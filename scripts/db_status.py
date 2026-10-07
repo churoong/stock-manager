@@ -22,22 +22,10 @@ from batch.core.client import TursoClient  # noqa: E402
 
 # (제목, 질의). 표가 없으면 그 항목만 오류로 찍고 넘어간다
 CHECKS: list[tuple[str, str]] = [
-    (
-        # 맨 앞에 둔다. 아침마다 가장 먼저 보는 숫자다 (docs/infra.md 25.26).
-        # **가로로 늘어놓는다.** D1 이 UNION ALL 항 수를 좁게 제한해서
-        # "too many terms in compound SELECT" 로 거절한다 (infra 25.5)
-        "따라잡기 진행 (목표: 거래일 200 · 재무·업종·점수·신호가 0 이 아닐 것)",
-        "SELECT (SELECT COUNT(DISTINCT date) FROM prices) AS 거래일수,"
-        " (SELECT MIN(date) || ' ~ ' || MAX(date) FROM prices) AS 시세기간,"
-        " (SELECT COUNT(*) FROM financials) AS 재무행,"
-        " (SELECT COUNT(*) FROM stocks WHERE sector IS NOT NULL) AS 업종있음,"
-        " (SELECT COUNT(*) FROM performance_metrics) AS 성과지표,"
-        " (SELECT COUNT(*) FROM factors) AS 팩터,"
-        " (SELECT COUNT(*) FROM scores) AS 점수,"
-        " (SELECT COUNT(*) FROM signals) AS 신호,"
-        " (SELECT call_count FROM api_usage WHERE api_name = 'd1_writes'"
-        "  AND window_type = 'day' ORDER BY window_start DESC LIMIT 1) AS 오늘쓴행",
-    ),
+    # "따라잡기 진행"(전체 거래일수·재무·팩터·점수·신호 행 수)은 기본 묶음에서 뺐다 (docs/infra.md 25.980).
+    # D1 따라잡기 때 아침마다 보던 숫자였는데, 큰 표를 통째로 세어 2026-10-07 한 번에 Turso 읽기 1,353만 행
+    # (월 한도 5억의 2.7%)을 썼다 — 묶음의 나머지 전부는 5만 행. 신선도는 아래 "나라별 채움" 이 기준일로 보인다.
+    # 표별 행 수가 꼭 필요하면 `--tables` (읽기 예산을 크게 쓴다고 적어 둔 길)로 본다.
     (
         # **나라를 가려서 본다** (2026-09-21, docs/infra.md 25.75).
         #

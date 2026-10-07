@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import contextlib
+import re
 import sqlite3
 import sys
 from pathlib import Path
@@ -57,15 +58,28 @@ def test_D1_의_합성_SELECT_제한에_걸리지_않는다() -> None:
         )
 
 
-def test_따라잡기_진행이_맨_앞이다() -> None:
+def test_나라별_채움이_맨_앞이다() -> None:
     """아침마다 가장 먼저 보는 숫자다. 뒤로 밀리면 긴 출력에 묻힌다."""
-    assert "따라잡기 진행" in CHECKS[0][0]
+    assert "나라별" in CHECKS[0][0]
+
+
+#: 수백만 행 표. 조건 없이 통째로 세면 한 번에 Turso 읽기 1,353만 행이었다 (docs/infra.md 25.980)
+큰_표 = ("prices", "financials", "factors", "scores", "signals", "performance_metrics")
+
+
+@pytest.mark.parametrize("제목, sql", CHECKS, ids=lambda v: v[:24] if isinstance(v, str) else "")
+def test_기본_묶음은_큰_표를_통째로_세지_않는다(제목: str, sql: str) -> None:
+    """기본 묶음은 하루 몇 번 돈다. 큰 표 전체 COUNT 하나가 묶음 나머지의 250배를 읽었다."""
+    for 표 in 큰_표:
+        assert not re.search(rf"COUNT\((\*|DISTINCT \w+)\) FROM {표}\s*\)", sql), (
+            f"{제목}: {표} 를 조건 없이 센다 — 읽기 예산을 크게 쓴다. `--tables` 로 옮기세요"
+        )
 
 
 def test_나라별_점검이_있다() -> None:
     """복귀 뒤 두 나라가 한 숫자에 섞이지 않게 (docs/infra.md 25.75).
 
-    "따라잡기 진행" 은 나라를 가리지 않고 센다. 국내만 돌리는 지금은 그게 곧 국내 숫자지만,
+    예전 "따라잡기 진행"(25.980 에서 뺐다)은 나라를 가리지 않고 셌다. 국내만 돌릴 때는 그게 곧 국내 숫자지만,
     미국이 살아나면 "점수 1,800" 이 국내 900 + 미국 900 인지 알 수 없게 된다.
     """
     제목들 = [제목 for 제목, _ in CHECKS]
