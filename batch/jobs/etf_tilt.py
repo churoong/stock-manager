@@ -294,6 +294,11 @@ def fetch_kr(
             continue
         try:
             doc = client.pdf(product, base)
+        except kodex_pdf.KodexBlocked as exc:
+            # 쉬었다 물어도 막혔다 — 남은 것은 부르지 않는다 (25.984). 계속 부르면 더 오래 막힌다
+            for rest in targets[targets.index(sym):]:
+                failed.setdefault(rest, f"KODEX 429 로 이번 실행 멈춤 ({exc})")
+            break
         except (kodex_pdf.KodexFailed, OSError) as exc:  # requests 의 접속 오류도 OSError 계열이다
             failed[sym] = str(exc)
             continue
@@ -339,8 +344,10 @@ def run() -> int:
         sources = {int(p["pick_id"]): src for p in picks if (src := source_of(p, kodex_index))}
 
         us_targets = sorted({s for k, s in sources.values() if k == "us"} | {tilt.MARKET_BENCHMARK})
-        kr_targets = sorted({s for k, s in sources.values() if k == "kr"}
-                            | ({tilt.KR_BENCHMARK} if tilt.KR_BENCHMARK in products else set()))  # fmt: skip
+        # 기준(KODEX 200)을 **맨 앞에** — 429 로 중간에 멈춰도 "시장 대비" 의 기준은 받는다 (25.984)
+        kr_targets = sorted({s for k, s in sources.values() if k == "kr"} - {tilt.KR_BENCHMARK})
+        if tilt.KR_BENCHMARK in products:
+            kr_targets.insert(0, tilt.KR_BENCHMARK)
         us_docs, cusips, sec_calls = fetch_us(us_targets, failed)
         kr_base = max((date.fromisoformat(str(p["as_of_date"])[:10]) for p in picks if p["country"] == "KR"),
                       default=date.today())  # fmt: skip
