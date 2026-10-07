@@ -697,6 +697,8 @@ export const FRESHNESS: FreshnessRow[] = [
   // `sentiment_scores` 는 뉴스 크론이 아니라 `jobs/sentiment.run(market)` 이 시장마다 쓴다 — 크론이 초록이어도 채점·집계는 멈출 수 있다
   { key: "sentiment_kr", label: "종목 감성(국내)", sql: "SELECT MAX(x.as_of_date) AS v FROM sentiment_scores x JOIN stocks s ON s.id = x.stock_id WHERE s.country = 'KR'", every: "session" },
   { key: "sentiment_us", label: "종목 감성(미국)", sql: "SELECT MAX(x.as_of_date) AS v FROM sentiment_scores x JOIN stocks s ON s.id = x.stock_id WHERE s.country = 'US'", every: "session", restsOnD1: true },
+  // **수급은 하루라도 빠지면 영영 빈다** (docs/infra.md 25.987) — KIS 가 30일만 주므로 한 달 넘게 멈추면 그 구간은 다시 못 받는다
+  { key: "kr_flows", label: "국내 수급(투자자별·공매도·신용, KIS)", sql: "SELECT MAX(date) AS v FROM kr_flows", every: "session" },
   { key: "universe_kr", label: "유니버스(국내)", sql: "SELECT MAX(um.snapshot_date) AS v FROM universe_members um JOIN stocks s ON s.id = um.stock_id WHERE s.country = 'KR'", every: "week" },
   { key: "universe_us", label: "유니버스(미국)", sql: "SELECT MAX(um.snapshot_date) AS v FROM universe_members um JOIN stocks s ON s.id = um.stock_id WHERE s.country = 'US'", every: "week", restsOnD1: true },
   // **이 두 줄만 뜻이 반대다.** 나머지는 "최근일수록 싱싱하다" 인데 달력은 **미래 날짜**가

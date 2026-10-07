@@ -105,3 +105,127 @@ def holidays(client, base: date) -> tuple[list[DayStatus], int]:
     except ValueError as exc:
         raise KisFailed("KIS 휴장일 응답이 JSON 이 아닙니다") from exc
     return parse_holidays(payload), 1 + int(issued)
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# 수급 일별 (docs/infra.md 25.987) — 투자자별 · 공매도 · 신용.
+# 응답 모양은 2026-10-07 실측(`scripts/probe_kis_catalog.py`)
+# ---------------------------------------------------------------------------------------------------------------------
+
+Q = "/uapi/domestic-stock/v1/quotations/"
+#: 실전 REST 초당 20건(공식). 여유를 두고 15건
+PER_SECOND = 15
+
+
+def _int(v: object) -> int | None:
+    try:
+        return int(float(str(v).replace(",", "")))
+    except (TypeError, ValueError):
+        return None
+
+
+def _float(v: object) -> float | None:
+    try:
+        return float(str(v).replace(",", ""))
+    except (TypeError, ValueError):
+        return None
+
+
+def _iso(ymd: object) -> str | None:
+    s = str(ymd or "")
+    return f"{s[:4]}-{s[4:6]}-{s[6:8]}" if len(s) == 8 and s.isdigit() else None
+
+
+def _list(payload: object, key: str) -> list[dict]:
+    if not isinstance(payload, dict) or str(payload.get("rt_cd")) != "0":
+        code = payload.get("msg_cd") if isinstance(payload, dict) else None
+        raise KisFailed(f"KIS 응답 실패 {code or ''}".strip())
+    v = payload.get(key)
+    return [r for r in v if isinstance(r, dict)] if isinstance(v, list) else []
+
+
+def parse_investor(payload: object) -> dict[str, dict]:
+    """투자자별 (`FHKST01010900`, output 30행) → 날짜 → 칸. 대금은 백만원."""
+    out = {}
+    for r in _list(payload, "output"):
+        day = _iso(r.get("stck_bsop_date"))
+        if day and r.get("frgn_ntby_qty") not in (None, ""):
+            out[day] = {
+                "frgn_net_qty": _int(r.get("frgn_ntby_qty")), "orgn_net_qty": _int(r.get("orgn_ntby_qty")),
+                "prsn_net_qty": _int(r.get("prsn_ntby_qty")), "frgn_net_amt": _int(r.get("frgn_ntby_tr_pbmn")),
+                "orgn_net_amt": _int(r.get("orgn_ntby_tr_pbmn")), "prsn_net_amt": _int(r.get("prsn_ntby_tr_pbmn")),
+            }  # fmt: skip
+    return out
+
+
+def parse_short(payload: object) -> dict[str, dict]:
+    """공매도 일별 (`FHPST04830000`, output2 최대 100행)."""
+    out = {}
+    for r in _list(payload, "output2"):
+        day = _iso(r.get("stck_bsop_date"))
+        if day:
+            out[day] = {"short_qty": _int(r.get("ssts_cntg_qty")), "short_vol_pct": _float(r.get("ssts_vol_rlim"))}
+    return out
+
+
+def parse_credit(payload: object) -> dict[str, dict]:
+    """신용잔고 일별 (`FHPST04760000`, output 30행). 날짜는 매매일(`deal_date`) — 결제일이 아니다."""
+    out = {}
+    for r in _list(payload, "output"):
+        day = _iso(r.get("deal_date"))
+        if day:
+            out[day] = {"credit_rmnd_qty": _int(r.get("whol_loan_rmnd_stcn")),
+                        "credit_rmnd_pct": _float(r.get("whol_loan_rmnd_rate"))}  # fmt: skip
+    return out
+
+
+class QuoteClient:
+    """시세 조회 묶음. 초당 `PER_SECOND` 건을 넘지 않게 여러 스레드가 한 문을 지난다."""
+
+    def __init__(self, token: str) -> None:
+        import threading
+
+        self.head = {"authorization": f"Bearer {token}", "appkey": os.environ["KIS_APP_KEY"],
+                     "appsecret": os.environ["KIS_APP_SECRET"], "custtype": "P"}  # fmt: skip
+        self.session = requests.Session()
+        self.calls = 0
+        self._lock = threading.Lock()
+        self._stamps: list[float] = []
+
+    def _gate(self) -> None:
+        import time
+
+        while True:
+            with self._lock:
+                now = time.monotonic()
+                self._stamps = [t for t in self._stamps if now - t < 1.0]
+                if len(self._stamps) < PER_SECOND:
+                    self._stamps.append(now)
+                    self.calls += 1
+                    return
+            time.sleep(0.05)
+
+    def get(self, path: str, tr: str, params: dict[str, str]) -> object:
+        self._gate()
+        r = self.session.get(BASE + path, params=params, headers=self.head | {"tr_id": tr}, timeout=TIMEOUT)
+        try:
+            body = r.json()
+        except ValueError as exc:
+            raise KisFailed(f"KIS HTTP {r.status_code} JSON 아님") from exc
+        if r.status_code != 200 and not isinstance(body, dict):
+            raise KisFailed(f"KIS HTTP {r.status_code}")
+        return body
+
+    def investor(self, code: str) -> dict[str, dict]:
+        return parse_investor(self.get(Q + "inquire-investor", "FHKST01010900",
+                                       {"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": code}))  # fmt: skip
+
+    def short(self, code: str, since: date, until: date) -> dict[str, dict]:
+        return parse_short(self.get(Q + "daily-short-sale", "FHPST04830000", {
+            "FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": code,
+            "FID_INPUT_DATE_1": since.strftime("%Y%m%d"), "FID_INPUT_DATE_2": until.strftime("%Y%m%d")}))  # fmt: skip
+
+    def credit(self, code: str, until: date) -> dict[str, dict]:
+        return parse_credit(self.get(Q + "daily-credit-balance", "FHPST04760000", {
+            "FID_COND_MRKT_DIV_CODE": "J", "FID_COND_SCR_DIV_CODE": "20476", "FID_INPUT_ISCD": code,
+            "FID_INPUT_DATE_1": until.strftime("%Y%m%d")}))  # fmt: skip

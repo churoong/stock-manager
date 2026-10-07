@@ -43,6 +43,7 @@ HEALTH = (뿌리 / "web" / "lib" / "health.ts").read_text(encoding="utf-8")
     "daily-us.yml": ("watch", "daily_us"),
     "sentiment-kr.yml": ("watch", "sentiment"),
     "accumulation.yml": ("freshness", "accum_picks_kr"),
+    "kis-flows.yml": ("freshness", "kr_flows"),
     "backtest.yml": ("freshness", "backtest_kr"),
     "dividends.yml": ("freshness", "dividends_kr"),
     "earnings-calendar.yml": ("freshness", "earnings_calendar_kr"),

@@ -46,6 +46,7 @@ PAUSE_ON_D1 = {
     "universe.yml", "financials.yml", "metrics.yml", "scores.yml", "signals.yml", "insider-kr.yml",
     "us-shares.yml", "us-financials.yml", "refresh-us-adjusted.yml", "disclosures-us.yml", "backfill-us.yml",
     "recompute.yml",
+    "kis-flows.yml",  # 첫 수집이 몇만 행을 쓴다 (25.987)
 }  # fmt: skip
 #: D1 에서 돌아야 하는 것. 미국 일일 배치는 쉬되 스스로 skipped 기록을 남긴다(jobs/daily.py)
 RUN_ON_D1 = {"d1-catchup.yml", "daily-kr.yml", "backfill-kr.yml", "turso-return.yml", "daily-us.yml"}

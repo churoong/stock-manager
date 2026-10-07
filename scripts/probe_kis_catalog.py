@@ -113,7 +113,8 @@ def main() -> int:
     f = "%Y%m%d"
     head = {"authorization": f"Bearer {token}", "appkey": key, "appsecret": secret, "custtype": "P"}
     days = [now + timedelta(days=d) for d in (0, -30, -365, 60)]
-    only = [s for s in os.environ.get("ONLY", "").split(",") if s]
+    # `--only A1,B2` — 이 머리로 시작하는 것만
+    only = [s for s in (sys.argv[sys.argv.index("--only") + 1] if "--only" in sys.argv[:-1] else "").split(",") if s]
     for name, path, tr, params in cases(*(d.strftime(f) for d in days)):
         if only and not any(name.startswith(o) for o in only):
             continue

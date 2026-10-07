@@ -1,0 +1,75 @@
+name: 국내 수급 수집 (KIS)
+
+# 투자자별 순매수 · 공매도 · 신용잔고를 매일 쌓는다 (docs/data-sources.md 3.1, docs/infra.md 25.987).
+# KIS 가 투자자별·신용을 최근 30일만 주므로 매일 받아야 이력이 남는다. 장중 값은 잠정치라 장 마감 뒤에 돈다.
+# 약 870종목 × 3회, 초당 15건 → 3~4분.
+on:
+  schedule:
+    - cron: "17 9 * * 1-5" # 09:17 UTC = 18:17 KST (월~금). 휴장일이면 KIS 가 직전 거래일까지를 준다 — 겹쳐 덮어쓸 뿐이다
+  repository_dispatch:
+    types: [kis-flows]
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: 앞에서부터 몇 종목만 (시험용, 비우면 전부)
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  issues: write # 기록을 이슈 코멘트로 내보낸다 (docs/infra.md 25.17)
+
+concurrency:
+  group: kis-flows
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+      TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+      # DB 백엔드 전환 (docs/infra.md 25절). 비어 있으면 Turso 를 쓴다
+      DB_BACKEND: ${{ vars.DB_BACKEND }}
+      # D1 임시 운영 중에는 쉰다 (docs/infra.md 25.14)
+      SKIP_ON_D1: "1"
+      D1_ACCOUNT_ID: ${{ secrets.D1_ACCOUNT_ID }}
+      D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+      D1_API_TOKEN: ${{ secrets.D1_API_TOKEN }}
+      KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}
+      KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}
+      OFFLINE_MODE: "0"
+      LOG_LEVEL: INFO
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 수집
+        run: |
+          set -o pipefail
+          ARGS=""
+          if [ -n "${{ inputs.limit }}" ]; then ARGS="--limit ${{ inputs.limit }}"; fi
+          python -m batch.jobs.kis_flows $ARGS 2>&1 | python scripts/ops_tee.py run.log
+
+      - name: 기록을 이슈로 내보내기
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 공개 저장소로 옮긴 뒤에는 비공개 운영 저장소로 보낸다 (docs/public-repo.md, infra 25.978)
+          OPS_REPO: ${{ secrets.OPS_REPO }}
+          OPS_TOKEN: ${{ secrets.OPS_TOKEN }}
+        run: |
+          python scripts/publish_output.py \
+            --title "운영 출력 (클라우드 세션용)" \
+            --file run.log \
+            --note "국내 수급 수집 (${{ job.status }})"

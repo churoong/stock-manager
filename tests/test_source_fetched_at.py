@@ -29,6 +29,7 @@ import pytest
 #: **밖에서 받아 온 것.** `source` 와 `fetched_at` 이 둘 다 있어야 한다.
 #: 값은 어디서 받는지 — 나중에 출처가 바뀌면 여기부터 고친다
 받아_온_표 = {
+    "kr_flows": "한국투자증권 KIS 투자자별·공매도·신용 일별 (batch/jobs/kis_flows.py, 25.987)",
     "api_tokens": "한국투자증권 KIS 접근토큰 (web/lib/kis.ts, 25.983)",
     "stocks": "KRX 종목마스터 · SEC company_tickers",
     "prices": "KRX 일별시세 · 야후 (수정주가 포함)",

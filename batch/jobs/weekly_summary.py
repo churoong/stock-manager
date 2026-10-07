@@ -53,6 +53,7 @@ MAX_LINES = 8
 EXPECTED_DAYS: dict[str, int] = {
     "daily_kr": 4, "daily_us": 4, "sentiment": 4, "monitor_targets": 4, "index_prices": 4,
     "portfolio": 4, "sell_flags": 4, "scores": 4, "signals": 4,  # 거래일마다. 연휴(최장 11일)는 오탐이 될 수 있다
+    "kis_flows": 4,  # 거래일마다 (25.987). KIS 가 30일만 주므로 길게 멈추면 그 구간은 영영 빈다
     "metrics": 10, "universe": 10, "valuation_bands": 10, "signal_outcomes": 10, "earnings_calendar": 10,
     "backup": 10,  # 주 1회
     "dividends": 20,  # 월 2회
