@@ -179,6 +179,47 @@ def parse_credit(payload: object) -> dict[str, dict]:
     return out
 
 
+
+# ---------------------------------------------------------------------------------------------------------------------
+# 투자의견 · 기업행위 일정 (docs/infra.md 25.988)
+# ---------------------------------------------------------------------------------------------------------------------
+
+KSD = "/uapi/domestic-stock/v1/ksdinfo/"
+#: 기업행위 종류 → (경로, tr_id). 실측 2026-10-07 — 액면교체는 `CTS` 인자가 없으면 OPSQ2001 로 거절한다
+EVENT_APIS = {
+    "dividend": ("dividend", "HHKDB669102C0"),
+    "bonus": ("bonus-issue", "HHKDB669101C0"),
+    "rights": ("paidin-capin", "HHKDB669100C0"),
+    "split": ("rev-split", "HHKDB669104C0"),
+}
+
+
+def parse_opinions(payload: object) -> list[dict]:
+    out = []
+    for r in _list(payload, "output"):
+        day, broker = _iso(r.get("stck_bsop_date")), str(r.get("mbcr_name") or "").strip()
+        if day and broker:
+            target = _float(r.get("hts_goal_prc"))
+            out.append({"date": day, "broker": broker, "opinion": str(r.get("invt_opnn") or "").strip() or None,
+                        "opinion_code": _int(r.get("invt_opnn_cls_code")),
+                        "prev_opinion_code": _int(r.get("rgbf_invt_opnn_cls_code")),
+                        "target_price": target if target and target > 0 else None})  # fmt: skip
+    return out
+
+
+def parse_events(kind: str, payload: object) -> list[dict]:
+    """기업행위 일정 한 종류. 액면교체는 output1, 나머지는 output."""
+    rows = _list(payload, "output1") if kind == "split" else _list(payload, "output")
+    out = []
+    for r in rows:
+        day, code = _iso(r.get("record_date")), str(r.get("sht_cd") or "").strip()
+        if day and len(code) == 6:
+            name = r.get("isin_name") or r.get("opp_cust_nm") or r.get("cust_nm")
+            out.append({"code": code, "kind": kind, "record_date": day, "name": str(name or "").strip() or None,
+                        "detail": r})  # fmt: skip
+    return out
+
+
 class QuoteClient:
     """시세 조회 묶음. 초당 `PER_SECOND` 건을 넘지 않게 여러 스레드가 한 문을 지난다."""
 
@@ -229,3 +270,20 @@ class QuoteClient:
         return parse_credit(self.get(Q + "daily-credit-balance", "FHPST04760000", {
             "FID_COND_MRKT_DIV_CODE": "J", "FID_COND_SCR_DIV_CODE": "20476", "FID_INPUT_ISCD": code,
             "FID_INPUT_DATE_1": until.strftime("%Y%m%d")}))  # fmt: skip
+
+    def opinions(self, code: str, since: date, until: date) -> list[dict]:
+        return parse_opinions(self.get(Q + "invest-opinion", "FHKST663300C0", {
+            "FID_COND_MRKT_DIV_CODE": "J", "FID_COND_SCR_DIV_CODE": "16633", "FID_INPUT_ISCD": code,
+            "FID_INPUT_DATE_1": since.strftime("%Y%m%d"), "FID_INPUT_DATE_2": until.strftime("%Y%m%d")}))  # fmt: skip
+
+
+    def events(self, kind: str, since: date, until: date) -> list[dict]:
+        path, tr = EVENT_APIS[kind]
+        f, t = since.strftime("%Y%m%d"), until.strftime("%Y%m%d")
+        params = {
+            "dividend": {"CTS": "", "GB1": "0", "F_DT": f, "T_DT": t, "SHT_CD": "", "HIGH_GB": ""},
+            "bonus": {"CTS": "", "F_DT": f, "T_DT": t, "SHT_CD": ""},
+            "rights": {"CTS": "", "GB1": "1", "F_DT": f, "T_DT": t, "SHT_CD": ""},
+            "split": {"CTS": "", "SHT_CD": "", "MARKET_GB": "0", "F_DT": f, "T_DT": t},
+        }[kind]
+        return parse_events(kind, self.get(KSD + path, tr, params))

@@ -1,4 +1,5 @@
-"""국내 수급 일별 수집 — 투자자별 순매수 · 공매도 · 신용잔고 (docs/data-sources.md 3.1, docs/infra.md 25.987).
+"""국내 수급 일별 수집 — 투자자별 순매수 · 공매도 · 신용잔고 · 증권사 투자의견 · 기업행위 일정
+(docs/data-sources.md 3.1, docs/infra.md 25.987·25.988).
 
 KIS 는 투자자별·신용을 **최근 30일만**, 공매도를 약 100일 준다(2026-10-07 실측).
 과거로 거슬러 받을 수 없으니 매일 쌓는다.
@@ -15,6 +16,7 @@ KIS 는 투자자별·신용을 **최근 30일만**, 공매도를 약 100일 준
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -30,6 +32,25 @@ log = logging.getLogger(__name__)
 JOB_NAME = "kis_flows"
 #: 공매도 조회 창 — 첫날은 이만큼 거슬러 채우고, 그 뒤로는 겹치는 날을 덮어쓴다(잠정치 정정)
 SHORT_LOOKBACK_DAYS = 45
+#: 투자의견 조회 창 — 표가 비었으면(첫 실행) 1년, 아니면 겹치게 60일 (25.988)
+OPINION_FIRST_DAYS = 365
+OPINION_DAYS = 60
+#: 기업행위 일정 창 — 지난 30일(정정분)부터 앞으로 90일
+EVENT_BACK_DAYS = 30
+EVENT_AHEAD_DAYS = 90
+OPINION_UPSERT = (
+    "INSERT INTO kr_opinions (stock_id, date, broker, opinion, opinion_code, prev_opinion_code, target_price,"
+    " source, fetched_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    " ON CONFLICT (stock_id, date, broker) DO UPDATE SET opinion = excluded.opinion,"
+    " opinion_code = excluded.opinion_code, prev_opinion_code = excluded.prev_opinion_code,"
+    " target_price = excluded.target_price, source = excluded.source, fetched_at = excluded.fetched_at"
+)
+EVENT_UPSERT = (
+    "INSERT INTO kr_corp_events (code, kind, record_date, name, detail, source, fetched_at)"
+    " VALUES (?, ?, ?, ?, ?, ?, ?)"
+    " ON CONFLICT (code, kind, record_date) DO UPDATE SET name = excluded.name, detail = excluded.detail,"
+    " source = excluded.source, fetched_at = excluded.fetched_at"
+)
 #: 스레드 수. 초당 한도는 `kis.QuoteClient` 의 문이 지킨다
 WORKERS = 8
 COLUMNS = (
@@ -104,9 +125,16 @@ def run(limit: int | None = None) -> int:
         qc = kis.QuoteClient(token)
         stocks = targets(client)[: limit or None]
         failed: dict[str, str] = {}
+        첫의견 = client.execute("SELECT COUNT(*) FROM (SELECT 1 FROM kr_opinions LIMIT 1)").scalar() == 0
+        의견창 = today - timedelta(days=OPINION_FIRST_DAYS if 첫의견 else OPINION_DAYS)
+        의견: dict[int, list[dict]] = {}
 
         def one(item: tuple[int, str]) -> tuple[int, dict[str, dict]]:
             sid, code = item
+            try:
+                의견[sid] = qc.opinions(code, 의견창, today)
+            except (kis.KisFailed, OSError) as exc:
+                failed[f"{code}:의견"] = str(exc)
             parts = []
             for name, call in (("투자자", lambda: qc.investor(code)),
                                ("공매도", lambda: qc.short(code, today - timedelta(days=SHORT_LOOKBACK_DAYS), today)),
@@ -122,16 +150,36 @@ def run(limit: int | None = None) -> int:
             results = list(pool.map(one, stocks))
         stamp = db.now_iso()
         statements = [s for sid, rows in results for s in upserts(sid, rows, stamp)]
+        의견행 = [
+            (OPINION_UPSERT, [sid, o["date"], o["broker"], o["opinion"], o["opinion_code"], o["prev_opinion_code"],
+                              o["target_price"], kis.SOURCE, stamp])
+            for sid, ops in 의견.items() for o in ops
+        ]  # fmt: skip
+        행사: list[dict] = []
+        창 = (today - timedelta(days=EVENT_BACK_DAYS), today + timedelta(days=EVENT_AHEAD_DAYS))
+        for kind in kis.EVENT_APIS:
+            try:
+                행사 += qc.events(kind, *창)
+            except (kis.KisFailed, OSError) as exc:
+                failed[f"일정:{kind}"] = str(exc)
+        행사행 = [
+            (EVENT_UPSERT, [e["code"], e["kind"], e["record_date"], e["name"],
+                            json.dumps(e["detail"], ensure_ascii=False), kis.SOURCE, stamp])
+            for e in 행사
+        ]  # fmt: skip
+        statements += 의견행 + 행사행
         for i in range(0, len(statements), 500):
             client.batch(statements[i : i + 500])
         db.record_api_call(client, "kis_openapi", count=qc.calls + int(issued))
-        step = {"stocks": len(stocks), "rows": len(statements), "calls": qc.calls, "failed": len(failed),
+        step = {"stocks": len(stocks), "rows": len(statements), "opinions": len(의견행), "events": len(행사행),
+                "opinion_since": 의견창.isoformat(), "calls": qc.calls, "failed": len(failed),
                 "failed_sample": dict(list(failed.items())[:10])}  # fmt: skip
         # 절반 넘게 못 받았으면 실패로 남긴다 — 조금 빠진 것은 다음 날 겹쳐 받으며 메워진다(30일 창)
-        status = "failed" if len(failed) > len(stocks) * 3 / 2 else ("partial" if failed else "success")
+        status = "failed" if len(failed) > len(stocks) * 4 / 2 else ("partial" if failed else "success")
         db.finish_batch_run(client, run_id, status=status, step_log=step,
                             error_text=f"못 받은 호출 {len(failed)}개" if failed else None)  # fmt: skip
-        print(f"수급 수집: 종목 {len(stocks)} · 행 {len(statements)} · 호출 {qc.calls} · 실패 {len(failed)}")
+        print(f"수급 수집: 종목 {len(stocks)} · 행 {len(statements)} (의견 {len(의견행)} · 일정 {len(행사행)})"
+              f" · 호출 {qc.calls} · 실패 {len(failed)}")
         return 1 if status == "failed" else 0
     finally:
         client.close()
