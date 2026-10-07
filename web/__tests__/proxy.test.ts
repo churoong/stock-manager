@@ -62,8 +62,11 @@ function 요청(경로: string, 쿠키?: string): NextRequest {
 /** 로그인·로그아웃 처리는 로그인 없이 불러야 한다(로그아웃은 쿠키를 지우기만 한다, 25.651). 아래에서 따로 본다 */
 const 공개API = ["/api/auth/login", "/api/auth/logout"];
 
+/** 텔레그램이 부르는 질의응답 웹훅 — 쿠키 대신 비밀 머리글·본인 대화방으로 스스로 지킨다 (25.1004) */
+const 텔레그램웹훅 = "/api/telegram/webhook";
+
 const 데이터경로들 = api경로들().filter(
-  (p) => !p.startsWith("/api/cron/") && !공개API.includes(p),
+  (p) => !p.startsWith("/api/cron/") && !공개API.includes(p) && p !== 텔레그램웹훅,
 );
 const 크론경로들 = api경로들().filter((p) => p.startsWith("/api/cron/"));
 
@@ -160,6 +163,16 @@ describe("예외 경로", () => {
 
     expect(소스).toContain("tokenMatches");
     expect(소스).toContain("CRON_SECRET");
+  });
+
+  it("텔레그램 웹훅은 통과하고 대신 비밀 머리글·대화방을 스스로 본다 — 켜기 경로는 로그인 뒤다", async () => {
+    expect((await proxy(요청(텔레그램웹훅))).headers.get("x-middleware-next")).toBe("1");
+    const 소스 = readFileSync(join(웹루트, "app", 텔레그램웹훅.slice(1), "route.ts"), "utf-8");
+    expect(소스).toContain("tokenMatches");
+    expect(소스).toContain("TELEGRAM_WEBHOOK_SECRET");
+    expect(소스).toContain("TELEGRAM_CHAT_ID");
+    expect((await proxy(요청("/api/telegram/webhook-setup"))).status).toBe(401);
+    expect((await proxy(요청("/api/telegram/webhook/x"))).status).toBe(401);
   });
 
   it("설치용 정적 파일만 통과한다", async () => {

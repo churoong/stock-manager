@@ -54,6 +54,7 @@ const 삼켜도_되는_곳: Record<string, string> = {
   "app/api/screener/presets/route.ts::request.json()": "본문이 JSON 이 아니면 `null` → zod 가 400 으로 답한다",
   "app/api/watchlist/route.ts::request.json()": "본문이 JSON 이 아니면 `null` → zod 가 400 으로 답한다",
   "app/api/watchlist/[id]/route.ts::request.json()": "본문이 JSON 이 아니면 `null` → zod 가 400 으로 답한다",
+  "app/api/telegram/webhook/route.ts::request.json()": "텔레그램 본문이 JSON 이 아니면 답할 말이 없다 — 200 으로 끝내야 텔레그램이 다시 보내지 않는다 (25.1004)",
   "app/api/screener/route.ts::catch(() => null)":
     "0건 진단 조회다. **실패하면 진단하지 않는다** — `null` 을 그대로 넘기면 `whyEmpty` 가"
     + " '유니버스가 비었습니다' 라고 단정해 사람을 엉뚱한 데로 보낸다 (25.163)",

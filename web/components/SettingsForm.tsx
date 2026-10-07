@@ -1,5 +1,6 @@
 "use client";
 
+import TelegramQaSetup from "@/components/TelegramQaSetup";
 import { useEffect, useMemo, useState } from "react";
 import { clearClientCache } from "@/lib/clientCache";
 import MarketTabs from "@/components/MarketTabs";
@@ -598,6 +599,8 @@ export default function SettingsForm({ initial, initialWarnings, loadFailed = fa
           ))}
         </div>
       )}
+
+      <TelegramQaSetup />
 
       {/* 폰은 아래 메뉴가 떠 있다(Nav.tsx). 그 높이만큼 올리지 않으면 저장 단추가 가린다 */}
       <div className="sticky bottom-[calc(var(--phone-nav)+env(safe-area-inset-bottom))] sm:bottom-0 z-10 flex gap-2 border-t border-slate-200 bg-slate-50 py-3 dark:border-slate-800 dark:bg-slate-950">

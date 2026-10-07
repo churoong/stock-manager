@@ -4,9 +4,10 @@
  * 한국거래소 약관이 데이터의 제3자 제공을 금지한다. 로그인하지 않은 요청에는
  * 어떤 데이터도 돌려주지 않는다. 화면뿐 아니라 API 경로도 마찬가지다.
  *
- * 예외는 다섯뿐이다.
- *   로그인 화면, 로그인 처리, 외부 크론이 부르는 경로, 앱 설치용 정적 파일, 그리고 `robots.txt`.
- * 크론 경로는 세션 대신 비밀 토큰으로 스스로를 지킨다.
+ * 예외는 여섯뿐이다.
+ *   로그인 화면, 로그인 처리, 외부 크론이 부르는 경로, 앱 설치용 정적 파일, `robots.txt`, 그리고 텔레그램 웹훅 하나.
+ * 크론 경로는 세션 대신 비밀 토큰으로 스스로를 지킨다. 텔레그램 웹훅도 비밀 머리글과 본인 대화방 번호로 지킨다
+ * (docs/infra.md 25.1004) — 정확히 그 경로만 연다(`webhook-setup` 은 로그인 뒤다).
  *
  * `robots.txt` 는 "들어오지 마라" 는 한 줄이라 데이터가 없다. 2026-09-26 까지 이것도 로그인 뒤에
  * 있어서 검색엔진이 받는 것은 **로그인 화면으로 보내는 307** 이었다 — "세 겹으로 막는다" 의 한 겹이
@@ -23,6 +24,8 @@ import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth";
 // 로그아웃은 쿠키를 지우기만 한다 — 만료된 세션에서도 눌러서 지워져야 한다 (25.651)
 const PUBLIC_PATHS = ["/login", "/api/auth/login", "/api/auth/logout"];
 const CRON_PREFIX = "/api/cron/";
+/** 텔레그램이 부르는 질의응답 웹훅 (25.1004). 경로가 스스로 비밀 머리글·대화방을 확인한다 */
+export const TELEGRAM_WEBHOOK = "/api/telegram/webhook";
 
 /** 앱 설치에 필요한 정적 파일. 데이터가 들어 있지 않다 (docs/pwa.md 3장) */
 const PWA_FILES = new Set([
@@ -64,7 +67,7 @@ export function crossSiteOk(request: NextRequest): boolean {
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  if (pathname.startsWith(CRON_PREFIX) || PWA_FILES.has(pathname)) {
+  if (pathname.startsWith(CRON_PREFIX) || PWA_FILES.has(pathname) || pathname === TELEGRAM_WEBHOOK) {
     return NextResponse.next();
   }
 
