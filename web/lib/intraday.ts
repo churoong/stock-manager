@@ -498,6 +498,10 @@ export function freshDisclosures<T extends { rcept_no: string }>(
 }
 
 /** 종목 목록(JSON 배열)의 그날 공시 알림 — `alerts(stock_id, trigger_type, trade_date)` 유니크 색인을 탄다 (25.595) */
+/** 오늘 이미 저장된 매수 구간·관심 목표가 알림 — 새 알림에만 체결강도를 묻는다 (25.991) */
+export const ZONE_ALERTS_FOR = `SELECT a.stock_id, a.trigger_type FROM json_each(?) j
+JOIN alerts a ON a.stock_id = j.value AND a.trigger_type IN ('buy_zone', 'watch_price') AND a.trade_date = ?`;
+
 export const DISCLOSURE_ALERTS_FOR = `SELECT a.stock_id, a.data FROM json_each(?) j
 JOIN alerts a ON a.stock_id = j.value AND a.trigger_type = 'disclosure' AND a.trade_date = ?`;
 

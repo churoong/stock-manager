@@ -30,7 +30,8 @@ vi.mock("@/lib/db", () => {
   };
 });
 
-const { fetchKisQuotes, kisCode, parseKisPrice, tokenFresh, KIS_SOURCE, KIS_PER_SECOND } = await import("@/lib/kis");
+const { fetchKisQuotes, fetchKisStrengths, kisCode, parseKisPrice, parseStrength, strengthNote, tokenFresh, KIS_SOURCE, KIS_PER_SECOND, KIS_STRENGTH_MAX } =
+  await import("@/lib/kis");
 
 const 지금 = new Date("2026-10-07T05:39:00Z");
 const 정상 = (prpr: string) => ({
@@ -182,5 +183,32 @@ describe("교차검증으로 고친 것 (25.986)", () => {
     const r = await fetchKisQuotes(["005930.KS"], 지금);
     expect(r.error).toMatch(/토큰 무효/);
     expect(상태.db!.prepare("SELECT COUNT(*) AS n FROM api_tokens").get()).toEqual({ n: 0 });
+  });
+});
+
+describe("체결강도 (25.991)", () => {
+  it("가장 최근 체결의 체결강도를 읽고 쪽을 적는다", () => {
+    const body = { rt_cd: "0", output: [{ stck_cntg_hour: "154825", tday_rltv: "105.84" }, { tday_rltv: "90" }] };
+    expect(parseStrength(body)).toBe(105.84);
+    expect(parseStrength({ rt_cd: "1" })).toBeNull();
+    expect(strengthNote(105.84)).toBe("체결강도 105.8 (매수 우위)");
+    expect(strengthNote(92)).toBe("체결강도 92.0 (매도 우위)");
+  });
+
+  it("묻는 종목 수에 상한이 있고, 실패한 종목은 빼고 돌려준다", async () => {
+    const 물은: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url.endsWith("/oauth2/tokenP")) return new Response(JSON.stringify({ access_token: "t", expires_in: 86400 }), { status: 200 });
+      const code = /FID_INPUT_ISCD=([0-9A-Z]{6})/.exec(url)![1];
+      물은.push(code);
+      if (code === "000001") throw new Error("net");
+      return new Response(JSON.stringify({ rt_cd: "0", output: [{ tday_rltv: "110" }] }), { status: 200 });
+    }));
+    const 심볼 = Array.from({ length: KIS_STRENGTH_MAX + 3 }, (_, i) => `${String(i).padStart(6, "0")}.KS`);
+    const r = await fetchKisStrengths(심볼, 지금);
+    expect(물은.length).toBe(KIS_STRENGTH_MAX);
+    expect(r.values["000000.KS"]).toBe(110);
+    expect(r.values["000001.KS"]).toBeUndefined();
+    expect(r.calls).toBe(1 + KIS_STRENGTH_MAX);
   });
 });

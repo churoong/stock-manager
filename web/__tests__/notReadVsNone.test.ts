@@ -29,6 +29,8 @@ const 삼키는_무늬 =
  * 열쇠는 `파일::그 줄에만 있는 조각` 이다 — 줄 번호는 곧 어긋난다.
  */
 const 삼켜도_되는_곳: Record<string, string> = {
+  "lib/kis.ts::parseStrength(await response.json().catch(":
+    "체결강도는 알림에 붙이는 곁다리 한 줄이다(25.991). 응답이 깨졌으면 줄 없이 알림만 나간다 — 알림을 막지 않는다",
   "lib/kis.ts::DELETE FROM api_tokens":
     "무효 토큰 지우기는 곁다리다(25.986). 못 지우면 다음 호출이 다시 실패하고 다시 지운다 — 그 호출의 시세는 야후로 이미 받았다",
   "lib/db.ts::noteTursoReads(":

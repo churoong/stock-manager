@@ -196,3 +196,56 @@ export async function fetchKisQuotes(symbols: string[], now: Date = new Date()):
   }
   return { quotes, failed, calls, error: errors.size ? [...errors].join(", ") : null };
 }
+
+/** 체결강도(`tday_rltv`) — 매수 체결량 ÷ 매도 체결량 × 100. 100 넘으면 매수세가 세다 (25.991) */
+export const KIS_CCNL_TR = "FHKST01010300";
+/** 한 호출에서 체결강도를 묻는 최대 종목 수 — 알림이 몰리는 날에도 시간을 크게 쓰지 않게 */
+export const KIS_STRENGTH_MAX = 10;
+
+export function strengthNote(v: number): string {
+  const 쪽 = v > 100 ? "매수 우위" : v < 100 ? "매도 우위" : "균형";
+  return `체결강도 ${v.toFixed(1)} (${쪽})`;
+}
+
+/** 체결 응답의 첫 줄(가장 최근 체결)의 체결강도. 없으면 null */
+export function parseStrength(payload: unknown): number | null {
+  const body = payload as { rt_cd?: unknown; output?: Array<Record<string, unknown>> } | null;
+  if (!body || String(body.rt_cd) !== "0" || !Array.isArray(body.output) || !body.output.length) return null;
+  const v = num(body.output[0].tday_rltv);
+  return v !== null && v > 0 ? v : null;
+}
+
+/**
+ * 새로 나갈 매수 구간·관심 목표가 알림에 붙일 체결강도 (docs/intraday.md 1.1, 25.991). 실패하면 빈 결과 — 알림은 그대로 나간다.
+ * 토큰은 시세와 같은 `api_tokens` 줄을 쓴다(이미 받아 둔 것). 반환: 야후 심볼 → 체결강도, 나간 호출 수
+ */
+export async function fetchKisStrengths(symbols: string[], now: Date = new Date()): Promise<{ values: Record<string, number>; calls: number }> {
+  const values: Record<string, number> = {};
+  const 대상 = symbols.map((s) => [s, kisCode(s)] as const).filter((c): c is readonly [string, string] => c[1] !== null).slice(0, KIS_STRENGTH_MAX);
+  if (!대상.length) return { values, calls: 0 };
+  let token: string;
+  let calls = 0;
+  try {
+    const got = await accessToken(now);
+    token = got.token;
+    if (got.issued) calls += 1;
+  } catch {
+    return { values, calls };
+  }
+  const head = {
+    authorization: `Bearer ${token}`, appkey: process.env.KIS_APP_KEY ?? "", appsecret: process.env.KIS_APP_SECRET ?? "",
+    custtype: "P", tr_id: KIS_CCNL_TR,
+  };
+  calls += 대상.length;
+  await Promise.all(대상.map(async ([sym, code]) => {
+    try {
+      const url = `${KIS_BASE}/uapi/domestic-stock/v1/quotations/inquire-ccnl?FID_COND_MRKT_DIV_CODE=J&FID_INPUT_ISCD=${code}`;
+      const response = await fetch(url, { headers: head, cache: "no-store", signal: AbortSignal.timeout(KIS_TIMEOUT_MS) });
+      const v = parseStrength(await response.json().catch(() => null));
+      if (v !== null) values[sym] = v;
+    } catch {
+      // 곁다리다 — 체결강도 없이 알림은 나간다
+    }
+  }));
+  return { values, calls };
+}

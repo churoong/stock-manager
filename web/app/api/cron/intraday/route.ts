@@ -15,6 +15,7 @@ import {
   tokenMatches,
   targetsFreshFor,
   DISCLOSURE_ALERTS_FOR,
+  ZONE_ALERTS_FOR,
   ACTION_GUARD_ROWS,
   recentActionKr,
   actionSuspect,
@@ -37,7 +38,7 @@ import {
 } from "@/lib/intraday";
 import { ALERT_UPSERT } from "@/lib/alertWrite";
 import { DART_API_NAME, DART_DAILY_LIMIT, addUsage, isBlocked, readUsage } from "@/lib/apiUsage";
-import { KIS_SOURCE, fetchKisQuotes, kisConfigured } from "@/lib/kis";
+import { KIS_SOURCE, fetchKisQuotes, fetchKisStrengths, kisConfigured, strengthNote } from "@/lib/kis";
 import { localDate } from "@/lib/market";
 import { SAFE_LEN, sendTelegram } from "@/lib/telegram";
 import { recordHeartbeat } from "@/lib/heartbeat";
@@ -554,6 +555,28 @@ export async function GET(request: Request) {
         : [];
     // **시세 알림을 DART 보다 먼저 저장한다** (docs/infra.md 25.595, 감사). 예전에는 보유 종목 수만큼 도는 순차 DART 호출 뒤에 한꺼번에 넣어,
     // DART 가 매달려 30초 상한에 걸리면 그 호출의 손절·목표·급등락 알림이 통째로 사라졌다
+    // 새로 나갈 국내 매수 구간·관심 목표가 알림에 체결강도 한 줄 (25.991) — 이미 오늘 저장된 알림에는 묻지 않는다
+    if (market === "KR" && kisConfigured()) {
+      const 구간 = hits.filter((h) => h.trigger === "buy_zone" || h.trigger === "watch_price");
+      if (구간.length) {
+        const 이미 = new Set(
+          rowsToObjects<{ stock_id: number; trigger_type: string }>(
+            await execute(ZONE_ALERTS_FOR, [JSON.stringify([...new Set(구간.map((h) => h.stock_id))]), localDate(market, now)]),
+          ).map((r) => `${r.stock_id}:${r.trigger_type}`),
+        );
+        const 새것 = 구간.filter((h) => !이미.has(`${h.stock_id}:${h.trigger}`));
+        if (새것.length) {
+          const { values, calls } = await fetchKisStrengths([...new Set(새것.map((h) => String(h.data.symbol)))], now);
+          await addUsage(KIS_SOURCE, calls, now, null).catch(() => undefined);
+          for (const h of 새것) {
+            const v = values[String(h.data.symbol)];
+            if (v === undefined) continue;
+            h.message += ` · ${strengthNote(v)}`;
+            h.data.strength = v;
+          }
+        }
+      }
+    }
     const inserted = await 넣기(hits);
     if (market === "KR") {
       // 공시 알림은 보유 종목에만 나간다 — 그 종목들로 **색인을 타게** 묻는다 (25.595, 감사: `market, trade_date` 조건은 색인이 없어
