@@ -63,11 +63,40 @@ def test_되살린_것과_실패를_찍는다(monkeypatch, capsys) -> None:
 
 
 def test_일일_배치가_매일_살려_둔다() -> None:
-    """cron-job.org 가 매 거래일 깨우는 둘이 다른 예약 워크플로를 켠다. 둘 다 빠지면 두 달 뒤 조용히 멈춘다."""
+    """cron-job.org 가 매 거래일 깨우는 둘이 다른 예약 워크플로를 켠다. 쓰기 권한은 **배치 본체가 아닌 잡**에만 (25.986)."""
     for name in ("daily-kr.yml", "daily-us.yml"):
         data = yaml.safe_load((ROOT / ".github/workflows" / name).read_text(encoding="utf-8"))
-        assert (data.get("permissions") or {}).get("actions") == "write", f"{name}: actions: write 가 없으면 켜기 요청이 403"
-        steps = data["jobs"]["run"]["steps"]
-        살림 = [s for s in steps if "keepalive_workflows.py" in str(s.get("run", ""))]
-        assert 살림, f"{name}: 예약 워크플로 살려 두기 단계가 없다"
-        assert "cancelled" in str(살림[0].get("if", "")), f"{name}: 배치가 실패해도 살려 두기는 돌아야 한다"
+        assert (data.get("permissions") or {}).get("contents") == "read", f"{name}: 본체는 저장소에 쓰지 못해야 한다"
+        assert "actions" not in (data.get("permissions") or {}), f"{name}: 본체에 actions 권한을 주지 않는다"
+        job = data["jobs"].get("keepalive")
+        assert job, f"{name}: keepalive 잡이 없다 — 두 달 뒤 예약이 조용히 멈춘다"
+        assert job["permissions"] == {"contents": "write", "actions": "write"}
+        assert any("keepalive_workflows.py" in str(s.get("run", "")) for s in job["steps"])
+        assert not any("pip install" in str(s.get("run", "")) for s in job["steps"]), "쓰기 권한 잡에서 패키지를 설치하지 않는다"
+
+
+def test_45일이_넘으면_빈_커밋() -> None:
+    now = ka.datetime(2026, 12, 1, tzinfo=ka.UTC)
+    assert ka.needs_commit("2026-10-07T05:00:00Z", now) is True
+    assert ka.needs_commit("2026-11-01T05:00:00Z", now) is False
+
+
+def test_빈_커밋은_같은_트리에_부모를_잇는다(monkeypatch) -> None:
+    calls = []
+
+    def fake(method, url, token, body=None):
+        calls.append((method, url.rsplit("/repos/o/r", 1)[-1], body))
+        if url.endswith("/repos/o/r"):
+            return 200, b'{"default_branch": "main"}'
+        if url.endswith("/commits/main"):
+            return 200, b'{"sha": "aaa", "commit": {"committer": {"date": "2026-08-01T00:00:00Z"}, "tree": {"sha": "ttt"}}}'
+        if url.endswith("/git/commits"):
+            return 201, b'{"sha": "bbbbbbbbb"}'
+        return 200, b"{}"
+
+    monkeypatch.setattr(ka, "_call", fake)
+    out = ka.touch_commit("o/r", "t", ka.datetime(2026, 10, 7, tzinfo=ka.UTC))
+    assert out.startswith("빈 커밋 bbbbbbb")
+    post = next(c for c in calls if c[0] == "POST")
+    assert post[2]["tree"] == "ttt" and post[2]["parents"] == ["aaa"]
+    assert ("PATCH", "/git/refs/heads/main", {"sha": "bbbbbbbbb"}) in calls

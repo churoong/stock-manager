@@ -184,7 +184,9 @@ describe("세션·조용시간·토큰", () => {
       ],
       new Date("2026-09-16T22:00:00Z"),
     );
-    expect(text.split("\n")[0]).toBe("장중 알림 2건 (07:00 KST, 지연 시세)");
+    expect(text.split("\n")[0]).toBe("장중 알림 2건 (07:00 KST, 미국은 지연 시세)");
+    // 국내만이면 지연이라 하지 않는다 — KIS 실시간 (25.986)
+    expect(bundleMessage([{ market: "KR", message: "C: 급등", created_at: "2026-09-16T01:00:00Z" }], new Date("2026-09-16T01:05:00Z")).split("\n")[0]).toBe("장중 알림 1건 (10:05 KST)");
     expect(text).toContain("A: 급락");
     expect(text).toContain("자동 매매는 없습니다");
   });

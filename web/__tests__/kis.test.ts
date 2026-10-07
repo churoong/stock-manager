@@ -147,3 +147,40 @@ describe("부르기", () => {
     }
   });
 });
+
+describe("교차검증으로 고친 것 (25.986)", () => {
+  it("거래정지·오늘 체결 없음은 KIS 시세로 쓰지 않는다 — 야후로 넘겨 지난 장 가드를 탄다", () => {
+    const 정지 = 정상("4000");
+    (정지.output as Record<string, string>).temp_stop_yn = "Y";
+    expect(parseKisPrice("005930.KS", 정지, 지금)).toBeNull();
+    const 무체결 = 정상("4000");
+    Object.assign(무체결.output, { stck_oprc: "0", acml_vol: "0" });
+    expect(parseKisPrice("005930.KS", 무체결, 지금)).toBeNull();
+  });
+
+  it("한 묶음이 매달리면 남은 종목은 기다리지 않고 야후로", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "Date"] });
+    vi.setSystemTime(지금);
+    try {
+      vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+        if (url.endsWith("/oauth2/tokenP")) return new Response(JSON.stringify({ access_token: "t", expires_in: 86400 }), { status: 200 });
+        vi.setSystemTime(new Date(Date.now() + 5_000)); // 제한 시간까지 매달림
+        throw Object.assign(new Error("timeout"), { name: "TimeoutError" });
+      }));
+      const 심볼 = Array.from({ length: KIS_PER_SECOND * 3 }, (_, i) => `${String(i).padStart(6, "0")}.KS`);
+      const r = await fetchKisQuotes(심볼, 지금);
+      expect(r.calls).toBe(1 + KIS_PER_SECOND);
+      expect(r.failed.length).toBe(심볼.length);
+      expect(r.error).toMatch(/시간 초과/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("토큰이 무효라는 답이면 DB 토큰을 지워 다음 호출이 새로 받는다", async () => {
+    vi.stubGlobal("fetch", 가짜fetch(() => ({ status: 500, body: { rt_cd: "1", msg_cd: "EGW00123", msg1: "기간이 만료된 token 입니다." } })));
+    const r = await fetchKisQuotes(["005930.KS"], 지금);
+    expect(r.error).toMatch(/토큰 무효/);
+    expect(상태.db!.prepare("SELECT COUNT(*) AS n FROM api_tokens").get()).toEqual({ n: 0 });
+  });
+});

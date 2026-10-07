@@ -29,7 +29,6 @@ on:
 permissions:
   contents: read
   issues: write # 기록을 이슈 코멘트로 내보낸다 (docs/infra.md 25.17)
-  actions: write # 예약 워크플로를 다시 켠다 (docs/infra.md 25.981)
 
 concurrency:
   group: daily-kr
@@ -149,8 +148,17 @@ jobs:
           path: .price-replica
           key: price-replica-${{ github.run_id }}-${{ github.run_attempt }}
 
-      - name: 예약 워크플로 살려 두기 (공개 저장소 60일 무활동 꺼짐, docs/infra.md 25.981)
-        if: ${{ !cancelled() }}
+  # 공개 저장소 60일 무활동 꺼짐 대비 (docs/infra.md 25.981·25.986). 쓰기 권한(커밋·워크플로 켜기)을 **배치 본체와 다른 잡**에만 준다 —
+  # 본체는 바깥 패키지를 설치해 돌리므로 저장소에 쓸 수 있으면 안 된다. 표준 라이브러리만 쓰는 스크립트라 설치가 없다
+  keepalive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v5
+      - name: 예약 워크플로 살려 두기
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python scripts/keepalive_workflows.py
+        run: python3 scripts/keepalive_workflows.py

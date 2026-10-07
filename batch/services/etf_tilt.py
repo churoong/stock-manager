@@ -168,7 +168,9 @@ def rank_within(groups: dict[str, list[tuple[int, float | None]]]) -> dict[int, 
     반환 pick_id → (순위, 분류 안 A 있는 수)."""
     out: dict[int, tuple[int, int]] = {}
     for rows in groups.values():
-        scored = sorted([(pid, a) for pid, a in rows if a is not None], key=lambda x: -x[1])
-        for i, (pid, _) in enumerate(scored, start=1):
-            out[pid] = (i, len(scored))
+        scored = [(pid, a) for pid, a in rows if a is not None]
+        # **같은 값은 같은 순위** (25.986, 교차검증) — SPY 가 IVV 보유로 보이면서(25.982) 둘의 A 가 똑같은데 목록 순서로
+        # "3위 / 4위" 가 갈렸다. 1 + 나보다 큰 값의 수 (1·2·2·4)
+        for pid, a in scored:
+            out[pid] = (1 + sum(1 for _, b in scored if b > a), len(scored))
     return out

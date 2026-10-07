@@ -29,6 +29,8 @@ const 삼키는_무늬 =
  * 열쇠는 `파일::그 줄에만 있는 조각` 이다 — 줄 번호는 곧 어긋난다.
  */
 const 삼켜도_되는_곳: Record<string, string> = {
+  "lib/kis.ts::DELETE FROM api_tokens":
+    "무효 토큰 지우기는 곁다리다(25.986). 못 지우면 다음 호출이 다시 실패하고 다시 지운다 — 그 호출의 시세는 야후로 이미 받았다",
   "lib/db.ts::noteTursoReads(":
     "웹 Turso 읽기를 월 카운터에 더하는 곁다리다(25.891). 못 적어도 본 질의 결과는 그대로 돌려줘야 한다 — 못 적은 몫은 되돌려 다음에 적는다",
   "app/api/alerts/route.ts::execute(ALERT_TOTALS)":

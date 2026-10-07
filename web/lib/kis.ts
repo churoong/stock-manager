@@ -22,6 +22,14 @@ export const KIS_PER_SECOND = 15;
 /** 토큰이 이만큼 남았으면 새로 받는다. 발급 직후 6시간 안 재발급은 같은 토큰을 준다(공식) */
 export const KIS_TOKEN_REFRESH_MS = 60 * 60_000;
 const KIS_TIMEOUT_MS = 5_000;
+/**
+ * KIS 에 쓰는 전체 시간 (25.986, 교차검증). 묶음마다 5초씩 매달리면 45종목에 17초가 지나서야 야후를 묻고, DART 예산(15초)이 사라지고
+ * 함수 상한 30초에 걸려 그 호출의 알림이 통째로 사라질 수 있었다. 다음 묶음이 **최악(제한 시간 5초)에도 이 안에 끝날 때만** 부르고,
+ * 아니면 남은 종목은 바로 야후로 보낸다 — 한 묶음이 매달리면(5초) 거기서 멈춘다. 정상(묶음 0.5초)이면 4묶음·60종목까지 KIS 로 받는다
+ */
+export const KIS_DEADLINE_MS = 10_000;
+/** 토큰이 무효·만료라는 KIS 오류 코드 머리 (EGW00121 유효하지 않은 token · EGW00123 만료 등) `[확인필요: 전체 목록]` */
+export const KIS_TOKEN_ERROR_PREFIX = "EGW0012";
 const TOKEN_NAME = "kis";
 
 export function kisConfigured(env: Record<string, string | undefined> = process.env): boolean {
@@ -52,6 +60,9 @@ const num = (v: unknown): number | null => {
  * - 전일 종가는 **기준가**(`stck_sdpr`)다 — 권리락·분할 날에는 조정된 값이라 `actionSuspect` 가 DB 전일 종가와 견줘 기업행위를 알아챈다.
  *   없으면 현재가 − 전일 대비(`prdy_vrss`)
  * - 응답에 시세 시각이 없다. 실시간이라 **부른 시각**을 쓴다 — 장 밖 호출은 경로가 먼저 걸러 낸다
+ * - **거래정지(`temp_stop_yn`=Y)이거나 오늘 체결이 없으면(시가 0·거래량 0) null** (25.986, 교차검증). 부른 시각을 붙이면 정지 종목의
+ *   지난 가격이 "이번 장 시세" 로 통과해(25.196 의 지난 장 가드를 우회) 손절가 아래에서 정지된 보유 종목에 매일 "손절선 터치" 가 나갔다.
+ *   null 이면 야후로 넘어가고, 야후는 지난 장 시각을 줘 예전처럼 판정하지 않는다
  */
 export function parseKisPrice(yahooSymbol: string, payload: unknown, at: Date): Quote | null {
   const body = payload as { rt_cd?: unknown; output?: Record<string, unknown> } | null;
@@ -65,6 +76,8 @@ export function parseKisPrice(yahooSymbol: string, payload: unknown, at: Date): 
   };
   const diff = num(o.prdy_vrss);
   const volume = num(o.acml_vol);
+  if (String(o.temp_stop_yn ?? "").toUpperCase() === "Y") return null;
+  if ((num(o.stck_oprc) ?? 0) <= 0 && (volume ?? 0) <= 0) return null;
   return {
     symbol: yahooSymbol,
     price,
@@ -139,7 +152,15 @@ export async function fetchKisQuotes(symbols: string[], now: Date = new Date()):
     custtype: "P", tr_id: KIS_PRICE_TR,
   };
   const errors = new Set<string>();
+  const started = Date.now();
+  let tokenBad = false;
   for (let i = 0; i < askable.length; i += KIS_PER_SECOND) {
+    // 시간이 다 됐거나 토큰이 무효면 남은 것은 야후로 (25.986)
+    if (tokenBad || Date.now() - started + (i > 0 ? 1_000 : 0) + KIS_TIMEOUT_MS > KIS_DEADLINE_MS) {
+      if (!tokenBad) errors.add("KIS 시간 초과 — 남은 종목은 야후로");
+      failed.push(...askable.slice(i).map(([sym]) => sym));
+      break;
+    }
     if (i > 0) await sleep(1_000);
     const wave = askable.slice(i, i + KIS_PER_SECOND);
     calls += wave.length;
@@ -147,11 +168,13 @@ export async function fetchKisQuotes(symbols: string[], now: Date = new Date()):
       const url = `${KIS_BASE}/uapi/domestic-stock/v1/quotations/inquire-price?FID_COND_MRKT_DIV_CODE=J&FID_INPUT_ISCD=${code}`;
       try {
         const response = await fetch(url, { headers: head, cache: "no-store", signal: AbortSignal.timeout(KIS_TIMEOUT_MS) });
+        // 오류 응답에도 본문(msg_cd)이 있다 — 토큰 무효를 가려내려고 읽는다 (25.986)
+        const body = (await response.json().catch(() => ({}))) as { rt_cd?: unknown; msg_cd?: unknown };
+        if (String(body.msg_cd ?? "").startsWith(KIS_TOKEN_ERROR_PREFIX)) tokenBad = true;
         if (!response.ok) {
-          errors.add(`KIS HTTP ${response.status}`);
+          errors.add(`KIS HTTP ${response.status}${body.msg_cd ? ` ${String(body.msg_cd)}` : ""}`);
           return [sym, null] as const;
         }
-        const body = (await response.json()) as { rt_cd?: unknown; msg_cd?: unknown };
         const quote = parseKisPrice(sym, body, new Date());
         if (!quote && String(body.rt_cd) !== "0") errors.add(`KIS ${String(body.msg_cd ?? "오류")}`);
         return [sym, quote] as const;
@@ -164,6 +187,12 @@ export async function fetchKisQuotes(symbols: string[], now: Date = new Date()):
       if (quote) quotes[sym] = quote;
       else failed.push(sym);
     }
+  }
+  if (tokenBad) {
+    // **무효 토큰을 버린다** (25.986, 교차검증). 키를 바꿨거나 KIS 가 토큰을 무효로 하면, 만료 1시간 전까지(최대 23시간) 같은 토큰을
+    // 계속 써 KIS 가 하루 내내 조용히 죽어 있었다. 지우면 다음 호출(5분 뒤)이 새로 받는다
+    errors.add("KIS 토큰 무효 — 지우고 다음 호출에 새로 받음");
+    await execute("DELETE FROM api_tokens WHERE name = ?", [TOKEN_NAME]).catch(() => undefined);
   }
   return { quotes, failed, calls, error: errors.size ? [...errors].join(", ") : null };
 }

@@ -89,8 +89,9 @@ describe("장중 묶음 — 고친 이유가 실재하는가", () => {
     expect(글.length).toBeGreaterThan(MAX_LEN);
   });
 
-  it("국내만 50건이어도 안전선은 넘는다", () => {
-    const 글 = bundleMessage(밀린알림(50, "어떤긴이름주식회사우선주", "KR"), 이때);
+  it("국내만 60건이면 안전선은 넘는다", () => {
+    // 50건은 3,894자였다 — 국내만이면 머리에 "지연 시세" 가 빠져(25.986) 안전선(3,900) 바로 아래가 됐다
+    const 글 = bundleMessage(밀린알림(60, "어떤긴이름주식회사우선주", "KR"), 이때);
 
     expect(글.length).toBeGreaterThan(SAFE_LEN);
   });

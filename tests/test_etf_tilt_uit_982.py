@@ -22,3 +22,9 @@ def test_다른_미국_ETF_는_제_보유() -> None:
 def test_대리는_같은_지수를_완전_복제하는_ETF_다() -> None:
     """대리 자신이 단위형 신탁이면 또 못 받는다. 대리끼리 꼬리를 물지 않는다."""
     assert set(tilt.US_UIT_PROXY.values()).isdisjoint(tilt.US_UIT_PROXY)
+
+
+def test_같은_값은_같은_순위() -> None:
+    """SPY 와 IVV 가 같은 보유라 A 가 같다 — 목록 순서로 순위가 갈리면 안 된다 (25.986)."""
+    got = tilt.rank_within({"Large Blend": [(1, 70.0), (2, 72.0), (3, 70.0), (4, 65.0), (5, None)]})
+    assert got == {2: (1, 4), 1: (2, 4), 3: (2, 4), 4: (4, 4)}

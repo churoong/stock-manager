@@ -14,6 +14,7 @@ const 웹 = process.cwd();
 
 /** 인자 없는 catch 를 쓰되 **삼키는 것이 아닌** 자리와 사유 */
 const 면제: Record<string, string> = {
+  "lib/kis.ts": "읽기가 아니라 무효 토큰 지우기(DELETE) 실패를 삼킨다(25.986). 못 지우면 다음 호출이 같은 토큰으로 또 실패하고 다시 지우려 한다 — 시세는 야후로 이미 받았다",
   "app/api/alerts/route.ts":
     "알림 **전체·안 읽은 수**는 곁다리다(25.805). 못 읽으면 null 이고 화면이 목록 안에서 센다 — 이 한 줄 때문에 알림 목록이 500 이 되면 더 나쁘다",
   "app/api/cron/intraday/route.ts":

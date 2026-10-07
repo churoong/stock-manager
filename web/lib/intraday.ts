@@ -333,7 +333,9 @@ export function bundleMessage(
   note: string | null = null,
 ): string {
   const kst = new Date(now.getTime() + 9 * 3600_000).toISOString().slice(11, 16);
-  const lines = [`장중 알림 ${alerts.length}건 (${kst} KST, 지연 시세)`];
+  // 국내는 KIS 실시간(25.983), 미국은 야후 지연 시세다 — 국내만이면 "지연" 이라 하지 않는다 (25.986, 교차검증)
+  const 지연 = alerts.some((a) => a.market !== "KR") ? ", 미국은 지연 시세" : "";
+  const lines = [`장중 알림 ${alerts.length}건 (${kst} KST${지연})`];
   // **한 번만 말한다.** 줄마다 붙이면 시끄러워 아무도 안 읽는다 (docs/infra.md 25.162)
   if (note) lines.push(note);
   const 오늘 = new Date(now.getTime() + 9 * 3600_000).toISOString().slice(0, 10);
