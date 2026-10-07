@@ -77,11 +77,13 @@ def test_투자의견_목표가_0_은_없음() -> None:
     assert got[1]["target_price"] is None
 
 
-def test_기업행위_일정_액면교체는_output1() -> None:
+def test_기업행위_일정은_네_종류_모두_output1() -> None:
     split = kis.parse_events("split", {"rt_cd": "0", "output1": [
         {"record_date": "20260930", "sht_cd": "028080", "opp_cust_nm": "휴맥스홀딩스", "merge_type": "흡수합병"}]})
     assert split[0]["code"] == "028080" and split[0]["kind"] == "split" and split[0]["record_date"] == "2026-09-30"
-    bonus = kis.parse_events("bonus", {"rt_cd": "0", "output": [
+    # 2026-10-07 실측: 배당·무상·유상도 output1 이다 (25.994)
+    assert kis.parse_events("bonus", {"rt_cd": "0", "output": [{"record_date": "20261030", "sht_cd": "052400"}]}) == []
+    bonus = kis.parse_events("bonus", {"rt_cd": "0", "output1": [
         {"record_date": "20261030", "sht_cd": "052400", "isin_name": "코나아이", "fix_rate": "50.00"},
         {"record_date": "20261030", "sht_cd": "", "isin_name": "코드없음"}]})
     assert [e["name"] for e in bonus] == ["코나아이"]

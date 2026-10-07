@@ -213,8 +213,10 @@ def parse_opinions(payload: object) -> list[dict]:
 
 
 def parse_events(kind: str, payload: object) -> list[dict]:
-    """기업행위 일정 한 종류. 액면교체는 output1, 나머지는 output."""
-    rows = _list(payload, "output1") if kind == "split" else _list(payload, "output")
+    """기업행위 일정 한 종류. **네 종류 모두 output1** 에 온다
+    (25.994 — 처음에는 배당·무상·유상을 output 으로 읽어 0건이었다).
+    한 번에 100행까지 온다(배당 지난30~앞90일 실측 100행에서 잘림) — 부른 쪽이 기간을 좁힌다."""
+    rows = _list(payload, "output1")
     out = []
     for r in rows:
         day, code = _iso(r.get("record_date")), str(r.get("sht_cd") or "").strip()

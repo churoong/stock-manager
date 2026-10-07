@@ -35,9 +35,12 @@ SHORT_LOOKBACK_DAYS = 45
 #: 투자의견 조회 창 — 표가 비었으면(첫 실행) 1년, 아니면 겹치게 60일 (25.988)
 OPINION_FIRST_DAYS = 365
 OPINION_DAYS = 60
-#: 기업행위 일정 창 — 지난 30일(정정분)부터 앞으로 90일
-EVENT_BACK_DAYS = 30
-EVENT_AHEAD_DAYS = 90
+#: 기업행위 일정 창 — 지난 7일(정정분)부터 앞으로 45일 (25.994). 한 번에 100행까지라 배당은 지난30~앞90일이면 잘렸다
+#: (실측 100행). 리포트는 앞 10일만 쓴다(`daily.CORP_EVENT_DAYS`)
+EVENT_BACK_DAYS = 7
+EVENT_AHEAD_DAYS = 45
+#: 한 종류가 이만큼 오면 잘렸을 수 있다 — 실행 기록에 남긴다
+EVENT_PAGE_ROWS = 100
 OPINION_UPSERT = (
     "INSERT INTO kr_opinions (stock_id, date, broker, opinion, opinion_code, prev_opinion_code, target_price,"
     " source, fetched_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
@@ -212,7 +215,10 @@ def run(limit: int | None = None) -> int:
         창 = (today - timedelta(days=EVENT_BACK_DAYS), today + timedelta(days=EVENT_AHEAD_DAYS))
         for kind in kis.EVENT_APIS:
             try:
-                행사 += qc.events(kind, *창)
+                받은 = qc.events(kind, *창)
+                if len(받은) >= EVENT_PAGE_ROWS:
+                    failed[f"일정:{kind}"] = f"{len(받은)}행 — 잘렸을 수 있음"
+                행사 += 받은
             except (kis.KisFailed, OSError) as exc:
                 failed[f"일정:{kind}"] = str(exc)
         행사행 = [
