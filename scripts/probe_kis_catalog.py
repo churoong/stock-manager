@@ -98,8 +98,13 @@ def main() -> int:
     if not key or not secret:
         print("KIS_APP_KEY·KIS_APP_SECRET 가 비어 있다")
         return 1
-    r = requests.post(f"{BASE}/oauth2/tokenP", json={"grant_type": "client_credentials", "appkey": key,
-                      "appsecret": secret}, timeout=20)  # fmt: skip
+    # 발급은 1분 1회 — 앞 단계(`probe_kis.py`)가 막 받았으면 403 이다. 한 번 기다렸다 다시 받는다
+    for wait in (0, 65):
+        time.sleep(wait)
+        r = requests.post(f"{BASE}/oauth2/tokenP", json={"grant_type": "client_credentials", "appkey": key,
+                          "appsecret": secret}, timeout=20)  # fmt: skip
+        if r.status_code != 403:
+            break
     token = (r.json() if r.headers.get("content-type", "").startswith("application/json") else {}).get("access_token")
     print(f"토큰: HTTP {r.status_code} · 받음={'예' if token else '아니오'}")
     if not token:
