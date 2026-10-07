@@ -407,6 +407,19 @@ class Test우연일_확률:
         검사(BACKTEST, f"γ = {luck.EULER_GAMMA:.4f}(오일러 상수)", "오일러 상수")
 
 
+class Test사후_분석:
+    """틀린 추천 사후 분석 (docs/reports.md 3.8, docs/infra.md 25.998)."""
+
+    def test_상수(self) -> None:
+        from batch.jobs import weekly_summary as ws
+        from batch.services import postmortem as pm
+
+        검사(REPORTS, f"**{pm.MIN_SECTOR_PEERS}개 미만**(`MIN_SECTOR_PEERS`)", "업종 표본 하한")
+        검사(REPORTS, f"예로 {pm.MAX_EXAMPLES}건을 적는다", "예 수")
+        검사(REPORTS, f"나쁜 순 {ws.POSTMORTEM_MAX}건까지만", "나누는 상한")
+        검사(REPORTS, f"진입일이 {ws.POSTMORTEM_ENTRY_DAYS[0]}~{ws.POSTMORTEM_ENTRY_DAYS[1]}일 전", "창")
+
+
 class Test시간외:
     """보유 종목 시간외 단일가 알림 (docs/intraday.md 1.2, docs/infra.md 25.992)."""
 
@@ -472,7 +485,7 @@ class Test밸류_분모:
     "valuation_band", "outcomes", "stress", "sell_flags", "factor_ic", "sector_momentum", "earnings_quality", "share_issuance",
     "quarterly_earnings", "short_reversal", "div_omission", "buyback", "dilution", "flow_surge",
     "gross_profitability", "robustness", "column_rot", "calibration", "self_grade", "holding_scores",
-    "pick_history", "etf_accounts", "etf_tilt", "after_hours", "broker_stats", "disclosure_reaction", "luck",
+    "pick_history", "etf_accounts", "etf_tilt", "after_hours", "broker_stats", "disclosure_reaction", "luck", "postmortem",
 )  # fmt: skip
 
 #: 아직 그물 밖인 모듈과 **왜 아직인지**. 하나씩 줄여 간다

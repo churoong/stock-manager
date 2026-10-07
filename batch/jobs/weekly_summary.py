@@ -33,7 +33,7 @@ from batch.core import db
 from batch.core.client import TursoClient
 from batch.core.entry import guard
 from batch.notify import telegram
-from batch.services import column_rot
+from batch.services import column_rot, postmortem
 
 log = logging.getLogger("weekly_summary")
 
@@ -178,10 +178,54 @@ def reads_line(used: int | None, limit: int, now: datetime) -> str:
     return f"Turso 월 읽기: {used / 1e6:,.1f}M / {limit / 1e6:,.0f}M ({몫:.0%}, 달 진도 {진도:.0%}){표시}"
 
 
+#: 사후 분석 창 — 진입일이 이 범위(오늘 기준 달력일)면 20거래일째가 대략 지난 한 주 안이다 (25.998)
+POSTMORTEM_ENTRY_DAYS = (36, 27)
+#: 사후 분석에서 따져 볼 손실의 상한 — 손실 하나마다 시세를 몇 줄씩 읽는다
+POSTMORTEM_MAX = 30
+
+SECTOR_AVG = (
+    "SELECT AVG(p2.close / p1.close - 1), COUNT(*) FROM stocks s"
+    " JOIN prices p1 ON p1.stock_id = s.id AND p1.date = ? AND p1.close > 0"
+    " JOIN prices p2 ON p2.stock_id = s.id AND p2.date = ? AND p2.close > 0"
+    " WHERE s.country = ? AND s.sector = ? AND s.id <> ? AND s.asset_type = 'stock'"
+)
+
+
+def load_losses(client: TursoClient, now: datetime) -> tuple[int, int, list[postmortem.Loss]]:
+    """20거래일 성적이 이번 주 나온 신호와 그 가운데 손실의 몫 (docs/reports.md 3.8, 25.998)."""
+    a, b = ((now - timedelta(days=d)).date().isoformat() for d in POSTMORTEM_ENTRY_DAYS)
+    rows = client.execute(
+        "SELECT o.stock_id, COALESCE(s.name_ko, s.name_en, s.ticker), o.horizon, o.entry_date, o.ret_20d,"
+        " o.bench_ret_20d, s.sector, s.country FROM signal_outcomes o JOIN stocks s ON s.id = o.stock_id"
+        " WHERE o.entry_date BETWEEN ? AND ? AND o.ret_20d IS NOT NULL AND o.days_available >= 20",
+        [a, b],
+    ).rows
+    losses = []
+    손실들 = sorted((r for r in rows if float(r[4]) < 0), key=lambda r: float(r[4]))
+    for r in 손실들[:POSTMORTEM_MAX]:
+        sid, entry = int(r[0]), str(r[3])
+        exit_ = client.execute(
+            "SELECT date FROM prices WHERE stock_id = ? AND date > ? ORDER BY date LIMIT 1 OFFSET 19", [sid, entry]
+        ).scalar()
+        sec_ret, peers = None, 0
+        if exit_ and r[6]:
+            avg, n = client.execute(SECTOR_AVG, [entry, exit_, r[7], r[6], sid]).rows[0]
+            sec_ret, peers = (float(avg) if avg is not None else None), int(n or 0)
+        공시 = client.execute(
+            "SELECT title FROM disclosures WHERE stock_id = ? AND disclosed_at > ? AND disclosed_at <= ?"
+            " ORDER BY disclosed_at LIMIT 1",
+            [sid, entry, exit_ or entry],
+        ).scalar()
+        losses.append(postmortem.Loss(str(r[1]), str(r[2]), float(r[4]), float(r[5] or 0.0), sec_ret, peers,
+                                      str(공시) if 공시 else None))  # fmt: skip
+    return len(rows), len(손실들), losses
+
+
 def compose(
     runs: list[Run], last_success: dict[str, str], now: datetime, reads_used: int | None,
     read_limit: int = db.TURSO_MONTHLY_READ_LIMIT,
     rot_lines: list[str] | None = None,
+    postmortem_lines: list[str] | None = None,
 ) -> str:
     """메시지 본문. 순수 함수 — 테스트가 그대로 돌린다.
 
@@ -231,6 +275,10 @@ def compose(
     if rot_lines:
         lines += ["", *rot_lines]
 
+    # 틀린 추천 사후 분석 (docs/reports.md 3.8, 25.998)
+    if postmortem_lines:
+        lines += ["", *postmortem_lines]
+
     lines += ["", "자세한 것은 웹 /status 와 이슈 #1 의 운영 출력에 있습니다"]
     return "\n".join(lines)
 
@@ -252,7 +300,14 @@ def run(dry_run: bool = False) -> int:
             (now - timedelta(days=column_rot.RECENT_DAYS + column_rot.BASELINE_DAYS)).date().isoformat(),
         )
         rot_lines = column_rot.render(rot, checked, MAX_LINES) + [f"  (못 본 표: {e})" for e in rot_errors[:2]]
-        text = compose(runs=runs, last_success=last, now=now, reads_used=used, rot_lines=rot_lines)
+        # 틀린 추천 사후 분석 (25.998) — 읽기에 실패하면 절만 빠진다(요약은 나간다)
+        try:
+            총, 손실수, 손실 = load_losses(client, now)
+            사후 = postmortem.render(총, 손실, 손실수)
+        except Exception as exc:  # noqa: BLE001 — 곁다리 절이다
+            사후 = [f"지난 추천 사후 분석을 못 했습니다 ({type(exc).__name__})"]
+        text = compose(runs=runs, last_success=last, now=now, reads_used=used, rot_lines=rot_lines,
+                       postmortem_lines=사후)  # fmt: skip
         print(text)
         sent = 0
         if not dry_run:
