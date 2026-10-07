@@ -37,6 +37,7 @@ import {
 } from "@/lib/intraday";
 import { ALERT_UPSERT } from "@/lib/alertWrite";
 import { DART_API_NAME, DART_DAILY_LIMIT, addUsage, isBlocked, readUsage } from "@/lib/apiUsage";
+import { KIS_SOURCE, fetchKisQuotes, kisConfigured } from "@/lib/kis";
 import { localDate } from "@/lib/market";
 import { SAFE_LEN, sendTelegram } from "@/lib/telegram";
 import { recordHeartbeat } from "@/lib/heartbeat";
@@ -51,8 +52,8 @@ import { watchTursoReturn } from "@/lib/tursoWatch";
  * 순서: 토큰 확인 → 조용시간이 아니면 밀린 알림부터 보냄 → 장 밖이면 끝 → 시세 → 판정 → alerts 삽입
  *       (같은 종목·트리거·날짜는 DB 유니크로 하루 한 번) → 조용시간이 아니면 새 알림 발송
  *
- * **쓰기 대상은 넷이다** — alerts(하는 일 자체) · cron_heartbeats(호출 기록) · api_usage(DART 한도
- * 카운터, 25.105) · settings 한 줄(Turso 복귀 표시, `watchTursoReturn()`, 25.12).
+ * **쓰기 대상은 다섯이다** — alerts(하는 일 자체) · cron_heartbeats(호출 기록) · api_usage(DART·KIS 한도
+ * 카운터, 25.105·25.983) · settings 한 줄(Turso 복귀 표시, `watchTursoReturn()`, 25.12) · api_tokens(KIS 접근토큰 한 줄, 25.983).
  * 점수·신호·매매·보유는 건드리지 않는다. 2026-09-26 까지 이 줄은 "읽고 alerts 만 쓴다" 였다 —
  * 25.191 이 docs/intraday.md 는 고치고 이 머리말은 놓쳤다(docs/infra.md 25.195).
  * 로그인 없이 부르는 경로라 proxy.ts 가 통과시키고, 여기서 토큰으로 스스로를 지킨다.
@@ -220,7 +221,7 @@ const DART_TIMEOUT_MS = 4_000;
 /** 호출 시작부터 DART 확인을 이어 가도 되는 시간. 뒤에 저장·발송(텔레그램 10초)·기록이 남는다 (25.598) */
 const DART_BUDGET_MS = 15_000;
 
-async function fetchQuotes(symbols: string[]): Promise<{ quotes: Record<string, Quote>; errors: string[] }> {
+async function fetchYahooQuotes(symbols: string[]): Promise<{ quotes: Record<string, Quote>; errors: string[] }> {
   const quotes: Record<string, Quote> = {};
   const errors: string[] = [];
   for (const group of chunk(symbols, SPARK_MAX_SYMBOLS)) {
@@ -238,6 +239,25 @@ async function fetchQuotes(symbols: string[]): Promise<{ quotes: Record<string, 
     }
   }
   return { quotes, errors };
+}
+
+/**
+ * 시세. **국내는 KIS 실시간을 먼저** 묻고(docs/infra.md 25.983, 2026-10-07 사용자가 키를 넣음), 못 받은 종목만 야후(약 20분 지연)로 묻는다.
+ * KIS 가 통째로 안 되면(키 없음·표 없음·HTTP 오류) 예전처럼 야후만 쓴다. `errors` 에는 **야후 실패만** 넣는다 — KIS 가 실패해도 야후가
+ * 받았으면 판정은 됐다. KIS 쪽 사정은 `kis` 에 따로 남긴다
+ */
+async function fetchQuotes(
+  symbols: string[], market: Market, now: Date,
+): Promise<{ quotes: Record<string, Quote>; errors: string[]; kis: Record<string, unknown> | null }> {
+  if (market !== "KR" || !kisConfigured() || !symbols.length) return { ...(await fetchYahooQuotes(symbols)), kis: null };
+  const kis = await fetchKisQuotes(symbols, now);
+  await addUsage(KIS_SOURCE, kis.calls, now, null).catch(() => undefined);
+  const yahoo = kis.failed.length ? await fetchYahooQuotes(kis.failed) : { quotes: {}, errors: [] };
+  return {
+    quotes: { ...yahoo.quotes, ...kis.quotes },
+    errors: yahoo.errors,
+    kis: { got: Object.keys(kis.quotes).length, yahoo_fallback: kis.failed.length, calls: kis.calls, ...(kis.error ? { error: kis.error } : {}) },
+  };
 }
 
 /** DART 가 "그날 공시 없음" 으로 주는 정상 응답. 오류가 아니다 */
@@ -483,7 +503,7 @@ export async function GET(request: Request) {
     }
 
     const symbols = [...new Set([...byStock.values()].map((v) => v.target.yahoo_symbol))];
-    const { quotes, errors } = await fetchQuotes(symbols);
+    const { quotes, errors, kis } = await fetchQuotes(symbols, market, now);
     // 야후 호출이 하나라도 실패했는지 — 그 호출에서 빠진 대상은 판정 못 한 것이다 (25.731)
     const quoteCallFailed = errors.length > 0;
     const hits: Hit[] = [];
@@ -583,6 +603,8 @@ export async function GET(request: Request) {
     );
     await recordHeartbeat("intraday", market, now, 결과, {
       targets: byStock.size, quotes: Object.keys(quotes).length, new_alerts: newCount, sent, errors,
+      // 국내 시세를 KIS 로 몇 개 받았고 몇 개를 야후로 물었나 (25.983)
+      ...(kis ? { kis } : {}),
       ...(staleQuotes.length ? { stale_quotes: staleQuotes } : {}),
       ...(missingQuotes.length ? { missing_quotes: missingQuotes } : {}),
       // 기업행위 첫날로 보여 가격 알림을 건너뛴 종목 (25.597). 야후 전일 종가 동작을 확인하는 단서도 된다

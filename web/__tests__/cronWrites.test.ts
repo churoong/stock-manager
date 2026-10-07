@@ -37,7 +37,8 @@ const 써도_되는_표: Record<string, Record<string, string>> = {
   intraday: {
     alerts: "이 경로가 하는 일 자체다 (docs/intraday.md)",
     cron_heartbeats: "우리가 뭘 했는지의 기록. 판단 자료가 아니다 (25.60)",
-    api_usage: "DART 를 직접 부르므로 한도 카운터에 센다 (25.105, CLAUDE.md 비용 규칙)",
+    api_usage: "DART·KIS 를 직접 부르므로 한도 카운터에 센다 (25.105·25.983, CLAUDE.md 비용 규칙)",
+    api_tokens: "KIS 접근토큰 한 줄. 하루 한 번 받아 둔다 — 5분마다 받으면 발급 제한에 걸린다 (25.983)",
     settings: "Turso 복귀 표시 한 줄(`db_return_requested_at`). 10분마다 본다 (25.12)." +
       " 사용자 설정이 아니라 운영 표시라 백업에서 사유와 함께 뺀다 (25.156)",
   },

@@ -212,7 +212,10 @@ GET https://data-dbg.krx.co.kr/svc/apis/{카테고리}/{api_id}.json?basDd=YYYYM
 - **출처**: `https://openapi.krx.co.kr/contents/OPP/INFO/OPPINFO002.jsp`, 실제 서버 응답
 - **확신도**: 도메인·헤더·파라미터·응답 구조·필드명은 실제 호출로 검증. 한도 초과 시 상태코드는 `[확인필요]`
 
-## 3. KIS Developers (국내 시세) — **선택. 지금은 쓰지 않음**
+## 3. KIS Developers (국내 시세) — **선택. 2026-10-07 부터 국내 장중 현재가에 씀**
+
+> **2026-10-07**: 사용자가 실전투자 키를 발급해 Vercel·Actions 에 넣었다. Actions 러너에서 IP 등록 없이 토큰 발급·현재가·휴장일 조회가 됐다(`scripts/probe_kis.py`, 실행 37577384577, 각 0.5~0.7초). 장중 감시가 국내 현재가를 KIS 로 먼저 묻는다(docs/intraday.md 1.1, docs/infra.md 25.983). Vercel 에서의 호출은 첫 장중 호출 기록(`cron_heartbeats.detail.kis`)으로 확인한다 `[확인필요]`. 휴장일 조회는 아직 쓰지 않는다.
+
 
 > **2026-09-16 결정**: 이 API가 유일하게 주는 것은 장중 실시간 시세와 공식 휴장일 조회 둘뿐이다. 나머지는 KRX와 DART로 전부 대체된다. 반면 실계좌 개설이 필요하고, 클라우드 IP에서 호출되는지가 확인되지 않아 준비가 헛수고가 될 수 있다. 장중 알림의 시의성 하나를 타협하고 뺐다.
 >

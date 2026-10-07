@@ -651,6 +651,7 @@ API_NAMES = (
     "yfinance",           # yfinance
     "yahoo_quotesummary",  # 야후 펀드 프로필 (batch/sources/yahoo_fund.SOURCE)
     "samsungfund_kodex",  # KODEX 구성종목 (batch/sources/kodex_pdf.SOURCE, 25.974 — 사용자 결정으로 사용)
+    "kis_openapi",        # 한국투자증권 KIS — 웹 장중 국내 현재가 (web/lib/kis.KIS_SOURCE, 25.983)
     "turso_writes", "turso_reads", "d1_writes", "d1_reads",  # 쓴/읽은 행 수
     "d1_db_size",         # D1 DB 가 차지한 바이트 (횟수가 아니라 수위다)
 )

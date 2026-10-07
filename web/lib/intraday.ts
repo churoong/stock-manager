@@ -125,6 +125,8 @@ export interface Quote {
   day_high: number | null;
   day_low: number | null;
   volume: number | null;
+  /** 어디서 받았나. 없으면 야후(`QUOTE_SOURCE`). 국내 KIS 는 `kis_openapi` (docs/infra.md 25.983) */
+  source?: string;
 }
 
 export interface Thresholds {
@@ -264,7 +266,7 @@ export function evaluate(target: Target, quote: Quote, thresholds: Thresholds, w
   const hits: Hit[] = [];
   const c = target.currency;
   // 출처를 알림 행에 남긴다 — 모든 데이터 행에 source(CLAUDE.md). 받은 시각은 alerts.created_at (25.815, 감사)
-  const base = { price: quote.price, quote_time: quote.time, symbol: quote.symbol, reasons: target.reasons, source: QUOTE_SOURCE };
+  const base = { price: quote.price, quote_time: quote.time, symbol: quote.symbol, reasons: target.reasons, source: quote.source ?? QUOTE_SOURCE };
   const push = (trigger: TriggerType, message: string, extra: Record<string, unknown>) =>
     hits.push({ stock_id: target.stock_id, trigger, message: `${target.name}: ${message}`, data: { ...base, ...extra } });
 
