@@ -27,7 +27,9 @@ ETF = "/uapi/etfetn/v1/quotations/inquire-component-stock-price"
 K = "/uapi/domestic-stock/v1/ksdinfo/"
 
 
-def cases(today: str, month_ago: str, year_ago: str, ahead: str) -> list[tuple[str, str, str, dict[str, str]]]:
+def cases(
+    today: str, month_ago: str, year_ago: str, ahead: str, ahead90: str = ""
+) -> list[tuple[str, str, str, dict[str, str]]]:
     """(이름, 경로, tr_id, 인자)"""
     return [
         ("A1 ETF 구성종목(KODEX 200)", ETF, "FHKST121600C0",
@@ -38,6 +40,12 @@ def cases(today: str, month_ago: str, year_ago: str, ahead: str) -> list[tuple[s
          {"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": "360750", "FID_COND_SCR_DIV_CODE": "11216"}),
         ("A2 예탁원 배당일정(앞으로)", K + "dividend", "HHKDB669102C0",
          {"CTS": "", "GB1": "0", "F_DT": today, "T_DT": ahead, "SHT_CD": "", "HIGH_GB": ""}),
+        ("A2b 배당(지난30~앞90)", K + "dividend", "HHKDB669102C0",
+         {"CTS": "", "GB1": "0", "F_DT": month_ago, "T_DT": ahead90, "SHT_CD": "", "HIGH_GB": ""}),
+        ("A2b 무상(지난30~앞90)", K + "bonus-issue", "HHKDB669101C0",
+         {"CTS": "", "F_DT": month_ago, "T_DT": ahead90, "SHT_CD": ""}),
+        ("A2b 배당(오늘~앞90)", K + "dividend", "HHKDB669102C0",
+         {"CTS": "", "GB1": "0", "F_DT": today, "T_DT": ahead90, "SHT_CD": "", "HIGH_GB": ""}),
         ("A2 예탁원 액면교체(분할·병합)", K + "rev-split", "HHKDB669104C0",
          {"CTS": "", "SHT_CD": "", "MARKET_GB": "0", "F_DT": year_ago, "T_DT": ahead}),
         ("A2 예탁원 무상증자", K + "bonus-issue", "HHKDB669101C0",
@@ -113,7 +121,7 @@ def main() -> int:
     now = datetime.now(KST)
     f = "%Y%m%d"
     head = {"authorization": f"Bearer {token}", "appkey": key, "appsecret": secret, "custtype": "P"}
-    days = [now + timedelta(days=d) for d in (0, -30, -365, 60)]
+    days = [now + timedelta(days=d) for d in (0, -30, -365, 60, 90)]
     # `--only A1,B2` — 이 머리로 시작하는 것만
     only = [s for s in (sys.argv[sys.argv.index("--only") + 1] if "--only" in sys.argv[:-1] else "").split(",") if s]
     for name, path, tr, params in cases(*(d.strftime(f) for d in days)):
