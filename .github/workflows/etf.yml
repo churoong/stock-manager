@@ -45,6 +45,9 @@ jobs:
       KRX_API_KEY: ${{ secrets.KRX_API_KEY }}
       # 점수 담음(N-PORT)이 SEC 를 부른다 — 연락처 든 User-Agent (docs/data-sources.md 13.5·14절)
       SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+      # KODEX 구성종목을 못 받으면 KIS 상위 30 으로 (docs/infra.md 25.990)
+      KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}
+      KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}
       TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
       TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
       # DB 백엔드 전환 (docs/infra.md 25절). 비어 있으면 Turso 를 쓴다

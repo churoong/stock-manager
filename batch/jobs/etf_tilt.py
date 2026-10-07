@@ -30,7 +30,7 @@ from batch.core.client import TursoClient
 from batch.core.entry import guard
 from batch.services import etf as etf_svc
 from batch.services import etf_tilt as tilt
-from batch.sources import kodex_pdf, sec_edgar, sec_nport
+from batch.sources import kis, kodex_pdf, sec_edgar, sec_nport
 
 log = logging.getLogger("etf_tilt")
 JOB_NAME = "etf_tilt"
@@ -310,6 +310,35 @@ def fetch_kr(
     return out
 
 
+def fetch_kr_kis(client: TursoClient, targets: list[str], out: dict[str, Fetched], failed: dict[str, str]) -> int:
+    """KODEX 홈페이지에서 못 받은 국내 ETF 를 KIS 구성종목 **상위 30** 으로 (25.990). 받은 것은 `failed` 에서 지운다.
+
+    상위 30 이라 코스피200 ETF 는 비중 85% 쯤만 덮는다 — 덮은 비중(`coverage_pct`)이 그대로 근거표에 남고,
+    하한(70%) 아래면 평균을 내지 않는다. 키가 없거나 토큰을 못 받으면 아무것도 하지 않는다. 반환: 나간 호출 수."""
+    if not targets or not kis.configured():
+        return 0
+    try:
+        token, issued = kis.access_token(client)
+    except (kis.KisFailed, OSError, KeyError) as exc:
+        for sym in targets:
+            failed.setdefault(sym, f"KIS 토큰 실패 ({exc})")
+        return 0
+    qc = kis.QuoteClient(token)
+    오늘 = date.today().isoformat()
+    for sym in targets:
+        try:
+            got = qc.etf_components(sym)
+        except (kis.KisFailed, OSError) as exc:
+            failed[sym] = f"{failed.get(sym, '')} · KIS 도 실패 ({exc})".lstrip(" ·")
+            continue
+        if not got:
+            failed[sym] = f"{failed.get(sym, '')} · KIS 구성종목 비어 있음".lstrip(" ·")
+            continue
+        out[sym] = Fetched(got, f"KIS 구성종목 상위 {len(got)} {오늘}", 오늘, 오늘, kis.SOURCE)
+        failed.pop(sym, None)
+    return qc.calls + int(issued)
+
+
 def needs_kodex(picks: list[dict[str, Any]]) -> bool:
     """국내 지수 ETF 후보가 하나라도 있으면 KODEX 목록을 받는다 — 없으면 부르지 않는다."""
     return any(
@@ -340,22 +369,29 @@ def run() -> int:
                 products = {p.ticker: p for p in kodex.products()}
             except (kodex_pdf.KodexFailed, OSError) as exc:
                 failed["KODEX 목록"] = str(exc)
-        kodex_index = kodex_by_index(picks, set(products))
+        # 목록을 못 받았으면(429 등) 이름으로 KODEX 를 가려 KIS 로 대신 받는다 (25.990)
+        kodex_tickers = set(products) or {str(p["symbol"]) for p in picks
+                                          if p["country"] == "KR" and str(p.get("name") or "").startswith("KODEX")}
+        kodex_index = kodex_by_index(picks, kodex_tickers)
         sources = {int(p["pick_id"]): src for p in picks if (src := source_of(p, kodex_index))}
 
         us_targets = sorted({s for k, s in sources.values() if k == "us"} | {tilt.MARKET_BENCHMARK})
         # 기준(KODEX 200)을 **맨 앞에** — 429 로 중간에 멈춰도 "시장 대비" 의 기준은 받는다 (25.984)
         kr_targets = sorted({s for k, s in sources.values() if k == "kr"} - {tilt.KR_BENCHMARK})
-        if tilt.KR_BENCHMARK in products:
+        if tilt.KR_BENCHMARK in kodex_tickers:
             kr_targets.insert(0, tilt.KR_BENCHMARK)
         us_docs, cusips, sec_calls = fetch_us(us_targets, failed)
         kr_base = max((date.fromisoformat(str(p["as_of_date"])[:10]) for p in picks if p["country"] == "KR"),
                       default=date.today())  # fmt: skip
         kr_docs = fetch_kr(kodex, products, kr_targets, kr_base, failed) if kr_targets and products else {}
+        # KODEX 홈페이지에서 못 받은 것은 KIS 상위 30 으로 (25.990)
+        kis_calls = fetch_kr_kis(client, [s for s in kr_targets if s not in kr_docs], kr_docs, failed)
         if sec_calls:
             db.record_api_call(client, "sec_edgar", count=sec_calls)
         if kodex.calls:
             db.record_api_call(client, "samsungfund_kodex", count=kodex.calls)
+        if kis_calls:
+            db.record_api_call(client, "kis_openapi", count=kis_calls)
 
         markets = {
             "us": load_market(client, "US", cusips, tilt.MARKET_BENCHMARK),
@@ -444,6 +480,8 @@ def run() -> int:
             "failed": failed,
             "sec_calls": sec_calls,
             "kodex_calls": kodex.calls,
+            "kis_calls": kis_calls,
+            "kis_docs": sorted(s for s, d in kr_docs.items() if d.source == kis.SOURCE),
             "coverage": {f"{k}:{s}": round(t.coverage_pct, 1) for (k, s), t in sorted(tilts.items())},
         }
         db.finish_batch_run(

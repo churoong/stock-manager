@@ -66,6 +66,8 @@ export function parseTilt(raw: string | null): Tilt | null {
 }
 
 export const KODEX_SOURCE = "samsungfund_kodex";
+/** KODEX 홈페이지를 못 받은 날의 대신 — KIS 구성종목 상위 30 (25.990) */
+export const KIS_SOURCE = "kis_openapi";
 
 /** 순위 무리 이름 (25.974) */
 export const GROUP_LABEL: Record<"us" | "kr_us" | "kr_kr", string> = {
@@ -78,7 +80,8 @@ const signed = (v: number) => `${v > 0 ? "+" : v < 0 ? "−" : "±"}${Math.abs(v
 
 /** 카드 한 줄. 상위 비중(순위 기준)이 먼저, 평균은 뒤. 덮은 비중이 모자라면 그 까닭을 적는다 */
 export function tiltLine(t: Tilt): string {
-  const 출처 = t.proxy ? ` · 같은 지수 ${t.source === KODEX_SOURCE ? `KODEX(${t.source_symbol})` : t.source_symbol} 보유로` : "";
+  const 국내 = t.source === KODEX_SOURCE || t.source === KIS_SOURCE;
+  const 출처 = t.proxy ? ` · 같은 지수 ${국내 ? `KODEX(${t.source_symbol})` : t.source_symbol} 보유로` : "";
   if (t.avg_score === null) {
     return `우리 점수 — 점수 있는 종목이 비중 ${t.coverage_pct.toFixed(0)}%뿐이라 내지 않음 (하한 ${t.coverage_min_pct.toFixed(0)}%)${출처}`;
   }
@@ -123,7 +126,9 @@ export function tiltSource(t: Tilt): string {
   const 문서 =
     t.source === KODEX_SOURCE
       ? `출처 삼성자산운용 KODEX(${t.source_symbol}) 구성종목 ${t.report_date ?? "-"}`
-      : `출처 SEC N-PORT ${t.source_symbol} 공시 ${t.accession} (기준 ${t.report_date ?? "-"}, 공시 ${t.filed})`;
+      : t.source === KIS_SOURCE
+        ? `출처 한국투자증권 KIS ${t.source_symbol} 구성종목 상위 ${t.holdings}개(전 종목 아님) ${t.report_date ?? "-"}`
+        : `출처 SEC N-PORT ${t.source_symbol} 공시 ${t.accession} (기준 ${t.report_date ?? "-"}, 공시 ${t.filed})`;
   return (
     문서 +
     ` · 점수 기준일 ${t.score_as_of ?? "-"} · 우리 종목으로 이은 비중 ${t.matched_pct.toFixed(0)}%${추천} · 백테스트 전 참고`

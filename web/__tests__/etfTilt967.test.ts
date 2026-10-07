@@ -37,6 +37,12 @@ describe("tiltLine", () => {
     expect(tiltLine(t)).toContain("같은 지수 KODEX(069500) 보유로");
   });
 
+  it("KIS 상위 30 이 출처면 전 종목이 아니라고 적는다 (25.990)", () => {
+    const t = tilt({ source: "kis_openapi", source_symbol: "069500", proxy: true, report_date: "2026-10-07", group: "kr_kr", holdings: 30 });
+    expect(tiltSource(t)).toContain("출처 한국투자증권 KIS 069500 구성종목 상위 30개(전 종목 아님) 2026-10-07");
+    expect(tiltLine(t)).toContain("같은 지수 KODEX(069500) 보유로");
+  });
+
   it("국내 대리 보유는 어느 ETF 의 보유인지 적는다", () => {
     expect(tiltLine(tilt({ proxy: true, source_symbol: "IVV", rank_all: null, rank_all_size: null }))).toBe(
       "우리 상위 10% 종목 비중 42% (VTI 14%의 3.0배) · 평균 61점 (VTI 대비 +9) · 같은 지수 IVV 보유로",

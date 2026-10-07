@@ -287,3 +287,19 @@ class QuoteClient:
             "split": {"CTS": "", "SHT_CD": "", "MARKET_GB": "0", "F_DT": f, "T_DT": t},
         }[kind]
         return parse_events(kind, self.get(KSD + path, tr, params))
+
+    def etf_components(self, code: str) -> list[tuple[str, float]]:
+        """국내 ETF 구성종목 **상위 30**(`FHKST121600C0`, output2) → [(단축코드, 비중 %)] (25.990).
+
+        2026-10-07 실측: `etf_cnfg_issu_rlim` 이 비중 %(KODEX 200 삼성전자 34.63 — KODEX 공시 34.46).
+        30종목 합은 코스피200 ETF 에서 84.94% 다. 해외지수 ETF 는 목록이 비어 온다."""
+        payload = self.get(
+            "/uapi/etfetn/v1/quotations/inquire-component-stock-price", "FHKST121600C0",
+            {"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": code, "FID_COND_SCR_DIV_CODE": "11216"},
+        )  # fmt: skip
+        out = []
+        for r in _list(payload, "output2"):
+            c, w = str(r.get("stck_shrn_iscd") or "").strip(), _float(r.get("etf_cnfg_issu_rlim"))
+            if len(c) == 6 and w and w > 0:
+                out.append((c, w))
+        return out

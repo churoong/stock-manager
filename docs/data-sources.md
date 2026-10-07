@@ -246,7 +246,7 @@ GET https://data-dbg.krx.co.kr/svc/apis/{카테고리}/{api_id}.json?basDd=YYYYM
 | 투자자별 매매 | FHKST01010900 | **최근 30일만**(output 30행). 대금 백만원 | `kr_flows` 매일 쌓기(25.987) |
 | 공매도 일별 | FHPST04830000 | output2 최대 100행(약 5개월) | `kr_flows` |
 | 신용잔고 일별 | FHPST04760000 | **최근 30일만**. 날짜는 매매일 `deal_date`(결제일 `stlm_date` 와 다름) | `kr_flows` |
-| ETF 구성종목 | FHKST121600C0 | 국내 주식 ETF **상위 30종목만**(output2). 해외지수 ETF 는 비어 있음 | 아직 — KODEX 전 종목(13.6)의 대안 검토 |
+| ETF 구성종목 | FHKST121600C0 | 국내 주식 ETF **상위 30종목만**(output2, `etf_cnfg_issu_rlim` = 비중 %, 코스피200 ETF 합 84.94%). 해외지수 ETF 는 비어 있음 | KODEX 홈페이지(13.6)를 못 받은 날의 대신(25.990) |
 | 예탁원 배당·무상·유상·액면교체 | HHKDB66910xC0 | 됨, 앞날 일정 포함. 액면교체는 `CTS` 인자 필수 | `kr_corp_events` 매일(지난 30일~앞 90일, 25.988) |
 | 투자의견 | FHKST663300C0 | 1년에 100행(증권사·목표가·의견) | `kr_opinions` 매일(첫 실행 1년, 그 뒤 60일 겹쳐, 25.988) |
 | 추정실적 | HHKST668300C0 | 숫자 칸 이름이 `data1~5` 뿐 — 뜻을 모른다 `[확인필요]` | 쓰지 않음 |
