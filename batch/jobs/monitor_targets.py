@@ -174,6 +174,33 @@ def merge_zones(
     return low, high
 
 
+#: 분할 매수 계획을 이어 보는 기간(달력일) — 신호가 이보다 오래됐으면 계획은 끝난 것으로 본다 (25.999)
+TRANCHE_PLAN_DAYS = 30
+
+
+def next_tranche(client: TursoClient, stock_id: int, today: date) -> tuple[float | None, int | None, str | None]:
+    """(다음 차수 가격, 차수, 계획 기준일). 최근 신호의 분할 계획을 신호 뒤 매수 기록 수로 이어 본다
+    (docs/intraday.md 2절 tranche).
+
+    매수 0번이면(계획 전에 산 보유) 이어 보지 않는다 — 1차를 산 사람만 2·3차를 기다린다. 3번 이상이면 끝났다."""
+    rows = client.execute(
+        "SELECT as_of_date, tranche_plan FROM signals WHERE stock_id = ? AND as_of_date >= ?"
+        " ORDER BY as_of_date DESC, CASE horizon WHEN 'short' THEN 0 WHEN 'mid' THEN 1 ELSE 2 END LIMIT 1",
+        [stock_id, (today - timedelta(days=TRANCHE_PLAN_DAYS)).isoformat()],
+    ).rows
+    if not rows:
+        return None, None, None
+    기준일, 계획 = str(rows[0][0]), json.loads(rows[0][1] or "[]")
+    산 = int(client.execute(
+        "SELECT COUNT(*) FROM trades WHERE stock_id = ? AND side = 'buy' AND trade_date >= ?", [stock_id, 기준일]
+    ).scalar() or 0)  # fmt: skip
+    if 산 < 1 or 산 >= len(계획):
+        return None, None, None
+    다음 = 계획[산]
+    가격 = 다음.get("price") if isinstance(다음, dict) else None
+    return (float(가격), 산 + 1, 기준일) if 가격 else (None, None, None)
+
+
 def build_targets(client: TursoClient, market: str, now: str) -> list[tuple]:
     # 범위 밖·반쪽 짝은 버리고 기본값을 쓴다 (docs/infra.md 25.180)
     targets_setting, 설정경고 = sr.기간별_목표(db.get_setting(client, "horizon_targets", None))
@@ -187,7 +214,7 @@ def build_targets(client: TursoClient, market: str, now: str) -> list[tuple]:
             by_stock[sid] = {
                 "stock_id": sid, "symbol": r["yahoo_symbol"], "name": r["name"], "currency": r["currency"],
                 "reasons": [], "zones": [], "target_price": None, "stop_price": None,
-                "dart": r.get("dart_corp_code"),
+                "dart": r.get("dart_corp_code"), "tranche": (None, None, None),
             }  # fmt: skip
         return by_stock[sid]
 
@@ -217,6 +244,8 @@ def build_targets(client: TursoClient, market: str, now: str) -> list[tuple]:
             # 가 매일 나갔다(25.218 은 보유는 해당 없다고 적었지만 틀렸다). 매도 플래그·리포트가 수량 확인을 따로 말한다
             continue
         t["target_price"], t["stop_price"] = holding_levels(float(r["avg_price"]), r["horizon"], targets_setting)
+        # 분할 매수 계획의 다음 차수 (docs/intraday.md 2절 tranche, 25.999) — 기업행위·ETF 는 위에서 이미 건너뛰었다
+        t["tranche"] = next_tranche(client, int(r["stock_id"]), cal.local_today(market))
 
     # **신호를 마지막으로 계산한 날** — 아침 리포트와 같은 잣대 (docs/infra.md 25.407, 25.337).
     # 예전에는 `signals` 의 MAX 였다. 오늘 계산했는데 한 건도 안 걸리면 MAX 가 어제로 남아 **어제 신호를
@@ -277,7 +306,7 @@ def build_targets(client: TursoClient, market: str, now: str) -> list[tuple]:
         rows.append((
             market, t["stock_id"], t["symbol"], t["name"], t["currency"], json.dumps(t["reasons"]),
             zone_low, zone_high, t["target_price"], t["stop_price"], stats[0], 평균거래량,
-            t["dart"] if "holding" in t["reasons"] else None, now,
+            t["dart"] if "holding" in t["reasons"] else None, now, *t["tranche"],
         ))  # fmt: skip
     return rows
 
@@ -391,8 +420,9 @@ def run(market: str) -> int:
         ]
         statements += [
             ("INSERT INTO monitor_targets (market, stock_id, yahoo_symbol, name, currency, reasons, buy_zone_low,"
-             " buy_zone_high, target_price, stop_price, prev_close, avg_volume_20d, dart_corp_code, built_at)"
-             " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", list(row))
+             " buy_zone_high, target_price, stop_price, prev_close, avg_volume_20d, dart_corp_code, built_at,"
+             " next_tranche_price, next_tranche_step, tranche_plan_date)"
+             " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", list(row))
             for row in targets
         ]  # fmt: skip
         news_targets = news_target_rows(client, market, targets, now)

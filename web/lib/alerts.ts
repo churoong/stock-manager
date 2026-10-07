@@ -9,8 +9,10 @@ export const TRIGGER_LABEL: Record<string, string> = {
   buy_zone: "매수 구간", watch_price: "관심 목표가", target: "목표가", stop: "손절선", spike_up: "급등", spike_down: "급락", volume: "거래량", disclosure: "공시",
   // 장 마감 뒤 배치가 남기는 보유 종목 시간외 단일가 (25.992, batch/jobs/kis_flows.py)
   after_hours: "시간외",
+  // 분할 매수 계획의 다음 차수 가격 도달 (25.999)
+  tranche: "분할 매수",
 };
-export const TRIGGER_ORDER = ["buy_zone", "watch_price", "target", "stop", "spike_up", "spike_down", "volume", "disclosure", "after_hours"] as const;
+export const TRIGGER_ORDER = ["buy_zone", "watch_price", "target", "stop", "spike_up", "spike_down", "volume", "disclosure", "after_hours", "tranche"] as const;
 
 export interface AlertRow {
   id: number;

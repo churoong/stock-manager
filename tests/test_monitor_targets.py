@@ -624,3 +624,43 @@ def test_ETF_보유도_기업행위_표시를_받는다(monkeypatch: pytest.Monk
     assert job.run("KR") == 0
     r = c.execute("SELECT reasons, target_price, stop_price FROM monitor_targets WHERE stock_id = 5").fetchone()
     assert json.loads(r[0]) == ["holding", "action_guard"] and r[1] is None and r[2] is None
+
+
+def test_분할_매수_다음_차수는_신호_뒤_매수_횟수로_이어_본다() -> None:
+    """1차를 산 뒤면 2차 가격을, 매수가 없거나 3번 다 샀으면 None (docs/intraday.md 2절 tranche, 25.999)."""
+    from batch.core import db
+
+    mem = MemClient()
+    db.apply_migrations(mem)  # type: ignore[arg-type]
+    c = mem.conn
+    c.execute(
+        "INSERT INTO stocks (id, ticker, market, country, currency, source, fetched_at)"
+        " VALUES (1, '005930', 'KOSPI', 'KR', 'KRW', 't', 't')"
+    )
+    계획 = [{"step": i, "ratio": 1 / 3, "price": p, "amount": 1} for i, p in ((1, 100.0), (2, 95.0), (3, 90.0))]
+    c.execute(
+        "INSERT INTO signals (stock_id, as_of_date, horizon, signal_type, buy_zone_low, buy_zone_high, currency,"
+        " tranche_plan, size_reduction, rationale_text, rationale_data, calc_version, created_at)"
+        " VALUES (1, '2026-09-10', 'short', 'buy', 95, 100, 'KRW', ?, 0, 'r', '{}', 'v', 't')",
+        [json.dumps(계획)],
+    )
+    today = date(2026, 9, 20)
+    assert job.next_tranche(mem, 1, today) == (None, None, None)  # type: ignore[arg-type]
+
+    def 매수(tid: int, day: str) -> None:
+        c.execute(
+            "INSERT INTO trades (id, stock_id, side, trade_date, price, quantity, currency, fx_rate, fx_rate_source,"
+            " created_at, updated_at) VALUES (?, 1, 'buy', ?, 100, 1, 'KRW', 1, 'none', 't', 't')",
+            [tid, day],
+        )
+
+    매수(1, "2026-09-01")  # 신호 전 매수는 세지 않는다
+    assert job.next_tranche(mem, 1, today) == (None, None, None)  # type: ignore[arg-type]
+    매수(2, "2026-09-11")
+    assert job.next_tranche(mem, 1, today) == (95.0, 2, "2026-09-10")  # type: ignore[arg-type]
+    매수(3, "2026-09-12")
+    assert job.next_tranche(mem, 1, today) == (90.0, 3, "2026-09-10")  # type: ignore[arg-type]
+    매수(4, "2026-09-13")
+    assert job.next_tranche(mem, 1, today) == (None, None, None)  # type: ignore[arg-type]
+    # 계획이 TRANCHE_PLAN_DAYS 보다 오래되면 잇지 않는다
+    assert job.next_tranche(mem, 1, date(2026, 11, 1)) == (None, None, None)  # type: ignore[arg-type]

@@ -49,6 +49,15 @@ describe("트리거", () => {
     expect(evaluate(target(), quote(), TH)).toEqual([]);
   });
 
+  it("분할 매수 다음 차수 가격에 저가가 닿으면 알린다 (25.999)", () => {
+    const t = target({ next_tranche_price: 251_500, next_tranche_step: 2 });
+    const [hit] = evaluate(t, quote(), TH);
+    expect(hit.trigger).toBe("tranche");
+    expect(hit.message).toContain("분할 매수 2차");
+    expect(evaluate(target({ next_tranche_price: 251_000, next_tranche_step: 2 }), quote(), TH)).toEqual([]);
+    expect(evaluate(target({ next_tranche_price: 251_500, next_tranche_step: null }), quote(), TH)).toEqual([]);
+  });
+
   it("권장 매수 구간 진입", () => {
     const hits = evaluate(target({ buy_zone_low: 250_000, buy_zone_high: 255_000 }), quote(), TH);
     expect(hits.map((h) => h.trigger)).toEqual(["buy_zone"]);

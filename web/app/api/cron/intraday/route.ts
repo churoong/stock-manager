@@ -62,6 +62,14 @@ import { watchTursoReturn } from "@/lib/tursoWatch";
  */
 export const dynamic = "force-dynamic";
 
+const MONITOR_TARGETS_SQL_OLD = `SELECT stock_id, yahoo_symbol, name, currency, reasons, buy_zone_low, buy_zone_high, target_price, stop_price,
+        prev_close, avg_volume_20d, dart_corp_code, built_at
+ FROM monitor_targets WHERE market = ?`;
+/** 감시 목록 + 분할 매수 다음 차수 (docs/intraday.md 2절 tranche, 25.999) */
+const MONITOR_TARGETS_SQL = `SELECT stock_id, yahoo_symbol, name, currency, reasons, buy_zone_low, buy_zone_high, target_price, stop_price,
+        prev_close, avg_volume_20d, dart_corp_code, built_at, next_tranche_price, next_tranche_step
+ FROM monitor_targets WHERE market = ?`;
+
 /** 조용시간에 생겨 보내지 않기로 한 알림의 sent_at 표시 */
 const QUIET_SKIPPED = "quiet-skipped";
 /** 보내려고 잡은 알림의 표시 (25.538). 이 시간이 지나도 잡힌 채면 잡은 호출이 죽은 것 — 다시 대기로 본다 */
@@ -417,12 +425,11 @@ export async function GET(request: Request) {
 
     const thresholds = settings.alert_thresholds;
     const 목록 = rowsToObjects<Target & { reasons: string; dart_corp_code: string | null; built_at: string | null }>(
-      await execute(
-        `SELECT stock_id, yahoo_symbol, name, currency, reasons, buy_zone_low, buy_zone_high, target_price, stop_price,
-                prev_close, avg_volume_20d, dart_corp_code, built_at
-         FROM monitor_targets WHERE market = ?`,
-        [market],
-      ),
+      // 분할 매수 칸(마이그레이션 0050, 25.999)이 아직 없으면 예전 질의로 — 웹이 배치보다 먼저 배포되는 날 감시가 통째로 서지 않게
+      await execute(MONITOR_TARGETS_SQL, [market]).catch((e: unknown) => {
+        if (e instanceof Error && /no such column/i.test(e.message)) return execute(MONITOR_TARGETS_SQL_OLD, [market]);
+        throw e;
+      }),
     );
     // **이번 장 목록이 아니면 신호 값은 쓰지 않는다** (docs/infra.md 25.534) — 어제 추천의 매수 구간 알림이 오늘의
     // 하루 1회 자리를 차지했다. 보유·관심 종목 감시는 그대로

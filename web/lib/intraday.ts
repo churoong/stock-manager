@@ -59,7 +59,7 @@ export function staleTargetsNote(
   );
 }
 
-export type TriggerType = "buy_zone" | "watch_price" | "target" | "stop" | "spike_up" | "spike_down" | "volume" | "disclosure";
+export type TriggerType = "buy_zone" | "watch_price" | "target" | "stop" | "spike_up" | "spike_down" | "volume" | "disclosure" | "tranche";
 
 /** 감시 목록이 이 장을 위해 만들어졌다고 보는 한계 — 장 시작 몇 시간 전까지 (docs/infra.md 25.534) */
 export const TARGETS_FRESH_HOURS = 12;
@@ -115,6 +115,9 @@ export interface Target {
   stop_price: number | null;
   prev_close: number | null;
   avg_volume_20d: number | null;
+  /** 분할 매수 계획의 다음 차수 (docs/intraday.md 2절 tranche, 25.999). 보유 + 최근 신호 + 1차 이상 산 경우만 */
+  next_tranche_price?: number | null;
+  next_tranche_step?: number | null;
 }
 
 export interface Quote {
@@ -287,6 +290,11 @@ export function evaluate(target: Target, quote: Quote, thresholds: Thresholds, w
 
   const high = quote.day_high ?? quote.price;
   const low = quote.day_low ?? quote.price;
+  // 분할 매수 다음 차수 (25.999) — 1차를 산 보유 종목이 계획한 2·3차 가격에 닿았다. 당일 저가로 본다(5분 사이 터치도 잡는다)
+  if (target.next_tranche_price && target.next_tranche_step && low <= target.next_tranche_price * (1 + 1e-9)) {
+    push("tranche", `분할 매수 ${target.next_tranche_step}차 가격 ${fmt(target.next_tranche_price, c)} 도달 (계획 ${target.next_tranche_step}/3, 저가 ${fmt(low, c)}, 현재 ${fmt(quote.price, c)})`,
+      { next_tranche_price: target.next_tranche_price, next_tranche_step: target.next_tranche_step, day_low: low });
+  }
   // **부동소수 여유** (docs/infra.md 25.726, 감사 재현). 평균단가 70,000 × (1 − 0.07) 이 65,099.99999… 로 계산돼, 화면엔 "손절선 65,100원" 인데
   // 저가 65,100원에서 알림이 안 나갔다. 정확히 −10% 도 −9.999999999999998% 로 계산돼 급락이 안 났다. 경계는 "이상·이하" 가 규칙이다
   const 여유 = 1e-9;
@@ -568,7 +576,7 @@ export function actionSuspect(market: string, price: number, dbPrevClose: number
  */
 export function dropOnActionSuspect(market: string): ReadonlySet<TriggerType> {
   return new Set<TriggerType>(
-    market === "KR" ? ["buy_zone", "watch_price", "target", "stop", "spike_up", "spike_down", "volume"] : ["buy_zone", "watch_price", "target", "stop", "volume"],
+    market === "KR" ? ["buy_zone", "watch_price", "target", "stop", "spike_up", "spike_down", "volume", "tranche"] : ["buy_zone", "watch_price", "target", "stop", "volume", "tranche"],
   );
 }
 
