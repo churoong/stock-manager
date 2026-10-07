@@ -92,6 +92,9 @@ export const settingsSchema = z.object({
     kr_dividend_pct: z.number().min(0).max(50).nullable(),
     us_dividend_pct: z.number().min(0).max(50).nullable(),
     us_capital_gains_pct: z.number().min(0).max(50).nullable(),
+    // 계좌별 세후 적립 시뮬레이션에만 쓴다 (docs/etf.md 11.7, 25.1003). 옛 설정에는 없다 → null
+    pension_income_pct: z.number().min(0).max(20).nullable().default(null),
+    pension_credit_pct: z.number().min(0).max(30).nullable().default(null),
   }),
 
   /** 무위험수익률. 자동 수집 전까지 직접 넣는다. */
@@ -202,6 +205,8 @@ export const DEFAULT_SETTINGS: Settings = {
     kr_dividend_pct: null,
     us_dividend_pct: null,
     us_capital_gains_pct: null,
+    pension_income_pct: null,
+    pension_credit_pct: null,
   },
   risk_free_manual: { kr_pct: null, us_pct: null },
   alert_thresholds: { spike_pct: 5, volume_multiple: 3 },

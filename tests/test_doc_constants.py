@@ -420,6 +420,20 @@ class Test사후_분석:
         검사(REPORTS, f"진입일이 {ws.POSTMORTEM_ENTRY_DAYS[0]}~{ws.POSTMORTEM_ENTRY_DAYS[1]}일 전", "창")
 
 
+class Test세후_시뮬레이션:
+    """계좌별 세후 적립 시뮬레이션 (docs/etf.md 11.7, docs/infra.md 25.1003)."""
+
+    def test_상수(self) -> None:
+        from batch.services import tax_sim as ts
+
+        검사(ETF, f"매달 **{ts.MONTHLY_KRW // 10_000}만원**(`MONTHLY_KRW`", "월 적립액")
+        검사(ETF, f"**{ts.YEARS[0]}년·{ts.YEARS[1]}년**(`YEARS`)", "기간")
+        검사(ETF, f"연 가격 수익 **{ts.PRICE_RETURN_PCT:.0f}%**(`PRICE_RETURN_PCT`)", "가정 가격 수익")
+        검사(ETF, f"연 분배 **{ts.DIST_YIELD_PCT:.0f}%**(`DIST_YIELD_PCT`)", "가정 분배율")
+        검사(ETF, f"기본공제 **{ts.US_GAIN_DEDUCTION_KRW // 10_000}만원**(`US_GAIN_DEDUCTION_KRW`", "양도 기본공제")
+        검사(ETF, f"연 **{ts.PENSION_CREDIT_LIMIT_KRW // 10_000}만원**(`PENSION_CREDIT_LIMIT_KRW`)", "세액공제 한도")
+
+
 class Test엇갈림:
     """점수 × 수급 × 증권사 의견 엇갈림 (docs/reports.md 3.9, docs/infra.md 25.1001)."""
 
@@ -498,7 +512,7 @@ class Test밸류_분모:
     "quarterly_earnings", "short_reversal", "div_omission", "buyback", "dilution", "flow_surge",
     "gross_profitability", "robustness", "column_rot", "calibration", "self_grade", "holding_scores",
     "pick_history", "etf_accounts", "etf_tilt", "after_hours", "broker_stats", "disclosure_reaction", "luck", "postmortem",
-    "divergence",
+    "divergence", "tax_sim",
 )  # fmt: skip
 
 #: 아직 그물 밖인 모듈과 **왜 아직인지**. 하나씩 줄여 간다

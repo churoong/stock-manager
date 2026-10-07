@@ -212,6 +212,9 @@ class Test잎마다:
     "kr_dividend_pct": "batch/jobs/portfolio.py",
     "us_dividend_pct": "batch/jobs/portfolio.py",
     "us_capital_gains_pct": "batch/jobs/portfolio.py",
+    # 계좌별 세후 적립 시뮬레이션 (25.1003)
+    "pension_income_pct": "batch/services/tax_sim.py",
+    "pension_credit_pct": "batch/services/tax_sim.py",
     # 샤프·소르티노 (25.171)
     "kr_pct": "batch/jobs/metrics.py",
     "us_pct": "batch/jobs/metrics.py",

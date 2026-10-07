@@ -36,6 +36,7 @@ from batch.services import backtest as bt
 from batch.services import metrics as m
 from batch.services import portfolio as pf
 from batch.services import review as rv
+from batch.services import tax_sim
 from batch.sources import dart
 
 log = logging.getLogger("portfolio")
@@ -585,17 +586,21 @@ def run() -> int:
                  g.median_return_pct, g.avg_holding_days, g.target_rate, g.stop_rate, g.total_pnl_krw,
                  rv.CALC_VERSION, now],
             ))  # fmt: skip
+        # 계좌별 세후 적립 시뮬레이션 (docs/etf.md 11.7, 25.1003) — 세율은 설정에서만. 범위 밖이면 빈 칸으로 본다
+        세율 = db.get_setting(client, "taxes", {})
         statements.append((
             "INSERT INTO portfolio_summary (id, as_of_date, totals_json, allocation_json, metrics_json, upcoming_json,"
-            " warnings_json, trades_version, calc_version, created_at) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " warnings_json, trades_version, calc_version, created_at, tax_sim_json)"
+            " VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             " ON CONFLICT (id) DO UPDATE SET as_of_date = excluded.as_of_date, totals_json = excluded.totals_json,"
             " allocation_json = excluded.allocation_json, metrics_json = excluded.metrics_json,"
             " upcoming_json = excluded.upcoming_json, warnings_json = excluded.warnings_json,"
             " trades_version = excluded.trades_version, calc_version = excluded.calc_version,"
-            " created_at = excluded.created_at",
+            " created_at = excluded.created_at, tax_sim_json = excluded.tax_sim_json",
             [today.isoformat(), json.dumps(totals), json.dumps(alloc, ensure_ascii=False),
              json.dumps(metrics, default=str), json.dumps(upcoming, ensure_ascii=False),
-             json.dumps(warnings[:30], ensure_ascii=False), version, pf.CALC_VERSION, now],
+             json.dumps(warnings[:30], ensure_ascii=False), version, pf.CALC_VERSION, now,
+             json.dumps(tax_sim.simulate(세율), ensure_ascii=False)],
         ))  # fmt: skip
         # 삭제와 다시 넣기를 나눠 보낸다. 중간에 끊기면 요약 지문이 REBUILDING 으로 남아 화면은 "계산 중", 매도 플래그는
         # 판정을 미룬다(25.644). 다음 실행이 통째로 다시 만든다

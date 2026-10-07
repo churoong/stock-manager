@@ -47,6 +47,8 @@ from __future__ import annotations
     "kr_dividend_pct": (0, 50),
     "us_dividend_pct": (0, 50),
     "us_capital_gains_pct": (0, 50),
+    "pension_income_pct": (0, 20),
+    "pension_credit_pct": (0, 30),
     # 무위험수익률
     "kr_pct": (0, 30),
     "us_pct": (0, 30),

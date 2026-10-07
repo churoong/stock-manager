@@ -20,6 +20,7 @@ import {
   type MarketGroup,
 } from "@/lib/etf";
 import { ACCOUNTS, groupByAccount, type Account } from "@/lib/etfAccounts";
+import { taxSimLines, type TaxSim } from "@/lib/taxSim";
 import { GROUP_LABEL, WIDE_POOL_WARNING, onePerIndex, parseTilt, tiltLine, tiltSource } from "@/lib/etfTilt";
 import { readSavedCountry, saveCountry, type Country } from "@/lib/market";
 import { daysSince, formatKst, parseCriteria } from "@/lib/recommend";
@@ -326,6 +327,53 @@ const ACCOUNT_STORAGE_KEY = "longterm.account";
  * 계좌별 보기 (docs/etf.md 11.1, 25.966). 국내·미국 상장을 함께 본다 — 연금저축은 국내 상장만 살 수 있고 일반계좌는 둘 다다.
  * 순위·까닭은 배치가 적은 그대로다. 분류(국내는 기초지수)마다 그 분류 1위만 — 같은 지수의 상품을 다 늘어놓지 않는다.
  */
+/** 계좌별 세후 적립 시뮬레이션 (docs/etf.md 11.7, 25.1003). 배치가 계산한 값을 읽어 보인다. 못 읽으면 조용히 접는다 — 곁다리다 */
+function TaxSimCard() {
+  const [sim, setSim] = useState<TaxSim | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const response = await fetch("/api/etf/tax-sim");
+        const data = await response.json();
+        if (!alive) return;
+        if (!response.ok) return setNote(`세후 시뮬레이션을 읽지 못했습니다 (${data.errors?.join(", ") ?? response.status})`);
+        setSim(data.sim ?? null);
+        setNote(data.note ?? null);
+      } catch {
+        if (alive) setNote("세후 시뮬레이션을 읽지 못했습니다");
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const v = taxSimLines(sim);
+  if (!v && !note) return null;
+  return (
+    <details className="mb-3 rounded-lg border border-slate-200 px-3 py-2 text-xs dark:border-slate-800">
+      <summary className="cursor-pointer text-sm font-medium">같은 돈, 계좌에 따라 세후 얼마나 다를까</summary>
+      {v ? (
+        <div className="mt-2 leading-relaxed text-slate-600 dark:text-slate-300">
+          <p className="mb-2">{v.head}</p>
+          {v.groups.map((g) => (
+            <div key={g.years} className="mb-2">
+              <p className="font-medium">{g.years}년 뒤</p>
+              {g.lines.map((l) => <p key={l}>{l}</p>)}
+            </div>
+          ))}
+          <p className="text-slate-500">
+            세율은 설정의 값입니다. 금융소득종합과세·건강보험료·연금 수령 한도·환율 변동은 넣지 않았습니다.
+          </p>
+        </div>
+      ) : (
+        <p className="mt-2 text-slate-500">{note}</p>
+      )}
+    </details>
+  );
+}
+
 function AccountEtfList() {
   const [d0] = useState(() => peekCachedJson<CoreResponse>("/api/etf", { method: "POST" }));
   const [picked, setPicked] = useState<EtfRow[]>(d0?.picked ?? []);
@@ -406,6 +454,7 @@ function AccountEtfList() {
         순서는 계좌마다 세금이 어디서 갈리는지로 정했습니다. 세율은 설정의 값을 인용만 합니다 —
         제도와 세율은 바뀔 수 있으니 가입한 금융사에서 확인하세요. 국내·미국 상장을 함께 봅니다.
       </p>
+      <TaxSimCard />
       {view.missing > 0 && view.tiers.length === 0 ? (
         <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950 dark:text-amber-200">
           계좌별 순위는 다음 월 판정부터 나옵니다 — 지금 판정은 이 기능 전에 냈습니다.

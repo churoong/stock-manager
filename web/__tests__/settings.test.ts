@@ -240,6 +240,8 @@ describe("쓰이지 않는 설정 칸에는 사유가 있다", () => {
     us_dividend_pct: "web: 배당 폼의 원천징수 채우기 (withholdingRate)",
     // 25.617 부터 연간 추정에 쓴다 — 사유 표에 "기록용" 으로 남아 화면이 거짓말을 했다 (25.629)
     us_capital_gains_pct: "batch: portfolio.us_capital_gains_estimates (연간 추정·참고값)",
+    pension_income_pct: "batch: tax_sim.simulate (ETF 계좌별 세후 적립 시뮬레이션, 25.1003)",
+    pension_credit_pct: "batch: tax_sim.simulate (ETF 계좌별 세후 적립 시뮬레이션, 25.1003)",
   };
 
   it("모든 세율 칸은 쓰이거나 사유가 있다", () => {
