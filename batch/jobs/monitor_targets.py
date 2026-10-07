@@ -179,21 +179,33 @@ TRANCHE_PLAN_DAYS = 30
 
 
 def next_tranche(client: TursoClient, stock_id: int, today: date) -> tuple[float | None, int | None, str | None]:
-    """(다음 차수 가격, 차수, 계획 기준일). 최근 신호의 분할 계획을 신호 뒤 매수 기록 수로 이어 본다
+    """(다음 차수 가격, 차수, 계획 기준일). 1차를 산 날의 신호 계획을 그 뒤 매수 기록 수로 이어 본다
     (docs/intraday.md 2절 tranche).
 
-    매수 0번이면(계획 전에 산 보유) 이어 보지 않는다 — 1차를 산 사람만 2·3차를 기다린다. 3번 이상이면 끝났다."""
-    rows = client.execute(
+    **기준 신호는 "신호 뒤 첫 매수일 이하의 가장 최근 신호" 로 고정한다** (25.1005, 교차검증). 신호는 보유 중에도
+    매일 다시 써지는데, 예전에는 가장 최근 신호일을 기준으로 삼아 기준일이 매일 밀렸고, 1차 매수가 기준일 앞으로
+    빠져 매수 0번 → 알림 꺼짐이 됐다 — 2차가 필요한 바로 그때.
+    창(`TRANCHE_PLAN_DAYS`) 안 첫 신호보다 앞선 매수는 계획 전 보유라 세지 않는다.
+    매수 0번이면 잇지 않고, 3번 이상이면 끝났다."""
+    신호 = client.execute(
         "SELECT as_of_date, tranche_plan FROM signals WHERE stock_id = ? AND as_of_date >= ?"
-        " ORDER BY as_of_date DESC, CASE horizon WHEN 'short' THEN 0 WHEN 'mid' THEN 1 ELSE 2 END LIMIT 1",
+        " ORDER BY as_of_date, CASE horizon WHEN 'short' THEN 0 WHEN 'mid' THEN 1 ELSE 2 END, calc_version DESC",
         [stock_id, (today - timedelta(days=TRANCHE_PLAN_DAYS)).isoformat()],
     ).rows
-    if not rows:
+    if not 신호:
         return None, None, None
-    기준일, 계획 = str(rows[0][0]), json.loads(rows[0][1] or "[]")
-    산 = int(client.execute(
-        "SELECT COUNT(*) FROM trades WHERE stock_id = ? AND side = 'buy' AND trade_date >= ?", [stock_id, 기준일]
-    ).scalar() or 0)  # fmt: skip
+    날별: dict[str, str] = {}
+    for d, plan in 신호:
+        날별.setdefault(str(d), plan)  # 같은 날은 단기 → 중기 → 장기, 큰 calc_version 이 먼저
+    매수 = [str(r[0]) for r in client.execute(
+        "SELECT trade_date FROM trades WHERE stock_id = ? AND side = 'buy' AND trade_date >= ? ORDER BY trade_date",
+        [stock_id, min(날별)],
+    ).rows]  # fmt: skip
+    if not 매수:
+        return None, None, None
+    기준일 = max(d for d in 날별 if d <= 매수[0])  # 매수는 첫 신호일부터 읽었으니 늘 하나는 있다
+    계획 = json.loads(날별[기준일] or "[]")
+    산 = sum(1 for d in 매수 if d >= 기준일)
     if 산 < 1 or 산 >= len(계획):
         return None, None, None
     다음 = 계획[산]

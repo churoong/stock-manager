@@ -664,3 +664,30 @@ def test_분할_매수_다음_차수는_신호_뒤_매수_횟수로_이어_본�
     assert job.next_tranche(mem, 1, today) == (None, None, None)  # type: ignore[arg-type]
     # 계획이 TRANCHE_PLAN_DAYS 보다 오래되면 잇지 않는다
     assert job.next_tranche(mem, 1, date(2026, 11, 1)) == (None, None, None)  # type: ignore[arg-type]
+
+
+def test_신호가_매일_다시_써져도_1차를_산_날의_계획을_잇는다() -> None:
+    """교차검증(25.1005): 기준일이 가장 최근 신호일이면 매일 밀려 1차 매수가 빠지고 알림이 꺼졌다."""
+    from batch.core import db
+
+    mem = MemClient()
+    db.apply_migrations(mem)  # type: ignore[arg-type]
+    c = mem.conn
+    c.execute(
+        "INSERT INTO stocks (id, ticker, market, country, currency, source, fetched_at)"
+        " VALUES (1, '005930', 'KOSPI', 'KR', 'KRW', 't', 't')"
+    )
+    for day, p1 in (("2026-09-10", 100.0), ("2026-09-11", 98.0), ("2026-09-14", 97.0)):
+        계획 = [{"step": i, "ratio": 1 / 3, "price": p1 - (i - 1) * 5, "amount": 1} for i in (1, 2, 3)]
+        c.execute(
+            "INSERT INTO signals (stock_id, as_of_date, horizon, signal_type, buy_zone_low, buy_zone_high, currency,"
+            " tranche_plan, size_reduction, rationale_text, rationale_data, calc_version, created_at)"
+            " VALUES (1, ?, 'short', 'buy', 95, 100, 'KRW', ?, 0, 'r', '{}', 'v', 't')",
+            [day, json.dumps(계획)],
+        )
+    c.execute(
+        "INSERT INTO trades (id, stock_id, side, trade_date, price, quantity, currency, fx_rate, fx_rate_source,"
+        " created_at, updated_at) VALUES (1, 1, 'buy', '2026-09-11', 98, 1, 'KRW', 1, 'none', 't', 't')"
+    )
+    # 9/11 신호(1차 98 → 2차 93)를 9/15 에도 잇는다 — 9/14 신호로 밀리지 않는다
+    assert job.next_tranche(mem, 1, date(2026, 9, 15)) == (93.0, 2, "2026-09-11")  # type: ignore[arg-type]
