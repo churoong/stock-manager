@@ -656,3 +656,20 @@ export function exposureText(m: unknown): { invested: string; holdings: string; 
     first: typeof o.first_invested === "string" ? o.first_invested : null,
   };
 }
+
+
+/**
+ * 우연일 확률 (docs/backtest.md 9장, 25.997) — 배치가 `metrics_json.luck` 에 싣는다(1 − DSR). 그 전 실행·벤치마크에는 없다.
+ * 칸은 짧게, 펼친 설명(title)에 근거를 적는다.
+ */
+export function luckText(m: unknown): { cell: string; title: string | null } {
+  const o = (m && typeof m === "object" ? m : {}) as Record<string, unknown>;
+  const l = (o.luck && typeof o.luck === "object" ? o.luck : null) as Record<string, unknown> | null;
+  if (!l) return { cell: "-", title: null };
+  if (typeof l.luck_pct !== "number") return { cell: "판정 안 함", title: typeof l.verdict === "string" ? l.verdict : null };
+  const num = (k: string) => (typeof l[k] === "number" ? (l[k] as number) : NaN);
+  return {
+    cell: `${l.luck_pct.toFixed(0)}%`,
+    title: `DSR — 같은 실행에서 시험한 전략 ${num("n_trials")}개, ${num("months")}개월. 월 초과 샤프 ${num("sr_monthly").toFixed(2)} vs 우연 문턱 ${num("sr_star").toFixed(2)}. PSR(문턱 0) ${(num("psr") * 100).toFixed(0)}%`,
+  };
+}

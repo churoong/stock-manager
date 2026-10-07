@@ -397,6 +397,16 @@ class Test공시_반응:
         검사(REACTION, f"매일 지난 {job.DAILY_DAYS}일을 겹쳐", "평소 겹쳐 받는 기간")
 
 
+class Test우연일_확률:
+    """운인가 실력인가 (docs/backtest.md 9장, docs/infra.md 25.997)."""
+
+    def test_상수(self) -> None:
+        from batch.services import luck
+
+        검사(BACKTEST, f"**{luck.MIN_MONTHS}개월 미만이면 판정하지 않는다**", "판정 최소 기간")
+        검사(BACKTEST, f"γ = {luck.EULER_GAMMA:.4f}(오일러 상수)", "오일러 상수")
+
+
 class Test시간외:
     """보유 종목 시간외 단일가 알림 (docs/intraday.md 1.2, docs/infra.md 25.992)."""
 
@@ -462,7 +472,7 @@ class Test밸류_분모:
     "valuation_band", "outcomes", "stress", "sell_flags", "factor_ic", "sector_momentum", "earnings_quality", "share_issuance",
     "quarterly_earnings", "short_reversal", "div_omission", "buyback", "dilution", "flow_surge",
     "gross_profitability", "robustness", "column_rot", "calibration", "self_grade", "holding_scores",
-    "pick_history", "etf_accounts", "etf_tilt", "after_hours", "broker_stats", "disclosure_reaction",
+    "pick_history", "etf_accounts", "etf_tilt", "after_hours", "broker_stats", "disclosure_reaction", "luck",
 )  # fmt: skip
 
 #: 아직 그물 밖인 모듈과 **왜 아직인지**. 하나씩 줄여 간다

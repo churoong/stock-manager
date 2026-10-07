@@ -6,7 +6,8 @@ import MarketTabs from "@/components/MarketTabs";
 import {
   WHAT_OPTIONS, costDefaultsNote, costLine, dividendNote, awaitingRunner, isRunning, recentlyFinished, stuckRunNote, mergeWarnings, readStressJson, metricNumber, progressText, strategyKind, strategyLabel,
   type BacktestRun, type BatchRunRow, type CurvePoint, type StressRun, type StressWindow,
-  exposureText, groupTags, staleVersionNote,
+  exposureText,
+  luckText, groupTags, staleVersionNote,
   stressVersionNote,
 } from "@/lib/backtest";
 import { readJson } from "@/lib/http";
@@ -376,6 +377,8 @@ function ResultTable({ runs, bench }: { runs: BacktestRun[]; bench: BacktestRun 
           ["평균 보유", exposureText(m).holdings],
           // 첫 투자일은 폰에서도 보인다(표에서는 칸의 title) — 25.789, 교차검증
           ["첫 투자", exposureText(m).first ?? "-"],
+          // 운인가 실력인가 (25.997)
+          ["우연일 확률", isBench ? "기준" : luckText(m).cell],
         ];
         return (
           <li key={r.id} className={`rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-800 ${isBench ? "bg-slate-50 dark:bg-slate-900" : ""}`}>
@@ -414,6 +417,7 @@ function ResultTable({ runs, bench }: { runs: BacktestRun[]; bench: BacktestRun 
             <th className="px-3 py-1.5 font-medium">회전율</th>
             <th className="px-3 py-1.5 font-medium">투자한 달</th>
             <th className="px-3 py-1.5 font-medium">평균 보유</th>
+            <th className="px-3 py-1.5 font-medium" title="이 초과수익이 우연일 확률 — 디플레이티드 샤프 비율(시험한 전략 수를 감안)">우연일 확률</th>
           </tr>
         </thead>
         <tbody>
@@ -437,6 +441,7 @@ function ResultTable({ runs, bench }: { runs: BacktestRun[]; bench: BacktestRun 
                 <td className="px-3 py-1.5">{r.turnover_avg === null ? "-" : `${(r.turnover_avg * 100).toFixed(0)}%`}</td>
                 <td className="px-3 py-1.5" title={exposureText(m).first ? `첫 투자 ${exposureText(m).first}` : undefined}>{exposureText(m).invested}</td>
                 <td className="px-3 py-1.5">{exposureText(m).holdings}</td>
+                <td className="px-3 py-1.5" title={luckText(m).title ?? undefined}>{isBench ? "기준" : luckText(m).cell}</td>
               </tr>
             );
           })}
@@ -445,6 +450,7 @@ function ResultTable({ runs, bench }: { runs: BacktestRun[]; bench: BacktestRun 
       <p className="px-3 py-1.5 text-[11px] text-slate-500">
         초과 CAGR·이긴 달은 벤치마크({bench ? strategyLabel(bench.strategy) : "없음"}) 대비입니다. {dividendNote(runs[0]?.market ?? "KR")}
         팩터 하나짜리 줄이 성과요인분석입니다. 투자한 달이 절반 미만이거나 평균 보유가 3종목 미만이면 그 수익은 표본이 적어 믿지 않습니다.
+        우연일 확률은 벤치마크 대비 월 초과수익의 샤프를, 같은 실행에서 시험한 전략 수만큼 높인 문턱과 견준 값입니다(디플레이티드 샤프 비율) — 낮을수록 실력에 가깝습니다. 24개월 미만이면 판정하지 않습니다.
       </p>
     </div>
     </>

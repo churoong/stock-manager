@@ -50,12 +50,12 @@ from batch.services import factor_ab as fab
 from batch.services import factor_ic as fic
 from batch.services import flow_surge as fs_
 from batch.services import gross_profitability as gp
+from batch.services import luck, sectors, trend
 from batch.services import metrics as m
 from batch.services import pit_universe as pit
 from batch.services import quarterly_earnings as qe
 from batch.services import scoring as sc
 from batch.services import sector_momentum as secmom
-from batch.services import sectors, trend
 from batch.services import share_issuance as si
 from batch.services import short_reversal as sr
 from batch.services import signals as sg
@@ -1293,6 +1293,7 @@ _RUN_COLS = (
 def store_run(
     client: TursoClient, market: str, strategy: str, result: bt.BacktestResult,
     summary: bt.Summary, top_n: int, group_id: str, warnings: list[str], now: str,
+    운판정: dict | None = None,
 ) -> int:
     노출 = exposure_fields(result)
     노출말 = exposure_warning(strategy, 노출)
@@ -1300,7 +1301,7 @@ def store_run(
         market, strategy, result.curve[0][0], result.curve[-1][0], top_n, "monthly",
         json.dumps(asdict(result.costs)), len(result.rebalances),
         summary.final_equity, summary.turnover_avg, summary.excess_cagr, summary.win_rate,
-        json.dumps({**asdict(summary.metrics), **노출}, default=str),
+        json.dumps({**asdict(summary.metrics), **노출, **({"luck": 운판정} if 운판정 else {})}, default=str),
         json.dumps(sorted(set(result.warnings + warnings + ([노출말] if 노출말 else []))), ensure_ascii=False),
         # 판 **둘**을 남긴다 (2026-09-22, docs/infra.md 25.101).
         # `calc_version` 은 엔진 판(리밸런스·비용·곡선), `scoring_calc_version` 은
@@ -1601,17 +1602,25 @@ def run(
         # 설정 화면은 "샤프지수 계산에 씁니다" 라고 하는데 백테스트에는 아무 효과가 없었다.
         # 종목 성과와 같은 함수로 읽는다(0 은 0%, 없거나 범위 밖이면 모름)
         무위험 = risk_free_with_warning(client, country, warnings)
+        # 운인가 실력인가 (docs/backtest.md 9장, 25.997) — 같은 실행에서 시험한 전략들을 한꺼번에 판정한다.
+        # 비용 없는 사본(`*_no_cost`)은 같은 전략이라 시도 수에 넣지 않는다
+        벤치월 = luck.monthly_returns(bench.curve)
+        운 = luck.judge({
+            name: luck.excess_series(luck.monthly_returns(r.curve), 벤치월)
+            for name, r in results.items() if name != "benchmark" and not name.endswith("_no_cost")
+        })  # fmt: skip
         stored = 0
         for strategy, result in results.items():
             summary = bt.summarize(result, None if strategy == "benchmark" else bench, risk_free_annual=무위험)
             # 벤치마크에는 추세 오버레이를 곱하지 않는다 — "추세 필터 켬" 을 붙이면 비교 기준을 오해한다 (25.471)
             그경고 = [w for w in warnings if not (strategy == "benchmark" and w == WARN_TREND_ON)]
-            store_run(client, market, strategy, result, summary, top_n, group_id, 그경고, now)
+            store_run(client, market, strategy, result, summary, top_n, group_id, 그경고, now, 운.get(strategy))
             stored += 1
             mt = summary.metrics
             print(
                 f"  요약 {strategy:18s} CAGR {_pct(mt.cagr)}  MDD {_pct(mt.mdd)}  샤프 {_fmt(mt.sharpe)}"
                 f"  초과 {_pct(summary.excess_cagr)}  이긴 달 {_pct(summary.win_rate)}"
+                + (f"  {luck.line(운[strategy])}" if strategy in 운 else "")
             )
 
         실제_리밸런스 = sum(1 for d in rebalance_dates if d != dates[-1] or len(dates) == 1)
