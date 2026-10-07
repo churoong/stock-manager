@@ -19,9 +19,13 @@ export async function POST(request: Request) {
   if (!tokenMatches(request.headers.get("x-telegram-bot-api-secret-token"), secret)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  const update = (await request.json().catch(() => null)) as { message?: { text?: string; chat?: { id?: number | string } } } | null;
+  const update = (await request.json().catch(() => null)) as {
+    message?: { text?: string; chat?: { id?: number | string; type?: string } };
+  } | null;
   const message = update?.message;
   if (!message?.text || String(message.chat?.id ?? "") !== chatId) return NextResponse.json({ ok: true });
+  // **개인 대화방에만 답한다** (25.1008, 교차검증). `TELEGRAM_CHAT_ID` 가 단체방이면 그 방 누구나 /보유 로 손익·비중을 받는다
+  if (message.chat?.type !== "private") return NextResponse.json({ ok: true });
   const query = parseQuery(message.text);
   if (!query) return NextResponse.json({ ok: true });
   let text: string;

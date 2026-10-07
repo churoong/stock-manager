@@ -28,6 +28,7 @@ import pytest
 
 #: 예시에 **없어도 되는** 이름. 사람이 채우는 값이 아니라 플랫폼이 넣어 준다
 플랫폼이_주는_것 = {
+    "VERCEL_ENV": "Vercel 이 배포마다 넣는다(production·preview·development) — 텔레그램 웹훅 켜기를 운영 배포로 막는다 (25.1007)",
     "GITHUB_ACTIONS": "러너가 항상 넣는다. Actions 안인지 밖인지 가리는 데 쓴다",
     "GITHUB_EVENT_NAME": "무엇이 이 실행을 깨웠는가 (schedule · repository_dispatch …)",
     "GITHUB_OUTPUT": "스텝끼리 값을 넘기는 파일 경로. 러너가 만든다",

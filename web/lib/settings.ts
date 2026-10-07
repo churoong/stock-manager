@@ -301,7 +301,9 @@ function 저장값_맞춤(key: keyof Settings, 값: unknown): { 값: unknown; �
  */
 function 칸별로_맞춤(기본: unknown, 값: unknown): { 값: unknown; 맞음: boolean } {
   if (기본 === null) {
-    if (값 === null) return { 값: null, 맞음: true };
+    // **칸이 아예 없으면 "안 넣음" 이다** (25.1007, 교차검증) — 나중에 더한 칸(예: 연금 세율 25.1003)이 옛 저장값에 없다고
+    // "읽지 못한 칸" 경고를 띄웠다. 배치 `잎마다` 도 없는 잎을 경고 없이 None 으로 본다
+    if (값 === null || 값 === undefined) return { 값: null, 맞음: true };
     return typeof 값 === "number" && Number.isFinite(값) ? { 값, 맞음: true } : { 값: null, 맞음: false };
   }
   if (typeof 기본 === "object" && !Array.isArray(기본)) {

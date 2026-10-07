@@ -85,11 +85,11 @@ describe("웹훅 — 비밀 머리글과 본인 대화방", () => {
     vi.doUnmock("@/lib/db");
   });
 
-  function req(secret: string | null, chat: number, text = "/보유") {
+  function req(secret: string | null, chat: number, text = "/보유", type = "private") {
     return new Request("http://x/api/telegram/webhook", {
       method: "POST",
       headers: secret ? { "x-telegram-bot-api-secret-token": secret } : {},
-      body: JSON.stringify({ message: { text, chat: { id: chat } } }),
+      body: JSON.stringify({ message: { text, chat: { id: chat, type } } }),
     });
   }
 
@@ -101,6 +101,21 @@ describe("웹훅 — 비밀 머리글과 본인 대화방", () => {
     expect(sent).toEqual([]);
     expect((await POST(req("s".repeat(20), 42))).status).toBe(200);
     expect(sent).toEqual(["보유 종목이 없습니다"]);
+  });
+
+  it("본인 대화방 번호여도 단체방이면 답하지 않는다 (25.1008)", async () => {
+    const { POST } = await import("@/app/api/telegram/webhook/route");
+    expect((await POST(req("s".repeat(20), 42, "/보유", "group"))).status).toBe(200);
+    expect(sent).toEqual([]);
+  });
+
+  it("미리보기 배포에서는 켜지 않는다 (25.1008)", async () => {
+    vi.stubEnv("TELEGRAM_BOT_TOKEN", "t");
+    vi.stubEnv("VERCEL_ENV", "preview");
+    const { POST } = await import("@/app/api/telegram/webhook-setup/route");
+    const r = await POST(new Request("https://preview.example/api/telegram/webhook-setup", { method: "POST", body: JSON.stringify({ action: "on" }) }));
+    expect(r.status).toBe(400);
+    expect((await r.json()).error).toContain("운영 배포에서만");
   });
 
   it("비밀값 환경변수가 없으면 경로가 없는 것처럼 404", async () => {
