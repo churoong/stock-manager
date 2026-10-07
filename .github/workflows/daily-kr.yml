@@ -29,6 +29,7 @@ on:
 permissions:
   contents: read
   issues: write # 기록을 이슈 코멘트로 내보낸다 (docs/infra.md 25.17)
+  actions: write # 예약 워크플로를 다시 켠다 (docs/infra.md 25.981)
 
 concurrency:
   group: daily-kr
@@ -144,3 +145,9 @@ jobs:
         with:
           path: .price-replica
           key: price-replica-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: 예약 워크플로 살려 두기 (공개 저장소 60일 무활동 꺼짐, docs/infra.md 25.981)
+        if: ${{ !cancelled() }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python scripts/keepalive_workflows.py

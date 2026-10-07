@@ -87,3 +87,4 @@ GitHub 은 시크릿 값을 다시 보여 주지 않는다. 옛 저장소에서 
   포트폴리오 재계산(평가액·손익·주의)과 매도 플래그(종목별 근거) — 은 공개 저장소에서 건수만 찍는다. 나머지(점수·신호·감시 대상·ETF·적립 종목)는
   건수와 **시장 데이터**(종목명·점수)만 찍는다 — 보유·금액은 없다. 시세 숫자를 대량으로 찍는 곳은 없다 `[확인필요: 옮긴 뒤 첫 실행 로그를 한 번 본다]`
 - 공개 저장소의 워크플로는 남이 포크해 PR 을 열 수 있다. `pull_request_target` 은 쓰지 않는다(지금 없다). 시크릿은 포크 PR 에 넘어가지 않는다
+- 공개 저장소는 **60일 무활동이면 예약 워크플로를 끈다**. 일일 배치(국내·미국)가 끝날 때마다 다시 켠다(`scripts/keepalive_workflows.py`, infra 25.981). Actions 탭에 "This scheduled workflow is disabled because there hasn't been activity…" 가 보이면 Enable workflow 를 누른다

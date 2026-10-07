@@ -54,9 +54,10 @@ def _워크플로들() -> list[str]:
             continue
         for 잡 in yaml.safe_load(글)["jobs"].values():
             # DB 를 쓰는 파이썬만 센다 — 로그 게시(publish_output)와 고정 단계 자신은 빼야 한다 (25.481, 교차검증:
-            # 그것까지 세어 파이썬이 하나뿐인 daily-kr·us 가 대상이 됐다). 출력 받기(ops_tee, 25.978)도 DB 를 쓰지
+            # 그것까지 세어 파이썬이 하나뿐인 daily-kr·us 가 대상이 됐다). 출력 받기(ops_tee, 25.978)·워크플로 살려
+            # 두기(keepalive_workflows, 25.981)도 DB 를 쓰지
             # 않는다
-            패턴 = r"python (?:-m batch\.(?!core\.client)|scripts/(?!publish_output|ops_tee))"
+            패턴 = r"python (?:-m batch\.(?!core\.client)|scripts/(?!publish_output|ops_tee|keepalive_workflows))"
             수 = sum(len(re.findall(패턴, str(s.get("run", "")))) for s in 잡.get("steps", []))
             if 수 >= 2:
                 나온것.append(p.name)
@@ -80,7 +81,7 @@ def test_파이썬을_여럿_부르는_워크플로는_첫_단계에서_고정�
     실행들 = [str(s.get("run", "")) for s in 단계들]
     고정 = next(i for i, r in enumerate(실행들) if "batch.core.client --pin" in r and "GITHUB_ENV" in r)
     첫_작업 = next(i for i, r in enumerate(실행들)
-                 if re.search(r"python (?:-m batch\.(?!core\.client)|scripts/(?!ops_tee))", r))  # fmt: skip
+                 if re.search(r"python (?:-m batch\.(?!core\.client)|scripts/(?!ops_tee|keepalive_workflows))", r))  # fmt: skip
     assert 고정 < 첫_작업
     # **고정 단계가 DB_BACKEND 를 봐야 한다** (25.481, 교차검증). 단계 env 에만 있으면 고정 단계는 기본값(turso)으로
     # 판정한다
