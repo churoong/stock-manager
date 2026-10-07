@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from batch.services import disclosure_reaction as dr
 
 
@@ -36,3 +38,42 @@ def test_요약과_한_줄은_웹과_같은_문장() -> None:
     # web/__tests__/disclosureReaction996.test.ts 의 기대 문장과 같다
     assert dr.line(b) == "자기주식 취득 공시 뒤 5거래일 지수 대비 중앙값 +0.8% · 평균 +1.2% · 오른 비율 56% (120건)"
     assert dr.line({**b, "n": dr.MIN_N - 1}) is None
+
+
+def test_시장_전체_공시는_키를_환경에서_읽고_쪽을_넘긴다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """운영 첫 실행이 `config.DART_API_KEY`(없는 이름)로 AttributeError 를 냈다 — 함수를 끝까지 돌려 본다 (25.1000)."""
+    from batch.sources import dart_disclosures as dd
+
+    monkeypatch.delenv("DART_API_KEY", raising=False)
+    assert dd.fetch_market_day("20261006", "B") == ([], 0, "DART_API_KEY 없음")
+
+    monkeypatch.setenv("DART_API_KEY", "k")
+    쪽들 = {
+        1: {"status": "000", "total_page": 2, "list": [
+            {"rcept_no": "20261006000001", "report_nm": "자기주식취득결정", "stock_code": "005930", "corp_code": "1"},
+            {"rcept_no": "20261006000002", "report_nm": "비상장", "stock_code": "", "corp_code": "2"},
+        ]},
+        2: {"status": "000", "total_page": 2, "list": [
+            {"rcept_no": "20261006000003", "report_nm": "유상증자결정", "stock_code": "000660", "corp_code": "3"},
+        ]},
+    }  # fmt: skip
+    받은: list[dict] = []
+
+    class 응답:
+        status_code = 200
+
+        def __init__(self, body: dict) -> None:
+            self.body = body
+
+        def json(self) -> dict:
+            return self.body
+
+    def 가짜(url: str, params: dict, timeout: float) -> 응답:
+        받은.append(params)
+        return 응답(쪽들[params["page_no"]])
+
+    monkeypatch.setattr(dd.requests, "get", 가짜)
+    got, calls, err = dd.fetch_market_day("20261006", "B")
+    assert err is None and calls == 2
+    assert [d.stock_code for d in got] == ["005930", "000660"]
+    assert 받은[0]["crtfc_key"] == "k" and 받은[0]["pblntf_ty"] == "B"

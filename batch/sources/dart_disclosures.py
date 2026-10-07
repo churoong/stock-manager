@@ -181,7 +181,7 @@ def parse_market(payload: dict[str, Any], kind: str) -> list[MarketDisclosure]:
 
 def fetch_market_day(day: str, kind: str) -> tuple[list[MarketDisclosure], int, str | None]:
     """하루치(YYYYMMDD) 시장 전체 공시 한 종류. 반환 (목록, 호출 수, 오류)."""
-    key = config.DART_API_KEY
+    key = config.get("DART_API_KEY")
     if not key:
         return [], 0, "DART_API_KEY 없음"
     out: list[MarketDisclosure] = []
