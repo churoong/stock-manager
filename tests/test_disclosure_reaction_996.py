@@ -77,3 +77,44 @@ def test_시장_전체_공시는_키를_환경에서_읽고_쪽을_넘긴다(mon
     assert err is None and calls == 2
     assert [d.stock_code for d in got] == ["005930", "000660"]
     assert 받은[0]["crtfc_key"] == "k" and 받은[0]["pblntf_ty"] == "B"
+
+
+def test_시장_전체_공시가_쪽_상한에서_잘리면_말한다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """교차검증(25.1006): 예전에는 20쪽에서 조용히 성공으로 끝났다."""
+    from batch.sources import dart_disclosures as dd
+
+    monkeypatch.setenv("DART_API_KEY", "k")
+    monkeypatch.setattr(dd, "MARKET_MAX_PAGES", 2)
+
+    class 응답:
+        status_code = 200
+
+        def json(self) -> dict:
+            return {"status": "000", "total_page": 9, "list": []}
+
+    monkeypatch.setattr(dd.requests, "get", lambda *a, **k: 응답())
+    got, calls, err = dd.fetch_market_day("20261006", "I")
+    assert calls == 2 and err == "잘림: 20261006 I 9쪽 중 2쪽"
+
+
+def test_1년_모으기가_멈추면_계산하지_않아_다음에_다시_받는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """교차검증(25.1006): 멈춘 채 계산하면 표가 차서 다음 실행이 7일만 받았다."""
+    from batch.core import db
+    from batch.jobs import disclosure_reaction as job
+    from tests.test_portfolio_job import MemClient
+
+    mem = MemClient()
+    db.apply_migrations(mem)  # type: ignore[arg-type]
+    monkeypatch.setattr(job, "TursoClient", lambda: mem)
+    받은날수: list[int] = []
+
+    def 가짜_모으기(client, today, days):  # noqa: ANN001, ANN202
+        받은날수.append(days)
+        return {"days": days, "calls": 1, "rows": 0, "error": "DART 일일 한도 — 나머지 날은 다음 실행에"}
+
+    계산: list[int] = []
+    monkeypatch.setattr(job, "collect", 가짜_모으기)
+    monkeypatch.setattr(job, "compute", lambda client, today: 계산.append(1) or {"events": 1})
+    assert job.run() == 0
+    assert job.run() == 0
+    assert 받은날수 == [job.BACKFILL_DAYS, job.BACKFILL_DAYS] and 계산 == []

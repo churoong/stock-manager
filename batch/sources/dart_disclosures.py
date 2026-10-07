@@ -155,6 +155,9 @@ def fetch_list(corp_code: str, bgn_de: str, end_de: str) -> FetchResult:
 
 #: 시장 전체로 받는 공시 종류 — 주요사항보고(B)·거래소공시(I). 정기공시·지분공시까지 받으면 하루 수천 건이다
 MARKET_KINDS = ("B", "I")
+#: 시장 전체 하루치에서 넘길 최대 쪽 수 — 100건 × 50쪽 = 5,000건. 하루 두 번(B·I)만 불러 상한을 넉넉히 둔다.
+#: 넘으면 잘렸다고 말한다 (25.1006). 실측: 2025-10~2026-10 1년 29,171건, 하루 평균 약 120건
+MARKET_MAX_PAGES = 50
 
 
 @dataclass(frozen=True)
@@ -203,6 +206,11 @@ def fetch_market_day(day: str, kind: str) -> tuple[list[MarketDisclosure], int, 
         if status != STATUS_OK:
             return out, page, f"상태 {status}: {payload.get('message')}"
         out += parse_market(payload, kind)
-        if page >= int(payload.get("total_page") or 1) or page >= MAX_PAGES:
+        total_page = int(payload.get("total_page") or 1)
+        if page >= total_page:
             return out, page, None
+        if page >= MARKET_MAX_PAGES:
+            # **잘렸다고 말한다** (25.1006, 교차검증) — 회사별 `fetch_list` 처럼. 예전에는 조용히 성공이었다
+            log.warning("시장 전체 공시 %s %s: %d쪽 중 %d쪽만 받음", day, kind, total_page, page)
+            return out, page, f"잘림: {day} {kind} {total_page}쪽 중 {page}쪽"
         page += 1

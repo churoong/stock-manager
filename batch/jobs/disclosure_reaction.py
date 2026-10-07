@@ -135,7 +135,15 @@ def run(days: int | None = None, force: bool = False) -> int:
         run_id = db.start_batch_run(client, job_name=JOB_NAME, market="KR", trade_date=today.isoformat())
         비었나 = client.execute("SELECT COUNT(*) FROM (SELECT 1 FROM disclosure_reaction LIMIT 1)").scalar() == 0
         모음 = collect(client, today, days or (BACKFILL_DAYS if 비었나 else DAILY_DAYS))
-        계산 = compute(client, today) if (force or 비었나 or today.weekday() == WEEKDAY) else {"skipped": "금요일 아님"}
+        # **1년 모으기가 중간에 멈췄으면 계산하지 않는다** (25.1006, 교차검증). 계산하면 표가 차서 다음 실행이
+        # "비지 않았다" 로 보고 7일만 받는다 — 멈춘 날 뒤 몇 달이 영구히 빈다. 표를 비워 두면 다음 실행이 1년을
+        # 다시 받는다(같은 접수번호는 한 번)
+        if 비었나 and 모음.get("error") and not force:
+            계산: dict = {"skipped": "1년 모으기가 끝나지 않음 — 다음 실행이 다시 받는다"}
+        elif force or 비었나 or today.weekday() == WEEKDAY:
+            계산 = compute(client, today)
+        else:
+            계산 = {"skipped": "금요일 아님"}
         status = "partial" if 모음.get("error") else "success"
         db.finish_batch_run(client, run_id, status=status, step_log={"collect": 모음, "compute": 계산},
                             error_text=모음.get("error"))  # fmt: skip
