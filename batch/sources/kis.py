@@ -113,8 +113,13 @@ def holidays(client, base: date) -> tuple[list[DayStatus], int]:
 # ---------------------------------------------------------------------------------------------------------------------
 
 Q = "/uapi/domestic-stock/v1/quotations/"
-#: 실전 REST 초당 20건(공식). 여유를 두고 15건
-PER_SECOND = 15
+#: 실전 REST 초당 20건(공식). 2026-10-07 첫 수집(초당 15건, 스레드 8)에서 3,504회 중 80회가
+#: EGW00201(초당 거래건수 초과)이었다
+#: — KIS 쪽 집계 창이 우리 1초 창과 어긋나는 것으로 본다. 10건으로 낮추고 걸리면 쉬었다 다시 묻는다 (25.993)
+PER_SECOND = 10
+#: 초당 한도 오류 코드와 다시 묻는 횟수
+RATE_LIMIT_CODE = "EGW00201"
+RATE_RETRY = 2
 
 
 def _int(v: object) -> int | None:
@@ -247,14 +252,22 @@ class QuoteClient:
             time.sleep(0.05)
 
     def get(self, path: str, tr: str, params: dict[str, str]) -> object:
-        self._gate()
-        r = self.session.get(BASE + path, params=params, headers=self.head | {"tr_id": tr}, timeout=TIMEOUT)
-        try:
-            body = r.json()
-        except ValueError as exc:
-            raise KisFailed(f"KIS HTTP {r.status_code} JSON 아님") from exc
-        if r.status_code != 200 and not isinstance(body, dict):
-            raise KisFailed(f"KIS HTTP {r.status_code}")
+        import time
+
+        for attempt in range(RATE_RETRY + 1):
+            self._gate()
+            r = self.session.get(BASE + path, params=params, headers=self.head | {"tr_id": tr}, timeout=TIMEOUT)
+            try:
+                body = r.json()
+            except ValueError as exc:
+                raise KisFailed(f"KIS HTTP {r.status_code} JSON 아님") from exc
+            if r.status_code != 200 and not isinstance(body, dict):
+                raise KisFailed(f"KIS HTTP {r.status_code}")
+            # 초당 한도(EGW00201)면 잠깐 쉬고 다시 — 다른 오류는 그대로 돌려 부른 쪽이 판단한다 (25.993)
+            if isinstance(body, dict) and body.get("msg_cd") == RATE_LIMIT_CODE and attempt < RATE_RETRY:
+                time.sleep(1.0 + attempt)
+                continue
+            return body
         return body
 
     def investor(self, code: str) -> dict[str, dict]:

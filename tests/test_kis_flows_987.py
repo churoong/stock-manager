@@ -100,3 +100,30 @@ def test_새_표의_질의가_실제_스키마에서_돈다() -> None:
         con.execute(job.EVENT_UPSERT, ["052400", "bonus", "2026-10-30", "코나아이", "{}", "kis_openapi", "t"])
     assert con.execute("SELECT COUNT(*) FROM kr_opinions").fetchone() == (1,)
     assert con.execute("SELECT COUNT(*) FROM kr_corp_events").fetchone() == (1,)
+
+
+def test_초당_한도면_쉬었다_다시_묻는다(monkeypatch) -> None:
+    """2026-10-07 첫 수집: 3,504회 중 80회가 EGW00201 (25.993)."""
+    monkeypatch.setenv("KIS_APP_KEY", "k")
+    monkeypatch.setenv("KIS_APP_SECRET", "s")
+    qc = kis.QuoteClient("t")
+    slept: list[float] = []
+    monkeypatch.setattr("time.sleep", slept.append)
+
+    class R:
+        status_code = 200
+
+        def __init__(self, body):
+            self._b = body
+
+        def json(self):
+            return self._b
+
+    answers = [R({"rt_cd": "1", "msg_cd": "EGW00201"}), R({"rt_cd": "0", "output": []})]
+    monkeypatch.setattr(qc.session, "get", lambda *a, **k: answers.pop(0))
+    assert qc.get("/x", "TR", {}) == {"rt_cd": "0", "output": []}
+    assert slept and qc.calls == 2
+    # 끝까지 막히면 마지막 응답을 돌려 부른 쪽이 "못 받음" 으로 센다
+    qc2 = kis.QuoteClient("t")
+    monkeypatch.setattr(qc2.session, "get", lambda *a, **k: R({"rt_cd": "1", "msg_cd": "EGW00201"}))
+    assert qc2.get("/x", "TR", {})["msg_cd"] == "EGW00201" and qc2.calls == 1 + kis.RATE_RETRY
