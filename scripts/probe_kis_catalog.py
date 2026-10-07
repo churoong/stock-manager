@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import sys
 import time
@@ -130,7 +131,12 @@ def main() -> int:
             v = body.get(key)
             if isinstance(v, list) and v and isinstance(v[0], dict):
                 print(f"  [{key}] {len(v)}행 · 날짜 {_date_span(v)} · 열 {', '.join(list(v[0])[:30])}")
-                print("    예: " + " · ".join(f"{k}={str(x)[:18]}" for k, x in list(v[0].items())[:14]))
+                for row in v[:3]:
+                    print("    예: " + " · ".join(f"{k}={str(x)[:18]}" for k, x in list(row.items())[:20]))
+                # 비중으로 보이는 칸은 합을 찍는다 — 퍼센트인지 가린다
+                for col in [c for c in v[0] if c.endswith("rlim") or c.endswith("rate") or c.endswith("ratio")]:
+                    with contextlib.suppress(ValueError):
+                        print(f"    합 {col} = {sum(float(r.get(col) or 0) for r in v):.2f}")
         rows = _rows(body)
         print(f"\n## {name}\n  HTTP {resp.status_code} · rt_cd={body.get('rt_cd')} msg_cd={body.get('msg_cd')} "
               f"msg={str(body.get('msg1', '')).strip()[:50]!r} · 행 {len(rows)} · 날짜 {_date_span(rows)}")  # fmt: skip
