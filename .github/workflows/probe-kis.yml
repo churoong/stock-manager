@@ -1,0 +1,41 @@
+name: 한국투자증권 API 클라우드 호출 확인
+
+# 한국투자증권 KIS Open API 가 Actions 러너에서 불리는지 본다 (docs/data-sources.md 3,
+# infra 25.983). 손으로만 돌린다. DB 를 건드리지 않는다. 토큰·키는 찍지 않는다.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install requests
+      - name: 호출
+        env:
+          KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}
+          KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}
+        run: |
+          set -o pipefail
+          python scripts/probe_kis.py 2>&1 | python scripts/ops_tee.py probe.txt
+
+      - name: 결과를 이슈로 내보내기
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 공개 저장소로 옮긴 뒤에는 비공개 운영 저장소로 보낸다 (docs/public-repo.md, infra 25.978)
+          OPS_REPO: ${{ secrets.OPS_REPO }}
+          OPS_TOKEN: ${{ secrets.OPS_TOKEN }}
+        run: |
+          python scripts/publish_output.py \
+            --title "운영 출력 (클라우드 세션용)" \
+            --file probe.txt \
+            --note "KIS 클라우드 호출"
