@@ -4,6 +4,11 @@ name: 한국투자증권 API 클라우드 호출 확인
 # infra 25.983). 손으로만 돌린다. DB 를 건드리지 않는다. 토큰·키는 찍지 않는다.
 on:
   workflow_dispatch:
+    inputs:
+      only:
+        description: 목록 확인에서 이 머리로 시작하는 것만 (쉼표, 예 A1,B2)
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -23,6 +28,7 @@ jobs:
         env:
           KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}
           KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}
+          ONLY: ${{ inputs.only }}
         run: |
           set -o pipefail
           python scripts/probe_kis.py 2>&1 | python scripts/ops_tee.py probe.txt

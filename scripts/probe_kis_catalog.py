@@ -38,7 +38,7 @@ def cases(today: str, month_ago: str, year_ago: str, ahead: str) -> list[tuple[s
         ("A2 예탁원 배당일정(앞으로)", K + "dividend", "HHKDB669102C0",
          {"CTS": "", "GB1": "0", "F_DT": today, "T_DT": ahead, "SHT_CD": "", "HIGH_GB": ""}),
         ("A2 예탁원 액면교체(분할·병합)", K + "rev-split", "HHKDB669104C0",
-         {"SHT_CD": "", "MARKET_GB": "0", "F_DT": year_ago, "T_DT": ahead}),
+         {"CTS": "", "SHT_CD": "", "MARKET_GB": "0", "F_DT": year_ago, "T_DT": ahead}),
         ("A2 예탁원 무상증자", K + "bonus-issue", "HHKDB669101C0",
          {"CTS": "", "F_DT": month_ago, "T_DT": ahead, "SHT_CD": ""}),
         ("A2 예탁원 유상증자", K + "paidin-capin", "HHKDB669100C0",
@@ -113,7 +113,10 @@ def main() -> int:
     f = "%Y%m%d"
     head = {"authorization": f"Bearer {token}", "appkey": key, "appsecret": secret, "custtype": "P"}
     days = [now + timedelta(days=d) for d in (0, -30, -365, 60)]
+    only = [s for s in os.environ.get("ONLY", "").split(",") if s]
     for name, path, tr, params in cases(*(d.strftime(f) for d in days)):
+        if only and not any(name.startswith(o) for o in only):
+            continue
         time.sleep(0.4)
         try:
             resp = requests.get(BASE + path, params=params, headers=head | {"tr_id": tr}, timeout=20)
@@ -121,6 +124,12 @@ def main() -> int:
         except (requests.RequestException, ValueError) as exc:
             print(f"\n## {name}\n  실패 {type(exc).__name__}")
             continue
+        # 출력이 여럿이면(output1 요약 · output2 목록) 모양을 다 찍는다
+        for key in ("output1", "output2", "output3"):
+            v = body.get(key)
+            if isinstance(v, list) and v and isinstance(v[0], dict):
+                print(f"  [{key}] {len(v)}행 · 날짜 {_date_span(v)} · 열 {', '.join(list(v[0])[:30])}")
+                print("    예: " + " · ".join(f"{k}={str(x)[:18]}" for k, x in list(v[0].items())[:14]))
         rows = _rows(body)
         print(f"\n## {name}\n  HTTP {resp.status_code} · rt_cd={body.get('rt_cd')} msg_cd={body.get('msg_cd')} "
               f"msg={str(body.get('msg1', '')).strip()[:50]!r} · 행 {len(rows)} · 날짜 {_date_span(rows)}")  # fmt: skip
