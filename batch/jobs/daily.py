@@ -41,7 +41,7 @@ from batch.core import db
 from batch.core.client import TursoClient
 from batch.core.entry import NOTHING_DONE, guard
 from batch.notify import formatter, report_sections, telegram
-from batch.services import holding_scores, pick_history, report_picks, reports, self_grade, trend
+from batch.services import divergence, holding_scores, pick_history, report_picks, reports, self_grade, trend
 
 log = logging.getLogger("daily")
 
@@ -1899,6 +1899,11 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
             if 일정:
                 message += "\n\n" + "\n".join(일정)
                 step_log["corp_events"] = len(일정) - 1
+            # 추천인데 외국인·기관이 팔고 증권사가 목표가를 내리는 종목 (docs/reports.md 3.9, 25.1001) — 참고만
+            엇갈림 = _divergence_lines(client, decision.trade_date, 상위, warnings)
+            if 엇갈림:
+                message += "\n\n" + "\n".join(엇갈림)
+                step_log["divergence"] = len(엇갈림) - 1
 
         if dry_run:
             print("--- 발송하지 않음 (dry-run) ---")
@@ -2168,6 +2173,59 @@ def _corp_event_lines(
             continue
         lines.append(f"· {이름}({r['code']}) {_행사_이름.get(r['kind'], r['kind'])} {r['record_date'][5:]} ({왜})")
     return [f"📅 기업행위 일정 ({CORP_EVENT_DAYS}일 안, 예탁원·KIS)", *lines] if lines else []
+
+
+DIVERGENCE_FLOWS_SQL = (
+    "SELECT f.stock_id, f.date, f.frgn_net_amt, f.orgn_net_amt FROM kr_flows f"
+    " JOIN json_each(?) j ON j.value = f.stock_id"
+    " WHERE f.date <= ? AND f.date > ? AND f.frgn_net_amt IS NOT NULL AND f.orgn_net_amt IS NOT NULL"
+    " ORDER BY f.stock_id, f.date DESC"
+)
+DIVERGENCE_OPINIONS_SQL = (
+    "SELECT o.stock_id, o.date, o.broker, o.target_price FROM kr_opinions o JOIN json_each(?) j ON j.value = o.stock_id"
+    " WHERE o.date <= ? AND o.date >= ?"
+)
+
+
+def _divergence_lines(
+    client: TursoClient, trade_date: str, picks: list, warnings: list[str] | None = None
+) -> list[str]:
+    """국내 추천 종목의 점수 × 수급 × 증권사 목표가 엇갈림 (docs/reports.md 3.9, 25.1001).
+
+    표가 없거나(0046·0047 전) 못 읽으면 빈 목록 — 곁다리다. 같은 종목의 여러 기간 신호는 한 번만 센다."""
+    종목: dict[int, tuple[str, str]] = {}
+    for r in picks:
+        종목.setdefault(int(r.stock_id), (r.name, r.ticker))
+    if not 종목:
+        return []
+    오늘 = date.fromisoformat(trade_date)
+    ids = json.dumps(sorted(종목))
+    try:
+        흐름 = client.execute(
+            DIVERGENCE_FLOWS_SQL, [ids, trade_date, (오늘 - timedelta(days=divergence.FLOW_DAYS * 3)).isoformat()]
+        ).rows
+        의견 = client.execute(DIVERGENCE_OPINIONS_SQL, [ids, trade_date, (오늘 - timedelta(days=400)).isoformat()]).rows
+    except Exception as exc:  # noqa: BLE001 — 곁다리. 표가 없으면 조용히, 그 밖의 실패는 경고로
+        if not db.표가_없나(exc) and warnings is not None:
+            warnings.append(_실패문("수급·의견 엇갈림 읽기", exc))
+        return []
+    합: dict[int, list[int]] = {}
+    for sid, _d, frgn, orgn in 흐름:
+        s = 합.setdefault(int(sid), [0, 0, 0])
+        if s[0] < divergence.FLOW_DAYS:
+            s[0] += 1
+            s[1] += int(frgn)
+            s[2] += int(orgn)
+    목표: dict[int, list[tuple[str, str, float | None]]] = {}
+    for sid, d, broker, target in 의견:
+        목표.setdefault(int(sid), []).append((str(d), str(broker), float(target) if target else None))
+    since = (오늘 - timedelta(days=divergence.OPINION_DAYS)).isoformat()
+    views = []
+    for sid, (이름, 티커) in 종목.items():
+        n, frgn, orgn = 합.get(sid, [0, 0, 0])
+        up, down = divergence.target_changes(목표.get(sid, []), since)
+        views.append(divergence.View(이름, 티커, n, frgn, orgn, up, down))
+    return divergence.render(views)
 
 
 def _holding_scores(

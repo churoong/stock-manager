@@ -420,6 +420,18 @@ class Test사후_분석:
         검사(REPORTS, f"진입일이 {ws.POSTMORTEM_ENTRY_DAYS[0]}~{ws.POSTMORTEM_ENTRY_DAYS[1]}일 전", "창")
 
 
+class Test엇갈림:
+    """점수 × 수급 × 증권사 의견 엇갈림 (docs/reports.md 3.9, docs/infra.md 25.1001)."""
+
+    def test_상수(self) -> None:
+        from batch.services import divergence as dv
+
+        검사(REPORTS, f"최근 **{dv.FLOW_DAYS}거래일**(`FLOW_DAYS`)", "수급 기간")
+        검사(REPORTS, f"**{dv.MIN_FLOW_DAYS}일 미만**(`MIN_FLOW_DAYS`)", "수급 최소 일수")
+        검사(REPORTS, f"최근 **{dv.OPINION_DAYS}일**(`OPINION_DAYS`)", "의견 기간")
+        검사(REPORTS, f"**{dv.TARGET_TOLERANCE * 100:.1f}%** 이하(`TARGET_TOLERANCE`)", "목표가 허용 오차")
+
+
 class Test시간외:
     """보유 종목 시간외 단일가 알림 (docs/intraday.md 1.2, docs/infra.md 25.992)."""
 
@@ -486,6 +498,7 @@ class Test밸류_분모:
     "quarterly_earnings", "short_reversal", "div_omission", "buyback", "dilution", "flow_surge",
     "gross_profitability", "robustness", "column_rot", "calibration", "self_grade", "holding_scores",
     "pick_history", "etf_accounts", "etf_tilt", "after_hours", "broker_stats", "disclosure_reaction", "luck", "postmortem",
+    "divergence",
 )  # fmt: skip
 
 #: 아직 그물 밖인 모듈과 **왜 아직인지**. 하나씩 줄여 간다
