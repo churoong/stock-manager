@@ -1,0 +1,49 @@
+name: 미국 공시 수집
+
+# SEC submissions 응답에 공시 목록이 함께 온다. 응답이 커서(평균 160KB, JPM 4.6MB)
+# 지켜보는 종목만 주 1회 받는다 (docs/data-sources.md 14.4).
+on:
+  schedule:
+    - cron: "9 20 * * 0" # 일 20:09 UTC = 월 05:09 KST
+  repository_dispatch:
+    types: [disclosures-us]
+  workflow_dispatch:
+    inputs:
+      max:
+        description: 한 번에 부를 회사 수
+        type: string
+        default: "300"
+
+concurrency:
+  group: disclosures-us
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+      TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+      # DB 백엔드 전환 (docs/infra.md 25절). 비어 있으면 Turso 를 쓴다
+      DB_BACKEND: ${{ vars.DB_BACKEND }}
+      # D1 임시 운영 중에는 쉰다 (docs/infra.md 25.14). Turso 로 돌아가면 저절로 다시 돈다
+      SKIP_ON_D1: "1"
+      D1_ACCOUNT_ID: ${{ secrets.D1_ACCOUNT_ID }}
+      D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+      D1_API_TOKEN: ${{ secrets.D1_API_TOKEN }}
+      SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+      OFFLINE_MODE: "0"
+      LOG_LEVEL: INFO
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: 수집
+        run: python -m batch.jobs.disclosures_us --max "${{ inputs.max || '300' }}"

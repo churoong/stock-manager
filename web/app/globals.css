@@ -1,0 +1,28 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: light dark;
+  /* 폰 아래 메뉴 높이 (components/Nav.tsx 의 h-14). 본문 아래 여백과, 화면 아래에 붙는 단추 막대가 같이 쓴다 */
+  --phone-nav: 3.5rem;
+}
+
+body {
+  @apply bg-slate-50 text-slate-900 antialiased;
+}
+
+/*
+ * 폰에서는 메뉴가 화면 아래에 떠 있다(components/Nav.tsx). 본문 끝이 그 막대에
+ * 가리지 않도록 아래를 비운다. 안전 영역(홈 인디케이터)까지 더한다.
+ * 넓은 화면은 메뉴가 위에 있으므로 필요 없다.
+ */
+@media (max-width: 639px) {
+  body {
+    padding-bottom: calc(var(--phone-nav) + 0.5rem + env(safe-area-inset-bottom));
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  body {
+    @apply bg-slate-950 text-slate-100;
+  }
+}

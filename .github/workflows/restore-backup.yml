@@ -1,0 +1,90 @@
+name: 백업 되살리기
+
+# 백업(.sql.gz)에서 **데이터만** 지금 DB 백엔드에 넣는다 (docs/infra.md 25.3).
+# 표는 마이그레이션이 만든다. 백업의 DROP/CREATE 는 실행하지 않는다.
+#
+# D1 은 하루 쓰기 10만 행이라 한 번에 다 넣지 않는다. --only 로 표를 골라 나눠 넣는다.
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 백업 아티팩트가 있는 실행 번호 (백업 워크플로)
+        type: string
+        required: true
+      artifact:
+        description: 아티팩트 이름
+        type: string
+        default: db-backup-essential
+      only:
+        description: 넣을 표 (쉼표로, 비우면 전부)
+        type: string
+        default: ""
+      max_rows:
+        description: 이번에 넣을 최대 행 수 (비우면 제한 없음)
+        type: string
+        default: ""
+      on_conflict:
+        description: 이미 있는 행 처리 (기본 skip, settings 는 replace)
+        type: choice
+        options: [skip, replace, fail]
+        default: skip
+      trust_stock_ids:
+        description: "대응표 없는 옛 백업만 — 종목 번호 대조를 건너뛴다(원본과 번호가 같은 DB 에만). 대응표가 있으면 무시 (docs/infra.md 25.679)"
+        type: boolean
+        default: false
+      dry_run:
+        description: 무엇이 들어가는지만 본다
+        type: boolean
+        default: true
+
+concurrency:
+  group: restore-backup
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read # 백업 아티팩트를 내려받는다
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+      TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+      # DB 백엔드 전환 (docs/infra.md 25절). 비어 있으면 Turso 를 쓴다
+      DB_BACKEND: ${{ vars.DB_BACKEND }}
+      D1_ACCOUNT_ID: ${{ secrets.D1_ACCOUNT_ID }}
+      D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+      D1_API_TOKEN: ${{ secrets.D1_API_TOKEN }}
+      OFFLINE_MODE: "0"
+      LOG_LEVEL: INFO
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 백업 내려받기
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run download "${{ inputs.run_id }}" -n "${{ inputs.artifact }}" -D backup
+
+      - name: 되살리기
+        run: |
+          FILE=$(ls backup/*.sql.gz | head -1)
+          echo "파일: $FILE"
+          ARGS=""
+          if [ -n "${{ inputs.only }}" ]; then ARGS="$ARGS --only ${{ inputs.only }}"; fi
+          if [ -n "${{ inputs.max_rows }}" ]; then ARGS="$ARGS --max-rows ${{ inputs.max_rows }}"; fi
+          ARGS="$ARGS --on-conflict ${{ inputs.on_conflict }}"
+          if [ "${{ inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
+          if [ "${{ inputs.trust_stock_ids }}" = "true" ]; then ARGS="$ARGS --trust-stock-ids"; fi
+          python scripts/restore_backup.py "$FILE" $ARGS

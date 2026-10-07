@@ -1,0 +1,30 @@
+name: KRX 과거 상장주식수 확인
+
+# 기법 발굴 5회차 A 의 선행 조건 — 과거 기준일에 그날의 LIST_SHRS 를 주는지 (docs/factors.md 12.7, docs/infra.md 25.794).
+# 손으로만 돌린다. DB 를 건드리지 않는다. 호출은 (기준일 수 × 2시장) 뿐이다.
+on:
+  workflow_dispatch:
+    inputs:
+      tickers:
+        description: 단축코드, 쉼표로 (증자·분할·소각이 있던 종목)
+        type: string
+        default: "005930,247540,086520"
+      dates:
+        description: 기준일 YYYYMMDD, 쉼표로
+        type: string
+        default: "20211001,20230102,20240102,20260929"
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: 호출
+        env:
+          KRX_API_KEY: ${{ secrets.KRX_API_KEY }}
+        run: python scripts/probe_krx_listed_shares.py --tickers "${{ inputs.tickers }}" --dates "${{ inputs.dates }}"

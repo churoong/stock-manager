@@ -1,0 +1,46 @@
+name: ETF 전 종목 보유 확인 (N-PORT)
+
+# 미국 ETF 전 종목 보유를 SEC N-PORT 공시로 받을 수 있는지 실제 응답으로 확인한다
+# (docs/data-sources.md 13.5). 손으로만 돌린다. DB 를 건드리지 않는다.
+on:
+  workflow_dispatch:
+    inputs:
+      tickers:
+        description: 쉼표로 구분한 ETF 심볼
+        type: string
+        default: "VOO,QQQ,SPY,VTI,SCHD"
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install requests
+      - name: 호출
+        env:
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+          TICKERS: ${{ inputs.tickers }}
+        run: |
+          set -o pipefail
+          python scripts/probe_etf_nport.py --tickers "$TICKERS" 2>&1 | python scripts/ops_tee.py probe.txt
+
+      - name: 결과를 이슈로 내보내기
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 공개 저장소로 옮긴 뒤에는 비공개 운영 저장소로 보낸다 (docs/public-repo.md, infra 25.978)
+          OPS_REPO: ${{ secrets.OPS_REPO }}
+          OPS_TOKEN: ${{ secrets.OPS_TOKEN }}
+        run: |
+          python scripts/publish_output.py \
+            --title "운영 출력 (클라우드 세션용)" \
+            --file probe.txt \
+            --note "ETF N-PORT 확인"

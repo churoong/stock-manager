@@ -1,0 +1,67 @@
+name: 미국 가격 백필
+
+# 한 번만 크게 도는 작업이다. 종목 구간으로 나눠 여러 번 돌린다(batch/jobs/backfill_us.py 머리말).
+# 200종목 시범으로 조각당 시간·429·'1300d' 수용 여부를 먼저 잰다.
+on:
+  workflow_dispatch:
+    inputs:
+      lookback:
+        description: 받을 달력일 수 (1300 달력일 ≈ 3.6년)
+        type: string
+        default: "1300"
+      start:
+        description: 정렬된 심볼 목록에서 시작 위치
+        type: string
+        default: "0"
+      count:
+        description: 이번에 받을 종목 수 (비우면 끝까지)
+        type: string
+        default: "200"
+      chunk:
+        description: 한 요청의 심볼 수
+        type: string
+        default: "200"
+      min_turnover:
+        description: "평균 거래대금 하한(달러). 비우면 전 종목. 5000000 권장 (Turso 월 쓰기 한도, backfill_us.py 주석)"
+        type: string
+        default: "5000000"
+
+concurrency:
+  group: backfill-us
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    env:
+      TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+      TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+      # DB 백엔드 전환 (docs/infra.md 25절). 비어 있으면 Turso 를 쓴다
+      DB_BACKEND: ${{ vars.DB_BACKEND }}
+      # D1 임시 운영 중에는 쉰다 (docs/infra.md 25.14). Turso 로 돌아가면 저절로 다시 돈다
+      SKIP_ON_D1: "1"
+      D1_ACCOUNT_ID: ${{ secrets.D1_ACCOUNT_ID }}
+      D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+      D1_API_TOKEN: ${{ secrets.D1_API_TOKEN }}
+      OFFLINE_MODE: "0"
+      LOG_LEVEL: INFO
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 백필
+        run: |
+          ARGS="--lookback ${{ inputs.lookback }} --start ${{ inputs.start }} --chunk ${{ inputs.chunk }}"
+          if [ -n "${{ inputs.count }}" ]; then ARGS="$ARGS --count ${{ inputs.count }}"; fi
+          if [ -n "${{ inputs.min_turnover }}" ]; then ARGS="$ARGS --min-turnover ${{ inputs.min_turnover }}"; fi
+          python -m batch.jobs.backfill_us $ARGS

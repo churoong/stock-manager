@@ -1,0 +1,5 @@
+# 국내 뉴스 감성 채점 전용 (sentiment-kr.yml 에서만 설치). docs/sentiment.md 1.2
+# torch 는 CPU 전용 인덱스에서 따로 설치한다(워크플로 참고). 2026-09-17 실측에서 동작한 버전으로 고정
+transformers==5.17.0
+sentencepiece==0.2.2
+protobuf==7.36.1

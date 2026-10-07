@@ -1,0 +1,334 @@
+name: D1 따라잡기 (국내)
+
+# Turso 가 막힌 동안 D1 을 채운다 (docs/infra.md 25.8). 사람이 없어도 매일 조금씩 채워진다.
+#
+# D1 하루 쓰기 한도(10만 행)가 풀리는 **09:00 KST 직후**에 돈다. 순서가 곧 의존 관계다.
+#   1. 유니버스 (주 1회면 된다 — 6일 안에 돌았으면 건너뛴다)
+#   2. 재무 (사업보고서 3년, 7일 안에 돌았으면 건너뛴다)
+#   3. 업종 (한 달에 한 번이면 된다)
+#   4. 과거 시세: **유니버스·보유·관심 종목만**, 가장 최근의 빠진 날부터, 남은 예산만큼
+#      (한국거래소는 하루 2,760종목을 주지만 점수는 880종목만 쓴다 → 같은 예산으로 3배 긴 기간)
+#   5. 성과 지표 → 6. 점수 → 7. 신호 → 8. 장중 감시·뉴스 후보
+#
+# **왜 재무·업종이 시세보다 먼저인가** (2026-09-20 에 순서를 바꿨다, docs/infra.md 25.20).
+# 시세는 남은 예산을 **전부** 쓰는 단계다. 뒤에 두면 앞선 단계가 굶지 않는다. 반대로 앞에 두면
+# 여유(reserve)를 아무리 잡아도 재무 한 번 돌 몫을 정확히 맞히기 어렵고, 실제로 9/19·9/20 에
+# 재무·업종이 이틀 내리 굶어 팩터가 하나도 만들어지지 않았다. 재무·업종은 7일·30일에 한 번이라
+# 대부분의 날에는 즉시 건너뛰고 시세가 예산을 그대로 다 쓴다 — 잃는 것이 없다.
+#
+# 왜 1년치를 목표로 하나: 종합 점수는 팩터가 둘 이상 비면 내지 않는다. 모멘텀은 6개월(126일),
+# 리스크는 성과 지표 1년 창(200일 이상)이 있어야 나온다. 6개월만 채우면 리스크가 끝내 비어
+# 추천이 네 팩터로만 나온다.
+#
+# 한 단계라도 실패하면 뒤는 돌지 않는다. 한도에 걸리면 다음 날 이어진다.
+# 끝나면(멈춰도) 텔레그램으로 결과를 알린다 — 마지막 단계. 아침 리포트가 건너뛴 날은 오늘 신호도 싣는다.
+# **지금 실제로 D1 을 쓰고 있을 때만 돈다** (DB_BACKEND=d1, 또는 auto 인데 Turso 가 막혀 있을 때).
+# Turso 가 풀려 auto 가 Turso 를 고르면 0번 단계에서 멈춘다 (docs/infra.md 25.12).
+# 정시성은 cron-job.org 가 확보한다. 2026-09-19 실측으로 이 저장소의 GitHub cron 이 2~4시간
+# 늦거나 아예 안 돈다(25.16). 09:05 KST 를 고른 이유가 "D1 하루 한도가 막 풀린 때" 인데
+# 4시간 늦으면 그 이유가 사라진다. cron 은 예비 경로로만 남긴다.
+on:
+  schedule:
+    - cron: "5 0 * * *" # 00:05 UTC = 09:05 KST (D1 한도가 풀린 직후). 예비
+  repository_dispatch:
+    types: [d1-catchup]
+  workflow_dispatch:
+    inputs:
+      max_days:
+        description: 이번에 받을 최대 거래일 수 (비우면 남은 예산만큼)
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  issues: write # 기록을 이슈 코멘트로 내보낸다 (docs/infra.md 25.17)
+
+# **따라잡기와 복귀는 같은 줄에 선다** (docs/infra.md 25.463, 스케줄 감사 #6). 따로 서면 09:05 따라잡기가
+# D1 에 쓰는 동안(제한 60분) 09:20 복귀가 사람이 넣은 데이터를 Turso 로 옮기고 복귀 표시를 남긴다 — 그 뒤
+# 따라잡기의 남은 단계는 DB_BACKEND=auto 라 새 연결부터 Turso 를 보고, D1 예산으로 잰 백필을 Turso 에 쓴다.
+# 같은 그룹이면 늦게 온 쪽은 앞쪽이 끝날 때까지 기다린다(기다리는 자리는 하나 — 새로 오면 옛 대기는 취소된다)
+concurrency:
+  group: db-backend-switch
+  cancel-in-progress: false
+
+jobs:
+  catchup:
+    if: ${{ vars.DB_BACKEND == 'd1' || vars.DB_BACKEND == 'auto' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+      TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+      # DB 백엔드 전환 (docs/infra.md 25절). 비어 있으면 Turso 를 쓴다
+      DB_BACKEND: ${{ vars.DB_BACKEND }}
+      D1_ACCOUNT_ID: ${{ secrets.D1_ACCOUNT_ID }}
+      D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+      D1_API_TOKEN: ${{ secrets.D1_API_TOKEN }}
+      KRX_API_KEY: ${{ secrets.KRX_API_KEY }}
+      DART_API_KEY: ${{ secrets.DART_API_KEY }}
+      OFFLINE_MODE: "0"
+      LOG_LEVEL: INFO
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 0. 지금 D1 을 쓰는가
+        id: check
+        # auto 면 Turso 가 살아 있는지 본다. Turso 로 돌아갔으면 따라잡을 이유가 없다.
+        #
+        # **여기서 죽으면 뒤가 전부 조용해진다** (infra 25.53). 예전에는 이 한 줄이 그냥
+        # `python -c ... >> $GITHUB_OUTPUT` 이었다. 파이썬이 예외를 던지면 단계가 실패하고
+        # `use_d1` 이 비어, 1~8번은 물론 **9번 텔레그램과 10번 이슈 내보내기까지** 건너뛴다.
+        # 닷새 만에 다시 도는 날 가장 먼저 깨질 만한 자리인데, 깨지면 아무 말도 없이 끝난다.
+        # 그래서 무슨 일이 있어도 값을 적고, 이유를 로그에 남긴다.
+        run: |
+          set -o pipefail
+          BACKEND=unknown
+          if OUT=$(python -c "from batch.core.client import resolved_backend; print(resolved_backend())" 2>&1); then
+            BACKEND="$OUT"
+            echo "[0단계] 지금 쓰는 DB: $BACKEND" | python scripts/ops_tee.py -a catchup.log
+          else
+            echo "[0단계] 어느 DB 를 쓰는지 알아내지 못해 따라잡기를 건너뛴다" | python scripts/ops_tee.py -a catchup.log
+            echo "$OUT" | python scripts/ops_tee.py -a catchup.log
+          fi
+          USE=false
+          if [ "$BACKEND" = "d1" ]; then USE=true; fi
+          echo "use_d1=$USE" >> "$GITHUB_OUTPUT"
+          # **Turso 로 돌아간 뒤에는 이 워크플로가 날마다 할 일이 없다.** 그래도 잡은 돈다
+          # (조건이 `DB_BACKEND == 'auto'` 라서). 그때 10번이 "지금 쓰는 DB: turso" 한 줄짜리
+          # 코멘트를 **매일** 달면 이슈 #1 의 마지막 자리가 그것으로 덮인다 (docs/infra.md 25.84).
+          # 표식을 남겨 10번이 건너뛰게 한다. **어느 DB 인지 알아낸 경우에만** 붙인다 —
+          # 0번이 깨진 날은 이유를 읽어야 하므로 코멘트가 나가야 한다 (25.53)
+          if [ "$USE" = "false" ] && [ "$BACKEND" != "unknown" ]; then
+            echo "실행하지 않음: 지금은 $BACKEND 를 쓴다 — 따라잡을 것이 없다" | python scripts/ops_tee.py -a catchup.log
+          fi
+
+      - name: 1. 유니버스
+        id: universe
+        # `always() &&` 가 있어야 **앞 단계가 죽어도 이 단계가 돈다** (docs/infra.md 25.63).
+        # 1~8 은 서로 기댈 필요가 없다 — 시세를 못 받은 날에도 점수·신호는 있는 데이터로 낸다
+        if: always() && steps.check.outputs.use_d1 == 'true'
+        run: |
+          set -o pipefail
+          python scripts/d1_usage.py "시작" 2>&1 | python scripts/ops_tee.py -a catchup.log d1-usage.log
+          rc=0
+          python -m batch.jobs.universe --market KR --skip-if-ran-within 6 2>&1 | python scripts/ops_tee.py -a catchup.log || rc=$?
+          # 실패해도 **이 단계가 얼마나 썼는지는 재고 넘어간다** (infra 25.52).
+          # 기본 셸이 `bash -e` 라 위가 죽으면 아래 줄이 통째로 건너뛰어졌다 —
+          # 하필 예산을 가장 알고 싶은 순간에 그 숫자를 잃는다
+          python scripts/d1_usage.py "1. 유니버스 끝" 2>&1 | python scripts/ops_tee.py -a catchup.log d1-usage.log
+          exit $rc
+
+      - name: 2. 재무 (사업보고서 3년)
+        id: financials
+        # `always() &&` 가 있어야 **앞 단계가 죽어도 이 단계가 돈다** (docs/infra.md 25.63).
+        # 1~8 은 서로 기댈 필요가 없다 — 시세를 못 받은 날에도 점수·신호는 있는 데이터로 낸다
+        if: always() && steps.check.outputs.use_d1 == 'true'
+        # 점수에 필요한 것만: 성장·피오트로스키가 2년을 비교한다. 분기는 D1 예산에 비해 크다.
+        # --resume: 하루 한도에 잘려도 다음 날 이어 받는다. 없으면 매일 처음부터 다시 받아
+        # 같은 자리에서 잘리고 영원히 끝나지 않는다 (docs/infra.md 25.24)
+        run: |
+          set -o pipefail
+          rc=0
+          python -m batch.jobs.financials --years 3 --report 11011 --skip-if-ran-within 7 --resume 2>&1 | python scripts/ops_tee.py -a catchup.log || rc=$?
+          # 실패해도 **이 단계가 얼마나 썼는지는 재고 넘어간다** (infra 25.52).
+          # 기본 셸이 `bash -e` 라 위가 죽으면 아래 줄이 통째로 건너뛰어졌다 —
+          # 하필 예산을 가장 알고 싶은 순간에 그 숫자를 잃는다
+          python scripts/d1_usage.py "2. 재무 끝" 2>&1 | python scripts/ops_tee.py -a catchup.log d1-usage.log
+          exit $rc
+
+      - name: 3. 업종 (한 달에 한 번이면 된다)
+        id: sectors
+        # `always() &&` 가 있어야 **앞 단계가 죽어도 이 단계가 돈다** (docs/infra.md 25.63).
+        # 1~8 은 서로 기댈 필요가 없다 — 시세를 못 받은 날에도 점수·신호는 있는 데이터로 낸다
+        if: always() && steps.check.outputs.use_d1 == 'true'
+        # 업종이 없으면 점수가 업종 대신 시장 전체와 비교되고 섹터 30% 상한이 걸리지 않는다.
+        # 2026-09-18 D1 첫 화면에서 "업종 없음" 으로 보여 찾았다
+        run: |
+          set -o pipefail
+          rc=0
+          python -m batch.jobs.sectors --market KR --skip-if-ran-within 30 2>&1 | python scripts/ops_tee.py -a catchup.log || rc=$?
+          # 실패해도 **이 단계가 얼마나 썼는지는 재고 넘어간다** (infra 25.52).
+          # 기본 셸이 `bash -e` 라 위가 죽으면 아래 줄이 통째로 건너뛰어졌다 —
+          # 하필 예산을 가장 알고 싶은 순간에 그 숫자를 잃는다
+          python scripts/d1_usage.py "3. 업종 끝" 2>&1 | python scripts/ops_tee.py -a catchup.log d1-usage.log
+          exit $rc
+
+      - name: 4. 과거 시세 (유니버스만, 최근의 빠진 날부터, 남은 예산만큼)
+        id: backfill
+        # `always() &&` 가 있어야 **앞 단계가 죽어도 이 단계가 돈다** (docs/infra.md 25.63).
+        # 1~8 은 서로 기댈 필요가 없다 — 시세를 못 받은 날에도 점수·신호는 있는 데이터로 낸다
+        if: always() && steps.check.outputs.use_d1 == 'true'
+        run: |
+          MAX="${{ inputs.max_days }}"
+          # 여유 3.2만 = 뒤 단계(성과·점수·신호) + 웹 크론 + 다음 날 08:27 국내 일일 배치 몫 (infra 25.8, 어림).
+          # **재무·업종은 이제 이 앞에서 끝난다** — 여유가 그 몫까지 맞힐 필요가 없다 (infra 25.20).
+          # 이 숫자는 D1 이 세는 행(인덱스 포함)이다. 논리 행으로 읽으면 4배쯤 적다
+          ARGS="--only-universe --budget-reserve 32000"
+          if [ -n "$MAX" ]; then ARGS="$ARGS --max-days $MAX"; fi
+          # 1년 목표 (성과 지표 1년 창이 나오려면 200거래일 이상). 이미 받은 날은 건너뛴다
+          FROM=$(date -u -d "400 days ago" +%F)
+          set -o pipefail
+          rc=0
+          # 읽기 예산 문 — 웹 몫을 남기지 못하면 이 단계는 내일로 (docs/infra.md 25.844). 예상치는 2026-10-01 실측의 약 1.1배
+          gate=0; python scripts/d1_read_gate.py "4. 과거 시세" 2000000 2>&1 | python scripts/ops_tee.py -a catchup.log || gate=$?
+          # 78 만 "미룸" 이다 — 다른 실패(재기 실패 등)는 예전처럼 들어간다
+          if [ "$gate" = "78" ]; then exit 0; fi
+          python -m batch.jobs.backfill_kr --from "$FROM" $ARGS 2>&1 | python scripts/ops_tee.py -a catchup.log || rc=$?
+          # 실패해도 **이 단계가 얼마나 썼는지는 재고 넘어간다** (infra 25.52).
+          # 기본 셸이 `bash -e` 라 위가 죽으면 아래 줄이 통째로 건너뛰어졌다 —
+          # 하필 예산을 가장 알고 싶은 순간에 그 숫자를 잃는다
+          python scripts/d1_usage.py "4. 과거 시세 끝" 2>&1 | python scripts/ops_tee.py -a catchup.log d1-usage.log
+          exit $rc
+
+      - name: 5. 성과 지표
+        id: metrics
+        # `always() &&` 가 있어야 **앞 단계가 죽어도 이 단계가 돈다** (docs/infra.md 25.63).
+        # 1~8 은 서로 기댈 필요가 없다 — 시세를 못 받은 날에도 점수·신호는 있는 데이터로 낸다
+        if: always() && steps.check.outputs.use_d1 == 'true'
+        run: |
+          set -o pipefail
+          rc=0
+          # 읽기 예산 문 — 웹 몫을 남기지 못하면 이 단계는 내일로 (docs/infra.md 25.844). 예상치는 2026-10-01 실측의 약 1.1배
+          gate=0; python scripts/d1_read_gate.py "5. 성과 지표" 400000 2>&1 | python scripts/ops_tee.py -a catchup.log || gate=$?
+          # 78 만 "미룸" 이다 — 다른 실패(재기 실패 등)는 예전처럼 들어간다
+          if [ "$gate" = "78" ]; then exit 0; fi
+          python -m batch.jobs.metrics --market KR 2>&1 | python scripts/ops_tee.py -a catchup.log || rc=$?
+          # 실패해도 **이 단계가 얼마나 썼는지는 재고 넘어간다** (infra 25.52).
+          # 기본 셸이 `bash -e` 라 위가 죽으면 아래 줄이 통째로 건너뛰어졌다 —
+          # 하필 예산을 가장 알고 싶은 순간에 그 숫자를 잃는다
+          python scripts/d1_usage.py "5. 성과 지표 끝" 2>&1 | python scripts/ops_tee.py -a catchup.log d1-usage.log
+          exit $rc
+
+      - name: 6. 점수
+        id: scores
+        # `always() &&` 가 있어야 **앞 단계가 죽어도 이 단계가 돈다** (docs/infra.md 25.63).
+        # 1~8 은 서로 기댈 필요가 없다 — 시세를 못 받은 날에도 점수·신호는 있는 데이터로 낸다
+        if: always() && steps.check.outputs.use_d1 == 'true'
+        run: |
+          set -o pipefail
+          rc=0
+          # 읽기 예산 문 — 웹 몫을 남기지 못하면 이 단계는 내일로 (docs/infra.md 25.844). 예상치는 2026-10-01 실측의 약 1.1배
+          gate=0; python scripts/d1_read_gate.py "6. 점수" 1200000 2>&1 | python scripts/ops_tee.py -a catchup.log || gate=$?
+          # 78 만 "미룸" 이다 — 다른 실패(재기 실패 등)는 예전처럼 들어간다
+          if [ "$gate" = "78" ]; then exit 0; fi
+          python -m batch.jobs.scores --market KR 2>&1 | python scripts/ops_tee.py -a catchup.log || rc=$?
+          # 실패해도 **이 단계가 얼마나 썼는지는 재고 넘어간다** (infra 25.52).
+          # 기본 셸이 `bash -e` 라 위가 죽으면 아래 줄이 통째로 건너뛰어졌다 —
+          # 하필 예산을 가장 알고 싶은 순간에 그 숫자를 잃는다
+          python scripts/d1_usage.py "6. 점수 끝" 2>&1 | python scripts/ops_tee.py -a catchup.log d1-usage.log
+          exit $rc
+
+      - name: 7. 신호
+        id: signals
+        # `always() &&` 가 있어야 **앞 단계가 죽어도 이 단계가 돈다** (docs/infra.md 25.63).
+        # 1~8 은 서로 기댈 필요가 없다 — 시세를 못 받은 날에도 점수·신호는 있는 데이터로 낸다
+        if: always() && steps.check.outputs.use_d1 == 'true'
+        run: |
+          set -o pipefail
+          rc=0
+          # 읽기 예산 문 — 웹 몫을 남기지 못하면 이 단계는 내일로 (docs/infra.md 25.844). 예상치는 2026-10-01 실측의 약 1.1배
+          gate=0; python scripts/d1_read_gate.py "7. 신호" 1100000 2>&1 | python scripts/ops_tee.py -a catchup.log || gate=$?
+          # 78 만 "미룸" 이다 — 다른 실패(재기 실패 등)는 예전처럼 들어간다
+          if [ "$gate" = "78" ]; then exit 0; fi
+          python -m batch.jobs.signals --market KR 2>&1 | python scripts/ops_tee.py -a catchup.log || rc=$?
+          # 실패해도 **이 단계가 얼마나 썼는지는 재고 넘어간다** (infra 25.52).
+          # 기본 셸이 `bash -e` 라 위가 죽으면 아래 줄이 통째로 건너뛰어졌다 —
+          # 하필 예산을 가장 알고 싶은 순간에 그 숫자를 잃는다
+          python scripts/d1_usage.py "7. 신호 끝" 2>&1 | python scripts/ops_tee.py -a catchup.log d1-usage.log
+          exit $rc
+
+      - name: 8. 장중 감시·뉴스 후보
+        id: targets
+        # `always() &&` 가 있어야 **앞 단계가 죽어도 이 단계가 돈다** (docs/infra.md 25.63).
+        # 1~8 은 서로 기댈 필요가 없다 — 시세를 못 받은 날에도 점수·신호는 있는 데이터로 낸다
+        if: always() && steps.check.outputs.use_d1 == 'true'
+        run: |
+          set -o pipefail
+          rc=0
+          # 읽기 예산 문 — 웹 몫을 남기지 못하면 이 단계는 내일로 (docs/infra.md 25.844). 예상치는 2026-10-01 실측의 약 1.1배
+          gate=0; python scripts/d1_read_gate.py "8. 장중 감시" 50000 2>&1 | python scripts/ops_tee.py -a catchup.log || gate=$?
+          # 78 만 "미룸" 이다 — 다른 실패(재기 실패 등)는 예전처럼 들어간다
+          if [ "$gate" = "78" ]; then exit 0; fi
+          python -m batch.jobs.monitor_targets --market KR 2>&1 | python scripts/ops_tee.py -a catchup.log || rc=$?
+          # 실패해도 **이 단계가 얼마나 썼는지는 재고 넘어간다** (infra 25.52).
+          # 기본 셸이 `bash -e` 라 위가 죽으면 아래 줄이 통째로 건너뛰어졌다 —
+          # 하필 예산을 가장 알고 싶은 순간에 그 숫자를 잃는다
+          python scripts/d1_usage.py "8. 장중 감시 끝" 2>&1 | python scripts/ops_tee.py -a catchup.log d1-usage.log
+          exit $rc
+
+      - name: 9. 결과 알림 (텔레그램)
+        # 끝났든 멈췄든 알린다. 멈춘 단계 이름은 steps 의 outcome 에서 찾는다 (scripts/catchup_report.py).
+        # 이 단계가 실패해도 따라잡기는 실패로 치지 않는다 — 스크립트가 늘 0 으로 끝난다
+        if: always() && steps.check.outputs.use_d1 == 'true'
+        env:
+          STEPS_JSON: ${{ toJSON(steps) }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          set -o pipefail
+          # 보낸 문장을 로그에도 남긴다 (2026-09-21, infra 25.54). 이 요약에 유니버스 수·
+          # 받은 거래일·오늘 쓴 D1 행이 한 줄로 들어 있는데, 여태 **텔레그램에만** 갔다.
+          # 클라우드 세션이 읽는 것은 10번이 올리는 catchup.log 뿐이라, 정작 세션은
+          # 단계별 사용량만 보고 "그래서 지금 몇 거래일인가" 는 사람에게 물어야 했다
+          python scripts/catchup_report.py --status "${{ job.status }}" 2>&1 | python scripts/ops_tee.py -a catchup.log
+
+      # 이름이 `9.` 로 시작하면 안 된다 — 테스트가 `startswith("9.")` 로 결과 알림 단계를 찾는다
+      # (tests/test_catchup_shell.py, tests/test_workflows.py). 9 와 10 사이라 `9-1` 로 적는다
+      - name: 9-1. 복귀 점검 (되살아나는 날 확인할 것을 스스로 판정한다)
+        # 되살아나는 날의 확인 목록을 **사람이 로그를 읽고 해석하는 대신** 여기서 판정한다
+        # (docs/infra.md 25.80). 9/20~21 에 고친 것들은 하나도 돌려 보지 못했고, 되살아나는 날은
+        # 분이 곧 돈이라 **한 번 도는 실행에서 못 본 것은 다음 날까지 모른다.**
+        #
+        # **`use_d1` 을 보지 않는다** — 0번이 깨져 아무것도 안 돈 날에도 STEPS_JSON 과 event 는
+        # 읽을 수 있고, 그날이야말로 이유를 읽어야 하는 날이다 (10번과 같은 이유, infra 25.53).
+        # 스크립트는 읽기만 하고 무슨 일이 있어도 0 으로 끝난다
+        if: always()
+        env:
+          STEPS_JSON: ${{ toJSON(steps) }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -o pipefail
+          # **먼저 다 받아 두고 나서** 파일에 붙인다. 판정이 읽는 파일(d1-usage.log)에 그대로
+          # 붙이기 때문이다 — 파이프로 이으면 tee 가 파일을 먼저 여는지 파이썬이 먼저 읽는지에
+          # 결과가 달라진다. d1-usage.log 에 붙이는 이유는 그것이 `--head-file` 이라
+          # **이슈 코멘트 맨 위**에 온다는 것이다 (scripts/publish_output.py). 세션이 거기부터 읽는다
+          OUT=$(python scripts/return_check.py --usage-log d1-usage.log 2>&1) || true
+          printf '%s\n' "$OUT" | python scripts/ops_tee.py -a catchup.log d1-usage.log
+
+      - name: 10. 기록을 이슈로 내보내기 (클라우드 세션이 로그를 못 읽는다)
+        # 멈췄든 끝났든 남긴다 — **멈춘 이유를 읽으려고 두는 것**이다 (docs/infra.md 25.17·25.21).
+        # 내보내기가 실패해도 따라잡기를 실패로 치지 않는다 (스크립트가 늘 0 으로 끝난다)
+        #
+        # **`use_d1` 을 보지 않는다** (2026-09-21, infra 25.53). 0번이 깨져서 아무것도 안 돈
+        # 날이야말로 이유를 읽어야 하는 날이다. 로그가 비면 스크립트가 조용히 넘어가므로
+        # 헛 코멘트가 달릴 걱정도 없다
+        #
+        # **다만 할 일이 없던 날은 뺀다** (25.84). Turso 로 돌아간 뒤에도 이 잡은 날마다 도는데,
+        # 그때마다 한 줄짜리 코멘트가 달리면 마지막 자리가 그것으로 덮인다. 0번이 **깨진** 날은
+        # 표식을 안 붙이므로 그대로 올라간다 — 그날이야말로 읽어야 하는 날이다
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 공개 저장소로 옮긴 뒤에는 비공개 운영 저장소로 보낸다 (docs/public-repo.md, infra 25.978)
+          OPS_REPO: ${{ secrets.OPS_REPO }}
+          OPS_TOKEN: ${{ secrets.OPS_TOKEN }}
+        run: |
+          if grep -q '^실행하지 않음: ' catchup.log 2>/dev/null; then
+            echo "따라잡을 것이 없던 날이라 이슈에 올리지 않는다 (docs/infra.md 25.84)"
+            exit 0
+          fi
+          python scripts/publish_output.py \
+            --title "운영 출력 (클라우드 세션용)" \
+            --file catchup.log \
+            --head-file d1-usage.log \
+            --note "D1 따라잡기 (${{ job.status }})"

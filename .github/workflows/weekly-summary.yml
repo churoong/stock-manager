@@ -1,0 +1,72 @@
+name: 주간 운영 요약
+
+# 일요일 아침 텔레그램 한 통 (docs/health.md 7장, docs/infra.md 25.943, 2026-10-04 사용자 결정 "다 진행해").
+# 지난 7일의 실행 결과·되풀이된 경고·Turso 월 읽기·수정주가 필요 종목·오래 안 돈 예약 작업을 모아 보낸다.
+# 읽기만 하고(batch_runs 약 300행 + api_usage 1행) 자기 실행 기록 한 줄만 쓴다. Actions 1분.
+# 월요일 아침 리포트와 겹치지 않게 일요일이다. 무응답 감시(웹 크론)는 "오늘 안 돈 것" 을 그날 알리므로 겹치지 않는다.
+on:
+  schedule:
+    - cron: "41 22 * * 6" # 토 22:41 UTC = 일 07:41 KST
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 보내지 않고 로그에만 찍는다
+        type: boolean
+        default: false
+
+concurrency:
+  group: weekly-summary
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write # 본문을 이슈 #1 에도 남긴다 — 클라우드 세션이 읽는다 (docs/infra.md 25.17)
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+      TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+      # DB 백엔드 전환 (docs/infra.md 25절). 비어 있으면 Turso 를 쓴다
+      DB_BACKEND: ${{ vars.DB_BACKEND }}
+      D1_ACCOUNT_ID: ${{ secrets.D1_ACCOUNT_ID }}
+      D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+      D1_API_TOKEN: ${{ secrets.D1_API_TOKEN }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      OFFLINE_MODE: "0"
+      LOG_LEVEL: INFO
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: DB 백엔드 고정 (이 워크플로의 모든 단계가 같은 DB 를 쓴다, docs/infra.md 25.472·25.480)
+        run: python -m batch.core.client --pin >> "$GITHUB_ENV"
+
+      - name: 요약 만들어 보내기
+        run: |
+          set -o pipefail
+          ARGS=""
+          if [ "${{ inputs.dry_run }}" = "true" ]; then ARGS="--dry-run"; fi
+          python -m batch.jobs.weekly_summary $ARGS 2>&1 | python scripts/ops_tee.py summary.txt
+
+      - name: 본문을 이슈로 내보내기
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 공개 저장소로 옮긴 뒤에는 비공개 운영 저장소로 보낸다 (docs/public-repo.md, infra 25.978)
+          OPS_REPO: ${{ secrets.OPS_REPO }}
+          OPS_TOKEN: ${{ secrets.OPS_TOKEN }}
+        run: |
+          python scripts/publish_output.py \
+            --title "운영 출력 (클라우드 세션용)" \
+            --file summary.txt \
+            --note "주간 운영 요약"

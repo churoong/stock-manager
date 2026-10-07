@@ -1,0 +1,76 @@
+name: 밸류에이션 밴드
+
+# 종목 상세 화면의 PBR 3년 밴드와 업종 안 백분위 (docs/stock_detail.md 2장).
+# 주 1회. 성과 지표(화 02:23 KST) 뒤, 유니버스·재무가 갱신된 다음에 돈다.
+# 실행 시간 [확인필요: 첫 실행 실측]. 가격을 40종목씩 묶어 읽는다.
+on:
+  schedule:
+    - cron: "53 17 * * 1" # 17:53 UTC 월요일 = 화요일 02:53 KST
+  workflow_dispatch:
+    inputs:
+      market:
+        description: 시장 (비우면 둘 다)
+        type: choice
+        options: ["", "KR", "US"]
+        default: ""
+
+concurrency:
+  group: valuation-bands
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+      TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+      # DB 백엔드 전환 (docs/infra.md 25절). 비어 있으면 Turso 를 쓴다
+      DB_BACKEND: ${{ vars.DB_BACKEND }}
+      D1_ACCOUNT_ID: ${{ secrets.D1_ACCOUNT_ID }}
+      D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+      D1_API_TOKEN: ${{ secrets.D1_API_TOKEN }}
+      OFFLINE_MODE: "0"
+      LOG_LEVEL: INFO
+      # 시세 사본 (docs/infra.md 25.888) — 맞춰 둔 사본이 있으면 시세·종목만 읽는 SELECT 를 거기서 읽는다
+      PRICE_REPLICA_PATH: .price-replica/prices.db
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: DB 백엔드 고정 (이 워크플로의 모든 단계가 같은 DB 를 쓴다, docs/infra.md 25.472·25.480)
+        run: python -m batch.core.client --pin >> "$GITHUB_ENV"
+
+      - name: 시세 사본 꺼내기 (docs/infra.md 25.888)
+        uses: actions/cache/restore@v4
+        with:
+          path: .price-replica
+          key: price-replica-${{ github.run_id }}
+          restore-keys: price-replica-
+
+      - name: 시세 사본 맞추기
+        id: replica
+        # 비었으면 Turso 월 읽기 진도가 허락할 때 처음부터 만든다(약 760만 행, 한 번). 못 맞추면 작업이 Turso 에서 읽는다
+        run: python scripts/price_replica.py sync --path .price-replica/prices.db
+
+      - name: 시세 사본 넣어 두기
+        if: ${{ steps.replica.outputs.changed == 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: .price-replica
+          key: price-replica-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: 계산
+        run: |
+          ARGS=""
+          if [ -n "${{ inputs.market }}" ]; then ARGS="--market ${{ inputs.market }}"; fi
+          python -m batch.jobs.valuation_bands $ARGS

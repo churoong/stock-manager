@@ -1,0 +1,39 @@
+name: 무거운 읽기 미리 보기
+
+# 다음 배치가 쓸 무거운 읽기를 쓰지 않고 돌려 본다 (docs/infra.md 25.7).
+# D1 은 질의당 30초 제한이 있다. 쓰기 한도가 막힌 날에도 읽기는 되므로 미리 확인한다.
+on:
+  workflow_dispatch:
+    inputs:
+      market:
+        description: 시장
+        type: choice
+        options: [KR, US]
+        default: KR
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+      TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+      # DB 백엔드 전환 (docs/infra.md 25절). 비어 있으면 Turso 를 쓴다
+      DB_BACKEND: ${{ vars.DB_BACKEND }}
+      D1_ACCOUNT_ID: ${{ secrets.D1_ACCOUNT_ID }}
+      D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+      D1_API_TOKEN: ${{ secrets.D1_API_TOKEN }}
+      OFFLINE_MODE: "0"
+      LOG_LEVEL: INFO
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: 돌려 보기
+        run: python scripts/probe_heavy_reads.py --market "${{ inputs.market }}"

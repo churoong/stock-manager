@@ -1,0 +1,54 @@
+name: 실적 일정
+
+# 야후 예정일(종목당 1회)을 먼저 받고, 없는 종목만 법정 제출 기한으로 추정한다 (docs/portfolio.md 5장).
+# 야후 호출이 유니버스 전체라 주 1회. 2,700종목 × 0.3초 = 최소 14분 [확인필요: 첫 실행 실측].
+on:
+  schedule:
+    - cron: "53 15 * * 1" # 15:53 UTC 월요일 = 화요일 00:53 KST
+  repository_dispatch:
+    types: [earnings-calendar]
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: 앞에서부터 몇 종목만 (시험용, 비우면 전부)
+        type: string
+        default: ""
+      no_yahoo:
+        description: 야후를 부르지 않고 추정만
+        type: boolean
+        default: false
+
+concurrency:
+  group: earnings-calendar
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+      TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+      # DB 백엔드 전환 (docs/infra.md 25절). 비어 있으면 Turso 를 쓴다
+      DB_BACKEND: ${{ vars.DB_BACKEND }}
+      D1_ACCOUNT_ID: ${{ secrets.D1_ACCOUNT_ID }}
+      D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+      D1_API_TOKEN: ${{ secrets.D1_API_TOKEN }}
+      OFFLINE_MODE: "0"
+      LOG_LEVEL: INFO
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: 수집·추정
+        run: |
+          ARGS=""
+          if [ -n "${{ inputs.limit }}" ]; then ARGS="$ARGS --limit ${{ inputs.limit }}"; fi
+          if [ "${{ inputs.no_yahoo }}" = "true" ]; then ARGS="$ARGS --no-yahoo"; fi
+          python -m batch.jobs.earnings_calendar $ARGS

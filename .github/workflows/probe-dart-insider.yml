@@ -1,0 +1,26 @@
+name: DART 내부자 API 확인
+
+# 수집기를 만들기 전에 실제 응답 모양을 본다 (docs/data-sources.md 16.1). 손으로만 돌린다.
+# 로그의 키 이름과 예시 행을 docs/data-sources.md 16.1 에 옮기고 [확인필요] 를 지운 뒤 수집기를 만든다.
+on:
+  workflow_dispatch:
+    inputs:
+      corp_code:
+        description: DART 고유번호 (기본 삼성전자 00126380)
+        type: string
+        default: "00126380"
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install requests
+      - name: 호출
+        env:
+          DART_API_KEY: ${{ secrets.DART_API_KEY }}
+        run: python scripts/probe_dart_insider.py --corp-code "${{ inputs.corp_code }}"

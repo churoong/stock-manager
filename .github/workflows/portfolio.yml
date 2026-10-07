@@ -1,0 +1,54 @@
+name: 포트폴리오 재계산
+
+# 매매·배당 원본에서 체결 묶음·보유·평가·요약을 다시 만든다 (docs/portfolio.md).
+# 웹에서 매매를 저장하면 repository_dispatch(portfolio) 로 깨운다. 1분 안쪽.
+# 같은 계산을 여러 번 불러도 결과가 같으므로, 밀린 요청은 GitHub 가 마지막 하나만 남긴다.
+on:
+  repository_dispatch:
+    types: [portfolio]
+  workflow_dispatch:
+    inputs:
+      fx_lookback:
+        description: 환율을 몇 달력일치 받을지 (과거 매매 입력 전 한 번 1900)
+        type: string
+        default: "10"
+
+concurrency:
+  group: portfolio
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+      TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+      # DB 백엔드 전환 (docs/infra.md 25절). 비어 있으면 Turso 를 쓴다
+      DB_BACKEND: ${{ vars.DB_BACKEND }}
+      D1_ACCOUNT_ID: ${{ secrets.D1_ACCOUNT_ID }}
+      D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+      D1_API_TOKEN: ${{ secrets.D1_API_TOKEN }}
+      OFFLINE_MODE: "0"
+      LOG_LEVEL: INFO
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: DB 백엔드 고정 (이 워크플로의 모든 단계가 같은 DB 를 쓴다, docs/infra.md 25.472)
+        run: python -m batch.core.client --pin >> "$GITHUB_ENV"
+
+      - name: 환율
+        run: python -m batch.jobs.fx --lookback "${{ inputs.fx_lookback || '10' }}"
+
+      - name: 재계산
+        run: python -m batch.jobs.portfolio

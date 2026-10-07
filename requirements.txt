@@ -1,0 +1,39 @@
+# 배치 실행 의존성. 웹앱 쪽은 web/package.json 에 따로 둔다.
+# 버전은 2026-09-16 기준 PyPI 최신으로 고정했다.
+# 올릴 때는 야후 파이낸스 쪽이 자주 깨지므로 yfinance 를 먼저 확인한다.
+
+# 시세·재무 수집
+yfinance==1.7.0
+
+# 데이터 처리
+pandas==3.0.5
+# numpy 는 코드가 직접 import 하지 않는다. pandas·exchange-calendars 가 요구해서
+# 어차피 깔리는데, 버전이 저절로 움직이면 pandas 쪽이 깨질 수 있어 여기서 못 박는다
+numpy==2.5.3
+
+# HTTP
+requests==2.34.2
+
+# 거래소 캘린더 (한국 XKRX, 미국 XNYS)
+exchange-calendars==4.13.2
+
+# 로컬 개발용 .env 로딩. 클라우드에서는 환경변수를 직접 읽는다
+python-dotenv==1.2.3
+
+# SQLAlchemy 는 쓰지 않는다 (2026-09-20 확인하고 지움).
+# 한때 "Step 1 부터 본격 사용" 이라고 적고 고정해 두었지만 끝내 쓰지 않았다.
+# Alembic 을 포기했기 때문이다 — Alembic 은 SQLAlchemy 방언을 요구하는데 Turso 용
+# 파이썬 드라이버가 낡아 동작하지 않는다(docs/infra.md 2번). 그래서 번호 붙은 SQL
+# 파일을 직접 적용한다(batch/core/db.py). import 하는 곳이 한 곳도 없고, 빼고도
+# 테스트 1,700여 개가 그대로 돈다. pandas 의 선택 의존성이라 저절로 깔리지도 않는다.
+
+# Turso 접속에는 별도 패키지를 쓰지 않는다.
+# 공식 파이썬 라이브러리(libsql-client)는 2024-05 이후 배포가 없고
+# 현재 Turso 에 401 을 받는다. batch/core/turso.py 가 검증된 HTTP 경로
+# (/v2/pipeline)를 requests 로 직접 호출한다.
+
+# 영어 뉴스 감성 (docs/sentiment.md). MIT. 사전과 규칙만 쓰고 네트워크를 타지 않는다
+vaderSentiment==3.3.2
+
+# 워크플로 YAML 검증 테스트용 (tests/test_workflows.py). 들여쓰기가 깨진 채 올라간 적이 있다
+PyYAML==6.0.3

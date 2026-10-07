@@ -1,0 +1,8 @@
+{
+  "_설명": "오프라인 모드 테스트용. 실제 고유번호 파일에서 몇 건만 옮겼다.",
+  "corps": [
+    {"corp_code": "00126380", "corp_name": "삼성전자", "stock_code": "005930"},
+    {"corp_code": "00164779", "corp_name": "SK하이닉스", "stock_code": "000660"},
+    {"corp_code": "00164742", "corp_name": "현대자동차", "stock_code": "005380"}
+  ]
+}

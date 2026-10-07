@@ -1,0 +1,146 @@
+name: 일일 배치 (국내)
+
+# 08:27 KST = 23:27 UTC 전날. (2026-09-17 에 07:57 에서 늦춤)
+# 한국거래소가 전일 시세를 07:56 KST 에는 주지 않고 08:17 에는 줬다.
+# 더 이르면 매일 0건으로 실패한다. 근거는 docs/infra.md 16.1절.
+# 예약 실행은 지연되거나 조용히 건너뛰므로 cron 은 예비 경로다.
+# 정시성은 cron-job.org 가 repository_dispatch 로 깨워 확보한다.
+# 매시 정각은 혼잡하므로 피한다.
+on:
+  schedule:
+    - cron: "27 23 * * 0-4" # 23:27 UTC = 08:27 KST 다음날 (월~금)
+    # 예비 — D1 하루 읽기 한도는 UTC 자정(09:00 KST)에 풀리는데 08:27 실행은 **그 전날 몫**을 쓴다. 전날 한도가 바닥이면 08:27 은
+    # "한도로 건너뜀" 으로 끝나고 다시 도는 길이 없었다(2026-10-01 하루 읽기 124%, docs/infra.md 25.870). 한도가 풀린 뒤 한 번 더 —
+    # 그날 성공 기록이 있으면 곧바로 끝나고(`has_successful_run`), 없으면 장중 "늦은 리포트" 로 낸다(25.845)
+    - cron: "35 0 * * 1-5" # 00:35 UTC = 09:35 KST (월~금)
+  repository_dispatch:
+    types: [daily-kr]
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 예약 시각 판단을 건너뛰고 실행
+        type: boolean
+        default: true
+      dry_run:
+        description: 텔레그램으로 보내지 않고 로그로만 확인
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  issues: write # 기록을 이슈 코멘트로 내보낸다 (docs/infra.md 25.17)
+
+concurrency:
+  group: daily-kr
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: DB 백엔드 고정 (이 워크플로의 모든 단계가 같은 DB 를 쓴다, docs/infra.md 25.472·25.480)
+        # 시세 사본 맞추기(25.888)가 두 번째 파이썬이라 배치와 같은 DB 를 보게 고정한다
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          DB_BACKEND: ${{ vars.DB_BACKEND }}
+          D1_ACCOUNT_ID: ${{ secrets.D1_ACCOUNT_ID }}
+          D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+          D1_API_TOKEN: ${{ secrets.D1_API_TOKEN }}
+        run: python -m batch.core.client --pin >> "$GITHUB_ENV"
+
+      - name: 배치 실행
+        id: batch
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # 리포트 종목 줄의 "매매 입력" 링크 (docs/infra.md 25.944). 변수가 비어 있으면 링크 없이 보낸다
+          APP_URL: ${{ vars.APP_URL }}
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          # DB 백엔드 전환 (docs/infra.md 25절). 비어 있으면 Turso 를 쓴다
+          DB_BACKEND: ${{ vars.DB_BACKEND }}
+          D1_ACCOUNT_ID: ${{ secrets.D1_ACCOUNT_ID }}
+          D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+          D1_API_TOKEN: ${{ secrets.D1_API_TOKEN }}
+          KRX_API_KEY: ${{ secrets.KRX_API_KEY }}
+          # 공시 수집 단계(jobs/disclosures_kr)가 DART 를 부른다. 빠져 있어 매일 "DART_API_KEY 가 비어 있습니다" 로
+          # 공시를 하나도 못 받았다 (docs/infra.md 25.882)
+          DART_API_KEY: ${{ secrets.DART_API_KEY }}
+          OFFLINE_MODE: "0"
+          LOG_LEVEL: INFO
+        run: |
+          set -o pipefail
+          ARGS="--market KR"
+          # 화면(/status 수동 실행)이 repository_dispatch 로 깨우면 client_payload.force 로 온다. 예약 시각 밖이라 --force 가 없으면 건너뛴다
+          if [ "${{ inputs.force }}" = "true" ] || [ "${{ github.event.client_payload.force }}" = "true" ]; then ARGS="$ARGS --force"; fi
+          if [ "${{ inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
+          python -m batch.jobs.daily $ARGS 2>&1 | python scripts/ops_tee.py -a run.log
+          # **아무 일도 하지 않은 실행은 이슈에 올리지 않는다** (docs/infra.md 25.84).
+          # 세션이 읽는 것은 이슈 #1 의 **마지막 코멘트** 하나인데(25.17), 휴장일·서머타임이
+          # 안 맞는 시각에도 평일마다 빈 코멘트가 달려 정작 읽어야 할 것을 밀어냈다.
+          # 표식은 batch/jobs/daily.py 의 NOTHING_DONE — tests/test_daily_skip.py 가 둘을 묶어 둔다
+          if grep -q '^실행하지 않음: ' run.log; then
+            echo "did_work=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "did_work=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 기록을 이슈로 내보내기 (클라우드 세션이 로그를 못 읽는다)
+        # 멈췄든 끝났든 남긴다 — **멈춘 이유를 읽으려고** 두는 것이다 (docs/infra.md 25.21)
+        if: always() && steps.batch.outputs.did_work != 'false'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 공개 저장소로 옮긴 뒤에는 비공개 운영 저장소로 보낸다 (docs/public-repo.md, infra 25.978)
+          OPS_REPO: ${{ secrets.OPS_REPO }}
+          OPS_TOKEN: ${{ secrets.OPS_TOKEN }}
+        run: |
+          python scripts/publish_output.py \
+            --title "운영 출력 (클라우드 세션용)" \
+            --file run.log \
+            --note "일일 배치 (국내) (${{ job.status }})"
+
+      # 시세 사본을 따뜻하게 (docs/infra.md 25.888). 주간 작업(지표·밴드·성과·백테스트)이 과거 시세를 사본에서 읽는다.
+      # 캐시는 7일 안 쓰면 지워진다 — 평일마다 맞춰 넣어 두면 주간 작업의 맞추기가 작고(그날 새 행·고친 범위만) 사본이 살아 있다.
+      # 비었으면 만들지 않는다(처음 만들기는 주간 작업이 진도 문을 보고 한다). 일일 배치 결과와는 상관없다 — 실패해도 리포트는 이미 나갔다
+      - name: 시세 사본 꺼내기 (docs/infra.md 25.888)
+        if: ${{ !cancelled() && steps.batch.outputs.did_work == 'true' }}
+        uses: actions/cache/restore@v4
+        with:
+          path: .price-replica
+          key: price-replica-${{ github.run_id }}
+          restore-keys: price-replica-
+
+      - name: 시세 사본 맞추기
+        id: replica
+        if: ${{ !cancelled() && steps.batch.outputs.did_work == 'true' }}
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          DB_BACKEND: ${{ vars.DB_BACKEND }}
+          D1_ACCOUNT_ID: ${{ secrets.D1_ACCOUNT_ID }}
+          D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+          D1_API_TOKEN: ${{ secrets.D1_API_TOKEN }}
+          OFFLINE_MODE: "0"
+        run: python scripts/price_replica.py sync --path .price-replica/prices.db --no-build
+
+      - name: 시세 사본 넣어 두기
+        if: ${{ !cancelled() && steps.replica.outputs.changed == 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: .price-replica
+          key: price-replica-${{ github.run_id }}-${{ github.run_attempt }}

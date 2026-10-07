@@ -1,0 +1,57 @@
+name: 배당 수집
+
+# 사업보고서가 3월 말까지 접수되므로 4·5월 초에 받으면 새 연도가 들어온다.
+# 그 밖의 달에는 바뀌는 것이 거의 없다. 1,758회 호출, 약 10분 [확인필요: 첫 실행에서 실측].
+on:
+  schedule:
+    - cron: "41 18 5 4,5 *" # 4·5월 5일 18:41 UTC = 6일 03:41 KST
+  workflow_dispatch:
+    inputs:
+      latest:
+        description: 최근 사업연도 (비우면 작년)
+        type: string
+        default: ""
+      limit:
+        description: 앞에서부터 몇 사만 (시험용, 비우면 전부)
+        type: string
+        default: ""
+
+concurrency:
+  group: dividends
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    # 처음 여섯 해를 채울 때 약 5,300회(25.476·25.478). 넘어도 다음 실행이 받은 것을 건너뛰고 이어 간다
+    timeout-minutes: 90
+    env:
+      DART_API_KEY: ${{ secrets.DART_API_KEY }}
+      TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+      TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+      # DB 백엔드 전환 (docs/infra.md 25절). 비어 있으면 Turso 를 쓴다
+      DB_BACKEND: ${{ vars.DB_BACKEND }}
+      D1_ACCOUNT_ID: ${{ secrets.D1_ACCOUNT_ID }}
+      D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+      D1_API_TOKEN: ${{ secrets.D1_API_TOKEN }}
+      OFFLINE_MODE: "0"
+      LOG_LEVEL: INFO
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 수집
+        run: |
+          ARGS=""
+          if [ -n "${{ inputs.latest }}" ]; then ARGS="$ARGS --latest ${{ inputs.latest }}"; fi
+          if [ -n "${{ inputs.limit }}" ]; then ARGS="$ARGS --limit ${{ inputs.limit }}"; fi
+          python -m batch.jobs.dividends $ARGS

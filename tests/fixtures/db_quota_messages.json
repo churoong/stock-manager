@@ -1,0 +1,100 @@
+{
+  "왜_이_파일이_있나": [
+    "DB 오류 문구를 보고 '한도에 걸린 것인가' 를 가르는 표다 (docs/infra.md 25.6·25.43).",
+    "같은 판정이 파이썬(batch/core/db.quota_reason)과 타입스크립트(web/lib/db.quotaReason)",
+    "두 군데에 있다. 두 함수의 본문은 지금 글자 그대로 같지만, 그것을 확인하는 장치가 없었다.",
+    "",
+    "어긋나면 무슨 일이 나나:",
+    "  · 배치 — 한도면 guard() 가 '건너뜀'(종료코드 0)으로 바꾼다. 못 알아보면 매일 실패",
+    "    알림이 쏟아지고, 진짜 고장이 그 속에 묻힌다 (25.6)",
+    "  · 웹 — probeTurso() 가 blocked 를 정하고, 그 값이 **어느 DB 를 읽을지**를 가른다",
+    "    (tests/fixtures/db_backend_decision.json). 한도를 '다른 장애' 로 읽으면 Turso 로",
+    "    갔다가 막힌 DB 를 읽는다",
+    "  · 크론 경로 — 한도면 200 + skipped 로 답한다. 500 을 주면 cron-job.org 가 실패를",
+    "    쌓다가 작업을 꺼 버릴 수 있다 [확인필요: 몇 번이면 끄는지]",
+    "",
+    "**문구는 실제로 받아 본 것만 적는다.** 지어낸 문구로 표를 채우면 진짜 응답이 바뀌었을 때",
+    "아무도 모른다. 새 문구를 만나면 여기 한 줄을 더하고 두 언어가 같이 배우게 한다.",
+    "",
+    "`쪽` 은 어느 규칙이 걸렸는가다. 돌려주는 한국어 문장은 두 언어가 조금 다르므로",
+    "(줄바꿈·괄호) 문장 전체가 아니라 **분류**를 맞춘다.",
+    "",
+    "`실측` 이 false 인 줄은 **아직 받아 본 적 없는 모양**이다. 규칙에 걸린 가지를 붙들려고",
+    "둔다 — 돌연변이 검사에서 `free tier` 가지를 지워도 아무 줄도 깨지지 않는 것을 보고",
+    "알았다(2026-09-21). 실제로 그 문구를 받으면 `실측` 을 true 로 바꾸고 문구를 고친다."
+  ],
+  "표": [
+    {
+      "쪽": "d1_daily",
+      "문구": "D1 HTTP 400: Your account has exceeded D1's free tier daily row write limit. Please upgrade to continue.",
+      "왜": "D1 어댑터가 400 본문을 그대로 붙여 올린다 (tests/test_d1_client.py)",
+      "실측": true
+    },
+    {
+      "쪽": "d1_daily",
+      "문구": "D1 HTTP 400: exceeded D1's free tier daily row write limit",
+      "왜": "짧게 오는 모양. 배치 여러 곳의 테스트가 이 문구를 쓴다",
+      "실측": true
+    },
+    {
+      "쪽": "d1_daily",
+      "문구": "{\"errors\":[{\"code\":7500,\"message\":\"exceeded D1's free tier daily row write limit\"}]}",
+      "왜": "JSON 본문 그대로. 어댑터가 파싱하기 전 단계 (tests/test_d1_transport.py)",
+      "실측": true
+    },
+    {
+      "쪽": "d1_daily",
+      "실측": false,
+      "문구": "D1 HTTP 400: Your account has exceeded D1's free tier daily read limit.",
+      "왜": "[확인필요] D1 은 하루 읽기 한도(500만 행)도 있다. 그 문구는 아직 받아 본 적이 없다. 규칙의 둘째 가지(free tier + limit)가 이것을 잡으라고 있는데, 이 줄이 없으면 그 가지를 지워도 테스트가 통과한다. **알려진 부정확**: 읽기 한도인데 '쓰기 한도' 라고 답한다. 풀리는 시각은 같아서 사람이 할 일은 달라지지 않으므로 그대로 두었다"
+    },
+    {
+      "쪽": "turso_monthly",
+      "문구": "Operation was blocked: SQL read operations are forbidden (reads are blocked, do you need to upgrade your plan?)",
+      "왜": "2026-09-17 에 실제로 받은 읽기 차단 (docs/infra.md 23절)",
+      "실측": true
+    },
+    {
+      "쪽": "turso_monthly",
+      "문구": "Operation was blocked: SQL write operations are forbidden (writes are blocked)",
+      "왜": "쓰기 차단. 조회는 되던 단계",
+      "실측": true
+    },
+    {
+      "쪽": "turso_monthly",
+      "문구": "SQL 실패: Operation was blocked: SQL read operations are forbidden (reads are blocked)",
+      "왜": "어댑터가 앞말을 붙여도 알아봐야 한다",
+      "실측": true
+    },
+    {
+      "쪽": null,
+      "문구": "no such table: prices",
+      "왜": "마이그레이션이 안 돌았다. 기다린다고 풀리지 않으므로 **실패로 다뤄야** 한다",
+      "실측": true
+    },
+    {
+      "쪽": null,
+      "문구": "401 unauthorized",
+      "왜": "토큰이 잘렸다 (docs/infra.md 4절). 사람이 고쳐야 한다",
+      "실측": true
+    },
+    {
+      "쪽": null,
+      "문구": "D1 HTTP 503: upstream connect error",
+      "왜": "잠깐의 장애. 한도로 읽으면 웹이 D1 로 눌러앉는다",
+      "실측": true
+    },
+    {
+      "쪽": null,
+      "문구": "Connection aborted: Remote end closed connection without response",
+      "왜": "연결 끊김. 다시 보내면 되는 것이지 기다릴 일이 아니다",
+      "실측": true
+    },
+    {
+      "쪽": null,
+      "문구": "",
+      "왜": "빈 문구. 여기서 한도라고 답하면 모든 오류가 조용히 건너뛰어진다",
+      "실측": true
+    }
+  ]
+}

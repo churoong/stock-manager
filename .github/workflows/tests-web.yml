@@ -1,0 +1,44 @@
+name: 테스트 (웹)
+
+# tests.yml 에서 갈라 나왔다 (2026-09-20, docs/infra.md 25.39).
+#
+# 왜 갈랐나: 한 워크플로에 잡 둘을 두면 배치만 고친 커밋에도 웹 잡이 돈다. GitHub 은
+# **잡마다 분을 올림해 세므로** 35초짜리 잡이 1분으로 청구된다. 커밋의 70% 가 배치만
+# 건드리는데 그때마다 1분씩 버리고 있었다. 실측으로 테스트가 월 무료 분의 18% 를
+# 먹고 있었고(364분/182회), 가르면 그 중 절반 가까이가 사라진다.
+#
+# 반대 방향은 가르지 않았다 — 파이썬 테스트가 웹 소스를 읽으므로(tests.yml 주석)
+# 웹만 고친 커밋에도 배치 테스트는 돌아야 한다.
+# **푸시마다 돌지 않는다** (2026-10-06, docs/infra.md 25.975 — tests.yml 과 같은 이유). 손으로만 돌린다.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: tests-web-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    name: 웹앱 (TypeScript)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: 의존성 설치
+        run: npm ci
+
+      - name: 타입 검사
+        run: npm run typecheck
+
+      - name: 테스트
+        run: npm test

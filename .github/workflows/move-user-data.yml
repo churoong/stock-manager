@@ -1,0 +1,51 @@
+name: 사용자 데이터 옮기기
+
+# 사람이 넣은 데이터(매매·배당·관심종목·설정·스크리너 조건·뉴스·감성)를 한 DB 에서 다른 DB 로 옮긴다.
+# D1 → Turso 로 되돌릴 때 쓴다 (docs/infra.md 25.9). 종목 번호를 (종목코드, 시장)으로 다시 맞춘다.
+# 기본은 시험 실행이다. apply 를 켜야 쓴다. **먼저 시험 실행으로 옮길 행 수를 본다.**
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: 원본
+        type: choice
+        options: [d1, turso]
+        default: d1
+      target:
+        description: 대상
+        type: choice
+        options: [turso, d1]
+        default: turso
+      apply:
+        description: 실제로 쓴다 (끄면 시험 실행)
+        type: boolean
+        default: false
+
+jobs:
+  move:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+      TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+      # DB 백엔드 전환 (docs/infra.md 25절). 비어 있으면 Turso 를 쓴다
+      DB_BACKEND: ${{ vars.DB_BACKEND }}
+      D1_ACCOUNT_ID: ${{ secrets.D1_ACCOUNT_ID }}
+      D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+      D1_API_TOKEN: ${{ secrets.D1_API_TOKEN }}
+      OFFLINE_MODE: "0"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: 옮기기
+        run: |
+          ARGS="--from ${{ inputs.source }} --to ${{ inputs.target }}"
+          if [ "${{ inputs.apply }}" = "true" ]; then ARGS="$ARGS --apply"; fi
+          python scripts/move_user_data.py $ARGS

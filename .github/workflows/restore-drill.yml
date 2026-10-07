@@ -1,0 +1,87 @@
+name: 백업 복구 리허설
+
+# 가장 최근 **필수 백업** 아티팩트를 받아 빈 SQLite 에 되살리고 표별 행 수를 대 본다 (docs/backup.md 6장, docs/infra.md 25.946).
+# 백업은 복구해 봐야 백업이다 — 매주 덤프가 돌지만 실제로 되살려 본 적이 운영 기록에 없었다.
+# **운영 DB 는 건드리지 않는다.** `batch_runs` 에 결과 한 줄만 적는다(/status "복구 리허설" 칸). Actions 2~3분, 분기 1회.
+on:
+  schedule:
+    - cron: "23 17 5 1,4,7,10 *" # 분기 첫 달 5일 17:23 UTC = 6일 02:23 KST — 그달 1일 전체 백업·2일 예비 뒤
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: 어느 백업으로 — latest 는 필수·전체 가운데 가장 최근 것
+        type: choice
+        options: [latest, essential, full]
+        default: latest
+
+concurrency:
+  group: restore-drill
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read # 백업 아티팩트를 내려받는다
+  issues: write # 결과를 이슈 #1 에 남긴다 (docs/infra.md 25.17)
+
+jobs:
+  drill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45 # 전체 백업(약 800만 행)이면 넣는 데 시간이 든다 `[확인필요: 첫 전체 리허설 실측]`
+    env:
+      TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+      TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+      # DB 백엔드 전환 (docs/infra.md 25절). 비어 있으면 Turso 를 쓴다 — 실행 기록 한 줄에만 쓴다
+      DB_BACKEND: ${{ vars.DB_BACKEND }}
+      D1_ACCOUNT_ID: ${{ secrets.D1_ACCOUNT_ID }}
+      D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+      D1_API_TOKEN: ${{ secrets.D1_API_TOKEN }}
+      OFFLINE_MODE: "0"
+      LOG_LEVEL: INFO
+      SCOPE: ${{ inputs.scope || 'latest' }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: DB 백엔드 고정 (이 워크플로의 모든 단계가 같은 DB 를 쓴다, docs/infra.md 25.472·25.480)
+        run: python -m batch.core.client --pin >> "$GITHUB_ENV"
+
+      - name: 가장 최근 백업 내려받기
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # **목록 순서를 믿지 않는다** (25.946 첫 실행: `per_page=1` 의 첫 줄이 9-17 것이었다 — 그 백업엔 행 수 표식이 없어 대조를 못 했다).
+        # 만료되지 않은 것 가운데 `created_at` 이 가장 늦은 것을 고른다. 기본(latest)은 필수·전체를 가리지 않는다 —
+        # Actions 가 멈춘 달(9/20~10/1)처럼 주간 필수 백업이 끊기면 가장 최근 것이 전체 백업일 수 있다
+        run: |
+          set -o pipefail
+          if [ "$SCOPE" = "latest" ]; then NAME_FILTER='select(.name | startswith("db-backup-"))'; else NAME_FILTER="select(.name == \"db-backup-${SCOPE}\")"; fi
+          ID=$(gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts?per_page=100" \
+            --jq "[.artifacts[] | ${NAME_FILTER} | select(.expired | not)] | sort_by(.created_at) | last | .id")
+          if [ -z "$ID" ] || [ "$ID" = "null" ]; then echo "백업 아티팩트(${SCOPE})가 없다"; exit 1; fi
+          gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${ID}/zip" > backup.zip
+          mkdir -p backup && unzip -o backup.zip -d backup
+          ls -la backup
+
+      - name: 리허설
+        run: |
+          set -o pipefail
+          FILE=$(ls backup/*.sql.gz | head -1)
+          python scripts/restore_drill.py "$FILE" --record-run 2>&1 | python scripts/ops_tee.py drill.txt
+
+      - name: 결과를 이슈로 내보내기
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 공개 저장소로 옮긴 뒤에는 비공개 운영 저장소로 보낸다 (docs/public-repo.md, infra 25.978)
+          OPS_REPO: ${{ secrets.OPS_REPO }}
+          OPS_TOKEN: ${{ secrets.OPS_TOKEN }}
+        run: |
+          python scripts/publish_output.py \
+            --title "운영 출력 (클라우드 세션용)" \
+            --file drill.txt \
+            --note "백업 복구 리허설"

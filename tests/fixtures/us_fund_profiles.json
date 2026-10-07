@@ -1,0 +1,697 @@
+{
+ "_설명": "오프라인 테스트용. 2026-09-17 야후 quoteSummary 실제 응답에서 이 앱이 읽는 필드만 남겼다.",
+ "VOO": {
+  "quoteSummary": {
+   "result": [
+    {
+     "fundProfile": {
+      "categoryName": "Large Blend",
+      "family": "Vanguard",
+      "legalType": "Exchange Traded Fund",
+      "feesExpensesInvestment": {
+       "annualReportExpenseRatio": {
+        "raw": 0.00029999999,
+        "fmt": "0.03%"
+       }
+      }
+     },
+     "defaultKeyStatistics": {
+      "totalAssets": {
+       "raw": 1756880437248,
+       "fmt": "1.76T"
+      },
+      "fundInceptionDate": {
+       "raw": 1283817600,
+       "fmt": "2010-09-07"
+      }
+     },
+     "summaryDetail": {
+      "totalAssets": {
+       "raw": 1756880437248,
+       "fmt": "1.76T"
+      },
+      "averageVolume": {
+       "raw": 7408516,
+       "fmt": "7.41M"
+      },
+      "previousClose": {
+       "raw": 696.2,
+       "fmt": "696.20"
+      },
+      "currency": "USD"
+     },
+     "topHoldings": {
+      "stockPosition": {
+       "raw": 0.9987,
+       "fmt": "99.87%"
+      },
+      "bondPosition": {
+       "raw": 0,
+       "fmt": "0.00%"
+      },
+      "holdings": [
+       {
+        "symbol": "NVDA",
+        "holdingName": "NVIDIA Corp",
+        "holdingPercent": {
+         "raw": 0.075486995,
+         "fmt": "7.55%"
+        }
+       },
+       {
+        "symbol": "AAPL",
+        "holdingName": "Apple Inc",
+        "holdingPercent": {
+         "raw": 0.0704422,
+         "fmt": "7.04%"
+        }
+       },
+       {
+        "symbol": "MSFT",
+        "holdingName": "Microsoft Corp",
+        "holdingPercent": {
+         "raw": 0.053597398,
+         "fmt": "5.36%"
+        }
+       },
+       {
+        "symbol": "AMZN",
+        "holdingName": "Amazon.com Inc",
+        "holdingPercent": {
+         "raw": 0.0412761,
+         "fmt": "4.13%"
+        }
+       },
+       {
+        "symbol": "GOOGL",
+        "holdingName": "Alphabet Inc Class A",
+        "holdingPercent": {
+         "raw": 0.0324214,
+         "fmt": "3.24%"
+        }
+       },
+       {
+        "symbol": "AVGO",
+        "holdingName": "Broadcom Inc",
+        "holdingPercent": {
+         "raw": 0.028615601,
+         "fmt": "2.86%"
+        }
+       },
+       {
+        "symbol": "GOOG",
+        "holdingName": "Alphabet Inc Class C",
+        "holdingPercent": {
+         "raw": 0.0261713,
+         "fmt": "2.62%"
+        }
+       },
+       {
+        "symbol": "META",
+        "holdingName": "Meta Platforms Inc Class A",
+        "holdingPercent": {
+         "raw": 0.0189824,
+         "fmt": "1.90%"
+        }
+       },
+       {
+        "symbol": "JPM",
+        "holdingName": "JPMorgan Chase & Co",
+        "holdingPercent": {
+         "raw": 0.014633501,
+         "fmt": "1.46%"
+        }
+       },
+       {
+        "symbol": "BRK-B",
+        "holdingName": "Berkshire Hathaway Inc Class B",
+        "holdingPercent": {
+         "raw": 0.0145603,
+         "fmt": "1.46%"
+        }
+       }
+      ]
+     }
+    }
+   ],
+   "error": null
+  }
+ },
+ "SPLG": {
+  "quoteSummary": {
+   "result": [
+    {
+     "fundProfile": {
+      "categoryName": "Large Blend",
+      "family": "State Street Investment Management",
+      "legalType": "Exchange Traded Fund",
+      "feesExpensesInvestment": {
+       "annualReportExpenseRatio": {
+        "raw": 0.0002,
+        "fmt": "0.02%"
+       }
+      }
+     },
+     "defaultKeyStatistics": {
+      "totalAssets": {
+       "raw": 97328324608,
+       "fmt": "97.33B"
+      },
+      "fundInceptionDate": {
+       "raw": 1131408000,
+       "fmt": "2005-11-08"
+      }
+     },
+     "summaryDetail": {
+      "totalAssets": {
+       "raw": 97328324608,
+       "fmt": "97.33B"
+      },
+      "averageVolume": {
+       "raw": 10140375,
+       "fmt": "10.14M"
+      },
+      "previousClose": {
+       "raw": 80.86,
+       "fmt": "80.86"
+      },
+      "currency": "USD"
+     },
+     "topHoldings": {
+      "stockPosition": {
+       "raw": 0.9997,
+       "fmt": "99.97%"
+      },
+      "bondPosition": {
+       "raw": 0,
+       "fmt": "0.00%"
+      },
+      "holdings": [
+       {
+        "symbol": "NVDA",
+        "holdingName": "NVIDIA Corp",
+        "holdingPercent": {
+         "raw": 0.073789805,
+         "fmt": "7.38%"
+        }
+       },
+       {
+        "symbol": "AAPL",
+        "holdingName": "Apple Inc",
+        "holdingPercent": {
+         "raw": 0.070704795,
+         "fmt": "7.07%"
+        }
+       },
+       {
+        "symbol": "MSFT",
+        "holdingName": "Microsoft Corp",
+        "holdingPercent": {
+         "raw": 0.0624858,
+         "fmt": "6.25%"
+        }
+       },
+       {
+        "symbol": "AMZN",
+        "holdingName": "Amazon.com Inc",
+        "holdingPercent": {
+         "raw": 0.0386719,
+         "fmt": "3.87%"
+        }
+       },
+       {
+        "symbol": "AVGO",
+        "holdingName": "Broadcom Inc",
+        "holdingPercent": {
+         "raw": 0.0323825,
+         "fmt": "3.24%"
+        }
+       },
+       {
+        "symbol": "GOOGL",
+        "holdingName": "Alphabet Inc Class A",
+        "holdingPercent": {
+         "raw": 0.031821597,
+         "fmt": "3.18%"
+        }
+       },
+       {
+        "symbol": "GOOG",
+        "holdingName": "Alphabet Inc Class C",
+        "holdingPercent": {
+         "raw": 0.025541,
+         "fmt": "2.55%"
+        }
+       },
+       {
+        "symbol": "META",
+        "holdingName": "Meta Platforms Inc Class A",
+        "holdingPercent": {
+         "raw": 0.0240115,
+         "fmt": "2.40%"
+        }
+       },
+       {
+        "symbol": "TSLA",
+        "holdingName": "Tesla Inc",
+        "holdingPercent": {
+         "raw": 0.020624101,
+         "fmt": "2.06%"
+        }
+       },
+       {
+        "symbol": "BRK-B",
+        "holdingName": "Berkshire Hathaway Inc Class B",
+        "holdingPercent": {
+         "raw": 0.0160976,
+         "fmt": "1.61%"
+        }
+       }
+      ]
+     }
+    }
+   ],
+   "error": null
+  }
+ },
+ "BND": {
+  "quoteSummary": {
+   "result": [
+    {
+     "fundProfile": {
+      "categoryName": "Intermediate Core Bond",
+      "family": "Vanguard",
+      "legalType": "Exchange Traded Fund",
+      "feesExpensesInvestment": {
+       "annualReportExpenseRatio": {
+        "raw": 0.00029999999,
+        "fmt": "0.03%"
+       }
+      }
+     },
+     "defaultKeyStatistics": {
+      "totalAssets": {
+       "raw": 398834597888,
+       "fmt": "398.83B"
+      },
+      "fundInceptionDate": {
+       "raw": 1175558400,
+       "fmt": "2007-04-03"
+      }
+     },
+     "summaryDetail": {
+      "totalAssets": {
+       "raw": 398834597888,
+       "fmt": "398.83B"
+      },
+      "averageVolume": {
+       "raw": 8216593,
+       "fmt": "8.22M"
+      },
+      "previousClose": {
+       "raw": 71.15,
+       "fmt": "71.15"
+      },
+      "currency": "USD"
+     },
+     "topHoldings": {
+      "stockPosition": {
+       "raw": 0,
+       "fmt": "0.00%"
+      },
+      "bondPosition": {
+       "raw": 0.9836,
+       "fmt": "98.36%"
+      },
+      "holdings": []
+     }
+    }
+   ],
+   "error": null
+  }
+ },
+ "TQQQ": {
+  "quoteSummary": {
+   "result": [
+    {
+     "fundProfile": {
+      "categoryName": "Trading--Leveraged Equity",
+      "family": "ProShares",
+      "legalType": "Exchange Traded Fund",
+      "feesExpensesInvestment": {
+       "annualReportExpenseRatio": {
+        "raw": 0.0082,
+        "fmt": "0.82%"
+       }
+      }
+     },
+     "defaultKeyStatistics": {
+      "totalAssets": {
+       "raw": 36114247680,
+       "fmt": "36.11B"
+      },
+      "fundInceptionDate": {
+       "raw": 1265673600,
+       "fmt": "2010-02-09"
+      }
+     },
+     "summaryDetail": {
+      "totalAssets": {
+       "raw": 36114247680,
+       "fmt": "36.11B"
+      },
+      "averageVolume": {
+       "raw": 59231606,
+       "fmt": "59.23M"
+      },
+      "previousClose": {
+       "raw": 67.9,
+       "fmt": "67.90"
+      },
+      "currency": "USD"
+     },
+     "topHoldings": {
+      "stockPosition": {
+       "raw": 0.6199,
+       "fmt": "61.99%"
+      },
+      "bondPosition": {
+       "raw": 0.037,
+       "fmt": "3.70%"
+      },
+      "holdings": [
+       {
+        "symbol": "IQMM",
+        "holdingName": "ProShares GENIUS Money Market ETF",
+        "holdingPercent": {
+         "raw": 0.1803924,
+         "fmt": "18.04%"
+        }
+       },
+       {
+        "symbol": "NVDA",
+        "holdingName": "NVIDIA Corp",
+        "holdingPercent": {
+         "raw": 0.0323899,
+         "fmt": "3.24%"
+        }
+       },
+       {
+        "symbol": "AAPL",
+        "holdingName": "Apple Inc",
+        "holdingPercent": {
+         "raw": 0.028212199,
+         "fmt": "2.82%"
+        }
+       }
+      ]
+     }
+    }
+   ],
+   "error": null
+  }
+ },
+ "XLK": {
+  "quoteSummary": {
+   "result": [
+    {
+     "fundProfile": {
+      "categoryName": "Technology",
+      "family": "State Street Investment Management",
+      "legalType": "Exchange Traded Fund",
+      "feesExpensesInvestment": {
+       "annualReportExpenseRatio": {
+        "raw": 0.0008,
+        "fmt": "0.08%"
+       }
+      }
+     },
+     "defaultKeyStatistics": {
+      "totalAssets": {
+       "raw": 121437732864,
+       "fmt": "121.44B"
+      },
+      "fundInceptionDate": {
+       "raw": 913766400,
+       "fmt": "1998-12-16"
+      }
+     },
+     "summaryDetail": {
+      "totalAssets": {
+       "raw": 121437732864,
+       "fmt": "121.44B"
+      },
+      "averageVolume": {
+       "raw": 8476708,
+       "fmt": "8.48M"
+      },
+      "previousClose": {
+       "raw": 183.74,
+       "fmt": "183.74"
+      },
+      "currency": "USD"
+     },
+     "topHoldings": {
+      "stockPosition": {
+       "raw": 0.9997,
+       "fmt": "99.97%"
+      },
+      "bondPosition": {
+       "raw": 0,
+       "fmt": "0.00%"
+      },
+      "holdings": [
+       {
+        "symbol": "NVDA",
+        "holdingName": "NVIDIA Corp",
+        "holdingPercent": {
+         "raw": 0.14363189,
+         "fmt": "14.36%"
+        }
+       },
+       {
+        "symbol": "AAPL",
+        "holdingName": "Apple Inc",
+        "holdingPercent": {
+         "raw": 0.1249984,
+         "fmt": "12.50%"
+        }
+       },
+       {
+        "symbol": "MSFT",
+        "holdingName": "Microsoft Corp",
+        "holdingPercent": {
+         "raw": 0.1012188,
+         "fmt": "10.12%"
+        }
+       },
+       {
+        "symbol": "AVGO",
+        "holdingName": "Broadcom Inc",
+        "holdingPercent": {
+         "raw": 0.0470974,
+         "fmt": "4.71%"
+        }
+       },
+       {
+        "symbol": "MU",
+        "holdingName": "Micron Technology Inc",
+        "holdingPercent": {
+         "raw": 0.0399906,
+         "fmt": "4.00%"
+        }
+       },
+       {
+        "symbol": "AMD",
+        "holdingName": "Advanced Micro Devices Inc",
+        "holdingPercent": {
+         "raw": 0.0392825,
+         "fmt": "3.93%"
+        }
+       },
+       {
+        "symbol": "INTC",
+        "holdingName": "Intel Corp",
+        "holdingPercent": {
+         "raw": 0.028994901,
+         "fmt": "2.90%"
+        }
+       },
+       {
+        "symbol": "CSCO",
+        "holdingName": "Cisco Systems Inc",
+        "holdingPercent": {
+         "raw": 0.0286219,
+         "fmt": "2.86%"
+        }
+       },
+       {
+        "symbol": "PLTR",
+        "holdingName": "Palantir Technologies Inc Ordinary Shares - Class A",
+        "holdingPercent": {
+         "raw": 0.0280656,
+         "fmt": "2.81%"
+        }
+       },
+       {
+        "symbol": "LRCX",
+        "holdingName": "Lam Research Corp",
+        "holdingPercent": {
+         "raw": 0.0247268,
+         "fmt": "2.47%"
+        }
+       }
+      ]
+     }
+    }
+   ],
+   "error": null
+  }
+ },
+ "QQQ": {
+  "quoteSummary": {
+   "result": [
+    {
+     "fundProfile": {
+      "categoryName": "Large Growth",
+      "family": "Invesco",
+      "legalType": "Exchange Traded Fund",
+      "feesExpensesInvestment": {
+       "annualReportExpenseRatio": {
+        "raw": 0.0018000001,
+        "fmt": "0.18%"
+       }
+      }
+     },
+     "defaultKeyStatistics": {
+      "totalAssets": {
+       "raw": 488981004288,
+       "fmt": "488.98B"
+      },
+      "fundInceptionDate": {
+       "raw": 921024000,
+       "fmt": "1999-03-10"
+      }
+     },
+     "summaryDetail": {
+      "totalAssets": {
+       "raw": 488981004288,
+       "fmt": "488.98B"
+      },
+      "averageVolume": {
+       "raw": 37467058,
+       "fmt": "37.47M"
+      },
+      "previousClose": {
+       "raw": 704.54,
+       "fmt": "704.54"
+      },
+      "currency": "USD"
+     },
+     "topHoldings": {
+      "stockPosition": {
+       "raw": 0.9989,
+       "fmt": "99.89%"
+      },
+      "bondPosition": {
+       "raw": 0,
+       "fmt": "0.00%"
+      },
+      "holdings": [
+       {
+        "symbol": "NVDA",
+        "holdingName": "NVIDIA Corp",
+        "holdingPercent": {
+         "raw": 0.0850652,
+         "fmt": "8.51%"
+        }
+       },
+       {
+        "symbol": "AAPL",
+        "holdingName": "Apple Inc",
+        "holdingPercent": {
+         "raw": 0.0740928,
+         "fmt": "7.41%"
+        }
+       },
+       {
+        "symbol": "MSFT",
+        "holdingName": "Microsoft Corp",
+        "holdingPercent": {
+         "raw": 0.059995297,
+         "fmt": "6.00%"
+        }
+       },
+       {
+        "symbol": "MU",
+        "holdingName": "Micron Technology Inc",
+        "holdingPercent": {
+         "raw": 0.047521602,
+         "fmt": "4.75%"
+        }
+       },
+       {
+        "symbol": "AMZN",
+        "holdingName": "Amazon.com Inc",
+        "holdingPercent": {
+         "raw": 0.044489898,
+         "fmt": "4.45%"
+        }
+       },
+       {
+        "symbol": "AMD",
+        "holdingName": "Advanced Micro Devices Inc",
+        "holdingPercent": {
+         "raw": 0.033736803,
+         "fmt": "3.37%"
+        }
+       },
+       {
+        "symbol": "GOOGL",
+        "holdingName": "Alphabet Inc Class A",
+        "holdingPercent": {
+         "raw": 0.0314663,
+         "fmt": "3.15%"
+        }
+       },
+       {
+        "symbol": "TSLA",
+        "holdingName": "Tesla Inc",
+        "holdingPercent": {
+         "raw": 0.029264601,
+         "fmt": "2.93%"
+        }
+       },
+       {
+        "symbol": "GOOG",
+        "holdingName": "Alphabet Inc Class C",
+        "holdingPercent": {
+         "raw": 0.029135698,
+         "fmt": "2.91%"
+        }
+       },
+       {
+        "symbol": "AVGO",
+        "holdingName": "Broadcom Inc",
+        "holdingPercent": {
+         "raw": 0.0279556,
+         "fmt": "2.80%"
+        }
+       }
+      ]
+     }
+    }
+   ],
+   "error": null
+  }
+ },
+ "NOPE": {
+  "quoteSummary": {
+   "result": null,
+   "error": {
+    "code": "Not Found",
+    "description": "Quote not found for symbol: NOPE"
+   }
+  }
+ }
+}

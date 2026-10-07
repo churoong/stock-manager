@@ -1,0 +1,76 @@
+name: Step 0 기반 검증
+
+# 수동 실행과 외부 크론 호출만 받는다.
+# 정해진 시각에 도는 배치가 아니라 확인용이다.
+on:
+  workflow_dispatch:
+    inputs:
+      no_telegram:
+        description: 텔레그램으로 보내지 않고 로그로만 확인
+        type: boolean
+        default: false
+  repository_dispatch:
+    types: [step0-check]
+
+# 같은 검증이 겹쳐 돌지 않게 한다. 야후 호출이 몰리면 차단 위험이 커진다.
+concurrency:
+  group: step0-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: 저장소 받기
+        uses: actions/checkout@v5
+
+      - name: 파이썬 준비
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 오프라인 테스트
+        env:
+          OFFLINE_MODE: "1"
+        run: |
+          pip install pytest
+          pytest tests/ -v
+
+      - name: 나가는 IP 확인
+        continue-on-error: true
+        run: |
+          echo "이 실행의 바깥 IP 대역을 기록해 둔다. 야후 차단 여부를 추적할 때 쓴다."
+          curl -s --max-time 10 https://api.ipify.org || echo "확인 실패"
+          echo ""
+
+      - name: 기반 검증 실행
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          KRX_API_KEY: ${{ secrets.KRX_API_KEY }}
+          DART_API_KEY: ${{ secrets.DART_API_KEY }}
+          # FRED_API_KEY 는 넘기지 않는다 — 읽는 코드가 없다 (docs/infra.md 25.160).
+          # 안 쓰는 시크릿을 넘기면 "쓰고 있다" 로 보인다
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          # DB 백엔드 전환 (docs/infra.md 25절). 비어 있으면 Turso 를 쓴다
+          DB_BACKEND: ${{ vars.DB_BACKEND }}
+          D1_ACCOUNT_ID: ${{ secrets.D1_ACCOUNT_ID }}
+          D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+          D1_API_TOKEN: ${{ secrets.D1_API_TOKEN }}
+          OFFLINE_MODE: "0"
+          LOG_LEVEL: INFO
+        run: |
+          if [ "${{ inputs.no_telegram }}" = "true" ]; then
+            python -m batch.jobs.step0_check --no-telegram
+          else
+            python -m batch.jobs.step0_check
+          fi

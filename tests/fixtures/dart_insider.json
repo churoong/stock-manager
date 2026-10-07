@@ -1,0 +1,77 @@
+{
+  "_주석": "DART elestock.json 응답 모양 (삼성전자 00126380, 2026-09-18 Actions 35285934191 로그). 앞 3행은 실제 응답을 그대로 옮겼다(증가·감소·0). 뒤 2행은 로그에서 본 값의 종류(10%이상주주, 직위 끝 공백, 숫자 자리의 '-')로 손으로 만든 경계 사례다.",
+  "status": "000",
+  "message": "정상",
+  "list": [
+    {
+      "rcept_no": "20240919000037",
+      "rcept_dt": "2024-09-19",
+      "corp_code": "00126380",
+      "corp_name": "삼성전자",
+      "repror": "정용준",
+      "isu_exctv_rgist_at": "비등기임원",
+      "isu_exctv_ofcps": "부사장",
+      "isu_main_shrholdr": "-",
+      "sp_stock_lmp_cnt": "3,000",
+      "sp_stock_lmp_irds_cnt": "1,000",
+      "sp_stock_lmp_rate": "0",
+      "sp_stock_lmp_irds_rate": "0"
+    },
+    {
+      "rcept_no": "20241004000101",
+      "rcept_dt": "2024-10-04",
+      "corp_code": "00126380",
+      "corp_name": "삼성전자",
+      "repror": "박형신",
+      "isu_exctv_rgist_at": "비등기임원",
+      "isu_exctv_ofcps": "상무",
+      "isu_main_shrholdr": "-",
+      "sp_stock_lmp_cnt": "761",
+      "sp_stock_lmp_irds_cnt": "-500",
+      "sp_stock_lmp_rate": "0.00",
+      "sp_stock_lmp_irds_rate": "0.00"
+    },
+    {
+      "rcept_no": "20260211000279",
+      "rcept_dt": "2026-02-11",
+      "corp_code": "00126380",
+      "corp_name": "삼성전자",
+      "repror": "이정원",
+      "isu_exctv_rgist_at": "등기임원",
+      "isu_exctv_ofcps": "부사장",
+      "isu_main_shrholdr": "-",
+      "sp_stock_lmp_cnt": "0",
+      "sp_stock_lmp_irds_cnt": "0",
+      "sp_stock_lmp_rate": "0.00",
+      "sp_stock_lmp_irds_rate": "0.00"
+    },
+    {
+      "rcept_no": "20260901000111",
+      "rcept_dt": "2026-09-01",
+      "corp_code": "00126380",
+      "corp_name": "삼성전자",
+      "repror": "홍길동",
+      "isu_exctv_rgist_at": "등기임원",
+      "isu_exctv_ofcps": "대표사장",
+      "isu_main_shrholdr": "10%이상주주",
+      "sp_stock_lmp_cnt": "1,200,000",
+      "sp_stock_lmp_irds_cnt": "200,000",
+      "sp_stock_lmp_rate": "0.02",
+      "sp_stock_lmp_irds_rate": "0.00"
+    },
+    {
+      "rcept_no": "20260902000222",
+      "rcept_dt": "2026-09-02",
+      "corp_code": "00126380",
+      "corp_name": "삼성전자",
+      "repror": "",
+      "isu_exctv_rgist_at": "비등기임원",
+      "isu_exctv_ofcps": "상무 ",
+      "isu_main_shrholdr": "-",
+      "sp_stock_lmp_cnt": "-",
+      "sp_stock_lmp_irds_cnt": "-",
+      "sp_stock_lmp_rate": "-",
+      "sp_stock_lmp_irds_rate": "-"
+    }
+  ]
+}

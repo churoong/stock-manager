@@ -1,0 +1,120 @@
+name: 일일 배치 (미국)
+
+# 정규장 시작 1시간 전 = 08:30 ET.
+# ET 는 서머타임에 따라 UTC-4 또는 UTC-5 라서 UTC 고정 시각으로 쓸 수 없다.
+# 그래서 두 시각에 모두 걸어 두고, 실제로 개장 1시간 전인지는 배치가 판단한다.
+# 해당하지 않는 쪽은 아무것도 하지 않고 끝난다.
+#
+# **"1분 미만 소모" 라고 적어 두었던 것은 틀렸다** (2026-09-21 정정, docs/infra.md 25.84).
+# GitHub 은 잡마다 **분 단위로 올림해** 센다 — 20초짜리 잡도 1분이다. 게다가 판단은
+# `cal.decide` 안에서 나므로 checkout·setup-python·pip install 을 **다 하고 나서야** 안다.
+# 평일마다 그 한 잡이 그대로 나간다. 서머타임 판단을 셸로 앞당겨 아끼고 싶었지만
+# 하지 않았다 — 그러면 같은 규칙이 파이썬과 셸 두 곳에 있게 되고, 그것이 이 저장소에서
+# 가장 자주 나온 고장 모양이다(25.0 "한 규칙이 두 곳에 있다"). **분보다 정확함이 낫다.**
+# 대신 아무것도 안 한 실행이 **이슈 코멘트를 남기지 않게** 했다(25.84).
+#   12:27 UTC = 08:27 EDT (서머타임 기간)
+#   13:27 UTC = 08:27 EST (그 외 기간)
+on:
+  schedule:
+    - cron: "27 12 * * 1-5"
+    - cron: "27 13 * * 1-5"
+  repository_dispatch:
+    types: [daily-us]
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 예약 시각 판단을 건너뛰고 실행
+        type: boolean
+        default: true
+      dry_run:
+        description: 텔레그램으로 보내지 않고 로그로만 확인
+        type: boolean
+        default: false
+      chunk_symbols:
+        description: 한 요청에 묶을 심볼 수 (비우면 200). 조각 수가 곧 시간이다
+        type: string
+        default: ""
+      lookback_days:
+        description: 며칠치 일봉을 받을지 (비우면 10). 수정주가를 일관되게 맞추려면 전 구간(예 1300)
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  issues: write # 기록을 이슈 코멘트로 내보낸다 (docs/infra.md 25.17)
+
+concurrency:
+  group: daily-us
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    # 미국은 전종목을 심볼 조각으로 나눠 받는다. 한국거래소처럼 한 번에 오지
+    # 않으므로 종목 수에 비례해 시간이 는다. 첫 운영 실행에서 실제 소요를 재고
+    # 이 값을 다시 잡는다 [확인필요: 조각 하나당 응답 시간].
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 배치 실행
+        id: batch
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # 리포트 종목 줄의 "매매 입력" 링크 (docs/infra.md 25.944). 변수가 비어 있으면 링크 없이 보낸다
+          APP_URL: ${{ vars.APP_URL }}
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          # DB 백엔드 전환 (docs/infra.md 25절). 비어 있으면 Turso 를 쓴다
+          DB_BACKEND: ${{ vars.DB_BACKEND }}
+          D1_ACCOUNT_ID: ${{ secrets.D1_ACCOUNT_ID }}
+          D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+          D1_API_TOKEN: ${{ secrets.D1_API_TOKEN }}
+          OFFLINE_MODE: "0"
+          LOG_LEVEL: INFO
+          # 비우면 어댑터의 기본값(200)을 쓴다. 실측 전에는 바꾸지 않는다.
+          YF_CHUNK_SYMBOLS: ${{ inputs.chunk_symbols }}
+          # 비우면 10. 수정주가는 전 구간을 한 번에 받아야 조정 기준이 맞는다
+          US_LOOKBACK_DAYS: ${{ inputs.lookback_days }}
+        run: |
+          set -o pipefail
+          ARGS="--market US"
+          # 화면(/status 수동 실행)이 repository_dispatch 로 깨우면 client_payload.force 로 온다. 예약 시각 밖이라 --force 가 없으면 건너뛴다
+          if [ "${{ inputs.force }}" = "true" ] || [ "${{ github.event.client_payload.force }}" = "true" ]; then ARGS="$ARGS --force"; fi
+          if [ "${{ inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
+          python -m batch.jobs.daily $ARGS 2>&1 | python scripts/ops_tee.py -a run.log
+          # **아무 일도 하지 않은 실행은 이슈에 올리지 않는다** (docs/infra.md 25.84).
+          # 세션이 읽는 것은 이슈 #1 의 **마지막 코멘트** 하나인데(25.17), 휴장일·서머타임이
+          # 안 맞는 시각에도 평일마다 빈 코멘트가 달려 정작 읽어야 할 것을 밀어냈다.
+          # 표식은 batch/jobs/daily.py 의 NOTHING_DONE — tests/test_daily_skip.py 가 둘을 묶어 둔다
+          if grep -q '^실행하지 않음: ' run.log; then
+            echo "did_work=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "did_work=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 기록을 이슈로 내보내기 (클라우드 세션이 로그를 못 읽는다)
+        # 멈췄든 끝났든 남긴다 — **멈춘 이유를 읽으려고** 두는 것이다 (docs/infra.md 25.21)
+        if: always() && steps.batch.outputs.did_work != 'false'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 공개 저장소로 옮긴 뒤에는 비공개 운영 저장소로 보낸다 (docs/public-repo.md, infra 25.978)
+          OPS_REPO: ${{ secrets.OPS_REPO }}
+          OPS_TOKEN: ${{ secrets.OPS_TOKEN }}
+        run: |
+          python scripts/publish_output.py \
+            --title "운영 출력 (클라우드 세션용)" \
+            --file run.log \
+            --note "일일 배치 (미국) (${{ job.status }})"

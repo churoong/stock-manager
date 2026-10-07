@@ -1,0 +1,26 @@
+name: SEC 공시 목록 확인
+
+# 미국 공시 수집이 전제한 필드와 Form 4 위치를 실제 응답으로 확인한다
+# (docs/data-sources.md 14.4·16.3). 손으로만 돌린다. DB 를 건드리지 않는다.
+on:
+  workflow_dispatch:
+    inputs:
+      ticker:
+        description: 심볼 (기본 AAPL)
+        type: string
+        default: "AAPL"
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install requests
+      - name: 호출
+        env:
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+        run: python scripts/probe_sec_filings.py --ticker "${{ inputs.ticker }}"

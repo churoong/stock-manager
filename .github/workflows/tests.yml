@@ -1,0 +1,49 @@
+name: 테스트 (배치)
+
+# 코드가 바뀔 때만 돈다. 문서만 고친 커밋으로 Actions 시간을 쓰지 않는다.
+#
+# **웹 테스트는 tests-web.yml 로 갈라 두었다** (2026-09-20, docs/infra.md 25.39).
+# 한 워크플로에 잡 둘을 두면 어느 쪽을 고쳐도 **둘 다** 돌고, GitHub 은 잡마다 분을
+# 올림해 센다 — 35초짜리 잡 둘이 2분이 된다. 실측으로 테스트가 364분(전체의 18%)을
+# 먹고 있었다. 커밋의 70% 가 배치만 건드리므로 가르면 그 몫이 사라진다.
+#
+# **여기 paths 에 web/** 이 있는 것은 실수가 아니다.** 파이썬 테스트가 웹 소스를 읽는다
+# (test_criteria_contract.py → web/lib/recommend.ts, test_disclaimer.py → 푸터·robots,
+# test_sell_flags.py → web/**/*.ts 전체). 웹만 고친 커밋이 파이썬 테스트를 깨뜨릴 수
+# 있으므로 이쪽도 돌아야 한다. 빼면 그 회귀를 놓친다.
+# **푸시마다 돌지 않는다** (2026-10-06, docs/infra.md 25.975). 10월 1~6일 엿새 만에 월 무료 2,000분을 다 썼고(Actions 가
+# "spending limit" 로 모든 작업을 막았다 — 일일 배치까지 멈췄다), 그 가운데 테스트가 약 600분이었다. 커밋은 푸시 전에
+# 로컬에서 전체 테스트를 통과해야 만들어지므로(작업 방식 "한 건의 끝") 푸시마다 다시 도는 것은 중복이다. 손으로만 돌린다.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  batch:
+    name: 배치 (Python)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pytest ruff
+
+      - name: 코드 스타일
+        run: ruff check batch tests scripts
+
+      - name: 테스트
+        # 오프라인 모드로 돈다. API 키 없이 통과해야 한다.
+        env:
+          OFFLINE_MODE: "1"
+        run: pytest tests/ -v

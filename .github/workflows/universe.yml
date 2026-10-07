@@ -1,0 +1,93 @@
+name: 유니버스 갱신
+
+# 주 1회. 일요일 밤에 돌려 월요일 배치가 새 유니버스를 쓰게 한다.
+on:
+  schedule:
+    - cron: "43 15 * * 0" # 15:43 UTC 일요일 = 월요일 00:43 KST
+  repository_dispatch:
+    types: [universe]
+  workflow_dispatch:
+    inputs:
+      market:
+        description: 시장
+        type: choice
+        options: [KR, US, 둘다]
+        default: 둘다
+      backfill_days:
+        description: 백필할 일수 (0이면 백필 없이 유니버스만)
+        type: string
+        default: "0"
+      backfill_from:
+        description: 백필 시작일 YYYY-MM-DD (주면 days 대신 이 구간을 쓴다)
+        type: string
+        default: ""
+      backfill_to:
+        description: 백필 종료일 YYYY-MM-DD
+        type: string
+        default: ""
+
+concurrency:
+  group: universe
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    env:
+      TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+      TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+      # DB 백엔드 전환 (docs/infra.md 25절). 비어 있으면 Turso 를 쓴다
+      DB_BACKEND: ${{ vars.DB_BACKEND }}
+      # D1 임시 운영 중에는 쉰다 (docs/infra.md 25.14). Turso 로 돌아가면 저절로 다시 돈다
+      SKIP_ON_D1: "1"
+      D1_ACCOUNT_ID: ${{ secrets.D1_ACCOUNT_ID }}
+      D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+      D1_API_TOKEN: ${{ secrets.D1_API_TOKEN }}
+      KRX_API_KEY: ${{ secrets.KRX_API_KEY }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      OFFLINE_MODE: "0"
+      LOG_LEVEL: INFO
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: DB 백엔드 고정 (이 워크플로의 모든 단계가 같은 DB 를 쓴다, docs/infra.md 25.472·25.480)
+        run: python -m batch.core.client --pin >> "$GITHUB_ENV"
+
+      - name: 종목 마스터 갱신
+        run: |
+          MARKET="${{ inputs.market }}"
+          if [ -z "$MARKET" ] || [ "$MARKET" = "둘다" ]; then
+            # 국내가 실패해도 미국은 돈다 (docs/infra.md 25.415). 기본 셸이 `bash -e` 라 예전에는 KR 이 1 을
+            # 돌려주면 US 줄이 실행되지 않아 미국 유니버스가 다음 주까지 묵었다. 실패는 끝에 모아 알린다
+            rc=0
+            python -m batch.jobs.universe --market KR || rc=1
+            python -m batch.jobs.universe --market US || rc=1
+            exit $rc
+          else
+            python -m batch.jobs.universe --market "$MARKET"
+          fi
+
+      - name: 국내 시세 백필
+        if: ${{ (inputs.backfill_days != '' && inputs.backfill_days != '0') || inputs.backfill_from != '' }}
+        run: |
+          if [ -n "${{ inputs.backfill_from }}" ]; then
+            python -m batch.jobs.backfill_kr --from "${{ inputs.backfill_from }}" --to "${{ inputs.backfill_to }}"
+          else
+            python -m batch.jobs.backfill_kr --days ${{ inputs.backfill_days }}
+          fi
+
+      - name: 백필 후 유니버스 재계산
+        if: ${{ (inputs.backfill_days != '' && inputs.backfill_days != '0') || inputs.backfill_from != '' }}
+        run: python -m batch.jobs.universe --market KR

@@ -1,0 +1,60 @@
+name: 장기 적립 종목 판정
+
+# 읽기만 해서 계산한다(재무·배당·유니버스는 각자 배치가 채운다). 1~2분.
+# 사업보고서·배당이 반영되는 4·5월 배당 수집 다음 날, 그리고 매월 초 한 번(유니버스 변화 반영).
+on:
+  schedule:
+    - cron: "17 19 6 * *" # 매월 6일 19:17 UTC = 7일 04:17 KST
+  workflow_dispatch:
+    inputs:
+      market:
+        description: 시장 (비우면 국내·미국 둘 다)
+        type: choice
+        options: ["", "KR", "US"]
+        default: ""
+
+concurrency:
+  group: accumulation
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+      TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+      # DB 백엔드 전환 (docs/infra.md 25절). 비어 있으면 Turso 를 쓴다
+      DB_BACKEND: ${{ vars.DB_BACKEND }}
+      D1_ACCOUNT_ID: ${{ secrets.D1_ACCOUNT_ID }}
+      D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+      D1_API_TOKEN: ${{ secrets.D1_API_TOKEN }}
+      OFFLINE_MODE: "0"
+      LOG_LEVEL: INFO
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: DB 백엔드 고정 (이 워크플로의 모든 단계가 같은 DB 를 쓴다, docs/infra.md 25.472·25.480)
+        run: python -m batch.core.client --pin >> "$GITHUB_ENV"
+
+      - name: 판정
+        run: |
+          if [ -n "${{ inputs.market }}" ]; then
+            python -m batch.jobs.accumulation --market ${{ inputs.market }}
+          else
+            # 국내가 실패해도 미국은 돈다 — `bash -e` 가 둘째 줄을 건너뛰지 않게 (docs/infra.md 25.415)
+            rc=0
+            python -m batch.jobs.accumulation --market KR || rc=1
+            python -m batch.jobs.accumulation --market US || rc=1
+            exit $rc
+          fi

@@ -1,0 +1,43 @@
+name: 지수 일봉 수집
+
+# 평소에는 일일 배치가 시세 뒤에 함께 받는다 (batch/jobs/daily.py). 이 워크플로는
+# 백테스트 --trend-filter 용으로 과거치를 한 번 채우거나, 빠진 날을 메울 때 손으로 돌린다.
+# 야후 호출 1회, 쓰는 행은 심볼 3개 × 일수라 예산 걱정이 없다 (docs/signals.md 3.5).
+on:
+  workflow_dispatch:
+    inputs:
+      lookback:
+        description: 받을 달력일 수 (5년치면 2000)
+        type: string
+        default: "2000"
+
+concurrency:
+  group: index-prices
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: 수집
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          # DB 백엔드 전환 (docs/infra.md 25절). 비어 있으면 Turso 를 쓴다
+          DB_BACKEND: ${{ vars.DB_BACKEND }}
+          D1_ACCOUNT_ID: ${{ secrets.D1_ACCOUNT_ID }}
+          D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+          D1_API_TOKEN: ${{ secrets.D1_API_TOKEN }}
+          OFFLINE_MODE: "0"
+          LOG_LEVEL: INFO
+        run: python -m batch.jobs.index_prices --lookback "${{ inputs.lookback }}"

@@ -1,0 +1,57 @@
+# 환경변수·비밀
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# Node
+node_modules/
+frontend/dist/
+
+# DB·캐시
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+data/cache/
+
+# DB 백업 — **저장소에 들어오면 안 되는 것 중 가장 나쁜 것** (docs/infra.md 25.159)
+#
+# `scripts/backup_db.py --out backup/` 이 만드는 파일에는 매매 기록·배당·설정·관심 종목과
+# 한국거래소·야후에서 받은 시세·재무가 통째로 들어 있다. 커밋되면 두 가지가 한꺼번에 깨진다 —
+# "저장소는 프라이빗"(CLAUDE.md)의 전제가 사람 실수 하나에 걸리고, git 이력은 지워도 남는다.
+# 문서가 **로컬에서 손으로 받는 법**을 안내하므로(docs/backup.md 2장) 드문 길이 아니다.
+backup/
+*.sql.gz
+# 압축을 풀면 `.sql` 이라 위 줄에 안 걸린다. 그래서 `.sql` 도 막되 **스키마만 되살린다** —
+# `migrations/` 는 스키마의 단일 정의처라 무시하면 안 된다 (CLAUDE.md)
+*.sql
+!migrations/*.sql
+# 읽기 전용 진단 질의(데이터 없음) — 25.874: 이 예외가 없어 7회차 진단 SQL 이 커밋되지 않은 채 '저장했다' 고 적혔다
+!scripts/diag/*.sql
+
+# 로그·OS
+*.log
+.DS_Store
+Thumbs.db
+
+# Next.js
+web/.next/
+web/out/
+web/next-env.d.ts
+web/.vercel/
+# tsc 증분 빌드 상태. 기계마다 달라져 커밋할 때마다 바뀐다
+web/tsconfig.tsbuildinfo
+
+# vitest --coverage 가 만드는 HTML·JSON. 2026-09-22 에 실수로 커밋됐다 (docs/infra.md 25.116).
+# 생성물이라 소스보다 늦게 썩는다 — 옛 소스가 든 리포트가 저장소에 남아 훑기가 그것을 문다
+web/coverage/
+.claude/worktrees/

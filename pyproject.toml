@@ -1,0 +1,19 @@
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+ignore = [
+    # 어댑터는 어떤 예외든 결과 객체로 감싸야 하므로 광범위 catch 를 허용한다
+    "BLE001",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# 테스트 함수 이름을 한국어로 쓴다
+"tests/*" = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"

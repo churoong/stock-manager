@@ -1,0 +1,78 @@
+name: 국내 뉴스 감성 채점
+
+# 연합뉴스 기사(웹 경로 /api/cron/news-kr 가 1시간마다 모은 것)를 KorFinASC 로 채점하고 종목별로 집계한다.
+# 국내 일일 배치(08:27 KST) 전에 끝나도록 07:40 KST 에 돈다. 일일 배치는 채점하지 않고 이 결과를 읽는다.
+# 2026-09-17 실측: 설치 44초 + 모델 불러오기 27초(캐시 전) + 채점 건당 0.18초. 하루 2~3분 추정 [확인필요: 운영 실측]
+on:
+  schedule:
+    - cron: "40 22 * * 0-4" # 일~목 22:40 UTC = 월~금 07:40 KST
+  workflow_dispatch:
+  # /status 수동 실행이 깨운다 (docs/infra.md 25.595). 무응답 감시 대상인데 깨울 길이 없었다
+  repository_dispatch:
+    types: [sentiment-kr]
+
+permissions:
+  contents: read
+  issues: write # 기록을 이슈 코멘트로 내보낸다 (docs/infra.md 25.17)
+
+concurrency:
+  group: sentiment-kr
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+      TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+      # DB 백엔드 전환 (docs/infra.md 25절). 비어 있으면 Turso 를 쓴다
+      DB_BACKEND: ${{ vars.DB_BACKEND }}
+      D1_ACCOUNT_ID: ${{ secrets.D1_ACCOUNT_ID }}
+      D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+      D1_API_TOKEN: ${{ secrets.D1_API_TOKEN }}
+      OFFLINE_MODE: "0"
+      LOG_LEVEL: INFO
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 모델 캐시
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-korfinasc-xlmr-v1
+
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          # 채점에만 필요하다. 일일 배치에는 넣지 않는다(설치가 무겁다)
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements-sentiment-kr.txt
+
+      - name: DB 백엔드 고정 (이 워크플로의 모든 단계가 같은 DB 를 쓴다, docs/infra.md 25.472·25.480)
+        run: python -m batch.core.client --pin >> "$GITHUB_ENV"
+
+      - name: 채점·집계
+        run: |
+          set -o pipefail
+          python -m batch.jobs.sentiment --market KR --score 2>&1 | python scripts/ops_tee.py -a run.log
+
+      - name: 기록을 이슈로 내보내기 (클라우드 세션이 로그를 못 읽는다)
+        # 멈췄든 끝났든 남긴다 — **멈춘 이유를 읽으려고** 두는 것이다 (docs/infra.md 25.21)
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 공개 저장소로 옮긴 뒤에는 비공개 운영 저장소로 보낸다 (docs/public-repo.md, infra 25.978)
+          OPS_REPO: ${{ secrets.OPS_REPO }}
+          OPS_TOKEN: ${{ secrets.OPS_TOKEN }}
+        run: |
+          python scripts/publish_output.py \
+            --title "운영 출력 (클라우드 세션용)" \
+            --file run.log \
+            --note "국내 뉴스 감성 채점 (${{ job.status }})"

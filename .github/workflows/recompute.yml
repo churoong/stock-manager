@@ -1,0 +1,95 @@
+name: 복귀 뒤 다시 계산
+
+# **Turso 로 돌아간 뒤 추천·적립을 곧바로 다시 만든다** (docs/infra.md 25.881).
+#
+# D1 임시 운영 중에는 지표·점수·신호가 쉬고(SKIP_ON_D1), 밴드·ETF·적립은 D1 에 결과를 적는다.
+# 복귀는 사람이 넣은 데이터만 옮기므로(scripts/move_user_data.py) Turso 의 계산 결과는 D1 로 넘어가기
+# 직전 그대로다. 2026-10-02 복귀 뒤 추천·장기 적립 화면이 09-17 결과를 보였다 — 다음 예약(화요일·
+# 매월 2·7일)까지 2주 넘게 옛 값이었다. 복귀 워크플로(turso-return.yml)가 메우기를 마치면 이것을 깨운다.
+#
+# 순서가 곧 의존이다: 지수(베타·추세 필터) → 지표 → 밸류 밴드 → 점수 → 신호 → 적립 종목.
+# ETF 는 따로 오래 걸려(제한 90분) 마지막에 etf.yml 을 깨우기만 한다.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write # 마지막에 etf.yml 을 깨운다
+
+concurrency:
+  group: recompute
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+      TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+      # DB 백엔드 전환 (docs/infra.md 25절). 비어 있으면 Turso 를 쓴다
+      DB_BACKEND: ${{ vars.DB_BACKEND }}
+      # D1 위에서는 돌 이유가 없다 — 이 워크플로는 Turso 로 돌아간 뒤를 위한 것이다
+      SKIP_ON_D1: "1"
+      D1_ACCOUNT_ID: ${{ secrets.D1_ACCOUNT_ID }}
+      D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+      D1_API_TOKEN: ${{ secrets.D1_API_TOKEN }}
+      OFFLINE_MODE: "0"
+      LOG_LEVEL: INFO
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: DB 백엔드 고정 (이 워크플로의 모든 단계가 같은 DB 를 쓴다, docs/infra.md 25.472)
+        run: python -m batch.core.client --pin >> "$GITHUB_ENV"
+
+      - name: 1. 지수 일봉 (베타·추세 필터)
+        # 야후 호출 1회. 복귀 때 지수가 아예 없으면 복귀 워크플로가 채우지 않는다(25.880 전 운영 출력)
+        run: python -m batch.jobs.index_prices --lookback 2000
+
+      - name: 2. 지표
+        if: ${{ !cancelled() }}
+        run: python -m batch.jobs.metrics
+
+      - name: 3. 밸류에이션 밴드
+        if: ${{ !cancelled() }}
+        run: python -m batch.jobs.valuation_bands
+
+      - name: 4. 점수
+        if: ${{ !cancelled() }}
+        run: |
+          rc=0  # 국내가 실패해도 미국은 돈다 — bash -e 가 둘째 줄을 건너뛰지 않게 (docs/infra.md 25.415)
+          python -m batch.jobs.scores --market KR || rc=1
+          python -m batch.jobs.scores --market US || rc=1
+          exit $rc
+
+      - name: 5. 신호
+        if: ${{ !cancelled() }}
+        run: |
+          rc=0
+          python -m batch.jobs.signals --market KR || rc=1
+          python -m batch.jobs.signals --market US || rc=1
+          exit $rc
+
+      - name: 6. 장기 적립 종목
+        if: ${{ !cancelled() }}
+        run: |
+          rc=0
+          python -m batch.jobs.accumulation --market KR || rc=1
+          python -m batch.jobs.accumulation --market US || rc=1
+          exit $rc
+
+      - name: 7. ETF 깨우기
+        if: ${{ !cancelled() }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run etf.yml --ref "${{ github.ref_name }}" -f market=둘다

@@ -1,0 +1,38 @@
+name: 국내 ETF 구성종목 경로 확인
+
+# 국내 상장 ETF 구성종목(PDF)을 운용사 홈페이지에서 받는 주소를 찾는다
+# (docs/etf.md 11.5, infra 25.970). 손으로만 돌린다. DB 를 건드리지 않는다.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install requests
+      - name: 호출
+        run: |
+          set -o pipefail
+          python scripts/probe_kr_etf_pdf.py 2>&1 | python scripts/ops_tee.py probe.txt
+
+      - name: 결과를 이슈로 내보내기
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 공개 저장소로 옮긴 뒤에는 비공개 운영 저장소로 보낸다 (docs/public-repo.md, infra 25.978)
+          OPS_REPO: ${{ secrets.OPS_REPO }}
+          OPS_TOKEN: ${{ secrets.OPS_TOKEN }}
+        run: |
+          python scripts/publish_output.py \
+            --title "운영 출력 (클라우드 세션용)" \
+            --file probe.txt \
+            --note "국내 ETF 구성종목 경로"

@@ -1,0 +1,73 @@
+name: 국내 가격 백필
+
+# 한국거래소 일별 시세를 날짜별로 받아 채운다.
+#
+# **--refresh 를 켜면 이미 저장된 날도 다시 받는다.** 2026-09-17 에 등락률(change_pct)
+# 열이 생겼는데 그 전 행에는 값이 없어 수정주가를 만들 수 없다. 다시 받으면 같은
+# 종가가 그대로 덮이고 등락률만 채워진다 (docs/adjust.md 4장).
+#
+# 호출 수 = 거래일 × 2(KOSPI·KOSDAQ). 5년이면 약 2,440회로 한국거래소 일 한도
+# 10,000회 안이다. 배치가 카운터를 보고 80% 에서 경고, 100% 에서 멈춘다.
+# 한 번에 0.5초를 쉬므로 5년 전체는 25분 안팎이 걸린다.
+on:
+  workflow_dispatch:
+    inputs:
+      from:
+        description: 시작일 YYYY-MM-DD
+        type: string
+        default: "2021-09-01"
+      to:
+        description: 종료일 YYYY-MM-DD (비우면 오늘)
+        type: string
+        default: ""
+      refresh:
+        description: 이미 저장된 날도 다시 받는다 (등락률 채우기)
+        type: boolean
+        default: false
+
+concurrency:
+  group: backfill-kr
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+      TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+      # DB 백엔드 전환 (docs/infra.md 25절). 비어 있으면 Turso 를 쓴다
+      DB_BACKEND: ${{ vars.DB_BACKEND }}
+      D1_ACCOUNT_ID: ${{ secrets.D1_ACCOUNT_ID }}
+      D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+      D1_API_TOKEN: ${{ secrets.D1_API_TOKEN }}
+      KRX_API_KEY: ${{ secrets.KRX_API_KEY }}
+      OFFLINE_MODE: "0"
+      LOG_LEVEL: INFO
+      FROM_DAY: ${{ inputs.from }}
+      TO_DAY: ${{ inputs.to }}
+      REFRESH: ${{ inputs.refresh && '--refresh' || '' }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: DB 백엔드 고정 (이 워크플로의 모든 단계가 같은 DB 를 쓴다, docs/infra.md 25.472·25.480)
+        run: python -m batch.core.client --pin >> "$GITHUB_ENV"
+
+      - name: 백필
+        run: |
+          END="${TO_DAY:-$(date -u +%F)}"
+          python -m batch.jobs.backfill_kr --from "$FROM_DAY" --to "$END" $REFRESH
+
+      # 등락률이 채워졌으니 곧바로 수정주가를 만든다. 사람이 잊지 않게 이어 붙인다
+      - name: 수정주가 채우기
+        run: python -m batch.jobs.adjust_kr

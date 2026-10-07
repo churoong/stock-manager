@@ -1,0 +1,48 @@
+name: 미국 수정주가 재수집
+
+# 배당·분할로 조정 기준이 어긋난 종목만 5년치를 다시 받는다 (docs/adjust.md 8장).
+# 대기열은 일일 배치가 채운다. 쓰기 예산이 모자라면 스스로 미룬다.
+on:
+  schedule:
+    - cron: "31 21 * * 6" # 토 21:31 UTC = 일 06:31 KST
+  repository_dispatch:
+    types: [refresh-us-adjusted]
+  workflow_dispatch:
+    inputs:
+      max:
+        description: 한 번에 받을 종목 상한
+        type: string
+        default: "100"
+
+concurrency:
+  group: refresh-us-adjusted
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+      TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+      # DB 백엔드 전환 (docs/infra.md 25절). 비어 있으면 Turso 를 쓴다
+      DB_BACKEND: ${{ vars.DB_BACKEND }}
+      # D1 임시 운영 중에는 쉰다 (docs/infra.md 25.14). Turso 로 돌아가면 저절로 다시 돈다
+      SKIP_ON_D1: "1"
+      D1_ACCOUNT_ID: ${{ secrets.D1_ACCOUNT_ID }}
+      D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+      D1_API_TOKEN: ${{ secrets.D1_API_TOKEN }}
+      OFFLINE_MODE: "0"
+      LOG_LEVEL: INFO
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: 재수집
+        run: python -m batch.jobs.refresh_us_adjusted --max "${{ inputs.max || '100' }}"

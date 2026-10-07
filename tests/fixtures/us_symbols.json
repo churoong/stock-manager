@@ -1,0 +1,8 @@
+{
+  "_설명": "오프라인 모드 테스트용. 실제 파일에서 몇 줄만 옮겼다.",
+  "symbols": [
+    {"symbol": "AAPL", "name": "Apple Inc. - Common Stock", "exchange": "NASDAQ", "is_etf": false, "is_test": false},
+    {"symbol": "QQQ", "name": "Invesco QQQ Trust, Series 1", "exchange": "NASDAQ", "is_etf": true, "is_test": false},
+    {"symbol": "BRK.B", "name": "Berkshire Hathaway Inc. Class B Common Stock", "exchange": "NYSE", "is_etf": false, "is_test": false}
+  ]
+}

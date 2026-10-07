@@ -1,0 +1,43 @@
+name: 한국어 감성 모델 실측
+
+# KorFinASC(2.24GB) 를 러너 CPU 에서 한 번 돌려 시간·판정 방향을 잰다 (docs/sentiment.md 1.2).
+# DB 를 쓰지 않고, 실제 기사 대신 직접 쓴 문장만 넣는다. 결과로 국내 감성 도입 여부를 정한다.
+on:
+  workflow_dispatch:
+    inputs:
+      count:
+        description: 속도 측정 문장 수
+        type: string
+        default: "1000"
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: 모델 캐시
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-korfinasc-xlmr-v1
+
+      - name: 의존성 설치 (CPU 전용 torch, 이 실측에만)
+        run: |
+          python -m pip install --upgrade pip
+          START=$(date +%s)
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install transformers sentencepiece protobuf
+          echo "설치 $(( $(date +%s) - START ))초"
+          nproc; free -g
+
+      - name: 실측
+        run: |
+          START=$(date +%s)
+          python -m batch.jobs.korfinasc_bench --count "${{ inputs.count || '1000' }}"
+          echo "실측 단계 전체 $(( $(date +%s) - START ))초"

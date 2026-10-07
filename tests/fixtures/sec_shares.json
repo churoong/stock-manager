@@ -1,0 +1,133 @@
+{
+ "_note": "SEC companyconcept 실제 응답(2026-09-17)에서 units.shares 의 일부만 남겼다",
+ "aapl_dei": {
+  "cik": 320193,
+  "taxonomy": "dei",
+  "tag": "EntityCommonStockSharesOutstanding",
+  "entityName": "Apple Inc.",
+  "units": {
+   "shares": [
+    {
+     "end": "2025-10-17",
+     "val": 14776353000,
+     "accn": "0000320193-25-000079",
+     "fy": 2025,
+     "fp": "FY",
+     "form": "10-K",
+     "filed": "2025-10-31",
+     "frame": "CY2025Q3I"
+    },
+    {
+     "end": "2026-01-16",
+     "val": 14681140000,
+     "accn": "0000320193-26-000006",
+     "fy": 2026,
+     "fp": "Q1",
+     "form": "10-Q",
+     "filed": "2026-01-30",
+     "frame": "CY2025Q4I"
+    },
+    {
+     "end": "2026-04-17",
+     "val": 14687356000,
+     "accn": "0000320193-26-000013",
+     "fy": 2026,
+     "fp": "Q2",
+     "form": "10-Q",
+     "filed": "2026-05-01",
+     "frame": "CY2026Q1I"
+    },
+    {
+     "end": "2026-07-17",
+     "val": 14594180000,
+     "accn": "0000320193-26-000020",
+     "fy": 2026,
+     "fp": "Q3",
+     "form": "10-Q",
+     "filed": "2026-07-31",
+     "frame": "CY2026Q2I"
+    }
+   ]
+  }
+ },
+ "googl_us_gaap": {
+  "cik": 1652044,
+  "taxonomy": "us-gaap",
+  "tag": "CommonStockSharesOutstanding",
+  "entityName": "Alphabet Inc.",
+  "units": {
+   "shares": [
+    {
+     "end": "2015-12-31",
+     "val": 687348000,
+     "accn": "0001652044-16-000022",
+     "fy": 2015,
+     "fp": "FY",
+     "form": "8-K",
+     "filed": "2016-05-03"
+    },
+    {
+     "end": "2025-12-31",
+     "val": 12088000000,
+     "accn": "0001652044-26-000048",
+     "fy": 2026,
+     "fp": "Q1",
+     "form": "10-Q",
+     "filed": "2026-04-30"
+    },
+    {
+     "end": "2025-12-31",
+     "val": 12088000000,
+     "accn": "0001652044-26-000071",
+     "fy": 2026,
+     "fp": "Q2",
+     "form": "10-Q",
+     "filed": "2026-07-23",
+     "frame": "CY2025Q4I"
+    },
+    {
+     "end": "2026-03-31",
+     "val": 12116000000,
+     "accn": "0001652044-26-000048",
+     "fy": 2026,
+     "fp": "Q1",
+     "form": "10-Q",
+     "filed": "2026-04-30",
+     "frame": "CY2026Q1I"
+    },
+    {
+     "end": "2026-06-30",
+     "val": 12230000000,
+     "accn": "0001652044-26-000071",
+     "fy": 2026,
+     "fp": "Q2",
+     "form": "10-Q",
+     "filed": "2026-07-23",
+     "frame": "CY2026Q2I"
+    }
+   ]
+  }
+ },
+ "tickers_sample": {
+  "0": {
+   "cik_str": 320193,
+   "ticker": "AAPL",
+   "title": "Apple Inc."
+  },
+  "1": {
+   "cik_str": 1652044,
+   "ticker": "GOOGL",
+   "title": "Alphabet Inc."
+  },
+  "2": {
+   "cik_str": 1652044,
+   "ticker": "GOOG",
+   "title": "Alphabet Inc."
+  },
+  "3": {
+   "cik_str": 1067983,
+   "ticker": "BRK-B",
+   "title": "BERKSHIRE HATHAWAY INC"
+  }
+ }
+}

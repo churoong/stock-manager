@@ -1,0 +1,82 @@
+{
+  "_설명": [
+    "미국 일봉 오프라인 픽스처. yfinance_src.fetch_daily_bars 가 오프라인 모드에서 읽는다.",
+    "값은 손으로 만든 것이고 실제 시세가 아니다. 계산 결과를 손으로 검증할 수 있게 자릿수를 단순하게 뒀다.",
+    "거래대금 추정치(종가 × 거래량)를 눈으로 확인할 수 있도록 거래량을 딱 떨어지는 수로 뒀다.",
+    "KRW=X 는 환율(1달러당 원). 1,400 은 손으로 정한 값이다 (batch/jobs/fx.py)."
+  ],
+  "bars": [
+    {
+      "ticker": "AAPL",
+      "date": "2026-09-11",
+      "close": 200,
+      "open": 198,
+      "high": 201,
+      "low": 197.5,
+      "adj_close": 200,
+      "volume": 1000000,
+      "currency": "USD"
+    },
+    {
+      "ticker": "AAPL",
+      "date": "2026-09-14",
+      "close": 210,
+      "open": 201,
+      "high": 211,
+      "low": 200.5,
+      "adj_close": 210,
+      "volume": 2000000,
+      "currency": "USD"
+    },
+    {
+      "ticker": "AAPL",
+      "date": "2026-09-15",
+      "close": 220,
+      "open": 211,
+      "high": 222,
+      "low": 210,
+      "adj_close": 220,
+      "volume": 3000000,
+      "currency": "USD"
+    },
+    {
+      "ticker": "MSFT",
+      "date": "2026-09-14",
+      "close": 400,
+      "open": 398,
+      "high": 402,
+      "low": 396,
+      "adj_close": 400,
+      "volume": 500000,
+      "currency": "USD"
+    },
+    {
+      "ticker": "MSFT",
+      "date": "2026-09-15",
+      "close": 410,
+      "open": 401,
+      "high": 412,
+      "low": 400,
+      "adj_close": 410,
+      "volume": 600000,
+      "currency": "USD"
+    },
+    {
+      "ticker": "NOVOL",
+      "date": "2026-09-15",
+      "close": 12.5,
+      "open": 12.4,
+      "high": 12.9,
+      "low": 12.1,
+      "adj_close": 12.5,
+      "volume": null,
+      "currency": "USD"
+    },
+    {
+      "ticker": "KRW=X",
+      "date": "2026-09-15",
+      "close": 1400,
+      "currency": "KRW"
+    }
+  ]
+}

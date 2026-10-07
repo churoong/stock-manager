@@ -1,0 +1,39 @@
+{
+  "왜_이_파일이_있나": [
+    "어느 DB 를 쓸지 정하는 표다 (docs/infra.md 25.12·25.42).",
+    "같은 판정이 파이썬(batch/core/client.decide)과 타입스크립트(web/lib/db.decideBackend)",
+    "두 군데에 있다. 배치는 쓰고 웹은 읽으므로, 둘이 어긋나면 **배치가 넣은 데이터를 웹이",
+    "다른 DB 에서 찾는다.** 화면은 '데이터가 없다' 고 말하고 아무도 이유를 모른다.",
+    "",
+    "2026-09-21 까지 두 테스트 파일이 이 표를 **손으로 베껴** 갖고 있었다. 한쪽을 고치면",
+    "다른 쪽은 옛 표를 지키며 조용히 통과한다. 그래서 표를 여기 하나로 옮겼다.",
+    "tests/test_db_backend_decision.py 와 web/__tests__/dbBackend.test.ts 가 이것을 읽는다.",
+    "",
+    "turso_ok·quota_blocked 의 네 조합을 returned 값마다 모두 적는다(3×2×2=12).",
+    "ok=true 와 blocked=true 가 함께 오는 일은 없지만, 함수는 그 입력에도 답이 있어야 하고",
+    "'일어날 리 없다' 고 비워 두면 나중에 두 언어가 다르게 답해도 아무도 모른다."
+  ],
+  "규칙": [
+    "복귀 표시가 있으면 Turso. 복귀 뒤 Turso 가 다시 막혀도 D1 로 되돌아가지 않는다",
+    "  — 두 DB 에 데이터가 갈라진다. 막힌 채로 두고 사람이 정한다",
+    "복귀 표시가 없으면 D1. Turso 가 살아 있어도 복귀 스크립트가 옮기기 전이다",
+    "D1 을 못 읽어 모르면 Turso 상태로 정한다: 살아 있으면 Turso, **한도로** 막혔으면 D1,",
+    "  다른 장애(연결 끊김 등)면 Turso — 잠깐의 장애로 D1 에 쓰기 시작하면 안 된다"
+  ],
+  "표": [
+    { "returned": true, "turso_ok": true, "quota_blocked": false, "backend": "turso", "왜": "옮기고 표시를 남겼다" },
+    { "returned": true, "turso_ok": true, "quota_blocked": true, "backend": "turso", "왜": "복귀 표시가 먼저다" },
+    { "returned": true, "turso_ok": false, "quota_blocked": true, "backend": "turso", "왜": "복귀 뒤 다시 막혀도 D1 로 튀지 않는다" },
+    { "returned": true, "turso_ok": false, "quota_blocked": false, "backend": "turso", "왜": "복귀 뒤 잠깐의 장애로 되돌아가지 않는다" },
+
+    { "returned": false, "turso_ok": true, "quota_blocked": false, "backend": "d1", "왜": "리셋됐지만 아직 안 옮겼다 — Turso 에 새 표·매매가 없다" },
+    { "returned": false, "turso_ok": true, "quota_blocked": true, "backend": "d1", "왜": "복귀 전이면 Turso 상태를 보지 않는다" },
+    { "returned": false, "turso_ok": false, "quota_blocked": true, "backend": "d1", "왜": "한도로 막혔고 복귀 전 — 지금의 임시 운영" },
+    { "returned": false, "turso_ok": false, "quota_blocked": false, "backend": "d1", "왜": "복귀 전이면 무조건 D1" },
+
+    { "returned": null, "turso_ok": true, "quota_blocked": false, "backend": "turso", "왜": "D1 을 못 읽으면 Turso 상태로: 살아 있으면 Turso" },
+    { "returned": null, "turso_ok": true, "quota_blocked": true, "backend": "turso", "왜": "살아 있다는 것이 먼저다" },
+    { "returned": null, "turso_ok": false, "quota_blocked": true, "backend": "d1", "왜": "한도로 막혔으면 D1" },
+    { "returned": null, "turso_ok": false, "quota_blocked": false, "backend": "turso", "왜": "한도가 아닌 장애로 D1 에 쓰기 시작하면 안 된다" }
+  ]
+}

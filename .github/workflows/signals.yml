@@ -1,0 +1,75 @@
+name: 매수 신호 계산
+
+# 스코어 다음에 돈다. 신호가 팩터 점수를 읽기 때문이다.
+# scores.yml 이 화요일 04:11 KST 에 도므로 그보다 뒤에 둔다.
+#
+# Step 9 에서 일일 리포트에 추천이 들어가면 일일 배치 안으로 옮긴다.
+# **예약은 뺐다** (2026-10-02, docs/infra.md 25.889). 일일 배치(`jobs/daily.py`)가 거래일마다 두 시장의 점수·신호를
+# 이미 계산한다 — 위 "일일 배치 안으로 옮긴다" 가 끝난 뒤에도 화요일 예약이 남아 같은 계산을 한 번 더 했다
+# (두 시장 약 160만 행 읽기 어림, Turso 월 읽기 한도의 약 1.4%/월). 손으로·복귀 뒤 다시 계산(recompute.yml)·
+# repository_dispatch 로는 그대로 돈다
+on:
+  repository_dispatch:
+    types: [signals]
+  workflow_dispatch:
+    inputs:
+      market:
+        description: 시장
+        type: choice
+        options: [KR, US, 둘다]
+        default: KR
+      as_of:
+        description: 기준일 YYYY-MM-DD (비우면 직전 거래일 — docs/infra.md 25.234)
+        type: string
+        default: ""
+
+concurrency:
+  group: signals
+  cancel-in-progress: true
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+      TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+      # DB 백엔드 전환 (docs/infra.md 25절). 비어 있으면 Turso 를 쓴다
+      DB_BACKEND: ${{ vars.DB_BACKEND }}
+      # D1 임시 운영 중에는 쉰다 (docs/infra.md 25.14). Turso 로 돌아가면 저절로 다시 돈다
+      SKIP_ON_D1: "1"
+      D1_ACCOUNT_ID: ${{ secrets.D1_ACCOUNT_ID }}
+      D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+      D1_API_TOKEN: ${{ secrets.D1_API_TOKEN }}
+      OFFLINE_MODE: "0"
+      LOG_LEVEL: INFO
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: DB 백엔드 고정 (이 워크플로의 모든 단계가 같은 DB 를 쓴다, docs/infra.md 25.472)
+        run: python -m batch.core.client --pin >> "$GITHUB_ENV"
+
+      - name: 계산
+        run: |
+          ARGS=""
+          if [ -n "${{ inputs.as_of }}" ]; then ARGS="$ARGS --as-of ${{ inputs.as_of }}"; fi
+
+          MARKET="${{ inputs.market }}"
+          if [ -z "$MARKET" ] || [ "$MARKET" = "둘다" ]; then
+            rc=0  # 국내가 실패해도 미국은 돈다 — bash -e 가 둘째 줄을 건너뛰지 않게 (docs/infra.md 25.415)
+            python -m batch.jobs.signals --market KR $ARGS || rc=1
+            python -m batch.jobs.signals --market US $ARGS || rc=1
+            exit $rc
+          else
+            python -m batch.jobs.signals --market "$MARKET" $ARGS
+          fi

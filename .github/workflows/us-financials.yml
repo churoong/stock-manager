@@ -1,0 +1,58 @@
+name: 미국 연간 재무 (SEC)
+
+# SEC companyfacts 에서 10-K 당기 연간값을 financials·financial_snapshots 에 넣는다 (docs/data-sources.md 14절).
+# 10-K 는 결산 뒤 60~90일에 몰리므로 월 1회면 충분하다. Actions 분을 아끼려고 주 1회로 두지 않는다.
+# 후보 약 2,900종목, 회사당 1회 호출(gzip 평균 115KB), 초당 약 7회 → 20분 안팎 [확인필요: 첫 실행에서 실측].
+on:
+  schedule:
+    - cron: "37 19 4 * *" # 매월 4일 19:37 UTC = 5일 04:37 KST
+  workflow_dispatch:
+    inputs:
+      min_turnover:
+        description: 평균 거래대금 하한(달러). 0 이면 전 종목
+        type: string
+        default: "5000000"
+      limit:
+        description: 앞에서부터 몇 종목만 (시험용, 비우면 전부)
+        type: string
+        default: ""
+
+concurrency:
+  group: us-financials
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+      TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+      TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+      # DB 백엔드 전환 (docs/infra.md 25절). 비어 있으면 Turso 를 쓴다
+      DB_BACKEND: ${{ vars.DB_BACKEND }}
+      # D1 임시 운영 중에는 쉰다 (docs/infra.md 25.14). Turso 로 돌아가면 저절로 다시 돈다
+      SKIP_ON_D1: "1"
+      D1_ACCOUNT_ID: ${{ secrets.D1_ACCOUNT_ID }}
+      D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+      D1_API_TOKEN: ${{ secrets.D1_API_TOKEN }}
+      OFFLINE_MODE: "0"
+      LOG_LEVEL: INFO
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 갱신
+        run: |
+          ARGS="--min-turnover ${{ inputs.min_turnover || '5000000' }}"
+          if [ -n "${{ inputs.limit }}" ]; then ARGS="$ARGS --limit ${{ inputs.limit }}"; fi
+          python -m batch.jobs.us_financials $ARGS
