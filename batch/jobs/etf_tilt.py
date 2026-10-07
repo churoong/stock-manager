@@ -118,7 +118,8 @@ def source_of(pick: dict[str, Any], kodex_index: dict[str, str] | None = None) -
     if not in_pool(pick, kodex_index):
         return None
     if pick["country"] == "US":
-        return ("us", str(pick["symbol"]).upper())
+        sym = str(pick["symbol"]).upper()
+        return ("us", tilt.US_UIT_PROXY.get(sym, sym))  # 단위형 신탁은 같은 지수 ETF 보유로 (25.982)
     index = str(pick.get("category") or "")
     if index in tilt.PROXY_BY_INDEX:
         return ("us", tilt.PROXY_BY_INDEX[index])

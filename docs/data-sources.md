@@ -532,7 +532,7 @@ yfinance `Ticker.info`·`funds_data` 가 쓰는 것과 같다.
 
 | 단계 | 경로 | 실측 |
 |---|---|---|
-| 티커 → 신고 주체·시리즈 | `www.sec.gov/files/company_tickers_mf.json` (열 cik·seriesId·classId·symbol) | 28,608행. VOO·VTI·QQQ·SCHD·IVV·VXUS 있음. **SPY 없음** — 단위형 신탁(UIT)이라 [확인필요: N-PORT 를 내는지] |
+| 티커 → 신고 주체·시리즈 | `www.sec.gov/files/company_tickers_mf.json` (열 cik·seriesId·classId·symbol) | 28,608행. VOO·VTI·QQQ·SCHD·IVV·VXUS 있음. **SPY 없음** — 단위형 신탁(UIT)이라 시리즈가 없다. 운영 세 번 모두 SPY·MDY·DIA 못 받음(2026-10-06) → 같은 지수 ETF 보유로 대신(docs/infra.md 25.982) |
 | 시리즈의 최근 NPORT-P | 신고 주체 `submissions` 의 NPORT-P 를 훑어 `-index-headers.html` 의 `<SERIES-ID>` 로 고른다. 공시가 수천 건인 신탁(iShares 1,443건)은 `cgi-bin/browse-edgar?CIK=<시리즈>&type=NPORT-P&output=atom` | 6개 모두 찾음. IVV 는 시리즈 목록으로만 |
 | 본문 | `Archives/edgar/data/<cik>/<accn>/primary_doc.xml` | VOO 520행 0.5MB · VTI 3,546행 3.2MB · QQQ 105행 · SCHD 102행 · IVV 508행 · VXUS 8,868행 8.3MB. 비중(`pctVal`, **% 단위**) 합 99.8~101.3% |
 | 시점 | `repPdDate` | **분기 말 기준, 약 2달 뒤 공개** (VOO 06-30 기준 → 08-28 공시). 20년 적립 판단에는 충분하다. 공시일(`filingDate`)을 근거표 기준일로 쓴다 |
