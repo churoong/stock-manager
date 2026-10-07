@@ -42,6 +42,7 @@ import pytest
     "earnings_calendar": "야후 실적 예정일 · 법정 기한 추정",
     "etfs": "KRX ETF 목록 · 야후",
     "etf_profiles": "야후 펀드 프로필 (보수·순자산·설정일)",
+    "etf_lookthrough": "보유 ETF 구성종목 비중 — SEC N-PORT · KODEX · KIS 상위 30 (batch/jobs/etf_tilt.py, 25.1002)",
     "stock_dividends": "DART 배당 · 야후",
     "fx_rates": "야후 USDKRW",
     "news": "언론사 RSS (제목·URL·시각만, 원문은 저장하지 않는다)",

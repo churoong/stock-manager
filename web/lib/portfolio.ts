@@ -887,3 +887,33 @@ export function fxDateNote(source: string, stored: { date: string } | undefined,
   return `자동 환율은 ${onDate} 이 아니라 ${stored.date} 종가입니다(그날 환율이 없습니다 — 휴일이거나 아직 받지 않았습니다). 체결 환율과 다르면 지우고 환율을 직접 넣어 다시 저장하세요`;
 }
 
+
+/** 배치가 계산한 계좌 전체 노출 (docs/portfolio.md 8장, 25.1002). 보유 ETF 가 없으면 배치가 null 을 둔다 */
+export interface Lookthrough {
+  etf_pct: number;
+  covered_pct: number;
+  unknown_etfs: string[];
+  by_stock: Array<{ stock_id: number; name: string; direct_pct: number; via_pct: number; total_pct: number }>;
+  by_sector: Record<string, number>;
+  as_of: string | null;
+}
+
+/** 화면 문장 — 계산하지 않고 배치 값을 글로만 바꾼다. 종목은 ETF 속 몫이 있는 것 위주로 앞 8개 */
+export function lookthroughLines(lt: Lookthrough | null | undefined): string[] {
+  if (!lt) return [];
+  const 종목 = lt.by_stock.slice(0, 8).map((r) =>
+    r.via_pct > 0 && r.direct_pct > 0
+      ? `${r.name} ${r.total_pct.toFixed(1)}%(직접 ${r.direct_pct.toFixed(1)} + ETF ${r.via_pct.toFixed(1)})`
+      : r.via_pct > 0
+        ? `${r.name} ${r.total_pct.toFixed(1)}%(ETF)`
+        : `${r.name} ${r.total_pct.toFixed(1)}%`,
+  );
+  const 업종 = Object.entries(lt.by_sector).slice(0, 6).map(([k, v]) => `${k} ${v.toFixed(1)}%`);
+  const 모름 = lt.unknown_etfs.length ? ` · 구성을 모르는 ETF: ${lt.unknown_etfs.join(", ")}` : "";
+  return [
+    `ETF 를 펼친 실제 노출 — ETF ${lt.etf_pct.toFixed(1)}% 중 구성을 아는 몫 ${lt.covered_pct.toFixed(0)}%` +
+      `${lt.as_of ? ` (구성 기준 ${lt.as_of})` : ""}${모름}`,
+    `종목: ${종목.join(" · ")}`,
+    `업종: ${업종.join(" · ")}`,
+  ];
+}

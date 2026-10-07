@@ -348,6 +348,52 @@ def needs_kodex(picks: list[dict[str, Any]]) -> bool:
     )  # fmt: skip
 
 
+HELD_ETFS_SQL = (
+    "SELECT s.id, s.ticker, s.country FROM positions p JOIN stocks s ON s.id = p.stock_id"
+    " WHERE s.asset_type = 'etf' AND p.quantity > 0"
+)
+LOOKTHROUGH_INSERT = (
+    "INSERT INTO etf_lookthrough (etf_stock_id, stock_id, weight_pct, as_of, basis, source, fetched_at)"
+    " VALUES (?, ?, ?, ?, ?, ?, ?)"
+)
+
+
+def store_lookthrough(
+    client: TursoClient, picks: list[dict[str, Any]], sources: dict[int, tuple[str, str]],
+    docs: dict[tuple[str, str], Fetched], markets: dict[str, Market],
+) -> dict[str, Any]:  # fmt: skip
+    """보유 중인 ETF 의 구성종목 비중을 `etf_lookthrough` 에 남긴다 (docs/portfolio.md 8장, 25.1002).
+
+    이번에 문서를 받은 보유 ETF 만 다시 쓴다 — 못 받은 것은 지난 값(기준일이 함께 있다)을 둔다. 더는 들고 있지 않은
+    ETF 의 행은 지운다. 판정 행에 없는 ETF(후보 풀 밖)는 구성을 모른다."""
+    held = client.execute(HELD_ETFS_SQL).rows
+    by_symbol = {(str(p["country"]), str(p["symbol"]).upper()): int(p["pick_id"]) for p in picks}
+    stmts: list[tuple[str, list[Any]]] = [
+        ("DELETE FROM etf_lookthrough WHERE etf_stock_id NOT IN (SELECT p.stock_id FROM positions p"
+         " JOIN stocks s ON s.id = p.stock_id WHERE s.asset_type = 'etf' AND p.quantity > 0)", []),
+    ]  # fmt: skip
+    written, missing = 0, []
+    stamp = db.now_iso()
+    for sid, ticker, country in held:
+        pid = by_symbol.get((str(country), str(ticker).upper()))
+        src = sources.get(pid) if pid is not None else None
+        doc = docs.get(src) if src else None
+        if src is None or doc is None:
+            missing.append(str(ticker))
+            continue
+        kind, sym = src
+        w = tilt.lookthrough_weights(doc.holdings, markets[kind].key_to_symbol, markets[kind].stocks)
+        basis = doc.accession + (f" (대리 {sym})" if sym != str(ticker).upper() else "")
+        stmts.append(("DELETE FROM etf_lookthrough WHERE etf_stock_id = ?", [int(sid)]))
+        as_of = doc.report_date or doc.filed
+        rows = [[int(sid), k, round(v, 4), as_of, basis, doc.source, stamp] for k, v in w.items()]
+        stmts += [(LOOKTHROUGH_INSERT, r) for r in rows]
+        written += 1
+    for i in range(0, len(stmts), 500):
+        client.batch(stmts[i : i + 500])
+    return {"held": len(held), "written": written, "missing": missing}
+
+
 def run() -> int:
     client = TursoClient()
     try:
@@ -455,7 +501,14 @@ def run() -> int:
         if updates or 지우기:
             client.batch(지우기 + updates)
 
+        # 계좌 전체 노출용 — 보유 ETF 의 구성 (25.1002). 실패해도 점수 쪽은 이미 적었다
+        try:
+            투시 = store_lookthrough(client, picks, sources, docs, markets)
+        except Exception as exc:  # noqa: BLE001 — 곁다리
+            투시 = {"error": str(exc)}
+            failed["보유 ETF 구성 저장"] = str(exc)
         step = {
+            "lookthrough": 투시,
             "picks": len(picks),
             "targets": len(us_targets) + len(kr_targets),
             "fetched": len(docs),

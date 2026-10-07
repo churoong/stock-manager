@@ -314,6 +314,39 @@ def fiscal_year_ends(client: TursoClient, stock_ids: list[int]) -> dict[int, tup
     return out
 
 
+LOOKTHROUGH_SQL = (
+    "SELECT l.etf_stock_id, l.stock_id, l.weight_pct, l.as_of, COALESCE(s.name_ko, s.name_en, s.ticker) AS name,"
+    " s.sector"
+    " FROM etf_lookthrough l JOIN stocks s ON s.id = l.stock_id"
+)
+
+
+def _lookthrough(
+    client: TursoClient, positions: list[pf.Position], stocks: dict[int, dict], warnings: list[str]
+) -> dict | None:
+    """보유 ETF 를 펼친 노출 (25.1002). ETF 가 없으면 읽지 않는다. 표가 없으면(0051 전) 구성을 모르는 것으로 본다."""
+    is_etf = {sid for sid, r in stocks.items() if r.get("asset_type") == "etf"}
+    if not any(p.stock_id in is_etf and (p.market_value_krw or 0) > 0 for p in positions):
+        return None
+    info = {sid: (str(r["name"]), r.get("sector")) for sid, r in stocks.items()}
+    weights: dict[int, dict[int, float]] = defaultdict(dict)
+    기준일: list[str] = []
+    try:
+        for r in client.execute(LOOKTHROUGH_SQL).dicts():
+            weights[int(r["etf_stock_id"])][int(r["stock_id"])] = float(r["weight_pct"])
+            info.setdefault(int(r["stock_id"]), (str(r["name"]), r.get("sector")))
+            if r.get("as_of"):
+                기준일.append(str(r["as_of"]))
+    except Exception as exc:  # noqa: BLE001 — 곁다리. 표가 없으면 조용히, 그 밖의 실패는 경고로 남기고 모름으로
+        if not db.표가_없나(exc):
+            warnings.append(f"ETF 구성종목을 읽지 못했습니다 — 계좌 전체 노출을 비웠습니다 ({exc})")
+            return None
+    out = pf.lookthrough(positions, is_etf, dict(weights), info)
+    if out is not None:
+        out["as_of"] = min(기준일) if 기준일 else None
+    return out
+
+
 def run() -> int:
     client = TursoClient()
     try:
@@ -342,8 +375,8 @@ def run() -> int:
 
         stocks = {
             int(r["id"]): r
-            for r in client.execute("SELECT id, ticker, COALESCE(name_ko, name_en, ticker) AS name, currency, sector"
-                                    " FROM stocks WHERE id IN (SELECT DISTINCT stock_id FROM trades"
+            for r in client.execute("SELECT id, ticker, COALESCE(name_ko, name_en, ticker) AS name, currency, sector,"
+                                    " asset_type FROM stocks WHERE id IN (SELECT DISTINCT stock_id FROM trades"
                                     " UNION SELECT DISTINCT stock_id FROM dividend_receipts)").dicts()
         }  # fmt: skip
 
@@ -403,6 +436,8 @@ def run() -> int:
             positions, sector_of, 30.0 if 섹터상한 is None else float(섹터상한),
             total_investable_krw=float(투자가능 or 0.0),
         )
+        # 계좌 전체 노출 — 보유 ETF 를 구성종목으로 펼친다 (docs/portfolio.md 8장, 25.1002)
+        alloc["lookthrough"] = _lookthrough(client, positions, stocks, warnings)
 
         무위험, 무위험경고 = sr.잎마다(db.get_setting(client, "risk_free_manual", {}, 못읽음=warnings), ("kr_pct",))
         warnings += 무위험경고

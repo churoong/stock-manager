@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import FlagCriteria from "@/components/FlagCriteria";
 import { bodyOf, readJson } from "@/lib/http";
 import { confirmNeeded, confirmPrompt, CONFIRM_CANCEL, type ConfirmKind } from "@/lib/confirm";
-import { dividendBody, readAmount, unreadableAmount, estimateWithholding, recalcPending, money, pct, pctSuffix, LIST_LIMIT, pnlClass, pctClass, qtyText, signedInt, signedWon, tradeBody, withholdingRate, won } from "@/lib/portfolio";
+import { dividendBody, readAmount, unreadableAmount, estimateWithholding, recalcPending, money, pct, pctSuffix, LIST_LIMIT, lookthroughLines, type Lookthrough, pnlClass, pctClass, qtyText, signedInt, signedWon, tradeBody, withholdingRate, won } from "@/lib/portfolio";
 type DividendTaxes = { kr_dividend_pct?: number | null; us_dividend_pct?: number | null };
 
 import { rateText } from "@/lib/recommend";
@@ -79,6 +79,8 @@ interface Summary {
     /** 배치가 설정값으로 고른 업종 상한과 넘은 업종 (25.217). 옛 요약에는 없다 */
     max_sector_pct?: number | null;
     sectors_over_cap?: string[];
+    /** 계좌 전체 노출 — ETF 를 펼친 것 (25.1002). 보유 ETF 가 없거나 옛 요약이면 없다 */
+    lookthrough?: Lookthrough | null;
   } | null;
   metrics: Record<string, number | string | null> | null;
   upcoming: Array<{ ticker: string; name: string; kind: string; deadline: string; d_day: number; basis?: string }>;
@@ -385,6 +387,12 @@ function Positions({ summary, onDismissed }: { summary: Summary; onDismissed: ()
             ? ` — 총 투자가능금액의 ${alloc.max_sector_pct}% 상한을 넘는 업종: ${alloc.sectors_over_cap.join(", ")}`
             : ""}
         </p>
+      ) : null}
+      {lookthroughLines(alloc?.lookthrough).length ? (
+        // ETF 가 무엇을 들고 있는지 펼쳐 본 노출 (docs/portfolio.md 8장, 25.1002). 계산은 배치가 했다
+        <div className="mb-2 rounded-lg bg-slate-50 px-2 py-1.5 text-xs text-slate-600 dark:bg-slate-900 dark:text-slate-400">
+          {lookthroughLines(alloc?.lookthrough).map((l) => <p key={l}>{l}</p>)}
+        </div>
       ) : null}
       <div className="flex flex-col gap-2">
         {summary.positions.map((p) => (

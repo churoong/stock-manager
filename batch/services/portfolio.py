@@ -440,6 +440,72 @@ def allocation(
     }
 
 
+#: ETF 투시에서 보이는 종목 수 (docs/portfolio.md 8장)
+LOOKTHROUGH_TOP = 15
+#: ETF 안에서 우리 종목에 잇지 못한 비중의 업종 이름
+LOOKTHROUGH_UNKNOWN = "ETF 속 미확인"
+
+
+def lookthrough(
+    positions: list[Position],
+    is_etf: set[int],
+    weights: dict[int, dict[int, float]],
+    info: dict[int, tuple[str, str | None]],
+) -> dict | None:
+    """계좌 전체 노출 — 보유 ETF 를 구성종목으로 펼친 종목·업종 비중 (docs/portfolio.md 8장, 25.1002).
+
+    weights = ETF stock_id → {구성 stock_id: ETF 안 비중 %}. info = stock_id → (이름, 업종).
+    ETF 를 하나도 들고 있지 않으면 None(펼칠 것이 없다). 구성을 모르는 ETF 는 통째로, 아는 ETF 의 나머지 비중은
+    `LOOKTHROUGH_UNKNOWN` 으로 센다 — 모르는 것을 아는 업종에 나눠 넣지 않는다."""
+    total = sum(p.market_value_krw or 0 for p in positions)
+    etf_value = sum(p.market_value_krw or 0 for p in positions if p.stock_id in is_etf)
+    if not total or not etf_value:
+        return None
+    direct: dict[int, float] = defaultdict(float)
+    via: dict[int, float] = defaultdict(float)
+    unknown = 0.0
+    모름: list[str] = []
+    for p in positions:
+        v = p.market_value_krw or 0
+        if v <= 0:
+            continue
+        if p.stock_id not in is_etf:
+            direct[p.stock_id] += v
+            continue
+        w = weights.get(p.stock_id)
+        if not w:
+            unknown += v
+            모름.append(info.get(p.stock_id, (str(p.stock_id), None))[0])
+            continue
+        합 = sum(w.values())
+        scale = 100 / 합 if 합 > 100 else 1.0  # 합이 100 을 넘으면(파생 상계 전 기재 등) 100 으로 줄인다
+        for sid, pct in w.items():
+            via[sid] += v * pct * scale / 100
+        unknown += v * (100 - min(합, 100.0)) / 100
+
+    def r(x: float) -> float:
+        return round(x / total * 100, 2)
+
+    ids = set(direct) | set(via)
+    rows = sorted(ids, key=lambda s: -(direct.get(s, 0) + via.get(s, 0)))
+    by_sector: dict[str, float] = defaultdict(float)
+    for s in ids:
+        by_sector[info.get(s, ("", None))[1] or NO_SECTOR] += direct.get(s, 0) + via.get(s, 0)
+    if unknown:
+        by_sector[LOOKTHROUGH_UNKNOWN] += unknown
+    return {
+        "etf_pct": r(etf_value),
+        "covered_pct": round((etf_value - unknown) / etf_value * 100, 1),
+        "unknown_etfs": sorted(모름),
+        "by_stock": [
+            {"stock_id": s, "name": info.get(s, (str(s), None))[0], "direct_pct": r(direct.get(s, 0)),
+             "via_pct": r(via.get(s, 0)), "total_pct": r(direct.get(s, 0) + via.get(s, 0))}
+            for s in rows[:LOOKTHROUGH_TOP]
+        ],
+        "by_sector": {k: r(v) for k, v in sorted(by_sector.items(), key=lambda kv: -kv[1])},
+    }  # fmt: skip
+
+
 # ----------------------------------------------------------------------
 # 날짜별 평가액과 시간가중 수익률
 # ----------------------------------------------------------------------

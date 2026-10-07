@@ -104,6 +104,21 @@ class Tilt:
         return {**asdict(self), "top": [asdict(c) for c in self.top]}
 
 
+def lookthrough_weights(
+    holdings: list[tuple[str, float]], key_to_symbol: dict[str, str], stock_by_symbol: dict[str, tuple[int, str, str]]
+) -> dict[int, float]:
+    """보유 → {우리 stock_id: ETF 안 비중 %}. `compute` 와 같은 잇기(심볼 정규화). 잇지 못한 줄·음수 비중은 뺀다
+    (계좌 전체 노출, docs/portfolio.md 8장, 25.1002)."""
+    out: dict[int, float] = {}
+    for key, w in holdings:
+        sym = key_to_symbol.get(key)
+        stock = stock_by_symbol.get(norm_symbol(sym)) if sym else None
+        if stock is None or w <= 0:
+            continue
+        out[stock[0]] = out.get(stock[0], 0.0) + w
+    return out
+
+
 def compute(
     holdings: list[tuple[str, float]],
     cusip_to_symbol: dict[str, str],
