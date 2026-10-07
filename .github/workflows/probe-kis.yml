@@ -26,6 +26,8 @@ jobs:
         run: |
           set -o pipefail
           python scripts/probe_kis.py 2>&1 | python scripts/ops_tee.py probe.txt
+          # 쓸 만한 KIS API 목록 확인 (infra 25.987)
+          python scripts/probe_kis_catalog.py 2>&1 | python scripts/ops_tee.py -a probe.txt
 
       - name: 결과를 이슈로 내보내기
         if: always()
