@@ -147,3 +147,62 @@ def fetch_list(corp_code: str, bgn_de: str, end_de: str) -> FetchResult:
         page_no += 1
     return FetchResult(ok=True, source=SOURCE, data=모은, limit_state="ok", fetched_at=datetime.now(UTC),
                        attempts=page_no)  # fmt: skip
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# 시장 전체 공시 (docs/disclosure_reaction.md, docs/infra.md 25.996)
+# ---------------------------------------------------------------------------------------------------------------------
+
+#: 시장 전체로 받는 공시 종류 — 주요사항보고(B)·거래소공시(I). 정기공시·지분공시까지 받으면 하루 수천 건이다
+MARKET_KINDS = ("B", "I")
+
+
+@dataclass(frozen=True)
+class MarketDisclosure:
+    corp_code: str
+    stock_code: str  # 6자리 (상장사만)
+    receipt_no: str
+    title: str
+    disclosed_at: str
+    kind: str  # B · I
+
+
+def parse_market(payload: dict[str, Any], kind: str) -> list[MarketDisclosure]:
+    """회사를 정하지 않은 목록. 상장사(`stock_code` 6자리)만 — 비상장·펀드는 버린다."""
+    out = []
+    for row in payload.get("list") or []:
+        receipt_no, title = str(row.get("rcept_no") or "").strip(), str(row.get("report_nm") or "").strip()
+        stock_code = str(row.get("stock_code") or "").strip()
+        day = receipt_date(receipt_no) if receipt_no else None
+        if receipt_no and title and day and len(stock_code) == 6:
+            out.append(MarketDisclosure(str(row.get("corp_code") or ""), stock_code, receipt_no, title, day, kind))
+    return out
+
+
+def fetch_market_day(day: str, kind: str) -> tuple[list[MarketDisclosure], int, str | None]:
+    """하루치(YYYYMMDD) 시장 전체 공시 한 종류. 반환 (목록, 호출 수, 오류)."""
+    key = config.DART_API_KEY
+    if not key:
+        return [], 0, "DART_API_KEY 없음"
+    out: list[MarketDisclosure] = []
+    page = 1
+    while True:
+        try:
+            response = requests.get(
+                f"{BASE_URL}/{ENDPOINT}",
+                params={"crtfc_key": key, "bgn_de": day, "end_de": day, "pblntf_ty": kind, "page_no": page,
+                        "page_count": PAGE_COUNT},
+                timeout=LIST_TIMEOUT,
+            )  # fmt: skip
+            payload = response.json() if response.status_code == 200 else {}
+        except (requests.RequestException, ValueError) as exc:
+            return out, page, f"호출 실패: {가림(str(exc))}"
+        status = str(payload.get("status"))
+        if status == STATUS_NO_DATA:
+            return out, page, None
+        if status != STATUS_OK:
+            return out, page, f"상태 {status}: {payload.get('message')}"
+        out += parse_market(payload, kind)
+        if page >= int(payload.get("total_page") or 1) or page >= MAX_PAGES:
+            return out, page, None
+        page += 1

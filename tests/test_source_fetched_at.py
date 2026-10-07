@@ -67,6 +67,7 @@ import pytest
     "portfolio_summary", "review_stats", "trade_reviews", "daily_reports", "report_items",
     "sell_flags", "monitor_targets", "news_targets", "adjust_refresh_queue",
     "broker_stats",  # 증권사 적중률 (25.995)
+    "disclosure_reaction",  # 공시 반응 통계 (25.996)
 }  # fmt: skip
 
 #: **사람이 넣은 것.** 출처는 사용자다. 시스템이 임의로 고치지 않는다(CLAUDE.md)

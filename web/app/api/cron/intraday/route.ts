@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { notifyQuotaOnce } from "@/lib/quotaNotice";
-import { batch, execute, quotaReason, rowsToObjects } from "@/lib/db";
+import { batch, execute, ifMissingTable, quotaReason, rowsToObjects } from "@/lib/db";
+import { REACTION_ROWS, type ReactionRow, classifyTitle, reactionLine } from "@/lib/disclosureReaction";
 import {
   SPARK_MAX_SYMBOLS,
   activeSession,
@@ -605,6 +606,19 @@ export async function GET(request: Request) {
         }
       }
       const dart = await disclosures(targets, session.date, now, alerted, 전거래일, 전에_알림);
+      // 이 유형 공시의 과거 반응 한 줄 (docs/disclosure_reaction.md, 25.996) — 표가 없거나(첫 금요일 전) 표본이 적으면 붙지 않는다
+      if (dart.hits.length) {
+        const 반응 = rowsToObjects<ReactionRow>(await execute(REACTION_ROWS).catch(ifMissingTable({ columns: [], rows: [] } as never)));
+        for (const h of dart.hits) {
+          // 회사 이름이 아니라 공시 제목만 가른다(메시지의 따옴표 안)
+          const 제목 = /"(.+)"/.exec(String(h.message))?.[1] ?? "";
+          const 줄 = reactionLine(classifyTitle(제목, 반응));
+          if (줄) {
+            h.message += ` · ${줄}`;
+            h.data.reaction = 줄;
+          }
+        }
+      }
       inserted.push(...(await 넣기(dart.hits)));
       errors.push(...dart.errors);
     }

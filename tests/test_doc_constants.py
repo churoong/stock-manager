@@ -62,6 +62,7 @@ BACKTEST = 읽기("backtest.md")
 ETF = 읽기("etf.md")
 INTRADAY = 읽기("intraday.md")
 BROKERS = 읽기("brokers.md")
+REACTION = 읽기("disclosure_reaction.md")
 
 
 def 검사(문서본문: str, 찾을것: str, 무엇: str) -> None:
@@ -375,6 +376,27 @@ class Test증권사_성적:
         assert f"BROKER_MIN_N = {bs.MIN_N};" in 웹, "web/lib/brokers.ts 표본 하한이 배치와 다르다"
 
 
+class Test공시_반응:
+    """공시 반응 통계 (docs/disclosure_reaction.md, docs/infra.md 25.996)."""
+
+    def test_기간과_표본(self) -> None:
+        from batch.services import disclosure_reaction as dr
+
+        검사(REACTION, f"**공시일부터 {dr.WINDOW_DAYS}거래일째 종가**", "반응 기간")
+        검사(REACTION, f"**{dr.MIN_N}건 미만**", "표본 하한")
+        검사(REACTION, f"{dr.ACTION_TOLERANCE * 100:.0f}% 넘게 바뀜", "기업행위 문턱")
+        for _, label, _ in dr.TYPES:
+            assert label in REACTION, f"docs/disclosure_reaction.md 2장에 유형 {label} 이 없다"
+        웹 = (Path(__file__).resolve().parent.parent / "web" / "lib" / "disclosureReaction.ts").read_text("utf-8")
+        assert f"REACTION_MIN_N = {dr.MIN_N};" in 웹, "web/lib/disclosureReaction.ts 표본 하한이 배치와 다르다"
+
+    def test_모으는_기간(self) -> None:
+        from batch.jobs import disclosure_reaction as job
+
+        검사(REACTION, f"지난 **{job.BACKFILL_DAYS}일**", "처음 모으는 기간")
+        검사(REACTION, f"매일 지난 {job.DAILY_DAYS}일을 겹쳐", "평소 겹쳐 받는 기간")
+
+
 class Test시간외:
     """보유 종목 시간외 단일가 알림 (docs/intraday.md 1.2, docs/infra.md 25.992)."""
 
@@ -440,7 +462,7 @@ class Test밸류_분모:
     "valuation_band", "outcomes", "stress", "sell_flags", "factor_ic", "sector_momentum", "earnings_quality", "share_issuance",
     "quarterly_earnings", "short_reversal", "div_omission", "buyback", "dilution", "flow_surge",
     "gross_profitability", "robustness", "column_rot", "calibration", "self_grade", "holding_scores",
-    "pick_history", "etf_accounts", "etf_tilt", "after_hours", "broker_stats",
+    "pick_history", "etf_accounts", "etf_tilt", "after_hours", "broker_stats", "disclosure_reaction",
 )  # fmt: skip
 
 #: 아직 그물 밖인 모듈과 **왜 아직인지**. 하나씩 줄여 간다
