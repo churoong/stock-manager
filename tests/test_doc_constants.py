@@ -61,6 +61,7 @@ SELL_FLAGS = 읽기("sell_flags.md")
 BACKTEST = 읽기("backtest.md")
 ETF = 읽기("etf.md")
 INTRADAY = 읽기("intraday.md")
+BROKERS = 읽기("brokers.md")
 
 
 def 검사(문서본문: str, 찾을것: str, 무엇: str) -> None:
@@ -360,6 +361,20 @@ class Test계좌별_ETF:
         검사(ETF, f"미국 상장 핵심 ETF 는 일반계좌 {ea.US_TAXABLE_PRIORITY}순위", "미국 상장 일반계좌 순위")
 
 
+class Test증권사_성적:
+    """증권사 적중률 성적표 (docs/brokers.md, docs/infra.md 25.995)."""
+
+    def test_기간과_표본(self) -> None:
+        from batch.services import broker_stats as bs
+
+        검사(BROKERS, f"기준가에서 {bs.FWD_DAYS}거래일 뒤 종가", "초과수익 기간")
+        검사(BROKERS, f"기준일부터 {bs.TOUCH_DAYS}거래일 안에", "터치 기간")
+        검사(BROKERS, f"**{bs.MIN_N}건 미만**", "표본 하한")
+        검사(BROKERS, f"{bs.ACTION_TOLERANCE * 100:.0f}% 넘게 바뀜", "기업행위 문턱")
+        웹 = (Path(__file__).resolve().parent.parent / "web" / "lib" / "brokers.ts").read_text("utf-8")
+        assert f"BROKER_MIN_N = {bs.MIN_N};" in 웹, "web/lib/brokers.ts 표본 하한이 배치와 다르다"
+
+
 class Test시간외:
     """보유 종목 시간외 단일가 알림 (docs/intraday.md 1.2, docs/infra.md 25.992)."""
 
@@ -425,7 +440,7 @@ class Test밸류_분모:
     "valuation_band", "outcomes", "stress", "sell_flags", "factor_ic", "sector_momentum", "earnings_quality", "share_issuance",
     "quarterly_earnings", "short_reversal", "div_omission", "buyback", "dilution", "flow_surge",
     "gross_profitability", "robustness", "column_rot", "calibration", "self_grade", "holding_scores",
-    "pick_history", "etf_accounts", "etf_tilt", "after_hours",
+    "pick_history", "etf_accounts", "etf_tilt", "after_hours", "broker_stats",
 )  # fmt: skip
 
 #: 아직 그물 밖인 모듈과 **왜 아직인지**. 하나씩 줄여 간다

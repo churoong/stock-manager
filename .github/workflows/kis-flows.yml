@@ -58,12 +58,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: DB 백엔드 고정 (수집과 증권사 성적표가 같은 DB 를 쓴다, docs/infra.md 25.472·25.480)
+        run: python -m batch.core.client --pin >> "$GITHUB_ENV"
+
       - name: 수집
         run: |
           set -o pipefail
           ARGS=""
           if [ -n "${{ inputs.limit }}" ]; then ARGS="--limit ${{ inputs.limit }}"; fi
           python -m batch.jobs.kis_flows $ARGS 2>&1 | python scripts/ops_tee.py run.log
+          # 증권사 적중률 성적표 — 금요일이거나 표가 비었을 때만 다시 계산한다 (docs/infra.md 25.995)
+          python -m batch.jobs.broker_stats 2>&1 | python scripts/ops_tee.py -a run.log
 
       - name: 기록을 이슈로 내보내기
         if: always()

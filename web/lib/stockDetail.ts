@@ -21,7 +21,7 @@ export type Row = Record<string, unknown>;
 export type Exec = (sql: string, args?: Array<string | number | null>) => Promise<Row[]>;
 
 export const SECTIONS = [
-  "prices", "financials", "valuation", "metrics", "news", "events", "signals", "dividends", "quarterly",
+  "prices", "financials", "valuation", "metrics", "news", "events", "signals", "dividends", "quarterly", "opinions",
 ] as const;
 export type Section = (typeof SECTIONS)[number];
 
@@ -64,6 +64,11 @@ function empty(reason: string, extra: Row = {}): SectionResult {
 // ---------------------------------------------------------------------------
 // 질의
 // ---------------------------------------------------------------------------
+
+/** 증권사 의견 최근 15건과 그 증권사의 성적 (docs/brokers.md, 25.995) — KIS 투자의견 `kr_opinions` × 성적표 `broker_stats` */
+export const OPINIONS = `SELECT o.date, o.broker, o.opinion, o.target_price, o.source, o.fetched_at FROM kr_opinions o
+WHERE o.stock_id = ? ORDER BY o.date DESC, o.broker LIMIT 15`;
+export const BROKER_STATS_FOR = `SELECT b.* FROM json_each(?) j JOIN broker_stats b ON b.broker = j.value`;
 
 export const MASTER = `SELECT id, ticker, market, country, COALESCE(name_ko, name_en, ticker) AS name, name_en, name_ko, sector,
   sector_source, currency, listed_shares, status, fetched_at, asset_type
@@ -461,6 +466,18 @@ export async function loadSection(
           { rows: [] },
         );
         return { as_of: (rows[0].as_of_date as string | null) ?? null, empty: false, reason: null, rows };
+      });
+
+    case "opinions":
+      return guard(async () => {
+        const opinions = await exec(OPINIONS, [id]);
+        if (!opinions.length) return empty("증권사 의견은 국내 유니버스·보유·관심 종목에 KIS 로 매일 모읍니다(국내만)", { opinions: [], stats: {} });
+        // 성적표가 아직 없으면(첫 금요일 전) 의견만 보인다
+        const 증권사 = [...new Set(opinions.map((o) => String(o.broker)))];
+        const stats = Object.fromEntries(
+          (await exec(BROKER_STATS_FOR, [JSON.stringify(증권사)]).catch(ifMissingTable([] as Row[]))).map((s) => [String(s.broker), s]),
+        );
+        return { as_of: String(opinions[0].fetched_at ?? ""), empty: false, reason: null, opinions, stats };
       });
 
     case "events":

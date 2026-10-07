@@ -44,6 +44,7 @@ import { money, pnlClass, qtyText, signedInt, signedWon } from "@/lib/portfolio"
 import { localDate, userDateOf, userTimeOf } from "@/lib/market";
 import { addWatch, loadWatchIds, removeWatch } from "@/lib/watch";
 import QuickTrade from "@/components/QuickTrade";
+import { type BrokerStat, brokerLine } from "@/lib/brokers";
 
 /**
  * 종목 상세 (docs/stock_detail.md, Step 10).
@@ -144,6 +145,7 @@ const JUMPS: Array<[string, string]> = [
   ["financials", "재무"],
   ["news", "뉴스"],
   ["events", "일정"],
+  ["opinions", "의견"],
 ];
 
 /** "2026-09-17" 은 그대로, ISO 시각은 KST 로 */
@@ -182,6 +184,8 @@ export default function StockDetail({
   const events = useJson<SectionResult>(`${base}/events`);
   const dividends = useJson<SectionResult>(`${base}/dividends`);
   const quarterly = useJson<SectionResult>(`${base}/quarterly`);
+  // 증권사 의견과 그 증권사의 성적 (docs/brokers.md, 25.995)
+  const opinions = useJson<SectionResult>(`${base}/opinions`);
   const [horizon, setHorizon] = useState<string | null>(horizonParam ?? null);
   // 관심 등록·해제 뒤 화면 값. undefined 면 서버가 준 것을 쓴다 (훅은 early return 위에)
   const [watchOverride, setWatchOverride] = useState<{ id: number } | null | undefined>(undefined);
@@ -397,6 +401,10 @@ export default function StockDetail({
 
       <Card id="events" title="실적·공시 일정" loaded={events}>
         {(data) => <EventsBlock data={data} />}
+      </Card>
+
+      <Card id="opinions" title="증권사 의견 · 그 증권사의 지난 성적" loaded={opinions}>
+        {(data) => <OpinionsBlock data={data} />}
       </Card>
     </div>
   );
@@ -1005,6 +1013,32 @@ function DividendsBlock({ rows, currency }: { rows: Row[]; currency: string }) {
       <p className="mt-1 text-[11px] text-slate-400">
         증감은 <b>배당총액</b>으로 봅니다. 주당배당금은 액면분할이 있으면 해마다 비교할 수 없습니다.
         {dividendSourceLine(rows, userTimeOf) ? <> {dividendSourceLine(rows, userTimeOf)}</> : null}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * 증권사 의견 (docs/brokers.md, 25.995). 의견마다 **그 증권사가 지난 1년 얼마나 맞혔나** 를 붙인다 — 목표가만 보면 늘 낙관적인
+ * 증권사와 신중한 증권사를 가를 수 없다. 출처는 KIS 투자의견, 성적은 우리 시세로 매주 계산한 것이다.
+ */
+function OpinionsBlock({ data }: { data: SectionResult }) {
+  const opinions = data.opinions as Row[];
+  const stats = (data.stats ?? {}) as Record<string, BrokerStat>;
+  return (
+    <div className="text-xs">
+      <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+        {opinions.map((o, i) => (
+          <li key={i} className="py-1">
+            <span className="text-slate-500">{String(o.date)}</span> <b>{String(o.broker)}</b> {String(o.opinion ?? "-")}
+            {o.target_price ? ` · 목표가 ${Number(o.target_price).toLocaleString("ko-KR")}원` : ""}
+            <div className="text-slate-500">{brokerLine(stats[String(o.broker)])}</div>
+          </li>
+        ))}
+      </ul>
+      <p className="mt-1 text-slate-400">
+        출처 한국투자증권 KIS 투자의견 · 성적은 의견 다음 거래일 종가 기준 60거래일 지수(코스피·코스닥) 대비, 목표가 터치는 120거래일 안 고가 ·
+        기준일 {String(Object.values(stats)[0]?.as_of ?? "-")}
       </p>
     </div>
   );
