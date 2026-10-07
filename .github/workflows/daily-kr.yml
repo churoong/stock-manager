@@ -79,6 +79,9 @@ jobs:
           D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
           D1_API_TOKEN: ${{ secrets.D1_API_TOKEN }}
           KRX_API_KEY: ${{ secrets.KRX_API_KEY }}
+          # 휴장일 대조 (docs/infra.md 25.985). 없으면 대조만 건너뛴다
+          KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}
+          KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}
           # 공시 수집 단계(jobs/disclosures_kr)가 DART 를 부른다. 빠져 있어 매일 "DART_API_KEY 가 비어 있습니다" 로
           # 공시를 하나도 못 받았다 (docs/infra.md 25.882)
           DART_API_KEY: ${{ secrets.DART_API_KEY }}

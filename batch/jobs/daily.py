@@ -106,6 +106,27 @@ def job_name(market: str) -> str:
 # `batch/core/db.trigger_source()` 로 옮겼다 (2026-09-21, docs/infra.md 25.95).
 
 
+def _kis_calendar_check(client: TursoClient, today: date) -> list[str]:
+    """KIS 휴장일 조회와 우리 달력이 다른 날을 경고로 (25.985). 키가 없으면 조용히 건너뛴다. **곁다리다** — 실패해도
+    시세·리포트는 그대로 가고, 실패 사실만 한 줄 남긴다(값·토큰은 남기지 않는다)."""
+    from batch.sources import kis
+
+    if not kis.configured():
+        return []
+    try:
+        statuses, calls = kis.holidays(client, today)
+        db.record_api_call(client, "kis_openapi", count=calls)  # = kis.SOURCE (이름은 글자로, 25.983)
+    except (kis.KisFailed, OSError, KeyError) as exc:  # requests 의 접속 오류도 OSError 계열이다
+        return [f"KIS 휴장일 대조를 못 했습니다 ({exc}) — 달력은 exchange_calendars 그대로 씁니다"]
+    다름 = cal.compare_with_kis("KR", statuses, today)
+    if not 다름:
+        return []
+    return [
+        "⚠️ 휴장일 판정이 KIS 공식 조회와 다릅니다: " + " / ".join(다름)
+        + " — 임시공휴일이면 batch/core/calendar.EXTRA_HOLIDAYS 에 넣어야 합니다"
+    ]
+
+
 def _까닭(warnings: list[str], limit: int = 5) -> str:
     """실패 예외에 붙일 경고 요약 — 앞 몇 줄만 (25.615). 두 시장 × (한도 + 폴백 실패) 가 넷이라 다섯 줄 (25.619)."""
     return (" — " + " / ".join(warnings[:limit])) if warnings else ""
@@ -195,9 +216,8 @@ def collect_kr_prices(
     # 온다)
     warnings.extend(_store_kr_etf_day(client, bas_dd, trade_date))
 
-    # 캘린더 판정을 남기고, 판정과 실제 데이터가 어긋나는지 본다.
-    # 한국투자증권의 공식 휴장일 조회를 쓰지 않아 대조할 상대가 없다.
-    # 임시공휴일 반영이 늦으면 여기서 드러난다.
+    # 캘린더 판정을 남기고, 판정과 실제 데이터가 어긋나는지 본다. 임시공휴일 반영이 늦으면 여기서 드러난다.
+    # 앞날은 KIS 공식 휴장일 조회와 견준다(아래, 25.985).
     from datetime import date as _date
 
     trade_day = _date.fromisoformat(trade_date)
@@ -205,6 +225,8 @@ def collect_kr_prices(
     suspicion = cal.suspect_calendar(is_open=True, rows_collected=stored_total)
     if suspicion:
         warnings.append(suspicion)
+    # 앞으로 2주 휴장일을 KIS 공식 조회와 견준다 (docs/infra.md 25.985) — 임시공휴일을 그날이 오기 전에 안다
+    warnings.extend(_kis_calendar_check(client, cal.user_today()))
 
     if stored_total == 0:
         # **까닭을 함께 올린다** (docs/infra.md 25.615). 거래소 한도·야후 폴백 실패 같은 원인은 경고에만 있어,

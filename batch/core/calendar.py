@@ -394,8 +394,8 @@ def holiday_basis(market: str, day: date) -> str:
 def record_decision(client, market: str, day: date, is_open: bool, note: str = "") -> None:
     """휴장일 판정을 남긴다.
 
-    한국투자증권의 공식 휴장일 조회를 쓰지 않기로 해서 대조할 상대가 없다.
-    대신 판정을 기록해 두고, 나중에 어긋난 날을 찾아낼 수 있게 한다.
+    판정을 기록해 두고, 나중에 어긋난 날을 찾아낼 수 있게 한다. 2026-10-07 부터 국내는 KIS 공식 휴장일 조회와도
+    매일 대조한다(`compare_with_kis`, docs/infra.md 25.985) — 그 전에는 대조할 상대가 없었다.
 
     **휴장일도 남긴다** (docs/infra.md 25.670, 감사). 예전에는 수집을 마친 뒤 개장일만 불러 `is_open=0` 행이
     한 번도 안 생겼고, 마감 시각은 NULL 로 박혀 반일장이 빠졌고, 근거(라이브러리·수동 목록)도 없어
@@ -426,6 +426,28 @@ def record_decision(client, market: str, day: date, is_open: bool, note: str = "
             now_iso(),
         ],
     )
+
+
+#: KIS 휴장일 조회와 견줄 앞날 수 (docs/infra.md 25.985). 임시공휴일은 대개 1~2주 전에 정해진다 `[확인필요]`
+KIS_COMPARE_DAYS = 14
+
+
+def compare_with_kis(market: str, statuses: list, today: date, days: int = KIS_COMPARE_DAYS) -> list[str]:
+    """KIS 개장 여부와 우리 달력이 다른 날 (docs/infra.md 25.985). `statuses` 는 `sources.kis.DayStatus` 목록.
+
+    다르면 **우리 달력이 틀렸을 수 있다** — 임시공휴일이 라이브러리에 아직 없거나 `EXTRA_HOLIDAYS` 를 잘못 적었거나.
+    달력을 저절로 고치지는 않는다(되돌릴 수 없는 휴장 판정을 바깥 응답 하나로 바꾸지 않는다).
+    사람이 `EXTRA_HOLIDAYS` 를 고친다.
+    """
+    out = []
+    for s in statuses:
+        if not (today <= s.day < today + timedelta(days=days)):
+            continue
+        ours = is_session(market, s.day)
+        if ours != s.is_open:
+            우리, 그쪽 = ("개장" if ours else "휴장"), ("개장" if s.is_open else "휴장")
+            out.append(f"{s.day.isoformat()} 우리 달력 {우리} · KIS {그쪽}")
+    return out
 
 
 def suspect_calendar(is_open: bool, rows_collected: int) -> str | None:
