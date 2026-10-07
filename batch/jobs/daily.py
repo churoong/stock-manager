@@ -1887,6 +1887,18 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
             )
         if composed.text:
             message += "\n\n" + composed.text
+        # 보유·추천 종목의 기업행위 일정 (docs/reports.md 3.7, 25.989) — 가격이 튀기 **전에** 안다.
+        # 못 읽으면 절만 빠진다. 보유이면서 추천이면 "보유" 로 적는다(뒤가 이긴다)
+        if market == "KR" and 추천_오류 is None:
+            상위 = report_picks.select_top(report_picks.with_criteria(signal_rows))
+            일정 = _corp_event_lines(
+                client, decision.trade_date,
+                {r.ticker: (r.name, "추천") for r in 상위} | {h.ticker: (h.name, "보유") for h in holdings},
+                warnings,
+            )
+            if 일정:
+                message += "\n\n" + "\n".join(일정)
+                step_log["corp_events"] = len(일정) - 1
 
         if dry_run:
             print("--- 발송하지 않음 (dry-run) ---")
@@ -2121,6 +2133,41 @@ def _send_failed(
 #: 그대로 쓰는 날,
 #: 25.547)는 배분한다 — 신호가 한 번 건너뛴 것은 흔하고 매수 구간이 하루에 크게 바뀌지 않는다
 STALE_SIGNAL_SESSIONS = 1
+
+
+#: 기업행위 일정을 리포트에 싣는 앞날 (25.989). 배당락·권리락은 기준일 하루 전 거래일이다 — 그 주에 알면 된다
+CORP_EVENT_DAYS = 10
+_행사_이름 = {"dividend": "배당 기준일", "bonus": "무상증자 기준일", "rights": "유상증자 기준일",
+           "split": "액면교체·합병·분할 기준일"}  # fmt: skip
+
+
+def _corp_event_lines(
+    client: TursoClient, trade_date: str, 종목: dict[str, tuple[str, str]], warnings: list[str] | None = None
+) -> list[str]:
+    """보유·추천 종목의 기업행위 일정 (docs/reports.md 3.7, 25.989). `kr_corp_events`(KIS 예탁원, 25.988).
+
+    표가 없거나(마이그레이션 전·KIS 키 없음) 못 읽으면 빈 목록 — 곁다리다. 배당은 거의 모든 종목에 있어 시끄러우니
+    **보유 종목만** 싣고, 무상·유상·액면교체는 추천에도 싣는다(가격이 크게 바뀐다)."""
+    if not 종목:
+        return []
+    끝 = (date.fromisoformat(trade_date) + timedelta(days=CORP_EVENT_DAYS)).isoformat()
+    try:
+        rows = client.execute(
+            "SELECT e.code, e.kind, e.record_date FROM kr_corp_events e JOIN json_each(?) j ON j.value = e.code"
+            " WHERE e.record_date > ? AND e.record_date <= ? ORDER BY e.record_date, e.code",
+            [json.dumps(sorted(종목)), trade_date, 끝],
+        ).dicts()
+    except Exception as exc:  # noqa: BLE001 — 곁다리. 표가 없으면(0047 전) 조용히, 그 밖의 실패는 경고로
+        if not db.표가_없나(exc) and warnings is not None:
+            warnings.append(_실패문("기업행위 일정 읽기", exc))
+        return []
+    lines = []
+    for r in rows:
+        이름, 왜 = 종목[r["code"]]
+        if r["kind"] == "dividend" and 왜 != "보유":
+            continue
+        lines.append(f"· {이름}({r['code']}) {_행사_이름.get(r['kind'], r['kind'])} {r['record_date'][5:]} ({왜})")
+    return [f"📅 기업행위 일정 ({CORP_EVENT_DAYS}일 안, 예탁원·KIS)", *lines] if lines else []
 
 
 def _holding_scores(
