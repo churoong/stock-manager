@@ -43,9 +43,14 @@ def main() -> int:
         return 1
     print(f"지금 {datetime.now(KST):%Y-%m-%d %H:%M} KST · 키 길이 {len(key)} · 시크릿 길이 {len(secret)}")
 
-    t0 = time.monotonic()
-    r = requests.post(f"{BASE}/oauth2/tokenP", json={"grant_type": "client_credentials", "appkey": key,
-                      "appsecret": secret}, timeout=20)  # fmt: skip
+    # 발급은 1분 1회(EGW00133) — 직전 실행과 겹치면 한 번 기다렸다 다시 받는다
+    for wait in (0, 65):
+        time.sleep(wait)
+        t0 = time.monotonic()
+        r = requests.post(f"{BASE}/oauth2/tokenP", json={"grant_type": "client_credentials", "appkey": key,
+                          "appsecret": secret}, timeout=20)  # fmt: skip
+        if r.status_code != 403:
+            break
     ms = (time.monotonic() - t0) * 1000
     try:
         tok = r.json()
