@@ -112,6 +112,59 @@ def upserts(stock_id: int, rows: dict[str, dict], fetched_at: str) -> list[tuple
     ]
 
 
+AFTER_HOURS_INSERT = (
+    "INSERT INTO alerts (stock_id, market, trade_date, trigger_type, message, data, created_at, sent_at)"
+    " VALUES (?, 'KR', ?, ?, ?, ?, ?, NULL) ON CONFLICT (stock_id, trigger_type, trade_date) DO NOTHING"
+)
+
+
+def _after_hours(client: TursoClient, qc: kis.QuoteClient, today, failed: dict[str, str]) -> dict:
+    """보유 종목의 시간외 단일가가 문턱(장중 급등락과 같은 설정) 이상 움직였으면 알림을 남기고 보낸다 (25.992).
+
+    하루 한 번은 `alerts` 의 UNIQUE 가 지킨다 — 손으로 다시 돌려도 두 번 보내지 않는다.
+    로그에는 건수만 찍는다(공개 저장소)."""
+    from batch.notify import telegram
+    from batch.services import after_hours as ah
+
+    보유 = [(int(r[0]), str(r[1]), str(r[2])) for r in client.execute(
+        "SELECT p.stock_id, s.ticker, COALESCE(s.name_ko, s.name_en, s.ticker) FROM positions p"
+        " JOIN stocks s ON s.id = p.stock_id WHERE p.quantity > 0 AND s.country = 'KR'"
+    ).rows if len(str(r[1])) == 6]  # fmt: skip
+    if not 보유:
+        return {"holdings": 0}
+    raw = client.execute("SELECT value FROM settings WHERE key = 'alert_thresholds'").scalar()
+    문턱 = ah.spike_pct(raw)
+    시세: dict[str, dict | None] = {}
+    for _, code, _ in 보유:
+        try:
+            시세[code] = qc.after_hours(code)
+        except (kis.KisFailed, OSError) as exc:
+            failed[f"{code}:시간외"] = str(exc)
+    걸림 = ah.hits(보유, 시세, 문턱)
+    stamp = db.now_iso()
+    새것 = []
+    for h in 걸림:
+        rs = client.execute(AFTER_HOURS_INSERT, [h["stock_id"], today.isoformat(), ah.TRIGGER, h["message"],
+                                                 json.dumps(h["data"], ensure_ascii=False), stamp])  # fmt: skip
+        if rs.affected_rows:
+            새것.append(h)
+    보냄 = 0
+    if 새것:
+        머리 = f"시간외 알림 {len(새것)}건 ({today.isoformat()} 18시 무렵)"
+        글 = "\n".join([머리, *(f"· {h['message']}" for h in 새것)])
+        try:
+            telegram.send(글)
+            보냄 = len(새것)
+            client.execute(
+                "UPDATE alerts SET sent_at = ? WHERE trigger_type = ? AND trade_date = ?"
+                " AND stock_id IN (SELECT value FROM json_each(?))",
+                [stamp, ah.TRIGGER, today.isoformat(), json.dumps([h["stock_id"] for h in 새것])],
+            )
+        except Exception as exc:  # noqa: BLE001 — 못 보내면 알림 센터에는 남는다(sent_at 비어 있음)
+            failed["시간외:발송"] = type(exc).__name__
+    return {"holdings": len(보유), "threshold_pct": 문턱, "hits": len(걸림), "new": len(새것), "sent": 보냄}
+
+
 def run(limit: int | None = None) -> int:
     client = TursoClient()
     try:
@@ -170,9 +223,11 @@ def run(limit: int | None = None) -> int:
         statements += 의견행 + 행사행
         for i in range(0, len(statements), 500):
             client.batch(statements[i : i + 500])
+        # 보유 종목 시간외 단일가 (docs/intraday.md 1.2, 25.992) — 곁다리. 실패해도 수집 결과는 그대로 남긴다
+        시간외 = _after_hours(client, qc, today, failed) if cal.is_session("KR", today) else {"skipped": "휴장일"}
         db.record_api_call(client, "kis_openapi", count=qc.calls + int(issued))
         step = {"stocks": len(stocks), "rows": len(statements), "opinions": len(의견행), "events": len(행사행),
-                "opinion_since": 의견창.isoformat(), "calls": qc.calls, "failed": len(failed),
+                "opinion_since": 의견창.isoformat(), "after_hours": 시간외, "calls": qc.calls, "failed": len(failed),
                 "failed_sample": dict(list(failed.items())[:10])}  # fmt: skip
         # 절반 넘게 못 받았으면 실패로 남긴다 — 조금 빠진 것은 다음 날 겹쳐 받으며 메워진다(30일 창)
         status = "failed" if len(failed) > len(stocks) * 4 / 2 else ("partial" if failed else "success")

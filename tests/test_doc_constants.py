@@ -60,6 +60,7 @@ DETAIL = 읽기("stock_detail.md")
 SELL_FLAGS = 읽기("sell_flags.md")
 BACKTEST = 읽기("backtest.md")
 ETF = 읽기("etf.md")
+INTRADAY = 읽기("intraday.md")
 
 
 def 검사(문서본문: str, 찾을것: str, 무엇: str) -> None:
@@ -359,6 +360,15 @@ class Test계좌별_ETF:
         검사(ETF, f"미국 상장 핵심 ETF 는 일반계좌 {ea.US_TAXABLE_PRIORITY}순위", "미국 상장 일반계좌 순위")
 
 
+class Test시간외:
+    """보유 종목 시간외 단일가 알림 (docs/intraday.md 1.2, docs/infra.md 25.992)."""
+
+    def test_기본_문턱(self) -> None:
+        from batch.services import after_hours as ah
+
+        검사(INTRADAY, f"`alert_thresholds.spike_pct`, 기본 {ah.DEFAULT_SPIKE_PCT:.0f}%", "시간외 기본 문턱")
+
+
 class Test점수_담음:
     """우리 점수를 많이 담은 ETF (docs/etf.md 11.2·11.3, docs/infra.md 25.967). 덮은 비중 하한·기준 ETF·대리 표."""
 
@@ -415,7 +425,7 @@ class Test밸류_분모:
     "valuation_band", "outcomes", "stress", "sell_flags", "factor_ic", "sector_momentum", "earnings_quality", "share_issuance",
     "quarterly_earnings", "short_reversal", "div_omission", "buyback", "dilution", "flow_surge",
     "gross_profitability", "robustness", "column_rot", "calibration", "self_grade", "holding_scores",
-    "pick_history", "etf_accounts", "etf_tilt",
+    "pick_history", "etf_accounts", "etf_tilt", "after_hours",
 )  # fmt: skip
 
 #: 아직 그물 밖인 모듈과 **왜 아직인지**. 하나씩 줄여 간다

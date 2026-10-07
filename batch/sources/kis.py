@@ -303,3 +303,18 @@ class QuoteClient:
             if len(c) == 6 and w and w > 0:
                 out.append((c, w))
         return out
+
+    def after_hours(self, code: str) -> dict | None:
+        """시간외 단일가 (`FHPST02300000`, output) → {가격, 전일 대비 %, 거래량}.
+
+        시간외 체결이 없으면(가격 0) None (25.992)."""
+        payload = self.get(Q + "inquire-overtime-price", "FHPST02300000",
+                           {"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": code})  # fmt: skip
+        o = payload.get("output") if isinstance(payload, dict) else None
+        if str(payload.get("rt_cd") if isinstance(payload, dict) else "") != "0" or not isinstance(o, dict):
+            raise KisFailed(f"KIS 시간외 실패 {payload.get('msg_cd') if isinstance(payload, dict) else ''}".strip())
+        price, pct = _float(o.get("ovtm_untp_prpr")), _float(o.get("ovtm_untp_prdy_ctrt"))
+        vol = _int(o.get("ovtm_untp_vol"))
+        if not price or price <= 0 or pct is None:
+            return None
+        return {"price": price, "change_pct": pct, "volume": vol}

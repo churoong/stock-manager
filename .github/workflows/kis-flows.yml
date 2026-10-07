@@ -2,7 +2,8 @@ name: 국내 수급 수집 (KIS)
 
 # 투자자별 순매수 · 공매도 · 신용잔고를 매일 쌓는다 (docs/data-sources.md 3.1, docs/infra.md 25.987).
 # KIS 가 투자자별·신용을 최근 30일만 주므로 매일 받아야 이력이 남는다. 장중 값은 잠정치라 장 마감 뒤에 돈다.
-# 약 870종목 × 3회, 초당 15건 → 3~4분.
+# 약 870종목 × 4회, 초당 15건 → 4~5분. 끝에 보유 종목 시간외 단일가를 보고 크게 움직였으면 텔레그램 (25.992).
+# 시간외 단일가는 16:00~18:00 — 18:17 이면 마감값이다.
 on:
   schedule:
     - cron: "17 9 * * 1-5" # 09:17 UTC = 18:17 KST (월~금). 휴장일이면 KIS 가 직전 거래일까지를 준다 — 겹쳐 덮어쓸 뿐이다
@@ -39,6 +40,9 @@ jobs:
       D1_API_TOKEN: ${{ secrets.D1_API_TOKEN }}
       KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}
       KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}
+      # 보유 종목 시간외 단일가 알림 (docs/infra.md 25.992)
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       OFFLINE_MODE: "0"
       LOG_LEVEL: INFO
     steps:
