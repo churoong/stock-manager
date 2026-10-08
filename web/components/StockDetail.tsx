@@ -74,9 +74,11 @@ interface Overview {
   unread?: string[];
 }
 
-function useJson<T>(url: string): Loaded<T> {
+function useJson<T>(url: string, enabled = true): Loaded<T> {
   const [value, setValue] = useState<Loaded<T>>({ state: "loading" });
   useEffect(() => {
+    // 아직 화면 가까이 오지 않은 카드는 읽지 않는다 (docs/infra.md 25.1032)
+    if (!enabled) return;
     let alive = true;
     setValue({ state: "loading" });
     cachedFetch(url)
@@ -90,8 +92,42 @@ function useJson<T>(url: string): Loaded<T> {
     return () => {
       alive = false;
     };
-  }, [url]);
+  }, [url, enabled]);
   return value;
+}
+
+/**
+ * 아래쪽 카드는 **화면 가까이 왔을 때** 읽는다 (docs/infra.md 25.1032, 2026-10-08 사용자 "웹 화면 DB 사용량도 줄여줘").
+ * 종목 화면을 열 때마다 열세 구역을 한꺼번에 읽었다 — 위쪽 넷(개요·분석·가격·신호) 말고는 스크롤해야 보이는데,
+ * 대개 거기까지 내려가지 않고 다른 종목으로 간다. `data-lazy` 가 달린 카드가 화면 아래 `LAZY_MARGIN` 안에 들어오면 읽는다.
+ * 바로가기(재무·뉴스…)를 누르면 그 자리로 스크롤되며 읽힌다. 관찰기가 없는 브라우저면 한꺼번에 읽는다(예전과 같다).
+ */
+const LAZY_MARGIN = "800px 0px";
+
+function useSeen(ready: boolean, key: string): Record<string, boolean> {
+  const [seen, setSeen] = useState<Record<string, boolean>>({});
+  // 다른 종목으로 가면 처음부터 — 앞 종목에서 본 카드를 새 종목에서 바로 읽지 않는다
+  useEffect(() => setSeen({}), [key]);
+  useEffect(() => {
+    if (!ready) return;
+    const els = Array.from(document.querySelectorAll<HTMLElement>("[data-lazy]"));
+    if (typeof IntersectionObserver === "undefined") {
+      setSeen(Object.fromEntries(els.map((e) => [e.dataset.lazy ?? "", true])));
+      return;
+    }
+    const io = new IntersectionObserver(
+      (entries) => {
+        const 새것 = entries.filter((e) => e.isIntersecting).map((e) => e.target as HTMLElement);
+        if (!새것.length) return;
+        새것.forEach((e) => io.unobserve(e));
+        setSeen((s) => ({ ...s, ...Object.fromEntries(새것.map((e) => [e.dataset.lazy ?? "", true])) }));
+      },
+      { rootMargin: LAZY_MARGIN },
+    );
+    els.forEach((e) => io.observe(e));
+    return () => io.disconnect();
+  }, [ready, key]);
+  return seen;
 }
 
 /** 폰 구역 바로가기가 가리키는 곳. 위쪽 제목줄(3rem)과 바로가기 줄 아래로 내려앉게 띄운다 */
@@ -104,7 +140,10 @@ function Card({
   children,
   right,
   emptyNote,
+  lazy,
 }: {
+  /** 화면 가까이 왔을 때 읽는 카드의 이름 — `useSeen` 이 본다 (25.1032) */
+  lazy?: string;
   id?: string;
   title: string;
   loaded: Loaded<SectionResult>;
@@ -116,7 +155,7 @@ function Card({
   // 데이터가 없는 구역은 한 줄로 줄인다. 빈 카드 열 개가 세로로 쌓여 화면이 길었다 (2026-09-18 "화면이 너무 길다")
   if (loaded.state === "ok" && loaded.data.empty) {
     return (
-      <section id={id} className={`mb-2 rounded-xl border border-slate-200 px-3 py-2 sm:mb-4 dark:border-slate-800 ${ANCHOR}`}>
+      <section id={id} data-lazy={lazy} className={`mb-2 rounded-xl border border-slate-200 px-3 py-2 sm:mb-4 dark:border-slate-800 ${ANCHOR}`}>
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
           <h2 className="text-sm font-semibold">{title}</h2>
           <span className="text-xs text-slate-400">{emptyNote ?? `데이터 없음${loaded.data.reason ? ` — ${loaded.data.reason}` : ""}`}</span>
@@ -126,7 +165,7 @@ function Card({
     );
   }
   return (
-    <section id={id} className={`mb-4 rounded-xl border border-slate-200 p-3 dark:border-slate-800 ${ANCHOR}`}>
+    <section id={id} data-lazy={lazy} className={`mb-4 rounded-xl border border-slate-200 p-3 dark:border-slate-800 ${ANCHOR}`}>
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-sm font-semibold">{title}</h2>
         <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
@@ -179,18 +218,20 @@ export default function StockDetail({
 }) {
   const base = `/api/stocks/${id}`;
   const overview = useJson<Overview>(base);
+  // 아래쪽 카드는 화면 가까이 왔을 때 읽는다 (25.1032)
+  const seen = useSeen(overview.state === "ok", base);
   const [range, setRange] = useState<"3M" | "1Y" | "3Y" | "5Y">("1Y");
   const prices = useJson<SectionResult>(`${base}/prices?range=${range}`);
   const signals = useJson<SectionResult>(`${base}/signals`);
-  const valuation = useJson<SectionResult>(`${base}/valuation`);
-  const metrics = useJson<SectionResult>(`${base}/metrics`);
-  const financials = useJson<SectionResult>(`${base}/financials`);
-  const news = useJson<SectionResult>(`${base}/news`);
-  const events = useJson<SectionResult>(`${base}/events`);
-  const dividends = useJson<SectionResult>(`${base}/dividends`);
-  const quarterly = useJson<SectionResult>(`${base}/quarterly`);
+  const valuation = useJson<SectionResult>(`${base}/valuation`, !!seen.valuation);
+  const metrics = useJson<SectionResult>(`${base}/metrics`, !!seen.metrics);
+  const financials = useJson<SectionResult>(`${base}/financials`, !!seen.financials);
+  const news = useJson<SectionResult>(`${base}/news`, !!seen.news);
+  const events = useJson<SectionResult>(`${base}/events`, !!seen.events);
+  const dividends = useJson<SectionResult>(`${base}/dividends`, !!seen.dividends);
+  const quarterly = useJson<SectionResult>(`${base}/quarterly`, !!seen.quarterly);
   // 증권사 의견과 그 증권사의 성적 (docs/brokers.md, 25.995)
-  const opinions = useJson<SectionResult>(`${base}/opinions`);
+  const opinions = useJson<SectionResult>(`${base}/opinions`, !!seen.opinions);
   const verdict = useJson<SectionResult>(`${base}/verdict`);
   const [horizon, setHorizon] = useState<string | null>(horizonParam ?? null);
   // 관심 등록·해제 뒤 화면 값. undefined 면 서버가 준 것을 쓴다 (훅은 early return 위에)
@@ -402,28 +443,28 @@ export default function StockDetail({
         )}
       </Card>
 
-      <Card title="밸류에이션 밴드 (PBR 3년)" loaded={valuation} emptyNote={etf ? ETF_SECTION_NOTE.valuation : undefined}>
+      <Card lazy="valuation" title="밸류에이션 밴드 (PBR 3년)" loaded={valuation} emptyNote={etf ? ETF_SECTION_NOTE.valuation : undefined}>
         {(data) => <ValuationBlock band={data.band as Row} factors={factors} currency={currency} />}
       </Card>
 
-      <Card id="metrics" title="과거 성과" loaded={metrics}>
+      <Card lazy="metrics" id="metrics" title="과거 성과" loaded={metrics}>
         {(data) => <MetricsBlock rows={data.rows as Row[]} />}
       </Card>
 
       {/* 재무 셋을 붙여 둔다(전에는 뉴스가 사이에 끼어 있었다). 바로가기 "재무" 가 여기로 온다 */}
-      <Card id="financials" title="5년 재무 (사업보고서)" loaded={financials} emptyNote={etf ? ETF_SECTION_NOTE.financials : undefined}>
+      <Card lazy="financials" id="financials" title="5년 재무 (사업보고서)" loaded={financials} emptyNote={etf ? ETF_SECTION_NOTE.financials : undefined}>
         {(data) => <FinancialsBlock rows={data.rows as Row[]} />}
       </Card>
 
-      <Card title="분기·반기 재무" loaded={quarterly} emptyNote={etf ? ETF_SECTION_NOTE.quarterly : undefined}>
+      <Card lazy="quarterly" title="분기·반기 재무" loaded={quarterly} emptyNote={etf ? ETF_SECTION_NOTE.quarterly : undefined}>
         {(data) => <QuarterlyBlock rows={data.rows as Row[]} />}
       </Card>
 
-      <Card title="배당 이력" loaded={dividends} emptyNote={etf ? ETF_SECTION_NOTE.dividends : undefined}>
+      <Card lazy="dividends" title="배당 이력" loaded={dividends} emptyNote={etf ? ETF_SECTION_NOTE.dividends : undefined}>
         {(data) => <DividendsBlock rows={data.rows as Row[]} currency={currency} />}
       </Card>
 
-      <Card id="news" title="뉴스와 감성" loaded={news}>
+      <Card lazy="news" id="news" title="뉴스와 감성" loaded={news}>
         {(data) => (
           <NewsBlock
             data={data}
@@ -434,11 +475,11 @@ export default function StockDetail({
         )}
       </Card>
 
-      <Card id="events" title="실적·공시 일정" loaded={events}>
+      <Card lazy="events" id="events" title="실적·공시 일정" loaded={events}>
         {(data) => <EventsBlock data={data} />}
       </Card>
 
-      <Card id="opinions" title="증권사 의견 · 그 증권사의 지난 성적" loaded={opinions}>
+      <Card lazy="opinions" id="opinions" title="증권사 의견 · 그 증권사의 지난 성적" loaded={opinions}>
         {(data) => <OpinionsBlock data={data} />}
       </Card>
     </div>

@@ -313,6 +313,52 @@ WHERE (status = 'active' OR id IN (SELECT stock_id FROM trades))
 ORDER BY CASE WHEN ticker = ? OR yahoo_symbol = ? THEN 0 ELSE 1 END, country, ticker
 LIMIT 20`;
 
+/**
+ * 검색 대상 목록 — **서버 메모리에 잠시 둔다** (docs/infra.md 25.1032, 2026-10-08 사용자 "웹 화면 DB 사용량도 줄여줘").
+ * `STOCK_SEARCH` 는 이름 가운데를 찾는 LIKE 라 색인을 못 타 **검색 한 번에 종목 표 전체**(약 1만 행)를 훑었다. 입력이 멈출 때마다
+ * 한 번이라 한 종목을 찾는 데 몇 번씩 불렀다. 목록을 `SEARCH_LIST_TTL_MS` 동안 두고 같은 규칙(`filterSearch`)으로 거른다 —
+ * 결과는 `STOCK_SEARCH` 와 같다(`__tests__/stockSearchCache1032.test.ts` 가 대 본다). 투자 수치 계산이 아니다(표시할 목록 고르기)
+ */
+export const STOCK_SEARCH_LIST = `SELECT id, ticker, yahoo_symbol, name_ko, name_en, market, country, currency, status, asset_type
+FROM stocks WHERE status = 'active' OR id IN (SELECT stock_id FROM trades)`;
+/** 목록을 다시 읽는 간격. 종목 마스터는 하루 한 번 바뀐다 — 매매를 넣은 상장폐지 종목이 늦게 보일 수 있는 시간이다 */
+export const SEARCH_LIST_TTL_MS = 30 * 60_000;
+
+export interface SearchRow {
+  id: number;
+  ticker: string;
+  yahoo_symbol: string | null;
+  name_ko: string | null;
+  name_en: string | null;
+  market: string;
+  country: string;
+  currency: string;
+  status: string;
+  asset_type: string | null;
+}
+
+/** SQLite LIKE 처럼 — ASCII 만 대소문자를 가리지 않는다 */
+function likeFold(s: string): string {
+  return s.replace(/[A-Z]/g, (c) => c.toLowerCase());
+}
+
+/** `STOCK_SEARCH` 와 같은 규칙으로 거르고 줄 세운다 (앞부분 일치: 티커·야후 심볼, 가운데 일치: 이름) */
+export function filterSearch(rows: SearchRow[], q: string): Array<Record<string, unknown>> {
+  const term = q.trim();
+  const t = likeFold(term);
+  const up = term.toUpperCase();
+  const hit = rows.filter((r) =>
+    likeFold(r.ticker ?? "").startsWith(t) || likeFold(r.yahoo_symbol ?? "").startsWith(t)
+    || likeFold(r.name_ko ?? "").includes(t) || likeFold(r.name_en ?? "").includes(t));
+  const exact = (r: SearchRow) => (r.ticker === up || r.yahoo_symbol === up ? 0 : 1);
+  const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+  hit.sort((a, b) => exact(a) - exact(b) || cmp(a.country, b.country) || cmp(a.ticker, b.ticker));
+  return hit.slice(0, 20).map((r) => ({
+    id: r.id, ticker: r.ticker, market: r.market, country: r.country, currency: r.currency,
+    name: r.name_ko ?? r.name_en ?? r.ticker, status: r.status, asset_type: r.asset_type,
+  }));
+}
+
 export function stockSearchArgs(q: string): string[] {
   const term = q.trim();
   const like = `%${term}%`;

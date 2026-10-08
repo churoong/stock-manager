@@ -186,7 +186,8 @@ export default function PortfolioView() {
   useEffect(() => {
     // 멈춘 것으로 판정되면 더 부르지 않는다 — 끝없이 다섯 경로를 다시 읽었다 (25.554)
     if (!summary?.stale || summary.recalc_stuck) return;
-    const timer = setInterval(() => void load(), 30_000);
+    // 화면이 뒤에 있으면(다른 앱·다른 탭) 읽지 않는다 — DB 읽기 절약 (25.1032)
+    const timer = setInterval(() => document.visibilityState !== "hidden" && void load(), 30_000);
     return () => clearInterval(timer);
   }, [summary?.stale, summary?.recalc_stuck, load]);
 

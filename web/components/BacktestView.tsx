@@ -92,7 +92,8 @@ export default function BacktestView() {
   const settling = data ? recentlyFinished(data.status) : false;
   useEffect(() => {
     if (!running && !settling) return;
-    const timer = setInterval(() => void load(), 20_000);
+    // 화면이 뒤에 있으면 읽지 않는다 — DB 읽기 절약 (25.1032)
+    const timer = setInterval(() => document.visibilityState !== "hidden" && void load(), 20_000);
     return () => clearInterval(timer);
   }, [running, settling, load]);
 
@@ -217,7 +218,7 @@ function RunForm({
     if (!waiting) return;
     const timer = setInterval(() => {
       setTick((t) => t + 1);
-      onRefresh();
+      if (document.visibilityState !== "hidden") onRefresh();
     }, 20_000);
     return () => clearInterval(timer);
   }, [waiting, onRefresh]);
