@@ -67,6 +67,8 @@ PRICE_WRITER_JOBS = ("daily_kr", "daily_us", "backfill_kr", "backfill_us", "adju
 REAPED_PREFIX = "끝맺지 못한 기록"
 
 ROUTABLE_TABLES = frozenset({"prices", "stocks"})
+#: 표가 아니라 SQLite 표 값 함수 — 고른 종목 번호 목록을 펼친다. 사본에서도 같다 (docs/infra.md 25.1033)
+ROUTABLE_FUNCS = frozenset({"json_each"})
 _WRITE = re.compile(r"^\s*(INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER)\b", re.I)
 _TABLE = re.compile(r"\b(?:FROM|JOIN)\s+([A-Za-z_][A-Za-z0-9_]*)", re.I)
 _CTE = re.compile(r"(?:\bWITH\s+(?:RECURSIVE\s+)?|,\s*)([A-Za-z_][A-Za-z0-9_]*)\s*(?:\([^()]*\))?\s+AS\s*\(", re.I)
@@ -213,8 +215,13 @@ def verify(remote, conn: sqlite3.Connection, seed: str, k: int | None = None) ->
     return 어긋남
 
 
-def sync(remote, conn: sqlite3.Connection, *, backend: str, allow_build: bool, now: datetime | None = None) -> dict:
-    """사본을 Turso 에 맞춘다. 결과 요약(`usable` 이 쓸 수 있는지)."""
+def sync(remote, conn: sqlite3.Connection, *, backend: str, allow_build: bool, now: datetime | None = None,
+         pending: dict | None = None) -> dict:  # fmt: skip
+    """사본을 Turso 에 맞춘다. 결과 요약(`usable` 이 쓸 수 있는지).
+
+    `pending` — **이 프로세스가 아직 끝맺지 않은 실행에서 고친 시세**(`db.prices_touched_summary()` 모양). 끝난 실행의
+    기록(`touched_ranges`)에는 아직 없다. 일일 배치가 시세를 넣고·수정주가를 고친 **같은 실행 안에서** 점수·신호 전에
+    맞출 때 쓴다 (docs/infra.md 25.1033)"""
     now = now or datetime.now(UTC)
     meta = _meta(conn)
     비었나 = conn.execute("SELECT 1 FROM prices LIMIT 1").fetchone() is None
@@ -242,6 +249,12 @@ def sync(remote, conn: sqlite3.Connection, *, backend: str, allow_build: bool, n
             전체, 종목별 = "0000-00-00", {}
         else:
             전체, 종목별 = touched_ranges(remote, 지난.isoformat())
+        if pending:
+            if pending.get("all"):
+                전체 = min(전체 or "9999", str(pending.get("min_date") or "0000-00-00"))
+            for sid, day in (pending.get("stocks") or {}).items():
+                if str(day) < 종목별.get(int(sid), "9999"):
+                    종목별[int(sid)] = str(day)
         다시 = 0
         if 전체 and (now.date() - _day(전체)).days > WIDE_RANGE_DAYS:
             # 넓은 다시 받기는 새로 만들기와 비용이 비슷하다 — 비우고 진도 문 있는 주간 작업에 넘긴다 (25.907)
@@ -314,7 +327,7 @@ class ReplicaClient:
                 self.dirty = True
                 log.info("시세·종목을 쓰는 문장이 있어 이 프로세스는 이제 Turso 에서 읽는다")
             return False
-        tables = referenced_tables(sql)
+        tables = referenced_tables(sql) - ROUTABLE_FUNCS
         return bool(tables) and tables <= ROUTABLE_TABLES
 
     def _local(self, sql: str, args: list | None) -> ResultSet | None:

@@ -18,7 +18,7 @@ import argparse
 import json
 import logging
 import sys
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 from batch import config
@@ -282,6 +282,27 @@ def market_dates_from_index(client: TursoClient, country: str, as_of: str, n: in
     return dates
 
 
+SERIES_IDS_SQL = (
+    "SELECT u.stock_id FROM universe_members u JOIN stocks s ON s.id = u.stock_id"
+    " WHERE u.included = 1 AND s.country = ?"
+    "   AND u.snapshot_date = (SELECT MAX(um.snapshot_date) FROM universe_members um"
+    "   JOIN stocks su ON su.id = um.stock_id WHERE su.country = ? AND um.snapshot_date <= ?)"
+)
+#: 시세 사본(25.888)이 받을 수 있는 모양 — `prices` 와 `json_each` 만 (25.1033)
+SERIES_PRICES_SQL = (
+    "SELECT p.stock_id, p.date, COALESCE(p.adj_close, p.close) AS px, p.value, p.close, p.volume FROM prices p"
+    " WHERE p.stock_id IN (SELECT value FROM json_each(?)) AND p.date >= ? AND p.date <= ? AND p.close IS NOT NULL"
+    " ORDER BY p.stock_id, p.date"
+)
+#: 등락률은 밸류 분모 옮기기(시총 날짜 → 기준일)에만 쓴다. 시총은 스냅샷보다 14일(`universe.MARKET_CAP_MAX_AGE_DAYS`)
+#: 넘게 묵으면 옮기지 않고 스냅샷은 주 1회라, 넉넉히 60일이면 덮는다 — 그보다 먼 시총 날짜는 배수를 모름(None)으로 둔다
+MOVES_DAYS = 60
+MOVES_SQL = (
+    "SELECT p.stock_id, p.date, p.change_pct FROM prices p"
+    " WHERE p.stock_id IN (SELECT value FROM json_each(?)) AND p.date >= ? AND p.date <= ? AND p.close IS NOT NULL"
+)
+
+
 def load_series(
     client: TursoClient, country: str, as_of: str, days: int,
     moves: dict[int, dict[str, float | None]] | None = None,
@@ -301,17 +322,22 @@ def load_series(
     if since is None:
         return {}
 
-    rs = client.execute(
-        "SELECT p.stock_id, p.date, COALESCE(p.adj_close, p.close) AS px, p.value, p.close, p.volume, p.change_pct"
-        " FROM universe_members u CROSS JOIN stocks s CROSS JOIN prices p"
-        " WHERE u.included = 1 AND u.snapshot_date = (SELECT MAX(um.snapshot_date) FROM universe_members um"
-        "   JOIN stocks su ON su.id = um.stock_id WHERE su.country = ? AND um.snapshot_date <= ?)"
-        "  AND s.id = u.stock_id AND s.country = ?"
-        "  AND p.stock_id = u.stock_id AND p.date >= ? AND p.date <= ? AND p.close IS NOT NULL"
-        " ORDER BY p.stock_id, p.date",
-        [country, as_of, country, since, as_of],
-    )
-    return series_from_rows(rs.dicts(), days, moves)
+    # **유니버스 종목 번호와 시세를 나눠 읽는다** (docs/infra.md 25.1033, 사용자 "배치 DB 사용량도 더 줄여줘").
+    # 예전에는 한 질의로 `universe_members` 를 조인해 시세 사본(25.888, `prices`·`stocks` 만 받는다)이 받지 못했고,
+    # 국내 약 25만·미국 약 40만 행을 날마다 Turso 에서 읽었다. 시세 질의는 이제 `prices` 와 `json_each` 만 써
+    # 사본이 있으면 거기서 읽는다.
+    # 등락률(`change_pct`)은 사본에 없고 밸류 분모 옮기기(25.954)에만 쓰여 최근 `MOVES_DAYS` 일만 따로 읽는다
+    ids = sorted(int(r[0]) for r in client.execute(SERIES_IDS_SQL, [country, country, as_of]).rows)
+    if not ids:
+        return {}
+    rs = client.execute(SERIES_PRICES_SQL, [json.dumps(ids), since, as_of])
+    out = series_from_rows([{**r, "change_pct": None} for r in rs.dicts()], days, None)
+    if moves is not None:
+        시작 = max(since, (date.fromisoformat(as_of[:10]) - timedelta(days=MOVES_DAYS)).isoformat())
+        for r in client.execute(MOVES_SQL, [json.dumps(ids), 시작, as_of]).dicts():
+            moves.setdefault(int(r["stock_id"]), {})[str(r["date"])] = (
+                None if r["change_pct"] is None else float(r["change_pct"]))
+    return out
 
 
 def series_window_start(client: TursoClient, country: str, as_of: str, days: int) -> str | None:

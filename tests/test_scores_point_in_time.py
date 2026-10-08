@@ -665,7 +665,7 @@ class Test시점을_걸고도_운영_흐름이_돈다:
 
         from batch.jobs import daily
 
-        원본 = inspect.getsource(daily.refresh_recommendations)
+        원본 = inspect.getsource(daily._scores_and_signals)  # 25.1033: 사본 문맥 안으로 옮겼다
 
         assert "scores.run(market, as_of=trade_date)" in 원본
         assert "signals.run(market, as_of=trade_date)" in 원본, (
@@ -678,7 +678,7 @@ class Test시점을_걸고도_운영_흐름이_돈다:
 
         from batch.jobs import daily
 
-        원본 = inspect.getsource(daily.refresh_recommendations)
+        원본 = inspect.getsource(daily._scores_and_signals)  # 25.1033: 사본 문맥 안으로 옮겼다
         점수뒤 = 원본.split("scores.run(market", 1)[1]
 
         assert 점수뒤.index("return warnings") < 점수뒤.index("signals.run"), (

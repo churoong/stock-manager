@@ -190,6 +190,22 @@ class Test읽기_길:
         )
         assert c.local_queries == 0 and all(r[0] != -1 for r in rs.rows)
 
+    def test_점수_신호의_시세_질의는_사본에서_유니버스는_원격(self, 사본) -> None:
+        """25.1033 — 시세 계열을 종목 번호(json_each)로 나눠 읽어 사본이 받는다. 등락률은 사본에 없어 원격."""
+        import json
+
+        from batch.jobs import scores as sj
+        from batch.jobs import signals as sig
+
+        원격, c = self._client(사본)
+        ids = json.dumps([1])
+        c.execute(sj.SERIES_PRICES_SQL, [ids, "2026-01-01", "2026-12-31"])
+        c.execute(sig.RECENT_PRICES_FOR_SQL, [ids, "2026-12-31", "2026-12-31", 60])
+        assert c.local_queries == 2
+        c.execute(sj.MOVES_SQL, [ids, "2026-01-01", "2026-12-31"])  # change_pct 는 사본에 없다
+        c.execute(sj.SERIES_IDS_SQL, ["KR", "KR", "2026-12-31"])  # universe_members 가 낀다
+        assert c.local_queries == 2
+
     def test_사본에_없는_열이면_원격(self, 사본) -> None:
         원격, c = self._client(사본)
         rs = c.execute("SELECT open, source FROM prices WHERE stock_id = 1 LIMIT 1")

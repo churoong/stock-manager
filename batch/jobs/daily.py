@@ -26,12 +26,14 @@ import argparse
 import contextlib
 import json
 import logging
+import os
 import sys
 import time
 import traceback
 from collections.abc import Callable
 from dataclasses import replace as dc_replace
 from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 from batch import config
@@ -796,6 +798,56 @@ def _report_rows_from_db(
     return rows
 
 
+#: 점수·신호가 읽을 시세 사본 파일 (docs/infra.md 25.1033). 워크플로가 사본 캐시를 꺼내 두고 이 값을 준다. 없으면 Turso
+REPLICA_FOR_SCORES_ENV = "PRICE_REPLICA_FOR_SCORES"
+
+
+@contextlib.contextmanager
+def _replica_for_scores():  # noqa: ANN202
+    """점수·신호 동안만 시세 사본을 연다 (docs/infra.md 25.1033, 사용자 "배치 DB 사용량도 더 줄여줘").
+
+    점수(유니버스 약 274거래일 계열)·신호(최근 60거래일) 시세를 날마다 Turso 에서 읽었다 — 국내 약 25만·미국 약 40만 행.
+    **오늘 시세를 넣은 뒤**라 여기서 사본을 맞춘다: 새 행(id 뒤)·끝난 실행이 고친 범위·**이 실행이 고친 범위**
+    (`db.prices_touched_summary()` — 오늘 수정주가를 다시 낸 종목)를 받고 표본 20종목을 Turso 와 견준다.
+    사본이 비었거나 어긋나면 쓰지 않는다(그대로 Turso). 시세를 넣는 앞 단계들은 사본을 보지 않는다 —
+    이 안에서만 `PRICE_REPLICA_PATH` 를 둔다.
+    맞추는 일이 실패해도 배치는 Turso 로 계속한다."""
+    path = os.environ.get(REPLICA_FOR_SCORES_ENV, "").strip()
+    if not path or not Path(path).exists():
+        yield None
+        return
+    try:
+        from batch.core import price_replica as rep
+
+        if backend.resolved_backend() != backend.TURSO:
+            yield None
+            return
+        remote = backend.TursoClient(use_replica=False)
+        conn = rep.open_replica(path)
+        try:
+            report = rep.sync(remote, conn, backend="turso", allow_build=False, pending=db.prices_touched_summary())
+        finally:
+            conn.close()
+            remote.close()
+        log.info("시세 사본 맞추기: %s", {k: v for k, v in report.items() if k != "mismatch"})
+    except Exception as exc:  # noqa: BLE001 — 사본은 곁다리다. 못 맞추면 Turso 에서 읽는다
+        log.warning("시세 사본을 맞추지 못해 Turso 에서 읽습니다: %s", exc)
+        yield None
+        return
+    if not report.get("usable"):
+        yield None
+        return
+    이전 = os.environ.get(rep.REPLICA_ENV)
+    os.environ[rep.REPLICA_ENV] = path
+    try:
+        yield path
+    finally:
+        if 이전 is None:
+            os.environ.pop(rep.REPLICA_ENV, None)
+        else:
+            os.environ[rep.REPLICA_ENV] = 이전
+
+
 def refresh_recommendations(market: str, trade_date: str) -> list[str]:
     """점수와 신호를 그 거래일 기준으로 다시 낸다. 실패는 경고로 돌려준다.
 
@@ -819,6 +871,14 @@ def refresh_recommendations(market: str, trade_date: str) -> list[str]:
             "뉴스 감성 집계 실패 (sentiment 배치 기록 참고). 3일 안의 앞선 감성이 있으면 그것으로 점수를 냅니다"
         )
 
+    # **점수·신호는 시세 사본에서 읽는다** (docs/infra.md 25.1033) — 오늘 시세를 넣은 뒤라 여기서 맞추고 둘에만 연다
+    with _replica_for_scores() as 사본:
+        if 사본:
+            log.info("점수·신호가 시세 사본에서 읽습니다: %s", 사본)
+        return _scores_and_signals(market, trade_date, warnings, scores, signals)
+
+
+def _scores_and_signals(market: str, trade_date: str, warnings: list[str], scores, signals) -> list[str]:  # noqa: ANN001
     # **단계마다 제 실패를 말한다** (docs/infra.md 25.372). 예전에는 `if not warnings:` 로 "앞에 경고가 없을 때만"
     # 점수·신호 실패를 적어, 감성 경고가 먼저 있으면 **점수를 못 냈다는 사실이 리포트에서 빠졌다**
     code, 예외 = _하위작업(lambda: scores.run(market, as_of=trade_date))

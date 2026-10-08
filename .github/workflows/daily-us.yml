@@ -68,9 +68,31 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: DB 백엔드 고정 (이 워크플로의 모든 단계가 같은 DB 를 쓴다, docs/infra.md 25.472·25.480)
+        # 시세 사본 맞추기(25.888)가 두 번째 파이썬이라 배치와 같은 DB 를 보게 고정한다
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          DB_BACKEND: ${{ vars.DB_BACKEND }}
+          D1_ACCOUNT_ID: ${{ secrets.D1_ACCOUNT_ID }}
+          D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+          D1_API_TOKEN: ${{ secrets.D1_API_TOKEN }}
+        run: python -m batch.core.client --pin >> "$GITHUB_ENV"
+
+      # 시세 사본 (docs/infra.md 25.888·25.1033). **배치 전에** 꺼내 둔다 — 점수·신호가 오늘 시세를 넣은 뒤 사본을 맞춰 거기서 읽는다.
+      # 없거나(캐시 만료) 못 맞추면 배치는 그대로 Turso 에서 읽는다
+      - name: 시세 사본 꺼내기 (docs/infra.md 25.888)
+        uses: actions/cache/restore@v4
+        with:
+          path: .price-replica
+          key: price-replica-${{ github.run_id }}
+          restore-keys: price-replica-
+
       - name: 배치 실행
         id: batch
         env:
+          # 점수·신호만 이 사본에서 읽는다 (docs/infra.md 25.1033, batch/jobs/daily.py REPLICA_FOR_SCORES_ENV)
+          PRICE_REPLICA_FOR_SCORES: .price-replica/prices.db
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           # 리포트 종목 줄의 "매매 입력" 링크 (docs/infra.md 25.944). 변수가 비어 있으면 링크 없이 보낸다
@@ -120,6 +142,28 @@ jobs:
             --title "운영 출력 (클라우드 세션용)" \
             --file run.log \
             --note "일일 배치 (미국) (${{ job.status }})"
+
+      # 시세 사본을 따뜻하게 (docs/infra.md 25.888·25.1033). 배치 안에서 맞춘 사본을 마저 맞추고 새 키로 넣는다.
+      # 국내·미국이 같은 사본 하나를 쓴다(종목 id 로 나뉜다). 비었으면 만들지 않는다 — 처음 만들기는 주간 작업이 한다
+      - name: 시세 사본 맞추기
+        id: replica
+        if: ${{ !cancelled() && steps.batch.outputs.did_work == 'true' }}
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          DB_BACKEND: ${{ vars.DB_BACKEND }}
+          D1_ACCOUNT_ID: ${{ secrets.D1_ACCOUNT_ID }}
+          D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+          D1_API_TOKEN: ${{ secrets.D1_API_TOKEN }}
+          OFFLINE_MODE: "0"
+        run: python scripts/price_replica.py sync --path .price-replica/prices.db --no-build
+
+      - name: 시세 사본 넣어 두기
+        if: ${{ !cancelled() && steps.replica.outputs.changed == 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: .price-replica
+          key: price-replica-${{ github.run_id }}-${{ github.run_attempt }}
 
   # 공개 저장소 60일 무활동 꺼짐 대비 (docs/infra.md 25.981·25.986). 쓰기 권한(커밋·워크플로 켜기)을 **배치 본체와 다른 잡**에만 준다 —
   # 본체는 바깥 패키지를 설치해 돌리므로 저장소에 쓸 수 있으면 안 된다. 표준 라이브러리만 쓰는 스크립트라 설치가 없다

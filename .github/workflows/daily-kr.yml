@@ -63,9 +63,20 @@ jobs:
           D1_API_TOKEN: ${{ secrets.D1_API_TOKEN }}
         run: python -m batch.core.client --pin >> "$GITHUB_ENV"
 
+      # 시세 사본 (docs/infra.md 25.888·25.1033). **배치 전에** 꺼내 둔다 — 점수·신호가 오늘 시세를 넣은 뒤 사본을 맞춰 거기서 읽는다.
+      # 없거나(캐시 만료) 못 맞추면 배치는 그대로 Turso 에서 읽는다
+      - name: 시세 사본 꺼내기 (docs/infra.md 25.888)
+        uses: actions/cache/restore@v4
+        with:
+          path: .price-replica
+          key: price-replica-${{ github.run_id }}
+          restore-keys: price-replica-
+
       - name: 배치 실행
         id: batch
         env:
+          # 점수·신호만 이 사본에서 읽는다 (docs/infra.md 25.1033, batch/jobs/daily.py REPLICA_FOR_SCORES_ENV)
+          PRICE_REPLICA_FOR_SCORES: .price-replica/prices.db
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           # 리포트 종목 줄의 "매매 입력" 링크 (docs/infra.md 25.944). 변수가 비어 있으면 링크 없이 보낸다
@@ -120,14 +131,7 @@ jobs:
       # 시세 사본을 따뜻하게 (docs/infra.md 25.888). 주간 작업(지표·밴드·성과·백테스트)이 과거 시세를 사본에서 읽는다.
       # 캐시는 7일 안 쓰면 지워진다 — 평일마다 맞춰 넣어 두면 주간 작업의 맞추기가 작고(그날 새 행·고친 범위만) 사본이 살아 있다.
       # 비었으면 만들지 않는다(처음 만들기는 주간 작업이 진도 문을 보고 한다). 일일 배치 결과와는 상관없다 — 실패해도 리포트는 이미 나갔다
-      - name: 시세 사본 꺼내기 (docs/infra.md 25.888)
-        if: ${{ !cancelled() && steps.batch.outputs.did_work == 'true' }}
-        uses: actions/cache/restore@v4
-        with:
-          path: .price-replica
-          key: price-replica-${{ github.run_id }}
-          restore-keys: price-replica-
-
+      # 사본은 배치 전에 꺼내 두었다(위). 배치 안에서 맞춘 것까지 여기서 새 키로 넣는다
       - name: 시세 사본 맞추기
         id: replica
         if: ${{ !cancelled() && steps.batch.outputs.did_work == 'true' }}

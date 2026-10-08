@@ -124,32 +124,23 @@ def load_recent_prices(
     분할이 하루 끼면 그 뒤 60일이 통째로 틀어진다. 거래대금은 조정하지 않는다 —
     "그날 얼마가 오갔나" 는 그날의 실제 금액이다.
     """
-    rs = client.execute(
-        "SELECT p.stock_id, p.date, COALESCE(p.adj_close, p.close) AS close, p.value"
-        " FROM universe_members u CROSS JOIN stocks s CROSS JOIN prices p"
-        " WHERE u.included = 1 AND u.snapshot_date = (SELECT MAX(um.snapshot_date) FROM universe_members um"
-        "   JOIN stocks su ON su.id = um.stock_id WHERE su.country = ? AND um.snapshot_date <= ?)"
-        "  AND s.id = u.stock_id AND s.country = ? AND p.stock_id = u.stock_id AND p.date <= ?"
-        "  AND p.date >= COALESCE((SELECT x.date FROM prices x WHERE x.stock_id = u.stock_id AND x.date <= ?"
-        "    ORDER BY x.date DESC LIMIT 1 OFFSET ? - 1), '')"
-        " ORDER BY p.stock_id, p.date",
-        [country, as_of, country, as_of, as_of, days],
-    )
-    out: dict[int, list[tuple[str, float, float | None]]] = {}
-    for row in rs.dicts():
-        if row["close"] is None:
-            continue
-        out.setdefault(int(row["stock_id"]), []).append(
-            (str(row["date"]), float(row["close"]), _opt_float(row["value"]))
-        )
-    return out
+    # **유니버스 종목 번호와 시세를 나눠 읽는다** (docs/infra.md 25.1033) — 시세 질의가 `prices`·`json_each` 만 써서
+    # 시세 사본(25.888)이 있으면 거기서 읽는다. 예전엔 `universe_members` 조인 때문에 날마다 Turso 에서 읽었다
+    from batch.jobs import scores as sj
+
+    ids = sorted(int(r[0]) for r in client.execute(sj.SERIES_IDS_SQL, [country, country, as_of]).rows)
+    if not ids:
+        return {}
+    return load_recent_prices_for(client, ids, as_of, days)
 
 
 #: `load_recent_prices` 와 같은 모양을 **고른 종목만** — 유니버스 밖 참고 판정표 (`jobs/analyze_extra`, 25.1019)
 RECENT_PRICES_FOR_SQL = (
-    "SELECT p.stock_id, p.date, COALESCE(p.adj_close, p.close) AS close, p.value FROM prices p"
-    " WHERE p.stock_id IN (SELECT value FROM json_each(?)) AND p.date <= ?"
-    "  AND p.date >= COALESCE((SELECT x.date FROM prices x WHERE x.stock_id = p.stock_id AND x.date <= ?"
+    # 하위 질의를 `j.value`(종목 번호)에 건다 — `p.stock_id` 에 걸면 같은 표라 날짜 범위를 색인에 못 쓰고
+    # 종목의 전 이력을 훑었다(질의 계획: date<? 만). 이 모양은 date>? AND date<? 범위로 찾는다 (docs/infra.md 25.1033)
+    "SELECT p.stock_id, p.date, COALESCE(p.adj_close, p.close) AS close, p.value"
+    " FROM json_each(?) j JOIN prices p ON p.stock_id = j.value WHERE p.date <= ?"
+    "  AND p.date >= COALESCE((SELECT x.date FROM prices x WHERE x.stock_id = j.value AND x.date <= ?"
     "    ORDER BY x.date DESC LIMIT 1 OFFSET ? - 1), '')"
     " ORDER BY p.stock_id, p.date"
 )
