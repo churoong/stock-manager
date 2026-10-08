@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -158,6 +159,9 @@ MARKET_KINDS = ("B", "I")
 #: 시장 전체 하루치에서 넘길 최대 쪽 수 — 100건 × 50쪽 = 5,000건. 하루 두 번(B·I)만 불러 상한을 넉넉히 둔다.
 #: 넘으면 잘렸다고 말한다 (25.1006). 실측: 2025-10~2026-10 1년 29,171건, 하루 평균 약 120건
 MARKET_MAX_PAGES = 50
+#: 시장 전체 한 쪽 호출이 실패하면 다시 묻는 횟수와 기다림(초, 회차마다 늘린다) (25.1010)
+MARKET_RETRIES = 2
+MARKET_RETRY_WAIT = 5.0
 
 
 @dataclass(frozen=True)
@@ -188,29 +192,37 @@ def fetch_market_day(day: str, kind: str) -> tuple[list[MarketDisclosure], int, 
     if not key:
         return [], 0, "DART_API_KEY 없음"
     out: list[MarketDisclosure] = []
-    page = 1
+    page, calls = 1, 0
     while True:
-        try:
-            response = requests.get(
-                f"{BASE_URL}/{ENDPOINT}",
-                params={"crtfc_key": key, "bgn_de": day, "end_de": day, "pblntf_ty": kind, "page_no": page,
-                        "page_count": PAGE_COUNT},
-                timeout=LIST_TIMEOUT,
-            )  # fmt: skip
-            payload = response.json() if response.status_code == 200 else {}
-        except (requests.RequestException, ValueError) as exc:
-            return out, page, f"호출 실패: {가림(str(exc))}"
+        payload: dict[str, Any] = {}
+        for attempt in range(MARKET_RETRIES + 1):
+            calls += 1
+            try:
+                response = requests.get(
+                    f"{BASE_URL}/{ENDPOINT}",
+                    params={"crtfc_key": key, "bgn_de": day, "end_de": day, "pblntf_ty": kind, "page_no": page,
+                            "page_count": PAGE_COUNT},
+                    timeout=LIST_TIMEOUT,
+                )  # fmt: skip
+                payload = response.json() if response.status_code == 200 else {}
+                break
+            except (requests.RequestException, ValueError) as exc:
+                # **한 번의 시간 초과로 1년 모으기 전체를 멈추지 않는다** (25.1010). 10-07 첫 모으기가 3월 중순에서
+                # 읽기 시간 초과 한 번으로 멈춰 4~9월이 비었다
+                if attempt == MARKET_RETRIES:
+                    return out, calls, f"호출 실패: {가림(str(exc))}"
+                time.sleep(MARKET_RETRY_WAIT * (attempt + 1))
         status = str(payload.get("status"))
         if status == STATUS_NO_DATA:
-            return out, page, None
+            return out, calls, None
         if status != STATUS_OK:
-            return out, page, f"상태 {status}: {payload.get('message')}"
+            return out, calls, f"상태 {status}: {payload.get('message')}"
         out += parse_market(payload, kind)
         total_page = int(payload.get("total_page") or 1)
         if page >= total_page:
-            return out, page, None
+            return out, calls, None
         if page >= MARKET_MAX_PAGES:
             # **잘렸다고 말한다** (25.1006, 교차검증) — 회사별 `fetch_list` 처럼. 예전에는 조용히 성공이었다
             log.warning("시장 전체 공시 %s %s: %d쪽 중 %d쪽만 받음", day, kind, total_page, page)
-            return out, page, f"잘림: {day} {kind} {total_page}쪽 중 {page}쪽"
+            return out, calls, f"잘림: {day} {kind} {total_page}쪽 중 {page}쪽"
         page += 1

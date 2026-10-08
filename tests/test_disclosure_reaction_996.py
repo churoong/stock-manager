@@ -118,3 +118,34 @@ def test_1년_모으기가_멈추면_계산하지_않아_다음에_다시_받는
     assert job.run() == 0
     assert job.run() == 0
     assert 받은날수 == [job.BACKFILL_DAYS, job.BACKFILL_DAYS] and 계산 == []
+
+
+def test_시장_전체_공시는_시간_초과를_다시_묻는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1010: 10-07 첫 1년 모으기가 읽기 시간 초과 한 번으로 3월에서 멈춰 4~9월이 비었다."""
+    import requests
+
+    from batch.sources import dart_disclosures as dd
+
+    monkeypatch.setenv("DART_API_KEY", "k")
+    monkeypatch.setattr(dd.time, "sleep", lambda s: None)
+    차례 = [requests.ReadTimeout("read timed out"), requests.ReadTimeout("read timed out")]
+
+    class 응답:
+        status_code = 200
+
+        def json(self) -> dict:
+            return {"status": "000", "total_page": 1, "list": [
+                {"rcept_no": "20260415000001", "report_nm": "유상증자결정", "stock_code": "000660", "corp_code": "3"}]}
+
+    def 가짜(*a, **k):  # noqa: ANN002, ANN003, ANN202
+        if 차례:
+            raise 차례.pop(0)
+        return 응답()
+
+    monkeypatch.setattr(dd.requests, "get", 가짜)
+    got, calls, err = dd.fetch_market_day("20260415", "B")
+    assert err is None and calls == 3 and len(got) == 1
+
+    차례[:] = [requests.ReadTimeout("x")] * 3
+    got, calls, err = dd.fetch_market_day("20260415", "B")
+    assert got == [] and calls == 3 and err is not None and err.startswith("호출 실패")

@@ -15,6 +15,14 @@ on:
         description: 앞에서부터 몇 종목만 (시험용, 비우면 전부)
         type: string
         default: ""
+      disclosure_days:
+        description: 공시 반응 — 지난 며칠을 다시 모은 뒤 다시 계산 (빈 구간 메우기, 25.1010). 비우면 평소대로
+        type: string
+        default: ""
+      disclosure_only:
+        description: 수급·증권사 성적표는 건너뛰고 공시 반응만
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -68,11 +76,17 @@ jobs:
           set -o pipefail
           ARGS=""
           if [ -n "${{ inputs.limit }}" ]; then ARGS="--limit ${{ inputs.limit }}"; fi
-          python -m batch.jobs.kis_flows $ARGS 2>&1 | python scripts/ops_tee.py run.log
-          # 증권사 적중률 성적표 — 금요일이거나 표가 비었을 때만 다시 계산한다 (docs/infra.md 25.995)
-          python -m batch.jobs.broker_stats 2>&1 | python scripts/ops_tee.py -a run.log
+          : > run.log
+          if [ "${{ inputs.disclosure_only }}" != "true" ]; then
+            python -m batch.jobs.kis_flows $ARGS 2>&1 | python scripts/ops_tee.py -a run.log
+            # 증권사 적중률 성적표 — 금요일이거나 표가 비었을 때만 다시 계산한다 (docs/infra.md 25.995)
+            python -m batch.jobs.broker_stats 2>&1 | python scripts/ops_tee.py -a run.log
+          fi
           # 공시 반응 통계 — 시장 전체 주요 공시 모으기(매일)와 유형별 5거래일 초과수익(금요일) (docs/infra.md 25.996)
-          python -m batch.jobs.disclosure_reaction 2>&1 | python scripts/ops_tee.py -a run.log
+          # 빈 구간 메우기: 지난 N일을 다시 모으고 계산을 강제한다 (25.1010)
+          DARGS=""
+          if [ -n "${{ inputs.disclosure_days }}" ]; then DARGS="--days ${{ inputs.disclosure_days }} --force"; fi
+          python -m batch.jobs.disclosure_reaction $DARGS 2>&1 | python scripts/ops_tee.py -a run.log
 
       - name: 기록을 이슈로 내보내기
         if: always()
