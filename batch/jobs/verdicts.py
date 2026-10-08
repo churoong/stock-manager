@@ -439,6 +439,7 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
     stamp = db.now_iso()
     rows: list[tuple[str, list[Any]]] = [(CLEAR, [country])]
     기록: list[tuple[str, list[Any]]] = []
+    레이더재료: list[dict] = []
     for sid, r in 점수.items():
         try:
             factors = json.loads(r["factor_scores"] or "{}")
@@ -483,6 +484,9 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
         detail["track"] = {"stock": 종목성적, "market": 시장성적, "since": 상태.get("since"), "first_due": 첫평가}
         detail["score_change"] = 변화
         detail["twins"] = 닮음
+        레이더재료.append({"stock_id": sid, "ticker": r["ticker"], "name": r["name"], "verdict": out["verdict"],
+                       "ladder": (out.get("outlook") or {}).get("ladder"), "score_change": 변화,
+                       "agreement": (out.get("outlook") or {}).get("agreement")})  # fmt: skip
         o = out.get("outlook") or {}
         모델 = ft.log_models(o)
         if 모델 and o.get("close_date") == as_of:
@@ -504,7 +508,14 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
     누계행 = [(TRACK_UPSERT, [sid, country, json.dumps(누계[sid], separators=(",", ":")), stamp])
             for sid in sorted(바뀜) if sid in 누계]  # fmt: skip
     rows[1:1] = [db.setting_statement(track_key(country), 상태), *누계행]
-    return rows + 기록
+    # 레이더 (20장) — 첫 화면이 설정 한 행만 읽게 시장마다 한 번 만들어 둔다
+    레이더 = {"as_of": as_of, "computed_at": stamp, **insights.radar(레이더재료)}
+    return rows + 기록 + [db.setting_statement(radar_key(country), 레이더)]
+
+
+def radar_key(country: str) -> str:
+    """종목 분석 탭 레이더를 두는 설정 열쇠 (배치만 쓰는 기록 키). 웹 `lib/analysis.ts` `RADAR_KEYS` 와 같다."""
+    return f"analysis_radar_{country}"
 
 
 def run(market: str) -> int:

@@ -155,3 +155,37 @@ def agreement(outlook: dict | None) -> dict | None:
         return None
     return {"views": {k: round(v, 4) for k, v in 눈.items()}, "up": sum(1 for v in 눈.values() if v > 0),
             "n": len(눈), "spread": round(max(눈.values()) - min(눈.values()), 4)}  # fmt: skip
+
+
+#: 레이더 목록마다의 길이 (docs/analysis.md 20장)
+RADAR_N = 10
+
+
+def radar(entries: list[dict]) -> dict:
+    """종목 분석 탭 첫 화면의 레이더 (docs/analysis.md 20장, 25.1043) — 시장 전체에서 세 목록.
+
+    entries: {stock_id, ticker, name, verdict, ladder, score_change, agreement}
+      near    아직 충족하지 않은 **판정표 가격 기준**까지 가장 가까운 종목(거리 절댓값 오름차순)
+              — "어느 가격이면 신호 기준이 바뀌나"
+      rising  4주 전보다 종합 점수가 가장 많이 오른 종목
+      eyes    1년 예상의 눈이 셋 이상이고 **모두** 오름을 말하는 종목(가장 낮은 눈이 높은 순)
+    새 문턱이 없다 — 순서만 정한다."""
+    near, rising, eyes = [], [], []
+    for e in entries:
+        머리 = {"stock_id": e["stock_id"], "ticker": e["ticker"], "name": e["name"], "verdict": e.get("verdict")}
+        기준 = [it for it in (e.get("ladder") or {}).get("items") or []
+                if it.get("kind") == "criterion" and not it.get("met")]  # fmt: skip
+        if 기준:
+            가까운 = min(기준, key=lambda it: abs(it["dist"]))
+            near.append({**머리, "label": 가까운["label"], "price": 가까운["price"], "dist": round(가까운["dist"], 4),
+                         "need": 가까운.get("need")})  # fmt: skip
+        sc = e.get("score_change") or {}
+        if isinstance(sc.get("delta"), (int, float)) and sc["delta"] > 0:
+            rising.append({**머리, "delta": round(sc["delta"], 1), "up": sc.get("up"), "since": sc.get("since")})
+        a = e.get("agreement") or {}
+        if a.get("n", 0) >= 3 and a.get("up") == a.get("n"):
+            eyes.append({**머리, "low": min(a["views"].values()), "high": max(a["views"].values()), "n": a["n"]})
+    near.sort(key=lambda x: (abs(x["dist"]), x["stock_id"]))
+    rising.sort(key=lambda x: (-x["delta"], x["stock_id"]))
+    eyes.sort(key=lambda x: (-x["low"], x["stock_id"]))
+    return {"near": near[:RADAR_N], "rising": rising[:RADAR_N], "eyes": eyes[:RADAR_N]}

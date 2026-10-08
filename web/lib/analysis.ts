@@ -228,6 +228,41 @@ export const VERDICT_STYLE: Record<VerdictKey, string> = {
 /** 종목 분석 탭의 모아보기 — 사람이 볼 결론만, 이 순서로 */
 export const HUB_ORDER: VerdictKey[] = ["check_holding", "consider_buy", "hold", "reference"];
 
+/** 팩터 이름 — batch/services/verdict.FACTOR 와 같다 */
+export const FACTOR_NAME: Record<string, string> = { value: "밸류", quality: "퀄리티", growth: "성장", momentum: "모멘텀", risk: "리스크" };
+
+/** 레이더 (docs/analysis.md 20장, 25.1043) — 배치가 시장마다 만들어 설정에 둔다. batch/jobs/verdicts.radar_key 와 같다 */
+export const RADAR_KEYS = ["analysis_radar_KR", "analysis_radar_US"] as const;
+export const RADAR_SQL = "SELECT key, value FROM settings WHERE key IN ('analysis_radar_KR', 'analysis_radar_US')";
+
+interface RadarHead {
+  stock_id: number;
+  ticker: string;
+  name: string;
+  verdict: VerdictKey | null;
+}
+export interface Radar {
+  as_of: string;
+  computed_at: string;
+  near: Array<RadarHead & { label: string; price: number; dist: number; need: "above" | "below" | null }>;
+  rising: Array<RadarHead & { delta: number; up: string | null; since: string | null }>;
+  eyes: Array<RadarHead & { low: number; high: number; n: number }>;
+}
+
+/** 설정 행 → 시장별 레이더. 깨진 값은 뺀다 */
+export function parseRadars(rows: Array<{ key: string; value: string }>): Record<string, Radar> {
+  const out: Record<string, Radar> = {};
+  for (const r of rows) {
+    try {
+      const v = JSON.parse(r.value) as Radar;
+      if (v && Array.isArray(v.near) && Array.isArray(v.rising) && Array.isArray(v.eyes)) out[r.key.replace("analysis_radar_", "")] = v;
+    } catch {
+      /* 깨진 값은 보이지 않는다 — 다음 배치가 덮는다 */
+    }
+  }
+  return out;
+}
+
 /** 모아보기 질의. 결론 하나마다 최대 HUB_LIMIT 줄 */
 export const HUB_LIMIT = 30;
 export const HUB_SQL = `SELECT v.stock_id, v.market, v.verdict, v.headline, v.computed_at, s.ticker,
