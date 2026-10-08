@@ -45,7 +45,7 @@ SIGNALS_SQL = (
     "   JOIN stocks s2 ON s2.id = g2.stock_id WHERE s2.country = ?)"
 )
 CHECKS_SQL = (
-    "SELECT c.stock_id, c.as_of_date, c.horizon, c.passed, c.failed_count, c.checks_json"
+    "SELECT c.stock_id, c.as_of_date, c.horizon, c.passed, c.failed_count, c.checks_json, c.levels_json"
     " FROM signal_checks c JOIN stocks s ON s.id = c.stock_id"
     " WHERE s.country = ? AND c.as_of_date = (SELECT MAX(c2.as_of_date) FROM signal_checks c2"
     "   JOIN stocks s2 ON s2.id = c2.stock_id WHERE s2.country = ?)"
@@ -314,8 +314,12 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
             rows = json.loads(r["checks_json"] or "[]")
         except (TypeError, ValueError):
             rows = []
+        try:
+            레벨 = json.loads(r.get("levels_json") or "[]")
+        except (TypeError, ValueError):
+            레벨 = []
         판정[int(r["stock_id"])].append({"horizon": r["horizon"], "as_of": r["as_of_date"], "passed": bool(r["passed"]),
-                                       "failed_count": r["failed_count"], "rows": rows})  # fmt: skip
+                                       "failed_count": r["failed_count"], "rows": rows, "levels": 레벨})  # fmt: skip
     보유 = {int(r["stock_id"]): r for r in _safe(client, POSITIONS_SQL, [country], warnings, "보유")}
     플래그: dict[int, list[dict]] = defaultdict(list)
     for r in _safe(client, FLAGS_SQL, [country], warnings, "매도 플래그"):

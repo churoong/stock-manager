@@ -853,6 +853,27 @@ def judgement(horizon: str, inp: SignalInput, data: dict) -> list[dict]:
     return rows
 
 
+def price_levels(inp: SignalInput) -> dict[str, list[dict]]:
+    """판정표 기준 가운데 **가격으로 풀 수 있는 것** (docs/analysis.md 12.2, 25.1038). 기간 → [{label, price, need}].
+
+    "다른 것이 그대로일 때 종가가 이 값을 넘으면(need=above)·밑돌면(need=below) 그 기준이 충족된다."
+    오늘 계열 그대로 푼다 — 내일은 이동평균 창이 한 칸 밀려 조금 달라진다. 점수·재무 기준은 가격으로 풀 수 없어 없다.
+    새 문턱이 아니다 — 판정표의 문턱 그대로다.
+    """
+    out: dict[str, list[dict]] = {h: [] for h in HORIZONS}
+    ma20 = moving_average(inp.closes, MA_SHORT_DAYS)
+    if ma20:
+        out["short"].append({"label": "단기: 추세 위 (20일선)", "price": ma20, "need": "above"})
+        out["short"].append({"label": f"단기: 과열 아님 (20일선 +{MAX_EXTENSION * 100:.0f}%)",
+                             "price": ma20 * (1 + MAX_EXTENSION), "need": "below"})  # fmt: skip
+    if inp.band is not None and inp.pbr_now and inp.pbr_now > 0:
+        기준가 = inp.band_close if inp.band_close and inp.band_close > 0 else inp.close
+        if 기준가:
+            out["long"].append({"label": f"장기: 밸류에이션 밴드 하단 (PBR {BAND_ENTRY_PERCENTILE}% 분위)",
+                                "price": inp.band.at(BAND_ENTRY_PERCENTILE) * 기준가 / inp.pbr_now, "need": "below"})
+    return out
+
+
 def judgements(inp: SignalInput) -> dict[str, tuple[bool, list[dict]]]:
     """기간마다 (신호 여부, 판정표). 신호 여부는 RULES 가 낸 것 그대로다."""
     out: dict[str, tuple[bool, list[dict]]] = {}

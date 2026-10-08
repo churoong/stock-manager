@@ -587,7 +587,9 @@ def store(client: TursoClient, rows: list[tuple]) -> int:
 
 
 # 판정표 (docs/signals.md 9장). 그 나라의 최근 기준일 것만 남긴다
-_CHECK_COLS = "stock_id, as_of_date, horizon, passed, failed_count, checks_json, calc_version, created_at"
+_CHECK_COLS = (
+    "stock_id, as_of_date, horizon, passed, failed_count, checks_json, calc_version, created_at, levels_json"
+)
 
 
 #: 시장별 "절반 넘게 멈춤" 을 볼 만큼 큰 시장의 종목 수 (25.541). 국내 두 시장은 수백 종목이라 늘 넘는다
@@ -624,6 +626,8 @@ def check_rows(inp: sg.SignalInput, as_of: str, now: str) -> list[tuple]:
         "기준일 종가", f"마지막 종가 {inp.price_date or '없음'} — {as_of} 종가가 없어 신호를 내지 않는다",
         f"종가 날짜 = {as_of}", sg.SOURCE_PRICES, inp.price_date, passed=False,
     )
+    # 판정표 기준을 가격으로 푼 것 — 가격 사다리 (docs/analysis.md 12.2, 25.1038)
+    레벨 = sg.price_levels(inp)
     for horizon, (passed, table) in sg.judgements(inp).items():
         if 멈춤 is not None:
             table, passed = [멈춤, *table], False
@@ -631,6 +635,7 @@ def check_rows(inp: sg.SignalInput, as_of: str, now: str) -> list[tuple]:
         rows.append((
             inp.stock_id, as_of, horizon, 1 if passed else 0, failed,
             json.dumps(table, ensure_ascii=False, default=str), sg.CALC_VERSION, now,
+            json.dumps(레벨.get(horizon) or [], ensure_ascii=False),
         ))
     return rows
 
@@ -653,7 +658,8 @@ def store_checks(client: TursoClient, country: str, as_of: str, rows: list[tuple
             f"INSERT INTO signal_checks ({_CHECK_COLS}) VALUES " + ", ".join([placeholder] * len(chunk))
             + " ON CONFLICT (stock_id, as_of_date, horizon) DO UPDATE SET passed = excluded.passed,"
             " failed_count = excluded.failed_count, checks_json = excluded.checks_json,"
-            " calc_version = excluded.calc_version, created_at = excluded.created_at",
+            " calc_version = excluded.calc_version, created_at = excluded.created_at,"
+            " levels_json = excluded.levels_json",
             args,
         ))
     statements.append((

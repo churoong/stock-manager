@@ -183,7 +183,7 @@ class Test판정표적재:
         rows = job.check_rows(inp, "2026-09-15", "now")
         assert len(rows) == 3
         for row in rows:
-            assert len(row) == db.column_count(job._CHECK_COLS) == 8
+            assert len(row) == db.column_count(job._CHECK_COLS) == 9  # 25.1038 levels_json
         # 값이 없는 종목은 전부 탈락이고 그 수가 적힌다
         by_h = {r[2]: r for r in rows}
         assert by_h["mid"][3] == 0 and by_h["mid"][4] == 4

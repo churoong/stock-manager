@@ -20,9 +20,9 @@ export default function ForecastTable({ f, close, closeDate, currency }: {
         <span className="text-xs text-slate-500">기준 종가 {formatPrice(close, currency)}{closeDate ? ` (${closeDate})` : ""}</span>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[22rem] text-left text-sm">
+        <table className="w-full min-w-[30rem] text-left text-sm">
           <thead className="text-xs text-slate-500">
-            <tr><th className="py-1 pr-2">기간</th><th className="pr-2">예상 주가</th><th className="pr-2">종가 대비</th><th className="pr-2">68% 범위</th><th>90% 범위</th></tr>
+            <tr><th className="py-1 pr-2">기간</th><th className="pr-2">예상 주가</th><th className="pr-2">종가 대비</th><th className="pr-2">68% 범위</th><th className="pr-2">90% 범위</th><th className="pr-2">오를 확률</th><th>−20% 이하</th></tr>
           </thead>
           <tbody>
             {f.horizons.map((h) => (
@@ -31,7 +31,9 @@ export default function ForecastTable({ f, close, closeDate, currency }: {
                 <td className="pr-2 font-semibold">{formatPrice(h.expected, currency)}</td>
                 <td className="pr-2">{대비(h.expected)}</td>
                 <td className="pr-2 text-xs">{범위(h.low68, h.high68)}</td>
-                <td className="text-xs">{범위(h.low90, h.high90)}</td>
+                <td className="pr-2 text-xs">{범위(h.low90, h.high90)}</td>
+                <td className="pr-2">{h.p_up === undefined ? "-" : `${(h.p_up * 100).toFixed(0)}%`}</td>
+                <td>{h.p_drop === undefined ? "-" : `${(h.p_drop * 100).toFixed(0)}%`}</td>
               </tr>
             ))}
           </tbody>

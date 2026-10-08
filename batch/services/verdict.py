@@ -67,6 +67,69 @@ def market_return(first: tuple[str, float] | None, last: tuple[str, float] | Non
     return {"annual": (last[1] / first[1]) ** (1 / 년) - 1, "years": 년, "since": first[0][:10], "until": last[0][:10]}
 
 
+#: 확률에서 말하는 하락 폭 — "1년 뒤 −20% 이하일 확률". 약세장의 흔한 정의(고점 대비 −20%)를 빌렸다 —
+#: 판정 문턱이 아니라 표시 기준
+DROP_LEVEL = -0.20
+#: 가격 사다리의 도달 확률 기간 (개월)
+TOUCH_MONTHS = (3, 12)
+
+
+def _phi(x: float) -> float:
+    return 0.5 * (1 + math.erf(x / math.sqrt(2)))
+
+
+def _drift(er: float, sigma: float) -> float:
+    """로그 가격의 연 기대 변화 ν = ln(1 + E[r]) − σ²/2 (10.1 의 범위와 같은 가정)."""
+    return math.log(1 + er) - sigma * sigma / 2
+
+
+def prob_above(ratio: float, er: float, sigma: float, t: float) -> float:
+    """t 년 뒤 가격 ÷ 지금 > ratio 일 확률 (로그정규, docs/analysis.md 12.1)."""
+    nu = _drift(er, sigma)
+    return 1 - _phi((math.log(ratio) - nu * t) / (sigma * math.sqrt(t)))
+
+
+def touch_prob(ratio: float, er: float, sigma: float, t: float) -> float:
+    """t 년 **안에** 한 번이라도 가격 ÷ 지금 = ratio 에 닿을 확률 — 표류 있는 브라운 운동의 첫 도달
+    (docs/analysis.md 12.2).
+
+    위 장벽(ratio > 1): Φ((−b + νt)/σ√t) + e^{2νb/σ²}·Φ((−b − νt)/σ√t),  b = ln ratio
+    아래 장벽(ratio < 1): Φ((b − νt)/σ√t) + e^{2νb/σ²}·Φ((b + νt)/σ√t).
+    연속으로 지켜본다는 가정이라 종가로만 보는 실제보다 조금 크게 나온다."""
+    if ratio <= 0:
+        return 0.0
+    b = math.log(ratio)
+    if b == 0:
+        return 1.0
+    nu, s = _drift(er, sigma), sigma * math.sqrt(t)
+    if b > 0:
+        a, c = (-b + nu * t) / s, (-b - nu * t) / s
+    else:
+        a, c = (b - nu * t) / s, (b + nu * t) / s
+    try:
+        뒤 = math.exp(2 * nu * b / (sigma * sigma)) * _phi(c)
+    except OverflowError:
+        뒤 = 1.0
+    return max(0.0, min(1.0, _phi(a) + 뒤))
+
+
+def race_prob(up_ratio: float, down_ratio: float, er: float, sigma: float) -> float | None:
+    """위(목표가)가 아래(손절가)보다 **먼저** 닿을 확률 — 기간 제한 없이 (docs/analysis.md 12.3).
+
+    척도 함수 s(x) = e^{−2νx/σ²} 로 P = (1 − e^{2νd/σ²}) / (e^{−2νu/σ²} − e^{2νd/σ²}),  u = ln 위, d = −ln 아래.
+    표류가 0 이면 d/(u+d) — 거리의 비만으로 정해진다."""
+    if up_ratio <= 1 or not 0 < down_ratio < 1:
+        return None
+    u, d = math.log(up_ratio), -math.log(down_ratio)
+    k = 2 * _drift(er, sigma) / (sigma * sigma)
+    if abs(k) < 1e-9:
+        return d / (u + d)
+    try:
+        return max(0.0, min(1.0, (1 - math.exp(k * d)) / (math.exp(-k * u) - math.exp(k * d))))
+    except (OverflowError, ZeroDivisionError):
+        return None
+
+
 def forecast(*, close: float | None, beta: float | None, sigma: float | None, market: dict | None,
              rf: float | None) -> dict | None:  # fmt: skip
     """1·3·6·12개월 예상 주가와 범위 (docs/analysis.md 10.1). CAPM 기대수익 + 로그정규 범위. 재료가 모자라면 None."""
@@ -87,6 +150,9 @@ def forecast(*, close: float | None, beta: float | None, sigma: float | None, ma
             for 이름, z in FORECAST_Z.items():
                 행[f"low{이름}"] = close * math.exp(중심 * t - z * s * math.sqrt(t))
                 행[f"high{이름}"] = close * math.exp(중심 * t + z * s * math.sqrt(t))
+            # 확률로 말하기 (docs/analysis.md 12.1, 25.1038) — 같은 로그정규 가정
+            행["p_up"] = prob_above(1.0, er, s, t)
+            행["p_drop"] = 1 - prob_above(1 + DROP_LEVEL, er, s, t)
         기간.append(행)
     return {"horizons": 기간, "er": er, "beta": b, "beta_given": isinstance(beta, (int, float)), "sigma": s,
             "rf": rf0, "rf_given": isinstance(rf, (int, float)), "market": market}  # fmt: skip
@@ -271,7 +337,70 @@ def _요약(sc: dict, outlook: dict | None, currency: str, *, reference: bool) -
     if 일년:
         범위 = (f"(68% {_won(일년['low68'], currency)}~{_won(일년['high68'], currency)})" if "low68" in 일년 else "")
         조각.append(f"1년 예상 {_won(일년['expected'], currency)}{범위}")
+        if isinstance(일년.get("p_up"), (int, float)):
+            조각.append(f"1년 뒤 오를 확률 {일년['p_up'] * 100:.0f}%")
     return 조각
+
+
+def ladder(*, close: float | None, currency: str, outlook: dict | None, signals: list[dict],
+           checks: list[dict]) -> dict | None:  # fmt: skip
+    """가격 사다리 (docs/analysis.md 12.2, 25.1038) — 이 종목에 걸린 가격들을 한 줄로 세우고
+    지금에서의 거리와 도달 확률을 붙인다.
+
+    모두 이미 있는 값이다: 52주 고점·PBR 밴드 기준 가격·증권사 목표가·1년 68% 범위·신호의 매수 구간·목표·손절·
+    판정표 기준을 가격으로 푼 것(`signals.price_levels`). 도달 확률은 10장의 CAPM 기대수익·변동성 가정으로(12.2)."""
+    o = outlook or {}
+    if not isinstance(close, (int, float)) or close <= 0:
+        return None
+    f = o.get("forecast") or {}
+    er, s = f.get("er"), f.get("sigma")
+    확률 = isinstance(er, (int, float)) and isinstance(s, (int, float)) and s > 0
+    items: list[dict] = []
+
+    def 더하기(label: str, price: Any, kind: str, source: str, **extra: Any) -> None:
+        if not isinstance(price, (int, float)) or price <= 0:
+            return
+        칸: dict[str, Any] = {"label": label, "price": float(price), "kind": kind, "source": source,
+                             "dist": price / close - 1, **extra}  # fmt: skip
+        if 확률 and abs(price / close - 1) > 1e-9:
+            칸["touch"] = {str(m): touch_prob(price / close, er, s, m / 12) for m in TOUCH_MONTHS}
+        items.append(칸)
+
+    prox = (o.get("momentum") or {}).get("high_52w_proximity")
+    if isinstance(prox, (int, float)) and 0 < prox < 1:
+        더하기("52주 고점(종가)", close / prox, "high", "factors.momentum")
+    밴드 = (o.get("band") or {}).get("prices") or {}
+    for k, 이름 in (("p20", "PBR 밴드 20% 가격"), ("p50", "PBR 밴드 중앙값 가격"), ("p80", "PBR 밴드 80% 가격")):
+        더하기(이름, 밴드.get(k), "band", "valuation_bands")
+    c = o.get("consensus") or {}
+    더하기(f"증권사 목표가 중앙값({c.get('brokers')}곳)", c.get("median"), "consensus", "kr_opinions")
+    일년 = next((h for h in f.get("horizons") or [] if h.get("months") == 12), None) or {}
+    더하기("1년 예상 68% 하단", 일년.get("low68"), "range", "계산 (10.1)")
+    더하기("1년 예상 68% 상단", 일년.get("high68"), "range", "계산 (10.1)")
+    if signals:
+        g = signals[0]
+        기간 = HORIZON.get(g.get("horizon"), g.get("horizon"))
+        더하기(f"{기간} 매수 구간 상단", g.get("buy_zone_high"), "signal", "signals")
+        더하기(f"{기간} 매수 구간 하단", g.get("buy_zone_low"), "signal", "signals")
+        더하기(f"{기간} 신호 목표가", g.get("target_price"), "target", "signals")
+        더하기(f"{기간} 신호 손절가", g.get("stop_price"), "stop", "signals")
+    for ch in checks:
+        for lv in ch.get("levels") or []:
+            need = lv.get("need")
+            p = lv.get("price")
+            if isinstance(p, (int, float)) and need in ("above", "below"):
+                더하기(str(lv.get("label")), p, "criterion", "signal_checks", need=need,
+                       met=(close > p) if need == "above" else (close <= p))  # fmt: skip
+    if not items:
+        return None
+    items.sort(key=lambda x: -x["price"])
+    out: dict[str, Any] = {"close": close, "items": items, "touch_months": list(TOUCH_MONTHS), "assumed": 확률}
+    if 확률 and signals and signals[0].get("target_price") and signals[0].get("stop_price"):
+        g = signals[0]
+        p = race_prob(float(g["target_price"]) / close, float(g["stop_price"]) / close, er, s)
+        if p is not None:
+            out["race"] = {"target": float(g["target_price"]), "stop": float(g["stop_price"]), "p": p}
+    return out
 
 
 def build(inp: Inputs) -> dict:
@@ -367,6 +496,23 @@ def build(inp: Inputs) -> dict:
         사유 = (sc or {}).get("skip_reason") or "점수가 없습니다(유니버스 밖이거나 ETF)"
         headline = f"판단 보류 — {사유}"
 
+    # 가격 사다리와 목표·손절 경주 (docs/analysis.md 12.2·12.3, 25.1038)
+    사다리 = ladder(close=(inp.outlook or {}).get("close"), currency=inp.currency, outlook=inp.outlook,
+                 signals=inp.signals, checks=inp.checks)  # fmt: skip
+    if 사다리 and 사다리.get("race"):
+        r = 사다리["race"]
+        reasons.append(f"목표가 {_won(r['target'], inp.currency)}가 손절가 {_won(r['stop'], inp.currency)}보다"
+                       " 먼저 닿을 확률 "
+                       f"{r['p'] * 100:.0f}% (CAPM 기대수익·변동성 가정, 기간 제한 없음)")  # fmt: skip
+        evidence.append(_row("목표가 먼저 닿을 확률", f"{r['p'] * 100:.0f}%", "표류 브라운 운동의 두 장벽",
+                             "계산 (docs/analysis.md 12.3)", (inp.outlook or {}).get("close_date")))  # fmt: skip
+    for it in (사다리 or {}).get("items") or []:
+        if it["kind"] == "criterion":
+            상태 = "충족" if it.get("met") else ("넘으면 충족" if it.get("need") == "above" else "밑돌면 충족")
+            evidence.append(_row(f"가격 기준: {it['label']}", _price(it["price"], inp.currency),
+                                 f"종가 {상태} · 지금에서 {_pct(it['dist'])}", "signal_checks.levels_json",
+                                 (inp.outlook or {}).get("close_date")))  # fmt: skip
+
     against = list(inp.against)
     for a in against:
         if a.get("evidence"):
@@ -380,7 +526,8 @@ def build(inp: Inputs) -> dict:
         "label": VERDICTS[key],
         "headline": headline,
         # 9.4 종합 의견 — 결론 다음에 가격·가치 진단 문장을 잇는다
-        "outlook": None if not inp.outlook else {k: v for k, v in inp.outlook.items() if k != "evidence"},
+        "outlook": None if not inp.outlook else {**{k: v for k, v in inp.outlook.items() if k != "evidence"},
+                                                 "ladder": 사다리},
         "reasons": reasons,
         "against": [a["text"] for a in against],
         "nearest": None if not near else {"horizon": near["horizon"], "failed_count": near["failed_count"],

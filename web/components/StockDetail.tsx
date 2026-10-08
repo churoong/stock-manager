@@ -407,7 +407,7 @@ export default function StockDetail({
           ) : null
         }
       >
-        {(data) => <VerdictBlock v={data.verdict as Verdict} />}
+        {(data) => <VerdictBlock v={data.verdict as Verdict} currency={currency} />}
       </Card>
 
       <Card

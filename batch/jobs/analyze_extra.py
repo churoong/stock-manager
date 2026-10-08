@@ -358,6 +358,7 @@ def reference_checks(client: TursoClient, country: str, as_of: str, metas: list[
     for inp in sig.build_inputs(후보, prices, growth, metrics, bands):
         out[inp.stock_id] = [
             {"horizon": t[2], "passed": bool(t[3]), "failed_count": t[4], "as_of": t[1],
+             "levels": json.loads(t[8] or "[]"),
              # 팩터 점수 행의 출처를 바로 적는다 — 참고 점수는 `scores` 표에 없다 (25.1019)
              "rows": [{**r, "source": REFERENCE_SOURCE} if r.get("source") == sig.sg.SOURCE_SCORES else r
                       for r in json.loads(t[5])]}

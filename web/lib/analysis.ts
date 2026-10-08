@@ -41,6 +41,45 @@ export interface OutlookData {
   consensus?: { brokers: number; median: number; low: number; high: number; upside: number | null; latest: string };
   /** 예상 주가 — CAPM + 변동성 범위 (docs/analysis.md 10장, 25.1024·25.1025) */
   forecast?: ForecastData | null;
+  /** 가격 사다리 (docs/analysis.md 12.2·12.3, 25.1038) */
+  ladder?: LadderData | null;
+}
+
+export interface LadderItem {
+  label: string;
+  price: number;
+  kind: "high" | "band" | "consensus" | "range" | "signal" | "target" | "stop" | "criterion";
+  source: string;
+  /** 지금 종가에서의 거리 (소수) */
+  dist: number;
+  /** 개월 → 그 안에 한 번이라도 닿을 확률 */
+  touch?: Record<string, number>;
+  need?: "above" | "below";
+  met?: boolean;
+}
+
+export interface LadderData {
+  close: number;
+  items: LadderItem[];
+  touch_months: number[];
+  /** 도달 확률을 냈나(변동성·기대수익이 있을 때만) */
+  assumed: boolean;
+  race?: { target: number; stop: number; p: number };
+}
+
+/** 사다리에 "지금" 줄을 끼운 순서 — 가격 내림차순, 지금 종가는 그 자리에 */
+export function ladderWithNow(l: LadderData): Array<LadderItem | { now: true; price: number }> {
+  const out: Array<LadderItem | { now: true; price: number }> = [];
+  let placed = false;
+  for (const it of l.items) {
+    if (!placed && it.price <= l.close) {
+      out.push({ now: true, price: l.close });
+      placed = true;
+    }
+    out.push(it);
+  }
+  if (!placed) out.push({ now: true, price: l.close });
+  return out;
 }
 
 export interface ForecastHorizon {
@@ -50,6 +89,9 @@ export interface ForecastHorizon {
   high68?: number;
   low90?: number;
   high90?: number;
+  /** 그 기간 뒤 지금보다 높을 확률·−20% 이하일 확률 (docs/analysis.md 12.1, 25.1038) */
+  p_up?: number;
+  p_drop?: number;
 }
 
 export interface ForecastData {
