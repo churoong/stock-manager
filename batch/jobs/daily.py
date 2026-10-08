@@ -1373,8 +1373,10 @@ def collect_us_prices(
 
     if not result.ok:
         raise RuntimeError(f"미국 시세 수집 실패: {result.error or '알 수 없는 실패'}")
-    if result.error:
-        warnings.append(_drop_never_priced(client, result.error, symbols, result.data, targets))
+    # **비면 넣지 않는다** (25.1011). 못 받은 것이 오래된 무시세 종목뿐이면 빈 문자열이 오는데, 그것을 경고로 넣어
+    # 25.922 가 막으려던 "미국 배치가 날마다 partial" 이 그대로 났다(10-02 경고 목록에 "" 한 줄)
+    if result.error and (말 := _drop_never_priced(client, result.error, symbols, result.data, targets)):
+        warnings.append(말)
 
     stored_total, tickers_seen, unsettled = _store_us_bars(
         client, result.data, trade_date, targets, result.source, notes=warnings

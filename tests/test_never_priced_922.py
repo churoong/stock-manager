@@ -44,3 +44,15 @@ def test_그_종목만_빠졌으면_경고가_비고_다른_경고는_남는다(
     note = "3조각 중 1조각 실패: x; 시세를 받지 못한 종목 1개 (예: SVA)"
     got = daily._drop_never_priced(c, note, ["SVA", "AAPL"], [SimpleNamespace(ticker="AAPL")], {"SVA": 51, "AAPL": 52})  # type: ignore[arg-type]
     assert got == "3조각 중 1조각 실패: x"
+
+
+def test_오래된_무시세_종목만_빠졌으면_빈_경고를_넣지_않는다() -> None:
+    """25.1011: 빈 문자열을 그대로 경고로 넣어 미국 배치가 partial 이 됐다(10-02)."""
+    import inspect
+    import re
+
+    c = _준비()
+    got = daily._drop_never_priced(c, "시세를 받지 못한 종목 1개 (예: SVA)", ["SVA"], [], {"SVA": 51})  # type: ignore[arg-type]
+    assert got == ""
+    src = inspect.getsource(daily)
+    assert re.search(r"if result\.error and \(말 := _drop_never_priced\(", src), "빈 경고를 거르지 않는다"
