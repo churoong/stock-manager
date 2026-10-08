@@ -354,7 +354,7 @@ export default function StockDetail({
       {/* 예상 주가의 다른 두 눈 — 비슷한 국면·1년 시나리오 (docs/analysis.md 13·14장) */}
       {(() => {
         const o = verdict.state === "ok" ? (verdict.data.verdict as Verdict | null)?.detail?.outlook : null;
-        return o ? <ForecastModels analog={o.analog} scenario={o.scenario} close={o.close} currency={currency} /> : null;
+        return o ? <ForecastModels analog={o.analog} scenario={o.scenario} agreement={o.agreement} close={o.close} currency={currency} /> : null;
       })()}
       {/* 예측 성적표 — 예상 주가 바로 아래 (docs/analysis.md 11장, 25.1037) */}
       {(() => {

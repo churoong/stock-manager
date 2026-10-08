@@ -25,6 +25,10 @@ export interface Verdict {
     outlook?: OutlookData | null;
     /** 예측 성적표 — 쌓은 예측을 기간이 지나 실제와 견준 누계 (docs/analysis.md 11장, 25.1037) */
     track?: TrackData | null;
+    /** 4주 전보다 점수 변화 (docs/analysis.md 17장, 25.1041) */
+    score_change?: { since: string; delta: number; factors: Record<string, number>; up?: string; down?: string } | null;
+    /** 팩터 모양이 닮은 종목 (docs/analysis.md 18장, 25.1041) */
+    twins?: Twin[];
   };
   evidence: EvidenceRow[];
   score_as_of: string | null;
@@ -47,6 +51,45 @@ export interface OutlookData {
   analog?: AnalogData | null;
   /** 1년 시나리오 — 순자산 성장 × PBR 밴드 (docs/analysis.md 14장, 25.1040) */
   scenario?: ScenarioData | null;
+  /** 역DCF·수급 흐름·네 눈 (docs/analysis.md 15·16·19장, 25.1041) */
+  reverse_dcf?: { implied_growth: number; ep: number; discount: number; per: number } | null;
+  flows?: FlowCard | null;
+  agreement?: Agreement | null;
+}
+
+export interface FlowCard {
+  latest: string;
+  windows: Record<string, { days: number; frgn: number; orgn: number; prsn: number }>;
+  frgn_streak: number;
+  short?: { recent: number; before: number };
+  credit?: { now: number; before: number };
+  lines: string[];
+}
+
+export interface Agreement {
+  views: Record<string, number>;
+  up: number;
+  n: number;
+  spread: number;
+}
+
+export interface Twin {
+  stock_id: number;
+  ticker: string;
+  name: string;
+  total: number | null;
+  dist: number;
+  signal: boolean;
+}
+
+/** 네 눈을 수직선에 놓을 자리 (0~100%). 0% 수익 선도 함께 — 표시용 비례 계산이다 */
+export function agreementPositions(a: Agreement): { zero: number; marks: Array<{ model: string; value: number; pos: number }> } {
+  const vals = Object.values(a.views);
+  const lo = Math.min(0, ...vals);
+  const hi = Math.max(0, ...vals);
+  const span = hi - lo || 1;
+  const pos = (v: number) => ((v - lo) / span) * 100;
+  return { zero: pos(0), marks: Object.entries(a.views).map(([model, value]) => ({ model, value, pos: pos(value) })) };
 }
 
 export interface AnalogDist {

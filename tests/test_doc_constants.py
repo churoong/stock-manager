@@ -446,6 +446,15 @@ class Test종목_분석:
         검사(ANALYSIS, f"({'·'.join(str(d) for d in pt.HORIZON_DAYS.values())}거래일)", "기간 → 거래일")
         검사(ANALYSIS, f"`MIN_SAMPLE`({ft.MIN_SAMPLE})건 미만", "성적표 최소 표본")
 
+    def test_해석_묶음(self) -> None:
+        from batch.jobs import verdicts as vj
+        from batch.services import insights as ins
+
+        검사(ANALYSIS, f"석 달치(`FLOWS_CALENDAR_DAYS` {vj.FLOWS_CALENDAR_DAYS}일)", "수급 흐름 읽기 창")
+        검사(ANALYSIS, f"`FLOW_WINDOWS`({'·'.join(str(w) for w in ins.FLOW_WINDOWS)})거래일", "수급 흐름 창")
+        검사(ANALYSIS, f"`SCORE_CHANGE_DAYS`({ins.SCORE_CHANGE_DAYS})일 앞", "점수 변화 거리")
+        검사(ANALYSIS, f"`TWINS`({ins.TWINS})종목", "닮은 종목 수")
+
     def test_참고_분석(self) -> None:
         from batch.jobs import analyze_extra as ax
 
@@ -545,7 +554,7 @@ class Test밸류_분모:
     "quarterly_earnings", "short_reversal", "div_omission", "buyback", "dilution", "flow_surge",
     "gross_profitability", "robustness", "column_rot", "calibration", "self_grade", "holding_scores",
     "pick_history", "etf_accounts", "etf_tilt", "after_hours", "broker_stats", "disclosure_reaction", "luck", "postmortem",
-    "divergence", "tax_sim", "verdict", "forecast_track", "patterns",
+    "divergence", "tax_sim", "verdict", "forecast_track", "patterns", "insights",
 )  # fmt: skip
 
 #: 아직 그물 밖인 모듈과 **왜 아직인지**. 하나씩 줄여 간다

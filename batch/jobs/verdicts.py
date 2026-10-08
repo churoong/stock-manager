@@ -24,7 +24,7 @@ from batch.core.client import TursoClient
 from batch.core.entry import guard
 from batch.jobs import daily
 from batch.services import disclosure_reaction as dr
-from batch.services import divergence
+from batch.services import divergence, insights
 from batch.services import forecast_track as ft
 from batch.services import verdict as vd
 
@@ -130,6 +130,24 @@ INSERT = (
     " headline = excluded.headline, detail_json = excluded.detail_json, evidence_json = excluded.evidence_json,"
     " score_as_of = excluded.score_as_of, signal_as_of = excluded.signal_as_of, computed_at = excluded.computed_at"
 )
+# 수급 흐름 (docs/analysis.md 16장, 25.1041) — 국내 석 달치.
+# 반대 목소리의 5거래일 엇갈림도 이것으로 낸다(한 번만 읽는다)
+FLOWS_SQL = (
+    "SELECT f.stock_id, f.date, f.frgn_net_amt, f.orgn_net_amt, f.prsn_net_amt, f.short_vol_pct, f.credit_rmnd_pct"
+    " FROM kr_flows f JOIN json_each(?) j ON j.value = f.stock_id WHERE f.date <= ? AND f.date > ?"
+    " ORDER BY f.stock_id, f.date DESC"
+)
+#: 석 달 ≈ 60거래일 + 연휴 여유
+FLOWS_CALENDAR_DAYS = 100
+# 점수 변화 (17장) — 4주 앞 가장 가까운 점수일
+SCORES_BEFORE_SQL = (
+    "SELECT sc.stock_id, sc.as_of_date, sc.total_score, sc.factor_scores FROM scores sc"
+    " JOIN stocks s ON s.id = sc.stock_id"
+    " WHERE s.country = ? AND sc.as_of_date = (SELECT MAX(sc2.as_of_date) FROM scores sc2"
+    "   JOIN stocks s2 ON s2.id = sc2.stock_id WHERE s2.country = ? AND sc2.as_of_date <= ?)"
+    " ORDER BY sc.stock_id, sc.calc_version DESC"
+)
+
 # 예측 성적표 (docs/analysis.md 11장, 25.1037) — 오늘 낸 예측을 쌓고, 기간이 찬 예측을 실제와 견준다
 LOG_INSERT = (
     "INSERT INTO forecast_log (as_of_date, stock_id, country, close, models_json, computed_at)"
@@ -204,14 +222,22 @@ def _safe(client: TursoClient, sql: str, args: list, warnings: list[str], what: 
         return []
 
 
-def against_kr(client: TursoClient, ids: list[int], today: date, warnings: list[str]) -> dict[int, list[dict]]:
-    """국내 반대 목소리와 공시 근거 (docs/analysis.md 5장). 종목 → [{text, evidence, against}]."""
+def against_kr(client: TursoClient, ids: list[int], today: date, warnings: list[str],
+               flows: dict[int, list[dict]] | None = None) -> dict[int, list[dict]]:  # fmt: skip
+    """국내 반대 목소리와 공시 근거 (docs/analysis.md 5장). 종목 → [{text, evidence, against}].
+
+    `flows` 를 주면(16장 수급 흐름이 읽은 석 달치) 그것으로 엇갈림을 내고 따로 읽지 않는다."""
     out: dict[int, list[dict]] = defaultdict(list)
     # 엇갈림 — 리포트 3.9 와 같은 질의·식
     try:
         oid = json.dumps(sorted(ids))
         흐름시작 = (today - timedelta(days=divergence.FLOW_DAYS * 3)).isoformat()
-        흐름 = client.execute(daily.DIVERGENCE_FLOWS_SQL, [oid, today.isoformat(), 흐름시작]).rows
+        if flows is not None:
+            흐름 = [(sid, r["date"], r["frgn_net_amt"], r["orgn_net_amt"]) for sid, rs in sorted(flows.items())
+                  for r in rs if str(r["date"]) > 흐름시작 and str(r["date"]) <= today.isoformat()
+                  and r["frgn_net_amt"] is not None and r["orgn_net_amt"] is not None]  # fmt: skip
+        else:
+            흐름 = client.execute(daily.DIVERGENCE_FLOWS_SQL, [oid, today.isoformat(), 흐름시작]).rows
         의견 = client.execute(daily.DIVERGENCE_OPINIONS_SQL,
                             [oid, today.isoformat(), (today - timedelta(days=400)).isoformat()]).rows  # fmt: skip
     except Exception as exc:  # noqa: BLE001
@@ -352,7 +378,13 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
     for r in _safe(client, FLAGS_SQL, [country], warnings, "매도 플래그"):
         플래그[int(r["stock_id"])].append({"level": r["level"], "rationale_text": r["rationale_text"],
                                          "as_of": r["as_of_date"]})  # fmt: skip
-    곁 = against_kr(client, sorted(점수), today, warnings) if country == "KR" else {}
+    흐름: dict[int, list[dict]] = defaultdict(list)
+    if country == "KR":
+        for r in _safe(client, FLOWS_SQL, [json.dumps(sorted(점수)), today.isoformat(),
+                                           (today - timedelta(days=FLOWS_CALENDAR_DAYS)).isoformat()],
+                       warnings, "수급 흐름"):  # fmt: skip
+            흐름[int(r["stock_id"])].append(r)
+    곁 = against_kr(client, sorted(점수), today, warnings, flows=흐름) if country == "KR" else {}
     as_of = max(str(r["as_of_date"]) for r in 점수.values())
     재료 = outlook_inputs(client, country, as_of, today, warnings)
     # 예측 성적표 (25.1037) — 지난 누계를 읽고 기간이 찬 예측을 더한다
@@ -366,6 +398,20 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
     if not 상태.get("since"):
         첫 = _safe(client, LOG_FIRST_SQL, [country], warnings, "예측 기록")
         상태["since"] = (첫[0][next(iter(첫[0]))] if 첫 else None) or as_of
+    # 점수 변화 (17장) · 닮은 종목 (18장)
+    앞점수: dict[int, dict] = {}
+    앞날 = (date.fromisoformat(as_of[:10]) - timedelta(days=insights.SCORE_CHANGE_DAYS)).isoformat()
+    for r in _safe(client, SCORES_BEFORE_SQL, [country, country, 앞날], warnings, "4주 전 점수"):
+        if int(r["stock_id"]) not in 앞점수:
+            with contextlib.suppress(TypeError, ValueError):
+                앞점수[int(r["stock_id"])] = {"as_of": r["as_of_date"], "total": r["total_score"],
+                                           "factors": json.loads(r["factor_scores"] or "{}")}  # fmt: skip
+    모양: dict[int, dict[str, float]] = {}
+    for sid, r in 점수.items():
+        with contextlib.suppress(TypeError, ValueError):
+            p = insights.profile(json.loads(r["factor_scores"] or "{}"))
+            if p:
+                모양[sid] = p
     시장성적 = 상태.get("market") or {}
     # 첫 성적이 나오는 날 — 처음 쌓은 날의 한 달 뒤(가장 짧은 기간)
     첫평가 = ft.months_back(date.fromisoformat(str(상태["since"])[:10]), -vd.FORECAST_MONTHS[0]).isoformat()
@@ -391,7 +437,21 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
             against=[a for a in 곁.get(sid, []) if a["against"]],
             outlook=outlook_for(재료, sid, str(r["currency"] or "KRW"), today, r.get("market")),
         )  # fmt: skip
+        if 흐름.get(sid):
+            카드 = insights.flow_card(흐름[sid])
+            if 카드 and inp.outlook is not None:
+                inp.outlook["flows"] = {**카드, "lines": insights.flow_lines(카드)}
         out = vd.build(inp)
+        # 점수 변화·닮은 종목 (17·18장)
+        변화 = insights.score_change({"as_of": r["as_of_date"], "total": r["total_score"], "factors": factors},
+                                    앞점수.get(sid))  # fmt: skip
+        if 변화 and 변화.get("since") and str(변화["since"]) < str(r["as_of_date"]):
+            조각 = [f"{vd.FACTOR[변화[k]]} {변화['factors'][변화[k]]:+.0f}" for k in ("up", "down") if 변화.get(k)]
+            뒤 = f" (가장 오른 팩터 {조각[0]} · 가장 내린 팩터 {조각[1]})" if len(조각) == 2 else ""
+            out["reasons"].append(f"점수 변화: {변화['since']}보다 {변화['delta']:+.1f}{뒤}")
+        닮음 = [{"stock_id": t, "ticker": 점수[t]["ticker"], "name": 점수[t]["name"],
+                 "total": 점수[t]["total_score"], "dist": d, "signal": bool(신호.get(t))}
+                for t, d in insights.twins(sid, 모양)]  # fmt: skip
         out["reasons"] += [a["text"] for a in 곁.get(sid, []) if not a["against"]]
         out["evidence"] += [a["evidence"] for a in 곁.get(sid, []) if not a["against"]]
         종목성적 = 누계.get(sid) or {}
@@ -400,6 +460,8 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
                 out["reasons"].append(f"예측 성적표: {줄}")
         detail = {k: out[k] for k in ("label", "reasons", "against", "nearest", "outlook")}
         detail["track"] = {"stock": 종목성적, "market": 시장성적, "since": 상태.get("since"), "first_due": 첫평가}
+        detail["score_change"] = 변화
+        detail["twins"] = 닮음
         o = out.get("outlook") or {}
         모델 = ft.log_models(o)
         if 모델 and o.get("close_date") == as_of:

@@ -1,6 +1,6 @@
 "use client";
 
-import { horizonLabel, type AnalogData, type ScenarioData } from "@/lib/analysis";
+import { MODEL_LABEL, agreementPositions, horizonLabel, type Agreement, type AnalogData, type ScenarioData } from "@/lib/analysis";
 import { formatPrice } from "@/lib/stockDetail";
 
 /**
@@ -8,14 +8,35 @@ import { formatPrice } from "@/lib/stockDetail";
  * 비슷한 국면(그 종목 자신의 과거)과 1년 시나리오(순자산 성장 × 자기 PBR 밴드). 배치가 낸 수익률·가격을 그린다 —
  * 가격 = 종가 × (1 + 수익률) 은 표시용 곱셈이다.
  */
-export default function ForecastModels({ analog, scenario, close, currency }: {
-  analog?: AnalogData | null; scenario?: ScenarioData | null; close: number | null; currency: string;
+export default function ForecastModels({ analog, scenario, agreement, close, currency }: {
+  analog?: AnalogData | null; scenario?: ScenarioData | null; agreement?: Agreement | null; close: number | null; currency: string;
 }) {
   const pct = (x: number) => `${x >= 0 ? "+" : ""}${(x * 100).toFixed(1)}%`;
   const px = (r: number) => (close ? formatPrice(close * (1 + r), currency) : pct(r));
-  if (!analog && !scenario) return null;
+  if (!analog && !scenario && !agreement) return null;
+  const 눈 = agreement ? agreementPositions(agreement) : null;
   return (
     <section id="forecast-models" className="mb-4 rounded-xl border border-slate-200 p-3 dark:border-slate-800">
+      {agreement && 눈 && (
+        <div className="mb-3">
+          <h2 className="mb-1 text-sm font-semibold">1년 예상 — 네 개의 눈</h2>
+          <p className="mb-2 text-xs text-slate-600 dark:text-slate-300">
+            {agreement.n}개 가운데 <b>{agreement.up}개</b>가 오름을 말합니다 · 가장 높은 눈과 낮은 눈의 차 {(agreement.spread * 100).toFixed(1)}%p
+          </p>
+          <div className="relative mx-2 mb-6 h-8">
+            <div className="absolute inset-x-0 top-4 h-px bg-slate-300 dark:bg-slate-600" />
+            <div className="absolute top-1 h-6 w-px bg-slate-500" style={{ left: `${눈.zero}%` }} title="0%" />
+            <span className="absolute top-7 -translate-x-1/2 text-[10px] text-slate-500" style={{ left: `${눈.zero}%` }}>0%</span>
+            {눈.marks.map((m, i) => (
+              <div key={m.model} className="absolute -translate-x-1/2 text-center" style={{ left: `${m.pos}%`, top: i % 2 ? "1.1rem" : "-0.9rem" }}>
+                <div className={`mx-auto h-2.5 w-2.5 rounded-full ${m.value >= 0 ? "bg-red-500" : "bg-blue-500"}`} />
+                <span className="whitespace-nowrap text-[10px] text-slate-600 dark:text-slate-300">{MODEL_LABEL[m.model] ?? m.model} {pct(m.value)}</span>
+              </div>
+            ))}
+          </div>
+          <p className="text-xs text-slate-400">시장·베타(CAPM) · 이 종목의 과거(비슷한 국면) · 회사의 가치(시나리오) · 증권사의 예측. 눈이 흩어질수록 불확실합니다.</p>
+        </div>
+      )}
       {analog && (
         <div className="mb-3">
           <h2 className="mb-1 text-sm font-semibold">비슷한 국면 — 이 종목의 과거에서</h2>

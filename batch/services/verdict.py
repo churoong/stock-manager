@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Any
 
-from batch.services import signals
+from batch.services import insights, signals
 
 #: 결론 키 → 이름 (위에서부터 처음 맞는 것, docs/analysis.md 3장)
 VERDICTS = {
@@ -295,6 +295,24 @@ def outlook(*, close: float | None, close_date: str | None, currency: str, momen
         evidence.append(_row("시나리오 기본 가격", _price(s["base"], currency), "PBR 밴드 중앙값 × 1년 뒤 주당순자산",
                              "계산 (docs/analysis.md 14장)", s.get("as_of")))  # fmt: skip
         out["scenario"] = s
+    # 15. 역DCF — 지금 가격에 담긴 영구 이익 성장률 (할인율 = CAPM 기대수익)
+    fu = fundamentals or {}
+    rd = insights.reverse_dcf(ep=fu.get("ep"), discount=(out.get("forecast") or {}).get("er"))
+    if rd:
+        과거 = []
+        if isinstance(fu.get("revenue_cagr_3y"), (int, float)):
+            과거.append(f"지난 3년 매출 연평균 {_pct(fu['revenue_cagr_3y'])}")
+        if isinstance(fu.get("operating_income_growth"), (int, float)):
+            과거.append(f"지난해 영업이익 {_pct(fu['operating_income_growth'])}")
+        rd["history"] = {k: fu.get(k) for k in ("revenue_cagr_3y", "operating_income_growth", "revenue_growth")}
+        줄.append(f"역DCF: PER {rd['per']:.1f}배는 영구 이익 성장 연 {_pct(rd['implied_growth'])}을 가정한 가격"
+                  f"(할인율 {_pct(rd['discount'])})" + (" — 실제는 " + " · ".join(과거) if 과거 else ""))  # fmt: skip
+        evidence.append(_row("가격에 담긴 영구 성장률", _pct(rd["implied_growth"]),
+                             "g = (r − E/P)/(1 + E/P), 고든 모형",
+                             "계산 (docs/analysis.md 15장)", fu.get("as_of")))  # fmt: skip
+        out["reverse_dcf"] = rd
+    # 19. 1년 예상의 네 눈 — 모델 합의
+    out["agreement"] = insights.agreement(out)
     out["lines"] = 줄
     out["evidence"] = evidence
     return out
