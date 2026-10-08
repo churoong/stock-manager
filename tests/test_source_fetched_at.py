@@ -62,7 +62,7 @@ import pytest
 #: **우리가 계산해 만든 것.** 입력의 출처는 그 입력 표에 있고, 언제 낸 것인지는
 #: `as_of_date`·`created_at`·`computed_at` 같은 제 이름의 열이 답한다
 만든_표 = {
-    "factors", "stock_verdicts", "forecast_log", "price_patterns", "scores", "signals", "signal_checks", "signal_outcomes", "signal_outcome_stats",
+    "factors", "stock_verdicts", "forecast_log", "price_patterns", "forecast_track", "scores", "signals", "signal_checks", "signal_outcomes", "signal_outcome_stats",
     "performance_metrics", "valuation_bands", "backtest_runs", "backtest_curves", "stress_runs",
     "etf_picks", "etf_satellite_picks", "stock_accum_picks", "universe_members",
     "article_sentiments", "sentiment_scores", "positions", "trade_lots", "portfolio_values",

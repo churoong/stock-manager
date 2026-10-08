@@ -38,14 +38,16 @@ def flow_card(rows: list[dict]) -> dict | None:
     if not rows:
         return None
     out: dict[str, Any] = {"latest": rows[0].get("date"), "windows": {}}
+    # 투자자별 금액이 있는 행만 센다 — 공매도만 있는 행을 "순매수 0" 으로 세지 않는다 (25.1042, 교차검증 감사)
+    매매 = [r for r in rows if r.get("frgn_net_amt") is not None]
     for w in FLOW_WINDOWS:
-        창 = rows[:w]
+        창 = 매매[:w]
         if len(창) < w // 2:
             continue
         합 = {k: sum(int(r.get(f"{k}_net_amt") or 0) for r in 창) / 100 for k in ("frgn", "orgn", "prsn")}
         out["windows"][str(w)] = {"days": len(창), **{k: round(v, 1) for k, v in 합.items()}}
     연속 = 0
-    for r in rows:
+    for r in 매매:
         x = r.get("frgn_net_amt")
         if x is None or x == 0:
             break
@@ -68,11 +70,14 @@ def flow_lines(card: dict | None) -> list[str]:
     if not card or not card.get("windows"):
         return []
     줄 = []
-    for w, x in card["windows"].items():
-        줄.append(f"{w}거래일 순매수: 외국인 {x['frgn']:+,.1f}억 · 기관 {x['orgn']:+,.1f}억 · 개인 {x['prsn']:+,.1f}억")
+    # 창 이름이 아니라 **실제로 센 거래일**로 적는다 — 수집 첫 두 달은 60거래일 창이 31~59일뿐이다
+    # (25.1042, 교차검증 감사)
+    for x in card["windows"].values():
+        줄.append(f"{x['days']}거래일 순매수: 외국인 {x['frgn']:+,.1f}억 · 기관 {x['orgn']:+,.1f}억"
+                  f" · 개인 {x['prsn']:+,.1f}억")
     x20 = card["windows"].get("20")
     if x20 and x20["prsn"] > 0 and x20["frgn"] < 0 and x20["orgn"] < 0:
-        줄.append("20거래일 동안 개인만 순매수 — 외국인·기관은 순매도")
+        줄.append(f"{x20['days']}거래일 동안 개인만 순매수 — 외국인·기관은 순매도")
     s = card.get("frgn_streak") or 0
     if abs(s) >= 2:
         줄.append(f"외국인 {abs(s)}거래일 연속 순{'매수' if s > 0 else '매도'}")

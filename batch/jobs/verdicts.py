@@ -159,12 +159,17 @@ LOG_INSERT = (
 LOG_DUE_SQL = "SELECT MAX(as_of_date) FROM forecast_log WHERE country = ? AND as_of_date <= ?"
 LOG_ROWS_SQL = "SELECT stock_id, models_json FROM forecast_log WHERE as_of_date = ? AND country = ?"
 LOG_FIRST_SQL = "SELECT MIN(as_of_date) FROM forecast_log WHERE country = ?"
-#: 종목마다의 누계는 의견 행(`detail_json.track.stock`)이 날마다 이어 간다 —
-#: 따로 표를 두면 날마다 종목×모델×기간만큼 쓴다
-PRIOR_TRACK_SQL = (
-    "SELECT stock_id, json_extract(detail_json, '$.track.stock') AS t FROM stock_verdicts"
-    " WHERE market = ? AND json_extract(detail_json, '$.excluded_reason') IS NULL"
+#: 종목 누계는 따로 둔다 — 의견 행을 지우고 다시 쓰는 길에서 사라지지 않게 (25.1042, 교차검증 감사)
+TRACK_ROWS_SQL = "SELECT stock_id, track_json FROM forecast_track WHERE country = ?"
+TRACK_UPSERT = (
+    "INSERT INTO forecast_track (stock_id, country, track_json, updated_at) VALUES (?, ?, ?, ?)"
+    " ON CONFLICT (stock_id) DO UPDATE SET country = excluded.country, track_json = excluded.track_json,"
+    " updated_at = excluded.updated_at"
 )
+#: 한 번에 평가하는 기록일의 상한(기간마다). 날마다 돌면 1~3일이다 — 오래 멈췄다 돌아온 날 한꺼번에 읽지 않게
+MAX_EVAL_DATES = 10
+#: 쌓은 기록일 목록의 길이 — 가장 긴 기간(12개월 ≈ 250거래일)보다 넉넉히
+LOGGED_KEEP = 400
 
 
 def track_key(country: str) -> str:
@@ -174,36 +179,53 @@ def track_key(country: str) -> str:
 
 def evaluate_due(client: TursoClient, country: str, as_of: str, now_close: dict[int, dict],
                  prior: dict[int, dict], state: dict, warnings: list[str]) -> list[str]:  # fmt: skip
-    """기간이 찬 예측을 견줘 `prior`(종목 누계)와 `state["market"]`(시장 누계)에 더한다. 평가한 기록일 목록.
+    """기간이 찬 예측을 견줘 `prior`(종목 누계)와 `state["market"]`(시장 누계)에 더한다. 평가한 기록일 목록. 바뀐 종목은
+    `state["_changed"]` 에 둔다(저장하지 않는 열쇠 — 부르는 쪽이 빼고 쓴다).
 
-    기간마다 "그 기간 앞의 가장 최근 기록일" 하나만 본다 — 같은 날 다시 돌아도 `state["through"]` 가 막아
-    두 번 세지 않는다.
+    기간마다 **어디까지 평가했나(`through`) 뒤 ~ 그 기간 앞(달력)** 의 기록일을 **모두** 오래된 것부터(한 번에 최대
+    `MAX_EVAL_DATES`) 본다 — 25.1037 은 가장 최근 하나만 봐 달력 차이(주말)로 기록일의 약 30% 가 영영 평가되지 않았다
+    (교차검증 감사, 반년 모의 106 일 중 31 일). 같은 날 다시 돌아도 `through` 가 막아 두 번 세지 않는다.
+    기록일은 `state["logged"]` 로 안다(따로 읽지 않는다). 실제 끝 가격은 오늘 종가 —
+    기록일이 밀려 평가된 날은 기간이 며칠 길다.
     기준 종가는 **지금 계열에서 그날 것을 다시 읽는다**(수정주가가 다시 매겨져도 두 끝이 같은 잣대)."""
     through = state.setdefault("through", {})
     market = state.setdefault("market", {})
+    바뀜: set[int] = state.setdefault("_changed", set())
     본날: list[str] = []
+    기록일 = sorted(set(state.get("logged") or []))
     for 달 in vd.FORECAST_MONTHS:
         cutoff = ft.months_back(date.fromisoformat(as_of[:10]), 달).isoformat()
-        rows = _safe(client, LOG_DUE_SQL, [country, cutoff], warnings, "예측 기록")
-        d = rows[0][next(iter(rows[0]))] if rows else None
-        if not d or str(d) <= str(through.get(str(달)) or ""):
-            continue
-        기준 = {int(r["stock_id"]): r for r in _safe(client, CLOSE_SQL, [country, str(d)], warnings, "기준 종가")}
-        for r in _safe(client, LOG_ROWS_SQL, [str(d), country], warnings, "예측 기록"):
-            sid = int(r["stock_id"])
-            b, n = (기준.get(sid) or {}).get("close"), (now_close.get(sid) or {}).get("close")
-            if not b or not n:
-                continue
-            try:
-                models = json.loads(r["models_json"] or "{}")
-            except (TypeError, ValueError):
-                continue
-            for model, cell in ft.evaluate(models, 달, float(b), float(n)).items():
-                ft.add(prior.setdefault(sid, {}), model, 달, cell)
-                ft.add(market, model, 달, cell)
-        through[str(달)] = str(d)
-        본날.append(f"{달}개월←{d}")
+        앞 = str(through.get(str(달)) or "")
+        if 기록일:
+            날들 = [d for d in 기록일 if 앞 < d <= cutoff][:MAX_EVAL_DATES]
+        else:  # 기록일 목록 전(25.1042 전)의 상태 — 가장 최근 하나만
+            rows = _safe(client, LOG_DUE_SQL, [country, cutoff], warnings, "예측 기록")
+            d0 = rows[0][next(iter(rows[0]))] if rows else None
+            날들 = [str(d0)] if d0 and str(d0) > 앞 else []
+        for d in 날들:
+            evaluate_date(client, country, d, 달, now_close, prior, market, 바뀜, warnings)
+            through[str(달)] = d
+            본날.append(f"{달}개월←{d}")
     return 본날
+
+
+def evaluate_date(client: TursoClient, country: str, d: str, 달: int, now_close: dict[int, dict],
+                  prior: dict[int, dict], market: dict, 바뀜: set[int], warnings: list[str]) -> None:  # fmt: skip
+    """기록일 하나의 `달` 개월 예측을 오늘 종가와 견준다."""
+    기준 = {int(r["stock_id"]): r for r in _safe(client, CLOSE_SQL, [country, str(d)], warnings, "기준 종가")}
+    for r in _safe(client, LOG_ROWS_SQL, [str(d), country], warnings, "예측 기록"):
+        sid = int(r["stock_id"])
+        b, n = (기준.get(sid) or {}).get("close"), (now_close.get(sid) or {}).get("close")
+        if not b or not n:
+            continue
+        try:
+            models = json.loads(r["models_json"] or "{}")
+        except (TypeError, ValueError):
+            continue
+        for model, cell in ft.evaluate(models, 달, float(b), float(n)).items():
+            ft.add(prior.setdefault(sid, {}), model, 달, cell)
+            ft.add(market, model, 달, cell)
+            바뀜.add(sid)
 
 
 #: 그 시장의 **유니버스 의견만** 지운다 — 참고 분석(`jobs/analyze_extra`, `detail.excluded_reason` 이 있는 행)은
@@ -389,10 +411,9 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
     재료 = outlook_inputs(client, country, as_of, today, warnings)
     # 예측 성적표 (25.1037) — 지난 누계를 읽고 기간이 찬 예측을 더한다
     누계: dict[int, dict] = {}
-    for r in _safe(client, PRIOR_TRACK_SQL, [country], warnings, "지난 예측 성적"):
+    for r in _safe(client, TRACK_ROWS_SQL, [country], warnings, "지난 예측 성적"):
         with contextlib.suppress(TypeError, ValueError):
-            if r["t"]:
-                누계[int(r["stock_id"])] = json.loads(r["t"])
+            누계[int(r["stock_id"])] = json.loads(r["track_json"])
     상태 = db.get_setting(client, track_key(country), {}) or {}
     평가 = evaluate_due(client, country, as_of, 재료["close"], 누계, 상태, warnings)
     if not 상태.get("since"):
@@ -476,8 +497,13 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
     if 평가:
         print(f"예측 성적 평가: {', '.join(평가)}")
     # "어디까지 평가했나" 는 지우기와 같은 첫 묶음에 — 뒤 묶음이 깨지면 그날 평가를 잃을 뿐 **두 번 세지 않는다**
-    # (덜 센 성적이 더 센 성적보다 덜 틀리게 읽힌다)
-    rows.insert(1, db.setting_statement(track_key(country), 상태))
+    # (덜 센 성적이 더 센 성적보다 덜 틀리게 읽힌다). 종목 누계는 그 바로 뒤 — 의견 행보다 먼저 (25.1042)
+    바뀜 = 상태.pop("_changed", set())
+    if 기록:
+        상태["logged"] = sorted(set(상태.get("logged") or []) | {as_of})[-LOGGED_KEEP:]
+    누계행 = [(TRACK_UPSERT, [sid, country, json.dumps(누계[sid], separators=(",", ":")), stamp])
+            for sid in sorted(바뀜) if sid in 누계]  # fmt: skip
+    rows[1:1] = [db.setting_statement(track_key(country), 상태), *누계행]
     return rows + 기록
 
 

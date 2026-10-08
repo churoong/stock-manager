@@ -122,3 +122,9 @@ def test_일일_의견이_판정표의_가격_기준을_읽는다() -> None:
     d = json.loads(c.execute("SELECT detail_json FROM stock_verdicts").fetchone()[0])
     it = d["outlook"]["ladder"]["items"][0]
     assert it["label"] == "단기: 추세 위 (20일선)" and it["met"] is False and math.isclose(it["dist"], 0.04)
+
+
+def test_변동성이_아주_작아도_도달_확률이_튀지_않는다() -> None:
+    """e^{2νb/σ²} 가 넘치는 자리 — 예전엔 100% 로 튀었다 (25.1042, 교차검증 감사)."""
+    assert vd.touch_prob(2.0, 0.08, 0.01, 0.25) < 1e-6
+    assert vd.touch_prob(2.0, 0.08, 0.02, 0.25) < 1e-6

@@ -102,3 +102,8 @@ def test_시나리오는_순자산_성장_곱하기_밴드_분위() -> None:
                    band={"current_value": 0.8, "band_close": 90.0, "p20": 0.56, "p50": 0.8, "p80": 1.12},
                    opinions=[], today=date(2026, 10, 8), fundamentals={"roe": 0.10})  # fmt: skip
     assert math.isclose(o["scenario"]["base"], 90 * 1.10) and math.isclose(ft.log_models(o)["scenario"]["12"]["exp"], 0.10)
+
+
+def test_자본이_다_사라지는_시나리오는_내지_않는다() -> None:
+    band = {"pbr": 0.8, "prices": {"p20": 70.0, "p50": 100.0, "p80": 140.0}}
+    assert vd.scenario(close=90.0, band=band, fundamentals={"roe": -1.4}) is None

@@ -106,11 +106,19 @@ def touch_prob(ratio: float, er: float, sigma: float, t: float) -> float:
         a, c = (-b + nu * t) / s, (-b - nu * t) / s
     else:
         a, c = (b - nu * t) / s, (b + nu * t) / s
-    try:
-        뒤 = math.exp(2 * nu * b / (sigma * sigma)) * _phi(c)
-    except OverflowError:
-        뒤 = 1.0
+    # 두 번째 항은 로그로 곱한다 — e^{2νb/σ²} 가 넘치는 자리(σ 가 아주 작음)에서 Φ(c) 는 0 에 가깝다.
+    # 예전에는 넘치면 1 로 두어 도달 확률이 100% 가 됐다 (25.1042, 교차검증 감사)
+    로그 = 2 * nu * b / (sigma * sigma) + _log_phi(c)
+    뒤 = 0.0 if 로그 < -745 else math.exp(min(로그, 0.0))
     return max(0.0, min(1.0, _phi(a) + 뒤))
+
+
+def _log_phi(x: float) -> float:
+    """ln Φ(x). 아주 작은 x 에서는 꼬리 근사 −x²/2 − ln(−x) − ½ln(2π) (Φ 가 0 으로 내려앉기 전에)."""
+    if x > -30:
+        p = _phi(x)
+        return math.log(p) if p > 0 else -745.0
+    return -x * x / 2 - math.log(-x) - 0.5 * math.log(2 * math.pi)
 
 
 def race_prob(up_ratio: float, down_ratio: float, er: float, sigma: float) -> float | None:
@@ -337,6 +345,8 @@ def scenario(*, close: float | None, band: dict | None, fundamentals: dict | Non
     dy, bp = f.get("dividend_yield"), f.get("bp")
     배당몫 = dy / bp if isinstance(dy, (int, float)) and isinstance(bp, (int, float)) and bp > 0 else 0.0
     g = roe - 배당몫
+    if 1 + g <= 0:  # 자본이 1년 안에 다 사라지는 셈 — 가격이 0 이하가 된다. 시나리오로 말할 수 없다 (25.1042)
+        return None
     return {"growth": g, "roe": roe, "payout_part": 배당몫, "bear": 가격["p20"] * (1 + g),
             "base": 가격["p50"] * (1 + g),
             "bull": 가격["p80"] * (1 + g), "hold": close * (1 + g), "as_of": f.get("as_of")}  # fmt: skip

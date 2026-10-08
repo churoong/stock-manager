@@ -101,3 +101,38 @@ def test_범위_밖이면_범위_안으로_세지_않는다() -> None:
     mem.batch(job.build_market(mem, "KR", 오늘, []))  # type: ignore[arg-type]
     d = json.loads(c.execute("SELECT detail_json FROM stock_verdicts").fetchone()[0])
     assert d["track"]["stock"]["capm"]["1"][:6] == [1, 1, 0, 0, 1, 0]
+
+
+def test_주말을_건너도_기록일을_모두_평가한다() -> None:
+    """가장 최근 기록일 하나만 보면 달력 차이(주말)로 기록일 약 30% 가 영영 빠졌다 (25.1042, 교차검증 감사)."""
+    mem = MemClient()
+    db.apply_migrations(mem)  # type: ignore[arg-type]
+    c = mem.conn
+    _시장(c, 기준가=100.0, 지금가=104.0)
+    for d in ("2026-09-04", "2026-09-03"):  # 9-07(월) 앞의 목·금 — 예전 방식이면 9-07 하나만 본다
+        c.execute("INSERT INTO prices (stock_id, date, close, adj_close, currency, source, fetched_at)"
+                  " VALUES (1, ?, 100, 100, 'KRW', 't', 't')", [d])  # fmt: skip
+        c.execute("INSERT INTO forecast_log (as_of_date, stock_id, country, close, models_json, computed_at)"
+                  " VALUES (?, 1, 'KR', 100, ?, 't')",
+                  [d, json.dumps({"capm": {"1": {"exp": 0.01, "lo68": -0.05, "hi68": 0.08}}})])  # fmt: skip
+    db.set_setting(mem, job.track_key("KR"), {"through": {"1": "2026-09-02"},  # type: ignore[arg-type]
+                                              "logged": ["2026-09-03", "2026-09-04", "2026-09-07"]})  # fmt: skip
+    mem.batch(job.build_market(mem, "KR", 오늘, []))  # type: ignore[arg-type]
+    d = json.loads(c.execute("SELECT detail_json FROM stock_verdicts").fetchone()[0])
+    assert d["track"]["stock"]["capm"]["1"][0] == 3
+    상태 = json.loads(c.execute("SELECT value FROM settings WHERE key = 'forecast_track_KR'").fetchone()[0])
+    assert 상태["through"]["1"] == "2026-09-07" and "2026-10-07" in 상태["logged"] and "_changed" not in 상태
+
+
+def test_종목_누계는_의견을_지워도_남는다() -> None:
+    """의견 행을 지우고 다시 쓰는 길(유니버스에서 빠짐·뒤 묶음 실패)에서 누계가 사라졌다 (25.1042, 교차검증 감사)."""
+    mem = MemClient()
+    db.apply_migrations(mem)  # type: ignore[arg-type]
+    c = mem.conn
+    _시장(c, 기준가=100.0, 지금가=104.0)
+    mem.batch(job.build_market(mem, "KR", 오늘, []))  # type: ignore[arg-type]
+    c.execute("DELETE FROM stock_verdicts")
+    assert json.loads(c.execute("SELECT track_json FROM forecast_track WHERE stock_id = 1").fetchone()[0])["capm"]["1"][0] == 1
+    mem.batch(job.build_market(mem, "KR", 오늘, []))  # type: ignore[arg-type]
+    d = json.loads(c.execute("SELECT detail_json FROM stock_verdicts").fetchone()[0])
+    assert d["track"]["stock"]["capm"]["1"][0] == 1  # 다시 세지 않고, 잃지도 않는다

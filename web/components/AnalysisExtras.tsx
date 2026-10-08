@@ -22,7 +22,8 @@ export default function AnalysisExtras({ flows, twins }: { flows?: FlowCard | nu
             <tbody>
               {Object.entries(flows.windows).map(([w, x]) => (
                 <tr key={w} className="border-t border-slate-100 dark:border-slate-800">
-                  <td className="py-0.5 pr-2">{w}거래일</td>
+                  {/* 창 이름이 아니라 실제로 센 거래일 — 수집 초기엔 60일 창이 덜 찼다 (25.1042) */}
+                  <td className="py-0.5 pr-2">최근 {x.days}거래일</td>
                   <td className={`pr-2 ${x.frgn < 0 ? "text-blue-700 dark:text-blue-300" : "text-red-700 dark:text-red-300"}`}>{억(x.frgn)}</td>
                   <td className={`pr-2 ${x.orgn < 0 ? "text-blue-700 dark:text-blue-300" : "text-red-700 dark:text-red-300"}`}>{억(x.orgn)}</td>
                   <td>{억(x.prsn)}</td>

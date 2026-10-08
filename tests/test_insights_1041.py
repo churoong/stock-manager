@@ -95,3 +95,13 @@ def test_일일_의견에_실린다() -> None:
     from batch.jobs import daily
 
     assert daily.DIVERGENCE_FLOWS_SQL not in 읽은 and job.FLOWS_SQL in 읽은
+
+
+def test_수급_창은_실제로_센_거래일로_말한다() -> None:
+    """수집 초기엔 60거래일 창이 덜 찼다 — "60거래일" 이라 적으면 틀린다 (25.1042, 교차검증 감사)."""
+    rows = _흐름(31, -100, -50, 150) + [{"date": "2026-08-01", "frgn_net_amt": None, "orgn_net_amt": None,
+                                         "prsn_net_amt": None, "short_vol_pct": 1.0}]  # fmt: skip
+    c = ins.flow_card(rows)
+    assert c["windows"]["60"]["days"] == 31  # 공매도만 있는 행은 세지 않는다
+    줄 = ins.flow_lines(c)
+    assert any(x.startswith("31거래일 순매수") for x in 줄) and not any(x.startswith("60거래일") for x in 줄)
