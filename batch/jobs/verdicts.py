@@ -32,7 +32,7 @@ JOB_NAME = "verdicts"
 
 SCORES_SQL = (
     "SELECT sc.stock_id, sc.as_of_date, sc.total_score, sc.rank_in_market, sc.factor_scores, sc.skip_reason,"
-    " sc.calc_version, s.ticker, COALESCE(s.name_ko, s.name_en, s.ticker) AS name, s.currency, s.market"
+    " sc.calc_version, s.ticker, COALESCE(s.name_ko, s.name_en, s.ticker) AS name, s.currency, s.market, s.sector"
     " FROM scores sc JOIN stocks s ON s.id = sc.stock_id"
     " WHERE s.country = ? AND sc.as_of_date = (SELECT MAX(sc2.as_of_date) FROM scores sc2"
     "   JOIN stocks s2 ON s2.id = sc2.stock_id WHERE s2.country = ?)"
@@ -434,6 +434,18 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
             if p:
                 모양[sid] = p
     시장성적 = 상태.get("market") or {}
+    # 같은 업종 비교 (21장) — (시장, 업종)마다. 점수는 시장별·업종별 z-score 라 코스피·코스닥을 섞지 않는다
+    업종: dict[tuple[str, str], list[dict]] = defaultdict(list)
+    for sid, r in 점수.items():
+        if not r.get("sector"):
+            continue
+        fu = (재료.get("fundamentals") or {}).get(sid) or {}
+        bp = fu.get("bp")
+        업종[(str(r.get("market")), str(r["sector"]))].append({
+            "stock_id": sid, "ticker": r["ticker"], "name": r["name"], "total": r["total_score"],
+            "pbr": 1 / bp if isinstance(bp, (int, float)) and bp > 0 else None, "roe": fu.get("roe"),
+            "r3": (재료["momentum"].get(sid) or {}).get("momentum_3m"),
+        })  # fmt: skip
     # 첫 성적이 나오는 날 — 처음 쌓은 날의 한 달 뒤(가장 짧은 기간)
     첫평가 = ft.months_back(date.fromisoformat(str(상태["since"])[:10]), -vd.FORECAST_MONTHS[0]).isoformat()
     stamp = db.now_iso()
@@ -484,6 +496,9 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
         detail["track"] = {"stock": 종목성적, "market": 시장성적, "since": 상태.get("since"), "first_due": 첫평가}
         detail["score_change"] = 변화
         detail["twins"] = 닮음
+        if r.get("sector"):
+            동종 = insights.peers(sid, 업종.get((str(r.get("market")), str(r["sector"])), []))
+            detail["peers"] = None if not 동종 else {"sector": r["sector"], "market": r.get("market"), **동종}
         레이더재료.append({"stock_id": sid, "ticker": r["ticker"], "name": r["name"], "verdict": out["verdict"],
                        "ladder": (out.get("outlook") or {}).get("ladder"), "score_change": 변화,
                        "agreement": (out.get("outlook") or {}).get("agreement")})  # fmt: skip

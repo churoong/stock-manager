@@ -26,7 +26,7 @@ export default function VerdictBlock({ v, currency = "KRW" }: { v: Verdict; curr
         </div>
       )}
       {v.detail?.outlook?.ladder && <PriceLadder l={v.detail.outlook.ladder} currency={currency} />}
-      <AnalysisExtras flows={v.detail?.outlook?.flows} twins={v.detail?.twins} />
+      <AnalysisExtras flows={v.detail?.outlook?.flows} twins={v.detail?.twins} peers={v.detail?.peers} />
       {reasons.length > 0 && (
         <ul className="mb-2 list-disc space-y-0.5 pl-5 text-slate-700 dark:text-slate-300">
           {reasons.map((r) => <li key={r}>{r}</li>)}

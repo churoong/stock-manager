@@ -455,6 +455,7 @@ class Test종목_분석:
         검사(ANALYSIS, f"`SCORE_CHANGE_DAYS`({ins.SCORE_CHANGE_DAYS})일 앞", "점수 변화 거리")
         검사(ANALYSIS, f"`TWINS`({ins.TWINS})종목", "닮은 종목 수")
         검사(ANALYSIS, f"`RADAR_N`({ins.RADAR_N})종목", "레이더 목록 길이")
+        검사(ANALYSIS, f"`PEERS_TOP`({ins.PEERS_TOP})종목", "업종 상위 이름 수")
         검사(ANALYSIS, f"한 번에 최대 `MAX_EVAL_DATES`({vj.MAX_EVAL_DATES})일", "한 번에 평가하는 기록일")
         검사(ANALYSIS, f"최근 `LOGGED_KEEP`({vj.LOGGED_KEEP})일", "기록일 목록 길이")
 

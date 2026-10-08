@@ -1,14 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import type { FlowCard, Twin } from "@/lib/analysis";
+import type { FlowCard, Peers, Twin } from "@/lib/analysis";
 
 /**
  * 종목 분석 의견 카드의 해석 묶음 (docs/analysis.md 16·18장, 25.1041) — 수급 흐름(국내)과 팩터 모양이 닮은 종목.
  * 배치가 낸 값을 그리기만 한다.
  */
-export default function AnalysisExtras({ flows, twins }: { flows?: FlowCard | null; twins?: Twin[] }) {
-  if (!flows && !twins?.length) return null;
+export default function AnalysisExtras({ flows, twins, peers }: { flows?: FlowCard | null; twins?: Twin[]; peers?: Peers | null }) {
+  if (!flows && !twins?.length && !peers) return null;
+  const pctv = (v: number | null) => (v === null ? "-" : `${v >= 0 ? "+" : ""}${(v * 100).toFixed(1)}%`);
   const 억 = (x: number) => `${x >= 0 ? "+" : ""}${x.toLocaleString(undefined, { maximumFractionDigits: 1 })}억`;
   return (
     <div className="mb-2 grid gap-2 sm:grid-cols-2">
@@ -34,6 +35,33 @@ export default function AnalysisExtras({ flows, twins }: { flows?: FlowCard | nu
           <ul className="space-y-0.5 text-slate-600 dark:text-slate-300">
             {flows.lines.filter((l) => !l.includes("거래일 순매수:")).map((l) => <li key={l}>· {l}</li>)}
           </ul>
+        </div>
+      )}
+      {peers && (
+        <div className="rounded-lg border border-slate-200 px-2.5 py-2 text-xs dark:border-slate-800">
+          <p className="mb-1 font-semibold text-slate-600 dark:text-slate-300">같은 업종 — {peers.sector} {peers.n}종목</p>
+          <table className="mb-1 w-full text-left">
+            <thead className="text-slate-500">
+              <tr><th className="pr-2">항목</th><th className="pr-2">이 종목</th><th>업종 중앙값</th></tr>
+            </thead>
+            <tbody>
+              <tr className="border-t border-slate-100 dark:border-slate-800"><td className="py-0.5 pr-2">점수 순위</td><td className="pr-2">{peers.rank ? `${peers.rank}위 / ${peers.ranked}` : "-"}</td><td>-</td></tr>
+              <tr className="border-t border-slate-100 dark:border-slate-800"><td className="py-0.5 pr-2">PBR</td><td className="pr-2">{peers.pbr === null ? "-" : `${peers.pbr.toFixed(2)}배`}</td><td>{peers.pbr_median === null ? "-" : `${peers.pbr_median.toFixed(2)}배`}</td></tr>
+              <tr className="border-t border-slate-100 dark:border-slate-800"><td className="py-0.5 pr-2">ROE</td><td className="pr-2">{pctv(peers.roe)}</td><td>{pctv(peers.roe_median)}</td></tr>
+              <tr className="border-t border-slate-100 dark:border-slate-800"><td className="py-0.5 pr-2">3개월 수익률</td><td className="pr-2">{pctv(peers.r3)}</td><td>{pctv(peers.r3_median)}</td></tr>
+            </tbody>
+          </table>
+          {peers.top.length > 0 && (
+            <p className="text-slate-500">
+              업종 점수 상위:{" "}
+              {peers.top.map((t, i) => (
+                <span key={t.stock_id}>
+                  {i > 0 && " · "}
+                  <Link href={`/stocks/${t.stock_id}`} className="text-sky-700 hover:underline dark:text-sky-300">{t.name}</Link> {t.total.toFixed(1)}
+                </span>
+              ))}
+            </p>
+          )}
         </div>
       )}
       {twins && twins.length > 0 && (

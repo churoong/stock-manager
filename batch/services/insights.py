@@ -189,3 +189,36 @@ def radar(entries: list[dict]) -> dict:
     rising.sort(key=lambda x: (-x["delta"], x["stock_id"]))
     eyes.sort(key=lambda x: (-x["low"], x["stock_id"]))
     return {"near": near[:RADAR_N], "rising": rising[:RADAR_N], "eyes": eyes[:RADAR_N]}
+
+
+#: 업종 비교에서 이름을 보이는 상위 종목 수 (docs/analysis.md 21장)
+PEERS_TOP = 3
+
+
+def _median(v: list[float]) -> float | None:
+    if not v:
+        return None
+    v = sorted(v)
+    n = len(v)
+    return v[n // 2] if n % 2 else (v[n // 2 - 1] + v[n // 2]) / 2
+
+
+def peers(sid: int, members: list[dict]) -> dict | None:
+    """같은 업종 비교 (docs/analysis.md 21장, 25.1045). members = 같은 시장·같은 업종 종목들
+    [{stock_id, ticker, name, total, pbr, roe, r3}] (자기 포함). 둘 이상일 때만.
+
+    점수 순위(종합 점수 높은 순), PBR·ROE·3개월 수익률의 업종 중앙값과 이 종목 값, 점수 상위 `PEERS_TOP` 종목.
+    문턱 없음."""
+    me = next((m for m in members if m["stock_id"] == sid), None)
+    if not me or len(members) < 2:
+        return None
+    점수순 = sorted((m for m in members if isinstance(m.get("total"), (int, float))),
+                 key=lambda m: (-m["total"], m["stock_id"]))  # fmt: skip
+    out: dict[str, Any] = {"n": len(members), "ranked": len(점수순)}
+    out["rank"] = next((i + 1 for i, m in enumerate(점수순) if m["stock_id"] == sid), None)
+    for k in ("pbr", "roe", "r3"):
+        out[k] = me.get(k) if isinstance(me.get(k), (int, float)) else None
+        out[f"{k}_median"] = _median([m[k] for m in members if isinstance(m.get(k), (int, float))])
+    out["top"] = [{"stock_id": m["stock_id"], "ticker": m["ticker"], "name": m["name"], "total": m["total"]}
+                  for m in 점수순 if m["stock_id"] != sid][:PEERS_TOP]  # fmt: skip
+    return out

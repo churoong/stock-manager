@@ -105,3 +105,31 @@ def test_수급_창은_실제로_센_거래일로_말한다() -> None:
     assert c["windows"]["60"]["days"] == 31  # 공매도만 있는 행은 세지 않는다
     줄 = ins.flow_lines(c)
     assert any(x.startswith("31거래일 순매수") for x in 줄) and not any(x.startswith("60거래일") for x in 줄)
+
+
+def test_같은_업종_비교() -> None:
+    m = [{"stock_id": i, "ticker": f"T{i}", "name": f"종목{i}", "total": t, "pbr": p, "roe": r, "r3": 0.01 * i}
+         for i, t, p, r in ((1, 60, 1.0, 0.10), (2, 80, 2.0, 0.20), (3, 70, None, 0.05))]  # fmt: skip
+    p = ins.peers(1, m)
+    assert p["rank"] == 3 and p["ranked"] == 3 and p["n"] == 3
+    assert p["pbr_median"] == 1.5 and p["roe_median"] == 0.10 and p["pbr"] == 1.0
+    assert [t["stock_id"] for t in p["top"]] == [2, 3]
+    assert ins.peers(1, m[:1]) is None  # 혼자면 비교가 아니다
+
+
+def test_업종_비교는_시장을_섞지_않는다() -> None:
+    """점수는 시장별·업종별 z-score — 코스피와 코스닥 종목의 종합 점수를 한 줄로 세우지 않는다."""
+    mem = MemClient()
+    db.apply_migrations(mem)  # type: ignore[arg-type]
+    c = mem.conn
+    for sid, 시장 in ((1, "KOSPI"), (2, "KOSPI"), (3, "KOSDAQ")):
+        c.execute("INSERT INTO stocks (id, ticker, market, country, name_ko, currency, sector, source, fetched_at)"
+                  " VALUES (?, ?, ?, 'KR', ?, 'KRW', '반도체', 't', 't')", [sid, f"00000{sid}", 시장, f"종목{sid}"])  # fmt: skip
+        c.execute("INSERT INTO scores (stock_id, as_of_date, total_score, factor_scores, sentiment_weight_used,"
+                  " weights_json, rank_in_market, calc_version, created_at) VALUES (?, '2026-10-07', ?, '{}', 0, '{}', 1,"
+                  " 10, 't')", [sid, 60 + sid])  # fmt: skip
+    mem.batch(job.build_market(mem, "KR", date(2026, 10, 8), []))  # type: ignore[arg-type]
+    d1 = json.loads(c.execute("SELECT detail_json FROM stock_verdicts WHERE stock_id = 1").fetchone()[0])
+    assert d1["peers"]["n"] == 2 and d1["peers"]["market"] == "KOSPI" and d1["peers"]["rank"] == 2
+    d3 = json.loads(c.execute("SELECT detail_json FROM stock_verdicts WHERE stock_id = 3").fetchone()[0])
+    assert d3["peers"] is None

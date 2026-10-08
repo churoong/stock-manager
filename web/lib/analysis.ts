@@ -29,6 +29,8 @@ export interface Verdict {
     score_change?: { since: string; delta: number; factors: Record<string, number>; up?: string; down?: string } | null;
     /** 팩터 모양이 닮은 종목 (docs/analysis.md 18장, 25.1041) */
     twins?: Twin[];
+    /** 같은 업종 비교 (docs/analysis.md 21장, 25.1045) */
+    peers?: Peers | null;
   };
   evidence: EvidenceRow[];
   score_as_of: string | null;
@@ -71,6 +73,20 @@ export interface Agreement {
   up: number;
   n: number;
   spread: number;
+}
+
+export interface Peers {
+  sector: string;
+  n: number;
+  ranked: number;
+  rank: number | null;
+  pbr: number | null;
+  pbr_median: number | null;
+  roe: number | null;
+  roe_median: number | null;
+  r3: number | null;
+  r3_median: number | null;
+  top: Array<{ stock_id: number; ticker: string; name: string; total: number }>;
 }
 
 export interface Twin {
