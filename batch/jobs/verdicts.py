@@ -69,6 +69,16 @@ BAND_SQL = (
     "   JOIN stocks s2 ON s2.id = v2.stock_id WHERE s2.country = ?) ORDER BY v.stock_id, v.calc_version DESC"
 )
 OPINIONS_SQL = "SELECT stock_id, date, broker, target_price FROM kr_opinions WHERE date >= ?"
+# 비슷한 국면 (docs/analysis.md 13장, 25.1039) — 주간 지표 작업이 종목마다 한 행
+PATTERNS_SQL = (
+    "SELECT p.stock_id, p.stats_json FROM price_patterns p JOIN stocks s ON s.id = p.stock_id WHERE s.country = ?"
+)
+# 시나리오·역DCF 재료 (docs/analysis.md 14·15장) — 점수 작업이 그날 저장한 밸류·퀄리티·성장 원값
+FUNDAMENTALS_SQL = (
+    "SELECT f.stock_id, f.factor, f.raw_json, f.as_of_date FROM factors f JOIN stocks s ON s.id = f.stock_id"
+    " WHERE s.country = ? AND f.factor IN ('value', 'quality', 'growth') AND f.as_of_date = ?"
+    " ORDER BY f.stock_id, f.calc_version DESC"
+)
 # 예상 주가의 시장 기대수익률 — 지수의 첫·마지막 종가 (docs/analysis.md 10.1, 25.1024). 기본 키 범위라 한 행씩 읽는다
 INDEX_FIRST_SQL = (
     "SELECT date, close FROM index_prices WHERE index_code = ? AND date >= ? AND date <= ? ORDER BY date LIMIT 1"
@@ -275,21 +285,38 @@ def outlook_inputs(client: TursoClient, country: str, as_of: str, today: date, w
         since = (today - timedelta(days=vd.CONSENSUS_DAYS)).isoformat()
         for r in _safe(client, OPINIONS_SQL, [since], warnings, "증권사 목표가"):
             의견[int(r["stock_id"])].append(r)
+    국면: dict[int, dict] = {}
+    for r in _safe(client, PATTERNS_SQL, [country], warnings, "비슷한 국면"):
+        with contextlib.suppress(TypeError, ValueError):
+            국면[int(r["stock_id"])] = json.loads(r["stats_json"])
+    재무원값: dict[int, dict] = {}
+    본칸: set[tuple[int, str]] = set()
+    for r in _safe(client, FUNDAMENTALS_SQL, [country, as_of], warnings, "밸류·퀄리티·성장 원값"):
+        k = (int(r["stock_id"]), str(r["factor"]))
+        if k in 본칸:  # 같은 날 여러 판이면 큰 calc_version (정렬)
+            continue
+        본칸.add(k)
+        with contextlib.suppress(TypeError, ValueError):
+            재무원값.setdefault(k[0], {"as_of": r["as_of_date"]}).update(json.loads(r["raw_json"] or "{}"))
     try:
         무위험 = risk_free(client, country)
     except Exception as exc:  # noqa: BLE001 — 0 으로 두고 그렇게 적는다
         warnings.append(f"무위험수익률을 읽지 못했습니다: {exc}")
         무위험 = None
     return {"close": 종가, "momentum": 모멘텀, "band": 밴드, "risk": 위험, "opinions": 의견,
-            "market": market_returns(client, country, as_of, warnings), "rf": 무위험}  # fmt: skip
+            "market": market_returns(client, country, as_of, warnings), "rf": 무위험,
+            "patterns": 국면, "fundamentals": 재무원값}  # fmt: skip
 
 
 def outlook_for(재료: dict, sid: int, currency: str, today: date, market: str | None = None) -> dict:
-    from batch.services import trend
+    from batch.services import patterns, trend
 
     c = 재료["close"].get(sid) or {}
     b = 재료["band"].get(sid)
+    m = 재료["momentum"].get(sid) or {}
     return vd.outlook(
+        analog=patterns.pick((재료.get("patterns") or {}).get(sid), m.get("momentum_3m"), m.get("high_52w_proximity")),
+        fundamentals=(재료.get("fundamentals") or {}).get(sid),
         close=c.get("close"), close_date=c.get("date"), currency=currency, momentum=재료["momentum"].get(sid),
         risk=재료["risk"].get(sid), band=b, opinions=재료["opinions"].get(sid, []), today=today,
         band_note=(b or {}).get("skip_reason"),

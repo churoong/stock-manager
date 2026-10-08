@@ -180,7 +180,8 @@ def consensus(opinions: list[dict], today: date) -> dict | None:
 
 def outlook(*, close: float | None, close_date: str | None, currency: str, momentum: dict | None,
             risk: dict | None, band: dict | None, opinions: list[dict], today: date,
-            band_note: str | None = None, market: dict | None = None, rf: float | None = None) -> dict:  # fmt: skip
+            band_note: str | None = None, market: dict | None = None, rf: float | None = None,
+            analog: dict | None = None, fundamentals: dict | None = None) -> dict:  # fmt: skip
     """가격·가치 진단 (docs/analysis.md 9장). 예측이 아니라 근거 있는 기준점 — 모든 값은 DB 행에서 온다.
 
     momentum: momentum_3m·momentum_6m·momentum_12_1·high_52w_proximity·as_of (factors.raw_json)
@@ -266,9 +267,61 @@ def outlook(*, close: float | None, close_date: str | None, currency: str, momen
         if f["sigma"] is None:
             줄[-1] += " · 변동성이 없어 범위는 내지 못했습니다"
         out["forecast"] = f
+    # 13. 비슷한 국면 — 그 종목 자신의 과거
+    a = analog or {}
+    if a.get("horizons"):
+        삼 = next((h for h in a["horizons"] if h["months"] == 3), a["horizons"][0])
+        이름 = "1년" if 삼["months"] == 12 else f"{삼['months']}개월"
+        평소 = 삼.get("base") or {}
+        비교 = (f" (평소 {_pct(평소['median'])}·{평소['up'] * 100:.0f}%)"
+                if isinstance(평소.get("median"), (int, float)) else "")  # fmt: skip
+        줄.append(f"비슷한 국면({a.get('since')}~ 자기 과거): {a['label']} — "
+                  f"{a.get('days')}일(국면 {a.get('episodes')}번), "
+                  f"{이름} 뒤 중앙값 {_pct(삼['median'])}·오른 비율 {삼['up'] * 100:.0f}%{비교}")  # fmt: skip
+        evidence.append(_row("비슷한 국면", f"{a['label']} · {a.get('days')}일",
+                             "3개월 수익률 × 52주 고점 근접, 자기 삼분위",
+                             "price_patterns (주간 성과 지표 작업)", a.get("until")))  # fmt: skip
+        out["analog"] = a
+    elif a.get("empty"):
+        줄.append(f"비슷한 국면: {a.get('label')} — 자기 과거에 이 상태가 드물어(표본 모자람) 분포를 내지 않습니다")
+    # 14. 1년 시나리오 — 순자산 성장 × PBR 밴드 분위
+    s = scenario(close=close, band=out.get("band"), fundamentals=fundamentals)
+    if s:
+        줄.append(f"1년 시나리오(순자산 {_pct(s['growth'])} 성장 × PBR 밴드): 약세 {_won(s['bear'], currency)} · "
+                  f"기본 {_won(s['base'], currency)} · 강세 {_won(s['bull'], currency)} · "
+                  f"PBR 그대로면 {_won(s['hold'], currency)}")  # fmt: skip
+        evidence.append(_row("순자산 성장률(1년)", _pct(s["growth"]), "ROE − 배당 ÷ 자본 (클린 서플러스)",
+                             "factors.quality·value", s.get("as_of")))  # fmt: skip
+        evidence.append(_row("시나리오 기본 가격", _price(s["base"], currency), "PBR 밴드 중앙값 × 1년 뒤 주당순자산",
+                             "계산 (docs/analysis.md 14장)", s.get("as_of")))  # fmt: skip
+        out["scenario"] = s
     out["lines"] = 줄
     out["evidence"] = evidence
     return out
+
+
+def scenario(*, close: float | None, band: dict | None, fundamentals: dict | None) -> dict | None:
+    """1년 시나리오 (docs/analysis.md 14장). 1년 뒤 주당순자산 = 지금 × (1 + ROE − 배당 ÷ 자본),
+    약세·기본·강세 = 자기 3년 PBR 밴드 20%·중앙값·80% × 그 주당순자산. "PBR 그대로" = 종가 × (1 + 순자산 성장).
+
+    배당 ÷ 자본 = 배당수익률 ÷ 순자산수익률(bp) — 둘 다 시가총액이 분모라 나누면 자본 기준이 된다.
+    재료가 모자라면 None."""
+    f = fundamentals or {}
+    b = band or {}
+    roe = f.get("roe")
+    pbr, 가격 = b.get("pbr"), b.get("prices") or {}
+    if not isinstance(close, (int, float)) or close <= 0 or not isinstance(roe, (int, float)):
+        return None
+    if not isinstance(pbr, (int, float)) or pbr <= 0:
+        return None
+    if not all(isinstance(가격.get(k), (int, float)) for k in ("p20", "p50", "p80")):
+        return None
+    dy, bp = f.get("dividend_yield"), f.get("bp")
+    배당몫 = dy / bp if isinstance(dy, (int, float)) and isinstance(bp, (int, float)) and bp > 0 else 0.0
+    g = roe - 배당몫
+    return {"growth": g, "roe": roe, "payout_part": 배당몫, "bear": 가격["p20"] * (1 + g),
+            "base": 가격["p50"] * (1 + g),
+            "bull": 가격["p80"] * (1 + g), "hold": close * (1 + g), "as_of": f.get("as_of")}  # fmt: skip
 
 
 @dataclass

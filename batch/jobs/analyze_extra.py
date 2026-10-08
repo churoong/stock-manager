@@ -241,10 +241,13 @@ def score_extra(client: TursoClient, country: str, as_of: str, extra: list[dict]
     weights, sentiment_weight, _ = sj.load_weights(client)
     by_stock: dict[int, dict[str, float | None]] = {}
     모멘텀: dict[int, dict] = {}
+    재무원값: dict[int, dict] = {}
     for r in sc.score_factors(inputs):
         by_stock.setdefault(r.stock_id, {})[r.factor] = r.score
         if r.factor == "momentum":
             모멘텀[r.stock_id] = r.raw  # 가격·가치 진단의 현재 주가 위치 (docs/analysis.md 9.1)
+        elif r.factor in ("value", "quality", "growth"):
+            재무원값.setdefault(r.stock_id, {"as_of": as_of}).update(getattr(r, "raw", None) or {})  # 14·15장
     # 감성도 이 종목들만 — 유니버스 종합 점수는 저장된 것을 쓰니 필요 없다 (25.1028). 처음부터 읽는 길은 나라 전체
     sentiments, _ = sj.load_sentiments(client, country, as_of, stock_ids=None if 경로 == "full" else sorted(extra_ids))
     totals = {sid: sc.total_score(s, weights, sentiment=sentiments.get(sid), sentiment_weight=sentiment_weight)
@@ -259,7 +262,8 @@ def score_extra(client: TursoClient, country: str, as_of: str, extra: list[dict]
         out[sid] = {"total": t.total, "factors": by_stock.get(sid, {}), "skip_reason": t.skip_reason,
                     "rank": None if t.total is None else 1 + sum(1 for v in 유니버스점수 if v > t.total),
                     "ranked": len(유니버스점수), "as_of": as_of, "path": 경로,
-                    "momentum": {**(모멘텀.get(sid) or {}), "as_of": as_of}}  # fmt: skip
+                    "momentum": {**(모멘텀.get(sid) or {}), "as_of": as_of},
+                    "fundamentals": 재무원값.get(sid)}  # fmt: skip
     return out
 
 
@@ -285,6 +289,7 @@ def reference_outlook(client: TursoClient, country: str, as_of: str, meta: dict,
     today = cal.user_today()
     c = (client.execute(ONE_CLOSE_SQL, [sid, as_of]).dicts() or [{}])[0]
     band, note = None, None
+    시세: list[tuple[str, float]] = []
     try:
         시세 = vbj.load_prices(client, [sid], as_of).get(sid, [])
         r = vb.compute(시세, vbj.load_equities(client, country, as_of, stock_ids=[sid]).get(sid, []),
@@ -315,9 +320,17 @@ def reference_outlook(client: TursoClient, country: str, as_of: str, meta: dict,
     except Exception as exc:  # noqa: BLE001
         warnings.append(f"무위험수익률을 읽지 못했습니다: {exc}")
         무위험 = None
+    # 비슷한 국면 (13장) — 밴드에 읽은 3년 시세(분할만 반영)로 그 자리에서.
+    # 주간 표(`price_patterns`)는 유니버스 종목만이다
+    from batch.services import patterns
+
+    m = (s or {}).get("momentum") or {}
+    국면 = patterns.pick(patterns.table([str(d) for d, _ in 시세], [float(x) for _, x in 시세]) if 시세 else None,
+                       m.get("momentum_3m"), m.get("high_52w_proximity"))  # fmt: skip
     return vd.outlook(close=c.get("close"), close_date=c.get("date"), currency=str(meta.get("currency") or "KRW"),
                       momentum=(s or {}).get("momentum"), risk=위험, band=band, opinions=의견, today=today,
-                      band_note=note, market=시장, rf=무위험)  # fmt: skip
+                      band_note=note, market=시장, rf=무위험, analog=국면,
+                      fundamentals=(s or {}).get("fundamentals"))  # fmt: skip
 
 
 def reference_checks(client: TursoClient, country: str, as_of: str, metas: list[dict],

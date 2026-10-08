@@ -436,6 +436,16 @@ class Test종목_분석:
         검사(ANALYSIS, f"1 + `DROP_LEVEL`({vd.DROP_LEVEL:.2f})", "확률의 하락 폭")
         검사(ANALYSIS, f"`BAND_ENTRY_PERCENTILE`, {vd.BAND_ENTRY_PERCENTILE}% 지점", "밴드 문턱(신호의 값)")
 
+    def test_비슷한_국면과_성적표(self) -> None:
+        from batch.services import forecast_track as ft
+        from batch.services import patterns as pt
+
+        검사(ANALYSIS, f"(종가 ÷ {pt.R3_DAYS}거래일 전 − 1)", "3개월 수익률 창")
+        검사(ANALYSIS, f"최근 {pt.HIGH_DAYS}거래일 최고 종가", "52주 고점 창")
+        검사(ANALYSIS, f"`MIN_DAYS`({pt.MIN_DAYS})일 미만", "칸 최소 일수")
+        검사(ANALYSIS, f"({'·'.join(str(d) for d in pt.HORIZON_DAYS.values())}거래일)", "기간 → 거래일")
+        검사(ANALYSIS, f"`MIN_SAMPLE`({ft.MIN_SAMPLE})건 미만", "성적표 최소 표본")
+
     def test_참고_분석(self) -> None:
         from batch.jobs import analyze_extra as ax
 
@@ -535,7 +545,7 @@ class Test밸류_분모:
     "quarterly_earnings", "short_reversal", "div_omission", "buyback", "dilution", "flow_surge",
     "gross_profitability", "robustness", "column_rot", "calibration", "self_grade", "holding_scores",
     "pick_history", "etf_accounts", "etf_tilt", "after_hours", "broker_stats", "disclosure_reaction", "luck", "postmortem",
-    "divergence", "tax_sim", "verdict", "forecast_track",
+    "divergence", "tax_sim", "verdict", "forecast_track", "patterns",
 )  # fmt: skip
 
 #: 아직 그물 밖인 모듈과 **왜 아직인지**. 하나씩 줄여 간다

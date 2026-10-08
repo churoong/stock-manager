@@ -22,7 +22,12 @@ from typing import Any
 #: 성적 한 칸의 자리 이름 — 웹 `lib/analysis.ts` `TRACK_FIELDS` 와 같은 순서
 FIELDS = ("n", "n_range", "in68", "in90", "dir_n", "dir_hit", "abs_err_sum")
 #: 모델 이름 (화면 글자) — 웹 `MODEL_LABEL` 과 같다
-MODELS = {"capm": "CAPM(시장·베타)", "consensus": "증권사 목표가", "analog": "비슷한 국면"}
+MODELS = {
+    "capm": "CAPM(시장·베타)",
+    "consensus": "증권사 목표가",
+    "analog": "비슷한 국면",
+    "scenario": "시나리오(밴드×순자산)",
+}
 #: 성적을 말할 최소 표본 — 이보다 적으면 "표본 n건" 만 적고 비율을 말하지 않는다(우연이 크다).
 #: 비율 하나의 표준오차가 √(p(1−p)/n) ≈ 0.5/√n 이라 20건이면 ±11%p — 그 아래는 숫자가 거의 뜻이 없다
 MIN_SAMPLE = 20
@@ -67,6 +72,10 @@ def log_models(outlook: dict | None) -> dict[str, dict[str, dict[str, float]]]:
             analog[str(h["months"])] = 칸
     if analog:
         out["analog"] = analog
+    s = o.get("scenario") or {}
+    if isinstance(s.get("base"), (int, float)) and s["base"] > 0:
+        # 기본 시나리오를 1년 예측으로. 약세~강세는 확률 범위가 아니라 밴드 분위라 68% 범위로 세지 않는다
+        out["scenario"] = {"12": {"exp": s["base"] / close - 1}}
     return out
 
 

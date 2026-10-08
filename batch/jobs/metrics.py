@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import math
 import sys
@@ -28,6 +29,7 @@ from batch.core import settings_range as sr
 from batch.core.client import TursoClient
 from batch.core.entry import guard
 from batch.services import metrics as calc
+from batch.services import patterns
 
 log = logging.getLogger("metrics")
 
@@ -226,6 +228,7 @@ def compute_all(
 
     rf_cache: dict[str, float | None] = {}
     skipped_for_samples = 0
+    pattern_rows: list[tuple] = []
 
     # 종목마다 기간마다 읽으면 880종목 × 3기간 = 2,640 번 왕복한다. D1 은 왕복마다 HTTP 다.
     # **가장 긴 창을 한 번 읽어 나눠 쓴다** — 짧은 창은 긴 창의 부분집합이다 (2026-09-21, 25.65)
@@ -253,6 +256,11 @@ def compute_all(
         all_points = load_prices(client, stock_id, since_longest, 수정_구멍)
         기준 = (as_of_by_country or {}).get(country, as_of)
         기준일 = date.fromisoformat(기준)
+        # 비슷한 국면 (docs/analysis.md 13장, 25.1039) — 5년 시세를 읽은 김에. 기준일 뒤 시세는 넣지 않는다
+        국면_점 = [q for q in all_points if q.date <= 기준일]
+        국면표 = patterns.table([q.date.isoformat() for q in 국면_점], [q.close for q in 국면_점])
+        if 국면표:
+            pattern_rows.append((stock_id, 기준, json.dumps(국면표, separators=(",", ":")), now))
         # 창 끝 검사의 "끝" 은 달력 기준일이 아니라 **그 나라 시세가 실제로 있는 마지막 날**이다 (25.710, 교차검증) —
         # 나라 수집이
         # 11일 넘게 멈추면 모든 종목의 모든 창이 None 이 되고, 1Y 가 가장 짧은 창이라 리스크 축이 통째로 비었다
@@ -330,7 +338,26 @@ def compute_all(
         )
 
     _bulk_upsert(client, rows_data)
+    store_patterns(client, pattern_rows, warnings)
     return len(rows_data), counts, warnings
+
+
+PATTERN_UPSERT = (
+    "INSERT INTO price_patterns (stock_id, as_of_date, stats_json, computed_at) VALUES (?, ?, ?, ?)"
+    " ON CONFLICT (stock_id) DO UPDATE SET as_of_date = excluded.as_of_date, stats_json = excluded.stats_json,"
+    " computed_at = excluded.computed_at"
+)
+
+
+def store_patterns(client: TursoClient, rows: list[tuple], warnings: list[str]) -> None:
+    """국면표를 종목마다 한 행으로 덮는다. 실패해도 성과 지표는 이미 저장됐다 — 경고만 남긴다."""
+    try:
+        for i in range(0, len(rows), 200):
+            client.batch([(PATTERN_UPSERT, list(r)) for r in rows[i : i + 200]])
+    except Exception as exc:  # noqa: BLE001 — 곁 결과다
+        if db.quota_reason(exc):
+            raise
+        warnings.append(f"비슷한 국면 표를 저장하지 못했습니다: {exc}")
 
 
 _COLUMNS = (

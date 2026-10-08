@@ -43,6 +43,42 @@ export interface OutlookData {
   forecast?: ForecastData | null;
   /** 가격 사다리 (docs/analysis.md 12.2·12.3, 25.1038) */
   ladder?: LadderData | null;
+  /** 비슷한 국면 — 자기 과거 (docs/analysis.md 13장, 25.1039) */
+  analog?: AnalogData | null;
+  /** 1년 시나리오 — 순자산 성장 × PBR 밴드 (docs/analysis.md 14장, 25.1040) */
+  scenario?: ScenarioData | null;
+}
+
+export interface AnalogDist {
+  n: number;
+  median: number;
+  p05: number;
+  p16: number;
+  p84: number;
+  p95: number;
+  up: number;
+}
+
+export interface AnalogData {
+  key: string;
+  label: string;
+  days?: number;
+  episodes?: number;
+  since?: string;
+  until?: string;
+  empty?: boolean;
+  horizons?: Array<AnalogDist & { months: number; base?: AnalogDist | null }>;
+}
+
+export interface ScenarioData {
+  growth: number;
+  roe: number;
+  payout_part: number;
+  bear: number;
+  base: number;
+  bull: number;
+  hold: number;
+  as_of?: string | null;
 }
 
 export interface LadderItem {
@@ -112,7 +148,8 @@ export function horizonLabel(months: number): string {
 
 /** 진단 줄 가운데 표로 따로 그리는 줄(예상 주가)은 목록에서 뺀다 — 같은 숫자를 두 번 보이지 않는다 */
 export function outlookListLines(lines: string[]): string[] {
-  return lines.filter((l) => !l.startsWith("예상 주가:"));
+  // 비슷한 국면·시나리오도 맨 위 예측 묶음(ForecastModels)에 표로 있다 (25.1039·25.1040)
+  return lines.filter((l) => !l.startsWith("예상 주가:") && !l.startsWith("비슷한 국면(") && !l.startsWith("1년 시나리오("));
 }
 
 /** 유니버스 밖 종목의 참고 점수 — `analyze_extra` 가 detail_json 에 둔다 (25.1019) */
@@ -250,7 +287,9 @@ export async function requestAnalysis(
 /** 누계 한 칸의 자리 — batch/services/forecast_track.FIELDS 와 같은 순서 */
 export const TRACK_FIELDS = ["n", "n_range", "in68", "in90", "dir_n", "dir_hit", "abs_err_sum"] as const;
 /** 모델 이름 — forecast_track.MODELS 와 같다 */
-export const MODEL_LABEL: Record<string, string> = { capm: "CAPM(시장·베타)", consensus: "증권사 목표가", analog: "비슷한 국면" };
+export const MODEL_LABEL: Record<string, string> = {
+  capm: "CAPM(시장·베타)", consensus: "증권사 목표가", analog: "비슷한 국면", scenario: "시나리오(밴드×순자산)",
+};
 /** 비율을 말할 최소 표본 — forecast_track.MIN_SAMPLE 과 같다 */
 export const TRACK_MIN_SAMPLE = 20;
 
