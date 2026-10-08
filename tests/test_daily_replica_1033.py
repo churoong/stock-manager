@@ -191,3 +191,36 @@ def test_워크플로가_배치_전에_사본을_꺼내고_경로를_준다(name
     assert steps[배치]["env"][daily.REPLICA_FOR_SCORES_ENV] == ".price-replica/prices.db"
     넣기 = next(i for i, s in enumerate(steps) if s.get("uses", "").startswith("actions/cache/save"))
     assert 넣기 > 배치  # 배치 안에서 맞춘 사본을 다음 실행에 넘긴다
+
+
+class Test배치_뒤_맞추기를_되풀이하지_않는다:
+    """일일 배치가 점수·신호 직전에 맞춘 사본을 배치 뒤에 또 맞추지 않는다 (docs/infra.md 25.1035)."""
+
+    def _스크립트(self):
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("price_replica_script", ROOT / "scripts" / "price_replica.py")
+        mod = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
+        spec.loader.exec_module(mod)  # type: ignore[union-attr]
+        return mod
+
+    def test_방금_맞춘_사본이면_건너뛴다(self, tmp_path: Path) -> None:
+        path = _만든_사본(tmp_path, _원격())  # 지금(2026-10-06 17:00 UTC) 에 맞췄다
+        s = self._스크립트()
+        assert s.just_synced(str(path), 120, now=지금 + timedelta(minutes=30))
+        assert not s.just_synced(str(path), 120, now=지금 + timedelta(minutes=121))  # 오래됐으면 맞춘다
+
+    def test_못_쓰는_사본이나_없는_파일이면_맞춘다(self, tmp_path: Path) -> None:
+        s = self._스크립트()
+        assert not s.just_synced(str(tmp_path / "없음.db"), 120)
+        path = tmp_path / "prices.db"
+        conn = rep.open_replica(path)
+        rep.sync(_원격(), conn, backend="turso", allow_build=False, now=지금)  # 비어서 usable=0
+        conn.close()
+        assert not s.just_synced(str(path), 120, now=지금 + timedelta(minutes=1))
+
+    @pytest.mark.parametrize("name", ["daily-kr", "daily-us"])
+    def test_워크플로가_건너뛰기를_켠다(self, name: str) -> None:
+        wf = yaml.safe_load((ROOT / ".github/workflows" / f"{name}.yml").read_text(encoding="utf-8"))
+        맞추기 = next(s for s in wf["jobs"]["run"]["steps"] if s.get("id") == "replica")
+        assert "--fresh-minutes" in 맞추기["run"]

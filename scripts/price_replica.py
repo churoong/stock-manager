@@ -17,7 +17,7 @@ import json
 import logging
 import os
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -46,13 +46,43 @@ def _output(key: str, value: str) -> None:
             fh.write(f"{key}={value}\n")
 
 
+def just_synced(path: str, minutes: int, now: datetime | None = None) -> bool:
+    """**방금 맞춘 사본인가** (docs/infra.md 25.1035). 일일 배치는 점수·신호 직전에 사본을 맞춘다(25.1033) — 그 뒤로
+    시세를 쓰는 단계가 없어, 배치 뒤 맞추기가 같은 일을 한 번 더 했다(종목 표 약 8천 행 + 표본 검증 약 2.5만 행 +
+    그날 범위 다시 받기). 다음 맞추기는 `synced_at - TOUCH_MARGIN` 뒤에 끝난 실행의 고친 범위를 보므로 이 실행이
+    고친 것도 놓치지 않는다. 파일이 없거나 못 쓴다고 적혀 있거나 시각을 모르면 False(맞춘다)."""
+    if not Path(path).exists():
+        return False
+    try:
+        conn = rep.open_replica(path)
+        try:
+            meta = rep._meta(conn)
+        finally:
+            conn.close()
+        synced = datetime.fromisoformat(meta["synced_at"])
+    except Exception:  # noqa: BLE001 — 모르면 맞춘다
+        return False
+    if meta.get("usable") != "1" or meta.get("backend") != "turso":
+        return False
+    return timedelta(0) <= (now or datetime.now(UTC)) - synced <= timedelta(minutes=minutes)
+
+
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     parser = argparse.ArgumentParser(description="시세 사본 맞추기")
     parser.add_argument("command", choices=["sync"])
     parser.add_argument("--path", required=True)
     parser.add_argument("--no-build", action="store_true", help="사본이 비었으면 만들지 않는다")
+    parser.add_argument(
+        "--fresh-minutes", type=int, default=0,
+        help="이 분 안에 맞춘 쓸 수 있는 사본이면 Turso 에 붙지 않고 그대로 넣는다(0: 늘 맞춘다)",
+    )
     args = parser.parse_args()
+
+    if args.fresh_minutes > 0 and just_synced(args.path, args.fresh_minutes):
+        print(f"[시세 사본] {args.fresh_minutes}분 안에 맞춘 사본이다 — 다시 맞추지 않고 그대로 넣는다")
+        _output("changed", "true")
+        return 0
 
     try:
         종류 = backend.resolved_backend()
