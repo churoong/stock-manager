@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 import time
@@ -60,8 +61,12 @@ def load_members(client: TursoClient, country: str, as_of: str) -> list[dict]:
     ).dicts()
 
 
-def load_equities(client: TursoClient, country: str, as_of: str) -> dict[int, list[tuple[str, float, int]]]:
-    """나라 전체의 연간 연결 자본총계 (접수일, 자본, 사업연도). 접수일 오름차순. 기준일 뒤에 접수된 것은 읽지 않는다."""
+def load_equities(client: TursoClient, country: str, as_of: str,
+                  stock_ids: list[int] | None = None) -> dict[int, list[tuple[str, float, int]]]:  # fmt: skip
+    """나라 전체의 연간 연결 자본총계 (접수일, 자본, 사업연도). 접수일 오름차순. 기준일 뒤에 접수된 것은 읽지 않는다.
+
+    `stock_ids` 를 주면 그 종목만 — 참고 분석의 가격·가치 진단 (`jobs/analyze_extra`, 25.1023)"""
+    골라 = None if stock_ids is None else json.dumps(stock_ids)
     out: dict[int, list[tuple[str, float, int]]] = {}
     for r in client.execute(
         # **기준(연결·별도)은 종목마다 한 번만 고른다** (docs/infra.md 25.890). 예전에는 재무 행마다 같은 종목의
@@ -69,14 +74,15 @@ def load_equities(client: TursoClient, country: str, as_of: str) -> dict[int, li
         # `MATERIALIZED` 가 없으면 SQLite 가 펼쳐 예전과 같아진다. 결과는 같다(`tests/test_financial_basis_890.py`)
         "WITH b AS MATERIALIZED (SELECT s.id AS sid, (SELECT fb.consolidated FROM financials fb"
         " WHERE fb.stock_id = s.id AND fb.report_code = ? AND fb.report_date <= ?"
-        " ORDER BY fb.fiscal_year DESC, fb.consolidated DESC LIMIT 1) AS cons FROM stocks s WHERE s.country = ?)"
+        " ORDER BY fb.fiscal_year DESC, fb.consolidated DESC LIMIT 1) AS cons FROM stocks s WHERE s.country = ?"
+        " AND (? IS NULL OR s.id IN (SELECT value FROM json_each(?))))"
         " SELECT f.stock_id, f.report_date, f.total_equity, f.fiscal_year"
         " FROM b CROSS JOIN financials f ON f.stock_id = b.sid AND f.consolidated = b.cons"
         " WHERE f.report_code = ? AND f.total_equity IS NOT NULL AND f.report_date <= ?"
         # 종목 통화로 낸 자본만 (25.915) — USD 로 공시한 국내 회사의 PBR 밴드가 1,400배 틀렸다
         " AND f.currency = (SELECT st.currency FROM stocks st WHERE st.id = f.stock_id)"
         " ORDER BY f.stock_id, f.report_date",
-        [ANNUAL_REPORT_CODE, as_of, country, ANNUAL_REPORT_CODE, as_of],  # 기준 고르기(25.856)·본 질의
+        [ANNUAL_REPORT_CODE, as_of, country, 골라, 골라, ANNUAL_REPORT_CODE, as_of],  # 기준 고르기(25.856)·본 질의
     ).dicts():
         out.setdefault(int(r["stock_id"]), []).append(
             (str(r["report_date"]), float(r["total_equity"]), int(r["fiscal_year"]))

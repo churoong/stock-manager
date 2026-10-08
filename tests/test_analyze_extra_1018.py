@@ -82,6 +82,10 @@ def test_요청이면_끝나고_알리되_조용시간에는_저장만(monkeypat
     monkeypatch.setattr(job, "datetime", 낮)
     assert job.notify(mem, "KR", row, res, None) is True  # type: ignore[arg-type]
     assert 보낸 == ["🔎 분석 완료 — 종목1(111111)\n참고 분석 — x\n반대 목소리: 외국인 순매도"]
+    # 가격·가치 진단이 있으면 결론 다음에 붙는다 (25.1023)
+    보낸.clear()
+    job.notify(mem, "KR", row, {**res, "outlook": {"lines": ["종가 1,069원", "밴드", "증권사"]}}, None)  # type: ignore[arg-type]
+    assert 보낸[0].startswith("🔎 분석 완료 — 종목1(111111)\n참고 분석 — x\n· 종가 1,069원\n· 밴드\n· 증권사")
     a = mem.conn.execute("SELECT trigger_type, sent_at FROM alerts").fetchone()
     assert a[0] == "analysis" and a[1] is not None
 
@@ -177,7 +181,8 @@ def test_유니버스_종목이면_그_시장_의견을_지금_만들어_알린�
     monkeypatch.setattr(vj, "run", 의견)
     assert job.run(stock_id=1, send=True) == 0
     assert 시장 == ["KR"]
-    assert 알림 == [({"verdict": "waiting", "headline": "신호 대기 — 단기 기준 1개 남음", "against": ["외국인 순매도"]}, None)]
+    assert 알림 == [({"verdict": "waiting", "headline": "신호 대기 — 단기 기준 1개 남음", "against": ["외국인 순매도"],
+                      "outlook": None}, None)]  # fmt: skip
     assert mem.conn.execute("SELECT status, note FROM analysis_requests").fetchone() == ("done", None)
     # 점수가 없어 의견을 못 만들면 그렇다고 알린다 — 참고 분석으로 덮지 않는다
     mem.conn.execute("DELETE FROM stock_verdicts")

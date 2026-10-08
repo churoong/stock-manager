@@ -21,11 +21,22 @@ export interface Verdict {
     label?: string; reasons?: string[]; against?: string[]; nearest?: { horizon: string; failed_count: number; as_of: string | null } | null;
     /** 참고 분석만 (25.1019) */
     excluded_reason?: string; reference_score?: ReferenceScoreData | null;
+    /** 가격·가치 진단 — 예측이 아니라 근거 있는 기준점 (docs/analysis.md 9장, 25.1023) */
+    outlook?: OutlookData | null;
   };
   evidence: EvidenceRow[];
   score_as_of: string | null;
   signal_as_of: string | null;
   computed_at: string;
+}
+
+/** 가격·가치 진단 — 배치(`verdict.outlook`)가 만든 문장과 값. 화면은 그리기만 한다 */
+export interface OutlookData {
+  lines: string[];
+  close: number | null;
+  close_date: string | null;
+  band?: { rank: number | null; pbr: number; prices: { p20: number | null; p50: number | null; p80: number | null }; price_date: string | null };
+  consensus?: { brokers: number; median: number; low: number; high: number; upside: number | null; latest: string };
 }
 
 /** 유니버스 밖 종목의 참고 점수 — `analyze_extra` 가 detail_json 에 둔다 (25.1019) */

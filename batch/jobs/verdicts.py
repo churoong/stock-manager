@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import sys
 from collections import defaultdict
@@ -48,6 +49,26 @@ CHECKS_SQL = (
     " WHERE s.country = ? AND c.as_of_date = (SELECT MAX(c2.as_of_date) FROM signal_checks c2"
     "   JOIN stocks s2 ON s2.id = c2.stock_id WHERE s2.country = ?)"
 )
+# 가격·가치 진단 재료 (docs/analysis.md 9장, 25.1023). 종가는 밴드와 같은 잣대(분할만 반영, `db.SPLIT_ONLY_PRICE_SQL`)
+CLOSE_SQL = (
+    "SELECT p.stock_id, p.date,"
+    " CASE WHEN s.country = 'US' THEN p.close ELSE COALESCE(p.adj_close, p.close) END AS close"
+    " FROM prices p JOIN stocks s ON s.id = p.stock_id WHERE s.country = ? AND p.date = ?"
+)
+MOMENTUM_SQL = (
+    "SELECT f.stock_id, f.raw_json, f.as_of_date FROM factors f JOIN stocks s ON s.id = f.stock_id"
+    " WHERE s.country = ? AND f.factor = 'momentum' AND f.as_of_date = ? ORDER BY f.stock_id, f.calc_version DESC"
+)
+BAND_SQL = (
+    "SELECT v.stock_id, v.p20, v.p50, v.p80, v.current_value, v.band_rank, v.price_date, v.skip_reason,"
+    " CASE WHEN s.country = 'US' THEN p.close ELSE COALESCE(p.adj_close, p.close) END AS band_close"
+    " FROM valuation_bands v JOIN stocks s ON s.id = v.stock_id"
+    " LEFT JOIN prices p ON p.stock_id = v.stock_id AND p.date = v.price_date"
+    " WHERE s.country = ? AND v.metric = 'PBR' AND v.as_of_date = (SELECT MAX(v2.as_of_date) FROM valuation_bands v2"
+    "   JOIN stocks s2 ON s2.id = v2.stock_id WHERE s2.country = ?) ORDER BY v.stock_id, v.calc_version DESC"
+)
+OPINIONS_SQL = "SELECT stock_id, date, broker, target_price FROM kr_opinions WHERE date >= ?"
+
 POSITIONS_SQL = (
     "SELECT p.stock_id, p.quantity, p.unrealized_pnl_krw, p.cost_krw, p.price_date FROM positions p"
     " JOIN stocks s ON s.id = p.stock_id WHERE s.country = ? AND p.quantity > 0"
@@ -144,6 +165,42 @@ def against_kr(client: TursoClient, ids: list[int], today: date, warnings: list[
     return out
 
 
+def outlook_inputs(client: TursoClient, country: str, as_of: str, today: date, warnings: list[str]) -> dict:
+    """가격·가치 진단의 재료를 시장 한 번에 읽는다 (docs/analysis.md 9장). 못 읽은 것은 경고로 — 그 줄만 빠진다."""
+    from batch.jobs import signals as sig
+
+    종가 = {int(r["stock_id"]): r for r in _safe(client, CLOSE_SQL, [country, as_of], warnings, "종가")}
+    모멘텀: dict[int, dict] = {}
+    for r in _safe(client, MOMENTUM_SQL, [country, as_of], warnings, "모멘텀"):
+        if int(r["stock_id"]) not in 모멘텀:
+            with contextlib.suppress(TypeError, ValueError):
+                모멘텀[int(r["stock_id"])] = {**json.loads(r["raw_json"] or "{}"), "as_of": r["as_of_date"]}
+    밴드: dict[int, dict] = {}
+    for r in _safe(client, BAND_SQL, [country, country], warnings, "밸류에이션 밴드"):
+        밴드.setdefault(int(r["stock_id"]), r)
+    try:
+        위험 = sig.load_metrics(client, country, as_of)
+    except Exception as exc:  # noqa: BLE001 — 그 줄만 빠진다
+        warnings.append(f"성과 지표를 읽지 못했습니다: {exc}")
+        위험 = {}
+    의견: dict[int, list[dict]] = defaultdict(list)
+    if country == "KR":
+        since = (today - timedelta(days=vd.CONSENSUS_DAYS)).isoformat()
+        for r in _safe(client, OPINIONS_SQL, [since], warnings, "증권사 목표가"):
+            의견[int(r["stock_id"])].append(r)
+    return {"close": 종가, "momentum": 모멘텀, "band": 밴드, "risk": 위험, "opinions": 의견}
+
+
+def outlook_for(재료: dict, sid: int, currency: str, today: date) -> dict:
+    c = 재료["close"].get(sid) or {}
+    b = 재료["band"].get(sid)
+    return vd.outlook(
+        close=c.get("close"), close_date=c.get("date"), currency=currency, momentum=재료["momentum"].get(sid),
+        risk=재료["risk"].get(sid), band=b, opinions=재료["opinions"].get(sid, []), today=today,
+        band_note=(b or {}).get("skip_reason"),
+    )  # fmt: skip
+
+
 def build_market(client: TursoClient, market: str, today: date, warnings: list[str]) -> list[tuple[str, list[Any]]]:
     country = "KR" if market == "KR" else "US"
     점수: dict[int, dict] = {}
@@ -169,6 +226,7 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
         플래그[int(r["stock_id"])].append({"level": r["level"], "rationale_text": r["rationale_text"],
                                          "as_of": r["as_of_date"]})  # fmt: skip
     곁 = against_kr(client, sorted(점수), today, warnings) if country == "KR" else {}
+    재료 = outlook_inputs(client, country, max(str(r["as_of_date"]) for r in 점수.values()), today, warnings)
     stamp = db.now_iso()
     rows: list[tuple[str, list[Any]]] = [(CLEAR, [country])]
     for sid, r in 점수.items():
@@ -188,11 +246,12 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
                             if p["unrealized_pnl_krw"] is not None and p["cost_krw"] else None)},
             flags=플래그.get(sid, []),
             against=[a for a in 곁.get(sid, []) if a["against"]],
+            outlook=outlook_for(재료, sid, str(r["currency"] or "KRW"), today),
         )  # fmt: skip
         out = vd.build(inp)
         out["reasons"] += [a["text"] for a in 곁.get(sid, []) if not a["against"]]
         out["evidence"] += [a["evidence"] for a in 곁.get(sid, []) if not a["against"]]
-        detail = {k: out[k] for k in ("label", "reasons", "against", "nearest")}
+        detail = {k: out[k] for k in ("label", "reasons", "against", "nearest", "outlook")}
         신호일 = max((g["as_of"] for g in 신호.get(sid, [])), default=None) or max(
             (c["as_of"] for c in 판정.get(sid, [])), default=None)
         rows.append((INSERT, [

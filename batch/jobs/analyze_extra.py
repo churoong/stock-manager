@@ -23,7 +23,7 @@ import argparse
 import json
 import logging
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from batch.core import calendar as cal
@@ -64,7 +64,8 @@ def universe_verdict(client: TursoClient, country: str, stock_id: int) -> dict |
         detail = json.loads(r[0]["detail_json"] or "{}")
     except (TypeError, ValueError):
         detail = {}
-    return {"verdict": r[0]["verdict"], "headline": r[0]["headline"], "against": detail.get("against") or []}
+    return {"verdict": r[0]["verdict"], "headline": r[0]["headline"], "against": detail.get("against") or [],
+            "outlook": detail.get("outlook")}  # fmt: skip
 
 TARGETS_SQL = (
     "SELECT s.id, s.ticker, s.country, COALESCE(s.name_ko, s.name_en, s.ticker) AS name, s.asset_type"
@@ -160,8 +161,11 @@ def score_extra(client: TursoClient, country: str, as_of: str, extra: list[dict]
     )  # fmt: skip
     weights, sentiment_weight, _ = sj.load_weights(client)
     by_stock: dict[int, dict[str, float | None]] = {}
+    모멘텀: dict[int, dict] = {}
     for r in sc.score_factors(inputs):
         by_stock.setdefault(r.stock_id, {})[r.factor] = r.score
+        if r.factor == "momentum":
+            모멘텀[r.stock_id] = r.raw  # 가격·가치 진단의 현재 주가 위치 (docs/analysis.md 9.1)
     sentiments, _ = sj.load_sentiments(client, country, as_of)
     totals = {sid: sc.total_score(s, weights, sentiment=sentiments.get(sid), sentiment_weight=sentiment_weight)
               for sid, s in by_stock.items()}  # fmt: skip
@@ -174,8 +178,57 @@ def score_extra(client: TursoClient, country: str, as_of: str, extra: list[dict]
             continue
         out[sid] = {"total": t.total, "factors": by_stock.get(sid, {}), "skip_reason": t.skip_reason,
                     "rank": None if t.total is None else 1 + sum(1 for v in 유니버스점수 if v > t.total),
-                    "ranked": len(유니버스점수), "as_of": as_of}  # fmt: skip
+                    "ranked": len(유니버스점수), "as_of": as_of,
+                    "momentum": {**(모멘텀.get(sid) or {}), "as_of": as_of}}  # fmt: skip
     return out
+
+
+ONE_CLOSE_SQL = (
+    "SELECT p.date, CASE WHEN s.country = 'US' THEN p.close ELSE COALESCE(p.adj_close, p.close) END AS close"
+    " FROM prices p JOIN stocks s ON s.id = p.stock_id WHERE p.stock_id = ? AND p.date <= ? AND p.close IS NOT NULL"
+    " ORDER BY p.date DESC LIMIT 1"
+)
+ONE_OPINIONS_SQL = "SELECT stock_id, date, broker, target_price FROM kr_opinions WHERE stock_id = ? AND date >= ?"
+
+
+def reference_outlook(client: TursoClient, country: str, as_of: str, meta: dict, s: dict | None,
+                      warnings: list[str]) -> dict:  # fmt: skip
+    """참고 분석 종목의 가격·가치 진단 (docs/analysis.md 9장, 25.1023).
+
+    일일 의견(`verdicts.outlook_inputs`)과 같은 재료를 이 종목만 읽는다. 밸류에이션 밴드는 `valuation_bands` 에
+    없으니 같은 식(`services/valuation_band.compute`)으로 낸다."""
+    from batch.jobs import signals as sig
+    from batch.jobs import valuation_bands as vbj
+    from batch.services import valuation_band as vb
+
+    sid = int(meta["stock_id"])
+    today = cal.user_today()
+    c = (client.execute(ONE_CLOSE_SQL, [sid, as_of]).dicts() or [{}])[0]
+    band, note = None, None
+    try:
+        시세 = vbj.load_prices(client, [sid], as_of).get(sid, [])
+        r = vb.compute(시세, vbj.load_equities(client, country, as_of, stock_ids=[sid]).get(sid, []),
+                       meta.get("listed_shares"))
+        if r.skip_reason:
+            note = r.skip_reason
+        else:
+            종가 = dict(시세)
+            band = {"p20": r.p20, "p50": r.p50, "p80": r.p80, "current_value": r.current_value,
+                    "band_rank": r.band_rank, "price_date": r.price_date, "band_close": 종가.get(str(r.price_date))}
+    except Exception as exc:  # noqa: BLE001 — 밴드 줄만 빠진다
+        warnings.append(f"가치 밴드를 내지 못했습니다: {exc}")
+    try:
+        위험 = sig.load_metrics(client, country, as_of, stock_ids=[sid]).get(sid)
+    except Exception as exc:  # noqa: BLE001
+        warnings.append(f"성과 지표를 읽지 못했습니다: {exc}")
+        위험 = None
+    의견 = []
+    if country == "KR":
+        since = (today - timedelta(days=vd.CONSENSUS_DAYS)).isoformat()
+        의견 = client.execute(ONE_OPINIONS_SQL, [sid, since]).dicts()
+    return vd.outlook(close=c.get("close"), close_date=c.get("date"), currency=str(meta.get("currency") or "KRW"),
+                      momentum=(s or {}).get("momentum"), risk=위험, band=band, opinions=의견, today=today,
+                      band_note=note)  # fmt: skip
 
 
 def reference_checks(client: TursoClient, country: str, as_of: str, metas: list[dict],
@@ -253,6 +306,14 @@ def analyze(client: TursoClient, country: str, rows: list[dict], warnings: list[
         판정 = {}
         warnings.append(f"참고 판정표를 내지 못했습니다: {exc}")
     단계.mark("reference_checks")
+    진단: dict[int, dict] = {}
+    for m in soft:
+        try:
+            sid = int(m["stock_id"])
+            진단[sid] = reference_outlook(client, country, as_of, m, 점수.get(sid), warnings)
+        except Exception as exc:  # noqa: BLE001 — 진단이 없어도 참고 점수는 말한다
+            warnings.append(f"가격·가치 진단을 내지 못했습니다: {exc}")
+    단계.mark("outlook")
     from batch.jobs import verdicts as vj
 
     보유 = {int(r["stock_id"]): r for r in vj._safe(client, vj.POSITIONS_SQL, [country], warnings, "보유")}
@@ -276,16 +337,17 @@ def analyze(client: TursoClient, country: str, rows: list[dict], warnings: list[
             against=[a for a in 곁.get(sid, []) if a["against"]],
             checks=판정.get(sid, []),
             excluded_reason=사유,
+            outlook=None if sid in hard else 진단.get(sid),
         )  # fmt: skip
         if sid in hard:
             inp.score = {"total": None, "skip_reason": f"유니버스 밖({사유}) — 성격상 점수를 내지 않습니다"}
         res = vd.build(inp)
         res["reasons"] += [a["text"] for a in 곁.get(sid, []) if not a["against"]]
-        detail = {k: res[k] for k in ("label", "reasons", "against", "nearest")} | {
+        detail = {k: res[k] for k in ("label", "reasons", "against", "nearest", "outlook")} | {
             "excluded_reason": 사유,
             # 화면의 점수 카드·매수 신호 카드가 이것을 "참고" 로 그린다 (25.1019)
             "reference_score": None if not s or s.get("total") is None else {
-                k: s.get(k) for k in ("total", "rank", "ranked", "as_of", "factors")},
+                k: s.get(k) for k in ("total", "rank", "ranked", "as_of", "factors")},  # 모멘텀 원값은 outlook 에
             "checks": 판정.get(sid, []),
         }  # fmt: skip
         stmts.append((VERDICT_UPSERT, [sid, country, res["verdict"], res["headline"],
@@ -309,6 +371,9 @@ def notify(client: TursoClient, country: str, row: dict, res: dict | None, error
     조용, 해제뒤 = ah.quiet_state(client.execute("SELECT value FROM settings WHERE key = 'quiet_hours'").scalar(), now)
     if res is not None:
         글 = f"🔎 분석 완료 — {row['name']}({row['ticker']})\n{res['headline']}"
+        # 가격·가치 진단 (docs/analysis.md 9장, 25.1023) — 결론 다음에
+        for 줄 in ((res.get("outlook") or {}).get("lines") or [])[:3]:
+            글 += f"\n· {줄}"
         if res.get("against"):
             글 += "\n반대 목소리: " + " / ".join(res["against"][:3])
     elif error is None:

@@ -12,6 +12,17 @@ export default function VerdictBlock({ v }: { v: Verdict }) {
         <span className="mr-1.5 font-semibold">{VERDICT_LABEL[v.verdict] ?? v.verdict}</span>
         {v.headline.replace(/^[^—]+—\s*/, "")}
       </p>
+      {(v.detail?.outlook?.lines ?? []).length > 0 && (
+        <div className="mb-2 rounded-lg bg-slate-50 px-2.5 py-2 dark:bg-slate-900">
+          <p className="mb-0.5 text-xs font-semibold text-slate-600 dark:text-slate-300">가격·가치 진단</p>
+          <ul className="space-y-0.5 text-slate-700 dark:text-slate-300">
+            {v.detail!.outlook!.lines.map((r) => <li key={r}>{r}</li>)}
+          </ul>
+          <p className="mt-1 text-xs text-slate-400">
+            우리 예측 주가는 내지 않습니다 — 밴드 기준 가격은 &quot;PBR 이 그 분위면&quot; 의 가격이고, 증권사 목표가는 증권사의 예측입니다.
+          </p>
+        </div>
+      )}
       {reasons.length > 0 && (
         <ul className="mb-2 list-disc space-y-0.5 pl-5 text-slate-700 dark:text-slate-300">
           {reasons.map((r) => <li key={r}>{r}</li>)}

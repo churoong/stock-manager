@@ -8,7 +8,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date, timedelta
 from typing import Any
+
+from batch.services import signals
 
 #: 결론 키 → 이름 (위에서부터 처음 맞는 것, docs/analysis.md 3장)
 VERDICTS = {
@@ -29,6 +32,112 @@ RECENT_DISCLOSURE_DAYS = 14
 REFERENCE_SOURCE = "참고 계산(유니버스 + 이 종목)"
 
 
+#: 증권사 목표가를 모으는 날 수 (docs/analysis.md 9.3). 목표가는 보통 분기 실적마다 다시 낸다 — 한 분기 남짓
+CONSENSUS_DAYS = 90
+#: 장기 신호의 밴드 문턱 — 새 문턱이 아니라 그 값을 그대로 쓴다 (docs/signals.md 1.3)
+BAND_ENTRY_PERCENTILE = signals.BAND_ENTRY_PERCENTILE
+
+
+def _won(x: Any, currency: str) -> str:
+    """가격 + 단위 (원·달러)."""
+    return f"{_price(x, currency)}{'원' if currency == 'KRW' else '달러'}"
+
+
+def _pct(x: Any, digits: int = 1, sign: bool = True) -> str:
+    return f"{x * 100:{'+' if sign else ''}.{digits}f}%" if isinstance(x, (int, float)) else "-"
+
+
+def consensus(opinions: list[dict], today: date) -> dict | None:
+    """증권사마다 가장 최근 목표가 하나 (지난 `CONSENSUS_DAYS` 일). 없으면 None."""
+    since = (today - timedelta(days=CONSENSUS_DAYS)).isoformat()
+    최근: dict[str, dict] = {}
+    for o in opinions:
+        d, t = str(o.get("date") or ""), o.get("target_price")
+        if d < since or not isinstance(t, (int, float)) or t <= 0:
+            continue
+        b = str(o.get("broker"))
+        if b not in 최근 or d > str(최근[b]["date"]):
+            최근[b] = {"date": d, "target": float(t)}
+    if not 최근:
+        return None
+    값 = sorted(x["target"] for x in 최근.values())
+    n = len(값)
+    중앙 = 값[n // 2] if n % 2 else (값[n // 2 - 1] + 값[n // 2]) / 2
+    return {"brokers": n, "median": 중앙, "low": 값[0], "high": 값[-1], "since": since,
+            "latest": max(x["date"] for x in 최근.values())}  # fmt: skip
+
+
+def outlook(*, close: float | None, close_date: str | None, currency: str, momentum: dict | None,
+            risk: dict | None, band: dict | None, opinions: list[dict], today: date,
+            band_note: str | None = None) -> dict:  # fmt: skip
+    """가격·가치 진단 (docs/analysis.md 9장). 예측이 아니라 근거 있는 기준점 — 모든 값은 DB 행에서 온다.
+
+    momentum: momentum_3m·momentum_6m·momentum_12_1·high_52w_proximity·as_of (factors.raw_json)
+    risk: volatility_ann·mdd·window·as_of_date (performance_metrics)
+    band: p20·p50·p80·current_value·band_rank·band_close·price_date (valuation_bands, band_close 는 그날 분할 반영 종가)
+    """
+    줄: list[str] = []
+    evidence: list[dict] = []
+    m = momentum or {}
+    out: dict[str, Any] = {"close": close, "close_date": close_date}
+    # 9.1 현재 주가 위치
+    if close is not None:
+        조각 = [f"종가 {_won(close, currency)}({close_date})"]
+        evidence.append(_row("종가", _price(close, currency), "—", "prices", close_date))
+        for k, 이름 in (("momentum_3m", "3개월"), ("momentum_6m", "6개월"), ("momentum_12_1", "12-1개월")):
+            if isinstance(m.get(k), (int, float)):
+                조각.append(f"{이름} {_pct(m[k])}")
+                evidence.append(_row(f"{이름} 수익률", _pct(m[k]), "—", "factors.momentum", m.get("as_of")))
+        if isinstance(m.get("high_52w_proximity"), (int, float)):
+            조각.append(f"52주 고점의 {m['high_52w_proximity'] * 100:.0f}%")
+            evidence.append(_row("52주 고점 대비", f"{m['high_52w_proximity'] * 100:.0f}%", "—", "factors.momentum",
+                                 m.get("as_of")))  # fmt: skip
+        r = risk or {}
+        if isinstance(r.get("volatility_ann"), (int, float)):
+            조각.append(f"변동성 {_pct(r['volatility_ann'], 0, False)}·최대 낙폭 {_pct(r.get('mdd'), 0)}"
+                        f"({r.get('window') or '-'})")  # fmt: skip
+            evidence.append(_row(f"변동성·최대 낙폭({r.get('window') or '-'})",
+                                 f"{_pct(r['volatility_ann'], 1, False)} · {_pct(r.get('mdd'), 1)}", "—",
+                                 "performance_metrics", r.get("as_of_date")))  # fmt: skip
+        줄.append(" · ".join(조각))
+        out["momentum"] = {k: m.get(k) for k in ("momentum_3m", "momentum_6m", "momentum_12_1", "high_52w_proximity")}
+        out["risk"] = None if not risk else {k: r.get(k) for k in ("volatility_ann", "mdd", "window")}
+    # 9.2 가치 기준 가격
+    b = band or {}
+    cur, bc = b.get("current_value"), b.get("band_close")
+    if isinstance(cur, (int, float)) and cur > 0 and isinstance(bc, (int, float)) and bc > 0 and b.get("p50"):
+        bps = bc / cur
+        가격 = {k: (float(b[k]) * bps if isinstance(b.get(k), (int, float)) else None) for k in ("p20", "p50", "p80")}
+        순위 = b.get("band_rank")
+        문턱 = (f"(장기 신호 문턱 {BAND_ENTRY_PERCENTILE}% 이하)"
+                if isinstance(순위, (int, float)) and 순위 <= BAND_ENTRY_PERCENTILE else "")  # fmt: skip
+        위치 = f"자기 3년 PBR 밴드의 {순위:.0f}% 지점{문턱} — " if isinstance(순위, (int, float)) else ""
+        줄.append(f"{위치}PBR {cur:.2f}배. 밴드 기준 가격: 20% {_won(가격['p20'], currency)} · "
+                  f"중앙값 {_won(가격['p50'], currency)} · 80% {_won(가격['p80'], currency)}"
+                  " (자본·주식 수가 그대로일 때 PBR 이 그 분위면 — 예측이 아님)")  # fmt: skip
+        evidence.append(_row("PBR 밴드 위치", f"{순위:.0f}% 지점" if isinstance(순위, (int, float)) else "-",
+                             f"장기 신호 ≤ {BAND_ENTRY_PERCENTILE}%", "valuation_bands",
+                             b.get("price_date")))  # fmt: skip
+        evidence.append(_row("밴드 중앙값 기준 가격", _price(가격["p50"], currency), "PBR p50 × 주당순자산",
+                             "valuation_bands", b.get("price_date")))  # fmt: skip
+        out["band"] = {"rank": 순위, "pbr": cur, "prices": 가격, "price_date": b.get("price_date")}
+    elif band_note:
+        줄.append(f"가치 밴드는 내지 못했습니다 — {band_note}")
+    # 9.3 증권사 목표가
+    c = consensus(opinions, today)
+    if c:
+        괴리 = (c["median"] / close - 1) if close else None
+        범위 = "" if c["brokers"] == 1 else f"(범위 {_won(c['low'], currency)}~{_won(c['high'], currency)})"
+        줄.append(f"증권사 {c['brokers']}곳 목표가 중앙값 {_won(c['median'], currency)}{범위}"
+                  + (f" — 종가 대비 {_pct(괴리)}" if 괴리 is not None else "") + " (증권사의 예측)")  # fmt: skip
+        evidence.append(_row(f"증권사 목표가 중앙값({c['brokers']}곳)", _price(c["median"], currency),
+                             f"최근 {CONSENSUS_DAYS}일 · 증권사마다 최신 1건", "kr_opinions", c["latest"]))  # fmt: skip
+        out["consensus"] = {**c, "upside": 괴리}
+    out["lines"] = 줄
+    out["evidence"] = evidence
+    return out
+
+
 @dataclass
 class Inputs:
     name: str
@@ -42,6 +151,8 @@ class Inputs:
     currency: str = "KRW"
     #: 유니버스 밖이면 그 제외 사유 — 점수는 "유니버스 + 이 종목" 으로 낸 참고 점수다 (docs/analysis.md 8장, 25.1018)
     excluded_reason: str | None = None
+    #: 가격·가치 진단 (`outlook`, docs/analysis.md 9장, 25.1023)
+    outlook: dict | None = None
 
 
 def _row(label: str, display: str | None, threshold: str, source: str, as_of: str | None) -> dict:
@@ -166,10 +277,14 @@ def build(inp: Inputs) -> dict:
             evidence.append(a["evidence"])
     if key == "consider_buy" and against:
         headline += f" · 반대 목소리 {len(against)}개"
+    if inp.outlook:
+        evidence.extend(inp.outlook.get("evidence") or [])
     return {
         "verdict": key,
         "label": VERDICTS[key],
         "headline": headline,
+        # 9.4 종합 의견 — 결론 다음에 가격·가치 진단 문장을 잇는다
+        "outlook": None if not inp.outlook else {k: v for k, v in inp.outlook.items() if k != "evidence"},
         "reasons": reasons,
         "against": [a["text"] for a in against],
         "nearest": None if not near else {"horizon": near["horizon"], "failed_count": near["failed_count"],
