@@ -6,8 +6,9 @@
 `adj_close` 만 채운다. 잘못 계산됐다면 이 배치를 다시 돌려 덮으면 된다.
 
 언제 도나 (docs/adjust.md 3.1 — 2026-09-28 바로잡음, infra 25.571)
-  - **예약 없음. 일일 배치는 부르지 않는다** — 전 종목이 하루 읽기 예산의 3분의 2 라서. 일일 배치는 그날치
-    계수만 보고 기업행위가 보이면 이 배치를 돌리라고 알린다(`daily._detect_kr_actions`)
+  - **전 종목은 예약 없음** — 하루 읽기 예산의 3분의 2 라서. 일일 배치는 그날치 계수만 보고, 걸린 종목이
+    20개 이하면 그 종목만 `adjust_stocks` 로 바로 낸다(`daily._detect_kr_actions`, 25.1009).
+    넘으면 이 배치를 돌리라고 알린다
   - 국내 백필 워크플로(`backfill-kr.yml`) 끝에서 돈다. D1 따라잡기(`d1-catchup.yml`) 의 백필 뒤에는 돌지 않는다
   - 손으로: python -m batch.jobs.adjust_kr (Actions → "국내 수정주가")
 
@@ -128,6 +129,70 @@ def rows_to_write(
 ROWS_PER_STOCK = 1_250
 
 
+def adjust_stocks(client: TursoClient, stock_ids: list[int]) -> dict[str, Any]:
+    """주어진 종목들의 수정종가를 다시 내고 바뀐 행만 쓴다. 전 종목 실행(`run`)과 일일 배치의 걸린 종목 바로 내기
+    (`daily._detect_kr_actions`, 25.1009)가 같이 쓴다."""
+    updated = 0
+    with_action = 0
+    with_suspect = 0
+    without_change_pct = 0
+    action_samples: list[dict[str, Any]] = []
+    suspect_samples: list[dict[str, Any]] = []
+
+    for start in range(0, len(stock_ids), CHUNK_STOCKS):
+        ids = stock_ids[start : start + CHUNK_STOCKS]
+        days_by_stock, stored_by_stock = load_days(client, ids)
+        for stock_id, days in days_by_stock.items():
+            if not days:
+                continue
+            if all(d.change_pct is None for d in days):
+                # 등락률을 받기 전에 저장된 구간이다. 조정하지 않고 비워 둔다.
+                # 여기서 close 를 그대로 adj_close 에 넣으면 "조정된 값" 으로 오해된다
+                without_change_pct += 1
+                continue
+
+            adjusted = adj.adjust(days)
+            # 바뀌는 행만 쓴다 (rows_to_write 주석). 대부분의 종목은 0행이다
+            statements: list[tuple[str, list[Any]]] = [
+                ("UPDATE prices SET adj_close = ? WHERE stock_id = ? AND date = ?", [value, stock_id, day])
+                for day, value in rows_to_write(days, adjusted, stored_by_stock.get(stock_id, {}))
+            ]
+            db.note_prices_touched((stock_id, args[2]) for _sql, args in statements)  # 시세 사본 (25.888)
+            for chunk_start in range(0, len(statements), UPDATE_CHUNK):
+                client.batch(statements[chunk_start : chunk_start + UPDATE_CHUNK])
+            updated += len(statements)
+
+            found = [a for a in adjusted if adj.is_action(a.factor)]
+            if found:
+                with_action += 1
+                if len(action_samples) < 10:
+                    action_samples.append(
+                        {"stock_id": stock_id, "dates": [(a.date, round(a.factor, 4)) for a in found[:3]]}
+                    )
+            # **구멍 위에서 판정된 것은 따로 센다** (docs/infra.md 25.132).
+            # 계수 식은 "앞 행 = 바로 전 거래일" 을 전제한다. 수집이 하루 빠지면 그 계수가
+            # 빠진 구간의 수익률이 되고, 수정계수는 **그 이전 전체**에 곱해진다
+            의심 = adj.suspect_actions(adjusted)
+            if 의심:
+                with_suspect += 1
+                if len(suspect_samples) < 10:
+                    suspect_samples.append({
+                        "stock_id": stock_id,
+                        "dates": [(a.date, round(a.factor, 4), a.gap_days) for a in 의심[:3]],
+                    })  # fmt: skip
+
+    return {
+        "stocks": len(stock_ids),
+        "rows_updated": updated,
+        "stocks_with_action": with_action,
+        "stocks_with_suspect_action": with_suspect,
+        "suspect_samples": suspect_samples,
+        "stocks_without_change_pct": without_change_pct,
+        "samples": action_samples,
+        "calc_version": adj.CALC_VERSION,
+    }
+
+
 def run(ticker: str | None = None, force: bool = False) -> int:
     client = TursoClient()
     try:
@@ -151,65 +216,10 @@ def run(ticker: str | None = None, force: bool = False) -> int:
             print("이번 달 읽기 예산이 모자랍니다. --force 로 넘길 수 있지만 계정이 막힐 수 있습니다")
             return 1
 
-        updated = 0
-        with_action = 0
-        with_suspect = 0
-        without_change_pct = 0
-        action_samples: list[dict[str, Any]] = []
-        suspect_samples: list[dict[str, Any]] = []
-
-        for start in range(0, len(stock_ids), CHUNK_STOCKS):
-            ids = stock_ids[start : start + CHUNK_STOCKS]
-            days_by_stock, stored_by_stock = load_days(client, ids)
-            for stock_id, days in days_by_stock.items():
-                if not days:
-                    continue
-                if all(d.change_pct is None for d in days):
-                    # 등락률을 받기 전에 저장된 구간이다. 조정하지 않고 비워 둔다.
-                    # 여기서 close 를 그대로 adj_close 에 넣으면 "조정된 값" 으로 오해된다
-                    without_change_pct += 1
-                    continue
-
-                adjusted = adj.adjust(days)
-                # 바뀌는 행만 쓴다 (rows_to_write 주석). 대부분의 종목은 0행이다
-                statements: list[tuple[str, list[Any]]] = [
-                    ("UPDATE prices SET adj_close = ? WHERE stock_id = ? AND date = ?", [value, stock_id, day])
-                    for day, value in rows_to_write(days, adjusted, stored_by_stock.get(stock_id, {}))
-                ]
-                db.note_prices_touched((stock_id, args[2]) for _sql, args in statements)  # 시세 사본 (25.888)
-                for chunk_start in range(0, len(statements), UPDATE_CHUNK):
-                    client.batch(statements[chunk_start : chunk_start + UPDATE_CHUNK])
-                updated += len(statements)
-
-                found = [a for a in adjusted if adj.is_action(a.factor)]
-                if found:
-                    with_action += 1
-                    if len(action_samples) < 10:
-                        action_samples.append(
-                            {"stock_id": stock_id, "dates": [(a.date, round(a.factor, 4)) for a in found[:3]]}
-                        )
-                # **구멍 위에서 판정된 것은 따로 센다** (docs/infra.md 25.132).
-                # 계수 식은 "앞 행 = 바로 전 거래일" 을 전제한다. 수집이 하루 빠지면 그 계수가
-                # 빠진 구간의 수익률이 되고, 수정계수는 **그 이전 전체**에 곱해진다
-                의심 = adj.suspect_actions(adjusted)
-                if 의심:
-                    with_suspect += 1
-                    if len(suspect_samples) < 10:
-                        suspect_samples.append({
-                            "stock_id": stock_id,
-                            "dates": [(a.date, round(a.factor, 4), a.gap_days) for a in 의심[:3]],
-                        })  # fmt: skip
-
-        step = {
-            "stocks": len(stock_ids),
-            "rows_updated": updated,
-            "stocks_with_action": with_action,
-            "stocks_with_suspect_action": with_suspect,
-            "suspect_samples": suspect_samples,
-            "stocks_without_change_pct": without_change_pct,
-            "samples": action_samples,
-            "calc_version": adj.CALC_VERSION,
-        }
+        step = adjust_stocks(client, stock_ids)
+        updated, with_action = step["rows_updated"], step["stocks_with_action"]
+        with_suspect, without_change_pct = step["stocks_with_suspect_action"], step["stocks_without_change_pct"]
+        action_samples, suspect_samples = step["samples"], step["suspect_samples"]
         db.finish_batch_run(client, run_id, status="success", step_log=step)
         print(f"종목 {len(stock_ids)}개 중 {with_action}개에서 기업행위를 찾아 {updated:,}행을 조정했습니다")
         if without_change_pct:

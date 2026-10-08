@@ -327,6 +327,45 @@ class Test기업행위를_알아챈다:
         assert len(말) == 1, "보유하지 않은 종목인데 수량 얘기까지 했다"
         assert "005930" in 말[0] and "수정주가" in 말[0]
 
+    def test_걸린_종목만_수정주가를_바로_다시_낸다(self, monkeypatch) -> None:
+        """25.1009: 예전에는 사람이 Actions 를 돌릴 때까지 그 종목 수정종가가 꺾인 채 점수에 들어갔다."""
+        from batch.jobs import adjust_kr, daily
+
+        받은: list[list[int]] = []
+        monkeypatch.setattr(adjust_kr, "adjust_stocks", lambda c, ids: 받은.append(ids) or {"rows_updated": 1234})
+        말 = daily._detect_kr_actions(
+            self._client("2026-09-17", {1: 1000.0, 2: 2000.0}),
+            "2026-09-18",
+            [self._Row("005930", 500.0, 0.0), self._Row("000660", 1000.0, 0.0)],
+            {"005930": 1, "000660": 2},
+        )
+        assert 받은 == [[1, 2]]
+        assert "바로 다시 냈습니다(바뀐 행 1,234)" in 말[0] and "Actions" not in 말[0]
+
+        # 못 내면 예전처럼 사람에게 말한다
+        def 터짐(c, ids):  # noqa: ANN001, ANN202
+            raise RuntimeError("읽기 실패")
+
+        monkeypatch.setattr(adjust_kr, "adjust_stocks", 터짐)
+        말 = daily._detect_kr_actions(
+            self._client("2026-09-17", {1: 1000.0}), "2026-09-18", [self._Row("005930", 500.0, 0.0)], {"005930": 1}
+        )
+        assert "바로 내지 못했습니다(읽기 실패)" in 말[0] and "Actions" in 말[0]
+
+    def test_걸린_종목이_많으면_바로_내지_않는다(self, monkeypatch) -> None:
+        from batch.jobs import adjust_kr, daily
+
+        받은: list = []
+        monkeypatch.setattr(adjust_kr, "adjust_stocks", lambda c, ids: 받은.append(ids) or {"rows_updated": 0})
+        n = daily.AUTO_ADJUST_MAX_STOCKS + 1
+        말 = daily._detect_kr_actions(
+            self._client("2026-09-17", {i: 1000.0 for i in range(n)}),
+            "2026-09-18",
+            [self._Row(f"{i:06d}", 500.0, 0.0) for i in range(n)],
+            {f"{i:06d}": i for i in range(n)},
+        )
+        assert 받은 == [] and "Actions" in 말[0]
+
     def test_하루_수집_구멍이면_기업행위가_아닐_수_있다고_말한다(self) -> None:
         """간격 2일짜리 구멍은 11일 문턱에 안 걸려 단서 없이 "기업행위" 가 됐다 (docs/infra.md 25.569, 감사 재현)."""
         from batch.jobs import daily

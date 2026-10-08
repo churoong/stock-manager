@@ -276,6 +276,11 @@ def _collect_index_prices(client: TursoClient) -> list[str]:
     return warnings
 
 
+#: 일일 배치가 기업행위로 보인 종목의 수정주가를 바로 다시 내는 상한 (25.1009) — 종목당 약 1,250행
+#: (`adjust_kr.ROWS_PER_STOCK`)이라 20종목이면 2.5만 행이다. 이보다 많으면 수집 이상일 수 있어 사람에게 넘긴다
+AUTO_ADJUST_MAX_STOCKS = 20
+
+
 def _detect_kr_actions(
     client: TursoClient, trade_date: str, krx_rows: list, ids: dict[str, int]
 ) -> list[str]:
@@ -378,6 +383,26 @@ def _detect_kr_actions(
         단서 = "(직전 거래일 시세가 없어 분할인지 확실하지 않습니다)"
         보유말 = [f"{단서} {m}" for m in _보유_수량_확인(client, 걸린번호)]
         return [f"직전 거래일 시세가 빠진 채 크게 움직인 종목 {len(걸린것)}개: {보기}.{꼬리}", *보유말]
+    # **걸린 종목만 바로 다시 낸다** (25.1009). 전 종목은 하루 읽기 예산의 3분의 2 라 손으로 돌리게 했지만,
+    # 걸린 몇 종목은 종목당 약 1,250행이라 싸다. 예전에는 사람이 Actions 를 돌릴 때까지 그 종목 수정종가 계열이
+    # 그날 -50%·-90% 로 꺾인 채 모멘텀·변동성·MDD·점수에 들어갔다.
+    # 사이가 벌어진 날(위 꼬리)은 기업행위라 단정하지 않으므로 내지 않는다
+    if not 꼬리 and 0 < len(걸린번호) <= AUTO_ADJUST_MAX_STOCKS:
+        try:
+            from batch.jobs import adjust_kr
+
+            결과 = adjust_kr.adjust_stocks(client, sorted(set(걸린번호)))
+            말들 = [
+                f"기업행위로 보이는 종목 {len(걸린것)}개: {보기}. 그 종목만 국내 수정주가를 바로 다시 냈습니다"
+                f"(바뀐 행 {결과['rows_updated']:,})"
+            ]
+        except Exception as exc:  # noqa: BLE001 — 못 내면 예전처럼 사람에게 말한다
+            말들 = [
+                f"기업행위로 보이는 종목 {len(걸린것)}개: {보기}. 수정주가를 바로 내지 못했습니다({exc})"
+                " **국내 수정주가를 다시 내야 합니다** — Actions → \"국내 수정주가\""
+            ]
+        말들.extend(_보유_수량_확인(client, 걸린번호))
+        return 말들
     말들 = [
         f"기업행위로 보이는 종목 {len(걸린것)}개: {보기}.{꼬리}"
         " **국내 수정주가를 다시 내야 합니다** — Actions → \"국내 수정주가\""
