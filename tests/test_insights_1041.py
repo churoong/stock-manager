@@ -165,3 +165,24 @@ def test_내부자_매매가_근거에_실린다() -> None:
     d = json.loads(c.execute("SELECT detail_json FROM stock_verdicts").fetchone()[0])
     assert d["insider"]["net_shares"] == 5000
     assert any(r.startswith("내부자 매매 최근 90일: 순매수 5,000주 (상장주식수의 +0.500%)") for r in d["reasons"])
+
+
+def test_다음_실적_발표() -> None:
+    mem = MemClient()
+    db.apply_migrations(mem)  # type: ignore[arg-type]
+    c = mem.conn
+    c.execute("INSERT INTO stocks (id, ticker, market, country, name_ko, currency, source, fetched_at)"
+              " VALUES (1, '005930', 'KOSPI', 'KR', '가', 'KRW', 't', 't')")  # fmt: skip
+    c.execute("INSERT INTO scores (stock_id, as_of_date, total_score, factor_scores, sentiment_weight_used,"
+              " weights_json, rank_in_market, calc_version, created_at) VALUES (1, '2026-10-07', 60, '{}', 0, '{}', 1,"
+              " 10, 't')")  # fmt: skip
+    for d, ok in (("2026-10-28", 1), ("2027-01-28", 0), ("2026-07-28", 1)):
+        c.execute("INSERT INTO earnings_calendar (stock_id, event_type, scheduled_date, is_confirmed, source, fetched_at)"
+                  " VALUES (1, '실적발표', ?, ?, 'yahoo', 't')", [d, ok])  # fmt: skip
+    c.execute("INSERT INTO disclosure_reaction (type, label, keywords, priority, n, mean_pct, median_pct, pos_pct,"
+              " window_days, since, as_of, computed_at) VALUES ('earnings', '실적', '[]', 1, 300, 0.5, 0.3, 52, 5, 's',"
+              " 'a', 't')")  # fmt: skip
+    mem.batch(job.build_market(mem, "KR", date(2026, 10, 8), []))  # type: ignore[arg-type]
+    d = json.loads(c.execute("SELECT detail_json FROM stock_verdicts").fetchone()[0])
+    assert d["earnings"] == {"date": "2026-10-28", "days": 20, "confirmed": True, "source": "yahoo"}
+    assert any(r.startswith("다음 실적 발표 2026-10-28 (D-20, 확정) — 국내 실적(잠정) 공시 뒤") for r in d["reasons"])

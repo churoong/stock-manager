@@ -140,6 +140,12 @@ FLOWS_SQL = (
 )
 #: 석 달 ≈ 60거래일 + 연휴 여유
 FLOWS_CALENDAR_DAYS = 100
+# 다음 실적 발표 (24장, 25.1048) — 종목마다 오늘 이후 가장 이른 실적발표 일정 하나 (SQLite 의 MIN 과 같은 행의 열)
+EARNINGS_SQL = (
+    "SELECT e.stock_id, MIN(e.scheduled_date) AS d, e.is_confirmed, e.source FROM earnings_calendar e"
+    " JOIN stocks s ON s.id = e.stock_id WHERE s.country = ? AND e.event_type = '실적발표' AND e.scheduled_date >= ?"
+    " GROUP BY e.stock_id"
+)
 # 같은 점수대의 지난 신호 성적 (22장, 25.1046) — 신호 성적표 작업이 실행 기록에 남긴 점수 보정표 (한 행)
 CALIBRATION_SQL = (
     "SELECT step_log FROM batch_runs WHERE job_name = 'signal_outcomes' AND market = ? AND status = 'success'"
@@ -449,6 +455,12 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
         if not db.표가_없나(exc):
             warnings.append(f"내부자 매매를 읽지 못했습니다: {exc}")
         내부자 = {}
+    실적일 = {int(r["stock_id"]): r for r in _safe(client, EARNINGS_SQL, [country, today.isoformat()], warnings,
+                                                   "실적 일정")}  # fmt: skip
+    실적반응 = None
+    if country == "KR":
+        실적반응 = next((r for r in _safe(client, REACTION_SQL, [], warnings, "공시 반응 통계")
+                     if r.get("type") == "earnings"), None)  # fmt: skip
     보정표: list[dict] = []
     for r in _safe(client, CALIBRATION_SQL, [country], warnings, "점수 보정표"):
         with contextlib.suppress(TypeError, ValueError, AttributeError):
@@ -521,6 +533,19 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
                 out["reasons"].append(f"내부자 매매 최근 {내부자[sid].window_days}일: {행[0]['display']}")
                 out["evidence"].append(행[0])
             detail["insider"] = 내부자[sid].as_dict()
+        if sid in 실적일:
+            e = 실적일[sid]
+            남은 = (date.fromisoformat(str(e["d"])[:10]) - today).days
+            확정 = "확정" if e.get("is_confirmed") else "예상"
+            반응 = ""
+            if 실적반응 and isinstance(실적반응.get("median_pct"), (int, float)):
+                반응 = (f" — 국내 실적(잠정) 공시 뒤 5거래일 반응(시장 전체): 중앙값 {실적반응['median_pct']:+.1f}%·"
+                        f"오른 비율 {실적반응['pos_pct']:.0f}% ({실적반응['n']}건)")  # fmt: skip
+            out["reasons"].append(f"다음 실적 발표 {e['d']} (D-{남은}, {확정}){반응}")
+            out["evidence"].append(vd._row("다음 실적 발표", str(e["d"]), 확정,
+                                           f"earnings_calendar ({e.get('source')})", str(e["d"])))  # fmt: skip
+            detail["earnings"] = {"date": e["d"], "days": 남은, "confirmed": bool(e.get("is_confirmed")),
+                                  "source": e.get("source")}  # fmt: skip
         보정 = insights.calibration_for(r["total_score"], 보정표)
         detail["calibration"] = 보정
         if 보정:
