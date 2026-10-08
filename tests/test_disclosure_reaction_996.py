@@ -36,7 +36,7 @@ def test_요약과_한_줄은_웹과_같은_문장() -> None:
     assert b["n"] == 120 and b["pos_pct"] == 50.0 and b["mean_pct"] == 0.25
     b = {**b, "mean_pct": 1.234, "median_pct": 0.81, "pos_pct": 56.2}
     # web/__tests__/disclosureReaction996.test.ts 의 기대 문장과 같다
-    assert dr.line(b) == "자기주식 취득 공시 뒤 5거래일 지수 대비 중앙값 +0.8% · 평균 +1.2% · 오른 비율 56% (120건)"
+    assert dr.line(b) == "자기주식 취득 공시: 전날 종가부터 5거래일째까지(공시일 반응 포함) 지수 대비 중앙값 +0.8% · 평균 +1.2% · 오른 비율 56% (120건)"
     assert dr.line({**b, "n": dr.MIN_N - 1}) is None
 
 

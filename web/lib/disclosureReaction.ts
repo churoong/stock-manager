@@ -42,5 +42,6 @@ const signed = (v: number) => `${v > 0 ? "+" : ""}${v.toFixed(1)}%`;
 
 export function reactionLine(r: ReactionRow | null): string | null {
   if (!r || r.n < REACTION_MIN_N || r.median_pct === null || r.mean_pct === null || r.pos_pct === null) return null;
-  return `${r.label} 공시 뒤 ${r.window_days}거래일 지수 대비 중앙값 ${signed(r.median_pct)} · 평균 ${signed(r.mean_pct)} · 오른 비율 ${r.pos_pct.toFixed(0)}% (${r.n}건)`;
+  // 공시일 반응이 들어 있다 — 알림 뒤에 얻을 수 있는 몫이 아니다 (25.1013)
+  return `${r.label} 공시: 전날 종가부터 ${r.window_days}거래일째까지(공시일 반응 포함) 지수 대비 중앙값 ${signed(r.median_pct)} · 평균 ${signed(r.mean_pct)} · 오른 비율 ${r.pos_pct.toFixed(0)}% (${r.n}건)`;
 }
