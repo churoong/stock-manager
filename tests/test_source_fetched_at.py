@@ -31,6 +31,7 @@ import pytest
 받아_온_표 = {
     "kr_opinions": "한국투자증권 KIS 증권사 투자의견 (batch/jobs/kis_flows.py, 25.988)",
     "kr_corp_events": "한국투자증권 KIS 예탁원 기업행위 일정 (batch/jobs/kis_flows.py, 25.988)",
+    "disclosure_coverage": "DART 공시목록 — 시장 전체 B·I 를 그날 다 받은 날 (batch/jobs/disclosure_reaction.py, 25.1014)",
     "kr_flows": "한국투자증권 KIS 투자자별·공매도·신용 일별 (batch/jobs/kis_flows.py, 25.987)",
     "api_tokens": "한국투자증권 KIS 접근토큰 (web/lib/kis.ts, 25.983)",
     "stocks": "KRX 종목마스터 · SEC company_tickers",

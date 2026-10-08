@@ -1154,11 +1154,7 @@ def load_buyback_events(
     (호출이 성공했고 쪽 상한에 안 잘린 종목)에게만 [실행일 − days, 실행일] 을 준다. 예전(25.484)에는 DART 고유번호가
     있는 종목 전부에 주어, 수집 당시 유니버스 밖이었던 종목이 수집된 적 없이 0 이 됐다.
     `covered_ids` 가 없는 옛 기록은 쓰지 않는다."""
-    rows = client.execute(
-        "SELECT d.stock_id, d.title, d.disclosed_at FROM disclosures d JOIN stocks s ON s.id = d.stock_id"
-        " WHERE s.country = ? AND d.title LIKE ?",
-        [country, "%자기주식%"],
-    ).dicts()
+    rows = client.execute(BUYBACK_EVENTS_SQL, [country, "%자기주식%"]).dicts()
     events: dict[int, list[str]] = {}
     for r in rows:
         if bb.is_buyback(str(r["title"])):
@@ -1178,18 +1174,48 @@ def load_buyback_events(
                 windows.setdefault(int(sid), []).append(구간)
         except (TypeError, ValueError, KeyError):
             continue
+    # **시장 전체 B 공시를 다 받은 날은 국내 전 종목을 덮는다** (25.1014, 14회차 교차검증). 자사주·희석 공시는
+    # 주요사항보고(B)로 온다(10-08 실측: 1년 동안 자사주 결정 B 43~130건/달, B 밖 0~10건).
+    # 덮은 날은 `disclosure_reaction.collect` 가 하루마다 남긴다
+    if country == "KR":
+        시장구간 = coverage_ranges([str(r[0]) for r in client.execute(COVERAGE_B_SQL).rows])
+        if 시장구간:
+            for r in client.execute("SELECT id FROM stocks WHERE country = 'KR'").rows:
+                windows.setdefault(int(r[0]), []).extend(시장구간)
     return events, windows
+
+
+#: 종목에 아직 잇지 못한 공시(stock_id 없음)도 DART 고유번호로 이어 읽는다 (25.1014). 시장 전체 수집은 잇지 못한 행을
+#: 버리지 않는다 — 신규 상장이 `stocks` 에 들어오기 전 공시가 빠지면 덮은 날인데 0 이 된다
+BUYBACK_EVENTS_SQL = (
+    "SELECT s.id AS stock_id, d.title, d.disclosed_at FROM disclosures d JOIN stocks s"
+    " ON s.id = d.stock_id OR (d.stock_id IS NULL AND s.dart_corp_code = d.corp_code)"
+    " WHERE s.country = ? AND d.title LIKE ?"
+)
+DILUTION_EVENTS_SQL = (
+    "SELECT s.id AS stock_id, d.title, d.disclosed_at FROM disclosures d JOIN stocks s"
+    " ON s.id = d.stock_id OR (d.stock_id IS NULL AND s.dart_corp_code = d.corp_code)"
+    " WHERE s.country = ? AND (d.title LIKE '%증자%' OR d.title LIKE '%사채%')"
+)
+COVERAGE_B_SQL = "SELECT day FROM disclosure_coverage WHERE kind = 'B' ORDER BY day"
+
+
+def coverage_ranges(days: list[str]) -> list[tuple[str, str]]:
+    """덮은 날들 → 하루씩 이어지는 (시작, 끝) 구간들. 하루라도 빠지면 끊는다 — 그 날 공시를 모르기 때문이다."""
+    out: list[list[str]] = []
+    for d in sorted(set(days)):
+        if out and d == (date.fromisoformat(out[-1][1]) + timedelta(days=1)).isoformat():
+            out[-1][1] = d
+        else:
+            out.append([d, d])
+    return [(a, b) for a, b in out]
 
 
 def load_dilution_events(client: TursoClient, country: str) -> dict[int, list[str]]:
     """종목 → 희석 사건 공시 접수일들 (3회차 C, docs/factors.md 12.2, 25.738).
 
     수집 구간은 `load_buyback_events` 의 것을 쓴다 — 같은 공시 수집(`disclosures_kr --all`)이다."""
-    rows = client.execute(
-        "SELECT d.stock_id, d.title, d.disclosed_at FROM disclosures d JOIN stocks s ON s.id = d.stock_id"
-        " WHERE s.country = ? AND (d.title LIKE '%증자%' OR d.title LIKE '%사채%')",
-        [country],
-    ).dicts()
+    rows = client.execute(DILUTION_EVENTS_SQL, [country]).dicts()
     events: dict[int, list[str]] = {}
     for r in rows:
         if dil.is_dilution(str(r["title"])):

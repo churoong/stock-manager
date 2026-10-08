@@ -19,6 +19,18 @@ on:
         description: 공시 반응 — 지난 며칠을 다시 모은 뒤 다시 계산 (빈 구간 메우기, 25.1010). 비우면 평소대로
         type: string
         default: ""
+      disclosure_from:
+        description: 공시 백필 시작일 YYYY-MM-DD (덮은 날 기록용, 25.1014). 비우면 disclosure_days 규칙
+        type: string
+        default: ""
+      disclosure_to:
+        description: 공시 백필 끝일 YYYY-MM-DD (비우면 오늘)
+        type: string
+        default: ""
+      disclosure_kinds:
+        description: 공시 종류 B,I (백필은 B 만이면 자사주·희석 판정에 충분)
+        type: string
+        default: "B,I"
       disclosure_only:
         description: 수급·증권사 성적표는 건너뛰고 공시 반응만
         type: boolean
@@ -86,6 +98,11 @@ jobs:
           # 빈 구간 메우기: 지난 N일을 다시 모으고 계산을 강제한다 (25.1010)
           DARGS=""
           if [ -n "${{ inputs.disclosure_days }}" ]; then DARGS="--days ${{ inputs.disclosure_days }} --force"; fi
+          # 오래된 구간 백필 (25.1014) — 계산은 하지 않는다(평소 금요일 계산이 쓴다). 60분 안에 끝나게 1년씩 나눠 돌린다
+          if [ -n "${{ inputs.disclosure_from }}" ]; then
+            DARGS="--from ${{ inputs.disclosure_from }} --kinds ${{ inputs.disclosure_kinds || 'B,I' }}"
+            if [ -n "${{ inputs.disclosure_to }}" ]; then DARGS="$DARGS --to ${{ inputs.disclosure_to }}"; fi
+          fi
           python -m batch.jobs.disclosure_reaction $DARGS 2>&1 | python scripts/ops_tee.py -a run.log
 
       - name: 기록을 이슈로 내보내기

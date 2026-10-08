@@ -33,11 +33,20 @@ BACKFILL_DAYS = 365
 DAILY_DAYS = 7
 #: 금요일에만 다시 계산한다
 WEEKDAY = 4
+#: 종목은 **DART 고유번호를 먼저** 보고 잇는다 (25.1014, 교차검증). 티커만 보면 이전상장 옛 행(같은 티커, 다른
+#: 시장)에 붙을 수 있었다. 잇지 못하면 **버리지 않고** stock_id 없이 남긴다 — 신규 상장이 `stocks` 에 들어온 뒤
+#: 고유번호로 이어 읽는다
 INSERT = (
     "INSERT INTO disclosures (stock_id, corp_code, receipt_no, title, disclosed_at, url, is_material, source,"
-    " fetched_at)"
-    " SELECT s.id, ?, ?, ?, ?, ?, ?, ?, ? FROM stocks s WHERE s.country = 'KR' AND s.ticker = ?"
-    " ON CONFLICT (receipt_no) DO NOTHING"
+    " fetched_at) VALUES ("
+    "(SELECT s.id FROM stocks s WHERE s.country = 'KR' AND (s.dart_corp_code = ? OR s.ticker = ?)"
+    " ORDER BY (s.dart_corp_code = ?) DESC, (s.status = 'active') DESC, s.id DESC LIMIT 1),"
+    " ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (receipt_no) DO NOTHING"
+)
+COVERAGE = (
+    "INSERT INTO disclosure_coverage (kind, day, rows, calls, source, fetched_at) VALUES (?, ?, ?, ?, ?, ?)"
+    " ON CONFLICT (kind, day) DO UPDATE SET rows = excluded.rows, calls = excluded.calls,"
+    " fetched_at = excluded.fetched_at"
 )
 UPSERT = (
     "INSERT INTO disclosure_reaction (type, label, keywords, priority, n, mean_pct, median_pct, pos_pct, window_days,"
@@ -45,35 +54,42 @@ UPSERT = (
 )
 
 
-def collect(client: TursoClient, today: date, days: int) -> dict:
-    """지난 days 일의 시장 전체 주요 공시를 넣는다. 한도에 막히면 멈춘다."""
+def collect(client: TursoClient, start: date, end: date, kinds: tuple[str, ...] = dd.MARKET_KINDS) -> dict:
+    """[start, end] 의 시장 전체 주요 공시를 넣는다. 한도·오류에 막히면 멈춘다.
+
+    **주말도 부른다** (25.1014) — 받은 날만 "덮은 날" 로 남기는데 주말을 건너뛰면 금·월 사이가 끊겨 365일 창이 영영
+    덮이지 않는다(`buyback.covered` 는 하루 차이까지만 잇는다). 주말은 대개 "자료 없음" 한 번이다.
+    종류마다 오류·잘림 없이 받은 날을 `disclosure_coverage` 에 그날 바로 쓴다."""
     stamp, calls, rows, err = db.now_iso(), 0, 0, None
-    for back in range(days, -1, -1):
-        day = (today - timedelta(days=back))
-        if day.weekday() >= 5:
-            continue
+    덮음 = 0
+    day = start
+    while day <= end:
         하루 = 0
-        for kind in dd.MARKET_KINDS:
+        for kind in kinds:
             got, n, err = dd.fetch_market_day(day.strftime("%Y%m%d"), kind)
             calls += n
             하루 += n
-            stmts = [
-                (INSERT, [d.corp_code, d.receipt_no, d.title, d.disclosed_at,
-                          dd.VIEW_URL.format(receipt_no=d.receipt_no), 1 if kind == "B" else 0, dd.SOURCE, stamp,
-                          d.stock_code])
+            stmts: list[tuple[str, list]] = [
+                (INSERT, [d.corp_code, d.stock_code, d.corp_code, d.corp_code, d.receipt_no, d.title, d.disclosed_at,
+                          dd.VIEW_URL.format(receipt_no=d.receipt_no), 1 if kind == "B" else 0, dd.SOURCE, stamp])
                 for d in got
             ]  # fmt: skip
+            if err is None:
+                stmts.append((COVERAGE, [kind, day.isoformat(), len(got), n, dd.SOURCE, stamp]))
+                덮음 += 1
             for i in range(0, len(stmts), 500):
                 client.batch(stmts[i : i + 500])
-            rows += len(stmts)
+            rows += len(got)
             if err:
                 break
-        # 하루치마다 세고 **넘기 전에** 멈춘다 (CLAUDE.md 80% 경고·100% 중단, 25.117) — 첫 1년 모으기가 1,500회다
+        # 하루치마다 세고 **넘기 전에** 멈춘다 (CLAUDE.md 80% 경고·100% 중단, 25.117)
         if 하루 and db.record_and_guard(client, "dart_opendart", count=하루, limit_value=20_000) == "blocked":
             err = err or "DART 일일 한도 — 나머지 날은 다음 실행에"
         if err:
             break
-    return {"days": days, "calls": calls, "rows": rows, "error": err}
+        day += timedelta(days=1)
+    return {"from": start.isoformat(), "to": end.isoformat(), "kinds": list(kinds), "calls": calls, "rows": rows,
+            "covered": 덮음, "stopped_at": day.isoformat() if err else None, "error": err}  # fmt: skip
 
 
 def compute(client: TursoClient, today: date) -> dict:
@@ -127,14 +143,17 @@ def compute(client: TursoClient, today: date) -> dict:
             "ready": [r["type"] for r in rows if r["n"] >= dr.MIN_N]}  # fmt: skip
 
 
-def run(days: int | None = None, force: bool = False) -> int:
+def run(days: int | None = None, force: bool = False, start: date | None = None, end: date | None = None,
+        kinds: tuple[str, ...] = dd.MARKET_KINDS) -> int:  # fmt: skip
     client = TursoClient()
     try:
         db.apply_migrations(client)
         today = cal.user_today()
         run_id = db.start_batch_run(client, job_name=JOB_NAME, market="KR", trade_date=today.isoformat())
         비었나 = client.execute("SELECT COUNT(*) FROM (SELECT 1 FROM disclosure_reaction LIMIT 1)").scalar() == 0
-        모음 = collect(client, today, days or (BACKFILL_DAYS if 비었나 else DAILY_DAYS))
+        끝 = end or today
+        시작 = start or (today - timedelta(days=days or (BACKFILL_DAYS if 비었나 else DAILY_DAYS)))
+        모음 = collect(client, 시작, 끝, kinds)
         # **1년 모으기가 중간에 멈췄으면 계산하지 않는다** (25.1006, 교차검증). 계산하면 표가 차서 다음 실행이
         # "비지 않았다" 로 보고 7일만 받는다 — 멈춘 날 뒤 몇 달이 영구히 빈다. 표를 비워 두면 다음 실행이 1년을
         # 다시 받는다(같은 접수번호는 한 번)
@@ -157,8 +176,13 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--days", type=int, default=None)
     parser.add_argument("--force", action="store_true")
+    # 오래된 구간 백필 (25.1014): 덮은 날 기록이 하루마다 남으니 구간을 나눠 여러 번 돌려도 된다
+    parser.add_argument("--from", dest="start", type=date.fromisoformat, default=None)
+    parser.add_argument("--to", dest="end", type=date.fromisoformat, default=None)
+    parser.add_argument("--kinds", default=",".join(dd.MARKET_KINDS), help="B,I 중 (백필은 B 만이면 된다)")
     args = parser.parse_args()
-    return run(args.days, args.force)
+    kinds = tuple(k for k in args.kinds.split(",") if k in dd.MARKET_KINDS) or dd.MARKET_KINDS
+    return run(args.days, args.force, args.start, args.end, kinds)
 
 
 if __name__ == "__main__":

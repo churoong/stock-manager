@@ -108,9 +108,9 @@ def test_1년_모으기가_멈추면_계산하지_않아_다음에_다시_받는
     monkeypatch.setattr(job, "TursoClient", lambda: mem)
     받은날수: list[int] = []
 
-    def 가짜_모으기(client, today, days):  # noqa: ANN001, ANN202
-        받은날수.append(days)
-        return {"days": days, "calls": 1, "rows": 0, "error": "DART 일일 한도 — 나머지 날은 다음 실행에"}
+    def 가짜_모으기(client, start, end, kinds):  # noqa: ANN001, ANN202
+        받은날수.append((end - start).days)
+        return {"calls": 1, "rows": 0, "error": "DART 일일 한도 — 나머지 날은 다음 실행에"}
 
     계산: list[int] = []
     monkeypatch.setattr(job, "collect", 가짜_모으기)
