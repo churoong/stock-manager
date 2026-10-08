@@ -8,6 +8,7 @@
  * Actions 예약이 밀리거나 워크플로가 꺼지면 아무 일도 일어나지 않는다 (docs/health.md 0장).
  */
 
+import { INTRADAY_ENABLED, INTRADAY_OFF_NOTE } from "@/lib/intradaySwitch";
 import { localDate, userDateOf, userTimeOf } from "@/lib/market";
 
 export type Market = "KR" | "US";
@@ -472,6 +473,8 @@ export function cronVerdict(
   table: readonly CronExpect[] = CRON_EXPECTED,
 ): FreshnessVerdict {
   const 기대 = table.find((c) => c.job === row.job && c.market === row.market);
+  // 장중 감시를 껐으면 비어 있는 것이 정상이다 (25.1026)
+  if (row.job === "intraday" && !INTRADAY_ENABLED) return { tone: "mute", text: "꺼짐", why: INTRADAY_OFF_NOTE };
   if (!기대) {
     return { tone: "mute", text: "", why: "이 크론의 기대 주기가 적혀 있지 않습니다" };
   }
@@ -548,6 +551,7 @@ export function intradayVerdict(
   inSession: boolean,
   now: Date,
 ): FreshnessVerdict {
+  if (!INTRADAY_ENABLED) return { tone: "mute", text: "꺼짐", why: INTRADAY_OFF_NOTE };
   const 기대 = CRON_EXPECTED.find((c) => c.job === "intraday" && c.market === market);
   const 주기 = 기대?.everyMinutes ?? 5;
   const 문턱 = 주기 * 3;

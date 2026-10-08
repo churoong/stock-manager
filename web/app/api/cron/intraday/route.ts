@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { INTRADAY_ENABLED, INTRADAY_OFF_NOTE } from "@/lib/intradaySwitch";
 import { notifyQuotaOnce } from "@/lib/quotaNotice";
 import { batch, execute, ifMissingTable, quotaReason, rowsToObjects } from "@/lib/db";
 import { REACTION_ROWS, type ReactionRow, classifyTitle, reactionLine } from "@/lib/disclosureReaction";
@@ -377,6 +378,8 @@ export async function GET(request: Request) {
   if (!tokenMatches(request.headers.get("x-cron-secret"), process.env.CRON_SECRET)) {
     return NextResponse.json({ error: "토큰이 맞지 않습니다" }, { status: 401 });
   }
+  // **꺼져 있으면 DB 를 전혀 건드리지 않는다** (docs/infra.md 25.1026 — Turso 한도). 호출 기록도 남기지 않는다
+  if (!INTRADAY_ENABLED) return NextResponse.json({ skipped: INTRADAY_OFF_NOTE });
   const market = new URL(request.url).searchParams.get("market")?.toUpperCase() as Market | undefined;
   if (market !== "KR" && market !== "US") {
     return NextResponse.json({ error: "market=KR 또는 US" }, { status: 400 });

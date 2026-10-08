@@ -12,6 +12,8 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+// 장중 감시가 켜졌을 때의 동작을 본다 — 운영 기본값은 꺼짐 (docs/infra.md 25.1026)
+vi.mock("@/lib/intradaySwitch", () => ({ INTRADAY_ENABLED: true, INTRADAY_OFF_NOTE: "꺼짐" }));
 import {
   activeSession,
   bundleMessage,

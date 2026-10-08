@@ -3,6 +3,11 @@
 > 2026-09-17 작성. 규칙의 단일 정의처. 코드는 준비 `batch/jobs/monitor_targets.py`, 판정 `web/lib/intraday.ts`,
 > 경로 `web/app/api/cron/intraday/route.ts`, 화면 [알림] (`web/components/AlertCenter.tsx`).
 
+> **2026-10-08 꺼 둠** (docs/infra.md 25.1026). 사용자: "장중 감시는 일단 빼자. 디비 소모가 너무 많아. 이미 turso가 리밋에 걸렸단 메시지가 왔어".
+> `web/lib/intradaySwitch.ts` 의 `INTRADAY_ENABLED = false` — 경로는 토큰만 확인하고 DB 를 건드리지 않고 끝난다. 다시 켜려면 true 로 바꿔 배포한다.
+> 꺼진 동안 매수 구간·목표가·손절·급등락·거래량·공시 장중 알림이 없고, 조용시간에 쌓인 알림(시간외·분석 완료 등)을 이 경로가 대신 보내던 것도 멈춘다.
+> 일일 배치의 "장중 감시 준비"(감시 목록, 하루 한 번)는 그대로 둔다 — 공시 수집이 그 목록을 쓴다.
+
 ## 0. 원칙
 
 - **알림은 판단 정보일 뿐이다.** 장중 경로는 **점수·신호·매매·보유를 바꾸지 않는다.**
