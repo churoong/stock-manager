@@ -65,22 +65,20 @@ def test_모르는_경우에만_Turso_를_살펴본다() -> None:
         assert len(답들) == 1, f"복귀={returned} 인데 Turso 상태에 따라 답이 갈린다: {답들}"
 
 
-def test_D1_값이_없으면_auto_라도_Turso_에_머문다(monkeypatch) -> None:  # noqa: ANN001
-    """25.1029 — 새 공개 저장소는 D1 시크릿이 없는데 DB_BACKEND 가 auto 라, Turso 가 한도로 막히자 모든 배치가
-    "D1 설정이 비어 있습니다" 로 죽었다. Turso 에 머물면 한도 오류는 entry.guard 가 '건너뜀' 으로 끝낸다."""
+def test_auto_라도_D1_으로_넘어가지_않는다(monkeypatch) -> None:  # noqa: ANN001
+    """25.1030 — 2026-10-08 사용자 결정 "D1으로 넘어가지말자". Turso 가 한도로 막혀도, D1 값이 있어도 Turso 에 머문다.
+    (25.1029 에는 D1 값이 없는 저장소에서 auto 가 D1 을 찾다 모든 배치가 죽었다)"""
     from batch.core import client as c
 
     monkeypatch.setattr(c, "backend", lambda: c.AUTO)
     monkeypatch.setattr(c, "_resolved", None)
-    for k in c.D1_ENV:
-        monkeypatch.delenv(k, raising=False)
     monkeypatch.delenv(c.PIN_ENV, raising=False)
     monkeypatch.setattr(c, "_probe_turso", lambda: (False, True))  # Turso 는 한도로 막힘
-    monkeypatch.setattr(c, "read_return_marker", lambda: None)
-    assert c.d1_configured() is False
-    assert c.resolved_backend() == c.TURSO
-    # D1 값이 있으면 예전처럼 판정한다 (막혔으면 D1)
-    monkeypatch.setattr(c, "_resolved", None)
+    monkeypatch.setattr(c, "read_return_marker", lambda: False)  # 예전 판정이면 D1
     for k in c.D1_ENV:
         monkeypatch.setenv(k, "x")
+    assert c.AUTO_FALLS_BACK_TO_D1 is False
+    assert c.resolved_backend() == c.TURSO
+    # 사람이 d1 이라고 적으면 그때만 D1
+    monkeypatch.setattr(c, "backend", lambda: c.D1)
     assert c.resolved_backend() == c.D1

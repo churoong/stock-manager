@@ -62,56 +62,38 @@ afterEach(() => {
 // 지키며 조용히 통과했다. 이제 둘 다 tests/fixtures/db_backend_decision.json 을 읽는다.
 // 여기 남은 것은 판정 **뒤에** 일어나는 일들이다 (docs/infra.md 25.42).
 
-describe("auto 경로", () => {
-  it("복귀 표시가 없으면 D1 에서 읽는다 — Turso 는 살펴보지도 않는다", async () => {
+// **auto 라도 D1 으로 넘어가지 않는다** (2026-10-08 사용자 결정 "D1으로 넘어가지말자", docs/infra.md 25.1030).
+// 예전(25.12) 시험은 복귀 표시로 D1 을 고르는 길을 봤다 — 판정표 자체(`decideBackend`)는 dbBackend.test.ts 가 그대로 본다
+describe("auto 경로 (25.1030)", () => {
+  it("Turso 가 한도로 막혀도 D1 을 찔러 보지 않고 Turso 로 간다 — 한도 오류가 그대로 올라온다", async () => {
     const calls = fakeNetwork(BLOCKED, false);
-    const { execute, rowsToObjects } = await import("@/lib/db");
-    const rows = rowsToObjects<{ n: number }>(await execute("SELECT 42 AS n"));
-    expect(rows).toEqual([{ n: 42 }]);
-    expect(calls).toEqual(["d1:marker", "d1:SELECT 42 AS n"]);
+    const { execute, AUTO_FALLS_BACK_TO_D1 } = await import("@/lib/db");
+    expect(AUTO_FALLS_BACK_TO_D1).toBe(false);
+    await expect(execute("SELECT 42 AS n")).rejects.toThrow();
+    expect(calls.every((c) => c === "turso")).toBe(true);
   });
 
-  it("Turso 가 살아나도 복귀 표시가 없으면 D1 에서 읽는다 (리셋 직후 ~ 복귀 워크플로 사이)", async () => {
+  it("Turso 가 살아 있으면 Turso 에서 읽는다 — 복귀 표시를 보지 않는다", async () => {
     const calls = fakeNetwork(TURSO_OK, false);
-    const { execute } = await import("@/lib/db");
-    await execute("SELECT 42 AS n");
-    expect(calls).not.toContain("turso");
-    expect(calls.at(-1)).toBe("d1:SELECT 42 AS n");
+    const { execute, rowsToObjects } = await import("@/lib/db");
+    expect(rowsToObjects<{ n: number }>(await execute("SELECT 7 AS n"))).toEqual([{ n: 7 }]);
+    expect(calls).toEqual(["turso"]);
   });
 
-  it("복귀 표시가 있으면 Turso 에서 읽는다", async () => {
-    const calls = fakeNetwork(TURSO_OK, true);
-    const { execute } = await import("@/lib/db");
-    await execute("SELECT 1");
-    expect(calls).toEqual(["d1:marker", "turso"]);
-  });
-
-  it("복귀 표시가 있으면 Turso 가 막혀도 D1 로 튀지 않는다", async () => {
-    fakeNetwork(BLOCKED, true);
-    const { execute } = await import("@/lib/db");
-    await expect(execute("SELECT 1")).rejects.toThrow(/한도/);
-  });
-
-  it("D1 을 못 읽으면 Turso 상태로 정하고, 그 판정은 짧게만 믿는다", async () => {
-    const calls = fakeNetwork(TURSO_OK, "down");
-    const { execute } = await import("@/lib/db");
-    await execute("SELECT 1");
-    expect(calls).toEqual(["d1:marker", "turso", "turso"]); // 표시 읽기 실패 → 살펴보기 → 실제 질의
-    vi.useFakeTimers();
-    try {
-      vi.advanceTimersByTime(6_000);
-      await execute("SELECT 1");
-      expect(calls.filter((c) => c === "d1:marker")).toHaveLength(2); // 5초 뒤 다시 본다
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("판정은 잠시 재사용한다 — 요청마다 D1 을 찔러 보지 않는다", async () => {
+  it("사람이 DB_BACKEND=d1 이라고 적으면 그때만 D1", async () => {
+    process.env.DB_BACKEND = "d1";
     const calls = fakeNetwork(BLOCKED, false);
     const { execute } = await import("@/lib/db");
     await execute("SELECT 42 AS n");
-    await execute("SELECT 42 AS n");
-    expect(calls.filter((c) => c === "d1:marker")).toHaveLength(1);
+    expect(calls).toEqual(["d1:SELECT 42 AS n"]);
+  });
+});
+
+describe("배치와 같은 결정 (25.1030)", () => {
+  it("배치도 auto 에서 D1 으로 넘어가지 않는다", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const py = readFileSync(join(process.cwd(), "..", "batch", "core", "client.py"), "utf-8");
+    expect(py).toContain("AUTO_FALLS_BACK_TO_D1 = False");
   });
 });

@@ -131,9 +131,16 @@ export async function readReturnMarker(): Promise<boolean | null> {
   }
 }
 
+/**
+ * auto 일 때 Turso 가 한도로 막히면 D1 으로 넘어가는가. **넘어가지 않는다** — 2026-10-08 사용자 결정 "D1으로 넘어가지말자"
+ * (docs/infra.md 25.1030). 배치 `batch/core/client.AUTO_FALLS_BACK_TO_D1` 과 같은 값. D1 은 `DB_BACKEND=d1` 일 때만
+ */
+export const AUTO_FALLS_BACK_TO_D1 = false;
+
 async function resolveBackend(): Promise<"turso" | "d1"> {
   const mode = dbBackend();
   if (mode !== "auto") return mode;
+  if (!AUTO_FALLS_BACK_TO_D1) return "turso";
   if (resolved && Date.now() - resolved.at < resolved.ttl) return resolved.value;
 
   const returned = await readReturnMarker();

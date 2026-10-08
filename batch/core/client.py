@@ -103,6 +103,12 @@ def returned_to_turso() -> bool:
     return read_return_marker() is True
 
 
+#: auto 일 때 Turso 가 한도로 막히면 D1 으로 넘어가는가. **넘어가지 않는다** — 2026-10-08 사용자 결정 "D1으로
+#: 넘어가지말자"
+#: (docs/infra.md 25.1030). 9월에는 넘어갔다(25.12) — 두 DB 에 데이터가 갈라지고 복귀가 무거웠다. 웹 `lib/db.ts` 와
+#: 같은 값
+AUTO_FALLS_BACK_TO_D1 = False
+
 #: D1 에 붙는 데 필요한 값 — `batch/core/d1.D1Client` 가 읽는 것과 같다
 D1_ENV = ("D1_ACCOUNT_ID", "D1_DATABASE_ID", "D1_API_TOKEN")
 
@@ -121,14 +127,11 @@ def resolved_backend() -> str:
     pinned = (config.get(PIN_ENV, "") or "").strip().lower()
     if pinned in (TURSO, D1):
         return pinned
-    if _resolved is None and not d1_configured():
-        # **D1 값이 없으면 auto 라도 Turso 에 머문다** (docs/infra.md 25.1029). 새 공개 저장소는 D1 시크릿을 넣지 않았다
-        # (docs/public-repo.md D8). 그런데 변수가 auto 로 남아, Turso 가 월 한도로 막히자(2026-10-08) 모든 배치가
-        # D1 으로 가려다 "D1 설정이 비어 있습니다" 로 **죽었다** — 한도 알림 대신 실패 메일, 일일 리포트도 실패로
-        # 보였다.
-        # Turso 에 머물면 한도 오류는 `entry.guard` 가 "건너뜀" 으로 끝내고 사유를 말한다
-        _resolved = TURSO
-        log.info("DB_BACKEND=auto 이지만 D1 값이 없어 Turso 를 쓴다")
+    if not AUTO_FALLS_BACK_TO_D1:
+        # **auto 라도 Turso 에 머문다** (2026-10-08 사용자 결정 "D1으로 넘어가지말자", docs/infra.md 25.1030).
+        # Turso 가 한도로 막히면 배치는 `entry.guard` 가 "건너뜀" 으로 끝내고 사유를 말한다. D1 은 `DB_BACKEND=d1` 로
+        # 사람이 정할 때만 쓴다
+        return TURSO
     if _resolved is None:
         returned = read_return_marker()
         ok = blocked = False

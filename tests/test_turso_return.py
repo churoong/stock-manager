@@ -29,6 +29,8 @@ def _d1_값이_있는_저장소(monkeypatch: pytest.MonkeyPatch) -> None:
     """이 파일은 D1 임시 운영(D1 값이 있는 저장소)의 복귀를 본다. D1 값이 없으면 auto 라도 Turso 에 머문다 (25.1029)."""
     for k in backend.D1_ENV:
         monkeypatch.setenv(k, "test")
+    # 이 파일은 넘어가던 시절(25.12)의 판정·복귀를 본다 — 운영은 넘어가지 않는다(25.1030)
+    monkeypatch.setattr(backend, "AUTO_FALLS_BACK_TO_D1", True)
 
 ROOT = Path(__file__).resolve().parent.parent
 
