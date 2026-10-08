@@ -129,6 +129,7 @@ def test_유니버스와_함께_계산하고_이_종목_결과만_순위와_함�
 
     uni = [{"stock_id": i, "ticker": f"{i}", "market": "KOSPI", "sector": "x", "market_cap": 1, "currency": "KRW",
             "snapshot_date": "d", "market_cap_date": "d"} for i in (1, 2, 3)]  # fmt: skip
+    monkeypatch.setattr(job, "stored_universe", lambda *a: None)  # 저장된 원값이 없을 때의 길(처음부터 읽기) — 25.1027
     monkeypatch.setattr(sj, "load_universe", lambda *a: uni)
     monkeypatch.setattr(sj, "load_series", lambda *a, **k: {})
     monkeypatch.setattr(sj, "series_window_start", lambda *a: None)

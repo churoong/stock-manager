@@ -61,6 +61,11 @@ DEFAULT_WEIGHTS = {
 # ----------------------------------------------------------------------
 
 
+def _ids(stock_ids: list[int] | None) -> str | None:
+    """고른 종목 목록을 `json_each` 인자로. None 이면 나라 전체 (25.1027)."""
+    return None if stock_ids is None else json.dumps(sorted(int(x) for x in stock_ids))
+
+
 def load_universe(client: TursoClient, country: str, as_of: str) -> list[dict[str, Any]]:
     """`as_of` 시점에 **알 수 있었던** 스냅샷의 편입 종목. 제외 종목은 점수를 내지 않는다.
 
@@ -84,7 +89,8 @@ def load_universe(client: TursoClient, country: str, as_of: str) -> list[dict[st
     return rs.dicts()
 
 
-def load_financials(client: TursoClient, country: str, as_of: str) -> dict[int, dict[int, dict]]:
+def load_financials(client: TursoClient, country: str, as_of: str,
+                    stock_ids: list[int] | None = None) -> dict[int, dict[int, dict]]:  # fmt: skip
     """`as_of` 까지 **공시된** 연간 재무. {stock_id: {fiscal_year: row}}
 
     **발표일(`report_date`)을 건다** (2026-09-21, docs/infra.md 25.97).
@@ -108,7 +114,9 @@ def load_financials(client: TursoClient, country: str, as_of: str) -> dict[int, 
         # `MATERIALIZED` 가 없으면 SQLite 가 펼쳐 예전과 같아진다. 결과는 같다(`tests/test_financial_basis_890.py`)
         "WITH b AS MATERIALIZED (SELECT s.id AS sid, (SELECT fb.consolidated FROM financials fb"
         " WHERE fb.stock_id = s.id AND fb.report_code = ? AND fb.report_date <= ?"
-        " ORDER BY fb.fiscal_year DESC, fb.consolidated DESC LIMIT 1) AS cons FROM stocks s WHERE s.country = ?)"
+        " ORDER BY fb.fiscal_year DESC, fb.consolidated DESC LIMIT 1) AS cons FROM stocks s WHERE s.country = ?"
+        # 고른 종목만 — 참고 분석 (25.1027). None 이면 나라 전체(예전과 같다)
+        " AND (? IS NULL OR s.id IN (SELECT value FROM json_each(?))))"
         " SELECT f.stock_id, f.fiscal_year, f.net_income, f.total_equity,"
         "       f.total_assets, f.total_liabilities, f.revenue, f.operating_income,"
         # 2026-09-17: 유동비율·피오트로스키 축소판·자산 성장률 (docs/factors.md 10.2)
@@ -117,7 +125,8 @@ def load_financials(client: TursoClient, country: str, as_of: str) -> dict[int, 
         " FROM b CROSS JOIN financials f ON f.stock_id = b.sid AND f.consolidated = b.cons"
         " WHERE f.report_code = ? AND f.report_date <= ?"
         " ORDER BY f.stock_id, f.report_date",
-        [ANNUAL_REPORT_CODE, as_of, country, ANNUAL_REPORT_CODE, as_of],  # 기준 고르기(25.856)·본 질의
+        # 기준 고르기(25.856)·본 질의
+        [ANNUAL_REPORT_CODE, as_of, country, *[_ids(stock_ids)] * 2, ANNUAL_REPORT_CODE, as_of],
     )
     out: dict[int, dict[int, dict]] = {}
     for row in rs.dicts():
@@ -181,7 +190,7 @@ def load_sentiments(
     return {int(r[0]): float(r[1]) for r in rs.rows}, None
 
 
-def load_metrics(client: TursoClient, country: str, as_of: str) -> dict[int, dict]:
+def load_metrics(client: TursoClient, country: str, as_of: str, stock_ids: list[int] | None = None) -> dict[int, dict]:
     """`as_of` 까지 계산된 성과 지표. 창은 3Y 를 먼저 보고 없으면 1Y 로 내려간다.
 
     **`as_of` 를 건다** (2026-09-21, docs/infra.md 25.97). 리스크 팩터 열 개 중 **일곱**이
@@ -193,9 +202,10 @@ def load_metrics(client: TursoClient, country: str, as_of: str) -> dict[int, dic
         "       m.mdd_recovery_days, m.mdd_trough_date, m.volatility_ann, m.sharpe, m.sortino, m.beta"
         f" FROM (WITH w(win) AS (VALUES {', '.join(['(?)'] * len(RISK_WINDOWS))}) SELECT win FROM w) w"
         " CROSS JOIN stocks s CROSS JOIN performance_metrics m"
-        " WHERE s.country = ? AND m.id = (SELECT x.id FROM performance_metrics x WHERE x.stock_id = s.id"
+        " WHERE s.country = ? AND (? IS NULL OR s.id IN (SELECT value FROM json_each(?)))"
+        " AND m.id = (SELECT x.id FROM performance_metrics x WHERE x.stock_id = s.id"
         "   AND x.window = w.win AND x.as_of_date <= ? ORDER BY x.as_of_date DESC, x.calc_version DESC LIMIT 1)",
-        [*RISK_WINDOWS, country, as_of],
+        [*RISK_WINDOWS, country, *[_ids(stock_ids)] * 2, as_of],
     )
 
     # 창 고르기는 `services/metrics.pick_window` 한 곳에 있다 (docs/infra.md 25.98)
@@ -444,7 +454,7 @@ def load_weights(client: TursoClient) -> tuple[dict[str, float], float, list[str
 
 def load_dividends(
     client: TursoClient, country: str, as_of: str, 못읽음: list[str] | None = None,
-    years: dict[int, int] | None = None,
+    years: dict[int, int] | None = None, stock_ids: list[int] | None = None,
 ) -> dict[int, float]:
     """`as_of` 시점에 **알 수 있었던** 최신 사업연도의 현금배당총액 (docs/factors.md 11.1).
 
@@ -473,10 +483,11 @@ def load_dividends(
             " JOIN stocks s ON s.id = d.stock_id"
             " JOIN (SELECT stock_id, fiscal_year, MAX(report_year) AS ry FROM stock_dividends"
             "       WHERE as_of_date IS NOT NULL AND as_of_date <= ?"
+            "         AND (? IS NULL OR stock_id IN (SELECT value FROM json_each(?)))"
             "       GROUP BY stock_id, fiscal_year) m"
             "   ON m.stock_id = d.stock_id AND m.fiscal_year = d.fiscal_year AND m.ry = d.report_year"
             " WHERE s.country = ? AND d.as_of_date IS NOT NULL AND d.as_of_date <= ?",
-            [as_of, country, as_of],
+            [as_of, *[_ids(stock_ids)] * 2, country, as_of],
         ).dicts()
     except Exception as exc:  # noqa: BLE001 — 배당을 못 읽어도 나머지 팩터는 낸다
         log.warning("배당을 읽지 못해 배당수익률이 빕니다: %s", exc)

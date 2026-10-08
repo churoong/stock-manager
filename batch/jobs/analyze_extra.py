@@ -129,16 +129,68 @@ def ensure_data(client: TursoClient, country: str, rows: list[dict]) -> list[str
     return warnings
 
 
-def score_extra(client: TursoClient, country: str, as_of: str, extra: list[dict]) -> dict[int, dict]:
-    """유니버스 + 이 종목들로 같은 계산을 돌려 **이 종목들의 결과만** 돌려준다.
+#: 유니버스의 저장된 팩터 원값과 종합 점수 (25.1027). 기준일·계산 판을 걸어 인덱스로 읽는다
+#: (`idx_factors_date`·`idx_scores_date`)
+STORED_FACTORS_SQL = (
+    "SELECT f.stock_id, f.factor, f.raw_json, s.market, s.sector FROM factors f JOIN stocks s ON s.id = f.stock_id"
+    " WHERE s.country = ? AND f.as_of_date = ? AND f.calc_version = ?"
+)
+STORED_TOTALS_SQL = (
+    "SELECT sc.stock_id, sc.total_score FROM scores sc JOIN stocks s ON s.id = sc.stock_id"
+    " WHERE s.country = ? AND sc.as_of_date = ? AND sc.calc_version = ?"
+)
 
-    {stock_id: {total, factors, rank, ranked, skip_reason}}. rank = 유니버스 종합 점수 가운데 이보다 높은 수 + 1
-    ("유니버스 기준 몇 위 상당")."""
+
+def stored_universe(client: TursoClient, country: str, as_of: str) -> tuple[list[sc.StockInput], list[float]] | None:
+    """그날 점수 작업이 저장한 유니버스의 팩터 원값 → z 입력, 그리고 유니버스 종합 점수 (docs/infra.md 25.1027).
+
+    없거나(점수 작업 전), 25.1027 전에 쓴 원값이라 회복 기간 하한이 없으면 None — 부르는 쪽이 재료를 처음부터 읽는다."""
+    rows = []
+    for r in client.execute(STORED_FACTORS_SQL, [country, as_of, sc.CALC_VERSION]).dicts():
+        try:
+            rows.append({**r, "raw": json.loads(r["raw_json"] or "{}")})
+        except (TypeError, ValueError):
+            return None
+    if not rows:
+        return None
+    inputs = sc.inputs_from_stored(rows)
+    if inputs is None:
+        return None
+    점수행 = client.execute(STORED_TOTALS_SQL, [country, as_of, sc.CALC_VERSION]).dicts()
+    totals = [float(r["total_score"]) for r in 점수행 if r["total_score"] is not None]
+    return inputs, totals
+
+
+def extra_inputs(client: TursoClient, country: str, as_of: str, extra: list[dict], 등락률: dict) -> list[sc.StockInput]:
+    """이 종목들만의 z 입력 — 점수 작업과 같은 로더를 종목을 골라 부른다 (25.1027)."""
+    ids = sorted(int(r["stock_id"]) for r in extra)
+    days = max(sc.MOMENTUM_OFFSETS) + 1
+    series: dict = {}
+    since = sj.series_window_start(client, country, as_of, days)
+    if since:
+        행 = client.execute(EXTRA_SERIES_SQL, [json.dumps(ids), since, as_of]).dicts()
+        series = sj.series_from_rows(행, days, 등락률)
+    못읽음: list[str] = []
+    financials = sj.load_financials(client, country, as_of, stock_ids=ids)
+    sj.drop_stale_annual(financials, as_of)
+    배당연도: dict[int, int] = {}
+    dividends = sj.load_dividends(client, country, as_of, 못읽음, 배당연도, stock_ids=ids)
+    if country == "US" and 배당연도:
+        sj.fill_us_no_dividend(dividends, 배당연도, financials, as_of)
+    성과 = sj.load_metrics(client, country, as_of, stock_ids=ids)
+    sj.attach_unrecovered_rows(client, 성과, as_of)
+    return sj.build_inputs(
+        extra, financials, 성과, series, dividends, sj.load_benchmark_closes(client, country, days, as_of, 못읽음),
+        as_of=as_of, moves=등락률, pending_adjust=sj.load_pending_adjust(client) if country == "US" else set(),
+    )  # fmt: skip
+
+
+def full_inputs(client: TursoClient, country: str, as_of: str, extra: list[dict], 등락률: dict) -> list[sc.StockInput]:
+    """유니버스 전 종목 + 이 종목들의 재료를 처음부터 읽는다 — 저장된 원값을 쓸 수 없을 때만 (25.1018 의 방식)."""
     universe = sj.load_universe(client, country, as_of)
     if not universe:
-        return {}
+        return []
     days = max(sc.MOMENTUM_OFFSETS) + 1
-    등락률: dict[int, dict[str, float | None]] = {}
     series = sj.load_series(client, country, as_of, days, moves=등락률)
     since = sj.series_window_start(client, country, as_of, days)
     ids = json.dumps(sorted(int(r["stock_id"]) for r in extra))
@@ -154,11 +206,38 @@ def score_extra(client: TursoClient, country: str, as_of: str, extra: list[dict]
     성과 = sj.load_metrics(client, country, as_of)
     sj.attach_unrecovered_rows(client, 성과, as_of)
     합친 = universe + [{k: r[k] for k in universe[0]} for r in extra]
-    inputs = sj.build_inputs(
+    return sj.build_inputs(
         합친, financials, 성과, series, dividends,
         sj.load_benchmark_closes(client, country, days, as_of, 못읽음),
         as_of=as_of, moves=등락률, pending_adjust=sj.load_pending_adjust(client) if country == "US" else set(),
     )  # fmt: skip
+
+
+def score_extra(client: TursoClient, country: str, as_of: str, extra: list[dict]) -> dict[int, dict]:
+    """유니버스 + 이 종목들로 같은 계산을 돌려 **이 종목들의 결과만** 돌려준다.
+
+    {stock_id: {total, factors, rank, ranked, skip_reason, momentum, path}}. rank = 유니버스 종합 점수 가운데
+    이보다 높은 수 + 1 ("유니버스 기준 몇 위 상당").
+
+    **유니버스 재료를 다시 읽지 않는다** (docs/infra.md 25.1027, 2026-10-08 사용자 "관심종목 참고 분석 DB 사용량
+    줄여줘"). z 는 그 시장 전 종목의 지표 원값으로 내는데, 그 원값은 그날 점수 작업이 `factors.raw_json` 에 이미
+    저장했다. 그것과 이 종목만의 재료로 같은 `score_factors` 를 돌린다 — 결과가 처음부터 읽은 것과 같다
+    (`tests/test_reference_light_1027.py`). 예전(25.1018)에는 유니버스 전 종목의 시세·재무·성과 지표를 다시 읽어
+    한 번에 약 149만 행이었다. 저장된 원값이 없으면(점수 작업 전·25.1027 전 원값) 예전처럼 처음부터 읽는다."""
+    extra_ids = {int(r["stock_id"]) for r in extra}
+    등락률: dict[int, dict[str, float | None]] = {}
+    저장 = stored_universe(client, country, as_of)
+    if 저장 is not None:
+        유니버스입력, 유니버스점수 = 저장
+        inputs = [s for s in 유니버스입력 if s.stock_id not in extra_ids]
+        inputs += extra_inputs(client, country, as_of, extra, 등락률)
+        경로 = "stored"
+    else:
+        inputs = full_inputs(client, country, as_of, extra, 등락률)
+        유니버스점수 = []
+        경로 = "full"
+    if not inputs:
+        return {}
     weights, sentiment_weight, _ = sj.load_weights(client)
     by_stock: dict[int, dict[str, float | None]] = {}
     모멘텀: dict[int, dict] = {}
@@ -168,9 +247,9 @@ def score_extra(client: TursoClient, country: str, as_of: str, extra: list[dict]
             모멘텀[r.stock_id] = r.raw  # 가격·가치 진단의 현재 주가 위치 (docs/analysis.md 9.1)
     sentiments, _ = sj.load_sentiments(client, country, as_of)
     totals = {sid: sc.total_score(s, weights, sentiment=sentiments.get(sid), sentiment_weight=sentiment_weight)
-              for sid, s in by_stock.items()}  # fmt: skip
-    extra_ids = {int(r["stock_id"]) for r in extra}
-    유니버스점수 = [t.total for sid, t in totals.items() if sid not in extra_ids and t.total is not None]
+              for sid, s in by_stock.items() if 경로 == "full" or sid in extra_ids}  # fmt: skip
+    if 경로 == "full":
+        유니버스점수 = [t.total for sid, t in totals.items() if sid not in extra_ids and t.total is not None]
     out = {}
     for sid in extra_ids:
         t = totals.get(sid)
@@ -178,7 +257,7 @@ def score_extra(client: TursoClient, country: str, as_of: str, extra: list[dict]
             continue
         out[sid] = {"total": t.total, "factors": by_stock.get(sid, {}), "skip_reason": t.skip_reason,
                     "rank": None if t.total is None else 1 + sum(1 for v in 유니버스점수 if v > t.total),
-                    "ranked": len(유니버스점수), "as_of": as_of,
+                    "ranked": len(유니버스점수), "as_of": as_of, "path": 경로,
                     "momentum": {**(모멘텀.get(sid) or {}), "as_of": as_of}}  # fmt: skip
     return out
 

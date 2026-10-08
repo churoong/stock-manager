@@ -1239,6 +1239,12 @@ class StockInput:
 #: 상세 화면의 1Y/3Y/5Y 표 중 어느 열이 점수에 들어갔는지 알 수 없었다
 RISK_SOURCE_KEY = "_metrics_source"
 
+#: 리스크 팩터의 `raw_json` 에 **회복 기간 하한**(`UNRECOVERED_ROWS`, 바닥 뒤 지난 행 수)을 함께 남기는 키
+#: (docs/infra.md 25.1027). z 계산은 이 값을 치환의 하한으로 쓰는데(`depth_substitutes`) 지표 이름 목록에 없어
+#: `raw_json` 에 안 실렸다 — 저장된 원값만으로 같은 z 를 다시 낼 수 없었다. 유니버스 밖 종목 참고 분석이
+#: 유니버스 재료를 다시 읽지 않고 이 원값을 쓴다(`inputs_from_stored`)
+UNRECOVERED_KEY = "_unrecovered_rows"
+
 #: 밸류 팩터의 `raw_json` 에 **시가총액을 어느 날 값에서 어떻게 옮겼는지** 남기는 키 (docs/factors.md 3.1,
 #: infra 25.954). 값은 `scale_market_cap` 의 기록 — {cap, cap_date, snapshot_date, factor, scaled, reason, source}.
 #: 웹 `lib/stockDetail.MARKET_CAP_KEY` 와 같은 글자여야 한다
@@ -1374,6 +1380,28 @@ class FactorResult:
     raw: dict[str, Any]
 
 
+def inputs_from_stored(rows: list[dict[str, Any]]) -> list[StockInput] | None:
+    """저장된 팩터 원값(`factors.raw_json`)으로 z 계산의 입력을 다시 만든다 (docs/analysis.md 8장, infra 25.1027).
+
+    rows: stock_id·market·sector·factor·raw(dict). `score_factors` 가 z 에 쓰는 것은 지표 원값과 회복 기간
+    하한뿐이라
+    그 둘이 있으면 **같은 결과**가 나온다(`tests/test_reference_light_1027.py` 가 대 본다). 리스크 원값에 하한 키가 없는
+    행(25.1027 전에 쓴 것)이 하나라도 있으면 None — 부르는 쪽이 재료를 처음부터 읽는다."""
+    by_stock: dict[int, StockInput] = {}
+    for r in rows:
+        sid = int(r["stock_id"])
+        s = by_stock.setdefault(sid, StockInput(stock_id=sid, market=str(r["market"]), sector=r.get("sector") or None))
+        raw = r.get("raw") or {}
+        for k, v in raw.items():
+            if not k.startswith("_"):
+                s.metrics[k] = v
+        if r["factor"] == "risk":
+            if UNRECOVERED_KEY not in raw:
+                return None
+            s.metrics[UNRECOVERED_ROWS] = raw[UNRECOVERED_KEY]
+    return list(by_stock.values())
+
+
 def score_factors(
     stocks: list[StockInput],
     min_size: int = MIN_PEER_SIZE,
@@ -1451,6 +1479,8 @@ def score_factors(
                     raw_values[SUBSTITUTED_KEY] = 섞인것
                 if factor == "risk" and stock.risk_source:
                     raw_values[RISK_SOURCE_KEY] = stock.risk_source
+                if factor == "risk":
+                    raw_values[UNRECOVERED_KEY] = stock.metrics.get(UNRECOVERED_ROWS)
                 # 밸류 분모를 어느 날 값에서 어떻게 옮겼는지 (docs/factors.md 3.1, 25.954) — 근거표가 펼친다
                 if factor == "value" and stock.market_cap_note:
                     raw_values[MARKET_CAP_KEY] = stock.market_cap_note
