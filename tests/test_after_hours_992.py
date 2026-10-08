@@ -20,3 +20,72 @@ def test_문턱_이상만_체결_없으면_안_본다() -> None:
     assert [h["stock_id"] for h in got] == [1]
     assert got[0]["message"] == "삼성전자(005930) 시간외 단일가 -5.0% · 255,000원 · 거래량 1,200주"
     assert got[0]["data"]["threshold_pct"] == 5.0
+
+
+def test_마감된_시간외의_거래일로_적는다() -> None:
+    """25.1012: 예약이 01:25 KST 에 돌아 다음 날 날짜를 붙였다. 2026-10-07(수)·10-08(목) 은 거래일."""
+    from datetime import UTC, date, datetime
+
+    from batch.services import after_hours as ah
+
+    assert ah.session_day(datetime(2026, 10, 7, 16, 25, tzinfo=UTC)) == date(2026, 10, 7)  # 10-08 01:25 KST
+    assert ah.session_day(datetime(2026, 10, 7, 9, 17, tzinfo=UTC)) == date(2026, 10, 7)  # 18:17 KST 당일
+    assert ah.session_day(datetime(2026, 10, 7, 7, 30, tzinfo=UTC)) is None  # 16:30 KST 진행 중
+    assert ah.session_day(datetime(2026, 10, 7, 3, 0, tzinfo=UTC)) == date(2026, 10, 6)  # 12:00 KST — 전 거래일
+
+
+def test_조용시간은_웹과_같이_가른다() -> None:
+    from datetime import UTC, datetime
+
+    from batch.services import after_hours as ah
+
+    새벽 = datetime(2026, 10, 7, 16, 25, tzinfo=UTC)  # 01:25 KST
+    assert ah.quiet_state(None, 새벽) == (True, True)
+    assert ah.quiet_state('{"enabled": false}', 새벽) == (False, True)
+    assert ah.quiet_state('{"start": "23:00", "end": "07:00", "deliver_on_release": false}', 새벽) == (True, False)
+    assert ah.quiet_state('{"start": "07:00", "end": "07:00"}', 새벽) == (False, True)
+    assert ah.quiet_state(None, datetime(2026, 10, 7, 9, 17, tzinfo=UTC)) == (False, True)  # 18:17 KST
+
+
+def test_조용시간이면_보내지_않고_해제_뒤로_남긴다(monkeypatch) -> None:
+    from datetime import UTC, datetime
+
+    from batch.jobs import kis_flows as job
+    from batch.notify import telegram
+
+    class Rs:
+        def __init__(self, rows=None, scalar=None, affected=1):  # noqa: ANN001
+            self.rows, self._s, self.affected_rows = rows or [], scalar, affected
+
+        def scalar(self):  # noqa: ANN201
+            return self._s
+
+    넣음: list[list] = []
+
+    class Client:
+        def execute(self, sql, args=None):  # noqa: ANN001, ANN201
+            if "FROM positions" in sql:
+                return Rs(rows=[(1, "005930", "삼성전자")])
+            if "quiet_hours" in sql:
+                return Rs(scalar='{"deliver_on_release": false}')
+            if "alert_thresholds" in sql:
+                return Rs(scalar=None)
+            if sql.startswith("INSERT INTO alerts"):
+                넣음.append(args)
+            return Rs()
+
+    class QC:
+        def after_hours(self, code):  # noqa: ANN001, ANN201
+            return {"price": 70000.0, "change_pct": -8.0, "volume": 10}
+
+    class 고정(datetime):
+        @classmethod
+        def now(cls, tz=None):  # noqa: ANN001, ANN206
+            return datetime(2026, 10, 7, 16, 25, tzinfo=UTC)  # 01:25 KST
+
+    보낸: list[str] = []
+    monkeypatch.setattr(job, "datetime", 고정)
+    monkeypatch.setattr(telegram, "send", 보낸.append)
+    out = job._after_hours(Client(), QC(), None, {})  # type: ignore[arg-type]
+    assert 보낸 == [] and out["quiet"] is True and out["day"] == "2026-10-07"
+    assert 넣음[0][1] == "2026-10-07" and 넣음[0][-1] == "quiet-skipped"

@@ -20,7 +20,7 @@ import json
 import logging
 import sys
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 from batch.core import calendar as cal
 from batch.core import db
@@ -124,7 +124,7 @@ def upserts(stock_id: int, rows: dict[str, dict], fetched_at: str) -> list[tuple
 
 AFTER_HOURS_INSERT = (
     "INSERT INTO alerts (stock_id, market, trade_date, trigger_type, message, data, created_at, sent_at)"
-    " VALUES (?, 'KR', ?, ?, ?, ?, ?, NULL) ON CONFLICT (stock_id, trigger_type, trade_date) DO NOTHING"
+    " VALUES (?, 'KR', ?, ?, ?, ?, ?, ?) ON CONFLICT (stock_id, trigger_type, trade_date) DO NOTHING"
 )
 
 
@@ -142,6 +142,15 @@ def _after_hours(client: TursoClient, qc: kis.QuoteClient, today, failed: dict[s
     ).rows if len(str(r[1])) == 6]  # fmt: skip
     if not 보유:
         return {"holdings": 0}
+    # **그날 시간외가 끝난 거래일로 적고, 조용시간이면 보내지 않는다** (25.1012). 예약이 7시간 늦게(01:25 KST) 돌아
+    # 다음 날 날짜로 새벽에 보낼 뻔했다. 조용시간에는 저장만 하고 웹 장중 경로가 해제 뒤 첫 호출에 묶어 보낸다
+    지금 = datetime.now(UTC)
+    day = ah.session_day(지금)
+    if day is None:
+        return {"holdings": len(보유), "skipped": "시간외 단일가 진행 중(16:00~18:00)"}
+    조용, 해제뒤 = ah.quiet_state(
+        client.execute("SELECT value FROM settings WHERE key = 'quiet_hours'").scalar(), 지금
+    )
     raw = client.execute("SELECT value FROM settings WHERE key = 'alert_thresholds'").scalar()
     문턱 = ah.spike_pct(raw)
     시세: dict[str, dict | None] = {}
@@ -154,13 +163,14 @@ def _after_hours(client: TursoClient, qc: kis.QuoteClient, today, failed: dict[s
     stamp = db.now_iso()
     새것 = []
     for h in 걸림:
-        rs = client.execute(AFTER_HOURS_INSERT, [h["stock_id"], today.isoformat(), ah.TRIGGER, h["message"],
-                                                 json.dumps(h["data"], ensure_ascii=False), stamp])  # fmt: skip
+        rs = client.execute(AFTER_HOURS_INSERT, [h["stock_id"], day.isoformat(), ah.TRIGGER, h["message"],
+                                                 json.dumps(h["data"], ensure_ascii=False), stamp,
+                                                 ah.QUIET_SKIPPED if (조용 and not 해제뒤) else None])  # fmt: skip
         if rs.affected_rows:
             새것.append(h)
     보냄 = 0
-    if 새것:
-        머리 = f"시간외 알림 {len(새것)}건 ({today.isoformat()} 18시 무렵)"
+    if 새것 and not 조용:
+        머리 = f"시간외 알림 {len(새것)}건 ({day.isoformat()} 시간외 단일가 마감)"
         글 = "\n".join([머리, *(f"· {h['message']}" for h in 새것)])
         try:
             telegram.send(글)
@@ -168,11 +178,12 @@ def _after_hours(client: TursoClient, qc: kis.QuoteClient, today, failed: dict[s
             client.execute(
                 "UPDATE alerts SET sent_at = ? WHERE trigger_type = ? AND trade_date = ?"
                 " AND stock_id IN (SELECT value FROM json_each(?))",
-                [stamp, ah.TRIGGER, today.isoformat(), json.dumps([h["stock_id"] for h in 새것])],
+                [stamp, ah.TRIGGER, day.isoformat(), json.dumps([h["stock_id"] for h in 새것])],
             )
         except Exception as exc:  # noqa: BLE001 — 못 보내면 알림 센터에는 남는다(sent_at 비어 있음)
             failed["시간외:발송"] = type(exc).__name__
-    return {"holdings": len(보유), "threshold_pct": 문턱, "hits": len(걸림), "new": len(새것), "sent": 보냄}
+    return {"holdings": len(보유), "day": day.isoformat(), "quiet": 조용, "threshold_pct": 문턱, "hits": len(걸림),
+            "new": len(새것), "sent": 보냄}
 
 
 def collect_events(client: TursoClient, qc: kis.QuoteClient, today: date, failed: dict[str, str]) -> list[dict]:
