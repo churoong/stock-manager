@@ -1,7 +1,8 @@
 "use client";
 
+import AnalyzeNow from "@/components/AnalyzeNow";
 import VerdictBlock from "@/components/VerdictBlock";
-import type { Verdict } from "@/lib/analysis";
+import type { AnalysisRequest, Verdict } from "@/lib/analysis";
 import Link from "next/link";
 import { cachedFetch } from "@/lib/clientCache";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
@@ -333,7 +334,18 @@ export default function StockDetail({
       )}
       {position && <PositionBlock position={position} currency={currency} stale={positionStale === true} />}
 
-      <Card id="verdict" title="종목 분석 의견" loaded={verdict}>
+      <Card
+        id="verdict"
+        title="종목 분석 의견"
+        loaded={verdict}
+        right={
+          // 유니버스 밖 종목만 — 의견이 없거나 참고 분석·판단 보류일 때 (docs/analysis.md 8장, 25.1018)
+          !etf && verdict.state === "ok" && (!verdict.data.verdict
+            || ["reference", "undecided"].includes(String((verdict.data.verdict as Verdict).verdict))) ? (
+            <AnalyzeNow stockId={Number(stock.id)} request={(verdict.data.request as AnalysisRequest | null | undefined) ?? null} />
+          ) : null
+        }
+      >
         {(data) => <VerdictBlock v={data.verdict as Verdict} />}
       </Card>
 

@@ -894,6 +894,10 @@ def refresh_portfolio(market: str | None = None) -> list[str]:
     if market:
         # 종목 분석 의견 — 신호·보유·플래그가 확정된 뒤 (docs/analysis.md, 25.1016)
         steps.append(("종목 분석 의견", lambda: verdicts.run(market)))
+        # 관심 종목 가운데 유니버스 밖 종목의 참고 분석 — 의견 표를 다시 쓴 뒤에 얹는다 (docs/analysis.md 8장, 25.1018)
+        from batch.jobs import analyze_extra
+
+        steps.append(("참고 분석", lambda: analyze_extra.run(market)))
         # 장중 감시 대상과 세션은 보유·신호가 확정된 뒤에 만든다 (docs/intraday.md)
         steps.append(("장중 감시 준비", lambda: monitor_targets.run(market)))
     if market == "KR":

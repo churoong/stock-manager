@@ -79,6 +79,7 @@ import pytest
 운영_기록 = {
     "batch_runs", "api_usage", "alerts", "health_alerts", "cron_heartbeats",
     "login_attempts", "news_fetch_log",
+    "analysis_requests",  # "지금 분석" 요청과 그 진행 (25.1018)
 }  # fmt: skip
 
 

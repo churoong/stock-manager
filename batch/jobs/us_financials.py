@@ -167,11 +167,13 @@ def build_dividend_rows(
     return rows
 
 
-def run(min_turnover: float | None, limit: int | None) -> int:
+def run(min_turnover: float | None, limit: int | None, only_ids: list[int] | None = None) -> int:
     client = TursoClient()
     try:
         db.apply_migrations(client)
         ids = _us_symbol_ids(client)
+        if only_ids:  # 유니버스 밖 종목 참고 분석 (docs/analysis.md 8장, 25.1018)
+            ids = {s: i for s, i in ids.items() if i in set(only_ids)}
         if min_turnover:
             keep = candidate_symbols(client, min_turnover)
             ids = {s: i for s, i in ids.items() if s in keep}

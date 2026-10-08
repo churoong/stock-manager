@@ -47,6 +47,7 @@ PAUSE_ON_D1 = {
     "us-shares.yml", "us-financials.yml", "refresh-us-adjusted.yml", "disclosures-us.yml", "backfill-us.yml",
     "recompute.yml",
     "kis-flows.yml",  # 첫 수집이 몇만 행을 쓴다 (25.987)
+    "analyze-stock.yml",  # 재무·지표 수집을 한 종목으로 부른다 — 둘 다 D1 에서 쉰다 (25.1018)
 }  # fmt: skip
 #: D1 에서 돌아야 하는 것. 미국 일일 배치는 쉬되 스스로 skipped 기록을 남긴다(jobs/daily.py)
 RUN_ON_D1 = {"d1-catchup.yml", "daily-kr.yml", "backfill-kr.yml", "turso-return.yml", "daily-us.yml"}
@@ -590,7 +591,7 @@ def test_Turso_복귀는_한_단계가_실패해도_나머지를_메운다() -> 
 #: 모듈(`dart.ANNUAL_REPORT_CODE`)은 넣지 않는다
 DART_CALLERS = (
     "batch.jobs.disclosures_kr", "batch.jobs.financials", "batch.jobs.insider_kr", "batch.jobs.dividends",
-    "batch.jobs.sectors",
+    "batch.jobs.sectors", "batch.jobs.analyze_extra",
 )  # fmt: skip
 
 

@@ -30,7 +30,7 @@ export default function AnalysisHub() {
   if (error) return <p className="text-sm text-rose-600">{error}</p>;
   if (!groups) return <p className="py-4 text-sm text-slate-500">불러오는 중…</p>;
   if (groups.length === 0) {
-    return <p className="py-4 text-sm text-slate-500">오늘 보유 점검·매수 검토·보유 유지 종목이 없습니다. 위에서 종목을 찾아 보세요.</p>;
+    return <p className="py-4 text-sm text-slate-500">오늘 보유 점검·매수 검토·보유 유지·참고 분석 종목이 없습니다. 위에서 종목을 찾아 보세요(유니버스 밖 종목은 종목 화면의 "지금 분석").</p>;
   }
   return (
     <div className="space-y-4">

@@ -2,7 +2,9 @@
  * 종목 분석 (docs/analysis.md, docs/infra.md 25.1016). 의견은 일일 배치가 만든다 — 여기서는 모양과 글자만 정한다.
  */
 
-export type VerdictKey = "check_holding" | "consider_buy" | "hold" | "waiting" | "undecided";
+import type { DispatchJob, DispatchResult } from "@/lib/dispatch";
+
+export type VerdictKey = "check_holding" | "consider_buy" | "hold" | "reference" | "waiting" | "undecided";
 
 export interface EvidenceRow {
   label: string;
@@ -27,6 +29,7 @@ export const VERDICT_LABEL: Record<VerdictKey, string> = {
   check_holding: "보유 점검",
   consider_buy: "매수 검토",
   hold: "보유 유지",
+  reference: "참고 분석",
   waiting: "신호 대기",
   undecided: "판단 보류",
 };
@@ -36,21 +39,22 @@ export const VERDICT_STYLE: Record<VerdictKey, string> = {
   check_holding: "border-red-300 bg-red-50 text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200",
   consider_buy: "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-200",
   hold: "border-sky-300 bg-sky-50 text-sky-800 dark:border-sky-900 dark:bg-sky-950 dark:text-sky-200",
+  reference: "border-violet-300 bg-violet-50 text-violet-800 dark:border-violet-900 dark:bg-violet-950 dark:text-violet-200",
   waiting: "border-slate-300 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200",
   undecided: "border-slate-200 bg-white text-slate-500 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-400",
 };
 
 /** 종목 분석 탭의 모아보기 — 사람이 볼 결론만, 이 순서로 */
-export const HUB_ORDER: VerdictKey[] = ["check_holding", "consider_buy", "hold"];
+export const HUB_ORDER: VerdictKey[] = ["check_holding", "consider_buy", "hold", "reference"];
 
 /** 모아보기 질의. 결론 하나마다 최대 HUB_LIMIT 줄 */
 export const HUB_LIMIT = 30;
 export const HUB_SQL = `SELECT v.stock_id, v.market, v.verdict, v.headline, v.computed_at, s.ticker,
   COALESCE(s.name_ko, s.name_en, s.ticker) AS name
 FROM stock_verdicts v JOIN stocks s ON s.id = v.stock_id
-WHERE v.verdict IN ('check_holding', 'consider_buy', 'hold')
-ORDER BY CASE v.verdict WHEN 'check_holding' THEN 0 WHEN 'consider_buy' THEN 1 ELSE 2 END, v.market, s.ticker
-LIMIT 90`;
+WHERE v.verdict IN ('check_holding', 'consider_buy', 'hold', 'reference')
+ORDER BY CASE v.verdict WHEN 'check_holding' THEN 0 WHEN 'consider_buy' THEN 1 WHEN 'hold' THEN 2 ELSE 3 END, v.market, s.ticker
+LIMIT 120`;
 
 export interface HubRow {
   stock_id: number;
@@ -66,4 +70,74 @@ export interface HubRow {
 export function groupHub(rows: HubRow[]): Array<{ key: VerdictKey; label: string; rows: HubRow[] }> {
   return HUB_ORDER.map((key) => ({ key, label: VERDICT_LABEL[key], rows: rows.filter((r) => r.verdict === key).slice(0, HUB_LIMIT) }))
     .filter((g) => g.rows.length > 0);
+}
+
+// ---------------------------------------------------------------------------
+// 지금 분석 (docs/analysis.md 8장, docs/infra.md 25.1018)
+// ---------------------------------------------------------------------------
+
+/** `analyze-stock.yml` 의 `repository_dispatch.types` */
+export const ANALYZE_EVENT = "analyze-stock";
+/**
+ * 같은 종목을 다시 눌러도 새로 깨우지 않는 시간. 러너가 뜨고(1~2분) 재무·지표를 받고 유니버스 전 종목으로 점수를 다시 내는 데
+ * 몇 분이 걸린다 — 수동 실행 잠금(`RUN_REQUEST_LOCK_MINUTES`)과 같은 15분 [확인필요: 실측]. 그보다 오래 '요청됨' 이면 멈춘 것으로 보고 다시 깨운다
+ */
+export const REQUEST_LOCK_MINUTES = 15;
+
+export const REQUEST_STOCK_SQL = "SELECT asset_type FROM stocks WHERE id = ?";
+/** 관심 종목에 넣는다 — 이미 있으면 목표가·메모·알림 설정을 건드리지 않는다 */
+export const REQUEST_WATCH_SQL = `INSERT INTO watchlist (stock_id, added_at, alert_enabled) VALUES (?, ?, 1)
+ON CONFLICT (stock_id) DO NOTHING`;
+export const REQUEST_GET_SQL = "SELECT status, requested_at, finished_at, note FROM analysis_requests WHERE stock_id = ?";
+export const REQUEST_UPSERT_SQL = `INSERT INTO analysis_requests (stock_id, requested_at, status, finished_at, note) VALUES (?, ?, 'requested', NULL, NULL)
+ON CONFLICT (stock_id) DO UPDATE SET requested_at = excluded.requested_at, status = 'requested', finished_at = NULL, note = NULL`;
+export const REQUEST_FAIL_SQL = "UPDATE analysis_requests SET status = 'failed', finished_at = ?, note = ? WHERE stock_id = ?";
+
+export interface AnalysisRequest {
+  status: "requested" | "running" | "done" | "failed";
+  requested_at: string;
+  finished_at: string | null;
+  note: string | null;
+}
+
+/** 아직 도는 요청인가 — 요청됨·도는 중이고 잠금 시간 안 */
+export function requestInFlight(r: AnalysisRequest | null | undefined, now: Date): boolean {
+  if (!r || (r.status !== "requested" && r.status !== "running")) return false;
+  const t = Date.parse(r.requested_at);
+  return Number.isFinite(t) && now.getTime() - t < REQUEST_LOCK_MINUTES * 60_000;
+}
+
+/** 이 종목 하나를 깨우는 작업. 종목 번호는 글자로 넘기고 워크플로가 정수로만 받는다 */
+export function analyzeJob(stockId: number): DispatchJob {
+  return { key: "analyze_stock", label: "종목 참고 분석", event: ANALYZE_EVENT, payload: { stock_id: String(stockId) }, note: "" };
+}
+
+type Exec = (sql: string, args?: Array<string | number | null>) => Promise<Array<Record<string, unknown>>>;
+
+export type RequestOutcome =
+  | { ok: true; state: "dispatched" | "in_flight" }
+  | { ok: false; status: number; error: string };
+
+/**
+ * "지금 분석" — 관심 종목에 넣고, 요청을 적고, 작업을 깨운다. 깨우지 못하면 요청을 실패로 닫는다
+ * (관심 종목에는 남는다 — 다음 일일 배치가 참고 분석을 만든다).
+ */
+export async function requestAnalysis(
+  exec: Exec, stockId: number, now: Date, dispatch: (job: DispatchJob) => Promise<DispatchResult>,
+): Promise<RequestOutcome> {
+  const stock = (await exec(REQUEST_STOCK_SQL, [stockId]))[0];
+  if (!stock) return { ok: false, status: 400, error: "그런 종목이 없습니다" };
+  if (stock.asset_type !== "stock") return { ok: false, status: 400, error: "ETF 는 종목 분석 대상이 아닙니다(장기 적립 탭에서 봅니다)" };
+  const stamp = now.toISOString();
+  await exec(REQUEST_WATCH_SQL, [stockId, stamp]);
+  const prev = (await exec(REQUEST_GET_SQL, [stockId]))[0] as unknown as AnalysisRequest | undefined;
+  if (requestInFlight(prev, now)) return { ok: true, state: "in_flight" };
+  await exec(REQUEST_UPSERT_SQL, [stockId, stamp]);
+  const res = await dispatch(analyzeJob(stockId));
+  if (!res.dispatched) {
+    const reason = res.reason ?? "작업을 깨우지 못했습니다";
+    await exec(REQUEST_FAIL_SQL, [stamp, reason, stockId]);
+    return { ok: false, status: 502, error: `${reason} — 관심 종목에는 넣었습니다. 다음 일일 배치가 참고 분석을 만듭니다` };
+  }
+  return { ok: true, state: "dispatched" };
 }

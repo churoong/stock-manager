@@ -284,6 +284,25 @@ def load_series(
     # **구멍 난 종목이 제 거래일로 창을 채우게 여유를 두고 읽고, 종목마다 끝 days 행만 남긴다** (docs/infra.md 25.556,
     # 감사 재현). 시장 날짜 days 번째부터만 읽어 정지일이 하루라도 있는 종목은 273행이 되고, 12-1·꾸준함·변동성 조정
     # 모멘텀이 NULL 이 됐다 — 문서(factors.md 3장 "구멍만큼 먼 과거까지 간다")와 백테스트(전 이력)와 달랐다
+    since = series_window_start(client, country, as_of, days)
+    if since is None:
+        return {}
+
+    rs = client.execute(
+        "SELECT p.stock_id, p.date, COALESCE(p.adj_close, p.close) AS px, p.value, p.close, p.volume, p.change_pct"
+        " FROM universe_members u CROSS JOIN stocks s CROSS JOIN prices p"
+        " WHERE u.included = 1 AND u.snapshot_date = (SELECT MAX(um.snapshot_date) FROM universe_members um"
+        "   JOIN stocks su ON su.id = um.stock_id WHERE su.country = ? AND um.snapshot_date <= ?)"
+        "  AND s.id = u.stock_id AND s.country = ?"
+        "  AND p.stock_id = u.stock_id AND p.date >= ? AND p.date <= ? AND p.close IS NOT NULL"
+        " ORDER BY p.stock_id, p.date",
+        [country, as_of, country, since, as_of],
+    )
+    return series_from_rows(rs.dicts(), days, moves)
+
+
+def series_window_start(client: TursoClient, country: str, as_of: str, days: int) -> str | None:
+    """`load_series` 창의 시작 날짜 — 유니버스 밖 종목 참고 분석(25.1018)도 같은 창으로 읽는다."""
     dates = market_dates_from_index(client, country, as_of, days + SERIES_GAP_ALLOWANCE)
     if dates is None:
         rs = client.execute(
@@ -296,22 +315,17 @@ def load_series(
             [country, as_of, country, days + SERIES_GAP_ALLOWANCE],
         )
         dates = [str(row[0]) for row in rs.rows]
-    if not dates:
-        return {}
-    since = dates[-1]
+    return dates[-1] if dates else None
 
-    rs = client.execute(
-        "SELECT p.stock_id, p.date, COALESCE(p.adj_close, p.close) AS px, p.value, p.close, p.volume, p.change_pct"
-        " FROM universe_members u CROSS JOIN stocks s CROSS JOIN prices p"
-        " WHERE u.included = 1 AND u.snapshot_date = (SELECT MAX(um.snapshot_date) FROM universe_members um"
-        "   JOIN stocks su ON su.id = um.stock_id WHERE su.country = ? AND um.snapshot_date <= ?)"
-        "  AND s.id = u.stock_id AND s.country = ?"
-        "  AND p.stock_id = u.stock_id AND p.date >= ? AND p.date <= ? AND p.close IS NOT NULL"
-        " ORDER BY p.stock_id, p.date",
-        [country, as_of, country, since, as_of],
-    )
+
+def series_from_rows(
+    rows: list[dict], days: int, moves: dict[int, dict[str, float | None]] | None = None
+) -> dict[int, tuple[list[str], list[float], list[float | None]]]:
+    """(stock_id, date 순) 시세 행 → 종목별 끝 days 행의 (날짜, 종가, 거래대금).
+
+    `load_series` 와 유니버스 밖 참고 분석(25.1018)이 같이 쓴다."""
     out: dict[int, tuple[list[str], list[float], list[float | None]]] = {}
-    for row in rs.dicts():
+    for row in rows:
         dates, closes, values = out.setdefault(int(row["stock_id"]), ([], [], []))
         # **날짜도 들고 온다** (2026-09-21). 질의는 그대로다 — `p.date` 를 이미 고르면서
         # 버리고 있었다. 잔차 변동성(docs/factors.md 11.3)이 지수와 **날짜를 맞춰야** 한다.

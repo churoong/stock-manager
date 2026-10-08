@@ -86,12 +86,21 @@ def linked_count(client: TursoClient) -> int:
         return 0
 
 
-def target_corps(client: TursoClient, universe_only: bool = True) -> list[tuple[str, int]]:
+def target_corps(
+    client: TursoClient, universe_only: bool = True, only_ids: list[int] | None = None
+) -> list[tuple[str, int]]:
     """수집 대상. (고유번호, stock_id) 목록.
 
     유니버스에 든 종목만 받는다. 제외된 종목의 재무는 쓸 일이 없고
-    호출만 늘린다.
+    호출만 늘린다. `only_ids` 를 주면 그 종목만 — 유니버스 밖 종목 참고 분석(docs/analysis.md 8장, 25.1018)
     """
+    if only_ids:
+        rs = client.execute(
+            "SELECT dart_corp_code, id FROM stocks WHERE country = 'KR' AND dart_corp_code IS NOT NULL"
+            " AND id IN (SELECT value FROM json_each(?))",
+            [json.dumps(sorted(only_ids))],
+        )
+        return [(str(r[0]), int(r[1])) for r in rs.rows]
     if universe_only:
         sql = (
             "SELECT s.dart_corp_code, s.id FROM stocks s"
@@ -359,7 +368,9 @@ def _bulk(
     client.batch(statements)
 
 
-def run(plan: list[tuple[int, str]], *, universe_only: bool = True, resume: bool = False) -> int:
+def run(
+    plan: list[tuple[int, str]], *, universe_only: bool = True, resume: bool = False, only_ids: list[int] | None = None
+) -> int:
     client = TursoClient()
     try:
         db.apply_migrations(client)
@@ -370,7 +381,8 @@ def run(plan: list[tuple[int, str]], *, universe_only: bool = True, resume: bool
         warnings: list[str] = []
         # 고유번호 잇기는 3,990건을 UPDATE 한다 — D1 이 인덱스까지 세므로 하루 예산에서 적지 않다.
         # 이어 받는 중에는 이미 이어 놓았으므로 건너뛴다. 새로 상장한 종목은 주 1회 평소 실행이 잇는다
-        if resume and linked_count(client) > 0:
+        # 몇 종목만 받을 때(참고 분석, 25.1018)도 고유번호 잇기를 건너뛴다 — 이미 이어져 있으면 4천 건 UPDATE 가 낭비다
+        if (resume or only_ids) and linked_count(client) > 0:
             linked = 0
             print("고유번호는 이미 이어져 있습니다. 건너뜁니다 (쓰기 예산을 재무에 남긴다)")
         else:
@@ -379,7 +391,7 @@ def run(plan: list[tuple[int, str]], *, universe_only: bool = True, resume: bool
             # 매번 partial("일부 성공")로 닫혀 진짜 일부 실패와 /status 에서 구별되지 않았다. 받기 실패만 경고다
             warnings += w
 
-        corps = target_corps(client, universe_only)
+        corps = target_corps(client, universe_only, only_ids)
         if not corps:
             db.finish_batch_run(
                 client, run_id, status="failed",

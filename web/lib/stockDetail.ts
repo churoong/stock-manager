@@ -70,6 +70,8 @@ function empty(reason: string, extra: Row = {}): SectionResult {
 /** 종목 분석 의견 (docs/analysis.md, 25.1016) */
 export const VERDICT = `SELECT verdict, headline, detail_json, evidence_json, score_as_of, signal_as_of, computed_at
 FROM stock_verdicts WHERE stock_id = ?`;
+/** "지금 분석" 요청의 진행 (docs/analysis.md 8장, 25.1018) */
+export const ANALYSIS_REQUEST = "SELECT status, requested_at, finished_at, note FROM analysis_requests WHERE stock_id = ?";
 
 export const OPINIONS = `SELECT o.date, o.broker, o.opinion, o.target_price, o.source, o.fetched_at FROM kr_opinions o
 WHERE o.stock_id = ? ORDER BY o.date DESC, o.broker LIMIT 15`;
@@ -476,10 +478,19 @@ export async function loadSection(
     case "verdict":
       return guard(async () => {
         // 종목 분석 의견 — 일일 배치가 만든 것을 읽기만 한다 (docs/analysis.md, 25.1016). 표가 없으면(0054 전) 빈 것
-        const v = (await exec(VERDICT, [id]).catch(ifMissingTable([] as Row[])))[0];
-        if (!v) return empty("분석 의견은 일일 배치가 점수가 있는 종목에 매일 만듭니다(유니버스 밖·ETF 는 없음)", { verdict: null });
+        const [vs, reqs] = await Promise.all([
+          exec(VERDICT, [id]).catch(ifMissingTable([] as Row[])),
+          // 표가 없으면(0055 전) 요청 없음 — "지금 분석" 단추만 보인다
+          exec(ANALYSIS_REQUEST, [id]).catch(ifMissingTable([] as Row[])),
+        ]);
+        const v = vs[0];
+        const request = reqs[0] ?? null;
+        if (!v) return empty(
+          "분석 의견은 일일 배치가 유니버스 종목에 매일 만듭니다. 유니버스 밖 종목은 '지금 분석' 으로 참고 분석을 만듭니다(ETF 제외)",
+          { verdict: null, request },
+        );
         return {
-          as_of: String(v.computed_at ?? ""), empty: false, reason: null,
+          as_of: String(v.computed_at ?? ""), empty: false, reason: null, request,
           verdict: { ...v, detail: parseJson(v.detail_json, {}), evidence: parseJson(v.evidence_json, []) },
         };
       });

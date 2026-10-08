@@ -11,8 +11,10 @@ export const TRIGGER_LABEL: Record<string, string> = {
   after_hours: "시간외",
   // 분할 매수 계획의 다음 차수 가격 도달 (25.999)
   tranche: "분할 매수",
+  // "지금 분석" 이 끝났다 (25.1018, batch/jobs/analyze_extra.py)
+  analysis: "분석 완료",
 };
-export const TRIGGER_ORDER = ["buy_zone", "watch_price", "target", "stop", "spike_up", "spike_down", "volume", "disclosure", "after_hours", "tranche"] as const;
+export const TRIGGER_ORDER = ["buy_zone", "watch_price", "target", "stop", "spike_up", "spike_down", "volume", "disclosure", "after_hours", "tranche", "analysis"] as const;
 
 export interface AlertRow {
   id: number;

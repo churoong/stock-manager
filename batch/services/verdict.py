@@ -15,6 +15,7 @@ VERDICTS = {
     "check_holding": "보유 점검",
     "consider_buy": "매수 검토",
     "hold": "보유 유지",
+    "reference": "참고 분석",
     "waiting": "신호 대기",
     "undecided": "판단 보류",
 }
@@ -37,6 +38,8 @@ class Inputs:
     flags: list[dict] = field(default_factory=list)  # level, rationale_text, as_of
     against: list[dict] = field(default_factory=list)  # text, evidence(dict)
     currency: str = "KRW"
+    #: 유니버스 밖이면 그 제외 사유 — 점수는 "유니버스 + 이 종목" 으로 낸 참고 점수다 (docs/analysis.md 8장, 25.1018)
+    excluded_reason: str | None = None
 
 
 def _row(label: str, display: str | None, threshold: str, source: str, as_of: str | None) -> dict:
@@ -70,8 +73,13 @@ def build(inp: Inputs) -> dict:
 
     # 근거 (4장) — 점수와 팩터. 문턱 없이 사실만
     if sc and sc.get("total") is not None:
-        순위 = f" · 시장 {sc['rank']:,}위/{sc['ranked']:,}" if sc.get("rank") and sc.get("ranked") else ""
-        reasons.append(f"종합 점수 {_n(sc['total'], 1)}{순위} ({sc['as_of']})")
+        if sc.get("rank") and sc.get("ranked"):
+            순위 = (f" · 유니버스 기준 {sc['rank']:,}위 상당/{sc['ranked']:,}" if inp.excluded_reason
+                    else f" · 시장 {sc['rank']:,}위/{sc['ranked']:,}")  # fmt: skip
+        else:
+            순위 = ""
+        이름 = "참고 점수(유니버스 + 이 종목으로 계산)" if inp.excluded_reason else "종합 점수"
+        reasons.append(f"{이름} {_n(sc['total'], 1)}{순위} ({sc['as_of']})")
         evidence.append(_row("종합 점수", _n(sc["total"], 1), "—", "scores", sc["as_of"]))
         f = {k: v for k, v in (sc.get("factors") or {}).items() if k in FACTOR and isinstance(v, (int, float))}
         if len(f) >= 2:
@@ -108,6 +116,12 @@ def build(inp: Inputs) -> dict:
         손익 = f" · 평가손익률 {inp.position['pnl_pct']:+.1f}%" if inp.position.get("pnl_pct") is not None else ""
         headline = f"보유 유지 — 매도 플래그 없음{손익}" + (
             f" ({inp.position['price_date']})" if inp.position.get("price_date") else "")
+    elif inp.excluded_reason and sc and sc.get("total") is not None:
+        key = "reference"
+        headline = (f"참고 분석 — 유니버스 밖({inp.excluded_reason})이라 추천·신호 대상이 아닙니다. "
+                    f"참고 점수 {_n(sc['total'], 1)}"
+                    + (f"(유니버스 기준 {sc['rank']:,}위 상당/{sc['ranked']:,})" if sc.get("rank") and sc.get("ranked")
+                       else ""))  # fmt: skip
     elif sc and sc.get("total") is not None:
         key = "waiting"
         if near:

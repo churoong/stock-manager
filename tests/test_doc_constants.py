@@ -431,6 +431,12 @@ class Test종목_분석:
         for 이름 in vd.VERDICTS.values():
             검사(ANALYSIS, f"**{이름}**", f"결론 {이름}")
 
+    def test_참고_분석(self) -> None:
+        from batch.jobs import analyze_extra as ax
+
+        검사(ANALYSIS, f"`MAX_STOCKS`({ax.MAX_STOCKS})종목", "한 번에 분석하는 상한")
+        검사(ANALYSIS, f"`HARD_REASONS`({'·'.join(ax.HARD_REASONS)})", "점수를 내지 않는 사유")
+
 
 class Test세후_시뮬레이션:
     """계좌별 세후 적립 시뮬레이션 (docs/etf.md 11.7, docs/infra.md 25.1003)."""

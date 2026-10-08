@@ -53,6 +53,7 @@ const 삼켜도_되는_곳: Record<string, string> = {
     "호출 수 기록 실패가 시세 알림을 막으면 안 된다. 기록은 다음 호출이 이어서 센다",
   "app/api/screener/presets/route.ts::request.json()": "본문이 JSON 이 아니면 `null` → zod 가 400 으로 답한다",
   "app/api/watchlist/route.ts::request.json()": "본문이 JSON 이 아니면 `null` → zod 가 400 으로 답한다",
+  "app/api/analysis/request/route.ts::request.json()": "본문이 JSON 이 아니면 `null` → zod 가 400 으로 답한다",
   "app/api/watchlist/[id]/route.ts::request.json()": "본문이 JSON 이 아니면 `null` → zod 가 400 으로 답한다",
   "app/api/telegram/webhook/route.ts::request.json()": "텔레그램 본문이 JSON 이 아니면 답할 말이 없다 — 200 으로 끝내야 텔레그램이 다시 보내지 않는다 (25.1004)",
   "app/api/screener/route.ts::catch(() => null)":
