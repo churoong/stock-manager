@@ -1,14 +1,15 @@
 "use client";
 
-import { horizonLabel, type ForecastData } from "@/lib/analysis";
+import ForecastFan from "@/components/ForecastFan";
+import { horizonLabel, type AnalogData, type ForecastData } from "@/lib/analysis";
 import { formatPrice } from "@/lib/stockDetail";
 
 /**
  * 예상 주가 표 (docs/analysis.md 10장, 25.1025). 종목 화면 맨 위 — 2026-10-08 사용자 "화면 상단에 표로 보여주면 좋겠다".
  * 배치(`verdict.forecast`)가 낸 값을 그리기만 한다. 종가 대비 % 는 표시용 나눗셈이다(투자 수치를 새로 만들지 않는다).
  */
-export default function ForecastTable({ f, close, closeDate, currency }: {
-  f: ForecastData; close: number | null; closeDate: string | null; currency: string;
+export default function ForecastTable({ f, close, closeDate, currency, analog }: {
+  f: ForecastData; close: number | null; closeDate: string | null; currency: string; analog?: AnalogData | null;
 }) {
   const 대비 = (x: number) => (close ? `${x >= close ? "+" : ""}${((x / close - 1) * 100).toFixed(1)}%` : "-");
   const 범위 = (lo?: number, hi?: number) => (lo !== undefined && hi !== undefined ? `${formatPrice(lo, currency)} ~ ${formatPrice(hi, currency)}` : "-");
@@ -39,6 +40,7 @@ export default function ForecastTable({ f, close, closeDate, currency }: {
           </tbody>
         </table>
       </div>
+      {close ? <ForecastFan f={f} analog={analog} close={close} currency={currency} /> : null}
       <p className="mt-2 text-xs text-slate-500">
         기대 연수익 {pct(f.er)} = 무위험 {pct(f.rf)}{f.rf_given ? "" : "(설정 없음)"} + 베타 {f.beta.toFixed(2)}{f.beta_given ? "" : "(없음)"} × (시장{" "}
         {pct(f.market.annual)} − 무위험) · 시장은 {f.market.index ?? "지수"} {f.market.years.toFixed(1)}년({f.market.since}~{f.market.until}) 연환산

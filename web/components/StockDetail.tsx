@@ -349,7 +349,7 @@ export default function StockDetail({
       {/* 예상 주가 표 — 화면 맨 위 (docs/analysis.md 10장, 25.1025 사용자 요청) */}
       {(() => {
         const o = verdict.state === "ok" ? (verdict.data.verdict as Verdict | null)?.detail?.outlook : null;
-        return o?.forecast ? <ForecastTable f={o.forecast} close={o.close} closeDate={o.close_date} currency={currency} /> : null;
+        return o?.forecast ? <ForecastTable f={o.forecast} close={o.close} closeDate={o.close_date} currency={currency} analog={o.analog} /> : null;
       })()}
       {/* 예상 주가의 다른 두 눈 — 비슷한 국면·1년 시나리오 (docs/analysis.md 13·14장) */}
       {(() => {
