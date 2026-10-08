@@ -103,13 +103,13 @@ describe("웹훅 — 비밀 머리글과 본인 대화방", () => {
     expect(sent).toEqual(["보유 종목이 없습니다"]);
   });
 
-  it("본인 대화방 번호여도 단체방이면 답하지 않는다 (25.1008)", async () => {
+  it("본인 대화방 번호여도 단체방이면 답하지 않는다 (25.1007)", async () => {
     const { POST } = await import("@/app/api/telegram/webhook/route");
     expect((await POST(req("s".repeat(20), 42, "/보유", "group"))).status).toBe(200);
     expect(sent).toEqual([]);
   });
 
-  it("미리보기 배포에서는 켜지 않는다 (25.1008)", async () => {
+  it("미리보기 배포에서는 켜지 않는다 (25.1007)", async () => {
     vi.stubEnv("TELEGRAM_BOT_TOKEN", "t");
     vi.stubEnv("VERCEL_ENV", "preview");
     const { POST } = await import("@/app/api/telegram/webhook-setup/route");

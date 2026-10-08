@@ -13,7 +13,7 @@ export async function POST(request: Request) {
   if (!token) return NextResponse.json({ error: "TELEGRAM_BOT_TOKEN 이 비어 있습니다" }, { status: 400 });
   const body = (await request.json().catch(() => ({}))) as { action?: string };
   const on = body.action !== "off";
-  // **운영 배포에서만 켠다** (25.1008, 교차검증). 주소를 요청 출처로 만들므로 미리보기 배포에서 누르면 웹훅이 그 주소에 걸린다
+  // **운영 배포에서만 켠다** (25.1007, 교차검증). 주소를 요청 출처로 만들므로 미리보기 배포에서 누르면 웹훅이 그 주소에 걸린다
   const env = process.env.VERCEL_ENV;
   if (on && env && env !== "production") {
     return NextResponse.json({ error: `운영 배포에서만 켤 수 있습니다 (지금: ${env})` }, { status: 400 });

@@ -129,3 +129,35 @@ def test_초당_한도면_쉬었다_다시_묻는다(monkeypatch) -> None:
     qc2 = kis.QuoteClient("t")
     monkeypatch.setattr(qc2.session, "get", lambda *a, **k: R({"rt_cd": "1", "msg_cd": "EGW00201"}))
     assert qc2.get("/x", "TR", {})["msg_cd"] == "EGW00201" and qc2.calls == 1 + kis.RATE_RETRY
+
+
+def test_잘린_일정은_보유_종목마다_다시_받고_유상증자는_창이_길다() -> None:
+    """25.1008: 배당이 시장 전체 100행에서 잘리면 보유 배당 기준일이 빠졌다. 유상증자는 청약일로 걸러 창이 길어야 한다."""
+    from datetime import date
+
+    from batch.jobs import kis_flows as job
+
+    class Rs:
+        rows = [("005930",), ("000660",)]
+
+    class Client:
+        def execute(self, sql, args=None):  # noqa: ANN001, ANN201
+            assert sql == job.HELD_KR_TICKERS
+            return Rs()
+
+    부름: list[tuple] = []
+
+    class QC:
+        def events(self, kind, since, until, code=""):  # noqa: ANN001, ANN201
+            부름.append((kind, (until - since).days, code))
+            if kind == "dividend" and not code:
+                return [{"code": f"{i:06d}", "kind": kind, "record_date": "2026-12-31"} for i in range(100)]
+            return [{"code": code or "111111", "kind": kind, "record_date": "2026-12-31"}]
+
+    failed: dict[str, str] = {}
+    got = job.collect_events(Client(), QC(), date(2026, 10, 8), failed)  # type: ignore[arg-type]
+    assert ("dividend", job.EVENT_BACK_DAYS + job.EVENT_AHEAD_DAYS, "005930") in 부름
+    assert ("dividend", job.EVENT_BACK_DAYS + job.EVENT_AHEAD_DAYS, "000660") in 부름
+    assert not any(k != "dividend" and c for k, _, c in 부름)  # 안 잘린 종류는 다시 받지 않는다
+    assert ("rights", job.EVENT_BACK_DAYS + 120, "") in 부름
+    assert "일정:dividend" in failed and len(got) == 100 + 3 + 2

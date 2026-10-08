@@ -24,7 +24,7 @@ export async function POST(request: Request) {
   } | null;
   const message = update?.message;
   if (!message?.text || String(message.chat?.id ?? "") !== chatId) return NextResponse.json({ ok: true });
-  // **개인 대화방에만 답한다** (25.1008, 교차검증). `TELEGRAM_CHAT_ID` 가 단체방이면 그 방 누구나 /보유 로 손익·비중을 받는다
+  // **개인 대화방에만 답한다** (25.1007, 교차검증). `TELEGRAM_CHAT_ID` 가 단체방이면 그 방 누구나 /보유 로 손익·비중을 받는다
   if (message.chat?.type !== "private") return NextResponse.json({ ok: true });
   const query = parseQuery(message.text);
   if (!query) return NextResponse.json({ ok: true });

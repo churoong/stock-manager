@@ -20,7 +20,7 @@ import json
 import logging
 import sys
 from concurrent.futures import ThreadPoolExecutor
-from datetime import timedelta
+from datetime import date, timedelta
 
 from batch.core import calendar as cal
 from batch.core import db
@@ -39,6 +39,13 @@ OPINION_DAYS = 60
 #: (실측 100행). 리포트는 앞 10일만 쓴다(`daily.CORP_EVENT_DAYS`)
 EVENT_BACK_DAYS = 7
 EVENT_AHEAD_DAYS = 45
+#: 유상증자는 KIS 가 **청약 시작일**(`sub_term_ft`)로 거른다 — 2026-10-07 실측: 기준일 08-31 행이 청약 10-06 이라
+#: 09-30~ 창에 걸렸다. 청약은 기준일 뒤 약 5주라, 앞 10일 안 기준일을 놓치지 않게 앞 창을 넉넉히 둔다 (25.1008)
+#: `[확인필요: 명세의 거르는 날짜]`
+EVENT_AHEAD_DAYS_BY_KIND = {"rights": 120}
+HELD_KR_TICKERS = (
+    "SELECT s.ticker FROM positions p JOIN stocks s ON s.id = p.stock_id WHERE p.quantity > 0 AND s.country = 'KR'"
+)
 #: 한 종류가 이만큼 오면 잘렸을 수 있다 — 실행 기록에 남긴다
 EVENT_PAGE_ROWS = 100
 OPINION_UPSERT = (
@@ -168,6 +175,36 @@ def _after_hours(client: TursoClient, qc: kis.QuoteClient, today, failed: dict[s
     return {"holdings": len(보유), "threshold_pct": 문턱, "hits": len(걸림), "new": len(새것), "sent": 보냄}
 
 
+def collect_events(client: TursoClient, qc: kis.QuoteClient, today: date, failed: dict[str, str]) -> list[dict]:
+    """기업행위 일정 네 종류. 시장 전체를 받고, 100행에서 잘렸거나 실패한 종류는 보유 국내 종목마다 다시 받는다
+    (25.1008)."""
+    행사: list[dict] = []
+    시작 = today - timedelta(days=EVENT_BACK_DAYS)
+    잘림: list[str] = []
+    for kind in kis.EVENT_APIS:
+        끝 = today + timedelta(days=EVENT_AHEAD_DAYS_BY_KIND.get(kind, EVENT_AHEAD_DAYS))
+        try:
+            받은 = qc.events(kind, 시작, 끝)
+            if len(받은) >= EVENT_PAGE_ROWS:
+                failed[f"일정:{kind}"] = f"{len(받은)}행 — 잘렸을 수 있음"
+                잘림.append(kind)
+            행사 += 받은
+        except (kis.KisFailed, OSError) as exc:
+            failed[f"일정:{kind}"] = str(exc)
+            잘림.append(kind)
+    # **잘린 종류는 보유 국내 종목마다 다시 받는다** (25.1008). 분기말·연말 배당 기준일은 하루에 수백 건이라
+    # 시장 전체가 100행에서 잘리고, 리포트가 싣는 보유 종목 배당 기준일이 빠졌다(10-07 실측: 배당 100행에서 잘림)
+    보유코드 = [str(r[0]) for r in client.execute(HELD_KR_TICKERS).rows] if 잘림 else []
+    for kind in 잘림:
+        끝 = today + timedelta(days=EVENT_AHEAD_DAYS_BY_KIND.get(kind, EVENT_AHEAD_DAYS))
+        for code in 보유코드:
+            try:
+                행사 += qc.events(kind, 시작, 끝, code)
+            except (kis.KisFailed, OSError) as exc:
+                failed[f"일정:{kind}:{code}"] = str(exc)
+    return 행사
+
+
 def run(limit: int | None = None) -> int:
     client = TursoClient()
     try:
@@ -211,16 +248,7 @@ def run(limit: int | None = None) -> int:
                               o["target_price"], kis.SOURCE, stamp])
             for sid, ops in 의견.items() for o in ops
         ]  # fmt: skip
-        행사: list[dict] = []
-        창 = (today - timedelta(days=EVENT_BACK_DAYS), today + timedelta(days=EVENT_AHEAD_DAYS))
-        for kind in kis.EVENT_APIS:
-            try:
-                받은 = qc.events(kind, *창)
-                if len(받은) >= EVENT_PAGE_ROWS:
-                    failed[f"일정:{kind}"] = f"{len(받은)}행 — 잘렸을 수 있음"
-                행사 += 받은
-            except (kis.KisFailed, OSError) as exc:
-                failed[f"일정:{kind}"] = str(exc)
+        행사 = collect_events(client, qc, today, failed)
         행사행 = [
             (EVENT_UPSERT, [e["code"], e["kind"], e["record_date"], e["name"],
                             json.dumps(e["detail"], ensure_ascii=False), kis.SOURCE, stamp])

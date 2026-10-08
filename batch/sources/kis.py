@@ -292,14 +292,16 @@ class QuoteClient:
             "FID_INPUT_DATE_1": since.strftime("%Y%m%d"), "FID_INPUT_DATE_2": until.strftime("%Y%m%d")}))  # fmt: skip
 
 
-    def events(self, kind: str, since: date, until: date) -> list[dict]:
+    def events(self, kind: str, since: date, until: date, code: str = "") -> list[dict]:
+        """`code` 를 주면 그 종목만(`SHT_CD`) — 시장 전체가 100행에서 잘리는 날에도 보유 종목이 빠지지 않게
+        (25.1008)."""
         path, tr = EVENT_APIS[kind]
         f, t = since.strftime("%Y%m%d"), until.strftime("%Y%m%d")
         params = {
-            "dividend": {"CTS": "", "GB1": "0", "F_DT": f, "T_DT": t, "SHT_CD": "", "HIGH_GB": ""},
-            "bonus": {"CTS": "", "F_DT": f, "T_DT": t, "SHT_CD": ""},
-            "rights": {"CTS": "", "GB1": "1", "F_DT": f, "T_DT": t, "SHT_CD": ""},
-            "split": {"CTS": "", "SHT_CD": "", "MARKET_GB": "0", "F_DT": f, "T_DT": t},
+            "dividend": {"CTS": "", "GB1": "0", "F_DT": f, "T_DT": t, "SHT_CD": code, "HIGH_GB": ""},
+            "bonus": {"CTS": "", "F_DT": f, "T_DT": t, "SHT_CD": code},
+            "rights": {"CTS": "", "GB1": "1", "F_DT": f, "T_DT": t, "SHT_CD": code},
+            "split": {"CTS": "", "SHT_CD": code, "MARKET_GB": "0", "F_DT": f, "T_DT": t},
         }[kind]
         return parse_events(kind, self.get(KSD + path, tr, params))
 
