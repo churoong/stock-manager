@@ -226,9 +226,18 @@ def reference_outlook(client: TursoClient, country: str, as_of: str, meta: dict,
     if country == "KR":
         since = (today - timedelta(days=vd.CONSENSUS_DAYS)).isoformat()
         의견 = client.execute(ONE_OPINIONS_SQL, [sid, since]).dicts()
+    from batch.jobs import verdicts as vj
+    from batch.services import trend
+
+    시장 = vj.market_returns(client, country, as_of, warnings).get(trend.index_for_market(meta.get("market")) or "")
+    try:
+        무위험 = vj.risk_free(client, country)
+    except Exception as exc:  # noqa: BLE001
+        warnings.append(f"무위험수익률을 읽지 못했습니다: {exc}")
+        무위험 = None
     return vd.outlook(close=c.get("close"), close_date=c.get("date"), currency=str(meta.get("currency") or "KRW"),
                       momentum=(s or {}).get("momentum"), risk=위험, band=band, opinions=의견, today=today,
-                      band_note=note)  # fmt: skip
+                      band_note=note, market=시장, rf=무위험)  # fmt: skip
 
 
 def reference_checks(client: TursoClient, country: str, as_of: str, metas: list[dict],
@@ -372,7 +381,7 @@ def notify(client: TursoClient, country: str, row: dict, res: dict | None, error
     if res is not None:
         글 = f"🔎 분석 완료 — {row['name']}({row['ticker']})\n{res['headline']}"
         # 가격·가치 진단 (docs/analysis.md 9장, 25.1023) — 결론 다음에
-        for 줄 in ((res.get("outlook") or {}).get("lines") or [])[:3]:
+        for 줄 in ((res.get("outlook") or {}).get("lines") or [])[:4]:
             글 += f"\n· {줄}"
         if res.get("against"):
             글 += "\n반대 목소리: " + " / ".join(res["against"][:3])

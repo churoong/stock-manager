@@ -431,6 +431,7 @@ class Test종목_분석:
         for 이름 in vd.VERDICTS.values():
             검사(ANALYSIS, f"**{이름}**", f"결론 {이름}")
         검사(ANALYSIS, f"지난 `CONSENSUS_DAYS`({vd.CONSENSUS_DAYS})일", "증권사 목표가를 모으는 날 수")
+        검사(ANALYSIS, f"지난 최대 `MARKET_YEARS`({vd.MARKET_YEARS})년 연환산 수익률", "시장 기대수익률 창")
         검사(ANALYSIS, f"`BAND_ENTRY_PERCENTILE`, {vd.BAND_ENTRY_PERCENTILE}% 지점", "밴드 문턱(신호의 값)")
 
     def test_참고_분석(self) -> None:

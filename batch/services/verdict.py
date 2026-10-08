@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Any
@@ -19,7 +20,8 @@ VERDICTS = {
     "consider_buy": "매수 검토",
     "hold": "보유 유지",
     "reference": "참고 분석",
-    "waiting": "신호 대기",
+    # 예전 이름 "신호 대기" — 2026-10-08 사용자 "신호대기하지 말고 그냥 그대로 분석을 해" (docs/analysis.md 10.2)
+    "waiting": "종합 분석",
     "undecided": "판단 보류",
 }
 HORIZON = {"short": "단기", "mid": "중기", "long": "장기"}
@@ -47,6 +49,49 @@ def _pct(x: Any, digits: int = 1, sign: bool = True) -> str:
     return f"{x * 100:{'+' if sign else ''}.{digits}f}%" if isinstance(x, (int, float)) else "-"
 
 
+#: 시장 기대수익률을 재는 지수 이력의 최대 길이(년) (docs/analysis.md 10.1). 길수록 한 국면에 덜 끌린다
+MARKET_YEARS = 10
+#: 예상 주가를 내는 기간 (개월)
+FORECAST_MONTHS = (1, 3, 12)
+#: 범위의 z — 68%·90% (정규분포)
+FORECAST_Z = {"68": 1.0, "90": 1.645}
+
+
+def market_return(first: tuple[str, float] | None, last: tuple[str, float] | None) -> dict | None:
+    """지수의 첫·마지막 종가로 연환산 수익률. 1년이 안 되면 None (한 국면이라 뜻이 없다)."""
+    if not first or not last or first[1] <= 0 or last[1] <= 0:
+        return None
+    년 = (date.fromisoformat(last[0][:10]) - date.fromisoformat(first[0][:10])).days / 365.25
+    if 년 < 1:
+        return None
+    return {"annual": (last[1] / first[1]) ** (1 / 년) - 1, "years": 년, "since": first[0][:10], "until": last[0][:10]}
+
+
+def forecast(*, close: float | None, beta: float | None, sigma: float | None, market: dict | None,
+             rf: float | None) -> dict | None:  # fmt: skip
+    """1·3·12개월 예상 주가와 범위 (docs/analysis.md 10.1). CAPM 기대수익 + 로그정규 범위. 재료가 모자라면 None."""
+    if close is None or close <= 0 or not market:
+        return None
+    rf0 = rf if isinstance(rf, (int, float)) else 0.0
+    b = beta if isinstance(beta, (int, float)) else 1.0
+    er = rf0 + b * (market["annual"] - rf0)
+    if er <= -1:
+        return None
+    s = sigma if isinstance(sigma, (int, float)) and sigma > 0 else None
+    기간 = []
+    for 달 in FORECAST_MONTHS:
+        t = 달 / 12
+        행: dict[str, Any] = {"months": 달, "expected": close * (1 + er) ** t}
+        if s is not None:
+            중심 = math.log(1 + er) - s * s / 2
+            for 이름, z in FORECAST_Z.items():
+                행[f"low{이름}"] = close * math.exp(중심 * t - z * s * math.sqrt(t))
+                행[f"high{이름}"] = close * math.exp(중심 * t + z * s * math.sqrt(t))
+        기간.append(행)
+    return {"horizons": 기간, "er": er, "beta": b, "beta_given": isinstance(beta, (int, float)), "sigma": s,
+            "rf": rf0, "rf_given": isinstance(rf, (int, float)), "market": market}  # fmt: skip
+
+
 def consensus(opinions: list[dict], today: date) -> dict | None:
     """증권사마다 가장 최근 목표가 하나 (지난 `CONSENSUS_DAYS` 일). 없으면 None."""
     since = (today - timedelta(days=CONSENSUS_DAYS)).isoformat()
@@ -69,7 +114,7 @@ def consensus(opinions: list[dict], today: date) -> dict | None:
 
 def outlook(*, close: float | None, close_date: str | None, currency: str, momentum: dict | None,
             risk: dict | None, band: dict | None, opinions: list[dict], today: date,
-            band_note: str | None = None) -> dict:  # fmt: skip
+            band_note: str | None = None, market: dict | None = None, rf: float | None = None) -> dict:  # fmt: skip
     """가격·가치 진단 (docs/analysis.md 9장). 예측이 아니라 근거 있는 기준점 — 모든 값은 DB 행에서 온다.
 
     momentum: momentum_3m·momentum_6m·momentum_12_1·high_52w_proximity·as_of (factors.raw_json)
@@ -133,6 +178,28 @@ def outlook(*, close: float | None, close_date: str | None, currency: str, momen
         evidence.append(_row(f"증권사 목표가 중앙값({c['brokers']}곳)", _price(c["median"], currency),
                              f"최근 {CONSENSUS_DAYS}일 · 증권사마다 최신 1건", "kr_opinions", c["latest"]))  # fmt: skip
         out["consensus"] = {**c, "upside": 괴리}
+    # 10. 예상 주가 — CAPM 기대수익 + 변동성 범위
+    f = forecast(close=close, beta=(risk or {}).get("beta"), sigma=(risk or {}).get("volatility_ann"), market=market,
+                 rf=rf)  # fmt: skip
+    if f:
+        조각 = []
+        for h in f["horizons"]:
+            이름 = "1년" if h["months"] == 12 else f"{h['months']}개월"
+            범위 = (f"(68% {_won(h['low68'], currency)}~{_won(h['high68'], currency)})" if "low68" in h else "")
+            조각.append(f"{이름} {_won(h['expected'], currency)}{범위}")
+        줄.append("예상 주가: " + " · ".join(조각) + f" — 기대 연수익 {_pct(f['er'])}(CAPM, 베타 {f['beta']:.2f})")
+        m2 = f["market"]
+        창 = f"{m2.get('index') or '지수'} {m2['years']:.1f}년 연환산"
+        evidence.append(_row("시장 기대수익률", _pct(m2["annual"]), 창, "index_prices", m2["until"]))
+        evidence.append(_row("베타", f"{f['beta']:.2f}" + ("" if f["beta_given"] else " (없음 — 1 로 둠)"), "—",
+                             "performance_metrics", (risk or {}).get("as_of_date")))  # fmt: skip
+        무위험 = _pct(f["rf"], 2, False) + ("" if f["rf_given"] else " (설정 없음 — 0 으로 둠)")
+        evidence.append(_row("무위험수익률", 무위험, "—", "settings.risk_free_manual", None))
+        evidence.append(_row("기대 연수익률", _pct(f["er"]), "rf + β(E[rm] − rf)", "계산 (docs/analysis.md 10.1)",
+                             close_date))  # fmt: skip
+        if f["sigma"] is None:
+            줄[-1] += " · 변동성이 없어 범위는 내지 못했습니다"
+        out["forecast"] = f
     out["lines"] = 줄
     out["evidence"] = evidence
     return out
@@ -176,6 +243,35 @@ def nearest(checks: list[dict]) -> dict | None:
         return None
     return min(후보, key=lambda c: (int(c["failed_count"]), HORIZON_ORDER.index(c["horizon"])
                                     if c["horizon"] in HORIZON_ORDER else 9))  # fmt: skip
+
+
+def _요약(sc: dict, outlook: dict | None, currency: str, *, reference: bool) -> list[str]:
+    """종합 분석 문장의 조각 (docs/analysis.md 10.2) — 점수 순위·3개월 수익률·밴드 위치·증권사 괴리·1년 예상 주가.
+    모두 근거 줄·근거표에 같은 값이 있다. 없는 것은 빠진다."""
+    조각: list[str] = []
+    rank, ranked = sc.get("rank"), sc.get("ranked")
+    if reference:
+        순위 = f"(유니버스 기준 {rank:,}위 상당/{ranked:,})" if rank and ranked else ""
+        조각.append(f"참고 점수 {_n(sc['total'], 1)}{순위}")
+    else:
+        순위 = f"(시장 {rank:,}위/{ranked:,}, 상위 {rank / ranked * 100:.0f}%)" if rank and ranked else ""
+        조각.append(f"점수 {_n(sc['total'], 1)}{순위}")
+    o = outlook or {}
+    m3 = (o.get("momentum") or {}).get("momentum_3m")
+    if isinstance(m3, (int, float)):
+        조각.append(f"3개월 {_pct(m3)}")
+    밴드 = o.get("band") or {}
+    if isinstance(밴드.get("rank"), (int, float)):
+        조각.append(f"PBR 밴드 {밴드['rank']:.0f}% 지점")
+    c = o.get("consensus") or {}
+    if isinstance(c.get("upside"), (int, float)):
+        조각.append(f"증권사 목표가 {_pct(c['upside'])}")
+    f = o.get("forecast") or {}
+    일년 = next((h for h in f.get("horizons") or [] if h.get("months") == 12), None)
+    if 일년:
+        범위 = (f"(68% {_won(일년['low68'], currency)}~{_won(일년['high68'], currency)})" if "low68" in 일년 else "")
+        조각.append(f"1년 예상 {_won(일년['expected'], currency)}{범위}")
+    return 조각
 
 
 def build(inp: Inputs) -> dict:
@@ -235,9 +331,7 @@ def build(inp: Inputs) -> dict:
     elif inp.excluded_reason and sc and sc.get("total") is not None:
         key = "reference"
         headline = (f"참고 분석 — 유니버스 밖({inp.excluded_reason})이라 추천·신호 대상이 아닙니다. "
-                    f"참고 점수 {_n(sc['total'], 1)}"
-                    + (f"(유니버스 기준 {sc['rank']:,}위 상당/{sc['ranked']:,})" if sc.get("rank") and sc.get("ranked")
-                       else ""))  # fmt: skip
+                    + " · ".join(_요약(sc, inp.outlook, inp.currency, reference=True)))
         # 참고 판정표 — 같은 신호 규칙을 이 종목에 돌린 결과. 신호(구간·금액)는 내지 않는다 (25.1019)
         충족 = [c for c in inp.checks if c.get("passed")]
         if 충족:
@@ -256,16 +350,18 @@ def build(inp: Inputs) -> dict:
                                      str(r.get("source")), r.get("as_of")))
     elif sc and sc.get("total") is not None:
         key = "waiting"
+        # 종합 분석 — 사실을 먼저 말하고 신호까지 남은 것은 끝에 (docs/analysis.md 10.2, 25.1024)
+        headline = "종합 분석 — " + " · ".join(_요약(sc, inp.outlook, inp.currency, reference=False))
         if near:
             빠진 = [r for r in near.get("rows") or [] if r.get("passed") is False]
-            headline = (f"신호 대기 — {HORIZON.get(near['horizon'], near['horizon'])} 신호까지 기준 "
-                        f"{near['failed_count']}개 남음 ({near['as_of']})")  # fmt: skip
+            headline += (f" · 매수 신호까지 {HORIZON.get(near['horizon'], near['horizon'])} 기준 "
+                         f"{near['failed_count']}개 남음 ({near['as_of']})")  # fmt: skip
             for r in 빠진:
                 reasons.append(f"빠진 기준: {r.get('label')} — 지금 {r.get('display')} · 문턱 {r.get('threshold')}")
                 evidence.append(_row(str(r.get("label")), r.get("display"), str(r.get("threshold")),
                                      str(r.get("source")), r.get("as_of")))
         else:
-            headline = "신호 대기 — 판정표가 없습니다(오늘 신호 계산 전이거나 대상 밖)"
+            headline += " · 신호 판정표 없음(오늘 신호 계산 전이거나 대상 밖)"
     else:
         key = "undecided"
         사유 = (sc or {}).get("skip_reason") or "점수가 없습니다(유니버스 밖이거나 ETF)"

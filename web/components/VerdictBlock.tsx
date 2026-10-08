@@ -19,7 +19,8 @@ export default function VerdictBlock({ v }: { v: Verdict }) {
             {v.detail!.outlook!.lines.map((r) => <li key={r}>{r}</li>)}
           </ul>
           <p className="mt-1 text-xs text-slate-400">
-            우리 예측 주가는 내지 않습니다 — 밴드 기준 가격은 &quot;PBR 이 그 분위면&quot; 의 가격이고, 증권사 목표가는 증권사의 예측입니다.
+            예상 주가는 시장 수익률과 베타(CAPM), 변동성으로 낸 통계적 값입니다 — 점수·신호로 맞힌 값이 아니라 범위가 본론입니다.
+            밴드 기준 가격은 &quot;PBR 이 그 분위면&quot; 의 가격이고, 증권사 목표가는 증권사의 예측입니다.
           </p>
         </div>
       )}

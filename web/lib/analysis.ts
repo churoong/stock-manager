@@ -54,7 +54,8 @@ export const VERDICT_LABEL: Record<VerdictKey, string> = {
   consider_buy: "매수 검토",
   hold: "보유 유지",
   reference: "참고 분석",
-  waiting: "신호 대기",
+  // 예전 이름 "신호 대기" (25.1024 사용자 지시)
+  waiting: "종합 분석",
   undecided: "판단 보류",
 };
 

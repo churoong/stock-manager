@@ -262,7 +262,8 @@ def load_metrics(client: TursoClient, country: str, as_of: str, stock_ids: list[
     '1Y')` 로 박혀 남아 있었다.** 규칙 하나가 반만 합쳐진 것이다.
     """
     rs = client.execute(
-        "SELECT m.stock_id, m.window, m.as_of_date, m.calc_version, m.volatility_ann, m.mdd, m.cagr, m.sharpe"
+        # beta 는 종목 분석의 예상 주가(CAPM)가 쓴다 (docs/analysis.md 10.1, 25.1024)
+        "SELECT m.stock_id, m.window, m.as_of_date, m.calc_version, m.volatility_ann, m.mdd, m.cagr, m.sharpe, m.beta"
         f" FROM (WITH w(win) AS (VALUES {', '.join(['(?)'] * len(mt.RISK_WINDOWS))}) SELECT win FROM w) w"
         " CROSS JOIN stocks s CROSS JOIN performance_metrics m"
         " WHERE s.country = ? AND (? IS NULL OR s.id IN (SELECT value FROM json_each(?)))"

@@ -27,9 +27,10 @@ SIGNAL = {"horizon": "short", "as_of": "2026-10-07", "buy_zone_low": 60000, "buy
 
 def test_결론은_규칙의_사실로만_위에서부터() -> None:
     기본 = dict(name="가", ticker="000001", score=SCORE, checks=CHECKS)
-    # 신호 대기 — 가장 가까운 기간은 탈락 1개 중 단기→중기→장기 순으로 중기
+    # 종합 분석(예전 "신호 대기", 25.1024) — 사실 먼저, 가장 가까운 기간(탈락 1개, 단기→중기→장기 순으로 중기)은 끝에
     w = vd.build(vd.Inputs(**기본))
-    assert w["verdict"] == "waiting" and w["headline"] == "신호 대기 — 중기 신호까지 기준 1개 남음 (2026-10-07)"
+    assert w["verdict"] == "waiting" and w["headline"] == (
+        "종합 분석 — 점수 72.5(시장 12위/870, 상위 1%) · 매수 신호까지 중기 기준 1개 남음 (2026-10-07)")
     assert "빠진 기준: 영업이익 증가율 — 지금 +4.0% · 문턱 ≥ 10%" in w["reasons"]
     assert "가장 강한 팩터 퀄리티 80 · 가장 약한 팩터 리스크 45" in w["reasons"]
     # 매수 검토

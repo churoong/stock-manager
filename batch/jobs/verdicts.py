@@ -31,7 +31,7 @@ JOB_NAME = "verdicts"
 
 SCORES_SQL = (
     "SELECT sc.stock_id, sc.as_of_date, sc.total_score, sc.rank_in_market, sc.factor_scores, sc.skip_reason,"
-    " sc.calc_version, s.ticker, COALESCE(s.name_ko, s.name_en, s.ticker) AS name, s.currency"
+    " sc.calc_version, s.ticker, COALESCE(s.name_ko, s.name_en, s.ticker) AS name, s.currency, s.market"
     " FROM scores sc JOIN stocks s ON s.id = sc.stock_id"
     " WHERE s.country = ? AND sc.as_of_date = (SELECT MAX(sc2.as_of_date) FROM scores sc2"
     "   JOIN stocks s2 ON s2.id = sc2.stock_id WHERE s2.country = ?)"
@@ -68,6 +68,34 @@ BAND_SQL = (
     "   JOIN stocks s2 ON s2.id = v2.stock_id WHERE s2.country = ?) ORDER BY v.stock_id, v.calc_version DESC"
 )
 OPINIONS_SQL = "SELECT stock_id, date, broker, target_price FROM kr_opinions WHERE date >= ?"
+# 예상 주가의 시장 기대수익률 — 지수의 첫·마지막 종가 (docs/analysis.md 10.1, 25.1024). 기본 키 범위라 한 행씩 읽는다
+INDEX_FIRST_SQL = (
+    "SELECT date, close FROM index_prices WHERE index_code = ? AND date >= ? AND date <= ? ORDER BY date LIMIT 1"
+)
+INDEX_LAST_SQL = "SELECT date, close FROM index_prices WHERE index_code = ? AND date <= ? ORDER BY date DESC LIMIT 1"
+
+
+def market_returns(client: TursoClient, country: str, as_of: str, warnings: list[str]) -> dict[str, dict]:
+    """그 나라 지수마다 지난 최대 `MARKET_YEARS` 년 연환산 수익률. {지수: market_return(...) + index}"""
+    from batch.services import trend
+
+    since = (date.fromisoformat(as_of[:10]) - timedelta(days=round(vd.MARKET_YEARS * 365.25))).isoformat()
+    out: dict[str, dict] = {}
+    for code in trend.COUNTRY_INDEXES.get(country, ()):
+        첫 = _safe(client, INDEX_FIRST_SQL, [code, since, as_of], warnings, f"{code} 지수")
+        끝 = _safe(client, INDEX_LAST_SQL, [code, as_of], warnings, f"{code} 지수")
+        m = vd.market_return((str(첫[0]["date"]), float(첫[0]["close"])) if 첫 else None,
+                             (str(끝[0]["date"]), float(끝[0]["close"])) if 끝 else None)  # fmt: skip
+        if m:
+            out[code] = {**m, "index": code}
+    return out
+
+
+def risk_free(client: TursoClient, country: str) -> float | None:
+    """설정의 무위험수익률 (연, 소수). 없으면 None — 예상 주가는 0 으로 두고 그렇게 적는다."""
+    from batch.jobs import metrics
+
+    return metrics.risk_free_for(client, country)
 
 POSITIONS_SQL = (
     "SELECT p.stock_id, p.quantity, p.unrealized_pnl_krw, p.cost_krw, p.price_date FROM positions p"
@@ -188,16 +216,25 @@ def outlook_inputs(client: TursoClient, country: str, as_of: str, today: date, w
         since = (today - timedelta(days=vd.CONSENSUS_DAYS)).isoformat()
         for r in _safe(client, OPINIONS_SQL, [since], warnings, "증권사 목표가"):
             의견[int(r["stock_id"])].append(r)
-    return {"close": 종가, "momentum": 모멘텀, "band": 밴드, "risk": 위험, "opinions": 의견}
+    try:
+        무위험 = risk_free(client, country)
+    except Exception as exc:  # noqa: BLE001 — 0 으로 두고 그렇게 적는다
+        warnings.append(f"무위험수익률을 읽지 못했습니다: {exc}")
+        무위험 = None
+    return {"close": 종가, "momentum": 모멘텀, "band": 밴드, "risk": 위험, "opinions": 의견,
+            "market": market_returns(client, country, as_of, warnings), "rf": 무위험}  # fmt: skip
 
 
-def outlook_for(재료: dict, sid: int, currency: str, today: date) -> dict:
+def outlook_for(재료: dict, sid: int, currency: str, today: date, market: str | None = None) -> dict:
+    from batch.services import trend
+
     c = 재료["close"].get(sid) or {}
     b = 재료["band"].get(sid)
     return vd.outlook(
         close=c.get("close"), close_date=c.get("date"), currency=currency, momentum=재료["momentum"].get(sid),
         risk=재료["risk"].get(sid), band=b, opinions=재료["opinions"].get(sid, []), today=today,
         band_note=(b or {}).get("skip_reason"),
+        market=재료.get("market", {}).get(trend.index_for_market(market) or ""), rf=재료.get("rf"),
     )  # fmt: skip
 
 
@@ -246,7 +283,7 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
                             if p["unrealized_pnl_krw"] is not None and p["cost_krw"] else None)},
             flags=플래그.get(sid, []),
             against=[a for a in 곁.get(sid, []) if a["against"]],
-            outlook=outlook_for(재료, sid, str(r["currency"] or "KRW"), today),
+            outlook=outlook_for(재료, sid, str(r["currency"] or "KRW"), today, r.get("market")),
         )  # fmt: skip
         out = vd.build(inp)
         out["reasons"] += [a["text"] for a in 곁.get(sid, []) if not a["against"]]

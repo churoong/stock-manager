@@ -91,6 +91,9 @@ def test_일일_의견이_시장_한_번에_재료를_읽어_진단을_붙인다
               " 0.55, 0.7, 0.9, 700, 18, '2026-10-02', 'KRW', 1, 't')")  # fmt: skip
     c.execute("INSERT INTO kr_opinions (stock_id, date, broker, target_price, source, fetched_at)"
               " VALUES (1, '2026-09-20', '가', 1500, 'kis', 't')")  # fmt: skip
+    for d, px in (("2016-10-10", 2000.0), ("2026-10-07", 2600.0)):
+        c.execute("INSERT INTO index_prices (index_code, date, close, source, fetched_at) VALUES ('KOSPI', ?, ?, 't', 't')",
+                  [d, px])  # fmt: skip
     warnings: list[str] = []
     mem.batch(job.build_market(mem, "KR", 오늘, warnings))  # type: ignore[arg-type]
     assert warnings == []
@@ -99,3 +102,44 @@ def test_일일_의견이_시장_한_번에_재료를_읽어_진단을_붙인다
     assert o["close"] == 1069 and o["momentum"]["momentum_3m"] == -0.1
     assert round(o["band"]["prices"]["p50"]) == round(1100 / 0.6 * 0.7)
     assert o["consensus"]["median"] == 1500 and o["consensus"]["brokers"] == 1
+    # 예상 주가 — 그 종목 시장(코스피) 지수로 (25.1024). 베타·무위험수익률이 없으면 1·0
+    assert o["forecast"]["market"]["index"] == "KOSPI" and o["forecast"]["beta"] == 1.0
+    assert [h["months"] for h in o["forecast"]["horizons"]] == [1, 3, 12]
+
+
+def test_예상_주가는_CAPM_기대수익과_변동성_범위() -> None:
+    """25.1024 — 사용자 "1개월, 3개월, 1년 뒤 예상 주가도 예측해서 알려줘". 식은 docs/analysis.md 10.1."""
+    import math
+
+    시장 = {"annual": 0.05, "years": 10.0, "since": "2016-10-07", "until": "2026-10-07", "index": "KOSPI"}
+    f = vd.forecast(close=1000.0, beta=0.8, sigma=0.3, market=시장, rf=0.03)
+    assert f is not None and f["er"] == 0.03 + 0.8 * (0.05 - 0.03)
+    일년 = f["horizons"][2]
+    assert 일년["months"] == 12 and 일년["expected"] == 1000 * (1 + f["er"])
+    중심 = math.log(1 + f["er"]) - 0.3**2 / 2
+    assert 일년["low68"] == 1000 * math.exp(중심 - 0.3) and 일년["high90"] == 1000 * math.exp(중심 + 1.645 * 0.3)
+    한달 = f["horizons"][0]
+    assert 한달["months"] == 1 and abs(한달["expected"] - 1000 * (1 + f["er"]) ** (1 / 12)) < 1e-9  # 기간만큼만 복리
+    assert 한달["low68"] < 한달["expected"] < 한달["high68"]  # 범위가 예상가를 감싼다
+    # 베타·무위험수익률이 없으면 1·0 으로 두고 그렇게 표시한다
+    g = vd.forecast(close=1000.0, beta=None, sigma=None, market=시장, rf=None)
+    assert g is not None and g["er"] == 0.05 and not g["beta_given"] and not g["rf_given"] and "low68" not in g["horizons"][0]
+    assert vd.forecast(close=1000.0, beta=1.0, sigma=0.3, market=None, rf=0.03) is None  # 시장 이력이 없으면 내지 않는다
+    # 1년이 안 되는 지수 이력은 쓰지 않는다
+    assert vd.market_return(("2026-03-01", 100.0), ("2026-10-01", 120.0)) is None
+    m = vd.market_return(("2016-10-07", 2000.0), ("2026-10-07", 2600.0))
+    assert m is not None and abs(m["annual"] - (1.3 ** (1 / m["years"]) - 1)) < 1e-12
+
+
+def test_종합_분석_문장은_사실을_먼저_신호는_끝에() -> None:
+    o = _진단(market={"annual": 0.05, "years": 10.0, "since": "s", "until": "2026-10-07", "index": "KOSPI"}, rf=0.03,
+              risk={"volatility_ann": 0.35, "mdd": -0.42, "beta": 0.8, "window": "1Y", "as_of_date": "d"})  # fmt: skip
+    sc = {"as_of": "2026-10-07", "total": 40.0, "rank": 200, "ranked": 800, "factors": {}}
+    checks = [{"horizon": "short", "passed": False, "failed_count": 2, "as_of": "2026-10-07", "rows": []}]
+    r = vd.build(vd.Inputs(name="가", ticker="1", score=sc, checks=checks, outlook=o))
+    assert r["verdict"] == "waiting" and r["label"] == "종합 분석"
+    h = r["headline"]
+    assert h.startswith("종합 분석 — 점수 40.0(시장 200위/800, 상위 25%) · 3개월 -8.2% · PBR 밴드 18% 지점 · 1년 예상 ")
+    assert h.endswith(" · 매수 신호까지 단기 기준 2개 남음 (2026-10-07)")
+    assert any(e["label"] == "기대 연수익률" for e in r["evidence"])
+    assert any(줄.startswith("예상 주가: 1개월 ") for 줄 in r["outlook"]["lines"])
