@@ -140,7 +140,7 @@ def test_유니버스와_함께_계산하고_이_종목_결과만_순위와_함�
     monkeypatch.setattr(sj, "attach_unrecovered_rows", lambda *a: None)
     monkeypatch.setattr(sj, "load_pending_adjust", lambda *a: set())
     monkeypatch.setattr(sj, "load_weights", lambda *a: ({}, 0.0, []))
-    monkeypatch.setattr(sj, "load_sentiments", lambda *a: ({}, None))
+    monkeypatch.setattr(sj, "load_sentiments", lambda *a, **k: ({}, None))
     본입력: list = []
 
     def build_inputs(rows, *a, **k):  # noqa: ANN001, ANN002, ANN003, ANN202

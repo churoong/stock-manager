@@ -163,7 +163,7 @@ SENTIMENT_MAX_AGE_DAYS = sentiment_svc.MAX_AGE_DAYS
 
 
 def load_sentiments(
-    client: TursoClient, country: str, as_of: str
+    client: TursoClient, country: str, as_of: str, stock_ids: list[int] | None = None
 ) -> tuple[dict[int, float], str | None]:
     """종목별 최신 감성(−100~+100)과 **못 읽었으면 그 이유**.
 
@@ -178,10 +178,13 @@ def load_sentiments(
         rs = client.execute(
             "SELECT ss.stock_id, ss.sentiment FROM sentiment_scores ss JOIN stocks s ON s.id = ss.stock_id"
             " WHERE s.country = ? AND ss.sentiment IS NOT NULL"
+            # 고른 종목만 — 참고 분석 (25.1028). None 이면 나라 전체(예전과 같다)
+            "   AND (? IS NULL OR ss.stock_id IN (SELECT value FROM json_each(?)))"
             "   AND ss.as_of_date <= ? AND ss.as_of_date >= date(?, ?) AND ss.as_of_date = ("
             "   SELECT MAX(x.as_of_date) FROM sentiment_scores x WHERE x.stock_id = ss.stock_id"
             "   AND x.as_of_date <= ? AND x.as_of_date >= date(?, ?))",
-            [country, as_of, as_of, f"-{SENTIMENT_MAX_AGE_DAYS} days", as_of, as_of, f"-{SENTIMENT_MAX_AGE_DAYS} days"],
+            [country, *[_ids(stock_ids)] * 2, as_of, as_of, f"-{SENTIMENT_MAX_AGE_DAYS} days", as_of, as_of,
+             f"-{SENTIMENT_MAX_AGE_DAYS} days"],  # fmt: skip
         )
     except Exception as e:  # noqa: BLE001 — 표가 없는 DB 는 정상, 나머지는 말한다
         if db.표가_없나(e):

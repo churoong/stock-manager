@@ -89,13 +89,35 @@ def test_참고_분석은_저장된_원값이_있으면_유니버스_재료를_�
     extra.stock_id, extra.sector = 999, "가"
     monkeypatch.setattr(job, "extra_inputs", lambda *a: [extra])
     monkeypatch.setattr(job.sj, "load_weights", lambda c: ({f: 20.0 for f in sc.FACTORS}, 0.0, []))
-    monkeypatch.setattr(job.sj, "load_sentiments", lambda *a: ({}, None))
+    감성_종목: list = []
+    monkeypatch.setattr(job.sj, "load_sentiments", lambda *a, stock_ids=None: 감성_종목.append(stock_ids) or ({}, None))
     out = job.score_extra(mem, "KR", "2026-10-07", [{"stock_id": 999}])  # type: ignore[arg-type]
     assert out[999]["path"] == "stored" and out[999]["ranked"] == 40
     total = out[999]["total"]
     assert out[999]["rank"] == 1 + sum(1 for v in range(1, 41) if v > total)
+    assert 감성_종목 == [[999]]  # 감성도 이 종목만 읽는다 (25.1028)
     # 점수 작업 전(그날 원값 없음)이면 처음부터 읽는 길로 간다
     읽음: list = []
     monkeypatch.setattr(job, "full_inputs", lambda *a: 읽음.append(1) or [])
     assert job.score_extra(mem, "KR", "2026-10-08", [{"stock_id": 999}]) == {}  # type: ignore[arg-type]
     assert 읽음 == [1]
+
+
+def test_감성은_고른_종목만_읽고_나라_전체는_예전과_같다() -> None:
+    """25.1028 — 사용자 "감성 점수도 줄여줘"."""
+    from batch.jobs import scores as sj
+
+    mem = MemClient()
+    db.apply_migrations(mem)  # type: ignore[arg-type]
+    c = mem.conn
+    for sid in (1, 2, 3):
+        c.execute("INSERT INTO stocks (id, ticker, market, country, currency, source, fetched_at)"
+                  " VALUES (?, ?, 'KOSPI', 'KR', 'KRW', 't', 't')", [sid, f"00000{sid}"])  # fmt: skip
+        for d, v in (("2026-10-06", 10.0 * sid), ("2026-10-07", 20.0 * sid)):
+            c.execute("INSERT INTO sentiment_scores (stock_id, as_of_date, sentiment, article_count, positive_count,"
+                      " negative_count, negative_count_7d, decay_halflife_days, method, calc_version, created_at)"
+                      " VALUES (?, ?, ?, 5, 3, 1, 0, 7, 'vader', 1, 't')", [sid, d, v])  # fmt: skip
+    전체, _ = sj.load_sentiments(mem, "KR", "2026-10-07")  # type: ignore[arg-type]
+    assert 전체 == {1: 20.0, 2: 40.0, 3: 60.0}
+    골라, _ = sj.load_sentiments(mem, "KR", "2026-10-07", stock_ids=[2])  # type: ignore[arg-type]
+    assert 골라 == {2: 40.0}

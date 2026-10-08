@@ -245,7 +245,8 @@ def score_extra(client: TursoClient, country: str, as_of: str, extra: list[dict]
         by_stock.setdefault(r.stock_id, {})[r.factor] = r.score
         if r.factor == "momentum":
             모멘텀[r.stock_id] = r.raw  # 가격·가치 진단의 현재 주가 위치 (docs/analysis.md 9.1)
-    sentiments, _ = sj.load_sentiments(client, country, as_of)
+    # 감성도 이 종목들만 — 유니버스 종합 점수는 저장된 것을 쓰니 필요 없다 (25.1028). 처음부터 읽는 길은 나라 전체
+    sentiments, _ = sj.load_sentiments(client, country, as_of, stock_ids=None if 경로 == "full" else sorted(extra_ids))
     totals = {sid: sc.total_score(s, weights, sentiment=sentiments.get(sid), sentiment_weight=sentiment_weight)
               for sid, s in by_stock.items() if 경로 == "full" or sid in extra_ids}  # fmt: skip
     if 경로 == "full":
