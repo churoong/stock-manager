@@ -595,6 +595,23 @@ DART_CALLERS = (
 )  # fmt: skip
 
 
+#: SEC(EDGAR)를 부르는 작업. SEC 는 연락처 없는 요청을 403 으로 막는다(`sources/sec_edgar`)
+SEC_CALLERS = ("batch.jobs.us_financials", "batch.jobs.disclosures_us", "batch.jobs.us_shares", "batch.jobs.analyze_extra")
+
+
+@pytest.mark.parametrize("path", WORKFLOWS, ids=lambda p: p.name)
+def test_SEC_를_부르는_워크플로는_연락처를_넘긴다(path: Path) -> None:
+    """25.1021 — `daily-us.yml` 의 참고 분석 단계가 SEC 재무를 받는데 `SEC_USER_AGENT` 가 없어, 관심 종목 가운데 유니버스 밖
+    미국 종목의 재무가 매일 "받지 못했습니다" 경고로 끝났다(25.882 의 DART 와 같은 모양)."""
+    text = path.read_text(encoding="utf-8")
+    부름 = [m for m in SEC_CALLERS if m in text]
+    if re.search(r"batch\.jobs\.daily\b", text) and "--market US" in text:
+        부름.append("batch.jobs.daily --market US (참고 분석 단계)")
+    if not 부름:
+        return
+    assert "SEC_USER_AGENT" in text, f"{path.name} 이 {부름} 을 부르는데 SEC_USER_AGENT 를 넘기지 않는다"
+
+
 @pytest.mark.parametrize("path", WORKFLOWS, ids=lambda p: p.name)
 def test_DART_를_부르는_워크플로는_키를_넘긴다(path: Path) -> None:
     """**키가 빠지면 조용히 비어 간다** (2026-10-02, docs/infra.md 25.882).

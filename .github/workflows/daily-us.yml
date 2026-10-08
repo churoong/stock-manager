@@ -82,6 +82,8 @@ jobs:
           D1_ACCOUNT_ID: ${{ secrets.D1_ACCOUNT_ID }}
           D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
           D1_API_TOKEN: ${{ secrets.D1_API_TOKEN }}
+          # 참고 분석 단계(jobs/analyze_extra)가 관심 종목 중 유니버스 밖 종목의 SEC 재무를 받는다 (docs/infra.md 25.1021)
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
           OFFLINE_MODE: "0"
           LOG_LEVEL: INFO
           # 비우면 어댑터의 기본값(200)을 쓴다. 실측 전에는 바꾸지 않는다.
