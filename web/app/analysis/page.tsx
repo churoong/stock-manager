@@ -17,7 +17,8 @@ export default function AnalysisPage() {
       <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-4">
         <PageHeader title="종목 분석" doc="docs/analysis.md">
           종목을 찾으면 점수·신호 판정표·보유·매도 플래그·수급과 증권사 의견·최근 공시를 모아 결론 한 줄과 근거, 반대 목소리를 보여 줍니다.
-          새 예측이 아니라 이미 있는 규칙의 결과입니다.
+          결론은 이미 있는 규칙의 결과이고, 예상 주가·확률·비슷한 국면·시나리오는 식과 입력을 모두 근거표로 밝힌 통계적 예측입니다 —
+          맞혔는지는 예측 성적표에 쌓입니다.
         </PageHeader>
         <div className="mb-4">
           <StockSearch />
