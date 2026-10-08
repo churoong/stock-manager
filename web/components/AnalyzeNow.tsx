@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { requestInFlight, type AnalysisRequest } from "@/lib/analysis";
+import { clearClientCache } from "@/lib/clientCache";
 import { userTimeOf } from "@/lib/market";
 
 /**
@@ -28,6 +29,8 @@ export default function AnalyzeNow({ stockId, request }: { stockId: number; requ
         setMessage(body.errors?.join(" ") ?? `요청 실패(${res.status})`);
         return;
       }
+      // 화면이 잠시 들고 있던 응답(25.879)을 버린다 — 안 버리면 분석이 끝나도 10분 동안 옛 "데이터 없음" 이 보였다 (25.1019)
+      clearClientCache();
       setState("sent");
       setMessage(body.state === "in_flight" ? "이미 분석 중입니다. 끝나면 알림이 갑니다" : "관심 종목에 넣고 분석을 시작했습니다. 몇 분 뒤 알림이 갑니다");
     } catch {
