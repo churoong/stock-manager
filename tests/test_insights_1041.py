@@ -186,3 +186,26 @@ def test_다음_실적_발표() -> None:
     d = json.loads(c.execute("SELECT detail_json FROM stock_verdicts").fetchone()[0])
     assert d["earnings"] == {"date": "2026-10-28", "days": 20, "confirmed": True, "source": "yahoo"}
     assert any(r.startswith("다음 실적 발표 2026-10-28 (D-20, 확정) — 국내 실적(잠정) 공시 뒤") for r in d["reasons"])
+
+
+def _분기(fy: int, code: str, rev: int, op: int, cons: int = 1, rd: str = "2026-01-01") -> dict:
+    return {"fiscal_year": fy, "report_code": code, "consolidated": cons, "report_date": rd, "revenue": rev,
+            "operating_income": op}  # fmt: skip
+
+
+def test_분기_실적_추세() -> None:
+    rows = [
+        _분기(2025, "11013", 100, 10), _분기(2025, "11012", 100, 10), _분기(2025, "11014", 100, 10),
+        _분기(2026, "11013", 110, 11), _분기(2026, "11012", 120, 13), _분기(2026, "11014", 130, 16),
+        _분기(2026, "11014", 999, 999, cons=0, rd="2026-02-01"),  # 별도 행은 섞지 않는다 — 늦게 접수됐어도
+        _분기(2026, "11012", 120, 12, rd="2025-12-01"),  # 같은 분기의 먼저 접수된 보고서는 쓰지 않는다
+    ]  # fmt: skip
+    t = ins.quarter_trend(rows)
+    assert t["basis"] == "연결" and t["trend"] == "가속"
+    assert [(x["fy"], x["q"]) for x in t["rows"]] == [(2026, 3), (2026, 2), (2026, 1)]
+    assert [round(x["op_yoy"], 2) for x in t["rows"]] == [0.6, 0.3, 0.1]
+    줄 = ins.quarter_line(t)
+    assert 줄.startswith("분기 영업이익 전년 같은 분기 대비(연결): 2026 1분기 +10% → 2026 2분기 +30% → 2026 3분기 +60% (가속)")
+    # 전년 영업이익이 적자면 증가율 대신 말로
+    t2 = ins.quarter_trend([_분기(2025, "11013", 100, -5), _분기(2026, "11013", 100, 3)])
+    assert t2["rows"][0]["op_note"] == "흑자 전환" and t2["trend"] is None

@@ -238,3 +238,75 @@ def calibration_for(total: float | None, payloads: list[dict] | None) -> dict | 
                     "win_rate": b.get("win_rate"), "rho": p.get("rho"), "verdict": p.get("verdict"),
                     "total_n": p.get("n")}  # fmt: skip
     return None
+
+
+#: 보고서 코드 → 분기 번호 (국내 DART. 11011 사업보고서는 연간이라 쓰지 않는다 — 4분기 단독 값이 없다)
+QUARTER_OF = {"11013": 1, "11012": 2, "11014": 3}
+#: 실적 추세에서 보이는 최근 분기 수 (docs/analysis.md 25장)
+TREND_QUARTERS = 3
+
+
+def quarter_trend(rows: list[dict]) -> dict | None:
+    """국내 분기 실적 추세 (docs/analysis.md 25장, 25.1049). rows = 한 종목의 분기 재무 행
+    {fiscal_year, report_code, consolidated, report_date, revenue, operating_income}.
+
+    - 기준 하나: 가장 최근 분기의 연결(있으면)·별도를 고르고 그 기준 행만 쓴다(웹 분기 표와 같은 규칙, 25.550)
+    - 같은 분기 여러 보고서면 가장 늦게 접수된 것
+    - 분기마다 전년 같은 분기 대비 매출·영업이익 증가율(전년 영업이익이 0 이하면 증가율 대신 흑자 전환·적자 지속),
+      영업이익률
+    - 최근 `TREND_QUARTERS` 분기의 영업이익 증가율이 계속 오르면 "가속", 계속 내리면 "감속" — 순서만 본다(문턱 없음)"""
+    q = [r for r in rows if str(r.get("report_code")) in QUARTER_OF]
+    if not q:
+        return None
+    key = lambda r: (int(r["fiscal_year"]), QUARTER_OF[str(r["report_code"])])  # noqa: E731
+    최근 = max(q, key=lambda r: (*key(r), int(r.get("consolidated") or 0)))
+    기준 = int(최근.get("consolidated") or 0)
+    칸: dict[tuple[int, int], dict] = {}
+    for r in q:
+        if int(r.get("consolidated") or 0) != 기준:
+            continue
+        k = key(r)
+        if k not in 칸 or str(r.get("report_date") or "") > str(칸[k].get("report_date") or ""):
+            칸[k] = r
+    out_rows = []
+    for k in sorted(칸, reverse=True):
+        r, 전 = 칸[k], 칸.get((k[0] - 1, k[1]))
+        rev, op = r.get("revenue"), r.get("operating_income")
+        행: dict[str, Any] = {"fy": k[0], "q": k[1],
+                              "margin": op / rev if isinstance(op, (int, float)) and rev else None}  # fmt: skip
+        if 전:
+            prev_rev, prev_op = 전.get("revenue"), 전.get("operating_income")
+            행["rev_yoy"] = rev / prev_rev - 1 if isinstance(rev, (int, float)) and prev_rev and prev_rev > 0 else None
+            if isinstance(op, (int, float)) and isinstance(prev_op, (int, float)):
+                if prev_op > 0:
+                    행["op_yoy"] = op / prev_op - 1
+                else:
+                    행["op_note"] = "흑자 전환" if op > 0 else "적자 지속"
+        out_rows.append(행)
+        if len(out_rows) == TREND_QUARTERS:
+            break
+    if not out_rows:
+        return None
+    성장 = [x.get("op_yoy") for x in reversed(out_rows)]
+    추세 = None
+    if len(성장) >= 2 and all(isinstance(g, (int, float)) for g in 성장):
+        if all(b > a for a, b in zip(성장, 성장[1:], strict=False)):
+            추세 = "가속"
+        elif all(b < a for a, b in zip(성장, 성장[1:], strict=False)):
+            추세 = "감속"
+    return {"basis": "연결" if 기준 else "별도", "rows": out_rows, "trend": 추세}
+
+
+def quarter_line(t: dict | None) -> str | None:
+    """분기 실적 추세 한 줄 — 오래된 분기부터."""
+    if not t or not t.get("rows"):
+        return None
+    조각 = []
+    for x in reversed(t["rows"]):
+        값 = (f"{x['op_yoy'] * 100:+.0f}%" if isinstance(x.get("op_yoy"), (int, float))
+              else x.get("op_note") or "전년 없음")  # fmt: skip
+        조각.append(f"{x['fy']} {x['q']}분기 {값}")
+    마진 = [f"{x['margin'] * 100:.1f}%" for x in reversed(t["rows"]) if isinstance(x.get("margin"), (int, float))]
+    꼬리 = f" ({t['trend']})" if t.get("trend") else ""
+    return (f"분기 영업이익 전년 같은 분기 대비({t['basis']}): " + " → ".join(조각) + 꼬리
+            + (f" · 영업이익률 {' → '.join(마진)}" if len(마진) >= 2 else ""))  # fmt: skip
