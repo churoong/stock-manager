@@ -118,6 +118,16 @@ def main() -> int:
         )
     except Exception as exc:  # noqa: BLE001 — 곁다리다. 배치를 죽이지 않는다
         print(f"워크플로 살려 두기 실패(배치는 계속): {type(exc).__name__}")
+    # GitHub 예약이 빠진 워크플로를 대신 깨운다 (25.1015)
+    try:
+        from pathlib import Path
+
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import schedule_catchup
+
+        print(schedule_catchup.run(repo, token, _call, datetime.now(UTC), Path(__file__).resolve().parent.parent))
+    except Exception as exc:  # noqa: BLE001 — 곁다리다
+        print(f"빠진 예약 따라잡기 실패(배치는 계속): {type(exc).__name__}")
     return 0
 
 

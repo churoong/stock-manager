@@ -283,9 +283,23 @@ def compose(
     return "\n".join(lines)
 
 
-def run(dry_run: bool = False) -> int:
+#: 이 안에 성공한 요약이 있으면 다시 보내지 않는다 (25.1015) — 늦게 온 GitHub 예약과 따라잡기가 겹쳐도 한 통
+RESEND_GUARD_DAYS = 5
+ALREADY_SENT_SQL = (
+    "SELECT MAX(started_at) FROM batch_runs WHERE job_name = 'weekly_summary' AND status = 'success'"
+    " AND started_at >= ?"
+)
+
+
+def run(dry_run: bool = False, force: bool = False) -> int:
     client = TursoClient()
     now = datetime.now(UTC)
+    if not (dry_run or force):
+        보냄 = client.execute(ALREADY_SENT_SQL, [(now - timedelta(days=RESEND_GUARD_DAYS)).isoformat()]).scalar()
+        if 보냄:
+            print(f"주간 요약: {str(보냄)[:16]} 에 이미 보냈습니다 — 건너뜀 (--force 로 다시 보낸다)")
+            client.close()
+            return 0
     run_id = db.start_batch_run(client, job_name=JOB_NAME, market=None, trade_date=now.date().isoformat())
     try:
         since = (now - timedelta(days=WINDOW_DAYS)).isoformat()
@@ -329,9 +343,10 @@ def run(dry_run: bool = False) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description="주간 운영 요약")
     parser.add_argument("--dry-run", action="store_true", help="보내지 않고 찍기만")
+    parser.add_argument("--force", action="store_true", help="이번 주에 이미 보냈어도 다시 보낸다")
     args = parser.parse_args()
     logging.basicConfig(level=config.SETTINGS.log_level, format="%(asctime)s %(levelname)s %(name)s | %(message)s")
-    return run(dry_run=args.dry_run)
+    return run(dry_run=args.dry_run, force=args.force)
 
 
 if __name__ == "__main__":
