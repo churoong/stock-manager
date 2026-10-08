@@ -26416,7 +26416,7 @@ needs to be increased." 프라이빗 저장소 월 무료 2,000분을 **10월 1~
   - `verdicts.OPINIONS_SQL` — `kr_opinions WHERE date >= ?`. 국내 일일 배치마다 의견 표 전체(첫 수집 12,282건, 25.988 — 날마다 는다)를 훑었다
   - 마이그레이션 `0056_read_indexes.sql` 이 `batch_runs (finished_at)`·`kr_opinions (date)` 색인을 만든다. **다음 배치가 적용한다**(손으로 적용하지 않는다). 색인을 만들 때 두 표를 한 번 읽는다
 - **두고 간 것**
-  - `weekly_summary` 실행 기록·`column_rot` 감성 — 주 1회, 25.~ 에서 "주 20만 행 남짓" 으로 받아들였다
+  - `weekly_summary` 실행 기록·`column_rot` 감성 — 주 1회, 25.948 에서 "주 20만 행 남짓" 으로 받아들였다
   - `db_status` 셋 — 사람이 하루 몇 번만 돌린다(CLAUDE.md 규칙)
 
 줄어드는 양은 두 표의 크기에 달렸다 — 달 수십만~100만 행 어림 `[확인필요: 실측]`. 큰 몫은 25.1034(d1-catchup 복귀 점검)였다.
