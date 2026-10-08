@@ -155,19 +155,53 @@ def test_유니버스와_함께_계산하고_이_종목_결과만_순위와_함�
     assert out[9]["rank"] == 2 and out[9]["ranked"] == 3  # 80 하나만 위
 
 
-def test_이미_유니버스_종목이면_덮지_않고_그렇다고_알린다(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_유니버스_종목이면_그_시장_의견을_지금_만들어_알린다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1022 — 율촌화학(유니버스)을 "지금 분석" 했는데 일일 의견이 아직 없어 "데이터 없음" 만 남았다."""
+    from batch.jobs import verdicts as vj
+
     mem = _mem()
     mem.close = lambda: None  # type: ignore[method-assign]
     mem.conn.execute("UPDATE universe_members SET included = 1, exclude_reason = NULL WHERE stock_id = 1")
-    mem.conn.execute("INSERT INTO stock_verdicts VALUES (1, 'KR', 'waiting', '신호 대기 — x', '{}', '[]', NULL, NULL, 't')")
     monkeypatch.setattr(job, "TursoClient", lambda: mem)
     monkeypatch.setattr(job, "ensure_data", lambda *a: pytest.fail("유니버스 종목의 재무를 따로 받지 않는다"))
     알림: list = []
     monkeypatch.setattr(job, "notify", lambda c, country, row, res, error: 알림.append((res, error)) or True)
+    시장: list = []
+
+    def 의견(market: str) -> int:
+        시장.append(market)
+        mem.conn.execute("INSERT INTO stock_verdicts VALUES (1, 'KR', 'waiting', '신호 대기 — 단기 기준 1개 남음',"
+                         " '{\"against\": [\"외국인 순매도\"]}', '[]', 'd', 'd', 't')")  # fmt: skip
+        return 0
+
+    monkeypatch.setattr(vj, "run", 의견)
     assert job.run(stock_id=1, send=True) == 0
-    assert mem.conn.execute("SELECT verdict FROM stock_verdicts WHERE stock_id = 1").fetchone()[0] == "waiting"
+    assert 시장 == ["KR"]
+    assert 알림 == [({"verdict": "waiting", "headline": "신호 대기 — 단기 기준 1개 남음", "against": ["외국인 순매도"]}, None)]
+    assert mem.conn.execute("SELECT status, note FROM analysis_requests").fetchone() == ("done", None)
+    # 점수가 없어 의견을 못 만들면 그렇다고 알린다 — 참고 분석으로 덮지 않는다
+    mem.conn.execute("DELETE FROM stock_verdicts")
+    monkeypatch.setattr(vj, "run", lambda market: 0)
+    알림.clear()
+    assert job.run(stock_id=1, send=True) == 0
+    assert mem.conn.execute("SELECT COUNT(*) FROM stock_verdicts").fetchone()[0] == 0
     assert mem.conn.execute("SELECT status, note FROM analysis_requests").fetchone() == ("done", job.IN_UNIVERSE_NOTE)
     assert 알림 == [(None, None)]
+
+
+def test_일일_의견은_참고_분석_행을_지우지_않고_유니버스에_든_종목은_덮는다() -> None:
+    """25.1022 — 예전엔 시장 전체를 지워 "지금 분석" 결과가 일일 배치의 참고 분석 단계에 기대야 했다."""
+    from batch.jobs import verdicts as vj
+
+    mem = _mem()
+    c = mem.conn
+    c.execute("INSERT INTO stock_verdicts VALUES (1, 'KR', 'reference', '참고', '{\"excluded_reason\": \"시총미달\"}',"
+              " '[]', 'd', NULL, 't')")  # fmt: skip
+    c.execute("INSERT INTO stock_verdicts VALUES (2, 'KR', 'waiting', '대기', '{}', '[]', 'd', NULL, 't')")
+    c.execute(vj.CLEAR, ["KR"])
+    assert [r[0] for r in c.execute("SELECT stock_id FROM stock_verdicts")] == [1]
+    c.execute(vj.INSERT, [1, "KR", "waiting", "유니버스에 들었다", "{}", "[]", "d", "d", "t2"])
+    assert c.execute("SELECT verdict, headline FROM stock_verdicts").fetchall() == [("waiting", "유니버스에 들었다")]
 
 
 def test_참고_판정표는_같은_신호_규칙을_이_종목만_읽어_돌린다() -> None:

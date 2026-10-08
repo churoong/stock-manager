@@ -65,7 +65,15 @@ REACTION_SQL = "SELECT type, label, n, mean_pct, median_pct, pos_pct FROM disclo
 INSERT = (
     "INSERT INTO stock_verdicts (stock_id, market, verdict, headline, detail_json, evidence_json, score_as_of,"
     " signal_as_of, computed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    # 유니버스에 새로 든 종목의 참고 분석 행을 덮는다 (25.1022)
+    " ON CONFLICT (stock_id) DO UPDATE SET market = excluded.market, verdict = excluded.verdict,"
+    " headline = excluded.headline, detail_json = excluded.detail_json, evidence_json = excluded.evidence_json,"
+    " score_as_of = excluded.score_as_of, signal_as_of = excluded.signal_as_of, computed_at = excluded.computed_at"
 )
+#: 그 시장의 **유니버스 의견만** 지운다 — 참고 분석(`jobs/analyze_extra`, `detail.excluded_reason` 이 있는 행)은
+#: 남긴다 (25.1022).
+#: 예전엔 시장 전체를 지워, 일일 배치의 참고 분석 단계가 실패하거나 30종목 상한을 넘으면 "지금 분석" 결과가 사라졌다
+CLEAR = "DELETE FROM stock_verdicts WHERE market = ? AND json_extract(detail_json, '$.excluded_reason') IS NULL"
 
 
 def _safe(client: TursoClient, sql: str, args: list, warnings: list[str], what: str) -> list[dict]:
@@ -162,7 +170,7 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
                                          "as_of": r["as_of_date"]})  # fmt: skip
     곁 = against_kr(client, sorted(점수), today, warnings) if country == "KR" else {}
     stamp = db.now_iso()
-    rows: list[tuple[str, list[Any]]] = [("DELETE FROM stock_verdicts WHERE market = ?", [country])]
+    rows: list[tuple[str, list[Any]]] = [(CLEAR, [country])]
     for sid, r in 점수.items():
         try:
             factors = json.loads(r["factor_scores"] or "{}")

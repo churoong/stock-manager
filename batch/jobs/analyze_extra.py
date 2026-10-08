@@ -42,8 +42,29 @@ HARD_REASONS = ("관리종목", "스팩", "보통주아님", "주권아님", "�
 MAX_STOCKS = 30
 #: 참고 점수의 출처 — `scores` 에 쓰지 않으므로 근거표가 `scores` 라고 말하면 거짓이다 (25.1019)
 REFERENCE_SOURCE = vd.REFERENCE_SOURCE
-#: 이미 유니버스 종목을 "지금 분석" 했을 때 — 참고 분석으로 덮지 않고 이렇게 알린다
-IN_UNIVERSE_NOTE = "유니버스 종목이라 일일 배치의 분석 의견을 그대로 봅니다"
+#: 이미 유니버스 종목을 "지금 분석" 했는데 의견을 만들지 못했을 때(점수가 없음) — 참고 분석으로 덮지 않는다
+IN_UNIVERSE_NOTE = "유니버스 종목인데 점수가 없어 분석 의견을 만들지 못했습니다(다음 일일 배치가 만듭니다)"
+STORED_SQL = "SELECT verdict, headline, detail_json FROM stock_verdicts WHERE stock_id = ?"
+
+
+def universe_verdict(client: TursoClient, country: str, stock_id: int) -> dict | None:
+    """유니버스 종목을 "지금 분석" 했을 때 — 그 시장의 종목 분석 의견(`jobs/verdicts`)을 지금 만들고
+    이 종목 것을 돌려준다.
+
+    25.1022: 종목 분석 의견이 생긴 날(25.1016) 일일 배치가 아직 안 돌아 유니버스 종목에 의견이 없었는데,
+    단추는 "일일 배치의 의견을 그대로 봅니다" 로 끝나 볼 것이 없었다. 의견 계산은 이미 계산된
+    점수·신호·판정표를 모을 뿐이라 가볍다."""
+    from batch.jobs import verdicts as vj
+
+    vj.run(country)
+    r = client.execute(STORED_SQL, [stock_id]).dicts()
+    if not r:
+        return None
+    try:
+        detail = json.loads(r[0]["detail_json"] or "{}")
+    except (TypeError, ValueError):
+        detail = {}
+    return {"verdict": r[0]["verdict"], "headline": r[0]["headline"], "against": detail.get("against") or []}
 
 TARGETS_SQL = (
     "SELECT s.id, s.ticker, s.country, COALESCE(s.name_ko, s.name_en, s.ticker) AS name, s.asset_type"
@@ -335,6 +356,13 @@ def run(market: str | None = None, stock_id: int | None = None, send: bool = Fal
             결과 = analyze(client, country, rows, warnings, 단계)
         except Exception as exc:  # noqa: BLE001 — 요청이면 실패도 알린다
             결과, error = {}, str(exc)[:200]
+        if stock_id is not None and not error and stock_id not in 결과 and rows:
+            try:
+                유니버스 = universe_verdict(client, country, stock_id)
+            except Exception as exc:  # noqa: BLE001 — 요청이면 실패도 알린다
+                유니버스, error = None, str(exc)[:200]
+            if 유니버스 is not None:
+                결과[stock_id] = 유니버스
         if stock_id is not None:
             안내 = IN_UNIVERSE_NOTE if not error and stock_id not in 결과 else None
             client.execute(REQUEST_UPDATE, ["failed" if error else "done", db.now_iso(), error or 안내, stock_id])
