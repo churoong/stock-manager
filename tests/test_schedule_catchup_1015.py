@@ -82,3 +82,25 @@ def test_주간_요약은_이번_주에_이미_보냈으면_다시_보내지_않
     시작: list = []
     monkeypatch.setattr(ws.db, "start_batch_run", lambda *a, **k: 시작.append(1) or 1)
     assert ws.run() == 0 and 시작 == []
+
+
+def test_한_번에_깨우는_수에_상한이_있다(tmp_path: Path) -> None:
+    """25.1029 — 새 저장소 첫 따라잡기가 주간 작업 12개를 한꺼번에 깨워 같은 날 Turso 월 한도에 걸렸다."""
+    wf = tmp_path / ".github" / "workflows"
+    wf.mkdir(parents=True)
+    for i in range(sc.MAX_PER_RUN + 4):
+        (wf / f"w{i:02d}.yml").write_text('on:\n  schedule:\n    - cron: "40 22 * * *"\n  workflow_dispatch:\n')
+
+    def call(method, url, token, body=None):  # noqa: ANN001, ANN202
+        return (200, json.dumps({"workflow_runs": []}).encode()) if method == "GET" else (204, b"")
+
+    부름: list[str] = []
+
+    def 세는_call(method, url, token, body=None):  # noqa: ANN001, ANN202
+        if method == "POST":
+            부름.append(url)
+        return call(method, url, token, body)
+
+    out = sc.run("o/r", "tok", 세는_call, t("2026-10-08T07:00"), tmp_path)
+    assert len(부름) == sc.MAX_PER_RUN
+    assert f"다음 회로 미룸 4개(한 번에 {sc.MAX_PER_RUN}개까지)" in out

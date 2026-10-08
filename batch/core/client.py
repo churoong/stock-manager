@@ -103,6 +103,15 @@ def returned_to_turso() -> bool:
     return read_return_marker() is True
 
 
+#: D1 에 붙는 데 필요한 값 — `batch/core/d1.D1Client` 가 읽는 것과 같다
+D1_ENV = ("D1_ACCOUNT_ID", "D1_DATABASE_ID", "D1_API_TOKEN")
+
+
+def d1_configured() -> bool:
+    """D1 값이 모두 있는가. 하나라도 비면 D1 으로 갈 수 없다."""
+    return all((config.get(k, "") or "").strip() for k in D1_ENV)
+
+
 def resolved_backend() -> str:
     """지금 실제로 쓸 백엔드. auto 면 한 번 살펴 정하고 프로세스가 끝날 때까지 그대로 쓴다."""
     global _resolved
@@ -112,6 +121,14 @@ def resolved_backend() -> str:
     pinned = (config.get(PIN_ENV, "") or "").strip().lower()
     if pinned in (TURSO, D1):
         return pinned
+    if _resolved is None and not d1_configured():
+        # **D1 값이 없으면 auto 라도 Turso 에 머문다** (docs/infra.md 25.1029). 새 공개 저장소는 D1 시크릿을 넣지 않았다
+        # (docs/public-repo.md D8). 그런데 변수가 auto 로 남아, Turso 가 월 한도로 막히자(2026-10-08) 모든 배치가
+        # D1 으로 가려다 "D1 설정이 비어 있습니다" 로 **죽었다** — 한도 알림 대신 실패 메일, 일일 리포트도 실패로
+        # 보였다.
+        # Turso 에 머물면 한도 오류는 `entry.guard` 가 "건너뜀" 으로 끝내고 사유를 말한다
+        _resolved = TURSO
+        log.info("DB_BACKEND=auto 이지만 D1 값이 없어 Turso 를 쓴다")
     if _resolved is None:
         returned = read_return_marker()
         ok = blocked = False

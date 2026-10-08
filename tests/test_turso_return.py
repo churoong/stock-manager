@@ -23,6 +23,13 @@ from batch.core import client as backend  # noqa: E402
 from batch.core import db  # noqa: E402
 from tests.test_portfolio_job import MemClient  # noqa: E402
 
+
+@pytest.fixture(autouse=True)
+def _d1_값이_있는_저장소(monkeypatch: pytest.MonkeyPatch) -> None:
+    """이 파일은 D1 임시 운영(D1 값이 있는 저장소)의 복귀를 본다. D1 값이 없으면 auto 라도 Turso 에 머문다 (25.1029)."""
+    for k in backend.D1_ENV:
+        monkeypatch.setenv(k, "test")
+
 ROOT = Path(__file__).resolve().parent.parent
 
 # 판정표는 여기 있었다가 `tests/test_db_backend_decision.py` 로 옮겼다 (2026-09-21).
@@ -627,3 +634,13 @@ def test_다시_잴_때도_상한을_넘지_않는다() -> None:
             "index_days": 5, "fx_days": 0, "disc_days": 1}  # fmt: skip
     got = turso_return.replan(계획, date(2026, 10, 11))
     assert got["us_days"] == turso_return.MAX_CATCHUP_DAYS and got["index_days"] == 15 and got["fx_days"] == 0
+
+
+def test_D1_값이_없으면_복귀는_할_일이_없다(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
+    """25.1029 — 새 공개 저장소(D1 시크릿 없음)에서 Turso 가 살아 있자 D1 을 열려다 실패로 끝났다(10-08 06:18 UTC)."""
+    for k in backend.D1_ENV:
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setattr(backend, "backend", lambda: backend.AUTO)
+    monkeypatch.setattr(backend, "_probe_turso", lambda: pytest.fail("D1 이 없으면 Turso 를 찔러 볼 까닭도 없다"))
+    assert turso_return.run().moved is False
+    assert "D1 값이 없어 옮길 것이 없습니다" in capsys.readouterr().out

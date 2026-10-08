@@ -374,6 +374,12 @@ def run(open_src=open_d1, open_dst=open_turso) -> Outcome:
         return Outcome(True, g["start"], us_days=g["us_days"], index_days=g["index_days"], fx_days=g["fx_days"],
                        disclosure_days=g["disc_days"])  # fmt: skip
 
+    if not backend.d1_configured():
+        # D1 을 쓰지 않는 저장소(docs/public-repo.md D8) — 옮길 것이 없다. 예전엔 Turso 가 살아 있으면 D1 을 열다
+        # 실패로 끝났다
+        # (2026-10-08 06:18 UTC, docs/infra.md 25.1029)
+        print(f"{NOTHING_DONE}D1 값이 없어 옮길 것이 없습니다 (Turso 만 쓰는 저장소)")
+        return Outcome(False)
     ok, blocked = backend._probe_turso()
     if not ok:
         왜 = "한도로 막혀 있습니다" if blocked else "응답하지 않습니다"

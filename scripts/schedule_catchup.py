@@ -26,6 +26,14 @@ from pathlib import Path
 GRACE_HOURS = 8
 #: 이보다 오래된 놓친 예약은 따라잡지 않는다
 LOOKBACK_DAYS = 4
+#: 한 번에 깨우는 상한 (docs/infra.md 25.1029). 2026-10-08 02:47 UTC 새 저장소의 첫 따라잡기가 주간 작업 12개(전체
+#: 백업·백업 복구
+#: 리허설·성과 지표·밸류 밴드·유니버스·재무…)를 **한꺼번에** 깨웠다 — 새 저장소라 Actions 캐시(시세 사본)가 비어 각자
+#: 처음부터
+#: 읽었고, 같은 날 Turso 월 읽기 한도에 걸렸다. keepalive 는 하루 두 번(국내·미국 일일 배치) 돌고 놓친 예약은 4일까지
+#: 따라잡으니
+#: 셋씩이면 이틀 안에 다 깨운다. 앞서 깨운 작업이 사본을 캐시에 넣어 둔 뒤라 뒤의 작업은 바뀐 것만 읽는다
+MAX_PER_RUN = 3
 #: 예약이 예비인 워크플로 — 주 경로가 따로 있다
 SKIP = {
     "daily-kr.yml": "cron-job.org 가 부른다. 예약은 예비이고 스스로 이미 돈 날을 건너뛴다",
@@ -103,7 +111,7 @@ def candidate(name: str, text: str, now: datetime) -> datetime | None:
 
 
 def run(repo: str, token: str, call, now: datetime, root: Path) -> str:  # noqa: ANN001 — call 은 keepalive._call
-    깨움, 못깨움, 실패 = [], [], []
+    깨움, 못깨움, 실패, 미룸 = [], [], [], []
     for path in sorted((root / ".github" / "workflows").glob("*.yml")):
         text = path.read_text(encoding="utf-8")
         s = candidate(path.name, text, now)
@@ -119,9 +127,13 @@ def run(repo: str, token: str, call, now: datetime, root: Path) -> str:  # noqa:
         if not has_dispatch(text):
             못깨움.append(path.name)
             continue
+        if len(깨움) >= MAX_PER_RUN:
+            미룸.append(path.name)
+            continue
         code, _ = call("POST", f"https://api.github.com/repos/{repo}/actions/workflows/{path.name}/dispatches",
                        token, {"ref": "main"})  # fmt: skip
         (깨움 if code == 204 else 실패).append(path.name if code == 204 else f"{path.name}({code})")
     return (f"빠진 예약 따라잡기: 깨움 {len(깨움)}개" + (f" ({', '.join(깨움)})" if 깨움 else "")
+            + (f" · 다음 회로 미룸 {len(미룸)}개(한 번에 {MAX_PER_RUN}개까지)" if 미룸 else "")
             + (f" · 수동 실행 없음 {', '.join(못깨움)}" if 못깨움 else "")
             + (f" · 실패 {', '.join(실패)}" if 실패 else ""))  # fmt: skip
