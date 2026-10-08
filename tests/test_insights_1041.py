@@ -146,3 +146,22 @@ def test_같은_점수대의_지난_신호() -> None:
     assert c["window"] == 5 and c["lo"] == 60 and c["avg_ret"] == -0.012 and c["rho"] == -0.29
     assert ins.calibration_for(100.0, 표)["lo"] == 90  # 100점은 마지막 칸
     assert ins.calibration_for(30.0, 표) is None
+
+
+def test_내부자_매매가_근거에_실린다() -> None:
+    mem = MemClient()
+    db.apply_migrations(mem)  # type: ignore[arg-type]
+    c = mem.conn
+    c.execute("INSERT INTO stocks (id, ticker, market, country, name_ko, currency, listed_shares, source, fetched_at)"
+              " VALUES (1, '005930', 'KOSPI', 'KR', '가', 'KRW', 1000000, 't', 't')")  # fmt: skip
+    c.execute("INSERT INTO scores (stock_id, as_of_date, total_score, factor_scores, sentiment_weight_used,"
+              " weights_json, rank_in_market, calc_version, created_at) VALUES (1, '2026-10-07', 60, '{}', 0, '{}', 1,"
+              " 10, 't')")  # fmt: skip
+    c.execute("INSERT INTO insider_trades (stock_id, filed_date, insider, action, shares, currency, source, receipt_no,"
+              " fetched_at) VALUES (1, '2026-09-20', '홍길동', 'buy', 5000, 'KRW', 'dart', 'r1', 't')")  # fmt: skip
+    warnings: list[str] = []
+    mem.batch(job.build_market(mem, "KR", date(2026, 10, 8), warnings))  # type: ignore[arg-type]
+    assert warnings == []
+    d = json.loads(c.execute("SELECT detail_json FROM stock_verdicts").fetchone()[0])
+    assert d["insider"]["net_shares"] == 5000
+    assert any(r.startswith("내부자 매매 최근 90일: 순매수 5,000주 (상장주식수의 +0.500%)") for r in d["reasons"])

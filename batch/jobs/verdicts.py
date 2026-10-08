@@ -32,7 +32,8 @@ JOB_NAME = "verdicts"
 
 SCORES_SQL = (
     "SELECT sc.stock_id, sc.as_of_date, sc.total_score, sc.rank_in_market, sc.factor_scores, sc.skip_reason,"
-    " sc.calc_version, s.ticker, COALESCE(s.name_ko, s.name_en, s.ticker) AS name, s.currency, s.market, s.sector"
+    " sc.calc_version, s.ticker, COALESCE(s.name_ko, s.name_en, s.ticker) AS name, s.currency, s.market, s.sector,"
+    " s.listed_shares"
     " FROM scores sc JOIN stocks s ON s.id = sc.stock_id"
     " WHERE s.country = ? AND sc.as_of_date = (SELECT MAX(sc2.as_of_date) FROM scores sc2"
     "   JOIN stocks s2 ON s2.id = sc2.stock_id WHERE s2.country = ?)"
@@ -439,6 +440,15 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
             if p:
                 모양[sid] = p
     시장성적 = 상태.get("market") or {}
+    # 내부자 매매 (23장, 25.1047) — 신호 작업과 같은 집계(최근 90일 접수). 판정에 쓰지 않는다
+    try:
+        from batch.services import insider
+
+        내부자 = insider.load_summaries(client, country, as_of[:10])
+    except Exception as exc:  # noqa: BLE001 — 그 줄만 빠진다
+        if not db.표가_없나(exc):
+            warnings.append(f"내부자 매매를 읽지 못했습니다: {exc}")
+        내부자 = {}
     보정표: list[dict] = []
     for r in _safe(client, CALIBRATION_SQL, [country], warnings, "점수 보정표"):
         with contextlib.suppress(TypeError, ValueError, AttributeError):
@@ -505,6 +515,12 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
         detail["track"] = {"stock": 종목성적, "market": 시장성적, "since": 상태.get("since"), "first_due": 첫평가}
         detail["score_change"] = 변화
         detail["twins"] = 닮음
+        if sid in 내부자:
+            행 = insider.criteria_rows(내부자[sid], r.get("listed_shares"))
+            if 행:
+                out["reasons"].append(f"내부자 매매 최근 {내부자[sid].window_days}일: {행[0]['display']}")
+                out["evidence"].append(행[0])
+            detail["insider"] = 내부자[sid].as_dict()
         보정 = insights.calibration_for(r["total_score"], 보정표)
         detail["calibration"] = 보정
         if 보정:
