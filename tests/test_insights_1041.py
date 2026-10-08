@@ -133,3 +133,16 @@ def test_업종_비교는_시장을_섞지_않는다() -> None:
     assert d1["peers"]["n"] == 2 and d1["peers"]["market"] == "KOSPI" and d1["peers"]["rank"] == 2
     d3 = json.loads(c.execute("SELECT detail_json FROM stock_verdicts WHERE stock_id = 3").fetchone()[0])
     assert d3["peers"] is None
+
+
+def test_같은_점수대의_지난_신호() -> None:
+    표 = [{"window": 5, "n": 36, "rho": -0.29, "verdict": "낮았다", "buckets": [
+              {"lo": 60, "hi": 70, "n": 13, "avg_ret": -0.012, "win_rate": 0.46},
+              {"lo": 90, "hi": 100, "n": 6, "avg_ret": 0.03, "win_rate": 0.6}]},
+          {"window": 20, "n": 8, "rho": None, "verdict": "아직", "buckets": [
+              {"lo": 60, "hi": 70, "n": 3, "avg_ret": None, "win_rate": None}]}]  # fmt: skip
+    c = ins.calibration_for(64.2, 표)
+    # 20일 창은 그 구간 평균이 없어(표본 모자람) 5일 창
+    assert c["window"] == 5 and c["lo"] == 60 and c["avg_ret"] == -0.012 and c["rho"] == -0.29
+    assert ins.calibration_for(100.0, 표)["lo"] == 90  # 100점은 마지막 칸
+    assert ins.calibration_for(30.0, 표) is None

@@ -139,6 +139,11 @@ FLOWS_SQL = (
 )
 #: 석 달 ≈ 60거래일 + 연휴 여유
 FLOWS_CALENDAR_DAYS = 100
+# 같은 점수대의 지난 신호 성적 (22장, 25.1046) — 신호 성적표 작업이 실행 기록에 남긴 점수 보정표 (한 행)
+CALIBRATION_SQL = (
+    "SELECT step_log FROM batch_runs WHERE job_name = 'signal_outcomes' AND market = ? AND status = 'success'"
+    " ORDER BY started_at DESC LIMIT 1"
+)
 # 점수 변화 (17장) — 4주 앞 가장 가까운 점수일
 SCORES_BEFORE_SQL = (
     "SELECT sc.stock_id, sc.as_of_date, sc.total_score, sc.factor_scores FROM scores sc"
@@ -434,6 +439,10 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
             if p:
                 모양[sid] = p
     시장성적 = 상태.get("market") or {}
+    보정표: list[dict] = []
+    for r in _safe(client, CALIBRATION_SQL, [country], warnings, "점수 보정표"):
+        with contextlib.suppress(TypeError, ValueError, AttributeError):
+            보정표 = list(json.loads(r["step_log"] or "{}").get("calibration") or [])
     # 같은 업종 비교 (21장) — (시장, 업종)마다. 점수는 시장별·업종별 z-score 라 코스피·코스닥을 섞지 않는다
     업종: dict[tuple[str, str], list[dict]] = defaultdict(list)
     for sid, r in 점수.items():
@@ -496,6 +505,14 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
         detail["track"] = {"stock": 종목성적, "market": 시장성적, "since": 상태.get("since"), "first_due": 첫평가}
         detail["score_change"] = 변화
         detail["twins"] = 닮음
+        보정 = insights.calibration_for(r["total_score"], 보정표)
+        detail["calibration"] = 보정
+        if 보정:
+            상관 = f" · 점수-수익 순위 상관 ρ {보정['rho']:+.2f}" if isinstance(보정.get("rho"), (int, float)) else ""
+            오름 = f"·오른 비율 {보정['win_rate'] * 100:.0f}%" if isinstance(보정.get("win_rate"), (int, float)) else ""
+            out["reasons"].append(
+                f"같은 점수대의 지난 신호: {보정['lo']}~{보정['hi']}점 {보정['window']}거래일 뒤"
+                f" 평균 {보정['avg_ret'] * 100:+.1f}%{오름} ({보정['n']}건){상관} — {보정.get('verdict') or ''}")
         if r.get("sector"):
             동종 = insights.peers(sid, 업종.get((str(r.get("market")), str(r["sector"])), []))
             detail["peers"] = None if not 동종 else {"sector": r["sector"], "market": r.get("market"), **동종}

@@ -222,3 +222,19 @@ def peers(sid: int, members: list[dict]) -> dict | None:
     out["top"] = [{"stock_id": m["stock_id"], "ticker": m["ticker"], "name": m["name"], "total": m["total"]}
                   for m in 점수순 if m["stock_id"] != sid][:PEERS_TOP]  # fmt: skip
     return out
+
+
+def calibration_for(total: float | None, payloads: list[dict] | None) -> dict | None:
+    """같은 점수대의 지난 신호 성적 (docs/analysis.md 22장, 25.1046) — 점수 보정표(docs/signals.md 10.1)에서
+    이 종목 종합 점수가 든 10점 구간을 고른다.
+    평균을 낸 구간(표본 하한을 넘은 것)이 있는 가장 긴 창 하나. 없으면 None."""
+    if not isinstance(total, (int, float)) or not payloads:
+        return None
+    lo = min(int(total // 10) * 10, 90)
+    for p in sorted(payloads, key=lambda x: -int(x.get("window") or 0)):
+        b = next((b for b in p.get("buckets") or [] if b.get("lo") == lo and b.get("avg_ret") is not None), None)
+        if b:
+            return {"window": p["window"], "lo": b["lo"], "hi": b["hi"], "n": b["n"], "avg_ret": b["avg_ret"],
+                    "win_rate": b.get("win_rate"), "rho": p.get("rho"), "verdict": p.get("verdict"),
+                    "total_n": p.get("n")}  # fmt: skip
+    return None
