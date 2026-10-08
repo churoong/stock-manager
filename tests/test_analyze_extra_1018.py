@@ -193,6 +193,8 @@ def test_참고_판정표는_같은_신호_규칙을_이_종목만_읽어_돌린
     단기 = next(x for x in out[1] if x["horizon"] == "short")
     이름 = {r["label"]: r["passed"] for r in 단기["rows"]}
     assert 이름.get("정배열") is True
+    점수행 = [r for x in out[1] for r in x["rows"] if "점수" in str(r["label"])]
+    assert 점수행 and all(r["source"] == job.REFERENCE_SOURCE for r in 점수행)  # scores 표에 없는 값이다
     # 신호·판정표 표에는 쓰지 않는다 — 유니버스 종목의 "왜 없나" 화면과 섞이지 않게
     assert c.execute("SELECT COUNT(*) FROM signal_checks").fetchone()[0] == 0
     assert c.execute("SELECT COUNT(*) FROM signals").fetchone()[0] == 0

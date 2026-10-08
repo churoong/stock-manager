@@ -25,6 +25,8 @@ FACTOR = {"value": "밸류", "quality": "퀄리티", "growth": "성장", "moment
 LEVEL = {"red": "적색", "yellow": "황색", "green": "녹색"}
 #: 최근 공시로 보는 날 수 (docs/analysis.md 5장)
 RECENT_DISCLOSURE_DAYS = 14
+#: 참고 점수의 출처 — 유니버스 밖 종목의 점수는 `scores` 에 쓰지 않는다 (docs/analysis.md 8장, 25.1019)
+REFERENCE_SOURCE = "참고 계산(유니버스 + 이 종목)"
 
 
 @dataclass
@@ -81,7 +83,7 @@ def build(inp: Inputs) -> dict:
         이름 = "참고 점수(유니버스 + 이 종목으로 계산)" if inp.excluded_reason else "종합 점수"
         reasons.append(f"{이름} {_n(sc['total'], 1)}{순위} ({sc['as_of']})")
         # 참고 점수는 `scores` 에 없다 — 출처를 그대로 적는다 (25.1019)
-        출처 = "참고 계산(유니버스 + 이 종목)" if inp.excluded_reason else "scores"
+        출처 = REFERENCE_SOURCE if inp.excluded_reason else "scores"
         evidence.append(_row("종합 점수", _n(sc["total"], 1), "—", 출처, sc["as_of"]))
         f = {k: v for k, v in (sc.get("factors") or {}).items() if k in FACTOR and isinstance(v, (int, float))}
         if len(f) >= 2:

@@ -40,6 +40,8 @@ JOB_NAME = "analyze_extra"
 HARD_REASONS = ("관리종목", "스팩", "보통주아님", "주권아님", "상장폐지", "상장1년미만", "데이터없음")
 #: 한 번에 분석하는 상한 — 관심 종목이 많아도 일일 배치가 길어지지 않게
 MAX_STOCKS = 30
+#: 참고 점수의 출처 — `scores` 에 쓰지 않으므로 근거표가 `scores` 라고 말하면 거짓이다 (25.1019)
+REFERENCE_SOURCE = vd.REFERENCE_SOURCE
 #: 이미 유니버스 종목을 "지금 분석" 했을 때 — 참고 분석으로 덮지 않고 이렇게 알린다
 IN_UNIVERSE_NOTE = "유니버스 종목이라 일일 배치의 분석 의견을 그대로 봅니다"
 
@@ -192,9 +194,12 @@ def reference_checks(client: TursoClient, country: str, as_of: str, metas: list[
     out: dict[int, list[dict]] = {}
     for inp in sig.build_inputs(후보, prices, growth, metrics, bands):
         out[inp.stock_id] = [
-            {"horizon": t[2], "passed": bool(t[3]), "failed_count": t[4], "as_of": t[1], "rows": json.loads(t[5])}
+            {"horizon": t[2], "passed": bool(t[3]), "failed_count": t[4], "as_of": t[1],
+             # 팩터 점수 행의 출처를 바로 적는다 — 참고 점수는 `scores` 표에 없다 (25.1019)
+             "rows": [{**r, "source": REFERENCE_SOURCE} if r.get("source") == sig.sg.SOURCE_SCORES else r
+                      for r in json.loads(t[5])]}
             for t in sig.check_rows(inp, as_of, now)
-        ]
+        ]  # fmt: skip
     return out
 
 
