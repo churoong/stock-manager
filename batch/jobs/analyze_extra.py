@@ -57,7 +57,8 @@ ONE_SQL = (
 #: 유니버스 행과 같은 모양(`scores.load_universe`) — 그 종목의 가장 최근 스냅샷 행(제외여도)
 EXTRA_UNIVERSE_SQL = (
     "SELECT s.id AS stock_id, s.ticker, s.market, s.sector, u.market_cap, s.currency, u.snapshot_date,"
-    " s.market_cap_date, u.included, u.exclude_reason"
+    " s.market_cap_date, u.included, u.exclude_reason, s.listed_shares,"
+    " COALESCE(s.name_ko, s.name_en, s.ticker) AS name"
     " FROM stocks s LEFT JOIN universe_members u ON u.stock_id = s.id AND u.snapshot_date ="
     "   (SELECT MAX(u2.snapshot_date) FROM universe_members u2 WHERE u2.stock_id = s.id AND u2.snapshot_date <= ?)"
     " WHERE s.id IN (SELECT value FROM json_each(?))"
@@ -154,6 +155,49 @@ def score_extra(client: TursoClient, country: str, as_of: str, extra: list[dict]
     return out
 
 
+def reference_checks(client: TursoClient, country: str, as_of: str, metas: list[dict],
+                     점수: dict[int, dict]) -> dict[int, list[dict]]:  # fmt: skip
+    """참고 판정표 — 신호 규칙(`services/signals.judgements`)을 이 종목에 그대로 돌린 결과 (docs/analysis.md 8장).
+
+    25.1019. 입력은 일일 신호 작업과 같은 것(최근 시세·연간 재무 성장률·성과 지표·밸류에이션 밴드)을
+    **이 종목만** 읽고, 팩터 점수는 참고 점수를 쓴다. `signal_checks`·`signals` 에는 쓰지 않는다
+    — 신호(매수 구간·금액)는 유니버스 종목만 낸다.
+    {stock_id: [{horizon, passed, failed_count, as_of, rows}]}"""
+    from batch.jobs import signals as sig
+
+    후보 = []
+    for m in metas:
+        s = 점수.get(int(m["stock_id"]))
+        if s is None or s.get("total") is None:
+            continue
+        후보.append({**m, "scores": {k: v for k, v in (s.get("factors") or {}).items()}, "total_score": s["total"],
+                     "score_date": s["as_of"]})  # fmt: skip
+    if not 후보:
+        return {}
+    ids = [int(r["stock_id"]) for r in 후보]
+    prices = sig.load_recent_prices_for(client, ids, as_of)
+    growth = sig.load_growth(client, country, as_of, stock_ids=ids)
+    metrics = sig.load_metrics(client, country, as_of, stock_ids=ids)
+    bands = {}
+    for r in 후보:
+        if not sig.needs_band(r["scores"]):
+            continue
+        sid = int(r["stock_id"])
+        band = sig.load_band(client, sid, as_of, r.get("listed_shares"))
+        if band is not None:
+            bands[sid] = band
+            r["_latest_equity"] = sig._latest_equity(client, sid, as_of)
+            r["_band_close"] = sig._split_only_close(client, sid, as_of)
+    now = db.now_iso()
+    out: dict[int, list[dict]] = {}
+    for inp in sig.build_inputs(후보, prices, growth, metrics, bands):
+        out[inp.stock_id] = [
+            {"horizon": t[2], "passed": bool(t[3]), "failed_count": t[4], "as_of": t[1], "rows": json.loads(t[5])}
+            for t in sig.check_rows(inp, as_of, now)
+        ]
+    return out
+
+
 def analyze(client: TursoClient, country: str, rows: list[dict], warnings: list[str]) -> dict[int, dict]:
     """종목들 → {stock_id: verdict 결과}. 저장까지 한다."""
     if not rows:
@@ -170,6 +214,11 @@ def analyze(client: TursoClient, country: str, rows: list[dict], warnings: list[
     if soft:
         warnings += ensure_data(client, country, [r for r in rows if int(r["id"]) not in hard])
     점수 = score_extra(client, country, as_of, soft) if soft else {}
+    try:
+        판정 = reference_checks(client, country, as_of, soft, 점수)
+    except Exception as exc:  # noqa: BLE001 — 판정표가 없어도 참고 점수는 말한다
+        판정 = {}
+        warnings.append(f"참고 판정표를 내지 못했습니다: {exc}")
     from batch.jobs import verdicts as vj
 
     보유 = {int(r["stock_id"]): r for r in vj._safe(client, vj.POSITIONS_SQL, [country], warnings, "보유")}
@@ -191,13 +240,20 @@ def analyze(client: TursoClient, country: str, rows: list[dict], warnings: list[
                                                                                        if sid in hard else None)},
             position=None if not p else {"quantity": p["quantity"], "price_date": p["price_date"], "pnl_pct": 손익},
             against=[a for a in 곁.get(sid, []) if a["against"]],
+            checks=판정.get(sid, []),
             excluded_reason=사유,
         )  # fmt: skip
         if sid in hard:
             inp.score = {"total": None, "skip_reason": f"유니버스 밖({사유}) — 성격상 점수를 내지 않습니다"}
         res = vd.build(inp)
         res["reasons"] += [a["text"] for a in 곁.get(sid, []) if not a["against"]]
-        detail = {k: res[k] for k in ("label", "reasons", "against", "nearest")} | {"excluded_reason": 사유}
+        detail = {k: res[k] for k in ("label", "reasons", "against", "nearest")} | {
+            "excluded_reason": 사유,
+            # 화면의 점수 카드·매수 신호 카드가 이것을 "참고" 로 그린다 (25.1019)
+            "reference_score": None if not s or s.get("total") is None else {
+                k: s.get(k) for k in ("total", "rank", "ranked", "as_of", "factors")},
+            "checks": 판정.get(sid, []),
+        }  # fmt: skip
         stmts.append((VERDICT_UPSERT, [sid, country, res["verdict"], res["headline"],
                                        json.dumps(detail, ensure_ascii=False),
                                        json.dumps(res["evidence"], ensure_ascii=False),

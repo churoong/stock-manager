@@ -539,6 +539,8 @@ export async function loadSection(
           최근[0] as unknown as SignalRunRow | undefined, 성공[0]?.finished_at ? String(성공[0].finished_at) : null, latest ?? null,
         );
         if (!latest) {
+          const ref = await referenceChecks(exec, id);
+          if (ref) return ref;
           return empty(run_note ? `${run_note} · 신호가 아직 계산되지 않았습니다` : "신호가 아직 계산되지 않았습니다", { rows: [], last_signal_date: null, run_note });
         }
         const rows = firstBy(await exec(SIGNALS, [id, latest, country, latest]), "horizon").map((r) => ({ ...r, tranches: parseJson(r.tranche_plan, []), data: parseJson(r.rationale_data, {}) }));
@@ -550,6 +552,11 @@ export async function loadSection(
           horizon: String(c.horizon), passed: Number(c.passed) === 1, failed_count: Number(c.failed_count),
           as_of: String(c.as_of_date), rows: parseJson(c.checks_json, []),
         }));
+        if (!rows.length && judged.length === 0) {
+          // 유니버스 밖 종목 — "지금 분석" 이 같은 규칙으로 본 참고 판정표가 있으면 그것을 보인다 (25.1019)
+          const ref = await referenceChecks(exec, id);
+          if (ref) return ref;
+        }
         if (!rows.length) {
           const 없음 = lastOwn ? `${latest} 기준 신호 없음 (마지막 신호 ${lastOwn})` : `${latest} 기준 신호 없음`;
           const reason = run_note ? `${run_note} · ${없음}` : 없음;
@@ -559,6 +566,20 @@ export async function loadSection(
         return { as_of: latest, empty: false, reason: null, rows, last_signal_date: lastOwn, checks: judged, run_note };
       });
   }
+}
+
+/** 유니버스 밖이라 신호를 내지 않는 종목의 참고 판정표 (docs/analysis.md 8장, 25.1019). 참고 분석이 아니면 null */
+export const REFERENCE_SIGNALS_NOTE = "유니버스 밖 종목이라 신호(매수 구간·금액)를 내지 않습니다. 아래는 같은 신호 규칙으로 본 참고 판정표입니다";
+
+async function referenceChecks(exec: Exec, id: number): Promise<SectionResult | null> {
+  const v = (await exec(VERDICT, [id]).catch(ifMissingTable([] as Row[])))[0];
+  if (!v || v.verdict !== "reference") return null;
+  const checks = (parseJson(v.detail_json, {}) as { checks?: Array<Record<string, unknown>> }).checks ?? [];
+  if (!checks.length) return null;
+  const judged = checks.map((c) => ({
+    horizon: String(c.horizon), passed: c.passed === true, failed_count: Number(c.failed_count), as_of: String(c.as_of), rows: c.rows ?? [],
+  }));
+  return { as_of: judged[0].as_of, empty: false, reason: REFERENCE_SIGNALS_NOTE, rows: [], last_signal_date: null, checks: judged, run_note: null, reference: true };
 }
 
 // ---------------------------------------------------------------------------

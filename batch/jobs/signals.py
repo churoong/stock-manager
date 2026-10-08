@@ -145,29 +145,56 @@ def load_recent_prices(
     return out
 
 
+#: `load_recent_prices` 와 같은 모양을 **고른 종목만** — 유니버스 밖 참고 판정표 (`jobs/analyze_extra`, 25.1019)
+RECENT_PRICES_FOR_SQL = (
+    "SELECT p.stock_id, p.date, COALESCE(p.adj_close, p.close) AS close, p.value FROM prices p"
+    " WHERE p.stock_id IN (SELECT value FROM json_each(?)) AND p.date <= ?"
+    "  AND p.date >= COALESCE((SELECT x.date FROM prices x WHERE x.stock_id = p.stock_id AND x.date <= ?"
+    "    ORDER BY x.date DESC LIMIT 1 OFFSET ? - 1), '')"
+    " ORDER BY p.stock_id, p.date"
+)
+
+
+def load_recent_prices_for(
+    client: TursoClient, stock_ids: list[int], as_of: str, days: int = RECENT_DAYS
+) -> dict[int, list[tuple[str, float, float | None]]]:
+    """`load_recent_prices` 와 같은 것을 고른 종목만."""
+    out: dict[int, list[tuple[str, float, float | None]]] = {}
+    for row in client.execute(RECENT_PRICES_FOR_SQL, [json.dumps(stock_ids), as_of, as_of, days]).dicts():
+        if row["close"] is not None:
+            out.setdefault(int(row["stock_id"]), []).append(
+                (str(row["date"]), float(row["close"]), _opt_float(row["value"])))
+    return out
+
+
 #: 정의처는 `services/signals.STALE_ANNUAL_DAYS` (25.660)
 STALE_ANNUAL_DAYS = sg.STALE_ANNUAL_DAYS
 
 
-def load_growth(client: TursoClient, country: str, as_of: str) -> dict[int, dict]:
+def load_growth(client: TursoClient, country: str, as_of: str, stock_ids: list[int] | None = None) -> dict[int, dict]:
     """최근 연간 재무와 전년도. 성장률을 여기서 낸다.
 
     **접수일이 기준일 뒤인 보고서는 읽지 않는다** (docs/infra.md 25.106).
     이 값이 중기 신호(실적 모멘텀)의 재료다 — 과거 기준일로 다시 계산할 때 아직 나오지도
     않은 실적으로 "모멘텀이 좋다" 고 판정하면 백테스트도 복기도 뜻을 잃는다.
     `financials.report_date` 는 회계연도 말일이 아니라 **접수일**이다(0005 마이그레이션).
+
+    `stock_ids` 를 주면 그 종목만 읽는다 — 유니버스 밖 종목 참고 판정표(`jobs/analyze_extra`, 25.1019)
     """
+    골라 = None if stock_ids is None else json.dumps(stock_ids)
     rs = client.execute(
         # **기준(연결·별도)은 종목마다 한 번만 고른다** (docs/infra.md 25.890). 예전에는 재무 행마다 같은 종목의
         # 기준 고르기를 다시 돌려 나라 전체 질의 하나가 재무 표를 7배쯤 읽었다(인구 DB 실측 47만 → 14만 행).
         # `MATERIALIZED` 가 없으면 SQLite 가 펼쳐 예전과 같아진다. 결과는 같다(`tests/test_financial_basis_890.py`)
         "WITH b AS MATERIALIZED (SELECT s.id AS sid, (SELECT fb.consolidated FROM financials fb"
         " WHERE fb.stock_id = s.id AND fb.report_code = ? AND fb.report_date <= ?"
-        " ORDER BY fb.fiscal_year DESC, fb.consolidated DESC LIMIT 1) AS cons FROM stocks s WHERE s.country = ?)"
+        " ORDER BY fb.fiscal_year DESC, fb.consolidated DESC LIMIT 1) AS cons FROM stocks s WHERE s.country = ?"
+        " AND (? IS NULL OR s.id IN (SELECT value FROM json_each(?))))"
         " SELECT f.stock_id, f.fiscal_year, f.revenue, f.operating_income, f.consolidated, f.report_date, f.currency"
         " FROM b CROSS JOIN financials f ON f.stock_id = b.sid AND f.consolidated = b.cons"
         " WHERE f.report_code = ? AND f.report_date <= ?",
-        [ANNUAL_REPORT_CODE, as_of, country, ANNUAL_REPORT_CODE, as_of],  # 기준 고르기(25.856)·본 질의
+        # 기준 고르기(25.856)·본 질의
+        [ANNUAL_REPORT_CODE, as_of, country, 골라, 골라, ANNUAL_REPORT_CODE, as_of],
     )
     by_stock: dict[int, dict[int, dict]] = {}
     for row in rs.dicts():
@@ -216,7 +243,7 @@ def _growth(current: float | None, previous: float | None) -> float | None:
     return current / previous - 1
 
 
-def load_metrics(client: TursoClient, country: str, as_of: str) -> dict[int, dict]:
+def load_metrics(client: TursoClient, country: str, as_of: str, stock_ids: list[int] | None = None) -> dict[int, dict]:
     """비중 축소에 쓸 변동성과 MDD. 창 고르기는 `services/metrics.pick_window` 가 한다.
 
     **`as_of` 를 건다** (2026-09-21, docs/infra.md 25.98). 안 걸면 과거 기준일 신호가
@@ -238,9 +265,10 @@ def load_metrics(client: TursoClient, country: str, as_of: str) -> dict[int, dic
         "SELECT m.stock_id, m.window, m.as_of_date, m.calc_version, m.volatility_ann, m.mdd, m.cagr, m.sharpe"
         f" FROM (WITH w(win) AS (VALUES {', '.join(['(?)'] * len(mt.RISK_WINDOWS))}) SELECT win FROM w) w"
         " CROSS JOIN stocks s CROSS JOIN performance_metrics m"
-        " WHERE s.country = ? AND m.id = (SELECT x.id FROM performance_metrics x WHERE x.stock_id = s.id"
+        " WHERE s.country = ? AND (? IS NULL OR s.id IN (SELECT value FROM json_each(?)))"
+        " AND m.id = (SELECT x.id FROM performance_metrics x WHERE x.stock_id = s.id"
         "   AND x.window = w.win AND x.as_of_date <= ? ORDER BY x.as_of_date DESC, x.calc_version DESC LIMIT 1)",
-        [*mt.RISK_WINDOWS, country, as_of],
+        [*mt.RISK_WINDOWS, country, *[None if stock_ids is None else json.dumps(stock_ids)] * 2, as_of],
     )
     return mt.pick_window(rs.dicts())
 

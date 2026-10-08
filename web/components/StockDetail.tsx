@@ -2,7 +2,7 @@
 
 import AnalyzeNow from "@/components/AnalyzeNow";
 import VerdictBlock from "@/components/VerdictBlock";
-import type { AnalysisRequest, Verdict } from "@/lib/analysis";
+import type { AnalysisRequest, ReferenceScoreData, Verdict } from "@/lib/analysis";
 import Link from "next/link";
 import { cachedFetch } from "@/lib/clientCache";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
@@ -199,6 +199,11 @@ export default function StockDetail({
   if (overview.state === "error") return <p className="text-sm text-red-600">{overview.message}</p>;
   const { stock, score, factors, position, position_stale: positionStale = null, position_stuck: positionStuck = null, flags, watch: watchFromServer, unread = [] } = overview.data;
   const etf = stock.asset_type === "etf";
+  // 유니버스 밖 종목의 참고 점수 — "지금 분석"·관심 종목 매일 분석이 만든다 (docs/analysis.md 8장, 25.1019)
+  const 참고 = verdict.state === "ok" && (verdict.data.verdict as Verdict | null)?.verdict === "reference"
+    ? (verdict.data.verdict as Verdict).detail : null;
+  const 참고점수 = 참고?.reference_score ?? null;
+  const 참고사유 = 참고?.excluded_reason ?? null;
   // 재계산 전 보유로 평균 단가 선을 그리지 않는다 — 방금 판 종목의 옛 단가가 지금 값처럼 보였다 (25.806)
   const 보유상태: "ok" | "unread" | "stale" = unread.includes("보유") ? "unread" : positionStale ? "stale" : "ok";
   const watch = watchOverride === undefined ? watchFromServer : watchOverride;
@@ -307,9 +312,11 @@ export default function StockDetail({
               {/* ETF 는 점수를 내지 않는다 — "아직" 이라 하면 기다리면 생길 것처럼 읽힌다 (25.905) */}
               {unread.includes("종합 점수") ? "점수를 읽지 못했습니다 — 계산되지 않은 것이 아닐 수 있습니다"
                 : stock.asset_type === "etf" ? "ETF 는 종목 점수를 내지 않습니다 — 장기 적립 관점의 판정은 ETF 탭에 있습니다"
-                : "데이터 없음 — 점수가 아직 계산되지 않았습니다 (유니버스 편입 종목만)"}
+                : 참고점수 ? `참고 점수 — 유니버스 밖(${참고사유 ?? "제외"})이라 추천 점수표에는 넣지 않습니다`
+                : "데이터 없음 — 점수는 유니버스 편입 종목만 매일 냅니다. 유니버스 밖 종목은 아래 '지금 분석' 으로 참고 점수를 냅니다"}
             </span>
           </div>
+          {참고점수 && <ReferenceScore s={참고점수} />}
         </section>
       ) : (
         <section className="mb-4 rounded-xl border border-slate-200 p-3 dark:border-slate-800">
@@ -382,7 +389,8 @@ export default function StockDetail({
           <SignalsBlock
             rows={data.rows as Row[]} checks={(data.checks as Judged[]) ?? []} reason={data.reason as string | null} currency={currency}
             runNote={(data.run_note as string | null | undefined) ?? null}
-            dateNote={signalScoreDateNote((data.as_of as string | null) ?? null, (score?.as_of_date as string | undefined) ?? null)}
+            reference={data.reference === true}
+            dateNote={data.reference === true ? null : signalScoreDateNote((data.as_of as string | null) ?? null, (score?.as_of_date as string | undefined) ?? null)}
           />
         )}
       </Card>
@@ -618,11 +626,31 @@ interface Judged {
  * 신호가 난 기간은 근거표, 안 난 기간은 판정표 (docs/signals.md 9장).
  * "왜 이 종목은 추천에 없나" 에 답한다 — 추천된 이유만이 아니라 안 된 이유도 확인돼야 완결이다.
  */
-function SignalsBlock({ rows, checks, reason, currency, runNote, dateNote }: {
+function ReferenceScore({ s }: { s: ReferenceScoreData }) {
+  return (
+    <div className="mt-2 text-sm">
+      <p>
+        <b>{formatNum(s.total)}</b>
+        {s.rank && s.ranked ? <span className="ml-2 text-xs text-slate-500">유니버스 기준 {s.rank.toLocaleString()}위 상당/{s.ranked.toLocaleString()}</span> : null}
+        <span className="ml-2 text-xs text-slate-500">기준 {s.as_of}</span>
+      </p>
+      <p className="mt-1 flex flex-wrap gap-x-3 text-xs text-slate-600 dark:text-slate-300">
+        {FACTOR_LABELS.filter(([k]) => typeof s.factors?.[k] === "number").map(([k, label]) => (
+          <span key={k}>{label} {formatNum(s.factors[k])}</span>
+        ))}
+      </p>
+      <p className="mt-1 text-xs text-slate-400">유니버스 전 종목에 이 종목을 더해 같은 식으로 낸 값입니다(순위·추천에는 들어가지 않습니다).</p>
+    </div>
+  );
+}
+
+function SignalsBlock({ rows, checks, reason, currency, runNote, dateNote, reference = false }: {
   rows: Row[]; checks: Judged[]; reason: string | null; currency: string; runNote: string | null; dateNote: string | null;
+  /** 유니버스 밖 종목의 참고 판정표 — 통과한 기간도 신호가 아니라 함께 보인다 (25.1019) */
+  reference?: boolean;
 }) {
   const signalled = new Set(rows.map((r) => String(r.horizon)));
-  const missing = checks.filter((c) => !signalled.has(c.horizon));
+  const missing = reference ? checks : checks.filter((c) => !signalled.has(c.horizon));
   return (
     <div className="space-y-3">
       {/* 건너뛴 실행은 사유 줄(reason)에 이미 들어 있다 — 신호가 있을 때만 따로 띄운다 (25.807) */}
@@ -652,11 +680,11 @@ function SignalsBlock({ rows, checks, reason, currency, runNote, dateNote }: {
       })}
       {missing.length > 0 ? (
         <div className="border-t border-slate-100 pt-2 dark:border-slate-800">
-          <p className="text-xs font-medium text-slate-600 dark:text-slate-300">왜 신호가 없나</p>
+          <p className="text-xs font-medium text-slate-600 dark:text-slate-300">{reference ? "참고 판정표" : "왜 신호가 없나"}</p>
           {missing.map((c) => (
             <article key={c.horizon} className="mt-1 text-xs">
               <p>
-                {HORIZON_LABEL[c.horizon] ?? c.horizon} · 탈락 {c.failed_count}개 기준
+                {HORIZON_LABEL[c.horizon] ?? c.horizon} · {reference && c.passed ? "조건 모두 충족(참고 — 신호 아님)" : `탈락 ${c.failed_count}개 기준`}
               </p>
               <CriteriaTable rows={parseCriteria(JSON.stringify({ criteria: c.rows }))} caption={`판정일 ${c.as_of}`} docPath="docs/signals.md" staleAfterDays={STALE_AFTER_DAYS} />
             </article>

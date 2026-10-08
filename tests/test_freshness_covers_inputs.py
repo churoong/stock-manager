@@ -30,6 +30,7 @@ HEALTH = (뿌리 / "web" / "lib" / "health.ts").read_text(encoding="utf-8")
 #: 적었다가 `test_예외_목록이_없는_표를_가리키지_않는다` 에 걸렸다 — `factors`·`settings` 는
 #: f-string 표 이름과 `db.get_setting` 으로 다루고 `insider_trades` 는 services 를 거친다.
 신선도_불필요 = {
+    "json_each": "표가 아니라 SQLite 표 값 함수다 — 고른 종목 번호 목록을 펼친다 (signals.load_growth 의 stock_ids, 25.1019)",
     "stocks": "종목 마스터. 날짜가 아니라 상태로 본다",
     "batch_runs": "실행 이력. '최근 배치' 칸이 따로 있다",
     "signal_checks": "판정표. 신호와 같은 실행이다",

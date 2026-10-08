@@ -53,6 +53,11 @@ def test_성격상_빠진_종목은_점수를_내지_않고_나머지는_참고_
     assert out[2]["verdict"] == "undecided" and "스팩" in out[2]["headline"]
     stored = {r[0]: r[1] for r in mem.conn.execute("SELECT stock_id, verdict FROM stock_verdicts")}
     assert stored == {1: "reference", 2: "undecided"}
+    # 화면의 점수 카드·신호 카드가 읽는 것 (25.1019) — 참고 점수와 기간마다 참고 판정표
+    상세 = json.loads(mem.conn.execute("SELECT detail_json FROM stock_verdicts WHERE stock_id = 1").fetchone()[0])
+    assert 상세["reference_score"]["total"] == 55.5 and 상세["reference_score"]["rank"] == 400
+    assert {c["horizon"] for c in 상세["checks"]} == {"short", "mid", "long"}
+    assert out[1]["nearest"] is not None  # 판정표가 결론까지 갔다
     # 다시 돌려도 한 행 (덮어쓴다)
     job.analyze(mem, "KR", rows, warnings)  # type: ignore[arg-type]
     assert mem.conn.execute("SELECT COUNT(*) FROM stock_verdicts").fetchone()[0] == 2
@@ -163,3 +168,49 @@ def test_이미_유니버스_종목이면_덮지_않고_그렇다고_알린다(m
     assert mem.conn.execute("SELECT verdict FROM stock_verdicts WHERE stock_id = 1").fetchone()[0] == "waiting"
     assert mem.conn.execute("SELECT status, note FROM analysis_requests").fetchone() == ("done", job.IN_UNIVERSE_NOTE)
     assert 알림 == [(None, None)]
+
+
+def test_참고_판정표는_같은_신호_규칙을_이_종목만_읽어_돌린다() -> None:
+    """25.1019 — 유니버스 밖이라 신호 카드가 "데이터 없음" 이었다. 판정표만 내고 신호 표에는 쓰지 않는다."""
+    from datetime import date, timedelta
+
+    mem = _mem()
+    c = mem.conn
+    d0 = date(2026, 6, 1)
+    날짜 = [(d0 + timedelta(days=i)).isoformat() for i in range(80)]
+    for i, d in enumerate(날짜):  # 꾸준히 오르는 종목 — 단기 규칙의 정배열·추세 위는 통과한다
+        c.execute("INSERT INTO prices (stock_id, date, close, adj_close, value, currency, source, fetched_at)"
+                  " VALUES (1, ?, ?, ?, ?, 'KRW', 't', 't')", [d, 1000 + i * 5, 1000 + i * 5, 1e9])  # fmt: skip
+        c.execute("INSERT INTO prices (stock_id, date, close, adj_close, value, currency, source, fetched_at)"
+                  " VALUES (2, ?, 500, 500, 1e8, 'KRW', 't', 't')", [d])  # fmt: skip
+    as_of = 날짜[-1]
+    meta = [{"stock_id": 1, "ticker": "111111", "market": "KOSDAQ", "sector": None, "currency": "KRW",
+             "listed_shares": None, "name": "종목1"}]  # fmt: skip
+    점수 = {1: {"total": 55.0, "factors": {"value": 60.0, "quality": 50.0, "momentum": 70.0}, "as_of": as_of}}
+    out = job.reference_checks(mem, "KR", as_of, meta, 점수)  # type: ignore[arg-type]
+    assert set(out) == {1}
+    assert {x["horizon"] for x in out[1]} == {"short", "mid", "long"}
+    단기 = next(x for x in out[1] if x["horizon"] == "short")
+    이름 = {r["label"]: r["passed"] for r in 단기["rows"]}
+    assert 이름.get("정배열") is True
+    # 신호·판정표 표에는 쓰지 않는다 — 유니버스 종목의 "왜 없나" 화면과 섞이지 않게
+    assert c.execute("SELECT COUNT(*) FROM signal_checks").fetchone()[0] == 0
+    assert c.execute("SELECT COUNT(*) FROM signals").fetchone()[0] == 0
+    # 점수가 없는 종목은 판정하지 않는다
+    assert job.reference_checks(mem, "KR", as_of, meta, {}) == {}  # type: ignore[arg-type]
+
+
+def test_참고_분석_결론은_판정표의_가장_가까운_기간을_말한다() -> None:
+    sc = {"as_of": "2026-10-07", "total": 40.1, "rank": 790, "ranked": 855, "factors": {"value": 41, "growth": 46}}
+    빠짐 = {"label": "추세 위", "display": "종가 < 20일선", "threshold": "close > MA20", "source": "prices",
+            "as_of": "2026-10-07", "passed": False}  # fmt: skip
+    checks = [{"horizon": "short", "passed": False, "failed_count": 1, "as_of": "2026-10-07", "rows": [빠짐]},
+              {"horizon": "mid", "passed": False, "failed_count": 3, "as_of": "2026-10-07", "rows": []}]  # fmt: skip
+    r = vd.build(vd.Inputs(name="영", ticker="003520", score=sc, checks=checks, excluded_reason="거래대금미달"))
+    assert r["verdict"] == "reference"
+    assert r["headline"].endswith("· 참고 판정표: 단기 기준 1개 남음")
+    assert "빠진 기준: 추세 위 — 지금 종가 < 20일선 · 문턱 close > MA20" in r["reasons"]
+    assert r["evidence"][0]["source"] == "참고 계산(유니버스 + 이 종목)"  # scores 표에 없는 값이다
+    checks[0]["passed"] = True
+    r = vd.build(vd.Inputs(name="영", ticker="003520", score=sc, checks=checks, excluded_reason="거래대금미달"))
+    assert r["verdict"] == "reference" and "단기 신호 조건 충족" in r["headline"]  # 매수 검토가 아니다

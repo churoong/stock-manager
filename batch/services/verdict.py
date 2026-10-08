@@ -80,13 +80,16 @@ def build(inp: Inputs) -> dict:
             순위 = ""
         이름 = "참고 점수(유니버스 + 이 종목으로 계산)" if inp.excluded_reason else "종합 점수"
         reasons.append(f"{이름} {_n(sc['total'], 1)}{순위} ({sc['as_of']})")
-        evidence.append(_row("종합 점수", _n(sc["total"], 1), "—", "scores", sc["as_of"]))
+        # 참고 점수는 `scores` 에 없다 — 출처를 그대로 적는다 (25.1019)
+        출처 = "참고 계산(유니버스 + 이 종목)" if inp.excluded_reason else "scores"
+        evidence.append(_row("종합 점수", _n(sc["total"], 1), "—", 출처, sc["as_of"]))
         f = {k: v for k, v in (sc.get("factors") or {}).items() if k in FACTOR and isinstance(v, (int, float))}
         if len(f) >= 2:
             hi, lo = max(f, key=f.get), min(f, key=f.get)  # type: ignore[arg-type]
             reasons.append(f"가장 강한 팩터 {FACTOR[hi]} {_n(f[hi])} · 가장 약한 팩터 {FACTOR[lo]} {_n(f[lo])}")
             for k, v in f.items():
-                evidence.append(_row(f"팩터 {FACTOR[k]}", _n(v), "—", "scores.factor_scores", sc["as_of"]))
+                evidence.append(_row(f"팩터 {FACTOR[k]}", _n(v), "—",
+                                     출처 if inp.excluded_reason else "scores.factor_scores", sc["as_of"]))
 
     # 결론 (3장)
     붉은 = [x for x in inp.flags if x.get("level") in ("red", "yellow")]
@@ -122,6 +125,22 @@ def build(inp: Inputs) -> dict:
                     f"참고 점수 {_n(sc['total'], 1)}"
                     + (f"(유니버스 기준 {sc['rank']:,}위 상당/{sc['ranked']:,})" if sc.get("rank") and sc.get("ranked")
                        else ""))  # fmt: skip
+        # 참고 판정표 — 같은 신호 규칙을 이 종목에 돌린 결과. 신호(구간·금액)는 내지 않는다 (25.1019)
+        충족 = [c for c in inp.checks if c.get("passed")]
+        if 충족:
+            기간 = "·".join(HORIZON.get(c["horizon"], c["horizon"]) for c in 충족)
+            headline += f" · 참고 판정표: {기간} 신호 조건 충족"
+            reasons.append(f"참고 판정표: {기간} 신호 조건을 모두 충족 ({충족[0].get('as_of')}) — 유니버스 밖이라"
+                           " 매수 구간·금액은 내지 않습니다")  # fmt: skip
+        elif near:
+            기간 = HORIZON.get(near["horizon"], near["horizon"])
+            headline += f" · 참고 판정표: {기간} 기준 {near['failed_count']}개 남음"
+            reasons.append(f"참고 판정표: {HORIZON.get(near['horizon'], near['horizon'])} 신호까지 기준 "
+                           f"{near['failed_count']}개 남음 ({near.get('as_of')})")  # fmt: skip
+            for r in [r for r in near.get("rows") or [] if r.get("passed") is False]:
+                reasons.append(f"빠진 기준: {r.get('label')} — 지금 {r.get('display')} · 문턱 {r.get('threshold')}")
+                evidence.append(_row(str(r.get("label")), r.get("display"), str(r.get("threshold")),
+                                     str(r.get("source")), r.get("as_of")))
     elif sc and sc.get("total") is not None:
         key = "waiting"
         if near:

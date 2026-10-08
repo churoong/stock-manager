@@ -17,11 +17,24 @@ export interface EvidenceRow {
 export interface Verdict {
   verdict: VerdictKey;
   headline: string;
-  detail: { label?: string; reasons?: string[]; against?: string[]; nearest?: { horizon: string; failed_count: number; as_of: string | null } | null };
+  detail: {
+    label?: string; reasons?: string[]; against?: string[]; nearest?: { horizon: string; failed_count: number; as_of: string | null } | null;
+    /** 참고 분석만 (25.1019) */
+    excluded_reason?: string; reference_score?: ReferenceScoreData | null;
+  };
   evidence: EvidenceRow[];
   score_as_of: string | null;
   signal_as_of: string | null;
   computed_at: string;
+}
+
+/** 유니버스 밖 종목의 참고 점수 — `analyze_extra` 가 detail_json 에 둔다 (25.1019) */
+export interface ReferenceScoreData {
+  total: number;
+  rank: number | null;
+  ranked: number | null;
+  as_of: string;
+  factors: Record<string, number | null>;
 }
 
 /** 결론 이름 — batch/services/verdict.VERDICTS 와 같다 */

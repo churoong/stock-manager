@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { ANALYZE_EVENT, REQUEST_LOCK_MINUTES, requestAnalysis, requestInFlight, type AnalysisRequest } from "@/lib/analysis";
 import { TRIGGER_LABEL, TRIGGER_ORDER } from "@/lib/alerts";
 import type { DispatchJob } from "@/lib/dispatch";
-import { loadSection } from "@/lib/stockDetail";
+import { REFERENCE_SIGNALS_NOTE, loadSection } from "@/lib/stockDetail";
 
 const ROOT = join(process.cwd(), "..");
 
@@ -80,5 +80,22 @@ describe("지금 분석", () => {
     expect(py).toContain("'analysis'");
     expect(TRIGGER_LABEL.analysis).toBe("분석 완료");
     expect(TRIGGER_ORDER).toContain("analysis");
+  });
+
+  it("유니버스 밖 종목의 신호 카드는 참고 판정표를 보인다 — 유니버스 종목의 판정표가 있으면 그것을 (25.1019)", async () => {
+    const { db, exec } = mem();
+    db.exec(`INSERT INTO signal_checks (stock_id, as_of_date, horizon, passed, failed_count, checks_json, calc_version, created_at)
+      VALUES (2, '2026-10-07', 'short', 0, 1, '[]', 1, 't')`);
+    const 판정 = [{ horizon: "short", passed: true, failed_count: 0, as_of: "2026-10-07", rows: [{ label: "정배열", passed: true }] }];
+    db.prepare(`INSERT INTO stock_verdicts VALUES (1, 'KR', 'reference', '참고 분석 — x', ?, '[]', '2026-10-07', NULL, 't')`)
+      .run(JSON.stringify({ checks: 판정, reference_score: { total: 40.1 } }));
+    const s = (await loadSection(exec, "signals", 1, { country: "KR" })) as unknown as { empty: boolean; reason: string; reference: boolean; checks: Array<{ passed: boolean }> };
+    expect(s.empty).toBe(false);
+    expect(s.reference).toBe(true);
+    expect(s.reason).toBe(REFERENCE_SIGNALS_NOTE);
+    expect(s.checks[0].passed).toBe(true);
+    // 참고 분석이 아니면 예전처럼
+    db.exec(`UPDATE stock_verdicts SET verdict = 'undecided' WHERE stock_id = 1`);
+    expect((await loadSection(exec, "signals", 1, { country: "KR" })).empty).toBe(true);
   });
 });
