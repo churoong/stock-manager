@@ -49,8 +49,10 @@ describe("폰 메뉴 자리", () => {
 });
 
 describe("폰 아래 막대 (2026-09-18 사용자 결정)", () => {
-  it("추천·적립·찾기·내 계좌·알림·더보기 여섯 칸, 아이콘과 글자가 함께 있다", () => {
-    expect(PHONE_TABS.map((t) => t.label)).toEqual(["추천", "적립", "찾기", "내 계좌", "알림", "더보기"]);
+  // 2026-10-08 사용자 지시로 알림 자리에 종목 분석(분석)이 들어가고 알림은 더보기로 갔다
+  it("추천·적립·찾기·내 계좌·분석·더보기 여섯 칸, 아이콘과 글자가 함께 있다", () => {
+    expect(PHONE_TABS.map((t) => t.label)).toEqual(["추천", "적립", "찾기", "내 계좌", "분석", "더보기"]);
+    expect(MORE_ITEMS.map((i) => i.href)).toContain("/alerts");
     expect(PHONE_TABS.every((t) => t.icon)).toBe(true);
     expect(nav).toContain("<Icon name={tab.icon}");
   });

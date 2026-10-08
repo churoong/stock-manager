@@ -27,6 +27,15 @@ const PATHS: Record<IconName, React.ReactNode> = {
       <path d="M10 20.5a2 2 0 0 0 4 0" />
     </>
   ),
+  // 종목 분석 — 문서 위 돋보기 (25.1016)
+  analysis: (
+    <>
+      <path d="M6 3.5h8l4 4V20.5H6z" />
+      <path d="M9 10h6M9 13.5h3" />
+      <circle cx="14.5" cy="16" r="2.2" />
+      <path d="M16.2 17.7l1.8 1.8" />
+    </>
+  ),
   more: (
     <>
       <circle cx="6" cy="12" r="1.3" />
