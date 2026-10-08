@@ -203,8 +203,12 @@ def reference_checks(client: TursoClient, country: str, as_of: str, metas: list[
     return out
 
 
-def analyze(client: TursoClient, country: str, rows: list[dict], warnings: list[str]) -> dict[int, dict]:
-    """종목들 → {stock_id: verdict 결과}. 저장까지 한다."""
+def analyze(client: TursoClient, country: str, rows: list[dict], warnings: list[str],
+            단계: db.ReadSteps | None = None) -> dict[int, dict]:  # fmt: skip
+    """종목들 → {stock_id: verdict 결과}. 저장까지 한다.
+
+    `단계` 를 주면 단계별 읽은 행을 적는다 — 요청 한 번이 149만 행을 읽어(25.1019) 어디서인지 가린다 (25.1020)"""
+    단계 = 단계 or db.ReadSteps()
     if not rows:
         return {}
     as_of = cal.default_as_of(country)
@@ -216,14 +220,18 @@ def analyze(client: TursoClient, country: str, rows: list[dict], warnings: list[
         return {}
     hard = {sid for sid, m in meta.items() if any(h in str(m.get("exclude_reason") or "") for h in HARD_REASONS)}
     soft = [m for sid, m in meta.items() if sid not in hard]
+    단계.mark("meta")
     if soft:
         warnings += ensure_data(client, country, [r for r in rows if int(r["id"]) not in hard])
+    단계.mark("ensure_data")
     점수 = score_extra(client, country, as_of, soft) if soft else {}
+    단계.mark("score_extra")
     try:
         판정 = reference_checks(client, country, as_of, soft, 점수)
     except Exception as exc:  # noqa: BLE001 — 판정표가 없어도 참고 점수는 말한다
         판정 = {}
         warnings.append(f"참고 판정표를 내지 못했습니다: {exc}")
+    단계.mark("reference_checks")
     from batch.jobs import verdicts as vj
 
     보유 = {int(r["stock_id"]): r for r in vj._safe(client, vj.POSITIONS_SQL, [country], warnings, "보유")}
@@ -265,6 +273,7 @@ def analyze(client: TursoClient, country: str, rows: list[dict], warnings: list[
                                        None if s is None else s["as_of"], stamp]))  # fmt: skip
         out[sid] = res
     client.batch(stmts)
+    단계.mark("verdict")
     return out
 
 
@@ -321,8 +330,9 @@ def run(market: str | None = None, stock_id: int | None = None, send: bool = Fal
             client.execute(REQUEST_UPDATE, ["running", None, None, stock_id])
         warnings: list[str] = []
         error = None
+        단계 = db.ReadSteps()
         try:
-            결과 = analyze(client, country, rows, warnings)
+            결과 = analyze(client, country, rows, warnings, 단계)
         except Exception as exc:  # noqa: BLE001 — 요청이면 실패도 알린다
             결과, error = {}, str(exc)[:200]
         if stock_id is not None:
@@ -331,7 +341,7 @@ def run(market: str | None = None, stock_id: int | None = None, send: bool = Fal
             if send:
                 notify(client, country, rows[0], 결과.get(stock_id), error)
         status = "failed" if error else ("partial" if warnings else "success")
-        기록 = {"stocks": len(rows), "analyzed": len(결과), "warnings": warnings[:10]}
+        기록 = {"stocks": len(rows), "analyzed": len(결과), "warnings": warnings[:10], "reads_by_step": 단계.steps}
         db.finish_batch_run(client, run_id, status=status, error_text=error, step_log=기록)
         print(f"참고 분석({country}): {len(결과)}/{len(rows)}종목" + (f" — 실패 {error}" if error else ""))
         return 1 if error else 0

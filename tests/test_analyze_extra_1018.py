@@ -216,3 +216,15 @@ def test_참고_분석_결론은_판정표의_가장_가까운_기간을_말한�
     checks[0]["passed"] = True
     r = vd.build(vd.Inputs(name="영", ticker="003520", score=sc, checks=checks, excluded_reason="거래대금미달"))
     assert r["verdict"] == "reference" and "단기 신호 조건 충족" in r["headline"]  # 매수 검토가 아니다
+
+
+def test_실행_기록에_단계별_읽기량이_남는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1020 — 요청 한 번 149만 행. 어느 단계인지 실행 기록에서 가린다."""
+    mem = _mem()
+    mem.close = lambda: None  # type: ignore[method-assign]
+    monkeypatch.setattr(job, "TursoClient", lambda: mem)
+    monkeypatch.setattr(job, "ensure_data", lambda *a: [])
+    monkeypatch.setattr(job, "score_extra", lambda *a: {})
+    assert job.run(stock_id=1) == 0
+    기록 = json.loads(mem.conn.execute("SELECT step_log FROM batch_runs WHERE job_name = 'analyze_extra'").fetchone()[0])
+    assert {"meta", "ensure_data", "score_extra", "reference_checks", "verdict"} <= set(기록["reads_by_step"])
