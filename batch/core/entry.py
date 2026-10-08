@@ -19,9 +19,12 @@
 
 from __future__ import annotations
 
+import importlib.util
 import logging
 import os
 from collections.abc import Callable
+from datetime import UTC, datetime
+from pathlib import Path
 
 from batch.core import db
 
@@ -40,6 +43,67 @@ SKIP_ON_D1_ENV = "SKIP_ON_D1"
 #: 여기 있는 이유: 진입점의 공통 약속이고, 일일 배치(`jobs/daily.py`)와
 #: 복귀 스크립트(`scripts/turso_return.py`)가 **같은 글자**를 써야 한다.
 NOTHING_DONE = "실행하지 않음: "
+
+
+#: 이 값(예상 읽기 행 수)을 워크플로가 주면 Turso 월 읽기 진도 문(`scripts/turso_read_gate.py`, 25.886)을
+#: 지나야 시작한다
+#: (docs/infra.md 25.1031). 주간·월간 작업처럼 **며칠 미뤄도 되는** 작업에만 단다 — 일일 배치에는 달지 않는다
+READ_ESTIMATE_ENV = "TURSO_READ_ESTIMATE"
+
+
+def _load_gate():  # noqa: ANN202 — scripts/ 는 패키지가 아니라 파일로 읽는다(시험과 같은 방식)
+    spec = importlib.util.spec_from_file_location(
+        "turso_read_gate", Path(__file__).resolve().parents[2] / "scripts" / "turso_read_gate.py"
+    )
+    mod = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod
+
+
+def _job_name(main: Callable[[], int]) -> str:
+    """`python -m batch.jobs.metrics` 면 metrics — 그때 main 의 모듈 이름은 `__main__` 이라 실행 모듈의
+    spec 을 본다."""
+    import sys
+
+    spec = getattr(sys.modules.get("__main__"), "__spec__", None)
+    name = getattr(spec, "name", None) if main.__module__ == "__main__" else main.__module__
+    return (name or main.__module__).rsplit(".", 1)[-1]
+
+
+def deferred_by_read_budget(job: str) -> str | None:
+    """이 작업을 미뤄야 하면 사유, 아니면 None (docs/infra.md 25.1031).
+
+    2026-10-08 Turso 월 한도에 걸렸다(25.1029) — 같은 날 주간 작업 12개가 몰렸는데 진도 문은 전체 백업·
+    백테스트에만 있었다.
+    사용자 지시 "turso 사용량 다른 데서 더 줄일 거 있으면 줄여줘". 문이 미루면 `batch_runs` 에 `skipped` 를 남긴다.
+    **재지 못하면 들어간다** — 재는 일이 작업을 멈추게 하면 안 된다(문 자체의 원칙)."""
+    raw = os.environ.get(READ_ESTIMATE_ENV, "").strip()
+    if not raw:
+        return None
+    try:
+        estimate = int(raw)
+        gate = _load_gate()
+        from batch.core import client as backend
+
+        if backend.resolved_backend() != backend.TURSO:
+            return None
+        client = backend.TursoClient()
+    except Exception as exc:  # noqa: BLE001
+        log.warning("읽기 진도 문을 재지 못해 들어갑니다: %s", exc)
+        return None
+    try:
+        남음 = db.remaining_read_budget_or_none(client)
+        used = None if 남음 is None else db.TURSO_MONTHLY_READ_LIMIT - 남음
+        ok, text = gate.decide(used, estimate, datetime.now(UTC))
+        if ok:
+            return None
+        gate.record_skip(client, job, text)
+        return text
+    except Exception as exc:  # noqa: BLE001
+        log.warning("읽기 진도 문을 재지 못해 들어갑니다: %s", exc)
+        return None
+    finally:
+        client.close()
 
 
 def paused_on_d1() -> str | None:
@@ -61,6 +125,10 @@ def guard(main: Callable[[], int]) -> int:
     pause = paused_on_d1()
     if pause:
         print(f"쉼: {pause}")
+        return 0
+    미룸 = deferred_by_read_budget(_job_name(main))
+    if 미룸:
+        print(f"미룸: {미룸}")
         return 0
     try:
         return main()

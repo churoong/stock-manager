@@ -17,6 +17,8 @@ from pathlib import Path
 
 #: (파일, 함수) → 빈 값으로 가도 되는 사유. **사유 없는 예외는 두지 않는다**
 면제: dict[tuple[str, str], str] = {
+    ("batch/core/entry.py", "deferred_by_read_budget"): "읽기 진도 문(25.1031)이다. 재지 못하면 들어간다 — 재는 일이 작업을"
+    " 멈추게 하면 안 된다(25.886 문의 원칙). 경고 로그를 남긴다",
     ("batch/core/client.py", "read_return_marker"): "Turso 복귀 표시(운영 표시, 25.12). 못 읽으면 '표시 없음' 이 곧 안전한 쪽이다",
     ("batch/core/d1.py", "database_size"): "모르면 None — 0 으로 두면 '비어 있다' 가 된다(25.30). 부르는 쪽이 None 을 '모름' 으로 적는다",
     ("batch/core/db.py", "_record_rows"): "쓰기 카운터 갱신이다. 카운터가 본 작업을 막으면 안 되고, 경고 로그를 남긴다",

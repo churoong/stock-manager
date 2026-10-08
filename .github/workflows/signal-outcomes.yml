@@ -31,6 +31,8 @@ jobs:
       D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
       D1_API_TOKEN: ${{ secrets.D1_API_TOKEN }}
       OFFLINE_MODE: "0"
+      # Turso 월 읽기 진도 문 (docs/infra.md 25.1031) — 이번 달이 진도를 앞서면 이 작업을 미룬다. 값은 예상 읽기 행 수 [확인필요: 실측]
+      TURSO_READ_ESTIMATE: "2000000"
       LOG_LEVEL: INFO
       # 시세 사본 (docs/infra.md 25.888) — 맞춰 둔 사본이 있으면 시세·종목만 읽는 SELECT 를 거기서 읽는다
       PRICE_REPLICA_PATH: .price-replica/prices.db
