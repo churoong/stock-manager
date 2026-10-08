@@ -138,7 +138,8 @@ describe("종목 상세 (3단계)", () => {
   it("폰 구역 바로가기가 가리키는 카드가 모두 있다", () => {
     const block = detail.slice(detail.indexOf("const JUMPS"), detail.indexOf("];", detail.indexOf("const JUMPS")));
     const jumps = [...block.matchAll(/\["(\w+)", "[^"]+"\],/g)].map((m) => m[1]);
-    expect(jumps).toEqual(["price", "signals", "metrics", "financials", "news", "events", "opinions"]);
+    // "분석"(종목 분석 의견, 25.1016)이 맨 앞 — 결론부터 보고 근거 카드로 내려간다
+    expect(jumps).toEqual(["verdict", "price", "signals", "metrics", "financials", "news", "events", "opinions"]);
     for (const id of jumps) expect(detail, id).toContain(`id="${id}"`);
     expect(detail).toMatch(/aria-label="구역 바로가기"[\s\S]{0,80}sticky[^"]*sm:hidden/);
   });

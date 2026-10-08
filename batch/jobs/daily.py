@@ -888,10 +888,12 @@ def refresh_portfolio(market: str | None = None) -> list[str]:
 
     매매가 없으면 빈 표로 끝난다. 실패는 경고로 돌려주고 리포트는 보낸다.
     """
-    from batch.jobs import monitor_targets, portfolio, sell_flags
+    from batch.jobs import monitor_targets, portfolio, sell_flags, verdicts
 
     steps = [("포트폴리오 재계산", portfolio.run), ("매도 플래그", sell_flags.run)]
     if market:
+        # 종목 분석 의견 — 신호·보유·플래그가 확정된 뒤 (docs/analysis.md, 25.1016)
+        steps.append(("종목 분석 의견", lambda: verdicts.run(market)))
         # 장중 감시 대상과 세션은 보유·신호가 확정된 뒤에 만든다 (docs/intraday.md)
         steps.append(("장중 감시 준비", lambda: monitor_targets.run(market)))
     if market == "KR":

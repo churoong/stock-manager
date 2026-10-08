@@ -1,5 +1,7 @@
 "use client";
 
+import VerdictBlock from "@/components/VerdictBlock";
+import type { Verdict } from "@/lib/analysis";
 import Link from "next/link";
 import { cachedFetch } from "@/lib/clientCache";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
@@ -139,6 +141,7 @@ function Card({
 
 /** 폰 구역 바로가기. 카드 id 와 같아야 한다 */
 const JUMPS: Array<[string, string]> = [
+  ["verdict", "분석"],
   ["price", "가격"],
   ["signals", "신호"],
   ["metrics", "성과"],
@@ -186,6 +189,7 @@ export default function StockDetail({
   const quarterly = useJson<SectionResult>(`${base}/quarterly`);
   // 증권사 의견과 그 증권사의 성적 (docs/brokers.md, 25.995)
   const opinions = useJson<SectionResult>(`${base}/opinions`);
+  const verdict = useJson<SectionResult>(`${base}/verdict`);
   const [horizon, setHorizon] = useState<string | null>(horizonParam ?? null);
   // 관심 등록·해제 뒤 화면 값. undefined 면 서버가 준 것을 쓴다 (훅은 early return 위에)
   const [watchOverride, setWatchOverride] = useState<{ id: number } | null | undefined>(undefined);
@@ -328,6 +332,10 @@ export default function StockDetail({
         </p>
       )}
       {position && <PositionBlock position={position} currency={currency} stale={positionStale === true} />}
+
+      <Card id="verdict" title="종목 분석 의견" loaded={verdict}>
+        {(data) => <VerdictBlock v={data.verdict as Verdict} />}
+      </Card>
 
       <Card
         id="price"

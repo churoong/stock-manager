@@ -27,6 +27,8 @@ export const DESKTOP_TABS: Array<{ href: string; label: string }> = [
   // 장기 적립은 타이밍을 보지 않아 오늘의 추천과 나눴다 (docs/etf.md 4장)
   { href: "/etf", label: "장기 적립" },
   { href: "/screener", label: "종목 찾기" },
+  // 한 종목의 결론·근거·반대 목소리 (docs/analysis.md, 25.1016)
+  { href: "/analysis", label: "종목 분석" },
   { href: "/portfolio", label: "내 포트폴리오" },
   { href: "/alerts", label: "알림" },
   // 규칙을 고칠 때만 보는 화면이라 뒤쪽에 둔다 (docs/backtest.md)
@@ -47,6 +49,7 @@ export const PHONE_TABS: MenuItem[] = [
 
 /** 더보기 화면. 아래 막대에 없는 화면은 여기서 간다 (로그아웃도 여기 있다) */
 export const MORE_ITEMS: MenuItem[] = [
+  { href: "/analysis", label: "종목 분석", icon: "search", note: "한 종목의 결론·근거·반대 목소리" },
   { href: "/reports", label: "일일 리포트", icon: "report", note: "텔레그램으로 보낸 아침 리포트 보관함" },
   { href: "/backtest", label: "백테스트", icon: "backtest", note: "규칙이 과거에 통했는지" },
   { href: "/status", label: "시스템 상태", icon: "status", note: "배치·알림이 도는지 보고, 수동으로 돌린다" },
@@ -58,6 +61,7 @@ export const TITLES: Record<string, string> = {
   "/recommend": "오늘의 추천",
   "/etf": "장기 적립",
   "/screener": "종목 찾기",
+  "/analysis": "종목 분석",
   "/portfolio": "내 포트폴리오",
   "/alerts": "알림",
   "/reports": "일일 리포트",
@@ -79,6 +83,7 @@ export const BACK_TO: Record<string, string> = {
   "/backtest": "/more",
   "/settings": "/more",
   "/status": "/more",
+  "/analysis": "/more",
 };
 
 /** 지금 화면에서 아래 막대의 어느 칸을 켤지. 더보기 안의 화면이면 더보기를 켠다 */

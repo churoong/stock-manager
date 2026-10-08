@@ -22,6 +22,7 @@ export type Exec = (sql: string, args?: Array<string | number | null>) => Promis
 
 export const SECTIONS = [
   "prices", "financials", "valuation", "metrics", "news", "events", "signals", "dividends", "quarterly", "opinions",
+  "verdict",
 ] as const;
 export type Section = (typeof SECTIONS)[number];
 
@@ -66,6 +67,10 @@ function empty(reason: string, extra: Row = {}): SectionResult {
 // ---------------------------------------------------------------------------
 
 /** 증권사 의견 최근 15건과 그 증권사의 성적 (docs/brokers.md, 25.995) — KIS 투자의견 `kr_opinions` × 성적표 `broker_stats` */
+/** 종목 분석 의견 (docs/analysis.md, 25.1016) */
+export const VERDICT = `SELECT verdict, headline, detail_json, evidence_json, score_as_of, signal_as_of, computed_at
+FROM stock_verdicts WHERE stock_id = ?`;
+
 export const OPINIONS = `SELECT o.date, o.broker, o.opinion, o.target_price, o.source, o.fetched_at FROM kr_opinions o
 WHERE o.stock_id = ? ORDER BY o.date DESC, o.broker LIMIT 15`;
 export const BROKER_STATS_FOR = `SELECT b.* FROM json_each(?) j JOIN broker_stats b ON b.broker = j.value`;
@@ -466,6 +471,17 @@ export async function loadSection(
           { rows: [] },
         );
         return { as_of: (rows[0].as_of_date as string | null) ?? null, empty: false, reason: null, rows };
+      });
+
+    case "verdict":
+      return guard(async () => {
+        // 종목 분석 의견 — 일일 배치가 만든 것을 읽기만 한다 (docs/analysis.md, 25.1016). 표가 없으면(0054 전) 빈 것
+        const v = (await exec(VERDICT, [id]).catch(ifMissingTable([] as Row[])))[0];
+        if (!v) return empty("분석 의견은 일일 배치가 점수가 있는 종목에 매일 만듭니다(유니버스 밖·ETF 는 없음)", { verdict: null });
+        return {
+          as_of: String(v.computed_at ?? ""), empty: false, reason: null,
+          verdict: { ...v, detail: parseJson(v.detail_json, {}), evidence: parseJson(v.evidence_json, []) },
+        };
       });
 
     case "opinions":

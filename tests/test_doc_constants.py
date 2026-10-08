@@ -60,6 +60,7 @@ DETAIL = 읽기("stock_detail.md")
 SELL_FLAGS = 읽기("sell_flags.md")
 BACKTEST = 읽기("backtest.md")
 ETF = 읽기("etf.md")
+ANALYSIS = 읽기("analysis.md")
 INTRADAY = 읽기("intraday.md")
 BROKERS = 읽기("brokers.md")
 REACTION = 읽기("disclosure_reaction.md")
@@ -420,6 +421,17 @@ class Test사후_분석:
         검사(REPORTS, f"진입일이 {ws.POSTMORTEM_ENTRY_DAYS[0]}~{ws.POSTMORTEM_ENTRY_DAYS[1]}일 전", "창")
 
 
+class Test종목_분석:
+    """종목 분석 의견 (docs/analysis.md, docs/infra.md 25.1016)."""
+
+    def test_상수(self) -> None:
+        from batch.services import verdict as vd
+
+        검사(ANALYSIS, f"지난 `RECENT_DISCLOSURE_DAYS`({vd.RECENT_DISCLOSURE_DAYS})일", "최근 공시 날 수")
+        for 이름 in vd.VERDICTS.values():
+            검사(ANALYSIS, f"**{이름}**", f"결론 {이름}")
+
+
 class Test세후_시뮬레이션:
     """계좌별 세후 적립 시뮬레이션 (docs/etf.md 11.7, docs/infra.md 25.1003)."""
 
@@ -512,7 +524,7 @@ class Test밸류_분모:
     "quarterly_earnings", "short_reversal", "div_omission", "buyback", "dilution", "flow_surge",
     "gross_profitability", "robustness", "column_rot", "calibration", "self_grade", "holding_scores",
     "pick_history", "etf_accounts", "etf_tilt", "after_hours", "broker_stats", "disclosure_reaction", "luck", "postmortem",
-    "divergence", "tax_sim",
+    "divergence", "tax_sim", "verdict",
 )  # fmt: skip
 
 #: 아직 그물 밖인 모듈과 **왜 아직인지**. 하나씩 줄여 간다

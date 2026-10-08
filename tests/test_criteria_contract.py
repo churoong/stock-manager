@@ -40,7 +40,7 @@ from pathlib import Path
 
 import pytest
 
-from batch.services import accumulation, etf, etf_satellite, insider, sell_flags, signals
+from batch.services import accumulation, etf, etf_satellite, insider, sell_flags, signals, verdict
 from batch.services import criteria as criteria_svc
 
 웹_소스 = Path(__file__).resolve().parent.parent / "web" / "lib" / "recommend.ts"
@@ -76,6 +76,8 @@ def 웹의_거르개(행: dict, 요구: set[str]) -> bool:
     "위성 ETF 참고행": lambda: etf_satellite._info("라벨", "보이는 값", "krx", "2026-09-18"),
     "적립": lambda: accumulation._criterion("라벨", "보이는 값", "문턱", "prices", None, None),
     "매도 플래그": lambda: sell_flags._criterion("라벨", "보이는 값", "문턱", "prices", None),
+    # 종목 분석 의견의 근거표 (docs/analysis.md, 25.1016)
+    "종목 분석": lambda: verdict._row("라벨", "보이는 값", "문턱", "scores", "2026-10-08"),
     # 2026-09-21 에 더했다. **여섯째였는데 이 목록에 없었다** — 위 머리말이 "다섯 곳"
     # 이라고 적혀 있던 그 사이에 여섯째가 생긴 것이다(docs/infra.md 25.94).
     # 이 행은 다른 다섯과 달리 `_criterion` 도우미를 안 쓰고 **직접 딕셔너리를 짓는다** —
@@ -99,6 +101,7 @@ def 웹의_거르개(행: dict, 요구: set[str]) -> bool:
     "batch/services/accumulation.py::_criterion",
     "batch/services/sell_flags.py::_criterion",
     "batch/services/insider.py::criteria_rows",
+    "batch/services/verdict.py::_row",
 }
 
 

@@ -68,6 +68,16 @@ def _억(백만원: int) -> str:
     return f"{억:+.1f}억" if abs(억) < 10 else f"{억:+,.0f}억"
 
 
+def against_lines(v: View) -> list[str]:
+    """한 종목의 반대 목소리 문장 — 종목 분석(docs/analysis.md 5장)이 쓴다. 반대가 아니면 빈 목록."""
+    out = []
+    if v.flow_against:
+        out.append(f"외국인·기관 {v.flow_days}거래일 순매도 (외국인 {_억(v.frgn_amt)}·기관 {_억(v.orgn_amt)})")
+    if v.opinion_against:
+        out.append(f"증권사 목표가 {OPINION_DAYS}일 내림 {v.cuts}·올림 {v.raises}")
+    return out
+
+
 def render(views: list[View]) -> list[str]:
     """반대인 종목만 줄로. 하나도 없으면 빈 목록(절을 싣지 않는다)."""
     lines = []
