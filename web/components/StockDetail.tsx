@@ -2,6 +2,7 @@
 
 import AnalyzeNow from "@/components/AnalyzeNow";
 import ForecastTable from "@/components/ForecastTable";
+import ForecastTrack from "@/components/ForecastTrack";
 import VerdictBlock from "@/components/VerdictBlock";
 import type { AnalysisRequest, ReferenceScoreData, Verdict } from "@/lib/analysis";
 import Link from "next/link";
@@ -348,6 +349,11 @@ export default function StockDetail({
       {(() => {
         const o = verdict.state === "ok" ? (verdict.data.verdict as Verdict | null)?.detail?.outlook : null;
         return o?.forecast ? <ForecastTable f={o.forecast} close={o.close} closeDate={o.close_date} currency={currency} /> : null;
+      })()}
+      {/* 예측 성적표 — 예상 주가 바로 아래 (docs/analysis.md 11장, 25.1037) */}
+      {(() => {
+        const t = verdict.state === "ok" ? (verdict.data.verdict as Verdict | null)?.detail?.track : null;
+        return t ? <ForecastTrack t={t} /> : null;
       })()}
 
       {/* 점수: 팩터 레이더와 센티먼트는 분리해 보인다 (CLAUDE.md 스코어링) */}

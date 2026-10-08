@@ -25,6 +25,7 @@ from batch.core.entry import guard
 from batch.jobs import daily
 from batch.services import disclosure_reaction as dr
 from batch.services import divergence
+from batch.services import forecast_track as ft
 from batch.services import verdict as vd
 
 JOB_NAME = "verdicts"
@@ -119,6 +120,64 @@ INSERT = (
     " headline = excluded.headline, detail_json = excluded.detail_json, evidence_json = excluded.evidence_json,"
     " score_as_of = excluded.score_as_of, signal_as_of = excluded.signal_as_of, computed_at = excluded.computed_at"
 )
+# 예측 성적표 (docs/analysis.md 11장, 25.1037) — 오늘 낸 예측을 쌓고, 기간이 찬 예측을 실제와 견준다
+LOG_INSERT = (
+    "INSERT INTO forecast_log (as_of_date, stock_id, country, close, models_json, computed_at)"
+    " VALUES (?, ?, ?, ?, ?, ?)"
+    " ON CONFLICT (as_of_date, stock_id) DO UPDATE SET close = excluded.close, models_json = excluded.models_json,"
+    " computed_at = excluded.computed_at"
+)
+#: 기간이 찬 예측의 날 — 그 기간 앞(달력)보다 늦지 않은 가장 최근 기록일
+LOG_DUE_SQL = "SELECT MAX(as_of_date) FROM forecast_log WHERE country = ? AND as_of_date <= ?"
+LOG_ROWS_SQL = "SELECT stock_id, models_json FROM forecast_log WHERE as_of_date = ? AND country = ?"
+LOG_FIRST_SQL = "SELECT MIN(as_of_date) FROM forecast_log WHERE country = ?"
+#: 종목마다의 누계는 의견 행(`detail_json.track.stock`)이 날마다 이어 간다 —
+#: 따로 표를 두면 날마다 종목×모델×기간만큼 쓴다
+PRIOR_TRACK_SQL = (
+    "SELECT stock_id, json_extract(detail_json, '$.track.stock') AS t FROM stock_verdicts"
+    " WHERE market = ? AND json_extract(detail_json, '$.excluded_reason') IS NULL"
+)
+
+
+def track_key(country: str) -> str:
+    """시장 누계와 "어디까지 평가했나" 를 두는 설정 열쇠 (배치만 쓰는 기록 키)."""
+    return f"forecast_track_{country}"
+
+
+def evaluate_due(client: TursoClient, country: str, as_of: str, now_close: dict[int, dict],
+                 prior: dict[int, dict], state: dict, warnings: list[str]) -> list[str]:  # fmt: skip
+    """기간이 찬 예측을 견줘 `prior`(종목 누계)와 `state["market"]`(시장 누계)에 더한다. 평가한 기록일 목록.
+
+    기간마다 "그 기간 앞의 가장 최근 기록일" 하나만 본다 — 같은 날 다시 돌아도 `state["through"]` 가 막아
+    두 번 세지 않는다.
+    기준 종가는 **지금 계열에서 그날 것을 다시 읽는다**(수정주가가 다시 매겨져도 두 끝이 같은 잣대)."""
+    through = state.setdefault("through", {})
+    market = state.setdefault("market", {})
+    본날: list[str] = []
+    for 달 in vd.FORECAST_MONTHS:
+        cutoff = ft.months_back(date.fromisoformat(as_of[:10]), 달).isoformat()
+        rows = _safe(client, LOG_DUE_SQL, [country, cutoff], warnings, "예측 기록")
+        d = rows[0][next(iter(rows[0]))] if rows else None
+        if not d or str(d) <= str(through.get(str(달)) or ""):
+            continue
+        기준 = {int(r["stock_id"]): r for r in _safe(client, CLOSE_SQL, [country, str(d)], warnings, "기준 종가")}
+        for r in _safe(client, LOG_ROWS_SQL, [str(d), country], warnings, "예측 기록"):
+            sid = int(r["stock_id"])
+            b, n = (기준.get(sid) or {}).get("close"), (now_close.get(sid) or {}).get("close")
+            if not b or not n:
+                continue
+            try:
+                models = json.loads(r["models_json"] or "{}")
+            except (TypeError, ValueError):
+                continue
+            for model, cell in ft.evaluate(models, 달, float(b), float(n)).items():
+                ft.add(prior.setdefault(sid, {}), model, 달, cell)
+                ft.add(market, model, 달, cell)
+        through[str(달)] = str(d)
+        본날.append(f"{달}개월←{d}")
+    return 본날
+
+
 #: 그 시장의 **유니버스 의견만** 지운다 — 참고 분석(`jobs/analyze_extra`, `detail.excluded_reason` 이 있는 행)은
 #: 남긴다 (25.1022).
 #: 예전엔 시장 전체를 지워, 일일 배치의 참고 분석 단계가 실패하거나 30종목 상한을 넘으면 "지금 분석" 결과가 사라졌다
@@ -263,9 +322,25 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
         플래그[int(r["stock_id"])].append({"level": r["level"], "rationale_text": r["rationale_text"],
                                          "as_of": r["as_of_date"]})  # fmt: skip
     곁 = against_kr(client, sorted(점수), today, warnings) if country == "KR" else {}
-    재료 = outlook_inputs(client, country, max(str(r["as_of_date"]) for r in 점수.values()), today, warnings)
+    as_of = max(str(r["as_of_date"]) for r in 점수.values())
+    재료 = outlook_inputs(client, country, as_of, today, warnings)
+    # 예측 성적표 (25.1037) — 지난 누계를 읽고 기간이 찬 예측을 더한다
+    누계: dict[int, dict] = {}
+    for r in _safe(client, PRIOR_TRACK_SQL, [country], warnings, "지난 예측 성적"):
+        with contextlib.suppress(TypeError, ValueError):
+            if r["t"]:
+                누계[int(r["stock_id"])] = json.loads(r["t"])
+    상태 = db.get_setting(client, track_key(country), {}) or {}
+    평가 = evaluate_due(client, country, as_of, 재료["close"], 누계, 상태, warnings)
+    if not 상태.get("since"):
+        첫 = _safe(client, LOG_FIRST_SQL, [country], warnings, "예측 기록")
+        상태["since"] = (첫[0][next(iter(첫[0]))] if 첫 else None) or as_of
+    시장성적 = 상태.get("market") or {}
+    # 첫 성적이 나오는 날 — 처음 쌓은 날의 한 달 뒤(가장 짧은 기간)
+    첫평가 = ft.months_back(date.fromisoformat(str(상태["since"])[:10]), -vd.FORECAST_MONTHS[0]).isoformat()
     stamp = db.now_iso()
     rows: list[tuple[str, list[Any]]] = [(CLEAR, [country])]
+    기록: list[tuple[str, list[Any]]] = []
     for sid, r in 점수.items():
         try:
             factors = json.loads(r["factor_scores"] or "{}")
@@ -288,14 +363,29 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
         out = vd.build(inp)
         out["reasons"] += [a["text"] for a in 곁.get(sid, []) if not a["against"]]
         out["evidence"] += [a["evidence"] for a in 곁.get(sid, []) if not a["against"]]
+        종목성적 = 누계.get(sid) or {}
+        for 줄 in (ft.line(종목성적, scope="이 종목"), ft.line(시장성적, scope="시장 전체")):
+            if 줄:
+                out["reasons"].append(f"예측 성적표: {줄}")
         detail = {k: out[k] for k in ("label", "reasons", "against", "nearest", "outlook")}
+        detail["track"] = {"stock": 종목성적, "market": 시장성적, "since": 상태.get("since"), "first_due": 첫평가}
+        o = out.get("outlook") or {}
+        모델 = ft.log_models(o)
+        if 모델 and o.get("close_date") == as_of:
+            기록.append((LOG_INSERT, [as_of, sid, country, float(o["close"]),
+                                     json.dumps(모델, separators=(",", ":")), stamp]))  # fmt: skip
         신호일 = max((g["as_of"] for g in 신호.get(sid, [])), default=None) or max(
             (c["as_of"] for c in 판정.get(sid, [])), default=None)
         rows.append((INSERT, [
             sid, country, out["verdict"], out["headline"], json.dumps(detail, ensure_ascii=False),
             json.dumps(out["evidence"], ensure_ascii=False), r["as_of_date"], 신호일, stamp,
         ]))  # fmt: skip
-    return rows
+    if 평가:
+        print(f"예측 성적 평가: {', '.join(평가)}")
+    # "어디까지 평가했나" 는 지우기와 같은 첫 묶음에 — 뒤 묶음이 깨지면 그날 평가를 잃을 뿐 **두 번 세지 않는다**
+    # (덜 센 성적이 더 센 성적보다 덜 틀리게 읽힌다)
+    rows.insert(1, db.setting_statement(track_key(country), 상태))
+    return rows + 기록
 
 
 def run(market: str) -> int:
@@ -309,13 +399,17 @@ def run(market: str) -> int:
         for i in range(0, len(rows), 400):
             client.batch(rows[i : i + 400])
         세기: dict[str, int] = defaultdict(int)
-        for _sql, args in rows[1:]:
-            세기[str(args[2])] += 1
+        의견수 = 0
+        for sql, args in rows:
+            if sql == INSERT:
+                의견수 += 1
+                세기[str(args[2])] += 1
+        기록수 = sum(1 for sql, _ in rows if sql == LOG_INSERT)
         db.finish_batch_run(client, run_id, status="partial" if warnings else "success",
-                            step_log={"stocks": len(rows) - 1 if rows else 0, "by_verdict": dict(세기),
+                            step_log={"stocks": 의견수, "by_verdict": dict(세기), "forecast_logged": 기록수,
                                       "warnings": warnings[:10]})  # fmt: skip
         # 결론별 수는 찍지 않는다 — "보유 점검·보유 유지" 수가 보유 종목 수다(공개 로그, 25.979). step_log 에만
-        print(f"종목 분석 의견({market}): {max(len(rows) - 1, 0)}종목")
+        print(f"종목 분석 의견({market}): {의견수}종목 · 예측 기록 {기록수}건")
         return 0
     finally:
         client.close()

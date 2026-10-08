@@ -23,6 +23,8 @@ export interface Verdict {
     excluded_reason?: string; reference_score?: ReferenceScoreData | null;
     /** 가격·가치 진단 — 예측이 아니라 근거 있는 기준점 (docs/analysis.md 9장, 25.1023) */
     outlook?: OutlookData | null;
+    /** 예측 성적표 — 쌓은 예측을 기간이 지나 실제와 견준 누계 (docs/analysis.md 11장, 25.1037) */
+    track?: TrackData | null;
   };
   evidence: EvidenceRow[];
   score_as_of: string | null;
@@ -197,4 +199,48 @@ export async function requestAnalysis(
     return { ok: false, status: 502, error: `${reason} — 관심 종목에는 넣었습니다. 다음 일일 배치가 참고 분석을 만듭니다` };
   }
   return { ok: true, state: "dispatched" };
+}
+
+// ---------------------------------------------------------------------------
+// 예측 성적표 (docs/analysis.md 11장, docs/infra.md 25.1037)
+// ---------------------------------------------------------------------------
+
+/** 누계 한 칸의 자리 — batch/services/forecast_track.FIELDS 와 같은 순서 */
+export const TRACK_FIELDS = ["n", "n_range", "in68", "in90", "dir_n", "dir_hit", "abs_err_sum"] as const;
+/** 모델 이름 — forecast_track.MODELS 와 같다 */
+export const MODEL_LABEL: Record<string, string> = { capm: "CAPM(시장·베타)", consensus: "증권사 목표가", analog: "비슷한 국면" };
+/** 비율을 말할 최소 표본 — forecast_track.MIN_SAMPLE 과 같다 */
+export const TRACK_MIN_SAMPLE = 20;
+
+export type TrackCells = Record<string, Record<string, number[]>>;
+export interface TrackData {
+  stock?: TrackCells;
+  market?: TrackCells;
+  since?: string | null;
+  first_due?: string | null;
+}
+
+export interface TrackRow {
+  model: string;
+  months: number;
+  n: number;
+  in68: number | null;
+  dir: number | null;
+  err: number | null;
+  enough: boolean;
+}
+
+/** 누계 → 표 줄 (모델·기간 순). 비율은 표시용 나눗셈이다 — 배치가 센 수를 그대로 나눈다 */
+export function trackRows(cells: TrackCells | undefined): TrackRow[] {
+  const out: TrackRow[] = [];
+  for (const model of Object.keys(MODEL_LABEL)) {
+    const m = cells?.[model];
+    if (!m) continue;
+    for (const months of Object.keys(m).map(Number).sort((a, b) => a - b)) {
+      const [n, nr, i68, , dn, dh, err] = m[String(months)] ?? [];
+      if (!n) continue;
+      out.push({ model, months, n, in68: nr ? i68 / nr : null, dir: dn ? dh / dn : null, err: err / n, enough: n >= TRACK_MIN_SAMPLE });
+    }
+  }
+  return out;
 }
