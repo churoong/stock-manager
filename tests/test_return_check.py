@@ -440,3 +440,55 @@ def test_점검이_결코_실패로_끝나지_않는다(monkeypatch: pytest.Monk
     찍힌것 = capsys.readouterr().out
     assert "DB 를 읽지 못했다" in 찍힌것
     assert "[복귀 점검] ===" in 찍힌것, "DB 가 없어도 워크플로에서 아는 것은 찍어야 한다"
+
+
+class TestD1_을_안_쓴_날은_읽지_않는다:
+    """d1-catchup 의 9-1 단계는 `if: always()` 라 `DB_BACKEND=auto` 면 매일 돈다 (docs/infra.md 25.1034).
+    따라잡기가 돌지 않은 날 Turso 에서 시세·점수·감성을 통째로 세면 하루 수백만 행이다."""
+
+    def _열면_기록(self, monkeypatch: pytest.MonkeyPatch) -> list[int]:
+        열림: list[int] = []
+
+        class 기록:
+            def __init__(self) -> None:
+                열림.append(1)
+                raise RuntimeError("열지 말아야 한다")
+
+        monkeypatch.setattr("batch.core.client.TursoClient", 기록)
+        monkeypatch.setattr(sys, "argv", ["return_check.py", "--usage-log", "없는파일.log"])
+        return 열림
+
+    def test_turso_면_열지_않는다(self, monkeypatch: pytest.MonkeyPatch, capsys: Any) -> None:
+        열림 = self._열면_기록(monkeypatch)
+        monkeypatch.setenv(rc.CATCHUP_BACKEND_ENV, "turso")
+        assert rc.main() == 0
+        assert 열림 == []
+        assert "DB 를 읽지 않는다" in capsys.readouterr().out
+
+    @pytest.mark.parametrize("값", ["d1", "unknown", ""])
+    def test_D1_이거나_모르면_읽는다(self, 값: str, monkeypatch: pytest.MonkeyPatch) -> None:
+        """0단계가 깨진 날이야말로 이유를 읽어야 한다(25.53)."""
+        열림 = self._열면_기록(monkeypatch)
+        monkeypatch.setenv(rc.CATCHUP_BACKEND_ENV, 값)
+        assert rc.main() == 0
+        assert 열림 == [1]
+
+    def test_워크플로가_0단계_판정을_넘긴다(self) -> None:
+        import yaml
+
+        wf = yaml.safe_load((Path(__file__).resolve().parent.parent / ".github/workflows/d1-catchup.yml")
+                            .read_text(encoding="utf-8"))  # fmt: skip
+        steps = next(iter(wf["jobs"].values()))["steps"]
+        점검 = next(s for s in steps if "return_check.py" in str(s.get("run", "")))
+        assert 점검["env"][rc.CATCHUP_BACKEND_ENV] == "${{ steps.check.outputs.backend }}"
+        영 = next(s for s in steps if s.get("id") == "check")
+        assert 'echo "backend=$BACKEND" >> "$GITHUB_OUTPUT"' in 영["run"]
+
+
+def test_거래일_수는_날짜_색인으로_센다() -> None:
+    """`COUNT(DISTINCT p.date)` 는 그 나라 시세 행을 전부 읽는다 (25.1034, catchup_report 25.866 과 같은 꼴)."""
+    import inspect
+
+    src = inspect.getsource(rc.모으기)
+    assert "\"SELECT COUNT(DISTINCT p.date)" not in src  # 주석의 옛 꼴 설명은 빼고 질의만
+    assert "WITH RECURSIVE d(x)" in src

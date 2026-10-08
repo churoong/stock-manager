@@ -301,9 +301,14 @@ def 모으기(client: Any, country: str = "KR") -> 사실:
             f" WHERE u.included = 1 AND s.country = ? AND u.snapshot_date = {db.latest_snapshot_sql()}",
             [country, country],
         ),
+        # 날짜 색인을 한 칸씩 건너뛰며 센다 (docs/infra.md 25.1034, `catchup_report` 25.866 과 같은 꼴) —
+        # `COUNT(DISTINCT p.date)` 는 그 나라 시세 행을 전부(국내 약 수백만 행) 읽었다
         시세거래일=_수(
             client,
-            "SELECT COUNT(DISTINCT p.date) FROM prices p JOIN stocks s ON s.id = p.stock_id WHERE s.country = ?",
+            "WITH RECURSIVE d(x) AS (SELECT (SELECT MIN(date) FROM prices)"
+            " UNION ALL SELECT (SELECT MIN(date) FROM prices WHERE date > d.x) FROM d WHERE d.x IS NOT NULL)"
+            " SELECT COUNT(*) FROM d WHERE x IS NOT NULL AND EXISTS (SELECT 1 FROM prices p"
+            "   CROSS JOIN stocks s WHERE p.date = d.x AND s.id = p.stock_id AND s.country = ?)",
             [country],
         ),
         성과지표=_수(
@@ -360,6 +365,10 @@ def 머리말(판정들: list[판정]) -> str:
     return f"[복귀 점검] === {len(판정들)}가지 확인 — {꼬리} (docs/infra.md 25.80) ==="
 
 
+#: d1-catchup 0단계가 판정한 DB (`steps.check.outputs.backend`). 워크플로가 이 이름으로 넘긴다
+CATCHUP_BACKEND_ENV = "CATCHUP_BACKEND"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="되살아나는 날 확인 (docs/infra.md 25.80)")
     parser.add_argument("--usage-log", default="d1-usage.log", help="scripts/d1_usage.py 가 쌓은 로그")
@@ -370,6 +379,14 @@ def main() -> int:
         사용량글 = Path(args.usage_log).read_text(encoding="utf-8")
     except OSError:
         사용량글 = ""
+
+    # **D1 을 쓰지 않은 날은 DB 를 읽지 않는다** (docs/infra.md 25.1034). 이 단계는 `if: always()` 라 `DB_BACKEND=auto`
+    # 이면 **매일** 돌았고, 따라잡기가 돌지 않은 날(0단계가 turso 라고 판정)에도 Turso 에서 시세·점수·감성을 통째로
+    # 셌다 — 하루 수백만 행 `[확인필요: 실측]`. 0단계가 깨져 어느 DB 인지 모르는 날(unknown·빈 값)은 예전처럼 읽는다
+    백엔드 = os.environ.get(CATCHUP_BACKEND_ENV, "").strip()
+    if 백엔드 and 백엔드 not in ("d1", "unknown"):
+        print(f"[복귀 점검] 지금 쓰는 DB 가 {백엔드} 라 따라잡기가 돌지 않았다 — 확인할 것이 없어 DB 를 읽지 않는다")
+        return 0
 
     f = 사실()
     try:

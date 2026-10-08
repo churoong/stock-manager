@@ -103,6 +103,8 @@ jobs:
           USE=false
           if [ "$BACKEND" = "d1" ]; then USE=true; fi
           echo "use_d1=$USE" >> "$GITHUB_OUTPUT"
+          # 9-1 복귀 점검이 이 값을 보고 D1 을 안 쓴 날은 DB 를 읽지 않는다 (docs/infra.md 25.1034)
+          echo "backend=$BACKEND" >> "$GITHUB_OUTPUT"
           # **Turso 로 돌아간 뒤에는 이 워크플로가 날마다 할 일이 없다.** 그래도 잡은 돈다
           # (조건이 `DB_BACKEND == 'auto'` 라서). 그때 10번이 "지금 쓰는 DB: turso" 한 줄짜리
           # 코멘트를 **매일** 달면 이슈 #1 의 마지막 자리가 그것으로 덮인다 (docs/infra.md 25.84).
@@ -296,6 +298,8 @@ jobs:
         env:
           STEPS_JSON: ${{ toJSON(steps) }}
           GITHUB_EVENT_NAME: ${{ github.event_name }}
+          # scripts/return_check.py CATCHUP_BACKEND_ENV — turso 면 DB 를 읽지 않는다 (docs/infra.md 25.1034)
+          CATCHUP_BACKEND: ${{ steps.check.outputs.backend }}
         run: |
           set -o pipefail
           # **먼저 다 받아 두고 나서** 파일에 붙인다. 판정이 읽는 파일(d1-usage.log)에 그대로
