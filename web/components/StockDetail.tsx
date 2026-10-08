@@ -1,6 +1,7 @@
 "use client";
 
 import AnalyzeNow from "@/components/AnalyzeNow";
+import ForecastTable from "@/components/ForecastTable";
 import VerdictBlock from "@/components/VerdictBlock";
 import type { AnalysisRequest, ReferenceScoreData, Verdict } from "@/lib/analysis";
 import Link from "next/link";
@@ -301,6 +302,12 @@ export default function StockDetail({
           </a>
         ))}
       </nav>
+
+      {/* 예상 주가 표 — 화면 맨 위 (docs/analysis.md 10장, 25.1025 사용자 요청) */}
+      {(() => {
+        const o = verdict.state === "ok" ? (verdict.data.verdict as Verdict | null)?.detail?.outlook : null;
+        return o?.forecast ? <ForecastTable f={o.forecast} close={o.close} closeDate={o.close_date} currency={currency} /> : null;
+      })()}
 
       {/* 점수: 팩터 레이더와 센티먼트는 분리해 보인다 (CLAUDE.md 스코어링) */}
       {!score ? (

@@ -1,6 +1,6 @@
 "use client";
 
-import { VERDICT_LABEL, VERDICT_STYLE, type Verdict } from "@/lib/analysis";
+import { VERDICT_LABEL, VERDICT_STYLE, outlookListLines, type Verdict } from "@/lib/analysis";
 
 /** 종목 분석 의견 카드 본문 (docs/analysis.md). 결론·근거·반대 목소리·근거표 — 배치가 만든 값을 보이기만 한다 */
 export default function VerdictBlock({ v }: { v: Verdict }) {
@@ -12,15 +12,14 @@ export default function VerdictBlock({ v }: { v: Verdict }) {
         <span className="mr-1.5 font-semibold">{VERDICT_LABEL[v.verdict] ?? v.verdict}</span>
         {v.headline.replace(/^[^—]+—\s*/, "")}
       </p>
-      {(v.detail?.outlook?.lines ?? []).length > 0 && (
+      {outlookListLines(v.detail?.outlook?.lines ?? []).length > 0 && (
         <div className="mb-2 rounded-lg bg-slate-50 px-2.5 py-2 dark:bg-slate-900">
           <p className="mb-0.5 text-xs font-semibold text-slate-600 dark:text-slate-300">가격·가치 진단</p>
           <ul className="space-y-0.5 text-slate-700 dark:text-slate-300">
-            {v.detail!.outlook!.lines.map((r) => <li key={r}>{r}</li>)}
+            {outlookListLines(v.detail!.outlook!.lines).map((r) => <li key={r}>{r}</li>)}
           </ul>
           <p className="mt-1 text-xs text-slate-400">
-            예상 주가는 시장 수익률과 베타(CAPM), 변동성으로 낸 통계적 값입니다 — 점수·신호로 맞힌 값이 아니라 범위가 본론입니다.
-            밴드 기준 가격은 &quot;PBR 이 그 분위면&quot; 의 가격이고, 증권사 목표가는 증권사의 예측입니다.
+            예상 주가는 화면 맨 위 표에 있습니다. 밴드 기준 가격은 &quot;PBR 이 그 분위면&quot; 의 가격이고, 증권사 목표가는 증권사의 예측입니다.
           </p>
         </div>
       )}

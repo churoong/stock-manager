@@ -99,3 +99,16 @@ describe("지금 분석", () => {
     expect((await loadSection(exec, "signals", 1, { country: "KR" })).empty).toBe(true);
   });
 });
+
+describe("예상 주가 표 (25.1025)", () => {
+  it("기간 이름과, 표로 그리는 줄은 진단 목록에서 뺀다", async () => {
+    const { horizonLabel, outlookListLines } = await import("@/lib/analysis");
+    expect([1, 3, 6, 12].map(horizonLabel)).toEqual(["1개월", "3개월", "6개월", "1년"]);
+    expect(outlookListLines(["종가 1,000원", "예상 주가: 1개월 1,010원", "증권사 2곳"])).toEqual(["종가 1,000원", "증권사 2곳"]);
+  });
+
+  it("배치가 내는 기간과 같다", () => {
+    const py = readFileSync(join(ROOT, "batch", "services", "verdict.py"), "utf-8");
+    expect(py).toContain("FORECAST_MONTHS = (1, 3, 6, 12)");
+  });
+});

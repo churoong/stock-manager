@@ -51,8 +51,8 @@ def _pct(x: Any, digits: int = 1, sign: bool = True) -> str:
 
 #: 시장 기대수익률을 재는 지수 이력의 최대 길이(년) (docs/analysis.md 10.1). 길수록 한 국면에 덜 끌린다
 MARKET_YEARS = 10
-#: 예상 주가를 내는 기간 (개월)
-FORECAST_MONTHS = (1, 3, 12)
+#: 예상 주가를 내는 기간 (개월). 6개월은 2026-10-08 사용자 요청으로 더함 (25.1025)
+FORECAST_MONTHS = (1, 3, 6, 12)
 #: 범위의 z — 68%·90% (정규분포)
 FORECAST_Z = {"68": 1.0, "90": 1.645}
 
@@ -69,7 +69,7 @@ def market_return(first: tuple[str, float] | None, last: tuple[str, float] | Non
 
 def forecast(*, close: float | None, beta: float | None, sigma: float | None, market: dict | None,
              rf: float | None) -> dict | None:  # fmt: skip
-    """1·3·12개월 예상 주가와 범위 (docs/analysis.md 10.1). CAPM 기대수익 + 로그정규 범위. 재료가 모자라면 None."""
+    """1·3·6·12개월 예상 주가와 범위 (docs/analysis.md 10.1). CAPM 기대수익 + 로그정규 범위. 재료가 모자라면 None."""
     if close is None or close <= 0 or not market:
         return None
     rf0 = rf if isinstance(rf, (int, float)) else 0.0

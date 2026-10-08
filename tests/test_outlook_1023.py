@@ -104,7 +104,7 @@ def test_일일_의견이_시장_한_번에_재료를_읽어_진단을_붙인다
     assert o["consensus"]["median"] == 1500 and o["consensus"]["brokers"] == 1
     # 예상 주가 — 그 종목 시장(코스피) 지수로 (25.1024). 베타·무위험수익률이 없으면 1·0
     assert o["forecast"]["market"]["index"] == "KOSPI" and o["forecast"]["beta"] == 1.0
-    assert [h["months"] for h in o["forecast"]["horizons"]] == [1, 3, 12]
+    assert [h["months"] for h in o["forecast"]["horizons"]] == [1, 3, 6, 12]  # 6개월 (25.1025)
 
 
 def test_예상_주가는_CAPM_기대수익과_변동성_범위() -> None:
@@ -114,7 +114,7 @@ def test_예상_주가는_CAPM_기대수익과_변동성_범위() -> None:
     시장 = {"annual": 0.05, "years": 10.0, "since": "2016-10-07", "until": "2026-10-07", "index": "KOSPI"}
     f = vd.forecast(close=1000.0, beta=0.8, sigma=0.3, market=시장, rf=0.03)
     assert f is not None and f["er"] == 0.03 + 0.8 * (0.05 - 0.03)
-    일년 = f["horizons"][2]
+    일년 = next(h for h in f["horizons"] if h["months"] == 12)
     assert 일년["months"] == 12 and 일년["expected"] == 1000 * (1 + f["er"])
     중심 = math.log(1 + f["er"]) - 0.3**2 / 2
     assert 일년["low68"] == 1000 * math.exp(중심 - 0.3) and 일년["high90"] == 1000 * math.exp(중심 + 1.645 * 0.3)

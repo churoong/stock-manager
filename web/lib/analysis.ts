@@ -37,6 +37,38 @@ export interface OutlookData {
   close_date: string | null;
   band?: { rank: number | null; pbr: number; prices: { p20: number | null; p50: number | null; p80: number | null }; price_date: string | null };
   consensus?: { brokers: number; median: number; low: number; high: number; upside: number | null; latest: string };
+  /** 예상 주가 — CAPM + 변동성 범위 (docs/analysis.md 10장, 25.1024·25.1025) */
+  forecast?: ForecastData | null;
+}
+
+export interface ForecastHorizon {
+  months: number;
+  expected: number;
+  low68?: number;
+  high68?: number;
+  low90?: number;
+  high90?: number;
+}
+
+export interface ForecastData {
+  horizons: ForecastHorizon[];
+  er: number;
+  beta: number;
+  beta_given: boolean;
+  sigma: number | null;
+  rf: number;
+  rf_given: boolean;
+  market: { annual: number; years: number; since: string; until: string; index?: string };
+}
+
+/** 예상 주가 표의 기간 이름 */
+export function horizonLabel(months: number): string {
+  return months === 12 ? "1년" : `${months}개월`;
+}
+
+/** 진단 줄 가운데 표로 따로 그리는 줄(예상 주가)은 목록에서 뺀다 — 같은 숫자를 두 번 보이지 않는다 */
+export function outlookListLines(lines: string[]): string[] {
+  return lines.filter((l) => !l.startsWith("예상 주가:"));
 }
 
 /** 유니버스 밖 종목의 참고 점수 — `analyze_extra` 가 detail_json 에 둔다 (25.1019) */
