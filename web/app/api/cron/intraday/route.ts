@@ -16,7 +16,10 @@ import {
   staleTargetsNote,
   tokenMatches,
   targetsFreshFor,
+  DISCLOSURE_ALERTS_BETWEEN,
   DISCLOSURE_ALERTS_FOR,
+  DISCLOSURE_LOOKBACK_SESSIONS,
+  disclosureBoundary,
   ZONE_ALERTS_FOR,
   ACTION_GUARD_ROWS,
   recentActionKr,
@@ -292,9 +295,9 @@ async function disclosures(
   day: string,
   now: Date,
   alreadyAlerted: Set<number>,
-  /** 전 거래일(없으면 오늘). 장 마감 뒤 공시를 놓치지 않으려고 여기부터 묻는다 (25.344) */
+  /** 앞 거래일 둘째 날(없으면 오늘). 장 마감 뒤 공시·하루짜리 DART 점검을 놓치지 않으려고 여기부터 묻는다 (25.344·25.1075) */
   since: string,
-  /** 전 거래일에 알린 공시 알림의 `rcept_no` — 이미 알린 것을 다시 알리지 않는다 (25.344) */
+  /** 창 안에서 종목마다 마지막으로 알린 공시의 `rcept_no` — 이미 알린 것을 다시 알리지 않는다 (25.344·25.1075) */
   alertedBefore: Map<number, string>,
 ): Promise<{ hits: Hit[]; errors: string[] }> {
   const key = process.env.DART_API_KEY;
@@ -599,23 +602,21 @@ export async function GET(request: Request) {
           await execute(DISCLOSURE_ALERTS_FOR, [JSON.stringify(보유ids), day]),
         ).map((r) => Number(r.stock_id)),
       );
-      // 전 거래일부터 묻는다 — 장 마감 뒤 공시가 다음 날에도 안 잡히던 틈 (docs/infra.md 25.344)
-      const 전거래일 =
-        rowsToObjects<{ d: string | null }>(
-          await execute("SELECT MAX(date) AS d FROM market_sessions WHERE market = ? AND date < ?", [market, session.date]),
-        )[0]?.d ?? session.date;
-      const 전에_알림 = new Map<number, string>();
-      for (const r of rowsToObjects<{ stock_id: number; data: string | null }>(
-        await execute(DISCLOSURE_ALERTS_FOR, [JSON.stringify(보유ids), 전거래일]),
-      )) {
-        try {
-          const no = (JSON.parse(r.data ?? "{}") as { rcept_no?: unknown }).rcept_no;
-          if (typeof no === "string") 전에_알림.set(Number(r.stock_id), no);
-        } catch {
-          // 깨진 기록이면 모르는 것으로 둔다 — 그 종목의 전 거래일 공시가 다시 한 번 알려질 수 있다
-        }
-      }
-      const dart = await disclosures(targets, session.date, now, alerted, 전거래일, 전에_알림);
+      // 앞 거래일들부터 묻는다 — 장 마감 뒤 공시가 다음 날에도 안 잡히던 틈(25.344), 하루짜리 DART 점검이 그 틈을 다시 연 것(25.1075)
+      const 앞날들 = rowsToObjects<{ date: string }>(
+        await execute("SELECT date FROM market_sessions WHERE market = ? AND date < ? ORDER BY date DESC LIMIT ?", [
+          market,
+          session.date,
+          DISCLOSURE_LOOKBACK_SESSIONS,
+        ]),
+      );
+      const 창시작 = 앞날들.length ? 앞날들[앞날들.length - 1].date : session.date;
+      const 전에_알림 = disclosureBoundary(
+        rowsToObjects<{ stock_id: number; data: string | null }>(
+          await execute(DISCLOSURE_ALERTS_BETWEEN, [JSON.stringify(보유ids), 창시작, session.date]),
+        ),
+      );
+      const dart = await disclosures(targets, session.date, now, alerted, 창시작, 전에_알림);
       // 이 유형 공시의 과거 반응 한 줄 (docs/disclosure_reaction.md, 25.996) — 표가 없거나(첫 금요일 전) 표본이 적으면 붙지 않는다
       if (dart.hits.length) {
         const 반응 = rowsToObjects<ReactionRow>(await execute(REACTION_ROWS).catch(ifMissingTable({ columns: [], rows: [] } as never)));

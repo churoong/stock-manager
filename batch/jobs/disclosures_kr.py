@@ -147,7 +147,13 @@ def collect(
     return len(targets), stored, warnings, 덮음
 
 
-def run(days: int = DEFAULT_DAYS, everyone: bool = False) -> int:
+def run(days: int = DEFAULT_DAYS, everyone: bool = False, strict: bool = False) -> int:
+    """`strict` 면 경고(실패·중단)가 하나라도 있을 때 1 을 돌려준다 (docs/infra.md 25.1076).
+
+    일일 배치 안에서는 0 이 맞다 — 다음 날 7일 창이 겹쳐 메운다. 그러나 Turso 복귀 메우기(`turso-return.yml` 2-0b)는
+    한 번 끝 표시가 적히면 다시 돌지 않는다. 그 단계가 DART 점검(상태 800) 중에 0 으로 끝나면
+    7일보다 긴 구멍이 영영 남는다.
+    """
     client = TursoClient()
     try:
         db.apply_migrations(client)
@@ -168,7 +174,7 @@ def run(days: int = DEFAULT_DAYS, everyone: bool = False) -> int:
         print(f"공시 수집: 대상 {targets}사, 행 {stored} (최근 {days}일)")
         for w in warnings:
             print(f"  주의: {w}")
-        return 0
+        return 1 if strict and warnings else 0
     finally:
         client.close()
 
@@ -177,9 +183,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="국내 공시 수집")
     parser.add_argument("--days", type=int, default=DEFAULT_DAYS)
     parser.add_argument("--all", action="store_true", help="지켜보는 종목이 아니라 유니버스 전체")
+    parser.add_argument("--strict", action="store_true", help="경고가 있으면 실패로 끝낸다(다시 돌지 않는 메우기용)")
     args = parser.parse_args()
     logging.basicConfig(level=config.SETTINGS.log_level, format="%(asctime)s %(levelname)s %(name)s | %(message)s")
-    return run(args.days, args.all)
+    return run(args.days, args.all, strict=args.strict)
 
 
 if __name__ == "__main__":

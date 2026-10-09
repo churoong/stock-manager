@@ -2,7 +2,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { beforeAll, describe, expect, it } from "vitest";
-import { DISCLOSURE_ALERTS_FOR } from "@/lib/intraday";
+import { DISCLOSURE_ALERTS_BETWEEN, DISCLOSURE_ALERTS_FOR } from "@/lib/intraday";
 
 const MIGRATIONS = join(process.cwd(), "..", "migrations");
 let db: DatabaseSync;
@@ -19,6 +19,9 @@ describe("장중 경로가 alerts 를 통째로 훑지 않는다 (docs/infra.md 
   it("공시 알림 조회는 유니크 색인을 탄다", () => {
     const p = 계획(DISCLOSURE_ALERTS_FOR, "[1,2]", "2026-09-28");
     expect(p.some((d) => /SCAN a\b|SCAN alerts/.test(d)), p.join("\n")).toBe(false);
+    // 두 거래일 창(25.1075)도 같은 색인을 범위로 탄다
+    const q = 계획(DISCLOSURE_ALERTS_BETWEEN, "[1,2]", "2026-10-07", "2026-10-09");
+    expect(q.some((d) => /SCAN a\b|SCAN alerts/.test(d)), q.join("\n")).toBe(false);
   });
 
   it("발송 대기 조회는 이미 보낸 행을 범위에 넣지 않는다", () => {

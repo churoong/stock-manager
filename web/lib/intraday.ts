@@ -514,6 +514,38 @@ export const DISCLOSURE_ALERTS_FOR = `SELECT a.stock_id, a.data FROM json_each(?
 JOIN alerts a ON a.stock_id = j.value AND a.trigger_type = 'disclosure' AND a.trade_date = ?`;
 
 /**
+ * **몇 거래일 앞부터 공시를 묻나** (docs/infra.md 25.1075). 25.344 는 전 거래일부터 물었는데, DART 가 거래일 하나를 통째로
+ * 점검(상태 800 — 2026-10-09 한글날 실제로 몇 시간)하면 그 전날 장 마감 뒤 공시는 다음 날 창 밖이라 알림이 영영 안 나갔다.
+ * 둘로 넓히면 하루짜리 장애를 덮는다. DART 호출 수는 같다(날짜 구간은 한 호출의 인자)
+ */
+export const DISCLOSURE_LOOKBACK_SESSIONS = 2;
+
+/** 창(since 이상 오늘 미만)에 나간 공시 알림 — 같은 유니크 색인을 범위로 탄다 */
+export const DISCLOSURE_ALERTS_BETWEEN = `SELECT a.stock_id, a.data FROM json_each(?) j
+JOIN alerts a ON a.stock_id = j.value AND a.trigger_type = 'disclosure' AND a.trade_date >= ? AND a.trade_date < ?`;
+
+/**
+ * 창 안에서 종목마다 **가장 늦게 알린** `rcept_no` — `freshDisclosures` 의 경계 (25.1075).
+ * 접수번호는 접수일(8자리)로 시작해 글자 순서가 시간 순서다. 깨진 기록은 건너뛴다 — 그 종목의 옛 공시가 한 번 더 알려질 수 있다
+ */
+export function disclosureBoundary(rows: Array<{ stock_id: number; data: string | null }>): Map<number, string> {
+  const out = new Map<number, string>();
+  for (const r of rows) {
+    let no: unknown;
+    try {
+      no = (JSON.parse(r.data ?? "{}") as { rcept_no?: unknown }).rcept_no;
+    } catch {
+      continue;
+    }
+    if (typeof no !== "string") continue;
+    const id = Number(r.stock_id);
+    const 앞 = out.get(id);
+    if (앞 === undefined || no > 앞) out.set(id, no);
+  }
+  return out;
+}
+
+/**
  * 관심 종목만 있는 종목의 **기업행위 가드** (docs/infra.md 25.595, 감사). 보유·추천 종목은 배치(`monitor_targets.recent_action`)가
  * 20일 평균 거래량을 비우는데 관심 종목은 경로가 prices 에서 바로 읽어, 1:50 분할 뒤 약 6거래일 동안 "거래량 50배" 가 매일 나갔다
  * (docs/intraday.md 2장 "기업행위 뒤 20거래일은 거래량 트리거를 대지 않는다" 와 달랐다).

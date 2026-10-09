@@ -113,7 +113,9 @@ jobs:
         if: ${{ !cancelled() && steps.ret.outputs.moved == 'true' && steps.ret.outputs.disclosure_days != '0' }}
         run: |
           set -o pipefail
-          python -m batch.jobs.disclosures_kr --days "${{ steps.ret.outputs.disclosure_days }}" 2>&1 | python scripts/ops_tee.py -a run.log
+          # --strict: DART 가 점검(상태 800)이거나 실패가 잇달면 1 로 끝나 5단계 "메우기 끝 표시" 가 적히지 않는다 —
+          # 다음 실행이 다시 메운다 (docs/infra.md 25.1076). 뒤 단계는 !cancelled() 라 그대로 돈다
+          python -m batch.jobs.disclosures_kr --days "${{ steps.ret.outputs.disclosure_days }}" --strict 2>&1 | python scripts/ops_tee.py -a run.log
 
       - name: 2-1. 빠진 지수 일봉 (베타·추세 필터)
         # **날짜를 박지 않는다.** 며칠이 비었는지는 1단계가 Turso 에 물어 정한다(25.82).
