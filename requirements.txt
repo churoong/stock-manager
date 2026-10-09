@@ -7,8 +7,8 @@ yfinance==1.7.0
 
 # 데이터 처리
 pandas==3.0.5
-# numpy 는 코드가 직접 import 하지 않는다. pandas·exchange-calendars 가 요구해서
-# 어차피 깔리는데, 버전이 저절로 움직이면 pandas 쪽이 깨질 수 있어 여기서 못 박는다
+# numpy 는 pandas·exchange-calendars 가 요구해서 어차피 깔리고, 버전이 저절로 움직이면 pandas 쪽이 깨질 수 있어 여기서 못 박는다.
+# 2026-10-09 부터 `batch/services/simulation.py`(부트스트랩, docs/analysis.md 43장)가 직접 import 한다
 numpy==2.5.3
 
 # HTTP
