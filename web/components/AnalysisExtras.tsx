@@ -1,18 +1,43 @@
 "use client";
 
 import Link from "next/link";
-import type { FlowCard, Peers, Twin } from "@/lib/analysis";
+import type { FlowCard, Peers, SignalHistory, Twin } from "@/lib/analysis";
 
 /**
  * 종목 분석 의견 카드의 해석 묶음 (docs/analysis.md 16·18장, 25.1041) — 수급 흐름(국내)과 팩터 모양이 닮은 종목.
  * 배치가 낸 값을 그리기만 한다.
  */
-export default function AnalysisExtras({ flows, twins, peers }: { flows?: FlowCard | null; twins?: Twin[]; peers?: Peers | null }) {
-  if (!flows && !twins?.length && !peers) return null;
+const HORIZON_KO: Record<string, string> = { short: "단기", mid: "중기", long: "장기" };
+
+export default function AnalysisExtras({ flows, twins, peers, signals }: {
+  flows?: FlowCard | null; twins?: Twin[]; peers?: Peers | null; signals?: SignalHistory | null;
+}) {
+  if (!flows && !twins?.length && !peers && !signals) return null;
   const pctv = (v: number | null) => (v === null ? "-" : `${v >= 0 ? "+" : ""}${(v * 100).toFixed(1)}%`);
   const 억 = (x: number) => `${x >= 0 ? "+" : ""}${x.toLocaleString(undefined, { maximumFractionDigits: 1 })}억`;
   return (
     <div className="mb-2 grid gap-2 sm:grid-cols-2">
+      {signals && signals.recent.length > 0 && (
+        <div className="rounded-lg border border-slate-200 px-2.5 py-2 text-xs dark:border-slate-800">
+          <p className="mb-1 font-semibold text-slate-600 dark:text-slate-300">이 종목에 난 신호 (지난 1년 {signals.signals}번)</p>
+          <table className="w-full text-left">
+            <thead className="text-slate-500"><tr><th className="pr-2">날</th><th className="pr-2">기간</th><th className="pr-2">5일</th><th className="pr-2">20일</th><th className="pr-2">60일</th><th>도달</th></tr></thead>
+            <tbody>
+              {signals.recent.map((x) => (
+                <tr key={`${x.as_of_date}-${x.horizon}`} className="border-t border-slate-100 dark:border-slate-800">
+                  <td className="py-0.5 pr-2">{x.as_of_date}</td>
+                  <td className="pr-2">{HORIZON_KO[x.horizon] ?? x.horizon}</td>
+                  <td className="pr-2">{pctv(x.ret_5d)}</td>
+                  <td className="pr-2">{pctv(x.ret_20d)}</td>
+                  <td className="pr-2">{pctv(x.ret_60d)}</td>
+                  <td>{x.hit_target ? "목표" : x.hit_stop ? "손절" : "-"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="mt-1 text-slate-400">조건이 이어진 날들은 한 번으로 셉니다(첫날 기준). 아직 기간이 안 찬 칸은 -.</p>
+        </div>
+      )}
       {flows && Object.keys(flows.windows).length > 0 && (
         <div className="rounded-lg border border-slate-200 px-2.5 py-2 text-xs dark:border-slate-800">
           <p className="mb-1 font-semibold text-slate-600 dark:text-slate-300">수급 흐름 (기준 {flows.latest})</p>

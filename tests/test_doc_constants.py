@@ -475,6 +475,9 @@ class Test종목_분석:
         from batch.services import insights as ins
 
         검사(ANALYSIS, f"`WEIGHT_MONTHS`({ins.WEIGHT_MONTHS})개월 성적", "성적 가중 합의 기간")
+        검사(ANALYSIS, f"`SIGNAL_HISTORY_DAYS`({vj.SIGNAL_HISTORY_DAYS})일", "신호 성적 창")
+        검사(ANALYSIS, f"`SIGNAL_GAP_DAYS`({ins.SIGNAL_GAP_DAYS})달력일", "신호 끊김 문턱")
+        검사(ANALYSIS, f"`SIGNAL_SHOW`({ins.SIGNAL_SHOW})번", "신호 표시 수")
         검사(ANALYSIS, f"`TREND_POINTS`({'·'.join(str(x) for x in ins.TREND_POINTS)})일 전", "목표가 흐름 찍는 날")
 
         검사(ANALYSIS, f"석 달치(`FLOWS_CALENDAR_DAYS` {vj.FLOWS_CALENDAR_DAYS}일)", "수급 흐름 읽기 창")

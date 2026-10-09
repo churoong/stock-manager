@@ -200,6 +200,40 @@ def target_trend(opinions: list[dict], today: Any, window_days: int) -> dict | N
             "avg_change": round(sum(변경) / len(변경), 4) if 변경 else None, "points": points}  # fmt: skip
 
 
+#: 이 종목 신호 성적 (docs/analysis.md 37장) — 같은 기간 신호가 이 달력일 넘게 끊겼다가 다시 나야 새 신호로 센다.
+#: 신호는 조건이 이어지는 동안 날마다 다시 적혀, 그대로 세면 한 번의 신호가 수십 번으로 부푼다. 한 주(주말 포함 7일)
+SIGNAL_GAP_DAYS = 7
+#: 화면에 싣는 최근 신호 수
+SIGNAL_SHOW = 10
+
+
+def signal_history(rows: list[dict]) -> dict | None:
+    """이 종목 신호 성적 (docs/analysis.md 37장, 25.1060) — `signal_outcomes` 행(날짜 오름차순)을 신호 한 번씩으로 묶어
+    그 첫날의 결과만 센다. 요약: 20거래일 뒤 결과가 있는 신호 수·평균·오른 비율·시장 대비 평균, 목표·손절 도달 수."""
+    from datetime import date
+
+    앞날: dict[str, str] = {}
+    신호: list[dict] = []
+    for r in sorted(rows, key=lambda r: (str(r["as_of_date"]), str(r["horizon"]))):
+        d, h = str(r["as_of_date"]), str(r["horizon"])
+        새 = h not in 앞날 or (date.fromisoformat(d) - date.fromisoformat(앞날[h])).days > SIGNAL_GAP_DAYS
+        앞날[h] = d
+        if 새:
+            신호.append({k: r.get(k) for k in ("as_of_date", "horizon", "ret_5d", "ret_20d", "ret_60d", "hit_target",
+                                                "hit_stop", "bench_ret_20d")})  # fmt: skip
+    if not 신호:
+        return None
+    스물 = [x for x in 신호 if isinstance(x.get("ret_20d"), (int, float))]
+    초과 = [x["ret_20d"] - x["bench_ret_20d"] for x in 스물 if isinstance(x.get("bench_ret_20d"), (int, float))]
+    return {
+        "signals": len(신호), "rows": len(rows), "recent": 신호[-SIGNAL_SHOW:][::-1],
+        "n20": len(스물), "avg20": round(sum(x["ret_20d"] for x in 스물) / len(스물), 4) if 스물 else None,
+        "up20": sum(1 for x in 스물 if x["ret_20d"] > 0),
+        "excess20": round(sum(초과) / len(초과), 4) if 초과 else None,
+        "targets": sum(1 for x in 신호 if x.get("hit_target")), "stops": sum(1 for x in 신호 if x.get("hit_stop")),
+    }  # fmt: skip
+
+
 #: 성적 가중 합의가 보는 기간 — 네 눈이 모두 1년 예상이라 1년 성적으로만 견준다 (docs/analysis.md 30장)
 WEIGHT_MONTHS = 12
 

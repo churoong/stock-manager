@@ -160,6 +160,13 @@ CALIBRATION_SQL = (
     "SELECT step_log FROM batch_runs WHERE job_name = 'signal_outcomes' AND market = ? AND status = 'success'"
     " ORDER BY started_at DESC LIMIT 1"
 )
+# 이 종목 신호 성적 (37장, 25.1060) — 지난 1년 신호의 사후 결과(신호 성적표 작업이 쓴다)
+SIGNAL_HISTORY_SQL = (
+    "SELECT o.stock_id, o.as_of_date, o.horizon, o.ret_5d, o.ret_20d, o.ret_60d, o.hit_target, o.hit_stop,"
+    " o.bench_ret_20d FROM signal_outcomes o JOIN stocks s ON s.id = o.stock_id"
+    " WHERE s.country = ? AND o.as_of_date >= ? ORDER BY o.stock_id, o.as_of_date"
+)
+SIGNAL_HISTORY_DAYS = 365
 # 점수 변화 (17장) — 4주 앞 가장 가까운 점수일
 SCORES_BEFORE_SQL = (
     "SELECT sc.stock_id, sc.as_of_date, sc.total_score, sc.factor_scores, sc.weights_json, sc.sentiment_score,"
@@ -504,6 +511,10 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
     if country == "KR":
         실적반응 = next((r for r in _safe(client, REACTION_SQL, [], warnings, "공시 반응 통계")
                      if r.get("type") == "earnings"), None)  # fmt: skip
+    신호이력: dict[int, list[dict]] = defaultdict(list)
+    for r in _safe(client, SIGNAL_HISTORY_SQL, [country, (today - timedelta(days=SIGNAL_HISTORY_DAYS)).isoformat()],
+                   warnings, "이 종목 신호 성적"):  # fmt: skip
+        신호이력[int(r["stock_id"])].append(r)
     보정표: list[dict] = []
     for r in _safe(client, CALIBRATION_SQL, [country], warnings, "점수 보정표"):
         with contextlib.suppress(TypeError, ValueError, AttributeError):
@@ -614,6 +625,13 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
                 분해["change"] = insights.decompose_change(지금점수, 앞점수.get(sid))
                 분해["since"] = (앞점수.get(sid) or {}).get("as_of") if 분해["change"] else None
             detail["decomposition"] = 분해
+        이력 = insights.signal_history(신호이력.get(sid, []))
+        detail["signal_history"] = 이력
+        if 이력 and 이력["n20"]:
+            초과 = f"(시장 대비 {이력['excess20'] * 100:+.1f}%p)" if 이력["excess20"] is not None else ""
+            out["reasons"].append(
+                f"이 종목에 난 신호(지난 1년 {이력['signals']}번): 20거래일 뒤 평균 {이력['avg20'] * 100:+.1f}%{초과}"
+                f"·오른 {이력['up20']}/{이력['n20']}번, 목표 도달 {이력['targets']}·손절 도달 {이력['stops']}")
         보정 = insights.calibration_for(r["total_score"], 보정표)
         detail["calibration"] = 보정
         if 보정:

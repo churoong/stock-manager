@@ -33,6 +33,8 @@ export interface Verdict {
     peers?: Peers | null;
     /** 종합 점수 분해 (docs/analysis.md 26장, 25.1051) */
     decomposition?: Decomposition | null;
+    /** 이 종목에 난 신호들의 성적 (docs/analysis.md 37장, 25.1060) */
+    signal_history?: SignalHistory | null;
   };
   evidence: EvidenceRow[];
   score_as_of: string | null;
@@ -495,4 +497,17 @@ export function trackRows(cells: TrackCells | undefined): TrackRow[] {
     }
   }
   return out;
+}
+
+/** 이 종목에 난 신호들의 성적 (docs/analysis.md 37장) — 이어지는 신호는 한 번으로 묶은 뒤 */
+export interface SignalHistory {
+  signals: number;
+  rows: number;
+  recent: Array<{ as_of_date: string; horizon: string; ret_5d: number | null; ret_20d: number | null; ret_60d: number | null; hit_target: number | null; hit_stop: number | null; bench_ret_20d: number | null }>;
+  n20: number;
+  avg20: number | null;
+  up20: number;
+  excess20: number | null;
+  targets: number;
+  stops: number;
 }
