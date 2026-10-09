@@ -16,6 +16,7 @@ S5(업종 선도-지연)·S6(커버리지 개시)는 두 검증 모두 탈락이
 
 from __future__ import annotations
 
+import math
 import statistics
 from collections.abc import Callable
 from datetime import date
@@ -153,3 +154,121 @@ def shrink_missing(score: float | None, alive: int, registered: int) -> float | 
     if score is None or registered <= 0:
         return score
     return 50 + (score - 50) * max(0, alive) / registered
+
+
+# ----------------------------------------------------------------------
+# 16회차 — 숨은 테마 안의 지각생 (짝 거래 신호, Chen·Chen·Chen·Li 2019)
+# ----------------------------------------------------------------------
+
+#: 벌어진 폭을 재는 거래일 — 지난 한 달(13장과 같은 환산)
+PAIRS_DAYS = 21
+
+
+#: 짝 수 — Chen·Chen·Chen·Li(2019) 의 50. 짝이 50 이 안 되면 NULL (검증 B: 5 는 우리가 고른 숫자였다)
+PAIRS_PEERS = 50
+#: 짝 가운데 지난달 수익이 있어야 하는 몫 — 켜는 기준의 표본 비율과 같은 60%
+PAIRS_MIN_SHARE = fic.MIN_COVERAGE
+
+
+def same_issuer_key(ticker: str | None, kr: bool) -> str | None:
+    """같은 발행사 열쇠. 국내는 6자리 코드의 앞 5자리(보통주 …0, 우선주 …5·7·9·K), 미국은 '-'·'.' 앞 글자 —
+    BRK-A/BRK-B. GOOG/GOOGL·FOX/FOXA 처럼 한쪽이 다른 쪽의 앞부분인 이중 클래스는 앞 4글자로 묶는다
+    `[확인필요: 미국 이중 클래스 목록을 따로 받지 않는다 — 앞 4글자가 같은 다른 회사가 드물게 함께 빠진다]`."""
+    if not ticker:
+        return None
+    t = str(ticker).upper()
+    if kr:
+        return t[:5] if len(t) == 6 else t
+    t = t.replace(".", "-").split("-")[0]
+    return t[:4] if len(t) >= 4 else t
+
+
+def axis_return(series: list[tuple[str, float]], axis: list[str], kr: bool,
+                days: int = PAIRS_DAYS) -> float | None:  # fmt: skip
+    """**공통 날짜 축**(기준 지수의 거래일)으로 잰 지난 `days` 거래일 수익 — 종목마다 자기 행 N개를 세면
+    정지·결측이 있는 종목은 더 옛날까지 늘어나 짝과 다른 기간을 잰다(검증 A).
+    끝 = 축의 마지막 날, 그날 거래가 없으면 None(멈춘 종목). 시작 = 축의 `days` 거래일 앞 날 이하 마지막 종가.
+    국내는 그 사이 하루 ±30% 밖 움직임(수정 안 된 분할)이 있으면 None."""
+    if len(axis) <= days or not series:
+        return None
+    시작, 끝 = axis[-1 - days], axis[-1]
+    if series[-1][0] != 끝:
+        return None
+    앞 = [(d, c) for d, c in series if d <= 시작]
+    if not 앞 or 앞[-1][1] <= 0:
+        return None
+    if kr:
+        창 = [c for d, c in series if d >= 앞[-1][0]]
+        if any(a > 0 and abs(b / a - 1) > LT_KR_LIMIT for a, b in zip(창, 창[1:], strict=False)):
+            return None
+    return series[-1][1] / 앞[-1][1] - 1
+
+
+def formation_returns(series: list[tuple[str, float]], kr: bool, until: str, days: int) -> dict[str, float]:
+    """짝 고르기 창의 일간 로그 수익 {날짜: 수익} — `until` 이하 마지막 `days` 개. 국내는 하루 ±30% 밖 날을 빈 날로
+    (그 하루가 잔차 표준편차를 부풀려 모든 상관을 0 쪽으로 끌어내린다, 검증 A)."""
+    끝 = [(d, c) for d, c in series if d <= until][-(days + 1) :]
+    out: dict[str, float] = {}
+    for (_, c0), (d1, c1) in zip(끝, 끝[1:], strict=False):
+        if c0 > 0 and c1 > 0 and not (kr and abs(c1 / c0 - 1) > LT_KR_LIMIT):
+            out[d1] = math.log(c1 / c0)
+    return out
+
+
+def pairs_beta(own: dict[str, float], peers: list[dict[str, float]]) -> float | None:
+    """형성 창에서 자기 일간 수익 = a + β·(짝 동일가중 일간 수익) 의 최소제곱 β (CCCL 2019).
+    겹치는 날이 모자라면 None."""
+    xs, ys = [], []
+    for d, y in own.items():
+        v = [p[d] for p in peers if d in p]
+        if v:
+            xs.append(sum(v) / len(v))
+            ys.append(y)
+    if len(xs) < 60:  # 저장소의 벤치마크 최소 점수(`metrics.MIN_BENCHMARK_POINTS`)와 같은 하한
+        return None
+    mx, my = sum(xs) / len(xs), sum(ys) / len(ys)
+    var = sum((x - mx) ** 2 for x in xs)
+    return sum((x - mx) * (y - my) for x, y in zip(xs, ys, strict=True)) / var if var > 0 else None
+
+
+def pairs_from_prices(closes: dict[int, list[tuple[str, float]]], market_of: dict[int, str], ticker_of: dict[int, str],
+                      kr_ids: set[int], index_points: list[tuple[str, float]],
+                      scored: list[int]) -> dict[int, dict]:  # fmt: skip
+    """지각생 (docs/factors.md 12.18, analysis 53장) — **백테스트 IC 와 운영 표시가 함께 쓰는 정의 하나.**
+    closes = 종목 → 기준일 이하 (날짜, 수정종가). 축 = 기준 지수의 거래일(기준일 이하).
+    - 형성 창: 축의 끝에서 `PAIRS_DAYS` 거래일 앞까지의 `COMOVE_DAYS` 거래일 — 신호 창과 겹치지 않는다(검증 B)
+    - 짝: 같은 시장(`stocks.market`) 안, 같은 발행사 제외, 시장 몫을 뺀 잔차 상관 상위 `PAIRS_PEERS`
+    - β: 형성 창의 자기 수익을 짝 동일가중 수익에 회귀
+    - 값: β·(짝 평균 지난 `PAIRS_DAYS` 거래일 수익) − 자기 수익, 같은 날짜 축(`axis_return`). 방향 +
+    돌려주는 것: 종목 → {gap, own, peers, beta, n, until}. 값을 못 내면 그 종목은 없다."""
+    from batch.services import history as hist
+
+    축 = [d for d, c in index_points if c and c > 0]
+    if len(축) < hist.COMOVE_DAYS + PAIRS_DAYS + 1:
+        return {}
+    형성끝 = 축[-1 - PAIRS_DAYS]
+    지수 = [(d, c) for d, c in index_points if c and c > 0 and d <= 형성끝]
+    시장수익 = {d1: math.log(c1 / c0) for (_, c0), (d1, c1) in zip(지수, 지수[1:], strict=False)}
+    계열 = {sid: formation_returns(cl, sid in kr_ids, 형성끝, hist.COMOVE_DAYS) for sid, cl in closes.items()}
+    지난달 = {sid: axis_return(cl, 축, sid in kr_ids) for sid, cl in closes.items()}
+    out: dict[int, dict] = {}
+    for 시장 in sorted({market_of.get(s) or "?" for s in closes}):
+        무리 = [s for s in closes if (market_of.get(s) or "?") == 시장]
+        발행사 = {s: same_issuer_key(ticker_of.get(s), s in kr_ids) or "" for s in 무리}
+        짝 = hist.comovers({s: 계열[s] for s in 무리}, 시장수익, {}, top=PAIRS_PEERS, issuer_of=발행사)
+        for sid in scored:
+            if sid not in 무리 or len(짝.get(sid) or []) < PAIRS_PEERS:
+                continue
+            ids = [p["stock_id"] for p in 짝[sid]]
+            r = [지난달.get(p) for p in ids]
+            값 = [x for x in r if x is not None]
+            own = 지난달.get(sid)
+            if own is None or len(값) < PAIRS_MIN_SHARE * PAIRS_PEERS:
+                continue
+            beta = pairs_beta(계열[sid], [계열[p] for p in ids])
+            if beta is None:
+                continue
+            평균 = sum(값) / len(값)
+            out[sid] = {"gap": beta * 평균 - own, "own": own, "peers": 평균, "beta": beta, "n": len(값),
+                        "until": 축[-1], "formation_until": 형성끝}  # fmt: skip
+    return out

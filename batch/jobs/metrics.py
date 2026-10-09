@@ -28,7 +28,7 @@ from batch.core import db
 from batch.core import settings_range as sr
 from batch.core.client import TursoClient
 from batch.core.entry import guard
-from batch.services import event_history, history, patterns, simulation
+from batch.services import candidate_factors, event_history, history, patterns, simulation
 from batch.services import metrics as calc
 
 log = logging.getLogger("metrics")
@@ -243,6 +243,20 @@ def load_sectors(client: TursoClient, countries: list[str], warnings: list[str])
         return {}
 
 
+MARKETS_SQL = "SELECT id, market, ticker FROM stocks WHERE country IN (SELECT value FROM json_each(?))"
+
+
+def load_markets(client: TursoClient, countries: list[str],
+                 warnings: list[str]) -> tuple[dict[int, str], dict[int, str]]:  # fmt: skip
+    """종목 → (시장, 종목코드). 지각생(53장)의 같은 시장 짝·같은 발행사 빼기용. 못 읽으면 비우고 경고."""
+    try:
+        rs = client.execute(MARKETS_SQL, [json.dumps(countries)]).rows
+        return {int(r[0]): str(r[1] or "") for r in rs}, {int(r[0]): str(r[2] or "") for r in rs}
+    except Exception as exc:  # noqa: BLE001
+        warnings.append(f"시장·종목코드를 읽지 못했습니다: {exc}")
+        return {}, {}
+
+
 SHARES_SQL = (
     "SELECT id, listed_shares FROM stocks WHERE country IN (SELECT value FROM json_each(?)) AND listed_shares > 0"
 )
@@ -314,6 +328,7 @@ def compute_all(
     사건이력: dict[str, dict] | None = None
     움직임: dict[int, dict | None] = {}
     일수익: dict[str, dict[int, dict[str, float]]] = {}
+    지각재료: dict[str, dict[int, list[tuple[str, float]]]] = {}
 
     나라_끝: dict[str, tuple[dict[str, date], dict[int, str]]] = {}
     멈춤_경고: set[str] = set()
@@ -368,6 +383,8 @@ def compute_all(
         움직임[stock_id] = history.move_inputs(날짜들, 종가들, 지수)
         # 변동성 국면 성적 (51장, 25.1071)
         이력["vol_regime"] = history.vol_regime(날짜들, 종가들)
+        # 지각생 (53장, 25.1072) — 기준일 이하 수정종가를 모아 두고 아래에서 나라마다 백테스트와 같은 함수로
+        지각재료.setdefault(country, {})[stock_id] = [(q.date.isoformat(), q.close) for q in 국면_점[-400:]]
         # 함께 움직이는 종목 (52장) — 최근 1년 일간 로그 수익을 모아 두고 아래에서 나라마다 상관을 낸다
         끝 = list(zip(날짜들, 종가들, strict=False))[-(history.COMOVE_DAYS + 1) :]
         일수익.setdefault(country, {})[stock_id] = {
@@ -463,12 +480,25 @@ def compute_all(
         # 함께 움직이는 종목 (52장) — 나라마다, 베타·하락장 성적과 같은 기준 지수의 일간 로그 수익을 뺀 잔차 상관
         동행: dict[int, list[dict]] = {}
         for 나라, 계열 in 일수익.items():
-            지수점 = [(q.date.isoformat(), q.close) for q in bench_cache.get(나라, [])]
+            기준일_나라 = (as_of_by_country or {}).get(나라, as_of)
+            지수점 = [(q.date.isoformat(), q.close) for q in bench_cache.get(나라, [])
+                   if q.date.isoformat() <= 기준일_나라]  # fmt: skip
             시장수익 = {d1: math.log(c1 / c0) for (_, c0), (d1, c1) in zip(지수점, 지수점[1:], strict=False)
                      if c0 > 0 and c1 > 0}  # fmt: skip
             동행.update(history.comovers(계열, 시장수익, 업종))
+        지각: dict[int, dict] = {}
+        시장_of, 코드_of = load_markets(client, sorted({c for _, _, c in stocks}), warnings)
+        for 나라, 모음 in 지각재료.items():
+            기준일_나라 = (as_of_by_country or {}).get(나라, as_of)
+            지수점 = [(q.date.isoformat(), q.close) for q in bench_cache.get(나라, [])
+                   if q.date.isoformat() <= 기준일_나라]  # fmt: skip
+            지각.update(candidate_factors.pairs_from_prices(
+                모음, 시장_of, 코드_of, {s for s in 모음 if 나라 == "KR"}, 지수점, list(모음)))  # fmt: skip
         for sid, _, 표, _ in pattern_rows:
             표["comovers"] = 동행.get(sid)
+            # 지각생 (53장) — 백테스트 IC 와 같은 함수(`candidate_factors.pairs_from_prices`)
+            if sid in 지각:
+                표["pairs_gap"] = {k: (round(v, 4) if isinstance(v, float) else v) for k, v in 지각[sid].items()}
             k = 업종.get(sid)
             peers = [움직임[o] for o in 같은업종.get(k, []) if o != sid and 움직임.get(o)] if k else []
             표["moves"] = history.move_parts(움직임.get(sid) or {}, peers)

@@ -435,6 +435,21 @@ def year_values(snapshots: list[dict[str, Any]], cutoff: str, picked: dict[str, 
     return merged
 
 
+def pairs_scores(view: bt.PriceView, pool: list[dict[str, Any]], scored: list[int],
+                 benchmark_closes: dict[str, float] | None, cutoff: str,
+                 kr_ids: set[int]) -> tuple[dict[int, float | None], dict[int, float | None]]:  # fmt: skip
+    """지각생 점수 (docs/factors.md 12.18) — 운영 53장과 같은 `candidate_factors.pairs_from_prices`(정의 하나).
+    짝 후보는 그 시점 유니버스의 가격 있는 종목 전부(`pool`, 점수 유무와 무관 — 검증 A), 점수는 `scored` 에만.
+    (점수, 같은 날짜 축의 −자기 수익) — 둘째는 증분 IC 의 통제 변수다."""
+    지수 = sorted((d, c) for d, c in (benchmark_closes or {}).items() if d <= cutoff)
+    종가 = {r["stock_id"]: view.closes(r["stock_id"]) for r in pool}
+    시장 = {r["stock_id"]: str(r.get("market") or "") for r in pool}
+    코드 = {r["stock_id"]: str(r.get("ticker") or "") for r in pool}
+    결과 = cf.pairs_from_prices(종가, 시장, 코드, kr_ids, 지수, scored)
+    return ({sid: (결과[sid]["gap"] if sid in 결과 else None) for sid in scored},
+            {sid: (-결과[sid]["own"] if sid in 결과 else None) for sid in scored})  # fmt: skip
+
+
 @dataclass
 class KrExtra:
     """15회차 사용자 지시분(12.17)의 국내 재료 — 신용잔고율·개인 순매수·증권사 목표가·수정 계수. 비면 그 IC 만 빈다."""
@@ -488,9 +503,16 @@ LOOP_IC_NAMES = (
     "gross_profitability", "flow_surge_x_rev",
 )
 #: 2026-10-09 사용자 지시분(docs/factors.md 12.17, 25.1069) — 동결 셈과 섞지 않는 **별도 묶음**. BH 도 따로 낸다
-USER_IC_NAMES = ("lt_reversal", "lt_reversal_x_value", "credit_balance", "retail_flow", "tp_dispersion")
-#: IC 를 잴 이름들 (docs/backtest.md 2.5). 팩터 다섯과 종합, 발굴 루프, 사용자 지시분
-IC_NAMES = ("composite", "value", "quality", "growth", "momentum", "risk", *LOOP_IC_NAMES, *USER_IC_NAMES)
+USER_IC_NAMES = ("lt_reversal", "lt_reversal_x_value", "credit_balance", "retail_flow", "tp_dispersion",
+                 # 16회차 사용자 지시분 — 숨은 테마 안의 지각생 (docs/factors.md 12.18, 25.1072). **판정은 증분 IC
+                 # 하나**
+                 "pairs_gap_x_rev")  # fmt: skip
+#: 판정하지 않는 기록용 IC — 원값 `pairs_gap` 은 −(자기 수익)을 품어 단기 반전 덕에 통과할 수 있다(12.18 검증 B).
+#: verdict 는 실행 기록에 남지만 판정·BH 묶음에 세지 않는다
+DIAG_IC_NAMES = ("pairs_gap",)
+#: IC 를 잴 이름들 (docs/backtest.md 2.5). 팩터 다섯과 종합, 발굴 루프, 사용자 지시분, 기록용
+IC_NAMES = ("composite", "value", "quality", "growth", "momentum", "risk", *LOOP_IC_NAMES, *USER_IC_NAMES,
+            *DIAG_IC_NAMES)  # fmt: skip
 
 
 def factor_ics(
@@ -607,6 +629,11 @@ def factor_ics(
         # 15회차 사용자 지시분 (docs/factors.md 12.17, 25.1069) — 정의는 `services/candidate_factors`
         장기반전 = {sid: cf.lt_reversal([c for _, c in view.closes(sid)], sid in 국내) for sid in by_stock}
         밸류점수 = {sid: fs.get("value") for sid, fs in by_stock.items()}
+        # 16회차 지각생 (12.18) — 기준일까지의 `COMOVE_DAYS` 거래일로 짝(시장 몫을 뺀 상관 상위)을 고르고,
+        # 지난 `PAIRS_DAYS` 거래일 짝 평균 − 자기 수익. 짝 고르기·벌어진 폭 모두 기준일 이하 가격만(view)
+        짝후보 = [r for r in 후보 if view.last_close(r["stock_id"])]
+        국내후보 = {r["stock_id"] for r in 후보 if r.get("market") in ("KOSPI", "KOSDAQ")}
+        지각점수, 자기반전 = pairs_scores(view, 짝후보, list(by_stock), benchmark_closes, cutoff, 국내후보)
         ke = kr_extra or KrExtra()
         신용점수: dict[int, float | None] = {}
         개인점수: dict[int, float | None] = {}
@@ -653,6 +680,8 @@ def factor_ics(
                 점수 = 개인점수
             elif name == "tp_dispersion":
                 점수 = 분산점수
+            elif name in ("pairs_gap", "pairs_gap_x_rev"):
+                점수 = 지각점수
             else:
                 점수 = {sid: fs.get(name) for sid, fs in by_stock.items()}
             # **판정 계열은 시장 안에서 잰 IC 의 가중 평균**이다 (6회차 1, docs/backtest.md 2.5, 25.810).
@@ -661,6 +690,11 @@ def factor_ics(
                 # 장기 반전의 **증분 IC** — 밸류를 통제한다(Fama·French 1996 이 밸류에 흡수된다고 보였다, 12.17)
                 ic, 쓴수, 갈래 = fic.period_ic_by_market(장기반전, 수익, 시장, control=밸류점수)
                 섞음[name].append(fic.partial_period_ic_n(장기반전, 밸류점수, 수익)[0])
+            elif name == "pairs_gap_x_rev":
+                # 지각생의 **증분 IC** — 자기 지난달 수익이 신호의 한 몫이라, **같은 날짜 축**의 −자기 수익을
+                # 통제한다(검증 A — `reversal_1m` 은 자기 행 21개라 축이 다르다). 남는 것은 짝 평균의 몫이다(12.18)
+                ic, 쓴수, 갈래 = fic.period_ic_by_market(지각점수, 수익, 시장, control=자기반전)
+                섞음[name].append(fic.partial_period_ic_n(지각점수, 자기반전, 수익)[0])
             elif name == "flow_surge_x_rev":
                 # 거래대금 급증의 **증분 IC** — 단기 반전을 통제한다 (3회차 검증 2 조건, 25.742).
                 # 거래량이 튀는 날은 가격도 튀어 반전과 겹친다. 통제해도 남아야 수급 유입 조건의 근거가 된다
@@ -1151,7 +1185,7 @@ def load_universe(client: TursoClient, country: str) -> tuple[list[dict[str, Any
     """
     rs = client.execute(
         "SELECT s.id AS stock_id, s.market, s.sector, s.sector_code, s.listed_shares, s.listed_date, u.snapshot_date,"
-        " s.currency"
+        " s.currency, s.ticker"  # 종목코드 — 지각생(12.18)이 같은 발행사 주식을 짝에서 뺀다
         " FROM universe_members u JOIN stocks s ON s.id = u.stock_id"
         " WHERE u.included = 1 AND s.country = ?"
         f"   AND u.snapshot_date = {db.latest_snapshot_sql()}",

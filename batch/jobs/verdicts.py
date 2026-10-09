@@ -674,6 +674,14 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
         짝 = [{**x, "ticker": 점수[x["stock_id"]]["ticker"], "name": 점수[x["stock_id"]]["name"]}
              for x in 짝원본 if x["stock_id"] in 점수]  # fmt: skip
         detail["comovers"] = 짝 or None
+        폭 = ((재료.get("patterns") or {}).get(sid) or {}).get("pairs_gap")
+        detail["pairs_gap"] = 폭
+        if 폭:
+            # 53장 — 사실과 문헌만. 우리 백테스트 판정 전이라 "따라잡는다" 고 말하지 않는다
+            out["reasons"].append(
+                f"짝 {폭['n']}종목(시장 몫을 뺀 1년 상관 상위, {폭['formation_until']}까지로 고름)의 지난 한 달 평균 "
+                f"{폭['peers'] * 100:+.1f}%, 이 종목 {폭['own'] * 100:+.1f}%, β {폭['beta']:.2f} — 벌어진 폭 "
+                f"{폭['gap'] * 100:+.1f}%p (짝 거래 문헌은 다음 달 좁혀지는 쪽, 우리 판정 전)")  # fmt: skip
         if 짝:
             밖 = [x["name"] for x in 짝 if not x["same_sector"]]
             out["reasons"].append("함께 움직이는 종목(지난 1년, 시장 몫을 뺀 상관): "

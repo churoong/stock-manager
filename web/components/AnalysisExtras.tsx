@@ -9,10 +9,11 @@ import type { FlowCard, Peers, SignalHistory, Twin, Verdict } from "@/lib/analys
  */
 const HORIZON_KO: Record<string, string> = { short: "단기", mid: "중기", long: "장기" };
 
-export default function AnalysisExtras({ flows, twins, peers, signals, alternatives, comovers }: {
+export default function AnalysisExtras({ flows, twins, peers, signals, alternatives, comovers, pairsGap }: {
   flows?: FlowCard | null; twins?: Twin[]; peers?: Peers | null; signals?: SignalHistory | null;
   alternatives?: NonNullable<Verdict["detail"]>["alternatives"];
   comovers?: NonNullable<Verdict["detail"]>["comovers"];
+  pairsGap?: NonNullable<Verdict["detail"]>["pairs_gap"];
 }) {
   if (!flows && !twins?.length && !peers && !signals && !alternatives?.length && !comovers?.length) return null;
   const pctv = (v: number | null) => (v === null ? "-" : `${v >= 0 ? "+" : ""}${(v * 100).toFixed(1)}%`);
@@ -102,6 +103,13 @@ export default function AnalysisExtras({ flows, twins, peers, signals, alternati
               </li>
             ))}
           </ul>
+          {pairsGap && (
+            <p className="mt-1">
+              지난 한 달 짝 {pairsGap.n}종목 평균 {pctv(pairsGap.peers)} · 이 종목 {pctv(pairsGap.own)} · β {pairsGap.beta.toFixed(2)} →{" "}
+              <b>벌어진 폭 {pairsGap.gap >= 0 ? "+" : ""}{(pairsGap.gap * 100).toFixed(1)}%p</b>
+              <span className="text-slate-400"> (짝 거래 문헌은 다음 달 좁혀지는 쪽 — 우리 백테스트 판정 전)</span>
+            </p>
+          )}
           <p className="mt-1 text-slate-400">업종 밖인데 함께 움직이면 분류에 없는 공통 재료(테마·공급망)가 있을 수 있습니다.</p>
         </div>
       )}

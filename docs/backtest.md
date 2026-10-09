@@ -217,7 +217,7 @@ group 변경)까지 끼어 있어 무엇이 무엇을 바꿨는지 알 수 없�
 - 나오는 날 가격이 없는 종목(거래정지)은 **마지막 종가로 묶는다** — `simulate` 와 같은 규칙이다. 예전에는 빠졌다
 지금은 팩터 다섯, 종합, 업종 모멘텀(`sector_mom`, 25.439), 발생액(`accrual`, 25.445), 순주식발행(`net_issuance`, 25.446)을 잰다. 발굴 루프로 넣는 새 지표도 같은 자리에 이름을 더해 잰다
 (2026-09-30 기준 `sue`·`reversal_1m`·`div_omission`·`buyback`·`dilution`·`flow_surge`·`gross_profitability`·`flow_surge_x_rev` 까지 17개).
-2026-10-09 사용자 지시분(factors.md 12.17, 25.1069)으로 `lt_reversal`·`lt_reversal_x_value`(밸류 통제 증분)·`credit_balance`·`retail_flow`·`tp_dispersion` 을 더해 22개다 — 이 다섯은 발굴 루프 묶음(`LOOP_IC_NAMES`, 11개 고정)과 섞지 않는 **별도 묶음 `USER_IC_NAMES`** 이고, BH 기록도 따로 낸다(`fdr.group = user_2026_10_09`, 누적 검정 이름 수 `m_total`, `t_ge_3` 함께).
+2026-10-09 사용자 지시분(factors.md 12.17, 25.1069)으로 `lt_reversal`·`lt_reversal_x_value`(밸류 통제 증분)·`credit_balance`·`retail_flow`·`tp_dispersion` 을 더해 22개다(16회차 12.18 로 판정 이름 `pairs_gap_x_rev` 와 **기록 전용** `pairs_gap`(`DIAG_IC_NAMES`, 판정·BH 에 세지 않음)이 더해져 24개) — 이 다섯은 발굴 루프 묶음(`LOOP_IC_NAMES`, 11개 고정)과 섞지 않는 **별도 묶음 `USER_IC_NAMES`** 이고, BH 기록도 따로 낸다(`fdr.group = user_2026_10_09`, 누적 검정 이름 수 `m_total`, `t_ge_3` 함께).
 
 **증분 IC** (2026-09-30, docs/infra.md 25.742) — "이미 있는 지표를 통제해도 남는가". `factor_ic.partial_period_ic_n` 이
 통제 지표 z 를 걷어 낸 스피어만 편상관 `(r_xy − r_xz·r_yz) / √((1 − r_xz²)(1 − r_yz²))` 를 낸다(교과서 식, 새 문턱 없음).

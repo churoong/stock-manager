@@ -41,6 +41,8 @@ export interface Verdict {
     signal_history?: SignalHistory | null;
     /** 함께 움직이는 종목 — 시장 몫을 뺀 1년 상관 (52장, 25.1071) */
     comovers?: Array<{ stock_id: number; ticker: string; name: string; corr: number; same_sector: boolean }> | null;
+    /** 지각생 — 짝 평균 지난 한 달 수익 − 이 종목 (53장, 25.1072) */
+    pairs_gap?: { gap: number; own: number; peers: number; n: number; beta: number; until: string; formation_until: string } | null;
     /** 감성과 가격의 엇갈림 (50장, 25.1070) */
     sentiment_gap?: { as_of: string; sentiment: number | null; sent_delta: number; price_ret: number; opposite: boolean } | null;
     /** 같은 업종 대체 후보 — 점수가 같거나 높고 변동성이 낮은 종목 (47장, 25.1068) */

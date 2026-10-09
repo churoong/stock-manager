@@ -382,7 +382,8 @@ COMOVE_TOP = 5
 
 
 def comovers(series: dict[int, dict[str, float]], market: dict[str, float],
-             sector_of: dict[int, Any]) -> dict[int, list[dict]]:  # fmt: skip
+             sector_of: dict[int, Any], top: int = COMOVE_TOP,
+             issuer_of: dict[int, str] | None = None) -> dict[int, list[dict]]:  # fmt: skip
     """함께 움직이는 종목 (52장, 25.1071). series = 종목 → {날짜: 일간 로그 수익},
     market = {날짜: 지수 일간 로그 수익}. 종목마다 베타 × 지수를 빼 잔차를 내고(업종·테마처럼 시장 말고 함께 움직이는
     것만 남게), 잔차끼리 상관이 큰 `COMOVE_TOP` 개. 관측일이 `COMOVE_MIN_DAYS` 미만인 종목은 뺀다.
@@ -409,15 +410,27 @@ def comovers(series: dict[int, dict[str, float]], market: dict[str, float],
             continue
         ids.append(sid)
         행.append(np.nan_to_num(e / sd, nan=0.0))
-    if len(ids) < COMOVE_TOP + 1:
+    if len(ids) < top + 1:
         return {}
     z = np.asarray(행, dtype=np.float32)
     corr = (z @ z.T) / len(날)
     np.fill_diagonal(corr, -np.inf)
+    # 같은 발행사의 다른 주식(보통주·우선주, 이중 클래스)은 기계적인 짝이라 뺀다 (12.18 검증 B)
+    if issuer_of:
+        같은: dict[str, list[int]] = {}
+        for i, sid in enumerate(ids):
+            if issuer_of.get(sid):
+                같은.setdefault(issuer_of[sid], []).append(i)
+        for idx in 같은.values():
+            for a in idx:
+                for b in idx:
+                    corr[a][b] = -np.inf
     out: dict[int, list[dict]] = {}
+    n_top = top
     for i, sid in enumerate(ids):
-        top = np.argpartition(-corr[i], COMOVE_TOP)[:COMOVE_TOP]
-        top = top[np.argsort(-corr[i][top])]
+        top_i = np.argpartition(-corr[i], n_top)[:n_top]
+        top_i = top_i[np.isfinite(corr[i][top_i])]
+        top = top_i[np.argsort(-corr[i][top_i])]
         out[sid] = [{"stock_id": int(ids[j]), "corr": round(float(corr[i][j]), 3),
                      "same_sector": sector_of.get(sid) is not None and sector_of.get(sid) == sector_of.get(ids[j])}
                     for j in top]  # fmt: skip
