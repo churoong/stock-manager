@@ -97,12 +97,18 @@ export interface HistoryData {
   } | null;
   /** 상승의 출처 (41장, 국내) */
   sources?: { since: string; until: string; from_year: number; to_year: number; price: number; earnings: number; multiple: number; dividends: number | null } | null;
+  /** 실제 수익률 경로 (43장) — 화면은 예상 주가 표의 boot 와 사다리의 touch_boot 를 쓴다 */
+  boot?: { days_used: number; sigma: number } | null;
+  /** 매물대 (45장) — 칸은 마지막 수정주가에 대한 비율 */
+  profile?: { since: string; until: string; days: number; bins: Array<{ lo: number; hi: number; share: number }>; top: number[]; now: number } | null;
+  /** 움직임 분해 (44장) */
+  moves?: { until: string; beta: number; w: Record<string, { since: string; stock: number; market: number; sector: number | null; peers: number; own: number }> } | null;
   /** 공매도 급증 뒤 (42장, 국내) */
   short?: { since: string; until: string; days: number; events: number; last: string | null; h: Record<string, DistLite | null>; base: Record<string, DistLite | null> } | null;
 }
 
 /** 진단 줄 가운데 이력 카드(HistoryFacts)가 그리는 줄 — 목록에서 뺀다 */
-export const HISTORY_LINE_PREFIXES = ["낙폭 회복(", "최악의 한 달(", "계절성(", "52주 신고가 뒤(", "실적 발표 반응(", "상승의 출처(", "공매도 급증 뒤("];
+export const HISTORY_LINE_PREFIXES = ["낙폭 회복(", "최악의 한 달(", "계절성(", "52주 신고가 뒤(", "실적 발표 반응(", "상승의 출처(", "공매도 급증 뒤(", "움직임 분해(", "실제 수익률로 그린 1년 범위("];
 
 /** 보고서 코드 → 이름 (DART) */
 export const REPORT_NAME: Record<string, string> = { "11013": "1분기", "11012": "반기", "11014": "3분기", "11011": "사업" };
@@ -231,12 +237,15 @@ export interface ScenarioData {
 export interface LadderItem {
   label: string;
   price: number;
-  kind: "high" | "band" | "consensus" | "range" | "signal" | "target" | "stop" | "criterion";
+  kind: "high" | "band" | "consensus" | "range" | "signal" | "target" | "stop" | "criterion" | "profile";
   source: string;
   /** 지금 종가에서의 거리 (소수) */
   dist: number;
   /** 개월 → 그 안에 한 번이라도 닿을 확률 */
   touch?: Record<string, number>;
+  /** 같은 질문을 실제 수익률 경로로(표류 0)와, 같은 변동성의 정규 가정(표류 0) — 꼬리 모양만 견준다 (43장) */
+  touch_boot?: Record<string, number | null>;
+  touch_norm0?: Record<string, number>;
   need?: "above" | "below";
   met?: boolean;
 }
@@ -281,6 +290,8 @@ export interface ForecastHorizon {
   p_drop?: number;
   /** 그 기간의 평균 변동성 — 최근 변동성이 장기로 돌아가는 기간 구조 (10.5) */
   sigma?: number;
+  /** 실제 수익률로 그린 범위 (43장) — 같은 중심, 꼬리 모양만 다르다 */
+  boot?: { low90: number; low68: number; low50: number; median: number; high50: number; high68: number; high90: number };
 }
 
 export interface ForecastData {

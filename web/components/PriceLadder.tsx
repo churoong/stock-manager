@@ -7,6 +7,7 @@ import { formatPrice } from "@/lib/stockDetail";
 const KIND_STYLE: Record<LadderItem["kind"], string> = {
   high: "text-slate-600 dark:text-slate-300",
   band: "text-violet-700 dark:text-violet-300",
+  profile: "text-teal-700 dark:text-teal-300",
   consensus: "text-sky-700 dark:text-sky-300",
   range: "text-slate-500",
   signal: "text-emerald-700 dark:text-emerald-300",
@@ -19,8 +20,17 @@ const KIND_STYLE: Record<LadderItem["kind"], string> = {
  * 가격 사다리 (docs/analysis.md 12.2·12.3, 25.1038). 이 종목에 걸린 가격을 위에서 아래로 세우고 지금 종가를 그 사이에 끼운다.
  * 거리와 도달 확률은 배치가 낸 값이다 — 화면은 그리기만 한다.
  */
+/** 1년 실제 꼬리 칸 (43장) — "실제 경로 x% (정규 y%)", 둘 다 표류 0 */
+export function tailCell(it: LadderItem): string {
+  const b = it.touch_boot?.["12"];
+  const n = it.touch_norm0?.["12"];
+  if (b === undefined || b === null) return "-";
+  return `${(b * 100).toFixed(0)}%${n === undefined ? "" : ` (${(n * 100).toFixed(0)}%)`}`;
+}
+
 export default function PriceLadder({ l, currency }: { l: LadderData; currency: string }) {
   const pct = (x: number) => `${x >= 0 ? "+" : ""}${(x * 100).toFixed(1)}%`;
+  const 꼬리 = l.items.some((it) => it.touch_boot);
   return (
     <div className="mb-2 rounded-lg border border-slate-200 px-2.5 py-2 dark:border-slate-800">
       <p className="mb-1 text-xs font-semibold text-slate-600 dark:text-slate-300">가격 사다리 — 이 종목에 걸린 가격들</p>
@@ -41,6 +51,7 @@ export default function PriceLadder({ l, currency }: { l: LadderData; currency: 
             <tr>
               <th className="py-1 pr-2">가격</th><th className="pr-2">무엇</th><th className="pr-2">지금에서</th>
               {l.assumed && l.touch_months.map((m) => <th key={m} className="pr-2">{m === 12 ? "1년" : `${m}개월`} 안 닿을 확률</th>)}
+              {꼬리 && <th className="pr-2">1년 실제 꼬리 (정규)</th>}
             </tr>
           </thead>
           <tbody>
@@ -48,7 +59,7 @@ export default function PriceLadder({ l, currency }: { l: LadderData; currency: 
               "now" in it ? (
                 <tr key={`now-${i}`} className="border-y-2 border-slate-400 bg-slate-50 font-semibold dark:border-slate-500 dark:bg-slate-900">
                   <td className="py-1 pr-2">{formatPrice(it.price, currency)}</td>
-                  <td className="pr-2" colSpan={2 + (l.assumed ? l.touch_months.length : 0)}>◀ 지금 종가</td>
+                  <td className="pr-2" colSpan={2 + (l.assumed ? l.touch_months.length : 0) + (꼬리 ? 1 : 0)}>◀ 지금 종가</td>
                 </tr>
               ) : (
                 <tr key={`${it.label}-${i}`} className="border-t border-slate-100 dark:border-slate-800">
@@ -63,6 +74,7 @@ export default function PriceLadder({ l, currency }: { l: LadderData; currency: 
                   {l.assumed && l.touch_months.map((m) => (
                     <td key={m} className="pr-2">{it.touch?.[String(m)] === undefined ? "-" : `${(it.touch[String(m)] * 100).toFixed(0)}%`}</td>
                   ))}
+                  {꼬리 && <td className="pr-2">{tailCell(it)}</td>}
                 </tr>
               ),
             )}
@@ -71,7 +83,7 @@ export default function PriceLadder({ l, currency }: { l: LadderData; currency: 
       </div>
       <p className="mt-1 text-xs text-slate-400">
         도달 확률은 예상 주가와 같은 가정(시장·베타로 낸 기대수익, 과거 변동성)으로 낸 통계적 값입니다. 가격 기준(노랑)은 신호 판정표의 문턱을 가격으로
-        푼 것으로, 다른 조건이 그대로일 때의 값입니다.
+        푼 것으로, 다른 조건이 그대로일 때의 값입니다.{꼬리 ? " '실제 꼬리' 는 이 종목의 지난 일간 수익을 묶음째 다시 뽑은 경로에서 센 값이고, 괄호는 같은 변동성의 정규 가정입니다(둘 다 기대수익 0 — 꼬리 모양만 견줍니다)." : ""}
       </p>
     </div>
   );

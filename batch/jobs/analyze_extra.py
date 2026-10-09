@@ -345,13 +345,16 @@ def reference_outlook(client: TursoClient, country: str, as_of: str, meta: dict,
 
 def _이력(시세: list) -> dict | None:
     """자기 시세 이력의 사실들 (31~34장) — 밴드에 읽은 3년 시세로 그 자리에서. 시장 전체 분포는 없다"""
-    from batch.services import history
+    from batch.services import history, simulation
 
     if not 시세:
         return None
     d, c = [str(x) for x, _ in 시세], [float(y) for _, y in 시세]
     return {"drawdown": history.drawdowns(d, c), "tail": history.tail(d, c), "season": history.season(d, c),
-            "breakout": history.breakout(d, c)[0]}  # fmt: skip
+            "breakout": history.breakout(d, c)[0],
+            # 실제 수익률 경로 (43장) — 3년 시세라 주간 표(5년)보다 짧다. 매물대·움직임 분해는 거래대금·업종이 없어
+            # 빠진다
+            "boot": simulation.bootstrap(c, seed=0)}  # fmt: skip
 
 
 def reference_checks(client: TursoClient, country: str, as_of: str, metas: list[dict],

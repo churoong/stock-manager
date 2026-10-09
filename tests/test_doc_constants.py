@@ -482,6 +482,25 @@ class Test종목_분석:
         검사(ANALYSIS, f"`SURGE_COOLDOWN`({ev.SURGE_COOLDOWN})거래일", "공매도 급증 식힘")
         검사(ANALYSIS, f"`SURGE_DAYS`({'·'.join(str(x) for x in ev.SURGE_DAYS)})거래일", "공매도 급증 뒤 거래일")
 
+    def test_경로_분해_매물대(self) -> None:
+        from batch.services import history as hs
+        from batch.services import simulation as sim
+
+        검사(ANALYSIS, f"`BOOT_DAYS`({sim.BOOT_DAYS})거래일", "부트스트랩 창")
+        검사(ANALYSIS, f"`BOOT_BLOCK`({sim.BOOT_BLOCK})거래일 묶음째", "부트스트랩 묶음")
+        검사(ANALYSIS, f"`BOOT_HORIZON` {sim.BOOT_HORIZON}거래일", "경로 길이")
+        검사(ANALYSIS, f"`BOOT_PATHS`({sim.BOOT_PATHS})개", "경로 수")
+        검사(ANALYSIS, f"`BOOT_MIN_DAYS`({sim.BOOT_MIN_DAYS})거래일 미만", "부트스트랩 최소 이력")
+        검사(ANALYSIS, f"`BOOT_AT`({'·'.join(str(x) for x in sim.BOOT_AT)})거래일", "끝 분포 거래일")
+        검사(ANALYSIS, f"`BOOT_Q` {'·'.join(f'{q * 100:.0f}' for q in sim.BOOT_Q)}%", "끝 분포 분위")
+        검사(ANALYSIS, f"`TOUCH_AT` {'·'.join(str(x) for x in sim.TOUCH_AT)}거래일, `TOUCH_GRID` {sim.TOUCH_GRID}칸", "도달 격자")
+        검사(ANALYSIS, f"`MOVE_DAYS`({'·'.join(str(x) for x in hs.MOVE_DAYS)})거래일", "움직임 창")
+        검사(ANALYSIS, f"`MOVE_BETA_DAYS`({hs.MOVE_BETA_DAYS})거래일", "움직임 베타 창")
+        검사(ANALYSIS, f"`MOVE_MIN_PEERS`({hs.MOVE_MIN_PEERS})종목 미만", "업종 몫 최소 종목")
+        검사(ANALYSIS, f"`PROFILE_DAYS`({hs.PROFILE_DAYS})거래일", "매물대 창")
+        검사(ANALYSIS, f"`PROFILE_BINS`({hs.PROFILE_BINS})칸", "매물대 칸 수")
+        검사(ANALYSIS, f"`PROFILE_TOP`({hs.PROFILE_TOP})칸", "매물대 사다리 칸")
+
     def test_해석_묶음(self) -> None:
         from batch.jobs import verdicts as vj
         from batch.services import insights as ins
@@ -606,7 +625,7 @@ class Test밸류_분모:
     "gross_profitability", "robustness", "column_rot", "calibration", "self_grade", "holding_scores",
     "pick_history", "etf_accounts", "etf_tilt", "after_hours", "broker_stats", "disclosure_reaction", "luck", "postmortem",
     "divergence", "tax_sim", "verdict", "forecast_track", "patterns", "insights", "history",
-    "event_history",
+    "event_history", "simulation",
 )  # fmt: skip
 
 #: 아직 그물 밖인 모듈과 **왜 아직인지**. 하나씩 줄여 간다

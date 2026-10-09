@@ -28,7 +28,7 @@ from batch.core import db
 from batch.core import settings_range as sr
 from batch.core.client import TursoClient
 from batch.core.entry import guard
-from batch.services import event_history, history, patterns
+from batch.services import event_history, history, patterns, simulation
 from batch.services import metrics as calc
 
 log = logging.getLogger("metrics")
@@ -63,7 +63,7 @@ def load_prices(
     더한다, 25.715). 앞뒤 끝의 빈 행은 늘 원 종가.
     """
     rs = client.execute(
-        "SELECT date, adj_close, close FROM prices WHERE stock_id = ? AND date >= ? ORDER BY date",
+        "SELECT date, adj_close, close, volume FROM prices WHERE stock_id = ? AND date >= ? ORDER BY date",
         [stock_id, since],
     )
     rows = rs.dicts()
@@ -109,7 +109,8 @@ def load_prices(
         else:
             px = 원
         if px is not None:
-            out.append(calc.PricePoint(date=date.fromisoformat(str(row["date"])), close=px))
+            거래 = 원 * float(row["volume"]) if 원 and row.get("volume") else None
+            out.append(calc.PricePoint(date=date.fromisoformat(str(row["date"])), close=px, value=거래))
     return out
 
 
@@ -227,6 +228,21 @@ EVENT_SHARES_SQL = "SELECT id, listed_shares FROM stocks WHERE country = ?"
 EVENT_YEARS = 6
 
 
+SECTORS_SQL = (
+    "SELECT id, country, sector FROM stocks WHERE country IN (SELECT value FROM json_each(?)) AND sector IS NOT NULL"
+)
+
+
+def load_sectors(client: TursoClient, countries: list[str], warnings: list[str]) -> dict[int, tuple[str, str]]:
+    """종목 → (나라, 업종). 움직임 분해의 업종 몫(44장)용. 못 읽으면 비우고 경고 — 업종 몫만 빠진다."""
+    try:
+        rs = client.execute(SECTORS_SQL, [json.dumps(countries)])
+        return {int(r[0]): (str(r[1]), str(r[2])) for r in rs.rows if r[2]}
+    except Exception as exc:  # noqa: BLE001
+        warnings.append(f"업종을 읽지 못했습니다: {exc}")
+        return {}
+
+
 def load_event_inputs(client: TursoClient, country: str, as_of: str, warnings: list[str]) -> dict[str, dict]:
     """재무·배당·수급·상장주식수 이력을 종목별로. 못 읽은 것은 비우고 경고 — 그 칸만 빠진다."""
     from collections import defaultdict
@@ -281,6 +297,7 @@ def compute_all(
     시장국면: dict[str, dict[str, str]] = {}
     신고가_모음: dict[str, list[dict[str, list[float]]]] = {}
     사건이력: dict[str, dict] | None = None
+    움직임: dict[int, dict | None] = {}
 
     나라_끝: dict[str, tuple[dict[str, date], dict[int, str]]] = {}
     멈춤_경고: set[str] = set()
@@ -326,9 +343,14 @@ def compute_all(
             이력["sources"] = event_history.return_sources(재무.get(stock_id, []), 배당.get(stock_id, []), 날짜들,
                                                            종가들, 주식수.get(stock_id))  # fmt: skip
             이력["short"] = event_history.short_surges(수급.get(stock_id, []), 날짜들, 종가들)
+        # 실제 수익률 1년 경로·매물대 (43·45장, 25.1064·25.1066) — 같은 계열로
+        이력["boot"] = simulation.bootstrap(종가들, seed=stock_id)
+        이력["profile"] = history.volume_profile(날짜들, 종가들, [q.value for q in 국면_점])
+        # 움직임 분해 (44장, 25.1065) — 업종 몫은 모든 종목을 모은 뒤(아래)
+        움직임[stock_id] = history.move_inputs(날짜들, 종가들, 지수)
         if 국면표 or 하락장 or 변동 or any(이력.values()):
             국면표 = {**(국면표 or {}), "stress": 하락장, "vol": 변동, **이력}
-            pattern_rows.append((stock_id, 기준, json.dumps(국면표, separators=(",", ":")), now))
+            pattern_rows.append((stock_id, 기준, 국면표, now))
         # 창 끝 검사의 "끝" 은 달력 기준일이 아니라 **그 나라 시세가 실제로 있는 마지막 날**이다 (25.710, 교차검증) —
         # 나라 수집이
         # 11일 넘게 멈추면 모든 종목의 모든 창이 None 이 되고, 1Y 가 가장 짧은 창이라 리스크 축이 통째로 비었다
@@ -406,7 +428,18 @@ def compute_all(
         )
 
     _bulk_upsert(client, rows_data)
-    store_patterns(client, pattern_rows, warnings)
+    # 움직임 분해의 업종 몫 (44장) — 같은 나라·같은 업종 다른 종목의 같은 창 평균
+    if pattern_rows:
+        업종 = load_sectors(client, sorted({c for _, _, c in stocks}), warnings)
+        같은업종: dict[tuple, list[int]] = {}
+        for sid, k in 업종.items():
+            같은업종.setdefault(k, []).append(sid)
+        for sid, _, 표, _ in pattern_rows:
+            k = 업종.get(sid)
+            peers = [움직임[o] for o in 같은업종.get(k, []) if o != sid and 움직임.get(o)] if k else []
+            표["moves"] = history.move_parts(움직임.get(sid) or {}, peers)
+    store_patterns(client, [(sid, d, json.dumps(표, separators=(",", ":")), t) for sid, d, 표, t in pattern_rows],
+                   warnings)  # fmt: skip
     # 시장 전체 신고가 뒤 (34장) — 나라마다 설정 한 행
     for 나라, 모음 in 신고가_모음.items():
         시장분포 = history.market_breakout(모음)

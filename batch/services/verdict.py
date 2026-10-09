@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Any
 
-from batch.services import insights, patterns, signals
+from batch.services import insights, patterns, signals, simulation
 
 #: 결론 키 → 이름 (위에서부터 처음 맞는 것, docs/analysis.md 3장)
 VERDICTS = {
@@ -241,6 +241,40 @@ def consensus(opinions: list[dict], today: date, stats: dict[str, dict] | None =
             "latest": max(x["date"] for x in 최근.values()), "skilled": skilled(최근, stats)}  # fmt: skip
 
 
+#: 예상 주가 기간(개월) → 거래일 — 부트스트랩 끝 분포의 자리 (43장, `simulation.BOOT_AT` 와 같은 환산)
+BOOT_DAYS_OF = {1: 21, 3: 63, 6: 126, 12: 252}
+
+
+def _boot_ranges(f: dict | None, boot: dict | None, close: float | None, currency: str) -> str | None:
+    """실제 수익률로 그린 범위 (43장, 25.1064). 부트스트랩의 표류 0 끝 분포(로그)에 그 기간 CAPM 로그 표류
+    (ln(1 + E[r]) − σ(t)²/2)·t 를 더해 가격으로. 같은 중심에서 **꼬리 모양만** 다르다. 1년 줄을 돌려준다."""
+    if not f or not boot or not isinstance(close, (int, float)) or close <= 0:
+        return None
+    q = list(boot.get("q") or [])
+    if not q:
+        return None
+    for h in f.get("horizons") or []:
+        d = BOOT_DAYS_OF.get(h["months"])
+        qs = (boot.get("terminal") or {}).get(str(d))
+        s = h.get("sigma") or f.get("sigma")
+        if not qs or not isinstance(s, (int, float)):
+            continue
+        t = h["months"] / 12
+        표류 = (math.log(1 + f["er"]) - s * s / 2) * t
+        가격 = {p: close * math.exp(x + 표류) for p, x in zip(q, qs, strict=True)}
+        h["boot"] = {"low90": 가격[0.05], "low68": 가격[0.16], "low50": 가격[0.25], "median": 가격[0.5],
+                     "high50": 가격[0.75], "high68": 가격[0.84], "high90": 가격[0.95]}  # fmt: skip
+    일년 = next((h for h in f.get("horizons") or [] if h["months"] == 12 and h.get("boot")), None)
+    if not 일년:
+        return None
+    b = 일년["boot"]
+    정규 = (f" (정규 가정 90% {_won(일년['low90'], currency)}~{_won(일년['high90'], currency)})"
+            if "low90" in 일년 else "")  # fmt: skip
+    return (f"실제 수익률로 그린 1년 범위(자기 일간 수익 {boot.get('days_used')}일을 열흘 묶음으로 다시 뽑은 경로 "
+            f"{simulation.BOOT_PATHS:,}개): 50% {_won(b['low50'], currency)}~{_won(b['high50'], currency)} · "
+            f"90% {_won(b['low90'], currency)}~{_won(b['high90'], currency)}{정규}")
+
+
 def outlook(*, close: float | None, close_date: str | None, currency: str, momentum: dict | None,
             risk: dict | None, band: dict | None, opinions: list[dict], today: date,
             band_note: str | None = None, market: dict | None = None, rf: float | None = None,
@@ -388,11 +422,18 @@ def outlook(*, close: float | None, close_date: str | None, currency: str, momen
     from batch.services import history as hist
 
     이력 = {k: (history or {}).get(k)
-            for k in ("drawdown", "tail", "season", "breakout", "earnings", "sources", "short")}  # fmt: skip
+            for k in ("drawdown", "tail", "season", "breakout", "earnings", "sources", "short", "boot", "profile",
+                      "moves")}  # fmt: skip
     if any(이력.values()):
         줄 += hist.lines(이력, market_breakout, today.month)
         # 40~42. 재무·수급 사건과 그 뒤 — 국내만
         줄 += evh.lines(이력)
+        # 43. 실제 수익률로 그린 범위 — 예상 주가 표의 각 기간에 붙인다(중심은 CAPM 과 같은 로그 표류)
+        boot_line = _boot_ranges(out.get("forecast"), 이력.get("boot"), close, currency)
+        if boot_line:
+            줄.append(boot_line)
+        # 44. 움직임 분해
+        줄 += hist.move_lines(이력.get("moves"))
         out["history"] = {**이력, "market_breakout": market_breakout}
     # 28. 하락장 성적 — 시장이 가장 나빴던 달들
     st = stress or {}
@@ -551,6 +592,7 @@ def ladder(*, close: float | None, currency: str, outlook: dict | None, signals:
         return None
     f = o.get("forecast") or {}
     er, s, 단기 = f.get("er"), f.get("sigma"), f.get("sigma_short")
+    boot = (o.get("history") or {}).get("boot")
     확률 = isinstance(er, (int, float)) and isinstance(s, (int, float)) and s > 0
     items: list[dict] = []
 
@@ -562,6 +604,13 @@ def ladder(*, close: float | None, currency: str, outlook: dict | None, signals:
         if 확률 and abs(price / close - 1) > 1e-9:
             칸["touch"] = {str(m): touch_prob(price / close, er, term_sigma(s, 단기, m / 12) or s, m / 12)
                           for m in TOUCH_MONTHS}  # fmt: skip
+        # 43. 같은 질문을 실제 수익률 경로로 — 표류 0 에서 정규 가정과 나란히(꼬리 모양만 견준다)
+        if boot and abs(price / close - 1) > 1e-9:
+            sb = boot.get("sigma")
+            칸["touch_boot"] = {str(m): simulation.touch(boot, price / close, BOOT_DAYS_OF[m]) for m in TOUCH_MONTHS}
+            if isinstance(sb, (int, float)) and sb > 0:
+                er0 = math.exp(sb * sb / 2) - 1  # 로그 표류 0
+                칸["touch_norm0"] = {str(m): touch_prob(price / close, er0, sb, m / 12) for m in TOUCH_MONTHS}
         items.append(칸)
 
     prox = (o.get("momentum") or {}).get("high_52w_proximity")
@@ -574,6 +623,12 @@ def ladder(*, close: float | None, currency: str, outlook: dict | None, signals:
     더하기(f"증권사 목표가 중앙값({c.get('brokers')}곳)", c.get("median"), "consensus", "kr_opinions")
     sk = c.get("skilled") or {}
     더하기(f"잘 맞힌 증권사 목표가({sk.get('n')}곳)", sk.get("weighted"), "consensus", "kr_opinions × broker_stats")
+    # 45. 매물대 — 지난 1년 거래대금이 가장 많았던 가격대(순위만, 비율 문턱 없음)
+    pf = (o.get("history") or {}).get("profile") or {}
+    for 순위, i in enumerate(pf.get("top") or []):
+        b = pf["bins"][i]
+        더하기(f"매물대 {순위 + 1}위(지난 1년 거래대금 {b['share'] * 100:.0f}%)", close * (b["lo"] + b["hi"]) / 2,
+               "profile", "prices.volume", lo=close * b["lo"], hi=close * b["hi"])  # fmt: skip
     일년 = next((h for h in f.get("horizons") or [] if h.get("months") == 12), None) or {}
     더하기("1년 예상 68% 하단", 일년.get("low68"), "range", "계산 (10.1)")
     더하기("1년 예상 68% 상단", 일년.get("high68"), "range", "계산 (10.1)")

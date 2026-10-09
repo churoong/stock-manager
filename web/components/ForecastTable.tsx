@@ -40,6 +40,24 @@ export default function ForecastTable({ f, close, closeDate, currency, analog }:
           </tbody>
         </table>
       </div>
+      {f.horizons.some((h) => h.boot) && (
+        <div className="mt-2 overflow-x-auto">
+          <p className="mb-1 text-xs font-semibold text-slate-600 dark:text-slate-300">실제 수익률로 그린 범위 — 같은 중심, 이 종목의 지난 흔들림 그대로</p>
+          <table className="w-full min-w-[26rem] text-left text-xs">
+            <thead className="text-slate-500"><tr><th className="py-0.5 pr-2">기간</th><th className="pr-2">반반 범위(50%)</th><th className="pr-2">90% 범위</th><th>정규 가정 90%</th></tr></thead>
+            <tbody>
+              {f.horizons.filter((h) => h.boot).map((h) => (
+                <tr key={h.months} className="border-t border-slate-100 dark:border-slate-800">
+                  <td className="py-0.5 pr-2">{horizonLabel(h.months)}</td>
+                  <td className="pr-2 font-medium">{범위(h.boot!.low50, h.boot!.high50)}</td>
+                  <td className="pr-2">{범위(h.boot!.low90, h.boot!.high90)}</td>
+                  <td className="text-slate-500">{범위(h.low90, h.high90)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
       {close ? <ForecastFan f={f} analog={analog} close={close} currency={currency} /> : null}
       <p className="mt-2 text-xs text-slate-500">
         기대 연수익 {pct(f.er)} = 무위험 {pct(f.rf)}{f.rf_given ? "" : "(설정 없음)"} + 베타 {f.beta.toFixed(2)}{f.beta_given ? "" : "(없음)"} × (시장{" "}

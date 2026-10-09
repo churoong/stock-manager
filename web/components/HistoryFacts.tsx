@@ -15,7 +15,8 @@ export default function HistoryFacts({ h }: { h: HistoryData }) {
   const ea = h.earnings;
   const so = h.sources;
   const sh = h.short;
-  if (!dd && !t && !Object.keys(se).length && !bo && !ea && !so && !sh) return null;
+  const mv = h.moves;
+  if (!dd && !t && !Object.keys(se).length && !bo && !ea && !so && !sh && !mv) return null;
   return (
     <section id="history-facts" className="mb-4 rounded-xl border border-slate-200 p-3 dark:border-slate-800">
       <h2 className="mb-2 text-sm font-semibold">이 종목의 지난 시세에서</h2>
@@ -92,6 +93,26 @@ export default function HistoryFacts({ h }: { h: HistoryData }) {
                 })}
               </tbody>
             </table>
+          </div>
+        )}
+        {mv && Object.keys(mv.w).length > 0 && (
+          <div>
+            <h3 className="mb-1 text-xs font-semibold text-slate-600 dark:text-slate-300">움직임 분해 — 시장·업종·이 종목만 (베타 {mv.beta.toFixed(2)})</h3>
+            <table className="w-full text-left text-xs">
+              <thead className="text-slate-500"><tr><th className="py-0.5 pr-2">창</th><th className="pr-2">종목</th><th className="pr-2">시장 몫</th><th className="pr-2">업종 몫</th><th>이 종목만</th></tr></thead>
+              <tbody>
+                {Object.entries(mv.w).map(([n, x]) => (
+                  <tr key={n} className="border-t border-slate-100 dark:border-slate-800">
+                    <td className="py-0.5 pr-2">{n}거래일</td>
+                    <td className="pr-2 font-medium">{pct(x.stock)}</td>
+                    <td className="pr-2">{pct(x.market)}</td>
+                    <td className="pr-2">{x.sector === null ? "-" : pct(x.sector)}</td>
+                    <td>{pct(x.own)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="mt-1 text-[11px] text-slate-400">시장 몫 = 베타 × 지수, 업종 몫 = 같은 업종 평균 − 지수, 나머지가 이 종목만의 몫. ~{mv.until}.</p>
           </div>
         )}
         {so && (

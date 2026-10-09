@@ -143,6 +143,8 @@ class PricePoint:
 
     date: date
     close: float
+    #: 그날 거래대금(원 종가 × 거래량) — 매물대(docs/analysis.md 45장)만 쓴다. 분할이 있어도 바뀌지 않는 값이다
+    value: float | None = None
 
 
 @dataclass

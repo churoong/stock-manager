@@ -203,3 +203,90 @@ def lines(h: dict | None, market_bo: dict | None, today_month: int) -> list[str]
         줄.append(f"52주 신고가 뒤(지난 {bo['events']}번): 1개월 중앙값 {_p(b1['median'])}·"
                   f"오른 비율 {b1['up'] * 100:.0f}%" + (f" ({'; '.join(견줌)})" if 견줌 else ""))  # fmt: skip
     return 줄
+
+
+#: 매물대 (45장) — 지난 `PROFILE_DAYS` 거래일 거래대금을 수정주가 범위 `PROFILE_BINS` 칸으로 나눈다.
+#: 20칸이면 1년 가격 범위의 5% 씩 — 사다리 한 칸의 가격으로 쓰기에 충분히 좁고 칸마다 날이 충분하다
+PROFILE_DAYS = 252
+PROFILE_BINS = 20
+#: 사다리에 올리는 칸 수 — 거래대금이 가장 많은 순서. 비율 문턱이 아니라 순위만 쓴다
+PROFILE_TOP = 3
+
+
+def volume_profile(dates: list[str], closes: list[float], values: list[float | None]) -> dict[str, Any] | None:
+    """매물대 (45장, 25.1066) — 지난 1년 어느 가격대에서 거래가 많았나.
+    가격은 수정주가, 무게는 그날 거래대금(분할이 있어도 그대로인 값). 칸은 마지막 수정주가에 대한 **비율**로 적는다 —
+    일일 의견이 오늘 종가에 곱해 가격으로 옮긴다(수정주가와 원 종가의 축이 달라도 맞는다)."""
+    쌍 = [(c, v) for c, v in zip(closes[-PROFILE_DAYS:], values[-PROFILE_DAYS:], strict=False)
+         if c and c > 0 and v and v > 0]  # fmt: skip
+    if len(쌍) < PROFILE_DAYS // 2:
+        return None
+    lo, hi = min(c for c, _ in 쌍), max(c for c, _ in 쌍)
+    if hi <= lo:
+        return None
+    폭 = (hi - lo) / PROFILE_BINS
+    무게 = [0.0] * PROFILE_BINS
+    for c, v in 쌍:
+        무게[min(PROFILE_BINS - 1, int((c - lo) / 폭))] += v
+    합 = sum(무게)
+    끝 = float(closes[-1])
+    bins = [{"lo": round((lo + i * 폭) / 끝, 4), "hi": round((lo + (i + 1) * 폭) / 끝, 4), "share": round(w / 합, 4)}
+            for i, w in enumerate(무게)]  # fmt: skip
+    순 = sorted(range(PROFILE_BINS), key=lambda i: -무게[i])[:PROFILE_TOP]
+    return {"since": str(dates[-len(closes[-PROFILE_DAYS:])]), "until": str(dates[-1]), "days": len(쌍),
+            "bins": bins, "top": 순, "now": min(PROFILE_BINS - 1, int((끝 - lo) / 폭))}  # fmt: skip
+
+
+#: 움직임 분해 (44장) — 지난 20·60거래일
+MOVE_DAYS = (20, 60)
+#: 업종 몫을 낼 최소 같은 업종 종목 수(나 빼고) — 이보다 적으면 업종 평균이 한두 종목의 움직임이다
+MOVE_MIN_PEERS = 3
+#: 베타를 재는 최근 거래일 — 1년
+MOVE_BETA_DAYS = 252
+
+
+def move_inputs(dates: list[str], closes: list[float], index: dict[str, float]) -> dict[str, Any] | None:
+    """움직임 분해의 재료 (44장, 25.1065) — 종목 하나의 창별 수익·지수 수익·1년 베타.
+    업종 몫은 모든 종목을 모은 뒤 낸다."""
+    쌍 = [(d, c) for d, c in zip(dates, closes, strict=False) if c and c > 0 and index.get(str(d))]
+    if len(쌍) < max(MOVE_DAYS) + 1:
+        return None
+    out: dict[str, Any] = {"until": 쌍[-1][0], "w": {}}
+    for n in MOVE_DAYS:
+        (d0, c0), (d1, c1) = 쌍[-1 - n], 쌍[-1]
+        out["w"][str(n)] = {"since": d0, "stock": c1 / c0 - 1, "market": index[d1] / index[d0] - 1}
+    끝 = 쌍[-(MOVE_BETA_DAYS + 1) :]
+    xs = [index[b] / index[a] - 1 for (a, _), (b, _) in zip(끝, 끝[1:], strict=False)]
+    ys = [c1 / c0 - 1 for (_, c0), (_, c1) in zip(끝, 끝[1:], strict=False)]
+    mx, my = sum(xs) / len(xs), sum(ys) / len(ys)
+    var = sum((x - mx) ** 2 for x in xs)
+    out["beta"] = sum((x - mx) * (y - my) for x, y in zip(xs, ys, strict=True)) / var if var > 0 else None
+    return out
+
+
+def move_parts(mine: dict, peers: list[dict]) -> dict[str, Any] | None:
+    """움직임 분해 (44장) — 창마다 종목 수익 = 시장 몫(베타 × 지수) + 업종 몫(같은 업종 평균 − 지수)
+    + 이 종목만의 몫(나머지). peers = 같은 업종 다른 종목의 `move_inputs`.
+    업종 종목이 `MOVE_MIN_PEERS` 미만이면 업종 몫 없이 나머지를 이 종목 몫으로."""
+    if not mine or mine.get("beta") is None:
+        return None
+    out: dict[str, Any] = {"until": mine["until"], "beta": round(mine["beta"], 3), "w": {}}
+    for n, x in mine["w"].items():
+        시장 = mine["beta"] * x["market"]
+        같은 = [p["w"][n]["stock"] for p in peers if n in (p.get("w") or {}) and p["w"][n]["since"] == x["since"]]
+        업종 = (sum(같은) / len(같은) - x["market"]) if len(같은) >= MOVE_MIN_PEERS else None
+        out["w"][n] = {"since": x["since"], "stock": round(x["stock"], 4), "market": round(시장, 4),
+                       "sector": round(업종, 4) if 업종 is not None else None, "peers": len(같은),
+                       "own": round(x["stock"] - 시장 - (업종 or 0.0), 4)}  # fmt: skip
+    return out
+
+
+def move_lines(m: dict | None) -> list[str]:
+    """움직임 분해 진단 줄 (44장) — 창마다 한 줄."""
+    줄 = []
+    for n, x in ((m or {}).get("w") or {}).items():
+        업종 = f" + 업종 {_p(x['sector'])}(같은 업종 {x['peers']}종목)" if x.get("sector") is not None else ""
+        줄.append(f"움직임 분해(지난 {n}거래일, {x['since']}~{m['until']}): 종목 {_p(x['stock'])} = "
+                  f"시장 {_p(x['market'])}(베타 {m['beta']:.2f}){업종} + 이 종목만 {_p(x['own'])}")  # fmt: skip
+    return 줄
+
