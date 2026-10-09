@@ -384,11 +384,15 @@ def outlook(*, close: float | None, close_date: str | None, currency: str, momen
     elif a.get("empty"):
         줄.append(f"비슷한 국면: {a.get('label')} — 자기 과거에 이 상태가 드물어(표본 모자람) 분포를 내지 않습니다")
     # 31~34. 자기 시세 이력의 사실들 — 낙폭 회복·최악의 한 달·계절성·신고가 뒤
+    from batch.services import event_history as evh
     from batch.services import history as hist
 
-    이력 = {k: (history or {}).get(k) for k in ("drawdown", "tail", "season", "breakout")}
+    이력 = {k: (history or {}).get(k)
+            for k in ("drawdown", "tail", "season", "breakout", "earnings", "sources", "short")}  # fmt: skip
     if any(이력.values()):
         줄 += hist.lines(이력, market_breakout, today.month)
+        # 40~42. 재무·수급 사건과 그 뒤 — 국내만
+        줄 += evh.lines(이력)
         out["history"] = {**이력, "market_breakout": market_breakout}
     # 28. 하락장 성적 — 시장이 가장 나빴던 달들
     st = stress or {}

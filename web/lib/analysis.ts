@@ -89,10 +89,23 @@ export interface HistoryData {
   season?: { since: string; until: string; months: Record<string, { n: number; up: number; avg: number }> } | null;
   breakout?: { events: number; last: string | null; h: Record<string, DistLite | null>; base: Record<string, DistLite | null> } | null;
   market_breakout?: Record<string, DistLite> | null;
+  /** 실적 발표 반응 (40장, 국내) */
+  earnings?: {
+    basis: string; events: number;
+    recent: Array<{ date: string; fiscal_year: number; report_code: string; yoy: number | null; r1: number; x1: number | null; r5: number; x5: number | null }>;
+    grew: { n: number; avg: number; up: number } | null; shrank: { n: number; avg: number; up: number } | null;
+  } | null;
+  /** 상승의 출처 (41장, 국내) */
+  sources?: { since: string; until: string; from_year: number; to_year: number; price: number; earnings: number; multiple: number; dividends: number | null } | null;
+  /** 공매도 급증 뒤 (42장, 국내) */
+  short?: { since: string; until: string; days: number; events: number; last: string | null; h: Record<string, DistLite | null>; base: Record<string, DistLite | null> } | null;
 }
 
 /** 진단 줄 가운데 이력 카드(HistoryFacts)가 그리는 줄 — 목록에서 뺀다 */
-export const HISTORY_LINE_PREFIXES = ["낙폭 회복(", "최악의 한 달(", "계절성(", "52주 신고가 뒤("];
+export const HISTORY_LINE_PREFIXES = ["낙폭 회복(", "최악의 한 달(", "계절성(", "52주 신고가 뒤(", "실적 발표 반응(", "상승의 출처(", "공매도 급증 뒤("];
+
+/** 보고서 코드 → 이름 (DART) */
+export const REPORT_NAME: Record<string, string> = { "11013": "1분기", "11012": "반기", "11014": "3분기", "11011": "사업" };
 
 /** 계절성 달력의 칸 색 — 오른 비율(사실)을 그대로 옮긴다. 새 문턱이 아니라 절반 위·아래로 나눌 뿐 */
 export function seasonTone(up: number, n: number): "up" | "down" | "even" {

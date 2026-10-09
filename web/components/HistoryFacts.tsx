@@ -1,6 +1,6 @@
 "use client";
 
-import { seasonTone, type HistoryData } from "@/lib/analysis";
+import { REPORT_NAME, seasonTone, type HistoryData } from "@/lib/analysis";
 
 /**
  * 자기 시세 이력의 사실들 (docs/analysis.md 31~34장, 25.1057) — 낙폭 회복 시간표·최악의 한 달·계절성 달력·52주 신고가 뒤.
@@ -12,7 +12,10 @@ export default function HistoryFacts({ h }: { h: HistoryData }) {
   const t = h.tail;
   const se = h.season?.months ?? {};
   const bo = h.breakout;
-  if (!dd && !t && !Object.keys(se).length && !bo) return null;
+  const ea = h.earnings;
+  const so = h.sources;
+  const sh = h.short;
+  if (!dd && !t && !Object.keys(se).length && !bo && !ea && !so && !sh) return null;
   return (
     <section id="history-facts" className="mb-4 rounded-xl border border-slate-200 p-3 dark:border-slate-800">
       <h2 className="mb-2 text-sm font-semibold">이 종목의 지난 시세에서</h2>
@@ -89,6 +92,49 @@ export default function HistoryFacts({ h }: { h: HistoryData }) {
                 })}
               </tbody>
             </table>
+          </div>
+        )}
+        {so && (
+          <div>
+            <h3 className="mb-1 text-xs font-semibold text-slate-600 dark:text-slate-300">상승의 출처 ({so.from_year}→{so.to_year} 사업보고서)</h3>
+            <p className="text-xs">
+              주가 <b>{pct(so.price)}</b> = 순이익 {pct(so.earnings)} × 배수(PER) {pct(so.multiple)}
+              {so.dividends !== null ? ` · 그 사이 배당 ${pct(so.dividends)}` : ""}
+            </p>
+            <p className="mt-1 text-[11px] text-slate-400">{so.since}~{so.until}. 주식 수가 그대로라고 본 근사입니다(증자·소각이 있으면 어긋남).</p>
+          </div>
+        )}
+        {ea && ea.recent.length > 0 && (
+          <div>
+            <h3 className="mb-1 text-xs font-semibold text-slate-600 dark:text-slate-300">실적 발표 반응 ({ea.basis})</h3>
+            <table className="w-full text-left text-xs">
+              <thead className="text-slate-500"><tr><th className="py-0.5 pr-2">접수일</th><th className="pr-2">보고서</th><th className="pr-2">영업이익 전년비</th><th className="pr-2">1일</th><th>5일(시장 대비)</th></tr></thead>
+              <tbody>
+                {ea.recent.map((x) => (
+                  <tr key={x.date + x.report_code} className="border-t border-slate-100 dark:border-slate-800">
+                    <td className="py-0.5 pr-2">{x.date}</td>
+                    <td className="pr-2">{x.fiscal_year} {REPORT_NAME[x.report_code] ?? x.report_code}</td>
+                    <td className="pr-2">{x.yoy === null ? "-" : pct(x.yoy)}</td>
+                    <td className="pr-2">{pct(x.r1)}</td>
+                    <td>{x.x5 === null ? pct(x.r5) : pct(x.x5)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="mt-1 text-[11px] text-slate-400">접수일 전날 종가 기준. 컨센서스 대비 서프라이즈가 아니라 전년 같은 보고서 대비입니다.</p>
+          </div>
+        )}
+        {sh && sh.events > 0 && sh.h["5"] && (
+          <div>
+            <h3 className="mb-1 text-xs font-semibold text-slate-600 dark:text-slate-300">공매도 급증 뒤 ({sh.since}~, {sh.events}번)</h3>
+            <ul className="space-y-0.5 text-xs">
+              {["5", "20"].map((m) => {
+                const a = sh.h[m];
+                const b = sh.base[m];
+                return a ? <li key={m}>{m}거래일 뒤 중앙값 <b>{pct(a.median)}</b> · 오름 {(a.up * 100).toFixed(0)}% {b ? `(평소 ${pct(b.median)} · ${(b.up * 100).toFixed(0)}%)` : ""}</li> : null;
+              })}
+            </ul>
+            <p className="mt-1 text-[11px] text-slate-400">급증 = 공매도 비중이 앞 20거래일 중앙값의 2배 이상. 수집이 2026-10 에 시작해 표본이 적습니다.</p>
           </div>
         )}
       </div>

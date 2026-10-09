@@ -28,7 +28,7 @@ from batch.core import db
 from batch.core import settings_range as sr
 from batch.core.client import TursoClient
 from batch.core.entry import guard
-from batch.services import history, patterns
+from batch.services import event_history, history, patterns
 from batch.services import metrics as calc
 
 log = logging.getLogger("metrics")
@@ -212,6 +212,44 @@ def 시세_끝날(client: TursoClient, country: str, 기준: str) -> tuple[dict[
     return 끝날, {int(r[0]): str(r[1]) for r in rs.rows}
 
 
+# 재무·수급 사건 이력 (docs/analysis.md 40~42장, 25.1063) — 나라마다 한 번
+EVENT_FIN_SQL = (
+    "SELECT f.stock_id, f.fiscal_year, f.report_code, f.consolidated, f.report_date, f.operating_income, f.net_income"
+    " FROM financials f JOIN stocks s ON s.id = f.stock_id WHERE s.country = ? AND f.fiscal_year >= ?"
+)
+EVENT_DIV_SQL = (
+    "SELECT d.stock_id, d.fiscal_year, d.cash_dividend_total FROM stock_dividends d JOIN stocks s ON s.id = d.stock_id"
+    " WHERE s.country = ? AND d.fiscal_year >= ?"
+)
+EVENT_FLOWS_SQL = "SELECT stock_id, date, short_vol_pct FROM kr_flows WHERE date >= ? AND date <= ?"
+EVENT_SHARES_SQL = "SELECT id, listed_shares FROM stocks WHERE country = ?"
+#: 사건 이력을 읽는 햇수 — 5년 시세 창과 같고, 전년 대비를 내려고 한 해 더
+EVENT_YEARS = 6
+
+
+def load_event_inputs(client: TursoClient, country: str, as_of: str, warnings: list[str]) -> dict[str, dict]:
+    """재무·배당·수급·상장주식수 이력을 종목별로. 못 읽은 것은 비우고 경고 — 그 칸만 빠진다."""
+    from collections import defaultdict
+
+    해 = date.fromisoformat(as_of).year - EVENT_YEARS
+    out: dict[str, dict] = {"fin": defaultdict(list), "div": defaultdict(list), "flows": defaultdict(list),
+                            "shares": {}}  # fmt: skip
+    읽기 = (("fin", EVENT_FIN_SQL, [country, 해]), ("div", EVENT_DIV_SQL, [country, 해]),
+            ("flows", EVENT_FLOWS_SQL, [f"{해 + EVENT_YEARS - 1}{as_of[4:]}", as_of]))  # fmt: skip
+    for 키, sql, args in 읽기:
+        try:
+            for r in client.execute(sql, args).dicts():
+                out[키][int(r["stock_id"])].append(r)
+        except Exception as exc:  # noqa: BLE001
+            if not db.표가_없나(exc):
+                warnings.append(f"사건 이력({키})을 읽지 못했습니다: {exc}")
+    try:
+        out["shares"] = {int(r[0]): float(r[1]) for r in client.execute(EVENT_SHARES_SQL, [country]).rows if r[1]}
+    except Exception as exc:  # noqa: BLE001
+        warnings.append(f"상장주식수를 읽지 못했습니다: {exc}")
+    return out
+
+
 def compute_all(
     client: TursoClient,
     stocks: list[tuple[int, str, str]],
@@ -242,6 +280,7 @@ def compute_all(
     bench_missing: set[str] = set()
     시장국면: dict[str, dict[str, str]] = {}
     신고가_모음: dict[str, list[dict[str, list[float]]]] = {}
+    사건이력: dict[str, dict] | None = None
 
     나라_끝: dict[str, tuple[dict[str, date], dict[int, str]]] = {}
     멈춤_경고: set[str] = set()
@@ -278,6 +317,15 @@ def compute_all(
         신고가_모음.setdefault(country, []).append(신고가_뒤)
         이력 = {"drawdown": history.drawdowns(날짜들, 종가들), "tail": history.tail(날짜들, 종가들),
                 "season": history.season(날짜들, 종가들), "breakout": 신고가}  # fmt: skip
+        # 재무·수급 사건과 그 뒤 (40~42장, 25.1063) — 국내만. 나라마다 한 번 몰아 읽은 이력에서
+        if country == "KR":
+            if 사건이력 is None:
+                사건이력 = load_event_inputs(client, country, 기준, warnings)
+            재무, 배당, 수급, 주식수 = (사건이력[k] for k in ("fin", "div", "flows", "shares"))
+            이력["earnings"] = event_history.earnings_reactions(재무.get(stock_id, []), 날짜들, 종가들, 지수)
+            이력["sources"] = event_history.return_sources(재무.get(stock_id, []), 배당.get(stock_id, []), 날짜들,
+                                                           종가들, 주식수.get(stock_id))  # fmt: skip
+            이력["short"] = event_history.short_surges(수급.get(stock_id, []), 날짜들, 종가들)
         if 국면표 or 하락장 or 변동 or any(이력.values()):
             국면표 = {**(국면표 or {}), "stress": 하락장, "vol": 변동, **이력}
             pattern_rows.append((stock_id, 기준, json.dumps(국면표, separators=(",", ":")), now))

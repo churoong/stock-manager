@@ -470,6 +470,18 @@ class Test종목_분석:
         검사(ANALYSIS, f"`BREAKOUT_COOLDOWN`({hs.BREAKOUT_COOLDOWN})거래일", "신고가 식힘")
         검사(ANALYSIS, f"{'·'.join(str(m) for m in hs.BREAKOUT_MONTHS)}개월(`BREAKOUT_MONTHS`)", "신고가 뒤 기간")
 
+    def test_재무_수급_사건(self) -> None:
+        from batch.jobs import metrics as mj
+        from batch.services import event_history as ev
+
+        검사(ANALYSIS, f"`EVENT_YEARS`({mj.EVENT_YEARS})년치", "사건 이력 햇수")
+        검사(ANALYSIS, f"`REACTION_DAYS`({'·'.join(str(x) for x in ev.REACTION_DAYS)})거래일", "발표 반응 거래일")
+        검사(ANALYSIS, f"`REACTION_SHOW`({ev.REACTION_SHOW})번", "발표 반응 표시 수")
+        검사(ANALYSIS, f"`SOURCE_YEARS`({ev.SOURCE_YEARS})년 전", "상승 출처 햇수")
+        검사(ANALYSIS, f"`SURGE_BASE`({ev.SURGE_BASE})거래일 중앙값의 `SURGE_X`({ev.SURGE_X})배", "공매도 급증 정의")
+        검사(ANALYSIS, f"`SURGE_COOLDOWN`({ev.SURGE_COOLDOWN})거래일", "공매도 급증 식힘")
+        검사(ANALYSIS, f"`SURGE_DAYS`({'·'.join(str(x) for x in ev.SURGE_DAYS)})거래일", "공매도 급증 뒤 거래일")
+
     def test_해석_묶음(self) -> None:
         from batch.jobs import verdicts as vj
         from batch.services import insights as ins
@@ -594,6 +606,7 @@ class Test밸류_분모:
     "gross_profitability", "robustness", "column_rot", "calibration", "self_grade", "holding_scores",
     "pick_history", "etf_accounts", "etf_tilt", "after_hours", "broker_stats", "disclosure_reaction", "luck", "postmortem",
     "divergence", "tax_sim", "verdict", "forecast_track", "patterns", "insights", "history",
+    "event_history",
 )  # fmt: skip
 
 #: 아직 그물 밖인 모듈과 **왜 아직인지**. 하나씩 줄여 간다
