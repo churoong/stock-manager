@@ -462,6 +462,8 @@ class Test종목_분석:
         from batch.jobs import verdicts as vj
         from batch.services import insights as ins
 
+        검사(ANALYSIS, f"`WEIGHT_MONTHS`({ins.WEIGHT_MONTHS})개월 성적", "성적 가중 합의 기간")
+
         검사(ANALYSIS, f"석 달치(`FLOWS_CALENDAR_DAYS` {vj.FLOWS_CALENDAR_DAYS}일)", "수급 흐름 읽기 창")
         검사(ANALYSIS, f"`FLOW_WINDOWS`({'·'.join(str(w) for w in ins.FLOW_WINDOWS)})거래일", "수급 흐름 창")
         검사(ANALYSIS, f"`SCORE_CHANGE_DAYS`({ins.SCORE_CHANGE_DAYS})일 앞", "점수 변화 거리")

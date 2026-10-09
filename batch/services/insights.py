@@ -157,6 +157,43 @@ def agreement(outlook: dict | None) -> dict | None:
             "n": len(눈), "spread": round(max(눈.values()) - min(눈.values()), 4)}  # fmt: skip
 
 
+#: 성적 가중 합의가 보는 기간 — 네 눈이 모두 1년 예상이라 1년 성적으로만 견준다 (docs/analysis.md 30장)
+WEIGHT_MONTHS = 12
+
+
+def weighted_agreement(agreement: dict | None, market_track: dict | None, since: str | None) -> dict | None:
+    """성적 가중 합의 (docs/analysis.md 30장, 25.1056) — 네 눈을 **시장 전체 1년 성적표**의
+    평균 로그 오차의 역수로 가중.
+
+    눈마다 1년 성적 칸의 표본이 성적표 최소 표본(`forecast_track.MIN_SAMPLE`) 이상이고
+    오차가 0 보다 클 때만 가중에 든다.
+    든 눈이 둘 이상이면 가중 평균, 아니면 언제부터 낼 수 있는지(첫 기록일 + 1년)를 말한다. 눈이 없으면 None."""
+    from batch.services import forecast_track as ft
+
+    views = (agreement or {}).get("views") or {}
+    if len(views) < 2:
+        return None
+    무게: dict[str, float] = {}
+    표본: dict[str, int] = {}
+    for model in views:
+        r = ft.rates(((market_track or {}).get(model) or {}).get(str(WEIGHT_MONTHS)))
+        if r:
+            표본[model] = r["n"]
+        if r and r["enough"] and r["err"] > 0:
+            무게[model] = 1 / r["err"]
+    빠짐 = sorted(m for m in views if m not in 무게)
+    if len(무게) < 2:
+        언제 = None
+        if since:
+            from datetime import date
+
+            언제 = ft.months_back(date.fromisoformat(str(since)[:10]), -WEIGHT_MONTHS).isoformat()
+        return {"value": None, "pending": 빠짐, "available_from": 언제, "n": 표본}
+    합 = sum(무게.values())
+    return {"value": round(sum(views[m] * w for m, w in 무게.items()) / 합, 4),
+            "weights": {m: round(w / 합, 4) for m, w in 무게.items()}, "left_out": 빠짐, "n": 표본}  # fmt: skip
+
+
 #: 레이더 목록마다의 길이 (docs/analysis.md 20장)
 RADAR_N = 10
 

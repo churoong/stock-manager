@@ -560,6 +560,15 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
                 out["reasons"].append(f"예측 성적표: {줄}")
         detail = {k: out[k] for k in ("label", "reasons", "against", "nearest", "outlook")}
         detail["track"] = {"stock": 종목성적, "market": 시장성적, "since": 상태.get("since"), "first_due": 첫평가}
+        # 성적 가중 합의 (30장, 25.1056) — 네 눈(19장)을 시장 전체 1년 성적으로 가중
+        합의 = (detail.get("outlook") or {}).get("agreement")
+        if 합의:
+            합의["weighted"] = insights.weighted_agreement(합의, 시장성적, 상태.get("since"))
+            가중 = 합의["weighted"] or {}
+            if 가중.get("value") is not None:
+                out["reasons"].append("성적 가중 1년 예상: " + f"{가중['value'] * 100:+.1f}% ("
+                                      + " · ".join(f"{ft.MODELS.get(m, m)} {w * 100:.0f}%"
+                                                   for m, w in 가중["weights"].items()) + ")")  # fmt: skip
         detail["score_change"] = 변화
         detail["twins"] = 닮음
         if sid in 내부자:

@@ -1,6 +1,6 @@
 "use client";
 
-import { MODEL_LABEL, agreementPositions, horizonLabel, type Agreement, type AnalogData, type ScenarioData } from "@/lib/analysis";
+import { MODEL_LABEL, agreementPositions, horizonLabel, weightedAgreementLine, type Agreement, type AnalogData, type ScenarioData } from "@/lib/analysis";
 import { formatPrice } from "@/lib/stockDetail";
 
 /**
@@ -34,6 +34,9 @@ export default function ForecastModels({ analog, scenario, agreement, close, cur
               </div>
             ))}
           </div>
+          {weightedAgreementLine(agreement.weighted) && (
+            <p className="mb-1 text-xs font-medium text-slate-700 dark:text-slate-200">{weightedAgreementLine(agreement.weighted)}</p>
+          )}
           <p className="text-xs text-slate-400">시장·베타(CAPM) · 이 종목의 과거(비슷한 국면) · 회사의 가치(시나리오) · 증권사의 예측. 눈이 흩어질수록 불확실합니다.</p>
         </div>
       )}

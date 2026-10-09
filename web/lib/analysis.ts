@@ -79,6 +79,31 @@ export interface Agreement {
   up: number;
   n: number;
   spread: number;
+  /** 성적 가중 합의 (docs/analysis.md 30장) — 시장 전체 1년 성적의 오차 역수로 가중. 성적이 모자라면 value 가 null */
+  weighted?: WeightedAgreement | null;
+}
+
+export interface WeightedAgreement {
+  value: number | null;
+  weights?: Record<string, number>;
+  left_out?: string[];
+  pending?: string[];
+  available_from?: string | null;
+  n?: Record<string, number>;
+}
+
+/** 성적 가중 합의 한 줄 (30장). 배치 값을 글로 옮길 뿐이다 */
+export function weightedAgreementLine(w: WeightedAgreement | null | undefined): string | null {
+  if (!w) return null;
+  const pct = (x: number) => `${x >= 0 ? "+" : ""}${(x * 100).toFixed(1)}%`;
+  if (w.value === null || w.value === undefined) {
+    return w.available_from
+      ? `성적 가중 합의는 ${w.available_from}부터 냅니다 — 1년 예측의 실제 결과가 쌓여야 어느 눈이 잘 맞히는지 압니다.`
+      : "성적 가중 합의는 1년 예측의 실제 결과가 쌓인 뒤에 냅니다.";
+  }
+  const 무게 = Object.entries(w.weights ?? {}).map(([m, x]) => `${MODEL_LABEL[m] ?? m} ${(x * 100).toFixed(0)}%`).join(" · ");
+  const 빠짐 = w.left_out?.length ? ` · 성적이 모자라 뺀 눈: ${w.left_out.map((m) => MODEL_LABEL[m] ?? m).join(", ")}` : "";
+  return `성적 가중 1년 예상 ${pct(w.value)} (가중 ${무게}${빠짐})`;
 }
 
 export interface Decomposition {
