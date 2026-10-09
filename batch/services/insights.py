@@ -234,6 +234,61 @@ def signal_history(rows: list[dict]) -> dict | None:
     }  # fmt: skip
 
 
+#: 재무 건전성 (docs/analysis.md 38장) — Altman Z″ (1995, 비제조·신흥시장용, 시가총액이 필요 없는 판)의 계수와 구간.
+#: Z″ = 6.56·운전자본/자산 + 3.26·이익잉여금/자산 + 6.72·영업이익/자산 + 1.05·자본/부채.
+#: 구간 경계(안전 > 2.60, 회색 1.10~2.60, 위험 < 1.10)는 Altman(2000, "Predicting Financial Distress of Companies:
+#: Revisiting the Z-Score and ZETA Models")이 적은 값을 그대로 옮긴 것 — 우리가 맞춘 문턱이 아니다
+Z2_COEF = (6.56, 3.26, 6.72, 1.05)
+Z2_SAFE = 2.60
+Z2_DISTRESS = 1.10
+
+
+def health(rows: list[dict], sector_code: str | None) -> dict | None:
+    """재무 건전성 (docs/analysis.md 38장, 25.1061) — 가장 최근 사업보고서(11011) 한 행으로 Altman Z″ 와 부채비율.
+
+    기준 하나: 가장 최근 회계연도의 연결(있으면)·별도, 같은 해 여러 보고서면 가장 늦게 접수된 것.
+    금융업(은행·보험·증권·부동산 — `sectors.is_financial`)은 부채가 영업 재료라 Z″ 가 뜻이 없어 내지 않고 그렇게 적는다.
+    재료가 비면 비었다고 적는다(지어내지 않는다). 사업보고서가 없으면 None."""
+    from batch.services import sectors
+    from batch.sources import dart
+
+    연간 = [r for r in rows if str(r.get("report_code")) == dart.ANNUAL_REPORT_CODE]
+    if not 연간:
+        return None
+    해 = max(int(r["fiscal_year"]) for r in 연간)
+    같은해 = [r for r in 연간 if int(r["fiscal_year"]) == 해]
+    연결 = [r for r in 같은해 if int(r.get("consolidated") or 0) == 1]
+    r = max(연결 or 같은해, key=lambda x: str(x.get("report_date") or ""))
+    out: dict[str, Any] = {"fiscal_year": 해, "consolidated": bool(연결), "report_date": r.get("report_date"),
+                           "z": None}  # fmt: skip
+    if sectors.is_financial(sector_code):
+        out["note"] = "금융업은 부채가 영업 재료라 Altman Z″ 를 내지 않습니다"
+        return out
+    ca, cl, ta, tl, re_, eq, ebit = (r.get(k) for k in ("current_assets", "current_liabilities", "total_assets",
+                                                         "total_liabilities", "retained_earnings", "total_equity",
+                                                         "operating_income"))  # fmt: skip
+    빈것 = [이름 for 이름, v in (("유동자산", ca), ("유동부채", cl), ("자산총계", ta), ("부채총계", tl),
+                              ("이익잉여금", re_), ("자본총계", eq), ("영업이익", ebit)) if v is None]  # fmt: skip
+    if isinstance(tl, (int, float)) and isinstance(eq, (int, float)) and eq > 0:
+        out["debt_ratio"] = round(tl / eq, 4)
+    if 빈것 or not ta or ta <= 0 or not tl or tl <= 0:
+        out["note"] = "재료가 비어 Z″ 를 내지 못했습니다: " + (", ".join(빈것) if 빈것 else "자산·부채 0")
+        return out
+    x = ((ca - cl) / ta, re_ / ta, ebit / ta, eq / tl)
+    z = sum(c * v for c, v in zip(Z2_COEF, x, strict=True))
+    out.update({"z": round(z, 3), "parts": [round(v, 4) for v in x],
+                "zone": "safe" if z > Z2_SAFE else "distress" if z < Z2_DISTRESS else "grey"})  # fmt: skip
+    return out
+
+
+def health_line(h: dict) -> str:
+    구간 = {"safe": "안전 구간", "grey": "회색 구간", "distress": "위험 구간"}[h["zone"]]
+    부채 = f" · 부채비율 {h['debt_ratio'] * 100:.0f}%" if h.get("debt_ratio") is not None else ""
+    기준 = "·연결" if h["consolidated"] else "·별도"
+    return (f"재무 건전성({h['fiscal_year']} 사업보고서{기준}): Altman Z″ {h['z']:.2f} "
+            f"— {구간}(>{Z2_SAFE:.2f} 안전, <{Z2_DISTRESS:.2f} 위험, Altman 2000){부채}")
+
+
 #: 성적 가중 합의가 보는 기간 — 네 눈이 모두 1년 예상이라 1년 성적으로만 견준다 (docs/analysis.md 30장)
 WEIGHT_MONTHS = 12
 

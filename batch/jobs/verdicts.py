@@ -27,6 +27,7 @@ from batch.services import disclosure_reaction as dr
 from batch.services import divergence, history, insights
 from batch.services import forecast_track as ft
 from batch.services import verdict as vd
+from batch.sources import dart
 
 JOB_NAME = "verdicts"
 
@@ -34,7 +35,7 @@ SCORES_SQL = (
     "SELECT sc.stock_id, sc.as_of_date, sc.total_score, sc.rank_in_market, sc.factor_scores, sc.skip_reason,"
     " sc.weights_json, sc.sentiment_score, sc.sentiment_weight_used,"
     " sc.calc_version, s.ticker, COALESCE(s.name_ko, s.name_en, s.ticker) AS name, s.currency, s.market, s.sector,"
-    " s.listed_shares"
+    " s.listed_shares, s.sector_code"
     " FROM scores sc JOIN stocks s ON s.id = sc.stock_id"
     " WHERE s.country = ? AND sc.as_of_date = (SELECT MAX(sc2.as_of_date) FROM scores sc2"
     "   JOIN stocks s2 ON s2.id = sc2.stock_id WHERE s2.country = ?)"
@@ -145,9 +146,12 @@ FLOWS_SQL = (
 FLOWS_CALENDAR_DAYS = 100
 # 분기 실적 추세 (25장, 25.1049) — 국내만(미국은 연간만 수집). 지난 3년치 분기 보고서
 QUARTERS_SQL = (
-    "SELECT f.stock_id, f.fiscal_year, f.report_code, f.consolidated, f.report_date, f.revenue, f.operating_income"
+    "SELECT f.stock_id, f.fiscal_year, f.report_code, f.consolidated, f.report_date, f.revenue, f.operating_income,"
+    # 재무 건전성 (38장, 25.1061) — 같은 행에서 사업보고서(11011)의 재무상태표 열도 함께 읽는다(행 둘 더)
+    " f.current_assets, f.current_liabilities, f.total_assets, f.total_liabilities, f.retained_earnings,"
+    " f.total_equity"
     " FROM financials f JOIN json_each(?) j ON j.value = f.stock_id"
-    " WHERE f.report_code IN ('11013', '11012', '11014') AND f.fiscal_year >= ?"
+    " WHERE f.report_code IN ('11013', '11012', '11014', ?) AND f.fiscal_year >= ?"  # ? = dart.ANNUAL_REPORT_CODE
 )
 # 다음 실적 발표 (24장, 25.1048) — 종목마다 오늘 이후 가장 이른 실적발표 일정 하나 (SQLite 의 MIN 과 같은 행의 열)
 EARNINGS_SQL = (
@@ -503,7 +507,8 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
         내부자 = {}
     분기: dict[int, list[dict]] = defaultdict(list)
     if country == "KR":
-        for r in _safe(client, QUARTERS_SQL, [json.dumps(sorted(점수)), today.year - 2], warnings, "분기 재무"):
+        for r in _safe(client, QUARTERS_SQL, [json.dumps(sorted(점수)), dart.ANNUAL_REPORT_CODE, today.year - 2],
+                       warnings, "분기 재무"):
             분기[int(r["stock_id"])].append(r)
     실적일 = {int(r["stock_id"]): r for r in _safe(client, EARNINGS_SQL, [country, today.isoformat()], warnings,
                                                    "실적 일정")}  # fmt: skip
@@ -597,6 +602,10 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
                 out["evidence"].append(행[0])
             detail["insider"] = 내부자[sid].as_dict()
         if 분기.get(sid):
+            건전 = insights.health(분기[sid], r.get("sector_code"))
+            detail["health"] = 건전
+            if 건전 and 건전.get("z") is not None:
+                out["reasons"].append(insights.health_line(건전))
             추세 = insights.quarter_trend(분기[sid])
             줄 = insights.quarter_line(추세)
             if 줄:

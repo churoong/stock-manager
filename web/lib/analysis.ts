@@ -33,6 +33,8 @@ export interface Verdict {
     peers?: Peers | null;
     /** 종합 점수 분해 (docs/analysis.md 26장, 25.1051) */
     decomposition?: Decomposition | null;
+    /** 재무 건전성 — Altman Z″ (docs/analysis.md 38장, 25.1061). 국내만 */
+    health?: { fiscal_year: number; consolidated: boolean; report_date: string | null; z: number | null; zone?: "safe" | "grey" | "distress"; parts?: number[]; debt_ratio?: number; note?: string } | null;
     /** 이 종목에 난 신호들의 성적 (docs/analysis.md 37장, 25.1060) */
     signal_history?: SignalHistory | null;
   };

@@ -475,6 +475,10 @@ class Test종목_분석:
         from batch.services import insights as ins
 
         검사(ANALYSIS, f"`WEIGHT_MONTHS`({ins.WEIGHT_MONTHS})개월 성적", "성적 가중 합의 기간")
+        검사(ANALYSIS, f"Z″ = {ins.Z2_COEF[0]}·(유동자산 − 유동부채)/자산 + {ins.Z2_COEF[1]}·이익잉여금/자산 + "
+                       f"{ins.Z2_COEF[2]}·영업이익/자산 + {ins.Z2_COEF[3]}·자본/부채", "Altman Z″ 계수")
+        검사(ANALYSIS, f"`Z2_SAFE`({ins.Z2_SAFE:.2f})", "Z″ 안전 경계")
+        검사(ANALYSIS, f"`Z2_DISTRESS`({ins.Z2_DISTRESS:.2f})", "Z″ 위험 경계")
         검사(ANALYSIS, f"`SIGNAL_HISTORY_DAYS`({vj.SIGNAL_HISTORY_DAYS})일", "신호 성적 창")
         검사(ANALYSIS, f"`SIGNAL_GAP_DAYS`({ins.SIGNAL_GAP_DAYS})달력일", "신호 끊김 문턱")
         검사(ANALYSIS, f"`SIGNAL_SHOW`({ins.SIGNAL_SHOW})번", "신호 표시 수")
