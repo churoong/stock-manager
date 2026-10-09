@@ -114,8 +114,22 @@ ALERT_UPSERT = (
 )
 
 
+#: 성과 지표가 이 날 수 안에 계산돼 있으면 다시 내지 않는다 (docs/infra.md 25.1080). 지표는 주간 작업(metrics.yml)이
+#: 내는 값이라 그 주기와 같게 둔다 — 지표는 몇 해 창의 CAGR·MDD·변동성이라 며칠 사이 거의 안 움직인다
+METRICS_FRESH_DAYS = 7
+#: 종목마다 가장 최근 지표 기준일 — `(stock_id, as_of_date DESC, window)` 색인을 탄다
+METRICS_LATEST_SQL = (
+    "SELECT j.value AS stock_id, (SELECT pm.as_of_date FROM performance_metrics pm WHERE pm.stock_id = j.value"
+    " ORDER BY pm.as_of_date DESC, pm.calc_version DESC LIMIT 1) AS d FROM json_each(?) j"
+)
+
+
 def ensure_data(client: TursoClient, country: str, rows: list[dict]) -> list[str]:
-    """그 종목들의 재무·성과 지표를 받는다. 실패는 경고로 — 있는 것으로 분석한다."""
+    """그 종목들의 재무·성과 지표를 받는다. 실패는 경고로 — 있는 것으로 분석한다.
+
+    **성과 지표는 묵었을 때만 다시 낸다** (docs/infra.md 25.1080). `metrics.run` 은 종목 하나를 줘도 나라 전체 시장
+    날짜·재무 사건·배당을 읽는다 — 유니버스 밖 관심 종목 하나에 국내 약 55만 행(10-08 `ensure_data`), 그것도 매일.
+    """
     from batch.jobs import financials, metrics, us_financials
 
     warnings: list[str] = []
@@ -128,7 +142,15 @@ def ensure_data(client: TursoClient, country: str, rows: list[dict]) -> list[str
             us_financials.run(None, None, only_ids=ids)
     except Exception as exc:  # noqa: BLE001 — 받지 못하면 있는 재무로
         warnings.append(f"재무를 받지 못했습니다: {exc}")
+    try:
+        최근 = {int(x["stock_id"]): x["d"] for x in client.execute(METRICS_LATEST_SQL, [json.dumps(ids)]).dicts()}
+    except Exception as exc:  # noqa: BLE001 — 못 읽으면 예전처럼 모두 다시 낸다
+        warnings.append(f"성과 지표 날짜를 읽지 못해 모두 다시 냅니다: {exc}")
+        최근 = {}
+    기준 = (datetime.now(UTC).date() - timedelta(days=METRICS_FRESH_DAYS)).isoformat()
     for r in rows:
+        if (최근.get(int(r["id"])) or "") >= 기준:
+            continue
         try:
             metrics.run(list(metrics.WINDOW_DAYS), ticker=str(r["ticker"]), countries=(country,))
         except Exception as exc:  # noqa: BLE001

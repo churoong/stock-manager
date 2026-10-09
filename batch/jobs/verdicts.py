@@ -177,15 +177,21 @@ INITIATION_SQL = (
     " GROUP BY stock_id, broker"
 )
 # 감성과 가격의 엇갈림 (50장, 25.1070) — 지난 한 주 안 감성 행(종목마다 최신)과 그 30일 앞 한 주의 종가
+# 날짜 색인(0061)을 바깥으로 고정한다(25.1081). 종목순 정렬을 빼야 플래너가 (stock_id, as_of_date) 색인
+# 통째 훑기를 고르지 않는다 — 종목마다 최신 한 행은 파이썬이 날짜 내림차순의 첫 행으로 고른다(setdefault)
 SENTIMENT_GAP_SQL = (
     "SELECT ss.stock_id, ss.as_of_date, ss.sentiment, ss.delta_30d FROM sentiment_scores ss"
-    " JOIN stocks s ON s.id = ss.stock_id WHERE s.country = ? AND ss.as_of_date >= ? AND ss.delta_30d IS NOT NULL"
-    " ORDER BY ss.stock_id, ss.as_of_date DESC"
+    " CROSS JOIN stocks s ON s.id = ss.stock_id WHERE ss.as_of_date >= ? AND s.country = ? AND ss.delta_30d IS NOT NULL"
+    " ORDER BY ss.as_of_date DESC"
 )
+# **감성 있는 종목의 종가만** (docs/infra.md 25.1081). 예전에는 나라 전체 시세 약 28거래일을 날짜 색인으로
+# 읽어(다른 나라 행까지 지나간다) 파이썬에서 감성 종목만 골랐다. 종목 목록을 바깥에 고정하면 (stock_id, date) 색인
+# 범위만 읽는다
 PRICE_BACK_SQL = (
     "SELECT p.stock_id, p.date,"
     " CASE WHEN s.country = 'US' THEN p.close ELSE COALESCE(p.adj_close, p.close) END AS close"
-    " FROM prices p JOIN stocks s ON s.id = p.stock_id WHERE s.country = ? AND p.date >= ? AND p.date <= ?"
+    " FROM json_each(?) j CROSS JOIN prices p ON p.stock_id = j.value CROSS JOIN stocks s ON s.id = p.stock_id"
+    " WHERE p.date >= ? AND p.date <= ?"
 )
 # 점수 변화 (17장) — 4주 앞 가장 가까운 점수일
 SCORES_BEFORE_SQL = (
@@ -535,13 +541,14 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
     # 감성과 가격의 엇갈림 (50장) — 감성 행의 날짜에서 30일 앞 종가(그날 이하 마지막, 한 주 안)와 그날 종가
     감성: dict[int, dict] = {}
     한주 = (today - timedelta(days=7)).isoformat()
-    for r in _safe(client, SENTIMENT_GAP_SQL, [country, 한주], warnings, "뉴스 감성"):
+    for r in _safe(client, SENTIMENT_GAP_SQL, [한주, country], warnings, "뉴스 감성"):
         감성.setdefault(int(r["stock_id"]), r)
     감성가격: dict[int, list[tuple[str, float]]] = defaultdict(list)
     if 감성:
         가장앞 = min(date.fromisoformat(str(r["as_of_date"])[:10]) for r in 감성.values())
         시작 = (가장앞 - timedelta(days=insights.SENT_GAP_DAYS + 7)).isoformat()
-        for r in _safe(client, PRICE_BACK_SQL, [country, 시작, today.isoformat()], warnings, "엇갈림 종가"):
+        종목들 = json.dumps(sorted(감성))
+        for r in _safe(client, PRICE_BACK_SQL, [종목들, 시작, today.isoformat()], warnings, "엇갈림 종가"):
             if int(r["stock_id"]) in 감성 and r["close"]:
                 감성가격[int(r["stock_id"])].append((str(r["date"]), float(r["close"])))
     개시: dict[int, list[dict]] = defaultdict(list)
