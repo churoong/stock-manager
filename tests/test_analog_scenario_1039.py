@@ -135,3 +135,30 @@ def test_하락장_성적() -> None:
     assert any(줄.startswith(f"하락장 성적: 시장이 가장 나빴던 {pt.WORST_MONTHS}개 달") for 줄 in o["lines"])
     # 하락장 성적만 있는 행으로 비슷한 국면을 고르지 않는다
     assert pt.pick({"stress": s}, 0.1, 0.9) is None
+
+
+def test_하락장_성적은_지수의_나쁜_달을_고르고_지수와_견준다() -> None:
+    """종목만의 큰 흔들림이 있어도 '지수가 가장 나빴던 달' 을 고른다. 베타 0.5 종목은 빠져도 시장보다 덜 빠진다."""
+    import datetime as dt
+
+    d0 = dt.date(2023, 1, 2)
+    random.seed(5)
+    dates, index, a, b = [], {}, [], []
+    ix, ca, cb = 1000.0, 100.0, 100.0
+    for i in range(900):
+        d = (d0 + dt.timedelta(days=i)).isoformat()
+        m = random.gauss(0.0, 0.01)
+        ix *= 1 + m
+        ca *= 1 + 0.5 * m + random.gauss(0, 0.03)  # 종목만의 큰 흔들림
+        cb *= 1 + 0.5 * m
+        dates.append(d)
+        index[d] = ix
+        a.append(ca)
+        b.append(cb)
+    s = pt.stress(dates, a, index)
+    지수달 = pt._month_ends(sorted(index), [index[d] for d in sorted(index)])
+    달 = sorted(지수달)
+    수익 = sorted(((지수달[y] / 지수달[x] - 1), y) for x, y in zip(달, 달[1:], strict=False))
+    assert sorted(w["month"] for w in s["worst"]) == sorted(y for _, y in 수익[: pt.WORST_MONTHS])
+    s2 = pt.stress(dates, b, index)
+    assert s2["worse"] == 0 and s2["avg_index"] < s2["avg_stock"] < 0
