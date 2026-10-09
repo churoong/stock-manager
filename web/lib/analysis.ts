@@ -224,7 +224,8 @@ export interface LadderData {
   touch_months: number[];
   /** 도달 확률을 냈나(변동성·기대수익이 있을 때만) */
   assumed: boolean;
-  race?: { target: number; stop: number; p: number };
+  /** 목표·손절 경주 (12.3) + 켈리 참고 비중 (35장, 25.1058) — up·down 은 종가 대비 이익·손실 폭(소수) */
+  race?: { target: number; stop: number; p: number; up?: number; down?: number; kelly?: number | null };
 }
 
 /** 사다리에 "지금" 줄을 끼운 순서 — 가격 내림차순, 지금 종가는 그 자리에 */

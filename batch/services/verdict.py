@@ -86,6 +86,9 @@ def market_return(first: tuple[str, float] | None, last: tuple[str, float] | Non
 #: 확률에서 말하는 하락 폭 — "1년 뒤 −20% 이하일 확률". 약세장의 흔한 정의(고점 대비 −20%)를 빌렸다 —
 #: 판정 문턱이 아니라 표시 기준
 DROP_LEVEL = -0.20
+#: 켈리 참고 비중과 함께 보이는 몫 — 절반 켈리. 확률·손익비 추정이 틀릴 때 전부 켈리는 크게 잃는다는 흔한 처방
+#: (Thorp 등). 표시 기준일 뿐 비중 규칙이 아니다 (35장)
+KELLY_SHOWN = 0.5
 #: 가격 사다리의 도달 확률 기간 (개월)
 TOUCH_MONTHS = (3, 12)
 
@@ -135,6 +138,16 @@ def _log_phi(x: float) -> float:
         p = _phi(x)
         return math.log(p) if p > 0 else -745.0
     return -x * x / 2 - math.log(-x) - 0.5 * math.log(2 * math.pi)
+
+
+def kelly(p: float, up: float, down: float) -> float | None:
+    """켈리 참고 비중 (docs/analysis.md 35장, 25.1058) — 두 결과뿐인 내기: 확률 p 로 +up, 1−p 로 −down (소수).
+    E[ln(1 + f·X)] 를 최대로 하는 f = p/down − (1−p)/up. 0 보다 작으면 0(사지 않는 쪽).
+    1 을 넘으면 1 — 빚 없이(레버리지 없음) 고를 수 있는 꼭대기다(로그 성장이 오목해 [0,1] 안의 최대는 끝점).
+    손절가에서 정확히 판다는 가정이라 갭 하락이 있으면 실제 손실이 더 크다. up·down 이 0 이하면 None."""
+    if up <= 0 or down <= 0 or not 0 <= p <= 1:
+        return None
+    return min(1.0, max(0.0, p / down - (1 - p) / up))
 
 
 def race_prob(up_ratio: float, down_ratio: float, er: float, sigma: float) -> float | None:
@@ -574,7 +587,9 @@ def ladder(*, close: float | None, currency: str, outlook: dict | None, signals:
         g = signals[0]
         p = race_prob(float(g["target_price"]) / close, float(g["stop_price"]) / close, er, s)
         if p is not None:
-            out["race"] = {"target": float(g["target_price"]), "stop": float(g["stop_price"]), "p": p}
+            up, down = float(g["target_price"]) / close - 1, 1 - float(g["stop_price"]) / close
+            out["race"] = {"target": float(g["target_price"]), "stop": float(g["stop_price"]), "p": p,
+                           "up": up, "down": down, "kelly": kelly(p, up, down)}  # fmt: skip
     return out
 
 
@@ -681,6 +696,17 @@ def build(inp: Inputs) -> dict:
                        f"{r['p'] * 100:.0f}% (CAPM 기대수익·변동성 가정, 기간 제한 없음)")  # fmt: skip
         evidence.append(_row("목표가 먼저 닿을 확률", f"{r['p'] * 100:.0f}%", "표류 브라운 운동의 두 장벽",
                              "계산 (docs/analysis.md 12.3)", (inp.outlook or {}).get("close_date")))  # fmt: skip
+        if r.get("kelly") is not None:
+            # 35. 켈리 참고 비중 — 비교용. 실제 비중 규칙(상한·변동성 축소)을 바꾸지 않는다
+            f = r["kelly"]
+            reasons.append(f"켈리 참고 비중(이론상 최대, 비교용): {f * 100:.0f}% · "
+                           f"절반 켈리 {f * KELLY_SHOWN * 100:.0f}% "
+                           f"— 손익비 {r['up'] * 100:.1f}% : {r['down'] * 100:.1f}%, 목표가 먼저 {r['p'] * 100:.0f}%"
+                           + (" (기대값이 0 이하라 0)" if f == 0 else "")
+                           + (" (식의 값이 100% 를 넘어 빚 없는 100% 로 자름 — 손절가에서 정확히 판다는 가정이 강하다)"
+                              if f >= 1 else ""))  # fmt: skip
+            evidence.append(_row("켈리 참고 비중", f"{f * 100:.0f}%", "p/손실폭 − (1−p)/이익폭",
+                                 "계산 (docs/analysis.md 35장)", (inp.outlook or {}).get("close_date")))  # fmt: skip
     for it in (사다리 or {}).get("items") or []:
         if it["kind"] == "criterion":
             상태 = "충족" if it.get("met") else ("넘으면 충족" if it.get("need") == "above" else "밑돌면 충족")

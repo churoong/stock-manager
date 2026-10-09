@@ -28,6 +28,11 @@ export default function PriceLadder({ l, currency }: { l: LadderData; currency: 
         <p className="mb-1.5 text-xs text-slate-700 dark:text-slate-300">
           목표가 {formatPrice(l.race.target, currency)}가 손절가 {formatPrice(l.race.stop, currency)}보다 <b>먼저</b> 닿을 확률{" "}
           <b>{(l.race.p * 100).toFixed(0)}%</b>
+          {l.race.kelly !== undefined && l.race.kelly !== null && (
+            <span className="block text-slate-500">
+              켈리 참고 비중(이론상 최대) {(l.race.kelly * 100).toFixed(0)}% · 절반 켈리 {(l.race.kelly * 50).toFixed(0)}% — 비교용입니다. 실제 권장 비중은 상한·변동성 규칙을 따릅니다.
+            </span>
+          )}
         </p>
       )}
       <div className="overflow-x-auto">

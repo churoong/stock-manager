@@ -453,6 +453,7 @@ class Test종목_분석:
         검사(ANALYSIS, f"`EWMA_DAYS`({pt.EWMA_DAYS})거래일", "EWMA 창")
         검사(ANALYSIS, f"감쇠 `EWMA_LAMBDA` {pt.EWMA_LAMBDA}", "EWMA 감쇠")
         검사(ANALYSIS, f"`EWMA_MIN`({pt.EWMA_MIN})개 미만", "EWMA 최소 수익률 수")
+        검사(ANALYSIS, f"절반 켈리(`KELLY_SHOWN` {vd.KELLY_SHOWN})", "켈리 표시 몫")
         검사(ANALYSIS, f"반감기 `VOL_HALF_LIFE_MONTHS`({vd.VOL_HALF_LIFE_MONTHS:g})개월", "변동성 반감기")
         검사(ANALYSIS, f"z = {vd.FORECAST_Z['50']}(50%)·{vd.FORECAST_Z['68']:g}(68%)·{vd.FORECAST_Z['90']}(90%)", "범위 z")
         검사(ANALYSIS, f"({'·'.join(str(d) for d in pt.HORIZON_DAYS.values())}거래일)", "기간 → 거래일")
