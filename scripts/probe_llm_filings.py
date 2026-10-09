@@ -154,25 +154,82 @@ def load_model(choice: str):  # noqa: ANN201 — llama_cpp 는 실행할 때만 
     raise SystemExit(f"{choice}: 받을 수 있는 모델이 없다")
 
 
-def ask(llm, company: str, text: str, thinking_off: bool) -> tuple[dict | None, dict]:  # noqa: ANN001
-    prompt = PROMPT.format(company=company, text=text) + (" /no_think" if thinking_off else "")
-    t = time.time()
-    res = llm.create_chat_completion(
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.0,
-        max_tokens=1024,
-        response_format={"type": "json_object"},
-    )
-    took = time.time() - t
-    usage = res.get("usage") or {}
-    raw = res["choices"][0]["message"]["content"] or ""
-    raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+def parse_answer(raw: str) -> dict | None:
+    """모델 답에서 JSON 하나. 생각 꼬리표·코드펜스를 걷어 낸다."""
+    raw = re.sub(r"<think>.*?</think>", "", raw or "", flags=re.DOTALL).strip()
+    raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw)
     try:
-        parsed = json.loads(raw)
+        got = json.loads(raw)
     except ValueError:
-        parsed = None
-    return parsed, {"seconds": round(took, 1), "prompt_tokens": usage.get("prompt_tokens"),
-                    "completion_tokens": usage.get("completion_tokens"), "raw": raw[:1500]}  # fmt: skip
+        return None
+    return got if isinstance(got, dict) else None
+
+
+def local_backend(choice: str):  # noqa: ANN201
+    llm, repo = load_model(choice)
+    thinking_off = repo == "Qwen/Qwen3-4B-GGUF" or "1.7B" in repo
+
+    def complete(prompt: str) -> tuple[str, dict]:
+        res = llm.create_chat_completion(
+            messages=[{"role": "user", "content": prompt + (" /no_think" if thinking_off else "")}],
+            temperature=0.0, max_tokens=1024, response_format={"type": "json_object"})  # fmt: skip
+        return res["choices"][0]["message"]["content"] or "", res.get("usage") or {}
+
+    return complete, repo
+
+
+#: 호스팅 무료 등급 — 둘 다 **새 계정 없이** 지금 있는 시크릿으로 시험한다 (docs/infra.md 25.1074)
+#: GitHub Models: Actions GITHUB_TOKEN + permissions models: read. 2026-06 신규 차단설 [확인필요] — 실패도 결과
+#: Cloudflare Workers AI: 하루 10,000 뉴런 무료(공식 가격 문서). D1 계정·토큰 재사용 — 권한 [확인필요]
+REMOTE = {
+    "github": ("https://models.github.ai/inference/chat/completions", "GITHUB_TOKEN", "openai/gpt-4.1-mini"),
+    "cloudflare": ("https://api.cloudflare.com/client/v4/accounts/{account}/ai/v1/chat/completions",
+                   "D1_API_TOKEN", "@cf/qwen/qwen3-30b-a3b-fp8"),
+}  # fmt: skip
+
+
+def remote_backend(name: str, model: str | None):  # noqa: ANN201
+    url, token_env, default_model = REMOTE[name]
+    url = url.format(account=os.environ.get("D1_ACCOUNT_ID", ""))
+    token = os.environ.get(token_env, "")
+    model = model or default_model
+
+    def complete(prompt: str) -> tuple[str, dict]:
+        r = requests.post(url, timeout=180, headers={"Authorization": f"Bearer {token}"}, json={
+            "model": model, "temperature": 0, "max_tokens": 1024,
+            "messages": [{"role": "user", "content": prompt}]})  # fmt: skip
+        if r.status_code != 200:
+            # 본문만 짧게 — 요청 머리(토큰)는 찍지 않는다
+            return f"HTTP {r.status_code}: {r.text[:300]}", {}
+        body = r.json()
+        return body["choices"][0]["message"].get("content") or "", body.get("usage") or {}
+
+    return complete, f"{name}:{model}"
+
+
+def ask(complete, company: str, text: str) -> tuple[dict | None, dict]:  # noqa: ANN001
+    t = time.time()
+    raw, usage = complete(PROMPT.format(company=company, text=text))
+    took = time.time() - t
+    return parse_answer(raw), {"seconds": round(took, 1), "prompt_tokens": usage.get("prompt_tokens"),
+                               "completion_tokens": usage.get("completion_tokens"), "raw": raw[:1500]}  # fmt: skip
+
+
+#: DART 없이 백엔드만 시험하는 지어낸 견본(실제 공시 아님). 정답: 고객 Apple·Verizon, 공급 SK실트론, 익명 A사
+PING_TEXT = (
+    "당사의 주요 매출처는 Apple, Verizon 등이며 국내 완성차 업체 A사에도 일부 납품하고 있습니다.\n"
+    "주요 원재료 | 웨이퍼 | 매입처 | SK실트론\n"
+    "당사의 종속회사인 한빛전자(주)에 대한 매출은 연결 시 제거됩니다."
+)
+
+
+def ping_score(parsed: dict | None) -> str:
+    if parsed is None:
+        return "JSON 아님"
+    names = lambda side: {_norm(str(i.get("name"))) for i in parsed.get(side) or [] if isinstance(i, dict)}  # noqa: E731
+    cust, sup = names("customers"), names("suppliers")
+    ok = cust == {"apple", "verizon"} and sup == {_norm("SK실트론")}
+    return f"{'정답' if ok else '오답'} — 고객 {sorted(cust)} 공급 {sorted(sup)} 익명 {parsed.get('anonymous')}"
 
 
 def latest_annual(corp_code: str, key: str) -> dict | None:
@@ -206,7 +263,19 @@ def main() -> int:
     p.add_argument("--out", default="probe-out")
     p.add_argument("--model", default="qwen3-4b", choices=sorted(MODELS))
     p.add_argument("--tickers", default="")
+    p.add_argument("--backend", default="local", choices=["local", *REMOTE])
+    p.add_argument("--remote-model", default="")
+    p.add_argument("--ping", action="store_true", help="DART 없이 지어낸 견본 한 건으로 백엔드만 시험")
     args = p.parse_args()
+    if args.backend == "local":
+        complete, repo = local_backend(args.model)
+    else:
+        complete, repo = remote_backend(args.backend, args.remote_model or None)
+    if args.ping:
+        parsed, meta = ask(complete, "견본", PING_TEXT)
+        print(f"핑 {repo}: {meta['seconds']}초 토큰 {meta['prompt_tokens']}/{meta['completion_tokens']} — "
+              f"{ping_score(parsed)}\n원답: {meta['raw'][:500]}")  # fmt: skip
+        return 0
     key = os.environ.get("DART_API_KEY", "")
     if not key:
         print("DART_API_KEY 가 비었다")
@@ -222,8 +291,6 @@ def main() -> int:
         print(f"고유번호 실패: {codes.error}")
         return 1
     by_ticker = {c.stock_code: c for c in codes.data}
-    llm, repo = load_model(args.model)
-    thinking_off = repo == "Qwen/Qwen3-4B-GGUF" or "1.7B" in repo
 
     summary = {"model": repo, "docs": 0, "items": 0, "name_ok": 0, "quote_ok": 0, "anon": 0, "parse_fail": 0,
                "no_section": 0, "seconds": []}  # fmt: skip
@@ -252,7 +319,7 @@ def main() -> int:
             lines.append(f"찾은 절 없음. 제목 앞 60개: {titles}")
         for name, body in secs.items():
             text = window(body)
-            parsed, meta = ask(llm, corp.corp_name, text, thinking_off)
+            parsed, meta = ask(complete, corp.corp_name, text)
             summary["docs"] += 1
             summary["seconds"].append(meta["seconds"])
             lines.append(f"\n## 절 [{name}] 원문 {len(body)}자 → 창 {len(text)}자, "

@@ -9,6 +9,14 @@ on:
         description: qwen3-4b 또는 qwen3-1.7b
         type: string
         default: qwen3-4b
+      backend:
+        description: local(Actions CPU) · github(GitHub Models) · cloudflare(Workers AI)
+        type: string
+        default: local
+      ping:
+        description: DART 없이 지어낸 견본 한 건으로 백엔드만 시험
+        type: boolean
+        default: false
       tickers:
         description: 쉼표로 구분한 종목코드 (비우면 스크립트 기본 12종목)
         type: string
@@ -17,6 +25,7 @@ on:
 permissions:
   contents: read
   issues: write # 결과를 이슈 코멘트로 내보낸다 (docs/infra.md 25.17)
+  models: read # GitHub Models 무료 등급을 GITHUB_TOKEN 으로 부른다 (docs/infra.md 25.1074)
 
 jobs:
   probe:
@@ -25,6 +34,8 @@ jobs:
     env:
       MODEL: ${{ inputs.model }}
       TICKERS: ${{ inputs.tickers }}
+      BACKEND: ${{ inputs.backend }}
+      PING: ${{ inputs.ping }}
       OFFLINE_MODE: "0"
     steps:
       - uses: actions/checkout@v5
@@ -37,15 +48,24 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt huggingface_hub
           # 미리 빌드된 CPU 바퀴가 있으면 쓰고, 없으면 소스에서 빌드한다(수 분)
-          pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
-          python -c "import llama_cpp; print('llama_cpp', llama_cpp.__version__)"
+          if [ "${BACKEND:-local}" = "local" ]; then
+            pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+            python -c "import llama_cpp; print('llama_cpp', llama_cpp.__version__)"
+          fi
       - name: 시험
         env:
           DART_API_KEY: ${{ secrets.DART_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Workers AI 는 D1 과 같은 Cloudflare 계정. 토큰에 Workers AI 권한이 없으면 403 이 결과다
+          D1_ACCOUNT_ID: ${{ secrets.D1_ACCOUNT_ID }}
+          D1_API_TOKEN: ${{ secrets.D1_API_TOKEN }}
         run: |
           set -o pipefail
           # 입력은 셸에 끼우지 않고 따옴표 안 환경변수로만 넘긴다. 빈 값이면 스크립트 기본값
+          EXTRA=""
+          if [ "$PING" = "true" ]; then EXTRA="--ping"; fi
           python scripts/probe_llm_filings.py --out probe-out --model "${MODEL:-qwen3-4b}" --tickers "$TICKERS" \
+            --backend "${BACKEND:-local}" $EXTRA \
             2>&1 | python scripts/ops_tee.py probe-log.txt
       - name: 결과를 비공개 이슈로
         if: always()
