@@ -143,3 +143,19 @@ def test_종합_분석_문장은_사실을_먼저_신호는_끝에() -> None:
     assert h.endswith(" · 매수 신호까지 단기 기준 2개 남음 (2026-10-07)")
     assert any(e["label"] == "기대 연수익률" for e in r["evidence"])
     assert any(줄.startswith("예상 주가: 1개월 ") for 줄 in r["outlook"]["lines"])
+
+
+def test_잘_맞힌_증권사만의_목표가() -> None:
+    """도달률 표본이 하한 이상인 증권사만, 도달률로 가중 (docs/analysis.md 27장, 25.1052)."""
+    의견 = [{"date": "2026-10-01", "broker": b, "target_price": t} for b, t in (("가", 150), ("나", 100), ("다", 300))]
+    성적 = {"가": {"n_touch": 40, "touch_pct": 60.0}, "나": {"n_touch": 25, "touch_pct": 20.0},
+            "다": {"n_touch": 5, "touch_pct": 90.0}}  # 다는 표본이 모자라 뺀다  # fmt: skip
+    c = vd.consensus(의견, date(2026, 10, 8), 성적)
+    assert c["median"] == 150
+    sk = c["skilled"]
+    assert sk["n"] == 2 and [x["broker"] for x in sk["brokers"]] == ["가", "나"]
+    assert sk["weighted"] == (150 * 60 + 100 * 20) / 80
+    o = vd.outlook(close=100.0, close_date="d", currency="KRW", momentum=None, risk=None, band=None, opinions=의견,
+                   today=date(2026, 10, 8), broker_stats=성적)  # fmt: skip
+    assert any(줄.startswith("잘 맞힌 증권사 2곳(목표가 도달률 가중): 138원") for 줄 in o["lines"])
+    assert vd.consensus(의견, date(2026, 10, 8))["skilled"] is None  # 성적표가 없으면 내지 않는다

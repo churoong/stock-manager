@@ -308,9 +308,16 @@ def reference_outlook(client: TursoClient, country: str, as_of: str, meta: dict,
         warnings.append(f"성과 지표를 읽지 못했습니다: {exc}")
         위험 = None
     의견 = []
+    증권사성적: dict[str, dict] = {}
     if country == "KR":
         since = (today - timedelta(days=vd.CONSENSUS_DAYS)).isoformat()
         의견 = client.execute(ONE_OPINIONS_SQL, [sid, since]).dicts()
+        try:  # 잘 맞힌 증권사 가중 (27장) — 일일 의견과 같은 성적표
+            from batch.jobs import verdicts as _vj
+
+            증권사성적 = {str(r["broker"]): r for r in client.execute(_vj.BROKER_STATS_SQL).dicts()}
+        except Exception as exc:  # noqa: BLE001 — 그 줄만 빠진다
+            warnings.append(f"증권사 성적표를 읽지 못했습니다: {exc}")
     from batch.jobs import verdicts as vj
     from batch.services import trend
 
@@ -330,7 +337,7 @@ def reference_outlook(client: TursoClient, country: str, as_of: str, meta: dict,
     return vd.outlook(close=c.get("close"), close_date=c.get("date"), currency=str(meta.get("currency") or "KRW"),
                       momentum=(s or {}).get("momentum"), risk=위험, band=band, opinions=의견, today=today,
                       band_note=note, market=시장, rf=무위험, analog=국면,
-                      fundamentals=(s or {}).get("fundamentals"))  # fmt: skip
+                      fundamentals=(s or {}).get("fundamentals"), broker_stats=증권사성적)  # fmt: skip
 
 
 def reference_checks(client: TursoClient, country: str, as_of: str, metas: list[dict],

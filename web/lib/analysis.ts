@@ -46,7 +46,11 @@ export interface OutlookData {
   close: number | null;
   close_date: string | null;
   band?: { rank: number | null; pbr: number; prices: { p20: number | null; p50: number | null; p80: number | null }; price_date: string | null };
-  consensus?: { brokers: number; median: number; low: number; high: number; upside: number | null; latest: string };
+  consensus?: {
+    brokers: number; median: number; low: number; high: number; upside: number | null; latest: string;
+    /** 잘 맞힌 증권사만의 목표가 (docs/analysis.md 27장, 25.1052) */
+    skilled?: { n: number; weighted: number; upside: number | null; brokers: Array<{ broker: string; target: number; touch_pct: number; n_touch: number }> } | null;
+  };
   /** 예상 주가 — CAPM + 변동성 범위 (docs/analysis.md 10장, 25.1024·25.1025) */
   forecast?: ForecastData | null;
   /** 가격 사다리 (docs/analysis.md 12.2·12.3, 25.1038) */

@@ -434,6 +434,7 @@ class Test종목_분석:
         검사(ANALYSIS, f"지난 최대 `MARKET_YEARS`({vd.MARKET_YEARS})년 연환산 수익률", "시장 기대수익률 창")
         검사(ANALYSIS, f"`FORECAST_MONTHS`({'·'.join(str(m) for m in vd.FORECAST_MONTHS)}개월)", "예상 주가 기간")
         검사(ANALYSIS, f"1 + `DROP_LEVEL`({vd.DROP_LEVEL:.2f})", "확률의 하락 폭")
+        검사(ANALYSIS, f"`SKILLED_MIN_N`({vd.SKILLED_MIN_N})건 이상", "잘 맞힌 증권사 표본 하한")
         검사(ANALYSIS, f"`BAND_ENTRY_PERCENTILE`, {vd.BAND_ENTRY_PERCENTILE}% 지점", "밴드 문턱(신호의 값)")
 
     def test_비슷한_국면과_성적표(self) -> None:

@@ -71,6 +71,8 @@ BAND_SQL = (
     "   JOIN stocks s2 ON s2.id = v2.stock_id WHERE s2.country = ?) ORDER BY v.stock_id, v.calc_version DESC"
 )
 OPINIONS_SQL = "SELECT stock_id, date, broker, target_price FROM kr_opinions WHERE date >= ?"
+# 잘 맞힌 증권사 가중 (27장, 25.1052) — 증권사 성적표 (증권사 수십 행)
+BROKER_STATS_SQL = "SELECT broker, n_touch, touch_pct FROM broker_stats"
 # 비슷한 국면 (docs/analysis.md 13장, 25.1039) — 주간 지표 작업이 종목마다 한 행
 PATTERNS_SQL = (
     "SELECT p.stock_id, p.stats_json FROM price_patterns p JOIN stocks s ON s.id = p.stock_id WHERE s.country = ?"
@@ -349,7 +351,9 @@ def outlook_inputs(client: TursoClient, country: str, as_of: str, today: date, w
         warnings.append(f"성과 지표를 읽지 못했습니다: {exc}")
         위험 = {}
     의견: dict[int, list[dict]] = defaultdict(list)
+    성적: dict[str, dict] = {}
     if country == "KR":
+        성적 = {str(r["broker"]): r for r in _safe(client, BROKER_STATS_SQL, [], warnings, "증권사 성적표")}
         since = (today - timedelta(days=vd.CONSENSUS_DAYS)).isoformat()
         for r in _safe(client, OPINIONS_SQL, [since], warnings, "증권사 목표가"):
             의견[int(r["stock_id"])].append(r)
@@ -373,7 +377,7 @@ def outlook_inputs(client: TursoClient, country: str, as_of: str, today: date, w
         무위험 = None
     return {"close": 종가, "momentum": 모멘텀, "band": 밴드, "risk": 위험, "opinions": 의견,
             "market": market_returns(client, country, as_of, warnings), "rf": 무위험,
-            "patterns": 국면, "fundamentals": 재무원값}  # fmt: skip
+            "patterns": 국면, "fundamentals": 재무원값, "broker_stats": 성적}  # fmt: skip
 
 
 def outlook_for(재료: dict, sid: int, currency: str, today: date, market: str | None = None) -> dict:
@@ -384,7 +388,7 @@ def outlook_for(재료: dict, sid: int, currency: str, today: date, market: str 
     m = 재료["momentum"].get(sid) or {}
     return vd.outlook(
         analog=patterns.pick((재료.get("patterns") or {}).get(sid), m.get("momentum_3m"), m.get("high_52w_proximity")),
-        fundamentals=(재료.get("fundamentals") or {}).get(sid),
+        fundamentals=(재료.get("fundamentals") or {}).get(sid), broker_stats=재료.get("broker_stats"),
         close=c.get("close"), close_date=c.get("date"), currency=currency, momentum=재료["momentum"].get(sid),
         risk=재료["risk"].get(sid), band=b, opinions=재료["opinions"].get(sid, []), today=today,
         band_note=(b or {}).get("skip_reason"),

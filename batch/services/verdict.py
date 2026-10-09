@@ -166,8 +166,29 @@ def forecast(*, close: float | None, beta: float | None, sigma: float | None, ma
             "rf": rf0, "rf_given": isinstance(rf, (int, float)), "market": market}  # fmt: skip
 
 
-def consensus(opinions: list[dict], today: date) -> dict | None:
-    """증권사마다 가장 최근 목표가 하나 (지난 `CONSENSUS_DAYS` 일). 없으면 None."""
+#: 잘 맞힌 증권사 가중의 표본 하한 — 증권사 성적표(`services/broker_stats.MIN_N`)와 같은 값 (docs/analysis.md 27장)
+SKILLED_MIN_N = 20
+
+
+def skilled(최근: dict[str, dict], stats: dict[str, dict] | None) -> dict | None:
+    """잘 맞힌 증권사만의 목표가 (docs/analysis.md 27장, 25.1052) — 증권사마다 최신 목표가를 **목표가 도달률**
+    (`broker_stats.touch_pct`, 120거래일 안 터치)로 가중한 평균. 도달률 표본(`n_touch`)이 하한 이상인 증권사만."""
+    쓴것 = []
+    for b, x in 최근.items():
+        s = (stats or {}).get(b) or {}
+        n, p = s.get("n_touch"), s.get("touch_pct")
+        if isinstance(n, (int, float)) and n >= SKILLED_MIN_N and isinstance(p, (int, float)) and p > 0:
+            쓴것.append({"broker": b, "target": x["target"], "touch_pct": float(p), "n_touch": int(n)})
+    if not 쓴것:
+        return None
+    합 = sum(x["touch_pct"] for x in 쓴것)
+    쓴것.sort(key=lambda x: -x["touch_pct"])
+    return {"n": len(쓴것), "weighted": sum(x["target"] * x["touch_pct"] for x in 쓴것) / 합, "brokers": 쓴것}
+
+
+def consensus(opinions: list[dict], today: date, stats: dict[str, dict] | None = None) -> dict | None:
+    """증권사마다 가장 최근 목표가 하나 (지난 `CONSENSUS_DAYS` 일). 없으면 None.
+    `stats` 를 주면 잘 맞힌 증권사 가중도."""
     since = (today - timedelta(days=CONSENSUS_DAYS)).isoformat()
     최근: dict[str, dict] = {}
     for o in opinions:
@@ -183,13 +204,14 @@ def consensus(opinions: list[dict], today: date) -> dict | None:
     n = len(값)
     중앙 = 값[n // 2] if n % 2 else (값[n // 2 - 1] + 값[n // 2]) / 2
     return {"brokers": n, "median": 중앙, "low": 값[0], "high": 값[-1], "since": since,
-            "latest": max(x["date"] for x in 최근.values())}  # fmt: skip
+            "latest": max(x["date"] for x in 최근.values()), "skilled": skilled(최근, stats)}  # fmt: skip
 
 
 def outlook(*, close: float | None, close_date: str | None, currency: str, momentum: dict | None,
             risk: dict | None, band: dict | None, opinions: list[dict], today: date,
             band_note: str | None = None, market: dict | None = None, rf: float | None = None,
-            analog: dict | None = None, fundamentals: dict | None = None) -> dict:  # fmt: skip
+            analog: dict | None = None, fundamentals: dict | None = None,
+            broker_stats: dict[str, dict] | None = None) -> dict:  # fmt: skip
     """가격·가치 진단 (docs/analysis.md 9장). 예측이 아니라 근거 있는 기준점 — 모든 값은 DB 행에서 온다.
 
     momentum: momentum_3m·momentum_6m·momentum_12_1·high_52w_proximity·as_of (factors.raw_json)
@@ -244,7 +266,7 @@ def outlook(*, close: float | None, close_date: str | None, currency: str, momen
     elif band_note:
         줄.append(f"가치 밴드는 내지 못했습니다 — {band_note}")
     # 9.3 증권사 목표가
-    c = consensus(opinions, today)
+    c = consensus(opinions, today, broker_stats)
     if c:
         괴리 = (c["median"] / close - 1) if close else None
         범위 = "" if c["brokers"] == 1 else f"(범위 {_won(c['low'], currency)}~{_won(c['high'], currency)})"
@@ -252,6 +274,15 @@ def outlook(*, close: float | None, close_date: str | None, currency: str, momen
                   + (f" — 종가 대비 {_pct(괴리)}" if 괴리 is not None else "") + " (증권사의 예측)")  # fmt: skip
         evidence.append(_row(f"증권사 목표가 중앙값({c['brokers']}곳)", _price(c["median"], currency),
                              f"최근 {CONSENSUS_DAYS}일 · 증권사마다 최신 1건", "kr_opinions", c["latest"]))  # fmt: skip
+        sk = c.get("skilled")
+        if sk:
+            sk["upside"] = (sk["weighted"] / close - 1) if close else None
+            줄.append(f"잘 맞힌 증권사 {sk['n']}곳(목표가 도달률 가중): {_won(sk['weighted'], currency)}"
+                      + (f" — 종가 대비 {_pct(sk['upside'])}" if sk["upside"] is not None else "")
+                      + f" · 전체 중앙값 {_won(c['median'], currency)}")  # fmt: skip
+            evidence.append(_row(f"잘 맞힌 증권사 목표가({sk['n']}곳)", _price(sk["weighted"], currency),
+                                 f"목표가 도달률 가중 · 도달률 표본 {SKILLED_MIN_N}건 이상",
+                                 "kr_opinions × broker_stats", c["latest"]))  # fmt: skip
         out["consensus"] = {**c, "upside": 괴리}
     # 10. 예상 주가 — CAPM 기대수익 + 변동성 범위
     f = forecast(close=close, beta=(risk or {}).get("beta"), sigma=(risk or {}).get("volatility_ann"), market=market,
@@ -455,6 +486,8 @@ def ladder(*, close: float | None, currency: str, outlook: dict | None, signals:
         더하기(이름, 밴드.get(k), "band", "valuation_bands")
     c = o.get("consensus") or {}
     더하기(f"증권사 목표가 중앙값({c.get('brokers')}곳)", c.get("median"), "consensus", "kr_opinions")
+    sk = c.get("skilled") or {}
+    더하기(f"잘 맞힌 증권사 목표가({sk.get('n')}곳)", sk.get("weighted"), "consensus", "kr_opinions × broker_stats")
     일년 = next((h for h in f.get("horizons") or [] if h.get("months") == 12), None) or {}
     더하기("1년 예상 68% 하단", 일년.get("low68"), "range", "계산 (10.1)")
     더하기("1년 예상 68% 상단", 일년.get("high68"), "range", "계산 (10.1)")
