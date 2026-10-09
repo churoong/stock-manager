@@ -157,6 +157,49 @@ def agreement(outlook: dict | None) -> dict | None:
             "n": len(눈), "spread": round(max(눈.values()) - min(눈.values()), 4)}  # fmt: skip
 
 
+#: 목표가 흐름의 중앙값을 찍는 날 — 지금에서 며칠 전 (docs/analysis.md 36장). 일일 의견이 읽는 90일 창 안
+TREND_POINTS = (60, 30, 0)
+
+
+def target_trend(opinions: list[dict], today: Any, window_days: int) -> dict | None:
+    """목표가 흐름 (docs/analysis.md 36장, 25.1059) — 최근 `window_days` 일 증권사 목표가.
+
+    - 변경: 같은 증권사의 바로 앞(창 안) 목표가보다 올렸나 내렸나, 평균 변경률(올림·내림만)
+    - 중앙값의 길: `TREND_POINTS` 일 전마다, 그날까지 낸 증권사별 마지막 목표가(창 안)의 중앙값
+    창 안 의견이 없으면 None."""
+    from datetime import date, timedelta
+
+    from batch.services import divergence
+
+    t = today if isinstance(today, date) else date.fromisoformat(str(today)[:10])
+    since = (t - timedelta(days=window_days)).isoformat()
+    rows = sorted((str(o.get("date") or ""), str(o.get("broker")), float(o["target_price"])) for o in opinions
+                  if str(o.get("date") or "") >= since and isinstance(o.get("target_price"), (int, float))
+                  and o["target_price"] > 0)  # fmt: skip
+    if not rows:
+        return None
+    앞: dict[str, float] = {}
+    변경: list[float] = []
+    for _, b, x in rows:
+        if b in 앞 and abs(x / 앞[b] - 1) > divergence.TARGET_TOLERANCE:  # 반대 목소리와 같은 허용 폭
+            변경.append(x / 앞[b] - 1)
+        앞[b] = x
+    points = []
+    for 전 in TREND_POINTS:
+        끝 = (t - timedelta(days=전)).isoformat()
+        마지막: dict[str, float] = {}
+        for d, b, x in rows:
+            if d <= 끝:
+                마지막[b] = x
+        if 마지막:
+            v = sorted(마지막.values())
+            n = len(v)
+            points.append({"days_ago": 전, "date": 끝, "brokers": n,
+                           "median": v[n // 2] if n % 2 else (v[n // 2 - 1] + v[n // 2]) / 2})  # fmt: skip
+    return {"window": window_days, "raises": sum(1 for x in 변경 if x > 0), "cuts": sum(1 for x in 변경 if x < 0),
+            "avg_change": round(sum(변경) / len(변경), 4) if 변경 else None, "points": points}  # fmt: skip
+
+
 #: 성적 가중 합의가 보는 기간 — 네 눈이 모두 1년 예상이라 1년 성적으로만 견준다 (docs/analysis.md 30장)
 WEIGHT_MONTHS = 12
 

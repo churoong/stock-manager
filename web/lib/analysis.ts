@@ -63,6 +63,8 @@ export interface OutlookData {
   reverse_dcf?: { implied_growth: number; ep: number; discount: number; per: number } | null;
   flows?: FlowCard | null;
   agreement?: Agreement | null;
+  /** 목표가 흐름 (docs/analysis.md 36장, 25.1059) — 진단 줄로 보이고 값은 여기 */
+  target_trend?: { window: number; raises: number; cuts: number; avg_change: number | null; points: Array<{ days_ago: number; date: string; brokers: number; median: number }> } | null;
   /** 자기 시세 이력의 사실들 — 낙폭 회복·최악의 한 달·계절성·신고가 뒤 (docs/analysis.md 31~34장, 25.1057) */
   history?: HistoryData | null;
 }

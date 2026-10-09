@@ -301,6 +301,14 @@ def outlook(*, close: float | None, close_date: str | None, currency: str, momen
         out["band"] = {"rank": 순위, "pbr": cur, "prices": 가격, "price_date": b.get("price_date")}
     elif band_note:
         줄.append(f"가치 밴드는 내지 못했습니다 — {band_note}")
+    # 36. 목표가 흐름 — 올림·내림과 중앙값의 길
+    흐름 = insights.target_trend(opinions, today, CONSENSUS_DAYS)
+    if 흐름:
+        길 = " → ".join(("지금" if p["days_ago"] == 0 else f"{p['days_ago']}일 전") + f" {_won(p['median'], currency)}"
+                       for p in 흐름["points"])  # fmt: skip
+        평균 = f", 평균 변경 {_pct(흐름['avg_change'])}" if 흐름["avg_change"] is not None else ""
+        줄.append(f"목표가 흐름({흐름['window']}일): 올림 {흐름['raises']}·내림 {흐름['cuts']}{평균} · 중앙값 {길}")
+        out["target_trend"] = 흐름
     # 9.3 증권사 목표가
     c = consensus(opinions, today, broker_stats)
     if c:
