@@ -26949,3 +26949,5 @@ needs to be increased." 프라이빗 저장소 월 무료 2,000분을 **10월 1~
 **되돌리기 확인** — 핑 채점이 종속회사(한빛전자)를 고객으로 뽑은 답도 정답으로 치게 바꾸면 `test_모델_답_파싱과_핑_채점` 이 깨졌다.
 
 출처: GitHub billing docs(GitHub Models), developers.cloudflare.com/workers-ai/platform/pricing, ai.google.dev/pricing, 제3자 요약(klymentiev.com "GitHub Models Retired July 2026", eesel.ai Groq pricing).
+
+**첫 핑 결과 (2026-10-09 11:06 UTC)** — ①Actions CPU Qwen3-4B-Instruct-2507(unsloth GGUF Q4_K_M, apache-2.0, 2.50GB 받기 21초): 견본 26.5초(입력 299·출력 211 토큰), JSON 은 냈지만 **오답** — "A사" 를 익명으로 빼라는 지시를 어기고 고객에 넣었다. 공식 `Qwen/…-2507-GGUF` 저장소는 없었다. ②Cloudflare: 주소가 `/accounts/ai/…` — `D1_ACCOUNT_ID` 시크릿이 비어 있다(D1 폴백을 끈 뒤 지웠는지 `[확인필요]`). ③GitHub Models 새 주소: 200 에 JSON 아닌 본문 → 스크립트가 죽었다. 원격 답 파싱을 감싸 결과로 남기게 고치고(`test_원격_답이_JSON_아니면_멈추지_않고_결과로_남긴다`, 감싸기를 빼면 깨짐 확인) 옛 주소 `github-azure` 를 함께 시험한다.

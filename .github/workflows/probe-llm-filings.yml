@@ -10,7 +10,7 @@ on:
         type: string
         default: qwen3-4b
       backend:
-        description: local(Actions CPU) · github(GitHub Models) · cloudflare(Workers AI)
+        description: local(Actions CPU) · github · github-azure(GitHub Models 새·옛 주소) · cloudflare(Workers AI)
         type: string
         default: local
       ping:

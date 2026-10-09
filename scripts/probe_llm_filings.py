@@ -183,6 +183,8 @@ def local_backend(choice: str):  # noqa: ANN201
 #: Cloudflare Workers AI: 하루 10,000 뉴런 무료(공식 가격 문서). D1 계정·토큰 재사용 — 권한 [확인필요]
 REMOTE = {
     "github": ("https://models.github.ai/inference/chat/completions", "GITHUB_TOKEN", "openai/gpt-4.1-mini"),
+    # 예전 주소. 새 주소가 JSON 아닌 답을 줬다(2026-10-09 11:06 UTC) — 어느 쪽이 살아 있나 함께 본다
+    "github-azure": ("https://models.inference.ai.azure.com/chat/completions", "GITHUB_TOKEN", "gpt-4o-mini"),
     "cloudflare": ("https://api.cloudflare.com/client/v4/accounts/{account}/ai/v1/chat/completions",
                    "D1_API_TOKEN", "@cf/qwen/qwen3-30b-a3b-fp8"),
 }  # fmt: skip
@@ -201,8 +203,11 @@ def remote_backend(name: str, model: str | None):  # noqa: ANN201
         if r.status_code != 200:
             # 본문만 짧게 — 요청 머리(토큰)는 찍지 않는다
             return f"HTTP {r.status_code}: {r.text[:300]}", {}
-        body = r.json()
-        return body["choices"][0]["message"].get("content") or "", body.get("usage") or {}
+        try:
+            body = r.json()
+            return body["choices"][0]["message"].get("content") or "", body.get("usage") or {}
+        except (ValueError, KeyError, IndexError, TypeError):
+            return f"HTTP {r.status_code} JSON 아님: {r.text[:300]!r}", {}
 
     return complete, f"{name}:{model}"
 

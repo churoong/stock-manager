@@ -73,3 +73,19 @@ def test_모델_답_파싱과_핑_채점(monkeypatch) -> None:  # noqa: ANN001
     raw, _ = complete("p")
     assert "/accounts/acct/" in 보낸것["url"] and 보낸것["headers"]["Authorization"] == "Bearer 비밀"
     assert raw.startswith("HTTP 401") and "비밀" not in raw and 이름.startswith("cloudflare:")
+
+
+def test_원격_답이_JSON_아니면_멈추지_않고_결과로_남긴다(monkeypatch) -> None:  # noqa: ANN001
+    """2026-10-09 GitHub Models 새 주소가 200 에 빈 본문을 줘 시험 전체가 죽었다(25.1074)."""
+
+    class 응답:
+        status_code = 200
+        text = ""
+
+        def json(self) -> dict:
+            raise ValueError("빈 본문")
+
+    monkeypatch.setattr(probe.requests, "post", lambda url, **kw: 응답())
+    complete, _ = probe.remote_backend("github", None)
+    raw, usage = complete("p")
+    assert raw.startswith("HTTP 200 JSON 아님") and usage == {}
