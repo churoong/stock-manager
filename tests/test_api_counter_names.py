@@ -170,7 +170,8 @@ DART소스 = ("dart", "dart_dividends", "dart_disclosures", "dart_insider")
 
 #: DART 를 부르는데 위 `DART작업` 에 없어도 되는 파일과 **왜인지**
 부르지만_면제 = {
-    # 지금은 비어 있다. 생기면 사유를 적는다 — 사유 없는 면제는 곧 잊힌 구멍이다
+    # 사유 없는 면제는 곧 잊힌 구멍이다
+    "scripts/probe_llm_filings.py": "손으로만 도는 시험(infra 25.1073). 한 번에 고유번호 1 + 12종목×2 = 25회 — 일 한도의 0.1%",
 }
 
 

@@ -66,6 +66,7 @@ IRRELEVANT_ON_D1 = {
     "tests-web.yml": "테스트만 돈다",
     "step0-check.yml": "바깥 API 가 살아 있는지만 본다",
     "probe-dart-insider.yml": "스펙 확인용 probe",
+    "probe-llm-filings.yml": "공시 읽기 소형 모델 시험 probe (infra 25.1073) — 운영 DB 를 안 쓴다",
     "probe-heavy-reads.yml": "스펙 확인용 probe",
     "probe-sec-filings.yml": "스펙 확인용 probe",
     "probe-etf-nport.yml": "스펙 확인용 probe (ETF 전 종목 보유, docs/data-sources.md 13.5)",

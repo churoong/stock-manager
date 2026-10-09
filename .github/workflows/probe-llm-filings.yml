@@ -1,0 +1,60 @@
+name: 공시 읽기 소형 모델 시험
+
+# 공개 소형 모델(Apache-2.0)이 DART 사업보고서에서 거래처를 쓸 만큼 뽑는지 잰다 (docs/infra.md 25.1073).
+# 손으로만 돌린다. 운영 DB 를 읽지도 쓰지도 않는다. 결과는 비공개 운영 저장소 이슈로만 낸다(공개 로그엔 줄 수만).
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: qwen3-4b 또는 qwen3-1.7b
+        type: string
+        default: qwen3-4b
+      tickers:
+        description: 쉼표로 구분한 종목코드 (비우면 스크립트 기본 12종목)
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  issues: write # 결과를 이슈 코멘트로 내보낸다 (docs/infra.md 25.17)
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      MODEL: ${{ inputs.model }}
+      TICKERS: ${{ inputs.tickers }}
+      OFFLINE_MODE: "0"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt huggingface_hub
+          # 미리 빌드된 CPU 바퀴가 있으면 쓰고, 없으면 소스에서 빌드한다(수 분)
+          pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+          python -c "import llama_cpp; print('llama_cpp', llama_cpp.__version__)"
+      - name: 시험
+        env:
+          DART_API_KEY: ${{ secrets.DART_API_KEY }}
+        run: |
+          set -o pipefail
+          # 입력은 셸에 끼우지 않고 따옴표 안 환경변수로만 넘긴다. 빈 값이면 스크립트 기본값
+          python scripts/probe_llm_filings.py --out probe-out --model "${MODEL:-qwen3-4b}" --tickers "$TICKERS" \
+            2>&1 | python scripts/ops_tee.py probe-log.txt
+      - name: 결과를 비공개 이슈로
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPS_REPO: ${{ secrets.OPS_REPO }}
+          OPS_TOKEN: ${{ secrets.OPS_TOKEN }}
+        run: |
+          for f in probe-log.txt probe-out/_summary.txt probe-out/[0-9]*.txt; do
+            [ -f "$f" ] || continue
+            python scripts/publish_output.py --title "운영 출력 (클라우드 세션용)" --file "$f" --note "공시 읽기 시험 $f"
+          done
