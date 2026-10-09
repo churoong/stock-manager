@@ -23,7 +23,7 @@ export default function ForecastTable({ f, close, closeDate, currency, analog }:
       <div className="overflow-x-auto">
         <table className="w-full min-w-[30rem] text-left text-sm">
           <thead className="text-xs text-slate-500">
-            <tr><th className="py-1 pr-2">기간</th><th className="pr-2">예상 주가</th><th className="pr-2">종가 대비</th><th className="pr-2">68% 범위</th><th className="pr-2">90% 범위</th><th className="pr-2">오를 확률</th><th>−20% 이하</th></tr>
+            <tr><th className="py-1 pr-2">기간</th><th className="pr-2">예상 주가</th><th className="pr-2">종가 대비</th><th className="pr-2">반반 범위(50%)</th><th className="pr-2">90% 범위</th><th className="pr-2">오를 확률</th><th>−20% 이하</th></tr>
           </thead>
           <tbody>
             {f.horizons.map((h) => (
@@ -31,7 +31,7 @@ export default function ForecastTable({ f, close, closeDate, currency, analog }:
                 <td className="py-1.5 pr-2">{horizonLabel(h.months)}</td>
                 <td className="pr-2 font-semibold">{formatPrice(h.expected, currency)}</td>
                 <td className="pr-2">{대비(h.expected)}</td>
-                <td className="pr-2 text-xs">{범위(h.low68, h.high68)}</td>
+                <td className="pr-2 text-xs font-medium">{범위(h.low50, h.high50)}</td>
                 <td className="pr-2 text-xs">{범위(h.low90, h.high90)}</td>
                 <td className="pr-2">{h.p_up === undefined ? "-" : `${(h.p_up * 100).toFixed(0)}%`}</td>
                 <td>{h.p_drop === undefined ? "-" : `${(h.p_drop * 100).toFixed(0)}%`}</td>
@@ -44,10 +44,14 @@ export default function ForecastTable({ f, close, closeDate, currency, analog }:
       <p className="mt-2 text-xs text-slate-500">
         기대 연수익 {pct(f.er)} = 무위험 {pct(f.rf)}{f.rf_given ? "" : "(설정 없음)"} + 베타 {f.beta.toFixed(2)}{f.beta_given ? "" : "(없음)"} × (시장{" "}
         {pct(f.market.annual)} − 무위험) · 시장은 {f.market.index ?? "지수"} {f.market.years.toFixed(1)}년({f.market.since}~{f.market.until}) 연환산
-        {f.sigma ? ` · 변동성 ${(f.sigma * 100).toFixed(0)}%` : " · 변동성이 없어 범위를 내지 못했습니다"}
+        {f.sigma
+          ? f.sigma_short
+            ? ` · 변동성 최근 ${(f.sigma_short * 100).toFixed(0)}% → 장기 ${(f.sigma * 100).toFixed(0)}%(기간이 길수록 장기 쪽으로)`
+            : ` · 변동성 ${(f.sigma * 100).toFixed(0)}%`
+          : " · 변동성이 없어 범위를 내지 못했습니다"}
       </p>
       <p className="mt-1 text-xs text-slate-400">
-        시장 수익률과 베타(CAPM), 변동성으로 낸 통계적 값입니다 — 점수·신호로 맞힌 값이 아니고, 예상 주가 하나보다 범위가 본론입니다.
+        시장 수익률과 베타(CAPM), 변동성으로 낸 통계적 값입니다 — 점수·신호로 맞힌 값이 아니고, 예상 주가 하나보다 범위가 본론입니다. 반반 범위 = 이 안에 들 확률과 밖에 있을 확률이 반반인 구간입니다. 주가는 원래 이만큼 흔들립니다 — 범위를 억지로 좁히면 성적표의 &quot;범위 안 비율&quot; 이 떨어져 드러납니다.
       </p>
     </section>
   );

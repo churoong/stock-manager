@@ -196,6 +196,9 @@ export function ladderWithNow(l: LadderData): Array<LadderItem | { now: true; pr
 export interface ForecastHorizon {
   months: number;
   expected: number;
+  /** 반반 범위 — 이 안에 들 확률 50% (docs/analysis.md 10.5, 25.1055) */
+  low50?: number;
+  high50?: number;
   low68?: number;
   high68?: number;
   low90?: number;
@@ -203,6 +206,8 @@ export interface ForecastHorizon {
   /** 그 기간 뒤 지금보다 높을 확률·−20% 이하일 확률 (docs/analysis.md 12.1, 25.1038) */
   p_up?: number;
   p_drop?: number;
+  /** 그 기간의 평균 변동성 — 최근 변동성이 장기로 돌아가는 기간 구조 (10.5) */
+  sigma?: number;
 }
 
 export interface ForecastData {
@@ -211,6 +216,8 @@ export interface ForecastData {
   beta: number;
   beta_given: boolean;
   sigma: number | null;
+  /** 최근 EWMA 변동성 (10.5). 없으면 장기 변동성 하나로 낸 범위 */
+  sigma_short?: number | null;
   rf: number;
   rf_given: boolean;
   market: { annual: number; years: number; since: string; until: string; index?: string };

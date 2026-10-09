@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Any
 
-from batch.services import insights, signals
+from batch.services import insights, patterns, signals
 
 #: 결론 키 → 이름 (위에서부터 처음 맞는 것, docs/analysis.md 3장)
 VERDICTS = {
@@ -53,8 +53,24 @@ def _pct(x: Any, digits: int = 1, sign: bool = True) -> str:
 MARKET_YEARS = 10
 #: 예상 주가를 내는 기간 (개월). 6개월은 2026-10-08 사용자 요청으로 더함 (25.1025)
 FORECAST_MONTHS = (1, 3, 6, 12)
-#: 범위의 z — 68%·90% (정규분포)
-FORECAST_Z = {"68": 1.0, "90": 1.645}
+#: 범위의 z — 50%·68%·90% (정규분포). 50% 는 "반반 범위" — 2026-10-09 사용자 "범위가 너무 넓어" 로 더함 (25.1055)
+FORECAST_Z = {"50": 0.6745, "68": 1.0, "90": 1.645}
+#: 최근 변동성이 장기 수준으로 돌아가는 반감기(개월) (docs/analysis.md 10.5, 25.1055).
+#: 일간 GARCH(1,1) 의 지속성 α+β 가 개별 주식에서 흔히 0.98~0.99 로 추정된다 — 0.985 면 반감기
+#: ln 0.5 ÷ ln 0.985 ≈ 46거래일 ≈ 2개월 [확인필요: 종목·시기마다 다르다. 성적표(11장)의 68% 적중률로 맞는지 본다]
+VOL_HALF_LIFE_MONTHS = 2.0
+
+
+def term_sigma(long: float | None, short: float | None, t: float) -> float | None:
+    """t 년 동안의 평균 변동성 — 지금(short)에서 장기(long)로 지수적으로 돌아간다고 볼 때 분산의 기간 평균의 제곱근.
+    σ²(t) = L² + (S² − L²)·(1 − e^{−t/τ})/(t/τ), τ = 반감기 ÷ ln 2. 하나만 있으면 그것, 둘 다 없으면 None."""
+    L = long if isinstance(long, (int, float)) and long > 0 else None
+    S = short if isinstance(short, (int, float)) and short > 0 else None
+    if L is None or S is None:
+        return L or S
+    x = t / (VOL_HALF_LIFE_MONTHS / 12 / math.log(2))
+    w = (1 - math.exp(-x)) / x if x > 0 else 1.0
+    return math.sqrt(L * L + (S * S - L * L) * w)
 
 
 def market_return(first: tuple[str, float] | None, last: tuple[str, float] | None) -> dict | None:
@@ -139,8 +155,9 @@ def race_prob(up_ratio: float, down_ratio: float, er: float, sigma: float) -> fl
 
 
 def forecast(*, close: float | None, beta: float | None, sigma: float | None, market: dict | None,
-             rf: float | None) -> dict | None:  # fmt: skip
-    """1·3·6·12개월 예상 주가와 범위 (docs/analysis.md 10.1). CAPM 기대수익 + 로그정규 범위. 재료가 모자라면 None."""
+             rf: float | None, sigma_short: float | None = None) -> dict | None:  # fmt: skip
+    """1·3·6·12개월 예상 주가와 범위 (docs/analysis.md 10.1). CAPM 기대수익 + 로그정규 범위. 재료가 모자라면 None.
+    sigma_short(최근 EWMA 변동성)를 주면 기간마다 `term_sigma` 로 범위를 낸다(10.5)."""
     if close is None or close <= 0 or not market:
         return None
     rf0 = rf if isinstance(rf, (int, float)) else 0.0
@@ -148,12 +165,15 @@ def forecast(*, close: float | None, beta: float | None, sigma: float | None, ma
     er = rf0 + b * (market["annual"] - rf0)
     if er <= -1:
         return None
-    s = sigma if isinstance(sigma, (int, float)) and sigma > 0 else None
+    s0 = sigma if isinstance(sigma, (int, float)) and sigma > 0 else None
+    단기 = sigma_short if s0 is not None and isinstance(sigma_short, (int, float)) and sigma_short > 0 else None
     기간 = []
     for 달 in FORECAST_MONTHS:
         t = 달 / 12
         행: dict[str, Any] = {"months": 달, "expected": close * (1 + er) ** t}
+        s = term_sigma(s0, 단기, t) if s0 is not None else None
         if s is not None:
+            행["sigma"] = s
             중심 = math.log(1 + er) - s * s / 2
             for 이름, z in FORECAST_Z.items():
                 행[f"low{이름}"] = close * math.exp(중심 * t - z * s * math.sqrt(t))
@@ -162,7 +182,8 @@ def forecast(*, close: float | None, beta: float | None, sigma: float | None, ma
             행["p_up"] = prob_above(1.0, er, s, t)
             행["p_drop"] = 1 - prob_above(1 + DROP_LEVEL, er, s, t)
         기간.append(행)
-    return {"horizons": 기간, "er": er, "beta": b, "beta_given": isinstance(beta, (int, float)), "sigma": s,
+    return {"horizons": 기간, "er": er, "beta": b, "beta_given": isinstance(beta, (int, float)), "sigma": s0,
+            "sigma_short": 단기,
             "rf": rf0, "rf_given": isinstance(rf, (int, float)), "market": market}  # fmt: skip
 
 
@@ -211,7 +232,8 @@ def outlook(*, close: float | None, close_date: str | None, currency: str, momen
             risk: dict | None, band: dict | None, opinions: list[dict], today: date,
             band_note: str | None = None, market: dict | None = None, rf: float | None = None,
             analog: dict | None = None, fundamentals: dict | None = None,
-            broker_stats: dict[str, dict] | None = None, stress: dict | None = None) -> dict:  # fmt: skip
+            broker_stats: dict[str, dict] | None = None, stress: dict | None = None,
+            vol: dict | None = None) -> dict:  # fmt: skip
     """가격·가치 진단 (docs/analysis.md 9장). 예측이 아니라 근거 있는 기준점 — 모든 값은 DB 행에서 온다.
 
     momentum: momentum_3m·momentum_6m·momentum_12_1·high_52w_proximity·as_of (factors.raw_json)
@@ -286,7 +308,7 @@ def outlook(*, close: float | None, close_date: str | None, currency: str, momen
         out["consensus"] = {**c, "upside": 괴리}
     # 10. 예상 주가 — CAPM 기대수익 + 변동성 범위
     f = forecast(close=close, beta=(risk or {}).get("beta"), sigma=(risk or {}).get("volatility_ann"), market=market,
-                 rf=rf)  # fmt: skip
+                 rf=rf, sigma_short=(vol or {}).get("ewma"))  # fmt: skip
     if f:
         조각 = []
         for h in f["horizons"]:
@@ -303,6 +325,13 @@ def outlook(*, close: float | None, close_date: str | None, currency: str, momen
         evidence.append(_row("무위험수익률", 무위험, "—", "settings.risk_free_manual", None))
         evidence.append(_row("기대 연수익률", _pct(f["er"]), "rf + β(E[rm] − rf)", "계산 (docs/analysis.md 10.1)",
                              close_date))  # fmt: skip
+        if f.get("sigma_short") is not None:
+            줄[-1] += (f" · 범위는 최근 변동성 {_pct(f['sigma_short'], 1, False)}이 "
+                      f"장기 {_pct(f['sigma'], 1, False)}로 돌아간다고 보고 냄"
+                      f"(반감기 {VOL_HALF_LIFE_MONTHS:g}개월)")  # fmt: skip
+            evidence.append(_row("최근 변동성(EWMA)", _pct(f["sigma_short"], 1, False),
+                                 f"일간 λ={patterns.EWMA_LAMBDA}, 연환산",
+                                 "prices → price_patterns (주간 성과 지표 작업)", (vol or {}).get("date")))  # fmt: skip
         if f["sigma"] is None:
             줄[-1] += " · 변동성이 없어 범위는 내지 못했습니다"
         out["forecast"] = f
@@ -488,7 +517,7 @@ def ladder(*, close: float | None, currency: str, outlook: dict | None, signals:
     if not isinstance(close, (int, float)) or close <= 0:
         return None
     f = o.get("forecast") or {}
-    er, s = f.get("er"), f.get("sigma")
+    er, s, 단기 = f.get("er"), f.get("sigma"), f.get("sigma_short")
     확률 = isinstance(er, (int, float)) and isinstance(s, (int, float)) and s > 0
     items: list[dict] = []
 
@@ -498,7 +527,8 @@ def ladder(*, close: float | None, currency: str, outlook: dict | None, signals:
         칸: dict[str, Any] = {"label": label, "price": float(price), "kind": kind, "source": source,
                              "dist": price / close - 1, **extra}  # fmt: skip
         if 확률 and abs(price / close - 1) > 1e-9:
-            칸["touch"] = {str(m): touch_prob(price / close, er, s, m / 12) for m in TOUCH_MONTHS}
+            칸["touch"] = {str(m): touch_prob(price / close, er, term_sigma(s, 단기, m / 12) or s, m / 12)
+                          for m in TOUCH_MONTHS}  # fmt: skip
         items.append(칸)
 
     prox = (o.get("momentum") or {}).get("high_52w_proximity")

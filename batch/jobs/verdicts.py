@@ -404,6 +404,7 @@ def outlook_for(재료: dict, sid: int, currency: str, today: date, market: str 
                               재료.get("regime")),
         fundamentals=(재료.get("fundamentals") or {}).get(sid), broker_stats=재료.get("broker_stats"),
         stress=((재료.get("patterns") or {}).get(sid) or {}).get("stress"),
+        vol=((재료.get("patterns") or {}).get(sid) or {}).get("vol"),
         close=c.get("close"), close_date=c.get("date"), currency=currency, momentum=재료["momentum"].get(sid),
         risk=재료["risk"].get(sid), band=b, opinions=재료["opinions"].get(sid, []), today=today,
         band_note=(b or {}).get("skip_reason"),

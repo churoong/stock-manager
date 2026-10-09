@@ -268,8 +268,11 @@ def compute_all(
         지수 = {q.date.isoformat(): q.close for q in bench_cache[country] if q.date <= 기준일}
         하락장 = (patterns.stress([q.date.isoformat() for q in 국면_점], [q.close for q in 국면_점], 지수)
                 if 지수 else None)  # fmt: skip
-        if 국면표 or 하락장:
-            국면표 = {**(국면표 or {}), "stress": 하락장}
+        # 최근 변동성 (10.5, 25.1055) — 예상 주가의 단기 범위가 지금 흔들림을 따르게
+        변동 = patterns.ewma_vol([q.date.isoformat() for q in 국면_점[-patterns.EWMA_DAYS :]],
+                               [q.close for q in 국면_점[-patterns.EWMA_DAYS :]])  # fmt: skip
+        if 국면표 or 하락장 or 변동:
+            국면표 = {**(국면표 or {}), "stress": 하락장, "vol": 변동}
             pattern_rows.append((stock_id, 기준, json.dumps(국면표, separators=(",", ":")), now))
         # 창 끝 검사의 "끝" 은 달력 기준일이 아니라 **그 나라 시세가 실제로 있는 마지막 날**이다 (25.710, 교차검증) —
         # 나라 수집이

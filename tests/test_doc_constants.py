@@ -447,6 +447,14 @@ class Test종목_분석:
         검사(ANALYSIS, f"`WORST_MONTHS`({pt.WORST_MONTHS})개 달", "하락장 성적 달 수")
         검사(ANALYSIS, f"`MIN_MONTHS`({pt.MIN_MONTHS}) 미만", "하락장 성적 최소 달 수")
         검사(ANALYSIS, f"`REGIME_SMA_DAYS`({pt.REGIME_SMA_DAYS})거래일 단순이동평균", "시장 국면 이동평균 창")
+        # 예상 주가 범위 (10.5, 25.1055)
+        from batch.services import verdict as vd
+
+        검사(ANALYSIS, f"`EWMA_DAYS`({pt.EWMA_DAYS})거래일", "EWMA 창")
+        검사(ANALYSIS, f"감쇠 `EWMA_LAMBDA` {pt.EWMA_LAMBDA}", "EWMA 감쇠")
+        검사(ANALYSIS, f"`EWMA_MIN`({pt.EWMA_MIN})개 미만", "EWMA 최소 수익률 수")
+        검사(ANALYSIS, f"반감기 `VOL_HALF_LIFE_MONTHS`({vd.VOL_HALF_LIFE_MONTHS:g})개월", "변동성 반감기")
+        검사(ANALYSIS, f"z = {vd.FORECAST_Z['50']}(50%)·{vd.FORECAST_Z['68']:g}(68%)·{vd.FORECAST_Z['90']}(90%)", "범위 z")
         검사(ANALYSIS, f"({'·'.join(str(d) for d in pt.HORIZON_DAYS.values())}거래일)", "기간 → 거래일")
         검사(ANALYSIS, f"`MIN_SAMPLE`({ft.MIN_SAMPLE})건 미만", "성적표 최소 표본")
 

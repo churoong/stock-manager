@@ -337,7 +337,10 @@ def reference_outlook(client: TursoClient, country: str, as_of: str, meta: dict,
     return vd.outlook(close=c.get("close"), close_date=c.get("date"), currency=str(meta.get("currency") or "KRW"),
                       momentum=(s or {}).get("momentum"), risk=위험, band=band, opinions=의견, today=today,
                       band_note=note, market=시장, rf=무위험, analog=국면,
-                      fundamentals=(s or {}).get("fundamentals"), broker_stats=증권사성적)  # fmt: skip
+                      fundamentals=(s or {}).get("fundamentals"), broker_stats=증권사성적,
+                      vol=patterns.ewma_vol([str(d) for d, _ in 시세[-patterns.EWMA_DAYS :]],
+                                            [float(x) for _, x in 시세[-patterns.EWMA_DAYS :]]) if 시세 else None,
+                      )  # fmt: skip
 
 
 def reference_checks(client: TursoClient, country: str, as_of: str, metas: list[dict],

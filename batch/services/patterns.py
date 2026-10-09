@@ -13,6 +13,7 @@ CAPM(10장)은 시장과 베타만 본다. 이것은 **그 종목이 겪은 일*
 
 from __future__ import annotations
 
+import math
 import statistics
 from collections import deque
 from typing import Any
@@ -231,3 +232,25 @@ def stress(dates: list[str], closes: list[float], index: dict[str, float]) -> di
             var = sum((m - ms) ** 2 for _, m in xs)
             out[이름] = round(sum((s - ss) * (m - ms) for s, m in xs) / var, 3) if var > 0 else None
     return out
+
+
+#: 최근 변동성 (docs/analysis.md 10.5, 25.1055) — RiskMetrics(1996) 일간 EWMA 의 감쇠 0.94.
+#: 어제의 제곱 수익률에 6% 를 주고 나머지는 앞의 추정을 잇는다 — 반감기 약 11거래일
+EWMA_LAMBDA = 0.94
+#: EWMA 를 낼 최소 일간 수익률 수 — 0.94^60 ≈ 2.5% 라 처음 씨앗의 무게가 거의 사라진다
+EWMA_MIN = 60
+#: 주간 작업이 EWMA 에 넘기는 최근 거래일 — 0.94^500 은 0 이라 더 앞은 값에 영향이 없다
+EWMA_DAYS = 500
+
+
+def ewma_vol(dates: list[str], closes: list[float]) -> dict | None:
+    """연환산 EWMA 변동성(√252 배). 씨앗 = 처음 21일 제곱 수익률 평균. 모자라면 None."""
+    쌍 = [(d, c) for d, c in zip(dates, closes, strict=False) if c and c > 0]
+    r = [math.log(b / a) for (_, a), (_, b) in zip(쌍, 쌍[1:], strict=False)]
+    if len(r) < EWMA_MIN:
+        return None
+    var = sum(x * x for x in r[:21]) / 21
+    for x in r[21:]:
+        var = EWMA_LAMBDA * var + (1 - EWMA_LAMBDA) * x * x
+    return {"ewma": round(math.sqrt(252 * var), 4), "date": str(쌍[-1][0])}
+
