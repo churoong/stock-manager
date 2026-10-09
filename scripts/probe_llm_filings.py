@@ -48,6 +48,8 @@ MODELS = {
         "Qwen/Qwen3-4B-GGUF",
     ),
     "qwen3-1.7b": ("Qwen/Qwen3-1.7B-GGUF", "unsloth/Qwen3-1.7B-GGUF"),
+    # 4B 가 익명 "A사" 를 고객으로 뽑았다(25.1074 핑) — 러너 램 16GB 에 드는 한 단계 큰 모델 (Q4 약 5GB)
+    "qwen3-8b": ("unsloth/Qwen3-8B-GGUF", "Qwen/Qwen3-8B-GGUF"),
 }
 
 #: 절 제목에 이 말이 있으면 읽힌다 — 사업보고서 서식 "II. 사업의 내용" 의 하위 절
@@ -167,7 +169,7 @@ def parse_answer(raw: str) -> dict | None:
 
 def local_backend(choice: str):  # noqa: ANN201
     llm, repo = load_model(choice)
-    thinking_off = repo == "Qwen/Qwen3-4B-GGUF" or "1.7B" in repo
+    thinking_off = "2507" not in repo  # 2507 판은 생각 없는 지시형, 나머지는 섞인형이라 /no_think
 
     def complete(prompt: str) -> tuple[str, dict]:
         res = llm.create_chat_completion(
@@ -228,10 +230,21 @@ PING_TEXT = (
 )
 
 
-def ping_score(parsed: dict | None) -> str:
+_ANON = re.compile(r"^(?:[가-힣]*\s*)?(?:[A-Z]|[A-Z]\d?)\s*사$|고객사|업체|거래처|해외\s*고객|국내\s*고객")
+
+
+def is_anonymous(name: str) -> bool:
+    """'A사'·'국내 완성차 업체'·'해외 고객사' 처럼 이름이 없는 것. 모델이 지시를 어겨도 규칙으로 걸러 낸다."""
+    return bool(_ANON.search(name.strip()))
+
+
+def ping_score(parsed: dict | None, rule_filter: bool = False) -> str:
     if parsed is None:
         return "JSON 아님"
-    names = lambda side: {_norm(str(i.get("name"))) for i in parsed.get(side) or [] if isinstance(i, dict)}  # noqa: E731
+    def names(side: str) -> set[str]:
+        return {_norm(str(i.get("name"))) for i in parsed.get(side) or []
+                if isinstance(i, dict) and not (rule_filter and is_anonymous(str(i.get("name"))))}  # fmt: skip
+
     cust, sup = names("customers"), names("suppliers")
     ok = cust == {"apple", "verizon"} and sup == {_norm("SK실트론")}
     return f"{'정답' if ok else '오답'} — 고객 {sorted(cust)} 공급 {sorted(sup)} 익명 {parsed.get('anonymous')}"
@@ -279,7 +292,8 @@ def main() -> int:
     if args.ping:
         parsed, meta = ask(complete, "견본", PING_TEXT)
         print(f"핑 {repo}: {meta['seconds']}초 토큰 {meta['prompt_tokens']}/{meta['completion_tokens']} — "
-              f"{ping_score(parsed)}\n원답: {meta['raw'][:500]}")  # fmt: skip
+              f"{ping_score(parsed)} / 규칙 거른 뒤 {ping_score(parsed, rule_filter=True)}\n"
+              f"원답: {meta['raw'][:500]}")  # fmt: skip
         return 0
     key = os.environ.get("DART_API_KEY", "")
     if not key:
@@ -298,7 +312,7 @@ def main() -> int:
     by_ticker = {c.stock_code: c for c in codes.data}
 
     summary = {"model": repo, "docs": 0, "items": 0, "name_ok": 0, "quote_ok": 0, "anon": 0, "parse_fail": 0,
-               "no_section": 0, "seconds": []}  # fmt: skip
+               "no_section": 0, "rule_dropped": 0, "seconds": []}  # fmt: skip
     tickers = [t.strip() for t in args.tickers.split(",") if re.fullmatch(r"\d{6}", t.strip())] or list(TICKERS)
     for ticker in tickers:
         corp = by_ticker.get(ticker)
@@ -340,6 +354,10 @@ def main() -> int:
                 for item in parsed.get(side) or []:
                     if not isinstance(item, dict) or not item.get("name"):
                         continue
+                    if is_anonymous(str(item.get("name"))):
+                        summary["rule_dropped"] += 1
+                        lines.append(f"- {side} {item.get('name')!r} 규칙으로 뺌(익명)")
+                        continue
                     n_ok, q_ok = grounded(item, text)
                     summary["items"] += 1
                     summary["name_ok"] += n_ok
@@ -358,7 +376,7 @@ def main() -> int:
     (out / "_summary.txt").write_text(
         f"모델 {s['model']}\n문서 절 {s['docs']}, 뽑은 항목 {s['items']}, 이름 원문 일치 {s['name_ok']}, "
         f"근거 원문 일치 {s['quote_ok']}, 익명 언급 {s['anon']}, JSON 실패 {s['parse_fail']}, "
-        f"절 못 찾음 {s['no_section']}\n"
+        f"절 못 찾음 {s['no_section']}, 익명 규칙으로 뺌 {s['rule_dropped']}\n"
         f"절당 초 중앙 {med}, 최대 {max(secs_sorted) if secs_sorted else None}, 합 {sum(secs_sorted):.0f}\n",
         encoding="utf-8",
     )

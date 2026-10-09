@@ -89,3 +89,13 @@ def test_원격_답이_JSON_아니면_멈추지_않고_결과로_남긴다(monke
     complete, _ = probe.remote_backend("github", None)
     raw, usage = complete("p")
     assert raw.startswith("HTTP 200 JSON 아님") and usage == {}
+
+
+def test_익명_거래처는_규칙으로_거른다() -> None:
+    """4B 가 지시를 어기고 'A사' 를 고객으로 뽑았다(25.1074 핑). 실명은 남기고 익명만 뺀다."""
+    for 익명 in ("A사", "국내 완성차 업체 A사", "해외 고객사", "고객사 A"):
+        assert probe.is_anonymous(익명), 익명
+    for 실명 in ("Apple", "LG에너지솔루션", "삼성전자(주)", "SK실트론", "GM", "Tesla"):
+        assert not probe.is_anonymous(실명), 실명
+    답 = {"customers": [{"name": "Apple"}, {"name": "Verizon"}, {"name": "A사"}], "suppliers": [{"name": "SK실트론"}]}
+    assert probe.ping_score(답).startswith("오답") and probe.ping_score(답, rule_filter=True).startswith("정답")
