@@ -96,10 +96,12 @@ class Test점수_신호_동안만_사본:
             assert 사본 is None
         assert rep.REPLICA_ENV not in os.environ
 
-    def test_파일이_없으면_Turso(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_파일이_없으면_Turso(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog) -> None:  # noqa: ANN001
         monkeypatch.setenv(daily.REPLICA_FOR_SCORES_ENV, str(tmp_path / "없음.db"))
-        with daily._replica_for_scores() as 사본:
+        with caplog.at_level("WARNING"), daily._replica_for_scores() as 사본:
             assert 사본 is None
+        # **말하고** Turso 로 간다 (25.1082) — 10-08 운영 기록에 사본 줄이 없어 날마다 Turso 로 읽는 줄 아무도 몰랐다
+        assert any("시세 사본이 없어" in r.getMessage() for r in caplog.records)
 
     def test_맞추면_그_안에서만_사본_경로를_둔다(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         원격 = _원격()
@@ -112,13 +114,14 @@ class Test점수_신호_동안만_사본:
             assert rep.usable_replica(path) is not None  # 방금 맞췄으니 ReplicaClient 가 연다
         assert rep.REPLICA_ENV not in os.environ  # 앞뒤 단계(시세 쓰기·리포트)는 사본을 보지 않는다
 
-    def test_빈_사본은_만들지_않고_Turso(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_빈_사본은_만들지_않고_Turso(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog) -> None:  # noqa: ANN001
         path = tmp_path / "prices.db"
         rep.open_replica(path).close()
         self._원격_고정(monkeypatch, _원격())
         monkeypatch.setenv(daily.REPLICA_FOR_SCORES_ENV, str(path))
-        with daily._replica_for_scores() as 사본:
+        with caplog.at_level("WARNING"), daily._replica_for_scores() as 사본:
             assert 사본 is None
+        assert any("쓸 수 없어" in r.getMessage() and "비었" in r.getMessage() for r in caplog.records)  # 25.1082
         assert rep.REPLICA_ENV not in os.environ
 
     def test_D1_이면_Turso_와_같은_길(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

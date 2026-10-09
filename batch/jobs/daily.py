@@ -820,12 +820,18 @@ def _replica_for_scores():  # noqa: ANN202
     맞추는 일이 실패해도 배치는 Turso 로 계속한다."""
     path = os.environ.get(REPLICA_FOR_SCORES_ENV, "").strip()
     if not path or not Path(path).exists():
+        # **조용히 Turso 로 가지 않는다** (docs/infra.md 25.1082). 10-08 국내 배치 기록에 사본 줄이 한 줄도 없었다 —
+        # 캐시가 없으면(처음 만들기는 주간 작업 몫인데 그 작업이 읽기 진도 문에 미뤄졌다) 점수·신호가 날마다
+        # Turso 에서 시세 계열을 읽는데도 아무도 몰랐다
+        if path:
+            log.warning("시세 사본이 없어 점수·신호가 Turso 에서 읽습니다 (%s 없음 — 캐시가 비었다)", path)
         yield None
         return
     try:
         from batch.core import price_replica as rep
 
         if backend.resolved_backend() != backend.TURSO:
+            log.info("시세 사본은 Turso 에서만 씁니다 — 이번 실행은 %s", backend.resolved_backend())
             yield None
             return
         remote = backend.TursoClient(use_replica=False)
@@ -841,6 +847,7 @@ def _replica_for_scores():  # noqa: ANN202
         yield None
         return
     if not report.get("usable"):
+        log.warning("시세 사본을 쓸 수 없어 점수·신호가 Turso 에서 읽습니다: %s", report.get("reason") or report)
         yield None
         return
     이전 = os.environ.get(rep.REPLICA_ENV)
