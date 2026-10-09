@@ -171,6 +171,11 @@ SIGNAL_HISTORY_SQL = (
     " WHERE s.country = ? AND o.as_of_date >= ? ORDER BY o.stock_id, o.as_of_date"
 )
 SIGNAL_HISTORY_DAYS = 365
+# 커버리지 개시 (49장, 15회차 S6) — (종목, 증권사)마다 지난 1년 첫 의견일. 국내만. 날짜 색인으로 1년치 의견 행을 읽는다
+INITIATION_SQL = (
+    "SELECT stock_id, broker, MIN(date) AS first_date FROM kr_opinions WHERE date >= ? AND target_price > 0"
+    " GROUP BY stock_id, broker"
+)
 # 점수 변화 (17장) — 4주 앞 가장 가까운 점수일
 SCORES_BEFORE_SQL = (
     "SELECT sc.stock_id, sc.as_of_date, sc.total_score, sc.factor_scores, sc.weights_json, sc.sentiment_score,"
@@ -516,6 +521,11 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
     if country == "KR":
         실적반응 = next((r for r in _safe(client, REACTION_SQL, [], warnings, "공시 반응 통계")
                      if r.get("type") == "earnings"), None)  # fmt: skip
+    개시: dict[int, list[dict]] = defaultdict(list)
+    if country == "KR":
+        for r in _safe(client, INITIATION_SQL, [(today - timedelta(days=insights.INIT_LOOKBACK_DAYS)).isoformat()],
+                       warnings, "커버리지 개시"):  # fmt: skip
+            개시[int(r["stock_id"])].append(r)
     신호이력: dict[int, list[dict]] = defaultdict(list)
     for r in _safe(client, SIGNAL_HISTORY_SQL, [country, (today - timedelta(days=SIGNAL_HISTORY_DAYS)).isoformat()],
                    warnings, "이 종목 신호 성적"):  # fmt: skip
@@ -636,6 +646,11 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
                 분해["change"] = insights.decompose_change(지금점수, 앞점수.get(sid))
                 분해["since"] = (앞점수.get(sid) or {}).get("as_of") if 분해["change"] else None
             detail["decomposition"] = 분해
+        새증권사 = insights.initiations(개시.get(sid, []), today)
+        if 새증권사:
+            detail["initiations"] = 새증권사
+            out["reasons"].append(f"최근 {insights.INIT_RECENT_DAYS}일 처음 의견을 낸 증권사(그 앞 1년 의견 없음): "
+                                  + ", ".join(f"{x['broker']}({x['date']})" for x in 새증권사))  # fmt: skip
         이력 = insights.signal_history(신호이력.get(sid, []))
         detail["signal_history"] = 이력
         if 이력 and 이력["n20"]:

@@ -106,13 +106,17 @@ export interface HistoryData {
   /** 시장 시나리오 (46장) — 지수가 1년에 ±20% 넘게 움직인 경로에서 이 종목의 1년 수익(16·50·84%) */
   scenarios?: { days_used: number; beta: number | null; paths: number; move: number; down: { n: number; stock?: number[]; index?: number }; up: { n: number; stock?: number[]; index?: number } } | null;
   /** 움직임 분해 (44장) */
-  moves?: { until: string; beta: number; w: Record<string, { since: string; stock: number; market: number; sector: number | null; peers: number; own: number }> } | null;
+  moves?: {
+    until: string; beta: number; w: Record<string, { since: string; stock: number; market: number; sector: number | null; peers: number; own: number }>;
+    /** 업종 대형주(시총 상위 30%)의 같은 창 평균 (48장) */
+    leaders?: { n: number; of: number; self_leader: boolean; w: Record<string, { leaders: number; stock: number }> } | null;
+  } | null;
   /** 공매도 급증 뒤 (42장, 국내) */
   short?: { since: string; until: string; days: number; events: number; last: string | null; h: Record<string, DistLite | null>; base: Record<string, DistLite | null> } | null;
 }
 
 /** 진단 줄 가운데 이력 카드(HistoryFacts)가 그리는 줄 — 목록에서 뺀다 */
-export const HISTORY_LINE_PREFIXES = ["낙폭 회복(", "최악의 한 달(", "계절성(", "52주 신고가 뒤(", "실적 발표 반응(", "상승의 출처(", "공매도 급증 뒤(", "움직임 분해(", "실제 수익률로 그린 1년 범위(", "시장 시나리오("];
+export const HISTORY_LINE_PREFIXES = ["낙폭 회복(", "최악의 한 달(", "계절성(", "52주 신고가 뒤(", "실적 발표 반응(", "상승의 출처(", "공매도 급증 뒤(", "움직임 분해(", "실제 수익률로 그린 1년 범위(", "시장 시나리오(", "업종 대형주("];
 
 /** 보고서 코드 → 이름 (DART) */
 export const REPORT_NAME: Record<string, string> = { "11013": "1분기", "11012": "반기", "11014": "3분기", "11011": "사업" };

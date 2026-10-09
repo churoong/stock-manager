@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from batch.services import patterns as pt
@@ -251,7 +252,7 @@ def move_inputs(dates: list[str], closes: list[float], index: dict[str, float]) 
     쌍 = [(d, c) for d, c in zip(dates, closes, strict=False) if c and c > 0 and index.get(str(d))]
     if len(쌍) < max(MOVE_DAYS) + 1:
         return None
-    out: dict[str, Any] = {"until": 쌍[-1][0], "w": {}}
+    out: dict[str, Any] = {"until": 쌍[-1][0], "w": {}, "last": 쌍[-1][1]}
     for n in MOVE_DAYS:
         (d0, c0), (d1, c1) = 쌍[-1 - n], 쌍[-1]
         out["w"][str(n)] = {"since": d0, "stock": c1 / c0 - 1, "market": index[d1] / index[d0] - 1}
@@ -282,11 +283,40 @@ def move_parts(mine: dict, peers: list[dict]) -> dict[str, Any] | None:
 
 
 def move_lines(m: dict | None) -> list[str]:
-    """움직임 분해 진단 줄 (44장) — 창마다 한 줄."""
+    """움직임 분해 진단 줄 (44장) — 창마다 한 줄. 업종 대형주(48장)가 있으면 한 줄 더."""
     줄 = []
+    ld = (m or {}).get("leaders") or {}
+    for n, x in (ld.get("w") or {}).items():
+        나 = " (이 종목도 대형주)" if ld.get("self_leader") else ""
+        줄.append(f"업종 대형주(시총 상위 {ld['n']}/{ld['of']}종목, 지난 {n}거래일): 평균 {_p(x['leaders'])} · "
+                  f"이 종목 {_p(x['stock'])}{나}")  # fmt: skip
     for n, x in ((m or {}).get("w") or {}).items():
         업종 = f" + 업종 {_p(x['sector'])}(같은 업종 {x['peers']}종목)" if x.get("sector") is not None else ""
         줄.append(f"움직임 분해(지난 {n}거래일, {x['since']}~{m['until']}): 종목 {_p(x['stock'])} = "
                   f"시장 {_p(x['market'])}(베타 {m['beta']:.2f}){업종} + 이 종목만 {_p(x['own'])}")  # fmt: skip
     return 줄
+
+
+#: 업종 대형주 (48장, 15회차 S5) — 같은 업종 시가총액 상위 이 몫. Hou(2007)의 "큰 회사가 먼저 움직인다" 를 사실 줄로만
+LEADER_SHARE = 0.3
+
+
+def leaders(sid: int, mine: dict | None, peers: dict[int, dict], caps: dict[int, float]) -> dict[str, Any] | None:
+    """업종 대형주의 움직임 (48장, 25.1069) — 같은 업종에서 시총 상위 `LEADER_SHARE`(나 포함, 올림) 종목의
+    창별 평균 수익과 이 종목 수익. 업종 종목(나 포함)이 `MOVE_MIN_PEERS` + 1 미만이면 None.
+    이 종목이 그 대형주에 들면 `self_leader`.
+    예측이라 부르지 않는다 — 두 검증 모두 IC 로 잴 수 없다고 봤다(docs/factors.md 12.17)."""
+    if not mine:
+        return None
+    무리 = {k: v for k, v in peers.items() if v and k in caps} | ({sid: mine} if sid in caps else {})
+    if len(무리) < MOVE_MIN_PEERS + 1:
+        return None
+    n = max(1, math.ceil(len(무리) * LEADER_SHARE))
+    큰 = sorted(무리, key=lambda k: -caps[k])[:n]
+    out: dict[str, Any] = {"n": n, "of": len(무리), "self_leader": sid in 큰, "w": {}}
+    for w, x in mine["w"].items():
+        같은 = [무리[k]["w"][w]["stock"] for k in 큰 if w in 무리[k]["w"] and 무리[k]["w"][w]["since"] == x["since"]]
+        if 같은:
+            out["w"][w] = {"leaders": round(sum(같은) / len(같은), 4), "stock": round(x["stock"], 4)}
+    return out if out["w"] else None
 

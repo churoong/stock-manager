@@ -183,6 +183,8 @@ group 변경)까지 끼어 있어 무엇이 무엇을 바꿨는지 알 수 없�
 | `value` `quality` `growth` `momentum` `risk` | 그 팩터 점수 상위 N |
 | `benchmark` | 유니버스 전체 동일가중 |
 | `momentum_sector` (후보) | 업종 모멘텀 상위 절반 업종 안에서 모멘텀 점수 상위 N — 발굴 루프 1회차 D, 실제 추천에는 아직 안 쓴다 (docs/factors.md 12.2) |
+| `ic_weighted` (후보) | 종합 점수를 **끝난 기간의 팩터 IC 확장 평균**으로 가중(현행 20×5 로 λ = n/(n+36) 수축) — 2026-10-09 사용자 지시분 S1, 실제 추천에는 안 쓴다 (docs/factors.md 12.17) |
+| `shrink_missing` (후보) | 팩터마다 점수를 살아 있는 지표 몫만큼 50 쪽으로 당긴 뒤 종합 — 사용자 지시분 S2 (12.17) |
 
 `benchmark` 를 지수(KOSPI) 대신 유니버스 동일가중으로 두는 이유는 지수 시세를
 아직 저장하지 않기 때문이다 `[확인필요: 지수 시세 경로]`. 유니버스 동일가중은
@@ -215,6 +217,7 @@ group 변경)까지 끼어 있어 무엇이 무엇을 바꿨는지 알 수 없�
 - 나오는 날 가격이 없는 종목(거래정지)은 **마지막 종가로 묶는다** — `simulate` 와 같은 규칙이다. 예전에는 빠졌다
 지금은 팩터 다섯, 종합, 업종 모멘텀(`sector_mom`, 25.439), 발생액(`accrual`, 25.445), 순주식발행(`net_issuance`, 25.446)을 잰다. 발굴 루프로 넣는 새 지표도 같은 자리에 이름을 더해 잰다
 (2026-09-30 기준 `sue`·`reversal_1m`·`div_omission`·`buyback`·`dilution`·`flow_surge`·`gross_profitability`·`flow_surge_x_rev` 까지 17개).
+2026-10-09 사용자 지시분(factors.md 12.17, 25.1069)으로 `lt_reversal`·`lt_reversal_x_value`(밸류 통제 증분)·`credit_balance`·`retail_flow`·`tp_dispersion` 을 더해 22개다 — 이 다섯은 발굴 루프 묶음(`LOOP_IC_NAMES`, 11개 고정)과 섞지 않는 **별도 묶음 `USER_IC_NAMES`** 이고, BH 기록도 따로 낸다(`fdr.group = user_2026_10_09`, 누적 검정 이름 수 `m_total`, `t_ge_3` 함께).
 
 **증분 IC** (2026-09-30, docs/infra.md 25.742) — "이미 있는 지표를 통제해도 남는가". `factor_ic.partial_period_ic_n` 이
 통제 지표 z 를 걷어 낸 스피어만 편상관 `(r_xy − r_xz·r_yz) / √((1 − r_xz²)(1 − r_yz²))` 를 낸다(교과서 식, 새 문턱 없음).

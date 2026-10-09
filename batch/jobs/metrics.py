@@ -243,6 +243,21 @@ def load_sectors(client: TursoClient, countries: list[str], warnings: list[str])
         return {}
 
 
+SHARES_SQL = (
+    "SELECT id, listed_shares FROM stocks WHERE country IN (SELECT value FROM json_each(?)) AND listed_shares > 0"
+)
+
+
+def load_shares(client: TursoClient, countries: list[str], warnings: list[str]) -> dict[int, float]:
+    """종목 → 지금 상장주식수. 업종 대형주(48장)의 시총 순위용 —
+    순위만 쓰므로 지금 주식수 × 최근 수정종가로 충분하다."""
+    try:
+        return {int(r[0]): float(r[1]) for r in client.execute(SHARES_SQL, [json.dumps(countries)]).rows}
+    except Exception as exc:  # noqa: BLE001
+        warnings.append(f"상장주식수를 읽지 못했습니다: {exc}")
+        return {}
+
+
 def load_event_inputs(client: TursoClient, country: str, as_of: str, warnings: list[str]) -> dict[str, dict]:
     """재무·배당·수급·상장주식수 이력을 종목별로. 못 읽은 것은 비우고 경고 — 그 칸만 빠진다."""
     from collections import defaultdict
@@ -436,10 +451,16 @@ def compute_all(
         같은업종: dict[tuple, list[int]] = {}
         for sid, k in 업종.items():
             같은업종.setdefault(k, []).append(sid)
+        주식수 = load_shares(client, sorted({c for _, _, c in stocks}), warnings)
+        시총 = {sid: 주식수[sid] * m["last"] for sid, m in 움직임.items() if m and sid in 주식수}
         for sid, _, 표, _ in pattern_rows:
             k = 업종.get(sid)
             peers = [움직임[o] for o in 같은업종.get(k, []) if o != sid and 움직임.get(o)] if k else []
             표["moves"] = history.move_parts(움직임.get(sid) or {}, peers)
+            # 업종 대형주의 움직임 (48장, 15회차 S5) — 사실 줄로만
+            if 표["moves"] and k:
+                같은 = {o: 움직임[o] for o in 같은업종.get(k, []) if o != sid and 움직임.get(o)}
+                표["moves"]["leaders"] = history.leaders(sid, 움직임.get(sid), 같은, 시총)
     store_patterns(client, [(sid, d, json.dumps(표, separators=(",", ":")), t) for sid, d, 표, t in pattern_rows],
                    warnings)  # fmt: skip
     # 시장 전체 신고가 뒤 (34장) — 나라마다 설정 한 행

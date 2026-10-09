@@ -393,6 +393,34 @@ def peers(sid: int, members: list[dict]) -> dict | None:
     return out
 
 
+#: 커버리지 개시 (49장, 15회차 S6) — 최근 이 달력일 안에 처음 의견을 낸 증권사
+INIT_RECENT_DAYS = 90
+#: "처음" 을 가르는 창 — 그 앞 1년에 그 증권사의 의견이 없었다
+INIT_LOOKBACK_DAYS = 365
+#: 수집 이력이 1년을 덮었다고 볼 여유 — 그 종목의 가장 이른 의견이 창 시작에서 이 일수 안이어야 한다.
+#: 종목당 100행 상한에 오래된 행이 잘린 종목은 가장 이른 행이 최근이라 걸러진다(가짜 "개시" 를 막는다, 검증 A)
+INIT_COVER_SLACK_DAYS = 30
+
+
+def initiations(rows: list[dict], today: Any) -> list[dict]:
+    """커버리지 개시 (docs/analysis.md 49장, 25.1069) — rows = 한 종목의 (증권사, 창 안 첫 의견일)
+    [{broker, first_date}]. 최근 `INIT_RECENT_DAYS` 일 안에 처음 나온 증권사.
+    그 종목의 가장 이른 의견이 창 시작에서 `INIT_COVER_SLACK_DAYS` 일 안이 아니면(수집 이력이 1년을 못 덮음)
+    빈 목록 — 모르는 것을 "처음" 이라 하지 않는다."""
+    from datetime import date, timedelta
+
+    if not rows:
+        return []
+    t = today if isinstance(today, date) else date.fromisoformat(str(today)[:10])
+    창시작 = t - timedelta(days=INIT_LOOKBACK_DAYS)
+    가장이른 = min(date.fromisoformat(str(r["first_date"])[:10]) for r in rows)
+    if (가장이른 - 창시작).days > INIT_COVER_SLACK_DAYS:
+        return []
+    최근 = (t - timedelta(days=INIT_RECENT_DAYS)).isoformat()
+    return sorted(({"broker": str(r["broker"]), "date": str(r["first_date"])[:10]} for r in rows
+                   if str(r["first_date"])[:10] >= 최근), key=lambda x: x["date"])  # fmt: skip
+
+
 #: 같은 업종 대체 후보 수 (docs/analysis.md 47장)
 ALT_TOP = 3
 

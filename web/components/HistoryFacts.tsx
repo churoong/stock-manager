@@ -132,6 +132,12 @@ export default function HistoryFacts({ h }: { h: HistoryData }) {
                 ))}
               </tbody>
             </table>
+            {mv.leaders && (
+              <p className="mt-1 text-xs">
+                업종 대형주(시총 상위 {mv.leaders.n}/{mv.leaders.of}종목{mv.leaders.self_leader ? ", 이 종목 포함" : ""}):{" "}
+                {Object.entries(mv.leaders.w).map(([n, x]) => `${n}거래일 평균 ${pct(x.leaders)}`).join(" · ")}
+              </p>
+            )}
             <p className="mt-1 text-[11px] text-slate-400">시장 몫 = 베타 × 지수, 업종 몫 = 같은 업종 평균 − 지수, 나머지가 이 종목만의 몫. ~{mv.until}.</p>
           </div>
         )}

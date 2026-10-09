@@ -503,6 +503,24 @@ class Test종목_분석:
         검사(ANALYSIS, f"−`SCENARIO_MOVE`({sim.SCENARIO_MOVE * 100:.0f}%)", "시장 시나리오 폭")
         검사(ANALYSIS, f"`SCENARIO_MIN_PATHS`({sim.SCENARIO_MIN_PATHS})개 미만", "시나리오 최소 경로")
 
+    def test_15회차_사용자_지시분(self) -> None:
+        from batch.services import candidate_factors as cf
+        from batch.services import history as hs
+        from batch.services import insights as ins
+
+        F = FACTORS
+        검사(F, f"−(P[t−{cf.LT_NEAR}] ÷ P[t−{cf.LT_FAR}] − 1)", "장기 반전 창")
+        검사(F, f"\\|일간 수익\\| > {cf.LT_KR_LIMIT * 100:.0f}%", "장기 반전 국내 가격제한")
+        검사(F, f"기준일 {cf.CREDIT_LAG_DAYS}거래일 전 이하", "신용잔고 시차")
+        검사(F, f"최근 {cf.RETAIL_DAYS}거래일 Σ개인 순매수", "개인 순매수 창")
+        검사(F, f"(t−{cf.TP_WINDOW_DAYS}일, t]", "목표가 분산 창")
+        검사(F, f"{cf.TP_MIN_BROKERS}곳 이상", "목표가 분산 최소 증권사")
+        검사(F, f"λ = n/(n+{cf.IC_SHRINK_PRIOR})", "IC 가중 수축")
+        검사(ANALYSIS, f"`LEADER_SHARE`({hs.LEADER_SHARE * 100:.0f}%", "업종 대형주 몫")
+        검사(ANALYSIS, f"`INIT_LOOKBACK_DAYS`({ins.INIT_LOOKBACK_DAYS})일", "개시 창")
+        검사(ANALYSIS, f"`INIT_RECENT_DAYS`({ins.INIT_RECENT_DAYS})일", "개시 최근")
+        검사(ANALYSIS, f"`INIT_COVER_SLACK_DAYS`({ins.INIT_COVER_SLACK_DAYS})일", "개시 이력 여유")
+
     def test_해석_묶음(self) -> None:
         from batch.jobs import verdicts as vj
         from batch.services import insights as ins
@@ -628,7 +646,7 @@ class Test밸류_분모:
     "gross_profitability", "robustness", "column_rot", "calibration", "self_grade", "holding_scores",
     "pick_history", "etf_accounts", "etf_tilt", "after_hours", "broker_stats", "disclosure_reaction", "luck", "postmortem",
     "divergence", "tax_sim", "verdict", "forecast_track", "patterns", "insights", "history",
-    "event_history", "simulation",
+    "event_history", "simulation", "candidate_factors",
 )  # fmt: skip
 
 #: 아직 그물 밖인 모듈과 **왜 아직인지**. 하나씩 줄여 간다

@@ -32,7 +32,7 @@ import math
 import sys
 import uuid
 from collections.abc import Callable
-from dataclasses import asdict, replace
+from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
@@ -43,6 +43,7 @@ from batch.core.entry import guard
 from batch.jobs import metrics as metrics_job
 from batch.services import backtest as bt
 from batch.services import buyback as bb
+from batch.services import candidate_factors as cf
 from batch.services import dilution as dil
 from batch.services import div_omission as dvo
 from batch.services import earnings_quality as eq
@@ -77,9 +78,12 @@ WARN_NOT_DEFAULT_PARAMS = "기본 파라미터 아님 (비교용, 규칙 판단�
 # 리스크 팩터를 그 자리에서 계산할 창. docs/backtest.md 2.3 절. 3Y 창의 표본 하한이다.
 RISK_LOOKBACK_DAYS = 750
 
-STRATEGIES = ("composite", "value", "quality", "growth", "momentum", "risk", "benchmark", "momentum_sector")
-#: 발굴 루프로 넣은 **후보** 전략 (docs/factors.md 12장). 실제 추천에는 켜는 기준을 넘기 전까지 쓰지 않는다
-CANDIDATE_STRATEGIES = ("momentum_sector",)
+STRATEGIES = ("composite", "value", "quality", "growth", "momentum", "risk", "benchmark", "momentum_sector",
+              "ic_weighted", "shrink_missing")  # fmt: skip
+#: 발굴 루프로 넣은 **후보** 전략 (docs/factors.md 12장). 실제 추천에는 켜는 기준을 넘기 전까지 쓰지 않는다.
+#: `ic_weighted`·`shrink_missing` 은 2026-10-09 사용자 지시분(12.17 S1·S2). 이름을 `composite` 로 시작하지 않는다 —
+#: 웹 `strategyKind` 가 그런 이름을 대표 전략으로 묶는다
+CANDIDATE_STRATEGIES = ("momentum_sector", "ic_weighted", "shrink_missing")
 
 # 장기 신호 백테스트 (docs/backtest.md 7장)
 LONG_HOLD_DAYS = 365  # 장기 = 1년 이상 (CLAUDE.md 투자 기간). 들어간 뒤 1년은 신호가 꺼져도 들고 있다
@@ -233,8 +237,12 @@ def make_strategy(
     eligible_at: EligibleAt | None = None,
     dividends_by_stock: dict[int, list[tuple[str, int, float]]] | None = None,
     benchmark_closes: dict[str, float] | None = None,
+    cache: dict[str, tuple[list, list]] | None = None,
 ) -> bt.WeightsAt:
     """전략 이름에 맞는 판단 함수를 만든다.
+
+    cache 를 주면 기준일마다 (입력, 팩터 결과)를 전략끼리 나눠 쓴다 — 같은 실행의 전략들은 같은 후보·같은 기준일이라
+    결과가 같다(15회차 후보 전략 둘이 늘어 실행 시간이 늘지 않게, 12.17 검증 A).
 
     eligible_at 을 주면 리밸런스마다 **그때의 유니버스**로 후보를 먼저 자른다
     (docs/backtest.md 1.3). 주지 않으면 오늘 유니버스를 전 구간에 쓴다 — 옛 방식이다.
@@ -258,12 +266,22 @@ def make_strategy(
 
     risk_gap_noted = False
     sector_noted = False
+    # S1 IC 가중 (12.17) — 지난 리밸런스의 (날, 팩터 점수, 시장)과 끝난 기간의 팩터 IC
+    지난: list[tuple[str, dict[int, dict[str, float | None]], dict[int, str]]] = []
+    ic_hist: dict[str, list[float | None]] = {f: [] for f in weights}
+    끝낸 = 0
 
     def decide(t: str, view: bt.PriceView) -> dict[int, float]:
-        nonlocal risk_gap_noted, sector_noted
-        inputs = build_pit_inputs(
-            candidates(t, view), snapshots_by_stock, view, dividends_by_stock, benchmark_closes
-        )
+        nonlocal risk_gap_noted, sector_noted, 끝낸
+        if cache is not None and view.cutoff in cache:
+            inputs, results = cache[view.cutoff]
+        else:
+            inputs = build_pit_inputs(
+                candidates(t, view), snapshots_by_stock, view, dividends_by_stock, benchmark_closes
+            )
+            results = sc.score_factors(inputs) if inputs else []
+            if cache is not None:
+                cache[view.cutoff] = (inputs, results)
         if not inputs:
             return {}
 
@@ -271,12 +289,40 @@ def make_strategy(
             warnings.append(WARN_RISK_GAP)
             risk_gap_noted = True
 
-        results = sc.score_factors(inputs)
         by_stock: dict[int, dict[str, float | None]] = {}
         for r in results:
             by_stock.setdefault(r.stock_id, {})[r.factor] = r.score
 
-        if strategy == "composite":
+        if strategy == "ic_weighted":
+            # 끝난 기간(다음 리밸런스 날이 기준일 이하)의 IC 만 쌓는다 — 한 달 늦게 쓴다(검증 A, 12.17)
+            while 끝낸 + 1 < len(지난) and 지난[끝낸 + 1][0] <= view.cutoff:
+                t0, 점수0, 시장0 = 지난[끝낸]
+                t1 = 지난[끝낸 + 1][0]
+                수익: dict[int, float | None] = {}
+                for sid in 점수0:
+                    계열 = view.closes(sid)
+                    p0 = next((c for d, c in 계열 if d == t0), None)
+                    i1 = bisect.bisect_right(계열, (t1, float("inf"))) - 1
+                    p1 = 계열[i1][1] if i1 >= 0 else None
+                    수익[sid] = p1 / p0 - 1 if p0 and p1 else None
+                for f in weights:
+                    ic_hist[f].append(fic.period_ic_by_market({sid: fs.get(f) for sid, fs in 점수0.items()}, 수익,
+                                                              시장0)[0])  # fmt: skip
+                끝낸 += 1
+            지난.append((t, by_stock, {i.stock_id: i.market for i in inputs}))
+            w = cf.ic_weights(weights, ic_hist)
+            scores = {sid: sc.total_score(fs, w).total for sid, fs in by_stock.items()}
+        elif strategy == "shrink_missing":
+            # S2 (12.17) — 팩터마다 살아 있는 지표 몫만큼 50 쪽으로, 종합 식은 그대로
+            등록 = {f: {m.name for m in sc.FACTOR_METRICS[f]} for f in weights}
+            줄인: dict[int, dict[str, float | None]] = {}
+            for r in results:
+                if r.factor in 등록:
+                    빈 = len(등록[r.factor] & set(r.missing_fields or []))
+                    줄인.setdefault(r.stock_id, {})[r.factor] = cf.shrink_missing(
+                        r.score, len(등록[r.factor]) - 빈, len(등록[r.factor]))  # fmt: skip
+            scores = {sid: sc.total_score(fs, weights).total for sid, fs in 줄인.items()}
+        elif strategy == "composite":
             scores = {
                 sid: sc.total_score(fs, weights).total for sid, fs in by_stock.items()
             }
@@ -389,14 +435,62 @@ def year_values(snapshots: list[dict[str, Any]], cutoff: str, picked: dict[str, 
     return merged
 
 
-#: IC 를 잴 이름들 (docs/backtest.md 2.5). 팩터 다섯과 종합
-IC_NAMES = (
-    "composite", "value", "quality", "growth", "momentum", "risk", "sector_mom", "accrual", "net_issuance", "sue",
-    "reversal_1m", "div_omission", "buyback", "dilution", "flow_surge",
+@dataclass
+class KrExtra:
+    """15회차 사용자 지시분(12.17)의 국내 재료 — 신용잔고율·개인 순매수·증권사 목표가·수정 계수. 비면 그 IC 만 빈다."""
+
+    credit: dict[int, list[tuple[str, float]]] = field(default_factory=dict)
+    retail: dict[int, dict[str, float | None]] = field(default_factory=dict)
+    opinions: dict[int, list[tuple[str, str, float]]] = field(default_factory=dict)
+    #: 종목 → 날짜 오름차순 (날짜, 수정종가 ÷ 원 종가)
+    factors: dict[int, list[tuple[str, float]]] = field(default_factory=dict)
+
+    def factor_at(self, sid: int, d: str) -> float | None:
+        """`d` 이하 마지막 거래일의 수정 계수. 모르면 None."""
+        xs = self.factors.get(sid) or []
+        i = bisect.bisect_right(xs, (d, float("inf"))) - 1
+        return xs[i][1] if i >= 0 else None
+
+
+KR_FLOWS_BT_SQL = (
+    "SELECT f.stock_id, f.date, f.prsn_net_amt, f.credit_rmnd_pct FROM kr_flows f JOIN stocks s ON s.id = f.stock_id"
+    " WHERE s.country = 'KR' AND f.date >= ?"
+)
+KR_OPINIONS_BT_SQL = (
+    "SELECT o.stock_id, o.date, o.broker, o.target_price FROM kr_opinions o JOIN stocks s ON s.id = o.stock_id"
+    " WHERE s.country = 'KR' AND o.date >= ? AND o.target_price > 0"
+)
+
+
+def load_kr_extra(client: TursoClient, since: str, factors: dict[int, dict[str, float]],
+                  warnings: list[str]) -> KrExtra:  # fmt: skip
+    """국내 수급·의견을 한 번씩 읽는다. 표가 없거나 못 읽으면 비우고 경고 — 그 IC 만 판정 불가가 된다."""
+    out = KrExtra(factors={sid: sorted(by.items()) for sid, by in factors.items()})
+    try:
+        for r in client.execute(KR_FLOWS_BT_SQL, [since]).dicts():
+            sid = int(r["stock_id"])
+            if r["credit_rmnd_pct"] is not None:
+                out.credit.setdefault(sid, []).append((str(r["date"]), float(r["credit_rmnd_pct"])))
+            out.retail.setdefault(sid, {})[str(r["date"])] = (
+                None if r["prsn_net_amt"] is None else float(r["prsn_net_amt"]))  # fmt: skip
+        for r in client.execute(KR_OPINIONS_BT_SQL, [since]).dicts():
+            out.opinions.setdefault(int(r["stock_id"]), []).append(
+                (str(r["date"]), str(r["broker"]), float(r["target_price"])))  # fmt: skip
+    except Exception as exc:  # noqa: BLE001
+        if not db.표가_없나(exc):
+            warnings.append(f"국내 수급·의견(15회차 IC)을 읽지 못했습니다: {exc}")
+    return out
+
+
+#: 발굴 루프로 넣은 이름(팩터 다섯·종합 제외) — 다중검정 기록의 묶음이다. 크기를 고정한다 (6회차 2, 25.810)
+LOOP_IC_NAMES = (
+    "sector_mom", "accrual", "net_issuance", "sue", "reversal_1m", "div_omission", "buyback", "dilution", "flow_surge",
     "gross_profitability", "flow_surge_x_rev",
 )
-#: 발굴 루프로 넣은 이름(팩터 다섯·종합 제외) — 다중검정 기록의 묶음이다. 크기를 고정한다 (6회차 2, 25.810)
-LOOP_IC_NAMES = tuple(n for n in IC_NAMES if n not in ("composite", "value", "quality", "growth", "momentum", "risk"))
+#: 2026-10-09 사용자 지시분(docs/factors.md 12.17, 25.1069) — 동결 셈과 섞지 않는 **별도 묶음**. BH 도 따로 낸다
+USER_IC_NAMES = ("lt_reversal", "lt_reversal_x_value", "credit_balance", "retail_flow", "tp_dispersion")
+#: IC 를 잴 이름들 (docs/backtest.md 2.5). 팩터 다섯과 종합, 발굴 루프, 사용자 지시분
+IC_NAMES = ("composite", "value", "quality", "growth", "momentum", "risk", *LOOP_IC_NAMES, *USER_IC_NAMES)
 
 
 def factor_ics(
@@ -415,6 +509,7 @@ def factor_ics(
     buybacks: tuple[dict[int, list[str]], dict[int, list[tuple[str, str]]]] | None = None,
     dilutions: dict[int, list[str]] | None = None,
     ab: fab.AbAccumulator | None = None,
+    kr_extra: KrExtra | None = None,
 ) -> dict[str, fic.IcSummary]:
     """팩터별 IC — 리밸런스 t 의 점수(t-1 까지의 값) 순위와 t → 다음 리밸런스 수익률 순위의 상관
     (docs/backtest.md 2.5, docs/infra.md 25.435).
@@ -509,6 +604,22 @@ def factor_ics(
             # 매출총이익/총자산 — 미국만, 금융업 제외 (3회차 E, 25.740)
             총이익점수[sid] = (None if sid in 국내 or sid in 금융
                                else gp.gross_profitability(v.get("gross_profit"), v.get("total_assets")))  # fmt: skip
+        # 15회차 사용자 지시분 (docs/factors.md 12.17, 25.1069) — 정의는 `services/candidate_factors`
+        장기반전 = {sid: cf.lt_reversal([c for _, c in view.closes(sid)], sid in 국내) for sid in by_stock}
+        밸류점수 = {sid: fs.get("value") for sid, fs in by_stock.items()}
+        ke = kr_extra or KrExtra()
+        신용점수: dict[int, float | None] = {}
+        개인점수: dict[int, float | None] = {}
+        분산점수: dict[int, float | None] = {}
+        for sid in by_stock:
+            if sid not in 국내:
+                신용점수[sid] = 개인점수[sid] = 분산점수[sid] = None
+                continue
+            거래일 = [d for d, _ in view.closes(sid)]
+            신용점수[sid] = cf.credit_balance(ke.credit.get(sid, []), 거래일)
+            개인점수[sid] = cf.retail_flow(ke.retail.get(sid, {}), 거래일, view.values(sid))
+            분산점수[sid] = cf.tp_dispersion(ke.opinions.get(sid, []), cutoff,
+                                           lambda d, sid=sid, ke=ke: ke.factor_at(sid, d))  # fmt: skip
         if ab is not None:
             ab.add_period(inputs, by_stock, 수익, 시장, {"sue": sue점수})
         for name in IC_NAMES:
@@ -534,11 +645,23 @@ def factor_ics(
                 점수 = 반전점수
             elif name == "sue":
                 점수 = sue점수  # 분기 실적 서프라이즈 — 클수록 좋다 (25.456)
+            elif name in ("lt_reversal", "lt_reversal_x_value"):
+                점수 = 장기반전
+            elif name == "credit_balance":
+                점수 = 신용점수
+            elif name == "retail_flow":
+                점수 = 개인점수
+            elif name == "tp_dispersion":
+                점수 = 분산점수
             else:
                 점수 = {sid: fs.get(name) for sid, fs in by_stock.items()}
             # **판정 계열은 시장 안에서 잰 IC 의 가중 평균**이다 (6회차 1, docs/backtest.md 2.5, 25.810).
             # 섞은 IC 는 참고로만 남긴다
-            if name == "flow_surge_x_rev":
+            if name == "lt_reversal_x_value":
+                # 장기 반전의 **증분 IC** — 밸류를 통제한다(Fama·French 1996 이 밸류에 흡수된다고 보였다, 12.17)
+                ic, 쓴수, 갈래 = fic.period_ic_by_market(장기반전, 수익, 시장, control=밸류점수)
+                섞음[name].append(fic.partial_period_ic_n(장기반전, 밸류점수, 수익)[0])
+            elif name == "flow_surge_x_rev":
                 # 거래대금 급증의 **증분 IC** — 단기 반전을 통제한다 (3회차 검증 2 조건, 25.742).
                 # 거래량이 튀는 날은 가격도 튀어 반전과 겹친다. 통제해도 남아야 수급 유입 조건의 근거가 된다
                 ic, 쓴수, 갈래 = fic.period_ic_by_market(급증점수, 수익, 시장, control=반전점수)
@@ -578,6 +701,10 @@ def ic_log(summaries: dict[str, fic.IcSummary]) -> dict[str, dict[str, Any]]:
 
     # 다중검정 기록 — 발굴 루프 이름만, 묶음 크기 고정. **판정에 쓰지 않는다** (6회차 2, 25.810)
     bh = fic.bh_record(summaries, LOOP_IC_NAMES)
+    # 사용자 지시분은 따로 묶는다 — 동결 셈과 섞지 않는다(12.17). 누적 검정 이름 수 m 과 t ≥ 3(Harvey·Liu·Zhu 2016)도
+    # 적는다
+    bh_user = fic.bh_record(summaries, tuple(n for n in USER_IC_NAMES if n in summaries))
+    누적 = len(LOOP_IC_NAMES) + len(USER_IC_NAMES)
     out: dict[str, dict[str, Any]] = {}
     for name, s in summaries.items():
         row: dict[str, Any] = {
@@ -592,6 +719,11 @@ def ic_log(summaries: dict[str, fic.IcSummary]) -> dict[str, dict[str, Any]]:
         if name in bh:
             row["fdr"] = {"p": r(float(bh[name]["p"])), "q": r(float(bh[name]["q"])), "bh_pass": bh[name]["bh_pass"],
                           "note": "기록용 — 켜는 기준에 쓰지 않음"}  # fmt: skip
+        if name in bh_user:
+            row["fdr"] = {"p": r(float(bh_user[name]["p"])), "q": r(float(bh_user[name]["q"])),
+                          "bh_pass": bh_user[name]["bh_pass"], "group": "user_2026_10_09", "m_total": 누적,
+                          "t_ge_3": s.t_stat is not None and s.t_stat >= 3,
+                          "note": "기록용 — 사용자 지시분 묶음(12.17), 켜는 기준에 쓰지 않음"}  # fmt: skip
         out[name] = row
     return out
 
@@ -1097,8 +1229,10 @@ def load_prices_and_turnover(
     chunk: int = 100,
     with_turnover: bool = True,
     levels: dict[int, dict[str, float]] | None = None,
+    factors: dict[int, dict[str, float]] | None = None,
 ) -> tuple[dict[int, dict[str, float]], dict[int, dict[str, float]]]:
-    """가격과 거래대금을 **한 번에** 읽는다.
+    """가격과 거래대금을 **한 번에** 읽는다. `factors` 를 주면 그날 수정 계수(수정종가 ÷ 원 종가)도 같은 행에서 모은다
+    (15회차 목표가 분산도가 원값 목표가를 수정주가 기준에 옮길 때, 12.17).
 
     같은 행에서 둘 다 나오므로 따로 읽으면 같은 5년치를 두 번 가져오게 된다.
     수익률은 수정주가(adj_close)를 쓴다.
@@ -1132,6 +1266,8 @@ def load_prices_and_turnover(
             stock_id = int(row["stock_id"])
             day = str(row["date"])
             prices.setdefault(stock_id, {})[day] = float(row["px"])
+            if factors is not None and row["close"]:
+                factors.setdefault(stock_id, {})[day] = float(row["px"]) / float(row["close"])
             if levels is not None and row["close"] is not None:
                 # 가격 수준(분할만 조정된 원 종가). 시총·PBR 이 쓴다 (docs/infra.md 25.275)
                 levels.setdefault(stock_id, {})[day] = float(row["close"])
@@ -1460,7 +1596,8 @@ def run(
         # 종합·모멘텀은 첫 약 12개월, 리스크는 약 28개월을 **현금으로** 보냈다(벤치마크·밸류는 첫 달부터 투자) —
         # 전략 비교가 통째로 기울었다. 곡선과 리밸런스는 그대로 `since` 부터다
         워밍업 = (date.fromisoformat(since) - timedelta(days=WARMUP_CALENDAR_DAYS)).isoformat()
-        prices, turnover = load_prices_and_turnover(client, ids, 워밍업, levels=levels)
+        계수: dict[int, dict[str, float]] | None = {} if country == "KR" else None
+        prices, turnover = load_prices_and_turnover(client, ids, 워밍업, levels=levels, factors=계수)
         snapshots = load_snapshots(client, country)
         # 배당 이력 (docs/factors.md 11.1). **접수일을 함께 들고** 시점마다 되감는다 —
         # 적재 경로와 같은 지표를 같은 시점 규칙으로 내야 백테스트가 운영을 잰다(infra 25.92)
@@ -1555,12 +1692,13 @@ def run(
             except Exception:  # noqa: BLE001 — 진행 표시가 계산을 죽이면 안 된다. 아래에서 말한다
                 log.warning("진행 상태를 적지 못했습니다")
 
+        점수_캐시: dict[str, tuple[list, list]] = {}  # 기준일 → (입력, 팩터 결과), 전략끼리 나눠 쓴다 (12.17)
         for strategy in planned:
             progress(len(results), strategy)
             strat_warnings: list[str] = []
             decide = make_strategy(
                 strategy, universe, snapshots, top_n, weights, strat_warnings, eligible, pit_divs,
-                bench_closes,
+                bench_closes, 점수_캐시,
             )
             if strategy != "benchmark":
                 decide = overlay(decide, strat_warnings)  # 벤치마크는 비교 기준이라 그대로 둔다
@@ -1582,6 +1720,7 @@ def run(
                 turnover, levels, load_quarter_snapshots(client, country),
                 load_buyback_events(client, country) if country == "KR" else None,
                 load_dilution_events(client, country) if country == "KR" else None, ab,
+                load_kr_extra(client, 워밍업, 계수 or {}, warnings) if country == "KR" else None,
             ))  # fmt: skip
             for name, v in ic_summary.items():
                 print(f"  IC {name:10s} {v['months']}개월 평균 {v['mean']} t {v['t']}"
