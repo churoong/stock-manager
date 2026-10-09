@@ -5,6 +5,7 @@ import ForecastModels from "@/components/ForecastModels";
 import ForecastTable from "@/components/ForecastTable";
 import ForecastTrack from "@/components/ForecastTrack";
 import HistoryFacts from "@/components/HistoryFacts";
+import SummaryStrip from "@/components/SummaryStrip";
 import VerdictBlock from "@/components/VerdictBlock";
 import type { AnalysisRequest, ReferenceScoreData, Verdict } from "@/lib/analysis";
 import Link from "next/link";
@@ -347,6 +348,8 @@ export default function StockDetail({
         ))}
       </nav>
 
+      {/* 한 줄 요약 — 다섯 칸 신호등 (docs/analysis.md 39장, 25.1062) */}
+      {verdict.state === "ok" && <SummaryStrip detail={(verdict.data.verdict as Verdict | null)?.detail} />}
       {/* 예상 주가 표 — 화면 맨 위 (docs/analysis.md 10장, 25.1025 사용자 요청) */}
       {(() => {
         const o = verdict.state === "ok" ? (verdict.data.verdict as Verdict | null)?.detail?.outlook : null;

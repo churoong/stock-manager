@@ -33,6 +33,8 @@ export interface Verdict {
     peers?: Peers | null;
     /** 종합 점수 분해 (docs/analysis.md 26장, 25.1051) */
     decomposition?: Decomposition | null;
+    /** 분기 실적 추세 (docs/analysis.md 25장, 25.1049) — 국내 */
+    quarters?: { basis: string; trend: "가속" | "감속" | null; rows: unknown[] } | null;
     /** 재무 건전성 — Altman Z″ (docs/analysis.md 38장, 25.1061). 국내만 */
     health?: { fiscal_year: number; consolidated: boolean; report_date: string | null; z: number | null; zone?: "safe" | "grey" | "distress"; parts?: number[]; debt_ratio?: number; note?: string } | null;
     /** 이 종목에 난 신호들의 성적 (docs/analysis.md 37장, 25.1060) */
@@ -55,6 +57,8 @@ export interface OutlookData {
     /** 잘 맞힌 증권사만의 목표가 (docs/analysis.md 27장, 25.1052) */
     skilled?: { n: number; weighted: number; upside: number | null; brokers: Array<{ broker: string; target: number; touch_pct: number; n_touch: number }> } | null;
   };
+  /** 모멘텀 원값 (docs/analysis.md 9.1) */
+  momentum?: { momentum_3m?: number | null; momentum_6m?: number | null; momentum_12_1?: number | null; high_52w_proximity?: number | null } | null;
   /** 예상 주가 — CAPM + 변동성 범위 (docs/analysis.md 10장, 25.1024·25.1025) */
   forecast?: ForecastData | null;
   /** 가격 사다리 (docs/analysis.md 12.2·12.3, 25.1038) */
@@ -513,3 +517,50 @@ export interface SignalHistory {
   targets: number;
   stops: number;
 }
+
+/** 한 줄 요약 칸 (docs/analysis.md 39장) */
+export interface SummaryCell { key: "value" | "trend" | "flow" | "earnings" | "risk"; label: string; text: string; tone: "good" | "bad" | "neutral" | "none" }
+
+/**
+ * 한 줄 요약 카드 (docs/analysis.md 39장, 25.1062) — 다섯 칸 신호등. **새 문턱을 만들지 않는다**:
+ * 가치 = PBR 밴드의 자기 20%·80% 선(9.2 와 같은 선), 추세 = 3개월 수익률의 부호, 수급 = 최근 20거래일 외국인+기관 합의 부호,
+ * 실적 = 분기 추세의 가속·감속(25장), 위험 = Altman Z″ 구간(38장, Altman 2000 의 경계). 재료가 없으면 회색 "없음".
+ */
+export function summaryCells(d: Verdict["detail"] | null | undefined): SummaryCell[] {
+  const o = d?.outlook;
+  const pct = (x: number) => `${x >= 0 ? "+" : ""}${(x * 100).toFixed(1)}%`;
+  const cells: SummaryCell[] = [];
+  const rank = o?.band?.rank;
+  cells.push(
+    typeof rank === "number"
+      ? { key: "value", label: "가치", text: rank <= 20 ? `싼 쪽 (밴드 ${rank.toFixed(0)}%)` : rank >= 80 ? `비싼 쪽 (밴드 ${rank.toFixed(0)}%)` : `중간 (밴드 ${rank.toFixed(0)}%)`, tone: rank <= 20 ? "good" : rank >= 80 ? "bad" : "neutral" }
+      : { key: "value", label: "가치", text: "밴드 없음", tone: "none" },
+  );
+  const m3 = o?.momentum?.momentum_3m;
+  cells.push(
+    typeof m3 === "number"
+      ? { key: "trend", label: "추세", text: `3개월 ${pct(m3)}`, tone: m3 > 0 ? "good" : m3 < 0 ? "bad" : "neutral" }
+      : { key: "trend", label: "추세", text: "없음", tone: "none" },
+  );
+  const w = o?.flows?.windows?.["20"];
+  const 합 = w ? w.frgn + w.orgn : null;
+  cells.push(
+    w && 합 !== null
+      ? { key: "flow", label: "수급", text: `외국인+기관 ${합 >= 0 ? "+" : ""}${합.toLocaleString(undefined, { maximumFractionDigits: 0 })}억 (${w.days}일)`, tone: 합 > 0 ? "good" : 합 < 0 ? "bad" : "neutral" }
+      : { key: "flow", label: "수급", text: "없음(국내만)", tone: "none" },
+  );
+  const q = d?.quarters;
+  cells.push(
+    q
+      ? { key: "earnings", label: "실적", text: q.trend ? `영업이익 증가율 ${q.trend}` : "뚜렷한 방향 없음", tone: q.trend === "가속" ? "good" : q.trend === "감속" ? "bad" : "neutral" }
+      : { key: "earnings", label: "실적", text: "없음(국내만)", tone: "none" },
+  );
+  const h = d?.health;
+  cells.push(
+    h && typeof h.z === "number" && h.zone
+      ? { key: "risk", label: "재무 위험", text: `Z″ ${h.z.toFixed(2)} ${h.zone === "safe" ? "안전" : h.zone === "distress" ? "위험" : "회색"}`, tone: h.zone === "safe" ? "good" : h.zone === "distress" ? "bad" : "neutral" }
+      : { key: "risk", label: "재무 위험", text: h?.note ? "해당 없음" : "없음", tone: "none" },
+  );
+  return cells;
+}
+
