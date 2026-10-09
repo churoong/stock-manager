@@ -241,6 +241,7 @@ def is_anonymous(name: str) -> bool:
 def ping_score(parsed: dict | None, rule_filter: bool = False) -> str:
     if parsed is None:
         return "JSON 아님"
+
     def names(side: str) -> set[str]:
         return {_norm(str(i.get("name"))) for i in parsed.get(side) or []
                 if isinstance(i, dict) and not (rule_filter and is_anonymous(str(i.get("name"))))}  # fmt: skip
@@ -276,6 +277,12 @@ def document_xml(rcept_no: str, key: str) -> str:
     return raw.decode("utf-8", errors="replace")
 
 
+def _backend(args: argparse.Namespace):  # noqa: ANN202
+    if args.backend == "local":
+        return local_backend(args.model)
+    return remote_backend(args.backend, args.remote_model or None)
+
+
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--out", default="probe-out")
@@ -285,11 +292,8 @@ def main() -> int:
     p.add_argument("--remote-model", default="")
     p.add_argument("--ping", action="store_true", help="DART 없이 지어낸 견본 한 건으로 백엔드만 시험")
     args = p.parse_args()
-    if args.backend == "local":
-        complete, repo = local_backend(args.model)
-    else:
-        complete, repo = remote_backend(args.backend, args.remote_model or None)
     if args.ping:
+        complete, repo = _backend(args)
         parsed, meta = ask(complete, "견본", PING_TEXT)
         print(f"핑 {repo}: {meta['seconds']}초 토큰 {meta['prompt_tokens']}/{meta['completion_tokens']} — "
               f"{ping_score(parsed)} / 규칙 거른 뒤 {ping_score(parsed, rule_filter=True)}\n"
@@ -305,11 +309,13 @@ def main() -> int:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from batch.sources import dart
 
+    # **DART 부터 본다** — 점검(상태 800) 중이면 모델(2.5~5GB)을 받기 전에 끝낸다 (25.1078, 10-09 한글날 재시도 여섯 번)
     codes = dart.fetch_corp_codes()
     if not codes.ok:
         print(f"고유번호 실패: {codes.error}")
         return 1
     by_ticker = {c.stock_code: c for c in codes.data}
+    complete, repo = _backend(args)
 
     summary = {"model": repo, "docs": 0, "items": 0, "name_ok": 0, "quote_ok": 0, "anon": 0, "parse_fail": 0,
                "no_section": 0, "rule_dropped": 0, "seconds": []}  # fmt: skip

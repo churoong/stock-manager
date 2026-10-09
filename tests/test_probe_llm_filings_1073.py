@@ -99,3 +99,17 @@ def test_익명_거래처는_규칙으로_거른다() -> None:
         assert not probe.is_anonymous(실명), 실명
     답 = {"customers": [{"name": "Apple"}, {"name": "Verizon"}, {"name": "A사"}], "suppliers": [{"name": "SK실트론"}]}
     assert probe.ping_score(답).startswith("오답") and probe.ping_score(답, rule_filter=True).startswith("정답")
+
+
+def test_DART_가_막혔으면_모델을_받지_않는다(monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    """10-09 한글날 DART 점검 중 재시도마다 모델 2.5GB 를 먼저 받고서야 상태 800 을 알았다 (25.1078)."""
+    import sys
+
+    from batch.sources import dart
+
+    받음 = []
+    monkeypatch.setattr(probe, "local_backend", lambda m: 받음.append(m) or (None, "x"))
+    monkeypatch.setattr(dart, "fetch_corp_codes", lambda: dart.FetchResult(ok=False, source="t", error="상태 800"))
+    monkeypatch.setenv("DART_API_KEY", "k")
+    monkeypatch.setattr(sys, "argv", ["probe", "--out", str(tmp_path)])
+    assert probe.main() == 1 and 받음 == []
