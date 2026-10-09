@@ -537,9 +537,15 @@ def run(market: str | None = None, stock_id: int | None = None, send: bool = Fal
             country = str(rows[0]["country"]) if rows else "KR"
         else:
             country = "KR" if (market or "KR").upper() == "KR" else "US"
-            rows = client.execute(TARGETS_SQL, [country, country, MAX_STOCKS]).dicts()
         # 실패도 기록에 남게 먼저 연다 — 안 남으면 화면이 '안 불렸다' 와 똑같이 본다 (25.1018)
         run_id = db.start_batch_run(client, job_name=JOB_NAME, market=country, trade_date=cal.user_today().isoformat())
+        단계 = db.ReadSteps()
+        if stock_id is None:
+            # **대상 고르기는 실행 기록을 연 뒤에** (docs/infra.md 25.1079). 앞에서 돌면 이 질의가 읽은 행이 이 작업의
+            # `db_rows_read` 가 아니라 부르는 쪽(일일 배치) 합계에만 잡힌다 — 25.1077 의 3,200만 행이 그렇게 숨어
+            # 25.1050 이 범인을 잘못 짚었다
+            rows = client.execute(TARGETS_SQL, [country, country, MAX_STOCKS]).dicts()
+            단계.mark("targets")
         if stock_id is not None and (not rows or rows[0]["asset_type"] != "stock"):
             사유 = "분석할 수 없는 종목입니다(없거나 ETF)"
             client.execute(REQUEST_UPDATE, ["failed", db.now_iso(), 사유, stock_id])
@@ -550,7 +556,6 @@ def run(market: str | None = None, stock_id: int | None = None, send: bool = Fal
             client.execute(REQUEST_UPDATE, ["running", None, None, stock_id])
         warnings: list[str] = []
         error = None
-        단계 = db.ReadSteps()
         try:
             결과 = analyze(client, country, rows, warnings, 단계)
         except Exception as exc:  # noqa: BLE001 — 요청이면 실패도 알린다

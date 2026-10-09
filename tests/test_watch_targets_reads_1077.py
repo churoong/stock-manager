@@ -72,3 +72,12 @@ def test_관심_종목이_바깥이고_최신_스냅샷은_상관이_아니다()
     assert 계획[0].startswith("SCAN w"), 계획
     assert not any("CORRELATED SCALAR SUBQUERY" in x and "MAX" in x for x in 계획)
     assert sum("CORRELATED" in x for x in 계획) <= 1, 계획  # NOT EXISTS 하나만 상관이다
+
+
+def test_대상_고르기는_실행_기록을_연_뒤에_돈다() -> None:
+    """앞에서 돌면 읽은 행이 부르는 쪽(일일 배치) 합계에만 잡혀 하위 작업 표에서 사라진다 (25.1079)."""
+    import inspect
+
+    src = inspect.getsource(analyze_extra.run)
+    assert src.index("db.start_batch_run(") < src.index("client.execute(TARGETS_SQL")
+    assert 'mark("targets")' in src
