@@ -310,3 +310,40 @@ def quarter_line(t: dict | None) -> str | None:
     꼬리 = f" ({t['trend']})" if t.get("trend") else ""
     return (f"분기 영업이익 전년 같은 분기 대비({t['basis']}): " + " → ".join(조각) + 꼬리
             + (f" · 영업이익률 {' → '.join(마진)}" if len(마진) >= 2 else ""))  # fmt: skip
+
+
+def decompose(score: dict | None) -> dict | None:
+    """종합 점수 분해 (docs/analysis.md 26장, 25.1051) — `scoring.total_score` 를 거꾸로 펼친다.
+
+    팩터 몫 = 팩터 점수 × 정규화 가중치(`scores.weights_json`, 살아 있는 팩터 합 100) ÷ 100,
+    감성 몫 = (감성 −100~100 → 0~100 − 50) × 감성 가중치 ÷ 100. 몫의 합 = 종합 점수(0~100 자르기 전).
+    score = {total, factors, weights, sentiment, sentiment_weight}. 재료가 모자라면 None."""
+    s = score or {}
+    f, w = s.get("factors") or {}, s.get("weights") or {}
+    if not isinstance(s.get("total"), (int, float)):
+        return None
+    parts = []
+    for k in FACTORS:
+        v, wt = f.get(k), w.get(k)
+        if isinstance(v, (int, float)) and isinstance(wt, (int, float)):
+            parts.append({"factor": k, "score": v, "weight": wt, "contrib": round(v * wt / 100, 2)})
+    if not parts:
+        return None
+    sent = 0.0
+    sw, sv = s.get("sentiment_weight"), s.get("sentiment")
+    if isinstance(sw, (int, float)) and sw > 0 and isinstance(sv, (int, float)):
+        sent = round(((sv + 100) / 2 - 50) * sw / 100, 2)
+    return {"parts": parts, "sentiment": sent, "total": s["total"]}
+
+
+def decompose_change(now: dict | None, before: dict | None) -> dict[str, float] | None:
+    """두 날의 분해에서 팩터별 몫의 변화 — "점수가 왜 움직였나".
+    가중치가 바뀌었으면 그 몫도 섞인다(그날그날의 가중치)."""
+    a, b = decompose(now), decompose(before)
+    if not a or not b:
+        return None
+    pa = {p["factor"]: p["contrib"] for p in a["parts"]}
+    pb = {p["factor"]: p["contrib"] for p in b["parts"]}
+    out = {k: round(pa.get(k, 0.0) - pb.get(k, 0.0), 2) for k in set(pa) | set(pb)}
+    out["sentiment"] = round(a["sentiment"] - b["sentiment"], 2)
+    return out

@@ -31,6 +31,8 @@ export interface Verdict {
     twins?: Twin[];
     /** 같은 업종 비교 (docs/analysis.md 21장, 25.1045) */
     peers?: Peers | null;
+    /** 종합 점수 분해 (docs/analysis.md 26장, 25.1051) */
+    decomposition?: Decomposition | null;
   };
   evidence: EvidenceRow[];
   score_as_of: string | null;
@@ -73,6 +75,14 @@ export interface Agreement {
   up: number;
   n: number;
   spread: number;
+}
+
+export interface Decomposition {
+  parts: Array<{ factor: string; score: number; weight: number; contrib: number }>;
+  sentiment: number;
+  total: number;
+  change?: Record<string, number> | null;
+  since?: string | null;
 }
 
 export interface Peers {

@@ -209,3 +209,21 @@ def test_분기_실적_추세() -> None:
     # 전년 영업이익이 적자면 증가율 대신 말로
     t2 = ins.quarter_trend([_분기(2025, "11013", 100, -5), _분기(2026, "11013", 100, 3)])
     assert t2["rows"][0]["op_note"] == "흑자 전환" and t2["trend"] is None
+
+
+def test_점수_분해는_종합_점수를_되살린다() -> None:
+    """몫의 합 = 종합 점수 — `scoring.total_score` 와 같은 식이어야 한다 (26장)."""
+    from batch.services import scoring
+
+    f = {"value": 70.0, "quality": 55.0, "growth": 40.0, "momentum": 80.0, "risk": None}
+    w = {"value": 25.0, "quality": 25.0, "growth": 20.0, "momentum": 20.0, "risk": 10.0}
+    t = scoring.total_score(f, w, sentiment=40.0, sentiment_weight=10.0)
+    d = ins.decompose({"total": t.total, "factors": f, "weights": t.weights_used, "sentiment": 40.0,
+                       "sentiment_weight": 10.0})  # fmt: skip
+    assert math.isclose(sum(p["contrib"] for p in d["parts"]) + d["sentiment"], t.total, abs_tol=0.05)
+    assert [p["factor"] for p in d["parts"]] == ["value", "quality", "growth", "momentum"]  # 빠진 팩터는 없다
+    before = {"total": 60.0, "factors": {**f, "momentum": 50.0}, "weights": t.weights_used, "sentiment": 40.0,
+              "sentiment_weight": 10.0}  # fmt: skip
+    ch = ins.decompose_change({"total": t.total, "factors": f, "weights": t.weights_used, "sentiment": 40.0,
+                               "sentiment_weight": 10.0}, before)  # fmt: skip
+    assert math.isclose(ch["momentum"], 30 * t.weights_used["momentum"] / 100, abs_tol=0.01) and ch["value"] == 0

@@ -2,6 +2,7 @@
 
 import AnalysisExtras from "@/components/AnalysisExtras";
 import PriceLadder from "@/components/PriceLadder";
+import ScoreWaterfall from "@/components/ScoreWaterfall";
 import { VERDICT_LABEL, VERDICT_STYLE, outlookListLines, type Verdict } from "@/lib/analysis";
 
 /** 종목 분석 의견 카드 본문 (docs/analysis.md). 결론·근거·반대 목소리·근거표 — 배치가 만든 값을 보이기만 한다 */
@@ -26,6 +27,7 @@ export default function VerdictBlock({ v, currency = "KRW" }: { v: Verdict; curr
         </div>
       )}
       {v.detail?.outlook?.ladder && <PriceLadder l={v.detail.outlook.ladder} currency={currency} />}
+      {v.detail?.decomposition && <ScoreWaterfall d={v.detail.decomposition} />}
       <AnalysisExtras flows={v.detail?.outlook?.flows} twins={v.detail?.twins} peers={v.detail?.peers} />
       {reasons.length > 0 && (
         <ul className="mb-2 list-disc space-y-0.5 pl-5 text-slate-700 dark:text-slate-300">

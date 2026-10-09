@@ -32,6 +32,7 @@ JOB_NAME = "verdicts"
 
 SCORES_SQL = (
     "SELECT sc.stock_id, sc.as_of_date, sc.total_score, sc.rank_in_market, sc.factor_scores, sc.skip_reason,"
+    " sc.weights_json, sc.sentiment_score, sc.sentiment_weight_used,"
     " sc.calc_version, s.ticker, COALESCE(s.name_ko, s.name_en, s.ticker) AS name, s.currency, s.market, s.sector,"
     " s.listed_shares"
     " FROM scores sc JOIN stocks s ON s.id = sc.stock_id"
@@ -159,7 +160,8 @@ CALIBRATION_SQL = (
 )
 # 점수 변화 (17장) — 4주 앞 가장 가까운 점수일
 SCORES_BEFORE_SQL = (
-    "SELECT sc.stock_id, sc.as_of_date, sc.total_score, sc.factor_scores FROM scores sc"
+    "SELECT sc.stock_id, sc.as_of_date, sc.total_score, sc.factor_scores, sc.weights_json, sc.sentiment_score,"
+    " sc.sentiment_weight_used FROM scores sc"
     " JOIN stocks s ON s.id = sc.stock_id"
     " WHERE s.country = ? AND sc.as_of_date = (SELECT MAX(sc2.as_of_date) FROM scores sc2"
     "   JOIN stocks s2 ON s2.id = sc2.stock_id WHERE s2.country = ? AND sc2.as_of_date <= ?)"
@@ -444,7 +446,10 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
         if int(r["stock_id"]) not in 앞점수:
             with contextlib.suppress(TypeError, ValueError):
                 앞점수[int(r["stock_id"])] = {"as_of": r["as_of_date"], "total": r["total_score"],
-                                           "factors": json.loads(r["factor_scores"] or "{}")}  # fmt: skip
+                                           "factors": json.loads(r["factor_scores"] or "{}"),
+                                           "weights": json.loads(r["weights_json"] or "{}"),
+                                           "sentiment": r["sentiment_score"],
+                                           "sentiment_weight": r["sentiment_weight_used"]}  # fmt: skip
     모양: dict[int, dict[str, float]] = {}
     for sid, r in 점수.items():
         with contextlib.suppress(TypeError, ValueError):
@@ -562,6 +567,16 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
                                            f"earnings_calendar ({e.get('source')})", str(e["d"])))  # fmt: skip
             detail["earnings"] = {"date": e["d"], "days": 남은, "confirmed": bool(e.get("is_confirmed")),
                                   "source": e.get("source")}  # fmt: skip
+        # 점수 분해 (26장) — 오늘 몫과 4주 동안 몫의 변화
+        with contextlib.suppress(TypeError, ValueError):
+            지금점수 = {"as_of": r["as_of_date"], "total": r["total_score"], "factors": factors,
+                     "weights": json.loads(r["weights_json"] or "{}"), "sentiment": r["sentiment_score"],
+                     "sentiment_weight": r["sentiment_weight_used"]}  # fmt: skip
+            분해 = insights.decompose(지금점수)
+            if 분해:
+                분해["change"] = insights.decompose_change(지금점수, 앞점수.get(sid))
+                분해["since"] = (앞점수.get(sid) or {}).get("as_of") if 분해["change"] else None
+            detail["decomposition"] = 분해
         보정 = insights.calibration_for(r["total_score"], 보정표)
         detail["calibration"] = 보정
         if 보정:
