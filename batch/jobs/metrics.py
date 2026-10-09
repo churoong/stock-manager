@@ -28,8 +28,8 @@ from batch.core import db
 from batch.core import settings_range as sr
 from batch.core.client import TursoClient
 from batch.core.entry import guard
+from batch.services import history, patterns
 from batch.services import metrics as calc
-from batch.services import patterns
 
 log = logging.getLogger("metrics")
 
@@ -241,6 +241,7 @@ def compute_all(
     bench_cache: dict[str, list[calc.PricePoint]] = {}
     bench_missing: set[str] = set()
     시장국면: dict[str, dict[str, str]] = {}
+    신고가_모음: dict[str, list[dict[str, list[float]]]] = {}
 
     나라_끝: dict[str, tuple[dict[str, date], dict[int, str]]] = {}
     멈춤_경고: set[str] = set()
@@ -271,8 +272,14 @@ def compute_all(
         # 최근 변동성 (10.5, 25.1055) — 예상 주가의 단기 범위가 지금 흔들림을 따르게
         변동 = patterns.ewma_vol([q.date.isoformat() for q in 국면_점[-patterns.EWMA_DAYS :]],
                                [q.close for q in 국면_점[-patterns.EWMA_DAYS :]])  # fmt: skip
-        if 국면표 or 하락장 or 변동:
-            국면표 = {**(국면표 or {}), "stress": 하락장, "vol": 변동}
+        # 자기 시세 이력의 사실들 (31~34장, 25.1057~25.1060) — 같은 계열로, 추가 읽기 없이
+        날짜들, 종가들 = [q.date.isoformat() for q in 국면_점], [q.close for q in 국면_점]
+        신고가, 신고가_뒤 = history.breakout(날짜들, 종가들)
+        신고가_모음.setdefault(country, []).append(신고가_뒤)
+        이력 = {"drawdown": history.drawdowns(날짜들, 종가들), "tail": history.tail(날짜들, 종가들),
+                "season": history.season(날짜들, 종가들), "breakout": 신고가}  # fmt: skip
+        if 국면표 or 하락장 or 변동 or any(이력.values()):
+            국면표 = {**(국면표 or {}), "stress": 하락장, "vol": 변동, **이력}
             pattern_rows.append((stock_id, 기준, json.dumps(국면표, separators=(",", ":")), now))
         # 창 끝 검사의 "끝" 은 달력 기준일이 아니라 **그 나라 시세가 실제로 있는 마지막 날**이다 (25.710, 교차검증) —
         # 나라 수집이
@@ -352,6 +359,14 @@ def compute_all(
 
     _bulk_upsert(client, rows_data)
     store_patterns(client, pattern_rows, warnings)
+    # 시장 전체 신고가 뒤 (34장) — 나라마다 설정 한 행
+    for 나라, 모음 in 신고가_모음.items():
+        시장분포 = history.market_breakout(모음)
+        if 시장분포:
+            try:
+                db.set_setting(client, history.market_key(나라), {"as_of": as_of, "h": 시장분포})
+            except Exception as exc:  # noqa: BLE001 — 그 줄만 빠진다
+                warnings.append(f"시장 전체 신고가 뒤 분포를 저장하지 못했습니다: {exc}")
     return len(rows_data), counts, warnings
 
 

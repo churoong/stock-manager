@@ -24,7 +24,7 @@ from batch.core.client import TursoClient
 from batch.core.entry import guard
 from batch.jobs import daily
 from batch.services import disclosure_reaction as dr
-from batch.services import divergence, insights
+from batch.services import divergence, history, insights
 from batch.services import forecast_track as ft
 from batch.services import verdict as vd
 
@@ -383,6 +383,12 @@ def outlook_inputs(client: TursoClient, country: str, as_of: str, today: date, w
         본칸.add(k)
         with contextlib.suppress(TypeError, ValueError):
             재무원값.setdefault(k[0], {"as_of": r["as_of_date"]}).update(json.loads(r["raw_json"] or "{}"))
+    # 시장 전체 신고가 뒤 (34장) — 주간 작업이 나라마다 한 행
+    시장신고가 = None
+    try:
+        시장신고가 = (db.get_setting(client, history.market_key(country)) or {}).get("h")
+    except Exception as exc:  # noqa: BLE001 — 그 줄만 빠진다
+        warnings.append(f"시장 전체 신고가 뒤 분포를 읽지 못했습니다: {exc}")
     try:
         무위험 = risk_free(client, country)
     except Exception as exc:  # noqa: BLE001 — 0 으로 두고 그렇게 적는다
@@ -390,7 +396,8 @@ def outlook_inputs(client: TursoClient, country: str, as_of: str, today: date, w
         무위험 = None
     return {"close": 종가, "momentum": 모멘텀, "band": 밴드, "risk": 위험, "opinions": 의견,
             "market": market_returns(client, country, as_of, warnings), "rf": 무위험,
-            "patterns": 국면, "fundamentals": 재무원값, "broker_stats": 성적, "regime": 시장국면}  # fmt: skip
+            "patterns": 국면, "fundamentals": 재무원값, "broker_stats": 성적, "regime": 시장국면,
+            "market_breakout": 시장신고가}  # fmt: skip
 
 
 def outlook_for(재료: dict, sid: int, currency: str, today: date, market: str | None = None) -> dict:
@@ -405,6 +412,7 @@ def outlook_for(재료: dict, sid: int, currency: str, today: date, market: str 
         fundamentals=(재료.get("fundamentals") or {}).get(sid), broker_stats=재료.get("broker_stats"),
         stress=((재료.get("patterns") or {}).get(sid) or {}).get("stress"),
         vol=((재료.get("patterns") or {}).get(sid) or {}).get("vol"),
+        history=(재료.get("patterns") or {}).get(sid), market_breakout=재료.get("market_breakout"),
         close=c.get("close"), close_date=c.get("date"), currency=currency, momentum=재료["momentum"].get(sid),
         risk=재료["risk"].get(sid), band=b, opinions=재료["opinions"].get(sid, []), today=today,
         band_note=(b or {}).get("skip_reason"),

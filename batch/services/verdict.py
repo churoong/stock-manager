@@ -233,7 +233,8 @@ def outlook(*, close: float | None, close_date: str | None, currency: str, momen
             band_note: str | None = None, market: dict | None = None, rf: float | None = None,
             analog: dict | None = None, fundamentals: dict | None = None,
             broker_stats: dict[str, dict] | None = None, stress: dict | None = None,
-            vol: dict | None = None) -> dict:  # fmt: skip
+            vol: dict | None = None, history: dict | None = None,
+            market_breakout: dict | None = None) -> dict:  # fmt: skip
     """가격·가치 진단 (docs/analysis.md 9장). 예측이 아니라 근거 있는 기준점 — 모든 값은 DB 행에서 온다.
 
     momentum: momentum_3m·momentum_6m·momentum_12_1·high_52w_proximity·as_of (factors.raw_json)
@@ -361,6 +362,13 @@ def outlook(*, close: float | None, close_date: str | None, currency: str, momen
         out["analog"] = a
     elif a.get("empty"):
         줄.append(f"비슷한 국면: {a.get('label')} — 자기 과거에 이 상태가 드물어(표본 모자람) 분포를 내지 않습니다")
+    # 31~34. 자기 시세 이력의 사실들 — 낙폭 회복·최악의 한 달·계절성·신고가 뒤
+    from batch.services import history as hist
+
+    이력 = {k: (history or {}).get(k) for k in ("drawdown", "tail", "season", "breakout")}
+    if any(이력.values()):
+        줄 += hist.lines(이력, market_breakout, today.month)
+        out["history"] = {**이력, "market_breakout": market_breakout}
     # 28. 하락장 성적 — 시장이 가장 나빴던 달들
     st = stress or {}
     if st.get("worst"):

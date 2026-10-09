@@ -340,7 +340,18 @@ def reference_outlook(client: TursoClient, country: str, as_of: str, meta: dict,
                       fundamentals=(s or {}).get("fundamentals"), broker_stats=증권사성적,
                       vol=patterns.ewma_vol([str(d) for d, _ in 시세[-patterns.EWMA_DAYS :]],
                                             [float(x) for _, x in 시세[-patterns.EWMA_DAYS :]]) if 시세 else None,
-                      )  # fmt: skip
+                      history=_이력(시세))  # fmt: skip
+
+
+def _이력(시세: list) -> dict | None:
+    """자기 시세 이력의 사실들 (31~34장) — 밴드에 읽은 3년 시세로 그 자리에서. 시장 전체 분포는 없다"""
+    from batch.services import history
+
+    if not 시세:
+        return None
+    d, c = [str(x) for x, _ in 시세], [float(y) for _, y in 시세]
+    return {"drawdown": history.drawdowns(d, c), "tail": history.tail(d, c), "season": history.season(d, c),
+            "breakout": history.breakout(d, c)[0]}  # fmt: skip
 
 
 def reference_checks(client: TursoClient, country: str, as_of: str, metas: list[dict],

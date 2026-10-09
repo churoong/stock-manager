@@ -4,6 +4,7 @@ import AnalyzeNow from "@/components/AnalyzeNow";
 import ForecastModels from "@/components/ForecastModels";
 import ForecastTable from "@/components/ForecastTable";
 import ForecastTrack from "@/components/ForecastTrack";
+import HistoryFacts from "@/components/HistoryFacts";
 import VerdictBlock from "@/components/VerdictBlock";
 import type { AnalysisRequest, ReferenceScoreData, Verdict } from "@/lib/analysis";
 import Link from "next/link";
@@ -360,6 +361,11 @@ export default function StockDetail({
       {(() => {
         const t = verdict.state === "ok" ? (verdict.data.verdict as Verdict | null)?.detail?.track : null;
         return t ? <ForecastTrack t={t} /> : null;
+      })()}
+      {/* 자기 시세 이력의 사실들 (docs/analysis.md 31~34장, 25.1057) */}
+      {(() => {
+        const h = verdict.state === "ok" ? (verdict.data.verdict as Verdict | null)?.detail?.outlook?.history : null;
+        return h ? <HistoryFacts h={h} /> : null;
       })()}
 
       {/* 점수: 팩터 레이더와 센티먼트는 분리해 보인다 (CLAUDE.md 스코어링) */}

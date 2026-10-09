@@ -63,6 +63,30 @@ export interface OutlookData {
   reverse_dcf?: { implied_growth: number; ep: number; discount: number; per: number } | null;
   flows?: FlowCard | null;
   agreement?: Agreement | null;
+  /** 자기 시세 이력의 사실들 — 낙폭 회복·최악의 한 달·계절성·신고가 뒤 (docs/analysis.md 31~34장, 25.1057) */
+  history?: HistoryData | null;
+}
+
+export interface DistLite { n: number; median: number; up: number; p16?: number; p84?: number }
+
+export interface HistoryData {
+  drawdown?: {
+    since: string; until: string; now: number; peak_date: string; days_since_peak: number;
+    levels: Record<string, { n: number; recovered: number; open: number; median_days: number | null }>;
+    worst: Array<{ peak: string; trough: string; depth: number; recovered: string | null; days: number | null }>;
+  } | null;
+  tail?: { since: string; until: string; d1: { n: number; var: number; cvar: number; worst: number }; m1: { n: number; var: number; cvar: number; worst: number } } | null;
+  season?: { since: string; until: string; months: Record<string, { n: number; up: number; avg: number }> } | null;
+  breakout?: { events: number; last: string | null; h: Record<string, DistLite | null>; base: Record<string, DistLite | null> } | null;
+  market_breakout?: Record<string, DistLite> | null;
+}
+
+/** 진단 줄 가운데 이력 카드(HistoryFacts)가 그리는 줄 — 목록에서 뺀다 */
+export const HISTORY_LINE_PREFIXES = ["낙폭 회복(", "최악의 한 달(", "계절성(", "52주 신고가 뒤("];
+
+/** 계절성 달력의 칸 색 — 오른 비율(사실)을 그대로 옮긴다. 새 문턱이 아니라 절반 위·아래로 나눌 뿐 */
+export function seasonTone(up: number, n: number): "up" | "down" | "even" {
+  return up * 2 > n ? "up" : up * 2 < n ? "down" : "even";
 }
 
 export interface FlowCard {
@@ -256,7 +280,9 @@ export function horizonLabel(months: number): string {
 /** 진단 줄 가운데 표로 따로 그리는 줄(예상 주가)은 목록에서 뺀다 — 같은 숫자를 두 번 보이지 않는다 */
 export function outlookListLines(lines: string[]): string[] {
   // 비슷한 국면·시나리오도 맨 위 예측 묶음(ForecastModels)에 표로 있다 (25.1039·25.1040)
-  return lines.filter((l) => !l.startsWith("예상 주가:") && !l.startsWith("비슷한 국면(") && !l.startsWith("1년 시나리오("));
+  return lines.filter(
+    (l) => !l.startsWith("예상 주가:") && !l.startsWith("비슷한 국면(") && !l.startsWith("1년 시나리오(") && !HISTORY_LINE_PREFIXES.some((p) => l.startsWith(p)),
+  );
 }
 
 /** 유니버스 밖 종목의 참고 점수 — `analyze_extra` 가 detail_json 에 둔다 (25.1019) */

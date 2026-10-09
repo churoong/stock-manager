@@ -458,6 +458,17 @@ class Test종목_분석:
         검사(ANALYSIS, f"({'·'.join(str(d) for d in pt.HORIZON_DAYS.values())}거래일)", "기간 → 거래일")
         검사(ANALYSIS, f"`MIN_SAMPLE`({ft.MIN_SAMPLE})건 미만", "성적표 최소 표본")
 
+    def test_자기_시세_이력(self) -> None:
+        from batch.services import history as hs
+
+        검사(ANALYSIS, f"`DD_LEVELS`({'%·'.join(f'{x * 100:.0f}' for x in hs.DD_LEVELS)}%", "낙폭 단계")
+        검사(ANALYSIS, f"`MIN_DAYS`({hs.MIN_DAYS})거래일 미만이면", "이력 최소 거래일")
+        검사(ANALYSIS, f"`TAIL_P`({hs.TAIL_P * 100:.0f}%)", "꼬리 확률")
+        검사(ANALYSIS, f"`MONTH_DAYS`({hs.MONTH_DAYS})거래일", "한 달 거래일")
+        검사(ANALYSIS, f"`SEASON_MIN`({hs.SEASON_MIN})번 미만", "계절성 최소 표본")
+        검사(ANALYSIS, f"`BREAKOUT_COOLDOWN`({hs.BREAKOUT_COOLDOWN})거래일", "신고가 식힘")
+        검사(ANALYSIS, f"{'·'.join(str(m) for m in hs.BREAKOUT_MONTHS)}개월(`BREAKOUT_MONTHS`)", "신고가 뒤 기간")
+
     def test_해석_묶음(self) -> None:
         from batch.jobs import verdicts as vj
         from batch.services import insights as ins
@@ -573,7 +584,7 @@ class Test밸류_분모:
     "quarterly_earnings", "short_reversal", "div_omission", "buyback", "dilution", "flow_surge",
     "gross_profitability", "robustness", "column_rot", "calibration", "self_grade", "holding_scores",
     "pick_history", "etf_accounts", "etf_tilt", "after_hours", "broker_stats", "disclosure_reaction", "luck", "postmortem",
-    "divergence", "tax_sim", "verdict", "forecast_track", "patterns", "insights",
+    "divergence", "tax_sim", "verdict", "forecast_track", "patterns", "insights", "history",
 )  # fmt: skip
 
 #: 아직 그물 밖인 모듈과 **왜 아직인지**. 하나씩 줄여 간다
