@@ -176,6 +176,17 @@ INITIATION_SQL = (
     "SELECT stock_id, broker, MIN(date) AS first_date FROM kr_opinions WHERE date >= ? AND target_price > 0"
     " GROUP BY stock_id, broker"
 )
+# 감성과 가격의 엇갈림 (50장, 25.1070) — 지난 한 주 안 감성 행(종목마다 최신)과 그 30일 앞 한 주의 종가
+SENTIMENT_GAP_SQL = (
+    "SELECT ss.stock_id, ss.as_of_date, ss.sentiment, ss.delta_30d FROM sentiment_scores ss"
+    " JOIN stocks s ON s.id = ss.stock_id WHERE s.country = ? AND ss.as_of_date >= ? AND ss.delta_30d IS NOT NULL"
+    " ORDER BY ss.stock_id, ss.as_of_date DESC"
+)
+PRICE_BACK_SQL = (
+    "SELECT p.stock_id, p.date,"
+    " CASE WHEN s.country = 'US' THEN p.close ELSE COALESCE(p.adj_close, p.close) END AS close"
+    " FROM prices p JOIN stocks s ON s.id = p.stock_id WHERE s.country = ? AND p.date >= ? AND p.date <= ?"
+)
 # 점수 변화 (17장) — 4주 앞 가장 가까운 점수일
 SCORES_BEFORE_SQL = (
     "SELECT sc.stock_id, sc.as_of_date, sc.total_score, sc.factor_scores, sc.weights_json, sc.sentiment_score,"
@@ -521,6 +532,18 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
     if country == "KR":
         실적반응 = next((r for r in _safe(client, REACTION_SQL, [], warnings, "공시 반응 통계")
                      if r.get("type") == "earnings"), None)  # fmt: skip
+    # 감성과 가격의 엇갈림 (50장) — 감성 행의 날짜에서 30일 앞 종가(그날 이하 마지막, 한 주 안)와 그날 종가
+    감성: dict[int, dict] = {}
+    한주 = (today - timedelta(days=7)).isoformat()
+    for r in _safe(client, SENTIMENT_GAP_SQL, [country, 한주], warnings, "뉴스 감성"):
+        감성.setdefault(int(r["stock_id"]), r)
+    감성가격: dict[int, list[tuple[str, float]]] = defaultdict(list)
+    if 감성:
+        가장앞 = min(date.fromisoformat(str(r["as_of_date"])[:10]) for r in 감성.values())
+        시작 = (가장앞 - timedelta(days=insights.SENT_GAP_DAYS + 7)).isoformat()
+        for r in _safe(client, PRICE_BACK_SQL, [country, 시작, today.isoformat()], warnings, "엇갈림 종가"):
+            if int(r["stock_id"]) in 감성 and r["close"]:
+                감성가격[int(r["stock_id"])].append((str(r["date"]), float(r["close"])))
     개시: dict[int, list[dict]] = defaultdict(list)
     if country == "KR":
         for r in _safe(client, INITIATION_SQL, [(today - timedelta(days=insights.INIT_LOOKBACK_DAYS)).isoformat()],
@@ -646,6 +669,28 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
                 분해["change"] = insights.decompose_change(지금점수, 앞점수.get(sid))
                 분해["since"] = (앞점수.get(sid) or {}).get("as_of") if 분해["change"] else None
             detail["decomposition"] = 분해
+        # 함께 움직이는 종목 (52장) — 주간 표의 짝을 이름으로(유니버스 종목만)
+        짝원본 = ((재료.get("patterns") or {}).get(sid) or {}).get("comovers") or []
+        짝 = [{**x, "ticker": 점수[x["stock_id"]]["ticker"], "name": 점수[x["stock_id"]]["name"]}
+             for x in 짝원본 if x["stock_id"] in 점수]  # fmt: skip
+        detail["comovers"] = 짝 or None
+        if 짝:
+            밖 = [x["name"] for x in 짝 if not x["same_sector"]]
+            out["reasons"].append("함께 움직이는 종목(지난 1년, 시장 몫을 뺀 상관): "
+                                  + ", ".join(f"{x['name']} {x['corr']:.2f}" for x in 짝)
+                                  + (f" — 업종 분류 밖: {', '.join(밖)}" if 밖 else ""))  # fmt: skip
+        엇갈림 = None
+        if sid in 감성:
+            끝날 = str(감성[sid]["as_of_date"])[:10]
+            앞날 = (date.fromisoformat(끝날) - timedelta(days=insights.SENT_GAP_DAYS)).isoformat()
+            계열 = sorted(감성가격.get(sid, []))
+            앞 = [c for d, c in 계열 if d <= 앞날 and d >= (date.fromisoformat(앞날) - timedelta(days=7)).isoformat()]
+            뒤 = [c for d, c in 계열 if d <= 끝날]
+            엇갈림 = insights.sentiment_gap(감성[sid], 앞[-1] if 앞 else None, 뒤[-1] if 뒤 else None)
+        detail["sentiment_gap"] = 엇갈림
+        줄 = insights.sentiment_gap_line(엇갈림)
+        if 줄:
+            out["reasons"].append(줄)
         새증권사 = insights.initiations(개시.get(sid, []), today)
         if 새증권사:
             detail["initiations"] = 새증권사
@@ -677,7 +722,8 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
                     + f" — 이 종목 변동성 {대체[0]['my_vol'] * 100:.0f}%")  # fmt: skip
         레이더재료.append({"stock_id": sid, "ticker": r["ticker"], "name": r["name"], "verdict": out["verdict"],
                        "ladder": (out.get("outlook") or {}).get("ladder"), "score_change": 변화,
-                       "agreement": (out.get("outlook") or {}).get("agreement")})  # fmt: skip
+                       "agreement": (out.get("outlook") or {}).get("agreement"),
+                       "sentiment_gap": 엇갈림})  # fmt: skip
         o = out.get("outlook") or {}
         모델 = ft.log_models(o)
         if 모델 and o.get("close_date") == as_of:

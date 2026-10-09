@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import math
+import statistics
 from typing import Any
 
 from batch.services import patterns as pt
@@ -320,3 +321,104 @@ def leaders(sid: int, mine: dict | None, peers: dict[int, dict], caps: dict[int,
             out["w"][w] = {"leaders": round(sum(같은) / len(같은), 4), "stock": round(x["stock"], 4)}
     return out if out["w"] else None
 
+
+
+#: 변동성 국면 (51장) — 최근 한 달(21거래일) 일간 수익의 연환산 표준편차를 자기 이력에서 셋으로 나눈다
+VOL_WINDOW = 21
+#: 변동성 국면 뒤를 재는 기간(개월) — 13장과 같은 거래일 환산
+VOL_REGIME_MONTHS = (1, 3)
+
+
+def vol_regime(dates: list[str], closes: list[float]) -> dict[str, Any] | None:
+    """변동성 국면 성적 (51장, 25.1071) — 날마다 최근 `VOL_WINDOW` 거래일 변동성(연환산)을 내고, 자기 이력에서 삼분위로
+    나눈 칸마다 그 뒤 1·3개월 수익 분포. 지금 변동성이 자기 이력 몇 % 분위인지와 지금 칸. 칸 표본은 13장과 같은 하한."""
+    c = [float(x) for x in closes if x and x > 0]
+    if len(c) < MIN_DAYS + VOL_WINDOW:
+        return None
+    r = [math.log(b / a) for a, b in zip(c, c[1:], strict=False)]
+    vol: list[tuple[int, float]] = []  # (종가 자리, 변동성)
+    for i in range(VOL_WINDOW, len(r) + 1):
+        창 = r[i - VOL_WINDOW : i]
+        m = sum(창) / VOL_WINDOW
+        vol.append((i, math.sqrt(sum((x - m) ** 2 for x in 창) / (VOL_WINDOW - 1) * 252)))
+    값 = sorted(v for _, v in vol)
+    a, b = statistics.quantiles(값, n=3)
+    def 칸(v: float) -> int:
+        return 0 if v <= a else 1 if v <= b else 2
+
+    모음: dict[int, dict[str, list[float]]] = {k: {str(m): [] for m in VOL_REGIME_MONTHS} for k in range(3)}
+    for i, v in vol:
+        for m in VOL_REGIME_MONTHS:
+            d = pt.HORIZON_DAYS[m]
+            if i + d < len(c):
+                모음[칸(v)][str(m)].append(c[i + d] / c[i] - 1)
+    지금 = vol[-1][1]
+    return {"since": str(dates[-len(c)]), "until": str(dates[-1]), "now": round(지금, 4),
+            "pct": round(sum(1 for x in 값 if x <= 지금) / len(값), 4), "edges": [round(a, 4), round(b, 4)],
+            "bucket": 칸(지금),
+            "buckets": {str(k): {m: pt.dist(v) if len(v) >= pt.MIN_DAYS else None for m, v in 기간.items()}
+                        for k, 기간 in 모음.items()}}  # fmt: skip
+
+
+VOL_LABEL = ("조용한 편(하위 1/3)", "보통(가운데 1/3)", "시끄러운 편(상위 1/3)")
+
+
+def vol_regime_line(v: dict | None) -> str | None:
+    if not v:
+        return None
+    지금 = (v.get("buckets") or {}).get(str(v["bucket"])) or {}
+    한달 = 지금.get("1")
+    뒤 = f" — 이 칸에서 1개월 뒤 중앙값 {_p(한달['median'])}·오른 비율 {한달['up'] * 100:.0f}%" if 한달 else ""
+    return (f"변동성 국면: 지금 한 달 변동성 {v['now'] * 100:.0f}%(자기 이력 {v['pct'] * 100:.0f}% 분위, "
+            f"{VOL_LABEL[v['bucket']]}){뒤}")
+
+
+#: 함께 움직이는 종목 (52장) — 최근 1년(252거래일), 시장 몫을 뺀 일간 수익의 상관
+COMOVE_DAYS = 252
+#: 상관을 낼 최소 관측일 — 그보다 적으면 상관이 잡음이다
+COMOVE_MIN_DAYS = 200
+#: 종목마다 남기는 짝 수
+COMOVE_TOP = 5
+
+
+def comovers(series: dict[int, dict[str, float]], market: dict[str, float],
+             sector_of: dict[int, Any]) -> dict[int, list[dict]]:  # fmt: skip
+    """함께 움직이는 종목 (52장, 25.1071). series = 종목 → {날짜: 일간 로그 수익},
+    market = {날짜: 지수 일간 로그 수익}. 종목마다 베타 × 지수를 빼 잔차를 내고(업종·테마처럼 시장 말고 함께 움직이는
+    것만 남게), 잔차끼리 상관이 큰 `COMOVE_TOP` 개. 관측일이 `COMOVE_MIN_DAYS` 미만인 종목은 뺀다.
+    빈 날은 표준화 뒤 0(정보 없음)으로 둔다. 같은 업종인지 함께 적는다."""
+    import numpy as np
+
+    날 = sorted(market)[-COMOVE_DAYS:]
+    if len(날) < COMOVE_MIN_DAYS:
+        return {}
+    m = np.asarray([market[d] for d in 날])
+    ids, 행 = [], []
+    for sid, by in series.items():
+        x = np.asarray([by.get(d, np.nan) for d in 날], dtype=float)
+        ok = ~np.isnan(x)
+        if ok.sum() < COMOVE_MIN_DAYS:
+            continue
+        mv = m[ok] - m[ok].mean()
+        var = float((mv * mv).sum())
+        beta = float(((x[ok] - x[ok].mean()) * mv).sum() / var) if var > 0 else 0.0
+        e = np.where(ok, x - beta * m, np.nan)
+        e = e - np.nanmean(e)
+        sd = float(np.nanstd(e))
+        if sd <= 0:
+            continue
+        ids.append(sid)
+        행.append(np.nan_to_num(e / sd, nan=0.0))
+    if len(ids) < COMOVE_TOP + 1:
+        return {}
+    z = np.asarray(행, dtype=np.float32)
+    corr = (z @ z.T) / len(날)
+    np.fill_diagonal(corr, -np.inf)
+    out: dict[int, list[dict]] = {}
+    for i, sid in enumerate(ids):
+        top = np.argpartition(-corr[i], COMOVE_TOP)[:COMOVE_TOP]
+        top = top[np.argsort(-corr[i][top])]
+        out[sid] = [{"stock_id": int(ids[j]), "corr": round(float(corr[i][j]), 3),
+                     "same_sector": sector_of.get(sid) is not None and sector_of.get(sid) == sector_of.get(ids[j])}
+                    for j in top]  # fmt: skip
+    return out

@@ -39,6 +39,10 @@ export interface Verdict {
     health?: { fiscal_year: number; consolidated: boolean; report_date: string | null; z: number | null; zone?: "safe" | "grey" | "distress"; parts?: number[]; debt_ratio?: number; note?: string } | null;
     /** 이 종목에 난 신호들의 성적 (docs/analysis.md 37장, 25.1060) */
     signal_history?: SignalHistory | null;
+    /** 함께 움직이는 종목 — 시장 몫을 뺀 1년 상관 (52장, 25.1071) */
+    comovers?: Array<{ stock_id: number; ticker: string; name: string; corr: number; same_sector: boolean }> | null;
+    /** 감성과 가격의 엇갈림 (50장, 25.1070) */
+    sentiment_gap?: { as_of: string; sentiment: number | null; sent_delta: number; price_ret: number; opposite: boolean } | null;
     /** 같은 업종 대체 후보 — 점수가 같거나 높고 변동성이 낮은 종목 (47장, 25.1068) */
     alternatives?: Array<{ stock_id: number; ticker: string; name: string; total: number; vol: number; mdd: number | null; my_vol: number; my_total: number }>;
   };
@@ -103,6 +107,8 @@ export interface HistoryData {
   boot?: { days_used: number; sigma: number } | null;
   /** 매물대 (45장) — 칸은 마지막 수정주가에 대한 비율 */
   profile?: { since: string; until: string; days: number; bins: Array<{ lo: number; hi: number; share: number }>; top: number[]; now: number } | null;
+  /** 변동성 국면 성적 (51장) — 칸 0·1·2 = 조용·보통·시끄러움 */
+  vol_regime?: { since: string; until: string; now: number; pct: number; edges: number[]; bucket: number; buckets: Record<string, Record<string, DistLite | null>> } | null;
   /** 시장 시나리오 (46장) — 지수가 1년에 ±20% 넘게 움직인 경로에서 이 종목의 1년 수익(16·50·84%) */
   scenarios?: { days_used: number; beta: number | null; paths: number; move: number; down: { n: number; stock?: number[]; index?: number }; up: { n: number; stock?: number[]; index?: number } } | null;
   /** 움직임 분해 (44장) */
@@ -116,7 +122,7 @@ export interface HistoryData {
 }
 
 /** 진단 줄 가운데 이력 카드(HistoryFacts)가 그리는 줄 — 목록에서 뺀다 */
-export const HISTORY_LINE_PREFIXES = ["낙폭 회복(", "최악의 한 달(", "계절성(", "52주 신고가 뒤(", "실적 발표 반응(", "상승의 출처(", "공매도 급증 뒤(", "움직임 분해(", "실제 수익률로 그린 1년 범위(", "시장 시나리오(", "업종 대형주("];
+export const HISTORY_LINE_PREFIXES = ["낙폭 회복(", "최악의 한 달(", "계절성(", "52주 신고가 뒤(", "실적 발표 반응(", "상승의 출처(", "공매도 급증 뒤(", "움직임 분해(", "실제 수익률로 그린 1년 범위(", "시장 시나리오(", "업종 대형주(", "변동성 국면:"];
 
 /** 보고서 코드 → 이름 (DART) */
 export const REPORT_NAME: Record<string, string> = { "11013": "1분기", "11012": "반기", "11014": "3분기", "11011": "사업" };
@@ -380,6 +386,8 @@ export interface Radar {
   near: Array<RadarHead & { label: string; price: number; dist: number; need: "above" | "below" | null }>;
   rising: Array<RadarHead & { delta: number; up: string | null; since: string | null }>;
   eyes: Array<RadarHead & { low: number; high: number; n: number }>;
+  /** 감성과 가격의 엇갈림 (50장, 25.1070) — 예전 기록에는 없다 */
+  gap?: Array<RadarHead & { sent_delta: number; price_ret: number }>;
 }
 
 /** 설정 행 → 시장별 레이더. 깨진 값은 뺀다 */

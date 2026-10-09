@@ -313,6 +313,7 @@ def compute_all(
     신고가_모음: dict[str, list[dict[str, list[float]]]] = {}
     사건이력: dict[str, dict] | None = None
     움직임: dict[int, dict | None] = {}
+    일수익: dict[str, dict[int, dict[str, float]]] = {}
 
     나라_끝: dict[str, tuple[dict[str, date], dict[int, str]]] = {}
     멈춤_경고: set[str] = set()
@@ -365,6 +366,12 @@ def compute_all(
         이력["profile"] = history.volume_profile(날짜들, 종가들, [q.value for q in 국면_점])
         # 움직임 분해 (44장, 25.1065) — 업종 몫은 모든 종목을 모은 뒤(아래)
         움직임[stock_id] = history.move_inputs(날짜들, 종가들, 지수)
+        # 변동성 국면 성적 (51장, 25.1071)
+        이력["vol_regime"] = history.vol_regime(날짜들, 종가들)
+        # 함께 움직이는 종목 (52장) — 최근 1년 일간 로그 수익을 모아 두고 아래에서 나라마다 상관을 낸다
+        끝 = list(zip(날짜들, 종가들, strict=False))[-(history.COMOVE_DAYS + 1) :]
+        일수익.setdefault(country, {})[stock_id] = {
+            d1: math.log(c1 / c0) for (_, c0), (d1, c1) in zip(끝, 끝[1:], strict=False) if c0 > 0 and c1 > 0}
         if 국면표 or 하락장 or 변동 or any(이력.values()):
             국면표 = {**(국면표 or {}), "stress": 하락장, "vol": 변동, **이력}
             pattern_rows.append((stock_id, 기준, 국면표, now))
@@ -453,7 +460,15 @@ def compute_all(
             같은업종.setdefault(k, []).append(sid)
         주식수 = load_shares(client, sorted({c for _, _, c in stocks}), warnings)
         시총 = {sid: 주식수[sid] * m["last"] for sid, m in 움직임.items() if m and sid in 주식수}
+        # 함께 움직이는 종목 (52장) — 나라마다, 베타·하락장 성적과 같은 기준 지수의 일간 로그 수익을 뺀 잔차 상관
+        동행: dict[int, list[dict]] = {}
+        for 나라, 계열 in 일수익.items():
+            지수점 = [(q.date.isoformat(), q.close) for q in bench_cache.get(나라, [])]
+            시장수익 = {d1: math.log(c1 / c0) for (_, c0), (d1, c1) in zip(지수점, 지수점[1:], strict=False)
+                     if c0 > 0 and c1 > 0}  # fmt: skip
+            동행.update(history.comovers(계열, 시장수익, 업종))
         for sid, _, 표, _ in pattern_rows:
+            표["comovers"] = 동행.get(sid)
             k = 업종.get(sid)
             peers = [움직임[o] for o in 같은업종.get(k, []) if o != sid and 움직임.get(o)] if k else []
             표["moves"] = history.move_parts(움직임.get(sid) or {}, peers)

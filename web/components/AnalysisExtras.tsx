@@ -9,11 +9,12 @@ import type { FlowCard, Peers, SignalHistory, Twin, Verdict } from "@/lib/analys
  */
 const HORIZON_KO: Record<string, string> = { short: "단기", mid: "중기", long: "장기" };
 
-export default function AnalysisExtras({ flows, twins, peers, signals, alternatives }: {
+export default function AnalysisExtras({ flows, twins, peers, signals, alternatives, comovers }: {
   flows?: FlowCard | null; twins?: Twin[]; peers?: Peers | null; signals?: SignalHistory | null;
   alternatives?: NonNullable<Verdict["detail"]>["alternatives"];
+  comovers?: NonNullable<Verdict["detail"]>["comovers"];
 }) {
-  if (!flows && !twins?.length && !peers && !signals && !alternatives?.length) return null;
+  if (!flows && !twins?.length && !peers && !signals && !alternatives?.length && !comovers?.length) return null;
   const pctv = (v: number | null) => (v === null ? "-" : `${v >= 0 ? "+" : ""}${(v * 100).toFixed(1)}%`);
   const 억 = (x: number) => `${x >= 0 ? "+" : ""}${x.toLocaleString(undefined, { maximumFractionDigits: 1 })}억`;
   return (
@@ -88,6 +89,20 @@ export default function AnalysisExtras({ flows, twins, peers, signals, alternati
               ))}
             </p>
           )}
+        </div>
+      )}
+      {comovers && comovers.length > 0 && (
+        <div className="rounded-lg border border-slate-200 px-2.5 py-2 text-xs dark:border-slate-800">
+          <p className="mb-1 font-semibold text-slate-600 dark:text-slate-300">함께 움직이는 종목 — 지난 1년, 시장 몫을 뺀 상관</p>
+          <ul className="space-y-0.5">
+            {comovers.map((c) => (
+              <li key={c.stock_id} className="flex items-baseline justify-between gap-2">
+                <Link href={`/stocks/${c.stock_id}`} className="truncate text-sky-700 hover:underline dark:text-sky-300">{c.name}</Link>
+                <span className="shrink-0">{c.corr.toFixed(2)}{c.same_sector ? "" : <span className="ml-1 rounded bg-amber-100 px-1 text-amber-800 dark:bg-amber-950 dark:text-amber-200">업종 밖</span>}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-1 text-slate-400">업종 밖인데 함께 움직이면 분류에 없는 공통 재료(테마·공급망)가 있을 수 있습니다.</p>
         </div>
       )}
       {alternatives && alternatives.length > 0 && (

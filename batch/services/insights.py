@@ -326,6 +326,30 @@ def weighted_agreement(agreement: dict | None, market_track: dict | None, since:
             "weights": {m: round(w / 합, 4) for m, w in 무게.items()}, "left_out": 빠짐, "n": 표본}  # fmt: skip
 
 
+#: 감성과 가격의 엇갈림 (docs/analysis.md 50장) — 감성 표가 저장하는 `delta_30d` 와 같은 30일
+SENT_GAP_DAYS = 30
+
+
+def sentiment_gap(sent: dict | None, p_then: float | None, p_now: float | None) -> dict | None:
+    """감성과 가격의 엇갈림 (50장, 25.1070). sent = 감성 최근 행 {as_of_date, sentiment, delta_30d},
+    p_then·p_now = 그 30일 앞뒤 종가(같은 축). 둘 다 있으면 30일 감성 변화·주가 변화와 **부호가 반대인가**.
+    문턱 없음."""
+    if not sent or not isinstance(sent.get("delta_30d"), (int, float)) or not p_then or not p_now or p_then <= 0:
+        return None
+    r = p_now / p_then - 1
+    d = float(sent["delta_30d"])
+    return {"as_of": sent.get("as_of_date"), "sentiment": sent.get("sentiment"), "sent_delta": round(d, 2),
+            "price_ret": round(r, 4), "opposite": (d > 0 > r) or (d < 0 < r)}  # fmt: skip
+
+
+def sentiment_gap_line(g: dict | None) -> str | None:
+    if not g or not g.get("opposite"):
+        return None
+    방향 = "좋아졌는데 주가는 빠졌다" if g["sent_delta"] > 0 else "나빠졌는데 주가는 올랐다"
+    return (f"감성과 가격의 엇갈림({g['as_of']}까지 {SENT_GAP_DAYS}일): 뉴스 감성이 {g['sent_delta']:+.0f}점 {방향}"
+            f"({g['price_ret'] * 100:+.1f}%) — 어느 쪽이 맞는지는 모른다, 사실만")
+
+
 #: 레이더 목록마다의 길이 (docs/analysis.md 20장)
 RADAR_N = 10
 
@@ -338,8 +362,9 @@ def radar(entries: list[dict]) -> dict:
               — "어느 가격이면 신호 기준이 바뀌나"
       rising  4주 전보다 종합 점수가 가장 많이 오른 종목
       eyes    1년 예상의 눈이 셋 이상이고 **모두** 오름을 말하는 종목(가장 낮은 눈이 높은 순)
+      gap     30일 뉴스 감성 변화와 주가 변화의 부호가 반대인 종목(두 변화 크기의 곱이 큰 순, 50장)
     새 문턱이 없다 — 순서만 정한다."""
-    near, rising, eyes = [], [], []
+    near, rising, eyes, gap = [], [], [], []
     for e in entries:
         머리 = {"stock_id": e["stock_id"], "ticker": e["ticker"], "name": e["name"], "verdict": e.get("verdict")}
         기준 = [it for it in (e.get("ladder") or {}).get("items") or []
@@ -351,13 +376,18 @@ def radar(entries: list[dict]) -> dict:
         sc = e.get("score_change") or {}
         if isinstance(sc.get("delta"), (int, float)) and sc["delta"] > 0:
             rising.append({**머리, "delta": round(sc["delta"], 1), "up": sc.get("up"), "since": sc.get("since")})
+        g = e.get("sentiment_gap") or {}
+        if g.get("opposite"):
+            gap.append({**머리, "sent_delta": g["sent_delta"], "price_ret": g["price_ret"]})
         a = e.get("agreement") or {}
         if a.get("n", 0) >= 3 and a.get("up") == a.get("n"):
             eyes.append({**머리, "low": min(a["views"].values()), "high": max(a["views"].values()), "n": a["n"]})
     near.sort(key=lambda x: (abs(x["dist"]), x["stock_id"]))
     rising.sort(key=lambda x: (-x["delta"], x["stock_id"]))
     eyes.sort(key=lambda x: (-x["low"], x["stock_id"]))
-    return {"near": near[:RADAR_N], "rising": rising[:RADAR_N], "eyes": eyes[:RADAR_N]}
+    # 엇갈림(50장) — 두 변화의 크기 곱이 큰 순
+    gap.sort(key=lambda x: (-abs(x["sent_delta"] * x["price_ret"]), x["stock_id"]))
+    return {"near": near[:RADAR_N], "rising": rising[:RADAR_N], "eyes": eyes[:RADAR_N], "gap": gap[:RADAR_N]}
 
 
 #: 업종 비교에서 이름을 보이는 상위 종목 수 (docs/analysis.md 21장)

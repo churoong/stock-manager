@@ -423,7 +423,7 @@ def outlook(*, close: float | None, close_date: str | None, currency: str, momen
 
     이력 = {k: (history or {}).get(k)
             for k in ("drawdown", "tail", "season", "breakout", "earnings", "sources", "short", "boot", "profile",
-                      "moves", "scenarios")}  # fmt: skip
+                      "moves", "scenarios", "vol_regime")}  # fmt: skip
     if any(이력.values()):
         줄 += hist.lines(이력, market_breakout, today.month)
         # 40~42. 재무·수급 사건과 그 뒤 — 국내만
@@ -434,6 +434,10 @@ def outlook(*, close: float | None, close_date: str | None, currency: str, momen
             줄.append(boot_line)
         # 44. 움직임 분해
         줄 += hist.move_lines(이력.get("moves"))
+        # 51. 변동성 국면 성적
+        국면줄 = hist.vol_regime_line(이력.get("vol_regime"))
+        if 국면줄:
+            줄.append(국면줄)
         # 46. 시장 시나리오
         시나리오 = simulation.scenario_line(이력.get("scenarios"))
         if 시나리오:

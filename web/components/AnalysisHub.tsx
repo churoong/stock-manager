@@ -88,6 +88,8 @@ function RadarBlock({ market, r }: { market: string; r: Radar }) {
           r.rising.map((x) => ({ ...x, right: `${x.delta >= 0 ? "+" : ""}${x.delta.toFixed(1)}${x.up ? ` · ${FACTOR_NAME[x.up] ?? x.up}` : ""}` })))}
         {칸("네 눈이 모두 오름", "1년 예상의 눈이 셋 이상이고 모두 오름 — 가장 낮은 눈이 높은 순",
           r.eyes.map((x) => ({ ...x, right: `${pct(x.low)} ~ ${pct(x.high)}` })))}
+        {칸("뉴스 감성과 주가가 엇갈린 종목", "30일 감성 변화와 주가 변화의 부호가 반대 — 어느 쪽이 맞는지는 모릅니다",
+          (r.gap ?? []).map((x) => ({ ...x, right: `감성 ${x.sent_delta >= 0 ? "+" : ""}${x.sent_delta.toFixed(0)} · 주가 ${pct(x.price_ret)}` })))}
       </div>
     </section>
   );

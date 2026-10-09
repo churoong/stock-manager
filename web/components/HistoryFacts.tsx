@@ -1,6 +1,6 @@
 "use client";
 
-import { REPORT_NAME, seasonTone, type HistoryData } from "@/lib/analysis";
+import { REPORT_NAME, seasonTone, type DistLite, type HistoryData } from "@/lib/analysis";
 
 /**
  * 자기 시세 이력의 사실들 (docs/analysis.md 31~34장, 25.1057) — 낙폭 회복 시간표·최악의 한 달·계절성 달력·52주 신고가 뒤.
@@ -17,7 +17,8 @@ export default function HistoryFacts({ h }: { h: HistoryData }) {
   const sh = h.short;
   const mv = h.moves;
   const sc = h.scenarios;
-  if (!dd && !t && !Object.keys(se).length && !bo && !ea && !so && !sh && !mv && !sc) return null;
+  const vr = h.vol_regime;
+  if (!dd && !t && !Object.keys(se).length && !bo && !ea && !so && !sh && !mv && !sc && !vr) return null;
   return (
     <section id="history-facts" className="mb-4 rounded-xl border border-slate-200 p-3 dark:border-slate-800">
       <h2 className="mb-2 text-sm font-semibold">이 종목의 지난 시세에서</h2>
@@ -94,6 +95,28 @@ export default function HistoryFacts({ h }: { h: HistoryData }) {
                 })}
               </tbody>
             </table>
+          </div>
+        )}
+        {vr && (
+          <div>
+            <h3 className="mb-1 text-xs font-semibold text-slate-600 dark:text-slate-300">변동성 국면 — 지금 {(vr.now * 100).toFixed(0)}% (자기 이력 {(vr.pct * 100).toFixed(0)}% 분위)</h3>
+            <table className="w-full text-left text-xs">
+              <thead className="text-slate-500"><tr><th className="py-0.5 pr-2">한 달 변동성</th><th className="pr-2">1개월 뒤</th><th>3개월 뒤</th></tr></thead>
+              <tbody>
+                {["0", "1", "2"].map((k) => {
+                  const b = vr.buckets[k] ?? {};
+                  const 칸 = (d: DistLite | null | undefined) => (d ? `${pct(d.median)} · 오름 ${(d.up * 100).toFixed(0)}%` : "-");
+                  return (
+                    <tr key={k} className={`border-t border-slate-100 dark:border-slate-800 ${Number(k) === vr.bucket ? "font-semibold" : ""}`}>
+                      <td className="py-0.5 pr-2">{["조용한 편", "보통", "시끄러운 편"][Number(k)]}{Number(k) === vr.bucket ? " ◀ 지금" : ""}</td>
+                      <td className="pr-2">{칸(b["1"])}</td>
+                      <td>{칸(b["3"])}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            <p className="mt-1 text-[11px] text-slate-400">칸 = 이 종목 자기 이력의 한 달 변동성 삼분위(경계 {(vr.edges[0] * 100).toFixed(0)}% · {(vr.edges[1] * 100).toFixed(0)}%).</p>
           </div>
         )}
         {sc && (sc.down.stock || sc.up.stock) && (
