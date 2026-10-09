@@ -67,12 +67,19 @@ def universe_verdict(client: TursoClient, country: str, stock_id: int) -> dict |
     return {"verdict": r[0]["verdict"], "headline": r[0]["headline"], "against": detail.get("against") or [],
             "outlook": detail.get("outlook")}  # fmt: skip
 
+#: **관심 종목을 바깥에 고정하고 최신 스냅샷은 한 번만 구한다** (docs/infra.md 25.1077).
+#: 예전 식은 `JOIN` 에 맡겨 플래너가 stocks 전체를 바깥으로 잡았고, 최신 스냅샷 MAX 가 `s2.country = s.country` 로
+#: **상관** 서브쿼리라 미국 주식 행마다(약 9천 번) 다시 돌았다 — 한 번마다 (snapshot_date, stock_id) 색인 맨 위의
+#: 국내 행 수천 개를 걸어 내려갔다. 2026-10-08·09 미국 일일 배치 한 번 3,400만 행의 대부분이다(25.1050 은 원인을
+#: 잘못 짚었다). 관심 종목 수와 무관한 고정 비용이었다. CROSS JOIN 은 SQLite 에서 조인 순서를 고정한다.
+#: 나라는 두 번 바인딩한다(바깥 조건·최신 스냅샷). 최신 스냅샷 식은 `db.latest_snapshot_sql` 과 같은 것을
+#: 글자로 적었다 — 스키마 검사가 읽을 수 있게
 TARGETS_SQL = (
     "SELECT s.id, s.ticker, s.country, COALESCE(s.name_ko, s.name_en, s.ticker) AS name, s.asset_type"
-    " FROM watchlist w JOIN stocks s ON s.id = w.stock_id"
+    " FROM watchlist w CROSS JOIN stocks s ON s.id = w.stock_id"
     " WHERE s.country = ? AND s.asset_type = 'stock' AND NOT EXISTS (SELECT 1 FROM universe_members u"
-    "   WHERE u.stock_id = s.id AND u.included = 1 AND u.snapshot_date = (SELECT MAX(u2.snapshot_date)"
-    "   FROM universe_members u2 JOIN stocks s2 ON s2.id = u2.stock_id WHERE s2.country = s.country))"
+    "   WHERE u.stock_id = s.id AND u.included = 1 AND u.snapshot_date = (SELECT MAX(um.snapshot_date)"
+    "   FROM universe_members um JOIN stocks su ON su.id = um.stock_id WHERE su.country = ?))"
     " ORDER BY w.added_at LIMIT ?"
 )
 ONE_SQL = (
@@ -530,7 +537,7 @@ def run(market: str | None = None, stock_id: int | None = None, send: bool = Fal
             country = str(rows[0]["country"]) if rows else "KR"
         else:
             country = "KR" if (market or "KR").upper() == "KR" else "US"
-            rows = client.execute(TARGETS_SQL, [country, MAX_STOCKS]).dicts()
+            rows = client.execute(TARGETS_SQL, [country, country, MAX_STOCKS]).dicts()
         # 실패도 기록에 남게 먼저 연다 — 안 남으면 화면이 '안 불렸다' 와 똑같이 본다 (25.1018)
         run_id = db.start_batch_run(client, job_name=JOB_NAME, market=country, trade_date=cal.user_today().isoformat())
         if stock_id is not None and (not rows or rows[0]["asset_type"] != "stock"):
