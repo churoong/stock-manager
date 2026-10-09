@@ -637,6 +637,16 @@ MISSING_MARKET_DAYS_SQL = (
 NEVER_PRICED_QUIET_SNAPSHOTS = 2
 
 
+#: 한 번도 시세가 없던 오래된 종목 (25.922). 글자 그대로의 질의 — 스키마 검사가 읽을 수 있게 목록은 JSON 하나로 넘긴다.
+#: 스냅샷 수 세기는 `idx_universe_stock`(마이그레이션 0060)을 탄다 — 그 전에는 못 받은 심볼마다 유니버스 표 전체를 훑어
+#: 미국 일일 배치 한 번이 Turso 약 3,200만 행을 읽었다 (docs/infra.md 25.1050)
+NEVER_PRICED_SQL = (
+    "SELECT s.yahoo_symbol FROM stocks s WHERE s.id IN (SELECT value FROM json_each(?))"
+    " AND NOT EXISTS (SELECT 1 FROM prices p WHERE p.stock_id = s.id)"
+    " AND (SELECT COUNT(*) FROM universe_members u WHERE u.stock_id = s.id) >= ?"
+)
+
+
 def _drop_never_priced(client: TursoClient, note: str, symbols: list[str], bars: list, ids: dict[str, int]) -> str:
     """야후 경고에서 **한 번도 시세가 없던 오래된 종목**의 "못 받음" 을 뺀다 (docs/infra.md 25.922).
 
@@ -652,11 +662,7 @@ def _drop_never_priced(client: TursoClient, note: str, symbols: list[str], bars:
     try:
         조용 = {
             str(r[0]) for r in client.execute(
-                # 글자 그대로의 질의 — 스키마 검사가 읽을 수 있게 목록은 JSON 하나로 넘긴다
-                "SELECT s.yahoo_symbol FROM stocks s WHERE s.id IN (SELECT value FROM json_each(?))"
-                " AND NOT EXISTS (SELECT 1 FROM prices p WHERE p.stock_id = s.id)"
-                " AND (SELECT COUNT(*) FROM universe_members u WHERE u.stock_id = s.id) >= ?",
-                [json.dumps([ids[t] for t in 못받음]), NEVER_PRICED_QUIET_SNAPSHOTS],
+                NEVER_PRICED_SQL, [json.dumps([ids[t] for t in 못받음]), NEVER_PRICED_QUIET_SNAPSHOTS],
             ).rows
         }  # fmt: skip
     except Exception as exc:  # noqa: BLE001 — 거르지 못하면 예전처럼 다 경고한다
