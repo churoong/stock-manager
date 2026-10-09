@@ -500,12 +500,15 @@ class Test종목_분석:
         검사(ANALYSIS, f"`PROFILE_DAYS`({hs.PROFILE_DAYS})거래일", "매물대 창")
         검사(ANALYSIS, f"`PROFILE_BINS`({hs.PROFILE_BINS})칸", "매물대 칸 수")
         검사(ANALYSIS, f"`PROFILE_TOP`({hs.PROFILE_TOP})칸", "매물대 사다리 칸")
+        검사(ANALYSIS, f"−`SCENARIO_MOVE`({sim.SCENARIO_MOVE * 100:.0f}%)", "시장 시나리오 폭")
+        검사(ANALYSIS, f"`SCENARIO_MIN_PATHS`({sim.SCENARIO_MIN_PATHS})개 미만", "시나리오 최소 경로")
 
     def test_해석_묶음(self) -> None:
         from batch.jobs import verdicts as vj
         from batch.services import insights as ins
 
         검사(ANALYSIS, f"`WEIGHT_MONTHS`({ins.WEIGHT_MONTHS})개월 성적", "성적 가중 합의 기간")
+        검사(ANALYSIS, f"`ALT_TOP`({ins.ALT_TOP})개", "대체 후보 수")
         검사(ANALYSIS, f"Z″ = {ins.Z2_COEF[0]}·(유동자산 − 유동부채)/자산 + {ins.Z2_COEF[1]}·이익잉여금/자산 + "
                        f"{ins.Z2_COEF[2]}·영업이익/자산 + {ins.Z2_COEF[3]}·자본/부채", "Altman Z″ 계수")
         검사(ANALYSIS, f"`Z2_SAFE`({ins.Z2_SAFE:.2f})", "Z″ 안전 경계")

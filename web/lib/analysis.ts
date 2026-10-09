@@ -39,6 +39,8 @@ export interface Verdict {
     health?: { fiscal_year: number; consolidated: boolean; report_date: string | null; z: number | null; zone?: "safe" | "grey" | "distress"; parts?: number[]; debt_ratio?: number; note?: string } | null;
     /** 이 종목에 난 신호들의 성적 (docs/analysis.md 37장, 25.1060) */
     signal_history?: SignalHistory | null;
+    /** 같은 업종 대체 후보 — 점수가 같거나 높고 변동성이 낮은 종목 (47장, 25.1068) */
+    alternatives?: Array<{ stock_id: number; ticker: string; name: string; total: number; vol: number; mdd: number | null; my_vol: number; my_total: number }>;
   };
   evidence: EvidenceRow[];
   score_as_of: string | null;
@@ -101,6 +103,8 @@ export interface HistoryData {
   boot?: { days_used: number; sigma: number } | null;
   /** 매물대 (45장) — 칸은 마지막 수정주가에 대한 비율 */
   profile?: { since: string; until: string; days: number; bins: Array<{ lo: number; hi: number; share: number }>; top: number[]; now: number } | null;
+  /** 시장 시나리오 (46장) — 지수가 1년에 ±20% 넘게 움직인 경로에서 이 종목의 1년 수익(16·50·84%) */
+  scenarios?: { days_used: number; beta: number | null; paths: number; move: number; down: { n: number; stock?: number[]; index?: number }; up: { n: number; stock?: number[]; index?: number } } | null;
   /** 움직임 분해 (44장) */
   moves?: { until: string; beta: number; w: Record<string, { since: string; stock: number; market: number; sector: number | null; peers: number; own: number }> } | null;
   /** 공매도 급증 뒤 (42장, 국내) */
@@ -108,7 +112,7 @@ export interface HistoryData {
 }
 
 /** 진단 줄 가운데 이력 카드(HistoryFacts)가 그리는 줄 — 목록에서 뺀다 */
-export const HISTORY_LINE_PREFIXES = ["낙폭 회복(", "최악의 한 달(", "계절성(", "52주 신고가 뒤(", "실적 발표 반응(", "상승의 출처(", "공매도 급증 뒤(", "움직임 분해(", "실제 수익률로 그린 1년 범위("];
+export const HISTORY_LINE_PREFIXES = ["낙폭 회복(", "최악의 한 달(", "계절성(", "52주 신고가 뒤(", "실적 발표 반응(", "상승의 출처(", "공매도 급증 뒤(", "움직임 분해(", "실제 수익률로 그린 1년 범위(", "시장 시나리오("];
 
 /** 보고서 코드 → 이름 (DART) */
 export const REPORT_NAME: Record<string, string> = { "11013": "1분기", "11012": "반기", "11014": "3분기", "11011": "사업" };

@@ -16,7 +16,8 @@ export default function HistoryFacts({ h }: { h: HistoryData }) {
   const so = h.sources;
   const sh = h.short;
   const mv = h.moves;
-  if (!dd && !t && !Object.keys(se).length && !bo && !ea && !so && !sh && !mv) return null;
+  const sc = h.scenarios;
+  if (!dd && !t && !Object.keys(se).length && !bo && !ea && !so && !sh && !mv && !sc) return null;
   return (
     <section id="history-facts" className="mb-4 rounded-xl border border-slate-200 p-3 dark:border-slate-800">
       <h2 className="mb-2 text-sm font-semibold">이 종목의 지난 시세에서</h2>
@@ -93,6 +94,25 @@ export default function HistoryFacts({ h }: { h: HistoryData }) {
                 })}
               </tbody>
             </table>
+          </div>
+        )}
+        {sc && (sc.down.stock || sc.up.stock) && (
+          <div>
+            <h3 className="mb-1 text-xs font-semibold text-slate-600 dark:text-slate-300">시장 시나리오 — 시장이 1년에 {(sc.move * 100).toFixed(0)}% 넘게 움직이면</h3>
+            <ul className="space-y-0.5 text-xs">
+              {([["down", "빠진"], ["up", "오른"]] as const).map(([k, 말]) => {
+                const x = sc[k];
+                return x.stock ? (
+                  <li key={k}>
+                    {말} 경로 {x.n}개(지수 중앙값 {pct(x.index!)}): 이 종목 중앙값 <b>{pct(x.stock[1])}</b> · 68% {pct(x.stock[0])}~{pct(x.stock[2])}
+                    {sc.beta !== null ? <span className="text-slate-500"> (베타 {sc.beta.toFixed(2)}로 단순 환산 {pct(x.index! * sc.beta)})</span> : null}
+                  </li>
+                ) : (
+                  <li key={k} className="text-slate-400">{말} 경로가 {x.n}개뿐이라 분포를 내지 않습니다</li>
+                );
+              })}
+            </ul>
+            <p className="mt-1 text-[11px] text-slate-400">종목과 지수의 같은 날 수익을 한 쌍으로 다시 뽑은 1년 경로 {sc.paths.toLocaleString()}개에서 셉니다(함께 무너지는 꼬리가 남습니다). 평균은 뺐습니다.</p>
           </div>
         )}
         {mv && Object.keys(mv.w).length > 0 && (

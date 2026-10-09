@@ -89,3 +89,59 @@ def touch(boot: dict, ratio: float, days: int) -> float | None:
         return None if not qs else round(1 - _cdf(qs, x - 1e-12), 4)
     qs = (boot.get("min") or {}).get(str(days))
     return None if not qs else round(_cdf(qs, x), 4)
+
+
+#: 시장 시나리오 (docs/analysis.md 46장) — "시장(기준 지수)이 1년에 20% 넘게 빠지면/오르면". 흔한 약세장 정의(−20%)를
+#: 빌린 표시 기준
+SCENARIO_MOVE = 0.20
+#: 시나리오 경로가 이보다 적으면 분포를 말하지 않는다 — 분위 셋(16·50·84%)을 낼 만큼
+SCENARIO_MIN_PATHS = 50
+
+
+def scenarios(dates: list[str], closes: list[float], index: dict[str, float], seed: int) -> dict[str, Any] | None:
+    """시장 시나리오 (46장, 25.1067) — 종목과 지수의 **같은 날** 일간 로그 수익을 한 쌍으로 묶어 열흘 묶음째 다시 뽑는다
+    (두 계열의 상관·함께 무너지는 꼬리가 그대로 남는다). 둘 다 평균을 뺀다(표류 0).
+    지수가 1년 뒤 −20% 이하인 경로·+20% 이상인 경로에서 종목의 1년 수익 분포(16·50·84%)와 경로 수.
+    선형 비교용으로 이 쌍에서 잰 베타도 함께."""
+    쌍 = [(float(c), float(index[str(d)])) for d, c in zip(dates, closes, strict=False)
+         if c and c > 0 and index.get(str(d)) and index[str(d)] > 0][-(BOOT_DAYS + 1) :]  # fmt: skip
+    if len(쌍) < BOOT_MIN_DAYS + 1:
+        return None
+    a = np.asarray(쌍, dtype=float)
+    r = np.diff(np.log(a), axis=0)  # (n, 2): 종목, 지수
+    r = r - r.mean(axis=0)
+    var = float(np.var(r[:, 1], ddof=1))
+    beta = float(np.cov(r[:, 0], r[:, 1], ddof=1)[0, 1] / var) if var > 0 else None
+    n_blocks = math.ceil(BOOT_HORIZON / BOOT_BLOCK)
+    rng = np.random.default_rng(seed + 1)  # 1년 경로(43장)와 다른 씨앗 — 같은 묶음을 되풀이하지 않게
+    starts = rng.integers(0, len(r) - BOOT_BLOCK + 1, size=(BOOT_PATHS, n_blocks))
+    idx = (starts[:, :, None] + np.arange(BOOT_BLOCK)[None, None, :]).reshape(BOOT_PATHS, -1)[:, :BOOT_HORIZON]
+    끝 = r[idx].sum(axis=1)  # (paths, 2) 1년 로그 수익
+    out: dict[str, Any] = {"days_used": int(len(r)), "beta": round(beta, 3) if beta is not None else None,
+                           "paths": BOOT_PATHS, "move": SCENARIO_MOVE}  # fmt: skip
+    for 이름, 고름 in (("down", 끝[:, 1] <= math.log(1 - SCENARIO_MOVE)),
+                     ("up", 끝[:, 1] >= math.log(1 + SCENARIO_MOVE))):  # fmt: skip
+        n = int(고름.sum())
+        x: dict[str, Any] = {"n": n}
+        if n >= SCENARIO_MIN_PATHS:
+            q = np.quantile(끝[고름, 0], (0.16, 0.5, 0.84))
+            x.update({"stock": [round(float(math.expm1(v)), 4) for v in q],
+                      "index": round(float(math.expm1(np.median(끝[고름, 1]))), 4)})  # fmt: skip
+        out[이름] = x
+    return out
+
+
+def scenario_line(s: dict | None) -> str | None:
+    """진단 줄 (46장)."""
+    if not s:
+        return None
+    조각 = []
+    for 이름, 말 in (("down", "빠진"), ("up", "오른")):
+        x = s.get(이름) or {}
+        if x.get("stock"):
+            선형 = f", 베타로 단순 환산 {x['index'] * s['beta'] * 100:+.0f}%" if s.get("beta") is not None else ""
+            lo, mid, hi = (v * 100 for v in x["stock"])
+            조각.append(f"시장이 1년에 {s['move'] * 100:.0f}% 넘게 {말} 경로 {x['n']}개"
+                       f"(지수 중앙값 {x['index'] * 100:+.0f}%)에서 이 종목 중앙값 {mid:+.0f}%"
+                       f"(68% {lo:+.0f}~{hi:+.0f}%{선형})")  # fmt: skip
+    return ("시장 시나리오(실제 함께 움직인 날들로 그린 경로): " + " · ".join(조각)) if 조각 else None

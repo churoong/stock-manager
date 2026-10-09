@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import type { FlowCard, Peers, SignalHistory, Twin } from "@/lib/analysis";
+import type { FlowCard, Peers, SignalHistory, Twin, Verdict } from "@/lib/analysis";
 
 /**
  * 종목 분석 의견 카드의 해석 묶음 (docs/analysis.md 16·18장, 25.1041) — 수급 흐름(국내)과 팩터 모양이 닮은 종목.
@@ -9,10 +9,11 @@ import type { FlowCard, Peers, SignalHistory, Twin } from "@/lib/analysis";
  */
 const HORIZON_KO: Record<string, string> = { short: "단기", mid: "중기", long: "장기" };
 
-export default function AnalysisExtras({ flows, twins, peers, signals }: {
+export default function AnalysisExtras({ flows, twins, peers, signals, alternatives }: {
   flows?: FlowCard | null; twins?: Twin[]; peers?: Peers | null; signals?: SignalHistory | null;
+  alternatives?: NonNullable<Verdict["detail"]>["alternatives"];
 }) {
-  if (!flows && !twins?.length && !peers && !signals) return null;
+  if (!flows && !twins?.length && !peers && !signals && !alternatives?.length) return null;
   const pctv = (v: number | null) => (v === null ? "-" : `${v >= 0 ? "+" : ""}${(v * 100).toFixed(1)}%`);
   const 억 = (x: number) => `${x >= 0 ? "+" : ""}${x.toLocaleString(undefined, { maximumFractionDigits: 1 })}억`;
   return (
@@ -87,6 +88,21 @@ export default function AnalysisExtras({ flows, twins, peers, signals }: {
               ))}
             </p>
           )}
+        </div>
+      )}
+      {alternatives && alternatives.length > 0 && (
+        <div className="rounded-lg border border-slate-200 px-2.5 py-2 text-xs dark:border-slate-800">
+          <p className="mb-1 font-semibold text-slate-600 dark:text-slate-300">
+            같은 업종 대체 후보 — 점수가 같거나 높고 변동성이 낮은 종목 (이 종목 점수 {alternatives[0].my_total.toFixed(1)} · 변동성 {(alternatives[0].my_vol * 100).toFixed(0)}%)
+          </p>
+          <ul className="space-y-0.5">
+            {alternatives.map((a) => (
+              <li key={a.stock_id}>
+                <Link href={`/stocks/${a.stock_id}`} className="text-sky-700 hover:underline dark:text-sky-300">{a.name}</Link>{" "}
+                점수 {a.total.toFixed(1)} · 변동성 {(a.vol * 100).toFixed(0)}%{a.mdd !== null ? ` · MDD ${(a.mdd * 100).toFixed(0)}%` : ""}
+              </li>
+            ))}
+          </ul>
         </div>
       )}
       {twins && twins.length > 0 && (

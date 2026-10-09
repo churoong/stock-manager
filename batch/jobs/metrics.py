@@ -345,6 +345,8 @@ def compute_all(
             이력["short"] = event_history.short_surges(수급.get(stock_id, []), 날짜들, 종가들)
         # 실제 수익률 1년 경로·매물대 (43·45장, 25.1064·25.1066) — 같은 계열로
         이력["boot"] = simulation.bootstrap(종가들, seed=stock_id)
+        # 시장 시나리오 (46장, 25.1067) — 베타·하락장 성적과 같은 기준 지수
+        이력["scenarios"] = simulation.scenarios(날짜들, 종가들, 지수, seed=stock_id) if 지수 else None
         이력["profile"] = history.volume_profile(날짜들, 종가들, [q.value for q in 국면_점])
         # 움직임 분해 (44장, 25.1065) — 업종 몫은 모든 종목을 모은 뒤(아래)
         움직임[stock_id] = history.move_inputs(날짜들, 종가들, 지수)

@@ -535,6 +535,8 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
             "stock_id": sid, "ticker": r["ticker"], "name": r["name"], "total": r["total_score"],
             "pbr": 1 / bp if isinstance(bp, (int, float)) and bp > 0 else None, "roe": fu.get("roe"),
             "r3": (재료["momentum"].get(sid) or {}).get("momentum_3m"),
+            # 같은 업종 대체 후보 (47장) — 성과 지표의 연환산 변동성·MDD
+            "vol": (재료["risk"].get(sid) or {}).get("volatility_ann"), "mdd": (재료["risk"].get(sid) or {}).get("mdd"),
         })  # fmt: skip
     # 첫 성적이 나오는 날 — 처음 쌓은 날의 한 달 뒤(가장 짧은 기간)
     첫평가 = ft.months_back(date.fromisoformat(str(상태["since"])[:10]), -vd.FORECAST_MONTHS[0]).isoformat()
@@ -652,6 +654,12 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
         if r.get("sector"):
             동종 = insights.peers(sid, 업종.get((str(r.get("market")), str(r["sector"])), []))
             detail["peers"] = None if not 동종 else {"sector": r["sector"], "market": r.get("market"), **동종}
+            대체 = insights.alternatives(sid, 업종.get((str(r.get("market")), str(r["sector"])), []))
+            detail["alternatives"] = 대체
+            if 대체:
+                out["reasons"].append("같은 업종에서 점수가 같거나 높고 변동성이 낮은 종목: " + ", ".join(
+                    f"{a['name']}(점수 {a['total']:.0f}·변동성 {a['vol'] * 100:.0f}%)" for a in 대체)
+                    + f" — 이 종목 변동성 {대체[0]['my_vol'] * 100:.0f}%")  # fmt: skip
         레이더재료.append({"stock_id": sid, "ticker": r["ticker"], "name": r["name"], "verdict": out["verdict"],
                        "ladder": (out.get("outlook") or {}).get("ladder"), "score_change": 변화,
                        "agreement": (out.get("outlook") or {}).get("agreement")})  # fmt: skip

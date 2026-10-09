@@ -393,6 +393,26 @@ def peers(sid: int, members: list[dict]) -> dict | None:
     return out
 
 
+#: 같은 업종 대체 후보 수 (docs/analysis.md 47장)
+ALT_TOP = 3
+
+
+def alternatives(sid: int, members: list[dict]) -> list[dict]:
+    """같은 업종 대체 후보 (47장, 25.1068) — 같은 시장·같은 업종에서
+    **종합 점수가 같거나 높고 연환산 변동성이 낮은** 종목,
+    변동성 낮은 순 `ALT_TOP` 개. 새 문턱 없음 — "같거나 높다"·"낮다" 의 비교만. 이 종목 점수·변동성이 없으면 빈 목록."""
+    me = next((m for m in members if m["stock_id"] == sid), None)
+    if not me or not isinstance(me.get("total"), (int, float)) or not isinstance(me.get("vol"), (int, float)):
+        return []
+    후보 = [m for m in members if m["stock_id"] != sid and isinstance(m.get("total"), (int, float))
+          and isinstance(m.get("vol"), (int, float))
+          and m["total"] >= me["total"] and m["vol"] < me["vol"]]  # fmt: skip
+    후보.sort(key=lambda m: (m["vol"], -m["total"], m["stock_id"]))
+    return [{"stock_id": m["stock_id"], "ticker": m["ticker"], "name": m["name"], "total": m["total"],
+             "vol": m["vol"], "mdd": m.get("mdd"), "my_vol": me["vol"], "my_total": me["total"]}
+            for m in 후보[:ALT_TOP]]  # fmt: skip
+
+
 def calibration_for(total: float | None, payloads: list[dict] | None) -> dict | None:
     """같은 점수대의 지난 신호 성적 (docs/analysis.md 22장, 25.1046) — 점수 보정표(docs/signals.md 10.1)에서
     이 종목 종합 점수가 든 10점 구간을 고른다.
