@@ -240,6 +240,7 @@ def compute_all(
     # 벤치마크도 (나라, 기간) 마다 한 번만 읽는다
     bench_cache: dict[str, list[calc.PricePoint]] = {}
     bench_missing: set[str] = set()
+    시장국면: dict[str, dict[str, str]] = {}
 
     나라_끝: dict[str, tuple[dict[str, date], dict[int, str]]] = {}
     멈춤_경고: set[str] = set()
@@ -258,7 +259,11 @@ def compute_all(
         기준일 = date.fromisoformat(기준)
         # 비슷한 국면 (docs/analysis.md 13장, 25.1039) — 5년 시세를 읽은 김에. 기준일 뒤 시세는 넣지 않는다
         국면_점 = [q for q in all_points if q.date <= 기준일]
-        국면표 = patterns.table([q.date.isoformat() for q in 국면_점], [q.close for q in 국면_점])
+        # 시장 국면으로 한 번 더 나눈다 (29장, 25.1054) — 그날 국면은 그날까지의 지수만 보므로 나라마다 한 번 낸다
+        if country not in 시장국면:
+            시장국면[country] = patterns.index_regimes({q.date.isoformat(): q.close for q in bench_cache[country]})
+        국면표 = patterns.table([q.date.isoformat() for q in 국면_점], [q.close for q in 국면_점],
+                             시장국면[country] or None)  # fmt: skip
         # 하락장 성적 (28장, 25.1053) — 베타와 같은 기준 지수로
         지수 = {q.date.isoformat(): q.close for q in bench_cache[country] if q.date <= 기준일}
         하락장 = (patterns.stress([q.date.isoformat() for q in 국면_점], [q.close for q in 국면_점], 지수)

@@ -67,8 +67,30 @@ def label(key: str) -> str:
     return f"{R3_LABEL[i]} · {PROX_LABEL[j]}"
 
 
-def table(dates: list[str], closes: list[float]) -> dict[str, Any] | None:
-    """그 종목의 국면표. 날짜 오름차순 종가(수정주가). 상태를 낼 날이 모자라면 None."""
+#: 시장 국면 (docs/analysis.md 29장, 25.1054) — 기준 지수가 200거래일 단순이동평균 아래면 약세.
+#: 정의는 추세 필터(`trend.regime_from_closes`, signals.md 3.5)와 같다 — 오늘 국면을 그 함수로 고르기 때문이다
+REGIME_SMA_DAYS = 200
+REGIME_LABEL = {"bull": "시장 강세(지수 200일선 위)", "bear": "시장 약세(지수 200일선 아래)"}
+
+
+def index_regimes(index: dict[str, float]) -> dict[str, str]:
+    """지수 {날짜: 종가} → {날짜: "bull"|"bear"}. 그날까지 최근 200개 종가의 평균과 견준다(200개가 모이기 전 날은 없음).
+
+    나라마다 한 번만 부른다(주간 작업이 캐시) — 날마다 창을 새로 더해
+    `trend.regime_from_closes` 와 소수 끝까지 같게 한다."""
+    날 = sorted(d for d, c in index.items() if c and c > 0)
+    값 = [index[d] for d in 날]
+    out: dict[str, str] = {}
+    for i in range(REGIME_SMA_DAYS - 1, len(날)):
+        창 = 값[i - REGIME_SMA_DAYS + 1 : i + 1]
+        out[날[i]] = "bear" if 값[i] < sum(창) / len(창) else "bull"
+    return out
+
+
+def table(dates: list[str], closes: list[float], regimes: dict[str, str] | None = None) -> dict[str, Any] | None:
+    """그 종목의 국면표. 날짜 오름차순 종가(수정주가). 상태를 낼 날이 모자라면 None.
+
+    regimes(`index_regimes`)를 주면 같은 칸을 시장 강세·약세로 한 번 더 나눈 `by_regime` 도 낸다(29장)."""
     n = len(closes)
     상태: list[tuple[int, float, float]] = []
     # 252일 최고값을 미는 창(단조 덱)으로 — 종목마다 1,250일 × 252 를 다시 훑지 않는다
@@ -91,9 +113,14 @@ def table(dates: list[str], closes: list[float]) -> dict[str, Any] | None:
     날수: dict[str, int] = {}
     국면: dict[str, int] = {}
     전체: dict[str, list[float]] = {str(m): [] for m in HORIZON_DAYS}
+    시장칸: dict[str, dict[str, dict[str, list[float]]]] = {}
+    시장날수: dict[str, int] = {}
     앞칸 = None
     for i, r3, prox in 상태:
         k = bucket(r3, prox, edges)
+        g = (regimes or {}).get(str(dates[i]))
+        if g:
+            시장날수[f"{g}/{k}"] = 시장날수.get(f"{g}/{k}", 0) + 1
         날수[k] = 날수.get(k, 0) + 1
         if k != 앞칸:
             국면[k] = 국면.get(k, 0) + 1
@@ -103,12 +130,22 @@ def table(dates: list[str], closes: list[float]) -> dict[str, Any] | None:
                 r = closes[i + d] / closes[i] - 1
                 칸들.setdefault(k, {}).setdefault(str(m), []).append(r)
                 전체[str(m)].append(r)
+                if g:
+                    시장칸.setdefault(f"{g}/{k}", {}).setdefault(str(m), []).append(r)
     buckets: dict[str, Any] = {}
     for k, 기간 in 칸들.items():
         h = {m: dist(v) for m, v in 기간.items() if len(v) >= MIN_DAYS}
         if h:
             buckets[k] = {"days": 날수.get(k, 0), "episodes": 국면.get(k, 0), "h": h}
+    by_regime: dict[str, dict[str, Any]] = {}
+    for gk, 기간 in 시장칸.items():
+        h = {m: dist(v) for m, v in 기간.items() if len(v) >= MIN_DAYS}
+        if h:
+            g, k = gk.split("/")
+            by_regime.setdefault(g, {})[k] = {"days": 시장날수.get(gk, 0), "h": h}
+    extra = {"by_regime": by_regime} if regimes is not None else {}
     return {
+        **extra,
         "since": dates[상태[0][0]], "until": dates[-1], "edges": edges, "buckets": buckets,
         "all": {m: dist(v) for m, v in 전체.items() if len(v) >= MIN_DAYS},
         "current": bucket(상태[-1][1], 상태[-1][2], edges),
@@ -117,8 +154,11 @@ def table(dates: list[str], closes: list[float]) -> dict[str, Any] | None:
     }
 
 
-def pick(t: dict | None, r3: float | None, prox: float | None) -> dict | None:
-    """오늘 상태의 칸 — 일일 의견이 모멘텀 원값으로 고른다. 칸이 없거나(표본 모자람) 상태를 모르면 None."""
+def pick(t: dict | None, r3: float | None, prox: float | None, regime: str | None = None) -> dict | None:
+    """오늘 상태의 칸 — 일일 의견이 모멘텀 원값으로 고른다. 칸이 없거나(표본 모자람) 상태를 모르면 None.
+
+    regime(오늘 시장 국면 "bull"|"bear")을 주고 표에 `by_regime` 이 있으면 같은 칸·같은 시장 국면의 분포를
+    `regime` 으로 덧붙인다(29장). 표본이 모자라면 {"empty": True} — 칸 전체 분포는 그대로 둔다."""
     if not t or "edges" not in t or not isinstance(r3, (int, float)) or not isinstance(prox, (int, float)):
         return None  # 하락장 성적만 있는 행(국면표를 못 낸 짧은 이력)도 여기서 걸러진다
     k = bucket(r3, prox, t["edges"])
@@ -130,8 +170,17 @@ def pick(t: dict | None, r3: float | None, prox: float | None) -> dict | None:
         d = (칸.get("h") or {}).get(str(m))
         if d:
             horizons.append({"months": m, **d, "base": (t.get("all") or {}).get(str(m))})
-    return {"key": k, "label": label(k), "days": 칸.get("days"), "episodes": 칸.get("episodes"),
-            "since": t.get("since"), "until": t.get("until"), "horizons": horizons}  # fmt: skip
+    out = {"key": k, "label": label(k), "days": 칸.get("days"), "episodes": 칸.get("episodes"),
+           "since": t.get("since"), "until": t.get("until"), "horizons": horizons}  # fmt: skip
+    if regime in REGIME_LABEL and isinstance(t.get("by_regime"), dict):
+        시장 = (t["by_regime"].get(regime) or {}).get(k)
+        if 시장:
+            out["regime"] = {"state": regime, "label": REGIME_LABEL[regime], "days": 시장.get("days"),
+                             "horizons": [{"months": m, **시장["h"][str(m)]} for m in sorted(HORIZON_DAYS)
+                                          if (시장.get("h") or {}).get(str(m))]}  # fmt: skip
+        else:
+            out["regime"] = {"state": regime, "label": REGIME_LABEL[regime], "empty": True}
+    return out
 
 
 #: 하락장 성적 — 시장(기준 지수)이 가장 나빴던 달의 수 (docs/analysis.md 28장)

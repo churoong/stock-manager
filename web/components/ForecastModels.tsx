@@ -66,6 +66,14 @@ export default function ForecastModels({ analog, scenario, agreement, close, cur
                   </tbody>
                 </table>
               </div>
+              {analog.regime && (
+                <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
+                  {analog.regime.empty || !analog.regime.horizons?.length
+                    ? `시장 국면까지 맞추면(${analog.regime.label}): 이 칸에서 그런 날이 드물어 분포를 내지 않습니다.`
+                    : `시장 국면까지 맞추면(${analog.regime.label}) — 같은 칸 ${analog.regime.days?.toLocaleString()}일: ` +
+                      analog.regime.horizons.map((h) => `${horizonLabel(h.months)} ${pct(h.median)}·오름 ${(h.up * 100).toFixed(0)}%`).join(" · ")}
+                </p>
+              )}
               <p className="mt-1 text-xs text-slate-400">
                 같은 상태 = 3개월 수익률과 52주 고점 근접을 이 종목 자신의 과거에서 각각 셋으로 나눈 칸. 앞으로의 기간이 겹쳐 날들이 서로 독립이 아니므로 &quot;일수&quot; 보다 &quot;국면&quot; 수가 실제 표본에 가깝습니다.
               </p>

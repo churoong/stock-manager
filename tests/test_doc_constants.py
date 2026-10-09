@@ -446,6 +446,7 @@ class Test종목_분석:
         검사(ANALYSIS, f"`MIN_DAYS`({pt.MIN_DAYS})일 미만", "칸 최소 일수")
         검사(ANALYSIS, f"`WORST_MONTHS`({pt.WORST_MONTHS})개 달", "하락장 성적 달 수")
         검사(ANALYSIS, f"`MIN_MONTHS`({pt.MIN_MONTHS}) 미만", "하락장 성적 최소 달 수")
+        검사(ANALYSIS, f"`REGIME_SMA_DAYS`({pt.REGIME_SMA_DAYS})거래일 단순이동평균", "시장 국면 이동평균 창")
         검사(ANALYSIS, f"({'·'.join(str(d) for d in pt.HORIZON_DAYS.values())}거래일)", "기간 → 거래일")
         검사(ANALYSIS, f"`MIN_SAMPLE`({ft.MIN_SAMPLE})건 미만", "성적표 최소 표본")
 

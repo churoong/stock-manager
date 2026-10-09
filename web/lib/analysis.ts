@@ -141,6 +141,8 @@ export interface AnalogData {
   until?: string;
   empty?: boolean;
   horizons?: Array<AnalogDist & { months: number; base?: AnalogDist | null }>;
+  /** 같은 칸을 오늘 시장 국면(지수 200일선)으로 한 번 더 나눈 분포 (docs/analysis.md 29장) */
+  regime?: { state: "bull" | "bear"; label: string; days?: number; empty?: boolean; horizons?: Array<AnalogDist & { months: number }> } | null;
 }
 
 export interface ScenarioData {

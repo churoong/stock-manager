@@ -320,6 +320,15 @@ def outlook(*, close: float | None, close_date: str | None, currency: str, momen
         evidence.append(_row("비슷한 국면", f"{a['label']} · {a.get('days')}일",
                              "3개월 수익률 × 52주 고점 근접, 자기 삼분위",
                              "price_patterns (주간 성과 지표 작업)", a.get("until")))  # fmt: skip
+        # 29. 같은 칸을 오늘 시장 국면으로 한 번 더 — 같은 3개월을 지나도 시장이 약세면 결과가 다를 수 있다
+        g = a.get("regime") or {}
+        gh = next((h for h in g.get("horizons") or [] if h["months"] == 삼["months"]), None)
+        if gh:
+            줄.append(f"시장 국면까지 맞추면({g['label']}): 같은 칸 {g.get('days')}일, {이름} 뒤 중앙값 "
+                      f"{_pct(gh['median'])}·오른 비율 {gh['up'] * 100:.0f}% (칸 전체 {_pct(삼['median'])}·"
+                      f"{삼['up'] * 100:.0f}%)")  # fmt: skip
+        elif g.get("state"):
+            줄.append(f"시장 국면까지 맞추면({g.get('label')}): 이 칸에서 그런 날이 드물어 분포를 내지 않습니다")
         out["analog"] = a
     elif a.get("empty"):
         줄.append(f"비슷한 국면: {a.get('label')} — 자기 과거에 이 상태가 드물어(표본 모자람) 분포를 내지 않습니다")

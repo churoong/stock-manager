@@ -358,6 +358,19 @@ def outlook_inputs(client: TursoClient, country: str, as_of: str, today: date, w
         for r in _safe(client, OPINIONS_SQL, [since], warnings, "증권사 목표가"):
             의견[int(r["stock_id"])].append(r)
     국면: dict[int, dict] = {}
+    # 오늘 시장 국면 (29장, 25.1054) — 주간 표가 칸을 나눈 기준 지수와 같은 지수, 추세 필터와 같은 정의
+    시장국면 = None
+    try:
+        from batch.jobs import metrics
+        from batch.services import trend
+
+        code = metrics.BENCHMARK.get(country)
+        if code:
+            closes, source = trend.load_index_closes(client, code, as_of)
+            g = trend.regime_from_closes(code, closes, as_of, source)
+            시장국면 = g.state if g.state in ("bull", "bear") else None
+    except Exception as exc:  # noqa: BLE001 — 시장 국면 줄만 빠진다
+        warnings.append(f"시장 국면을 읽지 못했습니다: {exc}")
     for r in _safe(client, PATTERNS_SQL, [country], warnings, "비슷한 국면"):
         with contextlib.suppress(TypeError, ValueError):
             국면[int(r["stock_id"])] = json.loads(r["stats_json"])
@@ -377,7 +390,7 @@ def outlook_inputs(client: TursoClient, country: str, as_of: str, today: date, w
         무위험 = None
     return {"close": 종가, "momentum": 모멘텀, "band": 밴드, "risk": 위험, "opinions": 의견,
             "market": market_returns(client, country, as_of, warnings), "rf": 무위험,
-            "patterns": 국면, "fundamentals": 재무원값, "broker_stats": 성적}  # fmt: skip
+            "patterns": 국면, "fundamentals": 재무원값, "broker_stats": 성적, "regime": 시장국면}  # fmt: skip
 
 
 def outlook_for(재료: dict, sid: int, currency: str, today: date, market: str | None = None) -> dict:
@@ -387,7 +400,8 @@ def outlook_for(재료: dict, sid: int, currency: str, today: date, market: str 
     b = 재료["band"].get(sid)
     m = 재료["momentum"].get(sid) or {}
     return vd.outlook(
-        analog=patterns.pick((재료.get("patterns") or {}).get(sid), m.get("momentum_3m"), m.get("high_52w_proximity")),
+        analog=patterns.pick((재료.get("patterns") or {}).get(sid), m.get("momentum_3m"), m.get("high_52w_proximity"),
+                              재료.get("regime")),
         fundamentals=(재료.get("fundamentals") or {}).get(sid), broker_stats=재료.get("broker_stats"),
         stress=((재료.get("patterns") or {}).get(sid) or {}).get("stress"),
         close=c.get("close"), close_date=c.get("date"), currency=currency, momentum=재료["momentum"].get(sid),
