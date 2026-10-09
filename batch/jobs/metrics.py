@@ -259,7 +259,12 @@ def compute_all(
         # 비슷한 국면 (docs/analysis.md 13장, 25.1039) — 5년 시세를 읽은 김에. 기준일 뒤 시세는 넣지 않는다
         국면_점 = [q for q in all_points if q.date <= 기준일]
         국면표 = patterns.table([q.date.isoformat() for q in 국면_점], [q.close for q in 국면_점])
-        if 국면표:
+        # 하락장 성적 (28장, 25.1053) — 베타와 같은 기준 지수로
+        지수 = {q.date.isoformat(): q.close for q in bench_cache[country] if q.date <= 기준일}
+        하락장 = (patterns.stress([q.date.isoformat() for q in 국면_점], [q.close for q in 국면_점], 지수)
+                if 지수 else None)  # fmt: skip
+        if 국면표 or 하락장:
+            국면표 = {**(국면표 or {}), "stress": 하락장}
             pattern_rows.append((stock_id, 기준, json.dumps(국면표, separators=(",", ":")), now))
         # 창 끝 검사의 "끝" 은 달력 기준일이 아니라 **그 나라 시세가 실제로 있는 마지막 날**이다 (25.710, 교차검증) —
         # 나라 수집이

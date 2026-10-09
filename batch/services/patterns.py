@@ -119,8 +119,8 @@ def table(dates: list[str], closes: list[float]) -> dict[str, Any] | None:
 
 def pick(t: dict | None, r3: float | None, prox: float | None) -> dict | None:
     """오늘 상태의 칸 — 일일 의견이 모멘텀 원값으로 고른다. 칸이 없거나(표본 모자람) 상태를 모르면 None."""
-    if not t or not isinstance(r3, (int, float)) or not isinstance(prox, (int, float)):
-        return None
+    if not t or "edges" not in t or not isinstance(r3, (int, float)) or not isinstance(prox, (int, float)):
+        return None  # 하락장 성적만 있는 행(국면표를 못 낸 짧은 이력)도 여기서 걸러진다
     k = bucket(r3, prox, t["edges"])
     칸 = (t.get("buckets") or {}).get(k)
     if not 칸:
@@ -132,3 +132,53 @@ def pick(t: dict | None, r3: float | None, prox: float | None) -> dict | None:
             horizons.append({"months": m, **d, "base": (t.get("all") or {}).get(str(m))})
     return {"key": k, "label": label(k), "days": 칸.get("days"), "episodes": 칸.get("episodes"),
             "since": t.get("since"), "until": t.get("until"), "horizons": horizons}  # fmt: skip
+
+
+#: 하락장 성적 — 시장(기준 지수)이 가장 나빴던 달의 수 (docs/analysis.md 28장)
+WORST_MONTHS = 5
+#: 하락장 성적을 낼 최소 겹치는 달 수 — 1년이 안 되면 "가장 나빴던 달" 이 한 국면이다
+MIN_MONTHS = 12
+
+
+def _month_ends(dates: list[str], closes: list[float]) -> dict[str, float]:
+    끝: dict[str, float] = {}
+    for d, c in zip(dates, closes, strict=False):
+        if c and c > 0:
+            끝[str(d)[:7]] = c  # 날짜 오름차순이라 그달 마지막 종가가 남는다
+    return 끝
+
+
+def stress(dates: list[str], closes: list[float], index: dict[str, float]) -> dict | None:
+    """하락장 성적 (docs/analysis.md 28장, 25.1053). index = 기준 지수 {날짜: 종가}.
+
+    - 달마다(그달 마지막 종가) 수익률을 종목·지수 함께 내고, 지수가 가장 나빴던 `WORST_MONTHS` 달의 둘을 나란히
+    - 하락일 베타·상승일 베타: 지수 일간 수익률이 음수인 날만·양수인 날만으로 잰 기울기(공분산 ÷ 분산)
+    겹치는 달이 `MIN_MONTHS` 미만이면 None. 문턱 없음 — 사실만."""
+    종목달 = _month_ends(dates, closes)
+    지수달 = _month_ends(sorted(index), [index[d] for d in sorted(index)])
+    달들 = sorted(set(종목달) & set(지수달))
+    if len(달들) < MIN_MONTHS + 1:
+        return None
+    rows = []
+    for a, b in zip(달들, 달들[1:], strict=False):
+        rows.append({"month": b, "index": 지수달[b] / 지수달[a] - 1, "stock": 종목달[b] / 종목달[a] - 1})
+    worst = sorted(rows, key=lambda r: r["index"])[:WORST_MONTHS]
+    worse = sum(1 for r in worst if r["stock"] < r["index"])
+    out: dict[str, Any] = {
+        "months": len(rows), "worst": [{k: (round(v, 4) if isinstance(v, float) else v) for k, v in r.items()}
+                                        for r in sorted(worst, key=lambda r: r["month"])],
+        "avg_index": round(sum(r["index"] for r in worst) / len(worst), 4),
+        "avg_stock": round(sum(r["stock"] for r in worst) / len(worst), 4), "worse": worse,
+    }  # fmt: skip
+    # 하락일·상승일 베타 — 같은 날 둘 다 있는 날만
+    일 = [(d, c) for d, c in zip(dates, closes, strict=False) if str(d) in index and c and c > 0]
+    쌍 = [(c1 / c0 - 1, index[str(d1)] / index[str(d0)] - 1) for (d0, c0), (d1, c1) in zip(일, 일[1:], strict=False)
+         if index[str(d0)] > 0]  # fmt: skip
+    for 이름, 고름 in (("down_beta", lambda m: m < 0), ("up_beta", lambda m: m > 0)):
+        xs = [(s, m) for s, m in 쌍 if 고름(m)]
+        if len(xs) >= 30:
+            ms = sum(m for _, m in xs) / len(xs)
+            ss = sum(s for s, _ in xs) / len(xs)
+            var = sum((m - ms) ** 2 for _, m in xs)
+            out[이름] = round(sum((s - ss) * (m - ms) for s, m in xs) / var, 3) if var > 0 else None
+    return out

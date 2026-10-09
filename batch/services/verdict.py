@@ -211,7 +211,7 @@ def outlook(*, close: float | None, close_date: str | None, currency: str, momen
             risk: dict | None, band: dict | None, opinions: list[dict], today: date,
             band_note: str | None = None, market: dict | None = None, rf: float | None = None,
             analog: dict | None = None, fundamentals: dict | None = None,
-            broker_stats: dict[str, dict] | None = None) -> dict:  # fmt: skip
+            broker_stats: dict[str, dict] | None = None, stress: dict | None = None) -> dict:  # fmt: skip
     """가격·가치 진단 (docs/analysis.md 9장). 예측이 아니라 근거 있는 기준점 — 모든 값은 DB 행에서 온다.
 
     momentum: momentum_3m·momentum_6m·momentum_12_1·high_52w_proximity·as_of (factors.raw_json)
@@ -323,6 +323,20 @@ def outlook(*, close: float | None, close_date: str | None, currency: str, momen
         out["analog"] = a
     elif a.get("empty"):
         줄.append(f"비슷한 국면: {a.get('label')} — 자기 과거에 이 상태가 드물어(표본 모자람) 분포를 내지 않습니다")
+    # 28. 하락장 성적 — 시장이 가장 나빴던 달들
+    st = stress or {}
+    if st.get("worst"):
+        베타 = " · ".join(f"{이름} {st[k]:.2f}"
+                        for k, 이름 in (("down_beta", "하락일 베타"), ("up_beta", "상승일 베타"))
+                        if isinstance(st.get(k), (int, float)))  # fmt: skip
+        n달 = len(st["worst"])
+        줄.append(f"하락장 성적: 시장이 가장 나빴던 {n달}개 달(지수 평균 {_pct(st['avg_index'])})에 이 종목 평균 "
+                  f"{_pct(st['avg_stock'])} — {n달}번 중 {st['worse']}번 시장보다 나빴다"
+                  + (f" · {베타}" if 베타 else ""))  # fmt: skip
+        evidence.append(_row("하락장 성적", f"평균 {_pct(st['avg_stock'])} (지수 {_pct(st['avg_index'])})",
+                             f"지수가 가장 나빴던 {len(st['worst'])}개 달 · 지난 {st.get('months')}개 달 중",
+                             "price_patterns (주간 성과 지표 작업)", None))  # fmt: skip
+        out["stress"] = st
     # 14. 1년 시나리오 — 순자산 성장 × PBR 밴드 분위
     s = scenario(close=close, band=out.get("band"), fundamentals=fundamentals)
     if s:

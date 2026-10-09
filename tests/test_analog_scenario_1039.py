@@ -107,3 +107,31 @@ def test_시나리오는_순자산_성장_곱하기_밴드_분위() -> None:
 def test_자본이_다_사라지는_시나리오는_내지_않는다() -> None:
     band = {"pbr": 0.8, "prices": {"p20": 70.0, "p50": 100.0, "p80": 140.0}}
     assert vd.scenario(close=90.0, band=band, fundamentals={"roe": -1.4}) is None
+
+
+def test_하락장_성적() -> None:
+    """지수가 가장 나빴던 달에 종목이 지수의 두 배로 움직이면 — 평균 두 배, 다섯 번 모두 시장보다 나쁨, 하락일 베타 2."""
+    import datetime as dt
+
+    d0 = dt.date(2023, 1, 2)
+    dates, closes, index = [], [], {}
+    c, ix = 100.0, 1000.0
+    random.seed(11)
+    for i in range(800):
+        d = (d0 + dt.timedelta(days=i)).isoformat()
+        m = random.gauss(0.0003, 0.01)
+        ix *= 1 + m
+        c *= 1 + 2 * m
+        dates.append(d)
+        closes.append(c)
+        index[d] = ix
+    s = pt.stress(dates, closes, index)
+    assert len(s["worst"]) == pt.WORST_MONTHS and s["worse"] == pt.WORST_MONTHS
+    assert s["avg_stock"] < s["avg_index"] < 0
+    assert math.isclose(s["down_beta"], 2.0, rel_tol=0.02) and math.isclose(s["up_beta"], 2.0, rel_tol=0.02)
+    assert pt.stress(dates[:200], closes[:200], index) is None  # 1년이 안 되면 내지 않는다
+    o = vd.outlook(close=c, close_date="d", currency="KRW", momentum=None, risk=None, band=None, opinions=[],
+                   today=date(2026, 10, 8), stress=s)  # fmt: skip
+    assert any(줄.startswith(f"하락장 성적: 시장이 가장 나빴던 {pt.WORST_MONTHS}개 달") for 줄 in o["lines"])
+    # 하락장 성적만 있는 행으로 비슷한 국면을 고르지 않는다
+    assert pt.pick({"stress": s}, 0.1, 0.9) is None
