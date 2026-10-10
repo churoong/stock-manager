@@ -263,3 +263,14 @@ def test_5xx_와_깨진_본문은_없음이_아니라_실패다(monkeypatch: pyt
             부르기()
     monkeypatch.setattr(c, "_get", lambda url: SimpleNamespace(status_code=404, json=lambda: {}))
     assert c.company_facts("1") is None and c.filings("1") == [] and c.shares("1") is None
+
+
+def test_외국_발행사의_20F·40F_주식수도_쓴다() -> None:
+    """10-K·10-Q 만 인정해 외국 발행사 시총이 늘 비어 '데이터없음' 이었다 (docs/infra.md 25.1117, 유니버스 감사 재현)."""
+    for form in ("40-F", "20-F"):
+        payload = {"units": {"shares": [
+            {"val": 1_400_000_000, "end": "2026-03-31", "filed": "2026-06-20", "form": form},
+            {"val": 9, "end": "2026-04-30", "filed": "2026-07-01", "form": "DEF 14A"},  # 정기 보고서가 아니다
+        ]}}  # fmt: skip
+        found = sec_edgar.latest_shares(payload, "dei:EntityCommonStockSharesOutstanding")
+        assert found is not None and found.value == 1_400_000_000 and found.form == form

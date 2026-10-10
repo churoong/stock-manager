@@ -49,7 +49,12 @@ SHARE_CONCEPTS = (
 MAX_AGE_DAYS = 550
 
 # 위임장(DEF 14A) 같은 공시의 fact 가 섞여 온다. 정기 보고서만 쓴다(14.1).
-PERIODIC_FORMS = frozenset({"10-K", "10-K/A", "10-Q", "10-Q/A"})
+# **외국 발행사의 연간 보고서(20-F·40-F)도 정기 보고서다** (docs/infra.md 25.1117, 유니버스 감사 재현). 10-K·10-Q 만
+# 인정해
+# 보통주를 직접 상장한 외국 회사(캐나다 은행·Spotify 등 — ADR 은 이름 거르기로 이미 빠진다)의 주식수가 늘 비어 시총이
+# 없고 유니버스 사유가 '데이터없음' 이었다(재현: 하루 거래대금 3억 달러 종목). 연간 보고뿐이라 값이 최대 1년 묵을 수
+# 있다 — `MAX_AGE_DAYS`(550일)가 그 길이를 이미 살린다
+PERIODIC_FORMS = frozenset({"10-K", "10-K/A", "10-Q", "10-Q/A", "20-F", "20-F/A", "40-F", "40-F/A"})
 
 
 class SecFailed(RuntimeError):
