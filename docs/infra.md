@@ -2145,6 +2145,7 @@ SQL read operations are forbidden (reads are blocked, ...)
 | 25.1095 | 매도 플래그 — 처음부터 유니버스 밖이던 보유에 "빠졌습니다" 황색 |
 | 25.1096 | 포트폴리오 — 환율이 없으면 종목 통화 평가액까지 비워 미국 손절 판정이 빠지던 것 |
 | 25.1097 | 뉴스 감성 — 모델이 NaN 을 내면 +1(강한 긍정)으로 저장되던 것 |
+| 25.1098 | 미국 뉴스 — ALL·NOW·A 같은 티커와 Target·Best Buy 같은 이름이 흔한 영어 낱말에 걸리던 것 |
 
 ### 25.1 왜 D1 인가
 
@@ -27282,3 +27283,13 @@ needs to be increased." 프라이빗 저장소 월 무료 2,000분을 **10월 1~
 **고친 방식** — 유한한 수가 아니면 적지 않고 "채점 안 된 기사" 로 남긴다. 그 몫이 크면 25.834 의 미채점 문이 그 종목 감성을 비운다. 실행 기록 `non_finite_scores` 에 수를 남긴다. 결정적인 모델이면 같은 기사가 다음 실행에도 다시 NaN 이 되지만 채점 비용만 든다.
 
 **되돌리기 확인** — 검사를 끄면 `test_NaN_점수는_강한_긍정으로_저장하지_않는다` 가 깨졌다.
+
+### 25.1098 미국 뉴스 — ALL·NOW·A 같은 티커와 Target·Best Buy 같은 이름이 흔한 영어 낱말에 걸리던 것
+
+**찾은 경위** — 뉴스 감성 감사(25.1097 회차).
+
+**무엇이 틀렸나** — 미국 모음 기사(티커 셋 이상)는 제목이 그 종목을 부를 때만 남긴다(25.745). 그 판정(`titleMentions`)이 제목을 소문자로 바꿔 티커를 낱말로 견줘, 영어 낱말과 같은 티커가 흔한 문장에 걸렸다. 회사 이름 첫 낱말도 흔한 말이면 그 하나로 인정했다. 재현(모두 참이었다): "Tesla, Apple, Microsoft **all** slide" → ALL(Allstate), "Is **now** the time" → NOW(ServiceNow), "raise price **targets**" → Target, "**Best** stocks to buy" → Best Buy, "**Dollar** slides" → Dollar General, "**a** look at" → A(Agilent). 티커 넷이 달린 첫 기사는 ALL 에 그대로 남았다. 다른 회사 제목의 VADER 점수가 그 종목 기사로 들어가 부정 7일 건수를 부풀리고, 보유면 감성 급락 황색에 섞였다(나스닥이 그 티커를 태그로 단 기사에서만).
+
+**고친 방식** — 영어 낱말과 같은 티커 목록(`낱말_티커`, `[확인필요: 목록]`)은 제목에 **대문자 그대로**(`NOW`·`$NOW`·`(NOW)`) 나올 때만, 한 글자 티커는 문장 첫 "A" 와 겹치므로 `$A`·`(A)`·`NYSE: A)` 꼴만 본다. 이름으로 부른 것("ServiceNow tops")은 그대로 인정한다. 흔한 첫 낱말에 target·best·dollar·news·energy·digital·western·southern·state·public·capital·world 를 더했다 — 이 이름들은 두 낱말("best buy")을 요구한다. 대가: "Target shares fall" 처럼 한 낱말로 부른 모음 기사는 빠진다(티커 둘 이하 기사는 제목을 보지 않아 그대로 남는다). 거짓 경보보다 놓침이 보수적이다.
+
+**되돌리기 확인** — ①낱말 티커 갈래를 끄면 2건 ②흔한 낱말 추가를 빼면 1건이 `newsUsFilter.test.ts` 에서 깨졌다.

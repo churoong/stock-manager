@@ -135,6 +135,20 @@ export const MULTI_TICKER_MIN = 3;
 /** 이름의 첫 낱말이 이만큼 흔하면 그 낱말만으로 종목을 부른 것으로 보지 않는다 — 둘째 낱말까지 본다 `[확인필요: 목록]` */
 const 흔한_첫낱말 = new Set([
   "general", "american", "united", "first", "national", "international", "global", "new", "home", "bank", "trade",
+  // 25.1098(감사 재현): "raise price targets" 가 Target, "Best stocks to buy" 가 Best Buy, "Dollar slides" 가 Dollar General
+  "target", "best", "dollar", "news", "energy", "digital", "western", "southern", "state", "public", "capital", "world",
+]);
+
+/**
+ * **영어 낱말과 같은 티커** — 제목에서 소문자로 바꿔 견주면 "Tesla, Apple, Microsoft all slide" 가 ALL(Allstate),
+ * "Is now the time" 이 NOW(ServiceNow) 를 부른 것이 됐다 (docs/infra.md 25.1098, 감사 재현). 이런 티커와 한 글자 티커는
+ * 제목에 **대문자 그대로**(`$NOW`·`(NOW)`·`NOW`) 나올 때만 부른 것으로 본다 `[확인필요: 목록]`
+ */
+const 낱말_티커 = new Set([
+  "all", "now", "on", "it", "be", "are", "so", "go", "can", "for", "has", "key", "low", "big", "cat", "fun", "man",
+  "pay", "run", "see", "two", "win", "well", "love", "good", "life", "real", "safe", "main", "next", "play", "rock",
+  "ship", "site", "true", "most", "open", "tech", "fast", "cars", "nice", "ever", "out", "eat", "ago", "any", "who",
+  "bull", "bear", "hope", "save", "wish", "care", "kind", "nine", "dna",
 ]);
 
 /**
@@ -145,7 +159,14 @@ export function titleMentions(title: string, symbol: string, name?: string | nul
   // 낱말 끝의 마침표는 문장 부호다 — "Apple." 을 놓쳤다. 낱말 안의 점(BRK.B)만 남긴다 (25.748)
   const 제목 = ` ${title.toLowerCase().replace(/[^a-z0-9.]+/g, " ").replace(/\.+(?= |$)/g, "")} `;
   const 티커 = symbol.toLowerCase().replace(/[-/]/g, ".");
-  if (제목.includes(` ${티커} `) || 제목.includes(` ${티커.replace(/\./g, " ")} `)) return true;
+  if (티커.length === 1 || 낱말_티커.has(티커)) {
+    const 대문자 = symbol.toUpperCase().replace(/[^A-Z0-9]/g, "");
+    // 한 글자는 문장 첫 "A" 와도 같다 — `$A`·`(A)`·`NYSE: A` 꼴만 본다
+    const 꼴 = 티커.length === 1
+      ? `\\$${대문자}(?![A-Za-z0-9])|\\(${대문자}\\)|:\\s*${대문자}\\)`
+      : `(^|[^A-Za-z0-9])\\$?${대문자}([^A-Za-z0-9]|$)`;
+    if (new RegExp(꼴).test(title)) return true;
+  } else if (제목.includes(` ${티커} `) || 제목.includes(` ${티커.replace(/\./g, " ")} `)) return true;
   // 앞의 "the" 는 떼고(The Coca-Cola Company), 흔한 첫 낱말이거나 3글자 미만이면(JP Morgan) 두 낱말을 본다.
   // 두 낱말은 붙여 쓴 꼴(jpmorgan)도 부른 것으로 본다 (25.748, 교차검증)
   const 낱말 = (name ?? "").toLowerCase().replace(/[^a-z0-9 ]+/g, " ").split(/\s+/).filter(Boolean);

@@ -85,3 +85,30 @@ describe("Bank of 이름 (25.755)", () => {
     expect(titleMentions("Bank of America, Wells slide", "BK", "The Bank of New York Mellon Corporation")).toBe(false);
   });
 });
+
+describe("영어 낱말과 같은 티커·이름 (docs/infra.md 25.1098, 감사 재현)", () => {
+  it("낱말 티커는 대문자 그대로 나올 때만, 한 글자 티커는 $A·(A) 꼴만", () => {
+    expect(titleMentions("Tesla, Apple, Microsoft all slide", "ALL", "Allstate Corporation")).toBe(false);
+    expect(titleMentions("Is now the time to buy chips?", "NOW", "ServiceNow, Inc.")).toBe(false);
+    expect(titleMentions("A look at Apple's margins", "A", "Agilent Technologies")).toBe(false);
+    expect(titleMentions("Why $NOW and ORCL rallied", "NOW", "ServiceNow, Inc.")).toBe(true);
+    expect(titleMentions("Allstate (ALL) beats", "ALL", "Allstate Corporation")).toBe(true);
+    expect(titleMentions("Agilent (A) raises guidance", "A", "Agilent Technologies")).toBe(true);
+    expect(titleMentions("ServiceNow tops estimates", "NOW", "ServiceNow, Inc.")).toBe(true); // 이름으로는 그대로
+    // 낱말이 아닌 티커는 예전처럼 대소문자를 가리지 않는다
+    expect(titleMentions("why aapl fell", "AAPL", "Apple Inc.")).toBe(true);
+  });
+
+  it("흔한 첫 낱말 이름은 두 낱말을 본다", () => {
+    expect(titleMentions("Analysts raise price targets on chips", "TGT", "Target Corporation")).toBe(false);
+    expect(titleMentions("Best stocks to buy now", "BBY", "Best Buy Co., Inc.")).toBe(false);
+    expect(titleMentions("Dollar slides as Fed signals cut", "DG", "Dollar General Corporation")).toBe(false);
+    expect(titleMentions("Best Buy cuts outlook", "BBY", "Best Buy Co., Inc.")).toBe(true);
+    expect(titleMentions("Dollar General shares jump", "DG", "Dollar General Corporation")).toBe(true);
+  });
+
+  it("모음 기사에서 낱말 티커 종목에 남의 제목이 붙지 않는다", () => {
+    const 피드 = [기사("Tesla, Apple, Microsoft all slide", ["TSLA", "AAPL", "MSFT", "ALL"])];
+    expect(filterForSymbol(피드, "ALL", "Allstate Corporation")).toHaveLength(0);
+  });
+});
