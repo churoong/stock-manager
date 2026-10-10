@@ -127,7 +127,9 @@ def test_추적_판정은_현지_날짜로() -> None:
     assert sell_flags.현지날짜("2026-08-24T03:00:00+00:00", "US") == "2026-08-23"
     from pathlib import Path
 
-    assert "현지날짜(str(처음), str(r[\"country\"]))" in Path("batch/jobs/sell_flags.py").read_text(encoding="utf-8")
+    # 25.1100 에서 나라를 변수로 뺐다 — 첫 기사 시각과 시장 수집 시작 모두 현지 날짜로 바꾼다
+    원문 = Path("batch/jobs/sell_flags.py").read_text(encoding="utf-8")
+    assert "현지날짜(str(처음), 나라)" in 원문 and "현지날짜(시장, 나라)" in 원문
 
 
 def test_센티먼트_가중치가_바뀌면_20점_하락을_보지_않는다() -> None:

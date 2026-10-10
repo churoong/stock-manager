@@ -694,6 +694,47 @@ def test_중립_기준은_과거_창이_열릴_때부터_받던_종목만(monkey
     assert ("감성급락" in 뜬것) is 뜨나
 
 
+@pytest.mark.parametrize(("첫_매수", "뜨나"), [("2026-01-02", True), ("2026-09-10", False)])
+def test_조용하던_보유에_악재가_몰리면_시장_수집_시작부터_본다(monkeypatch, 첫_매수: str, 뜨나: bool) -> None:
+    """기사가 없던 종목은 첫 기사가 곧 악재라 "추적 전" 으로 읽혀 급락을 놓쳤다 (docs/infra.md 25.1100, 감사).
+
+    시장 수집은 08-01 부터(다른 종목 기사), 이 종목 첫 기사는 09-15. 1월부터 보유했으면 그동안 수집 대상이었으니
+    과거가 빈 것은 기사가 적었던 것이다 — 뜬다. 09-10 에 샀으면 그 전엔 대상이 아니었을 수 있다 — 뜨지 않는다."""
+    from batch.core import db
+    from batch.jobs import sell_flags as job
+
+    mem = MemClient()
+    monkeypatch.setattr(job, "TursoClient", lambda: mem)
+    db.apply_migrations(mem)  # type: ignore[arg-type]
+    c = mem.conn
+    c.execute(
+        "INSERT INTO stocks (id, ticker, market, country, name_ko, currency, status, source, fetched_at)"
+        " VALUES (1, 'A', 'KOSPI', 'KR', '에이', 'KRW', 'active', 't', 't'),"
+        " (2, 'B', 'KOSPI', 'KR', '비', 'KRW', 'active', 't', 't')"
+    )
+    c.execute(
+        "INSERT INTO positions (stock_id, quantity, currency, avg_price, avg_fx, cost, cost_krw, first_buy_date,"
+        " horizon, price_date, close, market_value, updated_at)"
+        " VALUES (1, 10, 'KRW', 100, 1, 1000, 1000, ?, 'long', '2026-09-15', 100, 1000, 't')",
+        [첫_매수],
+    )
+    c.execute(
+        "INSERT INTO sentiment_scores (stock_id, as_of_date, sentiment, article_count, positive_count, negative_count,"
+        " negative_count_7d, decay_halflife_days, delta_7d, method, calc_version, created_at)"
+        " VALUES (1, '2026-09-16', -55, 8, 0, 8, 8, 7, NULL, 'm', 1, 't')"
+    )
+    c.execute(
+        "INSERT INTO news (stock_id, title, url, published_at, lang, source, fetched_at) VALUES"
+        " (2, 't', 'u0', '2026-08-01', 'ko', 'rss', '2026-08-01T00:00:00+00:00'),"
+        " (1, 't', 'u1', '2026-09-15', 'ko', 'rss', '2026-09-15T00:00:00+00:00')"
+    )
+    assert job.run(date(2026, 9, 16)) == 0
+    뜬것 = [r[0] for r in c.execute("SELECT reason_code FROM sell_flags WHERE is_active = 1")]
+    assert ("감성급락" in 뜬것) is 뜨나
+    # 시장 수집 시작은 한 번 재서 설정에 둔다 — 다음 실행은 news 전체를 훑지 않는다
+    assert "2026-08-01" in str(db.get_setting(mem, job.NEWS_START_KEY, {}))  # type: ignore[arg-type]
+
+
 def test_ETF_보유에는_매도_플래그를_세우지_않는다() -> None:
     """적립 ETF 가 −25% 에 적색 "손절" 을 받았다 — ETF 는 타이밍 무관 장기 적립이다 (docs/infra.md 25.908, 감사)."""
     from batch.core import db

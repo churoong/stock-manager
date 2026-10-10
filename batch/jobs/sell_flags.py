@@ -87,6 +87,7 @@ def load_holdings(client: TursoClient, today: date | None = None) -> tuple[list[
     ).dicts()
     out: list[sf.HoldingInput] = []
     못읽음: set[str] = set()
+    시장시작: dict[str, str | None] = {}
     잣대바뀐종목: list[str] = []
     for r in rows:
         sid = int(r["stock_id"])
@@ -122,6 +123,16 @@ def load_holdings(client: TursoClient, today: date | None = None) -> tuple[list[
         추적 = False
         if s0.get("as_of_date"):
             처음 = client.execute("SELECT MIN(fetched_at) FROM news WHERE stock_id = ?", [sid]).scalar()
+            나라 = str(r["country"])
+            # **기사가 없던 종목은 첫 기사 시각이 곧 악재가 몰린 날이다** (docs/infra.md 25.1100, 감사).
+            # 종목별 첫 기사로만 재면 조용하던 종목에 악재가 몰린 주(25.638 이 잡으려던 바로 그 경우)에
+            # "추적 전" 이 되어 급락을 보지 않았다.
+            # 보유 종목은 매수일부터 수집 대상이다(국내 `news_targets ∪ positions ∪ watchlist`, 미국 보유 우선 25.909) —
+            # **max(그 시장 수집 시작, 첫 매수일)** 부터 받고 있었다고 보고, 종목별 첫 기사와 둘 중 이른 쪽을 쓴다
+            후보일 = [현지날짜(str(처음), 나라)] if 처음 else []
+            시장 = _수집_시작(client, 나라, 시장시작)
+            if 시장 and r["first_buy_date"]:
+                후보일.append(max(현지날짜(시장, 나라), str(r["first_buy_date"])))
             # 과거 점수는 `as_of−7` 에서 끝나는 **30일 창**으로 낸다 — 그 창이 열릴 때(37일 전)부터 받고 있었어야
             # "과거가 비었다 = 기사가 적었다" 가 참이다. 7일이면 8일 전 시작한 종목이 여전히 거짓 급락이었다 (25.645,
             # 교차검증)
@@ -129,7 +140,7 @@ def load_holdings(client: TursoClient, today: date | None = None) -> tuple[list[
             # fetched_at 은 UTC 다 — **그 시장 현지 날짜**로 바꿔 견준다 (25.749, 감사). 앞 10글자(UTC 날짜)와 현지
             # 날짜를 견줘
             # KST 08:00 첫 수집이 전날로 읽혀 하루 일찍 "추적 중" 이 됐다
-            추적 = bool(처음) and 현지날짜(str(처음), str(r["country"])) <= 창시작.isoformat()
+            추적 = bool(후보일) and min(후보일) <= 창시작.isoformat()
         # **두 점수가 같은 잣대인가** (docs/infra.md 25.209). 설정에서 팩터 가중치를 바꾸거나
         # 점수 계산 판이 바뀌면 종목은 그대로인데 점수만 20점 넘게 움직여 거짓 "재무악화" 가 뜬다.
         # 두 행의 잣대를 **둘 다 알 때만** 다르다고 한다 — 모르면 예전처럼 비교한다
@@ -241,6 +252,34 @@ def load_holdings(client: TursoClient, today: date | None = None) -> tuple[list[
             f" {', '.join(잣대바뀐종목[:5])}) — 다른 잣대의 두 점수를 빼면 거짓 경보가 난다"
         )
     return out, 경고
+
+
+#: 시장별 뉴스 수집 시작 시각(UTC ISO)을 한 번 재서 두는 설정 키 (25.1100). 수집 시작은 바뀌지 않으므로 매일 `news`
+#: 전체를 훑지 않는다
+NEWS_START_KEY = "news_collection_started"
+
+
+def _수집_시작(client: TursoClient, country: str, 캐시: dict[str, str | None]) -> str | None:
+    """그 시장의 뉴스 수집 시작 시각. 설정에 없으면 `news` 의 가장 이른 수집 시각을 한 번 재서 적는다 (25.1100).
+
+    읽지 못하면 None — 예전처럼 종목별 첫 기사만 본다."""
+    if country in 캐시:
+        return 캐시[country]
+    값: str | None = None
+    try:
+        저장 = db.get_setting(client, NEWS_START_KEY, {}) or {}
+        값 = 저장.get(country) if isinstance(저장, dict) else None
+        if not 값:
+            값 = client.execute(
+                "SELECT MIN(n.fetched_at) FROM news n JOIN stocks s ON s.id = n.stock_id WHERE s.country = ?",
+                [country],
+            ).scalar()
+            if 값:
+                db.set_setting(client, NEWS_START_KEY, {**(저장 if isinstance(저장, dict) else {}), country: str(값)})
+    except Exception:  # noqa: BLE001 — 덧붙이는 추정이 판정을 막으면 안 된다
+        값 = None
+    캐시[country] = str(값) if 값 else None
+    return 캐시[country]
 
 
 def _기업행위(client: TursoClient, stock_id: int, country: str) -> bool:
