@@ -133,15 +133,27 @@ def load_holdings(client: TursoClient, today: date | None = None) -> tuple[list[
         # **두 점수가 같은 잣대인가** (docs/infra.md 25.209). 설정에서 팩터 가중치를 바꾸거나
         # 점수 계산 판이 바뀌면 종목은 그대로인데 점수만 20점 넘게 움직여 거짓 "재무악화" 가 뜬다.
         # 두 행의 잣대를 **둘 다 알 때만** 다르다고 한다 — 모르면 예전처럼 비교한다
+        # **매수일 잣대는 매매에 적힌 점수를 낸 판으로** (docs/infra.md 25.1094, 감사 재현). 두 날 모두 그날 가장 높은
+        # 판을
+        # 읽어, 뒤에 `scores --as-of`·재계산으로 매수일을 새 판으로 다시 내면 매매의 옛 판 점수(80)와 지금 새 판
+        # 점수(57)를
+        # 같은 잣대로 보고 거짓 재무악화를 냈다. 그날 판이 여럿이면 매매 점수와 같은 값(소수 첫째 자리)의 판을 쓰고,
+        # 맞는 것이 없으면 예전처럼 가장 높은 판
         잣대 = [
             client.execute(
-                "SELECT weights_json, calc_version, sentiment_weight_used FROM scores"
+                "SELECT weights_json, calc_version, sentiment_weight_used, total_score FROM scores"
                 " WHERE stock_id = ? AND as_of_date = ?"
-                " ORDER BY calc_version DESC LIMIT 1",
-                [sid, day],
+                " ORDER BY calc_version DESC LIMIT ?",
+                [sid, day, 한도],
             ).dicts()
-            for day in (r["score_at_buy_date"], r["score_now_date"])
+            for day, 한도 in ((r["score_at_buy_date"], 5), (r["score_now_date"], 1))
         ]
+        if r["score_at_buy"] is not None:
+            맞음 = [x for x in 잣대[0] if x["total_score"] is not None
+                    and abs(float(x["total_score"]) - float(r["score_at_buy"])) < 0.051]  # fmt: skip
+            잣대[0] = 맞음[:1] or 잣대[0][:1]
+        else:
+            잣대[0] = 잣대[0][:1]
         잣대가_바뀜 = bool(잣대[0] and 잣대[1]) and (
             _팩터가중치_다름(잣대[0][0]["weights_json"], 잣대[1][0]["weights_json"])
             or int(잣대[0][0]["calc_version"]) != int(잣대[1][0]["calc_version"])

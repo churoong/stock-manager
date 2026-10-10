@@ -445,6 +445,13 @@ class Test점수_하락은_같은_잣대끼리만:
         codes, 경고 = self._돌리기(monkeypatch, '{"value": 10, "quality": 90}', 중간=("2026-09-10", 78), 더함=더함)
         assert "재무악화" not in codes and any("아직 없음" in 줄 for 줄 in 경고)
 
+    def test_매수일을_새_판으로_다시_내도_매매_점수의_판으로_견준다(self, monkeypatch) -> None:
+        """매매엔 판 1의 80점, 같은 날 판 2로 다시 낸 58점, 지금 판 2의 55점 — 80→55 거짓 재무악화였다 (25.1094, 감사)."""
+        w = '{"value": 30, "quality": 70}'
+        codes, 경고 = self._돌리기(monkeypatch, w, 지금_판=2, 더함=[("2026-08-31", 58, w, 2)])
+        assert "재무악화" not in codes and any("아직 없음" in 줄 for 줄 in 경고)
+        # 매수일 판이 하나뿐이고 지금과 같으면 예전처럼 견준다 — `test_미끼__같은_잣대면_25점_하락이_재무악화다`
+
     def test_중간_점수가_옛_잣대면_기준점으로_쓰지_않는다(self, monkeypatch) -> None:
         codes, 경고 = self._돌리기(monkeypatch, '{"value": 30, "quality": 70}', 지금_판=2, 중간=("2026-09-10", 78), 중간_판=1)
         assert "재무악화" not in codes and any("아직 없음" in 줄 for 줄 in 경고)
