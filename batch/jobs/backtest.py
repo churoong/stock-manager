@@ -1661,7 +1661,7 @@ def run(
         _RISK_FREE = metrics_job.risk_free_for(client, country)
         _위험_캐시.clear()  # 나라·가격이 바뀐다 — 지난 실행의 값을 쓰지 않는다
 
-        dates = sorted({d for by_date in prices.values() for d in by_date if d >= since})
+        dates = bt.market_dates(prices, since)  # 가격이 드문 날(한 종목만 휴장일 행)은 뺀다 (25.1102)
         if len(dates) < 40:
             db.finish_batch_run(client, batch_id, status="failed", error_text="거래일이 40일 미만입니다")
             print("가격이 너무 적어 백테스트를 돌릴 수 없습니다. 백필을 먼저 돌리세요")

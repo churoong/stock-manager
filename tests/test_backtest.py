@@ -567,3 +567,22 @@ def test_마지막_날이_월초여도_일부만_들어온_시세로_나머지�
     assert [rb.date for rb in r.rebalances] == ["2026-09-01"]  # 끝 날은 평가만
     # 첫 매수 비용만 빠지고, 끝에서 회전·비용이 붙지 않는다
     assert r.curve[-1][1] == pytest.approx(r.curve[1][1])
+
+
+class Test날짜_축_25_1102:
+    """한 종목만 1/1 에 행이 있으면 그날이 1월 리밸런스 날이 됐다 (docs/infra.md 25.1102, 백테스트 감사 D5)."""
+
+    def test_가격이_드문_날은_날짜_축에서_뺀다(self) -> None:
+        날들 = ["2024-01-02", "2024-01-03", "2024-01-04", "2024-01-05", "2024-02-01"]
+        prices = {sid: {d: 10.0 for d in 날들} for sid in range(1, 11)}
+        prices[1]["2024-01-01"] = 10.0  # 한 종목만 휴장일 행
+        dates = bt.market_dates(prices, "2023-12-01")
+        assert "2024-01-01" not in dates and dates == 날들
+        assert bt.month_starts(dates) == ["2024-01-02", "2024-02-01"]
+
+    def test_정지_종목_몇이_빠진_날은_남긴다(self) -> None:
+        날들 = [f"2024-03-{d:02d}" for d in range(1, 21)]
+        prices = {sid: {d: 10.0 for d in 날들} for sid in range(1, 11)}
+        for sid in range(1, 6):
+            del prices[sid]["2024-03-11"]  # 절반 정지
+        assert bt.market_dates(prices, "2024-01-01") == 날들

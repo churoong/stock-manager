@@ -312,6 +312,35 @@ def top_n_equal_weight(
 # ----------------------------------------------------------------------
 
 
+#: 날짜 축에 넣는 거래일의 문턱 — 그날 가격이 있는 종목 수가 앞뒤 `MARKET_DATE_WINDOW` 거래일 중앙값의
+#: 이만큼은 돼야 한다
+#: (docs/infra.md 25.1102). 종목 하나만 휴장일에 행이 있으면 그날이 월초 리밸런스 날이 되어 새로 살 종목이 전부 빠졌다.
+#: 0.2 는 "대부분이 없다" 를 가르는 넉넉한 값 — 정지 종목 몇이 빠진 정상 거래일은 늘 넘는다
+MARKET_DATE_MIN_SHARE = 0.2
+MARKET_DATE_WINDOW = 10
+
+
+def market_dates(prices: dict[int, dict[str, float]], since: str) -> list[str]:
+    """날짜 축 — 전 종목 날짜의 합집합에서 **가격이 있는 종목이 드문 날**을 뺀다 (25.1102, 백테스트 감사 D5).
+
+    예전에는 합집합 그대로라 한 종목만 휴장일(1/1)에 행이 있으면 그날이 1월 리밸런스 날이 되고, 그날 가격이 없는
+    종목은 살 수 없어 한 달을 현금으로 보냈다(최종 1.0406 → 1.01). 마지막 날만 막은 25.792 의 일반화다.
+    """
+    수: dict[str, int] = {}
+    for by_date in prices.values():
+        for d in by_date:
+            if d >= since:
+                수[d] = 수.get(d, 0) + 1
+    날들 = sorted(수)
+    out: list[str] = []
+    for i, d in enumerate(날들):
+        이웃 = sorted(수[x] for x in 날들[max(0, i - MARKET_DATE_WINDOW) : i + MARKET_DATE_WINDOW + 1])
+        중앙 = 이웃[len(이웃) // 2]
+        if 수[d] >= MARKET_DATE_MIN_SHARE * 중앙:
+            out.append(d)
+    return out
+
+
 def month_starts(dates: list[str]) -> list[str]:
     """매월 첫 거래일. dates 는 거래일 목록(오름차순)이다."""
     out: list[str] = []
