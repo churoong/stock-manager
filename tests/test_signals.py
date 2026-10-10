@@ -786,6 +786,21 @@ def test_손절선이_3차_매수가_위면_말한다() -> None:
     assert not any(r["label"] == "손절선 위치 (주의)" for r in 보통)
 
 
+def test_목표가가_1차_매수가_이하면_말한다() -> None:
+    """중기 목표 +2.5% 면 목표 9,990 이 1차 10,000 보다 낮은데 근거표가 조용했다 (docs/infra.md 25.1089, 감사 재현)."""
+    from batch.services import signals as sg_
+
+    inp = sg_.SignalInput(
+        stock_id=1, ticker="A", name="가", market="KOSPI", currency="KRW", closes=[10_000.0] * 80,
+        price_date="2026-10-08",
+    )  # fmt: skip
+    낮음 = sg_.plan_criteria(inp, "mid", 9500.0, 10_000.0, 9990.0, 8300.0, None, 1.0, 10.0, 10.0)
+    주의 = [r for r in 낮음 if r["label"] == "목표가 위치 (주의)"]
+    assert 주의 and "9,990" in 주의[0]["display"] and "10,000" in 주의[0]["display"]
+    보통 = sg_.plan_criteria(inp, "mid", 9500.0, 10_000.0, 12_200.0, 8300.0, None, 1.0, 10.0, 10.0)
+    assert not any(r["label"] == "목표가 위치 (주의)" for r in 보통)
+
+
 def test_최소_주문_미만이면_근거표도_금액을_내지_않았다고_적는다() -> None:
     """카드는 '권장 금액 없음' 인데 근거표가 걸러지기 전 30,000 을 적었다 (docs/infra.md 25.291)."""
     from batch.services import signals as sg_
