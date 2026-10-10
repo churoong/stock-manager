@@ -180,7 +180,7 @@ def not_checked_warning(country: str) -> str | None:
 
 
 def marker_warning(
-    country: str, verdicts: list[Verdict], section_types: list[str]
+    country: str, verdicts: list[Verdict], section_types: list[str], markets: list[str] | None = None
 ) -> str | None:
     """**국내 관리종목·거래정지 판정이 정말 걸리는가** (docs/infra.md 25.157).
 
@@ -200,6 +200,16 @@ def marker_warning(
     """
     if country.upper() != "KR":
         return None
+    # **시장마다 따로 센다** (docs/infra.md 25.1111, 유니버스 감사 재현). 코스닥에 `관리종목(소속부없음)` 한 건만 걸려도
+    # 관리종목 경고가 꺼져, 소속부가 비어 오는 것으로 기억하는 코스피는 관리종목이 한 번도 걸리지 않는데 말이 없었다
+    if markets is not None and len(set(markets)) > 1:
+        말들 = []
+        for 시장 in sorted(set(markets)):
+            골라 = [i for i, m in enumerate(markets) if m == 시장]
+            말 = marker_warning(country, [verdicts[i] for i in 골라], [section_types[i] for i in 골라])
+            if 말:
+                말들.append(f"[{시장}] " + 말)
+        return " / ".join(말들) or None
     # **검사마다 따로 센다** (docs/infra.md 25.612, 감사). 예전에는 둘을 합쳐 0건일 때만 말해, 코스닥 관리종목이
     # 한 건만 걸려도 경고가 꺼졌다 — 거래정지를 전혀 못 보는 것이 가려졌다
     # 형제 사유(투자주의환기·정리매매)로는 채우지 않는다 (25.614, 교차검증) — 그 글자는 "관리"·"거래정지" 가 오는지를

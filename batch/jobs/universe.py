@@ -601,7 +601,9 @@ def build_snapshot(
     요약 = uni.summarize(verdicts + 빠진판정)
     # **판정이 정말 걸리는지 스스로 답하게 한다** (docs/infra.md 25.157).
     # 국내 관리종목·거래정지는 소속부 글자 하나에 매달려 있는데 그 값을 확인한 적이 없다
-    표시경고 = uni.marker_warning(country, verdicts, [str(r["section_type"] or "") for r in rows])
+    표시경고 = uni.marker_warning(
+        country, verdicts, [str(r["section_type"] or "") for r in rows], [str(r["market"]) for r in rows]
+    )
     if 표시경고:
         warnings.append(표시경고)
     if dry_run:

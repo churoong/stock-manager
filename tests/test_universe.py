@@ -294,6 +294,16 @@ class Test국내_표시_검사가_정말_걸리나:
     def _판정(self, reason: str | None) -> u.Verdict:
         return u.Verdict(included=reason is None, reason=reason, listed_days=400)
 
+    def test_시장마다_따로_센다(self) -> None:
+        """코스닥 관리종목 한 건이 코스피의 관리종목 공백을 가렸다 (docs/infra.md 25.1111, 유니버스 감사 재현)."""
+        판정 = [self._판정(u.REASON_SUPERVISED), self._판정(u.REASON_HALTED),  # 코스닥
+                self._판정(u.REASON_HALTED), self._판정(None)]  # 코스피 — 관리종목 0건  # fmt: skip
+        소속부 = ["관리종목(소속부없음)", "거래정지", "거래정지", ""]
+        시장 = ["KOSDAQ", "KOSDAQ", "KOSPI", "KOSPI"]
+        assert u.marker_warning("KR", 판정, 소속부) is None  # 합쳐 세면 조용했다
+        말 = u.marker_warning("KR", 판정, 소속부, 시장) or ""
+        assert 말.startswith("[KOSPI]") and "관리종목" in 말 and "KOSDAQ" not in 말
+
     def test_둘_다_걸리면_조용하다(self) -> None:
         verdicts = [self._판정(u.REASON_SUPERVISED), self._판정(u.REASON_HALTED), self._판정(None)]
 
