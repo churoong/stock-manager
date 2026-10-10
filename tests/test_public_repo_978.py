@@ -79,6 +79,13 @@ class Test배치_로그:
         i = src.index("if visibility.is_public():")
         assert src.index("평가액 {totals") > i, "평가액 줄이 공개 판정보다 먼저 찍힌다"
 
+    def test_신호_작업의_설정_경고는_공개면_찍지_않는다(self) -> None:
+        """범위 밖 설정 경고는 총 투자가능금액을 문장에 넣는데 `signals.yml`·`recompute.yml` 은 `ops_tee` 를 거치지
+        않았다 (docs/infra.md 25.1106, 리포트 감사)."""
+        src = (ROOT / "batch" / "jobs" / "signals.py").read_text(encoding="utf-8")
+        i = src.index('if visibility.is_public() and settings["setting_warnings"]:')
+        assert src.index('print(f"  주의: {줄}")') > i, "설정 경고 문장이 공개 판정보다 먼저 찍힌다"
+
     def test_매도_플래그_근거는_공개면_찍지_않는다(self) -> None:
         src = (ROOT / "batch" / "jobs" / "sell_flags.py").read_text(encoding="utf-8")
         i = src.index("if visibility.is_public():")

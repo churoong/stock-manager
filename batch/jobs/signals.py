@@ -31,7 +31,7 @@ from typing import Any
 
 from batch import config
 from batch.core import calendar as cal
-from batch.core import db
+from batch.core import db, visibility
 from batch.core import settings_range as sr
 from batch.core.client import TursoClient
 from batch.core.entry import guard
@@ -855,8 +855,14 @@ def run(market: str, as_of: str | None = None) -> int:
             },
         )
 
-        for 줄 in settings["setting_warnings"]:
-            print(f"  주의: {줄}")
+        # **공개 저장소면 설정 경고 문장을 로그에 찍지 않는다** (docs/infra.md 25.1106, 리포트 감사) — 범위 밖 설정의
+        # 경고는 그 값(총 투자가능금액·최소 주문 금액)을 문장에 넣는다. `signals.yml`·`recompute.yml` 은 `ops_tee` 를
+        # 거치지 않아 그대로 남이 보는 로그에 남았다. 문장은 실행 기록(step_log)에 있다
+        if visibility.is_public() and settings["setting_warnings"]:
+            print(f"  주의: 범위 밖 설정 {len(settings['setting_warnings'])}건 (공개 저장소 — 문장은 실행 기록에만)")
+        else:
+            for 줄 in settings["setting_warnings"]:
+                print(f"  주의: {줄}")
         print(f"대상 {len(candidates)}종목, 밴드 {len(bands)}종목")
         if 멈춘:
             print(f"  주의: {as_of} 종가가 없는 {len(멈춘)}종목은 신호를 내지 않았습니다 ({', '.join(멈춘[:5])} 등)")
