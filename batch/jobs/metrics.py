@@ -479,15 +479,19 @@ def compute_all(
         시총 = {sid: 주식수[sid] * m["last"] for sid, m in 움직임.items() if m and sid in 주식수}
         # 함께 움직이는 종목 (52장) — 나라마다, 베타·하락장 성적과 같은 기준 지수의 일간 로그 수익을 뺀 잔차 상관
         동행: dict[int, list[dict]] = {}
+        시장_of, 코드_of = load_markets(client, sorted({c for _, _, c in stocks}), warnings)
         for 나라, 계열 in 일수익.items():
             기준일_나라 = (as_of_by_country or {}).get(나라, as_of)
             지수점 = [(q.date.isoformat(), q.close) for q in bench_cache.get(나라, [])
                    if q.date.isoformat() <= 기준일_나라]  # fmt: skip
             시장수익 = {d1: math.log(c1 / c0) for (_, c0), (d1, c1) in zip(지수점, 지수점[1:], strict=False)
                      if c0 > 0 and c1 > 0}  # fmt: skip
-            동행.update(history.comovers(계열, 시장수익, 업종))
+            # **같은 발행사는 짝이 아니다** (25.1084) — 53장 짝(`pairs_from_prices`)과 같은 열쇠. 넘기지 않아
+            # GOOG·GOOGL 같은 두 종류 주식이 서로 1순위 "함께 움직이는 종목" 으로 잡혔다(상관 0.95+ 의 기계적 짝)
+            발행사 = {sid: candidate_factors.same_issuer_key(코드_of[sid], kr=나라 == "KR")
+                   for sid in 계열 if sid in 코드_of}  # fmt: skip
+            동행.update(history.comovers(계열, 시장수익, 업종, issuer_of=발행사))
         지각: dict[int, dict] = {}
-        시장_of, 코드_of = load_markets(client, sorted({c for _, _, c in stocks}), warnings)
         for 나라, 모음 in 지각재료.items():
             기준일_나라 = (as_of_by_country or {}).get(나라, as_of)
             지수점 = [(q.date.isoformat(), q.close) for q in bench_cache.get(나라, [])

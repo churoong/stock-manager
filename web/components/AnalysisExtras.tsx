@@ -15,7 +15,7 @@ export default function AnalysisExtras({ flows, twins, peers, signals, alternati
   comovers?: NonNullable<Verdict["detail"]>["comovers"];
   pairsGap?: NonNullable<Verdict["detail"]>["pairs_gap"];
 }) {
-  if (!flows && !twins?.length && !peers && !signals && !alternatives?.length && !comovers?.length) return null;
+  if (!flows && !twins?.length && !peers && !signals && !alternatives?.length && !comovers?.length && !pairsGap) return null;
   const pctv = (v: number | null) => (v === null ? "-" : `${v >= 0 ? "+" : ""}${(v * 100).toFixed(1)}%`);
   const 억 = (x: number) => `${x >= 0 ? "+" : ""}${x.toLocaleString(undefined, { maximumFractionDigits: 1 })}억`;
   return (
@@ -92,17 +92,20 @@ export default function AnalysisExtras({ flows, twins, peers, signals, alternati
           )}
         </div>
       )}
-      {comovers && comovers.length > 0 && (
+      {((comovers && comovers.length > 0) || pairsGap) && (
+        // 짝 줄(53장)은 함께 움직이는 종목(52장)과 따로 계산된다 — 상관 목록이 비어도(오늘 점수 있는 짝이 없음) 짝 줄은 그린다 (25.1084)
         <div className="rounded-lg border border-slate-200 px-2.5 py-2 text-xs dark:border-slate-800">
           <p className="mb-1 font-semibold text-slate-600 dark:text-slate-300">함께 움직이는 종목 — 지난 1년, 시장 몫을 뺀 상관</p>
-          <ul className="space-y-0.5">
-            {comovers.map((c) => (
-              <li key={c.stock_id} className="flex items-baseline justify-between gap-2">
-                <Link href={`/stocks/${c.stock_id}`} className="truncate text-sky-700 hover:underline dark:text-sky-300">{c.name}</Link>
-                <span className="shrink-0">{c.corr.toFixed(2)}{c.same_sector ? "" : <span className="ml-1 rounded bg-amber-100 px-1 text-amber-800 dark:bg-amber-950 dark:text-amber-200">업종 밖</span>}</span>
-              </li>
-            ))}
-          </ul>
+          {comovers && comovers.length > 0 && (
+            <ul className="space-y-0.5">
+              {comovers.map((c) => (
+                <li key={c.stock_id} className="flex items-baseline justify-between gap-2">
+                  <Link href={`/stocks/${c.stock_id}`} className="truncate text-sky-700 hover:underline dark:text-sky-300">{c.name}</Link>
+                  <span className="shrink-0">{c.corr.toFixed(2)}{c.same_sector ? "" : <span className="ml-1 rounded bg-amber-100 px-1 text-amber-800 dark:bg-amber-950 dark:text-amber-200">업종 밖</span>}</span>
+                </li>
+              ))}
+            </ul>
+          )}
           {pairsGap && (
             <p className="mt-1">
               지난 한 달 짝 {pairsGap.n}종목 평균 {pctv(pairsGap.peers)} · 이 종목 {pctv(pairsGap.own)} · β {pairsGap.beta.toFixed(2)} →{" "}

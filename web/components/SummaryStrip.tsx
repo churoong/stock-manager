@@ -13,8 +13,8 @@ const TONE: Record<string, string> = {
  * 한 줄 요약 카드 (docs/analysis.md 39장, 25.1062) — 가치·추세·수급·실적·재무 위험 다섯 칸.
  * 색은 각 장의 사실을 옮긴 것이다(빨강 = 좋은 쪽, 파랑 = 나쁜 쪽 — 국내 시세 색 관례). 판정·추천이 아니다.
  */
-export default function SummaryStrip({ detail }: { detail: Verdict["detail"] | null | undefined }) {
-  const cells = summaryCells(detail);
+export default function SummaryStrip({ detail, country }: { detail: Verdict["detail"] | null | undefined; country?: string | null }) {
+  const cells = summaryCells(detail, country);
   if (cells.every((c) => c.tone === "none")) return null;
   return (
     <section aria-label="한 줄 요약" className="mb-3 grid grid-cols-2 gap-1.5 sm:grid-cols-5">

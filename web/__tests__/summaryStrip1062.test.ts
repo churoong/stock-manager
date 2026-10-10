@@ -22,4 +22,14 @@ describe("한 줄 요약", () => {
     expect(c.slice(1).every((x) => x.tone === "none")).toBe(true);
     expect(summaryCells(null).every((x) => x.tone === "none")).toBe(true);
   });
+  it("국내 종목은 '국내만' 이라 하지 않고, 자료 누락을 금융업처럼 적지 않는다 (25.1084)", () => {
+    const 국내 = summaryCells(상세({}), "KR");
+    expect(국내.find((x) => x.key === "flow")?.text).toBe("없음");
+    expect(국내.find((x) => x.key === "earnings")?.text).toBe("없음");
+    expect(summaryCells(상세({}), "US").find((x) => x.key === "flow")?.text).toBe("없음(국내만)");
+    const 누락 = summaryCells(상세({ health: { note: "재료가 비어 Z″ 를 내지 못했습니다: 자산" } as never }), "KR");
+    expect(누락.find((x) => x.key === "risk")?.text).toBe("없음");
+    const 금융 = summaryCells(상세({ health: { note: "금융업은 부채가 영업 재료라 Altman Z″ 를 내지 않습니다" } as never }), "KR");
+    expect(금융.find((x) => x.key === "risk")?.text).toBe("해당 없음(금융업)");
+  });
 });

@@ -40,6 +40,17 @@ export default function HistoryFacts({ h }: { h: HistoryData }) {
                 ))}
               </tbody>
             </table>
+            {dd.worst?.length > 0 && (
+              <ul className="mt-1 space-y-0.5 text-xs" aria-label="가장 깊었던 낙폭">
+                <li className="text-slate-500">가장 깊었던 {dd.worst.length}번</li>
+                {dd.worst.map((w) => (
+                  <li key={w.peak}>
+                    {w.peak}→{w.trough} <b>{pct(w.depth)}</b> ·{" "}
+                    {w.recovered ? `${w.recovered} 회복 (고점부터 ${w.days}거래일)` : "아직 회복 못 함"}
+                  </li>
+                ))}
+              </ul>
+            )}
             <p className="mt-1 text-[11px] text-slate-400">회복 = 그 깊이를 처음 지난 날부터 고점을 되찾기까지. {dd.since}~{dd.until} 수정주가.</p>
           </div>
         )}
@@ -174,10 +185,22 @@ export default function HistoryFacts({ h }: { h: HistoryData }) {
             <p className="mt-1 text-[11px] text-slate-400">{so.since}~{so.until}. 주식 수가 그대로라고 본 근사입니다(증자·소각이 있으면 어긋남).</p>
           </div>
         )}
-        {ea && ea.recent.length > 0 && (
+        {ea && (ea.recent.length > 0 || ea.grew || ea.shrank) && (
           <div>
-            <h3 className="mb-1 text-xs font-semibold text-slate-600 dark:text-slate-300">실적 발표 반응 ({ea.basis})</h3>
-            <table className="w-full text-left text-xs">
+            <h3 className="mb-1 text-xs font-semibold text-slate-600 dark:text-slate-300">실적 발표 반응 ({ea.basis}, {ea.events}번)</h3>
+            {(ea.grew || ea.shrank) && (
+              // 요약 — 진단 줄 "실적 발표 반응(" 은 목록에서 빼고 여기서 그린다 (HISTORY_LINE_PREFIXES, 25.1084)
+              <ul className="mb-1 space-y-0.5 text-xs">
+                {([["영업이익이 늘어난 발표", ea.grew], ["줄어든 발표", ea.shrank]] as const).map(([이름, x]) =>
+                  x ? (
+                    <li key={이름}>
+                      {이름} {x.n}번: 5거래일 시장 대비 평균 <b>{pct(x.avg)}</b> · 오른 것 {x.up}번
+                    </li>
+                  ) : null,
+                )}
+              </ul>
+            )}
+            {ea.recent.length > 0 && <table className="w-full text-left text-xs">
               <thead className="text-slate-500"><tr><th className="py-0.5 pr-2">접수일</th><th className="pr-2">보고서</th><th className="pr-2">영업이익 전년비</th><th className="pr-2">1일</th><th>5일(시장 대비)</th></tr></thead>
               <tbody>
                 {ea.recent.map((x) => (
@@ -190,7 +213,7 @@ export default function HistoryFacts({ h }: { h: HistoryData }) {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </table>}
             <p className="mt-1 text-[11px] text-slate-400">접수일 전날 종가 기준. 컨센서스 대비 서프라이즈가 아니라 전년 같은 보고서 대비입니다.</p>
           </div>
         )}

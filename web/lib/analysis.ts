@@ -101,6 +101,7 @@ export interface HistoryData {
   earnings?: {
     basis: string; events: number;
     recent: Array<{ date: string; fiscal_year: number; report_code: string; yoy: number | null; r1: number; x1: number | null; r5: number; x5: number | null }>;
+    /** 5거래일 시장 대비 수익 — avg 는 평균(비율), up 은 오른 **횟수** (`event_history.earnings_reaction`) */
     grew: { n: number; avg: number; up: number } | null; shrank: { n: number; avg: number; up: number } | null;
   } | null;
   /** 상승의 출처 (41장, 국내) */
@@ -568,7 +569,9 @@ export interface SummaryCell { key: "value" | "trend" | "flow" | "earnings" | "r
  * 가치 = PBR 밴드의 자기 20%·80% 선(9.2 와 같은 선), 추세 = 3개월 수익률의 부호, 수급 = 최근 20거래일 외국인+기관 합의 부호,
  * 실적 = 분기 추세의 가속·감속(25장), 위험 = Altman Z″ 구간(38장, Altman 2000 의 경계). 재료가 없으면 회색 "없음".
  */
-export function summaryCells(d: Verdict["detail"] | null | undefined): SummaryCell[] {
+export function summaryCells(d: Verdict["detail"] | null | undefined, country?: string | null): SummaryCell[] {
+  // 국내 종목에서 수급·실적이 빈 까닭은 "국내만" 이 아니다 — 유니버스 밖 참고 분석은 이 둘을 내지 않는다 (25.1084)
+  const 없음 = country === "KR" ? "없음" : "없음(국내만)";
   const o = d?.outlook;
   const pct = (x: number) => `${x >= 0 ? "+" : ""}${(x * 100).toFixed(1)}%`;
   const cells: SummaryCell[] = [];
@@ -589,19 +592,20 @@ export function summaryCells(d: Verdict["detail"] | null | undefined): SummaryCe
   cells.push(
     w && 합 !== null
       ? { key: "flow", label: "수급", text: `외국인+기관 ${합 >= 0 ? "+" : ""}${합.toLocaleString(undefined, { maximumFractionDigits: 0 })}억 (${w.days}일)`, tone: 합 > 0 ? "good" : 합 < 0 ? "bad" : "neutral" }
-      : { key: "flow", label: "수급", text: "없음(국내만)", tone: "none" },
+      : { key: "flow", label: "수급", text: 없음, tone: "none" },
   );
   const q = d?.quarters;
   cells.push(
     q
       ? { key: "earnings", label: "실적", text: q.trend ? `영업이익 증가율 ${q.trend}` : "뚜렷한 방향 없음", tone: q.trend === "가속" ? "good" : q.trend === "감속" ? "bad" : "neutral" }
-      : { key: "earnings", label: "실적", text: "없음(국내만)", tone: "none" },
+      : { key: "earnings", label: "실적", text: 없음, tone: "none" },
   );
   const h = d?.health;
   cells.push(
     h && typeof h.z === "number" && h.zone
       ? { key: "risk", label: "재무 위험", text: `Z″ ${h.z.toFixed(2)} ${h.zone === "safe" ? "안전" : h.zone === "distress" ? "위험" : "회색"}`, tone: h.zone === "safe" ? "good" : h.zone === "distress" ? "bad" : "neutral" }
-      : { key: "risk", label: "재무 위험", text: h?.note ? "해당 없음" : "없음", tone: "none" },
+      // 금융업만 "해당 없음" — 재료가 비어 못 낸 것(`insights.health` 의 다른 note)은 "없음" 이다 (25.1084)
+      : { key: "risk", label: "재무 위험", text: h?.note?.startsWith("금융업") ? "해당 없음(금융업)" : "없음", tone: "none" },
   );
   return cells;
 }
