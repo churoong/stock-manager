@@ -110,6 +110,9 @@ class HoldingInput:
     sentiment_ref_date: str | None = None
     #: 판정에 쓴 투자 기간(`horizon`)의 첫 매수일. 기간초과는 여기서 잰다 (docs/infra.md 25.417). 비면 first_buy_date
     horizon_since: str | None = None
+    #: 최근 20거래일 안에 분할·병합 같은 기업행위가 감지됐나 (docs/infra.md 25.1093) — 장중 감시와 같은 판정
+    #: (`monitor_targets.recent_action`). 수량은 사용자가 고치기 전까지 분할 전 값이라 손절·목표가 거짓일 수 있다
+    corporate_action_recent: bool = False
 
 
 @dataclass
@@ -146,10 +149,21 @@ def evaluate(h: HoldingInput, today: date, targets: dict | None = None) -> list[
             if 묵음 is not None
             else ""
         )
+        # **기업행위 뒤에는 "수량을 확인하라" 를 플래그 문장에 붙인다** (docs/infra.md 25.1093, 감사 재현). 그 경고는
+        # 국내 일일 배치가 감지한 **그날 하루**만 냈고 미국은 아예 없었다 — 4:1 분할이면 −75% "손절선에 닿았습니다" 가
+        # 사유 없이 매일 실렸다. 플래그를 지우지는 않는다(진짜 손절일 수도 있다) — 묵은 종가(25.161)와 같은 판단
+        if h.corporate_action_recent:
+            덧 += (" ※ 최근 20거래일 안에 분할·병합 같은 기업행위가 감지됐습니다."
+                  " 매매 기록의 수량을 확인한 뒤 다시 보세요")  # fmt: skip
         묵음행 = (
             [_criterion("종가 나이", f"{h.price_date} ({묵음}일 전)",
                         f"≤ {_종가_묵음_일수()}일 (거래일 사이 최장 간격)", "positions", h.price_date)]
             if 묵음 is not None
+            else []
+        ) + (
+            [_criterion("기업행위", "최근 20거래일 안에 분할·병합 감지", "없어야 평가 수익률을 믿는다 — 수량 확인",
+                        "prices·us_split_detections", h.price_date)]
+            if h.corporate_action_recent
             else []
         )  # fmt: skip
         if ret <= rules["stop_pct"]:

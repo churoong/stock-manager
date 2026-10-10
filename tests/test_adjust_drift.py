@@ -127,6 +127,26 @@ class Test대기열:
         assert [d.stock_id for d in found] == [2]
 
 
+    def test_보유한_미국_종목이_분할하면_그날_수량_확인을_말한다(self) -> None:
+        """국내만 보유 수량 확인을 말해 미국 보유는 분할 뒤 거짓 손절이 안내 없이 나갔다 (docs/infra.md 25.1093, 감사)."""
+        client = self._client()
+        client.conn.execute(
+            "INSERT INTO positions (stock_id, quantity, currency, avg_price, avg_fx, cost, cost_krw, first_buy_date,"
+            " horizon, updated_at) VALUES (2, 10, 'USD', 50, 1300, 500, 650000, '2026-08-01', 'long', 't')"
+        )
+        bars = [DailyBar("AAA", "2026-09-01", 100.0, adj_close=98.0), DailyBar("BBB", "2026-09-01", 25.0, adj_close=24.5)]
+        말: list[str] = []
+        daily._store_us_bars(client, bars, "2026-09-10", {"AAA": 1, "BBB": 2}, "yfinance", notes=말)  # type: ignore[arg-type]
+        assert len(말) == 1 and "BBB" in 말[0] and "수량을 확인" in 말[0] and "권리락" not in 말[0]
+        # 보유가 아니면 말하지 않는다
+        client.conn.execute("DELETE FROM positions")
+        client.conn.execute("DELETE FROM adjust_refresh_queue")
+        client.conn.execute("UPDATE prices SET close = 50, adj_close = 49 WHERE stock_id = 2 AND date = '2026-09-01'")
+        말 = []
+        daily._store_us_bars(client, bars, "2026-09-10", {"AAA": 1, "BBB": 2}, "yfinance", notes=말)  # type: ignore[arg-type]
+        assert 말 == []
+
+
 class Test예산:
     def test_예비를_빼고_종목_수를_정한다(self) -> None:
         # 남은 200만 − 예비 100만 = 100만 / 1,300 = 769종목

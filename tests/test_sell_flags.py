@@ -342,6 +342,20 @@ class Test확인은_본_속_사유까지만:
         assert 확인 is None and 처음 != "2026-09-16T00:00:00+00:00"
 
 
+def test_기업행위_뒤_손절에는_수량_확인을_붙인다() -> None:
+    """4:1 분할 뒤 −75% "손절선에 닿았습니다" 가 사유 없이 매일 실렸다 (docs/infra.md 25.1093, 감사 재현).
+
+    지우지는 않는다 — 진짜 손절일 수 있다(묵은 종가 25.161 과 같은 판단)."""
+    분할 = holding(market_value=250_000.0, corporate_action_recent=True)
+    [f] = sf.evaluate(분할, TODAY)
+    assert f.reason_code == "손절" and "기업행위" in f.rationale_text and "수량을 확인" in f.rationale_text
+    assert any(r["label"] == "기업행위" for r in f.criteria)
+    병합 = holding(market_value=10_000_000.0, corporate_action_recent=True)
+    assert "기업행위" in sf.evaluate(병합, TODAY)[0].rationale_text
+    [보통] = sf.evaluate(holding(market_value=250_000.0), TODAY)
+    assert "기업행위" not in 보통.rationale_text and not any(r["label"] == "기업행위" for r in 보통.criteria)
+
+
 def test_묵은_지금_점수로는_점수_하락을_판정하지_않는다() -> None:
     """유니버스에서 빠져 점수가 멈춘 종목의 3월 점수가 9월에도 "지금" 이었다 (docs/infra.md 25.564, 감사 재현)."""
     묵음 = holding(score_at_buy=70.0, score_now=48.0, score_now_date="2026-03-02")

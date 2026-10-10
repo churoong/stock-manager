@@ -425,7 +425,7 @@ def _detect_kr_actions(
     return 말들
 
 
-def _보유_수량_확인(client: TursoClient, 걸린번호: list[int]) -> list[str]:
+def _보유_수량_확인(client: TursoClient, 걸린번호: list[int], 미국: bool = False) -> list[str]:
     """걸린 종목 중 **보유 중인 것**을 따로 짚는다 (docs/infra.md 25.146).
 
     수정주가는 *가격*을 고친다. 그런데 분할·병합은 **수량**도 바꾸는데 `trades` 는
@@ -459,6 +459,13 @@ def _보유_수량_확인(client: TursoClient, 걸린번호: list[int]) -> list[
     겹침 = sorted({보유[n] for n in 걸린번호 if n in 보유})
     if not 겹침:
         return []
+    if 미국:
+        # 미국은 분할 감지(두 비율이 같음)만 여기로 온다 — 권리락 안내는 맞지 않는다 (25.1093)
+        return [
+            f"미국 분할·병합으로 보이는 **보유 종목**이 있습니다: {', '.join(겹침)}."
+            " **매매 기록의 수량을 확인하세요** — 수량은 사용자가 적은 값이라 시스템이 고치지 않습니다."
+            " 그대로 두면 평가액·수익률이 틀어지고, 그 값으로 손절·목표 플래그가 판정됩니다. " + SPLIT_GUIDE
+        ]
     return [
         f"그중 **보유 중인 종목**이 있습니다: {', '.join(겹침)}."
         " 분할·병합·**무상증자**면 **매매 기록의 수량을 확인하세요** — 수량은 사용자가 적은 값이라"
@@ -1657,6 +1664,11 @@ def _store_us_bars(
             queued = queue_drift(client, drifts, now)
             if queued:
                 log.info("수정주가가 어긋난 종목 %d개를 재수집 대기열에 적었습니다", queued)
+            # **미국 보유가 분할하면 그날 말한다** (docs/infra.md 25.1093, 감사). 국내만 `_보유_수량_확인` 을 불러
+            # 미국 보유는 분할 뒤 거짓 손절이 수량 확인 안내 없이 나갔다. 분할 = 두 비율이 같은 어긋남(`queue_drift`)
+            분할 = [d.stock_id for d in drifts if d.ratio_before == d.ratio_after]
+            if 분할 and notes is not None:
+                notes.extend(_보유_수량_확인(client, 분할, 미국=True))
         except Exception as exc:  # noqa: BLE001 — 감지가 실패해도 시세는 저장한다
             # 적지 못한 종목은 **오늘 시세를 저장하지 않는다** (docs/infra.md 25.548, 교차검증). 저장하면 표본이
             # 조정 뒤 값으로 덮여 다음 날 다시 감지하지 못하고, 창보다 앞선 이력이 영영 재조정되지 않았다

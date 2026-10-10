@@ -204,6 +204,7 @@ def load_holdings(client: TursoClient, today: date | None = None) -> tuple[list[
                 sentiment_date=s0.get("as_of_date"),
                 sentiment_ref_date=_감성_기준일(r["country"], today),
                 horizon_since=r["horizon_since"],
+                corporate_action_recent=_기업행위(client, sid, str(r["country"])),
             )
         )  # fmt: skip
     경고 = [f"감성을 읽지 못해 감성급락은 판정하지 않았습니다 — {이유}" for 이유 in sorted(못읽음)]
@@ -215,6 +216,18 @@ def load_holdings(client: TursoClient, today: date | None = None) -> tuple[list[
             f" {', '.join(잣대바뀐종목[:5])}) — 다른 잣대의 두 점수를 빼면 거짓 경보가 난다"
         )
     return out, 경고
+
+
+def _기업행위(client: TursoClient, stock_id: int, country: str) -> bool:
+    """최근 20거래일 안의 분할·병합 — 장중 감시(`monitor_targets.recent_action`, 25.533)와 같은 판정 (25.1093).
+
+    읽지 못하면 False(예전과 같다) — 이 표시는 문장에 말을 덧붙일 뿐 플래그를 바꾸지 않는다."""
+    from batch.jobs import monitor_targets
+
+    try:
+        return monitor_targets.recent_action(client, stock_id, "US" if country == "US" else "KR")
+    except Exception:  # noqa: BLE001 — 덧붙이는 말이 판정을 막으면 안 된다
+        return False
 
 
 def _팩터가중치_다름(a: Any, b: Any) -> bool:
