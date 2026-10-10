@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import math
 import sys
 from dataclasses import replace as dc_replace
 from datetime import UTC, date, datetime, time, timedelta
@@ -248,6 +249,7 @@ def run(market: str, as_of: str | None = None, score: bool | None = None) -> int
             [method, market, lang, 현재판, 현재판, 재채점_시작],
         ).dicts() if score else []
         scored = 0
+        못_매김 = 0
         if pending:
             from importlib.metadata import version
 
@@ -264,6 +266,12 @@ def run(market: str, as_of: str | None = None, score: bool | None = None) -> int
                 method_version = f"{KORFINASC_MODEL} transformers {version('transformers')}"
             statements: list[tuple[str, list[Any]]] = []
             for row, (value, parts) in zip(pending, results, strict=True):
+                # **NaN·inf 는 점수가 아니다** (docs/infra.md 25.1097, 감사 재현) — `max(-1, min(1, nan))` 이 +1.0 이라
+                # 모델이 NaN 을 내면 강한 긍정으로 저장됐다. 적지 않고 "채점 안 된 기사" 로 남긴다 — 그 몫이 크면
+                # 25.834 의 미채점 문이 그 종목 감성을 비운다
+                if not isinstance(value, (int, float)) or not math.isfinite(value):
+                    못_매김 += 1
+                    continue
                 statements.append((
                     "INSERT INTO article_sentiments (news_id, score, method, method_version, matched_terms, created_at)"
                     " VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (news_id, method) DO UPDATE SET"
@@ -347,6 +355,7 @@ def run(market: str, as_of: str | None = None, score: bool | None = None) -> int
 
         step = {"scored": scored, "stocks": len(rows), "with_score": with_score, "as_of": as_of,
                 "unscored_articles": sum(미채점.values()), "dropped_for_unscored": 덜_채점,  # 25.834
+                "non_finite_scores": 못_매김,  # 25.1097
                 "effective_n": st.effective_n_summary(유효수)}  # 25.873 — 기록만
         db.finish_batch_run(client, run_id, status="success", step_log=step)
         print(f"{market} 기사 채점 {scored}건, 종목 {len(rows)}개 집계 (점수 있음 {with_score}, 기사 5건 미만은 NULL)")

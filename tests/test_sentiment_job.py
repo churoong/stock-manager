@@ -336,3 +336,28 @@ def test_실행_기록에_유효_기사_수_분포를_남긴다_25_873(monkeypat
     assert job.run("KR", "2026-09-17") == 0
     log = c.execute("SELECT step_log FROM batch_runs ORDER BY id DESC LIMIT 1").fetchone()[0]
     assert '"effective_n": {"n": 1' in log
+
+
+def test_NaN_점수는_강한_긍정으로_저장하지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`max(-1, min(1, nan))` 이 +1.0 이라 모델이 NaN 을 내면 강한 긍정으로 저장됐다 (docs/infra.md 25.1097, 감사)."""
+    from batch.core import db
+
+    mem = MemClient()
+    monkeypatch.setattr(job, "TursoClient", lambda: mem)
+    db.apply_migrations(mem)  # type: ignore[arg-type]
+    c = mem.conn
+    c.execute(
+        "INSERT INTO stocks (id, ticker, market, country, name_en, currency, status, source, fetched_at)"
+        " VALUES (1, 'AAPL', 'NASDAQ', 'US', 'Apple', 'USD', 'active', 't', 't')"
+    )
+    for i, title in enumerate(["nan please", "Apple beats estimates"]):
+        c.execute(
+            "INSERT INTO news (stock_id, title, url, published_at, lang, source, fetched_at)"
+            " VALUES (1, ?, ?, '2026-09-16T12:00:00.000Z', 'en', 'nasdaq_rss', 't')",
+            [title, f"https://x/{i}"],
+        )
+    진짜 = job.vader_scorer()
+    monkeypatch.setattr(job, "vader_scorer", lambda: lambda t: (float("nan"), {}) if t.startswith("nan") else 진짜(t))
+    assert job.run("US", "2026-09-17") == 0
+    점수 = dict(c.execute("SELECT n.title, a.score FROM article_sentiments a JOIN news n ON n.id = a.news_id").fetchall())
+    assert "nan please" not in 점수 and 점수["Apple beats estimates"] > 0
