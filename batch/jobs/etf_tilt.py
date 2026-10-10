@@ -102,6 +102,8 @@ def in_pool(pick: dict[str, Any], kodex_index: dict[str, str] | None = None) -> 
         return True
     category = str(pick.get("category") or "")
     leveraged = etf_svc.name_looks_leveraged(str(pick.get("name") or ""))
+    if etf_svc.name_looks_option(str(pick.get("name") or "")):  # 분류가 Large Blend 인 커버드콜·버퍼 (25.1107)
+        return False
     if category.startswith(etf_svc.TRADING_CATEGORY_PREFIX) or leveraged:
         return False
     if category in tilt.POOL_EXCLUDED_CATEGORIES:  # 옵션 전략 상품 (25.969)

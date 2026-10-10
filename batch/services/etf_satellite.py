@@ -32,13 +32,14 @@ MIN_YEARS_US_LONG = 10  # 미국 배당·업종. 섹터 SPDR 1998, Vanguard 섹�
 MIN_YEARS_THEME = 3  # 테마는 대부분 젊어 10년이면 묶음이 빈다. 대신 경고를 강하게 단다(10.4)
 MAX_POSITION_SUM = 1.05  # BOXX stock_position 198.81% 실측. 파생으로 부풀린 상품을 거른다
 
-US_OPTION_NAME_PATTERN = re.compile(
-    r"buywrite|covered call|premium income|option income|enhanced income|buffer|defined outcome|target income",
-    re.IGNORECASE,
-)
+US_OPTION_NAME_PATTERN = core.US_OPTION_NAME_PATTERN  # 정의처는 핵심 판정 쪽 (25.1107)
 US_OPTION_CATEGORIES = frozenset({"Derivative Income", "Defined Outcome"})
 
-KR_OPTION_INDEX_PATTERN = re.compile(r"커버드콜|Covered Call|Premium|콜매도|BuyWrite", re.IGNORECASE)
+# 25.1107(ETF 감사): "…Weekly Target Income Index" 같은 옵션 인컴 기초지수가 위성 테마로 통과했다 — 미국 규칙에 있는
+# Target Income·Buffer 를 더한다
+KR_OPTION_INDEX_PATTERN = re.compile(
+    r"커버드콜|Covered Call|Premium|콜매도|BuyWrite|Target Income|Buffer|버퍼", re.IGNORECASE
+)
 
 # ----------------------------------------------------------------------
 # 미국 묶음 (10.2)

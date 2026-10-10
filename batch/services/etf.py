@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass, field
 from datetime import date
@@ -45,8 +46,21 @@ TRADING_CATEGORY_PREFIX = "Trading--"
 # **알고 있는 오판**: "Ultra-Short Income" 같은 초단기 채권 ETF 도 ultra 에 걸린다.
 # 그런 상품은 분류가 허용 목록 밖이라 어차피 빠지지만, 제외 사유가 "레버리지" 로
 # 표시된다. 분류 판정이 먼저라 실제로는 분류가 있는 대부분이 분류 사유로 빠진다.
+#
+# 25.1107(ETF 감사 재현): "Direxion Daily TSLA Bull 1.5X" 가 분류 없이 "우리 종목 집중" 후보 풀에 들었다 — 1.25X·1.5X·
+# 1.75X·5x 같은 소수·큰 배수, bull·short·weeklypay 를 더한다. short 는 "Short-Term"·"Short Duration" 채권과 겹쳐
+# 뒤에 term·duration·maturity 가 오면 보지 않는다
 LEVERAGE_NAME_PATTERN = re.compile(
-    r"(?<![a-z0-9])(-?[1-4]x|ultra|ultrapro|ultrashort|inverse|bear|leveraged)(?![a-z0-9])"
+    r"(?<![a-z0-9.])(-?\d+(?:\.\d+)?x|ultra|ultrapro|ultrashort|inverse|bear|bull|leveraged|weeklypay"
+    r"|short(?![- ]?(?:term|duration|maturity)))(?![a-z0-9])"
+)
+
+#: **옵션 전략 상품의 이름 표기** (25.1107, ETF 감사 재현). 위성(`etf_satellite`)에만 있어, 야후 분류가 Large Blend 로
+#: 잡힌 "Global X S&P 500 Covered Call ETF"·버퍼 ETF·"Equity Premium Income" 이 핵심 추천과 "우리 종목 집중" 에
+#: 들었다. 정의처를 여기로 옮기고 위성도 이것을 쓴다
+US_OPTION_NAME_PATTERN = re.compile(
+    r"buywrite|covered call|premium income|option income|enhanced income|buffer|defined outcome|target income",
+    re.IGNORECASE,
 )
 
 # 넓은 지수 허용 목록. 분류 → 묶음. 2026-09-17 실제 응답에서 확인한 이름이다.
@@ -86,6 +100,10 @@ KR_NAME_EXCLUSIONS: tuple[tuple[str, str], ...] = (
     ("인버스", "레버리지·인버스 상품 (20년 적립과 정반대)"),
     ("2X", "레버리지·인버스 상품 (20년 적립과 정반대)"),
     ("곱버스", "레버리지·인버스 상품 (20년 적립과 정반대)"),
+    # 25.1107(ETF 감사): "TIGER 200 2배"·"XX 200 숏" 이 핵심을 통과했다 — 한글 배수·인버스 표기
+    ("2배", "레버리지·인버스 상품 (20년 적립과 정반대)"),
+    ("숏", "레버리지·인버스 상품 (20년 적립과 정반대)"),
+    ("울트라", "레버리지·인버스 상품 (20년 적립과 정반대)"),
     ("합성", "합성(스왑) 복제 — 거래상대방 위험 (2.1)"),
     ("커버드콜", "커버드콜 — 상승을 팔아 분배금을 만든다. 적립과 목적이 다르다"),
     ("콜매도", "커버드콜 — 상승을 팔아 분배금을 만든다. 적립과 목적이 다르다"),
@@ -153,6 +171,11 @@ def renormalized_weights(available: tuple[str, ...] = AVAILABLE_US) -> dict[str,
 
 def name_looks_leveraged(name: str) -> bool:
     return LEVERAGE_NAME_PATTERN.search(name.lower()) is not None
+
+
+def name_looks_option(name: str) -> bool:
+    """커버드콜·버퍼 같은 옵션 전략 이름인가 (25.1107)."""
+    return US_OPTION_NAME_PATTERN.search(name) is not None
 
 
 def years_between(start_iso: str, as_of: date) -> float | None:
@@ -269,7 +292,13 @@ def evaluate(symbol: str, name: str, profile: FundProfile | None, as_of: date, f
         ))
     if leveraged:
         return excluded("레버리지·인버스 상품 (20년 적립과 정반대)")
+    if name_looks_option(name):
+        rows.append(_criterion("옵션 전략 아님", f"이름 {name}", "커버드콜·버퍼·옵션 인컴 표기 없음",
+                               SOURCE_PROFILE, fetched, False))  # fmt: skip
+        return excluded("옵션 전략 상품 (커버드콜·버퍼) — 지수를 그대로 따르지 않는다")
 
+    # NaN·inf 는 값이 아니다 (25.1107, ETF 감사 재현) — 총보수 NaN 이 섞이면 백분위 정렬이 깨져 입력 순서만 바꿔도 다른
+    # ETF 의 보수 점수가 16.7 ↔ 83.3 으로 뒤집혔고, 근거 문장에 "총보수 nan%" 가 찍혔다
     missing = [
         label
         for label, value in (
@@ -278,7 +307,7 @@ def evaluate(symbol: str, name: str, profile: FundProfile | None, as_of: date, f
             ("순자산", profile.total_assets),
             ("설정일", profile.inception_date),
         )
-        if value is None
+        if value is None or (isinstance(value, float) and not math.isfinite(value))
     ]
     if missing:
         return excluded(f"확인할 수 없는 값: {', '.join(missing)}")
