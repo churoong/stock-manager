@@ -19,7 +19,9 @@ import {
   DISCLOSURE_ALERTS_BETWEEN,
   DISCLOSURE_ALERTS_FOR,
   DISCLOSURE_LOOKBACK_SESSIONS,
+  KIS_DISAGREE_KEY,
   disclosureBoundary,
+  kisCalendarSuspect,
   ZONE_ALERTS_FOR,
   ACTION_GUARD_ROWS,
   recentActionKr,
@@ -261,9 +263,16 @@ async function fetchYahooQuotes(symbols: string[]): Promise<{ quotes: Record<str
  * 받았으면 판정은 됐다. KIS 쪽 사정은 `kis` 에 따로 남긴다
  */
 async function fetchQuotes(
-  symbols: string[], market: Market, now: Date,
+  symbols: string[], market: Market, now: Date, day: string,
 ): Promise<{ quotes: Record<string, Quote>; errors: string[]; kis: Record<string, unknown> | null }> {
   if (market !== "KR" || !kisConfigured() || !symbols.length) return { ...(await fetchYahooQuotes(symbols)), kis: null };
+  // 우리 달력과 KIS 가 오늘 개장 여부를 다르게 말하면 KIS 를 쓰지 않는다 (25.1086, `kisCalendarSuspect`)
+  const 어긋남 = rowsToObjects<{ value: string }>(
+    await execute("SELECT value FROM settings WHERE key = ?", [KIS_DISAGREE_KEY]).catch(() => ({ columns: [], rows: [] }) as never),
+  )[0]?.value;
+  if (kisCalendarSuspect(어긋남, day)) {
+    return { ...(await fetchYahooQuotes(symbols)), kis: { skipped: "오늘 개장 여부가 KIS 와 우리 달력에서 다름 — 야후만" } };
+  }
   const kis = await fetchKisQuotes(symbols, now);
   await addUsage(KIS_SOURCE, kis.calls, now, null).catch(() => undefined);
   const yahoo = kis.failed.length ? await fetchYahooQuotes(kis.failed) : { quotes: {}, errors: [] };
@@ -518,7 +527,7 @@ export async function GET(request: Request) {
     }
 
     const symbols = [...new Set([...byStock.values()].map((v) => v.target.yahoo_symbol))];
-    const { quotes, errors, kis } = await fetchQuotes(symbols, market, now);
+    const { quotes, errors, kis } = await fetchQuotes(symbols, market, now, session.date);
     // 야후 호출이 하나라도 실패했는지 — 그 호출에서 빠진 대상은 판정 못 한 것이다 (25.731)
     const quoteCallFailed = errors.length > 0;
     const hits: Hit[] = [];

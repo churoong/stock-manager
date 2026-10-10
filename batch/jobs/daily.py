@@ -108,6 +108,10 @@ def job_name(market: str) -> str:
 # `batch/core/db.trigger_source()` 로 옮겼다 (2026-09-21, docs/infra.md 25.95).
 
 
+#: 우리 달력과 KIS 개장 여부가 어긋난 날 (25.1086) — 장중 경로(`web/lib/intraday.ts` `KIS_DISAGREE_KEY`)가 읽는다
+KIS_DISAGREE_KEY = "kis_calendar_disagree_KR"
+
+
 def _kis_calendar_check(client: TursoClient, today: date) -> list[str]:
     """KIS 휴장일 조회와 우리 달력이 다른 날을 경고로 (25.985). 키가 없으면 조용히 건너뛴다. **곁다리다** — 실패해도
     시세·리포트는 그대로 가고, 실패 사실만 한 줄 남긴다(값·토큰은 남기지 않는다)."""
@@ -121,6 +125,14 @@ def _kis_calendar_check(client: TursoClient, today: date) -> list[str]:
     except (kis.KisFailed, OSError, KeyError) as exc:  # requests 의 접속 오류도 OSError 계열이다
         return [f"KIS 휴장일 대조를 못 했습니다 ({exc}) — 달력은 exchange_calendars 그대로 씁니다"]
     다름 = cal.compare_with_kis("KR", statuses, today)
+    # **장중 경로가 볼 수 있게 남긴다** (25.1086). 장중은 KIS 시세에 시각이 없어(부른 시각을 붙인다) "지난 장 시세"
+    # 가드를 늘 통과한다 — 달력이 임시공휴일을 놓친 날 어제 시세로 손절·급락 알림이 오늘 날짜로 나갈 수 있었다.
+    # 어긋난 날에는 장중이 국내 시세를 야후(시각이 있어 가드가 걸린다)로만 받는다. 달력 자체는 고치지 않는다(25.985)
+    try:
+        db.set_setting(client, KIS_DISAGREE_KEY, {"checked": today.isoformat(),
+                                                  "dates": [x.split(" ")[0] for x in 다름]})  # fmt: skip
+    except Exception as exc:  # noqa: BLE001 — 곁다리다. 못 남기면 장중은 예전처럼 KIS 를 쓴다
+        log.warning("KIS 달력 불일치를 남기지 못했습니다: %s", exc)
     if not 다름:
         return []
     return [

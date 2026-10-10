@@ -627,3 +627,22 @@ export function watchPriceUsable(watchBuy: number | null, prevClose: number | nu
   // 대가: 목표가를 지난 뒤 −33% 넘게 더 빠진 종목의 **반복** 알림이 꺼진다(처음 지나는 날은 전일 종가가 높아 나간다)
   return watchBuy > prevClose * WATCH_PRICE_MAX_RATIO ? null : watchBuy;
 }
+
+/** 우리 달력과 KIS 개장 여부가 어긋난 날 — 배치(`daily._kis_calendar_check`)가 남긴다 (docs/infra.md 25.1086) */
+export const KIS_DISAGREE_KEY = "kis_calendar_disagree_KR";
+
+/**
+ * 오늘 국내 시세를 KIS 로 받아도 되나 (25.1086). KIS 시세에는 시각이 없어(부른 시각을 붙인다) "지난 장 시세" 가드
+ * (`isSessionQuote`)를 늘 통과한다 — 달력이 임시공휴일을 놓친 날 어제 시세로 손절·급락 알림이 오늘 날짜로 나갈 수
+ * 있었다. 어긋난 날에는 야후로만 받는다: 진짜 휴장이면 야후 시각이 지난 장이라 걸러지고, 진짜 장이면 지연 시세로라도
+ * 알림이 나간다. 값을 못 읽으면 예전처럼 KIS 를 쓴다.
+ */
+export function kisCalendarSuspect(raw: string | null | undefined, day: string): boolean {
+  if (!raw) return false;
+  try {
+    const v = JSON.parse(raw) as { dates?: unknown };
+    return Array.isArray(v.dates) && v.dates.includes(day);
+  } catch {
+    return false;
+  }
+}

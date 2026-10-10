@@ -16,6 +16,7 @@ KIS 는 투자자별·신용을 **최근 30일만**, 공매도를 약 100일 준
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import logging
 import sys
@@ -122,6 +123,11 @@ def upserts(stock_id: int, rows: dict[str, dict], fetched_at: str) -> list[tuple
     ]
 
 
+#: 장중 경로의 "잡음" 표시와 같은 앞머리 (`web/app/api/cron/intraday/route.ts` `CLAIM_PREFIX`, 25.1086). 배치가 넣은
+#: 행을 보내기 전에 장중 경로의 밀린 알림 발송(`flushOnce`)이 같은 NULL 행을 잡아 보내면 두 번 갔다. 잡은 채로 넣고,
+#: 보내면 시각으로, 못 보내면 NULL 로 되돌린다. 배치가 도중에 죽으면 경로가 10분 뒤(묵은 잡음) 다시 보낸다
+CLAIM_PREFIX = "claim:"
+
 AFTER_HOURS_INSERT = (
     "INSERT INTO alerts (stock_id, market, trade_date, trigger_type, message, data, created_at, sent_at)"
     " VALUES (?, 'KR', ?, ?, ?, ?, ?, ?) ON CONFLICT (stock_id, trigger_type, trade_date) DO NOTHING"
@@ -161,11 +167,12 @@ def _after_hours(client: TursoClient, qc: kis.QuoteClient, today, failed: dict[s
             failed[f"{code}:시간외"] = str(exc)
     걸림 = ah.hits(보유, 시세, 문턱)
     stamp = db.now_iso()
+    잡음 = f"{CLAIM_PREFIX}{stamp}"
     새것 = []
     for h in 걸림:
         rs = client.execute(AFTER_HOURS_INSERT, [h["stock_id"], day.isoformat(), ah.TRIGGER, h["message"],
                                                  json.dumps(h["data"], ensure_ascii=False), stamp,
-                                                 ah.QUIET_SKIPPED if (조용 and not 해제뒤) else None])  # fmt: skip
+                                                 ah.QUIET_SKIPPED if (조용 and not 해제뒤) else 잡음])  # fmt: skip
         if rs.affected_rows:
             새것.append(h)
     보냄 = 0
@@ -176,12 +183,23 @@ def _after_hours(client: TursoClient, qc: kis.QuoteClient, today, failed: dict[s
             telegram.send(글)
             보냄 = len(새것)
             client.execute(
-                "UPDATE alerts SET sent_at = ? WHERE trigger_type = ? AND trade_date = ?"
+                "UPDATE alerts SET sent_at = ? WHERE trigger_type = ? AND trade_date = ? AND sent_at = ?"
                 " AND stock_id IN (SELECT value FROM json_each(?))",
-                [stamp, ah.TRIGGER, day.isoformat(), json.dumps([h["stock_id"] for h in 새것])],
+                [stamp, ah.TRIGGER, day.isoformat(), 잡음, json.dumps([h["stock_id"] for h in 새것])],
             )
-        except Exception as exc:  # noqa: BLE001 — 못 보내면 알림 센터에는 남는다(sent_at 비어 있음)
+        except Exception as exc:  # noqa: BLE001 — 못 보내면 알림 센터에는 남는다
             failed["시간외:발송"] = type(exc).__name__
+            # 잡음을 풀어 장중 경로가 다음 호출에 보내게 한다(예전처럼 sent_at 비움)
+            with contextlib.suppress(Exception):
+                client.execute(
+                    "UPDATE alerts SET sent_at = NULL WHERE trigger_type = ? AND trade_date = ? AND sent_at = ?",
+                    [ah.TRIGGER, day.isoformat(), 잡음],
+                )
+    elif 새것:
+        # 조용시간 + "해제 뒤 보내기" 면 잡음으로 넣었으니 풀어 둔다 — 장중 경로가 조용시간이 끝나면 보낸다(예전처럼
+        # NULL). 조용시간 + 버리기면 QUIET_SKIPPED 로 넣어 이 UPDATE 는 아무 행도 안 건드린다
+        client.execute("UPDATE alerts SET sent_at = NULL WHERE trigger_type = ? AND trade_date = ? AND sent_at = ?",
+                       [ah.TRIGGER, day.isoformat(), 잡음])  # fmt: skip
     return {"holdings": len(보유), "day": day.isoformat(), "quiet": 조용, "threshold_pct": 문턱, "hits": len(걸림),
             "new": len(새것), "sent": 보냄}
 

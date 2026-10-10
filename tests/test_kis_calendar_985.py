@@ -92,3 +92,23 @@ def test_다르면_경고(monkeypatch) -> None:
     monkeypatch.setattr(daily.db, "record_api_call", lambda *a, **k: None)
     [줄] = daily._kis_calendar_check(_Client(), date(2026, 10, 7))
     assert "KIS 공식 조회와 다릅니다" in 줄 and "2026-10-08" in 줄 and "EXTRA_HOLIDAYS" in 줄
+
+
+def test_어긋난_날을_장중이_볼_수_있게_남긴다(monkeypatch) -> None:  # noqa: ANN001
+    """장중 KIS 시세는 시각이 없어 지난 장 가드를 늘 통과한다 — 어긋난 날엔 장중이 야후로만 받게 남긴다 (25.1086).
+    어긋남이 없는 날에도 빈 목록으로 덮어 지난 경고가 남지 않게 한다."""
+    from pathlib import Path
+
+    monkeypatch.setenv("KIS_APP_KEY", "k")
+    monkeypatch.setenv("KIS_APP_SECRET", "s")
+    monkeypatch.setattr(daily.db, "record_api_call", lambda *a, **k: None)
+    남김: list = []
+    monkeypatch.setattr(daily.db, "set_setting", lambda c, key, v: 남김.append((key, v)))
+    monkeypatch.setattr(kis, "holidays", lambda c, d: ([kis.DayStatus(date(2026, 10, 8), False)], 1))
+    daily._kis_calendar_check(_Client(), date(2026, 10, 7))
+    monkeypatch.setattr(kis, "holidays", lambda c, d: ([kis.DayStatus(date(2026, 10, 8), True)], 1))
+    daily._kis_calendar_check(_Client(), date(2026, 10, 7))
+    assert 남김 == [(daily.KIS_DISAGREE_KEY, {"checked": "2026-10-07", "dates": ["2026-10-08"]}),
+                  (daily.KIS_DISAGREE_KEY, {"checked": "2026-10-07", "dates": []})]  # fmt: skip
+    웹 = (Path(__file__).resolve().parent.parent / "web" / "lib" / "intraday.ts").read_text(encoding="utf-8")
+    assert f'KIS_DISAGREE_KEY = "{daily.KIS_DISAGREE_KEY}"' in 웹

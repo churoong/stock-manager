@@ -89,3 +89,58 @@ def test_조용시간이면_보내지_않고_해제_뒤로_남긴다(monkeypatch
     out = job._after_hours(Client(), QC(), None, {})  # type: ignore[arg-type]
     assert 보낸 == [] and out["quiet"] is True and out["day"] == "2026-10-07"
     assert 넣음[0][1] == "2026-10-07" and 넣음[0][-1] == "quiet-skipped"
+
+
+def test_잡은_채로_넣고_보낸_뒤_시각으로_못_보내면_푼다(monkeypatch) -> None:  # noqa: ANN001
+    """넣고 보내기 사이에 장중 경로의 밀린 발송이 같은 NULL 행을 잡아 두 번 갔다 (25.1086)."""
+    from datetime import UTC, datetime
+
+    from batch.jobs import kis_flows as job
+    from batch.notify import telegram
+
+    class Rs:
+        def __init__(self, rows=None, scalar=None, affected=1):  # noqa: ANN001
+            self.rows, self._s, self.affected_rows = rows or [], scalar, affected
+
+        def scalar(self):  # noqa: ANN201
+            return self._s
+
+    문장: list[tuple[str, list]] = []
+
+    class Client:
+        def execute(self, sql, args=None):  # noqa: ANN001, ANN201
+            문장.append((sql, args or []))
+            if "FROM positions" in sql:
+                return Rs(rows=[(1, "005930", "삼성전자")])
+            if "quiet_hours" in sql:
+                return Rs(scalar='{"enabled": false}')
+            return Rs()
+
+    class QC:
+        def after_hours(self, code):  # noqa: ANN001, ANN201
+            return {"price": 70000.0, "change_pct": -8.0, "volume": 10}
+
+    class 고정(datetime):
+        @classmethod
+        def now(cls, tz=None):  # noqa: ANN001, ANN206
+            return datetime(2026, 10, 7, 9, 25, tzinfo=UTC)  # 18:25 KST
+
+    monkeypatch.setattr(job, "datetime", 고정)
+    monkeypatch.setattr(telegram, "send", lambda 글: None)
+    job._after_hours(Client(), QC(), None, {})  # type: ignore[arg-type]
+    [넣기] = [a for s, a in 문장 if s.startswith("INSERT INTO alerts")]
+    assert str(넣기[-1]).startswith(job.CLAIM_PREFIX)
+    [보냄] = [a for s, a in 문장 if s.startswith("UPDATE alerts SET sent_at = ? ")]
+    assert 넣기[-1] in 보냄 and not str(보냄[0]).startswith(job.CLAIM_PREFIX)
+
+    def 실패(글: str) -> None:
+        raise RuntimeError("telegram 429")
+
+    문장.clear()
+    monkeypatch.setattr(telegram, "send", 실패)
+    failed: dict = {}
+    job._after_hours(Client(), QC(), None, failed)  # type: ignore[arg-type]
+    assert "시간외:발송" in failed
+    assert any(s.startswith("UPDATE alerts SET sent_at = NULL") for s, _ in 문장)
+    웹 = (__import__("pathlib").Path(__file__).resolve().parent.parent / "web/app/api/cron/intraday/route.ts").read_text()
+    assert f'CLAIM_PREFIX = "{job.CLAIM_PREFIX}"' in 웹
