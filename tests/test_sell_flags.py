@@ -353,7 +353,7 @@ def test_묵은_지금_점수로는_점수_하락을_판정하지_않는다() ->
 class Test점수_하락은_같은_잣대끼리만:
     """**가중치를 바꾸면 종목은 그대로인데 점수만 움직인다** (docs/infra.md 25.209)."""
 
-    def _돌리기(self, monkeypatch, 지금_가중치: str, 지금_판: int = 1, 중간=None, 중간_판=None):
+    def _돌리기(self, monkeypatch, 지금_가중치: str, 지금_판: int = 1, 중간=None, 중간_판=None, 더함=()):
         from batch.core import db
         from batch.jobs import sell_flags as job
 
@@ -379,6 +379,7 @@ class Test점수_하락은_같은_잣대끼리만:
         행들 = [("2026-08-31", 80, '{"value": 30, "quality": 70}', 1), ("2026-09-15", 55, 지금_가중치, 지금_판)]
         if 중간:
             행들.append((중간[0], 중간[1], 지금_가중치, 중간_판 or 지금_판))
+        행들 += list(더함)
         for day, total, weights, 판 in 행들:
             c.execute(
                 "INSERT INTO scores (stock_id, as_of_date, total_score, factor_scores, sentiment_weight_used,"
@@ -414,6 +415,21 @@ class Test점수_하락은_같은_잣대끼리만:
         assert h.score_rebased and h.score_at_buy == 78 and h.score_at_buy_date == "2026-09-10"
         [flag] = sf.evaluate(h, date(2026, 9, 16))
         assert any("기준 재설정(2026-09-10" in str(r) for r in flag.criteria)
+
+    def test_옛_가중치_점수가_20행을_넘어도_기준점을_찾는다(self, monkeypatch) -> None:
+        """매수 뒤 28거래일을 옛 가중치로 지낸 뒤 바꿨더니 앞 20행만 봐서 영영 못 찾았다 (docs/infra.md 25.1092, 감사 재현)."""
+        옛 = '{"value": 30, "quality": 70}'
+        # 09-01~09-08 여덟 행이 옛 가중치, 09-10 이 지금 가중치의 첫 점수(78). 쪽을 3행으로 줄여 "앞 20행이 모두 옛
+        # 가중치" 를 재현한다(실제는 20행 × 28거래일)
+        더함 = [((date(2026, 9, 1) + timedelta(days=i)).isoformat(), 80, 옛, 1) for i in range(8)]
+        from batch.jobs import sell_flags as job
+
+        monkeypatch.setattr(job, "BASELINE_PAGE", 3)
+        codes, 경고 = self._돌리기(monkeypatch, '{"value": 10, "quality": 90}', 중간=("2026-09-10", 78), 더함=더함)
+        assert "재무악화" in codes and 경고 == []
+        monkeypatch.setattr(job, "BASELINE_SCAN_PAGES", 1)  # 한 쪽(3행)만 보면 예전처럼 못 찾는다
+        codes, 경고 = self._돌리기(monkeypatch, '{"value": 10, "quality": 90}', 중간=("2026-09-10", 78), 더함=더함)
+        assert "재무악화" not in codes and any("아직 없음" in 줄 for 줄 in 경고)
 
     def test_중간_점수가_옛_잣대면_기준점으로_쓰지_않는다(self, monkeypatch) -> None:
         codes, 경고 = self._돌리기(monkeypatch, '{"value": 30, "quality": 70}', 지금_판=2, 중간=("2026-09-10", 78), 중간_판=1)

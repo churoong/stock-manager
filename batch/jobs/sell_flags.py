@@ -28,6 +28,10 @@ from batch.sources import dart
 log = logging.getLogger("sell_flags")
 
 JOB_NAME = "sell_flags"
+#: 잣대가 바뀐 보유의 새 기준점을 찾을 때 한 번에 읽는 점수 행 수와 최대 쪽 수 (25.961·25.1092). 20×19 = 380행은
+#: 거래일 1년 반 남짓 — 그보다 오래전에 바꾼 잣대 뒤 첫 점수까지 못 닿으면 "같은 잣대의 점수가 없음" 으로 말한다
+BASELINE_PAGE = 20
+BASELINE_SCAN_PAGES = 19
 
 
 def _f(value: Any) -> float | None:
@@ -153,16 +157,28 @@ def load_holdings(client: TursoClient, today: date | None = None) -> tuple[list[
         기준점: dict[str, Any] | None = None
         if 잣대가_바뀜 and r["score_at_buy_date"] and r["score_now_date"]:
             지금잣대 = 잣대[1][0]
-            for 후보 in client.execute(
-                "SELECT as_of_date, total_score, weights_json, sentiment_weight_used FROM scores"
-                " WHERE stock_id = ? AND as_of_date > ? AND as_of_date < ? AND calc_version = ?"
-                "   AND total_score IS NOT NULL ORDER BY as_of_date LIMIT 20",
-                [sid, r["score_at_buy_date"], r["score_now_date"], int(지금잣대["calc_version"])],
-            ).dicts():
-                if not (_팩터가중치_다름(후보["weights_json"], 지금잣대["weights_json"])
-                        or _가중치_다름(후보.get("sentiment_weight_used"), 지금잣대.get("sentiment_weight_used"))):
-                    기준점 = 후보
+            # **20행씩 넘겨 본다** (docs/infra.md 25.1092, 감사 재현). 앞 20행만 봐서, 매수 뒤 20거래일 넘게 지나
+            # 가중치를
+            # 바꾸면 그 20행이 모두 옛 가중치라 기준점을 영영 못 찾았다 — 매일 같은 20행이라 시간이 가도 그대로였다.
+            # 읽기는 잣대가 바뀐 보유에서만, 찾으면 바로 멈춘다. 상한 `BASELINE_SCAN_PAGES` 쪽(약 1년 반)
+            # 넘으면 예전처럼 "같은 잣대의 점수가 없음" 으로 말한다
+            쪽 = 0
+            while 기준점 is None and 쪽 < BASELINE_SCAN_PAGES:
+                후보들 = client.execute(
+                    "SELECT as_of_date, total_score, weights_json, sentiment_weight_used FROM scores"
+                    " WHERE stock_id = ? AND as_of_date > ? AND as_of_date < ? AND calc_version = ?"
+                    "   AND total_score IS NOT NULL ORDER BY as_of_date LIMIT ? OFFSET ?",
+                    [sid, r["score_at_buy_date"], r["score_now_date"], int(지금잣대["calc_version"]),
+                     BASELINE_PAGE, 쪽 * BASELINE_PAGE],
+                ).dicts()  # fmt: skip
+                for 후보 in 후보들:
+                    if not (_팩터가중치_다름(후보["weights_json"], 지금잣대["weights_json"])
+                            or _가중치_다름(후보.get("sentiment_weight_used"), 지금잣대.get("sentiment_weight_used"))):
+                        기준점 = 후보
+                        break
+                if len(후보들) < BASELINE_PAGE:
                     break
+                쪽 += 1
         # 오늘 점수가 없으면 검사가 원래 돌지 않는다 — "잣대가 달라 안 봤다" 는 거짓 까닭이 된다 (25.773, 교차검증)
         if 잣대가_바뀜 and 기준점 is None and r["score_at_buy"] is not None and r["score_now"] is not None:
             잣대바뀐종목.append(display_name(str(r["name"])))  # 미국 목록 이름 꼬리는 뗀다 (25.957)
