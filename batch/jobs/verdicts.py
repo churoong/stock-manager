@@ -225,6 +225,10 @@ TRACK_UPSERT = (
 MAX_EVAL_DATES = 10
 #: 쌓은 기록일 목록의 길이 — 가장 긴 기간(12개월 ≈ 250거래일)보다 넉넉히
 LOGGED_KEEP = 400
+#: 기간이 찼는데 오늘 종가가 없던(거래정지) 예측을 기다리는 달력 날 수 (docs/infra.md 25.1085). 거래가 다시 열리면 그날
+#: 종가로 채점한다. 이보다 오래 멈춘 종목(상장폐지 등)은 버리고 `dropped` 에 센다 — 조용히 빼지 않는다. 90일은 국내
+#: 거래정지 대부분(감사·실질심사 결과 대기)을 덮는 어림 [확인필요: 정지 기간 분포를 재지 않았다]
+PENDING_MAX_DAYS = 90
 
 
 def track_key(country: str) -> str:
@@ -258,20 +262,51 @@ def evaluate_due(client: TursoClient, country: str, as_of: str, now_close: dict[
             d0 = rows[0][next(iter(rows[0]))] if rows else None
             날들 = [str(d0)] if d0 and str(d0) > 앞 else []
         for d in 날들:
-            evaluate_date(client, country, d, 달, now_close, prior, market, 바뀜, warnings)
+            못함 = evaluate_date(client, country, d, 달, now_close, prior, market, 바뀜, warnings)
             through[str(달)] = d
             본날.append(f"{달}개월←{d}")
+            # **거래정지라 오늘 종가가 없던 종목은 기다린다** (25.1085). 예전엔 `through` 만 넘어가 영영 채점되지
+            # 않았다 — 정지·상폐는 대개 나쁜 소식이라 성적표가 살아남은 종목 쪽으로 낙관적으로 기울었다
+            state.setdefault("pending", []).extend([d, 달, sid] for sid in 못함)
+    _pending(client, country, as_of, now_close, prior, market, 바뀜, state, warnings)
     return 본날
 
 
+def _pending(client: TursoClient, country: str, as_of: str, now_close: dict[int, dict], prior: dict[int, dict],
+             market: dict, 바뀜: set[int], state: dict, warnings: list[str]) -> None:  # fmt: skip
+    """기다리던 예측 가운데 오늘 종가가 생긴 것을 채점한다. 너무 오래 기다린 것은 버리고 센다."""
+    남김: list[list] = []
+    묶음: dict[tuple[str, int], set[int]] = {}
+    오늘 = date.fromisoformat(as_of[:10])
+    for d, 달, sid in state.get("pending") or []:
+        if (now_close.get(int(sid)) or {}).get("close"):
+            묶음.setdefault((str(d), int(달)), set()).add(int(sid))
+        elif (오늘 - date.fromisoformat(str(d)[:10])).days > 31 * int(달) + PENDING_MAX_DAYS:
+            state["dropped"] = int(state.get("dropped") or 0) + 1
+        else:
+            남김.append([d, 달, sid])
+    for (d, 달), sids in sorted(묶음.items()):
+        남김 += [[d, 달, s] for s in evaluate_date(client, country, d, 달, now_close, prior, market, 바뀜, warnings,
+                                                 only=sids)]  # fmt: skip
+    state["pending"] = 남김
+
+
 def evaluate_date(client: TursoClient, country: str, d: str, 달: int, now_close: dict[int, dict],
-                  prior: dict[int, dict], market: dict, 바뀜: set[int], warnings: list[str]) -> None:  # fmt: skip
-    """기록일 하나의 `달` 개월 예측을 오늘 종가와 견준다."""
+                  prior: dict[int, dict], market: dict, 바뀜: set[int], warnings: list[str],
+                  only: set[int] | None = None) -> list[int]:  # fmt: skip
+    """기록일 하나의 `달` 개월 예측을 오늘 종가와 견준다. **기준 종가는 있는데 오늘 종가가 없는**(거래정지) 종목을
+    돌려준다 — 부르는 쪽이 기다린다(25.1085). `only` 를 주면 그 종목만."""
     기준 = {int(r["stock_id"]): r for r in _safe(client, CLOSE_SQL, [country, str(d)], warnings, "기준 종가")}
+    못함: list[int] = []
     for r in _safe(client, LOG_ROWS_SQL, [str(d), country], warnings, "예측 기록"):
         sid = int(r["stock_id"])
+        if only is not None and sid not in only:
+            continue
         b, n = (기준.get(sid) or {}).get("close"), (now_close.get(sid) or {}).get("close")
-        if not b or not n:
+        if b and not n:
+            못함.append(sid)
+            continue
+        if not b:
             continue
         try:
             models = json.loads(r["models_json"] or "{}")
@@ -281,6 +316,7 @@ def evaluate_date(client: TursoClient, country: str, d: str, 달: int, now_close
             ft.add(prior.setdefault(sid, {}), model, 달, cell)
             ft.add(market, model, 달, cell)
             바뀜.add(sid)
+    return 못함
 
 
 #: 그 시장의 **유니버스 의견만** 지운다 — 참고 분석(`jobs/analyze_extra`, `detail.excluded_reason` 이 있는 행)은

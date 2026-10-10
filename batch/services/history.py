@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import math
 import statistics
+from datetime import date, timedelta
 from typing import Any
 
 from batch.services import patterns as pt
@@ -99,11 +100,22 @@ def tail(dates: list[str], closes: list[float]) -> dict[str, Any] | None:
     return out
 
 
+def _달이_끝났나(last: str) -> bool:
+    """마지막 날이 그달 마지막 평일 근처인가 — 다음 날이 다음 달이거나, 금요일이고 다음 월요일이 다음 달이면.
+    휴장 달력은 보지 않는다(월말 하루 이틀이 휴장이면 끝난 달을 덜 끝난 것으로 봐 한 표본을 버린다 — 보수적인 쪽)."""
+    d = date.fromisoformat(last)
+    return (d + timedelta(days=1)).month != d.month or (d.weekday() == 4 and (d + timedelta(days=3)).month != d.month)
+
+
 def season(dates: list[str], closes: list[float]) -> dict[str, Any] | None:
     """계절성 달력 (33장). 달마다(그달 마지막 종가) 수익률을 달력의 달(1~12월)로 모은다. 2년이 안 되면 None.
     달마다 횟수·오른 횟수·평균. `SEASON_MIN` 번 미만인 달은 비운다. 우연이 크다 — 판정에 쓰지 않는다."""
     끝 = pt._month_ends([str(d) for d in dates], [float(x) for x in closes])
     달 = sorted(끝)
+    if 달 and not _달이_끝났나(str(dates[-1])[:10]):
+        # **아직 안 끝난 이번 달은 넣지 않는다** (25.1085). 10-08 기준이면 10월 6거래일 수익이 "한 달" 표본으로
+        # 들어갔고, 화면 줄은 바로 그 이번 달을 보여 준다
+        달 = 달[:-1]
     if len(달) < 25:
         return None
     모음: dict[str, list[float]] = {}
@@ -231,7 +243,12 @@ def volume_profile(dates: list[str], closes: list[float], values: list[float | N
     for c, v in 쌍:
         무게[min(PROFILE_BINS - 1, int((c - lo) / 폭))] += v
     합 = sum(무게)
-    끝 = float(closes[-1])
+    끝 = float(closes[-1] or 0)
+    if 끝 <= 0:
+        # 마지막 종가가 0·빈 값이면 비율을 낼 수 없다 — 이 종목만 빠진다 (25.1085). 예전엔 0 으로 나눠 **주간 지표
+        # 작업 전체**가 저장 전에 죽었다(종목 반복에 종목별 예외 처리가 없다). 25.203 뒤로는 적재가 막지만 옛 0 행이
+        # 남을 수 있다
+        return None
     bins = [{"lo": round((lo + i * 폭) / 끝, 4), "hi": round((lo + (i + 1) * 폭) / 끝, 4), "share": round(w / 합, 4)}
             for i, w in enumerate(무게)]  # fmt: skip
     순 = sorted(range(PROFILE_BINS), key=lambda i: -무게[i])[:PROFILE_TOP]

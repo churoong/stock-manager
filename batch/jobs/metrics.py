@@ -34,6 +34,9 @@ from batch.services import metrics as calc
 log = logging.getLogger("metrics")
 
 JOB_NAME = "metrics"
+#: 종목 몇 개만 낸 실행(`--ticker`, 참고 분석 `ensure_data`)의 기록 이름 (docs/infra.md 25.1085). 주간 작업과
+#: 같은 이름이면 주간 지표가 멈춰도 "오래 안 돈 작업"(`weekly_summary`) 경고가 이 성공 기록에 가려졌다
+JOB_NAME_ONE = "metrics_one"
 
 # 기간별로 거슬러 올라갈 달력 일수. 거래일이 아니라 달력 기준이다.
 WINDOW_DAYS = {"1Y": 366, "3Y": 1096, "5Y": 1827}
@@ -301,6 +304,7 @@ def compute_all(
     windows: list[str],
     as_of: str,
     as_of_by_country: dict[str, str] | None = None,
+    market_wide: bool = True,
 ) -> tuple[int, dict[str, int], list[str]]:
     """전 종목의 지표를 계산해 저장한다. 나라마다 기준일이 다르면 `as_of_by_country` 가 이긴다 (25.558)."""
     warnings: list[str] = []
@@ -512,8 +516,10 @@ def compute_all(
                 표["moves"]["leaders"] = history.leaders(sid, 움직임.get(sid), 같은, 시총)
     store_patterns(client, [(sid, d, json.dumps(표, separators=(",", ":")), t) for sid, d, 표, t in pattern_rows],
                    warnings)  # fmt: skip
-    # 시장 전체 신고가 뒤 (34장) — 나라마다 설정 한 행
-    for 나라, 모음 in 신고가_모음.items():
+    # 시장 전체 신고가 뒤 (34장) — 나라마다 설정 한 행. **시장 전체를 돈 실행만 쓴다** (25.1085) — 참고 분석이
+    # 종목 하나로 돌면 그 종목의 사건 몇 개(n=5)로 나라 전체 분포를 덮어써, 주간 작업이 다시 돌 때까지 모든 종목의
+    # 34장 줄이 틀렸다
+    for 나라, 모음 in (신고가_모음.items() if market_wide else ()):
         시장분포 = history.market_breakout(모음)
         if 시장분포:
             try:
@@ -598,7 +604,7 @@ def run(windows: list[str], ticker: str | None = None, countries: tuple[str, ...
         as_of_by = {c: cal.default_as_of(c) for c in countries}
         as_of = max(as_of_by.values())
         run_id = db.start_batch_run(
-            client, job_name=JOB_NAME, market=None, trade_date=as_of
+            client, job_name=JOB_NAME_ONE if ticker else JOB_NAME, market=None, trade_date=as_of
         )
 
         stocks = target_stocks(client, ticker, countries)
@@ -610,7 +616,7 @@ def run(windows: list[str], ticker: str | None = None, countries: tuple[str, ...
             return 1
 
         print(f"대상 {len(stocks)}종목, 기간 {windows}")
-        total, counts, warnings = compute_all(client, stocks, windows, as_of, as_of_by)
+        total, counts, warnings = compute_all(client, stocks, windows, as_of, as_of_by, market_wide=ticker is None)
 
         db.finish_batch_run(
             client, run_id,
