@@ -256,6 +256,15 @@ class Test보내기:
         assert ids == [7]
         assert len(보낸것) == 1
 
+    def test_나뉜_리포트의_둘째_통에도_기간_머리가_있다(self, 부르기, monkeypatch) -> None:
+        """둘째 메시지만 보면 어느 기간 신호인지 몰랐다 (docs/infra.md 25.1104, 리포트 감사)."""
+        monkeypatch.setattr(tg.config, "get", lambda _k, *a: "채팅")
+        보낸것, _ = 부르기(성공())
+        글 = "1부 개별 종목\n[장기]\n" + "\n".join(f"종목{i} 80점\n  " + "근거" * 300 for i in range(12))
+        tg.send(글, with_disclaimer=False)
+        assert len(보낸것) >= 2
+        assert all(x["text"].startswith(("1부", "[장기]")) for x in 보낸것)
+
     def test_고지가_없으면_붙인다(self, 부르기, monkeypatch) -> None:
         monkeypatch.setattr(tg.config, "get", lambda _k, *a: "채팅")
         monkeypatch.setattr(tg.config, "TELEGRAM_DISCLAIMER", True)  # 켰을 때 — 기본은 꺼짐(25.878)

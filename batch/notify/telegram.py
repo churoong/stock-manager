@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from typing import Any
 
@@ -292,7 +293,9 @@ def send(text: str, chat_id: str | None = None, with_disclaimer: bool = True) ->
         text = append_disclaimer(text)
 
     message_ids: list[int] = []
-    chunks = split_message(text)
+    # 절 머리 다시 달기는 **보내는 쪽에서만** (25.1104) — `split_message` 는 웹(장중 알림 묶음)과 같은 표
+    # (`tests/fixtures/telegram_split.json`)로 고정한 계약이고, 리포트는 파이썬만 보낸다
+    chunks = _carry_headers(split_message(text))
     첫_조각_모름: TelegramUncertainError | None = None
     보낸_번호: list[int] = []
     for i, chunk in enumerate(chunks):
@@ -362,3 +365,38 @@ def _모름으로(
     )
     오류.sent_ids = list(message_ids)  # type: ignore[attr-defined]
     return 오류
+
+
+#: 리포트의 절 머리 — 기간(`[단기]`)과 1부·2부 (docs/infra.md 25.1104)
+_절_머리 = re.compile(r"^(\[(단기|중기|장기)\]|[12]부 .+)$")
+_기간_머리 = re.compile(r"^\[(단기|중기|장기)\]( \(이어서\))?$")
+
+
+def _carry_headers(chunks: list[str]) -> list[str]:
+    """**절 머리를 조각마다 다시 단다** (docs/infra.md 25.1104, 리포트 감사 재현).
+
+    25.819 는 들여 쓴 줄을 종목 머리와 묶었지만 `[장기]`·`2부 포트폴리오` 같은 절 머리는 들여 쓰지 않아, 첫 조각이
+    `[장기]` 한 줄로 끝나고 둘째 조각은 기간 없이 종목으로 시작했다 — 매수 구간·근거가 기간마다 다른데 둘째 메시지만
+    보면 어느 기간 신호인지 몰랐다. 조각 끝의 외톨이 절 머리는 다음 조각으로 넘기고, 절 머리 없이 시작하는 조각에는
+    직전 **기간** 머리를 "(이어서)" 로 단다. 3,900자 안전 한도라 머리 한 줄은 텔레그램 한도(4,096) 안에 든다.
+    """
+    out: list[str] = []
+    지금_머리: str | None = None
+    넘김: list[str] = []
+    for i, chunk in enumerate(chunks):
+        줄들 = 넘김 + chunk.split("\n")
+        넘김 = []
+        while i < len(chunks) - 1 and len(줄들) > 1 and _절_머리.match(줄들[-1].strip()):
+            넘김.insert(0, 줄들.pop())
+        첫 = next((x for x in 줄들 if x.strip()), "")
+        if out and 지금_머리 and not _절_머리.match(첫.strip()):
+            줄들 = [f"{지금_머리} (이어서)", *줄들]
+        for x in 줄들:
+            # 이어 다는 것은 **기간 머리만** — 1부·2부 머리를 만나면 끊는다. 2부 뒤의 절(매도 플래그·일정)에
+            # "[장기] (이어서)" 가 붙지 않게
+            if _기간_머리.match(x.strip()):
+                지금_머리 = x.strip().removesuffix(" (이어서)")
+            elif _절_머리.match(x.strip()):
+                지금_머리 = None
+        out.append("\n".join(줄들))
+    return out
