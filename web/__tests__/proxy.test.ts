@@ -245,6 +245,25 @@ describe("공개 경로는 정확히 같을 때만, 상태를 바꾸는 API 는 
     expect((await proxy(new NextRequest("https://example.com/api/auth/login/x"))).status).toBe(401);
   });
 
+  it("크론·설치 파일 경로에 `..` 를 끼워 데이터 경로로 넘어가지 못한다 (25.1090, 감사)", async () => {
+    // URL 해석이 `..`·`%2e%2e` 를 먼저 접어 실제 경로(/api/portfolio)로 보고 쿠키를 요구한다
+    for (const 주소 of [
+      "https://example.com/api/cron/../portfolio",
+      "https://example.com/api/cron/%2e%2e/portfolio",
+      "https://example.com/api/cron/.%2E/portfolio",
+      "https://example.com/manifest.webmanifest/../api/portfolio",
+      "https://example.com/api/telegram/webhook/../../portfolio",
+    ]) {
+      const 요청_ = new NextRequest(주소);
+      expect(요청_.nextUrl.pathname, 주소).toBe("/api/portfolio");
+      expect((await proxy(요청_)).status, 주소).toBe(401);
+    }
+    // 크론 접두사 뒤에 남는 `%2F` 는 경로 구분자가 아니다 — 크론 경로 안에서 비밀 토큰을 본다(운영 빌드로 확인, 25.1090)
+    expect(new NextRequest("https://example.com/api/cron/..%2Fportfolio").nextUrl.pathname).toBe("/api/cron/..%2Fportfolio");
+    // 대소문자를 바꿔도 공개 접두사가 아니다 — 화면 경로로 보고 로그인으로 보낸다
+    expect((await proxy(new NextRequest("https://example.com/API/CRON/x"))).status).toBe(307);
+  });
+
   it("다른 출처의 POST 는 쿠키가 있어도 403", async () => {
     const 쿠키 = `${SESSION_COOKIE}=${await createSessionToken()}`;
     const 남 = new NextRequest("https://example.com/api/trades", {
