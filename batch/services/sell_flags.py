@@ -14,6 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date
 
+from batch.core.rounding import fixed
 from batch.services import sentiment
 
 # CLAUDE.md 매매 규칙 기본값. 설정 horizon_targets 가 있으면 그것을 쓴다
@@ -209,7 +210,7 @@ def evaluate(h: HoldingInput, today: date, targets: dict | None = None) -> list[
     if (점수_쓸_수_있다 and h.score_now is not None and h.score_at_buy is not None
             and h.score_at_buy - h.score_now >= SCORE_DROP_POINTS):
         drop = h.score_at_buy - h.score_now
-        texts.append(f"종합 점수 {h.score_at_buy:.0f}→{h.score_now:.0f}점")
+        texts.append(f"종합 점수 {fixed(h.score_at_buy)}→{fixed(h.score_now)}점")  # .5 올림 (25.1105)
         # 기준점을 다시 잡았으면 그렇다고 적는다 (25.961) — "매수 당시" 라고 하면 거짓이다
         기준 = (f"기준 재설정({h.score_at_buy_date}, 매수 뒤 계산 판·가중치가 바뀌어 같은 잣대의 첫 점수)"
                 if h.score_rebased else f"매수 당시({h.score_at_buy_date})")  # fmt: skip

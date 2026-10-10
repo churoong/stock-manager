@@ -20,6 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from batch.core.rounding import fixed
 from batch.services import holding_scores, pick_history, robustness
 from batch.services.accumulation import display_name
 
@@ -229,7 +230,7 @@ def _pct(value: float | None, digits: int = 1) -> str:
 def _score(value: float | None) -> str:
     if value is None:
         return "-"
-    return f"{value:.0f}"
+    return fixed(value)  # .5 를 올린다 — 근거 문장·웹과 같게 (25.1105)
 
 
 def trade_link(app_url: str | None, pick: StockPick) -> str | None:
@@ -297,7 +298,7 @@ def render_picks(picks: list[StockPick], app_url: str | None = None, footer: str
             # 센티먼트는 항상 따로 적는다. 팩터에 섞지 않는다
             if not 반복 and pick.sentiment is not None:
                 # 정수로 먼저 반올림한다 — `:+.0f` 는 −0.3 을 "-0" 으로 찍었다 (docs/infra.md 25.421)
-                lines.append(f"  센티먼트 {int(round(pick.sentiment)):+d}")
+                lines.append(f"  센티먼트 {fixed(pick.sentiment, sign=True)}")  # .5 올림 (25.1105)
 
             # 가중치 흔들기 — 이 점수가 설정값에 얼마나 기대는지 (docs/reports.md 3.2). 점수 줄 바로 아래
             흔들기 = None if 반복 else robustness.stability_line(pick.stability)
@@ -359,7 +360,7 @@ def render_portfolio(portfolio: PortfolioView, picks: list[StockPick]) -> str:
         for allocation in portfolio.allocations:
             lines.append(
                 f"{allocation.name}  {_money(allocation.amount, allocation.currency)} "
-                f"({allocation.weight_pct:.1f}%)"
+                f"({fixed(allocation.weight_pct, 1)}%)"
             )
             for i, tranche in enumerate(allocation.tranches, 1):
                 price = tranche.get("price_at_or_below")

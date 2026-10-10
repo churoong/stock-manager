@@ -20,6 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from batch.core.rounding import fixed, half_up
 from batch.services.accumulation import display_name
 
 #: 2부에 싣는 보유 줄 상한. 보유가 많아도 한 조각(3,900자) 안에 들게
@@ -68,12 +69,12 @@ def line(h: HoldingScore) -> str:
     else:
         자리 = f"{h.market} {h.rank_now}위" if h.market and h.rank_now else None
         안 = ", ".join(x for x in (자리, _short(h.as_of)) if x)
-        지금 = f"지금 {round(h.score_now)}점" + (f" ({안})" if 안 else "")
+        지금 = f"지금 {fixed(h.score_now)}점" + (f" ({안})" if 안 else "")
     if h.score_at_trade is None:
         그때 = "매수 때 점수 없음"
         차이 = ""
     else:
-        그때 = f"매수 때 {round(h.score_at_trade)}점" + (f" ({_short(h.first_buy)})" if h.first_buy else "")
+        그때 = f"매수 때 {fixed(h.score_at_trade)}점" + (f" ({_short(h.first_buy)})" if h.first_buy else "")
         # **보이는 두 숫자의 차이**를 적는다 (25.959) — 반올림 전 값으로 빼면 "지금 60점 · 매수 때 61점 → +0점" 이
         # 됐다(10-06 리포트)
         if h.score_now is None:
@@ -81,7 +82,7 @@ def line(h: HoldingScore) -> str:
         elif not h.same_yardstick:
             차이 = " (계산 판·가중치가 달라 차이는 적지 않음)"
         else:
-            차이 = f" → {round(h.score_now) - round(h.score_at_trade):+d}점"
+            차이 = f" → {int(half_up(h.score_now) - half_up(h.score_at_trade)):+d}점"
     return f"보유 {display_name(h.name)}: {지금} · {그때}{차이}"
 
 
