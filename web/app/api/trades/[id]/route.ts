@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { execute, rowsToObjects } from "@/lib/db";
-import { TRADES_FOR_HELD, deleteShortfallWarnings, requestRecalc } from "@/lib/portfolio";
+import { TRADES_FOR_HELD, deleteShortfallWarnings, requestRecalc, tradeEditErrors, tradeEditSchema } from "@/lib/portfolio";
 
 /**
  * 매매 기록 한 건: 근거 스냅샷 보기(GET), 지우기(DELETE).
  *
- * 고치기는 지우고 다시 넣는다. 매수 근거 스냅샷은 넣는 순간의 것이어야 해서, 날짜·수량을 바꾸며
+ * 고치기: 메모·수수료·세금은 **제자리에서**(PATCH, 25.1116 — id 가 그대로라 같은 날 매수의 선입선출 순서가 안 바뀐다).
+ * 날짜·종목·수량·체결가·투자 기간은 지우고 다시 넣는다. 매수 근거 스냅샷은 넣는 순간의 것이어야 해서, 날짜·수량을 바꾸며
  * 스냅샷을 그대로 두면 근거와 기록이 어긋난다.
  */
 type Params = { params: Promise<{ id: string }> };
@@ -81,5 +82,39 @@ export async function DELETE(_request: Request, { params }: Params) {
       },
       { status: 500 },
     );
+  }
+}
+
+/** 메모·수수료·세금을 제자리에서 고친다 (docs/infra.md 25.1116). 넣을 때와 같은 규칙으로 다시 본다 */
+export async function PATCH(request: Request, { params }: Params) {
+  const id = parseId((await params).id);
+  if (!id) return NextResponse.json({ errors: ["잘못된 번호"] }, { status: 400 });
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ errors: ["요청 본문을 읽지 못했습니다"] }, { status: 400 });
+  }
+  const parsed = tradeEditSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json({ errors: parsed.error.issues.map((i) => `${i.path.join(".") || "본문"}: ${i.message}`) }, { status: 400 });
+  }
+  try {
+    const row = rowsToObjects<{ stock_id: number; side: string; trade_date: string; price: number; quantity: number; fee: number | null; tax: number | null; memo: string | null }>(
+      await execute("SELECT stock_id, side, trade_date, price, quantity, fee, tax, memo FROM trades WHERE id = ?", [id]),
+    )[0];
+    if (!row) return NextResponse.json({ errors: ["기록이 없습니다"] }, { status: 404 });
+    const errors = tradeEditErrors(row, parsed.data);
+    if (errors.length) return NextResponse.json({ errors }, { status: 400 });
+    const 새 = { ...row, ...parsed.data };
+    await execute("UPDATE trades SET memo = ?, fee = ?, tax = ?, updated_at = ? WHERE id = ?", [
+      새.memo ?? null, 새.fee ?? null, 새.tax ?? null, new Date().toISOString(), id,
+    ]);
+    // 수수료·세금은 원가·실현손익을 바꾼다 — 메모만이면 다시 계산하지 않는다(Actions 분을 아낀다)
+    const 계산 = parsed.data.fee !== undefined || parsed.data.tax !== undefined;
+    const recalc = 계산 ? await requestRecalc() : null;
+    return NextResponse.json({ ok: true, recalc });
+  } catch (error) {
+    return NextResponse.json({ errors: [error instanceof Error ? error.message : "고치기 실패"] }, { status: 500 });
   }
 }

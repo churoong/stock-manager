@@ -90,6 +90,31 @@ export const tradeInputSchema = z.object({
 });
 export type TradeInput = z.infer<typeof tradeInputSchema>;
 
+/**
+ * **제자리에서 고칠 수 있는 칸** — 메모·수수료·세금 (docs/infra.md 25.1116, 웹 매매 감사 재현). 고치기가 "지우고 다시 넣기"
+ * 뿐이라 다시 넣은 매수가 새 id 를 받았고, 배치는 같은 날 매수를 id 순으로 선입선출해(`same_day_order`) 메모 하나만
+ * 고쳐도 짝짓기 순서가 바뀌었다 — 같은 날 70,000·80,000 매수 뒤 매도의 실현손익이 +5만 → −5만, 남은 평단 80,000 →
+ * 70,000. 날짜·종목·수량·체결가·투자 기간은 매수 근거 스냅샷과 묶여 있어(넣는 순간의 것) 여전히 지우고 다시 넣는다
+ */
+export const tradeEditSchema = z.object({
+  memo: z.string().max(200).nullable().optional(),
+  fee: 비용().nullable().optional(),
+  tax: 비용().nullable().optional(),
+}).strict();
+
+/** 기존 매매에 고친 칸을 덧씌워 **넣을 때와 같은 규칙**으로 다시 본다. 오류 문장 목록(없으면 빈 목록) */
+export function tradeEditErrors(
+  row: { stock_id: number; side: string; trade_date: string; price: number; quantity: number; fee: number | null; tax: number | null; memo: string | null },
+  edit: z.infer<typeof tradeEditSchema>,
+): string[] {
+  const 합 = { ...row, ...edit, side: row.side as "buy" | "sell" };
+  const r = tradeInputSchema.safeParse({
+    stock_id: 합.stock_id, side: 합.side, trade_date: 합.trade_date, price: 합.price, quantity: 합.quantity,
+    fee: 합.fee, tax: 합.tax, memo: 합.memo,
+  });
+  return r.success ? [] : r.error.issues.map((i) => i.message);
+}
+
 export const dividendInputSchema = z.object({
   stock_id: z.number().int().positive(),
   pay_date: isoDate,

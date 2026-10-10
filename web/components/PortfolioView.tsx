@@ -607,7 +607,7 @@ export function TradeForm({
       <button type="button" disabled={busy} onClick={() => void submit()} className={SAVE}>
         {busy ? "저장 중…" : "저장"}
       </button>
-      <p className="mt-2 text-[11px] text-slate-500">매수를 저장하면 그날의 점수·신호를 함께 얼려 둡니다(복기용). 기록을 고치려면 지우고 다시 넣습니다.</p>
+      <p className="mt-2 text-[11px] text-slate-500">매수를 저장하면 그날의 점수·신호를 함께 얼려 둡니다(복기용). 메모·수수료·세금은 [고치기]로, 날짜·수량·체결가는 지우고 다시 넣어 고칩니다.</p>
     </section>
   );
 }
@@ -627,6 +627,31 @@ function Trades({ trades, onChanged, onReload }: { trades: Trade[]; onChanged: (
     onChanged(j.recalc);
   };
 
+  // 메모·수수료·세금은 제자리에서 고친다 (25.1116) — 지우고 다시 넣으면 같은 날 매수의 선입선출 순서가 바뀐다.
+  // 비운 칸은 비움(수수료·세금은 설정 비율로 다시 계산), 취소하면 아무것도 바꾸지 않는다
+  const edit = async (t: Trade) => {
+    const 메모 = prompt("메모 (날짜·수량·체결가는 지우고 다시 넣어 고칩니다)", t.memo ?? "");
+    if (메모 === null) return;
+    const 수수료글 = prompt(`수수료 (${t.currency}, 비우면 설정 비율)`, t.fee == null ? "" : String(t.fee));
+    if (수수료글 === null) return;
+    const 세금글 = t.side === "sell" ? prompt(`세금 (${t.currency}, 비우면 설정 세율)`, t.tax == null ? "" : String(t.tax)) : "";
+    if (세금글 === null) return;
+    const 수수료 = readAmount(수수료글);
+    const 세금 = readAmount(세금글);
+    if ((수수료 !== null && !Number.isFinite(수수료)) || (세금 !== null && !Number.isFinite(세금))) {
+      return setErr("수수료·세금을 숫자로 읽지 못했습니다");
+    }
+    const r = await readJson(`/api/trades/${t.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ memo: 메모 || null, fee: 수수료, ...(t.side === "sell" ? { tax: 세금 } : {}) }),
+    });
+    const j = bodyOf<Saved>(r);
+    if (!r.ok) return setErr(j.errors?.join(", ") ?? "고치기 실패");
+    setErr(null);
+    onChanged(j.recalc ?? undefined);
+  };
+
   return (
     <div>
       <TradeForm onSaved={onChanged} onReload={onReload} />
@@ -643,6 +668,7 @@ function Trades({ trades, onChanged, onReload }: { trades: Trade[]; onChanged: (
                 {t.currency !== "KRW" ? <span className="text-xs text-slate-500">환율 {t.fx_rate.toLocaleString("ko-KR")} ({FX_SOURCE[t.fx_rate_source] ?? t.fx_rate_source})</span> : null}
                 <span className="ml-auto flex gap-2 text-xs">
                   {t.side === "buy" ? <button type="button" className={`text-slate-500 underline ${TAP}`} onClick={() => setOpen(open === t.id ? null : t.id)}>근거</button> : null}
+                  <button type="button" className={`text-slate-500 underline ${TAP}`} onClick={() => void edit(t)}>고치기</button>
                   <button type="button" className={`text-slate-500 underline ${TAP}`} onClick={() => remove(t.id)}>지우기</button>
                 </span>
               </div>
