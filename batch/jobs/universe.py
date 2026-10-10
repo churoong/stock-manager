@@ -40,6 +40,15 @@ JOB_NAME = "universe"
 US_MARKET_CAP_MISSING = "미국 시가총액이 비어 있다. us-shares 워크플로를 먼저 돌려야 한다"
 
 
+
+#: 시장의 거래일로 보는 문턱 — 그날 행이 있는 종목 수가 가장 많은 날의 이만큼 (25.1109). 0.5 는 "시장 대부분" 을
+#: 가르는 값이다 — 수정주가 재수집이 넣는 행은 최대 100종목(미국 수천 종목의 몇 %)이고, 정상 거래일은 정지
+#: 종목 몇이 빠져도 거의 전부다
+MARKET_DAY_MIN_SHARE = 0.5
+#: 종목마다 N 행보다 더 읽는 행 — 창에서 뺀 날(위)이 있어도 그 종목이 시장의 N 거래일을 덮게. 주 1회 실행이고
+#: 한 주(5거래일)면 토요일 재수집 하루를 넉넉히 덮는다
+MARKET_DAY_SLACK = 5
+
 def us_market_cap_warnings(client: TursoClient) -> list[str]:
     rs = client.execute(
         "SELECT COUNT(*) FROM stocks WHERE country = 'US' AND status = 'active' AND market_cap IS NOT NULL"
@@ -69,31 +78,42 @@ def _avg_turnover_map(
         " WHERE s.country = ? AND p.stock_id = s.id AND p.date <= ?"
         "   AND p.date >= COALESCE((SELECT x.date FROM prices x WHERE x.stock_id = s.id AND x.date <= ?"
         "     ORDER BY x.date DESC LIMIT 1 OFFSET ? - 1), '')",
-        [country, as_of, as_of, days],
+        # 몇 종목만 가진 날을 창에서 빼면(25.1109) 그 종목은 N 행으로 창을 다 덮지 못한다 — 여유 행을 더 읽는다
+        [country, as_of, as_of, days + MARKET_DAY_SLACK],
     )
 
     by_stock: dict[int, list[tuple[str, float | None]]] = {}
     for row in rs.dicts():
         값 = row["value"]
         by_stock.setdefault(int(row["stock_id"]), []).append((str(row["date"]), None if 값 is None else float(값)))
-    # 시장의 최근 N 거래일 = 받은 행의 날짜 가운데 위에서 N 번째. 대부분의 종목이 매일 거래하므로 빠짐이 없다
-    날짜들 = sorted({d for rows in by_stock.values() for d, _v in rows}, reverse=True)
+    # 시장의 최근 N 거래일 = 받은 행의 날짜 가운데 위에서 N 번째. 대부분의 종목이 매일 거래하므로 빠짐이 없다.
+    # **몇 종목만 가진 날은 시장의 거래일이 아니다** (docs/infra.md 25.1109, 유니버스 감사 재현). 토요일 수정주가
+    # 재수집이 대기열 종목(최대 100개)에만 금요일 행을 넣고 일요일 유니버스가 돌면, 창이 금요일까지 밀려 금요일 행이
+    # 없는 나머지 전 종목의 금요일이 0 으로 들어갔다 — 평균이 19/20 로 깎여 500만~526만 달러 종목이 매주
+    # '거래대금미달' 로 빠졌다. 그날 행이 있는 종목이 가장 많은 날의 `MARKET_DAY_MIN_SHARE` 에 못 미치면 뺀다
+    수: dict[str, int] = {}
+    for rows in by_stock.values():
+        for d, _v in rows:
+            수[d] = 수.get(d, 0) + 1
+    문턱 = MARKET_DAY_MIN_SHARE * max(수.values(), default=0)
+    날짜들 = sorted((d for d, n in 수.items() if n >= 문턱), reverse=True)
     if len(날짜들) < days:
         return {}
-    창_시작 = 날짜들[days - 1]
+    창 = set(날짜들[:days])
 
     out: dict[int, int] = {}
     for stock_id, rows in by_stock.items():
-        if len(rows) < days:
+        # 이력이 N 거래일에 못 미치면 평균이라 부르지 않는다 — 창에서 뺀 날의 행은 세지 않는다
+        if sum(1 for d, _v in rows if d in 창 or d < min(창)) < days:
             continue
-        모름 = sum(1 for d, v in rows if d >= 창_시작 and v is None)
+        모름 = sum(1 for d, v in rows if d in 창 and v is None)
         아는_날 = days - 모름
         # 아는 날이 너무 적으면 평균이라 부르지 않는다 (25.525, 교차검증). 숫자(10)는 백테스트와 같지만
         # **효과는 반대다**(25.540 교차검증) — 백테스트는 모르면 통과, 운영은 '데이터없음' 으로 뺀다.
         # 운영은 돈이 걸려 덜 사는 쪽을 골랐다
         if 아는_날 < pit.MIN_TURNOVER_SAMPLES:
             continue
-        out[stock_id] = int(sum(v for d, v in rows if d >= 창_시작 and v is not None) / 아는_날)
+        out[stock_id] = int(sum(v for d, v in rows if d in 창 and v is not None) / 아는_날)
     return out
 
 

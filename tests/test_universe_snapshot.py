@@ -266,6 +266,15 @@ class Test거래대금_창은_시장의_20거래일이다:
         self._시장(client)
         assert job._avg_turnover_map(client, "KR", 기준일)[1] == 1_000_000_000  # type: ignore[arg-type]
 
+    def test_몇_종목만_가진_날은_창에_넣지_않는다(self, client: MemClient) -> None:
+        """토요일 수정주가 재수집이 대기열 종목에만 금요일 행을 넣으면 나머지 전 종목이 19/20 로 깎였다
+        (docs/infra.md 25.1109, 유니버스 감사 재현 — 500만~526만 달러 종목이 매주 '거래대금미달')."""
+        for i in (1, 2, 3):
+            시세넣기(client.conn, i, 30, 1_000_000_000)
+        client.conn.execute("DELETE FROM prices WHERE stock_id IN (1, 2) AND date = ?", [기준일])  # 3 만 가진 날
+        평균 = job._avg_turnover_map(client, "KR", 기준일)  # type: ignore[arg-type]
+        assert 평균[1] == 1_000_000_000 and 평균[2] == 1_000_000_000 and 평균[3] == 1_000_000_000
+
     def test_최근_15일_쉬었으면_그만큼_깎인다(self, client: MemClient) -> None:
         from datetime import date, timedelta
 
