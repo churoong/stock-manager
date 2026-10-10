@@ -6,7 +6,8 @@
            일일 배치 전(07:40 KST)에 따로** 채점한다. 일일 배치 안에서는 채점하지 않고 집계만 한다
 2. 최근 30일 기사가 있는 종목마다 집계해 sentiment_scores 에 (기준일 하루 한 줄)
 
-수집은 여기서 하지 않는다. 미국은 /api/cron/news(1분마다 한 종목), 국내는 /api/cron/news-kr(1시간마다 연합뉴스 RSS).
+수집은 여기서 하지 않는다. 미국은 /api/cron/news(매시 한 종목 — 예전 주석의 "1분마다" 는 낡았다, 25.1099),
+국내는 /api/cron/news-kr(1시간마다 연합뉴스 RSS).
 
 실행
   python -m batch.jobs.sentiment --market US

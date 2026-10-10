@@ -77,6 +77,17 @@ def test_날이_다르면_같은_제목도_따로_센다() -> None:
     assert len(st.판_하나만(rows)) == 2
 
 
+def test_판_표시_여러_꼴과_자정을_넘긴_판도_하나로_센다() -> None:
+    """`(속보)`·`[종합2보]`·`<속보>`·`[고침]` 을 떼지 못했고, 23:50 1보와 00:40 종합이 두 건이었다 (docs/infra.md 25.1099, 감사)."""
+    t0 = datetime(2026, 9, 20, 14, 50, tzinfo=UTC)  # 23:50 KST
+    for 표시 in ("(속보)", "[종합2보]", "<속보>", "&lt;속보&gt;", "[고침]", "(고침)"):
+        assert st.판_뗀_제목(f"{표시}삼성전자 공장 화재") == "삼성전자공장화재", 표시
+    rows = [("[속보] 삼성전자 공장 화재", t0, -0.9), ("삼성전자 공장 화재(종합)", t0 + timedelta(minutes=50), -0.7)]
+    assert len(st.판_하나만(rows)) == 1
+    # 12시간이 넘으면 다음 날 같은 제목은 다른 기사로 본다(예전과 같음)
+    assert len(st.판_하나만([rows[0], ("삼성전자 공장 화재", t0 + timedelta(hours=13), -0.5)])) == 2
+
+
 class Test현지달력_25_749:
     """판 중복 날짜와 30·7일 창을 그 시장 현지 달력으로 (docs/infra.md 25.749, 뉴스 감성 감사)."""
 
@@ -91,8 +102,8 @@ class Test현지달력_25_749:
             ("Apple beats estimates", datetime(2026, 10, 1, 13, 0, tzinfo=UTC), 0.5),  # 09:00 ET
             ("Apple beats estimates", datetime(2026, 10, 1, 16, 0, tzinfo=UTC), 0.4),  # 12:00 ET, 같은 제목
         ]
-        # KST 로는 10-01 22:00 과 10-02 01:00 — 날이 갈려 둘이 됐다
-        assert len(st.판_하나만(rows)) == 2
+        # KST 로는 10-01 22:00 과 10-02 01:00 — 날이 갈려 둘이 됐다. 25.1099 부터는 12시간 안이라 tz 없이도 하나
+        assert len(st.판_하나만(rows)) == 1
         assert len(st.판_하나만(rows, et)) == 1
 
     def test_서머타임_경계에서도_30일은_현지_자정부터(self) -> None:

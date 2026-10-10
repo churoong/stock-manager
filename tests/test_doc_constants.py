@@ -780,6 +780,7 @@ class Test이웃_모듈들:
         검사(SENTIMENT, f"0.5^(경과일 / **{se.HALFLIFE_DAYS:.0f}**)", "반감기")
         검사(SENTIMENT, f"**{se.MIN_ARTICLES}건 미만**", "최소 기사 수")
         검사(SENTIMENT, f"**가장 새 기사가 {se.NEWEST_MAX_DAYS}일보다 오래됐으면**", "가장 새 기사 나이 (25.832)")
+        검사(SENTIMENT, f"앞 판에서 **{se.SAME_STORY_HOURS}시간 안**이면 같은 판", "판 중복 시간 (25.1099)")
         검사(SENTIMENT, f"**채점되지 않은 몫이 {se.UNSCORED_MAX_SHARE * 100:.0f}% 를 넘으면**", "미채점 몫 (25.834)")
         검사(SENTIMENT, f"≥ +{se.POSITIVE_AT} 긍정, ≤ −{abs(se.NEGATIVE_AT)} 부정", "긍정·부정 문턱")
 

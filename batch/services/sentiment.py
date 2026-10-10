@@ -54,7 +54,10 @@ class ScoredArticle:
 
 # 같은 사건의 판 표시 — 연합은 1보·2보·(종합)·(종합2보) 를 판마다 **다른 주소**로 내 주소 중복 제거를 지나간다.
 # 사건 하나가 부정 7일을 네 건 채워 급락 문턱(5건)을 거의 혼자 넘겼다 (docs/infra.md 25.647, 감사)
-_판_표시 = re.compile(r"\[(속보|\d+보|종합)\]|\(종합\d*보?\)|\(\d+보\)")
+# 25.1099(감사 재현): `(속보)`·`[종합2보]`·`<속보>`·`[고침]` 은 떼지 못해 같은 사건이 따로 셌다 — 괄호 셋을 모두 본다
+_판_표시 = re.compile(r"[\[(<](속보|종합\d*보?|\d+보|고침)[\])>]|&lt;속보&gt;")
+#: 같은 제목이면 날이 바뀌어도 이 시간 안에 나온 판은 하나로 본다 (25.1099). 1보 23:50·(종합) 00:40 이 두 건이었다
+SAME_STORY_HOURS = 12
 
 
 def 판_뗀_제목(title: str) -> str:
@@ -69,12 +72,19 @@ def 판_하나만(rows: list[tuple[str, datetime, float]], tz: tzinfo | None = N
     미국 ET 같은 날 09:00·12:00 판이 KST 로는 날이 갈려 두 건으로 셌다. `tz` 를 안 주면 예전처럼 KST.
 
     먼저 나온 것을 남겨야 7일 전 점수를 다시 낼 때 그때 알 수 없던 판이 끼지 않는다(look-ahead 방지).
-    날이 다르면 같은 제목이어도 따로 센다 — "○○ 실적 호조" 같은 제목은 날마다 다른 기사일 수 있다.
+    날이 다르면 같은 제목이어도 따로 센다 — "○○ 실적 호조" 같은 제목은 날마다 다른 기사일 수 있다. 다만 앞 판에서
+    `SAME_STORY_HOURS` 안이면 자정을 넘겨도 같은 판이다 (25.1099).
     """
     first: dict[tuple[str, str], tuple[datetime, float]] = {}
+    마지막: dict[str, datetime] = {}  # 제목마다 마지막으로 남긴 판의 시각
     for title, published, score in sorted(rows, key=lambda r: r[1]):
         날 = (published.astimezone(tz).date() if tz else (published + timedelta(hours=9)).date()).isoformat()
-        first.setdefault((판_뗀_제목(title) or title, 날), (published, score))
+        키 = 판_뗀_제목(title) or title
+        앞 = 마지막.get(키)
+        if (키, 날) in first or (앞 is not None and published - 앞 < timedelta(hours=SAME_STORY_HOURS)):
+            continue
+        first[(키, 날)] = (published, score)
+        마지막[키] = published
     return [ScoredArticle(p, sc) for p, sc in first.values()]
 
 
