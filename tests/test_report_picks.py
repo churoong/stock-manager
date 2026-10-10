@@ -118,7 +118,9 @@ class Test포트폴리오:
         assert view.remaining_budget == 9_200_000
 
     def test_여력을_넘으면_빼고_사유를_적는다(self) -> None:
-        rows = [row(1, suggested_amount=700_000.0), row(2, suggested_amount=700_000.0)]
+        # 비중은 금액과 맞춘다(70만 = 오늘 총액 100만의 70%) — 25.1088 부터 보유 없는 종목도 비중 × 오늘 총액까지만이다
+        rows = [row(1, suggested_amount=700_000.0, suggested_weight_pct=70.0),
+                row(2, suggested_amount=700_000.0, suggested_weight_pct=70.0)]  # fmt: skip
         # 종목 상한을 풀어 여력만 본다(상한은 아래 검사가 따로 본다)
         view = rp.build_portfolio(rows, total_investable=1_000_000, max_stock_pct=100)
         assert [a.ticker for a in view.allocations] == ["000001"]
@@ -126,7 +128,8 @@ class Test포트폴리오:
         assert view.excluded[0].detail == "남은 300,000원"  # 통화가 붙는다 (docs/infra.md 25.324)
 
     def test_미국_제외_사유의_금액은_달러로(self) -> None:
-        달러 = {"currency": "USD", "suggested_amount": 700.0, "tranche_plan": [{"step": 1, "ratio": 1.0, "price": 100}]}
+        달러 = {"currency": "USD", "suggested_amount": 700.0, "suggested_weight_pct": 70.0,
+              "tranche_plan": [{"step": 1, "ratio": 1.0, "price": 100}]}  # fmt: skip
         rows = [row(1, **달러), row(2, **달러)]
         view = rp.build_portfolio(rows, total_investable=1_050.0, currency="USD", max_stock_pct=100)
         assert view.excluded[0].detail == "남은 $350.00"

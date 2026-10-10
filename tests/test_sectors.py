@@ -42,9 +42,10 @@ class Test분류:
 class Test업종상한:
     def test_같은_업종이_30퍼센트를_넘으면_뺀다(self) -> None:
         rows = [
-            row(1, suggested_amount=2_000_000.0, sector="반도체"),
-            row(2, suggested_amount=1_500_000.0, sector="반도체"),  # 2+1.5 = 35% > 30%
-            row(3, suggested_amount=1_500_000.0, sector="은행"),
+            # 비중은 금액과 맞춘다(오늘 총액 1천만 기준) — 25.1088 부터 보유 없는 종목도 비중 × 오늘 총액까지만이다
+            row(1, suggested_amount=2_000_000.0, suggested_weight_pct=20.0, sector="반도체"),
+            row(2, suggested_amount=1_500_000.0, suggested_weight_pct=15.0, sector="반도체"),  # 2+1.5 = 35% > 30%
+            row(3, suggested_amount=1_500_000.0, suggested_weight_pct=15.0, sector="은행"),
         ]
         # 종목 상한(10%)을 풀어 업종 상한만 본다 — 종목 상한은 보유와 무관하게 걸린다 (docs/infra.md 25.290)
         view = rp.build_portfolio(rows, total_investable=10_000_000, max_stock_pct=100)

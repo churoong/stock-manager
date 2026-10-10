@@ -327,8 +327,10 @@ class Test2부에_실제로_배선됐나:
         거꾸로 하면 50만으로 자른 뒤 다시 0.3 을 곱해 15만이 된다.
         """
         계열 = _series(self._같이)
+        # 비중 40% — 상관을 곱한 목표(12%)가 종목 상한(10%) 위라 목표 검사는 건너뛰고 상한만 본다(25.1088 뒤에도
+        # 순서만 묻게)
         view = rp.build_portfolio(
-            [self._row(1)],
+            [self._row(1, suggested_weight_pct=40.0)],
             total_investable=100_000_000,
             holdings=[self._보유(9), rp.Holding(1, "000001", "종목1", None, 9_500_000.0)],
             price_series={1: 계열, 9: 계열},
@@ -495,7 +497,7 @@ class Test분할_계획이_줄인_금액과_맞나:
         """**겹치는 경우가 가장 크게 벌어진다.** 고치기 전에는 3.3배였다."""
         계열 = _series(Test2부에_실제로_배선됐나._같이)
         view = rp.build_portfolio(
-            [self._행(tranche_plan=self._계획())],
+            [self._행(tranche_plan=self._계획(), suggested_weight_pct=40.0)],  # 상관 목표가 상한 위 (25.1088)
             total_investable=100_000_000,
             holdings=[
                 rp.Holding(9, "000009", "보유9", None, 1_000_000.0),
@@ -670,3 +672,34 @@ def test_ETF_보유는_상관_축소의_대조에_넣지_않는다() -> None:
     주식 = rp.Holding(9, "000009", "보유9", None, 1_000_000.0)
     줄어든 = rp.build_portfolio([row(1)], total_investable=10_000_000, holdings=[주식], price_series={1: 계열, 9: 계열})
     assert 줄어든.allocations[0].amount < 1_000_000
+
+
+class Test상관_축소가_다음_날_풀리지_않는다:
+    """보유 B 와 상관 0.95(배수 0.3)인 후보가 날마다 다시 뽑히면 300만씩 더해 나흘 만에 10% 가 찼다 (25.1088, 감사 재현)."""
+
+    def test_보유를_더해도_상관을_곱한_목표까지만(self) -> None:
+        from tests.test_report_picks import row
+
+        계열 = _series(Test2부에_실제로_배선됐나._같이)
+        보유 = [rp.Holding(9, "000009", "보유9", None, 10_000_000.0)]
+        금액 = []
+        이미 = 0.0
+        for _ in range(5):
+            hs = [*보유, *([rp.Holding(1, "000001", "종목1", None, 이미)] if 이미 else [])]
+            view = rp.build_portfolio([row(1, suggested_amount=10_000_000.0, suggested_weight_pct=10.0)],
+                                      total_investable=100_000_000, holdings=hs, price_series={1: 계열, 9: 계열})  # fmt: skip
+            오늘 = view.allocations[0].amount if view.allocations else 0
+            금액.append(오늘)
+            이미 += 오늘
+        assert 이미 == pytest.approx(100_000_000 * 0.10 * sig.REDUCTION_FLOOR, abs=2)  # 3% 에서 멈춘다
+        assert 금액[1:] == [0, 0, 0, 0]
+
+
+def test_보유_없는_종목도_오늘_총액_기준_비중까지만() -> None:
+    """신호가 하루 묵었거나 총액을 줄인 날, 변동성으로 4% 로 줄인 새 종목에 상한 10% 가 배분됐다 (25.1088, 감사 재현)."""
+    from tests.test_report_picks import row
+
+    view = rp.build_portfolio([row(1, suggested_amount=4_000_000.0, suggested_weight_pct=4.0)],
+                              total_investable=20_000_000)  # fmt: skip
+    a = view.allocations[0]
+    assert a.amount == 800_000 and "권장 비중 4.0%까지만(오늘 총액 기준)" in a.note
