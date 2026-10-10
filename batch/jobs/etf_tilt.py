@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import sys
 from dataclasses import dataclass
 from datetime import date
@@ -150,23 +151,44 @@ def load_stocks(client: TursoClient, country: str = "US") -> dict[str, tuple[int
     return out
 
 
+#: 순서에 쓰는 팩터 — **장기 점수 = 밸류·퀄리티의 평균** (docs/etf.md 11.2, docs/infra.md 25.1108, 2026-10-10 사용자
+#: 확인). 종합 점수에는 모멘텀(12·6·3개월 수익률)·리스크(CAGR·샤프)가 들어 있어, 10~20년 적립 ETF 의 순서를 사실상
+#: 구성종목의 최근 수익률이 정했다(첫 실행 2위 SPMO). 장기 매수 신호 규칙(밸류에이션 밴드 + 퀄리티)과 같은 잣대다
+LONG_FACTORS = ("value", "quality")
+
+
+def long_score(factor_scores: Any) -> float | None:
+    """`scores.factor_scores` JSON 에서 장기 점수 — 밸류·퀄리티 중 있는 것의 평균. 둘 다 없으면 None (25.1108)."""
+    try:
+        f = json.loads(factor_scores) if isinstance(factor_scores, str) else (factor_scores or {})
+    except (TypeError, ValueError):
+        return None
+    값 = [float(f[k]) for k in LONG_FACTORS
+          if isinstance(f, dict) and isinstance(f.get(k), int | float) and math.isfinite(float(f[k]))]  # fmt: skip
+    return sum(값) / len(값) if 값 else None
+
+
 def load_scores(client: TursoClient, country: str = "US") -> tuple[dict[int, float], str | None]:
-    """그 시장의 가장 새 점수 기준일의 종합 점수(그날 가장 높은 판). 반환 (stock_id → 점수, 기준일)."""
+    """그 시장의 가장 새 점수 기준일의 **장기 점수**(밸류·퀄리티 평균, 그날 가장 높은 판).
+
+    반환 (stock_id → 점수, 기준일).
+
+    예전에는 종합 점수였다 — `LONG_FACTORS` 주석 (25.1108)."""
     as_of = client.execute(
         "SELECT MAX(sc.as_of_date) FROM scores sc JOIN stocks s ON s.id = sc.stock_id WHERE s.country = ?", [country]
     ).scalar()
     if not as_of:
         return {}, None
-    best: dict[int, tuple[int, float]] = {}
+    best: dict[int, tuple[int, float | None]] = {}
     for r in client.execute(
-        "SELECT sc.stock_id, sc.calc_version, sc.total_score FROM scores sc JOIN stocks s ON s.id = sc.stock_id"
-        " WHERE s.country = ? AND sc.as_of_date = ? AND sc.total_score IS NOT NULL",
+        "SELECT sc.stock_id, sc.calc_version, sc.factor_scores FROM scores sc JOIN stocks s ON s.id = sc.stock_id"
+        " WHERE s.country = ? AND sc.as_of_date = ?",
         [country, str(as_of)],
     ).dicts():
         sid, ver = int(r["stock_id"]), int(r["calc_version"])
         if sid not in best or ver > best[sid][0]:
-            best[sid] = (ver, float(r["total_score"]))
-    return {sid: v for sid, (_, v) in best.items()}, str(as_of)
+            best[sid] = (ver, long_score(r["factor_scores"]))
+    return {sid: v for sid, (_, v) in best.items() if v is not None}, str(as_of)
 
 
 def load_long_signals(client: TursoClient, country: str = "US") -> tuple[set[int], str | None]:

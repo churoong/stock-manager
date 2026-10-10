@@ -274,7 +274,7 @@ function FocusEtfList({ country }: { country: Country }) {
   return (
     <div>
       <p className="mb-3 text-xs leading-relaxed text-slate-500">
-        {country === "KR" ? "국내 상장" : "미국 상장"} 주식형 ETF 를 <b>우리 점수 상위 {(first?.top_share_pct ?? 10).toFixed(0)}% 종목을 얼마나 담았나</b>{" "}
+        {country === "KR" ? "국내 상장" : "미국 상장"} 주식형 ETF 를 <b>우리 장기 점수(밸류·퀄리티) 상위 {(first?.top_share_pct ?? 10).toFixed(0)}% 종목을 얼마나 담았나</b>{" "}
         순으로 세웠습니다. 전 종목 보유는 SEC 분기 공시에서 받았습니다(약 두 달 늦음). 넓은 지수가 아닌 ETF 도 들어옵니다 —
         아직 백테스트로 효과를 확인하지 않은 참고 순위입니다.
         {first?.score_as_of ? ` 점수 기준일 ${first.score_as_of}.` : ""}

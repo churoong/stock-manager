@@ -122,8 +122,9 @@ class Test작업:
             c.execute(
                 "INSERT INTO scores (stock_id, as_of_date, total_score, factor_scores, sentiment_weight_used,"
                 " weights_json, calc_version, created_at)"
-                " VALUES (?, '2026-10-02', ?, '{}', 0, '{}', 10, 't')",
-                [sid, sc],
+                " VALUES (?, '2026-10-02', ?, ?, 0, '{}', 10, 't')",
+                # 순서는 장기 점수(밸류·퀄리티 평균)로 낸다 (25.1108) — 종합 점수와 같은 값을 두 팩터에 둔다
+                [sid, sc, json.dumps({"value": sc, "quality": sc, "momentum": 0.0})],
             )
         etfs = [(1, "VTI", "US", "미국 주식", "Large Blend", 1), (2, "IVV", "US", "미국 주식", "Large Blend", 1),
                 (3, "360750", "KR", "해외 주식", "S&P 500", 1), (4, "069500", "KR", "국내 주식", "코스피 200", 1),
@@ -281,3 +282,13 @@ class Test국내_상장:
         assert tilt.rank_by([(1, 30.0, 1e9), (2, 30.0, 5e9), (3, 40.0, 1.0), (4, None, 9e9)]) == {
             3: (1, 3), 2: (2, 3), 1: (3, 3)
         }
+
+
+def test_순서는_모멘텀이_아니라_장기_점수로_낸다() -> None:
+    """종합 점수에 모멘텀·CAGR 이 들어 있어 첫 화면 순서를 최근 수익률이 정했다 (docs/infra.md 25.1108, 사용자 확인)."""
+    from batch.jobs import etf_tilt as job
+
+    assert job.long_score('{"value": 80, "quality": 60, "momentum": 100, "risk": 100}') == 70.0
+    assert job.long_score('{"value": 80, "momentum": 100}') == 80.0  # 하나만 있으면 그것
+    assert job.long_score('{"momentum": 100, "risk": 90}') is None  # 장기 팩터가 없으면 점수 없음
+    assert job.long_score('{"value": NaN}') is None and job.long_score("깨짐") is None

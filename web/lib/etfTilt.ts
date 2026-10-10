@@ -1,7 +1,7 @@
 /**
  * 우리 점수를 많이 담은 ETF (docs/etf.md 11.2·11.3, docs/infra.md 25.967).
  *
- * 배치(`batch/jobs/etf_tilt.py`)가 판정 행의 `rationale_data.tilt` 에 N-PORT 보유 × 종합 점수 가중평균을 적었다.
+ * 배치(`batch/jobs/etf_tilt.py`)가 판정 행의 `rationale_data.tilt` 에 N-PORT 보유 × 장기 점수(밸류·퀄리티 평균, 25.1108 — 예전엔 종합 점수) 가중평균을 적었다.
  * 여기서는 읽어서 글로 옮기기만 한다 — 다시 계산하지 않는다(CLAUDE.md "웹앱은 계산하지 않는다").
  * 백테스트 전이라 보수·규모 순위와 섞지 않는 참고 순위다.
  *
