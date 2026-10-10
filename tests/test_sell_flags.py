@@ -356,6 +356,19 @@ def test_기업행위_뒤_손절에는_수량_확인을_붙인다() -> None:
     assert "기업행위" not in 보통.rationale_text and not any(r["label"] == "기업행위" for r in 보통.criteria)
 
 
+def test_처음부터_유니버스_밖이던_보유는_빠졌다고_하지_않는다() -> None:
+    """우선주·시총미달 종목을 사면 다음 배치부터 "빠졌습니다" 황색이 NEW 로 떴다 (docs/infra.md 25.1095, 감사 재현)."""
+    for 사유 in ("보통주아님", "시총미달", "상장1년미만"):
+        assert sf.evaluate(holding(universe_excluded_reason=사유, universe_included_since_buy=False), TODAY) == []
+    # 결격으로 넘어가면 알리되 "빠졌습니다" 라 하지 않는다
+    [f] = sf.evaluate(holding(universe_excluded_reason="관리종목", universe_included_since_buy=False), TODAY)
+    assert f.reason_code == "점검" and "빠졌" not in f.rationale_text and "관리종목" in f.rationale_text
+    # 들었다가 빠졌거나 모르면 예전 그대로
+    for 들었나 in (True, None):
+        [g] = sf.evaluate(holding(universe_excluded_reason="시총미달", universe_included_since_buy=들었나), TODAY)
+        assert "빠졌습니다(시총미달)" in g.rationale_text
+
+
 def test_묵은_지금_점수로는_점수_하락을_판정하지_않는다() -> None:
     """유니버스에서 빠져 점수가 멈춘 종목의 3월 점수가 9월에도 "지금" 이었다 (docs/infra.md 25.564, 감사 재현)."""
     묵음 = holding(score_at_buy=70.0, score_now=48.0, score_now_date="2026-03-02")
@@ -367,7 +380,7 @@ def test_묵은_지금_점수로는_점수_하락을_판정하지_않는다() ->
 class Test점수_하락은_같은_잣대끼리만:
     """**가중치를 바꾸면 종목은 그대로인데 점수만 움직인다** (docs/infra.md 25.209)."""
 
-    def _돌리기(self, monkeypatch, 지금_가중치: str, 지금_판: int = 1, 중간=None, 중간_판=None, 더함=()):
+    def _돌리기(self, monkeypatch, 지금_가중치: str, 지금_판: int = 1, 중간=None, 중간_판=None, 더함=(), 유니버스=()):
         from batch.core import db
         from batch.jobs import sell_flags as job
 
@@ -400,7 +413,14 @@ class Test점수_하락은_같은_잣대끼리만:
                 " weights_json, calc_version, created_at) VALUES (1, ?, ?, '{}', 0, ?, ?, 't')",
                 [day, total, weights, 판],
             )
+        for day, 편입, 사유 in 유니버스:
+            c.execute(
+                "INSERT INTO universe_members (snapshot_date, stock_id, included, exclude_reason, currency, created_at)"
+                " VALUES (?, 1, ?, ?, 'KRW', 't')",
+                [day, 편입, 사유],
+            )
         holdings, 경고 = job.load_holdings(mem)  # type: ignore[arg-type]
+        self._holdings = holdings
         flags = [f for h in holdings for f in sf.evaluate(h, date(2026, 9, 16))]
         return [f.reason_code for f in flags], 경고
 
@@ -451,6 +471,16 @@ class Test점수_하락은_같은_잣대끼리만:
         codes, 경고 = self._돌리기(monkeypatch, w, 지금_판=2, 더함=[("2026-08-31", 58, w, 2)])
         assert "재무악화" not in codes and any("아직 없음" in 줄 for 줄 in 경고)
         # 매수일 판이 하나뿐이고 지금과 같으면 예전처럼 견준다 — `test_미끼__같은_잣대면_25점_하락이_재무악화다`
+
+    def test_매수_때부터_유니버스_밖이었는지_읽는다(self, monkeypatch) -> None:
+        """매수(09-01) 때 쓰던 스냅샷(08-25)부터 한 번도 들지 않았으면 "빠졌습니다" 를 내지 않는다 (25.1095)."""
+        w = '{"value": 30, "quality": 70}'
+        밖 = [("2026-08-18", 1, None), ("2026-08-25", 0, "보통주아님"), ("2026-09-14", 0, "보통주아님")]
+        codes, _ = self._돌리기(monkeypatch, w, 유니버스=밖)
+        assert "점검" not in codes and self._holdings[0].universe_included_since_buy is False
+        들었다 = [("2026-08-25", 1, None), ("2026-09-14", 0, "시총미달")]
+        codes, _ = self._돌리기(monkeypatch, w, 유니버스=들었다)
+        assert "점검" in codes and self._holdings[0].universe_included_since_buy is True
 
     def test_중간_점수가_옛_잣대면_기준점으로_쓰지_않는다(self, monkeypatch) -> None:
         codes, 경고 = self._돌리기(monkeypatch, '{"value": 30, "quality": 70}', 지금_판=2, 중간=("2026-09-10", 78), 중간_판=1)

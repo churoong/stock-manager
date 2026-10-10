@@ -197,6 +197,18 @@ def load_holdings(client: TursoClient, today: date | None = None) -> tuple[list[
         latest = fin[0] if fin else {}
         prev = fin[1] if len(fin) > 1 and int(fin[1]["fiscal_year"]) == int(fin[0]["fiscal_year"]) - 1 else {}
         excluded = uni[0] if uni and not uni[0]["included"] else None
+        # 제외된 보유만 — 매수 때 쓰던 스냅샷부터 한 번이라도 들었나 (25.1095). 주 1회 스냅샷이라 1년에 52행 남짓
+        들었나: bool | None = None
+        if excluded is not None:
+            try:
+                최대 = client.execute(
+                    "SELECT MAX(included) FROM universe_members WHERE stock_id = ? AND snapshot_date >= COALESCE("
+                    " (SELECT MAX(snapshot_date) FROM universe_members WHERE stock_id = ? AND snapshot_date <= ?), '')",
+                    [sid, sid, r["first_buy_date"]],
+                ).scalar()
+                들었나 = bool(최대)
+            except Exception:  # noqa: BLE001 — 모르면 예전처럼 "빠졌습니다"
+                들었나 = None
         out.append(
             sf.HoldingInput(
                 stock_id=sid, name=str(r["name"]), horizon=r["horizon"], first_buy_date=str(r["first_buy_date"]),
@@ -217,6 +229,7 @@ def load_holdings(client: TursoClient, today: date | None = None) -> tuple[list[
                 sentiment_ref_date=_감성_기준일(r["country"], today),
                 horizon_since=r["horizon_since"],
                 corporate_action_recent=_기업행위(client, sid, str(r["country"])),
+                universe_included_since_buy=들었나,
             )
         )  # fmt: skip
     경고 = [f"감성을 읽지 못해 감성급락은 판정하지 않았습니다 — {이유}" for 이유 in sorted(못읽음)]

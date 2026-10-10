@@ -113,6 +113,9 @@ class HoldingInput:
     #: 최근 20거래일 안에 분할·병합 같은 기업행위가 감지됐나 (docs/infra.md 25.1093) — 장중 감시와 같은 판정
     #: (`monitor_targets.recent_action`). 수량은 사용자가 고치기 전까지 분할 전 값이라 손절·목표가 거짓일 수 있다
     corporate_action_recent: bool = False
+    #: 매수 때(그때 쓰던 스냅샷)부터 지금까지 유니버스에 **한 번이라도** 들었나 (docs/infra.md 25.1095). None 은 모름 —
+    #: 예전처럼 "빠졌습니다" 로 판정한다
+    universe_included_since_buy: bool | None = None
 
 
 @dataclass
@@ -248,9 +251,15 @@ def evaluate(h: HoldingInput, today: date, targets: dict | None = None) -> list[
                                       f" 부정 ≥ {sentiment.DROP_MIN_NEGATIVE_7D}건",
                                       "sentiment_scores", h.sentiment_date)]))  # fmt: skip
 
-    if h.universe_excluded_reason:
+    # **처음부터 유니버스 밖이던 보유는 "빠졌습니다" 가 아니다** (docs/infra.md 25.1095, 감사 재현). 우선주(보통주아님)·
+    # 시총미달 종목을 일부러 사면 다음 배치부터 거짓 문장의 황색이 NEW 로 떴다. 그런 보유는 **결격**(관리종목·거래정지·
+    # 정리매매·상장폐지)으로 넘어갈 때만 알린다 — 25.564 가 지키려던 순간
+    밖이던 = h.universe_included_since_buy is False
+    if h.universe_excluded_reason and (not 밖이던 or h.universe_excluded_reason in 결격_사유):
+        문장 = (f"유니버스 밖에서 산 종목이 지금 {h.universe_excluded_reason}입니다" if 밖이던
+                else f"최신 유니버스에서 빠졌습니다({h.universe_excluded_reason})")  # fmt: skip
         flags.append(Flag(h.stock_id, "yellow", "점검",
-                          f"{h.name}: 최신 유니버스에서 빠졌습니다({h.universe_excluded_reason})",
+                          f"{h.name}: {문장}",
                           [_criterion("유니버스 제외", h.universe_excluded_reason, "included = 0",
                                       "universe_members", h.universe_date)]))  # fmt: skip
 
@@ -263,6 +272,8 @@ def evaluate(h: HoldingInput, today: date, targets: dict | None = None) -> list[
 #: 이어받지 않으므로 같은 종목이 되풀이해 다시 떴다. 이 넷 사이의 이동은 심해진 것이 아니다. 관리종목·거래정지·정리매매·
 #: 상장폐지 같은 **결격으로 넘어갈 때만** 다시 알린다(25.564 가 지키려던 순간)
 수치_사유 = frozenset({"데이터없음", "시총미달", "거래대금미달", "상장1년미만"})
+#: 보유를 다시 봐야 하는 **결격** — 처음부터 유니버스 밖이던 보유도 이리로 넘어가면 알린다 (25.1095)
+결격_사유 = frozenset({"관리종목", "거래정지", "정리매매", "상장폐지"})
 
 
 def _점검_무리(display: str) -> str:
