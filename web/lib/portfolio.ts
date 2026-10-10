@@ -629,6 +629,19 @@ export const TRADE_INSERT = `INSERT INTO trades (stock_id, side, trade_date, pri
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
 /**
+ * **같은 매매가 방금 없을 때만 넣는다 — 한 문장으로** (docs/infra.md 25.1112, 웹 매매 감사 재현). 중복 확인(`RECENT_SAME_TRADE`)은
+ * 조회만 하고 실제 INSERT 는 DB 조회 너덧 번 뒤라, 망이 끊겨 다시 누른 두 요청이 동시에 오면 둘 다 확인을 지나 두 행이
+ * 생겼다(보유·원가 두 배, 10주 보유에서 10주 매도 둘이 다 저장). SQLite 는 쓰기를 한 줄로 세우므로 한 문장 안의
+ * `NOT EXISTS` 는 앞 요청의 행을 본다. 인자: TRADE_INSERT 의 19개 + [stock_id, side, trade_date, price, quantity, 이후]
+ */
+export const TRADE_INSERT_UNLESS_RECENT = `INSERT INTO trades (stock_id, side, trade_date, price, quantity, currency, fx_rate, fx_rate_source,
+  fee, tax, horizon, memo, snapshot_as_of, score_at_trade, signal_type_at_trade, sentiment_at_trade,
+  factor_scores_at_trade, created_at, updated_at)
+SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+WHERE NOT EXISTS (SELECT 1 FROM trades WHERE stock_id = ? AND side = ? AND trade_date = ? AND price = ? AND quantity = ?
+  AND created_at >= ?)`;
+
+/**
  * 목록 상한 (docs/infra.md 25.591, 감사). 예전에는 매매·배당 300·체결 묶음 200 에서 **말없이** 잘라, 탭 건수가 전부처럼 보이고
  * [실현손익] 합이 요약과 달랐으며 가장 오래된 매매는 지우거나 확인할 수 없었다(고치기는 지우고 다시 넣기뿐). 개인 한 사람의 기록이라
  * 넉넉히 올리고, 한 건 더 읽어 넘치면 경로가 `truncated` 로 알린다

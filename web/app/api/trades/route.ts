@@ -9,6 +9,7 @@ import {
   RECENT_SAME_TRADE,
   SNAPSHOT_AT,
   TRADE_INSERT,
+  TRADE_INSERT_UNLESS_RECENT,
   TRADE_PRICE_BASIS,
   TRADES_LIST,
   capList,
@@ -140,12 +141,31 @@ export async function POST(request: Request) {
     }
 
     const now = new Date().toISOString();
-    await execute(TRADE_INSERT, [
+    const 값들 = [
       input.stock_id, input.side, input.trade_date, input.price, input.quantity, stock.currency, fxRate, fxSource,
       input.fee ?? null, input.tax ?? null, input.horizon ?? null, input.memo ?? null,
       snapshot?.as_of_date ?? null, snapshot?.total_score ?? null, snapshot?.signal_type ?? null,
       snapshot?.sentiment_score ?? null, snapshot?.factor_scores ?? null, now, now,
-    ]);
+    ];
+    if (input.confirm_duplicate) {
+      await execute(TRADE_INSERT, 값들);
+    } else {
+      // 위 확인과 이 쓰기 사이에 같은 요청이 먼저 쓰였으면 넣지 않는다 (25.1112) — 확인과 쓰기를 한 문장으로
+      const 이후 = new Date(Date.now() - DUPLICATE_WINDOW_MS).toISOString();
+      const rs = await execute(TRADE_INSERT_UNLESS_RECENT, [
+        ...값들, input.stock_id, input.side, input.trade_date, input.price, input.quantity, 이후,
+      ]);
+      if (rs.affectedRows === 0) {
+        return NextResponse.json(
+          {
+            errors: ["같은 매매가 방금 저장됐습니다 — 응답이 늦어 다시 누른 것이면 목록을 확인해 주세요"],
+            duplicate: true,
+            confirm_needed: "duplicate",
+          },
+          { status: 409 },
+        );
+      }
+    }
     const recalc = await requestRecalc();
     return NextResponse.json({ ok: true, fx_rate: fxRate, fx_rate_source: fxSource, recalc, warnings: [가격검사.warning, fxWarning, fxDateWarning].filter((w): w is string => Boolean(w)) });
   } catch (error) {
