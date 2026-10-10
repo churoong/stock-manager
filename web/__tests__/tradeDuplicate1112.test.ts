@@ -49,3 +49,15 @@ describe("경로가 확인 없는 저장에 한 문장 쓰기를 쓴다", () => 
     expect(원문).toMatch(/affectedRows === 0[\s\S]{0,400}status: 409/);
   });
 });
+
+describe("주말 체결일은 말한다 (docs/infra.md 25.1114)", () => {
+  it("토·일만", async () => {
+    const { weekendNote } = await import("@/lib/portfolio");
+    expect(weekendNote("2026-10-03")).toContain("토요일");
+    expect(weekendNote("2026-10-04")).toContain("일요일");
+    expect(weekendNote("2026-10-08")).toBeNull();
+    expect(weekendNote("깨짐")).toBeNull();
+    const 원문 = readFileSync(join(process.cwd(), "app", "api", "trades", "route.ts"), "utf-8");
+    expect(원문).toContain("weekendNote(input.trade_date)");
+  });
+});

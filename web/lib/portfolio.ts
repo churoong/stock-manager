@@ -927,6 +927,20 @@ export function capList<T>(rows: T[]): { rows: T[]; truncated: boolean } {
  * 받아 전날 이하(7일 안) 환율이 들어가는데, 화면은 "그날 종가" 라고만 했다. 기록에 환율 날짜 칸은 없다(스키마를 늘리지 않았다) —
  * 저장하는 순간에 말해 두는 것이 할 수 있는 전부다
  */
+/**
+ * **주말 체결일은 말한다** (docs/infra.md 25.1114, 웹 매매 감사 재현). 날짜 검사는 달력에 있는 날·미래만 보아 토요일·일요일
+ * 체결이 경고 없이 저장됐다 — 날짜 오타면 보유 기간·시간가중수익률 날짜가 어긋나고 미국 종목은 자동 환율이 앞 날짜 값이
+ * 된다. 국내·미국 모두 주말 정규장은 없다. 막지는 않는다(매매 기록은 사용자 것 — 해외 결제일로 적는 사람도 있다)
+ * 휴장일(설·추석 등)은 시장 달력이 웹에 없어 보지 않는다 `[확인필요]`
+ */
+export function weekendNote(isoDay: string): string | null {
+  const d = new Date(`${isoDay}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return null;
+  const 요일 = d.getUTCDay();
+  if (요일 !== 0 && 요일 !== 6) return null;
+  return `${isoDay} 은 ${요일 === 6 ? "토요일" : "일요일"}입니다 — 정규장이 없는 날입니다. 체결일이 맞는지 확인해 주세요(틀렸으면 지우고 다시 넣기)`;
+}
+
 export function fxDateNote(source: string, stored: { date: string } | undefined, onDate: string): string | null {
   if (source !== "auto" || !stored || stored.date === onDate) return null;
   // 휴일이면 그날 환율은 앞으로도 없다 — "아직 없다" 로 단정하지 않는다 (25.594, 교차검증)

@@ -9,6 +9,7 @@ import {
   RECENT_SAME_TRADE,
   SNAPSHOT_AT,
   TRADE_INSERT,
+  weekendNote,
   TRADE_INSERT_UNLESS_RECENT,
   TRADE_PRICE_BASIS,
   TRADES_LIST,
@@ -167,7 +168,7 @@ export async function POST(request: Request) {
       }
     }
     const recalc = await requestRecalc();
-    return NextResponse.json({ ok: true, fx_rate: fxRate, fx_rate_source: fxSource, recalc, warnings: [가격검사.warning, fxWarning, fxDateWarning].filter((w): w is string => Boolean(w)) });
+    return NextResponse.json({ ok: true, fx_rate: fxRate, fx_rate_source: fxSource, recalc, warnings: [가격검사.warning, fxWarning, fxDateWarning, weekendNote(input.trade_date)].filter((w): w is string => Boolean(w)) });
   } catch (error) {
     return NextResponse.json({ errors: [error instanceof Error ? error.message : "저장 실패"] }, { status: 500 });
   }
