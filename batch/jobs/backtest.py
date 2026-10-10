@@ -41,6 +41,7 @@ from batch.core import db
 from batch.core.client import TursoClient
 from batch.core.entry import guard
 from batch.jobs import metrics as metrics_job
+from batch.services import adjust as adj
 from batch.services import backtest as bt
 from batch.services import buyback as bb
 from batch.services import candidate_factors as cf
@@ -1291,12 +1292,28 @@ def load_prices_and_turnover(
     for start in range(0, len(stock_ids), chunk):
         ids = stock_ids[start : start + chunk]
         placeholders = ", ".join(["?"] * len(ids))
+        # **0 이하 종가는 읽지 않는다** (docs/infra.md 25.1101, 감사 재현). 들어오는 문(25.203)만 막아 이미 있는 행은
+        # 남을 수 있다 — 엔진이 0 을 진짜 가격으로 써 리밸런스 날 걸린 종목 몫이 영구히 0 이 되고,
+        # 한 종목 100% 면 자본 0 뒤 `metrics.compute` 가 CAGR +3688% 를 냈다
         rs = client.execute(
-            "SELECT stock_id, date, COALESCE(adj_close, close) AS px, close, volume, value FROM prices"
-            f" WHERE stock_id IN ({placeholders}) AND date >= ? AND close IS NOT NULL",
+            "SELECT stock_id, date, adj_close, close, volume, value FROM prices"
+            f" WHERE stock_id IN ({placeholders}) AND date >= ? AND close IS NOT NULL AND close > 0"
+            "   AND (adj_close IS NULL OR adj_close > 0)",
             [*ids, since],
         )
+        # **수정주가 계열 가운데 빈 행은 직전 계수로 메운다** (25.1101, 감사 재현). `COALESCE(adj_close, close)` 로 읽어
+        # 1:10 분할 전 구간에 원 종가 한 행이 끼면 그날 리밸런스에서 가짜 이익 +39% 가 영구히 남았다. 지표 계산과 같은
+        # 규칙(`adjust.fill_adjusted`)을 종목마다 날짜 순으로 건다
+        종목별: dict[int, list[dict]] = {}
         for row in rs.dicts():
+            종목별.setdefault(int(row["stock_id"]), []).append(row)
+        행들: list[dict] = []
+        for 줄 in 종목별.values():
+            줄.sort(key=lambda r: str(r["date"]))
+            for row, (px, _) in zip(줄, adj.fill_adjusted(줄), strict=True):
+                if px is not None:
+                    행들.append({**row, "px": px})
+        for row in 행들:
             stock_id = int(row["stock_id"])
             day = str(row["date"])
             prices.setdefault(stock_id, {})[day] = float(row["px"])

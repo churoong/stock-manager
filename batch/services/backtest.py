@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date
@@ -295,7 +296,9 @@ def top_n_equal_weight(
     if n <= 0:
         raise ValueError("n 은 1 이상이어야 합니다")
     ranked = sorted(
-        ((sid, s) for sid, s in scores.items() if s is not None),
+        # NaN 은 점수가 아니다 (docs/infra.md 25.1101, 감사 재현) — 정렬이 NaN 앞뒤를 가리지 못해 {1:10, 2:NaN, 3:30,
+        # 4:20} 상위 둘이 {1, 2} 였고 딕셔너리 순서만 바꿔도 달라졌다
+        ((sid, s) for sid, s in scores.items() if s is not None and math.isfinite(s)),
         key=lambda pair: (-pair[1], pair[0]),
     )[:n]
     if not ranked:

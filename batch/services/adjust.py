@@ -22,6 +22,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 CALC_VERSION = 1
@@ -183,3 +184,52 @@ def actions(days: list[Day]) -> list[tuple[str, float]]:
 def suspect_actions(adjusted: list[Adjusted]) -> list[Adjusted]:
     """구멍 위에서 판정된 기업행위들 (docs/infra.md 25.132)."""
     return [a for a in adjusted if is_suspect(a)]
+
+
+def fill_adjusted(rows: list[dict]) -> list[tuple[float | None, bool]]:
+    """날짜 순 `{adj_close, close}` 행 → 행마다 (쓸 가격, 옮겨 메웠나) (docs/infra.md 25.701·25.709·25.715·25.719).
+
+    **수정주가 계열 사이에 낀 빈 행.** 종가 정정 재적재가 `adj_close` 를 비우던 때(25.705 전), 과거 빈 날을 새 행으로
+    넣을 때(국내 행은 수정주가가 늘 NULL) 분할 전 구간 한가운데 원 종가 한 행이 끼어 MDD −90% 가 났다. 국내
+    `adjust_kr` 는 누적 계수가 1 인 날(분할·병합이 이어져 되돌아온 구간)을 **정상적으로** NULL 로 두므로
+    빼지 않고 가른다:
+    앞뒤 수정 계수가 같으면 그 사이 빈 행은 반드시 구멍이라 직전 계수로 옮기고, 다르면 원 종가와 옮긴 값 가운데
+    **직전 값에 더 가까운 쪽**을 쓴다. 앞뒤 끝의 빈 행은 늘 원 종가.
+
+    `jobs/metrics.load_prices` 에만 있던 규칙을 백테스트·점수 계열도 쓰게 뺐다 (25.1101) — 둘은
+    `COALESCE(adj_close, close)` 로 읽어 같은 구멍에 원 종가가 그대로 들어갔다.
+    """
+    수정 = [i for i, r in enumerate(rows) if r.get("adj_close") is not None]
+    처음, 끝 = (수정[0], 수정[-1]) if 수정 else (len(rows), -1)
+    다음계수: list[float | None] = [None] * len(rows)
+    뒤: float | None = None
+    for j in range(len(rows) - 1, -1, -1):
+        다음계수[j] = 뒤
+        r = rows[j]
+        if r.get("adj_close") is not None and r.get("close") and float(r["close"]) > 0:
+            뒤 = float(r["adj_close"]) / float(r["close"])
+    out: list[tuple[float | None, bool]] = []
+    계수: float | None = None
+    직전: float | None = None
+    for i, row in enumerate(rows):
+        원 = None if row.get("close") is None else float(row["close"])
+        메움 = False
+        if row.get("adj_close") is not None:
+            px: float | None = float(row["adj_close"])
+            if 원 and 원 > 0:
+                계수 = px / 원
+        elif 처음 < i < 끝 and 원 and 직전 and 계수 and 직전 > 0:
+            옮김 = 원 * 계수
+            같은_계수 = 다음계수[i] is not None and math.isclose(계수, 다음계수[i], rel_tol=1e-6)  # type: ignore[arg-type]
+            if not math.isclose(계수, 1.0, rel_tol=1e-9) and (
+                같은_계수 or abs(math.log(옮김 / 직전)) < abs(math.log(원 / 직전))
+            ):
+                px, 메움 = 옮김, True
+            else:
+                px = 원
+        else:
+            px = 원
+        out.append((px, 메움))
+        if px is not None:
+            직전 = px
+    return out

@@ -28,6 +28,7 @@ from batch.core import db
 from batch.core import settings_range as sr
 from batch.core.client import TursoClient
 from batch.core.entry import guard
+from batch.services import adjust as adj
 from batch.services import candidate_factors, event_history, history, patterns, simulation
 from batch.services import metrics as calc
 
@@ -70,48 +71,13 @@ def load_prices(
         [stock_id, since],
     )
     rows = rs.dicts()
-    수정 = [i for i, r in enumerate(rows) if r["adj_close"] is not None]
-    처음, 끝 = (수정[0], 수정[-1]) if 수정 else (len(rows), -1)
     out: list[calc.PricePoint] = []
-    계수: float | None = None  # 직전 수정 행의 (수정 ÷ 원)
-    # 각 행 뒤의 첫 수정 행 계수 (25.719). 앞뒤 계수가 같으면 그 사이 빈 행은 **반드시 구멍**이다 — `adjust_kr` 는
-    # 누적 계수가
-    # 정확히 1 인 날만 NULL 로 두므로, 계수가 같은(≠1) 두 수정 행 사이의 NULL 은 정정·삽입으로 비운 자리다
-    다음계수: list[float | None] = [None] * len(rows)
-    뒤: float | None = None
-    for j in range(len(rows) - 1, -1, -1):
-        다음계수[j] = 뒤
-        r = rows[j]
-        if r["adj_close"] is not None and r["close"] and float(r["close"]) > 0:
-            뒤 = float(r["adj_close"]) / float(r["close"])
-    for i, row in enumerate(rows):
-        원 = None if row["close"] is None else float(row["close"])
-        if row["adj_close"] is not None:
-            px: float | None = float(row["adj_close"])
-            if 원 and 원 > 0:
-                계수 = px / 원
-        elif 처음 < i < 끝 and 원 and out and 계수 and out[-1].close > 0:
-            직전 = out[-1].close
-            옮김 = 원 * 계수
-            # **직전 값에 더 가까운 쪽** (25.715, 교차검증). 25.709 의 ±30% 문턱은 계수가 0.77 보다 큰
-            # 구간(무상증자·배당 조정)의
-            # 구멍을 놓쳐 +26%·−19% 로 튀었고, 가격제한이 없는 날의 큰 움직임엔 분할 구멍도 놓쳤다. 계수 1 구간은 원
-            # 종가가
-            # 이어지고(옮긴 값이 튄다), 정정 구멍은 옮긴 값이 이어진다 — 문턱 없이 가른다
-            같은_계수 = 다음계수[i] is not None and math.isclose(계수, 다음계수[i], rel_tol=1e-6)  # type: ignore[arg-type]
-            # 앞뒤 계수가 같으면 규칙 없이 옮긴다 — 로그 거리 규칙은 계수와 반대로 크게 움직인 날(0.8 구간의 −15% 날)을
-            # 원 종가로 이었다 (25.719, 교차검증). 앞뒤 계수가 다를 때(그 사이에 분할·병합)만 가까운 쪽으로 가른다
-            if not math.isclose(계수, 1.0, rel_tol=1e-9) and (
-                같은_계수 or abs(math.log(옮김 / 직전)) < abs(math.log(원 / 직전))
-            ):
-                px = 옮김
-                if 구멍 is not None:
-                    구멍.append(stock_id)
-            else:
-                px = 원
-        else:
-            px = 원
+    # 규칙은 `services.adjust.fill_adjusted` 가 정의처다 — 백테스트·점수 계열과 같은 규칙을 쓴다 (25.1101)
+    for row, (px, 메움) in zip(rows, adj.fill_adjusted(rows), strict=True):
+        if 메움 and 구멍 is not None:
+            구멍.append(stock_id)
         if px is not None:
+            원 = None if row["close"] is None else float(row["close"])
             거래 = 원 * float(row["volume"]) if 원 and row.get("volume") else None
             out.append(calc.PricePoint(date=date.fromisoformat(str(row["date"])), close=px, value=거래))
     return out

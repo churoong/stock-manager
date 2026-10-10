@@ -314,6 +314,24 @@ class Test가격읽기:
         assert "2026-01-05" not in turnover.get(1, {})
 
 
+    def test_수정주가_가운데_빈_행은_메우고_0_종가는_읽지_않는다(self) -> None:
+        """1:10 분할 전 구간에 원 종가 한 행이 끼어 가짜 이익 +39% 가 남았고, 0 종가가 그 종목 몫을 0 으로 만들었다
+        (docs/infra.md 25.1101, 백테스트 감사)."""
+        client = self._client()
+        c = client.conn
+        c.execute("DELETE FROM prices")
+        for day, close, adj_close in (("2026-01-02", 1000, 100), ("2026-01-05", 1010, None), ("2026-01-06", 1020, 102),
+                                      ("2026-01-07", 0, None), ("2026-01-08", 103, 103)):  # fmt: skip
+            c.execute(
+                "INSERT INTO prices (stock_id, date, close, adj_close, volume, currency, source, fetched_at)"
+                " VALUES (1, ?, ?, ?, 10, 'KRW', 't', 't')",
+                [day, close, adj_close],
+            )
+        prices, _ = job.load_prices_and_turnover(client, [1], "2020-01-01")  # type: ignore[arg-type]
+        assert prices[1]["2026-01-05"] == pytest.approx(101.0)  # 원 종가 1010 이 아니라 직전 계수 0.1 로 옮김
+        assert "2026-01-07" not in prices[1]
+
+
 class Test거래대금창:
     """PriceView 가 거래대금도 cutoff 로 잘라 closes() 와 같은 순서로 준다."""
 
@@ -728,3 +746,16 @@ def test_기본_파라미터_실행만_기본으로_적는다() -> None:
     assert job.실행_파라미터(**{**기본, "long_thresholds": (60.0, 55.0)})["default"] is True
     for 바꿈 in ({"years": 3}, {"top_n": 10}, {"only_long": True}, {"pit_universe": False}, {"trend_filter": True}):
         assert job.실행_파라미터(**{**기본, **바꿈})["default"] is False, 바꿈
+
+
+def test_점수_계열도_수정주가_가운데_빈_행을_메운다() -> None:
+    """점수(모멘텀·리스크) 계열도 `COALESCE(adj_close, close)` 라 같은 구멍에 원 종가가 들어갔다 (docs/infra.md 25.1101)."""
+    from batch.jobs import scores
+
+    rows = [
+        {"stock_id": 1, "date": d, "px": a if a is not None else c, "adj_close": a, "close": c, "value": None,
+         "volume": None}
+        for d, c, a in (("2026-01-02", 1000.0, 100.0), ("2026-01-05", 1010.0, None), ("2026-01-06", 1020.0, 102.0))
+    ]  # fmt: skip
+    _, 종가, _ = scores.series_from_rows(rows, 10)[1]
+    assert 종가 == pytest.approx([100.0, 101.0, 102.0])

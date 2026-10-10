@@ -310,6 +310,11 @@ class Test상위N:
         w = bt.top_n_equal_weight({1: 90.0, 2: None}, n=2)
         assert w == {1: 1.0}
 
+
+    def test_NaN_점수는_뽑지_않는다(self) -> None:
+        """{1:10, 2:NaN, 3:30, 4:20} 상위 둘이 {1, 2} 였다 (docs/infra.md 25.1101, 백테스트 감사)."""
+        assert set(bt.top_n_equal_weight({1: 10.0, 2: float("nan"), 3: 30.0, 4: 20.0}, n=2)) == {3, 4}
+        assert set(bt.top_n_equal_weight({2: float("nan"), 4: 20.0, 1: 10.0, 3: 30.0}, n=2)) == {3, 4}
     def test_동점은_종목_번호로_가른다(self) -> None:
         """재현성. 같은 입력이면 같은 선택이어야 한다."""
         w = bt.top_n_equal_weight({5: 90.0, 3: 90.0}, n=1)

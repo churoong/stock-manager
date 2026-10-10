@@ -290,7 +290,8 @@ SERIES_IDS_SQL = (
 )
 #: 시세 사본(25.888)이 받을 수 있는 모양 — `prices` 와 `json_each` 만 (25.1033)
 SERIES_PRICES_SQL = (
-    "SELECT p.stock_id, p.date, COALESCE(p.adj_close, p.close) AS px, p.value, p.close, p.volume FROM prices p"
+    "SELECT p.stock_id, p.date, COALESCE(p.adj_close, p.close) AS px, p.adj_close, p.value, p.close, p.volume"
+    " FROM prices p"
     " WHERE p.stock_id IN (SELECT value FROM json_each(?)) AND p.date >= ? AND p.date <= ? AND p.close IS NOT NULL"
     " ORDER BY p.stock_id, p.date"
 )
@@ -364,6 +365,20 @@ def series_from_rows(
 
     `load_series` 와 유니버스 밖 참고 분석(25.1018)이 같이 쓴다."""
     out: dict[int, tuple[list[str], list[float], list[float | None]]] = {}
+    # **수정주가 계열 가운데 빈 행은 직전 계수로 메운다** (docs/infra.md 25.1101, 백테스트 감사) — 지표 계산과 같은 규칙
+    # (`adjust.fill_adjusted`). `adj_close` 칸이 있는 행(점수 계열 질의)에서만 건다; 종목별로 날짜 순이라 그대로 묶는다
+    if rows and "adj_close" in rows[0]:
+        from batch.services import adjust as adj
+
+        묶음: dict[int, list[dict]] = {}
+        for row in rows:
+            묶음.setdefault(int(row["stock_id"]), []).append(row)
+        rows = [
+            {**row, "px": px}
+            for 줄 in 묶음.values()
+            for row, (px, _) in zip(줄, adj.fill_adjusted(줄), strict=True)
+            if px is not None and px > 0
+        ]
     for row in rows:
         dates, closes, values = out.setdefault(int(row["stock_id"]), ([], [], []))
         # **날짜도 들고 온다** (2026-09-21). 질의는 그대로다 — `p.date` 를 이미 고르면서
