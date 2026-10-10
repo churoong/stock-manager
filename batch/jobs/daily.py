@@ -1949,6 +1949,11 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
             signals_as_of or decision.trade_date,
             warnings,
         )
+        # 본문을 만든 **뒤에** 생긴 경고는 끝에 따로 싣는다 (docs/infra.md 25.1103) — 아래 추천 이력·자기 채점·보유
+        # 점수·
+        # 기업행위 일정·엇갈림 읽기가 실패하면 `warnings` 에만 붙어 DB·웹에만 남고 텔레그램엔 없었다. 일정 절이 조용히
+        # 빠지면 "10일 안에 일정 없음" 과 구별할 수 없다
+        본문_경고수 = len(warnings)
         message = formatter.daily_report(
             market=market,
             trade_date=decision.trade_date,
@@ -2034,6 +2039,9 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
             if 엇갈림:
                 message += "\n\n" + "\n".join(엇갈림)
                 step_log["divergence"] = len(엇갈림) - 1
+
+        if len(warnings) > 본문_경고수:
+            message += "\n\n" + formatter.late_warnings(warnings[본문_경고수:])
 
         if dry_run:
             print("--- 발송하지 않음 (dry-run) ---")

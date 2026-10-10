@@ -50,6 +50,11 @@ def _volume(value: int | None) -> str:
     return f"{value:,}주"
 
 
+def late_warnings(warnings: list[str]) -> str:
+    """리포트 본문을 만든 뒤에 생긴 경고 (docs/infra.md 25.1103). 머리 경고 절과 같은 모양으로 끝에 싣는다."""
+    return "\n".join(["경고 (리포트를 마무리하며)", *(f"  - {_한_줄(w)}" for w in warnings)])
+
+
 def daily_report(
     *,
     market: str,

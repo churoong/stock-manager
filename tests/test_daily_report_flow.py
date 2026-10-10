@@ -663,6 +663,26 @@ class Test매도_플래그와_상관_시세도_말한다:
             assert 본문.index(읽기) < 글, f"{읽기} 가 리포트 글 뒤에 있다 — 경고가 안 실린다"
 
 
+def test_글을_만든_뒤에_생긴_경고도_텔레그램에_싣는다() -> None:
+    """추천 이력·자기 채점·보유 점수·기업행위 일정·엇갈림 읽기 실패가 DB·웹에만 남았다 (docs/infra.md 25.1103, 감사).
+
+    그 다섯은 2부·절을 만들려면 글 뒤에 읽어야 한다 — 그래서 늘어난 경고를 끝에 싣고, 그 덧붙임이 마지막 읽기 뒤·
+    발송·저장 앞에 있음을 소스로 고정한다."""
+    import inspect
+
+    from batch.jobs import daily
+    from batch.notify import formatter
+
+    글 = formatter.late_warnings(["기업행위 일정을 읽지 못했습니다: 한도 초과"])
+    assert 글.startswith("경고") and "  - 기업행위 일정을 읽지 못했습니다" in 글
+    본문 = inspect.getsource(daily.run)
+    덧붙임 = 본문.index("formatter.late_warnings(warnings[본문_경고수:])")
+    for 읽기 in ("_pick_history(", "_self_grade(", "_holding_scores(", "_corp_event_lines(", "_divergence_lines("):
+        assert 본문.index(읽기) < 덧붙임, f"{읽기} 가 경고 덧붙임 뒤에 있다"
+    assert 덧붙임 < 본문.index("append_disclaimer(message)") and 덧붙임 < 본문.index("reports.store_report(")
+    assert 본문.index("본문_경고수 = len(warnings)") < 본문.index("message = formatter.daily_report(")
+
+
 def test_저장하는_본문에도_고지가_붙어_보낸_글과_같다(monkeypatch) -> None:
     """예전에는 고지 붙이기 전의 글을 저장해 화면 본문과 텔레그램이 한 줄 달랐다 (docs/infra.md 25.325)."""
     import inspect
