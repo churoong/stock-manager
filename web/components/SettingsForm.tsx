@@ -88,9 +88,9 @@ function NumberField({
       </span>
       <span className="flex shrink-0 items-center gap-1">
         <input
-          type="number"
+          // 글자 칸 — 숫자 칸은 브라우저마다 "1,000" 을 ""로 넘기거나 막는다 (25.1113, 매매 폼 25.642 와 같게)
+          type="text"
           inputMode="decimal"
-          step={step}
           value={글}
           placeholder={nullable ? "확인 필요" : ""}
           onChange={(e) => {

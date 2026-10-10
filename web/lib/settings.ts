@@ -8,6 +8,7 @@
  */
 
 import { z } from "zod";
+import { readAmount } from "@/lib/numberInput";
 
 const percent = z.number().min(0).max(100);
 
@@ -557,8 +558,11 @@ export function numberFieldInput(raw: string, nullable: boolean): { commit: bool
   if (t === "" || t === "-" || t === "." || t === "-.") {
     return nullable && t === "" ? { commit: true, value: null } : { commit: false, value: null };
   }
-  const parsed = Number(t);
-  return Number.isFinite(parsed) ? { commit: true, value: parsed } : { commit: false, value: null };
+  // **매매 폼과 같은 읽기** (`readAmount`, docs/infra.md 25.1113, 웹 감사). `Number()` 는 "1,000" 을 못 읽어 값을 반영하지
+  // 않고(총 투자가능금액 "10,000,000" 이 옛 값 그대로 "저장했습니다"), 반대로 "1e3"·"0x10" 은 1000·16 으로 받았다.
+  // 매매 폼은 같은 문제로 이미 글자 칸 + `readAmount` 로 바꿨다(25.642·25.645)
+  const parsed = readAmount(t);
+  return parsed !== null && Number.isFinite(parsed) ? { commit: true, value: parsed } : { commit: false, value: null };
 }
 
 

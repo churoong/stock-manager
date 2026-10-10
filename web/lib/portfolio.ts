@@ -8,6 +8,7 @@
 
 import { z } from "zod";
 import { confirmFlags, type ConfirmKind } from "@/lib/confirm";
+import { readAmount } from "@/lib/numberInput";
 
 // ----------------------------------------------------------------------
 // 입력 검증
@@ -150,21 +151,7 @@ export function dividendBody(f: {
   };
 }
 
-/**
- * 금액·수량 칸의 글을 숫자로 (docs/infra.md 25.642, 감사). 빈칸은 `null`(비움), 읽을 수 없으면 `NaN`.
- *
- * 예전 칸은 `type="number"` 라 브라우저가 "1,500" 을 빈 글자로 넘겼고, 수수료·세금·환율은 빈칸을 "비움" 으로 받아
- * **말없이** 설정 비율·자동 환율·세금 0 으로 저장됐다. 글자 칸으로 받아 쉼표·공백을 빼고, 못 읽으면 막는다(25.584 와 같다)
- */
-export function readAmount(s: string): number | null {
-  const 글 = s.trim().replace(/\s/g, "");
-  if (글 === "") return null;
-  // 쉼표는 **세 자리 구분일 때만** 뺀다 — "1,5"·유럽식 "1.380,5" 를 15·1.3805 로 말없이 읽지 않게.
-  // `Number` 가 받는 "1e3"·"0x10" 도 금액 칸에서는 받지 않는다 (25.645, 교차검증)
-  if (글.includes(",") && !/^-?\d{1,3}(,\d{3})+(\.\d+)?$/.test(글)) return NaN;
-  const 숫자 = 글.replace(/,/g, "");
-  return /^-?(\d+(\.\d*)?|\.\d+)$/.test(숫자) ? Number(숫자) : NaN;
-}
+export { readAmount };
 
 /** 채운 칸 가운데 숫자로 못 읽은 첫 칸의 오류 문장. 없으면 null */
 export function unreadableAmount(칸: Record<string, string>): string | null {

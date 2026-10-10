@@ -137,3 +137,14 @@ describe("목표·손절 규칙은 그 기간만 되돌린다 (25.587, 교차검
   });
 });
 
+
+describe("설정 숫자 칸은 매매 폼과 같게 읽는다 (docs/infra.md 25.1113, 웹 감사)", () => {
+  it("세 자리 쉼표는 받고 지수·16진 표기는 받지 않는다", () => {
+    expect(numberFieldInput("10,000,000", false)).toEqual({ commit: true, value: 10_000_000 });
+    expect(numberFieldInput("0.015", true)).toEqual({ commit: true, value: 0.015 });
+    expect(numberFieldInput("-7", false)).toEqual({ commit: true, value: -7 });
+    expect(numberFieldInput("1e3", false)).toEqual({ commit: false, value: null });
+    expect(numberFieldInput("0x10", false)).toEqual({ commit: false, value: null });
+    expect(numberFieldInput("1,5", false)).toEqual({ commit: false, value: null });
+  });
+});
