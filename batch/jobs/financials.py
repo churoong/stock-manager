@@ -382,8 +382,11 @@ def _bulk(
 
 
 def run(
-    plan: list[tuple[int, str]], *, universe_only: bool = True, resume: bool = False, only_ids: list[int] | None = None
+    plan: list[tuple[int, str]], *, universe_only: bool = True, resume: bool = False, only_ids: list[int] | None = None,
+    failures: list[str] | None = None,
 ) -> int:
+    """`failures` 를 주면 받기 실패 경고(한도·잇단 실패·기간별 오류)를 거기 담는다 — 부르는 쪽(참고 분석)이 리포트에
+    올리게 (docs/infra.md 25.1087). 종료코드는 그대로 0 이다(경고는 partial 로 남는다)."""
     client = TursoClient()
     try:
         db.apply_migrations(client)
@@ -433,6 +436,8 @@ def run(
             status="partial" if warnings else "success",
             step_log={"stored": total, "corps": len(corps), "warnings": warnings[:20]},
         )
+        if failures is not None:
+            failures.extend(warnings)
 
         print(f"저장 {total}건")
         if warnings:

@@ -158,7 +158,13 @@ def ensure_data(client: TursoClient, country: str, rows: list[dict]) -> list[str
     try:
         if 재무 and country == "KR":
             plan = financials.collection_plan(None, 5, None, datetime.now(UTC).date())
-            financials.run(plan, universe_only=False, only_ids=재무)
+            실패: list[str] = []
+            financials.run(plan, universe_only=False, only_ids=재무, failures=실패)
+            # **받지 못한 것을 말한다** (25.1087). 예전엔 DART 점검·불통이어도 0 으로 끝나 리포트에 아무 줄이 없었다 —
+            # 묵은 재무로 분석했다는 사실이 사라졌다
+            if 실패:
+                warnings.append(f"재무를 다 받지 못해 있는 재무로 분석했습니다: {실패[0]}"
+                                + (f" 외 {len(실패) - 1}건" if len(실패) > 1 else ""))  # fmt: skip
         elif 재무:
             us_financials.run(None, None, only_ids=재무)
     except Exception as exc:  # noqa: BLE001 — 받지 못하면 있는 재무로

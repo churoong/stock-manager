@@ -71,3 +71,16 @@ def test_재무도_묵은_종목만_받는다(부른것: list[str]) -> None:
     전부_새것 = {i: f"{오늘.isoformat()}T01:00:00Z" for i in (1, 2, 3)}
     analyze_extra.ensure_data(_가짜({}, 재무날=전부_새것), "KR", rows)  # type: ignore[arg-type]
     assert 재무_받은 == []  # 모두 새것이면 재무 작업을 아예 부르지 않는다
+
+
+def test_재무를_못_받으면_경고로_올린다(monkeypatch: pytest.MonkeyPatch, 부른것: list[str]) -> None:
+    """DART 점검·불통이어도 재무 작업은 0 으로 끝나 리포트에 아무 줄이 없었다 (25.1087)."""
+
+    def 실패하는_재무(*a, only_ids=None, failures=None, **k):  # noqa: ANN001, ANN002, ANN003, ANN202
+        if failures is not None:
+            failures.extend(["2026 11013: 상태 800: 시스템 점검", "DART 실패가 잇달아 멈춤 (5번)"])
+        return 0
+
+    monkeypatch.setattr(financials, "run", 실패하는_재무)
+    경고 = analyze_extra.ensure_data(_가짜({}, 재무날={}), "KR", [{"id": 1, "ticker": "T1"}])  # type: ignore[arg-type]
+    assert any("재무를 다 받지 못해" in x and "상태 800" in x and "외 1건" in x for x in 경고)
