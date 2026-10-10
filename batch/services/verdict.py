@@ -720,7 +720,15 @@ def build(inp: Inputs) -> dict:
     elif inp.position:
         key = "hold"
         손익 = f" · 평가손익률 {inp.position['pnl_pct']:+.1f}%" if inp.position.get("pnl_pct") is not None else ""
-        headline = f"보유 유지 — 매도 플래그 없음{손익}" + (
+        # **녹색(목표 도달)은 점검이 아니지만 "플래그 없음" 도 아니다** (docs/infra.md 25.1091, 감사 재현) — 차익 실현을
+        # 검토하라는 플래그가 걸린 날 "매도 플래그 없음" 이라 적고 근거표에서도 뺐다
+        녹색 = [x for x in inp.flags if x.get("level") == "green"]
+        for x in 녹색:
+            evidence.append(
+                _row("매도 플래그(녹색)", x["rationale_text"], "docs/sell_flags.md", "sell_flags", x.get("as_of"))
+            )
+        플래그 = f"매도 플래그 녹색: {녹색[0]['rationale_text']}" if 녹색 else "매도 플래그 없음"
+        headline = f"보유 유지 — {플래그}{손익}" + (
             f" ({inp.position['price_date']})" if inp.position.get("price_date") else "")
     elif inp.excluded_reason and sc and sc.get("total") is not None:
         key = "reference"

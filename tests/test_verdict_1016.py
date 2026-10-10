@@ -44,7 +44,11 @@ def test_결론은_규칙의_사실로만_위에서부터() -> None:
     # 녹색 플래그는 점검이 아니다
     h = vd.build(vd.Inputs(**기본, position={"quantity": 1, "pnl_pct": 3.25, "price_date": "2026-10-07"},
                            flags=[{**flag, "level": "green"}]))  # fmt: skip
-    assert h["verdict"] == "hold" and h["headline"] == "보유 유지 — 매도 플래그 없음 · 평가손익률 +3.2% (2026-10-07)"
+    assert h["verdict"] == "hold" and h["headline"] == (
+        "보유 유지 — 매도 플래그 녹색: 손절선 -7% 터치 · 평가손익률 +3.2% (2026-10-07)")  # 녹색도 적는다 (25.1091)
+    assert any(e["label"] == "매도 플래그(녹색)" for e in h["evidence"])
+    h0 = vd.build(vd.Inputs(**기본, position={"quantity": 1, "pnl_pct": 3.25, "price_date": "2026-10-07"}))
+    assert h0["headline"] == "보유 유지 — 매도 플래그 없음 · 평가손익률 +3.2% (2026-10-07)"
     # 점수가 없으면 보류
     u = vd.build(vd.Inputs(name="나", ticker="000002", score={**SCORE, "total": None, "skip_reason": "재무 없음"}))
     assert u["verdict"] == "undecided" and u["headline"] == "판단 보류 — 재무 없음"
