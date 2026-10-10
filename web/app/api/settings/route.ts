@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { PORTFOLIO_SETTING_KEYS, requestRecalc } from "@/lib/portfolio";
 import { execute, rowsToObjects } from "@/lib/db";
-import { SETTINGS_KEYS, mergeStoredSettings, storedSettingNotices, validateSettings } from "@/lib/settings";
+import { changedSettingKeys, mergeStoredSettings, storedSettingNotices, validateSettings } from "@/lib/settings";
 
 /**
  * 설정 읽기와 쓰기.
@@ -46,7 +46,10 @@ export async function PUT(request: Request) {
 
   try {
     const now = new Date().toISOString();
-    const statements = SETTINGS_KEYS.map((key) => ({
+    // 화면이 불러온 값과 다른 칸만 쓴다 (25.1115) — 다른 기기에서 고친 칸을 옛 값으로 덮지 않게
+    const 기준 = (body as { _base?: unknown } | null)?._base;
+    const { keys: 쓸칸, partial } = changedSettingKeys(result.value, 기준);
+    const statements = 쓸칸.map((key) => ({
       sql:
         "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)" +
         " ON CONFLICT (key) DO UPDATE SET value = excluded.value," +
@@ -59,16 +62,25 @@ export async function PUT(request: Request) {
     const { batch, execute } = await import("@/lib/db");
     // 저장 **전** 값 — 포트폴리오 계산에 쓰는 칸이 바뀌었는지 보려고 (25.629)
     const 전 = new Map<string, string>();
+    const 저장됨 = new Map<string, string>();
     try {
       // 표가 작아 통째로 읽고 여기서 거른다 — 질의에 보간을 넣지 않는다(appSql 검사)
       const rs = await execute("SELECT key, value FROM settings");
       for (const row of rs.rows) {
+        저장됨.set(String(row[0]), String(row[1]));
         if ((PORTFOLIO_SETTING_KEYS as readonly string[]).includes(String(row[0]))) 전.set(String(row[0]), String(row[1]));
       }
     } catch {
       // 못 읽으면 "바뀌었다" 로 본다 — 아래에서 다시 계산을 깨운다(한 번 더 도는 편이 옛 값을 보이는 편보다 낫다)
     }
-    await batch(statements);
+    // 이 탭도 바꿨고 다른 곳도 그 사이 바꾼 칸 — 이 탭 값으로 덮었다고 말한다(나중 저장이 이긴다)
+    const 겹침 = partial
+      ? 쓸칸.filter((k) => {
+          const 옛 = (기준 as Record<string, unknown>)[k as string];
+          return 저장됨.has(k as string) && 저장됨.get(k as string) !== JSON.stringify(옛);
+        })
+      : [];
+    if (statements.length) await batch(statements);
 
     // **포트폴리오에 쓰는 설정이 바뀌면 다시 계산을 깨운다** (docs/infra.md 25.629, 감사). 예전에는 매매 저장만 깨워,
     // 수수료·세율·목표/손절·섹터 상한·총액·무위험수익률을 바꿔도 다음 일일 배치 전까지 화면이 옛 값으로 계산된 결과를
@@ -81,8 +93,12 @@ export async function PUT(request: Request) {
     const targets_changed = 전.get("horizon_targets") !== JSON.stringify(result.value["horizon_targets"]);
     return NextResponse.json({
       ok: true,
-      warnings: result.warnings,
+      warnings: [
+        ...result.warnings,
+        ...(겹침.length ? [`다른 곳에서 그 사이 바꾼 칸을 이 화면 값으로 덮었습니다: ${겹침.join(", ")}`] : []),
+      ],
       saved_at: now,
+      saved_keys: 쓸칸,
       recalc,
       targets_changed,
     });

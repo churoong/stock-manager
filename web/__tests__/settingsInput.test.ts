@@ -148,3 +148,30 @@ describe("설정 숫자 칸은 매매 폼과 같게 읽는다 (docs/infra.md 25.
     expect(numberFieldInput("1,5", false)).toEqual({ commit: false, value: null });
   });
 });
+
+describe("설정은 이 화면이 바꾼 칸만 쓴다 (docs/infra.md 25.1115, 웹 설정 감사)", () => {
+  it("불러온 값과 다른 칸만", async () => {
+    const { changedSettingKeys } = await import("@/lib/settings");
+    const 바꿈 = structuredClone(DEFAULT_SETTINGS);
+    바꿈.min_order_amount = DEFAULT_SETTINGS.min_order_amount + 1;
+    expect(changedSettingKeys(바꿈, DEFAULT_SETTINGS)).toEqual({ keys: ["min_order_amount"], partial: true });
+    expect(changedSettingKeys(DEFAULT_SETTINGS, DEFAULT_SETTINGS).keys).toEqual([]);
+  });
+
+  it("기준이 없거나 읽지 못하면 예전처럼 전부", async () => {
+    const { changedSettingKeys, SETTINGS_KEYS } = await import("@/lib/settings");
+    expect(changedSettingKeys(DEFAULT_SETTINGS, undefined)).toEqual({ keys: SETTINGS_KEYS, partial: false });
+    expect(changedSettingKeys(DEFAULT_SETTINGS, { weights: "깨짐" }).partial).toBe(false);
+  });
+});
+
+describe("경로·화면이 기준 값을 주고받는다 (25.1115)", () => {
+  it("화면은 _base 를 보내고 경로는 바뀐 칸만 쓴다", async () => {
+    const { readFileSync } = await import("node:fs");
+    const 경로 = readFileSync("app/api/settings/route.ts", "utf-8");
+    const 화면 = readFileSync("components/SettingsForm.tsx", "utf-8");
+    expect(경로).toContain("changedSettingKeys(result.value, 기준)");
+    expect(경로).toContain("쓸칸.map((key)");
+    expect(화면).toContain("JSON.stringify({ ...s, _base: base })");
+  });
+});

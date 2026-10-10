@@ -387,6 +387,22 @@ export function settingsNotices(settings: Settings): string[] {
   return result.ok ? result.warnings : result.errors;
 }
 
+/**
+ * **이 탭이 바꾼 칸만 쓴다** (docs/infra.md 25.1115, 웹 설정 감사). 예전에는 저장마다 `SETTINGS_KEYS` 전부를 통째로 덮어,
+ * 오래 열어 둔 탭(폰)에서 아무 칸이나 저장하면 다른 기기(PC)에서 고친 수수료·세율·목표/손절이 말없이 옛 값으로
+ * 돌아갔다 — 그 값으로 실현손익·매도 플래그가 계산된다. 화면이 불러온 값(`base`)과 다른 칸만 쓴다. `base` 를 읽지 못하면
+ * (옛 화면·검증 실패) 예전처럼 전부 쓴다.
+ */
+export function changedSettingKeys(value: Settings, base: unknown): { keys: Array<keyof Settings>; partial: boolean } {
+  const parsed = base === undefined || base === null ? null : settingsSchema.safeParse(base);
+  if (!parsed || !parsed.success) return { keys: [...SETTINGS_KEYS], partial: false };
+  const 옛 = parsed.data as Settings;
+  return {
+    keys: SETTINGS_KEYS.filter((k) => JSON.stringify(value[k]) !== JSON.stringify(옛[k])),
+    partial: true,
+  };
+}
+
 export function validateSettings(input: unknown): ValidationResult {
   const parsed = settingsSchema.safeParse(input);
   if (!parsed.success) {

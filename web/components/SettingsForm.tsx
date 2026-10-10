@@ -117,6 +117,8 @@ function NumberField({
 
 export default function SettingsForm({ initial, initialWarnings, loadFailed = false }: Props) {
   const [s, setS] = useState<Settings>(initial);
+  // 이 화면이 불러온(또는 마지막으로 저장한) 값 — 서버가 바뀐 칸만 쓰게 함께 보낸다 (25.1115)
+  const [base, setBase] = useState<Settings>(initial);
   const [msg, setMsg] = useState<Msg>(
     initialWarnings.length ? { kind: "warn", lines: initialWarnings } : null,
   );
@@ -153,7 +155,7 @@ export default function SettingsForm({ initial, initialWarnings, loadFailed = fa
       const response = await fetch("/api/settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(s),
+        body: JSON.stringify({ ...s, _base: base }),
       });
       const body = await response.json().catch(() => ({}));
 
@@ -161,6 +163,7 @@ export default function SettingsForm({ initial, initialWarnings, loadFailed = fa
         setMsg({ kind: "error", lines: body.errors ?? ["저장에 실패했습니다"] });
         return;
       }
+      setBase(s);
       // 포트폴리오에 쓰는 칸이 바뀌었으면 재계산을 깨웠는지 말한다 — 못 깨웠으면 다음 일일 배치 때 반영된다 (25.629)
       const 재계산: string | null = body.recalc
         ? body.recalc.dispatched
