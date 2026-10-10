@@ -119,6 +119,15 @@ class Test보유와_평가:
         pf.valuate(pos, None, None, 1.0, None)
         assert pos.market_value_krw is None and pos.unrealized_pnl_krw is None
 
+    def test_환율이_없어도_종목_통화_평가액은_낸다(self) -> None:
+        """환율이 없으면 달러 평가액까지 비워 미국 보유의 손절 판정이 조용히 빠졌다 (docs/infra.md 25.1096, 감사)."""
+        _, open_lots, _ = pf.match_fifo([buy(1, "2025-01-02", 100, 10, 1300.0, fee=0)], NO_COST)
+        pos = pf.position_from(1, "USD", open_lots)
+        assert pos is not None
+        pf.valuate(pos, 60.0, "2026-09-16", None, None)
+        assert pos.market_value == pytest.approx(600) and pos.unrealized_pnl == pytest.approx(600 - pos.cost)
+        assert pos.market_value_krw is None and pos.unrealized_pnl_krw is None and pos.unrealized_fx_pnl_krw is None
+
     def test_다_팔면_보유_없음(self) -> None:
         _, open_lots, _ = pf.match_fifo([buy(1, "2025-01-02", 100, 2), sell(2, "2025-01-03", 100, 2)], NO_COST)
         assert pf.position_from(1, "KRW", open_lots) is None

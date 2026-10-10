@@ -301,15 +301,21 @@ def position_from(stock_id: int, currency: str, open_lots: list[OpenLot]) -> Pos
 def valuate(
     position: Position, close: float | None, price_date: str | None, fx_now: float | None, fx_date: str | None
 ) -> Position:
-    """종가·환율로 평가한다. 없으면 평가 칸을 비운다(없는 숫자를 만들지 않는다)."""
+    """종가·환율로 평가한다. 없으면 평가 칸을 비운다(없는 숫자를 만들지 않는다).
+
+    **환율이 없어도 종목 통화 평가액은 낸다** (docs/infra.md 25.1096, 감사 재현). 예전에는 환율이 없으면 종목 통화
+    칸까지 비워, 미국 보유의 손절·목표 판정(종목 통화 기준 — docs/sell_flags.md)이 조용히 빠졌다. 원화 칸만 비운다.
+    """
     position.close, position.price_date = close, price_date
     position.fx_now, position.fx_date = fx_now, fx_date
-    if close is None or fx_now is None:
+    if close is None:
         return position
     mv = position.quantity * close
     position.market_value = mv
-    position.market_value_krw = mv * fx_now
     position.unrealized_pnl = mv - position.cost
+    if fx_now is None:
+        return position
+    position.market_value_krw = mv * fx_now
     position.unrealized_pnl_krw = mv * fx_now - position.cost_krw
     position.unrealized_price_pnl_krw = (mv - position.cost) * position.avg_fx
     position.unrealized_fx_pnl_krw = mv * (fx_now - position.avg_fx)
