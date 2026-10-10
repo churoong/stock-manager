@@ -124,6 +124,24 @@ METRICS_LATEST_SQL = (
 )
 
 
+#: 종목마다 가장 최근에 받은 재무 행 시각 — `(stock_id, …)` 색인으로 그 종목 행만 (25.1083)
+FIN_FETCHED_SQL = (
+    "SELECT j.value AS stock_id, (SELECT MAX(f.fetched_at) FROM financials f WHERE f.stock_id = j.value) AS d"
+    " FROM json_each(?) j"
+)
+
+
+def _묵은것(client: TursoClient, sql: str, ids: list[int], warnings: list[str], 무엇: str) -> set[int]:
+    """`METRICS_FRESH_DAYS` 안에 받은 적 없는 종목. 날짜를 못 읽으면 모두(예전처럼)."""
+    try:
+        최근 = {int(x["stock_id"]): x["d"] for x in client.execute(sql, [json.dumps(ids)]).dicts()}
+    except Exception as exc:  # noqa: BLE001 — 못 읽으면 예전처럼 모두 다시 받는다
+        warnings.append(f"{무엇} 날짜를 읽지 못해 모두 다시 받습니다: {exc}")
+        return set(ids)
+    기준 = (datetime.now(UTC).date() - timedelta(days=METRICS_FRESH_DAYS)).isoformat()
+    return {i for i in ids if str(최근.get(i) or "")[:10] < 기준}
+
+
 def ensure_data(client: TursoClient, country: str, rows: list[dict]) -> list[str]:
     """그 종목들의 재무·성과 지표를 받는다. 실패는 경고로 — 있는 것으로 분석한다.
 
@@ -134,22 +152,20 @@ def ensure_data(client: TursoClient, country: str, rows: list[dict]) -> list[str
 
     warnings: list[str] = []
     ids = [int(r["id"]) for r in rows]
+    # **재무도 묵었을 때만 받는다** (25.1083). 10-08 국내 배치가 유니버스 밖 종목 하나의 23개 기간을 날마다 다시 받아
+    # 19건을 다시 썼다 — 유니버스 재무는 주간 작업이 받는 것과 같은 주기로 둔다
+    재무 = sorted(_묵은것(client, FIN_FETCHED_SQL, ids, warnings, "재무"))
     try:
-        if country == "KR":
+        if 재무 and country == "KR":
             plan = financials.collection_plan(None, 5, None, datetime.now(UTC).date())
-            financials.run(plan, universe_only=False, only_ids=ids)
-        else:
-            us_financials.run(None, None, only_ids=ids)
+            financials.run(plan, universe_only=False, only_ids=재무)
+        elif 재무:
+            us_financials.run(None, None, only_ids=재무)
     except Exception as exc:  # noqa: BLE001 — 받지 못하면 있는 재무로
         warnings.append(f"재무를 받지 못했습니다: {exc}")
-    try:
-        최근 = {int(x["stock_id"]): x["d"] for x in client.execute(METRICS_LATEST_SQL, [json.dumps(ids)]).dicts()}
-    except Exception as exc:  # noqa: BLE001 — 못 읽으면 예전처럼 모두 다시 낸다
-        warnings.append(f"성과 지표 날짜를 읽지 못해 모두 다시 냅니다: {exc}")
-        최근 = {}
-    기준 = (datetime.now(UTC).date() - timedelta(days=METRICS_FRESH_DAYS)).isoformat()
+    지표 = _묵은것(client, METRICS_LATEST_SQL, ids, warnings, "성과 지표")
     for r in rows:
-        if (최근.get(int(r["id"])) or "") >= 기준:
+        if int(r["id"]) not in 지표:
             continue
         try:
             metrics.run(list(metrics.WINDOW_DAYS), ticker=str(r["ticker"]), countries=(country,))

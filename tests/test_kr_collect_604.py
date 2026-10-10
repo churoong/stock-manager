@@ -115,6 +115,23 @@ class Test잇단_실패:
         assert any(x.startswith(fin.FAILURES_STOPPED) for x in w)
         assert fin.LIMIT_REACHED not in w, "한도가 아니다 — 틀린 원인을 적지 않는다 (25.605)"
 
+    def test_종목이_하나여도_기간을_건너_이어_센다(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """참고 분석(유니버스 밖 종목 하나)은 기간마다 호출이 한 번이다 — 기간마다 0 에서 세면 23개 기간을 다
+        불렀다(10-08 국내 배치, 25.1083). 같은 `Streak` 를 넘기면 5번째 기간에서 멈춘다."""
+        n = fin.MAX_CONSECUTIVE_FAILURES
+        보낸것 = self._준비(monkeypatch, [self._실패() for _ in range(n + 10)])
+        잇단 = fin.Streak()
+        멈춤 = None
+        for 기간 in range(n + 10):
+            _s, w = fin.collect_period(None, [("c1", 1)], 2025 - 기간, "11011", streak=잇단)  # type: ignore[arg-type]
+            if any(x.startswith(fin.FAILURES_STOPPED) for x in w):
+                멈춤 = 기간
+                break
+        assert 멈춤 == n - 1 and len(보낸것) == n
+        import inspect
+
+        assert "streak=잇단" in inspect.getsource(fin.run)  # 실제 실행이 같은 셈을 넘긴다
+
     def test_사이에_성공이_있으면_다시_센다(self, monkeypatch: pytest.MonkeyPatch) -> None:
         n = fin.MAX_CONSECUTIVE_FAILURES
         결과 = [self._실패() for _ in range(n - 1)] + [self._성공()] + [self._실패() for _ in range(n - 1)]

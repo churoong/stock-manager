@@ -157,6 +157,18 @@ def _한도_찼나(client: TursoClient) -> bool:
     return bool(rows) and rows[0].get("state") == "blocked"
 
 
+class Streak:
+    """기간을 건너 이어 세는 **잇단 실패 수** (docs/infra.md 25.1083).
+
+    `collect_period` 가 기간마다 0 에서 다시 세서, 종목이 몇 개뿐이라 기간마다 호출이 한 번인 경로(참고 분석 — 유니버스
+    밖 종목 하나)는 DART 가 점검·불통이어도 5번에 닿지 않고 23개 기간을 다 불렀다. 10-08 국내 배치에서 연결 실패
+    (`Max retries exceeded`)가 기간마다 따로 나며 끝까지 돌았다 — 응답 없이 매달리는 장애면 120초 × 23번이다.
+    """
+
+    def __init__(self) -> None:
+        self.n = 0
+
+
 def collect_period(
     client: TursoClient,
     corps: list[tuple[str, int]],
@@ -164,6 +176,7 @@ def collect_period(
     report_code: str,
     *,
     resume: bool = False,
+    streak: Streak | None = None,
 ) -> tuple[int, list[str]]:
     """한 회계연도·보고서 종류를 전 종목에 대해 수집한다.
 
@@ -188,7 +201,7 @@ def collect_period(
         if not codes:
             return 0, warnings
 
-    잇단실패 = 0
+    잇단 = streak or Streak()
     for start in range(0, len(codes), dart.MAX_CORPS_PER_CALL):
         # **부르기 전에 본다** (docs/infra.md 25.318). 예전에는 부른 뒤에야 셌다 — 이미 한도가 찼어도 한 번은 나갔다
         if _한도_찼나(client):
@@ -214,12 +227,12 @@ def collect_period(
             # **한도가 아닌 실패가 잇달면 멈춘다** (25.604, 감사). 키 사용 불가(011)·점검(800)이면 매 호출이
             # 실패하는데 전 기간을 다 불러
             # 한도만 썼다(배당 25.319·백필 25.387 은 이미 멈춘다). 같은 표지로 바깥 기간 루프도 끊는다
-            잇단실패 += 1
-            if 잇단실패 >= MAX_CONSECUTIVE_FAILURES:
-                warnings.append(f"{FAILURES_STOPPED} ({잇단실패}번) — 키·점검을 확인하세요")
+            잇단.n += 1
+            if 잇단.n >= MAX_CONSECUTIVE_FAILURES:
+                warnings.append(f"{FAILURES_STOPPED} ({잇단.n}번) — 키·점검을 확인하세요")
                 break
             continue
-        잇단실패 = 0
+        잇단.n = 0
 
         # 이 호출은 이미 나갔고 셌다. 한도에 닿았어도 **받은 것은 저장한다** — 예전에는 버렸다
         stored += _store(client, result.data, by_corp, result.source)
@@ -403,8 +416,9 @@ def run(
         print(f"대상 {len(corps)}종목, 고유번호 연결 {linked}종목")
 
         total = 0
+        잇단 = Streak()  # 기간을 건너 이어 센다 (25.1083)
         for year, report in plan:
-            stored, w = collect_period(client, corps, year, report, resume=resume)
+            stored, w = collect_period(client, corps, year, report, resume=resume, streak=잇단)
             total += stored
             warnings += w
             name = dart.REPORT_CODES.get(report, (report,))[0]
