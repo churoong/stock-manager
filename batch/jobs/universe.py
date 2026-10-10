@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 from datetime import UTC, date, datetime
@@ -659,7 +660,31 @@ def _bulk_upsert_universe(client: TursoClient, rows: list[tuple]) -> int:
             args.extend(r)
         statements.append((sql, args))
 
-    client.batch(statements)
+    # **반쪽 스냅샷을 최신으로 남기지 않는다** (docs/infra.md 25.1110, 유니버스 감사 재현).
+    # Turso 파이프라인은 트랜잭션이 아니라(문장마다 커밋, `turso.py`) 400행 문장 20여 개 중간에서 끊기면 앞 문장만
+    # 쓰인다. 최신 스냅샷은 날짜의 MAX 라 그 반쪽(재현: 30종목 → 10종목)이 다음 실행까지 점수·신호·리포트의
+    # 유니버스가 됐다. **새 날짜를 쓰다** 실패하면 이번에 쓴 날짜의 이 종목들 행을 지워 지난 스냅샷이 최신으로 남게
+    # 한다. 같은 날짜를 다시 쓰던 중이면(이미 있다) 지우지 않는다 — 지우면 그날 스냅샷이 통째로 사라진다
+    날짜 = str(rows[0][0])
+    ids = sorted({int(r[1]) for r in rows})
+    있던 = client.execute(
+        "SELECT COUNT(*) FROM universe_members WHERE snapshot_date = ?"
+        " AND stock_id IN (SELECT value FROM json_each(?))",
+        [날짜, json.dumps(ids)],
+    ).scalar()
+    try:
+        client.batch(statements)
+    except Exception:
+        if not 있던:
+            try:
+                client.execute(
+                    "DELETE FROM universe_members WHERE snapshot_date = ?"
+                    " AND stock_id IN (SELECT value FROM json_each(?))",
+                    [날짜, json.dumps(ids)],
+                )
+            except Exception:  # noqa: BLE001 — 지우기도 실패하면 원래 오류를 올린다(실행이 실패로 남는다)
+                log.exception("반쪽 유니버스 스냅샷(%s)을 지우지 못했습니다", 날짜)
+        raise
     return len(rows)
 
 

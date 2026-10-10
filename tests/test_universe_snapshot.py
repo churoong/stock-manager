@@ -494,3 +494,40 @@ def test_새_시장에_옛_행이_있으면_옮기지_않는다__유니버스가
     assert 문장 == []
     for sql, args in 문장:
         c.conn.execute(sql, args)  # 실행해도 UNIQUE 에 걸리지 않는다
+
+
+class Test반쪽_스냅샷_25_1110:
+    """400행 문장 중간에서 끊기면 반쪽 스냅샷이 최신이 됐다 (docs/infra.md 25.1110, 유니버스 감사 재현)."""
+
+    @staticmethod
+    def _행(날짜: str, n: int) -> list[tuple]:
+        return [(날짜, i, 1, None, 1, 1, 1, "KRW", "t") for i in range(1, n + 1)]
+
+    def test_새_날짜를_쓰다_끊기면_그_날짜를_지운다(self, client: MemClient, monkeypatch) -> None:
+        for i in range(1, 6):
+            client.conn.execute(
+                "INSERT INTO stocks (id, ticker, market, country, currency, status, source, fetched_at)"
+                " VALUES (?, ?, 'KOSPI', 'KR', 'KRW', 'active', 't', 't') ON CONFLICT DO NOTHING",
+                [100 + i, f"T{i}"],
+            )
+        monkeypatch.setattr(job, "UNIVERSE_ROWS_PER_STATEMENT", 2)
+        행 = [(r[0], 100 + r[1], *r[2:]) for r in self._행("2026-10-09", 5)]
+        진짜 = client.batch
+
+        def 끊김(stmts):  # 첫 문장만 쓰고 끊긴다(파이프라인은 문장마다 커밋)
+            진짜(stmts[:1])
+            raise RuntimeError("연결 끊김")
+
+        monkeypatch.setattr(client, "batch", 끊김)
+        with pytest.raises(RuntimeError):
+            job._bulk_upsert_universe(client, 행)  # type: ignore[arg-type]
+        assert client.conn.execute(
+            "SELECT COUNT(*) FROM universe_members WHERE snapshot_date = '2026-10-09'").fetchone()[0] == 0
+        # 같은 날짜를 다시 쓰던 중이면 지우지 않는다 — 그날 스냅샷이 통째로 사라진다
+        monkeypatch.setattr(client, "batch", 진짜)
+        job._bulk_upsert_universe(client, 행)  # type: ignore[arg-type]
+        monkeypatch.setattr(client, "batch", 끊김)
+        with pytest.raises(RuntimeError):
+            job._bulk_upsert_universe(client, 행)  # type: ignore[arg-type]
+        assert client.conn.execute(
+            "SELECT COUNT(*) FROM universe_members WHERE snapshot_date = '2026-10-09'").fetchone()[0] == 5
