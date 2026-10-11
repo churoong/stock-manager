@@ -925,3 +925,13 @@ def test_유니버스_제외_사유가_설계서_목록과_같다() -> None:
     assert set(목록.group(1).split("|")) == set(uni.ALL_REASONS)
     assert "미국 시총 판정은 아직 붙이지 않았다" not in 글
     assert "하루만 비어도 그 종목을 판정에서 통째로 뺀다" not in 글
+
+
+def test_해외_양도_공제는_한_곳에서_정의한다() -> None:
+    """같은 공제액이 `portfolio`·`tax_sim` 두 벌이었다 — 한쪽만 고치면 보유 화면과 적립 시뮬레이션이 갈린다 (docs/infra.md 25.1132)."""
+    from batch.jobs import portfolio as job
+    from batch.services import portfolio as pf
+    from batch.services import tax_sim as ts
+
+    assert ts.US_GAIN_DEDUCTION_KRW is pf.US_CGT_DEDUCTION_KRW
+    assert "15.4" not in job.ETF_GAIN_TAX_NOTE

@@ -19,6 +19,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 
 from batch.core import settings_range as sr
+from batch.services.portfolio import US_CGT_DEDUCTION_KRW
 
 #: 매달 넣는 돈(원) — 연금저축 세액공제 한도(연 600만원 `[확인필요]`)와 맞춘 월 50만원
 MONTHLY_KRW = 500_000
@@ -27,8 +28,8 @@ YEARS = (10, 20)
 #: 가정 — 연 가격 수익률(%)과 연 분배율(%). 예측이 아니다(모든 행이 같은 가정)
 PRICE_RETURN_PCT = 5.0
 DIST_YIELD_PCT = 2.0
-#: 해외주식 양도소득 기본공제(원/년) `[확인필요]`
-US_GAIN_DEDUCTION_KRW = 2_500_000
+#: 해외주식 양도소득 기본공제(원/년) `[확인필요]` — 정의처는 `portfolio.US_CGT_DEDUCTION_KRW` (25.1132, 두 벌이던 것)
+US_GAIN_DEDUCTION_KRW = US_CGT_DEDUCTION_KRW
 #: 연금저축 세액공제 대상 납입 한도(원/년) `[확인필요]`
 PENSION_CREDIT_LIMIT_KRW = 6_000_000
 
