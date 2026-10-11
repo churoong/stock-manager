@@ -531,3 +531,72 @@ class Test반쪽_스냅샷_25_1110:
             job._bulk_upsert_universe(client, 행)  # type: ignore[arg-type]
         assert client.conn.execute(
             "SELECT COUNT(*) FROM universe_members WHERE snapshot_date = '2026-10-09'").fetchone()[0] == 5
+
+
+class Test재사용_티커_25_1120:
+    """폐지된 회사의 티커로 다른 회사가 상장하면 옛 행(상장일·시세)을 물려받았다 (docs/infra.md 25.1120, 유니버스 감사 #5)."""
+
+    @staticmethod
+    def _준비(monkeypatch: pytest.MonkeyPatch, 옛_이름: str | None, 새_이름: str, 새_시장: str = "NASDAQ"):
+        from batch.core import db
+        from batch.jobs import universe as job
+        from batch.sources import nasdaq_symbols as ns
+        from batch.sources.yfinance_src import FetchResult
+
+        c = MemClient()
+        db.apply_migrations(c)  # type: ignore[arg-type]
+        남은 = [f"S{i:02d}" for i in range(20)]
+        for i, t in enumerate(남은, 1):
+            c.conn.execute(
+                "INSERT INTO stocks (id, ticker, market, country, currency, status, source, fetched_at)"
+                " VALUES (?, ?, 'NASDAQ', 'US', 'USD', 'active', 't', 't')",
+                [i, t],
+            )
+        c.conn.execute(
+            "INSERT INTO stocks (id, ticker, market, country, name_en, currency, status, source, fetched_at,"
+            " listed_date) VALUES (99, 'REUS', 'NASDAQ', 'US', ?, 'USD', 'delisted', 't', 't', '2001-01-01')",
+            [옛_이름],
+        )
+        받음 = [ns.UsSymbol(t, f"{t} Inc. Common Stock", "NASDAQ", False, False) for t in 남은]
+        받음.append(ns.UsSymbol("REUS", 새_이름, 새_시장, False, False))
+        monkeypatch.setattr(ns, "fetch_symbols", lambda: FetchResult(ok=True, source="nasdaqtrader", data=받음))
+        job.refresh_us_master(c)  # type: ignore[arg-type]
+        return c
+
+    def test_다른_회사면_옛_행을_비키고_새_행을_만든다(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        c = self._준비(monkeypatch, "Old Mining Corp. - Common Stock", "Rocket Software Inc. - Class A Common Stock")
+        행 = c.conn.execute(
+            "SELECT id = 99, ticker, status, listed_date FROM stocks WHERE ticker LIKE 'REUS%' ORDER BY id"
+        ).fetchall()
+        # 옛 행은 비켜서 폐지 그대로(옛 상장일 유지), 새 회사는 상장일 없는 새 행
+        assert 행 == [(1, "REUS~99", "delisted", "2001-01-01"), (0, "REUS", "active", None)]
+
+    def test_같은_회사가_돌아오면_되살린다(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        c = self._준비(monkeypatch, "Rocket Corp. - Common Stock", "Rocket Corporation - Common Stock")
+        assert c.conn.execute("SELECT id, ticker, status FROM stocks WHERE ticker LIKE 'REUS%'").fetchall() == [
+            (99, "REUS", "active")]
+
+    def test_이름을_모르면_예전처럼_되살린다(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        c = self._준비(monkeypatch, None, "Rocket Software Inc. - Common Stock")
+        assert c.conn.execute("SELECT id, ticker, status FROM stocks WHERE ticker LIKE 'REUS%'").fetchall() == [
+            (99, "REUS", "active")]
+
+    def test_다른_시장의_다른_회사도_비키고_옮기기는_막지_않는다(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """새 시장 쪽 폐지 행이 비켜야 이전상장(25.529)이 UNIQUE 에 막히지 않는다."""
+        from batch.jobs import universe as job
+
+        기존 = [
+            (1, "MOVE", "NYSE", True, "active", "Move Corp. - Common Stock", None),
+            (2, "MOVE", "NASDAQ", False, "delisted", "Ancient Bank Inc. - Common Stock", None),
+        ]
+        비키기, 비킨 = job.reused_ticker_statements(기존, {("MOVE", "NASDAQ"): ("Move Corp. - Common Stock", None)})
+        assert 비키기 == [("UPDATE stocks SET ticker = ? WHERE id = ?", ["MOVE~2", 2])] and 비킨 == {2}
+        assert job.market_move_statements([r for r in 기존 if r[0] not in 비킨], {"MOVE": "NASDAQ"}) == [
+            ("UPDATE stocks SET market = ? WHERE id = ?", ["NASDAQ", 1])]
+
+    def test_국내는_ISIN_으로_가른다(self) -> None:
+        from batch.jobs import universe as job
+
+        기존 = [(7, "123450", "KOSDAQ", False, "delisted", "Same Name", "KR7123450001")]
+        assert job.reused_ticker_statements(기존, {("123450", "KOSDAQ"): ("Same Name", "KR7123450001")})[1] == set()
+        assert job.reused_ticker_statements(기존, {("123450", "KOSDAQ"): ("Same Name", "KR7123451009")})[1] == {7}

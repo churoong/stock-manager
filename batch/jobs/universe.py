@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import re
 import sys
 from datetime import UTC, date, datetime
 from typing import Any
@@ -152,8 +153,15 @@ def refresh_kr_master(client: TursoClient, bas_dd: str) -> tuple[int, list[str]]
         now = db.now_iso()
         받은[market] = {row.ticker for row in result.data if row.ticker}
         # 이전상장한 종목은 **새 행을 만들지 않고 옛 행의 시장을 바꾼다** (25.529) — 시세 이력이 그 행에 있다
+        # 폐지 행을 다른 회사가 다시 쓰면 먼저 비켜 둔다 (25.1120) — 그 뒤 옮기기는 비킨 행 없이 판정한다
+        기존 = _country_rows(client, "KR")
+        비키기, 비킨 = reused_ticker_statements(
+            기존, {(row.ticker, row.market or market): (row.name_en, row.isin) for row in result.data if row.ticker}
+        )
+        statements.extend(비키기)
         statements.extend(market_move_statements(
-            _country_rows(client, "KR"), {row.ticker: (row.market or market) for row in result.data if row.ticker},
+            [r for r in 기존 if r[0] not in 비킨],
+            {row.ticker: (row.market or market) for row in result.data if row.ticker},
         ))  # fmt: skip
         for row in result.data:
             if not row.ticker:
@@ -220,14 +228,65 @@ def refresh_kr_master(client: TursoClient, bas_dd: str) -> tuple[int, list[str]]
     return total, warnings
 
 
-def _country_rows(client: TursoClient, country: str) -> list[tuple[int, str, str, bool]]:
-    """(id, ticker, market, active). **옮기는 것은 active 행만, 막는 것은 모든 행으로** 본다 (25.536·25.541, 교차검증).
+def _country_rows(client: TursoClient, country: str) -> list[tuple[Any, ...]]:
+    """(id, ticker, market, active, status, name_en, isin). **옮기는 것은 active 행만, 막는 것은 모든 행으로** 본다
+    (25.536·25.541, 교차검증). 뒤의 셋은 재사용 티커 가르기(25.1120)가 쓴다 — 같은 읽기 한 번으로.
 
     - 폐지·제외 행까지 옮기면 다른 시장에서 같은 티커로 새로 상장한 **다른 회사**가 옛 회사의 행을 물려받았다(25.536).
     - 그런데 막기(새 시장에 이미 행이 있나)까지 active 만 보자, 새 시장의 옛 폐지·제외 행을 못 봐 `UPDATE` 가
       UNIQUE(ticker, market) 에 걸려 **유니버스 배치 전체가 실패**했다(25.541, 재현)."""
-    rs = client.execute("SELECT id, ticker, market, status FROM stocks WHERE country = ?", [country])
-    return [(int(r[0]), str(r[1]), str(r[2]), str(r[3]) == "active") for r in rs.rows]
+    rs = client.execute(
+        "SELECT id, ticker, market, status, name_en, isin FROM stocks WHERE country = ?", [country]
+    )
+    return [
+        (int(r[0]), str(r[1]), str(r[2]), str(r[3]) == "active", str(r[3]), r[4], r[5]) for r in rs.rows
+    ]
+
+
+#: 회사 이름을 견줄 때 버리는 낱말 — 법인 형태·주식 종류. 남은 낱말이 **하나도 겹치지 않아야** 다른 회사로 본다
+_이름_군말 = frozenset({
+    "inc", "incorporated", "corp", "corporation", "co", "company", "ltd", "limited", "plc", "llc", "lp",
+    "holdings", "holding", "group", "the", "sa", "nv", "ag", "se",
+    "class", "common", "stock", "stocks", "ordinary", "share", "shares", "a", "b", "c", "new",
+})  # fmt: skip
+
+
+def _이름_낱말(name: object) -> set[str]:
+    앞 = str(name or "").split(" - ")[0].lower()
+    return {w for w in re.findall(r"[a-z0-9]+", 앞) if w not in _이름_군말}
+
+
+def reused_ticker_statements(
+    existing: list[tuple[Any, ...]], listed: dict[tuple[str, str], tuple[str | None, str | None]]
+) -> tuple[list[tuple[str, list[Any]]], set[int]]:
+    """폐지된 회사의 티커를 **다른 회사**가 다시 쓰면 옛 행의 티커를 `티커~id` 로 비켜 둔다 (docs/infra.md 25.1120).
+
+    `(ticker, market)` 이 유일 키라 예전에는 upsert 가 폐지 행을 되살려(25.361·25.519) 새 회사가 옛 회사의
+    시세 이력과 상장일을 물려받았다 — '상장1년미만' 을 통과하고 모멘텀·변동성이 두 회사를 이었다(유니버스 감사 #5).
+    비켜 두면 upsert 가 깨끗한 새 행을 만든다. 옛 행은 지우지 않는다 — 시세·매매가 그 행을 가리킨다.
+
+    다른 회사로 보는 것은 **폐지(`delisted`) 행**이면서
+    - 국내: 옛 ISIN 과 새 ISIN 이 둘 다 있고 다르다(ISIN 은 발행사마다 따로 받는다)
+    - 미국: 옛 이름과 새 이름의 낱말(법인 형태·주식 종류 뺀 것)이 **하나도** 겹치지 않는다
+    둘 다 모르면(이름·ISIN 비어 있음) 예전처럼 되살린다 — 같은 회사가 잠깐 빠졌다 돌아온 것일 수 있다.
+    돌려주는 id 묶음은 비켜 둔 행이다 — 시장 옮기기(25.529)를 이 행 없이 다시 판정하게.
+    """
+    out: list[tuple[str, list[Any]]] = []
+    비킨: set[int] = set()
+    for row in existing:
+        stock_id, ticker, market, status, name_en, isin = row[0], row[1], row[2], row[4], row[5], row[6]
+        if status != "delisted" or (ticker, market) not in listed:
+            continue
+        새_이름, 새_isin = listed[(ticker, market)]
+        if isin and 새_isin:
+            다름 = str(isin) != str(새_isin)
+        else:
+            옛, 새 = _이름_낱말(name_en), _이름_낱말(새_이름)
+            다름 = bool(옛) and bool(새) and not (옛 & 새)
+        if 다름:
+            out.append(("UPDATE stocks SET ticker = ? WHERE id = ?", [f"{ticker}~{stock_id}", stock_id]))
+            비킨.add(int(stock_id))
+    return out, 비킨
 
 
 def market_move_statements(
@@ -368,7 +427,12 @@ def refresh_us_master(client: TursoClient) -> tuple[int, list[str]]:
     now = db.now_iso()
     # 거래소를 옮긴 종목은 옛 행의 시장을 바꾼다 (25.529) — 새 행이면 시세 이력이 없어 4주 '데이터없음',
     # 첫 관측일이 상장일이 되어 1년 '상장1년미만' 이었다
-    statements = market_move_statements(_country_rows(client, "US"), {s.symbol: s.exchange for s in common})
+    # 폐지 행을 다른 회사가 다시 쓰면 먼저 비켜 둔다 (25.1120) — 그 뒤 옮기기는 비킨 행 없이 판정한다
+    기존 = _country_rows(client, "US")
+    statements, 비킨 = reused_ticker_statements(기존, {(s.symbol, s.exchange): (s.name, None) for s in common})
+    statements += market_move_statements(
+        [r for r in 기존 if r[0] not in 비킨], {s.symbol: s.exchange for s in common}
+    )
     statements += [
         (
             "INSERT INTO stocks"
