@@ -22,7 +22,7 @@ import json
 import logging
 import math
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from typing import Any
 
@@ -363,6 +363,29 @@ def fetch_kr_kis(client: TursoClient, targets: list[str], out: dict[str, Fetched
     return qc.calls + int(issued)
 
 
+def align_kr_sources(kr_docs: dict[str, Fetched]) -> tuple[dict[str, Fetched], int | None]:
+    """국내 보유가 KODEX 전 종목과 KIS 상위 N 으로 섞였으면 **KODEX 쪽도 비중 상위 N 만** 남긴다 (25.1123).
+
+    국내 순위(11.6)는 상위 비중 T = Σ w(우리 상위 종목) 의 **절대 합**이다. KIS 는 상위 30종목(합 약 85%)만 주므로
+    KODEX 가 429 로 막힌 달에는 KIS 로 받은 ETF 만 꼬리 15% 의 몫이 빠진 채 전 종목 ETF 와 견줘졌다 — 어느 쪽으로
+    틀어지는지도 모른다. 같은 모양(비중 상위 N)으로 잘라 견준다. 덮은 비중 하한(70%)도 같은 잣대로 본다.
+    비율로 늘리는(T ÷ 합) 방법은 꼬리의 상위 종목 몫이 머리와 같다고 가정해 쓰지 않는다.
+    섞이지 않았으면(전부 KODEX 이거나 전부 KIS) 그대로 둔다. 계좌 노출(25.1002)은 자르지 않은 보유를 쓴다.
+    반환: (순위에 쓸 보유, 맞춘 N 또는 None)."""
+    부분 = [d for d in kr_docs.values() if d.source == kis.SOURCE]
+    if not 부분 or len(부분) == len(kr_docs):
+        return kr_docs, None
+    n = min(len(d.holdings) for d in 부분)
+    out: dict[str, Fetched] = {}
+    for sym, d in kr_docs.items():
+        if d.source == kis.SOURCE or len(d.holdings) <= n:
+            out[sym] = d
+            continue
+        머리 = sorted(d.holdings, key=lambda h: -h[1])[:n]
+        out[sym] = replace(d, holdings=머리, accession=f"{d.accession} 중 비중 상위 {n}개(KIS 출처와 맞춤)")
+    return out, n
+
+
 def needs_kodex(picks: list[dict[str, Any]]) -> bool:
     """국내 지수 ETF 후보가 하나라도 있으면 KODEX 목록을 받는다 — 없으면 부르지 않는다."""
     return any(
@@ -468,10 +491,13 @@ def run() -> int:
             "kr": load_market(client, "KR", {}, tilt.KR_BENCHMARK),
         }
         docs = {("us", s): d for s, d in us_docs.items()} | {("kr", s): d for s, d in kr_docs.items()}
+        # 국내 출처가 섞였으면 같은 모양으로 잘라 견준다 (25.1123). 점수·순위·근거표는 자른 것, 계좌 노출은 전 종목
+        kr_rank_docs, 맞춘_수 = align_kr_sources(kr_docs)
+        tilt_docs = {("us", s): d for s, d in us_docs.items()} | {("kr", s): d for s, d in kr_rank_docs.items()}
         tilts = {
             key: tilt.compute(d.holdings, markets[key[0]].key_to_symbol, markets[key[0]].stocks,
                               markets[key[0]].scores.get, markets[key[0]].rec_ids, markets[key[0]].top_ids)
-            for key, d in docs.items()
+            for key, d in tilt_docs.items()
         }  # fmt: skip
         benches = {"us": tilts.get(("us", tilt.MARKET_BENCHMARK)), "kr": tilts.get(("kr", tilt.KR_BENCHMARK))}
 
@@ -504,7 +530,7 @@ def run() -> int:
                 continue
             kind, sym = src
             payload = build_payload(
-                tilts[src], docs[src], sym, sym != str(p["symbol"]).upper(), markets[kind], benches[kind],
+                tilts[src], tilt_docs[src], sym, sym != str(p["symbol"]).upper(), markets[kind], benches[kind],
                 ranks.get(pid), ranks_all.get(pid), group_of(p), "core" if p.get("passed") else "wide",
             )
             updates.append((
@@ -559,6 +585,7 @@ def run() -> int:
             "kodex_calls": kodex.calls,
             "kis_calls": kis_calls,
             "kis_docs": sorted(s for s, d in kr_docs.items() if d.source == kis.SOURCE),
+            "kr_aligned_top_n": 맞춘_수,
             "coverage": {f"{k}:{s}": round(t.coverage_pct, 1) for (k, s), t in sorted(tilts.items())},
         }
         db.finish_batch_run(
