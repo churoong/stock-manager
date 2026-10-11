@@ -178,7 +178,10 @@ def refresh_kr_master(client: TursoClient, bas_dd: str) -> tuple[int, list[str]]
                     "   yahoo_symbol = excluded.yahoo_symbol, source = excluded.source,"
                     # 빈 상장일이 좋은 값을 NULL 로 덮어 "데이터없음" 으로 빠졌다 (25.654, 감사)
                     "   fetched_at = excluded.fetched_at,"
-                    "   listed_date = COALESCE(excluded.listed_date, stocks.listed_date),"
+                    # 이전상장(25.529 로 옛 행을 옮긴다)의 `LIST_DD` 가 이전일이면 옛 상장일을 늦춰 1년 '상장1년미만'
+                    # 이었다 — **이른 쪽**을 지킨다 (25.1121). 재사용 티커는 25.1120 이 새 행으로 가른다
+                    "   listed_date = MIN(COALESCE(excluded.listed_date, stocks.listed_date),"
+                    "                     COALESCE(stocks.listed_date, excluded.listed_date)),"
                     "   security_group = excluded.security_group,"
                     "   section_type = excluded.section_type,"
                     "   share_kind = excluded.share_kind, isin = excluded.isin,"

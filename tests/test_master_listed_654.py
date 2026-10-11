@@ -22,3 +22,22 @@ def test_빈_상장일은_있던_값을_지우지_않는다(monkeypatch: pytest.
     monkeypatch.setattr(krx, "fetch_master", lambda *a, **k: FetchResult(ok=True, data=[행]))
     universe.refresh_kr_master(c, "20260925")  # type: ignore[arg-type]
     assert c.conn.execute("SELECT listed_date FROM stocks WHERE ticker = '005930'").fetchone() == ("1975-06-11",)
+
+
+def test_이전상장의_늦은_상장일이_옛_값을_늦추지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """KOSDAQ → KOSPI 이전 뒤 `LIST_DD` 가 이전일이면 1년 '상장1년미만' 이었다 (docs/infra.md 25.1121)."""
+    monkeypatch.setattr(db, "usage_blocked_today", lambda client, api: False)
+    c = _client()
+    c.conn.execute("UPDATE stocks SET listed_date = '2010-03-02' WHERE ticker = '005930'")
+    행 = krx.KrxMasterRow.from_raw({
+        "ISU_SRT_CD": "005930", "ISU_CD": "KR7005930003", "ISU_ABBRV": "삼성전자", "ISU_NM": "삼성전자보통주",
+        "LIST_DD": "20260901", "MKT_TP_NM": "KOSPI", "SECUGRP_NM": "주권", "KIND_STKCERT_TP_NM": "보통주",
+        "LIST_SHRS": "100",
+    })  # fmt: skip
+    monkeypatch.setattr(krx, "fetch_master", lambda *a, **k: FetchResult(ok=True, data=[행]))
+    universe.refresh_kr_master(c, "20260925")  # type: ignore[arg-type]
+    assert c.conn.execute("SELECT listed_date FROM stocks WHERE ticker = '005930'").fetchone() == ("2010-03-02",)
+    # 더 이른 값은 받는다(빈 행을 처음 채우는 것도)
+    c.conn.execute("UPDATE stocks SET listed_date = NULL WHERE ticker = '005930'")
+    universe.refresh_kr_master(c, "20260925")  # type: ignore[arg-type]
+    assert c.conn.execute("SELECT listed_date FROM stocks WHERE ticker = '005930'").fetchone() == ("2026-09-01",)
