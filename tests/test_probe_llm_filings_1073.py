@@ -113,3 +113,46 @@ def test_DART_가_막혔으면_모델을_받지_않는다(monkeypatch, tmp_path)
     monkeypatch.setenv("DART_API_KEY", "k")
     monkeypatch.setattr(sys, "argv", ["probe", "--out", str(tmp_path)])
     assert probe.main() == 1 and 받음 == []
+
+
+class Test2회차_장치_25_1131:
+    """1회차(25.1129)에서 드러난 장치 결함 — 근거 되풀이로 JSON 잘림, 빈 창, 나라를 공급사로, 프롬프트 예시 베끼기."""
+
+    def test_줄_번호로_답하면_그_줄이_근거가_된다(self) -> None:
+        body, lines = probe.numbered("가\n\n주요 매출처는 Apple, Verizon\n다")
+        assert body == "[1] 가\n[2] 주요 매출처는 Apple, Verizon\n[3] 다"
+        assert probe.resolve({"name": "Apple", "line": 2}, lines)["evidence"] == "주요 매출처는 Apple, Verizon"
+        assert probe.resolve({"name": "Apple", "line": "2"}, lines)["evidence"] == "주요 매출처는 Apple, Verizon"
+        assert "evidence" not in probe.resolve({"name": "Apple", "line": 9}, lines)
+        assert "evidence" not in probe.resolve({"name": "Apple", "line": True}, lines)
+        # 틀린 줄을 고르면 근거 X — 줄은 원문에 있어도 이름이 없다
+        src = "\n".join(lines)
+        assert probe.grounded(probe.resolve({"name": "Apple", "line": 1}, lines), src) == (True, False)
+        assert probe.grounded(probe.resolve({"name": "Apple", "line": 2}, lines), src) == (True, True)
+
+    def test_답을_원문_줄로_바꿔_돌려준다(self) -> None:
+        본 = []
+
+        def complete(prompt: str):  # noqa: ANN202
+            본.append(prompt)
+            return '{"customers":[{"name":"Apple","line":2}],"suppliers":[],"anonymous":[]}', {}
+
+        parsed, _ = probe.ask(complete, "견본", "가\n주요 매출처는 Apple\n다")
+        assert parsed["customers"][0]["evidence"] == "주요 매출처는 Apple"
+        assert "[2] 주요 매출처는 Apple" in 본[0]
+
+    def test_빈_창이면_절_앞부분을_준다(self) -> None:
+        assert probe.window("가\n나\n다", limit=3) == "가\n나"
+        assert probe.window("웨이퍼는 SK실트론에서 조달합니다") == "웨이퍼는 SK실트론에서 조달합니다"
+
+    def test_나라_이름은_회사가_아니다(self) -> None:
+        for 곳 in ("일본", "한국", "중국", "대만", "미국", "독일", " 유럽 "):
+            assert probe.is_place(곳), 곳
+        for 회사 in ("한국전력", "일본제철", "미국 GM", "SK실트론", "China Steel"):
+            assert not probe.is_place(회사), 회사
+
+    def test_프롬프트에_익명_예시를_두지_않고_상한을_늘렸다(self) -> None:
+        for 예시 in ("A사", "해외 고객사", "국내 완성차 업체"):
+            assert 예시 not in probe.PROMPT
+        assert '"line"' in probe.PROMPT and probe.MAX_TOKENS == 2048
+        assert not set(probe.TICKERS_R2) & set(probe.TICKERS) and len(probe.TICKERS_R2) == 12
