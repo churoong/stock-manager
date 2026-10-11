@@ -50,11 +50,11 @@ describe("답 — 실제 스키마", () => {
              unrealized_pnl_krw, updated_at) VALUES (1, 10, 'KRW', 55000, 1, 550000, 550000, '2026-01-02', 55000, 't')`);
     const text = await answer({ kind: "stock", q: "삼성전자" }, exec);
     expect(text).toContain("삼성전자 (005930)");
-    expect(text).toContain("종가 61,000 (2026-10-06)");
+    expect(text).toContain("종가 61,000원 (2026-10-06)");
     expect(text).toContain("종합 72.5점 · 시장 12위 (2026-10-06)");
     expect(text).toContain("밸류 60 · 퀄리티 80 · 성장 - · 모멘텀 70 · 리스크 75");
     expect(text).toContain("매수 신호: 최근 없음");
-    expect(text).toContain("보유 10주 · 평균 55,000 · 평가손익률 10%");
+    expect(text).toContain("보유 10주 · 평균 55,000원 · 평가손익률 10%");
   });
 
   it("여럿이 맞으면 고르게 하고, 없으면 그렇게 말한다", async () => {
