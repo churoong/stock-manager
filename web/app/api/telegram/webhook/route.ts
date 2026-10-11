@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { execute } from "@/lib/db";
 import { tokenMatches } from "@/lib/intraday";
 import { sendTelegram } from "@/lib/telegram";
-import { answer, parseQuery } from "@/lib/telegramQa";
+import { ANSWER_TIMEOUT_MS, answer, parseQuery, withTimeout } from "@/lib/telegramQa";
 
 /**
  * 텔레그램 질의응답 웹훅 (docs/telegram-qa.md, docs/infra.md 25.1004).
@@ -30,7 +30,9 @@ export async function POST(request: Request) {
   if (!query) return NextResponse.json({ ok: true });
   let text: string;
   try {
-    text = await answer(query, execute);
+    // **DB 가 답하지 않아도 제때 200 으로 끝낸다** (25.1133, 텔레그램 감사 재현). `execute` 의 fetch 에는 시간 제한이 없어 함수가
+    // 시간 초과로 죽으면 텔레그램이 같은 말을 다시 보내고, DB 가 살아난 뒤 답이 늦게 여러 번 갔다
+    text = await withTimeout(answer(query, execute), ANSWER_TIMEOUT_MS);
   } catch (error) {
     text = `답을 만들지 못했습니다 — DB 를 읽지 못했습니다 (${error instanceof Error ? error.message.slice(0, 120) : "알 수 없음"})`;
   }

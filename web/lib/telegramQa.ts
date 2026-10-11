@@ -243,3 +243,15 @@ export function webhookOrigin(requestUrl: string, productionHost: string | undef
   const host = productionHost?.trim().replace(/^https?:\/\//, "").replace(/\/+$/, "");
   return host ? `https://${host}` : new URL(requestUrl).origin;
 }
+
+/** 웹훅이 답을 기다리는 상한(ms). Vercel 무료 함수 상한(10초 `[확인필요: 플랜별]`)보다 짧게 — 넘으면 "DB 응답 없음" 을 보내고 200 (25.1133) */
+export const ANSWER_TIMEOUT_MS = 8_000;
+
+/** 약속이 상한 안에 끝나지 않으면 오류로 끝낸다. 늦게 끝난 원래 약속의 결과는 버린다 */
+export function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const 늦음 = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`DB 가 ${Math.round(ms / 1000)}초 안에 답하지 않았습니다`)), ms);
+  });
+  return Promise.race([p, 늦음]).finally(() => clearTimeout(timer));
+}

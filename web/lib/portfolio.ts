@@ -132,6 +132,17 @@ export const dividendInputSchema = z.object({
 export type DividendInput = z.infer<typeof dividendInputSchema>;
 
 /**
+ * 주당 배당 × 수량이 세전 금액과 1% 넘게 다르면 말한다 (docs/infra.md 25.1133, 배당 감사). API 가 두 칸을 그대로 저장해
+ * "주당 1 × 10주" 에 세전 300,000 이 함께 남았다. 계산은 세전 금액만 쓰므로 막지 않고 알린다(지금 화면 폼은 두 칸을 보내지 않는다)
+ */
+export function perShareNote(aps: number | null | undefined, qty: number | null | undefined, gross: number): string | null {
+  if (aps == null || qty == null || !(aps > 0) || !(qty > 0) || !(gross > 0)) return null;
+  const 곱 = aps * qty;
+  if (Math.abs(곱 - gross) / gross <= 0.01) return null;
+  return `주당 배당 × 수량(${곱.toLocaleString("ko-KR", { maximumFractionDigits: 4 })})이 세전 금액(${gross.toLocaleString("ko-KR", { maximumFractionDigits: 4 })})과 다릅니다 — 계산은 세전 금액으로 합니다. 틀렸으면 지우고 다시 넣으세요`;
+}
+
+/**
  * 방금(10분 안) 같은 배당 — 같은 종목·지급일·세전·세금 (docs/infra.md 25.829, 감사). 저장 응답이 끊긴 뒤 다시 누르면 같은 배당이 두 행이 되어
  * 배당 합계와 TWR 에 두 번 들어갔다(25.785 가 매매만 막았다). 인자: [종목, 지급일, 세전, 세금, 이후 시각]
  */

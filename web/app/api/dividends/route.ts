@@ -16,6 +16,7 @@ import {
   fxDateNote,
   fxRangeWarning,
   isFutureDate,
+  perShareNote,
   requestRecalc,
   withholdingRate,
   zeroWithholdingNote,
@@ -137,7 +138,7 @@ export async function POST(request: Request) {
       }
     }
     const recalc = await requestRecalc();
-    return NextResponse.json({ ok: true, fx_rate: fxRate, fx_rate_source: fxSource, recalc, warnings: [fxWarning, fxDateWarning, 크기.warning, 세금0].filter((w): w is string => Boolean(w)) });
+    return NextResponse.json({ ok: true, fx_rate: fxRate, fx_rate_source: fxSource, recalc, warnings: [fxWarning, fxDateWarning, 크기.warning, 세금0, perShareNote(input.amount_per_share, input.quantity, input.gross_amount)].filter((w): w is string => Boolean(w)) });
   } catch (error) {
     return NextResponse.json({ errors: [error instanceof Error ? error.message : "저장 실패"] }, { status: 500 });
   }
