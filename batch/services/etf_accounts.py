@@ -16,6 +16,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from batch.core import settings_range as sr
+
 #: 계좌 순서 — 화면 탭 순서와 같다
 ACCOUNTS = ("pension", "irp", "taxable")
 ACCOUNT_LABELS = {"pension": "연금저축", "irp": "IRP", "taxable": "일반계좌"}
@@ -36,8 +38,14 @@ _PENSION_US = "연금저축·IRP 는 국내 상장 ETF 만 살 수 있습니다"
 
 
 def _rate(taxes: dict | None, key: str) -> str:
-    v = (taxes or {}).get(key)
-    return f"{float(v):g}%" if isinstance(v, int | float) else "미입력"
+    """설정 세율을 근거 문장에 인용한다. **배치·웹과 같은 범위(0~50%)로 거른다** (25.1130, 배당 감사 재현).
+
+    예전에는 숫자면 그대로 — 백업 복원으로 들어온 60% 를 "설정 세율 60%", `True` 를 "1%" 로 인용했다. 같은 설정을 세후
+    시뮬레이션(`tax_sim`)·비용(`cost_rates`)은 범위 밖으로 버리는데 근거 문장만 다른 값을 말했다."""
+    값, 말 = sr.범위_안(key, (taxes or {}).get(key), None)
+    if 값 is None:
+        return "범위 밖 — 설정 화면에서 확인" if 말 else "미입력"
+    return f"{값:g}%"
 
 
 def _reason(country: str, bucket: str, account: str, taxes: dict | None) -> str:

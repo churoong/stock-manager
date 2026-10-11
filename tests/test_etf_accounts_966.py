@@ -45,3 +45,11 @@ class Test근거:
         assert a["pension"]["eligible"] and "위성" in a["pension"]["reason"]
         assert "위험자산" in a["irp"]["note"]
         assert ea.accounts_for("US", "업종", satellite=True)["pension"]["eligible"] is False
+
+
+def test_근거의_세율은_범위를_거친다() -> None:
+    """범위 밖·숫자 아닌 세율을 그대로 인용했다 (docs/infra.md 25.1130)."""
+    assert "설정 세율 15.4%" in ea._reason("KR", "해외 주식", "taxable", {"kr_dividend_pct": 15.4})
+    assert "설정 세율 범위 밖" in ea._reason("KR", "해외 주식", "taxable", {"kr_dividend_pct": 60})
+    assert "설정 세율 범위 밖" in ea._reason("US", "미국 주식", "taxable", {"us_capital_gains_pct": True})
+    assert "설정 세율 미입력" in ea._reason("US", "미국 주식", "taxable", {})
