@@ -43,7 +43,10 @@ def test_조용시간은_웹과_같이_가른다() -> None:
     assert ah.quiet_state(None, 새벽) == (True, True)
     assert ah.quiet_state('{"enabled": false}', 새벽) == (False, True)
     assert ah.quiet_state('{"start": "23:00", "end": "07:00", "deliver_on_release": false}', 새벽) == (True, False)
-    assert ah.quiet_state('{"start": "07:00", "end": "07:00"}', 새벽) == (False, True)
+    # 켜진 시작=끝은 웹(`readSetting`)처럼 기본값(00:00~07:00) — 예전엔 "없음" 으로 읽어 웹과 갈렸다 (25.1119)
+    assert ah.quiet_state('{"start": "07:00", "end": "07:00"}', 새벽) == (True, True)
+    assert ah.quiet_state('{"enabled": true, "start": "22:00", "end": "22:00", "deliver_on_release": false}', 새벽) == (
+        True, True)
     assert ah.quiet_state(None, datetime(2026, 10, 7, 9, 17, tzinfo=UTC)) == (False, True)  # 18:17 KST
 
 

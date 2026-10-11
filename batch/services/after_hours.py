@@ -71,16 +71,23 @@ def session_day(now_utc: datetime) -> date | None:
 
 
 def quiet_state(raw: str | None, now_utc: datetime) -> tuple[bool, bool]:
-    """(지금 조용시간인가, 해제 뒤 보내나). 웹 `inQuietHours` 와 같은 판정 — 시작=끝이면 조용시간 없음."""
+    """(지금 조용시간인가, 해제 뒤 보내나). 웹 `inQuietHours`·`readSetting` 과 같은 판정.
+
+    켜진 시작=끝은 기본값으로 읽는다(25.1119)."""
     try:
         q = {**DEFAULT_QUIET, **(json.loads(raw or "{}") or {})}
     except (TypeError, ValueError):
         q = dict(DEFAULT_QUIET)
     if not q.get("enabled"):
         return False, bool(q.get("deliver_on_release", True))
-    hm = now_utc.astimezone(KST).strftime("%H:%M")
     start, end = str(q.get("start")), str(q.get("end"))
     if start == end:
-        return False, True
+        # **웹과 같게 기본값 통째로** (docs/infra.md 25.1119, 웹 감사 재현). 화면은 켜진 시작=해제를
+        # 받지 않고(25.254), 9/26 전 저장분·백업 복원으로 남은 값은 웹 `readSetting` 이 스키마 위반으로
+        # 보고 기본값(00:00~07:00 켜짐)을 쓴다. 여기만 "조용시간 없음" 으로 읽어 03:30 KST 시간외 알림이
+        # 웹 경로는 묶고 배치는 바로 보냈다
+        q = dict(DEFAULT_QUIET)
+        start, end = str(q["start"]), str(q["end"])
+    hm = now_utc.astimezone(KST).strftime("%H:%M")
     quiet = start <= hm < end if start < end else (hm >= start or hm < end)
     return quiet, bool(q.get("deliver_on_release", True))
