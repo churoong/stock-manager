@@ -966,6 +966,23 @@ export function weekendNote(isoDay: string): string | null {
   return `${isoDay} 은 ${요일 === 6 ? "토요일" : "일요일"}입니다 — 정규장이 없는 날입니다. 체결일이 맞는지 확인해 주세요(틀렸으면 지우고 다시 넣기)`;
 }
 
+/** 그 시각의 미국 동부 날짜(YYYY-MM-DD) — 서머타임은 Intl 이 따른다 */
+export function newYorkDay(now: Date = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
+}
+
+/**
+ * 미국 종목 체결일은 **현지(뉴욕) 날짜**로 적는다 (docs/portfolio.md 2장, docs/infra.md 25.1124). 시세·환율·매수 스냅샷이 모두 미국 거래일로
+ * 쌓여 있어서다. 한국 새벽(뉴욕 전날 오후)에 체결한 것을 한국 날짜로 넣으면 아직 오지 않은 미국 날짜가 되어 — 체결가 검사·자동 환율이
+ * 앞 날짜 값으로, 주말 경고가 토요일로 틀어진다. 그 날짜가 뉴욕에서 아직 오지 않았으면 그것만 알린다(저장은 한다 — 사용자 입력값)
+ */
+export function usLocalDateNote(country: string | null | undefined, isoDay: string, now: Date = new Date()): string | null {
+  if (country !== "US") return null;
+  const 뉴욕 = newYorkDay(now);
+  if (isoDay <= 뉴욕) return null;
+  return `미국 현지(뉴욕)는 아직 ${뉴욕} 입니다 — 미국 종목 체결일은 현지 날짜로 적습니다(한국 새벽 체결이면 전날). 한국 날짜를 넣었으면 지우고 ${뉴욕} 로 다시 넣어 주세요`;
+}
+
 export function fxDateNote(source: string, stored: { date: string } | undefined, onDate: string): string | null {
   if (source !== "auto" || !stored || stored.date === onDate) return null;
   // 휴일이면 그날 환율은 앞으로도 없다 — "아직 없다" 로 단정하지 않는다 (25.594, 교차검증)

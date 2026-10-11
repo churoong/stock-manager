@@ -588,7 +588,7 @@ export function TradeForm({
             <option value="sell">매도</option>
           </select>
         </Field>
-        <Field label="체결일"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputCls} /></Field>
+        <Field label={stock?.country === "US" ? "체결일 (미국 현지 날짜)" : "체결일"}><input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputCls} /></Field>
         <Field label={`체결가 (${stock?.currency ?? "통화"})`}><input type="text" inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} className={inputCls} /></Field>
         <Field label="수량"><input type="text" inputMode="decimal" value={qty} onChange={(e) => setQty(e.target.value)} className={inputCls} /></Field>
         {stock && stock.currency !== "KRW" ? (

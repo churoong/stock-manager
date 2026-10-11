@@ -10,6 +10,7 @@ import {
   SNAPSHOT_AT,
   TRADE_INSERT,
   weekendNote,
+  usLocalDateNote,
   TRADE_INSERT_UNLESS_RECENT,
   TRADE_PRICE_BASIS,
   TRADES_LIST,
@@ -56,8 +57,8 @@ export async function POST(request: Request) {
   }
 
   try {
-    const stock = rowsToObjects<{ currency: string }>(
-      await execute("SELECT currency FROM stocks WHERE id = ?", [input.stock_id]),
+    const stock = rowsToObjects<{ currency: string; country: string }>(
+      await execute("SELECT currency, country FROM stocks WHERE id = ?", [input.stock_id]),
     )[0];
     if (!stock) return NextResponse.json({ errors: ["종목을 찾지 못했습니다"] }, { status: 400 });
 
@@ -168,7 +169,7 @@ export async function POST(request: Request) {
       }
     }
     const recalc = await requestRecalc();
-    return NextResponse.json({ ok: true, fx_rate: fxRate, fx_rate_source: fxSource, recalc, warnings: [가격검사.warning, fxWarning, fxDateWarning, weekendNote(input.trade_date)].filter((w): w is string => Boolean(w)) });
+    return NextResponse.json({ ok: true, fx_rate: fxRate, fx_rate_source: fxSource, recalc, warnings: [가격검사.warning, fxWarning, fxDateWarning, usLocalDateNote(stock.country, input.trade_date), weekendNote(input.trade_date)].filter((w): w is string => Boolean(w)) });
   } catch (error) {
     return NextResponse.json({ errors: [error instanceof Error ? error.message : "저장 실패"] }, { status: 500 });
   }
