@@ -76,12 +76,20 @@ jobs:
         # 그 전에는 백업이 아무 흔적도 안 남겨 **몇 주째 안 돌아도 알 길이 없었다**
         run: python scripts/backup_db.py --scope "$SCOPE" --out backup --record-run
 
+      - name: 암호화 (공개 저장소 아티팩트는 누구나 내려받는다, docs/infra.md 25.1125)
+        if: ${{ steps.gate.outputs.deferred != 'true' }}
+        env:
+          BACKUP_KEY: ${{ secrets.BACKUP_KEY }}
+        # 키가 없으면 멈춘다 — 평문을 올리지 않는다. 평문 .sql.gz 는 여기서 지운다
+        run: bash scripts/backup_crypt.sh encrypt backup
+
       - name: 아티팩트로 올리기
         if: ${{ steps.gate.outputs.deferred != 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: db-backup-${{ env.SCOPE }}
-          path: backup/*.sql.gz
+          # **암호화한 것만** 올린다 (25.1125). 평문이 남아 있어도 이 무늬에 걸리지 않는다
+          path: backup/*.sql.gz.enc
 
           # 필수는 오래, 전체는 짧게 둔다. 용량이 곧 비용이다
           retention-days: ${{ env.SCOPE == 'full' && 30 || 90 }}

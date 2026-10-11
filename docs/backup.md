@@ -75,6 +75,17 @@ Turso 냐 D1 이냐를 고른다(25.12). 목록과 사유는 `backup_db.설정_�
 > 다만 `migrations/*.sql` 은 예외다(스키마의 단일 정의처). 그러니 되살릴 때 푼 파일은
 > `migrations/` 안에 두지 않는다.
 
+### 2.1 아티팩트는 암호화해서 올린다 (2026-10-11, docs/infra.md 25.1125)
+
+**공개 저장소의 Actions 아티팩트는 GitHub 에 로그인한 누구나 내려받는다.** 10-07 공개 전환 뒤에도 백업이 평문으로 올라가
+매매·배당·설정이 열려 있었다. 이제 `scripts/backup_crypt.sh encrypt` 가 올리기 전에 `*.sql.gz` → `*.sql.gz.enc`
+(openssl AES-256-CBC, PBKDF2 20만 회)로 바꾸고 평문을 지운다. 올리는 무늬도 `*.sql.gz.enc` 뿐이다.
+- 키: 시크릿 **`BACKUP_KEY`** 가 있으면 그것, 없으면 `TURSO_AUTH_TOKEN` 에서 끌어낸 값. 둘 다 없으면 백업이 **실패한다**(평문을 올리지 않는다)
+- 되살리기·리허설 워크플로가 같은 키로 먼저 푼다. 옛 평문 백업이면 푸는 단계는 아무것도 하지 않는다
+- **Turso 토큰을 바꾸면 그 전 백업은 옛 토큰으로만 열린다.** 오래 둘 키는 `BACKUP_KEY` 다 — 사용자가 정한 긴 암호를
+  비밀번호 관리자에 두고 시크릿으로 넣으면 그 뒤 백업은 그것으로 잠긴다(handoff 사용자 결정)
+- 로컬에서 손으로 풀기: `BACKUP_KEY=… bash scripts/backup_crypt.sh decrypt 폴더/` (키가 토큰에서 끌어낸 것이면 `TURSO_AUTH_TOKEN=…`)
+
 ```bash
 # 손으로 받기 (로컬에 .env 가 있을 때)
 python scripts/backup_db.py --scope essential --out backup/
@@ -96,6 +107,7 @@ python scripts/backup_db.py --scope essential --out backup/
 ## 3. 어떻게 되살리나
 
 ```bash
+bash scripts/backup_crypt.sh decrypt .   # 2026-10-11 뒤 백업은 .sql.gz.enc — 먼저 푼다 (2.1)
 gunzip -c stock-manager-essential-2026-09-17.sql.gz | sqlite3 restored.db
 sqlite3 restored.db "SELECT COUNT(*) FROM trades;"
 ```

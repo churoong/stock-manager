@@ -31,6 +31,7 @@ data/cache/
 # 문서가 **로컬에서 손으로 받는 법**을 안내하므로(docs/backup.md 2장) 드문 길이 아니다.
 backup/
 *.sql.gz
+*.sql.gz.enc
 # 압축을 풀면 `.sql` 이라 위 줄에 안 걸린다. 그래서 `.sql` 도 막되 **스키마만 되살린다** —
 # `migrations/` 는 스키마의 단일 정의처라 무시하면 안 된다 (CLAUDE.md)
 *.sql

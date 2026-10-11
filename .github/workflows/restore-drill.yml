@@ -67,6 +67,11 @@ jobs:
           mkdir -p backup && unzip -o backup.zip -d backup
           ls -la backup
 
+      - name: 복호화 (25.1125 뒤 백업은 암호화돼 있다. 옛 평문 백업이면 아무것도 안 한다)
+        env:
+          BACKUP_KEY: ${{ secrets.BACKUP_KEY }}
+        run: bash scripts/backup_crypt.sh decrypt backup
+
       - name: 리허설
         run: |
           set -o pipefail

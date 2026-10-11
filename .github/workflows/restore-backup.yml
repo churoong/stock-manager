@@ -77,6 +77,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh run download "${{ inputs.run_id }}" -n "${{ inputs.artifact }}" -D backup
 
+      - name: 복호화 (25.1125 뒤 백업은 암호화돼 있다. 옛 평문 백업이면 아무것도 안 한다)
+        env:
+          BACKUP_KEY: ${{ secrets.BACKUP_KEY }}
+        run: bash scripts/backup_crypt.sh decrypt backup
+
       - name: 되살리기
         run: |
           FILE=$(ls backup/*.sql.gz | head -1)
