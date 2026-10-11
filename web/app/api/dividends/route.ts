@@ -3,6 +3,8 @@ import { execute, rowsToObjects } from "@/lib/db";
 import { issueTexts } from "@/lib/validationErrors";
 import {
   BUY_COST_UNTIL,
+  DIVIDEND_INSERT,
+  DIVIDEND_INSERT_UNLESS_RECENT,
   DIVIDENDS_LIST,
   DUPLICATE_WINDOW_MS,
   RECENT_SAME_DIVIDEND,
@@ -15,6 +17,8 @@ import {
   fxRangeWarning,
   isFutureDate,
   requestRecalc,
+  withholdingRate,
+  zeroWithholdingNote,
 } from "@/lib/portfolio";
 
 /**
@@ -101,18 +105,39 @@ export async function POST(request: Request) {
     // 자동 환율이 그날 것이 아니면 어느 날 것인지 (25.591)
     const fxDateWarning = fxDateNote(fxSource, fx, input.pay_date);
 
+    // 세율이 있는데 세금 0 이면 말한다 (25.1127). 설정을 못 읽으면 말하지 않는다(저장은 막지 않는다)
+    let 세금0: string | null = null;
+    if (input.tax === 0 && input.gross_amount > 0) {
+      try {
+        const raw = (await execute("SELECT value FROM settings WHERE key = 'taxes'")).rows[0]?.[0];
+        세금0 = zeroWithholdingNote(input.tax, input.gross_amount, withholdingRate(stock.currency, raw ? JSON.parse(String(raw)) : null), stock.currency);
+      } catch {
+        세금0 = null;
+      }
+    }
+
     const now = new Date().toISOString();
-    await execute(
-      `INSERT INTO dividend_receipts (stock_id, pay_date, amount_per_share, quantity, gross_amount, tax, net_amount,
-         currency, fx_rate, fx_rate_source, memo, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        input.stock_id, input.pay_date, input.amount_per_share ?? null, input.quantity ?? null, input.gross_amount,
-        input.tax, input.gross_amount - input.tax, stock.currency, fxRate, fxSource, input.memo ?? null, now, now,
-      ],
-    );
+    const 값들 = [
+      input.stock_id, input.pay_date, input.amount_per_share ?? null, input.quantity ?? null, input.gross_amount,
+      input.tax, input.gross_amount - input.tax, stock.currency, fxRate, fxSource, input.memo ?? null, now, now,
+    ];
+    if (input.confirm_duplicate) {
+      await execute(DIVIDEND_INSERT, 값들);
+    } else {
+      // 위 확인과 이 쓰기 사이에 같은 요청이 먼저 쓰였으면 넣지 않는다 (25.1127, 매매 25.1112 와 같은 모양)
+      const 이후 = new Date(Date.now() - DUPLICATE_WINDOW_MS).toISOString();
+      const rs = await execute(DIVIDEND_INSERT_UNLESS_RECENT, [
+        ...값들, input.stock_id, input.pay_date, input.gross_amount, input.tax, 이후,
+      ]);
+      if (rs.affectedRows === 0) {
+        return NextResponse.json(
+          { errors: ["같은 배당이 방금 저장됐습니다 — 응답이 늦어 다시 누른 것이면 목록을 확인해 주세요"], duplicate: true, confirm_needed: "duplicate" },
+          { status: 409 },
+        );
+      }
+    }
     const recalc = await requestRecalc();
-    return NextResponse.json({ ok: true, fx_rate: fxRate, fx_rate_source: fxSource, recalc, warnings: [fxWarning, fxDateWarning, 크기.warning].filter((w): w is string => Boolean(w)) });
+    return NextResponse.json({ ok: true, fx_rate: fxRate, fx_rate_source: fxSource, recalc, warnings: [fxWarning, fxDateWarning, 크기.warning, 세금0].filter((w): w is string => Boolean(w)) });
   } catch (error) {
     return NextResponse.json({ errors: [error instanceof Error ? error.message : "저장 실패"] }, { status: 500 });
   }

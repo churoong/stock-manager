@@ -139,6 +139,21 @@ export const RECENT_SAME_DIVIDEND = `SELECT created_at FROM dividend_receipts
 WHERE stock_id = ? AND pay_date = ? AND gross_amount = ? AND tax = ? AND created_at >= ?
 ORDER BY created_at DESC LIMIT 1`;
 
+export const DIVIDEND_INSERT = `INSERT INTO dividend_receipts (stock_id, pay_date, amount_per_share, quantity, gross_amount, tax, net_amount,
+  currency, fx_rate, fx_rate_source, memo, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+
+/**
+ * **같은 배당이 방금 없을 때만 넣는다 — 한 문장으로** (docs/infra.md 25.1127, 배당 감사 재현). 매매(25.1112)와 같은 구멍 —
+ * `RECENT_SAME_DIVIDEND` 확인은 조회만 하고 INSERT 는 조회 두세 번 뒤라, 망이 끊겨 다시 누른 두 요청이 동시에 오면 둘 다 저장돼
+ * 배당 합계·시간가중수익률에 두 번 들어갔다. 인자: `DIVIDEND_INSERT` 의 13개 + [종목, 지급일, 세전, 세금, 이후]
+ */
+export const DIVIDEND_INSERT_UNLESS_RECENT = `INSERT INTO dividend_receipts (stock_id, pay_date, amount_per_share, quantity, gross_amount,
+  tax, net_amount, currency, fx_rate, fx_rate_source, memo, created_at, updated_at)
+SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+WHERE NOT EXISTS (SELECT 1 FROM dividend_receipts WHERE stock_id = ? AND pay_date = ? AND gross_amount = ? AND tax = ?
+  AND created_at >= ?)`;
+
 /**
  * 매매 폼이 보내는 본문 — **화면에 보이는 칸만 싣는다** (docs/infra.md 25.265).
  *
@@ -378,8 +393,10 @@ export function stockSearchArgs(q: string): string[] {
 }
 
 /** 배당 지급일까지 그 종목에 넣은 매수 원금(종목 통화, 수수료 제외). 배당 크기 확인용 (docs/infra.md 25.404) */
+// 지급일 **전** 매수만 (25.1127) — 배치는 지급일 당일 매수를 "배당을 벌지 못한 몫" 으로 뺀다(25.932). 예전 `<=` 는 당일에만 산 종목의
+// 배당을 "원금의 24%" 로 경고했다(비교할 원금이 없어야 맞다)
 export const BUY_COST_UNTIL = `SELECT COALESCE(SUM(price * quantity), 0) AS cost
-FROM trades WHERE stock_id = ? AND side = 'buy' AND trade_date <= ?`;
+FROM trades WHERE stock_id = ? AND side = 'buy' AND trade_date < ?`;
 
 /**
  * 배당 세전 금액이 **넣은 원금에 비해 말이 되는가** (docs/infra.md 25.404).
@@ -915,6 +932,17 @@ export function withholdingRate(
   const rate = currency === "KRW" ? taxes.kr_dividend_pct : taxes.us_dividend_pct;
   // 배치 범위(0~50%, `settings_range`)를 넘으면 모름으로 본다 — 백업 복원으로 들어온 60% 를 폼이 그대로 채웠다 (25.765, 설정 감사)
   return typeof rate === "number" && Number.isFinite(rate) && rate >= 0 && rate <= DIVIDEND_TAX_MAX_PCT ? rate : null;
+}
+
+/**
+ * 설정에 원천징수 세율이 있는데 세금 0 으로 저장했으면 말한다 (docs/infra.md 25.1127, 배당 감사 재현). 폼은 세금 칸을 한 번
+ * 고치면 다시 채우지 않아, 칸을 비우면 0 이 조용히 저장돼 세후 배당이 세율만큼 부풀었다(25.127 이 막으려던 모양). 비과세 계좌일
+ * 수 있어 막지 않는다 — 사용자 입력 그대로 저장하고 알린다
+ */
+export function zeroWithholdingNote(tax: number, gross: number, rate: number | null, currency: string): string | null {
+  if (tax !== 0 || !(gross > 0) || rate === null || !(rate > 0)) return null;
+  const 추정 = estimateWithholding(gross, rate, currency);
+  return `세금 0 으로 저장했습니다 — 설정 원천징수 ${rate}% 면 약 ${추정 ?? "-"} ${currency} 입니다. 비과세 계좌가 아니면 지우고 세금을 넣어 다시 저장하세요`;
 }
 
 /**

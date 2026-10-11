@@ -27,7 +27,9 @@ describe("배당 중복 저장", () => {
     expect(dividendBody({ stockId: 1, currency: "KRW", date: "2026-04-15", gross: 1, tax: 0, fx: null, confirmed: new Set(["duplicate"]) }).confirm_duplicate).toBe(true);
     const 경로 = readFileSync("app/api/dividends/route.ts", "utf-8");
     expect(경로).toContain("if (!input.confirm_duplicate) {");
-    expect(경로.indexOf("RECENT_SAME_DIVIDEND, [")).toBeLessThan(경로.indexOf("INSERT INTO dividend_receipts"));
+    // 쓰기는 25.1127 부터 상수(`DIVIDEND_INSERT_UNLESS_RECENT`)로 — 확인이 그보다 앞서야 한다
+    expect(경로.indexOf("RECENT_SAME_DIVIDEND, [")).toBeGreaterThan(-1);
+    expect(경로.indexOf("RECENT_SAME_DIVIDEND, [")).toBeLessThan(경로.indexOf("execute(DIVIDEND_INSERT_UNLESS_RECENT"));
     expect(readFileSync("components/PortfolioView.tsx", "utf-8")).toContain("return submit(new Set([...confirmed, 물음]));");
   });
 });
