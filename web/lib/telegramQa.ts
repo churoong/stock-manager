@@ -232,3 +232,14 @@ async function alerts(exec: Exec): Promise<string> {
   if (rs.length === 0) return "장중 알림 기록이 없습니다";
   return [`장중 알림 (${rs[0].trade_date}, 최근 ${rs.length}건)`, ...rs.map((r) => `· ${r.name}: ${r.message}`)].join("\n");
 }
+
+/**
+ * 웹훅을 걸 출처 — **운영 대표 주소**가 있으면 그것 (docs/infra.md 25.1128, 텔레그램 감사 재현). 예전에는 요청이 들어온 출처라
+ * 대시보드 "Visit" 로 연 배포 고유 주소(`프로젝트-해시-팀.vercel.app`, 이것도 VERCEL_ENV=production)에서 누르면 웹훅이 **그 배포 하나에**
+ * 묶여, 뒤 배포의 수정이 반영되지 않고 배포 보호가 켜져 있으면 봇이 말없이 답하지 않았다(그래도 "켰습니다"). Vercel 이 주는
+ * `VERCEL_PROJECT_PRODUCTION_URL`(호스트만, 시스템 환경변수 — 노출 설정이 꺼져 있으면 비어 `[확인필요]`)이 없으면 예전처럼 요청 출처
+ */
+export function webhookOrigin(requestUrl: string, productionHost: string | undefined): string {
+  const host = productionHost?.trim().replace(/^https?:\/\//, "").replace(/\/+$/, "");
+  return host ? `https://${host}` : new URL(requestUrl).origin;
+}

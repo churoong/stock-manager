@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
+import { webhookOrigin } from "@/lib/telegramQa";
 
 /**
  * 텔레그램 질의응답 켜기·끄기 (docs/telegram-qa.md, 25.1004). 설정 화면의 단추가 부른다(로그인 뒤).
  *
  * 켜기 = 텔레그램에 `setWebhook`(이 앱의 `/api/telegram/webhook`, 비밀값 `TELEGRAM_WEBHOOK_SECRET`, 말만 받기).
- * 끄기 = `deleteWebhook`. 주소는 지금 요청이 들어온 출처로 만든다 — 저장소·문서에 웹앱 주소를 적지 않는다.
+ * 끄기 = `deleteWebhook`. 주소는 운영 대표 주소(`VERCEL_PROJECT_PRODUCTION_URL`), 없으면 지금 요청이 들어온 출처로 만든다 —
+ * 저장소·문서에 웹앱 주소를 적지 않는다.
  * 웹훅이 걸려 있으면 텔레그램 `getUpdates` 는 쓸 수 없다(테스트 발송의 "대화방 번호 후보" 안내가 비게 된다).
  */
 export async function POST(request: Request) {
@@ -24,7 +26,7 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
-  const url = `${new URL(request.url).origin}/api/telegram/webhook`;
+  const url = `${webhookOrigin(request.url, process.env.VERCEL_PROJECT_PRODUCTION_URL)}/api/telegram/webhook`;
   const [method, payload] = on
     ? ["setWebhook", { url, secret_token: secret, allowed_updates: ["message"], drop_pending_updates: true }]
     : ["deleteWebhook", { drop_pending_updates: true }];
