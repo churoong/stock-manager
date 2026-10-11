@@ -516,15 +516,25 @@ def us_exclusion_statements(symbols: list, now: str) -> list[tuple[str, list[Any
 MARKET_CAP_MAX_AGE_DAYS = 14
 
 
-def stale_market_cap_warning(rows: list[dict], as_of: date) -> str | None:
+def stale_market_cap_warning(
+    rows: list[dict], as_of: date, verdicts: list[uni.Verdict] | None = None
+) -> str | None:
     """묵은 시총으로 판정한 종목 수를 말한다 (docs/infra.md 25.362).
 
     `stocks.market_cap_date` 는 쓰기만 하고 아무도 읽지 않았다. 이번 주 시총 조회가 한 시장만 실패해도
     경고 한 줄만 남고 **지난주 값으로 편입·제외가 정해졌다**(950억→1,100억이 된 종목이 여전히 "시총미달").
     판정을 바꾸지는 않는다 — 묵었다고 빼면 수집이 멈춘 주에 유니버스가 통째로 빈다. 대신 실행 기록에 남긴다.
+
+    `verdicts`(rows 와 같은 순서)를 주면 **시총이 판정을 가른 종목만** 센다 (25.1122) — 편입이거나 '시총미달'.
+    관리종목·스팩·거래대금미달처럼 시총과 상관없이 빠진 종목의 묵은 시총까지 세어(미국은 시총을 거래대금 후보에게만
+    채운다, `us_shares`) 경고가 매주 켜져 있었다 — 늘 켜진 경고는 진짜 수집 중단을 가린다.
     """
     묵은: list[str] = []
-    for row in rows:
+    for i, row in enumerate(rows):
+        if verdicts is not None and i < len(verdicts):
+            v = verdicts[i]
+            if not v.included and v.reason != uni.REASON_SMALL_CAP:
+                continue
         when = row.get("market_cap_date")
         if row.get("market_cap") is None or not when:
             continue
@@ -661,7 +671,7 @@ def build_snapshot(
         빠진판정.append(uni.Verdict(included=False, reason=사유, listed_days=None))
         rows_data.append((snapshot_date, int(r["id"]), 0, 사유, None, None, None, str(r["currency"]), now))
 
-    묵은시총 = stale_market_cap_warning(rows, as_of)
+    묵은시총 = stale_market_cap_warning(rows, as_of, verdicts)
     if 묵은시총:
         warnings.append(묵은시총)
 

@@ -60,4 +60,23 @@ def test_스냅샷이_묵은_시총을_본다() -> None:
 
     src = (Path(__file__).resolve().parents[1] / "batch" / "jobs" / "universe.py").read_text(encoding="utf-8")
     assert "market_cap, market_cap_date, currency" in src
-    assert "stale_market_cap_warning(rows, as_of)" in src
+    assert "stale_market_cap_warning(rows, as_of, verdicts)" in src
+
+
+def test_묵은_시총은_판정을_가른_종목만_센다() -> None:
+    """시총과 상관없이 빠진 종목(거래대금미달·관리종목)까지 세어 경고가 늘 켜져 있었다 (docs/infra.md 25.1122)."""
+    from datetime import date
+
+    from batch.services import universe as uni
+
+    묵은 = {"market_cap": 1e11, "market_cap_date": "2026-09-01"}
+    rows = [{"ticker": t, **묵은} for t in ("IN", "SMALL", "TURN", "SUP")]
+    판정 = [
+        uni.Verdict(included=True, reason=None, listed_days=999),
+        uni.Verdict(included=False, reason=uni.REASON_SMALL_CAP, listed_days=999),
+        uni.Verdict(included=False, reason=uni.REASON_LOW_TURNOVER, listed_days=999),
+        uni.Verdict(included=False, reason=uni.REASON_SUPERVISED, listed_days=999),
+    ]
+    말 = job.stale_market_cap_warning(rows, date(2026, 9, 28), 판정)
+    assert 말 is not None and "2종목" in 말 and "TURN" not in 말 and "SUP" not in 말
+    assert job.stale_market_cap_warning(rows[2:], date(2026, 9, 28), 판정[2:]) is None
