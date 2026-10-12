@@ -363,6 +363,12 @@ def fetch_kr_kis(client: TursoClient, targets: list[str], out: dict[str, Fetched
     return qc.calls + int(issued)
 
 
+#: KIS 구성종목(상위 30)의 비중 합이 이 % 이상이면 **잘리지 않은 전체**로 본다 (25.1199).
+#: 현금·선물 줄이 빠져 100 에 조금 못 미칠 수 있어 여유를 둔다.
+#: 잘린 코스피200 은 약 85%(25.990 실측) `[확인필요: 업종 ETF 실측]`
+KIS_COMPLETE_PCT = 95.0
+
+
 def align_kr_sources(kr_docs: dict[str, Fetched]) -> tuple[dict[str, Fetched], int | None]:
     """국내 보유가 KODEX 전 종목과 KIS 상위 N 으로 섞였으면 **KODEX 쪽도 비중 상위 N 만** 남긴다 (25.1123).
 
@@ -372,7 +378,12 @@ def align_kr_sources(kr_docs: dict[str, Fetched]) -> tuple[dict[str, Fetched], i
     비율로 늘리는(T ÷ 합) 방법은 꼬리의 상위 종목 몫이 머리와 같다고 가정해 쓰지 않는다.
     섞이지 않았으면(전부 KODEX 이거나 전부 KIS) 그대로 둔다. 계좌 노출(25.1002)은 자르지 않은 보유를 쓴다.
     반환: (순위에 쓸 보유, 맞춘 N 또는 None)."""
-    부분 = [d for d in kr_docs.values() if d.source == kis.SOURCE]
+    # **잘린 KIS 목록만** 잣대로 쓴다 (25.1199, ETF 감사 재현).
+    # 종목이 10개뿐인 업종 ETF 는 KIS 에서도 전부(합 약 100%)가 오는데, 예전에는 그 길이(10)로
+    # KODEX 쪽을 모두 잘라 KODEX 200 이 상위 10(합 약 50%)만 남아 덮은 비중 하한(70%)에 걸렸다
+    부분 = [
+        d for d in kr_docs.values() if d.source == kis.SOURCE and sum(w for _c, w in d.holdings) < KIS_COMPLETE_PCT
+    ]
     if not 부분 or len(부분) == len(kr_docs):
         return kr_docs, None
     n = min(len(d.holdings) for d in 부분)

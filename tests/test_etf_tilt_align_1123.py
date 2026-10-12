@@ -29,6 +29,18 @@ def test_섞이면_KODEX_도_비중_상위_N_만_본다() -> None:
     assert round(t.top_pct, 6) == 27.0
 
 
+def test_종목이_적어_다_온_KIS_목록은_자르는_잣대가_아니다() -> None:
+    """10종목 업종 ETF(KIS 로 전부, 합 100%) 하나 때문에 KODEX 200 이 상위 10 으로 잘려 덮은 비중 하한에 걸렸다 (25.1199)."""
+    kodex200 = _doc(200, kodex_pdf.SOURCE, 0.5)
+    업종 = _doc(10, kis.SOURCE, 10.0)
+    out, n = job.align_kr_sources({"A": kodex200, "S": 업종})
+    assert n is None and out["A"] is kodex200
+    # 잘린 KIS(상위 30, 합 84%)가 함께 있으면 그 길이(30)로 맞춘다 — 다 온 10종목이 잣대가 되지 않는다
+    잘린 = _doc(30, kis.SOURCE, 2.8)
+    out2, n2 = job.align_kr_sources({"A": kodex200, "S": 업종, "B": 잘린})
+    assert n2 == 30 and len(out2["A"].holdings) == 30 and out2["S"] is 업종
+
+
 def test_섞이지_않으면_그대로() -> None:
     a, b = _doc(200, kodex_pdf.SOURCE, 0.5), _doc(30, kis.SOURCE, 2.8)
     assert job.align_kr_sources({"A": a}) == ({"A": a}, None)
