@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import math
 import sys
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
@@ -101,7 +102,15 @@ def recent_action(client: TursoClient, stock_id: int, market: str) -> bool:
 
 
 def action_scale(client: TursoClient, stock_id: int, market: str) -> float | None:
-    """보유 목표·손절을 댈 때 평균단가에 곱할 값. **None 이면 대지 않는다**(기업행위 경계, 25.533).
+    """`action_factors` 의 계수 곱 — None 이면 None, 없으면 1.0."""
+    계수들 = action_factors(client, stock_id, market)
+    if 계수들 is None:
+        return None
+    return math.prod(f for _날, f in 계수들)
+
+
+def action_factors(client: TursoClient, stock_id: int, market: str) -> list[tuple[str, float]] | None:
+    """보유 목표·손절을 댈 때 평균단가에 곱할 (날, 계수) 목록. **None 이면 대지 않는다**(기업행위 경계, 25.533).
 
     1.0 = 최근 기업행위 없음. 그 밖의 값 = 20거래일 안의 계수가 모두 **유상증자 권리락**으로 확인된 경우의 계수 곱
     (25.1139). 권리락 날 시세는 신주인수권 가치만큼 기계적으로 떨어지는데(할인 큰 주주배정이면 수십 %), 평균단가는 그 전
@@ -114,9 +123,9 @@ def action_scale(client: TursoClient, stock_id: int, market: str) -> float | Non
         # 분할 감지 기록 (`adjust_drift.SPLIT_LOG_KEY`, 25.535) — 대기열 표시는 배당 감지와 뒤엉켜 새 분할을 놓쳤다
         감지 = (db.get_setting(client, "us_split_detections", {}) or {}).get(str(stock_id))
         if not 감지:
-            return 1.0
+            return []
         경계선 = (datetime.now(UTC) - timedelta(days=ACTION_GUARD_ROWS * 7 // 5)).isoformat()
-        return None if str(감지) >= 경계선 else 1.0
+        return None if str(감지) >= 경계선 else []
     rows = client.execute(
         "SELECT close, change_pct, date FROM prices WHERE stock_id = ? AND close IS NOT NULL AND close > 0"
         " ORDER BY date DESC LIMIT ?",
@@ -128,16 +137,13 @@ def action_scale(client: TursoClient, stock_id: int, market: str) -> float | Non
         if adj.is_action(f):
             계수들.append((str(day)[:10], f))
     if not 계수들:
-        return 1.0
+        return []
     # **유상증자 권리락으로 확인되면 막지 않는다** (docs/factors.md 12.20, docs/infra.md 25.1139 — 18회차 검증 B).
     # 계수만으로는 유상증자 권리락과 작은 무상증자를 가르지 못해, 유상증자 뒤 20거래일 동안 보유 종목의 목표·손절
     # 감시가 꺼지고 매도 플래그에 "수량 확인" 이 붙었다. 권리락이면 수량이 그대로라 손절선이 맞다(계수만 맞추면)
     if not all(_유상_권리락(client, stock_id, 날) for 날, _f in 계수들):
         return None
-    배 = 1.0
-    for f in (f for _날, f in 계수들):
-        배 *= f
-    return 배
+    return 계수들
 
 
 def rights_only(events: list[tuple[str, str]], action_day: str, next_day: str) -> bool:
@@ -290,7 +296,8 @@ def build_targets(client: TursoClient, market: str, now: str) -> list[tuple]:
         t["reasons"].append("holding")
         # 기업행위 표시는 ETF 보다 **먼저** 본다 (25.925, 감사). 웹은 이 표시로 관심 목표가를 거르는데, ETF 를 먼저
         # 건너뛰어 보유+관심 ETF 가 분할 뒤 20거래일 동안 분할 전 관심 목표가로 "도달" 알림을 받을 수 있었다
-        배율 = action_scale(client, int(r["stock_id"]), market)
+        계수들 = action_factors(client, int(r["stock_id"]), market)
+        배율 = None if 계수들 is None else math.prod(f for _날, f in 계수들)
         경계 = 배율 is None
         if 경계:
             t["reasons"].append("action_guard")
@@ -314,7 +321,13 @@ def build_targets(client: TursoClient, market: str, now: str) -> list[tuple]:
         평균 = float(r["avg_price"]) * (배율 or 1.0)
         t["target_price"], t["stop_price"] = holding_levels(평균, r["horizon"], targets_setting)
         # 분할 매수 계획의 다음 차수 (docs/intraday.md 2절 tranche, 25.999) — 기업행위·ETF 는 위에서 이미 건너뛰었다
-        t["tranche"] = next_tranche(client, int(r["stock_id"]), cal.local_today(market))
+        가격, 차수, 계획일 = next_tranche(client, int(r["stock_id"]), cal.local_today(market))
+        if 가격 is not None and 계획일 and 계수들:
+            # **계획 뒤 권리락이면 다음 차수 가격도 같은 계수로 옮긴다** (25.1159, 감사 재현). 손절·목표(25.1140)·관심가
+            # (25.1142)만 맞추고 이것이 빠져, 실질 1차 가격과 같은 시세에 "2차 가격 95,000원 도달" 이 나갔다.
+            # 계획일 **뒤** 계수만 — 그날이나 그 뒤에 낸 계획은 이미 권리락 뒤 시세로 낸 것이다
+            가격 *= math.prod(f for 날, f in 계수들 if 날 > 계획일)
+        t["tranche"] = (가격, 차수, 계획일)
 
     # **신호를 마지막으로 계산한 날** — 아침 리포트와 같은 잣대 (docs/infra.md 25.407, 25.337).
     # 예전에는 `signals` 의 MAX 였다. 오늘 계산했는데 한 건도 안 걸리면 MAX 가 어제로 남아 **어제 신호를
