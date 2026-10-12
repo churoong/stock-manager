@@ -219,7 +219,8 @@ def run(limit: int | None = None, use_yahoo: bool = True) -> int:
                 rows.extend(rows_for(stock_id, fy_end, today, now))
             stored = store(client, rows, today.isoformat(), yahoo_ids=답한, estimate_ids=대상번호)
         except Exception as exc:
-            db.finish_batch_run(client, run_id, status="failed", error_text=str(exc))
+            if not db.quota_reason(exc):  # 한도는 `guard()` 가 skipped 로 닫는다 (docs/infra.md 25.1223)
+                db.finish_batch_run(client, run_id, status="failed", error_text=str(exc))
             raise
 
         step = {

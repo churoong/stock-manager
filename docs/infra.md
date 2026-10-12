@@ -2273,6 +2273,7 @@ SQL read operations are forbidden (reads are blocked, ...)
 | 25.1223 | 유니버스·공시·주간 요약이 DB 한도를 실패로 닫음 |
 | 25.1224 | KIS 수집 실패가 DART 만 쓰는 공시 반응까지 멈춤 |
 | 25.1225 | 주간 요약: 보낸 뒤 쓰기 실패가 실행을 실패로 만들어 다시 보냄 |
+| 25.1226 | 한도를 먼저 실패로 닫고 올리는 자리 셋 더 + 그물 |
 
 ### 25.1 왜 D1 인가
 
@@ -29271,3 +29272,12 @@ KIS 와 무관한데 그날 돌지 않았고, 기록(`batch_runs`)도 없었다.
 **고침** — 보낸 뒤의 진척 쓰기는 감싸 경고로 남기고 실행을 `partial` 로 닫는다. `ALREADY_SENT_SQL` 은 `success`·`partial` 둘 다 "보냈다" 로 본다.
 진척을 못 적으면 다음 주 사후 분석이 같은 손실을 한 번 더 말할 뿐이다.
 **시험** — `tests/test_weekly_summary_after_send_1225.py`: 쓰기 실패 → partial, 두 번째 실행은 보내지 않음. **되돌리기 확인** — 되돌리면 깨진다.
+
+### 25.1226 한도를 먼저 실패로 닫고 올리는 자리 셋 더 + 그물
+
+**무엇** — 25.1223 과 같은 꼴(한도 오류를 먼저 `failed` 로 닫고 다시 올림 → `guard()` 는 열린 기록이 없어 "건너뜀"·0, DB 는 실패)이 감사가 짚은 셋 말고 셋 더 있었다:
+`earnings_calendar`·`index_prices`(일일 배치 하위 작업)·`signal_outcomes`. 같은 꼴을 스스로 훑어 찾았다.
+
+**고침** — 같은 처방: `db.quota_reason(exc)` 면 닫지 않고 올린다.
+**그물** — `test_quota_skip_1223.py::test_한도를_먼저_실패로_닫고_올리는_자리가_없다`: `batch/jobs/*.py` 에서 `except Exception as exc:` 바로 아래 `failed` 닫기 + `raise` 꼴을 찾아 건다.
+**되돌리기 확인** — `earnings_calendar.py` 하나만 되돌려도 그물이 깨진다.

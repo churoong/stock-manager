@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import date
 from pathlib import Path
 
@@ -60,3 +61,13 @@ def test_미국_공시_한도는_실패로_닫지_않는다(monkeypatch: pytest.
 def test_나머지도_한도면_실패로_닫지_않는다(이름: str) -> None:
     글 = (Path(__file__).resolve().parents[1] / "batch" / "jobs" / f"{이름}.py").read_text(encoding="utf-8")
     assert "if not db.quota_reason(exc):" in 글
+
+
+def test_한도를_먼저_실패로_닫고_올리는_자리가_없다() -> None:
+    """`failed` 로 닫은 뒤 올리면 `guard()` 는 열린 기록이 없어 건너뜀·0 으로 끝나 DB 와 워크플로가 어긋난다."""
+    꼴 = re.compile(
+        r"except Exception as exc:\n\s+db\.finish_batch_run\(client, \w+, status=\"failed\", error_text=str\(exc\)\)\n\s+raise\n"
+    )
+    걸림 = [p.name for p in sorted((Path(__file__).resolve().parents[1] / "batch" / "jobs").glob("*.py"))
+            if 꼴.search(p.read_text(encoding="utf-8"))]  # fmt: skip
+    assert 걸림 == []

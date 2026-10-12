@@ -124,7 +124,8 @@ def main() -> int:
         try:
             count, warnings = collect(client, args.lookback)
         except Exception as exc:
-            db.finish_batch_run(client, run_id, status="failed", error_text=str(exc))
+            if not db.quota_reason(exc):  # 한도는 `guard()` 가 skipped 로 닫는다 (docs/infra.md 25.1223)
+                db.finish_batch_run(client, run_id, status="failed", error_text=str(exc))
             raise
         status = "failed" if not count else ("partial" if warnings else "success")
         db.finish_batch_run(client, run_id, status=status, step_log={"rows": count, "lookback": args.lookback,

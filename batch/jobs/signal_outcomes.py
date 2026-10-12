@@ -296,7 +296,8 @@ def run(market: str) -> int:
             # 점수 보정표 (docs/signals.md 10.1, 25.949) — 굳은 성적까지 포함해 점수와 수익을 짝짓는다
             보정, 보정_경고 = calibrations(client, country, results + load_frozen(client, country, since_of(today)))
         except Exception as exc:
-            db.finish_batch_run(client, run_id, status="failed", error_text=str(exc))
+            if not db.quota_reason(exc):  # 한도는 `guard()` 가 skipped 로 닫는다 (docs/infra.md 25.1223)
+                db.finish_batch_run(client, run_id, status="failed", error_text=str(exc))
             raise
         db.finish_batch_run(
             client, run_id, status="success",
