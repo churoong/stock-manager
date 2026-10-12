@@ -41,3 +41,9 @@ def test_워크플로는_손으로만_돌고_결과는_비공개로() -> None:
     src = (Path(__file__).resolve().parent.parent / ".github" / "workflows" / "probe-dart-cb.yml").read_text(encoding="utf-8")
     assert "workflow_dispatch" in src and "schedule" not in src
     assert "ops_tee.py" in src and "publish_output.py" in src and "probe_dart_cb.py" in src
+    # 적는 파일과 올리는 파일이 같아야 한다 — 첫 실행은 옛 이름을 올리려다 "내보낼 것이 없다" 로 끝났다(10-12)
+    import re
+
+    적는 = re.search(r"ops_tee\.py (\S+)", src)
+    올리는 = re.search(r"--file (\S+)", src)
+    assert 적는 and 올리는 and 적는.group(1) == 올리는.group(1)

@@ -48,4 +48,4 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OPS_REPO: ${{ secrets.OPS_REPO }}
           OPS_TOKEN: ${{ secrets.OPS_TOKEN }}
-        run: python scripts/publish_output.py --title "운영 출력 (클라우드 세션용)" --file audit-probe.txt --note "DART 전환사채 필드 탐침"
+        run: python scripts/publish_output.py --title "운영 출력 (클라우드 세션용)" --file cb-probe.txt --note "DART 전환사채 필드 탐침"
