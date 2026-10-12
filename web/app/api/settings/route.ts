@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { PORTFOLIO_SETTING_KEYS, requestRecalc } from "@/lib/portfolio";
 import { execute, rowsToObjects } from "@/lib/db";
-import { changedSettingKeys, checkWeightConsistency, mergeStoredSettings, storedSettingNotices, validateSettings } from "@/lib/settings";
+import {
+  changedSettingKeys, checkWeightConsistency, mergeStoredSettings, normalizingRewrites, storedSettingNotices, validateSettings,
+} from "@/lib/settings";
 
 /**
  * 설정 읽기와 쓰기.
@@ -74,6 +76,14 @@ export async function PUT(request: Request) {
         );
       }
     }
+    // 정규화가 필요한 다른 칸도 함께 정리해 쓴다 (25.1207) — 안내("저장하면 기본값으로 바뀝니다")가 참이 되게
+    const 정리칸 = 행 && 전값 && partial ? normalizingRewrites(행, 전값, 쓸칸) : [];
+    const 정리 = 정리칸.map((key) => ({
+      sql:
+        "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)" +
+        " ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+      args: [key as string, JSON.stringify((전값 as Record<string, unknown>)[key as string]), now] as Array<string | number | null>,
+    }));
     const statements = 쓸칸.map((key) => ({
       sql:
         "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)" +
@@ -90,7 +100,7 @@ export async function PUT(request: Request) {
     const 겹침 = partial && 전값 && 불러온
       ? 쓸칸.filter((k) => 저장됨.has(k as string) && JSON.stringify(전값[k]) !== JSON.stringify(불러온[k]))
       : [];
-    if (statements.length) await batch(statements);
+    if (statements.length || 정리.length) await batch([...statements, ...정리]);
 
     // **포트폴리오에 쓰는 설정이 바뀌면 다시 계산을 깨운다** (docs/infra.md 25.629, 감사). 예전에는 매매 저장만 깨워,
     // 수수료·세율·목표/손절·섹터 상한·총액·무위험수익률을 바꿔도 다음 일일 배치 전까지 화면이 옛 값으로 계산된 결과를
@@ -111,6 +121,7 @@ export async function PUT(request: Request) {
       ],
       saved_at: now,
       saved_keys: 쓸칸,
+      normalized_keys: 정리칸,
       recalc,
       targets_changed,
     });

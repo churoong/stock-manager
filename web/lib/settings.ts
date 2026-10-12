@@ -361,6 +361,30 @@ export function unreadableSettingNotices(rows: Array<{ key: string; value: strin
 export const HIDDEN_SETTING_KEYS: Array<keyof Settings> = ["base_currency", "backfill_years", "sentiment_target_top_n"];
 
 /** 화면에 칸이 없는데 저장값이 규칙을 어겨 기본값으로 둔 키. 사용자에게 알린다 — 조용히 삼키지 않는다 */
+/**
+ * 바뀐 칸만 쓰는 저장(25.1115)에서 **함께 정리해 쓸 칸** (docs/infra.md 25.1207, 설정 감사). 저장된 행이 정규화한 값(`mergeStoredSettings`)과
+ * 다르고(규칙을 어겨 기본값으로 읽은 숨은 칸·옛 모양·읽지 못한 잎) 정규화한 값이 규칙에 맞으면, 그 값으로 다시 쓴다 — "저장하면 기본값으로
+ * 바뀝니다" 안내가 25.1115 뒤로 거짓이 되어 사라지지 않았다. 쓰는 값은 **지금 DB 를 정규화한 것**이라 다른 탭이 고친 값을 덮지 않는다
+ */
+export function normalizingRewrites(
+  rows: Array<{ key: string; value: string }>, merged: Settings, written: ReadonlyArray<keyof Settings>,
+): Array<keyof Settings> {
+  const out: Array<keyof Settings> = [];
+  for (const row of rows) {
+    const key = row.key as keyof Settings;
+    if (!SETTINGS_KEYS.includes(key) || written.includes(key)) continue;
+    if (!settingsSchema.shape[key as keyof typeof settingsSchema.shape].safeParse(merged[key]).success) continue;
+    let 저장값: unknown;
+    try {
+      저장값 = JSON.parse(row.value);
+    } catch {
+      저장값 = undefined;
+    }
+    if (JSON.stringify(저장값) !== JSON.stringify(merged[key])) out.push(key);
+  }
+  return out;
+}
+
 export function hiddenSettingNotices(rows: Array<{ key: string; value: string }>): string[] {
   const out: string[] = [];
   for (const row of rows) {

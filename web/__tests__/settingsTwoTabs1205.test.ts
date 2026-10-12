@@ -67,4 +67,17 @@ describe("설정 저장 — 쓰고 난 DB 의 모습으로 본다 (25.1205)", ()
     expect(r.body.targets_changed).toBe(true);
     expect(깨움).toHaveBeenCalledTimes(1);
   });
+
+  it("규칙을 어긴 숨은 칸은 다른 칸을 저장할 때 기본값으로 정리해 쓴다 (25.1207)", async () => {
+    const { DEFAULT_SETTINGS, hiddenSettingNotices } = await import("@/lib/settings");
+    저장된.set("sentiment_target_top_n", "1000");
+    저장된.set("max_weight_per_stock", "10"); // 규칙에 맞는 행은 건드리지 않는다
+    const base = { ...DEFAULT_SETTINGS };
+    const r = await 저장({ ...base, min_order_amount: (base.min_order_amount ?? 0) + 1000, _base: base });
+    expect(r.status).toBe(200);
+    expect(r.body.normalized_keys).toEqual(["sentiment_target_top_n"]);
+    expect(저장된.get("sentiment_target_top_n")).toBe(JSON.stringify(DEFAULT_SETTINGS.sentiment_target_top_n));
+    expect(hiddenSettingNotices([...저장된.entries()].map(([key, value]) => ({ key, value })))).toEqual([]);
+    expect(쓴것.some((x) => x.args[0] === "max_weight_per_stock")).toBe(false);
+  });
 });
