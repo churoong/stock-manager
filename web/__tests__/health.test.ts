@@ -15,7 +15,7 @@ import { DatabaseSync } from "node:sqlite";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
   CALENDAR_LOW_SESSIONS, HEALTH_ALERT_INSERT, LAST_SUCCESS, RAN_STATUSES, SESSIONS_AROUND, STUCK_AFTER_HOURS,
-  SUCCESS_WINDOW_HOURS, TODAY_HEALTH_ALERTS, WATCHES, countsForToday, dueAlerts, isStuck, lastSuccessFor, localDate, sessionOn,
+  SUCCESS_WINDOW_HOURS, TODAY_HEALTH_ALERTS, WATCHES, countsForToday, dueAlerts, isStuck, lastSuccessFor, localDate, sessionOn, todayHealthAlertsArgs,
   findLastSuccess, sinceText, usageRatio, usageTone, type LastSuccess, type Market, type Session,
 } from "@/lib/health";
 
@@ -324,9 +324,20 @@ describe("질의", () => {
     const args = ["daily_kr", "KR", "2026-09-18", "missing", "문구", "{}", "2026-09-18T00:30:00Z", null];
     db.prepare(HEALTH_ALERT_INSERT).run(...(args as never[]));
     db.prepare(HEALTH_ALERT_INSERT).run(...(args as never[]));
-    const rows = db.prepare(TODAY_HEALTH_ALERTS).all("2026-09-18") as Array<{ job: string }>;
+    const rows = db.prepare(TODAY_HEALTH_ALERTS).all(...todayHealthAlertsArgs("2026-09-18")) as Array<{ job: string }>;
     expect(rows).toHaveLength(1);
     expect(rows[0].job).toBe("daily_kr");
+  });
+
+  it("창 안 알림은 만든 시각 색인으로 좁혀 읽는다 (docs/infra.md 25.1203)", () => {
+    const 계획 = (db.prepare("EXPLAIN QUERY PLAN " + TODAY_HEALTH_ALERTS).all("2026-09-17", "2026-09-18") as Array<{ detail: string }>)
+      .map((r) => r.detail).join(" | ");
+    expect(계획).toContain("idx_health_alerts_recent");
+    expect(계획).not.toMatch(/SCAN health_alerts/);
+    // 국내 현지 날짜(+9h)는 UTC 만든 시각보다 앞선다 — 10-11 KST 알림은 10-10T15:00Z 에 만들어질 수 있다
+    expect(todayHealthAlertsArgs("2026-10-11")).toEqual(["2026-10-10", "2026-10-11"]);
+    const 경로 = readFileSync(join(__dirname, "..", "app", "api", "cron", "health", "route.ts"), "utf8");
+    expect(경로).toContain("execute(TODAY_HEALTH_ALERTS, todayHealthAlertsArgs(from))");
   });
 
   it("마이그레이션이 감시 호출 기록 자리를 만들어 둔다", () => {

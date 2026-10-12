@@ -3,7 +3,7 @@ import { notifyQuotaOnce } from "@/lib/quotaNotice";
 import { batch, currentBackend, execute, quotaReason, rowsToObjects } from "@/lib/db";
 import {
   HEALTH_ALERT_INSERT, HEALTH_CLAIM_PREFIX, HEALTH_CLAIM_STALE_MS, PENDING_HEALTH_ALERTS, SESSIONS_AROUND, TODAY_HEALTH_ALERTS,
-  WATCHES, dueAlerts, lastSuccessFor, localDate, type LastSuccess, type Market, type Session,
+  WATCHES, dueAlerts, lastSuccessFor, localDate, todayHealthAlertsArgs, type LastSuccess, type Market, type Session,
 } from "@/lib/health";
 import { tokenMatches } from "@/lib/intraday";
 import { sendTelegram } from "@/lib/telegram";
@@ -56,7 +56,7 @@ export async function GET(request: Request) {
     const [sessionsRs, lastRs, existingRs] = await Promise.all([
       execute(SESSIONS_AROUND, [from]),
       execute(lastSuccessFor(WATCHES.map((w) => w.job))),
-      execute(TODAY_HEALTH_ALERTS, [from]),
+      execute(TODAY_HEALTH_ALERTS, todayHealthAlertsArgs(from)),
     ]);
 
     // D1 임시 운영 중에는 미국을 돌리지 않는다(docs/infra.md 25.14). 미국 배치가 없다고 매일 알리면 거짓 알림이다

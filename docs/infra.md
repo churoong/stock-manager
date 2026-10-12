@@ -2250,6 +2250,7 @@ SQL read operations are forbidden (reads are blocked, ...)
 | 25.1200 | SEC 가 도중에 막히면 ETF 부분 순위를 쓰고 나머지를 지움 (ETF 감사 #2) |
 | 25.1201 | ETF 국내 '우리 종목 집중' 두 무리를 한 질의 30행으로 잘라 지수가 빠짐 (ETF 감사 #3) |
 | 25.1202 | ETF 장기 신호 비중이 옛 판 신호까지 셈 (ETF 감사 #4) |
+| 25.1203 | 무응답 감시의 창 안 경보 읽기가 표 전체를 훑음 (웹 읽기) |
 
 ### 25.1 왜 D1 인가
 
@@ -28946,3 +28947,17 @@ SEC 가 429 로 막으면 거기서 멈추는데(`break`), (1) 남은 대상을 
 **고침** — 같은 나라·같은 기준일의 가장 새 판만(`etf.load_recommended_us` 와 같은 하위 질의, 바깥 행을 가리키지 않는다 25.428) + `s.status = 'active'`.
 
 **되돌리기 확인** — `batch/jobs/etf_tilt.py` 를 되돌리면 `test_장기_신호_비중은_그날_가장_새_판만_센다` 가 깨진다.
+
+### 25.1203 무응답 감시의 창 안 경보 읽기가 표 전체를 훑음 (웹 읽기)
+
+**무엇** — 무응답 감시(`/api/cron/health`, 매시간)가 창 안의 이미 낸 경보를 `SELECT … FROM health_alerts WHERE local_date >= ?` 로 읽었다. `local_date` 에는 색인이
+없고(유니크 `(job, market, local_date, kind)` 는 job 이 앞) 계획이 **표 전체 훑기**였다(`SCAN health_alerts USING COVERING INDEX sqlite_autoindex_health_alerts_1`).
+`health_alerts` 에는 무응답·달력 경보에 더해 웹 읽기 경보(25.1178)도 쌓인다. handoff "웹 읽기" 목록의 `TODAY_HEALTH_ALERTS` 항목이다.
+
+**아팠나** — 읽기 비용만(지금 표가 작아 작다). 판정은 같다.
+
+**고침** — `WHERE created_at >= ? AND local_date >= ?` — 0025 의 `created_at` 색인으로 좁힌다. 국내 현지 날짜(+9시간)는 UTC 만든 시각보다 앞설 수 있어(10-11 KST 경보가
+10-10T15:00Z 에 만들어진다) 만든 시각 하한은 하루 더 앞(`todayHealthAlertsArgs`). 25.1196(`LAST_SUCCESS`)에 이은 같은 경로의 둘째 읽기다.
+같은 날 db-status: `turso_reads` 10월 362,589,199(10-12 08:21 UTC). 출처별(`turso_reads@…`) 행은 아직 없다 — 배포(07:00 UTC) 뒤 돈 배치가 없다. 내일 본다.
+
+**되돌리기 확인** — 경로·`health.ts` 를 되돌리면 vitest `창 안 알림은 만든 시각 색인으로 좁혀 읽는다` 가 깨진다(계획에 SCAN).

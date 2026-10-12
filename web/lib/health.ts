@@ -351,7 +351,17 @@ export function lastSuccessFor(jobs: readonly string[]): string {
   return LAST_SUCCESS.replace("WHERE status IN", `WHERE job_name IN (${이름}) AND status IN`);
 }
 
-export const TODAY_HEALTH_ALERTS = `SELECT job, market, local_date, kind FROM health_alerts WHERE local_date >= ?`;
+/**
+ * 창 안의 무응답 알림 — **만든 시각 하한을 먼저 건다** (docs/infra.md 25.1203). `local_date` 에는 색인이 없어(유니크는 job 이 앞)
+ * 매시간 표 전체를 훑었다. `created_at` 색인(0025)으로 좁히고 `local_date` 는 그 안에서 거른다. 인자는 `todayHealthAlertsArgs`
+ */
+export const TODAY_HEALTH_ALERTS = `SELECT job, market, local_date, kind FROM health_alerts WHERE created_at >= ? AND local_date >= ?`;
+
+/** [만든 시각 하한, 현지 날짜 하한]. 현지 날짜(국내 +9시간)가 UTC 만든 시각보다 앞설 수 있어 하루 더 거슬러 연다 */
+export function todayHealthAlertsArgs(from: string): [string, string] {
+  const 하루전 = new Date(Date.parse(`${from}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
+  return [하루전, from];
+}
 
 export const HEALTH_ALERT_INSERT = `INSERT INTO health_alerts (job, market, local_date, kind, message, data, created_at, sent_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
