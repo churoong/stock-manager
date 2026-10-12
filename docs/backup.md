@@ -112,6 +112,10 @@ gunzip -c stock-manager-essential-2026-09-17.sql.gz | sqlite3 restored.db
 sqlite3 restored.db "SELECT COUNT(*) FROM trades;"
 ```
 
+**덤프에는 표 정의·데이터 뒤에 색인·트리거 정의도 있다** (2026-10-12, docs/infra.md 25.1244). 예전 덤프는 표 정의만 담아 이 경로로 되살리면 색인 42개가 모두
+사라졌다 — 백업이 `schema_migrations` 도 담아 그 뒤 마이그레이션이 아무것도 다시 만들지 않는다. 2026-10-12 전 덤프로 되살렸다면 `migrations/` 의 `CREATE INDEX` 문을
+직접 한 번 돌린다. KIS 접근 토큰·로그인 시도 표는 **정의만** 있고 행은 없다(25.1243).
+
 운영 DB 로 되돌릴 때는 **새 Turso DB 를 만들어 거기에 넣고 주소를 바꾼다.** 쓰고 있는 DB 에
 덤프를 그대로 부으면 `DROP TABLE` 이 먼저 돈다 `[확인필요: Turso CLI 없이 HTTP 로 대량 적재하는
 가장 빠른 방법]`.

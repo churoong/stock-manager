@@ -217,6 +217,16 @@ def create_sql(client: TursoClient, table: str) -> str | None:
     return str(value) if value else None
 
 
+def index_sqls(client: TursoClient, table: str) -> list[str]:
+    """그 표의 색인·트리거 정의(사용자가 만든 것만 — 자동 색인은 `sql` 이 비어 있다)."""
+    rs = client.execute(
+        "SELECT sql FROM sqlite_master WHERE type IN ('index', 'trigger') AND tbl_name = ? AND sql IS NOT NULL"
+        " ORDER BY type, name",
+        [table],
+    )
+    return [str(r[0]) for r in rs.rows if r[0]]
+
+
 #: 표마다 몇 행을 썼는지 적는 주석. 되살리는 쪽(`scripts/restore_backup.py`)이 이것과 대 본다.
 #: **두 스크립트를 잇는 글자라 한 곳에서 온다** (docs/infra.md 25.113 의 교훈)
 ROWS_MARK = "-- rows"
@@ -251,14 +261,17 @@ def quote(value: object) -> str:
     return "'" + str(value).replace("'", "''") + "'"
 
 
-def dump_table(client: TursoClient, table: str, out) -> int:
-    """한 표를 INSERT 문으로 쓴다. 행 수를 돌려준다."""
+def dump_table(client: TursoClient, table: str, out, *, with_rows: bool = True) -> int:
+    """한 표를 INSERT 문으로 쓴다. 행 수를 돌려준다. `with_rows=False` 면 정의만(행 0) — 늘 빼는 표 (25.1244)."""
     ddl = create_sql(client, table)
     if not ddl:
         return 0
     out.write(f"\n-- {table}\n")
     out.write(f"DROP TABLE IF EXISTS {table};\n")
     out.write(ddl.rstrip().rstrip(";") + ";\n")
+    if not with_rows:
+        out.write(f"{ROWS_MARK} {table} 0\n")
+        return 0
 
     # 운영 표시는 담지 않는다 (docs/infra.md 25.155). 표를 통째로 빼는 것과 같은 뜻인데,
     # `settings` 는 대부분 사용자 값이라 **줄 단위**로 뺀다
@@ -315,7 +328,8 @@ def run(scope: str, out_dir: Path) -> int:
                 log.warning("표가 없어 건너뜁니다: %s", t)
         else:
             # **이름 순이 아니라 의존 순이다** (25.121). 되살릴 때 외래키가 걸린다
-            tables = 의존_순서(sorted(available - set(늘_빼는_표)))
+            # 늘 빼는 표도 **정의는** 담는다(행은 빼고) — 빼면 `gunzip | sqlite3` 복원에 표가 없다 (25.1244)
+            tables = 의존_순서(sorted(available))
 
         out_dir.mkdir(parents=True, exist_ok=True)
         today = datetime.now(UTC).date().isoformat()
@@ -330,8 +344,17 @@ def run(scope: str, out_dir: Path) -> int:
                 out.write(f"{STOCK_KEY_MARK} {sid}\t{ticker}\t{market}\t{country}\t{currency}\n")
             out.write("PRAGMA foreign_keys = OFF;\nBEGIN;\n")
             for table in tables:
-                counts[table] = dump_table(client, table, out)
+                counts[table] = dump_table(client, table, out, with_rows=table not in 늘_빼는_표)
             out.write("COMMIT;\n")
+            # **색인·트리거도 쓴다** (docs/infra.md 25.1244, 백업 감사 재현). 예전에는 표 정의만 써서
+            # 문서의 `gunzip | sqlite3` 복원이 색인 42개를 모두 잃었다 — 백업이 `schema_migrations` 도 담아
+            # 그 뒤 마이그레이션은 아무것도 다시 만들지 않는다. 그대로 운영하면 색인 질의가 모두 표 전체 읽기가
+            # 되어 Turso 월 읽기 한도가 바닥난다(infra 24절). 데이터 뒤에 둔다(빠르다).
+            # `restore_backup`·`restore_drill` 은 INSERT 만 실행하므로 영향이 없다
+            out.write("\n-- 색인·트리거 (25.1244)\n")
+            for table in tables:
+                for ddl in index_sqls(client, table):
+                    out.write(ddl.rstrip().rstrip(";") + ";\n")
 
         size_mb = path.stat().st_size / 1_048_576
         print(f"{path.name}  {size_mb:.1f}MB  표 {len(tables)}개, 행 {sum(counts.values()):,}")
