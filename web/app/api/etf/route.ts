@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { execute, rowsToObjects } from "@/lib/db";
 import {
-  ETF_LAST_FAILED, MARKETS, buildExcludedQuery, buildPickedQuery, buildTiltLeadersQuery, etfFailedNote, etfNameExcludedNote, etfRunNote, etfRunNotStored, type EtfRow,
+  ETF_LAST_FAILED, MARKETS, buildExcludedQuery, buildPickedQuery, buildTiltLeadersQuery, TILT_LEADERS_KR_ROWS, etfFailedNote, etfNameExcludedNote, etfRunNote, etfRunNotStored, type EtfRow,
 } from "@/lib/etf";
 import { userDateOf } from "@/lib/market";
 
@@ -20,8 +20,12 @@ export async function POST() {
     const leadersQ = buildTiltLeadersQuery();
     const tiltLeaders = rowsToObjects<EtfRow>(await execute(leadersQ.sql, leadersQ.args));
     // 국내 상장 — 미국 지수를 따르는 것만 대리 보유로 들어온다 (25.970)
-    const leadersKrQ = buildTiltLeadersQuery(undefined, "KR");
-    const tiltLeadersKr = rowsToObjects<EtfRow>(await execute(leadersKrQ.sql, leadersKrQ.args));
+    // 무리마다 따로 자른다 (25.1201) — 한 질의 30행으로는 무리마다 15행쯤만 와 지수가 통째로 빠졌다
+    const tiltLeadersKr: EtfRow[] = [];
+    for (const group of ["kr_kr", "kr_us"] as const) {
+      const q = buildTiltLeadersQuery(TILT_LEADERS_KR_ROWS, "KR", group);
+      tiltLeadersKr.push(...rowsToObjects<EtfRow>(await execute(q.sql, q.args)));
+    }
 
     const excluded: Record<string, EtfRow[]> = {};
     for (const { country } of MARKETS) {

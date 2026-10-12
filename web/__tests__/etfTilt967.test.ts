@@ -1,9 +1,10 @@
 /** 우리 종목 집중 표시 (docs/etf.md 11.2·11.5, docs/infra.md 25.967·25.968). 배치가 적은 값을 글로 옮기기만 한다. */
 
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
-import { buildTiltLeadersQuery } from "@/lib/etf";
+import { TILT_LEADERS_KR_ROWS, buildTiltLeadersQuery } from "@/lib/etf";
 import { onePerIndex, parseTilt, tiltLine, tiltSource, type Tilt } from "@/lib/etfTilt";
 
 function tilt(over: Partial<Tilt> = {}): Tilt {
@@ -80,6 +81,37 @@ describe("우리 종목 집중 목록", () => {
     const kr = buildTiltLeadersQuery(30, "KR");
     expect(kr.sql).toContain("e.country = 'KR'");
     expect(kr.sql).not.toContain("e.country = 'US'");
+  });
+
+  it("국내는 무리마다 따로 잘라 한 무리가 다른 무리의 자리를 먹지 않는다 (docs/infra.md 25.1201)", () => {
+    const db = new DatabaseSync(":memory:");
+    const MIG = join(process.cwd(), "..", "migrations");
+    for (const f of readdirSync(MIG).filter((x) => x.endsWith(".sql")).sort()) db.exec(readFileSync(join(MIG, f), "utf-8"));
+    // 국내 상장 미국 지수 40상품(순위 1~40), 국내 지수 10상품(순위 1~10)
+    let id = 0;
+    for (const [group, n] of [["kr_us", 40], ["kr_kr", 10]] as const) {
+      for (let r = 1; r <= n; r++) {
+        id += 1;
+        db.prepare("INSERT INTO etfs (id, symbol, country, name, source, fetched_at) VALUES (?, ?, 'KR', ?, 't', 't')")
+          .run(id, `${group}${r}`, `${group}${r}`);
+        db.prepare(
+          "INSERT INTO etf_picks (etf_id, as_of_date, bucket, passed, rationale_text, rationale_data, calc_version, created_at)" +
+            " VALUES (?, '2026-10-01', 'x', 0, 'x', ?, 5, 't')",
+        ).run(id, JSON.stringify({ tilt: { rank_all: r, group } }));
+      }
+    }
+    const 한번 = buildTiltLeadersQuery(30, "KR");
+    const 섞음 = db.prepare(한번.sql).all(...한번.args) as Array<{ symbol: string }>;
+    expect(섞음.filter((r) => r.symbol.startsWith("kr_kr")).length).toBe(10); // 30행 안에 국내 지수는 10개 다 들지만
+    expect(섞음.filter((r) => r.symbol.startsWith("kr_us")).length).toBe(20); // 미국 지수는 20위에서 잘렸다
+    for (const [group, 기대] of [["kr_us", 40], ["kr_kr", 10]] as const) {
+      const q = buildTiltLeadersQuery(TILT_LEADERS_KR_ROWS, "KR", group);
+      const rows = db.prepare(q.sql).all(...q.args) as Array<{ symbol: string }>;
+      expect(rows.length).toBe(기대);
+      expect(rows.every((r) => r.symbol.startsWith(group))).toBe(true);
+    }
+    const 경로 = readFileSync(join(process.cwd(), "app", "api", "etf", "route.ts"), "utf-8");
+    expect(경로).toContain("buildTiltLeadersQuery(TILT_LEADERS_KR_ROWS, \"KR\", group)");
   });
 
   it("장기 적립 탭이 첫 보기로 그리고, 넓은 지수가 아니면 경고를 단다", () => {

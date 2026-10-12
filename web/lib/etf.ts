@@ -104,17 +104,26 @@ export const TILT_LEADERS_LIMIT = 30;
  * 매긴 것 — **핵심 통과가 아니어도**(업종·테마·팩터) 들어온다. 순위는 배치가 낸 그대로 읽는다.
  */
 export function buildTiltLeadersQuery(
-  limit = TILT_LEADERS_LIMIT, country: "KR" | "US" = "US",
+  limit = TILT_LEADERS_LIMIT, country: "KR" | "US" = "US", group?: "kr_us" | "kr_kr",
 ): { sql: string; args: Array<string | number> } {
-  // 국내 상장은 국내끼리 매긴 순위다 (25.970) — 시장마다 따로 읽는다
+  // 국내 상장은 국내끼리 매긴 순위다 (25.970) — 시장마다 따로 읽는다.
+  // **국내는 무리마다 따로 자른다** (25.1201, ETF 감사 재현). 두 무리(국내 상장 미국 지수·국내 지수)는 순위가 각각 1 부터인데
+  // 한 질의로 `rank_all` 순 30행을 잘라 무리마다 약 15행만 오고, 같은 지수 상품을 한 카드로 묶으면(onePerIndex) 순위에 든
+  // 지수가 통째로 빠졌다. 무리 표시가 없는 옛 행은 국내 상장 미국 지수로 본다(화면과 같다)
+  const 무리 = group
+    ? ` AND COALESCE(json_extract(pk.rationale_data, '$.tilt.group'), 'kr_us') = '${group === "kr_kr" ? "kr_kr" : "kr_us"}'`
+    : "";
   return {
     sql: `${SELECT}
-WHERE ${최신(country)} AND json_extract(pk.rationale_data, '$.tilt.rank_all') IS NOT NULL
+WHERE ${최신(country)} AND json_extract(pk.rationale_data, '$.tilt.rank_all') IS NOT NULL${무리}
 ORDER BY json_extract(pk.rationale_data, '$.tilt.rank_all')
 LIMIT ?`,
     args: [limit],
   };
 }
+
+/** 국내 무리 하나에서 읽는 행 수 — 같은 지수 상품이 여럿이라 카드(지수)보다 넉넉히 (25.1201) `[확인필요: 실제 무리 크기]` */
+export const TILT_LEADERS_KR_ROWS = 80;
 
 export function buildPickedQuery(): { sql: string; args: Array<string | number> } {
   return {
