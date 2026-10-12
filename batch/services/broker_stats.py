@@ -5,8 +5,13 @@ KIS 증권사 투자의견(`kr_opinions`, 25.988 — 1년에 100행까지, 발�
 1. **제시 상승여력** — 목표가 ÷ 기준가 − 1 의 평균. 늘 크면 낙관 편향이다
 2. **의견 뒤 60거래일 초과수익** — 기준가에서 60거래일 뒤 수익 − 같은 기간 지수(코스피·코스닥) 수익.
    상향 목표가(상승여력 > 0)만 "맞힘(초과수익 > 0)" 비율을 낸다
-3. **목표가 터치율** — 120거래일 안에 고가가 목표가에 닿은 비율. 상향 목표가만, 120거래일이 다 지났거나
-   이미 닿은 것만 센다
+3. **목표가 터치율** — 120거래일 안에 고가가 목표가에 닿은 비율. 상향 목표가만, 120거래일이 다 지난 것만
+   센다(25.1148)
+
+**시세가 끊긴 종목도 센다** (25.1155, 감사 재현 — 생존편향). 의견 뒤 상장폐지·장기 정지로 시세가 끊기면 창이
+영영 안 차 조용히 빠졌다 — 나쁜 결과일수록 빠져 증권사가 더 잘 맞힌 것처럼 보였다. 신호 성적표(`outcomes`,
+25.696·25.697)와 같은 규칙: 그 종목 마지막 날이 **시세 전체의 마지막 날**보다 `CUTOFF_GAP_DAYS` 넘게 앞이면 끊긴
+것으로 보고, 시장 거래일(지수 날짜)로 창의 끝날이 지났으면 **마지막 종가를 청산가**로 창을 채운다.
 
 기준가는 발표일 **다음 거래일** 종가다 — 발표일 당일 종가를 쓰면 장 뒤 발표의 반응이 기준에 섞인다
 `[확인필요: 발표 시각]`. 기간 안에 분할·병합(수정계수가 2% 넘게 바뀜)이 있으면 그 의견은 뺀다 — 목표가와
@@ -16,6 +21,9 @@ KIS 증권사 투자의견(`kr_opinions`, 25.988 — 1년에 100행까지, 발�
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date
+
+from batch.services.outcomes import CUTOFF_GAP_DAYS
 
 #: 초과수익을 재는 거래일 수
 FWD_DAYS = 60
@@ -89,6 +97,8 @@ def compute(
     """증권사별 성적. `bars`·`index_bars` 는 날짜 오름차순."""
     stats: dict[str, BrokerStat] = {}
     index_close = {code: {b.date: b.close for b in bs} for code, bs in index_bars.items()}
+    # 끊김 판정의 기준 — 지수가 아니라 시세 전체의 마지막 날 (outcomes 25.697 과 같다)
+    market_last = max((bs[-1].date for bs in bars.values() if bs), default=None)
     for op in opinions:
         st = stats.setdefault(op.broker, BrokerStat(op.broker))
         st.n_opinions += 1
@@ -107,17 +117,26 @@ def compute(
         st.upsides.append(upside)
         if upside <= 0:
             continue
+        ix = index_close.get(op.index_code, {})
+        끊김 = market_last is not None and (
+            date.fromisoformat(market_last) - date.fromisoformat(series[-1].date)
+        ).days > CUTOFF_GAP_DAYS
+        # 끊긴 종목은 시장 거래일로 창을 센다 — 기준일 뒤 시장 거래일(시세 전체 마지막 날까지)
+        시장일 = sorted(d for d in ix if series[i].date < d <= market_last) if 끊김 and market_last else []
         j = i + FWD_DAYS
         if j < len(series):
-            ix = index_close.get(op.index_code, {})
             i0, i1 = ix.get(series[i].date), ix.get(series[j].date)
             if i0 and i1:
                 st.excess.append((series[j].close / base - 1) - (i1 / i0 - 1))
+        elif len(시장일) >= FWD_DAYS:
+            i0, i1 = ix.get(series[i].date), ix.get(시장일[FWD_DAYS - 1])
+            if i0 and i1:
+                st.excess.append((series[-1].close / base - 1) - (i1 / i0 - 1))
         window = series[i : i + TOUCH_DAYS + 1]
         # **120거래일이 다 찬 의견만 센다** (25.1148, 감사 재현). "이미 닿은 것" 도 세면 덜 찬 의견 가운데 닿은 것만
         # 분모·분자에 들어가 실제 20% 가 30.8% 로 보였다 — 최근 의견이 많은 증권사일수록 부풀어
         # `verdict.skilled` 가중이 틀어진다
-        if len(window) == TOUCH_DAYS + 1:
+        if len(window) == TOUCH_DAYS + 1 or len(시장일) >= TOUCH_DAYS:
             st.touched.append(any((b.high or b.close) >= op.target_price for b in window))
     return sorted((s.row() for s in stats.values()), key=lambda r: (-(r["n_fwd"] or 0), r["broker"]))
 

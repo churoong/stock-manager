@@ -62,3 +62,25 @@ def test_다_찬_창에서_닿으면_센다() -> None:
     rows = bs.compute([bs.Opinion(1, "KOSPI", DAYS[0], "마", 150.0)],
                       {1: _bars([100.0] * 200, highs)}, {"KOSPI": _bars([1.0] * 200)})  # fmt: skip
     assert rows[0]["n_touch"] == 1 and rows[0]["touch_pct"] == 100.0
+
+
+def test_시세가_끊긴_종목은_마지막_종가로_창을_채운다() -> None:
+    """−70% 로 떨어진 뒤 상장폐지된 종목이 조용히 빠져 증권사가 더 잘 맞힌 것처럼 보였다 (docs/infra.md 25.1155)."""
+    끊긴 = [100.0] * 10 + [30.0] * 20  # 30거래일 뒤 시세 없음
+    rows = bs.compute(
+        [bs.Opinion(1, "KOSPI", DAYS[0], "바", 150.0)],
+        {1: _bars(끊긴), 2: _bars([50.0] * 200)},  # 2번이 시세 전체의 마지막 날을 정한다
+        {"KOSPI": _bars([1000.0] * 200)},
+    )
+    [r] = rows
+    assert r["n_fwd"] == 1 and r["avg_excess_pct"] == -70.0 and r["hit_pct"] == 0.0
+    assert r["n_touch"] == 1 and r["touch_pct"] == 0.0
+
+
+def test_끊긴_종목도_시장_창이_덜_지났으면_안_센다() -> None:
+    rows = bs.compute(
+        [bs.Opinion(1, "KOSPI", DAYS[0], "사", 150.0)],
+        {1: _bars([100.0] * 10), 2: _bars([50.0] * 40)},  # 시장은 40거래일만 지났다 — 60일 창이 안 찼다
+        {"KOSPI": _bars([1000.0] * 40)},
+    )
+    assert rows[0]["n_fwd"] == 0 and rows[0]["n_touch"] == 0
