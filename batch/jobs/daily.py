@@ -1769,7 +1769,14 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
     started_at = datetime.now(UTC)
     trigger = db.trigger_source()
 
-    client = TursoClient()
+    try:
+        client = TursoClient()
+    except Exception as exc:
+        # **DB 연결을 못 열어도 실패 알림은 나간다** (docs/infra.md 25.1215). 예전에는 이 줄이 아래 `try` 밖이라
+        # 시크릿이 빠진 날(저장소 이전 뒤 재입력 누락 등) 기록도 텔레그램도 없이 종료코드 1 만 남았다.
+        # `_notify_failure` 는 DB 를 못 읽어도 보낸다 — 마지막 성공은 "알 수 없음" 으로 적힌다
+        _notify_failure(None, market, name, f"DB 연결을 열지 못함: {type(exc).__name__}", dry_run)  # type: ignore[arg-type]
+        raise
     try:
         decision = cal.decide(market, now=started_at, force=force)
         log.info("판단: %s", decision.reason)
