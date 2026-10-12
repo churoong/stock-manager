@@ -402,3 +402,22 @@ def test_미국_작은_시장의_끊긴_종목은_나라_끝날로_본다(client
     _, _, 경고 = job.compute_all(client, [(13, "T13", "US")], ["1Y"], 기준일)  # type: ignore[arg-type]
     assert client.conn.execute("SELECT cagr FROM performance_metrics WHERE stock_id = 13").fetchone()[0] is None
     assert not any("시세가" in w and "뒤로 없습니다" in w for w in 경고)
+
+
+def test_창_첫머리의_빈_행도_직전_계수로_메운다(client: MemClient) -> None:
+    """창 바로 앞 행을 안 읽어 첫머리 빈 행이 원 종가(10배)로 남던 것 (docs/infra.md 25.1145, 감사 재현)."""
+    for 날, 원, 수정 in [
+        ("2026-08-31", 1000.0, 100.0), ("2026-09-01", 1010.0, None),  # 창(09-01~) 첫 행이 빈 행
+        ("2026-09-02", 1020.0, 102.0), ("2026-09-03", 105.0, None),
+    ]:
+        client.conn.execute(
+            "INSERT INTO prices (stock_id, date, close, adj_close, currency, source, fetched_at)"
+            " VALUES (1, ?, ?, ?, 'KRW', 't', 't')",
+            [날, 원, 수정],
+        )
+    구멍: list[int] = []
+    점 = job.load_prices(client, 1, "2026-09-01", 구멍)  # type: ignore[arg-type]
+    assert [(p.date.isoformat(), round(p.close, 6)) for p in 점] == [
+        ("2026-09-01", 101.0), ("2026-09-02", 102.0), ("2026-09-03", 105.0),
+    ]
+    assert 구멍 == [1]

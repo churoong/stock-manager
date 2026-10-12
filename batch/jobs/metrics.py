@@ -66,14 +66,19 @@ def load_prices(
     그래서 가른다: 원 종가와 직전 수정 계수로 옮긴 값 가운데 **직전 값에 더 가까운 쪽**을 쓴다(옮긴 값이면 `구멍` 에
     더한다, 25.715). 앞뒤 끝의 빈 행은 늘 원 종가.
     """
+    # **창 바로 앞 한 행도 읽는다** (25.1145, 감사 재현) — 창 첫머리가 빈 행이면 "앞 끝의 빈 행" 으로 보아 원 종가를
+    # 썼다. 1:10 분할 전이면 첫 점만 10배라 5년 CAGR·MDD 가 통째로 틀린다. 앞 행은 메우는 데만 쓰고 결과에서 뺀다
     rs = client.execute(
-        "SELECT date, adj_close, close, volume FROM prices WHERE stock_id = ? AND date >= ? ORDER BY date",
-        [stock_id, since],
+        "SELECT date, adj_close, close, volume FROM prices WHERE stock_id = ?"
+        " AND date >= COALESCE((SELECT MAX(date) FROM prices WHERE stock_id = ? AND date < ?), ?) ORDER BY date",
+        [stock_id, stock_id, since, since],
     )
     rows = rs.dicts()
     out: list[calc.PricePoint] = []
     # 규칙은 `services.adjust.fill_adjusted` 가 정의처다 — 백테스트·점수 계열과 같은 규칙을 쓴다 (25.1101)
     for row, (px, 메움) in zip(rows, adj.fill_adjusted(rows), strict=True):
+        if str(row["date"]) < since:
+            continue
         if 메움 and 구멍 is not None:
             구멍.append(stock_id)
         if px is not None:
