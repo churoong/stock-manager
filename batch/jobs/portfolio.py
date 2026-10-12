@@ -408,7 +408,9 @@ def run() -> int:
         앞_종가일 = (date.fromisoformat(since) - timedelta(days=m.MAX_SESSION_GAP_DAYS)).isoformat()
         closes_wide = load_closes(client, ids, 앞_종가일)
         closes = {sid: {d: v for d, v in series.items() if d >= since} for sid, series in closes_wide.items()}
-        fx_series = load_fx(client, since)
+        # 환율도 같은 만큼 앞부터 (25.1160, 감사 재현) — 첫 매매가 미국 종목이고 체결일 뒤 환율 행이 아직 없으면
+        # `fx_now` 가 None 이라 평가 0원·미국 2부에서 빠짐. 묵은 환율은 `stale_notes` 가 말한다
+        fx_series = load_fx(client, 앞_종가일)
         latest_fx = max(fx_series["USD"].items(), default=(None, None))
         for pos in positions:
             # 종가가 마지막 체결보다 묵었으면 체결가로 평가한다 (docs/infra.md 25.398)

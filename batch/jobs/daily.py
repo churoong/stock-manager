@@ -1099,19 +1099,22 @@ def load_holdings(
             # 환율이 없으면 먼저 센다 — 그날은 금액 자체를 내지 않으므로 "실제보다 클 수 있다" 는 맞지 않다 (25.441)
             환율없어_뺀 += 1
             continue
-        if row["market_value_krw"] is None:
+        같은통화 = currency != "KRW" and row.get("pos_currency") == currency and row.get("market_value") is not None
+        # 같은 통화 평가액이 있으면 원화 평가액이 없어도 쓴다 (25.1160, 감사 재현) — 환율이 없어 원화로만 못 바꾼
+        # 미국 보유가 미국 2부에서 빠져 여력·종목 상한이 부풀었다
+        if row["market_value_krw"] is None and not 같은통화:
             빠진.append(str(row["ticker"]))
             continue
-        value_krw = float(row["market_value_krw"])
-        if currency == "KRW":
+        value_krw = None if row["market_value_krw"] is None else float(row["market_value_krw"])
+        if currency == "KRW" and value_krw is not None:
             value = value_krw
-        elif row.get("pos_currency") == currency and row.get("market_value") is not None:
+        elif 같은통화:
             # **같은 통화 보유는 종목 통화 평가액 그대로** (docs/infra.md 25.494, 텔레그램 감사).
             # 원화 평가액은 포트폴리오 배치가 표의 가장 새 환율(당일 진행 중 봉일 수 있다)로 곱한 값이고,
             # 여기서 나누는 환율은 리포트 기준일(D-1) 환율이다 — 둘로 오가면 달러 평가액이
             # (당일 ÷ 전일 환율) 만큼 틀어져 여력·종목 상한이 어긋났다
             value = float(row["market_value"])
-        elif fx_rate and fx_rate > 0:
+        elif value_krw is not None and fx_rate and fx_rate > 0:
             value = value_krw / fx_rate
         else:
             환율없어_뺀 += 1
