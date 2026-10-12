@@ -122,8 +122,18 @@ def load_holdings(client: TursoClient, today: date | None = None) -> tuple[list[
         # 아니라 "수집을 늦게 시작했다" 면 중립 기준(25.638)은 원래 부정적이던 종목을 "급락" 으로 만든다
         추적 = False
         if s0.get("as_of_date"):
-            처음 = client.execute("SELECT MIN(fetched_at) FROM news WHERE stock_id = ?", [sid]).scalar()
             나라 = str(r["country"])
+            창시작 = date.fromisoformat(str(s0["as_of_date"])) - timedelta(days=7 + sentiment.WINDOW_DAYS)
+            # **종목별 근거는 "창이 열릴 무렵에 받고 있었나" 다** (25.1183, 감사 재현).
+            # 예전엔 그 종목 **첫** 기사 시각을
+            # 써서, 점수 상위로 잠깐 수집됐다가 빠져 몇 주 끊겼던 종목도 "37일 전부터 받고 있었다" 가 되어 공백 탓에
+            # 비어 있던 과거 점수를 중립 0 으로 보고 거짓 "감성급락" 이 떴다(25.641 이 막으려던 모양). 창 시작 전 7일
+            # 안에 받은(fetched_at) 기사가 있어야 그 종목 근거로 친다
+            가까이 = client.execute(
+                "SELECT MIN(fetched_at) FROM news WHERE stock_id = ? AND fetched_at >= ? AND fetched_at <= ?",
+                [sid, (창시작 - timedelta(days=7)).isoformat(), (창시작 + timedelta(days=1)).isoformat()],
+            ).scalar()
+            처음 = 가까이
             # **기사가 없던 종목은 첫 기사 시각이 곧 악재가 몰린 날이다** (docs/infra.md 25.1100, 감사).
             # 종목별 첫 기사로만 재면 조용하던 종목에 악재가 몰린 주(25.638 이 잡으려던 바로 그 경우)에
             # "추적 전" 이 되어 급락을 보지 않았다.
@@ -136,7 +146,6 @@ def load_holdings(client: TursoClient, today: date | None = None) -> tuple[list[
             # 과거 점수는 `as_of−7` 에서 끝나는 **30일 창**으로 낸다 — 그 창이 열릴 때(37일 전)부터 받고 있었어야
             # "과거가 비었다 = 기사가 적었다" 가 참이다. 7일이면 8일 전 시작한 종목이 여전히 거짓 급락이었다 (25.645,
             # 교차검증)
-            창시작 = date.fromisoformat(str(s0["as_of_date"])) - timedelta(days=7 + sentiment.WINDOW_DAYS)
             # fetched_at 은 UTC 다 — **그 시장 현지 날짜**로 바꿔 견준다 (25.749, 감사). 앞 10글자(UTC 날짜)와 현지
             # 날짜를 견줘
             # KST 08:00 첫 수집이 전날로 읽혀 하루 일찍 "추적 중" 이 됐다

@@ -754,3 +754,45 @@ def test_ETF_보유에는_매도_플래그를_세우지_않는다() -> None:
     )
     holdings, _ = job.load_holdings(mem)  # type: ignore[arg-type]
     assert holdings == []
+
+
+@pytest.mark.parametrize(("가까운_수집", "뜨나"), [(None, False), ("2026-08-07T00:00:00+00:00", True)])
+def test_수집이_끊겼던_종목은_첫_기사가_오래돼도_추적_중이_아니다(monkeypatch, 가까운_수집: str | None, 뜨나: bool) -> None:
+    """점수 상위로 잠깐 수집됐다 빠져 몇 주 끊긴 종목을 사면 거짓 "감성급락" 이 떴다 (docs/infra.md 25.1183, 감사 재현).
+
+    이 종목 첫 기사는 07-01 이고 09-10 에 샀다. 과거 30일 창은 08-10 에 열린다 — 그 무렵(08-03~08-11) 받은 기사가
+    없으면 공백이라 추적 중이 아니다. 그 무렵 받은 기사가 있으면 추적 중이다."""
+    from batch.core import db
+    from batch.jobs import sell_flags as job
+
+    mem = MemClient()
+    monkeypatch.setattr(job, "TursoClient", lambda: mem)
+    db.apply_migrations(mem)  # type: ignore[arg-type]
+    c = mem.conn
+    c.execute(
+        "INSERT INTO stocks (id, ticker, market, country, name_ko, currency, status, source, fetched_at)"
+        " VALUES (1, 'A', 'KOSPI', 'KR', '에이', 'KRW', 'active', 't', 't'),"
+        " (2, 'B', 'KOSPI', 'KR', '비', 'KRW', 'active', 't', 't')"
+    )
+    c.execute(
+        "INSERT INTO positions (stock_id, quantity, currency, avg_price, avg_fx, cost, cost_krw, first_buy_date,"
+        " horizon, price_date, close, market_value, updated_at)"
+        " VALUES (1, 10, 'KRW', 100, 1, 1000, 1000, '2026-09-10', 'long', '2026-09-15', 100, 1000, 't')"
+    )
+    c.execute(
+        "INSERT INTO sentiment_scores (stock_id, as_of_date, sentiment, article_count, positive_count, negative_count,"
+        " negative_count_7d, decay_halflife_days, delta_7d, method, calc_version, created_at)"
+        " VALUES (1, '2026-09-16', -55, 8, 0, 8, 8, 7, NULL, 'm', 1, 't')"
+    )
+    c.execute(
+        "INSERT INTO news (stock_id, title, url, published_at, lang, source, fetched_at) VALUES"
+        " (2, 't', 'u0', '2026-08-01', 'ko', 'rss', '2026-08-01T00:00:00+00:00'),"
+        " (1, 't', 'u1', '2026-07-01', 'ko', 'rss', '2026-07-01T00:00:00+00:00'),"
+        " (1, 't', 'u2', '2026-09-15', 'ko', 'rss', '2026-09-15T00:00:00+00:00')"
+    )
+    if 가까운_수집:
+        c.execute("INSERT INTO news (stock_id, title, url, published_at, lang, source, fetched_at)"
+                  " VALUES (1, 't', 'u3', '2026-08-06', 'ko', 'rss', ?)", [가까운_수집])  # fmt: skip
+    assert job.run(date(2026, 9, 16)) == 0
+    뜬것 = [r[0] for r in c.execute("SELECT reason_code FROM sell_flags WHERE is_active = 1")]
+    assert ("감성급락" in 뜬것) is 뜨나
