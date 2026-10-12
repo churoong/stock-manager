@@ -57,7 +57,9 @@ PROXY_BY_INDEX = {
     "NASDAQ 100": "QQQ",
     "Dow Jones U.S. Dividend 100 Index(TR)": "SCHD",
     "Dow Jones U.S. Dividend 100 Price Return Index": "SCHD",
-    "PHLX Semiconductor Sector Index": "SOXX",
+    # SOXX 는 2021-06 부터 ICE(현 NYSE) 반도체 지수를 따른다 — 같은 지수가 아니다 (docs/infra.md 25.1238, ETF 감사).
+    # PHLX SOX 를 따르는 것은 SOXQ(Invesco). SEC 목록에 없으면 "보유를 받지 못한 ETF" 로 남는다 `[확인필요]`
+    "PHLX Semiconductor Sector Index": "SOXQ",
     "MVIS US Listed Semiconductor 25 Index": "SMH",
     "CRSP US Large Cap Growth Index(PR)": "VUG",
     "나스닥 종합주가지수": "ONEQ",

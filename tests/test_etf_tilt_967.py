@@ -129,10 +129,10 @@ class Test작업:
         etfs = [(1, "VTI", "US", "미국 주식", "Large Blend", 1), (2, "IVV", "US", "미국 주식", "Large Blend", 1),
                 (3, "360750", "KR", "해외 주식", "S&P 500", 1), (4, "069500", "KR", "국내 주식", "코스피 200", 1),
                 # 넓은 지수가 아니라 핵심에서 빠진 업종 ETF — 후보 풀(11.5)에는 든다
-                (5, "SOXX", "US", None, "Technology", 0),
+                (5, "SOXQ", "US", None, "Technology", 0),
                 # 레버리지 — 풀에서도 빠진다
                 (6, "SOXL", "US", None, "Trading--Leveraged Equity", 0),
-                # 국내 상장 미국 지수 ETF (25.970) — 핵심 밖이어도 대리 보유(SOXX)로 국내 순위에 든다
+                # 국내 상장 미국 지수 ETF (25.970) — 핵심 밖이어도 대리 보유(SOXQ, 25.1238)로 국내 순위에 든다
                 (7, "381180", "KR", None, "PHLX Semiconductor Sector Index", 0),
                 # 같은 지수라도 커버드콜은 뺀다
                 (8, "999999", "KR", None, "PHLX Semiconductor Sector Index", 0),
@@ -155,8 +155,8 @@ class Test작업:
                 [eid, bucket, passed, 옛 if sym == "SOXL" else '{"criteria": [1]}'],
             )
 
-        holdings = {"VTI": [("C1", 50.0), ("C2", 50.0)], "IVV": [("C1", 90.0), ("C2", 10.0)], "SOXX": [("C1", 100.0)]}
-        series = {"S1": "VTI", "S2": "IVV", "S3": "SOXX", "S4": "SOXL"}  # 국내 반도체는 SOXX 대리
+        holdings = {"VTI": [("C1", 50.0), ("C2", 50.0)], "IVV": [("C1", 90.0), ("C2", 10.0)], "SOXQ": [("C1", 100.0)]}
+        series = {"S1": "VTI", "S2": "IVV", "S3": "SOXQ", "S4": "SOXL"}  # 국내 반도체는 SOXQ 대리
 
         series_of = series
 
@@ -220,12 +220,12 @@ class Test작업:
         run = c.execute("SELECT status, step_log FROM batch_runs WHERE job_name = 'etf_tilt'").fetchone()
         assert run[0] == "success" and json.loads(run[1])["updated"] == 7
         # 넓힌 풀 (25.968): 상위 비중 T 로 전체 순위. 상위 10% = AAPL 한 종목(2종목 중 하나)
-        assert [got[s]["tilt"]["rank_all"] for s in ("SOXX", "IVV", "VTI")] == [1, 2, 3]
-        assert got["SOXX"]["tilt"]["top_pct"] == 100.0 and got["SOXX"]["tilt"]["pool"] == "wide"
-        assert got["SOXX"]["tilt"]["market_top_pct"] == 50.0 and got["IVV"]["tilt"]["pool"] == "core"
+        assert [got[s]["tilt"]["rank_all"] for s in ("SOXQ", "IVV", "VTI")] == [1, 2, 3]
+        assert got["SOXQ"]["tilt"]["top_pct"] == 100.0 and got["SOXQ"]["tilt"]["pool"] == "wide"
+        assert got["SOXQ"]["tilt"]["market_top_pct"] == 50.0 and got["IVV"]["tilt"]["pool"] == "core"
         assert "tilt" not in got["SOXL"]  # 레버리지는 풀 밖 — 지난 실행의 순위도 지운다 (25.969)
-        # 국내 상장은 국내끼리 순위 (25.970): 반도체(SOXX 대리, T 100) 1위 · S&P 500(IVV 대리, T 90) 2위
-        assert got["381180"]["tilt"]["source_symbol"] == "SOXX" and got["381180"]["tilt"]["rank_all"] == 1
+        # 국내 상장은 국내끼리 순위 (25.970): 반도체(SOXQ 대리, T 100) 1위 · S&P 500(IVV 대리, T 90) 2위
+        assert got["381180"]["tilt"]["source_symbol"] == "SOXQ" and got["381180"]["tilt"]["rank_all"] == 1
         assert got["360750"]["tilt"]["rank_all"] == 2 and got["360750"]["tilt"]["rank_all_size"] == 2
         assert "tilt" not in got["999999"]
 

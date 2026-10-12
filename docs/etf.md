@@ -578,11 +578,13 @@ S_i       = 그 종목의 가장 새 장기 점수 = mean(밸류, 퀄리티) (sc
 | S&P 500 | IVV |
 | NASDAQ 100 | QQQ |
 | Dow Jones U.S. Dividend 100 Index(TR) · Dow Jones U.S. Dividend 100 Price Return Index | SCHD |
-| PHLX Semiconductor Sector Index | SOXX |
+| PHLX Semiconductor Sector Index | SOXQ |
 | MVIS US Listed Semiconductor 25 Index | SMH |
 | CRSP US Large Cap Growth Index(PR) | VUG |
 | 나스닥 종합주가지수 | ONEQ |
 | MSCI World | `[확인필요: URTH 의 N-PORT 와 매칭률]` |
+
+> 2026-10-12 정정 (docs/infra.md 25.1238): PHLX 반도체 지수의 대리는 SOXQ 다. 예전 표의 SOXX 는 2021-06 부터 ICE(현 NYSE) 반도체 지수를 따라 같은 지수가 아니었다 — 구성 종목·비중 상한이 다르다
 
 - 근거표에 "대리 보유 — 같은 지수를 따르는 IVV 의 N-PORT(기준 06-30)" 라고 적는다. 환헤지(H)·TR 여부는 보유 종목을 바꾸지 않는다
 - 짝이 없는 지수는 "보유 정보 없음" — 비슷한 지수로 지어내지 않는다
