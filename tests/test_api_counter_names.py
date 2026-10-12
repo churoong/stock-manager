@@ -173,6 +173,7 @@ DART소스 = ("dart", "dart_dividends", "dart_disclosures", "dart_insider")
     # 사유 없는 면제는 곧 잊힌 구멍이다
     "scripts/probe_llm_filings.py": "손으로만 도는 시험(infra 25.1073). 한 번에 고유번호 1 + 12종목×2 = 25회 — 일 한도의 0.1%",
     "scripts/probe_dart_audit.py": "손으로만 도는 필드 탐침(infra 25.1138). 한 번에 고유번호 1 + 10종목 = 11회 — 일 한도의 0.06%",
+    "scripts/probe_dart_cb.py": "손으로만 도는 필드 탐침(infra 25.1177). 목록 최대 20일치(하루 1~2쪽) + 발행 6건 — 일 한도의 0.3% 이하",
 }
 
 
