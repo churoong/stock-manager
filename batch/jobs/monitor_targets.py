@@ -196,8 +196,13 @@ def rights_factors_since(client: TursoClient, stock_id: int, since: str) -> list
             " WHERE s.id = ? AND e.kind = 'rights' AND e.record_date > ? ORDER BY e.record_date",
             [stock_id, since],
         ).rows]  # fmt: skip
-    except Exception:  # noqa: BLE001 — 표가 없으면(KIS 키 없음) 모른다
-        return []
+    except Exception as exc:  # noqa: BLE001
+        # 표가 없으면(KIS 키 없음) 모른다 — 맞추지 않는다. 그 밖의 읽기 실패는 올린다:
+        # 빈 목록으로 삼키면 계수가 1 이 되어 권리락 전 매수분에 거짓 손절이 난다(이 함수가 막으려던 일).
+        # 매도 플래그는 부르는 쪽이 받아 예전처럼 다룬다
+        if db.표가_없나(exc):
+            return []
+        raise
     out: list[tuple[str, float]] = []
     for 기준일 in 기준일들:
         rows = client.execute(

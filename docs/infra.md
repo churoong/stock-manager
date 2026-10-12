@@ -28867,6 +28867,8 @@ FIFO(`open_buy_lots`, `services/portfolio.match_fifo` 와 같은 순서 25.397)�
 
 **되돌리기 확인** — `monitor_targets.py`·`sell_flags.py` 를 되돌리면 `Test권리락_원가는_매수분마다_25_1197` 셋이 깨진다.
 
+**덧 (같은 날)** — `rights_factors_since` 가 처음에 모든 읽기 실패를 빈 목록으로 삼켜 `test_no_swallowed_reads` 에 걸렸다. 빈 목록이면 계수가 1 이 되어 고치려던 거짓 손절이 되살아나므로, 표 없음(`db.표가_없나`)만 넘기고 그 밖은 올린다. 매도 플래그는 부르는 쪽(`_기업행위`)이 받아 예전처럼 (False, 1.0) 으로 둔다.
+
 ### 25.1198 장중 공시 알림 경계가 접수번호 순서를 가정해 금감원 공시를 놓침
 
 **증상** (장중 감사 재현, `audit_intraday/audit.test.ts`) — 보유 종목 공시 알림(트리거 e)은 앞 두 거래일부터 공시를 묻고, 창 안에서 이미 알린 공시는
