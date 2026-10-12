@@ -2265,6 +2265,7 @@ SQL read operations are forbidden (reads are blocked, ...)
 | 25.1215 | DB 연결을 못 열면 일일 배치가 알림 없이 끝남 |
 | 25.1216 | 리포트 저장 실패 알림이 "웹에 전체가 있다" 고 스스로 모순 |
 | 25.1217 | 웹 숫자 표시 — 종목 상세 −0, ETF 구성 몫 끝값, 복기 수익률과 표지 엇갈림 |
+| 25.1218 | Turso 연결 오류 글의 DB 호스트가 공개 Actions 로그에 찍힘 |
 
 ### 25.1 왜 D1 인가
 
@@ -29180,3 +29181,12 @@ CLAUDE.md "배치 실패 시 텔레그램 실패 알림" 을 어긴다. 남는 �
 **그대로 둔 것** — `money()` 의 "$-1,234.50" 꼴은 음수 달러를 넘기는 화면이 없어 잠재일 뿐이다(감사 확인).
 
 **시험** — `web/__tests__/displayRound1217.test.ts`. **되돌리기 확인** — `stockDetail.ts` 를 되돌리면 −0 검사 둘이 깨진다.
+
+### 25.1218 Turso 연결 오류 글의 DB 호스트가 공개 Actions 로그에 찍힘
+
+**무엇** — `TursoClient._post_with_retry` 가 requests 연결 오류 글을 그대로 `TursoError`·경고 로그에 실었다. 그 글에는 `HTTPSConnectionPool(host='<DB 호스트>', …)` 가 들어 있다.
+`daily-kr/us.yml` 의 "시세 사본 맞추기" 단계(`scripts/price_replica.py`)는 `ops_tee` 를 거치지 않고 `print(f"… ({error}) …")` 하므로 Turso 가 흔들린 날 **공개 Actions 로그에 DB 호스트**가 찍힌다.
+Actions 의 시크릿 가림은 `TURSO_DATABASE_URL` 값 전체(`libsql://…`)만 맞춰 호스트만 나오면 못 가린다. 토큰은 아니지만 공개 저장소 규칙(운영 출력은 공개 로그에 찍지 않는다)에 어긋난다. (일일 배치 실패 흐름 감사, 재현 확인)
+
+**고침** — 원천에서 가린다: `_가림` 이 오류 글의 호스트를 `<db-host>` 로 바꾼 뒤 `TursoError` 와 재시도 경고에 싣는다. 단계마다 `ops_tee` 를 씌우는 것보다 빠뜨릴 자리가 적다.
+**시험** — `tests/test_turso_host_mask_1218.py`: 호스트를 실은 연결 오류를 던지게 하고 예외 글·로그에 호스트가 없는지. **되돌리기 확인** — `turso.py` 를 되돌리면 깨진다.

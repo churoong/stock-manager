@@ -191,6 +191,13 @@ class TursoClient:
         self.reads = ReadCounter()
         self._recording = False  # 카운터를 적는 동안 그 쓰기·읽기를 또 세지 않게
 
+    def _가림(self, text: str) -> str:
+        """오류 글에서 DB 호스트를 가린다 (docs/infra.md 25.1218). requests 오류는 `host='….turso.io'` 를 싣는데
+        시세 사본 맞추기 등 `ops_tee` 를 거치지 않는 단계가 이 글을 **공개 Actions 로그**에 찍었다.
+        Actions 의 시크릿 가림은 `libsql://…` 전체만 맞춰 호스트만 따로 나오면 가리지 못한다"""
+        host = self._endpoint.split("/")[2] if "//" in self._endpoint else ""
+        return text.replace(host, "<db-host>") if host else text
+
     def close(self) -> None:
         self._flush_writes(self.writes.take())
         self._flush_reads(self.reads.take())
@@ -243,8 +250,8 @@ class TursoClient:
                 resp = self._session.post(self._endpoint, json=payload, timeout=TIMEOUT)
             except requests.RequestException as exc:
                 if attempt == attempts:
-                    raise TursoError(f"Turso 통신 실패: {exc}") from exc
-                reason = str(exc)
+                    raise TursoError(f"Turso 통신 실패: {self._가림(str(exc))}") from exc
+                reason = self._가림(str(exc))
             else:
                 if resp.status_code not in RETRYABLE_STATUS or attempt == attempts:
                     return resp
