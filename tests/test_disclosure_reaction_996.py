@@ -166,3 +166,18 @@ def test_반대_다른_사건은_유형에_넣지_않는다() -> None:
     assert dr.classify("주요사항보고서(타법인주식및출자증권취득결정)") == "acquire"
     assert dr.classify("주요사항보고서(회사분할결정)") == "merger"
     assert dr.classify("주요사항보고서(회사합병결정)") == "merger"
+
+
+def test_창은_시장_거래일로_세고_정지면_따로_센다() -> None:
+    """정지 70거래일 뒤 값이 "5거래일째" 로 들어가고, 아직 정지 중이면 조용히 빠졌다 (docs/infra.md 25.1154)."""
+    시장 = DATES + ["2026-03-12", "2026-03-13", "2026-03-16"]
+    index = {d: 1000.0 for d in 시장}
+    # 03-03 공시 뒤 03-04 부터 정지, 03-16 에 재개(−45%). 시장 5거래일째는 03-09 — 그날 종가가 없다
+    dates, closes = ["2026-03-02", "2026-03-03", "2026-03-16"], [100.0, 98.0, 55.0]
+    assert dr.car(dates, closes, [1.0] * 3, index, "2026-03-03") == dr.HALTED
+    # 정지 없이 그날 종가가 있으면 그 값 — 종목 거래일이 아니라 시장 거래일로 센 5거래일째(03-09)
+    dates2 = ["2026-03-02", "2026-03-03", "2026-03-09"]
+    assert round(dr.car(dates2, [100.0, 98.0, 90.0], [1.0] * 3, index, "2026-03-03"), 6) == -0.10
+    rows = {r["type"]: r for r in dr.summarize({"fraud": [-0.02] * 40}, {"fraud": 3})}
+    assert rows["fraud"]["halted"] == 3 and rows["buyback"]["halted"] == 0
+    assert dr.line(rows["fraud"]).endswith("(40건, 거래정지로 못 잰 3건 빠짐)")

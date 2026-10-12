@@ -126,7 +126,8 @@ DISCLOSURES_SQL = (
     "SELECT d.stock_id, d.title, d.disclosed_at, d.receipt_no FROM disclosures d JOIN stocks s ON s.id = d.stock_id"
     " WHERE s.country = 'KR' AND d.disclosed_at >= ? ORDER BY d.disclosed_at DESC"
 )
-REACTION_SQL = "SELECT type, label, n, mean_pct, median_pct, pos_pct FROM disclosure_reaction"
+# `halted` — 5거래일째 거래정지로 못 잰 건수 (25.1154)
+REACTION_SQL = "SELECT type, label, n, mean_pct, median_pct, pos_pct, halted FROM disclosure_reaction"
 INSERT = (
     "INSERT INTO stock_verdicts (stock_id, market, verdict, headline, detail_json, evidence_json, score_as_of,"
     " signal_as_of, computed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"

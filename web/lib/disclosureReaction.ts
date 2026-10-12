@@ -17,10 +17,12 @@ export interface ReactionRow {
   median_pct: number | null;
   pos_pct: number | null;
   window_days: number;
+  /** 5거래일째 거래정지로 못 잰 건수 (25.1154). 마이그레이션 0062 전 행에는 없다 */
+  halted?: number | null;
 }
 
-export const REACTION_ROWS = `SELECT type, label, keywords, priority, n, mean_pct, median_pct, pos_pct, window_days
-FROM disclosure_reaction ORDER BY priority`;
+// `*` 로 읽는다 — `halted` 열(0062)이 아직 없는 DB 에서도 장중 경로가 깨지지 않게 (25.1154)
+export const REACTION_ROWS = `SELECT * FROM disclosure_reaction ORDER BY priority`;
 
 /** 이 낱말이 있으면 어느 유형도 아니다 — batch/services/disclosure_reaction.EXCLUDE 와 같아야 한다 (25.1153) */
 export const REACTION_EXCLUDE = ["정정", "해지", "결과보고", "종속회사", "자회사의주요경영사항"];
@@ -46,5 +48,7 @@ const signed = (v: number) => `${v > 0 ? "+" : ""}${v.toFixed(1)}%`;
 export function reactionLine(r: ReactionRow | null): string | null {
   if (!r || r.n < REACTION_MIN_N || r.median_pct === null || r.mean_pct === null || r.pos_pct === null) return null;
   // 공시일 반응이 들어 있다 — 알림 뒤에 얻을 수 있는 몫이 아니다 (25.1013)
-  return `${r.label} 공시: 전날 종가부터 ${r.window_days}거래일째까지(공시일 반응 포함) 지수 대비 중앙값 ${signed(r.median_pct)} · 평균 ${signed(r.mean_pct)} · 오른 비율 ${r.pos_pct.toFixed(0)}% (${r.n}건)`;
+  // 정지로 못 잰 건수를 말한다 (25.1154) — 배치 `line` 과 같은 문장
+  const 정지 = Number(r.halted ?? 0);
+  return `${r.label} 공시: 전날 종가부터 ${r.window_days}거래일째까지(공시일 반응 포함) 지수 대비 중앙값 ${signed(r.median_pct)} · 평균 ${signed(r.mean_pct)} · 오른 비율 ${r.pos_pct.toFixed(0)}% (${r.n}건${정지 ? `, 거래정지로 못 잰 ${정지}건 빠짐` : ""})`;
 }

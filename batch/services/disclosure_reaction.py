@@ -76,29 +76,47 @@ class Event:
     type: str
 
 
+#: `car` 가 "5거래일째에 거래정지라 못 잼" 을 알리는 값 — None(아직 덜 지남·자료 없음)과 가른다 (25.1154)
+HALTED = "halted"
+
+
 def car(dates: list[str], closes: list[float], ratios: list[float | None], index: dict[str, float],
-        day: str) -> float | None:  # fmt: skip
-    """한 공시의 초과수익. 재지 못하면 None(전 거래일·5거래일째·지수가 없거나 기업행위)."""
-    k = bisect.bisect_left(dates, day)  # 첫 "공시일 이후" 거래일
-    if k == 0 or k + WINDOW_DAYS - 1 >= len(dates):
+        day: str) -> float | str | None:  # fmt: skip
+    """한 공시의 초과수익. 재지 못하면 None(전 거래일·5거래일째·지수가 없거나 기업행위), 5거래일째에 그 종목
+    종가가 없으면(거래정지·상장폐지) `HALTED`.
+
+    **창은 시장 거래일(지수 날짜)로 센다** (25.1154, 감사 재현). 예전엔 종목 자신의 거래일로 세어 정지 70거래일이
+    끼면 "5거래일째" 가 104일 뒤가 되었고, 아직 정지 중이면 None 으로 빠졌다 — 횡령·배임·불성실공시처럼 정지가
+    잦은 유형의 중앙값이 덜 나쁘게 나왔다. 전 거래일 종가는 그날까지의 마지막 종가다
+    (그 전부터 정지였으면 정지 전 값)."""
+    시장 = sorted(index)
+    k = bisect.bisect_left(시장, day)  # 첫 "공시일 이후" 시장 거래일
+    if k == 0 or k + WINDOW_DAYS - 1 >= len(시장):
         return None
-    i0, i1 = k - 1, k + WINDOW_DAYS - 1
+    d0, d1 = 시장[k - 1], 시장[k + WINDOW_DAYS - 1]
+    i0 = bisect.bisect_right(dates, d0) - 1  # d0 이하 마지막 종가
+    if i0 < 0:
+        return None
+    i1 = bisect.bisect_left(dates, d1)
+    if i1 >= len(dates) or dates[i1] != d1:
+        return HALTED
     rs = [r for r in ratios[i0 : i1 + 1] if r]
     if rs and max(rs) / min(rs) - 1 > ACTION_TOLERANCE:
         return None
-    a, b = index.get(dates[i0]), index.get(dates[i1])
+    a, b = index.get(d0), index.get(d1)
     if not a or not b or closes[i0] <= 0:
         return None
     return (closes[i1] / closes[i0] - 1) - (b / a - 1)
 
 
-def summarize(values: dict[str, list[float]]) -> list[dict]:
-    """유형 → 초과수익 목록 → 줄. 퍼센트(%, 소수 둘째 자리)."""
+def summarize(values: dict[str, list[float]], halted: dict[str, int] | None = None) -> list[dict]:
+    """유형 → 초과수익 목록 → 줄. 퍼센트(%, 소수 둘째 자리). `halted` 는 5거래일째 거래정지로 못 잰 건수."""
     out = []
     for key, label, words in TYPES:
         xs = values.get(key) or []
         out.append({
             "type": key, "label": label, "keywords": list(words), "n": len(xs),
+            "halted": int((halted or {}).get(key) or 0),
             "mean_pct": round(statistics.fmean(xs) * 100, 2) if xs else None,
             "median_pct": round(statistics.median(xs) * 100, 2) if xs else None,
             "pos_pct": round(sum(1 for x in xs if x > 0) / len(xs) * 100, 1) if xs else None,
@@ -113,6 +131,9 @@ def line(row: dict | None) -> str | None:
     # **공시일 반응이 들어 있다고 말한다** (25.1013, 14회차 교차검증). "공시 뒤 5거래일" 이라 적었는데 실제로는
     # 공시 전날 종가부터 잰다 — 알림을 받은 사람은 이미 지나간 공시일 몫을 앞으로 올 것처럼 읽었다
     # (악재면 바닥에서 팔게 만든다)
+    # 정지로 못 잰 건수를 말한다 (25.1154) — 그 사건들은 대개 나쁜 쪽인데 숫자에 없다
+    정지 = int(row.get("halted") or 0)
     return (f"{row['label']} 공시: 전날 종가부터 {WINDOW_DAYS}거래일째까지(공시일 반응 포함) 지수 대비 중앙값 "
             f"{row['median_pct']:+.1f}% · "
-            f"평균 {row['mean_pct']:+.1f}% · 오른 비율 {row['pos_pct']:.0f}% ({row['n']}건)")  # fmt: skip
+            f"평균 {row['mean_pct']:+.1f}% · 오른 비율 {row['pos_pct']:.0f}% ({row['n']}건"
+            + (f", 거래정지로 못 잰 {정지}건 빠짐" if 정지 else "") + ")")  # fmt: skip

@@ -50,7 +50,7 @@ COVERAGE = (
 )
 UPSERT = (
     "INSERT INTO disclosure_reaction (type, label, keywords, priority, n, mean_pct, median_pct, pos_pct, window_days,"
-    " since, as_of, computed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    " since, as_of, computed_at, halted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 )
 
 
@@ -125,21 +125,25 @@ def compute(client: TursoClient, today: date) -> dict:
     ).rows:
         index[str(r[0])][str(r[1])] = float(r[2])
     values: dict[str, list[float]] = defaultdict(list)
+    정지: dict[str, int] = defaultdict(int)
     for e in events.values():
         s = series.get(e.stock_id)
         if s:
             x = dr.car(s[0], s[1], s[2], index[e.index_code], e.day)
-            if x is not None:
+            if x == dr.HALTED:
+                정지[e.type] += 1
+            elif isinstance(x, float):
                 values[e.type].append(x)
-    rows = dr.summarize(values)
+    rows = dr.summarize(values, 정지)
     as_of = max((s[0][-1] for s in series.values() if s[0]), default=None)
     stamp = db.now_iso()
     client.batch([("DELETE FROM disclosure_reaction", [])] + [
         (UPSERT, [r["type"], r["label"], json.dumps(r["keywords"], ensure_ascii=False), i, r["n"], r["mean_pct"],
-                  r["median_pct"], r["pos_pct"], dr.WINDOW_DAYS, first, as_of, stamp])
+                  r["median_pct"], r["pos_pct"], dr.WINDOW_DAYS, first, as_of, stamp, r["halted"]])
         for i, r in enumerate(rows)
     ])  # fmt: skip
-    return {"events": len(events), "measured": sum(len(v) for v in values.values()), "since": first, "as_of": as_of,
+    return {"events": len(events), "measured": sum(len(v) for v in values.values()), "halted": sum(정지.values()),
+            "since": first, "as_of": as_of,
             "ready": [r["type"] for r in rows if r["n"] >= dr.MIN_N]}  # fmt: skip
 
 
