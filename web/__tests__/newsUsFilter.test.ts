@@ -107,6 +107,25 @@ describe("영어 낱말과 같은 티커·이름 (docs/infra.md 25.1098, 감사 
     expect(titleMentions("Dollar General shares jump", "DG", "Dollar General Corporation")).toBe(true);
   });
 
+  it("모음 기사 제목의 보통 낱말이 회사를 부르지 않는다 (docs/infra.md 25.1191, 뉴스 감사 #5)", () => {
+    const 경우: Array<[string, string, string]> = [
+      ["Live updates: Nvidia, Apple, Tesla slide as yields jump", "LYV", "Live Nation Entertainment, Inc."],
+      ["Holiday travelers face delays; American, United, Southwest cut flights", "TRV", "The Travelers Companies, Inc."],
+      ["Delta variant fears hit cruise stocks: Carnival, Royal Caribbean, Norwegian", "DAL", "Delta Air Lines, Inc."],
+      ["Old economy stocks rally: Exxon, Chevron, Caterpillar", "ODFL", "Old Dominion Freight Line, Inc."],
+      ["Results don't match hype: Snowflake, Datadog, MongoDB sink", "MTCH", "Match Group, Inc."],
+      ["Regions hit by storms: insurers Allstate, Progressive fall", "RF", "Regions Financial Corporation"],
+    ];
+    for (const [제목, 티커, 이름] of 경우) {
+      expect(filterForSymbol([기사(제목, [티커, "AAA", "BBB"])], 티커, 이름), 티커).toHaveLength(0);
+    }
+    // 두 낱말로 부르거나 티커를 적으면 그대로 남는다
+    expect(titleMentions("Delta Air Lines, United, American lift guidance", "DAL", "Delta Air Lines, Inc.")).toBe(true);
+    expect(titleMentions("Airlines rally: DAL, UAL, AAL", "DAL", "Delta Air Lines, Inc.")).toBe(true);
+    // 단독 기사(티커 3개 미만)는 제목을 보지 않는다 — 첫 낱말 목록이 단독 기사를 버리지 않는다
+    expect(filterForSymbol([기사("Delta cuts capacity", ["DAL"])], "DAL", "Delta Air Lines, Inc.")).toHaveLength(1);
+  });
+
   it("모음 기사에서 낱말 티커 종목에 남의 제목이 붙지 않는다", () => {
     const 피드 = [기사("Tesla, Apple, Microsoft all slide", ["TSLA", "AAPL", "MSFT", "ALL"])];
     expect(filterForSymbol(피드, "ALL", "Allstate Corporation")).toHaveLength(0);

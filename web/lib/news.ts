@@ -137,6 +137,13 @@ const 흔한_첫낱말 = new Set([
   "general", "american", "united", "first", "national", "international", "global", "new", "home", "bank", "trade",
   // 25.1098(감사 재현): "raise price targets" 가 Target, "Best stocks to buy" 가 Best Buy, "Dollar slides" 가 Dollar General
   "target", "best", "dollar", "news", "energy", "digital", "western", "southern", "state", "public", "capital", "world",
+  // 25.1191(뉴스 감사 #5): 모음 기사 제목의 보통 낱말이 회사를 부른 것으로 남았다 — "Live updates:" 가 Live Nation, "Holiday
+  // travelers" 가 Travelers, "Delta variant" 가 Delta Air Lines, "Old economy stocks" 가 Old Dominion, "don't match hype" 가
+  // Match Group, "Regions hit by storms" 가 Regions Financial. 이름 첫 낱말이 흔한 영어 낱말인 대형주를 함께 넣는다 —
+  // 그 종목은 모음 기사(티커 3개 이상)에서만 두 낱말을 요구하므로 단독 기사는 그대로 받는다 [확인필요: 목록]
+  "live", "travelers", "delta", "old", "match", "regions", "progressive", "southwest", "carrier", "booking", "block",
+  "ball", "discover", "equity", "host", "pool", "mosaic", "principal", "republic", "fifth", "align", "arch", "snap",
+  "unity", "zoom", "ross", "constellation", "dominion", "realty", "union", "alliance", "regency",
 ]);
 
 /**

@@ -2238,6 +2238,7 @@ SQL read operations are forbidden (reads are blocked, ...)
 | 25.1188 | 포트폴리오 평가 종가도 수정주가 빈 행을 메운다 |
 | 25.1189 | 손절선에 닿은 보유 종목에 2부가 더 사는 금액을 냄 (리포트 감사 #2) |
 | 25.1190 | 예측 성적표 기준 종가의 수정주가 빈 행 (verdicts 하루 종가 구멍) |
+| 25.1191 | 미국 모음 기사: 보통 낱말 첫 낱말 이름이 남의 제목을 받음 (뉴스 감사 #5) |
 
 ### 25.1 왜 D1 인가
 
@@ -28729,3 +28730,20 @@ compose 뒤에 붙인다)을 만나면 끊는다 — 그 절에 "2부 포트폴�
 앞뒤 읽기가 실패하면 25.1152 처럼 그 기록일을 None 으로 돌려 다음에 다시 본다. 오늘 종가(`now_close`)는 계열의 끝이라 원 종가가 맞다.
 
 **되돌리기 확인** — `batch/jobs/verdicts.py` 를 되돌리면 `test_기준일이_빈_행이면_앞뒤_계수로_메워_채점한다` 가 깨진다(구간 밖 채점).
+
+### 25.1191 미국 모음 기사: 보통 낱말 첫 낱말 이름이 남의 제목을 받음 (뉴스 감사 #5)
+
+**증상** — 미국 뉴스의 모음 기사(티커 3개 이상 달린 항목)는 제목이 그 종목을 부를 때만 남기는데(25.745), 이름 첫 낱말이 **보통 영어 낱말**이면
+그 낱말만으로 부른 것으로 쳤다. 재현(`audit_news/us_title.mts`, `web/lib/news.ts` 그대로): "Live updates: Nvidia, Apple, Tesla slide" 가 Live Nation,
+"Holiday travelers face delays" 가 Travelers, "Delta variant fears hit cruise stocks" 가 Delta Air Lines, "Old economy stocks rally" 가
+Old Dominion, "Results don't match hype" 가 Match Group, "Regions hit by storms" 가 Regions Financial 기사로 **여섯 모두 남았다**.
+
+**아팠나** — 그렇다. 남은 기사의 제목 점수(대개 남의 하락·상승)가 그 종목 감성에 들어간다 — "Delta variant fears" 는 부정이라 Delta 보유자에게
+감성 급락 황색 후보가 거짓으로 쌓인다. 25.1098 이 target·best·dollar 를 넣으며 같은 모양을 고쳤는데 목록이 좁았다.
+
+**고침** — `흔한_첫낱말` 에 여섯과, 이름 첫 낱말이 흔한 영어 낱말인 대형주(progressive·southwest·carrier·booking·block·ball·discover·equity·host·
+pool·mosaic·principal·republic·fifth·align·arch·snap·unity·zoom·ross·constellation·dominion·realty·union·alliance·regency)를 더했다. 이 목록은
+**모음 기사에서만** 두 낱말("delta air")을 요구한다 — 단독 기사(티커 1~2개)는 제목을 보지 않으므로 그대로 받고, 티커(DAL)를 적은 제목도 남는다.
+잃는 것: 모음 기사가 "Delta" 한 낱말로만 부른 진짜 기사. 남의 기사가 붙는 것보다 덜 틀린다고 본다(25.1098 과 같은 판단). 목록은 `[확인필요]`.
+
+**되돌리기 확인** — `web/lib/news.ts` 를 되돌리면 vitest `모음 기사 제목의 보통 낱말이 회사를 부르지 않는다` 가 깨진다.
