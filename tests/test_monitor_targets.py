@@ -734,3 +734,20 @@ class Test유상증자_권리락은_막지_않는다_25_1139:
         assert job.rights_only([("rights", "2026-09-16")], "2026-09-15", "2026-09-16")
         assert not job.rights_only([("rights", "2026-09-16"), ("dividend", "2026-09-15")], "2026-09-15", "2026-09-16")
         assert not job.rights_only([("split", "2026-09-16")], "2026-09-15", "2026-09-16")
+
+
+def test_유상증자_권리락이면_평균단가에_같은_계수를_곱해_손절을_댄다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """권리락 첫날 기계적 하락(계수 0.9)만으로 "손절선 터치" 가 나지 않게 — 시세와 같은 잣대 (25.1139 구현 뒤 반박 검증)."""
+    mem = Test유상증자_권리락은_막지_않는다_25_1139._준비([("rights", "2026-09-16")])
+    monkeypatch.setattr(job, "TursoClient", lambda: mem)
+    mem.conn.execute("UPDATE stocks SET yahoo_symbol = '005930.KS' WHERE id = 1")
+    mem.conn.execute(
+        "INSERT INTO positions (stock_id, quantity, currency, avg_price, avg_fx, cost, cost_krw, first_buy_date,"
+        " horizon, updated_at) VALUES (1, 10, 'KRW', 100000, 1, 1000000, 1000000, '2026-01-02', 'short', 't')"
+    )
+    assert job.action_scale(mem, 1, "KR") == pytest.approx(0.9)  # type: ignore[arg-type]
+    assert job.run("KR") == 0
+    reasons, 손절 = mem.conn.execute("SELECT reasons, stop_price FROM monitor_targets WHERE stock_id = 1").fetchone()
+    assert "action_guard" not in json.loads(reasons)
+    # 단기 손절 −7%: 100,000 × 0.9 × 0.93 = 83,700 (권리락 전 평균단가 그대로면 93,000 — 90,000 시세에 바로 터치)
+    assert 손절 == pytest.approx(83_700)

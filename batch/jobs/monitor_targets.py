@@ -95,6 +95,18 @@ def recent_action(client: TursoClient, stock_id: int, market: str) -> bool:
 
     국내: 그 종목 행의 (앞 종가, 종가, 거래소 등락률)로 조정 계수를 되살린다(`adjust.factor_of`, 25.138 과 같은 식).
     미국: 수정주가 재수집 대기열의 분할 표시(두 비율이 같음)가 그 기간 안에 감지됐나. 모르면 False.
+    유상증자 권리락뿐으로 확인되면 False (25.1139) — `action_scale` 을 본다.
+    """
+    return action_scale(client, stock_id, market) is None
+
+
+def action_scale(client: TursoClient, stock_id: int, market: str) -> float | None:
+    """보유 목표·손절을 댈 때 평균단가에 곱할 값. **None 이면 대지 않는다**(기업행위 경계, 25.533).
+
+    1.0 = 최근 기업행위 없음. 그 밖의 값 = 20거래일 안의 계수가 모두 **유상증자 권리락**으로 확인된 경우의 계수 곱
+    (25.1139). 권리락 날 시세는 신주인수권 가치만큼 기계적으로 떨어지는데(할인 큰 주주배정이면 수십 %), 평균단가는 그 전
+    값이라 그대로 대면 권리락 첫날 "손절선 터치" 가 난다(25.1139 구현 뒤 반박 검증). 시세 계열(수정주가)과 같은 계수를
+    평균단가에도 곱해 같은 잣대로 본다.
     """
     from batch.services import adjust as adj
 
@@ -102,27 +114,30 @@ def recent_action(client: TursoClient, stock_id: int, market: str) -> bool:
         # 분할 감지 기록 (`adjust_drift.SPLIT_LOG_KEY`, 25.535) — 대기열 표시는 배당 감지와 뒤엉켜 새 분할을 놓쳤다
         감지 = (db.get_setting(client, "us_split_detections", {}) or {}).get(str(stock_id))
         if not 감지:
-            return False
-        from datetime import UTC, datetime, timedelta
-
-        return str(감지) >= (datetime.now(UTC) - timedelta(days=ACTION_GUARD_ROWS * 7 // 5)).isoformat()
+            return 1.0
+        경계선 = (datetime.now(UTC) - timedelta(days=ACTION_GUARD_ROWS * 7 // 5)).isoformat()
+        return None if str(감지) >= 경계선 else 1.0
     rows = client.execute(
         "SELECT close, change_pct, date FROM prices WHERE stock_id = ? AND close IS NOT NULL AND close > 0"
         " ORDER BY date DESC LIMIT ?",
         [stock_id, ACTION_GUARD_ROWS + 1],
     ).rows
-    날들 = [
-        str(day)[:10]
-        for (close, pct, day), (prev, _p, _d) in zip(rows, rows[1:], strict=False)
-        if adj.is_action(adj.factor_of(float(prev), float(close), None if pct is None else float(pct)))
-    ]
-    if not 날들:
-        return False
+    계수들: list[tuple[str, float]] = []
+    for (close, pct, day), (prev, _p, _d) in zip(rows, rows[1:], strict=False):
+        f = adj.factor_of(float(prev), float(close), None if pct is None else float(pct))
+        if adj.is_action(f):
+            계수들.append((str(day)[:10], f))
+    if not 계수들:
+        return 1.0
     # **유상증자 권리락으로 확인되면 막지 않는다** (docs/factors.md 12.20, docs/infra.md 25.1139 — 18회차 검증 B).
     # 계수만으로는 유상증자 권리락과 작은 무상증자를 가르지 못해, 유상증자 뒤 20거래일 동안 보유 종목의 목표·손절
-    # 감시가 꺼지고 매도 플래그에 "수량 확인" 이 붙었다. 권리락이면 수량·평균단가가 그대로라 손절선이 맞다 —
-    # 증자 뒤 하락 구간에 손절이 꺼졌다
-    return not all(_유상_권리락(client, stock_id, 날) for 날 in 날들)
+    # 감시가 꺼지고 매도 플래그에 "수량 확인" 이 붙었다. 권리락이면 수량이 그대로라 손절선이 맞다(계수만 맞추면)
+    if not all(_유상_권리락(client, stock_id, 날) for 날, _f in 계수들):
+        return None
+    배 = 1.0
+    for f in (f for _날, f in 계수들):
+        배 *= f
+    return 배
 
 
 def rights_only(events: list[tuple[str, str]], action_day: str, next_day: str) -> bool:
@@ -275,7 +290,8 @@ def build_targets(client: TursoClient, market: str, now: str) -> list[tuple]:
         t["reasons"].append("holding")
         # 기업행위 표시는 ETF 보다 **먼저** 본다 (25.925, 감사). 웹은 이 표시로 관심 목표가를 거르는데, ETF 를 먼저
         # 건너뛰어 보유+관심 ETF 가 분할 뒤 20거래일 동안 분할 전 관심 목표가로 "도달" 알림을 받을 수 있었다
-        경계 = recent_action(client, int(r["stock_id"]), market)
+        배율 = action_scale(client, int(r["stock_id"]), market)
+        경계 = 배율 is None
         if 경계:
             t["reasons"].append("action_guard")
         if r.get("asset_type") == "etf":
@@ -290,7 +306,9 @@ def build_targets(client: TursoClient, market: str, now: str) -> list[tuple]:
             # 사용자가 매매 기록을 고치기 전까지 분할 전 값이라, 1:5 분할 뒤 19,800원 시세에 "손절선 93,000원 터치"
             # 가 매일 나갔다(25.218 은 보유는 해당 없다고 적었지만 틀렸다). 매도 플래그·리포트가 수량 확인을 따로 말한다
             continue
-        t["target_price"], t["stop_price"] = holding_levels(float(r["avg_price"]), r["horizon"], targets_setting)
+        # 유상증자 권리락이면 평균단가에 같은 계수를 곱해 권리락 뒤 시세와 같은 잣대로 (25.1139, 구현 뒤 반박 검증)
+        평균 = float(r["avg_price"]) * (배율 or 1.0)
+        t["target_price"], t["stop_price"] = holding_levels(평균, r["horizon"], targets_setting)
         # 분할 매수 계획의 다음 차수 (docs/intraday.md 2절 tranche, 25.999) — 기업행위·ETF 는 위에서 이미 건너뛰었다
         t["tranche"] = next_tranche(client, int(r["stock_id"]), cal.local_today(market))
 
