@@ -359,7 +359,8 @@ def render_portfolio(portfolio: PortfolioView, picks: list[StockPick]) -> str:
         lines.append("")
         for allocation in portfolio.allocations:
             lines.append(
-                f"{allocation.name}  {_money(allocation.amount, allocation.currency)} "
+                # 미국 목록 이름 꼬리("Common Stock" 등)는 1부처럼 뗀다 (25.957 을 2부·제외 줄에도, 25.1181)
+                f"{display_name(allocation.name)}  {_money(allocation.amount, allocation.currency)} "
                 f"({fixed(allocation.weight_pct, 1)}%)"
             )
             for i, tranche in enumerate(allocation.tranches, 1):
@@ -380,7 +381,7 @@ def render_portfolio(portfolio: PortfolioView, picks: list[StockPick]) -> str:
         lines.append("")
         lines.append("배분에서 빠진 종목")
         for item in portfolio.excluded:
-            line = f"  {item.name} — {item.reason}"
+            line = f"  {display_name(item.name)} — {item.reason}"
             if item.detail:
                 line += f" ({item.detail})"
             lines.append(line)
