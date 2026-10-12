@@ -37,6 +37,8 @@ from batch.sources import sec_facts as sf
 log = logging.getLogger("us_financials")
 
 JOB_NAME = "us_financials"
+#: 종목 몇 개만 받은 실행(`only_ids`, 참고 분석)의 기록 이름 — 주간 요약 경고를 가리지 않게 (25.1236)
+JOB_NAME_ONE = "us_financials_one"
 #: 정의처는 `batch/sources/dart.ANNUAL_REPORT_CODE` 하나다 (docs/infra.md 25.143)
 ANNUAL_REPORT_CODE = dart.ANNUAL_REPORT_CODE
 
@@ -182,7 +184,7 @@ def run(min_turnover: float | None, limit: int | None, only_ids: list[int] | Non
 
         today = datetime.now(UTC).date()
         run_id = db.start_batch_run(
-            client, job_name=JOB_NAME, market="US", trade_date=today.isoformat()
+            client, job_name=JOB_NAME_ONE if only_ids else JOB_NAME, market="US", trade_date=today.isoformat()
         )
 
         sec = sec_edgar.SecClient()

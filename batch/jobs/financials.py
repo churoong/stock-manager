@@ -37,6 +37,10 @@ from batch.sources import dart
 log = logging.getLogger("financials")
 
 JOB_NAME = "financials"
+#: 종목 몇 개만 받은 실행(`only_ids` — 참고 분석)의 기록 이름 (docs/infra.md 25.1236, metrics 25.1085 와 같은 까닭).
+#: 주간 작업과 같은 이름이면 월요일 수집이 DART 점검으로 partial 이 된 날, 아침 참고 분석의 한 종목 성공이 화요일 재시도
+#: (`--skip-if-ran-within`)를 "최근에 돌았다" 로 건너뛰게 해 유니버스 새 분기·정정이 한 주 밀렸다
+JOB_NAME_ONE = "financials_one"
 
 # 호출 사이 간격. DART 가 초당 한도를 공개하지 않아 보수적으로 둔다.
 CALL_INTERVAL_SECONDS = 0.3
@@ -391,7 +395,7 @@ def run(
     try:
         db.apply_migrations(client)
         run_id = db.start_batch_run(
-            client, job_name=JOB_NAME, market="KR", trade_date=None
+            client, job_name=JOB_NAME_ONE if only_ids else JOB_NAME, market="KR", trade_date=None
         )
 
         warnings: list[str] = []
