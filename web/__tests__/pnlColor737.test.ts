@@ -32,7 +32,7 @@ describe("pctClass", () => {
   it("세 곳이 pctClass 를 쓴다", () => {
     const view = readFileSync("components/PortfolioView.tsx", "utf8");
     const bt = readFileSync("components/BacktestView.tsx", "utf8");
-    expect(view).toContain("pctClass(r.return_pct)");
+    expect(view).toContain("pctClass(r.return_pct, reviewPctDigits(r.return_pct))"); // 자릿수도 글과 같게 (25.1217)
     expect((bt.match(/pctClass\(w\.return_pct\)/g) ?? []).length).toBe(2);
     expect(bt).not.toContain('w.return_pct < 0 ? "text-blue-600"');
   });

@@ -64,10 +64,12 @@ describe("스크리너", () => {
     // **7개**가 됐다 (docs/infra.md 25.489).
     // 2026-09-30: 성과 지표 기준일을 기간별로 잡으며 기간 인자가 하나 늘어 **8개**가 됐다 (docs/infra.md 25.775).
     // 2026-09-30: 그 기준일의 분모를 지금 유니버스 종목 수로 잡으며 나라 인자가 하나 늘어 **9개** (docs/infra.md 25.782).
+    // 2026-10-12: 성과 지표 기준일을 최근 120일만 세며 가장 늦은 날을 따로 잡아 나라·기간 인자가 둘 늘어 **11개** (docs/infra.md 25.1211).
     // 조건을 더할 때 이 수를 보고 판단한다 — 한도에 가까워지면 나눠 보내야 한다.
     // 어림이 아니라 잰 값이므로 상한으로 박는다(25.0 "재어 보지 않고 적는다" 의 반대)
-    expect(buildScreener(screenerFilterSchema.parse({})).args.length).toBe(9);
-    expect(buildScreener(꽉_채운_조건).args.length).toBeLessThanOrEqual(40);
+    expect(buildScreener(screenerFilterSchema.parse({})).args.length).toBe(11);
+    // 꽉 채운 조건은 25.1211 뒤 실측 41 — 한도 100 의 절반 아래라 상한을 45 로 올린다
+    expect(buildScreener(꽉_채운_조건).args.length).toBeLessThanOrEqual(45);
   });
 
   it("한도를 넘길 만큼 조건을 늘릴 길이 없다", () => {
