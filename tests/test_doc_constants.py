@@ -418,7 +418,8 @@ class Test사후_분석:
         검사(REPORTS, f"**{pm.MIN_SECTOR_PEERS}개 미만**(`MIN_SECTOR_PEERS`)", "업종 표본 하한")
         검사(REPORTS, f"예로 {pm.MAX_EXAMPLES}건을 적는다", "예 수")
         검사(REPORTS, f"나쁜 순 {ws.POSTMORTEM_MAX}건까지만", "나누는 상한")
-        검사(REPORTS, f"진입일이 {ws.POSTMORTEM_ENTRY_DAYS[0]}~{ws.POSTMORTEM_ENTRY_DAYS[1]}일 전", "창")
+        검사(REPORTS, f"{ws.POSTMORTEM_BACKSTOP_DAYS}일 전 진입일까지만", "거슬러 볼 한계")  # 25.1151
+        검사(REPORTS, f"`{ws.POSTMORTEM_THROUGH_KEY}`", "보고 기록 키")
 
 
 class Test종목_분석:
