@@ -627,3 +627,27 @@ def test_근거_모양이_이상해도_리포트를_죽이지_않는다() -> Non
 
     for 이상한 in ({"a": 1}, ["x"], "abc", [1], None):
         assert crit.usable(이상한) is False
+
+
+def test_손절선에_닿은_보유_종목에는_2부가_더_사는_금액을_내지_않는다() -> None:
+    """같은 리포트가 "[적] 손절선 −25%" 와 "1차 10,000원 이하 8만원" 을 함께 냈다 — 평균단가 아래로 물타기
+    (docs/infra.md 25.1189, 리포트 감사 #2). 1부는 그대로, 황색·녹색과 보유하지 않은 종목은 영향 없음."""
+    rows = [row(1, "long", suggested_weight_pct=4.0, suggested_amount=400_000.0),
+            row(2, "long", suggested_weight_pct=4.0, suggested_amount=400_000.0)]  # fmt: skip
+    보유 = [rp.Holding(1, "000001", "종목1", None, 200_000.0)]
+    손절 = {"stock_id": 1, "level": "red", "reason_code": "손절", "rationale": "종목1: 손절선 -25% 에 닿았습니다",
+            "new": True, "as_of_date": "2026-10-08"}  # fmt: skip
+    c = rp.compose(rows, 10_000_000.0, "2026-10-08", holdings=보유, sell_flags=[손절])
+    assert c.portfolio is not None
+    assert [a.ticker for a in c.portfolio.allocations] == ["000002"]
+    빠짐 = {e.ticker: e for e in c.portfolio.excluded}
+    assert 빠짐["000001"].reason == rs.EXCLUDED_STOP_LOSS
+    assert "손절선 -25%" in str(빠짐["000001"].detail)
+    assert "000001" in {p.ticker for p in c.picks}  # 1부는 그대로
+    # 황색(기간초과 등)은 매수 신호를 덮지 않는다
+    황 = {**손절, "level": "yellow", "reason_code": "기간초과"}
+    c2 = rp.compose(rows, 10_000_000.0, "2026-10-08", holdings=보유, sell_flags=[황])
+    assert c2.portfolio is not None and "000001" in {a.ticker for a in c2.portfolio.allocations}
+    # 보유하지 않은 종목에 (어긋난) 손절 플래그가 붙어 있어도 빼지 않는다 — 더 사는 것이 아니다
+    c3 = rp.compose(rows, 10_000_000.0, "2026-10-08", holdings=[], sell_flags=[손절])
+    assert c3.portfolio is not None and "000001" in {a.ticker for a in c3.portfolio.allocations}

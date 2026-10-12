@@ -376,8 +376,12 @@ def build_portfolio(
     min_order_amount: float = 0.0,
     fx_missing: bool = False,
     reserved: float = 0.0,
+    stop_flags: dict[int, str] | None = None,
 ) -> rs.PortfolioView:
     """2부. 종목당 배분 하나, 빠지면 사유. 보유를 포함해 계산한다 (docs/design.md 3.9, Step 30).
+
+    - `stop_flags` 는 `{종목번호: 손절 플래그 근거 문장}` — 보유 종목이 손절선에 닿았으면
+      더 사는 금액을 내지 않는다 (docs/infra.md 25.1189)
 
     - 남은 여력 = 총 투자가능금액 − 현재 보유 평가액. 이미 산 것을 두 번 세지 않는다
     - 종목 상한: 보유 평가 + 새 배분 ≤ 총액 × 종목 상한. 이미 찼으면 "종목 비중 상한 도달"
@@ -445,6 +449,16 @@ def build_portfolio(
             view.excluded.append(
                 rs.Excluded(first.ticker, first.name, _reason(first, total_investable, fx_missing, min_order_amount))
             )
+            continue
+        # **손절선에 닿은 보유 종목에는 더 사는 금액을 내지 않는다** (docs/infra.md 25.1189, 리포트 감사 #2 — 교차검증).
+        # 1부(신호)는 보유를 보지 않아 그대로 싣는다. 예전에는 같은 리포트가 "[적] 손절선 −25%" 와 "1차 10,000원 이하
+        # 8만원" 을 함께 냈다 — 떨어질수록 권장 비중까지 남은 몫이 커져 **더 많이** 배분했다. 상관 대조(`앞선_후보`)에도
+        # 넣지 않는다. 황색·녹색은 보지 않는다(기간·재무·감성은 점검 신호라 매수 신호를 덮지 않는다)
+        if held_by_stock.get(first.stock_id, 0.0) > 0 and first.stock_id in (stop_flags or {}):
+            view.excluded.append(rs.Excluded(
+                first.ticker, first.name, rs.EXCLUDED_STOP_LOSS,
+                f"{(stop_flags or {})[first.stock_id]} — 2부에서 더 사는 금액을 내지 않음",
+            ))
             continue
 
         best = max(funded, key=lambda r: r.suggested_amount or 0)
@@ -819,6 +833,11 @@ def compose(
             min_order_amount=min_order_amount,
             fx_missing=fx_missing,
             reserved=reserved,
+            stop_flags={
+                int(f["stock_id"]): str(f.get("rationale") or "손절선 이탈")
+                for f in sell_flags or []
+                if f.get("reason_code") == "손절" and f.get("stock_id") is not None
+            },
         )
         # **추천이 0건인 날에도 말할 것이 있으면 2부를 싣는다** (docs/infra.md 25.420). 예전에는 추천이 없으면
         # 2부가 통째로 빠져 현재 보유 평가·남은 여력이 사라졌다 — 보유 현황은 추천이 없는 날에도 알아야 한다.

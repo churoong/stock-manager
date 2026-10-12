@@ -47,8 +47,11 @@ EXCLUDED_NO_FX = "환율 없음"
 # 예전에는 "최소 주문 단위 미만" 으로 떨어져 무엇을 고칠지 틀리게 가리켰다 —
 # 1부 근거표는 "환율이 없어 내지 않았습니다" 인데 2부는 주문 단위라 했다
 EXCLUDED_SIGNAL_NO_AMOUNT = "신호에 금액 없음"
+# 보유 종목이 오늘 손절선에 닿아 매도 플래그(적·손절)가 걸렸다 (docs/infra.md 25.1189, 리포트 감사 #2). 같은 리포트가
+# "[적] 손절선 −25% 이탈" 과 "그 종목 1차 10,000원 이하에서 8만원" 을 함께 냈다 — 평균단가 아래로 물타기를 권한 셈이다
+EXCLUDED_STOP_LOSS = "보유 중 손절선 이탈"
 
-#: 위 여덟 전부. 그물이 이것으로 문서와 대 본다
+#: 위 아홉 전부. 그물이 이것으로 문서와 대 본다
 EXCLUDED_REASONS = (
     EXCLUDED_SECTOR_CAP,
     EXCLUDED_STOCK_CAP,
@@ -58,6 +61,7 @@ EXCLUDED_REASONS = (
     EXCLUDED_BELOW_MIN_ORDER,
     EXCLUDED_NO_FX,
     EXCLUDED_SIGNAL_NO_AMOUNT,
+    EXCLUDED_STOP_LOSS,
 )
 
 HORIZON_LABEL = {"short": "단기", "mid": "중기", "long": "장기"}
