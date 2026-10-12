@@ -274,15 +274,20 @@ def make_strategy(
 
     def decide(t: str, view: bt.PriceView) -> dict[int, float]:
         nonlocal risk_gap_noted, sector_noted, 끝낸
-        if cache is not None and view.cutoff in cache:
-            inputs, results = cache[view.cutoff]
+        # **빈 창은 캐시하지 않는다** (25.1209, 백테스트 감사).
+        # 첫 리밸런스 앞에 시세가 없으면 엔진이 cutoff = 체결일인 빈 창을 넘기는데, 그날이 월말이면
+        # 다음 리밸런스의 cutoff 도 같은 날이라 열 전략이 함께 쓰는 캐시에서 빈 결과를 꺼내
+        # 한 달을 현금으로 보냈다(재현 최종 2.2775 → 1.508)
+        쓸캐시 = cache is not None and bool(view.stocks())
+        if 쓸캐시 and view.cutoff in cache:  # type: ignore[operator]
+            inputs, results = cache[view.cutoff]  # type: ignore[index]
         else:
             inputs = build_pit_inputs(
                 candidates(t, view), snapshots_by_stock, view, dividends_by_stock, benchmark_closes
             )
             results = sc.score_factors(inputs) if inputs else []
-            if cache is not None:
-                cache[view.cutoff] = (inputs, results)
+            if 쓸캐시:
+                cache[view.cutoff] = (inputs, results)  # type: ignore[index]
         if not inputs:
             return {}
 
@@ -1238,6 +1243,11 @@ def history_starts(stocks: list[pit.Stock], series_by_stock: dict[int, pit.Serie
     return tuple(sorted(set(pit.history_starts_of(관측)) | set(빈_무리)))
 
 
+def pit_market_dates(series_by_stock: dict[int, Any]) -> list[str]:
+    """시점 유니버스 20일 창의 **시장 거래일** — 엔진 날짜 축과 같은 규칙(`bt.market_dates`, 드문 날 뺌, 25.1208)."""
+    return bt.market_dates({sid: dict.fromkeys(se.dates, 1.0) for sid, se in series_by_stock.items()}, "")
+
+
 def pit_series(
     prices: dict[int, dict[str, float]], turnover: dict[int, dict[str, float]]
 ) -> dict[int, pit.Series]:
@@ -1693,8 +1703,11 @@ def run(
             min_listed_days=base.min_listed_days,
             history_starts=history_starts(pit_stock_list, series_by_stock),
         )
-        # 20일 평균 거래대금의 창은 **시장의** 최근 20 거래일이다 (docs/infra.md 25.271). 한 번만 낸다
-        market_dates = pit.market_dates_of(series_by_stock)
+        # 20일 평균 거래대금의 창은 **시장의** 최근 20 거래일이다 (docs/infra.md 25.271). 한 번만 낸다.
+        # **드문 날을 뺀 날짜 축**으로 (25.1208, 백테스트 감사).
+        # 엔진 날짜 축(`bt.market_dates`, 25.1102)과 유니버스 배치(25.1109)는 한 종목만 행이 있는 휴장일(1/1)을
+        # 빼는데 여기만 합집합이라, 그날이 전 종목에 0원 날로 창에 들어가 하한 근처 종목이 그달 통째로 빠졌다
+        market_dates = pit_market_dates(series_by_stock)
         eligible_cache: dict[str, set[int]] = {}
         pit_reasons: dict[str, int] = {}
 

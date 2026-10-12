@@ -226,8 +226,12 @@ class PriceView:
             if kept:
                 self._series[stock_id] = kept
         # 거래대금도 같은 창으로 잘라 둔다. Amihud 비유동성(docs/factors.md 10.1)이 쓴다.
-        # 없으면 그 지표만 비고 나머지는 그대로다
-        self._turnover = turnover or {}
+        # 없으면 그 지표만 비고 나머지는 그대로다. **정말로 잘라 둔다** (25.1210, 백테스트 감사) —
+        # 예전에는 통째로 들고 있어 공개 메서드만 안 보여 줄 뿐 판단 함수가 `view._turnover` 로
+        # 미래 거래대금을 읽을 수 있었다("볼 것이 없다" 규칙 위반)
+        self._turnover: dict[int, dict[str, float]] = {
+            sid: {d: v for d, v in by_date.items() if d <= cutoff} for sid, by_date in (turnover or {}).items()
+        }
 
     def broad_last(self, share: float = 0.5, lookback_days: int = 40) -> str | None:
         """cutoff 이하에서 **대부분의 종목이 시세를 가진** 마지막 날 (docs/infra.md 25.723).
