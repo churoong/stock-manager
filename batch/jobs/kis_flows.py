@@ -151,7 +151,7 @@ def _발송_기록(client: TursoClient, args: list) -> bool:
         with TursoClient() as 새것:
             새것.execute(SENT_UPDATE, args)
         return True
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001 — 새 연결로도 못 적으면 부르는 쪽이 실행 기록에 남긴다(잡음은 유지)
         return False
 
 
