@@ -95,7 +95,10 @@ EXTRA_UNIVERSE_SQL = (
     " WHERE s.id IN (SELECT value FROM json_each(?))"
 )
 EXTRA_SERIES_SQL = (
-    "SELECT p.stock_id, p.date, COALESCE(p.adj_close, p.close) AS px, p.value, p.close, p.volume, p.change_pct"
+    # `p.adj_close` 칸이 있어야 `series_from_rows` 가 수정주가 가운데 빈 행을 메운다 (25.1164) — 점수 계열
+    # (`scores.SERIES_PRICES_SQL`)과 같은 칸. 없으면 원 종가(분할 전이면 10배)가 모멘텀·변동성에 그대로 들어갔다
+    "SELECT p.stock_id, p.date, COALESCE(p.adj_close, p.close) AS px, p.adj_close, p.value, p.close, p.volume,"
+    " p.change_pct"
     " FROM prices p WHERE p.stock_id IN (SELECT value FROM json_each(?)) AND p.date >= ? AND p.date <= ?"
     " AND p.close IS NOT NULL ORDER BY p.stock_id, p.date"
 )

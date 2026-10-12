@@ -90,3 +90,14 @@ def test_신호_가격_계열도_빈_행을_메우고_창_첫머리까지_메운
     # 창 첫 행이 빈 행이어도(앞 한 행을 더 읽어) 메운다
     가격 = sj.load_recent_prices_for(mem, [1], "2026-09-08", 3)  # type: ignore[arg-type]
     assert [p for _, p, _ in 가격[1]] == [100.0, 100.0, 100.0]
+
+
+def test_참고_분석_계열도_수정주가_빈_행을_메운다() -> None:
+    """유니버스 밖 참고 분석의 시세 질의에 `adj_close` 칸이 없어 `series_from_rows` 가 메우지 못했다 (25.1164)."""
+    from batch.jobs import analyze_extra as ax
+    from batch.jobs import scores
+
+    mem = _mem()
+    행 = mem.execute(ax.EXTRA_SERIES_SQL, ["[1]", "2026-09-01", "2026-09-08"]).dicts()
+    _날, 종가, _값 = scores.series_from_rows(행, 5)[1]
+    assert 종가 == [100.0, 100.0, 100.0, 100.0, 100.0]
