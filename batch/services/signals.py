@@ -278,6 +278,8 @@ class SignalInput:
     #: `pbr_now` 을 낸 종가(분할만 반영, 미국은 야후 Close).
     #: 장기 구간을 가격으로 되돌릴 때 **같은 종가**를 쓴다 (25.562)
     band_close: float | None = None
+    #: 장기 후보가 밴드 계산 상한(`jobs.signals.MAX_BAND_STOCKS`, 점수 순) 밖이라 밴드를 만들지 않았다 (25.1171)
+    band_capped: bool = False
 
     volatility_ann: float | None = None
     mdd: float | None = None
@@ -823,7 +825,12 @@ def judgement(horizon: str, inp: SignalInput, data: dict) -> list[dict]:
         rows.append(_check("영업이익 증가", og, og is not None and og > 0, f"전년 대비 {_증가율(og)}",
                            "> 0%", SOURCE_FINANCIALS, fy))
     else:
-        if inp.band is None or inp.pbr_now is None:
+        if inp.band is None and inp.band_capped:
+            rows.append(_criterion(
+                "밸류에이션 밴드", "밴드 계산 대상 밖 — 장기 후보 가운데 종합 점수 순 상한 밖",
+                "점수 순 상한 안이어야 밴드를 만든다", SOURCE_DERIVED, inp.price_date, passed=False,
+            ))
+        elif inp.band is None or inp.pbr_now is None:
             rows.append(_criterion(
                 "밸류에이션 밴드",
                 f"밴드({BAND_YEARS}년 PBR 표본 {BAND_MIN_SAMPLE}일) 또는 현재 PBR 없음",

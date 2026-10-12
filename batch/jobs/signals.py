@@ -57,8 +57,9 @@ RECENT_DAYS = sg.MA_LONG_DAYS
 # 같은 750 이 세 곳에 따로 있었다 — 여기·services/valuation_band·jobs/backtest.
 BAND_DAYS = sg.BAND_DAYS
 
-# 밴드를 계산할 종목 수 상한.
-# 장기 후보가 지나치게 많으면 조회가 길어진다. 점수 높은 순으로 자른다.
+# 밴드를 계산할 종목 수 상한 (docs/signals.md 1.3, 25.1171).
+# 장기 후보가 지나치게 많으면 조회가 길어진다(종목마다 750행). 점수 높은 순으로 자른다.
+# 국내 장기 후보는 60여 종목이라 닿지 않고, 미국은 닿을 수 있다 — 잘린 수는 실행 기록 `band_capped`
 MAX_BAND_STOCKS = 300
 
 DEFAULT_MIN_ORDER = 100_000.0
@@ -468,6 +469,7 @@ def build_inputs(
                 pbr_now=pbr_now,
                 band_close=band_close,
                 band=band,
+                band_capped=bool(row.get("_band_capped")),
                 volatility_ann=_opt_float(metric_row.get("volatility_ann")),
                 mdd=_opt_float(metric_row.get("mdd")),
                 cagr=_opt_float(metric_row.get("cagr")),
@@ -733,10 +735,15 @@ def run(market: str, as_of: str | None = None) -> int:
         단계.mark("metrics")
 
         # 장기 후보만 밴드를 만든다. 점수 높은 순으로 상한을 둔다.
-        long_pool = sorted(
+        장기후보 = sorted(
             (row for row in candidates if needs_band(row.get("scores", {}))),
             key=lambda r: -(r.get("total_score") or 0),
-        )[:MAX_BAND_STOCKS]
+        )
+        long_pool = 장기후보[:MAX_BAND_STOCKS]
+        # 상한 밖은 밴드를 만들지 않았다고 판정표에 **그 까닭으로** 적는다 (25.1171, 감사 재현) — 예전엔 "밴드 또는 현재
+        # PBR 없음" 이라 데이터가 같은 300위와 301위가 다른 까닭 없이 갈렸다
+        for row in 장기후보[MAX_BAND_STOCKS:]:
+            row["_band_capped"] = True
 
         bands: dict[int, sg.Band] = {}
         for row in long_pool:
@@ -850,6 +857,7 @@ def run(market: str, as_of: str | None = None) -> int:
             step_log={
                 "universe": len(candidates),
                 "bands": len(bands),
+                **({"band_capped": len(장기후보) - MAX_BAND_STOCKS} if len(장기후보) > MAX_BAND_STOCKS else {}),
                 "signals": len(rows),
                 "by_horizon": by_horizon,
                 "fx": settings["fx"],

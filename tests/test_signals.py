@@ -986,3 +986,12 @@ def test_근거_데이터에_과거_성과를_싣는다() -> None:
     }
     # 값이 없으면 싣지 않는다
     assert "performance" not in sg.evaluate(short_input(), total_investable=10_000_000)[0].rationale_data
+
+
+def test_밴드_계산_상한_밖이면_판정표가_그_까닭을_말한다() -> None:
+    """300위와 301위가 데이터가 같아도 "밴드 또는 현재 PBR 없음" 으로 갈렸다 (docs/infra.md 25.1171)."""
+    밴드행 = [r for r in sg.judgement("long", long_input(band=None, pbr_now=None, band_capped=True), {})
+             if r["label"] == "밸류에이션 밴드"]  # fmt: skip
+    assert len(밴드행) == 1 and "밴드 계산 대상 밖" in 밴드행[0]["display"] and 밴드행[0]["passed"] is False
+    없음 = [r for r in sg.judgement("long", long_input(band=None, pbr_now=None), {}) if r["label"] == "밸류에이션 밴드"]
+    assert "PBR 없음" in 없음[0]["display"]
