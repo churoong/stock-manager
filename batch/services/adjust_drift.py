@@ -60,6 +60,24 @@ def detect(stored: dict[int, Sample], incoming: dict[int, Sample], tolerance: fl
     return out
 
 
+#: 수집 공백을 건너 견줄 때 분할로 보는 종가 변화 (docs/infra.md 25.1247). 3:2 분할(−33%)을 잡고 몇 주 공백의
+#: 보통 등락은 넘지 않게 30% `[확인필요: 실측 뒤 조정]`. 틀려도 재수집 한 번(이력 다시 받기)과 "수량 확인" 안내뿐이다
+GAP_SPLIT_MOVE = 0.30
+
+
+def gap_drift(stock_id: int, last_stored: Sample, first_new: Sample, move: float = GAP_SPLIT_MOVE) -> Drift | None:
+    """**겹치는 날이 없을 때** — 공백 전 마지막 저장 행과 새 창의 첫 행을 견준다 (25.1247, 미국 시세 감사 재현).
+
+    정지·잠시 제외(25.519) 뒤 돌아온 종목은 저장된 마지막 날이 새 창보다 앞서 `detect` 가 견줄 날이 없었다.
+    공백 중 분할이면 새 창(이미 분할 반영)이 그대로 쓰여 이력에 −75% 절벽이 영구히 남고, 다음 날부터는 겹치는
+    행이 이미 새 기준이라 다시 못 잡았다. 종가가 `move` 넘게 달라졌으면 분할 표시(두 비율을 같게)로 대기열에
+    올린다 — 재수집이 이력 전체를 다시 받는다"""
+    if last_stored.close <= 0 or first_new.close <= 0 or abs(first_new.close / last_stored.close - 1) <= move:
+        return None
+    기준 = ratio(first_new) or 1.0
+    return Drift(stock_id, first_new.date, 기준, 기준)
+
+
 #: 분할 감지 기록을 두는 설정 키 (docs/infra.md 25.535). 대기열의 표시(두 비율이 같음)는 재수집 순서만 정한다 —
 #: 감지일까지 거기에 얹으면 배당 감지와 뒤엉켜 새 분할을 놓치거나 옛 분할이 영구히 남았다(25.531 교차검증)
 SPLIT_LOG_KEY = "us_split_detections"

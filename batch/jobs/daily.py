@@ -1649,7 +1649,26 @@ def find_drift(client: TursoClient, bars: list, trade_date: str, ids: dict[str, 
         if 겹침:
             stored[stock_id] = 저장[stock_id][겹침[0]]
             oldest[stock_id] = 날들[겹침[0]]
-    return drift.detect(stored, oldest)
+    out = drift.detect(stored, oldest)
+    # **겹치는 날이 없는 종목은 공백 전 마지막 행과 견준다** (docs/infra.md 25.1247) — 정지·잠시 제외 뒤 돌아온 종목.
+    # 보통은 창이 매일 겹쳐 이 갈래에 드는 종목이 거의 없다(새로 받는 종목은 저장 행이 없어 한 번 읽고 끝난다)
+    for stock_id, 날들 in 창.items():
+        if stock_id in stored:
+            continue
+        첫날 = min(날들)
+        rs = client.execute(
+            "SELECT date, close, adj_close FROM prices WHERE stock_id = ? AND date < ? AND close IS NOT NULL"
+            " ORDER BY date DESC LIMIT 1",
+            [stock_id, 첫날],
+        )
+        if not rs.rows:
+            continue
+        r = rs.rows[0]
+        옛 = drift.Sample(str(r[0]), float(r[1]), None if r[2] is None else float(r[2]))
+        d = drift.gap_drift(stock_id, 옛, 날들[첫날])
+        if d is not None:
+            out.append(d)
+    return out
 
 
 def queue_drift(client: TursoClient, drifts: list[Any], now: str) -> int:
