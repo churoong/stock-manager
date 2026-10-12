@@ -78,8 +78,9 @@ TARGETS_SQL = (
     "SELECT s.id, s.ticker, s.country, COALESCE(s.name_ko, s.name_en, s.ticker) AS name, s.asset_type"
     " FROM watchlist w CROSS JOIN stocks s ON s.id = w.stock_id"
     " WHERE s.country = ? AND s.asset_type = 'stock' AND NOT EXISTS (SELECT 1 FROM universe_members u"
-    "   WHERE u.stock_id = s.id AND u.included = 1 AND u.snapshot_date = (SELECT MAX(um.snapshot_date)"
-    "   FROM universe_members um JOIN stocks su ON su.id = um.stock_id WHERE su.country = ?))"
+    "   WHERE u.stock_id = s.id AND u.included = 1 AND u.snapshot_date = (SELECT um.snapshot_date"
+    "   FROM universe_members um CROSS JOIN stocks su ON su.id = um.stock_id WHERE su.country = ?"
+    " ORDER BY um.snapshot_date DESC LIMIT 1))"
     " ORDER BY w.added_at LIMIT ?"
 )
 ONE_SQL = (

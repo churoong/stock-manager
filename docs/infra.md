@@ -2261,6 +2261,7 @@ SQL read operations are forbidden (reads are blocked, ...)
 | 25.1211 | 스크리너 성과 지표 기준일이 지표 표 전체를 묶어 셈 (웹 읽기) |
 | 25.1212 | 상태 화면 신선도 16칸이 통계 뒤 나라 행 전체를 읽음 (웹 읽기) |
 | 25.1213 | ETF·위성·적립·스크리너 최신 기준일도 날짜 색인 첫 행으로 + 그물 (웹 읽기) |
+| 25.1214 | 배치의 나라별 최신 날짜 질의 — MAX + JOIN 을 날짜 색인 내림차순 첫 행으로 |
 
 ### 25.1 왜 D1 인가
 
@@ -29122,3 +29123,22 @@ handoff "웹 읽기" 목록의 "스크리너 훑기" 항목이다.
 옛 DB 되돌이(`*_FALLBACK`), 최신 판정으로 이미 거른 행의 집계 열(적립 퍼널). 배치 쪽은 다음 건으로 둔다(`db.LAST_CALC_SQL` 은 25.1204 에서 고쳤다).
 
 **되돌리기 확인** — 네 파일을 되돌리면 그물이 깨진다.
+
+### 25.1214 배치의 나라별 최신 날짜 질의 — MAX + JOIN 을 날짜 색인 내림차순 첫 행으로
+
+**무엇** — 25.1213 이 남겨 둔 배치 쪽. `MAX(날) FROM 표 x JOIN stocks|etfs … WHERE 나라 = ?` 꼴이 배치에 열아홉 군데 + 손으로 고친 다섯 군데 남아 있었다.
+통계(ANALYZE)가 있으면 SQLite 는 종목 → (종목, 날짜) 색인 순으로 **그 나라 행을 전부** 읽는다(25.1204 에서 Turso 읽기로 확인한 뒤집힘). 매일 도는 것 중 큰 것:
+- `verdicts` 의 점수·신호·판정·PBR 밴드·4주 전 점수 최신일(다섯) — 표마다 수백만 행 [확인필요: 실제 행 수는 다음 db-status 에서]
+- `daily` 의 국내 직전 거래일(`prices`), `scores` 의 거래일 목록 되돌이(색인 시장일이 없을 때), `monitor_targets`·`etf_tilt` 의 점수·신호 최신일
+- `db.latest_snapshot_sql`·`snapshot_as_of_sql`(유니버스 최신 스냅샷 — 점수·신호·지표가 두루 쓴다)과 그 글자 사본(analyze_extra·kis_flows·universe·pit·scores)
+- `etf_link`·`etf_tilt.latest_picks` 의 ETF 판정 최신일(표가 작아 비용은 작다)
+
+**고침** — 모두 `SELECT x.날 FROM 표 x CROSS JOIN … WHERE … ORDER BY x.날 DESC LIMIT 1`. 날짜로 시작하는 색인이 다 있다(`idx_prices_date`·scores (as_of_date, total_score)·
+signals (as_of_date, horizon, calc_version)·`idx_signal_checks_date`(0066)·`idx_valuation_bands_date`·universe_members (snapshot_date, included)·`idx_etf_picks_date`·`idx_etf_satellite_date`).
+빈 결과는 예전과 같이 NULL(하위 질의) 또는 `scalar()` → None 이다.
+**그대로 둔 것** — `MAX(calc_version)`(같은 날짜 안의 판 고르기라 날짜 색인 범위), `etf_profiles`(날짜로 시작하는 색인이 없다 — (etf_id, as_of_date) 뿐, 표가 작다).
+
+**그물** — `tests/test_max_join_guard_1214.py`: 배치 SQL 글자(AST 상수)에서 위 꼴을 찾아 걸고(면제 둘은 위 사유), 가짜 통계를 넣은 스키마에서
+`verdicts.SCORES_SQL`·`db.latest_snapshot_sql` 계획이 종목별 (stock_id=?) 탐색을 하지 않는지 본다. 나라 구분·기준일 이하 답이 예전과 같은지도 본다.
+
+**되돌리기 확인** — `verdicts.py`·`db.py` 를 되돌리면 그물·계획 검사 셋이 깨진다.

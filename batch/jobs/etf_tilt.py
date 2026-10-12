@@ -44,8 +44,8 @@ def latest_picks(client: TursoClient) -> list[dict[str, Any]]:
         " pf.stock_position, pf.total_assets"
         " FROM etf_picks pk JOIN etfs e ON e.id = pk.etf_id"
         " LEFT JOIN etf_profiles pf ON pf.etf_id = pk.etf_id AND pf.as_of_date = pk.as_of_date"
-        " WHERE pk.as_of_date = (SELECT MAX(p2.as_of_date) FROM etf_picks p2 JOIN etfs e2 ON e2.id = p2.etf_id"
-        "                        WHERE e2.country = e.country)"
+        " WHERE pk.as_of_date = (SELECT p2.as_of_date FROM etf_picks p2 CROSS JOIN etfs e2 ON e2.id = p2.etf_id"
+        "                        WHERE e2.country = e.country ORDER BY p2.as_of_date DESC LIMIT 1)"
         "   AND pk.calc_version = (SELECT MAX(p3.calc_version) FROM etf_picks p3 JOIN etfs e3 ON e3.id = p3.etf_id"
         "                          WHERE e3.country = e.country AND p3.as_of_date = pk.as_of_date)"
     ).dicts()
@@ -175,7 +175,9 @@ def load_scores(client: TursoClient, country: str = "US") -> tuple[dict[int, flo
 
     예전에는 종합 점수였다 — `LONG_FACTORS` 주석 (25.1108)."""
     as_of = client.execute(
-        "SELECT MAX(sc.as_of_date) FROM scores sc JOIN stocks s ON s.id = sc.stock_id WHERE s.country = ?", [country]
+        # 날짜 색인 내림차순 첫 행 (25.1214)
+        "SELECT sc.as_of_date FROM scores sc CROSS JOIN stocks s ON s.id = sc.stock_id WHERE s.country = ?"
+        " ORDER BY sc.as_of_date DESC LIMIT 1", [country]
     ).scalar()
     if not as_of:
         return {}, None
@@ -194,8 +196,8 @@ def load_scores(client: TursoClient, country: str = "US") -> tuple[dict[int, flo
 def load_long_signals(client: TursoClient, country: str = "US") -> tuple[set[int], str | None]:
     """그 시장의 가장 새 장기 신호 종목 — 추천 비중(R, 참고)에만 쓴다."""
     as_of = client.execute(
-        "SELECT MAX(sg.as_of_date) FROM signals sg JOIN stocks s ON s.id = sg.stock_id"
-        " WHERE s.country = ? AND sg.horizon = 'long'",
+        "SELECT sg.as_of_date FROM signals sg CROSS JOIN stocks s ON s.id = sg.stock_id"
+        " WHERE s.country = ? AND sg.horizon = 'long' ORDER BY sg.as_of_date DESC LIMIT 1",
         [country],
     ).scalar()
     if not as_of:

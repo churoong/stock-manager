@@ -39,21 +39,21 @@ SCORES_SQL = (
     " sc.calc_version, s.ticker, COALESCE(s.name_ko, s.name_en, s.ticker) AS name, s.currency, s.market, s.sector,"
     " s.listed_shares, s.sector_code"
     " FROM scores sc JOIN stocks s ON s.id = sc.stock_id"
-    " WHERE s.country = ? AND sc.as_of_date = (SELECT MAX(sc2.as_of_date) FROM scores sc2"
-    "   JOIN stocks s2 ON s2.id = sc2.stock_id WHERE s2.country = ?)"
+    " WHERE s.country = ? AND sc.as_of_date = (SELECT sc2.as_of_date FROM scores sc2"
+    "   CROSS JOIN stocks s2 ON s2.id = sc2.stock_id WHERE s2.country = ? ORDER BY sc2.as_of_date DESC LIMIT 1)"
     " ORDER BY sc.stock_id, sc.calc_version DESC"
 )
 SIGNALS_SQL = (
     "SELECT g.stock_id, g.as_of_date AS as_of, g.horizon, g.buy_zone_low, g.buy_zone_high, g.target_price, g.stop_price"
     " FROM signals g JOIN stocks s ON s.id = g.stock_id"
-    " WHERE s.country = ? AND g.as_of_date = (SELECT MAX(g2.as_of_date) FROM signals g2"
-    "   JOIN stocks s2 ON s2.id = g2.stock_id WHERE s2.country = ?)"
+    " WHERE s.country = ? AND g.as_of_date = (SELECT g2.as_of_date FROM signals g2"
+    "   CROSS JOIN stocks s2 ON s2.id = g2.stock_id WHERE s2.country = ? ORDER BY g2.as_of_date DESC LIMIT 1)"
 )
 CHECKS_SQL = (
     "SELECT c.stock_id, c.as_of_date, c.horizon, c.passed, c.failed_count, c.checks_json, c.levels_json"
     " FROM signal_checks c JOIN stocks s ON s.id = c.stock_id"
-    " WHERE s.country = ? AND c.as_of_date = (SELECT MAX(c2.as_of_date) FROM signal_checks c2"
-    "   JOIN stocks s2 ON s2.id = c2.stock_id WHERE s2.country = ?)"
+    " WHERE s.country = ? AND c.as_of_date = (SELECT c2.as_of_date FROM signal_checks c2"
+    "   CROSS JOIN stocks s2 ON s2.id = c2.stock_id WHERE s2.country = ? ORDER BY c2.as_of_date DESC LIMIT 1)"
 )
 # 가격·가치 진단 재료 (docs/analysis.md 9장, 25.1023). 종가는 밴드와 같은 잣대(분할만 반영, `db.SPLIT_ONLY_PRICE_SQL`)
 CLOSE_SQL = (
@@ -79,8 +79,9 @@ BAND_SQL = (
     " CASE WHEN s.country = 'US' THEN p.close ELSE COALESCE(p.adj_close, p.close) END AS band_close"
     " FROM valuation_bands v JOIN stocks s ON s.id = v.stock_id"
     " LEFT JOIN prices p ON p.stock_id = v.stock_id AND p.date = v.price_date"
-    " WHERE s.country = ? AND v.metric = 'PBR' AND v.as_of_date = (SELECT MAX(v2.as_of_date) FROM valuation_bands v2"
-    "   JOIN stocks s2 ON s2.id = v2.stock_id WHERE s2.country = ?) ORDER BY v.stock_id, v.calc_version DESC"
+    " WHERE s.country = ? AND v.metric = 'PBR' AND v.as_of_date = (SELECT v2.as_of_date FROM valuation_bands v2"
+    "   CROSS JOIN stocks s2 ON s2.id = v2.stock_id WHERE s2.country = ?"
+    " ORDER BY v2.as_of_date DESC LIMIT 1) ORDER BY v.stock_id, v.calc_version DESC"
 )
 OPINIONS_SQL = "SELECT stock_id, date, broker, target_price FROM kr_opinions WHERE date >= ?"
 # 잘 맞힌 증권사 가중 (27장, 25.1052) — 증권사 성적표 (증권사 수십 행)
@@ -219,8 +220,9 @@ SCORES_BEFORE_SQL = (
     "SELECT sc.stock_id, sc.as_of_date, sc.total_score, sc.factor_scores, sc.weights_json, sc.sentiment_score,"
     " sc.sentiment_weight_used FROM scores sc"
     " JOIN stocks s ON s.id = sc.stock_id"
-    " WHERE s.country = ? AND sc.as_of_date = (SELECT MAX(sc2.as_of_date) FROM scores sc2"
-    "   JOIN stocks s2 ON s2.id = sc2.stock_id WHERE s2.country = ? AND sc2.as_of_date <= ?)"
+    " WHERE s.country = ? AND sc.as_of_date = (SELECT sc2.as_of_date FROM scores sc2"
+    "   CROSS JOIN stocks s2 ON s2.id = sc2.stock_id WHERE s2.country = ? AND sc2.as_of_date <= ?"
+    " ORDER BY sc2.as_of_date DESC LIMIT 1)"
     " ORDER BY sc.stock_id, sc.calc_version DESC"
 )
 

@@ -285,8 +285,9 @@ def market_dates_from_index(client: TursoClient, country: str, as_of: str, n: in
 SERIES_IDS_SQL = (
     "SELECT u.stock_id FROM universe_members u JOIN stocks s ON s.id = u.stock_id"
     " WHERE u.included = 1 AND s.country = ?"
-    "   AND u.snapshot_date = (SELECT MAX(um.snapshot_date) FROM universe_members um"
-    "   JOIN stocks su ON su.id = um.stock_id WHERE su.country = ? AND um.snapshot_date <= ?)"
+    "   AND u.snapshot_date = (SELECT um.snapshot_date FROM universe_members um"
+    "   CROSS JOIN stocks su ON su.id = um.stock_id WHERE su.country = ? AND um.snapshot_date <= ?"
+    " ORDER BY um.snapshot_date DESC LIMIT 1)"
 )
 #: 시세 사본(25.888)이 받을 수 있는 모양 — `prices` 와 `json_each` 만 (25.1033)
 SERIES_PRICES_SQL = (
@@ -347,10 +348,12 @@ def series_window_start(client: TursoClient, country: str, as_of: str, days: int
     if dates is None:
         rs = client.execute(
             "WITH RECURSIVE d(x) AS ("
-            " SELECT (SELECT MAX(p.date) FROM prices p JOIN stocks s ON s.id = p.stock_id"
-            "   WHERE s.country = ? AND p.date <= ?)"
-            " UNION ALL SELECT (SELECT MAX(p.date) FROM prices p JOIN stocks s ON s.id = p.stock_id"
-            "   WHERE s.country = ? AND p.date < d.x) FROM d WHERE d.x IS NOT NULL LIMIT ?)"
+            # 날짜 색인 내림차순 첫 행 (25.1214)
+            " SELECT (SELECT p.date FROM prices p CROSS JOIN stocks s ON s.id = p.stock_id"
+            "   WHERE s.country = ? AND p.date <= ? ORDER BY p.date DESC LIMIT 1)"
+            " UNION ALL SELECT (SELECT p.date FROM prices p CROSS JOIN stocks s ON s.id = p.stock_id"
+            "   WHERE s.country = ? AND p.date < d.x ORDER BY p.date DESC LIMIT 1)"
+            " FROM d WHERE d.x IS NOT NULL LIMIT ?)"
             " SELECT x FROM d WHERE x IS NOT NULL ORDER BY x DESC",
             [country, as_of, country, days + SERIES_GAP_ALLOWANCE],
         )

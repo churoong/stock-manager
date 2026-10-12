@@ -148,8 +148,9 @@ def coverage(client: TursoClient, as_of: str) -> dict[str, int]:
         " JOIN universe_members um1 ON um1.stock_id = fs.stock_id AND um1.included = 1"
         " JOIN stocks s1 ON s1.id = fs.stock_id AND s1.country = 'KR'"
         " WHERE fs.as_of_date <= ?"
-        "   AND um1.snapshot_date = (SELECT MAX(um.snapshot_date) FROM universe_members um"
-        "     JOIN stocks su ON su.id = um.stock_id WHERE su.country = 'KR')",
+        "   AND um1.snapshot_date = (SELECT um.snapshot_date FROM universe_members um"
+        "     CROSS JOIN stocks su ON su.id = um.stock_id WHERE su.country = 'KR'"
+        " ORDER BY um.snapshot_date DESC LIMIT 1)",
         [as_of],
     )
     covered = int(rs.scalar() or 0)
@@ -158,8 +159,9 @@ def coverage(client: TursoClient, as_of: str) -> dict[str, int]:
     rs2 = client.execute(
         "SELECT COUNT(*) FROM universe_members um0 JOIN stocks s0 ON s0.id = um0.stock_id"
         " WHERE um0.included = 1 AND s0.country = 'KR'"
-        "   AND um0.snapshot_date = (SELECT MAX(um.snapshot_date) FROM universe_members um"
-        "     JOIN stocks su ON su.id = um.stock_id WHERE su.country = 'KR')"
+        "   AND um0.snapshot_date = (SELECT um.snapshot_date FROM universe_members um"
+        "     CROSS JOIN stocks su ON su.id = um.stock_id WHERE su.country = 'KR'"
+        " ORDER BY um.snapshot_date DESC LIMIT 1)"
     )
     universe = int(rs2.scalar() or 0)
 

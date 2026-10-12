@@ -317,8 +317,9 @@ def _detect_kr_actions(
     from batch.services.metrics import MAX_SESSION_GAP_DAYS
 
     직전 = client.execute(
-        "SELECT MAX(p.date) FROM prices p JOIN stocks s ON s.id = p.stock_id"
-        " WHERE s.country = 'KR' AND p.date < ?",
+        # 날짜 색인 내림차순 첫 행 (25.1214 — 통계 뒤 MAX + JOIN 은 국내 시세 행을 전부 읽는 계획이 된다)
+        "SELECT p.date FROM prices p CROSS JOIN stocks s ON s.id = p.stock_id"
+        " WHERE s.country = 'KR' AND p.date < ? ORDER BY p.date DESC LIMIT 1",
         [trade_date],
     ).scalar()
     if not 직전:

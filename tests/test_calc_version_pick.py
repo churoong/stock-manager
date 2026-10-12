@@ -60,16 +60,21 @@ def 파일들() -> list[Path]:
 
 def 걸린것(표들) -> list[str]:
     꼴 = re.compile(
-        r"MAX\(\s*(?:\w+\.)?as_of_date\s*\)\s*FROM\s+(" + "|".join(표들) + r")\b", re.I
+        # 날짜 색인 내림차순 첫 행 꼴(`SELECT x.as_of_date FROM … ORDER BY … DESC LIMIT 1`, 25.1214)도 같은 "날짜만 고르기" 다
+        r"(?:MAX\(\s*(?:\w+\.)?as_of_date\s*\)|SELECT\s+(?:\w+\.)?as_of_date)\s*FROM\s+(" + "|".join(표들) + r")\b",
+        re.I,
     )
     나온것 = []
     for 길 in 파일들():
         글 = 길.read_text(encoding="utf-8", errors="replace")
         for m in 꼴.finditer(글):
             줄번호 = 글[: m.start()].count("\n") + 1
-            # 같은 문장 안에서 calc_version 을 함께 보면 괜찮다. 앞뒤 400자를 본다
-            둘레 = 글[max(0, m.start() - 400) : m.end() + 400]
+            # 같은 문장 안에서 calc_version 을 함께 보면 괜찮다. 앞뒤 600자를 본다 — 날짜 색인 꼴(25.1214)이 MAX 꼴보다 길다
+            둘레 = 글[max(0, m.start() - 600) : m.end() + 600]
             if "calc_version" in 둘레:
+                continue
+            # 종목 수를 세는 자리(`COUNT(DISTINCT stock_id)`)는 행이 둘이어도 수가 같다 — catchup_report 와 같은 사유
+            if "COUNT(DISTINCT" in 둘레:
                 continue
             상대 = str(길.relative_to(뿌리))
             if 상대 in 판이_필요_없는_곳:
@@ -185,6 +190,10 @@ def 최근_한_행_꼴() -> list[str]:
         글 = 길.read_text(encoding="utf-8", errors="replace")
         for m in 두번째_꼴.finditer(글):
             if "calc_version" in m.group(0):
+                continue
+            # **날짜 하나만** 고르는 자리(`SELECT x.as_of_date FROM … DESC LIMIT 1`, 25.1214)는 `MAX(as_of_date)` 와 같다 —
+            # 행을 집지 않으니 판과 무관하다. 바깥 질의가 판을 보는지는 `걸린것` 이 본다
+            if re.search(r"SELECT\s+(?:\w+\.)?as_of_date\s*$", 글[max(0, m.start() - 60) : m.start()], re.I):
                 continue
             나온것.append(f"{상대}:{글[: m.start()].count(chr(10)) + 1}")
     return 나온것

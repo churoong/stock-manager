@@ -663,8 +663,8 @@ def build_snapshot(
         " WHERE s.country = ? AND s.status != 'active'"
         "   AND (u.included = 1 OR s.id IN (SELECT stock_id FROM positions WHERE quantity > 0))"
         "   AND u.snapshot_date = ("
-        "   SELECT MAX(um.snapshot_date) FROM universe_members um JOIN stocks s2 ON s2.id = um.stock_id"
-        "   WHERE s2.country = ? AND um.snapshot_date <= ?)",
+        "   SELECT um.snapshot_date FROM universe_members um CROSS JOIN stocks s2 ON s2.id = um.stock_id"
+        "   WHERE s2.country = ? AND um.snapshot_date <= ? ORDER BY um.snapshot_date DESC LIMIT 1)",
         [country, country, snapshot_date],
     ).dicts():
         사유 = uni.STATUS_REASON.get(str(r["status"]), uni.REASON_MASTER_EXCLUDED)

@@ -523,8 +523,9 @@ def news_target_rows(client: TursoClient, market: str, monitor: list[tuple], now
     rs = client.execute(
         "SELECT sc.stock_id FROM scores sc JOIN stocks s ON s.id = sc.stock_id"
         " WHERE s.country = ? AND s.status = 'active' AND sc.total_score IS NOT NULL"
-        "   AND sc.as_of_date = (SELECT MAX(x.as_of_date) FROM scores x JOIN stocks sx ON sx.id = x.stock_id"
-        "                        WHERE sx.country = ?)"
+        # 날짜 색인 내림차순 첫 행 (25.1214)
+        "   AND sc.as_of_date = (SELECT x.as_of_date FROM scores x CROSS JOIN stocks sx ON sx.id = x.stock_id"
+        "                        WHERE sx.country = ? ORDER BY x.as_of_date DESC LIMIT 1)"
         # 판을 안 걸면 같은 종목이 두 번 걸려 **상위 N 자리를 중복이 먹는다** —
         # 지켜보는 종목이 그만큼 줄어든다 (2026-09-21, docs/infra.md 25.91)
         "   AND sc.calc_version = (SELECT MAX(c.calc_version) FROM scores c"

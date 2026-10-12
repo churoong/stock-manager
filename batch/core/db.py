@@ -165,8 +165,8 @@ def last_signal_calc_date(client: TursoClient, country: str, upto: str | None) -
         if not 표가_없나(exc):
             raise
         rs = client.execute(
-            "SELECT MAX(sg.as_of_date) FROM signals sg JOIN stocks s ON s.id = sg.stock_id"
-            " WHERE s.country = ? AND sg.as_of_date <= ?",
+            "SELECT sg.as_of_date FROM signals sg CROSS JOIN stocks s ON s.id = sg.stock_id"
+            " WHERE s.country = ? AND sg.as_of_date <= ? ORDER BY sg.as_of_date DESC LIMIT 1",
             [country, until],
         )
     value = rs.scalar()
@@ -185,8 +185,8 @@ def latest_snapshot_sql() -> str:
     쓰는 쪽은 이 서브쿼리 자리에 나라 값을 바인딩한다.
     """
     return (
-        "(SELECT MAX(um.snapshot_date) FROM universe_members um"
-        " JOIN stocks su ON su.id = um.stock_id WHERE su.country = ?)"
+        "(SELECT um.snapshot_date FROM universe_members um"
+        " CROSS JOIN stocks su ON su.id = um.stock_id WHERE su.country = ? ORDER BY um.snapshot_date DESC LIMIT 1)"
     )
 
 
@@ -202,9 +202,9 @@ def snapshot_as_of_sql() -> str:
     **고를 일이 있는 쪽만 이것을 쓴다.**
     """
     return (
-        "(SELECT MAX(um.snapshot_date) FROM universe_members um"
-        " JOIN stocks su ON su.id = um.stock_id"
-        " WHERE su.country = ? AND um.snapshot_date <= ?)"
+        "(SELECT um.snapshot_date FROM universe_members um"
+        " CROSS JOIN stocks su ON su.id = um.stock_id"
+        " WHERE su.country = ? AND um.snapshot_date <= ? ORDER BY um.snapshot_date DESC LIMIT 1)"
     )
 
 
