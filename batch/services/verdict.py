@@ -40,6 +40,16 @@ CONSENSUS_DAYS = 90
 BAND_ENTRY_PERCENTILE = signals.BAND_ENTRY_PERCENTILE
 
 
+
+def _확률(v: float) -> str:
+    """확률·비율 → "37%". 반올림이 끝값을 만들지 않는다 — 99.6% 를 "100%"(확실), 0.3% 를 "0%" 로 적지 않는다
+    (docs/infra.md 25.1228, 웹 `recommend.rateText`·25.699 와 같은 규칙). 참값 0·1 은 그대로"""
+    if 0 < v < 0.005:
+        return "1% 미만"
+    if 0.995 <= v < 1:
+        return "99% 넘게"
+    return f"{v * 100:.0f}%"
+
 def _won(x: Any, currency: str) -> str:
     """가격 + 단위 (원·달러)."""
     return f"{_price(x, currency)}{'원' if currency == 'KRW' else '달러'}"
@@ -397,11 +407,11 @@ def outlook(*, close: float | None, close_date: str | None, currency: str, momen
         삼 = next((h for h in a["horizons"] if h["months"] == 3), a["horizons"][0])
         이름 = "1년" if 삼["months"] == 12 else f"{삼['months']}개월"
         평소 = 삼.get("base") or {}
-        비교 = (f" (평소 {_pct(평소['median'])}·{평소['up'] * 100:.0f}%)"
+        비교 = (f" (평소 {_pct(평소['median'])}·{_확률(평소['up'])})"
                 if isinstance(평소.get("median"), (int, float)) else "")  # fmt: skip
         줄.append(f"비슷한 국면({a.get('since')}~ 자기 과거): {a['label']} — "
                   f"{a.get('days')}일(국면 {a.get('episodes')}번), "
-                  f"{이름} 뒤 중앙값 {_pct(삼['median'])}·오른 비율 {삼['up'] * 100:.0f}%{비교}")  # fmt: skip
+                  f"{이름} 뒤 중앙값 {_pct(삼['median'])}·오른 비율 {_확률(삼['up'])}{비교}")  # fmt: skip
         evidence.append(_row("비슷한 국면", f"{a['label']} · {a.get('days')}일",
                              "3개월 수익률 × 52주 고점 근접, 자기 삼분위",
                              "price_patterns (주간 성과 지표 작업)", a.get("until")))  # fmt: skip
@@ -410,8 +420,8 @@ def outlook(*, close: float | None, close_date: str | None, currency: str, momen
         gh = next((h for h in g.get("horizons") or [] if h["months"] == 삼["months"]), None)
         if gh:
             줄.append(f"시장 국면까지 맞추면({g['label']}): 같은 칸 {g.get('days')}일, {이름} 뒤 중앙값 "
-                      f"{_pct(gh['median'])}·오른 비율 {gh['up'] * 100:.0f}% (칸 전체 {_pct(삼['median'])}·"
-                      f"{삼['up'] * 100:.0f}%)")  # fmt: skip
+                      f"{_pct(gh['median'])}·오른 비율 {_확률(gh['up'])} (칸 전체 {_pct(삼['median'])}·"
+                      f"{_확률(삼['up'])})")  # fmt: skip
         elif g.get("state"):
             줄.append(f"시장 국면까지 맞추면({g.get('label')}): 이 칸에서 그런 날이 드물어 분포를 내지 않습니다")
         out["analog"] = a
@@ -584,7 +594,7 @@ def _요약(sc: dict, outlook: dict | None, currency: str, *, reference: bool) -
         범위 = (f"(68% {_won(일년['low68'], currency)}~{_won(일년['high68'], currency)})" if "low68" in 일년 else "")
         조각.append(f"1년 예상 {_won(일년['expected'], currency)}{범위}")
         if isinstance(일년.get("p_up"), (int, float)):
-            조각.append(f"1년 뒤 오를 확률 {일년['p_up'] * 100:.0f}%")
+            조각.append(f"1년 뒤 오를 확률 {_확률(일년['p_up'])}")
     return 조각
 
 
@@ -776,15 +786,15 @@ def build(inp: Inputs) -> dict:
         r = 사다리["race"]
         reasons.append(f"목표가 {_won(r['target'], inp.currency)}가 손절가 {_won(r['stop'], inp.currency)}보다"
                        " 먼저 닿을 확률 "
-                       f"{r['p'] * 100:.0f}% (CAPM 기대수익·변동성 가정, 기간 제한 없음)")  # fmt: skip
-        evidence.append(_row("목표가 먼저 닿을 확률", f"{r['p'] * 100:.0f}%", "표류 브라운 운동의 두 장벽",
+                       f"{_확률(r['p'])} (CAPM 기대수익·변동성 가정, 기간 제한 없음)")  # fmt: skip
+        evidence.append(_row("목표가 먼저 닿을 확률", f"{_확률(r['p'])}", "표류 브라운 운동의 두 장벽",
                              "계산 (docs/analysis.md 12.3)", (inp.outlook or {}).get("close_date")))  # fmt: skip
         if r.get("kelly") is not None:
             # 35. 켈리 참고 비중 — 비교용. 실제 비중 규칙(상한·변동성 축소)을 바꾸지 않는다
             f = r["kelly"]
             reasons.append(f"켈리 참고 비중(이론상 최대, 비교용): {f * 100:.0f}% · "
                            f"절반 켈리 {f * KELLY_SHOWN * 100:.0f}% "
-                           f"— 손익비 {r['up'] * 100:.1f}% : {r['down'] * 100:.1f}%, 목표가 먼저 {r['p'] * 100:.0f}%"
+                           f"— 손익비 {r['up'] * 100:.1f}% : {r['down'] * 100:.1f}%, 목표가 먼저 {_확률(r['p'])}"
                            + (" (기대값이 0 이하라 0)" if f == 0 else "")
                            + (" (식의 값이 100% 를 넘어 빚 없는 100% 로 자름 — 손절가에서 정확히 판다는 가정이 강하다)"
                               if f >= 1 else ""))  # fmt: skip
