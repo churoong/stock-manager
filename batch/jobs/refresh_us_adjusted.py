@@ -59,11 +59,19 @@ def pending_note(client: TursoClient, today: date) -> str | None:
     )
 
 
+#: 대기 항목 가운데 다시 받을 수 있는 것 — 상장 중이고 야후 기호가 있다 (25.1246).
+#: 폐지·인수된 종목은 야후가 대개 더 주지 않는다
+_다시_받을_수_있음 = "q.done_at IS NULL AND s.status = 'active' AND s.yahoo_symbol IS NOT NULL"
+
+
 def pending_summary(client: TursoClient) -> tuple[int, str | None]:
     """(밀린 종목 수, 가장 오래된 감지 시각). 표가 없으면 (0, None)."""
     try:
+        # **다시 받을 수 있는 종목만 센다** (docs/infra.md 25.1246, 미국 시세 감사 재현) — `pending()` 과 같은 거르기.
+        # 예전에는 폐지·기호 없는 종목의 항목도 세어, 재수집이 영영 못 지우는 "밀려 있습니다" 경고와 매주 실패가 났다
         rs = client.execute(
-            "SELECT COUNT(*), MIN(detected_at) FROM adjust_refresh_queue WHERE done_at IS NULL"
+            "SELECT COUNT(*), MIN(q.detected_at) FROM adjust_refresh_queue q JOIN stocks s ON s.id = q.stock_id"
+            f" WHERE {_다시_받을_수_있음}"
         )
     except Exception as e:  # noqa: BLE001 — 표가 없는 DB 는 정상 (25.164)
         if db.표가_없나(e):
@@ -78,7 +86,7 @@ def pending(client: TursoClient) -> list[tuple[int, str]]:
     배당락마다 쌓이는 종목 뒤에서 분할이 몇 주를 기다렸다. 분할 감지는 두 비율을 같게 적는다(`adjust_drift.detect`)."""
     rs = client.execute(
         "SELECT q.stock_id, s.yahoo_symbol FROM adjust_refresh_queue q JOIN stocks s ON s.id = q.stock_id"
-        " WHERE q.done_at IS NULL AND s.yahoo_symbol IS NOT NULL"
+        f" WHERE {_다시_받을_수_있음}"
         " ORDER BY CASE WHEN q.ratio_before = q.ratio_after THEN 0 ELSE 1 END, q.detected_at, q.stock_id",
     )
     return [(int(r[0]), str(r[1])) for r in rs.rows]
