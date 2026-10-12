@@ -808,6 +808,10 @@ def run(market: str, *, dry_run: bool = False) -> int:
             counts, w = build_snapshot(client, market, snapshot_date, dry_run=dry_run)
             warnings += w
         except Exception as exc:  # noqa: BLE001
+            # **한도는 실패가 아니다** (docs/infra.md 25.1223). 여기서 1 을 돌려주면 `guard()` 가 한도를 못 봐
+            # 기록이 failed, 워크플로가 빨간불, 주간 요약이 실패로 셌다. 올려 보내 `guard()` 가 skipped·0 으로 닫게 한다
+            if db.quota_reason(exc):
+                raise
             if run_id is not None:
                 db.finish_batch_run(client, run_id, status="failed", error_text=str(exc))
             print(f"실패: {exc}")

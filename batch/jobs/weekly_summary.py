@@ -376,7 +376,8 @@ def run(dry_run: bool = False, force: bool = False) -> int:
         )  # fmt: skip
         return 0
     except Exception as exc:
-        db.finish_batch_run(client, run_id, status="failed", error_text=str(exc))
+        if not db.quota_reason(exc):  # 한도는 `guard()` 가 skipped 로 닫는다 (docs/infra.md 25.1223)
+            db.finish_batch_run(client, run_id, status="failed", error_text=str(exc))
         raise
     finally:
         client.close()

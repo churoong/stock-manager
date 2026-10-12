@@ -163,7 +163,8 @@ def run(days: int = DEFAULT_DAYS, everyone: bool = False, strict: bool = False) 
         try:
             targets, stored, warnings, 덮음 = collect(client, days, everyone)
         except Exception as exc:
-            db.finish_batch_run(client, run_id, status="failed", error_text=str(exc))
+            if not db.quota_reason(exc):  # 한도는 `guard()` 가 skipped 로 닫는다 (docs/infra.md 25.1223)
+                db.finish_batch_run(client, run_id, status="failed", error_text=str(exc))
             raise
         db.finish_batch_run(
             client, run_id, status="partial" if warnings else "success",
