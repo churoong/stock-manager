@@ -873,3 +873,13 @@ def test_리스크_팩터가_쓴_성과_지표의_창을_남긴다() -> None:
     결과 = [r for r in sc.score_factors(무리, min_size=99) if r.factor == "risk"]
     assert 결과[0].raw[sc.RISK_SOURCE_KEY] == {"window": "1Y", "as_of_date": "2026-09-25"}
     assert all(sc.RISK_SOURCE_KEY not in r.raw for r in sc.score_factors(무리, min_size=99) if r.factor == "value")
+
+
+def test_값이_모두_같으면_반올림_찌꺼기가_있어도_z_0() -> None:
+    """평균의 반올림 찌꺼기로 표준편차가 1e-17 이 되어 `[0.8]×30` 이 33.3점이 됐다 (docs/infra.md 25.1169)."""
+    from batch.services import scoring as sc
+
+    for v in (0.8, 0.7, 0.1):
+        assert set(sc.zscores([v] * 30)) == {0.0}
+    # 윈저라이즈 뒤 전원 같은 값이 되는 업종(0.8 이 28·0.6·1.0 하나씩)도 0
+    assert set(sc.zscores([0.8] * 28 + [0.6, 1.0])) == {0.0}

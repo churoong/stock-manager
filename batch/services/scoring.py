@@ -1163,7 +1163,9 @@ def zscores(
         if value is None:
             out.append(None)
             continue
-        if stdev == 0:
+        # **값이 모두 같으면 0** — `stdev == 0` 이 아니라 윈저라이즈 뒤 최솟값 = 최댓값으로 본다 (25.1169, 감사 재현).
+        # 평균에 반올림 찌꺼기가 남아 표준편차가 1e-17 로 나오면 전원 z=±1 이 되어 `[0.8]×30` 이 33.3점이 됐다
+        if stdev == 0 or high == low:
             out.append(0.0)
             continue
         bounded = min(max(value, low), high)
