@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import { notifyQuotaOnce } from "@/lib/quotaNotice";
 import { batch, currentBackend, execute, quotaReason, rowsToObjects } from "@/lib/db";
 import {
-  HEALTH_ALERT_INSERT, HEALTH_CLAIM_PREFIX, HEALTH_CLAIM_STALE_MS, LAST_SUCCESS, PENDING_HEALTH_ALERTS, SESSIONS_AROUND, TODAY_HEALTH_ALERTS,
-  WATCHES, dueAlerts, localDate, type LastSuccess, type Market, type Session,
+  HEALTH_ALERT_INSERT, HEALTH_CLAIM_PREFIX, HEALTH_CLAIM_STALE_MS, PENDING_HEALTH_ALERTS, SESSIONS_AROUND, TODAY_HEALTH_ALERTS,
+  WATCHES, dueAlerts, lastSuccessFor, localDate, type LastSuccess, type Market, type Session,
 } from "@/lib/health";
 import { tokenMatches } from "@/lib/intraday";
 import { sendTelegram } from "@/lib/telegram";
@@ -55,7 +55,7 @@ export async function GET(request: Request) {
   try {
     const [sessionsRs, lastRs, existingRs] = await Promise.all([
       execute(SESSIONS_AROUND, [from]),
-      execute(LAST_SUCCESS),
+      execute(lastSuccessFor(WATCHES.map((w) => w.job))),
       execute(TODAY_HEALTH_ALERTS, [from]),
     ]);
 

@@ -341,6 +341,16 @@ export const LAST_SUCCESS = `SELECT job_name, market, trade_date, status, MAX(fi
 FROM batch_runs WHERE status IN (${RAN_STATUSES.map((s) => `'${s}'`).join(", ")}) AND finished_at IS NOT NULL
 GROUP BY job_name, market`;
 
+/**
+ * 무응답 감시(`/api/cron/health`, **매시간**)용 — 감시 대상 작업만 (docs/infra.md 25.1196). `LAST_SUCCESS` 는 모든 작업의 성공 행을
+ * 훑는다(상태 화면은 그것이 필요하다). 감시는 `WATCHES` 의 작업 셋만 보므로 `(job_name, status, finished_at)` 색인(0038)으로
+ * 그 작업 행만 읽는다 — 하루 수십 행씩 쌓이는 다른 작업(장중·백업·수집)을 매시간 다시 읽지 않는다. 이름은 코드의 상수라 글자로 넣는다
+ */
+export function lastSuccessFor(jobs: readonly string[]): string {
+  const 이름 = [...new Set(jobs)].map((j) => `'${j.replace(/'/g, "''")}'`).join(", ");
+  return LAST_SUCCESS.replace("WHERE status IN", `WHERE job_name IN (${이름}) AND status IN`);
+}
+
 export const TODAY_HEALTH_ALERTS = `SELECT job, market, local_date, kind FROM health_alerts WHERE local_date >= ?`;
 
 export const HEALTH_ALERT_INSERT = `INSERT INTO health_alerts (job, market, local_date, kind, message, data, created_at, sent_at)

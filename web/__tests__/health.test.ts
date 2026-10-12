@@ -15,7 +15,7 @@ import { DatabaseSync } from "node:sqlite";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
   CALENDAR_LOW_SESSIONS, HEALTH_ALERT_INSERT, LAST_SUCCESS, RAN_STATUSES, SESSIONS_AROUND, STUCK_AFTER_HOURS,
-  SUCCESS_WINDOW_HOURS, TODAY_HEALTH_ALERTS, WATCHES, countsForToday, dueAlerts, isStuck, localDate, sessionOn,
+  SUCCESS_WINDOW_HOURS, TODAY_HEALTH_ALERTS, WATCHES, countsForToday, dueAlerts, isStuck, lastSuccessFor, localDate, sessionOn,
   findLastSuccess, sinceText, usageRatio, usageTone, type LastSuccess, type Market, type Session,
 } from "@/lib/health";
 
@@ -268,6 +268,22 @@ describe("질의", () => {
     const kr = rows.find((r) => r.job_name === "daily_kr");
     expect(kr?.trade_date).toBe("2026-09-17");
     expect(rows.find((r) => r.job_name === "sentiment")?.trade_date).toBe("2026-09-17");
+  });
+
+  it("무응답 감시는 감시 대상 작업 행만 색인으로 읽는다 (docs/infra.md 25.1196)", () => {
+    const sql = lastSuccessFor(WATCHES.map((w) => w.job));
+    const 전부 = db.prepare(LAST_SUCCESS).all() as unknown as LastSuccess[];
+    const 감시 = db.prepare(sql).all() as unknown as LastSuccess[];
+    const 이름 = new Set(WATCHES.map((w) => w.job));
+    // 감시 대상만, 그리고 같은 답
+    expect(감시.every((r) => 이름.has(r.job_name))).toBe(true);
+    expect(감시).toEqual(전부.filter((r) => 이름.has(r.job_name)));
+    const 계획 = (db.prepare("EXPLAIN QUERY PLAN " + sql).all() as Array<{ detail: string }>).map((r) => r.detail);
+    expect(계획.join(" | ")).toMatch(/USING (COVERING )?INDEX idx_batch_runs_last_success/);
+    // 경로가 이것을 쓴다 — 전체 훑기(`LAST_SUCCESS`)로 되돌아가지 않게
+    const 경로 = readFileSync(join(__dirname, "..", "app", "api", "cron", "health", "route.ts"), "utf8");
+    expect(경로).toContain("execute(lastSuccessFor(");
+    expect(경로).not.toMatch(/execute\(LAST_SUCCESS\)/);
   });
 
   it("상관 서브쿼리를 쓰지 않는다 — 매시간 도는 질의라 기록이 쌓이면 읽기가 제곱으로 는다", () => {
