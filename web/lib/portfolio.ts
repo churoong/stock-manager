@@ -133,7 +133,8 @@ export const dividendInputSchema = z.object({
   pay_date: isoDate,
   amount_per_share: 비용().nullable().optional(),
   quantity: 비용().nullable().optional(),
-  gross_amount: 비용(),
+  // 세전 0 은 받지 않는다 (docs/infra.md 25.1230) — 0/0/0 영수증이 저장되고 다시 계산까지 불렀다. 매매의 가격·수량 0 은 이미 막는다
+  gross_amount: 금액("세전 배당금은 0 보다 커야 합니다"),
   tax: 비용().default(0),
   fx_rate: 금액("환율은 0 보다 커야 합니다").nullable().optional(),
   memo: z.string().max(200).nullable().optional(),
