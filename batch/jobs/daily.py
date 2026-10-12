@@ -2132,7 +2132,9 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
             if not 보낸_것_있음 and report_id is None:
                 _notify_failure(
                     client, market, name,
-                    "리포트는 보냈지만 웹에 저장하지 못했습니다 — 웹에 오늘 리포트가 없고,"
+                    # 표식 문구를 그대로 싣는다 — 없으면 `failure_alert` 가 "웹의 오늘 리포트에 전체가 있습니다" 를
+                    # 덧붙여 한 알림이 스스로 모순됐다 (docs/infra.md 25.1216)
+                    f"텔레그램으로는 보냈지만 {formatter.WEB_SAVE_FAILED_MARK} — 웹에 오늘 리포트가 없고,"
                     " 같은 날 다른 시장 2부가 이 리포트의 배분을 빼지 못합니다",
                     dry_run=dry_run, title="리포트 저장 실패",
                 )

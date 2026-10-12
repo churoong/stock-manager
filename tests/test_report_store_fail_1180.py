@@ -99,3 +99,15 @@ def test_두_번_다_실패하면_본문에_적고_보낸_뒤_알린다(monkeypa
     assert not 저장
     assert any("리포트를 웹에 저장하지 못했습니다" in t for t in 보낸)
     assert [제목 for 제목, _ in 알림] == ["리포트 저장 실패"]
+
+
+def test_저장_실패_알림이_웹에_전체가_있다고_하지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """알림 원인에 표식이 없으면 `failure_alert` 가 "웹의 오늘 리포트에 전체가 있습니다" 를 붙였다 (25.1216)."""
+    from batch.notify import formatter
+
+    _, _, 알림 = _준비(monkeypatch, 2)
+    assert daily.run("KR") == 0
+    (제목, 원인), = 알림
+    글 = formatter.failure_alert(market="KR", job_name="daily_kr", error_text=원인, last_success=None, title=제목)
+    assert "웹의 오늘 리포트에 전체가 있습니다" not in 글
+    assert "웹에서는 볼 수 없습니다" in 글
