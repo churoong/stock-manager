@@ -298,6 +298,12 @@ def dump_table(client: TursoClient, table: str, out) -> int:
     return total
 
 
+#: **어느 범위에서도 담지 않는 표** (docs/infra.md 25.1243, 백업 감사). 위 사유표는 필수 범위만 걸러,
+#: 전체 백업에는 살아 있는 KIS 접근 토큰(`api_tokens` — "백업 파일에 두지 않는다" 라고 적어 둔 것)과
+#: 로그인 시도의 IP 해시가 그대로 들어가 30일 아티팩트로 남았다. 둘 다 되살릴 뜻이 없다(토큰 24시간, 시도는 잠금용)
+늘_빼는_표 = ("api_tokens", "login_attempts")
+
+
 def run(scope: str, out_dir: Path) -> int:
     client = TursoClient()
     try:
@@ -309,7 +315,7 @@ def run(scope: str, out_dir: Path) -> int:
                 log.warning("표가 없어 건너뜁니다: %s", t)
         else:
             # **이름 순이 아니라 의존 순이다** (25.121). 되살릴 때 외래키가 걸린다
-            tables = 의존_순서(sorted(available))
+            tables = 의존_순서(sorted(available - set(늘_빼는_표)))
 
         out_dir.mkdir(parents=True, exist_ok=True)
         today = datetime.now(UTC).date().isoformat()
