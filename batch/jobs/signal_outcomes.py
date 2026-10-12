@@ -17,6 +17,7 @@ from batch import config
 from batch.core import db
 from batch.core.client import TursoClient
 from batch.core.entry import guard
+from batch.services import adjust as adj
 from batch.services import calibration as cb
 from batch.services import outcomes as oc
 from batch.services import trend
@@ -81,16 +82,24 @@ def load_closes(
         rs = client.execute(
             # **분할만 반영한 가격** (docs/infra.md 25.216, `db.SPLIT_ONLY_PRICE_SQL`). 초과수익을 견주는 지수
             # (KOSPI·^GSPC)는 배당이 빠진 **가격 지수**다. 미국 Adj Close(배당 포함)와 빼면 배당률만큼 부푼다
-            f"SELECT p.stock_id, p.date, {db.SPLIT_ONLY_PRICE_SQL} AS px, p.close AS raw"
+            # 수정주가 가운데 빈 행은 직전 계수로 메운다 (`adjust.split_only_prices`, 25.1165) — 식 그대로 읽으면
+            # 그 행에 원 종가(1:10 이면 10배)가 들어가 60일 창 최고가가 +900% 로 튀고 "목표가 도달" 이 거짓으로 찍혔다
+            "SELECT p.stock_id, p.date, p.adj_close, p.close, s.country, p.close AS raw"
             f" FROM prices p JOIN stocks s ON s.id = p.stock_id WHERE p.stock_id IN ({', '.join(['?'] * len(ids))})"
             # 0 이하 종가는 뺀다 — 수익률 −100%·최저가 0 으로 거짓 손절이 찍혔다. 포트폴리오와 같은 조건 (25.203·25.680)
             " AND p.date >= ? AND p.close > 0 AND COALESCE(p.adj_close, p.close) > 0 ORDER BY p.stock_id, p.date",
             [*ids, since],
         )
+        묶음: dict[int, list[dict]] = {}
         for row in rs.dicts():
-            out.setdefault(int(row["stock_id"]), []).append((str(row["date"]), float(row["px"])))
-            if raw is not None:
-                raw.setdefault(int(row["stock_id"]), {})[str(row["date"])] = float(row["raw"])
+            묶음.setdefault(int(row["stock_id"]), []).append(row)
+        for sid, 줄 in 묶음.items():
+            for row, px in zip(줄, adj.split_only_prices(줄, str(줄[0]["country"])), strict=True):
+                if px is None or px <= 0:
+                    continue
+                out.setdefault(sid, []).append((str(row["date"]), float(px)))
+                if raw is not None:
+                    raw.setdefault(sid, {})[str(row["date"])] = float(row["raw"])
     return out
 
 

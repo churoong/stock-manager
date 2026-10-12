@@ -101,3 +101,13 @@ def test_참고_분석_계열도_수정주가_빈_행을_메운다() -> None:
     행 = mem.execute(ax.EXTRA_SERIES_SQL, ["[1]", "2026-09-01", "2026-09-08"]).dicts()
     _날, 종가, _값 = scores.series_from_rows(행, 5)[1]
     assert 종가 == [100.0, 100.0, 100.0, 100.0, 100.0]
+
+
+def test_신호_성적표_종가도_빈_행을_메운다() -> None:
+    """60일 창 최고가가 빈 행의 원 종가로 +900% 튀어 "목표가 도달" 이 거짓으로 찍혔다 (25.1165)."""
+    from batch.jobs import signal_outcomes as so
+
+    원: dict = {}
+    종가 = so.load_closes(_mem(), [1], "2026-09-01", 원)  # type: ignore[arg-type]
+    assert [p for _, p in 종가[1]] == [100.0, 100.0, 100.0, 100.0, 100.0]
+    assert 원[1]["2026-09-03"] == 1000.0  # 원 종가는 단위 맞추기용으로 그대로
