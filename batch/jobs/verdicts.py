@@ -23,6 +23,7 @@ from batch.core import db
 from batch.core.client import TursoClient
 from batch.core.entry import guard
 from batch.jobs import daily
+from batch.services import adjust as adj
 from batch.services import disclosure_reaction as dr
 from batch.services import divergence, history, insights
 from batch.services import forecast_track as ft
@@ -56,8 +57,17 @@ CHECKS_SQL = (
 # 가격·가치 진단 재료 (docs/analysis.md 9장, 25.1023). 종가는 밴드와 같은 잣대(분할만 반영, `db.SPLIT_ONLY_PRICE_SQL`)
 CLOSE_SQL = (
     "SELECT p.stock_id, p.date,"
-    " CASE WHEN s.country = 'US' THEN p.close ELSE COALESCE(p.adj_close, p.close) END AS close"
+    " CASE WHEN s.country = 'US' THEN p.close ELSE COALESCE(p.adj_close, p.close) END AS close,"
+    " p.adj_close, p.close AS raw_close"
     " FROM prices p JOIN stocks s ON s.id = p.stock_id WHERE s.country = ? AND p.date = ?"
+)
+#: 국내 기준 종가가 **수정주가 빈 행**이면 앞뒤를 읽어 직전 계수로 메운다
+#: (`adjust.fill_adjusted`, docs/infra.md 25.1190). 하루만 읽으면 그 행이 가운데 구멍인지 끝인지 모른다.
+#: 앞뒤 이만큼(달력일)이면 거래일 몇 개는 늘 걸린다
+HOLE_WINDOW_DAYS = 20
+HOLE_SQL = (
+    "SELECT p.stock_id, p.date, p.adj_close, p.close FROM json_each(?) j CROSS JOIN prices p ON p.stock_id = j.value"
+    " WHERE p.date >= ? AND p.date <= ? AND p.close > 0 ORDER BY p.stock_id, p.date"
 )
 MOMENTUM_SQL = (
     "SELECT f.stock_id, f.raw_json, f.as_of_date FROM factors f JOIN stocks s ON s.id = f.stock_id"
@@ -310,6 +320,10 @@ def evaluate_date(client: TursoClient, country: str, d: str, 달: int, now_close
     if 종가줄 is None or 기록줄 is None:
         return None
     기준 = {int(r["stock_id"]): r for r in 종가줄}
+    if country == "KR":
+        메움 = _fill_base_holes(client, 기준, str(d), warnings)
+        if 메움 is None:
+            return None
     못함: list[int] = []
     for r in 기록줄:
         sid = int(r["stock_id"])
@@ -336,6 +350,33 @@ def evaluate_date(client: TursoClient, country: str, d: str, 달: int, now_close
 #: 남긴다 (25.1022).
 #: 예전엔 시장 전체를 지워, 일일 배치의 참고 분석 단계가 실패하거나 30종목 상한을 넘으면 "지금 분석" 결과가 사라졌다
 CLEAR = "DELETE FROM stock_verdicts WHERE market = ? AND json_extract(detail_json, '$.excluded_reason') IS NULL"
+
+
+def _fill_base_holes(client: TursoClient, 기준: dict[int, dict], d: str, warnings: list[str]) -> int | None:
+    """기준일 국내 종가 가운데 `adj_close` 가 빈 행을 앞뒤 행으로 메운다 (docs/infra.md 25.1190).
+    메운 수를 돌려주고, 읽기에 실패하면 None.
+
+    예전에는 `COALESCE(adj_close, close)` 한 날만 읽어, 분할 전 구간 한가운데 빈 행이면 원 종가(1:10 이면 10배)가
+    기준이 되어 그 기록일 예측이 −90% 로 채점됐다 — 모델 성적표(예측 적중)가 한 종목에 끌렸다.
+    빈 행이 없으면 더 읽지 않는다(거의 늘 그렇다)."""
+    빈 = sorted(sid for sid, r in 기준.items() if r.get("adj_close") is None and r.get("raw_close"))
+    if not 빈:
+        return 0
+    day = date.fromisoformat(d)
+    창 = [(day - timedelta(days=HOLE_WINDOW_DAYS)).isoformat(), (day + timedelta(days=HOLE_WINDOW_DAYS)).isoformat()]
+    줄 = _strict(client, HOLE_SQL, [json.dumps(빈), *창], warnings, "기준 종가 앞뒤")
+    if 줄 is None:
+        return None
+    묶음: dict[int, list[dict]] = defaultdict(list)
+    for r in 줄:
+        묶음[int(r["stock_id"])].append(r)
+    n = 0
+    for sid, rows in 묶음.items():
+        for r, (px, _) in zip(rows, adj.fill_adjusted(rows), strict=True):
+            if str(r["date"]) == d and px:
+                기준[sid] = {**기준[sid], "close": float(px)}
+                n += 1
+    return n
 
 
 def _strict(client: TursoClient, sql: str, args: list, warnings: list[str], what: str) -> list[dict] | None:
