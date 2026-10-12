@@ -111,3 +111,11 @@ def test_신호_성적표_종가도_빈_행을_메운다() -> None:
     종가 = so.load_closes(_mem(), [1], "2026-09-01", 원)  # type: ignore[arg-type]
     assert [p for _, p in 종가[1]] == [100.0, 100.0, 100.0, 100.0, 100.0]
     assert 원[1]["2026-09-03"] == 1000.0  # 원 종가는 단위 맞추기용으로 그대로
+
+
+def test_2부_상관용_시세도_빈_행을_메운다() -> None:
+    """빈 행 하나가 +900%·−90% 이틀치 수익률이 되어 60일 상관을 혼자 끌었다 (25.1166)."""
+    from batch.jobs import daily
+
+    가격 = daily.load_price_series(_mem(), [1], "2026-09-08")  # type: ignore[arg-type]
+    assert list(가격[1].values()) == [100.0, 100.0, 100.0, 100.0, 100.0]

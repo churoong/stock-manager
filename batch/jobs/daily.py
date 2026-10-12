@@ -1180,7 +1180,9 @@ def load_price_series(
         자리 = ",".join("?" for _ in 묶음)
         try:
             rs = client.execute(
-                "SELECT stock_id, date, COALESCE(adj_close, close) AS px FROM prices"
+                # 수정주가 가운데 빈 행은 직전 계수로 메운다 (`adjust.fill_adjusted`, 25.1166) — 빈 행 하나가 +900%·−90%
+                # 이틀치 수익률이 되어 60일 상관을 혼자 끌었다
+                "SELECT stock_id, date, adj_close, close FROM prices"
                 f" WHERE stock_id IN ({자리}) AND date >= ? AND date <= ? AND close IS NOT NULL"
                 " ORDER BY stock_id, date",
                 [*묶음, since, as_of],
@@ -1191,8 +1193,15 @@ def load_price_series(
             if warnings is not None:
                 warnings.append(f"상관용 시세를 읽지 못해 2부 금액을 상관으로 줄이지 않았습니다 ({exc})")
             return {}
+        from batch.services import adjust as adj
+
+        줄들: dict[int, list[dict]] = {}
         for row in rs.dicts():
-            out.setdefault(int(row["stock_id"]), {})[str(row["date"])] = float(row["px"])
+            줄들.setdefault(int(row["stock_id"]), []).append(row)
+        for sid, 줄 in 줄들.items():
+            for row, (px, _) in zip(줄, adj.fill_adjusted(줄), strict=True):
+                if px is not None:
+                    out.setdefault(sid, {})[str(row["date"])] = float(px)
     return out
 
 
