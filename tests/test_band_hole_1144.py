@@ -127,3 +127,11 @@ def test_스트레스_시험_바구니_시세도_빈_행을_메운다() -> None:
 
     가격 = stress.load_prices(_mem(), [1], "2026-09-01")  # type: ignore[arg-type]
     assert list(가격[1].values()) == [100.0, 100.0, 100.0, 100.0, 100.0]
+
+
+def test_포트폴리오_평가_종가도_빈_행을_메운다() -> None:
+    """보유 평가 계열이 빈 행의 원 종가(10배)로 하루 튀어 TWR·포트폴리오 MDD 가 틀어졌다 (docs/infra.md 25.1188)."""
+    from batch.jobs import portfolio as pj
+
+    종가 = pj.load_closes(_mem(), [1], "2026-09-01")  # type: ignore[arg-type]
+    assert list(종가[1].values()) == [100.0, 100.0, 100.0, 100.0, 100.0]

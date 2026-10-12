@@ -32,6 +32,7 @@ from batch.core import db, visibility
 from batch.core import settings_range as sr
 from batch.core.client import TursoClient
 from batch.core.entry import guard
+from batch.services import adjust as adj
 from batch.services import backtest as bt
 from batch.services import metrics as m
 from batch.services import portfolio as pf
@@ -247,14 +248,24 @@ def load_closes(client: TursoClient, stock_ids: list[int], since: str) -> dict[i
             # 야후 `Close`(`auto_adjust=False`)는 **분할만** 반영한 값이라 이 자리의 잣대(분할 맞춘 수량)와 맞는다.
             # 국내 수정주가는 거래소 등락률로 되살려 분할·감자만 담는다(docs/adjust.md) — 그대로 둔다
             # 0 이하 종가는 값이 없는 날이다 (docs/infra.md 25.203). 그대로 쓰면 평가액 0원 → 손절 플래그
-            f"SELECT p.stock_id, p.date, {db.SPLIT_ONLY_PRICE_SQL} AS close"
+            #
+            # **국내 수정주가 가운데 빈 행은 직전 계수로 메운다** (`adjust.split_only_prices`, docs/infra.md 25.1188).
+            # 식(`db.SPLIT_ONLY_PRICE_SQL`)으로 읽으면 분할 전 구간 한가운데 빈 행에 원 종가(1:10 이면 10배)가 들어가
+            # 그날 보유 평가액이 10배 → 일별 평가 계열·TWR·포트폴리오 MDD 가 하루 튀었다 (25.1165~1167 과 같은 구멍)
+            "SELECT p.stock_id, p.date, p.adj_close, p.close, s.country"
             " FROM prices p JOIN stocks s ON s.id = p.stock_id"
             f" WHERE p.stock_id IN ({', '.join(['?'] * len(ids))})"
-            " AND p.date >= ? AND p.close IS NOT NULL AND p.close > 0 AND COALESCE(p.adj_close, p.close) > 0",
+            " AND p.date >= ? AND p.close IS NOT NULL AND p.close > 0 AND COALESCE(p.adj_close, p.close) > 0"
+            " ORDER BY p.stock_id, p.date",
             [*ids, since],
         )
+        묶음: dict[int, list[dict]] = {}
         for r in rs.dicts():
-            out.setdefault(int(r["stock_id"]), {})[str(r["date"])] = float(r["close"])
+            묶음.setdefault(int(r["stock_id"]), []).append(r)
+        for sid, 줄 in 묶음.items():
+            for r, px in zip(줄, adj.split_only_prices(줄, str(줄[0]["country"])), strict=True):
+                if px is not None and px > 0:
+                    out.setdefault(sid, {})[str(r["date"])] = float(px)
     return out
 
 
