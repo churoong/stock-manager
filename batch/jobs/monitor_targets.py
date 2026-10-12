@@ -159,6 +159,88 @@ def action_factors(client: TursoClient, stock_id: int, market: str) -> list[tupl
     return 계수들
 
 
+def open_buy_lots(client: TursoClient, stock_id: int) -> list[tuple[str, float, float]]:
+    """보유 중인 매수분 (체결일, 남은 수량, 단가). 먼저 산 것부터 판다 — `services/portfolio.match_fifo` 와 같은 순서
+    (날짜 → 같은 날 매수 먼저 → id, 25.397). 수수료는 비율만 쓰는 자리라 넣지 않는다."""
+    rows = client.execute(
+        "SELECT side, trade_date, quantity, price FROM trades WHERE stock_id = ?"
+        " ORDER BY trade_date, CASE side WHEN 'buy' THEN 0 ELSE 1 END, id",
+        [stock_id],
+    ).rows
+    남은: list[list] = []
+    for side, day, qty, price in rows:
+        if side == "buy":
+            남은.append([str(day)[:10], float(qty), float(price)])
+            continue
+        팔 = float(qty)
+        while 팔 > 1e-9 and 남은:
+            뺌 = min(팔, 남은[0][1])
+            남은[0][1] -= 뺌
+            팔 -= 뺌
+            if 남은[0][1] <= 1e-9:
+                남은.pop(0)
+    return [(d, q, p) for d, q, p in 남은 if q > 1e-9]
+
+
+def rights_factors_since(client: TursoClient, stock_id: int, since: str) -> list[tuple[str, float]]:
+    """`since` 뒤의 **유상증자 권리락** 계수 (날, 계수) — 예탁원 일정(`kr_corp_events`)의 `rights` 기준일마다
+    그 직전 거래일 행의 계수를 되살린다(`adjust.factor_of`). `rights_only` 로 다른 종류가 섞이지 않았을 때만 (25.1197).
+
+    20거래일 창(`action_factors`)과 달리 **보유 기간 전체**를 본다 — 권리락 하락은 사라지지 않는데 창이 지나면 원가가
+    원래 값으로 돌아가 거짓 손절이 났다. 일정이 없는 기간(10-07 전)은 모른다 — 맞추지 않는다(예전과 같다)."""
+    from batch.services import adjust as adj
+
+    try:
+        기준일들 = [str(r[0])[:10] for r in client.execute(
+            "SELECT e.record_date FROM kr_corp_events e JOIN stocks s ON s.ticker = e.code"
+            " WHERE s.id = ? AND e.kind = 'rights' AND e.record_date > ? ORDER BY e.record_date",
+            [stock_id, since],
+        ).rows]  # fmt: skip
+    except Exception:  # noqa: BLE001 — 표가 없으면(KIS 키 없음) 모른다
+        return []
+    out: list[tuple[str, float]] = []
+    for 기준일 in 기준일들:
+        rows = client.execute(
+            "SELECT close, change_pct, date FROM prices WHERE stock_id = ? AND date < ? AND close > 0"
+            " ORDER BY date DESC LIMIT 2",
+            [stock_id, 기준일],
+        ).rows
+        if len(rows) < 2 or str(rows[0][2])[:10] <= since:
+            continue
+        (close, pct, day), (prev, _p, _d) = rows
+        f = adj.factor_of(float(prev), float(close), None if pct is None else float(pct))
+        if adj.is_action(f) and _유상_권리락(client, stock_id, str(day)[:10]):
+            out.append((str(day)[:10], f))
+    return out
+
+
+def holding_rights_scale(
+    client: TursoClient, stock_id: int, market: str, first_buy_date: str | None = None
+) -> float | None:
+    """보유 원가에 곱할 권리락 계수 — **매수분마다 그 매수 뒤의 권리락만** 곱한 가중 비율 (docs/infra.md 25.1197).
+
+    None 이면 최근 분할·병합 경계(`action_factors`)라 대지 않는다. 25.1139·25.1158 은 최근 20거래일 계수 곱을
+    포지션 전체에 곱해, 권리락 **뒤에** 산 몫(이미 낮은 값에 샀다)까지 깎아 진짜 −10% 를 0% 로 읽어 손절을 놓쳤고,
+    20거래일이 지나면 계수가 1 로 돌아가 권리락 전 매수분에 움직이지 않은 주가로 거짓 손절이 났다."""
+    if action_factors(client, stock_id, market) is None:
+        return None
+    if market == "US":
+        return 1.0
+    lots = open_buy_lots(client, stock_id)
+    if not lots and first_buy_date:
+        # 매매 기록을 못 읽으면(보유 표만 있는 경우) 보유 전체를 첫 매수일 한 몫으로 본다 — 예전 판정과 같은 쪽
+        lots = [(str(first_buy_date)[:10], 1.0, 1.0)]
+    if not lots:
+        return 1.0
+    계수들 = rights_factors_since(client, stock_id, min(d for d, _q, _p in lots))
+    if not 계수들:
+        return 1.0
+    원 = sum(q * p for _d, q, p in lots)
+    # 권리락 날(계수가 잡힌 날)에 산 몫은 이미 떨어진 값에 샀다 — 그날보다 **앞에** 산 몫만 맞춘다
+    맞춘 = sum(q * p * math.prod(f for 날, f in 계수들 if 날 > d) for d, q, p in lots)
+    return 맞춘 / 원 if 원 > 0 else 1.0
+
+
 def rights_only(events: list[tuple[str, str]], action_day: str, next_day: str) -> bool:
     """계수가 잡힌 날이 **유상증자 권리락뿐**인가 — 예탁원 일정(`kr_corp_events`)으로 (25.1139, 18회차 검증 조건).
 
@@ -301,7 +383,7 @@ def build_targets(client: TursoClient, market: str, now: str) -> list[tuple]:
 
     for r in client.execute(
         "SELECT p.stock_id, s.yahoo_symbol, COALESCE(s.name_ko, s.name_en, s.ticker) AS name, s.currency,"
-        " s.dart_corp_code, p.avg_price, p.horizon, s.asset_type"
+        " s.dart_corp_code, p.avg_price, p.horizon, s.asset_type, p.first_buy_date"
         " FROM positions p JOIN stocks s ON s.id = p.stock_id WHERE s.country = ? AND s.yahoo_symbol IS NOT NULL",
         [market],
     ).dicts():
@@ -330,7 +412,9 @@ def build_targets(client: TursoClient, market: str, now: str) -> list[tuple]:
             # 사용자가 매매 기록을 고치기 전까지 분할 전 값이라, 1:5 분할 뒤 19,800원 시세에 "손절선 93,000원 터치"
             # 가 매일 나갔다(25.218 은 보유는 해당 없다고 적었지만 틀렸다). 매도 플래그·리포트가 수량 확인을 따로 말한다
             continue
-        # 유상증자 권리락이면 평균단가에 같은 계수를 곱해 권리락 뒤 시세와 같은 잣대로 (25.1139, 구현 뒤 반박 검증)
+        # 유상증자 권리락이면 평균단가에 같은 계수를 곱해 권리락 뒤 시세와 같은 잣대로 (25.1139, 구현 뒤 반박 검증).
+        # **매수분마다 그 뒤의 권리락만** — 권리락 뒤에 산 몫은 깎지 않고, 20거래일이 지나도 풀지 않는다 (25.1197)
+        배율 = holding_rights_scale(client, int(r["stock_id"]), market, r.get("first_buy_date"))
         평균 = float(r["avg_price"]) * (배율 or 1.0)
         t["target_price"], t["stop_price"] = holding_levels(평균, r["horizon"], targets_setting)
         # 분할 매수 계획의 다음 차수 (docs/intraday.md 2절 tranche, 25.999) — 기업행위·ETF 는 위에서 이미 건너뛰었다

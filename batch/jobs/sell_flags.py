@@ -248,7 +248,9 @@ def load_holdings(client: TursoClient, today: date | None = None) -> tuple[list[
                 sentiment_date=s0.get("as_of_date"),
                 sentiment_ref_date=_감성_기준일(r["country"], today),
                 horizon_since=r["horizon_since"],
-                corporate_action_recent=(행위 := _기업행위(client, sid, str(r["country"])))[0],
+                corporate_action_recent=(
+                    행위 := _기업행위(client, sid, str(r["country"]), str(r["first_buy_date"]))
+                )[0],
                 rights_scale=행위[1],
                 universe_included_since_buy=들었나,
             )
@@ -292,7 +294,9 @@ def _수집_시작(client: TursoClient, country: str, 캐시: dict[str, str | No
     return 캐시[country]
 
 
-def _기업행위(client: TursoClient, stock_id: int, country: str) -> tuple[bool, float]:
+def _기업행위(
+    client: TursoClient, stock_id: int, country: str, first_buy_date: str | None = None
+) -> tuple[bool, float]:
     """(최근 20거래일 안의 분할·병합이 있나, 유상증자 권리락 계수) — 장중 감시(`monitor_targets.action_scale`,
     25.533·25.1139)와 같은 판정 (25.1093·25.1158). 계수는 권리락만으로 확인됐을 때만 1.0 이 아니다.
 
@@ -300,7 +304,9 @@ def _기업행위(client: TursoClient, stock_id: int, country: str) -> tuple[boo
     from batch.jobs import monitor_targets
 
     try:
-        배율 = monitor_targets.action_scale(client, stock_id, "US" if country == "US" else "KR")
+        # **매수분마다 그 뒤의 권리락만**, 보유 기간 전체에서 (25.1197, 매도 플래그 감사 재현) — 예전에는 최근 20거래일
+        # 계수 곱을 포지션 전체에 곱해 권리락 뒤 매수분까지 깎았고(손절 놓침), 20거래일이 지나면 풀려 거짓 손절이 났다
+        배율 = monitor_targets.holding_rights_scale(client, stock_id, "US" if country == "US" else "KR", first_buy_date)
     except Exception:  # noqa: BLE001 — 덧붙이는 말이 판정을 막으면 안 된다
         return False, 1.0
     return (True, 1.0) if 배율 is None else (False, float(배율))

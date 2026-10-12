@@ -782,3 +782,52 @@ def test_유상증자_권리락이면_평균단가에_같은_계수를_곱해_�
     assert "action_guard" not in json.loads(reasons) and "rights_ex" in json.loads(reasons)  # 웹이 관심가를 쓰지 않게 (25.1142)
     # 단기 손절 −7%: 100,000 × 0.9 × 0.93 = 83,700 (권리락 전 평균단가 그대로면 93,000 — 90,000 시세에 바로 터치)
     assert 손절 == pytest.approx(83_700)
+
+
+class Test권리락_원가는_매수분마다_25_1197:
+    """권리락 계수를 포지션 전체에 곱해 권리락 뒤 매수분까지 깎았고(손절 놓침), 20거래일이 지나면 풀려 거짓 손절이 났다
+    (docs/infra.md 25.1197, 매도 플래그 감사 재현)."""
+
+    @staticmethod
+    def _매수(mem: MemClient, 줄: list[tuple[str, str, float, float]]) -> None:
+        for i, (side, day, qty, price) in enumerate(줄, 1):
+            mem.conn.execute(
+                "INSERT INTO trades (id, stock_id, side, trade_date, price, quantity, currency, fx_rate, fx_rate_source,"
+                " horizon, created_at, updated_at) VALUES (?, 1, ?, ?, ?, ?, 'KRW', 1, 'none', 'short', 't', 't')",
+                [i, side, day, price, qty],
+            )
+
+    def test_권리락_뒤에_산_몫은_깎지_않는다(self) -> None:
+        mem = Test유상증자_권리락은_막지_않는다_25_1139._준비([("rights", "2026-09-16")])
+        self._매수(mem, [("buy", "2026-09-16", 10, 90_000)])  # 권리락(09-15) 뒤 매수
+        assert job.holding_rights_scale(mem, 1, "KR") == pytest.approx(1.0)  # type: ignore[arg-type]
+        mem2 = Test유상증자_권리락은_막지_않는다_25_1139._준비([("rights", "2026-09-16")])
+        # 앞 10주 100,000(권리락 전) + 뒤 10주 90,000 → (1,000,000×0.9 + 900,000) / 1,900,000
+        self._매수(mem2, [("buy", "2026-09-01", 10, 100_000), ("buy", "2026-09-16", 10, 90_000)])
+        assert job.holding_rights_scale(mem2, 1, "KR") == pytest.approx(1_800_000 / 1_900_000)  # type: ignore[arg-type]
+        # 권리락 당일 산 몫도 이미 떨어진 값이다
+        mem3 = Test유상증자_권리락은_막지_않는다_25_1139._준비([("rights", "2026-09-16")])
+        self._매수(mem3, [("buy", "2026-09-15", 10, 90_000)])
+        assert job.holding_rights_scale(mem3, 1, "KR") == pytest.approx(1.0)  # type: ignore[arg-type]
+
+    def test_20거래일이_지나도_권리락_전_매수분은_계속_맞춘다(self) -> None:
+        mem = Test유상증자_권리락은_막지_않는다_25_1139._준비([("rights", "2026-09-16")])
+        self._매수(mem, [("buy", "2026-09-01", 10, 100_000)])
+        # 권리락 뒤 25거래일 같은 값 — 최근 20행 창(action_factors)에는 권리락이 없다
+        from datetime import date, timedelta
+
+        d = date(2026, 9, 16)
+        for _ in range(25):
+            mem.conn.execute("INSERT INTO prices (stock_id, date, close, change_pct, currency, source, fetched_at)"
+                             " VALUES (1, ?, 90000, 0, 'KRW', 't', 't')", [d.isoformat()])  # fmt: skip
+            d += timedelta(days=1)
+        assert job.action_factors(mem, 1, "KR") == []  # type: ignore[arg-type]  # 창은 비었다
+        assert job.holding_rights_scale(mem, 1, "KR") == pytest.approx(0.9)  # type: ignore[arg-type]
+
+    def test_판_몫은_먼저_산_것부터(self) -> None:
+        mem = Test유상증자_권리락은_막지_않는다_25_1139._준비([("rights", "2026-09-16")])
+        # 권리락 전 10주를 다 팔고 권리락 뒤 10주만 남았다 → 맞출 것 없음
+        self._매수(mem, [("buy", "2026-09-01", 10, 100_000), ("sell", "2026-09-10", 10, 101_000),
+                          ("buy", "2026-09-16", 10, 90_000)])  # fmt: skip
+        assert job.open_buy_lots(mem, 1) == [("2026-09-16", 10.0, 90_000.0)]  # type: ignore[arg-type]
+        assert job.holding_rights_scale(mem, 1, "KR") == pytest.approx(1.0)  # type: ignore[arg-type]
