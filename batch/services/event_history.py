@@ -65,13 +65,17 @@ def earnings_reactions(fin: list[dict], dates: list[str], closes: list[float],
     앞해 = {(int(r["fiscal_year"]), str(r["report_code"])): r for r in 행}
     사건 = []
     for r in 행:
-        d = str(r.get("report_date") or "")
+        # 처음 발표한 날 — 정정이 오면 `report_date` 가 정정 접수일로 덮인다 (docs/infra.md 25.1237)
+        d = str(r.get("first_date") or r.get("report_date") or "")
         i = _앞날(dates, d)
         if i is None or i + max(REACTION_DAYS) >= len(dates) or closes[i] <= 0:
             continue
         p = 앞해.get((int(r["fiscal_year"]) - 1, str(r["report_code"])))
         oi, oi0 = r.get("operating_income"), (p or {}).get("operating_income")
-        yoy = (oi / oi0 - 1) if isinstance(oi, (int, float)) and isinstance(oi0, (int, float)) and oi0 > 0 else None
+        # 통화가 바뀐 해(원화 → 달러 보고)끼리는 견주지 않는다 (25.1237, 25.919 같은 통화 규칙)
+        같은통화 = not (p and r.get("currency") and p.get("currency") and r["currency"] != p["currency"])
+        yoy = (oi / oi0 - 1) if (같은통화 and isinstance(oi, (int, float)) and isinstance(oi0, (int, float))
+                                 and oi0 > 0) else None  # fmt: skip
         칸: dict[str, Any] = {"date": d, "fiscal_year": int(r["fiscal_year"]), "report_code": str(r["report_code"]),
                              "yoy": round(yoy, 4) if yoy is not None else None}  # fmt: skip
         for n in REACTION_DAYS:
@@ -109,10 +113,12 @@ def return_sources(fin: list[dict], divs: list[dict], dates: list[str], closes: 
     시작 = next((r for r in 연간 if int(r["fiscal_year"]) == int(끝["fiscal_year"]) - SOURCE_YEARS), None)
     if not 시작:
         return None
+    if 시작.get("currency") and 끝.get("currency") and 시작["currency"] != 끝["currency"]:
+        return None  # 통화가 바뀐 두 해의 이익은 견줄 수 없다 (25.1237)
     ni0, ni1 = 시작.get("net_income"), 끝.get("net_income")
     if not (isinstance(ni0, (int, float)) and isinstance(ni1, (int, float)) and ni0 > 0 and ni1 > 0):
         return None
-    i = bisect.bisect_left(dates, str(시작.get("report_date") or ""))
+    i = bisect.bisect_left(dates, str(시작.get("first_date") or 시작.get("report_date") or ""))  # 처음 발표일 (25.1237)
     if i >= len(dates) - 1 or closes[i] <= 0 or closes[-1] <= 0:
         return None
     주가 = closes[-1] / closes[i] - 1

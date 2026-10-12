@@ -189,8 +189,16 @@ def 시세_끝날(client: TursoClient, country: str, 기준: str) -> tuple[dict[
 
 # 재무·수급 사건 이력 (docs/analysis.md 40~42장, 25.1063) — 나라마다 한 번
 EVENT_FIN_SQL = (
-    "SELECT f.stock_id, f.fiscal_year, f.report_code, f.consolidated, f.report_date, f.operating_income, f.net_income"
-    " FROM financials f JOIN stocks s ON s.id = f.stock_id WHERE s.country = ? AND f.fiscal_year >= ?"
+    "SELECT f.stock_id, f.fiscal_year, f.report_code, f.consolidated, f.report_date, f.operating_income, f.net_income,"
+    " f.currency FROM financials f JOIN stocks s ON s.id = f.stock_id WHERE s.country = ? AND f.fiscal_year >= ?"
+)
+#: 보고서마다 **처음 접수한 날** (docs/infra.md 25.1237). `financials.report_date` 는 정정 공시가 오면
+#: 정정 접수일로 덮인다 — 실적 반응은 처음 발표 날 둘레를 재야 한다. 스냅샷은 정정을 새 행으로 쌓으므로
+#: 가장 이른 접수일이 처음 발표다. 종목 → (종목, 날짜) 색인 순으로 그 나라 스냅샷만 읽는다(CROSS JOIN 이 순서를 고정)
+EVENT_FIRST_SQL = (
+    "SELECT fs.stock_id, fs.fiscal_year, fs.report_code, fs.consolidated, MIN(fs.as_of_date) AS first_date"
+    " FROM stocks s CROSS JOIN financial_snapshots fs ON fs.stock_id = s.id"
+    " WHERE s.country = ? AND fs.fiscal_year >= ? GROUP BY fs.stock_id, fs.fiscal_year, fs.report_code, fs.consolidated"
 )
 EVENT_DIV_SQL = (
     "SELECT d.stock_id, d.fiscal_year, d.cash_dividend_total FROM stock_dividends d JOIN stocks s ON s.id = d.stock_id"
@@ -262,6 +270,18 @@ def load_event_inputs(client: TursoClient, country: str, as_of: str, warnings: l
         except Exception as exc:  # noqa: BLE001
             if not db.표가_없나(exc):
                 warnings.append(f"사건 이력({키})을 읽지 못했습니다: {exc}")
+    # 처음 접수일을 재무 행에 붙인다 — 못 읽으면 예전처럼 `report_date`(정정이면 정정일)를 쓴다
+    try:
+        처음 = {(int(r[0]), int(r[1]), str(r[2]), int(r[3])): str(r[4])
+                for r in client.execute(EVENT_FIRST_SQL, [country, 해]).rows if r[4]}  # fmt: skip
+        for 행들 in out["fin"].values():
+            for r in 행들:
+                k = (int(r["stock_id"]), int(r["fiscal_year"]), str(r["report_code"]), int(r.get("consolidated") or 0))
+                if k in 처음:
+                    r["first_date"] = 처음[k]
+    except Exception as exc:  # noqa: BLE001
+        if not db.표가_없나(exc):
+            warnings.append(f"사건 이력(처음 접수일)을 읽지 못했습니다: {exc}")
     try:
         out["shares"] = {int(r[0]): float(r[1]) for r in client.execute(EVENT_SHARES_SQL, [country]).rows if r[1]}
     except Exception as exc:  # noqa: BLE001
