@@ -36,6 +36,7 @@ import {
   type SectionResult,
  metricLabel,
   substitutedNote,
+  capitalImpairedNote,
   priceRiskNote,
   QUARTER_LABEL,
   REPORT_LABEL,
@@ -572,6 +573,7 @@ function ScoreBlock({ score, factors, currency }: { score: NonNullable<Overview[
                     {f ? `${String(f.peer_group)} (${String(f.peer_size)}종목)` : "없음"}
                     {f?.missing.length ? ` · 빠짐: ${f.missing.map(metricLabel).join(", ")}` : ""}
                     {f ? (substitutedNote(f.raw) ? ` · 치환: ${substitutedNote(f.raw)}` : "") : ""}
+                    {key === "quality" && f && capitalImpairedNote(f.raw) ? ` · ${capitalImpairedNote(f.raw)}` : ""}
                     {key === "risk" && f && priceRiskNote(f.raw, currency) ? ` · ${priceRiskNote(f.raw, currency)}` : ""}
                     {key === "risk" && f && riskSourceNote(f.raw) ? ` · ${riskSourceNote(f.raw)}` : ""}
                   </td>

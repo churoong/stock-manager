@@ -687,6 +687,15 @@ export function priceRiskNote(raw: Record<string, unknown>, currency?: string): 
   return 줄.join(" · ");
 }
 
+/** 퀄리티 팩터의 자본잠식 표시 (docs/factors.md 3.2, 25.1175). 표식이 없으면 빈 문자열 */
+export function capitalImpairedNote(raw: Record<string, unknown>): string {
+  const 표식 = raw?._capital_impaired;
+  if (!표식 || typeof 표식 !== "object") return "";
+  return (표식 as { roe_worst?: boolean }).roe_worst
+    ? "자본잠식(자본 < 0) — 부채비율·ROE 를 집단 최악으로 매김"
+    : "자본잠식(자본 < 0) — 부채비율을 집단 최악으로 매김(흑자라 ROE 는 뺌)";
+}
+
 /** 근거표에 적을 "치환했다" 한 줄. 치환이 없으면 빈 문자열 (docs/factors.md 3.5) */
 export function substitutedNote(raw: Record<string, unknown>): string {
   const 섞인것 = raw?.[SUBSTITUTED_KEY];

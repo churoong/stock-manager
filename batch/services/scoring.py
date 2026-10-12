@@ -44,7 +44,9 @@ from batch.services import metrics as mt
 #      [확인필요] 판을 합치지 않고 올렸다
 # 9: 밸류 분모 시점 정합 — 시가총액을 기준일 가격으로 옮긴다 (docs/factors.md 3.1, infra 25.954)
 # 10: 옮기는 조건을 "시총 날짜 == 스냅샷" 에서 "시총 날짜 ≤ 스냅샷, 14일 안" 으로 — 미국이 실제로 옮겨진다 (25.960)
-CALC_VERSION = 10
+# 11: 자본잠식(자본 < 0)이면 부채비율은 집단 최악, ROE 는 적자일 때만 최악 — 사후 배정이라 다른 종목 z 는 그대로
+#     (docs/factors.md 3.2, infra 25.1175). 예전엔 두 지표가 빠져 잠식 종목의 퀄리티가 오히려 높았다
+CALC_VERSION = 11
 
 FACTORS = ("value", "quality", "growth", "momentum", "risk")
 
@@ -275,6 +277,10 @@ def quality_metrics(
         else total_liabilities_of(total_assets, total_equity)
     )
     return {
+        # 자본잠식 표식 (25.1175) — 자본 < 0 이면 1.0(적자: ROE 도 최악) 또는 0.0(흑자: 부채비율만 최악), 아니면 None.
+        # 자본이 정확히 0 이면 자료 구멍일 수 있어 표식을 달지 않는다(검증 조건)
+        CAPITAL_IMPAIRED: None if total_equity is None or total_equity >= 0
+        else (1.0 if net_income is not None and net_income < 0 else 0.0),
         "roe": safe_ratio(net_income, total_equity),
         "roa": safe_ratio(net_income, total_assets),
         # A/B 전용(12.14, `quality_op_assets`) — `FACTOR_METRICS` 밖이라 운영 점수·기록에 들어가지 않는다.
@@ -284,6 +290,21 @@ def quality_metrics(
         "debt_ratio": safe_ratio(liabilities, total_equity),
         "profit_stability": profit_stability(profitable_years, observed_years),
     }
+
+
+#: 자본잠식 표식 — 지표 묶음(`StockInput.metrics`)의 키이자 퀄리티 `raw_json` 의 키 (docs/factors.md 3.2, 25.1175).
+#: 지표 이름 목록(`FACTOR_METRICS`) 밖이라 z 에 직접 들어가지 않고, `score_factors` 가 부채비율·ROE 의 빈 z 를
+#: **다른 종목으로 낸 z 의 최솟값**으로 사후에 채우는 데만 쓴다 — 표본에 넣으면 하단 윈저라이즈가 꺼지고(25.245)
+#: 다른 종목 점수까지 움직인다(검증 에이전트 재현 5~7점)
+CAPITAL_IMPAIRED = "_capital_impaired"
+
+
+def impaired_worst(metric: str, flag: float | None) -> bool:
+    """자본잠식 표식이면 이 지표의 빈 z 를 최악으로 채우나. 부채비율은 늘(부채 ≥ 자산이라 순서상 최악),
+    ROE 는 적자일 때만(흑자인데 자본이 음수면 ROE → +∞ 쪽이라 최악이 근거 없다 — 자사주 매입 기업)."""
+    if flag is None:
+        return False
+    return metric == "debt_ratio" or (metric == "roe" and flag == 1.0)
 
 
 def total_liabilities_of(
@@ -1398,6 +1419,9 @@ def inputs_from_stored(rows: list[dict[str, Any]]) -> list[StockInput] | None:
         for k, v in raw.items():
             if not k.startswith("_"):
                 s.metrics[k] = v
+        # 자본잠식 표식도 되살린다 (25.1175) — 없으면 저장값 경로와 처음부터 읽는 경로의 z 가 갈린다
+        if r["factor"] == "quality" and isinstance(raw.get(CAPITAL_IMPAIRED), dict):
+            s.metrics[CAPITAL_IMPAIRED] = 1.0 if raw[CAPITAL_IMPAIRED].get("roe_worst") else 0.0
         if r["factor"] == "risk":
             if UNRECOVERED_KEY not in raw:
                 return None
@@ -1459,6 +1483,18 @@ def score_factors(
                     floor=하한,
                 )
 
+        # **자본잠식은 사후 배정** (docs/factors.md 3.2, 25.1175). 잠식 종목의 부채비율(늘)·ROE(적자일 때)는 값이
+        # 성립하지 않아 None 인데, 빠지면 가장 나쁜 두 지표가 사라져 퀄리티가 오히려 높았다(재현 46.0 vs 38.1).
+        # 다른 종목으로 낸 z 의 최솟값을 준다 — 평균·표준편차·윈저라이즈는 그대로라 다른 종목 점수는 안 바뀐다
+        for name, col in metric_z.items():
+            있는 = [z for z in col if z is not None]
+            if not 있는:
+                continue
+            최악 = min(있는)
+            for i, m in enumerate(members):
+                if col[i] is None and impaired_worst(name, m.metrics.get(CAPITAL_IMPAIRED)):
+                    col[i] = 최악
+
         for index, stock in enumerate(members):
             if stock.stock_id not in 배정:
                 continue  # 시장 전체로 z 를 냈지만 이 종목은 자기 업종 집단에서 따로 점수를 받는다
@@ -1484,6 +1520,8 @@ def score_factors(
                     raw_values[RISK_SOURCE_KEY] = stock.risk_source
                 if factor == "risk":
                     raw_values[UNRECOVERED_KEY] = stock.metrics.get(UNRECOVERED_ROWS)
+                if factor == "quality" and stock.metrics.get(CAPITAL_IMPAIRED) is not None:
+                    raw_values[CAPITAL_IMPAIRED] = {"roe_worst": stock.metrics.get(CAPITAL_IMPAIRED) == 1.0}
                 # 밸류 분모를 어느 날 값에서 어떻게 옮겼는지 (docs/factors.md 3.1, 25.954) — 근거표가 펼친다
                 if factor == "value" and stock.market_cap_note:
                     raw_values[MARKET_CAP_KEY] = stock.market_cap_note
