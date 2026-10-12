@@ -202,8 +202,12 @@ def load_long_signals(client: TursoClient, country: str = "US") -> tuple[set[int
         return set(), None
     ids = client.execute(
         "SELECT DISTINCT sg.stock_id FROM signals sg JOIN stocks s ON s.id = sg.stock_id"
-        " WHERE s.country = ? AND sg.horizon = 'long' AND sg.as_of_date = ?",
-        [country, str(as_of)],
+        " WHERE s.country = ? AND sg.horizon = 'long' AND sg.as_of_date = ? AND s.status = 'active'"
+        # **그 나라·그 기준일의 가장 새 판만** (25.1202, ETF 감사 — 25.464 규칙). 같은 날 판이 둘이면 새 판이 걸러 낸
+        # 종목의 옛 판 행까지 세어 카드의 "장기 신호 종목 비중" 이 부풀었다. 바깥 행을 가리키지 않는다(25.428)
+        "   AND sg.calc_version = (SELECT MAX(c.calc_version) FROM signals c JOIN stocks s3 ON s3.id = c.stock_id"
+        "     WHERE s3.country = ? AND c.as_of_date = ?)",
+        [country, str(as_of), country, str(as_of)],
     ).rows
     return {int(r[0]) for r in ids}, str(as_of)
 

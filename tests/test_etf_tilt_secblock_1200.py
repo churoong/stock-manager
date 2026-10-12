@@ -70,3 +70,18 @@ def test_SEC_가_막히면_미국_순위를_쓰지도_지우지도_않고_기준
         assert t["rank_all"] == i and t["rank_all_size"] == 5, sym  # 지난달 값 그대로(부분 순위로 덮지도, 지우지도 않음)
     상태, 글 = mem.conn.execute("SELECT status, error_text FROM batch_runs WHERE job_name = 'etf_tilt'").fetchone()
     assert 상태 == "partial" and "2개: CCC, DDD" in 글 and "지난달 값을 그대로" in 글
+
+
+def test_장기_신호_비중은_그날_가장_새_판만_센다() -> None:
+    """같은 날 판이 둘이면 새 판이 걸러 낸 종목의 옛 판 행까지 세었다 (docs/infra.md 25.1202, ETF 감사 #4)."""
+    mem = MemClient()
+    db.apply_migrations(mem)  # type: ignore[arg-type]
+    c = mem.conn
+    for sid in (1, 2):
+        c.execute("INSERT INTO stocks (id, ticker, market, country, currency, status, source, fetched_at)"
+                  " VALUES (?, ?, 'NYSE', 'US', 'USD', 'active', 't', 't')", [sid, f"T{sid}"])  # fmt: skip
+    for sid, ver in ((1, 1), (2, 1), (1, 2)):  # 판 2 는 종목 1 만 냈다
+        c.execute("INSERT INTO signals (stock_id, as_of_date, horizon, signal_type, buy_zone_low, buy_zone_high, currency,"
+                  " tranche_plan, size_reduction, rationale_text, rationale_data, calc_version, created_at)"
+                  " VALUES (?, '2026-10-10', 'long', 'x', 1, 2, 'USD', '[]', 1, 'x', '{}', ?, 't')", [sid, ver])  # fmt: skip
+    assert job.load_long_signals(mem, "US") == ({1}, "2026-10-10")  # type: ignore[arg-type]
