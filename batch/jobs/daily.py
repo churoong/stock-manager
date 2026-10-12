@@ -2456,8 +2456,9 @@ def _self_grade(client: TursoClient, market: str, trade_date: str, warnings: lis
             " FROM report_items i JOIN daily_reports r ON r.id = i.report_id"
             " JOIN signal_outcomes o ON o.stock_id = i.stock_id"
             "  AND o.as_of_date = json_extract(i.payload_json, '$.as_of_date')"
+            # 사용자가 받은 리포트만 (25.1182) — 한 번도 보내지 못한 리포트는 "지난 추천" 이 아니다(reports.md 3.4)
             " WHERE r.market = ? AND r.trade_date < ? AND i.section = 'recommend' AND i.stock_id IS NOT NULL"
-            " GROUP BY i.stock_id, r.trade_date",
+            " AND r.sent_at IS NOT NULL GROUP BY i.stock_id, r.trade_date",
             [market, trade_date],
         )
     except Exception as exc:  # noqa: BLE001 — 자기 채점은 곁다리다. 경고로 말하고 리포트는 그대로
@@ -2474,7 +2475,10 @@ def _pick_history(
         rs = client.execute(
             "SELECT i.stock_id, r.trade_date, json_extract(i.payload_json, '$.close') AS close"
             " FROM report_items i JOIN daily_reports r ON r.id = i.report_id"
-            " WHERE r.market = ? AND r.trade_date < ? AND i.section = 'recommend' AND i.stock_id IS NOT NULL",
+            # 사용자가 받은 리포트만 센다 (25.1182, 감사 재현) — 발송이 실패하고 예비 실행도 실패한 날의 리포트가
+            # 다음 날 "2번째 추천 (연속 2일)" 로 셌다. 기준은 "사용자가 봤던 것" 이다(reports.md 3.3)
+            " WHERE r.market = ? AND r.trade_date < ? AND i.section = 'recommend' AND i.stock_id IS NOT NULL"
+            " AND r.sent_at IS NOT NULL",
             [market, trade_date],
         )
     except Exception as exc:  # noqa: BLE001 — 영수증은 곁다리다. 리포트를 막지 않고 경고로 말한다

@@ -24,3 +24,25 @@ def test_2부와_제외_줄에도_이름_꼬리를_뗀다() -> None:
     글 = rp.compose(rows, 20000.0, "2026-10-08", currency="USD").text
     assert "Common Stock" not in 글 and "Ordinary Shares" not in 글
     assert "Kennametal Inc." in 글 and "Acme Holding Ltd" in 글
+
+
+def test_보내지_못한_리포트는_추천_이력에_세지_않는다() -> None:
+    """발송·예비 실행이 모두 실패한 날의 리포트가 다음 날 "2번째 추천 (연속 2일)" 로 셌다 (docs/infra.md 25.1182)."""
+    from batch.core import db
+    from batch.jobs import daily
+    from tests.test_portfolio_job import MemClient
+
+    mem = MemClient()
+    db.apply_migrations(mem)  # type: ignore[arg-type]
+    c = mem.conn
+    c.execute("INSERT INTO stocks (id, ticker, market, country, currency, status, source, fetched_at)"
+              " VALUES (5, '000005', 'KOSPI', 'KR', 'KRW', 'active', 't', 't')")  # fmt: skip
+    for rid, day, sent in ((1, "2026-10-06", "2026-10-06T23:30:00Z"), (2, "2026-10-07", None)):
+        c.execute("INSERT INTO daily_reports (id, market, trade_date, status, generated_at, summary_text, warnings_json,"
+                  " sent_at) VALUES (?, 'KR', ?, 'success', 't', 'x', '[]', ?)", [rid, day, sent])  # fmt: skip
+        c.execute("INSERT INTO report_items (report_id, section, rank, stock_id, payload_json)"
+                  " VALUES (?, 'recommend', 1, 5, '{\"close\": 100}')", [rid])  # fmt: skip
+    경고: list[str] = []
+    이력 = daily._pick_history(mem, "KR", "2026-10-08", 경고)  # type: ignore[arg-type]
+    assert 이력 is not None and not 경고
+    assert 이력[5].times == 1 and 이력[5].first_date == "2026-10-06"
