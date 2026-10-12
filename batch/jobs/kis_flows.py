@@ -134,6 +134,27 @@ AFTER_HOURS_INSERT = (
 )
 
 
+SENT_UPDATE = (
+    "UPDATE alerts SET sent_at = ? WHERE trigger_type = ? AND trade_date = ? AND sent_at = ?"
+    " AND stock_id IN (SELECT value FROM json_each(?))"
+)
+
+
+def _발송_기록(client: TursoClient, args: list) -> bool:
+    """보낸 시간외 알림의 `sent_at` 을 적는다 — 실패하면 새 연결로 한 번 더 (25.1222, 25.1219 와 같은 까닭)."""
+    try:
+        client.execute(SENT_UPDATE, args)
+        return True
+    except Exception as exc:  # noqa: BLE001 — 이미 보냈다
+        log.warning("시간외 알림 발송 시각을 적지 못했습니다 — 새 연결로 한 번 더: %s", type(exc).__name__)
+    try:
+        with TursoClient() as 새것:
+            새것.execute(SENT_UPDATE, args)
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _after_hours(client: TursoClient, qc: kis.QuoteClient, today, failed: dict[str, str]) -> dict:
     """보유 종목의 시간외 단일가가 문턱(장중 급등락과 같은 설정) 이상 움직였으면 알림을 남기고 보낸다 (25.992).
 
@@ -181,12 +202,6 @@ def _after_hours(client: TursoClient, qc: kis.QuoteClient, today, failed: dict[s
         글 = "\n".join([머리, *(f"· {h['message']}" for h in 새것)])
         try:
             telegram.send(글)
-            보냄 = len(새것)
-            client.execute(
-                "UPDATE alerts SET sent_at = ? WHERE trigger_type = ? AND trade_date = ? AND sent_at = ?"
-                " AND stock_id IN (SELECT value FROM json_each(?))",
-                [stamp, ah.TRIGGER, day.isoformat(), 잡음, json.dumps([h["stock_id"] for h in 새것])],
-            )
         except Exception as exc:  # noqa: BLE001 — 못 보내면 알림 센터에는 남는다
             failed["시간외:발송"] = type(exc).__name__
             # 잡음을 풀어 장중 경로가 다음 호출에 보내게 한다(예전처럼 sent_at 비움)
@@ -195,6 +210,13 @@ def _after_hours(client: TursoClient, qc: kis.QuoteClient, today, failed: dict[s
                     "UPDATE alerts SET sent_at = NULL WHERE trigger_type = ? AND trade_date = ? AND sent_at = ?",
                     [ah.TRIGGER, day.isoformat(), 잡음],
                 )
+        else:
+            보냄 = len(새것)
+            # **보낸 뒤 기록 실패는 잡음을 풀지 않는다** (docs/infra.md 25.1222, 감사 재현). 예전에는 발송과 기록이 한
+            # `try` 라 기록이 실패하면 위 갈래로 가 `sent_at = NULL` 로 풀었고, 장중 경로가 같은 알림을 다시 보냈다
+            if not _발송_기록(client, [stamp, ah.TRIGGER, day.isoformat(), 잡음,
+                                      json.dumps([h["stock_id"] for h in 새것])]):  # fmt: skip
+                failed["시간외:발송기록"] = "보냈지만 sent_at 을 적지 못함(잡음 유지)"
     elif 새것:
         # 조용시간 + "해제 뒤 보내기" 면 잡음으로 넣었으니 풀어 둔다 — 장중 경로가 조용시간이 끝나면 보낸다(예전처럼
         # NULL). 조용시간 + 버리기면 QUIET_SKIPPED 로 넣어 이 UPDATE 는 아무 행도 안 건드린다
