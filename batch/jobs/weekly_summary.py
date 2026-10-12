@@ -183,10 +183,14 @@ POSTMORTEM_ENTRY_DAYS = (36, 27)
 #: 사후 분석에서 따져 볼 손실의 상한 — 손실 하나마다 시세를 몇 줄씩 읽는다
 POSTMORTEM_MAX = 30
 
+#: 업종 평균도 **분할만 반영한 가격**으로 (25.1150, 감사 재현) — 손실 종목의 `ret_20d` 가 그 잣대다(`db.SPLIT_ONLY_PRICE_SQL`).
+#: 원 종가로 내면 동종 6개 가운데 하나가 1:5 분할한 주에 업종 평균이 −16% 가 되고 주된 원인이 "업종" 으로 바뀌었다
+_P1 = db.SPLIT_ONLY_PRICE_SQL.replace("p.", "p1.")
+_P2 = db.SPLIT_ONLY_PRICE_SQL.replace("p.", "p2.")
 SECTOR_AVG = (
-    "SELECT AVG(p2.close / p1.close - 1), COUNT(*) FROM stocks s"
-    " JOIN prices p1 ON p1.stock_id = s.id AND p1.date = ? AND p1.close > 0"
-    " JOIN prices p2 ON p2.stock_id = s.id AND p2.date = ? AND p2.close > 0"
+    f"SELECT AVG(({_P2}) / ({_P1}) - 1), COUNT(*) FROM stocks s"
+    f" JOIN prices p1 ON p1.stock_id = s.id AND p1.date = ? AND p1.close > 0 AND ({_P1}) > 0"
+    f" JOIN prices p2 ON p2.stock_id = s.id AND p2.date = ? AND p2.close > 0 AND ({_P2}) > 0"
     " WHERE s.country = ? AND s.sector = ? AND s.id <> ? AND s.asset_type = 'stock'"
 )
 

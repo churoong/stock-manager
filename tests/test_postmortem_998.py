@@ -104,3 +104,21 @@ def test_끊긴_신호의_손실도_센다() -> None:
     총, 손실수, [x] = ws.load_losses(C(), datetime(2026, 10, 7, tzinfo=UTC))
     assert (총, 손실수) == (1, 1) and x.ret == -0.60
     assert x.disclosure == "상장폐지결정"  # 공시 창은 마지막 종가 날까지
+
+
+def test_업종_평균은_분할만_반영한_가격으로_낸다() -> None:
+    """동종 하나가 1:5 분할한 주에 원 종가로 낸 업종 평균이 −16% 가 되었다 (docs/infra.md 25.1150)."""
+    con = sqlite3.connect(":memory:")
+    for f in sorted((Path(__file__).resolve().parent.parent / "migrations").glob("*.sql")):
+        con.executescript(f.read_text(encoding="utf-8"))
+    for i in range(1, 7):
+        con.execute("INSERT INTO stocks (id, ticker, market, country, currency, status, source, fetched_at, sector)"
+                    " VALUES (?, ?, 'KOSPI', 'KR', 'KRW', 'active', 't', 't', '반도체')", [i, f"00000{i}"])  # fmt: skip
+    for i in range(2, 7):
+        # 진입일 100 → 끝날 95. 6번은 그 사이 1:5 분할 — 원 종가 19, 수정주가는 진입일 20(=100/5)
+        첫, 끝 = ((100.0, 20.0), (19.0, None)) if i == 6 else ((100.0, None), (95.0, None))
+        for d, (c, a) in (("2026-09-04", 첫), ("2026-10-02", 끝)):
+            con.execute("INSERT INTO prices (stock_id, date, close, adj_close, currency, source, fetched_at)"
+                        " VALUES (?, ?, ?, ?, 'KRW', 't', 't')", [i, d, c, a])  # fmt: skip
+    avg, n = con.execute(ws.SECTOR_AVG, ["2026-09-04", "2026-10-02", "KR", "반도체", 1]).fetchone()
+    assert n == 5 and round(avg, 4) == -0.05
