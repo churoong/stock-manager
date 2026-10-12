@@ -1,5 +1,6 @@
 "use client";
 
+import { rateText } from "@/lib/recommend"; // 적중률을 반올림으로 0%·100% 로 만들지 않는다 (25.1227)
 import { MODEL_LABEL, TRACK_MIN_SAMPLE, horizonLabel, trackRows, type TrackData, type TrackRow } from "@/lib/analysis";
 
 /**
@@ -9,7 +10,7 @@ import { MODEL_LABEL, TRACK_MIN_SAMPLE, horizonLabel, trackRows, type TrackData,
 export default function ForecastTrack({ t }: { t: TrackData }) {
   const 종목 = trackRows(t.stock);
   const 시장 = trackRows(t.market);
-  const pct = (x: number | null, ok: boolean) => (x === null ? "-" : ok ? `${(x * 100).toFixed(0)}%` : "표본 적음");
+  const pct = (x: number | null, ok: boolean) => (x === null ? "-" : ok ? rateText(x) : "표본 적음");
   const 줄 = (r: TrackRow) => (
     <tr key={`${r.model}-${r.months}`} className="border-t border-slate-100 dark:border-slate-800">
       <td className="py-1 pr-2">{MODEL_LABEL[r.model] ?? r.model}</td>

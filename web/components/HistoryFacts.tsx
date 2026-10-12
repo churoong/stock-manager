@@ -1,6 +1,7 @@
 "use client";
 
 import { REPORT_NAME, seasonTone, type DistLite, type HistoryData } from "@/lib/analysis";
+import { rateText } from "@/lib/recommend"; // "오름" 비율을 반올림으로 0%·100% 로 만들지 않는다 (25.1227)
 
 /**
  * 자기 시세 이력의 사실들 (docs/analysis.md 31~34장, 25.1057) — 낙폭 회복 시간표·최악의 한 달·계절성 달력·52주 신고가 뒤.
@@ -98,9 +99,9 @@ export default function HistoryFacts({ h }: { h: HistoryData }) {
                   return a ? (
                     <tr key={m} className="border-t border-slate-100 dark:border-slate-800">
                       <td className="py-0.5 pr-2">{m}개월</td>
-                      <td className="pr-2">{pct(a.median)} · 오름 {(a.up * 100).toFixed(0)}%</td>
-                      <td className="pr-2">{b ? `${pct(b.median)} · ${(b.up * 100).toFixed(0)}%` : "-"}</td>
-                      <td>{c ? `${pct(c.median)} · ${(c.up * 100).toFixed(0)}%` : "-"}</td>
+                      <td className="pr-2">{pct(a.median)} · 오름 {rateText(a.up)}</td>
+                      <td className="pr-2">{b ? `${pct(b.median)} · ${rateText(b.up)}` : "-"}</td>
+                      <td>{c ? `${pct(c.median)} · ${rateText(c.up)}` : "-"}</td>
                     </tr>
                   ) : null;
                 })}
@@ -116,7 +117,7 @@ export default function HistoryFacts({ h }: { h: HistoryData }) {
               <tbody>
                 {["0", "1", "2"].map((k) => {
                   const b = vr.buckets[k] ?? {};
-                  const 칸 = (d: DistLite | null | undefined) => (d ? `${pct(d.median)} · 오름 ${(d.up * 100).toFixed(0)}%` : "-");
+                  const 칸 = (d: DistLite | null | undefined) => (d ? `${pct(d.median)} · 오름 ${rateText(d.up)}` : "-");
                   return (
                     <tr key={k} className={`border-t border-slate-100 dark:border-slate-800 ${Number(k) === vr.bucket ? "font-semibold" : ""}`}>
                       <td className="py-0.5 pr-2">{["조용한 편", "보통", "시끄러운 편"][Number(k)]}{Number(k) === vr.bucket ? " ◀ 지금" : ""}</td>
@@ -224,7 +225,7 @@ export default function HistoryFacts({ h }: { h: HistoryData }) {
               {["5", "20"].map((m) => {
                 const a = sh.h[m];
                 const b = sh.base[m];
-                return a ? <li key={m}>{m}거래일 뒤 중앙값 <b>{pct(a.median)}</b> · 오름 {(a.up * 100).toFixed(0)}% {b ? `(평소 ${pct(b.median)} · ${(b.up * 100).toFixed(0)}%)` : ""}</li> : null;
+                return a ? <li key={m}>{m}거래일 뒤 중앙값 <b>{pct(a.median)}</b> · 오름 {rateText(a.up)} {b ? `(평소 ${pct(b.median)} · ${rateText(b.up)})` : ""}</li> : null;
               })}
             </ul>
             <p className="mt-1 text-[11px] text-slate-400">급증 = 공매도 비중이 앞 20거래일 중앙값의 2배 이상. 수집이 2026-10 에 시작해 표본이 적습니다.</p>

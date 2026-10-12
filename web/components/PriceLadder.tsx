@@ -1,5 +1,6 @@
 "use client";
 
+import { rateText } from "@/lib/recommend"; // 확률을 반올림으로 0%·100% 로 만들지 않는다 (25.1227)
 import { ladderWithNow, type LadderData, type LadderItem } from "@/lib/analysis";
 import { formatPrice } from "@/lib/stockDetail";
 
@@ -25,7 +26,7 @@ export function tailCell(it: LadderItem): string {
   const b = it.touch_boot?.["12"];
   const n = it.touch_norm0?.["12"];
   if (b === undefined || b === null) return "-";
-  return `${(b * 100).toFixed(0)}%${n === undefined ? "" : ` (${(n * 100).toFixed(0)}%)`}`;
+  return `${rateText(b)}${n === undefined ? "" : ` (${rateText(n)})`}`;
 }
 
 export default function PriceLadder({ l, currency }: { l: LadderData; currency: string }) {
@@ -37,7 +38,7 @@ export default function PriceLadder({ l, currency }: { l: LadderData; currency: 
       {l.race && (
         <p className="mb-1.5 text-xs text-slate-700 dark:text-slate-300">
           목표가 {formatPrice(l.race.target, currency)}가 손절가 {formatPrice(l.race.stop, currency)}보다 <b>먼저</b> 닿을 확률{" "}
-          <b>{(l.race.p * 100).toFixed(0)}%</b>
+          <b>{rateText(l.race.p)}</b>
           {l.race.kelly !== undefined && l.race.kelly !== null && (
             <span className="block text-slate-500">
               켈리 참고 비중(이론상 최대) {(l.race.kelly * 100).toFixed(0)}% · 절반 켈리 {(l.race.kelly * 50).toFixed(0)}% — 비교용입니다. 실제 권장 비중은 상한·변동성 규칙을 따릅니다.
@@ -72,7 +73,7 @@ export default function PriceLadder({ l, currency }: { l: LadderData; currency: 
                   </td>
                   <td className="pr-2">{pct(it.dist)}</td>
                   {l.assumed && l.touch_months.map((m) => (
-                    <td key={m} className="pr-2">{it.touch?.[String(m)] === undefined ? "-" : `${(it.touch[String(m)] * 100).toFixed(0)}%`}</td>
+                    <td key={m} className="pr-2">{it.touch?.[String(m)] === undefined ? "-" : rateText(it.touch[String(m)])}</td>
                   ))}
                   {꼬리 && <td className="pr-2">{tailCell(it)}</td>}
                 </tr>
