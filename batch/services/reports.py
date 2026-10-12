@@ -57,6 +57,11 @@ def items_from(
             add(SECTION_BUY, asdict(alloc), stock_of.get(alloc.ticker))
         for ex in composed.portfolio.excluded:
             add(SECTION_NOTICE, {"kind": "excluded", **asdict(ex)}, stock_of.get(ex.ticker))
+        # 배분이 0건인 **까닭**도 항목으로 남긴다 (25.1187, 리포트 감사 #5). 본문(2부)에는
+        # "신호가 2거래일 전 것이라 배분하지 않았습니다" 가 있는데 항목에는 없어,
+        # 웹 항목 목록의 매수 절이 까닭 없이 비었다
+        if not composed.portfolio.allocations and composed.portfolio.no_allocation_reason:
+            add(SECTION_NOTICE, {"kind": "no_allocation", "text": composed.portfolio.no_allocation_reason})
 
     for flag in sell_flags or []:
         add(SECTION_SELL_FLAG, dict(flag), _int_or_none(flag.get("stock_id")))

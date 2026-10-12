@@ -105,3 +105,16 @@ class Test저장:
         assert sum("INSERT INTO report_items" in sql for sql in 묶음들[0]) == 4
         n = client.conn.execute("SELECT COUNT(*) FROM report_items WHERE report_id = ?", [report_id]).fetchone()[0]
         assert n == 4
+
+
+def test_배분이_0건인_까닭도_항목으로_남긴다() -> None:
+    """2부 본문에는 "배분하지 않았습니다" 가 있는데 report_items 에는 없어 웹 항목 목록의 매수 절이 까닭 없이 비었다
+    (docs/infra.md 25.1187, 리포트 감사 #5)."""
+    사유 = "신호가 2거래일 전(2026-10-06) 것이라 2부에서 금액을 배분하지 않았습니다"
+    c = rp.compose([row(1), row(2)], 10_000_000.0, "2026-10-06", no_allocation_reason=사유)
+    items = reports.items_from(c, [], [], None)
+    assert [i["payload"]["text"] for i in items if i["payload"].get("kind") == "no_allocation"] == [사유]
+    assert not [i for i in items if i["section"] == reports.SECTION_BUY]
+    # 배분이 있으면 싣지 않는다
+    c2 = rp.compose([row(1), row(2)], 10_000_000.0, "2026-10-06")
+    assert not [i for i in reports.items_from(c2, [], [], None) if i["payload"].get("kind") == "no_allocation"]

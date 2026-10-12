@@ -26,7 +26,7 @@
 | `recommend` | 1부 개별 종목. 기간마다 한 항목 | `report_sections.StockPick` 을 그대로 (점수·구간·성과·근거 문장, **그날 신호의 근거표 `criteria` 와 계산일 `as_of_date`** — 화면이 추천마다 펼친다, infra 25.349) |
 | `buy_signal` | 2부 배분 | `Allocation` (금액·비중·분할) |
 | `sell_flag` | 매도 플래그 | 플래그 행 그대로 |
-| `notice` | 2부 제외 사유 (`kind=excluded`) · 시장 국면 (`kind=regime`) · 경고 (`kind=warning`) | 종류별 |
+| `notice` | 2부 제외 사유 (`kind=excluded`) · 2부 배분 0건의 까닭 (`kind=no_allocation`, 25.1187) · 시장 국면 (`kind=regime`) · 경고 (`kind=warning`) | 종류별 |
 
 설계서의 `buy_signal` 을 2부 배분에 썼다. 설계서는 1부·2부 구조 전의 이름이라 뜻이 조금 다르다 —
 "돈을 넣을 종목" 이라는 뜻으로 읽으면 같다.
