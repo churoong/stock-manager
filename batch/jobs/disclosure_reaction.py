@@ -23,6 +23,7 @@ from batch.core import calendar as cal
 from batch.core import db
 from batch.core.client import TursoClient
 from batch.core.entry import guard
+from batch.services import cb_overhang as cb
 from batch.services import disclosure_reaction as dr
 from batch.sources import dart_disclosures as dd
 
@@ -117,6 +118,57 @@ def write_governance(client: TursoClient, 위험: dict[tuple[int, str, str], tup
     return {"covered": list(구간) if 구간 else None, "rows": len(stmts) - 1}
 
 
+#: 전환사채 발행결정 상세를 한 번 실행에 부르는 상한 (docs/analysis.md 55장, 25.1192). 처음 1년치는 몇 주에 걸쳐 찬다 —
+#: 유니버스 종목의 1년 발행결정은 수백 건 어림 `[확인필요: 실측]`. DART 일 한도 2만의 2%
+CB_MAX_CALLS = 400
+CB_PENDING_SQL = (
+    "SELECT d.receipt_no, d.stock_id, d.corp_code, d.disclosed_at, d.title FROM disclosures d"
+    " LEFT JOIN cb_issuances c ON c.receipt_no = d.receipt_no"
+    " WHERE d.disclosed_at >= ? AND d.stock_id IS NOT NULL AND d.is_material = 1"
+    " AND d.title LIKE '%전환사채권발행결정%' AND c.receipt_no IS NULL ORDER BY d.disclosed_at DESC"
+)
+CB_INSERT = (
+    "INSERT INTO cb_issuances (receipt_no, stock_id, decided_at, status, face_amount, conv_price, conv_shares,"
+    " shares_pct, claim_start, claim_end, refix_floor, source, fetched_at)"
+    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    " ON CONFLICT (receipt_no) DO NOTHING"
+)
+
+
+def collect_cb(client: TursoClient, today: date, max_calls: int = CB_MAX_CALLS) -> dict:
+    """B 목록의 전환사채 발행결정 가운데 아직 안 받은 것을 DART 상세로 받는다 (docs/analysis.md 55장, 25.1192).
+
+    접수번호마다 한 번. 응답에 그 접수번호 행이 없으면 `no_row` 로 적어 다시 부르지 않는다.
+    오류면 적지 않고 멈춘다(다음 실행)."""
+    since = (today - timedelta(days=cb.WINDOW_DAYS)).isoformat()
+    대기 = [r for r in client.execute(CB_PENDING_SQL, [since]).dicts() if cb.is_cb_title(str(r["title"]))]
+    stamp, calls, ok, 없음, err = db.now_iso(), 0, 0, 0, None
+    stmts: list[tuple[str, list]] = []
+    for r in 대기[:max_calls]:
+        day = str(r["disclosed_at"])[:10]
+        rows, err = dd.fetch_cb_decision(str(r["corp_code"]), day.replace("-", ""))
+        calls += 1
+        if err:
+            break
+        v = cb.parse_row(rows, str(r["receipt_no"]))
+        if v is None:
+            없음 += 1
+            stmts.append((CB_INSERT, [r["receipt_no"], r["stock_id"], day, "no_row", None, None, None, None, None, None,
+                                      None, dd.SOURCE, stamp]))  # fmt: skip
+        else:
+            ok += 1
+            stmts.append((CB_INSERT, [r["receipt_no"], r["stock_id"], day, "ok", v.face_amount, v.conv_price,
+                                      v.conv_shares, v.shares_pct, v.claim_start, v.claim_end, v.refix_floor,
+                                      dd.SOURCE, stamp]))  # fmt: skip
+    for i in range(0, len(stmts), 500):
+        client.batch(stmts[i : i + 500])
+    # 부른 만큼 센다 (CLAUDE.md 80% 경고·100% 중단) — 한도에 막히면 다음 실행에
+    if calls and db.record_and_guard(client, "dart_opendart", count=calls, limit_value=20_000) == "blocked":
+        err = err or "DART 일일 한도"
+    return {"pending": len(대기), "calls": calls, "ok": ok, "no_row": 없음, "left": max(len(대기) - calls, 0),
+            "error": err}  # fmt: skip
+
+
 def compute(client: TursoClient, today: date) -> dict:
     since = (today - timedelta(days=BACKFILL_DAYS + 30)).isoformat()
     events: dict[tuple[int, str, str], dr.Event] = {}
@@ -196,6 +248,8 @@ def run(days: int | None = None, force: bool = False, start: date | None = None,
             계산: dict = {"skipped": "1년 모으기가 끝나지 않음 — 다음 실행이 다시 받는다"}
         elif force or 비었나 or today.weekday() == WEEKDAY:
             계산 = compute(client, today)
+            # 전환사채 발행결정 상세 (55장) — 계산하는 날만(주 1회). 공시 표를 1년치 훑는 읽기를 날마다 하지 않는다
+            계산["cb"] = collect_cb(client, today)
         else:
             계산 = {"skipped": "금요일 아님"}
         status = "partial" if 모음.get("error") else "success"

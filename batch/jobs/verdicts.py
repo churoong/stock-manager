@@ -24,6 +24,7 @@ from batch.core.client import TursoClient
 from batch.core.entry import guard
 from batch.jobs import daily
 from batch.services import adjust as adj
+from batch.services import cb_overhang as cb
 from batch.services import disclosure_reaction as dr
 from batch.services import divergence, history, insights
 from batch.services import forecast_track as ft
@@ -138,6 +139,11 @@ DISCLOSURES_SQL = (
 )
 #: 공시 위험 이력 1년 (docs/analysis.md 54장, 25.1157) — 금요일 공시 반응 계산이 채운 작은 표만 읽는다
 GOVERNANCE_SQL = "SELECT stock_id, day, type, title, receipt_no, covered_from, covered_to FROM governance_events"
+# 전환사채 잠재 물량 사실 줄 (55장, 25.1192) — 청구 기간이 남은 것만(표 자체가 작다)
+CB_SQL = (
+    "SELECT stock_id, receipt_no, decided_at, status, face_amount, conv_price, shares_pct, claim_start, claim_end,"
+    " refix_floor FROM cb_issuances WHERE status = 'ok' AND decided_at >= ? AND claim_end >= ?"
+)
 # `halted` — 5거래일째 거래정지로 못 잰 건수 (25.1154)
 REACTION_SQL = "SELECT type, label, n, mean_pct, median_pct, pos_pct, halted FROM disclosure_reaction"
 INSERT = (
@@ -593,6 +599,11 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
     if country == "KR":
         for r in _safe(client, GOVERNANCE_SQL, [], warnings, "공시 위험 이력"):
             위험이력[int(r["stock_id"])].append(r)
+    전환사채: dict[int, list[dict]] = defaultdict(list)
+    if country == "KR":
+        for r in _safe(client, CB_SQL, [(today - timedelta(days=cb.WINDOW_DAYS)).isoformat(), today.isoformat()],
+                       warnings, "전환사채 발행결정"):  # fmt: skip
+            전환사채[int(r["stock_id"])].append(r)
     as_of = max(str(r["as_of_date"]) for r in 점수.values())
     재료 = outlook_inputs(client, country, as_of, today, warnings)
     # 예측 성적표 (25.1037) — 지난 누계를 읽고 기간이 찬 예측을 더한다
@@ -745,9 +756,16 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
         # 사실 줄 (54장) — 점수·결론·반대 목소리 셈에 넣지 않는다. 근거표에는 접수번호
         사실 = dr.governance_line(위험이력.get(sid, []))
         if 사실:
-            detail["facts"] = [사실]
+            detail.setdefault("facts", []).append(사실)
             out["evidence"] += [vd._row("공시 위험 이력", str(e["title"]), "—", f"DART 접수번호 {e['receipt_no']}",
                                         str(e["day"])) for e in 위험이력[sid]]  # fmt: skip
+        # 전환사채 잠재 물량 (55장, 25.1192) — 같은 사실 줄. 근거표에는 접수번호와 결정일
+        물량 = cb.line(전환사채.get(sid, []), today)
+        if 물량:
+            detail.setdefault("facts", []).append(물량)
+            out["evidence"] += [vd._row("전환사채 발행결정", f"발행주식의 {e['shares_pct']}%" if e.get("shares_pct")
+                                        is not None else "—", "—", f"DART 접수번호 {e['receipt_no']} (cvbdIsDecsn)",
+                                        str(e["decided_at"])) for e in cb.live(전환사채[sid], today)]  # fmt: skip
         if sid in 내부자:
             행 = insider.criteria_rows(내부자[sid], r.get("listed_shares"))
             if 행:

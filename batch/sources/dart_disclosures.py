@@ -226,3 +226,32 @@ def fetch_market_day(day: str, kind: str) -> tuple[list[MarketDisclosure], int, 
             log.warning("시장 전체 공시 %s %s: %d쪽 중 %d쪽만 받음", day, kind, total_page, page)
             return out, calls, f"잘림: {day} {kind} {total_page}쪽 중 {page}쪽"
         page += 1
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# 전환사채 발행결정 상세 (docs/analysis.md 55장, docs/infra.md 25.1177 탐침·25.1192)
+# ---------------------------------------------------------------------------------------------------------------------
+
+#: 주요사항보고서 API — 전환사채권 발행결정. 칸 이름은 10-12 탐침(`scripts/probe_dart_cb.py`)으로 확인했다
+CB_ENDPOINT = "cvbdIsDecsn.json"
+
+
+def fetch_cb_decision(corp_code: str, day: str) -> tuple[list[dict[str, Any]], str | None]:
+    """한 회사의 하루치(YYYYMMDD) 전환사채 발행결정 행들. 반환 (행, 오류). 자료 없음은 ([], None).
+
+    한 번 부르면 그날 그 회사의 발행결정이 여러 행 올 수 있다(10-12 탐침) — 부르는 쪽이 접수번호로 고른다."""
+    key = config.get("DART_API_KEY")
+    if not key:
+        return [], "DART_API_KEY 없음"
+    try:
+        params = {"crtfc_key": key, "corp_code": corp_code, "bgn_de": day, "end_de": day}
+        response = requests.get(f"{BASE_URL}/{CB_ENDPOINT}", timeout=LIST_TIMEOUT, params=params)
+        payload = response.json() if response.status_code == 200 else {}
+    except (requests.RequestException, ValueError) as exc:
+        return [], f"호출 실패: {가림(str(exc))}"
+    status = str(payload.get("status"))
+    if status == STATUS_NO_DATA:
+        return [], None
+    if status != STATUS_OK:
+        return [], f"상태 {status}: {payload.get('message')}"
+    return [r for r in payload.get("list") or [] if isinstance(r, dict)], None

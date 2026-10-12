@@ -406,6 +406,15 @@ class Test공시_반응:
         assert dr.GOVERNANCE_DAYS == 365
         검사(ANALYSIS, "1년 전부터 계산일 " + f"{dr.COVERAGE_SLACK_DAYS}일 전까지 이어질 때만", "덮은 날 가드")
 
+    def test_전환사채_잠재_물량(self) -> None:
+        """사실 줄의 창·상한 (docs/analysis.md 55장, 25.1192)."""
+        from batch.jobs import disclosure_reaction as job
+        from batch.services import cb_overhang as cb
+
+        검사(ANALYSIS, f"지난 **{cb.WINDOW_DAYS}일** 안에 결정한", "결정일 창")
+        검사(ANALYSIS, f"새 것부터 최대 {cb.MAX_LISTED}건", "나열 상한")
+        검사(ANALYSIS, f"한 번에 최대 {job.CB_MAX_CALLS}회", "실행당 호출 상한")
+
 
 class Test우연일_확률:
     """운인가 실력인가 (docs/backtest.md 9장, docs/infra.md 25.997)."""
@@ -665,7 +674,7 @@ class Test밸류_분모:
     "gross_profitability", "robustness", "column_rot", "calibration", "self_grade", "holding_scores",
     "pick_history", "etf_accounts", "etf_tilt", "after_hours", "broker_stats", "disclosure_reaction", "luck", "postmortem",
     "divergence", "tax_sim", "verdict", "forecast_track", "patterns", "insights", "history",
-    "event_history", "simulation", "candidate_factors",
+    "event_history", "simulation", "candidate_factors", "cb_overhang",
 )  # fmt: skip
 
 #: 아직 그물 밖인 모듈과 **왜 아직인지**. 하나씩 줄여 간다

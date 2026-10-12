@@ -49,6 +49,7 @@ import pytest
     "news": "언론사 RSS (제목·URL·시각만, 원문은 저장하지 않는다)",
     "index_prices": "KRX 지수 · 야후",
     "insider_trades": "DART 임원·주요주주 소유보고 · SEC Form 4",
+    "cb_issuances": "DART 주요사항보고 전환사채권 발행결정 상세 (batch/jobs/disclosure_reaction.py, 25.1192)",
 }
 
 #: **밖에서 왔지만 "받아 온" 것이 아닌 것.** 왜 `fetched_at` 이 없어도 되는지를 적는다

@@ -51,6 +51,11 @@ GET https://opendart.fss.or.kr/api/fnlttMultiAcnt.json?crtfc_key=<키>&corp_code
 GET https://opendart.fss.or.kr/api/fnlttSinglAcntAll.json?crtfc_key=<키>&corp_code=<하나>&bsns_year=2025&reprt_code=11011&fs_div=CFS
 ```
 
+- **전환사채권 발행결정** `cvbdIsDecsn.json?corp_code=<하나>&bgn_de=<YYYYMMDD>&end_de=<YYYYMMDD>` (2026-10-12 탐침, docs/infra.md 25.1177·25.1192) —
+  한 번에 그 기간의 발행결정이 **여러 행** 온다(접수번호 `rcept_no` 로 고른다). 쓰는 칸: `bd_fta` 권면총액, `cv_prc` 전환가액,
+  `cvisstk_cnt` 전환 발행 주식 수, `cvisstk_tisstk_vs` 발행주식 대비 %, `cvrqpd_bgd`·`cvrqpd_edd` 청구 기간("2027년 11월 07일" 글자),
+  `act_mktprcfl_cvprc_lwtrsprc` 시가하락 조정 최저가액(없으면 "-"). 값이 없으면 "-". 신주인수권부사채(`bdwtIsDecsn`) 칸은 아직 모른다 `[확인필요]`
+
 - 인증키는 **쿼리 파라미터 `crtfc_key`** 로 보낸다
 - **DART 는 종목코드가 아니라 고유번호(corp_code)로 조회한다.** 먼저 고유번호 목록을 받아 이어 붙여야 한다
 - 고유번호 목록은 **zip 으로 온다.** 압축을 풀면 XML 하나가 들어 있고 약 30MB, 11만 건이다. 그중 **상장사는 약 3,990건**이다. 비상장사는 종목코드 자리가 공백이다
