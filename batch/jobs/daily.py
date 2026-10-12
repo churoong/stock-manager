@@ -2097,7 +2097,13 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
         # 먼저 저장한다(발송이 실패해도 "만들었지만 못 보냈다" 가 보이게, docs/reports.md)
         보낸_것_있음 = reports.sent_exists(client, market, decision.trade_date)
         if not 보낸_것_있음:
-            report_id = _저장()
+            # **처음 저장이 실패하면 한 번 더, 그래도 못 하면 본문에 적고 보낸 뒤 알린다** (25.1180, 리포트 감사 재현).
+            # 예전엔 경고 목록에만 넣어(본문은 이미 다 만들었다) 텔레그램은 정상처럼 갔고 알림 0 건·실행 기록
+            # partial — 예비 실행도 성공으로 보고 다시 저장하지 않았다. 웹에 그날 리포트가 없고, 같은 날 다른 시장 2부가
+            # 이 리포트의 배분을 빼지 못하며(25.508), 다음 날 매도 플래그 NEW·추천 이력이 어긋났다
+            report_id = _저장() or _저장()
+            if report_id is None:
+                message += f"\n\n※ {formatter.WEB_SAVE_FAILED_MARK} — 웹 화면에 오늘 리포트가 없습니다"
 
         def _웹에_없음() -> str:
             """이번 본문이 웹에 저장되지 않았을 때 붙일 말 (25.672·25.674, 교차검증).
@@ -2115,6 +2121,13 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
             message_ids = telegram.send(message)
             step_log["sent"] = True
             step_log["message_ids"] = message_ids
+            if not 보낸_것_있음 and report_id is None:
+                _notify_failure(
+                    client, market, name,
+                    "리포트는 보냈지만 웹에 저장하지 못했습니다 — 웹에 오늘 리포트가 없고,"
+                    " 같은 날 다른 시장 2부가 이 리포트의 배분을 빼지 못합니다",
+                    dry_run=dry_run, title="리포트 저장 실패",
+                )
             if 보낸_것_있음:
                 report_id = _저장()
                 if report_id is None:
