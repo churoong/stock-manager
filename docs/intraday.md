@@ -11,8 +11,8 @@
 ## 0. 원칙
 
 - **알림은 판단 정보일 뿐이다.** 장중 경로는 **점수·신호·매매·보유를 바꾸지 않는다.**
-  쓰는 표는 넷이고 셋은 운영 기록이다 — `alerts`(하는 일 자체), `cron_heartbeats`(25.60),
-  `api_usage`(DART 한도 카운터, 25.105), `settings` 한 줄(Turso 복귀 표시, 25.12).
+  쓰는 표는 다섯이고 넷은 운영 기록이다 — `alerts`(하는 일 자체), `cron_heartbeats`(25.60),
+  `api_usage`(DART 한도 카운터, 25.105), `settings` 한 줄(Turso 복귀 표시, 25.12), `api_tokens`(KIS 접근토큰 한 줄, 25.983).
   `web/__tests__/cronWrites.test.ts` 가 **import 를 타고** 확인한다.
   2026-09-25 까지 이 줄은 "`alerts` 만 쓴다" 였고, 그것을 지킨다는 검사는 손으로 적은
   파일 다섯만 훑어 `settings` 쓰기를 못 보고 있었다(docs/infra.md 25.191)
@@ -35,7 +35,7 @@ cron-job.org  → GET /api/cron/intraday?market=KR|US  (헤더 x-cron-secret)
   2. 조용시간이 아니면 밀린 알림을 보냄(한 통에 최대 50건, 한 호출에 최대 10통 — 25.253)
   3. 지금이 정규장(폐장 뒤 30분 포함) 이 아니면 끝  ← 외부 크론이 잘못 불러도 시세를 받지 않는다
   4. 감시 대상 + 관심 종목(watchlist 에서 바로) → 야후 spark (한 번에 20종목, 2026-09-17 실측)
-  5. 판정 → alerts 삽입 (ON CONFLICT DO NOTHING)
+  5. 판정 → alerts 삽입 (같은 종목·트리거·날은 한 줄 — 조용시간에 건너뛴 줄만 되살리는 `DO UPDATE`, `web/lib/alertWrite.ts`, 25.797)
   6. 조용시간이 아니면 새 알림 발송
 ```
 
