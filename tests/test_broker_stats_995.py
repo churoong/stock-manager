@@ -34,12 +34,13 @@ def test_기준가는_다음_거래일_초과수익은_지수를_뺀다() -> Non
     assert r["n_touch"] == 1 and r["touch_pct"] == 0.0
 
 
-def test_닿으면_120일_전이라도_센다_안_닿고_덜_지났으면_안_센다() -> None:
+def test_120일이_덜_찼으면_닿았어도_안_센다() -> None:
+    """덜 찬 의견 가운데 닿은 것만 세면 터치율이 부풀었다 (docs/infra.md 25.1148)."""
     highs = [100.0] * 10 + [151.0] + [100.0] * 9
     rows = bs.compute([bs.Opinion(1, "KOSPI", DAYS[0], "나", 150.0), bs.Opinion(2, "KOSPI", DAYS[0], "다", 150.0)],
                       {1: _bars([100.0] * 20, highs), 2: _bars([100.0] * 20)}, {"KOSPI": _bars([1.0] * 20)})  # fmt: skip
     by = {r["broker"]: r for r in rows}
-    assert by["나"]["n_touch"] == 1 and by["나"]["touch_pct"] == 100.0
+    assert by["나"]["n_touch"] == 0 and by["나"]["touch_pct"] is None
     assert by["다"]["n_touch"] == 0 and by["다"]["n_fwd"] == 0  # 60거래일도 안 지났다
 
 
@@ -54,3 +55,10 @@ def test_표본이_적으면_성적을_말하지_않는다() -> None:
     assert bs.line({"n_fwd": 5}).startswith("표본 부족")
     ok = {"n_fwd": 30, "avg_excess_pct": 1.24, "hit_pct": 54.2, "n_touch": 10, "touch_pct": 30.0, "avg_upside_pct": 38.4}
     assert bs.line(ok) == "60거래일 초과수익 평균 +1.2%p · 맞힘 54% (30건) · 목표가 터치 30% (10건) · 제시 상승여력 평균 +38%"
+
+
+def test_다_찬_창에서_닿으면_센다() -> None:
+    highs = [100.0] * 10 + [151.0] + [100.0] * 189
+    rows = bs.compute([bs.Opinion(1, "KOSPI", DAYS[0], "마", 150.0)],
+                      {1: _bars([100.0] * 200, highs)}, {"KOSPI": _bars([1.0] * 200)})  # fmt: skip
+    assert rows[0]["n_touch"] == 1 and rows[0]["touch_pct"] == 100.0
