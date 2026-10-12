@@ -370,6 +370,11 @@ def _모름으로(
 #: 리포트의 절 머리 — 기간(`[단기]`)과 1부·2부 (docs/infra.md 25.1104)
 _절_머리 = re.compile(r"^(\[(단기|중기|장기)\]|[12]부 .+)$")
 _기간_머리 = re.compile(r"^\[(단기|중기|장기)\]( \(이어서\))?$")
+#: 2부 머리도 이어 단다 (25.1186) — 2부 둘째 조각이 "종목4  1,000,000원 (3.3%)" 로 시작하면 1부 종목 줄과 구별이 안 된다
+_2부_머리 = re.compile(r"^2부 .+?( \(이어서\))?$")
+#: 제 이름을 머리에 단 절 — 여기부터는 "2부 (이어서)" 를 달지 않는다. 매도 플래그는 2부 안에서 그려지지만 머리가 스스로
+#: 무엇인지 말하고, 일정·엇갈림·늦은 경고는 `jobs/daily.run` 이 compose 뒤에 붙이는 2부 밖의 절이다
+_끝_절 = re.compile(r"^(매도 플래그|📅 |🔀 |경고 \(리포트를 마무리하며\))")
 
 
 def _carry_headers(chunks: list[str]) -> list[str]:
@@ -386,17 +391,25 @@ def _carry_headers(chunks: list[str]) -> list[str]:
     for i, chunk in enumerate(chunks):
         줄들 = 넘김 + chunk.split("\n")
         넘김 = []
-        while i < len(chunks) - 1 and len(줄들) > 1 and _절_머리.match(줄들[-1].strip()):
-            넘김.insert(0, 줄들.pop())
+        # 끝의 빈 줄은 건너 보고 머리를 찾는다 (25.1186) — 조각이 "1부 개별 종목\n" 으로 끝나면 마지막 줄이 빈 줄이라
+        # 외톨이 머리를 못 보고 첫 조각 끝에 남겼다
+        while i < len(chunks) - 1:
+            끝 = len(줄들)
+            while 끝 > 1 and not 줄들[끝 - 1].strip():
+                끝 -= 1
+            if 끝 <= 1 or not _절_머리.match(줄들[끝 - 1].strip()):
+                break
+            넘김.insert(0, 줄들[끝 - 1])
+            del 줄들[끝 - 1:]
         첫 = next((x for x in 줄들 if x.strip()), "")
-        if out and 지금_머리 and not _절_머리.match(첫.strip()):
+        if out and 지금_머리 and not _절_머리.match(첫.strip()) and not _끝_절.match(첫.strip()):
             줄들 = [f"{지금_머리} (이어서)", *줄들]
         for x in 줄들:
-            # 이어 다는 것은 **기간 머리만** — 1부·2부 머리를 만나면 끊는다. 2부 뒤의 절(매도 플래그·일정)에
-            # "[장기] (이어서)" 가 붙지 않게
-            if _기간_머리.match(x.strip()):
+            # 이어 다는 것은 **기간 머리와 2부 머리** — 1부 머리를 만나면 기간을 새로 기다리고, 2부 머리를 만나면 2부를,
+            # 리포트 끝 절(일정·엇갈림·늦은 경고)을 만나면 아무것도 달지 않는다. 그 절에 "[장기] (이어서)" 가 붙지 않게
+            if _기간_머리.match(x.strip()) or _2부_머리.match(x.strip()):
                 지금_머리 = x.strip().removesuffix(" (이어서)")
-            elif _절_머리.match(x.strip()):
+            elif _절_머리.match(x.strip()) or _끝_절.match(x.strip()):
                 지금_머리 = None
         out.append("\n".join(줄들))
     return out
