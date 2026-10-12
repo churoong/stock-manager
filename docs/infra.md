@@ -2289,6 +2289,7 @@ SQL read operations are forbidden (reads are blocked, ...)
 | 25.1239 | 연금 2순위 채권 ETF 근거가 "이득이 가장 크다" 고 말함 |
 | 25.1240 | 일반계좌 ETF 순위 근거가 틀렸고 세후 시뮬레이션과 반대로 보임 |
 | 25.1241 | 텔레그램 질의응답이 영문 정식 이름을 정확 일치로 보지 않음 |
+| 25.1242 | 백업·되살리기의 표별 행 수가 공개 로그에 찍힘 |
 
 ### 25.1 왜 D1 인가
 
@@ -29452,3 +29453,13 @@ D1 따라잡기(`--skip-if-ran-within 7`)와 주간 요약의 "오래 안 돈 �
 
 **고침** — `findStocks` 가 정확 여부(`exact`)를 결과에 실어 넘기고 `answer` 는 그것을 쓴다.
 **시험** — `web/__tests__/telegramQaExactEn1241.test.ts`: 영문 정식 이름은 하나로, 앞부분만 같으면 여전히 목록. **되돌리기 확인** — 되돌리면 깨진다.
+
+### 25.1242 백업·되살리기의 표별 행 수가 공개 로그에 찍힘
+
+**무엇** — `backup.yml` 덤프 단계(`backup_db.py`)가 표별 행 수 15줄(매매·배당·관심 종목·설정 행 수 포함)을, `restore-backup.yml` 되살리기 단계(`restore_backup.py`)가 표별 행 수와
+"⚠ 건너뛴 매매" 줄을 **공개 Actions 로그**에 그대로 찍었다. 같은 일을 하는 리허설(`restore-drill.yml`)은 처음부터 `ops_tee` → 비공개 운영 이슈였다. CLAUDE.md "운영 출력은 공개 로그에 찍지 않는다" 위반.
+(백업·복구 감사, 코드 확인)
+
+**고침** — 두 단계를 `set -o pipefail` + `| python scripts/ops_tee.py …` 로 받고 `publish_output.py` 로 운영 이슈에 보낸다(리허설과 같은 꼴). 운영 저장소 시크릿이 없으면 공개 저장소 이슈에는
+올리지 않는다(`publish_output.target`). 이슈 단계가 있으면 쓰기 권한을 준다는 기존 규칙(`test_workflows`)대로 `issues: write` 를 더했다.
+**시험** — `tests/test_backup_public_log_1242.py`: 백업·되살리기·리허설 세 스크립트 줄이 ops_tee 를 거치는지. **되돌리기 확인** — 두 워크플로를 되돌리면 깨진다.

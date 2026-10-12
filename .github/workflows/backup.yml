@@ -25,6 +25,10 @@ concurrency:
   group: backup
   cancel-in-progress: false
 
+permissions:
+  contents: read
+  issues: write # 결과를 운영 이슈로 (25.1242) — 비공개 운영 저장소가 없으면 공개 이슈에는 올리지 않는다
+
 jobs:
   dump:
     runs-on: ubuntu-latest
@@ -74,7 +78,11 @@ jobs:
         if: ${{ steps.gate.outputs.deferred != 'true' }}
         # --record-run: `batch_runs` 에 실행 기록을 **연다** (docs/infra.md 25.167).
         # 그 전에는 백업이 아무 흔적도 안 남겨 **몇 주째 안 돌아도 알 길이 없었다**
-        run: python scripts/backup_db.py --scope "$SCOPE" --out backup --record-run
+        # **표별 행 수는 공개 로그에 찍지 않는다** (docs/infra.md 25.1242) — 매매·배당·관심 종목 행 수도 운영 출력이다.
+        # 리허설(restore-drill.yml)처럼 ops_tee 로 받아 비공개 운영 이슈로 보낸다
+        run: |
+          set -o pipefail
+          python scripts/backup_db.py --scope "$SCOPE" --out backup --record-run 2>&1 | python scripts/ops_tee.py backup.txt
 
       - name: 암호화 (공개 저장소 아티팩트는 누구나 내려받는다, docs/infra.md 25.1125)
         if: ${{ steps.gate.outputs.deferred != 'true' }}
@@ -94,6 +102,18 @@ jobs:
           # 필수는 오래, 전체는 짧게 둔다. 용량이 곧 비용이다
           retention-days: ${{ env.SCOPE == 'full' && 30 || 90 }}
           if-no-files-found: error
+
+      - name: 결과를 이슈로 내보내기
+        if: ${{ always() && steps.gate.outputs.deferred != 'true' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPS_REPO: ${{ secrets.OPS_REPO }}
+          OPS_TOKEN: ${{ secrets.OPS_TOKEN }}
+        run: |
+          python scripts/publish_output.py \
+            --title "운영 출력 (클라우드 세션용)" \
+            --file backup.txt \
+            --note "DB 백업 ($SCOPE)"
 
       - name: 실행 기록 닫기
         if: ${{ steps.gate.outputs.deferred != 'true' }}

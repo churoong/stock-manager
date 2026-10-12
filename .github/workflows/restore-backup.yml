@@ -48,6 +48,7 @@ concurrency:
 permissions:
   contents: read
   actions: read # 백업 아티팩트를 내려받는다
+  issues: write # 결과를 운영 이슈로 (25.1242) — 비공개 운영 저장소가 없으면 공개 이슈에는 올리지 않는다
 
 jobs:
   restore:
@@ -87,7 +88,9 @@ jobs:
         run: bash scripts/backup_crypt.sh decrypt backup
 
       - name: 되살리기
+        # **표별 행 수·건너뛴 매매 줄은 공개 로그에 찍지 않는다** (docs/infra.md 25.1242) — ops_tee 로 받아 비공개 운영 이슈로
         run: |
+          set -o pipefail
           FILE=$(ls backup/*.sql.gz | head -1)
           echo "파일: $FILE"
           ARGS=""
@@ -97,4 +100,16 @@ jobs:
           ARGS="$ARGS --on-conflict ${{ inputs.on_conflict }}"
           if [ "${{ inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
           if [ "${{ inputs.trust_stock_ids }}" = "true" ]; then ARGS="$ARGS --trust-stock-ids"; fi
-          python scripts/restore_backup.py "$FILE" $ARGS
+          python scripts/restore_backup.py "$FILE" $ARGS 2>&1 | python scripts/ops_tee.py restore.txt
+
+      - name: 결과를 이슈로 내보내기
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPS_REPO: ${{ secrets.OPS_REPO }}
+          OPS_TOKEN: ${{ secrets.OPS_TOKEN }}
+        run: |
+          python scripts/publish_output.py \
+            --title "운영 출력 (클라우드 세션용)" \
+            --file restore.txt \
+            --note "백업 되살리기"
