@@ -24,7 +24,7 @@ on:
         type: string
         default: ""
       on_conflict:
-        description: 이미 있는 행 처리 (기본 skip, settings 는 replace)
+        description: 이미 있는 행 처리 (기본 skip — 건너뛴 행은 출력이 표마다 센다, 25.1136. replace 는 덮어쓴다 — 25.155)
         type: choice
         options: [skip, replace, fail]
         default: skip

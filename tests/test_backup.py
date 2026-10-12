@@ -46,7 +46,8 @@ class MemClient:
             self.writes += 1
         cur = self.conn.execute(sql, args or [])
         cols = [d[0] for d in cur.description or []]
-        return ResultSet(columns=cols, rows=[tuple(r) for r in cur.fetchall()], last_insert_rowid=cur.lastrowid)
+        return ResultSet(columns=cols, rows=[tuple(r) for r in cur.fetchall()], last_insert_rowid=cur.lastrowid,
+                         affected_rows=max(cur.rowcount, 0))  # fmt: skip
 
     def batch(self, statements: list[tuple[str, list[Any]]]) -> list[ResultSet]:
         return [self.execute(sql, args) for sql, args in statements]
@@ -811,3 +812,28 @@ class Test8일_예비는_그달_전체_백업이_있으면_건너뛴다:
         text = (ROOT / ".github" / "workflows" / "backup.yml").read_text(encoding="utf-8")
         assert '"47 16 8 * *" ] && python scripts/backup_db.py --full-done-this-month' in text
         assert "--rows-read" in text
+
+
+def test_번호가_겹쳐_건너뛴_매매를_말한다(
+    client: MemClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """복구 도중 웹이 새 매매를 id 1 로 먼저 쓰면 백업의 id 1 매매가 소리 없이 버려지고 "되살린 행" 은 보낸 수였다
+    (docs/infra.md 25.1136, 백업 감사 재현)."""
+    from scripts import restore_backup as restore
+
+    backup.run("essential", tmp_path)
+    대상 = MemClient()
+    db.apply_migrations(대상)  # type: ignore[arg-type]
+    대상.conn.execute(
+        "INSERT INTO stocks (id, ticker, market, country, name_ko, currency, status, source, fetched_at)"
+        " VALUES (1, '005930', 'KOSPI', 'KR', 'x', 'KRW', 'active', 't', 't')"
+    )
+    대상.conn.execute(
+        "INSERT INTO trades (id, stock_id, side, trade_date, price, quantity, currency, fx_rate, fx_rate_source,"
+        " created_at, updated_at) VALUES (1, 1, 'buy', '2026-10-11', 1, 1, 'KRW', 1, 'none', 't', 't')"
+    )
+    monkeypatch.setattr(restore, "TursoClient", lambda: 대상)
+    assert restore.run(next(tmp_path.glob("*.sql.gz")), {"trades"}, None, dry_run=False) == 0
+    out = capsys.readouterr().out
+    assert "되살린 행 0 (보낸 문장 1)" in out
+    assert "⚠ 사람이 넣은 표(trades)" in out and "건너뜀 1" in out

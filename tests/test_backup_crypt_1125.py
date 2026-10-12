@@ -76,3 +76,14 @@ def test_워크플로는_암호화한_것만_올리고_되살리기_전에_푼�
     # 이 저장소에서 아티팩트를 올리는 곳은 암호화한 백업 하나뿐이다
     올림 = [p.name for p in WF.glob("*.yml") if "upload-artifact" in p.read_text(encoding="utf-8")]
     assert 올림 == ["backup.yml"]
+
+
+def test_BACKUP_KEY_를_넣어도_그_전_토큰_키_백업이_열린다(tmp_path: Path) -> None:
+    """풀기가 첫 키 하나만 써 보아 `BACKUP_KEY` 를 넣는 순간 그 전 백업이 안 열렸다 (docs/infra.md 25.1136, 백업 감사 재현)."""
+    본문 = _백업(tmp_path)
+    assert _run("encrypt", tmp_path, TURSO_AUTH_TOKEN="tok").returncode == 0  # 예전: 토큰 키로 잠금
+    r = _run("decrypt", tmp_path, BACKUP_KEY="새키", TURSO_AUTH_TOKEN="tok")  # 지금: BACKUP_KEY 도 있다
+    assert r.returncode == 0, r.stderr
+    assert "TURSO_AUTH_TOKEN 에서 끌어낸 키" in r.stdout
+    with gzip.open(tmp_path / "stock-manager-essential-2026-10-11.sql.gz", "rb") as f:
+        assert f.read() == 본문

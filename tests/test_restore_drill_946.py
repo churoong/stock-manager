@@ -112,3 +112,18 @@ def test_마이그레이션이_미리_채운_표는_덮어쓰고_마이그레이
     assert r.ok, r.lines()
     assert r.actual["cron_heartbeats"] == 1 and r.skipped == ["step0_check"]
     assert any("대조 안 함" in 줄 for 줄 in r.lines())
+
+
+def test_값_안의_CR_은_되살릴_때_그대로다(tmp_path: Path) -> None:
+    """`gzip.open(…, "rt")` 의 줄바꿈 자동 변환이 메모의 `\\r\\n`·`\\r` 을 `\\n` 으로 바꿨다 (docs/infra.md 25.1136, 백업 감사 재현).
+    행 수는 같아 리허설이 못 잡았다."""
+    from scripts import restore_backup as restore
+
+    값 = "1차 매수\r\n손절 -7%\r끝"
+    path = tmp_path / "b.sql.gz"
+    with gzip.open(path, "wb") as f:
+        f.write(f"INSERT INTO trades (memo) VALUES ('{값}');\n".encode())
+    (_, sql), = restore.statements(path)
+    assert 값 in sql
+    (_, sql2), _주석 = list(load()._stream(path))  # 마지막은 주석 묶음
+    assert 값 in sql2

@@ -20,18 +20,28 @@ if [ -z "$mode" ] || [ -z "$dir" ]; then
   exit 2
 fi
 
+# 키 후보 — 암호화는 첫째 것으로, 풀기는 **차례로 다 해 본다** (25.1136, 백업 감사 재현). 예전엔 풀기도 첫째 하나만 써서
+# `BACKUP_KEY` 를 넣는 순간 그 전(토큰 키로 잠근) 백업 90일치가 워크플로로 안 열렸다
+keys=()
+srcs=()
 if [ -n "${BACKUP_KEY:-}" ]; then
-  BK_PASS="$BACKUP_KEY"
-  src="BACKUP_KEY"
-elif [ -n "${TURSO_AUTH_TOKEN:-}" ]; then
-  BK_PASS=$(printf 'stock-manager-backup-v1:%s' "$TURSO_AUTH_TOKEN" | sha256sum | cut -d' ' -f1)
-  src="TURSO_AUTH_TOKEN 에서 끌어낸 키"
-else
+  keys+=("$BACKUP_KEY")
+  srcs+=("BACKUP_KEY")
+fi
+if [ -n "${TURSO_AUTH_TOKEN:-}" ]; then
+  keys+=("$(printf 'stock-manager-backup-v1:%s' "$TURSO_AUTH_TOKEN" | sha256sum | cut -d' ' -f1)")
+  srcs+=("TURSO_AUTH_TOKEN 에서 끌어낸 키")
+fi
+if [ ${#keys[@]} -eq 0 ]; then
   echo "백업 암호 키가 없습니다(BACKUP_KEY·TURSO_AUTH_TOKEN 둘 다 비어 있음) — 평문으로 올리지 않고 멈춥니다" >&2
   exit 1
 fi
 # Actions 로그에 끌어낸 값이 섞이지 않게 가린다(밖에서는 아무 뜻 없는 줄)
-if [ -n "${GITHUB_ACTIONS:-}" ]; then echo "::add-mask::$BK_PASS"; fi
+if [ -n "${GITHUB_ACTIONS:-}" ]; then
+  for k in "${keys[@]}"; do echo "::add-mask::$k"; done
+fi
+BK_PASS="${keys[0]}"
+src="${srcs[0]}"
 export BK_PASS
 
 opts=(-aes-256-cbc -pbkdf2 -iter 200000 -md sha256 -pass env:BK_PASS)
@@ -50,12 +60,21 @@ case "$mode" in
     ;;
   decrypt)
     for f in "$dir"/*.sql.gz.enc; do
-      if ! openssl enc -d "${opts[@]}" -in "$f" -out "${f%.enc}"; then
+      done_one=""
+      for i in "${!keys[@]}"; do
+        export BK_PASS="${keys[$i]}"
+        # 틀린 키도 드물게(약 1/256) 채움 검사를 지나 쓰레기를 낸다 — gzip 검사까지 지나야 맞는 키로 본다
+        if openssl enc -d "${opts[@]}" -in "$f" -out "${f%.enc}" 2>/dev/null && gzip -t "${f%.enc}" 2>/dev/null; then
+          echo "복호화: $(basename "${f%.enc}") (키: ${srcs[$i]})"
+          done_one=1
+          break
+        fi
         rm -f "${f%.enc}"
-        echo "복호화 실패: $(basename "$f") — 키($src)가 백업 때와 다릅니다. Turso 토큰을 바꾼 뒤라면 백업 당시의 키가 필요합니다" >&2
+      done
+      if [ -z "$done_one" ]; then
+        echo "복호화 실패: $(basename "$f") — 가진 키(${srcs[*]}) 어느 것으로도 열리지 않습니다. 백업 당시의 키(옛 Turso 토큰 등)가 필요합니다" >&2
         exit 1
       fi
-      echo "복호화: $(basename "${f%.enc}") (키: $src)"
     done
     ;;
   *)

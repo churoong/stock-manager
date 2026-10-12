@@ -138,7 +138,7 @@ def statements(path: Path) -> list[tuple[str, str]]:
     표는 마이그레이션이 이미 만든다. 백업의 DROP/CREATE 를 실행하면 **새 마이그레이션으로 생긴
     열이 사라진다.** 데이터만 넣는다.
     """
-    with gzip.open(path, "rt", encoding="utf-8") as handle:
+    with gzip.open(path, "rt", encoding="utf-8", newline="") as handle:
         글 = handle.read()
     out: list[tuple[str, str]] = []
     for 문장 in _문장들(글):
@@ -155,7 +155,7 @@ def 종목_대응표(path: Path) -> dict[int, tuple[str, str, str, str]]:
 
     25.676 첫 판은 (코드, 시장) 셋 칸이었다 — 그 모양도 읽고 나라·통화는 시장에서 채운다.
     """
-    with gzip.open(path, "rt", encoding="utf-8") as handle:
+    with gzip.open(path, "rt", encoding="utf-8", newline="") as handle:
         글 = handle.read()
     out: dict[int, tuple[str, str, str, str]] = {}
     칸 = r"([^\t\n]*)"
@@ -252,7 +252,7 @@ def 행수_대조(path: Path, rows: list[tuple[str, str]]) -> list[str]:
 
     옛 백업에는 이 표시가 없다. **없는 것을 틀렸다고 하지 않는다** — 한 줄 알리고 넘어간다.
     """
-    with gzip.open(path, "rt", encoding="utf-8") as handle:
+    with gzip.open(path, "rt", encoding="utf-8", newline="") as handle:
         적힌것 = 적힌_행수(handle.read())
     if not 적힌것:
         print("  (이 백업에는 행 수 표시가 없다 — 대조를 건너뛴다)")
@@ -443,16 +443,47 @@ def run(
                           f" {len(만들것) - 실제:,}) — 자리는 마스터 수집이 채운다")
         rows = _예산만큼(client, rows, max_rows)
         written = 0
+        # **보낸 수가 아니라 실제로 들어간 수를 센다** (docs/infra.md 25.1136, 백업 감사 재현).
+        # `skip` 은 INSERT OR IGNORE 라 대상에 같은 번호의 행이 있으면(복구 도중 웹이 새 매매를 id 1 로 먼저 쓴 경우 등)
+        # 백업 행이 **소리 없이 버려지는데**, 예전 출력은 보낸 문장 수를 "되살린 행" 으로 셌다
+        보냄: dict[str, int] = {}
+        들어감: dict[str, int] = {}
         for start in range(0, len(rows), CHUNK):
             chunk = rows[start : start + CHUNK]
-            client.batch([(with_conflict(sql, on_conflict), []) for _table, sql in chunk])
+            결과 = client.batch([(with_conflict(sql, on_conflict), []) for _table, sql in chunk])
+            for (table, _sql), rs in zip(chunk, 결과 or [], strict=False):
+                보냄[table] = 보냄.get(table, 0) + 1
+                들어감[table] = 들어감.get(table, 0) + int(getattr(rs, "affected_rows", 1) or 0)
             written += len(chunk)
             if written % 5_000 == 0:
                 print(f"  {written:,}행")
-        print(f"되살린 행 {written:,}")
+        print(f"되살린 행 {sum(들어감.values()):,} (보낸 문장 {written:,})")
+        print(건너뜀_알림(보냄, 들어감))
         return 0
     finally:
         client.close()
+
+
+#: 건너뛴 행이 있으면 크게 알리는 표 — 사람이 넣은 것. 나머지 표는 다시 돌릴 때 이미 있는 행을 건너뛰는 것이 정상이다
+사람이_넣은_표 = ("trades", "dividend_receipts", "settings", "watchlist", "screener_presets", "stock_aliases")
+
+
+def 건너뜀_알림(보냄: dict[str, int], 들어감: dict[str, int]) -> str:
+    """표마다 넣음/건너뜀 (25.1136). 사람이 넣은 표에서 건너뛴 행이 있으면 같은 행인지 확인하라고 말한다."""
+    줄 = []
+    for table in sorted(보냄):
+        빠짐 = 보냄[table] - 들어감.get(table, 0)
+        if 빠짐 > 0:
+            줄.append(f"  {table}: 넣음 {들어감.get(table, 0):,} · 이미 있는 번호라 건너뜀 {빠짐:,}")
+    if not 줄:
+        return "건너뛴 행 없음"
+    경고 = [t for t in 사람이_넣은_표 if 보냄.get(t, 0) > 들어감.get(t, 0)]
+    머리 = "이미 있던 행과 겹쳐 넣지 않은 행이 있습니다:"
+    if 경고:
+        머리 = (f"⚠ 사람이 넣은 표({', '.join(경고)})에 건너뛴 행이 있습니다 — 같은 번호에 **다른** 행"
+                "(복구 도중 새로 넣은 매매 등)이 있으면 백업의 행이 빠진 것입니다."
+                " 대상 DB 의 그 표와 백업을 대 보세요:")
+    return "\n".join([머리, *줄])
 
 
 def main() -> int:

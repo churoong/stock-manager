@@ -123,7 +123,7 @@ def _stream(path: Path):
     comments: list[str] = []
     버퍼: list[str] = []
     홀짝 = 0
-    with gzip.open(path, "rt", encoding="utf-8") as handle:
+    with gzip.open(path, "rt", encoding="utf-8", newline="") as handle:
         for line in handle:
             버퍼.append(line)
             홀짝 ^= line.count("'") & 1
