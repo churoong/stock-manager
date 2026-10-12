@@ -131,6 +131,19 @@ FINANCIAL_BASIS_SNAPSHOTS = (
 FINANCIAL_BASIS_AT_CUTOFF = "f.consolidated AS consolidated_picked_at_cutoff"
 
 
+#: 마지막으로 계산한 날 (`last_signal_calc_date`). 날짜 색인을 내림차순으로 따라가 그 나라 첫 행에서 멈춘다
+#: (25.1204, 마이그레이션 0066, 웹 `LAST_CALC_DATE` 와 같은 모양).
+#: 예전 `MAX` + JOIN 은 그 나라 종목의 판정표 행을 전부 읽었다.
+#: 인자 (나라, 끝, 나라, 끝)
+LAST_CALC_SQL = (
+    "SELECT MAX(d) FROM ("
+    " SELECT d FROM (SELECT sg.as_of_date AS d FROM signals sg CROSS JOIN stocks s ON s.id = sg.stock_id"
+    " WHERE s.country = ? AND sg.as_of_date <= ? ORDER BY sg.as_of_date DESC LIMIT 1) UNION ALL"
+    " SELECT d FROM (SELECT ck.as_of_date AS d FROM signal_checks ck CROSS JOIN stocks s ON s.id = ck.stock_id"
+    " WHERE s.country = ? AND ck.as_of_date <= ? ORDER BY ck.as_of_date DESC LIMIT 1))"
+)
+
+
 def last_signal_calc_date(client: TursoClient, country: str, upto: str | None) -> str | None:
     """신호를 **마지막으로 계산한 날** (docs/infra.md 25.337, 웹 `lib/recommend.LAST_CALC_DATE` 와 같은 잣대).
 
@@ -145,11 +158,7 @@ def last_signal_calc_date(client: TursoClient, country: str, upto: str | None) -
     until = upto or "9999-12-31"
     try:
         rs = client.execute(
-            "SELECT MAX(d) FROM ("
-            " SELECT MAX(sg.as_of_date) AS d FROM signals sg JOIN stocks s ON s.id = sg.stock_id"
-            " WHERE s.country = ? AND sg.as_of_date <= ? UNION ALL"
-            " SELECT MAX(ck.as_of_date) AS d FROM signal_checks ck JOIN stocks s ON s.id = ck.stock_id"
-            " WHERE s.country = ? AND ck.as_of_date <= ?)",
+            LAST_CALC_SQL,
             [country, until, country, until],
         )
     except Exception as exc:  # noqa: BLE001 — 판정표가 아직 없는 DB(0034 전)

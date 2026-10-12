@@ -116,10 +116,15 @@ export interface RecommendRow {
  * 별개로 전 종목에 남긴다"). 그래서 둘의 MAX 가 곧 **마지막으로 계산한 날**이다.
  */
 export const LAST_CALC_DATE = `SELECT MAX(d) AS d FROM (
-  SELECT MAX(sg.as_of_date) AS d FROM signals sg JOIN stocks s ON s.id = sg.stock_id WHERE s.country = ?
+  SELECT d FROM (SELECT sg.as_of_date AS d FROM signals sg CROSS JOIN stocks s ON s.id = sg.stock_id
+    WHERE s.country = ? ORDER BY sg.as_of_date DESC LIMIT 1)
   UNION ALL
-  SELECT MAX(ck.as_of_date) AS d FROM signal_checks ck JOIN stocks s ON s.id = ck.stock_id WHERE s.country = ?
+  SELECT d FROM (SELECT ck.as_of_date AS d FROM signal_checks ck CROSS JOIN stocks s ON s.id = ck.stock_id
+    WHERE s.country = ? ORDER BY ck.as_of_date DESC LIMIT 1)
 )`;
+// **날짜 색인을 내림차순으로 따라가 그 나라 첫 행에서 멈춘다** (docs/infra.md 25.1204, 마이그레이션 0066). 예전 `MAX(...)` + JOIN 은
+// 그 나라 종목마다 판정표 행을 **전부** 읽었다(종목 × 3기간 × 날 수, 재현 8.4만 행) — 추천·종목 화면을 열 때마다.
+// `CROSS JOIN` 은 표 순서를 고정한다(판정표 날짜 색인이 바깥)
 
 /** 판정표 표가 아직 없는 DB(0034 마이그레이션 전)에서 되돌아갈 옛 잣대 */
 export const LAST_CALC_DATE_FALLBACK = `SELECT MAX(sg.as_of_date) AS d FROM signals sg
@@ -417,10 +422,13 @@ export function formatKst(iso: string | null): string | null {
  * "새로" 가 붙지 않았다(25.145 와 같은 모양). 인자는 (나라, 기준일, 나라, 기준일)
  */
 export const PREVIOUS_AS_OF = `SELECT MAX(d) AS d FROM (
-  SELECT MAX(sg.as_of_date) AS d FROM signals sg JOIN stocks s ON s.id = sg.stock_id WHERE s.country = ? AND sg.as_of_date < ?
+  SELECT d FROM (SELECT sg.as_of_date AS d FROM signals sg CROSS JOIN stocks s ON s.id = sg.stock_id
+    WHERE s.country = ? AND sg.as_of_date < ? ORDER BY sg.as_of_date DESC LIMIT 1)
   UNION ALL
-  SELECT MAX(ck.as_of_date) AS d FROM signal_checks ck JOIN stocks s ON s.id = ck.stock_id WHERE s.country = ? AND ck.as_of_date < ?
+  SELECT d FROM (SELECT ck.as_of_date AS d FROM signal_checks ck CROSS JOIN stocks s ON s.id = ck.stock_id
+    WHERE s.country = ? AND ck.as_of_date < ? ORDER BY ck.as_of_date DESC LIMIT 1)
 )`;
+// 날짜 색인 내림차순으로 (25.1204, `LAST_CALC_DATE` 와 같은 모양)
 
 /** 판정표가 아직 없는 DB(0034 전)에서 되돌아갈 옛 잣대 */
 export const PREVIOUS_AS_OF_FALLBACK = `SELECT MAX(sg.as_of_date) AS d FROM signals sg JOIN stocks s ON s.id = sg.stock_id

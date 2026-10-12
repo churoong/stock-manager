@@ -295,6 +295,18 @@ describe("마지막 계산일 (docs/infra.md 25.145)", () => {
     (local.prepare(LAST_CALC_DATE).all("KR", "KR")[0] as { d: string | null })
       .d;
 
+  it("판정표 행을 전부 읽지 않고 날짜 색인으로 첫 행에서 멈춘다 (docs/infra.md 25.1204)", () => {
+    const local = 새DB();
+    for (const [sql, args] of [[LAST_CALC_DATE, ["KR", "KR"]], [PREVIOUS_AS_OF, ["KR", "2026-10-01", "KR", "2026-10-01"]]] as const) {
+      const 계획 = (local.prepare("EXPLAIN QUERY PLAN " + sql).all(...args) as Array<{ detail: string }>).map((r) => r.detail);
+      expect(계획.join(" | ")).toContain("idx_signal_checks_date");
+      expect(계획.some((x) => x.startsWith("SEARCH ck USING COVERING INDEX sqlite_autoindex_signal_checks_1"))).toBe(false);
+      // 색인만으로는 통계(ANALYZE) 뒤 종목 쪽부터 도는 옛 계획으로 돌아갈 수 있다 — 표 순서와 멈춤을 질의 모양으로 고정한다
+      expect(sql).toContain("FROM signal_checks ck CROSS JOIN stocks s");
+      expect(sql).toContain("ORDER BY ck.as_of_date DESC LIMIT 1");
+    }
+  });
+
   it("신호가 걸린 날에는 그 날이다", () => {
     const local = 새DB();
     local.exec(`INSERT INTO signals (stock_id, as_of_date, horizon, signal_type, buy_zone_low, buy_zone_high,

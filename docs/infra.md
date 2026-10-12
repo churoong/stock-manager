@@ -2251,6 +2251,7 @@ SQL read operations are forbidden (reads are blocked, ...)
 | 25.1201 | ETF 국내 '우리 종목 집중' 두 무리를 한 질의 30행으로 잘라 지수가 빠짐 (ETF 감사 #3) |
 | 25.1202 | ETF 장기 신호 비중이 옛 판 신호까지 셈 (ETF 감사 #4) |
 | 25.1203 | 무응답 감시의 창 안 경보 읽기가 표 전체를 훑음 (웹 읽기) |
+| 25.1204 | 마지막 계산일 질의가 판정표 행을 전부 읽음 (웹·배치 읽기) |
 
 ### 25.1 왜 D1 인가
 
@@ -28961,3 +28962,20 @@ SEC 가 429 로 막으면 거기서 멈추는데(`break`), (1) 남은 대상을 
 같은 날 db-status: `turso_reads` 10월 362,589,199(10-12 08:21 UTC). 출처별(`turso_reads@…`) 행은 아직 없다 — 배포(07:00 UTC) 뒤 돈 배치가 없다. 내일 본다.
 
 **되돌리기 확인** — 경로·`health.ts` 를 되돌리면 vitest `창 안 알림은 만든 시각 색인으로 좁혀 읽는다` 가 깨진다(계획에 SCAN).
+
+### 25.1204 마지막 계산일 질의가 판정표 행을 전부 읽음 (웹·배치 읽기)
+
+**무엇** — "마지막으로 계산한 날"(웹 `lib/recommend.LAST_CALC_DATE`·`PREVIOUS_AS_OF` — 추천 화면·종목 상세, 배치 `db.last_signal_calc_date` — 아침 리포트·스트레스)이
+`SELECT MAX(ck.as_of_date) FROM signal_checks ck JOIN stocks s … WHERE s.country = ?` 였다. 판정표(`signal_checks`)에는 `as_of_date` 로 시작하는 색인이 없어,
+통계가 있는 계획은 그 나라 종목마다 판정표 행을 **전부** 읽었다(`SEARCH s` → `SEARCH ck USING COVERING INDEX sqlite_autoindex_signal_checks_1 (stock_id=?)`).
+판정표는 신호가 없어도 전 종목 × 3기간이 날마다 쌓인다. 재현(`scratchpad/lastcalc.py`, 600종목 × 70일 × 3기간): VM 단계 4,226 단위 vs 고친 뒤 62.
+
+**아팠나** — 읽기 비용만(Turso 월 읽기 72.5%, 10-12 08:21 db-status 362,589,199). 추천 화면은 한 번 열 때 이 질의 둘(기준일·앞선 계산일)을 부른다.
+
+**고침** — (1) 마이그레이션 0066 `idx_signal_checks_date (as_of_date)` (다음 배치가 적용한다). (2) 세 질의를 `FROM signal_checks ck CROSS JOIN stocks s … ORDER BY
+ck.as_of_date DESC LIMIT 1` 로 — 날짜 색인을 내림차순으로 따라가 그 나라 첫 행에서 멈춘다. `signals` 쪽도 같은 모양(0008 의 `idx_signals_date` 가 날짜로 시작한다).
+색인만 있어도 통계 없는 계획은 이미 빨라지지만, 통계(ANALYZE) 뒤엔 종목 쪽부터 도는 옛 계획으로 돌아가는 것을 재현해 **질의 모양으로 고정**했다(`CROSS JOIN` 은
+표 순서를 고정한다). 배치 질의는 `db.LAST_CALC_SQL` 상수로 뺐다. 마이그레이션이 적용되기 전 몇 시간은 색인이 없어 판정표 날짜 정렬이 표 전체를 본다 — 옛 질의와 비슷한 비용.
+
+**되돌리기 확인** — 웹 `recommend.ts` 를 되돌리면 vitest `판정표 행을 전부 읽지 않고 날짜 색인으로` 가 깨진다(질의 모양). 배치는 `test_last_calc_1204.py`
+(계획에 0066 색인·답이 나라를 가림).
