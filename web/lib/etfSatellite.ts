@@ -63,12 +63,14 @@ LEFT JOIN prices px ON px.stock_id = e.stock_id
  * (2026-09-22, docs/infra.md 25.111).
  */
 const LATEST = `sp.as_of_date = (
-    SELECT MAX(sp2.as_of_date) FROM etf_satellite_picks sp2 JOIN etfs e2 ON e2.id = sp2.etf_id
-    WHERE e2.country = ?)
+    SELECT sp2.as_of_date FROM etf_satellite_picks sp2 CROSS JOIN etfs e2 ON e2.id = sp2.etf_id
+    WHERE e2.country = ? ORDER BY sp2.as_of_date DESC LIMIT 1)
   AND sp.calc_version = (
     SELECT MAX(sp3.calc_version) FROM etf_satellite_picks sp3 JOIN etfs e3 ON e3.id = sp3.etf_id
     WHERE e3.country = ? AND sp3.as_of_date = (
-      SELECT MAX(sp4.as_of_date) FROM etf_satellite_picks sp4 JOIN etfs e4 ON e4.id = sp4.etf_id WHERE e4.country = ?))`;
+      SELECT sp4.as_of_date FROM etf_satellite_picks sp4 CROSS JOIN etfs e4 ON e4.id = sp4.etf_id WHERE e4.country = ? ORDER BY sp4.as_of_date DESC LIMIT 1))`;
+// 최신 기준일은 날짜 색인 내림차순 첫 행으로 잡는다(`CROSS JOIN … ORDER BY … DESC LIMIT 1`) — 통계(ANALYZE) 뒤 `MAX` + JOIN 이 그 나라 행을
+// 전부 읽는 계획으로 바뀌지 않게 (docs/infra.md 25.1213, 25.1204 와 같은 모양)
 // **버전 하위 질의는 바깥 행을 가리키지 않는다** (docs/infra.md 25.858, 감사) — 행마다 다시 돌던(N²) 것을 나라 인자로 한 번만. 인자 둘이 붙는다
 
 export function buildSatellitePassedQuery(country: Country): { sql: string; args: string[] } {

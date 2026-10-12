@@ -291,9 +291,10 @@ export function buildQuery(filters: ScreenerFilters): {
   // 전체 MAX 로 잡으면 한 나라가 통째로 빠진다. 나라의 최신 스냅샷을 따로 잡는다.
   const inner = `
 WITH snapshot AS (
-  SELECT MAX(um.snapshot_date) AS d
-  FROM universe_members um JOIN stocks s2 ON s2.id = um.stock_id
-  WHERE s2.country = ?
+  -- 날짜 색인 내림차순 첫 행 (25.1213 — 통계 뒤 MAX + JOIN 이 나라 행을 전부 읽지 않게)
+  SELECT um.snapshot_date AS d
+  FROM universe_members um CROSS JOIN stocks s2 ON s2.id = um.stock_id
+  WHERE s2.country = ? ORDER BY um.snapshot_date DESC LIMIT 1
 ),
 -- 지금 유니버스 종목 수 — 성과 지표 배치는 최신 스냅샷의 편입 종목만 계산한다(jobs/metrics.load_targets) (25.782)
 universe_n AS (

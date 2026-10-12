@@ -90,8 +90,10 @@ LEFT JOIN prices px ON px.stock_id = e.stock_id
  */
 /** 한 나라의 최신 기준일·그날의 가장 새 버전. 나라는 코드의 글자(사용자 입력 아님)라 바로 적는다 — 그래야 인자 없이 한 번만 계산된다 */
 const 최신 = (c: "KR" | "US") =>
-  `(e.country = '${c}' AND pk.as_of_date = (SELECT MAX(pk2.as_of_date) FROM etf_picks pk2 JOIN etfs e2 ON e2.id = pk2.etf_id WHERE e2.country = '${c}') AND pk.calc_version = (SELECT MAX(pk3.calc_version) FROM etf_picks pk3 JOIN etfs e3 ON e3.id = pk3.etf_id WHERE e3.country = '${c}' AND pk3.as_of_date = (SELECT MAX(pk4.as_of_date) FROM etf_picks pk4 JOIN etfs e4 ON e4.id = pk4.etf_id WHERE e4.country = '${c}')))`;
+  `(e.country = '${c}' AND pk.as_of_date = (SELECT pk2.as_of_date FROM etf_picks pk2 CROSS JOIN etfs e2 ON e2.id = pk2.etf_id WHERE e2.country = '${c}' ORDER BY pk2.as_of_date DESC LIMIT 1) AND pk.calc_version = (SELECT MAX(pk3.calc_version) FROM etf_picks pk3 JOIN etfs e3 ON e3.id = pk3.etf_id WHERE e3.country = '${c}' AND pk3.as_of_date = (SELECT pk4.as_of_date FROM etf_picks pk4 CROSS JOIN etfs e4 ON e4.id = pk4.etf_id WHERE e4.country = '${c}' ORDER BY pk4.as_of_date DESC LIMIT 1)))`;
 
+// 최신 기준일은 날짜 색인 내림차순 첫 행으로 잡는다(`CROSS JOIN … ORDER BY … DESC LIMIT 1`) — 통계(ANALYZE) 뒤 `MAX` + JOIN 이 그 나라 행을
+// 전부 읽는 계획으로 바뀌지 않게 (docs/infra.md 25.1213, 25.1204 와 같은 모양)
 // **버전 하위 질의는 바깥 행을 가리키지 않는다** (docs/infra.md 25.858, 감사). 예전에는 `e3.country = e.country AND pk3.as_of_date = pk.as_of_date`
 // 라 행마다 다시 돌아(N²) ETF 탭 한 번에 약 157만 행을 읽었다
 const LATEST = `(${최신("KR")} OR ${최신("US")})`;

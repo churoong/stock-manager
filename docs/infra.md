@@ -2260,6 +2260,7 @@ SQL read operations are forbidden (reads are blocked, ...)
 | 25.1210 | 백테스트 가격 보기가 미래 거래대금을 들고 있음 (백테스트 감사 #3) |
 | 25.1211 | 스크리너 성과 지표 기준일이 지표 표 전체를 묶어 셈 (웹 읽기) |
 | 25.1212 | 상태 화면 신선도 16칸이 통계 뒤 나라 행 전체를 읽음 (웹 읽기) |
+| 25.1213 | ETF·위성·적립·스크리너 최신 기준일도 날짜 색인 첫 행으로 + 그물 (웹 읽기) |
 
 ### 25.1 왜 D1 인가
 
@@ -29108,3 +29109,16 @@ handoff "웹 읽기" 목록의 "스크리너 훑기" 항목이다.
 `tests/test_freshness_covers_inputs.py` 가 표 이름을 `FROM 표` 로만 찾아 새 모양을 함께 읽게 했다.
 
 **되돌리기 확인** — `health.ts` 를 되돌리면 vitest `freshnessIndex1212` 의 "종목 쪽부터 돌지 않는다" 가 깨진다(통계 뒤 계획 첫 줄이 `SEARCH s`).
+
+### 25.1213 ETF·위성·적립·스크리너 최신 기준일도 날짜 색인 첫 행으로 + 그물 (웹 읽기)
+
+**무엇** — 25.1204·25.1212 와 같은 모양(`MAX(날) … JOIN stocks|etfs`, 통계 뒤 그 나라 행 전부 읽기)이 남은 웹 질의 넷을 바꾸고, 다시 생기지 않게 그물을 쳤다.
+- ETF 탭 핵심 판정(`etf.ts` 최신 기준일)·위성 판정(`etfSatellite.ts`)·적립 종목 판정(`accumulation.ts`)의 "그 나라 최신 기준일" 하위 질의 각 둘
+- 스크리너 `snapshot` CTE(유니버스 최신 스냅샷)
+모두 날짜로 시작하는 색인이 있다(`idx_etf_picks_date`·`idx_etf_satellite_date`·`idx_stock_accum_date`·`idx_universe_snapshot`). 표가 작아(월 판정) 지금 비용은 작지만 같은 계획 뒤집힘을 그대로 갖고 있었다.
+
+**고침** — `SELECT x.날 FROM 표 x CROSS JOIN … WHERE 나라 ORDER BY x.날 DESC LIMIT 1`. 같은 날의 가장 새 판(`calc_version`) 하위 질의는 날짜 색인 범위라 그대로다.
+**그물** — vitest `maxJoinGuard1213`: `web/lib`·`web/app` 에서 `MAX(…날짜) … FROM 표 x JOIN stocks|etfs` 를 찾아 걸고, 면제는 사유와 함께 셋 — `etf_profiles`(날짜 색인 없음),
+옛 DB 되돌이(`*_FALLBACK`), 최신 판정으로 이미 거른 행의 집계 열(적립 퍼널). 배치 쪽은 다음 건으로 둔다(`db.LAST_CALC_SQL` 은 25.1204 에서 고쳤다).
+
+**되돌리기 확인** — 네 파일을 되돌리면 그물이 깨진다.

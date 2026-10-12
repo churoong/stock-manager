@@ -110,11 +110,13 @@ export interface FunnelStep {
  * **한 줄도 안 나온다.** 화면은 "아직 판정이 없다" 처럼 보이고 아무도 이유를 모른다.
  */
 const LATEST = `p.as_of_date = (
-    SELECT MAX(p2.as_of_date) FROM stock_accum_picks p2 JOIN stocks s2 ON s2.id = p2.stock_id WHERE s2.country = ?)
+    SELECT p2.as_of_date FROM stock_accum_picks p2 CROSS JOIN stocks s2 ON s2.id = p2.stock_id WHERE s2.country = ? ORDER BY p2.as_of_date DESC LIMIT 1)
   AND p.calc_version = (
     SELECT MAX(p3.calc_version) FROM stock_accum_picks p3 JOIN stocks s3 ON s3.id = p3.stock_id
     WHERE s3.country = ? AND p3.as_of_date = (
-      SELECT MAX(p4.as_of_date) FROM stock_accum_picks p4 JOIN stocks s4 ON s4.id = p4.stock_id WHERE s4.country = ?))`;
+      SELECT p4.as_of_date FROM stock_accum_picks p4 CROSS JOIN stocks s4 ON s4.id = p4.stock_id WHERE s4.country = ? ORDER BY p4.as_of_date DESC LIMIT 1))`;
+// 최신 기준일은 날짜 색인 내림차순 첫 행으로 잡는다(`CROSS JOIN … ORDER BY … DESC LIMIT 1`) — 통계(ANALYZE) 뒤 `MAX` + JOIN 이 그 나라 행을
+// 전부 읽는 계획으로 바뀌지 않게 (docs/infra.md 25.1213, 25.1204 와 같은 모양)
 // **버전 하위 질의는 바깥 행을 가리키지 않는다** (docs/infra.md 25.858, 감사). 예전에는 `s3.country = s.country AND p3.as_of_date = p.as_of_date` 라
 // 행마다 다시 돌아(N²) 적립 종목 퍼널 한 번에 국내 2,760행이면 약 1,500만 행을 읽었다. 나라를 인자로 받아 한 번만 계산한다 — 인자 셋(나라)이 붙는다
 
