@@ -72,3 +72,35 @@ def test_질의가_실제_스키마에서_돈다() -> None:
     assert x.peers == 5 and round(x.sector_ret, 4) == -0.05 and x.market == -0.02
     assert x.disclosure == "주요사항보고서(유상증자결정)"
     assert {k: round(v, 4) for k, v in pm.parts(x).items()} == {"market": -0.02, "sector": -0.03, "idio": -0.05}
+
+
+def test_끊긴_신호의_손실도_센다() -> None:
+    """성적표가 마지막 종가로 채운 끊긴 신호(`days_available` < 20)를 걸러 가장 나쁜 손실이 빠졌다 (docs/infra.md 25.1149)."""
+    con = sqlite3.connect(":memory:")
+    for f in sorted((Path(__file__).resolve().parent.parent / "migrations").glob("*.sql")):
+        con.executescript(f.read_text(encoding="utf-8"))
+
+    class C:
+        def execute(self, sql, args=None):
+            cur = con.execute(sql, args or [])
+
+            class R:
+                rows = cur.fetchall()
+
+                def scalar(self):
+                    return self.rows[0][0] if self.rows else None
+
+            return R()
+
+    con.execute("INSERT INTO stocks (id, ticker, market, country, currency, status, source, fetched_at, sector, name_ko)"
+                " VALUES (1, '000001', 'KOSDAQ', 'KR', 'KRW', 'delisted', 't', 't', '바이오', '끊긴종목')")
+    for d, c in (("2026-09-04", 100.0), ("2026-09-07", 70.0), ("2026-09-08", 40.0)):
+        con.execute("INSERT INTO prices (stock_id, date, close, currency, source, fetched_at) VALUES (1, ?, ?, 'KRW', 't', 't')",
+                    [d, c])  # fmt: skip
+    con.execute("INSERT INTO disclosures (stock_id, corp_code, receipt_no, title, disclosed_at, source, fetched_at)"
+                " VALUES (1, 'c', 'r1', '상장폐지결정', '2026-09-07', 'dart_opendart', 't')")
+    con.execute("INSERT INTO signal_outcomes (stock_id, as_of_date, horizon, entry_date, entry_close, ret_20d, bench_ret_20d,"
+                " days_available, computed_at) VALUES (1, '2026-09-03', 'short', '2026-09-04', 100, -0.60, -0.01, 2, 't')")
+    총, 손실수, [x] = ws.load_losses(C(), datetime(2026, 10, 7, tzinfo=UTC))
+    assert (총, 손실수) == (1, 1) and x.ret == -0.60
+    assert x.disclosure == "상장폐지결정"  # 공시 창은 마지막 종가 날까지

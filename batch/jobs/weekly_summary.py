@@ -197,15 +197,20 @@ def load_losses(client: TursoClient, now: datetime) -> tuple[int, int, list[post
     rows = client.execute(
         "SELECT o.stock_id, COALESCE(s.name_ko, s.name_en, s.ticker), o.horizon, o.entry_date, o.ret_20d,"
         " o.bench_ret_20d, s.sector, s.country FROM signal_outcomes o JOIN stocks s ON s.id = o.stock_id"
-        " WHERE o.entry_date BETWEEN ? AND ? AND o.ret_20d IS NOT NULL AND o.days_available >= 20",
+        # `days_available >= 20` 을 걸지 않는다 (25.1149) — 성적표는 상장폐지·거래정지로 끊긴 신호의 `ret_20d` 를
+        # 마지막 종가로 채운다(25.696). 그 조건은 `ret_20d IS NOT NULL` 과 겹치고 **끊긴 손실만** 걸러 냈다(생존편향)
+        " WHERE o.entry_date BETWEEN ? AND ? AND o.ret_20d IS NOT NULL",
         [a, b],
     ).rows
     losses = []
     손실들 = sorted((r for r in rows if float(r[4]) < 0), key=lambda r: float(r[4]))
     for r in 손실들[:POSTMORTEM_MAX]:
         sid, entry = int(r[0]), str(r[3])
+        # 20거래일째. 끊긴 신호는 그만큼 없으니 마지막 종가 날 — 성적표가 `ret_20d` 를 채운 그 날이다 (25.1149)
         exit_ = client.execute(
             "SELECT date FROM prices WHERE stock_id = ? AND date > ? ORDER BY date LIMIT 1 OFFSET 19", [sid, entry]
+        ).scalar() or client.execute(
+            "SELECT MAX(date) FROM prices WHERE stock_id = ? AND date > ?", [sid, entry]
         ).scalar()
         sec_ret, peers = None, 0
         if exit_ and r[6]:

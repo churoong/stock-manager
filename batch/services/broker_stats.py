@@ -115,7 +115,8 @@ def compute(
                 st.excess.append((series[j].close / base - 1) - (i1 / i0 - 1))
         window = series[i : i + TOUCH_DAYS + 1]
         # **120거래일이 다 찬 의견만 센다** (25.1148, 감사 재현). "이미 닿은 것" 도 세면 덜 찬 의견 가운데 닿은 것만
-        # 분모·분자에 들어가 실제 20% 가 30.8% 로 보였다 — 최근 의견이 많은 증권사일수록 부풀어 `verdict.skilled` 가중이 틀어진다
+        # 분모·분자에 들어가 실제 20% 가 30.8% 로 보였다 — 최근 의견이 많은 증권사일수록 부풀어
+        # `verdict.skilled` 가중이 틀어진다
         if len(window) == TOUCH_DAYS + 1:
             st.touched.append(any((b.high or b.close) >= op.target_price for b in window))
     return sorted((s.row() for s in stats.values()), key=lambda r: (-(r["n_fwd"] or 0), r["broker"]))
