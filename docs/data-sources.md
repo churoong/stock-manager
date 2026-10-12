@@ -635,7 +635,7 @@ yfinance `Ticker.info`·`funds_data` 가 쓰는 것과 같다.
 - **`frame`·frames API 를 쓰지 않는다.** 가장 늦게 제출된 값에만 붙는다. MSFT FY2017 순이익 최초 21,204M(filed 2017-08-02) → 재작성 25,489M(2018-08-03). frame 은 재작성값에 붙어 있다
 - **`form` 으로 거른다.** 10-K·10-K/A(분기는 10-Q·10-Q/A)만. JPM·WMT 에서 DEF 14A(위임장) fact 가 frame 을 차지했다
 - 결산일은 dei 를 뺀 재무 fact 의 최대 `end` 또는 `dei:DocumentPeriodEndDate`. "accn 안의 최대 end" 는 dei 표지일이 잡혀 **틀린다**(검증에서 반박됨)
-- `filed` 는 날짜뿐이고 17:30 ET 이후 접수분은 다음 영업일 배포다. `as_of` 는 **filed 다음 거래일**로 둔다(보수적)
+- `filed` 는 날짜뿐이고 17:30 ET 이후 접수분은 다음 영업일 배포다. `as_of` 는 **filed 다음 거래일**로 둔다(보수적) — 백테스트가 읽는 `financial_snapshots` 에 건다. 밴드·지금 PBR 이 읽는 `financials.report_date` 는 `filed` 그대로다(docs/signals.md, 25.1147)
 
 ### 14.2 개념 매핑 요지 (자세한 우선순위는 docs/factors.md 8장)
 
