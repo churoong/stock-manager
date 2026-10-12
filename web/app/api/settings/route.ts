@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { PORTFOLIO_SETTING_KEYS, requestRecalc } from "@/lib/portfolio";
 import { execute, rowsToObjects } from "@/lib/db";
-import { changedSettingKeys, mergeStoredSettings, storedSettingNotices, validateSettings } from "@/lib/settings";
+import { changedSettingKeys, checkWeightConsistency, mergeStoredSettings, storedSettingNotices, validateSettings } from "@/lib/settings";
 
 /**
  * 설정 읽기와 쓰기.
@@ -46,9 +46,34 @@ export async function PUT(request: Request) {
 
   try {
     const now = new Date().toISOString();
+    const { batch, execute } = await import("@/lib/db");
+    // **저장 전 값을 먼저 읽는다** (docs/infra.md 25.1205, 설정 감사). 바뀐 칸만 쓰므로(25.1115) 이 탭의 값만으로 검사하면
+    // 두 탭이 서로 다른 칸을 고쳐 "종목 상한 20 · 섹터 상한 15" 가 둘 다 200 으로 저장됐다. 표가 작아 통째로 읽는다
+    let 행: Array<{ key: string; value: string }> | null = null;
+    try {
+      행 = (await execute("SELECT key, value FROM settings")).rows.map((r) => ({ key: String(r[0]), value: String(r[1]) }));
+    } catch {
+      // 못 읽으면 예전처럼 이 탭 값만으로 — 아래에서 다시 계산을 깨운다(한 번 더 도는 편이 옛 값을 보이는 편보다 낫다)
+    }
+    const 저장됨 = new Map((행 ?? []).map((r) => [String(r.key), String(r.value)]));
+    // 저장 전 **정규화된** 값 — 없는 행은 기본값, 옛 모양은 지금 모양으로(`mergeStoredSettings`). 글자로 견주면 행이 없는 칸이
+    // 저장할 때마다 "바뀜" 이었고(목표 지연 안내·재계산), 옛 모양 행은 다른 기기가 고친 것처럼 읽혔다 (25.1205)
+    const 전값 = 행 ? mergeStoredSettings(행) : null;
+
     // 화면이 불러온 값과 다른 칸만 쓴다 (25.1115) — 다른 기기에서 고친 칸을 옛 값으로 덮지 않게
     const 기준 = (body as { _base?: unknown } | null)?._base;
     const { keys: 쓸칸, partial } = changedSettingKeys(result.value, 기준);
+    if (전값 && partial) {
+      // 쓰고 난 DB 의 모습(지금 값 + 이 탭이 바꾼 칸)으로 칸 사이 규칙을 다시 본다
+      const 합친 = { ...전값, ...Object.fromEntries(쓸칸.map((k) => [k, result.value[k]])) } as typeof 전값;
+      const 어긋남 = checkWeightConsistency(합친).filter((m) => m.startsWith("종목 비중 상한"));
+      if (어긋남.length) {
+        return NextResponse.json(
+          { errors: [...어긋남.map((m) => `${m} — 다른 곳에서 그 사이 상한을 바꿨습니다. 새로 불러온 뒤 다시 저장하세요`)] },
+          { status: 409 },
+        );
+      }
+    }
     const statements = 쓸칸.map((key) => ({
       sql:
         "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)" +
@@ -59,38 +84,25 @@ export async function PUT(request: Request) {
       >,
     }));
 
-    const { batch, execute } = await import("@/lib/db");
-    // 저장 **전** 값 — 포트폴리오 계산에 쓰는 칸이 바뀌었는지 보려고 (25.629)
-    const 전 = new Map<string, string>();
-    const 저장됨 = new Map<string, string>();
-    try {
-      // 표가 작아 통째로 읽고 여기서 거른다 — 질의에 보간을 넣지 않는다(appSql 검사)
-      const rs = await execute("SELECT key, value FROM settings");
-      for (const row of rs.rows) {
-        저장됨.set(String(row[0]), String(row[1]));
-        if ((PORTFOLIO_SETTING_KEYS as readonly string[]).includes(String(row[0]))) 전.set(String(row[0]), String(row[1]));
-      }
-    } catch {
-      // 못 읽으면 "바뀌었다" 로 본다 — 아래에서 다시 계산을 깨운다(한 번 더 도는 편이 옛 값을 보이는 편보다 낫다)
-    }
-    // 이 탭도 바꿨고 다른 곳도 그 사이 바꾼 칸 — 이 탭 값으로 덮었다고 말한다(나중 저장이 이긴다)
-    const 겹침 = partial
-      ? 쓸칸.filter((k) => {
-          const 옛 = (기준 as Record<string, unknown>)[k as string];
-          return 저장됨.has(k as string) && 저장됨.get(k as string) !== JSON.stringify(옛);
-        })
+    // 이 탭도 바꿨고 다른 곳도 그 사이 바꾼 칸 — 이 탭 값으로 덮었다고 말한다(나중 저장이 이긴다).
+    // 견주는 것은 정규화된 저장값과 화면이 불러온 값이다 (25.1205 — 옛 모양 행을 "다른 곳에서 바꿈" 으로 읽지 않게)
+    const 불러온 = partial ? (validateSettings(기준).ok ? (validateSettings(기준) as { value: typeof result.value }).value : null) : null;
+    const 겹침 = partial && 전값 && 불러온
+      ? 쓸칸.filter((k) => 저장됨.has(k as string) && JSON.stringify(전값[k]) !== JSON.stringify(불러온[k]))
       : [];
     if (statements.length) await batch(statements);
 
     // **포트폴리오에 쓰는 설정이 바뀌면 다시 계산을 깨운다** (docs/infra.md 25.629, 감사). 예전에는 매매 저장만 깨워,
     // 수수료·세율·목표/손절·섹터 상한·총액·무위험수익률을 바꿔도 다음 일일 배치 전까지 화면이 옛 값으로 계산된 결과를
-    // "지금 설정" 인 것처럼 보였다. 바뀐 칸이 없으면 깨우지 않는다(Actions 분을 아낀다)
-    const 바뀜 = PORTFOLIO_SETTING_KEYS.some((k) => 전.get(k) !== JSON.stringify(result.value[k]));
+    // "지금 설정" 인 것처럼 보였다. 바뀐 칸이 없으면 깨우지 않는다(Actions 분을 아낀다). **쓴 칸만** 본다 (25.1205)
+    const 바뀐칸 = (k: (typeof PORTFOLIO_SETTING_KEYS)[number]) =>
+      (쓸칸 as readonly string[]).includes(k) && (!전값 || JSON.stringify(전값[k]) !== JSON.stringify(result.value[k]));
+    const 바뀜 = PORTFOLIO_SETTING_KEYS.some(바뀐칸);
     const recalc = 바뀜 ? await requestRecalc() : null;
 
     // 목표·손절은 포트폴리오 재계산만으로는 **장중 감시·매도 플래그에 닿지 않는다** — 그 둘은 다음 일일 배치가 새로 만든다
     // (docs/infra.md 25.764, 설정 감사). 말하지 않으면 한 화면에서 복기는 새 값, 매도 플래그는 옛 값으로 판정한 것이 섞여 보였다
-    const targets_changed = 전.get("horizon_targets") !== JSON.stringify(result.value["horizon_targets"]);
+    const targets_changed = 바뀐칸("horizon_targets" as (typeof PORTFOLIO_SETTING_KEYS)[number]);
     return NextResponse.json({
       ok: true,
       warnings: [

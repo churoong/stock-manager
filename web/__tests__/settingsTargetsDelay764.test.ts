@@ -7,7 +7,8 @@ describe("목표·손절 반영 시점 안내", () => {
   it("저장 API 가 바뀌었는지 알려 주고 화면이 안내한다", () => {
     const route = readFileSync("app/api/settings/route.ts", "utf8");
     const form = readFileSync("components/SettingsForm.tsx", "utf8");
-    expect(route).toContain('전.get("horizon_targets") !== JSON.stringify(result.value["horizon_targets"])');
+    // 쓴 칸이고 정규화된 저장값과 다를 때만 (25.1205 — 행이 없는 칸이 저장할 때마다 "바뀜" 이었다)
+    expect(route).toContain('const targets_changed = 바뀐칸("horizon_targets"');
     expect(route).toContain("targets_changed,");
     expect(form).toContain("body.targets_changed ? [TARGETS_DELAY_NOTE]");
     expect(TARGETS_DELAY_NOTE).toContain("다음 일일 배치");
