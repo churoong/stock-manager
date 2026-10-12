@@ -25,6 +25,7 @@ from batch.core import calendar as cal
 from batch.core import db
 from batch.core.client import TursoClient
 from batch.core.entry import guard
+from batch.services import adjust as adj
 from batch.services import valuation_band as vb
 from batch.sources import dart
 
@@ -102,13 +103,21 @@ def load_prices(client: TursoClient, stock_ids: list[int], as_of: str) -> dict[i
     for start in range(0, len(stock_ids), PRICE_CHUNK):
         chunk = stock_ids[start : start + PRICE_CHUNK]
         marks = ", ".join(["?"] * len(chunk))
+        묶음: dict[int, list[dict]] = {}
+        나라: dict[int, str] = {}
         for r in client.execute(
-            f"SELECT p.stock_id, p.date, {db.SPLIT_ONLY_PRICE_SQL} AS close"
+            "SELECT p.stock_id, p.date, p.adj_close, p.close, s.country"
             f" FROM prices p JOIN stocks s ON s.id = p.stock_id WHERE p.stock_id IN ({marks})"
             " AND p.date > ? AND p.date <= ? AND p.close IS NOT NULL ORDER BY p.stock_id, p.date",
             [*chunk, since, as_of],
         ).dicts():
-            out.setdefault(int(r["stock_id"]), []).append((str(r["date"]), float(r["close"])))
+            묶음.setdefault(int(r["stock_id"]), []).append(r)
+            나라[int(r["stock_id"])] = str(r["country"])
+        # 수정주가 가운데 빈 행은 직전 계수로 메운다 (`adjust.split_only_prices`, 25.1144)
+        for sid, 줄 in 묶음.items():
+            for r, px in zip(줄, adj.split_only_prices(줄, 나라[sid]), strict=True):
+                if px is not None:
+                    out.setdefault(sid, []).append((str(r["date"]), px))
     return {sid: rows[-vb.BAND_DAYS :] for sid, rows in out.items()}
 
 

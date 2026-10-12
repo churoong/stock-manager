@@ -233,3 +233,15 @@ def fill_adjusted(rows: list[dict]) -> list[tuple[float | None, bool]]:
         if px is not None:
             직전 = px
     return out
+
+
+def split_only_prices(rows: list[dict], country: str) -> list[float | None]:
+    """한 종목의 날짜 순 `{adj_close, close}` 행 → 행마다 **분할만 반영한** 가격 (SQL 식의 파이썬판).
+
+    미국은 야후 `Close`(분할만 반영, 25.213), 국내는 수정주가 — 가운데 빈 행은 `fill_adjusted` 로 메운다
+    (docs/infra.md 25.1144). SQL 식 `COALESCE(adj_close, close)` 는 그 구멍에 원 종가를 그대로 넣어 분할 전
+    구간 한가운데 PBR 이 몇 배로 튀었다.
+    """
+    if country == "US":
+        return [None if r.get("close") is None else float(r["close"]) for r in rows]
+    return [px for px, _ in fill_adjusted(rows)]

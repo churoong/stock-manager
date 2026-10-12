@@ -35,6 +35,7 @@ from batch.core import db, visibility
 from batch.core import settings_range as sr
 from batch.core.client import TursoClient
 from batch.core.entry import guard
+from batch.services import adjust as adj
 from batch.services import fx, insider, trend
 from batch.services import metrics as mt
 from batch.services import scoring as scoring_svc
@@ -275,15 +276,17 @@ def load_band(
     # 분할만 반영한 가격을 쓴다. PBR = 시총/자본인데, 시총을 "그 가격 × 지금 주식수" 로 잡으면
     # 분할·감자가 있어도 앞뒤가 한 잣대가 된다 (docs/adjust.md 7장). 미국 Adj Close 는 배당까지
     # 담아 과거 PBR 을 낮춘다 — 미국은 야후 Close 다 (docs/infra.md 25.213, `db.SPLIT_ONLY_PRICE_SQL`)
-    prices_rs = client.execute(
-        f"SELECT p.date, {db.SPLIT_ONLY_PRICE_SQL} AS close FROM prices p JOIN stocks s ON s.id = p.stock_id"
+    # 수정주가 가운데 빈 행은 직전 계수로 메운다 (`adjust.split_only_prices`, 25.1144) — SQL 식은 원 종가를 넣었다
+    줄 = list(reversed(client.execute(
+        "SELECT p.date, p.adj_close, p.close, s.country FROM prices p JOIN stocks s ON s.id = p.stock_id"
         " WHERE p.stock_id = ? AND p.date <= ? ORDER BY p.date DESC LIMIT ?",
         [stock_id, as_of, BAND_DAYS],
-    )
+    ).dicts()))
+    나라 = str(줄[0]["country"]) if 줄 else "KR"
     prices = [
-        (str(row["date"]), float(row["close"]))
-        for row in reversed(prices_rs.dicts())
-        if row["close"] is not None
+        (str(row["date"]), px)
+        for row, px in zip(줄, adj.split_only_prices(줄, 나라), strict=True)
+        if px is not None
     ]
     if not prices:
         return None
