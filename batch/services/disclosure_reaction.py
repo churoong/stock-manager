@@ -38,8 +38,10 @@ TYPES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("dividend", "배당 결정", ("배당결정",)),
     ("control", "최대주주 변경", ("최대주주변경", "최대주주 변경")),
     ("reduction", "감자", ("감자결정", "감자 결정")),
-    ("merger", "합병·분할", ("합병", "분할결정")),
-    ("acquire", "타법인 주식 취득", ("타법인주식",)),
+    # "분할결정" 은 액면분할(`주식분할결정`)도 잡았다 — 회사 분할만 (25.1153)
+    ("merger", "합병·분할", ("합병", "회사분할")),
+    # "타법인주식" 은 처분(`타법인주식및출자증권처분결정`)도 잡았다 — 취득만 (25.1153)
+    ("acquire", "타법인 주식 취득", ("타법인주식및출자증권취득",)),
     ("facility", "유형자산 취득·시설투자", ("유형자산취득", "신규시설투자")),
     ("lawsuit", "소송", ("소송",)),
     ("fraud", "횡령·배임", ("횡령", "배임")),
@@ -48,10 +50,17 @@ TYPES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
 )
 
 
+#: 이 낱말이 제목에 있으면 **어느 유형도 아니다** (25.1153, 감사 재현). 같은 낱말을 품은 반대·다른 사건이다:
+#: 정정 공시, 신탁·계약 **해지**(자기주식취득신탁계약해지 → 매수의 반대), 이미 알린 일의 **결과 보고**,
+#: 자회사의 사항(`유상증자결정(종속회사의주요경영사항)` — 그 회사가 증자하는 것이 아니다).
+#: 웹(`web/lib/disclosureReaction.ts` `REACTION_EXCLUDE`)도 같은 목록이어야 한다(test_doc_constants)
+EXCLUDE: tuple[str, ...] = ("정정", "해지", "결과보고", "종속회사", "자회사의주요경영사항")
+
+
 def classify(title: str) -> str | None:
-    """제목 → 유형 키. 정정 공시이거나 맞는 유형이 없으면 None."""
+    """제목 → 유형 키. 빼는 낱말(`EXCLUDE`)이 있거나 맞는 유형이 없으면 None."""
     t = title.replace(" ", "")
-    if "정정" in t:
+    if any(w in t for w in EXCLUDE):
         return None
     for key, _, words in TYPES:
         if any(w.replace(" ", "") in t for w in words):

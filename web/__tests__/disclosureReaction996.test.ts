@@ -16,6 +16,12 @@ describe("공시 반응", () => {
     expect(classifyTitle("임원ㆍ주요주주특정증권등소유상황보고서", 표)).toBeNull();
   });
 
+  it("해지·결과 보고·자회사 사항은 같은 낱말이 있어도 없음 (25.1153)", () => {
+    expect(classifyTitle("주요사항보고서(자기주식취득신탁계약해지결정)", 표)).toBeNull();
+    expect(classifyTitle("자기주식취득결과보고서", 표)).toBeNull();
+    expect(classifyTitle("유상증자결정(종속회사의주요경영사항)", 표)).toBeNull();
+  });
+
   it("배치와 같은 문장, 표본이 적으면 없음", () => {
     expect(reactionLine(표[1])).toBe("자기주식 취득 공시: 전날 종가부터 5거래일째까지(공시일 반응 포함) 지수 대비 중앙값 +0.8% · 평균 +1.2% · 오른 비율 56% (120건)");
     expect(reactionLine({ ...표[1], n: REACTION_MIN_N - 1 })).toBeNull();

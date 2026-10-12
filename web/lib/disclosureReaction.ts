@@ -22,10 +22,13 @@ export interface ReactionRow {
 export const REACTION_ROWS = `SELECT type, label, keywords, priority, n, mean_pct, median_pct, pos_pct, window_days
 FROM disclosure_reaction ORDER BY priority`;
 
-/** 제목 → 유형 줄. 배치 `classify` 와 같은 규칙: 공백을 빼고, "정정" 이면 없음, 우선순위대로 처음 맞는 것 */
+/** 이 낱말이 있으면 어느 유형도 아니다 — batch/services/disclosure_reaction.EXCLUDE 와 같아야 한다 (25.1153) */
+export const REACTION_EXCLUDE = ["정정", "해지", "결과보고", "종속회사", "자회사의주요경영사항"];
+
+/** 제목 → 유형 줄. 배치 `classify` 와 같은 규칙: 공백을 빼고, 빼는 낱말이 있으면 없음, 우선순위대로 처음 맞는 것 */
 export function classifyTitle(title: string, rows: ReactionRow[]): ReactionRow | null {
   const t = title.replace(/\s/g, "");
-  if (t.includes("정정")) return null;
+  if (REACTION_EXCLUDE.some((w) => t.includes(w))) return null;
   for (const r of [...rows].sort((a, b) => a.priority - b.priority)) {
     let words: string[] = [];
     try {

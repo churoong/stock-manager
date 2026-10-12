@@ -390,6 +390,8 @@ class Test공시_반응:
             assert label in REACTION, f"docs/disclosure_reaction.md 2장에 유형 {label} 이 없다"
         웹 = (Path(__file__).resolve().parent.parent / "web" / "lib" / "disclosureReaction.ts").read_text("utf-8")
         assert f"REACTION_MIN_N = {dr.MIN_N};" in 웹, "web/lib/disclosureReaction.ts 표본 하한이 배치와 다르다"
+        빼는 = "[" + ", ".join(f'"{w}"' for w in dr.EXCLUDE) + "]"
+        assert f"REACTION_EXCLUDE = {빼는};" in 웹, "web/lib/disclosureReaction.ts 빼는 낱말이 배치와 다르다 (25.1153)"
 
     def test_모으는_기간(self) -> None:
         from batch.jobs import disclosure_reaction as job

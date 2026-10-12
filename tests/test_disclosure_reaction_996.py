@@ -149,3 +149,20 @@ def test_시장_전체_공시는_시간_초과를_다시_묻는다(monkeypatch: 
     차례[:] = [requests.ReadTimeout("x")] * 3
     got, calls, err = dd.fetch_market_day("20260415", "B")
     assert got == [] and calls == 3 and err is not None and err.startswith("호출 실패")
+
+
+def test_반대_다른_사건은_유형에_넣지_않는다() -> None:
+    """같은 낱말을 품은 반대·다른 사건이 섞였다 — 신탁 해지에 "자기주식 취득" 통계가 붙었다 (docs/infra.md 25.1153)."""
+    for 제목 in (
+        "주요사항보고서(자기주식취득신탁계약해지결정)",
+        "자기주식취득결과보고서",
+        "주요사항보고서(타법인주식및출자증권처분결정)",
+        "주식분할결정",
+        "유상증자결정(종속회사의주요경영사항)",
+        "단일판매ㆍ공급계약해지",
+    ):
+        assert dr.classify(제목) is None, 제목
+    assert dr.classify("주요사항보고서(자기주식취득신탁계약체결결정)") == "buyback"
+    assert dr.classify("주요사항보고서(타법인주식및출자증권취득결정)") == "acquire"
+    assert dr.classify("주요사항보고서(회사분할결정)") == "merger"
+    assert dr.classify("주요사항보고서(회사합병결정)") == "merger"
