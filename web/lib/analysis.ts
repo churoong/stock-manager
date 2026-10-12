@@ -19,6 +19,8 @@ export interface Verdict {
   headline: string;
   detail: {
     label?: string; reasons?: string[]; against?: string[]; nearest?: { horizon: string; failed_count: number; as_of: string | null } | null;
+    /** 사실 줄 — 점수·결론에 넣지 않는 참고 (공시 위험 이력, docs/analysis.md 54장, 25.1157) */
+    facts?: string[];
     /** 참고 분석만 (25.1019) */
     excluded_reason?: string; reference_score?: ReferenceScoreData | null;
     /** 가격·가치 진단 — 예측이 아니라 근거 있는 기준점 (docs/analysis.md 9장, 25.1023) */

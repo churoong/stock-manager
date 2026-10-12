@@ -42,6 +42,14 @@ export default function VerdictBlock({ v, currency = "KRW" }: { v: Verdict; curr
           </ul>
         </div>
       )}
+      {(v.detail?.facts ?? []).length > 0 && (
+        <div className="mb-2">
+          <p className="mb-0.5 text-xs font-semibold text-slate-600 dark:text-slate-300">사실 (참고 — 점수·결론에 넣지 않습니다)</p>
+          <ul className="list-disc space-y-0.5 pl-5 text-slate-700 dark:text-slate-300">
+            {v.detail!.facts!.map((r) => <li key={r}>{r}</li>)}
+          </ul>
+        </div>
+      )}
       {v.evidence.length > 0 && (
         <details className="text-xs">
           <summary className="cursor-pointer text-slate-500">근거표 {v.evidence.length}행 — 어느 표·언제·출처</summary>

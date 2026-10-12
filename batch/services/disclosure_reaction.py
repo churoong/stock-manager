@@ -18,6 +18,7 @@ from __future__ import annotations
 import bisect
 import statistics
 from dataclasses import dataclass
+from datetime import date, timedelta
 
 #: 공시일부터 몇 번째 거래일 종가까지 재나 (공시일 = 1)
 WINDOW_DAYS = 5
@@ -137,3 +138,44 @@ def line(row: dict | None) -> str | None:
             f"{row['median_pct']:+.1f}% · "
             f"평균 {row['mean_pct']:+.1f}% · 오른 비율 {row['pos_pct']:.0f}% ({row['n']}건"
             + (f", 거래정지로 못 잰 {정지}건 빠짐" if 정지 else "") + ")")  # fmt: skip
+
+
+# ----------------------------------------------------------------------
+# 공시 위험 이력 1년 — 사실 줄 (docs/analysis.md 54장, 25.1157)
+# ----------------------------------------------------------------------
+#: 사실 줄에 넣는 유형 — 최대주주 변경·감자는 위험 신호가 아니다(18회차 검증 B)
+GOVERNANCE_TYPES: tuple[str, ...] = ("fraud", "unfaithful")
+GOVERNANCE_DAYS = 365
+#: I 덮은 날이 계산일 며칠 전까지는 이어져야 하나 — 하루 수집이 늦거나 실패한 날을 넘기되 오래 비면 쓰지 않는다
+COVERAGE_SLACK_DAYS = 7
+
+
+def covered_span(days: list[str], today: date) -> tuple[str, str] | None:
+    """덮은 날 목록 → 1년 전부터 끊김 없이 이어진 (시작, 끝). 1년 전을 못 덮었거나 끝이 `COVERAGE_SLACK_DAYS` 보다
+    오래됐으면 None — 덮지 못한 날의 사건이 "없음" 으로 읽히면 안 된다."""
+    have = {d[:10] for d in days}
+    시작 = today - timedelta(days=GOVERNANCE_DAYS)
+    끝: date | None = None
+    d = 시작
+    while d <= today and d.isoformat() in have:
+        끝 = d
+        d += timedelta(days=1)
+    if 끝 is None or (today - 끝).days > COVERAGE_SLACK_DAYS:
+        return None
+    return 시작.isoformat(), 끝.isoformat()
+
+
+def governance_line(events: list[dict]) -> str | None:
+    """한 종목의 사건 → 사실 한 줄. 사건이 없으면 None(덮은 기간 안에서만 참인 "없음" 은 말하지 않는다)."""
+    if not events:
+        return None
+    이름 = {key: label for key, label, _ in TYPES}
+    조각 = []
+    for kind in GOVERNANCE_TYPES:
+        xs = sorted((e for e in events if e["type"] == kind), key=lambda e: str(e["day"]), reverse=True)
+        if xs:
+            나열 = ", ".join(f"{x['day']} \"{x['title']}\"" for x in xs[:3])
+            나열 += f" 외 {len(xs) - 3}건" if len(xs) > 3 else ""
+            조각.append(f"{이름[kind]} {len(xs)}건({나열})")
+    기간 = f"{events[0]['covered_from']}~{events[0]['covered_to']}"
+    return f"지난 1년 공시 위험 이력: {' · '.join(조각)} — 거래소 공시 {기간} 기준, 점수·결론에 넣지 않음"

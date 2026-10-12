@@ -70,6 +70,7 @@ import pytest
     "sell_flags", "monitor_targets", "news_targets", "adjust_refresh_queue",
     "broker_stats",  # 증권사 적중률 (25.995)
     "disclosure_reaction",  # 공시 반응 통계 (25.996)
+    "governance_events",  # 공시 위험 이력 1년 — 공시 표에서 고른 계산 결과 (25.1157)
 }  # fmt: skip
 
 #: **사람이 넣은 것.** 출처는 사용자다. 시스템이 임의로 고치지 않는다(CLAUDE.md)

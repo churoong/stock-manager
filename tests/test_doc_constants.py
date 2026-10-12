@@ -399,6 +399,13 @@ class Test공시_반응:
         검사(REACTION, f"지난 **{job.BACKFILL_DAYS}일**", "처음 모으는 기간")
         검사(REACTION, f"매일 지난 {job.DAILY_DAYS}일을 겹쳐", "평소 겹쳐 받는 기간")
 
+    def test_공시_위험_이력(self) -> None:
+        """사실 줄의 가드 (docs/analysis.md 54장, 25.1157)."""
+        from batch.services import disclosure_reaction as dr
+
+        assert dr.GOVERNANCE_DAYS == 365
+        검사(ANALYSIS, "1년 전부터 계산일 " + f"{dr.COVERAGE_SLACK_DAYS}일 전까지 이어질 때만", "덮은 날 가드")
+
 
 class Test우연일_확률:
     """운인가 실력인가 (docs/backtest.md 9장, docs/infra.md 25.997)."""

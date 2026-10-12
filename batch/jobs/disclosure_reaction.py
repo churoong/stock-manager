@@ -92,20 +92,50 @@ def collect(client: TursoClient, start: date, end: date, kinds: tuple[str, ...] 
             "covered": 덮음, "stopped_at": day.isoformat() if err else None, "error": err}  # fmt: skip
 
 
+GOVERNANCE_INSERT = (
+    "INSERT INTO governance_events (receipt_no, stock_id, day, type, title, covered_from, covered_to, source,"
+    " computed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (receipt_no) DO NOTHING"
+)
+
+
+def write_governance(client: TursoClient, 위험: dict[tuple[int, str, str], tuple[str, str]], today: date) -> dict:
+    """공시 위험 이력 표를 통째로 바꾼다 (docs/analysis.md 54장, 25.1157). I 덮은 날이 1년을 잇지 못하면 비운다."""
+    시작 = (today - timedelta(days=dr.GOVERNANCE_DAYS)).isoformat()
+    덮음 = [str(r[0]) for r in client.execute(
+        "SELECT day FROM disclosure_coverage WHERE kind = 'I' AND day >= ? ORDER BY day", [시작]).rows]  # fmt: skip
+    구간 = dr.covered_span(덮음, today)
+    stmts: list[tuple[str, list]] = [("DELETE FROM governance_events", [])]
+    if 구간:
+        stamp = db.now_iso()
+        stmts += [
+            (GOVERNANCE_INSERT, [no, sid, day, kind, title, 구간[0], 구간[1], dd.SOURCE, stamp])
+            for (sid, day, kind), (no, title) in sorted(위험.items())
+            if 구간[0] <= day <= 구간[1]
+        ]
+    for i in range(0, len(stmts), 500):
+        client.batch(stmts[i : i + 500])
+    return {"covered": list(구간) if 구간 else None, "rows": len(stmts) - 1}
+
+
 def compute(client: TursoClient, today: date) -> dict:
     since = (today - timedelta(days=BACKFILL_DAYS + 30)).isoformat()
     events: dict[tuple[int, str, str], dr.Event] = {}
+    # 공시 위험 이력(54장) — 같은 읽기에서 횡령·배임·불성실공시만 따로 모은다 (종목·날·유형 하나에 첫 접수번호)
+    위험: dict[tuple[int, str, str], tuple[str, str]] = {}
     for r in client.execute(
-        "SELECT d.stock_id, s.market, d.disclosed_at, d.title FROM disclosures d JOIN stocks s ON s.id = d.stock_id"
-        " WHERE s.country = 'KR' AND d.disclosed_at >= ?",
+        "SELECT d.stock_id, s.market, d.disclosed_at, d.title, d.receipt_no FROM disclosures d"
+        " JOIN stocks s ON s.id = d.stock_id WHERE s.country = 'KR' AND d.disclosed_at >= ?",
         [since],
     ).rows:
         kind = dr.classify(str(r[3]))
         if kind:
             idx = "KOSDAQ" if str(r[1]).upper() == "KOSDAQ" else "KOSPI"
             events.setdefault((int(r[0]), str(r[2]), kind), dr.Event(int(r[0]), idx, str(r[2]), kind))
+            if kind in dr.GOVERNANCE_TYPES:
+                위험.setdefault((int(r[0]), str(r[2])[:10], kind), (str(r[4]), str(r[3])))
+    거버넌스 = write_governance(client, 위험, today)
     if not events:
-        return {"events": 0}
+        return {"events": 0, "governance": 거버넌스}
     first = min(e.day for e in events.values())
     series: dict[int, tuple[list[str], list[float], list[float | None]]] = defaultdict(lambda: ([], [], []))
     for r in client.execute(
@@ -143,6 +173,7 @@ def compute(client: TursoClient, today: date) -> dict:
         for i, r in enumerate(rows)
     ])  # fmt: skip
     return {"events": len(events), "measured": sum(len(v) for v in values.values()), "halted": sum(정지.values()),
+            "governance": 거버넌스,
             "since": first, "as_of": as_of,
             "ready": [r["type"] for r in rows if r["n"] >= dr.MIN_N]}  # fmt: skip
 

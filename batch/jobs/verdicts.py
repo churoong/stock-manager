@@ -126,6 +126,8 @@ DISCLOSURES_SQL = (
     "SELECT d.stock_id, d.title, d.disclosed_at, d.receipt_no FROM disclosures d JOIN stocks s ON s.id = d.stock_id"
     " WHERE s.country = 'KR' AND d.disclosed_at >= ? ORDER BY d.disclosed_at DESC"
 )
+#: 공시 위험 이력 1년 (docs/analysis.md 54장, 25.1157) — 금요일 공시 반응 계산이 채운 작은 표만 읽는다
+GOVERNANCE_SQL = "SELECT stock_id, day, type, title, receipt_no, covered_from, covered_to FROM governance_events"
 # `halted` — 5거래일째 거래정지로 못 잰 건수 (25.1154)
 REACTION_SQL = "SELECT type, label, n, mean_pct, median_pct, pos_pct, halted FROM disclosure_reaction"
 INSERT = (
@@ -546,6 +548,10 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
                        warnings, "수급 흐름"):  # fmt: skip
             흐름[int(r["stock_id"])].append(r)
     곁 = against_kr(client, sorted(점수), today, warnings, flows=흐름) if country == "KR" else {}
+    위험이력: dict[int, list[dict]] = defaultdict(list)
+    if country == "KR":
+        for r in _safe(client, GOVERNANCE_SQL, [], warnings, "공시 위험 이력"):
+            위험이력[int(r["stock_id"])].append(r)
     as_of = max(str(r["as_of_date"]) for r in 점수.values())
     재료 = outlook_inputs(client, country, as_of, today, warnings)
     # 예측 성적표 (25.1037) — 지난 누계를 읽고 기간이 찬 예측을 더한다
@@ -695,6 +701,12 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
                                                    for m, w in 가중["weights"].items()) + ")")  # fmt: skip
         detail["score_change"] = 변화
         detail["twins"] = 닮음
+        # 사실 줄 (54장) — 점수·결론·반대 목소리 셈에 넣지 않는다. 근거표에는 접수번호
+        사실 = dr.governance_line(위험이력.get(sid, []))
+        if 사실:
+            detail["facts"] = [사실]
+            out["evidence"] += [vd._row("공시 위험 이력", str(e["title"]), "—", f"DART 접수번호 {e['receipt_no']}",
+                                        str(e["day"])) for e in 위험이력[sid]]  # fmt: skip
         if sid in 내부자:
             행 = insider.criteria_rows(내부자[sid], r.get("listed_shares"))
             if 행:

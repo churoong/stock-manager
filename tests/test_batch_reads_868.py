@@ -45,7 +45,8 @@ def test_OFFSET_질의는_SQL_에서_N행으로_자른다() -> None:
     c = _db()
     잡은것 = _잡기(c)
     signals.load_recent_prices(c, "KR", "2026-03-21", days=20)  # type: ignore[arg-type]
-    assert len(잡은것[-1][1].rows) == 20
+    # 창 첫머리 빈 행을 메우려고 한 행 더 읽는다 (25.1156) — 그래도 N+1 에서 자른다
+    assert len(잡은것[-1][1].rows) == 20 + 1
     universe._avg_turnover_map(c, "KR", "2026-03-21", days=20)  # type: ignore[arg-type]
     # 몇 종목만 가진 날을 창에서 빼려고 여유 행을 더 읽는다 (25.1109) — 그래도 N + 여유에서 자른다
     assert len(잡은것[-1][1].rows) == 20 + universe.MARKET_DAY_SLACK
