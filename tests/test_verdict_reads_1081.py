@@ -17,7 +17,8 @@ def test_세_질의가_색인을_탄다() -> None:
     감성 = _계획(verdicts.SENTIMENT_GAP_SQL, ["2026-10-02", "KR"])
     assert 감성[0].startswith("SEARCH ss USING INDEX idx_sentiment_scores_date"), 감성
     밴드 = _계획(verdicts.BAND_SQL, ["KR", "KR"])
-    assert not any(x.startswith("SCAN v") for x in 밴드) and "idx_valuation_bands_date" in 밴드[0], 밴드
+    # 최신일 하위 질의는 날짜 색인을 뒤에서 훑다 첫 행에서 멈춘다(`SCAN v2 USING INDEX …`, 25.1214) — 바깥 v 는 훑지 않는다
+    assert not any(x.startswith("SCAN v ") for x in 밴드) and "idx_valuation_bands_date" in 밴드[0], 밴드
     종가 = _계획(verdicts.PRICE_BACK_SQL, ["[1, 2]", "2026-09-01", "2026-10-09"])
     assert 종가[0].startswith("SCAN j") and "(stock_id=? AND date>? AND date<?)" in 종가[1], 종가
 

@@ -326,7 +326,7 @@ def test_뒤_조각만_실패하면_실패로_닫지_않는다() -> None:
     src = (Path(__file__).resolve().parents[1] / "batch" / "jobs" / "daily.py").read_text(encoding="utf-8")
     부분 = src[src.index("except telegram.TelegramPartialError as exc:"):]
     부분 = 부분[: 부분.index("except Exception as exc:")]
-    assert "reports.mark_sent(client, report_id, exc.sent_ids)" in 부분
+    assert "_발송시각_적기(client, report_id, exc.sent_ids, warnings)" in 부분  # 25.1219
     assert "reports.mark_partial_send(client, report_id, warnings)" in 부분  # 25.419
     # 웹의 발송 표시(`lib/reports.PARTIAL_SEND_MARK`)가 이 글자로 일부 발송을 알아본다 (25.427)
     웹 = (Path(__file__).resolve().parents[1] / "web" / "lib" / "reports.ts").read_text(encoding="utf-8")
@@ -438,7 +438,7 @@ def test_모름_재실행은_새_리포트로_덮고_한도_알림은_단정하�
     모름 = src[src.index("except telegram.TelegramUncertainError as exc:"):]
     # 새 본문의 조각이 확실히 갔을 때만 덮고, 발송 시각을 적는다 (25.570 — 한 조각 "모름" 이 아침 행을 지웠다)
     assert "if 보낸_것_있음 and 확실히_간:\n                report_id = _저장()" in 모름[:1500]
-    assert "reports.mark_sent(client, report_id, 확실히_간)" in 모름[:1800]
+    assert "_발송시각_적기(client, report_id, 확실히_간, warnings)" in 모름[:1800]  # 25.1219
     # 덮지 않았으면 알림에도 붙인다 (25.574, 교차검증 — 경고는 실행 기록에만 남았다)
     assert "formatter.NOT_SAVED_MARK}(웹은 먼저 보낸 리포트)" in 모름
     보낸것: list[str] = []

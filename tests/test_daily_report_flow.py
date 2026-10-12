@@ -305,7 +305,7 @@ class Test기업행위를_알아챈다:
                     def scalar(self):
                         return self.rows[0][0] if self.rows else None
 
-                if "MAX(p.date)" in sql:
+                if "SELECT p.date FROM prices p CROSS JOIN stocks s" in sql:  # 직전 거래일 (25.1214)
                     return RS([(직전,)])
                 if "FROM positions" in sql:
                     return RS(list((보유 or {}).items()))
@@ -425,7 +425,7 @@ class Test기업행위를_알아챈다:
 
                 if "FROM positions" in sql:
                     raise RuntimeError(self.오류)
-                if "MAX(p.date)" in sql:
+                if "SELECT p.date FROM prices p CROSS JOIN stocks s" in sql:  # 직전 거래일 (25.1214)
                     return RS()
                 rs = RS()
                 rs.rows = [(1, 1000.0)]
