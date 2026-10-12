@@ -416,7 +416,10 @@ def run(today: date | None = None) -> int:
             처음 = prev["created_at"] if prev else now
             # 어제 근거는 아래 `_criteria_of`(리포트와 같은 읽기)로 읽는다 — 같은 이름을 하나 더 만들어 뒤의 것에
             # 덮여 늘 빈 목록이 됐고, 확인이 매 배치 풀렸다 (25.566, 교차검증)
-            if 확인 and not sf.keeps_dismissal(f.reason_code, _criteria_of(prev.get("rationale_data")), f.criteria):
+            # **확인하지 않은 플래그도** 속 사유가 새로 생기면(시총미달 → 관리종목) NEW 를 다시 붙인다
+            # (docs/infra.md 25.1234, 매도 플래그 감사). 예전에는 [확인] 을 누른 쪽만 다시 알려, 아무것도 누르지 않은
+            # 사용자는 더 나빠진 줄을 옛 줄처럼 받았다
+            if prev and not sf.keeps_dismissal(f.reason_code, _criteria_of(prev.get("rationale_data")), f.criteria):
                 # 속 사유가 새로 생겼다 — 다시 알린다(25.564). **NEW 도 붙인다**: NEW 는 `created_at` 을 마지막 발송과
                 # 견주므로 처음 걸린 시각을 이어받으면 다시 실려도 NEW 가 없었다 (25.566)
                 확인 = None
