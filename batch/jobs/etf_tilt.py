@@ -277,8 +277,16 @@ def build_payload(
     }
 
 
+#: `failed` 에 이 키가 있으면 SEC 가 이번 실행 도중 막혔다 (25.1200)
+SEC_BLOCKED = "SEC 막힘"
+
+
 def fetch_us(targets: list[str], failed: dict[str, str]) -> tuple[dict[str, Fetched], dict[str, str], int]:
-    """미국 N-PORT. 반환 (심볼 → 보유, CUSIP → 심볼, SEC 호출 수)."""
+    """미국 N-PORT. 반환 (심볼 → 보유, CUSIP → 심볼, SEC 호출 수).
+
+    SEC 가 막으면(429) 멈추고 **남은 대상도 실패로 적는다** (25.1200) —
+    예전에는 막힌 하나만 적어 실행 기록이 "1개 실패" 였다.
+    부르는 쪽은 `SEC_BLOCKED` 가 `failed` 에 있으면 미국 무리의 순위를 쓰지도 지우지도 않는다."""
     if not targets:
         return {}, {}, 0
     sec = sec_edgar.SecClient()
@@ -295,6 +303,9 @@ def fetch_us(targets: list[str], failed: dict[str, str]) -> tuple[dict[str, Fetc
         except (sec_edgar.SecFailed, sec_edgar.SecBlocked) as exc:
             failed[sym] = str(exc)
             if isinstance(exc, sec_edgar.SecBlocked):
+                failed[SEC_BLOCKED] = str(exc)
+                for 남은 in targets[targets.index(sym) + 1:]:
+                    failed.setdefault(남은, "SEC 막힘 — 부르지 않음")
                 break  # 계속 부르면 더 오래 막힌다
             continue
         if doc is None:
@@ -479,7 +490,10 @@ def run() -> int:
         kodex_index = kodex_by_index(picks, kodex_tickers)
         sources = {int(p["pick_id"]): src for p in picks if (src := source_of(p, kodex_index))}
 
-        us_targets = sorted({s for k, s in sources.values() if k == "us"} | {tilt.MARKET_BENCHMARK})
+        # 기준(VTI)을 **맨 앞에** — SEC 가 중간에 막혀도 "시장 대비" 의 기준은 받는다 (KODEX 200 과 같은 이유, 25.1200)
+        us_targets = [tilt.MARKET_BENCHMARK] + sorted(
+            {s for k, s in sources.values() if k == "us"} - {tilt.MARKET_BENCHMARK}
+        )
         # 기준(KODEX 200)을 **맨 앞에** — 429 로 중간에 멈춰도 "시장 대비" 의 기준은 받는다 (25.984)
         kr_targets = sorted({s for k, s in sources.values() if k == "kr"} - {tilt.KR_BENCHMARK})
         if tilt.KR_BENCHMARK in kodex_tickers:
@@ -533,11 +547,19 @@ def run() -> int:
             ]  # fmt: skip
             ranks_all.update(tilt.rank_by(whole))
 
+        # **SEC 가 도중에 막힌 달은 미국 N-PORT 로 내는 무리의 순위를 쓰지도 지우지도 않는다**
+        # (25.1200, ETF 감사 재현) — 미국 상장과, 미국 대리 ETF 로 내는 국내 상장 미국 지수(출처 `us`).
+        # 예전에는 알파벳 앞쪽 일부만으로 "2개 중 1위" 를 내고 나머지(대개 기준 VTI 까지)의 지난달 순위를 지웠다 —
+        # 화면은 실행 상태를 보지 않아 부분 목록인 줄 몰랐다. 지난달 값이 남는 편이 덜 틀린다(근거표에 기준일이 있다)
+        미국_보류 = SEC_BLOCKED in failed
+        건너뜀 = {
+            int(p["pick_id"]) for p in picks if 미국_보류 and (sources.get(int(p["pick_id"])) or ("",))[0] == "us"
+        }
         updates = []
         for p in picks:
             pid = int(p["pick_id"])
             src = sources.get(pid)
-            if src not in tilts:
+            if src not in tilts or pid in 건너뜀:
                 continue
             kind, sym = src
             payload = build_payload(
@@ -557,7 +579,7 @@ def run() -> int:
                 [int(p["pick_id"])],
             )
             for p in picks
-            if int(p["pick_id"]) not in 갱신
+            if int(p["pick_id"]) not in 갱신 and int(p["pick_id"]) not in 건너뜀
         ]
         if updates or 지우기:
             client.batch(지우기 + updates)
@@ -599,9 +621,14 @@ def run() -> int:
             "kr_aligned_top_n": 맞춘_수,
             "coverage": {f"{k}:{s}": round(t.coverage_pct, 1) for (k, s), t in sorted(tilts.items())},
         }
+        못받음 = sorted(k for k in failed if k != SEC_BLOCKED)
+        step["us_ranks_kept"] = 미국_보류
         db.finish_batch_run(
             client, run_id, status="partial" if failed else "success", step_log=step,
-            error_text=f"보유를 받지 못한 ETF {len(failed)}개: {', '.join(sorted(failed))}" if failed else None,
+            error_text=(
+                f"보유를 받지 못한 ETF {len(못받음)}개: {', '.join(못받음)}"
+                + (" — SEC 가 도중에 막혀 미국 지수 ETF 순위는 지난달 값을 그대로 둠" if 미국_보류 else "")
+            ) if failed else None,
         )  # fmt: skip
         print(f"ETF 점수 담음: 대상 {step['targets']} · 받음 {len(docs)} · 행 갱신 {len(updates)}")
         print(f"  실패 {failed or '없음'}")
