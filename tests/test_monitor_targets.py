@@ -748,6 +748,6 @@ def test_유상증자_권리락이면_평균단가에_같은_계수를_곱해_�
     assert job.action_scale(mem, 1, "KR") == pytest.approx(0.9)  # type: ignore[arg-type]
     assert job.run("KR") == 0
     reasons, 손절 = mem.conn.execute("SELECT reasons, stop_price FROM monitor_targets WHERE stock_id = 1").fetchone()
-    assert "action_guard" not in json.loads(reasons)
+    assert "action_guard" not in json.loads(reasons) and "rights_ex" in json.loads(reasons)  # 웹이 관심가를 쓰지 않게 (25.1142)
     # 단기 손절 −7%: 100,000 × 0.9 × 0.93 = 83,700 (권리락 전 평균단가 그대로면 93,000 — 90,000 시세에 바로 터치)
     assert 손절 == pytest.approx(83_700)

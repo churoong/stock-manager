@@ -510,7 +510,8 @@ export async function GET(request: Request) {
     // 배치 사유 `action_guard` 로 안다
     const 가드된 = new Set<number>([
       ...관심가드,
-      ...targets.filter((t) => t.reasons.includes("action_guard")).map((t) => t.stock_id),
+      // 유상증자 권리락 뒤(`rights_ex`, 25.1142)도 — 권리락 전에 적은 관심 목표가가 기계적 하락으로 "도달" 하지 않게
+      ...targets.filter((t) => t.reasons.includes("action_guard") || t.reasons.includes("rights_ex")).map((t) => t.stock_id),
     ]);
     const byStock = new Map<number, { target: Target; watchBuy: number | null }>();
     for (const t of targets) byStock.set(t.stock_id, { target: t, watchBuy: null });

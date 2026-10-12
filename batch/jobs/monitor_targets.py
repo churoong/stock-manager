@@ -294,6 +294,10 @@ def build_targets(client: TursoClient, market: str, now: str) -> list[tuple]:
         경계 = 배율 is None
         if 경계:
             t["reasons"].append("action_guard")
+        elif 배율 != 1.0:
+            # 유상증자 권리락 뒤 (25.1142) — 보유 손절은 계수로 맞췄지만(25.1140), 웹이 겹친 관심 종목의
+            # **관심 목표 매수가**(사용자가 권리락 전에 적은 값)를 쓰지 않게 알린다. 기계적 하락만으로 "도달" 이 났다
+            t["reasons"].append("rights_ex")
         if r.get("asset_type") == "etf":
             # **ETF 보유에는 목표·손절선을 대지 않는다** (docs/infra.md 25.908, 감사). ETF 는 10~20년 정액 적립·타이밍
             # 무관(CLAUDE.md)인데,

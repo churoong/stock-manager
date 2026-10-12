@@ -110,7 +110,8 @@ describe("교차검증 반영 (docs/infra.md 25.598)", () => {
     expect(글).toContain("if (Date.now() - now.getTime() > DART_BUDGET_MS) {");
     expect(글).toContain("const 결과 = await batch(관심만.map((w) => ({");
     expect(글).toContain("existing.watchBuy = 가드된.has(w.stock_id) ? null : w.target_buy_price;");
-    expect(글).toContain('...targets.filter((t) => t.reasons.includes("action_guard")).map((t) => t.stock_id),');
+    // 25.1142 부터 유상증자 권리락(`rights_ex`)도 같은 자리에서 막는다
+    expect(글).toContain('...targets.filter((t) => t.reasons.includes("action_guard") || t.reasons.includes("rights_ex")).map((t) => t.stock_id),');
   });
 
   it("국내 감성 단추는 batch_runs 의 sentiment(KR) 기록으로 잠긴다", async () => {
