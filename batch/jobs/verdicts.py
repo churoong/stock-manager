@@ -263,6 +263,10 @@ def evaluate_due(client: TursoClient, country: str, as_of: str, now_close: dict[
             날들 = [str(d0)] if d0 and str(d0) > 앞 else []
         for d in 날들:
             못함 = evaluate_date(client, country, d, 달, now_close, prior, market, 바뀜, warnings)
+            if 못함 is None:
+                # **읽기에 실패한 날은 `through` 를 넘기지 않는다** (25.1152, 감사 재현) — 예전엔 빈 목록으로 보고
+                # 넘어가 그 기록일의 예측이 영영 채점되지 않았다. 뒤 날짜도 멈춘다(순서대로 넘겨야 막을 수 있다)
+                break
             through[str(달)] = d
             본날.append(f"{달}개월←{d}")
             # **거래정지라 오늘 종가가 없던 종목은 기다린다** (25.1085). 예전엔 `through` 만 넘어가 영영 채점되지
@@ -286,19 +290,25 @@ def _pending(client: TursoClient, country: str, as_of: str, now_close: dict[int,
         else:
             남김.append([d, 달, sid])
     for (d, 달), sids in sorted(묶음.items()):
-        남김 += [[d, 달, s] for s in evaluate_date(client, country, d, 달, now_close, prior, market, 바뀜, warnings,
-                                                 only=sids)]  # fmt: skip
+        못함 = evaluate_date(client, country, d, 달, now_close, prior, market, 바뀜, warnings, only=sids)
+        남김 += [[d, 달, s] for s in (sorted(sids) if 못함 is None else 못함)]  # 읽기 실패면 그대로 기다린다
     state["pending"] = 남김
 
 
 def evaluate_date(client: TursoClient, country: str, d: str, 달: int, now_close: dict[int, dict],
                   prior: dict[int, dict], market: dict, 바뀜: set[int], warnings: list[str],
-                  only: set[int] | None = None) -> list[int]:  # fmt: skip
+                  only: set[int] | None = None) -> list[int] | None:  # fmt: skip
     """기록일 하나의 `달` 개월 예측을 오늘 종가와 견준다. **기준 종가는 있는데 오늘 종가가 없는**(거래정지) 종목을
-    돌려준다 — 부르는 쪽이 기다린다(25.1085). `only` 를 주면 그 종목만."""
-    기준 = {int(r["stock_id"]): r for r in _safe(client, CLOSE_SQL, [country, str(d)], warnings, "기준 종가")}
+    돌려준다 — 부르는 쪽이 기다린다(25.1085). `only` 를 주면 그 종목만.
+
+    **읽기에 실패하면 None** (25.1152) — 아무것도 더하지 않았으니 부르는 쪽이 그 날을 다음에 다시 본다."""
+    종가줄 = _strict(client, CLOSE_SQL, [country, str(d)], warnings, "기준 종가")
+    기록줄 = None if 종가줄 is None else _strict(client, LOG_ROWS_SQL, [str(d), country], warnings, "예측 기록")
+    if 종가줄 is None or 기록줄 is None:
+        return None
+    기준 = {int(r["stock_id"]): r for r in 종가줄}
     못함: list[int] = []
-    for r in _safe(client, LOG_ROWS_SQL, [str(d), country], warnings, "예측 기록"):
+    for r in 기록줄:
         sid = int(r["stock_id"])
         if only is not None and sid not in only:
             continue
@@ -323,6 +333,17 @@ def evaluate_date(client: TursoClient, country: str, d: str, 달: int, now_close
 #: 남긴다 (25.1022).
 #: 예전엔 시장 전체를 지워, 일일 배치의 참고 분석 단계가 실패하거나 30종목 상한을 넘으면 "지금 분석" 결과가 사라졌다
 CLEAR = "DELETE FROM stock_verdicts WHERE market = ? AND json_extract(detail_json, '$.excluded_reason') IS NULL"
+
+
+def _strict(client: TursoClient, sql: str, args: list, warnings: list[str], what: str) -> list[dict] | None:
+    """`_safe` 와 같되 **일시 오류를 빈 목록과 가른다** — 표가 없으면 [](정말 없음), 그 밖은 경고하고 None (25.1152)."""
+    try:
+        return client.execute(sql, args).dicts()
+    except Exception as exc:  # noqa: BLE001
+        if db.표가_없나(exc):
+            return []
+        warnings.append(f"{what}을(를) 읽지 못했습니다: {exc}")
+        return None
 
 
 def _safe(client: TursoClient, sql: str, args: list, warnings: list[str], what: str) -> list[dict]:
