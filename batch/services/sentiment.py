@@ -77,11 +77,19 @@ def 판_하나만(rows: list[tuple[str, datetime, float]], tz: tzinfo | None = N
     """
     first: dict[tuple[str, str], tuple[datetime, float]] = {}
     마지막: dict[str, datetime] = {}  # 제목마다 마지막으로 남긴 판의 시각
+    # 12시간 규칙으로 앞 판에 묶인 판도 **그 날을 차지한다** (25.1185, 뉴스 감사 #3).
+    # 예전에는 1보 20:00 → 2보 다음날 07:00(묶임) → (종합) 다음날 09:00 이 1보에서 13시간이라 따로 셌다
+    # — 2보와 같은 날인데.
+    # 앞 판 시각(마지막)은 옮기지 않는다: 옮기면 날마다 같은 제목이 이어 달려 며칠이 한 건으로 뭉친다
+    묶인날: set[tuple[str, str]] = set()
     for title, published, score in sorted(rows, key=lambda r: r[1]):
         날 = (published.astimezone(tz).date() if tz else (published + timedelta(hours=9)).date()).isoformat()
         키 = 판_뗀_제목(title) or title
         앞 = 마지막.get(키)
-        if (키, 날) in first or (앞 is not None and published - 앞 < timedelta(hours=SAME_STORY_HOURS)):
+        if (키, 날) in first or (키, 날) in 묶인날:
+            continue
+        if 앞 is not None and published - 앞 < timedelta(hours=SAME_STORY_HOURS):
+            묶인날.add((키, 날))
             continue
         first[(키, 날)] = (published, score)
         마지막[키] = published

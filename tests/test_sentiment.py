@@ -88,6 +88,18 @@ def test_판_표시_여러_꼴과_자정을_넘긴_판도_하나로_센다() -> 
     assert len(st.판_하나만([rows[0], ("삼성전자 공장 화재", t0 + timedelta(hours=13), -0.5)])) == 2
 
 
+def test_앞_판에_묶인_판의_날에_나온_다음_판도_같은_판이다() -> None:
+    """1보 20:00 → 2보 다음날 07:00(12시간 안, 묶임) → (종합) 다음날 09:00 이 1보에서 13시간이라 따로 셌다 (docs/infra.md 25.1185)."""
+    kst = timedelta(hours=9)
+    t1 = datetime(2026, 10, 5, 20, tzinfo=UTC) - kst
+    rows = [("삼성전자 공장 화재", t1, -0.8), ("삼성전자 공장 화재(2보)", t1 + timedelta(hours=11), -0.8),
+            ("삼성전자 공장 화재(종합)", t1 + timedelta(hours=13), -0.8)]  # fmt: skip
+    남음 = st.판_하나만(rows)
+    assert [a.published_at for a in 남음] == [t1]  # 먼저 나온 1보 하나 (look-ahead 방지)
+    # 묶인 판이 앞 판 시각을 옮기지는 않는다 — 그다음 날 같은 제목은 따로 센다
+    assert len(st.판_하나만([*rows, ("삼성전자 공장 화재", t1 + timedelta(hours=35), -0.5)])) == 2
+
+
 class Test현지달력_25_749:
     """판 중복 날짜와 30·7일 창을 그 시장 현지 달력으로 (docs/infra.md 25.749, 뉴스 감성 감사)."""
 
