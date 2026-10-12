@@ -1302,8 +1302,9 @@ def scale_market_cap(
 ) -> tuple[float | None, dict[str, Any]]:
     """스냅샷 시총을 기준일 가격으로 옮긴 값과 그 기록 (docs/factors.md 3.1 "분모 시점 규칙").
 
-    옮기는 조건: 시총이 있고, 시총의 가격 날짜(`stocks.market_cap_date`)가 스냅샷 날짜와 같고(그래야 그 시총이 그날
-    가격의 값이다 — 13회차 검증 A·B), 배수를 낼 수 있고, 배수가 `MARKET_CAP_BAND` 안. 아니면 **그대로**(지금까지의
+    옮기는 조건: 시총이 있고, 시총의 가격 날짜(`stocks.market_cap_date`)가 스냅샷보다 늦지 않고 14일
+    (`universe.MARKET_CAP_MAX_AGE_DAYS`) 안이며(25.960 — 처음엔 "스냅샷 날짜와 같고" 였다, 13회차 검증 A·B), 배수를 낼
+    수 있고, 배수가 `MARKET_CAP_BAND` 안. 아니면 **그대로**(지금까지의
     동작)이고 `scaled=false` 와 사유를 남긴다. 값을 지어내지 않는다 — 모르면 옮기지 않는다.
     """
     note: dict[str, Any] = {
