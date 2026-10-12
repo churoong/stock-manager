@@ -28,3 +28,15 @@ describe("세후 시뮬레이션", () => {
     expect(taxSimLines(null)).toBeNull();
   });
 });
+
+describe("머리 문구가 한 해에 모두 판다는 가정을 밝힌다 (25.1240)", () => {
+  it("추천 순서와 다를 수 있다고 말한다", async () => {
+    const { taxSimLines } = await import("@/lib/taxSim");
+    const r = taxSimLines({
+      assumption: { monthly_krw: 500000, price_return_pct: 5, dist_yield_pct: 2 },
+      rows: [{ key: "a", label: "a", years: 10, contributed: 1, after_tax: 1, tax: 0, missing: [] }],
+    } as never);
+    expect(r?.head).toContain("한 해에 모두 판다고 가정");
+    expect(r?.head).toContain("일반계좌 추천 순서");
+  });
+});

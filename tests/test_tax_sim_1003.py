@@ -40,8 +40,11 @@ def test_세율이_비거나_범위_밖이면_숫자를_내지_않는다() -> No
     assert all(r["after_tax"] is None for r in ts.simulate(None)["rows"])
 
 
-def test_과세_구조_순서가_계좌별_추천과_같다() -> None:
-    """docs/etf.md 11.1 — 연금이 해외 ETF 에 가장 유리, 일반계좌는 국내 주식 ETF 가 먼저(매매차익 비과세)."""
+def test_시뮬레이션_순서와_추천_순서의_관계() -> None:
+    """docs/etf.md 11.1 — 연금이 해외 ETF 에 가장 유리, 일반계좌는 국내 주식 ETF 가 먼저(매매차익 비과세).
+
+    국내 상장 해외 > 미국 상장 은 **시뮬레이션 가정(한 해에 모두 팖) 탓**이고 추천 순서(미국 상장 2순위)와 반대다 —
+    화면 머리 문구가 그 까닭을 밝힌다 (docs/infra.md 25.1240). 이름이 "추천과 같다" 였는데 사실이 아니었다."""
     rows = {r["key"]: r["after_tax"] for r in ts.simulate(RATES)["rows"] if r["years"] == 20}
     assert rows["pension_kr_listed_foreign"] > rows["general_kr_equity"] > rows["general_kr_listed_foreign"]
     assert rows["general_kr_listed_foreign"] > rows["general_us_listed"]

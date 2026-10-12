@@ -63,3 +63,16 @@ def test_연금_2순위_채권은_가장_크다고_하지_않는다() -> None:
     해외 = ea.accounts_for("KR", "해외 주식", satellite=False)["pension"]
     assert 채권["priority"] == 2 and "가장" not in 채권["reason"] and "해외 주식 다음" in 채권["reason"]
     assert 해외["priority"] == 1 and "가장 큽니다" in 해외["reason"]
+
+
+def test_미국_상장_2순위의_까닭은_구조와_단점이다() -> None:
+    """예전 근거는 미국 상장도 22% 과세임을 빠뜨렸다 — 앞서는 까닭(분리과세·해마다 공제·손익통산)과 단점(환전·상속세)을 함께
+    적는다 (docs/infra.md 25.1240, 교차검증 판정: 순서 유지 + 문구)."""
+    from batch.services import etf_accounts as ea
+
+    미국 = ea.accounts_for("US", "해외 주식", satellite=False)["taxable"]
+    국내해외 = ea.accounts_for("KR", "해외 주식", satellite=False)["taxable"]
+    assert 미국["priority"] == 2 and 국내해외["priority"] == 3
+    for 말 in ("분리과세", "250만원", "손익통산", "환전", "상속세"):
+        assert 말 in 미국["reason"]
+    assert "종합과세" in 국내해외["reason"] and "나눠" in 국내해외["reason"]

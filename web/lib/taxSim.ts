@@ -39,7 +39,10 @@ export function taxSimLines(sim: TaxSim | null | undefined): { head: string; gro
   const a = sim.assumption;
   const head =
     `매달 ${만원(a.monthly_krw)}씩, 연 가격 ${a.price_return_pct}% · 분배 ${a.dist_yield_pct}% 를 가정했을 때 ` +
-    "(예측이 아닙니다 — 모든 줄이 같은 가정이라 차이는 세금에서만 납니다)";
+    "(예측이 아닙니다 — 모든 줄이 같은 가정이라 차이는 세금에서만 납니다). " +
+    // 순서가 일반계좌 추천과 달라 보이는 까닭을 밝힌다 (docs/infra.md 25.1240, docs/etf.md 11.7)
+    "끝에 한 해에 모두 판다고 가정해 미국 상장의 해마다 250만원 공제(나눠 팔기)·손익통산과 국내 상장 해외 ETF 의 " +
+    "금융소득종합과세(한 해 2,000만원 초과)를 넣지 않았습니다 — 그래서 일반계좌 추천 순서(과세 구조로 정함)와 다를 수 있습니다";
   const years = [...new Set(sim.rows.map((r) => r.years))];
   return {
     head,

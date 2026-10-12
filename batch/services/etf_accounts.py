@@ -51,7 +51,14 @@ def _rate(taxes: dict | None, key: str) -> str:
 def _reason(country: str, bucket: str, account: str, taxes: dict | None) -> str:
     """순위의 까닭 한 줄. 세율은 settings 값을 인용만 한다."""
     if country == "US":
-        return f"미국 상장 — 양도차익 분리과세(설정 세율 {_rate(taxes, 'us_capital_gains_pct')}), 국내 주식 ETF 다음"
+        # 예전 근거("국내 상장 해외 ETF 는 매매차익 과세라 그 앞")는 미국 상장도 22% 과세임을 빠뜨렸다
+        # (25.1240, 교차검증). 앞서는 까닭은 세율이 아니라 **구조**다 — 분리과세·해마다 공제·손익통산.
+        # 단점(환전·상속세)도 함께 적는다
+        return (
+            f"미국 상장 — 양도차익 분리과세(설정 세율 {_rate(taxes, 'us_capital_gains_pct')},"
+            " 금융소득종합과세에 합산 안 됨)·해마다 250만원 기본공제(나눠 팔기)·다른 해외주식과 손익통산."
+            " 단 환전 비용과 미국 상속세 대상 자산(비거주자 공제 6만 달러 `[확인필요]`) — 국내 주식 ETF 다음"
+        )
     if bucket == "국내 주식":
         if account == "taxable":
             return "국내 주식 ETF 는 일반계좌에서도 매매차익이 비과세 — 연금 한도는 다른 상품에 쓰는 편이 낫습니다"
@@ -59,7 +66,8 @@ def _reason(country: str, bucket: str, account: str, taxes: dict | None) -> str:
     if account == "taxable":
         return (
             f"국내 상장 {bucket} ETF 는 일반계좌에서 매매차익·분배금 모두 배당소득세"
-            f"(설정 세율 {_rate(taxes, 'kr_dividend_pct')}) — 연금 계좌가 낫습니다"
+            f"(설정 세율 {_rate(taxes, 'kr_dividend_pct')}) — 한 해에 몰아 팔면 금융소득종합과세(2,000만원 초과)"
+            "될 수 있어 여러 해에 나눠 팝니다. 연금 계좌가 낫습니다"
         )
     # 해외 주식(1순위)과 채권(2순위)이 같은 문장으로 "가장 크다" 를 말해 2순위 카드가 1순위로 읽혔다 (25.1239)
     if bucket == "채권":
