@@ -743,9 +743,17 @@ export function formatPrice(value: unknown, currency: string): string {
     : `$${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+/**
+ * 반올림한 뒤 −0 을 0 으로 (docs/infra.md 25.1217). −0.0004 를 그대로 `toFixed` 하면 "-0.0%" 가 됐다 —
+ * 추천 카드 `performanceLine`(25.805)·텔레그램(25.613)은 이미 이렇게 고쳤는데 종목 상세 성과표만 남아 있었다
+ */
+function 고친값(v: number, digits: number): string {
+  return (Number(v.toFixed(digits)) + 0).toFixed(digits);
+}
+
 /** 비율(0.123) → "12.3%" */
 export function formatPct(value: unknown, digits = 1): string {
-  return isNum(value) ? `${(value * 100).toFixed(digits)}%` : "-";
+  return isNum(value) ? `${고친값(value * 100, digits)}%` : "-";
 }
 
 /**
@@ -757,7 +765,7 @@ export function formatPercentNumber(value: unknown, digits = 0): string {
 }
 
 export function formatNum(value: unknown, digits = 2): string {
-  return isNum(value) ? value.toFixed(digits) : "-";
+  return isNum(value) ? 고친값(value, digits) : "-";
 }
 
 export interface OverlayLine {

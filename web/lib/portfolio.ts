@@ -875,6 +875,25 @@ export function pct(ratio: number | null | undefined, digits = 1): string {
  * 비율 값의 색 — **`pct` 가 보여 주는 숫자**를 따른다 (docs/infra.md 25.71·25.741). 0.0004 가 "0.0%" 로 보이는데
  * 빨갛거나, −0.0001 이 "0.0%" 인데 파랗던 곳(복기 행·백테스트 창)이 반올림 전 부호로 칠했다.
  */
+/**
+ * "구성을 아는 몫"(퍼센트 수) — 반올림이 끝값을 만들지 않게 (docs/infra.md 25.1217, 25.699 와 같은 규칙).
+ * 99.6 을 "100%" 로 적으면 ETF 구성을 다 아는 것처럼 읽혔고, 0.4 는 "0%" 가 됐다
+ */
+export function coveredText(pctValue: number): string {
+  if (pctValue > 0 && pctValue < 0.5) return "1% 미만";
+  if (pctValue >= 99.5 && pctValue < 100) return "99% 넘게";
+  return `${pctValue.toFixed(0)}%`;
+}
+
+/**
+ * 복기 행 수익률 — 결과 표지(이익·손실)와 숫자가 엇갈리지 않게 (docs/infra.md 25.1217). 한 자리로 0.0% 가 되는
+ * 작은 값은 두 자리로 적는다. −0.0004 가 "0.0%" 로 "손실" 표지 옆에 서 있었다. 그 자리도 반올림 결과 0 이면 그대로 둔다
+ */
+export function reviewPctDigits(ratio: number | null | undefined): number {
+  if (!그릴수있나(ratio) || ratio === 0) return 1;
+  return Number((ratio * 100).toFixed(1)) === 0 ? 2 : 1;
+}
+
 export function pctClass(ratio: number | null | undefined, digits = 1): string {
   if (!그릴수있나(ratio)) return "";
   const 보이는값 = Number((ratio * 100).toFixed(digits));
@@ -1065,7 +1084,7 @@ export function lookthroughLines(lt: Lookthrough | null | undefined): string[] {
   const 업종 = Object.entries(lt.by_sector).slice(0, 6).map(([k, v]) => `${k} ${v.toFixed(1)}%`);
   const 모름 = lt.unknown_etfs.length ? ` · 구성을 모르는 ETF: ${lt.unknown_etfs.join(", ")}` : "";
   return [
-    `ETF 를 펼친 실제 노출 — ETF ${lt.etf_pct.toFixed(1)}% 중 구성을 아는 몫 ${lt.covered_pct.toFixed(0)}%` +
+    `ETF 를 펼친 실제 노출 — ETF ${lt.etf_pct.toFixed(1)}% 중 구성을 아는 몫 ${coveredText(lt.covered_pct)}` +
       `${lt.as_of ? ` (구성 기준 ${lt.as_of})` : ""}${모름}`,
     `종목: ${종목.join(" · ")}`,
     `업종: ${업종.join(" · ")}`,

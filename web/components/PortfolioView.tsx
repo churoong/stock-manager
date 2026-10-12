@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import FlagCriteria from "@/components/FlagCriteria";
 import { bodyOf, readJson } from "@/lib/http";
 import { confirmNeeded, confirmPrompt, CONFIRM_CANCEL, type ConfirmKind } from "@/lib/confirm";
-import { dividendBody, readAmount, unreadableAmount, estimateWithholding, recalcPending, money, pct, pctSuffix, LIST_LIMIT, lookthroughLines, type Lookthrough, pnlClass, pctClass, qtyText, signedInt, signedWon, tradeBody, withholdingRate, won } from "@/lib/portfolio";
+import { dividendBody, readAmount, unreadableAmount, estimateWithholding, recalcPending, money, pct, pctSuffix, LIST_LIMIT, lookthroughLines, type Lookthrough, pnlClass, pctClass, qtyText, reviewPctDigits, signedInt, signedWon, tradeBody, withholdingRate, won } from "@/lib/portfolio";
 type DividendTaxes = { kr_dividend_pct?: number | null; us_dividend_pct?: number | null };
 
 import { rateText } from "@/lib/recommend";
@@ -940,9 +940,9 @@ function ReviewList({ reviews }: { reviews: ReviewRow[] }) {
             <Link href={`/stocks/${r.stock_id}`} className="font-semibold hover:underline">{r.name}</Link>
             <span className="text-xs text-slate-500">{r.ticker} · {r.buy_date} → {r.last_sell_date}</span>
             <span className={`rounded px-1.5 py-0.5 text-[11px] ${OUTCOME_TONE[r.outcome] ?? ""}`}>{OUTCOME_LABEL[r.outcome] ?? r.outcome}</span>
-            <span className={`ml-auto ${pctClass(r.return_pct)}`}>
+            <span className={`ml-auto ${pctClass(r.return_pct, reviewPctDigits(r.return_pct))}`}>
               {/* 수익률은 종목 통화 기준이다. 해외는 그렇다고 적고 원화 손익을 주가·환으로 나눈다 (25.241) */}
-              {pct(r.return_pct)}{r.currency === "KRW" ? "" : ` (${r.currency} 주가)`}{" "}
+              {pct(r.return_pct, reviewPctDigits(r.return_pct))}{r.currency === "KRW" ? "" : ` (${r.currency} 주가)`}{" "}
               <span className="text-xs text-slate-500">{reviewPnlText(r, signedWon)}</span>
             </span>
           </div>
