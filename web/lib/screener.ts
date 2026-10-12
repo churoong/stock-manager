@@ -217,6 +217,12 @@ function rangeCondition(
  * 비율은 배치가 저장한 팩터 원시값(factors.raw_json)을 읽어 단위만 바꾼다 (docs/infra.md 25.490).
  * 사업연도·순이익은 최근 사업보고서 행에서, 성과 지표는 선택한 기간의 최신 행에서 가져온다.
  */
+/**
+ * 성과 지표 기준일을 고를 때 보는 기간(달력일) — 가장 늦은 계산일에서 이만큼 앞까지 (docs/infra.md 25.1211). 성과 지표는 주 1회라
+ * 넉넉하다. 배치가 이보다 오래 멈춘 뒤 한 종목만 돌린 날만 남으면 그 안에서 가장 넓게 계산된 날을 쓴다(아래 정렬 규칙 그대로)
+ */
+export const METRICS_ASOF_LOOKBACK_DAYS = 120;
+
 export function buildQuery(filters: ScreenerFilters): {
   sql: string;
   args: Array<string | number>;
@@ -304,10 +310,14 @@ metrics_asof AS (
   -- 넓다 = **지금 유니버스의 절반 이상**을 계산한 날(종목 수로 센다 — 같은 날 새 판으로 다시 돌리면 행이 쌓인다, 25.779).
   -- 25.779 는 "마지막 날부터 40일 안의 최대" 와 견줘, 배치가 40일 넘게 멈춘 뒤 한 종목만 돌린 날이 다시 기준일이 됐다(교차검증).
   -- 그런 날이 없으면(유니버스가 두 배 넘게 늘었다) 가장 넓게 계산된 날. 표를 한 번만 훑는다
+  -- **최근 METRICS_ASOF_LOOKBACK_DAYS 일만 센다** (docs/infra.md 25.1211). 예전에는 그 나라·그 기간의 성과 지표를 처음부터 전부
+  -- 묶어 셌다 — 주 1회 쌓여 1년이면 종목 × 52행을 스크리너를 열 때마다 읽었다. 가장 늦은 날은 날짜 색인 내림차순으로 첫 행에서 멈춰 잡는다
   SELECT d FROM (
     SELECT m.as_of_date AS d, COUNT(DISTINCT m.stock_id) AS n
     FROM performance_metrics m JOIN stocks s3 ON s3.id = m.stock_id
-    WHERE s3.country = ? AND m.window = ?
+    WHERE s3.country = ? AND m.window = ? AND m.as_of_date >= date((
+      SELECT ml.as_of_date FROM performance_metrics ml CROSS JOIN stocks s6 ON s6.id = ml.stock_id
+      WHERE s6.country = ? AND ml.window = ? ORDER BY ml.as_of_date DESC LIMIT 1), '-${METRICS_ASOF_LOOKBACK_DAYS} days')
     GROUP BY m.as_of_date
   )
   ORDER BY (n * 2 >= (SELECT c FROM universe_n)) DESC,
@@ -420,13 +430,16 @@ ORDER BY ${orderExpression} ${direction} NULLS LAST, stock_id
 LIMIT ?`;
 
   // 인자 순서가 SQL 의 ? 순서와 같아야 한다.
-  //   snapshot 의 나라 → universe_n 의 나라(25.782) → metrics_asof 의 나라·기간(25.775) → factors_asof 의 나라
+  //   snapshot 의 나라 → universe_n 의 나라(25.782) → metrics_asof 의 나라·기간(25.775)·가장 늦은 날의 나라·기간(25.1211) → factors_asof 의 나라
   //   → factors_ver 의 나라 → JOIN 의 metric_window → WHERE 의 나라·시장·업종 → 바깥 조건 → LIMIT
   return {
     sql,
     args: [
       filters.country,
       filters.country,
+      filters.country,
+      filters.metric_window,
+      // metrics_asof 안의 "가장 늦은 날" 하위 질의 (25.1211)
       filters.country,
       filters.metric_window,
       filters.country,

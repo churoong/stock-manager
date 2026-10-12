@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
+  METRICS_ASOF_LOOKBACK_DAYS,
   MARKETS_BY_COUNTRY,
   SECTORS,
   buildQuery,
@@ -352,6 +353,17 @@ describe("성과 지표 기준일 — 지금 유니버스의 절반 이상을 �
     // 25.779 는 마지막 날부터 40일 안에서만 견줘 09-29(한 종목)를 골랐다 — 나머지 두 종목의 지표가 비었다
     const d = 새_db([행(1, "2026-08-10"), 행(2, "2026-08-10"), 행(4, "2026-08-10"), 행(1, "2026-09-29")].join(", "));
     expect(기준일(d)).toBe("2026-08-10");
+  });
+
+  it("가장 늦은 계산일에서 120일 안만 센다 — 지표 표 전체를 묶지 않는다 (docs/infra.md 25.1211)", () => {
+    // 05-01 은 세 종목(넓은 날)이지만 09-29 에서 120일 밖이다 — 그 안에서는 08-10 이 넓은 날
+    const d = 새_db([행(1, "2026-05-01"), 행(2, "2026-05-01"), 행(4, "2026-05-01"), 행(1, "2026-08-10"), 행(2, "2026-08-10"),
+      행(1, "2026-09-29")].join(", "));
+    expect(기준일(d)).toBe("2026-08-10");
+    expect(METRICS_ASOF_LOOKBACK_DAYS).toBe(120);
+    const { sql, args } = buildQuery(screenerFilterSchema.parse({ country: "KR", metric_window: "3Y", universe_only: false }));
+    const 계획 = (d.prepare("EXPLAIN QUERY PLAN " + sql).all(...args) as Array<{ detail: string }>).map((r) => r.detail).join(" | ");
+    expect(계획).toMatch(/SEARCH m USING INDEX idx_metrics_window \(as_of_date>\?\)/);
   });
 
   it("절반을 넘긴 날이 없으면(유니버스가 크게 늘었다) 가장 넓게 계산된 날", () => {
