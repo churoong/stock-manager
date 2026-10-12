@@ -26,13 +26,14 @@ import re
 import sys
 from calendar import monthrange
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 from batch import config
 from batch.core import db
 from batch.core.client import TursoClient
 from batch.core.entry import guard
 from batch.notify import telegram
+from batch.services import adjust as adj
 from batch.services import column_rot, postmortem
 
 log = logging.getLogger("weekly_summary")
@@ -188,17 +189,34 @@ POSTMORTEM_BACKSTOP_DAYS = 45
 #: 사후 분석에서 따져 볼 손실의 상한 — 손실 하나마다 시세를 몇 줄씩 읽는다
 POSTMORTEM_MAX = 30
 
-#: 업종 평균도 **분할만 반영한 가격**으로 (25.1150, 감사 재현) — 손실 종목의 `ret_20d` 가 그 잣대다
-#: (`db.SPLIT_ONLY_PRICE_SQL`).
-#: 원 종가로 내면 동종 6개 가운데 하나가 1:5 분할한 주에 업종 평균이 −16% 가 되고 주된 원인이 "업종" 으로 바뀌었다
-_P1 = db.SPLIT_ONLY_PRICE_SQL.replace("p.", "p1.")
-_P2 = db.SPLIT_ONLY_PRICE_SQL.replace("p.", "p2.")
-SECTOR_AVG = (
-    f"SELECT AVG(({_P2}) / ({_P1}) - 1), COUNT(*) FROM stocks s"
-    f" JOIN prices p1 ON p1.stock_id = s.id AND p1.date = ? AND p1.close > 0 AND ({_P1}) > 0"
-    f" JOIN prices p2 ON p2.stock_id = s.id AND p2.date = ? AND p2.close > 0 AND ({_P2}) > 0"
-    " WHERE s.country = ? AND s.sector = ? AND s.id <> ? AND s.asset_type = 'stock'"
+#: 업종 평균도 **분할만 반영한 가격**으로 (25.1150, 감사 재현) — 손실 종목의 `ret_20d` 가 그 잣대다.
+#: 원 종가로 내면 동종 6개 가운데 하나가 1:5 분할한 주에 업종 평균이 −16% 가 되고 주된 원인이 "업종" 으로 바뀌었다.
+#: **두 날만 읽지 않는다** (25.1194) — 진입일이 국내 수정주가 가운데 빈 행이면 그 동종의 기준이 원 종가(10배)라
+#: 같은 일이 났다. 앞뒤 `SECTOR_PAD_DAYS` 를 붙여 읽고 `adjust.split_only_prices` 로 메운 뒤 두 날 값을 견준다
+SECTOR_PAD_DAYS = 10
+SECTOR_ROWS_SQL = (
+    "SELECT p.stock_id, p.date, p.adj_close, p.close, s.country FROM stocks s"
+    " JOIN prices p ON p.stock_id = s.id AND p.date >= ? AND p.date <= ? AND p.close > 0"
+    " WHERE s.country = ? AND s.sector = ? AND s.id <> ? AND s.asset_type = 'stock' ORDER BY p.stock_id, p.date"
 )
+
+
+def sector_avg(
+    client: TursoClient, entry: str, exit_: str, country: str, sector: str, sid: int
+) -> tuple[float | None, int]:
+    """같은 나라·업종 다른 종목들의 진입일→끝날 평균 수익률과 종목 수. 두 날 값이 다 있는 종목만 센다."""
+    시작 = (date.fromisoformat(entry[:10]) - timedelta(days=SECTOR_PAD_DAYS)).isoformat()
+    끝 = (date.fromisoformat(exit_[:10]) + timedelta(days=SECTOR_PAD_DAYS)).isoformat()
+    묶음: dict[int, list[dict]] = {}
+    for sid_, d, a, c, ctry in client.execute(SECTOR_ROWS_SQL, [시작, 끝, country, sector, sid]).rows:
+        묶음.setdefault(int(sid_), []).append({"date": d, "adj_close": a, "close": c, "country": ctry})
+    수익: list[float] = []
+    for 줄 in 묶음.values():
+        값 = {str(r["date"]): px for r, px in zip(줄, adj.split_only_prices(줄, str(줄[0]["country"])), strict=True)}
+        a, b = 값.get(entry), 값.get(exit_)
+        if a and b and a > 0 and b > 0:
+            수익.append(b / a - 1)
+    return (sum(수익) / len(수익) if 수익 else None), len(수익)
 
 
 def load_losses(
@@ -230,8 +248,7 @@ def load_losses(
         ).scalar()
         sec_ret, peers = None, 0
         if exit_ and r[6]:
-            avg, n = client.execute(SECTOR_AVG, [entry, exit_, r[7], r[6], sid]).rows[0]
-            sec_ret, peers = (float(avg) if avg is not None else None), int(n or 0)
+            sec_ret, peers = sector_avg(client, entry, str(exit_), str(r[7]), str(r[6]), sid)
         공시 = client.execute(
             "SELECT title FROM disclosures WHERE stock_id = ? AND disclosed_at > ? AND disclosed_at <= ?"
             " ORDER BY disclosed_at LIMIT 1",

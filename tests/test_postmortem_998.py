@@ -120,8 +120,38 @@ def test_업종_평균은_분할만_반영한_가격으로_낸다() -> None:
         for d, (c, a) in (("2026-09-04", 첫), ("2026-10-02", 끝)):
             con.execute("INSERT INTO prices (stock_id, date, close, adj_close, currency, source, fetched_at)"
                         " VALUES (?, ?, ?, ?, 'KRW', 't', 't')", [i, d, c, a])  # fmt: skip
-    avg, n = con.execute(ws.SECTOR_AVG, ["2026-09-04", "2026-10-02", "KR", "반도체", 1]).fetchone()
-    assert n == 5 and round(avg, 4) == -0.05
+    avg, n = ws.sector_avg(_C(con), "2026-09-04", "2026-10-02", "KR", "반도체", 1)  # type: ignore[arg-type]
+    assert n == 5 and avg is not None and round(avg, 4) == -0.05
+
+
+class _C:
+    def __init__(self, con: sqlite3.Connection) -> None:
+        self.con = con
+
+    def execute(self, sql: str, args: list | None = None):  # noqa: ANN201
+        from batch.core.turso import ResultSet
+
+        cur = self.con.execute(sql, args or [])
+        return ResultSet(columns=[d[0] for d in cur.description or []], rows=[tuple(r) for r in cur.fetchall()])
+
+
+def test_업종_평균의_진입일이_수정주가_빈_행이면_메운다() -> None:
+    """진입일이 가운데 빈 행인 동종 하나가 원 종가(10배)를 기준으로 −90% 를 내 업종 평균을 끌었다 (docs/infra.md 25.1194)."""
+    con = sqlite3.connect(":memory:")
+    for f in sorted((Path(__file__).resolve().parent.parent / "migrations").glob("*.sql")):
+        con.executescript(f.read_text(encoding="utf-8"))
+    for i in range(1, 4):
+        con.execute("INSERT INTO stocks (id, ticker, market, country, currency, status, source, fetched_at, sector)"
+                    " VALUES (?, ?, 'KOSPI', 'KR', 'KRW', 'active', 't', 't', '반도체')", [i, f"00000{i}"])  # fmt: skip
+    # 2·3번: 100 → 95. 3번은 그 사이 1:10 분할(원 종가 1000 → 95), 진입일 09-04 는 수정주가가 빈 행
+    for i, 줄 in ((2, [("2026-09-03", 100, 100), ("2026-09-04", 100, 100), ("2026-09-07", 100, 100), ("2026-10-02", 95, 95)]),
+                  (3, [("2026-09-03", 1000, 100), ("2026-09-04", 1000, None), ("2026-09-07", 1000, 100),
+                       ("2026-10-02", 95, 95)])):  # fmt: skip
+        for d, c, a in 줄:
+            con.execute("INSERT INTO prices (stock_id, date, close, adj_close, currency, source, fetched_at)"
+                        " VALUES (?, ?, ?, ?, 'KRW', 't', 't')", [i, d, c, a])  # fmt: skip
+    avg, n = ws.sector_avg(_C(con), "2026-09-04", "2026-10-02", "KR", "반도체", 1)  # type: ignore[arg-type]
+    assert n == 2 and avg is not None and round(avg, 4) == -0.05  # 빈 행 원 종가면 (−0.05 − 0.905)/2 = −0.4775
 
 
 def test_지난_보고_뒤_성적이_나온_신호를_모두_본다() -> None:
