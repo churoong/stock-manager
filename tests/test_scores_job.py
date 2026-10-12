@@ -672,3 +672,22 @@ def test_정정공시로_새로워진_접수일도_점수·백테스트에서_�
     # 접수일 문턱의 경계: 457일은 신선, 458일은 묵음
     assert sc.annual_stale_reason("2025-06-30", "2026-09-30", 2025) is None
     assert sc.annual_stale_reason("2025-06-29", "2026-09-30", 2025) is not None
+
+
+def test_미회복_하한은_지표를_낸_날까지만_세고_묵은_지표는_실행_기록에_남긴다() -> None:
+    """지표가 묵은 사이 신고가로 회복한 종목도 하한이 날마다 커졌다 — 129일 묵은 행 → 101행 (docs/infra.md 25.1170)."""
+    from datetime import date, timedelta
+
+    client = _sqlite_client()
+    시작 = date(2026, 5, 1)
+    for k in range(160):
+        client.conn.execute(
+            "INSERT INTO prices (stock_id, date, close, currency, source, fetched_at) VALUES (1, ?, 100, 'KRW', 't', 't')",
+            [(시작 + timedelta(days=k)).isoformat()],
+        )
+    지표 = {1: {"mdd": -0.3, "mdd_recovery_days": None, "mdd_trough_date": "2026-05-20", "as_of_date": "2026-06-01"}}
+    job.attach_unrecovered_rows(client, 지표, "2026-10-08")  # type: ignore[arg-type]
+    assert 지표[1]["unrecovered_rows"] == 12.0  # 05-21 ~ 06-01, 기준일(10-08)까지가 아니다
+    묵음 = job.stale_metrics(지표, "2026-10-08")
+    assert 묵음 == {"count": 1, "of": 1, "oldest": "2026-06-01"}
+    assert job.stale_metrics(지표, "2026-06-10") is None

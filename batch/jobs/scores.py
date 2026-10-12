@@ -574,6 +574,19 @@ def fill_us_no_dividend(
             채움 += 1
     return 채움
 
+#: 성과 지표 행이 이보다 묵으면 실행 기록에 적는다(달력일). 주간 작업이라 평소 7일 — 두 번 빠지면 넘는다 (25.1170).
+#: 버리지는 않는다: 3년 변동성·MDD·베타는 몇 주에 거의 안 바뀌는데, 전원 결측이면 리스크 팩터가 빠져 종합 점수가
+#: 4팩터로 재정규화되어 순위가 크게 흔들린다 — 묵은 것을 말하는 쪽이 덜 틀린다
+METRICS_STALE_DAYS = 21
+
+
+def stale_metrics(metrics: dict[int, dict], as_of: str) -> dict | None:
+    """기준일보다 `METRICS_STALE_DAYS` 넘게 묵은 성과 지표 행 수와 가장 오래된 날. 없으면 None."""
+    한계 = (date.fromisoformat(as_of[:10]) - timedelta(days=METRICS_STALE_DAYS)).isoformat()
+    묵음 = [str(r["as_of_date"]) for r in metrics.values() if r.get("as_of_date") and str(r["as_of_date"]) < 한계]
+    return {"count": len(묵음), "of": len(metrics), "oldest": min(묵음)} if 묵음 else None
+
+
 def attach_unrecovered_rows(client: TursoClient, metrics: dict[int, dict], as_of: str) -> None:
     """미회복 종목마다 바닥 뒤 시세 행 수를 `unrecovered_rows` 로 붙인다 (docs/infra.md 25.693, 교차검증).
 
@@ -582,8 +595,11 @@ def attach_unrecovered_rows(client: TursoClient, metrics: dict[int, dict], as_of
     성과 지표가 회복 기간을 셀 때(`jobs/metrics.load_prices`: 수정·원 종가 중 하나라도 있는 행)와 같다.
     한 종목에 한 문장이지만 `batch` 로 묶어 왕복은 묶음마다 한 번이다.
     """
+    # **끝은 그 지표를 낸 날까지** (25.1170, 감사 재현). 점수 기준일까지 세면 지표가 묵은 사이에 신고가로 회복한
+    # 종목도 "미회복" 하한이 날마다 커져 회복 기간 최악 쪽 점수를 받았다(129일 묵은 행 → 하한 101행). 지표를 낸 날까지는
+    # 그 행이 아는 사실이라 참인 하한이다. 지표가 다시 돌면 회복을 다시 판정한다
     대상 = [
-        (sid, str(row["mdd_trough_date"]))
+        (sid, str(row["mdd_trough_date"]), min(as_of, str(row.get("as_of_date") or as_of)))
         for sid, row in metrics.items()
         if row.get("mdd_recovery_days") is None and row.get("mdd_trough_date")
     ]
@@ -593,11 +609,11 @@ def attach_unrecovered_rows(client: TursoClient, metrics: dict[int, dict], as_of
             (
                 "SELECT COUNT(*) FROM prices WHERE stock_id = ? AND date > ? AND date <= ?"
                 " AND COALESCE(adj_close, close) IS NOT NULL",
-                [sid, 바닥, as_of],
+                [sid, 바닥, 끝],
             )
-            for sid, 바닥 in 묶음
+            for sid, 바닥, 끝 in 묶음
         ])
-        for (sid, _), rs in zip(묶음, 결과, strict=True):
+        for (sid, _, _), rs in zip(묶음, 결과, strict=True):
             metrics[sid]["unrecovered_rows"] = float(rs.rows[0][0]) if rs.rows else None
 
 
@@ -954,6 +970,10 @@ def run(market: str, as_of: str | None = None) -> int:
         단계.mark("metrics")
         attach_unrecovered_rows(client, 성과지표, as_of)
         단계.mark("unrecovered_rows")
+        묵은_지표 = stale_metrics(성과지표, as_of)
+        if 묵은_지표:
+            log.warning("성과 지표 %d/%d종목이 %d일 넘게 묵었습니다(가장 오래된 %s) — 주간 성과 지표 작업을 확인하세요",
+                        묵은_지표["count"], 묵은_지표["of"], METRICS_STALE_DAYS, 묵은_지표["oldest"])  # fmt: skip
         inputs = build_inputs(
             universe,
             financials,
@@ -1087,6 +1107,8 @@ def run(market: str, as_of: str | None = None) -> int:
                 **({"input_read_errors": 재료_못읽음} if 재료_못읽음 else {}),
                 # 묵은 사업보고서라 연간 재무를 쓰지 않은 종목 (docs/infra.md 25.804)
                 **({"stale_annual": 묵은_재무} if 묵은_재무 else {}),
+                # 묵은 성과 지표 — 버리지 않고 말한다 (25.1170)
+                **({"stale_metrics": 묵은_지표} if 묵은_지표 else {}),
                 # 범위 밖 가중치를 기본값으로 되돌렸으면 남긴다 (docs/infra.md 25.169)
                 **({"setting_warnings": 설정경고} if 설정경고 else {}),
             },
