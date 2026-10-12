@@ -64,7 +64,7 @@ class Test기록:
         db.record_rows_read(mem, 5)  # type: ignore[arg-type]
         db.record_rows_written(mem, 7)  # type: ignore[arg-type]
         rows = mem.conn.execute(
-            "SELECT api_name, call_count FROM api_usage ORDER BY api_name"
+            "SELECT api_name, call_count FROM api_usage WHERE api_name NOT LIKE 'turso_reads@%' ORDER BY api_name"
         ).fetchall()
         assert rows == [("turso_reads", 5), ("turso_writes", 7)]
 
@@ -140,3 +140,19 @@ def test_카운터를_못_적으면_이유를_함께_남긴다(caplog: pytest.Lo
     with caplog.at_level("WARNING"):
         assert core_db._record_rows(깨진(), "turso_reads", 10, 100) is None  # type: ignore[arg-type]
     assert "no such table: api_usage" in caplog.text
+
+
+def test_출처별_월_누계에도_더한다(monkeypatch: Any) -> None:
+    """합계만으로는 배치 실행 기록에 안 잡히는 읽기가 어디서 오는지 몰랐다 (docs/infra.md 25.1178)."""
+    mem = MemClient()
+    db.apply_migrations(mem)  # type: ignore[arg-type]
+    monkeypatch.setenv("GITHUB_WORKFLOW", "일일 배치 (미국)")
+    db.record_rows_read(mem, 300)  # type: ignore[arg-type]
+    db.record_rows_read(mem, 200)  # type: ignore[arg-type]
+    monkeypatch.setenv("GITHUB_WORKFLOW", "")
+    monkeypatch.setattr("sys.argv", ["scripts/price_replica.py", "sync"])
+    db.record_rows_read(mem, 50)  # type: ignore[arg-type]
+    rows = dict(mem.conn.execute("SELECT api_name, call_count FROM api_usage WHERE window_type = 'month'").fetchall())
+    assert rows["turso_reads"] == 550
+    assert rows["turso_reads@일일 배치 (미국)"] == 500
+    assert rows["turso_reads@price_replica"] == 50

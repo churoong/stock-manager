@@ -923,6 +923,40 @@ def remaining_d1_daily_writes(client: TursoClient) -> int:
     return max(0, D1_DAILY_WRITE_LIMIT - (used or 0))
 
 
+#: 출처별 월 읽기 누계의 이름 머리 (docs/infra.md 25.1178).
+#: `turso_reads@<워크플로 이름 또는 스크립트>` · 웹은 `turso_reads@web`
+READ_SOURCE_PREFIX = "turso_reads@"
+
+
+def read_source() -> str:
+    """지금 읽는 쪽의 이름 — Actions 면 워크플로 이름(`GITHUB_WORKFLOW`), 아니면 실행한 스크립트 이름."""
+    import sys
+
+    스크립트 = sys.argv[0] if sys.argv and sys.argv[0] else "local"
+    이름 = os.environ.get("GITHUB_WORKFLOW") or Path(스크립트).stem or "local"
+    return 이름.strip()[:60]
+
+
+def _record_read_source(client: TursoClient, rows: int) -> None:
+    """출처별 월 누계에도 더한다 (25.1178, 10-12 감사). 합계(`turso_reads`)만으로는 10월 3억 5,800만 행 가운데 배치
+    실행 기록(`step_log.db_rows_read`)에 안 잡히는 약 1억 행이 어디서 오는지 알 수 없었다 — 시세 사본 맞추기·DB 상태
+    조회·탐침처럼 실행 기록을 남기지 않는 스크립트와 웹이 같은 카운터에 섞인다. 문장 하나, 실패해도 막지 않는다."""
+    if rows <= 0:
+        return
+    month = datetime.now(UTC).strftime("%Y-%m")
+    try:
+        client.execute(
+            "INSERT INTO api_usage (api_name, window_type, window_start, call_count, limit_value, warn_at_pct, state,"
+            " last_call_at, updated_at) VALUES (?, 'month', ?, ?, ?, 80, 'unknown', ?, ?)"
+            " ON CONFLICT (api_name, window_type, window_start) DO UPDATE SET"
+            "   call_count = api_usage.call_count + excluded.call_count, last_call_at = excluded.last_call_at,"
+            "   updated_at = excluded.updated_at",
+            [READ_SOURCE_PREFIX + read_source(), month, rows, TURSO_MONTHLY_READ_LIMIT, now_iso(), now_iso()],
+        )
+    except Exception as exc:  # noqa: BLE001 — 카운터가 본 작업을 막으면 안 된다
+        log.warning("읽기 출처 카운터를 갱신하지 못했습니다: %s", str(exc)[:200])
+
+
 def record_rows_read(client: TursoClient, rows: int) -> dict[str, Any] | None:
     """이번 달에 **훑은** 행 수를 센다 (docs/infra.md 24절). D1 이면 **오늘(UTC)** 누계도 센다.
 
@@ -932,6 +966,7 @@ def record_rows_read(client: TursoClient, rows: int) -> dict[str, Any] | None:
     "80% 경고, 100% 중단"(CLAUDE.md)의 앞 절반이 읽기 쪽에서는 작동할 수 없었다.
     """
     row = _record_rows(client, "turso_reads", rows, TURSO_MONTHLY_READ_LIMIT)
+    _record_read_source(client, rows)
     from batch.core import client as backend
 
     if backend.resolved_backend() == backend.D1:

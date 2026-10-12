@@ -173,6 +173,9 @@ export function utcMonth(now: Date): string {
 /** `USAGE_ADD` 와 같고 창만 **월**이다 — Turso 한도는 한 달 단위다 */
 export const USAGE_ADD_MONTH = USAGE_ADD.replace("VALUES (?, 'day',", "VALUES (?, 'month',");
 
+/** 웹 몫만의 월 누계 이름 — 배치 `db.READ_SOURCE_PREFIX` + "web" (25.1178) */
+export const TURSO_READS_WEB_NAME = "turso_reads@web";
+
 const tursoPending = { reads: 0 };
 let tursoRecording = false;
 
@@ -352,6 +355,11 @@ export async function noteTursoReads(
       {
         sql: USAGE_ADD_MONTH,
         args: [TURSO_READS_NAME, utcMonth(now), due, TURSO_MONTHLY_READ_LIMIT, 80, "unknown", stamp, stamp],
+      },
+      // 출처별 월 누계 — 배치의 `turso_reads@<워크플로>` 와 나란히 (docs/infra.md 25.1178)
+      {
+        sql: USAGE_ADD_MONTH,
+        args: [TURSO_READS_WEB_NAME, utcMonth(now), due, TURSO_MONTHLY_READ_LIMIT, 80, "unknown", stamp, stamp],
       },
     ]);
   } catch {

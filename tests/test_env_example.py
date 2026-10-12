@@ -34,6 +34,7 @@ import pytest
     "GITHUB_EVENT_NAME": "무엇이 이 실행을 깨웠는가 (schedule · repository_dispatch …)",
     "GITHUB_OUTPUT": "스텝끼리 값을 넘기는 파일 경로. 러너가 만든다",
     "GITHUB_REPOSITORY": "owner/repo. 실행 주소를 만들 때 쓴다",
+    "GITHUB_WORKFLOW": "워크플로 이름. Turso 읽기를 출처별 월 누계로 나눈다 (25.1178)",
     "GITHUB_RUN_ID": "실행 번호. 실행 주소를 만들 때 쓴다",
     "GITHUB_SERVER_URL": "https://github.com. 자체 호스팅이면 달라진다",
     "GITHUB_TOKEN": "워크플로가 `${{ github.token }}` 으로 넘긴다. 사람이 발급하지 않는다",

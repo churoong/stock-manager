@@ -374,7 +374,8 @@ FROM batch_runs ORDER BY id DESC LIMIT 25`;
  */
 export const API_USAGE = `SELECT api_name, window_type, window_start, call_count, limit_value, warn_at_pct, state, last_call_at
 FROM api_usage
-WHERE (window_type = 'day' AND window_start >= ?) OR (window_type = 'month' AND window_start >= ?)
+WHERE ((window_type = 'day' AND window_start >= ?) OR (window_type = 'month' AND window_start >= ?))
+  AND api_name NOT LIKE 'turso_reads@%'
 ORDER BY CASE window_type WHEN 'month' THEN 0 ELSE 1 END, api_name`;
 
 /**

@@ -253,9 +253,11 @@ describe("웹의 Turso 읽기도 월 카운터에 더한다 (docs/infra.md 25.89
     await noteTursoReads(READ_FLUSH_ROWS - 1, now, send);
     expect(sent).toHaveLength(0);
     await noteTursoReads(5, now, send);
-    expect(sent).toHaveLength(1);
+    // 합계 한 줄 + 웹 출처 한 줄 (25.1178)
+    expect(sent).toHaveLength(2);
     expect(sent[0].sql).toContain("'month'");
     expect(sent[0].args.slice(0, 3)).toEqual([TURSO_READS_NAME, "2026-10", READ_FLUSH_ROWS + 4]);
+    expect(sent[1].args.slice(0, 3)).toEqual(["turso_reads@web", "2026-10", READ_FLUSH_ROWS + 4]);
     expect(peekTursoPending()).toBe(0);
   });
 
