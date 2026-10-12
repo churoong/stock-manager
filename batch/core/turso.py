@@ -250,7 +250,8 @@ class TursoClient:
                 resp = self._session.post(self._endpoint, json=payload, timeout=TIMEOUT)
             except requests.RequestException as exc:
                 if attempt == attempts:
-                    raise TursoError(f"Turso 통신 실패: {self._가림(str(exc))}") from exc
+                    # `from None` — 원래 오류를 사슬에 남기면 traceback 이 가리지 않은 호스트를 찍는다 (25.1221)
+                    raise TursoError(f"Turso 통신 실패: {self._가림(str(exc))}") from None
                 reason = self._가림(str(exc))
             else:
                 if resp.status_code not in RETRYABLE_STATUS or attempt == attempts:

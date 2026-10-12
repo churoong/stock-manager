@@ -2268,6 +2268,7 @@ SQL read operations are forbidden (reads are blocked, ...)
 | 25.1218 | Turso 연결 오류 글의 DB 호스트가 공개 Actions 로그에 찍힘 |
 | 25.1219 | 보낸 리포트의 발송 시각 기록 실패를 삼킴 |
 | 25.1220 | 점수·신호의 덜 된 계산(감성·재료 못 읽음, 근거표 없음)이 리포트에 안 실림 |
+| 25.1221 | Turso 오류의 예외 사슬이 가리지 않은 호스트를 traceback 에 남김 |
 
 ### 25.1 왜 D1 인가
 
@@ -29214,3 +29215,12 @@ Actions 의 시크릿 가림은 `TURSO_DATABASE_URL` 값 전체(`libsql://…`)�
 **고침** — `_scores_and_signals` 끝에서 `_계산_저하` 가 이번에 연 두 작업의 마지막 기록(한 줄씩, `started_at >= 점수 시작`)을 읽어 위 키를 리포트 경고 문장으로 바꾼다.
 **건수만** 싣고 종목·예외 글은 싣지 않는다(실행 기록 참고). 신호 설정 경고는 리포트가 `signals_job.load_settings` 로 이미 싣으므로 빼 중복을 막았다. 못 읽으면 못 읽었다고 한 줄.
 **시험** — `tests/test_scores_degraded_1220.py`: 다섯 키 → 다섯 문장, 옛 기록·빈 목록은 말 없음, 단계가 그 줄을 붙이는지. **되돌리기 확인** — 붙이는 줄을 빼면 깨진다.
+
+### 25.1221 Turso 오류의 예외 사슬이 가리지 않은 호스트를 traceback 에 남김
+
+**무엇** — 25.1218 은 `TursoError` 글에서 호스트를 가렸지만 `raise … from exc` 로 원래 requests 오류를 예외 사슬에 남겼다. `guard()` 가 한도가 아닌 오류를 다시 올리면
+파이썬 기본 traceback 이 **사슬의 원래 오류를 먼저**(`ConnectionError: HTTPSConnectionPool(host='<실제 호스트>' …)`) 찍는다. `ops_tee` 를 거치지 않는 워크플로
+(universe·financials·metrics·valuation-bands·etf·backtest·dividends·disclosures-us·us-financials·backup)는 그 글이 공개 로그에 남는다. `log.exception` 도 같다. (주간·월간 작업 실패 흐름 감사, 재현 확인)
+
+**고침** — `raise TursoError(…) from None`. 가린 원래 글은 메시지에 그대로 있어 진단에 잃는 것이 없다.
+**시험** — `test_turso_host_mask_1218.py::test_traceback_에도_호스트가_없다`: `traceback.format_exception` 전체에 호스트가 없는지. **되돌리기 확인** — `from exc` 로 되돌리면 깨진다.
