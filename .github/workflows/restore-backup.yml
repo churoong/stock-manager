@@ -19,6 +19,10 @@ on:
         description: 넣을 표 (쉼표로, 비우면 전부)
         type: string
         default: ""
+      skip_rows:
+        description: "--only 로 고른 표 하나의 앞 N 행 건너뛰기 — 표 가운데서 잘렸을 때 지난 출력의 '다음 실행' 값 (25.1143)"
+        type: string
+        default: ""
       max_rows:
         description: 이번에 넣을 최대 행 수 (비우면 제한 없음)
         type: string
@@ -89,6 +93,7 @@ jobs:
           ARGS=""
           if [ -n "${{ inputs.only }}" ]; then ARGS="$ARGS --only ${{ inputs.only }}"; fi
           if [ -n "${{ inputs.max_rows }}" ]; then ARGS="$ARGS --max-rows ${{ inputs.max_rows }}"; fi
+          if [ -n "${{ inputs.skip_rows }}" ]; then ARGS="$ARGS --skip-rows ${{ inputs.skip_rows }}"; fi
           ARGS="$ARGS --on-conflict ${{ inputs.on_conflict }}"
           if [ "${{ inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
           if [ "${{ inputs.trust_stock_ids }}" = "true" ]; then ARGS="$ARGS --trust-stock-ids"; fi

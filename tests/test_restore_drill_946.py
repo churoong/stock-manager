@@ -151,3 +151,22 @@ def test_only_오타는_실패한다(tmp_path: Path, capsys) -> None:  # noqa: A
     assert restore.run(path, {"trade"}, None, dry_run=True) == 1
     assert "trade" in capsys.readouterr().out
     assert restore.run(path, {"trades"}, None, dry_run=True) == 0
+
+
+def test_표_가운데서_잘리면_skip_rows_로_이어_넣는다(tmp_path: Path, capsys) -> None:  # noqa: ANN001
+    """다음 실행이 늘 같은 앞 N 행만 보내 큰 표가 영영 다 들어가지 않았다 (docs/infra.md 25.1143, 백업 감사 재현)."""
+    from scripts import restore_backup as restore
+
+    path = tmp_path / "b.sql.gz"
+    with gzip.open(path, "wt", encoding="utf-8") as f:
+        f.write("BEGIN;\n" + "".join(
+            f"INSERT INTO settings (key, value, updated_at) VALUES ('k{i:03d}', 'v', 't');\n" for i in range(250)
+        ) + "-- rows settings 250\nCOMMIT;\n")
+    assert restore.run(path, {"settings"}, 100, dry_run=True) == 0
+    assert "다음 실행: --only settings --skip-rows 100" in capsys.readouterr().out
+    assert restore.run(path, {"settings"}, 100, dry_run=True, skip_rows=100) == 0
+    assert "--skip-rows 200" in capsys.readouterr().out
+    assert restore.run(path, {"settings"}, 100, dry_run=True, skip_rows=200) == 0
+    out = capsys.readouterr().out
+    assert "넣을 행 50" in out and "다음 실행" not in out
+    assert restore.run(path, None, 100, dry_run=True, skip_rows=100) == 1  # 표를 고르지 않으면 쓸 수 없다

@@ -355,6 +355,7 @@ def run(
     dry_run: bool,
     on_conflict: str = "skip",
     trust_stock_ids: bool = False,
+    skip_rows: int = 0,
 ) -> int:
     try:
         rows = statements(path)
@@ -377,6 +378,14 @@ def run(
             print(f"--only 의 표 {없는표} 가 이 백업에 없습니다(오타이거나 다른 범위의 백업). **넣지 않습니다**")
             return 1
         rows = [(table, sql) for table, sql in rows if table in only]
+    # **표 가운데서 잘린 뒤 이어 넣기** (25.1143, 백업 감사 재현). 예전 안내는 "그 표를 통째로 다시 보낸다" 였는데
+    # 다음 실행도 같은 한도로 **같은 앞 N 행**만 보내(이미 있어 건너뜀) 한도보다 큰 표는 영영 다 들어가지 않았다 — rc 0
+    if skip_rows:
+        if not only or len(only) != 1:
+            print("--skip-rows 는 --only 로 표 하나를 골랐을 때만 씁니다. **넣지 않습니다**")
+            return 1
+        print(f"  {next(iter(only))} 의 앞 {skip_rows:,}행은 지난 실행이 넣었다고 보고 건너뛴다")
+        rows = rows[skip_rows:]
     counts: dict[str, int] = {}
     for table, _sql in rows:
         counts[table] = counts.get(table, 0) + 1
@@ -388,12 +397,12 @@ def run(
         rows, 남은표, 쪼갠표 = 표_경계로_자르기(rows, max_rows)
         print(f"  → {len(rows):,}행까지만 넣는다 (한도 {max_rows:,})")
         if 쪼갠표:
-            print(
-                f"  주의: {쪼갠표} 하나가 한도를 넘어 **표 가운데서** 잘랐다."
-                " 다음 실행은 그 표를 통째로 다시 보낸다 (--on-conflict skip 이라 값은 안 틀린다)"
-            )
+            넣은수 = skip_rows + sum(1 for t, _s in rows if t == 쪼갠표)
+            print(f"  주의: {쪼갠표} 하나가 한도를 넘어 **표 가운데서** 잘랐다.")
+            print(f"  다음 실행: --only {쪼갠표} --skip-rows {넣은수}")
+            남은표 = [t for t in 남은표 if t != 쪼갠표]
         if 남은표:
-            print(f"  다음 실행: --only {','.join(남은표)}")
+            print(f"  그다음: --only {','.join(남은표)}")
     if dry_run:
         print("시험 실행이라 넣지 않았습니다")
         return 0
@@ -506,10 +515,14 @@ def main() -> int:
         "--trust-stock-ids", dest="trust_stock_ids", action="store_true",
         help="대응표가 없는 옛 백업만: 종목 번호 대조를 건너뛴다(원본과 번호가 같은 DB 에만). 대응표가 있으면 무시",
     )  # fmt: skip
+    parser.add_argument(
+        "--skip-rows", dest="skip_rows", type=int, default=0,
+        help="--only 로 고른 표 하나의 앞 N 행을 건너뛴다 — 표 가운데서 잘린 뒤 이어 넣기 (출력의 '다음 실행' 그대로)",
+    )  # fmt: skip
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s | %(message)s")
     only = {t.strip() for t in args.only.split(",") if t.strip()} if args.only else None
-    return run(args.path, only, args.max_rows, args.dry_run, args.on_conflict, args.trust_stock_ids)
+    return run(args.path, only, args.max_rows, args.dry_run, args.on_conflict, args.trust_stock_ids, args.skip_rows)
 
 
 if __name__ == "__main__":
