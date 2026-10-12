@@ -661,6 +661,18 @@ class Test섞인_투자_기간은_원가가_큰_쪽:
         _, open_lots, _ = pf.match_fifo(trades, NO_COST)
         assert pf.dominant_horizon(open_lots) == "long"
 
+    def test_기간이_빈_로트는_장기와_합쳐_센다(self) -> None:
+        """장기 400 + 빈 기간 300 + 단기 500 — 장기 쪽 700 이 이긴다 (docs/infra.md 25.1233, 매도 플래그 감사 재현)."""
+        trades = [buy(1, "2026-01-02", 100, 4, fee=0, horizon="long"), buy(2, "2026-02-02", 100, 3, fee=0),
+                  buy(3, "2026-09-01", 100, 5, fee=0, horizon="short")]  # fmt: skip
+        _, open_lots, _ = pf.match_fifo(trades, NO_COST)
+        assert pf.dominant_horizon(open_lots) == "long"
+
+    def test_모두_비었으면_예전처럼_None(self) -> None:
+        trades = [buy(1, "2026-01-02", 100, 4, fee=0), buy(2, "2026-02-02", 100, 3, fee=0, horizon="short")]
+        _, open_lots, _ = pf.match_fifo(trades, NO_COST)
+        assert pf.dominant_horizon(open_lots) is None  # 빈 기간 400 > 단기 300 — 장기로 적은 로트는 없다
+
 
 def test_추정_세금은_수수료를_뺀_나머지를_넘지_않는다() -> None:
     """수수료 100 을 적은 100원 매도에 추정 세금이 붙어 매도대금이 음수가 됐다 (docs/infra.md 25.616, 감사)."""

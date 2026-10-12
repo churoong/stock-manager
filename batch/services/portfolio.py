@@ -267,14 +267,25 @@ def dominant_horizon(open_lots: list[OpenLot]) -> str | None:
     예전에는 가장 오래된 로트의 기간(`open_lots[0]`)이었다. 장기로 10주, 뒤에 단기로 100주를 사면 포지션
     전체가 장기가 되어 손절 −7% 가 아니라 −25%, 목표 +10% 가 아니라 +50% 로 판정했고 기간초과도 뜨지 않았다.
     목표·손절은 포지션 전체 기준이므로(로트별 판정 없음) 돈이 가장 많이 걸린 기간을 따른다. 같으면 먼저 산 쪽.
+
+    **기간이 빈 로트는 장기와 합쳐 센다** (docs/infra.md 25.1233, 매도 플래그 감사). 문서 규칙("투자 기간이 비어
+    있는 보유는 장기로 본다")과 달리 따로 세어, 장기 400만 + 빈 기간 300만 + 단기 500만이면 단기가 이겨
+    손절 −25% 대신 −7% 로 빨간 플래그가 났다. 장기 쪽이 이기면 장기로 적은 로트가 있을 때만 "long",
+    모두 비었으면 예전처럼 None(화면은 "기간 없음")
     """
-    합: dict[str | None, float] = {}
+    def 칸(h: str | None) -> str:
+        return h or "long"
+
+    합: dict[str, float] = {}
     for lot in open_lots:
-        합[lot.horizon] = 합.get(lot.horizon, 0.0) + lot.quantity * (lot.price + lot.unit_fee)
+        합[칸(lot.horizon)] = 합.get(칸(lot.horizon), 0.0) + lot.quantity * (lot.price + lot.unit_fee)
     if not 합:
         return None
     최대 = max(합.values())
-    return next(lot.horizon for lot in open_lots if 합[lot.horizon] == 최대)
+    이긴 = next(칸(lot.horizon) for lot in open_lots if 합[칸(lot.horizon)] == 최대)
+    if 이긴 == "long" and not any(lot.horizon == "long" for lot in open_lots):
+        return None
+    return 이긴
 
 
 def position_from(stock_id: int, currency: str, open_lots: list[OpenLot]) -> Position | None:
