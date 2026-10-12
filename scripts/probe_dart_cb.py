@@ -22,6 +22,8 @@ DART = "https://opendart.fss.or.kr/api"
 #: (제목 낱말, 엔드포인트 후보 `[확인필요]`)
 KINDS = (("전환사채권발행결정", "cvbdIsDecsn.json"), ("신주인수권부사채권발행결정", "bdwtIsDecsn.json"))
 #: 값을 찍을 칸을 고르는 낱말 — 칸 이름을 모르니 이름의 조각으로 고른다(가액 prc · 일자 de/bgd/edd · 총액 fta · 비율 rt)
+#: 목록 쪽 상한 — 20일치 B 는 대개 5쪽 안이다
+MAX_PAGES = 10
 FIELD_HINTS = ("prc", "fta", "bgd", "edd", "rt", "cnt", "stk", "lwtr", "rfx", "adj")
 
 
@@ -69,17 +71,22 @@ def main() -> int:
 
     key = os.environ["DART_API_KEY"]
     calls = 0
-    고른: list[tuple[str, str, str, str]] = []
-    day = date.today()
-    for _ in range(max(1, args.days)):
-        rows, n, err = dd.fetch_market_day(day.strftime("%Y%m%d"), "B")
-        calls += n
-        if err:
-            print(f"{day}: 목록 실패 {err}")
-        고른 += [x for x in pick_issuers(rows, args.max) if x[:3] not in {g[:3] for g in 고른}]
-        if len(고른) >= args.max:
+    # 기간 전체를 한 번에(쪽마다 100건) — 하루씩 받으면 15분 제한에 걸렸다(10-12 첫 실행 취소)
+    끝, 시작 = date.today(), date.today() - timedelta(days=max(1, args.days))
+    rows: list = []
+    for page in range(1, MAX_PAGES + 1):
+        r = requests.get(f"{DART}/list.json", timeout=30, params={
+            "crtfc_key": key, "bgn_de": 시작.strftime("%Y%m%d"), "end_de": 끝.strftime("%Y%m%d"),
+            "pblntf_ty": "B", "page_no": page, "page_count": 100})  # fmt: skip
+        calls += 1
+        body = r.json()
+        if str(body.get("status")) != "000":
+            print(f"목록 {page}쪽: status {body.get('status')} {body.get('message', '')}")
             break
-        day -= timedelta(days=1)
+        rows += dd.parse_market(body, "B")
+        if page >= int(body.get("total_page") or 1):
+            break
+    고른 = pick_issuers(rows, args.max)
     print(f"고른 발행 {len(고른)}건")
     for corp, ticker, ep, de in 고른[: args.max]:
         r = requests.get(f"{DART}/{ep}", timeout=30,
