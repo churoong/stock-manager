@@ -828,7 +828,11 @@ def make_long_strategy(
     def decide(t: str, view: bt.PriceView) -> dict[int, float]:
         today = date.fromisoformat(t)
         for sid, entered in list(held.items()):
-            if (today - date.fromisoformat(entered)).days >= LONG_HOLD_DAYS:
+            # 1년이 지났거나 **엔진이 실제로 들지 않은 종목은 놓는다** (docs/infra.md 25.1231, 백테스트 감사). 진입한 날
+            # 체결가가 없어 엔진이 빼 버렸거나(거래정지) 상장폐지로 팔았는데 여기선 1년 보유로 셌다 — 매달 신호 없이
+            # 다시 제안돼 재개되면 그때 샀고, 자리를 차지해 진짜 신호를 막았다
+            지남 = (today - date.fromisoformat(entered)).days >= LONG_HOLD_DAYS
+            if 지남 or (view.holding is not None and sid not in view.holding):
                 del held[sid]
 
         if len(held) < max_holdings:

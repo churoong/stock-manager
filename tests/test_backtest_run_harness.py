@@ -228,9 +228,9 @@ def test_여러_번_리밸런스해도_거래대금_표가_살아_있다(가짜:
     원래 = bt.PriceView
 
     class 세는View(원래):  # type: ignore[misc, valid-type]
-        def __init__(self, prices: Any, cutoff: str, turnover: Any = None, levels: Any = None) -> None:
+        def __init__(self, prices: Any, cutoff: str, turnover: Any = None, levels: Any = None, **k: Any) -> None:
             받은_종류.append(type(turnover).__name__)
-            super().__init__(prices, cutoff, turnover, levels)
+            super().__init__(prices, cutoff, turnover, levels, **k)  # holding (25.1231)
 
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(bt, "PriceView", 세는View)

@@ -209,8 +209,13 @@ class PriceView:
         cutoff: str,
         turnover: dict[int, dict[str, float]] | None = None,
         levels: dict[int, dict[str, float]] | None = None,
+        holding: frozenset[int] | None = None,
     ) -> None:
         self.cutoff = cutoff
+        # **엔진이 지금 실제로 든 종목** (docs/infra.md 25.1231). 체결가가 없어 엔진이 빼 버린 종목·상장폐지로 판 종목을
+        # 판단 함수가 알 수 있게 한다 — 보유 기간을 스스로 세는 전략(장기 신호)이 "산 줄 아는" 종목을 1년 붙들었다.
+        # 미래 정보가 아니다(리밸런스 직전의 엔진 상태). 엔진 밖에서 만든 창은 None(모름)
+        self.holding = holding
         # **가격 수준**(시총·PBR 용)을 따로 든다 (docs/infra.md 25.275). 미국 `prices` 는 야후 수정종가
         # (배당 재투자 포함)라 수익률에는 맞지만 **수준**은 그 뒤 배당만큼 낮다 — 5년 전 날짜면 배당 4% 종목의
         # 시총이 약 18% 작게 나와 밸류가 부풀고, 그 크기가 **미래의 배당 결정**에 달린다(look-ahead).
@@ -496,7 +501,10 @@ def simulate(
             # 첫 거래일이라 t-1 이 없으면 빈 창을 넘긴다. 무엇을 살지는 판단
             # 함수의 몫이다. 점수로 고르는 전략은 볼 것이 없어 아무것도 사지
             # 않을 것이고, 그것이 맞다. 엔진이 대신 비워 버리지 않는다
-            view = PriceView(prices, cutoff, turnover, levels) if cutoff else PriceView({}, d)
+            든것 = frozenset(sid for sid, w in drifted.items() if w > 0)
+            view = (
+                PriceView(prices, cutoff, turnover, levels, holding=든것) if cutoff else PriceView({}, d, holding=든것)
+            )
             proposed = weights_at(d, view)
 
             # **들고 있는데 오늘 체결가가 없고 뒤에 다시 거래되는 종목은 거래정지다 — 팔 수 없다** (infra 25.471).
