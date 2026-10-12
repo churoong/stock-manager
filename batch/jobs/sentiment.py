@@ -79,6 +79,21 @@ FINANCE_LEXICON: dict[str, float] = {
     **dict.fromkeys(("climb", "climbs", "climbed"), 1.3),
     **dict.fromkeys(("upgrade", "upgrades", "upgraded"), 2.0),
     **dict.fromkeys(("beat", "beats"), 1.5),
+    # 판 3 (25.1184, 뉴스 감사 #4) — 일반 사전에 없어 **0 으로 채점되던 악재 낱말**.
+    # "Acme files for bankruptcy"·"Acme recalls 1 million cars"·"SEC opens probe into Acme" 가 모두 0.0 이었다
+    # (bankrupt −2.6 은 있는데 bankruptcy 는 없다).
+    # 값은 이웃 말(fraud −2.8, lawsuit −0.9, penalty −2.0)에 맞춘 추정 [확인필요]
+    "bankruptcy": -2.6, "insolvency": -2.4, "insolvent": -2.4,
+    **dict.fromkeys(("recall", "recalls", "recalled"), -1.5),
+    **dict.fromkeys(("probe", "probes", "probed"), -1.5),
+    "investigation": -1.2, "investigations": -1.2, "subpoena": -1.5, "subpoenaed": -1.5,
+    **dict.fromkeys(("layoff", "layoffs"), -1.8),
+    **dict.fromkeys(("sue", "sues", "sued"), -1.0),
+    **dict.fromkeys(("fined", "fines"), -1.5),
+    **dict.fromkeys(("delist", "delists", "delisted", "delisting"), -2.0),
+    **dict.fromkeys(("shortfall", "shortfalls"), -1.5),
+    **dict.fromkeys(("underperform", "underperforms"), -1.2),
+    **dict.fromkeys(("outperform", "outperforms"), 1.2),
 }
 
 
@@ -107,7 +122,7 @@ UNSCORED_SQL = (
 )
 
 #: 보정 사전의 판. 사전을 바꾸면 올린다 — 판이 다른 미국 기사는 다시 채점된다 (25.545)
-FINANCE_LEXICON_VERSION = 2
+FINANCE_LEXICON_VERSION = 3
 
 
 def vader_method_version() -> str:

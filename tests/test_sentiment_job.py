@@ -275,6 +275,20 @@ def test_금융_제목_보정_사전으로_급락_제목은_음수다() -> None:
     assert 채점("Apple shares rebound after selloff")[0] > 채점("Apple shares selloff")[0]
 
 
+def test_판3_일반_사전에_없던_악재_낱말은_음수다() -> None:
+    """bankruptcy·recall·probe·layoffs 가 일반 사전에 없어 "Acme files for bankruptcy" 가 0.0 이었다 (docs/infra.md 25.1184, 뉴스 감사 #4)."""
+    pytest.importorskip("vaderSentiment")
+    from batch.jobs import sentiment as job
+
+    채점 = job.vader_scorer()
+    for 제목 in ("Acme files for bankruptcy", "Acme recalls 1 million cars", "SEC opens probe into Acme",
+                 "Acme announces layoffs", "Acme sued by shareholders", "Acme fined $5 million",
+                 "Acme faces delisting", "Acme reports revenue shortfall", "Acme under investigation"):  # fmt: skip
+        assert 채점(제목)[0] <= -0.05, 제목
+    assert 채점("Acme to outperform, analyst says")[0] >= 0.05
+    assert job.FINANCE_LEXICON_VERSION >= 3  # 사전을 바꾸면 판을 올려야 옛 판 기사가 다시 채점된다
+
+
 def test_미채점_창_시작은_UTC_로_비교한다(monkeypatch: pytest.MonkeyPatch) -> None:
     """창 시작을 현지(+09:00) 문자열로 넘기면 UTC 로 저장된 기사와 글자 비교가 어긋나, 창 첫날 9시간 안의
     미채점 기사를 세지 않는다 (25.838 의 `.astimezone(UTC)`, 25.850 에서 지키는 검사를 더함)."""
