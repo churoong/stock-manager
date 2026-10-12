@@ -61,6 +61,12 @@ def _reason(country: str, bucket: str, account: str, taxes: dict | None) -> str:
             f"국내 상장 {bucket} ETF 는 일반계좌에서 매매차익·분배금 모두 배당소득세"
             f"(설정 세율 {_rate(taxes, 'kr_dividend_pct')}) — 연금 계좌가 낫습니다"
         )
+    # 해외 주식(1순위)과 채권(2순위)이 같은 문장으로 "가장 크다" 를 말해 2순위 카드가 1순위로 읽혔다 (25.1239)
+    if bucket == "채권":
+        return (
+            "국내 상장 채권 ETF 는 일반계좌라면 이자·매매차익이 과세"
+            " — 연금 계좌의 과세이연 이득이 해외 주식 다음으로 큽니다"
+        )
     return f"국내 상장 {bucket} ETF 는 일반계좌라면 매매차익까지 과세 — 연금 계좌의 과세이연 이득이 가장 큽니다"
 
 

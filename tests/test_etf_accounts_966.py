@@ -53,3 +53,13 @@ def test_근거의_세율은_범위를_거친다() -> None:
     assert "설정 세율 범위 밖" in ea._reason("KR", "해외 주식", "taxable", {"kr_dividend_pct": 60})
     assert "설정 세율 범위 밖" in ea._reason("US", "미국 주식", "taxable", {"us_capital_gains_pct": True})
     assert "설정 세율 미입력" in ea._reason("US", "미국 주식", "taxable", {})
+
+
+def test_연금_2순위_채권은_가장_크다고_하지_않는다() -> None:
+    """해외 주식(1순위)과 채권(2순위)이 같은 "가장 큽니다" 를 말했다 (docs/infra.md 25.1239, ETF 감사)."""
+    from batch.services import etf_accounts as ea
+
+    채권 = ea.accounts_for("KR", "채권", satellite=False)["pension"]
+    해외 = ea.accounts_for("KR", "해외 주식", satellite=False)["pension"]
+    assert 채권["priority"] == 2 and "가장" not in 채권["reason"] and "해외 주식 다음" in 채권["reason"]
+    assert 해외["priority"] == 1 and "가장 큽니다" in 해외["reason"]
