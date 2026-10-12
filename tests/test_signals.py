@@ -995,3 +995,13 @@ def test_밴드_계산_상한_밖이면_판정표가_그_까닭을_말한다() -
     assert len(밴드행) == 1 and "밴드 계산 대상 밖" in 밴드행[0]["display"] and 밴드행[0]["passed"] is False
     없음 = [r for r in sg.judgement("long", long_input(band=None, pbr_now=None), {}) if r["label"] == "밸류에이션 밴드"]
     assert "PBR 없음" in 없음[0]["display"]
+
+
+def test_판정표_PBR_과_1달러_미만_가격은_구별되는_자릿수로_적는다() -> None:
+    """PBR 1.004 vs 분위 1.001 이 "1.00배 vs 1.00배 / ≤ / 탈락", 저장 분할 0.9674 가 "0.97" 로 찍혔다 (25.1173)."""
+    band = sg.Band(p20=0.8, p30=1.001, p50=1.2, p80=1.6, sample=750)
+    [행] = [r for r in sg.judgement("long", long_input(pbr_now=1.004, band=band), {}) if r["label"] == "밸류에이션 밴드 하단"]
+    assert "1.004배" in 행["display"] and "1.001배" in 행["display"]
+    미국 = long_input(currency="USD", market="NASDAQ")
+    assert sg._가격(0.9674, 미국) == "0.9674" and sg._가격(12.345, 미국) == "12.35"
+    assert sg._가격(70_000, long_input()) == "70,000"

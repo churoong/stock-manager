@@ -838,9 +838,11 @@ def judgement(horizon: str, inp: SignalInput, data: dict) -> list[dict]:
             ))
         else:
             문턱 = inp.band.at(BAND_ENTRY_PERCENTILE)
+            # 반올림해 같아 보이면 자릿수를 늘린다 (25.630 의 규칙을 PBR 에도, 25.1173)
+            d = _문턱_자릿수(inp.pbr_now, 문턱, 2)
             rows.append(_check(
                 "밸류에이션 밴드 하단", inp.pbr_now, inp.pbr_now <= 문턱,
-                f"PBR {inp.pbr_now:.2f}배 vs {BAND_YEARS}년 {BAND_ENTRY_PERCENTILE}% 분위 {문턱:.2f}배",
+                f"PBR {inp.pbr_now:.{d}f}배 vs {BAND_YEARS}년 {BAND_ENTRY_PERCENTILE}% 분위 {문턱:.{d}f}배",
                 f"PBR ≤ 밴드 {BAND_ENTRY_PERCENTILE}% 분위", SOURCE_DERIVED, inp.price_date,
             ))
             # **손절 분위 아래면 매수 구간이 뒤집혀 신호를 버린다** (`buy_zone`). 판정표에 그 행이 없어 "전부 통과" 인데
@@ -849,9 +851,10 @@ def judgement(horizon: str, inp: SignalInput, data: dict) -> list[dict]:
             # 통과 여부는 **구간 계산 그 자체**로 본다 (25.531, 교차검증) — `pbr ≥ 바닥` 으로 따로 비교하면
             # 경계(같은 값)에서 부동소수점 때문에 표는 통과인데 구간은 뒤집혀 신호가 없었다
             구간_됨 = buy_zone("long", inp, data) is not None
+            d = _문턱_자릿수(inp.pbr_now, 바닥, 2)
             rows.append(_check(
                 "손절 분위 위", inp.pbr_now, 구간_됨,
-                f"PBR {inp.pbr_now:.2f}배 vs {BAND_YEARS}년 {BAND_STOP_PERCENTILE}% 분위 {바닥:.2f}배"
+                f"PBR {inp.pbr_now:.{d}f}배 vs {BAND_YEARS}년 {BAND_STOP_PERCENTILE}% 분위 {바닥:.{d}f}배"
                 + ("" if 구간_됨 else " — 이미 손절선 아래라 매수 구간을 만들 수 없다"),
                 f"PBR ≥ 밴드 {BAND_STOP_PERCENTILE}% 분위", SOURCE_DERIVED, inp.price_date,
             ))
@@ -957,8 +960,9 @@ def criteria(horizon: str, inp: SignalInput, data: dict) -> list[dict]:
         if inp.pbr_now is not None and inp.band is not None:
             rows.append(_criterion(
                 "밸류에이션 밴드 하단",
-                f"PBR {inp.pbr_now:.2f}배 ({BAND_YEARS}년 {BAND_ENTRY_PERCENTILE}% 분위 "
-                f"{inp.band.at(BAND_ENTRY_PERCENTILE):.2f}배, 표본 {data.get('band_sample', 0)}일)",
+                f"PBR {inp.pbr_now:.{(d := _문턱_자릿수(inp.pbr_now, inp.band.at(BAND_ENTRY_PERCENTILE), 2))}f}배"
+                f" ({BAND_YEARS}년 {BAND_ENTRY_PERCENTILE}% 분위 "
+                f"{inp.band.at(BAND_ENTRY_PERCENTILE):.{d}f}배, 표본 {data.get('band_sample', 0)}일)",
                 f"≤ 밴드 {BAND_ENTRY_PERCENTILE}% 분위", SOURCE_DERIVED, inp.price_date,
             ))
         if data.get("quality") is not None:
@@ -1098,7 +1102,7 @@ def plan_criteria(
     base = (low + high) / 2
     # **통화를 붙인다** (docs/infra.md 25.385). 예전에는 "82,500.00" 처럼 단위 없이 소수 둘째 자리까지 적었다 —
     # 국내 가격에 소수가 붙고, 미국인지 국내인지 근거표만 봐서는 알 수 없었다
-    가격 = (lambda v: f"{v:,.0f}원") if inp.currency == "KRW" else (lambda v: f"{v:,.2f} {inp.currency}")
+    가격 = (lambda v: f"{v:,.0f}원") if inp.currency == "KRW" else (lambda v: f"{_가격(v, inp)} {inp.currency}")
     # **매수 구간·분할 가격의 식과 재료** (docs/infra.md 25.562, 감사 재현). 카드의 돈에 닿는 숫자인데 근거표에 종가도
     # "현재가 × 0.95" 도, 장기의 밴드 20% 분위도 없었다 — 중기 근거표에는 가격 행이 한 줄도 없었다
     종가 = inp.close or 0.0
@@ -1116,10 +1120,12 @@ def plan_criteria(
     else:
         기준가 = inp.band_close if inp.band_close and inp.band_close > 0 else 종가
         if inp.band is not None and inp.pbr_now:
-            식 = (f"주당순자산 = 원 종가(분할만 반영) {가격(기준가)} ÷ PBR {inp.pbr_now:.2f}배"
+            # 유효숫자 4자리 (25.1173, 감사 재현) — 2자리로 적으면 PBR 0.3대 종목은 표의 숫자로 다시 계산한 하단이
+            # 저장값과 3% 넘게 달라 이 검증 행(25.562)이 제 역할을 못 했다
+            식 = (f"주당순자산 = 원 종가(분할만 반영) {가격(기준가)} ÷ PBR {inp.pbr_now:.4g}배"
                  f" → 하단 × {BAND_STOP_PERCENTILE}% 분위"
-                 f" {inp.band.at(BAND_STOP_PERCENTILE):.2f}배 · 상단 min(종가, × {BAND_ENTRY_PERCENTILE}% 분위"
-                 f" {inp.band.at(BAND_ENTRY_PERCENTILE):.2f}배)")
+                 f" {inp.band.at(BAND_STOP_PERCENTILE):.4g}배 · 상단 min(종가, × {BAND_ENTRY_PERCENTILE}% 분위"
+                 f" {inp.band.at(BAND_ENTRY_PERCENTILE):.4g}배)")
         else:
             식 = "밸류에이션 밴드 기준"
         # **실제 재료를 적는다** (docs/infra.md 25.620, 감사). 신호의 밴드는 매일 직접 만들고 `valuation_bands` 표
@@ -1239,7 +1245,10 @@ def _가격(value: float | None, inp: SignalInput) -> str | None:
     근거표의 정배열·추세 위 행이 달러도 정수로 적어, 근거 문장은 "20일선 9.75달러" 인데 같은 카드의 표는
     "20일선 10달러 > 60일선 10달러" 였다 — 25.600 은 문장만 고쳤다. 문장과 표가 이 한 함수를 쓴다.
     """
-    return _fmt_num(value, 0 if inp.currency == "KRW" else 2)
+    # 1 단위 미만 해외 가격은 호가 단위(0.0001, 25.657)대로 넷째 자리 (25.1173) — 저장된 분할 0.9674 가 "0.97" 로 찍혔다
+    if inp.currency == "KRW":
+        return _fmt_num(value, 0)
+    return _fmt_num(value, 4 if value is not None and abs(value) < 1 else 2)
 
 
 def rationale(horizon: str, inp: SignalInput, data: dict) -> str:
