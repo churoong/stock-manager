@@ -2147,10 +2147,7 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
                     _notify_failure(client, market, name, f"방금 보낸 리포트를 저장하지 못했습니다{_웹에_없음()}",
                                     dry_run=dry_run, title="리포트 저장 실패")
             if report_id is not None:
-                try:
-                    reports.mark_sent(client, report_id, message_ids)
-                except Exception as exc:  # noqa: BLE001
-                    log.warning("발송 시각을 적지 못했습니다: %s", exc)
+                _발송시각_적기(client, report_id, message_ids, warnings)
         except telegram.TelegramPartialError as exc:
             # **앞 조각은 이미 갔다** (docs/infra.md 25.414). 실패로 닫으면 다음 예약이 전체를 다시 보내 앞 조각이
             # 두 번 간다. 보낸 것으로 적고, 뒷부분이 빠졌다고 경고·알림으로 말한다 — 전체는 웹 리포트에 있다
@@ -2159,10 +2156,7 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
             if 보낸_것_있음:
                 report_id = _저장()  # 새 본문 앞부분이 갔다 — 새 것으로 덮는다
             if report_id is not None:
-                try:
-                    reports.mark_sent(client, report_id, exc.sent_ids)
-                except Exception as mark_exc:  # noqa: BLE001
-                    log.warning("발송 시각을 적지 못했습니다: %s", mark_exc)
+                _발송시각_적기(client, report_id, exc.sent_ids, warnings)
             # 저장이 막혔으면(`report_id` 없음) "웹에서 보세요" 가 거짓이다 (25.672·25.674, 교차검증)
             어디서 = _웹에_없음() or " — 나머지는 웹의 오늘 리포트에서 보세요"
             warnings.append(f"텔레그램 리포트 {exc.total}조각 가운데 {len(exc.sent_ids)}조각만 보냈습니다{어디서}")
@@ -2194,10 +2188,7 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
                     "이번 재실행 본문은 확실히 간 조각이 없어 웹에 저장하지 않았습니다 — 웹은 먼저 보낸 리포트입니다"
                 )
             if report_id is not None and 확실히_간:
-                try:
-                    reports.mark_sent(client, report_id, 확실히_간)
-                except Exception as mark_exc:  # noqa: BLE001
-                    log.warning("발송 시각을 적지 못했습니다: %s", mark_exc)
+                _발송시각_적기(client, report_id, 확실히_간, warnings)
             # **뒤 조각이 실패했거나 모르면 "일부만 보냈다" 표지를 붙인다** (docs/infra.md 25.600, 감사). 확실히 간
             # 조각이 있으면 발송 시각을
             # 적는데 이 경로엔 `PARTIAL_SEND_MARK` 가 없어, 매도 플래그가 든 끝 조각이 확실히 안 갔는데도 다음
@@ -2269,6 +2260,38 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
 
     finally:
         client.close()
+
+
+#: 발송 시각을 끝내 못 적었을 때 실행 기록에 남기는 경고 (docs/infra.md 25.1219)
+SENT_AT_LOST = (
+    "리포트는 보냈지만 발송 시각을 적지 못했습니다 — 웹에는 '못 보냄' 으로 보이고"
+    " 다음 리포트의 매도 플래그 NEW 가 다시 붙을 수 있습니다"
+)
+
+
+def _발송시각_적기(client: TursoClient, report_id: int, message_ids: Any, warnings: list[str]) -> None:
+    """보낸 리포트의 `sent_at` 을 적는다 — 실패하면 **새 연결로 한 번 더**, 그래도 안 되면 경고 (25.1219, 감사).
+
+    예전에는 로그 한 줄로 삼켜 실행이 `success` 로 끝났다. `sent_at` 이 비면 웹은 "만들었지만 못 보냄" 을 보이고,
+    다음 리포트는 더 옛 발송을 기준으로 매도 플래그 NEW 를 다시 붙이며, 추천 이력·자기 채점이 그날을 빼먹었다
+    """
+    from batch.core.client import TursoClient as _Client
+
+    try:
+        reports.mark_sent(client, report_id, message_ids)
+        return
+    except Exception as exc:  # noqa: BLE001 — 리포트는 이미 갔다
+        log.warning("발송 시각을 적지 못했습니다 — 새 연결로 한 번 더: %s", exc)
+    try:
+        새것 = _Client()
+        try:
+            reports.mark_sent(새것, report_id, message_ids)
+            return
+        finally:
+            새것.close()
+    except Exception as exc:  # noqa: BLE001
+        log.warning("새 연결로도 발송 시각을 적지 못했습니다: %s", exc)
+    warnings.append(SENT_AT_LOST)
 
 
 def _새연결로_닫기(run_id: int, status: str, step_log: dict) -> bool:
