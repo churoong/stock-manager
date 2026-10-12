@@ -107,14 +107,49 @@ def recent_action(client: TursoClient, stock_id: int, market: str) -> bool:
 
         return str(감지) >= (datetime.now(UTC) - timedelta(days=ACTION_GUARD_ROWS * 7 // 5)).isoformat()
     rows = client.execute(
-        "SELECT close, change_pct FROM prices WHERE stock_id = ? AND close IS NOT NULL AND close > 0"
+        "SELECT close, change_pct, date FROM prices WHERE stock_id = ? AND close IS NOT NULL AND close > 0"
         " ORDER BY date DESC LIMIT ?",
         [stock_id, ACTION_GUARD_ROWS + 1],
     ).rows
-    for (close, pct), (prev, _p) in zip(rows, rows[1:], strict=False):
-        if adj.is_action(adj.factor_of(float(prev), float(close), None if pct is None else float(pct))):
-            return True
-    return False
+    날들 = [
+        str(day)[:10]
+        for (close, pct, day), (prev, _p, _d) in zip(rows, rows[1:], strict=False)
+        if adj.is_action(adj.factor_of(float(prev), float(close), None if pct is None else float(pct)))
+    ]
+    if not 날들:
+        return False
+    # **유상증자 권리락으로 확인되면 막지 않는다** (docs/factors.md 12.20, docs/infra.md 25.1139 — 18회차 검증 B).
+    # 계수만으로는 유상증자 권리락과 작은 무상증자를 가르지 못해, 유상증자 뒤 20거래일 동안 보유 종목의 목표·손절
+    # 감시가 꺼지고 매도 플래그에 "수량 확인" 이 붙었다. 권리락이면 수량·평균단가가 그대로라 손절선이 맞다 —
+    # 증자 뒤 하락 구간에 손절이 꺼졌다
+    return not all(_유상_권리락(client, stock_id, 날) for 날 in 날들)
+
+
+def rights_only(events: list[tuple[str, str]], action_day: str, next_day: str) -> bool:
+    """계수가 잡힌 날이 **유상증자 권리락뿐**인가 — 예탁원 일정(`kr_corp_events`)으로 (25.1139, 18회차 검증 조건).
+
+    권리락일 = 기준일 전 1거래일 → 기준일 = 계수가 잡힌 날의 **다음 거래일**(새 숫자 없이 달력으로).
+    그 기준일에 `rights` 가 있고, 계수가 잡힌 날부터 그 기준일 사이에 **다른 종류**(무상·주식배당이 섞일 수 있는
+    배당·액면교체·합병·분할)가 하나도 없을 때만 참.
+    일정이 없으면(10-07 전, 잘린 날의 비보유 종목) "모름" 이라 거짓 — 예전처럼 막는다.
+    """
+    유상 = any(kind == "rights" and day == next_day for kind, day in events)
+    다른 = any(kind != "rights" and action_day <= day <= next_day for kind, day in events)
+    return 유상 and not 다른
+
+
+def _유상_권리락(client: TursoClient, stock_id: int, action_day: str) -> bool:
+    """그 종목·그날의 계수가 유상증자 권리락인가. 못 읽으면 거짓(막는다)."""
+    try:
+        다음 = cal.next_session("KR", date.fromisoformat(action_day)).isoformat()
+        rows = client.execute(
+            "SELECT e.kind, e.record_date FROM kr_corp_events e JOIN stocks s ON s.ticker = e.code"
+            " WHERE s.id = ? AND e.record_date >= ? AND e.record_date <= ?",
+            [stock_id, action_day, 다음],
+        ).rows
+    except Exception:  # noqa: BLE001 — 표가 없거나(KIS 키 없음) 달력 밖이면 모른다 → 예전처럼 막는다
+        return False
+    return rights_only([(str(k), str(d)[:10]) for k, d in rows], action_day, 다음)
 
 
 def expected_signal_date(market: str, now: datetime | None = None) -> str:

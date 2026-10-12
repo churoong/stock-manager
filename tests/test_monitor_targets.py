@@ -691,3 +691,46 @@ def test_신호가_매일_다시_써져도_1차를_산_날의_계획을_잇는�
     )
     # 9/11 신호(1차 98 → 2차 93)를 9/15 에도 잇는다 — 9/14 신호로 밀리지 않는다
     assert job.next_tranche(mem, 1, date(2026, 9, 15)) == (93.0, 2, "2026-09-11")  # type: ignore[arg-type]
+
+
+class Test유상증자_권리락은_막지_않는다_25_1139:
+    """유상증자 권리락 뒤 20거래일 동안 보유 손절 감시가 꺼졌다 — 수량·평균단가가 그대로라 손절선은 맞다
+    (docs/factors.md 12.20, docs/infra.md 25.1139, 18회차 검증 B)."""
+
+    @staticmethod
+    def _준비(일정: list[tuple[str, str]]) -> MemClient:
+        from batch.core import db
+
+        mem = MemClient()
+        db.apply_migrations(mem)  # type: ignore[arg-type]
+        c = mem.conn
+        c.execute(
+            "INSERT INTO stocks (id, ticker, market, country, name_ko, currency, status, source, fetched_at)"
+            " VALUES (1, '005930', 'KOSPI', 'KR', '가', 'KRW', 'active', 't', 't')"
+        )
+        # 2026-09-15(화) 권리락 — 거래소 등락률 0% 인데 종가 −10% (계수 0.9)
+        for day, close, pct in (("2026-09-14", 100_000, 0.0), ("2026-09-15", 90_000, 0.0)):
+            c.execute(
+                "INSERT INTO prices (stock_id, date, close, change_pct, currency, source, fetched_at)"
+                " VALUES (1, ?, ?, ?, 'KRW', 't', 't')",
+                [day, close, pct],
+            )
+        for kind, day in 일정:
+            c.execute(
+                "INSERT INTO kr_corp_events (code, kind, record_date, source, fetched_at) VALUES ('005930', ?, ?, 'kis', 't')",
+                [kind, day],
+            )
+        return mem
+
+    def test_기준일이_다음_거래일인_유상증자뿐이면_막지_않는다(self) -> None:
+        assert job.recent_action(self._준비([("rights", "2026-09-16")]), 1, "KR") is False  # type: ignore[arg-type]
+
+    def test_일정이_없거나_다른_종류가_섞이면_예전처럼_막는다(self) -> None:
+        assert job.recent_action(self._준비([]), 1, "KR") is True  # type: ignore[arg-type]
+        assert job.recent_action(self._준비([("rights", "2026-09-16"), ("bonus", "2026-09-16")]), 1, "KR") is True  # type: ignore[arg-type]
+        assert job.recent_action(self._준비([("rights", "2026-09-17")]), 1, "KR") is True  # type: ignore[arg-type]  # 기준일이 다르다
+
+    def test_판정은_새_숫자_없이_달력으로(self) -> None:
+        assert job.rights_only([("rights", "2026-09-16")], "2026-09-15", "2026-09-16")
+        assert not job.rights_only([("rights", "2026-09-16"), ("dividend", "2026-09-15")], "2026-09-15", "2026-09-16")
+        assert not job.rights_only([("split", "2026-09-16")], "2026-09-15", "2026-09-16")
