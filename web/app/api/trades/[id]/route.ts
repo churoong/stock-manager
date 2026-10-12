@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { execute, rowsToObjects } from "@/lib/db";
-import { TRADES_FOR_HELD, deleteShortfallWarnings, requestRecalc, tradeEditErrors, tradeEditSchema } from "@/lib/portfolio";
+import { TRADES_FOR_HELD, deleteShortfallWarnings, requestRecalc, tradeEditChangesMoney, tradeEditErrors, tradeEditSchema } from "@/lib/portfolio";
 
 /**
  * 매매 기록 한 건: 근거 스냅샷 보기(GET), 지우기(DELETE).
@@ -107,11 +107,16 @@ export async function PATCH(request: Request, { params }: Params) {
     const errors = tradeEditErrors(row, parsed.data);
     if (errors.length) return NextResponse.json({ errors }, { status: 400 });
     const 새 = { ...row, ...parsed.data };
-    await execute("UPDATE trades SET memo = ?, fee = ?, tax = ?, updated_at = ? WHERE id = ?", [
-      새.memo ?? null, 새.fee ?? null, 새.tax ?? null, new Date().toISOString(), id,
-    ]);
-    // 수수료·세금은 원가·실현손익을 바꾼다 — 메모만이면 다시 계산하지 않는다(Actions 분을 아낀다)
-    const 계산 = parsed.data.fee !== undefined || parsed.data.tax !== undefined;
+    // 수수료·세금이 **실제로** 바뀌었을 때만 지문(`updated_at`)을 넘기고 다시 계산한다 (25.1161) — 파생 표는 메모를 쓰지 않는다.
+    // 메모만이면 `updated_at` 을 그대로 두어 "계산 중" 이 뜨지 않게 한다(Actions 분도 아낀다)
+    const 계산 = tradeEditChangesMoney(row, parsed.data);
+    if (계산) {
+      await execute("UPDATE trades SET memo = ?, fee = ?, tax = ?, updated_at = ? WHERE id = ?", [
+        새.memo ?? null, 새.fee ?? null, 새.tax ?? null, new Date().toISOString(), id,
+      ]);
+    } else {
+      await execute("UPDATE trades SET memo = ? WHERE id = ?", [새.memo ?? null, id]);
+    }
     const recalc = 계산 ? await requestRecalc() : null;
     return NextResponse.json({ ok: true, recalc });
   } catch (error) {

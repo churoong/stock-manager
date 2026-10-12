@@ -102,6 +102,19 @@ export const tradeEditSchema = z.object({
   tax: 비용().nullable().optional(),
 }).strict();
 
+/**
+ * 고치기가 **돈 칸(수수료·세금)을 실제로 바꾸나** (docs/infra.md 25.1161, 감사 재현). 화면은 늘 `fee` 를 보내(비면 null)
+ * "메모만이면 다시 계산하지 않는다"(25.1116)가 한 번도 작동하지 않았고, API 로 메모만 고치면 `updated_at` 만 바뀌어 지문이
+ * 달라져 다음 일일 배치까지 "계산 중"·거짓 멈춤 띠가 떴다. 값으로 견준다 — 비움(null)과 안 보냄(undefined)은 같지 않다
+ */
+export function tradeEditChangesMoney(
+  row: { fee: number | null; tax: number | null },
+  data: { fee?: number | null; tax?: number | null; memo?: string | null },
+): boolean {
+  const 다름 = (보냄: number | null | undefined, 있던: number | null) => 보냄 !== undefined && (보냄 ?? null) !== (있던 ?? null);
+  return 다름(data.fee, row.fee) || 다름(data.tax, row.tax);
+}
+
 /** 기존 매매에 고친 칸을 덧씌워 **넣을 때와 같은 규칙**으로 다시 본다. 오류 문장 목록(없으면 빈 목록) */
 export function tradeEditErrors(
   row: { stock_id: number; side: string; trade_date: string; price: number; quantity: number; fee: number | null; tax: number | null; memo: string | null },

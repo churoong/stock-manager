@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { tradeEditErrors, tradeEditSchema } from "@/lib/portfolio";
+import { tradeEditChangesMoney, tradeEditErrors, tradeEditSchema } from "@/lib/portfolio";
 
 /**
  * **메모·수수료·세금은 제자리에서 고친다** (docs/infra.md 25.1116, 웹 매매 감사 재현).
@@ -32,5 +32,25 @@ describe("고칠 수 있는 칸과 규칙", () => {
     expect(경로).toContain("UPDATE trades SET memo = ?, fee = ?, tax = ?, updated_at = ? WHERE id = ?");
     const 화면 = readFileSync(join(process.cwd(), "components", "PortfolioView.tsx"), "utf-8");
     expect(화면).toContain('method: "PATCH"');
+  });
+});
+
+describe("돈 칸이 실제로 바뀔 때만 다시 계산 (25.1161)", () => {
+  it("화면처럼 같은 fee 를 늘 보내도 메모만 바뀌었으면 거짓", () => {
+    expect(tradeEditChangesMoney(매수, { memo: "x", fee: 100 })).toBe(false);
+    expect(tradeEditChangesMoney(매수, { memo: "x", fee: 100, tax: null })).toBe(false);
+    expect(tradeEditChangesMoney(매수, { memo: "x" })).toBe(false);
+  });
+
+  it("수수료·세금이 달라지거나 비우면 참", () => {
+    expect(tradeEditChangesMoney(매수, { fee: 150 })).toBe(true);
+    expect(tradeEditChangesMoney(매수, { fee: null })).toBe(true);
+    expect(tradeEditChangesMoney(매도, { tax: 10 })).toBe(true);
+  });
+
+  it("메모만이면 updated_at 을 건드리지 않는다", () => {
+    const 경로 = readFileSync(join(process.cwd(), "app", "api", "trades", "[id]", "route.ts"), "utf-8");
+    expect(경로).toContain('"UPDATE trades SET memo = ? WHERE id = ?"');
+    expect(경로).toContain("tradeEditChangesMoney(row, parsed.data)");
   });
 });
