@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   DISCLOSURE_LOOKBACK_SESSIONS,
   disclosureBoundary,
+  disclosureHit,
+  disclosureSeen,
   freshDisclosures,
 } from "@/lib/intraday";
 
@@ -61,5 +64,33 @@ describe("하루짜리 DART 점검이 장 마감 뒤 공시를 삼키지 않는�
       disclosureBoundary(알림들).get(1) ?? null,
     ).map((d) => d.report_nm);
     expect(남은).toEqual(["수요일 장 마감 뒤"]);
+  });
+});
+
+
+describe("일련번호는 접수 순서가 아니다 (docs/infra.md 25.1198, 장중 감사)", () => {
+  it("아침 거래소 공시(80…)를 알린 뒤 같은 날 금감원 제출(00…)도 다음 날 새 공시로 남는다", () => {
+    const 아침 = { report_nm: "공정공시", rcept_no: "20261012800120" };
+    const 알림 = disclosureHit({ stock_id: 1, name: "가" }, { list: [아침], total_count: 1 });
+    expect(알림?.data.rcept_nos).toEqual(["20261012800120"]);
+    const 창 = [{ stock_id: 1, data: JSON.stringify(알림?.data) }];
+    const 오후 = { report_nm: "주요사항보고서(유상증자결정)", rcept_no: "20261012000950" };
+    const 남은 = freshDisclosures([아침, 오후], "20261013", disclosureBoundary(창).get(1) ?? null, disclosureSeen(창).get(1) ?? null);
+    expect(남은.map((d) => d.report_nm)).toEqual(["주요사항보고서(유상증자결정)"]);
+    // 예전(번호 크기)이면 000950 < 800120 이라 버려졌다
+    expect(freshDisclosures([아침, 오후], "20261013", "20261012800120")).toEqual([]);
+  });
+
+  it("이 판 전 알림(집합 없음)이 섞이면 예전 번호 비교로 물러난다", () => {
+    const 창 = [
+      { stock_id: 1, data: JSON.stringify({ rcept_no: "20261012000300" }) },
+      { stock_id: 1, data: JSON.stringify({ rcept_no: "20261012000400", rcept_nos: ["20261012000400"] }) },
+    ];
+    expect(disclosureSeen(창).get(1)).toBeNull();
+  });
+
+  it("경로가 집합을 넘긴다", () => {
+    const src = readFileSync(join(__dirname, "..", "app", "api", "cron", "intraday", "route.ts"), "utf8");
+    expect(src).toContain("disclosureSeen(창알림)");
   });
 });

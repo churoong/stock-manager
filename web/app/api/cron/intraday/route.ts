@@ -21,6 +21,7 @@ import {
   DISCLOSURE_LOOKBACK_SESSIONS,
   KIS_DISAGREE_KEY,
   disclosureBoundary,
+  disclosureSeen,
   kisCalendarSuspect,
   ZONE_ALERTS_FOR,
   ACTION_GUARD_ROWS,
@@ -309,6 +310,8 @@ async function disclosures(
   since: string,
   /** 창 안에서 종목마다 마지막으로 알린 공시의 `rcept_no` — 이미 알린 것을 다시 알리지 않는다 (25.344·25.1075) */
   alertedBefore: Map<number, string>,
+  /** 그 알림들이 본 접수번호 집합 — 있으면 번호 크기 대신 이것으로 가른다 (25.1198) */
+  seenBefore: Map<number, Set<string> | null> = new Map(),
 ): Promise<{ hits: Hit[]; errors: string[] }> {
   const key = process.env.DART_API_KEY;
   // **키가 없으면 트리거 e 가 꺼진 것이다 — 조용히 넘어가지 않는다** (docs/infra.md 25.720, 감사). 배포 문서가 이 키를 Vercel 목록에
@@ -366,7 +369,7 @@ async function disclosures(
       }
       const 경계 = alertedBefore.get(t.stock_id) ?? null;
       const 받은 = body.list ?? [];
-      const 새것 = freshDisclosures(받은, ymd, 경계);
+      const 새것 = freshDisclosures(받은, ymd, 경계, seenBefore.get(t.stock_id) ?? null);
       // 건수 (25.636, 감사): 받은 쪽(page_count=10) 밖에 더 있고 전 거래일 경계가 있으면, 못 받은 쪽에
       // 이미 알린 것이 섞였는지 모른다 — `total_count` 를 그대로 쓰면 이미 알린 것까지 "외 N건" 에 들어갔다.
       // 그때는 받은 것 가운데 새것만 세고 "이상" 을 붙인다. 경계가 없으면 전부 새것이라 total_count 가 맞다
@@ -622,12 +625,12 @@ export async function GET(request: Request) {
         ]),
       );
       const 창시작 = 앞날들.length ? 앞날들[앞날들.length - 1].date : session.date;
-      const 전에_알림 = disclosureBoundary(
-        rowsToObjects<{ stock_id: number; data: string | null }>(
-          await execute(DISCLOSURE_ALERTS_BETWEEN, [JSON.stringify(보유ids), 창시작, session.date]),
-        ),
+      const 창알림 = rowsToObjects<{ stock_id: number; data: string | null }>(
+        await execute(DISCLOSURE_ALERTS_BETWEEN, [JSON.stringify(보유ids), 창시작, session.date]),
       );
-      const dart = await disclosures(targets, session.date, now, alerted, 창시작, 전에_알림);
+      const dart = await disclosures(
+        targets, session.date, now, alerted, 창시작, disclosureBoundary(창알림), disclosureSeen(창알림),
+      );
       // 이 유형 공시의 과거 반응 한 줄 (docs/disclosure_reaction.md, 25.996) — 표가 없거나(첫 금요일 전) 표본이 적으면 붙지 않는다
       if (dart.hits.length) {
         const 반응 = rowsToObjects<ReactionRow>(await execute(REACTION_ROWS).catch(ifMissingTable({ columns: [], rows: [] } as never)));

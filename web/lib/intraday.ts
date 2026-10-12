@@ -440,7 +440,11 @@ export function disclosureHit(
     trigger: "disclosure",
     message: `${stock.name}: 새 공시 "${first.report_nm.trim()}"${더}`,
     // 출처 — 시세 알림과 같이 (25.817, 교차검증)
-    data: { rcept_no: first.rcept_no, count, url: `https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${first.rcept_no}`, source: "dart_list" },
+    // `rcept_nos` — 이 알림이 본 접수번호 전부 (25.1198). 다음 거래일 "이미 알림" 은 이 집합으로 가른다(`disclosureSeen`)
+    data: {
+      rcept_no: first.rcept_no, rcept_nos: (body.list ?? []).map((d) => String(d.rcept_no)), count,
+      url: `https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${first.rcept_no}`, source: "dart_list",
+    },
   };
 }
 
@@ -511,12 +515,45 @@ export function freshDisclosures<T extends { rcept_no: string }>(
   list: T[],
   todayYmd: string,
   alertedRceptNo: string | null,
+  seen: Set<string> | null = null,
 ): T[] {
   return list.filter((d) => {
     const no = String(d.rcept_no ?? "");
     if (no.slice(0, 8) >= todayYmd) return true;
-    return alertedRceptNo === null || no > alertedRceptNo;
+    if (alertedRceptNo === null) return true;
+    // **알린 접수번호 집합이 있으면 그것으로 가른다** (docs/infra.md 25.1198, 장중 감사). 일련번호는 접수 순서가 아니다 —
+    // 거래소 경유 공시는 `80…`, 금감원 직접 제출은 `00…` 로 시작해, 아침 거래소 공시(…800120)를 알린 뒤 같은 날 오후
+    // 유상증자결정(…000950)이 "경계보다 작다" 로 **영영 알림이 안 나갔다.** 집합이 없는 옛 알림은 예전처럼 번호로
+    if (seen) return !seen.has(no);
+    return no > alertedRceptNo;
   });
+}
+
+/**
+ * 창 안 공시 알림이 본 접수번호 집합 (25.1198). 종목의 알림 가운데 하나라도 `rcept_nos` 가 없으면(이 판 전 알림) 그 종목은
+ * null — `freshDisclosures` 가 예전 번호 비교로 물러난다. 받은 쪽(page_count=10) 밖의 것은 집합에 없어 한 번 더 알릴 수 있다 —
+ * 두 번 알리는 편이 안 알리는 편보다 낫다(25.618 과 같은 판단)
+ */
+export function disclosureSeen(rows: Array<{ stock_id: number; data: string | null }>): Map<number, Set<string> | null> {
+  const out = new Map<number, Set<string> | null>();
+  for (const r of rows) {
+    const id = Number(r.stock_id);
+    let nos: unknown;
+    try {
+      nos = (JSON.parse(r.data ?? "{}") as { rcept_nos?: unknown }).rcept_nos;
+    } catch {
+      nos = undefined;
+    }
+    if (!Array.isArray(nos)) {
+      out.set(id, null);
+      continue;
+    }
+    if (out.has(id) && out.get(id) === null) continue;
+    const 집합 = out.get(id) ?? new Set<string>();
+    for (const n of nos) if (typeof n === "string") 집합.add(n);
+    out.set(id, 집합);
+  }
+  return out;
 }
 
 /** 종목 목록(JSON 배열)의 그날 공시 알림 — `alerts(stock_id, trigger_type, trade_date)` 유니크 색인을 탄다 (25.595) */
