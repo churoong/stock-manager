@@ -13,6 +13,7 @@ import {
   formatKst,
   groupByHorizon,
   isStale,
+  otherHorizonNote,
   outcomeLine,
   parseCriteria,
   performanceLine,
@@ -359,6 +360,7 @@ export default function RecommendList() {
                     isNew={added.has(signalKey(row))}
                     watched={watchIds.has(row.stock_id)}
                     onToggleWatch={() => void toggleWatch(row.stock_id)}
+                    otherNote={otherHorizonNote(rows, row)}
                   />
                 ))}
               </div>
@@ -429,8 +431,8 @@ function Summary({
  * 17건이 한 화면에 들어오는 것이 목표다.
  */
 function Card({
-  row, isNew = false, watched = false, onToggleWatch,
-}: { row: RecommendRow; isNew?: boolean; watched?: boolean; onToggleWatch?: () => void }) {
+  row, isNew = false, watched = false, onToggleWatch, otherNote = null,
+}: { row: RecommendRow; isNew?: boolean; watched?: boolean; onToggleWatch?: () => void; otherNote?: string | null }) {
   const [open, setOpen] = useState(false);
   const factors = parseFactors(row.factor_scores);
   const tranches = parseTranches(row.tranche_plan);
@@ -583,6 +585,7 @@ function Card({
             <span className="ml-1 text-slate-400">(보유·상관·섹터 상한 반영 전 — 리포트는 시장별 상위 {REPORT_TOP_STOCKS}종목만 싣고 2부에서 반영합니다)</span>
           </div>
 
+          {otherNote ? <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">{otherNote}</p> : null}
           {cut ? <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">{cut}</p> : null}
           {row.sector_cap_note ? (
             <p className="mt-1 text-xs text-slate-500">{row.sector_cap_note}</p>

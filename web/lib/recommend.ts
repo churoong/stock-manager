@@ -259,6 +259,18 @@ export function reductionNote(reduction: number, rationaleData: string | null = 
   return `${앞} 비중을 ${cut}% 줄였습니다`;
 }
 
+/**
+ * 같은 종목이 **다른 기간에도** 추천됐을 때 카드에 붙일 한 줄 (docs/infra.md 25.1162, 감사 재현). 기간별 권장 금액은
+ * 각자 종목 비중 상한까지 내므로(단기 1,000만·중기 1,000만 = 상한 10% 의 두 배) 따로 사면 상한을 넘는다. 리포트 2부는
+ * 가장 큰 한 건만 쓰지만(design.md 3.9) 화면 카드는 말이 없었다. 다른 기간이 없으면 null
+ */
+export function otherHorizonNote(rows: Pick<RecommendRow, "stock_id" | "horizon">[], row: Pick<RecommendRow, "stock_id" | "horizon">): string | null {
+  const 다른 = [...new Set(rows.filter((r) => r.stock_id === row.stock_id && r.horizon !== row.horizon).map((r) => r.horizon))];
+  if (!다른.length) return null;
+  const 이름 = 다른.map((h) => HORIZON_LABEL[h]?.split(" ")[0] ?? h).join("·");
+  return `같은 종목이 ${이름}에도 추천됐습니다 — 기간별 권장 금액을 더하지 마세요(종목 비중 상한은 합쳐서입니다. 리포트 2부는 가장 큰 한 건만 씁니다)`;
+}
+
 /** 기간별로 묶는다. 판단 근거가 다르므로 섞지 않는다. */
 export function groupByHorizon(rows: RecommendRow[]): Array<{
   horizon: string;
