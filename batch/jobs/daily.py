@@ -914,6 +914,7 @@ def refresh_recommendations(market: str, trade_date: str) -> list[str]:
 def _scores_and_signals(market: str, trade_date: str, warnings: list[str], scores, signals) -> list[str]:  # noqa: ANN001
     # **단계마다 제 실패를 말한다** (docs/infra.md 25.372). 예전에는 `if not warnings:` 로 "앞에 경고가 없을 때만"
     # 점수·신호 실패를 적어, 감성 경고가 먼저 있으면 **점수를 못 냈다는 사실이 리포트에서 빠졌다**
+    점수_시작 = db.now_iso()
     code, 예외 = _하위작업(lambda: scores.run(market, as_of=trade_date))
     if code != 0:
         warnings.append(_실패문("점수 계산", 예외) if 예외 else "점수 계산 실패 (scores 배치 기록 참고)")
@@ -929,7 +930,44 @@ def _scores_and_signals(market: str, trade_date: str, warnings: list[str], score
         건너뜀 = _건너뛴_까닭(signals.JOB_NAME, 시작)
         if 건너뜀:
             warnings.append(건너뜀)
+    warnings.extend(_계산_저하(scores.JOB_NAME, signals.JOB_NAME, 점수_시작))
     return warnings
+
+
+def _계산_저하(scores_job: str, signals_job: str, since: str) -> list[str]:
+    """점수·신호가 **성공(0)으로 끝났지만 덜 된 채** 계산한 것 — 실행 기록에만 있던 것을 리포트 경고로 (25.1220, 감사).
+
+    점수: 감성을 못 읽어 5팩터로 재정규화(`sentiment_read_error`), 배당·지수를 못 읽어 밸류·리스크가 바뀜
+    (`input_read_errors`), 범위 밖 가중치를 기본값으로(`setting_warnings`). 신호: 판정표를 못 씀(`checks_error`),
+    근거표가 없어 내보내지 않은 신호(`unverifiable`). 신호 설정 경고는 리포트가 `load_settings` 로 이미 싣는다.
+    예외 글은 싣지 않는다 — 건수만 적고 자세한 것은 실행 기록에 있다
+    """
+    나온것: list[str] = []
+    try:
+        with TursoClient() as client:
+            기록 = {}
+            for job in (scores_job, signals_job):
+                rs = client.execute(
+                    "SELECT step_log FROM batch_runs WHERE job_name = ? AND started_at >= ? ORDER BY id DESC LIMIT 1",
+                    [job, since],
+                ).rows
+                기록[job] = (json.loads(rs[0][0] or "{}") or {}) if rs else {}
+    except Exception as exc:  # noqa: BLE001 — 말 몇 줄 때문에 리포트를 막지 않는다. 못 읽었다는 것은 말한다
+        return [f"점수·신호 계산 기록을 읽지 못했습니다: {type(exc).__name__}"]
+    점, 신 = 기록[scores_job], 기록[signals_job]
+    if 점.get("sentiment_read_error"):
+        나온것.append("점수: 감성 점수를 읽지 못해 감성 없이(5팩터 재정규화) 계산했습니다 (scores 배치 기록 참고)")
+    if 점.get("input_read_errors"):
+        건수 = len(점["input_read_errors"])
+        나온것.append(f"점수: 배당·지수 등 재료 {건수}건을 읽지 못한 채 계산했습니다 (scores 배치 기록 참고)")
+    if 점.get("setting_warnings"):
+        나온것.append(f"점수: 범위 밖 가중치 설정 {len(점['setting_warnings'])}건을 기본값으로 계산했습니다")
+    if 신.get("checks_error"):
+        나온것.append("신호: 판정표를 적지 못했습니다 — 종목 상세의 통과·탈락 근거가 어제 것일 수 있습니다")
+    if 신.get("unverifiable"):
+        건수 = len(신["unverifiable"])
+        나온것.append(f"신호: 근거표를 만들지 못한 {건수}건을 내보내지 않았습니다 (signals 배치 기록 참고)")
+    return 나온것
 
 
 def _건너뛴_까닭(job_name: str, since: str) -> str | None:
@@ -1995,7 +2033,7 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
             if 추천_오류 is None else (0.0, None)
         )
         step_log["reserved_by_other_report"] = 예약
-        # 흔들기에 쓸 설정 가중치 — 점수 작업과 같은 `load_weights`. 경고는 점수 작업이 이미 리포트에 올렸으므로
+        # 흔들기에 쓸 설정 가중치 — 점수 작업과 같은 `load_weights`. 경고는 `_계산_저하` 가 리포트에 올리므로(25.1220)
         # 되풀이하지 않는다. 못 읽으면 흔들기 줄만 빠지고 리포트는 그대로 (25.947)
         흔들_가중치, 흔들_센티먼트 = _shake_weights(client) if signal_rows and 추천_오류 is None else (None, 0.0)
         # 건너뛴 추천 영수증 (docs/reports.md 3.3, 25.950) — 지난 리포트가 실제로 실은 종목·날·종가. 못 읽으면 줄만
