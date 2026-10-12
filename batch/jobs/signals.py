@@ -913,20 +913,27 @@ def _latest_equity(client: TursoClient, stock_id: int, as_of: str) -> float | No
     고르는 규칙도 밴드와 같게 맞춘다 — `known_equity_at` 은 알 수 있던 것 중 **가장 늦은 사업연도**,
     같은 연도면 늦게 접수된 것(정정)을 고른다 (25.549). 접수일만 보면 옛 연도의 정정이 최신 연도를 덮었다.
     """
+    # **가장 늦은 사업연도 행을 먼저 고르고**, 그 행의 자본이 없거나 종목 통화가 아니면 모름(None) (25.1172, 감사 재현).
+    # 예전엔 `total_equity IS NOT NULL`·통화 조건을 고르기 **안에** 걸어 그 행이 빠지면 옛 연도로 조용히 내려갔다 —
+    # FY2025 자본만 NULL 이면 FY2024 값으로, 연결을 USD 로 낸 국내 회사는 4년 전 값으로 현재 PBR 을 냈다
     rs = client.execute(
-        "SELECT total_equity FROM financials"
+        "SELECT total_equity,"
+        "   financials.currency = (SELECT st.currency FROM stocks st WHERE st.id = financials.stock_id) AS same_ccy"
+        " FROM financials"
         " WHERE stock_id = ? AND report_code = ? AND financials.consolidated ="
         " (SELECT fb.consolidated FROM financials fb"
         " WHERE fb.stock_id = financials.stock_id AND fb.report_code = financials.report_code"
         " AND fb.report_date <= ?"
         " ORDER BY fb.fiscal_year DESC, fb.consolidated DESC LIMIT 1)"
-        "   AND total_equity IS NOT NULL AND report_date <= ?"
-        # 시총과 나눌 자본은 **종목 통화로 낸 것만** (25.915) — USD 로 공시한 국내 회사의 PBR 이 1,400배 틀렸다
-        "   AND financials.currency = (SELECT st.currency FROM stocks st WHERE st.id = financials.stock_id)"
+        "   AND report_date <= ?"
         " ORDER BY fiscal_year DESC, report_date DESC LIMIT 1",
         [stock_id, ANNUAL_REPORT_CODE, as_of, as_of],  # 기준 고르기·본 질의 (25.856)
     )
-    return _opt_float(rs.scalar())
+    if not rs.rows:
+        return None
+    자본, 같은통화 = rs.rows[0]
+    # 시총과 나눌 자본은 **종목 통화로 낸 것만** (25.915) — USD 로 공시한 국내 회사의 PBR 이 1,400배 틀렸다
+    return _opt_float(자본) if 같은통화 else None
 
 
 def main() -> int:

@@ -438,3 +438,35 @@ def test_기준일_점수가_없으면_신호를_계산하지_않는다(monkeypa
     assert job.run("KR", "2026-09-16") == 0
     status = mem.conn.execute("SELECT status FROM batch_runs WHERE job_name = ?", [job.JOB_NAME]).fetchone()[0]
     assert status == "skipped"
+
+
+def test_현재_PBR_자본은_가장_늦은_사업연도가_없으면_모름이다() -> None:
+    """자본만 NULL 인 FY2025·USD 로 낸 연결이 빠지면 옛 연도로 조용히 내려갔다 (docs/infra.md 25.1172, 감사 재현)."""
+    from batch.core import db
+    from batch.jobs import signals as job
+    from tests.test_portfolio_job import MemClient
+
+    c = MemClient()
+    db.apply_migrations(c)  # type: ignore[arg-type]
+    for sid in (1, 2, 3):
+        c.conn.execute("INSERT INTO stocks (id, ticker, market, country, currency, status, source, fetched_at)"
+                       " VALUES (?, ?, 'KOSPI', 'KR', 'KRW', 'active', 't', 't')", [sid, f"00000{sid}"])  # fmt: skip
+
+    def 재무(sid: int, fy: int, 자본: float | None, 통화: str) -> None:
+        c.conn.execute(
+            "INSERT INTO financials (stock_id, fiscal_year, report_code, period_type, consolidated, report_date,"
+            " receipt_no, currency, unit, total_equity, source, fetched_at)"
+            " VALUES (?, ?, ?, 'A', 1, ?, ?, ?, ?, ?, 't', 't')",
+            [sid, fy, job.ANNUAL_REPORT_CODE, f"{fy + 1}-03-15", f"r{sid}{fy}", 통화, 통화, 자본],
+        )
+
+    재무(1, 2022, 10_000_000, "KRW")
+    for fy in (2023, 2024, 2025):
+        재무(1, fy, 9_000, "USD")
+    재무(2, 2024, 5_000_000, "KRW")
+    재무(2, 2025, None, "KRW")
+    재무(3, 2024, 4_000_000, "KRW")
+    재무(3, 2025, 4_500_000, "KRW")
+    assert job._latest_equity(c, 1, "2026-10-08") is None  # 예전: FY2022 값(4년 전)
+    assert job._latest_equity(c, 2, "2026-10-08") is None  # 예전: FY2024 값
+    assert job._latest_equity(c, 3, "2026-10-08") == 4_500_000.0
