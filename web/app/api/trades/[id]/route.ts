@@ -110,13 +110,13 @@ export async function PATCH(request: Request, { params }: Params) {
     // 수수료·세금이 **실제로** 바뀌었을 때만 지문(`updated_at`)을 넘기고 다시 계산한다 (25.1161) — 파생 표는 메모를 쓰지 않는다.
     // 메모만이면 `updated_at` 을 그대로 두어 "계산 중" 이 뜨지 않게 한다(Actions 분도 아낀다)
     const 계산 = tradeEditChangesMoney(row, parsed.data);
-    if (계산) {
-      await execute("UPDATE trades SET memo = ?, fee = ?, tax = ?, updated_at = ? WHERE id = ?", [
-        새.memo ?? null, 새.fee ?? null, 새.tax ?? null, new Date().toISOString(), id,
-      ]);
-    } else {
-      await execute("UPDATE trades SET memo = ? WHERE id = ?", [새.memo ?? null, id]);
-    }
+    const rs = 계산
+      ? await execute("UPDATE trades SET memo = ?, fee = ?, tax = ?, updated_at = ? WHERE id = ?", [
+          새.memo ?? null, 새.fee ?? null, 새.tax ?? null, new Date().toISOString(), id,
+        ])
+      : await execute("UPDATE trades SET memo = ? WHERE id = ?", [새.memo ?? null, id]);
+    // 읽은 뒤 다른 탭이 지웠으면 0행이다 — "고쳤다" 고 답하지 않고 다시 계산도 부르지 않는다 (docs/infra.md 25.1229, DELETE 와 같게)
+    if (rs.affectedRows === 0) return NextResponse.json({ errors: ["기록이 없습니다"] }, { status: 404 });
     const recalc = 계산 ? await requestRecalc() : null;
     return NextResponse.json({ ok: true, recalc });
   } catch (error) {
