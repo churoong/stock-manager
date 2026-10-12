@@ -280,6 +280,8 @@ class SignalInput:
     band_close: float | None = None
     #: 장기 후보가 밴드 계산 상한(`jobs.signals.MAX_BAND_STOCKS`, 점수 순) 밖이라 밴드를 만들지 않았다 (25.1171)
     band_capped: bool = False
+    #: 미국 분할 재수집 대기 — 과거 가격이 분할 전이라 밴드를 만들지 않았다 (docs/infra.md 25.1245)
+    band_split_pending: bool = False
 
     volatility_ann: float | None = None
     mdd: float | None = None
@@ -825,7 +827,12 @@ def judgement(horizon: str, inp: SignalInput, data: dict) -> list[dict]:
         rows.append(_check("영업이익 증가", og, og is not None and og > 0, f"전년 대비 {_증가율(og)}",
                            "> 0%", SOURCE_FINANCIALS, fy))
     else:
-        if inp.band is None and inp.band_capped:
+        if inp.band is None and inp.band_split_pending:
+            rows.append(_criterion(
+                "밸류에이션 밴드", "분할 재수집 대기 — 과거 가격이 분할 전이라 밴드를 만들지 않음",
+                "주말 미국 수정주가 재수집 뒤 다시 본다", SOURCE_DERIVED, inp.price_date, passed=False,
+            ))
+        elif inp.band is None and inp.band_capped:
             rows.append(_criterion(
                 "밸류에이션 밴드", "밴드 계산 대상 밖 — 장기 후보 가운데 종합 점수 순 상한 밖",
                 "점수 순 상한 안이어야 밴드를 만든다", SOURCE_DERIVED, inp.price_date, passed=False,

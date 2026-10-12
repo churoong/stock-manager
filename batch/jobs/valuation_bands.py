@@ -122,6 +122,10 @@ def load_prices(client: TursoClient, stock_ids: list[int], as_of: str) -> dict[i
     return {sid: rows[-vb.BAND_DAYS :] for sid, rows in out.items()}
 
 
+#: 분할 재수집 대기라 밴드를 내지 않은 까닭 (25.1245)
+SPLIT_PENDING_REASON = "분할 재수집 대기 — 과거 가격이 분할 전이라 밴드를 내지 않음"
+
+
 def build_rows(
     members: list[dict],
     prices: dict[int, list[tuple[str, float]]],
@@ -129,12 +133,17 @@ def build_rows(
     country: str,
     as_of: str,
     now: str,
+    split_pending: set[int] | None = None,
 ) -> list[tuple]:
     results = {
         int(m["stock_id"]): vb.compute(prices.get(int(m["stock_id"]), []), equities.get(int(m["stock_id"]), []),
                                        m.get("listed_shares"))  # fmt: skip
         for m in members
     }
+    # 미국 분할 재수집 대기 종목은 밴드를 내지 않는다 (25.1245) — 과거 가격이 분할 전이라 밴드 위치가 거짓이다
+    for sid in split_pending or set():
+        if sid in results:
+            results[sid] = vb.BandResult(None, None, None, None, None, 0, None, None, None, SPLIT_PENDING_REASON)
     peers = vb.peer_percentiles(
         [(int(m["stock_id"]), m.get("sector"), results[int(m["stock_id"])].current_value) for m in members], country
     )
@@ -209,7 +218,8 @@ def run(countries: tuple[str, ...], as_of: str | None = None) -> int:
             ids = [int(m["stock_id"]) for m in members]
             prices = load_prices(client, ids, as_of)
             equities = load_equities(client, country, as_of)
-            rows = build_rows(members, prices, equities, country, as_of, db.now_iso())
+            분할대기 = db.split_pending_us(client) if country == "US" else set()
+            rows = build_rows(members, prices, equities, country, as_of, db.now_iso(), 분할대기)
             client.execute(*clear_statement(country, as_of))  # 넣기 전에 지운다
             written = store(client, rows)
             with_band = sum(1 for r in rows if r[4] is not None)

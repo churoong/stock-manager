@@ -470,6 +470,7 @@ def build_inputs(
                 band_close=band_close,
                 band=band,
                 band_capped=bool(row.get("_band_capped")),
+                band_split_pending=bool(row.get("_band_split_pending")),
                 volatility_ann=_opt_float(metric_row.get("volatility_ann")),
                 mdd=_opt_float(metric_row.get("mdd")),
                 cagr=_opt_float(metric_row.get("cagr")),
@@ -746,8 +747,16 @@ def run(market: str, as_of: str | None = None) -> int:
             row["_band_capped"] = True
 
         bands: dict[int, sg.Band] = {}
+        # **미국 분할 재수집 대기 종목은 밴드를 만들지 않는다** (docs/infra.md 25.1245, 미국 시세 감사 재현).
+        # 일일 수집은 최근 열흘쯤만 분할 반영 값으로 다시 쓰고 3년 이력은 토요일 재수집까지 분할 전이다 —
+        # 주식수는 그대로라 지금 PBR 이 밴드의 4분의 1(4:1 분할)로 떨어져 "밴드 하단" 장기 매수 신호가
+        # 재수집 날까지 매일 났다
+        분할대기 = db.split_pending_us(client) if country == "US" else set()
         for row in long_pool:
             stock_id = int(row["stock_id"])
+            if stock_id in 분할대기:
+                row["_band_split_pending"] = True
+                continue
             band = load_band(client, stock_id, as_of, row.get("listed_shares"))
             if band is not None:
                 bands[stock_id] = band

@@ -1370,3 +1370,18 @@ def bulk_upsert_prices(
 
     # 쓴 행 수는 TursoClient 가 응답에서 직접 센다(core/turso.WriteCounter). 여기서 또 세지 않는다
     return len(rows)
+
+
+def split_pending_us(client: TursoClient) -> set[int]:
+    """미국 수정주가 재수집 대기열 가운데 **분할**로 감지된 종목 — 분할은 종가와 수정종가를 함께 움직여
+    두 비가 같다(`daily` 의 분할 판정과 같은 규칙, 25.553). 배당 어긋남만인 종목은 밴드(분할만 반영한 종가)에
+    영향이 없어 넣지 않는다"""
+    try:
+        rs = client.execute(
+            "SELECT stock_id FROM adjust_refresh_queue WHERE done_at IS NULL AND ratio_before = ratio_after"
+        )
+    except Exception as exc:  # noqa: BLE001
+        if 표가_없나(exc):
+            return set()
+        raise
+    return {int(r[0]) for r in rs.rows}
