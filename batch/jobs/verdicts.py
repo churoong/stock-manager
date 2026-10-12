@@ -206,11 +206,13 @@ SENTIMENT_GAP_SQL = (
 # **감성 있는 종목의 종가만** (docs/infra.md 25.1081). 예전에는 나라 전체 시세 약 28거래일을 날짜 색인으로
 # 읽어(다른 나라 행까지 지나간다) 파이썬에서 감성 종목만 골랐다. 종목 목록을 바깥에 고정하면 (stock_id, date) 색인
 # 범위만 읽는다
+# 수정주가 가운데 빈 행은 직전 계수로 메운다 (`adjust.split_only_prices`, docs/infra.md 25.1193).
+# 30일 앞 종가가 빈 행이면 원 종가(1:10 이면 10배)가 들어가 주가 변화가 −90% 로 읽혀
+# "감성은 좋아졌는데 주가는 빠졌다" 가 거짓으로 섰다
 PRICE_BACK_SQL = (
-    "SELECT p.stock_id, p.date,"
-    " CASE WHEN s.country = 'US' THEN p.close ELSE COALESCE(p.adj_close, p.close) END AS close"
+    "SELECT p.stock_id, p.date, p.adj_close, p.close, s.country"
     " FROM json_each(?) j CROSS JOIN prices p ON p.stock_id = j.value CROSS JOIN stocks s ON s.id = p.stock_id"
-    " WHERE p.date >= ? AND p.date <= ?"
+    " WHERE p.date >= ? AND p.date <= ? AND p.close > 0 ORDER BY p.stock_id, p.date"
 )
 # 점수 변화 (17장) — 4주 앞 가장 가까운 점수일
 SCORES_BEFORE_SQL = (
@@ -664,9 +666,14 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
         가장앞 = min(date.fromisoformat(str(r["as_of_date"])[:10]) for r in 감성.values())
         시작 = (가장앞 - timedelta(days=insights.SENT_GAP_DAYS + 7)).isoformat()
         종목들 = json.dumps(sorted(감성))
+        묶음: dict[int, list[dict]] = defaultdict(list)
         for r in _safe(client, PRICE_BACK_SQL, [종목들, 시작, today.isoformat()], warnings, "엇갈림 종가"):
-            if int(r["stock_id"]) in 감성 and r["close"]:
-                감성가격[int(r["stock_id"])].append((str(r["date"]), float(r["close"])))
+            if int(r["stock_id"]) in 감성:
+                묶음[int(r["stock_id"])].append(r)
+        for sid, 줄 in 묶음.items():
+            for r, px in zip(줄, adj.split_only_prices(줄, str(줄[0]["country"])), strict=True):
+                if px and px > 0:
+                    감성가격[sid].append((str(r["date"]), float(px)))
     개시: dict[int, list[dict]] = defaultdict(list)
     if country == "KR":
         for r in _safe(client, INITIATION_SQL, [(today - timedelta(days=insights.INIT_LOOKBACK_DAYS)).isoformat()],

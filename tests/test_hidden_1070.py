@@ -98,3 +98,22 @@ def test_주간_작업이_쌓는다(client) -> None:  # noqa: ANN001
 
 
 from tests.test_metrics_beta import client as client  # noqa: E402,F401 — 픽스처
+
+
+def test_엇갈림의_30일_앞_종가가_빈_행이면_메운다() -> None:
+    """30일 앞 종가가 수정주가 빈 행이면 원 종가(10배)가 들어가 주가 변화가 −90% 로 읽혔다 (docs/infra.md 25.1193)."""
+    mem = MemClient()
+    db.apply_migrations(mem)  # type: ignore[arg-type]
+    c = mem.conn
+    _시장(c, 기준가=100.0, 지금가=104.0)
+    # 1:10 분할(10-01) 전 구간 — 원 종가 1000, 수정주가 100. 09-07 은 수정주가가 빈 행
+    c.execute("UPDATE prices SET close = 1000, adj_close = NULL WHERE date = '2026-09-07'")
+    for d in ("2026-09-04", "2026-09-08"):
+        c.execute("INSERT INTO prices (stock_id, date, close, adj_close, currency, source, fetched_at)"
+                  " VALUES (1, ?, 1000, 100, 'KRW', 't', 't')", [d])  # fmt: skip
+    c.execute("INSERT INTO sentiment_scores (stock_id, as_of_date, sentiment, article_count, positive_count,"
+              " negative_count, negative_count_7d, decay_halflife_days, delta_30d, method, calc_version, created_at)"
+              " VALUES (1, '2026-10-07', -30, 10, 2, 8, 3, 7, -40, 'vader', 1, 't')")  # fmt: skip
+    mem.batch(job.build_market(mem, "KR", date(2026, 10, 8), []))  # type: ignore[arg-type]
+    g = json.loads(c.execute("SELECT detail_json FROM stock_verdicts").fetchone()[0])["sentiment_gap"]
+    assert math.isclose(g["price_ret"], 0.04) and g["opposite"], g  # 빈 행 원 종가면 −89.6%·같은 쪽이었다
