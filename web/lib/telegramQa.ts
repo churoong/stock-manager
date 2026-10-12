@@ -75,7 +75,7 @@ async function searchList(exec: Exec): Promise<SearchRow[]> {
   return 목록.rows;
 }
 
-type Found = { id: number; ticker: string; country: string; name: string; alts?: number[] };
+type Found = { id: number; ticker: string; country: string; name: string; alts?: number[]; exact?: boolean };
 
 /** 예전 `FIND_SQL` 과 같은 규칙: 정확히 같은 것 먼저, 그다음 이름 앞부분 — 한글 이름 길이·티커 순, 최대 `MAX_MATCHES` */
 export function findStocks(list: SearchRow[], q: string): Found[] {
@@ -97,7 +97,7 @@ export function findStocks(list: SearchRow[], q: string): Found[] {
     const 열쇠 = `${r.country}|${r.ticker.toUpperCase()}|${r.name_ko ?? ""}|${r.name_en ?? ""}`;
     const 앞 = 묶음.get(열쇠);
     if (앞) (앞.alts ??= []).push(r.id);
-    else 묶음.set(열쇠, { id: r.id, ticker: r.ticker, country: r.country, name: r.name_ko ?? r.name_en ?? r.ticker });
+    else 묶음.set(열쇠, { id: r.id, ticker: r.ticker, country: r.country, name: r.name_ko ?? r.name_en ?? r.ticker, exact: exact(r) });
   }
   return [...묶음.values()].slice(0, MAX_MATCHES);
 }
@@ -109,7 +109,9 @@ export async function answer(query: Query, exec: Exec): Promise<string> {
   const q = query.q;
   const found = findStocks(await searchList(exec), q);
   if (found.length === 0) return `"${q}" 에 맞는 종목이 없습니다. 이름이나 티커를 다시 보내 주세요`;
-  const exact = found.filter((f) => f.ticker.toUpperCase() === q.toUpperCase() || f.name.toUpperCase() === q.toUpperCase());
+  // 정확히 같음은 `findStocks` 가 티커·한글·**영문** 이름으로 판정한 것을 쓴다 (docs/infra.md 25.1241) — 예전엔 대표 이름(한글 우선)만
+  // 견줘, 영문 정식 이름으로 물으면 앞부분이 같은 다른 종목과 함께 "여럿이 맞습니다" 로 빠졌다
+  const exact = found.filter((f) => f.exact);
   if (exact.length !== 1 && found.length > 1) {
     return `여럿이 맞습니다 — 하나를 골라 다시 보내 주세요\n${found.map((f) => `· ${f.name} (${f.ticker})`).join("\n")}`;
   }
