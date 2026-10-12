@@ -21,6 +21,7 @@ from batch import config
 from batch.core import db
 from batch.core.client import TursoClient
 from batch.core.entry import guard
+from batch.services import adjust as adj
 from batch.services import stress as st
 
 log = logging.getLogger("stress")
@@ -85,12 +86,19 @@ def load_prices(client: TursoClient, stock_ids: list[int], since: str) -> dict[i
     for start in range(0, len(stock_ids), size):
         ids = stock_ids[start : start + size]
         rs = client.execute(
-            "SELECT stock_id, date, COALESCE(adj_close, close) AS px FROM prices"
-            f" WHERE stock_id IN ({', '.join(['?'] * len(ids))}) AND date >= ? AND close IS NOT NULL",
+            # 수정주가 가운데 빈 행은 직전 계수로 메운다 (`adjust.fill_adjusted`, 25.1167) — 날짜 순이어야 한다
+            "SELECT stock_id, date, adj_close, close FROM prices"
+            f" WHERE stock_id IN ({', '.join(['?'] * len(ids))}) AND date >= ? AND close IS NOT NULL"
+            " ORDER BY stock_id, date",
             [*ids, since],
         )
+        줄들: dict[int, list[dict]] = {}
         for row in rs.dicts():
-            out.setdefault(int(row["stock_id"]), {})[str(row["date"])] = float(row["px"])
+            줄들.setdefault(int(row["stock_id"]), []).append(row)
+        for sid, 줄 in 줄들.items():
+            for row, (px, _) in zip(줄, adj.fill_adjusted(줄), strict=True):
+                if px is not None:
+                    out.setdefault(sid, {})[str(row["date"])] = float(px)
     return out
 
 

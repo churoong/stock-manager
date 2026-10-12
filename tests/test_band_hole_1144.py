@@ -119,3 +119,11 @@ def test_2부_상관용_시세도_빈_행을_메운다() -> None:
 
     가격 = daily.load_price_series(_mem(), [1], "2026-09-08")  # type: ignore[arg-type]
     assert list(가격[1].values()) == [100.0, 100.0, 100.0, 100.0, 100.0]
+
+
+def test_스트레스_시험_바구니_시세도_빈_행을_메운다() -> None:
+    """위기 구간 바구니 수익률이 빈 행의 원 종가로 틀어졌다 (25.1167)."""
+    from batch.jobs import stress
+
+    가격 = stress.load_prices(_mem(), [1], "2026-09-01")  # type: ignore[arg-type]
+    assert list(가격[1].values()) == [100.0, 100.0, 100.0, 100.0, 100.0]
