@@ -89,10 +89,15 @@ jobs:
           ARGS=""
           if [ -n "${{ inputs.limit }}" ]; then ARGS="--limit ${{ inputs.limit }}"; fi
           : > run.log
+          # **KIS 가 실패해도 DART 만 쓰는 공시 반응은 돈다** (docs/infra.md 25.1224). 기본 셸이 `bash -e` 라 수집이 1 로 끝나면
+          # 단계가 거기서 멈춰 공시 반응 수집·금요일 계산이 기록도 없이 빠졌다. 실패는 끝에 모아 단계를 빨갛게 한다
+          rc=0
           if [ "${{ inputs.disclosure_only }}" != "true" ]; then
-            python -m batch.jobs.kis_flows $ARGS 2>&1 | python scripts/ops_tee.py -a run.log
-            # 증권사 적중률 성적표 — 금요일이거나 표가 비었을 때만 다시 계산한다 (docs/infra.md 25.995)
-            python -m batch.jobs.broker_stats 2>&1 | python scripts/ops_tee.py -a run.log
+            python -m batch.jobs.kis_flows $ARGS 2>&1 | python scripts/ops_tee.py -a run.log || rc=1
+            # 증권사 적중률 성적표 — 금요일이거나 표가 비었을 때만 다시 계산한다 (docs/infra.md 25.995). KIS 수급이 재료라 수집이 된 날만
+            if [ "$rc" = 0 ]; then
+              python -m batch.jobs.broker_stats 2>&1 | python scripts/ops_tee.py -a run.log || rc=1
+            fi
           fi
           # 공시 반응 통계 — 시장 전체 주요 공시 모으기(매일)와 유형별 5거래일 초과수익(금요일) (docs/infra.md 25.996)
           # 빈 구간 메우기: 지난 N일을 다시 모으고 계산을 강제한다 (25.1010)
@@ -103,7 +108,8 @@ jobs:
             DARGS="--from ${{ inputs.disclosure_from }} --kinds ${{ inputs.disclosure_kinds || 'B,I' }}"
             if [ -n "${{ inputs.disclosure_to }}" ]; then DARGS="$DARGS --to ${{ inputs.disclosure_to }}"; fi
           fi
-          python -m batch.jobs.disclosure_reaction $DARGS 2>&1 | python scripts/ops_tee.py -a run.log
+          python -m batch.jobs.disclosure_reaction $DARGS 2>&1 | python scripts/ops_tee.py -a run.log || rc=1
+          exit $rc
 
       - name: 기록을 이슈로 내보내기
         if: always()

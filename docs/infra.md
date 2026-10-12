@@ -2271,6 +2271,7 @@ SQL read operations are forbidden (reads are blocked, ...)
 | 25.1221 | Turso 오류의 예외 사슬이 가리지 않은 호스트를 traceback 에 남김 |
 | 25.1222 | 시간외 알림: 보낸 뒤 기록 실패가 잡음을 풀어 장중 경로가 다시 보냄 |
 | 25.1223 | 유니버스·공시·주간 요약이 DB 한도를 실패로 닫음 |
+| 25.1224 | KIS 수집 실패가 DART 만 쓰는 공시 반응까지 멈춤 |
 
 ### 25.1 왜 D1 인가
 
@@ -29248,3 +29249,14 @@ Actions 의 시크릿 가림은 `TURSO_DATABASE_URL` 값 전체(`libsql://…`)�
 **고침** — 넷 모두 `db.quota_reason(exc)` 면 닫지 않고 그대로 올린다(유니버스는 1 대신 다시 올림). `guard()` 가 `close_current_run("skipped", …)` 로 닫는다.
 **시험** — `tests/test_quota_skip_1223.py`: 유니버스·미국 공시는 `guard` 를 거쳐 0·skipped, 실패로 닫지 않음. 국내 공시·주간 요약은 같은 분기가 있는지 글자로.
 **되돌리기 확인** — 네 파일을 되돌리면 넷 다 깨진다.
+
+### 25.1224 KIS 수집 실패가 DART 만 쓰는 공시 반응까지 멈춤
+
+**무엇** — `kis-flows.yml` "수집" 단계가 `set -o pipefail` 로 kis_flows → broker_stats → disclosure_reaction 을 차례로 돌린다. 깃허브 기본 셸은 `bash -e` 라
+kis_flows 가 1 로 끝나면(호출 절반 넘게 실패, 토큰 발급 예외) **단계가 거기서 멈춘다.** DART 만 쓰는 `disclosure_reaction`(평일 공시 모으기·금요일 유형별 계산)은
+KIS 와 무관한데 그날 돌지 않았고, 기록(`batch_runs`)도 없었다. 두 작업 모두 `weekly_summary.EXPECTED_DAYS` 에 없어 빠져도 아무도 말하지 않았다. 25.415 와 같은 꼴. (주간·월간 작업 실패 흐름 감사, 재현 확인)
+
+**고침** — 각 명령을 `|| rc=1` 로 받아 끝에 `exit $rc`(실패는 그대로 빨간불). broker_stats 는 KIS 수급이 재료라 수집이 된 날만 돈다(예전과 같다).
+`EXPECTED_DAYS` 에 `disclosure_reaction: 4`(평일마다 기록) · `broker_stats: 10`(금요일만 기록을 연다)을 더했다.
+**시험** — `tests/test_kis_flows_step_1224.py`: 단계 글을 `bash -e` 로 그대로 돌리되 파이썬 명령을 대역으로 바꿔, KIS 실패에도 공시 반응이 돌고 성적표는 건너뛰며 단계는 1, 평소엔 셋 다·0.
+**되돌리기 확인** — 워크플로·주간 요약을 되돌리면 KIS 실패 경우와 기대 표 검사가 깨진다.
