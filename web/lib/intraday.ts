@@ -86,6 +86,20 @@ export function targetsFreshFor(builtAt: string | null, session: Session, prevCl
  * 묵은 목록에서는 **신호에서 온 값**(매수 구간, 보유가 아닌 종목의 목표·손절)을 쓰지 않는다. 보유 목표·손절은 사용자가 적은
  * 평균단가에서 나와 그대로 둔다(25.161 과 같은 판단).
  */
+/**
+ * 감시 목록의 `reasons`(배치가 `json.dumps` 로 쓴 문자열 배열)을 읽는다. **깨진 행 하나가 호출 전체를 죽이지 않게** 실패하면 빈 배열
+ * (docs/infra.md 25.1137, cron 감사 재현) — 예전 `JSON.parse` 가 한 행에서 던지면 500 으로 끝나 그 5분의 모든 종목 알림(손절 포함)이
+ * 빠졌다. 빈 배열이면 그 종목은 보유·신호 사유 없이 본다(시세 급등락·거래량만)
+ */
+export function parseReasons(raw: unknown): string[] {
+  try {
+    const v = JSON.parse(String(raw));
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 export function withoutSignalLevels<T extends Target>(t: T): T {
   const 보유 = t.reasons.includes("holding");
   return {

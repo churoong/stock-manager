@@ -29,6 +29,7 @@ import {
   watchPriceUsable,
   dropOnActionSuspect,
   recentActionUs,
+  parseReasons,
   withoutSignalLevels,
   type Hit,
   type Market,
@@ -452,7 +453,7 @@ export async function GET(request: Request) {
     const 직전닫힘 = sessions.filter((x) => x.date < session.date).map((x) => x.close_utc).sort().at(-1) ?? null;
     const 이번장 = targetsFreshFor(만든때, session, 직전닫힘);
     const targets = 목록.map((t) => {
-      const 풀린 = { ...t, reasons: JSON.parse(String(t.reasons)) as string[] };
+      const 풀린 = { ...t, reasons: parseReasons(t.reasons) }; // 깨진 행 하나가 호출 전체를 죽이지 않게 (25.1137)
       return 이번장 ? 풀린 : withoutSignalLevels(풀린);
     });
     // 상장폐지된 관심 종목은 감시하지 않는다 — 지난 장 시세만 와 판정 0건이 될 수 있다 (25.814, 감사). 유니버스에서 빠진(excluded) 종목은

@@ -347,7 +347,17 @@ export const HEALTH_ALERT_INSERT = `INSERT INTO health_alerts (job, market, loca
 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (job, market, local_date, kind) DO NOTHING`;
 
-export const PENDING_HEALTH_ALERTS = `SELECT id, message FROM health_alerts WHERE sent_at IS NULL ORDER BY created_at LIMIT 20`;
+/** 발송을 잡은 표시 — 잡고 이만큼 지나도 그대로면(발송 중 함수가 죽음) 다시 보낸다 (25.1137, 장중 경로 25.538 과 같은 모양) */
+export const HEALTH_CLAIM_PREFIX = "claim:";
+export const HEALTH_CLAIM_STALE_MS = 10 * 60_000;
+
+/**
+ * 보낼 무응답 경보 — 안 보낸 것 + **잡고 10분 넘게 그대로인 것** (docs/infra.md 25.1137, cron 감사 재현). 예전에는 잡을 때 보통 시각을
+ * 적어 "보냈다" 와 "잡고 죽었다" 가 같았다. 텔레그램이 매달린 채 함수가 시간 초과로 죽으면 그 `[무응답]` 은 `dueAlerts` 가 같은 날 다시
+ * 만들지 않아 **영영 가지 않았다** — 아침 리포트가 안 왔다는 단 하나의 경보다. 인자: ['claim:' + 10분 전 시각]
+ */
+export const PENDING_HEALTH_ALERTS = `SELECT id, message FROM health_alerts
+WHERE sent_at IS NULL OR (sent_at >= 'claim:' AND sent_at < ?) ORDER BY created_at LIMIT 20`;
 
 export const RECENT_BATCH_RUNS = `SELECT id, job_name, market, trade_date, trigger_source, scheduled_for, started_at,
   finished_at, status, delay_seconds, step_log, error_text

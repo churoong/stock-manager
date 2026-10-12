@@ -195,7 +195,7 @@ export default function StatusView() {
               {data.health_alerts.map((a) => (
                 <li key={`${a.job}-${a.market}-${a.local_date}-${a.kind}`} className="whitespace-pre-line rounded-lg border border-slate-200 px-2 py-1 dark:border-slate-800">
                   {a.message}
-                  <span className="ml-1 text-slate-400">{a.sent_at ? "보냄" : "미발송"}</span>
+                  <span className="ml-1 text-slate-400">{a.sent_at?.startsWith("claim:") ? "보내는 중" : a.sent_at ? "보냄" : "미발송"}</span>
                 </li>
               ))}
             </ul>

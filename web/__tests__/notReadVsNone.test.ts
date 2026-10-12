@@ -62,6 +62,7 @@ const 삼켜도_되는_곳: Record<string, string> = {
   "components/ServiceWorker.tsx::serviceWorker.register": "설치 실패는 화면 동작과 무관하다 (docs/pwa.md)",
   "lib/heartbeat.ts::).catch(() => undefined)": "호출 기록 쓰기 실패가 크론 본 작업을 막으면 안 된다",
   "app/api/cron/health/route.ts::WHERE id = ?\", [row.id]).catch(": "발송 실패 뒤 잡은 알림을 푸는 쓰기 — 풀기 실패는 원래 발송 오류에 묻힌다(중복보다 빠짐이 낫다, 25.593)",
+  "app/api/cron/health/route.ts::WHERE id = ?\", [now.toISOString(), row.id]).catch(": "보낸 뒤 \"보냄\" 을 적는 쓰기 — 실패하면 잡음 표시가 남아 10분 뒤 한 번 더 간다(두 번이 안 가는 것보다 낫다, 25.1137)",
   "app/api/trades/[id]/route.ts::requestRecalc().catch(": "이미 실패한 삭제의 뒤처리다 — 재계산 요청이 실패해도 원래 오류(500)를 그대로 돌려준다 (25.591)",
   "lib/tursoWatch.ts::deps.lastRequested()": "지난 요청 기록을 못 읽으면 `null` — 부르는 쪽이 '모름' 으로 다룬다",
   "lib/tursoWatch.ts::ok: null, tries: 시도":

@@ -220,7 +220,10 @@ WHERE s.country = 'US' AND s.status = 'active' AND s.yahoo_symbol IS NOT NULL
   AND (f.last_fetched_at IS NULL
        OR (f.last_status = 'ok' AND f.last_fetched_at < ?)
        OR (f.last_status != 'ok' AND f.last_fetched_at < ?))
-ORDER BY c.prio, f.last_fetched_at IS NOT NULL, f.last_fetched_at, s.id
+-- **실패한 재시도는 맨 뒤** (docs/infra.md 25.1137, cron 감사 재현). 실패한 보유(0)·관심(1) 종목이 60분마다 다시 후보가 되어
+-- 받을 때가 된 다른 후보보다 늘 먼저 뽑혀, 매시 한 번뿐인 기회를 절반 넘게(24번 중 14번) 가져갔다
+ORDER BY CASE WHEN f.last_status IS NOT NULL AND f.last_status != 'ok' THEN 3 ELSE c.prio END,
+  f.last_fetched_at IS NOT NULL, f.last_fetched_at, s.id
 LIMIT 1`;
 
 export const NEWS_INSERT = `INSERT INTO news (stock_id, title, url, published_at, publisher, lang, source, fetched_at)

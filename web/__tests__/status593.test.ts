@@ -31,7 +31,8 @@ describe("상태 화면 감사 (docs/infra.md 25.593)", () => {
   });
 
   it("무응답 알림은 먼저 잡고 보낸다", () => {
-    expect(readFileSync("app/api/cron/health/route.ts", "utf8")).toContain("WHERE id = ? AND sent_at IS NULL");
+    // 25.1137 부터 `claim:시각` 으로 잡는다 — 비었거나 묵은 잡음만 잡는다
+    expect(readFileSync("app/api/cron/health/route.ts", "utf8")).toContain("WHERE id = ? AND (sent_at IS NULL OR (sent_at >= 'claim:' AND sent_at < ?))");
   });
 });
 

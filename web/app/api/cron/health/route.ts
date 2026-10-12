@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { notifyQuotaOnce } from "@/lib/quotaNotice";
 import { batch, currentBackend, execute, quotaReason, rowsToObjects } from "@/lib/db";
 import {
-  HEALTH_ALERT_INSERT, LAST_SUCCESS, PENDING_HEALTH_ALERTS, SESSIONS_AROUND, TODAY_HEALTH_ALERTS,
+  HEALTH_ALERT_INSERT, HEALTH_CLAIM_PREFIX, HEALTH_CLAIM_STALE_MS, LAST_SUCCESS, PENDING_HEALTH_ALERTS, SESSIONS_AROUND, TODAY_HEALTH_ALERTS,
   WATCHES, dueAlerts, localDate, type LastSuccess, type Market, type Session,
 } from "@/lib/health";
 import { tokenMatches } from "@/lib/intraday";
@@ -33,6 +33,9 @@ import { watchTursoReturn } from "@/lib/tursoWatch";
 export const dynamic = "force-dynamic";
 
 /** 감시가 실제로 돌고 있는지. 장중 경로와 같은 방식으로 한 줄을 덮어쓴다. 실패해도 본 작업을 막지 않는다 */
+
+// 텔레그램 발송(10초 제한)과 DB 읽기가 겹쳐도 함수가 먼저 끊기지 않게 (25.1137) `[확인필요: 무료 플랜 상한]`
+export const maxDuration = 30;
 
 export async function GET(request: Request) {
   // 비밀이 빠진 것을 "토큰이 맞지 않습니다" 로 보이지 않게 — 다른 크론 세 경로와 같게 503 (docs/infra.md 25.655, 감사)
@@ -78,7 +81,8 @@ export async function GET(request: Request) {
     }
 
     // 저장된 것 중 못 보낸 것을 보낸다. 방금 넣은 것과 지난번에 발송이 실패한 것이 함께 나온다
-    const pending = rowsToObjects<{ id: number; message: string }>(await execute(PENDING_HEALTH_ALERTS));
+    const 묵은잡음 = HEALTH_CLAIM_PREFIX + new Date(now.getTime() - HEALTH_CLAIM_STALE_MS).toISOString();
+    const pending = rowsToObjects<{ id: number; message: string }>(await execute(PENDING_HEALTH_ALERTS, [묵은잡음]));
     let sent = 0;
     const errors: string[] = [];
     for (const row of pending) {
@@ -86,11 +90,17 @@ export async function GET(request: Request) {
       // 찍기가 실패하면(일시 DB 오류·D1 쓰기 한도) 매시간 같은 "[무응답]" 이 다시 갔다. 잡기가 실패하면 보내지 않는다(다음 호출이 다시 본다)
       let 잡음 = false;
       try {
-        const claim = await execute("UPDATE health_alerts SET sent_at = ? WHERE id = ? AND sent_at IS NULL", [now.toISOString(), row.id]);
+        // `claim:시각` 으로 잡고, 보낸 뒤 보통 시각으로 바꾼다 (25.1137) — 잡고 죽으면 10분 뒤 다른 호출이 다시 본다
+        const claim = await execute(
+          "UPDATE health_alerts SET sent_at = ? WHERE id = ? AND (sent_at IS NULL OR (sent_at >= 'claim:' AND sent_at < ?))",
+          [HEALTH_CLAIM_PREFIX + now.toISOString(), row.id, 묵은잡음],
+        );
         if (claim.affectedRows === 0) continue; // 다른 호출이 이미 잡았다
         잡음 = true;
         await sendTelegram(row.message);
         sent += 1;
+        // 보냄을 적지 못하면 10분 뒤 한 번 더 간다 — 두 번 가는 편이 안 가는 편보다 낫다(25.618)
+        await execute("UPDATE health_alerts SET sent_at = ? WHERE id = ?", [now.toISOString(), row.id]).catch(() => undefined);
       } catch (error) {
         errors.push(error instanceof Error ? error.message : "발송 실패");
         // 보내지 못했으면 잡은 것을 푼다 — 다음 호출이 다시 보낸다. 풀기마저 실패하면 이 알림은 빠진다(중복보다 낫다고 본다).

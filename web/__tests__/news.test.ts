@@ -115,6 +115,18 @@ describe("질의 (실제 스키마)", () => {
     db.exec("DELETE FROM news_fetch_log");
   });
 
+  it("실패한 보유 종목의 재시도는 받을 때가 된 다른 후보 뒤로 (25.1137)", () => {
+    const pick = () =>
+      db.prepare(NEXT_TARGET).get(refetchCutoff(now), retryCutoff(now)) as { stock_id: number } | undefined;
+    db.exec("DELETE FROM news_fetch_log");
+    db.prepare(FETCH_LOG_UPSERT).run(1, "2026-09-17T06:00:00Z", "http:404", 0, 0); // 보유 — 실패 2시간 전(재시도 가능)
+    db.prepare(FETCH_LOG_UPSERT).run(2, "2026-09-17T07:59:00Z", "ok", 15, 3); // 관심 — 방금 받음
+    expect(pick()?.stock_id).toBe(3); // 한 번도 안 받은 후보가 실패한 보유보다 먼저
+    db.prepare(FETCH_LOG_UPSERT).run(3, "2026-09-17T07:59:00Z", "ok", 0, 0);
+    expect(pick()?.stock_id).toBe(1); // 다른 후보가 없으면 실패한 것도 다시 받는다
+    db.exec("DELETE FROM news_fetch_log");
+  });
+
   it("큰 표(scores·prices)를 읽지 않는다 — 1분마다 도는 경로라 읽기 한도를 태운다", () => {
     for (const table of ["scores", "prices", "factors", "signals"]) {
       expect(NEXT_TARGET).not.toContain(` ${table} `);
