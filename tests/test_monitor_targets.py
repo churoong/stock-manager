@@ -132,6 +132,37 @@ def test_묵은_신호는_지금_가격_단위로_옮긴다(monkeypatch: pytest.
     assert row == pytest.approx((190.0, 200.0, 240.0, 180.0))
 
 
+def test_신호일이_수정주가_빈_행이어도_단위를_옮긴다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """신호일 행이 수정주가 가운데 빈 행이면 원 종가가 나와 비율 1 — 옛 단위 손절선이 남았다 (docs/infra.md 25.1195)."""
+    from batch.core import db
+
+    mem = MemClient()
+    monkeypatch.setattr(job, "TursoClient", lambda: mem)
+    db.apply_migrations(mem)  # type: ignore[arg-type]
+    c = mem.conn
+    c.execute(
+        "INSERT INTO stocks (id, ticker, market, country, name_ko, currency, status, source, fetched_at, yahoo_symbol)"
+        " VALUES (3, '000003', 'KOSPI', 'KR', '종목3', 'KRW', 'active', 't', 't', '000003.KS')"
+    )
+    # 5:1 분할 전 구간(원 종가 1000, 수정주가 200) — 신호일 9/16 은 수정주가가 빈 행
+    c.execute(
+        "INSERT INTO prices (stock_id, date, close, adj_close, currency, source, fetched_at) VALUES"
+        " (3, '2026-09-15', 1000, 200, 'KRW', 't', 't'), (3, '2026-09-16', 1000, NULL, 'KRW', 't', 't'),"
+        " (3, '2026-09-17', 1000, 200, 'KRW', 't', 't'), (3, '2026-09-18', 205, 205, 'KRW', 't', 't')"
+    )
+    c.execute(
+        "INSERT INTO signals (stock_id, as_of_date, horizon, signal_type, buy_zone_low, buy_zone_high, currency,"
+        " tranche_plan, target_price, stop_price, size_reduction, rationale_text, rationale_data, calc_version,"
+        " created_at) VALUES (3, '2026-09-16', 'mid', 'x', 950, 1000, 'KRW', '[]', 1200, 900, 1, 'x',"
+        " '{\"ref_close\": 1000}', 1, 't')"
+    )
+    assert job.run("KR") == 0
+    row = c.execute(
+        "SELECT buy_zone_low, buy_zone_high, target_price, stop_price FROM monitor_targets WHERE stock_id = 3"
+    ).fetchone()
+    assert row == pytest.approx((190.0, 200.0, 240.0, 180.0))  # 빈 행 원 종가면 (950, 1000, 1200, 900) 그대로였다
+
+
 class Test뉴스_후보:
     """뉴스 수집 후보를 배치가 미리 고른다 (docs/infra.md 24절).
 

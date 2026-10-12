@@ -63,6 +63,10 @@ def session_rows(market: str, start, days: int = SESSION_DAYS) -> list[tuple[str
     return out
 
 
+#: 단위 비율을 낼 때 신호일 앞뒤로 붙여 읽는 달력일 — 그날이 수정주가 빈 행이어도 앞뒤 계수로 메운다 (25.1195)
+UNIT_PAD_DAYS = 10
+
+
 def _단위_비율(client: TursoClient, stock_id: int, as_of: str, rationale_data: Any) -> float:
     """신호의 가격(매수 구간·목표·손절)을 **지금 단위**로 옮기는 비율 (docs/infra.md 25.218).
 
@@ -77,12 +81,21 @@ def _단위_비율(client: TursoClient, stock_id: int, as_of: str, rationale_dat
         return 1.0
     if not ref or float(ref) <= 0:
         return 1.0
-    rs = client.execute(
-        f"SELECT {db.SPLIT_ONLY_PRICE_SQL} FROM prices p JOIN stocks s ON s.id = p.stock_id"
-        " WHERE p.stock_id = ? AND p.date = ?",
-        [stock_id, as_of],
-    ).rows
-    지금 = rs[0][0] if rs else None
+    # 그날 하나만 읽으면 그 행이 국내 수정주가 **가운데 빈 행**일 때 원 종가가 나와 비율이 1 —
+    # 분할 뒤에도 옛 단위 손절선이 그대로 남아 거짓 손절 알림이 났다(이 함수가 막으려던 바로 그 일).
+    # 앞뒤를 붙여 읽어 메운다 (docs/infra.md 25.1195)
+    from batch.services import adjust as adj
+
+    day = date.fromisoformat(str(as_of)[:10])
+    rows = client.execute(
+        "SELECT p.date, p.adj_close, p.close, s.country FROM prices p JOIN stocks s ON s.id = p.stock_id"
+        " WHERE p.stock_id = ? AND p.date >= ? AND p.date <= ? AND p.close > 0 ORDER BY p.date",
+        [stock_id, (day - timedelta(days=UNIT_PAD_DAYS)).isoformat(),
+         (day + timedelta(days=UNIT_PAD_DAYS)).isoformat()],
+    ).dicts()
+    값 = dict(zip((str(r["date"]) for r in rows), adj.split_only_prices(rows, str(rows[0]["country"])) if rows else [],
+                 strict=True))  # fmt: skip
+    지금 = 값.get(str(as_of)[:10])
     return float(지금) / float(ref) if 지금 and float(지금) > 0 else 1.0
 
 
