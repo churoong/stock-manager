@@ -52,7 +52,7 @@ def render(total: int, losses: list[Loss], n_losses: int | None = None) -> list[
         return []
     전체손실 = len(losses) if n_losses is None else n_losses
     잘림 = f"(나쁜 순 {len(losses)}건만 나눔)" if 전체손실 > len(losses) else ""
-    head = f"지난 추천 사후 분석 — 20거래일 성적이 이번 주 나온 신호 {total}건 중 손실 {전체손실}건{잘림}"
+    head = f"지난 추천 사후 분석 — 지난 요약 뒤 20거래일 성적이 나온 신호 {total}건 중 손실 {전체손실}건{잘림}"
     if not losses:
         return [head]
     세기 = {k: sum(1 for x in losses if cause(x) == k) for k in LABEL}

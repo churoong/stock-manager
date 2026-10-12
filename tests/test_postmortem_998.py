@@ -28,7 +28,7 @@ def test_업종_표본이_적으면_시장과_같다고_본다() -> None:
 
 def test_손실이_없거나_신호가_없으면() -> None:
     assert pm.render(0, []) == []
-    assert pm.render(5, []) == ["지난 추천 사후 분석 — 20거래일 성적이 이번 주 나온 신호 5건 중 손실 0건"]
+    assert pm.render(5, []) == ["지난 추천 사후 분석 — 지난 요약 뒤 20거래일 성적이 나온 신호 5건 중 손실 0건"]
     assert "나쁜 순 1건만" in pm.render(9, [pm.Loss("다", "long", -0.2, 0.0, None, 0, None)], 4)[0]
 
 
@@ -122,3 +122,38 @@ def test_업종_평균은_분할만_반영한_가격으로_낸다() -> None:
                         " VALUES (?, ?, ?, ?, 'KRW', 't', 't')", [i, d, c, a])  # fmt: skip
     avg, n = con.execute(ws.SECTOR_AVG, ["2026-09-04", "2026-10-02", "KR", "반도체", 1]).fetchone()
     assert n == 5 and round(avg, 4) == -0.05
+
+
+def test_지난_보고_뒤_성적이_나온_신호를_모두_본다() -> None:
+    """진입일 36~27일 전 창은 성적표 시각과 어긋나 대상의 8% 만 봤다 (docs/infra.md 25.1151)."""
+    con = sqlite3.connect(":memory:")
+    for f in sorted((Path(__file__).resolve().parent.parent / "migrations").glob("*.sql")):
+        con.executescript(f.read_text(encoding="utf-8"))
+
+    class C:
+        def execute(self, sql, args=None):
+            cur = con.execute(sql, args or [])
+
+            class R:
+                rows = cur.fetchall()
+
+                def scalar(self):
+                    return self.rows[0][0] if self.rows else None
+
+            return R()
+
+    con.execute("INSERT INTO stocks (id, ticker, market, country, currency, status, source, fetched_at)"
+                " VALUES (1, '000001', 'KOSPI', 'KR', 'KRW', 'active', 't', 't')")
+    # 일요일 10-11 기준 진입 08-28·09-01·09-08(37·40·33일 전 — 옛 창에는 09-08 하나뿐) + 아직 안 익은 09-15
+    for k, (d, r) in enumerate((("2026-08-28", -0.1), ("2026-09-01", -0.2), ("2026-09-08", 0.1), ("2026-09-15", None))):
+        con.execute("INSERT INTO signal_outcomes (stock_id, as_of_date, horizon, entry_date, entry_close, ret_20d,"
+                    " days_available, computed_at) VALUES (1, ?, 'short', ?, 100, ?, 20, 't')", [f"a{k}", d, r])  # fmt: skip
+    now = datetime(2026, 10, 11, tzinfo=UTC)
+    끝: list[str] = []
+    총, 손실수, _ = ws.load_losses(C(), now, None, 끝)
+    assert (총, 손실수) == (3, 2) and 끝 == ["2026-09-08"]
+    # 다음 주: 보고한 데까지는 다시 세지 않는다
+    assert ws.load_losses(C(), now, "2026-09-08")[:2] == (0, 0)
+    # 기록이 아주 오래 묵었어도 45일 넘게 거슬러 가지 않는다
+    # 10-20 기준 45일 전은 09-05 — 08-28·09-01 은 넘어가고 09-08 하나
+    assert ws.load_losses(C(), datetime(2026, 10, 20, tzinfo=UTC), "2026-01-01")[:2] == (1, 0)

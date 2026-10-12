@@ -24,6 +24,8 @@ from pathlib import Path
 화면_밖_예외: dict[str, str] = {
     # 사람이 바꾸는 설정이 아니라 배치가 적는 기록이다 — 미국 분할 감지일 (docs/infra.md 25.535)
     "us_split_detections": "배치 내부 기록(분할 감지일). 사람이 고칠 값이 아니다",
+    # 주간 사후 분석이 어디까지 보고했나 (docs/infra.md 25.1151)
+    "postmortem_through": "배치 내부 기록(사후 분석을 보고한 마지막 진입일). 사람이 고칠 값이 아니다",
 }
 
 

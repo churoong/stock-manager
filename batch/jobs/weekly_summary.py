@@ -178,12 +178,18 @@ def reads_line(used: int | None, limit: int, now: datetime) -> str:
     return f"Turso 월 읽기: {used / 1e6:,.1f}M / {limit / 1e6:,.0f}M ({몫:.0%}, 달 진도 {진도:.0%}){표시}"
 
 
-#: 사후 분석 창 — 진입일이 이 범위(오늘 기준 달력일)면 20거래일째가 대략 지난 한 주 안이다 (25.998)
-POSTMORTEM_ENTRY_DAYS = (36, 27)
+#: 사후 분석이 **어디까지 보고했나** — 보고한 진입일의 마지막 날 (배치만 쓰는 기록 키, 25.1151).
+#: 예전에는 "진입일 36~27일 전" 창이었는데, 성적표는 화요일 06:07 KST 에 돌아 그때 시세가 그 전 금요일까지라
+#: 일요일 기준 20거래일 성적이 나와 있는 진입일은 대개 창 **앞**이었다 — 2026 달력 모의 154 진입일 가운데
+#: 13일만 보고됐다
+POSTMORTEM_THROUGH_KEY = "postmortem_through"
+#: 기록이 없거나 오래 묵었을 때 거슬러 볼 한계(달력일). 첫 실행이 몇 달치를 한꺼번에 내지 않게 막는다
+POSTMORTEM_BACKSTOP_DAYS = 45
 #: 사후 분석에서 따져 볼 손실의 상한 — 손실 하나마다 시세를 몇 줄씩 읽는다
 POSTMORTEM_MAX = 30
 
-#: 업종 평균도 **분할만 반영한 가격**으로 (25.1150, 감사 재현) — 손실 종목의 `ret_20d` 가 그 잣대다(`db.SPLIT_ONLY_PRICE_SQL`).
+#: 업종 평균도 **분할만 반영한 가격**으로 (25.1150, 감사 재현) — 손실 종목의 `ret_20d` 가 그 잣대다
+#: (`db.SPLIT_ONLY_PRICE_SQL`).
 #: 원 종가로 내면 동종 6개 가운데 하나가 1:5 분할한 주에 업종 평균이 −16% 가 되고 주된 원인이 "업종" 으로 바뀌었다
 _P1 = db.SPLIT_ONLY_PRICE_SQL.replace("p.", "p1.")
 _P2 = db.SPLIT_ONLY_PRICE_SQL.replace("p.", "p2.")
@@ -195,17 +201,23 @@ SECTOR_AVG = (
 )
 
 
-def load_losses(client: TursoClient, now: datetime) -> tuple[int, int, list[postmortem.Loss]]:
-    """20거래일 성적이 이번 주 나온 신호와 그 가운데 손실의 몫 (docs/reports.md 3.8, 25.998)."""
-    a, b = ((now - timedelta(days=d)).date().isoformat() for d in POSTMORTEM_ENTRY_DAYS)
+def load_losses(
+    client: TursoClient, now: datetime, through: str | None = None, 끝: list[str] | None = None
+) -> tuple[int, int, list[postmortem.Loss]]:
+    """지난 보고(`through`) 뒤 20거래일 성적이 나온 신호와 그 가운데 손실의 몫 (docs/reports.md 3.8, 25.998·25.1151).
+
+    `끝` 을 주면 이번에 본 진입일의 마지막 날을 넣는다 — 보낸 뒤 `through` 로 적는다."""
+    한계 = (now - timedelta(days=POSTMORTEM_BACKSTOP_DAYS)).date().isoformat()
     rows = client.execute(
         "SELECT o.stock_id, COALESCE(s.name_ko, s.name_en, s.ticker), o.horizon, o.entry_date, o.ret_20d,"
         " o.bench_ret_20d, s.sector, s.country FROM signal_outcomes o JOIN stocks s ON s.id = o.stock_id"
         # `days_available >= 20` 을 걸지 않는다 (25.1149) — 성적표는 상장폐지·거래정지로 끊긴 신호의 `ret_20d` 를
         # 마지막 종가로 채운다(25.696). 그 조건은 `ret_20d IS NOT NULL` 과 겹치고 **끊긴 손실만** 걸러 냈다(생존편향)
-        " WHERE o.entry_date BETWEEN ? AND ? AND o.ret_20d IS NOT NULL",
-        [a, b],
+        " WHERE o.entry_date > ? AND o.ret_20d IS NOT NULL",
+        [max(through or "", 한계)],
     ).rows
+    if 끝 is not None and rows:
+        끝.append(max(str(r[3]) for r in rows))
     losses = []
     손실들 = sorted((r for r in rows if float(r[4]) < 0), key=lambda r: float(r[4]))
     for r in 손실들[:POSTMORTEM_MAX]:
@@ -324,8 +336,9 @@ def run(dry_run: bool = False, force: bool = False) -> int:
         )
         rot_lines = column_rot.render(rot, checked, MAX_LINES) + [f"  (못 본 표: {e})" for e in rot_errors[:2]]
         # 틀린 추천 사후 분석 (25.998) — 읽기에 실패하면 절만 빠진다(요약은 나간다)
+        본_끝: list[str] = []
         try:
-            총, 손실수, 손실 = load_losses(client, now)
+            총, 손실수, 손실 = load_losses(client, now, db.get_setting(client, POSTMORTEM_THROUGH_KEY), 본_끝)
             사후 = postmortem.render(총, 손실, 손실수)
         except Exception as exc:  # noqa: BLE001 — 곁다리 절이다
             사후 = [f"지난 추천 사후 분석을 못 했습니다 ({type(exc).__name__})"]
@@ -335,6 +348,9 @@ def run(dry_run: bool = False, force: bool = False) -> int:
         sent = 0
         if not dry_run:
             sent = len(telegram.send(text))
+            # 보낸 뒤에만 넘긴다 — 찍기만 하는 실행이 다음 주 보고를 먹지 않게
+            if 본_끝:
+                db.set_setting(client, POSTMORTEM_THROUGH_KEY, 본_끝[0])
         db.finish_batch_run(
             client, run_id, status="success",
             step_log={"runs": len(runs), "sent_chunks": sent, "stale": [j for j, _ in stale_jobs(last, now)],
