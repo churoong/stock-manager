@@ -36,8 +36,9 @@ JOB_NAME = "valuation_bands"
 ANNUAL_REPORT_CODE = dart.ANNUAL_REPORT_CODE
 # 가격을 한 번에 읽을 종목 수. 40 × 750일 = 3만 행, 응답 수 MB 안쪽
 PRICE_CHUNK = 40
-# 750 거래일을 넉넉히 덮는 달력 일수 (휴장일 포함)
-LOOKBACK_CALENDAR_DAYS = 1100
+# 750 거래일을 넉넉히 덮는 달력 일수 (휴장일 포함). 1100 은 국내 거래일 732~735 로 750 에 못 미쳐 이 표의 밴드가
+# 신호 밴드(최근 750 행)보다 짧았다 — 1150 은 국내 763~768·미국 789~791 (25.1146, XKRX·XNYS 달력으로 셈)
+LOOKBACK_CALENDAR_DAYS = 1150
 
 _COLS = (
     "stock_id, as_of_date, metric, current_value, p20, p30, p50, p80, sample, band_rank,"

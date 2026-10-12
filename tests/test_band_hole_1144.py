@@ -59,3 +59,22 @@ def test_신호_밴드도_같은_가격을_넘긴다() -> None:
 def test_미국은_원_종가를_그대로_쓴다() -> None:
     줄 = [{"close": 10, "adj_close": 9}, {"close": 11, "adj_close": None}]
     assert adj.split_only_prices(줄, "US") == [10.0, 11.0]
+
+
+def test_달력_창이_두_시장_모두_BAND_DAYS_거래일을_덮는다() -> None:
+    """1100 일은 국내 거래일 732~735 라 신호 밴드(750 행)보다 짧았다 (docs/infra.md 25.1146)."""
+    from datetime import date, timedelta
+
+    import pandas as pd
+
+    from batch.core import calendar as cal
+    from batch.services import valuation_band as vb
+
+    for 시장 in ("KR", "US"):
+        달력 = cal.exchange_calendar(시장)
+        for 기준 in ("2025-10-10", "2026-02-20", "2026-10-12"):
+            끝 = date.fromisoformat(기준)
+            시작 = 끝 - timedelta(days=vbj.LOOKBACK_CALENDAR_DAYS)
+            # 질의는 `date > since` — 시작일은 빠진다
+            세션 = 달력.sessions_in_range(pd.Timestamp(시작 + timedelta(days=1)), pd.Timestamp(끝))
+            assert len(세션) >= vb.BAND_DAYS, (시장, 기준, len(세션))
