@@ -370,6 +370,12 @@ def run(
     # 파일의 종목 행은 `--only` 로 거르기 전에 따로 둔다 — 대조가 빈 번호를 채울 때 이름 없는 자리 대신 쓴다 (25.681)
     파일_종목 = [(table, sql) for table, sql in rows if table == "stocks"]
     if only:
+        # **파일에 없는 표 이름은 실패로** (25.1141, 백업 감사 재현) — `--only trade`(오타)가 "넣을 행 0" 에
+        # 성공으로 끝나 매매를 되살렸다고 믿게 했다
+        없는표 = sorted(only - {table for table, _sql in rows})
+        if 없는표:
+            print(f"--only 의 표 {없는표} 가 이 백업에 없습니다(오타이거나 다른 범위의 백업). **넣지 않습니다**")
+            return 1
         rows = [(table, sql) for table, sql in rows if table in only]
     counts: dict[str, int] = {}
     for table, _sql in rows:

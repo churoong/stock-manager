@@ -229,8 +229,27 @@ def drill(path: Path, work_db: str | None = None) -> DrillResult:
     ]  # fmt: skip
     if not expected:
         errors.append("백업에 행 수 표식(-- rows)이 없다 — 옛 백업이라 대조할 수 없다")
+    else:
+        errors.extend(사람표_점검(expected))
     return DrillResult(ok=not mismatches and not errors, expected=expected, actual=actual, inserted=inserted,
                        mismatches=mismatches, errors=errors, skipped=sorted(건너뛴표))  # fmt: skip
+
+
+#: 백업에 **반드시** 표식이 있어야 하는 표 — 사람이 넣은 것 가운데 늘 쓰는 둘 (25.1141, 백업 감사 재현)
+사람표 = ("trades", "settings")
+
+
+def 사람표_점검(expected: dict[str, int]) -> list[str]:
+    """빈 백업·표가 빠진 백업을 통과시키지 않는다 (docs/infra.md 25.1141, 백업 감사 재현).
+
+    예전 리허설은 파일이 스스로 적어 둔 행 수와만 대조해, 빈 DB 에서 받은 백업(trades 0/0)도
+    trades·settings 구획을 통째로 지운 백업도 `ok` 였다 — 잃으면 끝인 자료를 지키는지 묻는 리허설이
+    그 자료가 없는 파일을 합격시켰다.
+    """
+    out = [f"백업에 {t} 표가 없다 — 사람이 넣은 자료가 빠진 백업이다" for t in 사람표 if t not in expected]
+    if not out and all(expected.get(t, 0) == 0 for t in 사람표):
+        out.append("매매·설정이 모두 0행이다 — 원본이 비어 있었거나 덤프가 빈 DB 를 읽었다")
+    return out
 
 
 def record(result: DrillResult, path: Path) -> None:

@@ -106,6 +106,8 @@ def test_마이그레이션이_미리_채운_표는_덮어쓰고_마이그레이
             "INSERT INTO cron_heartbeats (job, market, called_at, outcome, detail, calls_today, day)"
             " VALUES ('health', 'ALL', 't', 'ok', '{}', 1, 'd');\n-- rows cron_heartbeats 1\n"
             "INSERT INTO step0_check (id, checked_at, env) VALUES (1, 't', '{}');\n-- rows step0_check 1\n"
+            # 사람이 넣은 표 표식 (25.1141 — 없으면 리허설이 실패한다)
+            "INSERT INTO settings (key, value, updated_at) VALUES ('a', 'b', 't');\n-- rows settings 1\n-- rows trades 0\n"
             "COMMIT;\n"
         )
     r = d.drill(path, work_db=str(tmp_path / "w.db"))
@@ -127,3 +129,25 @@ def test_값_안의_CR_은_되살릴_때_그대로다(tmp_path: Path) -> None:
     assert 값 in sql
     (_, sql2), _주석 = list(load()._stream(path))  # 마지막은 주석 묶음
     assert 값 in sql2
+
+
+def test_매매·설정이_빠졌거나_비면_통과시키지_않는다(tmp_path: Path) -> None:
+    """빈 DB 에서 받은 백업·구획을 지운 백업도 `ok` 였다 (docs/infra.md 25.1141, 백업 감사 재현)."""
+    d = load()
+    assert d.사람표_점검({"trades": 2, "settings": 1}) == []
+    assert d.사람표_점검({"trades": 0, "settings": 3}) == []  # 매매를 다 지운 사람도 있다 — 설정이 있으면 통과
+    assert d.사람표_점검({"trades": 0, "settings": 0})[0].startswith("매매·설정이 모두 0행")
+    assert "trades" in d.사람표_점검({"settings": 1})[0]
+    path = tmp_path / "empty.sql.gz"
+    with gzip.open(path, "wt", encoding="utf-8") as f:
+        f.write("BEGIN;\n-- rows trades 0\n-- rows settings 0\nCOMMIT;\n")
+    assert not d.drill(path, work_db=str(tmp_path / "w.db")).ok
+
+
+def test_only_오타는_실패한다(tmp_path: Path, capsys) -> None:  # noqa: ANN001
+    from scripts import restore_backup as restore
+
+    path = _backup(tmp_path)
+    assert restore.run(path, {"trade"}, None, dry_run=True) == 1
+    assert "trade" in capsys.readouterr().out
+    assert restore.run(path, {"trades"}, None, dry_run=True) == 0
