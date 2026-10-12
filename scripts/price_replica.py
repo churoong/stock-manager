@@ -36,7 +36,8 @@ def _gate_allows_build(remote) -> tuple[bool, str]:
     spec.loader.exec_module(gate)  # type: ignore[union-attr]
     남음 = db.remaining_read_budget_or_none(remote)
     used = None if 남음 is None else db.TURSO_MONTHLY_READ_LIMIT - 남음
-    return gate.decide(used, BUILD_ESTIMATE, datetime.now(UTC))
+    # 진도선은 보지 않는다 (25.1135) — 사본이 있으면 일일 배치의 시세 읽기가 줄어 1~2주 안에 만든 값을 돌려받는다
+    return gate.decide(used, BUILD_ESTIMATE, datetime.now(UTC), pace=False)
 
 
 def _output(key: str, value: str) -> None:

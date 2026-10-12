@@ -51,18 +51,23 @@ def month_progress(now: datetime) -> tuple[float, float]:
 
 
 def decide(
-    used: int | None, estimate: int, now: datetime, limit: int = db.TURSO_MONTHLY_READ_LIMIT
+    used: int | None, estimate: int, now: datetime, limit: int = db.TURSO_MONTHLY_READ_LIMIT, *, pace: bool = True
 ) -> tuple[bool, str]:
-    """(들어가도 되나, 사람이 읽을 문장). 이번 달 쓴 양을 모르면 들어간다."""
+    """(들어가도 되나, 사람이 읽을 문장). 이번 달 쓴 양을 모르면 들어간다.
+
+    `pace=False` 는 **이후 읽기를 줄이는 일**(시세 사본 처음 만들기)에 쓴다 (docs/infra.md 25.1135).
+    진도선은 보지 않고 월말까지 핵심 작업 몫을 남기는 상한선만 본다. 진도선은 "지금 써도 되나" 를 묻는데,
+    사본은 쓰는 만큼 뒤에서 아끼므로 진도에 뒤처진 달일수록 오히려 먼저 만들어야 한다. 예전에는 진도에 막혀
+    10월 내내 미뤄졌고 그동안 일일 배치가 날마다 시세를 Turso 에서 읽었다"""
     if used is None:
         return True, f"이번 달 읽기를 재지 못해 들어갑니다 (예상 {estimate:,}행)"
     몫, 남은날 = month_progress(now)
     진도선 = int(limit * 몫 + limit * PACE_SLACK)
     상한선 = int(limit - CORE_DAILY_READS * 남은날)
-    허용 = min(진도선, 상한선)
+    허용 = min(진도선, 상한선) if pace else 상한선
+    진도글 = f"진도 {몫:.0%}·여유 {PACE_SLACK:.0%} → {진도선:,}" if pace else "진도선 보지 않음 — 이후 읽기를 줄이는 일"
     글 = (f"이번 달 {used:,}행 + 예상 {estimate:,}행 = {used + estimate:,}행, 허용선 {허용:,}행"
-          f" (진도 {몫:.0%}·여유 {PACE_SLACK:.0%} → {진도선:,}"
-          f" / 남은 {남은날:.1f}일 몫을 뺀 상한 {상한선:,})")  # fmt: skip
+          f" ({진도글} / 남은 {남은날:.1f}일 몫을 뺀 상한 {상한선:,})")  # fmt: skip
     if used + estimate <= 허용:
         return True, f"{글} — 들어갑니다"
     return False, f"{글} — 미룹니다 (넘기면 월말 전에 한도가 바닥나 일일 리포트·웹이 함께 멈춘다, infra 24절·25.886)"

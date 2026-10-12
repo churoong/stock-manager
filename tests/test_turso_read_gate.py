@@ -60,3 +60,20 @@ def test_문이_미루면_뒤_단계가_모두_서는지() -> None:
         assert any("turso_read_gate.py" in str(s.get("run", "")) for s in steps.values()), 이름
         for 단계 in 단계들:
             assert "steps.gate.outputs.deferred != 'true'" in str(steps[단계].get("if", "")), f"{이름} {단계}"
+
+
+def test_사본_만들기는_진도선이_아니라_상한만_본다() -> None:
+    """10-12 실측: 3억 6천만(진도선 약 2억 300만 넘음)이라 사본(760만)이 늘 미뤄졌다 — 그동안 일일 배치가 날마다 시세를 읽었다 (25.1135)."""
+    지금 = datetime(2026, 10, 12, 1, 37, tzinfo=UTC)
+    assert gate.decide(359_970_004, 7_600_000, 지금, 한도)[0] is False  # 진도 문 그대로면 미룬다
+    ok, 글 = gate.decide(359_970_004, 7_600_000, 지금, 한도, pace=False)
+    assert ok and "진도선 보지 않음" in 글
+    # 월말 핵심 몫까지 먹으면 사본도 미룬다
+    assert gate.decide(470_000_000, 7_600_000, datetime(2026, 10, 25, tzinfo=UTC), 한도, pace=False)[0] is False
+
+
+def test_사본은_진도선을_보지_않게_부른다() -> None:
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parents[1] / "scripts" / "price_replica.py").read_text(encoding="utf-8")
+    assert "gate.decide(used, BUILD_ESTIMATE, datetime.now(UTC), pace=False)" in src
