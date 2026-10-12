@@ -78,3 +78,15 @@ def test_달력_창이_두_시장_모두_BAND_DAYS_거래일을_덮는다() -> N
             # 질의는 `date > since` — 시작일은 빠진다
             세션 = 달력.sessions_in_range(pd.Timestamp(시작 + timedelta(days=1)), pd.Timestamp(끝))
             assert len(세션) >= vb.BAND_DAYS, (시장, 기준, len(세션))
+
+
+def test_신호_가격_계열도_빈_행을_메우고_창_첫머리까지_메운다() -> None:
+    """신호 가격 계열(이동평균·이격도 재료)도 `COALESCE` 로 원 종가를 넣었다 (docs/infra.md 25.1156)."""
+    mem = _mem()  # 09-01·02 100, 09-03 빈 행(1000), 09-04 100, 09-07 분할 뒤 100
+    가격 = sj.load_recent_prices_for(mem, [1], "2026-09-08", 4)  # type: ignore[arg-type]
+    assert [(d, p) for d, p, _ in 가격[1]] == [
+        ("2026-09-02", 100.0), ("2026-09-03", 100.0), ("2026-09-04", 100.0), ("2026-09-07", 100.0),
+    ]
+    # 창 첫 행이 빈 행이어도(앞 한 행을 더 읽어) 메운다
+    가격 = sj.load_recent_prices_for(mem, [1], "2026-09-08", 3)  # type: ignore[arg-type]
+    assert [p for _, p, _ in 가격[1]] == [100.0, 100.0, 100.0]

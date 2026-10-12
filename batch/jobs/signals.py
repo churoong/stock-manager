@@ -139,7 +139,8 @@ def load_recent_prices(
 RECENT_PRICES_FOR_SQL = (
     # 하위 질의를 `j.value`(종목 번호)에 건다 — `p.stock_id` 에 걸면 같은 표라 날짜 범위를 색인에 못 쓰고
     # 종목의 전 이력을 훑었다(질의 계획: date<? 만). 이 모양은 date>? AND date<? 범위로 찾는다 (docs/infra.md 25.1033)
-    "SELECT p.stock_id, p.date, COALESCE(p.adj_close, p.close) AS close, p.value"
+    # 수정주가와 원 종가를 함께 읽어 가운데 빈 행을 메운다 (`adjust.fill_adjusted`, 25.1156)
+    "SELECT p.stock_id, p.date, p.adj_close, p.close, p.value"
     " FROM json_each(?) j JOIN prices p ON p.stock_id = j.value WHERE p.date <= ?"
     "  AND p.date >= COALESCE((SELECT x.date FROM prices x WHERE x.stock_id = j.value AND x.date <= ?"
     "    ORDER BY x.date DESC LIMIT 1 OFFSET ? - 1), '')"
@@ -150,12 +151,20 @@ RECENT_PRICES_FOR_SQL = (
 def load_recent_prices_for(
     client: TursoClient, stock_ids: list[int], as_of: str, days: int = RECENT_DAYS
 ) -> dict[int, list[tuple[str, float, float | None]]]:
-    """`load_recent_prices` 와 같은 것을 고른 종목만."""
+    """`load_recent_prices` 와 같은 것을 고른 종목만.
+
+    **수정주가 가운데 빈 행은 직전 계수로 메운다** (25.1156) — `COALESCE(adj_close, close)` 는 분할 전 구간 한가운데
+    원 종가(10배)를 넣어 이동평균·이격도가 그 뒤 60일 동안 틀어졌다. 지표·밴드(25.1101·25.1144)와 같은 규칙이다.
+    창 첫머리가 빈 행이면 "앞 끝" 으로 원 종가가 남으므로(25.1145) **한 행 더** 읽어 메우는 데만 쓰고 버린다."""
+    묶음: dict[int, list[dict]] = {}
+    for row in client.execute(RECENT_PRICES_FOR_SQL, [json.dumps(stock_ids), as_of, as_of, days + 1]).dicts():
+        묶음.setdefault(int(row["stock_id"]), []).append(row)
     out: dict[int, list[tuple[str, float, float | None]]] = {}
-    for row in client.execute(RECENT_PRICES_FOR_SQL, [json.dumps(stock_ids), as_of, as_of, days]).dicts():
-        if row["close"] is not None:
-            out.setdefault(int(row["stock_id"]), []).append(
-                (str(row["date"]), float(row["close"]), _opt_float(row["value"])))
+    for sid, 줄 in 묶음.items():
+        점 = [(str(r["date"]), float(px), _opt_float(r["value"]))
+             for r, (px, _) in zip(줄, adj.fill_adjusted(줄), strict=True) if px is not None]  # fmt: skip
+        if 점:
+            out[sid] = 점[-days:]
     return out
 
 
