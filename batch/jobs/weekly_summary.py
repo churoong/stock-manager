@@ -326,7 +326,7 @@ def compose(
 #: 이 안에 성공한 요약이 있으면 다시 보내지 않는다 (25.1015) — 늦게 온 GitHub 예약과 따라잡기가 겹쳐도 한 통
 RESEND_GUARD_DAYS = 5
 ALREADY_SENT_SQL = (
-    "SELECT MAX(started_at) FROM batch_runs WHERE job_name = 'weekly_summary' AND status = 'success'"
+    "SELECT MAX(started_at) FROM batch_runs WHERE job_name = 'weekly_summary' AND status IN ('success', 'partial')"
     " AND started_at >= ?"
 )
 
@@ -365,16 +365,23 @@ def run(dry_run: bool = False, force: bool = False) -> int:
                        postmortem_lines=사후)  # fmt: skip
         print(text)
         sent = 0
+        뒤경고: list[str] = []
         if not dry_run:
             sent = len(telegram.send(text))
             # 보낸 뒤에만 넘긴다 — 찍기만 하는 실행이 다음 주 보고를 먹지 않게
             if 본_끝:
-                db.set_setting(client, POSTMORTEM_THROUGH_KEY, 본_끝[0])
+                # **보낸 뒤의 실패는 실행을 실패로 만들지 않는다** (docs/infra.md 25.1225). 예전에는 여기서 올라가
+                # `failed` 로 닫혔고, 다시 보내지 않는 검사는 성공만 봐 따라잡기·재실행이 요약을 한 번 더 보냈다
+                try:
+                    db.set_setting(client, POSTMORTEM_THROUGH_KEY, 본_끝[0])
+                except Exception as exc:  # noqa: BLE001 — 이미 보냈다. 다음 주 사후 분석이 같은 손실을 한 번 더 말할 뿐이다
+                    뒤경고.append(f"사후 분석 진척을 적지 못함: {type(exc).__name__}")
         db.finish_batch_run(
-            client, run_id, status="success",
+            client, run_id, status="partial" if 뒤경고 else "success",
             step_log={"runs": len(runs), "sent_chunks": sent, "stale": [j for j, _ in stale_jobs(last, now)],
                       "adjust_needed": adjust_needed(runs),
-                      "rot": [f.text for f in rot], "rot_checked": checked, "rot_errors": rot_errors},
+                      "rot": [f.text for f in rot], "rot_checked": checked, "rot_errors": rot_errors,
+                      **({"warnings": 뒤경고} if 뒤경고 else {})},
         )  # fmt: skip
         return 0
     except Exception as exc:
