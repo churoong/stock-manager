@@ -86,6 +86,26 @@ FINANCE_LEXICON: dict[str, float] = {
 #: 38일이면 `delta_30d` 에 22일 동안 옛 판 점수가 섞였다). VADER 는 가벼워 두 달치도 싸다
 RESCORE_DAYS = 61
 
+#: 감성 일일 질의 셋 — `news` 를 바깥으로 고정해(CROSS JOIN) 날짜 색인(`idx_news_published`, 0064)을 탄다 (25.1179)
+PENDING_SQL = (
+    "SELECT n.id, n.stock_id, n.title, COALESCE(s.name_ko, s.name_en, s.ticker) AS name FROM news n"
+    " CROSS JOIN stocks s"
+    " LEFT JOIN article_sentiments a ON a.news_id = n.id AND a.method = ?"
+    " WHERE s.id = n.stock_id AND n.published_at >= ? AND s.country = ? AND n.lang = ?"
+    " AND (a.id IS NULL OR (? <> '' AND COALESCE(a.method_version, '') <> ?))"
+)
+WINDOW_SQL = (
+    "SELECT n.stock_id, n.title, n.published_at, a.score FROM news n CROSS JOIN stocks s"
+    " JOIN article_sentiments a ON a.news_id = n.id AND a.method = ?"
+    " WHERE s.id = n.stock_id AND n.published_at >= ? AND n.published_at <= ? AND s.country = ?"
+)
+UNSCORED_SQL = (
+    "SELECT n.stock_id, COUNT(*) FROM news n CROSS JOIN stocks s"
+    " LEFT JOIN article_sentiments a ON a.news_id = n.id AND a.method = ?"
+    " WHERE s.id = n.stock_id AND n.published_at > ? AND n.published_at <= ? AND s.country = ?"
+    " AND a.news_id IS NULL GROUP BY n.stock_id"
+)
+
 #: 보정 사전의 판. 사전을 바꾸면 올린다 — 판이 다른 미국 기사는 다시 채점된다 (25.545)
 FINANCE_LEXICON_VERSION = 2
 
@@ -241,13 +261,13 @@ def run(market: str, as_of: str | None = None, score: bool | None = None) -> int
         # 조건이 없어 전 이력을 다시 쓰고 있었다. 창 밖 기사는 어느 점수에도 들어가지 않는다
         현재판 = vader_method_version() if market == "US" else ""
         재채점_시작 = (date.fromisoformat(as_of) - timedelta(days=RESCORE_DAYS)).isoformat()
+        # **날짜 범위로 기사를 먼저 고른다** (25.1179, 감사 재현)
+        # 미채점 기사에도 `published_at >= 재채점_시작` 을 건다.
+        # 창 밖 기사는 어느 점수에도 쓰이지 않는다. `news` 를 바깥으로 고정(CROSS JOIN)해 `idx_news_published` 를 타게
+        # 한다 — 예전엔 news·article_sentiments 를 통째로 훑어 이력이 쌓일수록 매일 읽는 양이 늘었다
         pending = client.execute(
-            "SELECT n.id, n.stock_id, n.title, COALESCE(s.name_ko, s.name_en, s.ticker) AS name FROM news n"
-            " JOIN stocks s ON s.id = n.stock_id"
-            " LEFT JOIN article_sentiments a ON a.news_id = n.id AND a.method = ?"
-            " WHERE s.country = ? AND n.lang = ? AND (a.id IS NULL OR (? <> ''"
-            "   AND COALESCE(a.method_version, '') <> ? AND n.published_at >= ?))",
-            [method, market, lang, 현재판, 현재판, 재채점_시작],
+            PENDING_SQL,
+            [method, 재채점_시작, market, lang, 현재판, 현재판],
         ).dicts() if score else []
         scored = 0
         못_매김 = 0
@@ -289,10 +309,9 @@ def run(market: str, as_of: str | None = None, score: bool | None = None) -> int
         since = (moment - timedelta(days=st.WINDOW_DAYS * 2 + 1)).isoformat()
         날것: dict[int, list[tuple[str, datetime, float]]] = {}
         for r in client.execute(
-            "SELECT n.stock_id, n.title, n.published_at, a.score FROM news n JOIN stocks s ON s.id = n.stock_id"
-            " JOIN article_sentiments a ON a.news_id = n.id AND a.method = ?"
-            " WHERE s.country = ? AND n.published_at >= ? AND n.published_at <= ?",
-            [method, market, since, moment.isoformat()],
+            # news 를 바깥으로 고정해 날짜 색인으로 고른다 (25.1179)
+            WINDOW_SQL,
+            [method, since, moment.isoformat(), market],
         ).dicts():
             published = datetime.fromisoformat(str(r["published_at"]).replace("Z", "+00:00"))
             날것.setdefault(int(r["stock_id"]), []).append((str(r["title"] or ""), published, float(r["score"])))
@@ -305,11 +324,8 @@ def run(market: str, as_of: str | None = None, score: bool | None = None) -> int
         현지_시각 = moment.astimezone(ZoneInfo(cal.MARKETS[market.upper()]["timezone"]))
         창_시작 = (현지_시각 - timedelta(days=st.WINDOW_DAYS)).astimezone(UTC).isoformat()  # 저장 형식과 같은 UTC
         for r in client.execute(
-            "SELECT n.stock_id, COUNT(*) FROM news n JOIN stocks s ON s.id = n.stock_id"
-            " LEFT JOIN article_sentiments a ON a.news_id = n.id AND a.method = ?"
-            " WHERE s.country = ? AND n.published_at > ? AND n.published_at <= ? AND a.news_id IS NULL"
-            " GROUP BY n.stock_id",
-            [method, market, 창_시작, moment.isoformat()],
+            UNSCORED_SQL,
+            [method, 창_시작, moment.isoformat(), market],
         ).rows:
             미채점[int(r[0])] = int(r[1])
         # 판(1보·2보·종합)만 다른 기사는 하나로 (25.647)
