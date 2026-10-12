@@ -59,6 +59,8 @@ def 읽는표() -> set[str]:
 
 읽는것 = 읽는표()
 신선도표 = {m.lower() for m in re.findall(r"FROM\s+([a-z_][a-z0-9_]*)", HEALTH, re.I)}
+# 25.1212 부터 날짜 색인이 있는 표는 `최근날("표", …)` 으로 적는다
+신선도표 |= {m.lower() for m in re.findall(r'최근날\("([a-z_][a-z0-9_]*)"', HEALTH)}
 
 
 def test_읽어_냈다() -> None:

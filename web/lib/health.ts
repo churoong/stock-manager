@@ -713,9 +713,18 @@ export interface FreshnessRow {
  * 예전에는 앞 10자(`substr(…, 1, 10)`)를 날짜로 써서, 08:27 KST(= 전날 23:27 UTC)에 만든 감시 목록이 **만든 날 아침부터
  * "1일 전"** 이었다. 판정의 오늘은 한국 날짜(`freshnessVerdict`)라 두 잣대가 섞였다. 한국은 서머타임이 없어 +9 시간이 고정이다
  */
+/**
+ * 그 나라의 가장 최근 날짜 — **날짜 색인을 내림차순으로 따라가 첫 행에서 멈춘다** (docs/infra.md 25.1212). 예전 `MAX(x.날) … JOIN stocks`
+ * 는 통계(ANALYZE)가 있으면 종목 쪽부터 돌아 그 나라 행을 **전부** 읽는 계획이 됐다(재현: 시세 12만 행 — 운영 시세는 수백만 행).
+ * 25.1204(마지막 계산일)와 같은 모양. 날짜로 시작하는 색인이 있는 표만 이 모양으로 쓴다. 행이 없으면 빈 결과 — 경로가 null 로 읽는다
+ */
+function 최근날(표: string, 별칭: string, 열: string, 나라: "KR" | "US"): string {
+  return `SELECT ${별칭}.${열} AS v FROM ${표} ${별칭} CROSS JOIN stocks s ON s.id = ${별칭}.stock_id WHERE s.country = '${나라}' ORDER BY ${별칭}.${열} DESC LIMIT 1`;
+}
+
 export const FRESHNESS: FreshnessRow[] = [
-  { key: "prices_kr", label: "국내 시세", sql: "SELECT MAX(p.date) AS v FROM prices p JOIN stocks s ON s.id = p.stock_id WHERE s.country = 'KR'", every: "session" },
-  { key: "prices_us", label: "미국 시세", sql: "SELECT MAX(p.date) AS v FROM prices p JOIN stocks s ON s.id = p.stock_id WHERE s.country = 'US'", every: "session", restsOnD1: true },
+  { key: "prices_kr", label: "국내 시세", sql: 최근날("prices", "p", "date", "KR"), every: "session" },
+  { key: "prices_us", label: "미국 시세", sql: 최근날("prices", "p", "date", "US"), every: "session", restsOnD1: true },
   { key: "fx", label: "환율(USDKRW)", sql: "SELECT MAX(date) AS v FROM fx_rates WHERE pair = 'USDKRW'", every: "session", staleDays: FX_STALE_DAYS },
   // **나라별로 나눠서 본다 (2026-09-21).** 점수·신호·유니버스는 나라마다 따로 계산되고
   // (`scores.run(market)`·`signals.run(market)`), 지금은 미국이 통째로 쉬고 있다(25.14).
@@ -725,18 +734,18 @@ export const FRESHNESS: FreshnessRow[] = [
   // 값은 읽기 세 번이 늘지만 읽기는 넉넉하다(D1 하루 500만 행).
   // **점수는 거래일마다** (docs/infra.md 25.917, 감사). 25.889 가 주간 예약을 빼고 일일 배치가 매일 계산한다 — "week" 이면 점수 단계가 일일 배치 안에서
   // 계속 실패해도(일일 배치는 partial 로 끝나 무응답 감시를 피한다) 14일까지 초록이었다. 신호는 0건인 날이 정상이라 week 로 둔다
-  { key: "scores_kr", label: "점수(국내)", sql: "SELECT MAX(sc.as_of_date) AS v FROM scores sc JOIN stocks s ON s.id = sc.stock_id WHERE s.country = 'KR'", every: "session" },
-  { key: "scores_us", label: "점수(미국)", sql: "SELECT MAX(sc.as_of_date) AS v FROM scores sc JOIN stocks s ON s.id = sc.stock_id WHERE s.country = 'US'", every: "session", restsOnD1: true },
-  { key: "signals_kr", label: "매수 신호(국내)", sql: "SELECT MAX(sg.as_of_date) AS v FROM signals sg JOIN stocks s ON s.id = sg.stock_id WHERE s.country = 'KR'", every: "week" },
-  { key: "signals_us", label: "매수 신호(미국)", sql: "SELECT MAX(sg.as_of_date) AS v FROM signals sg JOIN stocks s ON s.id = sg.stock_id WHERE s.country = 'US'", every: "week", restsOnD1: true },
+  { key: "scores_kr", label: "점수(국내)", sql: 최근날("scores", "sc", "as_of_date", "KR"), every: "session" },
+  { key: "scores_us", label: "점수(미국)", sql: 최근날("scores", "sc", "as_of_date", "US"), every: "session", restsOnD1: true },
+  { key: "signals_kr", label: "매수 신호(국내)", sql: 최근날("signals", "sg", "as_of_date", "KR"), every: "week" },
+  { key: "signals_us", label: "매수 신호(미국)", sql: 최근날("signals", "sg", "as_of_date", "US"), every: "week", restsOnD1: true },
   // **나라마다 따로 본다** (docs/infra.md 25.247). 한 줄 MAX 였을 때는 국내 날짜가 미국 감성의 멈춤을 덮었다.
   // `sentiment_scores` 는 뉴스 크론이 아니라 `jobs/sentiment.run(market)` 이 시장마다 쓴다 — 크론이 초록이어도 채점·집계는 멈출 수 있다
-  { key: "sentiment_kr", label: "종목 감성(국내)", sql: "SELECT MAX(x.as_of_date) AS v FROM sentiment_scores x JOIN stocks s ON s.id = x.stock_id WHERE s.country = 'KR'", every: "session" },
-  { key: "sentiment_us", label: "종목 감성(미국)", sql: "SELECT MAX(x.as_of_date) AS v FROM sentiment_scores x JOIN stocks s ON s.id = x.stock_id WHERE s.country = 'US'", every: "session", restsOnD1: true },
+  { key: "sentiment_kr", label: "종목 감성(국내)", sql: 최근날("sentiment_scores", "x", "as_of_date", "KR"), every: "session" },
+  { key: "sentiment_us", label: "종목 감성(미국)", sql: 최근날("sentiment_scores", "x", "as_of_date", "US"), every: "session", restsOnD1: true },
   // **수급은 하루라도 빠지면 영영 빈다** (docs/infra.md 25.987) — KIS 가 30일만 주므로 한 달 넘게 멈추면 그 구간은 다시 못 받는다
   { key: "kr_flows", label: "국내 수급(투자자별·공매도·신용, KIS)", sql: "SELECT MAX(date) AS v FROM kr_flows", every: "session" },
-  { key: "universe_kr", label: "유니버스(국내)", sql: "SELECT MAX(um.snapshot_date) AS v FROM universe_members um JOIN stocks s ON s.id = um.stock_id WHERE s.country = 'KR'", every: "week" },
-  { key: "universe_us", label: "유니버스(미국)", sql: "SELECT MAX(um.snapshot_date) AS v FROM universe_members um JOIN stocks s ON s.id = um.stock_id WHERE s.country = 'US'", every: "week", restsOnD1: true },
+  { key: "universe_kr", label: "유니버스(국내)", sql: 최근날("universe_members", "um", "snapshot_date", "KR"), every: "week" },
+  { key: "universe_us", label: "유니버스(미국)", sql: 최근날("universe_members", "um", "snapshot_date", "US"), every: "week", restsOnD1: true },
   // **이 두 줄만 뜻이 반대다.** 나머지는 "최근일수록 싱싱하다" 인데 달력은 **미래 날짜**가
   // 정상이고, 오늘에 가까워질수록 위험하다 — 다 차면 장중 감시가 멈춘다(25.104).
   // 이름에 그 방향을 적어 둔다. 같은 격자에서 같은 잣대로 읽히면 안 된다
@@ -755,8 +764,8 @@ export const FRESHNESS: FreshnessRow[] = [
   // 재무와 같은 이유로 `report_date`(회계연도) 가 아니라 **받아 온 날**로 본다
   { key: "dividends_kr", label: "배당(국내)", sql: "SELECT date(MAX(d.fetched_at), '+9 hours') AS v FROM stock_dividends d JOIN stocks s ON s.id = d.stock_id WHERE s.country = 'KR'", every: "year" },
   { key: "dividends_us", label: "배당(미국)", sql: "SELECT date(MAX(d.fetched_at), '+9 hours') AS v FROM stock_dividends d JOIN stocks s ON s.id = d.stock_id WHERE s.country = 'US'", every: "year", restsOnD1: true },
-  { key: "metrics_kr", label: "성과 지표(국내)", sql: "SELECT MAX(m.as_of_date) AS v FROM performance_metrics m JOIN stocks s ON s.id = m.stock_id WHERE s.country = 'KR'", every: "week" },
-  { key: "metrics_us", label: "성과 지표(미국)", sql: "SELECT MAX(m.as_of_date) AS v FROM performance_metrics m JOIN stocks s ON s.id = m.stock_id WHERE s.country = 'US'", every: "week", restsOnD1: true },
+  { key: "metrics_kr", label: "성과 지표(국내)", sql: 최근날("performance_metrics", "m", "as_of_date", "KR"), every: "week" },
+  { key: "metrics_us", label: "성과 지표(미국)", sql: 최근날("performance_metrics", "m", "as_of_date", "US"), every: "week", restsOnD1: true },
   // 지수는 추세 필터(docs/signals.md 3.5)와 **베타**(25.65)의 재료다. 60일치가 없으면 베타가 빈다
   // **수정주가는 예약이 없다** (docs/infra.md 25.138). 사람이 `adjust-kr.yml` 을 손으로 돌린다.
   // 그래서 **마지막으로 언제 돌렸나**를 보인다 (25.924). 예전 식 "adj_close 가 있는 가장 늦은 날" 은
@@ -768,8 +777,8 @@ export const FRESHNESS: FreshnessRow[] = [
   // 미국이 통째로 쉬는 지금(25.14) **전체 MAX 는 국내 날짜를 보여 주고 "최신" 이라 말한다.**
   { key: "index_prices_kr", label: "지수(국내, 추세 필터·베타)", sql: "SELECT MAX(date) AS v FROM index_prices WHERE index_code IN ('KOSPI', 'KOSDAQ')", every: "session" },
   { key: "index_prices_us", label: "지수(미국, 추세 필터·베타)", sql: "SELECT MAX(date) AS v FROM index_prices WHERE index_code = 'SP500'", every: "session", restsOnD1: true },
-  { key: "valuation_bands_kr", label: "밸류에이션 밴드(국내, 장기 신호)", sql: "SELECT MAX(b.as_of_date) AS v FROM valuation_bands b JOIN stocks s ON s.id = b.stock_id WHERE s.country = 'KR'", every: "week" },
-  { key: "valuation_bands_us", label: "밸류에이션 밴드(미국, 장기 신호)", sql: "SELECT MAX(b.as_of_date) AS v FROM valuation_bands b JOIN stocks s ON s.id = b.stock_id WHERE s.country = 'US'", every: "week", restsOnD1: true },
+  { key: "valuation_bands_kr", label: "밸류에이션 밴드(국내, 장기 신호)", sql: 최근날("valuation_bands", "b", "as_of_date", "KR"), every: "week" },
+  { key: "valuation_bands_us", label: "밸류에이션 밴드(미국, 장기 신호)", sql: 최근날("valuation_bands", "b", "as_of_date", "US"), every: "week", restsOnD1: true },
   // 아래 다섯은 2026-09-23 에 더했다 (docs/infra.md 25.139).
   //
   // `tests/test_watch_names.py` 는 "주 1회·월 1회짜리는 /status 의 데이터 신선도로 본다"
@@ -783,8 +792,8 @@ export const FRESHNESS: FreshnessRow[] = [
   { key: "sectors_us", label: "업종(미국, 섹터 상한·업종별 z-score 의 재료)", sql: "SELECT date(MAX(sector_updated_at), '+9 hours') AS v FROM stocks WHERE country = 'US' AND sector IS NOT NULL", every: "month", restsOnD1: true },
   { key: "etf_profiles_kr", label: "ETF 프로필(국내, 장기 적립 탭)", sql: "SELECT MAX(pf.as_of_date) AS v FROM etf_profiles pf JOIN etfs e ON e.id = pf.etf_id WHERE e.country = 'KR'", every: "month" },
   { key: "etf_profiles_us", label: "ETF 프로필(미국, 장기 적립 탭)", sql: "SELECT MAX(pf.as_of_date) AS v FROM etf_profiles pf JOIN etfs e ON e.id = pf.etf_id WHERE e.country = 'US'", every: "month", restsOnD1: true },
-  { key: "accum_picks_kr", label: "적립 종목 판정(국내)", sql: "SELECT MAX(p.as_of_date) AS v FROM stock_accum_picks p JOIN stocks s ON s.id = p.stock_id WHERE s.country = 'KR'", every: "month" },
-  { key: "accum_picks_us", label: "적립 종목 판정(미국)", sql: "SELECT MAX(p.as_of_date) AS v FROM stock_accum_picks p JOIN stocks s ON s.id = p.stock_id WHERE s.country = 'US'", every: "month", restsOnD1: true },
+  { key: "accum_picks_kr", label: "적립 종목 판정(국내)", sql: 최근날("stock_accum_picks", "p", "as_of_date", "KR"), every: "month" },
+  { key: "accum_picks_us", label: "적립 종목 판정(미국)", sql: 최근날("stock_accum_picks", "p", "as_of_date", "US"), every: "month", restsOnD1: true },
   { key: "earnings_calendar_kr", label: "실적 일정(국내)", sql: "SELECT date(MAX(e.fetched_at), '+9 hours') AS v FROM earnings_calendar e JOIN stocks s ON s.id = e.stock_id WHERE s.country = 'KR'", every: "week" },
   { key: "earnings_calendar_us", label: "실적 일정(미국)", sql: "SELECT date(MAX(e.fetched_at), '+9 hours') AS v FROM earnings_calendar e JOIN stocks s ON s.id = e.stock_id WHERE s.country = 'US'", every: "week", restsOnD1: true },
   { key: "signal_outcomes_kr", label: "신호 성적표(국내, 복기)", sql: "SELECT date(MAX(computed_at), '+9 hours') AS v FROM signal_outcome_stats WHERE country = 'KR'", every: "week" },
