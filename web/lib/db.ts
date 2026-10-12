@@ -234,8 +234,10 @@ async function tursoBatch(
   }
   // 웹의 Turso 읽기도 월 카운터에 더한다 (docs/infra.md 25.891). 카운터가 본 작업을 막지 않는다
   if (read > 0) {
-    const { noteTursoReads, noteHeavyRead } = await import("@/lib/webUsage");
+    const { noteTursoReads, noteHeavyRead, noteRouteReads } = await import("@/lib/webUsage");
     await noteTursoReads(read, new Date(), (sts) => tursoBatch(sts)).catch(() => undefined);
+    // 경로·질의 모양별로도 (25.1176) — 작은 질의가 자주 도는 쪽은 무거운 읽기 문턱에 안 걸린다
+    await noteRouteReads(statements, read, new Date(), (sts) => tursoBatch(sts)).catch(() => undefined);
     // 어느 경로의 어떤 질의가 많이 훑었는지 (docs/health.md 7.2, 25.956) — 월 카운터는 합만 알고 출처를 모른다
     await noteHeavyRead(statements, read, new Date(), (sts) => tursoBatch(sts));
   }

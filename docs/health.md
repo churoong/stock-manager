@@ -198,6 +198,12 @@ data = {rows, count, route, sql(앞 300자)} — 같은 날 같은 모양이면 
 sent_at 을 처음부터 채운다 → 텔레그램 무응답 알림으로는 나가지 않는다. /status "최근 알림" 과 DB 에서 읽는다
 ```
 
+**경로별 웹 읽기** (2026-10-12, docs/infra.md 25.1176). 무거운 읽기 기록은 10월 내내 0 건이었는데 웹은 하루 1,500만 행 남짓을 읽었다 — 작은 질의가 자주
+도는 쪽이라 한 왕복 문턱으로는 못 잡는다. 그래서 **모든** 왕복의 행 수를 경로·질의 모양별로 모아, 월 카운터와 같은 1만 행(`READ_FLUSH_ROWS`)마다
+`job = web_reads`, kind = "경로 · 질의 모양" 한 행에 `data.rows`·`data.count` 를 더한다(`lib/webUsage.noteRouteReads`). /status 최근 알림에서는 뺀다.
+읽는 법: `SELECT kind, json_extract(data,'$.rows') r, json_extract(data,'$.count') c FROM health_alerts WHERE job='web_reads' AND local_date = ? ORDER BY r DESC`.
+서버리스 인스턴스가 사라질 때 1만 행 아래 몫은 잃는다(월 카운터와 같은 한계).
+
 - 문턱 20만 행: 시세 표 전체(약 700만 행)의 3%. 정상 화면 질의는 수천~수만 행이다 `[확인필요: 며칠 기록을 보고 문턱·출처를 적는다]`
 - 기록은 곁다리다 — 실패해도 본 질의 결과는 그대로 돌려주고, 기록 중의 기록은 하지 않는다. 기록 자체는 쓰기 1행, 읽기 0 행
 

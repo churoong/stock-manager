@@ -253,6 +253,77 @@ export async function noteHeavyRead(
   }
 }
 
+// ----------------------------------------------------------------------
+// 경로별 읽기 (docs/health.md 7.2, docs/infra.md 25.1176)
+// ----------------------------------------------------------------------
+/**
+ * 경로·질의 모양별 읽은 행을 **모두** 모아 둔다. 25.956 의 무거운 읽기(한 왕복 20만 행 넘음) 기록은 10월 내내 0 건이었는데 웹은
+ * 하루 1,500만 행 남짓을 읽었다 — 작은 질의가 자주 도는 쪽이라 문턱 기록으로는 못 잡는다. 월 카운터(25.891)와 같은 문턱
+ * (`READ_FLUSH_ROWS`)마다 `health_alerts`(job `web_reads`, 하루·경로·모양마다 한 행)에 행 수·횟수를 더한다. /status 최근 알림에서는 뺀다
+ */
+export const WEB_READS_JOB = "web_reads";
+
+export const WEB_READS_UPSERT = `INSERT INTO health_alerts (job, market, local_date, kind, message, data, created_at, sent_at)
+VALUES (?, 'ALL', ?, ?, ?, ?, ?, ?)
+ON CONFLICT (job, market, local_date, kind) DO UPDATE SET
+  message = excluded.message,
+  data = json_set(health_alerts.data,
+    '$.count', COALESCE(json_extract(health_alerts.data, '$.count'), 0) + json_extract(excluded.data, '$.count'),
+    '$.rows', COALESCE(json_extract(health_alerts.data, '$.rows'), 0) + json_extract(excluded.data, '$.rows'))`;
+
+const routePending = new Map<string, { rows: number; count: number }>();
+let routePendingRows = 0;
+let routeRecording = false;
+
+/** 모아 둔 경로별 행 수를 적을 문장들. 문턱 아래면 빈 목록이고 모은 것은 그대로 둔다 */
+export function routeReadStatements(now: Date): Array<{ sql: string; args: SqlValue[] }> {
+  if (routePendingRows < READ_FLUSH_ROWS) return [];
+  const stamp = now.toISOString();
+  const out = [...routePending.entries()].map(([kind, v]) => ({
+    sql: WEB_READS_UPSERT,
+    args: [WEB_READS_JOB, stamp.slice(0, 10), kind, `웹 읽기 ${kind}`, JSON.stringify({ rows: v.rows, count: v.count }), stamp, stamp] as SqlValue[],
+  }));
+  return out;
+}
+
+/** 한 왕복이 읽은 행을 경로·질의 모양에 더하고, 문턱을 넘으면 한 번에 적는다. 본 질의를 막지 않는다 */
+export async function noteRouteReads(
+  statements: Array<{ sql: string }>,
+  read: number,
+  now: Date,
+  send: (statements: Array<{ sql: string; args: SqlValue[] }>) => Promise<unknown>,
+  stack: string | undefined = new Error().stack,
+): Promise<void> {
+  if (routeRecording || !(read > 0) || statements.length === 0) return;
+  const kind = `${routeFromStack(stack)} · ${sqlShape(statements[0].sql)}`;
+  const 앞 = routePending.get(kind) ?? { rows: 0, count: 0 };
+  routePending.set(kind, { rows: 앞.rows + read, count: 앞.count + 1 });
+  routePendingRows += read;
+  const 문장 = routeReadStatements(now);
+  if (!문장.length) return;
+  const 보낸것 = new Map(routePending);
+  routePending.clear();
+  routePendingRows = 0;
+  routeRecording = true;
+  try {
+    await send(문장);
+  } catch {
+    // 못 적으면 되돌려 둔다 — 다음 문턱에 함께 간다
+    for (const [k, v] of 보낸것) {
+      const 지금 = routePending.get(k) ?? { rows: 0, count: 0 };
+      routePending.set(k, { rows: 지금.rows + v.rows, count: 지금.count + v.count });
+      routePendingRows += v.rows;
+    }
+  } finally {
+    routeRecording = false;
+  }
+}
+
+export function resetRoutePending(): void {
+  routePending.clear();
+  routePendingRows = 0;
+}
+
 export function peekTursoPending(): number {
   return tursoPending.reads;
 }

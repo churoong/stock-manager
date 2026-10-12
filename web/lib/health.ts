@@ -420,8 +420,9 @@ export function pickUsageRows<T extends { api_name: string; window_type: string;
   }));
 }
 
+// 경로별 웹 읽기 진단 행(`web_reads`, 25.1176)은 하루 수십 행이라 최근 알림을 덮는다 — 뺀다
 export const RECENT_HEALTH_ALERTS = `SELECT job, market, local_date, kind, message, created_at, sent_at
-FROM health_alerts ORDER BY created_at DESC LIMIT 10`;
+FROM health_alerts WHERE job <> 'web_reads' ORDER BY created_at DESC LIMIT 10`;
 
 export const CRON_HEARTBEATS = `SELECT job, market, called_at, outcome, detail, calls_today, day FROM cron_heartbeats
 ORDER BY job, market`;

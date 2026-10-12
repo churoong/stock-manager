@@ -35,6 +35,8 @@ const 삼켜도_되는_곳: Record<string, string> = {
     "무효 토큰 지우기는 곁다리다(25.986). 못 지우면 다음 호출이 다시 실패하고 다시 지운다 — 그 호출의 시세는 야후로 이미 받았다",
   "lib/db.ts::noteTursoReads(":
     "웹 Turso 읽기를 월 카운터에 더하는 곁다리다(25.891). 못 적어도 본 질의 결과는 그대로 돌려줘야 한다 — 못 적은 몫은 되돌려 다음에 적는다",
+  "lib/db.ts::noteRouteReads(":
+    "경로별 웹 읽기 진단 기록이다(25.1176). 못 적어도 본 질의 결과는 그대로 돌려줘야 한다 — 못 적은 몫은 되돌려 다음에 적는다",
   "app/api/alerts/route.ts::execute(ALERT_TOTALS)":
     "전체·안 읽은 수는 곁다리다(25.805). null 이면 화면이 예전처럼 목록 안에서 센다 — 알림 목록 전체를 500 으로 만들지 않는다",
   "app/api/cron/health/route.ts::watchTursoReturn()":
