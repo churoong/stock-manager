@@ -114,6 +114,11 @@ class HoldingInput:
     #: 최근 20거래일 안에 분할·병합 같은 기업행위가 감지됐나 (docs/infra.md 25.1093) — 장중 감시와 같은 판정
     #: (`monitor_targets.recent_action`). 수량은 사용자가 고치기 전까지 분할 전 값이라 손절·목표가 거짓일 수 있다
     corporate_action_recent: bool = False
+    #: 20거래일 안 **유상증자 권리락**만으로 확인된 계수 곱 (`monitor_targets.action_scale`, 25.1158).
+    #: 1.0 이 아니면 원가에
+    #: 곱해 수익률을 낸다 — 권리락 날 시세는 신주인수권 값만큼 기계적으로 떨어지는데(장중 손절선은 25.1140 부터 같은
+    #: 계수를 곱한다) 원가를 그대로 두면 실질 0% 인 날 "손절선에 닿았습니다" 가 났다
+    rights_scale: float = 1.0
     #: 매수 때(그때 쓰던 스냅샷)부터 지금까지 유니버스에 **한 번이라도** 들었나 (docs/infra.md 25.1095). None 은 모름 —
     #: 예전처럼 "빠졌습니다" 로 판정한다
     universe_included_since_buy: bool | None = None
@@ -142,8 +147,10 @@ def evaluate(h: HoldingInput, today: date, targets: dict | None = None) -> list[
 
     if h.market_value is not None and h.cost > 0:
         # 경계(정확히 −7% 등)가 부동소수 찌꺼기(−6.9999…)로 빗나가지 않게 소수 여섯째 자리에서 반올림
-        ret = round((h.market_value / h.cost - 1) * 100, 6)
-        shown = f"평가 수익률 {ret:+.1f}% (주가 기준, 수수료 포함 원가 대비)"
+        권리락 = h.rights_scale != 1.0 and h.rights_scale > 0
+        ret = round((h.market_value / (h.cost * (h.rights_scale if 권리락 else 1.0)) - 1) * 100, 6)
+        shown = f"평가 수익률 {ret:+.1f}% (주가 기준, 수수료 포함 원가 대비)" + (
+            f" — 유상증자 권리락 계수 {h.rights_scale:.4g} 를 원가에 반영" if 권리락 else "")
         # **묵은 종가로 판정하면 "닿았습니다" 가 거짓이 된다** (docs/infra.md 25.161).
         # 값을 지우지는 않는다 — 진짜로 손절선 아래일 수 있다. 대신 말한다 (25.136 과 같은 판단)
         묵음 = stale_price_days(h.price_date, today)
@@ -168,6 +175,12 @@ def evaluate(h: HoldingInput, today: date, targets: dict | None = None) -> list[
             [_criterion("기업행위", "최근 20거래일 안에 분할·병합 감지", "없어야 평가 수익률을 믿는다 — 수량 확인",
                         "prices·us_split_detections", h.price_date)]
             if h.corporate_action_recent
+            else []
+        ) + (
+            [_criterion("유상증자 권리락", f"계수 {h.rights_scale:.4g} (원가 × 계수와 견줌)",
+                        "권리락 하락은 손절이 아니다 — 장중 손절선과 같은 잣대 (25.1140·25.1158)",
+                        "prices·kr_corp_events", h.price_date)]
+            if 권리락
             else []
         )  # fmt: skip
         if ret <= rules["stop_pct"]:

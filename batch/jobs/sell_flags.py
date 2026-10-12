@@ -239,7 +239,8 @@ def load_holdings(client: TursoClient, today: date | None = None) -> tuple[list[
                 sentiment_date=s0.get("as_of_date"),
                 sentiment_ref_date=_감성_기준일(r["country"], today),
                 horizon_since=r["horizon_since"],
-                corporate_action_recent=_기업행위(client, sid, str(r["country"])),
+                corporate_action_recent=(행위 := _기업행위(client, sid, str(r["country"])))[0],
+                rights_scale=행위[1],
                 universe_included_since_buy=들었나,
             )
         )  # fmt: skip
@@ -282,16 +283,18 @@ def _수집_시작(client: TursoClient, country: str, 캐시: dict[str, str | No
     return 캐시[country]
 
 
-def _기업행위(client: TursoClient, stock_id: int, country: str) -> bool:
-    """최근 20거래일 안의 분할·병합 — 장중 감시(`monitor_targets.recent_action`, 25.533)와 같은 판정 (25.1093).
+def _기업행위(client: TursoClient, stock_id: int, country: str) -> tuple[bool, float]:
+    """(최근 20거래일 안의 분할·병합이 있나, 유상증자 권리락 계수) — 장중 감시(`monitor_targets.action_scale`,
+    25.533·25.1139)와 같은 판정 (25.1093·25.1158). 계수는 권리락만으로 확인됐을 때만 1.0 이 아니다.
 
-    읽지 못하면 False(예전과 같다) — 이 표시는 문장에 말을 덧붙일 뿐 플래그를 바꾸지 않는다."""
+    읽지 못하면 (False, 1.0)(예전과 같다) — 문장에 말을 덧붙이거나 원가를 맞출 뿐, 못 읽은 것이 판정을 막지 않는다."""
     from batch.jobs import monitor_targets
 
     try:
-        return monitor_targets.recent_action(client, stock_id, "US" if country == "US" else "KR")
+        배율 = monitor_targets.action_scale(client, stock_id, "US" if country == "US" else "KR")
     except Exception:  # noqa: BLE001 — 덧붙이는 말이 판정을 막으면 안 된다
-        return False
+        return False, 1.0
+    return (True, 1.0) if 배율 is None else (False, float(배율))
 
 
 def _팩터가중치_다름(a: Any, b: Any) -> bool:
