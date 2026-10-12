@@ -1,0 +1,51 @@
+name: DART 감사의견 필드 탐침
+
+# 계속기업·감사의견 사실 줄을 만들기 전에 DART 응답 칸을 한 번 본다 (docs/factors.md 12.20, docs/infra.md 25.1138).
+# 손으로만 돌린다. 운영 DB 를 읽지도 쓰지도 않는다. 결과는 비공개 운영 저장소 이슈로만(공개 로그엔 줄 수만).
+on:
+  workflow_dispatch:
+    inputs:
+      tickers:
+        description: 쉼표로 구분한 종목코드 (비우면 기본 10종목)
+        type: string
+        default: ""
+      year:
+        description: 사업연도
+        type: string
+        default: "2025"
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TICKERS: ${{ inputs.tickers }}
+      YEAR: ${{ inputs.year }}
+      OFFLINE_MODE: "0"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: 탐침
+        env:
+          DART_API_KEY: ${{ secrets.DART_API_KEY }}
+        run: |
+          set -o pipefail
+          python scripts/probe_dart_audit.py --tickers "$TICKERS" --year "${YEAR:-2025}" 2>&1 | python scripts/ops_tee.py audit-probe.txt
+      - name: 결과를 비공개 이슈로
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPS_REPO: ${{ secrets.OPS_REPO }}
+          OPS_TOKEN: ${{ secrets.OPS_TOKEN }}
+        run: python scripts/publish_output.py --title "운영 출력 (클라우드 세션용)" --file audit-probe.txt --note "DART 감사의견 필드 탐침"
