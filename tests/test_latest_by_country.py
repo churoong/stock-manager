@@ -197,4 +197,5 @@ def test_stress_가_나라별로_잡는다() -> None:
     # 25.359 부터는 아침 리포트와 같은 "마지막 계산일" 함수를 쓴다 — 그 함수가 나라별로 잡는다
     assert "db.last_signal_calc_date(client, country" in 본문
     함수 = (뿌리 / "batch" / "core" / "db.py").read_text(encoding="utf-8")
-    assert "WHERE s.country = ? AND sg.as_of_date <= ? UNION ALL" in 함수
+    # 25.1204 부터 날짜 색인 내림차순 모양(LAST_CALC_SQL) — 나라 조건은 그대로 두 번
+    assert "WHERE s.country = ? AND sg.as_of_date <= ? ORDER BY sg.as_of_date DESC LIMIT 1) UNION ALL" in 함수
