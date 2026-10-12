@@ -348,6 +348,46 @@ def _예산만큼(client, rows: list[tuple[str, str]], max_rows: int | None) -> 
     return 자른것
 
 
+def _미리보기(path: Path, rows: list[tuple[str, str]], 파일_종목: list[tuple[str, str]], trust: bool) -> bool:
+    """시험 실행에서도 대상 DB 를 **읽기만** 해 실제 실행이 종목 번호 대조에 막힐지와 D1 하루 예산을 미리 보인다
+    (docs/infra.md 25.1168, 백업 감사). 예전 dry-run 은 행 수만 찍어, 통과한 뒤 실제 실행이 "번호가 다릅니다" 로 막혔다.
+    막힐 것이면 참. 대상 DB 를 못 열거나 못 읽으면 말만 하고 막지 않는다. 마이그레이션도 쓰기도 하지 않는다."""
+    try:
+        client = TursoClient()
+    except Exception as exc:  # noqa: BLE001 — 미리보기는 곁다리다
+        print(f"  대상 DB 를 열지 못해 종목 대조·예산은 미리 보지 못했습니다 ({exc})")
+        return False
+    try:
+        if 종목번호를_가진_표(rows):
+            try:
+                대응표 = 종목_대응표(path) or 파일_대응표(파일_종목)
+            except ValueError as exc:
+                print(f"  미리보기: {exc} — 실제 실행은 **막힙니다**")
+                return True
+            if not 대응표:
+                if not trust:
+                    print("  미리보기: 종목 대응표가 없는 옛 백업이라 실제 실행은 trust_stock_ids 없이는 **막힙니다**")
+                    return True
+            else:
+                어긋남, 만들것 = 종목_계획(client, 대응표)
+                if 어긋남:
+                    print(f"  미리보기: 대상 DB 의 종목 번호가 백업과 다릅니다({len(어긋남)}건)"
+                          " — 실제 실행은 **막힙니다**:")
+                    for 줄 in 어긋남[:20]:
+                        print(f"    {줄}")
+                    return True
+                print(f"  미리보기: 종목 번호 대조 통과 — 백업 번호 그대로 만들 종목 자리 {len(만들것):,}개")
+        from batch.core import client as backend
+
+        if backend.resolved_backend() == backend.D1:
+            print(f"  미리보기: D1 남은 하루 쓰기 {db.remaining_d1_daily_writes(client):,}행 (여유 {예산여유:,})")
+    except Exception as exc:  # noqa: BLE001
+        print(f"  대상 DB 를 읽지 못해 종목 대조·예산은 미리 보지 못했습니다 ({exc})")
+    finally:
+        client.close()
+    return False
+
+
 def run(
     path: Path,
     only: set[str] | None,
@@ -404,8 +444,9 @@ def run(
         if 남은표:
             print(f"  그다음: --only {','.join(남은표)}")
     if dry_run:
+        막힘 = _미리보기(path, rows, 파일_종목, trust_stock_ids)
         print("시험 실행이라 넣지 않았습니다")
-        return 0
+        return 1 if 막힘 else 0
 
     client = TursoClient()
     try:

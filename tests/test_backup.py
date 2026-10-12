@@ -587,6 +587,23 @@ class Test종목_번호_대조:
         assert restore.run(next(tmp_path.glob("*.sql.gz")), {"trades"}, None, dry_run=False) == 1
         assert 대상.conn.execute("SELECT COUNT(*) FROM trades").fetchone()[0] == 0
 
+    def test_시험_실행도_대조에_막힐지_미리_말한다(
+        self, client: MemClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+    ) -> None:
+        """예전 dry-run 은 행 수만 찍고 통과해, 실제 실행이 "번호가 다릅니다" 로 막혔다 (docs/infra.md 25.1168)."""
+        from scripts import restore_backup as restore
+
+        backup.run("essential", tmp_path)
+        파일 = next(tmp_path.glob("*.sql.gz"))
+        대상 = self._대상(monkeypatch, "000660")
+        assert restore.run(파일, {"trades"}, None, dry_run=True) == 1
+        assert "실제 실행은 **막힙니다**" in capsys.readouterr().out
+        assert 대상.conn.execute("SELECT COUNT(*) FROM trades").fetchone()[0] == 0
+        대상.conn.execute("UPDATE stocks SET ticker = '005930' WHERE id = 1")
+        assert restore.run(파일, {"trades"}, None, dry_run=True) == 0
+        assert "종목 번호 대조 통과" in capsys.readouterr().out
+        assert 대상.conn.execute("SELECT COUNT(*) FROM trades").fetchone()[0] == 0  # 시험 실행은 쓰지 않는다
+
     def test_같은_종목이면_넣는다(self, client: MemClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         from scripts import restore_backup as restore
 

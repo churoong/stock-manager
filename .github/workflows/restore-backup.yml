@@ -37,7 +37,7 @@ on:
         type: boolean
         default: false
       dry_run:
-        description: 무엇이 들어가는지만 본다
+        description: 무엇이 들어가는지와 종목 번호 대조·D1 예산만 본다(읽기만, 막힐 것이면 실패) — 25.1168
         type: boolean
         default: true
 
