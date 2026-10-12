@@ -1249,6 +1249,8 @@ KRX_SOURCE = "krx_openapi"
 
 #: 일부 발송 경고의 표지 — 아래 발송 경고 문구 안의 글자와 같아야 한다(웹 `PARTIAL_SEND_MARK` 도 같다)
 PARTIAL_SEND_MARK = "조각만 보냈습니다"
+#: 매도 플래그를 못 읽고 보낸 리포트의 경고 표식 — 그 리포트는 플래그를 "보여 준" 것으로 치지 않는다 (25.1235)
+FLAGS_UNREAD_MARK = "매도 플래그를 읽지 못해"
 
 #: 다른 나라 리포트의 배분을 여력에서 빼는 기간. 국내 08:30 과 미국 22:30(서머타임 21:30) KST 는 서로 10~14시간
 #: 떨어져 있다 — 바로 앞 리포트 하나만 잡고 그 전날 것은 잡지 않는 길이다 (docs/infra.md 25.508)
@@ -1347,9 +1349,12 @@ def _last_report_sent_at(client: TursoClient, country: str) -> str | None:
             # **일부만 나간 리포트는 보여 준 것으로 치지 않는다** (docs/infra.md 25.512, 교차검증).
             # 매도 플래그는 글 끝에 붙어 잘린 뒷부분에 있었을 가능성이 크다 —
             # 그런데도 발송 시각이 찍혀 다음 날 NEW 가 빠졌다
+            # **플래그 절 없이 간 리포트도 같다** (docs/infra.md 25.1235) — 읽기가 실패해 절이 빠졌는데
+            # 발송 시각이 경계가 되어, 한 번도 보여 주지 않은 손절 플래그가 다음 날 NEW 없이 실렸다
             "SELECT sent_at FROM daily_reports WHERE market = ? AND sent_at IS NOT NULL"
-            " AND instr(COALESCE(warnings_json, ''), ?) = 0 ORDER BY sent_at DESC LIMIT 1",
-            [country, PARTIAL_SEND_MARK],
+            " AND instr(COALESCE(warnings_json, ''), ?) = 0 AND instr(COALESCE(warnings_json, ''), ?) = 0"
+            " ORDER BY sent_at DESC LIMIT 1",
+            [country, PARTIAL_SEND_MARK, FLAGS_UNREAD_MARK],
         ).rows
     except Exception as exc:  # noqa: BLE001 — 모르면 예전 규칙(처음 걸린 날 == 오늘)으로 간다
         if not db.표가_없나(exc):
@@ -1372,7 +1377,7 @@ def _sell_flags_for_report(client: TursoClient, country: str, warnings: list[str
         # 표가 없는 것 말고는 **리포트에 말한다** (docs/infra.md 25.220).
         # 조용히 빠지면 "오늘 플래그 없음" 과 같아 보인다
         if warnings is not None and not db.표가_없나(exc):
-            warnings.append(f"매도 플래그를 읽지 못해 리포트에 싣지 못했습니다 — 화면에서 확인하세요 ({exc})")
+            warnings.append(f"{FLAGS_UNREAD_MARK} 리포트에 싣지 못했습니다 — 화면에서 확인하세요 ({exc})")
         return []
 
 
