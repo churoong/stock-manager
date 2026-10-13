@@ -152,7 +152,10 @@ jobs:
         # 백테스트는 유니버스 전체의 여러 해 시세·재무를 읽는다 — 가장 무거운 작업이다 `[확인필요: 25.885 실측 읽기량]`.
         # 이번 달 읽기가 진도를 앞서면 미루고 `batch_runs` 에 "건너뜀" 과 이유를 남긴다(백테스트 화면이 보여 준다).
         # 문이 깨지면 들어간다(`|| true`)
-        run: python scripts/turso_read_gate.py backtest 5000000 || true
+        # 월 읽기량은 운영 수치라 공개 로그에는 줄 수만 (25.1307). 미루면 `batch_runs` 의 "건너뜀" 이 까닭을 적는다
+        run: |
+          set -o pipefail
+          python scripts/turso_read_gate.py backtest 5000000 2>&1 | python scripts/ops_tee.py gate.txt || true
 
       - name: 백테스트
         if: ${{ steps.gate.outputs.deferred != 'true' && env.WHAT != '스트레스' && env.WHAT != '장기문턱' }}

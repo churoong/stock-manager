@@ -2354,6 +2354,7 @@ SQL read operations are forbidden (reads are blocked, ...)
 | 25.1304 | 주간 요약 확인 실행이 success 로 닫혀 그 주 일요일 발송이 빠지고, 확인 실행 경고가 되풀이로 셈 |
 | 25.1305 | 빠진 예약 따라잡기가 수동 실행이라 월 전체 백업이 필수로, 미국 백테스트가 국내로 돎 |
 | 25.1306 | 복구 리허설이 예외·앞 단계 실패를 기록하지 않고, 상태 칸이 400일이라 네 번 실패해도 초록 |
+| 25.1307 | Turso 월 읽기 문 출력이 공개 Actions 로그에 찍힘 |
 
 ### 25.1 왜 D1 인가
 
@@ -30379,3 +30380,18 @@ GitHub 이 422 로 거절한다 `[확인필요: 실측]`. 문서 `docs/backup.md
 
 **시험** — `tests/test_restore_drill_failure_1306.py`(잘린 백업·앞 단계 실패·워크플로 배선), `web/__tests__/restoreDrillFresh1306.test.ts`.
 **되돌리기 확인** — `restore_drill.py` 2건, `restore-drill.yml` 1건, `health.ts` 1건이 깨진다.
+
+### 25.1307 Turso 월 읽기 문 출력이 공개 Actions 로그에 찍힘
+
+**무엇(운영 감사 #5)** — `backup.yml`·`backtest.yml` 의 Turso 읽기 진도 문(`turso_read_gate.py`)이 "이번 달 N행 + 예상 …, 허용선 …" 을 **공개 Actions 로그**에
+그대로 찍었다. 주간 요약은 같은 "Turso 월 읽기" 줄을 일부러 비공개 운영 저장소로 보낸다(25.978) — 운영 수치를 공개 로그에 두지 않는다는 규칙과 어긋났다.
+보유·금액은 아니다.
+
+**실제로 아팠나** — 낮다. 운영 수치(월 읽기량)가 공개 로그에 남았다.
+
+**고침** — 두 문의 출력을 `ops_tee` 로 받는다. 백업은 덤프와 **같은 파일**(`backup.txt`, `-a` 로 이어 쓰기)이라 비공개 이슈에 함께 올라간다. 백테스트는 `gate.txt`
+(공개 로그에는 줄 수만) — 미루면 `batch_runs` 의 "건너뜀" 이 까닭을 적는다. 파이프를 걸었으니 `set -o pipefail` 을 함께 둔다(`test_workflows` 규칙,
+`|| true` 가 미룸 종료코드를 그대로 삼킨다 — 미룸은 `GITHUB_OUTPUT` 으로 전한다).
+
+**시험** — `tests/test_read_gate_public_log_1307.py`(모든 워크플로의 읽기 문이 `ops_tee` 를 거침·백업은 같은 파일에 이어 씀).
+**되돌리기 확인** — `backup.yml` 을 되돌리면 2건, `backtest.yml` 을 되돌리면 1건 깨진다.

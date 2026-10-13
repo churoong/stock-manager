@@ -74,11 +74,13 @@ jobs:
         # **8일 예비는 그달 1일 전체 백업이 성공했으면 건너뛴다** (25.887). 같은 `deferred` 출력으로 뒤 단계를 세운다
         if: ${{ env.SCOPE == 'full' }}
         run: |
+          set -o pipefail
           if [ "$SCHED" = "47 16 8 * *" ] && python scripts/backup_db.py --full-done-this-month; then
             echo "deferred=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          python scripts/turso_read_gate.py backup 8500000 || true
+          # 월 읽기량은 운영 수치라 공개 로그에 찍지 않는다 — 덤프와 같은 파일로 비공개 이슈에 (25.1307)
+          python scripts/turso_read_gate.py backup 8500000 2>&1 | python scripts/ops_tee.py -a backup.txt || true
 
       - name: 덤프
         id: dump
@@ -89,7 +91,7 @@ jobs:
         # 리허설(restore-drill.yml)처럼 ops_tee 로 받아 비공개 운영 이슈로 보낸다
         run: |
           set -o pipefail
-          python scripts/backup_db.py --scope "$SCOPE" --out backup --record-run 2>&1 | python scripts/ops_tee.py backup.txt
+          python scripts/backup_db.py --scope "$SCOPE" --out backup --record-run 2>&1 | python scripts/ops_tee.py -a backup.txt
 
       - name: 암호화 (공개 저장소 아티팩트는 누구나 내려받는다, docs/infra.md 25.1125)
         if: ${{ steps.gate.outputs.deferred != 'true' }}
