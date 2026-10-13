@@ -287,8 +287,12 @@ export const SESSIONS_AROUND = `SELECT market, date, open_utc FROM market_sessio
  * 일일 배치가 어긋남을 찾아 대기열에 적고, 토요일 재수집이 비운다. 그 사이 그 종목의
  * 옛 `adj_close` 는 **지금 기준과 어긋나 있고**, 모멘텀·성과지표·백테스트가 그 값을 읽는다.
  * 그런데 감지 사실은 `log.info` 에만 남아 있었다 — 우리는 Actions 로그를 못 읽는다(25.17).
+ *
+ * **다시 받을 수 있는 종목만 센다** (docs/infra.md 25.1258) — 배치 `refresh_us_adjusted.pending_summary`(25.1246)와 같은 거르기.
+ * 폐지·야후 기호 없는 종목의 항목은 재수집이 영영 못 지워 이 줄이 15일 뒤부터 늘 노랬다
  */
-export const ADJUST_QUEUE = `SELECT COUNT(*) AS n, MIN(detected_at) AS oldest FROM adjust_refresh_queue WHERE done_at IS NULL`;
+export const ADJUST_QUEUE = `SELECT COUNT(*) AS n, MIN(q.detected_at) AS oldest FROM adjust_refresh_queue q JOIN stocks s ON s.id = q.stock_id
+  WHERE q.done_at IS NULL AND s.status = 'active' AND s.yahoo_symbol IS NOT NULL`;
 
 /** 배치의 `refresh_us_adjusted.MAX_PENDING_DAYS` 와 같은 값이어야 한다 (주 1회 × 2번) */
 export const ADJUST_QUEUE_STALE_DAYS = 15;

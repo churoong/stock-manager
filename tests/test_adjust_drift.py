@@ -337,3 +337,28 @@ class Test분할_재수집:
         오늘 = date(2026, 9, 25)
         assert refresh._넣을_시작(오늘, (오늘 - date(2020, 1, 2)).days + 5) == "2020-01-02"
         assert refresh._넣을_시작(오늘, refresh.LOOKBACK_DAYS) == (오늘 - timedelta(days=refresh.LOOKBACK_DAYS)).isoformat()
+
+
+class Test웹_대기열_거르기_1258:
+    """상태 화면의 대기열 수도 다시 받을 수 있는 종목만 센다 (docs/infra.md 25.1258)."""
+
+    def test_폐지_종목_항목은_세지_않는다(self) -> None:
+        import re
+
+        글 = (ROOT / "web" / "lib" / "health.ts").read_text(encoding="utf-8")
+        sql = re.search(r"export const ADJUST_QUEUE = `([^`]*)`", 글)[1]
+        assert refresh._다시_받을_수_있음 in " ".join(sql.split())
+        c = SqliteClient()
+        c.conn.execute(
+            "INSERT INTO stocks (id, ticker, market, country, currency, status, source, fetched_at, yahoo_symbol)"
+            " VALUES (1, 'AAA', 'NASDAQ', 'US', 'USD', 'delisted', 't', 't', 'AAA'),"
+            " (2, 'BBB', 'NASDAQ', 'US', 'USD', 'active', 't', 't', NULL)"
+        )
+        for sid in (1, 2):
+            c.conn.execute(
+                "INSERT INTO adjust_refresh_queue (stock_id, detected_at, sample_date, ratio_before, ratio_after)"
+                " VALUES (?, '2026-09-01T00:00:00+00:00', '2026-08-28', 1.0, 1.0)",
+                [sid],
+            )
+        assert c.conn.execute(sql).fetchone()[0] == 0
+        assert refresh.pending_summary(c) == (0, None)
