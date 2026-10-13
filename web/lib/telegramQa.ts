@@ -271,17 +271,20 @@ async function alerts(exec: Exec): Promise<string> {
   // 정규장(현지 날짜가 하루 앞) 알림이 통째로 빠졌다. 두 시장을 따로 묶어 날짜를 붙인다
   const rs = rows<{ name: string; message: string; trade_date: string; market: string }>(
     await exec(
-      `SELECT COALESCE(s.name_ko, s.name_en, s.ticker) AS name, a.message, a.trade_date, a.market FROM alerts a
-       JOIN (SELECT market, MAX(trade_date) AS d FROM alerts GROUP BY market) m ON m.market = a.market AND m.d = a.trade_date
-       JOIN stocks s ON s.id = a.stock_id
-       ORDER BY a.market, a.created_at DESC LIMIT 40`,
+      // 시장마다 20건 — 한 시장이 40건을 넘겨도 다른 시장이 밀려나지 않게 시장 안에서 센다
+      `SELECT name, message, trade_date, market FROM (
+         SELECT COALESCE(s.name_ko, s.name_en, s.ticker) AS name, a.message, a.trade_date, a.market,
+           ROW_NUMBER() OVER (PARTITION BY a.market ORDER BY a.created_at DESC) AS rn, a.created_at FROM alerts a
+         JOIN (SELECT market, MAX(trade_date) AS d FROM alerts GROUP BY market) m ON m.market = a.market AND m.d = a.trade_date
+         JOIN stocks s ON s.id = a.stock_id)
+       WHERE rn <= 20 ORDER BY market, created_at DESC`,
     ),
   );
   if (rs.length === 0) return "장중 알림 기록이 없습니다";
   const 시장들 = [...new Set(rs.map((r) => r.market))];
   return 시장들
     .map((m) => {
-      const 줄 = rs.filter((r) => r.market === m).slice(0, 20);
+      const 줄 = rs.filter((r) => r.market === m);
       const 이름 = m === "KR" ? "국내" : m === "US" ? "미국" : m;
       return [`장중 알림 ${이름} (${줄[0].trade_date}, 최근 ${줄.length}건)`, ...줄.map((r) => `· ${r.name}: ${r.message}`)].join("\n");
     })

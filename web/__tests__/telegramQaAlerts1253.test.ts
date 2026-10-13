@@ -44,4 +44,19 @@ describe("알림 답", () => {
     expect(text).toContain("미국 목표가");
     expect(text).not.toContain("어제 국내");
   });
+  it("한 시장이 많아도 다른 시장이 밀려나지 않는다", async () => {
+    const { db, exec } = memExec();
+    db.exec(`INSERT INTO stocks (id, ticker, market, country, name_ko, currency, status, source, fetched_at)
+             VALUES (1, '000001', 'KOSPI', 'KR', '가나', 'KRW', 'active', 't', 't'),
+                    (2, 'AAA', 'NASDAQ', 'US', '에이', 'USD', 'active', 't', 't')`);
+    for (let i = 0; i < 45; i++) {
+      db.exec(`INSERT INTO alerts (stock_id, market, trade_date, trigger_type, message, data, created_at)
+               VALUES (1, 'KR', '2026-10-13', 't${i}', '국내 ${i}', '{}', '2026-10-13T01:${String(i).padStart(2, "0")}:00Z')`);
+    }
+    db.exec(`INSERT INTO alerts (stock_id, market, trade_date, trigger_type, message, data, created_at)
+             VALUES (2, 'US', '2026-10-12', 'target', '미국 목표가', '{}', '2026-10-12T18:00:00Z')`);
+    const text = await answer({ kind: "alerts" }, exec);
+    expect(text).toContain("장중 알림 국내 (2026-10-13, 최근 20건)");
+    expect(text).toContain("미국 목표가");
+  });
 });
