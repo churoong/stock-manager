@@ -23,6 +23,7 @@ import math
 from dataclasses import dataclass, field
 from typing import Any
 
+from batch.core.rounding import fixed
 from batch.notify import report_sections as rs
 from batch.services import criteria as crit
 from batch.services import holding_scores as hsc
@@ -710,6 +711,18 @@ def build_portfolio(
             f"다른 나라 보유 {len(다른_나라)}종목의 업종은 분류표가 달라(국내 KSIC·미국 SIC)"
             " 이름이 같은 업종만 섹터 상한에 합산했습니다"
         )
+    # **업종을 모르는 보유도 밝힌다** (docs/infra.md 25.1314, 2부 감사 재현). 업종 작업은 유니버스 종목만 채워,
+    # 유니버스 밖에서 산 보유(시총 하한 미달·상장 1년 미만·관리종목)는 업종이 영영 비고 섹터 상한·섹터 비중에서
+    # **말없이** 빠졌다 — 같은 업종을 이미 크게 들고 있어도 그 업종 추천이 상한까지 다 받았다. 어느 업종인지 모르니
+    # 상한에 넣을 수는 없고, 그만큼 섹터 비중이 낮게 보일 수 있다고 적는다
+    모름 = [h for h in holdings if not h.sector]
+    if 모름 and sector_limit is not None:
+        모름_합 = sum(h.value for h in 모름)
+        비중 = fixed(모름_합 / 분모 * 100, 1)
+        글 = (f"업종을 모르는 보유 {len(모름)}종목(총액의 {비중}%)은 섹터 상한·섹터 비중에 넣지 못했습니다"
+              " — 그 업종의 실제 비중은 위 숫자보다 클 수 있습니다")  # fmt: skip
+        view.sector_note = f"{view.sector_note}\n{글}" if view.sector_note else 글
+        view.holdings_unknown_sector = len(모름)
 
     if total_investable > 0:
         view.remaining_budget = 단위(remaining)  # 총액·배분과 같은 단위 (25.567 — 남은 여력만 정수였다)

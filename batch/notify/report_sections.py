@@ -161,6 +161,8 @@ class PortfolioView:
     # 현재 보유 (Step 30). 여력·종목 상한·섹터 집중도가 보유를 포함해 계산됐다는 것을 보인다
     holdings_value: float | None = None
     holdings_count: int = 0
+    #: 업종을 모르는 보유 수 — 섹터 상한·비중에 넣지 못한다 (25.1314)
+    holdings_unknown_sector: int = 0
     #: 섹터 상한의 한계 한 줄 (docs/infra.md 25.509)
     sector_note: str | None = None
     #: 2부 전체를 배분하지 않은 사유 — 묵은 신호 (docs/infra.md 25.820·25.822). 있으면 종목별 "사유 없음" 검사를 하지
@@ -405,6 +407,8 @@ def render_portfolio(portfolio: PortfolioView, picks: list[StockPick]) -> str:
         lines.append(
             f"현재 보유 평가 {_money(portfolio.holdings_value, portfolio.budget_currency)}"
             f" ({portfolio.holdings_count}종목) — 여력·상한·섹터 비중에 포함"
+            + (f"(업종 모르는 {portfolio.holdings_unknown_sector}종목은 섹터 비중 제외)"
+               if portfolio.holdings_unknown_sector else "")
         )
     if portfolio.remaining_budget is not None:
         lines.append(f"남은 여력 {_money(portfolio.remaining_budget, portfolio.budget_currency)}")
