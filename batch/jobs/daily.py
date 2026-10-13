@@ -1642,10 +1642,8 @@ def find_drift(client: TursoClient, bars: list, trade_date: str, ids: dict[str, 
         if stock_id is None or bar.close is None or bar.adj_close is None or bar.date >= trade_date:
             continue
         창.setdefault(stock_id, {})[bar.date] = drift.Sample(bar.date, float(bar.close), float(bar.adj_close))
-    if not 창:
-        return []
-
-    처음 = min(d for 날들 in 창.values() for d in 날들)
+    # 창이 비어도 끝내지 않는다 — 확정 거래일 한 줄만 온 재개 종목을 아래에서 본다 (25.1259). 창이 비면 읽기는 없다
+    처음 = min((d for 날들 in 창.values() for d in 날들), default=trade_date)
     저장: dict[int, dict[str, drift.Sample]] = {}
     stock_ids = list(창)
     for start in range(0, len(stock_ids), 200):
@@ -1673,22 +1671,80 @@ def find_drift(client: TursoClient, bars: list, trade_date: str, ids: dict[str, 
     out = drift.detect(stored, oldest)
     # **겹치는 날이 없는 종목은 공백 전 마지막 행과 견준다** (docs/infra.md 25.1247) — 정지·잠시 제외 뒤 돌아온 종목.
     # 보통은 창이 매일 겹쳐 이 갈래에 드는 종목이 거의 없다(새로 받는 종목은 저장 행이 없어 한 번 읽고 끝난다)
-    for stock_id, 날들 in 창.items():
-        if stock_id in stored:
-            continue
-        첫날 = min(날들)
+    # **확정 거래일 한 줄만 온 종목도 본다** (25.1259, 교차검증) — 창 내내 정지했다 그날 재개한 종목. 예전엔 그 줄을
+    # 견주지 않고 저장해, 다음 날부터는 겹치는 행이 이미 새 기준이라 정지 중 분할을 영영 놓쳤다
+    공백: dict[int, drift.Sample] = {sid: 날들[min(날들)] for sid, 날들 in 창.items() if sid not in stored}
+    당일만 = {
+        sid: drift.Sample(bar.date, float(bar.close), float(bar.adj_close))
+        for bar in bars
+        if (sid := ids.get(bar.ticker)) is not None and sid not in 창 and bar.date == trade_date
+        and bar.close is not None and bar.adj_close is not None
+    }
+    if len(당일만) <= GAP_ONLY_TODAY_MAX:  # 수천이면 창 자체가 이상한 날이다 — 종목마다 읽지 않는다
+        공백.update(당일만)
+    else:
+        log.warning("확정 거래일 한 줄만 온 종목이 %d개라 공백 검사를 건너뜁니다", len(당일만))
+    걸림: list[tuple[int, drift.Sample, Any]] = []
+    for stock_id, 첫 in 공백.items():
         rs = client.execute(
             "SELECT date, close, adj_close FROM prices WHERE stock_id = ? AND date < ? AND close > 0"
             " ORDER BY date DESC LIMIT 1",
-            [stock_id, 첫날],
+            [stock_id, 첫.date],
         )
         if not rs.rows:
             continue
         r = rs.rows[0]
         옛 = drift.Sample(str(r[0]), float(r[1]), None if r[2] is None else float(r[2]))
-        d = drift.gap_drift(stock_id, 옛, 날들[첫날])
+        d = drift.gap_drift(stock_id, 옛, 첫)
         if d is not None:
+            걸림.append((stock_id, 옛, d))
+    out.extend(_gap_verify(client, 걸림, ids, trade_date))
+    return out
+
+
+#: 확정 거래일 한 줄만 온 종목을 공백 검사할 상한 (25.1259). 평소엔 재개 종목 몇 개다
+GAP_ONLY_TODAY_MAX = 50
+#: 공백 위 큰 등락을 야후에 다시 물어 확인할 종목 상한 (25.1259). 넘으면 예전처럼 분할로 둔다
+GAP_VERIFY_MAX = 10
+
+
+def _gap_verify(
+    client: TursoClient, 걸림: list[tuple[int, Any, Any]], ids: dict[str, int], trade_date: str
+) -> list[Any]:
+    """공백 위 큰 등락이 **정말 분할인지** 야후에 그 종목만 다시 물어 확인한다 (docs/infra.md 25.1259, 교차검증).
+
+    분할이면 야후가 옛 날짜 종가까지 분할 반영해 돌려준다 — 공백 앞 저장 종가와 다르다. 같으면 정지 뒤 진짜 등락이다.
+    예전(25.1247)엔 30% 넘는 등락을 모두 분할로 적어, 정지 뒤 −40% 폭락한 보유 종목의 장중 손절·목표가 감시가
+    28일 꺼지고(`monitor_targets.action_factors`) 시총이 다음 분기 보고서까지 폭락 전 값으로 묶였으며(`us_shares`)
+    손절 꼬리표가 "분할·병합 — 수량 확인" 으로 바뀌었다. **못 물으면 예전처럼 분할로 둔다** — 진짜 분할을 놓치면
+    이력 절벽이 영구다."""
+    from datetime import date as _date
+
+    from batch.services import adjust_drift as drift
+    from batch.sources import yfinance_src
+
+    기호 = {sid: sym for sym, sid in ids.items()}
+    out: list[Any] = []
+    for i, (sid, 옛, d) in enumerate(걸림):
+        sym = 기호.get(sid)
+        if i >= GAP_VERIFY_MAX or not sym:
             out.append(d)
+            continue
+        try:
+            날수 = (_date.fromisoformat(trade_date) - _date.fromisoformat(옛.date)).days + 7
+            res = yfinance_src.fetch_daily_bars([sym], lookback_days=날수, chunk_size=1)
+            db.record_api_call(client, "yfinance", count=1)
+        except Exception as exc:  # noqa: BLE001 — 확인을 못 하면 예전처럼 분할로 둔다
+            log.warning("공백 등락 확인 실패(%s): %s", sym, exc)
+            out.append(d)
+            continue
+        그날 = next((b for b in res.data or [] if b.ticker == sym and b.date == 옛.date and b.close), None)
+        if not res.ok or 그날 is None:
+            out.append(d)
+            continue
+        새 = drift.Sample(그날.date, float(그날.close), None if 그날.adj_close is None else float(그날.adj_close))
+        # 분할이면 종가가 바뀌어 분할 표시, 아니면 배당 어긋남만(있으면) — `detect` 의 규칙 그대로
+        out.extend(drift.detect({sid: 옛}, {sid: 새}))
     return out
 
 
