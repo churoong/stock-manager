@@ -398,7 +398,7 @@ def render_portfolio(portfolio: PortfolioView, picks: list[StockPick]) -> str:
             portfolio.sector_concentration.items(), key=lambda kv: -kv[1]
         )[:5]
         # 한 자리까지 — 제외 사유 "이미 30.4%, 상한 30%"(25.369)와 같은 리포트에서 "30%" 로 어긋나지 않게 (25.421)
-        parts = [f"{sector} {weight:.1f}%" for sector, weight in top]
+        parts = [f"{sector} {fixed(weight, 1)}%" for sector, weight in top]  # .5 올림 (25.1315)
         lines.append(f"섹터 비중 {' · '.join(parts)}")
     if portfolio.sector_note:
         lines.append(portfolio.sector_note)

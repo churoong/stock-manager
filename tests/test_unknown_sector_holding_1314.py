@@ -32,3 +32,12 @@ def test_모두_업종을_알면_말하지_않는다() -> None:
     holdings = [rp.Holding(8, "Y", "중형", 업종, 15_000_000.0, country="KR")]
     text = rp.compose([_row()], 총액, "2026-10-12", holdings=holdings, min_order_amount=100000).text
     assert "업종을 모르는" not in text and "업종 모르는" not in text
+
+
+def test_메모의_비율도_배분_줄과_같은_반올림() -> None:
+    """4.25% 는 배분 줄 `fixed` 로 4.3% — 메모도 같은 규칙이어야 한다 (25.1315, 파이썬 `:.1f` 는 짝수 쪽 4.2%)."""
+    row = _row()
+    row.suggested_weight_pct, row.suggested_amount = 4.25, 총액 * 4.25 / 100
+    row.tranche_plan = [{**t, "amount": row.suggested_amount * t["ratio"]} for t in row.tranche_plan]
+    text = rp.compose([row], 총액, "2026-10-12", min_order_amount=100000, max_stock_pct=4.25).text
+    assert "(4.3%)" in text and "4.2%" not in text

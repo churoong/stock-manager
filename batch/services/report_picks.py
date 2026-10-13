@@ -363,7 +363,7 @@ def _넘은_비율(값: float, 상한: float) -> str:
     for 자리 in (1, 2, 3):
         if round(값, 자리) > 상한:
             return f"{값:.{자리}f}%"
-    return f"{값:.3f}% 초과" if 값 > 상한 else f"{값:.1f}%"
+    return f"{값:.3f}% 초과" if 값 > 상한 else f"{fixed(값, 1)}%"
 
 def build_portfolio(
     rows: list[SignalRow],
@@ -518,7 +518,7 @@ def build_portfolio(
             # **보유하지 않은 종목도 오늘 총액 기준 목표까지만** (25.1088, 감사 재현). 1부 금액은 신호 낸 날 총액
             # 기준이라, 신호가 하루 묵었거나 총액을 줄인 날 변동성·MDD 로 4% 로 줄인 종목에 상한 10% 까지 배분됐다
             amount = 목표
-            capped_note = f"권장 비중 {목표 / 분모 * 100:.1f}%까지만(오늘 총액 기준)"
+            capped_note = f"권장 비중 {fixed(목표 / 분모 * 100, 1)}%까지만(오늘 총액 기준)"
         if held > 0 and 목표 > 0 and (stock_limit is None or 목표 < stock_limit):
             목표_여지 = 목표 - held
             if 목표_여지 <= 0:
@@ -530,12 +530,13 @@ def build_portfolio(
                 )
                 view.excluded.append(rs.Excluded(
                     first.ticker, first.name, rs.EXCLUDED_STOCK_CAP,
-                    f"보유 {held / 분모 * 100:.1f}% — 이미 권장 비중({목표 / 분모 * 100:.1f}%) 이상 보유{넘음}",
+                    f"보유 {fixed(held / 분모 * 100, 1)}%"
+                    f" — 이미 권장 비중({fixed(목표 / 분모 * 100, 1)}%) 이상 보유{넘음}",
                 ))
                 continue
             if amount > 목표_여지:
                 amount = 목표_여지
-                capped_note = f"보유 포함 권장 비중 {목표 / 분모 * 100:.1f}%까지만"
+                capped_note = f"보유 포함 권장 비중 {fixed(목표 / 분모 * 100, 1)}%까지만"
         # **보유하지 않은 종목도 상한을 본다** (docs/infra.md 25.290). 예전에는 `if held and …` 라
         # 새 종목은 건너뛰었다 —
         # 신호 금액은 **신호 낸 날의 총액** 기준이라, 신호가 묵은 채 사용자가 총액을 줄이면 오늘 총액의 10% 를 넘는다
@@ -544,7 +545,7 @@ def build_portfolio(
             if room <= 0:
                 view.excluded.append(rs.Excluded(
                     first.ticker, first.name, rs.EXCLUDED_STOCK_CAP,
-                    f"보유 {held / 분모 * 100:.1f}%, 상한 {max_stock_pct:g}%",
+                    f"보유 {fixed(held / 분모 * 100, 1)}%, 상한 {max_stock_pct:g}%",
                 ))
                 continue
             if amount > room:
@@ -569,8 +570,8 @@ def build_portfolio(
                     # 설정값은 그대로(`:g`), 쓴 비율은 한 자리까지 —
                     # 반올림으로 "이미 30%, 상한 30%" 가 되지 않게 (25.369)
                     # 이 종목 몫과 합친 비율도 적는다 — "이미 25%, 상한 30%" 만으로는 왜 빠졌는지 읽히지 않았다 (25.649)
-                    f"{sector} 이미 {sector_used.get(sector, 0.0) / 분모 * 100:.1f}%"
-                    f" + 이 종목 {amount / 분모 * 100:.1f}%"
+                    f"{sector} 이미 {fixed(sector_used.get(sector, 0.0) / 분모 * 100, 1)}%"
+                    f" + 이 종목 {fixed(amount / 분모 * 100, 1)}%"
                     f" → {_넘은_비율((sector_used.get(sector, 0.0) + amount) / 분모 * 100, max_sector_pct)},"
                     f" 상한 {max_sector_pct:g}%",
                 )
@@ -660,10 +661,10 @@ def build_portfolio(
         if not capped_note and 신호비중 > 0 and abs(weight_pct - 신호비중 * 상관_배수) > 0.05:
             notes.append(
                 f"금액은 신호를 낸 날({best.as_of_date or '?'})의 총 투자가능금액 기준입니다"
-                f" — 지금 총액으로는 {weight_pct:.1f}% (신호 때 {신호비중:.1f}%"
+                f" — 지금 총액으로는 {fixed(weight_pct, 1)}% (신호 때 {fixed(신호비중, 1)}%"
                 # 상관으로 줄였으면 견준 값(신호 비중 × 상관 배수)을 함께 — "10% → 6%" 가 총액 탓으로 줄어든 것처럼
                 # 읽혔다 (25.710)
-                + (f", 상관 반영 {신호비중 * 상관_배수:.1f}%" if 상관_배수 < 1.0 else "")
+                + (f", 상관 반영 {fixed(신호비중 * 상관_배수, 1)}%" if 상관_배수 < 1.0 else "")
                 + ")"
             )
         note = " · ".join(notes)
