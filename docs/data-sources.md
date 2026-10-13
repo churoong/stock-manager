@@ -55,7 +55,7 @@ GET https://opendart.fss.or.kr/api/fnlttSinglAcntAll.json?crtfc_key=<키>&corp_c
   사업보고서 스냅샷마다 한 번 부른다(2026-10-13, docs/infra.md 25.1317, `jobs/kr_cashflow`). 회사·연도·기준마다 1회라 한 실행 5천 회까지(일 한도 2만의 4분의 1).
   **2026-10-13 탐침(삼성전자 2025, 실행 38374641420)으로 확인**: `fs_div` CFS 229행·OFS 141행, `rcept_no` 는 모든 행이 같은 하나(20260310002820 —
   사업보고서 원공시), 합계 `ifrs-full_CashFlowsFromUsedInOperatingActivities` 가 있다(연결 85.3조, 별도 68.7조), 순이익 `ifrs-full_ProfitLoss`·총자산
-  `ifrs-full_Assets` 도 있다. 남은 `[확인필요]`: 주요계정 API 의 "당기순이익" 이 `ProfitLoss`(지배·비지배 합)와 같은 값인지 — 다르면 자기정합 검사가 다 걸린다(첫 실행 결과로 본다)
+  `ifrs-full_Assets` 도 있다. 같은 날 두 번째 탐침(실행 38374830232)이 주요계정 묶음 API 값과 나란히 찍었다 — **연결·별도 모두 순이익(`ProfitLoss` = 주요계정 "당기순이익")·총자산·접수번호가 정확히 같다**. 자기정합 검사가 쓸 수 있다
 
 - **전환사채권 발행결정** `cvbdIsDecsn.json?corp_code=<하나>&bgn_de=<YYYYMMDD>&end_de=<YYYYMMDD>` (2026-10-12 탐침, docs/infra.md 25.1177·25.1192) —
   한 번에 그 기간의 발행결정이 **여러 행** 온다(접수번호 `rcept_no` 로 고른다). 쓰는 칸: `bd_fta` 권면총액, `cv_prc` 전환가액,
