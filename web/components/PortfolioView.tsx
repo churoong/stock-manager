@@ -401,7 +401,7 @@ function Positions({ summary, onDismissed }: { summary: Summary; onDismissed: ()
             <div className="flex flex-wrap items-baseline gap-x-2">
               <Link href={`/stocks/${p.stock_id}`} className="font-semibold hover:underline">{p.name}</Link>
               <span className="text-xs text-slate-500">{p.ticker} · {p.sector ?? "업종 없음"} · {HORIZON[p.horizon ?? ""] ?? "-"}</span>
-              <span className="ml-auto">{won(p.market_value_krw)} <span className="text-xs text-slate-500">({p.weight_pct?.toFixed(1) ?? "-"}%)</span></span>
+              <span className="ml-auto">{won(p.market_value_krw)} <span className="text-xs text-slate-500" title="보유 평가 합 대비 — 리포트 2부의 % 는 총 투자가능금액 대비다 (25.1316)">(보유 중 {p.weight_pct?.toFixed(1) ?? "-"}%)</span></span>
             </div>
             {(summary.flags ?? []).filter((f) => f.stock_id === p.stock_id).map((f) => (
               <div key={f.id} className={`mt-1 rounded px-2 py-1 text-xs ${FLAG_STYLE[f.level] ?? ""} ${f.dismissed_at ? "opacity-60" : ""}`}>
