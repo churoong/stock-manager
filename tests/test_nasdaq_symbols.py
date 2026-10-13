@@ -235,3 +235,26 @@ def test_표지는_낱말로_찾는다() -> None:
     assert not 보통주("ABC Preferreds")
     assert 보통주("Unit Corporation - Common Stock")
     assert 보통주("Right On Brands Common Stock")
+
+
+class Test발행사_이름_1265:
+    """표지는 " - " 뒤 증권 종류에서만 찾는다 (docs/infra.md 25.1265, 유니버스 감사 재현)."""
+
+    @staticmethod
+    def _보통주(name: str, symbol: str = "PFBC") -> bool:
+        from batch.sources.nasdaq_symbols import UsSymbol
+
+        return UsSymbol(symbol=symbol, name=name, exchange="Q", is_etf=False, is_test=False).is_common_stock
+
+    def test_발행사_이름의_낱말은_보지_않는다(self) -> None:
+        assert self._보통주("Preferred Bank - Common Stock")
+        assert self._보통주("United Rights Holdings Inc. - Class A Common Stock", "URH")
+
+    def test_종류의_표지는_그대로_거른다(self) -> None:
+        assert not self._보통주("Preferred Bank - 6.5% Series A Preferred Stock", "PFBCP")
+        assert not self._보통주("Some Acquisition Corp - Warrant", "SACW")
+        assert not self._보통주("Baidu, Inc. - American Depositary Shares", "BIDU")
+        assert not self._보통주("Some Acquisition Corp - Units, each consisting of one share", "SACU")
+
+    def test_대시가_없으면_예전처럼_통째로(self) -> None:
+        assert not self._보통주("XYZ Corp 6.5% Preferred Stock", "XYZP")

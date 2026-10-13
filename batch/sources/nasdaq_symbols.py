@@ -111,6 +111,16 @@ def _표지_식(m: str) -> str:
 
 _NON_COMMON_RE = re.compile("|".join(_표지_식(m) for m in NON_COMMON_MARKERS))
 
+
+def 종류_글(name: str) -> str:
+    """표지를 찾을 글 — 나스닥 이름은 "<발행사> - <증권 종류>" 꼴이라 **" - " 뒤만** 본다 (docs/infra.md 25.1265).
+
+    통째로 보면 발행사 이름의 낱말에 걸렸다 — "Preferred Bank - Common Stock"(PFBC, 시총 약 12억 달러)이
+    "Preferred" 로 보통주가 아니게 되어 사유 기록 없이 `excluded` 가 됐다(유니버스 감사). 우선주·워런트·유닛·ADR 은
+    종류 쪽에 표지가 있다("… - 6.5% Series A Preferred Stock", "… - Warrant", "… - American Depositary Shares").
+    " - " 가 없는 이름은 예전대로 통째로 본다"""
+    return name.split(" - ", 1)[1] if " - " in name else name
+
 # ----------------------------------------------------------------------
 # 심볼 형태로 거르는 규칙 (2026-09-16 추가)
 # ----------------------------------------------------------------------
@@ -170,7 +180,7 @@ class UsSymbol:
         """
         if self.is_etf or self.is_test:
             return False
-        if _NON_COMMON_RE.search(self.name):
+        if _NON_COMMON_RE.search(종류_글(self.name)):
             return False
         return not self.looks_like_non_common
 
