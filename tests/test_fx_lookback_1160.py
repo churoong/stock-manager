@@ -38,7 +38,8 @@ def mem(monkeypatch: pytest.MonkeyPatch) -> MemClient:
 def test_첫_매매일_앞_환율로_평가한다(mem: MemClient) -> None:
     job.run()
     mv, mv_krw = mem.conn.execute("SELECT market_value, market_value_krw FROM positions").fetchone()
-    assert mv == 2100.0 and mv_krw == pytest.approx(2100.0 * 1400.0)
+    # 표의 마지막 환율(1,400)이 체결일보다 앞서므로 체결 환율 1,405 로 평가한다 (25.1295). 이 시험의 요지(평가가 비지 않는다)는 같다
+    assert mv == 2100.0 and mv_krw == pytest.approx(2100.0 * 1405.0)
     totals = json.loads(mem.conn.execute("SELECT totals_json FROM portfolio_summary").fetchone()[0])
     assert totals["unvalued_count"] == 0
 
