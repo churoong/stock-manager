@@ -848,6 +848,7 @@ python -m batch.jobs.backtest --market KR --years 5 --top-n 20 --trend-filter
    새로 들어오는 것은 적재 문이 막는다. 이미 있으면 지우기 전에 **사용자에게 묻는다**(되돌릴 수 없다)
    25.1251 부터 국내 수정주가·일일 기업행위 감지는 0 행을 건너뛰어 남아 있어도 분할을 가리지 않는다 — 다른 읽는 곳은 [확인필요]
 8. **국내 마스터가 실제로 갱신되는지 본다** (infra 25.1264, 읽기만) — `SELECT MAX(fetched_at) FROM stocks WHERE country='KR' AND asset_type='stock'` 가 지난 일요일 밤 실행 뒤인지, 그 실행 경고에 "직전 거래일 … 목록으로 갱신" 이 있었는지. 금요일 치가 주말에 나오는지도 이걸로 안다
+9. **마이그레이션 0067(`financials.period_days`, infra 25.1286)이 적용됐는지 본다** (읽기만) — 다음 일일 배치가 자동 적용한다. 다음 재무 수집(월요일) 뒤 `SELECT COUNT(*) FROM financials WHERE period_days IS NOT NULL` 이 늘었는지, `period_days < 350` 인 사업보고서가 있는지
 
 ### 4.0 되살아나는 날 — **한 번의 실행**으로 확인할 것
 
