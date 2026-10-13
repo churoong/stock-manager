@@ -125,13 +125,17 @@ def run(today: date | None = None, max_calls: int = MAX_CALLS_PER_RUN) -> int:
 
 def probe(corp_code: str, fiscal_year: int) -> int:
     """쓰지 않고 응답의 칸만 찍는다 — `rcept_no` 가 행마다 오는지, 합계 account_id 가 무엇인지 (검증 A 조건 ⑨)."""
+    # 주요계정 묶음 API 의 같은 회사 값 — 저장된 스냅샷이 이 값이다. 자기정합 검사가 무엇과 견주는지 나란히 본다
+    묶음 = dart.fetch_multi_financials([corp_code], fiscal_year, dart.ANNUAL_REPORT_CODE)
+    주요 = {bool(c.consolidated): {"receipt_no": c.receipt_no, "net_income": c.values.get("net_income"),
+                                  "total_assets": c.values.get("total_assets")} for c in (묶음.data or [])}  # fmt: skip
     for consolidated in (True, False):
         res = dart.fetch_full_statement(corp_code, fiscal_year, dart.ANNUAL_REPORT_CODE, consolidated)
         rows = res.data or []
         cf = [r for r in rows if r.get("sj_div") == "CF"][:12]
         print(json.dumps({"consolidated": consolidated, "ok": res.ok, "error": res.error, "rows": len(rows),
                           "rcept_no": sorted({str(r.get("rcept_no")) for r in rows})[:3],
-                          "parsed": dart.parse_full_statement(rows),
+                          "parsed": dart.parse_full_statement(rows), "multi": 주요.get(consolidated),
                           "cf_head": [(r.get("account_id"), r.get("account_nm")) for r in cf]},
                          ensure_ascii=False))  # fmt: skip
     return 0
