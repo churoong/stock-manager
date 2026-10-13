@@ -22,7 +22,8 @@ _예전_조건 = (
     " f.revenue, f.operating_income, f.current_assets, f.current_liabilities, f.noncurrent_liabilities, f.report_date, f.currency,"
     " f.period_days"  # 보고 기간 일수 — 25.1286 에 더한 열(기준 고르기와 무관)
     " FROM financials f JOIN stocks s ON s.id = f.stock_id" + _예전_조건 + " AND f.report_date <= ?",
-    "signals": "SELECT f.stock_id, f.fiscal_year, f.revenue, f.operating_income, f.consolidated, f.report_date, f.currency"
+    "signals": "SELECT f.stock_id, f.fiscal_year, f.revenue, f.operating_income, f.consolidated, f.report_date, f.currency,"
+    " f.period_days"  # 25.1293
     " FROM financials f JOIN stocks s ON s.id = f.stock_id" + _예전_조건 + " AND f.report_date <= ?",
     "valuation_bands": "SELECT f.stock_id, f.report_date, f.total_equity, f.fiscal_year FROM financials f"
     " JOIN stocks s ON s.id = f.stock_id" + _예전_조건 + " AND f.total_equity IS NOT NULL AND f.report_date <= ?",

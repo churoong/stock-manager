@@ -249,7 +249,7 @@ def health(rows: list[dict], sector_code: str | None) -> dict | None:
     기준 하나: 가장 최근 회계연도의 연결(있으면)·별도, 같은 해 여러 보고서면 가장 늦게 접수된 것.
     금융업(은행·보험·증권·부동산 — `sectors.is_financial`)은 부채가 영업 재료라 Z″ 가 뜻이 없어 내지 않고 그렇게 적는다.
     재료가 비면 비었다고 적는다(지어내지 않는다). 사업보고서가 없으면 None."""
-    from batch.services import sectors
+    from batch.services import scoring, sectors
     from batch.sources import dart
 
     연간 = [r for r in rows if str(r.get("report_code")) == dart.ANNUAL_REPORT_CODE]
@@ -269,6 +269,10 @@ def health(rows: list[dict], sector_code: str | None) -> dict | None:
                                                          "operating_income"))  # fmt: skip
     빈것 = [이름 for 이름, v in (("유동자산", ca), ("유동부채", cl), ("자산총계", ta), ("부채총계", tl),
                               ("이익잉여금", re_), ("자본총계", eq), ("영업이익", ebit)) if v is None]  # fmt: skip
+    # **짧은 사업연도의 영업이익은 12개월 값이 아니다** (docs/infra.md 25.1293) — Z″ 의 EBIT/총자산이 작게 나와 위험
+    # 쪽으로 기운다. 연율화하지 않고(점수 25.1286 과 같은 판단) Z″ 를 내지 않는다. 부채비율은 시점 값이라 그대로
+    if ebit is not None and scoring.short_year(r):
+        빈것.append(f"영업이익(사업연도 {int(r['period_days'])}일 — 12개월 아님)")
     if isinstance(tl, (int, float)) and isinstance(eq, (int, float)) and eq > 0:
         out["debt_ratio"] = round(tl / eq, 4)
     if 빈것 or not ta or ta <= 0 or not tl or tl <= 0:

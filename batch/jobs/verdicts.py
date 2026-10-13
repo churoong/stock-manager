@@ -169,7 +169,7 @@ QUARTERS_SQL = (
     "SELECT f.stock_id, f.fiscal_year, f.report_code, f.consolidated, f.report_date, f.revenue, f.operating_income,"
     # 재무 건전성 (38장, 25.1061) — 같은 행에서 사업보고서(11011)의 재무상태표 열도 함께 읽는다(행 둘 더)
     " f.current_assets, f.current_liabilities, f.total_assets, f.total_liabilities, f.retained_earnings,"
-    " f.total_equity"
+    " f.total_equity, f.period_days"  # 짧은 사업연도 (25.1293)
     " FROM financials f JOIN json_each(?) j ON j.value = f.stock_id"
     " WHERE f.report_code IN ('11013', '11012', '11014', ?) AND f.fiscal_year >= ?"  # ? = dart.ANNUAL_REPORT_CODE
 )

@@ -192,7 +192,8 @@ def load_growth(client: TursoClient, country: str, as_of: str, stock_ids: list[i
         " WHERE fb.stock_id = s.id AND fb.report_code = ? AND fb.report_date <= ?"
         " ORDER BY fb.fiscal_year DESC, fb.consolidated DESC LIMIT 1) AS cons FROM stocks s WHERE s.country = ?"
         " AND (? IS NULL OR s.id IN (SELECT value FROM json_each(?))))"
-        " SELECT f.stock_id, f.fiscal_year, f.revenue, f.operating_income, f.consolidated, f.report_date, f.currency"
+        " SELECT f.stock_id, f.fiscal_year, f.revenue, f.operating_income, f.consolidated, f.report_date, f.currency,"
+        " f.period_days"  # 짧은 사업연도 (25.1293)
         " FROM b CROSS JOIN financials f ON f.stock_id = b.sid AND f.consolidated = b.cons"
         " WHERE f.report_code = ? AND f.report_date <= ?",
         # 기준 고르기(25.856)·본 질의
@@ -210,6 +211,11 @@ def load_growth(client: TursoClient, country: str, as_of: str, stock_ids: list[i
         # 2023 영업이익
         # 성장률이 −99.9%(달러 ÷ 원)였다. 전년 통화가 다르면 전년이 없는 것과 같다
         if previous is not None and not scoring_svc.same_currency(current, previous):
+            previous = None
+        # **짧은 사업연도는 12개월 해와 견주지 않는다** (docs/infra.md 25.1293) — 점수(`scores.build_inputs`, 25.1286)와
+        # 같은 규칙. 분할 신설 첫해(7개월)의 매출을 전년 12개월과 견주면 "역성장" 이, 그 다음 해에는 "급성장" 이 나와
+        # 중기 신호(실적 모멘텀)가 기간 차이를 실적으로 읽었다
+        if scoring_svc.short_year(current) or scoring_svc.short_year(previous):
             previous = None
         # **묵은 사업보고서로 "실적 모멘텀" 을 내지 않는다** (docs/infra.md 25.660, 감사). 감사 지연·의견거절로
         # 최신 사업보고서가 없는 회사가 재작년 성장률로 중기 신호를 받았다. 접수일이 15개월(약 457일)보다 오래되면
