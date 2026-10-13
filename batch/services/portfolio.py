@@ -582,6 +582,19 @@ def fresher_price(series: dict[str, float], trades: list[Trade]) -> tuple[float 
     return series[last_day], last_day
 
 
+def fresher_fx(latest: tuple[str | None, float | None], trades: list[Trade]) -> tuple[str | None, float | None]:
+    """평가에 쓸 환율과 그 날짜 — `fresher_price` 의 짝 (docs/infra.md 25.1294 다음, 25.1295).
+
+    환율 표의 마지막 행이 이 종목의 **마지막 체결일보다 앞서면** 그 체결의 환율을 쓴다. 예전에는 가격만 체결가로 바꾸고
+    환율은 표의 마지막 값이라, 10-12 에 $255·1,425원에 산 종목이 10-08 환율(1,400)로 평가되어 사자마자 환차손 −25만원이
+    떴다(4일이라 묵음 경고도 없음). 체결 환율이 0 이하(모름)면 예전처럼 표의 값을 쓴다."""
+    fx_day, fx_now = latest
+    last_trade = max((t for t in trades if t.fx_rate and t.fx_rate > 0), key=same_day_order, default=None)
+    if last_trade is not None and (fx_day is None or fx_day < last_trade.trade_date):
+        return last_trade.trade_date, float(last_trade.fx_rate)
+    return fx_day, fx_now
+
+
 def _carry(series: dict[str, float], dates_sorted: list[str], day: str, cache: dict) -> float | None:
     """day 이전(포함) 가장 최근 값. 휴장일·가격 끊김은 마지막 값으로 들고 간다."""
     key = id(series)

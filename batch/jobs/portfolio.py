@@ -432,7 +432,8 @@ def run() -> int:
         for pos in positions:
             # 종가가 마지막 체결보다 묵었으면 체결가로 평가한다 (docs/infra.md 25.398)
             price, price_day = pf.fresher_price(closes_wide.get(pos.stock_id, {}), by_stock[pos.stock_id])
-            fx_day, fx_now = ("-", 1.0) if pos.currency == "KRW" else latest_fx
+            # 환율도 같은 규칙 — 표의 마지막 환율이 마지막 체결보다 묵었으면 체결 환율 (25.1295)
+            fx_day, fx_now = ("-", 1.0) if pos.currency == "KRW" else pf.fresher_fx(latest_fx, by_stock[pos.stock_id])
             pf.valuate(pos, price, price_day, fx_now, fx_day)
             if pos.market_value_krw is None:
                 ticker = stocks.get(pos.stock_id, {}).get("ticker")
