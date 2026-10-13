@@ -208,6 +208,17 @@ export function inQuietHours(
 
 /** 장중 시세의 출처 이름 — 알림 행 `data.source` (25.815). 야후 spark 는 지연 시세다 */
 export const QUOTE_SOURCE = "yahoo_spark";
+/**
+ * 시세를 물을 종목 순서 — **보유 먼저, 그다음 신호, 관심** (docs/infra.md 25.1310, 장중 감사). KIS 는 한 호출에 약 60종목까지
+ * 받고(시간 상한) 나머지는 야후 지연 시세로 물러난다. 예전엔 `monitor_targets` 행 순서(정렬 없음)라 보유가 지연 꼬리에 갈 수 있었다
+ */
+export function quoteOrder(targets: Array<Pick<Target, "yahoo_symbol" | "reasons">>): string[] {
+  const 순위 = (r: string[]) => (r.includes("holding") ? 0 : r.some((x) => x.startsWith("signal")) ? 1 : 2);
+  const 가장 = new Map<string, number>();
+  for (const t of targets) 가장.set(t.yahoo_symbol, Math.min(가장.get(t.yahoo_symbol) ?? 9, 순위(t.reasons)));
+  return [...가장.keys()].sort((a, b) => (가장.get(a) ?? 9) - (가장.get(b) ?? 9));
+}
+
 /** KIS 실시간 출처 이름 — `lib/kis.KIS_SOURCE` 와 같다(시험이 대 본다). 이 파일이 KIS 클라이언트를 끌어오지 않게 따로 둔다 */
 export const KIS_QUOTE_SOURCE = "kis_openapi";
 

@@ -44,6 +44,7 @@ import {
   secretWeakDetail,
   withinOpenGrace,
   freshDisclosures,
+  quoteOrder,
 } from "@/lib/intraday";
 import { ALERT_UPSERT } from "@/lib/alertWrite";
 import { DART_API_NAME, DART_DAILY_LIMIT, addUsage, isBlocked, readUsage } from "@/lib/apiUsage";
@@ -547,7 +548,8 @@ export async function GET(request: Request) {
       }
     }
 
-    const symbols = [...new Set([...byStock.values()].map((v) => v.target.yahoo_symbol))];
+    // 보유 먼저 — KIS 시간 상한에 걸려 야후로 물러나는 꼬리에 보유가 가지 않게 (25.1310)
+    const symbols = quoteOrder([...byStock.values()].map((v) => v.target));
     const { quotes, errors, kis } = await fetchQuotes(symbols, market, now, session.date);
     // 야후 호출이 하나라도 실패했는지 — 그 호출에서 빠진 대상은 판정 못 한 것이다 (25.731)
     const quoteCallFailed = errors.length > 0;

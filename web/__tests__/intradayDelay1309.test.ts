@@ -29,3 +29,20 @@ describe("국내 지연 시세 표시", () => {
     expect(KIS_QUOTE_SOURCE).toBe(KIS_SOURCE);
   });
 });
+
+describe("시세 순서 (25.1310)", () => {
+  it("보유 먼저, 신호, 관심 — 같은 종목은 가장 앞 순위로 한 번", async () => {
+    const { quoteOrder } = await import("@/lib/intraday");
+    expect(quoteOrder([
+      { yahoo_symbol: "W.KS", reasons: ["watch"] },
+      { yahoo_symbol: "S.KS", reasons: ["signal:mid"] },
+      { yahoo_symbol: "H.KS", reasons: ["holding"] },
+      { yahoo_symbol: "W.KS", reasons: ["holding"] },
+    ])).toEqual(["W.KS", "H.KS", "S.KS"]);
+  });
+  it("route 가 이 순서로 묻는다", async () => {
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync(new URL("../app/api/cron/intraday/route.ts", import.meta.url), "utf8");
+    expect(src).toContain("const symbols = quoteOrder(");
+  });
+});
