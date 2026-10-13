@@ -72,6 +72,8 @@ def test_판정표_기준을_가격으로_푼다() -> None:
     assert [x["need"] for x in lv["short"]] == ["above", "below"]
     # PBR 0.6(30% 분위) × 주당순자산(110 / 0.8)
     assert math.isclose(lv["long"][0]["price"], 0.6 * 110 / 0.8) and lv["long"][0]["need"] == "below"
+    # 손절 분위 위(PBR ≥ 20% 분위) 도 가격으로 (25.1267) — 0.5 × 주당순자산, 넘어야 충족
+    assert math.isclose(lv["long"][1]["price"], 0.5 * 110 / 0.8) and lv["long"][1]["need"] == "above"
     assert lv["mid"] == []
     # 판정표 행에 함께 실린다
     rows = sig_job.check_rows(inp, "2026-10-07", "now")

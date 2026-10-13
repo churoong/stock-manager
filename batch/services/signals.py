@@ -888,6 +888,10 @@ def price_levels(inp: SignalInput) -> dict[str, list[dict]]:
         if 기준가:
             out["long"].append({"label": f"장기: 밸류에이션 밴드 하단 (PBR {BAND_ENTRY_PERCENTILE}% 분위)",
                                 "price": inp.band.at(BAND_ENTRY_PERCENTILE) * 기준가 / inp.pbr_now, "need": "below"})
+            # 판정표 "손절 분위 위"(PBR ≥ 20% 분위)도 가격으로 풀린다 (25.1267, 신호 감사) — 빠져 있어, 바닥 아래로
+            # 떨어져 장기 판정이 떨어진 종목의 사다리가 이미 충족된 "30% 분위 아래" 하나만 보였다
+            out["long"].append({"label": f"장기: 손절 분위 위 (PBR {BAND_STOP_PERCENTILE}% 분위)",
+                                "price": inp.band.at(BAND_STOP_PERCENTILE) * 기준가 / inp.pbr_now, "need": "above"})
     return out
 
 
