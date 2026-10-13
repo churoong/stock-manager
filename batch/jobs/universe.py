@@ -533,7 +533,8 @@ MARKET_CAP_MAX_AGE_DAYS = 14
 
 
 def stale_market_cap_warning(
-    rows: list[dict], as_of: date, verdicts: list[uni.Verdict] | None = None
+    rows: list[dict], as_of: date, verdicts: list[uni.Verdict] | None = None,
+    turnover: dict[int, int] | None = None, min_turnover: int | None = None,
 ) -> str | None:
     """묵은 시총으로 판정한 종목 수를 말한다 (docs/infra.md 25.362).
 
@@ -551,6 +552,13 @@ def stale_market_cap_warning(
             v = verdicts[i]
             if not v.included and v.reason != uni.REASON_SMALL_CAP:
                 continue
+            # **거래대금만으로도 빠질 종목의 '시총미달' 은 세지 않는다** (25.1266, 유니버스 감사). 판정은 시총을 먼저
+            # 봐 사유가 '시총미달' 로 적히지만, 미국은 거래대금이 낮아진 소형주의 시총을 더 채우지 않아(`us_shares`)
+            # 그 묵은 값이 매주 이 경고를 켰다 — 묵은 시총이 아무것도 가르지 않았는데. 거래대금을 모르면 그대로 센다
+            if not v.included and min_turnover is not None and turnover is not None:
+                t = turnover.get(int(row["id"])) if "id" in row else None
+                if t is not None and t < min_turnover:
+                    continue
         when = row.get("market_cap_date")
         if row.get("market_cap") is None or not when:
             continue
@@ -687,7 +695,7 @@ def build_snapshot(
         빠진판정.append(uni.Verdict(included=False, reason=사유, listed_days=None))
         rows_data.append((snapshot_date, int(r["id"]), 0, 사유, None, None, None, str(r["currency"]), now))
 
-    묵은시총 = stale_market_cap_warning(rows, as_of, verdicts)
+    묵은시총 = stale_market_cap_warning(rows, as_of, verdicts, turnover, filters.min_avg_turnover_20d)
     if 묵은시총:
         warnings.append(묵은시총)
 
