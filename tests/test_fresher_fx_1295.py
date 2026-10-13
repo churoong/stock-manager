@@ -52,3 +52,16 @@ def test_평가_잡이_체결_환율을_쓴다(monkeypatch) -> None:
     job.run()
     fx_now, fx_date, fx_krw = c.execute("SELECT fx_now, fx_date, unrealized_fx_pnl_krw FROM positions").fetchone()
     assert (fx_now, fx_date) == (1425.0, "2026-10-12") and fx_krw == 0
+
+
+def test_날짜별_평가액도_체결_환율() -> None:
+    """TWR 계열도 같은 규칙 — 산 날 지수에 묵은 환율만큼 가짜 환차손이 들지 않는다 (25.1308)."""
+    # 기존 미국 보유 10주(10-01 $100·1,400원) + 10-12 에 한 주 더($110·1,425원). 환율 표는 10-08(1,400) 까지
+    trades = [pf.Trade(1, 2, "buy", "2026-10-01", 100.0, 10, "USD", 1400.0, fee=0),
+              pf.Trade(2, 2, "buy", "2026-10-12", 110.0, 1, "USD", 1425.0, fee=0)]  # fmt: skip
+    closes = {2: {"2026-10-01": 100.0, "2026-10-08": 110.0, "2026-10-12": 110.0}}
+    fx = {"USD": {"2026-10-01": 1400.0, "2026-10-08": 1400.0}}
+    rows, _ = pf.value_series(trades, [], closes, fx, "2026-10-12", {"USD": pf.CostRates(0, 0, None, has_sell_tax=False)})
+    마지막 = rows[-1]
+    assert 마지막.date == "2026-10-12"
+    assert abs(마지막.value_krw - 11 * 110.0 * 1425.0) < 1e-6

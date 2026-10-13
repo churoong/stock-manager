@@ -22,7 +22,8 @@ from typing import Any
 #: 4 — 일부만 판 묶음은 원가 전체(25.784), 전날 몫과 그날 묶음에 걸친 매도 줄의 대금은 매수 자금이 아니다(25.787)
 #: 5 — 지급일 보유가 앞 6개월 최대의 절반 아래면 배당을 몫이 빠진 날에 붙인다 (docs/infra.md 25.828)
 #: 6 — 지표 곡선에 첫날 앞 기준점(25.1260), 배당은 기록한 몫만 TWR 에(25.1261)
-CALC_VERSION = 6
+#: 7 — 환율 표가 체결보다 묵은 날은 체결 환율로 평가 (25.1308 — 보유 평가 25.1295 와 같은 규칙)
+CALC_VERSION = 7
 
 # 수량 비교 허용 오차. 소수 주식(미국)을 더하고 빼다 생기는 부동소수 찌꺼기
 QTY_EPS = 1e-9
@@ -908,6 +909,12 @@ def value_series(
                 close = 체결가[sid][0]  # 종가가 체결보다 묵었다 — 체결가가 더 새 값이다 (25.398)
             currency = currency_of.get(sid, "KRW")
             rate = 1.0 if currency == "KRW" else _carry(fx.get(currency, {}), fx_dates.get(currency, []), day, cache)
+            if currency != "KRW" and rate is not None and 체결가[sid][1] > 0 and _carry_date(
+                fx_dates.get(currency, []), cache, fx.get(currency, {})
+            ) < 체결일[sid]:
+                # 환율도 체결보다 묵었으면 체결 환율 — 보유 평가(`fresher_fx`, 25.1295)와 같은 규칙. 아니면 산 날 지수에
+                # 묵은 환율만큼 가짜 환차손이 들어갔다가 환율 표가 따라잡는 날 되돌아갔다 (25.1308)
+                rate = 체결가[sid][1]
             if close is None or rate is None:
                 빈날[sid].add(str(day))
                 if sid not in 체결가:
