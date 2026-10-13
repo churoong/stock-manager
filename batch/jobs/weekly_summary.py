@@ -221,23 +221,40 @@ def sector_avg(
     return (sum(수익) / len(수익) if 수익 else None), len(수익)
 
 
+def _나라별(through: str | dict | None) -> dict[str, str]:
+    """보고 기록을 나라별로 (25.1269). 예전 기록(문자열 하나)은 두 나라에 같이 쓴다"""
+    if isinstance(through, dict):
+        return {str(k): str(v) for k, v in through.items() if v}
+    return {"KR": through, "US": through} if through else {}
+
+
 def load_losses(
-    client: TursoClient, now: datetime, through: str | None = None, 끝: list[str] | None = None
+    client: TursoClient, now: datetime, through: str | dict | None = None, 끝: list[dict] | None = None
 ) -> tuple[int, int, list[postmortem.Loss]]:
     """지난 보고(`through`) 뒤 20거래일 성적이 나온 신호와 그 가운데 손실의 몫 (docs/reports.md 3.8, 25.998·25.1151).
 
-    `끝` 을 주면 이번에 본 진입일의 마지막 날을 넣는다 — 보낸 뒤 `through` 로 적는다."""
+    `끝` 을 주면 이번에 본 진입일의 마지막 날을 **나라별로** 넣는다 — 보낸 뒤 `through` 로 적는다.
+
+    **보고 기록은 나라마다 따로** (docs/infra.md 25.1269, 리포트 감사 재현). 예전엔 두 나라를 합친 최댓값 하나라,
+    휴장일이 다른 주(국내 추석·한글날, 미국 추수감사절)에 성적이 덜 익은 나라의 사이 진입일이 다음 주에 익어도
+    `entry_date > 기록` 에 걸려 **영영 보고되지 않았다** — 10-11 기준 국내는 09-07, 미국은 09-11 까지 익어 국내
+    09-08~09-11 이 빠졌다."""
     한계 = (now - timedelta(days=POSTMORTEM_BACKSTOP_DAYS)).date().isoformat()
+    앞 = _나라별(through)
     rows = client.execute(
         "SELECT o.stock_id, COALESCE(s.name_ko, s.name_en, s.ticker), o.horizon, o.entry_date, o.ret_20d,"
         " o.bench_ret_20d, s.sector, s.country FROM signal_outcomes o JOIN stocks s ON s.id = o.stock_id"
         # `days_available >= 20` 을 걸지 않는다 (25.1149) — 성적표는 상장폐지·거래정지로 끊긴 신호의 `ret_20d` 를
         # 마지막 종가로 채운다(25.696). 그 조건은 `ret_20d IS NOT NULL` 과 겹치고 **끊긴 손실만** 걸러 냈다(생존편향)
-        " WHERE o.entry_date > ? AND o.ret_20d IS NOT NULL",
-        [max(through or "", 한계)],
+        " WHERE o.entry_date > CASE s.country WHEN 'KR' THEN ? ELSE ? END AND o.ret_20d IS NOT NULL",
+        [max(앞.get("KR", ""), 한계), max(앞.get("US", ""), 한계)],
     ).rows
     if 끝 is not None and rows:
-        끝.append(max(str(r[3]) for r in rows))
+        새 = dict(앞)
+        for r in rows:
+            나라 = "KR" if str(r[7]) == "KR" else "US"
+            새[나라] = max(새.get(나라, ""), str(r[3]))
+        끝.append(새)
     losses = []
     손실들 = sorted((r for r in rows if float(r[4]) < 0), key=lambda r: float(r[4]))
     for r in 손실들[:POSTMORTEM_MAX]:
@@ -355,7 +372,7 @@ def run(dry_run: bool = False, force: bool = False) -> int:
         )
         rot_lines = column_rot.render(rot, checked, MAX_LINES) + [f"  (못 본 표: {e})" for e in rot_errors[:2]]
         # 틀린 추천 사후 분석 (25.998) — 읽기에 실패하면 절만 빠진다(요약은 나간다)
-        본_끝: list[str] = []
+        본_끝: list[dict] = []
         try:
             총, 손실수, 손실 = load_losses(client, now, db.get_setting(client, POSTMORTEM_THROUGH_KEY), 본_끝)
             사후 = postmortem.render(총, 손실, 손실수)

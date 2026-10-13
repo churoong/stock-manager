@@ -181,9 +181,39 @@ def test_지난_보고_뒤_성적이_나온_신호를_모두_본다() -> None:
     now = datetime(2026, 10, 11, tzinfo=UTC)
     끝: list[str] = []
     총, 손실수, _ = ws.load_losses(C(), now, None, 끝)
-    assert (총, 손실수) == (3, 2) and 끝 == ["2026-09-08"]
+    assert (총, 손실수) == (3, 2) and 끝 == [{"KR": "2026-09-08"}]  # 나라별 (25.1269)
     # 다음 주: 보고한 데까지는 다시 세지 않는다
     assert ws.load_losses(C(), now, "2026-09-08")[:2] == (0, 0)
     # 기록이 아주 오래 묵었어도 45일 넘게 거슬러 가지 않는다
     # 10-20 기준 45일 전은 09-05 — 08-28·09-01 은 넘어가고 09-08 하나
     assert ws.load_losses(C(), datetime(2026, 10, 20, tzinfo=UTC), "2026-01-01")[:2] == (1, 0)
+
+
+def test_보고_기록은_나라마다_따로다() -> None:
+    """휴장일이 달라 덜 익은 나라의 진입일이 다음 주에 빠지지 않는다 (docs/infra.md 25.1269, 리포트 감사 재현)."""
+    from batch.core.turso import ResultSet
+    from tests.test_sql_schema import 스키마올리기
+
+    con: sqlite3.Connection = 스키마올리기()
+
+    class C:
+        def execute(self, sql, args=None):  # noqa: ANN001, ANN202
+            cur = con.execute(sql, args or [])
+            return ResultSet(columns=[d[0] for d in cur.description or []], rows=[tuple(r) for r in cur.fetchall()])
+
+    for sid, 나라 in ((1, "KR"), (2, "US")):
+        con.execute("INSERT INTO stocks (id, ticker, market, country, currency, status, source, fetched_at)"
+                    " VALUES (?, ?, 'X', ?, 'KRW', 'active', 't', 't')", [sid, f"T{sid}", 나라])  # fmt: skip
+    줄 = [(1, "2026-09-07", -0.1), (1, "2026-09-09", None), (2, "2026-09-11", -0.1)]
+    for k, (sid, d, r) in enumerate(줄):
+        con.execute("INSERT INTO signal_outcomes (stock_id, as_of_date, horizon, entry_date, entry_close, ret_20d,"
+                    " days_available, computed_at) VALUES (?, ?, 'short', ?, 100, ?, 20, 't')", [sid, f"a{k}", d, r])  # fmt: skip
+    now = datetime(2026, 10, 11, tzinfo=UTC)
+    끝: list[dict] = []
+    assert ws.load_losses(C(), now, None, 끝)[:2] == (2, 2)
+    assert 끝 == [{"KR": "2026-09-07", "US": "2026-09-11"}]
+    # 다음 주 국내 09-09 가 익었다 — 미국 기록(09-11)에 가리지 않는다
+    con.execute("UPDATE signal_outcomes SET ret_20d = -0.2 WHERE entry_date = '2026-09-09'")
+    assert ws.load_losses(C(), datetime(2026, 10, 18, tzinfo=UTC), 끝[0])[:2] == (1, 1)
+    # 예전 기록(문자열 하나)은 두 나라에 같이 쓴다
+    assert ws.load_losses(C(), datetime(2026, 10, 18, tzinfo=UTC), "2026-09-11")[:2] == (0, 0)
