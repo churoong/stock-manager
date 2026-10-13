@@ -154,8 +154,24 @@ const FLUSH_GAP_MS = 1_100;
  */
 export const maxDuration = 30;
 
+/**
+ * 이보다 오래 대기한 알림은 보내지 않고 `stale-skipped` 로 둔다 (docs/infra.md 25.1289, 장중 감사 재현). 장중 감시를 끈 동안(25.1026)
+ * 조용시간·발송 실패로 쌓인 시간외·분석 알림이 다시 켠 첫 호출에 "장중 알림" 머리로 최대 500건 한꺼번에 나갔다 — 며칠 묵은
+ * 시세 알림은 판단에 쓸 수 없다. 4일이면 사흘 연휴 뒤 첫 해제 호출까지 덮는다. 알림 화면에는 그대로 남는다
+ */
+const PENDING_MAX_AGE_MS = 4 * 86_400_000;
+const STALE_SKIPPED = "stale-skipped";
+
 async function flushPending(now: Date, notes: string[] = []): Promise<number> {
   let 보낸수 = 0;
+  const 묵음 = await execute(
+    "UPDATE alerts SET sent_at = ? WHERE sent_at IS NULL AND created_at < ?",
+    [STALE_SKIPPED, new Date(now.getTime() - PENDING_MAX_AGE_MS).toISOString()],
+  )
+    .catch(() => null /* 대기 접기 실패 */);
+  if (묵음 && 묵음.affectedRows > 0) {
+    notes = [...notes, `${묵음.affectedRows}건은 ${PENDING_MAX_AGE_MS / 86_400_000}일 넘게 대기해 보내지 않았습니다 — 알림 화면에 있습니다`];
+  }
   for (let 차례 = 0; 차례 < FLUSH_MAX_ROUNDS; 차례++) {
     if (차례 > 0) await new Promise((r) => setTimeout(r, FLUSH_GAP_MS));
     // 머리말(목록 날짜·설정 경고)은 **첫 통에만** 붙인다

@@ -91,6 +91,7 @@ export function sentLabel(sent: string | null, kst: (iso: string) => string): st
   // 조용시간 대기만이 아니다 — 발송이 실패해도 비어 있다 (docs/infra.md 25.338). 이유를 지어내지 않는다
   if (!sent) return "아직 안 보냄";
   if (sent === "quiet-skipped") return "보내지 않음 (조용시간)";
+  if (sent === "stale-skipped") return "보내지 않음 (너무 오래 대기 — 25.1289)";
   if (sent.startsWith("claim:")) return "보내는 중 (10분 넘게 이대로면 다음 호출이 다시 보냄)";
   return `발송 ${kst(sent)}`;
 }
