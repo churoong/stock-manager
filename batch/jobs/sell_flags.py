@@ -385,6 +385,18 @@ def run(today: date | None = None) -> int:
             db.finish_batch_run(client, run_id, status="failed", error_text=이유)
             print(이유)
             return 1
+        # **묵은 보유로도 판정하지 않는다** (docs/infra.md 25.1272, 매도 플래그 감사 재현). 위 검사는 쓰다 만 표만
+        # 잡는다 — 재계산이 **읽다가** 실패하면(시간 초과 등) positions 는 지난 성공 그대로라, 웹에서 다 판 종목에
+        # "단기 손절선 터치" 빨강이 오늘 날짜로 NEW 가 됐다. 요약의 원본 지문이 지금 지문과 다르면 같은 길로 간다
+        저장_지문 = client.execute("SELECT trades_version FROM portfolio_summary WHERE id = 1").scalar()
+        if 저장_지문 is not None and str(저장_지문) != _pf.trades_version(client):
+            이유 = (
+                "보유 표가 지금 매매 기록보다 묵었습니다(포트폴리오 재계산이 끝나지 않음)"
+                " — 매도 플래그를 판정하지 않았습니다 — 어제 플래그 유지"
+            )
+            db.finish_batch_run(client, run_id, status="failed", error_text=이유)
+            print(이유)
+            return 1
         # **범위를 여기서도 본다** (2026-09-23, docs/infra.md 25.180). 예전에는
         # `jobs/signals` 만 검사하고 나머지 셋은 날것을 썼다 — 같은 설정으로 낸
         # 신호의 손절선과 매도 플래그의 손절선이 **서로 다를 수 있었다.**

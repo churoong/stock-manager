@@ -656,8 +656,16 @@ def test_재계산이_쓰다_말았으면_판정하지_않는다(monkeypatch) ->
     assert c.execute("SELECT COUNT(*) FROM sell_flags").fetchone()[0] == 0
     상태, 까닭 = c.execute("SELECT status, error_text FROM batch_runs WHERE job_name = ?", [job.JOB_NAME]).fetchone()
     assert 상태 == "failed" and "재계산이 끝나지 않아" in 까닭
-    c.execute("UPDATE portfolio_summary SET trades_version = 'v1'")
+    c.execute("UPDATE portfolio_summary SET trades_version = ?", [pf_job.trades_version(mem)])  # type: ignore[arg-type]
     assert job.run(date(2026, 9, 16)) == 0  # 끝난 지문이면 예전대로
+    # **지문이 지금 매매 기록과 다르면**(재계산이 읽다 실패 — 다 판 것이 표에 남음) 판정하지 않는다 (25.1272)
+    c.execute("INSERT INTO trades (stock_id, side, trade_date, price, quantity, currency, fx_rate, fx_rate_source,"
+              " created_at, updated_at) VALUES (1, 'sell', '2026-09-15', 70, 10, 'KRW', 1, 'none', 't', 't2')")  # fmt: skip
+    전 = c.execute("SELECT COUNT(*) FROM sell_flags").fetchone()[0]
+    assert job.run(date(2026, 9, 16)) == 1
+    assert c.execute("SELECT COUNT(*) FROM sell_flags").fetchone()[0] == 전  # 어제 플래그 그대로
+    assert "묵었습니다" in c.execute("SELECT error_text FROM batch_runs WHERE job_name = ? ORDER BY id DESC LIMIT 1",
+                                     [job.JOB_NAME]).fetchone()[0]  # fmt: skip
 
 
 @pytest.mark.parametrize(("처음_수집", "뜨나"), [("2026-08-01T00:00:00+00:00", True), ("2026-09-08T00:00:00+00:00", False)])
