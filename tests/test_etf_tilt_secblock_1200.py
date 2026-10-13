@@ -150,3 +150,36 @@ def test_새_달_행에는_지난_판정_순위를_옮겨_싣는다(monkeypatch:
         t = json.loads(c.execute("SELECT rationale_data FROM etf_picks WHERE etf_id = ? AND as_of_date = '2026-11-02'",
                                  [i]).fetchone()[0])["tilt"]  # fmt: skip
         assert t["rank_all"] == i and t["carried_from"] == "2026-10-01"
+
+
+def test_핵심을_못_넘은_넓은_지수는_broad(monkeypatch: pytest.MonkeyPatch) -> None:
+    """규모 등으로 핵심에서 빠진 넓은 지수 ETF 가 "넓은 지수가 아닙니다" 경고를 받았다 (docs/infra.md 25.1283, ETF 감사 재현)."""
+    mem = _mem()
+    c = mem.conn
+    c.execute("UPDATE etf_picks SET passed = 0 WHERE etf_id = 2")  # BBB — 넓은 지수(미국 주식)인데 규모 미달
+    c.execute("UPDATE etf_picks SET passed = 0, bucket = NULL WHERE etf_id = 3")  # CCC — 넓은 지수 아님
+
+    class FakeSec:
+        calls = 0
+
+    class FakeNport:
+        def __init__(self, sec) -> None:  # noqa: ANN001
+            pass
+
+        def fund_tickers(self):  # noqa: ANN202
+            return {s: ("0000000001", f"S{s}") for s in ETFS}
+
+        def ftd_cusips(self, _d):  # noqa: ANN001, ANN202
+            return {f"C{k:08d}": f"S{k}" for k in range(20)}
+
+        def latest(self, cik, series):  # noqa: ANN001, ANN202
+            return sec_nport.NportDoc("0001-26-000001", "2026-08-29", "2026-06-30",
+                                      [sec_nport.Holding("x", f"C{k:08d}", "", 5.0) for k in range(20)])  # fmt: skip
+
+    monkeypatch.setattr(job.sec_edgar, "SecClient", lambda: FakeSec())
+    monkeypatch.setattr(job.sec_nport, "NportClient", FakeNport)
+    monkeypatch.setattr(job, "TursoClient", lambda: mem)
+    assert job.run() == 0
+    풀 = {i: (json.loads(c.execute("SELECT rationale_data FROM etf_picks WHERE etf_id = ?", [i]).fetchone()[0])
+              .get("tilt") or {}).get("pool") for i in (1, 2, 3)}  # fmt: skip
+    assert 풀 == {1: "core", 2: "broad", 3: "wide"}

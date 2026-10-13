@@ -47,8 +47,8 @@ export interface Tilt {
   market_top_pct?: number | null;
   top_share_pct?: number;
   top_cut_score?: number | null;
-  /** core = 핵심 통과(넓은 지수) · wide = 넓은 지수 아님(업종·테마·팩터) */
-  pool?: "core" | "wide";
+  /** core = 핵심 통과(넓은 지수) · broad = 넓은 지수지만 핵심 기준(규모·이력·거래량)을 못 넘음 · wide = 넓은 지수 아님(업종·테마·팩터) */
+  pool?: "core" | "broad" | "wide";
   /** us = 미국 상장 · kr_us = 국내 상장 미국 지수 · kr_kr = 국내 상장 국내 지수 (25.974). 순위는 이 무리 안에서 */
   group?: "us" | "kr_us" | "kr_kr";
   /** sec_nport · samsungfund_kodex */
@@ -97,6 +97,9 @@ export function tiltLine(t: Tilt): string {
   const 대비 = t.vs_market === null ? "" : ` (${t.benchmark} 대비 ${signed(t.vs_market)})`;
   return `${상위}${배수}${전체} · 평균 ${t.avg_score.toFixed(0)}점${대비}${출처}`;
 }
+
+/** 넓은 지수지만 핵심 기준을 못 넘은 후보에 붙이는 말 (docs/infra.md 25.1283) — "넓은 지수가 아닙니다" 는 틀린 말이다 */
+export const BROAD_POOL_NOTE = "넓은 지수지만 핵심 기준(규모·운용 이력·거래량·괴리율)을 넘지 못했습니다 — 카드의 제외 사유를 보세요";
 
 /** 넓은 지수가 아닌 후보(업종·테마·팩터)에 붙이는 경고 — 핵심 판정의 위성 경고와 같은 뜻 */
 export const WIDE_POOL_WARNING =

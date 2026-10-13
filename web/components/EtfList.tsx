@@ -21,7 +21,7 @@ import {
 } from "@/lib/etf";
 import { ACCOUNTS, groupByAccount, type Account } from "@/lib/etfAccounts";
 import { taxSimLines, type TaxSim } from "@/lib/taxSim";
-import { GROUP_LABEL, WIDE_POOL_WARNING, onePerIndex, parseTilt, tiltLine, tiltSource } from "@/lib/etfTilt";
+import { GROUP_LABEL, BROAD_POOL_NOTE, WIDE_POOL_WARNING, onePerIndex, parseTilt, tiltLine, tiltSource } from "@/lib/etfTilt";
 import { readSavedCountry, saveCountry, type Country } from "@/lib/market";
 import { daysSince, formatKst, parseCriteria } from "@/lib/recommend";
 
@@ -311,6 +311,8 @@ function FocusEtfList({ country }: { country: Country }) {
               </div>
               {t?.pool === "wide" ? (
                 <p className="mb-1 text-xs text-amber-700 dark:text-amber-300">{WIDE_POOL_WARNING}</p>
+              ) : t?.pool === "broad" ? (
+                <p className="mb-1 text-xs text-slate-500">{BROAD_POOL_NOTE}</p>
               ) : null}
               <EtfCard row={row} />
             </div>

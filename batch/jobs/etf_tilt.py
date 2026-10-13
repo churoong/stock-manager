@@ -587,7 +587,10 @@ def run() -> int:
             kind, sym = src
             payload = build_payload(
                 tilts[src], tilt_docs[src], sym, sym != str(p["symbol"]).upper(), markets[kind], benches[kind],
-                ranks.get(pid), ranks_all.get(pid), group_of(p), "core" if p.get("passed") else "wide",
+                # 핵심을 못 넘은 까닭이 규모·이력·거래량뿐인 **넓은 지수**는 "broad" — "wide"(업종·테마·전략)와 가른다
+                # (docs/infra.md 25.1283, ETF 감사 재현). 넓은 지수 묶음(`bucket`)이 있으면 넓은 지수다
+                ranks.get(pid), ranks_all.get(pid), group_of(p),
+                "core" if p.get("passed") else ("broad" if p.get("bucket") else "wide"),
             )
             updates.append((
                 "UPDATE etf_picks SET rationale_data = json_set(rationale_data, '$.tilt', json(?)) WHERE id = ?",
