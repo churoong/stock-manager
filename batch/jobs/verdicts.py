@@ -24,6 +24,7 @@ from batch.core.client import TursoClient
 from batch.core.entry import guard
 from batch.jobs import daily
 from batch.services import adjust as adj
+from batch.services import buy_thesis as bt
 from batch.services import cb_overhang as cb
 from batch.services import disclosure_reaction as dr
 from batch.services import divergence, history, insights
@@ -142,6 +143,61 @@ DISCLOSURES_SQL = (
 )
 #: 공시 위험 이력 1년 (docs/analysis.md 54장, 25.1157) — 금요일 공시 반응 계산이 채운 작은 표만 읽는다
 GOVERNANCE_SQL = "SELECT stock_id, day, type, title, receipt_no, covered_from, covered_to FROM governance_events"
+# 매수 근거가 아직 참인가 (56장, 25.1312) — 보유 종목의 가장 최근 중기·장기 매수와 그날 점수 기준일.
+# 보유 몇 종목만 읽는다
+BUY_THESIS_TRADES_SQL = (
+    "SELECT t.stock_id, t.horizon, t.snapshot_as_of FROM trades t JOIN json_each(?) j ON j.value = t.stock_id"
+    " WHERE t.side = 'buy' AND t.horizon IN ('mid', 'long') AND t.snapshot_as_of IS NOT NULL"
+    " ORDER BY t.trade_date DESC, t.id DESC"
+)
+#: 산 날의 같은 기간 신호(가장 높은 판)와 오늘(가장 최근) 판정표
+BUY_THESIS_SIGNAL_SQL = (
+    "SELECT id, as_of_date, rationale_data, calc_version FROM signals WHERE stock_id = ? AND as_of_date = ?"
+    " AND horizon = ? ORDER BY calc_version DESC LIMIT 1"
+)
+BUY_THESIS_CHECKS_SQL = (
+    "SELECT as_of_date, checks_json, calc_version FROM signal_checks WHERE stock_id = ? AND horizon = ?"
+    " ORDER BY as_of_date DESC LIMIT 1"
+)
+
+
+def load_buy_thesis(client: TursoClient, held: list[int], warnings: list[str]) -> dict[int, dict]:
+    """보유 종목 → {line, evidence}. 같은 기간 신호가 산 날에 있을 때만 (검증 A 조건 ①). 못 읽으면 그 줄만 빠진다."""
+    out: dict[int, dict] = {}
+    if not held:
+        return out
+    최근: dict[int, dict] = {}
+    for r in _safe(client, BUY_THESIS_TRADES_SQL, [json.dumps(sorted(held))], warnings, "매수 근거(매매)"):
+        최근.setdefault(int(r["stock_id"]), r)
+    for sid, t in 최근.items():
+        try:
+            sig = client.execute(BUY_THESIS_SIGNAL_SQL, [sid, t["snapshot_as_of"], t["horizon"]]).dicts()
+            if not sig:
+                continue
+            chk = client.execute(BUY_THESIS_CHECKS_SQL, [sid, t["horizon"]]).dicts()
+        except Exception as exc:  # noqa: BLE001 — 사실 줄 하나다
+            warnings.append(f"매수 근거를 읽지 못했습니다: {type(exc).__name__}")
+            return out
+        try:
+            그때 = (json.loads(sig[0]["rationale_data"] or "{}") or {}).get("criteria") or []
+            오늘 = json.loads(chk[0]["checks_json"]) if chk else None
+        except (TypeError, ValueError):
+            continue
+        오늘판 = chk[0]["calc_version"] if chk else None
+        결과 = bt.compare(str(t["horizon"]), 그때, sig[0]["calc_version"], 오늘, 오늘판)
+        if 결과 is None:
+            continue
+        오늘날 = str(chk[0]["as_of_date"]) if chk else "없음"
+        out[sid] = {
+            "line": bt.line(str(t["horizon"]), str(sig[0]["as_of_date"]), 오늘날, 결과),
+            "evidence": [
+                vd._row("산 날의 신호", f"{bt.HORIZON_KO.get(str(t['horizon']))} 신호 #{sig[0]['id']}", "—",
+                        f"signals 판 {sig[0]['calc_version']}", str(sig[0]["as_of_date"])),
+                *([vd._row("오늘 판정표", f"{bt.HORIZON_KO.get(str(t['horizon']))} 판정표", "—",
+                           f"signal_checks 판 {chk[0]['calc_version']}", 오늘날)] if chk else []),
+            ],
+        }  # fmt: skip
+    return out
 # 전환사채 잠재 물량 사실 줄 (55장, 25.1192) — 청구 기간이 남은 것만(표 자체가 작다)
 CB_SQL = (
     "SELECT stock_id, receipt_no, decided_at, status, face_amount, conv_price, shares_pct, claim_start, claim_end,"
@@ -722,6 +778,7 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
     rows: list[tuple[str, list[Any]]] = [(CLEAR, [country])]
     기록: list[tuple[str, list[Any]]] = []
     레이더재료: list[dict] = []
+    매수근거 = load_buy_thesis(client, sorted(sid for sid in 보유 if sid in 점수), warnings)
     for sid, r in 점수.items():
         try:
             factors = json.loads(r["factor_scores"] or "{}")
@@ -785,6 +842,10 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
             out["evidence"] += [vd._row("전환사채 발행결정", f"발행주식의 {e['shares_pct']}%" if e.get("shares_pct")
                                         is not None else "—", "—", f"DART 접수번호 {e['receipt_no']} (cvbdIsDecsn)",
                                         str(e["decided_at"])) for e in cb.live(전환사채[sid], today)]  # fmt: skip
+        # 매수 근거가 아직 참인가 (56장, 25.1312) — 같은 사실 줄. 결론·플래그·알림에 넣지 않는다
+        if sid in 매수근거:
+            detail.setdefault("facts", []).append(매수근거[sid]["line"])
+            out["evidence"] += 매수근거[sid]["evidence"]
         if sid in 내부자:
             행 = insider.criteria_rows(내부자[sid], r.get("listed_shares"))
             if 행:
