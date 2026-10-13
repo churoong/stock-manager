@@ -15,7 +15,10 @@ def test_가격만_오르면_달마다_복리() -> None:
 
     with um.patch.multiple(ts, MONTHLY_KRW=100, PRICE_RETURN_PCT=12.0, DIST_YIELD_PCT=0.0):
         v, basis, dt = ts._grow(1, 15.4)
-    assert v == pytest.approx(100 * sum(1.01**k for k in range(1, 13)))
+    # 달마다 1.12^(1/12) — 12번 곱하면 정확히 연 12% (25.1299. 예전 1.01 은 연 12.68%)
+    g = 1.12 ** (1 / 12)
+    assert v == pytest.approx(100 * sum(g**k for k in range(1, 13)))
+    assert g**12 == pytest.approx(1.12)
     assert basis == 1200 and dt == 0
 
 

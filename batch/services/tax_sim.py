@@ -48,10 +48,14 @@ class Row:
 def _grow(years: int, dist_tax_pct: float) -> tuple[float, float, float]:
     """(끝 평가액, 원가(넣은 돈 + 재투자한 세후 분배금), 분배금 세금 합)."""
     value = basis = dist_tax = 0.0
+    달_성장 = (1 + PRICE_RETURN_PCT / 100) ** (1 / 12)  # 12번 곱하면 연 PRICE_RETURN_PCT (25.1299)
     for _ in range(years * 12):
         value += MONTHLY_KRW
         basis += MONTHLY_KRW
-        value *= 1 + PRICE_RETURN_PCT / 100 / 12
+        # 연 가격 수익률을 **달마다 같은 비율로** 나눈다 — 12번 곱하면 정확히 연 `PRICE_RETURN_PCT`
+        # (docs/infra.md 25.1299). 예전 `연율/12` 를 12번 곱하면 연 5.116% 라 모든 금액이 가정보다 컸다(20년 연금
+        # +411만원). 분배율은 흐름(그 달 평가액의 1/12)이라 나눗셈이 맞다
+        value *= 달_성장
         dist = value * DIST_YIELD_PCT / 100 / 12
         tax = dist * dist_tax_pct / 100
         value += dist - tax
