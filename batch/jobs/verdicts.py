@@ -126,7 +126,9 @@ def risk_free(client: TursoClient, country: str) -> float | None:
     return metrics.risk_free_for(client, country)
 
 POSITIONS_SQL = (
-    "SELECT p.stock_id, p.quantity, p.unrealized_pnl_krw, p.cost_krw, p.price_date FROM positions p"
+    "SELECT p.stock_id, p.quantity, p.unrealized_pnl_krw, p.cost_krw, p.price_date,"
+    " p.unrealized_pnl, p.cost, p.unrealized_fx_pnl_krw"  # 해외 주가·환차 분리 (25.1294)
+    " FROM positions p"
     " JOIN stocks s ON s.id = p.stock_id WHERE s.country = ? AND p.quantity > 0"
 )
 FLAGS_SQL = (
@@ -731,10 +733,7 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
             score={"as_of": r["as_of_date"], "total": r["total_score"], "rank": r["rank_in_market"],
                    "ranked": 순위있음, "factors": factors, "skip_reason": r["skip_reason"]},
             signals=신호.get(sid, []), checks=판정.get(sid, []),
-            position=None if not p else {
-                "quantity": p["quantity"], "price_date": p["price_date"],
-                "pnl_pct": (float(p["unrealized_pnl_krw"]) / float(p["cost_krw"]) * 100
-                            if p["unrealized_pnl_krw"] is not None and p["cost_krw"] else None)},
+            position=vd.position_of(p),
             flags=플래그.get(sid, []),
             against=[a for a in 곁.get(sid, []) if a["against"]],
             outlook=outlook_for(재료, sid, str(r["currency"] or "KRW"), today, r.get("market")),

@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Any
@@ -534,7 +535,7 @@ class Inputs:
     score: dict | None = None  # as_of, total, rank, ranked, factors{}, skip_reason
     signals: list[dict] = field(default_factory=list)  # horizon, as_of, buy_zone_low/high, target_price, stop_price
     checks: list[dict] = field(default_factory=list)  # horizon, as_of, passed, failed_count, rows[]
-    position: dict | None = None  # quantity, pnl_pct, price_date
+    position: dict | None = None  # quantity, pnl_pct, price_date, (해외) price_pct, fx_krw — `position_of`
     flags: list[dict] = field(default_factory=list)  # level, rationale_text, as_of
     against: list[dict] = field(default_factory=list)  # text, evidence(dict)
     currency: str = "KRW"
@@ -552,6 +553,38 @@ def _row(label: str, display: str | None, threshold: str, source: str, as_of: st
 
 def _n(x: Any, digits: int = 0) -> str:
     return f"{x:,.{digits}f}" if isinstance(x, (int, float)) else "-"
+
+
+def position_of(p: Mapping[str, Any] | None) -> dict | None:
+    """`positions` 한 행 → 판정 입력의 보유 칸 (docs/infra.md 25.1294).
+
+    원화 합계 손익률 `pnl_pct` 와 함께 **해외 종목의 주가 손익률(종목 통화 손익 ÷ 종목 통화 원가)과
+    환차손익(원, 배치가 나눈 값)** 을 싣는다 — 텔레그램 봇 `pnlText`(25.1126)와 같은 분리.
+    예전에는 원화 합계 하나라 주가가 10% 빠진 미국 종목이 환율 덕에 "평가손익률 +3.5%" 로 읽혔다"""
+    if not p:
+        return None
+
+    def 수(k: str) -> float | None:
+        v = p.get(k)
+        return float(v) if isinstance(v, int | float) else None
+
+    손익, 원가 = 수("unrealized_pnl_krw"), 수("cost_krw")
+    통화손익, 통화원가 = 수("unrealized_pnl"), 수("cost")
+    return {"quantity": p.get("quantity"), "price_date": p.get("price_date"),
+            "pnl_pct": 손익 / 원가 * 100 if 손익 is not None and 원가 else None,
+            "price_pct": 통화손익 / 통화원가 * 100 if 통화손익 is not None and 통화원가 else None,
+            "fx_krw": 수("unrealized_fx_pnl_krw")}  # fmt: skip
+
+
+def pnl_text(position: Mapping[str, Any], currency: str) -> str:
+    """판정 머리의 평가손익 조각. 원화 종목은 예전처럼 손익률 하나, 해외 종목은 주가·환차·원화 합계 (25.1294)"""
+    합계 = position.get("pnl_pct")
+    if currency == "KRW":
+        return f" · 평가손익률 {합계:+.1f}%" if 합계 is not None else ""
+    주가, 환차 = position.get("price_pct"), position.get("fx_krw")
+    조각 = [글 for 값, 글 in ((주가, f"주가 {주가 or 0:+.1f}%"), (환차, f"환차 {환차 or 0:+,.0f}원"),
+                             (합계, f"원화 합계 {합계 or 0:+.1f}%")) if 값 is not None]  # fmt: skip
+    return f" · 평가손익 {' · '.join(조각)}" if 조각 else ""
 
 
 def _price(x: Any, currency: str) -> str:
@@ -729,7 +762,7 @@ def build(inp: Inputs) -> dict:
                                  "signals", g["as_of"]))
     elif inp.position:
         key = "hold"
-        손익 = f" · 평가손익률 {inp.position['pnl_pct']:+.1f}%" if inp.position.get("pnl_pct") is not None else ""
+        손익 = pnl_text(inp.position, inp.currency)
         # **녹색(목표 도달)은 점검이 아니지만 "플래그 없음" 도 아니다** (docs/infra.md 25.1091, 감사 재현) — 차익 실현을
         # 검토하라는 플래그가 걸린 날 "매도 플래그 없음" 이라 적고 근거표에서도 뺐다
         녹색 = [x for x in inp.flags if x.get("level") == "green"]

@@ -509,13 +509,11 @@ def analyze(client: TursoClient, country: str, rows: list[dict], warnings: list[
         사유 = str(m.get("exclude_reason") or "유니버스 판정 기록 없음")
         p = 보유.get(sid)
         s = 점수.get(sid)
-        손익 = (float(p["unrealized_pnl_krw"]) / float(p["cost_krw"]) * 100
-                if p and p["unrealized_pnl_krw"] is not None and p["cost_krw"] else None)
         inp = vd.Inputs(
             name=str(r["name"]), ticker=str(r["ticker"]), currency=str(m.get("currency") or "KRW"),
             score=None if s is None else {**s, "skip_reason": s.get("skip_reason") or (f"유니버스 밖({사유})"
                                                                                        if sid in hard else None)},
-            position=None if not p else {"quantity": p["quantity"], "price_date": p["price_date"], "pnl_pct": 손익},
+            position=vd.position_of(p),
             against=[a for a in 곁.get(sid, []) if a["against"]],
             checks=판정.get(sid, []),
             excluded_reason=사유,
