@@ -222,6 +222,7 @@ class Test팩터_정규화:
 
     def test_z_절단(self) -> None:
         검사(FACTORS, f"±{sc.Z_CLIP:.0f}σ", "z 절단")
+        검사(FACTORS, f"{sc.MIN_FULL_YEAR_DAYS}일(`scoring.MIN_FULL_YEAR_DAYS`)", "짧은 사업연도 (25.1286)")
         검사(FACTORS, f"z = +{sc.Z_CLIP:.0f} 을 100점", "z 절단의 뜻")
 
 

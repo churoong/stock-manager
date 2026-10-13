@@ -70,7 +70,8 @@ def build_rows(
                 v.get("current_liabilities"), v.get("noncurrent_liabilities"), v.get("total_liabilities"),
                 v.get("capital_stock"), v.get("retained_earnings"), v.get("total_equity"),
                 v.get("revenue"), v.get("operating_income"), v.get("pretax_income"), v.get("net_income"),
-                v.get("comprehensive_income"), sf.SOURCE, now,
+                # 보고 기간 일수(25.1286)는 비운다 — 미국 연간 값은 이미 350~380일 기간만 고른다(25.730·25.743)
+                v.get("comprehensive_income"), sf.SOURCE, now, None,
             )
         )  # fmt: skip
     snap_rows = [

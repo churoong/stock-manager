@@ -8,6 +8,8 @@ from __future__ import annotations
 import json
 from datetime import date
 
+import pytest
+
 from batch.jobs import monitor_targets as job
 from batch.jobs import sell_flags as sfjob
 from batch.services import sell_flags as sf
@@ -27,7 +29,8 @@ def _준비():
     c.execute(
         "INSERT INTO signals (stock_id, as_of_date, horizon, signal_type, buy_zone_low, buy_zone_high, currency,"
         " tranche_plan, size_reduction, rationale_text, rationale_data, calc_version, created_at)"
-        " VALUES (1, '2026-09-14', 'short', 'buy', 95000, 100000, 'KRW', ?, 0, 'r', '{}', 1, 't')",
+        # 9/11 기준 신호(9/14 아침에 나옴)로 9/14 에 1차를 샀다 — 기준 신호는 매수일 전 (25.1287)
+        " VALUES (1, '2026-09-11', 'short', 'buy', 95000, 100000, 'KRW', ?, 0, 'r', '{}', 1, 't')",
         [json.dumps(계획)],
     )
     c.execute(
@@ -57,8 +60,9 @@ def test_권리락_계수를_반영해도_진짜_손절은_뜨고_근거표에_�
     assert any(c["label"] == "유상증자 권리락" for c in 손절.criteria)
 
 
-def test_계획_뒤_권리락이면_다음_차수_가격도_계수로_옮긴다() -> None:
-    """9/14 계획(2차 95,000) 뒤 권리락 — 옛 단위 그대로라 실질 1차 가격과 같은 시세에 "2차 도달" 이 났다 (25.1159)."""
+def test_계획_뒤_권리락이면_다음_차수_가격도_계수로_옮긴다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """9/11 계획(2차 95,000) 뒤 권리락 — 옛 단위 그대로라 실질 1차 가격과 같은 시세에 "2차 도달" 이 났다 (25.1159)."""
+    monkeypatch.setattr(job.cal, "local_today", lambda market: date(2026, 9, 20))  # 실제 오늘에 기대지 않는다
     mem = _준비()
     배율 = job.action_scale(mem, 1, "KR")  # type: ignore[arg-type]
     [행] = job.build_targets(mem, "KR", "2026-10-12T00:00:00+00:00")  # type: ignore[arg-type]
@@ -66,12 +70,13 @@ def test_계획_뒤_권리락이면_다음_차수_가격도_계수로_옮긴다(
     assert 차수 == 2 and abs(차수가격 - 95000 * 배율) < 1e-6
 
 
-def test_권리락_뒤에_낸_계획은_옮기지_않는다() -> None:
+def test_권리락_뒤에_낸_계획은_옮기지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(job.cal, "local_today", lambda market: date(2026, 9, 20))  # 실제 오늘에 기대지 않는다
     mem = _준비()
     계수들 = job.action_factors(mem, 1, "KR")  # type: ignore[arg-type]
     assert 계수들 and 계수들[0][0] == "2026-09-15"
     # 계획일이 계수 날과 같거나 뒤면 그대로 (그날 종가로 낸 계획은 이미 권리락 뒤 시세다)
     mem.conn.execute("UPDATE signals SET as_of_date = '2026-09-15'")
-    mem.conn.execute("UPDATE trades SET trade_date = '2026-09-15'")
+    mem.conn.execute("UPDATE trades SET trade_date = '2026-09-16'")
     [행] = job.build_targets(mem, "KR", "2026-10-12T00:00:00+00:00")  # type: ignore[arg-type]
     assert 행[14] == 95000.0
