@@ -694,6 +694,7 @@ function Dividends({ dividends, taxes, taxesUnread, onChanged }: { dividends: Di
   const [gross, setGross] = useState("");
   const [tax, setTax] = useState("");
   const [fx, setFx] = useState("");
+  const [qty, setQty] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const num = readAmount; // 쉼표를 빼고 읽는다. 못 읽으면 NaN — 보내기 전에 막는다 (25.642)
@@ -725,14 +726,14 @@ function Dividends({ dividends, taxes, taxesUnread, onChanged }: { dividends: Di
 
   const submit = async (confirmed: ReadonlySet<ConfirmKind> = new Set()): Promise<void> => {
     if (!stock) return setErr("종목을 고르세요");
-    const 못읽음 = unreadableAmount({ "세전 금액": gross, 세금: tax, ...(stock.currency !== "KRW" ? { 환율: fx } : {}) });
+    const 못읽음 = unreadableAmount({ "세전 금액": gross, 세금: tax, "받은 주식 수": qty, ...(stock.currency !== "KRW" ? { 환율: fx } : {}) });
     if (못읽음) return setErr(못읽음);
     setBusy(true);
     setErr(null);
     const r = await readJson("/api/dividends", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(dividendBody({ stockId: stock.id, currency: stock.currency, date, gross: num(gross), tax: num(tax), fx: num(fx), confirmed })),
+      body: JSON.stringify(dividendBody({ stockId: stock.id, currency: stock.currency, date, gross: num(gross), tax: num(tax), fx: num(fx), quantity: num(qty), confirmed })),
     });
     const j = bodyOf<Saved & Record<string, unknown>>(r);
     setBusy(false);
@@ -744,7 +745,7 @@ function Dividends({ dividends, taxes, taxesUnread, onChanged }: { dividends: Di
       return setErr(j.errors?.join(", ") ?? CONFIRM_CANCEL[물음]);
     }
     if (!r.ok) return setErr(j.errors?.join(", ") ?? "저장 실패");
-    setGross(""); setTax(""); setFx(""); 손댔나.current = false;
+    setGross(""); setTax(""); setFx(""); setQty(""); 손댔나.current = false;
     if (j.warnings?.length) setErr(j.warnings.join(" "));
     onChanged(j.recalc);
   };
@@ -769,6 +770,8 @@ function Dividends({ dividends, taxes, taxesUnread, onChanged }: { dividends: Di
           <Field label="지급일"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputCls} /></Field>
           <Field label={`세전 금액 (${stock?.currency ?? "통화"})`}><input type="text" inputMode="decimal" value={gross} onChange={(e) => 세전바뀜(e.target.value)} className={inputCls} /></Field>
           <Field label={세율 === null ? "원천징수 세금" : `원천징수 세금 (설정 ${세율}%)`}><input type="text" inputMode="decimal" value={tax} onChange={(e) => { 손댔나.current = true; setTax(e.target.value); }} className={inputCls} /></Field>
+          {/* 일부만 기록한 종목이면 받은 주식 수를 적어야 시간가중 수익률이 부풀지 않는다 (docs/infra.md 25.1261) */}
+          <Field label="받은 주식 수 (선택)"><input type="text" inputMode="decimal" value={qty} onChange={(e) => setQty(e.target.value)} className={inputCls} /></Field>
           {stock && stock.currency !== "KRW" ? <Field label="환율 (비우면 그날 이하 최근 종가)"><input type="text" inputMode="decimal" value={fx} onChange={(e) => setFx(e.target.value)} className={inputCls} /></Field> : null}
         </div>
         {taxesUnread ? (

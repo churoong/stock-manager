@@ -207,10 +207,12 @@ export function tradeBody(f: {
 /** 배당 폼의 본문. 환율 칸은 원화가 아닌 종목에서만 보인다 (docs/infra.md 25.265) */
 export function dividendBody(f: {
   stockId: number; currency: string; date: string; gross: number | null; tax: number | null; fx: number | null;
+  /** 배당을 받은 주식 수(선택). 기록한 매수보다 많으면 기록한 몫만 시간가중 수익률에 넣는다 (docs/infra.md 25.1261) */
+  quantity?: number | null;
   confirmed?: ReadonlySet<ConfirmKind>;
 }) {
   return {
-    stock_id: f.stockId, pay_date: f.date, gross_amount: f.gross, tax: f.tax ?? 0,
+    stock_id: f.stockId, pay_date: f.date, gross_amount: f.gross, tax: f.tax ?? 0, quantity: f.quantity ?? null,
     fx_rate: f.currency !== "KRW" ? f.fx : null,
     ...confirmFlags(f.confirmed ?? new Set()),
   };

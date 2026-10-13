@@ -534,6 +534,8 @@ class DividendReceipt:
     pay_date: str
     net_amount: float
     fx_rate: float
+    #: 배당을 받은 주식 수(사용자 입력, 선택). 기록한 매수보다 많으면 기록한 몫만 지수에 넣는다 (25.1261)
+    quantity: float | None = None
 
 
 @dataclass
@@ -638,6 +640,44 @@ def _몫이_빠진_날(d: DividendReceipt, trades: list[Trade]) -> str | None:
             떨어진_날 = 날
         직전 = q
     return 떨어진_날
+
+
+#: 주식 수를 모르는 배당이 기록한 몫의 원가에 견줘 이보다 크면 **기록하지 않은 주식의 배당이 섞였다**고 보고 지수에서
+#: 뺀다 (docs/infra.md 25.1261). 한 번 받는 배당이 원가의 10% 를 넘는 일은 드물다(연 배당수익률 자체가 대개 그 아래).
+#: 오래 들어 원가가 낮은 고배당주는 걸릴 수 있다 — 그때는 지수가 배당만큼 덜 오르고 경고가 주식 수를 넣으라 한다
+DIVIDEND_TWR_MAX_YIELD = 0.10
+
+
+def 배당_지수_몫(d: DividendReceipt, trades: list[Trade]) -> float | None:
+    """배당 가운데 **기록한 매수가 번 몫**(0~1). 판단할 수 없을 만큼 크면 None — 지수에 넣지 않는다 (25.1261).
+
+    기록 전부터 가진 주식이 있으면(25.934 가 흔하다고 적은 입력) 배당은 전체 주식 수만큼 나오는데 밑은 기록한 몫의
+    평가액이라, 1주만 기록하고 500주 배당을 넣으면 지수가 3.8배, 100주면 배당 효과가 5배로 부풀었다(경고 없음).
+    주식 수를 적었으면 `기록 몫 ÷ 받은 주식 수` 만큼만, 안 적었으면 원가 대비 `DIVIDEND_TWR_MAX_YIELD` 를 넘을 때 뺀다.
+    기록 몫은 지급일 앞 `DIVIDEND_EARN_WINDOW_DAYS` 일의 최대 보유(25.828 과 같은 근사)."""
+    창_시작 = (date.fromisoformat(d.pay_date) - timedelta(days=DIVIDEND_EARN_WINDOW_DAYS)).isoformat()
+    보유 = 최대 = 0.0
+    산값 = 산수 = 0.0
+    for t in sorted((t for t in trades if t.stock_id == d.stock_id
+                     and (t.trade_date < d.pay_date or (t.trade_date == d.pay_date and t.side != "buy"))),
+                    key=same_day_order):  # fmt: skip
+        if t.side == "buy":
+            보유 += t.quantity
+            산값 += t.price * t.quantity
+            산수 += t.quantity
+        else:
+            보유 = max(0.0, 보유 - t.quantity)
+        if t.trade_date >= 창_시작 or 최대 == 0.0:
+            최대 = max(최대, 보유)
+    최대 = max(최대, 보유)
+    if 최대 <= QTY_EPS:
+        return 1.0  # 기록 몫이 없으면 `배당_붙일_날` 이 이미 가른다(25.616)
+    if d.quantity is not None and d.quantity > 0:
+        return min(1.0, 최대 / d.quantity)
+    평단 = 산값 / 산수 if 산수 > 0 else 0.0
+    if 평단 > 0 and d.net_amount > DIVIDEND_TWR_MAX_YIELD * 최대 * 평단:
+        return None
+    return 1.0
 
 
 def 배당_붙일_날(d: DividendReceipt, trades: list[Trade]) -> str | None:
@@ -748,12 +788,17 @@ def value_series(
         by_day[t.trade_date].append(t)
     div_by_day: dict[str, float] = defaultdict(float)
     보유한_적_없는_배당: list[str] = []
+    너무_큰_배당: list[str] = []
     for d in dividends:
         붙일_날 = 배당_붙일_날(d, trades)
         if 붙일_날 is None:
             보유한_적_없는_배당.append(d.pay_date)
             continue
-        div_by_day[붙일_날] += d.net_amount * d.fx_rate
+        몫 = 배당_지수_몫(d, trades)
+        if 몫 is None:
+            너무_큰_배당.append(d.pay_date)
+            continue
+        div_by_day[붙일_날] += d.net_amount * d.fx_rate * 몫
 
     close_dates = {sid: sorted(s) for sid, s in closes.items()}
     fx_dates = {cur: sorted(s) for cur, s in fx.items()}
@@ -896,6 +941,12 @@ def value_series(
             f"지급일까지 매수 기록이 없는 종목의 배당 {len(보유한_적_없는_배당)}건({min(보유한_적_없는_배당)} 등)은"
             " 시간가중 수익률에 넣지 않았습니다 — 기록 전부터 가진 주식이면 그 매수를 입력하세요."
             " 배당 합계에는 들어 있습니다"
+        )
+    if 너무_큰_배당:
+        warnings.append(
+            f"기록한 매수의 원가에 견줘 너무 큰 배당 {len(너무_큰_배당)}건({min(너무_큰_배당)} 등)은 시간가중 수익률에"
+            " 넣지 않았습니다 — 기록하지 않은 주식의 배당이 섞였을 수 있습니다. 배당을 넣을 때 받은 주식 수를 적으면"
+            " 기록한 몫만 반영합니다. 배당 합계에는 들어 있습니다"
         )
     if 못_담은_배당:
         warnings.append(

@@ -225,9 +225,15 @@ def load_buy_snapshots(client: TursoClient) -> dict[int, rv.BuySnapshot]:
 
 
 def load_receipts(client: TursoClient) -> list[pf.DividendReceipt]:
-    rs = client.execute("SELECT stock_id, pay_date, net_amount, fx_rate FROM dividend_receipts ORDER BY pay_date")
+    rs = client.execute(
+        "SELECT stock_id, pay_date, net_amount, fx_rate, quantity FROM dividend_receipts ORDER BY pay_date"
+    )
     return [
-        pf.DividendReceipt(int(r["stock_id"]), str(r["pay_date"]), float(r["net_amount"]), float(r["fx_rate"]))
+        pf.DividendReceipt(
+            int(r["stock_id"]), str(r["pay_date"]), float(r["net_amount"]), float(r["fx_rate"]),
+            # 받은 주식 수(선택) — 기록한 몫만 지수에 넣는다 (25.1261)
+            float(r["quantity"]) if r["quantity"] is not None else None,
+        )
         for r in rs.dicts()
     ]
 

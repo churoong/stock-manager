@@ -33,3 +33,11 @@ describe("배당 중복 저장", () => {
     expect(readFileSync("components/PortfolioView.tsx", "utf-8")).toContain("return submit(new Set([...confirmed, 물음]));");
   });
 });
+
+// 받은 주식 수(선택)를 함께 보낸다 — 기록한 몫만 시간가중 수익률에 넣는다 (docs/infra.md 25.1261)
+describe("배당 주식 수", () => {
+  it("적으면 보내고 비우면 null", () => {
+    expect(dividendBody({ stockId: 1, currency: "KRW", date: "2026-04-20", gross: 1, tax: 0, fx: null, quantity: 500 }).quantity).toBe(500);
+    expect(dividendBody({ stockId: 1, currency: "KRW", date: "2026-04-20", gross: 1, tax: 0, fx: null }).quantity).toBeNull();
+  });
+});
