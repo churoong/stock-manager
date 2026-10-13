@@ -92,7 +92,7 @@ def run(today: date | None = None, max_calls: int = MAX_CALLS_PER_RUN) -> int:
             if 호출 >= max_calls:
                 남음 += 1
                 continue
-            if db.record_and_guard(client, dart.SOURCE, limit_value=dart.DAILY_LIMIT) == "blocked":
+            if db.record_and_guard(client, "dart_opendart", limit_value=dart.DAILY_LIMIT) == "blocked":
                 남음 += 1
                 셈["한도"] = 셈.get("한도", 0) + 1
                 break

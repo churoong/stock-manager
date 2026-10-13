@@ -133,7 +133,8 @@ class Test세고_나서_그_수를_본다:
 
     #: DART 를 부르는 작업. 한도(20,000/일)가 문서로 확인된 유일한 소스다
     #: (docs/data-sources.md — SEC·야후는 한도가 `[확인필요]` 라 "100% 중단" 을 정의할 수 없다)
-    DART작업 = ("financials.py", "dividends.py", "sectors.py", "disclosures_kr.py", "insider_kr.py", "disclosure_reaction.py")
+    DART작업 = ("financials.py", "dividends.py", "sectors.py", "disclosures_kr.py", "insider_kr.py", "disclosure_reaction.py",
+               "kr_cashflow.py")  # fmt: skip
 
     @staticmethod
     def _글(이름: str) -> str:

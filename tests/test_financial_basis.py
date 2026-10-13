@@ -31,11 +31,14 @@ def 파이썬이_고르는_질의() -> set[str]:
     """두 기준을 다 읽고 **파이썬이 기준 하나를 고르는** 질의 (25.1049). 분기 실적 추세(`verdicts.QUARTERS_SQL`)는
     웹 분기 표와 같은 규칙(가장 최근 분기의 연결 우선 — 25.550)을 `insights.quarter_trend` 가 적용한다.
     SQL 로 하면 행마다 상관 부질의가 돌아 하루 수십만 행을 읽는다. 규칙은 `test_insights_1041.test_분기_실적_추세` 가 묶는다"""
-    from batch.jobs import metrics, verdicts
+    from batch.jobs import kr_cashflow, metrics, verdicts
 
     # 재무 사건 이력(`metrics.EVENT_FIN_SQL`, 25.1063)도 같다 — `event_history._기준_하나` 가 가장 최근 보고서의
     # 연결·별도 하나를 고른다. 규칙은 `test_event_history_1063.test_발표_반응은_접수일_전날_종가에서` 가 묶는다
-    return {re.sub(r"\s+", " ", verdicts.QUARTERS_SQL), re.sub(r"\s+", " ", metrics.EVENT_FIN_SQL)}
+    # 국내 영업현금흐름 채우기(`kr_cashflow.TODO_SQL`, 25.1317)는 기준을 고르지 않는다 — 스냅샷 **행마다** 그 행과 같은
+    # 접수번호·기준의 값을 붙인다. 고르는 일은 그 값을 읽는 백테스트(`FINANCIAL_BASIS_AT_CUTOFF`)가 한다
+    return {re.sub(r"\s+", " ", verdicts.QUARTERS_SQL), re.sub(r"\s+", " ", metrics.EVENT_FIN_SQL),
+            re.sub(r"\s+", " ", kr_cashflow.TODO_SQL)}  # fmt: skip
 
 
 def test_재무를_읽는_질의가_모두_같은_기준을_쓴다() -> None:
