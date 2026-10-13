@@ -34,6 +34,11 @@ BASELINE_PAGE = 20
 BASELINE_SCAN_PAGES = 19
 
 
+
+#: 판정하지 못한 날 어제 플래그를 잇는 최대 일수 — 마지막으로 판정한 날부터 (docs/infra.md 25.1302).
+#: 감성급락은 7일 변화라 7일이 지나면 그 플래그를 건 근거가 창 밖이다. 채점 실패·점수 없음 같은 하루이틀 공백은 덮는다
+MAX_CARRY_DAYS = 7
+
 def _f(value: Any) -> float | None:
     return None if value is None else float(value)
 
@@ -416,7 +421,7 @@ def run(today: date | None = None) -> int:
             (int(r["stock_id"]), str(r["reason_code"])): r
             for r in client.execute(
                 "SELECT stock_id, reason_code, first_seen_date, dismissed_at, created_at, rationale_data,"
-                " level, rationale_text FROM sell_flags"
+                " level, rationale_text, as_of_date FROM sell_flags"
                 " WHERE is_active = 1 AND as_of_date <= ? ORDER BY as_of_date",
                 [day],
             ).dicts()
@@ -456,6 +461,17 @@ def run(today: date | None = None) -> int:
         for (sid, 사유), prev in previous.items():
             if (sid, 사유) in 걸린 or 사유 not in 못_본.get(sid, set()):
                 continue
+            # **잇는 기간에 끝이 있다** (docs/infra.md 25.1302, 감성 감사 재현). 나쁜 뉴스가 몰린 뒤 뉴스가
+            # 끊기면 감성이 신선도·기사 수 규칙으로 NULL 이 되어 "판정 못 함" 이 끝없이 이어졌다 — 7일 변화로 건
+            # 노란 플래그가 몇 주·몇 달 남았다. 마지막으로 **판정한 날**에서 `MAX_CARRY_DAYS` 가 지나면 풀리게 둔다
+            try:
+                자료 = json.loads(prev["rationale_data"] or "{}")
+            except (TypeError, ValueError):
+                자료 = {}
+            판정일 = str(자료.get("carried_since") or prev["as_of_date"])[:10]
+            if (today - date.fromisoformat(판정일)).days > MAX_CARRY_DAYS:
+                continue
+            자료["carried_since"] = 판정일
             이음 += 1
             글 = str(prev["rationale_text"] or "")
             if "오늘 판정할 자료가 없어" not in 글:
@@ -463,7 +479,7 @@ def run(today: date | None = None) -> int:
             statements.append((
                 "INSERT INTO sell_flags (stock_id, as_of_date, level, reason_code, rationale_text, rationale_data,"
                 " is_active, first_seen_date, dismissed_at, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)",
-                [sid, day, prev["level"], 사유, 글, prev["rationale_data"], prev["first_seen_date"],
+                [sid, day, prev["level"], 사유, 글, json.dumps(자료, ensure_ascii=False), prev["first_seen_date"],
                  prev["dismissed_at"], prev["created_at"]],
             ))  # fmt: skip
         # 옛 행은 비활성으로 돌린다. **풀린 것에만 `resolved_at` 을 찍는다** (docs/infra.md 25.564, 감사) — 오늘로
