@@ -344,23 +344,31 @@ def next_tranche(client: TursoClient, stock_id: int, today: date) -> tuple[float
     창(`TRANCHE_PLAN_DAYS`) 안 첫 신호보다 앞선 매수는 계획 전 보유라 세지 않는다.
     매수 0번이면 잇지 않고, 3번 이상이면 끝났다."""
     신호 = client.execute(
-        "SELECT as_of_date, tranche_plan FROM signals WHERE stock_id = ? AND as_of_date >= ?"
+        "SELECT as_of_date, tranche_plan, horizon FROM signals WHERE stock_id = ? AND as_of_date >= ?"
         " ORDER BY as_of_date, CASE horizon WHEN 'short' THEN 0 WHEN 'mid' THEN 1 ELSE 2 END, calc_version DESC",
         [stock_id, (today - timedelta(days=TRANCHE_PLAN_DAYS)).isoformat()],
     ).rows
     if not 신호:
         return None, None, None
     날별: dict[str, str] = {}
-    for d, plan in 신호:
+    기간별: dict[str, dict[str, str]] = {}
+    for d, plan, 기간 in 신호:
         날별.setdefault(str(d), plan)  # 같은 날은 단기 → 중기 → 장기, 큰 calc_version 이 먼저
-    매수 = [str(r[0]) for r in client.execute(
-        "SELECT trade_date FROM trades WHERE stock_id = ? AND side = 'buy' AND trade_date >= ? ORDER BY trade_date",
+        기간별.setdefault(str(d), {}).setdefault(str(기간), plan)
+    매수줄 = client.execute(
+        "SELECT trade_date, horizon FROM trades WHERE stock_id = ? AND side = 'buy' AND trade_date >= ?"
+        " ORDER BY trade_date",
         [stock_id, min(날별)],
-    ).rows]  # fmt: skip
+    ).rows
+    매수 = [str(r[0]) for r in 매수줄]
     if not 매수:
         return None, None, None
     기준일 = max(d for d in 날별 if d <= 매수[0])  # 매수는 첫 신호일부터 읽었으니 늘 하나는 있다
-    계획 = json.loads(날별[기준일] or "[]")
+    # **1차를 산 기간의 계획을 잇는다** (docs/infra.md 25.1262, 신호 감사 재현). 같은 날 단기·장기 신호가 함께 있으면
+    # 예전엔 늘 단기 계획을 골라, 장기 카드로 1차(103,000)를 산 사용자에게 2차를 단기 계획의 100,000 에서 알렸다 —
+    # 장기 2차(84,100)보다 16% 위에서 더 사게 했다. 매매 기록의 기간(`trades.horizon`)이 그날 계획에 없으면 예전 순서
+    첫_기간 = str(매수줄[0][1]) if 매수줄[0][1] else None
+    계획 = json.loads((기간별[기준일].get(첫_기간) if 첫_기간 else None) or 날별[기준일] or "[]")
     산 = sum(1 for d in 매수 if d >= 기준일)
     if 산 < 1 or 산 >= len(계획):
         return None, None, None
