@@ -132,6 +132,8 @@ def repeated_reasons(runs: list[Run]) -> list[tuple[str, int]]:
     """같은 머리말의 경고·실패 사유를 묶어 많은 순. `REPEAT_MIN` 미만은 뺀다 — 한 번 난 것은 그날 알림이 말했다."""
     묶음: dict[str, tuple[str, int]] = {}
     for r in runs:
+        if r.status == "dryrun":
+            continue  # 확인 실행의 경고는 운영의 되풀이가 아니다 (25.1304) — 한 번 난 경고가 확인 한 번으로 ×2 가 됐다
         글들 = list(r.warnings) + ([r.error_text] if r.status == "failed" and r.error_text else [])
         for 글 in 글들:
             머리 = 글[:PREFIX_LEN]
@@ -150,7 +152,7 @@ def adjust_needed(runs: list[Run]) -> list[str]:
     수정실행 = sorted(r.started_at for r in runs if r.job_name == "adjust_kr" and r.status == "success")
     남은: dict[str, None] = {}
     for r in runs:
-        if r.job_name != "daily_kr":
+        if r.job_name != "daily_kr" or r.status == "dryrun":
             continue
         for w in r.warnings:
             m = _기업행위.search(w)
@@ -421,7 +423,10 @@ def run(dry_run: bool = False, force: bool = False) -> int:
                 except Exception as exc:  # noqa: BLE001 — 이미 보냈다. 다음 주 사후 분석이 같은 손실을 한 번 더 말할 뿐이다
                     뒤경고.append(f"사후 분석 진척을 적지 못함: {type(exc).__name__}")
         db.finish_batch_run(
-            client, run_id, status="partial" if 뒤경고 else "success",
+            # **확인 실행은 `dryrun`** (docs/infra.md 25.1304, 운영 감사 재현) — 예전엔 `success` 로 닫아 다시
+            # 보내지 않는 검사가 "이미 보냈다" 로 읽었다. 화·수에 손으로 확인하면 그 주 일요일 요약이 통째로 빠지고
+            # /status 는 초록이었다. 일일 배치(`daily.py`)도 `dryrun` 이다
+            client, run_id, status="dryrun" if dry_run else "partial" if 뒤경고 else "success",
             step_log={"runs": len(runs), "sent_chunks": sent, "stale": [j for j, _ in stale_jobs(last, now)],
                       "adjust_needed": adjust_needed(runs),
                       "rot": [f.text for f in rot], "rot_checked": checked, "rot_errors": rot_errors,

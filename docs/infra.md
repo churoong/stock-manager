@@ -2351,6 +2351,7 @@ SQL read operations are forbidden (reads are blocked, ...)
 | 25.1301 | 계좌별 사유가 월 1회 잡의 옛 세율을 인용해 같은 탭의 세후 카드와 다른 세율, 제도 금액 글자 박힘 |
 | 25.1302 | 판정 못 한 날 잇는 매도 플래그에 기간 상한이 없어 뉴스가 끊기면 감성급락이 몇 달 남음 |
 | 25.1303 | 같은 감성 값이 텔레그램·웹·플래그 문장에서 반올림이 달라 1점 차이, 기사 색 문턱이 배치와 다름 |
+| 25.1304 | 주간 요약 확인 실행이 success 로 닫혀 그 주 일요일 발송이 빠지고, 확인 실행 경고가 되풀이로 셈 |
 
 ### 25.1 왜 D1 인가
 
@@ -30329,3 +30330,17 @@ docs/sell_flags.md 2장은 "조건이 풀리면" 이라 했다. (매도 플래�
 
 **시험** — `tests/test_sentiment_rounding_1303.py`(−42.5 → −43), `web/__tests__/sentimentRounding1303.test.ts`(signedInt·sentimentLine·색 문턱).
 **되돌리기 확인** — `sell_flags.py`·`portfolio.ts`·`recommend.ts` 를 하나씩 되돌리면 각각 깨진다.
+
+### 25.1304 주간 요약 확인 실행이 success 로 닫혀 그 주 일요일 발송이 빠지고, 확인 실행 경고가 되풀이로 셈
+
+**무엇(운영 감사 #1·#4)** — ① 주간 운영 요약을 `--dry-run`(워크플로 `dry_run=true`)으로 돌리면 보내지 않고도 실행을 `success` 로 닫았다
+(`sent_chunks: 0`). 다시 보내지 않는 검사(`ALREADY_SENT_SQL`, 5일)는 성공·일부만 보므로 화~일 아침 사이에 확인 실행을 한 번 하면 **그 주 일요일
+요약이 "이미 보냈습니다 — 건너뜀"** 으로 빠졌고, /status 의 "주간 운영 요약(마지막 발송)" 은 초록이었다. 일일 배치는 이미 `dryrun` 으로 닫는다(25.1274).
+② 되풀이 경고(`repeated_reasons`)와 수정주가 필요 목록(`adjust_needed`)이 `dryrun` 실행의 경고도 세어, 운영에서 한 번 난 경고가 확인 실행 한 번으로 "×2 되풀이" 가 됐다.
+재현 `audit_ops/weekly_dryrun.py`·`weekly_dryrun_repeat.py`.
+
+**실제로 아팠나** — ① 그렇다(확인 실행을 한 주). 요약 한 통이 빠지고 화면은 정상으로 보였다. ② 요약 글이 과장됐다.
+
+**고침** — 확인 실행은 `status="dryrun"` 으로 닫는다. 두 집계가 `dryrun` 실행을 건너뛴다.
+
+**시험** — `tests/test_weekly_dryrun_1304.py`. **되돌리기 확인** — `weekly_summary.py` 를 되돌리면 2건 깨진다.
