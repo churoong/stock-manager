@@ -2544,8 +2544,20 @@ def _divergence_lines(
         if not db.표가_없나(exc) and warnings is not None:
             warnings.append(_실패문("수급·의견 엇갈림 읽기", exc))
         return []
+    # **최근 FLOW_DAYS 거래일 안의 행만 더한다** (docs/infra.md 25.1276, 리포트 감사 재현). 읽는 창은 달력 15일이라
+    # 수급 수집이 멈추면(KIS 키·장애) 1~2주 묵은 행이 "최근 5거래일" 처럼 날짜 없이 실렸다. 창 밖 행만 남으면 그 종목
+    # 수급은 빈다
+    try:
+        첫날 = 오늘
+        for _ in range(divergence.FLOW_DAYS - 1):
+            첫날 = cal.previous_session("KR", before=첫날)
+        경계 = 첫날.isoformat()
+    except Exception:  # noqa: BLE001 — 달력을 못 읽으면 예전 창(달력 15일) 그대로
+        경계 = ""
     합: dict[int, list[int]] = {}
-    for sid, _d, frgn, orgn in 흐름:
+    for sid, d, frgn, orgn in 흐름:
+        if str(d) < 경계:
+            continue
         s = 합.setdefault(int(sid), [0, 0, 0])
         if s[0] < divergence.FLOW_DAYS:
             s[0] += 1
