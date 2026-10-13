@@ -208,6 +208,14 @@ export function inQuietHours(
 
 /** 장중 시세의 출처 이름 — 알림 행 `data.source` (25.815). 야후 spark 는 지연 시세다 */
 export const QUOTE_SOURCE = "yahoo_spark";
+/** KIS 실시간 출처 이름 — `lib/kis.KIS_SOURCE` 와 같다(시험이 대 본다). 이 파일이 KIS 클라이언트를 끌어오지 않게 따로 둔다 */
+export const KIS_QUOTE_SOURCE = "kis_openapi";
+
+/** ISO 시각 → KST "HH:MM". 못 읽으면 "시각 모름" */
+function kstHm(iso: string): string {
+  const t = Date.parse(iso);
+  return Number.isFinite(t) ? new Date(t + 9 * 3600_000).toISOString().slice(11, 16) : "시각 모름";
+}
 
 /** 야후 spark 응답(한 번에 20종목까지, 2026-09-17 실측)에서 종목별 시세. */
 export function parseSpark(payload: unknown): Record<string, Quote> {
@@ -284,8 +292,12 @@ export function evaluate(target: Target, quote: Quote, thresholds: Thresholds, w
   const c = target.currency;
   // 출처를 알림 행에 남긴다 — 모든 데이터 행에 source(CLAUDE.md). 받은 시각은 alerts.created_at (25.815, 감사)
   const base = { price: quote.price, quote_time: quote.time, symbol: quote.symbol, reasons: target.reasons, source: quote.source ?? QUOTE_SOURCE };
+  // **국내인데 KIS 실시간이 아니면 줄마다 "지연 시세 HH:MM 기준" 을 붙인다** (docs/infra.md 25.1309, 장중 감사 재현).
+  // 25.986 은 국내를 늘 KIS 로 보고 지연 표시를 뺐는데, KIS 키 없음·토큰 실패·종목 수 상한(약 60개)·KIS 빈 응답이면
+  // 야후 지연 시세(약 20분)로 물러난다 — 20분 전 값의 손절·급락이 "현재" 로 읽혔다(infra 16장 "지연과 시각을 반드시 표시")
+  const 지연 = target.currency === "KRW" && base.source !== KIS_QUOTE_SOURCE ? ` (지연 시세 ${kstHm(quote.time)} 기준)` : "";
   const push = (trigger: TriggerType, message: string, extra: Record<string, unknown>) =>
-    hits.push({ stock_id: target.stock_id, trigger, message: `${target.name}: ${message}`, data: { ...base, ...extra } });
+    hits.push({ stock_id: target.stock_id, trigger, message: `${target.name}: ${message}${지연}`, data: { ...base, ...extra } });
 
   const high = quote.day_high ?? quote.price;
   const low = quote.day_low ?? quote.price;
@@ -362,7 +374,8 @@ export function bundleMessage(
   note: string | null = null,
 ): string {
   const kst = new Date(now.getTime() + 9 * 3600_000).toISOString().slice(11, 16);
-  // 국내는 KIS 실시간(25.983), 미국은 야후 지연 시세다 — 국내만이면 "지연" 이라 하지 않는다 (25.986, 교차검증)
+  // 국내는 KIS 실시간(25.983), 미국은 야후 지연 시세다 — 국내만이면 "지연" 이라 하지 않는다 (25.986, 교차검증).
+  // 국내가 야후로 물러난 줄은 `evaluate` 가 줄 끝에 "지연 시세 HH:MM 기준" 을 붙인다 (25.1309)
   const 지연 = alerts.some((a) => a.market !== "KR") ? ", 미국은 지연 시세" : "";
   const lines = [`장중 알림 ${alerts.length}건 (${kst} KST${지연})`];
   // **한 번만 말한다.** 줄마다 붙이면 시끄러워 아무도 안 읽는다 (docs/infra.md 25.162)
