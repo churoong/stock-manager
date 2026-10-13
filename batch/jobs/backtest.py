@@ -768,8 +768,11 @@ def ic_log(summaries: dict[str, fic.IcSummary]) -> dict[str, dict[str, Any]]:
     return out
 
 
-#: 판단용 과거를 시작일보다 앞서 읽는 달력일. 가장 긴 창이 리스크 팩터의 600거래일(약 870 달력일)이다 (25.532)
-WARMUP_CALENDAR_DAYS = 900
+#: 판단용 과거를 시작일보다 앞서 읽는 달력일 (25.532). **리스크 팩터의 3년 창을 채우는 길이**다 (docs/infra.md 25.1278,
+#: 백테스트 감사 재현) — 25.703·25.710 부터 3년 값은 첫 시세가 (기준일 − 1,096일) + 45일 안이어야 나온다. 예전 900일
+#: ("600거래일 ≈ 883 달력일")로는 시작 뒤 약 5달 동안 모든 종목의 리스크가 1년 창으로 계산돼 운영(3년 창)과 달랐다.
+#: 3년 창 + 30일(연휴 여유)
+WARMUP_CALENDAR_DAYS = metrics_job.WINDOW_DAYS["3Y"] + 30
 
 
 def long_entry(
