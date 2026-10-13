@@ -29,21 +29,25 @@ class Loss:
     name: str
     horizon: str
     ret: float
-    market: float
+    market: float | None  # 지수 수익 — 진입일·20거래일째 지수 행이 없으면 None (25.1271: 0 으로 지어내지 않는다)
     sector_ret: float | None  # 업종 평균(표본이 모자라면 None)
     peers: int
     disclosure: str | None  # 기간 안 첫 공시 제목
 
 
-def parts(x: Loss) -> dict[str, float]:
+def parts(x: Loss) -> dict[str, float] | None:
+    """셋으로 나눈 몫. **지수 수익을 모르면 None** — 나누지 않는다 (docs/infra.md 25.1271, 리포트 감사 재현).
+    예전엔 0 으로 두어 "시장 +0.0%p" 를 잰 값처럼 찍고 손실 전부를 업종·종목 고유 탓으로 돌렸다(없는 숫자 금지)"""
+    if x.market is None:
+        return None
     sec = x.sector_ret if (x.sector_ret is not None and x.peers >= MIN_SECTOR_PEERS) else x.market
     return {"market": x.market, "sector": sec - x.market, "idio": x.ret - sec}
 
 
-def cause(x: Loss) -> str:
-    """가장 크게 깎은(가장 음수인) 몫의 키."""
+def cause(x: Loss) -> str | None:
+    """가장 크게 깎은(가장 음수인) 몫의 키. 나눌 수 없으면 None."""
     p = parts(x)
-    return min(p, key=lambda k: p[k])
+    return None if p is None else min(p, key=lambda k: p[k])
 
 
 def render(total: int, losses: list[Loss], n_losses: int | None = None) -> list[str]:
@@ -56,11 +60,16 @@ def render(total: int, losses: list[Loss], n_losses: int | None = None) -> list[
     if not losses:
         return [head]
     세기 = {k: sum(1 for x in losses if cause(x) == k) for k in LABEL}
+    모름 = sum(1 for x in losses if cause(x) is None)
     공시 = sum(1 for x in losses if x.disclosure)
-    원인 = " · ".join(f"{LABEL[k]} {n}" for k, n in 세기.items())
+    원인 = " · ".join(f"{LABEL[k]} {n}" for k, n in 세기.items()) + (f" · 지수 없어 못 나눔 {모름}" if 모름 else "")
     out = [head, f"  주된 원인: {원인} (기간 안 공시 있음 {공시})"]
     for x in sorted(losses, key=lambda x: x.ret)[:MAX_EXAMPLES]:
         p = parts(x)
+        if p is None:
+            공시말 = f" · 공시 \"{x.disclosure}\"" if x.disclosure else ""
+            out.append(f"  {x.name}({x.horizon}) {x.ret * 100:+.1f}% — 그 기간 지수 수익이 없어 나누지 못함{공시말}")
+            continue
         조각 = " · ".join(f"{LABEL[k]} {p[k] * 100:+.1f}%p" for k in LABEL)
         공시말 = f" · 공시 \"{x.disclosure}\"" if x.disclosure else ""
         업종말 = "" if x.peers >= MIN_SECTOR_PEERS else f" (업종 표본 {x.peers}개 — 시장과 같다고 봄)"

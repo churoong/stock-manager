@@ -262,6 +262,15 @@ def load_losses(
             나라 = "KR" if str(r[7]) == "KR" else "US"
             새[나라] = max(새.get(나라, ""), str(r[3]))
         끝.append(새)
+    # **한 종목·한 진입일은 한 번만 센다** (docs/infra.md 25.1271, 리포트 감사 재현). 같은 날 단기·중기·장기 신호가
+    # 함께 나면 진입가·20거래일 수익이 같은 줄이 기간마다 와서, 손실·원인 집계가 세 배가 되고 예 세 자리가 같은 종목으로
+    # 찼다(`self_grade` 는 이미 종목·날로 하나만 센다). 기간은 "short·mid" 처럼 함께 적는다
+    묶음: dict[tuple[int, str], list] = {}
+    for r in rows:
+        묶음.setdefault((int(r[0]), str(r[3])), []).append(r)
+    순서 = {"short": 0, "mid": 1, "long": 2}
+    rows = [[*줄[0][:2], "·".join(sorted({str(x[2]) for x in 줄}, key=lambda h: 순서.get(h, 9))), *줄[0][3:]]
+            for 줄 in 묶음.values()]  # fmt: skip
     losses = []
     손실들 = sorted((r for r in rows if float(r[4]) < 0), key=lambda r: float(r[4]))
     for r in 손실들[:POSTMORTEM_MAX]:
@@ -280,7 +289,8 @@ def load_losses(
             " ORDER BY disclosed_at LIMIT 1",
             [sid, entry, exit_ or entry],
         ).scalar()
-        losses.append(postmortem.Loss(str(r[1]), str(r[2]), float(r[4]), float(r[5] or 0.0), sec_ret, peers,
+        losses.append(postmortem.Loss(str(r[1]), str(r[2]), float(r[4]), None if r[5] is None else float(r[5]),
+                                      sec_ret, peers,
                                       str(공시) if 공시 else None))  # fmt: skip
     return len(rows), len(손실들), losses
 

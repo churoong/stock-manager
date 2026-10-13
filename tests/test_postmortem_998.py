@@ -217,3 +217,33 @@ def test_보고_기록은_나라마다_따로다() -> None:
     assert ws.load_losses(C(), datetime(2026, 10, 18, tzinfo=UTC), 끝[0])[:2] == (1, 1)
     # 예전 기록(문자열 하나)은 두 나라에 같이 쓴다
     assert ws.load_losses(C(), datetime(2026, 10, 18, tzinfo=UTC), "2026-09-11")[:2] == (0, 0)
+
+
+def test_지수_수익을_모르면_나누지_않는다() -> None:
+    """예전엔 0 으로 두어 "시장 +0.0%p" 를 잰 값처럼 찍었다 (docs/infra.md 25.1271, 리포트 감사 재현)."""
+    x = pm.Loss("가", "short·mid", -0.10, None, None, 0, None)
+    assert pm.parts(x) is None and pm.cause(x) is None
+    글 = "\n".join(pm.render(1, [x]))
+    assert "시장 +0.0%p" not in 글 and "지수 없어 못 나눔 1" in 글 and "지수 수익이 없어 나누지 못함" in 글
+
+
+def test_같은_종목_같은_진입일은_기간이_여럿이어도_한_번() -> None:
+    """같은 날 단기·중기·장기 신호의 손실이 세 번 세어졌다 (docs/infra.md 25.1271)."""
+    from batch.core.turso import ResultSet
+    from tests.test_sql_schema import 스키마올리기
+
+    con = 스키마올리기()
+
+    class C:
+        def execute(self, sql, args=None):  # noqa: ANN001, ANN202
+            cur = con.execute(sql, args or [])
+            return ResultSet(columns=[d[0] for d in cur.description or []], rows=[tuple(r) for r in cur.fetchall()])
+
+    con.execute("INSERT INTO stocks (id, ticker, market, country, name_ko, currency, status, source, fetched_at)"
+                " VALUES (1, '000001', 'KOSPI', 'KR', '가', 'KRW', 'active', 't', 't')")  # fmt: skip
+    for k, hz in enumerate(("long", "short", "mid")):
+        con.execute("INSERT INTO signal_outcomes (stock_id, as_of_date, horizon, entry_date, entry_close, ret_20d,"
+                    " bench_ret_20d, days_available, computed_at) VALUES (1, ?, ?, '2026-09-08', 100, -0.1, -0.02, 20, 't')",
+                    [f"a{k}", hz])  # fmt: skip
+    총, 손실수, 손실 = ws.load_losses(C(), datetime(2026, 10, 11, tzinfo=UTC))
+    assert (총, 손실수, len(손실)) == (1, 1, 1) and 손실[0].horizon == "short·mid·long"
