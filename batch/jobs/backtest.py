@@ -76,8 +76,11 @@ DEFAULT_YEARS = 5
 #: 시점 유니버스 끔·추세 필터 켬과 달리 이것만 결과 행에 흔적이 없어, 기간 2년·상위 50 실행이 대표 결과가 됐다
 WARN_NOT_DEFAULT_PARAMS = "기본 파라미터 아님 (비교용, 규칙 판단에 쓰지 않는다)"
 
-# 리스크 팩터를 그 자리에서 계산할 창. docs/backtest.md 2.3 절. 3Y 창의 표본 하한이다.
-RISK_LOOKBACK_DAYS = 750
+# 리스크 팩터를 그 자리에서 계산할 때 넘기는 최대 행 수 (docs/backtest.md 2.3 절). **창은 아래에서 날짜로 자른다** —
+# 이 수는 3Y 창(1,096 달력일)을 어느 시장에서도 다 담을 만큼만 크면 된다. 예전 750 은 "3Y 표본 하한" 이라 적혀 있었지만
+# 하한은 `metrics.MIN_POINTS["3Y"]`(600)이고, 미국 3년은 752~756거래일이라 창 앞 2~6일이 잘려 운영(`jobs/metrics`,
+# 창 안 전부)과 다른 MDD·변동성이 났다 (docs/infra.md 25.1318, 백테스트 감사 재현). 국내는 730~740일이라 영향 없음
+RISK_LOOKBACK_DAYS = 800
 
 STRATEGIES = ("composite", "value", "quality", "growth", "momentum", "risk", "benchmark", "momentum_sector",
               "ic_weighted", "shrink_missing")  # fmt: skip
