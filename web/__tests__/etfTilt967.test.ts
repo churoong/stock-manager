@@ -148,3 +148,12 @@ describe("옮긴 순위", () => {
     );
   });
 });
+
+// 국내 탭 머리는 무리마다 출처·점수 기준일 (docs/infra.md 25.1284) — 예전엔 SEC 만 적고 첫 행 점수일 하나
+describe("국내 탭 머리", () => {
+  it("국내 지수 출처와 무리별 점수 기준일을 적는다", () => {
+    const 글 = readFileSync(join(process.cwd(), "components/EtfList.tsx"), "utf-8");
+    expect(글).toContain("KODEX·한국투자증권 구성종목(그날)");
+    expect(글).toContain("${GROUP_LABEL[g]} 점수 기준일");
+  });
+});

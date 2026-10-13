@@ -275,9 +275,23 @@ function FocusEtfList({ country }: { country: Country }) {
     <div>
       <p className="mb-3 text-xs leading-relaxed text-slate-500">
         {country === "KR" ? "국내 상장" : "미국 상장"} 주식형 ETF 를 <b>우리 장기 점수(밸류·퀄리티) 상위 {(first?.top_share_pct ?? 10).toFixed(0)}% 종목을 얼마나 담았나</b>{" "}
-        순으로 세웠습니다. 전 종목 보유는 SEC 분기 공시에서 받았습니다(약 두 달 늦음). 넓은 지수가 아닌 ETF 도 들어옵니다 —
-        아직 백테스트로 효과를 확인하지 않은 참고 순위입니다.
-        {first?.score_as_of ? ` 점수 기준일 ${first.score_as_of}.` : ""}
+        순으로 세웠습니다.{" "}
+        {/* 보유 출처·점수 기준일은 무리마다 다르다 (docs/infra.md 25.1284) — 국내 지수는 그날 KODEX·KIS 구성종목과 국내 점수,
+            미국 지수는 SEC 분기 공시(약 두 달 늦음)와 미국 점수. 예전엔 국내 탭에도 SEC 만 적고 첫 행(국내 지수)의 점수일 하나만 보였다 */}
+        {country === "KR"
+          ? "보유는 국내 지수가 KODEX·한국투자증권 구성종목(그날), 미국 지수가 같은 지수 미국 ETF 의 SEC 분기 공시(약 두 달 늦음)입니다."
+          : "전 종목 보유는 SEC 분기 공시에서 받았습니다(약 두 달 늦음)."}{" "}
+        넓은 지수가 아닌 ETF 도 들어옵니다 — 아직 백테스트로 효과를 확인하지 않은 참고 순위입니다.
+        {country === "KR"
+          ? (["kr_kr", "kr_us"] as const)
+              .map((g) => {
+                const t = rows.map((r) => parseTilt(r.rationale_data)).find((x) => (x?.group ?? "kr_us") === g);
+                return t?.score_as_of ? ` ${GROUP_LABEL[g]} 점수 기준일 ${t.score_as_of}.` : "";
+              })
+              .join("")
+          : first?.score_as_of
+            ? ` 점수 기준일 ${first.score_as_of}.`
+            : ""}
       </p>
       {country === "KR" ? (
         <p className="mb-3 rounded-lg bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-600 dark:bg-slate-900 dark:text-slate-300">
