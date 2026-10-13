@@ -280,7 +280,7 @@ def _store(
                 values.get("total_equity"), values.get("revenue"),
                 values.get("operating_income"), values.get("pretax_income"),
                 values.get("net_income"), values.get("comprehensive_income"),
-                source, now,
+                source, now, item.period_days,
             )
         )
         snap_rows.append(
@@ -293,7 +293,7 @@ def _store(
                 # 더한다
                 json.dumps(
                     {**values, "currency": item.currency, "unit": 단위, "accounting_standard": "K-IFRS",
-                     "period_type": item.period_type},
+                     "period_type": item.period_type, "period_days": item.period_days},
                     ensure_ascii=False,
                 ),
                 source, now,
@@ -311,7 +311,7 @@ _FIN_COLS = (
     " current_assets, noncurrent_assets, total_assets, current_liabilities,"
     " noncurrent_liabilities, total_liabilities, capital_stock, retained_earnings,"
     " total_equity, revenue, operating_income, pretax_income, net_income,"
-    " comprehensive_income, source, fetched_at"
+    " comprehensive_income, source, fetched_at, period_days"
 )
 _FIN_SQL = (
     " ON CONFLICT (stock_id, fiscal_year, report_code, consolidated) DO UPDATE SET"
@@ -330,6 +330,8 @@ _FIN_SQL = (
     # 통화·단위·기준·기간·출처도 갱신한다 (25.729) — 예전에는 처음 넣은 값이 영영 남았다
     "   currency = excluded.currency, unit = excluded.unit, accounting_standard = excluded.accounting_standard,"
     "   period_type = excluded.period_type, source = excluded.source,"
+    # 보고 기간 일수 (25.1286) — 새로 못 읽었으면 있던 값을 지킨다
+    "   period_days = COALESCE(excluded.period_days, financials.period_days),"
     "   fetched_at = excluded.fetched_at"
 )
 

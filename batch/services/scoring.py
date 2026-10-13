@@ -333,6 +333,26 @@ def profit_stability(
     return profitable_years / observed_years
 
 
+#: 이보다 짧은 사업연도는 12개월 해와 견주지 않는다 (docs/infra.md 25.1286, 재무 감사 재현) — 분할 신설 첫해·결산월
+#: 변경 해. 미국 쪽 "350~380일" 규칙(25.730·25.743)과 같은 아래 문턱
+MIN_FULL_YEAR_DAYS = 350
+#: 기간에 따라 크기가 달라지는 손익 계정 — 짧은 해는 이것만 비운다(재무상태표 값은 그 시점 값이라 그대로)
+FLOW_FIELDS = ("revenue", "operating_income", "pretax_income", "net_income", "comprehensive_income")
+
+
+def short_year(row: Mapping[str, Any] | None) -> bool:
+    """보고 기간을 알고 그것이 `MIN_FULL_YEAR_DAYS` 보다 짧은 사업연도인가. 모르면(옛 행) False — 예전처럼 본다"""
+    if row is None:
+        return False
+    days = row.get("period_days")
+    return isinstance(days, int | float) and 0 < days < MIN_FULL_YEAR_DAYS
+
+
+def flow_blanked(row: dict[str, Any]) -> dict[str, Any]:
+    """손익 계정을 비운 사본 — 짧은 해의 E/P·S/P·ROE·ROA·마진을 12개월 값처럼 쓰지 않게 (25.1286). 연율화하지 않는다"""
+    return {**row, **dict.fromkeys(FLOW_FIELDS)}
+
+
 def same_currency(*rows: Mapping[str, Any] | None) -> bool:
     """재무 행들의 통화가 모두 같은가 (docs/infra.md 25.919, 11회차).
 

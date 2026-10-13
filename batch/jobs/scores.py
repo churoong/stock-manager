@@ -121,7 +121,7 @@ def load_financials(client: TursoClient, country: str, as_of: str,
         "       f.total_assets, f.total_liabilities, f.revenue, f.operating_income,"
         # 2026-09-17: 유동비율·피오트로스키 축소판·자산 성장률 (docs/factors.md 10.2)
         "       f.current_assets, f.current_liabilities, f.noncurrent_liabilities,"
-        "       f.report_date, f.currency"
+        "       f.report_date, f.currency, f.period_days"
         " FROM b CROSS JOIN financials f ON f.stock_id = b.sid AND f.consolidated = b.cons"
         " WHERE f.report_code = ? AND f.report_date <= ?"
         " ORDER BY f.stock_id, f.report_date",
@@ -663,6 +663,15 @@ def build_inputs(
             else None
         )
         if three_ago is not None and not sc.same_currency(current, three_ago):
+            three_ago = None
+        # **짧은 사업연도는 12개월 해와 견주지 않는다** (docs/infra.md 25.1286, 재무 감사 재현). 분할 신설 첫해(2개월)가
+        # 지금 해면 E/P·S/P·ROE 가 6분의 1, 다음 해의 전년이면 매출·영업이익 성장이 +500% 였다. 지금 해가 짧으면 손익만
+        # 비우고(재무상태표는 그대로) 성장 비교를 하지 않는다. 전년·3년 전이 짧으면 없는 해로 본다. 연율화하지 않는다
+        if sc.short_year(current):
+            current, previous, three_ago = sc.flow_blanked(current), None, None
+        if sc.short_year(previous):
+            previous = None
+        if sc.short_year(three_ago):
             three_ago = None
 
         market_cap, cap_note = scaled_market_cap(row, stock_id, as_of, series, moves, pending_adjust)

@@ -194,7 +194,12 @@ def pit_financials(
     three_ago = known.get(latest - 3) if sc.has_cagr_years(known, latest) else None
     picked = (known[latest], known.get(latest - 1), three_ago)
     _guard(cutoff, *(None if row is None else str(row["as_of_date"]) for row in picked))
-    return picked
+    # 짧은 사업연도는 12개월 해와 견주지 않는다 — 운영 점수(`jobs/scores.build_inputs`)와 같은 규칙 (25.1286)
+    지금, 전년, 삼년 = picked
+    if sc.short_year(지금["values"]):
+        return {**지금, "values": sc.flow_blanked(지금["values"])}, None, None
+    return (지금, None if 전년 is not None and sc.short_year(전년["values"]) else 전년,
+            None if 삼년 is not None and sc.short_year(삼년["values"]) else 삼년)  # fmt: skip
 
 
 def stability_from(

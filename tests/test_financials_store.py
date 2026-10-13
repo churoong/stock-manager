@@ -50,8 +50,8 @@ class Test열개수:
         assert fin.column_count("a, b, ") == 2
 
     def test_financials_열_개수(self) -> None:
-        # 실제로 26개다. 이 값이 바뀌면 값 묶음도 함께 바뀌어야 한다
-        assert fin.column_count(fin._FIN_COLS) == 26
+        # 실제로 27개다(25.1286 에 보고 기간 일수). 이 값이 바뀌면 값 묶음도 함께 바뀌어야 한다
+        assert fin.column_count(fin._FIN_COLS) == 27
 
     def test_snapshots_열_개수(self) -> None:
         assert fin.column_count(fin._SNAP_COLS) == 9
@@ -96,7 +96,7 @@ class Test값과열이맞는가:
             fin._bulk(client, "financials", fin._FIN_COLS, "", [(1, 2, 3)])
 
         assert "3개" in str(exc.value)
-        assert "26개" in str(exc.value)
+        assert "27개" in str(exc.value)
 
 
 class Test저장내용:

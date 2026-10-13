@@ -273,6 +273,8 @@ class CompanyFinancials:
     report_date: str
     currency: str
     values: dict[str, int | None] = field(default_factory=dict)
+    #: 손익의 보고 기간 일수(시작일·끝일 포함). 모르면 None (25.1286)
+    period_days: int | None = None
 
     @property
     def period_type(self) -> str:
@@ -299,6 +301,28 @@ def _pick(rows: list[dict[str, Any]], field_name: str) -> int | None:
                     # 분기·반기 보고서에서 손익의 thstrm_amount 는 그 분기 **3개월** 값이다(누적은 thstrm_add_amount).
                     # 반기 행의 thstrm_dt 는 누적 기간을 적어 헷갈린다 (docs/data-sources.md 1.3, 2026-09-18 확인)
                     return _to_int(row.get("thstrm_amount"))
+    return None
+
+
+def period_days_of(rows: list[dict[str, Any]]) -> int | None:
+    """손익 행의 `thstrm_dt`("2025.01.01 ~ 2025.12.31") 로 보고 기간 일수 (docs/infra.md 25.1286). 읽지 못하면 None.
+
+    **사업보고서에만 뜻이 있다** — 분기·반기 행의 `thstrm_dt` 는 누적 기간을 적는다(docs/data-sources.md 1.3)."""
+    from datetime import date as _date
+
+    for row in rows:
+        if row.get("sj_div") not in ("IS", "CIS"):
+            continue
+        m = re.match(r"\s*(\d{4})\.(\d{2})\.(\d{2})\s*~\s*(\d{4})\.(\d{2})\.(\d{2})", str(row.get("thstrm_dt") or ""))
+        if not m:
+            continue
+        try:
+            a = _date(int(m[1]), int(m[2]), int(m[3]))
+            b = _date(int(m[4]), int(m[5]), int(m[6]))
+        except ValueError:
+            continue
+        if b >= a:
+            return (b - a).days + 1
     return None
 
 
@@ -338,6 +362,7 @@ def parse_multi_response(
                 report_date=as_of,
                 currency=str(first.get("currency", "KRW")).strip() or "KRW",
                 values={name: _pick(group, name) for name in ACCOUNT_MAP},
+                period_days=period_days_of(group),
             )
         )
     return out
