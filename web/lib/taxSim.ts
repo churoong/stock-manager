@@ -14,7 +14,12 @@ export interface TaxSimRow {
 }
 
 export interface TaxSim {
-  assumption: { monthly_krw: number; price_return_pct: number; dist_yield_pct: number };
+  assumption: {
+    monthly_krw: number; price_return_pct: number; dist_yield_pct: number;
+    // 제도 금액·쓴 세율 (25.1301) — 이 칸이 생기기 전에 저장된 값에는 없다
+    us_gain_deduction_krw?: number; fin_income_comprehensive_krw?: number;
+    rates?: Record<string, number | null>;
+  };
   rows: TaxSimRow[];
 }
 
@@ -41,8 +46,14 @@ export function taxSimLines(sim: TaxSim | null | undefined): { head: string; gro
     `매달 ${만원(a.monthly_krw)}씩, 연 가격 ${a.price_return_pct}% · 분배 ${a.dist_yield_pct}% 를 가정했을 때 ` +
     "(예측이 아닙니다 — 모든 줄이 같은 가정이라 차이는 세금에서만 납니다). " +
     // 순서가 일반계좌 추천과 달라 보이는 까닭을 밝힌다 (docs/infra.md 25.1240, docs/etf.md 11.7)
-    "끝에 한 해에 모두 판다고 가정해 미국 상장의 해마다 250만원 공제(나눠 팔기)·손익통산과 국내 상장 해외 ETF 의 " +
-    "금융소득종합과세(한 해 2,000만원 초과)를 넣지 않았습니다 — 그래서 일반계좌 추천 순서(과세 구조로 정함)와 다를 수 있습니다";
+    `끝에 한 해에 모두 판다고 가정해 미국 상장의 해마다 ${a.us_gain_deduction_krw ? 만원(a.us_gain_deduction_krw) : "기본"} 공제` +
+    "(나눠 팔기)·손익통산과 국내 상장 해외 ETF 의 " +
+    `금융소득종합과세(${a.fin_income_comprehensive_krw ? `한 해 ${만원(a.fin_income_comprehensive_krw)} 초과` : "기준 초과"})를 넣지 않았습니다` +
+    " — 그래서 일반계좌 추천 순서(과세 구조로 정함)와 다를 수 있습니다" +
+    // 계좌별 사유는 세율을 인용하지 않는다 — 지금 쓴 세율은 여기서 본다 (25.1301)
+    (a.rates
+      ? `. 쓴 세율: ${Object.entries(a.rates).map(([k, v]) => `${잎_이름[k] ?? k} ${v == null ? "미입력" : `${v}%`}`).join(" · ")}`
+      : "");
   const years = [...new Set(sim.rows.map((r) => r.years))];
   return {
     head,

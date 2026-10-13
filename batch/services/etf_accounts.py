@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from batch.core import settings_range as sr
+from batch.services.tax_sim import FIN_INCOME_COMPREHENSIVE_KRW, US_CGT_DEDUCTION_KRW
 
 #: 계좌 순서 — 화면 탭 순서와 같다
 ACCOUNTS = ("pension", "irp", "taxable")
@@ -37,15 +37,10 @@ IRP_RISK_LIMIT_PCT = 70
 _PENSION_US = "연금저축·IRP 는 국내 상장 ETF 만 살 수 있습니다"
 
 
-def _rate(taxes: dict | None, key: str) -> str:
-    """설정 세율을 근거 문장에 인용한다. **배치·웹과 같은 범위(0~50%)로 거른다** (25.1130, 배당 감사 재현).
-
-    예전에는 숫자면 그대로 — 백업 복원으로 들어온 60% 를 "설정 세율 60%", `True` 를 "1%" 로 인용했다. 같은 설정을 세후
-    시뮬레이션(`tax_sim`)·비용(`cost_rates`)은 범위 밖으로 버리는데 근거 문장만 다른 값을 말했다."""
-    값, 말 = sr.범위_안(key, (taxes or {}).get(key), None)
-    if 값 is None:
-        return "범위 밖 — 설정 화면에서 확인" if 말 else "미입력"
-    return f"{값:g}%"
+#: 사유가 세율 숫자 대신 쓰는 말 (docs/infra.md 25.1301, 세후 적립 감사 #1). 사유는 월 1회 ETF 잡이 써서 세율을
+#: 인용하면 설정을 고쳐도 한 달 동안 옛 세율을 말했다 — 같은 탭의 세후 적립 카드는 설정 저장마다 다시 계산돼 둘이
+#: 다른 세율을 보였다. 지금 세율은 그 카드가 보여 준다
+_세율_글 = "세율은 설정값 — 위 세후 적립 카드에 지금 값"
 
 
 def _reason(country: str, bucket: str, account: str, taxes: dict | None) -> str:
@@ -55,8 +50,9 @@ def _reason(country: str, bucket: str, account: str, taxes: dict | None) -> str:
         # (25.1240, 교차검증). 앞서는 까닭은 세율이 아니라 **구조**다 — 분리과세·해마다 공제·손익통산.
         # 단점(환전·상속세)도 함께 적는다
         return (
-            f"미국 상장 — 양도차익 분리과세(설정 세율 {_rate(taxes, 'us_capital_gains_pct')},"
-            " 금융소득종합과세에 합산 안 됨)·해마다 250만원 기본공제(나눠 팔기)·다른 해외주식과 손익통산."
+            f"미국 상장 — 양도차익 분리과세({_세율_글},"
+            f" 금융소득종합과세에 합산 안 됨)·해마다 {US_CGT_DEDUCTION_KRW // 10_000}만원 기본공제(나눠 팔기)"
+            "·다른 해외주식과 손익통산."
             " 단 환전 비용과 미국 상속세 대상 자산(비거주자 공제 6만 달러 `[확인필요]`) — 국내 주식 ETF 다음"
         )
     if bucket == "국내 주식":
@@ -66,7 +62,7 @@ def _reason(country: str, bucket: str, account: str, taxes: dict | None) -> str:
     if account == "taxable":
         return (
             f"국내 상장 {bucket} ETF 는 일반계좌에서 매매차익·분배금 모두 배당소득세"
-            f"(설정 세율 {_rate(taxes, 'kr_dividend_pct')}) — 한 해에 몰아 팔면 금융소득종합과세(2,000만원 초과)"
+            f"({_세율_글}) — 한 해에 몰아 팔면 금융소득종합과세({FIN_INCOME_COMPREHENSIVE_KRW // 10_000:,}만원 초과)"
             "될 수 있어 여러 해에 나눠 팝니다. 연금 계좌가 낫습니다"
         )
     # 해외 주식(1순위)과 채권(2순위)이 같은 문장으로 "가장 크다" 를 말해 2순위 카드가 1순위로 읽혔다 (25.1239)

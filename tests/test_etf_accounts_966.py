@@ -29,11 +29,11 @@ class Test순위:
 
 
 class Test근거:
-    def test_세율은_설정값을_인용하고_없으면_미입력(self) -> None:
+    def test_세율_숫자는_인용하지_않는다(self) -> None:
+        """사유는 월 1회 잡이 써서 세율을 인용하면 한 달 묵는다 — 지금 세율은 세후 적립 카드가 보인다 (25.1301)."""
         a = ea.accounts_for("KR", "해외 주식", satellite=False, taxes={"kr_dividend_pct": 15.4})
-        assert "설정 세율 15.4%" in a["taxable"]["reason"]
-        b = ea.accounts_for("KR", "해외 주식", satellite=False)
-        assert "설정 세율 미입력" in b["taxable"]["reason"]
+        assert "15.4" not in a["taxable"]["reason"] and "세후 적립 카드" in a["taxable"]["reason"]
+        assert ea.accounts_for("KR", "해외 주식", satellite=False)["taxable"]["reason"] == a["taxable"]["reason"]
 
     def test_IRP_위험자산_안내(self) -> None:
         assert f"{ea.IRP_RISK_LIMIT_PCT}% 이하" in ea.accounts_for("KR", "해외 주식", satellite=False)["irp"]["note"]
@@ -47,12 +47,16 @@ class Test근거:
         assert ea.accounts_for("US", "업종", satellite=True)["pension"]["eligible"] is False
 
 
-def test_근거의_세율은_범위를_거친다() -> None:
-    """범위 밖·숫자 아닌 세율을 그대로 인용했다 (docs/infra.md 25.1130)."""
-    assert "설정 세율 15.4%" in ea._reason("KR", "해외 주식", "taxable", {"kr_dividend_pct": 15.4})
-    assert "설정 세율 범위 밖" in ea._reason("KR", "해외 주식", "taxable", {"kr_dividend_pct": 60})
-    assert "설정 세율 범위 밖" in ea._reason("US", "미국 주식", "taxable", {"us_capital_gains_pct": True})
-    assert "설정 세율 미입력" in ea._reason("US", "미국 주식", "taxable", {})
+def test_제도_금액은_상수에서() -> None:
+    """250만원·2,000만원을 글자로 박지 않는다 (25.1301 — 정의처 `portfolio.US_CGT_DEDUCTION_KRW`·`tax_sim`)."""
+    from batch.services import tax_sim as ts
+
+    us = ea._reason("US", "미국 주식", "taxable", {})
+    kr = ea._reason("KR", "해외 주식", "taxable", {})
+    assert f"{ts.US_GAIN_DEDUCTION_KRW // 10_000}만원 기본공제" in us
+    assert f"{ts.FIN_INCOME_COMPREHENSIVE_KRW // 10_000:,}만원 초과" in kr
+    # 범위 밖·숫자 아닌 세율도 더는 인용하지 않는다 (25.1130 이 막던 것)
+    assert "60" not in ea._reason("KR", "해외 주식", "taxable", {"kr_dividend_pct": 60})
 
 
 def test_연금_2순위_채권은_가장_크다고_하지_않는다() -> None:
@@ -76,3 +80,13 @@ def test_미국_상장_2순위의_까닭은_구조와_단점이다() -> None:
     for 말 in ("분리과세", "250만원", "손익통산", "환전", "상속세"):
         assert 말 in 미국["reason"]
     assert "종합과세" in 국내해외["reason"] and "나눠" in 국내해외["reason"]
+
+
+def test_설정_화면의_공제_글도_상수와_같다() -> None:
+    """웹은 파이썬 상수를 못 읽는다 — 설정 화면의 "기본공제 N만원" 이 정의처와 어긋나지 않게 대조한다 (25.1301)."""
+    from pathlib import Path
+
+    from batch.services.portfolio import US_CGT_DEDUCTION_KRW
+
+    글 = (Path(__file__).resolve().parents[1] / "web/components/SettingsForm.tsx").read_text(encoding="utf-8")
+    assert f"기본공제 {US_CGT_DEDUCTION_KRW // 10_000}만원" in 글

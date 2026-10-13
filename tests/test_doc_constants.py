@@ -594,6 +594,7 @@ class Test세후_시뮬레이션:
         검사(ETF, f"연 분배 **{ts.DIST_YIELD_PCT:.0f}%**(`DIST_YIELD_PCT`)", "가정 분배율")
         검사(ETF, f"기본공제 **{ts.US_GAIN_DEDUCTION_KRW // 10_000}만원**(`US_GAIN_DEDUCTION_KRW`", "양도 기본공제")
         검사(ETF, f"연 **{ts.PENSION_CREDIT_LIMIT_KRW // 10_000}만원**(`PENSION_CREDIT_LIMIT_KRW`)", "세액공제 한도")
+        검사(ETF, f"연 **{ts.FIN_INCOME_COMPREHENSIVE_KRW // 10_000:,}만원**(`FIN_INCOME_COMPREHENSIVE_KRW`", "종합과세 기준")
 
 
 class Test엇갈림:

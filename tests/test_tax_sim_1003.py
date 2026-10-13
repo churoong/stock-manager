@@ -74,3 +74,10 @@ def test_포트폴리오_재계산이_요약에_저장한다(monkeypatch: pytest
     by = {(r["key"], r["years"]): r for r in sim["rows"]}
     assert by[("general_kr_equity", 10)]["after_tax"] is not None  # 국내 배당소득세만 넣었다
     assert by[("general_us_listed", 10)]["missing"] == ["us_dividend_pct", "us_capital_gains_pct"]
+
+
+def test_쓴_세율과_제도_금액을_싣는다() -> None:
+    """카드가 지금 쓴 세율을 보인다 — 계좌별 사유는 세율을 인용하지 않는다 (25.1301)."""
+    a = ts.simulate({"kr_dividend_pct": 15.4, "pension_income_pct": 60})["assumption"]
+    assert a["rates"]["kr_dividend_pct"] == 15.4 and a["rates"]["pension_income_pct"] is None  # 범위 밖은 비운다
+    assert a["fin_income_comprehensive_krw"] == ts.FIN_INCOME_COMPREHENSIVE_KRW

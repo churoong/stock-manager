@@ -32,6 +32,8 @@ DIST_YIELD_PCT = 2.0
 US_GAIN_DEDUCTION_KRW = US_CGT_DEDUCTION_KRW
 #: 연금저축 세액공제 대상 납입 한도(원/년) `[확인필요]`
 PENSION_CREDIT_LIMIT_KRW = 6_000_000
+#: 금융소득종합과세 기준(원/년) `[확인필요]` — 시뮬레이션에는 넣지 않고 글로만 말한다(계좌별 사유·카드 머리, 25.1301)
+FIN_INCOME_COMPREHENSIVE_KRW = 20_000_000
 
 
 @dataclass(frozen=True)
@@ -114,6 +116,10 @@ def simulate(taxes: dict | None) -> dict:
     return {
         "assumption": {"monthly_krw": MONTHLY_KRW, "price_return_pct": PRICE_RETURN_PCT,
                        "dist_yield_pct": DIST_YIELD_PCT, "us_gain_deduction_krw": US_GAIN_DEDUCTION_KRW,
-                       "pension_credit_limit_krw": PENSION_CREDIT_LIMIT_KRW},  # fmt: skip
+                       "pension_credit_limit_krw": PENSION_CREDIT_LIMIT_KRW,
+                       "fin_income_comprehensive_krw": FIN_INCOME_COMPREHENSIVE_KRW,
+                       # 이번 계산에 쓴 세율 — 카드가 "지금 설정" 을 보여 준다. 계좌별 사유는 월 1회 ETF 잡이
+                       # 써서 세율을 인용하면 한 달 묵는다(25.1301). 이 값은 설정을 저장할 때마다 다시 쓰인다
+                       "rates": {k: t.get(k) for k in TAX_KEYS}},  # fmt: skip
         "rows": [asdict(r) for r in rows],
     }
