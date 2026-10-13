@@ -147,7 +147,15 @@ def _안_넣은_비용(rates: dict[str, pf.CostRates], trades: list[pf.Trade] | 
     거짓 경보다. `trades` 를 안 주면 예전처럼 알린다.
     """
     말들: list[str] = []
-    if any(r.buy_fee_pct is None or r.sell_fee_pct is None for r in rates.values()):
+    # **수수료 경고도 그 설정을 실제로 쓰는 매매가 있을 때만** (docs/infra.md 25.1296, 손익 감사 #4) — 수수료를 다
+    # 입력하는 국내만 사용자에게 "미국 수수료율 없음" 으로 매 실행 경고가 떠 실행이 늘 "일부" 였다. 매매의 통화·방향에
+    # 맞는 율이 비었고 그 매매의 수수료 칸도 비었을 때만 알린다
+    def _율(t: pf.Trade) -> float | None:
+        r = rates.get(t.currency, pf.CostRates())
+        return r.buy_fee_pct if t.side == "buy" else r.sell_fee_pct
+
+    if (any(r.buy_fee_pct is None or r.sell_fee_pct is None for r in rates.values()) if trades is None
+            else any(t.fee is None and _율(t) is None for t in trades)):  # fmt: skip
         말들.append(_안_넣은_수수료)
     krw = rates["KRW"]
     if krw.sell_tax_pct is None:
