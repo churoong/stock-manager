@@ -267,15 +267,25 @@ async function holdings(exec: Exec): Promise<string> {
 }
 
 async function alerts(exec: Exec): Promise<string> {
-  const rs = rows<{ name: string; message: string; trade_date: string }>(
+  // **시장마다 제 마지막 거래일** (docs/infra.md 25.1253). 예전에는 표 전체의 MAX(trade_date) 하나로 걸러, 한국 낮에 물으면 미국의 지난 밤
+  // 정규장(현지 날짜가 하루 앞) 알림이 통째로 빠졌다. 두 시장을 따로 묶어 날짜를 붙인다
+  const rs = rows<{ name: string; message: string; trade_date: string; market: string }>(
     await exec(
-      `SELECT COALESCE(s.name_ko, s.name_en, s.ticker) AS name, a.message, a.trade_date FROM alerts a
+      `SELECT COALESCE(s.name_ko, s.name_en, s.ticker) AS name, a.message, a.trade_date, a.market FROM alerts a
+       JOIN (SELECT market, MAX(trade_date) AS d FROM alerts GROUP BY market) m ON m.market = a.market AND m.d = a.trade_date
        JOIN stocks s ON s.id = a.stock_id
-       WHERE a.trade_date = (SELECT MAX(trade_date) FROM alerts) ORDER BY a.created_at DESC LIMIT 20`,
+       ORDER BY a.market, a.created_at DESC LIMIT 40`,
     ),
   );
   if (rs.length === 0) return "장중 알림 기록이 없습니다";
-  return [`장중 알림 (${rs[0].trade_date}, 최근 ${rs.length}건)`, ...rs.map((r) => `· ${r.name}: ${r.message}`)].join("\n");
+  const 시장들 = [...new Set(rs.map((r) => r.market))];
+  return 시장들
+    .map((m) => {
+      const 줄 = rs.filter((r) => r.market === m).slice(0, 20);
+      const 이름 = m === "KR" ? "국내" : m === "US" ? "미국" : m;
+      return [`장중 알림 ${이름} (${줄[0].trade_date}, 최근 ${줄.length}건)`, ...줄.map((r) => `· ${r.name}: ${r.message}`)].join("\n");
+    })
+    .join("\n\n");
 }
 
 /**
