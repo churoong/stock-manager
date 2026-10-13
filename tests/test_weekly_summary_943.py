@@ -142,3 +142,12 @@ def test_일일_배치가_바로_다시_낸_종목은_말하지_않는다() -> N
     assert ws.바로_냄 in 바로 and ws.바로_냄 in __import__("inspect").getsource(daily._detect_kr_actions)
     runs = [_run("daily_kr", "partial", "2026-10-02T02:22:28+00:00", 바로)]
     assert ws.adjust_needed(runs) == []
+
+
+def test_머리_날짜는_한국_날짜이고_확인_실행은_미완이_아니다() -> None:
+    """UTC 날짜로 하루 늦었고, 손으로 돌린 dryrun 이 "미완" 으로 세었다 (docs/infra.md 25.1274, 리포트 감사 재현)."""
+    runs = [_run("daily_kr", "success", "2026-10-08T00:00:00+00:00"), _run("daily_kr", "dryrun", "2026-10-09T05:00:00+00:00"),
+            _run("daily_kr", "failed", "2026-10-09T00:00:00+00:00")]  # fmt: skip
+    글 = ws.compose(runs, {j: "2026-10-10T00:00:00+00:00" for j in ws.EXPECTED_DAYS}, 지금, None)
+    assert 글.startswith("[주간 운영 요약] 2026-09-28 ~ 2026-10-05")  # 지금 = 10-04 22:41 UTC = 10-05 07:41 KST
+    assert "daily_kr: 성공 1 · 실패 1 · 확인 실행 1" in 글 and "미완" not in 글

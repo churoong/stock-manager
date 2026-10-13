@@ -29,6 +29,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 
 from batch import config
+from batch.core import calendar as cal
 from batch.core import db
 from batch.core.client import TursoClient
 from batch.core.entry import guard
@@ -115,7 +116,11 @@ def load_last_success(client: TursoClient) -> dict[str, str]:
 def status_counts(runs: list[Run]) -> dict[str, dict[str, int]]:
     out: dict[str, dict[str, int]] = {}
     for r in runs:
-        칸 = out.setdefault(r.job_name, {"success": 0, "partial": 0, "failed": 0, "skipped": 0, "running": 0})
+        칸 = out.setdefault(
+            r.job_name, {"success": 0, "partial": 0, "failed": 0, "skipped": 0, "running": 0, "dryrun": 0}
+        )
+        # 손으로 돌린 확인 실행(`dryrun`, 보내지 않음)은 **미완이 아니다** (25.1274, 리포트 감사) — 예전엔 아는 다섯
+        # 상태 밖이라 "미완" 으로 세어 멈춘 실행처럼 보였다
         칸[r.status if r.status in 칸 else "running"] += 1
     return out
 
@@ -305,7 +310,9 @@ def compose(
 
     `rot_lines` 는 데이터 열 점검 절(`services/column_rot.render`, docs/health.md 7장). None 이면 절을 싣지 않는다.
     """
-    끝 = now.date()
+    # **머리 날짜는 사용자(한국) 날짜** (docs/infra.md 25.1274, 리포트 감사 재현). 예약은 일 07:41 KST = 토 22:41 UTC 라
+    # UTC 날짜로 적으면 일요일에 받은 요약이 "10-03 ~ 10-10" 으로 하루 늦었다 — 실제로 덮는 창은 한국 10-04 ~ 10-11 이다
+    끝 = now.astimezone(cal.market_tz("KR")).date() if now.tzinfo else now.date()
     시작 = 끝 - timedelta(days=WINDOW_DAYS)
     lines = [f"[주간 운영 요약] {시작} ~ {끝}", ""]
 
@@ -317,7 +324,7 @@ def compose(
     for j, c in 심한순[:MAX_LINES]:
         조각 = [f"성공 {c['success']}"]
         조각 += [f"{이름} {c[키]}" for 키, 이름 in (("partial", "부분"), ("failed", "실패"), ("skipped", "건너뜀"),
-                                                      ("running", "미완"))
+                                                      ("running", "미완"), ("dryrun", "확인 실행"))
                  if c[키]]  # fmt: skip
         lines.append(f"  {j}: {' · '.join(조각)}")
 
