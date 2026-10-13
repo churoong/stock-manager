@@ -51,6 +51,10 @@ GET https://opendart.fss.or.kr/api/fnlttMultiAcnt.json?crtfc_key=<키>&corp_code
 GET https://opendart.fss.or.kr/api/fnlttSinglAcntAll.json?crtfc_key=<키>&corp_code=<하나>&bsns_year=2025&reprt_code=11011&fs_div=CFS
 ```
 
+- **전체 재무제표** `fnlttSinglAcntAll.json` — 국내 영업현금흐름(현금흐름표 `sj_div='CF'`, 합계 account_id `ifrs-full_CashFlowsFromUsedInOperatingActivities`)을
+  사업보고서 스냅샷마다 한 번 부른다(2026-10-13, docs/infra.md 25.1317, `jobs/kr_cashflow`). 회사·연도·기준마다 1회라 한 실행 5천 회까지(일 한도 2만의 4분의 1).
+  `fs_div`(CFS·OFS)·행마다 오는 `rcept_no`·account_id 표기는 **탐침 전** `[확인필요]` — `probe-dart-cashflow.yml` 로 본다
+
 - **전환사채권 발행결정** `cvbdIsDecsn.json?corp_code=<하나>&bgn_de=<YYYYMMDD>&end_de=<YYYYMMDD>` (2026-10-12 탐침, docs/infra.md 25.1177·25.1192) —
   한 번에 그 기간의 발행결정이 **여러 행** 온다(접수번호 `rcept_no` 로 고른다). 쓰는 칸: `bd_fta` 권면총액, `cv_prc` 전환가액,
   `cvisstk_cnt` 전환 발행 주식 수, `cvisstk_tisstk_vs` 발행주식 대비 %, `cvrqpd_bgd`·`cvrqpd_edd` 청구 기간("2027년 11월 07일" 글자),

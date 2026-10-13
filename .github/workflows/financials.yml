@@ -76,5 +76,11 @@ jobs:
             python -m batch.jobs.financials --years ${{ inputs.years || 5 }} $RETRY
           fi
 
+      # 19회차 A1 (docs/infra.md 25.1317) — 사업보고서 스냅샷에 영업현금흐름을 더한다. 11-04 전에는 아무것도 안 한다
+      # (11-03 국내 기본 백테스트를 반쯤 찬 자료로 판정하지 않게). 새 사업보고서도 이 단계가 채운다. 출력은 건수만
+      - name: 국내 영업현금흐름 채우기
+        if: ${{ !inputs.year }}
+        run: python -m batch.jobs.kr_cashflow
+
       - name: 시점 조회 확인
         run: python scripts/check_pit.py 005930

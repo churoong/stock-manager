@@ -437,6 +437,80 @@ def fetch_multi_financials(
     )
 
 
+# ----------------------------------------------------------------------
+# 단일회사 전체 재무제표 — 국내 영업현금흐름 (docs/factors.md 12.21 19회차 A1, docs/infra.md 25.1317)
+# ----------------------------------------------------------------------
+
+#: 영업활동 현금흐름 **합계** 행의 account_id. "영업에서 창출된 현금"(이자·세금 전 소계)은 쓰지 않는다(검증 A ③,
+#: 미국 25.448 과 같은 규칙). `ifrs_` 는 옛 표기 [확인필요: 실측 — `kr_cashflow --probe` 로 본다]
+OCF_ACCOUNT_IDS = (
+    "ifrs-full_CashFlowsFromUsedInOperatingActivities",
+    "ifrs_CashFlowsFromUsedInOperatingActivities",
+)
+#: 자기정합 검사에 쓰는 같은 응답의 순이익·총자산 account_id [확인필요: 실측]
+NI_ACCOUNT_IDS = ("ifrs-full_ProfitLoss", "ifrs_ProfitLoss")
+ASSETS_ACCOUNT_IDS = ("ifrs-full_Assets", "ifrs_Assets")
+
+
+def parse_full_statement(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """전체 재무제표 행 → {receipt_no, operating_cash_flow, net_income, total_assets}. 못 찾은 칸은 None.
+
+    - 영업현금흐름은 현금흐름표(`sj_div='CF'`)의 합계 account_id 만 — 이름으로 찾지 않는다(소계와 헷갈린다)
+    - 접수번호는 **행마다** 오는 `rcept_no` [확인필요: 실측]. 행끼리 다르면 None(어느 판인지 모른다)
+    - 당기 값(`thstrm_amount`)만 — 뒤 보고서의 전기 값(`frmtrm`)은 재작성된 숫자라 쓰지 않는다(미래 정보)"""
+
+    def 값(sj: tuple[str, ...], ids: tuple[str, ...]) -> int | None:
+        for row in rows:
+            if row.get("sj_div") in sj and row.get("account_id") in ids:
+                return _to_int(row.get("thstrm_amount"))
+        return None
+
+    접수 = {str(r.get("rcept_no")) for r in rows if r.get("rcept_no")}
+    return {
+        "receipt_no": next(iter(접수)) if len(접수) == 1 else None,
+        "operating_cash_flow": 값(("CF",), OCF_ACCOUNT_IDS),
+        "net_income": 값(("IS", "CIS"), NI_ACCOUNT_IDS),
+        "total_assets": 값(("BS",), ASSETS_ACCOUNT_IDS),
+    }
+
+
+def fetch_full_statement(corp_code: str, fiscal_year: int, report_code: str, consolidated: bool) -> FetchResult:
+    """단일회사 전체 재무제표(`fnlttSinglAcntAll.json`) 한 번. data = 행 목록(013 이면 빈 목록).
+
+    `fs_div` 는 CFS(연결)·OFS(별도) [확인필요: 실측]. 회사·연도·보고서·기준마다 한 번이라 묶음보다 비싸다 — 부르는 쪽이
+    `db.record_and_guard` 로 센다(일 한도 2만)."""
+    if config.SETTINGS.offline_mode:
+        return FetchResult(ok=False, source=SOURCE, error="오프라인 모드", attempts=0)
+    key = config.get("DART_API_KEY")
+    if not key:
+        return FetchResult(ok=False, source=SOURCE, error="DART_API_KEY 가 비어 있습니다", attempts=0)
+    try:
+        response = requests.get(
+            f"{BASE_URL}/fnlttSinglAcntAll.json",
+            params={"crtfc_key": key, "corp_code": corp_code, "bsns_year": str(fiscal_year),
+                    "reprt_code": report_code, "fs_div": "CFS" if consolidated else "OFS"},  # fmt: skip
+            timeout=TIMEOUT,
+        )
+    except requests.RequestException as exc:
+        return FetchResult(ok=False, source=SOURCE, error=f"호출 실패: {가림(str(exc))}")
+    if response.status_code != 200:
+        return FetchResult(ok=False, source=SOURCE, error=f"HTTP {response.status_code}")
+    try:
+        body = response.json()
+    except ValueError:
+        return FetchResult(ok=False, source=SOURCE, error="응답을 해석하지 못했습니다")
+    status = str(body.get("status", ""))
+    if status == STATUS_NO_DATA:
+        return FetchResult(ok=True, source=SOURCE, data=[], limit_state="ok")
+    if status != STATUS_OK:
+        return FetchResult(
+            ok=False, source=SOURCE, error=f"DART 오류 {status}: {body.get('message', '')}",
+            limit_state="blocked" if status == STATUS_DAILY_LIMIT else "unknown",
+        )
+    return FetchResult(ok=True, source=SOURCE, data=list(body.get("list") or []), limit_state="ok",
+                       fetched_at=datetime.now(UTC))  # fmt: skip
+
+
 def fetch_company_industry(corp_code: str) -> FetchResult:
     """기업개황(company.json)의 업종코드 `induty_code` (한국표준산업분류). data 는 코드 문자열 또는 None.
 

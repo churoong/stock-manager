@@ -193,6 +193,8 @@ def _준비(monkeypatch: pytest.MonkeyPatch) -> 가짜클라이언트:
     client = 가짜클라이언트()
     db.apply_migrations(client)  # 운영과 같은 길로 스키마를 만든다. run 안에서 한 번 더 불러도 할 일이 없다
     _채우기(client)
+    # 국내 영업현금흐름 채우기를 마쳤다고 적는다 — 없으면 백테스트가 국내 영업현금흐름을 지워 `accrual` 이 안 나온다 (25.1317)
+    db.set_setting(client, backtest_module.KR_CFO_DONE_KEY, "2026-11-04")
     client.기록.clear()
     monkeypatch.setattr(backtest_module, "TursoClient", lambda: client)
     monkeypatch.setattr(backtest_module, "datetime", 고정시각)

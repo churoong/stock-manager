@@ -1470,6 +1470,10 @@ def load_quarter_snapshots(client: TursoClient, country: str) -> dict[int, list[
     return out
 
 
+#: 국내 영업현금흐름 채우기를 마친 날 — `jobs/kr_cashflow.DONE_KEY` 와 같다(시험이 대 본다)
+KR_CFO_DONE_KEY = "kr_cfo_fill_done"
+
+
 def load_snapshots(client: TursoClient, country: str) -> dict[int, list[dict[str, Any]]]:
     """연간 스냅샷 전부, **연결·별도 둘 다**. 기준은 `pit_basis_rows` 가 기준일마다 고르고(25.860), 시점 필터는 각
     함수가 한다."""
@@ -1487,11 +1491,17 @@ def load_snapshots(client: TursoClient, country: str) -> dict[int, list[dict[str
         [country, ANNUAL_REPORT_CODE],
     )
     out: dict[int, list[dict[str, Any]]] = {}
+    # **국내 영업현금흐름은 채우기를 마친 뒤에만 쓴다** (docs/infra.md 25.1317, 19회차 A1 검증 B 조건 ④).
+    # 반쯤 찬 동안 큰 종목·최근 해부터 찬 치우친 부분 표본이 표본 비율 0.6 을 넘어 국내 `accrual` 이 판정될 수 있다
+    # — 끝 기록이 없으면 그 열쇠를 지워 예전처럼 "판정 불가" 로 둔다
+    국내_현금흐름 = country != "KR" or bool(db.get_setting(client, KR_CFO_DONE_KEY))
     for row in rs.dicts():
         try:
             values = json.loads(row["payload"])
         except (TypeError, ValueError):
             values = {}
+        if not 국내_현금흐름:
+            values.pop("operating_cash_flow", None)
         if not values.get("currency") and row.get("ledger_currency"):
             values["currency"] = str(row["ledger_currency"])
         out.setdefault(int(row["stock_id"]), []).append({

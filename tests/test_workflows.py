@@ -69,6 +69,7 @@ IRRELEVANT_ON_D1 = {
     "probe-llm-filings.yml": "공시 읽기 소형 모델 시험 probe (infra 25.1073) — 운영 DB 를 안 쓴다",
     "probe-dart-audit.yml": "DART 감사의견 필드 탐침 (infra 25.1138) — 운영 DB 를 안 쓴다",
     "probe-dart-cb.yml": "DART 전환사채 필드 탐침 (infra 25.1177) — 운영 DB 를 안 쓴다",
+    "probe-dart-cashflow.yml": "DART 영업현금흐름 필드 탐침 (infra 25.1317) — 운영 DB 를 안 쓴다",
     "probe-heavy-reads.yml": "스펙 확인용 probe",
     "probe-sec-filings.yml": "스펙 확인용 probe",
     "probe-etf-nport.yml": "스펙 확인용 probe (ETF 전 종목 보유, docs/data-sources.md 13.5)",

@@ -1,0 +1,52 @@
+name: DART 영업현금흐름 필드 탐침
+
+# 국내 영업현금흐름 채우기(`batch/jobs/kr_cashflow`)를 켜기 전에 전체 재무제표 응답 칸을 한 번 본다
+# (docs/factors.md 12.21 19회차 A1, docs/infra.md 25.1317 — 검증 A 조건 ⑨: `rcept_no` 가 행마다 오는지, 합계 account_id).
+# 손으로만 돌린다. 운영 DB 를 읽지도 쓰지도 않는다. 결과는 비공개 운영 저장소 이슈로만(공개 로그엔 줄 수만).
+on:
+  workflow_dispatch:
+    inputs:
+      corp_code:
+        description: DART 고유번호 8자리 (예 삼성전자 00126380)
+        type: string
+        default: "00126380"
+      year:
+        description: 사업연도
+        type: string
+        default: "2025"
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CORP: ${{ inputs.corp_code }}
+      YEAR: ${{ inputs.year }}
+      OFFLINE_MODE: "0"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: 탐침
+        env:
+          DART_API_KEY: ${{ secrets.DART_API_KEY }}
+        run: |
+          set -o pipefail
+          python -m batch.jobs.kr_cashflow --probe "${CORP:-00126380}" "${YEAR:-2025}" 2>&1 | python scripts/ops_tee.py cf-probe.txt
+      - name: 결과를 비공개 이슈로
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPS_REPO: ${{ secrets.OPS_REPO }}
+          OPS_TOKEN: ${{ secrets.OPS_TOKEN }}
+        run: python scripts/publish_output.py --title "운영 출력 (클라우드 세션용)" --file cf-probe.txt --note "DART 영업현금흐름 필드 탐침"
