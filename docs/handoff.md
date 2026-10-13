@@ -83,7 +83,7 @@
 > ## 9/20~21 에 한 일 — 전부 "돌려 보지 않고 찾아내기"
 >
 > Actions 가 멈춰 아무것도 운영할 수 없어서, 코드를 훑어 결함을 찾고 되살아나는 날을 준비했다.
-> **docs/infra.md 25.32~25.1291** 에 하나씩 적혀 있고 **25.0 에 목록과 '되풀이된 고장의 모양'** 이 있다.
+> **docs/infra.md 25.32~25.1292** 에 하나씩 적혀 있고 **25.0 에 목록과 '되풀이된 고장의 모양'** 이 있다.
 > 되살아나는 날에 값을 하는 것부터 꼽으면:
 >
 > - **25.80** 확인할 일곱 가지를 실행이 스스로 판정한다 (그날 사람이 로그를 읽지 않아도 된다)
@@ -849,10 +849,11 @@ python -m batch.jobs.backtest --market KR --years 5 --top-n 20 --trend-filter
    25.1251 부터 국내 수정주가·일일 기업행위 감지는 0 행을 건너뛰어 남아 있어도 분할을 가리지 않는다 — 다른 읽는 곳은 [확인필요]
 8. **국내 마스터가 실제로 갱신되는지 본다** (infra 25.1264, 읽기만) — `SELECT MAX(fetched_at) FROM stocks WHERE country='KR' AND asset_type='stock'` 가 지난 일요일 밤 실행 뒤인지, 그 실행 경고에 "직전 거래일 … 목록으로 갱신" 이 있었는지. 금요일 치가 주말에 나오는지도 이걸로 안다
 9. **마이그레이션 0067(`financials.period_days`, infra 25.1286)이 적용됐는지 본다** (읽기만) — 다음 일일 배치가 자동 적용한다. 다음 재무 수집(월요일) 뒤 `SELECT COUNT(*) FROM financials WHERE period_days IS NOT NULL` 이 늘었는지, `period_days < 350` 인 사업보고서가 있는지
+10. **국내 `bsns_year` 관례를 가린다** (infra 25.1292, 읽기만) — `SELECT COUNT(DISTINCT fs.stock_id) FROM (SELECT stock_id, fiscal_year, MIN(as_of_date) AS d FROM financial_snapshots WHERE report_code='11011' GROUP BY stock_id, fiscal_year) fs JOIN stocks s ON s.id=fs.stock_id WHERE s.country='KR' AND substr(fs.d,1,4) = CAST(fs.fiscal_year AS TEXT)`. 0 이 아니면 "결산일의 해" 관례 — 그 회사들의 다음 사업연도 분기 보고서를 수집 계획이 그 해 안에 부르지 않는다(25.1292 대로 고친다)
 
 ### 4.0 되살아나는 날 — **한 번의 실행**으로 확인할 것
 
-> 2026-09-20~23 에 고친 **천 이백스물아홉 가지**(infra **25.58~25.1291**)는 **거의 돌려 보지 못했다.**
+> 2026-09-20~23 에 고친 **천 이백서른 가지**(infra **25.58~25.1292**)는 **거의 돌려 보지 못했다.**
 > (예외는 25.104 — 웹 경로라 Vercel 에 올라가는 즉시 산다. 아래 상자를 보라.)
 > Actions 가 멈춰 있었기 때문이다. 되살아나면 아껴 써야 하므로(분이 곧 돈이다)
 > **따라잡기 한 번**으로 최대한 많이 확인한다. 순서대로 본다.
