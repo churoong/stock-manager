@@ -161,6 +161,13 @@ def pit_basis_rows(snapshots: list[dict[str, Any]], cutoff: str) -> list[dict[st
     return [r for r in snapshots if bool(r["consolidated"]) == 연결]
 
 
+def _공시_순(row: dict[str, Any]) -> tuple[str, str]:
+    """같은 회계연도 공시 중 무엇이 나중인가 — 접수일, 같으면 **접수번호** (docs/infra.md 25.1291). 같은 날 원공시와
+    정정이 함께 접수되면 접수일만으로는 동점이라 읽은 순서(먼저 저장된 원공시)가 이겼다. SUE 의
+    `quarterly_earnings._latest`(25.465)와 같은 규칙이다. 접수번호가 없는 행(예전 모양·시험)은 빈 문자열로 본다."""
+    return str(row["as_of_date"]), str(row.get("receipt_no") or "")
+
+
 def pit_financials(
     snapshots: list[dict[str, Any]], cutoff: str
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None]:
@@ -180,7 +187,7 @@ def pit_financials(
             continue
         year = int(row["fiscal_year"])
         kept = known.get(year)
-        if kept is None or str(row["as_of_date"]) > str(kept["as_of_date"]):
+        if kept is None or _공시_순(row) > _공시_순(kept):
             known[year] = row
 
     if not known:
@@ -213,7 +220,7 @@ def stability_from(
             continue
         year = int(row["fiscal_year"])
         kept = known.get(year)
-        if kept is None or str(row["as_of_date"]) > str(kept["as_of_date"]):
+        if kept is None or _공시_순(row) > _공시_순(kept):
             known[year] = row
 
     window = [
@@ -428,7 +435,7 @@ def year_values(snapshots: list[dict[str, Any]], cutoff: str, picked: dict[str, 
     year = picked.get("fiscal_year")
     earlier = sorted(
         (r for r in snapshots if r.get("fiscal_year") == year and str(r["as_of_date"]) <= cutoff and r is not picked),
-        key=lambda r: str(r["as_of_date"]), reverse=True,
+        key=_공시_순, reverse=True,
     )  # fmt: skip
     끝 = merged.get("period_end")
     for r in earlier:
@@ -1467,7 +1474,7 @@ def load_snapshots(client: TursoClient, country: str) -> dict[int, list[dict[str
     """연간 스냅샷 전부, **연결·별도 둘 다**. 기준은 `pit_basis_rows` 가 기준일마다 고르고(25.860), 시점 필터는 각
     함수가 한다."""
     rs = client.execute(
-        "SELECT f.stock_id, f.as_of_date, f.fiscal_year, f.payload,"
+        "SELECT f.stock_id, f.as_of_date, f.fiscal_year, f.payload, f.receipt_no,"
         " f.consolidated AS consolidated_picked_at_cutoff,"  # = db.FINANCIAL_BASIS_AT_CUTOFF
         # **통화를 원장에서 잇는다** (docs/infra.md 25.919, 11회차 검증 A·B). 스냅샷 payload 에는 통화 키가 없다(운영
         # 50,973행 전부,
@@ -1489,7 +1496,7 @@ def load_snapshots(client: TursoClient, country: str) -> dict[int, list[dict[str
             values["currency"] = str(row["ledger_currency"])
         out.setdefault(int(row["stock_id"]), []).append({
             "as_of_date": str(row["as_of_date"]), "fiscal_year": int(row["fiscal_year"]), "values": values,
-            "consolidated": bool(row["consolidated_picked_at_cutoff"]),
+            "receipt_no": str(row["receipt_no"] or ""), "consolidated": bool(row["consolidated_picked_at_cutoff"]),
         })  # fmt: skip
     return out
 

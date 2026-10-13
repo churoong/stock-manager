@@ -113,13 +113,14 @@ def _query_snapshots(client: TursoClient, stock_id: int, as_of: str) -> list[dic
 
     정렬 기준이 둘이다.
       1. 회계연도가 큰 것 우선 — 공개일 먼저면 옛 연도의 정정이 최신 연도를 덮었다 (25.549 와 같은 모양, 25.553)
-      2. 같은 연도면 공개일이 늦은 것(정정) 우선
+      2. 같은 연도면 공개일이 늦은 것(정정) 우선, 같은 날이면 접수번호가 큰 것 — 같은 날 원공시·정정이 함께
+         접수되면 읽은 순서(먼저 저장된 원공시)가 이겼다 (docs/infra.md 25.1291)
     """
     rs = client.execute(
         "SELECT as_of_date, fiscal_year, report_code, consolidated, receipt_no, payload"
         " FROM financial_snapshots"
         " WHERE stock_id = ? AND report_code = ? AND as_of_date <= ?"
-        " ORDER BY fiscal_year DESC, as_of_date DESC",
+        " ORDER BY fiscal_year DESC, as_of_date DESC, receipt_no DESC",
         [stock_id, ANNUAL_REPORT_CODE, as_of],
     )
     return rs.dicts()

@@ -2338,6 +2338,7 @@ SQL read operations are forbidden (reads are blocked, ...)
 | 25.1288 | 조용시간에 보내지 않은 보유 종목 공시가 영영 안 나감 |
 | 25.1289 | 장중 감시를 다시 켜면 며칠 묵은 대기 알림이 한꺼번에 나감 |
 | 25.1290 | 상승의 출처·실적 반응 이력이 정정 접수일 순으로 끝 해를 고름 |
+| 25.1291 | 같은 날 원공시·정정에서 연간 시점 재무가 원공시를, SUE 가 정정을 씀 |
 
 ### 25.1 왜 D1 인가
 
@@ -30111,3 +30112,20 @@ docs/sell_flags.md 2장은 "조건이 풀리면" 이라 했다. (매도 플래�
 **고침** — 기준과 순서를 **기간 순**(회계연도, 1분기·반기·3분기·사업보고서, 같으면 처음 발표일)으로.
 
 **시험** — `tests/test_return_sources_restated_1290.py`. **되돌리기 확인** — `event_history.py` 를 되돌리면 깨진다.
+
+### 25.1291 같은 날 원공시·정정에서 연간 시점 재무가 원공시를, SUE 가 정정을 씀
+
+**무엇** — 같은 회계연도 사업보고서가 **같은 날** 원공시와 정정으로 함께 접수되면(DART 는 같은 날 기재정정이 흔하다),
+백테스트 연간 시점 재무(`backtest.pit_financials`·`stability_from`·`year_values`)와 `pit.financials_as_of` 는 접수일
+`>` 비교만 해서 동점이면 **읽은 순서(먼저 저장된 원공시)** 를 골랐다. 같은 실행의 SUE(`quarterly_earnings._latest`,
+25.465)는 접수번호가 큰 정정을 고른다 — 한 백테스트 안에서 연간 팩터와 SUE 가 서로 다른 판을 봤다.
+`load_snapshots` 는 `receipt_no` 를 싣지도 않아 고칠 재료가 없었다. (재무 감사 재현 `r3_same_day_tie`: 원 100·정정 40 → 연간 100, SUE 40)
+
+**실제로 아팠나** — 백테스트·`scripts/check_pit.py` 만. 운영 점수는 `financials` 원장(키당 한 행, 정정이 덮어씀)을 읽어 상관없다.
+같은 날 두 판이 다 스냅샷에 남는 경우는 드물다(주간 수집이 그 사이에 한 번 돌아야 한다) [확인필요: 운영 DB 에서 같은 (종목, 연도, 기준, 접수일) 두 행 수].
+
+**고침** — `backtest._공시_순(row) = (접수일, 접수번호)` 로 세 함수가 같은 순서를 쓴다. `load_snapshots` 가 `f.receipt_no` 를 싣는다.
+`pit._query_snapshots` 는 `ORDER BY ..., receipt_no DESC`. DART 접수번호는 접수일+일련번호라 같은 날이면 나중 접수가 크다 — SUE 와 같은 가정.
+
+**시험** — `tests/test_same_day_amendment_1291.py`(백테스트·시점 조회·SUE 와 같은 판·입력 순서 무관).
+**되돌리기 확인** — `backtest.py` 를 되돌리면 3건, `pit.py` 를 되돌리면 1건 깨진다.
