@@ -1010,9 +1010,10 @@ function NewsBlock({ data, scoreAsOf, market, nameNote }: { data: SectionResult;
       <ul className="divide-y divide-slate-100 dark:divide-slate-800">
         {articles.map((a) => (
           <li key={String(a.id)} className="flex items-baseline gap-2 py-2.5 text-xs sm:py-1.5">
+            {/* 색 문턱은 배치가 긍정·부정을 세는 문턱(`sentiment.POSITIVE_AT`/`NEGATIVE_AT`, 경계 포함)과 같다 (25.1303) */}
             <span
               className={`w-10 shrink-0 text-right tabular-nums ${
-                typeof a.score !== "number" ? "text-slate-300" : a.score > 0.05 ? "text-red-600" : a.score < -0.05 ? "text-blue-600" : "text-slate-400"
+                typeof a.score !== "number" ? "text-slate-300" : a.score >= 0.05 ? "text-red-600" : a.score <= -0.05 ? "text-blue-600" : "text-slate-400"
               }`}
             >
               {typeof a.score === "number" ? a.score.toFixed(2) : "미채점"}

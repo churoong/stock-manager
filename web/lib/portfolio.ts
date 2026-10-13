@@ -859,7 +859,8 @@ function 반올림(value: number): number {
  * (docs/infra.md 25.432, 배치 리포트 25.421 과 같은 규칙).
  */
 export function signedInt(value: number): string {
-  const n = Math.round(value);
+  // `toFixed` 로 반올림한다 — `Math.round(-12.5)` 는 -12 라 텔레그램(-13, 배치 `rounding.fixed`)과 갈렸다 (25.1303)
+  const n = Number(value.toFixed(0));
   // Math.round(-0.3) 은 -0 이다 — 0 으로 적는다. 양수는 +를 붙인다(리포트 `:+d` 와 같은 모양, 25.437)
   return n === 0 ? "0" : n > 0 ? `+${n}` : String(n);
 }

@@ -254,8 +254,11 @@ def evaluate(h: HoldingInput, today: date, targets: dict | None = None) -> list[
     ):
         # 과거 점수가 없어 중립(0)에서 잰 것이면 문장이 그렇게 말한다 (25.638)
         중립에서 = h.sentiment_delta_7d is None
-        말 = f"기사가 적던 종목에 감성이 {변화:+.0f}점까지" if 중립에서 else f"뉴스 감성이 7일 사이 {변화:+.0f}점"
-        값 = f"{변화:+.1f}점 (7일 전 기사 부족 — 중립 0 기준)" if 중립에서 else f"{변화:+.1f}점"
+        # 반올림은 웹 `toFixed` 와 같은 규칙 — 파이썬 서식은 .5 를 짝수로 보내 −41.5 가
+        # 문장 −42·웹 −41 로 갈렸다 (25.1303)
+        정수, 한자리 = fixed(변화, sign=True), fixed(변화, 1, sign=True)
+        말 = f"기사가 적던 종목에 감성이 {정수}점까지" if 중립에서 else f"뉴스 감성이 7일 사이 {정수}점"
+        값 = f"{한자리}점 (7일 전 기사 부족 — 중립 0 기준)" if 중립에서 else f"{한자리}점"
         flags.append(Flag(h.stock_id, "yellow", "감성급락",
                           f"{h.name}: {말},"
                           f" 부정 기사 {h.sentiment_negative_7d}건. 무슨 일인지 확인하세요",

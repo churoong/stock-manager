@@ -596,7 +596,7 @@ export function sentimentLine(row: Pick<RecommendRow, "sentiment_score" | "senti
     // 배치는 값이 없을 때 쓴 가중치를 0 으로 저장해 w 로는 까닭을 가를 수 없다 (25.833)
     return "센티먼트 반영 안 됨 (값이 없었거나 가중치 0)";
   }
-  const v = Math.round(row.sentiment_score);
+  const v = Number(row.sentiment_score.toFixed(0)) + 0; // .5 는 절댓값 쪽 — 텔레그램과 같게 (25.1303). +0 은 -0 을 0 으로
   const 부호 = v > 0 ? "+" : "";
   return w ? `센티먼트 ${부호}${v} (종합 점수에 ${w}% 반영)` : `센티먼트 ${부호}${v} (종합 점수에 반영 안 됨)`;
 }
