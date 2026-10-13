@@ -1586,7 +1586,12 @@ def collect_us_prices(
 
     trade_day = _date.fromisoformat(trade_date)
     cal.record_decision(client, "US", trade_day, is_open=True)
-    suspicion = cal.suspect_calendar(is_open=True, rows_collected=stored_total)
+    # **확정 거래일의 행만 센다** (docs/infra.md 25.1256, 미국 시세 감사 재현). 미국은 일주일 남짓을 한 번에 받아
+    # 저장 행 수(`stored_total`)에 앞날들이 섞인다 — 그 수로 재면 그날 시세가 한 건도 없어도(달력에 없는 임시 휴장·
+    # 야후 미게시) 이 검사가 영영 울리지 않았다. 국내는 그날 행만 받아 처음부터 맞다. 경고만 한다 — 뒤 단계(신호)가
+    # 종가 없는 종목을 이미 건너뛴다
+    그날 = sum(1 for b in result.data if b.date == trade_date and b.close is not None and b.ticker in targets)
+    suspicion = cal.suspect_calendar(is_open=True, rows_collected=그날)
     if suspicion:
         warnings.append(suspicion)
 

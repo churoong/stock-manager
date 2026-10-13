@@ -385,3 +385,22 @@ class Test조각크기설정:
             monkeypatch.delenv("YF_CHUNK_SYMBOLS", raising=False)
             importlib.reload(config)
             importlib.reload(yfinance_src)
+
+
+class Test거래일_확인_1256:
+    """미국 달력 검사는 **확정 거래일의 행**으로 잰다 (docs/infra.md 25.1256, 미국 시세 감사 재현)."""
+
+    def test_그날_시세가_없으면_달력을_의심한다(self, offline) -> None:
+        from batch.jobs import daily
+
+        # 픽스처는 09-15 까지다 — 09-16 이 달력에 없는 임시 휴장이었거나 야후가 아직 안 냈다
+        client = FakeClient(symbols={"AAPL": 1, "MSFT": 2})
+        _rows, warnings, _summary = daily.collect_us_prices(client, "2026-09-16")
+        assert any("캘린더가 틀렸을 수 있습니다" in w for w in warnings), warnings
+
+    def test_그날_시세가_있으면_조용하다(self, offline) -> None:
+        from batch.jobs import daily
+
+        client = FakeClient(symbols={"AAPL": 1, "MSFT": 2})
+        _rows, warnings, _summary = daily.collect_us_prices(client, "2026-09-15")
+        assert not any("캘린더" in w for w in warnings), warnings
