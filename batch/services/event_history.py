@@ -33,11 +33,23 @@ SURGE_COOLDOWN = 5
 SURGE_DAYS = (5, 20)
 
 
+#: 한 사업연도 안 보고서의 순서 — 1분기·반기·3분기·사업보고서 (DART `reprt_code`)
+_보고서_순서 = {"11013": 1, "11012": 2, "11014": 3, "11011": 4}
+
+
+def _기간_순(r: dict) -> tuple[int, int, str]:
+    """**기간 순서**(회계연도, 보고서) — 접수일 순이 아니다 (docs/infra.md 25.1290, 재무 감사 재현). 정정이 오면
+    `report_date` 가 정정 접수일로 덮여(25.549) 옛 해의 정정이 "가장 최근" 이 됐다. 같은 자리면 처음 발표일"""
+    return (int(r["fiscal_year"]), _보고서_순서.get(str(r["report_code"]), 0),
+            str(r.get("first_date") or r.get("report_date") or ""))  # fmt: skip
+
+
 def _기준_하나(rows: list[dict]) -> list[dict]:
-    """재무 행에서 기준 하나 — 가장 최근 보고서의 연결(있으면)·별도. 같은 (연도, 보고서)는 가장 늦게 접수된 것."""
+    """재무 행에서 기준 하나 — **가장 늦은 기간** 보고서의 연결(있으면)·별도. 같은 (연도, 보고서)는 가장 늦게 접수된 것.
+    기간 순서로 돌려준다 (25.1290 — 예전엔 접수일 순이라 옛 해 정정이 끝 해가 됐다)."""
     if not rows:
         return []
-    최근 = max(rows, key=lambda r: (str(r.get("report_date") or ""), int(r.get("consolidated") or 0)))
+    최근 = max(rows, key=lambda r: (*_기간_순(r)[:2], int(r.get("consolidated") or 0)))
     연결 = int(최근.get("consolidated") or 0)
     고름: dict[tuple[int, str], dict] = {}
     for r in rows:
@@ -46,7 +58,7 @@ def _기준_하나(rows: list[dict]) -> list[dict]:
         k = (int(r["fiscal_year"]), str(r["report_code"]))
         if k not in 고름 or str(r.get("report_date") or "") > str(고름[k].get("report_date") or ""):
             고름[k] = r
-    return sorted(고름.values(), key=lambda r: str(r.get("report_date") or ""))
+    return sorted(고름.values(), key=_기간_순)
 
 
 def _앞날(dates: list[str], d: str) -> int | None:
