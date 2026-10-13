@@ -229,3 +229,10 @@ class Test백테스트에서_팩터_IC:
 
 # 실행 기록에 IC 가 남는지·진행 칸이 IC 단계를 세는지는 소스 글자로 보던 것을 `tests/test_backtest_run_harness.py` 가
 # `run` 을 실제로 돌려 본다 (docs/infra.md 25.460·25.462)
+
+
+def test_표본_비율은_반올림해_적고_못_낸_달도_센다() -> None:
+    """날것 비율이 판정 글에 찍혔다. 못 낸 달(None)도 평균에 든다 — 보수적 선택 (docs/infra.md 25.1273)."""
+    s = fic.summarize([0.06] * 40 + [None] * 21, [0.9] * 40 + [0.0] * 21)
+    assert s.months == 40 and abs(s.coverage - 36 / 61) < 1e-9
+    assert s.verdict() == "판정 불가(표본 비율 0.59 < 0.6)"

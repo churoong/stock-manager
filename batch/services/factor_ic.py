@@ -163,7 +163,9 @@ class IcSummary:
         if self.months < MIN_MONTHS:
             return f"판정 불가(IC {self.months}개월 < {MIN_MONTHS})"
         if self.coverage is None or self.coverage < MIN_COVERAGE:
-            return f"판정 불가(표본 비율 {self.coverage if self.coverage is not None else '모름'} < {MIN_COVERAGE:g})"
+            # 소수 둘째 자리로 (25.1273) — 날것의 0.590163934426229 가 그대로 찍혔다
+            비 = f"{self.coverage:.2f}" if self.coverage is not None else "모름"
+            return f"판정 불가(표본 비율 {비} < {MIN_COVERAGE:g})"
         return "통과" if self.passes() else "탈락"
 
     def passes(self) -> bool:
@@ -209,6 +211,9 @@ def summarize(ics: list[float | None], coverages: list[float] | None = None) -> 
     """리밸런스 순서대로의 IC 목록(None 은 그 달 표본 부족)을 요약한다.
 
     `coverages` 는 달마다 (쓴 종목 수 / 후보 수). 주면 평균을 `coverage` 로 남긴다 — 판정에 쓴다.
+    **IC 를 내지 못한 달(None)도 평균에 넣는다** (docs/infra.md 25.1273, 백테스트 감사) — 그 달은 대개 표본이 모자란
+    달이라 빼면 표본 비율이 부풀어 켜는 기준을 느슨하게 만든다. 늦게 차는 지표(SUE·장기 반전)는 그만큼 판정 불가가
+    길다 — 보수적인 쪽
     """
     kept = [x for x in ics if x is not None]
     n = len(kept)
