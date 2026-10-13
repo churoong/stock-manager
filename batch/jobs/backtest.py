@@ -1250,9 +1250,10 @@ def history_starts(stocks: list[pit.Stock], series_by_stock: dict[int, pit.Serie
     return tuple(sorted(set(pit.history_starts_of(관측)) | set(빈_무리)))
 
 
-def pit_market_dates(series_by_stock: dict[int, Any]) -> list[str]:
-    """시점 유니버스 20일 창의 **시장 거래일** — 엔진 날짜 축과 같은 규칙(`bt.market_dates`, 드문 날 뺌, 25.1208)."""
-    return bt.market_dates({sid: dict.fromkeys(se.dates, 1.0) for sid, se in series_by_stock.items()}, "")
+def pit_market_dates(series_by_stock: dict[int, Any], market_of: dict[int, str] | None = None) -> list[str]:
+    """시점 유니버스 20일 창의 **시장 거래일** — 엔진 날짜 축과 같은 규칙(`bt.market_dates`, 드문 날·한 시장만 빈 날
+    뺌, 25.1208·25.1279)."""
+    return bt.market_dates({sid: dict.fromkeys(se.dates, 1.0) for sid, se in series_by_stock.items()}, "", market_of)
 
 
 def pit_series(
@@ -1678,7 +1679,9 @@ def run(
         _RISK_FREE = metrics_job.risk_free_for(client, country)
         _위험_캐시.clear()  # 나라·가격이 바뀐다 — 지난 실행의 값을 쓰지 않는다
 
-        dates = bt.market_dates(prices, since)  # 가격이 드문 날(한 종목만 휴장일 행)은 뺀다 (25.1102)
+        # 가격이 드문 날(한 종목만 휴장일 행, 25.1102)과 **한 시장만 빈 날**(25.1279)은 뺀다
+        시장_맵 = {int(r["stock_id"]): str(r["market"]) for r in universe if r.get("market")}
+        dates = bt.market_dates(prices, since, 시장_맵)
         if len(dates) < 40:
             db.finish_batch_run(client, batch_id, status="failed", error_text="거래일이 40일 미만입니다")
             print("가격이 너무 적어 백테스트를 돌릴 수 없습니다. 백필을 먼저 돌리세요")
@@ -1714,7 +1717,7 @@ def run(
         # **드문 날을 뺀 날짜 축**으로 (25.1208, 백테스트 감사).
         # 엔진 날짜 축(`bt.market_dates`, 25.1102)과 유니버스 배치(25.1109)는 한 종목만 행이 있는 휴장일(1/1)을
         # 빼는데 여기만 합집합이라, 그날이 전 종목에 0원 날로 창에 들어가 하한 근처 종목이 그달 통째로 빠졌다
-        market_dates = pit_market_dates(series_by_stock)
+        market_dates = pit_market_dates(series_by_stock, 시장_맵)
         eligible_cache: dict[str, set[int]] = {}
         pit_reasons: dict[str, int] = {}
 

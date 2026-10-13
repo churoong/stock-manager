@@ -329,25 +329,56 @@ MARKET_DATE_MIN_SHARE = 0.2
 MARKET_DATE_WINDOW = 10
 
 
-def market_dates(prices: dict[int, dict[str, float]], since: str) -> list[str]:
+#: 시장별로도 드문 날을 볼 만큼 큰 시장의 종목 수 (25.1279). 작은 무리(이은 ETF 몇 개)는 따로 보지 않는다
+MARKET_DATE_MIN_GROUP = 30
+
+
+def _드문_날(수: dict[str, int]) -> set[str]:
+    날들 = sorted(수)
+    out: set[str] = set()
+    for i, d in enumerate(날들):
+        이웃 = sorted(수[x] for x in 날들[max(0, i - MARKET_DATE_WINDOW) : i + MARKET_DATE_WINDOW + 1])
+        if 수[d] < MARKET_DATE_MIN_SHARE * 이웃[len(이웃) // 2]:
+            out.add(d)
+    return out
+
+
+def market_dates(
+    prices: dict[int, dict[str, float]], since: str, market_of: dict[int, str] | None = None
+) -> list[str]:
     """날짜 축 — 전 종목 날짜의 합집합에서 **가격이 있는 종목이 드문 날**을 뺀다 (25.1102, 백테스트 감사 D5).
 
     예전에는 합집합 그대로라 한 종목만 휴장일(1/1)에 행이 있으면 그날이 1월 리밸런스 날이 되고, 그날 가격이 없는
     종목은 살 수 없어 한 달을 현금으로 보냈다(최종 1.0406 → 1.01). 마지막 날만 막은 25.792 의 일반화다.
+
+    `market_of`(종목 → 시장)를 주면 **시장마다도** 본다 (docs/infra.md 25.1279, 백테스트 감사 재현). 25.1102 가 원인으로
+    든 "한 시장 가격이 빠진 날" 은 전체 문턱(20%)을 넘어(코스닥 약 40% 빠짐) 남았다 — 월초면 코스닥 보유가 정지처럼
+    얼고 새 코스닥 종목이 빠져 한 달을 코스피만으로 돌았고(재현 최종 1.1062 → 0.9946), 달 중간이면 20일 거래대금 창에
+    코스닥 전 종목의 0원 날이 들어가 하한 근처 종목이 다음 달 빠졌다. 종목 `MARKET_DATE_MIN_GROUP` 개 이상인 시장의
+    그날 수가 그 시장 이웃 중앙값의 20% 아래면 뺀다
     """
     수: dict[str, int] = {}
-    for by_date in prices.values():
+    시장수: dict[str, dict[str, int]] = {}
+    for sid, by_date in prices.items():
+        시장 = (market_of or {}).get(sid)
         for d in by_date:
             if d >= since:
                 수[d] = 수.get(d, 0) + 1
-    날들 = sorted(수)
-    out: list[str] = []
-    for i, d in enumerate(날들):
-        이웃 = sorted(수[x] for x in 날들[max(0, i - MARKET_DATE_WINDOW) : i + MARKET_DATE_WINDOW + 1])
-        중앙 = 이웃[len(이웃) // 2]
-        if 수[d] >= MARKET_DATE_MIN_SHARE * 중앙:
-            out.append(d)
-    return out
+                if 시장 is not None:
+                    칸 = 시장수.setdefault(시장, {})
+                    칸[d] = 칸.get(d, 0) + 1
+    뺄 = _드문_날(수)
+    if market_of:
+        크기: dict[str, int] = {}
+        for sid in prices:
+            if (시장 := market_of.get(sid)) is not None:
+                크기[시장] = 크기.get(시장, 0) + 1
+        for 시장, 칸 in 시장수.items():
+            if 크기.get(시장, 0) < MARKET_DATE_MIN_GROUP:
+                continue
+            # 그 시장에 행이 하나도 없는 날도 0 으로 세어야 한다 — 통째로 빠진 날이 바로 그 경우다
+            뺄 |= _드문_날({d: 칸.get(d, 0) for d in 수})
+    return [d for d in sorted(수) if d not in 뺄]
 
 
 def month_starts(dates: list[str]) -> list[str]:
