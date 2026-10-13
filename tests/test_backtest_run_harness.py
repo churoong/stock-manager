@@ -393,7 +393,7 @@ def test_판단용_과거는_시작일보다_앞에서_읽고_곡선은_시작�
         리밸.append(list(dates))
         return 원래_월초(dates)
 
-    시작 = (오늘 - timedelta(days=365 * 2 + 30)).isoformat()
+    시작 = backtest_module.start_of_backtest(오늘, 2)  # 다음 달 첫날 (25.1320)
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(backtest_module, "load_prices_and_turnover", 읽기)
         mp.setattr(bt, "month_starts", 월초)
@@ -433,7 +433,7 @@ def test_읽기_어림은_있는_워밍업만_더한다(가짜: 가짜클라이�
             db._열린_실행.clear()
     종목 = len(backtest_module.load_universe(가짜, "KR")[0])  # type: ignore[arg-type]
     # 가격이 시작일 바로 앞(가격_시작)부터라 워밍업은 그 며칠뿐이다
-    앞선 = (date.fromisoformat((오늘 - timedelta(days=365 * 2 + 30)).isoformat()) - 가격_시작).days
+    앞선 = (date.fromisoformat(backtest_module.start_of_backtest(오늘, 2)) - 가격_시작).days  # 25.1320
     assert 받은 == [종목 * (2 * backtest_module.TRADING_DAYS_PER_YEAR + max(0, 앞선) * 252 // 365)]
     # 나라 전체를 훑는 조인 MIN 조회를 쓰지 않는다 — 종목마다 색인으로 MIN (25.543·25.548, 교차검증)
     assert not any("MIN(p.date) FROM prices p JOIN" in sql for sql, _ in 가짜.기록)

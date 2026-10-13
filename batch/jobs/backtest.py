@@ -1473,6 +1473,18 @@ def load_quarter_snapshots(client: TursoClient, country: str) -> dict[int, list[
     return out
 
 
+def start_of_backtest(today: date, years: int) -> str:
+    """백테스트 시작일 — `years` 년 + 30일 앞의 **다음 달 첫날** (docs/infra.md 25.1320, 백테스트 감사 #4).
+
+    예전에는 그 날 그대로였다. `month_starts` 가 시작일을 첫 리밸런스로 잡아, 월말에 손으로 돌리면(10-29 → 9-30 시작)
+    9-30 과 10-1 에 잇달아 리밸런스해 비용이 한 번 더 들고 IC 계열에 하루짜리 수익을 한 달로 셌다. 달 첫날로 맞추면
+    첫 리밸런스가 늘 그달 첫 거래일이다(이미 1일이면 그대로)."""
+    d = today - timedelta(days=365 * years + 30)
+    if d.day == 1:
+        return d.isoformat()
+    return (date(d.year + 1, 1, 1) if d.month == 12 else date(d.year, d.month + 1, 1)).isoformat()
+
+
 #: 국내 영업현금흐름 채우기를 마친 날 — `jobs/kr_cashflow.DONE_KEY` 와 같다(시험이 대 본다)
 KR_CFO_DONE_KEY = "kr_cfo_fill_done"
 
@@ -1644,7 +1656,7 @@ def run(
         db.apply_migrations(client)
         now = db.now_iso()
         today = datetime.now(UTC).date()
-        since = (today - timedelta(days=365 * years + 30)).isoformat()
+        since = start_of_backtest(today, years)
         batch_id = db.start_batch_run(
             client, job_name=JOB_NAME, market=market, trade_date=today.isoformat()
         )
