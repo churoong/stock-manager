@@ -39,6 +39,8 @@ export interface Tilt {
   score_as_of: string | null;
   signals_as_of: string | null;
   coverage_min_pct: number;
+  /** SEC 가 막혀 이번 판정에 다시 내지 못하고 **지난 판정에서 옮긴 순위**면 그 판정일 (docs/infra.md 25.1281) */
+  carried_from?: string | null;
   /** 미국 주식형 ETF 전체 안 순위(상위 비중 순). 이 기능 전 행에는 없다 */
   rank_all?: number | null;
   rank_all_size?: number | null;
@@ -90,7 +92,8 @@ export function tiltLine(t: Tilt): string {
     t.market_top_pct ? ` (${t.benchmark} ${t.market_top_pct.toFixed(0)}%의 ${(t.top_pct / t.market_top_pct).toFixed(1)}배)` : "";
   // 순위는 무리 안에서 매긴 것이다 (25.970·25.974) — 다른 무리 순위로 읽히지 않게
   const 무리 = GROUP_LABEL[t.group ?? (t.proxy ? "kr_us" : "us")];
-  const 전체 = t.rank_all && t.rank_all_size ? ` · ${무리} ${t.rank_all_size}개 중 ${t.rank_all}위` : "";
+  const 옮김 = t.carried_from ? ` (${t.carried_from} 판정 순위 — 이번 달은 SEC 가 막혀 다시 내지 못함)` : "";
+  const 전체 = t.rank_all && t.rank_all_size ? ` · ${무리} ${t.rank_all_size}개 중 ${t.rank_all}위${옮김}` : "";
   const 대비 = t.vs_market === null ? "" : ` (${t.benchmark} 대비 ${signed(t.vs_market)})`;
   return `${상위}${배수}${전체} · 평균 ${t.avg_score.toFixed(0)}점${대비}${출처}`;
 }

@@ -139,3 +139,12 @@ describe("onePerIndex", () => {
     ]);
   });
 });
+
+// SEC 가 막혀 지난 판정에서 옮긴 순위는 그렇다고 적는다 (docs/infra.md 25.1281)
+describe("옮긴 순위", () => {
+  it("판정일과 까닭을 붙인다", () => {
+    expect(tiltLine(tilt({ rank_all: 2, rank_all_size: 30, carried_from: "2026-10-01" }))).toContain(
+      "30개 중 2위 (2026-10-01 판정 순위 — 이번 달은 SEC 가 막혀 다시 내지 못함)",
+    );
+  });
+});

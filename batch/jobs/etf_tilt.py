@@ -40,7 +40,8 @@ JOB_NAME = "etf_tilt"
 def latest_picks(client: TursoClient) -> list[dict[str, Any]]:
     """나라별 가장 새 기준일·가장 높은 판의 핵심 판정 행 — **통과·제외 모두** (후보 풀은 `in_pool` 이 가른다, 11.5)."""
     return client.execute(
-        "SELECT pk.id AS pick_id, e.symbol, e.name, e.country, pk.bucket, pk.passed, pf.category, pk.as_of_date,"
+        "SELECT pk.id AS pick_id, pk.etf_id, e.symbol, e.name, e.country, pk.bucket, pk.passed, pf.category,"
+        " pk.as_of_date,"
         " pf.stock_position, pf.total_assets"
         " FROM etf_picks pk JOIN etfs e ON e.id = pk.etf_id"
         " LEFT JOIN etf_profiles pf ON pf.etf_id = pk.etf_id AND pf.as_of_date = pk.as_of_date"
@@ -597,6 +598,34 @@ def run() -> int:
             for p in picks
             if int(p["pick_id"]) not in 갱신 and int(p["pick_id"]) not in 건너뜀
         ]
+        # **막힌 무리는 지난 판정의 순위를 새 행으로 옮긴다** (docs/infra.md 25.1281, ETF 감사 재현). 25.1200 은 "쓰지도
+        # 지우지도 않아 지난달 값이 남는다" 고 했지만, 달마다 판정(etf.yml)이 순위 없는 새 날짜 행을 먼저 쓰므로 남을
+        # 값이 없었다 — 지난달 순위는 지난달 행에 있고 화면은 최신 행만 읽는다. 그 ETF 의 가장 최근 순위를
+        # `carried_from`(그 판정일)과 함께 옮긴다
+        옮김 = 0
+        for p in picks:
+            pid = int(p["pick_id"])
+            if pid not in 건너뜀:
+                continue
+            지금 = client.execute(
+                "SELECT json_extract(rationale_data, '$.tilt') FROM etf_picks WHERE id = ?", [pid]
+            ).scalar()
+            if 지금 is not None:
+                continue  # 같은 날 다시 돈 실행 — 이미 있다
+            옛 = client.execute(
+                "SELECT json_extract(rationale_data, '$.tilt'), as_of_date FROM etf_picks"
+                " WHERE etf_id = ? AND as_of_date < ? AND json_extract(rationale_data, '$.tilt') IS NOT NULL"
+                " ORDER BY as_of_date DESC LIMIT 1",
+                [int(p["etf_id"]), str(p["as_of_date"])],
+            ).rows
+            if not 옛:
+                continue
+            updates.append((
+                "UPDATE etf_picks SET rationale_data = json_set(rationale_data, '$.tilt',"
+                " json_set(json(?), '$.carried_from', ?)) WHERE id = ?",
+                [str(옛[0][0]), str(옛[0][1]), pid],
+            ))
+            옮김 += 1
         if updates or 지우기:
             client.batch(지우기 + updates)
 
@@ -612,6 +641,7 @@ def run() -> int:
             "targets": len(us_targets) + len(kr_targets),
             "fetched": len(docs),
             "updated": len(updates),
+            "carried": 옮김,
             "with_avg": sum(1 for t in tilts.values() if t.avg_score is not None),
             "cusips": len(cusips),
             "kodex_products": len(products),

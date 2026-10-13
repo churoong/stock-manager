@@ -116,3 +116,37 @@ def test_SEC_목록_실패나_망_오류도_실행을_죽이지_않는다(monkey
     assert job.run() == 0  # 예전엔 예외로 죽었다
     상태, 글 = mem.conn.execute("SELECT status, error_text FROM batch_runs WHERE job_name = 'etf_tilt'").fetchone()
     assert 상태 == "partial" and "지난달 값을 그대로" in 글
+
+
+def test_새_달_행에는_지난_판정_순위를_옮겨_싣는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """달마다 판정이 순위 없는 새 날짜 행을 먼저 써 '지난달 값이 남는다' 가 성립하지 않았다 (docs/infra.md 25.1281)."""
+    mem = _mem()
+    c = mem.conn
+    for i in range(1, len(ETFS) + 1):  # 이번 달 판정 — 순위 없는 새 행
+        c.execute("INSERT INTO etf_profiles (etf_id, as_of_date, category, currency, total_assets, stock_position,"
+                  " source, fetched_at) VALUES (?, '2026-11-02', 'Large Blend', 'USD', 5e9, 0.99, 't', 't')", [i])  # fmt: skip
+        c.execute("INSERT INTO etf_picks (etf_id, as_of_date, bucket, passed, rationale_text, rationale_data,"
+                  " calc_version, created_at) VALUES (?, '2026-11-02', '미국 주식', 1, 'x', '{\"criteria\": []}', 5, 't')",
+                  [i])  # fmt: skip
+
+    class FakeSec:
+        calls = 0
+
+    class FakeNport:
+        def __init__(self, sec) -> None:  # noqa: ANN001
+            pass
+
+        def fund_tickers(self):  # noqa: ANN202
+            raise sec_edgar.SecBlocked("HTTP 429")
+
+        def ftd_cusips(self, _d):  # noqa: ANN001, ANN202
+            return {}
+
+    monkeypatch.setattr(job.sec_edgar, "SecClient", lambda: FakeSec())
+    monkeypatch.setattr(job.sec_nport, "NportClient", FakeNport)
+    monkeypatch.setattr(job, "TursoClient", lambda: mem)
+    assert job.run() == 0
+    for i in range(1, len(ETFS) + 1):
+        t = json.loads(c.execute("SELECT rationale_data FROM etf_picks WHERE etf_id = ? AND as_of_date = '2026-11-02'",
+                                 [i]).fetchone()[0])["tilt"]  # fmt: skip
+        assert t["rank_all"] == i and t["carried_from"] == "2026-10-01"
