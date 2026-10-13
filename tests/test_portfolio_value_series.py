@@ -31,4 +31,4 @@ def test_현금_날에_배당이_붙으면_남긴다() -> None:
 
 
 def test_지표는_현금_날을_뺀_계열로_낸다() -> None:
-    assert "for v in pf.invested_rows(values)" in inspect.getsource(job)
+    assert "보유행 = pf.invested_rows(values)" in inspect.getsource(job)  # 25.1260 에서 이름을 붙였다

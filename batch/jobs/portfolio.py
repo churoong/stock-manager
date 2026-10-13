@@ -465,11 +465,23 @@ def run() -> int:
             # — 다음 거래일 수익률에 그대로 들어간다
             # **아무것도 들고 있지 않은 날도 뺀다** (docs/infra.md 25.736, 감사) — 현금 상태의 수익률 0 행이 같은
             # 방식으로 부풀렸다
+            보유행 = pf.invested_rows(values)
             points = [
                 m.PricePoint(date=d, close=v.twr_index)
-                for v in pf.invested_rows(values)
+                for v in 보유행
                 if (d := date.fromisoformat(v.date)).weekday() < 5
             ]
+            # **첫날 수익을 빠뜨리지 않는다** (docs/infra.md 25.1260, 손익 감사 재현). 첫 행의 지수는 이미
+            # "체결가 → 첫 종가" 를 담는데 그 앞의 기준점(1.0, 쉬었다 다시 들어온 경우 그 앞 지수)이 계열에 없어 첫날
+            # 등락이 CAGR·MDD·샤프에서 사라졌다 — 첫날 −10% 뒤 원금 회복이면 "TWR 0% · CAGR +11% · MDD 0%" 가 한 줄에
+            # 찍혔다. `twr_total_return` 은 1.0 에서 잰다. 기준점은 첫 보유일 앞 평일에 둔다(지표 시작일은 그대로)
+            if points and 보유행:
+                i = values.index(보유행[0])
+                기준 = values[i - 1].twr_index if i > 0 else 1.0
+                앞날 = date.fromisoformat(보유행[0].date) - timedelta(days=1)
+                while 앞날.weekday() >= 5:
+                    앞날 -= timedelta(days=1)
+                points.insert(0, m.PricePoint(date=앞날, close=기준))
             # **`if rf` 로 가르지 않는다** (docs/infra.md 25.298). 0 은 "무위험수익률 0%" 라는 값이다 —
             # 종목 성과(`jobs/metrics.risk_free_for`)는 0 을 그대로 쓰는데 여기만 "모름" 으로 읽어
             # 샤프가 비었다(25.179 와 같은 모양)
@@ -479,7 +491,7 @@ def run() -> int:
             metrics.update({k: v for k, v in asdict(computed).items() if not isinstance(v, date)})
             metrics["twr_total_return"] = values[-1].twr_index - 1
             # 지표를 낸 구간을 적는다 — 다 판 뒤 현금 일수를 뺐으면 끝 날이 마지막 보유일이다 (25.736)
-            metrics["start_date"] = points[0].date.isoformat() if points else values[0].date
+            metrics["start_date"] = points[1].date.isoformat() if len(points) > 1 else values[0].date
             metrics["end_date"] = points[-1].date.isoformat() if points else values[-1].date
 
         upcoming = []
