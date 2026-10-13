@@ -132,3 +132,13 @@ def test_사유_목록이_낡지_않았다() -> None:
 @pytest.mark.parametrize("job", sorted(ws.EXPECTED_DAYS))
 def test_기대_주기는_주기보다_넉넉하다(job: str) -> None:
     assert ws.EXPECTED_DAYS[job] >= 4, "거래일 작업도 주말·휴장을 넘겨야 한다"
+
+
+def test_일일_배치가_바로_다시_낸_종목은_말하지_않는다() -> None:
+    """25.1009 의 바로 다시 내기 문장에도 걸려 끝난 종목을 매주 다시 돌리라 했다 (docs/infra.md 25.1270, 리포트 감사 재현)."""
+    from batch.jobs import daily
+
+    바로 = "기업행위로 보이는 종목 2개: 111110, 222220. 그 종목만 국내 수정주가를 바로 다시 냈습니다(바뀐 행 3)"
+    assert ws.바로_냄 in 바로 and ws.바로_냄 in __import__("inspect").getsource(daily._detect_kr_actions)
+    runs = [_run("daily_kr", "partial", "2026-10-02T02:22:28+00:00", 바로)]
+    assert ws.adjust_needed(runs) == []

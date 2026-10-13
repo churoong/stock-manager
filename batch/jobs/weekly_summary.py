@@ -65,6 +65,8 @@ EXPECTED_DAYS: dict[str, int] = {
 }  # fmt: skip
 
 _기업행위 = re.compile(r"기업행위로 보이는 종목 \d+개: (.+?)\.")
+#: 일일 배치가 그 자리에서 수정주가를 다시 냈다는 표시 — `daily._detect_kr_actions` 의 문장과 같아야 한다 (25.1270)
+바로_냄 = "국내 수정주가를 바로 다시 냈습니다"
 _종목코드 = re.compile(r"\b(\d{6})\b")
 
 
@@ -145,6 +147,11 @@ def adjust_needed(runs: list[Run]) -> list[str]:
         for w in r.warnings:
             m = _기업행위.search(w)
             if not m:
+                continue
+            # **일일 배치가 이미 바로 다시 낸 종목은 뺀다** (docs/infra.md 25.1270, 리포트 감사 재현). 25.1009 부터
+            # 20종목까지는 그 자리에서 국내 수정주가를 다시 내고 "바로 다시 냈습니다" 라 적는데, 이 정규식이 그 문장에
+            # 도 걸려 끝난 종목을 매주 "국내 수정주가" 로 다시 돌리라 했다(`adjust_stocks` 는 실행 기록이 없다)
+            if 바로_냄 in w:
                 continue
             if any(t > r.started_at for t in 수정실행):
                 continue
