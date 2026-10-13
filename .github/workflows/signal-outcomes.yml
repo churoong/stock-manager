@@ -50,23 +50,47 @@ jobs:
         run: python -m batch.core.client --pin >> "$GITHUB_ENV"
 
       - name: 시세 사본 꺼내기 (docs/infra.md 25.888)
+        # **암호화본만 캐시에 둔다** (docs/infra.md 25.1249) — 공개 저장소라 평문 KRX 시세를 캐시에 두지 않는다
+        id: replica_enc
+        uses: actions/cache/restore@v4
+        with:
+          path: .price-replica-enc
+          key: price-replica-enc-${{ github.run_id }}
+          restore-keys: price-replica-enc-
+
+      - name: 옛 평문 사본 꺼내기 (암호화본이 아직 없을 때만 — 옮겨 담고 다시 만들지 않게, 25.1249)
+        if: ${{ steps.replica_enc.outputs.cache-matched-key == '' }}
         uses: actions/cache/restore@v4
         with:
           path: .price-replica
           key: price-replica-${{ github.run_id }}
           restore-keys: price-replica-
 
+      - name: 시세 사본 풀기
+        env:
+          BACKUP_KEY: ${{ secrets.BACKUP_KEY }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: bash scripts/replica_crypt.sh decrypt
+
       - name: 시세 사본 맞추기
         id: replica
         # 비었으면 Turso 월 읽기 진도가 허락할 때 처음부터 만든다(약 760만 행, 한 번). 못 맞추면 작업이 Turso 에서 읽는다
         run: python scripts/price_replica.py sync --path .price-replica/prices.db
 
-      - name: 시세 사본 넣어 두기
+      - name: 시세 사본 암호화
+        id: replica_crypt
         if: ${{ steps.replica.outputs.changed == 'true' }}
+        env:
+          BACKUP_KEY: ${{ secrets.BACKUP_KEY }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: bash scripts/replica_crypt.sh encrypt
+
+      - name: 시세 사본 넣어 두기
+        if: ${{ (steps.replica.outputs.changed == 'true') && steps.replica_crypt.outputs.ready == 'true' }}
         uses: actions/cache/save@v4
         with:
-          path: .price-replica
-          key: price-replica-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .price-replica-enc
+          key: price-replica-enc-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: 계산
         run: |

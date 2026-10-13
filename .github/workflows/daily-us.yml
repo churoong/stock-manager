@@ -82,11 +82,27 @@ jobs:
       # 시세 사본 (docs/infra.md 25.888·25.1033). **배치 전에** 꺼내 둔다 — 점수·신호가 오늘 시세를 넣은 뒤 사본을 맞춰 거기서 읽는다.
       # 없거나(캐시 만료) 못 맞추면 배치는 그대로 Turso 에서 읽는다
       - name: 시세 사본 꺼내기 (docs/infra.md 25.888)
+        # **암호화본만 캐시에 둔다** (docs/infra.md 25.1249) — 공개 저장소라 평문 KRX 시세를 캐시에 두지 않는다
+        id: replica_enc
+        uses: actions/cache/restore@v4
+        with:
+          path: .price-replica-enc
+          key: price-replica-enc-${{ github.run_id }}
+          restore-keys: price-replica-enc-
+
+      - name: 옛 평문 사본 꺼내기 (암호화본이 아직 없을 때만 — 옮겨 담고 다시 만들지 않게, 25.1249)
+        if: ${{ steps.replica_enc.outputs.cache-matched-key == '' }}
         uses: actions/cache/restore@v4
         with:
           path: .price-replica
           key: price-replica-${{ github.run_id }}
           restore-keys: price-replica-
+
+      - name: 시세 사본 풀기
+        env:
+          BACKUP_KEY: ${{ secrets.BACKUP_KEY }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: bash scripts/replica_crypt.sh decrypt
 
       - name: 배치 실행
         id: batch
@@ -159,12 +175,20 @@ jobs:
         # 배치가 점수·신호 직전에 맞췄으면(25.1033) 다시 맞추지 않고 그대로 넣는다 (docs/infra.md 25.1035)
         run: python scripts/price_replica.py sync --path .price-replica/prices.db --no-build --fresh-minutes 120
 
-      - name: 시세 사본 넣어 두기
+      - name: 시세 사본 암호화
+        id: replica_crypt
         if: ${{ !cancelled() && steps.replica.outputs.changed == 'true' }}
+        env:
+          BACKUP_KEY: ${{ secrets.BACKUP_KEY }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: bash scripts/replica_crypt.sh encrypt
+
+      - name: 시세 사본 넣어 두기
+        if: ${{ (!cancelled() && steps.replica.outputs.changed == 'true') && steps.replica_crypt.outputs.ready == 'true' }}
         uses: actions/cache/save@v4
         with:
-          path: .price-replica
-          key: price-replica-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .price-replica-enc
+          key: price-replica-enc-${{ github.run_id }}-${{ github.run_attempt }}
 
   # 공개 저장소 60일 무활동 꺼짐 대비 (docs/infra.md 25.981·25.986). 쓰기 권한(커밋·워크플로 켜기)을 **배치 본체와 다른 잡**에만 준다 —
   # 본체는 바깥 패키지를 설치해 돌리므로 저장소에 쓸 수 있으면 안 된다. 표준 라이브러리만 쓰는 스크립트라 설치가 없다

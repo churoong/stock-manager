@@ -190,7 +190,8 @@ def test_워크플로가_배치_전에_사본을_꺼내고_경로를_준다(name
     꺼내기 = next(i for i, s in enumerate(steps) if s.get("uses", "").startswith("actions/cache/restore"))
     배치 = names.index("배치 실행")
     assert 꺼내기 < 배치
-    assert steps[꺼내기]["with"]["path"] == ".price-replica"
+    assert steps[꺼내기]["with"]["path"] == ".price-replica-enc"  # 암호화본 (25.1249)
+    assert names.index("시세 사본 풀기") < 배치
     assert steps[배치]["env"][daily.REPLICA_FOR_SCORES_ENV] == ".price-replica/prices.db"
     넣기 = next(i for i, s in enumerate(steps) if s.get("uses", "").startswith("actions/cache/save"))
     assert 넣기 > 배치  # 배치 안에서 맞춘 사본을 다음 실행에 넘긴다
