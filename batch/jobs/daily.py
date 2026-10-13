@@ -1652,7 +1652,8 @@ def find_drift(client: TursoClient, bars: list, trade_date: str, ids: dict[str, 
         chunk = stock_ids[start : start + 200]
         rs = client.execute(
             "SELECT stock_id, date, close, adj_close FROM prices"
-            f" WHERE date >= ? AND date < ? AND close IS NOT NULL AND stock_id IN ({', '.join(['?'] * len(chunk))})",
+            # 종가 0(25.203 전에 쌓인 정지일 행)은 표본이 못 된다 — 비가 0·무한이라 분할을 가렸다 (25.1257)
+            f" WHERE date >= ? AND date < ? AND close > 0 AND stock_id IN ({', '.join(['?'] * len(chunk))})",
             [처음, trade_date, *chunk],
         )
         # 수정종가가 없는 옛 행도 읽는다 — 분할은 종가로 본다 (docs/infra.md 25.498)
@@ -1677,7 +1678,7 @@ def find_drift(client: TursoClient, bars: list, trade_date: str, ids: dict[str, 
             continue
         첫날 = min(날들)
         rs = client.execute(
-            "SELECT date, close, adj_close FROM prices WHERE stock_id = ? AND date < ? AND close IS NOT NULL"
+            "SELECT date, close, adj_close FROM prices WHERE stock_id = ? AND date < ? AND close > 0"
             " ORDER BY date DESC LIMIT 1",
             [stock_id, 첫날],
         )
