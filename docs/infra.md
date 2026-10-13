@@ -30362,7 +30362,7 @@ docs/sell_flags.md 2장은 "조건이 풀리면" 이라 했다. (매도 플래�
 따라잡기는 워크플로가 그 입력을 선언했을 때만 빠진 예약의 cron 을 `inputs` 로 넘긴다(`dispatch_body`) — 선언하지 않은 워크플로에 모르는 입력을 넘기면
 GitHub 이 422 로 거절한다 `[확인필요: 실측]`. 문서 `docs/backup.md` 1장.
 
-**시험** — `tests/test_catchup_missed_schedule_1305.py`(백업 1일·8일 cron, 입력 없는 워크플로는 예전대로, 세 워크플로가 입력을 선언하고 식에서 씀).
+**시험** — `tests/test_catchup_missed_schedule_1305.py`(백업 1일·8일 cron, 입력 없는 워크플로는 예전대로, 세 워크플로가 입력을 선언하고 식에서 씀). 워크플로 글자를 그대로 대던 `test_d1_read_gate_844`·`test_financials_retry_1087`·`test_backtest_schedule_942` 의 기대 글자를 새 식으로 고쳤다.
 **되돌리기 확인** — `schedule_catchup.py`·`backup.yml` 을 하나씩 되돌리면 각각 2건 깨진다.
 
 ### 25.1306 복구 리허설이 예외·앞 단계 실패를 기록하지 않고, 상태 칸이 400일이라 네 번 실패해도 초록

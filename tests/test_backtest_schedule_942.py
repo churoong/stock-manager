@@ -24,7 +24,7 @@ def test_미국_예약은_그_크론으로만_가른다() -> None:
     """입력이 없는 예약 실행은 cron 줄로 시장을 정한다 — 둘째 크론이 US, 나머지는 기본 KR."""
     env = 워크플로["jobs"]["run"]["env"]
     us_cron = 트리거["schedule"][1]["cron"]
-    assert f"github.event.schedule == '{us_cron}' && 'US'" in env["MARKET"]
+    assert f"(github.event.schedule || inputs.missed_schedule) == '{us_cron}' && 'US'" in env["MARKET"]  # 따라잡기도 (25.1305)
     # 예약 실행은 기간·상위 N·비교 깃발 입력이 비어 기본값으로 떨어진다 → `params.default = true`
     assert env["YEARS"].endswith("|| '5' }}") and env["TOP_N"].endswith("|| '20' }}")
     assert "no_pit_universe" in env["NO_PIT"] and "trend_filter" in env["TREND"]

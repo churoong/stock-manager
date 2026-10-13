@@ -18,7 +18,7 @@ def test_화요일_다시_돌되_월요일이_성공했으면_건너뛴다() -> 
     crons = [x["cron"] for x in wf[True]["schedule"]]  # PyYAML 은 'on' 을 True 로 읽는다
     assert crons == ["17 16 * * 0", "17 16 * * 1"]
     run = next(s["run"] for s in wf["jobs"]["run"]["steps"] if s.get("name") == "수집")
-    assert 'if [ "${{ github.event.schedule }}" = "17 16 * * 1" ]; then RETRY="--skip-if-ran-within 3"' in run
+    assert 'if [ "${{ github.event.schedule || inputs.missed_schedule }}" = "17 16 * * 1" ]; then RETRY="--skip-if-ran-within 3"' in run  # 25.1305
     assert "--years ${{ inputs.years || 5 }} $RETRY" in run
 
 

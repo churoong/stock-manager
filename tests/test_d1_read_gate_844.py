@@ -121,4 +121,4 @@ def test_아침_실행이_실패한_날은_예비_실행_몫을_남긴다_25_871
 def test_전체_백업은_한_달에_두_번이고_둘_다_전체다_25_872() -> None:
     글 = (루트 / ".github" / "workflows" / "backup.yml").read_text(encoding="utf-8")
     for 예약 in ("47 16 1 * *", "47 16 8 * *"):
-        assert f"github.event.schedule == '{예약}'" in 글  # SCOPE 가 full 이 된다
+        assert f"(github.event.schedule || inputs.missed_schedule) == '{예약}'" in 글  # SCOPE 가 full 이 된다 (따라잡기도, 25.1305)
