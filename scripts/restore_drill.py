@@ -276,12 +276,25 @@ def record(result: DrillResult, path: Path) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="백업 복구 리허설 (운영 DB 를 건드리지 않는다)")
-    parser.add_argument("path", type=Path)
+    parser.add_argument("path", type=Path, nargs="?")
     parser.add_argument("--record-run", dest="record_run", action="store_true",
                         help="결과를 batch_runs 에 한 줄 적는다")  # fmt: skip
+    # 리허설 앞 단계(아티팩트 찾기·복호화)가 깨지면 워크플로가 이것으로 실패를 적는다 (25.1306)
+    parser.add_argument("--record-failure", dest="record_failure", default=None,
+                        help="리허설에 닿지 못한 실패를 batch_runs 에 적는다")  # fmt: skip
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s | %(message)s")
-    result = drill(args.path)
+    if args.record_failure is not None:
+        record(DrillResult(False, {}, {}, 0, errors=[args.record_failure or "리허설 앞 단계 실패"]), Path("-"))
+        return 1
+    if args.path is None:
+        parser.error("백업 파일 경로가 필요하다")
+    # **어떤 예외든 실패로 적는다** (docs/infra.md 25.1306, 운영 감사 재현). 예전엔 `sqlite3.Error` 만 잡아 잘린 gzip
+    # (`EOFError`)·읽기 오류가 기록 없이 빠져나갔다 — 실패가 `batch_runs` 에 남지 않아 상태 화면은 지난 통과만 보았다
+    try:
+        result = drill(args.path)
+    except Exception as exc:  # noqa: BLE001 — 무엇이든 "리허설 실패" 다
+        result = DrillResult(False, {}, {}, 0, errors=[f"{type(exc).__name__}: {exc}"[:300]])
     print(f"파일 {args.path.name}")
     print("\n".join(result.lines()))
     if args.record_run:

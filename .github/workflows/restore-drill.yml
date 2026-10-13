@@ -73,10 +73,17 @@ jobs:
         run: bash scripts/backup_crypt.sh decrypt backup
 
       - name: 리허설
+        id: drill
         run: |
           set -o pipefail
           FILE=$(ls backup/*.sql.gz | head -1)
           python scripts/restore_drill.py "$FILE" --record-run 2>&1 | python scripts/ops_tee.py drill.txt
+
+      # 리허설에 닿기 전에 깨지면(아티팩트 없음·복호화 실패) 기록이 없었다 — 상태 화면은 지난 통과만 보고 초록이었다 (25.1306).
+      # 리허설 단계 자신이 실패했으면 그 단계가 이미 적었다
+      - name: 앞 단계 실패 기록
+        if: ${{ failure() && steps.drill.outcome != 'failure' }}
+        run: python scripts/restore_drill.py --record-failure "리허설 앞 단계 실패 (아티팩트 찾기·내려받기·복호화)" 2>&1 | python scripts/ops_tee.py drill.txt
 
       - name: 결과를 이슈로 내보내기
         if: always()

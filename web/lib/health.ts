@@ -685,6 +685,8 @@ export const MAX_AS_OF_AGE_DAYS = 12;
  * (docs/infra.md 25.280). `tests/test_freshness_verdict.py` 가 두 값을 대 본다
  */
 export const FX_STALE_DAYS = 7;
+/** 백업 복구 리허설 신선도 — 분기(약 92일) + 여유 (25.1306). 한 번 거르면 노랑, 두 번이면 빨강 */
+export const RESTORE_DRILL_STALE_DAYS = 100;
 
 /**
  * 허용 일수. 넘으면 노랑, **두 배를 넘으면** 빨강.
@@ -826,8 +828,9 @@ export const FRESHNESS: FreshnessRow[] = [
   { key: "backtest_us", label: "기본 백테스트(미국, 마지막 기본 실행)", sql: "SELECT date(MAX(finished_at), '+9 hours') AS v FROM batch_runs WHERE job_name = 'backtest' AND market = 'US' AND status = 'success' AND json_extract(step_log, '$.params.default') = 1", every: "month", restsOnD1: true },
   // 주간 운영 요약 (25.943) — 일요일 아침 텔레그램. 안 오면 여기서 낡는다
   { key: "weekly_summary", label: "주간 운영 요약(마지막 발송)", sql: "SELECT date(MAX(finished_at), '+9 hours') AS v FROM batch_runs WHERE job_name = 'weekly_summary' AND status = 'success'", every: "week" },
-  // 백업 복구 리허설 (25.946) — 분기 1회라 `year`(400일) 로 본다. 두 번 건너뛰어야 빨개진다
-  { key: "restore_drill", label: "백업 복구 리허설(마지막 통과)", sql: "SELECT date(MAX(finished_at), '+9 hours') AS v FROM batch_runs WHERE job_name = 'restore_drill' AND status = 'success'", every: "year" },
+  // 백업 복구 리허설 (25.946) — 분기 1회. 예전엔 `year`(400일) 라 네 번 연속 실패해도 초록이었다 — 분기(약 92일)에 여유를 둔
+  // 100일로 본다: 한 번 거르면 노랑, 두 번이면 빨강 (25.1306)
+  { key: "restore_drill", label: "백업 복구 리허설(마지막 통과)", sql: "SELECT date(MAX(finished_at), '+9 hours') AS v FROM batch_runs WHERE job_name = 'restore_drill' AND status = 'success'", every: "year", staleDays: RESTORE_DRILL_STALE_DAYS },
   { key: "backup", label: "DB 백업(마지막 성공)", sql: "SELECT date(MAX(finished_at), '+9 hours') AS v FROM batch_runs WHERE job_name = 'backup' AND status = 'success'", every: "week" },
   { key: "monitor_kr", label: "장중 감시 목록(국내)", sql: "SELECT date(MAX(built_at), '+9 hours') AS v FROM monitor_targets WHERE market = 'KR'", every: "session" },
   { key: "monitor_us", label: "장중 감시 목록(미국)", sql: "SELECT date(MAX(built_at), '+9 hours') AS v FROM monitor_targets WHERE market = 'US'", every: "session", restsOnD1: true },

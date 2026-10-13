@@ -2353,6 +2353,7 @@ SQL read operations are forbidden (reads are blocked, ...)
 | 25.1303 | 같은 감성 값이 텔레그램·웹·플래그 문장에서 반올림이 달라 1점 차이, 기사 색 문턱이 배치와 다름 |
 | 25.1304 | 주간 요약 확인 실행이 success 로 닫혀 그 주 일요일 발송이 빠지고, 확인 실행 경고가 되풀이로 셈 |
 | 25.1305 | 빠진 예약 따라잡기가 수동 실행이라 월 전체 백업이 필수로, 미국 백테스트가 국내로 돎 |
+| 25.1306 | 복구 리허설이 예외·앞 단계 실패를 기록하지 않고, 상태 칸이 400일이라 네 번 실패해도 초록 |
 
 ### 25.1 왜 D1 인가
 
@@ -30362,3 +30363,19 @@ GitHub 이 422 로 거절한다 `[확인필요: 실측]`. 문서 `docs/backup.md
 
 **시험** — `tests/test_catchup_missed_schedule_1305.py`(백업 1일·8일 cron, 입력 없는 워크플로는 예전대로, 세 워크플로가 입력을 선언하고 식에서 씀).
 **되돌리기 확인** — `schedule_catchup.py`·`backup.yml` 을 하나씩 되돌리면 각각 2건 깨진다.
+
+### 25.1306 복구 리허설이 예외·앞 단계 실패를 기록하지 않고, 상태 칸이 400일이라 네 번 실패해도 초록
+
+**무엇(운영 감사 #2)** — 백업 복구 리허설 실패가 사실상 드러나지 않았다.
+① `restore_drill.drill()` 은 `sqlite3.Error` 만 잡아, 잘린 gzip(`EOFError`) 같은 예외는 `record()` 전에 빠져나가 `batch_runs` 에 아무것도 안 남겼다(재현 `audit_ops/drill_truncated.py`).
+② 워크플로의 앞 단계(아티팩트 없음·내려받기·복호화)가 깨져도 기록이 없었다.
+③ `/status` 칸은 `every: "year"`(400일 노랑·800일 빨강)라 분기 리허설이 네 번 연속 실패해도 초록이었다(재현 `audit_ops/vt/__tests__/drill.test.ts`).
+`docs/backup.md` 6장은 다음 백업 전에 실패를 보길 기대한다.
+
+**실제로 아팠나** — 리허설이 깨진 채 몇 분기가 지나도 몰랐을 것이다. "백업이 되살아난다" 는 유일한 확인이 조용히 멈출 수 있었다.
+
+**고침** — ① `main()` 이 어떤 예외든 실패 결과로 바꿔 적는다. ② `--record-failure` 모드를 두고 워크플로가 `failure() && steps.drill.outcome != 'failure'` 일 때 부른다(리허설 단계가 실패했으면 그 단계가 이미 적었다).
+③ 칸 문턱을 `RESTORE_DRILL_STALE_DAYS`(100일 — 분기 약 92일 + 여유)로: 한 번 거르면 노랑, 두 번이면 빨강. 문서 `docs/backup.md` 6장.
+
+**시험** — `tests/test_restore_drill_failure_1306.py`(잘린 백업·앞 단계 실패·워크플로 배선), `web/__tests__/restoreDrillFresh1306.test.ts`.
+**되돌리기 확인** — `restore_drill.py` 2건, `restore-drill.yml` 1건, `health.ts` 1건이 깨진다.
