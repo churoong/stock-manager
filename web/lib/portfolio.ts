@@ -704,7 +704,31 @@ WHERE NOT EXISTS (SELECT 1 FROM trades WHERE stock_id = ? AND side = ? AND trade
  */
 export const LIST_LIMIT = 2000;
 
-export const TRADES_LIST = `SELECT t.id, t.stock_id, s.ticker, s.country, COALESCE(s.name_ko, s.name_en, s.ticker) AS name,
+/**
+ * 매도 세금 칸의 안내 — **비우면 무엇이 되는지** (docs/infra.md 25.1297, 손익 감사 #5). 입력 칸과 고치기 창이 같은 글을 쓴다.
+ * 예전 고치기 창은 모든 매도에 "비우면 설정 세율" 이라 적었지만 배치(`portfolio._tax`)는 미국 매도·국내 ETF 매도의 빈 세금을
+ * 0 으로 확정한다. 종목을 아직 고르지 않았으면 국내 주식 기준으로 적는다
+ */
+export function taxFieldLabel(currency: string | null | undefined, assetType: string | null | undefined): string {
+  if (!currency) return "세금 (비우면 설정 비율)";
+  if (currency !== "KRW") return `세금 (${currency} · 매매세 없음 · 비우면 0)`;
+  if (assetType === "etf") return "세금 (KRW · ETF 는 증권거래세 없음 · 비우면 0)";
+  return "세금 (KRW · 비우면 설정 비율)";
+}
+
+/**
+ * 매매 목록 한 줄의 수수료·세금 (25.1297). 예전엔 저장된 값을 고치기 창을 열어야만 볼 수 있었다. 빈 칸은 배치가 설정 비율로
+ * 추정한다(설정도 비면 0) — 미국 매도·국내 ETF 매도의 빈 세금은 추정이 아니라 0 이다(`taxFieldLabel` 과 같은 규칙)
+ */
+export function costText(t: { side: string; currency: string; asset_type?: string | null; fee: number | null; tax: number | null }): string {
+  const 수수료 = t.fee == null ? "수수료 설정 비율로 추정" : `수수료 ${money(t.fee, t.currency)}`;
+  if (t.side !== "sell") return 수수료;
+  const 세금없음 = t.currency !== "KRW" || t.asset_type === "etf";
+  const 세금 = t.tax != null ? `세금 ${money(t.tax, t.currency)}` : 세금없음 ? `세금 ${money(0, t.currency)}` : "세금 설정 세율로 추정";
+  return `${수수료} · ${세금}`;
+}
+
+export const TRADES_LIST = `SELECT t.id, t.stock_id, s.ticker, s.country, s.asset_type, COALESCE(s.name_ko, s.name_en, s.ticker) AS name,
   t.side, t.trade_date, t.price, t.quantity, t.currency, t.fx_rate, t.fx_rate_source, t.fee, t.tax, t.horizon, t.memo,
   t.snapshot_as_of, t.score_at_trade, t.signal_type_at_trade, t.factor_scores_at_trade
 FROM trades t JOIN stocks s ON s.id = t.stock_id

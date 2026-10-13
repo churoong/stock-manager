@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import FlagCriteria from "@/components/FlagCriteria";
 import { bodyOf, readJson } from "@/lib/http";
 import { confirmNeeded, confirmPrompt, CONFIRM_CANCEL, type ConfirmKind } from "@/lib/confirm";
-import { dividendBody, readAmount, unreadableAmount, estimateWithholding, recalcPending, money, pct, pctSuffix, LIST_LIMIT, lookthroughLines, type Lookthrough, pnlClass, pctClass, qtyText, reviewPctDigits, signedInt, signedWon, tradeBody, withholdingRate, won } from "@/lib/portfolio";
+import { costText, dividendBody, readAmount, unreadableAmount, estimateWithholding, recalcPending, money, pct, pctSuffix, LIST_LIMIT, lookthroughLines, type Lookthrough, pnlClass, pctClass, qtyText, reviewPctDigits, signedInt, signedWon, taxFieldLabel, tradeBody, withholdingRate, won } from "@/lib/portfolio";
 type DividendTaxes = { kr_dividend_pct?: number | null; us_dividend_pct?: number | null };
 
 import { rateText } from "@/lib/recommend";
@@ -39,7 +39,7 @@ interface Lot {
 }
 
 interface Trade {
-  id: number; ticker: string; name: string; country: string; side: string; trade_date: string; price: number;
+  id: number; ticker: string; name: string; country: string; asset_type: string | null; side: string; trade_date: string; price: number;
   quantity: number; currency: string; fx_rate: number; fx_rate_source: string; fee: number | null; tax: number | null;
   horizon: string | null; memo: string | null; snapshot_as_of: string | null; score_at_trade: number | null;
   signal_type_at_trade: string | null; factor_scores_at_trade: string | null;
@@ -595,7 +595,7 @@ export function TradeForm({
           <Field label="환율 (원/달러, 비우면 그날 이하 최근 종가)"><input type="text" inputMode="decimal" value={fx} onChange={(e) => setFx(e.target.value)} className={inputCls} /></Field>
         ) : null}
         <Field label={`수수료 (${stock?.currency ?? "종목 통화"} · 비우면 설정 비율)`}><input type="text" inputMode="decimal" value={fee} onChange={(e) => setFee(e.target.value)} className={inputCls} /></Field>
-        {side === "sell" ? <Field label={!stock ? "세금 (비우면 설정 비율)" : stock.currency === "KRW" && stock.asset_type === "etf" ? "세금 (KRW · ETF 는 증권거래세 없음 · 비우면 0)" : stock.currency === "KRW" ? "세금 (KRW · 비우면 설정 비율)" : `세금 (${stock.currency} · 매매세 없음 · 비우면 0)`}><input type="text" inputMode="decimal" value={tax} onChange={(e) => setTax(e.target.value)} className={inputCls} /></Field> : null}
+        {side === "sell" ? <Field label={taxFieldLabel(stock?.currency, stock?.asset_type)}><input type="text" inputMode="decimal" value={tax} onChange={(e) => setTax(e.target.value)} className={inputCls} /></Field> : null}
         <Field label="투자 기간">
           <select value={horizon} onChange={(e) => setHorizon(e.target.value as "short" | "mid" | "long")} className={inputCls}>
             <option value="short">단기</option><option value="mid">중기</option><option value="long">장기</option>
@@ -634,7 +634,7 @@ function Trades({ trades, onChanged, onReload }: { trades: Trade[]; onChanged: (
     if (메모 === null) return;
     const 수수료글 = prompt(`수수료 (${t.currency}, 비우면 설정 비율)`, t.fee == null ? "" : String(t.fee));
     if (수수료글 === null) return;
-    const 세금글 = t.side === "sell" ? prompt(`세금 (${t.currency}, 비우면 설정 세율)`, t.tax == null ? "" : String(t.tax)) : "";
+    const 세금글 = t.side === "sell" ? prompt(taxFieldLabel(t.currency, t.asset_type), t.tax == null ? "" : String(t.tax)) : "";
     if (세금글 === null) return;
     const 수수료 = readAmount(수수료글);
     const 세금 = readAmount(세금글);
@@ -666,6 +666,8 @@ function Trades({ trades, onChanged, onReload }: { trades: Trade[]; onChanged: (
                 <span className="font-medium">{t.name}</span>
                 <span className="text-xs text-slate-500">{t.trade_date} · {money(t.price, t.currency)} × {qtyText(t.quantity)}</span>
                 {t.currency !== "KRW" ? <span className="text-xs text-slate-500">환율 {t.fx_rate.toLocaleString("ko-KR")} ({FX_SOURCE[t.fx_rate_source] ?? t.fx_rate_source})</span> : null}
+                {/* 저장된 수수료·세금 (25.1297) — 고치기 창을 열어야만 보였다. 빈 칸은 배치가 설정 비율로 추정한다 */}
+                <span className="text-xs text-slate-500">{costText(t)}</span>
                 <span className="ml-auto flex gap-2 text-xs">
                   {t.side === "buy" ? <button type="button" className={`text-slate-500 underline ${TAP}`} onClick={() => setOpen(open === t.id ? null : t.id)}>근거</button> : null}
                   <button type="button" className={`text-slate-500 underline ${TAP}`} onClick={() => void edit(t)}>고치기</button>
