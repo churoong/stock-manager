@@ -755,7 +755,9 @@ class Test지난_구간_매도세는_법정_세율:
         from batch.services import backtest as bt_
 
         rates, _ = job.cost_rates({}, {"kr_transaction_pct": 0.2})
-        assert rates["KRW"].sell_tax_schedule == bt_.KR_SELL_TAX_SCHEDULE
+        # 체결 기준으로 옮긴 법정 표 (25.1298 — 시행일은 결제일 기준)
+        assert rates["KRW"].sell_tax_schedule == job.체결_기준_세율표(bt_.KR_SELL_TAX_SCHEDULE)
+        assert [r for _, r in rates["KRW"].sell_tax_schedule] == [r for _, r in bt_.KR_SELL_TAX_SCHEDULE]
         assert rates["USD"].sell_tax_schedule == ()
 
 

@@ -108,7 +108,7 @@ def cost_rates(
         # 지난 구간 매도는 법정 세율 표로 추정한다 — 백테스트와 같은 표 (docs/infra.md 25.791)
         "KRW": pf.CostRates(
             fees["kr_buy_pct"], fees["kr_sell_pct"], taxes["kr_transaction_pct"],
-            sell_tax_schedule=bt.KR_SELL_TAX_SCHEDULE,
+            sell_tax_schedule=체결_기준_세율표(bt.KR_SELL_TAX_SCHEDULE),
         ),
         # 미국은 매매마다 붙는 세금이 없다. `None` 이 "모른다" 가 아니라 "없다" 다
         "USD": pf.CostRates(fees["us_buy_pct"], fees["us_sell_pct"], None, has_sell_tax=False),
@@ -123,15 +123,42 @@ def _양도세율(settings_taxes: dict | None) -> float | None:
     return None if 값 is None else float(값)
 
 
+#: 국내 결제 주기 — 체결 뒤 몇 거래일에 결제되나(T+2)
+KR_SETTLEMENT_SESSIONS = 2
+
+
+def 체결_기준_세율표(표: tuple[tuple[str, float], ...]) -> tuple[tuple[str, float], ...]:
+    """법정 세율 표의 시행일을 **그날 결제되는 첫 체결일**로 옮긴다 (docs/infra.md 25.1298, 손익 감사 #3).
+
+    증권거래세 세율 변경은 양도일(결제일, T+2) 기준으로 적용된다고 보았다(25.784 "받아들인 것" 과 같은 전제
+    `[확인필요: 법령 원문]`). 예전에는 체결일과 견줘 2025-12-30 체결(2026-01-02 결제) 매도에 2025 년 0.15% 를 붙였다 —
+    0.20% 여야 한다. 시행일 뒤 첫 거래일에서 `KR_SETTLEMENT_SESSIONS` 거래일 앞이 새 체결 기준 시행일이다.
+    첫 행(0001-01-01, 표 밖 없음)과 달력이 답하지 못하는 날은 그대로 둔다. 세금을 입력한 매도에는 쓰이지 않는다."""
+    out: list[tuple[str, float]] = []
+    for 시행일, 세율 in 표:
+        try:
+            d = date.fromisoformat(시행일)
+            첫 = d if cal.is_session("KR", d) else cal.next_session("KR", d)
+            for _ in range(KR_SETTLEMENT_SESSIONS):
+                첫 = cal.previous_session("KR", 첫)
+            out.append((첫.isoformat(), 세율))
+        except Exception:  # noqa: BLE001 — 달력 범위 밖(0001-01-01 등)은 그대로
+            out.append((시행일, 세율))
+    return tuple(out)
+
+
 #: 비용률을 안 넣었을 때의 말. **무엇이 빠졌고 실현손익이 어느 쪽으로 틀리는지**를 적는다
 _안_넣은_수수료 = (
     "설정에 수수료율이 비어 있어, 수수료를 입력하지 않은 매매는 수수료 0 으로 계산했습니다"
     " — 실현손익이 그만큼 좋게 나옵니다"
 )
 def _안_넣은_거래세(시행일: str, 세율: float) -> str:
-    # 날짜·세율은 법정 표의 마지막 구간에서 만든다 — 박아 두면 표에 새 구간이 들어갈 때 틀린다 (25.795, 교차검증)
+    # 날짜·세율은 법정 표의 마지막 구간에서 만든다 — 박아 두면 표에 새 구간이 들어갈 때 틀린다 (25.795, 교차검증).
+    # 표는 체결 기준으로 옮겨져 있다(25.1298) — 법정 시행일(결제일 기준)을 함께 적는다
+    법정 = bt.KR_SELL_TAX_SCHEDULE[-1][0]
+    때 = f"{시행일} 이후" if 시행일 in ("모든", 법정) else f"{시행일} 체결(결제일 기준 {법정} 이후)"
     return (
-        f"설정에 국내 증권거래세율이 비어 있어, 세금을 입력하지 않은 {시행일} 이후 국내 매도는 세금 0 으로"
+        f"설정에 국내 증권거래세율이 비어 있어, 세금을 입력하지 않은 {때} 국내 매도는 세금 0 으로"
         " 계산했습니다 — 실현손익이 그만큼 좋게 나옵니다"
         f" (그 구간 법정 {세율:.2f}% [확인필요: 법령 원문]. 그 전 매도는 법정 세율 표로 추정)"
     )
