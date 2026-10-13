@@ -69,7 +69,9 @@ def load_days(
     placeholders = ", ".join(["?"] * len(stock_ids))
     rs = client.execute(
         "SELECT stock_id, date, close, change_pct, adj_close FROM prices"
-        f" WHERE stock_id IN ({placeholders}) AND close IS NOT NULL"
+        # **종가 0 은 빼고 읽는다** (docs/infra.md 25.1251). 25.203 이 막기 전에 쌓인 정지일 행(KRX 가 종가 "0" 을 줌)이
+        # 남아 있으면 그 앞뒤 비가 0·무한이 되어 계수를 못 내고, 정지를 끼는 국내 분할(25.132)을 통째로 놓쳤다
+        f" WHERE stock_id IN ({placeholders}) AND close > 0"
         " ORDER BY stock_id, date",
         list(stock_ids),
     )

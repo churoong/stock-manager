@@ -328,7 +328,8 @@ def _detect_kr_actions(
         int(r[0]): float(r[1])
         for r in client.execute(
             "SELECT p.stock_id, p.close FROM prices p JOIN stocks s ON s.id = p.stock_id"
-            " WHERE s.country = 'KR' AND p.date = ? AND p.close IS NOT NULL",
+            # 종가 0(25.203 전에 쌓인 정지일 행)은 없는 것으로 — 그래야 아래 "제 마지막 종가" 로 간다 (25.1251)
+            " WHERE s.country = 'KR' AND p.date = ? AND p.close > 0",
             [str(직전)],
         ).rows
     }
