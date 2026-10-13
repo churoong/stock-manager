@@ -20,6 +20,10 @@ on:
         description: 특정 연도만 (비우면 years 사용)
         type: string
         default: ""
+      missed_schedule:
+        description: 빠진 예약 따라잡기가 채운다 — 그 예약의 cron (사람은 비워 둔다, docs/infra.md 25.1305)
+        type: string
+        default: ""
 
 concurrency:
   group: financials
@@ -65,7 +69,7 @@ jobs:
       - name: 수집
         run: |
           RETRY=""
-          if [ "${{ github.event.schedule }}" = "17 16 * * 1" ]; then RETRY="--skip-if-ran-within 3"; fi
+          if [ "${{ github.event.schedule || inputs.missed_schedule }}" = "17 16 * * 1" ]; then RETRY="--skip-if-ran-within 3"; fi
           if [ -n "${{ inputs.year }}" ]; then
             python -m batch.jobs.financials --year ${{ inputs.year }}
           else

@@ -100,6 +100,24 @@ def due(text: str, now: datetime) -> datetime | None:
     return max(times) if times else None
 
 
+def missed_cron(text: str, now: datetime) -> str | None:
+    """가장 최근 예약 시각을 낸 cron 글자 — `due` 와 같은 고르기."""
+    pairs = [(t, c) for c in crons(text) if (t := last_due(c, now)) is not None]
+    return max(pairs)[1] if pairs else None
+
+
+def dispatch_body(text: str, now: datetime) -> dict:
+    """수동 실행 요청 본문 (docs/infra.md 25.1305, 운영 감사 재현).
+
+    워크플로가 `missed_schedule` 입력을 받으면 빠진 예약의 cron 을 넘긴다 — 수동 실행에는 `github.event.schedule` 이
+    없어, 예약마다 하는 일이 다른 워크플로(월 1일 전체 백업, 미국 월 백테스트, 재무 화요일 재시도)가 따라잡기로 깨면
+    기본 갈래(필수 백업·국내)로 돌았다."""
+    body: dict = {"ref": "main"}
+    if re.search(r"^\s*missed_schedule\s*:", text, re.M) and (c := missed_cron(text, now)):
+        body["inputs"] = {"missed_schedule": c}
+    return body
+
+
 def candidate(name: str, text: str, now: datetime) -> datetime | None:
     """실행 기록을 물어볼 예약 시각 — 예비가 아니고, 지연 여유를 넘겼고, LOOKBACK 안이면. 아니면 None."""
     if name in SKIP:
@@ -131,7 +149,7 @@ def run(repo: str, token: str, call, now: datetime, root: Path) -> str:  # noqa:
             미룸.append(path.name)
             continue
         code, _ = call("POST", f"https://api.github.com/repos/{repo}/actions/workflows/{path.name}/dispatches",
-                       token, {"ref": "main"})  # fmt: skip
+                       token, dispatch_body(text, now))  # fmt: skip
         (깨움 if code == 204 else 실패).append(path.name if code == 204 else f"{path.name}({code})")
     return (f"빠진 예약 따라잡기: 깨움 {len(깨움)}개" + (f" ({', '.join(깨움)})" if 깨움 else "")
             + (f" · 다음 회로 미룸 {len(미룸)}개(한 번에 {MAX_PER_RUN}개까지)" if 미룸 else "")
