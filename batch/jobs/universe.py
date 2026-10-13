@@ -137,6 +137,22 @@ def refresh_kr_master(client: TursoClient, bas_dd: str) -> tuple[int, list[str]]
         db.record_api_call(
             client, "krx_openapi", count=result.attempts, limit_value=krx.DAILY_LIMIT, warn_at_pct=80
         )
+        # **빈 응답이면 직전 거래일로 한 번 물러난다** (docs/infra.md 25.1264, 유니버스 감사 — 시총 25.955 와 같은 길).
+        # 예약 실행(월 00:43 KST)의 기준일은 금요일인데 거래소는 그날 치를 다음 거래일 아침에 내는 것으로 보인다
+        # (16.1, 10-04 실행도 금요일 치가 비었다). 예전엔 마스터만 물러나지 않아 평소 주마다 비어 관리종목·신규 상장·
+        # 상장폐지가 갱신되지 않았다
+        쓸_날 = bas_dd
+        물러남 = 0
+        while result.ok and not result.data and 물러남 < MARKET_CAP_FALLBACK_STEPS:
+            물러남 += 1
+            앞날 = cal.previous_session("KR", before=date.fromisoformat(f"{쓸_날[:4]}-{쓸_날[4:6]}-{쓸_날[6:]}"))
+            쓸_날 = 앞날.strftime("%Y%m%d")
+            result = krx.fetch_master(market, 쓸_날)
+            db.record_api_call(
+                client, "krx_openapi", count=result.attempts, limit_value=krx.DAILY_LIMIT, warn_at_pct=80
+            )
+        if result.ok and result.data and 물러남:
+            warnings.append(f"{market} 마스터: {bas_dd} 응답이 비어 직전 거래일 {쓸_날} 목록으로 갱신했습니다")
 
         if not result.ok:
             warnings.append(f"{market} 마스터 실패: {result.error}")
