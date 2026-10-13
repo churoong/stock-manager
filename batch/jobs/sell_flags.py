@@ -415,8 +415,8 @@ def run(today: date | None = None) -> int:
         previous = {
             (int(r["stock_id"]), str(r["reason_code"])): r
             for r in client.execute(
-                "SELECT stock_id, reason_code, first_seen_date, dismissed_at, created_at, rationale_data"
-                " FROM sell_flags"
+                "SELECT stock_id, reason_code, first_seen_date, dismissed_at, created_at, rationale_data,"
+                " level, rationale_text FROM sell_flags"
                 " WHERE is_active = 1 AND as_of_date <= ? ORDER BY as_of_date",
                 [day],
             ).dicts()
@@ -447,6 +447,25 @@ def run(today: date | None = None) -> int:
                  # NEW 를 리포트 발송 시각과 견주려면 날짜로는 모자랐다(같은 날 발송 뒤에 걸린 것을 못 가른다)
                  처음],
             ))  # fmt: skip
+        # **오늘 판정하지 못한 사유의 어제 플래그는 잇는다** (docs/infra.md 25.1277, 매도 플래그 감사 재현). 자료가 없던
+        # 날(감성 채점 실패·점수 없음·평가액 없음)을 "풀림" 으로 보면 다음 날 [확인] 이 사라지고 NEW 로 다시 떴다.
+        # 지금도 보유 중인 종목만 — 다 판 종목은 풀린다
+        걸린 = {(f.stock_id, f.reason_code) for f in flags}
+        못_본 = {h.stock_id: sf.unjudged(h, today) for h in holdings if isinstance(h, sf.HoldingInput)}
+        이음 = 0
+        for (sid, 사유), prev in previous.items():
+            if (sid, 사유) in 걸린 or 사유 not in 못_본.get(sid, set()):
+                continue
+            이음 += 1
+            글 = str(prev["rationale_text"] or "")
+            if "오늘 판정할 자료가 없어" not in 글:
+                글 += " ※ 오늘 판정할 자료가 없어 지난 판정을 이어 둡니다"
+            statements.append((
+                "INSERT INTO sell_flags (stock_id, as_of_date, level, reason_code, rationale_text, rationale_data,"
+                " is_active, first_seen_date, dismissed_at, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)",
+                [sid, day, prev["level"], 사유, 글, prev["rationale_data"], prev["first_seen_date"],
+                 prev["dismissed_at"], prev["created_at"]],
+            ))  # fmt: skip
         # 옛 행은 비활성으로 돌린다. **풀린 것에만 `resolved_at` 을 찍는다** (docs/infra.md 25.564, 감사) — 오늘로
         # 이어진 플래그의 어제 행까지 찍어 문서("조건이 풀리면 찍힌다")와 달랐다. 오늘 행은 위에서 먼저 넣었다
         statements.append((
@@ -461,6 +480,7 @@ def run(today: date | None = None) -> int:
         counts = {level: sum(1 for f in flags if f.level == level) for level in ("red", "yellow", "green")}
         db.finish_batch_run(client, run_id, status="success",
                             step_log={"holdings": len(holdings), "flags": len(flags), **counts,
+                                      **({"carried_unjudged": 이음} if 이음 else {}),
                                       **({"warnings": 경고, "warning_count": len(경고)} if 경고 else {})})  # fmt: skip
         print(
             f"보유 {len(holdings)}종목 → 플래그 {len(flags)}개"

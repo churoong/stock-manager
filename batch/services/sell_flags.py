@@ -297,6 +297,28 @@ def _점검_무리(display: str) -> str:
     return "수치미달" if display in 수치_사유 else display
 
 
+def unjudged(h: HoldingInput, today: date) -> set[str]:
+    """오늘 **판정할 수 없었던** 사유 (docs/infra.md 25.1277, 매도 플래그 감사 재현). 그 어제 플래그는 풀지 않고 잇는다.
+
+    "판정했더니 아니다" 와 "판정할 자료가 없다" 는 다르다. 예전엔 둘 다 플래그가 안 나와 어제 행이 `resolved_at` 으로
+    풀렸고, 자료가 돌아온 날 다시 걸리면 이어받을 행이 없어 [확인] 이 사라지고 NEW 로 다시 떴다 — 국내 감성 채점이 하루
+    실패하면 확인한 "감성급락" 이 그다음 날 NEW 로 재발했다(문서는 "조건이 풀리면" 이라 했다)."""
+    out: set[str] = set()
+    if h.market_value is None or not h.cost > 0:
+        out |= {"손절", "목표도달"}
+    점수나이 = _며칠_전(h.score_now_date, today)
+    if h.score_now is None or (점수나이 is not None and 점수나이 > _종가_묵음_일수()):
+        out.add("재무악화")
+    기준 = date.fromisoformat(h.sentiment_ref_date) if h.sentiment_ref_date else today
+    감성나이 = _며칠_전(h.sentiment_date, 기준)
+    오늘감성 = h.sentiment_now if h.sentiment_tracked_7d else None
+    if (감성나이 is not None and 감성나이 > sentiment.MAX_AGE_DAYS) or sentiment.drop_basis(
+        h.sentiment_delta_7d, 오늘감성
+    ) is None:
+        out.add("감성급락")
+    return out
+
+
 def sub_reasons(reason_code: str, criteria: list[dict]) -> set[str]:
     """한 플래그의 **속 사유** (docs/infra.md 25.564, 감사 재현).
 
