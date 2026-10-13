@@ -1372,13 +1372,17 @@ def bulk_upsert_prices(
     return len(rows)
 
 
-def split_pending_us(client: TursoClient) -> set[int]:
+def split_pending_us(client: TursoClient, as_of: str | None = None) -> set[int]:
     """미국 수정주가 재수집 대기열 가운데 **분할**로 감지된 종목 — 분할은 종가와 수정종가를 함께 움직여
     두 비가 같다(`daily` 의 분할 판정과 같은 규칙, 25.553). 배당 어긋남만인 종목은 밴드(분할만 반영한 종가)에
-    영향이 없어 넣지 않는다"""
+    영향이 없어 넣지 않는다.
+
+    `as_of` 를 주면 **그날까지 감지된 것만** (25.1311) — 과거 기준일로 다시 낼 때 오늘의 대기열이 걸리지 않게"""
     try:
         rs = client.execute(
             "SELECT stock_id FROM adjust_refresh_queue WHERE done_at IS NULL AND ratio_before = ratio_after"
+            " AND (? IS NULL OR substr(detected_at, 1, 10) <= ?)",
+            [as_of, as_of],
         )
     except Exception as exc:  # noqa: BLE001
         if 표가_없나(exc):

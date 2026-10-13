@@ -631,6 +631,7 @@ def build_inputs(
     as_of: str | None = None,
     moves: dict[int, dict[str, float | None]] | None = None,
     pending_adjust: set[int] | None = None,
+    split_pending: set[int] | None = None,
 ) -> list[sc.StockInput]:
     """종목마다 지표 묶음을 만든다. 없는 입력은 없는 채로 둔다.
 
@@ -730,6 +731,12 @@ def build_inputs(
         # **같은 계열**을 넘긴다. 예전에는 모멘텀만 날짜로 기준점을 잡아, 같은 실행 안에서
         # `momentum_12_1` 과 `momentum_vol_adjusted` 의 12-1 이 갈렸다 (docs/infra.md 25.100)
         dates_series, closes_series, values_series = series.get(stock_id, ([], [], []))
+        # **미국 분할 재수집 대기 종목은 가격 계열을 모른다로 둔다** (docs/infra.md 25.1311, 19회차 A2). 일일 수집은
+        # 최근 열흘쯤만 분할 반영 값으로 다시 쓰고 그 앞은 토요일 재수집까지 분할 전이라, 4:1 분할이면 계열 한가운데
+        # −75% 절벽이 생겨 모멘텀·52주 고점·변동성 조정 모멘텀·잔차 변동성이 거짓으로 무너졌다 — 보유 종목이면 매도
+        # 플래그 ②(점수 20점 하락)까지 거짓으로 걸 수 있었다. 성과지표(MDD·변동성)는 지표 작업이 지난 행을 지킨다
+        if stock_id in (split_pending or set()):
+            dates_series, closes_series, values_series = [], [], []
         merged.update(sc.momentum_metrics(closes_series))
         merged.update(sc.price_series_metrics(closes_series, values_series or None, dates_series))
 
@@ -986,6 +993,7 @@ def run(market: str, as_of: str | None = None) -> int:
         if 묵은_지표:
             log.warning("성과 지표 %d/%d종목이 %d일 넘게 묵었습니다(가장 오래된 %s) — 주간 성과 지표 작업을 확인하세요",
                         묵은_지표["count"], 묵은_지표["of"], METRICS_STALE_DAYS, 묵은_지표["oldest"])  # fmt: skip
+        분할대기 = db.split_pending_us(client, as_of) if country == "US" else set()  # 25.1311
         inputs = build_inputs(
             universe,
             financials,
@@ -998,6 +1006,7 @@ def run(market: str, as_of: str | None = None) -> int:
             as_of=as_of,
             moves=등락률,
             pending_adjust=load_pending_adjust(client) if country == "US" else set(),
+            split_pending=분할대기,
         )
         # 몇 종목을 옮겼고 왜 못 옮겼는지 실행 기록에 (25.954)
         옮김 = [i.market_cap_note for i in inputs if i.market_cap_note]

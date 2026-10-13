@@ -328,7 +328,15 @@ def compute_all(
     나라_끝: dict[str, tuple[dict[str, date], dict[int, str]]] = {}
     멈춤_경고: set[str] = set()
     수정_구멍: list[int] = []
+    # **미국 분할 재수집 대기 종목은 이번 주에 다시 내지 않는다** (docs/infra.md 25.1311, 19회차 A2). 그 3년 이력은
+    # 토요일 재수집까지 분할 전이라 MDD·변동성이 가짜 −75% 절벽을 담는다. NULL 행을 쓰면 그것이 최신 행이 되어
+    # 리스크 축이 빈다(성과지표 표에는 사유 칸이 없다) — 분할 전에 낸 **지난 행을 그대로 둔다**. 21일 묵음 규칙이 본다
+    분할대기 = db.split_pending_us(client, as_of) if any(c == "US" for _, _, c in stocks) else set()
+    분할_건너뜀: list[int] = []
     for stock_id, _ticker, country in stocks:
+        if stock_id in 분할대기:
+            분할_건너뜀.append(stock_id)
+            continue
         if country not in rf_cache:
             rf_cache[country] = risk_free_for(client, country)
         risk_free = rf_cache[country]
@@ -444,6 +452,11 @@ def compute_all(
         warnings.append(
             "무위험수익률이 설정되지 않아 샤프와 소르티노를 계산하지 않았습니다. "
             "설정 화면에서 입력하세요"
+        )
+    if 분할_건너뜀:
+        warnings.append(
+            f"미국 분할 재수집 대기 {len(분할_건너뜀)}종목은 이번에 성과 지표를 다시 내지 않았습니다 — 지난 값을 둡니다"
+            " (토요일 수정주가 재수집 뒤 다음 실행이 낸다)"
         )
     if 수정_구멍:
         # 수정주가 사이의 빈 행을 뺐다 (25.701) — 국내 `adjust_kr` 를 돌리면 채워진다

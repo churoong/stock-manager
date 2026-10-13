@@ -282,6 +282,8 @@ class SignalInput:
     band_capped: bool = False
     #: 미국 분할 재수집 대기 — 과거 가격이 분할 전이라 밴드를 만들지 않았다 (docs/infra.md 25.1245)
     band_split_pending: bool = False
+    #: 미국 분할 재수집 대기 — 과거 가격이 분할 전이라 이동평균을 믿을 수 없다. 단기 판정을 내지 않는다 (25.1311)
+    split_pending: bool = False
 
     volatility_ann: float | None = None
     mdd: float | None = None
@@ -358,8 +360,8 @@ def short_term(inp: SignalInput) -> tuple[bool, dict]:
 
     data: dict = {"ma20": ma20, "ma60": ma60, "close": close, "momentum": momentum}
 
-    # 표본이 모자라면 판단하지 않는다.
-    if ma20 is None or ma60 is None or close is None:
+    # 표본이 모자라거나 분할 재수집 대기면(이동평균이 분할 전 가격을 섞는다, 25.1311) 판단하지 않는다.
+    if inp.split_pending or ma20 is None or ma60 is None or close is None:
         return False, data
 
     turnover_20 = moving_average(inp.turnovers, MA_SHORT_DAYS)
@@ -792,6 +794,11 @@ def judgement(horizon: str, inp: SignalInput, data: dict) -> list[dict]:
 
     if horizon == "short":
         ma20, ma60, close = data.get("ma20"), data.get("ma60"), data.get("close")
+        if inp.split_pending:
+            return [_criterion(
+                "가격 이력", "분할 재수집 대기 — 과거 가격이 분할 전이라 이동평균을 믿을 수 없음",
+                "주말 미국 수정주가 재수집 뒤 다시 본다", SOURCE_DERIVED, inp.price_date, passed=False,
+            )]
         if ma20 is None or ma60 is None or close is None:
             return [_criterion(
                 "표본", f"거래일 {len(inp.closes)}일 (60일 필요)", "MA20·MA60 을 낼 수 있어야",

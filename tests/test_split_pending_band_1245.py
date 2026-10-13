@@ -42,4 +42,4 @@ def test_신호_작업이_밴드를_만들지_않는다() -> None:
     from batch.jobs import signals as job_sig
 
     글 = Path(job_sig.__file__).read_text(encoding="utf-8")
-    assert "db.split_pending_us(client) if country == \"US\"" in 글 and 'row["_band_split_pending"] = True' in 글
+    assert "db.split_pending_us(client, as_of) if country == \"US\"" in 글 and 'row["_band_split_pending"] = True' in 글

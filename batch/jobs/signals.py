@@ -477,6 +477,7 @@ def build_inputs(
                 band=band,
                 band_capped=bool(row.get("_band_capped")),
                 band_split_pending=bool(row.get("_band_split_pending")),
+                split_pending=bool(row.get("_split_pending")),
                 volatility_ann=_opt_float(metric_row.get("volatility_ann")),
                 mdd=_opt_float(metric_row.get("mdd")),
                 cagr=_opt_float(metric_row.get("cagr")),
@@ -757,7 +758,11 @@ def run(market: str, as_of: str | None = None) -> int:
         # 일일 수집은 최근 열흘쯤만 분할 반영 값으로 다시 쓰고 3년 이력은 토요일 재수집까지 분할 전이다 —
         # 주식수는 그대로라 지금 PBR 이 밴드의 4분의 1(4:1 분할)로 떨어져 "밴드 하단" 장기 매수 신호가
         # 재수집 날까지 매일 났다
-        분할대기 = db.split_pending_us(client) if country == "US" else set()
+        분할대기 = db.split_pending_us(client, as_of) if country == "US" else set()
+        # 단기(기술적) 판정도 모른다로 — 20·60일선이 분할 전 가격을 섞는다 (25.1311, 19회차 A2)
+        for row in candidates:
+            if int(row["stock_id"]) in 분할대기:
+                row["_split_pending"] = True
         for row in long_pool:
             stock_id = int(row["stock_id"])
             if stock_id in 분할대기:
