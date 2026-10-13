@@ -297,8 +297,17 @@ def fetch_us(targets: list[str], failed: dict[str, str]) -> tuple[dict[str, Fetc
         return {}, {}, 0
     sec = sec_edgar.SecClient()
     nport = sec_nport.NportClient(sec)
-    funds = nport.fund_tickers()
-    cusips = nport.ftd_cusips(date.today())
+    # **첫 두 부르기와 망 오류도 막힘으로 다룬다** (docs/infra.md 25.1280, ETF 감사 재현). 예전엔 펀드 티커 목록·결제
+    # 실패 목록의 429·5xx 나 N-PORT 받기 도중 연결 끊김(`requests` 예외 = OSError)이 `run()` 밖으로 올라가, SEC 가
+    # 필요 없는 국내(KODEX) 순위까지 한 줄도 쓰지 못했다 — 화면은 최신 행만 읽어 세 목록이 한 달 내내 비었다
+    try:
+        funds = nport.fund_tickers()
+        cusips = nport.ftd_cusips(date.today())
+    except (sec_edgar.SecFailed, sec_edgar.SecBlocked, OSError) as exc:
+        failed[SEC_BLOCKED] = f"{type(exc).__name__}: {exc}"
+        for 남은 in targets:
+            failed.setdefault(남은, "SEC 목록을 받지 못함 — 부르지 않음")
+        return {}, {}, sec.calls
     out: dict[str, Fetched] = {}
     for sym in targets:
         if sym not in funds:
@@ -306,9 +315,10 @@ def fetch_us(targets: list[str], failed: dict[str, str]) -> tuple[dict[str, Fetc
             continue
         try:
             doc = nport.latest(*funds[sym])
-        except (sec_edgar.SecFailed, sec_edgar.SecBlocked) as exc:
+        except (sec_edgar.SecFailed, sec_edgar.SecBlocked, OSError) as exc:
             failed[sym] = str(exc)
-            if isinstance(exc, sec_edgar.SecBlocked):
+            # 망 오류(연결 끊김·시간 초과)도 막힘처럼 멈춘다 — 계속 부르면 같은 실패를 되풀이한다 (25.1280)
+            if isinstance(exc, sec_edgar.SecBlocked | OSError):
                 failed[SEC_BLOCKED] = str(exc)
                 for 남은 in targets[targets.index(sym) + 1:]:
                     failed.setdefault(남은, "SEC 막힘 — 부르지 않음")

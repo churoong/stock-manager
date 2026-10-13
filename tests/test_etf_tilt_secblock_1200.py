@@ -85,3 +85,34 @@ def test_장기_신호_비중은_그날_가장_새_판만_센다() -> None:
                   " tranche_plan, size_reduction, rationale_text, rationale_data, calc_version, created_at)"
                   " VALUES (?, '2026-10-10', 'long', 'x', 1, 2, 'USD', '[]', 1, 'x', '{}', ?, 't')", [sid, ver])  # fmt: skip
     assert job.load_long_signals(mem, "US") == ({1}, "2026-10-10")  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("어디", ["목록", "받기"])
+def test_SEC_목록_실패나_망_오류도_실행을_죽이지_않는다(monkeypatch: pytest.MonkeyPatch, 어디: str) -> None:
+    """펀드 티커 목록의 429·N-PORT 받기 중 연결 끊김이 `run()` 밖으로 올라가 국내 순위까지 못 썼다 (docs/infra.md 25.1280)."""
+    mem = _mem()
+
+    class FakeSec:
+        calls = 0
+
+    class FakeNport:
+        def __init__(self, sec) -> None:  # noqa: ANN001
+            pass
+
+        def fund_tickers(self):  # noqa: ANN202
+            if 어디 == "목록":
+                raise sec_edgar.SecBlocked("HTTP 429")
+            return {s: ("0000000001", f"S{s}") for s in ETFS}
+
+        def ftd_cusips(self, _d):  # noqa: ANN001, ANN202
+            return {}
+
+        def latest(self, cik, series):  # noqa: ANN001, ANN202
+            raise ConnectionError("Connection reset by peer")
+
+    monkeypatch.setattr(job.sec_edgar, "SecClient", lambda: FakeSec())
+    monkeypatch.setattr(job.sec_nport, "NportClient", FakeNport)
+    monkeypatch.setattr(job, "TursoClient", lambda: mem)
+    assert job.run() == 0  # 예전엔 예외로 죽었다
+    상태, 글 = mem.conn.execute("SELECT status, error_text FROM batch_runs WHERE job_name = 'etf_tilt'").fetchone()
+    assert 상태 == "partial" and "지난달 값을 그대로" in 글
