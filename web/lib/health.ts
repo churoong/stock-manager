@@ -492,6 +492,17 @@ export const CRON_EXPECTED: CronExpect[] = [
 
 
 /**
+ * "오늘 N회" 문구 (docs/infra.md 25.1252).
+ *
+ * `calls_today` 는 **호출이 올 때만** 날짜를 보고 1 로 되돌린다(`heartbeat.ts`). 오늘 한 번도 안 불렸으면 어제 센 값이 그대로
+ * 남아 "오늘 12회" 로 읽혔다 — 크론이 멈춘 날 화면이 정반대를 말했다. 기록된 날(`day`, 한국 날짜)이 오늘일 때만 오늘 횟수다.
+ */
+export function callsTodayText(row: { calls_today: number; day: string | null }, now: Date): string {
+  if (row.day === localDate("KR", now)) return `오늘 ${row.calls_today}회`;
+  return row.day ? `오늘 0회 (${row.day.slice(5)} ${row.calls_today}회)` : "오늘 0회";
+}
+
+/**
  * 크론 호출 한 줄의 판정 (docs/infra.md 25.141).
  *
  * 문턱은 **주기의 세 배**다. 한 번 거르는 일은 바깥 서비스에서 흔하고(재시도·지연),

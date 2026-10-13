@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { STATUS_LABEL, adjustQueueNote, dayNote, cronVerdict, freshnessVerdict, isStuck, sinceText, usageAmount, usageLabel, usageRatio, usageTone } from "@/lib/health";
+import { STATUS_LABEL, adjustQueueNote, callsTodayText, dayNote, cronVerdict, freshnessVerdict, isStuck, sinceText, usageAmount, usageLabel, usageRatio, usageTone } from "@/lib/health";
 import { readJson } from "@/lib/http";
 import { userTimeOf } from "@/lib/market";
 
@@ -177,7 +177,7 @@ export default function StatusView() {
         </div>
         <p className={`mt-1 text-[11px] ${watchdogTint}`} title={watchdogVerdict?.why}>
           마지막 감시 호출: {watchdog && watchdog.outcome !== "never"
-            ? `${userTimeOf(watchdog.called_at)} KST (${sinceText(watchdog.called_at, now)}) · ${watchdog.outcome} · 오늘 ${watchdog.calls_today}회`
+            ? `${userTimeOf(watchdog.called_at)} KST (${sinceText(watchdog.called_at, now)}) · ${watchdog.outcome} · ${callsTodayText(watchdog, now)}`
             // **못 읽었으면 "등록하세요" 라고 시키지 않는다** (docs/infra.md 25.163)
             : 못읽음("cron")
               ? `호출 기록을 읽지 못했습니다 — ${못읽음("cron")}`
@@ -345,7 +345,7 @@ export default function StatusView() {
               return (
                 <li key={`${c.job}-${c.market}`} className="flex flex-wrap items-baseline gap-x-2 rounded-xl border border-slate-200 px-3 py-1.5 dark:border-slate-800" title={v.why}>
                   <span className="font-medium">{c.job} {c.market}</span>
-                  <span className="text-slate-500">{c.outcome === "never" ? "호출된 적 없음" : `${userTimeOf(c.called_at)} · ${c.outcome} · 오늘 ${c.calls_today}회`}</span>
+                  <span className="text-slate-500">{c.outcome === "never" ? "호출된 적 없음" : `${userTimeOf(c.called_at)} · ${c.outcome} · ${callsTodayText(c, now)}`}</span>
                   <span className="ml-auto">{v.text ? <Tag tone={v.tone}>{v.text}</Tag> : null}</span>
                 </li>
               );
