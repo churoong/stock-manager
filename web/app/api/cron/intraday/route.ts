@@ -613,7 +613,7 @@ export async function GET(request: Request) {
       // 오늘 이미 공시 알림이 나간 종목은 DART 를 다시 부르지 않는다 (25.105)
       const alerted = new Set(
         rowsToObjects<{ stock_id: number }>(
-          await execute(DISCLOSURE_ALERTS_FOR, [JSON.stringify(보유ids), day]),
+          await execute(DISCLOSURE_ALERTS_FOR, [JSON.stringify(보유ids), day, quiet ? 0 : 1]),
         ).map((r) => Number(r.stock_id)),
       );
       // 앞 거래일들부터 묻는다 — 장 마감 뒤 공시가 다음 날에도 안 잡히던 틈(25.344), 하루짜리 DART 점검이 그 틈을 다시 연 것(25.1075)
@@ -626,7 +626,7 @@ export async function GET(request: Request) {
       );
       const 창시작 = 앞날들.length ? 앞날들[앞날들.length - 1].date : session.date;
       const 창알림 = rowsToObjects<{ stock_id: number; data: string | null }>(
-        await execute(DISCLOSURE_ALERTS_BETWEEN, [JSON.stringify(보유ids), 창시작, session.date]),
+        await execute(DISCLOSURE_ALERTS_BETWEEN, [JSON.stringify(보유ids), 창시작, session.date, quiet ? 0 : 1]),
       );
       const dart = await disclosures(
         targets, session.date, now, alerted, 창시작, disclosureBoundary(창알림), disclosureSeen(창알림),

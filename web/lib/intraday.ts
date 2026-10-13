@@ -568,8 +568,15 @@ export function disclosureSeen(rows: Array<{ stock_id: number; data: string | nu
 export const ZONE_ALERTS_FOR = `SELECT a.stock_id, a.trigger_type FROM json_each(?) j
 JOIN alerts a ON a.stock_id = j.value AND a.trigger_type IN ('buy_zone', 'watch_price') AND a.trade_date = ?`;
 
+/**
+ * 오늘 이미 알린 공시. **마지막 인자가 1(조용시간 밖)이면 조용시간에 "보내지 않음" 으로 둔 행은 알린 것으로 보지 않는다**
+ * (docs/infra.md 25.1288, 장중 감사 재현). 가격 알림은 조용시간 밖의 같은 판정이 그 행을 되살리는데(25.797), 공시는 이 행이
+ * "오늘 이미 알렸다" 로 세어 DART 를 다시 묻지 않았고, 다음 날엔 그 접수번호를 이미 본 것으로 쳐 **영영 보내지 않았다**.
+ * 조용시간 안(0)에는 예전처럼 센다 — 묻지 않는다
+ */
 export const DISCLOSURE_ALERTS_FOR = `SELECT a.stock_id, a.data FROM json_each(?) j
-JOIN alerts a ON a.stock_id = j.value AND a.trigger_type = 'disclosure' AND a.trade_date = ?`;
+JOIN alerts a ON a.stock_id = j.value AND a.trigger_type = 'disclosure' AND a.trade_date = ?
+WHERE NOT (? = 1 AND a.sent_at IS 'quiet-skipped')`;
 
 /**
  * **몇 거래일 앞부터 공시를 묻나** (docs/infra.md 25.1075). 25.344 는 전 거래일부터 물었는데, DART 가 거래일 하나를 통째로
@@ -580,7 +587,8 @@ export const DISCLOSURE_LOOKBACK_SESSIONS = 2;
 
 /** 창(since 이상 오늘 미만)에 나간 공시 알림 — 같은 유니크 색인을 범위로 탄다 */
 export const DISCLOSURE_ALERTS_BETWEEN = `SELECT a.stock_id, a.data FROM json_each(?) j
-JOIN alerts a ON a.stock_id = j.value AND a.trigger_type = 'disclosure' AND a.trade_date >= ? AND a.trade_date < ?`;
+JOIN alerts a ON a.stock_id = j.value AND a.trigger_type = 'disclosure' AND a.trade_date >= ? AND a.trade_date < ?
+WHERE NOT (? = 1 AND a.sent_at IS 'quiet-skipped')`;
 
 /**
  * 창 안에서 종목마다 **가장 늦게 알린** `rcept_no` — `freshDisclosures` 의 경계 (25.1075).

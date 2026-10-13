@@ -17,10 +17,10 @@ const 계획 = (sql: string, ...args: Array<string | number>) =>
 
 describe("장중 경로가 alerts 를 통째로 훑지 않는다 (docs/infra.md 25.595)", () => {
   it("공시 알림 조회는 유니크 색인을 탄다", () => {
-    const p = 계획(DISCLOSURE_ALERTS_FOR, "[1,2]", "2026-09-28");
+    const p = 계획(DISCLOSURE_ALERTS_FOR, "[1,2]", "2026-09-28", 1);
     expect(p.some((d) => /SCAN a\b|SCAN alerts/.test(d)), p.join("\n")).toBe(false);
     // 두 거래일 창(25.1075)도 같은 색인을 범위로 탄다
-    const q = 계획(DISCLOSURE_ALERTS_BETWEEN, "[1,2]", "2026-10-07", "2026-10-09");
+    const q = 계획(DISCLOSURE_ALERTS_BETWEEN, "[1,2]", "2026-10-07", "2026-10-09", 1);
     expect(q.some((d) => /SCAN a\b|SCAN alerts/.test(d)), q.join("\n")).toBe(false);
   });
 
