@@ -3,6 +3,7 @@
  */
 
 import type { DispatchJob, DispatchResult } from "@/lib/dispatch";
+import { userDateOf } from "@/lib/market";
 
 export type VerdictKey = "check_holding" | "consider_buy" | "hold" | "reference" | "waiting" | "undecided";
 
@@ -426,6 +427,24 @@ export interface HubRow {
   computed_at: string;
   ticker: string;
   name: string;
+}
+
+/**
+ * 모아보기 한 줄이 묵었다고 보는 날수 (docs/infra.md 25.1254). 유니버스 의견은 거래일마다 다시 쓰여 주말을 끼면 3일까지 정상이고,
+ * 이보다 오래면 그 시장 의견 계산이 멈췄거나 한 번 돌린 "지금 분석"(참고 분석)이다. 휴장 연휴에도 노랗게 되지만 그때는 실제로 묵은 값이다
+ */
+export const HUB_STALE_DAYS = 4;
+
+/**
+ * 모아보기 한 줄의 기준 (docs/infra.md 25.1254). 예전에는 계산 시각을 읽고도 보이지 않아, 몇 달 전에 한 번 돌린 참고 분석이나 계산이 멈춘
+ * 시장의 의견이 "오늘 의견" 으로 읽혔다. 지우지 않고 날짜와 며칠 전을 붙인다
+ */
+export function hubAsOf(computedAt: string, now: Date): { text: string; stale: boolean } {
+  const t = Date.parse(computedAt);
+  if (Number.isNaN(t)) return { text: "기준 시각 모름", stale: true };
+  const 일 = Math.floor((now.getTime() - t) / 86_400_000);
+  const 날 = userDateOf(computedAt).slice(5);
+  return { text: 일 >= 1 ? `${날} 기준 · ${일}일 전` : `${날} 기준`, stale: 일 > HUB_STALE_DAYS };
 }
 
 /** 모아보기 묶음 — 결론별로 HUB_LIMIT 까지. 비어 있는 결론은 뺀다 */

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { FACTOR_NAME, VERDICT_STYLE, type HubRow, type Radar, type VerdictKey } from "@/lib/analysis";
+import { FACTOR_NAME, VERDICT_STYLE, hubAsOf, type HubRow, type Radar, type VerdictKey } from "@/lib/analysis";
 
 type Group = { key: VerdictKey; label: string; rows: HubRow[] };
 
@@ -31,6 +31,7 @@ export default function AnalysisHub() {
   }, []);
   if (error) return <p className="text-sm text-rose-600">{error}</p>;
   if (!groups) return <p className="py-4 text-sm text-slate-500">불러오는 중…</p>;
+  const now = new Date();
   return (
     <div className="space-y-4">
       {Object.entries(radars).map(([market, r]) => <RadarBlock key={market} market={market} r={r} />)}
@@ -45,6 +46,10 @@ export default function AnalysisHub() {
               <li key={r.stock_id}>
                 <Link href={`/stocks/${r.stock_id}#verdict`} className={`block rounded-lg border px-2.5 py-2 text-sm ${VERDICT_STYLE[r.verdict]}`}>
                   <span className="font-medium">{r.name}</span> <span className="text-xs opacity-70">{r.ticker}</span>
+                  {(() => {
+                    const a = hubAsOf(r.computed_at, now);
+                    return <span className={`ml-1.5 text-[11px] ${a.stale ? "font-medium text-amber-700 dark:text-amber-400" : "opacity-60"}`}>{a.text}</span>;
+                  })()}
                   <span className="block text-xs">{r.headline.replace(/^[^—]+—\s*/, "")}</span>
                 </Link>
               </li>
