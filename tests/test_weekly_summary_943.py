@@ -151,3 +151,12 @@ def test_머리_날짜는_한국_날짜이고_확인_실행은_미완이_아니�
     글 = ws.compose(runs, {j: "2026-10-10T00:00:00+00:00" for j in ws.EXPECTED_DAYS}, 지금, None)
     assert 글.startswith("[주간 운영 요약] 2026-09-28 ~ 2026-10-05")  # 지금 = 10-04 22:41 UTC = 10-05 07:41 KST
     assert "daily_kr: 성공 1 · 실패 1 · 확인 실행 1" in 글 and "미완" not in 글
+
+
+def test_국내_재무는_주_1회_기준으로_본다() -> None:
+    """월 1회 칸(40일)에 있어 다섯 번 내리 빠져도 몰랐다 (docs/infra.md 25.1285, 재무 감사 재현)."""
+    from pathlib import Path
+
+    wf = Path(__file__).resolve().parents[1] / ".github" / "workflows" / "financials.yml"
+    assert "* * 0" in wf.read_text(encoding="utf-8")  # 주 1회 예약
+    assert ws.EXPECTED_DAYS["financials"] <= 10

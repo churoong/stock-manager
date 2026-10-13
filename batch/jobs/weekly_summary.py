@@ -60,8 +60,11 @@ EXPECTED_DAYS: dict[str, int] = {
     "broker_stats": 10,  # 금요일만 기록을 연다 (25.995)
     "metrics": 10, "universe": 10, "valuation_bands": 10, "signal_outcomes": 10, "earnings_calendar": 10,
     "backup": 10,  # 주 1회
+    # 국내 재무는 **주 1회**(월요일, 화요일 재시도)다 — 월 1회 칸에 있어 다섯 번 내리 빠져도 41일째에야 말했다
+    # (docs/infra.md 25.1285, 재무 감사 재현). 새 사업보고서가 점수에 늦게 드는 것을 한 달 넘게 몰랐다
+    "financials": 10,
     "dividends": 20,  # 월 2회
-    "financials": 40, "us_financials": 40, "sectors": 40, "accumulation": 40, "etf": 40, "etf_satellite": 40,  # 월 1회
+    "us_financials": 40, "sectors": 40, "accumulation": 40, "etf": 40, "etf_satellite": 40,  # 월 1회
     "backtest": 40,  # 매달 3일 (25.942)
 }  # fmt: skip
 
