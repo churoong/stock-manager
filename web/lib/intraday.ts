@@ -287,8 +287,20 @@ export function evaluate(target: Target, quote: Quote, thresholds: Thresholds, w
   const push = (trigger: TriggerType, message: string, extra: Record<string, unknown>) =>
     hits.push({ stock_id: target.stock_id, trigger, message: `${target.name}: ${message}`, data: { ...base, ...extra } });
 
+  const high = quote.day_high ?? quote.price;
+  const low = quote.day_low ?? quote.price;
+  // **부동소수 여유** (docs/infra.md 25.726, 감사 재현). 평균단가 70,000 × (1 − 0.07) 이 65,099.99999… 로 계산돼, 화면엔 "손절선 65,100원" 인데
+  // 저가 65,100원에서 알림이 안 나갔다. 정확히 −10% 도 −9.999999999999998% 로 계산돼 급락이 안 났다. 경계는 "이상·이하" 가 규칙이다
+  const 여유 = 1e-9;
+  // **손절선에 닿은 날은 더 사라고 하지 않는다** (docs/infra.md 25.1263, 신호 감사 재현). 기간별 구간을 합치면(25.287) 장기 구간의
+  // 아래쪽이 단기 손절선보다 낮아, 같은 시세 90,000원에 "권장 매수 구간 진입" 과 "손절선 92,900원 터치" 가 함께 나갔다. 보유는 손절이
+  // 평균단가 기준이라 3차 계획가(65,100)가 손절(70,163) 아래면 "3차 가격 도달" 과 "손절선 터치" 가 함께 나갔다 — 25.1189 의 "손절에
+  // 닿은 보유에는 더 살 금액을 내지 않는다" 와 어긋난다. 손절 알림은 그대로 내고 매수 쪽 두 알림만 그날 거른다(관심 목표가는 사용자 값이라 둔다)
+  // 같은 잣대끼리 견준다 — 매수 구간은 현재가로 보므로 현재가가 손절선 이하일 때, 분할 차수는 저가로 보므로 저가가 닿았을 때 거른다
+  const 손절닿음 = target.stop_price !== null && low <= target.stop_price * (1 + 여유);
+  const 손절아래 = target.stop_price !== null && quote.price <= target.stop_price * (1 + 여유);
   const inZone =
-    target.buy_zone_low !== null && target.buy_zone_high !== null &&
+    !손절아래 && target.buy_zone_low !== null && target.buy_zone_high !== null &&
     quote.price >= target.buy_zone_low && quote.price <= target.buy_zone_high;
   if (inZone) {
     push("buy_zone", `권장 매수 구간 진입 ${fmt(quote.price, c)} (구간 ${fmt(target.buy_zone_low!, c)}~${fmt(target.buy_zone_high!, c)})`,
@@ -302,21 +314,16 @@ export function evaluate(target: Target, quote: Quote, thresholds: Thresholds, w
       { watch_buy_price: watchBuyPrice });
   }
 
-  const high = quote.day_high ?? quote.price;
-  const low = quote.day_low ?? quote.price;
   // 분할 매수 다음 차수 (25.999) — 1차를 산 보유 종목이 계획한 2·3차 가격에 닿았다. 당일 저가로 본다(5분 사이 터치도 잡는다)
-  if (target.next_tranche_price && target.next_tranche_step && low <= target.next_tranche_price * (1 + 1e-9)) {
+  if (!손절닿음 && target.next_tranche_price && target.next_tranche_step && low <= target.next_tranche_price * (1 + 1e-9)) {
     push("tranche", `분할 매수 ${target.next_tranche_step}차 가격 ${fmt(target.next_tranche_price, c)} 도달 (계획 ${target.next_tranche_step}/3, 저가 ${fmt(low, c)}, 현재 ${fmt(quote.price, c)})`,
       { next_tranche_price: target.next_tranche_price, next_tranche_step: target.next_tranche_step, day_low: low });
   }
-  // **부동소수 여유** (docs/infra.md 25.726, 감사 재현). 평균단가 70,000 × (1 − 0.07) 이 65,099.99999… 로 계산돼, 화면엔 "손절선 65,100원" 인데
-  // 저가 65,100원에서 알림이 안 나갔다. 정확히 −10% 도 −9.999999999999998% 로 계산돼 급락이 안 났다. 경계는 "이상·이하" 가 규칙이다
-  const 여유 = 1e-9;
   if (target.target_price !== null && high >= target.target_price * (1 - 여유)) {
     push("target", `목표가 ${fmt(target.target_price, c)} 터치 (고가 ${fmt(high, c)}, 현재 ${fmt(quote.price, c)})`,
       { target_price: target.target_price, day_high: high });
   }
-  if (target.stop_price !== null && low <= target.stop_price * (1 + 여유)) {
+  if (손절닿음 && target.stop_price !== null) {
     push("stop", `손절선 ${fmt(target.stop_price, c)} 터치 (저가 ${fmt(low, c)}, 현재 ${fmt(quote.price, c)})`,
       { stop_price: target.stop_price, day_low: low });
   }
