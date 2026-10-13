@@ -59,7 +59,10 @@ LEVERAGE_NAME_PATTERN = re.compile(
 #: 잡힌 "Global X S&P 500 Covered Call ETF"·버퍼 ETF·"Equity Premium Income" 이 핵심 추천과 "우리 종목 집중" 에
 #: 들었다. 정의처를 여기로 옮기고 위성도 이것을 쓴다
 US_OPTION_NAME_PATTERN = re.compile(
-    r"buywrite|covered call|premium income|option income|enhanced income|buffer|defined outcome|target income",
+    # collar·hedged equity·overlay·tail risk (25.1282, ETF 감사) — 칼라·풋 스프레드 덧씌움 상품("Hedged Equity Laddered
+    # Overlay", "Collar 95-110")은 위 낱말이 없어 분류가 Large Blend 면 넓은 지수로 들어왔다
+    r"buywrite|covered call|premium income|option income|enhanced income|buffer|defined outcome|target income"
+    r"|collar|hedged equity|overlay|tail risk",
     re.IGNORECASE,
 )
 

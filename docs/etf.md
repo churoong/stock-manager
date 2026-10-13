@@ -413,7 +413,7 @@ ETF 가 대개 액티브로 등록되는 제도상 이유가 있는 것으로 �
 | 조건 | 미국 | 국내 |
 |---|---|---|
 | 레버리지·인버스 아님 | 8.2 그대로 | 9.2 이름 규칙 그대로 |
-| 합성·커버드콜 아님 | **옵션형 이름 규칙 추가**: `buywrite` `covered call` `premium income` `option income` `enhanced income` `buffer` `defined outcome` `target income` 와 분류 `Derivative Income` `Defined Outcome` | 9.2 이름 규칙 + **기초지수 이름**에 `커버드콜` `Covered Call` `Premium` `콜매도` `BuyWrite` |
+| 합성·커버드콜 아님 | **옵션형 이름 규칙 추가**: `buywrite` `covered call` `premium income` `option income` `enhanced income` `buffer` `defined outcome` `target income` `collar` `hedged equity` `overlay` `tail risk`(뒤 넷은 25.1282) 와 분류 `Derivative Income` `Defined Outcome` | 9.2 이름 규칙 + **기초지수 이름**에 `커버드콜` `Covered Call` `Premium` `콜매도` `BuyWrite` |
 | 순자산 | $1B 이상 | 1,000억원 이상 |
 | 유동성 | 평균 거래량×종가 $5M 이상 | 20일 평균 거래대금 10억원 이상, 관측 15일 |
 | 운용 이력 | 배당·업종 **10년**, 테마 **3년** | 3년 (3년 전 응답에 있음) |
@@ -604,7 +604,7 @@ S_i       = 그 종목의 가장 새 장기 점수 = mean(밸류, 퀄리티) (sc
 전체 순위  = 후보 풀 전체를 T 내림차순.  덮은 비중 C 가 하한 미만이면 순위 없음
 ```
 
-- **옵션 전략 상품은 뺀다** (25.969): 야후 분류 `Derivative Income`(커버드콜·프리미엄 인컴, JEPI·QYLD·AIPI …)·`Defined Outcome`(버퍼). 국내 판정이 커버드콜·버퍼·옵션을 빼는 것과 같은 이유다
+- **옵션 전략 상품은 뺀다** (25.969): 야후 분류 `Derivative Income`(커버드콜·프리미엄 인컴, JEPI·QYLD·AIPI …)·`Defined Outcome`(버퍼). 국내 판정이 커버드콜·버퍼·옵션을 빼는 것과 같은 이유다. `Equity Hedged`(칼라·풋 덧씌움, 2026-10-13 25.1282 — 야후가 이 이름을 주는지 `[확인필요]`)도 뺀다. 이름 규칙에 `collar` `hedged equity` `overlay` `tail risk` 를 더했고(분류가 Large Blend 인 칼라·덧씌움), 주식+채권 비중 합이 105%(`etf_satellite.MAX_POSITION_SUM`)를 넘는 상품(90/60 같은 선물 레버리지)도 뺀다
 - 화면: 장기 적립 탭의 **첫 보기 "우리 종목 집중"** — 전체 순위 상위 30개(국내 상장은 무리마다 따로 80행을 읽어 같은 지수 상품을 한 카드로 묶는다 — 25.1201). 넓은 지수가 아닌 카드에는 "핵심을 대신하지 않습니다" 경고를 단다
 - 평균(A)은 카드에 함께 보인다. 분류 안 순위(11.2)는 핵심 통과끼리만 남긴다
 - **아직 효과를 보인 순위가 아니다.** 우리 점수가 앞으로의 수익을 예측하는지는 신호 성적표·백테스트가 판정한다(첫 국내 5일 보정은 36쌍으로 표본이 모자랐다, 25.949).

@@ -42,7 +42,9 @@ POOL_MIN_ASSETS_USD = 100_000_000
 #: 국내 판정이 커버드콜·버퍼·옵션을 빼는 것과 같은 이유(오래 들고 가며 복리로 불리는 적립과 목적이 반대).
 #: 2026-10-06 운영 실측: Derivative Income 31개(JEPI·QYLD·AIPI …)·Defined Outcome 8개(BUFR …)가 풀에 들어와
 #: AIPI 가 17위에 올랐다
-POOL_EXCLUDED_CATEGORIES = ("Derivative Income", "Defined Outcome")
+#: "Equity Hedged"(칼라·풋 덧씌움) — 모닝스타가 옛 옵션 분류를 나눌 때 함께 생긴 분류 (25.1282, ETF 감사).
+#: 야후가 이 이름 그대로 주는지는 실측 전 `[확인필요]` — 이름 거르기(`US_OPTION_NAME_PATTERN`)가 겹쳐 막는다
+POOL_EXCLUDED_CATEGORIES = ("Derivative Income", "Defined Outcome", "Equity Hedged")
 #: 시장 대비의 기준 — 미국 전체 시장 ETF
 MARKET_BENCHMARK = "VTI"
 #: 국내 지수 ETF 의 시장 대비 기준 — KODEX 200 (25.974). 국내 점수끼리만 견준다

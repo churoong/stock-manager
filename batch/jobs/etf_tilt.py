@@ -31,6 +31,7 @@ from batch.core.client import TursoClient
 from batch.core.entry import guard
 from batch.services import etf as etf_svc
 from batch.services import etf_tilt as tilt
+from batch.services.etf_satellite import MAX_POSITION_SUM
 from batch.sources import kis, kodex_pdf, sec_edgar, sec_nport
 
 log = logging.getLogger("etf_tilt")
@@ -42,7 +43,7 @@ def latest_picks(client: TursoClient) -> list[dict[str, Any]]:
     return client.execute(
         "SELECT pk.id AS pick_id, pk.etf_id, e.symbol, e.name, e.country, pk.bucket, pk.passed, pf.category,"
         " pk.as_of_date,"
-        " pf.stock_position, pf.total_assets"
+        " pf.stock_position, pf.bond_position, pf.total_assets"
         " FROM etf_picks pk JOIN etfs e ON e.id = pk.etf_id"
         " LEFT JOIN etf_profiles pf ON pf.etf_id = pk.etf_id AND pf.as_of_date = pk.as_of_date"
         " WHERE pk.as_of_date = (SELECT p2.as_of_date FROM etf_picks p2 CROSS JOIN etfs e2 ON e2.id = p2.etf_id"
@@ -111,6 +112,11 @@ def in_pool(pick: dict[str, Any], kodex_index: dict[str, str] | None = None) -> 
     if category in tilt.POOL_EXCLUDED_CATEGORIES:  # 옵션 전략 상품 (25.969)
         return False
     stock, assets = pick.get("stock_position"), pick.get("total_assets")
+    # **파생으로 부풀린 상품은 뺀다** (docs/infra.md 25.1282, ETF 감사 재현) — 위성 판정(`MAX_POSITION_SUM`)과
+    # 같은 문턱. 90/60 같은 선물 레버리지 상품(이름에 레버리지 낱말 없음)이 주식 90% 로 풀에 들어와 순위를 받았다
+    bond = pick.get("bond_position")
+    if isinstance(stock, int | float) and isinstance(bond, int | float) and stock + bond > MAX_POSITION_SUM:
+        return False
     return (
         isinstance(stock, int | float) and stock >= tilt.POOL_MIN_STOCK_POSITION
         and isinstance(assets, int | float) and assets >= tilt.POOL_MIN_ASSETS_USD
