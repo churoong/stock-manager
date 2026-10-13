@@ -452,24 +452,6 @@ export default function SettingsForm({ initial, initialWarnings, loadFailed = fa
               }
             />
             <NumberField
-              label="연금소득세 (시뮬레이션용)"
-              value={s.taxes.pension_income_pct}
-              suffix="%"
-              step={0.1}
-              nullable
-              hint="ETF 계좌별 탭의 세후 적립 시뮬레이션에만 씁니다. 연금으로 받을 때의 세율을 넣으세요(나이에 따라 다릅니다)"
-              onChange={(v) => patch((d) => ({ ...d, taxes: { ...d.taxes, pension_income_pct: v } }))}
-            />
-            <NumberField
-              label="연금저축 세액공제율 (시뮬레이션용)"
-              value={s.taxes.pension_credit_pct}
-              suffix="%"
-              step={0.1}
-              nullable
-              hint="ETF 계좌별 탭의 세후 적립 시뮬레이션에만 씁니다. 소득 구간에 따라 다릅니다"
-              onChange={(v) => patch((d) => ({ ...d, taxes: { ...d.taxes, pension_credit_pct: v } }))}
-            />
-            <NumberField
               label="무위험수익률"
               value={s.risk_free_manual.us_pct}
               suffix="%"
@@ -481,6 +463,25 @@ export default function SettingsForm({ initial, initialWarnings, loadFailed = fa
             />
           </>
         )}
+        {/* 연금 세율은 나라와 무관하다 — 예전엔 미국 탭에만 있어 국내 탭만 보는 사용자가 찾지 못했다 (25.1300) */}
+        <NumberField
+          label="연금소득세 (시뮬레이션용)"
+          value={s.taxes.pension_income_pct}
+          suffix="%"
+          step={0.1}
+          nullable
+          hint="ETF 계좌별 탭의 세후 적립 시뮬레이션에만 씁니다. 연금으로 받을 때의 세율을 넣으세요(나이에 따라 다릅니다)"
+          onChange={(v) => patch((d) => ({ ...d, taxes: { ...d.taxes, pension_income_pct: v } }))}
+        />
+        <NumberField
+          label="연금저축 세액공제율 (시뮬레이션용)"
+          value={s.taxes.pension_credit_pct}
+          suffix="%"
+          step={0.1}
+          nullable
+          hint="ETF 계좌별 탭의 세후 적립 시뮬레이션에만 씁니다. 소득 구간에 따라 다릅니다"
+          onChange={(v) => patch((d) => ({ ...d, taxes: { ...d.taxes, pension_credit_pct: v } }))}
+        />
       </Section>
 
       <Section

@@ -21,7 +21,7 @@ describe("세후 시뮬레이션", () => {
   });
 
   it("세율이 비면 숫자 없이 무엇을 넣을지 적는다", () => {
-    expect(taxSimLines(SIM)!.groups[0].lines[2]).toBe("일반 · 미국 상장 ETF: 설정 세율 미입력 (해외 양도소득세)");
+    expect(taxSimLines(SIM)!.groups[0].lines[2]).toBe("일반 · 미국 상장 ETF: 설정 세율 미입력 (해외 양도소득세 — 설정 화면 세금 칸)");
   });
 
   it("없으면 null", () => {

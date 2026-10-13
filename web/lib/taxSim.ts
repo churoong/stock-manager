@@ -53,7 +53,7 @@ export function taxSimLines(sim: TaxSim | null | undefined): { head: string; gro
         years: y,
         lines: rows.map((r) =>
           r.after_tax == null
-            ? `${r.label}: 설정 세율 미입력 (${r.missing.map((k) => 잎_이름[k] ?? k).join(", ")})`
+            ? `${r.label}: 설정 세율 미입력 (${r.missing.map((k) => 잎_이름[k] ?? k).join(", ")} — 설정 화면 세금 칸)`
             : `${r.label}: 세후 ${만원(r.after_tax)} (넣은 돈 ${만원(r.contributed)}, ` +
               `${(r.tax ?? 0) < 0 ? `세액공제가 세금보다 ${만원(-(r.tax ?? 0))} 많음` : `세금 ${만원(r.tax ?? 0)}`})` +
               `${r.after_tax === best && rows.filter((x) => x.after_tax != null).length > 1 ? " ← 가장 큼" : ""}`,
