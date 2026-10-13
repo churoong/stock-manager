@@ -13,7 +13,7 @@
 실제 수치다.
 
 연속 n일 = 그 시장의 가장 최근 리포트 날부터 거슬러 올라가며 빠짐없이 실린 날 수. 리포트가 없던 날(휴장·실패)은 세지
-않는다.
+않는다. **보냈지만 추천이 0건이던 날은 끊긴 날이다** (25.1275).
 """
 
 from __future__ import annotations
@@ -43,9 +43,13 @@ class PickHistory:
                 "streak": self.streak}  # fmt: skip
 
 
-def summarize(rows: list[dict[str, Any]]) -> dict[int, PickHistory]:
+def summarize(rows: list[dict[str, Any]], report_dates: list[str] | None = None) -> dict[int, PickHistory]:
     """`report_items`(recommend) 행 — {stock_id, trade_date, close} — 에서 종목마다 이력. 같은 날의 기간별 항목은 한
-    날이다."""
+    날이다.
+
+    `report_dates` 는 그 시장에 **보낸 리포트의 날** 전부 (docs/infra.md 25.1275, 리포트 감사 재현). 주면 연속을 그
+    날들로 센다 — 예전엔 추천이 한 건이라도 실린 날만 보아, "오늘 추천할 종목이 없습니다" 로 보낸 날을 건너뛰고 연속이
+    이어졌다(10-06·10-08 에만 실린 종목이 "연속 3일")."""
     by_stock: dict[int, dict[str, float | None]] = {}
     all_dates: set[str] = set()
     for r in rows:
@@ -60,7 +64,7 @@ def summarize(rows: list[dict[str, Any]]) -> dict[int, PickHistory]:
         # 같은 날 여러 기간 항목 — 종가는 같다. 먼저 온 값이 비었으면 뒤의 값으로 채운다
         if d not in days or days[d] is None:
             days[d] = float(close) if isinstance(close, int | float) else None
-    ordered = sorted(all_dates, reverse=True)
+    ordered = sorted(all_dates | set(report_dates or []), reverse=True)
     out: dict[int, PickHistory] = {}
     for sid, days in by_stock.items():
         dates = sorted(days)

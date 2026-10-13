@@ -2656,7 +2656,17 @@ def _pick_history(
     except Exception as exc:  # noqa: BLE001 — 영수증은 곁다리다. 리포트를 막지 않고 경고로 말한다
         warnings.append(f"지난 리포트 이력을 읽지 못해 추천 횟수 줄을 뺐습니다: {exc}")
         return None
-    return pick_history.summarize(rs.dicts())
+    # 보낸 리포트의 날 전부 — 추천 0건으로 보낸 날도 연속을 끊는다 (docs/infra.md 25.1275). 못 읽으면 예전처럼 센다
+    try:
+        보낸날 = [str(r[0]) for r in client.execute(
+            "SELECT trade_date FROM daily_reports WHERE market = ? AND trade_date < ? AND sent_at IS NOT NULL"
+            " ORDER BY trade_date DESC LIMIT 400",
+            [market, trade_date],
+        ).rows]  # fmt: skip
+    except Exception as exc:  # noqa: BLE001 — 영수증은 곁다리다
+        warnings.append(f"보낸 리포트 날짜를 읽지 못해 연속 추천을 추천이 실린 날로만 셉니다: {exc}")
+        보낸날 = None
+    return pick_history.summarize(rs.dicts(), 보낸날)
 
 
 def _shake_weights(client: TursoClient) -> tuple[dict[str, float] | None, float]:

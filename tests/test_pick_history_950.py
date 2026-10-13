@@ -77,3 +77,21 @@ class Test분할_띠:
         # 띠 끝은 적는다
         assert ph.history_line(h, 35000, 원).endswith("대비 -50.0%")
         assert ph.history_line(h, 140000, 원).endswith("대비 +100.0%")
+
+
+def test_추천_0건으로_보낸_날은_연속을_끊는다() -> None:
+    """추천이 실린 날만 보아 0건으로 보낸 날을 건너뛰고 "연속 3일" 이 됐다 (docs/infra.md 25.1275, 리포트 감사 재현)."""
+    from batch.services import pick_history as ph
+
+    rows = [{"stock_id": 1, "trade_date": "2026-10-06", "close": 100}, {"stock_id": 1, "trade_date": "2026-10-08", "close": 101}]
+    assert ph.summarize(rows)[1].streak == 2  # 보낸 날을 모르면 예전처럼
+    assert ph.summarize(rows, ["2026-10-06", "2026-10-07", "2026-10-08"])[1].streak == 1
+
+
+def test_일일_배치가_보낸_날을_넘긴다() -> None:
+    import inspect
+
+    from batch.jobs import daily
+
+    src = inspect.getsource(daily._pick_history)
+    assert "sent_at IS NOT NULL" in src and "pick_history.summarize(rs.dicts(), 보낸날)" in src
