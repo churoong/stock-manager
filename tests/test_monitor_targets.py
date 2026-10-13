@@ -720,8 +720,9 @@ def test_신호가_매일_다시_써져도_1차를_산_날의_계획을_잇는�
         "INSERT INTO trades (id, stock_id, side, trade_date, price, quantity, currency, fx_rate, fx_rate_source,"
         " created_at, updated_at) VALUES (1, 1, 'buy', '2026-09-11', 98, 1, 'KRW', 1, 'none', 't', 't')"
     )
-    # 9/11 신호(1차 98 → 2차 93)를 9/15 에도 잇는다 — 9/14 신호로 밀리지 않는다
-    assert job.next_tranche(mem, 1, date(2026, 9, 15)) == (93.0, 2, "2026-09-11")  # type: ignore[arg-type]
+    # 9/11 에 산 사람이 본 것은 9/10 신호(1차 100 → 2차 95)다 — 9/11 기준 신호는 9/12 아침에 나온다(25.1287).
+    # 9/15 에도 잇는다 — 9/14 신호로 밀리지 않는다
+    assert job.next_tranche(mem, 1, date(2026, 9, 15)) == (95.0, 2, "2026-09-10")  # type: ignore[arg-type]
 
 
 class Test유상증자_권리락은_막지_않는다_25_1139:

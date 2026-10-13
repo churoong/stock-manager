@@ -338,15 +338,18 @@ def next_tranche(client: TursoClient, stock_id: int, today: date) -> tuple[float
     """(다음 차수 가격, 차수, 계획 기준일). 1차를 산 날의 신호 계획을 그 뒤 매수 기록 수로 이어 본다
     (docs/intraday.md 2절 tranche).
 
-    **기준 신호는 "신호 뒤 첫 매수일 이하의 가장 최근 신호" 로 고정한다** (25.1005, 교차검증). 신호는 보유 중에도
+    **기준 신호는 "신호 뒤 첫 매수일 전의 가장 최근 신호" 로 고정한다** (25.1005 교차검증, 25.1287). 신호는 보유 중에도
     매일 다시 써지는데, 예전에는 가장 최근 신호일을 기준으로 삼아 기준일이 매일 밀렸고, 1차 매수가 기준일 앞으로
     빠져 매수 0번 → 알림 꺼짐이 됐다 — 2차가 필요한 바로 그때.
     창(`TRANCHE_PLAN_DAYS`) 안 첫 신호보다 앞선 매수는 계획 전 보유라 세지 않는다.
     매수 0번이면 잇지 않고, 3번 이상이면 끝났다."""
+    # **두 배 창으로 읽고 계획의 나이는 기준 신호로 잰다** (docs/infra.md 25.1287, 장중 감사 재현). 예전엔 신호를
+    # 30일 창만 읽어, 1차 매수가 창 밖으로 밀리면 2차 매수를 1차로 세고 그날 계획으로 다시 잡았다 — 9/02·9/20 에 산
+    # 종목이 10/05 에 "2차 84,870"(계획 3차 약 80,000 위)으로 네 번째 매수를 권했다. 기준 신호가 30일보다 오래면 끝이다
     신호 = client.execute(
         "SELECT as_of_date, tranche_plan, horizon FROM signals WHERE stock_id = ? AND as_of_date >= ?"
         " ORDER BY as_of_date, CASE horizon WHEN 'short' THEN 0 WHEN 'mid' THEN 1 ELSE 2 END, calc_version DESC",
-        [stock_id, (today - timedelta(days=TRANCHE_PLAN_DAYS)).isoformat()],
+        [stock_id, (today - timedelta(days=2 * TRANCHE_PLAN_DAYS)).isoformat()],
     ).rows
     if not 신호:
         return None, None, None
@@ -355,21 +358,26 @@ def next_tranche(client: TursoClient, stock_id: int, today: date) -> tuple[float
     for d, plan, 기간 in 신호:
         날별.setdefault(str(d), plan)  # 같은 날은 단기 → 중기 → 장기, 큰 calc_version 이 먼저
         기간별.setdefault(str(d), {}).setdefault(str(기간), plan)
+    # **신호일보다 뒤의 매수만** — 기준일 D 의 신호는 D+1 아침 배치가 낸다. D 에 산 사람은 D−1 신호의 카드를 봤다
+    # (docs/infra.md 25.1287, 장중 감사 재현 — 매수 스냅샷 `SNAPSHOT_AT` 은 이미 `<`, 25.678). 예전엔 `<=` 라 10-13 에
+    # 장기 카드(10-12 기준)로 산 종목이 10-13 기준 단기 신호의 계획(2차 99,000)으로 바뀌어 25.1262 가 되살아났다
     매수줄 = client.execute(
-        "SELECT trade_date, horizon FROM trades WHERE stock_id = ? AND side = 'buy' AND trade_date >= ?"
+        "SELECT trade_date, horizon FROM trades WHERE stock_id = ? AND side = 'buy' AND trade_date > ?"
         " ORDER BY trade_date",
         [stock_id, min(날별)],
     ).rows
     매수 = [str(r[0]) for r in 매수줄]
     if not 매수:
         return None, None, None
-    기준일 = max(d for d in 날별 if d <= 매수[0])  # 매수는 첫 신호일부터 읽었으니 늘 하나는 있다
+    기준일 = max(d for d in 날별 if d < 매수[0])  # 첫 신호일보다 뒤의 매수만 읽었으니 늘 하나는 있다
+    if 기준일 < (today - timedelta(days=TRANCHE_PLAN_DAYS)).isoformat():
+        return None, None, None
     # **1차를 산 기간의 계획을 잇는다** (docs/infra.md 25.1262, 신호 감사 재현). 같은 날 단기·장기 신호가 함께 있으면
     # 예전엔 늘 단기 계획을 골라, 장기 카드로 1차(103,000)를 산 사용자에게 2차를 단기 계획의 100,000 에서 알렸다 —
     # 장기 2차(84,100)보다 16% 위에서 더 사게 했다. 매매 기록의 기간(`trades.horizon`)이 그날 계획에 없으면 예전 순서
     첫_기간 = str(매수줄[0][1]) if 매수줄[0][1] else None
     계획 = json.loads((기간별[기준일].get(첫_기간) if 첫_기간 else None) or 날별[기준일] or "[]")
-    산 = sum(1 for d in 매수 if d >= 기준일)
+    산 = len(매수)
     if 산 < 1 or 산 >= len(계획):
         return None, None, None
     다음 = 계획[산]
