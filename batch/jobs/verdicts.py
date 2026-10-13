@@ -334,13 +334,24 @@ def evaluate_date(client: TursoClient, country: str, d: str, 달: int, now_close
         메움 = _fill_base_holes(client, 기준, str(d), warnings)
         if 메움 is None:
             return None
+    # **미국 분할이 재수집을 기다리는 종목은 기다린다** (docs/infra.md 25.1255, 미국 시세 감사 재현).
+    # 일일 배치는 최근 10일만 고쳐 쓰고 옛 행은 토요일 재수집까지 분할 전 값이라, 몇 달 전 기준 종가와
+    # 오늘(분할 뒤) 종가를 견주면 4:1 분할이 −75% 로 채점됐다 — 성적표는 더하기만 하고 `through` 가 넘어가
+    # 재수집 뒤에도 지워지지 않았다(25.1190 과 같은 모양). 거래정지와 같은 길(`못함` → `_pending`)로 미룬다
+    분할대기: set[int] = set()
+    if country == "US":
+        try:
+            분할대기 = db.split_pending_us(client)
+        except Exception as exc:  # noqa: BLE001 — 읽기 실패는 그 날을 다음에 다시 본다(25.1152 와 같은 처리)
+            warnings.append(f"분할 대기열을 읽지 못해 이 기록일 채점을 미룹니다: {type(exc).__name__}")
+            return None
     못함: list[int] = []
     for r in 기록줄:
         sid = int(r["stock_id"])
         if only is not None and sid not in only:
             continue
         b, n = (기준.get(sid) or {}).get("close"), (now_close.get(sid) or {}).get("close")
-        if b and not n:
+        if b and (not n or sid in 분할대기):
             못함.append(sid)
             continue
         if not b:
