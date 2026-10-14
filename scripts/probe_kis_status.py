@@ -25,7 +25,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from batch.core import db  # noqa: E402
 from batch.core.client import TursoClient  # noqa: E402
 from batch.services import universe as uv  # noqa: E402
 from batch.sources import kis  # noqa: E402
@@ -40,8 +39,9 @@ SUSPECT = {"iscd_stat_cls_code": {"51", "58"}, "sltr_yn": {"Y"}, "temp_stop_yn":
 SNAPSHOT_SQL = (
     "SELECT s.ticker, s.market, s.section_type, u.included, u.exclude_reason FROM universe_members u"
     " JOIN stocks s ON s.id = u.stock_id"
-    f" WHERE s.country = 'KR' AND u.snapshot_date = {db.latest_snapshot_sql()}"
-)
+    " WHERE s.country = 'KR' AND u.snapshot_date = (SELECT um.snapshot_date FROM universe_members um"
+    " CROSS JOIN stocks su ON su.id = um.stock_id WHERE su.country = ? ORDER BY um.snapshot_date DESC LIMIT 1)"
+)  # `db.latest_snapshot_sql()` 와 같은 서브쿼리 — 글자로 적어 스키마 검사가 읽게 한다
 
 
 def group_of(row: dict) -> str | None:
