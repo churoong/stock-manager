@@ -2573,6 +2573,10 @@ def _divergence_lines(
             DIVERGENCE_FLOWS_SQL, [ids, trade_date, (오늘 - timedelta(days=divergence.FLOW_DAYS * 3)).isoformat()]
         ).rows
         의견 = client.execute(DIVERGENCE_OPINIONS_SQL, [ids, trade_date, (오늘 - timedelta(days=400)).isoformat()]).rows
+        from batch.jobs import verdicts as _vj  # 분할·병합을 건넌 목표가는 견주지 않는다 (25.1343)
+
+        의견, _ = _vj._units_safe(client, list(의견), trade_date, lambda r: int(r[0]), lambda r: str(r[1]),
+                                warnings if warnings is not None else [])  # fmt: skip
     except Exception as exc:  # noqa: BLE001 — 곁다리. 표가 없으면 조용히, 그 밖의 실패는 경고로
         if not db.표가_없나(exc) and warnings is not None:
             warnings.append(_실패문("수급·의견 엇갈림 읽기", exc))

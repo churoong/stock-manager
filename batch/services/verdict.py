@@ -316,7 +316,7 @@ def outlook(*, close: float | None, close_date: str | None, currency: str, momen
             analog: dict | None = None, fundamentals: dict | None = None,
             broker_stats: dict[str, dict] | None = None, stress: dict | None = None,
             vol: dict | None = None, history: dict | None = None,
-            market_breakout: dict | None = None) -> dict:  # fmt: skip
+            market_breakout: dict | None = None, opinions_dropped: int = 0) -> dict:  # fmt: skip
     """가격·가치 진단 (docs/analysis.md 9장). 예측이 아니라 근거 있는 기준점 — 모든 값은 DB 행에서 온다.
 
     momentum: momentum_3m·momentum_6m·momentum_12_1·high_52w_proximity·as_of (factors.raw_json)
@@ -378,7 +378,11 @@ def outlook(*, close: float | None, close_date: str | None, currency: str, momen
         평균 = f", 평균 변경 {_pct(흐름['avg_change'])}" if 흐름["avg_change"] is not None else ""
         줄.append(f"목표가 흐름({흐름['window']}일): 올림 {흐름['raises']}·내림 {흐름['cuts']}{평균} · 중앙값 {길}")
         out["target_trend"] = 흐름
-    # 9.3 증권사 목표가
+    # 9.3 증권사 목표가 — 분할·병합 앞에 낸 의견은 부른 쪽이 이미 뺐다(`target_units`, 25.1343). 뺐으면 근거에 남긴다
+    if opinions_dropped:
+        evidence.append(_row("기업행위 전후 증권사 의견", f"{opinions_dropped}건 제외",
+                             "분할·병합 앞에 낸 목표가는 지금 주가와 단위가 달라 견주지 않음", "kr_opinions × prices",
+                             close_date))  # fmt: skip
     c = consensus(opinions, today, broker_stats)
     if c:
         괴리 = (c["median"] / close - 1) if close else None

@@ -489,6 +489,19 @@ def _safe(client: TursoClient, sql: str, args: list, warnings: list[str], what: 
         return []
 
 
+def _units_safe(client: Any, rows: list, today: str, stock_of: Any, date_of: Any,
+                warnings: list[str]) -> tuple[list, dict[int, int]]:  # fmt: skip
+    """분할·병합을 건넌 증권사 목표가를 뺀다 (`services/target_units`, 25.1343). 계수를 못 읽으면 그대로 두고 말한다."""
+    from batch.services import target_units
+
+    try:
+        return target_units.drop_across_actions(client, rows, today, stock_of, date_of)
+    except Exception as exc:  # noqa: BLE001 — 곁다리. 예전처럼 원 목표가로 두되 말한다
+        if not db.표가_없나(exc):
+            warnings.append(f"증권사 목표가의 기업행위 계수를 읽지 못해 그대로 썼습니다: {exc}")
+        return rows, {}
+
+
 def against_kr(client: TursoClient, ids: list[int], today: date, warnings: list[str],
                flows: dict[int, list[dict]] | None = None) -> dict[int, list[dict]]:  # fmt: skip
     """국내 반대 목소리와 공시 근거 (docs/analysis.md 5장). 종목 → [{text, evidence, against}].
@@ -507,6 +520,8 @@ def against_kr(client: TursoClient, ids: list[int], today: date, warnings: list[
             흐름 = client.execute(daily.DIVERGENCE_FLOWS_SQL, [oid, today.isoformat(), 흐름시작]).rows
         의견 = client.execute(daily.DIVERGENCE_OPINIONS_SQL,
                             [oid, today.isoformat(), (today - timedelta(days=400)).isoformat()]).rows  # fmt: skip
+        의견, _ = _units_safe(client, list(의견), today.isoformat(), lambda r: int(r[0]), lambda r: str(r[1]),
+                            warnings)  # 분할·병합을 건넌 목표가는 견주지 않는다 (25.1343)
     except Exception as exc:  # noqa: BLE001
         if not db.표가_없나(exc):
             warnings.append(f"수급·의견을 읽지 못했습니다: {exc}")
@@ -580,11 +595,15 @@ def outlook_inputs(client: TursoClient, country: str, as_of: str, today: date, w
         warnings.append(f"성과 지표를 읽지 못했습니다: {exc}")
         위험 = {}
     의견: dict[int, list[dict]] = defaultdict(list)
+    의견뺌: dict[int, int] = {}
     성적: dict[str, dict] = {}
     if country == "KR":
         성적 = {str(r["broker"]): r for r in _safe(client, BROKER_STATS_SQL, [], warnings, "증권사 성적표")}
         since = (today - timedelta(days=vd.CONSENSUS_DAYS)).isoformat()
-        for r in _safe(client, OPINIONS_SQL, [since], warnings, "증권사 목표가"):
+        의견행 = _safe(client, OPINIONS_SQL, [since], warnings, "증권사 목표가")
+        의견행, 의견뺌 = _units_safe(client, 의견행, today.isoformat(), lambda r: int(r["stock_id"]),
+                               lambda r: str(r["date"]), warnings)  # fmt: skip
+        for r in 의견행:
             의견[int(r["stock_id"])].append(r)
     국면: dict[int, dict] = {}
     # 오늘 시장 국면 (29장, 25.1054) — 주간 표가 칸을 나눈 기준 지수와 같은 지수, 추세 필터와 같은 정의
@@ -623,7 +642,7 @@ def outlook_inputs(client: TursoClient, country: str, as_of: str, today: date, w
     except Exception as exc:  # noqa: BLE001 — 0 으로 두고 그렇게 적는다
         warnings.append(f"무위험수익률을 읽지 못했습니다: {exc}")
         무위험 = None
-    return {"close": 종가, "momentum": 모멘텀, "band": 밴드, "risk": 위험, "opinions": 의견,
+    return {"close": 종가, "momentum": 모멘텀, "band": 밴드, "risk": 위험, "opinions": 의견, "opinions_dropped": 의견뺌,
             "market": market_returns(client, country, as_of, warnings), "rf": 무위험,
             "patterns": 국면, "fundamentals": 재무원값, "broker_stats": 성적, "regime": 시장국면,
             "market_breakout": 시장신고가}  # fmt: skip
@@ -644,6 +663,7 @@ def outlook_for(재료: dict, sid: int, currency: str, today: date, market: str 
         history=(재료.get("patterns") or {}).get(sid), market_breakout=재료.get("market_breakout"),
         close=c.get("close"), close_date=c.get("date"), currency=currency, momentum=재료["momentum"].get(sid),
         risk=재료["risk"].get(sid), band=b, opinions=재료["opinions"].get(sid, []), today=today,
+        opinions_dropped=(재료.get("opinions_dropped") or {}).get(sid, 0),
         band_note=(b or {}).get("skip_reason"),
         market=재료.get("market", {}).get(trend.index_for_market(market) or ""), rf=재료.get("rf"),
     )  # fmt: skip

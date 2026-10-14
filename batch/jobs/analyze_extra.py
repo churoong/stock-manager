@@ -363,10 +363,15 @@ def reference_outlook(client: TursoClient, country: str, as_of: str, meta: dict,
         warnings.append(f"성과 지표를 읽지 못했습니다: {exc}")
         위험 = None
     의견 = []
+    의견뺌: dict[int, int] = {}
     증권사성적: dict[str, dict] = {}
     if country == "KR":
         since = (today - timedelta(days=vd.CONSENSUS_DAYS)).isoformat()
         의견 = client.execute(ONE_OPINIONS_SQL, [sid, since]).dicts()
+        from batch.jobs import verdicts as _vj0  # 분할·병합을 건넌 목표가는 빼고 근거에 남긴다 (25.1343)
+
+        의견, 의견뺌 = _vj0._units_safe(client, 의견, today.isoformat(), lambda r: int(r["stock_id"]),
+                                    lambda r: str(r["date"]), warnings)  # fmt: skip
         try:  # 잘 맞힌 증권사 가중 (27장) — 일일 의견과 같은 성적표
             from batch.jobs import verdicts as _vj
 
@@ -391,6 +396,7 @@ def reference_outlook(client: TursoClient, country: str, as_of: str, meta: dict,
                        m.get("momentum_3m"), m.get("high_52w_proximity"))  # fmt: skip
     return vd.outlook(close=c.get("close"), close_date=c.get("date"), currency=str(meta.get("currency") or "KRW"),
                       momentum=(s or {}).get("momentum"), risk=위험, band=band, opinions=의견, today=today,
+                      opinions_dropped=의견뺌.get(sid, 0),
                       band_note=note, market=시장, rf=무위험, analog=국면,
                       fundamentals=(s or {}).get("fundamentals"), broker_stats=증권사성적,
                       vol=patterns.ewma_vol([str(d) for d, _ in 시세[-patterns.EWMA_DAYS :]],

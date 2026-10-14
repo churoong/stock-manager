@@ -676,7 +676,7 @@ class Test밸류_분모:
     "gross_profitability", "robustness", "column_rot", "calibration", "self_grade", "holding_scores",
     "pick_history", "etf_accounts", "etf_tilt", "after_hours", "broker_stats", "disclosure_reaction", "luck", "postmortem",
     "divergence", "tax_sim", "verdict", "forecast_track", "patterns", "insights", "history",
-    "event_history", "simulation", "candidate_factors", "cb_overhang", "buy_thesis", "plan_fill",
+    "event_history", "simulation", "candidate_factors", "cb_overhang", "buy_thesis", "plan_fill", "target_units",
 )  # fmt: skip
 
 #: 아직 그물 밖인 모듈과 **왜 아직인지**. 하나씩 줄여 간다
@@ -712,6 +712,7 @@ class Test밸류_분모:
     " `tests/test_calc_version_pick.py` 가 따로 본다",
     "VOL_ANN_EPS": "0 으로 나누기를 막는 엡실론이다. 판정 문턱이 아니라 수치 안정용이라"
     " 바뀌어도 사람이 읽는 규칙이 달라지지 않는다",
+    "CHUNK": "한 질의에 넣는 쌍 수(`target_units`, 25.1343)다. 읽기 묶음 크기라 결과가 달라지지 않는다",
 }
 
 
