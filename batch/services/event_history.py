@@ -13,6 +13,7 @@ import math
 import statistics
 from typing import Any
 
+from batch.core.rounding import fixed
 from batch.services import patterns as pt
 from batch.services import scoring as sc
 from batch.sources import dart
@@ -199,7 +200,8 @@ def short_surges(flows: list[dict], dates: list[str], closes: list[float]) -> di
 
 
 def _p(x: float) -> str:
-    return f"{x * 100:+.1f}%"
+    """수익률 글자 — .5 는 0 에서 멀어지게 (25.1105 규칙, 25.1334). 파이썬 `.1f` 는 이진 표현대로 잘라 웹과 어긋났다"""
+    return f"{fixed(x * 100, 1, sign=True)}%"
 
 
 REPORT_NAME = {"11013": "1분기", "11012": "반기", "11014": "3분기", dart.ANNUAL_REPORT_CODE: "사업"}
@@ -225,7 +227,7 @@ def lines(h: dict | None) -> list[str]:
     a = (q.get("h") or {}).get(str(SURGE_DAYS[0]))
     if q.get("events") and a:
         b = (q.get("base") or {}).get(str(SURGE_DAYS[0])) or {}
-        평소 = f" (평소 {_p(b['median'])}·{b['up'] * 100:.0f}%)" if b else ""
+        평소 = f" (평소 {_p(b['median'])}·{fixed(b['up'] * 100)}%)" if b else ""
         줄.append(f"공매도 급증 뒤({q['since']}~, {q['events']}번): {SURGE_DAYS[0]}거래일 뒤 중앙값 {_p(a['median'])}·"
-                  f"오른 비율 {a['up'] * 100:.0f}%{평소}")  # fmt: skip
+                  f"오른 비율 {fixed(a['up'] * 100)}%{평소}")  # fmt: skip
     return 줄

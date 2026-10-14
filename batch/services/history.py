@@ -13,6 +13,7 @@ import statistics
 from datetime import date, timedelta
 from typing import Any
 
+from batch.core.rounding import fixed
 from batch.services import patterns as pt
 
 #: 낙폭 회복 시간표의 깊이 단계 (31장). 흔히 쓰는 구분(−10% 조정·−20% 약세장)과 그 아래 한 칸을 빌린 **표시 기준** —
@@ -174,7 +175,8 @@ def market_breakout(raws: list[dict[str, list[float]]]) -> dict[str, Any] | None
 
 
 def _p(x: float) -> str:
-    return f"{x * 100:+.1f}%"
+    """수익률 글자 — .5 는 0 에서 멀어지게 (25.1105 규칙, 25.1334). 파이썬 `.1f` 는 이진 표현대로 잘라 웹과 어긋났다"""
+    return f"{fixed(x * 100, 1, sign=True)}%"
 
 
 def lines(h: dict | None, market_bo: dict | None, today_month: int) -> list[str]:
@@ -212,10 +214,10 @@ def lines(h: dict | None, market_bo: dict | None, today_month: int) -> list[str]
     if b1:
         평소 = (bo.get("base") or {}).get("1") or {}
         시장 = (market_bo or {}).get("1") or {}
-        견줌 = [f"{이름} {_p(x['median'])}·{x['up'] * 100:.0f}%"
+        견줌 = [f"{이름} {_p(x['median'])}·{fixed(x['up'] * 100)}%"
                 for 이름, x in (("이 종목 평소", 평소), ("시장 전체 신고가 뒤", 시장)) if x]  # fmt: skip
         줄.append(f"52주 신고가 뒤(지난 {bo['events']}번): 1개월 중앙값 {_p(b1['median'])}·"
-                  f"오른 비율 {b1['up'] * 100:.0f}%" + (f" ({'; '.join(견줌)})" if 견줌 else ""))  # fmt: skip
+                  f"오른 비율 {fixed(b1['up'] * 100)}%" + (f" ({'; '.join(견줌)})" if 견줌 else ""))  # fmt: skip
     return 줄
 
 
@@ -385,8 +387,8 @@ def vol_regime_line(v: dict | None) -> str | None:
         return None
     지금 = (v.get("buckets") or {}).get(str(v["bucket"])) or {}
     한달 = 지금.get("1")
-    뒤 = f" — 이 칸에서 1개월 뒤 중앙값 {_p(한달['median'])}·오른 비율 {한달['up'] * 100:.0f}%" if 한달 else ""
-    return (f"변동성 국면: 지금 한 달 변동성 {v['now'] * 100:.0f}%(자기 이력 {v['pct'] * 100:.0f}% 분위, "
+    뒤 = f" — 이 칸에서 1개월 뒤 중앙값 {_p(한달['median'])}·오른 비율 {fixed(한달['up'] * 100)}%" if 한달 else ""
+    return (f"변동성 국면: 지금 한 달 변동성 {fixed(v['now'] * 100)}%(자기 이력 {fixed(v['pct'] * 100)}% 분위, "
             f"{VOL_LABEL[v['bucket']]}){뒤}")
 
 
