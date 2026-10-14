@@ -14,6 +14,7 @@ import statistics
 from typing import Any
 
 from batch.services import patterns as pt
+from batch.services import scoring as sc
 from batch.sources import dart
 
 #: 실적 발표 반응을 재는 거래일 — 발표 전날 종가에서 1·5거래일 뒤 (40장)
@@ -86,8 +87,11 @@ def earnings_reactions(fin: list[dict], dates: list[str], closes: list[float],
         oi, oi0 = r.get("operating_income"), (p or {}).get("operating_income")
         # 통화가 바뀐 해(원화 → 달러 보고)끼리는 견주지 않는다 (25.1237, 25.919 같은 통화 규칙)
         같은통화 = not (p and r.get("currency") and p.get("currency") and r["currency"] != p["currency"])
-        yoy = (oi / oi0 - 1) if (같은통화 and isinstance(oi, (int, float)) and isinstance(oi0, (int, float))
-                                 and oi0 > 0) else None  # fmt: skip
+        # **짧은 사업연도와는 견주지 않는다** (docs/infra.md 25.1326, 20회차 P2) — 결산월을 바꾼 해(3개월)의 영업이익을
+        # 12개월과 견줘 "이익 감소" 로 셌다. 사업보고서 행에만 — 분·반기 행은 늘 350일 미만이다
+        짧음 = str(r["report_code"]) == dart.ANNUAL_REPORT_CODE and (sc.short_year(r) or sc.short_year(p))
+        yoy = (oi / oi0 - 1) if (같은통화 and not 짧음 and isinstance(oi, (int, float))
+                                 and isinstance(oi0, (int, float)) and oi0 > 0) else None  # fmt: skip
         칸: dict[str, Any] = {"date": d, "fiscal_year": int(r["fiscal_year"]), "report_code": str(r["report_code"]),
                              "yoy": round(yoy, 4) if yoy is not None else None}  # fmt: skip
         for n in REACTION_DAYS:
@@ -127,6 +131,8 @@ def return_sources(fin: list[dict], divs: list[dict], dates: list[str], closes: 
         return None
     if 시작.get("currency") and 끝.get("currency") and 시작["currency"] != 끝["currency"]:
         return None  # 통화가 바뀐 두 해의 이익은 견줄 수 없다 (25.1237)
+    if sc.short_year(시작) or sc.short_year(끝):
+        return None  # 짧은 사업연도의 순이익은 12개월과 견줄 수 없다 — 연환산하지 않는다 (25.1326)
     ni0, ni1 = 시작.get("net_income"), 끝.get("net_income")
     if not (isinstance(ni0, (int, float)) and isinstance(ni1, (int, float)) and ni0 > 0 and ni1 > 0):
         return None

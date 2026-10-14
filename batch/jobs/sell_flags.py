@@ -97,7 +97,8 @@ def load_holdings(client: TursoClient, today: date | None = None) -> tuple[list[
     for r in rows:
         sid = int(r["stock_id"])
         fin = client.execute(
-            "SELECT fiscal_year, operating_income, report_date, currency FROM financials WHERE stock_id = ?"
+            "SELECT fiscal_year, operating_income, report_date, currency, period_days"  # 짧은 사업연도 (25.1326)
+            " FROM financials WHERE stock_id = ?"
             " AND report_code = ? AND financials.consolidated ="
             " (SELECT fb.consolidated FROM financials fb"
             " WHERE fb.stock_id = financials.stock_id AND fb.report_code = financials.report_code"
@@ -240,6 +241,7 @@ def load_holdings(client: TursoClient, today: date | None = None) -> tuple[list[
                 op_income_latest=_f(latest.get("operating_income")), op_income_prev=_f(prev.get("operating_income")),
                 fiscal_year_latest=latest.get("fiscal_year"), fin_report_date=latest.get("report_date"),
                 op_income_currency=latest.get("currency"), op_income_prev_currency=prev.get("currency"),
+                op_income_period_days=(latest.get("period_days"), prev.get("period_days")),
                 universe_excluded_reason=(excluded or {}).get("exclude_reason"),
                 universe_date=(excluded or {}).get("snapshot_date"),
                 sentiment_delta_7d=_f(s0.get("delta_7d")), sentiment_negative_7d=int(s0.get("negative_count_7d") or 0),

@@ -190,7 +190,8 @@ def 시세_끝날(client: TursoClient, country: str, 기준: str) -> tuple[dict[
 # 재무·수급 사건 이력 (docs/analysis.md 40~42장, 25.1063) — 나라마다 한 번
 EVENT_FIN_SQL = (
     "SELECT f.stock_id, f.fiscal_year, f.report_code, f.consolidated, f.report_date, f.operating_income, f.net_income,"
-    " f.currency FROM financials f JOIN stocks s ON s.id = f.stock_id WHERE s.country = ? AND f.fiscal_year >= ?"
+    " f.currency, f.period_days"  # 짧은 사업연도 (25.1326)
+    " FROM financials f JOIN stocks s ON s.id = f.stock_id WHERE s.country = ? AND f.fiscal_year >= ?"
 )
 #: 보고서마다 **처음 접수한 날** (docs/infra.md 25.1237). `financials.report_date` 는 정정 공시가 오면
 #: 정정 접수일로 덮인다 — 실적 반응은 처음 발표 날 둘레를 재야 한다. 스냅샷은 정정을 새 행으로 쌓으므로

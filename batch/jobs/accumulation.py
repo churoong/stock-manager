@@ -104,7 +104,7 @@ def load_inputs(client: TursoClient, country: str = "KR") -> tuple[list[acc.Stoc
     latest_receipt: dict[int, tuple[int, str]] = {}
     for r in client.execute(
         "SELECT f.stock_id, f.fiscal_year, f.report_date, f.revenue, f.operating_income, f.net_income,"
-        "       f.total_equity, f.total_liabilities, f.retained_earnings, f.pretax_income, f.receipt_no"
+        "       f.total_equity, f.total_liabilities, f.retained_earnings, f.pretax_income, f.receipt_no, f.period_days"
         " FROM financials f JOIN stocks s ON s.id = f.stock_id"
         " WHERE s.country = ? AND f.report_code = ? AND f.consolidated = 1 AND f.fiscal_year BETWEEN ? AND ?",
         [country, ANNUAL, first_year, last_year],
@@ -126,6 +126,7 @@ def load_inputs(client: TursoClient, country: str = "KR") -> tuple[list[acc.Stoc
             total_liabilities=_f(r["total_liabilities"]),
             retained_earnings=_f(r["retained_earnings"]),
             pretax_income=_f(r["pretax_income"]),
+            period_days=int(r["period_days"]) if r.get("period_days") is not None else None,
         )
 
     # 같은 사업연도를 여러 보고서가 싣는다. 가장 나중 보고서의 값을 쓴다(오늘 시점 판정이다).

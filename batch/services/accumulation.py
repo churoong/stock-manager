@@ -13,6 +13,7 @@ from datetime import date
 
 from batch.services import criteria
 from batch.services import metrics as mt
+from batch.services import scoring as sc
 from batch.services.etf import percentile_scores
 
 CALC_VERSION = 1
@@ -77,6 +78,8 @@ class FinYear:
     total_liabilities: float | None
     retained_earnings: float | None
     pretax_income: float | None = None
+    #: 사업연도 일수 (25.1326) — 짧은 해가 창 안에 있으면 G8 아래 참고 행만 단다(판정은 그대로)
+    period_days: int | None = None
 
     def profit(self, pretax_proxy: bool) -> tuple[float | None, bool]:
         """G5·이익률에 쓰는 이익과 대리 여부. 영업이익이 있으면 늘 그것이다."""
@@ -373,6 +376,14 @@ def evaluate(inp: StockInput, years: list[int], thresholds: dict, as_of: date, r
     g8 = median is not None and agg.avg_roe is not None and agg.avg_roe >= median
     threshold = f"≥ 중앙값 {pct(median, 2)} (n={thresholds.get('roe_n')}, {today})"
     rows.append(_criterion("G8 수익성", f"5년 평균 ROE {pct(agg.avg_roe, 2)}", threshold, source_fin, fin_as_of, g8))
+    # **짧은 사업연도가 창 안에 있으면 참고 행** (docs/infra.md 25.1326, 20회차 P2).
+    # 몇 달치 순이익이 평균 ROE 를 끌어내린다 — 판정은 바꾸지 않는다(검증 A·B: 참고만).
+    # 없으면 행도 없다(모든 종목에 붙으면 잡음)
+    짧은해 = [f"FY{inp.years[y].fiscal_year} {inp.years[y].period_days}일" for y in years
+              if inp.years.get(y) is not None and sc.short_year({"period_days": inp.years[y].period_days})]  # fmt: skip
+    if 짧은해:
+        rows.append(_criterion("짧은 사업연도 포함", ", ".join(짧은해),
+                               "참고 — 12개월이 아닌 해의 ROE 가 평균에 들어감", source_fin, fin_as_of, None))
     if not g8:
         return fail("G8", "5년 평균 ROE 가 집단 중앙값 미만")
 

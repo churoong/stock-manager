@@ -13,8 +13,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date
+from typing import Any
 
 from batch.core.rounding import fixed, half_up
+from batch.services import scoring as sc
 from batch.services import sentiment
 
 # CLAUDE.md 매매 규칙 기본값. 설정 horizon_targets 가 있으면 그것을 쓴다
@@ -71,6 +73,14 @@ def _재무금액(value: float, currency: str | None) -> str:
     return f"{value:,.0f} {currency}" if currency else f"{value:,.0f} (통화 모름)"
 
 
+def _짧은해_주석(days: tuple[Any, Any]) -> str:
+    """적자 전환 근거의 기간 주석 (docs/infra.md 25.1326, 20회차 P2). 부호 판정이라 짧은 해의 손실도 진짜 손실이다 —
+    지우지 않고(검증 A·B: 보수) 어느 해가 12개월이 아닌지만 적는다. 기간을 모르면(옛 행) 아무것도 붙이지 않는다"""
+    붙임 = [f"{이름} 사업연도 {int(d)}일" for 이름, d in zip(("올해", "전년"), days, strict=True)
+            if sc.short_year({"period_days": d})]  # fmt: skip
+    return f" — {', '.join(붙임)}(12개월 아님)" if 붙임 else ""
+
+
 @dataclass
 class HoldingInput:
     stock_id: int
@@ -95,6 +105,8 @@ class HoldingInput:
     #: 재무 행의 표시 통화 (25.937). 종목 통화와 다를 수 있다(국내 상장사가 USD 로 보고 — 25.915)
     op_income_currency: str | None = None
     op_income_prev_currency: str | None = None
+    #: (올해, 전년) 사업연도 일수 — 짧은 해면 적자 전환 근거에 주석만 단다 (25.1326). 플래그는 지우지 않는다
+    op_income_period_days: tuple[Any, Any] = (None, None)
     universe_excluded_reason: str | None = None
     universe_date: str | None = None
     sentiment_delta_7d: float | None = None
@@ -214,7 +226,8 @@ def evaluate(h: HoldingInput, today: date, targets: dict | None = None) -> list[
         texts.append(f"FY{h.fiscal_year_latest} 영업이익 적자 전환")
         reasons.append(_criterion("영업이익 적자 전환",
                                   f"FY{h.fiscal_year_latest} {_재무금액(h.op_income_latest, h.op_income_currency)}"
-                                  f" (전년 {_재무금액(h.op_income_prev, h.op_income_prev_currency)})",
+                                  f" (전년 {_재무금액(h.op_income_prev, h.op_income_prev_currency)})"
+                                  f"{_짧은해_주석(h.op_income_period_days)}",
                                   "전년 흑자 → 올해 0 이하", "financials", h.fin_report_date))  # fmt: skip
     # **묵은 "지금 점수" 로는 판정하지 않는다** (docs/infra.md 25.564, 감사 재현). 유니버스에서 빠진 종목은 점수를 새로
     # 내지 않아 3월 점수가 9월에도 "지금" 으로 쓰였다 — 25.161 의 "묵은 값은 판정하지 않는다" 와 같은 잣대(종가 묵음
