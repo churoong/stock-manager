@@ -220,9 +220,12 @@ def evaluate(h: HoldingInput, today: date, targets: dict | None = None) -> list[
     # 11일)를 건다. 그 종목은 "점검" 플래그가 따로 뜬다
     점수나이 = _며칠_전(h.score_now_date, today)
     점수_쓸_수_있다 = 점수나이 is None or 점수나이 <= _종가_묵음_일수()
-    if (점수_쓸_수_있다 and h.score_now is not None and h.score_at_buy is not None
-            and h.score_at_buy - h.score_now >= SCORE_DROP_POINTS):
-        drop = h.score_at_buy - h.score_now
+    # 하락폭도 소수 여섯째 자리에서 반올림한다 (docs/infra.md 25.1323, 매도 플래그 감사 #1)
+    # — 점수는 소수 한 자리로 저장되고 64.1 − 44.1 = 19.99999… 라 "20점 이상" 이 빗나갔다
+    # (50~100 사이 정확히 20점 하락의 약 9%). 손익률(위)과 같은 처리
+    drop = (round(h.score_at_buy - h.score_now, 6)
+            if h.score_now is not None and h.score_at_buy is not None else None)  # fmt: skip
+    if 점수_쓸_수_있다 and drop is not None and drop >= SCORE_DROP_POINTS:
         texts.append(f"종합 점수 {fixed(h.score_at_buy)}→{fixed(h.score_now)}점")  # .5 올림 (25.1105)
         # 기준점을 다시 잡았으면 그렇다고 적는다 (25.961) — "매수 당시" 라고 하면 거짓이다
         기준 = (f"기준 재설정({h.score_at_buy_date}, 매수 뒤 계산 판·가중치가 바뀌어 같은 잣대의 첫 점수)"
