@@ -2479,6 +2479,8 @@ STALE_SIGNAL_SESSIONS = 1
 CORP_EVENT_DAYS = 10
 _행사_이름 = {"dividend": "배당 기준일", "bonus": "무상증자 기준일", "rights": "유상증자 기준일",
            "split": "액면교체·합병·분할 기준일"}  # fmt: skip
+#: 기준일 하루 전 거래일에 가격이 떨어지는 일 (25.1332). 액면교체·합병·분할은 매매정지 기간이 따로라 붙이지 않는다
+_락_이름 = {"dividend": "배당락", "bonus": "권리락", "rights": "권리락"}
 
 
 def _corp_event_lines(
@@ -2501,12 +2503,23 @@ def _corp_event_lines(
         if not db.표가_없나(exc) and warnings is not None:
             warnings.append(_실패문("기업행위 일정 읽기", exc))
         return []
+    # **이미 락이 지난 일정은 싣지 않는다** (docs/infra.md 25.1332, 배당 감사 #3). `trade_date` 는 리포트 전날(데이터의
+    # 날)이라 "기준일 > trade_date" 로는 리포트 날 기준일(락은 어제)이 "앞으로의 일정" 으로 실렸다 — 가격은 이미
+    # 빠졌는데
+    # "지금 사면 받는다" 로 읽혔다. 락일 = 기준일 하루 전 거래일, 리포트 날(trade_date 다음 거래일) 이상만. 락일을 함께
+    # 적는다
+    리포트날 = cal.next_session("KR", date.fromisoformat(trade_date))
     lines = []
     for r in rows:
         이름, 왜 = 종목[r["code"]]
         if r["kind"] == "dividend" and 왜 != "보유":
             continue
-        lines.append(f"· {이름}({r['code']}) {_행사_이름.get(r['kind'], r['kind'])} {r['record_date'][5:]} ({왜})")
+        락이름 = _락_이름.get(r["kind"])
+        락 = cal.previous_session("KR", date.fromisoformat(r["record_date"])) if 락이름 else None
+        if 락 is not None and 락 < 리포트날:
+            continue
+        덧 = f"{락이름} {락.isoformat()[5:]}, " if 락 is not None else ""
+        lines.append(f"· {이름}({r['code']}) {_행사_이름.get(r['kind'], r['kind'])} {r['record_date'][5:]} ({덧}{왜})")
     return [f"📅 기업행위 일정 ({CORP_EVENT_DAYS}일 안, 예탁원·KIS)", *lines] if lines else []
 
 
