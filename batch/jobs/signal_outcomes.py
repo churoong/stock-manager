@@ -286,7 +286,9 @@ def calibrations(
         말 = f"점수 보정표 — 점수를 읽지 못해 뺐다: {exc}"
         logging.getLogger("signal_outcomes").warning(말)
         return [], 말
-    return [cb.calibrate(cb.pairs_for(outcomes, scores, w), w).as_payload() for w in oc.WINDOWS], None
+    # 날짜 평균을 뺀 ρ — 기록만, 판정·화면에 쓰지 않는다 (25.1359, 23회차 P2). 보정표 payload 모양은 그대로
+    return [{**cb.calibrate(cb.pairs_for(outcomes, scores, w), w).as_payload(),
+             "demeaned": cb.demeaned_check(outcomes, scores, w)} for w in oc.WINDOWS], None  # fmt: skip
 
 
 def run(market: str) -> int:

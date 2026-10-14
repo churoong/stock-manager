@@ -156,6 +156,40 @@ def pairs_for(
     return out
 
 
+def demeaned_check(outcomes: list[Any], scores: dict[tuple[int, str], float], window: int) -> dict[str, Any]:
+    """**날짜 평균을 뺀** ρ — 기록만 (docs/signals.md 10.1, docs/infra.md 25.1359, 23회차 P2).
+
+    보정표의 ρ 는 여러 신호 날짜의 원 수익을 섞는다. 높은 점수가 시장이 오른 날에 몰리면 점수에 실력이 없어도 ρ 가 좋아
+    보인다(Fama·MacBeth 의 단면 원칙). 같은 날 신호가 둘 이상인 날짜만, 그날 수익 평균을 빼고 점수와 순위 상관을 낸다.
+    판정·화면에는 쓰지 않는다 — ρ 둘을 나란히 보이면 결과를 보고 좋은 쪽을 고르게 된다. 짝은 `pairs_for` 와 같은 규칙.
+    돌려주는 것: {window, n(쓴 짝), n_dates(쓴 날짜), n_stocks(쓴 종목), rho_demeaned(30건 미만이면 None)}"""
+    seen: set[tuple[int, str]] = set()
+    날별: dict[str, list[tuple[int, float, float]]] = {}
+    for o in outcomes:
+        key = (int(o.stock_id), str(o.as_of_date))
+        ret, score = o.rets.get(window), scores.get(key)
+        if key in seen or ret is None or score is None:
+            continue
+        seen.add(key)
+        날별.setdefault(str(o.as_of_date), []).append((int(o.stock_id), float(score), float(ret)))
+    xs: list[float] = []
+    ys: list[float] = []
+    종목: set[int] = set()
+    날수 = 0
+    for 줄 in 날별.values():
+        if len(줄) < 2:
+            continue
+        날수 += 1
+        평균 = sum(r for _s, _x, r in 줄) / len(줄)
+        for sid, x, r in 줄:
+            xs.append(x)
+            ys.append(r - 평균)
+            종목.add(sid)
+    rho = spearman(xs, ys) if len(xs) >= MIN_CORR_N else None
+    return {"window": window, "n": len(xs), "n_dates": 날수, "n_stocks": len(종목),
+            "rho_demeaned": None if rho is None else round(rho, 4)}  # fmt: skip
+
+
 def render_lines(cal: dict[str, Any] | Calibration) -> list[str]:
     """글 몇 줄. payload(dict)와 Calibration 둘 다 받는다 — 배치 출력과 웹이 같은 말을 하게."""
     d = cal.as_payload() if isinstance(cal, Calibration) else cal
