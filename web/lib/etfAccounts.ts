@@ -37,6 +37,19 @@ export function parseAccounts(raw: string | null): Record<Account, AccountCell> 
   }
 }
 
+/**
+ * 계좌 칸 한 줄 — 위성 카드용 (docs/etf.md 11.1, docs/infra.md 25.1381). 위성은 순위 없이 가능 여부만 배치가 적는데
+ * (`etf_satellite.to_row`) 화면 어디에도 안 보였다 — IRP 의 "위험자산 — 주식형 합계 70% 이하" 안내도 함께 묻혔다.
+ * 칸이 없으면(이 기능 전 판정) null
+ */
+export function accountsLine(cells: Record<Account, AccountCell> | null): string | null {
+  if (!cells) return null;
+  return ACCOUNTS.map(({ key, label }) => {
+    const c = cells[key];
+    return `${label} ${c.eligible ? "가능" : "불가"}${c.note ? `(${c.note})` : ""}`;
+  }).join(" · ");
+}
+
 export interface AccountTier {
   priority: number;
   country: string;

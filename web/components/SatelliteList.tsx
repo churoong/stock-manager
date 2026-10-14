@@ -6,6 +6,7 @@ import { money } from "@/lib/portfolio";
 import QuickTrade from "@/components/QuickTrade";
 import CriteriaTable from "@/components/CriteriaTable";
 import { ETF_STALE_AFTER_DAYS, formatAssets, formatPct } from "@/lib/etf";
+import { accountsLine, parseAccounts } from "@/lib/etfAccounts";
 import { parseWarnings, type SatelliteGroup, type SatelliteRow } from "@/lib/etfSatellite";
 import type { Country } from "@/lib/market";
 import { daysSince, parseCriteria } from "@/lib/recommend";
@@ -194,6 +195,11 @@ function SatelliteCard({ row }: { row: SatelliteRow }) {
         <p className={`mt-1 text-xs leading-relaxed text-slate-600 dark:text-slate-300 ${open ? "" : "line-clamp-2"}`}>
           {row.rationale_text}
         </p>
+        {/* 계좌별 가능 여부 — 배치가 적어 두고 화면이 안 보였다 (docs/infra.md 25.1381) */}
+        {(() => {
+          const 줄 = accountsLine(parseAccounts(row.rationale_data));
+          return 줄 ? <p className="mt-1 text-xs text-slate-500">계좌: {줄}</p> : null;
+        })()}
       </button>
       {/* 펼쳤으면 0줄이어도 그린다 — 그때는 빨간 경고가 뜬다 (docs/infra.md 25.71·25.174) */}
       {open ? (

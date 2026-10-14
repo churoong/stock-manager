@@ -2428,6 +2428,7 @@ SQL read operations are forbidden (reads are blocked, ...)
 | 25.1378 | 값 하나가 빈 넓은 미국 ETF 가 집중 목록에서 "넓은 지수 아님" 경고를 받았다 |
 | 25.1379 | 국내 ETF 카드가 "구성종목 경로가 없다" 고, 계좌 사유 문서가 "세율을 인용한다" 고 했다 — 사실대로 |
 | 25.1380 | 주간 요약에 Turso 월 쓰기 한도가 없었다 — 읽기와 같은 80% 규칙으로 |
+| 25.1381 | 위성 ETF 의 계좌별 가능 여부를 배치가 적고 화면이 안 보였다 |
 
 ### 25.1 왜 D1 인가
 
@@ -31389,3 +31390,11 @@ analysis.md 10.1 에 기하/산술 어긋남·가격지수 편향·추정 오차
 **고친 방식** — `db.remaining_write_budget_or_none` (읽기 쪽 `remaining_read_budget_or_none` 의 짝 — 못 읽으면 None; 기존 `remaining_write_budget` 은 모르면 한도 전체를 돌려줘 보고에 쓸 수 없다). 주간 요약 `run` 이 이번 달 쓴 쓰기 행을 내어 `compose(..., writes_used=)` 로 넘기고, 읽기 줄과 같은 함수(`reads_line(..., label="Turso 월 쓰기")`, 진도 앞섬·80% 규칙)로 한 줄을 싣는다. 넘기지 않은 옛 호출은 줄을 싣지 않는다(시험·다른 호출 그대로). 추가 읽기는 `api_usage` 한 행.
 
 **시험** — `tests/test_weekly_summary_943.py::test_월_쓰기도_같은_80퍼센트_규칙으로_싣는다`(8.5M/10M → 경고, None → "재지 못했습니다", 안 넘기면 줄 없음), `::test_쓰기_사용량은_못_읽으면_None`. **되돌리기 확인** — 쓰기 줄을 끄면 첫 시험이 깨진다.
+
+### 25.1381 위성 ETF 의 계좌별 가능 여부를 배치가 적고 화면이 안 보였다
+
+**무엇이 틀렸나 (하, ETF 감사 ⑥ — handoff 항목)** — 위성 ETF 판정(`etf_satellite.to_row`)은 통과한 ETF 마다 계좌별 가능 여부(`rationale_data.accounts`, 순위 없이 가능 여부만 — etf.md 11.1)를 적는데, 웹 어디에서도 읽지 않았다(`groupByAccount` 는 핵심 통과 행만 받는다). IRP 의 "위험자산 — 주식형 합계 70% 이하" 안내도 함께 묻혔다. 문서는 "위성은 가능 여부만 적는다" 고 해 보이는 것처럼 읽혔다.
+
+**고친 방식** — `etfAccounts.accountsLine(cells)`: 세 계좌를 "연금저축 가능 · IRP 가능(안내) · 일반계좌 가능" 한 줄로(칸이 없는 옛 판정은 null — 지어내지 않음). 위성 카드(`SatelliteList`)가 근거 문장 아래에 "계좌: …" 로 그린다. 계산은 그대로 배치 값. etf.md 11.1 한 줄, handoff 항목 지움.
+
+**시험** — `web/__tests__/satelliteAccounts1381.test.ts`(한 줄 모양, 칸 없으면 null, 카드가 그림). **되돌리기 확인** — 카드를 되돌리면 깨진다.
