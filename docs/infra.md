@@ -31393,6 +31393,7 @@ analysis.md 10.1 에 기하/산술 어긋남·가격지수 편향·추정 오차
 
 **고친 방식** — `db.remaining_write_budget_or_none` (읽기 쪽 `remaining_read_budget_or_none` 의 짝 — 못 읽으면 None; 기존 `remaining_write_budget` 은 모르면 한도 전체를 돌려줘 보고에 쓸 수 없다). 주간 요약 `run` 이 이번 달 쓴 쓰기 행을 내어 `compose(..., writes_used=)` 로 넘기고, 읽기 줄과 같은 함수(`reads_line(..., label="Turso 월 쓰기")`, 진도 앞섬·80% 규칙)로 한 줄을 싣는다. 넘기지 않은 옛 호출은 줄을 싣지 않는다(시험·다른 호출 그대로). 추가 읽기는 `api_usage` 한 행.
 
+**읽기 삼킴 검사** — `remaining_write_budget_or_none` 은 못 읽으면 None(모름)이라 `test_no_swallowed_reads` 면제 목록에 읽기 쪽 짝과 같은 사유로 더했다(전체 시험에서 걸려 같은 묶음에서 고침).
 **시험** — `tests/test_weekly_summary_943.py::test_월_쓰기도_같은_80퍼센트_규칙으로_싣는다`(8.5M/10M → 경고, None → "재지 못했습니다", 안 넘기면 줄 없음), `::test_쓰기_사용량은_못_읽으면_None`. **되돌리기 확인** — 쓰기 줄을 끄면 첫 시험이 깨진다.
 
 ### 25.1381 위성 ETF 의 계좌별 가능 여부를 배치가 적고 화면이 안 보였다

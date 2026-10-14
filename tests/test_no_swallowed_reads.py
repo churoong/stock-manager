@@ -27,6 +27,8 @@ from pathlib import Path
     ("batch/core/db.py", "db_size_note"): "리포트에 붙일 **말 한 줄**이다. 말하는 일이 배치를 죽이면 안 된다",
     ("batch/core/db.py", "d1_reads_today"): "모르면 None — 0 과 구별한다(25.30)",
     ("batch/core/db.py", "remaining_read_budget_or_none"): "모르면 None — 진도 문이 '모름' 과 '다 남음' 을 가른다(25.886)",
+    ("batch/core/db.py", "remaining_write_budget_or_none"): "모르면 None — 주간 요약이 '재지 못했습니다' 로 말한다(25.1380)."
+    " 읽기 쪽 짝과 같다",
     ("batch/jobs/backtest.py", "load_benchmark_closes"): "백테스트는 사람이 돌려 읽는다. 경고 로그가 남는다(25.221 알고 두는 것)",
     ("batch/notify/telegram.py", "discover_chat_ids"): "설정을 돕는 **후보 목록**이다(25.392). 못 찾아도 '보내지 않는다' 는 결론은 같고 오류 문구에서 후보만 빠진다",
     ("batch/jobs/backtest.py", "load_pit_dividends"): "백테스트의 배당 이력이다. 사람이 돌려 읽고 경고 로그가 남는다(25.221)",
