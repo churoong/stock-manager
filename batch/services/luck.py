@@ -66,23 +66,32 @@ def expected_max_sr(n_trials: int, var_sr: float) -> float:
     )
 
 
-def judge(series: dict[str, list[float]]) -> dict[str, dict]:
-    """전략 → 월별 초과수익 → 판정. 같은 실행의 전략들을 한꺼번에 넘긴다(N·V 를 그 묶음에서 낸다)."""
+def judge(series: dict[str, list[float]], n_floor: int | None = None) -> dict[str, dict]:
+    """전략 → 월별 초과수익 → 판정. 같은 실행의 전략들을 한꺼번에 넘긴다(V 를 그 묶음에서 낸다).
+
+    `n_floor` — 시도 수 N 의 하한 (docs/backtest.md 9장, docs/infra.md 25.1358, 23회차 P4). 일부 전략만 돌린 실행
+    (`--only-long` 은 N=3)이 같은 전략을 전체 실행(N=12)보다 덜 "운" 으로 보았다. N = max(이 실행, **이 앱에 등록된
+    전략 수**) — 판정은 더 보수적으로만 움직인다. 등록 수는 Bailey·López de Prado 의 누적 시도 수가 아니다(지난 회차에
+    탈락한 기법·문턱 변형이 빠짐 — 여전히 적게 센다). V 는 그 실행의 전략들로만 낸다 — 전략 하나면 V=0 이라 하한도
+    효과가 없다. 기본 실행은 N 이 이미 등록 수라 바뀌지 않는다"""
     m = {k: moments(v) for k, v in series.items()}
     srs = [x[0] for x in m.values() if x]
-    n = len(srs)
-    v = statistics.pvariance(srs) if n > 1 else 0.0
+    n_run = len(srs)
+    n = max(n_run, n_floor or 0)
+    v = statistics.pvariance(srs) if n_run > 1 else 0.0
     bar = expected_max_sr(n, v)
     out = {}
     for k, xs in series.items():
         mm = m[k]
         if not mm or len(xs) < MIN_MONTHS:
-            out[k] = {"months": len(xs), "n_trials": n, "verdict": f"판정 안 함(월 {len(xs)}개 < {MIN_MONTHS})"}
+            out[k] = {"months": len(xs), "n_trials": n, "n_trials_run": n_run,
+                      "verdict": f"판정 안 함(월 {len(xs)}개 < {MIN_MONTHS})"}  # fmt: skip
             continue
         sr, skew, kurt = mm
         p0, pd = psr(sr, 0.0, len(xs), skew, kurt), psr(sr, bar, len(xs), skew, kurt)
         out[k] = {
-            "months": len(xs), "n_trials": n, "sr_monthly": round(sr, 4), "sr_star": round(bar, 4),
+            "months": len(xs), "n_trials": n, "n_trials_run": n_run,
+            "sr_monthly": round(sr, 4), "sr_star": round(bar, 4),
             "psr": None if math.isnan(p0) else round(p0, 4), "dsr": None if math.isnan(pd) else round(pd, 4),
             "luck_pct": None if math.isnan(pd) else round((1 - pd) * 100, 1),
         }  # fmt: skip
@@ -92,5 +101,9 @@ def judge(series: dict[str, list[float]]) -> dict[str, dict]:
 def line(j: dict | None) -> str:
     if not j or j.get("luck_pct") is None:
         return (j or {}).get("verdict") or "판정 없음"
-    return (f"우연일 확률 {j['luck_pct']:.0f}% (DSR — 시도 {j['n_trials']}개, {j['months']}개월, "
+    # 하한이 걸렸으면 이 실행에서 돈 수를 함께 (25.1358)
+    run = j.get("n_trials_run")
+    하한 = run is not None and run < j["n_trials"]
+    시도 = f"{j['n_trials']}개" + (f"(이 실행 {run}개, 등록 전략 수 하한)" if 하한 else "")
+    return (f"우연일 확률 {j['luck_pct']:.0f}% (DSR — 시도 {시도}, {j['months']}개월, "
             f"월 초과 샤프 {j['sr_monthly']:+.2f} · 문턱 {j['sr_star']:.2f})")  # fmt: skip

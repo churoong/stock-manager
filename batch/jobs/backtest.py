@@ -93,6 +93,8 @@ CANDIDATE_STRATEGIES = ("momentum_sector", "ic_weighted", "shrink_missing")
 LONG_HOLD_DAYS = 365  # 장기 = 1년 이상 (CLAUDE.md 투자 기간). 들어간 뒤 1년은 신호가 꺼져도 들고 있다
 LONG_BAND_DAYS = sg.BAND_DAYS  # 정의처는 services/signals (docs/infra.md 25.108)
 DEFAULT_LONG_THRESHOLDS = (60.0, 55.0, 50.0)
+#: 운 판정(DSR)의 시도 수 하한 — 벤치마크를 뺀 등록 전략 + 기본 장기 문턱 (docs/backtest.md 9장, 25.1358)
+REGISTERED_TRIALS = len(STRATEGIES) - 1 + len(DEFAULT_LONG_THRESHOLDS)
 
 WARN_NO_HISTORICAL_UNIVERSE = "과거 유니버스 스냅샷 없음. 현재 유니버스를 전 기간에 썼다"
 # 시점 유니버스를 쓰면 위 경고 대신 이것이 붙는다. 고친 것과 못 고친 것을 함께 적는다
@@ -1892,10 +1894,11 @@ def run(
         # 운인가 실력인가 (docs/backtest.md 9장, 25.997) — 같은 실행에서 시험한 전략들을 한꺼번에 판정한다.
         # 비용 없는 사본(`*_no_cost`)은 같은 전략이라 시도 수에 넣지 않는다
         벤치월 = luck.monthly_returns(bench.curve)
+        # 시도 수 하한 = 이 앱에 등록된 전략 수 (25.1358, 23회차 P4) — 일부만 돌린 실행이 덜 "운" 으로 보지 않게
         운 = luck.judge({
             name: luck.excess_series(luck.monthly_returns(r.curve), 벤치월)
             for name, r in results.items() if name != "benchmark" and not name.endswith("_no_cost")
-        })  # fmt: skip
+        }, n_floor=REGISTERED_TRIALS)  # fmt: skip
         stored = 0
         for strategy, result in results.items():
             summary = bt.summarize(result, None if strategy == "benchmark" else bench, risk_free_annual=무위험)

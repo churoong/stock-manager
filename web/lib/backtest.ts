@@ -673,6 +673,7 @@ export function luckText(m: unknown): { cell: string; title: string | null } {
   const num = (k: string) => (typeof l[k] === "number" ? (l[k] as number) : NaN);
   return {
     cell: `${l.luck_pct.toFixed(0)}%`,
-    title: `DSR — 같은 실행에서 시험한 전략 ${num("n_trials")}개, ${num("months")}개월. 월 초과 샤프 ${num("sr_monthly").toFixed(2)} vs 우연 문턱 ${num("sr_star").toFixed(2)}. PSR(문턱 0) ${(num("psr") * 100).toFixed(0)}%`,
+    // 시도 수에 등록 전략 수 하한이 걸렸으면 이 실행에서 돈 수를 함께 (docs/infra.md 25.1358)
+    title: `DSR — 시도 ${num("n_trials")}개${num("n_trials_run") < num("n_trials") ? `(이 실행 ${num("n_trials_run")}개, 등록 전략 수 하한)` : ""}, ${num("months")}개월. 월 초과 샤프 ${num("sr_monthly").toFixed(2)} vs 우연 문턱 ${num("sr_star").toFixed(2)}. PSR(문턱 0) ${(num("psr") * 100).toFixed(0)}%`,
   };
 }

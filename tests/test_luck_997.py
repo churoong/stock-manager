@@ -56,3 +56,26 @@ def test_같은_수익도_시도가_많으면_우연일_확률이_오른다() ->
 def test_한_줄() -> None:
     j = {"luck_pct": 12.3, "n_trials": 8, "months": 60, "sr_monthly": 0.21, "sr_star": 0.15}
     assert luck.line(j) == "우연일 확률 12% (DSR — 시도 8개, 60개월, 월 초과 샤프 +0.21 · 문턱 0.15)"
+
+
+def test_시도_수_하한은_더_보수적으로만() -> None:
+    """일부만 돌린 실행(N=3)이 같은 전략을 전체 실행(N=12)보다 덜 운으로 보지 않는다 (25.1358, 23회차 P4)."""
+    import random
+
+    from batch.jobs import backtest as bt_job
+
+    rnd = random.Random(7)
+    묶음 = {f"s{i}": [rnd.gauss(0.004 * (i + 1), 0.03) for _ in range(48)] for i in range(3)}
+    셋 = luck.judge(묶음)
+    하한 = luck.judge(묶음, n_floor=bt_job.REGISTERED_TRIALS)
+    for k in 묶음:
+        assert 하한[k]["n_trials"] == 12 and 하한[k]["n_trials_run"] == 3
+        assert 하한[k]["sr_star"] >= 셋[k]["sr_star"]
+        assert 하한[k]["luck_pct"] >= 셋[k]["luck_pct"]
+    assert "이 실행 3개" in luck.line(하한["s0"])
+    # 기본 실행은 이미 등록 수 — 바뀌지 않는다
+    열둘 = {f"s{i}": [rnd.gauss(0.002 * i, 0.03) for _ in range(48)] for i in range(12)}
+    assert luck.judge(열둘) == luck.judge(열둘, n_floor=12)
+    assert "이 실행" not in luck.line(luck.judge(열둘, n_floor=12)["s1"])
+    등록 = len(bt_job.STRATEGIES) - 1 + len(bt_job.DEFAULT_LONG_THRESHOLDS)
+    assert 등록 == bt_job.REGISTERED_TRIALS
