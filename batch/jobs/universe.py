@@ -22,6 +22,7 @@ import json
 import logging
 import re
 import sys
+from collections.abc import Callable
 from datetime import UTC, date, datetime
 from typing import Any
 
@@ -32,9 +33,15 @@ from batch.core.client import TursoClient
 from batch.core.entry import guard
 from batch.services import pit_universe as pit
 from batch.services import universe as uni
+from batch.sources import kis
 
 log = logging.getLogger("universe")
 
+#: KIS 주식현재가 거래 ID (시세 조회, docs/infra.md 25.1330)
+KIS_PRICE_TR = "FHKST01010100"
+#: 이 몫보다 많이 실패하면 경고한다 — 몇 건의 일시 실패는 지금 판정 그대로 두면 되지만
+#: 대부분이 실패면 대조를 못 한 것이다 [확인필요: 첫 실행의 실패 수로 다시 본다]
+KIS_STATUS_FAIL_SHARE = 0.05
 JOB_NAME = "universe"
 
 # 야후에 시총을 종목마다 물으면 주간 배치로 감당하기 어렵다(월 230~314분). 그래서 SEC 주식수를 쓴다.
@@ -576,12 +583,46 @@ def stale_market_cap_warning(
     )
 
 
+#: (종목코드 목록) → ({종목코드: KIS 주식현재가 output}, 실패 수)
+KisStatusFetch = Callable[[list[str]], tuple[dict[str, dict], int]]
+
+
+def kis_status_fetcher(client: TursoClient) -> KisStatusFetch | None:
+    """KIS 주식현재가 상태 칸을 부르는 함수 (docs/infra.md 25.1330). 키가 없으면 None — 부르는 쪽이 경고한다.
+    시세 조회 API 만 쓴다(주문·계좌 아님). 토큰은 운영 배치와 같은 캐시(`api_tokens`)"""
+    if not kis.configured():
+        return None
+
+    def fetch(tickers: list[str]) -> tuple[dict[str, dict], int]:
+        from concurrent.futures import ThreadPoolExecutor
+
+        q = kis.QuoteClient(kis.access_token(client)[0])
+
+        def one(ticker: str) -> tuple[str, dict | None]:
+            try:
+                body = q.get(kis.Q + "inquire-price", KIS_PRICE_TR, {"FID_COND_MRKT_DIV_CODE": "J",
+                                                                     "FID_INPUT_ISCD": ticker})  # fmt: skip
+            except (kis.KisFailed, OSError):
+                return ticker, None
+            out = body.get("output") if isinstance(body, dict) else None
+            return ticker, out if isinstance(out, dict) else None
+
+        with ThreadPoolExecutor(max_workers=4) as ex:
+            got = list(ex.map(one, tickers))
+        return {t: o for t, o in got if o is not None}, sum(1 for _t, o in got if o is None)
+
+    return fetch
+
+
 def build_snapshot(
-    client: TursoClient, market: str, snapshot_date: str, *, dry_run: bool = False
+    client: TursoClient, market: str, snapshot_date: str, *, dry_run: bool = False,
+    kis_status: KisStatusFetch | None = None, info: dict[str, Any] | None = None,
 ) -> tuple[dict[str, int], list[str]]:
     """제외 규칙을 적용해 유니버스 스냅샷을 남긴다.
 
     `dry_run` 이면 **한 줄도 쓰지 않고** 판정 결과만 돌려준다.
+    `kis_status` 를 주면(국내) 소속부 판정을 지난 편입 종목을 KIS 종목 상태로 한 번 더 걸러낸다 (25.1330) —
+    그 결과(부른 수·실패·뺀 종목)는 `info["kis_status"]` 에 남는다(실행 기록 step_log)
     """
     country = "KR" if market.upper() == "KR" else "US"
     filters = (
@@ -676,6 +717,11 @@ def build_snapshot(
             )
         )
 
+    if country == "KR":
+        kis_warning = _kis_status_pass(rows, verdicts, rows_data, kis_status, info, dry_run)
+        if kis_warning:
+            warnings.append(kis_warning)
+
     빠진판정: list[uni.Verdict] = []  # 표시 경고(소속부 대조)와 섞지 않는다 — 소속부 목록과 줄이 어긋난다
     # **지난 스냅샷에 있던 종목이 마스터에서 빠졌으면 사유를 남긴다** (docs/infra.md 25.412).
     # 예전에는 active 만 판정해 폐지·제외 종목의 행이 다음 스냅샷에 **아예 없었다** — 왜 빠졌는지 기록이 없고,
@@ -729,6 +775,48 @@ def build_snapshot(
 
     _bulk_upsert_universe(client, rows_data)
     return 요약, warnings
+
+
+def _kis_status_pass(
+    rows: list[dict], verdicts: list[uni.Verdict], rows_data: list[tuple], fetch: KisStatusFetch | None,
+    info: dict[str, Any] | None, dry_run: bool,
+) -> str | None:
+    """**소속부를 지난 편입 종목을 KIS 종목 상태로 한 번 더 거른다** (docs/infra.md 25.1330, 20회차 P4 2단계).
+
+    탐침(25.1328)에서 코스피 편입 385종목의 소속부가 전부 빈 글자였다 — 코스피 관리종목은 소속부로는 한 번도 걸릴 수
+    없고, 거래정지는 시장 전체에서 0 이었다(편입인데 KIS 로 정지인 종목 1). 편입만 부른다(약 900건, 초당 10건).
+    - KIS 가 관리·정지·정리매매라 하면 그 사유로 뺀다(사유 글자는 기존 상수 그대로 — 화면·플래그가 같은 말을 쓴다)
+    - 응답이 없거나 실패한 종목은 **지금 판정 그대로**(편입) — 모르는 것을 결격으로 단정하지 않는다. 실패 수는 경고로
+    - 키가 없거나 시험 실행이면 부르지 않고 경고한다(키가 없어도 전 기능이 돌아야 한다 — CLAUDE.md)
+    `verdicts`·`rows_data` 는 같은 순서(같은 루프에서 쌓음)라 자리로 바꾼다. 돌려주는 것은 경고 한 줄 또는 None
+    """
+    if dry_run:
+        return None
+    if fetch is None:
+        return ("KIS 키가 없어 종목 상태 대조를 하지 않았습니다 — 코스피 관리종목·시장 전체 거래정지는"
+                " 소속부로 걸리지 않습니다 (25.1328)")  # fmt: skip
+    편입 = [i for i, v in enumerate(verdicts) if v.included]
+    try:
+        상태, 실패 = fetch([str(rows[i]["ticker"]) for i in 편입])
+    except Exception as exc:  # noqa: BLE001 — 대조는 덧붙임이다. 못 하면 지금 판정 그대로 두고 말한다
+        return f"KIS 종목 상태 대조를 하지 못했습니다(지금 판정 그대로): {str(exc)[:160]}"
+    뺀것: list[list[str]] = []
+    for i in 편입:
+        ticker = str(rows[i]["ticker"])
+        사유 = uni.kis_status_reason(상태.get(ticker))
+        if 사유 is None:
+            continue
+        verdicts[i] = uni.Verdict(included=False, reason=사유, listed_days=verdicts[i].listed_days)
+        rows_data[i] = (rows_data[i][0], rows_data[i][1], 0, 사유, *rows_data[i][4:])
+        out = 상태[ticker]
+        뺀것.append([ticker, 사유, str(out.get("iscd_stat_cls_code")), str(out.get("mang_issu_cls_code")),
+                    str(out.get("sltr_yn")), str(out.get("temp_stop_yn"))])  # fmt: skip
+    if info is not None:
+        info["kis_status"] = {"checked": len(편입), "answered": len(상태), "failed": 실패, "excluded": 뺀것,
+                              "source": kis.SOURCE, "at": db.now_iso()}  # fmt: skip
+    if 실패 > len(편입) * KIS_STATUS_FAIL_SHARE:
+        return f"KIS 종목 상태 대조 실패 {실패}/{len(편입)} — 그 종목들은 지금 판정 그대로 두었습니다"
+    return None
 
 
 # 종목마다 문장을 하나씩 보내면 8,000종목에 40번 넘게 왕복한다.
@@ -829,7 +917,9 @@ def run(market: str, *, dry_run: bool = False) -> int:
                 warnings += w
                 warnings += us_market_cap_warnings(client)
 
-            counts, w = build_snapshot(client, market, snapshot_date, dry_run=dry_run)
+            상태 = kis_status_fetcher(client) if market == "KR" and not dry_run else None
+            info: dict[str, Any] = {}
+            counts, w = build_snapshot(client, market, snapshot_date, dry_run=dry_run, kis_status=상태, info=info)
             warnings += w
         except Exception as exc:  # noqa: BLE001
             # **한도는 실패가 아니다** (docs/infra.md 25.1223). 여기서 1 을 돌려주면 `guard()` 가 한도를 못 봐
@@ -841,7 +931,7 @@ def run(market: str, *, dry_run: bool = False) -> int:
             print(f"실패: {exc}")
             return 1
 
-        step_log = {"master_rows": count, "universe": counts, "warnings": warnings}
+        step_log = {"master_rows": count, "universe": counts, "warnings": warnings, **info}
         if run_id is not None:
             db.finish_batch_run(
                 client,

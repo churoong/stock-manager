@@ -373,7 +373,7 @@ SQLite. 공통 규칙:
 **stocks** — 종목 마스터
 `id PK / ticker / market(KOSPI|KOSDAQ|NYSE|NASDAQ) / country(KR|US) / name_ko / name_en / sector / sector_code / sector_source / sector_updated_at / currency / yahoo_symbol / listed_date / listed_shares / market_cap / market_cap_date / security_group / section_type(소속부 — 관리종목 판정) / share_kind / isin / dart_corp_code / status(active|delisted|excluded) / source / fetched_at`
 
-> 2026-09-29 정정 (docs/infra.md 25.612): 예전 표의 `industry`·`shares_outstanding`·`is_spac`·`is_etf`·`delisted_date`·`status=halted|supervised` 는 만들지 않았다. 단일 정의처는 `migrations/` 다. 스팩은 이름으로, 관리종목·거래정지는 `section_type` 글자로 판정한다
+> 2026-09-29 정정 (docs/infra.md 25.612): 예전 표의 `industry`·`shares_outstanding`·`is_spac`·`is_etf`·`delisted_date`·`status=halted|supervised` 는 만들지 않았다. 단일 정의처는 `migrations/` 다. 스팩은 이름으로, 관리종목·거래정지는 `section_type` 글자로 판정한다. **2026-10-14 부터 국내는 소속부를 지난 편입 종목을 KIS 주식현재가 종목 상태(51 관리·58 정지·관리 지정·정리매매)로 한 번 더 거른다** — 코스피 소속부가 전부 빈 글자라 코스피 관리종목이 걸리지 않았다(docs/infra.md 25.1328 탐침, 25.1330). 모르면(키 없음·실패) 지금 판정 그대로
 유니크 `(ticker, market)`
 
 **universe_members** — 주 1회 스냅샷

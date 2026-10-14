@@ -116,6 +116,29 @@ class Verdict:
     listed_days: int | None
 
 
+#: KIS 주식현재가(`FHKST01010100`) 종목 상태 코드 → 제외 사유 (docs/infra.md 25.1330). 뜻은 2026-10-14 탐침(25.1328)의
+#: 분포로 읽었다 — 소속부로 걸린 관리종목 131 이 51(63)·58(67), 편입 894 는 거의 55·57. KIS 코드표 원문은 `[확인필요]`
+KIS_SUPERVISED_CODES = frozenset({"51"})
+KIS_HALTED_CODES = frozenset({"58"})
+
+
+def kis_status_reason(out: dict | None) -> str | None:
+    """KIS 상태 칸으로 본 제외 사유. 모르면(칸 없음·응답 없음) None — **모름은 편입 그대로**(지금 판정을 바꾸지 않는다).
+
+    순서는 `judge` 와 같다 — 정리매매 → 거래정지 → 관리종목. 경고 단계 코드(투자경고·위험·단기과열)는 보지 않는다
+    (20회차 검증 B — 25.1268 투자주의환기 플래그와 겹친다)"""
+    if not out:
+        return None
+    상태 = str(out.get("iscd_stat_cls_code") or "")
+    if str(out.get("sltr_yn") or "") == "Y":
+        return REASON_LIQUIDATION
+    if 상태 in KIS_HALTED_CODES or str(out.get("temp_stop_yn") or "") == "Y":
+        return REASON_HALTED
+    if 상태 in KIS_SUPERVISED_CODES or str(out.get("mang_issu_cls_code") or "") == "Y":
+        return REASON_SUPERVISED
+    return None
+
+
 # 소속부에 이 말이 들어가면 관리종목으로 본다.
 # 거래소가 쓰는 표기를 그대로 받으므로 포함 여부로 판정한다.
 SUPERVISED_MARKERS = ("관리", "투자주의환기")
