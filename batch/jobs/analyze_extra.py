@@ -499,6 +499,14 @@ def analyze(client: TursoClient, country: str, rows: list[dict], warnings: list[
     from batch.jobs import verdicts as vj
 
     보유 = {int(r["stock_id"]): r for r in vj._safe(client, vj.POSITIONS_SQL, [country], warnings, "보유")}
+    # **매도 플래그도 넘긴다** (docs/infra.md 25.1335, 분석 화면 감사 #1). 매도 플래그 작업은 유니버스와 상관없이 모든
+    # 보유를 본다(25.1268) — 넘기지 않아 유니버스 밖 보유가 손절 플래그가 떠 있어도 "보유 유지 — 매도 플래그 없음"
+    # 이었다
+    플래그: dict[int, list[dict]] = {}
+    if 보유:
+        for f in vj._safe(client, vj.FLAGS_SQL, [country], warnings, "매도 플래그"):
+            플래그.setdefault(int(f["stock_id"]), []).append(
+                {"level": f["level"], "rationale_text": f["rationale_text"], "as_of": f["as_of_date"]})
     곁 = vj.against_kr(client, sorted(점수), cal.user_today(), warnings) if country == "KR" and 점수 else {}
     stamp = db.now_iso()
     out: dict[int, dict] = {}
@@ -514,6 +522,7 @@ def analyze(client: TursoClient, country: str, rows: list[dict], warnings: list[
             score=None if s is None else {**s, "skip_reason": s.get("skip_reason") or (f"유니버스 밖({사유})"
                                                                                        if sid in hard else None)},
             position=vd.position_of(p),
+            flags=플래그.get(sid, []),
             against=[a for a in 곁.get(sid, []) if a["against"]],
             checks=판정.get(sid, []),
             excluded_reason=사유,
