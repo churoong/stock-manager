@@ -172,3 +172,17 @@ def test_배당은_연_2회라_가을에_묵음이_아니다() -> None:
     assert "dividends" in dict(ws.stale_jobs(last, 지금))
     cron = (뿌리 / ".github/workflows/dividends.yml").read_text(encoding="utf-8")
     assert '"41 18 5 4,5 *"' in cron  # 일정이 바뀌면 기대 주기도 다시 본다
+
+
+def test_예정된_건너뜀은_문제로_세지_않는다() -> None:
+    """겨울 미국 이른 cron·휴장일 건너뜀이 "건너뜀" 으로 세어져 "전부 성공" 이 안 나왔다 (25.1372, 주간 요약 감사)."""
+    이른 = ws.Run("daily_us", "US", "skipped", "2026-10-01T12:27:00+00:00", None, (),
+                "개장까지 123분 남아 아직 이릅니다. 다음 예약에 맡깁니다")  # fmt: skip
+    휴장 = ws.Run("daily_kr", "KR", "skipped", "2026-10-09T23:27:00+00:00", None, (), "국내 시장 휴장일")
+    성공 = _run("daily_us", "success", "2026-10-01T13:27:00+00:00", market="US")
+    글 = ws.compose([이른, 휴장, 성공], {j: "2026-10-04T00:00:00+00:00" for j in ws.EXPECTED_DAYS}, 지금, 10_000_000)
+    assert "전부 성공" in 글 and "건너뜀" not in 글
+    # 진짜 놓침은 그대로 문제다
+    늦음 = ws.Run("daily_us", "US", "skipped", "2026-10-02T21:00:00+00:00", None, (), "이미 장이 끝났습니다 (개장 400분 경과)")
+    글 = ws.compose([늦음, 성공], {j: "2026-10-04T00:00:00+00:00" for j in ws.EXPECTED_DAYS}, 지금, 10_000_000)
+    assert "daily_us: 성공 1 · 건너뜀 1" in 글

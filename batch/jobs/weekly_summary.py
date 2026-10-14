@@ -85,6 +85,15 @@ class Run:
     started_at: str
     error_text: str | None
     warnings: tuple[str, ...]
+    #: 건너뛴 까닭(`step_log.decision`) — 예정된 건너뜀을 가른다 (25.1372)
+    decision: str | None = None
+
+
+#: **예정된 건너뜀** — 고장이 아니다 (docs/infra.md 25.1372, 주간 요약 감사 재현). 미국 일일 배치는 서머타임을 덮으려고
+#: 12:27·13:27 UTC 두 번 걸려 있어 겨울에는 12:27 이 늘 "개장까지 123분 남아 아직 이릅니다" 로 건너뛰고,
+#: 휴장일은 트리거마다 건너뜀을 남긴다. 이것을 문제로 세어 겨울 내내 "daily_us: 성공 4 · 건너뜀 4" 가 실리고
+#: "전부 성공" 이 나오지 않았다 — 진짜 놓침("이미 장이 끝났습니다")과 구별되지 않았다
+_예정된_건너뜀 = ("휴장일", "아직 이릅니다")
 
 
 def load_runs(client: TursoClient, since: str) -> list[Run]:
@@ -96,13 +105,17 @@ def load_runs(client: TursoClient, since: str) -> list[Run]:
     out: list[Run] = []
     for r in rows:
         경고: tuple[str, ...] = ()
+        까닭: str | None = None
         try:
             로그 = json.loads(r["step_log"]) if r["step_log"] else {}
             if isinstance(로그, dict) and isinstance(로그.get("warnings"), list):
                 경고 = tuple(str(w) for w in 로그["warnings"])
+            if isinstance(로그, dict) and isinstance(로그.get("decision"), str):
+                까닭 = 로그["decision"]
         except (TypeError, ValueError):
             pass
-        out.append(Run(str(r["job_name"]), r["market"], str(r["status"]), str(r["started_at"]), r["error_text"], 경고))
+        out.append(Run(str(r["job_name"]), r["market"], str(r["status"]), str(r["started_at"]), r["error_text"], 경고,
+                       까닭))  # fmt: skip
     return out
 
 
@@ -123,8 +136,13 @@ def status_counts(runs: list[Run]) -> dict[str, dict[str, int]]:
     out: dict[str, dict[str, int]] = {}
     for r in runs:
         칸 = out.setdefault(
-            r.job_name, {"success": 0, "partial": 0, "failed": 0, "skipped": 0, "running": 0, "dryrun": 0}
+            r.job_name,
+            {"success": 0, "partial": 0, "failed": 0, "skipped": 0, "running": 0, "dryrun": 0, "planned_skip": 0},
         )
+        # 예정된 건너뜀(휴장일·서머타임 이른 cron)은 문제가 아니다 (25.1372) — 따로 센다
+        if r.status == "skipped" and r.decision and any(k in r.decision for k in _예정된_건너뜀):
+            칸["planned_skip"] += 1
+            continue
         # 손으로 돌린 확인 실행(`dryrun`, 보내지 않음)은 **미완이 아니다** (25.1274, 리포트 감사) — 예전엔 아는 다섯
         # 상태 밖이라 "미완" 으로 세어 멈춘 실행처럼 보였다
         칸[r.status if r.status in 칸 else "running"] += 1
