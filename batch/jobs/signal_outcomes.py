@@ -20,6 +20,7 @@ from batch.core.entry import guard
 from batch.services import adjust as adj
 from batch.services import calibration as cb
 from batch.services import outcomes as oc
+from batch.services import plan_fill as pf
 from batch.services import trend
 
 log = logging.getLogger("signal_outcomes")
@@ -48,7 +49,7 @@ def load_signals(client: TursoClient, country: str, since: str) -> list[dict[str
     규칙(나라·기준일마다 MAX 판)과 같게 한다. 같은 판 안에서 겹치면 그대로 마지막 행."""
     rs = client.execute(
         "SELECT sg.stock_id, sg.as_of_date, sg.horizon, sg.target_price, sg.stop_price, s.market, sg.calc_version,"
-        " sg.rationale_data"
+        " sg.rationale_data, sg.tranche_plan"  # 분할 계획 체결 성적 (25.1327) — 같은 행의 칸 하나
         " FROM signals sg JOIN stocks s ON s.id = sg.stock_id"
         " WHERE s.country = ? AND sg.as_of_date >= ? ORDER BY sg.stock_id, sg.as_of_date, sg.horizon, sg.calc_version",
         [country, since],
@@ -221,7 +222,11 @@ def store(
     client.batch(statements)
 
 
-def compute(client: TursoClient, country: str, today: str) -> tuple[list[oc.Outcome], list[oc.Stat]]:
+def compute(
+    client: TursoClient, country: str, today: str, plan: list[pf.PlanFill] | None = None
+) -> tuple[list[oc.Outcome], list[oc.Stat]]:
+    """`plan` 을 넘기면 창 안 신호의 분할 계획 체결 성적(docs/signals.md 10.2)을 거기에 더한다.
+    굳은 성적은 계획이 없다"""
     since = since_of(today)
     signals = load_signals(client, country, since)
     frozen = load_frozen(client, country, since)
@@ -246,6 +251,8 @@ def compute(client: TursoClient, country: str, today: str) -> tuple[list[oc.Outc
                 끝날.get(str(sig.get("market"))) or (끝날.get(country) if country != "KR" else None),
             )  # fmt: skip
         )
+        if plan is not None and (f := pf.evaluate(sig, results[-1], closes.get(sid, []), raw.get(sid))) is not None:
+            plan.append(f)
     return results, oc.summarize(results + frozen)
 
 
@@ -290,7 +297,8 @@ def run(market: str) -> int:
         today = datetime.now(UTC).date().isoformat()
         run_id = db.start_batch_run(client, job_name=JOB_NAME, market=country, trade_date=today)
         try:
-            results, stats = compute(client, country, today)
+            계획: list[pf.PlanFill] = []
+            results, stats = compute(client, country, today, 계획)
             now = db.now_iso()
             store(client, country, [to_row(o, now) for o in results], stats, now, since_of(today))
             # 점수 보정표 (docs/signals.md 10.1, 25.949) — 굳은 성적까지 포함해 점수와 수익을 짝짓는다
@@ -302,7 +310,8 @@ def run(market: str) -> int:
         db.finish_batch_run(
             client, run_id, status="success",
             step_log={"signals": len(results), "stats": [(s.horizon, s.window, s.n) for s in stats],
-                      "calibration": 보정, "warnings": [보정_경고] if 보정_경고 else []},
+                      "calibration": 보정, "plan_fill": pf.summarize(계획),  # 기록 전용 (signals.md 10.2)
+                      "warnings": [보정_경고] if 보정_경고 else []},
         )  # fmt: skip
         print(f"신호 성적표 {country}: 신호 {len(results)}건")
         for 표 in 보정:

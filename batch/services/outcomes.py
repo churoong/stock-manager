@@ -52,6 +52,22 @@ def _ret(later: float | None, base: float) -> float | None:
     return None if later is None or base <= 0 else later / base - 1
 
 
+def unit_ratio(
+    signal: dict[str, Any], closes: list[tuple[str, float]], raw_closes: dict[str, float] | None,
+    entry_date: str, entry: float,
+) -> float:
+    """신호 날 가격(목표·손절·분할 가격)을 지금 수정주가 단위로 옮기는 배수 (25.208·25.215).
+
+    신호 날 기준 종가(`ref_close`)가 있으면 지금 계열의 그날 종가 ÷ 그것. 없으면(옛 신호) 진입일의 (수정 ÷ 원래).
+    분할 계획 체결 성적(`plan_fill`, 25.1327)도 같은 배수를 쓴다 — 새 여유 계수가 아니다"""
+    ref = signal.get("ref_close")
+    지금_그날 = dict(closes).get(str(signal["as_of_date"]))
+    if ref and float(ref) > 0 and 지금_그날 and 지금_그날 > 0:
+        return 지금_그날 / float(ref)
+    raw_entry = (raw_closes or {}).get(entry_date)
+    return entry / raw_entry if raw_entry and raw_entry > 0 else 1.0
+
+
 def evaluate(
     signal: dict[str, Any],
     closes: list[tuple[str, float]],
@@ -118,13 +134,7 @@ def evaluate(
         # 지금 계열의 그날 종가 ÷ 신호 날 적어 둔 종가. 분할·배당, 국내·미국을 가리지 않는다.
         # 미국 `close` 는 야후 Close 라 다시 받을 때 **분할만큼 과거가 조정**되어, 25.208 의
         # (수정 ÷ 원래) 비율은 배당만 잡고 분할을 못 잡았다. 옛 신호(기준 종가 없음)는 그 비율로 둔다
-        ref = signal.get("ref_close")
-        지금_그날 = dict(closes).get(out.as_of_date)
-        if ref and float(ref) > 0 and 지금_그날 and 지금_그날 > 0:
-            k = 지금_그날 / float(ref)
-        else:
-            raw_entry = (raw_closes or {}).get(entry_date)
-            k = entry / raw_entry if raw_entry and raw_entry > 0 else 1.0
+        k = unit_ratio(signal, closes, raw_closes, entry_date, entry)
         target = None if target is None else float(target) * k
         stop = None if stop is None else float(stop) * k
         # **먼저 닿은 쪽만** 닿은 것이다 (docs/infra.md 25.680, 감사). 예전에는 둘을 따로 `any` 로 봐, 3일째 손절가
