@@ -42,6 +42,9 @@ class Trade:
     fee: float | None = None
     tax: float | None = None
     horizon: str | None = None
+    #: auto(그날 이하 USDKRW 표 값) / manual(증권사 체결 환율) / none(원화).
+    #: 모르면 None — 예전처럼 체결 환율로 본다 (25.1353)
+    fx_rate_source: str | None = None
 
 
 @dataclass(frozen=True)
@@ -588,9 +591,15 @@ def fresher_fx(latest: tuple[str | None, float | None], trades: list[Trade]) -> 
 
     환율 표의 마지막 행이 이 종목의 **마지막 체결일보다 앞서면** 그 체결의 환율을 쓴다. 예전에는 가격만 체결가로 바꾸고
     환율은 표의 마지막 값이라, 10-12 에 $255·1,425원에 산 종목이 10-08 환율(1,400)로 평가되어 사자마자 환차손 −25만원이
-    떴다(4일이라 묵음 경고도 없음). 체결 환율이 0 이하(모름)면 예전처럼 표의 값을 쓴다."""
+    떴다(4일이라 묵음 경고도 없음). 체결 환율이 0 이하(모름)면 예전처럼 표의 값을 쓴다.
+
+    **자동으로 채운 환율(`fx_rate_source = 'auto'`)은 체결 환율이 아니다** (docs/infra.md 25.1353, 거래 입력 감사 재현).
+    웹은 환율 칸을 비우면 체결일 이하 가장 최근 표 값(최대 7일 앞)을 넣는다 — 그 값은 이미 표에 **제 날짜로** 있다.
+    그런데 체결일 날짜를 붙여 쓰면 환율 수집이 멈춘 동안 산 종목이 13일 묵은 환율을 "7일 전 체결 환율" 로 평가해
+    묵음 경고(`stale_notes`)가 사라졌다. 그래서 증권사 체결 환율(manual·모름)만 쓴다"""
     fx_day, fx_now = latest
-    last_trade = max((t for t in trades if t.fx_rate and t.fx_rate > 0), key=same_day_order, default=None)
+    last_trade = max((t for t in trades if t.fx_rate and t.fx_rate > 0 and t.fx_rate_source != "auto"),
+                     key=same_day_order, default=None)  # fmt: skip
     if last_trade is not None and (fx_day is None or fx_day < last_trade.trade_date):
         return last_trade.trade_date, float(last_trade.fx_rate)
     return fx_day, fx_now

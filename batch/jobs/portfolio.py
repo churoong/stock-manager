@@ -205,12 +205,14 @@ def trades_version(client: TursoClient) -> str:
 def load_trades(client: TursoClient) -> list[pf.Trade]:
     rs = client.execute(
         "SELECT t.id, t.stock_id, t.side, t.trade_date, t.price, t.quantity, t.currency, t.fx_rate, t.fee, t.tax,"
-        " t.horizon, s.asset_type FROM trades t LEFT JOIN stocks s ON s.id = t.stock_id ORDER BY t.trade_date, t.id"
+        " t.horizon, t.fx_rate_source, s.asset_type"
+        " FROM trades t LEFT JOIN stocks s ON s.id = t.stock_id ORDER BY t.trade_date, t.id"
     )
     return [
         pf.Trade(
             int(r["id"]), int(r["stock_id"]), str(r["side"]), str(r["trade_date"]), float(r["price"]),
             float(r["quantity"]), str(r["currency"]), float(r["fx_rate"]), _f(r["fee"]), _tax(r), r["horizon"],
+            r.get("fx_rate_source"),
         )
         for r in rs.dicts()
     ]  # fmt: skip
