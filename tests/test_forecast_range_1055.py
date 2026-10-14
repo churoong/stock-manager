@@ -69,7 +69,7 @@ def test_지금이_조용하면_가까운_범위가_좁다() -> None:
 def test_진단과_사다리가_같은_변동성을_쓴다() -> None:
     o = vd.outlook(close=100.0, close_date="2026-10-07", currency="KRW", momentum={"high_52w_proximity": 0.8},
                    risk={"volatility_ann": 0.4, "beta": 1.0}, band=None, opinions=[], today=date(2026, 10, 8),
-                   market=시장, rf=0.03, vol={"ewma": 0.2, "date": "2026-10-02"})  # fmt: skip
+                   market=시장, rf=0.03, vol={"ewma": 0.2, "date": "2026-10-07"})  # fmt: skip — 나이 0 (25.1341)
     assert any("최근 변동성 20.0%이 장기 40.0%로" in 줄 for 줄 in o["lines"])
     assert any(e["label"] == "최근 변동성(EWMA)" for e in o["evidence"])
     b = vd.build(vd.Inputs(name="가", ticker="1", score={"as_of": "d", "total": 60}, outlook=o))

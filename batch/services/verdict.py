@@ -85,6 +85,29 @@ def term_sigma(long: float | None, short: float | None, t: float) -> float | Non
     return math.sqrt(L * L + (S * S - L * L) * w)
 
 
+def aged_short_sigma(long: float | None, short: float | None, short_date: str | None,
+                     as_of: str | None) -> tuple[float | None, int | None]:  # fmt: skip
+    """**묵은 최근 변동성을 그 나이만큼 장기로 옮긴다** (docs/analysis.md 10.5, infra 25.1341, 21회차 P2).
+
+    S 는 주간 성과 지표 작업이 낸 값이라 진도 문(25.1248)으로 작업이 미뤄지면 몇 주 묵는다 — 그런데 `term_sigma` 는 S 를
+    오늘의 값으로 썼다. 같은 모형(지수적으로 L 로 돌아감)을 나이만큼 앞으로 민다: S_eff² = L² + (S² − L²)·e^{−나이/τ}.
+    새 상수 없음(τ = `VOL_HALF_LIFE_MONTHS` ÷ ln 2).
+    `term_sigma` 는 그대로 — 19회차 A3 사전 등록 스크립트가 직접 부른다.
+    (S_eff, 나이 일수). S 날짜를 모르면 S 를 쓰지 않는다(None — 장기만). L 이 없으면 S 그대로(나이는 알린다)"""
+    S = short if isinstance(short, (int, float)) and short > 0 else None
+    if S is None:
+        return None, None
+    try:
+        나이 = max(0, (date.fromisoformat(str(as_of)[:10]) - date.fromisoformat(str(short_date)[:10])).days)
+    except (TypeError, ValueError):
+        return None, None
+    L = long if isinstance(long, (int, float)) and long > 0 else None
+    if L is None:
+        return S, 나이
+    tau = VOL_HALF_LIFE_MONTHS / 12 / math.log(2)
+    return math.sqrt(max(L * L + (S * S - L * L) * math.exp(-(나이 / 365.25) / tau), 0.0)), 나이
+
+
 def market_return(first: tuple[str, float] | None, last: tuple[str, float] | None) -> dict | None:
     """지수의 첫·마지막 종가로 연환산 수익률. 1년이 안 되면 None (한 국면이라 뜻이 없다)."""
     if not first or not last or first[1] <= 0 or last[1] <= 0:
@@ -375,8 +398,10 @@ def outlook(*, close: float | None, close_date: str | None, currency: str, momen
                                  "kr_opinions × broker_stats", c["latest"]))  # fmt: skip
         out["consensus"] = {**c, "upside": 괴리}
     # 10. 예상 주가 — CAPM 기대수익 + 변동성 범위
+    원S = (vol or {}).get("ewma")
+    S_eff, S나이 = aged_short_sigma((risk or {}).get("volatility_ann"), 원S, (vol or {}).get("date"), close_date)
     f = forecast(close=close, beta=(risk or {}).get("beta"), sigma=(risk or {}).get("volatility_ann"), market=market,
-                 rf=rf, sigma_short=(vol or {}).get("ewma"))  # fmt: skip
+                 rf=rf, sigma_short=S_eff)  # fmt: skip
     if f:
         조각 = []
         for h in f["horizons"]:
@@ -397,7 +422,9 @@ def outlook(*, close: float | None, close_date: str | None, currency: str, momen
             줄[-1] += (f" · 범위는 최근 변동성 {_pct(f['sigma_short'], 1, False)}이 "
                       f"장기 {_pct(f['sigma'], 1, False)}로 돌아간다고 보고 냄"
                       f"(반감기 {VOL_HALF_LIFE_MONTHS:g}개월)")  # fmt: skip
-            evidence.append(_row("최근 변동성(EWMA)", _pct(f["sigma_short"], 1, False),
+            옮김 = (f" (원값 {_pct(원S, 1, False)}, {S나이}일 전 — 나이만큼 장기로 옮김)"
+                    if S나이 and isinstance(원S, (int, float)) else "")  # 25.1341
+            evidence.append(_row("최근 변동성(EWMA)", _pct(f["sigma_short"], 1, False) + 옮김,
                                  f"일간 λ={patterns.EWMA_LAMBDA}, 연환산",
                                  "prices → price_patterns (주간 성과 지표 작업)", (vol or {}).get("date")))  # fmt: skip
         if f["sigma"] is None:
