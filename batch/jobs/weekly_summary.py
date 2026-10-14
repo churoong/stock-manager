@@ -212,18 +212,18 @@ def stale_jobs(last_success: dict[str, str], now: datetime) -> list[tuple[str, i
 QUOTA_WARN_SHARE = 0.8
 
 
-def reads_line(used: int | None, limit: int, now: datetime) -> str:
+def reads_line(used: int | None, limit: int, now: datetime, label: str = "Turso 월 읽기") -> str:
     """Turso 월 읽기 — 쓴 몫과 달의 진도. 진도보다 앞서면 ⚠, **80% 를 넘으면 진도와 상관없이 ⚠** (docs/infra.md 25.1374,
     주간 요약 감사 재현). 예전에는 진도만 봐서 10-28 에 420M/500M(84%, 진도 90%)이 아무 표시 없이 나갔다 — 비용 규칙의
     "80% 경고" 가 텔레그램에는 없었다(/status 게이지에만 있었다)."""
     if used is None:
-        return "Turso 월 읽기: 재지 못했습니다"
+        return f"{label}: 재지 못했습니다"
     일수 = monthrange(now.year, now.month)[1]
     진도 = now.day / 일수
     몫 = used / limit if limit else 0.0
     표시 = (" ⚠ 진도보다 앞섭니다" if 몫 > 진도 + 0.05
             else f" ⚠ {QUOTA_WARN_SHARE:.0%} 넘음 — 한도 경고 선" if 몫 >= QUOTA_WARN_SHARE else "")  # fmt: skip
-    return f"Turso 월 읽기: {used / 1e6:,.1f}M / {limit / 1e6:,.0f}M ({몫:.0%}, 달 진도 {진도:.0%}){표시}"
+    return f"{label}: {used / 1e6:,.1f}M / {limit / 1e6:,.0f}M ({몫:.0%}, 달 진도 {진도:.0%}){표시}"
 
 
 #: 사후 분석이 **어디까지 보고했나** — 보고한 진입일의 마지막 날 (배치만 쓰는 기록 키, 25.1151).
@@ -333,13 +333,20 @@ def load_losses(
     return len(rows), len(손실들), losses
 
 
+#: `compose` 의 쓰기 줄 — 넘기지 않았다는 표시 (None 은 "못 읽음" 이라 따로 둔다)
+_안줌: object = object()
+
+
 def compose(
     runs: list[Run], last_success: dict[str, str], now: datetime, reads_used: int | None,
     read_limit: int = db.TURSO_MONTHLY_READ_LIMIT,
     rot_lines: list[str] | None = None,
     postmortem_lines: list[str] | None = None,
+    writes_used: int | None | object = _안줌,
 ) -> str:
     """메시지 본문. 순수 함수 — 테스트가 그대로 돌린다.
+
+    `writes_used` 는 이번 달 쓴 Turso 쓰기 행(못 읽으면 None, 25.1380). 넘기지 않으면 쓰기 줄을 싣지 않는다.
 
     `rot_lines` 는 데이터 열 점검 절(`services/column_rot.render`, docs/health.md 7장). None 이면 절을 싣지 않는다.
     """
@@ -369,6 +376,11 @@ def compose(
             lines.append(f"  ×{n} {한줄[:120]}{'…' if len(한줄) > 120 else ''}")
 
     lines += ["", reads_line(reads_used, read_limit, now)]
+    # **월 쓰기도 함께** (docs/infra.md 25.1380, 주간 요약 감사) — 9월에 계정을 막은 것은 쓰기 한도였는데 요약에 없었다.
+    # 같은 80% 규칙. 값을 주지 않은 옛 호출(시험)은 줄을 싣지 않는다
+    if writes_used is not _안줌:
+        쓴 = writes_used if isinstance(writes_used, int) else None
+        lines.append(reads_line(쓴, db.TURSO_MONTHLY_WRITE_LIMIT, now, "Turso 월 쓰기"))
 
     남은 = adjust_needed(runs)
     수정실행 = sum(1 for r in runs if r.job_name == "adjust_kr" and r.status == "success")
@@ -442,6 +454,8 @@ def run(dry_run: bool = False, force: bool = False) -> int:
         last = load_last_success(client)
         남음 = db.remaining_read_budget_or_none(client)
         used = None if 남음 is None else db.TURSO_MONTHLY_READ_LIMIT - 남음
+        쓰기남음 = db.remaining_write_budget_or_none(client)
+        쓰기 = None if 쓰기남음 is None else db.TURSO_MONTHLY_WRITE_LIMIT - 쓰기남음
         # 조용히 썩는 열 (docs/health.md 7장, 25.948) — 최근 7일을 그 전 90일과 견준다. 표 하나가 실패해도 요약은 나간다
         rot, checked, rot_errors = column_rot.scan(
             client,
@@ -456,7 +470,7 @@ def run(dry_run: bool = False, force: bool = False) -> int:
             사후 = postmortem.render(총, 손실, 손실수)
         except Exception as exc:  # noqa: BLE001 — 곁다리 절이다
             사후 = [f"지난 추천 사후 분석을 못 했습니다 ({type(exc).__name__})"]
-        text = compose(runs=runs, last_success=last, now=now, reads_used=used, rot_lines=rot_lines,
+        text = compose(runs=runs, last_success=last, now=now, reads_used=used, writes_used=쓰기, rot_lines=rot_lines,
                        postmortem_lines=사후)  # fmt: skip
         print(text)
         sent = 0

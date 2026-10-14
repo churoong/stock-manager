@@ -1132,6 +1132,21 @@ def remaining_read_budget_or_none(client: TursoClient) -> int | None:
     return max(0, TURSO_MONTHLY_READ_LIMIT - int(rs.scalar() or 0))
 
 
+def remaining_write_budget_or_none(client: TursoClient) -> int | None:
+    """이번 달 남은 Turso 쓰기. **못 읽으면 None** — 주간 요약이 "재지 못했습니다" 로 말한다 (docs/infra.md 25.1380).
+    `remaining_write_budget` 은 모르면 한도 전체를 돌려줘(백필이 막히지 않게) 보고에는 쓸 수 없다"""
+    month = datetime.now(UTC).strftime("%Y-%m")
+    try:
+        rs = client.execute(
+            "SELECT call_count FROM api_usage WHERE api_name = 'turso_writes'"
+            " AND window_type = 'month' AND window_start = ?",
+            [month],
+        )
+    except Exception:  # noqa: BLE001 — 모르면 None
+        return None
+    return max(0, TURSO_MONTHLY_WRITE_LIMIT - int(rs.scalar() or 0))
+
+
 def remaining_d1_daily_reads(client: TursoClient) -> int:
     """오늘(UTC) D1 이 더 훑을 수 있는 행 수. 모르면 한도 전체 (`remaining_d1_daily_writes` 와 같다)."""
     used = d1_reads_today(client)

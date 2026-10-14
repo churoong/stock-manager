@@ -210,3 +210,24 @@ def test_다시_보내기_막기는_같은_주만() -> None:
     # 같은 일요일 아침의 정규 예약과 따라잡기는 한 통
     assert ws.already_sent_this_week("2026-10-17T22:41:00+00:00", datetime(2026, 10, 18, 1, 0, tzinfo=UTC))
     assert not ws.already_sent_this_week(None, 다음_정규)
+
+
+def test_월_쓰기도_같은_80퍼센트_규칙으로_싣는다() -> None:
+    """9월에 계정을 막은 것은 쓰기 한도였는데 요약에 없었다 (25.1380, 주간 요약 감사)."""
+    from batch.core import db as db_
+
+    last = {j: "2026-10-04T00:00:00+00:00" for j in ws.EXPECTED_DAYS}
+    글 = ws.compose([], last, 지금, 10_000_000, writes_used=8_500_000)
+    assert f"Turso 월 쓰기: 8.5M / {db_.TURSO_MONTHLY_WRITE_LIMIT / 1e6:,.0f}M" in 글 and "⚠" in 글.split("Turso 월 쓰기")[1]
+    assert "Turso 월 쓰기: 재지 못했습니다" in ws.compose([], last, 지금, 10_000_000, writes_used=None)
+    assert "Turso 월 쓰기" not in ws.compose([], last, 지금, 10_000_000)  # 넘기지 않은 옛 호출
+
+
+def test_쓰기_사용량은_못_읽으면_None() -> None:
+    from batch.core import db as db_
+
+    class 막힘:
+        def execute(self, *_a, **_k):  # noqa: ANN202
+            raise RuntimeError("down")
+
+    assert db_.remaining_write_budget_or_none(막힘()) is None
