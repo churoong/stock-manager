@@ -605,6 +605,14 @@ def fresher_fx(latest: tuple[str | None, float | None], trades: list[Trade]) -> 
     return fx_day, fx_now
 
 
+def trade_fx_valued(positions: list[Position], table_fx_date: str | None) -> int:
+    """환율 표가 아니라 **체결 환율로 평가한** 외화 보유 수 (docs/infra.md 25.1354, 거래 입력 감사 ③).
+    요약 머리는 표의 최신 환율 하나를 보이는데, 표보다 새 체결이 있는 종목은 `fresher_fx` 가 체결 환율로 평가해
+    같은 날 두 환율이 섞인다. 그 사실을 머리 줄이 말하게 센다"""
+    return sum(1 for p in positions
+               if p.currency != "KRW" and p.fx_date is not None and p.fx_date != table_fx_date)  # fmt: skip
+
+
 def _carry(series: dict[str, float], dates_sorted: list[str], day: str, cache: dict) -> float | None:
     """day 이전(포함) 가장 최근 값. 휴장일·가격 끊김은 마지막 값으로 들고 간다."""
     key = id(series)

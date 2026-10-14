@@ -584,6 +584,8 @@ def run() -> int:
             "price_date_max": max((p.price_date for p in positions if p.price_date), default=None),
             "fx_date": latest_fx[0],
             "fx_usdkrw": latest_fx[1],
+            # 위 환율이 아니라 체결 환율로 평가한 외화 보유 수 — 머리 줄이 함께 말한다 (25.1354)
+            "fx_trade_valued": pf.trade_fx_valued(positions, latest_fx[0]),
             # 해외 양도세 **연간 추정** — 실현손익에 섞지 않는다 (docs/infra.md 25.617)
             "us_cgt_estimates": pf.us_capital_gains_estimates(
                 lots, {t.id: t.trade_date for t in trades if t.side == "sell"},

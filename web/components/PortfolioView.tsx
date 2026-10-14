@@ -326,6 +326,8 @@ function Totals({ summary }: { summary: Summary }) {
           ? ` · 종가 ${String(t.price_date_min)}${t.price_date_max && t.price_date_max !== t.price_date_min ? `~${String(t.price_date_max)}` : ""}`
           : ""}
         {t.fx_usdkrw ? ` · 환율 ${Number(t.fx_usdkrw).toLocaleString("ko-KR")}원/달러 (${String(t.fx_date)})` : ""}
+        {/* 표보다 새 체결이 있는 종목은 체결 환율로 평가한다(25.1295) — 위 환율과 다르다는 것을 말한다 (25.1354) */}
+        {Number(t.fx_trade_valued) > 0 ? ` · ${Number(t.fx_trade_valued)}종목은 체결 환율로 평가` : ""}
         {t.cost_estimated ? " · 수수료·세금 일부는 설정 비율로 추정" : ""}
         {/* 해외 양도세 연간 추정 — 배치가 낸 값을 그대로 보인다. 실현손익에는 섞지 않는다 (docs/infra.md 25.617) */}
         {Array.isArray(t.us_cgt_estimates)
