@@ -54,7 +54,7 @@ describe("답 — 실제 스키마", () => {
     expect(text).toContain("종합 72.5점 · 시장 12위 (2026-10-06)");
     expect(text).toContain("밸류 60 · 퀄리티 80 · 성장 - · 모멘텀 70 · 리스크 75");
     expect(text).toContain("매수 신호: 최근 없음");
-    expect(text).toContain("보유 10주 · 평균 55,000원 · 평가손익률 10%");
+    expect(text).toContain("보유 10주 · 평균 55,000원 · 평가손익률 +10.0%");  // 웹과 같은 부호·자리 (25.1345)
   });
 
   it("여럿이 맞으면 고르게 하고, 없으면 그렇게 말한다", async () => {

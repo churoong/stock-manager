@@ -36,11 +36,11 @@ describe("해외 보유 손익은 주가와 환차를 나눈다", () => {
              VALUES (1, 10, 'USD', 200, 1300, 2000, 2600000, '2026-01-02', -200, 100000, -300000, 400000, '2026-10-09', 't')`);
     const text = await answer({ kind: "stock", q: "AAPL" }, exec);
     expect(text).toContain("평균 $200");
-    expect(text).toContain("주가 -10%");
+    expect(text).toContain("주가 -10.0%");
     expect(text).toContain("환차 +400,000원");
-    expect(text).toContain("원화 합계 3.8%");
+    expect(text).toContain("원화 합계 +3.8%");
     const 보유 = await answer({ kind: "holdings" }, exec);
-    expect(보유).toContain("Apple Inc 3.8% (주가 -10%)");
+    expect(보유).toContain("Apple Inc +3.8% (주가 -10.0%)");
   });
 });
 

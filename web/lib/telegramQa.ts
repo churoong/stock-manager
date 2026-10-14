@@ -6,7 +6,7 @@
  * 읽기만 한다 — 점수·매매·설정을 바꾸는 명령은 두지 않는다.
  */
 import type { ResultSet, SqlValue } from "@/lib/db";
-import { SEARCH_LIST_TTL_MS, STOCK_SEARCH_LIST, type SearchRow } from "@/lib/portfolio";
+import { SEARCH_LIST_TTL_MS, STOCK_SEARCH_LIST, pct, signedWon, type SearchRow } from "@/lib/portfolio";
 import { MAX_SIGNAL_VERSION_ON, OWN_SIGNAL_DATES, POSITION_SUMMARY_VERSION, SIGNALS, positionStale } from "@/lib/stockDetail";
 import { TRADES_VERSION } from "@/lib/portfolio";
 
@@ -54,8 +54,14 @@ function rows<T>(rs: ResultSet): T[] {
 const HORIZON: Record<string, string> = { short: "단기", mid: "중기", long: "장기" };
 const LEVEL: Record<string, string> = { red: "적", yellow: "황", green: "녹" };
 
+/**
+ * 숫자 글자 — **웹과 같은 반올림**(`Number(x.toFixed(n))`, docs/infra.md 25.1105·25.1345). 예전 `toLocaleString` 은 ICU 반올림이라
+ * 1.45 가 "1.5"(웹 "1.4")였고 −0.04 가 "-0" 이었다. 손익률·환차는 아래 `pct`·`signedWon`(웹 보유 화면과 같은 함수)을 쓴다
+ */
 function n(x: unknown, digits = 0): string {
-  return typeof x === "number" && Number.isFinite(x) ? x.toLocaleString("ko-KR", { maximumFractionDigits: digits }) : "-";
+  if (typeof x !== "number" || !Number.isFinite(x)) return "-";
+  const v = Number(x.toFixed(digits));
+  return (Object.is(v, -0) ? 0 : v).toLocaleString("ko-KR", { maximumFractionDigits: digits });
 }
 
 /**
@@ -199,12 +205,13 @@ type Pos = {
  * 환차손익은 원화 금액(배치가 나눠 둔 값 그대로)
  */
 export function pnlText(p: Pos): string {
+  // 부호·반올림은 웹 보유 화면과 같은 함수 (25.1345) — 예전에는 이익에 "+" 가 없고 "-0%"·"환차 +0원" 이 나왔다
   if (p.currency === "KRW") {
-    return p.unrealized_pnl_krw != null && p.cost_krw > 0 ? ` · 평가손익률 ${n((p.unrealized_pnl_krw / p.cost_krw) * 100, 1)}%` : "";
+    return p.unrealized_pnl_krw != null && p.cost_krw > 0 ? ` · 평가손익률 ${pct(p.unrealized_pnl_krw / p.cost_krw)}` : "";
   }
-  const 주가 = p.unrealized_pnl != null && p.cost > 0 ? `주가 ${n((p.unrealized_pnl / p.cost) * 100, 1)}%` : null;
-  const 환차 = p.unrealized_fx_pnl_krw != null ? `환차 ${p.unrealized_fx_pnl_krw >= 0 ? "+" : ""}${n(p.unrealized_fx_pnl_krw)}원` : null;
-  const 원화 = p.unrealized_pnl_krw != null && p.cost_krw > 0 ? `원화 합계 ${n((p.unrealized_pnl_krw / p.cost_krw) * 100, 1)}%` : null;
+  const 주가 = p.unrealized_pnl != null && p.cost > 0 ? `주가 ${pct(p.unrealized_pnl / p.cost)}` : null;
+  const 환차 = p.unrealized_fx_pnl_krw != null ? `환차 ${signedWon(p.unrealized_fx_pnl_krw)}` : null;
+  const 원화 = p.unrealized_pnl_krw != null && p.cost_krw > 0 ? `원화 합계 ${pct(p.unrealized_pnl_krw / p.cost_krw)}` : null;
   const 조각 = [주가, 환차, 원화].filter(Boolean);
   return 조각.length ? ` · 평가손익 ${조각.join(" · ")}` : "";
 }
@@ -258,10 +265,11 @@ async function holdings(exec: Exec): Promise<string> {
     `${머리}${기준}`,
     ...(늦음 ? [STALE_NOTE] : []),
     ...rs.map((r) => {
-      const 률 = r.unrealized_pnl_krw != null && r.cost_krw > 0 ? `${n((r.unrealized_pnl_krw / r.cost_krw) * 100, 1)}%` : "평가 없음";
+      const 률 = r.unrealized_pnl_krw != null && r.cost_krw > 0 ? pct(r.unrealized_pnl_krw / r.cost_krw) : "평가 없음";
       // 해외는 주가만의 손익률도 (원화 손익률에는 환율이 섞인다, 25.1126)
-      const 주가 = r.currency !== "KRW" && r.unrealized_pnl != null && r.cost > 0 ? ` (주가 ${n((r.unrealized_pnl / r.cost) * 100, 1)}%)` : "";
-      return `· ${r.name} ${률}${주가}${r.weight_pct != null ? ` · 비중 ${n(r.weight_pct, 1)}%` : ""}`;
+      const 주가 = r.currency !== "KRW" && r.unrealized_pnl != null && r.cost > 0 ? ` (주가 ${pct(r.unrealized_pnl / r.cost)})` : "";
+      // "보유 중" — 보유 평가 합 대비다. 리포트 2부의 비중(총 투자가능금액 대비)과 다르다 (25.1316 을 봇에도, 25.1345)
+      return `· ${r.name} ${률}${주가}${r.weight_pct != null ? ` · 보유 중 ${n(r.weight_pct, 1)}%` : ""}`;
     }),
   ].join("\n");
 }
