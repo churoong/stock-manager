@@ -111,6 +111,40 @@ def parse_json(raw: Any, default: Any) -> Any:
         return default
 
 
+#: 국내 시장 — 같은 발행사 열쇠가 6자리 코드를 다르게 다룬다
+_KR_MARKETS = frozenset({"KOSPI", "KOSDAQ", "KONEX"})
+
+
+def same_issuer_pairs(rows: list[SignalRow]) -> list[tuple[str, str]]:
+    """1부에 함께 실린 **같은 발행사로 보이는** 두 종목 (docs/infra.md 25.1385, 25회차 P2 — 기록과 주석만).
+
+    GOOG·GOOGL 처럼 두 종류 주식은 같은 재무(`us_financials` 가 한 CIK 의 재무를 둘 다에 넣는다)를 받아 퀄리티·성장이
+    같고, 1부 다섯 자리 가운데 둘을 한 회사가 차지할 수 있다. 열쇠(`candidate_factors.same_issuer_key`)가 같고
+    **퀄리티·성장 점수가 둘 다 있고 같을 때만** 짝으로 본다 — 앞 4글자만 같은 다른 회사를 묶지 않게. 열쇠가 FOX/FOXA 를
+    못 묶는 구멍은 11-03 뒤에 고친다(handoff). 국내 보통·우선주(앞 5자리)도 같은 규칙. 1부·2부 금액은 그대로"""
+    from batch.services import candidate_factors as cf
+
+    본: dict[int, SignalRow] = {}
+    for r in rows:
+        본.setdefault(r.stock_id, r)
+    종목 = list(본.values())
+    out: list[tuple[str, str]] = []
+    for i, a in enumerate(종목):
+        for b in 종목[i + 1 :]:
+            ka = cf.same_issuer_key(a.ticker, kr=a.market in _KR_MARKETS)
+            kb = cf.same_issuer_key(b.ticker, kr=b.market in _KR_MARKETS)
+            if not ka or ka != kb:
+                continue
+            같음 = all(
+                isinstance(a.factor_scores.get(f), int | float) and isinstance(b.factor_scores.get(f), int | float)
+                and abs(float(a.factor_scores[f]) - float(b.factor_scores[f])) < 1e-6  # type: ignore[arg-type]
+                for f in ("quality", "growth")
+            )  # fmt: skip
+            if 같음:
+                out.append((a.ticker, b.ticker))
+    return out
+
+
 def select_top(rows: list[SignalRow], n: int = TOP_STOCKS) -> list[SignalRow]:
     """점수 높은 서로 다른 종목 n 개의 신호 전부.
 
@@ -979,7 +1013,11 @@ def compose(
     if portfolio is not None and holding_scores:
         portfolio.holding_scores = list(holding_scores)
     그림자 = robustness.entrants_line(shaken.entrants, shaken.total) if shaken else None
-    body = rs.render(picks, portfolio, app_url=app_url, picks_footer=그림자)
+    # 같은 발행사로 보이는 두 종목 — 1부 끝에 한 줄, 고른 종목·금액은 그대로 (25.1385)
+    짝줄 = [f"· {a}·{b} 는 같은 발행사로 보입니다(퀄리티·성장 점수 같음) — 한 회사를 두 번 고른 것일 수 있습니다"
+          for a, b in same_issuer_pairs(chosen)]  # fmt: skip
+    꼬리 = "\n".join([*([그림자] if 그림자 else []), *짝줄]) or None
+    body = rs.render(picks, portfolio, app_url=app_url, picks_footer=꼬리)
     if portfolio is None and sell_flags:
         body += "\n\n" + "\n".join(rs.render_sell_flags(sell_flags))
     return Composed(f"{header}\n\n{body}", chosen, picks, portfolio, shaken)

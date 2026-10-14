@@ -2207,6 +2207,10 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
             self_grade_line=자기채점,
             holding_scores=보유점수,
         )
+        # 1부에 함께 실린 같은 발행사로 보이는 두 종목 — 기록만 (docs/factors.md 12.27 P2, 25.1385)
+        짝 = report_picks.same_issuer_pairs(composed.chosen) if 추천_오류 is None else []
+        if 짝:
+            step_log["same_issuer_pairs"] = [list(p) for p in 짝]
         if 추천_오류 is not None:
             # "오늘 추천할 종목이 없습니다" 는 계산했을 때의 말이다 — 못 읽은 날에 쓰지 않는다 (25.818)
             composed = dc_replace(
