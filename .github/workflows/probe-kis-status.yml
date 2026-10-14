@@ -1,0 +1,55 @@
+name: KIS 종목 상태 대조 탐침
+
+# 국내 관리종목·거래정지 제외(한국거래소 소속부 글자)를 KIS 주식현재가 상태 칸과 한 번 견준다
+# (docs/factors.md 12.22 20회차 P4 1단계, docs/infra.md 25.1328). 시세 조회 API 만 쓴다(주문·계좌 아님).
+# 손으로만 돌린다. 운영 DB 는 최신 유니버스 스냅샷을 한 번 읽고, KIS 토큰 캐시만 쓴다.
+# 결과는 비공개 운영 저장소 이슈로만(공개 로그엔 찍지 않는다).
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: 편입 종목을 이만큼만 부른다 (0 이면 전부, 초당 10건)
+        type: string
+        default: "0"
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+      TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+      # DB 백엔드 전환 (docs/infra.md 25절). 비어 있으면 Turso 를 쓴다
+      DB_BACKEND: ${{ vars.DB_BACKEND }}
+      D1_ACCOUNT_ID: ${{ secrets.D1_ACCOUNT_ID }}
+      D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+      D1_API_TOKEN: ${{ secrets.D1_API_TOKEN }}
+      KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}
+      KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}
+      LIMIT: ${{ inputs.limit }}
+      OFFLINE_MODE: "0"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: 탐침
+        run: |
+          set -o pipefail
+          python scripts/probe_kis_status.py --limit "${LIMIT:-0}" 2>&1 | python scripts/ops_tee.py kis-status.txt
+      - name: 결과를 비공개 이슈로
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPS_REPO: ${{ secrets.OPS_REPO }}
+          OPS_TOKEN: ${{ secrets.OPS_TOKEN }}
+        run: python scripts/publish_output.py --title "운영 출력 (클라우드 세션용)" --file kis-status.txt --note "KIS 종목 상태 대조 탐침"
