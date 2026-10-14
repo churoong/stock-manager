@@ -2541,6 +2541,20 @@ DIVERGENCE_OPINIONS_SQL = (
 )
 
 
+def flow_window_start(오늘: date) -> str:
+    """수급 합의 첫날 — `오늘` 을 포함한 최근 `FLOW_DAYS` 거래일의 첫날 (docs/infra.md 25.1276·25.1337).
+
+    아침 리포트 엇갈림(3.9)과 종목 의견의 반대 목소리(`verdicts.against_kr`)가 함께 쓴다.
+    달력을 못 읽으면 "" (자르지 않음)"""
+    try:
+        첫날 = 오늘
+        for _ in range(divergence.FLOW_DAYS - 1):
+            첫날 = cal.previous_session("KR", before=첫날)
+        return 첫날.isoformat()
+    except Exception:  # noqa: BLE001 — 달력을 못 읽으면 예전 창(달력 15일) 그대로
+        return ""
+
+
 def _divergence_lines(
     client: TursoClient, trade_date: str, picks: list, warnings: list[str] | None = None
 ) -> list[str]:
@@ -2566,13 +2580,7 @@ def _divergence_lines(
     # **최근 FLOW_DAYS 거래일 안의 행만 더한다** (docs/infra.md 25.1276, 리포트 감사 재현). 읽는 창은 달력 15일이라
     # 수급 수집이 멈추면(KIS 키·장애) 1~2주 묵은 행이 "최근 5거래일" 처럼 날짜 없이 실렸다. 창 밖 행만 남으면 그 종목
     # 수급은 빈다
-    try:
-        첫날 = 오늘
-        for _ in range(divergence.FLOW_DAYS - 1):
-            첫날 = cal.previous_session("KR", before=첫날)
-        경계 = 첫날.isoformat()
-    except Exception:  # noqa: BLE001 — 달력을 못 읽으면 예전 창(달력 15일) 그대로
-        경계 = ""
+    경계 = flow_window_start(오늘)
     합: dict[int, list[int]] = {}
     for sid, d, frgn, orgn in 흐름:
         if str(d) < 경계:

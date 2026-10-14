@@ -512,7 +512,13 @@ def against_kr(client: TursoClient, ids: list[int], today: date, warnings: list[
         흐름, 의견 = [], []
     합: dict[int, list[int]] = {}
     최근날: dict[int, str] = {}
-    for sid, d, frgn, orgn in 흐름:  # 종목마다 최근 날부터 (질의가 날짜 내림차순)
+    # **최근 FLOW_DAYS 거래일 안의 행만** (docs/infra.md 25.1337, 분석 화면 감사 #3 — 리포트 25.1276 과 같은 창). 달력
+    # 15일
+    # 창이라 수급 수집이 멈추면 1~2주 묵은 행이 "외국인·기관 5거래일 순매도" 로 반대 목소리에 실렸다
+    경계 = daily.flow_window_start(today)
+    for sid, d, frgn, orgn in sorted(흐름, key=lambda x: (int(x[0]), str(x[1])), reverse=True):  # 종목마다 최근 날부터
+        if str(d) < 경계:
+            continue
         s = 합.setdefault(int(sid), [0, 0, 0])
         최근날.setdefault(int(sid), str(d))
         if s[0] < divergence.FLOW_DAYS:
