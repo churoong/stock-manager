@@ -2568,6 +2568,11 @@ DIVERGENCE_FLOWS_SQL = (
     " WHERE f.date <= ? AND f.date > ? AND f.frgn_net_amt IS NOT NULL AND f.orgn_net_amt IS NOT NULL"
     " ORDER BY f.stock_id, f.date DESC"
 )
+#: 수급 반대의 크기 — 같은 날들의 거래대금(원). 반대인 종목만 읽는다 (docs/infra.md 25.1384, 25회차 P4)
+DIVERGENCE_VALUE_SQL = (
+    "SELECT p.stock_id, p.date, p.value FROM prices p JOIN json_each(?) j ON j.value = p.stock_id"
+    " WHERE p.date <= ? AND p.date >= ?"
+)
 DIVERGENCE_OPINIONS_SQL = (
     "SELECT o.stock_id, o.date, o.broker, o.target_price FROM kr_opinions o JOIN json_each(?) j ON j.value = o.stock_id"
     " WHERE o.date <= ? AND o.date >= ?"
@@ -2586,6 +2591,27 @@ def flow_window_start(오늘: date) -> str:
         return 첫날.isoformat()
     except Exception:  # noqa: BLE001 — 달력을 못 읽으면 예전 창(달력 15일) 그대로
         return ""
+
+
+def flow_turnover_shares(
+    client: TursoClient, sums: dict[int, tuple[int, int, int, list[str]]], trade_date: str, warnings: list[str] | None,
+) -> dict[int, float | None]:
+    """반대(외국인+기관 < 0)인 종목만 같은 날들의 거래대금을 한 질의로 읽어 몫을 낸다 (25.1384). 못 읽으면 빈 사전 —
+    크기만 빠지고 ⚠ 는 그대로다"""
+    반대 = {sid: v for sid, v in sums.items() if v[0] >= divergence.MIN_FLOW_DAYS and v[1] + v[2] < 0}
+    if not 반대:
+        return {}
+    시작 = min(min(v[3]) for v in 반대.values())
+    try:
+        rs = client.execute(DIVERGENCE_VALUE_SQL, [json.dumps(sorted(반대)), trade_date, 시작]).rows
+    except Exception as exc:  # noqa: BLE001 — 곁다리
+        if warnings is not None and not db.표가_없나(exc):
+            warnings.append(_실패문("수급 반대의 거래대금 읽기", exc))
+        return {}
+    값: dict[int, dict[str, float | None]] = {}
+    for sid, d, v in rs:
+        값.setdefault(int(sid), {})[str(d)] = None if v is None else float(v)
+    return {sid: divergence.turnover_share(v[1] + v[2], 값.get(sid, {}), v[3]) for sid, v in 반대.items()}
 
 
 def _divergence_lines(
@@ -2617,25 +2643,17 @@ def _divergence_lines(
     # **최근 FLOW_DAYS 거래일 안의 행만 더한다** (docs/infra.md 25.1276, 리포트 감사 재현). 읽는 창은 달력 15일이라
     # 수급 수집이 멈추면(KIS 키·장애) 1~2주 묵은 행이 "최근 5거래일" 처럼 날짜 없이 실렸다. 창 밖 행만 남으면 그 종목
     # 수급은 빈다
-    경계 = flow_window_start(오늘)
-    합: dict[int, list[int]] = {}
-    for sid, d, frgn, orgn in 흐름:
-        if str(d) < 경계:
-            continue
-        s = 합.setdefault(int(sid), [0, 0, 0])
-        if s[0] < divergence.FLOW_DAYS:
-            s[0] += 1
-            s[1] += int(frgn)
-            s[2] += int(orgn)
+    합 = divergence.sum_flows(list(흐름), flow_window_start(오늘))
+    몫 = flow_turnover_shares(client, 합, trade_date, warnings)  # 반대의 크기 (25.1384)
     목표: dict[int, list[tuple[str, str, float | None]]] = {}
     for sid, d, broker, target in 의견:
         목표.setdefault(int(sid), []).append((str(d), str(broker), float(target) if target else None))
     since = (오늘 - timedelta(days=divergence.OPINION_DAYS)).isoformat()
     views = []
     for sid, (이름, 티커) in 종목.items():
-        n, frgn, orgn = 합.get(sid, [0, 0, 0])
+        n, frgn, orgn, _날 = 합.get(sid, (0, 0, 0, []))
         up, down = divergence.target_changes(목표.get(sid, []), since)
-        views.append(divergence.View(이름, 티커, n, frgn, orgn, up, down))
+        views.append(divergence.View(이름, 티커, n, frgn, orgn, up, down, 몫.get(sid)))
     return divergence.render(views)
 
 

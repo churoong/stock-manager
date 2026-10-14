@@ -526,32 +526,24 @@ def against_kr(client: TursoClient, ids: list[int], today: date, warnings: list[
         if not db.표가_없나(exc):
             warnings.append(f"수급·의견을 읽지 못했습니다: {exc}")
         흐름, 의견 = [], []
-    합: dict[int, list[int]] = {}
-    최근날: dict[int, str] = {}
     # **최근 FLOW_DAYS 거래일 안의 행만** (docs/infra.md 25.1337, 분석 화면 감사 #3 — 리포트 25.1276 과 같은 창). 달력
-    # 15일
-    # 창이라 수급 수집이 멈추면 1~2주 묵은 행이 "외국인·기관 5거래일 순매도" 로 반대 목소리에 실렸다
-    경계 = daily.flow_window_start(today)
-    for sid, d, frgn, orgn in sorted(흐름, key=lambda x: (int(x[0]), str(x[1])), reverse=True):  # 종목마다 최근 날부터
-        if str(d) < 경계:
-            continue
-        s = 합.setdefault(int(sid), [0, 0, 0])
-        최근날.setdefault(int(sid), str(d))
-        if s[0] < divergence.FLOW_DAYS:
-            s[0] += 1
-            s[1] += int(frgn)
-            s[2] += int(orgn)
+    # 15일 창이라 수급 수집이 멈추면 1~2주 묵은 행이 "외국인·기관 5거래일 순매도" 로 반대 목소리에 실렸다.
+    # 더하기는 리포트와 한 함수(`divergence.sum_flows`, 25.1384) — 날짜를 함께 돌려줘 거래대금 몫을 같은 날로 낸다
+    합 = divergence.sum_flows(list(흐름), daily.flow_window_start(today))
+    최근날 = {sid: v[3][0] for sid, v in 합.items() if v[3]}
+    몫 = daily.flow_turnover_shares(client, 합, today.isoformat(), warnings)
     목표: dict[int, list[tuple[str, str, float | None]]] = defaultdict(list)
     for sid, d, broker, target in 의견:
         목표[int(sid)].append((str(d), str(broker), float(target) if target else None))
     since = (today - timedelta(days=divergence.OPINION_DAYS)).isoformat()
     for sid in ids:
-        n, frgn, orgn = 합.get(sid, [0, 0, 0])
+        n, frgn, orgn, _날 = 합.get(sid, (0, 0, 0, []))
         날 = 최근날.get(sid)
         up, down = divergence.target_changes(목표.get(sid, []), since)
-        v = divergence.View("", "", n, frgn, orgn, up, down)
+        v = divergence.View("", "", n, frgn, orgn, up, down, 몫.get(sid))
         if v.flow_against:
-            합계 = f"{(frgn + orgn) / 100:+,.1f}억 ({n}거래일)"
+            합계 = f"{(frgn + orgn) / 100:+,.1f}억 ({n}거래일)" + (
+                f", 거래대금의 {fixed(v.turnover_share * 100, 2, sign=True)}%" if v.turnover_share is not None else "")
             out[sid].append({"against": True, "text": divergence.against_lines(v)[0], "evidence": vd._row(
                 "외국인+기관 순매수 합", 합계, "< 0 이면 반대", "kr_flows (KIS)", 날)})
         if v.opinion_against:

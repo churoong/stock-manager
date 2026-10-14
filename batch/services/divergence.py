@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from batch.core.rounding import fixed
+
 #: 수급을 보는 거래일 수 — 한 주. 하루치는 잡음이 크다
 FLOW_DAYS = 5
 #: 이보다 적은 날의 수급만 있으면 판단하지 않는다(수집을 시작한 첫 주 등)
@@ -34,6 +36,9 @@ class View:
     orgn_amt: int
     raises: int
     cuts: int
+    #: 외국인+기관 순매수 합 ÷ **같은 날들**의 거래대금 합 (docs/infra.md 25.1384, 25회차 P4). 모르면 None — ⚠ 규칙은
+    #: 그대로이고 크기만 함께 보인다(시총 5조 종목의 −0.1억도 같은 ⚠ 였다)
+    turnover_share: float | None = None
 
     @property
     def flow_against(self) -> bool:
@@ -62,6 +67,38 @@ def target_changes(rows: list[tuple[str, str, float | None]], since: str) -> tup
     return up, down
 
 
+def sum_flows(rows: list[tuple], boundary: str) -> dict[int, tuple[int, int, int, list[str]]]:
+    """(종목, 날짜, 외국인, 기관) 행 → 종목마다 최근 `FLOW_DAYS` 거래일(경계 이후)의
+    (날 수, 외국인 합, 기관 합, 날짜들). 리포트(3.9)와 종목 분석 반대 목소리가 함께 쓴다
+    (25.1384 — 같은 날짜로 거래대금을 맞추려고 날짜를 함께 돌려준다)"""
+    out: dict[int, tuple[int, int, int, list[str]]] = {}
+    for sid, d, frgn, orgn in sorted(rows, key=lambda x: (int(x[0]), str(x[1])), reverse=True):
+        if str(d) < boundary:
+            continue
+        n, f, o, 날 = out.get(int(sid), (0, 0, 0, []))
+        if n < FLOW_DAYS:
+            out[int(sid)] = (n + 1, f + int(frgn), o + int(orgn), [*날, str(d)])
+    return out
+
+
+def turnover_share(net_millions: int, values: dict[str, float | None], dates: list[str]) -> float | None:
+    """순매수 합(백만원) ÷ 같은 날들의 거래대금 합(`prices.value`, 원). 한 날이라도 거래대금이 없으면(야후로 채운 날
+    등) None — 분모를 일부 날로 내면 커 보인다. 단위: 수급은 백만원(마이그레이션 0046), 거래대금은 원"""
+    if not dates:
+        return None
+    합 = 0.0
+    for d in dates:
+        v = values.get(d)
+        if v is None or v <= 0:
+            return None
+        합 += float(v)
+    return net_millions * 1e6 / 합
+
+
+def _몫(v: float) -> str:
+    return f"5일 거래대금의 {fixed(v * 100, 2, sign=True)}%"
+
+
 def _억(백만원: int) -> str:
     """백만원 → 억. 10억 미만은 소수 한 자리 — 반올림으로 "-0억" 이 되지 않게."""
     억 = 백만원 / 100
@@ -72,7 +109,8 @@ def against_lines(v: View) -> list[str]:
     """한 종목의 반대 목소리 문장 — 종목 분석(docs/analysis.md 5장)이 쓴다. 반대가 아니면 빈 목록."""
     out = []
     if v.flow_against:
-        out.append(f"외국인·기관 {v.flow_days}거래일 순매도 (외국인 {_억(v.frgn_amt)}·기관 {_억(v.orgn_amt)})")
+        몫 = f" · {_몫(v.turnover_share)}" if v.turnover_share is not None else ""
+        out.append(f"외국인·기관 {v.flow_days}거래일 순매도 (외국인 {_억(v.frgn_amt)}·기관 {_억(v.orgn_amt)}{몫})")
     if v.opinion_against:
         out.append(f"증권사 목표가 {OPINION_DAYS}일 내림 {v.cuts}·올림 {v.raises}")
     return out
@@ -87,7 +125,8 @@ def render(views: list[View]) -> list[str]:
         말 = []
         if v.flow_days >= MIN_FLOW_DAYS:
             표시 = "⚠ " if v.flow_against else ""
-            말.append(f"{표시}외국인 {_억(v.frgn_amt)}·기관 {_억(v.orgn_amt)} ({v.flow_days}일)")
+            몫 = f", {_몫(v.turnover_share)}" if v.flow_against and v.turnover_share is not None else ""
+            말.append(f"{표시}외국인 {_억(v.frgn_amt)}·기관 {_억(v.orgn_amt)} ({v.flow_days}일{몫})")
         if v.raises or v.cuts:
             표시 = "⚠ " if v.opinion_against else ""
             말.append(f"{표시}목표가 내림 {v.cuts}·올림 {v.raises} ({OPINION_DAYS}일)")
