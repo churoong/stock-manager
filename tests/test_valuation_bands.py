@@ -97,6 +97,12 @@ def test_적재_끝까지(monkeypatch: pytest.MonkeyPatch) -> None:
         " receipt_no, currency, unit, total_equity, source, fetched_at)"
         " VALUES (1, 2024, '11011', 'A', 1, '2025-03-10', 'r1', 'KRW', 'KRW', 1000, 't', 't')"
     )
+    # 기준일(2026-09-17)에 FY2024(555일 전)만 있으면 묵은 자본이라 비운다(25.1367) — 새 사업보고서를 둔다
+    c.execute(
+        "INSERT INTO financials (stock_id, fiscal_year, report_code, period_type, consolidated, report_date,"
+        " receipt_no, currency, unit, total_equity, source, fetched_at)"
+        " VALUES (1, 2025, '11011', 'A', 1, '2026-03-10', 'r2', 'KRW', 'KRW', 1000, 't', 't')"
+    )
     assert job.run(("KR",), "2026-09-17") == 0
     rows = c.execute(
         "SELECT stock_id, current_value, sample, skip_reason, peer_group FROM valuation_bands ORDER BY stock_id"
@@ -116,3 +122,14 @@ def test_열_개수() -> None:
     row = job.build_rows([{"stock_id": 1, "listed_shares": None, "sector": None, "currency": "KRW"}], {}, {}, "KR",
                          "2026-09-17", "t")[0]  # fmt: skip
     assert len(row) == db.column_count(job._COLS) == 20
+
+
+def test_묵은_사업보고서의_자본이면_밴드를_비운다() -> None:
+    """점수는 묵은 사업보고서를 비우는데 밴드는 2년 묵은 자본을 썼다 (25.1367, 24회차 P1)."""
+    prices = [(d, 100.0) for d in days(300, "2025-11-01")]
+    묵음 = vb.compute(prices, [("2025-03-10", 1000.0, 2024)], 10)
+    assert 묵음.current_value is None and 묵음.p30 is None
+    assert 묵음.skip_reason is not None and 묵음.skip_reason.startswith("자본 묵음 — ")
+    assert 묵음.equity_report_date == "2025-03-10"
+    신선 = vb.compute(prices, [("2025-03-10", 1000.0, 2024), (prices[-1][0][:4] + "-03-10", 1000.0, 2025)], 10)
+    assert 신선.skip_reason is None and 신선.current_value is not None

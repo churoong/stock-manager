@@ -12,9 +12,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from batch.services import scoring
 from batch.services import signals as sg
 
-CALC_VERSION = 1
+#: 2 — 묵은 사업보고서의 자본이면 비운다 (docs/infra.md 25.1367)
+CALC_VERSION = 2
 METRIC = "PBR"
 # **신호에서 가져다 쓴다** (2026-09-22, docs/infra.md 25.108).
 # "신호와 같은 값" 이라고 적어 두고 숫자는 따로 적고 있었다 — 한쪽만 바뀌면 아무도 모른다
@@ -61,6 +63,14 @@ def compute(
     price_date, close = prices[-1]
     # 현재 PBR 도 밴드와 같은 행을 쓴다 — 가장 늦은 사업연도, 같은 연도면 정정 (25.549)
     known = sg.known_equity_row(equities, price_date)
+    # **묵은 사업보고서의 자본으로 밴드·현재 PBR 을 내지 않는다** (docs/infra.md 25.1367, 24회차 P1). 점수는 같은 규칙
+    # (`scoring.annual_stale_reason` — 접수 457일·7월 규칙)으로 연간 재무를 비우는데 밴드는 그대로 써, 감사의견 거절로
+    # 새 사업보고서가 없는 종목의 참고 분석에서 팩터는 "묵음" 인데 밴드·가치 기준 가격은 2년 묵은 자본으로 나왔다.
+    # 공유 함수(`known_equity_at`·`build_band`)는 백테스트가 불러 건드리지 않는다 — 기준일 행 하나만 본다
+    if known:
+        묵음 = scoring.annual_stale_reason(known[0], price_date, known[2] if len(known) > 2 else None)  # type: ignore[misc]
+        if 묵음:
+            return skip(f"자본 묵음 — {묵음}", price_date=price_date, equity_report_date=known[0])
     current = None
     equity_date = known[0] if known else None
     if known and known[1] > 0 and close > 0:
