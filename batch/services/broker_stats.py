@@ -60,6 +60,9 @@ class BrokerStat:
     excess: list[float] = field(default_factory=list)  # 상향 목표가의 60거래일 초과수익
     touched: list[bool] = field(default_factory=list)
     skipped_action: int = 0
+    #: 익은 의견의 (종목, 기준 거래일 자리) — 같은 종목 반복 의견의 창 겹침을 세는 데만 쓴다 (25.1361, 기록만)
+    fwd_at: list[tuple[int, int]] = field(default_factory=list)
+    touch_at: list[tuple[int, int]] = field(default_factory=list)
 
     def row(self) -> dict:
         avg = lambda xs: (sum(xs) / len(xs)) if xs else None  # noqa: E731
@@ -77,6 +80,25 @@ class BrokerStat:
             "skipped_action": self.skipped_action,
         }
 
+    def clusters(self) -> dict:
+        """창이 겹치지 않는 묶음 수 — 기록만 (docs/brokers.md, docs/infra.md 25.1361, 23회차 P5).
+
+        같은 종목에 60거래일 안에 다시 낸 의견은 앞 의견과 창이 겹쳐 독립 표본이 아니다(Hansen·Hodrick 1980).
+        종목마다 앞에서부터, 직전에 센 의견에서 창 길이(초과수익 `FWD_DAYS`, 터치 `TOUCH_DAYS`) 이상 떨어진 의견만 센다.
+        표본 문(`MIN_N`·`verdict.SKILLED_MIN_N`)은 그대로 — 이 수가 문을 밑돌게 할 증권사가 있는지 먼저 본다"""
+        return {"n_fwd_clusters": _clusters(self.fwd_at, FWD_DAYS),
+                "n_touch_clusters": _clusters(self.touch_at, TOUCH_DAYS)}  # fmt: skip
+
+
+def _clusters(at: list[tuple[int, int]], gap: int) -> int:
+    n = 0
+    앞: dict[int, int] = {}
+    for sid, i in sorted(at):
+        if sid not in 앞 or i - 앞[sid] >= gap:
+            앞[sid] = i
+            n += 1
+    return n
+
 
 def _first_after(bars: list[Bar], day: str) -> int | None:
     """day **다음** 거래일의 인덱스 (발표일 당일은 건너뛴다). 없으면 None."""
@@ -92,10 +114,11 @@ def _action_between(bars: list[Bar], i: int, j: int) -> bool:
 
 
 def compute(
-    opinions: list[Opinion], bars: dict[int, list[Bar]], index_bars: dict[str, list[Bar]]
+    opinions: list[Opinion], bars: dict[int, list[Bar]], index_bars: dict[str, list[Bar]],
+    stats: dict[str, BrokerStat] | None = None,
 ) -> list[dict]:
-    """증권사별 성적. `bars`·`index_bars` 는 날짜 오름차순."""
-    stats: dict[str, BrokerStat] = {}
+    """증권사별 성적. `bars`·`index_bars` 는 날짜 오름차순. `stats` 를 주면 거기에 채운다(묶음 진단, 25.1361)."""
+    stats = {} if stats is None else stats
     index_close = {code: {b.date: b.close for b in bs} for code, bs in index_bars.items()}
     # 끊김 판정의 기준 — 지수가 아니라 시세 전체의 마지막 날 (outcomes 25.697 과 같다)
     market_last = max((bs[-1].date for bs in bars.values() if bs), default=None)
@@ -128,17 +151,31 @@ def compute(
             i0, i1 = ix.get(series[i].date), ix.get(series[j].date)
             if i0 and i1:
                 st.excess.append((series[j].close / base - 1) - (i1 / i0 - 1))
+                st.fwd_at.append((op.stock_id, i))
         elif len(시장일) >= FWD_DAYS:
             i0, i1 = ix.get(series[i].date), ix.get(시장일[FWD_DAYS - 1])
             if i0 and i1:
                 st.excess.append((series[-1].close / base - 1) - (i1 / i0 - 1))
+                st.fwd_at.append((op.stock_id, i))
         window = series[i : i + TOUCH_DAYS + 1]
         # **120거래일이 다 찬 의견만 센다** (25.1148, 감사 재현). "이미 닿은 것" 도 세면 덜 찬 의견 가운데 닿은 것만
         # 분모·분자에 들어가 실제 20% 가 30.8% 로 보였다 — 최근 의견이 많은 증권사일수록 부풀어
         # `verdict.skilled` 가중이 틀어진다
         if len(window) == TOUCH_DAYS + 1 or len(시장일) >= TOUCH_DAYS:
             st.touched.append(any((b.high or b.close) >= op.target_price for b in window))
+            st.touch_at.append((op.stock_id, i))
     return sorted((s.row() for s in stats.values()), key=lambda r: (-(r["n_fwd"] or 0), r["broker"]))
+
+
+def cluster_summary(stats: dict[str, BrokerStat], gate: int = MIN_N) -> dict:
+    """`compute` 가 채운 `stats` 로 증권사별 겹치지 않는 묶음 수와, 표본 문을 묶음 수로 보면 **문 밑으로 내려갈**
+    증권사 수 — 기록만 (25.1361). 0 이면 이 진단을 접는다(docs/factors.md 12.25 P5)"""
+    줄 = {b: {**s.clusters(), "n_fwd": len(s.excess), "n_touch": len(s.touched)} for b, s in stats.items()}
+    return {
+        "brokers": 줄,
+        "fwd_gate_drop": sum(1 for r in 줄.values() if r["n_fwd"] >= gate > r["n_fwd_clusters"]),
+        "touch_gate_drop": sum(1 for r in 줄.values() if r["n_touch"] >= gate > r["n_touch_clusters"]),
+    }
 
 
 def line(stat: dict | None) -> str:

@@ -84,7 +84,8 @@ def run(force: bool = False) -> int:
             return 0
         run_id = db.start_batch_run(client, job_name=JOB_NAME, market="KR", trade_date=today.isoformat())
         ops, bars, index, as_of = load(client)
-        rows = bs.compute(ops, bars, index)
+        묶음: dict[str, bs.BrokerStat] = {}
+        rows = bs.compute(ops, bars, index, 묶음)
         stamp = db.now_iso()
         client.batch([("DELETE FROM broker_stats", [])] + [
             (UPSERT, [r["broker"], as_of or today.isoformat(), r["n_opinions"], r["n_target"], r["avg_upside_pct"],
@@ -93,7 +94,9 @@ def run(force: bool = False) -> int:
             for r in rows
         ])  # fmt: skip
         익은 = sum(1 for r in rows if (r["n_fwd"] or 0) >= bs.MIN_N)
-        step = {"opinions": len(ops), "brokers": len(rows), "brokers_ready": 익은, "as_of": as_of}
+        step = {"opinions": len(ops), "brokers": len(rows), "brokers_ready": 익은, "as_of": as_of,
+                # 같은 종목 반복 의견의 창 겹침 — 기록만, 표본 문은 그대로 (25.1361, 23회차 P5)
+                "clusters": bs.cluster_summary(묶음)}  # fmt: skip
         db.finish_batch_run(client, run_id, status="success", step_log=step)
         print(f"증권사 성적표: 의견 {len(ops)} · 증권사 {len(rows)} (표본 {bs.MIN_N}건 이상 {익은})")
         return 0
