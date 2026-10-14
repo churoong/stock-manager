@@ -196,3 +196,17 @@ def test_읽기가_80퍼센트를_넘으면_진도와_상관없이_경고() -> N
     assert "⚠ 80% 넘음" in ws.reads_line(420_000_000, 500_000_000, 늦은달)
     assert "⚠" not in ws.reads_line(300_000_000, 500_000_000, 늦은달)  # 60%, 진도 90%
     assert "진도보다 앞섭니다" in ws.reads_line(300_000_000, 500_000_000, datetime(2026, 10, 10, tzinfo=UTC))
+
+
+def test_다시_보내기_막기는_같은_주만() -> None:
+    """화요일 낮에 늦게 따라잡은 요약이 그다음 일요일 정규 예약을 막았다 (25.1375, 주간 요약 감사)."""
+    from datetime import UTC, datetime
+
+    화요일_늦게 = "2026-10-13T12:30:00+00:00"  # 화 21:30 KST — 10-11(일) 주의 요약
+    다음_정규 = datetime(2026, 10, 17, 22, 41, tzinfo=UTC)  # 일 10-18 07:41 KST
+    assert ws.week_key(datetime.fromisoformat(화요일_늦게)) == "2026-10-11"
+    assert ws.week_key(다음_정규) == "2026-10-18"
+    assert not ws.already_sent_this_week(화요일_늦게, 다음_정규)
+    # 같은 일요일 아침의 정규 예약과 따라잡기는 한 통
+    assert ws.already_sent_this_week("2026-10-17T22:41:00+00:00", datetime(2026, 10, 18, 1, 0, tzinfo=UTC))
+    assert not ws.already_sent_this_week(None, 다음_정규)

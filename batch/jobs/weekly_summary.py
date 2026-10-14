@@ -397,12 +397,33 @@ def compose(
     return "\n".join(lines)
 
 
-#: 이 안에 성공한 요약이 있으면 다시 보내지 않는다 (25.1015) — 늦게 온 GitHub 예약과 따라잡기가 겹쳐도 한 통
-RESEND_GUARD_DAYS = 5
+#: 다시 보내기 막기 (25.1015) — 늦게 온 GitHub 예약과 따라잡기가 겹쳐도 한 통. **같은 주(한국 일요일 기준)에 보낸 것만**
+#: 막는다 (docs/infra.md 25.1375, 주간 요약 감사). 예전에는 "5일 안에 보낸 것" 이라, 따라잡기가 화요일 낮에 늦게 보낸
+#: 요약이 나흘 열 시간 뒤 토요일 밤(한국 일요일 아침) 정규 예약을 막아 그다음 주 요약이 통째로 빠졌다
+RESEND_GUARD_DAYS = 8
 ALREADY_SENT_SQL = (
     "SELECT MAX(started_at) FROM batch_runs WHERE job_name = 'weekly_summary' AND status IN ('success', 'partial')"
     " AND started_at >= ?"
 )
+
+
+def week_key(moment: datetime) -> str:
+    """그 시각이 속한 주 — 한국 날짜로 그 시각 이하의 가장 가까운 일요일.
+    요약은 일요일 아침(한국)에 지난 7일을 보낸다"""
+    하루 = moment.astimezone(cal.market_tz("KR")).date() if moment.tzinfo else moment.date()
+    return (하루 - timedelta(days=(하루.weekday() + 1) % 7)).isoformat()
+
+
+def already_sent_this_week(last_sent: str | None, now: datetime) -> bool:
+    if not last_sent:
+        return False
+    try:
+        보낸때 = datetime.fromisoformat(str(last_sent).replace("Z", "+00:00"))
+    except ValueError:
+        return True  # 읽지 못하면 보낸 것으로 — 두 통보다 한 통이 낫다(예전 동작)
+    if 보낸때.tzinfo is None:
+        보낸때 = 보낸때.replace(tzinfo=UTC)
+    return week_key(보낸때) == week_key(now)
 
 
 def run(dry_run: bool = False, force: bool = False) -> int:
@@ -410,7 +431,7 @@ def run(dry_run: bool = False, force: bool = False) -> int:
     now = datetime.now(UTC)
     if not (dry_run or force):
         보냄 = client.execute(ALREADY_SENT_SQL, [(now - timedelta(days=RESEND_GUARD_DAYS)).isoformat()]).scalar()
-        if 보냄:
+        if already_sent_this_week(보냄, now):
             print(f"주간 요약: {str(보냄)[:16]} 에 이미 보냈습니다 — 건너뜀 (--force 로 다시 보낸다)")
             client.close()
             return 0
