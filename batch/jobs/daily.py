@@ -2584,7 +2584,7 @@ def _holding_scores(
     매수는 `trade_date >= positions.first_buy_date` 만 본다 — 다 팔고 다시 산 종목에 닫힌 옛 매수의 점수가 붙지 않게
     (매도 플래그 25.286 과 같은 규칙, 25.962). 두 점수의 잣대(판·팩터 가중치·센티먼트 가중치)가 다르면 차이를 적지
     않는다(25.209 와 같은 판정)."""
-    from batch.jobs.sell_flags import _가중치_다름, _팩터가중치_다름
+    from batch.jobs.sell_flags import _가중치_다름, _팩터가중치_다름, 매수일_판
 
     try:
         rs = client.execute(
@@ -2613,11 +2613,12 @@ def _holding_scores(
             # 매수 때 점수의 잣대 — 매도 플래그(jobs/sell_flags)와 같은 행·같은 판정. 둘 다 알 때만 다르다고 한다
             if r.get("score_at_trade") is None or r.get("calc_version") is None or not r.get("score_at_trade_date"):
                 continue
-            그때 = client.execute(
-                "SELECT weights_json, calc_version, sentiment_weight_used FROM scores"
-                " WHERE stock_id = ? AND as_of_date = ? ORDER BY calc_version DESC LIMIT 1",
+            # 그날 판이 여럿이면 매매 점수를 낸 판 — 매도 플래그와 같은 규칙 (25.1325, 매도 플래그 감사 #2)
+            그때 = 매수일_판(client.execute(
+                "SELECT weights_json, calc_version, sentiment_weight_used, total_score FROM scores"
+                " WHERE stock_id = ? AND as_of_date = ? ORDER BY calc_version DESC LIMIT 5",
                 [r["stock_id"], r["score_at_trade_date"]],
-            ).dicts()
+            ).dicts(), r.get("score_at_trade"))
             if 그때:
                 g = 그때[0]
                 r["same_yardstick"] = not (

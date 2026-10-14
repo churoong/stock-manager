@@ -173,12 +173,7 @@ def load_holdings(client: TursoClient, today: date | None = None) -> tuple[list[
             ).dicts()
             for day, 한도 in ((r["score_at_buy_date"], 5), (r["score_now_date"], 1))
         ]
-        if r["score_at_buy"] is not None:
-            맞음 = [x for x in 잣대[0] if x["total_score"] is not None
-                    and abs(float(x["total_score"]) - float(r["score_at_buy"])) < 0.051]  # fmt: skip
-            잣대[0] = 맞음[:1] or 잣대[0][:1]
-        else:
-            잣대[0] = 잣대[0][:1]
+        잣대[0] = 매수일_판(잣대[0], r["score_at_buy"])
         잣대가_바뀜 = bool(잣대[0] and 잣대[1]) and (
             _팩터가중치_다름(잣대[0][0]["weights_json"], 잣대[1][0]["weights_json"])
             or int(잣대[0][0]["calc_version"]) != int(잣대[1][0]["calc_version"])
@@ -315,6 +310,19 @@ def _기업행위(
     except Exception:  # noqa: BLE001 — 덧붙이는 말이 판정을 막으면 안 된다
         return False, 1.0
     return (True, 1.0) if 배율 is None else (False, float(배율))
+
+
+def 매수일_판(rows: list[dict[str, Any]], score_at_buy: Any) -> list[dict[str, Any]]:
+    """매수일 점수 행들(판 높은 순) 가운데 **매매에 적힌 점수를 낸 판** 하나 (docs/infra.md 25.1094).
+
+    맞는 것(소수 첫째 자리)이 없거나 매매 점수가 없으면 가장 높은 판. 2부 보유 점수 줄(`daily._holding_scores`)도
+    이것을 쓴다 — 예전에는 거기만 가장 높은 판을 읽어 매도 플래그와 다른 잣대로 "−23점" 을 냈다 (25.1325)
+    """
+    if score_at_buy is not None:
+        맞음 = [x for x in rows if x.get("total_score") is not None
+                and abs(float(x["total_score"]) - float(score_at_buy)) < 0.051]  # fmt: skip
+        return 맞음[:1] or rows[:1]
+    return rows[:1]
 
 
 def _팩터가중치_다름(a: Any, b: Any) -> bool:
