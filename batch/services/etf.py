@@ -599,13 +599,17 @@ def overlap(profile: FundProfile | None, recommended: dict[str, str], signals_as
 
 
 def overlap_kr() -> dict:
-    """국내는 구성종목 경로가 없다(data-sources 13.2). 모른다고 남긴다."""
+    """국내 ETF 의 추천 종목 겹침 — 이 칸은 아직 계산하지 않는다. 모른다고 남긴다.
+
+    **"구성종목 경로가 없다" 는 이제 틀린 말이다** (docs/infra.md 25.1379, ETF 감사). 집중 목록(etf.md 11.6, 25.974)이
+    같은 지수 KODEX·KIS 구성종목을 받아, 같은 카드의 집중 줄은 "KODEX(069500) 보유로" 라 적는데 이 칸은 "받을 경로가
+    없다" 고 해 한 카드가 엇갈렸다. 겹침은 월 1회 ETF 판정(`jobs/etf`)이 내는데 구성종목은 그 뒤 집중 작업이 받는다"""
     return {
         "basis": "구성종목",
         "source": SOURCE_KRX,
         "as_of": None,
         "available": False,
-        "note": "국내 ETF 는 구성종목 자료를 받을 경로가 없어 계산하지 않았습니다",
+        "note": "국내 ETF 의 추천 종목 겹침은 아직 계산하지 않습니다 — 구성종목은 집중 목록(우리 종목 집중)에만 씁니다",
     }
 
 

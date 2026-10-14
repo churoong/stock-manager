@@ -467,7 +467,7 @@ function AccountEtfList() {
         ))}
       </div>
       <p className="mb-3 text-xs leading-relaxed text-slate-500">
-        순서는 계좌마다 세금이 어디서 갈리는지로 정했습니다. 세율은 설정의 값을 인용만 합니다 —
+        순서는 계좌마다 세금이 어디서 갈리는지(과세 구조)로 정했습니다. 사유에는 세율 숫자를 적지 않습니다 —
         제도와 세율은 바뀔 수 있으니 가입한 금융사에서 확인하세요. 국내·미국 상장을 함께 봅니다.
       </p>
       <TaxSimCard />

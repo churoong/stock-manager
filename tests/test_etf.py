@@ -864,3 +864,11 @@ def test_쓸_행이_없어도_지우기는_보낸다() -> None:
 
     job._bulk(C(), "t", "a, b", [], "", before=[("DELETE FROM t", [])])  # type: ignore[arg-type]
     assert 묶음 == [("DELETE FROM t", [])]
+
+
+def test_국내_겹침_문구는_구성종목_경로가_있다는_사실과_맞는다() -> None:
+    """집중 줄은 "KODEX 보유로" 라 적는데 겹침 칸은 "받을 경로가 없다" 고 해 한 카드가 엇갈렸다 (25.1379, ETF 감사)."""
+    글 = svc.overlap_kr()["note"]
+    assert "경로가 없" not in 글 and "아직 계산하지 않습니다" in 글
+    문서 = (ROOT / "docs" / "etf.md").read_text(encoding="utf-8")
+    assert "근거 문장은 settings `taxes` 의 세율을 그대로 인용만 하고" not in 문서  # 11.1 이 11.7 과 어긋났다
