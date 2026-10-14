@@ -308,6 +308,7 @@ MOVES_SQL = (
 def load_series(
     client: TursoClient, country: str, as_of: str, days: int,
     moves: dict[int, dict[str, float | None]] | None = None,
+    raw: dict[int, list[float]] | None = None,
 ) -> dict[int, tuple[list[str], list[float], list[float | None]]]:
     """최근 days 거래일의 (수정)종가와 거래대금 계열. {stock_id: (closes, values)}.
 
@@ -333,7 +334,7 @@ def load_series(
     if not ids:
         return {}
     rs = client.execute(SERIES_PRICES_SQL, [json.dumps(ids), since, as_of])
-    out = series_from_rows([{**r, "change_pct": None} for r in rs.dicts()], days, None)
+    out = series_from_rows([{**r, "change_pct": None} for r in rs.dicts()], days, None, raw)
     if moves is not None:
         시작 = max(since, (date.fromisoformat(as_of[:10]) - timedelta(days=MOVES_DAYS)).isoformat())
         for r in client.execute(MOVES_SQL, [json.dumps(ids), 시작, as_of]).dicts():
@@ -362,11 +363,14 @@ def series_window_start(client: TursoClient, country: str, as_of: str, days: int
 
 
 def series_from_rows(
-    rows: list[dict], days: int, moves: dict[int, dict[str, float | None]] | None = None
+    rows: list[dict], days: int, moves: dict[int, dict[str, float | None]] | None = None,
+    raw: dict[int, list[float]] | None = None,
 ) -> dict[int, tuple[list[str], list[float], list[float | None]]]:
     """(stock_id, date 순) 시세 행 → 종목별 끝 days 행의 (날짜, 종가, 거래대금).
 
-    `load_series` 와 유니버스 밖 참고 분석(25.1018)이 같이 쓴다."""
+    `load_series` 와 유니버스 밖 참고 분석(25.1018)이 같이 쓴다.
+    `raw` 를 주면 같은 행의 **원 종가**(`close` — 미국은 분할만 반영, docs/adjust.md)를 같은 자리로 담는다
+    (52주 고점 진단, 25.1360)"""
     out: dict[int, tuple[list[str], list[float], list[float | None]]] = {}
     # **수정주가 계열 가운데 빈 행은 직전 계수로 메운다** (docs/infra.md 25.1101, 백테스트 감사) — 지표 계산과 같은 규칙
     # (`adjust.fill_adjusted`). `adj_close` 칸이 있는 행(점수 계열 질의)에서만 건다; 종목별로 날짜 순이라 그대로 묶는다
@@ -389,6 +393,8 @@ def series_from_rows(
         # 날짜를 안 맞추면 값이 통째로 틀린다(베타와 같은 규칙)
         dates.append(str(row["date"]))
         closes.append(float(row["px"]))
+        if raw is not None:
+            raw.setdefault(int(row["stock_id"]), []).append(float(row["close"]))
         # 국내 가격 배수의 재료 (docs/factors.md 3.1, 25.954) — 같은 행에서 등락률만 더 꺼낸다. 질의는 그대로다
         if moves is not None:
             moves.setdefault(int(row["stock_id"]), {})[str(row["date"])] = (
@@ -398,7 +404,37 @@ def series_from_rows(
         if value is None and row["volume"] is not None and row["close"] is not None:
             value = float(row["close"]) * float(row["volume"])
         values.append(None if value is None else float(value))
+    if raw is not None:
+        for sid in raw:
+            raw[sid] = raw[sid][-days:]
     return {sid: (d[-days:], c[-days:], v[-days:]) for sid, (d, c, v) in out.items()}
+
+
+def high52_split_only_log(
+    series: dict[int, tuple[list[str], list[float], list[float | None]]],
+    raw: dict[int, list[float]],
+    split_pending: set[int],
+) -> dict | None:
+    """미국 52주 고점 근접도를 **분할만 반영한 종가**로 다시 재면 얼마나 다른가 — 기록만
+    (docs/factors.md 12.25 P3 1단계, docs/infra.md 25.1360). 점수 계열은 야후 Adj Close(배당까지 반영)라
+    고점 뒤 배당만큼 근접도가 높게 나온다(George·Hwang 2004 는 분할만 반영한 명목가).
+    점수·근거표는 그대로 — 바꾸는 2단계는 동결이 풀린 뒤 사전 등록.
+    Δ = 수정주가 근접도 − 분할만 근접도. 분할 재수집 대기 종목은 원 종가에 분할 절벽이 있어 뺀다.
+    돌려주는 것: {n, median_delta, p90_delta, share_over_2pct}. 잴 종목이 없으면 None"""
+    차이: list[float] = []
+    for sid, (_d, closes, _v) in series.items():
+        if sid in split_pending or sid not in raw or len(raw[sid]) != len(closes):
+            continue
+        a, b = sc.high_52w_proximity(closes), sc.high_52w_proximity(raw[sid])
+        if a is None or b is None:
+            continue
+        차이.append(a - b)
+    if not 차이:
+        return None
+    차이.sort()
+    return {"n": len(차이), "median_delta": round(차이[len(차이) // 2], 4),
+            "p90_delta": round(차이[min(len(차이) - 1, int(len(차이) * 0.9))], 4),
+            "share_over_2pct": round(sum(1 for x in 차이 if x > 0.02) / len(차이), 4)}  # fmt: skip
 
 
 def load_benchmark_closes(
@@ -971,7 +1007,8 @@ def run(market: str, as_of: str | None = None) -> int:
             return 1
 
         등락률: dict[int, dict[str, float | None]] = {}
-        series = load_series(client, country, as_of, max(sc.MOMENTUM_OFFSETS) + 1, moves=등락률)
+        원종가: dict[int, list[float]] | None = {} if country == "US" else None  # 52주 고점 진단 (25.1360)
+        series = load_series(client, country, as_of, max(sc.MOMENTUM_OFFSETS) + 1, moves=등락률, raw=원종가)
         단계.mark("series")
         재료_못읽음: list[str] = []
         financials = load_financials(client, country, as_of)
@@ -1122,6 +1159,9 @@ def run(market: str, as_of: str | None = None) -> int:
                 "skipped": skipped,
                 # 밸류 분모를 기준일 가격으로 옮긴 종목 수와 못 옮긴 사유 (docs/factors.md 3.1, 25.954)
                 "market_cap_scaled": 시총옮김,
+                # 미국 52주 고점 근접도: 수정주가 대 분할만 반영 — 기록만 (docs/factors.md 12.25 P3, 25.1360)
+                **({"high52_split_only": 고점진단} if (고점진단 := (
+                    high52_split_only_log(series, 원종가, 분할대기) if 원종가 is not None else None)) else {}),
                 # 빈 감성이 "아직 없다" 인지 "못 읽었다" 인지 남긴다 (docs/infra.md 25.164)
                 **({"sentiment_read_error": 감성_못읽음} if 감성_못읽음 else {}),
                 # 배당·지수도 같다 (docs/infra.md 25.221)
