@@ -80,7 +80,8 @@ def test_일일_의견이_시장_한_번에_재료를_읽어_진단을_붙인다
     c.execute("INSERT INTO scores (stock_id, as_of_date, total_score, factor_scores, sentiment_weight_used,"
               " weights_json, rank_in_market, calc_version, created_at) VALUES (1, '2026-10-07', 60, '{}', 0, '{}', 1,"
               " 10, 't')")  # fmt: skip
-    for d, px in (("2026-10-02", 1100), ("2026-10-07", 1069)):
+    # 09-18 — 의견 날(09-20) 이전 시세가 있어야 의견의 주식 단위를 안다(25.1343: 모르면 뺀다)
+    for d, px in (("2026-09-18", 1100), ("2026-10-02", 1100), ("2026-10-07", 1069)):
         c.execute("INSERT INTO prices (stock_id, date, close, adj_close, currency, source, fetched_at)"
                   " VALUES (1, ?, ?, ?, 'KRW', 't', 't')", [d, px, px])  # fmt: skip
     c.execute("INSERT INTO factors (stock_id, as_of_date, factor, raw_json, peer_group, peer_size, calc_version,"
