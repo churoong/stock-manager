@@ -632,7 +632,24 @@ def test_이미_성공한_날의_예비_실행은_할_일_없음_표식을_찍�
 
 def test_실패_알림의_다음_예정이_같은_날_예비_실행을_말한다() -> None:
     """"다음 예정 매 거래일 08:27" 이 "내일" 로 읽혀 오늘 리포트를 포기하게 했다 (25.913, 감사)."""
+    from datetime import UTC, datetime
+
     from batch.core import calendar as cal
 
-    assert "09:35 KST 예비 실행" in cal.next_scheduled_hint("KR")
-    assert "예비 실행" in cal.next_scheduled_hint("US")
+    아침 = datetime(2026, 10, 13, 23, 27, tzinfo=UTC)  # 10-14 08:27 KST · 미국은 전날 밤
+    assert "09:35 KST 예비 실행" in cal.next_scheduled_hint("KR", 아침)
+    assert "예비 실행" in cal.next_scheduled_hint("US", datetime(2026, 10, 14, 12, 27, tzinfo=UTC))
+
+
+def test_마지막_예비_실행의_실패는_다시_시도를_약속하지_않는다() -> None:
+    """09:35 예비 실행 자신이 실패해도 "09:35 예비 실행이 한 번 더 시도합니다" 가 붙었다 (25.1366, 배치 실패 감사)."""
+    from datetime import UTC, datetime
+
+    from batch.core import calendar as cal
+
+    예비 = datetime(2026, 10, 14, 0, 36, tzinfo=UTC)  # 09:36 KST
+    assert "한 번 더" not in cal.next_scheduled_hint("KR", 예비)
+    assert "오늘은 더 시도하지 않습니다" in cal.next_scheduled_hint("KR", 예비)
+    assert "오늘은 더 시도하지 않습니다" in cal.next_scheduled_hint("US", datetime(2026, 10, 14, 13, 28, tzinfo=UTC))
+    # 08:27 KST 본 실행(UTC 로는 전날 23:27)은 예비 실행을 약속한다
+    assert "한 번 더" in cal.next_scheduled_hint("KR", datetime(2026, 10, 13, 23, 28, tzinfo=UTC))

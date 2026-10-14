@@ -363,8 +363,26 @@ def format_local(moment: datetime, market: str) -> str:
     return moment.astimezone(tz).strftime(f"%Y-%m-%d %H:%M {suffix}")
 
 
-def next_scheduled_hint(market: str) -> str:
-    """다음 실행 예정에 대한 설명. 화면과 리포트에 쓴다."""
+#: 그날 마지막 예약 실행 시각(시간대, 시, 분) — 이 뒤의 실패 알림은 "예비 실행이 한 번 더" 를 약속하지 않는다 (25.1366).
+#: 국내 09:35 KST(daily-kr.yml 예비 cron 00:35 UTC — 본 실행 08:27 KST 는 UTC 로 전날 23:27 이라
+#: **현지 시각으로 견준다**), 미국 13:27 UTC(daily-us.yml 의 늦은 cron — 서머타임에는 예비, 그 밖에는 본 실행이라
+#: 어느 쪽이든 그날 마지막)
+LAST_DAILY_TRIGGER = {"KR": ("Asia/Seoul", 9, 35), "US": ("UTC", 13, 27)}
+
+
+def next_scheduled_hint(market: str, now: datetime | None = None) -> str:
+    """다음 실행 예정에 대한 설명. 화면과 리포트에 쓴다.
+
+    **그날 마지막 예약 실행이 지났으면 예비 실행을 약속하지 않는다** (docs/infra.md 25.1366, 배치 실패 감사). 국내 09:35
+    예비 실행 자신이 실패해도 "실패하면 같은 날 09:35 KST 예비 실행이 한 번 더 시도합니다" 가 붙어, 오지 않을 리포트를
+    기다리게 했다. `now` 를 주지 않으면 지금 시각"""
+    now = now or datetime.now(UTC)
+    tz, 시, 분 = LAST_DAILY_TRIGGER["KR" if market.upper() == "KR" else "US"]
+    현지 = now.astimezone(ZoneInfo(tz))
+    if (현지.hour, 현지.minute) >= (시, 분):
+        if market.upper() == "KR":
+            return "다음 거래일 08:27 KST — 오늘 예비 실행(09:35 KST)까지 지나 오늘은 더 시도하지 않습니다"
+        return "다음 거래일 미국 정규장 시작 1시간 전 — 오늘 예약 실행이 모두 지나 오늘은 더 시도하지 않습니다"
     # **같은 날 예비 실행을 말한다** (docs/infra.md 25.913, 감사). 실패 알림 끝의 "다음 예정 매 거래일 08:27" 은
     # "내일" 로 읽혀
     # 오늘 리포트를 포기하게 했다 — 실제로는 국내 09:35 KST(daily-kr.yml 예비 cron), 미국 서머타임 기간 13:27 UTC 가
