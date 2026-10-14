@@ -885,7 +885,11 @@ def price_levels(inp: SignalInput) -> dict[str, list[dict]]:
     새 문턱이 아니다 — 판정표의 문턱 그대로다.
     """
     out: dict[str, list[dict]] = {h: [] for h in HORIZONS}
-    ma20 = moving_average(inp.closes, MA_SHORT_DAYS)
+    # **분할 재수집 대기면 20일선 사다리를 내지 않는다** (docs/infra.md 25.1349, 22회차 검증 A 곁가지). 25.1311 이 단기
+    # 판정만
+    # 막고 여기는 빠졌다 — 분할 전후 가격이 섞인 20일선으로 "이 값을 넘으면 추세 위" 를 냈다. 판정이 모름인 기간은
+    # 사다리도 없다
+    ma20 = None if inp.split_pending else moving_average(inp.closes, MA_SHORT_DAYS)
     if ma20:
         out["short"].append({"label": "단기: 추세 위 (20일선)", "price": ma20, "need": "above"})
         out["short"].append({"label": f"단기: 과열 아님 (20일선 +{MAX_EXTENSION * 100:.0f}%)",
