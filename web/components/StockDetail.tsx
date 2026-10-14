@@ -894,7 +894,9 @@ function MetricsBlock({ rows }: { rows: Row[] }) {
       ))}
       {/* 기준 지수는 베타를 낸 기간에만 적힌다(25.684) — 첫 행(1Y)만 보면 3Y 베타가 있어도 "-" 였다 (25.686) */}
       <p className="mt-1 text-[11px] text-slate-400">
-        일간 수익률·연 252일 기준. 베타 {String(rows.find((r) => r.benchmark)?.benchmark ?? "-")} 대비, 무위험수익률 {formatPct(rows[0]?.risk_free_rate_used, 2)}.
+        일간 수익률·연 252일 기준. 베타 {String(rows.find((r) => r.benchmark)?.benchmark ?? "-")} 대비, 무위험수익률 {formatPct(rows[0]?.risk_free_rate_used, 2)}
+        {/* 오늘 설정값 하나를 과거 창 전체에 쓴다 — 금리가 바뀐 기간의 샤프·소르티노와 순위가 달라질 수 있다 (docs/metrics.md, 25.1362) */}
+        {rows[0]?.risk_free_rate_used !== null && rows[0]?.risk_free_rate_used !== undefined ? "(오늘 설정값을 과거 창 전체에 적용)" : ""}.
       </p>
     </div>
   );
