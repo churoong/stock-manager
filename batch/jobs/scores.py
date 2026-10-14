@@ -668,6 +668,7 @@ def build_inputs(
     moves: dict[int, dict[str, float | None]] | None = None,
     pending_adjust: set[int] | None = None,
     split_pending: set[int] | None = None,
+    small_base: dict[int, dict[str, bool]] | None = None,
 ) -> list[sc.StockInput]:
     """종목마다 지표 묶음을 만든다. 없는 입력은 없는 채로 둔다.
 
@@ -762,6 +763,12 @@ def build_inputs(
         )
         # 재무제표 지표. 백테스트(jobs/backtest.build_pit_inputs)와 같은 함수를 부른다
         merged.update(sc.statement_metrics(current, previous))
+        # 작은 기저 표식 — 기록만, 점수에 쓰지 않는다 (docs/factors.md 12.27 P3, 25.1383)
+        if small_base is not None:
+            small_base[stock_id] = sc.small_base_flags(
+                _num(previous, "operating_income"), _num(previous, "revenue"),
+                _num(current, "total_equity"), _num(current, "total_assets"),
+            )
 
         # 모멘텀·계열 지표. 백테스트(jobs/backtest.build_pit_inputs)와 **같은 함수**를 부르고
         # **같은 계열**을 넘긴다. 예전에는 모멘텀만 날짜로 기준점을 잡아, 같은 실행 안에서
@@ -1031,6 +1038,7 @@ def run(market: str, as_of: str | None = None) -> int:
             log.warning("성과 지표 %d/%d종목이 %d일 넘게 묵었습니다(가장 오래된 %s) — 주간 성과 지표 작업을 확인하세요",
                         묵은_지표["count"], 묵은_지표["of"], METRICS_STALE_DAYS, 묵은_지표["oldest"])  # fmt: skip
         분할대기 = db.split_pending_us(client, as_of) if country == "US" else set()  # 25.1311
+        작은기저: dict[int, dict[str, bool]] = {}  # 25.1383 — 기록만
         inputs = build_inputs(
             universe,
             financials,
@@ -1044,6 +1052,7 @@ def run(market: str, as_of: str | None = None) -> int:
             moves=등락률,
             pending_adjust=load_pending_adjust(client) if country == "US" else set(),
             split_pending=분할대기,
+            small_base=작은기저,
         )
         # 몇 종목을 옮겼고 왜 못 옮겼는지 실행 기록에 (25.954)
         옮김 = [i.market_cap_note for i in inputs if i.market_cap_note]
@@ -1161,6 +1170,8 @@ def run(market: str, as_of: str | None = None) -> int:
                 "market_cap_scaled": 시총옮김,
                 # 비교 집단·지표별 실제 표본 — 기록만 (docs/factors.md 12.27 P1+P6, 25.1382). 점수 불변
                 "peer_sample": sc.peer_sample_report(factor_results),
+                # 작은 기저 — 시장별 상위 10% 와 전체의 몫, 기록만 (12.27 P3, 25.1383)
+                "small_base": sc.small_base_report(작은기저, {k: v.total for k, v in totals.items()}, markets),
                 # 감성 축의 시장 중심 — 기록만 (docs/factors.md 12.25 P5, 25.1370). 뉴스 수집이 멈춰 있으면 빠진다
                 **({"sentiment_center": 감성중심} if (감성중심 := sc.sentiment_center(
                     sentiments, len(by_stock), sentiment_weight)) else {}),

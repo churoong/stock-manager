@@ -224,6 +224,10 @@ class Test팩터_정규화:
     def test_z_절단(self) -> None:
         검사(FACTORS, f"±{sc.Z_CLIP:.0f}σ", "z 절단")
         검사(FACTORS, f"{sc.MIN_FULL_YEAR_DAYS}일(`scoring.MIN_FULL_YEAR_DAYS`)", "짧은 사업연도 (25.1286)")
+        검사(FACTORS, f"전년 영업이익률 < {sc.SMALL_BASE_OI_MARGIN:.0%}(`SMALL_BASE_OI_MARGIN` {sc.SMALL_BASE_OI_MARGIN})",
+             "작은 기저 영업이익률 (25.1383)")
+        검사(FACTORS, f"자기자본 ÷ 총자산 < {sc.SMALL_BASE_EQUITY_RATIO:.0%}(`SMALL_BASE_EQUITY_RATIO` {sc.SMALL_BASE_EQUITY_RATIO})",
+             "작은 기저 자본 비율 (25.1383)")
         검사(FACTORS, f"z = +{sc.Z_CLIP:.0f} 을 100점", "z 절단의 뜻")
 
 

@@ -1424,6 +1424,46 @@ class FactorResult:
     raw: dict[str, Any]
 
 
+#: 작은 기저 — 기록만 (docs/factors.md 12.27 P3, docs/infra.md 25.1383). 결과를 보기 전에 고정한 문턱:
+#: 전년 영업이익률(전년 영업이익 ÷ 전년 매출)이 이보다 작은 양수면 영업이익 성장률의 분모가 작다
+SMALL_BASE_OI_MARGIN = 0.01
+#: 자기자본 ÷ 총자산이 이보다 작은 양수면 ROE 의 분모가 작다(자본 → 0⁺ 이면 ROE → +∞, 25.1174 는 음수만 다뤘다)
+SMALL_BASE_EQUITY_RATIO = 0.05
+
+
+def small_base_flags(
+    prev_operating_income: float | None, prev_revenue: float | None, equity: float | None, assets: float | None,
+) -> dict[str, bool]:
+    """한 종목의 작은 기저 표식 (25.1383). 값을 모르면 거짓 — 모르는 것을 작다고 하지 않는다"""
+    oi = (isinstance(prev_operating_income, int | float) and isinstance(prev_revenue, int | float)
+          and prev_operating_income > 0 and prev_revenue > 0
+          and prev_operating_income / prev_revenue < SMALL_BASE_OI_MARGIN)  # fmt: skip
+    eq = (isinstance(equity, int | float) and isinstance(assets, int | float) and equity > 0 and assets > 0
+          and equity / assets < SMALL_BASE_EQUITY_RATIO)  # fmt: skip
+    return {"oi": bool(oi), "equity": bool(eq)}
+
+
+def small_base_report(
+    flags: dict[int, dict[str, bool]], totals: dict[int, float | None], markets: dict[int, str], top_share: float = 0.1,
+) -> dict[str, dict[str, Any]]:
+    """시장마다 종합 점수 상위 `top_share` 의 작은 기저 몫과 전체 몫 (25.1383, 기록만).
+    따를 결정(사전 등록): 상위 몫이 전체 몫의 2배 이상이면 동결 뒤 분모 규칙을 사전 등록한다"""
+    out: dict[str, dict[str, Any]] = {}
+    by_market: dict[str, list[tuple[float, int]]] = {}
+    for sid, t in totals.items():
+        if t is not None and sid in flags and sid in markets:
+            by_market.setdefault(markets[sid], []).append((t, sid))
+    for 시장, 줄 in sorted(by_market.items()):
+        줄.sort(reverse=True)
+        상위 = [sid for _t, sid in 줄[: max(1, int(len(줄) * top_share))]]
+        전체 = [sid for _t, sid in 줄]
+        몫 = lambda ids, k: round(sum(1 for i in ids if flags[i][k]) / len(ids), 4)  # noqa: E731
+        out[시장] = {"n": len(전체), "top_n": len(상위),
+                    "oi_top": 몫(상위, "oi"), "oi_all": 몫(전체, "oi"),
+                    "equity_top": 몫(상위, "equity"), "equity_all": 몫(전체, "equity")}  # fmt: skip
+    return out
+
+
 #: `peer_sample_report` 의 목록 길이 상한 — 실행 기록이 커지지 않게
 PEER_REPORT_MAX = 60
 
