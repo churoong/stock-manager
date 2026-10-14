@@ -400,12 +400,21 @@ def with_trend_filter(
     """판단 함수의 비중에 그 종목 시장 지수의 국면 배수를 곱한다. 지수도 t-1(view.cutoff)까지만 본다.
 
     국면을 모르면(지수 부족) 배수 1.0 — 적재 경로(services/trend.factor_for)와 같은 규칙이다.
+
+    **배수가 0 으로 만든 종목은 판단 함수에 "들고 있다" 고 넘긴다** (docs/infra.md 25.1321, 백테스트 감사 #3).
+    약세장 배수 0(설정 범위 안)이면 비중이 0 이 되고 엔진이 그 종목을 들지 않는다 — 장기 신호 전략은 그것을
+    "엔진이 빼 버린 종목"(25.1231)으로 읽어 1년 보유를 잊고 빈자리를 새 종목으로 채웠다. 배수 0.01 이면 기억하고
+    0 이면 잊는 어긋남이다. 덮어 줄인 것은 엔진이 아니라 이 덧씌우기이므로 판단 함수의 기억은 그대로 둔다
     """
     settings = {"enabled": True, "bear_factor": bear_factor}
     noted = False
+    zeroed: set[int] = set()  # 지난 리밸런스에 판단 함수는 들자고 했는데 배수 0 이 비중을 0 으로 만든 종목
 
     def wrapped(t: str, view: bt.PriceView) -> dict[int, float]:
         nonlocal noted
+        if view.holding is not None and zeroed:
+            view.holding = view.holding | frozenset(zeroed)
+        zeroed.clear()
         proposed = decide(t, view)
         if not proposed:
             return proposed
@@ -421,6 +430,8 @@ def with_trend_filter(
                     noted = True
                 factor_of[code] = trend.factor_for(regime, settings)[0]
             out[sid] = weight * factor_of[code]
+            if weight > 0 and out[sid] <= 0:
+                zeroed.add(sid)
         return out
 
     return wrapped
