@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Any
 
+from batch.core.rounding import half_up
 from batch.services import insights, patterns, signals, simulation
 
 #: 결론 키 → 이름 (위에서부터 처음 맞는 것, docs/analysis.md 3장)
@@ -552,7 +553,11 @@ def _row(label: str, display: str | None, threshold: str, source: str, as_of: st
 
 
 def _n(x: Any, digits: int = 0) -> str:
-    return f"{x:,.{digits}f}" if isinstance(x, (int, float)) else "-"
+    """숫자 글자. **.5 는 0 에서 멀어지게** (25.1105 규칙, 25.1338).
+
+    파이썬 서식은 반을 짝수로 보내 팩터 72.5 가 "72" 로, 같은 화면 점수 카드(`toFixed`)는 "73" 이었다.
+    천 단위 쉼표는 그대로"""
+    return f"{half_up(x, digits):,.{digits}f}" if isinstance(x, (int, float)) else "-"
 
 
 def position_of(p: Mapping[str, Any] | None) -> dict | None:

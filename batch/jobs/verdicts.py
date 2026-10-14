@@ -22,6 +22,7 @@ from batch.core import calendar as cal
 from batch.core import db
 from batch.core.client import TursoClient
 from batch.core.entry import guard
+from batch.core.rounding import fixed
 from batch.jobs import daily
 from batch.services import adjust as adj
 from batch.services import buy_thesis as bt
@@ -819,9 +820,10 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
         변화 = insights.score_change({"as_of": r["as_of_date"], "total": r["total_score"], "factors": factors},
                                     앞점수.get(sid))  # fmt: skip
         if 변화 and 변화.get("since") and str(변화["since"]) < str(r["as_of_date"]):
-            조각 = [f"{vd.FACTOR[변화[k]]} {변화['factors'][변화[k]]:+.0f}" for k in ("up", "down") if 변화.get(k)]
+            조각 = [f"{vd.FACTOR[변화[k]]} {fixed(변화['factors'][변화[k]], 0, sign=True)}"
+                  for k in ("up", "down") if 변화.get(k)]  # .5 는 0 에서 멀어지게 (25.1338)
             뒤 = f" (가장 오른 팩터 {조각[0]} · 가장 내린 팩터 {조각[1]})" if len(조각) == 2 else ""
-            out["reasons"].append(f"점수 변화: {변화['since']}보다 {변화['delta']:+.1f}{뒤}")
+            out["reasons"].append(f"점수 변화: {변화['since']}보다 {fixed(변화['delta'], 1, sign=True)}{뒤}")
         닮음 = [{"stock_id": t, "ticker": 점수[t]["ticker"], "name": 점수[t]["name"],
                  "total": 점수[t]["total_score"], "dist": d, "signal": bool(신호.get(t))}
                 for t, d in insights.twins(sid, 모양)]  # fmt: skip
