@@ -127,11 +127,14 @@ def select_top(rows: list[SignalRow], n: int = TOP_STOCKS) -> list[SignalRow]:
     )
     chosen = {r.stock_id for r in ranked[:n]}
     order = {r.stock_id: i for i, r in enumerate(ranked)}
-    horizon_order = {"short": 0, "mid": 1, "long": 2}
     return sorted(
         (r for r in rows if r.stock_id in chosen),
-        key=lambda r: (order[r.stock_id], horizon_order.get(r.horizon, 9)),
+        key=lambda r: (order[r.stock_id], _기간_순.get(r.horizon, 9)),
     )
+
+
+#: 1부의 기간 순서. 2부가 한 종목의 여러 기간 신호 중 금액이 같은 것을 고를 때도 이 순서다
+_기간_순 = {"short": 0, "mid": 1, "long": 2}
 
 
 def to_picks(
@@ -462,7 +465,8 @@ def build_portfolio(
             ))
             continue
 
-        best = max(funded, key=lambda r: r.suggested_amount or 0)
+        # 금액이 같으면 **짧은 기간**(1부 순서) — 예전에는 들어온 행 순서에 맡겼다 (infra 25.1322)
+        best = max(funded, key=lambda r: (r.suggested_amount or 0, -_기간_순.get(r.horizon, 9)))
         #: 1부(신호)가 낸 금액. **분할 계획의 합이 이것과 같다**(`signals.tranche_plan`: 비중 합 1.0).
         #: 2부에서 줄인 뒤 분할을 그대로 두면 둘이 어긋난다 — 아래 `_scaled_tranches` 가 맞춘다
         원래금액 = float(best.suggested_amount or 0)
