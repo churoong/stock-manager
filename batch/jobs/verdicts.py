@@ -44,11 +44,20 @@ SCORES_SQL = (
     "   CROSS JOIN stocks s2 ON s2.id = sc2.stock_id WHERE s2.country = ? ORDER BY sc2.as_of_date DESC LIMIT 1)"
     " ORDER BY sc.stock_id, sc.calc_version DESC"
 )
+#: **신호는 마지막 계산일(신호·판정표 둘의 최신) 것만** (docs/infra.md 25.1336, 분석 화면 감사 #2). 신호 작업은 그날
+#: 행만
+#: 지우고 다시 넣어 신호 0 인 날에는 `signals` 의 최신 날이 지난 날로 남는다 — 그 날 신호로 "매수 검토 — 단기 매수 신호
+#: (지난 날)" 을 냈고 화면 신호 카드(`web/lib/recommend.LAST_CALC_DATE`)는 "오늘 신호 없음" 이었다. 판정표는 신호 0 인
+#: 날에도 전 종목에 남는다 — 웹과 같은 잣대. 인자는 (나라, 나라, 나라)
 SIGNALS_SQL = (
     "SELECT g.stock_id, g.as_of_date AS as_of, g.horizon, g.buy_zone_low, g.buy_zone_high, g.target_price, g.stop_price"
     " FROM signals g JOIN stocks s ON s.id = g.stock_id"
-    " WHERE s.country = ? AND g.as_of_date = (SELECT g2.as_of_date FROM signals g2"
-    "   CROSS JOIN stocks s2 ON s2.id = g2.stock_id WHERE s2.country = ? ORDER BY g2.as_of_date DESC LIMIT 1)"
+    " WHERE s.country = ? AND g.as_of_date = (SELECT MAX(d) FROM ("
+    "   SELECT d FROM (SELECT g2.as_of_date AS d FROM signals g2 CROSS JOIN stocks s2 ON s2.id = g2.stock_id"
+    "     WHERE s2.country = ? ORDER BY g2.as_of_date DESC LIMIT 1)"
+    "   UNION ALL"
+    "   SELECT d FROM (SELECT c2.as_of_date AS d FROM signal_checks c2 CROSS JOIN stocks s3 ON s3.id = c2.stock_id"
+    "     WHERE s3.country = ? ORDER BY c2.as_of_date DESC LIMIT 1)))"
 )
 CHECKS_SQL = (
     "SELECT c.stock_id, c.as_of_date, c.horizon, c.passed, c.failed_count, c.checks_json, c.levels_json"
@@ -642,7 +651,7 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
         return []
     순위있음 = sum(1 for r in 점수.values() if r["total_score"] is not None)
     신호: dict[int, list[dict]] = defaultdict(list)
-    for r in _safe(client, SIGNALS_SQL, [country, country], warnings, "신호"):
+    for r in _safe(client, SIGNALS_SQL, [country, country, country], warnings, "신호"):
         신호[int(r["stock_id"])].append(r)
     판정: dict[int, list[dict]] = defaultdict(list)
     for r in _safe(client, CHECKS_SQL, [country, country], warnings, "판정표"):
