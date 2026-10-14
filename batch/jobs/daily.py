@@ -1226,8 +1226,10 @@ def load_price_series(
 
     한 가지 알고 쓴다: **나라가 다르면 같은 날짜의 종가가 같은 시각이 아니다.**
     한국 종가는 미국 장이 열리기 전이다. 그래서 국내–미국 상관은 실제보다 **낮게**
-    나온다. 낮게 나오면 덜 줄이므로 **안전한 쪽으로 틀린다** — 지어내는 것보다 낫다.
-    `[확인필요: 하루 밀어 맞추는 편이 나은지]`
+    나온다. 낮게 나오면 덜 줄여 금액이 **커진다 — 안전한 쪽이 아니다**
+    (25.1357 정정, 예전 문장이 거꾸로였다).
+    금액은 그대로 두고 하루 밀어 맞춘 상관을 `report_picks.cross_country_lag_log` 가 기록만 한다
+    (docs/factors.md 12.25 P1)
     """
     if not stock_ids:
         return {}
@@ -2135,6 +2137,16 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
             composed_at=datetime.now(UTC),
         )
         step_log["correlation"] = {"stocks": len(corr_series), "holdings": len(holdings)}
+        # 나라가 다른 쌍을 하루 밀어 맞추면 상관이 얼마나 오르나 — 기록만, 금액 불변 (docs/infra.md 25.1357, 23회차 P1)
+        try:
+            비동기 = report_picks.cross_country_lag_log(
+                [r.stock_id for r in report_picks.select_top(report_picks.with_criteria(signal_rows))],
+                market, holdings, corr_series,
+            )
+            if 비동기:
+                step_log["correlation"]["corr_async"] = 비동기
+        except Exception as exc:  # noqa: BLE001 — 진단이 리포트를 막지 않는다. 실패는 기록에 남긴다
+            step_log["correlation"]["corr_async_error"] = str(exc)[:200]
         # **이름을 붙여 넘긴다** (2026-09-21, docs/infra.md 25.67).
         # 예전에는 열 개를 자리로 넘겼는데 그중 둘(`max_sector_pct` 30%, `max_stock_pct` 10%)이
         # 같은 실수(float)다. 둘이 뒤바뀌어도 타입도 테스트도 아무 말 하지 않고, 결과는

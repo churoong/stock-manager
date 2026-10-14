@@ -226,6 +226,85 @@ def _aligned_returns(
     return sc_.aligned_returns({d: left[d] for d in 공통}, {d: right[d] for d in 공통})
 
 
+def lagged_aligned_returns(
+    kr: dict[str, float], us: dict[str, float]
+) -> tuple[list[float], list[float]]:
+    """국내–미국 쌍을 **하루 밀어** 맞춘 일간 수익률 두 줄
+    (docs/signals.md 3.6 한계 5, docs/infra.md 25.1357, 23회차 P1).
+
+    한국 종가는 미국 장이 열리기 전이라, 미국 날짜 u 의 움직임은 **u 뒤 첫 국내 거래일** 종가에 드러난다.
+    국내 날짜 k 마다 k 보다 앞선 마지막 미국 날짜 u 를 잇는다. 미국이 쉰 날(같은 u 에 국내 날짜 둘)은
+    앞의 것 하나만 — 새 미국 정보가 없다. 맞춘 뒤에는 `scoring.aligned_returns`(11일 넘게 벌어진 쌍 제외)를
+    그대로 부른다. 창은 뒤에서 `CORR_WINDOW`+1"""
+    from bisect import bisect_left
+
+    from batch.services import scoring as sc_
+
+    미국날 = sorted(us)
+    좌: dict[str, float] = {}
+    우: dict[str, float] = {}
+    쓴: set[str] = set()
+    for k in sorted(kr):
+        i = bisect_left(미국날, k)  # k 보다 앞선 마지막 미국 날짜 = 미국날[i - 1]
+        if i == 0:
+            continue
+        u = 미국날[i - 1]
+        if u in 쓴:
+            continue
+        쓴.add(u)
+        좌[k], 우[k] = kr[k], us[u]
+    공통 = sorted(좌)[-(CORR_WINDOW + 1) :]
+    if len(공통) < 2:
+        return [], []
+    return sc_.aligned_returns({d: 좌[d] for d in 공통}, {d: 우[d] for d in 공통})
+
+
+def cross_country_lag_log(
+    candidates: list[int],
+    candidate_country: str,
+    holdings: list[Holding],
+    price_series: dict[int, dict[str, float]],
+    series_unknown: dict[int, str] | None = None,
+    threshold: float = CORR_THRESHOLD,
+) -> dict | None:
+    """2부 상관의 **나라가 다른 쌍** 진단 — 기록만 (docs/infra.md 25.1357, 23회차 P1). 금액은 바꾸지 않는다.
+
+    같은 날짜 상관(지금 2부가 쓰는 것)과 하루 밀어 맞춘 상관을 견준다. 낮게 잰 상관은 덜 줄여 금액을 키운다
+    — 안전한 쪽이 **아니다**. 돌려주는 것: {pairs: 둘 다 낸 쌍, raised: 하루 밀면 더 높은 쌍,
+    crossed: 문턱(0.7)을 새로 넘는 쌍, max_increase}. 비교할 쌍이 없으면 None.
+    11-03 판정 뒤 crossed 가 0 이 아니면 식을 사전 등록한다(docs/factors.md 12.25)"""
+    series_unknown = series_unknown or {}
+    쌍 = 오름 = 넘음 = 0
+    최대 = 0.0
+    for cid in dict.fromkeys(candidates):
+        후보 = None if cid in series_unknown else price_series.get(cid)
+        if not 후보:
+            continue
+        for h in holdings:
+            if h.stock_id == cid or h.asset_type == "etf" or h.stock_id in series_unknown:
+                continue
+            if not h.country or h.country == candidate_country or h.stock_id not in price_series:
+                continue
+            보유 = price_series[h.stock_id]
+            kr, us = (후보, 보유) if candidate_country == "KR" else (보유, 후보)
+            동시 = _aligned_returns(후보, 보유)
+            밀림 = lagged_aligned_returns(kr, us)
+            if len(동시[0]) < CORR_MIN_POINTS or len(밀림[0]) < CORR_MIN_POINTS:
+                continue
+            r0, r1 = pearson(*동시), pearson(*밀림)
+            if r0 is None or r1 is None:
+                continue
+            쌍 += 1
+            if r1 > r0:
+                오름 += 1
+                최대 = max(최대, r1 - r0)
+            if r0 <= threshold < r1:
+                넘음 += 1
+    if not 쌍:
+        return None
+    return {"pairs": 쌍, "raised": 오름, "crossed": 넘음, "max_increase": round(최대, 4)}
+
+
 def correlation_reduction(
     candidate: dict[str, float],
     holdings: list[tuple[int, str, dict[str, float]]],
