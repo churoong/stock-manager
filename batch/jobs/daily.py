@@ -2496,8 +2496,14 @@ def _corp_event_lines(
     try:
         rows = client.execute(
             "SELECT e.code, e.kind, e.record_date FROM kr_corp_events e JOIN json_each(?) j ON j.value = e.code"
-            " WHERE e.record_date > ? AND e.record_date <= ? ORDER BY e.record_date, e.code",
-            [json.dumps(sorted(종목)), trade_date, 끝],
+            " WHERE e.record_date > ? AND e.record_date <= ?"
+            # **일정이 바뀐 옛 행은 싣지 않는다** (25.1333, 배당 감사 #2). 표는 (종목, 종류, 기준일) 로 쌓기만 해
+            # 기준일이
+            # 옮겨지면 옛 날짜가 남았다 — 같은 종목·종류에 더 나중에 받은 앞날 행이 있으면 옛 행은 뺀다(취소는 못 가림)
+            " AND NOT EXISTS (SELECT 1 FROM kr_corp_events n WHERE n.code = e.code AND n.kind = e.kind"
+            "   AND n.record_date > ? AND substr(n.fetched_at, 1, 10) > substr(e.fetched_at, 1, 10))"
+            " ORDER BY e.record_date, e.code",
+            [json.dumps(sorted(종목)), trade_date, 끝, trade_date],
         ).dicts()
     except Exception as exc:  # noqa: BLE001 — 곁다리. 표가 없으면(0047 전) 조용히, 그 밖의 실패는 경고로
         if not db.표가_없나(exc) and warnings is not None:
