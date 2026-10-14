@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { FACTOR_NAME, VERDICT_STYLE, hubAsOf, type HubRow, type Radar, type VerdictKey } from "@/lib/analysis";
 
-type Group = { key: VerdictKey; label: string; rows: HubRow[] };
+type Group = { key: VerdictKey; label: string; rows: HubRow[]; total: number };
 
 /** 오늘 의견 모아보기 (docs/analysis.md). 누르면 종목 상세의 분석 카드로 간다 */
 export default function AnalysisHub() {
@@ -40,7 +40,7 @@ export default function AnalysisHub() {
       )}
       {groups.map((g) => (
         <section key={g.key}>
-          <h2 className="mb-1 text-sm font-semibold">{g.label} <span className="font-normal text-slate-400">{g.rows.length}</span></h2>
+          <h2 className="mb-1 text-sm font-semibold">{g.label} <span className="font-normal text-slate-400">{g.total}{g.total > g.rows.length ? ` · ${g.rows.length}개만 표시` : ""}</span></h2>
           <ul className="space-y-1.5">
             {g.rows.map((r) => (
               <li key={r.stock_id}>

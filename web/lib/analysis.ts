@@ -410,14 +410,21 @@ export function parseRadars(rows: Array<{ key: string; value: string }>): Record
   return out;
 }
 
-/** 모아보기 질의. 결론 하나마다 최대 HUB_LIMIT 줄 */
+/**
+ * 모아보기 질의. 결론·시장(KR·US)마다 최대 HUB_LIMIT 줄, 결론마다 실제 개수(`verdict_total`)를 함께 (docs/infra.md 25.1339).
+ * 예전에는 전체를 결론·시장·티커 순으로 120줄에서 자르고 결론마다 30줄만 보였다 — 국내 매수 검토가 30을 넘으면 미국 매수 검토가
+ * 통째로 빠지고(KR 이 US 보다 앞), 보유 점검·매수 검토가 120을 채우면 뒤 결론 묶음이 사라졌다. 머리 숫자는 보인 줄 수였다
+ */
 export const HUB_LIMIT = 30;
-export const HUB_SQL = `SELECT v.stock_id, v.market, v.verdict, v.headline, v.computed_at, s.ticker,
-  COALESCE(s.name_ko, s.name_en, s.ticker) AS name
-FROM stock_verdicts v JOIN stocks s ON s.id = v.stock_id
-WHERE v.verdict IN ('check_holding', 'consider_buy', 'hold', 'reference')
-ORDER BY CASE v.verdict WHEN 'check_holding' THEN 0 WHEN 'consider_buy' THEN 1 WHEN 'hold' THEN 2 ELSE 3 END, v.market, s.ticker
-LIMIT 120`;
+export const HUB_SQL = `SELECT stock_id, market, verdict, headline, computed_at, ticker, name, verdict_total FROM (
+  SELECT v.stock_id, v.market, v.verdict, v.headline, v.computed_at, s.ticker,
+    COALESCE(s.name_ko, s.name_en, s.ticker) AS name,
+    ROW_NUMBER() OVER (PARTITION BY v.verdict, v.market ORDER BY s.ticker) AS rn,
+    COUNT(*) OVER (PARTITION BY v.verdict) AS verdict_total
+  FROM stock_verdicts v JOIN stocks s ON s.id = v.stock_id
+  WHERE v.verdict IN ('check_holding', 'consider_buy', 'hold', 'reference')
+) WHERE rn <= ${HUB_LIMIT}
+ORDER BY CASE verdict WHEN 'check_holding' THEN 0 WHEN 'consider_buy' THEN 1 WHEN 'hold' THEN 2 ELSE 3 END, market, ticker`;
 
 export interface HubRow {
   stock_id: number;
@@ -427,6 +434,8 @@ export interface HubRow {
   computed_at: string;
   ticker: string;
   name: string;
+  /** 그 결론의 실제 종목 수(잘리기 전). 옛 질의 결과에는 없다 */
+  verdict_total?: number;
 }
 
 /**
@@ -447,10 +456,12 @@ export function hubAsOf(computedAt: string, now: Date): { text: string; stale: b
   return { text: 일 >= 1 ? `${날} 기준 · ${일}일 전` : `${날} 기준`, stale: 일 > HUB_STALE_DAYS };
 }
 
-/** 모아보기 묶음 — 결론별로 HUB_LIMIT 까지. 비어 있는 결론은 뺀다 */
-export function groupHub(rows: HubRow[]): Array<{ key: VerdictKey; label: string; rows: HubRow[] }> {
-  return HUB_ORDER.map((key) => ({ key, label: VERDICT_LABEL[key], rows: rows.filter((r) => r.verdict === key).slice(0, HUB_LIMIT) }))
-    .filter((g) => g.rows.length > 0);
+/** 모아보기 묶음 — 결론별로(시장마다 HUB_LIMIT 까지는 질의가 자른다). `total` 은 그 결론의 실제 종목 수. 비어 있는 결론은 뺀다 */
+export function groupHub(rows: HubRow[]): Array<{ key: VerdictKey; label: string; rows: HubRow[]; total: number }> {
+  return HUB_ORDER.map((key) => {
+    const 줄 = rows.filter((r) => r.verdict === key);
+    return { key, label: VERDICT_LABEL[key], rows: 줄, total: Math.max(줄.length, Number(줄[0]?.verdict_total ?? 0)) };
+  }).filter((g) => g.rows.length > 0);
 }
 
 // ---------------------------------------------------------------------------
