@@ -80,6 +80,8 @@ class FinYear:
     pretax_income: float | None = None
     #: 사업연도 일수 (25.1326) — 짧은 해가 창 안에 있으면 G8 아래 참고 행만 단다(판정은 그대로)
     period_days: int | None = None
+    #: 보고 통화 (25.1340) — 원 → 달러로 바꾼 해의 이익잉여금을 견주지 않는다
+    currency: str | None = None
 
     def profit(self, pretax_proxy: bool) -> tuple[float | None, bool]:
         """G5·이익률에 쓰는 이익과 대리 여부. 영업이익이 있으면 늘 그것이다."""
@@ -257,6 +259,10 @@ def aggregate(inp: StockInput, years: list[int], rules: Rules = KR) -> Aggregate
     if len(margins) == YEARS:
         agg.margin_std = statistics.stdev(margins)
     for prev, cur in zip(fin, fin[1:], strict=False):
+        # 보고 통화가 바뀐 두 해는 견주지 않는다 — 그 구간은 모름(25.632 규칙으로 축이 빠진다) (25.1340, 21회차 곁가지).
+        # 원 → 달러로 보고 통화를 바꾸면 숫자가 수천 분의 1 로 줄어 "감소" 로 셌다. 통화를 모르면 예전처럼 본다
+        if not sc.same_currency({"currency": prev.currency}, {"currency": cur.currency}):
+            continue
         if prev.retained_earnings is not None and cur.retained_earnings is not None:
             agg.retained_pairs += 1
             if cur.retained_earnings > prev.retained_earnings:
