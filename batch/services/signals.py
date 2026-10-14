@@ -103,6 +103,23 @@ SECTOR_CAP_UNAVAILABLE = "섹터 상한 미적용 (업종 데이터 없음)"
 # ----------------------------------------------------------------------
 
 
+def turnover_ratio_loo(turnovers: list[float]) -> float | None:
+    """20/60 거래대금 비에서 **최근 20일 가운데 가장 큰 하루를 두 평균 모두에서 뺀 값** (docs/signals.md 1.1, infra
+    25.1350,
+    22회차 P2 — 기록만). 지수 편입 동시호가·대량매매 하루가 20일 평균을 끌어 "수급 유입"(> `TURNOVER_MULTIPLE`)을 혼자
+    만들었는지 본다. ((S20 − m)/19) ÷ ((S60 − m)/59), m = 최근 20일 최댓값. 결과를 보기 전에 k = 1·문턱 1.2 로 고정했다.
+    문헌이 엇갈린다(하루 거래량 충격이 오히려 양의 초과수익 — Gervais·Kaniel·Mingelgrin 2001) — 그래서 판정에 쓰지
+    않는다.
+    값이 모자라면 None"""
+    r20 = [v for v in turnovers[-MA_SHORT_DAYS:] if v is not None]
+    r60 = [v for v in turnovers[-MA_LONG_DAYS:] if v is not None]
+    if len(r20) < MA_SHORT_DAYS or len(r60) < MA_LONG_DAYS:
+        return None
+    m = max(r20)
+    아래 = (sum(r60) - m) / (MA_LONG_DAYS - 1)
+    return ((sum(r20) - m) / (MA_SHORT_DAYS - 1)) / 아래 if 아래 > 0 else None
+
+
 def moving_average(values: list[float], days: int) -> float | None:
     """최근 N 개의 평균. 개수가 모자라면 None.
 
@@ -374,6 +391,8 @@ def short_term(inp: SignalInput) -> tuple[bool, dict]:
 
     if turnover_20 is not None and turnover_60 not in (None, 0):
         data["turnover_ratio"] = turnover_20 / turnover_60
+    # 가장 큰 하루를 뺀 거래대금 비 — **기록만**(판정·근거표에 쓰지 않는다, 25.1350, 22회차 P2)
+    data["turnover_ratio_loo"] = turnover_ratio_loo(inp.turnovers)
 
     passed = (
         ma20 > ma60
