@@ -202,7 +202,10 @@ EVENT_FIRST_SQL = (
     " WHERE s.country = ? AND fs.fiscal_year >= ? GROUP BY fs.stock_id, fs.fiscal_year, fs.report_code, fs.consolidated"
 )
 EVENT_DIV_SQL = (
-    "SELECT d.stock_id, d.fiscal_year, d.cash_dividend_total FROM stock_dividends d JOIN stocks s ON s.id = d.stock_id"
+    # `report_year` — 국내는 사업보고서 하나가 당기·전기·전전기를 실어 한 해가 최대 세 행이다. 서비스가 가장 늦은 보고서
+    # 한 행만 쓴다 (25.1331 — 점수 `scores.load_dividends` 와 같은 규칙, 읽기를 늘리지 않으려 SQL 이 아니라 코드에서)
+    "SELECT d.stock_id, d.fiscal_year, d.report_year, d.cash_dividend_total"
+    " FROM stock_dividends d JOIN stocks s ON s.id = d.stock_id"
     " WHERE s.country = ? AND d.fiscal_year >= ?"
 )
 EVENT_FLOWS_SQL = "SELECT stock_id, date, short_vol_pct FROM kr_flows WHERE date >= ? AND date <= ?"

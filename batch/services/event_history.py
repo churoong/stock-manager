@@ -114,6 +114,21 @@ def earnings_reactions(fin: list[dict], dates: list[str], closes: list[float],
             "shrank": 평균([x for x in 사건 if x["yoy"] is not None and x["yoy"] <= 0])}  # fmt: skip
 
 
+def _해마다_하나(divs: list[dict]) -> list[dict]:
+    """회계연도마다 **가장 늦은 보고서**의 배당 행 하나 (docs/infra.md 25.1331, 배당 감사 #1).
+
+    국내 배당 수집은 사업보고서 하나에서 당기·전기·전전기를 함께 저장해(`jobs/dividends`) 한 해가 최대 세 행이다
+    — 예전에는 모두 더해 "그 사이 배당" 이 두세 배가 됐다. 점수(`scores.load_dividends`)·적립·웹 상세와 같은
+    `MAX(report_year)` 규칙. 보고 연도가 없으면 뒤 행"""
+    고름: dict[int, dict] = {}
+    for d in divs:
+        fy = int(d.get("fiscal_year") or 0)
+        앞 = 고름.get(fy)
+        if 앞 is None or int(d.get("report_year") or 0) >= int(앞.get("report_year") or 0):
+            고름[fy] = d
+    return list(고름.values())
+
+
 def return_sources(fin: list[dict], divs: list[dict], dates: list[str], closes: list[float],
                    shares: float | None) -> dict[str, Any] | None:  # fmt: skip
     """상승의 출처 (41장, 25.1064) — `SOURCE_YEARS` 년 전 사업보고서 접수일부터 지금까지 주가 변화를
@@ -144,7 +159,7 @@ def return_sources(fin: list[dict], divs: list[dict], dates: list[str], closes: 
     배수 = (1 + 주가) / (1 + 이익) - 1
     배당 = None
     해들 = range(int(시작["fiscal_year"]) + 1, int(끝["fiscal_year"]) + 1)
-    현금 = [d.get("cash_dividend_total") for d in divs if int(d.get("fiscal_year") or 0) in 해들]
+    현금 = [d.get("cash_dividend_total") for d in _해마다_하나(divs) if int(d.get("fiscal_year") or 0) in 해들]
     if shares and shares > 0 and 현금 and all(isinstance(x, (int, float)) for x in 현금):
         배당 = sum(현금) / (closes[i] * shares)
     return {"since": dates[i], "until": dates[-1], "from_year": int(시작["fiscal_year"]),
