@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date
 
-from batch.core.rounding import fixed
+from batch.core.rounding import fixed, half_up
 from batch.services import sentiment
 
 # CLAUDE.md 매매 규칙 기본값. 설정 horizon_targets 가 있으면 그것을 쓴다
@@ -65,9 +65,9 @@ def _재무금액(value: float, currency: str | None) -> str:
     신호 가격은 통화를 붙인다(25.385).
     """
     if currency == "KRW":
-        return f"{value / 1e8:,.1f}억원"
+        return f"{half_up(value / 1e8, 1):,.1f}억원"
     if currency == "USD":
-        return f"${value / 1e6:,.1f}M"
+        return f"${half_up(value / 1e6, 1):,.1f}M"
     return f"{value:,.0f} {currency}" if currency else f"{value:,.0f} (통화 모름)"
 
 
@@ -149,7 +149,8 @@ def evaluate(h: HoldingInput, today: date, targets: dict | None = None) -> list[
         # 경계(정확히 −7% 등)가 부동소수 찌꺼기(−6.9999…)로 빗나가지 않게 소수 여섯째 자리에서 반올림
         권리락 = h.rights_scale != 1.0 and h.rights_scale > 0
         ret = round((h.market_value / (h.cost * (h.rights_scale if 권리락 else 1.0)) - 1) * 100, 6)
-        shown = f"평가 수익률 {ret:+.1f}% (주가 기준, 수수료 포함 원가 대비)" + (
+        수익 = fixed(ret, 1, sign=True)  # .5 는 0 에서 멀어지게 (25.1324)
+        shown = f"평가 수익률 {수익}% (주가 기준, 수수료 포함 원가 대비)" + (
             f" — 유상증자 권리락 계수 {h.rights_scale:.4g} 를 원가에 반영" if 권리락 else "")
         # **묵은 종가로 판정하면 "닿았습니다" 가 거짓이 된다** (docs/infra.md 25.161).
         # 값을 지우지는 않는다 — 진짜로 손절선 아래일 수 있다. 대신 말한다 (25.136 과 같은 판단)
@@ -185,12 +186,12 @@ def evaluate(h: HoldingInput, today: date, targets: dict | None = None) -> list[
         )  # fmt: skip
         if ret <= rules["stop_pct"]:
             flags.append(Flag(h.stock_id, "red", "손절",
-                              f"{h.name}: {label} 손절선 {rules['stop_pct']:g}% 에 닿았습니다 ({ret:+.1f}%){덧}",
+                              f"{h.name}: {label} 손절선 {rules['stop_pct']:g}% 에 닿았습니다 ({수익}%){덧}",
                               [_criterion("손절선", shown, f"≤ {rules['stop_pct']:g}% ({label})",
                                           "positions", h.price_date), *묵음행]))  # fmt: skip
         elif ret >= rules["target_pct"]:
             flags.append(Flag(h.stock_id, "green", "목표도달",
-                              f"{h.name}: {label} 목표 {rules['target_pct']:g}% 에 닿았습니다 ({ret:+.1f}%)."
+                              f"{h.name}: {label} 목표 {rules['target_pct']:g}% 에 닿았습니다 ({수익}%)."
                               f" 차익 실현을 검토하세요{덧}",
                               [_criterion("목표 수익률", shown, f"≥ {rules['target_pct']:g}% ({label})",
                                           "positions", h.price_date), *묵음행]))  # fmt: skip
@@ -231,8 +232,8 @@ def evaluate(h: HoldingInput, today: date, targets: dict | None = None) -> list[
         기준 = (f"기준 재설정({h.score_at_buy_date}, 매수 뒤 계산 판·가중치가 바뀌어 같은 잣대의 첫 점수)"
                 if h.score_rebased else f"매수 당시({h.score_at_buy_date})")  # fmt: skip
         reasons.append(_criterion("종합 점수 하락",
-                                  f"{기준} {h.score_at_buy:.1f}"
-                                  f" → {h.score_now:.1f} (−{drop:.1f})",
+                                  f"{기준} {fixed(h.score_at_buy, 1)}"
+                                  f" → {fixed(h.score_now, 1)} (−{fixed(drop, 1)})",
                                   f"−{SCORE_DROP_POINTS:.0f}점 이상", "scores / trades 스냅샷",
                                   h.score_now_date))  # fmt: skip
     if reasons:
