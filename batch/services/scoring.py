@@ -1597,6 +1597,22 @@ class TotalScore:
     sentiment_used: float | None = None
 
 
+def sentiment_center(sentiments: dict[int, float | None], universe_n: int, sentiment_weight: float) -> dict | None:
+    """감성 축의 **시장 중심** — 기록만 (docs/factors.md 5장·12.26 P5, docs/infra.md 25.1370).
+
+    `total_score` 는 중립을 0 으로 고정해 (S − 0)/2 × 가중치 만큼 더하고 뺀다(25.639). 모델(VADER·KorFinASC)의 시장 전체
+    중심이 0 이 아니면 감성이 있는 종목 전체가 같은 쪽으로 밀린다. 그 크기를 잰다: 평균 이동 = 평균(S)/2 × 가중치/100
+    × 덮은 몫(종합 점수 점). 따를 결정: 뉴스 수집 재개 30일 뒤 |평균 이동| 이 1점 이상이면 중심 빼기를 사전 등록,
+    아니면 접는다. 감성 값이 없으면 None"""
+    값 = sorted(float(v) for v in sentiments.values() if v is not None and math.isfinite(v))
+    if not 값 or universe_n <= 0:
+        return None
+    평균 = sum(값) / len(값)
+    덮음 = len(값) / universe_n
+    return {"n": len(값), "mean": round(평균, 2), "median": round(값[len(값) // 2], 2),
+            "coverage": round(덮음, 4), "mean_shift": round(평균 / 2 * sentiment_weight / 100 * 덮음, 3)}  # fmt: skip
+
+
 def total_score(
     factor_scores: dict[str, float | None],
     weights: dict[str, float],

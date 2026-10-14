@@ -587,7 +587,7 @@ export async function requestBacktest(
  */
 export function dividendNote(country: string): string {
   return country === "US"
-    ? "미국은 야후 수정종가라 배당 재투자가 들어 있습니다(총수익) — 국내 결과와 바로 견주지 마세요."
+    ? "미국은 야후 수정종가라 배당 재투자가 들어 있습니다(세전 총수익 — 배당 원천징수 미반영) — 국내 결과와 바로 견주지 마세요."
     : "배당 재투자는 넣지 않았습니다(가격 수익).";
 }
 
