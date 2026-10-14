@@ -134,7 +134,7 @@ export async function answer(query: Query, exec: Exec): Promise<string> {
 }
 
 async function stock(s: { id: number; ticker: string; country: string; name: string }, exec: Exec): Promise<string> {
-  const [scoreRs, priceRs, sigRs, posRs, flagRs, 늦음] = await Promise.all([
+  const [scoreRs, priceRs, sigRs, posRs, 매매Rs, flagRs] = await Promise.all([
     exec(
       `SELECT as_of_date, total_score, rank_in_market, factor_scores, skip_reason FROM scores
        WHERE stock_id = ? ORDER BY as_of_date DESC, calc_version DESC LIMIT 1`,
@@ -144,15 +144,16 @@ async function stock(s: { id: number; ticker: string; country: string; name: str
     latestSignals(exec, s.id, s.country),
     exec(
       `SELECT quantity, avg_price, currency, unrealized_pnl, cost, unrealized_pnl_krw, unrealized_price_pnl_krw,
-       unrealized_fx_pnl_krw, cost_krw, price_date FROM positions WHERE stock_id = ?`,
+       unrealized_fx_pnl_krw, cost_krw, price_date, fx_date FROM positions WHERE stock_id = ?`,
       [s.id],
     ),
+    // 이 종목에 매매가 있나 — "매매 반영 전" 줄은 그 종목에만 붙인다 (25.1346)
+    exec("SELECT 1 AS x FROM trades WHERE stock_id = ? LIMIT 1", [s.id]),
     exec(
       `SELECT level, rationale_text, as_of_date FROM sell_flags WHERE stock_id = ? AND is_active = 1
        AND as_of_date = (SELECT MAX(as_of_date) FROM sell_flags)`,
       [s.id],
     ),
-    보유늦음(exec),
   ]);
   // 통화를 붙인다 (25.1126) — 미국 종목 값이 원화인지 달러인지 글만으로 알 수 없었다
   const 돈 = (x: unknown) => (s.country === "US" ? `$${n(x, 2)}` : `${n(x, 0)}원`);
@@ -183,8 +184,12 @@ async function stock(s: { id: number; ticker: string; country: string; name: str
   }
   if (sigs.length === 0) out.push("매수 신호: 최근 없음");
   const pos = rows<Pos>(posRs)[0];
-  if (pos) out.push(`보유 ${n(pos.quantity, 4)}주 · 평균 ${돈(pos.avg_price)}${pnlText(pos)}${pos.price_date ? ` (${pos.price_date})` : ""}`);
-  if (늦음) out.push(STALE_NOTE);
+  // 해외 보유는 환율 기준일이 종가 날과 다르면 함께 적는다 (25.1346) — 환차·원화 합계는 `fx_date` 환율로 낸 값이다(웹 보유 화면과 같다)
+  const 환율날 = pos && pos.currency !== "KRW" && pos.fx_date && pos.fx_date !== pos.price_date ? ` · 환율 기준 ${pos.fx_date}` : "";
+  if (pos) out.push(`보유 ${n(pos.quantity, 4)}주 · 평균 ${돈(pos.avg_price)}${pnlText(pos)}${pos.price_date ? ` (${pos.price_date})` : ""}${환율날}`);
+  // "매매 반영 전" 은 **이 종목에 보유나 매매가 있을 때만** (25.1346, 텔레그램 감사 #5) — 예전에는 다른 종목의 매매가 재계산을
+  // 기다리는 동안 들고 있지도 않은 종목의 시세·점수 줄까지 "반영 전 값" 이라 했다
+  if ((pos || rows(매매Rs).length > 0) && (await 보유늦음(exec))) out.push(STALE_NOTE);
   // 판정일을 붙인다 (25.1206) — 배치가 멈춘 날의 옛 플래그가 오늘 것처럼 읽혔다. 다른 줄은 모두 날짜가 있다
   for (const f of rows<{ level: string; rationale_text: string; as_of_date: string }>(flagRs)) {
     out.push(`매도 플래그(${LEVEL[f.level] ?? f.level}, ${f.as_of_date}): ${f.rationale_text}`);
@@ -196,7 +201,7 @@ async function stock(s: { id: number; ticker: string; country: string; name: str
 type Pos = {
   quantity: number; avg_price: number; currency: string; unrealized_pnl: number | null; cost: number;
   unrealized_pnl_krw: number | null; unrealized_price_pnl_krw: number | null; unrealized_fx_pnl_krw: number | null;
-  cost_krw: number; price_date: string | null;
+  cost_krw: number; price_date: string | null; fx_date?: string | null;
 };
 
 /**
