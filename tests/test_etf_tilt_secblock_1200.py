@@ -152,6 +152,47 @@ def test_새_달_행에는_지난_판정_순위를_옮겨_싣는다(monkeypatch:
         assert t["rank_all"] == i and t["carried_from"] == "2026-10-01"
 
 
+def test_옮기는_순위는_직전_판정일_하나에서만(monkeypatch: pytest.MonkeyPatch) -> None:
+    """지난달 순위가 없는 ETF 는 지지난달 순위를 옮겨 서로 다른 달의 순위가 섞였다 (docs/infra.md 25.1377, ETF 감사)."""
+    mem = _mem()
+    c = mem.conn
+    옛 = c.execute("SELECT rationale_data FROM etf_picks WHERE etf_id = 1 AND as_of_date = '2026-10-01'").fetchone()[0]
+    c.execute("UPDATE etf_picks SET rationale_data = '{\"criteria\": []}' WHERE etf_id = 1 AND as_of_date = '2026-10-01'")
+    c.execute("INSERT INTO etf_picks (etf_id, as_of_date, bucket, passed, rationale_text, rationale_data, calc_version,"
+              " created_at) VALUES (1, '2026-09-01', '미국 주식', 1, 'x', ?, 5, 't')", [옛])  # fmt: skip
+    for i in range(1, len(ETFS) + 1):  # 이번 달 판정 — 순위 없는 새 행
+        c.execute("INSERT INTO etf_profiles (etf_id, as_of_date, category, currency, total_assets, stock_position,"
+                  " source, fetched_at) VALUES (?, '2026-11-02', 'Large Blend', 'USD', 5e9, 0.99, 't', 't')", [i])  # fmt: skip
+        c.execute("INSERT INTO etf_picks (etf_id, as_of_date, bucket, passed, rationale_text, rationale_data,"
+                  " calc_version, created_at) VALUES (?, '2026-11-02', '미국 주식', 1, 'x', '{\"criteria\": []}', 5, 't')",
+                  [i])  # fmt: skip
+
+    class FakeSec:
+        calls = 0
+
+    class FakeNport:
+        def __init__(self, sec) -> None:  # noqa: ANN001
+            pass
+
+        def fund_tickers(self):  # noqa: ANN202
+            raise sec_edgar.SecBlocked("HTTP 429")
+
+        def ftd_cusips(self, _d):  # noqa: ANN001, ANN202
+            return {}
+
+    monkeypatch.setattr(job.sec_edgar, "SecClient", lambda: FakeSec())
+    monkeypatch.setattr(job.sec_nport, "NportClient", FakeNport)
+    monkeypatch.setattr(job, "TursoClient", lambda: mem)
+    assert job.run() == 0
+    첫 = json.loads(c.execute("SELECT rationale_data FROM etf_picks WHERE etf_id = 1 AND as_of_date = '2026-11-02'"
+                             ).fetchone()[0])  # fmt: skip
+    assert "tilt" not in 첫  # 지지난달(09-01) 순위는 옮기지 않는다 — 모름
+    for i in range(2, len(ETFS) + 1):
+        t = json.loads(c.execute("SELECT rationale_data FROM etf_picks WHERE etf_id = ? AND as_of_date = '2026-11-02'",
+                                 [i]).fetchone()[0])["tilt"]  # fmt: skip
+        assert t["carried_from"] == "2026-10-01"
+
+
 def test_핵심을_못_넘은_넓은_지수는_broad(monkeypatch: pytest.MonkeyPatch) -> None:
     """규모 등으로 핵심에서 빠진 넓은 지수 ETF 가 "넓은 지수가 아닙니다" 경고를 받았다 (docs/infra.md 25.1283, ETF 감사 재현)."""
     mem = _mem()

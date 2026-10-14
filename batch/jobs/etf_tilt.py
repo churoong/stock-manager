@@ -646,7 +646,12 @@ def run() -> int:
         # 지우지도 않아 지난달 값이 남는다" 고 했지만, 달마다 판정(etf.yml)이 순위 없는 새 날짜 행을 먼저 쓰므로 남을
         # 값이 없었다 — 지난달 순위는 지난달 행에 있고 화면은 최신 행만 읽는다. 그 ETF 의 가장 최근 순위를
         # `carried_from`(그 판정일)과 함께 옮긴다
+        # **옮기는 판정일은 하나다** (docs/infra.md 25.1377, ETF 감사). 예전엔 ETF 마다 "그 ETF 의 가장 최근 순위" 를
+        # 옮겨, 지난달 공시를 못 받은 ETF 는 지지난달 순위를 옮겼다 — 같은 화면에 서로 다른 달의 "1위" 둘이 다른 무리
+        # 크기로 섰다. 순위는 같은 판정 안에서만 견줄 수 있다. 직전 판정일(순위가 있는 가장 늦은 날)의 순위만 옮기고,
+        # 그날 순위가 없는 ETF 는 비운다(모름)
         옮김 = 0
+        직전: dict[str, str | None] = {}
         for p in picks:
             pid = int(p["pick_id"])
             if pid not in 건너뜀:
@@ -656,11 +661,20 @@ def run() -> int:
             ).scalar()
             if 지금 is not None:
                 continue  # 같은 날 다시 돈 실행 — 이미 있다
+            오늘 = str(p["as_of_date"])
+            if 오늘 not in 직전:
+                직전[오늘] = client.execute(
+                    "SELECT MAX(as_of_date) FROM etf_picks WHERE as_of_date < ?"
+                    " AND json_extract(rationale_data, '$.tilt') IS NOT NULL",
+                    [오늘],
+                ).scalar()
+            if not 직전[오늘]:
+                continue
             옛 = client.execute(
                 "SELECT json_extract(rationale_data, '$.tilt'), as_of_date FROM etf_picks"
-                " WHERE etf_id = ? AND as_of_date < ? AND json_extract(rationale_data, '$.tilt') IS NOT NULL"
-                " ORDER BY as_of_date DESC LIMIT 1",
-                [int(p["etf_id"]), str(p["as_of_date"])],
+                " WHERE etf_id = ? AND as_of_date = ? AND json_extract(rationale_data, '$.tilt') IS NOT NULL"
+                " LIMIT 1",
+                [int(p["etf_id"]), str(직전[오늘])],
             ).rows
             if not 옛:
                 continue
