@@ -119,12 +119,21 @@ def _kis_calendar_check(client: TursoClient, today: date) -> list[str]:
 
     if not kis.configured():
         return []
+    # **곁다리의 어떤 실패도 리포트를 막지 않는다** (docs/infra.md 25.1365, 배치 실패 감사).
+    # 예전에는 `(KisFailed, OSError, KeyError)` 만 잡아, 응답 모양이 틀린 날
+    # (`parse_holidays` 의 AttributeError·ValueError, 토큰 만료값 `int()` 의 ValueError,
+    # `api_tokens`·호출 카운터 쓰기의 Turso 오류)이 시세 저장 뒤 `collect_kr_prices` 를 빠져나가 "배치 실패" 가 됐다
+    # — 09:35 예비 실행도 같은 응답을 받아 그날 국내 리포트가 통째로 없었다. 한도 초과만은 다시 던진다 — 그건
+    # 곁다리가 아니라 이 실행 전체의 문제라 `guard()` 가 건너뜀으로 닫는다(25.1223)
     try:
         statuses, calls = kis.holidays(client, today)
         db.record_api_call(client, "kis_openapi", count=calls)  # = kis.SOURCE (이름은 글자로, 25.983)
-    except (kis.KisFailed, OSError, KeyError) as exc:  # requests 의 접속 오류도 OSError 계열이다
-        return [f"KIS 휴장일 대조를 못 했습니다 ({exc}) — 달력은 exchange_calendars 그대로 씁니다"]
-    다름 = cal.compare_with_kis("KR", statuses, today)
+        다름 = cal.compare_with_kis("KR", statuses, today)
+    except Exception as exc:  # noqa: BLE001 — requests 의 접속 오류도 여기로 온다
+        if db.quota_reason(exc):
+            raise
+        return [f"KIS 휴장일 대조를 못 했습니다 ({type(exc).__name__}: {exc})"
+                " — 달력은 exchange_calendars 그대로 씁니다"]  # fmt: skip
     # **장중 경로가 볼 수 있게 남긴다** (25.1086). 장중은 KIS 시세에 시각이 없어(부른 시각을 붙인다) "지난 장 시세"
     # 가드를 늘 통과한다 — 달력이 임시공휴일을 놓친 날 어제 시세로 손절·급락 알림이 오늘 날짜로 나갈 수 있었다.
     # 어긋난 날에는 장중이 국내 시세를 야후(시각이 있어 가드가 걸린다)로만 받는다. 달력 자체는 고치지 않는다(25.985)

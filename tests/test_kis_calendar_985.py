@@ -112,3 +112,30 @@ def test_어긋난_날을_장중이_볼_수_있게_남긴다(monkeypatch) -> Non
                   (daily.KIS_DISAGREE_KEY, {"checked": "2026-10-07", "dates": []})]  # fmt: skip
     웹 = (Path(__file__).resolve().parent.parent / "web" / "lib" / "intraday.ts").read_text(encoding="utf-8")
     assert f'KIS_DISAGREE_KEY = "{daily.KIS_DISAGREE_KEY}"' in 웹
+
+
+def test_응답_모양이_틀려도_리포트를_막지_않는다(monkeypatch) -> None:
+    """곁다리의 어떤 실패도 한 줄 경고로 — 예전엔 AttributeError·ValueError·Turso 쓰기 오류가 배치 실패가 됐다 (25.1365)."""
+    monkeypatch.setenv("KIS_APP_KEY", "k")
+    monkeypatch.setenv("KIS_APP_SECRET", "s")
+    for 오류 in (AttributeError("'str' object has no attribute 'get'"), ValueError("invalid literal for int()")):
+        monkeypatch.setattr(kis, "holidays", lambda c, d, e=오류: (_ for _ in ()).throw(e))
+        [줄] = daily._kis_calendar_check(_Client(), date(2026, 10, 7))
+        assert "KIS 휴장일 대조를 못 했습니다" in 줄 and type(오류).__name__ in 줄
+    # 호출 카운터 쓰기가 실패해도
+    monkeypatch.setattr(kis, "holidays", lambda c, d: ([kis.DayStatus(date(2026, 10, 8), True)], 1))
+    monkeypatch.setattr(daily.db, "record_api_call", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("turso 500")))
+    [줄] = daily._kis_calendar_check(_Client(), date(2026, 10, 7))
+    assert "RuntimeError" in 줄
+
+
+def test_한도_초과는_다시_던진다(monkeypatch) -> None:
+    """한도 초과는 곁다리가 아니라 실행 전체의 문제 — guard() 가 건너뜀으로 닫는다 (25.1365, 25.1223)."""
+    import pytest
+
+    monkeypatch.setenv("KIS_APP_KEY", "k")
+    monkeypatch.setenv("KIS_APP_SECRET", "s")
+    monkeypatch.setattr(kis, "holidays", lambda c, d: (_ for _ in ()).throw(RuntimeError("한도")))
+    monkeypatch.setattr(daily.db, "quota_reason", lambda exc: "monthly row reads")
+    with pytest.raises(RuntimeError):
+        daily._kis_calendar_check(_Client(), date(2026, 10, 7))
