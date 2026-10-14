@@ -600,9 +600,25 @@ def fresher_fx(latest: tuple[str | None, float | None], trades: list[Trade]) -> 
     fx_day, fx_now = latest
     last_trade = max((t for t in trades if t.fx_rate and t.fx_rate > 0 and t.fx_rate_source != "auto"),
                      key=same_day_order, default=None)  # fmt: skip
-    if last_trade is not None and (fx_day is None or fx_day < last_trade.trade_date):
+    if last_trade is not None and (fx_day is None or fx_day < last_trade.trade_date) \
+            and trade_fx_plausible(last_trade.fx_rate, fx_now):
         return last_trade.trade_date, float(last_trade.fx_rate)
     return fx_day, fx_now
+
+
+#: 체결 환율이 표의 마지막 환율과 이만큼 넘게 다르면 보유 **전체** 평가에 쓰지 않는다
+#: (docs/infra.md 25.1355, 거래 입력 감사 ②).
+#: 표가 체결보다 며칠 묵은 사이의 USDKRW 움직임으로는 나오기 어려운 폭이다 — 일간 변동은 보통 1% 안팎
+#: [확인필요: 위기 때 한 주 최대 폭]. 넘으면 오타(1,425 → 14.25)로 보고 표의 값과 그 날짜(묵음 경고 대상)를 쓴다.
+#: 그 매수의 원가는 사용자가 넣은 값 그대로다(trades 는 사용자 입력값만)
+TRADE_FX_MAX_GAP = 0.10
+
+
+def trade_fx_plausible(trade_fx: float, table_fx: float | None) -> bool:
+    """체결 환율을 보유 평가에 써도 되나 — 표 값이 없으면 견줄 것이 없어 쓴다(예전과 같다)"""
+    if table_fx is None or table_fx <= 0:
+        return True
+    return abs(trade_fx / table_fx - 1) <= TRADE_FX_MAX_GAP
 
 
 def trade_fx_valued(positions: list[Position], table_fx_date: str | None) -> int:
@@ -926,7 +942,8 @@ def value_series(
                 close = 체결가[sid][0]  # 종가가 체결보다 묵었다 — 체결가가 더 새 값이다 (25.398)
             currency = currency_of.get(sid, "KRW")
             rate = 1.0 if currency == "KRW" else _carry(fx.get(currency, {}), fx_dates.get(currency, []), day, cache)
-            if currency != "KRW" and rate is not None and 체결가[sid][1] > 0 and _carry_date(
+            if currency != "KRW" and rate is not None and 체결가[sid][1] > 0 \
+                    and trade_fx_plausible(체결가[sid][1], rate) and _carry_date(
                 fx_dates.get(currency, []), cache, fx.get(currency, {})
             ) < 체결일[sid]:
                 # 환율도 체결보다 묵었으면 체결 환율 — 보유 평가(`fresher_fx`, 25.1295)와 같은 규칙. 아니면 산 날 지수에
