@@ -1159,6 +1159,8 @@ def run(market: str, as_of: str | None = None) -> int:
                 "skipped": skipped,
                 # 밸류 분모를 기준일 가격으로 옮긴 종목 수와 못 옮긴 사유 (docs/factors.md 3.1, 25.954)
                 "market_cap_scaled": 시총옮김,
+                # 비교 집단·지표별 실제 표본 — 기록만 (docs/factors.md 12.27 P1+P6, 25.1382). 점수 불변
+                "peer_sample": sc.peer_sample_report(factor_results),
                 # 감성 축의 시장 중심 — 기록만 (docs/factors.md 12.25 P5, 25.1370). 뉴스 수집이 멈춰 있으면 빠진다
                 **({"sentiment_center": 감성중심} if (감성중심 := sc.sentiment_center(
                     sentiments, len(by_stock), sentiment_weight)) else {}),

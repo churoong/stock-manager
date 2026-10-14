@@ -1424,6 +1424,47 @@ class FactorResult:
     raw: dict[str, Any]
 
 
+#: `peer_sample_report` 의 목록 길이 상한 — 실행 기록이 커지지 않게
+PEER_REPORT_MAX = 60
+
+
+def peer_sample_report(results: list[FactorResult], min_size: int = MIN_PEER_SIZE) -> dict[str, Any]:
+    """비교 집단·지표별 **실제 표본** — 기록만 (docs/factors.md 2.1·9.4·12.27 P1+P6, docs/infra.md 25.1382).
+
+    `zscores`·`assign_peer_groups`·`score_factors` 는 그대로다(백테스트 경로). 결과만 본다.
+    - small_markets: 업종이 작아 시장 집단으로 올렸는데 **그 시장도 `min_size` 미만**인 집단(9.4 의 열린 항목 — 2.1 의
+      "한 단계 위로" 는 시장이 맨 위라 지킬 수 없다). {집단: {n, stocks}} — IC 판정은 이 시장을 뺀다(25.810)
+    - small_metrics: (집단, 지표)마다 **실제 값**이 있는 종목 수 n 이 `min_size` 미만인 것. 치환값(`_substituted`)은
+      n 에 넣지 않는다. winsorized = n ≥ `WINSOR_MIN_VALUES`(그 미만이면 자르지 않고 z 를 낸다, 25.309)
+    따를 결정(사전 등록): 작은 시장 종목이 1부에 실린 적이 0 이면 접고, 있으면 동결 뒤 NYSE 합치기를 사전 등록하고
+    사용자에게 묻는다. n < 10 인데 |z| > 2 인 종목이 1부에 나오면 동결 뒤 지표별 최소 n 을 사전 등록한다."""
+    작은시장: dict[str, dict[str, Any]] = {}
+    표본: dict[tuple[str, str], int] = {}
+    for r in results:
+        if r.peer_group.startswith("market:") and r.peer_size < min_size:
+            칸 = 작은시장.setdefault(r.peer_group, {"n": r.peer_size, "stocks": set()})
+            칸["stocks"].add(r.stock_id)
+        치환 = set((r.raw.get(SUBSTITUTED_KEY) or {}).keys()) if isinstance(r.raw.get(SUBSTITUTED_KEY), dict) else set()
+        for 지표, 값 in r.raw.items():
+            if 지표.startswith("_") or 지표 in 치환:
+                continue
+            키 = (r.peer_group, 지표)
+            표본.setdefault(키, 0)
+            if isinstance(값, int | float) and not isinstance(값, bool) and math.isfinite(값):
+                표본[키] += 1
+    작은지표 = sorted(
+        ({"group": g, "metric": m, "n": n, "winsorized": n >= WINSOR_MIN_VALUES}
+         for (g, m), n in 표본.items() if n < min_size),
+        key=lambda x: (x["n"], x["group"], x["metric"]),
+    )  # fmt: skip
+    return {
+        "small_markets": {g: {"n": v["n"], "stocks": sorted(v["stocks"])[:PEER_REPORT_MAX]}
+                          for g, v in sorted(작은시장.items())},  # fmt: skip
+        "small_metrics": 작은지표[:PEER_REPORT_MAX],
+        "small_metrics_total": len(작은지표),
+    }
+
+
 def inputs_from_stored(rows: list[dict[str, Any]]) -> list[StockInput] | None:
     """저장된 팩터 원값(`factors.raw_json`)으로 z 계산의 입력을 다시 만든다 (docs/analysis.md 8장, infra 25.1027).
 
