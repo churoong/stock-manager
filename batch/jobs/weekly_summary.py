@@ -63,7 +63,10 @@ EXPECTED_DAYS: dict[str, int] = {
     # 국내 재무는 **주 1회**(월요일, 화요일 재시도)다 — 월 1회 칸에 있어 다섯 번 내리 빠져도 41일째에야 말했다
     # (docs/infra.md 25.1285, 재무 감사 재현). 새 사업보고서가 점수에 늦게 드는 것을 한 달 넘게 몰랐다
     "financials": 10,
-    "dividends": 20,  # 월 2회
+    # 배당은 **연 2회**(4·5월 5일, dividends.yml) — "월 2회 · 20일" 이라 적혀 한 해 열한 달
+    # "마지막 실행 165일 전 (기대 20일 안)" 이 떴다(docs/infra.md 25.1371, 주간 요약 감사 재현).
+    # 5월 실행 뒤 다음 4월까지 약 335일이라 그보다 넉넉히 둔다. /status(`health.ts` every: "year")와 같은 뜻
+    "dividends": 370,
     "us_financials": 40, "sectors": 40, "accumulation": 40, "etf": 40, "etf_satellite": 40,  # 월 1회
     "backtest": 40,  # 매달 3일 (25.942)
 }  # fmt: skip

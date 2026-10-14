@@ -160,3 +160,15 @@ def test_국내_재무는_주_1회_기준으로_본다() -> None:
     wf = Path(__file__).resolve().parents[1] / ".github" / "workflows" / "financials.yml"
     assert "* * 0" in wf.read_text(encoding="utf-8")  # 주 1회 예약
     assert ws.EXPECTED_DAYS["financials"] <= 10
+
+
+def test_배당은_연_2회라_가을에_묵음이_아니다() -> None:
+    """dividends.yml 은 4·5월 5일만 돈다 — "기대 20일" 이라 한 해 열한 달 묵음으로 실렸다 (25.1371, 주간 요약 감사)."""
+    last = {j: "2026-10-04T00:00:00+00:00" for j in ws.EXPECTED_DAYS}
+    last["dividends"] = "2026-05-05T19:00:00+00:00"
+    assert "dividends" not in dict(ws.stale_jobs(last, 지금))
+    # 한 해를 넘기면(4·5월 실행이 둘 다 빠짐) 묵음이다
+    last["dividends"] = "2025-09-01T00:00:00+00:00"
+    assert "dividends" in dict(ws.stale_jobs(last, 지금))
+    cron = (뿌리 / ".github/workflows/dividends.yml").read_text(encoding="utf-8")
+    assert '"41 18 5 4,5 *"' in cron  # 일정이 바뀌면 기대 주기도 다시 본다

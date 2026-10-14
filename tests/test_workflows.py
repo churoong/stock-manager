@@ -92,7 +92,7 @@ IRRELEVANT_ON_D1 = {
     "monitor-targets.yml": "장중 감시 대상. 웹 크론이 이것을 읽는다",
     "index-prices.yml": "지수 3행/일. 추세 필터와 베타(25.65)의 재료다",
     "sentiment-kr.yml": "국내 뉴스 감성. 쓰기가 작고 센티먼트 축이 총점에 들어간다(25.66)",
-    "dividends.yml": "배당. 월 2회, 국내만",
+    "dividends.yml": "배당. 연 2회(4·5월), 국내만",
     "earnings-calendar.yml": "실적 발표일. 주 1회, 쓰기가 작다",
     "signal-outcomes.yml": "신호 성적표. 주 1회, 읽기 위주",
     "valuation-bands.yml": "밸류에이션 밴드. 주 1회, 장기 신호의 재료다",
