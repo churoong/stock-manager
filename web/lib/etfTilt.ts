@@ -53,6 +53,13 @@ export interface Tilt {
   group?: "us" | "kr_us" | "kr_kr";
   /** sec_nport · samsungfund_kodex */
   source?: string;
+  /** 순위에 쓴 점수 — "value_quality"(25.1108 뒤). 없으면 옛 기준(종합 점수)으로 낸 순위다 (25.1376) */
+  score_basis?: string;
+}
+
+/** 집중 목록 머리의 점수 이름 — 행이 적은 기준대로 (docs/infra.md 25.1376). 기준이 없으면 옛 종합 점수 순위라고 말한다 */
+export function tiltBasisLabel(t: Pick<Tilt, "score_basis"> | null): string {
+  return t?.score_basis === "value_quality" ? "우리 장기 점수(밸류·퀄리티)" : "우리 종합 점수(이전 기준 — 다음 월 판정부터 밸류·퀄리티)";
 }
 
 /** 배치가 적은 tilt. 없거나(이 기능 전 판정·보유 경로 없음) 깨졌으면 null — 지어내지 않는다 */

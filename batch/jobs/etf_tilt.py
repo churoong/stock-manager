@@ -162,6 +162,10 @@ def load_stocks(client: TursoClient, country: str = "US") -> dict[str, tuple[int
 #: 확인). 종합 점수에는 모멘텀(12·6·3개월 수익률)·리스크(CAGR·샤프)가 들어 있어, 10~20년 적립 ETF 의 순서를 사실상
 #: 구성종목의 최근 수익률이 정했다(첫 실행 2위 SPMO). 장기 매수 신호 규칙(밸류에이션 밴드 + 퀄리티)과 같은 잣대다
 LONG_FACTORS = ("value", "quality")
+#: 순위에 쓴 점수의 이름 — 판정 행에 싣는다 (docs/infra.md 25.1376, ETF 감사). 25.1108 이 기준을 종합 점수에서
+#: 밸류·퀄리티로 바꿨는데 행에 기준이 없어, 화면은 다음 월 판정 전까지(그리고 SEC 가 막혀 지난 순위를 옮기는 달에는
+#: 더 오래) 종합 점수로 낸 순위를 "밸류·퀄리티 상위 10%" 라 적었다. 이 칸이 없는 행은 옛 기준(종합 점수)이다
+SCORE_BASIS = "value_quality"
 
 
 def long_score(factor_scores: Any) -> float | None:
@@ -317,6 +321,7 @@ def build_payload(
         # us = 미국 상장 · kr_us = 국내 상장 미국 지수 · kr_kr = 국내 상장 국내 지수 — 순위는 이 무리 안에서 (25.974)
         "group": group,
         "pool": pool,
+        "score_basis": SCORE_BASIS,
     }
 
 

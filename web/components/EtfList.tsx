@@ -21,7 +21,7 @@ import {
 } from "@/lib/etf";
 import { ACCOUNTS, groupByAccount, type Account } from "@/lib/etfAccounts";
 import { taxSimLines, type TaxSim } from "@/lib/taxSim";
-import { GROUP_LABEL, BROAD_POOL_NOTE, WIDE_POOL_WARNING, onePerIndex, parseTilt, tiltLine, tiltSource } from "@/lib/etfTilt";
+import { GROUP_LABEL, BROAD_POOL_NOTE, WIDE_POOL_WARNING, onePerIndex, parseTilt, tiltBasisLabel, tiltLine, tiltSource } from "@/lib/etfTilt";
 import { readSavedCountry, saveCountry, type Country } from "@/lib/market";
 import { daysSince, formatKst, parseCriteria } from "@/lib/recommend";
 
@@ -274,7 +274,7 @@ function FocusEtfList({ country }: { country: Country }) {
   return (
     <div>
       <p className="mb-3 text-xs leading-relaxed text-slate-500">
-        {country === "KR" ? "국내 상장" : "미국 상장"} 주식형 ETF 를 <b>우리 장기 점수(밸류·퀄리티) 상위 {(first?.top_share_pct ?? 10).toFixed(0)}% 종목을 얼마나 담았나</b>{" "}
+        {country === "KR" ? "국내 상장" : "미국 상장"} 주식형 ETF 를 <b>{tiltBasisLabel(first)} 상위 {(first?.top_share_pct ?? 10).toFixed(0)}% 종목을 얼마나 담았나</b>{" "}
         순으로 세웠습니다.{" "}
         {/* 보유 출처·점수 기준일은 무리마다 다르다 (docs/infra.md 25.1284) — 국내 지수는 그날 KODEX·KIS 구성종목과 국내 점수,
             미국 지수는 SEC 분기 공시(약 두 달 늦음)와 미국 점수. 예전엔 국내 탭에도 SEC 만 적고 첫 행(국내 지수)의 점수일 하나만 보였다 */}
