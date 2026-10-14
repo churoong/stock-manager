@@ -175,7 +175,33 @@ def long_score(factor_scores: Any) -> float | None:
     return sum(값) / len(값) if 값 else None
 
 
-def load_scores(client: TursoClient, country: str = "US") -> tuple[dict[int, float], str | None]:
+def factor_count(factor_scores: Any) -> int:
+    """장기 점수에 들어간 팩터 수(0~2) — 한 팩터 종목 몫 기록용 (25.1344)."""
+    try:
+        f = json.loads(factor_scores) if isinstance(factor_scores, str) else (factor_scores or {})
+    except (TypeError, ValueError):
+        return 0
+    return sum(1 for k in LONG_FACTORS if isinstance(f, dict) and isinstance(f.get(k), int | float)
+               and math.isfinite(float(f[k])))  # fmt: skip
+
+
+def single_factor_share(scores: dict[int, float], single: set[int], top_ids: set[int]) -> dict[str, Any]:
+    """**한 팩터만 있는 종목의 몫** — 점수 매긴 전체와 상위 10%(T) (docs/etf.md 11.2, infra 25.1344, 21회차 P5 기록
+    먼저).
+
+    장기 점수는 밸류·퀄리티 중 있는 것의 평균이라 한 팩터 종목은 평균 둘보다 흩어짐이 커 상위 10% 에 몰릴 수 있다.
+    검증 둘 모두 "먼저 재고 정하라" — 바꾸지 않고 몫만 남긴다. 상위 몫이 전체 몫보다 크면 상위 10% 소속에만
+    두 팩터를 요구한다(검증 A 의 좁은 규칙)"""
+    전체 = len(scores)
+    상위 = len(top_ids)
+    return {"scored": 전체, "single_all": len(single & set(scores)), "top": 상위, "single_top": len(single & top_ids),
+            "share_all": round(len(single & set(scores)) / 전체, 4) if 전체 else None,
+            "share_top": round(len(single & top_ids) / 상위, 4) if 상위 else None}  # fmt: skip
+
+
+def load_scores(
+    client: TursoClient, country: str = "US", single: set[int] | None = None
+) -> tuple[dict[int, float], str | None]:
     """그 시장의 가장 새 점수 기준일의 **장기 점수**(밸류·퀄리티 평균, 그날 가장 높은 판).
 
     반환 (stock_id → 점수, 기준일).
@@ -197,6 +223,8 @@ def load_scores(client: TursoClient, country: str = "US") -> tuple[dict[int, flo
         sid, ver = int(r["stock_id"]), int(r["calc_version"])
         if sid not in best or ver > best[sid][0]:
             best[sid] = (ver, long_score(r["factor_scores"]))
+            if single is not None:
+                (single.add if factor_count(r["factor_scores"]) == 1 else single.discard)(sid)
     return {sid: v for sid, (_, v) in best.items() if v is not None}, str(as_of)
 
 
@@ -245,17 +273,19 @@ class Market:
     top_ids: set[int]
     top_cut: float | None
     benchmark: str  # 시장 대비의 기준 ETF
+    single_factor: dict[str, Any] | None = None  # 한 팩터 종목 몫 (25.1344, 기록 전용)
 
 
 def load_market(client: TursoClient, country: str, key_to_symbol: dict[str, str], benchmark: str) -> Market:
     stocks = load_stocks(client, country)
-    scores, score_as_of = load_scores(client, country)
+    한팩터: set[int] = set()
+    scores, score_as_of = load_scores(client, country, 한팩터)
     rec_ids, signals_as_of = load_long_signals(client, country)
     top_ids, top_cut = tilt.top_ids_of(scores)
     # 국내는 보유 키가 단축코드 그대로라 이름표가 필요 없다 — 종목 표의 키를 그대로 쓴다
     mapping = key_to_symbol if key_to_symbol else {k: k for k in stocks}
     return Market(mapping, stocks, scores, score_as_of, rec_ids if signals_as_of else None, signals_as_of,
-                  top_ids, top_cut, benchmark)  # fmt: skip
+                  top_ids, top_cut, benchmark, single_factor_share(scores, 한팩터, top_ids))  # fmt: skip
 
 
 def build_payload(
@@ -658,6 +688,7 @@ def run() -> int:
             "score_as_of": {k: m.score_as_of for k, m in markets.items()},
             "benchmark_top_pct": {k: (b.top_pct if b else None) for k, b in benches.items()},
             "top_cut_score": {k: m.top_cut for k, m in markets.items()},
+            "single_factor": {k: m.single_factor for k, m in markets.items()},  # 25.1344 기록 전용
             "leaders": {
                 g: [
                     (p["symbol"], round(tilts[sources[int(p["pick_id"])]].top_pct, 1))
