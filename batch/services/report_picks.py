@@ -254,11 +254,14 @@ def correlation_reduction(
     닮은이름: str | None = None
     닮은번호: int | None = None
     본것 = 0
+    #: 겹친 날이 모자라 대 보지 못한 보유 (이름, 겹친 날) — 다른 보유와는 상관을 냈어도 말한다 (25.1348, 22회차 P5)
+    못봄: list[tuple[str, int]] = []
     for stock_id, name, series in holdings:
         if exclude_stock_id is not None and stock_id == exclude_stock_id:
             continue
         좌, 우 = _aligned_returns(candidate, series)
         if len(좌) < CORR_MIN_POINTS:
+            못봄.append((name, len(좌)))
             continue
         본것 += 1
         r = pearson(좌, 우)
@@ -288,6 +291,7 @@ def correlation_reduction(
         "correlation_window": CORR_WINDOW,
         "correlation_threshold": threshold,
         "compared": 본것,
+        "skipped": 못봄,
     }
     if 최고 <= threshold:
         근거["correlation_factor"] = 1.0
@@ -381,6 +385,7 @@ def build_portfolio(
     fx_missing: bool = False,
     reserved: float = 0.0,
     stop_flags: dict[int, str] | None = None,
+    series_unknown: dict[int, str] | None = None,
 ) -> rs.PortfolioView:
     """2부. 종목당 배분 하나, 빠지면 사유. 보유를 포함해 계산한다 (docs/design.md 3.9, Step 30).
 
@@ -406,9 +411,19 @@ def build_portfolio(
     # 것을 막는
     # 규칙이다. 넓은 지수 ETF(KODEX 200·VOO)는 거의 모든 대형주와 0.7 을 넘어, 적립 ETF 를 산 사용자의 2부 금액이
     # 통째로 30~70% 깎였다. ETF 는 종목 추천과 따로 본다(CLAUDE.md)
+    # **시세를 믿을 수 없는 종목은 대조하지 않고 "모름" 으로 말한다** (docs/infra.md 25.1348, 22회차 P5). 미국 분할
+    # 재수집
+    # 대기 시세는 −75% 하루가 분산을 차지해 0.9 상관이 0.25 로 읽혔다 — "확인했고 낮다" 가 됐다. 금액은 그대로(모르면 안
+    # 줄인다)지만 말이 정직해진다. 값은 까닭
+    series_unknown = series_unknown or {}
     보유계열 = [
         (h.stock_id, h.name, price_series[h.stock_id]) for h in holdings
-        if h.stock_id in price_series and h.asset_type != "etf"
+        if h.stock_id in price_series and h.asset_type != "etf" and h.stock_id not in series_unknown
+    ]
+    #: 시세가 없거나 믿을 수 없어 대조에서 빠진 보유 (번호, 이름, 까닭) — ETF 는 일부러 빼므로 넣지 않는다 (25.908)
+    빠진_보유 = [
+        (h.stock_id, h.name, series_unknown.get(h.stock_id, "시세 없음")) for h in holdings
+        if h.asset_type != "etf" and (h.stock_id not in price_series or h.stock_id in series_unknown)
     ]
     # 25.712 — 이번 리포트에서 먼저 배분돼 대조에 들어간 후보. 종목 번호로 센다 — 이름은 겹칠 수 있다 (25.716)
     앞선_후보: set[int] = set()
@@ -479,7 +494,7 @@ def build_portfolio(
         상관_배수 = 1.0
         #: 상관을 **대 보지 못한** 까닭 (25.700, 감사). 줄인 문구(corr_note)와 달리 "신호 낸 날" 안내를 막지 않는다
         상관_못봄 = ""
-        후보계열 = price_series.get(first.stock_id)
+        후보계열 = None if first.stock_id in series_unknown else price_series.get(first.stock_id)
         # 같은 종목을 더 사는 것은 상관을 보지 않는다(종목 상한이 다룬다) — "못 봤다" 도 다른 보유가 있을 때만 말한다
         다른_보유 = any(sid != first.stock_id for sid, _n, _s in 보유계열)
         진짜_보유 = any(sid != first.stock_id and sid not in 앞선_후보 for sid, _n, _s in 보유계열)
@@ -504,8 +519,20 @@ def build_portfolio(
                 # 대조 대상에 앞선 후보가 섞였으면 "보유 종목" 이라 부르지 않는다 (25.716, 교차검증 — 보유가 없는데
                 # "보유 종목과")
                 상관_못봄 = f"상관 미확인 ({str(corr_근거['note']).replace('보유 종목', 대상말)})"
+        elif first.stock_id in series_unknown and (
+            다른_보유 or any(sid != first.stock_id for sid, _n, _w in 빠진_보유)
+        ):
+            상관_못봄 = f"상관 미확인 (이 종목 {series_unknown[first.stock_id]})"
         elif 다른_보유 and not 후보계열:
             상관_못봄 = f"상관 미확인 (이 종목 시세가 없어 {대상말}과 대 보지 못했습니다)"
+        # 다른 보유와는 상관을 냈어도 **일부를 못 봤으면** 말한다 (25.1348) — 상장한 지 40일 된 분할 신설 회사처럼
+        # 이력이
+        # 가장 짧고 가장 닮은 보유가 말없이 빠졌다
+        if corr_근거.get("max_correlation") is not None:
+            일부 = [f"{n}: 겹친 날 {k}일 < {CORR_MIN_POINTS}" for n, k in corr_근거.get("skipped") or []]
+            일부 += [f"{n}: {왜}" for sid, n, 왜 in 빠진_보유 if sid != first.stock_id]
+            if 일부:
+                상관_못봄 = f"상관 일부 미확인 ({' · '.join(일부)})"
 
         held = held_by_stock.get(first.stock_id, 0.0)
         # **보유 종목은 1부가 낸 목표 금액(줄인 비중)까지만 채운다** (docs/infra.md 25.560, 감사 재현). 1부 금액은
@@ -795,6 +822,7 @@ def compose(
     fx_missing: bool = False,
     reserved: float = 0.0,
     no_allocation_reason: str | None = None,
+    series_unknown: dict[int, str] | None = None,
     app_url: str | None = None,
     weights: dict[str, float] | None = None,
     sentiment_weight: float = 0.0,
@@ -848,6 +876,7 @@ def compose(
             holdings=holdings,
             max_stock_pct=max_stock_pct,
             price_series=price_series,
+            series_unknown=series_unknown,
             min_order_amount=min_order_amount,
             fx_missing=fx_missing,
             reserved=reserved,

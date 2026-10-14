@@ -1201,6 +1201,17 @@ CORR_CALENDAR_SLACK_DAYS = 30
 CORR_IDS_PER_QUERY = 90
 
 
+def _corr_unknown(client: TursoClient, as_of: str, warnings: list[str]) -> dict[int, str]:
+    """상관 대조에서 "모름" 으로 둘 종목 — 미국 분할 재수집 대기 (docs/infra.md 25.1348, 22회차 P5). 국내 리포트에도
+    쓴다:
+    미국 보유가 원화 풀에 든다. 못 읽으면 빈 것(예전처럼)과 경고"""
+    try:
+        return dict.fromkeys(db.split_pending_us(client, as_of), "분할 재수집 대기")
+    except Exception as exc:  # noqa: BLE001 — 곁다리
+        warnings.append(_실패문("분할 재수집 대기 읽기(상관 대조)", exc))
+        return {}
+
+
 def load_price_series(
     client: TursoClient, stock_ids: list[int], as_of: str, warnings: list[str] | None = None
 ) -> dict[int, dict[str, float]]:
@@ -2160,6 +2171,7 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
             holdings=holdings if 추천_오류 is None else [],
             max_stock_pct=settings["max_weight_per_stock"],
             price_series=corr_series,
+            series_unknown=_corr_unknown(client, signals_as_of or decision.trade_date, warnings),
             # **이미 종목 통화로 환산된 값이다** (`load_settings`: 미국은 USDKRW 로 나눈다).
             # 2부가 상한·상관으로 깎고 나면 이 문턱 아래로 내려갈 수 있다 (docs/infra.md 25.96)
             min_order_amount=settings["min_order_amount"],
