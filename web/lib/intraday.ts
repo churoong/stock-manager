@@ -108,6 +108,11 @@ export function withoutSignalLevels<T extends Target>(t: T): T {
     buy_zone_high: null,
     target_price: 보유 ? t.target_price : null,
     stop_price: 보유 ? t.stop_price : null,
+    // **분할 매수 다음 차수도 비운다** (docs/infra.md 25.1364, 장중 감사 재현). 다음 차수는 목록을 만들 때의 매매 기록으로
+    // 센다 — 어제 "2차 도달" 을 받고 산 뒤 목록이 갱신되지 않으면 오늘 같은 "2차 도달" 이 또 나가 이미 산 것을 다시
+    // 사라고 했다. 보유 목표·손절(평균단가 기준, 매매가 바뀌어도 방향이 같다)과 달리 차수는 매매 하나로 틀린다
+    next_tranche_price: null,
+    next_tranche_step: null,
   };
 }
 

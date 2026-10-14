@@ -33,6 +33,18 @@ describe("감시 목록 신선도 (25.534)", () => {
     expect(evaluate(withoutSignalLevels(보유), 시세, 문턱).map((h) => h.trigger)).toEqual(["stop"]);
   });
 
+  it("묵은 목록이면 분할 매수 다음 차수도 쓰지 않는다 (25.1364)", () => {
+    const 보유: Target = {
+      stock_id: 1, yahoo_symbol: "005930.KS", name: "가", currency: "KRW", reasons: ["holding"],
+      buy_zone_low: null, buy_zone_high: null, target_price: null, stop_price: null,
+      prev_close: 100_000, avg_volume_20d: null, next_tranche_price: 95_000, next_tranche_step: 2,
+    } as Target;
+    const 시세 = { symbol: "005930.KS", price: 96_000, previous_close: 100_000, day_high: 100_000, day_low: 94_000, volume: null, time: "2026-09-28T01:00:00Z" };
+    const 문턱 = { spike_pct: 50, volume_multiple: 3 };
+    expect(evaluate(보유, 시세 as never, 문턱).map((h) => h.trigger)).toContain("tranche");
+    expect(evaluate(withoutSignalLevels(보유), 시세 as never, 문턱).map((h) => h.trigger)).not.toContain("tranche");
+  });
+
   it("경로가 그 판정을 쓴다", () => {
     const 경로 = readFileSync("app/api/cron/intraday/route.ts", "utf8");
     expect(경로).toContain("targetsFreshFor(만든때, session, 직전닫힘)");
