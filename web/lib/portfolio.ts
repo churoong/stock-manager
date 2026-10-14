@@ -678,6 +678,12 @@ WHERE stock_id = ? AND side = ? AND trade_date = ? AND price = ? AND quantity = 
 ORDER BY created_at DESC LIMIT 1`;
 /** 같은 매매를 "방금" 으로 볼 시간 */
 export const DUPLICATE_WINDOW_MS = 10 * 60_000;
+/**
+ * **확인하고 저장한 요청이 두 번 와도 한 행만** (docs/infra.md 25.1356, 거래 입력 감사 ④). "그래도 저장" 은 앞 행이 있는 걸 알고
+ * 넣는 길이라 10분 창으로는 막을 수 없다 — 그 확인 요청 자신의 재전송(응답이 늦어 다시 누름)만 이 짧은 창으로 막는다.
+ * 같은 매매를 1분 안에 일부러 세 번 넣는 일은 없다고 봤다
+ */
+export const CONFIRM_REPEAT_WINDOW_MS = 60_000;
 
 export const TRADE_INSERT = `INSERT INTO trades (stock_id, side, trade_date, price, quantity, currency, fx_rate, fx_rate_source,
   fee, tax, horizon, memo, snapshot_as_of, score_at_trade, signal_type_at_trade, sentiment_at_trade,

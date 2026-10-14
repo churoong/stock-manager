@@ -4,11 +4,11 @@ import { issueTexts } from "@/lib/validationErrors";
 import { userTimeOf } from "@/lib/market";
 import {
   FX_ON_OR_BEFORE,
+  CONFIRM_REPEAT_WINDOW_MS,
   DUPLICATE_WINDOW_MS,
   TRADES_FOR_HELD,
   RECENT_SAME_TRADE,
   SNAPSHOT_AT,
-  TRADE_INSERT,
   weekendNote,
   usLocalDateNote,
   TRADE_INSERT_UNLESS_RECENT,
@@ -149,24 +149,29 @@ export async function POST(request: Request) {
       snapshot?.as_of_date ?? null, snapshot?.total_score ?? null, snapshot?.signal_type ?? null,
       snapshot?.sentiment_score ?? null, snapshot?.factor_scores ?? null, now, now,
     ];
-    if (input.confirm_duplicate) {
-      await execute(TRADE_INSERT, 값들);
-    } else {
-      // 위 확인과 이 쓰기 사이에 같은 요청이 먼저 쓰였으면 넣지 않는다 (25.1112) — 확인과 쓰기를 한 문장으로
-      const 이후 = new Date(Date.now() - DUPLICATE_WINDOW_MS).toISOString();
-      const rs = await execute(TRADE_INSERT_UNLESS_RECENT, [
-        ...값들, input.stock_id, input.side, input.trade_date, input.price, input.quantity, 이후,
-      ]);
-      if (rs.affectedRows === 0) {
+    // 위 확인과 이 쓰기 사이에 같은 요청이 먼저 쓰였으면 넣지 않는다 (25.1112) — 확인과 쓰기를 한 문장으로.
+    // 확인하고 저장한 요청도 1분 안의 재전송은 막는다 (25.1356) — 예전엔 장치 없는 `TRADE_INSERT` 라 두 번 가면 두 행이었다
+    const 창 = input.confirm_duplicate ? CONFIRM_REPEAT_WINDOW_MS : DUPLICATE_WINDOW_MS;
+    const 이후 = new Date(Date.now() - 창).toISOString();
+    const rs = await execute(TRADE_INSERT_UNLESS_RECENT, [
+      ...값들, input.stock_id, input.side, input.trade_date, input.price, input.quantity, 이후,
+    ]);
+    if (rs.affectedRows === 0) {
+      if (input.confirm_duplicate) {
+        // 다시 묻지 않는다 — 확인한 저장은 이미 들어갔다
         return NextResponse.json(
-          {
-            errors: ["같은 매매가 방금 저장됐습니다 — 응답이 늦어 다시 누른 것이면 목록을 확인해 주세요"],
-            duplicate: true,
-            confirm_needed: "duplicate",
-          },
+          { errors: ["확인하고 저장한 같은 매매가 방금(1분 안) 들어갔습니다 — 목록을 확인해 주세요"], duplicate: true },
           { status: 409 },
         );
       }
+      return NextResponse.json(
+        {
+          errors: ["같은 매매가 방금 저장됐습니다 — 응답이 늦어 다시 누른 것이면 목록을 확인해 주세요"],
+          duplicate: true,
+          confirm_needed: "duplicate",
+        },
+        { status: 409 },
+      );
     }
     const recalc = await requestRecalc();
     return NextResponse.json({ ok: true, fx_rate: fxRate, fx_rate_source: fxSource, recalc, warnings: [가격검사.warning, fxWarning, fxDateWarning, usLocalDateNote(stock.country, input.trade_date), weekendNote(input.trade_date)].filter((w): w is string => Boolean(w)) });

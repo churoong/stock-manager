@@ -61,3 +61,25 @@ describe("주말 체결일은 말한다 (docs/infra.md 25.1114)", () => {
     expect(원문).toContain("weekendNote(input.trade_date)");
   });
 });
+
+describe("확인하고 저장한 요청도 1분 안의 재전송은 한 행만 (docs/infra.md 25.1356)", () => {
+  it("앞 행이 1분보다 오래면 넣고, 그 확인 저장이 다시 오면 0행", async () => {
+    const { CONFIRM_REPEAT_WINDOW_MS } = await import("@/lib/portfolio");
+    const 창 = (now: string) => new Date(Date.parse(now) - CONFIRM_REPEAT_WINDOW_MS).toISOString();
+    expect(넣기("2026-10-10T01:00:00.000Z", 창("2026-10-10T01:00:00.000Z"))).toBe(1); // 처음 저장
+    // 2분 뒤 "그래도 저장" — 앞 행을 알고 넣는 길이다
+    expect(넣기("2026-10-10T01:02:00.000Z", 창("2026-10-10T01:02:00.000Z"))).toBe(1);
+    // 그 확인 요청이 응답이 늦어 다시 왔다
+    expect(넣기("2026-10-10T01:02:05.000Z", 창("2026-10-10T01:02:05.000Z"))).toBe(0);
+    expect((db.prepare("SELECT COUNT(*) AS n FROM trades").get() as { n: number }).n).toBe(2);
+  });
+
+  it("매매·배당 경로 모두 장치 없는 INSERT 를 쓰지 않는다", () => {
+    const 매매 = readFileSync(join(process.cwd(), "app", "api", "trades", "route.ts"), "utf-8");
+    const 배당 = readFileSync(join(process.cwd(), "app", "api", "dividends", "route.ts"), "utf-8");
+    expect(매매).not.toMatch(/execute\(TRADE_INSERT,/);
+    expect(배당).not.toMatch(/execute\(DIVIDEND_INSERT,/);
+    expect(매매).toContain("CONFIRM_REPEAT_WINDOW_MS");
+    expect(배당).toContain("CONFIRM_REPEAT_WINDOW_MS");
+  });
+});
