@@ -1,0 +1,47 @@
+name: SEC 인수·합병 공시 색인 탐침
+
+# SEC 일별 양식 색인에 공개매수·대상 회사 의견·합병 위임장이 어느 CIK 로 실리는지 센다
+# (docs/factors.md 12.22 20회차 P5, docs/infra.md 25.1329). 손으로만 돌린다. 운영 DB 를 읽지도 쓰지도 않는다.
+# 결과는 비공개 운영 저장소 이슈로만.
+on:
+  workflow_dispatch:
+    inputs:
+      dates:
+        description: 색인 날짜 (쉼표, YYYYMMDD)
+        type: string
+        default: "20250602,20250715,20250910"
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DATES: ${{ inputs.dates }}
+      OFFLINE_MODE: "0"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: 탐침
+        env:
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+        run: |
+          set -o pipefail
+          python scripts/probe_sec_deals.py --dates "${DATES:-20250602,20250715,20250910}" 2>&1 | python scripts/ops_tee.py sec-deals.txt
+      - name: 결과를 비공개 이슈로
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPS_REPO: ${{ secrets.OPS_REPO }}
+          OPS_TOKEN: ${{ secrets.OPS_TOKEN }}
+        run: python scripts/publish_output.py --title "운영 출력 (클라우드 세션용)" --file sec-deals.txt --note "SEC 인수·합병 공시 색인 탐침"

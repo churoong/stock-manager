@@ -72,6 +72,7 @@ IRRELEVANT_ON_D1 = {
     "probe-dart-cashflow.yml": "DART 영업현금흐름 필드 탐침 (infra 25.1317) — 운영 DB 를 안 쓴다",
     "probe-heavy-reads.yml": "스펙 확인용 probe",
     "probe-sec-filings.yml": "스펙 확인용 probe",
+    "probe-sec-deals.yml": "SEC 인수·합병 공시 색인 탐침 (infra 25.1329) — 운영 DB 를 안 쓴다",
     "probe-etf-nport.yml": "스펙 확인용 probe (ETF 전 종목 보유, docs/data-sources.md 13.5)",
     "probe-kr-etf-pdf.yml": "스펙 확인용 probe (국내 ETF 구성종목 경로, docs/etf.md 11.5)",
     "probe-kis.yml": "스펙 확인용 probe (한국투자증권 API 클라우드 호출, docs/data-sources.md 3, infra 25.983)",
