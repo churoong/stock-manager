@@ -32,6 +32,9 @@ JOB_NAME = "sell_flags"
 #: 거래일 1년 반 남짓 — 그보다 오래전에 바꾼 잣대 뒤 첫 점수까지 못 닿으면 "같은 잣대의 점수가 없음" 으로 말한다
 BASELINE_PAGE = 20
 BASELINE_SCAN_PAGES = 19
+#: 팩터별 기여 합이 실제 점수 차와 이만큼 안이어야 분해를 적는다 (25.1342) — 점수는 소수 한 자리, 기여는 둘째 자리
+#: 반올림이라 다섯 팩터·감성 반올림 오차 합(약 0.03)에 넉넉히. 검증 A 조건의 값 그대로
+DROP_PARTS_TOLERANCE = 0.15
 
 
 
@@ -167,8 +170,8 @@ def load_holdings(client: TursoClient, today: date | None = None) -> tuple[list[
         # 맞는 것이 없으면 예전처럼 가장 높은 판
         잣대 = [
             client.execute(
-                "SELECT weights_json, calc_version, sentiment_weight_used, total_score FROM scores"
-                " WHERE stock_id = ? AND as_of_date = ?"
+                "SELECT weights_json, calc_version, sentiment_weight_used, total_score, factor_scores,"
+                " sentiment_score FROM scores WHERE stock_id = ? AND as_of_date = ?"  # 팩터·감성: 기여 분해 (25.1342)
                 " ORDER BY calc_version DESC LIMIT ?",
                 [sid, day, 한도],
             ).dicts()
@@ -198,7 +201,8 @@ def load_holdings(client: TursoClient, today: date | None = None) -> tuple[list[
             쪽 = 0
             while 기준점 is None and 쪽 < BASELINE_SCAN_PAGES:
                 후보들 = client.execute(
-                    "SELECT as_of_date, total_score, weights_json, sentiment_weight_used FROM scores"
+                    "SELECT as_of_date, total_score, weights_json, sentiment_weight_used, factor_scores,"
+                    " sentiment_score FROM scores"
                     " WHERE stock_id = ? AND as_of_date > ? AND as_of_date < ? AND calc_version = ?"
                     "   AND total_score IS NOT NULL ORDER BY as_of_date LIMIT ? OFFSET ?",
                     [sid, r["score_at_buy_date"], r["score_now_date"], int(지금잣대["calc_version"]),
@@ -238,6 +242,8 @@ def load_holdings(client: TursoClient, today: date | None = None) -> tuple[list[
                 score_at_buy=(_f(기준점["total_score"]) if 기준점 else None) if 잣대가_바뀜 else _f(r["score_at_buy"]),
                 score_at_buy_date=str(기준점["as_of_date"]) if 기준점 else r["score_at_buy_date"],
                 score_rebased=기준점 is not None,
+                score_drop_parts=_하락_기여(기준점 if 기준점 else (None if 잣대가_바뀜 else (잣대[0] or [None])[0]),
+                                       (잣대[1] or [None])[0]),
                 op_income_latest=_f(latest.get("operating_income")), op_income_prev=_f(prev.get("operating_income")),
                 fiscal_year_latest=latest.get("fiscal_year"), fin_report_date=latest.get("report_date"),
                 op_income_currency=latest.get("currency"), op_income_prev_currency=prev.get("currency"),
@@ -312,6 +318,34 @@ def _기업행위(
     except Exception:  # noqa: BLE001 — 덧붙이는 말이 판정을 막으면 안 된다
         return False, 1.0
     return (True, 1.0) if 배율 is None else (False, float(배율))
+
+
+def _점수_분해_입력(row: dict | None) -> dict | None:
+    if not row:
+        return None
+    try:
+        return {"total": row.get("total_score"), "factors": json.loads(row.get("factor_scores") or "{}"),
+                "weights": json.loads(row.get("weights_json") or "{}"), "sentiment": row.get("sentiment_score"),
+                "sentiment_weight": row.get("sentiment_weight_used")}  # fmt: skip
+    except (TypeError, ValueError):
+        return None
+
+
+def _하락_기여(before: dict | None, now: dict | None) -> dict[str, float] | None:
+    """② 종합 점수 하락의 팩터별 기여 (docs/sell_flags.md 1장, infra 25.1342, 21회차 P3 1단계).
+
+    `insights.decompose_change` 를 ② 가 견주는 **두 행 그대로**(매수일 판 또는 다시 잡은 기준점, 지금)에 쓴다.
+    기여의 합이 두 행의 실제 차와 `DROP_PARTS_TOLERANCE` 안일 때만 낸다 — 0~100 자르기, 매매 점수와 맞는 판이
+    없을 때(25.1094 물러남), 팩터 칸이 비었을 때는 합이 맞지 않아 아무것도 적지 않는다(모르는 분해를 지어내지 않는다)"""
+    from batch.services import insights
+
+    a, b = _점수_분해_입력(now), _점수_분해_입력(before)
+    if not a or not b or not isinstance(a["total"], (int, float)) or not isinstance(b["total"], (int, float)):
+        return None
+    변화 = insights.decompose_change(a, b)
+    if not 변화 or abs(sum(변화.values()) - (float(a["total"]) - float(b["total"]))) > DROP_PARTS_TOLERANCE:
+        return None
+    return 변화
 
 
 def 매수일_판(rows: list[dict[str, Any]], score_at_buy: Any) -> list[dict[str, Any]]:

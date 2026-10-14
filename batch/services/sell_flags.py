@@ -81,6 +81,22 @@ def _짧은해_주석(days: tuple[Any, Any]) -> str:
     return f" — {', '.join(붙임)}(12개월 아님)" if 붙임 else ""
 
 
+_팩터_이름 = {"value": "밸류", "quality": "퀄리티", "growth": "성장", "momentum": "모멘텀", "risk": "리스크",
+            "sentiment": "감성"}  # fmt: skip
+
+
+def _기여_글(parts: dict[str, float] | None) -> str:
+    """② 근거 칸 끝의 팩터별 기여 — **사실만**, 많이 내린 것부터 (25.1342, 21회차 P3 1단계).
+
+    인과 문장·"재무" 묶음을 쓰지 않는다: 밸류는 가격이 내리면 오르는 팩터라 퀄리티·성장 악화를 가릴 수 있다(검증 둘).
+    0 인 몫은 뺀다. 이름표는 그대로라 [확인] 이 유지된다(25.564 — 기준 이름만 본다)"""
+    if not parts:
+        return ""
+    줄 = [f"{_팩터_이름.get(k, k)} {fixed(v, 1, sign=True)}" for k, v in sorted(parts.items(), key=lambda kv: kv[1])
+          if abs(v) >= 0.05]  # fmt: skip
+    return f" — 팩터별 기여: {' · '.join(줄)}" if 줄 else ""
+
+
 @dataclass
 class HoldingInput:
     stock_id: int
@@ -98,6 +114,8 @@ class HoldingInput:
     #: 비교 기준점이 **매수 당시 점수가 아니라 다시 잡은 점수**인가 (docs/sell_flags.md, infra 25.961). 매수 뒤 계산
     #: 판·가중치가 바뀌면 매수 당시 점수와는 견주지 않고, 지금과 같은 잣대의 **첫 점수**(매수일 이후)를 기준점으로 쓴다
     score_rebased: bool = False
+    #: ② 하락의 팩터별 기여(지금 − 기준) — 합이 실제 차와 맞을 때만 잡이 채운다 (25.1342). 표시에만 쓴다
+    score_drop_parts: dict[str, float] | None = None
     op_income_latest: float | None = None
     op_income_prev: float | None = None
     fiscal_year_latest: int | None = None
@@ -246,7 +264,7 @@ def evaluate(h: HoldingInput, today: date, targets: dict | None = None) -> list[
                 if h.score_rebased else f"매수 당시({h.score_at_buy_date})")  # fmt: skip
         reasons.append(_criterion("종합 점수 하락",
                                   f"{기준} {fixed(h.score_at_buy, 1)}"
-                                  f" → {fixed(h.score_now, 1)} (−{fixed(drop, 1)})",
+                                  f" → {fixed(h.score_now, 1)} (−{fixed(drop, 1)}){_기여_글(h.score_drop_parts)}",
                                   f"−{SCORE_DROP_POINTS:.0f}점 이상", "scores / trades 스냅샷",
                                   h.score_now_date))  # fmt: skip
     if reasons:
