@@ -826,8 +826,10 @@ export const FRESHNESS: FreshnessRow[] = [
   // **기본 백테스트** (25.942) — 매달 3일 예약. 기법 발굴 판정이 이 실행만 센다(factors.md 12장 머리). 기본 파라미터 실행만 본다
   { key: "backtest_kr", label: "기본 백테스트(국내, 마지막 기본 실행)", sql: "SELECT date(MAX(finished_at), '+9 hours') AS v FROM batch_runs WHERE job_name = 'backtest' AND market = 'KR' AND status = 'success' AND json_extract(step_log, '$.params.default') = 1", every: "month" },
   { key: "backtest_us", label: "기본 백테스트(미국, 마지막 기본 실행)", sql: "SELECT date(MAX(finished_at), '+9 hours') AS v FROM batch_runs WHERE job_name = 'backtest' AND market = 'US' AND status = 'success' AND json_extract(step_log, '$.params.default') = 1", every: "month", restsOnD1: true },
-  // 주간 운영 요약 (25.943) — 일요일 아침 텔레그램. 안 오면 여기서 낡는다
-  { key: "weekly_summary", label: "주간 운영 요약(마지막 발송)", sql: "SELECT date(MAX(finished_at), '+9 hours') AS v FROM batch_runs WHERE job_name = 'weekly_summary' AND status = 'success'", every: "week" },
+  // 주간 운영 요약 (25.943) — 일요일 아침 텔레그램. 안 오면 여기서 낡는다. **부분 성공도 보낸 것이다** (25.1373, 주간 요약 감사) —
+  // 보낸 뒤 진도 쓰기에 실패하면 `partial` 로 닫는데(25.1225, 다시 보내기 막기도 partial 을 보낸 것으로 본다) 여기만 success 를 세어,
+  // 받은 요약이 14일 뒤 노랑·28일 뒤 빨강으로 "안 보냄" 이 됐다
+  { key: "weekly_summary", label: "주간 운영 요약(마지막 발송)", sql: "SELECT date(MAX(finished_at), '+9 hours') AS v FROM batch_runs WHERE job_name = 'weekly_summary' AND status IN ('success', 'partial')", every: "week" },
   // 백업 복구 리허설 (25.946) — 분기 1회. 예전엔 `year`(400일) 라 네 번 연속 실패해도 초록이었다 — 분기(약 92일)에 여유를 둔
   // 100일로 본다: 한 번 거르면 노랑, 두 번이면 빨강 (25.1306)
   { key: "restore_drill", label: "백업 복구 리허설(마지막 통과)", sql: "SELECT date(MAX(finished_at), '+9 hours') AS v FROM batch_runs WHERE job_name = 'restore_drill' AND status = 'success'", every: "year", staleDays: RESTORE_DRILL_STALE_DAYS },
