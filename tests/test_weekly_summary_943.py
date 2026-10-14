@@ -186,3 +186,13 @@ def test_예정된_건너뜀은_문제로_세지_않는다() -> None:
     늦음 = ws.Run("daily_us", "US", "skipped", "2026-10-02T21:00:00+00:00", None, (), "이미 장이 끝났습니다 (개장 400분 경과)")
     글 = ws.compose([늦음, 성공], {j: "2026-10-04T00:00:00+00:00" for j in ws.EXPECTED_DAYS}, 지금, 10_000_000)
     assert "daily_us: 성공 1 · 건너뜀 1" in 글
+
+
+def test_읽기가_80퍼센트를_넘으면_진도와_상관없이_경고() -> None:
+    """10-28 에 420M/500M(84%, 진도 90%)이 표시 없이 나갔다 (25.1374, 주간 요약 감사)."""
+    from datetime import UTC, datetime
+
+    늦은달 = datetime(2026, 10, 28, tzinfo=UTC)
+    assert "⚠ 80% 넘음" in ws.reads_line(420_000_000, 500_000_000, 늦은달)
+    assert "⚠" not in ws.reads_line(300_000_000, 500_000_000, 늦은달)  # 60%, 진도 90%
+    assert "진도보다 앞섭니다" in ws.reads_line(300_000_000, 500_000_000, datetime(2026, 10, 10, tzinfo=UTC))

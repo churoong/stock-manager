@@ -208,14 +208,21 @@ def stale_jobs(last_success: dict[str, str], now: datetime) -> list[tuple[str, i
     return out
 
 
+#: 비용 규칙의 경고 선 — "80% 도달 시 경고, 100% 에서 중단" (CLAUDE.md 비용 규칙)
+QUOTA_WARN_SHARE = 0.8
+
+
 def reads_line(used: int | None, limit: int, now: datetime) -> str:
-    """Turso 월 읽기 — 쓴 몫과 달의 진도. 진도보다 앞서면 ⚠."""
+    """Turso 월 읽기 — 쓴 몫과 달의 진도. 진도보다 앞서면 ⚠, **80% 를 넘으면 진도와 상관없이 ⚠** (docs/infra.md 25.1374,
+    주간 요약 감사 재현). 예전에는 진도만 봐서 10-28 에 420M/500M(84%, 진도 90%)이 아무 표시 없이 나갔다 — 비용 규칙의
+    "80% 경고" 가 텔레그램에는 없었다(/status 게이지에만 있었다)."""
     if used is None:
         return "Turso 월 읽기: 재지 못했습니다"
     일수 = monthrange(now.year, now.month)[1]
     진도 = now.day / 일수
     몫 = used / limit if limit else 0.0
-    표시 = " ⚠ 진도보다 앞섭니다" if 몫 > 진도 + 0.05 else ""
+    표시 = (" ⚠ 진도보다 앞섭니다" if 몫 > 진도 + 0.05
+            else f" ⚠ {QUOTA_WARN_SHARE:.0%} 넘음 — 한도 경고 선" if 몫 >= QUOTA_WARN_SHARE else "")  # fmt: skip
     return f"Turso 월 읽기: {used / 1e6:,.1f}M / {limit / 1e6:,.0f}M ({몫:.0%}, 달 진도 {진도:.0%}){표시}"
 
 
