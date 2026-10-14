@@ -128,6 +128,16 @@ class Test필수조건:
         ev = svc.evaluate("VOO", "x", p, AS_OF, FETCHED)
         assert not ev.passed and "확인할 수 없는 값: 설정일" in (ev.excluded_reason or "")
 
+    def test_값_하나가_비어도_넓은_지수_묶음은_싣는다(self) -> None:
+        """총보수가 빈 Large Blend 가 bucket=None 이라 집중 목록이 "넓은 지수 아님" 으로 경고했다 (25.1378, ETF 감사)."""
+        p = profile("VOO")
+        p.expense_ratio = None
+        ev = svc.evaluate("VOO", "x", p, AS_OF, FETCHED)
+        assert not ev.passed and "확인할 수 없는 값: 총보수" in (ev.excluded_reason or "")
+        assert ev.bucket is not None  # 넓은 지수 — 집중 목록은 broad 로 둔다
+        p.category = None
+        assert svc.evaluate("VOO", "x", p, AS_OF, FETCHED).bucket is None  # 분류를 모르면 모름
+
     def test_순자산_10억달러_미만은_뺀다(self) -> None:
         p = profile("VOO")
         p.total_assets = 999_000_000

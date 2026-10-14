@@ -313,7 +313,11 @@ def evaluate(symbol: str, name: str, profile: FundProfile | None, as_of: date, f
         if value is None or (isinstance(value, float) and not math.isfinite(value))
     ]
     if missing:
-        return excluded(f"확인할 수 없는 값: {', '.join(missing)}")
+        # **분류를 알면 넓은 지수 묶음은 싣는다** (docs/infra.md 25.1378, ETF 감사 재현). 묶음을 정하기 전에 나가
+        # 총보수 하나가 빈 Large Blend 가 `bucket=None` 이 되고, 집중 목록(`etf_tilt`)이 "넓은 지수 아님(업종·테마)"
+        # 경고를 붙였다 — 국내는 묶음을 먼저 정해 같은 경우에 broad 로 갔다(25.1283). 핵심 통과는 여전히 아니다
+        묶음 = BROAD_CATEGORIES.get(category) if category else None
+        return excluded(f"확인할 수 없는 값: {', '.join(missing)}", 묶음)
 
     assert category is not None  # 위에서 걸렀다. 타입 검사용
     bucket = BROAD_CATEGORIES.get(category)
