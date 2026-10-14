@@ -48,6 +48,13 @@ JOB_NAME = "signals"
 
 #: 정의처는 `batch/sources/dart.ANNUAL_REPORT_CODE` 하나다 (docs/infra.md 25.143)
 ANNUAL_REPORT_CODE = dart.ANNUAL_REPORT_CODE
+#: 사업보고서 뒤 분기 참고 행 (22회차 P3, docs/infra.md 25.1352) — **국내 중기 신호를 낸 종목만** 한 번 읽는다.
+#: 사업보고서 행과 분기 행을 함께(기준·통화·짧은 해를 `sg.newer_quarter` 가 본다). 기준일 뒤 접수는 읽지 않는다
+NEWER_QUARTER_SQL = (
+    "SELECT f.stock_id, f.fiscal_year, f.report_code, f.consolidated, f.report_date, f.operating_income, f.currency,"
+    " f.period_days FROM financials f JOIN json_each(?) j ON j.value = f.stock_id"
+    " WHERE f.report_code IN ('11013', '11012', '11014', ?) AND f.fiscal_year >= ? AND f.report_date <= ?"
+)
 
 # 1단계에서 읽을 거래일 수. 60일 이동평균에 필요한 만큼이다.
 RECENT_DAYS = sg.MA_LONG_DAYS
@@ -173,6 +180,47 @@ def load_recent_prices_for(
 
 #: 정의처는 `services/signals.STALE_ANNUAL_DAYS` (25.660)
 STALE_ANNUAL_DAYS = sg.STALE_ANNUAL_DAYS
+
+
+def add_newer_quarter_rows(
+    client: TursoClient,
+    중기: list[tuple[int, sg.Signal, sg.SignalInput]],
+    rows: list,
+    as_of: str,
+    now: str,
+) -> dict | None:
+    """국내 중기 신호에 **사업보고서 뒤 분기 영업이익** 참고 행을 붙인다 (22회차 P3, docs/infra.md 25.1352).
+    판정·금액은 그대로다. 붙인 신호의 `rows` 자리를 다시 만든다. 못 읽으면 붙이지 않고 그 사실을 돌려준다.
+
+    돌려주는 것(실행 기록): {"signals": 중기 신호 수, "with_quarter": 분기를 붙인 수, "lower": 그 가운데 영업이익이
+    전년 같은 분기보다 작은 수}. 작은 몫이 절반을 넘으면 잡음인지 다시 본다(docs/factors.md 12.24)."""
+    if not 중기:
+        return None
+    해 = [inp.fiscal_year for _i, _s, inp in 중기 if inp.fiscal_year is not None]
+    if not 해:
+        return {"signals": len(중기), "with_quarter": 0, "lower": 0}
+    ids = sorted({inp.stock_id for _i, _s, inp in 중기})
+    try:
+        rs = client.execute(NEWER_QUARTER_SQL, [json.dumps(ids), ANNUAL_REPORT_CODE, min(해), as_of])
+    except Exception as exc:  # noqa: BLE001 — 참고 행이 빠질 뿐 신호는 산다
+        log.warning("사업보고서 뒤 분기를 읽지 못했습니다: %s", exc)
+        return {"signals": len(중기), "error": str(exc)[:200]}
+    by_stock: dict[int, list[dict]] = {}
+    for r in rs.dicts():
+        by_stock.setdefault(int(r["stock_id"]), []).append(r)
+    붙임 = 작음 = 0
+    for i, signal, inp in 중기:
+        nq = sg.newer_quarter(
+            by_stock.get(inp.stock_id, []), fiscal_year=inp.fiscal_year, consolidated=inp.consolidated,
+            annual_code=ANNUAL_REPORT_CODE, as_of=as_of,
+        )
+        if nq is None:
+            continue
+        signal.rationale_data.setdefault("criteria", []).append(sg.newer_quarter_criterion(nq, inp.consolidated))
+        rows[i] = to_row(signal, as_of, now)
+        붙임 += 1
+        작음 += int(nq["lower"])
+    return {"signals": len(중기), "with_quarter": 붙임, "lower": 작음}
 
 
 def load_growth(client: TursoClient, country: str, as_of: str, stock_ids: list[int] | None = None) -> dict[int, dict]:
@@ -830,6 +878,7 @@ def run(market: str, as_of: str | None = None) -> int:
         by_horizon = dict.fromkeys(sg.HORIZONS, 0)
         하루기댐 = 0  # 단기 신호 가운데 가장 큰 하루를 빼면 1.2배 아래인 것 (25.1350, 기록만)
         최근낙폭 = 0  # 최근 60일 낙폭이 저장 MDD 보다 깊어 MDD 배수가 더 작았을 신호 (25.1351, 기록만)
+        중기: list[tuple[int, sg.Signal, sg.SignalInput]] = []  # 국내 중기 신호 (rows 자리, 신호, 입력) — 25.1352
         #: 근거표가 비어 내보내지 않은 신호. 있으면 안 되는 목록이다
         unverifiable: list[str] = []
 
@@ -855,6 +904,8 @@ def run(market: str, as_of: str | None = None) -> int:
                 if not sg.verifiable(signal):
                     unverifiable.append(f"{signal.ticker} {signal.horizon}")
                     continue
+                if country == "KR" and signal.horizon == "mid":
+                    중기.append((len(rows), signal, inp))
                 rows.append(to_row(signal, as_of, now))
                 by_horizon[signal.horizon] += 1
                 if signal.horizon == "short":
@@ -866,6 +917,8 @@ def run(market: str, as_of: str | None = None) -> int:
                 )
                 if sg.mdd_recent_worse(최근, inp.mdd):
                     최근낙폭 += 1
+
+        분기뒤 = add_newer_quarter_rows(client, 중기, rows, as_of, now)
 
         # 넣기 전에 그 나라·그 기준일 신호를 지운다. 후보를 끝까지 평가한 뒤에만 여기 온다
         # (유니버스가 비어 일찍 끝난 실행은 지우지 않는다)
@@ -895,6 +948,7 @@ def run(market: str, as_of: str | None = None) -> int:
                 "by_horizon": by_horizon,
                 "short_turnover_one_day": 하루기댐,  # 25.1350 — 기록만
                 "mdd_recent_worse": 최근낙폭,  # 25.1351 — 기록만, 비중은 그대로
+                **({"mid_newer_quarter": 분기뒤} if 분기뒤 else {}),  # 25.1352 — 참고 행만
                 "fx": settings["fx"],
                 "fx_missing": settings["fx_missing"],
                 "trend_filter": {**trend_settings, "regimes": {k: r.state for k, r in regimes.items()}},

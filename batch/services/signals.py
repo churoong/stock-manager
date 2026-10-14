@@ -18,6 +18,7 @@ import math
 from dataclasses import dataclass, field
 from typing import Any
 
+from batch.core.rounding import fixed
 from batch.services import insider, scoring
 
 # 이 파일 아래에 `criteria()` 함수가 있다. 모듈을 `criteria` 로 들여오면 함수가 그 이름을
@@ -152,6 +153,78 @@ def mdd_recent_worse(recent: float | None, stored: float | None) -> bool:
     지금 = min(max(TARGET_MDD / abs(stored), REDUCTION_FLOOR), 1.0)
     최근 = min(max(TARGET_MDD / abs(recent), REDUCTION_FLOOR), 1.0)
     return 최근 < 지금
+
+
+#: 국내 분기 보고서 → 분기 번호 (1분기·반기·3분기). 4분기 단독 보고서는 없다 (`quarterly_earnings.QUARTER_OF` 와 같다)
+QUARTER_OF = {"11013": 1, "11012": 2, "11014": 3}
+#: 사업보고서 뒤 분기 참고 행의 이름 (25.1352)
+NEWER_QUARTER_LABEL = "사업보고서 뒤 분기 영업이익"
+
+
+def _가장_늦게(rows: list[dict]) -> dict | None:
+    return max(rows, key=lambda r: str(r.get("report_date") or ""), default=None)
+
+
+def newer_quarter(
+    rows: list[dict], *, fiscal_year: int | None, consolidated: bool, annual_code: str, as_of: str
+) -> dict | None:
+    """중기 신호(국내)의 **사업보고서 뒤에 나온 분기**와 그 전년 같은 분기의 영업이익 (22회차 P3, docs/infra.md
+    25.1352). 판정에 쓰지 않는다 — 근거표 참고 행과 실행 기록에만.
+
+    rows = 한 종목의 재무 행 {fiscal_year, report_code, consolidated, report_date, operating_income, currency,
+    period_days}. 규칙(검증 둘의 조건):
+    - 사업보고서(`fiscal_year`)와 같은 연결·별도, 같은 통화(`scoring.same_currency`)
+    - 사업보고서가 짧은 사업연도면 None (`scoring.short_year`)
+    - 분기는 사업보고서 뒤 회계연도이고 접수일이 사업보고서 접수일 뒤·기준일 이하. 전년 같은 분기도 기준일 이하
+    - 같은 분기 여러 행(정정)이면 기준일까지 가장 늦게 접수된 것
+    값이 하나라도 없으면 None. 부호만 본다 — `lower` 는 그 분기 영업이익이 전년 같은 분기보다 작은가"""
+    if fiscal_year is None:
+        return None
+    기준 = 1 if consolidated else 0
+    쓸것 = [r for r in rows
+          if int(r.get("consolidated") or 0) == 기준 and str(r.get("report_date") or "")[:10] <= as_of]  # fmt: skip
+    연간 = _가장_늦게([r for r in 쓸것 if str(r.get("report_code")) == annual_code
+                     and int(r["fiscal_year"]) == fiscal_year])  # fmt: skip
+    if 연간 is None or scoring.short_year(연간):
+        return None
+    연간일 = str(연간.get("report_date") or "")[:10]
+    칸: dict[tuple[int, int], dict] = {}
+    for r in 쓸것:
+        q = QUARTER_OF.get(str(r.get("report_code")))
+        if q is None:
+            continue
+        k = (int(r["fiscal_year"]), q)
+        if k not in 칸 or str(r.get("report_date") or "") > str(칸[k].get("report_date") or ""):
+            칸[k] = r
+    뒤 = [k for k in 칸 if k[0] > fiscal_year and str(칸[k].get("report_date") or "")[:10] > 연간일]
+    if not 뒤:
+        return None
+    k = max(뒤)
+    지금, 전 = 칸[k], 칸.get((k[0] - 1, k[1]))
+    if 전 is None or not scoring.same_currency(연간, 지금, 전):
+        return None
+    op, prev = 지금.get("operating_income"), 전.get("operating_income")
+    if not isinstance(op, int | float) or not isinstance(prev, int | float):
+        return None
+    return {
+        "fy": k[0], "q": k[1], "op": float(op), "prev_op": float(prev),
+        "report_date": str(지금.get("report_date") or "")[:10], "lower": op < prev,
+    }
+
+
+def _억원(value: float) -> str:
+    return f"{fixed(value / 1e8, 1)}억원"
+
+
+def newer_quarter_criterion(nq: dict, consolidated: bool) -> dict:
+    """`newer_quarter` 의 참고 행(passed=None). 부호만 말하고 형용사를 붙이지 않는다. SUE 와 별개라고 밝힌다"""
+    견줌 = "작음" if nq["op"] < nq["prev_op"] else "큼" if nq["op"] > nq["prev_op"] else "같음"
+    return _criterion(
+        NEWER_QUARTER_LABEL,
+        f"{nq['fy']} {nq['q']}분기 {_억원(nq['op'])} — 전년 같은 분기 {_억원(nq['prev_op'])}보다 {견줌}",
+        "판정에 쓰지 않음 (SUE 와 별개, 부호만)",
+        f"financials (분기 재무{'' if consolidated else ', 별도'})", nq["report_date"], passed=None,
+    )
 
 
 def moving_average(values: list[float], days: int) -> float | None:
