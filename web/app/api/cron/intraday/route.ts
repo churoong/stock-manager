@@ -165,14 +165,22 @@ const STALE_SKIPPED = "stale-skipped";
 
 async function flushPending(now: Date, notes: string[] = []): Promise<number> {
   let 보낸수 = 0;
+  // **묵은 잡음(claim)도 접는다** (docs/infra.md 25.1363, 장중 감사 재현). 보낸 뒤 발송 표시를 못 써 잡음을 남긴 행
+  // (25.551·25.1222 — 이미 간 알림)은 10분 뒤 다시 대기로 읽히는데, 접기는 `sent_at IS NULL` 만 봐서 감시를 끈 동안 쌓인
+  // 그런 행이 다시 켠 첫 호출에 몇 주 묵은 채 또 나갔다. 10분 안의 잡음은 다른 호출이 보내는 중이라 건드리지 않는다
   const 묵음 = await execute(
-    "UPDATE alerts SET sent_at = ? WHERE sent_at IS NULL AND created_at < ?",
-    [STALE_SKIPPED, new Date(now.getTime() - PENDING_MAX_AGE_MS).toISOString()],
+    "UPDATE alerts SET sent_at = ? WHERE (sent_at IS NULL OR (sent_at >= 'claim:' AND sent_at < ?)) AND created_at < ?",
+    [
+      STALE_SKIPPED,
+      `${CLAIM_PREFIX}${new Date(now.getTime() - CLAIM_STALE_MS).toISOString()}`,
+      new Date(now.getTime() - PENDING_MAX_AGE_MS).toISOString(),
+    ],
   )
     .catch(() => null /* 대기 접기 실패 */);
-  if (묵음 && 묵음.affectedRows > 0) {
-    notes = [...notes, `${묵음.affectedRows}건은 ${PENDING_MAX_AGE_MS / 86_400_000}일 넘게 대기해 보내지 않았습니다 — 알림 화면에 있습니다`];
-  }
+  const 접은말 = 묵음 && 묵음.affectedRows > 0
+    ? `${묵음.affectedRows}건은 ${PENDING_MAX_AGE_MS / 86_400_000}일 넘게 대기해 보내지 않았습니다 — 알림 화면에 있습니다`
+    : null;
+  if (접은말) notes = [...notes, 접은말];
   for (let 차례 = 0; 차례 < FLUSH_MAX_ROUNDS; 차례++) {
     if (차례 > 0) await new Promise((r) => setTimeout(r, FLUSH_GAP_MS));
     // 머리말(목록 날짜·설정 경고)은 **첫 통에만** 붙인다
@@ -180,6 +188,9 @@ async function flushPending(now: Date, notes: string[] = []): Promise<number> {
     보낸수 += n;
     if (n < FLUSH_BATCH) break;
   }
+  // **보낼 것이 없어도 접은 사실은 한 번 말한다** (25.1363). 대기가 전부 묵어 접히면 첫 통이 없어 이 말이 실릴 곳이 없었고,
+  // 다음 호출은 접을 것이 없어 영영 안 나갔다 — 이 말이 필요한 바로 그 경우(다시 켠 첫 호출)였다
+  if (접은말 && 보낸수 === 0) await sendTelegram(`장중 알림 대기 정리\n${접은말}`);
   return 보낸수;
 }
 
