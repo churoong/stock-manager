@@ -847,6 +847,16 @@ export function signalScoreDateNote(signalAsOf: string | null, scoreAsOf: string
 }
 
 /** 밴드 막대의 가로 위치(0~100). 20·80 분위와 현재값을 모두 담도록 양 끝을 10% 넓힌다 */
+/**
+ * 밴드가 **실제로 덮은 기간** — 배치 `signals.band_span` 과 같은 규칙 (docs/infra.md 25.1368). 밴드는 표본 250일부터 만들어지는데
+ * 화면은 늘 "PBR 3년" 이라 적어, 1.6년치 밴드도 3년으로 읽혔다. 창(750일)을 95% 이상 채웠으면 "3년", 아니면 표본 ÷ 250
+ */
+export function bandSpan(sample: unknown): string {
+  const n = typeof sample === "number" && Number.isFinite(sample) ? sample : 0;
+  if (n >= 750 * 0.95) return "3년";
+  return `${Number((n / 250).toFixed(1))}년`;
+}
+
 export function bandPositions(band: Row): Record<"p20" | "p30" | "p50" | "p80" | "current", number | null> | null {
   const keys = ["p20", "p30", "p50", "p80", "current_value"] as const;
   const values = keys.map((k) => band[k]).filter(isNum);

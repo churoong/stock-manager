@@ -62,6 +62,15 @@ MIN_QUALITY_SCORE_MID = 50.0
 BAND_DAYS = 750  # 3년 ≈ 750 거래일. jobs/signals·jobs/backtest·services/valuation_band 가 가져다 쓴다
 BAND_MIN_SAMPLE = 250  # 1년도 안 되는 계열로 '3년 밴드' 를 말할 수 없다
 BAND_YEARS = BAND_DAYS // 250  # 사람에게 보여 줄 기간. 창을 바꾸면 글도 따라 바뀐다
+
+
+def band_span(sample: int) -> str:
+    """밴드가 **실제로 덮은 기간** (docs/infra.md 25.1368, 24회차 P1). 밴드는 표본 `BAND_MIN_SAMPLE`(250일)부터
+    만들어지는데 판정표는 늘 "3년 30% 분위" 라 적어, 상장 1년 반 된 종목의 1.6년치 밴드도 3년으로 읽혔다.
+    창을 거의 채웠으면(95% 이상) `BAND_YEARS` 년, 아니면 표본 일수를 250 으로 나눈 해(소수 첫째 자리)"""
+    if sample >= BAND_DAYS * 0.95:
+        return f"{BAND_YEARS}년"
+    return f"{fixed(sample / 250, 1)}년"
 BAND_ENTRY_PERCENTILE = 30  # 이 분위 **이하**면 밴드 하단으로 본다 (docs/signals.md 1.3)
 BAND_STOP_PERCENTILE = 20  # 장기 손절선이 되는 분위 (docs/signals.md 2장)
 # 2026-09-17 60 → 55. 5년 백테스트(docs/backtest.md 7.1)에서 60 은 보유가 적어 낙폭이 벤치마크보다
@@ -973,7 +982,7 @@ def judgement(horizon: str, inp: SignalInput, data: dict) -> list[dict]:
         elif inp.band is None or inp.pbr_now is None:
             rows.append(_criterion(
                 "밸류에이션 밴드",
-                f"밴드({BAND_YEARS}년 PBR 표본 {BAND_MIN_SAMPLE}일) 또는 현재 PBR 없음",
+                f"밴드(최근 {BAND_YEARS}년 창에 PBR 표본 {BAND_MIN_SAMPLE}일 이상) 또는 현재 PBR 없음",
                 "밴드와 PBR 이 있어야", SOURCE_DERIVED, inp.price_date, passed=False,
             ))
         else:
@@ -982,7 +991,8 @@ def judgement(horizon: str, inp: SignalInput, data: dict) -> list[dict]:
             d = _문턱_자릿수(inp.pbr_now, 문턱, 2)
             rows.append(_check(
                 "밸류에이션 밴드 하단", inp.pbr_now, inp.pbr_now <= 문턱,
-                f"PBR {inp.pbr_now:.{d}f}배 vs {BAND_YEARS}년 {BAND_ENTRY_PERCENTILE}% 분위 {문턱:.{d}f}배",
+                f"PBR {inp.pbr_now:.{d}f}배 vs {band_span(inp.band.sample)} {BAND_ENTRY_PERCENTILE}% 분위"
+                f" {문턱:.{d}f}배",
                 f"PBR ≤ 밴드 {BAND_ENTRY_PERCENTILE}% 분위", SOURCE_DERIVED, inp.price_date,
             ))
             # **손절 분위 아래면 매수 구간이 뒤집혀 신호를 버린다** (`buy_zone`). 판정표에 그 행이 없어 "전부 통과" 인데
@@ -994,7 +1004,7 @@ def judgement(horizon: str, inp: SignalInput, data: dict) -> list[dict]:
             d = _문턱_자릿수(inp.pbr_now, 바닥, 2)
             rows.append(_check(
                 "손절 분위 위", inp.pbr_now, 구간_됨,
-                f"PBR {inp.pbr_now:.{d}f}배 vs {BAND_YEARS}년 {BAND_STOP_PERCENTILE}% 분위 {바닥:.{d}f}배"
+                f"PBR {inp.pbr_now:.{d}f}배 vs {band_span(inp.band.sample)} {BAND_STOP_PERCENTILE}% 분위 {바닥:.{d}f}배"
                 + ("" if 구간_됨 else " — 이미 손절선 아래라 매수 구간을 만들 수 없다"),
                 f"PBR ≥ 밴드 {BAND_STOP_PERCENTILE}% 분위", SOURCE_DERIVED, inp.price_date,
             ))
@@ -1109,7 +1119,7 @@ def criteria(horizon: str, inp: SignalInput, data: dict) -> list[dict]:
             rows.append(_criterion(
                 "밸류에이션 밴드 하단",
                 f"PBR {inp.pbr_now:.{(d := _문턱_자릿수(inp.pbr_now, inp.band.at(BAND_ENTRY_PERCENTILE), 2))}f}배"
-                f" ({BAND_YEARS}년 {BAND_ENTRY_PERCENTILE}% 분위 "
+                f" ({band_span(inp.band.sample)} {BAND_ENTRY_PERCENTILE}% 분위 "
                 f"{inp.band.at(BAND_ENTRY_PERCENTILE):.{d}f}배, 표본 {data.get('band_sample', 0)}일)",
                 f"≤ 밴드 {BAND_ENTRY_PERCENTILE}% 분위", SOURCE_DERIVED, inp.price_date,
             ))

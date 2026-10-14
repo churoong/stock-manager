@@ -18,6 +18,7 @@ import { HORIZON_LABEL, STALE_AFTER_DAYS, parseCriteria } from "@/lib/recommend"
 import {
   FACTOR_LABELS,
   bandPositions,
+  bandSpan,
   formatAmount,
   formatNum,
   formatPct,
@@ -465,7 +466,7 @@ export default function StockDetail({
         )}
       </Card>
 
-      <Card lazy="valuation" title="밸류에이션 밴드 (PBR 3년)" loaded={valuation} emptyNote={etf ? ETF_SECTION_NOTE.valuation : undefined}>
+      <Card lazy="valuation" title="밸류에이션 밴드 (PBR, 최근 3년 창)" loaded={valuation} emptyNote={etf ? ETF_SECTION_NOTE.valuation : undefined}>
         {(data) => <ValuationBlock band={data.band as Row} factors={factors} currency={currency} />}
       </Card>
 
@@ -779,7 +780,7 @@ function ValuationBlock({ band, factors, currency }: { band: Row; factors: Overv
     <div className="text-sm">
       <p>
         현재 PBR <b>{formatNum(band.current_value)}배</b>
-        {typeof band.band_rank === "number" && <span className="ml-2 text-xs text-slate-500">자기 3년 계열의 {band.band_rank.toFixed(0)}% 지점</span>}
+        {typeof band.band_rank === "number" && <span className="ml-2 text-xs text-slate-500">자기 {bandSpan(band.sample)} 계열의 {band.band_rank.toFixed(0)}% 지점</span>}
       </p>
       {band.skip_reason ? <p className="text-xs text-amber-700">{String(band.skip_reason)}</p> : null}
       {pos && band.p50 !== null && (
