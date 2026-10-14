@@ -159,6 +159,7 @@ class Test사이징:
     def test_축소_하한(self) -> None:
         검사(SIGNALS, f"변동성, {sg.REDUCTION_FLOOR}, 1.0)", "변동성 배수 하한")
         검사(SIGNALS, f"MDD|, {sg.REDUCTION_FLOOR}, 1.0)", "낙폭 배수 하한")
+        검사(SIGNALS, f"가격제한폭 ±{sg.KR_DAILY_LIMIT * 100:.0f}%", "최근 낙폭의 국내 가격제한폭 (25.1351)")
 
     @pytest.mark.parametrize("차례", [0, 1, 2])
     def test_분할_비중(self, 차례: int) -> None:

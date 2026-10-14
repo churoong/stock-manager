@@ -120,6 +120,40 @@ def turnover_ratio_loo(turnovers: list[float]) -> float | None:
     return ((sum(r20) - m) / (MA_SHORT_DAYS - 1)) / 아래 if 아래 > 0 else None
 
 
+#: 국내 하루 가격제한폭(±30%). 이보다 큰 하루 움직임은 수정주가 빈틈으로 보고 최근 낙폭을 모른다고 한다 (25.1351)
+KR_DAILY_LIMIT = 0.30
+
+
+def recent_drawdown(closes: list[float], *, kr: bool, split_pending: bool) -> float | None:
+    """최근 종가 창(`RECENT_DAYS` = 60 거래일)의 **고점 대비 최대 하락률** (음수, 22회차 P4 — 기록만, docs/infra.md
+    25.1351). 저장된 MDD(`mdd`, 지표 창)보다 나쁜데도 비중 축소 배수가 그 MDD 로만 정해졌는지 센다.
+    판정·비중에는 쓰지 않는다. 분할 재수집 대기거나 국내 하루 움직임이 가격제한폭을 넘으면(수정주가 빈틈) None.
+    정지일 빈칸은 건너뛰지 않는다 — 있는 종가만 잇는다. 값이 둘 미만이면 None"""
+    if split_pending:
+        return None
+    usable = [c for c in closes if c is not None and math.isfinite(c) and c > 0]
+    if len(usable) < 2:
+        return None
+    if kr and any(abs(b / a - 1) > KR_DAILY_LIMIT for a, b in zip(usable, usable[1:], strict=False)):
+        return None
+    peak = usable[0]
+    worst = 0.0
+    for c in usable:
+        peak = max(peak, c)
+        worst = min(worst, c / peak - 1)
+    return worst
+
+
+def mdd_recent_worse(recent: float | None, stored: float | None) -> bool:
+    """최근 낙폭이 저장 MDD 보다 깊어 **MDD 배수가 더 작아졌을** 경우 (25.1351, 기록만). 저장 MDD 가 없으면 거짓 —
+    모르는 것을 위험하다고 단정하지 않는다(`size_reduction`)"""
+    if recent is None or stored is None or not math.isfinite(stored) or stored == 0 or recent == 0:
+        return False
+    지금 = min(max(TARGET_MDD / abs(stored), REDUCTION_FLOOR), 1.0)
+    최근 = min(max(TARGET_MDD / abs(recent), REDUCTION_FLOOR), 1.0)
+    return 최근 < 지금
+
+
 def moving_average(values: list[float], days: int) -> float | None:
     """최근 N 개의 평균. 개수가 모자라면 None.
 

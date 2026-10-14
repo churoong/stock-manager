@@ -51,6 +51,8 @@ ANNUAL_REPORT_CODE = dart.ANNUAL_REPORT_CODE
 
 # 1단계에서 읽을 거래일 수. 60일 이동평균에 필요한 만큼이다.
 RECENT_DAYS = sg.MA_LONG_DAYS
+#: 국내 시장 — 최근 낙폭에 가격제한폭 검사를 거는 쪽 (25.1351)
+KR_MARKETS = frozenset({"KOSPI", "KOSDAQ", "KONEX"})
 
 # 2단계에서 읽을 거래일 수. 3년치다.
 # **숫자를 여기 다시 적지 않는다** (2026-09-22, docs/infra.md 25.108).
@@ -827,6 +829,7 @@ def run(market: str, as_of: str | None = None) -> int:
         checks: list[tuple] = []
         by_horizon = dict.fromkeys(sg.HORIZONS, 0)
         하루기댐 = 0  # 단기 신호 가운데 가장 큰 하루를 빼면 1.2배 아래인 것 (25.1350, 기록만)
+        최근낙폭 = 0  # 최근 60일 낙폭이 저장 MDD 보다 깊어 MDD 배수가 더 작았을 신호 (25.1351, 기록만)
         #: 근거표가 비어 내보내지 않은 신호. 있으면 안 되는 목록이다
         unverifiable: list[str] = []
 
@@ -858,6 +861,11 @@ def run(market: str, as_of: str | None = None) -> int:
                     loo = (signal.rationale_data or {}).get("turnover_ratio_loo")
                     if loo is not None and loo <= sg.TURNOVER_MULTIPLE:
                         하루기댐 += 1
+                최근 = sg.recent_drawdown(
+                    inp.closes, kr=inp.market in KR_MARKETS, split_pending=inp.split_pending
+                )
+                if sg.mdd_recent_worse(최근, inp.mdd):
+                    최근낙폭 += 1
 
         # 넣기 전에 그 나라·그 기준일 신호를 지운다. 후보를 끝까지 평가한 뒤에만 여기 온다
         # (유니버스가 비어 일찍 끝난 실행은 지우지 않는다)
@@ -886,6 +894,7 @@ def run(market: str, as_of: str | None = None) -> int:
                 "signals": len(rows),
                 "by_horizon": by_horizon,
                 "short_turnover_one_day": 하루기댐,  # 25.1350 — 기록만
+                "mdd_recent_worse": 최근낙폭,  # 25.1351 — 기록만, 비중은 그대로
                 "fx": settings["fx"],
                 "fx_missing": settings["fx_missing"],
                 "trend_filter": {**trend_settings, "regimes": {k: r.state for k, r in regimes.items()}},
