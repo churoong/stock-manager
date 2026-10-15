@@ -10,6 +10,8 @@ import {
   PAPER_HISTORY,
   PAPER_INVESTED,
   PAPER_LATEST_DAILY,
+  PAPER_MEETINGS_LATEST,
+  PAPER_DOSSIERS_LATEST,
   PAPER_OPEN_BUYS,
   PAPER_OPEN_BUYS_LEGACY,
   PAPER_OPEN_ORDERS,
@@ -96,6 +98,16 @@ export async function GET() {
     } catch {
       realCompare = { error: "실제 포트폴리오 기록을 읽지 못해 비교를 싣지 않았습니다" };
     }
+    // 투자위원회 최근 회의록·조사 자료 (docs/company.md, 25.1469) — 0076 전 DB 에는 표가 없다. 못 읽으면 회의록만 빠진다
+    let meetings: unknown[] = [];
+    let dossiers: unknown[] = [];
+    try {
+      meetings = rowsToObjects(await execute(PAPER_MEETINGS_LATEST));
+      dossiers = rowsToObjects(await execute(PAPER_DOSSIERS_LATEST));
+    } catch {
+      meetings = [];
+      dossiers = [];
+    }
     let halted = false;
     try {
       halted = haltOn((await execute(HALT_READ)).rows[0]?.[0]);
@@ -105,6 +117,8 @@ export async function GET() {
     return NextResponse.json({
       halted,
       realCompare,
+      meetings,
+      dossiers,
       invested: 입금,
       accounts: views,
       flows: rowsToObjects(flows),

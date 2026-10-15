@@ -4,7 +4,17 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import CriteriaTable from "@/components/CriteriaTable";
 import EquityChart, { type Series } from "@/components/EquityChart";
 import { bodyOf, readJson } from "@/lib/http";
-import { DEPOSIT_MAX_KRW, DEPOSIT_MIN_KRW, PAIRS, attrCellText, ruleText, type AccountView, type Attribution } from "@/lib/paper";
+import {
+  DEPOSIT_MAX_KRW,
+  DEPOSIT_MIN_KRW,
+  DEPT_LABEL,
+  PAIRS,
+  attrCellText,
+  ruleText,
+  stanceText,
+  type AccountView,
+  type Attribution,
+} from "@/lib/paper";
 import { money, won } from "@/lib/portfolio";
 
 /**
@@ -44,19 +54,23 @@ interface FillRow {
 interface OrderRow { id: number; account_id: string; market: string; ticker: string; name: string; side: string; order_type?: string; limit_price: number | null; ref_price?: number | null; quantity: number; currency: string; fill_session: string; tranche: number; reason: string }
 interface HistoryRow { account_id: string; as_of: string; invested_krw: number; equity_krw: number; kospi_krw: number | null; sp500_krw: number | null }
 interface RealCompareView { start?: string; end?: string; realPct?: number; paperPct?: Record<string, number | null>; error?: string }
-export interface Data { halted: boolean; realCompare: RealCompareView | null; invested: number; accounts: Account[]; flows: Flow[]; fills: FillRow[]; orders: OrderRow[]; history: HistoryRow[] }
+/** 투자위원회 회의록 한 장 (docs/company.md 3·5장) — 배치가 적은 그대로 */
+interface MeetingRow { account_id: string; market: string; decided_on: string; charter_hash: string; minutes_json: string }
+interface DossierRow { market: string; as_of: string; stock_id: number; dossier_json: string }
+export interface Data { halted: boolean; realCompare: RealCompareView | null; invested: number; accounts: Account[]; flows: Flow[]; fills: FillRow[]; orders: OrderRow[]; history: HistoryRow[]; meetings?: MeetingRow[]; dossiers?: DossierRow[] }
 
 /** 매매 일지의 근거는 **주문 때 얼린 것**이라 오래될수록 묵는 값이 아니다 — 기준일을 노랗게 칠하지 않는다 */
 const JOURNAL_NEVER_STALE_DAYS = 100_000;
 
 const HORIZON_LABEL: Record<string, string> = { short: "단기", mid: "중기", long: "장기" };
-export type SubTab = "summary" | "holdings" | "trades" | "orders" | "report";
+export type SubTab = "summary" | "holdings" | "trades" | "orders" | "report" | "committee";
 const SUB_TABS: Array<[SubTab, string]> = [
   ["summary", "요약"],
   ["holdings", "보유내역"],
   ["trades", "거래내역"],
   ["orders", "미체결"],
   ["report", "성적표"],
+  ["committee", "투자위원회"],
 ];
 
 
@@ -372,7 +386,7 @@ export function AccountTabs({ data, acct, setAcct, sub, setSub }: {
         {a.name} · 규칙서 판 {a.rule_version} · {ruleText(a)}
       </p>
       <div className="mt-3 flex gap-1 overflow-x-auto border-b border-slate-200 text-sm dark:border-slate-800" role="tablist" aria-label="계좌 화면">
-        {SUB_TABS.map(([k, label]) => (
+        {SUB_TABS.filter(([k]) => k !== "committee" || a.charter_json).map(([k, label]) => (
           <button
             key={k}
             type="button"
@@ -392,6 +406,9 @@ export function AccountTabs({ data, acct, setAcct, sub, setSub }: {
         {sub === "trades" ? <TradesPane fills={체결} /> : null}
         {sub === "orders" ? <OrdersPane orders={주문} /> : null}
         {sub === "report" ? <ReportPane a={a} /> : null}
+        {sub === "committee" && a.charter_json ? (
+          <CommitteePane a={a} meetings={(data.meetings ?? []).filter((m) => m.account_id === a.id)} dossiers={data.dossiers ?? []} />
+        ) : null}
       </div>
     </section>
   );
@@ -533,6 +550,97 @@ function OrdersPane({ orders }: { orders: OrderRow[] }) {
         </li>
       ))}
     </ul>
+  );
+}
+
+interface MinutesItem {
+  stock_id: number; ticker: string; vote: number; favor: number; issue: boolean; passed: boolean; approved: boolean; reason: string;
+  vetoed_by: string[]; minority: string[]; opinions: Record<string, unknown[]>;
+}
+
+/**
+ * 투자위원회 (docs/company.md, 2026-10-15 사용자 지시 "부서들의 연구와 조사를 통해 서로 회의하고 토론해서 결정", 25.1469).
+ * 헌장(철학·부서 가중·주관 부서·거부권)과 시장마다 최근 회의록 — 안건마다 부서 입장(▲찬성·▼반대 + 확신, · 중립, – 자료 없음)·표·결정·소수의견.
+ * 값은 배치가 적은 그대로. 부서 근거(조사 자료)는 행을 펼쳐 본다.
+ */
+export function CommitteePane({ a, meetings, dossiers }: { a: Account; meetings: MeetingRow[]; dossiers: DossierRow[] }) {
+  let 헌장: { name?: string; philosophy?: string; weights?: Record<string, number>; lead?: string; veto?: string[];
+    threshold?: number; agenda?: number; top_n?: number; max_mdd?: number | null } = {};
+  try {
+    헌장 = JSON.parse(a.charter_json ?? "{}");
+  } catch {
+    헌장 = {};
+  }
+  const 부서 = Object.entries(헌장.weights ?? {}).filter(([, w]) => Number(w) > 0);
+  return (
+    <div className="space-y-4 text-sm">
+      <div>
+        <p className="font-semibold">{헌장.name}</p>
+        <p className="text-slate-600 dark:text-slate-400">“{헌장.philosophy}”</p>
+        <p className="mt-1 text-xs text-slate-500">
+          부서 가중: {부서.map(([k, w]) => `${DEPT_LABEL[k] ?? k} ${w}`).join(" · ")} · 주관 {DEPT_LABEL[헌장.lead ?? ""] ?? 헌장.lead}
+          {헌장.veto?.length ? ` · 거부권 ${헌장.veto.map((k) => DEPT_LABEL[k] ?? k).join("·")}` : ""}
+          {헌장.max_mdd != null ? ` (MDD ${Math.round(헌장.max_mdd * 100)}%)` : ""} · 가결 표 ≥ {헌장.threshold} · 찬성 부서 ≥ 2 · 안건 {헌장.agenda}
+          개 중 최대 {헌장.top_n}종목
+        </p>
+      </div>
+      {meetings.length === 0 ? <p className="text-slate-500">아직 회의록이 없습니다 — 다음 아침 배치부터 날마다 열립니다.</p> : null}
+      {meetings.map((m) => {
+        let 록: { memo?: string; items?: MinutesItem[] } = {};
+        try {
+          록 = JSON.parse(m.minutes_json);
+        } catch {
+          록 = {};
+        }
+        const 근거 = new Map(dossiers.filter((d) => d.market === m.market).map((d) => [Number(d.stock_id), d.dossier_json]));
+        return (
+          <section key={`${m.market}-${m.decided_on}`}>
+            <h3 className="font-medium">
+              {m.market} · {m.decided_on} 회의
+            </h3>
+            {록.memo ? <p className="text-xs text-slate-600 dark:text-slate-400">{록.memo}</p> : null}
+            <div className="mt-1 overflow-x-auto">
+              <table className="w-full min-w-[640px] text-xs">
+                <thead className="text-slate-500">
+                  <tr>
+                    <th className="py-1 text-left">종목</th>
+                    {부서.map(([k]) => (
+                      <th key={k} className="text-center">{(DEPT_LABEL[k] ?? k).replace("부", "")}</th>
+                    ))}
+                    <th className="text-right">표</th>
+                    <th className="text-left">결정</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {(록.items ?? []).map((i) => (
+                    <tr key={i.stock_id} className={i.approved ? "font-medium" : ""}>
+                      <td className="py-1">
+                        {i.ticker}
+                        {근거.has(Number(i.stock_id)) ? (
+                          <details>
+                            <summary className="cursor-pointer text-slate-400">근거</summary>
+                            <pre className="whitespace-pre-wrap text-[10px] text-slate-500">{근거.get(Number(i.stock_id))}</pre>
+                          </details>
+                        ) : null}
+                      </td>
+                      {부서.map(([k]) => (
+                        <td key={k} className="text-center">{stanceText(i.opinions[k])}</td>
+                      ))}
+                      <td className="text-right">{Number(i.vote).toFixed(2)}</td>
+                      <td>
+                        {i.approved ? "가결·집행" : i.passed ? "가결(상위 밖)" : i.reason.replace(/^위원회:\s*/, "부결 — ")}
+                        {i.minority.length ? ` · 소수의견 ${i.minority.map((k) => DEPT_LABEL[k] ?? k).join("·")}` : ""}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        );
+      })}
+      <p className="text-xs text-slate-500">부서는 규칙으로 판단하는 에이전트입니다 — 같은 자료면 같은 의견이 나옵니다(docs/company.md 0장).</p>
+    </div>
   );
 }
 

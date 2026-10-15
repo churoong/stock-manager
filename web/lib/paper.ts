@@ -91,6 +91,33 @@ export function ruleText(a: AccountRule): string {
   const 진입 = a.entry_rule === "open" ? "다음 장 시가에 한 번에" : "3회 분할 지정가";
   return `매수: ${고르기} · ${진입} — 매도: ${SELL_RULE_TEXT[a.sell_rule] ?? a.sell_rule}`;
 }
+/** 투자위원회 최근 회의록 — 회사·시장마다 마지막 날 한 장 (docs/company.md 3·5장, 25.1469). 0076 전에는 표가 없어 부르는 쪽이 오류를 삼킨다 */
+export const PAPER_MEETINGS_LATEST = `SELECT m.account_id, m.market, m.decided_on, m.charter_hash, m.minutes_json FROM paper_meetings m
+WHERE m.decided_on = (SELECT MAX(x.decided_on) FROM paper_meetings x WHERE x.account_id = m.account_id AND x.market = m.market)`;
+/** 조사 자료 — 시장마다 가장 최근 기준일 한 벌 (회사가 달라도 같다) */
+export const PAPER_DOSSIERS_LATEST = `SELECT d.market, d.as_of, d.stock_id, d.dossier_json FROM paper_dossiers d
+WHERE d.as_of = (SELECT MAX(x.as_of) FROM paper_dossiers x WHERE x.market = d.market)`;
+/** 부서 이름 — batch/services/company.py `DEPT_LABEL` 과 같은 목록(시험이 대조) */
+export const DEPT_LABEL: Record<string, string> = {
+  research: "리서치부",
+  quant: "퀀트부",
+  broker: "증권사리서치부",
+  flows: "수급부",
+  governance: "공시·지배구조부",
+  sentiment: "뉴스·감성부",
+  risk: "리스크관리부",
+  macro: "시장전략부",
+};
+/** 부서 입장 한 칸 — [입장, 확신, (자료 없음 까닭)] → 글 */
+export function stanceText(op: unknown[] | undefined): string {
+  if (!op) return "";
+  const [입장, 확신, 메모] = op as [number, number, string | undefined];
+  if (메모) return "–";
+  if (입장 > 0) return `▲${Math.round(Number(확신) * 100)}`;
+  if (입장 < 0) return `▼${Math.round(Number(확신) * 100)}`;
+  return "·";
+}
+
 /** 짝 비교 — 판 2(투자사)부터 회사 대 기준(B)과 기준 대 무작위. batch/services/paper.py `PAIRS` 와 같은 목록 (25.1468) */
 export const PAIRS: ReadonlyArray<readonly [string, string, string]> = [
   ["A", "B", "가치투자사 대 기준"],

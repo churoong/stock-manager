@@ -208,3 +208,14 @@ def test_broker_ranks_within_signal_population() -> None:
     ch = {**헌장, "weights": {"broker": 1, "research": 1}}
     assert co.opinions([pop[4]], ch, pop)[5]["broker"].stance == 1
     assert co.opinions([pop[4]], ch)[5]["broker"].stance == 0  # 모집단 없이 혼자면 50 백분위
+
+
+def test_web_dept_labels_match() -> None:
+    """웹 투자위원회 탭의 부서 이름은 배치와 같은 목록 (25.1469)."""
+    import re
+    from pathlib import Path
+
+    글 = (Path(__file__).resolve().parent.parent / "web" / "lib" / "paper.ts").read_text(encoding="utf-8")
+    블록 = 글[글.index("export const DEPT_LABEL"):]
+    블록 = 블록[: 블록.index("};")]
+    assert dict(re.findall(r'(\w+): "([^"]+)"', 블록)) == co.DEPT_LABEL
