@@ -502,6 +502,21 @@ def _units_safe(client: Any, rows: list, today: str, stock_of: Any, date_of: Any
         return rows, {}
 
 
+def flow_anchor(dates: list[str], today: date) -> date:
+    """수급 창의 마지막 거래일 (docs/infra.md 25.1388, KIS 수급 감사).
+
+    이 잡은 아침 일일 배치 안에서 돈다(`daily` "종목 분석 의견"). 그날 수급은 저녁 수집에서야 들어오므로
+    `today` 를 끝으로 잡으면 "최근 5거래일" 중 하루가 늘 비어 **4거래일**로 셌고, 같은 아침 리포트(3.9, 전 거래일 끝)와
+    다른 종목에 반대 목소리가 붙었다. 그날 행이 하나라도 있으면(저녁 수동 실행) 그날, 없으면 직전 거래일 — 한 거래일
+    넘게 물러나지 않으므로 수집이 멈춘 묵은 행은 여전히 창 밖이다(25.1337). 달력을 못 읽으면 `today`"""
+    if today.isoformat() in set(dates):
+        return today
+    try:
+        return cal.previous_session("KR", before=today)
+    except Exception:  # noqa: BLE001 — 달력을 못 읽으면 예전 창
+        return today
+
+
 def against_kr(client: TursoClient, ids: list[int], today: date, warnings: list[str],
                flows: dict[int, list[dict]] | None = None) -> dict[int, list[dict]]:  # fmt: skip
     """국내 반대 목소리와 공시 근거 (docs/analysis.md 5장). 종목 → [{text, evidence, against}].
@@ -529,9 +544,10 @@ def against_kr(client: TursoClient, ids: list[int], today: date, warnings: list[
     # **최근 FLOW_DAYS 거래일 안의 행만** (docs/infra.md 25.1337, 분석 화면 감사 #3 — 리포트 25.1276 과 같은 창). 달력
     # 15일 창이라 수급 수집이 멈추면 1~2주 묵은 행이 "외국인·기관 5거래일 순매도" 로 반대 목소리에 실렸다.
     # 더하기는 리포트와 한 함수(`divergence.sum_flows`, 25.1384) — 날짜를 함께 돌려줘 거래대금 몫을 같은 날로 낸다
-    합 = divergence.sum_flows(list(흐름), daily.flow_window_start(today))
+    기준 = flow_anchor([str(r[1]) for r in 흐름], today)
+    합 = divergence.sum_flows(list(흐름), daily.flow_window_start(기준))
     최근날 = {sid: v[3][0] for sid, v in 합.items() if v[3]}
-    몫 = daily.flow_turnover_shares(client, 합, today.isoformat(), warnings)
+    몫 = daily.flow_turnover_shares(client, 합, 기준.isoformat(), warnings)
     목표: dict[int, list[tuple[str, str, float | None]]] = defaultdict(list)
     for sid, d, broker, target in 의견:
         목표[int(sid)].append((str(d), str(broker), float(target) if target else None))
