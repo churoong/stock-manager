@@ -486,7 +486,7 @@ export default function SettingsForm({ initial, initialWarnings, loadFailed = fa
 
       <Section
         title="장중 알림 기준"
-        hint="국내 장중 시세는 약 20분 지연입니다. 알림에 지연 사실이 함께 표시됩니다."
+        hint="국내는 KIS 실시간 시세를 먼저 쓰고, 받지 못한 종목만 약 20분 지연 시세로 물러납니다 — 그 알림 줄에 '지연 시세 HH:MM 기준' 이 붙습니다. 미국은 야후 시세입니다."
       >
         <NumberField
           label="급등락 기준"
