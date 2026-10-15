@@ -86,6 +86,7 @@ IRRELEVANT_ON_D1 = {
     "restore-drill.yml": "복구 리허설. 로컬 SQLite 에만 쓰고 운영 DB 에는 기록 한 줄 (25.946)",
     "move-user-data.yml": "Turso↔D1 사이에 사람이 넣은 값을 옮긴다",
     "db-status.yml": "읽기만 한다. 막혔는지 보려고 부르는 것이다",
+    "company-replay.yml": "읽기만 한다. 모의 투자사 헌장을 적용하기 전 소급 재생 (25.1464)",
     # 국내 기능이라 D1 에서도 돈다 — **쉬게 할지 한 번 따져 봤고, 그대로 두기로 했다**
     "adjust-kr.yml": "국내 수정주가. 시세가 들어오는 한 이어져야 한다",
     "portfolio.yml": "사용자 매매 재계산. 사람이 입력하면 바로 돌아야 한다",

@@ -159,3 +159,24 @@ def test_charter_sell_rules_exist_before_charters_apply() -> None:
     assert pp.sells_for("momentum", 걸림) == {2: ["감성급락"], 3: ["재무악화"], 4: ["기간초과"]}
     assert {k: v["sell_rule"] for k, v in co.CHARTERS.items()} == {"A": "value", "C": "momentum", "D": "time", "E": "core"}
     assert {v["sell_rule"] for v in co.CHARTERS.values()} <= set(pp.SELL_RULES)
+
+
+def test_replay_tally_counts_without_names() -> None:
+    """소급 재생 요약 (scripts/company_replay.py, 25.1464) — 회사별 가결률·부결 까닭·부서 입장 분포, 종목 이름 없이."""
+    import importlib.util
+    from pathlib import Path
+
+    경로 = Path(__file__).resolve().parent.parent / "scripts" / "company_replay.py"
+    spec = importlib.util.spec_from_file_location("company_replay", 경로)
+    assert spec and spec.loader
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    ds = [_d(1, factors={"value": 90, "momentum": 90}, sentiment=30.0, domestic=False),
+          _d(2, factors={"value": 10, "momentum": 10}, domestic=False)]  # fmt: skip
+    items, approved = co.meet(ds, 헌장)
+    t = m.tally([("A", "2026-10-14", items, approved), ("A", "2026-10-15", items, [])])
+    assert t["A"]["meetings"] == 2 and t["A"]["passed"] == 2 and t["A"]["zero_days"] == 1
+    assert t["A"]["reasons"] == {"찬성": 2}  # "위원회: 찬성 부서 0 < 정족수 2" 의 첫 낱말
+    assert t["A"]["depts"]["governance"]["no_data"] == 4
+    줄 = m.lines("KR", t)
+    assert 줄[0] == "[모의 투자사 소급 재생 · KR]" and "T01" not in "\n".join(줄)

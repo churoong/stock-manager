@@ -1,0 +1,75 @@
+name: 모의 투자사 소급 재생 (읽기 전용)
+
+# 저장된 과거 신호에 회사별 투자위원회를 다시 열어 가결률·부서 입장 분포를 본다 (docs/company.md 2·6장, docs/infra.md 25.1464).
+# 판 2 헌장을 운영에 적용하기 **전에** 한 번 돌려 문턱이 터무니없는지(가결 0 · 늘 가결) 거른다. 쓰지 않는다. 수동 실행만.
+# 출력은 수만(종목 이름 없음)이지만 운영 출력 규칙대로 공개 로그 대신 비공개 운영 저장소 이슈로 보낸다(scripts/ops_tee.py).
+on:
+  workflow_dispatch:
+    inputs:
+      market:
+        description: 시장
+        type: choice
+        options: [KR, US]
+        default: KR
+      days:
+        description: 거슬러 갈 달력일
+        type: string
+        default: "60"
+      every:
+        description: 며칠마다 한 번 (읽기를 줄인다)
+        type: string
+        default: "5"
+
+permissions:
+  contents: read
+  issues: write # 결과를 이슈 코멘트로 내보낸다 (docs/infra.md 25.17)
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+      TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+      DB_BACKEND: ${{ vars.DB_BACKEND }}
+      D1_ACCOUNT_ID: ${{ secrets.D1_ACCOUNT_ID }}
+      D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+      D1_API_TOKEN: ${{ secrets.D1_API_TOKEN }}
+      OFFLINE_MODE: "0"
+      # 입력을 셸에 직접 끼우지 않고 환경변수로 넘긴다 (명령 주입 방지)
+      MARKET: ${{ inputs.market }}
+      DAYS: ${{ inputs.days }}
+      EVERY: ${{ inputs.every }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: DB 백엔드 고정 (docs/infra.md 25.472·25.480)
+        run: python -m batch.core.client --pin >> "$GITHUB_ENV"
+
+      - name: 소급 재생
+        run: |
+          set -o pipefail
+          python scripts/company_replay.py --market "$MARKET" --days "$DAYS" --every "$EVERY" 2>&1 \
+            | python scripts/ops_tee.py company-replay.txt
+
+      - name: 결과를 운영 이슈로
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPS_REPO: ${{ secrets.OPS_REPO }}
+          OPS_TOKEN: ${{ secrets.OPS_TOKEN }}
+        run: |
+          python scripts/publish_output.py \
+            --title "운영 출력 (클라우드 세션용)" \
+            --file company-replay.txt \
+            --note "모의 투자사 소급 재생"
