@@ -235,15 +235,27 @@ def apply_migrations(client: TursoClient) -> list[str]:
         # 들어갔는데 기록만 빠지는 틈이 생기고, 다음 실행이 같은 파일을 다시 돌려
         # `ALTER TABLE … ADD COLUMN` 이 "duplicate column" 으로 깨진다 — 그 뒤로는 영영 막힌다.
         # D1 의 batch 는 한 트랜잭션이라 본문과 기록이 함께 들어가거나 함께 빠진다.
-        client.batch(
-            [(s, []) for s in statements]
-            + [
-                (
-                    "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
-                    [version, now_iso()],
-                )
-            ]
-        )
+        # **Turso 의 파이프라인은 트랜잭션이 아니다** (docs/infra.md 25.1431, 감사) — 중간 문장이 실패해도 앞 문장이
+        # 커밋되고, 서버가 뒤를 계속 실행하면 적용 기록까지 들어가 그 파일이 영영 다시 돌지 않는다.
+        # `batch_atomic`(BEGIN·조건부·COMMIT/ROLLBACK)이 있으면 그것으로, 서버가 받지 않으면 예전처럼
+        묶음 = [(s, []) for s in statements] + [
+            ("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)", [version, now_iso()])
+        ]
+        원자 = getattr(client, "batch_atomic", None)
+        if 원자 is None:
+            client.batch(묶음)
+        else:
+            from batch.core.turso import AtomicUnsupported
+
+            try:
+                원자(묶음)
+            except AtomicUnsupported as exc:
+                # 응답 모양만 낯설고 실제로는 적용됐을 수 있다 — 기록이 있으면 다시 돌리지 않는다(ALTER 가 깨진다)
+                if client.execute("SELECT 1 FROM schema_migrations WHERE version = ?", [version]).rows:
+                    log.warning("마이그레이션 응답이 낯설지만 적용 기록이 있습니다: %s (%s)", version, exc)
+                else:
+                    log.warning("마이그레이션을 한 트랜잭션으로 보내지 못해 예전 방식으로 보냅니다: %s", exc)
+                    client.batch(묶음)
         newly.append(version)
 
     return newly

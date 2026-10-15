@@ -271,8 +271,33 @@ class TursoClient:
     def execute(self, sql: str, args: list[Any] | None = None) -> ResultSet:
         return self.batch([(sql, args or [])])[0]
 
+    def batch_atomic(self, statements: list[tuple[str, list[Any]]]) -> list[ResultSet]:
+        """**전부 들어가거나 전부 빠진다** — Hrana `batch` 요청 하나에 BEGIN·조건부 문장·COMMIT/ROLLBACK
+        (docs/infra.md 25.1431).
+
+        `batch()` 의 `/v2/pipeline` 은 트랜잭션이 아니다(문장마다 커밋, 25.1110). 마이그레이션이 본문과 적용 기록을 한
+        파이프라인에 실으면, 중간 문장이 실패해도 앞 문장이 커밋되고 Hrana 가 뒤를 계속 실행하면 적용 기록까지 들어가
+        그 파일이 영영 다시 돌지 않는다 [확인필요: 실패 뒤 계속 실행하는지]. 서버가 받지 않으면 `AtomicUnsupported`"""
+        payload = {"requests": [{"type": "batch", "batch": {"steps": atomic_steps(statements)}}, {"type": "close"}]}
+        resp = self._post_with_retry(payload)
+        if resp.status_code == 401:
+            raise TursoError("Turso 인증 실패(401). TURSO_AUTH_TOKEN 이 이 데이터베이스의 토큰인지 확인하세요")
+        if resp.status_code == 400:
+            raise AtomicUnsupported(f"Turso HTTP 400: {resp.text[:200]}")
+        if resp.status_code != 200:
+            raise TursoError(f"Turso HTTP {resp.status_code}: {resp.text[:200]}")
+        try:
+            body = resp.json()
+        except ValueError as exc:
+            raise TursoError("Turso 응답을 해석하지 못했습니다") from exc
+        results = parse_atomic(body, len(statements))
+        self._flush_writes(self.writes.add(sum(r.affected_rows for r in results)))
+        self._flush_reads(self.reads.add(sum(r.rows_read for r in results)))
+        return results
+
     def batch(self, statements: list[tuple[str, list[Any]]]) -> list[ResultSet]:
-        """여러 문장을 한 번에 보낸다. 앞에서 실패하면 뒤는 실행되지 않는다."""
+        """여러 문장을 한 번에 보낸다. **트랜잭션이 아니다** — 앞 문장은 이미 커밋된다(25.1110). 실패한 문장 뒤를 서버가
+        계속 실행하는지는 [확인필요]. 전부 아니면 전무가 필요하면 `batch_atomic` (25.1431)"""
         payload = {
             "requests": [
                 {
@@ -314,6 +339,45 @@ class TursoClient:
         self._flush_writes(self.writes.add(sum(r.affected_rows for r in results)))
         self._flush_reads(self.reads.add(sum(r.rows_read for r in results)))
         return results
+
+
+class AtomicUnsupported(TursoError):
+    """서버가 Hrana `batch` 요청이나 그 안의 BEGIN 을 받지 않았다 — 부른 쪽이 예전 파이프라인으로 물러난다 (25.1431)"""
+
+
+def atomic_steps(statements: list[tuple[str, list[Any]]]) -> list[dict[str, Any]]:
+    """BEGIN → 문장마다 "앞 단계가 성공했으면" → COMMIT → (COMMIT 이 안 됐으면) ROLLBACK (Hrana batch 조건,
+    25.1431). 앞 문장이 실패하면 뒤 문장은 **조건이 거짓이라 실행되지 않고**, COMMIT 도 건너뛰어 ROLLBACK 이
+    BEGIN 이후를 되돌린다"""
+    steps: list[dict[str, Any]] = [{"stmt": {"sql": "BEGIN"}}]
+    for sql, args in statements:
+        steps.append({"condition": {"type": "ok", "step": len(steps) - 1},
+                      "stmt": {"sql": sql, "args": [_encode(a) for a in args]}})  # fmt: skip
+    steps.append({"condition": {"type": "ok", "step": len(steps) - 1}, "stmt": {"sql": "COMMIT"}})
+    steps.append({"condition": {"type": "not", "cond": {"type": "ok", "step": len(steps) - 1}},
+                  "stmt": {"sql": "ROLLBACK"}})  # fmt: skip
+    return steps
+
+
+def parse_atomic(body: dict[str, Any], n: int) -> list[ResultSet]:
+    """`atomic_steps` 응답 → 문장 n 개의 결과. BEGIN 이 안 됐거나 요청 자체를 모르면 `AtomicUnsupported`,
+    문장·COMMIT 이 실패하면 `TursoError`(이때 ROLLBACK 이 되돌렸다)"""
+    item = (body.get("results") or [{}])[0]
+    if item.get("type") == "error":
+        raise AtomicUnsupported(f"batch 요청 거절: {item.get('error', {}).get('message', '알 수 없음')}")
+    result = ((item.get("response") or {}).get("result")) or {}
+    errors = result.get("step_errors") or []
+    outs = result.get("step_results") or []
+    if len(outs) < n + 3 and len(errors) < n + 3:
+        raise AtomicUnsupported("batch 응답 모양이 예상과 다르다")
+    if errors and errors[0]:
+        raise AtomicUnsupported(f"BEGIN 실패: {errors[0].get('message', '알 수 없음')}")
+    for i in range(1, n + 2):
+        if i < len(errors) and errors[i]:
+            raise TursoError(f"SQL 실패(되돌림): {errors[i].get('message', '알 수 없는 오류')}")
+    if not (n + 1 < len(outs) and outs[n + 1] is not None):
+        raise TursoError("COMMIT 이 실행되지 않았다(되돌림)")
+    return [_to_result_set(outs[i] or {}) for i in range(1, n + 1)]
 
 
 def _to_result_set(result: dict[str, Any]) -> ResultSet:
