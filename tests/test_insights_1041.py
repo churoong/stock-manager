@@ -185,7 +185,15 @@ def test_다음_실적_발표() -> None:
     mem.batch(job.build_market(mem, "KR", date(2026, 10, 8), []))  # type: ignore[arg-type]
     d = json.loads(c.execute("SELECT detail_json FROM stock_verdicts").fetchone()[0])
     assert d["earnings"] == {"date": "2026-10-28", "days": 20, "confirmed": True, "source": "yahoo"}
-    assert any(r.startswith("다음 실적 발표 2026-10-28 (D-20, 확정) — 국내 실적(잠정) 공시 뒤") for r in d["reasons"])
+    줄 = next(r for r in d["reasons"] if r.startswith("다음 실적 발표 2026-10-28 (D-20, 확정)"))
+    # 장중 알림과 같은 문장 — 공시일 반응이 들어 있다고 말한다 (25.1013·25.1394)
+    assert "— 시장 전체 실적 공시: 전날 종가부터 5거래일째까지(공시일 반응 포함)" in 줄 and "(300건)" in 줄
+    # 표본이 30건 미만이면 반응 통계를 붙이지 않는다 (25.1394)
+    c.execute("UPDATE disclosure_reaction SET n = 12, halted = 0")
+    c.execute("DELETE FROM stock_verdicts")
+    mem.batch(job.build_market(mem, "KR", date(2026, 10, 8), []))  # type: ignore[arg-type]
+    d = json.loads(c.execute("SELECT detail_json FROM stock_verdicts").fetchone()[0])
+    assert "다음 실적 발표 2026-10-28 (D-20, 확정)" in d["reasons"]
 
 
 def _분기(fy: int, code: str, rev: int, op: int, cons: int = 1, rd: str = "2026-01-01") -> dict:

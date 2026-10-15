@@ -911,10 +911,11 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
             e = 실적일[sid]
             남은 = (date.fromisoformat(str(e["d"])[:10]) - today).days
             확정 = "확정" if e.get("is_confirmed") else "예상"
-            반응 = ""
-            if 실적반응 and isinstance(실적반응.get("median_pct"), (int, float)):
-                반응 = (f" — 국내 실적(잠정) 공시 뒤 5거래일 반응(시장 전체): 중앙값 {실적반응['median_pct']:+.1f}%·"
-                        f"오른 비율 {실적반응['pos_pct']:.0f}% ({실적반응['n']}건)")  # fmt: skip
+            # 반응 통계는 장중 알림과 **같은 문장 함수**로 (docs/infra.md 25.1394, 공시 감사). 예전에는 따로 짜서
+            # 표본 하한(`MIN_N` 30)·거래정지로 못 잰 건수(25.1154)·"공시일 반응 포함" 문구(25.1013)가 모두 빠졌다 —
+            # 표가 다시 만들어지는 첫 주처럼 n 이 적어도 중앙값이 근거 줄에 나갔다
+            반응줄 = dr.line(실적반응)
+            반응 = f" — 시장 전체 {반응줄}" if 반응줄 else ""
             out["reasons"].append(f"다음 실적 발표 {e['d']} (D-{남은}, {확정}){반응}")
             out["evidence"].append(vd._row("다음 실적 발표", str(e["d"]), 확정,
                                            f"earnings_calendar ({e.get('source')})", str(e["d"])))  # fmt: skip
