@@ -1,8 +1,9 @@
 """SEC submissions 응답의 공시 목록 모양을 확인한다 (docs/data-sources.md 14.4·16.3).
 
-두 가지를 한 번에 본다. 같은 파일이 둘 다 답한다.
+세 가지를 한 번에 본다. 같은 파일이 다 답한다.
   1. 미국 공시 수집(`jobs/disclosures_us`)이 전제한 `filings.recent` 의 열 이름과 길이
   2. Form 4(내부자 매매)가 이 목록에 있는지, 본문 XML 이 어디 있는지
+  3. 8-K 의 `acceptanceDateTime` 시간대와 `items` 모양 (28회차 P2·P3, 25.1426)
 
 인증키는 없다. SEC 는 연락처가 든 User-Agent 를 요구한다(`SEC_USER_AGENT` 시크릿).
 **UA 는 찍지 않는다** — 이메일이 들어 있다.
@@ -59,6 +60,34 @@ def show_recent(recent: dict) -> None:
     top = sorted(counts.items(), key=lambda kv: -kv[1])[:10]
     print(f"   폼 종류 {len(counts)}개, 많은 순 {top}")
     print(f"   Form 4 건수 {counts.get('4', 0)} (내부자 매매)")
+
+
+def show_8k(recent: dict) -> None:
+    """8-K 의 접수 시각과 항목 (docs/factors.md 12.30 P2·P3 탐침, docs/infra.md 25.1426).
+
+    P2(신호 기준 종가 뒤 공시)는 `acceptanceDateTime` 이 **실제 UTC 인지, 동부시간에 Z 만 붙은 것인지**에
+    기대고, P3(8-K 중대 항목 4.02·3.01·1.03)는 `items` 글자 모양("2.02,9.01" 같은 쉼표 목록인지)에 기댄다.
+    실적 8-K(2.02)는 보통 장 마감 뒤(16:00~16:35 ET)에 접수된다 — 시각이 20~21시대(서머타임 UTC)면 진짜 UTC,
+    16시대면 동부시간에 Z 가 붙은 것이다. 공개 공시 메타라 찍어도 된다"""
+    forms = recent.get("form") or []
+    acc = recent.get("acceptanceDateTime") or []
+    items = recent.get("items") or []
+    dates = recent.get("filingDate") or []
+    print(f"   acceptanceDateTime 열 {'있음' if acc else '없음'}, items 열 {'있음' if items else '없음'}")
+    print(f"   recent 행 {len(forms)}개, 가장 오래된 filingDate {min(dates) if dates else None} (1년을 덮는가 — P3)")
+    shown = 0
+    for i, form in enumerate(forms):
+        if str(form) not in ("8-K", "8-K/A"):
+            continue
+        a = acc[i] if i < len(acc) else None
+        it = items[i] if i < len(items) else None
+        d = dates[i] if i < len(dates) else None
+        print(f"   {form} filingDate={d} acceptanceDateTime={a} items={it!r}")
+        shown += 1
+        if shown >= 8:
+            break
+    if not shown:
+        print("   8-K 가 최근 목록에 없다")
 
 
 def check_url(session: requests.Session, cik: str, recent: dict) -> None:
@@ -175,6 +204,7 @@ def main() -> int:
 
     recent = filings.get("recent") or {}
     show_recent(recent)
+    show_8k(recent)
     check_url(session, cik, recent)
     show_form4(session, cik, recent)
     return 0
