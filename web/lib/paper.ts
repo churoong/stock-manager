@@ -370,6 +370,14 @@ export interface Attribution {
   blocked?: AttrCell;
   /** 투자사 부서 성적표 (docs/company.md 6장, 25.1472) — 초과는 소수(0.05 = +5%p) */
   departments?: DeptScore[];
+  /** 가상 대조 (docs/company.md 6장, 25.1476) — 산 종목이 같은 날 무작위 20종목 안 몇 분위였나. 무작위면 50 */
+  virtual?: VirtualControl;
+}
+export interface VirtualControl { n: number; avg_pct: number | null; top_half: number | null }
+/** 가상 대조 한 줄 — 표본이 없으면 null. 30 미만은 "참고" (성과 분해와 같은 문턱) */
+export function virtualText(v: VirtualControl | undefined): string | null {
+  if (!v || !v.n || v.avg_pct == null) return null;
+  return `같은 날 무작위 20종목 안 평균 ${v.avg_pct.toFixed(0)} 분위 · 위쪽 절반 ${(v.top_half ?? 0).toFixed(0)}% (n=${v.n}${v.n < 30 ? ", 참고" : ""}) — 무작위면 50`;
 }
 export interface DeptScore {
   dept: string; n_for: number; n_against: number; n_neutral: number; avg_for: number | null; avg_against: number | null;

@@ -156,7 +156,7 @@ OUTCOME_BATCH = 900
 #: 성과 분해·부서 성적표가 보는 결정 — **지금 판의 것만**(판 번호가 빈 옛 행은 판 1).
 #: 판 2 회사의 성적에 판 1 결정이 섞이지 않게 (docs/company.md 1장 검증 [필수] 7, 25.1472)
 ATTR_DECISIONS_SQL = (
-    "SELECT stock_id, decided_on, kind, reason, ret_20d, bench_20d, detail_json FROM paper_decisions"
+    "SELECT stock_id, decided_on, kind, reason, ret_20d, bench_20d, detail_json, control_pct FROM paper_decisions"
     " WHERE account_id = ? AND decided_on >= ? AND ret_20d IS NOT NULL AND COALESCE(rule_version, 1) = ?"
 )
 ATTR_FILLS_SQL = (
@@ -250,6 +250,78 @@ def fill_outcomes(client: Any, market: str, today: str, now: str) -> dict[str, i
     if 문장:
         client.batch(문장)
     return {"pending_read": len(rows), "filled": 채움, "gave_up": 포기}
+
+
+#: 가상 대조 (docs/company.md 6장, 25.1476) — 성과가 찼는데 아직 대조를 안 본 매수
+PENDING_CONTROL_SQL = (
+    "SELECT id, stock_id, decided_on, ref_date, ret_20d FROM paper_decisions"
+    " WHERE market = ? AND kind = 'buy' AND ret_20d IS NOT NULL AND control_n IS NULL AND ref_date IS NOT NULL"
+    " ORDER BY decided_on LIMIT ?"
+)
+#: 결정일 이전 가장 최근 유니버스 스냅숏 날짜 — (snapshot_date, included) 색인의 최댓값 찾기라 한 번에 닿는다.
+#: 시장마다 스냅숏 날이 다를 수 있어 그 시장 종목이 없으면 하나 더 앞으로 간다(`_대조_모집단`)
+SNAPSHOT_AT_SQL = "SELECT MAX(snapshot_date) FROM universe_members WHERE snapshot_date <= ?"
+UNIVERSE_AT_SQL = (
+    "SELECT u.stock_id FROM universe_members u JOIN stocks s ON s.id = u.stock_id"
+    " WHERE u.snapshot_date = ? AND u.included = 1 AND s.country = ? AND s.asset_type = 'stock'"
+)
+CLOSE_ON_OR_BEFORE_SQL = (
+    "SELECT date, close FROM prices WHERE stock_id = ? AND date <= ? AND close > 0 ORDER BY date DESC LIMIT 1"
+)
+CONTROL_UPDATE_SQL = "UPDATE paper_decisions SET control_pct = ?, control_n = ? WHERE id = ?"
+#: 한 번에 대조를 보는 매수 수 — 같은 기준일의 매수는 대조군을 나눠 쓰므로 읽기는 기준일 수에 비례한다
+#: (기준일마다 유니버스 수천 행 + 대조 20 × 21 행)
+CONTROL_BATCH = 300
+#: 대조 종목의 기준일 종가가 이보다 묵었으면(정지 등) 그 대조는 뺀다 — 위험 점검의 묵음 기준(7일)과 같은 값
+CONTROL_STALE_DAYS = 7
+
+
+def _대조_모집단(client: Any, market: str, decided_on: str) -> list[int]:
+    """결정일 당시의 유니버스(편입·개별주) — 지금 유니버스를 쓰면 그 사이 빠진 종목이 사라져 생존편향."""
+    날 = decided_on
+    for _ in range(3):
+        r = client.execute(SNAPSHOT_AT_SQL, [날]).rows
+        if not r or not r[0][0]:
+            return []
+        모집단 = [int(x[0]) for x in client.execute(UNIVERSE_AT_SQL, [str(r[0][0]), market]).rows]
+        if 모집단:
+            return 모집단
+        날 = (date.fromisoformat(str(r[0][0])[:10]) - timedelta(days=1)).isoformat()
+    return []
+
+
+def fill_controls(client: Any, market: str) -> dict[str, int]:
+    """매수마다 가상 대조 분위를 채운다 (docs/company.md 6장, 25.1476). 결정 원장의 성과가 찬 매수만, 한 번."""
+    rows = client.execute(PENDING_CONTROL_SQL, [market, CONTROL_BATCH]).dicts()
+    모집단캐시: dict[str, list[int]] = {}
+    수익캐시: dict[tuple[int, str], float | None] = {}
+
+    def 수익(sid: int, ref_date: str) -> float | None:
+        if (sid, ref_date) not in 수익캐시:
+            기준 = client.execute(CLOSE_ON_OR_BEFORE_SQL, [sid, ref_date]).rows
+            값: float | None = None
+            묵음 = (date.fromisoformat(ref_date) - date.fromisoformat(str(기준[0][0])[:10])).days if 기준 else None
+            if 묵음 is not None and 묵음 <= CONTROL_STALE_DAYS:
+                뒤 = client.execute(AFTER_CLOSES_SQL, [sid, ref_date, pp.ATTRIBUTION_HORIZON]).rows
+                if len(뒤) >= pp.ATTRIBUTION_HORIZON:
+                    값 = (float(뒤[-1][1]) / float(기준[0][1]) - 1) * 100
+            수익캐시[(sid, ref_date)] = 값
+        return 수익캐시[(sid, ref_date)]
+
+    문장: list[tuple[str, list[Any]]] = []
+    낸것 = 0
+    for r in rows:
+        결정일, 기준일 = str(r["decided_on"]), str(r["ref_date"])[:10]
+        if 결정일 not in 모집단캐시:
+            모집단캐시[결정일] = _대조_모집단(client, market, 결정일)
+        대조 = pp.control_picks(모집단캐시[결정일], market, 기준일, int(r["stock_id"]))
+        rets = [x for x in (수익(c, 기준일) for c in 대조) if x is not None]
+        분위 = pp.control_pct(float(r["ret_20d"]), rets)
+        문장.append((CONTROL_UPDATE_SQL, [분위, len(rets), r["id"]]))
+        낸것 += 분위 is not None
+    if 문장:
+        client.batch(문장)
+    return {"pending_read": len(rows), "filled": 낸것, "snapshots": len(모집단캐시)}
 
 
 def _쓰기(client: Any, statements: list[tuple[str, list[Any]]]) -> None:
@@ -1195,6 +1267,13 @@ def run_step(
         기록["decision_outcomes"] = fill_outcomes(client, market, 오늘, 지금)
     except Exception as exc:  # noqa: BLE001 — 성과 채우기만 빠진다. 까닭은 기록에
         기록["decision_outcomes"] = {"error": str(exc)[:200]}
+    # 가상 대조 (docs/company.md 6장, 25.1476) — 곁다리. 0079 전 DB·읽기 실패면 그 칸만 빈다
+    try:
+        기록["virtual_control"] = fill_controls(client, market)
+    except Exception as exc:  # noqa: BLE001
+        if db.quota_reason(exc):
+            raise
+        기록["virtual_control"] = {"error": str(exc)[:200]}
     # 성과 분해 (25.1450) — 계좌마다 오늘 평가 행에. 곁다리
     try:
         for acct in accounts:

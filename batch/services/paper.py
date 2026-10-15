@@ -760,6 +760,39 @@ def _에피소드(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return 남김
 
 
+#: 가상 대조 (docs/company.md 6장, 25.1476) — 매수마다 같은 날·같은 시장 유니버스에서 무작위로 뽑는 대조 종목 수.
+#: 20 이면 분위 한 칸이 5 — 한 매수로는 거칠지만 에피소드 30 개를 모으면 평균의 표준오차가 약 5 분위
+VIRTUAL_CONTROLS = 20
+#: 20 거래일 성과를 낸 대조가 이보다 적으면 분위를 내지 않는다 (상장폐지·긴 정지로 빠진 것이 많은 날)
+VIRTUAL_MIN_CONTROLS = 10
+
+
+def control_picks(universe: list[int], market: str, ref_date: str, exclude: int) -> list[int]:
+    """가상 대조 종목 — `random_order(유니버스, "virtual|시장|기준일")` 앞에서 산 종목을 빼고 `VIRTUAL_CONTROLS` 개.
+
+    같은 날 같은 시장의 매수는 모두 같은 대조군이다(산 종목만 빠진다) — 회사끼리 같은 잣대로 견준다. 재현 가능
+    """
+    return [c for c in random_order(universe, f"virtual|{market}|{ref_date}")[: VIRTUAL_CONTROLS + 1]
+            if c != exclude][:VIRTUAL_CONTROLS]  # fmt: skip
+
+
+def control_pct(buy_ret: float, control_rets: list[float]) -> float | None:
+    """대조 수익 분포 안에서 매수의 분위(0~100) — (낮은 수 + 같은 수의 절반) / 대조 수. 대조가 모자라면 None."""
+    if len(control_rets) < VIRTUAL_MIN_CONTROLS:
+        return None
+    낮음 = sum(r < buy_ret for r in control_rets)
+    같음 = sum(r == buy_ret for r in control_rets)
+    return (낮음 + 0.5 * 같음) / len(control_rets) * 100
+
+
+def _가상(buys: list[dict[str, Any]]) -> dict[str, Any]:
+    """에피소드 첫 매수의 가상 대조 분위 — 평균·위쪽 절반 비율. 무작위면 평균 50."""
+    xs = [float(b["control_pct"]) for b in buys if b.get("control_pct") is not None]
+    if not xs:
+        return {"n": 0, "avg_pct": None, "top_half": None}
+    return {"n": len(xs), "avg_pct": sum(xs) / len(xs), "top_half": sum(x > 50 for x in xs) / len(xs) * 100}
+
+
 def _까닭_묶음(reason: str) -> str:
     """안 산 까닭을 묶는 열쇠 — 위원회 부결 사유의 숫자(표·찬성 수)를 N 으로. 숫자마다 다른 까닭으로 갈려
     상위 5칸이 "표 0.83 < 문턱 1"·"표 0.91 < 문턱 1" 같은 조각으로 찼다 (25.1472)"""
@@ -793,6 +826,7 @@ def attribution(decisions: list[dict[str, Any]], entries: list[tuple[float, floa
         "sold": _초과(종류["sell"]),
         "held_flag": _초과(종류["hold_flag"]),
         "blocked": _초과(종류["blocked"]),
+        "virtual": _가상(종류["buy"]),
     }
 
 
@@ -817,4 +851,9 @@ def attribution_lines(aid: str, a: dict[str, Any] | None) -> list[str]:
     줄.append(f"  {aid} 진입: {진입} · 안 찬 회차의 그 뒤 {칸(a['missed'])}")
     줄.append(f"  {aid} 청산: 판 뒤 {칸(a['sold'])} · 플래그를 따르지 않고 든 뒤 {칸(a['held_flag'])}"
              " — 판 뒤가 음수면 판 것이 옳았다")
+    v = a.get("virtual") or {}
+    if v.get("n"):
+        줄.append(f"  {aid} 가상 대조: 산 종목이 같은 날 무작위 {VIRTUAL_CONTROLS}종목 안 평균 {v['avg_pct']:.0f} 분위"
+                 f" · 위쪽 절반 {v['top_half']:.0f}% (n={v['n']}"
+                 + (", 참고" if v["n"] < ATTRIBUTION_MIN_SAMPLE else "") + ") — 무작위면 50")  # fmt: skip
     return 줄

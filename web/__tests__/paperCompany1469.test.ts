@@ -3,7 +3,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { AccountTabs, CommitteePane, type Data } from "@/components/PaperView";
-import { accountView, deptScoreText, stanceText } from "@/lib/paper";
+import { accountView, deptScoreText, stanceText, virtualText } from "@/lib/paper";
 
 const 헌장 = {
   name: "가치투자사", philosophy: "싸고 튼튼한 회사를 산다", weights: { research: 2, quant: 0.5, governance: 1 },
@@ -66,5 +66,12 @@ describe("투자위원회 탭", () => {
       meetings: [], dossiers: [],
     }));
     expect(html).toContain("리서치부: 찬성 40건 +2.1%p");
+  });
+
+  it("가상 대조 — 무작위 20종목 안 분위, 표본 없으면 숨김 (25.1476)", () => {
+    expect(virtualText({ n: 12, avg_pct: 61.4, top_half: 58.3 })).toBe(
+      "같은 날 무작위 20종목 안 평균 61 분위 · 위쪽 절반 58% (n=12, 참고) — 무작위면 50");
+    expect(virtualText({ n: 0, avg_pct: null, top_half: null })).toBeNull();
+    expect(virtualText(undefined)).toBeNull();
   });
 });
