@@ -1,5 +1,14 @@
 import { NextResponse } from "next/server";
-import { checkPassword, cookieOptions, createSessionToken } from "@/lib/auth";
+import {
+  DEVICE_COOKIE,
+  checkPassword,
+  cookieOptions,
+  createDeviceToken,
+  createSessionToken,
+  deviceCookieOptions,
+  newDeviceId,
+  verifyDeviceToken,
+} from "@/lib/auth";
 import {
   alertGlobalLock,
   reserveAttempt,
@@ -19,11 +28,22 @@ import {
  * 알려주면 공격자에게만 도움이 된다. 잠겼을 때만 남은 시간을 알려준다.
  * 본인이 기다려야 할 시간을 모르면 곤란하기 때문이다.
  */
+function cookieValue(request: Request, name: string): string | undefined {
+  for (const part of (request.headers.get("cookie") ?? "").split(";")) {
+    const i = part.indexOf("=");
+    if (i > 0 && part.slice(0, i).trim() === name) return part.slice(i + 1).trim();
+  }
+  return undefined;
+}
+
 export async function POST(request: Request) {
-  const ipHash = await hashIp(clientIp(request));
+  // **전에 들어온 기기면 전체 잠금을 보지 않고 기기 번호로 센다** (docs/infra.md 25.1424, 보안 감사 #1) — 남이 전체 잠금을 계속 걸어
+  // 본인 로그인을 막지 못하게. 기기 표를 못 읽으면(AUTH_SECRET 없음 등) 예전처럼 주소로
+  const deviceId = await verifyDeviceToken(cookieValue(request, DEVICE_COOKIE)).catch(() => null);
+  const ipHash = await hashIp(deviceId ? `device:${deviceId}` : clientIp(request));
 
   // 먼저 실패로 적어 두고 센다 — 동시 요청이 서로를 보게 (docs/infra.md 25.393)
-  const verdict = await reserveAttempt(ipHash);
+  const verdict = await reserveAttempt(ipHash, { trustedDevice: deviceId !== null });
   if (!verdict.allowed) {
     if (verdict.reason === "global") {
       await alertGlobalLock(new Date(), verdict.memory === true);
@@ -83,5 +103,11 @@ export async function POST(request: Request) {
 
   const response = NextResponse.json({ ok: true });
   response.cookies.set({ ...cookieOptions, value: token });
+  // 기기 표를 (다시) 준다 — 있던 번호는 그대로, 만료만 늘린다. 못 만들면 세션은 그대로 준다(기기 표는 덧붙임)
+  try {
+    response.cookies.set({ ...deviceCookieOptions, value: await createDeviceToken(deviceId ?? newDeviceId()) });
+  } catch {
+    // 세션을 만든 같은 키라 여기서 실패할 일은 거의 없다
+  }
   return response;
 }

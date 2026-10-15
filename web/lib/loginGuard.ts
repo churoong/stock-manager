@@ -123,12 +123,12 @@ const 메모리_주소별 = new Map<string, number[]>();
 let 메모리_전체: number[] = [];
 
 /** `record=false` 면 판정만 하고 적지 않는다 — DB 를 못 읽는 날 잠긴 요청을 DB 에 쓰기 전에 돌려보낼 때 (25.851) */
-export function memoryReserve(ipHash: string, now: number = Date.now(), record = true): GuardVerdict {
+export function memoryReserve(ipHash: string, now: number = Date.now(), record = true, skipGlobal = false): GuardVerdict {
   const 주소창 = now - PER_IP_WINDOW_MINUTES * 60_000;
   const 전체창 = now - GLOBAL_WINDOW_MINUTES * 60_000;
   const 주소 = (메모리_주소별.get(ipHash) ?? []).filter((t) => t > 주소창);
   메모리_전체 = 메모리_전체.filter((t) => t > 전체창);
-  if (메모리_전체.length >= MEMORY_GLOBAL_MAX_FAILURES) {
+  if (!skipGlobal && 메모리_전체.length >= MEMORY_GLOBAL_MAX_FAILURES) {
     return { allowed: false, reason: "global", memory: true, retryAfterSeconds: Math.max(1, Math.ceil((메모리_전체[0] + GLOBAL_WINDOW_MINUTES * 60_000 - now) / 1000)) };
   }
   if (주소.length >= MEMORY_PER_IP_MAX_FAILURES) {
@@ -159,11 +159,14 @@ export function memoryReset(): void {
   메모리_주소별.clear();
   메모리_전체 = [];
   메모리_알림시각 = null;
+  알림_본시각 = null;
   lockMemoryReset();
 }
 
 /** DB 장부를 못 적을 때 쓰는 알림 쿨다운 — 인스턴스 메모리 (25.846) */
 let 메모리_알림시각: number | null = null;
+/** 이 인스턴스가 알림 장부(`claimAlert`)를 마지막으로 본 시각 (25.1423) */
+let 알림_본시각: number | null = null;
 
 /**
  * **먼저 실패로 적어 두고** 센다 (docs/infra.md 25.393).
@@ -181,8 +184,8 @@ let 메모리_알림시각: number | null = null;
 const 잠금_주소별 = new Map<string, number>();
 let 잠금_전체 = 0;
 
-function 기억한_잠금(ipHash: string, now: number): GuardVerdict | null {
-  if (잠금_전체 > now) return { allowed: false, reason: "global", retryAfterSeconds: Math.max(1, Math.ceil((잠금_전체 - now) / 1000)) };
+function 기억한_잠금(ipHash: string, now: number, skipGlobal = false): GuardVerdict | null {
+  if (!skipGlobal && 잠금_전체 > now) return { allowed: false, reason: "global", retryAfterSeconds: Math.max(1, Math.ceil((잠금_전체 - now) / 1000)) };
   const 주소 = 잠금_주소별.get(ipHash);
   if (주소 !== undefined && 주소 > now) return { allowed: false, reason: "ip", retryAfterSeconds: Math.max(1, Math.ceil((주소 - now) / 1000)) };
   if (주소 !== undefined) 잠금_주소별.delete(ipHash);
@@ -206,24 +209,32 @@ export function lockMemoryReset(): void {
   잠금_전체 = 0;
 }
 
-export async function reserveAttempt(ipHash: string): Promise<GuardVerdict> {
-  const 기억 = 기억한_잠금(ipHash, Date.now());
+/**
+ * `trustedDevice` — 이 브라우저에서 전에 로그인에 성공했다는 서명 쿠키(`lib/auth` 기기 표)가 맞는 요청 (docs/infra.md 25.1424, 보안 감사 #1).
+ * **전체 잠금을 보지 않는다.** 전체 잠금은 누가 실패했는지 가리지 않아, 로그인하지 않은 누구든 한 시간에 틀린 비밀번호 20번만 보내면
+ * 잠금을 무기한 이어 본인 로그인을 막을 수 있었다(맞는 비밀번호도 429). 기기 표가 있는 요청은 대신 **그 기기 번호**로 주소별과 같은
+ * 한도(15분 5번)를 센다 — 부른 쪽이 `ipHash` 자리에 기기 번호의 해시를 넘긴다. 주소를 바꿔 가며 두드려도 같은 기기 한도에 걸린다.
+ * 그 실패도 전체 수에는 들어간다(다른 요청의 전체 잠금 판정은 그대로)
+ */
+export async function reserveAttempt(ipHash: string, opts: { trustedDevice?: boolean } = {}): Promise<GuardVerdict> {
+  const 건너뜀 = opts.trustedDevice === true;
+  const 기억 = 기억한_잠금(ipHash, Date.now(), 건너뜀);
   if (기억) return 기억; // DB 를 읽지 않는다 (25.914)
-  return 잠금_기억(ipHash, await reserveAttemptDb(ipHash), Date.now());
+  return 잠금_기억(ipHash, await reserveAttemptDb(ipHash, 건너뜀), Date.now());
 }
 
-async function reserveAttemptDb(ipHash: string): Promise<GuardVerdict> {
+async function reserveAttemptDb(ipHash: string, skipGlobal = false): Promise<GuardVerdict> {
   // **이미 잠겼으면 적지 않는다** (docs/infra.md 25.594, 감사). 25.393 뒤로 잠긴 뒤 온 요청도 실패 한 줄씩 쌓여, 공격을 멈춘 뒤에도
   // 전체 잠금이 최대 60분 늘어났고(본인도 못 들어옴) 안내한 대기 시간이 틀렸다(1분 뒤 → 여전히 15분). 잠긴 요청마다 쓰기도 한 번씩 태웠다.
   // 먼저 읽기만으로 보고(쓰기 없음), 잠겼으면 그대로 돌려보낸다
   const 먼저 = await checkGuardRaw(ipHash).catch(() => "unavailable" as const);
   if (먼저 !== "unavailable") {
-    const 앞판정 = verdictOf(먼저, 0);
+    const 앞판정 = verdictOf(먼저, 0, skipGlobal);
     if (!앞판정.allowed) return 정확한_대기(앞판정, ipHash, 먼저, 0);
   } else {
     // 못 읽는 날은 메모리 잠금을 **쓰기 전에** 본다 (25.851, 교차검증). 예전에는 잠긴 요청마다 실패 한 줄을 D1 에 쓴 뒤 메모리가 막아,
     // 두드리는 만큼 하루 쓰기 한도(10만)를 태웠고 읽기가 돌아온 아침 DB 전체 잠금까지 이어졌다(30번 두드리자 DB 행 30)
-    const 앞판정 = memoryReserve(ipHash, Date.now(), false);
+    const 앞판정 = memoryReserve(ipHash, Date.now(), false, skipGlobal);
     if (!앞판정.allowed) return 앞판정;
   }
   const 시각 = new Date().toISOString();
@@ -231,19 +242,19 @@ async function reserveAttemptDb(ipHash: string): Promise<GuardVerdict> {
     await execute("INSERT INTO login_attempts (ip_hash, attempted_at, success) VALUES (?, ?, 0)", [ipHash, 시각]);
   } catch (error) {
     if (표가_없나(error)) return { allowed: true, recentFailures: 0 };
-    return memoryReserve(ipHash); // 못 쓰면 메모리로 센다 (25.843)
+    return memoryReserve(ipHash, Date.now(), true, skipGlobal); // 못 쓰면 메모리로 센다 (25.843)
   }
   // 동시에 들어와 앞 읽기를 함께 통과한 요청의 줄은 **거두지 않는다** — 거두면 늦게 센 요청이 문턱 아래로 보고 통과해 25.393 이 막은
   // 동시 대입이 되살아난다. 한꺼번에 몰린 만큼만 남고, 잠긴 뒤 하나씩 오는 요청은 위에서 적지 않고 돌아선다
-  return checkGuardCounting(ipHash, 1);
+  return checkGuardCounting(ipHash, 1, skipGlobal);
 }
 
 /** 이미 넣은 자기 줄(`own`)을 빼고 문턱과 견준다 */
-async function checkGuardCounting(ipHash: string, own: number): Promise<GuardVerdict> {
+async function checkGuardCounting(ipHash: string, own: number, skipGlobal = false): Promise<GuardVerdict> {
   const v = await checkGuardRaw(ipHash);
   // 못 읽으면 막지 않고 메모리로 더 엄격하게 센다 — D1 읽기 한도 날 본인이 18시간 못 들어왔다 (25.843)
-  if (v === "unavailable") return memoryReserve(ipHash);
-  return 정확한_대기(verdictOf(v, own), ipHash, v, own);
+  if (v === "unavailable") return memoryReserve(ipHash, Date.now(), true, skipGlobal);
+  return 정확한_대기(verdictOf(v, own, skipGlobal), ipHash, v, own);
 }
 
 /**
@@ -281,10 +292,11 @@ async function 정확한_대기(
 function verdictOf(
   v: { ip: { n: number; oldest: string | null }; global: { n: number; oldest: string | null } },
   own: number,
+  skipGlobal = false,
 ): GuardVerdict {
   const ip = v.ip.n - own;
   const global = v.global.n - own;
-  if (global >= GLOBAL_MAX_FAILURES) {
+  if (!skipGlobal && global >= GLOBAL_MAX_FAILURES) {
     return { allowed: false, reason: "global", retryAfterSeconds: retryAfter(v.global.oldest, GLOBAL_WINDOW_MINUTES) };
   }
   if (ip >= PER_IP_MAX_FAILURES) {
@@ -440,7 +452,12 @@ async function releaseAlert(now: Date): Promise<void> {
  */
 export async function alertGlobalLock(now: Date = new Date(), memory = false): Promise<void> {
   if (!process.env.TELEGRAM_BOT_TOKEN || !process.env.TELEGRAM_CHAT_ID?.trim()) return;
-
+  // **이 인스턴스가 이번 창에 이미 장부를 봤으면 DB 를 부르지 않는다** (docs/infra.md 25.1423, 보안 감사 #2). 25.914 가 잠긴 요청을
+  // 메모리로 돌려보내 읽기를 없앴는데, 여기서 요청마다 `claimAlert` 의 INSERT … ON CONFLICT 문장이 한 번씩 돌았다(쿨다운 안이면 행은
+  // 그대로지만 문장 값은 낸다). 잡았든(보냄) 못 잡았든(다른 요청이 이미 보냄) 한 창 동안 기억한다 — 느슨해지는 것은 알림뿐이다
+  const t = now.getTime();
+  if (알림_본시각 !== null && t - 알림_본시각 < GLOBAL_WINDOW_MINUTES * 60_000) return;
+  알림_본시각 = t;
   if (!(await claimAlert(now))) return;
 
   try {
@@ -458,6 +475,9 @@ export async function alertGlobalLock(now: Date = new Date(), memory = false): P
   } catch (e) {
     // 알림 실패가 로그인 처리를 막으면 안 된다
     console.error("전체 잠금 알림 실패:", e instanceof Error ? e.message : e);
-    if (!(e instanceof TelegramUncertainError)) await releaseAlert(now);
+    if (!(e instanceof TelegramUncertainError)) {
+      await releaseAlert(now);
+      if (알림_본시각 === t) 알림_본시각 = null; // 못 보냈으면 다음 요청이 다시 잡게
+    }
   }
 }

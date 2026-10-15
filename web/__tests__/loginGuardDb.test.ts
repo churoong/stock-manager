@@ -509,3 +509,49 @@ describe("잠긴 뒤 두드려도 DB 를 읽지 않는다 (25.914, 감사)", () 
     expect((await reserveAttempt(남)).allowed).toBe(true);
   });
 });
+
+describe("전에 들어온 기기는 전체 잠금을 보지 않는다 (docs/infra.md 25.1424, 보안 감사 #1)", () => {
+  it("남이 전체 잠금을 걸어도 기기 번호로 센다 — 기기 한도는 그대로", async () => {
+    심기(남, GLOBAL_MAX_FAILURES, 1);
+    expect((await reserveAttempt(나)).allowed).toBe(false); // 기기 표 없음 — 예전처럼 전체 잠금
+    const 기기 = "기기해시";
+    const 처음 = await reserveAttempt(기기, { trustedDevice: true });
+    expect(처음.allowed).toBe(true);
+    // 기기 번호로 15분 5번 — 주소를 바꿔도 같은 기기 한도
+    for (let i = 1; i < PER_IP_MAX_FAILURES; i += 1) await reserveAttempt(기기, { trustedDevice: true });
+    const 막힘 = await reserveAttempt(기기, { trustedDevice: true });
+    expect(막힘.allowed).toBe(false);
+    expect(!막힘.allowed && 막힘.reason).toBe("ip");
+  });
+
+  it("기기 표 없는 요청이 전체 잠금을 기억해도 기기 요청은 막지 않는다 (25.914 기억)", async () => {
+    심기(남, GLOBAL_MAX_FAILURES, 1);
+    await reserveAttempt(나); // 잠금을 메모리에 기억
+    expect((await reserveAttempt("다른기기", { trustedDevice: true })).allowed).toBe(true);
+  });
+});
+
+describe("잠긴 동안 알림 장부를 요청마다 부르지 않는다 (25.1423, 보안 감사 #2)", () => {
+  it("한 창에 한 번만 장부 문장을 낸다", async () => {
+    const 이전 = { t: process.env.TELEGRAM_BOT_TOKEN, c: process.env.TELEGRAM_CHAT_ID };
+    process.env.TELEGRAM_BOT_TOKEN = "t";
+    process.env.TELEGRAM_CHAT_ID = "1";
+    const 보냄: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      보냄.push("x");
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    });
+    const 문장 = vi.spyOn(상태.db!, "prepare");
+    const 시각 = new Date();
+    await alertGlobalLock(시각);
+    const 첫 = 문장.mock.calls.filter(([sql]) => /settings/.test(String(sql))).length;
+    for (let i = 0; i < 5; i += 1) await alertGlobalLock(new Date(시각.getTime() + (i + 1) * 1000));
+    expect(문장.mock.calls.filter(([sql]) => /settings/.test(String(sql))).length).toBe(첫);
+    expect(보냄.length).toBe(1);
+    vi.restoreAllMocks();
+    process.env.TELEGRAM_BOT_TOKEN = 이전.t;
+    process.env.TELEGRAM_CHAT_ID = 이전.c;
+    if (이전.t === undefined) delete process.env.TELEGRAM_BOT_TOKEN;
+    if (이전.c === undefined) delete process.env.TELEGRAM_CHAT_ID;
+  });
+});

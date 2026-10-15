@@ -117,6 +117,55 @@ export async function verifySessionToken(
 }
 
 /**
+ * **기기 표** (docs/infra.md 25.1424, 보안 감사 #1). 로그인에 성공한 브라우저에 1년짜리 서명 쿠키를 준다. 안에는 무작위 기기 번호와
+ * 만료 시각뿐이다. 로그인 경로(`lib/loginGuard.reserveAttempt` 의 `trustedDevice`)가 이것이 맞는 요청은 **전체 잠금을 보지 않고** 기기
+ * 번호로 센다 — 남이 전체 잠금을 계속 걸어 두어도 전에 들어온 기기에서는 들어올 수 있다. 세션 쿠키로는 쓸 수 없다: 서명을
+ * `device.` 를 앞에 붙인 글에 하므로 세션 검증(`verifySessionToken`)의 서명과 다르다. 서명 키에 비밀번호가 섞여 있어 비밀번호를 바꾸면
+ * 기기 표도 모두 무효다
+ */
+const DEVICE_DAYS = 365;
+
+export async function createDeviceToken(deviceId: string, now: number = Date.now()): Promise<string> {
+  const payload = toBase64Url(
+    new TextEncoder().encode(JSON.stringify({ dev: deviceId, exp: now + DEVICE_DAYS * 24 * 60 * 60 * 1000 })),
+  );
+  return `${payload}.${toBase64Url(await hmac(`device.${payload}`))}`;
+}
+
+/** 맞으면 기기 번호, 아니면 null */
+export async function verifyDeviceToken(token: string | undefined, now: number = Date.now()): Promise<string | null> {
+  if (!token) return null;
+  const dot = token.lastIndexOf(".");
+  if (dot <= 0) return null;
+  const payload = token.slice(0, dot);
+  if (!timingSafeEqual(token.slice(dot + 1), toBase64Url(await hmac(`device.${payload}`)))) return null;
+  try {
+    const decoded = JSON.parse(new TextDecoder().decode(fromBase64Url(payload)));
+    return typeof decoded.dev === "string" && /^[A-Za-z0-9_-]{16,64}$/.test(decoded.dev) && typeof decoded.exp === "number" && decoded.exp > now
+      ? decoded.dev
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 새 기기 번호 — 128비트 무작위 */
+export function newDeviceId(): string {
+  return toBase64Url(crypto.getRandomValues(new Uint8Array(16)));
+}
+
+export const DEVICE_COOKIE = "sm_device";
+export const deviceCookieOptions = {
+  name: DEVICE_COOKIE,
+  httpOnly: true,
+  sameSite: "strict" as const,
+  secure: process.env.NODE_ENV === "production",
+  // 로그인 경로에만 실려 간다 — 다른 요청에는 필요 없다
+  path: "/api/auth/login",
+  maxAge: DEVICE_DAYS * 24 * 60 * 60,
+};
+
+/**
  * 비밀번호 최소 길이.
  *
  * 공개 주소에 걸리는 앱이라 원래는 16자 이상을 요구했다.
