@@ -125,11 +125,28 @@ CB_MAX_CALLS = 400
 #: `disclosures_kr` 가 먼저 넣으면 `is_material = 0` 이고, 뒤의 B 목록 넣기는 `ON CONFLICT DO NOTHING` 이라
 #: 그 행이 대기열에서 영영 빠졌다.
 #: 제목(`LIKE` + `cb.is_cb_title`)만으로 발행결정을 고른다
+#: 종목에 잇지 못하고 남은 공시(`stock_id` 없음)를 **고유번호로 다시 잇는다** (docs/infra.md 25.1395, 공시 감사 ⑤).
+#: 넣을 때 `stocks` 에 아직 없던 신규 상장의 공시는 위 INSERT 가 `stock_id` 없이 남긴다 —
+#: "들어온 뒤 고유번호로 이어 읽는다" 고 적어 두고 읽는 쪽은 `stock_id` 로만 이어 영영 빠졌다.
+#: 색인(`idx_stocks_dart`)을 타는 하위 질의 하나라 읽기가 작다. 아래 `REACTION_EVENTS_SQL` 도 같은 조각.
+#: 같은 고유번호의 보통·우선주는 티커가 작은 쪽(보통주 …0) 하나만 — 둘에 나눠 세면 같은 공시가 두 사건이 된다
 CB_PENDING_SQL = (
-    "SELECT d.receipt_no, d.stock_id, d.corp_code, d.disclosed_at, d.title FROM disclosures d"
+    "SELECT * FROM (SELECT d.receipt_no, COALESCE(d.stock_id, (SELECT s2.id FROM stocks s2 WHERE d.stock_id IS NULL"
+    " AND s2.dart_corp_code = d.corp_code AND s2.country = 'KR'"
+    " ORDER BY (s2.status = 'active') DESC, s2.ticker LIMIT 1)) AS stock_id,"
+    " d.corp_code, d.disclosed_at, d.title FROM disclosures d"
     " LEFT JOIN cb_issuances c ON c.receipt_no = d.receipt_no"
-    " WHERE d.disclosed_at >= ? AND d.stock_id IS NOT NULL"
-    " AND d.title LIKE '%전환사채권발행결정%' AND c.receipt_no IS NULL ORDER BY d.disclosed_at DESC"
+    " WHERE d.disclosed_at >= ? AND d.title LIKE '%전환사채권발행결정%' AND c.receipt_no IS NULL)"
+    " WHERE stock_id IS NOT NULL ORDER BY disclosed_at DESC"
+)
+#: 공시 반응 통계·공시 위험 이력이 읽는 국내 공시 — `stock_id` 가 없으면 고유번호로 다시 잇는다 (25.1395)
+REACTION_EVENTS_SQL = (
+    "SELECT s.id, s.market, x.disclosed_at, x.title, x.receipt_no FROM"
+    " (SELECT COALESCE(d.stock_id, (SELECT s2.id FROM stocks s2 WHERE d.stock_id IS NULL"
+    " AND s2.dart_corp_code = d.corp_code AND s2.country = 'KR'"
+    " ORDER BY (s2.status = 'active') DESC, s2.ticker LIMIT 1)) AS sid,"
+    " d.disclosed_at, d.title, d.receipt_no FROM disclosures d WHERE d.disclosed_at >= ?) x"
+    " JOIN stocks s ON s.id = x.sid WHERE s.country = 'KR'"
 )
 CB_INSERT = (
     "INSERT INTO cb_issuances (receipt_no, stock_id, decided_at, status, face_amount, conv_price, conv_shares,"
@@ -179,8 +196,7 @@ def compute(client: TursoClient, today: date) -> dict:
     # 공시 위험 이력(54장) — 같은 읽기에서 횡령·배임·불성실공시만 따로 모은다 (종목·날·유형 하나에 첫 접수번호)
     위험: dict[tuple[int, str, str], tuple[str, str]] = {}
     for r in client.execute(
-        "SELECT d.stock_id, s.market, d.disclosed_at, d.title, d.receipt_no FROM disclosures d"
-        " JOIN stocks s ON s.id = d.stock_id WHERE s.country = 'KR' AND d.disclosed_at >= ?",
+        REACTION_EVENTS_SQL,
         [since],
     ).rows:
         kind = dr.classify(str(r[3]))
@@ -195,10 +211,12 @@ def compute(client: TursoClient, today: date) -> dict:
     first = min(e.day for e in events.values())
     series: dict[int, tuple[list[str], list[float], list[float | None]]] = defaultdict(lambda: ([], [], []))
     for r in client.execute(
+        # 사건이 있는 종목만 — 다시 이은 종목도 들어가게 사건에서 고른다 (25.1395)
         "SELECT stock_id, date, close, adj_close FROM prices WHERE close > 0 AND date >= ?"
-        " AND stock_id IN (SELECT DISTINCT stock_id FROM disclosures WHERE disclosed_at >= ? AND stock_id IS NOT NULL)"
+        " AND stock_id IN (SELECT value FROM json_each(?))"
         " ORDER BY stock_id, date",
-        [(date.fromisoformat(first) - timedelta(days=10)).isoformat(), since],
+        [(date.fromisoformat(first) - timedelta(days=10)).isoformat(),
+         json.dumps(sorted({e.stock_id for e in events.values()}))],
     ).rows:
         d, c, a = series[int(r[0])]
         d.append(str(r[1]))
