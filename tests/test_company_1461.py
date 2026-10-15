@@ -180,3 +180,20 @@ def test_replay_tally_counts_without_names() -> None:
     assert t["A"]["depts"]["governance"]["no_data"] == 4
     줄 = m.lines("KR", t)
     assert 줄[0] == "[모의 투자사 소급 재생 · KR]" and "T01" not in "\n".join(줄)
+
+
+def test_charter_veto_rules_and_bad_weights() -> None:
+    """거부권은 가중 있는 공시·리스크 부서만, 리스크 거부권엔 max_mdd 필수, 숫자가 아닌 가중은 목록으로 (25.1465 검증 권장)."""
+    a = co.CHARTERS["A"]
+    assert any("거부권은" in e for e in co.charter_errors({**a, "veto": ["quant"]}))
+    assert any("max_mdd" in e for e in co.charter_errors({**a, "veto": ["risk"], "max_mdd": None}))
+    assert co.charter_errors({**a, "weights": {**a["weights"], "quant": None}}) == ["부서 가중에 숫자가 아닌 값이 있다"]
+
+
+def test_risk_limit_without_veto_only_notes() -> None:
+    """거부권이 없는 회사는 MDD 한도를 근거에 적기만 — 입장을 확신 1 반대로 덮어쓰지 않는다 (25.1465 검증 권장)."""
+    ds = [_d(i, mdd=-0.1 * i, volatility=0.05) for i in range(1, 7)]
+    있음 = co.risk(ds, -0.45)[6]
+    없음 = co.risk(ds, -0.45, veto=False)[6]
+    assert 있음.veto and 있음.conviction == 1.0
+    assert not 없음.veto and 없음.conviction < 1.0 and "한도" in 없음.evidence[-1]["label"]

@@ -72,35 +72,43 @@ def main() -> int:
     p.add_argument("--every", type=int, default=5, help="며칠마다 한 번 열까(읽기를 줄인다)")
     a = p.parse_args()
 
-    from batch.core import calendar as cal
     from batch.core.client import TursoClient
+
+    # 닫아야 읽기 수가 api_usage 에 남는다 (25.1465 검증 권장)
+    with TursoClient() as client:
+        회의, 본 = replay(client, a.market, a.days, a.every)
+        끝 = [f"(신호 날짜 {len(본)}개: {min(본, default='-')} ~ {max(본, default='-')}."
+             " 신호는 지금 상장 중인 종목만 읽힌다 — 그 사이 폐지된 종목은 빠진다)",
+             f"읽기 행: {getattr(getattr(client, 'reads', None), 'total', '모름')}"]  # fmt: skip
+    for 줄 in lines(a.market, tally(회의)) + 끝:
+        print(줄)
+    return 0
+
+
+def replay(client: Any, market: str, days: int, every: int) -> tuple[list[Any], set[str]]:
+    """며칠 간격의 신호 날짜마다 네 회사의 회의를 연다. 점수 부서 백분위는 그날 신호 종목 전체 안에서(25.1465)."""
+    from batch.core import calendar as cal
     from batch.jobs import company as job
     from batch.jobs import daily
 
-    client = TursoClient()
-    오늘 = cal.local_today(a.market)
+    오늘 = cal.local_today(market)
     본: set[str] = set()
     회의: list[tuple[str, str, list[co.Item], list[co.Item]]] = []
     크기 = max(int(ch["agenda"]) for ch in co.CHARTERS.values())
-    날 = 오늘 - timedelta(days=a.days)
+    날 = 오늘 - timedelta(days=days)
     while 날 <= 오늘:
-        rows, as_of = daily.load_signal_rows(client, a.market, 날.isoformat())
-        날 += timedelta(days=a.every)
+        rows, as_of = daily.load_signal_rows(client, market, 날.isoformat())
+        날 += timedelta(days=every)
         if not rows or not as_of or as_of in 본:
             continue
         본.add(as_of)
-        안건 = job.agenda_rows(rows, 크기)
-        자료 = job.load_dossiers(client, 안건, a.market, as_of)
+        모집단 = job.population_dossiers(client, rows, market, as_of)
+        자료 = job.load_dossiers(client, job.agenda_rows(rows, 크기), market, as_of)
         for aid, ch in co.CHARTERS.items():
-            items, approved = co.meet(자료[: int(ch["agenda"])], ch)
+            items, approved = co.meet(자료[: int(ch["agenda"])], ch, 모집단)
             회의.append((aid, as_of, items, approved))
-    끝 = [f"(신호 날짜 {len(본)}개: {min(본, default='-')} ~ {max(본, default='-')})"]
-    for 줄 in lines(a.market, tally(회의)) + 끝:
-        print(줄)
-    print(f"읽기 행: {getattr(getattr(client, 'reads', None), 'total', '모름')}")
-    return 0
+    return 회의, 본
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

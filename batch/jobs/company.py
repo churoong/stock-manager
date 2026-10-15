@@ -13,6 +13,7 @@ from datetime import date, timedelta
 from statistics import median
 from typing import Any
 
+from batch.core import calendar as cal
 from batch.services import company as co
 from batch.services import report_picks, trend
 
@@ -28,7 +29,7 @@ BROKER_SQL = (
 FLOWS_SQL = (
     "SELECT stock_id, date, frgn_net_amt, orgn_net_amt FROM kr_flows"
     " WHERE stock_id IN (SELECT value FROM json_each(?)) AND date > ? AND date <= ?"
-    " AND frgn_net_amt IS NOT NULL"
+    " AND frgn_net_amt IS NOT NULL AND orgn_net_amt IS NOT NULL"
     " ORDER BY stock_id, date DESC"
 )
 #: 20일 평균 거래대금(원) — 그 나라 기준일 이하 최신 유니버스 스냅샷의 판정값
@@ -43,6 +44,8 @@ GOV_SQL = (
     "SELECT stock_id, day, type FROM governance_events WHERE stock_id IN (SELECT value FROM json_each(?))"
     " AND day > ? AND day <= ? ORDER BY day DESC"
 )
+#: 공시 사건 표가 덮은 구간 — 매주 통째로 다시 쓰여 행마다 같은 덮개를 적는다(0063). 비면 덮개 모름
+GOV_COVER_SQL = "SELECT MIN(covered_from), MAX(covered_to) FROM governance_events"
 CB_SQL = (
     "SELECT stock_id, SUM(shares_pct) FROM cb_issuances WHERE stock_id IN (SELECT value FROM json_each(?))"
     " AND status = 'ok' AND decided_at > ? AND decided_at <= ? GROUP BY stock_id"
@@ -65,6 +68,41 @@ def agenda_rows(rows: list[report_picks.SignalRow], size: int) -> list[report_pi
     return sorted(한종목.values(), key=lambda r: (r.total_score is None, -(r.total_score or 0), r.ticker))[:size]
 
 
+def population_dossiers(
+    client: Any, rows: list[report_picks.SignalRow], country: str, as_of: str,
+) -> list[co.Dossier]:
+    """점수 부서의 백분위 모집단 — 그날 그 시장 **신호 종목 전체**(근거표가 있는 것). 팩터와 성과 지표만 (25.1465).
+
+    안건(점수 상위 20·30) 안에서 순위를 내면 회사마다 안건 크기에 따라 같은 종목의 입장이 바뀌었다(검증 [필수] 1)
+    """
+    from batch.jobs import signals as signals_job
+
+    한종목: dict[int, report_picks.SignalRow] = {}
+    for r in report_picks.with_criteria(rows):
+        한종목.setdefault(r.stock_id, r)
+    if not 한종목:
+        return []
+    지표 = signals_job.load_metrics(client, country, as_of, sorted(한종목))
+    return [co.Dossier(
+        stock_id=sid, ticker=r.ticker, as_of=as_of, total_score=r.total_score,
+        factors={k: r.factor_scores.get(k) for k in ("value", "quality", "growth", "momentum")},
+        mdd=(지표.get(sid) or {}).get("mdd"), volatility=(지표.get(sid) or {}).get("volatility_ann"),
+        perf_window=(지표.get(sid) or {}).get("window"), perf_as_of=(지표.get(sid) or {}).get("as_of_date"),
+    ) for sid, r in sorted(한종목.items())]  # fmt: skip
+
+
+def recent_sessions(market: str, as_of: str, n: int) -> list[str]:
+    """기준일을 포함한 최근 n 거래일 (기준일이 휴장일이면 그 앞 거래일부터)."""
+    날 = date.fromisoformat(as_of[:10])
+    out: list[str] = []
+    if cal.is_session(market, 날):
+        out.append(날.isoformat())
+    while len(out) < n:
+        날 = cal.previous_session(market, 날)
+        out.append(날.isoformat())
+    return out
+
+
 def load_dossiers(client: Any, rows: list[report_picks.SignalRow], country: str, as_of: str) -> list[co.Dossier]:
     """안건 종목들의 조사 자료. `rows` 는 `agenda_rows` 결과(종목마다 한 행), `as_of` 는 신호 기준일.
 
@@ -79,7 +117,7 @@ def load_dossiers(client: Any, rows: list[report_picks.SignalRow], country: str,
     기준 = date.fromisoformat(as_of[:10])
     국내 = country == "KR"
     지표 = signals_job.load_metrics(client, country, as_of, ids)
-    감성, _감성오류 = scores_job.load_sentiments(client, country, as_of, ids)
+    감성, 감성오류 = scores_job.load_sentiments(client, country, as_of, ids)
     국면 = trend.regimes_for_country(client, country, as_of)
 
     증권사: dict[int, list[tuple[str, str, float]]] = {}
@@ -87,7 +125,15 @@ def load_dossiers(client: Any, rows: list[report_picks.SignalRow], country: str,
     거래대금: dict[int, float] = {}
     사건: dict[int, list[tuple[str, str]]] = {}
     전환사채: dict[int, float] = {}
+    덮음 = False
     if 국내:
+        덮개 = client.execute(GOV_COVER_SQL).rows
+        if 덮개 and 덮개[0][0] and 덮개[0][1]:
+            덮음 = (str(덮개[0][0]) <= (기준 - timedelta(days=co.GOV_DAYS)).isoformat()
+                  and str(덮개[0][1]) >= as_of[:10])  # fmt: skip
+        # 수급은 **최근 5거래일이 다 있어야** — 그 종목에 기준일 행이 빠졌으면 더 묵은 5일을 쓰게 된다
+        # (25.1465 검증 권장)
+        최근날 = recent_sessions("KR", as_of, co.FLOW_DAYS)
         for sid, day, 증권사명, 목표, 종가 in client.execute(
             BROKER_SQL, [_ids(ids), (기준 - timedelta(days=co.BROKER_DAYS)).isoformat(), as_of]
         ).rows:
@@ -96,9 +142,8 @@ def load_dossiers(client: Any, rows: list[report_picks.SignalRow], country: str,
         for sid, day, 외, 기 in client.execute(
             FLOWS_SQL, [_ids(ids), (기준 - timedelta(days=FLOW_LOOKBACK_DAYS)).isoformat(), as_of]
         ).rows:
-            줄 = 수급.setdefault(int(sid), [])
-            if len(줄) < co.FLOW_DAYS:
-                줄.append((str(day), (float(외 or 0) + float(기 or 0)) * FLOW_AMOUNT_UNIT))
+            if str(day) in 최근날:
+                수급.setdefault(int(sid), []).append((str(day), (float(외) + float(기)) * FLOW_AMOUNT_UNIT))
         for sid, v in client.execute(TURNOVER_SQL, [_ids(ids), country, as_of]).rows:
             if v:
                 거래대금[int(sid)] = float(v)
@@ -125,7 +170,7 @@ def load_dossiers(client: Any, rows: list[report_picks.SignalRow], country: str,
             flow_sum=sum(v for _d, v in 흐름) if 흐름 else None, turnover_20d=거래대금.get(r.stock_id),
             flow_days=len(흐름), flow_date=흐름[0][0] if 흐름 else None,
             gov_events=사건.get(r.stock_id) or [], cb_pct=전환사채.get(r.stock_id), domestic=국내,
-            sentiment=감성.get(r.stock_id), sentiment_date=as_of if r.stock_id in 감성 else None,
+            sentiment=감성.get(r.stock_id), sentiment_error=감성오류, gov_covered=덮음 if 국내 else True,
             mdd=m.get("mdd"), volatility=m.get("volatility_ann"), perf_window=m.get("window"),
             perf_as_of=m.get("as_of_date"),
             regime=g.state if g else None, regime_index=idx, regime_date=g.date if g else None,

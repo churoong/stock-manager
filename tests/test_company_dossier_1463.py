@@ -43,7 +43,8 @@ def c() -> Client:
     ):
         x("INSERT INTO kr_opinions (stock_id, date, broker, target_price, source, fetched_at)"
           " VALUES (1, ?, ?, ?, 't', 't')", [day, broker, target or None])  # fmt: skip
-    for day, f, o in (("2026-10-07", 9, 9), ("2026-10-08", 1, 1), ("2026-10-10", 2, 0), ("2026-10-13", 3, 0),
+    # 10-09 한글날 휴장 — 최근 5거래일은 10-15·14·13·12·08
+    for day, f, o in (("2026-10-07", 9, 9), ("2026-10-08", 1, 1), ("2026-10-12", 2, 0), ("2026-10-13", 3, 0),
                       ("2026-10-14", 4, 0), ("2026-10-15", 5, 1), ("2026-10-16", 100, 100)):  # fmt: skip
         x("INSERT INTO kr_flows (stock_id, date, frgn_net_amt, orgn_net_amt, source, fetched_at)"
           " VALUES (1, ?, ?, ?, 't', 't')", [day, f, o])  # fmt: skip
@@ -53,7 +54,7 @@ def c() -> Client:
       " VALUES ('2026-10-10', 1, 1, 30000000, 'KRW', 't')")  # fmt: skip
     for no, day in (("r1", "2025-09-01"), ("r2", "2026-05-01")):  # 1년 밖 · 안
         x("INSERT INTO governance_events (receipt_no, stock_id, day, type, title, covered_from, covered_to, source,"
-          " computed_at) VALUES (?, 1, ?, 'fraud', 't', 'a', 'b', 't', 't')", [no, day])  # fmt: skip
+          " computed_at) VALUES (?, 1, ?, 'fraud', 't', '2025-01-01', '2026-10-15', 't', 't')", [no, day])  # fmt: skip
     for no, day, pct, st in (("c1", "2026-03-01", 6.0, "ok"), ("c2", "2026-07-01", 5.0, "ok"), ("c3", "2026-07-02", 50, "no_row")):
         x("INSERT INTO cb_issuances (receipt_no, stock_id, decided_at, status, shares_pct, source, fetched_at)"
           " VALUES (?, 1, ?, ?, ?, 't', 't')", [no, day, st, pct])  # fmt: skip
@@ -96,3 +97,53 @@ def test_us_dossier_has_no_domestic_reads(c: Client) -> None:
     [d] = job.load_dossiers(c, [_행(2, "AAPL", "NASDAQ", 80)], "US", 기준)
     assert not d.domestic and d.broker_upsides == [] and d.flow_days == 0
     assert co.broker(d).note and co.flows(d).note and co.governance(d).note
+
+
+def test_flows_need_all_recent_sessions_and_both_investors(c: Client) -> None:
+    """최근 5거래일이 하나라도 빠지면 자료 없음 — 더 묵은 5일을 "최근" 으로 쓰지 않는다. 기관 금액이 빈 날은 0 이 아니다 (25.1465)."""
+    c.conn.execute("UPDATE kr_flows SET orgn_net_amt = NULL WHERE date = '2026-10-13'")
+    [d] = job.load_dossiers(c, [_행(1, "005930", "KOSPI", 80)], "KR", 기준)
+    assert d.flow_days == 4 and co.flows(d).note
+
+
+def test_governance_without_coverage_is_no_data_not_neutral(c: Client) -> None:
+    """사건 표가 기준일 앞 1년을 덮지 않으면 "사건 없음 — 중립" 이 아니라 자료 없음 — 거부권이 조용히 꺼지지 않게 (25.1465)."""
+    c.conn.execute("DELETE FROM governance_events WHERE day = '2026-05-01'")
+    c.conn.execute("DELETE FROM cb_issuances")
+    [d] = job.load_dossiers(c, [_행(1, "005930", "KOSPI", 80)], "KR", 기준)
+    assert d.gov_covered and co.governance(d).note.startswith("사건 없음")  # type: ignore[union-attr]
+    c.conn.execute("UPDATE governance_events SET covered_from = '2026-01-01'")
+    [d] = job.load_dossiers(c, [_행(1, "005930", "KOSPI", 80)], "KR", 기준)
+    assert not d.gov_covered and co.governance(d).note.startswith("자료 없음")  # type: ignore[union-attr]
+    c.conn.execute("DELETE FROM governance_events")
+    [d] = job.load_dossiers(c, [_행(1, "005930", "KOSPI", 80)], "KR", 기준)
+    assert co.governance(d).note.startswith("자료 없음")  # type: ignore[union-attr]
+
+
+def test_population_ranks_beyond_agenda(c: Client) -> None:
+    """점수 부서의 백분위는 신호 종목 전체 안에서 — 안건 크기(회사마다 20·30)가 같은 종목의 입장을 바꾸지 않게 (25.1465 [필수] 1)."""
+    rows = [_행(i, f"T{i:02d}", "KOSPI", 100 - i) for i in range(1, 41)]
+    rows = [r.__class__(**{**r.__dict__, "factor_scores": {"value": 100 - r.stock_id, "quality": 50, "momentum": 50}})
+            for r in rows]  # fmt: skip
+    pop = job.population_dossiers(c, rows, "KR", 기준)
+    assert len(pop) == 40
+    ch = {**co.CHARTERS["A"], "weights": {"research": 1, "quant": 1}, "lead": "research", "veto": []}
+    작은 = co.opinions(pop[:20], ch, pop)
+    큰 = co.opinions(pop[:30], ch, pop)
+    # 안건 20 이든 30 이든 같은 종목(밸류 90, 신호 40종목 안 77 백분위)은 같은 입장(찬성)
+    assert 작은[10]["research"] == 큰[10]["research"] and 작은[10]["research"].stance == 1
+    # 모집단 없이 안건 안에서만 매기면 20개 안건에서는 53, 30개 안건에서는 69 백분위 — 둘 다 중립(고치기 전의 모양)
+    assert co.opinions(pop[:20], ch)[10]["research"].stance == 0 and co.opinions(pop[:30], ch)[10]["research"].stance == 0
+
+
+def test_replay_runs_on_empty_history(c: Client, monkeypatch: pytest.MonkeyPatch) -> None:
+    """소급 재생이 실제 스키마에서 끝까지 돈다(신호가 없으면 회의 0) — 운영에서 처음 돌다 죽지 않게."""
+    import importlib.util
+    from pathlib import Path
+
+    경로 = Path(__file__).resolve().parent.parent / "scripts" / "company_replay.py"
+    spec = importlib.util.spec_from_file_location("company_replay", 경로)
+    assert spec and spec.loader
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    assert m.replay(c, "KR", 10, 5) == ([], set())

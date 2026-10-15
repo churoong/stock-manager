@@ -73,6 +73,8 @@ class Dossier:
     domestic: bool = True  # 국내만 증권사·수급·공시 자료가 있다
     sentiment: float | None = None
     sentiment_date: str | None = None
+    sentiment_error: str | None = None  # 감성을 **못 읽었다**(한도 등) — "아직 없다" 와 가른다 (25.164)
+    gov_covered: bool = True  # 공시 사건 표가 기준일 앞 1년을 덮나 — 안 덮으면 "사건 없음" 이 아니라 "자료 없음"
     mdd: float | None = None  # 음수 비율 (−0.35 = 35% 하락)
     volatility: float | None = None
     perf_window: str | None = None
@@ -129,9 +131,15 @@ def _혼합(factors: dict[str, float | None], mix: dict[str, float]) -> float | 
     return sum(v * w for v, w in 쓴) / 합 if 합 > 0 else None
 
 
-def research(dossiers: list[Dossier], mix: dict[str, float]) -> dict[int, Opinion]:
-    """리서치부 — 헌장의 밸류·퀄리티·성장 비율로 섞은 값의 신호 종목 안 백분위."""
-    섞음 = {d.stock_id: _혼합(d.factors, mix) for d in dossiers}
+def research(
+    dossiers: list[Dossier], mix: dict[str, float], population: list[Dossier] | None = None,
+) -> dict[int, Opinion]:
+    """리서치부 — 헌장의 밸류·퀄리티·성장 비율로 섞은 값의 **신호 종목 전체**(`population`) 안 백분위.
+
+    안건 안에서 순위를 내면 안건 크기(회사마다 20·30)에 따라 같은 종목의 입장이 바뀌고, 점수 상위만 모인 안건의 아래 30%
+    가 기계적으로 반대가 된다(25.1465 검증 [필수] 1). `population` 이 없으면 넘긴 것끼리(시험용)
+    """
+    섞음 = {d.stock_id: _혼합(d.factors, mix) for d in (population or dossiers)}
     pct = percentile_ranks(섞음)
     비율 = " · ".join(f"{k} {w:g}" for k, w in mix.items())
     out: dict[int, Opinion] = {}
@@ -146,9 +154,9 @@ def research(dossiers: list[Dossier], mix: dict[str, float]) -> dict[int, Opinio
     return out
 
 
-def quant(dossiers: list[Dossier]) -> dict[int, Opinion]:
-    """퀀트부 — 모멘텀 팩터의 신호 종목 안 백분위."""
-    값 = {d.stock_id: d.factors.get("momentum") for d in dossiers}
+def quant(dossiers: list[Dossier], population: list[Dossier] | None = None) -> dict[int, Opinion]:
+    """퀀트부 — 모멘텀 팩터의 신호 종목 전체 안 백분위."""
+    값 = {d.stock_id: d.factors.get("momentum") for d in (population or dossiers)}
     pct = percentile_ranks(값)
     out: dict[int, Opinion] = {}
     for d in dossiers:
@@ -162,11 +170,17 @@ def quant(dossiers: list[Dossier]) -> dict[int, Opinion]:
     return out
 
 
-def risk(dossiers: list[Dossier], max_mdd: float | None) -> dict[int, Opinion]:
-    """리스크관리부 — MDD·변동성 각각의 위험 순위 평균. `max_mdd` 보다 나쁜 MDD 는 거부 조건."""
+def risk(
+    dossiers: list[Dossier], max_mdd: float | None, population: list[Dossier] | None = None, veto: bool = True,
+) -> dict[int, Opinion]:
+    """리스크관리부 — MDD·변동성 각각의 신호 종목 전체 안 위험 순위 평균. `max_mdd` 보다 나쁜 MDD 는 거부 조건.
+
+    거부권이 없는 회사(`veto=False`)는 한도를 근거에 적기만 하고 입장을 덮어쓰지 않는다(25.1465 검증 권장)
+    """
     # 위험 순위: MDD 는 더 음수일수록, 변동성은 클수록 위험 → 둘 다 "위험이 클수록 큰 값" 으로 맞춘다
-    mdd위험 = percentile_ranks({d.stock_id: (-d.mdd if d.mdd is not None else None) for d in dossiers})
-    변동위험 = percentile_ranks({d.stock_id: d.volatility for d in dossiers})
+    모집단 = population or dossiers
+    mdd위험 = percentile_ranks({d.stock_id: (-d.mdd if d.mdd is not None else None) for d in 모집단})
+    변동위험 = percentile_ranks({d.stock_id: d.volatility for d in 모집단})
     out: dict[int, Opinion] = {}
     for d in dossiers:
         쓴 = [x for x in (mdd위험.get(d.stock_id), 변동위험.get(d.stock_id)) if x is not None]
@@ -175,14 +189,15 @@ def risk(dossiers: list[Dossier], max_mdd: float | None) -> dict[int, Opinion]:
             continue
         q = sum(쓴) / len(쓴)
         입장 = -1 if q >= PCT_FOR else 1 if q <= PCT_AGAINST else 0
-        거부 = max_mdd is not None and d.mdd is not None and d.mdd < max_mdd
+        넘음 = max_mdd is not None and d.mdd is not None and d.mdd < max_mdd
+        거부 = 넘음 and veto
         근거 = [_criterion(
             "위험 순위", f"{q:.0f} (MDD {('—' if d.mdd is None else f'{d.mdd * 100:.0f}%')} · 변동성 "
             f"{('—' if d.volatility is None else f'{d.volatility * 100:.0f}%')}, {d.perf_window or '창 모름'})",
             f"반대 ≥ {PCT_FOR} · 찬성 ≤ {PCT_AGAINST} (높을수록 위험)", "performance_metrics",
             d.perf_as_of)]  # fmt: skip
-        if 거부:
-            한도 = f"헌장 한도 {max_mdd * 100:.0f}% 보다 나쁨 — 거부 조건"  # type: ignore[operator]
+        if 넘음:
+            한도 = f"헌장 한도 {max_mdd * 100:.0f}% 보다 나쁨" + (" — 거부 조건" if veto else "")  # type: ignore[operator]
             근거.append(_criterion("MDD 한도", f"{d.mdd * 100:.0f}%", 한도, "performance_metrics", d.perf_as_of))
         out[d.stock_id] = Opinion("risk", -1 if 거부 else 입장, 1.0 if 거부 else round(abs(q - 50) / 50, 6), 근거,
                                   veto=거부)  # fmt: skip
@@ -220,6 +235,10 @@ def governance(d: Dossier) -> Opinion:
     """공시·지배구조부 — 지배구조 사건이면 반대 확신 1(거부 조건), 전환사채가 많으면 반대 0.5. 찬성은 하지 않는다."""
     if not d.domestic:
         return _없음("governance", "미국 종목 공시 사건을 모으지 않는다")
+    if not d.gov_covered and not d.gov_events:
+        # 표가 빈 날(덮개가 끊겨 다시 쓰는 중)·기준일 앞 1년을 덮지 않는 날 — 사건이 없는지 모른다.
+        # 중립이면 거부권이 조용히 꺼진다
+        return _없음("governance", f"공시 사건 표가 기준일 앞 {GOV_DAYS}일을 덮지 않음")
     if d.gov_events:
         return Opinion("governance", -1, 1.0, [_criterion(
             "지배구조 사건", ", ".join(f"{day} {kind}" for day, kind in d.gov_events[:3]),
@@ -234,13 +253,15 @@ def governance(d: Dossier) -> Opinion:
 
 def sentiment(d: Dossier) -> Opinion:
     """뉴스·감성부 — `sentiment_scores` 의 감성(−100~+100)."""
+    if d.sentiment_error:
+        return _없음("sentiment", f"감성을 읽지 못함 ({d.sentiment_error[:60]})")
     if d.sentiment is None:
         return _없음("sentiment", "감성 없음(기사 부족·수집 전)")
     s = d.sentiment
     입장 = 1 if s >= SENT_FOR else -1 if s <= -SENT_FOR else 0
     return Opinion("sentiment", 입장, round(min(1.0, abs(s) / SENT_SPAN), 6), [_criterion(
-        "뉴스 감성", f"{s:+.0f}", f"찬성 ≥ +{SENT_FOR:g} · 반대 ≤ −{SENT_FOR:g}", "sentiment_scores",
-        d.sentiment_date)])  # fmt: skip
+        "뉴스 감성", f"{s:+.0f}" + ("" if d.sentiment_date else " (기준일 이하 며칠 안 최신)"),
+        f"찬성 ≥ +{SENT_FOR:g} · 반대 ≤ −{SENT_FOR:g}", "sentiment_scores", d.sentiment_date or d.as_of)])  # fmt: skip
 
 
 def macro(d: Dossier) -> Opinion:
@@ -261,7 +282,10 @@ def macro(d: Dossier) -> Opinion:
 def charter_errors(charter: dict[str, Any]) -> list[str]:
     """헌장이 위원회 규칙에 맞나 — 틀리면 그 회사는 위원회를 열지 않고 판 1 로 돈다(부르는 쪽). 빈 목록이면 맞다."""
     틀림: list[str] = []
-    가중 = {k: float(v) for k, v in (charter.get("weights") or {}).items() if float(v) > 0}
+    try:
+        가중 = {k: float(v) for k, v in (charter.get("weights") or {}).items() if float(v) > 0}
+    except (TypeError, ValueError):
+        return ["부서 가중에 숫자가 아닌 값이 있다"]
     if not 가중:
         return ["부서 가중이 없다"]
     모름 = sorted(set(가중) - set(DEPARTMENTS))
@@ -275,6 +299,12 @@ def charter_errors(charter: dict[str, Any]) -> list[str]:
         틀림.append("주관 부서가 표결 부서가 아니다")
     if sum(1 for _ in 가중) < QUORUM:
         틀림.append(f"표결 부서가 정족수({QUORUM})보다 적다")
+    거부권 = list(charter.get("veto") or [])
+    엉뚱 = sorted(set(거부권) - ({"governance", "risk"} & set(가중)))
+    if 엉뚱:
+        틀림.append(f"거부권은 가중이 있는 공시·지배구조·리스크관리 부서만 가질 수 있다: {엉뚱}")
+    if "risk" in 거부권 and not isinstance(charter.get("max_mdd"), int | float):
+        틀림.append("리스크관리 거부권에 max_mdd 가 없다 — 거부권이 소리 없이 꺼진다")
     for k in ("threshold", "agenda", "top_n"):
         if not isinstance(charter.get(k), int | float) or charter[k] <= 0:
             틀림.append(f"{k} 가 양수가 아니다")
@@ -286,19 +316,27 @@ def charter_hash(charter: dict[str, Any]) -> str:
     return hashlib.sha256(json.dumps(charter, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:12]
 
 
-def opinions(dossiers: list[Dossier], charter: dict[str, Any]) -> dict[int, dict[str, Opinion]]:
-    """헌장이 가중을 준 부서만 의견서를 낸다. {종목: {부서: 의견}}."""
+def opinions(
+    dossiers: list[Dossier], charter: dict[str, Any], population: list[Dossier] | None = None,
+) -> dict[int, dict[str, Opinion]]:
+    """헌장이 가중을 준 부서만 의견서를 낸다. {종목: {부서: 의견}}.
+
+    점수 부서의 백분위는 `population`(그날 그 시장 신호 종목 전체 — 안건보다 넓다) 안에서 낸다(25.1465)
+    """
     가중 = {k for k, v in (charter.get("weights") or {}).items() if float(v) > 0}
     표: dict[int, dict[str, Opinion]] = {d.stock_id: {} for d in dossiers}
+    모집단 = list({d.stock_id: d for d in [*(population or []), *dossiers]}.values()) if population else None
+    섞기 = charter.get("research_mix") or {"value": 1, "quality": 1, "growth": 1}
     단면 = {
-        "research": lambda: research(dossiers, charter.get("research_mix") or {"value": 1, "quality": 1, "growth": 1}),
-        "quant": lambda: quant(dossiers),
-        "risk": lambda: risk(dossiers, charter.get("max_mdd")),
+        "research": lambda: research(dossiers, 섞기, 모집단),
+        "quant": lambda: quant(dossiers, 모집단),
+        "risk": lambda: risk(dossiers, charter.get("max_mdd"), 모집단, "risk" in (charter.get("veto") or [])),
     }
     for 부서, 함수 in 단면.items():
         if 부서 in 가중:
             for sid, o in 함수().items():
-                표[sid][부서] = o
+                if sid in 표:
+                    표[sid][부서] = o
     한종목 = {"broker": broker, "flows": flows, "governance": governance, "sentiment": sentiment, "macro": macro}
     for d in dossiers:
         for 부서, f in 한종목.items():
@@ -326,17 +364,20 @@ class Item:
     minority: tuple[str, ...] = ()  # 최종 결정과 반대 입장이었던 부서
 
 
-def meet(agenda: list[Dossier], charter: dict[str, Any]) -> tuple[list[Item], list[Item]]:
+def meet(
+    agenda: list[Dossier], charter: dict[str, Any], population: list[Dossier] | None = None,
+) -> tuple[list[Item], list[Item]]:
     """투자위원회 (docs/company.md 3장). (모든 안건의 회의 결과, 가결 안건 — 표 순으로 top_n 까지).
 
     1 상정(부르는 쪽이 점수 상위 agenda 개) 2 의견서 3 쟁점 4 주관 부서 반대는 부결
-    5 표결(표 ≥ threshold · 찬성 ≥ 정족수) 6 거부권 7 결정. 가중 40% 상한은 `charter_errors` 가 헌장을 읽을 때 본다
+    5 표결(표 ≥ threshold · 찬성 ≥ 정족수) 6 거부권 7 결정. 가중 40% 상한은 `charter_errors` 가 헌장을 읽을 때 본다.
+    `population` 은 점수 부서의 백분위를 낼 그날 신호 종목 전체(`opinions`)
     """
     가중 = {k: float(v) for k, v in (charter.get("weights") or {}).items() if float(v) > 0}
     주관 = str(charter.get("lead"))
     거부권 = set(charter.get("veto") or [])
     문턱 = float(charter["threshold"])
-    표 = opinions(agenda, charter)
+    표 = opinions(agenda, charter, population)
     결과: list[Item] = []
     for d in agenda:
         의견 = 표[d.stock_id]
