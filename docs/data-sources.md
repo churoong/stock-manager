@@ -355,8 +355,13 @@ otherlisted.txt:  ACT Symbol|Security Name|Exchange|CQS Symbol|ETF|Round Lot Siz
 | 000660.KS (SK하이닉스) | 2026-10-27 | 〃 |
 
 - 응답은 **dict** 이고 `Earnings Date` 는 `datetime.date` **목록**이다. 값이 하나면 확정에 가깝고,
-  둘이면 야후도 아직 모르는 **구간**(예: 10/27~10/31)이다. 확정 여부를 따로 알려 주는 필드는 없다
+  둘이면 야후도 아직 모르는 **구간**(예: 10/27~10/31)이다. `Ticker.calendar` 에는 확정 여부 칸이 없다
   → 날짜 하나면 `is_confirmed = 1`, 구간이면 0 으로 적는다 (사용자 결정 2026-09-18)
+- 2026-10-15 (docs/infra.md 25.1417): `Ticker.calendar` 는 원시 `calendarEvents.earnings.isEarningsDateEstimate` 를 **버린다**
+  (yfinance 1.7.0 `_fetch_calendar`). 같은 호출 하나로 원시 응답(`_quote._fetch(modules=["calendarEvents"])`)을 읽어
+  **야후가 추정이라 표시한 날짜는 하나여도 추정**으로 적는다. 표시가 없으면 예전대로. 칸 이름은 `[확인필요: 첫 주간 실행 —
+  실행 기록 yahoo.estimate_true/false/missing]` — 이 컨테이너에서는 야후가 막혀 실측하지 못했다. 원시 응답을 못 읽으면
+  `Ticker.calendar` 로 물러난다(그때만 호출 둘)
 - `get_earnings_dates()` 는 과거 발표일과 EPS 서프라이즈까지 25건을 주지만 **시각이 미국 동부시간**이라
   국내 종목의 날짜가 하루 밀려 보인다(삼성전자 `2026-10-28 02:00-04:00`). 예정일에는 `calendar` 를 쓴다
 - 호출은 **종목당 1회**다. 유니버스 전체(약 2,715종목)를 주 1회 받는다(사용자 결정). 간격 0.3초는

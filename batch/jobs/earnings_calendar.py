@@ -65,17 +65,22 @@ def pick_targets(client: TursoClient, country: str) -> list[tuple[int, str | Non
     return [(int(r[0]), None if r[1] is None else str(r[1])) for r in rs.rows]
 
 
-def yahoo_rows(stock_id: int, dates: list[str], today: str, now: str) -> list[tuple]:
+def yahoo_rows(stock_id: int, dates: list[str], today: str, now: str, estimate: bool | None = None) -> list[tuple]:
     """야후 예정일 → 행. 지난 날짜는 버린다.
 
     날짜가 하나면 확정(is_confirmed = 1), 둘 이상이면 야후가 구간만 아는 것이라 추정으로 적고
     구간을 note 에 남긴다. 어느 쪽이든 어디서 온 값인지 화면이 알 수 있어야 한다.
+    **야후가 그 날짜를 스스로 추정이라 표시하면(`estimate` True) 날짜가 하나여도 추정**이다 (docs/infra.md 25.1417 —
+    예전엔 하나면 무조건 확정이라, 야후가 지난 분기 날짜로 짐작한 값도 "확정" 으로 판정·화면에 쓰였다). 표시가 없으면
+    (None) 예전대로
     """
     upcoming = [d for d in dates if d >= today]
     if not upcoming:
         return []
-    confirmed = len(dates) == 1
-    note = NOTE_YAHOO if confirmed else f"{NOTE_YAHOO} 구간 추정 ({dates[0]}~{dates[-1]})"
+    confirmed = len(dates) == 1 and estimate is not True
+    note = (NOTE_YAHOO if confirmed
+            else f"{NOTE_YAHOO} 야후 추정" if len(dates) == 1
+            else f"{NOTE_YAHOO} 구간 추정 ({dates[0]}~{dates[-1]})")  # fmt: skip
     return [(stock_id, YAHOO_EVENT, upcoming[0], 1 if confirmed else 0, note, SOURCE_YAHOO, now)]
 
 
@@ -100,7 +105,9 @@ def collect_yahoo(
     저장이 그 종목들의 옛 야후 일정만 지운다 (25.252).
     """
     rows: list[tuple] = []
-    counts = {"asked": 0, "with_date": 0, "failed": 0, "rate_limited": 0}
+    # estimate_*: 야후 추정 표시를 받은 수 (25.1417) — missing 이 대부분이면 칸 이름이 틀린 것이다 [확인필요: 첫 실행]
+    counts = {"asked": 0, "with_date": 0, "failed": 0, "rate_limited": 0,
+              "estimate_true": 0, "estimate_false": 0, "estimate_missing": 0}  # fmt: skip
     hits = 0
     for index, (stock_id, symbol) in enumerate(targets):
         if not symbol:
@@ -121,7 +128,10 @@ def collect_yahoo(
             continue
         if answered is not None:
             answered.add(stock_id)
-        new = yahoo_rows(stock_id, list(result.data or []), today, now)
+        추정 = (result.extra or {}).get("estimate")
+        if result.data:
+            counts["estimate_missing" if 추정 is None else "estimate_true" if 추정 else "estimate_false"] += 1
+        new = yahoo_rows(stock_id, list(result.data or []), today, now, estimate=추정)
         if new:
             counts["with_date"] += 1
             rows.extend(new)

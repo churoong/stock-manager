@@ -50,6 +50,8 @@ class FetchResult:
     #: 실제로 원격에 보낸 요청 수 — 재시도 포함 (docs/infra.md 25.390). 부르는 쪽이 이 수로 한도 카운터를 센다.
     #: 예전에는 늘 1 로 세서 5xx 두 번 뒤 성공한 KRX 호출(서버엔 3번)이 카운터에 1로만 잡혔다. 보내지 않았으면 0
     attempts: int = 1
+    #: 소스별 덧붙임 (예: 실적 예정일의 야후 추정 표시 `{"estimate": bool | None}`, 25.1417)
+    extra: dict = field(default_factory=dict)
 
     @property
     def rate_limited(self) -> bool:
@@ -554,7 +556,10 @@ def fetch_earnings_dates(symbol: str) -> FetchResult:
     try:
         import yfinance as yf
 
-        calendar = yf.Ticker(symbol).calendar
+        티커 = yf.Ticker(symbol)
+        calendar, 추정 = _raw_calendar(티커)
+        if calendar is None:
+            calendar = 티커.calendar
     except Exception as exc:  # noqa: BLE001 — 야후는 종목마다 다른 예외를 던진다
         blocked = _is_rate_limit(exc)
         return FetchResult(
@@ -572,4 +577,33 @@ def fetch_earnings_dates(symbol: str) -> FetchResult:
         return FetchResult(
             ok=False, error="예정일 응답이 비었습니다(야후 오류일 수 있어 지우지 않습니다)", limit_state="unknown"
         )
-    return FetchResult(ok=True, data=parse_earnings_dates(calendar), limit_state="ok")
+    return FetchResult(ok=True, data=parse_earnings_dates(calendar), limit_state="ok", extra={"estimate": 추정})
+
+
+def _raw_calendar(티커: Any) -> tuple[dict | None, bool | None]:
+    """원시 `calendarEvents` 한 번으로 (Ticker.calendar 모양의 dict, 야후 추정 표시) (docs/infra.md 25.1417).
+
+    `Ticker.calendar` 는 `earnings.isEarningsDateEstimate` 를 버린다(yfinance 1.7.0 `_fetch_calendar`) — 그래서 날짜가
+    하나면 무조건 "확정" 으로 적었다. 같은 호출 수로 표시까지 읽으려고 yfinance 내부 `_quote._fetch` 를 쓴다(판을
+    requirements 에 고정했다). 칸 이름은 [확인필요: 운영 실측 — 실행 기록 `yahoo.estimate_flag`]. 원시 응답을 못 읽으면
+    (None, None) — 부른 쪽이 예전 `Ticker.calendar` 로 물러난다"""
+    try:
+        raw = 티커._quote._fetch(modules=["calendarEvents"])
+        events = raw["quoteSummary"]["result"][0]["calendarEvents"] if raw else None
+    except (AttributeError, KeyError, IndexError, TypeError):
+        events = None
+    if not isinstance(events, dict):
+        return None, None
+    earnings = events.get("earnings") if isinstance(events.get("earnings"), dict) else {}
+
+    def _값(v: Any) -> Any:
+        return v.get("raw") if isinstance(v, dict) else v
+
+    날짜 = []
+    for v in earnings.get("earningsDate") or []:
+        초 = _값(v)
+        if isinstance(초, int | float):
+            날짜.append(datetime.fromtimestamp(초, UTC).date())
+    표시 = _값(earnings.get("isEarningsDateEstimate"))
+    # 응답이 비었으면 {} — 부른 쪽이 "빈 응답은 모름"(25.601)으로 둔다. 날짜 없이 다른 칸만 왔으면 "답했는데 날짜 없음"
+    return ({"Earnings Date": 날짜} if events else {}), (표시 if isinstance(표시, bool) else None)
