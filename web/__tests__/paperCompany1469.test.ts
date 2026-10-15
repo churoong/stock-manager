@@ -3,7 +3,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { AccountTabs, CommitteePane, type Data } from "@/components/PaperView";
-import { accountView, stanceText } from "@/lib/paper";
+import { accountView, deptScoreText, stanceText } from "@/lib/paper";
 
 const 헌장 = {
   name: "가치투자사", philosophy: "싸고 튼튼한 회사를 산다", weights: { research: 2, quant: 0.5, governance: 1 },
@@ -51,5 +51,20 @@ describe("투자위원회 탭", () => {
     expect(그림("A")).toContain("투자위원회");
     expect(그림("A")).toContain("아직 회의록이 없습니다");
     expect(그림("B")).not.toContain("투자위원회");
+  });
+
+  it("부서 성적표 — 가름과 참고 표시 (25.1472)", () => {
+    const 줄 = deptScoreText({ dept: "research", n_for: 40, n_against: 31, n_neutral: 5, avg_for: 0.021, avg_against: -0.012,
+      spread: 0.033, hit_for: 55, hit_against: 60, enough: true });
+    expect(줄).toBe("찬성 40건 +2.1%p · 반대 31건 -1.2%p · 가름 +3.3%p");
+    const 적음 = deptScoreText({ dept: "quant", n_for: 3, n_against: 0, n_neutral: 1, avg_for: 0.01, avg_against: null, spread: null,
+      hit_for: 100, hit_against: null, enough: false });
+    expect(적음).toBe("찬성 3건 +1.0%p · 반대 0건 — · 가름 — (참고)");
+    const html = renderToStaticMarkup(createElement(CommitteePane, {
+      a: { ...계좌, attribution: { departments: [{ dept: "research", n_for: 40, n_against: 31, n_neutral: 5, avg_for: 0.021,
+        avg_against: -0.012, spread: 0.033, hit_for: 55, hit_against: 60, enough: true }] } } as never,
+      meetings: [], dossiers: [],
+    }));
+    expect(html).toContain("리서치부: 찬성 40건 +2.1%p");
   });
 });

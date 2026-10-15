@@ -140,3 +140,34 @@ def test_news_targets_follow_rules_that_sell_on_sentiment() -> None:
     따름 = {k for k, v in pp.SELL_RULES.items() if v is None or "감성급락" in v}
     적힌 = set(re.findall(r"'(\w+)'", monitor_targets.PAPER_HELD_SQL.split("sell_rule IN")[1].split(")")[0]))
     assert 적힌 == 따름 == {"all", "momentum"}
+
+
+def test_department_scorecard_from_decision_ledger(c: Client, monkeypatch: pytest.MonkeyPatch) -> None:
+    """결정 원장의 부서 입장 + 20 거래일 성과 → 부서 성적표가 평가 행의 성과 분해에 (25.1472). 판 1 결정은 섞지 않는다."""
+    _하루(c, monkeypatch, "2026-10-14")
+    # 성과가 찼다고 친다 — 1(리서치 찬성)은 지수보다 +5%p, 3(리서치 반대)은 −3%p
+    c.conn.execute("UPDATE paper_decisions SET ret_20d = 8, bench_20d = 3 WHERE account_id = 'A' AND stock_id = 1")
+    c.conn.execute("UPDATE paper_decisions SET ret_20d = 0, bench_20d = 3 WHERE account_id = 'A' AND stock_id = 3")
+    # 판 1 결정(같은 계좌의 옛 판)은 성적표에 들지 않는다
+    c.conn.execute("INSERT INTO paper_decisions (account_id, market, decided_on, stock_id, kind, reason, detail_json, created_at,"
+                   " ret_20d, bench_20d, rule_version) VALUES ('A', 'KR', '2026-10-01', 3, 'skip', 'x', ?, 't', 50, 0, 1)",
+                   [json.dumps({"committee": {"opinions": {"research": [1, 1]}}})])  # fmt: skip
+    다음 = cal.next_session("KR", date(2026, 10, 14)).isoformat()
+    a = job.save_attribution(c, "A", 다음, 2)
+    리서치 = next(x for x in a["departments"] if x["dept"] == "research")
+    assert (리서치["n_for"], 리서치["n_against"]) == (1, 1)
+    assert 리서치["spread"] == pytest.approx(0.08)
+    # 감성은 자료 없음 — 표본에 들지 않는다
+    assert not any(x["dept"] == "sentiment" for x in a["departments"])
+    # 판 1 계좌(B)에는 부서 성적표가 없다
+    assert "departments" not in job.save_attribution(c, "B", 다음, 1)
+
+
+def test_committee_skip_reasons_group_without_numbers() -> None:
+    from batch.services import paper as pp
+
+    assert pp._까닭_묶음("위원회: 표 0.83 < 문턱 1") == pp._까닭_묶음("위원회: 표 0.91 < 문턱 1") == "위원회: 표 N < 문턱 N"
+    assert pp._까닭_묶음("종목 비중 상한 도달") == "종목 비중 상한 도달"
+    결정 = [{"stock_id": i, "decided_on": f"2026-09-{i:02d}", "kind": "skip", "reason": f"위원회: 표 0.{i} < 문턱 1",
+             "ret_20d": 1.0, "bench_20d": 0.0} for i in range(1, 4)]  # fmt: skip
+    assert list(pp.attribution(결정, [])["skip_by_reason"]) == ["위원회: 표 N < 문턱 N"]

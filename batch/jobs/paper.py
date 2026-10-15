@@ -153,9 +153,11 @@ UPDATE_OUTCOME_SQL = (
 #: 그만큼 늘어 300 에서 올렸다 — 같은 종목·기준일의 시세는 한 번만 읽으므로(캐시) 읽기는 계좌 수만큼 늘지 않는다
 OUTCOME_BATCH = 900
 #: 성과 분해 (docs/paper.md 10장, 25.1450) — 성과가 찬 결정과 체결일 종가가 있는 매수만, 최근 1년
+#: 성과 분해·부서 성적표가 보는 결정 — **지금 판의 것만**(판 번호가 빈 옛 행은 판 1).
+#: 판 2 회사의 성적에 판 1 결정이 섞이지 않게 (docs/company.md 1장 검증 [필수] 7, 25.1472)
 ATTR_DECISIONS_SQL = (
-    "SELECT stock_id, decided_on, kind, reason, ret_20d, bench_20d FROM paper_decisions"
-    " WHERE account_id = ? AND decided_on >= ? AND ret_20d IS NOT NULL"
+    "SELECT stock_id, decided_on, kind, reason, ret_20d, bench_20d, detail_json FROM paper_decisions"
+    " WHERE account_id = ? AND decided_on >= ? AND ret_20d IS NOT NULL AND COALESCE(rule_version, 1) = ?"
 )
 ATTR_FILLS_SQL = (
     "SELECT order_id, price, day_close FROM paper_fills"
@@ -499,14 +501,42 @@ def real_comparison(client: Any) -> dict[str, Any] | None:
     return pp.compare_real(모의, 실제)
 
 
-def save_attribution(client: Any, aid: str, today: str) -> dict[str, Any]:
-    """그 계좌의 성과 분해를 내 오늘 평가 행에 적는다 (docs/paper.md 10장, 25.1450)."""
+def save_attribution(client: Any, aid: str, today: str, rule_version: int = 1) -> dict[str, Any]:
+    """그 계좌의 성과 분해를 내 오늘 평가 행에 적는다 (docs/paper.md 10장, 25.1450).
+
+    투자사(판 2)면 부서 성적표도 — 결정 원장의 부서 입장과 20 거래일 지수 대비 초과로 (docs/company.md 6장, 25.1472)
+    """
     부터 = (date.fromisoformat(today) - timedelta(days=ATTR_WINDOW_DAYS)).isoformat()
-    결정 = client.execute(ATTR_DECISIONS_SQL, [aid, 부터]).dicts()
+    결정 = client.execute(ATTR_DECISIONS_SQL, [aid, 부터, rule_version]).dicts()
     체결행 = client.execute(ATTR_FILLS_SQL, [aid, 부터]).dicts()
     a = pp.attribution(결정, [(float(r["price"]), r["day_close"]) for r in 체결행])
+    성적 = department_scorecard(결정)
+    if 성적:
+        a["departments"] = 성적
     _쓰기(client, [(SAVE_ATTR_SQL, [json.dumps(a, ensure_ascii=False), aid, today])])
     return a
+
+
+def department_scorecard(decisions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """결정 원장 → 부서 성적표 (docs/company.md 6장, 25.1472). 위원회 기록이 없는 계좌(B·R)는 빈 목록.
+
+    성과는 % 단위(`ret_20d`·`bench_20d`)라 소수로 바꿔 `company.scorecard` 에 넘긴다. 한 회사 안에서는 판단식 매개변수가
+    하나라 열쇠를 비운다
+    """
+    행: list[dict[str, Any]] = []
+    for d in decisions:
+        try:
+            위원회 = (json.loads(d.get("detail_json") or "{}") or {}).get("committee") or {}
+        except ValueError:
+            continue
+        if d.get("ret_20d") is None or d.get("bench_20d") is None:
+            continue
+        초과 = (float(d["ret_20d"]) - float(d["bench_20d"])) / 100
+        for 부서, 입장 in (위원회.get("opinions") or {}).items():
+            자료없음 = len(입장) > 2 and str(입장[2]).startswith("자료 없음")
+            행.append({"dept": 부서, "param": "", "stock_id": d["stock_id"], "day": d["decided_on"],
+                      "stance": None if 자료없음 else int(입장[0]), "excess": 초과})  # fmt: skip
+    return [{"dept": k[0], **v} for k, v in sorted(co.scorecard(행).items())]
 
 
 def mark(
@@ -1168,7 +1198,7 @@ def run_step(
     # 성과 분해 (25.1450) — 계좌마다 오늘 평가 행에. 곁다리
     try:
         for acct in accounts:
-            a = save_attribution(client, str(acct["id"]), 오늘)
+            a = save_attribution(client, str(acct["id"]), 오늘, int(acct["rule_version"]))
             기록.setdefault("attribution_n", {})[str(acct["id"])] = a["selection"]["n"]
     except Exception as exc:  # noqa: BLE001 — 분해만 빠진다
         기록["attribution_error"] = str(exc)[:200]

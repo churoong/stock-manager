@@ -760,6 +760,14 @@ def _에피소드(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return 남김
 
 
+def _까닭_묶음(reason: str) -> str:
+    """안 산 까닭을 묶는 열쇠 — 위원회 부결 사유의 숫자(표·찬성 수)를 N 으로. 숫자마다 다른 까닭으로 갈려
+    상위 5칸이 "표 0.83 < 문턱 1"·"표 0.91 < 문턱 1" 같은 조각으로 찼다 (25.1472)"""
+    import re
+
+    return re.sub(r"[-+]?\d+(?:\.\d+)?", "N", reason) if reason.startswith("위원회") else reason
+
+
 def attribution(decisions: list[dict[str, Any]], entries: list[tuple[float, float | None]]) -> dict[str, Any]:
     """성과 분해 — 어디가 돈을 버나 (docs/paper.md 10장, 25.1450). 순수 함수.
 
@@ -773,7 +781,7 @@ def attribution(decisions: list[dict[str, Any]], entries: list[tuple[float, floa
     견줄 = [d for d in 종류["skip"] if not str(d.get("reason")).startswith(NONCOMPARABLE_SKIP_PREFIXES)]
     까닭: dict[str, list[dict[str, Any]]] = {}
     for d in 종류["skip"]:
-        까닭.setdefault(str(d.get("reason")), []).append(d)
+        까닭.setdefault(_까닭_묶음(str(d.get("reason"))), []).append(d)
     진입 = [(float(c) - float(p)) / float(p) * 100 for p, c in entries if c and p and p > 0]
     return {
         "horizon": ATTRIBUTION_HORIZON,

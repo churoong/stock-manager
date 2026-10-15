@@ -10,6 +10,7 @@ import {
   DEPT_LABEL,
   PAIRS,
   attrCellText,
+  deptScoreText,
   ruleText,
   stanceText,
   type AccountView,
@@ -639,6 +640,23 @@ export function CommitteePane({ a, meetings, dossiers }: { a: Account; meetings:
           </section>
         );
       })}
+      <div>
+        <h3 className="font-medium">부서 성적표</h3>
+        <p className="text-xs text-slate-500">
+          어느 부서가 맞았나 — 그 부서가 찬성한 안건과 반대한 안건의 20 거래일 뒤 지수 대비 초과. 가름(찬성 − 반대)이 클수록 잘 가린 부서입니다. 같은 종목은 28일에 한 번만 셉니다.
+        </p>
+        {a.attribution?.departments?.length ? (
+          <ul className="mt-1 space-y-0.5 text-xs">
+            {a.attribution.departments.map((d) => (
+              <li key={d.dept}>
+                {DEPT_LABEL[d.dept] ?? d.dept}: {deptScoreText(d)}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-xs text-slate-500">아직 표본이 없습니다 — 회의 뒤 20 거래일이 지나야 채워집니다.</p>
+        )}
+      </div>
       <p className="text-xs text-slate-500">부서는 규칙으로 판단하는 에이전트입니다 — 같은 자료면 같은 의견이 나옵니다(docs/company.md 0장).</p>
     </div>
   );

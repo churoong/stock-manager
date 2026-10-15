@@ -368,6 +368,17 @@ export interface Attribution {
   sold: AttrCell;
   held_flag: AttrCell;
   blocked?: AttrCell;
+  /** 투자사 부서 성적표 (docs/company.md 6장, 25.1472) — 초과는 소수(0.05 = +5%p) */
+  departments?: DeptScore[];
+}
+export interface DeptScore {
+  dept: string; n_for: number; n_against: number; n_neutral: number; avg_for: number | null; avg_against: number | null;
+  spread: number | null; hit_for: number | null; hit_against: number | null; enough: boolean;
+}
+/** 부서 성적표 한 줄의 글 — 가름(찬성 평균 − 반대 평균)이 클수록 잘 가린 부서 */
+export function deptScoreText(d: DeptScore): string {
+  const p = (v: number | null) => (v == null ? "—" : `${v >= 0 ? "+" : ""}${(v * 100).toFixed(1)}%p`);
+  return `찬성 ${d.n_for}건 ${p(d.avg_for)} · 반대 ${d.n_against}건 ${p(d.avg_against)} · 가름 ${p(d.spread)}${d.enough ? "" : " (참고)"}`;
 }
 /** 배치 `ATTRIBUTION_MIN_SAMPLE` 과 같다 — 이보다 적은 칸은 "참고" */
 export const ATTRIBUTION_MIN_SAMPLE = 30;
