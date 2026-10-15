@@ -93,6 +93,12 @@ UPSERT_DAILY_SQL = (
     " recon_note = excluded.recon_note, unknown_json = excluded.unknown_json, updated_at = excluded.updated_at"
 )
 
+PAPER_TWR_SQL = "SELECT account_id, as_of, twr_index FROM paper_daily ORDER BY account_id, as_of"
+#: 실제 포트폴리오의 시간가중 지수 — 비교에만 읽는다(쓰지 않는다). `jobs/portfolio` 가 매매 기록에서 다시 만든 파생 표
+REAL_TWR_SQL = "SELECT date, twr_index FROM portfolio_values WHERE date >= ? ORDER BY date"
+#: 실제 계열을 모의 첫 기록보다 이만큼 앞부터 읽는다 — 시작일 이하의 마지막 행을 잡으려고(주말·휴일 사이)
+REAL_LOOKBACK_DAYS = 14
+
 #: 미국 환율이 이 날수보다 묵었으면 쓰지 않는다 — 2부와 같은 기준(`signals_job.load_settings` 7일)
 FX_MAX_AGE_DAYS = 7
 
@@ -321,6 +327,22 @@ def _level_of(
             값 = 값 * 환[0] if 환 else 0.0
         out[f.id] = 값 or None
     return out, 지금값
+
+
+def real_comparison(client: Any) -> dict[str, Any] | None:
+    """모의 계좌와 실제 포트폴리오를 같은 기간 시간가중으로 (docs/paper.md 4장, 2026-10-15 사용자 지시 25.1448).
+
+    읽기만 한다. 실제 포트폴리오가 없거나 표를 못 읽으면 None — 리포트는 그 줄만 빠진다
+    """
+    모의: dict[str, list[tuple[str, float]]] = {}
+    for r in client.execute(PAPER_TWR_SQL).dicts():
+        모의.setdefault(str(r["account_id"]), []).append((str(r["as_of"]), float(r["twr_index"])))
+    if not 모의:
+        return None
+    처음 = min(v[0][0] for v in 모의.values())
+    부터 = (date.fromisoformat(처음) - timedelta(days=REAL_LOOKBACK_DAYS)).isoformat()
+    실제 = [(str(r[0]), float(r[1])) for r in client.execute(REAL_TWR_SQL, [부터]).rows if r[1] is not None]
+    return pp.compare_real(모의, 실제)
 
 
 def mark(
@@ -594,6 +616,15 @@ def run_step(
     if 읽기0 is not None:
         기록["reads"] = getattr(client.reads, "total", 0) - 읽기0
     머리 = ["🧪 모의 투자 " + " · ".join(글 for 글 in 줄 if not 글.startswith("⚠️"))]
+    # 실제 투자와 같은 기간 비교 (2026-10-15 사용자 지시, 25.1448) — 곁다리. 못 읽으면 그 줄만 빠진다
+    try:
+        비교 = real_comparison(client)
+    except Exception as exc:  # noqa: BLE001 — 비교 줄만 빠진다. 까닭은 기록에
+        비교 = None
+        기록["real_compare_error"] = str(exc)[:200]
+    if 비교:
+        기록["real_compare"] = 비교
+        머리.append(str(pp.compare_line(비교)))
     if frozen:
         머리.append(f"모의 계좌 멈춘 종목 {len(frozen)}개(기업행위 경계 — 원가로 평가, docs/paper.md 2.3)")
     return 머리 + [글 for 글 in 줄 if 글.startswith("⚠️")], 기록
@@ -635,5 +666,14 @@ def summary_section(client: Any, now: datetime) -> list[str]:
         "max_sector_pct": db.get_setting_in_range(client, "max_weight_per_sector", 30.0)[0],
         "stop_pct": 손절,
     }
-    return pp.summary_lines(daily, by_acct, 주초, 달초, {k: str(v.get("name")) for k, v in 캐시.items()},
-                            {k: v.get("sector") for k, v in 캐시.items()}, limits)  # fmt: skip
+    줄 = pp.summary_lines(daily, by_acct, 주초, 달초, {k: str(v.get("name")) for k, v in 캐시.items()},
+                         {k: v.get("sector") for k, v in 캐시.items()}, limits)  # fmt: skip
+    # 실제 투자와 같은 기간 비교 (25.1448) — 모의 절 바로 아래
+    try:
+        비교줄 = pp.compare_line(real_comparison(client))
+    except Exception as exc:  # noqa: BLE001 — 비교 줄만 빠진다
+        비교줄 = f"  실제 투자와 비교를 못 했습니다 ({type(exc).__name__})"
+    if 줄 and 비교줄:
+        자리 = next((i for i, x in enumerate(줄) if x.startswith("[모의 투자 월간")), len(줄))
+        줄.insert(자리, "  " + 비교줄.strip())
+    return 줄

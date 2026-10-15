@@ -159,3 +159,22 @@ describe("계좌 요약", () => {
     expect((db.prepare(PAPER_HISTORY).all("2026-10-01") as unknown[]).length).toBe(2);
   });
 });
+
+describe("실제 투자와 비교 (25.1448)", () => {
+  it("같은 기간으로 — 배치 compare_real 과 같은 결과", async () => {
+    const { compareReal, windowChange, REAL_TWR, PAPER_TWR } = await import("@/lib/paper");
+    const c = compareReal(
+      { A: [["2026-10-15", 1.0], ["2026-10-21", 1.05]], B: [["2026-10-15", 1.0], ["2026-10-21", 1.02]] },
+      [["2026-09-01", 1.0], ["2026-10-14", 1.1], ["2026-10-20", 1.21]],
+    );
+    expect(c?.start).toBe("2026-10-14");
+    expect(c?.end).toBe("2026-10-20");
+    expect(c?.realPct).toBeCloseTo(10);
+    expect(c?.paperPct.A).toBeCloseTo(0);
+    expect(compareReal({}, [["2026-10-01", 1]])).toBeNull();
+    expect(windowChange([["2026-10-01", 1], ["2026-10-05", 1.2]], "2026-10-02", "2026-09-30")).toBeNull();
+    // 질의가 실제 스키마에서 돈다
+    expect(db.prepare(REAL_TWR).all("2026-10-01")).toEqual([]);
+    expect(db.prepare(PAPER_TWR).all()).toEqual([]);
+  });
+});

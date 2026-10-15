@@ -12,7 +12,11 @@ import {
   PAPER_OPEN_BUYS,
   PAPER_OPEN_ORDERS,
   PAPER_STOCK_NAMES,
+  PAPER_TWR,
+  REAL_LOOKBACK_DAYS,
+  REAL_TWR,
   accountView,
+  compareReal,
   reservedByAccount,
   type DailyRow,
   type OpenBuy,
@@ -63,7 +67,26 @@ export async function GET() {
       positions: (보유들[a.id] ?? []).map((p) => ({ ...p, ...(이름[Number(p.stock_id)] ?? {}) })),
       unknown: JSON.parse(마지막.find((d) => d.account_id === a.id)?.unknown_json || "[]"),
     }));
+    // 실제 투자와 같은 기간 비교 (25.1448) — 실제 표는 읽기만. 못 읽으면 비교만 빠진다
+    let realCompare = null;
+    try {
+      const 모의: Record<string, Array<[string, number]>> = {};
+      for (const r of rowsToObjects<{ account_id: string; as_of: string; twr_index: number }>(await execute(PAPER_TWR))) {
+        (모의[r.account_id] ??= []).push([r.as_of, Number(r.twr_index)]);
+      }
+      const 처음 = Object.values(모의).map((v) => v[0]?.[0]).filter(Boolean).sort()[0];
+      if (처음) {
+        const 부터 = new Date(Date.parse(`${처음}T00:00:00Z`) - REAL_LOOKBACK_DAYS * 86_400_000).toISOString().slice(0, 10);
+        const 실제 = rowsToObjects<{ date: string; twr_index: number }>(await execute(REAL_TWR, [부터])).map(
+          (r) => [r.date, Number(r.twr_index)] as [string, number],
+        );
+        realCompare = compareReal(모의, 실제);
+      }
+    } catch {
+      realCompare = { error: "실제 포트폴리오 기록을 읽지 못해 비교를 싣지 않았습니다" };
+    }
     return NextResponse.json({
+      realCompare,
       invested: 입금,
       accounts: views,
       flows: rowsToObjects(flows),

@@ -200,3 +200,42 @@ export function accountView(
     notes, reconOk: Boolean(Number(daily.recon_ok)),
   };
 }
+
+export const PAPER_TWR = "SELECT account_id, as_of, twr_index FROM paper_daily ORDER BY account_id, as_of";
+/** 실제 포트폴리오의 시간가중 지수 — 비교에만 읽는다 (2026-10-15 사용자 지시 "실제 투자랑도 비교하는거 그냥 키자", 25.1448) */
+export const REAL_TWR = "SELECT date, twr_index FROM portfolio_values WHERE date >= ? ORDER BY date";
+/** 실제 계열을 모의 첫 기록보다 이만큼 앞부터 읽는다 — 배치 `REAL_LOOKBACK_DAYS` 와 같다 */
+export const REAL_LOOKBACK_DAYS = 14;
+
+type Point = [string, number];
+
+/** 시간가중 지수의 [start, end] 변화율(%) — 배치 `window_change` 와 같은 규칙 */
+export function windowChange(rows: Point[], start: string, end: string): { pct: number; start: string; end: string } | null {
+  if (!rows.length) return null;
+  const 앞 = rows.filter((r) => r[0] <= start);
+  const 시작 = 앞.length ? 앞[앞.length - 1] : rows.find((r) => r[0] >= start);
+  const 뒤 = rows.filter((r) => r[0] <= end);
+  if (!시작 || !뒤.length || 뒤[뒤.length - 1][0] < 시작[0] || !시작[1]) return null;
+  return { pct: (뒤[뒤.length - 1][1] / 시작[1] - 1) * 100, start: 시작[0], end: 뒤[뒤.length - 1][0] };
+}
+
+export interface RealCompare {
+  start: string;
+  end: string;
+  realPct: number;
+  paperPct: Record<string, number | null>;
+}
+
+/** 모의 계좌와 실제 포트폴리오를 같은 기간 시간가중으로 — 배치 `compare_real` 과 같은 규칙 (docs/paper.md 4장) */
+export function compareReal(paper: Record<string, Point[]>, real: Point[]): RealCompare | null {
+  const 모의 = Object.entries(paper).filter(([, v]) => v.length);
+  if (!모의.length || !real.length) return null;
+  const 시작 = [real[0][0], ...모의.map(([, v]) => v[0][0])].sort().at(-1)!;
+  const 끝 = [real[real.length - 1][0], ...모의.map(([, v]) => v[v.length - 1][0])].sort()[0];
+  if (끝 < 시작) return null;
+  const 실제 = windowChange(real, 시작, 끝);
+  if (!실제) return null;
+  const paperPct: Record<string, number | null> = {};
+  for (const [aid, rows] of 모의.sort(([a], [b]) => a.localeCompare(b))) paperPct[aid] = windowChange(rows, 시작, 끝)?.pct ?? null;
+  return { start: 실제.start, end: 실제.end, realPct: 실제.pct, paperPct };
+}

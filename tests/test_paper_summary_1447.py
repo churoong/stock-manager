@@ -84,3 +84,11 @@ def test_summary_section_reads_real_schema(monkeypatch: pytest.MonkeyPatch) -> N
     월 = job.summary_section(c, datetime(2026, 11, 1, 0, 0, tzinfo=UTC))
     assert any("[모의 투자 월간 복기] 2026-10-01 부터" in x for x in 월)
     assert job.summary_section(Client(), datetime(2026, 10, 18, tzinfo=UTC)) == []
+    # 실제 포트폴리오가 있으면 모의 절 아래에 같은 기간 비교 한 줄 (25.1448)
+    c.conn.executemany(
+        "INSERT INTO portfolio_values (date, value_krw, net_flow_krw, dividends_krw, twr_index, created_at)"
+        " VALUES (?, 1, 0, 0, ?, 't')", [("2026-10-10", 1.0), ("2026-10-17", 1.02)],
+    )  # fmt: skip
+    월 = job.summary_section(c, datetime(2026, 11, 1, 0, 0, tzinfo=UTC))
+    비교 = [i for i, x in enumerate(월) if "실제 투자와 비교" in x]
+    assert len(비교) == 1 and 비교[0] < next(i for i, x in enumerate(월) if x.startswith("[모의 투자 월간"))

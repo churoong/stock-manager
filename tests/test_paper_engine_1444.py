@@ -202,3 +202,25 @@ def test_after_parses_both_timestamp_shapes() -> None:
     assert pp.after("2026-10-15T14:00:00.000Z", "2026-10-15T00:30:00+00:00")
     assert not pp.after("2026-10-15T00:29:59Z", "2026-10-15T00:30:00.000001+00:00")
     assert pp.after("2026-10-15 14:00:00", "2026-10-15T00:30:00+00:00")
+
+
+def test_compare_real_uses_the_same_window() -> None:
+    """실제 투자와 비교 (2026-10-15 사용자 지시 "실제 투자랑도 비교하는거 그냥 키자", 25.1448)."""
+    실제 = [("2026-09-01", 1.0), ("2026-10-14", 1.10), ("2026-10-20", 1.21)]
+    모의 = {"A": [("2026-10-15", 1.0), ("2026-10-21", 1.05)], "B": [("2026-10-15", 1.0), ("2026-10-21", 1.02)]}
+    c = pp.compare_real(모의, 실제)
+    # 기간은 늦게 시작한 쪽(10-15)부터 일찍 끝난 쪽(10-20)까지 — 실제는 10-15 이하 마지막(10-14, 1.10)에서 10-20(1.21)
+    assert c is not None and (c["start"], c["end"]) == ("2026-10-14", "2026-10-20")
+    assert c["real_pct"] == pytest.approx(10.0)
+    assert c["paper_pct"] == {"A": pytest.approx(0.0), "B": pytest.approx(0.0)}  # 모의는 10-20 이하 마지막 = 10-15
+    줄 = pp.compare_line(c)
+    assert 줄 is not None and "실제 +10.0%" in 줄 and "A +0.0%" in 줄 and "보유분만" in 줄
+    assert pp.compare_real(모의, []) is None and pp.compare_real({}, 실제) is None
+    assert pp.compare_line(None) is None
+
+
+def test_window_change_edges() -> None:
+    rows = [("2026-10-01", 1.0), ("2026-10-05", 1.2)]
+    assert pp.window_change(rows, "2026-09-01", "2026-10-31") == (pytest.approx(20.0), "2026-10-01", "2026-10-05")
+    assert pp.window_change(rows, "2026-10-06", "2026-10-31") == (pytest.approx(0.0), "2026-10-05", "2026-10-05")
+    assert pp.window_change(rows, "2026-10-02", "2026-09-30") is None

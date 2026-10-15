@@ -256,3 +256,20 @@ def test_session_closed_helper() -> None:
 
     assert daily._장_끝남("KR", "2020-01-02") is True
     assert daily._장_끝남("KR", "2099-01-02") is False
+
+
+def test_real_portfolio_comparison_line(client: Client, monkeypatch: pytest.MonkeyPatch) -> None:
+    """실제 포트폴리오와 같은 기간 비교 — 실제 표는 읽기만 (2026-10-15 사용자 지시, 25.1448)."""
+    c = client
+    줄, 기록 = _하루(c, monkeypatch, "2026-10-14")  # 실제 기록이 없으면 줄이 없다
+    assert not any("실제 투자와 비교" in x for x in 줄) and "real_compare" not in 기록
+    c.conn.executemany(
+        "INSERT INTO portfolio_values (date, value_krw, net_flow_krw, dividends_krw, twr_index, created_at)"
+        " VALUES (?, 1, 0, 0, ?, 't')", [("2026-10-01", 1.0), ("2026-10-14", 1.05), ("2026-10-16", 1.10)],
+    )  # fmt: skip
+    _시세(c, "2026-10-15", 10_100, 9_900)
+    줄, 기록 = _하루(c, monkeypatch, "2026-10-15", signals=False)
+    비교 = [x for x in 줄 if x.startswith("실제 투자와 비교")]
+    assert len(비교) == 1 and "실제 +" in 비교[0]
+    assert 기록["real_compare"]["start"] == "2026-10-14"
+    assert c.q("SELECT COUNT(*) FROM portfolio_values") == [(3,)]  # 읽기만 했다

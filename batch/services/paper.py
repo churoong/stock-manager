@@ -526,3 +526,56 @@ def summary_lines(
         out.append(f"  {aid} 규칙 점검: 종목 상한 넘은 날 {len(종목넘음)} · 섹터 상한 넘은 날 {len(섹터넘음)}"
                    f" · 손절선 아래로 들고 간 날 {len(손절넘김)}{덧}")
     return out
+
+
+def window_change(rows: list[tuple[str, float]], start: str, end: str) -> tuple[float, str, str] | None:
+    """시간가중 지수 계열의 [start, end] 변화율(%) — (변화, 쓴 시작일, 쓴 끝일). 날짜 순 `rows` = [(날짜, 지수)].
+
+    시작은 start 이하의 마지막 행(없으면 start 이상의 첫 행), 끝은 end 이하의 마지막 행. 둘을 못 잡거나 끝이 시작보다
+    앞이면 None
+    """
+    if not rows:
+        return None
+    앞 = [r for r in rows if r[0] <= start]
+    시작 = 앞[-1] if 앞 else next((r for r in rows if r[0] >= start), None)
+    뒤 = [r for r in rows if r[0] <= end]
+    if 시작 is None or not 뒤 or 뒤[-1][0] < 시작[0] or not 시작[1]:
+        return None
+    return (float(뒤[-1][1]) / float(시작[1]) - 1) * 100, 시작[0], 뒤[-1][0]
+
+
+def compare_real(
+    paper: dict[str, list[tuple[str, float]]], real: list[tuple[str, float]],
+) -> dict[str, Any] | None:
+    """모의 계좌와 **실제 포트폴리오**의 시간가중 수익률을 같은 기간으로 견준다 (docs/paper.md 4장,
+    2026-10-15 사용자 지시 "실제 투자랑도 비교하는거 그냥 키자").
+
+    기간 = (모의 첫 기록·실제 첫 기록 중 늦은 날) ~ (둘의 마지막 기록 중 이른 날). 실제는 `portfolio_values.twr_index`
+    (보유분만·배당 포함), 모의는 `paper_daily.twr_index`(현금 포함·배당 없음) — 같은 잣대가 아니라는 것을
+    부르는 쪽이 함께 적는다.
+    어느 한쪽이 없으면 None
+    """
+    모의 = {k: v for k, v in paper.items() if v}
+    if not 모의 or not real:
+        return None
+    시작 = max([real[0][0], *(v[0][0] for v in 모의.values())])
+    끝 = min([real[-1][0], *(v[-1][0] for v in 모의.values())])
+    if 끝 < 시작:
+        return None
+    실제 = window_change(real, 시작, 끝)
+    if 실제 is None:
+        return None
+    out: dict[str, Any] = {"start": 실제[1], "end": 실제[2], "real_pct": 실제[0], "paper_pct": {}}
+    for aid, rows in sorted(모의.items()):
+        w = window_change(rows, 시작, 끝)
+        out["paper_pct"][aid] = None if w is None else w[0]
+    return out
+
+
+def compare_line(c: dict[str, Any] | None) -> str | None:
+    """리포트·요약에 싣는 한 줄. 견줄 수 없으면 None."""
+    if not c:
+        return None
+    모의 = " · ".join(f"{aid} {_퍼센트(v)}" for aid, v in c["paper_pct"].items())
+    return (f"실제 투자와 비교({c['start']}~{c['end']}, 시간가중): 실제 {_퍼센트(c['real_pct'])} · {모의}"
+            " — 실제는 보유분만·배당 포함, 모의는 현금 포함·배당 없음")  # fmt: skip

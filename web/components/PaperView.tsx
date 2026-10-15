@@ -31,7 +31,8 @@ interface FillRow {
 }
 interface OrderRow { id: number; account_id: string; market: string; ticker: string; name: string; side: string; limit_price: number | null; quantity: number; currency: string; fill_session: string; tranche: number; reason: string }
 interface HistoryRow { account_id: string; as_of: string; invested_krw: number; equity_krw: number; kospi_krw: number | null; sp500_krw: number | null }
-interface Data { invested: number; accounts: Account[]; flows: Flow[]; fills: FillRow[]; orders: OrderRow[]; history: HistoryRow[] }
+interface RealCompareView { start?: string; end?: string; realPct?: number; paperPct?: Record<string, number | null>; error?: string }
+interface Data { realCompare: RealCompareView | null; invested: number; accounts: Account[]; flows: Flow[]; fills: FillRow[]; orders: OrderRow[]; history: HistoryRow[] }
 
 /** 매매 일지의 근거는 **주문 때 얼린 것**이라 오래될수록 묵는 값이 아니다 — 기준일을 노랗게 칠하지 않는다 */
 const JOURNAL_NEVER_STALE_DAYS = 100_000;
@@ -215,6 +216,30 @@ export default function PaperView() {
           </section>
         ))}
       </div>
+
+      {data.realCompare ? (
+        <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+          <h2 className="text-base font-semibold">실제 투자와 비교</h2>
+          {data.realCompare.error ? (
+            <p className="mt-1 text-sm text-amber-600">{data.realCompare.error}</p>
+          ) : (
+            <>
+              <p className="mt-1 text-sm">
+                {data.realCompare.start} ~ {data.realCompare.end} 시간가중 수익률 · 실제{" "}
+                <b className={tone(data.realCompare.realPct)}>{pctText(data.realCompare.realPct)}</b>
+                {Object.entries(data.realCompare.paperPct ?? {}).map(([aid, v]) => (
+                  <span key={aid}>
+                    {" "}· 모의 {aid} <b className={tone(v)}>{pctText(v)}</b>
+                  </span>
+                ))}
+              </p>
+              <p className="mt-1 text-xs text-slate-500">
+                같은 잣대가 아닙니다 — 실제는 보유분만(현금 없음)·배당 포함, 모의는 현금 포함·배당 없음. 현금 비중만큼 모의가 덜 움직입니다.
+              </p>
+            </>
+          )}
+        </section>
+      ) : null}
 
       {data.history.length > 1 ? (
         <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
