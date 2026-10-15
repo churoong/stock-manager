@@ -14,7 +14,23 @@ from typing import Any
 SELL_RULES: dict[str, frozenset[str] | None] = {
     "all": None,
     "core": frozenset({"손절", "목표도달", "기간초과"}),
+    # D — 기간초과 하나만. 손절·목표·황색 모두 들고 간다 (docs/paper.md 2.2, 25.1458)
+    "time": frozenset({"기간초과"}),
 }
+
+#: 시장가 매수(시가 일괄, C·R)의 예약·크기 잣대 = 기준가 × (1 + 이 값) (docs/paper.md 2.1.1, 25.1458).
+#: 하룻밤 틈(갭)의 대부분을 덮자는 값이고 실측 근거는 없다 [확인필요]. 넘게 뛰면 체결 때 현금 검사가 그 주문을 취소한다
+OPEN_BUY_BUFFER = 0.10
+
+#: 짝 비교 — (앞, 뒤, 그 차이가 재는 것). 한 번에 하나만 다르게 지은 짝이다 (docs/paper.md 1장, 25.1458)
+PAIRS: tuple[tuple[str, str, str], ...] = (
+    ("A", "B", "황색 매도"),
+    ("B", "C", "분할 지정가 대 시가 일괄"),
+    ("B", "D", "매도 플래그 대 기간 보유"),
+    ("E", "B", "10종목 대 5종목"),
+    ("C", "R1", "종목 선정 대 무작위"),
+    ("C", "R2", "종목 선정 대 무작위"),
+)
 
 #: 장부로 다시 낸 현금과 어제 + 오늘 움직임이 이 만큼(원) 넘게 다르면 검산 실패 (docs/paper.md 3장 "1원이라도")
 RECON_TOLERANCE_KRW = 1.0
@@ -68,6 +84,7 @@ class Order:
     score_at_order: float | None = None
     score_as_of: str | None = None
     fill_basis: str = "open"  # open · close (장 열린 뒤 낸 주문)
+    ref_price: float | None = None  # 시장가 매수의 기준가 — 예약 잣대 (2.1.1)
 
 
 @dataclass(frozen=True)
@@ -142,9 +159,12 @@ def reserved_krw(open_buys: list[Order], fx_now: dict[str, float | None]) -> flo
     """
     합 = 0.0
     for o in open_buys:
-        if o.side != "buy" or o.limit_price is None:
+        if o.side != "buy":
             continue
-        금액 = o.limit_price * o.quantity * (1 + FEE_BUFFER)
+        단가 = buy_unit(o)
+        if 단가 is None:
+            continue
+        금액 = 단가 * o.quantity * (1 + FEE_BUFFER)
         if o.currency != "KRW":
             환율 = fx_now.get(o.currency)
             if not 환율:
@@ -152,6 +172,17 @@ def reserved_krw(open_buys: list[Order], fx_now: dict[str, float | None]) -> flo
             금액 *= 환율 * (1 + FX_BUFFER)
         합 += 금액
     return _원(합)
+
+
+def buy_unit(order: Order) -> float | None:
+    """매수 주문 한 주의 예약 단가(종목 통화) — 지정가는 그 값, 시장가는 기준가 × (1 + `OPEN_BUY_BUFFER`) (2.1.1).
+
+    시장가인데 기준가가 없으면 None — 예약에서 빠지면 같은 현금을 두 번 쓰므로 `size_buys` 는 그런 주문을
+    내지 않는다
+    """
+    if order.order_type == "market":
+        return order.ref_price * (1 + OPEN_BUY_BUFFER) if order.ref_price and order.ref_price > 0 else None
+    return order.limit_price
 
 
 def cancellable(flows: list[CashFlow], flow_id: int, available_by_account: dict[str, float]) -> str | None:
@@ -195,6 +226,13 @@ def judge(order: Order, bar: Bar | None) -> tuple[float | None, str]:
     if halted(bar):
         return None, "정지(그날 시세 없음·거래량 0)"
     assert bar is not None
+    if order.side == "buy" and order.order_type == "market":
+        # 시가 일괄 매수 (2.1.1) — 매도와 같은 잣대로 시가, 장 열린 뒤 낸 주문은 종가
+        if order.fill_basis == "close":
+            return bar.close, "장 열린 뒤 낸 주문 — 종가"
+        if bar.open is not None and bar.open > 0:
+            return bar.open, "시가"
+        return bar.close, "시가 없음 — 종가"
     if order.side == "buy":
         if order.limit_price is None or order.limit_price <= 0:
             return None, "지정가 없음"
@@ -212,14 +250,14 @@ def make_fill(order: Order, price: float, fill_date: str, fx_rate: float, costs:
     """체결 한 건의 비용과 현금 영향.
 
     지정가 매수는 그 값보다 비싸게 찰 수 없어 **슬리피지를 얹지 않는다**(검증 권장).
-    시장가 매도는 슬리피지를 싸게 쪽으로
+    시장가는 불리한 쪽으로 — 매도는 싸게, 매수(시가 일괄, 2.1.1)는 비싸게
     """
     gross = price * order.quantity
-    slip = 0.0 if order.side == "buy" else gross * costs.slippage_pct / 100
+    slip = 0.0 if order.side == "buy" and order.order_type != "market" else gross * costs.slippage_pct / 100
     if order.side == "buy":
         fee = gross * costs.buy_fee_pct / 100
         tax = 0.0
-        cash = -(gross + fee) * fx_rate
+        cash = -(gross + slip + fee) * fx_rate
     else:
         fee = gross * costs.sell_fee_pct / 100
         tax = gross * costs.sell_tax_pct / 100
@@ -409,11 +447,15 @@ def sells_for(sell_rule: str, flag_codes: dict[int, set[str]]) -> dict[int, list
 
 def size_buys(
     allocations: list[dict[str, Any]], cash_available: float, fx_rate: float, sold_recently: set[int],
-    currency: str = "KRW",
+    currency: str = "KRW", entry: str = "tranche",
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """2부 배분을 **정수 주 지정가 회차**로 바꾼다 (docs/paper.md 2.1).
 
-    `allocations`: [{stock_id, amount(종목 통화), tranches:[{price_at_or_below, amount}], ...}].
+    `entry='open'`(시가 일괄, 2.1.1)이면 회차 대신 배분 금액 전부를 한 시장가 주문(회차 1)으로 —
+    수량은 금액 ÷ 기준가(`ref_price`) 내림, 현금은 기준가 × (1 + `OPEN_BUY_BUFFER`) 로 센다(예약과 같은 잣대).
+    그 주문은 `limit_price` 가 None 이고 `ref_price` 가 있다.
+
+    `allocations`: [{stock_id, amount(종목 통화), tranches:[{price_at_or_below, amount}], ref_price, ...}].
     순서는 `build_portfolio` 가 낸 그대로(같은 함수 원칙), 현금(원 → 종목 통화) 안에서만 낸다. 1주도 못 사는 회차는 내지
     않는다. 최근에 판 종목(`sold_recently`, 판 뒤 `REBUY_COOLDOWN_SESSIONS`)은 사지 않는다.
     (주문, 빠진 것) — 빠진 것은 까닭을 단다
@@ -431,6 +473,20 @@ def size_buys(
         if sid in sold_recently:
             빠짐.append({"stock_id": sid, "why": f"판 뒤 {REBUY_COOLDOWN_SESSIONS}거래일 안"})
             continue
+        if entry == "open":
+            기준 = float(a.get("ref_price") or 0)
+            금액 = float(a.get("amount") or 0)
+            if 기준 <= 0 or 금액 <= 0:
+                빠짐.append({"stock_id": sid, "tranche": 1, "why": "기준가 없음" if 기준 <= 0 else "배분 금액 없음"})
+                continue
+            단가 = 기준 * (1 + OPEN_BUY_BUFFER)
+            수량 = int(min(금액 // 기준, 남은 / 여유 // 단가))
+            if 수량 < 1:
+                빠짐.append({"stock_id": sid, "tranche": 1, "why": "현금 부족" if 금액 >= 기준 else "배분 금액 < 1주"})
+                continue
+            남은 -= 수량 * 단가 * 여유
+            주문.append({"stock_id": sid, "tranche": 1, "limit_price": None, "ref_price": 기준, "quantity": 수량})
+            continue
         for i, t in enumerate(a.get("tranches") or [], start=1):
             가격 = float(t.get("price_at_or_below") or 0)
             금액 = float(t.get("amount") or 0)
@@ -444,6 +500,21 @@ def size_buys(
             남은 -= 수량 * 가격 * 여유
             주문.append({"stock_id": sid, "tranche": i, "limit_price": 가격, "quantity": 수량})
     return 주문, 빠짐
+
+
+def random_order(pool: list[int], seed: str) -> list[int]:
+    """무작위 대조(R1·R2)가 종목을 고르는 순서 — 고정 씨앗 (docs/paper.md 2.1.2, 25.1458).
+
+    후보마다 `sha256(씨앗|후보)` 가 작은 순서다(랑데부 해싱). 목록 전체를 섞으면 유니버스에 한 종목만 더해져도 순열이
+    통째로 바뀌어, 주간 유니버스가 갱신될 때마다 같은 신호 종목의 대체가 다른 종목으로 갔다(검증 [필수] 3 — R 만 새
+    종목을 사며 투자 속도가 빨라진다). 이 순서는 고른 종목이 모집단에 남아 있는 한 그대로이고, 파이썬 판과도 무관하다
+    """
+    import hashlib
+
+    def 열쇠(c: int) -> bytes:
+        return hashlib.sha256(f"{seed}|{c}".encode()).digest()
+
+    return sorted(set(pool), key=열쇠)
 
 
 def _퍼센트(v: float | None) -> str:
@@ -463,6 +534,7 @@ def summary_lines(
     names: dict[int, str],
     sectors: dict[int, str | None],
     limits: dict[str, Any],
+    sell_rules: dict[str, str] | None = None,
 ) -> list[str]:
     """주간 요약의 모의 계좌 절 — 월 첫 요약이면 월간 복기까지 (docs/paper.md 6장). 순수 함수.
 
@@ -495,8 +567,19 @@ def summary_lines(
             f" · 이번 주 체결 매수 {sum(f.side == 'buy' for f in 이번주)}·매도 {sum(f.side == 'sell' for f in 이번주)}"
             f" ({끝['as_of']} 평가" + (f", 종가 {날짜[0]}~{날짜[-1]}" if 날짜 else "") + ")"
         )
-    if "A" in 끝값 and "B" in 끝값:
-        out.append(f"  A−B: {끝값['A'] - 끝값['B']:+,.0f}원 — 매도 규칙을 포함한 정책 전체의 차이다(docs/paper.md 1장)")
+    # 짝 비교 (25.1458) — 한 번에 하나만 다르게 지은 짝. 차이는 그 규칙을 따른 정책 전체의 효과다(docs/paper.md 1장).
+    # **투자 비중을 함께 싣는다**(검증 [필수] 7) — E 는 처음 몇 달 B 의 두 배를 사고 D 는 거의 팔지 않아, 차이의 큰 몫이
+    # 규칙이 아니라 "얼마나 시장에 들어가 있었나"(베타)일 수 있다
+    비중: dict[str, float | None] = {}
+    for aid, 행들 in daily.items():
+        if 행들 and float(행들[-1]["equity_krw"] or 0) > 0:
+            보유합 = sum(float(p.get("value_krw") or 0) for p in json.loads(행들[-1].get("positions_json") or "[]"))
+            비중[aid] = 보유합 / float(행들[-1]["equity_krw"]) * 100
+    for 앞, 뒤, 무엇 in PAIRS:
+        if 앞 in 끝값 and 뒤 in 끝값:
+            덧 = (f"; 투자 비중 {앞} {비중[앞]:.0f}% · {뒤} {비중[뒤]:.0f}%"
+                  if 비중.get(앞) is not None and 비중.get(뒤) is not None else "")  # fmt: skip
+            out.append(f"  {앞}−{뒤}: {끝값[앞] - 끝값[뒤]:+,.0f}원 ({무엇}{덧})")
     if month_start is None:
         return out
     out.append(f"[모의 투자 월간 복기] {month_start} 부터")
@@ -529,7 +612,9 @@ def summary_lines(
                     손절넘김.add(str(r["as_of"]))
             if any(합 / 총 * 100 > float(limits.get("max_sector_pct") or 100) for 합 in 섹터합.values()):
                 섹터넘음.add(str(r["as_of"]))
-        덧 = " (B 는 설계상 생길 수 있다)" if aid == "B" else ""
+        # 손절을 따르지 않는 계좌(D, 기간 보유)는 설계상 생긴다 — B 는 손절 판정이 종가 기준이라 장중에 넘길 수 있다
+        덧 = (" (설계상 — 손절을 따르지 않는 계좌)" if (sell_rules or {}).get(aid) == "time"
+              else " (B 는 설계상 생길 수 있다)" if aid == "B" else "")  # fmt: skip
         out.append(f"  {aid} 규칙 점검: 종목 상한 넘은 날 {len(종목넘음)} · 섹터 상한 넘은 날 {len(섹터넘음)}"
                    f" · 손절선 아래로 들고 간 날 {len(손절넘김)}{덧}")
     return out

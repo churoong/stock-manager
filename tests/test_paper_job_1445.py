@@ -33,10 +33,14 @@ class _Res:
 
 
 class Client:
-    def __init__(self) -> None:
+    def __init__(self, accounts: tuple[str, ...] | None = ("A", "B")) -> None:
         self.conn = sqlite3.connect(":memory:")
         for path in sorted((ROOT / "migrations").glob("*.sql")):
             self.conn.executescript(path.read_text(encoding="utf-8"))
+        if accounts is not None:
+            # 이 파일의 시험은 A·B 두 계좌의 규칙을 본다 — 7계좌(25.1458)는 tests/test_paper_accounts_1458.py
+            self.conn.execute(f"DELETE FROM paper_accounts WHERE id NOT IN ({','.join('?' * len(accounts))})",
+                              list(accounts))  # fmt: skip
         for sid, ticker, country, cur in ((1, "005930", "KR", "KRW"), (2, "AAPL", "US", "USD"), (3, "000660", "KR", "KRW")):
             self.conn.execute(
                 "INSERT INTO stocks (id, ticker, market, country, name_ko, sector, currency, status, source,"
@@ -79,7 +83,7 @@ def client(monkeypatch: pytest.MonkeyPatch) -> Client:
     )
     # 사용자 실제 총액은 0 — 모의 계좌가 그것에 묶이지 않는지 (검증 [필수] 1)
     monkeypatch.setattr(report_picks, "with_criteria", lambda rows: rows)
-    monkeypatch.setattr(report_picks, "select_top", lambda rows: rows)
+    monkeypatch.setattr(report_picks, "select_top", lambda rows, _n=5: rows)
     monkeypatch.setattr(job, "frozen_ids", lambda *_a, **_k: set())
     return c
 

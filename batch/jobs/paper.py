@@ -16,6 +16,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import replace as dc_replace
 from datetime import UTC, date, datetime, timedelta
+from functools import partial
 from typing import Any
 
 from batch.core import calendar as cal
@@ -29,7 +30,9 @@ from batch.services import sell_flags as sf
 
 log = logging.getLogger(__name__)
 
-ACCOUNTS_SQL = "SELECT id, sell_rule, rule_version FROM paper_accounts ORDER BY id"
+ACCOUNTS_SQL = (
+    "SELECT id, sell_rule, rule_version, entry_rule, top_n, selection FROM paper_accounts ORDER BY id"
+)
 FLOWS_SQL = "SELECT id, flow_date, amount_krw, kind, cancels_id, created_at FROM paper_cash_flows ORDER BY id"
 FILLS_SQL = (
     "SELECT order_id, account_id, stock_id, side, fill_date, price, quantity, currency, fx_rate, fee, tax, slippage,"
@@ -37,7 +40,8 @@ FILLS_SQL = (
 )
 OPEN_ORDERS_SQL = (
     "SELECT id, account_id, market, stock_id, side, order_type, limit_price, quantity, currency, fill_session,"
-    " fill_basis, deferrals, horizon, score_at_order, score_as_of FROM paper_orders WHERE status = 'open' ORDER BY id"
+    " fill_basis, deferrals, horizon, score_at_order, score_as_of, ref_price FROM paper_orders WHERE status = 'open'"
+    " ORDER BY id"
 )
 BAR_SQL = "SELECT date, open, close, volume FROM prices WHERE stock_id = ? AND date = ?"
 #: 그 시장 전체에 그날 시세가 들어왔나 — 못 받은 날(배치 실패)과 정지를 가른다 (docs/paper.md 2.3)
@@ -86,7 +90,8 @@ DEFER_SQL = (
 INSERT_ORDER_SQL = (
     "INSERT OR IGNORE INTO paper_orders (account_id, market, stock_id, side, order_type, limit_price, quantity,"
     " currency, decided_on, fill_session, fill_basis, tranche, reason, horizon, score_at_order, score_as_of,"
-    " rationale_json, rule_version, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    " rationale_json, rule_version, created_at, ref_price)"
+    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 )
 UPSERT_DAILY_SQL = (
     "INSERT INTO paper_daily (account_id, as_of, invested_krw, cash_krw, holdings_krw, equity_krw, pnl_krw,"
@@ -132,8 +137,9 @@ UPDATE_OUTCOME_SQL = (
     " ret_60d = COALESCE(ret_60d, ?), bench_5d = COALESCE(bench_5d, ?), bench_20d = COALESCE(bench_20d, ?),"
     " bench_60d = COALESCE(bench_60d, ?), outcome_note = ?, outcome_at = ? WHERE id = ?"
 )
-#: 한 번에 성과를 채우는 결정 수 — 하루 읽기 상한(행당 최대 60 시세 행 + 지수 몇 행)
-OUTCOME_BATCH = 300
+#: 한 번에 성과를 채우는 결정 수 — 하루 읽기 상한(행당 최대 60 시세 행 + 지수 몇 행). 계좌가 일곱(25.1458)이라 결정도
+#: 그만큼 늘어 300 에서 올렸다 — 같은 종목·기준일의 시세는 한 번만 읽으므로(캐시) 읽기는 계좌 수만큼 늘지 않는다
+OUTCOME_BATCH = 900
 #: 성과 분해 (docs/paper.md 10장, 25.1450) — 성과가 찬 결정과 체결일 종가가 있는 매수만, 최근 1년
 ATTR_DECISIONS_SQL = (
     "SELECT stock_id, decided_on, kind, reason, ret_20d, bench_20d FROM paper_decisions"
@@ -197,6 +203,7 @@ def fill_outcomes(client: Any, market: str, today: str, now: str) -> dict[str, i
 
     채움, 포기 = 0, 0
     문장: list[tuple[str, list[Any]]] = []
+    시세캐시: dict[tuple[int, str, int], list] = {}
     for r in rows:
         if r["ref_close"] is None or not r["ref_date"]:
             # 기준 종가가 없는 행은 영영 못 채운다 — 대기열에 남아 자리를 먹지 않게 바로 까닭을 적는다 (25.1453)
@@ -206,7 +213,11 @@ def fill_outcomes(client: Any, market: str, today: str, now: str) -> dict[str, i
         창 = pp.due_horizons(str(r["decided_on"]), today, r)
         if not 창:
             continue
-        행들 = client.execute(AFTER_CLOSES_SQL, [r["stock_id"], r["ref_date"], max(창)]).rows
+        # 같은 종목·기준일·창은 계좌가 일곱이어도 한 번만 읽는다 (25.1458, 검증 권장 — 결정이 계좌 수만큼 겹친다)
+        열쇠 = (int(r["stock_id"]), str(r["ref_date"]), max(창))
+        if 열쇠 not in 시세캐시:
+            시세캐시[열쇠] = client.execute(AFTER_CLOSES_SQL, [r["stock_id"], r["ref_date"], max(창)]).rows
+        행들 = 시세캐시[열쇠]
         뒤 = [(str(d), float(c)) for d, c in 행들]
         그날들 = {뒤[n - 1][0]: 지수(뒤[n - 1][0]) for n in 창 if len(뒤) >= n}
         o = pp.outcomes(r["ref_close"], 뒤, 지수(str(r["ref_date"])), 그날들)
@@ -271,6 +282,7 @@ def _order(r: dict[str, Any]) -> pp.Order:
         order_type=str(r["order_type"]), limit_price=r["limit_price"], quantity=int(r["quantity"]),
         currency=str(r["currency"]), fill_session=str(r["fill_session"]), horizon=r["horizon"],
         score_at_order=r["score_at_order"], score_as_of=r["score_as_of"], fill_basis=str(r["fill_basis"] or "open"),
+        ref_price=r.get("ref_price"),
     )  # fmt: skip
 
 
@@ -578,6 +590,88 @@ def sell_decisions(
     return out
 
 
+#: 무작위 대조(R)가 고르는 모집단 — 그 나라 최신 주간 유니버스의 편입 개별주 (docs/paper.md 2.1.2, 25.1458)
+UNIVERSE_SQL = (
+    "SELECT u.stock_id FROM universe_members u JOIN stocks s ON s.id = u.stock_id"
+    " WHERE s.country = ? AND u.included = 1 AND s.asset_type = 'stock'"
+    f" AND u.snapshot_date = {db.latest_snapshot_sql()}"
+)
+
+
+#: 무작위 대조가 한 자리에서 자료 문제(묵은 종가·개별주 아님·멈춤)로 건너뛰는 최대 후보 수 — 시세가 통째로 묵은 날
+#: 모집단 전체를 한 종목씩 읽지 않게 (25.1458, 검증 권장). 넘으면 그 자리를 비우고 까닭을 적는다
+RANDOM_MAX_TRIES = 50
+
+
+def random_substitute(
+    client: Any, rows: list[report_picks.SignalRow], *, account: str, market: str, pool: list[int],
+    cooldown: set[int], stock_cache: dict[int, dict[str, Any]], today: date, 기록: dict[str, Any],
+) -> list[report_picks.SignalRow]:
+    """고른 신호 행의 종목을 무작위 종목으로 바꾼다 (docs/paper.md 2.1.2). 비중·기간·회차 비율은 그대로.
+
+    씨앗은 `계좌|시장|신호 종목` — 같은 신호 종목은 늘 같은 대체 종목으로 간다(C 가 X 를 채우는 날 R 은 Y 를 채운다).
+    **자료 문제**(개별주 아님·종가가 묵음·기업행위 멈춤)는 씨앗 순서의 다음 후보로 간다. **계좌 상태**(판 뒤 쉼
+    `cooldown`)는 다시 뽑지 않고 그 자리를 비운다 — C 가 X 를 쉬는 날과 같은 뜻이다. 다시 뽑으면 R 만 쉬는 동안
+    다른 종목을 사고 쉼이 끝나면 또 사서 종목 수·투자 속도가 C 와 갈렸다(검증 [필수] 3).
+    같은 날 다른 자리가 고른 종목은 건너뛴다.
+    `기록["random"]` 에 {신호 종목: 대체 종목}, 빈 자리는 `기록["random_empty"]` 에 까닭과 함께
+    """
+    바꿈: dict[int, int] = {}
+    빈자리: dict[str, str] = {}
+    기준일 = {r.stock_id: (r.close_date or today.isoformat())[:10] for r in rows}
+    for sid in dict.fromkeys(r.stock_id for r in rows):
+        까닭 = f"자료가 맞는 후보를 {RANDOM_MAX_TRIES}개 안에서 못 찾음"
+        시도 = 0
+        for c in pp.random_order(pool, f"{account}|{market}|{sid}"):
+            if c in 바꿈.values():
+                continue
+            if 시도 >= RANDOM_MAX_TRIES:
+                break
+            시도 += 1
+            s = _stock(client, c, stock_cache)
+            if s.get("country") != market or s.get("asset_type") not in (None, "stock"):
+                continue
+            # 기준 종가는 **신호의 종가 날짜까지** — C 의 기준가와 같은 시점
+            # (검증 권장: 장 끝난 뒤 손 실행에서 하루 어긋남)
+            종가 = client.execute(LAST_CLOSE_SQL, [c, 기준일[sid]]).rows
+            if not 종가 or (today - date.fromisoformat(str(종가[0][1])[:10])).days > rg.STALE_PRICE_DAYS:
+                continue
+            if c in frozen_ids(client, {c}, {c: market}):
+                continue
+            if c in cooldown:
+                까닭 = f"대체 종목 {c} 판 뒤 {pp.REBUY_COOLDOWN_SESSIONS}거래일 안"
+                break
+            stock_cache[c] = {**s, "_close": (float(종가[0][0]), str(종가[0][1]))}
+            바꿈[sid] = c
+            break
+        if sid not in 바꿈:
+            빈자리[str(sid)] = 까닭
+    out: list[report_picks.SignalRow] = []
+    for r in rows:
+        c = 바꿈.get(r.stock_id)
+        if c is None:
+            continue
+        s = stock_cache[c]
+        종가, 날 = s["_close"]
+        out.append(dc_replace(
+            r, stock_id=c, ticker=str(s.get("ticker")), name=str(s.get("name")), sector=s.get("sector"),
+            close=종가, close_date=날, total_score=None, rank_in_market=None, factor_scores={}, sentiment=None,
+            buy_zone_low=종가, buy_zone_high=종가, cagr=None, mdd=None, sharpe=None, perf_window=None, perf_as_of=None,
+            rationale_text=f"무작위 대조 — 원래 자리: {r.name}({r.ticker})",
+            # 근거표 모양은 sell_flags._criterion 과 같다 — CriteriaTable 이 display·threshold 를 읽는다 (검증 권장)
+            criteria=[{"label": "무작위 대조",
+                       "display": f"원래 자리 {r.name}({r.ticker}) · 비중 {r.suggested_weight_pct}%",
+                       "threshold": "추천이 아니라 대조 실험 (docs/paper.md 2.1.2)", "source": "paper", "as_of": 날,
+                       "passed": True}],
+            # 회차 가격 키는 신호의 `price` — build_portfolio 의 1주 검사가 이것을 읽는다(검증 [필수] 2)
+            tranche_plan=[{**t, "price": 종가, "price_at_or_below": 종가} for t in r.tranche_plan],
+        ))  # fmt: skip
+    기록["random"] = {str(k): v for k, v in 바꿈.items()}
+    if 빈자리:
+        기록["random_empty"] = 빈자리
+    return out
+
+
 def rescale_rows(rows: list[report_picks.SignalRow], total: float, min_order: float) -> list[report_picks.SignalRow]:
     """신호 금액을 **모의 계좌 평가 총액 × 신호 비중**으로 다시 만든다 (docs/paper.md 2.1, 검증 [필수] 1).
 
@@ -599,8 +693,16 @@ def buy_orders(
     open_buys: list[pp.Order], signal_rows: list[report_picks.SignalRow], settings: dict[str, Any],
     price_series: dict[int, dict[str, float]], series_unknown: dict[int, str], fx_rate: float | None,
     stop_ids: set[int], sold_recently: set[int], stock_cache: dict[int, dict[str, Any]],
+    top_n: int = report_picks.TOP_STOCKS, entry: str = "tranche",
+    substitute: Callable[[list[report_picks.SignalRow]], list[report_picks.SignalRow]] | None = None,
+    series_loader: Callable[[list[int]], dict] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """2부와 같은 함수로 이 계좌의 매수 회차 주문을 낸다 (docs/paper.md 2.1). (주문 행, 기록)."""
+    """2부와 같은 함수로 이 계좌의 매수 회차 주문을 낸다 (docs/paper.md 2.1). (주문 행, 기록).
+
+    계좌 칸(25.1458): `top_n` 상위 몇 종목(E 10), `entry` tranche·open(시가 일괄, 2.1.1),
+    `substitute` 는 고른 신호 행을 무작위 종목으로 바꾼다(R, 2.1.2). 2부가 시세를 읽지 않은 후보(6~10위·무작위 종목)는
+    `series_loader` 로 더 읽어 같은 상관 축소를 받는다
+    """
     통화 = "KRW" if market == "KR" else "USD"
     환율 = 1.0 if 통화 == "KRW" else fx_rate
     if not 환율:
@@ -621,8 +723,14 @@ def buy_orders(
         for r in valuation.rows
     ]
     총액 = valuation.equity_krw / 환율
-    고른 = report_picks.select_top(report_picks.with_criteria(signal_rows))
+    고른 = report_picks.select_top(report_picks.with_criteria(signal_rows), top_n)
+    후보수 = len({r.stock_id for r in 고른})  # 신호 종목이 top_n 보다 적은 날은 E 가 B 와 같다 — 기록에 남긴다
     다시 = rescale_rows(고른, 총액, float(settings.get("min_order_amount") or 0))
+    if substitute is not None:
+        다시 = substitute(다시)
+    빠진후보 = sorted({r.stock_id for r in 다시} - set(price_series))
+    if 빠진후보 and series_loader is not None:
+        price_series = {**price_series, **series_loader(빠진후보)}
     pv = report_picks.build_portfolio(
         다시, 총액, currency=통화, max_sector_pct=settings["max_weight_per_sector"], holdings=보유,
         max_stock_pct=settings["max_weight_per_stock"], price_series=price_series, series_unknown=series_unknown,
@@ -638,8 +746,10 @@ def buy_orders(
         if not 행:
             continue
         best = max(행, key=lambda r: (r.suggested_amount or 0, -report_picks._기간_순.get(r.horizon, 9)))
-        배분.append({"stock_id": best.stock_id, "amount": a.amount, "tranches": a.tranches, "row": best, "alloc": a})
-    주문, 빠짐 = pp.size_buys(배분, valuation.cash_krw - 예약, 환율, sold_recently, 통화)
+        배분.append({"stock_id": best.stock_id, "amount": a.amount, "tranches": a.tranches, "row": best, "alloc": a,
+                     "ref_price": best.close})  # fmt: skip
+    주문, 빠짐 = pp.size_buys(배분, valuation.cash_krw - 예약, 환율, sold_recently, 통화, entry)
+    사유 = "무작위 대조" if substitute is not None else "2부 배분"
     by_sid = {b["stock_id"]: b for b in 배분}
     # 결정 원장 (25.1449) — 산 후보·못 산 후보(까닭)와 그때의 기준 종가
     결정: list[dict[str, Any]] = []
@@ -648,10 +758,11 @@ def buy_orders(
         r0: report_picks.SignalRow = b["row"]
         까닭 = next((x["why"] for x in 빠짐 if x.get("stock_id") == b["stock_id"]), "주문 없음")
         결정.append({"stock_id": b["stock_id"], "kind": "buy" if b["stock_id"] in 낸 else "skip",
-                     "reason": "2부 배분" if b["stock_id"] in 낸 else 까닭,
+                     "reason": 사유 if b["stock_id"] in 낸 else 까닭,
                      "ref_close": r0.close, "ref_date": r0.close_date,
                      "detail": {"horizon": r0.horizon, "score": r0.total_score, "weight_pct": r0.suggested_weight_pct,
-                                "amount": b["amount"], "prices": [t.get("price_at_or_below") for t in b["tranches"]]}})
+                                "amount": b["amount"], "entry": entry,
+                                "prices": [t.get("price_at_or_below") for t in b["tranches"]]}})  # fmt: skip
     for e in pv.excluded:
         r0 = (by_ticker.get(e.ticker) or [None])[0]  # type: ignore[assignment]
         if r0 is not None:
@@ -662,22 +773,27 @@ def buy_orders(
     for o in 주문:
         b = by_sid[o["stock_id"]]
         r: report_picks.SignalRow = b["row"]
+        # 위험 점검의 금액은 **낼 것으로 보는 값** — 시장가는 기준가. 틈 여유(`OPEN_BUY_BUFFER`)는 현금 예약의
+        # 잣대라 `size_buys` 가 이미 그 잣대로 현금 안에서 냈다. 여유까지 넣으면 비중 10% 배분이 "사고 나면 11.1%"
+        # 로 읽혀 C·R 매수가 모두 막혔다 (25.1458)
+        단가 = o["limit_price"] if o.get("limit_price") is not None else o["ref_price"]
         out.append({
             **o, "currency": 통화, "horizon": r.horizon, "score": r.total_score, "score_as_of": r.as_of_date,
-            "ref_date": r.close_date,
-            # 위험 점검이 보는 원화 금액 — 예약과 같은 잣대 (25.1451)
-            "cost_krw": o["limit_price"] * o["quantity"] * (1 + pp.FEE_BUFFER) * 환율
+            "ref_date": r.close_date, "reason": 사유,
+            # 위험 점검이 보는 원화 금액 — 수수료·환율 여유는 예약과 같은 잣대 (25.1451)
+            "cost_krw": 단가 * o["quantity"] * (1 + pp.FEE_BUFFER) * 환율
             * (1 if 통화 == "KRW" else 1 + pp.FX_BUFFER),
             "rationale": {
                 "alloc": {"amount": b["alloc"].amount, "weight_pct": b["alloc"].weight_pct, "note": b["alloc"].note},
                 "signal": {"horizon": r.horizon, "as_of": r.as_of_date, "total_score": r.total_score,
                            "weight_pct": r.suggested_weight_pct, "criteria": r.criteria},
+                "entry": entry, "top_n": top_n, "ref_price": o.get("ref_price"),
                 "settings": {k: settings.get(k) for k in ("max_weight_per_stock", "max_weight_per_sector",
                                                           "min_order_amount")},
                 "equity": 총액, "reserved": 예약 / 환율, "fx": 환율,
             },
         })  # fmt: skip
-    return out, {"allocations": len(pv.allocations), "orders": len(out), "skipped": 빠짐[:10],
+    return out, {"candidates": 후보수, "allocations": len(pv.allocations), "orders": len(out), "skipped": 빠짐[:10],
                  "excluded": len(pv.excluded), "_decisions": 결정}  # fmt: skip
 
 
@@ -706,7 +822,11 @@ def run_step(
     fees = db.get_setting(client, "fees", {})
     taxes = db.get_setting(client, "taxes", {})
     stock_cache: dict[int, dict[str, Any]] = {}
-    관심 = {f.stock_id for f in fills} | {int(r["stock_id"]) for r in client.execute(OPEN_ORDERS_SQL).dicts()}
+    # 기업행위 경계는 **지금 든 것과 미체결 주문만** 본다 — 판 종목까지 보면 R 의 회전만큼 날마다 읽기가 늘었다
+    # (25.1458, 검증 권장)
+    든것 = {sid for aid in {f.account_id for f in fills}
+            for sid in pp.positions([f for f in fills if f.account_id == aid])}  # fmt: skip
+    관심 = 든것 | {int(r["stock_id"]) for r in client.execute(OPEN_ORDERS_SQL).dicts()}
     market_of = {sid: str(_stock(client, sid, stock_cache).get("country") or "KR") for sid in 관심}
     frozen = frozen_ids(client, 관심, market_of)
 
@@ -735,8 +855,12 @@ def run_step(
     기록["halted"] = 멈춤
     줄: list[str] = []
     계좌기록: dict[str, Any] = {}
+    유니버스: list[int] | None = None  # 무작위 대조의 모집단 — 하루 실행에 한 번만 읽어 R1·R2 가 같이 쓴다
     for acct in accounts:
         aid, 규칙, 판 = str(acct["id"]), str(acct["sell_rule"]), int(acct["rule_version"])
+        진입 = str(acct.get("entry_rule") or "tranche")
+        종목수 = int(acct.get("top_n") or report_picks.TOP_STOCKS)
+        무작위 = str(acct.get("selection") or "signal") == "random"
         a기록: dict[str, Any] = {"fills": sum(1 for f in 새체결 if f.account_id == aid)}
         v, 검 = mark(client, aid, 오늘, flows, flow_created, fills, fill_created, a기록["fills"], frozen, stock_cache,
                     shadows, 지금)  # fmt: skip
@@ -777,7 +901,7 @@ def run_step(
                 문장.append((INSERT_ORDER_SQL, [
                     aid, market, sid, "sell", "market", None, 보유[sid].quantity, 보유[sid].currency, trade_date,
                     다음장, 기준, 0, ",".join(사유), None, None, None,
-                    json.dumps({"flags": 근거, "sell_rule": 규칙}, ensure_ascii=False, default=str), 판, 지금,
+                    json.dumps({"flags": 근거, "sell_rule": 규칙}, ensure_ascii=False, default=str), 판, 지금, None,
                 ]))  # fmt: skip
             a기록["sells"] = len(문장)  # 이 자리까지는 매도 주문만 있다
             # 결정 원장 (25.1449) — 판 것과, 플래그가 섰는데 계좌 규칙이 따르지 않아 들고 간 것(B 의 황색)
@@ -797,15 +921,27 @@ def run_step(
                                     종가, 날, 지금))  # fmt: skip
             최근판 = {f.stock_id for f in 계좌체결 if f.side == "sell" and f.fill_date >= 쉼_시작} | set(매도)
             if allocate and settings is not None and signal_rows:
-                손절 = {sid for sid, (사유, _근거) in 매도.items() if "손절" in 사유}
+                # 손절이 선 보유에 더 사지 않는다 — **계좌 규칙 전의** 판정에서 (검증 [필수] 4: 규칙으로 거른 뒤의
+                # 매도에서 뽑으면 손절을 따르지 않는 D 는 늘 비어, 떨어진 보유를 목표 비중까지 날마다 더 샀다 —
+                # B−D 에 물타기가 섞였다)
+                손절 = {sid for sid, 메모 in 판정메모.items() if any(f["reason_code"] == "손절" for f in 메모["flags"])}
+                손절 |= {sid for sid, (사유, _근거) in 매도.items() if "손절" in 사유}
                 빠진시세 = sorted({int(r["stock_id"]) for r in v.rows} - set(price_series))
                 if 빠진시세 and series_loader is not None:
                     price_series = {**price_series, **series_loader(빠진시세)}
+                바꾸기 = None
+                if 무작위:
+                    if 유니버스 is None:
+                        유니버스 = [int(r[0]) for r in client.execute(UNIVERSE_SQL, [market, market]).rows]
+                    바꾸기 = partial(random_substitute, client, account=aid, market=market, pool=유니버스,
+                                    cooldown=최근판, stock_cache=stock_cache, today=cal.local_today(market),
+                                    기록=a기록)  # fmt: skip
                 주문, b기록 = buy_orders(
                     client, market=market, account=aid, account_fills=계좌체결, valuation=v,
                     open_buys=[o for o in 열린 if o.account_id == aid and o.side == "buy"], signal_rows=signal_rows,
                     settings=settings, price_series=price_series, series_unknown=series_unknown,
                     fx_rate=fx[0] if fx else None, stop_ids=손절, sold_recently=최근판, stock_cache=stock_cache,
+                    top_n=종목수, entry=진입, substitute=바꾸기, series_loader=series_loader,
                 )  # fmt: skip
                 # 사전 위험 점검 (25.1451) — 통과한 회차만 주문. 한 회차도 못 지난 종목은 결정 원장에서 blocked 로
                 후보 = [rg.Candidate(o["stock_id"], "buy", o["cost_krw"], o["ref_date"], i) for i, o in enumerate(주문)]
@@ -826,9 +962,10 @@ def run_step(
                 a기록["buy"] = b기록
                 for o in 주문:
                     문장.append((INSERT_ORDER_SQL, [
-                        aid, market, o["stock_id"], "buy", "limit", o["limit_price"], o["quantity"], o["currency"],
-                        trade_date, 다음장, 기준, o["tranche"], "2부 배분", o["horizon"], o["score"], o["score_as_of"],
-                        json.dumps(o["rationale"], ensure_ascii=False, default=str), 판, 지금,
+                        aid, market, o["stock_id"], "buy", "limit" if o.get("limit_price") is not None else "market",
+                        o.get("limit_price"), o["quantity"], o["currency"], trade_date, 다음장, 기준, o["tranche"],
+                        o["reason"], o["horizon"], o["score"], o["score_as_of"],
+                        json.dumps(o["rationale"], ensure_ascii=False, default=str), 판, 지금, o.get("ref_price"),
                     ]))  # fmt: skip
             else:
                 a기록["buy"] = {"skipped": "배분하지 않는 날(신호 없음·묵음·추천 못 읽음)"}
@@ -909,8 +1046,9 @@ def summary_section(client: Any, now: datetime) -> list[str]:
         "max_sector_pct": db.get_setting_in_range(client, "max_weight_per_sector", 30.0)[0],
         "stop_pct": 손절,
     }
+    규칙 = {str(r["id"]): str(r["sell_rule"]) for r in client.execute(ACCOUNTS_SQL).dicts()}
     줄 = pp.summary_lines(daily, by_acct, 주초, 달초, {k: str(v.get("name")) for k, v in 캐시.items()},
-                         {k: v.get("sector") for k, v in 캐시.items()}, limits)  # fmt: skip
+                         {k: v.get("sector") for k, v in 캐시.items()}, limits, 규칙)  # fmt: skip
     # 실제 투자와 같은 기간 비교 (25.1448) — 모의 절 바로 아래
     try:
         비교줄 = pp.compare_line(real_comparison(client))

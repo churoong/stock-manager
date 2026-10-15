@@ -95,7 +95,8 @@ describe("현금·예약·취소", () => {
         " VALUES (1, 'A', 1, 'buy', '2026-10-16', 10000, 4, 'KRW', 1, 6, 0, 0, -40006, 't')",
     );
     const 현금 = Object.fromEntries((db.prepare(PAPER_CASH).all() as Array<{ account_id: string; cash_krw: number }>).map((r) => [r.account_id, r.cash_krw]));
-    expect(현금).toEqual({ A: 959_994, B: 1_000_000 });
+    // 일곱 계좌(25.1458) 모두 같은 입금 — A 만 샀다
+    expect(현금).toEqual({ A: 959_994, B: 1_000_000, C: 1_000_000, D: 1_000_000, E: 1_000_000, R1: 1_000_000, R2: 1_000_000 });
     const 예약 = reservedByAccount(db.prepare(PAPER_OPEN_BUYS).all() as never, null);
     expect(예약).toEqual({ A: Math.round(9800 * 3 * 1.01) });
     // 일지·미체결 질의가 실제 스키마에서 돈다

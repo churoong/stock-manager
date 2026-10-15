@@ -15,6 +15,8 @@ export const DEPOSIT_MAX_KRW = 1_000_000_000;
 /** 미체결 매수 예약에 얹는 수수료 여유·달러 환율 여유 — `batch/services/paper.py` 의 FEE_BUFFER·FX_BUFFER 와 같다 */
 export const FEE_BUFFER = 0.01;
 export const FX_BUFFER = 0.03;
+/** 시장가 매수(시가 일괄, C·R)의 예약 잣대 = 기준가 × (1 + 이 값) — `batch/services/paper.py` OPEN_BUY_BUFFER 와 같다 (25.1458) */
+export const OPEN_BUY_BUFFER = 0.1;
 
 /** 화면이 요청마다 만드는 키. 두 번 누름은 같은 키라 장부에 한 번만 들어간다 (docs/paper.md 5장) */
 const requestKey = z.string().regex(/^[A-Za-z0-9-]{8,64}$/, "요청 키가 올바르지 않습니다");
@@ -31,7 +33,35 @@ export const depositSchema = z.object({
 
 export const cancelSchema = z.object({ request_key: requestKey });
 
-export const PAPER_ACCOUNTS = "SELECT id, name, sell_rule, rule_version FROM paper_accounts ORDER BY id";
+export const PAPER_ACCOUNTS =
+  "SELECT id, name, sell_rule, rule_version, entry_rule, top_n, selection FROM paper_accounts ORDER BY id";
+
+/** 계좌 규칙 칸 (migrations/0075, docs/paper.md 1장) — 화면은 칸을 글로 옮길 뿐 계좌 이름을 보지 않는다 */
+export interface AccountRule {
+  sell_rule: string;
+  entry_rule?: string | null;
+  top_n?: number | null;
+  selection?: string | null;
+}
+const SELL_RULE_TEXT: Record<string, string> = {
+  all: "모든 매도 플래그",
+  core: "손절·목표도달·기간초과만",
+  time: "기간초과만(손절·목표 무시)",
+};
+export function ruleText(a: AccountRule): string {
+  const 고르기 = a.selection === "random" ? "무작위 대조(같은 자리·비중)" : `점수 상위 ${a.top_n ?? 5}종목`;
+  const 진입 = a.entry_rule === "open" ? "다음 장 시가에 한 번에" : "3회 분할 지정가";
+  return `매수: ${고르기} · ${진입} — 매도: ${SELL_RULE_TEXT[a.sell_rule] ?? a.sell_rule}`;
+}
+/** 짝 비교 — 한 번에 하나만 다르게 지은 짝. batch/services/paper.py `PAIRS` 와 같은 목록 (25.1458) */
+export const PAIRS: ReadonlyArray<readonly [string, string, string]> = [
+  ["A", "B", "황색 매도를 따르는 값"],
+  ["B", "C", "분할 지정가 대 시가 일괄"],
+  ["B", "D", "매도 플래그 대 기간 보유"],
+  ["E", "B", "10종목 대 5종목"],
+  ["C", "R1", "종목 선정 대 무작위"],
+  ["C", "R2", "종목 선정 대 무작위"],
+];
 /** 총 투자금액 = 입금 장부 전체의 합(취소 행은 음수) */
 export const PAPER_INVESTED = "SELECT COALESCE(SUM(amount_krw), 0) AS invested, COUNT(*) AS n FROM paper_cash_flows";
 export const PAPER_FLOWS = `SELECT f.id, f.flow_date, f.amount_krw, f.kind, f.cancels_id, f.memo, f.created_at,
@@ -43,7 +73,7 @@ export const PAPER_CASH = `SELECT a.id AS account_id,
   + COALESCE((SELECT SUM(f.cash_krw) FROM paper_fills f WHERE f.account_id = a.id), 0) AS cash_krw
 FROM paper_accounts a ORDER BY a.id`;
 export const PAPER_OPEN_BUYS =
-  "SELECT account_id, limit_price, quantity, currency FROM paper_orders WHERE status = 'open' AND side = 'buy'";
+  "SELECT account_id, order_type, limit_price, ref_price, quantity, currency FROM paper_orders WHERE status = 'open' AND side = 'buy'";
 export const PAPER_LATEST_DAILY = `SELECT d.account_id, d.as_of, d.invested_krw, d.cash_krw, d.holdings_krw, d.equity_krw,
   d.pnl_krw, d.twr_index, d.kospi_krw, d.sp500_krw, d.positions_json, d.recon_ok, d.recon_note, d.unknown_json, d.updated_at,
   d.attribution_json, d.realized_krw, d.unrealized_krw
@@ -51,14 +81,18 @@ FROM paper_daily d
 WHERE d.as_of = (SELECT MAX(x.as_of) FROM paper_daily x WHERE x.account_id = d.account_id)`;
 export const PAPER_HISTORY = `SELECT account_id, as_of, invested_krw, equity_krw, twr_index, kospi_krw, sp500_krw
 FROM paper_daily WHERE as_of >= ? ORDER BY as_of`;
-/** 거래내역 — 계좌마다 화면이 거른다(두 계좌 합쳐 최근 500건). 매도의 실현손익은 배치가 체결 때 적었다 (25.1455) */
-export const PAPER_FILLS = `SELECT f.id, f.account_id, f.stock_id, s.ticker, COALESCE(s.name_ko, s.name_en, s.ticker) AS name,
-  f.side, f.fill_date, f.price, f.quantity, f.currency, f.fx_rate, f.fee, f.tax, f.slippage, f.cash_krw, f.realized_krw,
-  o.reason, o.decided_on, o.rationale_json, o.close_note
-FROM paper_fills f JOIN paper_orders o ON o.id = f.order_id JOIN stocks s ON s.id = f.stock_id
-ORDER BY f.fill_date DESC, f.id DESC LIMIT 500`;
+/** 계좌마다 거래내역에 싣는 최근 체결 수 — 계좌가 일곱이라 합쳐 자르면 한 계좌가 다른 계좌 몫을 밀어냈다 (25.1458) */
+export const FILLS_PER_ACCOUNT = 300;
+/** 거래내역 — **계좌마다** 최근 `FILLS_PER_ACCOUNT` 건. 매도의 실현손익은 배치가 체결 때 적었다 (25.1455) */
+export const PAPER_FILLS = `SELECT * FROM (
+  SELECT f.id, f.account_id, f.stock_id, s.ticker, COALESCE(s.name_ko, s.name_en, s.ticker) AS name,
+    f.side, f.fill_date, f.price, f.quantity, f.currency, f.fx_rate, f.fee, f.tax, f.slippage, f.cash_krw, f.realized_krw,
+    o.reason, o.decided_on, o.rationale_json, o.close_note,
+    ROW_NUMBER() OVER (PARTITION BY f.account_id ORDER BY f.fill_date DESC, f.id DESC) AS rn
+  FROM paper_fills f JOIN paper_orders o ON o.id = f.order_id JOIN stocks s ON s.id = f.stock_id
+) WHERE rn <= ${FILLS_PER_ACCOUNT} ORDER BY fill_date DESC, id DESC`;
 export const PAPER_OPEN_ORDERS = `SELECT o.id, o.account_id, o.market, s.ticker, COALESCE(s.name_ko, s.name_en, s.ticker) AS name,
-  o.side, o.limit_price, o.quantity, o.currency, o.fill_session, o.tranche, o.reason
+  o.side, o.order_type, o.limit_price, o.ref_price, o.quantity, o.currency, o.fill_session, o.tranche, o.reason
 FROM paper_orders o JOIN stocks s ON s.id = o.stock_id WHERE o.status = 'open' ORDER BY o.id`;
 export const PAPER_STOCK_NAMES = `SELECT s.id, s.ticker, COALESCE(s.name_ko, s.name_en, s.ticker) AS name
 FROM json_each(?) j JOIN stocks s ON s.id = j.value`;
@@ -76,7 +110,9 @@ export const FLOW_BY_KEY = "SELECT id, amount_krw, kind FROM paper_cash_flows WH
 
 export interface OpenBuy {
   account_id: string;
+  order_type?: string;
   limit_price: number | null;
+  ref_price?: number | null;
   quantity: number;
   currency: string;
 }
@@ -92,10 +128,12 @@ export function kstToday(now: Date = new Date()): string {
 export function reservedByAccount(buys: OpenBuy[], usdKrw: number | null): Record<string, number | null> {
   const out: Record<string, number | null> = {};
   for (const b of buys) {
-    if (b.limit_price == null) continue;
+    // 시장가 매수(시가 일괄)는 기준가 × (1 + 여유) — 0 으로 세면 입금 취소 막기가 C·R 에 묶인 돈을 못 봤다 (25.1458, 검증 [필수] 5)
+    const 단가 = b.order_type === "market" ? (b.ref_price ? b.ref_price * (1 + OPEN_BUY_BUFFER) : null) : b.limit_price;
+    if (단가 == null) continue;
     const prev = out[b.account_id] === undefined ? 0 : out[b.account_id];
     if (prev === null) continue;
-    let 금액 = b.limit_price * b.quantity * (1 + FEE_BUFFER);
+    let 금액 = 단가 * b.quantity * (1 + FEE_BUFFER);
     if (b.currency !== "KRW") {
       if (!usdKrw) {
         out[b.account_id] = null;

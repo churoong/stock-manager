@@ -72,7 +72,7 @@ def test_summary_section_reads_real_schema(monkeypatch: pytest.MonkeyPatch) -> N
     from batch.services import report_picks
 
     monkeypatch.setattr(report_picks, "with_criteria", lambda rows: rows)
-    monkeypatch.setattr(report_picks, "select_top", lambda rows: rows)
+    monkeypatch.setattr(report_picks, "select_top", lambda rows, _n=5: rows)
     monkeypatch.setattr(job, "frozen_ids", lambda *_a, **_k: set())
     _하루(c, monkeypatch, "2026-10-14")
     _시세(c, "2026-10-15", 10_100, 9_900)

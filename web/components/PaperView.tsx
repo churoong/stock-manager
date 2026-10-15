@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import CriteriaTable from "@/components/CriteriaTable";
 import EquityChart, { type Series } from "@/components/EquityChart";
 import { bodyOf, readJson } from "@/lib/http";
-import { DEPOSIT_MAX_KRW, DEPOSIT_MIN_KRW, attrCellText, type AccountView, type Attribution } from "@/lib/paper";
+import { DEPOSIT_MAX_KRW, DEPOSIT_MIN_KRW, PAIRS, attrCellText, ruleText, type AccountView, type Attribution } from "@/lib/paper";
 import { money, won } from "@/lib/portfolio";
 
 /**
@@ -19,6 +19,9 @@ interface Account {
   name: string;
   sell_rule: string;
   rule_version: number;
+  entry_rule?: string | null;
+  top_n?: number | null;
+  selection?: string | null;
   view: AccountView;
   positions: Position[];
   unknown: Array<{ stock_id: number; why: string }>;
@@ -37,7 +40,7 @@ interface FillRow {
   reason: string; decided_on: string;
   rationale_json: string | null;
 }
-interface OrderRow { id: number; account_id: string; market: string; ticker: string; name: string; side: string; limit_price: number | null; quantity: number; currency: string; fill_session: string; tranche: number; reason: string }
+interface OrderRow { id: number; account_id: string; market: string; ticker: string; name: string; side: string; order_type?: string; limit_price: number | null; ref_price?: number | null; quantity: number; currency: string; fill_session: string; tranche: number; reason: string }
 interface HistoryRow { account_id: string; as_of: string; invested_krw: number; equity_krw: number; kospi_krw: number | null; sp500_krw: number | null }
 interface RealCompareView { start?: string; end?: string; realPct?: number; paperPct?: Record<string, number | null>; error?: string }
 export interface Data { halted: boolean; realCompare: RealCompareView | null; invested: number; accounts: Account[]; flows: Flow[]; fills: FillRow[]; orders: OrderRow[]; history: HistoryRow[] }
@@ -55,7 +58,6 @@ const SUB_TABS: Array<[SubTab, string]> = [
   ["report", "성적표"],
 ];
 
-const RULE_LABEL: Record<string, string> = { all: "모든 매도 플래그를 따른다", core: "손절·목표도달·기간초과만 따른다" };
 
 function newKey(): string {
   return typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `k${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
@@ -71,20 +73,22 @@ function tone(v: number | null | undefined): string {
   return v > 0 ? "text-red-600 dark:text-red-400" : "text-blue-600 dark:text-blue-400";
 }
 
-/** 같은 돈 흐름이라 평가 ÷ 입금으로 견준다 — A·B·KOSPI·S&P500 이 같은 날 같은 금액을 받았다 (docs/paper.md 4장) */
-function chartSeries(history: HistoryRow[]): Series[] {
+/** 계좌 선 색 — 무작위 대조(R)는 회색 계열로 눌러 둔다 */
+const ACCOUNT_COLORS = ["#dc2626", "#7c3aed", "#ea580c", "#16a34a", "#2563eb", "#9ca3af", "#cbd5e1"];
+
+/** 같은 돈 흐름이라 평가 ÷ 입금으로 견준다 — 모든 계좌·KOSPI·S&P500 이 같은 날 같은 금액을 받았다 (docs/paper.md 4장) */
+function chartSeries(history: HistoryRow[], ids: string[]): Series[] {
   const by = (aid: string) => history.filter((h) => h.account_id === aid && Number(h.invested_krw) > 0);
-  const A = by("A");
+  const 첫 = by(ids[0] ?? "");
   const ratio = (rows: HistoryRow[], pick: (h: HistoryRow) => number | null) =>
     rows.flatMap((h) => {
       const v = pick(h);
       return v == null ? [] : [{ date: h.as_of, value: Number(v) / Number(h.invested_krw) }];
     });
   return [
-    { label: "A", color: "#dc2626", points: ratio(A, (h) => h.equity_krw) },
-    { label: "B", color: "#7c3aed", points: ratio(by("B"), (h) => h.equity_krw) },
-    { label: "KOSPI", color: "#64748b", points: ratio(A, (h) => h.kospi_krw) },
-    { label: "S&P500", color: "#0891b2", points: ratio(A, (h) => h.sp500_krw) },
+    ...ids.map((aid, i) => ({ label: aid, color: ACCOUNT_COLORS[i % ACCOUNT_COLORS.length], points: ratio(by(aid), (h) => h.equity_krw) })),
+    { label: "KOSPI", color: "#64748b", points: ratio(첫, (h) => h.kospi_krw) },
+    { label: "S&P500", color: "#0891b2", points: ratio(첫, (h) => h.sp500_krw) },
   ];
 }
 
@@ -122,7 +126,7 @@ export default function PaperView() {
     }
     const 지금 = data?.invested ?? 0;
     const 물음 =
-      `모의 계좌에 ${won(금액)}을 넣습니다 (A·B 두 계좌에 같은 금액).\n\n` +
+      `모의 계좌에 ${won(금액)}을 넣습니다 (모의 계좌 ${data?.accounts.length ?? 0}개 모두에 같은 금액).\n\n` +
       `지금 총 투자금액: ${won(지금)}\n입금 뒤 총 투자금액: ${won(지금 + 금액)}\n\n` +
       "매수는 다음 아침 리포트부터 배치가 규칙대로 합니다. 넣을까요?";
     if (!confirm(물음)) return;
@@ -186,7 +190,7 @@ export default function PaperView() {
       <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
         <h2 className="text-base font-semibold">입금</h2>
         <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-          장부의 총 투자금액 <b className="text-slate-900 dark:text-slate-100">{won(data.invested)}</b> — 입금 한 번이 A·B 두 계좌에 같은 금액으로 들어갑니다.
+          장부의 총 투자금액 <b className="text-slate-900 dark:text-slate-100">{won(data.invested)}</b> — 입금 한 번이 모의 계좌 {data.accounts.length}개 모두에 같은 금액으로 들어갑니다.
         </p>
         <div className="mt-3 flex flex-wrap gap-2">
           <input
@@ -226,6 +230,8 @@ export default function PaperView() {
         </div>
       </section>
 
+      <CompareCard data={data} />
+
       <AccountTabs data={data} acct={acct} setAcct={setAcct} sub={sub} setSub={setSub} />
 
       {data.realCompare ? (
@@ -255,7 +261,7 @@ export default function PaperView() {
       {data.history.length > 1 ? (
         <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
           <h2 className="text-base font-semibold">평가 ÷ 입금 (같은 돈 흐름)</h2>
-          <EquityChart series={chartSeries(data.history)} height={240} />
+          <EquityChart series={chartSeries(data.history, data.accounts.map((a) => a.id))} height={240} />
         </section>
       ) : null}
 
@@ -287,6 +293,51 @@ export default function PaperView() {
 const CARD = "rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900";
 
 /**
+ * 계좌 비교 (25.1458, 2026-10-15 사용자 지시 "두개의 모의투자자로는 부족할거 같다") — 일곱 계좌를 한 표에.
+ * 값은 계좌 화면과 같은 배치 값이고, 짝은 "무엇을 재는 차이인가" 의 안내다(차이 계산은 주간 요약이 한다).
+ */
+export function CompareCard({ data }: { data: Data }) {
+  if (data.accounts.length < 2) return null;
+  const 있음 = new Set(data.accounts.map((a) => a.id));
+  return (
+    <section className={CARD}>
+      <h2 className="text-base font-semibold">계좌 비교</h2>
+      <div className="mt-2 overflow-x-auto">
+        <table className="w-full min-w-[560px] text-xs">
+          <thead className="text-slate-500">
+            <tr>
+              <th className="py-1 text-left">계좌</th>
+              <th className="text-left">규칙</th>
+              <th className="text-right">평가 총액</th>
+              <th className="text-right">손익</th>
+              <th className="text-right">시간가중</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+            {data.accounts.map((a) => (
+              <tr key={a.id}>
+                <td className="py-1 font-semibold">{a.id}</td>
+                <td className="text-slate-600 dark:text-slate-400">{ruleText(a)}</td>
+                <td className="text-right">{won(a.view.equity)}</td>
+                <td className={`text-right ${tone(a.view.pnlPct)}`}>{pctText(a.view.pnlPct)}</td>
+                <td className={`text-right ${tone(a.view.twrPct)}`}>{pctText(a.view.twrPct)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-2 text-xs text-slate-500">
+        짝마다 규칙 하나만 다릅니다 —{" "}
+        {PAIRS.filter(([x, y]) => 있음.has(x) && 있음.has(y))
+          .map(([x, y, 무엇]) => `${x}−${y}: ${무엇}`)
+          .join(" · ")}
+        . 몇 달 차이는 대부분 운입니다(R1·R2 가 그 크기를 보여 줍니다).
+      </p>
+    </section>
+  );
+}
+
+/**
  * 계좌별 화면 (2026-10-15 사용자 지시 "각 모의A나 모의B의 보유내역, 거래내역, 평가손익 등을 확인할 수 있어야해", 25.1455).
  * 위 탭으로 계좌를, 아래 탭으로 요약·보유내역·거래내역·미체결·성적표를 고른다. 값은 모두 배치가 적은 그대로다.
  */
@@ -299,7 +350,7 @@ export function AccountTabs({ data, acct, setAcct, sub, setSub }: {
   const 주문 = data.orders.filter((o) => o.account_id === a.id);
   return (
     <section className={CARD}>
-      <div className="flex gap-2" role="tablist" aria-label="모의 계좌">
+      <div className="flex gap-2 overflow-x-auto pb-1" role="tablist" aria-label="모의 계좌">
         {data.accounts.map((x) => (
           <button
             key={x.id}
@@ -307,7 +358,7 @@ export function AccountTabs({ data, acct, setAcct, sub, setSub }: {
             role="tab"
             aria-selected={x.id === a.id}
             onClick={() => setAcct(x.id)}
-            className={`min-w-0 flex-1 rounded-lg border px-3 py-2 text-left text-sm ${x.id === a.id ? "border-slate-900 bg-slate-900 text-white dark:border-slate-100 dark:bg-slate-100 dark:text-slate-900" : "border-slate-300 dark:border-slate-700"}`}
+            className={`min-w-[7rem] flex-1 shrink-0 rounded-lg border px-3 py-2 text-left text-sm ${x.id === a.id ? "border-slate-900 bg-slate-900 text-white dark:border-slate-100 dark:bg-slate-100 dark:text-slate-900" : "border-slate-300 dark:border-slate-700"}`}
           >
             <span className="block font-semibold">모의 {x.id}</span>
             <span className="block truncate text-xs opacity-80">
@@ -317,7 +368,7 @@ export function AccountTabs({ data, acct, setAcct, sub, setSub }: {
         ))}
       </div>
       <p className="mt-2 text-xs text-slate-500">
-        {a.name} · 규칙서 판 {a.rule_version} · 매도: {RULE_LABEL[a.sell_rule] ?? a.sell_rule}
+        {a.name} · 규칙서 판 {a.rule_version} · {ruleText(a)}
       </p>
       <div className="mt-3 flex gap-1 overflow-x-auto border-b border-slate-200 text-sm dark:border-slate-800" role="tablist" aria-label="계좌 화면">
         {SUB_TABS.map(([k, label]) => (
@@ -470,7 +521,13 @@ function OrdersPane({ orders }: { orders: OrderRow[] }) {
     <ul className="space-y-1 text-sm">
       {orders.map((o) => (
         <li key={o.id}>
-          {o.name} · {o.side === "buy" ? `매수 ${o.tranche}회차 ${money(o.limit_price, o.currency)} 이하` : `매도(${o.reason}) 시장가`} ·{" "}
+          {o.name} ·{" "}
+          {o.side === "sell"
+            ? `매도(${o.reason}) 시장가`
+            : o.order_type === "market"
+              ? `매수 시가 일괄 (기준가 ${money(o.ref_price ?? null, o.currency)}${o.reason === "무작위 대조" ? " · 무작위 대조" : ""})`
+              : `매수 ${o.tranche}회차 ${money(o.limit_price, o.currency)} 이하`}{" "}
+          ·{" "}
           {o.quantity.toLocaleString("ko-KR")}주 · {o.fill_session} 장에서 판정
         </li>
       ))}

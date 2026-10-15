@@ -576,8 +576,11 @@ def news_target_rows(client: TursoClient, market: str, monitor: list[tuple], now
 
 
 #: 모의 계좌(어느 계좌든)가 지금 들고 있는 그 나라 종목 — 체결 장부의 순수량 > 0 (docs/paper.md 7장)
+#: 감성급락을 **따르는** 계좌(`sell_rule = 'all'`, A)의 보유만 — 다른 계좌는 감성급락으로 팔지 않는다.
+#: 일곱 계좌(25.1458)의 보유를 다 넣으면 무작위 대조 종목만큼 뉴스 수집이 늘었다(검증 권장)
 PAPER_HELD_SQL = (
-    "SELECT f.stock_id FROM paper_fills f CROSS JOIN stocks s ON s.id = f.stock_id WHERE s.country = ?"
+    "SELECT f.stock_id FROM paper_fills f CROSS JOIN stocks s ON s.id = f.stock_id"
+    " JOIN paper_accounts a ON a.id = f.account_id AND a.sell_rule = 'all' WHERE s.country = ?"
     " GROUP BY f.account_id, f.stock_id HAVING SUM(CASE f.side WHEN 'buy' THEN f.quantity ELSE -f.quantity END) > 0"
 )
 
