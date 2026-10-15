@@ -116,6 +116,9 @@ class HoldingInput:
     score_rebased: bool = False
     #: 잣대(계산 판·가중치)가 바뀌었는데 같은 잣대의 기준점을 못 찾은 날 — 점수 하락을 **판정할 수 없었다** (25.1405)
     score_scale_unknown: bool = False
+    #: 잣대가 바뀐 보유의 **같은 잣대 구간마다 이은 하락**과 바뀐 횟수 (25.1412). 있으면 이것으로 판정한다
+    score_drop_chained: float | None = None
+    score_scale_changes: int = 0
     #: ② 하락의 팩터별 기여(지금 − 기준) — 합이 실제 차와 맞을 때만 잡이 채운다 (25.1342). 표시에만 쓴다
     score_drop_parts: dict[str, float] | None = None
     op_income_latest: float | None = None
@@ -163,6 +166,44 @@ class Flag:
     reason_code: str
     rationale_text: str
     criteria: list[dict] = field(default_factory=list)
+
+
+def chained_score_drop(
+    start: dict[str, Any], history: list[dict[str, Any]], now_date: str, same_scale: Any,
+) -> tuple[float, int] | None:
+    """매수 때 점수부터 지금까지 **같은 잣대 구간마다의 하락을 이어 더한** 값과 잣대가 바뀐 횟수 (infra 25.1412).
+
+    계산 판·가중치가 바뀌면 그 경계의 점프는 종목이 아니라 잣대 탓이라 빼고, 구간 안의 움직임만 더한다. 25.961 은 "새
+    잣대의 첫 점수" 를 기준점으로 다시 잡아, 판이 주에 몇 번씩 오르면 사실상 "지난 판 이후 하락" 만 봤다(매도 플래그
+    감사). `history` 는 매수일 뒤~지금(포함)의 행 {as_of_date, total_score, …잣대 칸}, 날짜 오름차순·같은 날은 판
+    내림차순. 같은 날 여러 판이면 **지금 잣대를 잇는 행**을 고르고, 없을 때만 그날 첫 행(가장 높은 판)으로 넘어간다.
+    마지막 날(`now_date`)은 언제나 그날 첫 행 — 지금 점수와 같은 행으로 끝난다. 점수가 빈 행은 건너뛴다"""
+    def 점수(r: dict[str, Any]) -> float | None:
+        v = r.get("total_score")
+        return float(v) if isinstance(v, int | float) else None
+
+    if 점수(start) is None:
+        return None
+    날별: dict[str, list[dict[str, Any]]] = {}
+    for r in history:
+        if 점수(r) is not None:
+            날별.setdefault(str(r["as_of_date"]), []).append(r)
+    if now_date not in 날별:
+        return None
+    지금, 하락, 바뀜, 마지막_견줌 = start, 0.0, 0, False
+    for 날 in sorted(날별):
+        행들 = 날별[날]
+        이음 = None if 날 == now_date else next((r for r in 행들 if same_scale(지금, r)), None)
+        다음 = 이음 or 행들[0]
+        마지막_견줌 = same_scale(지금, 다음)
+        if 마지막_견줌:
+            하락 += 점수(지금) - 점수(다음)  # type: ignore[operator]
+        else:
+            바뀜 += 1
+        지금 = 다음
+    # **지금 잣대 구간에서 견준 쌍이 없으면 모름** — 마지막 걸음이 잣대 바뀜이면 지금 잣대로 얼마나 움직였는지 모른다.
+    # 부르는 쪽이 예전 기준점 방식·"판정 못 한 날"(25.1405)로 물러난다
+    return (round(하락, 6), 바뀜) if 마지막_견줌 else None
 
 
 def _criterion(label: str, display: str, threshold: str, source: str, as_of: str | None) -> dict:
@@ -266,9 +307,21 @@ def evaluate(h: HoldingInput, today: date, targets: dict | None = None) -> list[
     # 하락폭도 소수 여섯째 자리에서 반올림한다 (docs/infra.md 25.1323, 매도 플래그 감사 #1)
     # — 점수는 소수 한 자리로 저장되고 64.1 − 44.1 = 19.99999… 라 "20점 이상" 이 빗나갔다
     # (50~100 사이 정확히 20점 하락의 약 9%). 손익률(위)과 같은 처리
-    drop = (round(h.score_at_buy - h.score_now, 6)
+    이음 = h.score_drop_chained is not None and h.score_now is not None and h.score_at_buy is not None
+    drop = (h.score_drop_chained if 이음 else round(h.score_at_buy - h.score_now, 6)  # type: ignore[operator]
             if h.score_now is not None and h.score_at_buy is not None else None)  # fmt: skip
-    if 점수_쓸_수_있다 and drop is not None and drop >= SCORE_DROP_POINTS:
+    if 점수_쓸_수_있다 and drop is not None and drop >= SCORE_DROP_POINTS and 이음:
+        # 잣대가 바뀐 보유 — 같은 잣대 구간마다 이은 하락으로 판정한다 (25.1412). 두 점수의 차는 잣대 탓 점프를 섞는다
+        texts.append(f"종합 점수 {fixed(h.score_at_buy)}→{fixed(h.score_now)}점"
+                     f"(같은 잣대끼리 이은 하락 {fixed(drop, 1)}점)")  # fmt: skip
+        reasons.append(_criterion("종합 점수 하락",
+                                  f"매수 당시({h.score_at_buy_date}) {fixed(h.score_at_buy, 1)}"
+                                  f" → {fixed(h.score_now, 1)},"
+                                  f" 계산 판·가중치가 {h.score_scale_changes}번 바뀌어 같은 잣대 구간마다 이은 하락"
+                                  f" −{fixed(drop, 1)} (바뀐 날의 점프는 뺌)",
+                                  f"−{SCORE_DROP_POINTS:.0f}점 이상", "scores (매수일~지금 점수 이력)",
+                                  h.score_now_date))  # fmt: skip
+    elif 점수_쓸_수_있다 and drop is not None and drop >= SCORE_DROP_POINTS:
         texts.append(f"종합 점수 {fixed(h.score_at_buy)}→{fixed(h.score_now)}점")  # .5 올림 (25.1105)
         # 기준점을 다시 잡았으면 그렇다고 적는다 (25.961) — "매수 당시" 라고 하면 거짓이다
         기준 = (f"기준 재설정({h.score_at_buy_date}, 매수 뒤 계산 판·가중치가 바뀌어 같은 잣대의 첫 점수)"

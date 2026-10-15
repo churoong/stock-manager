@@ -30,6 +30,12 @@ log = logging.getLogger("sell_flags")
 JOB_NAME = "sell_flags"
 #: 잣대가 바뀐 보유의 새 기준점을 찾을 때 한 번에 읽는 점수 행 수와 최대 쪽 수 (25.961·25.1092). 20×19 = 380행은
 #: 거래일 1년 반 남짓 — 그보다 오래전에 바꾼 잣대 뒤 첫 점수까지 못 닿으면 "같은 잣대의 점수가 없음" 으로 말한다
+#: 같은 잣대 구간마다 하락을 이을 점수 이력 (25.1412) — 매수일 뒤~지금, 같은 날은 판 내림차순. 잣대가 바뀐 보유만 읽는다
+CHAIN_HISTORY_SQL = (
+    "SELECT as_of_date, calc_version, weights_json, sentiment_weight_used, total_score FROM scores"
+    " WHERE stock_id = ? AND as_of_date > ? AND as_of_date <= ? AND total_score IS NOT NULL"
+    " ORDER BY as_of_date, calc_version DESC LIMIT 2000"
+)
 BASELINE_PAGE = 20
 BASELINE_SCAN_PAGES = 19
 #: 팩터별 기여 합이 실제 점수 차와 이만큼 안이어야 분해를 적는다 (25.1342) — 점수는 소수 한 자리, 기여는 둘째 자리
@@ -191,7 +197,13 @@ def load_holdings(client: TursoClient, today: date | None = None) -> tuple[list[
         # 리포트 9종목 전부). 매수일 이후·지금 점수 전의 점수 가운데 **지금과 같은 잣대**(판·팩터 가중치·센티먼트
         # 가중치)인 가장 이른 행을 기준점으로 쓴다
         기준점: dict[str, Any] | None = None
-        if 잣대가_바뀜 and r["score_at_buy_date"] and r["score_now_date"]:
+        # **같은 잣대 구간마다 하락을 이어 더한다** (docs/infra.md 25.1412, 매도 플래그 감사) — 매수일 뒤~지금 점수 이력
+        # 한 질의. 잇지 못하면(이력이 비거나 지금 날이 없음) 아래 예전 기준점 방식으로 물러난다
+        이음: tuple[float, int] | None = None
+        if 잣대가_바뀜 and 잣대[0] and r["score_at_buy_date"] and r["score_now_date"]:
+            이력 = client.execute(CHAIN_HISTORY_SQL, [sid, r["score_at_buy_date"], r["score_now_date"]]).dicts()
+            이음 = sf.chained_score_drop(잣대[0][0], 이력, str(r["score_now_date"]), _같은_잣대)
+        if 잣대가_바뀜 and 이음 is None and r["score_at_buy_date"] and r["score_now_date"]:
             지금잣대 = 잣대[1][0]
             # **20행씩 넘겨 본다** (docs/infra.md 25.1092, 감사 재현). 앞 20행만 봐서, 매수 뒤 20거래일 넘게 지나
             # 가중치를
@@ -217,7 +229,8 @@ def load_holdings(client: TursoClient, today: date | None = None) -> tuple[list[
                     break
                 쪽 += 1
         # 오늘 점수가 없으면 검사가 원래 돌지 않는다 — "잣대가 달라 안 봤다" 는 거짓 까닭이 된다 (25.773, 교차검증)
-        if 잣대가_바뀜 and 기준점 is None and r["score_at_buy"] is not None and r["score_now"] is not None:
+        못_견줌 = 잣대가_바뀜 and 이음 is None and 기준점 is None
+        if 못_견줌 and r["score_at_buy"] is not None and r["score_now"] is not None:
             잣대바뀐종목.append(display_name(str(r["name"])))  # 미국 목록 이름 꼬리는 뗀다 (25.957)
         latest = fin[0] if fin else {}
         prev = fin[1] if len(fin) > 1 and int(fin[1]["fiscal_year"]) == int(fin[0]["fiscal_year"]) - 1 else {}
@@ -239,11 +252,14 @@ def load_holdings(client: TursoClient, today: date | None = None) -> tuple[list[
                 stock_id=sid, name=str(r["name"]), horizon=r["horizon"], first_buy_date=str(r["first_buy_date"]),
                 currency=str(r["currency"]), cost=float(r["cost"]), market_value=_f(r["market_value"]),
                 price_date=r["price_date"], score_now=_f(r["score_now"]), score_now_date=r["score_now_date"],
-                score_at_buy=(_f(기준점["total_score"]) if 기준점 else None) if 잣대가_바뀜 else _f(r["score_at_buy"]),
-                score_at_buy_date=str(기준점["as_of_date"]) if 기준점 else r["score_at_buy_date"],
-                score_rebased=기준점 is not None,
+                score_at_buy=_f(r["score_at_buy"]) if not 잣대가_바뀜
+                else _f(잣대[0][0]["total_score"]) if 이음 else (_f(기준점["total_score"]) if 기준점 else None),
+                score_at_buy_date=str(기준점["as_of_date"]) if 기준점 and not 이음 else r["score_at_buy_date"],
+                score_rebased=기준점 is not None and 이음 is None,
+                score_drop_chained=이음[0] if 이음 else None,
+                score_scale_changes=이음[1] if 이음 else 0,
                 # 잣대가 바뀌었는데 기준점을 못 찾음 — 판정 못 한 날로 (25.1405)
-                score_scale_unknown=잣대가_바뀜 and 기준점 is None and r["score_now"] is not None,
+                score_scale_unknown=잣대가_바뀜 and 이음 is None and 기준점 is None and r["score_now"] is not None,
                 score_drop_parts=_하락_기여(기준점 if 기준점 else (None if 잣대가_바뀜 else (잣대[0] or [None])[0]),
                                        (잣대[1] or [None])[0]),
                 op_income_latest=_f(latest.get("operating_income")), op_income_prev=_f(prev.get("operating_income")),
@@ -388,6 +404,16 @@ def _팩터가중치_다름(a: Any, b: Any) -> bool:
         return any(abs(float(x[k]) / 합x - float(y[k]) / 합y) > 1e-6 for k in 공통)
     except (TypeError, ValueError, AttributeError):
         return str(a) != str(b)
+
+
+def _같은_잣대(a: dict[str, Any], b: dict[str, Any]) -> bool:
+    """두 점수 행이 같은 잣대인가 — 판·팩터 가중치·센티먼트 가중치 (25.209·25.762, 위 `잣대가_바뀜` 과 같은 규칙)"""
+    try:
+        판_다름 = int(a["calc_version"]) != int(b["calc_version"])
+    except (KeyError, TypeError, ValueError):
+        판_다름 = False
+    return not (판_다름 or _팩터가중치_다름(a.get("weights_json"), b.get("weights_json"))
+                or _가중치_다름(a.get("sentiment_weight_used"), b.get("sentiment_weight_used")))  # fmt: skip
 
 
 def _가중치_다름(a: Any, b: Any) -> bool:

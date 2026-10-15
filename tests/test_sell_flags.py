@@ -438,17 +438,17 @@ class Test점수_하락은_같은_잣대끼리만:
         assert "재무악화" not in codes
 
     def test_같은_잣대의_첫_점수가_있으면_기준점을_다시_잡는다(self, monkeypatch) -> None:
-        """25.961 — 판을 올리면 그 전 보유 전부가 검사에서 영구히 빠졌다. 지금 잣대의 첫 점수(09-10, 78점)로 다시 잡는다."""
+        """25.961 — 판을 올리면 그 전 보유 전부가 검사에서 영구히 빠졌다. 25.1412 부터는 같은 잣대 구간마다 이어 더한다:
+        80(판 1) → 78(판 2, 바뀐 날 점프는 뺌) → 55(판 2) = 23점 하락."""
         codes, 경고 = self._돌리기(monkeypatch, '{"value": 30, "quality": 70}', 지금_판=2, 중간=("2026-09-10", 78))
         assert "재무악화" in codes and 경고 == []
-        # 근거표는 "매수 당시" 가 아니라 "기준 재설정" 이라 적는다
         from batch.jobs import sell_flags as job
 
         holdings, _ = job.load_holdings(self._mem)  # type: ignore[arg-type]
         h = holdings[0]
-        assert h.score_rebased and h.score_at_buy == 78 and h.score_at_buy_date == "2026-09-10"
+        assert (h.score_drop_chained, h.score_scale_changes, h.score_at_buy) == (23.0, 1, 80)
         [flag] = sf.evaluate(h, date(2026, 9, 16))
-        assert any("기준 재설정(2026-09-10" in str(r) for r in flag.criteria)
+        assert any("같은 잣대 구간마다 이은 하락 −23.0" in str(r) for r in flag.criteria)
 
     def test_옛_가중치_점수가_20행을_넘어도_기준점을_찾는다(self, monkeypatch) -> None:
         """매수 뒤 28거래일을 옛 가중치로 지낸 뒤 바꿨더니 앞 20행만 봐서 영영 못 찾았다 (docs/infra.md 25.1092, 감사 재현)."""
@@ -461,9 +461,10 @@ class Test점수_하락은_같은_잣대끼리만:
         monkeypatch.setattr(job, "BASELINE_PAGE", 3)
         codes, 경고 = self._돌리기(monkeypatch, '{"value": 10, "quality": 90}', 중간=("2026-09-10", 78), 더함=더함)
         assert "재무악화" in codes and 경고 == []
-        monkeypatch.setattr(job, "BASELINE_SCAN_PAGES", 1)  # 한 쪽(3행)만 보면 예전처럼 못 찾는다
+        # 25.1412 — 이어 더하기는 쪽 넘기기 없이 이력 한 질의라 쪽 상한과 무관하다(80→80…→78 바뀜→55 = 23점)
+        monkeypatch.setattr(job, "BASELINE_SCAN_PAGES", 1)
         codes, 경고 = self._돌리기(monkeypatch, '{"value": 10, "quality": 90}', 중간=("2026-09-10", 78), 더함=더함)
-        assert "재무악화" not in codes and any("아직 없음" in 줄 for 줄 in 경고)
+        assert "재무악화" in codes and 경고 == []
 
     def test_매수일을_새_판으로_다시_내도_매매_점수의_판으로_견준다(self, monkeypatch) -> None:
         """매매엔 판 1의 80점, 같은 날 판 2로 다시 낸 58점, 지금 판 2의 55점 — 80→55 거짓 재무악화였다 (25.1094, 감사)."""

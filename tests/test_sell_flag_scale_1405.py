@@ -68,4 +68,27 @@ def test_판_올린_날_걸린_재무악화가_풀리지_않는다(monkeypatch: 
     # 판이 오른 날 — 같은 잣대의 기준점이 없어 판정하지 못했다. 어제 플래그를 잇는다(예전엔 풀렸다)
     assert k.execute("SELECT reason_code FROM sell_flags WHERE is_active = 1").fetchall() == [("재무악화",)]
     assert k.execute("SELECT COUNT(*) FROM sell_flags WHERE resolved_at IS NOT NULL").fetchone()[0] == 0
-    # 다음 날부터는 새 판 첫 점수가 기준점이 되어 그전 하락이 빠진다 — 알고 둔 한계(handoff, 25.961)
+    # 다음 날 — 같은 잣대 구간마다 이어 더한다(25.1412): 72→48(판 10) 24점 + 47→46(판 11) 1점 = 25점. 예전엔 새 판 첫
+    # 점수(47)가 기준점이 되어 1점 하락으로 풀렸다
+    sc("2026-10-15", 46.0, 11)
+    monkeypatch.setattr(job.db, "now_iso", lambda: "2026-10-15T23:27:00+00:00")
+    job.run(date(2026, 10, 16))
+    assert k.execute("SELECT reason_code FROM sell_flags WHERE is_active = 1").fetchall() == [("재무악화",)]
+    assert k.execute("SELECT COUNT(*) FROM sell_flags WHERE resolved_at IS NOT NULL").fetchone()[0] == 0
+
+
+def test_같은_잣대_구간마다_이어_더한다() -> None:
+    같음 = lambda a, b: a["v"] == b["v"]  # noqa: E731
+    시작 = {"total_score": 80.0, "v": 1}
+    이력 = [{"as_of_date": "2026-09-02", "total_score": 75.0, "v": 1},
+            {"as_of_date": "2026-09-03", "total_score": 60.0, "v": 2},  # 바뀐 날 — 점프 15 는 뺀다
+            {"as_of_date": "2026-09-04", "total_score": 50.0, "v": 2}]  # fmt: skip
+    assert sf.chained_score_drop(시작, 이력, "2026-09-04", 같음) == (15.0, 1)  # 5 + 10
+    # 같은 날 두 판이면 지금 잣대를 잇는 행을 고른다
+    두판 = [{"as_of_date": "2026-09-02", "total_score": 58.0, "v": 2}, {"as_of_date": "2026-09-02", "total_score": 70.0, "v": 1},
+            {"as_of_date": "2026-09-03", "total_score": 52.0, "v": 2}, {"as_of_date": "2026-09-04", "total_score": 50.0, "v": 2}]  # fmt: skip
+    # 80→70(판 1) 10 + 70→52 바뀜(뺌) + 52→50 2 = 12
+    assert sf.chained_score_drop(시작, 두판, "2026-09-04", 같음) == (12.0, 1)
+    # 마지막 걸음이 잣대 바뀜이면(지금 잣대로 견준 쌍 없음) 모름
+    assert sf.chained_score_drop(시작, 이력[:2], "2026-09-03", 같음) is None
+    assert sf.chained_score_drop(시작, 이력, "2026-09-09", 같음) is None  # 지금 날 행이 없다
