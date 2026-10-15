@@ -2303,8 +2303,8 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
             except Exception as exc:  # noqa: BLE001 — 곁다리. 경고로 남기고 리포트는 보낸다
                 if db.quota_reason(exc):
                     raise
-                log.exception("모의 투자 단계 실패")
-                warnings.append(_실패문("모의 투자 계좌", exc))
+                log.exception("가상모의투자 단계 실패")
+                warnings.append(_실패문("가상모의투자 계좌", exc))
                 step_log["paper"] = {"error": str(exc)[:300]}
 
         if len(warnings) > 본문_경고수:
@@ -2477,8 +2477,8 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
                 멈춘종목 = set((step_log.get("paper") or {}).get("frozen") or [])
                 step_log["broker"] = broker_mirror.run(client, market, datetime.now(UTC), frozen=멈춘종목)
             except Exception as exc:  # noqa: BLE001 — 곁다리
-                log.exception("증권사 모의투자 단계 실패")
-                warnings.append(_실패문("증권사 모의투자", exc))
+                log.exception("KIS모의투자 단계 실패")
+                warnings.append(_실패문("KIS모의투자", exc))
                 step_log["broker"] = {"error": str(exc)[:300]}
         status = "partial" if warnings else "success"
         try:

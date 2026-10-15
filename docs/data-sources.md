@@ -267,7 +267,7 @@ GET https://data-dbg.krx.co.kr/svc/apis/{카테고리}/{api_id}.json?basDd=YYYYM
 - 일일 총량 한도는 공개돼 있지 않다 `[확인필요]`. 실전 REST 초당 20건(공식) — 우리는 15건으로 묶는다
 - 토큰 발급은 **1분 1회**(EGW00133 "접근토큰 발급 잠시 후 다시 시도하세요(1분당 1회)", 2026-10-07 실측). 웹·배치가 `api_tokens` 한 줄을 함께 쓴다
 
-### 3.2 KIS 모의투자 (2026-10-15 사용자 제안, docs/paper.md 15장, docs/infra.md 25.1475)
+### 3.2 KIS모의투자 (2026-10-15 사용자 제안, docs/paper.md 15장, docs/infra.md 25.1475)
 
 - **무엇**: 가상 돈 계좌. 내부 모의 계좌 B 의 주문을 베껴 내고(현금 주문), 다음 날 일별 주문체결·잔고 조회로 맞춘다. 실전 계좌·실전 도메인 주문은 쓰지 않는다
 - **인증**: 모의투자 신청 → 모의계좌번호, KIS Developers 에서 **모의투자용 앱키를 실전과 따로** 받는다(공식 예제 README L203). 시크릿 `KIS_VTS_APP_KEY`·`KIS_VTS_APP_SECRET`·`KIS_VTS_ACCOUNT`

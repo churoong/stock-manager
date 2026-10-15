@@ -115,7 +115,7 @@ def run(
     if market != "KR":
         return {"off": "국내만 — 해외 모의 주문은 [확인필요]"}
     if not kv.configured():
-        return {"off": "모의투자 키 없음"}
+        return {"off": "KIS모의투자 키 없음"}
     if not client.execute(ACCOUNT_SQL, [MIRROR_ACCOUNT]).rows:
         return {"off": f"베낄 계좌 {MIRROR_ACCOUNT} 없음"}
     지금 = now.isoformat()

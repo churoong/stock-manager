@@ -13,7 +13,7 @@ export default function PaperPage() {
     <div className="flex min-h-screen flex-col">
       <Nav current="/paper" />
       <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-4">
-        <PageHeader title="모의 투자" doc="docs/paper.md">
+        <PageHeader title="가상모의투자" doc="docs/paper.md">
           넣은 예수금 안에서 시스템이 아침 리포트의 규칙대로 사고팝니다. 실제 돈·실제 주문은 없습니다. A 는 모든 매도 플래그를,
           B 는 손절·목표·기간만 따릅니다 — 같은 돈으로 황색 플래그를 따르는 것이 나은지 봅니다. 복기용이며 규칙을 켜고 끄는
           근거로는 쓰지 않습니다.

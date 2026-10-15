@@ -74,6 +74,6 @@ describe("모의 계좌 탭", () => {
 
   it("미체결은 그 계좌 것만", () => {
     expect(그림("B", "orders")).toContain("매수 2회차 195,000원 이하");
-    expect(그림("A", "orders")).toContain("미체결 주문이 없습니다");
+    expect(그림("A", "orders")).toContain("체결 대기 주문이 없습니다");
   });
 });

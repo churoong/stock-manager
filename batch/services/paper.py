@@ -551,7 +551,7 @@ def summary_lines(
     """
     if not any(daily.values()):
         return []
-    out = ["[모의 투자]"]
+    out = ["[가상모의투자]"]
     끝값: dict[str, float] = {}
     for aid in sorted(daily):
         행들 = daily[aid]
@@ -590,7 +590,7 @@ def summary_lines(
             out.append(f"  {앞}−{뒤}: {끝값[앞] - 끝값[뒤]:+,.0f}원 ({무엇}{덧})")
     if month_start is None:
         return out
-    out.append(f"[모의 투자 월간 복기] {month_start} 부터")
+    out.append(f"[가상모의투자 월간 복기] {month_start} 부터")
     for aid in sorted(daily):
         실현 = [r for r in realized(fills.get(aid, [])) if r["fill_date"] >= month_start]
         if 실현:

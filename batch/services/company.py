@@ -571,7 +571,7 @@ def review_lines(
     """
     if not meetings and not decisions:
         return []
-    out = ["[모의 투자사 — 투자위원회]"]
+    out = ["[가상모의투자 투자사 — 투자위원회]"]
     for aid in sorted(charters):
         록들 = [m for m in meetings if m["account_id"] == aid]
         항목 = [i for m in 록들 for i in (json.loads(m.get("minutes_json") or "{}").get("items") or [])]

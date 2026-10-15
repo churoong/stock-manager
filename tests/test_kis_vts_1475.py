@@ -338,7 +338,7 @@ def 기록_상태(c: Client) -> list[str]:
 def test_job_off_and_timing(c: Client, monkeypatch: pytest.MonkeyPatch) -> None:
     assert job.run(c, "US", _at("08:40"), session=_Sess()) == {"off": "국내만 — 해외 모의 주문은 [확인필요]"}
     monkeypatch.delenv("KIS_VTS_ACCOUNT")
-    assert job.run(c, "KR", _at("08:40"), session=_Sess()) == {"off": "모의투자 키 없음"}
+    assert job.run(c, "KR", _at("08:40"), session=_Sess()) == {"off": "KIS모의투자 키 없음"}
     monkeypatch.setenv("KIS_VTS_ACCOUNT", "1234567801")
     # 너무 이르면 보내지 않는다(잔고는 적는다), 08:30 앞 10분 안이면 기다렸다 보낸다
     s = _Sess()

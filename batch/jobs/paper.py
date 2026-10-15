@@ -1283,7 +1283,7 @@ def run_step(
         기록["attribution_error"] = str(exc)[:200]
     if 읽기0 is not None:
         기록["reads"] = getattr(client.reads, "total", 0) - 읽기0
-    머리 = ["🧪 모의 투자 " + " · ".join(글 for 글 in 줄 if not 글.startswith("⚠️"))]
+    머리 = ["🧪 가상모의투자 " + " · ".join(글 for 글 in 줄 if not 글.startswith("⚠️"))]
     # 실제 투자와 같은 기간 비교 (2026-10-15 사용자 지시, 25.1448) — 곁다리. 못 읽으면 그 줄만 빠진다
     try:
         비교 = real_comparison(client)
@@ -1343,7 +1343,7 @@ def summary_section(client: Any, now: datetime) -> list[str]:
     except Exception as exc:  # noqa: BLE001 — 비교 줄만 빠진다
         비교줄 = f"  실제 투자와 비교를 못 했습니다 ({type(exc).__name__})"
     if 줄 and 비교줄:
-        자리 = next((i for i, x in enumerate(줄) if x.startswith("[모의 투자 월간")), len(줄))
+        자리 = next((i for i, x in enumerate(줄) if x.startswith("[가상모의투자 월간")), len(줄))
         줄.insert(자리, "  " + 비교줄.strip())
     # 월간 복기에 성과 분해 (25.1450) — 계좌마다 마지막 평가 행의 것
     if 달초 and 줄:

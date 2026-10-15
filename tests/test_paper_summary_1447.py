@@ -35,7 +35,7 @@ def test_weekly_lines_compare_same_money_benchmarks_and_twins() -> None:
         "B": [_행("B", "2026-10-02", 1_000_000, 1_000_000, 1.0), _행("B", "2026-10-09", 1_000_000, 1_030_000, 1.03)],
     }  # fmt: skip
     줄 = pp.summary_lines(daily, {"A": [_체결(1, "buy", "2026-10-05", 10_000)]}, "2026-10-03", None, {}, {}, 한도)
-    assert 줄[0] == "[모의 투자]"
+    assert 줄[0] == "[가상모의투자]"
     assert "A: 입금 1,000,000원 · 평가 1,050,000원 (손익 +5.0%, 이번 주 시간가중 +5.0%, 누적 +5.0%)" in 줄[1]
     assert "같은 돈 KOSPI +2.0%" in 줄[1] and "S&P500 —" in 줄[1]
     assert "이번 주 체결 매수 1·매도 0" in 줄[1]
@@ -51,7 +51,7 @@ def test_monthly_review_best_worst_and_rule_checks() -> None:
     daily = {"A": [_행("A", "2026-09-15", 1_000_000, 1_000_000, 1.0, 넘은날), _행("A", "2026-10-02", 1_000_000, 990_000, 0.99)]}
     줄 = pp.summary_lines(daily, {"A": fills}, "2026-09-26", "2026-09-01", {1: "가", 2: "나"}, {2: "전자"}, 한도)
     본문 = "\n".join(줄)
-    assert "[모의 투자 월간 복기] 2026-09-01 부터" in 본문
+    assert "[가상모의투자 월간 복기] 2026-09-01 부터" in 본문
     assert "A 이익 셋: 가 +" in 본문 and "A 손실 셋: 나 −" not in 본문 and "A 손실 셋: 나 -" in 본문
     assert "종목 상한 넘은 날 1 · 섹터 상한 넘은 날 0 · 손절선 아래로 들고 간 날 1" in 본문
 
@@ -78,11 +78,11 @@ def test_summary_section_reads_real_schema(monkeypatch: pytest.MonkeyPatch) -> N
     _시세(c, "2026-10-15", 10_100, 9_900)
     _하루(c, monkeypatch, "2026-10-15", signals=False)
     줄 = job.summary_section(c, datetime(2026, 10, 18, 0, 0, tzinfo=UTC))
-    assert 줄[0] == "[모의 투자]" and any(x.startswith("  A: 입금 1,000,000원") for x in 줄)
+    assert 줄[0] == "[가상모의투자]" and any(x.startswith("  A: 입금 1,000,000원") for x in 줄)
     assert any("이번 주 체결 매수 1·매도 0" in x for x in 줄)
     assert not any("월간" in x for x in 줄)
     월 = job.summary_section(c, datetime(2026, 11, 1, 0, 0, tzinfo=UTC))
-    assert any("[모의 투자 월간 복기] 2026-10-01 부터" in x for x in 월)
+    assert any("[가상모의투자 월간 복기] 2026-10-01 부터" in x for x in 월)
     assert any(x.startswith("[노하우 성적표 — 20 거래일 뒤") for x in 월)  # 성과 분해 (25.1450)
     assert job.summary_section(Client(), datetime(2026, 10, 18, tzinfo=UTC)) == []
     # 실제 포트폴리오가 있으면 모의 절 아래에 같은 기간 비교 한 줄 (25.1448)
@@ -92,4 +92,4 @@ def test_summary_section_reads_real_schema(monkeypatch: pytest.MonkeyPatch) -> N
     )  # fmt: skip
     월 = job.summary_section(c, datetime(2026, 11, 1, 0, 0, tzinfo=UTC))
     비교 = [i for i, x in enumerate(월) if "실제 투자와 비교" in x]
-    assert len(비교) == 1 and 비교[0] < next(i for i, x in enumerate(월) if x.startswith("[모의 투자 월간"))
+    assert len(비교) == 1 and 비교[0] < next(i for i, x in enumerate(월) if x.startswith("[가상모의투자 월간"))

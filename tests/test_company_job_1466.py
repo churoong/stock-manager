@@ -182,7 +182,7 @@ def test_weekly_committee_review(c: Client, monkeypatch: pytest.MonkeyPatch) -> 
     c.conn.execute("UPDATE paper_decisions SET ret_20d = 15, bench_20d = 3, detail_json = ? WHERE account_id = 'A'"
                    " AND stock_id = 3", [json.dumps(상세)])  # fmt: skip
     줄 = job.committee_review(c, date(2026, 11, 12), {})
-    assert 줄[0] == "[모의 투자사 — 투자위원회]"
+    assert 줄[0] == "[가상모의투자 투자사 — 투자위원회]"
     assert any(x.startswith("  A 가치투자사: 회의 0") for x in 줄)  # 11-12 기준 이번 주 회의는 없다
     assert any("부결했는데 +12.0%p — 소수의견(찬성: 퀀트부)이 옳았다" in x and "종목3" in x for x in 줄)
     # 이번 주 회의는 센다
@@ -190,7 +190,7 @@ def test_weekly_committee_review(c: Client, monkeypatch: pytest.MonkeyPatch) -> 
     assert any(x.startswith("  A 가치투자사: 회의 1 · 안건 2 · 가결 1 · 집행 1") for x in 줄)
     # 주간 요약에 실린다 (summary_section 이 부른다)
     요약 = job.summary_section(c, datetime(2026, 10, 18, 0, 0, tzinfo=UTC))
-    assert "[모의 투자사 — 투자위원회]" in 요약
+    assert "[가상모의투자 투자사 — 투자위원회]" in 요약
 
 
 def test_review_lines_threshold_and_order() -> None:

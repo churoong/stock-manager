@@ -70,7 +70,7 @@ const SUB_TABS: Array<[SubTab, string]> = [
   ["summary", "요약"],
   ["holdings", "보유내역"],
   ["trades", "거래내역"],
-  ["orders", "미체결"],
+  ["orders", "체결 대기"],
   ["report", "성적표"],
   ["committee", "투자위원회"],
 ];
@@ -536,9 +536,14 @@ function TradesPane({ fills }: { fills: FillRow[] }) {
 }
 
 function OrdersPane({ orders }: { orders: OrderRow[] }) {
-  if (!orders.length) return <p className="text-sm text-slate-500">미체결 주문이 없습니다.</p>;
+  if (!orders.length) return <p className="text-sm text-slate-500">체결 대기 주문이 없습니다.</p>;
   return (
-    <ul className="space-y-1 text-sm">
+    <div className="text-sm">
+      <p className="mb-1 text-xs text-slate-500">
+        가상모의투자는 장중에 체결하지 않습니다. 판정할 장이 끝난 뒤 다음 국내 배치(다음 거래일 아침)가 그날 일봉(시가·저가·종가)으로
+        찼는지 정합니다 — 그 전까지는 모두 여기 남습니다. 실제 주문 경로의 체결은 KIS모의투자(docs/paper.md 15장)가 따로 잽니다.
+      </p>
+      <ul className="space-y-1">
       {orders.map((o) => (
         <li key={o.id}>
           {o.name} ·{" "}
@@ -548,10 +553,11 @@ function OrdersPane({ orders }: { orders: OrderRow[] }) {
               ? `매수 시가 일괄 (기준가 ${money(o.ref_price ?? null, o.currency)}${o.reason === "무작위 대조" ? " · 무작위 대조" : ""})`
               : `매수 ${o.tranche}회차 ${money(o.limit_price, o.currency)} 이하`}{" "}
           ·{" "}
-          {o.quantity.toLocaleString("ko-KR")}주 · {o.fill_session} 장에서 판정
+          {o.quantity.toLocaleString("ko-KR")}주 · {o.fill_session} 장의 일봉으로 다음 배치가 판정
         </li>
       ))}
-    </ul>
+      </ul>
+    </div>
   );
 }
 

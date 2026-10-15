@@ -85,7 +85,7 @@ def _check_url(url: str, tr: str) -> str:
     """모의 도메인·모의 tr_id 가 아니면 보내지 않는다. 도메인은 **글자 그대로** 적는다 — `BASE` 와 견주면
     `BASE` 를 바꿀 때 검사도 같이 바뀐다 (25.1475 검증 [참고] 6)"""
     if not url.startswith("https://openapivts.koreainvestment.com:29443/") or not tr.startswith("V"):
-        raise KisFailed("모의투자 도메인·모의 tr_id 가 아니면 보내지 않습니다")
+        raise KisFailed("KIS모의투자 도메인·모의 tr_id 가 아니면 보내지 않습니다")
     return url
 
 
@@ -186,7 +186,7 @@ class Session:
 
     def __init__(self, client: Any, now: datetime | None = None, *, http: Any = None, sleep: Any = time.sleep) -> None:
         if not configured():
-            raise KisFailed("모의투자 키·계좌가 없습니다")
+            raise KisFailed("KIS모의투자 키·계좌가 없습니다")
         acct = account()
         assert acct is not None
         self.cano, self.prdt = acct

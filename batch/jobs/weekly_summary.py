@@ -519,7 +519,7 @@ def run(dry_run: bool = False, force: bool = False) -> int:
 
             모의 = paper_job.summary_section(client, now)
         except Exception as exc:  # noqa: BLE001 — 곁다리 절이다
-            모의 = [f"모의 투자 절을 만들지 못했습니다 ({type(exc).__name__})"]
+            모의 = [f"가상모의투자 절을 만들지 못했습니다 ({type(exc).__name__})"]
         # 실제 매매의 실행 품질 (docs/paper.md 13장, 25.1452) — 월 첫 요약에만. 곁다리
         try:
             모의 = [*모의, *execution_lines(client, now)]
