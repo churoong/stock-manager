@@ -43,3 +43,13 @@ def test_신호_작업이_밴드를_만들지_않는다() -> None:
 
     글 = Path(job_sig.__file__).read_text(encoding="utf-8")
     assert "db.split_pending_us(client, as_of) if country == \"US\"" in 글 and 'row["_band_split_pending"] = True' in 글
+
+
+def test_재수집이_끝나도_주식수가_분할_전이면_대기다() -> None:
+    """us_shares 는 다음 10-Q 까지 주식수를 분할 전 값으로 둔다 — 그 사이 PBR·밴드가 10배 어긋났다 (docs/infra.md 25.1403)"""
+    members = [{"stock_id": 1, "market_cap_date": "2026-10-02"},   # 감지(10-05) 뒤 주식수 갱신 전
+               {"stock_id": 2, "market_cap_date": "2026-11-06"},   # 10-Q 로 갱신됨
+               {"stock_id": 3, "market_cap_date": None},           # 날짜 모름 — 대기
+               {"stock_id": 4, "market_cap_date": "2026-10-02"}]   # 분할 감지 없음  # fmt: skip
+    감지 = {1: "2026-10-05T03:00:00+00:00", 2: "2026-10-05T03:00:00+00:00", 3: "2026-10-05"}
+    assert job.shares_before_split(members, 감지) == {1, 3}

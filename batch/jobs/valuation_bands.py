@@ -55,12 +55,30 @@ def load_members(client: TursoClient, country: str, as_of: str) -> list[dict]:
     밴드가 생긴다 — `scores.load_universe` 에서 고친 것과 같은 모양이다(25.97).
     """
     return client.execute(
-        "SELECT s.id AS stock_id, s.listed_shares, s.sector, s.currency FROM universe_members u"
+        "SELECT s.id AS stock_id, s.listed_shares, s.sector, s.currency, s.market_cap_date FROM universe_members u"
         " JOIN stocks s ON s.id = u.stock_id"
         f" WHERE u.included = 1 AND s.country = ? AND u.snapshot_date = {db.snapshot_as_of_sql()}"
         " ORDER BY s.id",
         [country, country, as_of],
     ).dicts()
+
+
+def shares_before_split(members: list[dict], detections: dict[int, str]) -> set[int]:
+    """분할을 감지한 뒤 **주식수가 아직 분할 전 값인** 미국 종목 (docs/infra.md 25.1403, 주간 작업 감사).
+
+    `us_shares` 는 분할 감지 뒤 다음 10-Q 까지 `listed_shares` 를 분할 전 값으로 둔다(25.524) — 그 사이
+    `market_cap_date` 도 그대로다. 그런데 밴드의 분할 대기(`db.split_pending_us`)는 수정주가 재수집이 끝나면(done)
+    풀려, 분할 뒤 가격 × 분할 전 주식수로 PBR·밴드가 10배 어긋났다(1:10). 감지일 > 주식수 날짜면 대기로 본다.
+    주식수 날짜를 모르면 대기"""
+    out: set[int] = set()
+    for m in members:
+        감지 = detections.get(int(m["stock_id"]))
+        if not 감지:
+            continue
+        날 = str(m.get("market_cap_date") or "")[:10]
+        if not 날 or 감지[:10] > 날:
+            out.add(int(m["stock_id"]))
+    return out
 
 
 def load_equities(client: TursoClient, country: str, as_of: str,
@@ -219,6 +237,10 @@ def run(countries: tuple[str, ...], as_of: str | None = None) -> int:
             prices = load_prices(client, ids, as_of)
             equities = load_equities(client, country, as_of)
             분할대기 = db.split_pending_us(client) if country == "US" else set()
+            if country == "US":
+                from batch.jobs import us_shares
+
+                분할대기 |= shares_before_split(members, us_shares.split_detections(client))
             rows = build_rows(members, prices, equities, country, as_of, db.now_iso(), 분할대기)
             client.execute(*clear_statement(country, as_of))  # 넣기 전에 지운다
             written = store(client, rows)
