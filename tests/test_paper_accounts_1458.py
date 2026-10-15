@@ -99,12 +99,13 @@ def test_summary_pairs_and_design_note() -> None:
     daily["E"][0]["positions_json"] = '[{"stock_id": 1, "value_krw": 816}]'
     daily["B"][0]["positions_json"] = '[{"stock_id": 1, "value_krw": 404}]'
     줄 = pp.summary_lines(daily, {}, "2026-10-12", "2026-10-01", {}, {}, {}, {"D": "time"})
-    assert "  A−B: -10원 (황색 매도; 투자 비중 A 0% · B 40%)" in 줄
-    assert "  B−C: +20원 (분할 지정가 대 시가 일괄; 투자 비중 B 40% · C 0%)" in 줄
+    # 판 2(투자사, 25.1468)부터 짝은 회사 대 기준(B)과 기준 대 무작위
+    assert "  A−B: -10원 (가치투자사 대 기준; 투자 비중 A 0% · B 40%)" in 줄
+    assert "  C−B: -20원 (모멘텀투자사 대 기준; 투자 비중 C 0% · B 40%)" in 줄
     # 투자 비중을 함께 — E 가 더 들어가 있으면 차이의 큰 몫이 베타일 수 있다(검증 [필수] 7)
-    assert "  E−B: +10원 (10종목 대 5종목; 투자 비중 E 80% · B 40%)" in 줄
-    assert any(x.startswith("  C−R1: +10원 (종목 선정 대 무작위") for x in 줄)
-    assert any(x.startswith("  C−R2: -10원 (종목 선정 대 무작위") for x in 줄)
+    assert "  E−B: +10원 (안정투자사 대 기준; 투자 비중 E 80% · B 40%)" in 줄
+    assert any(x.startswith("  B−R1: +30원 (기준 대 무작위") for x in 줄)
+    assert any(x.startswith("  B−R2: +10원 (기준 대 무작위") for x in 줄)
     assert any(x.startswith("  D 규칙 점검") and "손절을 따르지 않는 계좌" in x for x in 줄)
 
 

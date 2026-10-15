@@ -22,6 +22,7 @@ interface Account {
   entry_rule?: string | null;
   top_n?: number | null;
   selection?: string | null;
+  charter_json?: string | null;
   view: AccountView;
   positions: Position[];
   unknown: Array<{ stock_id: number; why: string }>;

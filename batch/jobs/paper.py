@@ -41,7 +41,8 @@ FILLS_SQL = (
 )
 OPEN_ORDERS_SQL = (
     "SELECT id, account_id, market, stock_id, side, order_type, limit_price, quantity, currency, fill_session,"
-    " fill_basis, deferrals, horizon, score_at_order, score_as_of, ref_price FROM paper_orders WHERE status = 'open'"
+    " fill_basis, deferrals, horizon, score_at_order, score_as_of, ref_price, rule_version FROM paper_orders"
+    " WHERE status = 'open'"
     " ORDER BY id"
 )
 BAR_SQL = "SELECT date, open, close, volume FROM prices WHERE stock_id = ? AND date = ?"
@@ -388,7 +389,7 @@ def fill_orders(
                 # 지정가가 안 찬 회차 — 그 뒤 얼마나 올랐나(놓친 기회)를 결정 원장으로 잰다 (25.1449)
                 문장.append(_결정(o.account_id, market, 날, o.stock_id, "missed", 까닭,
                                 {"limit_price": o.limit_price, "quantity": o.quantity, "order_id": o.id},
-                                bar.close, 날, now))  # fmt: skip
+                                bar.close, 날, now, r.get("rule_version")))  # fmt: skip
             _쓰기(client, 문장)
             남은매수.pop(o.id, None)
             기록["expired"] = 기록.get("expired", 0) + 1
@@ -891,12 +892,14 @@ def committee_step(
         cache["population"] = cjob.population_dossiers(client, signal_rows, market, as_of)
         cache["agenda"] = cjob.load_dossiers(client, cjob.agenda_rows(signal_rows, 크기), market, as_of)
     문장: list[tuple[str, list[Any]]] = []
+    items, approved = co.meet(cache["agenda"][: int(charter["agenda"])], charter, cache["population"])
     if not cache.get("dossiers_written"):
+        # 회의가 성공한 뒤에 켠다 — 먼저 켜면 첫 회사가 회의에서 실패할 때 그날 근거 행이 통째로 빠졌다
+        # (25.1468 검증 권장)
         문장 += [(DOSSIER_INSERT_SQL, [market, as_of, d.stock_id, json.dumps(cjob.dossier_json(d), ensure_ascii=False,
                                                                             default=str), now])
                  for d in cache["agenda"]]  # fmt: skip
         cache["dossiers_written"] = True
-    items, approved = co.meet(cache["agenda"][: int(charter["agenda"])], charter, cache["population"])
     메모 = co.memo(str(charter.get("name") or account), items, approved)
     지문 = co.charter_hash(charter)
     문장.append((MEETING_INSERT_SQL, [account, market, trade_date, 지문,
@@ -1084,10 +1087,18 @@ def run_step(
                 가결행: list[report_picks.SignalRow] | None = None
                 위원회: dict[int, dict[str, Any]] = {}
                 if aid in 헌장들:
-                    가결행, 위원회, 회의문장, 메모 = committee_step(
-                        client, market=market, account=aid, charter=헌장들[aid], charters=헌장들,
-                        signal_rows=signal_rows, trade_date=trade_date, cache=조사, now=지금, rule_version=판,
-                    )  # fmt: skip
+                    try:
+                        가결행, 위원회, 회의문장, 메모 = committee_step(
+                            client, market=market, account=aid, charter=헌장들[aid], charters=헌장들,
+                            signal_rows=signal_rows, trade_date=trade_date, cache=조사, now=지금, rule_version=판,
+                        )  # fmt: skip
+                    except Exception as exc:  # noqa: BLE001 — 그 회사만 오늘 사지 않는다. 다른 계좌·매도는 그대로
+                        if db.quota_reason(exc):
+                            raise
+                        # 위원회가 못 열린 날 판 1(점수 상위)로 사면 그 회사의 기록에 판 1 매수가 섞인다
+                        # — 사지 않고 까닭만 남긴다
+                        log.exception("모의 투자사 %s 위원회 실패", aid)
+                        가결행, 위원회, 회의문장, 메모 = [], {}, [], {"error": str(exc)[:200]}
                     문장 += 회의문장
                     a기록["committee"] = 메모
                     종목수 = int(헌장들[aid]["top_n"])
@@ -1136,7 +1147,9 @@ def run_step(
             a기록["charter_errors"] = 헌장오류[aid]
         계좌기록[aid] = a기록
         if isinstance(a기록.get("committee"), dict):
-            메모줄.append(f"🏛 {aid} {a기록['committee']['memo']}")
+            위 = a기록["committee"]
+            메모줄.append(f"🏛 {aid} {위['memo']}" if "memo" in 위
+                       else f"⚠️ 모의 {aid} 투자위원회를 열지 못함 — {위.get('error')}")  # fmt: skip
         손익률 = f"{v.pnl_pct:+.1f}%" if v.pnl_pct is not None else "—"
         줄.append(f"{aid}: 평가 {v.equity_krw:,.0f}원 (손익 {손익률}, 시간가중 {(검['twr'] - 1) * 100:+.1f}%,"
                  f" 오늘 체결 {a기록['fills']}건)")  # fmt: skip

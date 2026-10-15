@@ -99,3 +99,42 @@ def test_bad_charter_runs_rule_one_and_says_why(c: Client, monkeypatch: pytest.M
     assert any("40%" in e for e in 기록["accounts"]["A"]["charter_errors"])
     assert {r[0] for r in c.q("SELECT DISTINCT stock_id FROM paper_orders WHERE account_id = 'A'")} == {1, 3}
     assert c.q("SELECT COUNT(*) FROM paper_meetings") == [(0,)]
+
+
+def test_committee_failure_stops_only_that_company(c: Client, monkeypatch: pytest.MonkeyPatch) -> None:
+    """위원회가 실패하면 그 회사만 오늘 사지 않는다 — 다른 계좌는 그대로, 판 1 로 몰래 사지 않는다, 리포트에 경고 한 줄."""
+    def 터짐(*_a: object, **_k: object) -> None:
+        raise RuntimeError("조사 자료 읽기 실패")
+
+    monkeypatch.setattr(job, "committee_step", 터짐)
+    줄, 기록 = _하루(c, monkeypatch, "2026-10-14")
+    assert c.q("SELECT COUNT(*) FROM paper_orders WHERE account_id = 'A'") == [(0,)]
+    assert {r[0] for r in c.q("SELECT DISTINCT stock_id FROM paper_orders WHERE account_id = 'B'")} == {1, 3}
+    assert 기록["accounts"]["A"]["committee"]["error"].startswith("조사 자료")
+    assert any(x.startswith("⚠️ 모의 A 투자위원회를 열지 못함") for x in 줄)
+
+
+def test_charter_migration_matches_code() -> None:
+    """0077 의 헌장은 `services/company.CHARTERS` 그대로 — 판 2 는 첫 거래일(10-16)부터, B·R 은 판 1 (25.1468)."""
+    from batch.services import company as co
+    from batch.services import paper as pp
+
+    c = Client(accounts=None, charters=True)
+    행 = {r[0]: r[1:] for r in c.q("SELECT id, charter_json, charter_since, rule_version, sell_rule FROM paper_accounts")}
+    for aid, ch in co.CHARTERS.items():
+        assert json.loads(행[aid][0]) == ch and 행[aid][1:] == ("2026-10-16", 2, ch["sell_rule"]), aid
+        assert co.charter_errors(ch) == [] and ch["sell_rule"] in pp.SELL_RULES
+    for aid in ("B", "R1", "R2"):
+        assert 행[aid][0] is None and 행[aid][2] == 1, aid
+
+
+def test_news_targets_follow_rules_that_sell_on_sentiment() -> None:
+    """뉴스 수집 대상 계좌 = 감성급락을 따르는 원칙 — `SELL_RULES` 와 같은 목록이어야 C(momentum)의 감성 매도가 살아 있다 (25.1468)."""
+    import re
+
+    from batch.jobs import monitor_targets
+    from batch.services import paper as pp
+
+    따름 = {k for k, v in pp.SELL_RULES.items() if v is None or "감성급락" in v}
+    적힌 = set(re.findall(r"'(\w+)'", monitor_targets.PAPER_HELD_SQL.split("sell_rule IN")[1].split(")")[0]))
+    assert 적힌 == 따름 == {"all", "momentum"}

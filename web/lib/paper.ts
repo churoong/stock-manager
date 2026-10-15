@@ -34,7 +34,7 @@ export const depositSchema = z.object({
 export const cancelSchema = z.object({ request_key: requestKey });
 
 export const PAPER_ACCOUNTS =
-  "SELECT id, name, sell_rule, rule_version, entry_rule, top_n, selection FROM paper_accounts ORDER BY id";
+  "SELECT id, name, sell_rule, rule_version, entry_rule, top_n, selection, charter_json FROM paper_accounts ORDER BY id";
 
 /**
  * 0075 가 적용되기 **전**의 같은 질의 (25.1458 재검증 권장 3). 마이그레이션은 다음 일일 배치가 적용하므로, 그 사이에 배포된 웹이
@@ -66,25 +66,39 @@ export interface AccountRule {
   entry_rule?: string | null;
   top_n?: number | null;
   selection?: string | null;
+  /** 판 2 투자사 헌장 (migrations/0077, docs/company.md) — 있으면 매수는 위원회 가결 */
+  charter_json?: string | null;
 }
 const SELL_RULE_TEXT: Record<string, string> = {
   all: "모든 매도 플래그",
   core: "손절·목표도달·기간초과만",
   time: "기간초과만(손절·목표 무시)",
+  value: "손절·목표도달·재무악화·점검",
+  momentum: "손절·기간초과·재무악화·점검·감성급락(목표에서 안 팖)",
 };
 export function ruleText(a: AccountRule): string {
-  const 고르기 = a.selection === "random" ? "무작위 대조(같은 자리·비중)" : `점수 상위 ${a.top_n ?? 5}종목`;
+  let 헌장: { name?: string; agenda?: number; top_n?: number } | null = null;
+  try {
+    헌장 = a.charter_json ? JSON.parse(a.charter_json) : null;
+  } catch {
+    헌장 = null;
+  }
+  const 고르기 = 헌장
+    ? `${헌장.name ?? "투자사"} 위원회 가결(안건 ${헌장.agenda ?? "?"}개 중 최대 ${헌장.top_n ?? a.top_n ?? 5}종목)`
+    : a.selection === "random"
+      ? "무작위 대조(같은 자리·비중)"
+      : `점수 상위 ${a.top_n ?? 5}종목`;
   const 진입 = a.entry_rule === "open" ? "다음 장 시가에 한 번에" : "3회 분할 지정가";
   return `매수: ${고르기} · ${진입} — 매도: ${SELL_RULE_TEXT[a.sell_rule] ?? a.sell_rule}`;
 }
-/** 짝 비교 — 한 번에 하나만 다르게 지은 짝. batch/services/paper.py `PAIRS` 와 같은 목록 (25.1458) */
+/** 짝 비교 — 판 2(투자사)부터 회사 대 기준(B)과 기준 대 무작위. batch/services/paper.py `PAIRS` 와 같은 목록 (25.1468) */
 export const PAIRS: ReadonlyArray<readonly [string, string, string]> = [
-  ["A", "B", "황색 매도"],
-  ["B", "C", "분할 지정가 대 시가 일괄"],
-  ["B", "D", "매도 플래그 대 기간 보유"],
-  ["E", "B", "10종목 대 5종목"],
-  ["C", "R1", "종목 선정 대 무작위"],
-  ["C", "R2", "종목 선정 대 무작위"],
+  ["A", "B", "가치투자사 대 기준"],
+  ["C", "B", "모멘텀투자사 대 기준"],
+  ["D", "B", "장기보유투자사 대 기준"],
+  ["E", "B", "안정투자사 대 기준"],
+  ["B", "R1", "기준 대 무작위"],
+  ["B", "R2", "기준 대 무작위"],
 ];
 /** 총 투자금액 = 입금 장부 전체의 합(취소 행은 음수) */
 export const PAPER_INVESTED = "SELECT COALESCE(SUM(amount_krw), 0) AS invested, COUNT(*) AS n FROM paper_cash_flows";

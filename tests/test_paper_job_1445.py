@@ -33,10 +33,15 @@ class _Res:
 
 
 class Client:
-    def __init__(self, accounts: tuple[str, ...] | None = ("A", "B")) -> None:
+    def __init__(self, accounts: tuple[str, ...] | None = ("A", "B"), charters: bool = False) -> None:
         self.conn = sqlite3.connect(":memory:")
         for path in sorted((ROOT / "migrations").glob("*.sql")):
             self.conn.executescript(path.read_text(encoding="utf-8"))
+        if not charters:
+            # 판 1 규칙을 보는 시험 — 0077 헌장(판 2 투자사, docs/company.md) 전의 계좌로 되돌린다
+            for aid, rule in (("A", "all"), ("C", "core"), ("D", "time"), ("E", "core")):
+                self.conn.execute("UPDATE paper_accounts SET charter_json = NULL, charter_since = NULL, rule_version = 1,"
+                                  " sell_rule = ? WHERE id = ?", [rule, aid])  # fmt: skip
         if accounts is not None:
             # 이 파일의 시험은 A·B 두 계좌의 규칙을 본다 — 7계좌(25.1458)는 tests/test_paper_accounts_1458.py
             self.conn.execute(f"DELETE FROM paper_accounts WHERE id NOT IN ({','.join('?' * len(accounts))})",

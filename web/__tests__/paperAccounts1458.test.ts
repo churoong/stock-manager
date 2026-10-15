@@ -52,6 +52,10 @@ describe("모의 계좌 7개", () => {
       "매수: 무작위 대조(같은 자리·비중) · 다음 장 시가에 한 번에 — 매도: 손절·목표도달·기간초과만",
     );
     expect(ruleText({ sell_rule: "core", top_n: 10 })).toContain("점수 상위 10종목 · 3회 분할 지정가");
+    // 판 2 투자사(25.1468) — 매수는 위원회 가결
+    expect(
+      ruleText({ sell_rule: "value", top_n: 5, charter_json: JSON.stringify({ name: "가치투자사", agenda: 20, top_n: 5 }) }),
+    ).toBe("매수: 가치투자사 위원회 가결(안건 20개 중 최대 5종목) · 3회 분할 지정가 — 매도: 손절·목표도달·재무악화·점검");
   });
 
   it("시장가 매수도 예약에 든다 — 0 으로 세면 입금 취소가 C·R 에 묶인 돈을 못 본다 (검증 [필수] 5)", () => {
@@ -69,8 +73,8 @@ describe("모의 계좌 7개", () => {
   it("계좌 비교 — 일곱 계좌와 짝의 뜻", () => {
     const html = renderToStaticMarkup(createElement(CompareCard, { data }));
     for (const id of ["A", "B", "C", "D", "E", "R1", "R2"]) expect(html).toContain(`>${id}<`);
-    expect(html).toContain("C−R1: 종목 선정 대 무작위");
-    expect(html).toContain("B−D: 매도 플래그 대 기간 보유");
+    expect(html).toContain("A−B: 가치투자사 대 기준");
+    expect(html).toContain("B−R1: 기준 대 무작위");
     expect(html).toContain("기간초과만(손절·목표 무시)");
   });
 
