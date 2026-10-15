@@ -70,6 +70,32 @@ class Test적재:
         ).fetchall()
         assert kept == [(job.SOURCE, job.EVENTS_PER_STOCK), ("krx", 1)]  # 확정 일정은 건드리지 않는다
 
+    def test_대상에서_빠진_종목의_앞으로_일정을_지운다(self) -> None:
+        """빠진 종목의 야후 "확정" 행이 그 날짜까지 남아 종목 화면·판정에 보였다 (docs/infra.md 25.1399)"""
+        client = self._client()
+        client.conn.execute(
+            "INSERT INTO stocks (id, ticker, market, country, currency, status, source, fetched_at)"
+            " VALUES (9, 'Z', 'KOSPI', 'KR', 'KRW', 'active', 't', 't')"
+        )
+        client.conn.execute(
+            "INSERT INTO earnings_calendar (stock_id, event_type, scheduled_date, is_confirmed, note, source, fetched_at)"
+            " VALUES (9, '실적발표', '2026-10-28', 1, '확정', ?, 't'),"
+            "        (9, '실적발표', '2026-09-01', 1, '지난 일정', ?, 't'),"
+            "        (9, '실적발표', '2026-11-30', 1, '다른 출처', 'krx', 't')",
+            [job.SOURCE_YAHOO, job.SOURCE_YAHOO],
+        )
+        # 시험용 --limit 실행(대상 일부)이면 지우지 않는다
+        job.store(client, [], "2026-09-17", yahoo_ids=set(), estimate_ids=[1])  # type: ignore[arg-type]
+        assert client.conn.execute("SELECT COUNT(*) FROM earnings_calendar WHERE stock_id = 9").fetchone()[0] == 3
+        job.store(client, [], "2026-09-17", yahoo_ids=set(), estimate_ids=[1], all_target_ids=[1])  # type: ignore[arg-type]
+        남은 = client.conn.execute("SELECT note FROM earnings_calendar WHERE stock_id = 9 ORDER BY note").fetchall()
+        assert 남은 == [("다른 출처",), ("지난 일정",)]  # 이 배치 출처의 앞으로 일정만
+
+    def test_오늘은_한국_날짜(self) -> None:
+        import inspect
+
+        assert "cal.user_today()" in inspect.getsource(job.run)
+
 
 class Test야후_예정일:
     def test_실제_응답_모양을_읽는다(self) -> None:

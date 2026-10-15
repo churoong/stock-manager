@@ -22,10 +22,11 @@ import argparse
 import logging
 import sys
 import time
-from datetime import UTC, date, datetime
+from datetime import date
 from typing import Any
 
 from batch import config
+from batch.core import calendar as cal
 from batch.core import db
 from batch.core.client import TursoClient
 from batch.core.entry import guard
@@ -149,6 +150,7 @@ def store(
     *,
     yahoo_ids: set[int] | list[int],
     estimate_ids: set[int] | list[int],
+    all_target_ids: list[int] | None = None,
 ) -> int:
     """이 배치가 쓰는 두 출처의 앞으로 일정을 지우고 다시 넣는다 — **이번에 다룬 종목만** (docs/infra.md 25.252).
 
@@ -159,6 +161,9 @@ def store(
     `--limit N` 시험 실행은 N 밖의 모든 종목 일정을 지웠다.
     - `yahoo_ids`: 야후가 **답한** 종목. 그 종목의 옛 야후 일정만 지운다(날짜가 빠졌으면 빠진 것이 맞다)
     - `estimate_ids`: 이번에 대상이었던 종목. 그 종목의 옛 추정만 지운다
+    - `all_target_ids`: 대상 **전부**를 골랐을 때만(시험용 `--limit` 이 아닐 때) 준다. 대상에서 빠진 종목(유니버스·보유·
+      관심 밖)의 앞으로 일정을 지운다 (docs/infra.md 25.1399, 실적 일정 감사). 예전에는 빠진 종목의 "확정" 행이 그
+      날짜까지 남아, 야후가 날짜를 바꿔도 반영되지 않은 채 종목 화면·판정에 "10-28 확정" 으로 남았다
     """
     statements: list[tuple[str, list[Any]]] = []
     묶음 = db.in_chunk(reserve=2)
@@ -170,6 +175,14 @@ def store(
                 f" AND stock_id IN ({', '.join('?' * len(조각))})",
                 [출처, today, *조각],
             ))  # fmt: skip
+    if all_target_ids:
+        import json
+
+        statements.append((
+            "DELETE FROM earnings_calendar WHERE source IN (?, ?) AND scheduled_date >= ?"
+            " AND stock_id NOT IN (SELECT value FROM json_each(?))",
+            [SOURCE_YAHOO, SOURCE, today, json.dumps(sorted(all_target_ids))],
+        ))  # fmt: skip
     if rows:
         holes = "(" + ", ".join(["?"] * db.column_count(_COLS)) + ")"
         for start in range(0, len(rows), 200):
@@ -188,7 +201,10 @@ def run(limit: int | None = None, use_yahoo: bool = True) -> int:
     client = TursoClient()
     try:
         db.apply_migrations(client)
-        today = datetime.now(UTC).date()
+        # **사용자(한국) 날짜** (docs/infra.md 25.1399) — 월 15:53 UTC 실행은 한국 화요일이다. UTC 날짜를 쓰면
+        # 국내 종목의 어제(월) 발표일이 "앞으로 일정" 으로 저장돼 추정 대상에서도 빠졌다
+        # (화면은 한국 오늘 이후만 보여 비었다)
+        today = cal.user_today()
         run_id = db.start_batch_run(
             client, job_name=JOB_NAME, market=None, trade_date=today.isoformat()
         )
@@ -217,7 +233,8 @@ def run(limit: int | None = None, use_yahoo: bool = True) -> int:
             ends = fiscal_year_ends(client, sorted(rest))
             for stock_id, (fy_end, _filed) in ends.items():
                 rows.extend(rows_for(stock_id, fy_end, today, now))
-            stored = store(client, rows, today.isoformat(), yahoo_ids=답한, estimate_ids=대상번호)
+            stored = store(client, rows, today.isoformat(), yahoo_ids=답한, estimate_ids=대상번호,
+                           all_target_ids=대상번호 if not limit else None)
         except Exception as exc:
             if not db.quota_reason(exc):  # 한도는 `guard()` 가 skipped 로 닫는다 (docs/infra.md 25.1223)
                 db.finish_batch_run(client, run_id, status="failed", error_text=str(exc))
