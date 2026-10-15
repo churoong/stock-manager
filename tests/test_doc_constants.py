@@ -865,6 +865,7 @@ class Test이웃_모듈들:
         검사(SIGNALS, f"{oc.HORIZON_WINDOW} 거래일 안 **종가**", "목표·손절 터치 창")
         검사(SIGNALS, f"마지막 날보다 {oc.CUTOFF_GAP_DAYS}일 넘게 먼저 끝났고", "시세 끊김 판정 (25.696)")
         검사(SIGNALS, f"**{oc.EXCESS_SAMPLE_SHARE * 100:.0f}%** 이상이 지수값을 가질 때만", "지수 대비 표본 비율 (25.706)")
+        검사(SIGNALS, f"**{oc.POST_TOUCH_MAX_TAU}번째 날(`POST_TOUCH_MAX_TAU`)까지**", "터치 뒤 표류를 재는 터치 위치 상한 (25.1408)")
 
     def test_스트레스_표본_하한(self) -> None:
         검사(STRESS, f"창 길이의 {st.MIN_SAMPLE_MULTIPLE}배에 못 미치면", "스트레스 표본 하한")

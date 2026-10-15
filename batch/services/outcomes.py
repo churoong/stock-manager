@@ -42,10 +42,55 @@ class Outcome:
     hit_stop: bool | None = None
     bench: dict[int, float | None] = field(default_factory=lambda: dict.fromkeys(WINDOWS))
     days_available: int = 0
+    #: 목표·손절에 **먼저 닿은 뒤** 60일째까지의 지수 대비 (27회차 P2, 25.1408 — 기록만). (무리, 터치일, 값)
+    post_touch: tuple[str, str, float] | None = None
 
     def excess(self, window: int) -> float | None:
         r, b = self.rets.get(window), self.bench.get(window)
         return None if r is None or b is None else r - b
+
+
+#: 터치 뒤를 재려면 남아야 하는 창 — 터치가 40번째 날까지일 때만(성적표 20일 창 이상이 남는다). 결과 전 고정 (25.1408)
+POST_TOUCH_MAX_TAU = 40
+
+
+def post_touch(
+    window: list[tuple[str, float]], index_closes: list[tuple[str, float]] | None,
+    첫목표: int | None, 첫손절: int | None,
+) -> tuple[str, str, float] | None:
+    """먼저 닿은 쪽의 터치일 종가 → 60거래일째 종가 수익에서 같은 날들의 지수 수익을 뺀 값 (27회차 P2, 25.1408).
+
+    처분 효과(Frazzini 2006): 이긴 쪽을 일찍 팔고 진 쪽을 쥐면 그 뒤 표류를 놓친다 — 우리 녹색 "차익 실현 검토" 가
+    손해를 부르는지 보려는 **기록**이다. 창이 60일 다 찼을 때만(시세가 끊겨 마지막 종가로 채운 창은 뺀다 — 호출하는
+    쪽이 실제 행만 넘긴다), 터치가 `POST_TOUCH_MAX_TAU` 째 날까지일 때만, 지수는 두 날짜 모두 정확히 있을 때만"""
+    if len(window) < HORIZON_WINDOW or not index_closes:
+        return None
+    무리, τ = ("target", 첫목표) if 첫목표 is not None else ("stop", 첫손절) if 첫손절 is not None else ("", None)
+    if τ is None or τ > POST_TOUCH_MAX_TAU:
+        return None
+    idx = dict(index_closes)
+    (d0, p0), (d1, p1) = window[τ], window[HORIZON_WINDOW - 1]
+    i0, i1 = idx.get(d0), idx.get(d1)
+    if not (i0 and i1 and p0 > 0):
+        return None
+    return 무리, d0, (p1 / p0 - 1) - (i1 / i0 - 1)
+
+
+def summarize_post_touch(outcomes: list[Outcome]) -> dict[str, dict[str, Any]]:
+    """기간·무리별 n·서로 다른 종목 수·(종목, 터치일) 수·평균 (25.1408). 장기는 60일 안에 거의 닿지 않아 뺀다.
+    같은 종목의 연속 신호는 같은 터치일을 나눠 가지므로 (종목, 터치일) 한 건으로 센다(검증 B)"""
+    모음: dict[str, dict[tuple[int, str], float]] = {}
+    for o in outcomes:
+        if o.post_touch is None or o.horizon == "long":
+            continue
+        무리, 날, 값 = o.post_touch
+        모음.setdefault(f"{o.horizon}:{무리}", {}).setdefault((o.stock_id, 날), 값)
+    out: dict[str, dict[str, Any]] = {}
+    for key, 건 in sorted(모음.items()):
+        값들 = list(건.values())
+        out[key] = {"n": len(값들), "stocks": len({sid for sid, _ in 건}),
+                    "mean": round(sum(값들) / len(값들), 4)}  # fmt: skip
+    return out
 
 
 def _ret(later: float | None, base: float) -> float | None:
@@ -145,6 +190,8 @@ def evaluate(
         첫손절 = next((i for i, (_d, c) in enumerate(window) if stop is not None and c <= float(stop)), None)
         out.hit_target = None if target is None else 첫목표 is not None and (첫손절 is None or 첫목표 < 첫손절)
         out.hit_stop = None if stop is None else 첫손절 is not None and (첫목표 is None or 첫손절 < 첫목표)
+        out.post_touch = post_touch(window, index_closes, 첫목표 if out.hit_target else None,
+                                    첫손절 if out.hit_stop else None)  # fmt: skip
 
     if index_closes:
         idx = dict(index_closes)
