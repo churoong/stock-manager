@@ -63,3 +63,35 @@ class Test업종상한:
         rows = [row(1, suggested_amount=2_000_000.0, sector="A"), row(2, suggested_amount=2_000_000.0, sector="A")]
         view = rp.build_portfolio(rows, total_investable=10_000_000, max_sector_pct=50)
         assert len(view.allocations) == 2
+
+
+def test_미국_SEC_차단으로_도중에_멈추면_실패(monkeypatch) -> None:  # noqa: ANN001
+    """국내(25.609·25.611)와 같은 규칙 — 미국만 partial 로 끝나 남은 회사 업종이 다음 달까지 비었다 (25.1406)"""
+    from batch.core import db
+    from batch.jobs import sectors as job
+    from batch.sources import sec_edgar
+    from tests.test_portfolio_job import MemClient
+
+    mem = MemClient()
+    db.apply_migrations(mem)  # type: ignore[arg-type]
+    mem.close = lambda: None  # type: ignore[method-assign]
+    monkeypatch.setattr(job, "TursoClient", lambda: mem)
+    monkeypatch.setattr(job, "us_targets", lambda c: {"AAA": 1, "BBB": 2, "CCC": 3})
+
+    class 가짜SEC:
+        calls = 0
+
+        def ticker_map(self) -> dict[str, str]:
+            return {"AAA": "1", "BBB": "2", "CCC": "3"}
+
+        def sic(self, cik: str) -> str:
+            if cik == "2":
+                raise sec_edgar.SecBlocked("403")
+            return "3674"
+
+    monkeypatch.setattr(job.sec_edgar, "SecClient", 가짜SEC)
+    for sid in (1, 2, 3):
+        mem.conn.execute("INSERT INTO stocks (id, ticker, market, country, currency, source, fetched_at)"
+                         " VALUES (?, ?, 'NYSE', 'US', 'USD', 't', 't')", [sid, f"T{sid}"])  # fmt: skip
+    assert job.run("US") == 1
+    assert mem.conn.execute("SELECT status FROM batch_runs WHERE job_name = ?", [job.JOB_NAME]).fetchone() == ("failed",)

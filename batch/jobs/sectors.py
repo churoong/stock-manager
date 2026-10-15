@@ -64,7 +64,7 @@ def run(market: str, limit: int | None = None) -> int:
         names: Counter[str] = Counter()
         missing: list[str] = []
         error = ""
-        잇단멈춤 = False  # 국내: 잇단 실패·한도로 도중에 멈췄나 (25.609·25.611)
+        잇단멈춤 = False  # 잇단 실패·한도(국내)·SEC 차단(미국, 25.1406)으로 도중에 멈췄나 (25.609·25.611)
 
         if market == "KR" and db.usage_blocked_today(client, "dart_opendart"):
             # 부르기 전에 본다 (docs/infra.md 25.388) — 한도가 찬 날 100번 더 부르지 않는다
@@ -157,6 +157,10 @@ def run(market: str, limit: int | None = None) -> int:
                     sic = sec.sic(cik)
                 except sec_edgar.SecBlocked as exc:
                     error = f"{index}/{len(ciks)} 에서 SEC 차단: {exc}"
+                    # **도중에 멈췄으면 failed** — 국내(25.609·25.611)와 같은 규칙 (docs/infra.md 25.1406,
+                    # 주간 작업 감사). 미국만 빠져 partial 로 끝났고, 월 1회라 남은 회사 업종이
+                    # 다음 달까지 비었다
+                    잇단멈춤 = index < len(ciks)
                     break
                 except Exception as exc:  # noqa: BLE001 — 한 회사 실패(시간 초과 등)로 전체를 멈추지 않는다
                     log.warning("SEC submissions %s 실패: %s", cik, exc)
