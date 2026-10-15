@@ -22,17 +22,36 @@ def _e(day: str, amt: str = "0", pay: str = "", stk: str = "0") -> dict:
 
 
 def test_사실만_센다() -> None:
-    사건 = [_e("2026-06-30", "500", "2026/08/20"), _e("2026-09-30", "300", ""), _e("2026-10-15", "0"),
+    사건 = [_e("2026-06-30", "500", "2026/08/20"), _e("2026-09-30", "300", "20261120"), _e("2026-10-15", "0"),
             _e("2026-12-31", "1000")]  # fmt: skip
     n = sf.dividend_note(사건, ["2026-01-05"], 10, 100_000, "2026-01-05", 오늘, "2026-10-01")
     assert n is not None
-    # 앞날 기준일(12-31)은 빠진다. 미정("0") 1건, 지급 전 1건(9-30 은 지급일 없음)
-    assert (n["n"], n["per_share"], n["pending"], n["undetermined"]) == (3, 800.0, 1, 1)
+    # 앞날 기준일(12-31)은 빠진다. 미정("0") 1건, 지급 전 1건(9-30 → 11-20)
+    assert (n["n"], n["per_share"], n["pending"], n["undetermined"], n["pay_unknown"]) == (3, 800.0, 1, 1, 0)
     assert n["pct"] == pytest.approx(8.0)  # 800원 × 10주 / 10만 원
     assert n["uncovered_since"] == "2026-10-01"
     글 = sf.dividend_row(n, "2026-10-19")["display"]
-    assert "주당 합 800원 = 원가의 8.00%p (지급 전 1건)" in 글 and "금액 미정 1건" in 글 and "수집 전이라 모름" in 글
+    assert "주당 합 800원 = 원가의 8.00%p (지급 전 1건)" in 글 and "금액 미정(기준일 직후까지 받은 값) 1건" in 글 and "수집 전이라 모름" in 글
     assert sf.dividend_row(n, None)["passed"] is None
+
+
+def test_지급일을_못_읽으면_지급_전이라_하지_않는다() -> None:
+    """수집 창이 기준일 + 7일에서 끝나 빈 지급일은 다시 채워지지 않는다 — 몇 달 뒤 "지급 전" 은 거짓 (25.1416 R2)"""
+    n = sf.dividend_note([_e("2025-12-31", "300", "")], [], 10, 1000, "2025-01-05", date(2026, 5, 30), None)
+    assert n is not None and (n["pending"], n["pay_unknown"]) == (0, 1)
+    글 = sf.dividend_row(n, None)["display"]
+    assert "지급 전 0건" in 글 and "지급일 모름 1건" in 글 and "수집 시작을 몰라" in 글
+
+
+def test_긴_연휴면_달력으로_락일_전_매수를_덮는다() -> None:
+    """2025 추석(10-03~09 휴장)에 기준일 10-10 이면 마지막 권리 날은 10-01 — 7일 경계(10-03)는 10-02 매수를 못 덮었다
+    (25.1416 R4)"""
+    assert job._배당_매매_경계("2025-10-10") <= "2025-10-01"
+    n = sf.dividend_note([_e("2025-10-10", "300", "20251120")], ["2025-09-01", "2025-10-02"], 10, 1000, "2025-09-01",
+                         date(2025, 10, 20), None, guard_from=job._배당_매매_경계)  # fmt: skip
+    assert n is not None and n["qty_unknown"] == 1 and n["pct"] is None
+    # 평일만 있는 구간은 달력 7일이 더 이르다
+    assert job._배당_매매_경계("2026-09-30") == "2026-09-23"
 
 
 def test_기준일_앞뒤_매매면_수량을_모른다() -> None:
@@ -87,6 +106,6 @@ def test_적재가_예탁원_배당을_읽어_붙인다(monkeypatch: pytest.Monk
     job.run(오늘)
     글 = k.execute("SELECT rationale_data FROM sell_flags WHERE reason_code = '손절'").fetchone()[0]
     행 = [r for r in json.loads(글)["criteria"] if r["label"] == "매수 뒤 배당 기준일"]
-    assert 행 and "원가의 5.00%p (지급 전 1건)" in 행[0]["display"] and "2026-09-30 전" in 행[0]["display"]
+    assert 행 and "원가의 5.00%p (지급 전 1건)" in 행[0]["display"] and "2026-10-01 전" in 행[0]["display"]
     로그 = k.execute("SELECT step_log FROM batch_runs WHERE job_name = 'sell_flags'").fetchone()[0]
     assert json.loads(로그)["dividend_note"] == {"stop_target": 1, "with_div": 1}

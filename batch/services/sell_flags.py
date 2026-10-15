@@ -216,7 +216,8 @@ def chained_score_drop(
 
 
 #: 배당 기준일 이 날수 앞부터 매매가 있으면 그 기준일에 배당 받을 수량을 지금 수량으로 볼 수 없다 — 락일은 기준일 전
-#: 거래일이고 결제는 T+2 라 기준일 이틀(거래일) 전까지 산 주식만 받는다. 주말·연휴를 넉넉히 덮는 7일 (25.1413)
+#: 거래일이고 결제는 T+2 라 기준일 이틀(거래일) 전까지 산 주식만 받는다. 달력 하한 7일 (25.1413). 적재는 거래소
+#: 달력으로 "기준일 두 거래일 전" 과 견줘 이른 쪽을 쓴다 — 추석 같은 긴 연휴면 7일로는 락일 전 매수를 못 덮는다(25.1416)
 DIVIDEND_TRADE_GUARD_DAYS = 7
 
 
@@ -233,24 +234,31 @@ def _날(ymd: object) -> str | None:
     return f"{s[:4]}-{s[4:6]}-{s[6:8]}" if len(s) == 8 and s.isdigit() else None
 
 
+def _달력_경계(record_date: str) -> str:
+    return (date.fromisoformat(record_date) - timedelta(days=DIVIDEND_TRADE_GUARD_DAYS)).isoformat()
+
+
 def dividend_note(events: list[dict], trade_dates: list[str], quantity: float, cost: float, first_buy_date: str,
-                  today: date, covered_since: str | None) -> dict | None:  # fmt: skip
+                  today: date, covered_since: str | None, guard_from: Any = None) -> dict | None:  # fmt: skip
     """매수 뒤 **이미 지난** 배당 기준일의 사실 (docs/sell_flags.md 1.2, 26회차 P1 — 검증 B 의 사실 문구).
 
     평가 수익률은 주가만 본다 — 락일에 빠진 가격만큼 받을 현금배당은 들어 있지 않다. 판정은 바꾸지 않고 사실만 센다.
     `events` 는 예탁원 배당 일정(`kr_corp_events.detail` 을 푼 dict 와 `record_date`). 주당배당 `per_sto_divi_amt` 가
     "0" 이면 **금액 미정**(10-15 실측 — 정해지기 전에는 0 으로 온다). 주식배당(`stk_divi_rate` > 0)은 따로 센다.
-    기준일 7일 전부터 매매가 있으면 그 기준일의 받을 수량을 모른다 — 금액에 넣지 않고 센다"""
+    기준일 7일 전(또는 `guard_from(기준일)` — 적재가 거래소 달력으로 준다)부터 매매가 있으면 그 기준일의 받을 수량을
+    모른다 — 금액에 넣지 않고 센다. 지급일을 읽지 못하면 "지급 전" 이 아니라 "지급일 모름" 으로 센다(25.1416 — 수집 창이
+    기준일 + 7일에서 끝나 빈 지급일이 다시 채워지지 않는다). `covered_since` 가 None 이면 수집 범위를 모른다고 적는다"""
+    경계함수 = guard_from or _달력_경계
     지난 = sorted((e for e in events if first_buy_date < str(e.get("record_date") or "") <= today.isoformat()),
                 key=lambda e: str(e["record_date"]))  # fmt: skip
     if not 지난:
         return None
-    합, 주당, 지급전, 미정, 주식, 수량모름 = 0.0, 0.0, 0, 0, 0, 0
+    합, 주당, 지급전, 지급모름, 미정, 주식, 수량모름 = 0.0, 0.0, 0, 0, 0, 0, 0
     for e in 지난:
         d = e.get("detail") if isinstance(e.get("detail"), dict) else {}
         if (_원(d.get("stk_divi_rate")) or 0) > 0:
             주식 += 1
-        경계 = (date.fromisoformat(str(e["record_date"])) - timedelta(days=DIVIDEND_TRADE_GUARD_DAYS)).isoformat()
+        경계 = 경계함수(str(e["record_date"]))
         if any(t >= 경계 for t in trade_dates):
             수량모름 += 1
             continue
@@ -261,13 +269,16 @@ def dividend_note(events: list[dict], trade_dates: list[str], quantity: float, c
         합 += amt * quantity
         주당 += amt
         지급일 = _날(d.get("divi_pay_dt"))
-        if 지급일 is None or 지급일 > today.isoformat():
+        if 지급일 is None:
+            지급모름 += 1
+        elif 지급일 > today.isoformat():
             지급전 += 1
     return {
         "n": len(지난), "dates": [str(e["record_date"]) for e in 지난],
         "per_share": round(주당, 2), "pct": round(합 / cost * 100, 6) if cost > 0 and 합 > 0 else None,
-        "pending": 지급전, "undetermined": 미정, "stock_div": 주식, "qty_unknown": 수량모름,
+        "pending": 지급전, "pay_unknown": 지급모름, "undetermined": 미정, "stock_div": 주식, "qty_unknown": 수량모름,
         "uncovered_since": covered_since if covered_since and first_buy_date < covered_since else None,
+        "coverage_unknown": covered_since is None,
     }  # fmt: skip
 
 
@@ -277,12 +288,15 @@ def dividend_row(note: dict, as_of: str | None) -> dict:
     if note.get("pct") is not None:
         글 += (f" · 현금배당 주당 합 {fixed(note['per_share'], 0)}원 = 원가의 {fixed(note['pct'], 2)}%p"
                f" (지급 전 {note['pending']}건)")  # fmt: skip
-    말들 = (("undetermined", "금액 미정"), ("stock_div", "주식배당"), ("qty_unknown", "기준일 앞뒤 매매로 수량 모름"))
+    말들 = (("pay_unknown", "지급일 모름"), ("undetermined", "금액 미정(기준일 직후까지 받은 값)"),
+            ("stock_div", "주식배당"), ("qty_unknown", "기준일 앞뒤 매매로 수량 모름"))  # fmt: skip
     for 키, 말 in 말들:
         if note.get(키):
             글 += f" · {말} {note[키]}건"
     if note.get("uncovered_since"):
         글 += f" · {note['uncovered_since']} 전 기준일은 수집 전이라 모름"
+    elif note.get("coverage_unknown"):
+        글 += " · 수집 시작을 몰라 더 이른 기준일은 모름"
     행 = _criterion("매수 뒤 배당 기준일", 글,
                     "참고 — 평가 수익률은 주가만 보고 받을 현금배당은 넣지 않는다. 판정 불변 (docs/sell_flags.md 1.2)",
                     "kr_corp_events·trades", as_of)  # fmt: skip

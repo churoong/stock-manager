@@ -329,6 +329,9 @@ def _수집_시작(client: TursoClient, country: str, 캐시: dict[str, str | No
 
 #: 예탁원 배당 일정 수집 시작일(기준일 기준)을 한 번 재서 두는 설정 키 (25.1413) — 매일 `kr_corp_events` 를 훑지 않는다
 DIVIDEND_START_KEY = "corp_dividend_collection_started"
+#: 배당 일정이 온전히 덮는 첫 기준일의 하한 (25.1416, 교차검증 R1). 10-07 첫 수집은 배당 목록이 100행에서 잘렸고
+#: 보유 종목별 재조회(25.1008)는 그다음 실행부터였는데, 그 실행의 창은 10-01 부터라 분기말 09-30 기준일은 온전하지 않다
+DIVIDEND_COVERAGE_FLOOR = "2026-10-01"
 DIVIDEND_EVENTS_SQL = (
     "SELECT e.record_date, e.detail FROM kr_corp_events e JOIN stocks s ON s.ticker = e.code"
     " WHERE s.id = ? AND e.kind = 'dividend' AND e.record_date > ? AND e.record_date <= ?"
@@ -348,11 +351,25 @@ def _배당_수집_시작(client: TursoClient, 캐시: dict[str, str | None]) ->
             첫 = client.execute("SELECT MIN(fetched_at) FROM kr_corp_events WHERE kind = 'dividend'").scalar()
             if 첫:
                 값 = (date.fromisoformat(str(첫)[:10]) - timedelta(days=kis_flows.EVENT_BACK_DAYS)).isoformat()
+                값 = max(값, DIVIDEND_COVERAGE_FLOOR)
                 db.set_setting(client, DIVIDEND_START_KEY, 값)
     except Exception:  # noqa: BLE001 — 참고 행이 판정을 막으면 안 된다
         값 = None
     캐시["KR"] = str(값) if 값 else None
     return 캐시["KR"]
+
+
+def _배당_매매_경계(record_date: str) -> str:
+    """이 날부터의 매매는 그 기준일의 받을 수량을 바꾼다 — 기준일 두 거래일 전(T+2 결제의 마지막 권리 날, 그날 매매도
+    보수적으로 넣는다)과 달력 7일 전 가운데 이른 쪽 (25.1416, 교차검증 R4: 2025 추석 연휴 10-03~09 에 기준일 10-10 이면
+    락일 10-02 — 7일 경계 10-03 이 10-02 매수를 못 덮었다). 달력을 못 읽으면 달력 14일"""
+    기준 = date.fromisoformat(record_date)
+    try:
+        권리 = cal.previous_session("KR", cal.previous_session("KR", 기준))
+    except Exception as exc:  # noqa: BLE001 — 달력 계산이다. 더 넓은 경계로 물러난다
+        log.warning("배당 매매 경계를 달력으로 못 냄 (%s): %s", record_date, exc)
+        권리 = 기준 - timedelta(days=2 * sf.DIVIDEND_TRADE_GUARD_DAYS)
+    return min(권리, 기준 - timedelta(days=sf.DIVIDEND_TRADE_GUARD_DAYS)).isoformat()
 
 
 def _배당_기준일(
@@ -376,7 +393,8 @@ def _배당_기준일(
             "SELECT trade_date FROM trades WHERE stock_id = ? AND trade_date >= ?", [sid, 첫매수]
         ).dicts()
         return sf.dividend_note(사건, [str(t["trade_date"]) for t in 매매], float(r["quantity"] or 0),
-                                float(r["cost"] or 0), 첫매수, today, _배당_수집_시작(client, 캐시))  # fmt: skip
+                                float(r["cost"] or 0), 첫매수, today, _배당_수집_시작(client, 캐시),
+                                guard_from=_배당_매매_경계)  # fmt: skip
     except Exception as exc:  # noqa: BLE001 — 참고 행이 판정을 막으면 안 된다
         log.warning("배당 기준일을 읽지 못함 (stock_id=%s): %s", sid, exc)
         못읽음.append(str(r["name"]))
