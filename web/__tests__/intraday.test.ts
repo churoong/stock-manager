@@ -438,9 +438,11 @@ describe("경로: 공시 확인과 DART 한도", () => {
     stubFetch(() => ({ status: "013" })); // 시세 응답이 비었다
     const db = makeDb();
     const body = await run(db);
-    expect(body.missing_quotes).toContain("005930.KS");
+    // 응답에는 수만, 이름은 호출 기록에만 (25.1422 — 응답은 외부 크론 서비스 기록에 남을 수 있다)
+    expect(body.missing_quotes).toBeGreaterThan(0);
+    expect(JSON.stringify(body)).not.toContain("005930");
     const beat = db.executed.find((e) => /cron_heartbeats/.test(e.sql));
-    expect(JSON.stringify(beat?.args)).toContain("missing_quotes");
+    expect(JSON.stringify(beat?.args)).toContain("005930.KS");
   });
 
   it("오늘 장의 시세면 그대로 알린다 — 거르개가 전부를 막지 않는다", async () => {

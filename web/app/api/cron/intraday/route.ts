@@ -724,7 +724,9 @@ export async function GET(request: Request) {
       new_alerts: newCount,
       sent,
       errors,
-      missing_quotes: missingQuotes,
+      // **응답에는 수만** (docs/infra.md 25.1422, 보안 감사 #3) — 응답 본문은 외부 크론 서비스의 실행 기록에 남을 수 있어
+      // 감시 대상(보유·관심) 티커를 싣지 않는다. 이름은 위 호출 기록(`cron_heartbeats` detail)에 남는다
+      missing_quotes: missingQuotes.length,
       setting_warnings: settings.warnings,
     });
   } catch (error) {

@@ -97,7 +97,8 @@ export async function GET(request: Request) {
     const added = results.reduce((sum, r) => sum + r.affectedRows, 0);
     await execute(FETCH_LOG_UPSERT, [target.stock_id, stamp, status, items.length, added]);
     await recordHeartbeat("news", "US", now, status === "ok" ? "checked" : "error", { symbol: target.yahoo_symbol, status, items: items.length, added });
-    return NextResponse.json({ symbol: target.yahoo_symbol, status, items: items.length, added });
+    // 응답에 종목을 싣지 않는다 (25.1422) — 후보가 보유 → 관심 순이라 외부 크론 실행 기록에 보유 목록이 쌓인다. 종목은 호출 기록에
+    return NextResponse.json({ status, items: items.length, added });
   } catch (error) {
     const message = error instanceof Error ? error.message : "실패";
     const quota = quotaReason(message);
