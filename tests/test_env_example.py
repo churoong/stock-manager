@@ -32,6 +32,8 @@ import pytest
     "VERCEL_PROJECT_PRODUCTION_URL": "Vercel 시스템 환경변수(운영 대표 호스트) — 텔레그램 웹훅을 배포 고유 주소가 아닌 대표 주소에 건다 (25.1128)",
     "GITHUB_ACTIONS": "러너가 항상 넣는다. Actions 안인지 밖인지 가리는 데 쓴다",
     "GITHUB_EVENT_NAME": "무엇이 이 실행을 깨웠는가 (schedule · repository_dispatch …)",
+    "GITHUB_SHA": "실행한 커밋. 백테스트 실행 기록 `params.sha` 에 남긴다 (25.1437)",
+    "BACKTEST_TRIGGER": "backtest.yml 이 깨운 주체(schedule·catchup·…)를 넘긴다. 사람이 넣는 값이 아니다 (25.1437)",
     "GITHUB_OUTPUT": "스텝끼리 값을 넘기는 파일 경로. 러너가 만든다",
     "GITHUB_REPOSITORY": "owner/repo. 실행 주소를 만들 때 쓴다",
     "GITHUB_WORKFLOW": "워크플로 이름. Turso 읽기를 출처별 월 누계로 나눈다 (25.1178)",
