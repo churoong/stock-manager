@@ -56,18 +56,25 @@ def parse_holidays(payload: object) -> list[DayStatus]:
     return out
 
 
-def access_token(client, now: datetime | None = None) -> tuple[str, bool]:
-    """(토큰, 새로 받았나). DB 에 둔 것이 충분히 남았으면 그것을 쓴다."""
+def access_token(
+    client, now: datetime | None = None, *, base: str = BASE, name: str = TOKEN_NAME,
+    key_env: str = "KIS_APP_KEY", secret_env: str = "KIS_APP_SECRET", source: str = SOURCE,
+) -> tuple[str, bool]:
+    """(토큰, 새로 받았나). DB 에 둔 것이 충분히 남았으면 그것을 쓴다.
+
+    모의투자(`sources/kis_vts`, docs/paper.md 15장)는 도메인·키·토큰 줄이 따로라 인자로 바꿔 부른다 — 실전 토큰과 섞지
+    않는다
+    """
     now = now or datetime.now(UTC)
-    row = client.execute("SELECT token, expires_at FROM api_tokens WHERE name = ?", [TOKEN_NAME]).dicts()
+    row = client.execute("SELECT token, expires_at FROM api_tokens WHERE name = ?", [name]).dicts()
     if row:
         expires = datetime.fromisoformat(str(row[0]["expires_at"]).replace("Z", "+00:00"))
         if expires - now > TOKEN_REFRESH:
             return str(row[0]["token"]), False
     response = requests.post(
-        f"{BASE}/oauth2/tokenP",
-        json={"grant_type": "client_credentials", "appkey": os.environ["KIS_APP_KEY"],
-              "appsecret": os.environ["KIS_APP_SECRET"]},
+        f"{base}/oauth2/tokenP",
+        json={"grant_type": "client_credentials", "appkey": os.environ[key_env],
+              "appsecret": os.environ[secret_env]},
         timeout=TIMEOUT,
     )  # fmt: skip
     try:
@@ -83,7 +90,7 @@ def access_token(client, now: datetime | None = None) -> tuple[str, bool]:
         "INSERT INTO api_tokens (name, token, expires_at, source, fetched_at) VALUES (?, ?, ?, ?, ?)"
         " ON CONFLICT (name) DO UPDATE SET token = excluded.token, expires_at = excluded.expires_at,"
         " fetched_at = excluded.fetched_at",
-        [TOKEN_NAME, token, expires_at, SOURCE, now.isoformat()],
+        [name, token, expires_at, source, now.isoformat()],
     )
     return str(token), True
 

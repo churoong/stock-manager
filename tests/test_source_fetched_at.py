@@ -34,6 +34,8 @@ import pytest
     "disclosure_coverage": "DART 공시목록 — 시장 전체 B·I 를 그날 다 받은 날 (batch/jobs/disclosure_reaction.py, 25.1014)",
     "kr_flows": "한국투자증권 KIS 투자자별·공매도·신용 일별 (batch/jobs/kis_flows.py, 25.987)",
     "api_tokens": "한국투자증권 KIS 접근토큰 (web/lib/kis.ts, 25.983)",
+    "paper_broker_orders": "한국투자증권 KIS 모의투자 — 베껴 낸 주문의 접수·체결 (batch/jobs/broker_mirror.py, 25.1475)",
+    "paper_broker_daily": "한국투자증권 KIS 모의투자 — 날마다의 잔고와 내부 장부 대조 (batch/jobs/broker_mirror.py, 25.1475)",
     "stocks": "KRX 종목마스터 · SEC company_tickers",
     "prices": "KRX 일별시세 · 야후 (수정주가 포함)",
     "market_calendar": "exchange_calendars 로 낸 휴장일 판정과 그 근거",
