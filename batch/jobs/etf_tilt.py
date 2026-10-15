@@ -43,7 +43,7 @@ def latest_picks(client: TursoClient) -> list[dict[str, Any]]:
     return client.execute(
         "SELECT pk.id AS pick_id, pk.etf_id, e.symbol, e.name, e.country, pk.bucket, pk.passed, pf.category,"
         " pk.as_of_date,"
-        " pf.stock_position, pf.bond_position, pf.total_assets"
+        " pf.stock_position, pf.bond_position, pf.total_assets, pf.prev_close"
         " FROM etf_picks pk JOIN etfs e ON e.id = pk.etf_id"
         " LEFT JOIN etf_profiles pf ON pf.etf_id = pk.etf_id AND pf.as_of_date = pk.as_of_date"
         " WHERE pk.as_of_date = (SELECT p2.as_of_date FROM etf_picks p2 CROSS JOIN etfs e2 ON e2.id = p2.etf_id"
@@ -51,6 +51,29 @@ def latest_picks(client: TursoClient) -> list[dict[str, Any]]:
         "   AND pk.calc_version = (SELECT MAX(p3.calc_version) FROM etf_picks p3 JOIN etfs e3 ON e3.id = p3.etf_id"
         "                          WHERE e3.country = e.country AND p3.as_of_date = pk.as_of_date)"
     ).dicts()
+
+
+PREV_TILT_SQL = (
+    "SELECT step_log FROM batch_runs WHERE job_name = 'etf_tilt' AND status IN ('success', 'partial') AND id < ?"
+    " ORDER BY id DESC LIMIT 1"
+)
+
+
+def _종이_성적(client: TursoClient, run_id: int, 종가: dict[str, float]) -> dict[str, Any]:
+    """지난 실행의 상위 열·판정 종가(`leaders_close`·`bench_close`)와 이번 종가로 무리별 `paper_excess` (25.1440).
+    us 는 VTI, kr_kr 은 KODEX 200 대비. kr_us(원화 상장 미국 지수)는 통화가 어긋나 기준 없이 평균만. 못 읽으면 이유만"""
+    try:
+        글 = client.execute(PREV_TILT_SQL, [run_id]).scalar()
+        앞 = json.loads(글) if 글 else {}
+    except Exception as exc:  # noqa: BLE001 — 기록 전용. 실패를 기록에 남긴다(삼키지 않는다)
+        return {"error": type(exc).__name__}
+    앞종가, 앞기준 = 앞.get("leaders_close") or {}, 앞.get("bench_close") or {}
+    if not 앞종가:
+        return {"skipped": "지난 실행의 상위 열 종가 없음(첫 기록)"}
+    기준 = {"us": tilt.MARKET_BENCHMARK, "kr_kr": tilt.KR_BENCHMARK}
+    return {g: tilt.paper_excess({s: float(c) for s, c in (앞종가.get(g) or {}).items() if c}, 종가,
+                                 앞기준.get(g) if g in 기준 else None, 종가.get(기준[g]) if g in 기준 else None)
+            for g in ("us", "kr_us", "kr_kr")}  # fmt: skip
 
 
 def kr_name_excluded(name: str) -> bool:
@@ -738,6 +761,12 @@ def run() -> int:
             "kr_aligned_top_n": 맞춘_수,
             "coverage": {f"{k}:{s}": round(t.coverage_pct, 1) for (k, s), t in sorted(tilts.items())},
         }
+        # 종이 성적표 (docs/etf.md 11.5, 29회차 P5, 25.1440 — 기록만, 순위에 쓰지 않는다): 이번 상위 열과 기준의
+        # 판정 종가를 적고, 지난 실행이 적어 둔 것과 견준다
+        종가 = {str(p["symbol"]): float(p["prev_close"]) for p in picks if p.get("prev_close")}
+        step["leaders_close"] = {g: {sym: 종가.get(sym) for sym, _ in step["leaders"][g]} for g in step["leaders"]}
+        step["bench_close"] = {"us": 종가.get(tilt.MARKET_BENCHMARK), "kr_kr": 종가.get(tilt.KR_BENCHMARK)}
+        step["tilt_paper"] = _종이_성적(client, run_id, 종가)
         못받음 = sorted(k for k in failed if k != SEC_BLOCKED)
         step["us_ranks_kept"] = 미국_보류
         db.finish_batch_run(

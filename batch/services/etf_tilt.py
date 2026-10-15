@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
+from typing import Any
 
 #: A 를 내는 덮은 비중 하한(%). `[확인필요: 실측 뒤 조정]` — 실측(2026-10-06) 미국 넓은 지수 ETF 는 CUSIP 매칭만
 #: 97~99.6% 였고, 점수는 유니버스(시총·거래대금 하한) 안 종목에만 있어 그보다 낮을 것이다. 3할 넘게 점수 없는 몫이면
@@ -215,4 +216,41 @@ def rank_within(groups: dict[str, list[tuple[int, float | None]]]) -> dict[int, 
         # "3위 / 4위" 가 갈렸다. 1 + 나보다 큰 값의 수 (1·2·2·4)
         for pid, a in scored:
             out[pid] = (1 + sum(1 for _, b in scored if b > a), len(scored))
+    return out
+
+
+#: 종이 성적표에서 한 달 가격 비율이 이 밖이면 분할·병합 의심이라 모름 (docs/etf.md 11.5, 29회차 P5, 25.1440).
+#: 리포트 3.3 의 0.5~2.0 은 2:1 분할 + 5% 오름(0.525)을 띠 안에 둬 −47.5% 로 셌다 — 한 달 ETF 가격이 ±50% 움직일
+#: 일은 없어 좁혔다(검증 A)
+PAPER_RATIO_BAND = (0.67, 1.5)
+#: 열 가운데 이보다 많이 모르면 그 달은 모름(검증 B)
+PAPER_MAX_UNKNOWN = 2
+
+
+def paper_excess(prev: dict[str, float], cur: dict[str, float], bench_prev: float | None,
+                 bench_cur: float | None) -> dict[str, Any]:  # fmt: skip
+    """지난 판정의 상위 ETF 를 같은 비중으로 들었을 때 다음 판정까지 가격 수익과 기준 ETF 대비 (29회차 P5 — 기록만).
+
+    `prev` 는 지난 판정의 상위 열과 그때 종가(`etf_profiles.prev_close`), `cur` 는 이번 판정 종가. 가격 수익이라
+    분배금이 빠진다(양쪽 다 — 남는 차이는 배당률 차이). 기준이 없으면 `ex` 는 None(원화 상장 미국 지수 무리는 통화가
+    어긋나 기준 없이, 검증 A). 비율이 `PAPER_RATIO_BAND` 밖이거나 종가가 없으면 그 ETF 는 모름 —
+    `PAPER_MAX_UNKNOWN` 넘게 모르면 그 달 모름"""
+    수익 = []
+    모름 = 0
+    for sym, a in prev.items():
+        b = cur.get(sym)
+        r = (b / a) if (a and b and a > 0 and b > 0) else None
+        if r is None or not (PAPER_RATIO_BAND[0] <= r <= PAPER_RATIO_BAND[1]):
+            모름 += 1
+            continue
+        수익.append(r - 1)
+    out: dict[str, Any] = {"n": len(prev), "known": len(수익), "unknown": 모름, "mean": None, "bench": None, "ex": None}
+    if not 수익 or 모름 > PAPER_MAX_UNKNOWN:
+        return out
+    out["mean"] = round(sum(수익) / len(수익), 6)
+    if bench_prev and bench_cur and bench_prev > 0 and bench_cur > 0:
+        rb = bench_cur / bench_prev
+        if PAPER_RATIO_BAND[0] <= rb <= PAPER_RATIO_BAND[1]:
+            out["bench"] = round(rb - 1, 6)
+            out["ex"] = round(out["mean"] - out["bench"], 6)
     return out

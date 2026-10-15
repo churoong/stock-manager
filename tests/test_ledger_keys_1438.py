@@ -7,7 +7,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 #: 아직 구현 전인 29회차 키 — 구현하는 커밋에서 이 목록에서 뺀다
-아직 = {"tilt_paper", "horizon_fit"}
+아직 = {"horizon_fit"}
 
 
 def test_원장_키가_코드에_있다() -> None:
