@@ -17,13 +17,16 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any
 
+from batch.core.rounding import half_up
+
 #: 2 — 현금 상태 날을 지표에서 뺐다 (docs/infra.md 25.736). 지난 스냅샷의 지표와 견줄 때 판이 다르다
 #: 3 — 그날 산 몫을 그날 판 왕복을 교체로 상계하지 않는다 (docs/infra.md 25.780·25.782). 그런 날이 있던 TWR 이 바뀐다
 #: 4 — 일부만 판 묶음은 원가 전체(25.784), 전날 몫과 그날 묶음에 걸친 매도 줄의 대금은 매수 자금이 아니다(25.787)
 #: 5 — 지급일 보유가 앞 6개월 최대의 절반 아래면 배당을 몫이 빠진 날에 붙인다 (docs/infra.md 25.828)
 #: 6 — 지표 곡선에 첫날 앞 기준점(25.1260), 배당은 기록한 몫만 TWR 에(25.1261)
 #: 7 — 환율 표가 체결보다 묵은 날은 체결 환율로 평가 (25.1308 — 보유 평가 25.1295 와 같은 규칙)
-#: 8 — 배당 지수 몫의 기록 보유를 창이 열릴 때·날마다 마지막 보유로 (25.1400 — 몫이 빠진 날과 같은 규칙)
+#: 8 — 배당 지수 몫의 기록 보유를 창이 열릴 때·날마다 마지막 보유로 (25.1400 — 몫이 빠진 날과 같은 규칙),
+#:     비중은 소수 넷째 자리·웹과 같은 반올림, 섹터 상한은 반올림 전 값으로 견줌 (25.1401)
 CALC_VERSION = 8
 
 # 수량 비교 허용 오차. 소수 주식(미국)을 더하고 빼다 생기는 부동소수 찌꺼기
@@ -443,8 +446,10 @@ def allocation(
         by_sector[sector_of.get(p.stock_id) or NO_SECTOR] += value
         by_currency[p.currency] += value
 
+    # **소수 넷째 자리, 반올림은 웹과 같은 쪽** (docs/infra.md 25.1401, 포트폴리오 감사). 예전에는 내장 `round(…, 2)`
+    # 로 저장해 웹이 한 자리로 다시 반올림했다 — 12.2496% 가 12.25 → "12.3%"(맞는 값 12.2)
     def pct(d: dict[str, float]) -> dict[str, float]:
-        return {k: round(v / total * 100, 2) for k, v in sorted(d.items(), key=lambda kv: -kv[1])} if total else {}
+        return {k: half_up(v / total * 100, 4) for k, v in sorted(d.items(), key=lambda kv: -kv[1])} if total else {}
 
     sector_pct = pct(by_sector)
     return {
@@ -456,10 +461,11 @@ def allocation(
         if max_sector_pct is None or not 상한_분모
         else [
             k for k, v in by_sector.items()
-            if k != NO_SECTOR and round(v / 상한_분모 * 100, 2) > max_sector_pct
+            # 상한 비교는 **반올림 전 값**으로 (25.1401) — 30.004% 가 30.00 으로 깎여 "넘지 않음" 이었다
+            if k != NO_SECTOR and v / 상한_분모 * 100 > max_sector_pct
         ],
         "by_currency": pct(by_currency),
-        "by_stock": {str(p.stock_id): round(p.weight_pct, 2) for p in positions if p.weight_pct is not None},
+        "by_stock": {str(p.stock_id): half_up(p.weight_pct, 4) for p in positions if p.weight_pct is not None},
     }
 
 
@@ -507,7 +513,7 @@ def lookthrough(
         unknown += v * (100 - min(합, 100.0)) / 100
 
     def r(x: float) -> float:
-        return round(x / total * 100, 2)
+        return half_up(x / total * 100, 4)  # 25.1401 — 위 `pct` 와 같은 이유
 
     ids = set(direct) | set(via)
     rows = sorted(ids, key=lambda s: -(direct.get(s, 0) + via.get(s, 0)))
@@ -518,7 +524,7 @@ def lookthrough(
         by_sector[LOOKTHROUGH_UNKNOWN] += unknown
     return {
         "etf_pct": r(etf_value),
-        "covered_pct": round((etf_value - unknown) / etf_value * 100, 1),
+        "covered_pct": half_up((etf_value - unknown) / etf_value * 100, 4),
         "unknown_etfs": sorted(모름),
         "by_stock": [
             {"stock_id": s, "name": info.get(s, (str(s), None))[0], "direct_pct": r(direct.get(s, 0)),

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from batch.core import db
 from batch.jobs import etf_tilt as tilt_job
 from batch.jobs import portfolio as pf_job
@@ -42,7 +40,8 @@ def test_구성을_모르는_ETF는_통째로_모름() -> None:
 def test_비중_합이_100을_넘으면_줄인다() -> None:
     out = pf.lookthrough([_pos(10, 100)], {10}, {10: {1: 80, 2: 40}}, INFO)
     assert out is not None and out["covered_pct"] == 100.0
-    assert [r["total_pct"] for r in out["by_stock"]] == [pytest.approx(66.67), pytest.approx(33.33)]
+    # 소수 넷째 자리 (25.1401)
+    assert [r["total_pct"] for r in out["by_stock"]] == [66.6667, 33.3333]
 
 
 def test_ETF가_없으면_펼치지_않는다() -> None:

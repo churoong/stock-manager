@@ -14,11 +14,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from statistics import median
 
+from batch.core.rounding import fixed
 from batch.services import portfolio as pf
 from batch.services import signals as sg
 
 # 2: 일부 매도를 승률·표본에서 빼고, 분모가 작은 비율을 내지 않는다 (2026-09-29, docs/infra.md 25.694)
-CALC_VERSION = 2
+# 3: 문장 반올림을 웹과 같은 쪽으로 — 점수·수익률·보유일 (docs/infra.md 25.1401)
+CALC_VERSION = 3
 
 # 이 미만이면 단정하지 않는다. 출발값이고 근거는 없다 [확인필요: 몇 건부터 믿을지]
 MIN_SAMPLE = 10
@@ -222,11 +224,12 @@ def verdict(r: Review) -> str:
     if r.has_snapshot:
         head.append(r.signal_type_at_trade or "신호 없이 매수")
         if r.score_at_trade is not None:
-            head.append(f"매수 시 점수 {r.score_at_trade:.0f}")
+            # 웹 근거표·수익률 칸과 같은 반올림 (25.1401) — 내장 서식은 .5 를 짝수로 보내 72.5 가 문장 72·표 73 이었다
+            head.append(f"매수 시 점수 {fixed(r.score_at_trade, 0)}")
     else:
         head.append("저장된 근거 없음")
 
-    result = f"{r.return_pct:+.1%} ({r.holding_days:.0f}일)"
+    result = f"{fixed(r.return_pct * 100, 1, sign=True)}% ({fixed(r.holding_days, 0)}일)"
     if r.partial:
         result += ", 일부 매도"
 
