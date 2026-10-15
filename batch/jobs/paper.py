@@ -591,10 +591,12 @@ def sell_decisions(
 
 
 #: 무작위 대조(R)가 고르는 모집단 — 그 나라 최신 주간 유니버스의 편입 개별주 (docs/paper.md 2.1.2, 25.1458)
+#: 스냅샷 날짜 서브쿼리는 `db.latest_snapshot_sql()` 과 같은 글이다(동적 질의를 늘리지 않으려고 적어 둔다 — 시험이 대조)
 UNIVERSE_SQL = (
     "SELECT u.stock_id FROM universe_members u JOIN stocks s ON s.id = u.stock_id"
     " WHERE s.country = ? AND u.included = 1 AND s.asset_type = 'stock'"
-    f" AND u.snapshot_date = {db.latest_snapshot_sql()}"
+    " AND u.snapshot_date = (SELECT um.snapshot_date FROM universe_members um"
+    " CROSS JOIN stocks su ON su.id = um.stock_id WHERE su.country = ? ORDER BY um.snapshot_date DESC LIMIT 1)"
 )
 
 
@@ -606,6 +608,7 @@ RANDOM_MAX_TRIES = 50
 def random_substitute(
     client: Any, rows: list[report_picks.SignalRow], *, account: str, market: str, pool: list[int],
     cooldown: set[int], stock_cache: dict[int, dict[str, Any]], today: date, 기록: dict[str, Any],
+    held: dict[int, int] | None = None,
 ) -> list[report_picks.SignalRow]:
     """고른 신호 행의 종목을 무작위 종목으로 바꾼다 (docs/paper.md 2.1.2). 비중·기간·회차 비율은 그대로.
 
@@ -613,35 +616,60 @@ def random_substitute(
     **자료 문제**(개별주 아님·종가가 묵음·기업행위 멈춤)는 씨앗 순서의 다음 후보로 간다. **계좌 상태**(판 뒤 쉼
     `cooldown`)는 다시 뽑지 않고 그 자리를 비운다 — C 가 X 를 쉬는 날과 같은 뜻이다. 다시 뽑으면 R 만 쉬는 동안
     다른 종목을 사고 쉼이 끝나면 또 사서 종목 수·투자 속도가 C 와 갈렸다(검증 [필수] 3).
-    같은 날 다른 자리가 고른 종목은 건너뛴다.
+    **이미 든 대체 종목**(`held` = {신호 종목: 그 자리로 사서 지금 든 종목}, 주문 근거의 `substitute_of`)이 있으면
+    씨앗을 다시 보지 않고 그 종목을 잇는다 — 그 종목이 자료 문제(멈춤·묵은 종가·유니버스에서 빠짐)에 걸리면
+    **자리를 비운다**. 다음 후보로 넘어가면 든 종목은 원가로 남은 채 새 종목을 또 사서, 그 자리만 R 의 돈이
+    두 배가 됐다(25.1458 재검증 [필수] 1).
+    같은 날 다른 자리가 고른 종목·다른 자리가 이미 든 종목은 건너뛴다.
     `기록["random"]` 에 {신호 종목: 대체 종목}, 빈 자리는 `기록["random_empty"]` 에 까닭과 함께
     """
+    held = held or {}
     바꿈: dict[int, int] = {}
     빈자리: dict[str, str] = {}
     기준일 = {r.stock_id: (r.close_date or today.isoformat())[:10] for r in rows}
+
+    def 자료(c: int, sid: int) -> dict[str, Any] | None:
+        """자료가 맞으면 종목 정보(종가 포함), 아니면 None."""
+        s = _stock(client, c, stock_cache)
+        if s.get("country") != market or s.get("asset_type") not in (None, "stock"):
+            return None
+        # 기준 종가는 **신호의 종가 날짜까지** — C 의 기준가와 같은 시점
+        # (검증 권장: 장 끝난 뒤 손 실행에서 하루 어긋남)
+        종가 = client.execute(LAST_CLOSE_SQL, [c, 기준일[sid]]).rows
+        if not 종가 or (today - date.fromisoformat(str(종가[0][1])[:10])).days > rg.STALE_PRICE_DAYS:
+            return None
+        if c in frozen_ids(client, {c}, {c: market}):
+            return None
+        return {**s, "_close": (float(종가[0][0]), str(종가[0][1]))}
+
+    남의것 = set(held.values())
     for sid in dict.fromkeys(r.stock_id for r in rows):
+        if sid in held:
+            c = held[sid]
+            정보 = 자료(c, sid)
+            if 정보 is None:
+                빈자리[str(sid)] = f"든 대체 종목 {c} 자료 문제(멈춤·묵은 종가) — 새 종목을 사지 않음"
+            elif c in cooldown:
+                빈자리[str(sid)] = f"대체 종목 {c} 판 뒤 {pp.REBUY_COOLDOWN_SESSIONS}거래일 안"
+            else:
+                stock_cache[c] = 정보
+                바꿈[sid] = c
+            continue
         까닭 = f"자료가 맞는 후보를 {RANDOM_MAX_TRIES}개 안에서 못 찾음"
         시도 = 0
         for c in pp.random_order(pool, f"{account}|{market}|{sid}"):
-            if c in 바꿈.values():
+            if c in 바꿈.values() or c in 남의것:
                 continue
             if 시도 >= RANDOM_MAX_TRIES:
                 break
             시도 += 1
-            s = _stock(client, c, stock_cache)
-            if s.get("country") != market or s.get("asset_type") not in (None, "stock"):
-                continue
-            # 기준 종가는 **신호의 종가 날짜까지** — C 의 기준가와 같은 시점
-            # (검증 권장: 장 끝난 뒤 손 실행에서 하루 어긋남)
-            종가 = client.execute(LAST_CLOSE_SQL, [c, 기준일[sid]]).rows
-            if not 종가 or (today - date.fromisoformat(str(종가[0][1])[:10])).days > rg.STALE_PRICE_DAYS:
-                continue
-            if c in frozen_ids(client, {c}, {c: market}):
+            정보 = 자료(c, sid)
+            if 정보 is None:
                 continue
             if c in cooldown:
                 까닭 = f"대체 종목 {c} 판 뒤 {pp.REBUY_COOLDOWN_SESSIONS}거래일 안"
                 break
-            stock_cache[c] = {**s, "_close": (float(종가[0][0]), str(종가[0][1]))}
+            stock_cache[c] = 정보
             바꿈[sid] = c
             break
         if sid not in 바꿈:
@@ -659,16 +687,43 @@ def random_substitute(
             buy_zone_low=종가, buy_zone_high=종가, cagr=None, mdd=None, sharpe=None, perf_window=None, perf_as_of=None,
             rationale_text=f"무작위 대조 — 원래 자리: {r.name}({r.ticker})",
             # 근거표 모양은 sell_flags._criterion 과 같다 — CriteriaTable 이 display·threshold 를 읽는다 (검증 권장)
-            criteria=[{"label": "무작위 대조",
-                       "display": f"원래 자리 {r.name}({r.ticker}) · 비중 {r.suggested_weight_pct}%",
-                       "threshold": "추천이 아니라 대조 실험 (docs/paper.md 2.1.2)", "source": "paper", "as_of": 날,
-                       "passed": True}],
+            criteria=[{**sf._criterion("무작위 대조",
+                                       f"원래 자리 {r.name}({r.ticker}) · 비중 {r.suggested_weight_pct}%",
+                                       "추천이 아니라 대조 실험 (docs/paper.md 2.1.2)", "paper", 날),
+                       "substitute_of": r.stock_id}],
             # 회차 가격 키는 신호의 `price` — build_portfolio 의 1주 검사가 이것을 읽는다(검증 [필수] 2)
             tranche_plan=[{**t, "price": 종가, "price_at_or_below": 종가} for t in r.tranche_plan],
         ))  # fmt: skip
     기록["random"] = {str(k): v for k, v in 바꿈.items()}
     if 빈자리:
         기록["random_empty"] = 빈자리
+    return out
+
+
+#: 무작위 대조 계좌가 산 매수 주문의 근거 — 어느 신호 자리로 산 종목인가(`substitute_of`)를 다시 읽는다
+SUBSTITUTE_ORDERS_SQL = (
+    "SELECT stock_id, rationale_json FROM paper_orders WHERE account_id = ? AND side = 'buy' AND status = 'filled'"
+    " ORDER BY id"
+)
+
+
+def held_substitutes(client: Any, account: str, holding: set[int]) -> dict[int, int]:
+    """{신호 종목: 그 자리로 사서 지금 든 종목} — 무작위 대조가 든 종목을 잇게 (25.1458 재검증 [필수] 1).
+
+    나중 주문이 이긴다
+    """
+    out: dict[int, int] = {}
+    for r in client.execute(SUBSTITUTE_ORDERS_SQL, [account]).dicts():
+        if int(r["stock_id"]) not in holding:
+            continue
+        try:
+            근거 = json.loads(r["rationale_json"] or "{}")
+            원래 = next((c.get("substitute_of") for c in 근거.get("signal", {}).get("criteria") or []
+                         if isinstance(c, dict) and c.get("substitute_of") is not None), None)  # fmt: skip
+        except (ValueError, AttributeError):
+            continue
+        if 원래 is not None:
+            out[int(원래)] = int(r["stock_id"])
     return out
 
 
@@ -783,6 +838,10 @@ def buy_orders(
             # 위험 점검이 보는 원화 금액 — 수수료·환율 여유는 예약과 같은 잣대 (25.1451)
             "cost_krw": 단가 * o["quantity"] * (1 + pp.FEE_BUFFER) * 환율
             * (1 if 통화 == "KRW" else 1 + pp.FX_BUFFER),
+            # 현금 검사는 예약과 같은 잣대 — 시장가는 틈 여유까지 (25.1458 재검증 권장 1)
+            "cash_krw": (o["limit_price"] if o.get("limit_price") is not None
+                         else o["ref_price"] * (1 + pp.OPEN_BUY_BUFFER))
+            * o["quantity"] * (1 + pp.FEE_BUFFER) * 환율 * (1 if 통화 == "KRW" else 1 + pp.FX_BUFFER),
             "rationale": {
                 "alloc": {"amount": b["alloc"].amount, "weight_pct": b["alloc"].weight_pct, "note": b["alloc"].note},
                 "signal": {"horizon": r.horizon, "as_of": r.as_of_date, "total_score": r.total_score,
@@ -934,6 +993,7 @@ def run_step(
                     if 유니버스 is None:
                         유니버스 = [int(r[0]) for r in client.execute(UNIVERSE_SQL, [market, market]).rows]
                     바꾸기 = partial(random_substitute, client, account=aid, market=market, pool=유니버스,
+                                    held=held_substitutes(client, aid, set(pp.positions(계좌체결))),
                                     cooldown=최근판, stock_cache=stock_cache, today=cal.local_today(market),
                                     기록=a기록)  # fmt: skip
                 주문, b기록 = buy_orders(
@@ -944,7 +1004,8 @@ def run_step(
                     top_n=종목수, entry=진입, substitute=바꾸기, series_loader=series_loader,
                 )  # fmt: skip
                 # 사전 위험 점검 (25.1451) — 통과한 회차만 주문. 한 회차도 못 지난 종목은 결정 원장에서 blocked 로
-                후보 = [rg.Candidate(o["stock_id"], "buy", o["cost_krw"], o["ref_date"], i) for i, o in enumerate(주문)]
+                후보 = [rg.Candidate(o["stock_id"], "buy", o["cost_krw"], o["ref_date"], i, o["cash_krw"])
+                        for i, o in enumerate(주문)]  # fmt: skip
                 # 후보 종목의 업종도 — 보유만 채우면 새 종목은 업종이 비어 섹터 상한이 꺼졌다 (25.1453, 검증 [필수] 3)
                 문맥 = dc_replace(문맥, sector_of={**문맥.sector_of, **{
                     c.stock_id: _stock(client, c.stock_id, stock_cache).get("sector") for c in 후보}})

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { execute, rowsToObjects } from "@/lib/db";
 import {
   PAPER_ACCOUNTS,
+  PAPER_ACCOUNTS_LEGACY,
   PAPER_CASH,
   PAPER_FILLS,
   PAPER_FLOWS,
@@ -10,7 +11,9 @@ import {
   PAPER_INVESTED,
   PAPER_LATEST_DAILY,
   PAPER_OPEN_BUYS,
+  PAPER_OPEN_BUYS_LEGACY,
   PAPER_OPEN_ORDERS,
+  PAPER_OPEN_ORDERS_LEGACY,
   PAPER_STOCK_NAMES,
   PAPER_TWR,
   HALT_READ,
@@ -20,6 +23,7 @@ import {
   accountView,
   compareReal,
   reservedByAccount,
+  withLegacy,
   type DailyRow,
   type OpenBuy,
 } from "@/lib/paper";
@@ -34,15 +38,15 @@ const HISTORY_DAYS = 400;
 export async function GET() {
   try {
     const [accounts, invested, cash, buys, fx, latest, flows, fills, orders] = await Promise.all([
-      execute(PAPER_ACCOUNTS),
+      withLegacy((q) => execute(q), PAPER_ACCOUNTS, PAPER_ACCOUNTS_LEGACY),
       execute(PAPER_INVESTED),
       execute(PAPER_CASH),
-      execute(PAPER_OPEN_BUYS),
+      withLegacy((q) => execute(q), PAPER_OPEN_BUYS, PAPER_OPEN_BUYS_LEGACY),
       execute(PAPER_FX_LATEST),
       execute(PAPER_LATEST_DAILY),
       execute(PAPER_FLOWS),
       execute(PAPER_FILLS),
-      execute(PAPER_OPEN_ORDERS),
+      withLegacy((q) => execute(q), PAPER_OPEN_ORDERS, PAPER_OPEN_ORDERS_LEGACY),
     ]);
     const 시작 = new Date(Date.now() - HISTORY_DAYS * 86_400_000).toISOString().slice(0, 10);
     const history = rowsToObjects(await execute(PAPER_HISTORY, [시작]));

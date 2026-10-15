@@ -8,10 +8,12 @@ import {
   PAPER_FX_LATEST,
   PAPER_INVESTED,
   PAPER_OPEN_BUYS,
+  PAPER_OPEN_BUYS_LEGACY,
   cancelBlock,
   cancelSchema,
   kstToday,
   reservedByAccount,
+  withLegacy,
   type OpenBuy,
 } from "@/lib/paper";
 
@@ -36,7 +38,7 @@ export async function POST(request: Request, { params }: Params) {
     const [flow, cash, buys, fx] = await Promise.all([
       execute(FLOW_BY_ID, [id]),
       execute(PAPER_CASH),
-      execute(PAPER_OPEN_BUYS),
+      withLegacy((q) => execute(q), PAPER_OPEN_BUYS, PAPER_OPEN_BUYS_LEGACY),
       execute(PAPER_FX_LATEST),
     ]);
     const 행 = rowsToObjects<{ amount_krw: number; kind: string; cancelled: number }>(flow)[0];

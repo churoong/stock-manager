@@ -612,9 +612,10 @@ def summary_lines(
                     손절넘김.add(str(r["as_of"]))
             if any(합 / 총 * 100 > float(limits.get("max_sector_pct") or 100) for 합 in 섹터합.values()):
                 섹터넘음.add(str(r["as_of"]))
-        # 손절을 따르지 않는 계좌(D, 기간 보유)는 설계상 생긴다 — B 는 손절 판정이 종가 기준이라 장중에 넘길 수 있다
+        # 손절을 따르지 않는 계좌(D, 기간 보유)는 설계상 생긴다. 손절을 따르는 계좌도 판정이 종가 기준이라 생길 수 있다
+        # (25.1458 재검증 — 예전 주석은 B 에만 붙어 같은 규칙의 C·E·R 에는 없었다)
         덧 = (" (설계상 — 손절을 따르지 않는 계좌)" if (sell_rules or {}).get(aid) == "time"
-              else " (B 는 설계상 생길 수 있다)" if aid == "B" else "")  # fmt: skip
+              else " (손절은 종가 판정이라 설계상 생길 수 있다)")  # fmt: skip
         out.append(f"  {aid} 규칙 점검: 종목 상한 넘은 날 {len(종목넘음)} · 섹터 상한 넘은 날 {len(섹터넘음)}"
                    f" · 손절선 아래로 들고 간 날 {len(손절넘김)}{덧}")
     return out

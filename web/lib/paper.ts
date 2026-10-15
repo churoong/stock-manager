@@ -36,6 +36,30 @@ export const cancelSchema = z.object({ request_key: requestKey });
 export const PAPER_ACCOUNTS =
   "SELECT id, name, sell_rule, rule_version, entry_rule, top_n, selection FROM paper_accounts ORDER BY id";
 
+/**
+ * 0075 가 적용되기 **전**의 같은 질의 (25.1458 재검증 권장 3). 마이그레이션은 다음 일일 배치가 적용하므로, 그 사이에 배포된 웹이
+ * 새 칸(`entry_rule`·`ref_price`)을 읽으면 /paper 와 입금 취소가 "no such column" 500 이 된다. 칸이 없으면 이 질의로 돌아간다
+ */
+export const PAPER_ACCOUNTS_LEGACY = "SELECT id, name, sell_rule, rule_version FROM paper_accounts ORDER BY id";
+export const PAPER_OPEN_BUYS_LEGACY =
+  "SELECT account_id, limit_price, quantity, currency FROM paper_orders WHERE status = 'open' AND side = 'buy'";
+export const PAPER_OPEN_ORDERS_LEGACY = `SELECT o.id, o.account_id, o.market, s.ticker, COALESCE(s.name_ko, s.name_en, s.ticker) AS name,
+  o.side, o.limit_price, o.quantity, o.currency, o.fill_session, o.tranche, o.reason
+FROM paper_orders o JOIN stocks s ON s.id = o.stock_id WHERE o.status = 'open' ORDER BY o.id`;
+
+export function isMissingColumn(e: unknown): boolean {
+  return /no such column/i.test(e instanceof Error ? e.message : String(e));
+}
+/** 새 질의를 먼저, 칸이 없다는 오류일 때만 옛 질의로. 다른 오류는 그대로 던진다 */
+export async function withLegacy<T>(run: (sql: string) => Promise<T>, sql: string, legacy: string): Promise<T> {
+  try {
+    return await run(sql);
+  } catch (e) {
+    if (isMissingColumn(e)) return run(legacy);
+    throw e;
+  }
+}
+
 /** 계좌 규칙 칸 (migrations/0075, docs/paper.md 1장) — 화면은 칸을 글로 옮길 뿐 계좌 이름을 보지 않는다 */
 export interface AccountRule {
   sell_rule: string;
@@ -55,7 +79,7 @@ export function ruleText(a: AccountRule): string {
 }
 /** 짝 비교 — 한 번에 하나만 다르게 지은 짝. batch/services/paper.py `PAIRS` 와 같은 목록 (25.1458) */
 export const PAIRS: ReadonlyArray<readonly [string, string, string]> = [
-  ["A", "B", "황색 매도를 따르는 값"],
+  ["A", "B", "황색 매도"],
   ["B", "C", "분할 지정가 대 시가 일괄"],
   ["B", "D", "매도 플래그 대 기간 보유"],
   ["E", "B", "10종목 대 5종목"],

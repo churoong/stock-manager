@@ -53,9 +53,17 @@ class Context:
 class Candidate:
     stock_id: int
     side: str  # buy · sell
-    cost_krw: float  # 매수면 예약과 같은 잣대(수수료·환율 여유 포함), 매도면 0
+    cost_krw: float  # 매수면 **낼 것으로 보는 값**(수수료·환율 여유 포함) — 종목·섹터 상한이 본다. 매도면 0
     ref_date: str | None = None  # 매수 기준 종가의 날짜
     key: Any = None  # 부르는 쪽이 다시 찾을 열쇠(회차 등)
+    #: 현금 검사의 잣대 — **예약과 같은 값**. 시장가 매수(시가 일괄)는 틈 여유까지 넣어 `cost_krw` 보다 크다.
+    #: 비면 `cost_krw` (25.1458 재검증: 둘을 한 값으로 두면 상한이 여유만큼 부풀어 C·R 이 막히거나,
+    #: 현금 검사가 예약과 다른 잣대가 된다)
+    cash_krw: float | None = None
+
+    @property
+    def cash_cost(self) -> float:
+        return self.cost_krw if self.cash_krw is None else self.cash_krw
 
 
 def _여유(상한: float) -> float:
@@ -77,7 +85,7 @@ def _매수_까닭(c: Candidate, ctx: Context, 손실: float | None, 매수수: 
         섹터뒤 = (섹터합.get(str(섹터), 0.0) + c.cost_krw) / ctx.equity_krw * 100 if 섹터 else 0.0
         if 섹터뒤 > ctx.max_sector_pct + _여유(ctx.max_sector_pct):
             까닭.append(("sector_cap", f"사고 나면 {섹터} 비중 {섹터뒤:.1f}% > 상한 {ctx.max_sector_pct:g}%"))
-    if 쓴현금 + c.cost_krw > ctx.cash_available_krw + 1:
+    if 쓴현금 + c.cash_cost > ctx.cash_available_krw + 1:
         까닭.append(("cash", "현금(다른 미체결 매수 예약을 뺀) 넘음"))
     if not c.ref_date:
         까닭.append(("no_ref", "기준 종가 날짜 모름"))
@@ -114,7 +122,7 @@ def gate(candidates: list[Candidate], ctx: Context) -> tuple[list[Candidate], li
         통과.append(c)
         if c.side == "buy":
             매수수 += 1
-            쓴현금 += c.cost_krw
+            쓴현금 += c.cash_cost
             종목합[c.stock_id] = 종목합.get(c.stock_id, 0.0) + c.cost_krw
             if ctx.sector_of.get(c.stock_id):
                 k = str(ctx.sector_of[c.stock_id])

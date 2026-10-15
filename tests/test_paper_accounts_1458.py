@@ -268,6 +268,9 @@ def test_web_buffers_match_engine() -> None:
     for 이름 in ("FEE_BUFFER", "FX_BUFFER", "OPEN_BUY_BUFFER"):
         값 = re.search(rf"export const {이름} = ([0-9.]+);", 글)
         assert 값 and float(값.group(1)) == getattr(pp, 이름), 이름
+    # 짝 목록도 같다 — 웹 주석이 "같은 목록" 이라 하면서 문구가 달랐다 (25.1458 재검증)
+    웹짝 = re.findall(r'\["(\w+)", "(\w+)", "([^"]+)"\]', 글[글.index("export const PAIRS"):])
+    assert [tuple(x) for x in 웹짝] == [tuple(x) for x in pp.PAIRS]
 
 
 def test_news_targets_only_for_accounts_that_sell_on_sentiment(c: Client) -> None:
@@ -290,3 +293,49 @@ def test_news_targets_only_for_accounts_that_sell_on_sentiment(c: Client) -> Non
     삼(3, "A", 1)
     assert [r for r in monitor_targets.news_target_rows(c, "KR", [], "t") if r[3] == "paper"] == [  # type: ignore[arg-type]
         ("KR", 1, None, "paper", "t")]
+
+
+def test_random_keeps_held_substitute_and_empties_slot_on_data_issue(c: Client, monkeypatch: pytest.MonkeyPatch) -> None:
+    """이미 든 대체 종목은 씨앗을 다시 보지 않고 잇는다. 그 종목이 멈추면 자리를 비운다 — 다음 후보를 새로 사면
+    든 것은 원가로 남은 채 그 자리만 돈이 두 배가 됐다 (25.1458 재검증 [필수] 1)."""
+    오늘 = date(2026, 10, 15)
+    첫째, 둘째 = pp.random_order([1, 3], "R1|KR|1")
+    기록: dict[str, Any] = {}
+    # 씨앗으로는 첫째가 오지만 둘째를 그 자리로 들고 있다 → 둘째를 잇는다(모집단에 없어도)
+    줄 = job.random_substitute(c, [_신호()], account="R1", market="KR", pool=[첫째], cooldown=set(),
+                               stock_cache={}, today=오늘, 기록=기록, held={1: 둘째})  # fmt: skip
+    assert [r.stock_id for r in 줄] == [둘째]
+    # 든 종목이 멈췄다 → 다음 후보(첫째)를 사지 않고 자리를 비운다
+    monkeypatch.setattr(job, "frozen_ids", lambda _c, ids, _m: set(ids) & {둘째})
+    줄 = job.random_substitute(c, [_신호()], account="R1", market="KR", pool=[1, 3], cooldown=set(),
+                               stock_cache={}, today=오늘, 기록=기록, held={1: 둘째})  # fmt: skip
+    assert 줄 == [] and "자료 문제" in 기록["random_empty"]["1"]
+
+
+def test_held_substitutes_read_from_order_rationale(c: Client, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(report_picks, "select_top", lambda rows, n=5: rows)
+    _하루(c, monkeypatch, "2026-10-14")
+    대체 = _대체("R1")
+    c.conn.execute("UPDATE paper_orders SET status = 'filled' WHERE account_id = 'R1'")
+    assert job.held_substitutes(c, "R1", {대체}) == {1: 대체}
+    assert job.held_substitutes(c, "R1", set()) == {}  # 다 판 뒤에는 잇지 않는다 — 씨앗으로 다시
+
+
+def test_gate_caps_use_expected_cost_cash_uses_reservation() -> None:
+    """상한은 낼 것으로 보는 값, 현금은 예약과 같은 잣대(시장가 틈 여유 포함) — 한 값이면 둘 중 하나가 틀린다 (25.1458 재검증)."""
+    from batch.services import risk_gate as rg
+
+    문맥 = rg.Context(equity_krw=1_000_000, day_return_pct=None, cash_available_krw=105_000, holding_krw={},
+                      sector_of={}, max_stock_pct=10.0, max_sector_pct=30.0, today="2026-10-15")  # fmt: skip
+    후보 = rg.Candidate(1, "buy", 101_000, "2026-10-14", 0, 111_100)
+    통과, 막힘 = rg.gate([후보], 문맥)
+    assert 통과 == [] and [k for k, _t in 막힘[0][1]] == ["cash"]  # 상한(10.1%)은 통과, 현금(111,100 > 105,000)에서 막힘
+    통과, 막힘 = rg.gate([rg.Candidate(1, "buy", 101_000, "2026-10-14", 0, 104_000)], 문맥)
+    assert len(통과) == 1
+
+
+def test_universe_sql_matches_latest_snapshot_helper() -> None:
+    """무작위 대조 모집단의 스냅샷 서브쿼리는 `db.latest_snapshot_sql()` 그대로 — 나라마다 따로 잡는다(2026-09-17 결함)."""
+    from batch.core import db
+
+    assert job.UNIVERSE_SQL.endswith(f"AND u.snapshot_date = {db.latest_snapshot_sql()}")

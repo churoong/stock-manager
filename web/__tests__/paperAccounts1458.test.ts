@@ -1,9 +1,25 @@
 /** 모의 계좌 7개 (2026-10-15 사용자 지시 "두개의 모의투자자로는 부족할거 같다", docs/infra.md 25.1458) */
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { AccountTabs, CompareCard, type Data } from "@/components/PaperView";
-import { FEE_BUFFER, OPEN_BUY_BUFFER, accountView, reservedByAccount, ruleText } from "@/lib/paper";
+import {
+  FEE_BUFFER,
+  OPEN_BUY_BUFFER,
+  PAPER_ACCOUNTS,
+  PAPER_ACCOUNTS_LEGACY,
+  PAPER_OPEN_BUYS,
+  PAPER_OPEN_BUYS_LEGACY,
+  PAPER_OPEN_ORDERS,
+  PAPER_OPEN_ORDERS_LEGACY,
+  accountView,
+  reservedByAccount,
+  ruleText,
+  withLegacy,
+} from "@/lib/paper";
 
 const 규칙 = [
   ["A", "all", "tranche", 5, "signal"],
@@ -64,5 +80,34 @@ describe("모의 계좌 7개", () => {
     );
     for (const id of ["A", "B", "C", "D", "E", "R1", "R2"]) expect(html).toContain(`모의 ${id}`);
     expect(html).toContain("매수 시가 일괄 (기준가 200,000원 · 무작위 대조)");
+  });
+
+  it("0075 전이면 옛 질의로 — 배포가 마이그레이션보다 먼저여도 /paper 가 깨지지 않는다 (재검증 권장 3)", async () => {
+    const 부른 = [] as string[];
+    const run = async (q: string) => {
+      부른.push(q);
+      if (q === "new") throw new Error("SQLITE_ERROR: no such column: entry_rule");
+      return q;
+    };
+    expect(await withLegacy(run, "new", "old")).toBe("old");
+    expect(부른).toEqual(["new", "old"]);
+    // 다른 오류는 숨기지 않는다
+    await expect(withLegacy(async () => { throw new Error("network"); }, "new", "old")).rejects.toThrow("network");
+  });
+
+  it("옛 질의는 0075 전 스키마에서 돈다 — 새 질의는 거기서 칸 없음", async () => {
+    const 폴더 = join(process.cwd(), "..", "migrations");
+    const db = new DatabaseSync(":memory:");
+    for (const f of readdirSync(폴더).filter((x) => x.endsWith(".sql") && x < "0075").sort()) db.exec(readFileSync(join(폴더, f), "utf8"));
+    const run = async (q: string) => db.prepare(q).all();
+    for (const [새, 옛] of [
+      [PAPER_ACCOUNTS, PAPER_ACCOUNTS_LEGACY],
+      [PAPER_OPEN_BUYS, PAPER_OPEN_BUYS_LEGACY],
+      [PAPER_OPEN_ORDERS, PAPER_OPEN_ORDERS_LEGACY],
+    ]) {
+      await expect(run(새)).rejects.toThrow(/no such column/);
+      expect(Array.isArray(await withLegacy(run, 새, 옛))).toBe(true);
+    }
+    expect(((await withLegacy(run, PAPER_ACCOUNTS, PAPER_ACCOUNTS_LEGACY)) as unknown[]).length).toBe(2);
   });
 });
