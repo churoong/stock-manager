@@ -10,6 +10,10 @@ on:
         type: string
         default: "AAPL"
 
+permissions:
+  contents: read
+  issues: write
+
 jobs:
   probe:
     runs-on: ubuntu-latest
@@ -23,4 +27,15 @@ jobs:
       - name: 호출
         env:
           SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
-        run: python scripts/probe_sec_filings.py --ticker "${{ inputs.ticker }}"
+        # 결과는 비공개 운영 이슈로도 보낸다 (docs/infra.md 25.1427) — 클라우드 세션은 Actions 로그를 받을 수 없다(로그가 다른 주소로
+        # 넘어간다). 찍는 것은 공개 공시 메타뿐이지만 다른 탐침과 같은 길로 읽는다
+        run: |
+          set -o pipefail
+          python scripts/probe_sec_filings.py --ticker "${{ inputs.ticker }}" 2>&1 | python scripts/ops_tee.py sec-filings.txt
+      - name: 결과를 비공개 이슈로
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPS_REPO: ${{ secrets.OPS_REPO }}
+          OPS_TOKEN: ${{ secrets.OPS_TOKEN }}
+        run: python scripts/publish_output.py --title "운영 출력 (클라우드 세션용)" --file sec-filings.txt --note "SEC 공시 목록 탐침"
