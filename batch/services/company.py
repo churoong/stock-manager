@@ -482,3 +482,70 @@ CHARTERS: dict[str, dict[str, Any]] = {
         "max_mdd": -0.60, "threshold": 0.8, "agenda": 30, "top_n": 10,
     },
 }  # fmt: skip
+
+
+# ── 부서 성적표 (docs/company.md 6장, 25.1470) ──────────────────────────────────
+
+#: 같은 (부서, 판단식 매개변수, 종목)이 이 달력일 안에 되풀이되면 첫 판단 하나만 센다 — 신호가 며칠 이어지면
+#: 20 거래일 창이 겹친 표본이 쌓여 종목 둘로 "표본 30" 을 넘겼다(설계 검증 [필수] 8).
+#: 성과 분해(docs/paper.md 10장)의 28일 에피소드와 같은 값
+SCORECARD_EPISODE_DAYS = 28
+#: 이보다 적은 표본은 "참고" (docs/paper.md 10장 성과 분해와 같은 하한)
+SCORECARD_MIN_SAMPLE = 30
+
+
+def dept_param(dept: str, charter: dict[str, Any]) -> str:
+    """판단식 매개변수의 열쇠 — 리서치(밸류·퀄리티·성장 비율)·리스크(한도·거부권)만 회사마다 다르다."""
+    if dept == "research":
+        return json.dumps(charter.get("research_mix") or {}, sort_keys=True)
+    if dept == "risk":
+        거부 = "risk" in (charter.get("veto") or [])
+        return json.dumps({"max_mdd": charter.get("max_mdd"), "veto": 거부}, sort_keys=True)
+    return ""
+
+
+def scorecard(records: list[dict[str, Any]]) -> dict[tuple[str, str], dict[str, Any]]:
+    """부서 성적표. `records` = [{dept, param, stock_id, day, stance, excess}].
+
+    excess = 그 뒤 20 거래일 지수 대비 초과(소수). (부서, 매개변수)마다: 찬성·반대·중립 표본 수, 찬성 평균 초과,
+    반대 평균 초과, **가름 = 찬성 평균 − 반대 평균**(클수록 잘 가린다), 찬성 적중(초과 > 0 비율)·반대 적중
+    (초과 < 0 비율). 자료 없음(입장 None)·성과 없음은 뺀다. 에피소드로 겹친 창을 하나로 센다
+    """
+    from datetime import date as _date
+
+    마지막: dict[tuple[str, str, int], _date] = {}
+    모음: dict[tuple[str, str], dict[int, list[float]]] = {}
+    for r in sorted(records, key=lambda x: (str(x["day"]), x["dept"], str(x["param"]), int(x["stock_id"]))):
+        if r.get("stance") is None or r.get("excess") is None:
+            continue
+        열쇠 = (str(r["dept"]), str(r["param"]), int(r["stock_id"]))
+        날 = _date.fromisoformat(str(r["day"])[:10])
+        if 열쇠 in 마지막 and (날 - 마지막[열쇠]).days < SCORECARD_EPISODE_DAYS:
+            continue
+        마지막[열쇠] = 날
+        모음.setdefault((열쇠[0], 열쇠[1]), {1: [], 0: [], -1: []})[int(r["stance"])].append(float(r["excess"]))
+    out: dict[tuple[str, str], dict[str, Any]] = {}
+    for k, by in 모음.items():
+        def 평균(xs: list[float]) -> float | None:
+            return sum(xs) / len(xs) if xs else None
+
+        찬, 반 = 평균(by[1]), 평균(by[-1])
+        out[k] = {
+            "n_for": len(by[1]), "n_against": len(by[-1]), "n_neutral": len(by[0]),
+            "avg_for": 찬, "avg_against": 반, "spread": (찬 - 반) if 찬 is not None and 반 is not None else None,
+            "hit_for": sum(x > 0 for x in by[1]) / len(by[1]) * 100 if by[1] else None,
+            "hit_against": sum(x < 0 for x in by[-1]) / len(by[-1]) * 100 if by[-1] else None,
+            "enough": len(by[1]) >= SCORECARD_MIN_SAMPLE and len(by[-1]) >= SCORECARD_MIN_SAMPLE,
+        }  # fmt: skip
+    return out
+
+
+def records_from(
+    day: str, items: list[Item], charter: dict[str, Any], excess: dict[int, float],
+) -> list[dict[str, Any]]:
+    """한 회의의 부서 입장 → 성적표 행. 자료 없음(note)은 입장 None 으로(성적표가 뺀다)."""
+    return [
+        {"dept": k, "param": dept_param(k, charter), "stock_id": i.stock_id, "day": day,
+         "stance": None if o.note and o.note.startswith("자료 없음") else o.stance, "excess": excess.get(i.stock_id)}
+        for i in items for k, o in i.opinions.items()
+    ]  # fmt: skip

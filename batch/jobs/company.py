@@ -203,3 +203,53 @@ def dossier_json(d: co.Dossier) -> dict[str, Any]:
                                             "as_of": d.perf_as_of},
         "regime": {"state": d.regime, "index": d.regime_index, "date": d.regime_date},
     }  # fmt: skip
+
+
+#: 소급 성적표의 뒤 성과 — 기준일 뒤 시세(종목·지수). 창은 기준일 뒤 `FORWARD_LOOKAHEAD_DAYS` 달력일
+FORWARD_PRICES_SQL = (
+    "SELECT stock_id, date, close FROM prices WHERE stock_id IN (SELECT value FROM json_each(?))"
+    " AND date > ? AND date <= ? AND close > 0 ORDER BY stock_id, date"
+)
+FORWARD_INDEX_SQL = (
+    "SELECT date, close FROM index_prices WHERE index_code = ? AND date <= ? ORDER BY date DESC LIMIT 400"
+)
+#: 20 거래일 뒤를 잡으려고 읽는 달력일 — 연휴 여유
+FORWARD_LOOKAHEAD_DAYS = 45
+#: 성적표의 지수 — 결정 원장 성과(`jobs/paper.BENCH_INDEX`)와 같다
+BENCH = {"KR": "KOSPI", "US": "SP500"}
+
+
+def forward_excess(
+    client: Any, market: str, rows: list[report_picks.SignalRow], horizon: int = 20,
+) -> dict[int, float]:
+    """{종목: 신호 종가 날짜 뒤 `horizon` 거래일의 지수 대비 초과(소수)} — 소급 성적표용 (docs/company.md 6장, 25.1470).
+
+    기준가는 신호 행의 종가(그 날짜), 뒤 값은 그 날짜 뒤 `horizon` 번째 시세 행. 지수는 각 날짜 이하의 마지막 값.
+    뒤 시세가 모자라면(최근 신호) 빼고 돌려준다
+    """
+    기준 = {r.stock_id: (float(r.close), str(r.close_date)[:10]) for r in rows if r.close and r.close_date}
+    if not 기준:
+        return {}
+    시작 = min(d for _c, d in 기준.values())
+    끝 = (date.fromisoformat(max(d for _c, d in 기준.values())) + timedelta(days=FORWARD_LOOKAHEAD_DAYS)).isoformat()
+    뒤: dict[int, list[tuple[str, float]]] = {}
+    for sid, day, close in client.execute(FORWARD_PRICES_SQL, [_ids(list(기준)), 시작, 끝]).rows:
+        뒤.setdefault(int(sid), []).append((str(day), float(close)))
+    지수행 = client.execute(FORWARD_INDEX_SQL, [BENCH.get(market, "KOSPI"), 끝]).rows
+    지수 = sorted((str(d), float(c)) for d, c in 지수행)
+
+    def 지수값(day: str) -> float | None:
+        앞 = [c for d, c in 지수 if d <= day]
+        return 앞[-1] if 앞 else None
+
+    out: dict[int, float] = {}
+    for sid, (종가, 날) in 기준.items():
+        행 = [x for x in 뒤.get(sid, []) if x[0] > 날]
+        if len(행) < horizon:
+            continue
+        끝날, 끝값 = 행[horizon - 1]
+        i0, i1 = 지수값(날), 지수값(끝날)
+        if not i0 or not i1:
+            continue
+        out[sid] = (끝값 / 종가 - 1) - (i1 / i0 - 1)
+    return out

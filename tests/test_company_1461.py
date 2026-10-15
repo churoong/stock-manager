@@ -219,3 +219,26 @@ def test_web_dept_labels_match() -> None:
     블록 = 글[글.index("export const DEPT_LABEL"):]
     블록 = 블록[: 블록.index("};")]
     assert dict(re.findall(r'(\w+): "([^"]+)"', 블록)) == co.DEPT_LABEL
+
+
+def test_scorecard_episodes_and_spread() -> None:
+    """부서 성적표 — 28일 안 같은 (부서, 매개변수, 종목)은 첫 판단 하나, 가름 = 찬성 평균 − 반대 평균 (25.1470)."""
+    행 = [
+        # 같은 종목이 10일 뒤 다시 찬성 — 겹친 창이라 하나로
+        {"dept": "quant", "param": "", "stock_id": 1, "day": "2026-09-01", "stance": 1, "excess": 0.05},
+        {"dept": "quant", "param": "", "stock_id": 1, "day": "2026-09-11", "stance": 1, "excess": 0.50},
+        # 29일 뒤는 새 에피소드
+        {"dept": "quant", "param": "", "stock_id": 1, "day": "2026-09-30", "stance": -1, "excess": -0.02},
+        {"dept": "quant", "param": "", "stock_id": 2, "day": "2026-09-01", "stance": -1, "excess": 0.04},
+        {"dept": "quant", "param": "", "stock_id": 3, "day": "2026-09-01", "stance": None, "excess": 0.9},  # 자료 없음
+        {"dept": "quant", "param": "", "stock_id": 4, "day": "2026-09-01", "stance": 1, "excess": None},  # 성과 없음
+        # 리서치는 회사마다 비율이 달라 매개변수로 가른다
+        {"dept": "research", "param": "a", "stock_id": 1, "day": "2026-09-01", "stance": 1, "excess": 0.05},
+        {"dept": "research", "param": "b", "stock_id": 1, "day": "2026-09-01", "stance": -1, "excess": 0.05},
+    ]
+    s = co.scorecard(행)
+    q = s[("quant", "")]
+    assert (q["n_for"], q["n_against"]) == (1, 2)
+    assert q["avg_for"] == pytest.approx(0.05) and q["avg_against"] == pytest.approx(0.01)
+    assert q["spread"] == pytest.approx(0.04) and q["hit_against"] == pytest.approx(50.0) and not q["enough"]
+    assert s[("research", "a")]["n_for"] == 1 and s[("research", "b")]["n_against"] == 1

@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from batch.jobs import company as job
@@ -148,4 +150,23 @@ def test_replay_runs_on_empty_history(c: Client, monkeypatch: pytest.MonkeyPatch
     assert spec and spec.loader
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)
-    assert m.replay(c, "KR", 10, 5) == ([], set())
+    assert m.replay(c, "KR", 10, 5) == ([], set(), [])
+
+
+def test_forward_excess_twentieth_session_against_index(c: Client) -> None:
+    """소급 성적표의 뒤 성과 — 신호 종가 날짜 뒤 20번째 시세 행, 지수는 각 날짜 이하 마지막 값 (25.1470)."""
+    from datetime import date, timedelta
+
+    c.conn.execute("DELETE FROM prices WHERE stock_id = 1")
+    날 = date(2026, 9, 1)
+    for i in range(25):
+        d = (날 + timedelta(days=i)).isoformat()
+        c.conn.execute("INSERT INTO prices (stock_id, date, open, high, low, close, volume, currency, source, fetched_at)"
+                       " VALUES (1, ?, 1, 1, 1, ?, 1, 'KRW', 't', 't')", [d, 100 + i])  # fmt: skip
+        c.conn.execute("INSERT INTO index_prices (index_code, date, close, source, fetched_at) VALUES ('KOSPI', ?, ?, 't', 't')",
+                       [d, 1000 + i * 5])  # fmt: skip
+    r = replace(_행(1, "005930", "KOSPI", 80), close=100.0, close_date="2026-09-01")
+    # 뒤 20번째 행 = 09-21(종가 120) → +20%, 지수 1000 → 1100 = +10% → 초과 +10%p
+    assert job.forward_excess(c, "KR", [r]) == {1: pytest.approx(0.10)}
+    # 뒤 시세가 20행에 못 미치면 뺀다(최근 신호)
+    assert job.forward_excess(c, "KR", [replace(r, close_date="2026-09-10")]) == {}

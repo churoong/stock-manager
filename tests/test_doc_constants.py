@@ -893,6 +893,8 @@ class Test이웃_모듈들:
         검사(COMPANY, f"약세 → 반대 확신 {co.MACRO_CONVICTION:g}", "시장전략 확신")
         검사(COMPANY, f"**찬성 부서 ≥ {co.QUORUM}**(정족수)", "정족수")
         검사(COMPANY, f"전체 가중의 {co.MAX_WEIGHT_SHARE * 100:.0f}% 를 넘지 않는다", "한 부서 가중 상한")
+        검사(COMPANY, f"10장의 {co.SCORECARD_EPISODE_DAYS}일 에피소드로 묶고", "부서 성적표 에피소드")
+        검사(COMPANY, f"표본 {co.SCORECARD_MIN_SAMPLE} 미만 \"참고\"", "부서 성적표 표본 하한")
 
     def test_모의_계좌_규칙서(self) -> None:
         """모의 투자 규칙서 판 1 (docs/paper.md, docs/infra.md 25.1444)."""
