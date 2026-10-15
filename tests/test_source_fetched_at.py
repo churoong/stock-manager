@@ -72,10 +72,13 @@ import pytest
     "broker_stats",  # 증권사 적중률 (25.995)
     "disclosure_reaction",  # 공시 반응 통계 (25.996)
     "governance_events",  # 공시 위험 이력 1년 — 공시 표에서 고른 계산 결과 (25.1157)
+    # 모의 투자 계좌(docs/paper.md, 25.1443) — 배치의 규칙서가 낸 주문·체결과 그 평가. 근거는 주문의 스냅샷에 있다
+    "paper_accounts", "paper_orders", "paper_fills", "paper_daily",
 }  # fmt: skip
 
 #: **사람이 넣은 것.** 출처는 사용자다. 시스템이 임의로 고치지 않는다(CLAUDE.md)
-사람이_넣은_표 = {"trades", "dividend_receipts", "watchlist", "settings", "screener_presets", "stock_aliases"}  # 별칭은 사람이 관리 (25.840)
+사람이_넣은_표 = {"trades", "dividend_receipts", "watchlist", "settings", "screener_presets", "stock_aliases",
+             "paper_cash_flows"}  # 별칭은 사람이 관리 (25.840), 모의 계좌 입금 장부 (25.1443)
 
 #: **우리가 무엇을 했는지의 기록.** 판단 자료가 아니다
 운영_기록 = {

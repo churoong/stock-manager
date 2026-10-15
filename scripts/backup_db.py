@@ -78,6 +78,13 @@ ESSENTIAL_TABLES = [
     "article_sentiments",
     "sentiment_scores",
     "universe_members",
+    # 모의 투자 계좌 (docs/paper.md, 25.1447). 입금 장부는 사람 입력이고, 주문·체결·날마다 평가는 **그날의 시세·신호로
+    # 낸 결정의 기록**이라 다시 만들 수 없다(지난 신호를 다시 내면 다른 판으로 나온다). 작은 표다
+    "paper_accounts",
+    "paper_cash_flows",
+    "paper_orders",
+    "paper_fills",
+    "paper_daily",
     "schema_migrations",
 ]
 

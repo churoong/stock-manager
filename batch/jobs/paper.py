@@ -15,7 +15,7 @@ import json
 import logging
 from collections.abc import Callable
 from dataclasses import replace as dc_replace
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from batch.core import calendar as cal
@@ -188,14 +188,15 @@ def fill_orders(
     fees: dict | None, taxes: dict | None, frozen: set[int], now: str, 기록: dict[str, Any],
 ) -> list[pp.Fill]:
     """이 시장의 미체결 주문 가운데 판정할 날이 된 것을 판정한다. 새 체결 목록을 돌려준다(장부에도 적었다)."""
-    rows = [r for r in client.execute(OPEN_ORDERS_SQL).dicts() if r["market"] == market]
-    대상 = [r for r in rows if str(r["fill_session"]) <= trade_date]
+    전부 = client.execute(OPEN_ORDERS_SQL).dicts()
+    대상 = [r for r in 전부 if r["market"] == market and str(r["fill_session"]) <= trade_date]
     if not 대상:
         return []
     시장날: dict[str, bool] = {}
     새것: list[pp.Fill] = []
     오늘환율 = _fx(client, trade_date)
-    남은매수 = {int(r["id"]): _order(r) for r in rows if r["side"] == "buy"}
+    # 다른 시장의 미체결 매수도 현금을 묶고 있다 — 체결 검사에서 함께 뺀다 (25.1447, 교차검증 권장)
+    남은매수 = {int(r["id"]): _order(r) for r in 전부 if r["side"] == "buy"}
     # 매도 먼저(현금이 생긴다), 그다음 매수 — 같은 날 안에서는 주문 순서
     for r in sorted(대상, key=lambda x: (x["side"] != "sell", int(x["id"]))):
         o = _order(r)
@@ -269,6 +270,10 @@ def fill_orders(
                 _쓰기(client, [(EXPIRE_SQL, [trade_date, "팔 보유가 모자람", o.id])])
                 기록["expired"] = 기록.get("expired", 0) + 1
                 continue
+        if any(f.order_id == o.id for f in fills):
+            # 체결 행은 들어갔는데 주문 상태만 못 바꾼 채 끊겼던 것 — 상태만 맞추고 두 번 세지 않는다 (25.1447)
+            _쓰기(client, [(FILLED_SQL, [trade_date, 까닭, o.id])])
+            continue
         _쓰기(client, [
             (INSERT_FILL_SQL, [체결.order_id, 체결.account_id, 체결.stock_id, 체결.side, 체결.fill_date, 체결.price,
                                체결.quantity, 체결.currency, 체결.fx_rate, 환율날, 체결.fee, 체결.tax, 체결.slippage,
@@ -339,11 +344,12 @@ def mark(
         지수 = 1.0
     else:
         기준 = str(p["updated_at"])
-        새입금 = sum(f.amount_krw for f in flows if flow_created.get(f.id, "") > 기준)
-        새체결 = sum(f.cash_krw for f in 계좌체결 if fill_created.get(f.order_id, now) > 기준)
+        새입금 = sum(f.amount_krw for f in flows if pp.after(flow_created.get(f.id, ""), 기준))
+        새체결 = sum(f.cash_krw for f in 계좌체결 if pp.after(fill_created.get(f.order_id, now), 기준))
         ok, 글 = pp.reconcile(float(p["cash_krw"]), 새입금, 새체결, v.cash_krw)
-        들어온 = sum(f.amount_krw for f in flows if f.flow_date > str(p["as_of"]))
-        지수 = pp.twr_step(float(p["twr_index"]), float(p["equity_krw"]), v.equity_krw, 들어온)
+        # **어제 행을 적은 뒤에 들어온 입금**이 흐름이다 (25.1447, 교차검증 [필수] 1) — 입금 날짜(`flow_date > as_of`)로
+        # 고르면 미국 배치 뒤(같은 한국 날짜) 넣은 돈이 흐름에서 빠져 평가에만 더해져 지수가 +100% 로 뛰었다
+        지수 = pp.twr_step(float(p["twr_index"]), float(p["equity_krw"]), v.equity_krw, 새입금)
     그림자 = {code: pp.shadow(flows, *shadows[code]) if code in shadows else None for code in ("KOSPI", "SP500")}
     _쓰기(client, [(UPSERT_DAILY_SQL, [
         account, today, v.invested_krw, v.cash_krw, v.holdings_krw, v.equity_krw, v.pnl_krw, 지수,
@@ -458,7 +464,7 @@ def buy_orders(
             continue
         best = max(행, key=lambda r: (r.suggested_amount or 0, -report_picks._기간_순.get(r.horizon, 9)))
         배분.append({"stock_id": best.stock_id, "amount": a.amount, "tranches": a.tranches, "row": best, "alloc": a})
-    주문, 빠짐 = pp.size_buys(배분, valuation.cash_krw - 예약, 환율, sold_recently)
+    주문, 빠짐 = pp.size_buys(배분, valuation.cash_krw - 예약, 환율, sold_recently, 통화)
     by_sid = {b["stock_id"]: b for b in 배분}
     out: list[dict[str, Any]] = []
     for o in 주문:
@@ -483,8 +489,11 @@ def run_step(
     client: Any, *, market: str, trade_date: str, late: bool, signal_rows: list[report_picks.SignalRow],
     settings: dict[str, Any] | None, price_series: dict[int, dict[str, float]], series_unknown: dict[int, str],
     allocate: bool, now: datetime | None = None, series_loader: Callable[[list[int]], dict] | None = None,
+    after_close: bool = False,
 ) -> tuple[list[str], dict[str, Any]]:
     """일일 배치의 모의 계좌 단계. (리포트 끝에 붙일 줄, `step_log.paper`).
+
+    `late` 는 오늘 장이 열린 뒤 만든 리포트(매도는 종가), `after_close` 는 오늘 장이 끝난 뒤의 손 실행(주문은 다음 장)
 
     `series_loader` 는 2부가 읽지 않은 모의 보유 종목의 시세를 읽는다(상관 축소용) — 없으면 그 보유는 대조하지 않는다
     (2부와 같은 "모르면 줄이지 않는다")
@@ -517,6 +526,10 @@ def run_step(
     열린 = [_order(r) for r in client.execute(OPEN_ORDERS_SQL).dicts()]
     다음장 = cal.next_session(market, date.fromisoformat(trade_date)).isoformat()
     기준 = "close" if late else "open"
+    if after_close:
+        # **장이 끝난 뒤의 손 실행** (25.1447, 교차검증 [필수] 3) — 오늘 장의 시가·종가 모두 주문보다 앞선다.
+        # 다음 장 시가로
+        다음장, 기준 = cal.next_session(market, date.fromisoformat(다음장)).isoformat(), "open"
     쉼_시작 = trade_date
     for _ in range(pp.REBUY_COOLDOWN_SESSIONS - 1):
         쉼_시작 = cal.previous_session(market, date.fromisoformat(쉼_시작)).isoformat()
@@ -584,3 +597,43 @@ def run_step(
     if frozen:
         머리.append(f"모의 계좌 멈춘 종목 {len(frozen)}개(기업행위 경계 — 원가로 평가, docs/paper.md 2.3)")
     return 머리 + [글 for 글 in 줄 if 글.startswith("⚠️")], 기록
+
+
+PAPER_SUMMARY_SQL = (
+    "SELECT account_id, as_of, invested_krw, equity_krw, pnl_krw, twr_index, kospi_krw, sp500_krw, positions_json"
+    " FROM paper_daily WHERE as_of >= ? ORDER BY account_id, as_of"
+)
+#: 월간 복기 — 한국 날짜로 그달 1~7일에 보내는 주간 요약이 지난달을 돌아본다 (docs/paper.md 6장)
+MONTHLY_REVIEW_DAYS = 7
+
+
+def summary_section(client: Any, now: datetime) -> list[str]:
+    """주간 운영 요약의 모의 계좌 절 (docs/paper.md 6장). 입금이 없으면 빈 목록."""
+    오늘 = now.astimezone(cal.market_tz("KR")).date()
+    주초 = (오늘 - timedelta(days=7)).isoformat()
+    달초 = ((오늘.replace(day=1) - timedelta(days=1)).replace(day=1).isoformat()
+            if 오늘.day <= MONTHLY_REVIEW_DAYS else None)  # fmt: skip
+    시작 = min(x for x in ((오늘 - timedelta(days=14)).isoformat(), 달초) if x)
+    rows = client.execute(PAPER_SUMMARY_SQL, [시작]).dicts()
+    if not rows:
+        return []
+    daily: dict[str, list[dict[str, Any]]] = {}
+    for r in rows:
+        daily.setdefault(str(r["account_id"]), []).append(r)
+    fills, _ = _fills(client)
+    by_acct: dict[str, list[pp.Fill]] = {}
+    for f in fills:
+        by_acct.setdefault(f.account_id, []).append(f)
+    캐시: dict[int, dict[str, Any]] = {}
+    보유id = {int(p["stock_id"]) for r in rows for p in json.loads(r.get("positions_json") or "[]")}
+    for sid in {f.stock_id for f in fills} | 보유id:
+        _stock(client, sid, 캐시)
+    rules, _ = sr.기간별_목표(db.get_setting(client, "horizon_targets", None))
+    손절 = {h: {**sf.DEFAULT_TARGETS[h], **((rules or {}).get(h) or {})}["stop_pct"] for h in sf.DEFAULT_TARGETS}
+    limits = {
+        "max_stock_pct": db.get_setting_in_range(client, "max_weight_per_stock", 10.0)[0],
+        "max_sector_pct": db.get_setting_in_range(client, "max_weight_per_sector", 30.0)[0],
+        "stop_pct": 손절,
+    }
+    return pp.summary_lines(daily, by_acct, 주초, 달초, {k: str(v.get("name")) for k, v in 캐시.items()},
+                            {k: v.get("sector") for k, v in 캐시.items()}, limits)  # fmt: skip

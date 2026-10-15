@@ -6,6 +6,7 @@ DB 를 읽지 않는다 — 장부(입금·체결)와 그날 시세를 받아 �
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -313,7 +314,8 @@ def value(
             모름.append({"stock_id": sid, "why": 까닭})
         평가 += 값
         줄.append({"stock_id": sid, "quantity": p.quantity, "currency": p.currency, "cost_krw": _원(p.cost_krw),
-                  "value_krw": _원(값), "price_date": None if 까닭 or c is None else c[1]})  # fmt: skip
+                  "value_krw": _원(값), "price_date": None if 까닭 or c is None else c[1],
+                  "horizon": p.horizon})  # fmt: skip
     입금 = invested(flows)
     총액 = 현금 + _원(평가)
     손익 = 총액 - 입금
@@ -336,6 +338,24 @@ def reconcile(prev_cash: float | None, flows_today: float, fills_today: float, l
         움직임 = flows_today + fills_today
         return False, f"장부 현금 {ledger_cash:,.0f}원 ≠ 어제 {prev_cash:,.0f} + 오늘 움직임 {움직임:+,.0f}"
     return True, "맞음"
+
+
+def after(ts: object, base: object) -> bool:
+    """`ts` 가 `base` 보다 뒤의 시각인가 — 웹(`…Z`)·배치(`…+00:00`)·공백 구분 모양을 모두 읽어 견준다 (25.1447).
+
+    문자열로 견주면 모양이 다른 두 시각이 엇갈린다. 읽지 못하면 문자열로 견준다(예전 동작)
+    """
+    from datetime import UTC, datetime
+
+    def 읽기(v: object) -> datetime | None:
+        try:
+            d = datetime.fromisoformat(str(v).strip().replace(" ", "T").replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return d if d.tzinfo else d.replace(tzinfo=UTC)
+
+    a, b = 읽기(ts), 읽기(base)
+    return a > b if a and b else str(ts) > str(base)
 
 
 def twr_step(prev_index: float | None, prev_equity: float | None, equity: float, flow_since: float) -> float:
@@ -382,6 +402,7 @@ def sells_for(sell_rule: str, flag_codes: dict[int, set[str]]) -> dict[int, list
 
 def size_buys(
     allocations: list[dict[str, Any]], cash_available: float, fx_rate: float, sold_recently: set[int],
+    currency: str = "KRW",
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """2부 배분을 **정수 주 지정가 회차**로 바꾼다 (docs/paper.md 2.1).
 
@@ -392,6 +413,9 @@ def size_buys(
     """
     if fx_rate <= 0:
         return [], [{"stock_id": a.get("stock_id"), "why": "환율 없음"} for a in allocations]
+    # **예약과 같은 잣대로** 현금을 쓴다 (25.1447, 교차검증 [필수] 2) — 체결 때 남은 회차를 `reserved_krw`
+    # (달러는 환율 여유 3% 까지)로 빼므로, 여유 없이 현금을 다 쓰면 가장 잘 차는 1회차가 "현금 부족" 으로 취소됐다
+    여유 = (1 + FEE_BUFFER) * (1 if currency == "KRW" else 1 + FX_BUFFER)
     남은 = cash_available / fx_rate
     주문: list[dict[str, Any]] = []
     빠짐: list[dict[str, Any]] = []
@@ -406,10 +430,99 @@ def size_buys(
             if 가격 <= 0 or 금액 <= 0:
                 continue
             # 비용을 넉넉히 잡아 현금이 음수로 가지 않게 — 수수료 여유 (수수료율보다 크다)
-            수량 = int(min(금액, 남은 / (1 + FEE_BUFFER)) // 가격)
+            수량 = int(min(금액, 남은 / 여유) // 가격)
             if 수량 < 1:
                 빠짐.append({"stock_id": sid, "tranche": i, "why": "현금 부족" if 금액 >= 가격 else "회차 금액 < 1주"})
                 continue
-            남은 -= 수량 * 가격 * (1 + FEE_BUFFER)
+            남은 -= 수량 * 가격 * 여유
             주문.append({"stock_id": sid, "tranche": i, "limit_price": 가격, "quantity": 수량})
     return 주문, 빠짐
+
+
+def _퍼센트(v: float | None) -> str:
+    return "—" if v is None else f"{v:+.1f}%"
+
+
+def _대비(v: Any, 입금: float) -> float | None:
+    """평가 ÷ 입금 − 1 (%) — 같은 돈 흐름의 기준 지수와 견주는 잣대 (docs/paper.md 4장)."""
+    return (float(v) / 입금 - 1) * 100 if v is not None and 입금 > 0 else None
+
+
+def summary_lines(
+    daily: dict[str, list[dict[str, Any]]],
+    fills: dict[str, list[Fill]],
+    week_start: str,
+    month_start: str | None,
+    names: dict[int, str],
+    sectors: dict[int, str | None],
+    limits: dict[str, Any],
+) -> list[str]:
+    """주간 요약의 모의 계좌 절 — 월 첫 요약이면 월간 복기까지 (docs/paper.md 6장). 순수 함수.
+
+    `daily` 는 계좌마다 `paper_daily` 행(날짜 순, 월간이면 한 달 넘게), `limits` 는 {max_stock_pct, max_sector_pct,
+    stop_pct: {기간: %}}. 기준 지수는 같은 돈 흐름이라 평가 ÷ 입금으로 견준다
+    """
+    if not any(daily.values()):
+        return []
+    out = ["[모의 투자]"]
+    끝값: dict[str, float] = {}
+    for aid in sorted(daily):
+        행들 = daily[aid]
+        if not 행들:
+            continue
+        끝 = 행들[-1]
+        주초 = next((r for r in reversed(행들) if str(r["as_of"]) < week_start), None)
+        입금 = float(끝["invested_krw"])
+        총액 = float(끝["equity_krw"])
+        끝값[aid] = 총액
+        주간 = (float(끝["twr_index"]) / float(주초["twr_index"]) - 1) * 100 if 주초 and 주초["twr_index"] else None
+        손익, 코스피, 미국 = (_대비(v, 입금) for v in (총액, 끝.get("kospi_krw"), 끝.get("sp500_krw")))
+        이번주 = [f for f in fills.get(aid, []) if f.fill_date >= week_start]
+        보유 = json.loads(끝.get("positions_json") or "[]")
+        날짜 = sorted({str(p.get("price_date")) for p in 보유 if p.get("price_date")})
+        누적 = (float(끝["twr_index"]) - 1) * 100
+        out.append(
+            f"  {aid}: 입금 {입금:,.0f}원 · 평가 {총액:,.0f}원 (손익 {_퍼센트(손익)},"
+            f" 이번 주 시간가중 {_퍼센트(주간)}, 누적 {_퍼센트(누적)})"
+            f" · 같은 돈 KOSPI {_퍼센트(코스피)} · S&P500 {_퍼센트(미국)}"
+            f" · 이번 주 체결 매수 {sum(f.side == 'buy' for f in 이번주)}·매도 {sum(f.side == 'sell' for f in 이번주)}"
+            f" ({끝['as_of']} 평가" + (f", 종가 {날짜[0]}~{날짜[-1]}" if 날짜 else "") + ")"
+        )
+    if "A" in 끝값 and "B" in 끝값:
+        out.append(f"  A−B: {끝값['A'] - 끝값['B']:+,.0f}원 — 매도 규칙을 포함한 정책 전체의 차이다(docs/paper.md 1장)")
+    if month_start is None:
+        return out
+    out.append(f"[모의 투자 월간 복기] {month_start} 부터")
+    for aid in sorted(daily):
+        실현 = [r for r in realized(fills.get(aid, [])) if r["fill_date"] >= month_start]
+        if 실현:
+            좋은 = sorted(실현, key=lambda r: -r["pnl_krw"])[:3]
+            나쁜 = sorted(실현, key=lambda r: r["pnl_krw"])[:3]
+            def 글(r: dict[str, Any]) -> str:
+                return f"{names.get(r['stock_id'], r['stock_id'])} {r['pnl_krw']:+,.0f}원"
+            out.append(f"  {aid} 이익 셋: " + (", ".join(글(r) for r in 좋은 if r["pnl_krw"] > 0) or "없음"))
+            out.append(f"  {aid} 손실 셋: " + (", ".join(글(r) for r in 나쁜 if r["pnl_krw"] < 0) or "없음"))
+        else:
+            out.append(f"  {aid}: 이번 달 판 종목 없음")
+        종목넘음, 섹터넘음, 손절넘김 = set(), set(), set()
+        for r in daily[aid]:
+            if str(r["as_of"]) < month_start or not float(r["equity_krw"]):
+                continue
+            총 = float(r["equity_krw"])
+            섹터합: dict[str, float] = {}
+            for p in json.loads(r.get("positions_json") or "[]"):
+                v = float(p.get("value_krw") or 0)
+                if v / 총 * 100 > float(limits.get("max_stock_pct") or 100):
+                    종목넘음.add(str(r["as_of"]))
+                if sectors.get(int(p["stock_id"])):
+                    섹터합[str(sectors[int(p["stock_id"])])] = 섹터합.get(str(sectors[int(p["stock_id"])]), 0.0) + v
+                손절 = (limits.get("stop_pct") or {}).get(p.get("horizon") or "long")
+                if 손절 is not None and float(p.get("cost_krw") or 0) > 0 and (
+                        (v / float(p["cost_krw"]) - 1) * 100 <= float(손절)):
+                    손절넘김.add(str(r["as_of"]))
+            if any(합 / 총 * 100 > float(limits.get("max_sector_pct") or 100) for 합 in 섹터합.values()):
+                섹터넘음.add(str(r["as_of"]))
+        덧 = " (B 는 설계상 생길 수 있다)" if aid == "B" else ""
+        out.append(f"  {aid} 규칙 점검: 종목 상한 넘은 날 {len(종목넘음)} · 섹터 상한 넘은 날 {len(섹터넘음)}"
+                   f" · 손절선 아래로 들고 간 날 {len(손절넘김)}{덧}")
+    return out

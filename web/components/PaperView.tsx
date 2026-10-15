@@ -33,6 +33,9 @@ interface OrderRow { id: number; account_id: string; market: string; ticker: str
 interface HistoryRow { account_id: string; as_of: string; invested_krw: number; equity_krw: number; kospi_krw: number | null; sp500_krw: number | null }
 interface Data { invested: number; accounts: Account[]; flows: Flow[]; fills: FillRow[]; orders: OrderRow[]; history: HistoryRow[] }
 
+/** 매매 일지의 근거는 **주문 때 얼린 것**이라 오래될수록 묵는 값이 아니다 — 기준일을 노랗게 칠하지 않는다 */
+const JOURNAL_NEVER_STALE_DAYS = 100_000;
+
 const RULE_LABEL: Record<string, string> = { all: "모든 매도 플래그를 따른다", core: "손절·목표도달·기간초과만 따른다" };
 
 function newKey(): string {
@@ -257,7 +260,7 @@ export default function PaperView() {
                     주문 {f.decided_on} 리포트 · 수수료 {f.fee.toFixed(2)} · 세금 {f.tax.toFixed(2)} · 슬리피지 {f.slippage.toFixed(2)} ({f.currency})
                   </p>
                   {Array.isArray(기준) && 기준.length ? (
-                    <CriteriaTable rows={기준} caption={`주문 때 근거 (${f.decided_on})`} docPath="docs/paper.md" staleAfterDays={9999} />
+                    <CriteriaTable rows={기준} caption={`주문 때 근거 (${f.decided_on})`} docPath="docs/paper.md" staleAfterDays={JOURNAL_NEVER_STALE_DAYS} />
                   ) : null}
                 </details>
               </li>

@@ -225,3 +225,34 @@ def test_paper_holdings_join_news_targets(client: Client, monkeypatch: pytest.Mo
     후보 = monitor_targets.news_target_rows(c, "KR", [], "t")  # type: ignore[arg-type]
     assert [r for r in 후보 if r[3] == "paper"] == [("KR", 1, None, "paper", "t")]  # A·B 둘 다 들어도 한 번
     assert monitor_targets.news_target_rows(c, "US", [], "t") == []  # type: ignore[arg-type]
+
+
+def test_late_deposit_after_last_run_is_a_flow_not_a_gain(client: Client, monkeypatch: pytest.MonkeyPatch) -> None:
+    """그날 마지막 실행 뒤 넣은 입금은 흐름이다 — 시간가중이 +100% 로 뛰면 안 된다 (25.1447, 교차검증 [필수] 1)."""
+    c = client
+    _하루(c, monkeypatch, "2026-10-14")  # 10-15 한국 날짜로 첫 기록(지수 1)
+    c.conn.execute(
+        "INSERT INTO paper_cash_flows (flow_date, amount_krw, kind, created_at, request_key)"
+        " VALUES ('2026-10-15', 1000000, 'deposit', '2026-10-15T14:00:00.000Z', 'k2')"  # 같은 한국 날짜, 실행 뒤
+    )
+    _하루(c, monkeypatch, "2026-10-15", signals=False)
+    지수, 검산 = c.q("SELECT twr_index, recon_ok FROM paper_daily WHERE account_id = 'A' AND as_of = '2026-10-16'")[0]
+    assert 지수 == pytest.approx(1.0) and 검산 == 1
+
+
+def test_manual_run_after_close_orders_for_the_next_session(client: Client, monkeypatch: pytest.MonkeyPatch) -> None:
+    """장이 끝난 뒤의 손 실행은 오늘 장 값이 모두 주문보다 앞선다 — 다음 장으로 (25.1447, 교차검증 [필수] 3)."""
+    c = client
+    다음 = cal.next_session("KR", date(2026, 10, 14))
+    monkeypatch.setattr(cal, "local_today", lambda _m=None: 다음)
+    job.run_step(c, market="KR", trade_date="2026-10-14", late=True, signal_rows=[_신호()], settings=설정,
+                 price_series={}, series_unknown={}, allocate=True, now=datetime(2026, 10, 15, 8, tzinfo=UTC),
+                 after_close=True)  # fmt: skip
+    assert c.q("SELECT DISTINCT fill_session, fill_basis FROM paper_orders") == [("2026-10-16", "open")]
+
+
+def test_session_closed_helper() -> None:
+    from batch.jobs import daily
+
+    assert daily._장_끝남("KR", "2020-01-02") is True
+    assert daily._장_끝남("KR", "2099-01-02") is False

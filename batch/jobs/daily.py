@@ -2286,7 +2286,10 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
 
                 모의줄, step_log["paper"] = paper_job.run_step(
                     client, market=market, trade_date=decision.trade_date,
-                    late=decision.late_minutes is not None and decision.late_minutes <= 0,
+                    # 개장 뒤인가는 **개장까지 남은 분으로** — 손 실행(force)은 `late_minutes` 를 채우지 않는다
+                    # (25.1447, 교차검증 [필수] 3: /status 수동 실행이 장중이면 매도가 주문보다 앞선 시가로 찼다)
+                    late=decision.minutes_to_open is not None and decision.minutes_to_open <= 0,
+                    after_close=_장_끝남(market, decision.session_date),
                     signal_rows=signal_rows if 추천_오류 is None else [],
                     settings=settings if 추천_오류 is None else None, price_series=corr_series,
                     series_unknown=_corr_unknown(client, signals_as_of or decision.trade_date, warnings),
@@ -2511,6 +2514,15 @@ SENT_AT_LOST = (
     "리포트는 보냈지만 발송 시각을 적지 못했습니다 — 웹에는 '못 보냄' 으로 보이고"
     " 다음 리포트의 매도 플래그 NEW 가 다시 붙을 수 있습니다"
 )
+
+
+def _장_끝남(market: str, session_date: str) -> bool:
+    """오늘 장이 이미 끝났나 — 모의 계좌 주문을 다음 장으로 미룰 때 쓴다 (25.1447). 모르면 False."""
+    try:
+        끝 = cal.session_close_utc(market, date.fromisoformat(session_date))
+    except Exception:  # noqa: BLE001 — 모르면 예전처럼(다음 거래일 = 오늘 장)
+        return False
+    return 끝 is not None and datetime.now(UTC) >= 끝
 
 
 def _발송시각_적기(client: TursoClient, report_id: int, message_ids: Any, warnings: list[str]) -> None:

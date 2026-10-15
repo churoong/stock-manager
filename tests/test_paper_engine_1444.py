@@ -86,7 +86,7 @@ def test_valuation_unknown_price_uses_cost_not_zero() -> None:
     assert v2.pnl_krw == v2.equity_krw - 1_000_000
     assert v2.pnl_pct == pytest.approx(v2.pnl_krw / 10_000)
     assert v2.rows == [{"stock_id": 7, "quantity": 10, "currency": "KRW", "cost_krw": 100_015, "value_krw": 120_000,
-                        "price_date": "2026-10-17"}]  # fmt: skip
+                        "price_date": "2026-10-17", "horizon": "short"}]  # fmt: skip
     # 기업행위로 멈춘 종목은 종가가 있어도 원가로 — 분할 날 종가 × 분할 전 수량은 거짓 손실이다
     v3 = pp.value(흐름, 체결, {7: (2_400, "2026-10-17")}, {}, frozen={7})
     assert v3.holdings_krw == 100_015 and v3.unknown == [{"stock_id": 7, "why": "기업행위(멈춤)"}]
@@ -182,3 +182,23 @@ def test_paper_modules_never_touch_real_ledgers_or_order_api() -> None:
         글 = f.read_text(encoding="utf-8")
         assert not 금지.search(글), f"{f.name} 가 실제 장부·주문 API 를 건드린다"
         assert not re.search(r"\bFROM\s+(trades|positions)\b", 글, re.I), f"{f.name} 가 실제 매매·보유를 읽는다"
+
+
+def test_usd_sizing_matches_reservation_so_first_tranche_is_not_starved() -> None:
+    """체결 때 남은 달러 회차를 환율 여유까지 빼므로 수량도 같은 잣대로 낸다 (25.1447, 교차검증 [필수] 2)."""
+    # 검증 재현: 현금 100만 원·환율 1,400 에서 회차 금액이 현금 안에 거의 다 드는 날
+    배분 = [{"stock_id": 9, "amount": 710, "tranches": [{"price_at_or_below": 10, "amount": 300},
+                                                      {"price_at_or_below": 9.8, "amount": 250},
+                                                      {"price_at_or_below": 9.6, "amount": 160}]}]  # fmt: skip
+    주문, _ = pp.size_buys(배분, 1_000_000, 1_400.0, set(), "USD")
+    os_ = [pp.Order(id=i, account_id="A", stock_id=9, side="buy", order_type="limit", limit_price=o["limit_price"],
+                    quantity=o["quantity"], currency="USD", fill_session="d") for i, o in enumerate(주문, 1)]  # fmt: skip
+    첫 = pp.make_fill(os_[0], 10, "d", 1_400.0, 비용)
+    남은예약 = pp.reserved_krw(os_[1:], {"USD": 1_400.0})
+    assert 1_000_000 + 첫.cash_krw - (남은예약 or 0) >= 0
+
+
+def test_after_parses_both_timestamp_shapes() -> None:
+    assert pp.after("2026-10-15T14:00:00.000Z", "2026-10-15T00:30:00+00:00")
+    assert not pp.after("2026-10-15T00:29:59Z", "2026-10-15T00:30:00.000001+00:00")
+    assert pp.after("2026-10-15 14:00:00", "2026-10-15T00:30:00+00:00")

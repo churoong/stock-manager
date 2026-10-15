@@ -343,6 +343,7 @@ def compose(
     rot_lines: list[str] | None = None,
     postmortem_lines: list[str] | None = None,
     writes_used: int | None | object = _안줌,
+    paper_lines: list[str] | None = None,
 ) -> str:
     """메시지 본문. 순수 함수 — 테스트가 그대로 돌린다.
 
@@ -404,6 +405,10 @@ def compose(
     # 틀린 추천 사후 분석 (docs/reports.md 3.8, 25.998)
     if postmortem_lines:
         lines += ["", *postmortem_lines]
+
+    # 모의 투자 계좌 (docs/paper.md 6장, 25.1447)
+    if paper_lines:
+        lines += ["", *paper_lines]
 
     lines += ["", "자세한 것은 웹 /status 와 이슈 #1 의 운영 출력에 있습니다"]
     return "\n".join(lines)
@@ -470,8 +475,15 @@ def run(dry_run: bool = False, force: bool = False) -> int:
             사후 = postmortem.render(총, 손실, 손실수)
         except Exception as exc:  # noqa: BLE001 — 곁다리 절이다
             사후 = [f"지난 추천 사후 분석을 못 했습니다 ({type(exc).__name__})"]
+        # 모의 투자 계좌 (docs/paper.md 6장, 25.1447) — 곁다리 절. 못 읽으면 그렇다고 한 줄
+        try:
+            from batch.jobs import paper as paper_job
+
+            모의 = paper_job.summary_section(client, now)
+        except Exception as exc:  # noqa: BLE001 — 곁다리 절이다
+            모의 = [f"모의 투자 절을 만들지 못했습니다 ({type(exc).__name__})"]
         text = compose(runs=runs, last_success=last, now=now, reads_used=used, writes_used=쓰기, rot_lines=rot_lines,
-                       postmortem_lines=사후)  # fmt: skip
+                       postmortem_lines=사후, paper_lines=모의)  # fmt: skip
         print(text)
         sent = 0
         뒤경고: list[str] = []
