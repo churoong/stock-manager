@@ -54,6 +54,8 @@ export const PHONE_TABS: MenuItem[] = [
 export const MORE_ITEMS: MenuItem[] = [
   { href: "/alerts", label: "알림", icon: "bell", note: "장중 알림 기록과 관심 종목" },
   { href: "/reports", label: "일일 리포트", icon: "report", note: "텔레그램으로 보낸 아침 리포트 보관함" },
+  // 예수금을 넣으면 배치가 규칙대로 사고파는 쌍둥이 모의 계좌 (docs/paper.md, 2026-10-15 사용자 지시)
+  { href: "/paper", label: "모의 투자", icon: "wallet", note: "예수금 입금 · 모의 계좌 손익과 매매 일지" },
   { href: "/backtest", label: "백테스트", icon: "backtest", note: "규칙이 과거에 통했는지" },
   { href: "/status", label: "시스템 상태", icon: "status", note: "배치·알림이 도는지 보고, 수동으로 돌린다" },
   { href: "/settings", label: "설정", icon: "settings", note: "가중치·목표가·손절선·세율" },
@@ -68,6 +70,7 @@ export const TITLES: Record<string, string> = {
   "/portfolio": "내 포트폴리오",
   "/alerts": "알림",
   "/reports": "일일 리포트",
+  "/paper": "모의 투자",
   "/backtest": "백테스트",
   "/settings": "설정",
   "/status": "시스템 상태",
@@ -83,6 +86,7 @@ export const TITLES: Record<string, string> = {
 export const BACK_TO: Record<string, string> = {
   "/stocks": "/recommend",
   "/reports": "/more",
+  "/paper": "/more",
   "/backtest": "/more",
   "/settings": "/more",
   "/status": "/more",
