@@ -63,7 +63,11 @@ export async function GET() {
           ),
         )
       : {};
-    const views = rowsToObjects<{ id: string; name: string; sell_rule: string; rule_version: number }>(accounts).map((a) => ({
+    const views = rowsToObjects<{
+      id: string; name: string; sell_rule: string; rule_version: number;
+      // 계좌 규칙 칸 (migrations/0075, 25.1458) — 화면의 규칙 글·계좌 비교가 읽는다
+      entry_rule: string | null; top_n: number | null; selection: string | null;
+    }>(accounts).map((a) => ({
       ...a,
       view: accountView(a.id, 입금, 현금[a.id] ?? 입금, 예약[a.id] === undefined ? 0 : 예약[a.id], 마지막.find((d) => d.account_id === a.id)),
       positions: (보유들[a.id] ?? []).map((p) => ({ ...p, ...(이름[Number(p.stock_id)] ?? {}) })),
