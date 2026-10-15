@@ -2222,6 +2222,9 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
             충격 = report_picks.impact_log(composed.portfolio.allocations, composed.chosen, 거래대금, corr_series)
             if 충격["n"] or 충격["unknown"]:
                 step_log["impact"] = 충격
+        # 미국 2부 후보의 원화 기준 변동성 배수 — 기록만, 금액은 그대로 (docs/factors.md 12.28 P2, 25.1393)
+        if market == "US" and 추천_오류 is None and composed.chosen:
+            step_log["fx_vol"] = _fx_vol(client, composed.chosen, corr_series, signals_as_of or decision.trade_date)
         # 1부 업종 쏠림 — 기록만, 걸린 날은 1부 끝에 한 줄 (docs/factors.md 12.28 P6, 25.1390)
         if 추천_오류 is None and composed.crowding:
             step_log["part1_sector"] = {k: composed.crowding[k] for k in ("k", "sector", "unknown", "trip")}
@@ -2595,6 +2598,23 @@ DIVERGENCE_OPINIONS_SQL = (
     "SELECT o.stock_id, o.date, o.broker, o.target_price FROM kr_opinions o JOIN json_each(?) j ON j.value = o.stock_id"
     " WHERE o.date <= ? AND o.date >= ?"
 )
+
+
+#: 원화 기준 변동성 기록이 읽는 USDKRW 행 (25.1393) — 상관 창(126 거래일)을 덮는 달력 날짜. 하루 한 행이라 약 180행
+FX_VOL_SQL = "SELECT date, rate FROM fx_rates WHERE pair = 'USDKRW' AND date >= ? AND date <= ? AND rate > 0"
+
+
+def _fx_vol(client: TursoClient, chosen: list, series: dict[int, dict[str, float]], as_of: str) -> dict[str, Any]:
+    """`report_picks.fx_vol_log` 의 재료를 읽는다 (25.1393, 기록만). 못 읽으면 그 사실을 기록에 남긴다 — 금액과 무관"""
+    from batch.services.report_picks import CORR_WINDOW
+
+    가로 = int(CORR_WINDOW * 7 / 5) + CORR_CALENDAR_SLACK_DAYS
+    since = (date.fromisoformat(as_of) - timedelta(days=가로)).isoformat()
+    try:
+        환율 = {str(d): float(r) for d, r in client.execute(FX_VOL_SQL, [since, as_of]).rows}
+    except Exception as exc:  # noqa: BLE001 — 기록만 하는 곁다리. 실패를 기록에 남긴다(삼키지 않는다)
+        return {"error": _실패문("원화 기준 변동성 환율 읽기", exc)}
+    return report_picks.fx_vol_log(chosen, series, 환율)
 
 
 def flow_window_start(오늘: date) -> str:

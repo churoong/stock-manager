@@ -165,6 +165,7 @@ class Test사이징:
 
         검사(SIGNALS, f"최근 {_rp.IMPACT_ADV_DAYS}거래일 거래대금 평균, `IMPACT_ADV_DAYS`", "참여율 분모 창 (25.1392)")
         검사(SIGNALS, f"최근 {_rp.IMPACT_VOL_DAYS}개 일간 수익", "충격의 일간 변동성 창 (25.1392)")
+        검사(SIGNALS, f"수익이 {_rp.FX_VOL_MIN_RETURNS}개(`FX_VOL_MIN_RETURNS`)", "원화 기준 변동성 표본 하한 (25.1393)")
 
     @pytest.mark.parametrize("차례", [0, 1, 2])
     def test_분할_비중(self, 차례: int) -> None:

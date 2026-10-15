@@ -177,6 +177,64 @@ def sector_crowding_line(c: dict[str, Any]) -> str | None:
             f" 이 2부 섹터 상한 {c['max_sector_pct']:g}% 에 걸립니다{모름}")  # fmt: skip
 
 
+#: 원화 기준 변동성 기록의 최소 수익 수 (25.1393). 이보다 짧으면 κ 를 "모름" 으로 — 상관 배수의 표본 하한과 같은 60
+FX_VOL_MIN_RETURNS = 60
+
+
+def _표준편차(xs: list[float]) -> float | None:
+    if len(xs) < 2:
+        return None
+    m = sum(xs) / len(xs)
+    return math.sqrt(sum((x - m) ** 2 for x in xs) / (len(xs) - 1))
+
+
+def fx_vol_log(
+    chosen: list[SignalRow], series: dict[int, dict[str, float]], usdkrw: dict[str, float],
+) -> dict[str, Any]:
+    """미국 2부 후보의 **원화 기준 변동성** 배수 κ = σ_krw ÷ σ_usd (docs/factors.md 12.28 P2, 25.1393 — 기록만).
+
+    r_krw = (1 + r_usd)(1 + r_fx) − 1. 사이징(`size_reduction`)은 달러 변동성만 보는데, 원화 투자자가 지는 위험은
+    원화 기준이다. **금액은 그대로** — σ × max(1, κ) 는 동결 뒤 사전 등록 후보로만 둔다. 야후 `KRW=X` 일봉 종가 시각이
+    미국 종가와 달라 같은 날 쌍의 상관이 0 쪽으로 치우친다 [확인필요: 종가 시각] — 그래서 **같은 날(lag0)과 환율을
+    하루 뒤로 민 쌍(lag1)을 둘 다** 남긴다(검증 B, 23회차 `corr_async` 와 같은 문제). 창은 상관과 같은 `CORR_WINDOW`"""
+    from batch.services import scoring as sc_
+
+    def _한쪽(밀기: int) -> dict[str, Any]:
+        환 = sorted(usdkrw.items())
+        if 밀기:
+            환 = [(d, 환[i + 밀기][1]) for i, (d, _) in enumerate(환) if i + 밀기 < len(환)]
+        환율 = dict(환)
+        κs: list[float] = []
+        ρs: list[float] = []
+        모름 = 0
+        for r in {x.stock_id: x for x in chosen if x.currency == "USD"}.values():
+            종가 = series.get(r.stock_id) or {}
+            공통 = sorted(set(종가) & set(환율))[-(CORR_WINDOW + 1):]
+            us, fx_ = sc_.aligned_returns({d: 종가[d] for d in 공통}, {d: 환율[d] for d in 공통}) if 공통 else ([], [])
+            if len(us) < FX_VOL_MIN_RETURNS:
+                모름 += 1
+                continue
+            krw = [(1 + a) * (1 + b) - 1 for a, b in zip(us, fx_, strict=True)]
+            σu, σk = _표준편차(us), _표준편차(krw)
+            if not σu or σk is None:
+                모름 += 1
+                continue
+            κs.append(σk / σu)
+            ρ = pearson(us, fx_)
+            if ρ is not None:
+                ρs.append(ρ)
+        out: dict[str, Any] = {"n": len(κs), "unknown": 모름}
+        if κs:
+            κs.sort()
+            out.update({"kappa_median": round(κs[len(κs) // 2], 3), "kappa_over1": sum(1 for k in κs if k > 1)})
+        if ρs:
+            ρs.sort()
+            out["rho_median"] = round(ρs[len(ρs) // 2], 3)
+        return out
+
+    return {"lag0": _한쪽(0), "lag1": _한쪽(1)}
+
+
 #: 참여율의 분모 — 20거래일 평균 거래대금(ADV20). 유니버스 거래대금 하한과 같은 창 (25.1392)
 IMPACT_ADV_DAYS = 20
 #: 일간 변동성을 재는 최근 수익 수 (25.1392). 신호의 MA60 과 같은 길이
