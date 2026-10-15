@@ -26,13 +26,11 @@ DEPT_LABEL = {
 #: 점수 부서(리서치·퀀트·리스크)는 그날 그 시장 신호 종목 안의 백분위로 — 찬성·반대 문턱 (docs/company.md 2장)
 PCT_FOR = 70
 PCT_AGAINST = 30
-#: 증권사리서치부 — 최근 90일, 목표가 있는 의견 2건 이상, 중앙 상승여력 문턱
+#: 증권사리서치부 — 최근 90일, 목표가 있는 의견 2건 이상. 중앙 상승여력의 **신호 종목 안 백분위**로 판단한다
+#: (점수 부서와 같은 문턱). 절대 문턱(+20%·+5%)은 소급 재생(25.1464)에서 의견 있는 종목을 늘 찬성으로 만들었다
+#: — 국내 목표가 상승여력이 대부분 +20% 를 넘는다(25.1467)
 BROKER_DAYS = 90
 BROKER_MIN_N = 2
-BROKER_FOR = 0.20
-BROKER_AGAINST = 0.05
-BROKER_MID = 0.125
-BROKER_SPAN = 0.25
 #: 수급부 — 5거래일 외국인+기관 순매수 대금 ÷ 20일 평균 거래대금
 FLOW_DAYS = 5
 FLOW_FOR = 0.5
@@ -204,18 +202,31 @@ def risk(
     return out
 
 
-def broker(d: Dossier) -> Opinion:
-    """증권사리서치부 — 최근 90일 목표가 의견의 중앙 상승여력 (국내만)."""
-    if not d.domestic:
-        return _없음("broker", "미국 종목 증권사 의견을 모으지 않는다")
-    if len(d.broker_upsides) < BROKER_MIN_N:
-        return _없음("broker", f"최근 {BROKER_DAYS}일 목표가 의견 {len(d.broker_upsides)}건(< {BROKER_MIN_N})")
-    u = median(x for _d, _b, x in d.broker_upsides)
-    입장 = 1 if u >= BROKER_FOR else -1 if u <= BROKER_AGAINST else 0
-    마지막 = max(x[0] for x in d.broker_upsides)
-    return Opinion("broker", 입장, round(min(1.0, abs(u - BROKER_MID) / BROKER_SPAN), 6), [_criterion(
-        "증권사 중앙 상승여력", f"{u * 100:+.1f}% ({len(d.broker_upsides)}건, 최근 {BROKER_DAYS}일)",
-        f"찬성 ≥ +{BROKER_FOR * 100:g}% · 반대 ≤ +{BROKER_AGAINST * 100:g}%", "kr_opinions", 마지막)])  # fmt: skip
+def _중앙여력(d: Dossier) -> float | None:
+    return median(x for _d, _b, x in d.broker_upsides) if len(d.broker_upsides) >= BROKER_MIN_N else None
+
+
+def broker(dossiers: list[Dossier], population: list[Dossier] | None = None) -> dict[int, Opinion]:
+    """증권사리서치부 — 최근 90일 목표가 의견 중앙 상승여력의, 의견이 있는 신호 종목 안 백분위 (국내만)."""
+    여력 = {d.stock_id: (_중앙여력(d) if d.domestic else None) for d in (population or dossiers)}
+    pct = percentile_ranks(여력)
+    out: dict[int, Opinion] = {}
+    for d in dossiers:
+        if not d.domestic:
+            out[d.stock_id] = _없음("broker", "미국 종목 증권사 의견을 모으지 않는다")
+            continue
+        u = 여력.get(d.stock_id, _중앙여력(d))
+        if u is None or d.stock_id not in pct:
+            out[d.stock_id] = _없음(
+                "broker", f"최근 {BROKER_DAYS}일 목표가 의견 {len(d.broker_upsides)}건(< {BROKER_MIN_N})")
+            continue
+        입장, 확신 = _백분위_입장(pct[d.stock_id])
+        out[d.stock_id] = Opinion("broker", 입장, 확신, [_criterion(
+            "증권사 중앙 상승여력",
+            f"{u * 100:+.1f}% ({len(d.broker_upsides)}건, 신호 종목 안 {pct[d.stock_id]:.0f} 백분위)",
+            f"찬성 ≥ {PCT_FOR} · 반대 ≤ {PCT_AGAINST} 백분위 (최근 {BROKER_DAYS}일)", "kr_opinions",
+            max(x[0] for x in d.broker_upsides))])  # fmt: skip
+    return out
 
 
 def flows(d: Dossier) -> Opinion:
@@ -331,13 +342,14 @@ def opinions(
         "research": lambda: research(dossiers, 섞기, 모집단),
         "quant": lambda: quant(dossiers, 모집단),
         "risk": lambda: risk(dossiers, charter.get("max_mdd"), 모집단, "risk" in (charter.get("veto") or [])),
+        "broker": lambda: broker(dossiers, 모집단),
     }
     for 부서, 함수 in 단면.items():
         if 부서 in 가중:
             for sid, o in 함수().items():
                 if sid in 표:
                     표[sid][부서] = o
-    한종목 = {"broker": broker, "flows": flows, "governance": governance, "sentiment": sentiment, "macro": macro}
+    한종목 = {"flows": flows, "governance": governance, "sentiment": sentiment, "macro": macro}
     for d in dossiers:
         for 부서, f in 한종목.items():
             if 부서 in 가중:
@@ -467,6 +479,6 @@ CHARTERS: dict[str, dict[str, Any]] = {
         "weights": {"research": 1, "quant": 0.5, "broker": 0.5, "flows": 0.5, "governance": 1, "sentiment": 0.5,
                     "risk": 2, "macro": 1.5},
         "research_mix": {"value": 0.3, "quality": 0.5, "growth": 0.2}, "lead": "risk", "veto": ["governance", "risk"],
-        "max_mdd": -0.50, "threshold": 0.8, "agenda": 30, "top_n": 10,
+        "max_mdd": -0.60, "threshold": 0.8, "agenda": 30, "top_n": 10,
     },
 }  # fmt: skip

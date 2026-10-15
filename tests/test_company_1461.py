@@ -49,12 +49,15 @@ def test_quant_and_risk_thresholds() -> None:
 
 
 def test_broker_flows_governance_sentiment_macro() -> None:
-    # 증권사: 중앙 상승여력 25% → 찬성, 확신 |0.25 − 0.125| / 0.25 = 0.5
-    b = co.broker(_d(1, broker_upsides=[("2026-10-01", "가", 0.30), ("2026-10-02", "나", 0.25), ("2026-10-03", "다", 0.10)]))
-    assert (b.stance, b.conviction) == (1, 0.5) and b.evidence[0]["as_of"] == "2026-10-03"
-    assert co.broker(_d(1, broker_upsides=[("d", "가", 0.03), ("d", "나", 0.04)])).stance == -1
-    assert co.broker(_d(1, broker_upsides=[("d", "가", 0.5)])).note  # 1건 → 자료 없음
-    assert co.broker(_d(1, domestic=False, broker_upsides=[("d", "가", 0.5)] * 3)).stance == 0  # 미국은 자료 없음
+    # 증권사: 중앙 상승여력의, 의견 있는 신호 종목 안 백분위 (25.1467 — 절대 +20% 문턱은 국내에서 가르지 못했다)
+    여럿 = [_d(i, broker_upsides=[("2026-10-01", "가", 0.1 * i), ("2026-10-03", "나", 0.1 * i)]) for i in range(1, 6)]
+    b = co.broker(여럿)
+    assert [b[i].stance for i in range(1, 6)] == [-1, -1, 0, 1, 1] and b[5].conviction == 1.0
+    assert b[5].evidence[0]["as_of"] == "2026-10-03" and "100 백분위" in b[5].evidence[0]["display"]
+    assert co.broker([_d(1, broker_upsides=[("d", "가", 0.5)])])[1].note  # 1건 → 자료 없음
+    assert co.broker([_d(1, domestic=False, broker_upsides=[("d", "가", 0.5)] * 3)])[1].stance == 0  # 미국은 자료 없음
+    # 의견 없는 종목은 순위에서 빠진다 — 있는 종목끼리만 견준다
+    assert co.broker([*여럿, _d(9)])[9].note
     # 수급: 5일 합 ÷ 20일 평균 거래대금 = 1.0 → 찬성, 확신 0.5
     f = co.flows(_d(1, flow_sum=100.0, turnover_20d=100.0, flow_days=5, flow_date="2026-10-14"))
     assert (f.stance, f.conviction) == (1, 0.5)
@@ -197,3 +200,11 @@ def test_risk_limit_without_veto_only_notes() -> None:
     없음 = co.risk(ds, -0.45, veto=False)[6]
     assert 있음.veto and 있음.conviction == 1.0
     assert not 없음.veto and 없음.conviction < 1.0 and "한도" in 없음.evidence[-1]["label"]
+
+
+def test_broker_ranks_within_signal_population() -> None:
+    """증권사리서치부도 신호 종목 전체 안 순위로 — 안건 하나만 넘겨도 그 종목의 자리는 모집단에서 정해진다 (25.1467)."""
+    pop = [_d(i, broker_upsides=[("2026-10-01", "가", 0.1 * i), ("2026-10-02", "나", 0.1 * i)]) for i in range(1, 6)]
+    ch = {**헌장, "weights": {"broker": 1, "research": 1}}
+    assert co.opinions([pop[4]], ch, pop)[5]["broker"].stance == 1
+    assert co.opinions([pop[4]], ch)[5]["broker"].stance == 0  # 모집단 없이 혼자면 50 백분위

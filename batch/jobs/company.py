@@ -68,6 +68,16 @@ def agenda_rows(rows: list[report_picks.SignalRow], size: int) -> list[report_pi
     return sorted(한종목.values(), key=lambda r: (r.total_score is None, -(r.total_score or 0), r.ticker))[:size]
 
 
+def _broker_upsides(client: Any, ids: list[int], as_of: str) -> dict[int, list[tuple[str, str, float]]]:
+    """{종목: [(의견 날짜, 증권사, 상승여력)]} — 기준일 앞 90일, 목표가 있고 그 의견 날짜의 종가를 잡은 것만."""
+    out: dict[int, list[tuple[str, str, float]]] = {}
+    시작 = (date.fromisoformat(as_of[:10]) - timedelta(days=co.BROKER_DAYS)).isoformat()
+    for sid, day, 증권사명, 목표, 종가 in client.execute(BROKER_SQL, [_ids(ids), 시작, as_of]).rows:
+        if 종가:
+            out.setdefault(int(sid), []).append((str(day), str(증권사명), float(목표) / float(종가) - 1))
+    return {k: sorted(v) for k, v in out.items()}
+
+
 def population_dossiers(
     client: Any, rows: list[report_picks.SignalRow], country: str, as_of: str,
 ) -> list[co.Dossier]:
@@ -83,8 +93,11 @@ def population_dossiers(
     if not 한종목:
         return []
     지표 = signals_job.load_metrics(client, country, as_of, sorted(한종목))
+    # 증권사 의견도 — 증권사리서치부는 중앙 상승여력의 신호 종목 안 순위로 판단한다 (25.1467)
+    증권사 = _broker_upsides(client, sorted(한종목), as_of) if country == "KR" else {}
     return [co.Dossier(
-        stock_id=sid, ticker=r.ticker, as_of=as_of, total_score=r.total_score,
+        stock_id=sid, ticker=r.ticker, as_of=as_of, total_score=r.total_score, domestic=country == "KR",
+        broker_upsides=증권사.get(sid) or [],
         factors={k: r.factor_scores.get(k) for k in ("value", "quality", "growth", "momentum")},
         mdd=(지표.get(sid) or {}).get("mdd"), volatility=(지표.get(sid) or {}).get("volatility_ann"),
         perf_window=(지표.get(sid) or {}).get("window"), perf_as_of=(지표.get(sid) or {}).get("as_of_date"),
@@ -134,11 +147,7 @@ def load_dossiers(client: Any, rows: list[report_picks.SignalRow], country: str,
         # 수급은 **최근 5거래일이 다 있어야** — 그 종목에 기준일 행이 빠졌으면 더 묵은 5일을 쓰게 된다
         # (25.1465 검증 권장)
         최근날 = recent_sessions("KR", as_of, co.FLOW_DAYS)
-        for sid, day, 증권사명, 목표, 종가 in client.execute(
-            BROKER_SQL, [_ids(ids), (기준 - timedelta(days=co.BROKER_DAYS)).isoformat(), as_of]
-        ).rows:
-            if 종가:
-                증권사.setdefault(int(sid), []).append((str(day), str(증권사명), float(목표) / float(종가) - 1))
+        증권사 = _broker_upsides(client, ids, as_of)
         for sid, day, 외, 기 in client.execute(
             FLOWS_SQL, [_ids(ids), (기준 - timedelta(days=FLOW_LOOKBACK_DAYS)).isoformat(), as_of]
         ).rows:
@@ -166,7 +175,7 @@ def load_dossiers(client: Any, rows: list[report_picks.SignalRow], country: str,
         out.append(co.Dossier(
             stock_id=r.stock_id, ticker=r.ticker, as_of=as_of, total_score=r.total_score,
             factors={k: r.factor_scores.get(k) for k in ("value", "quality", "growth", "momentum")},
-            broker_upsides=sorted(증권사.get(r.stock_id) or []),
+            broker_upsides=증권사.get(r.stock_id) or [],
             flow_sum=sum(v for _d, v in 흐름) if 흐름 else None, turnover_20d=거래대금.get(r.stock_id),
             flow_days=len(흐름), flow_date=흐름[0][0] if 흐름 else None,
             gov_events=사건.get(r.stock_id) or [], cb_pct=전환사채.get(r.stock_id), domestic=국내,

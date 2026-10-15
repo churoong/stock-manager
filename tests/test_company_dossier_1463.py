@@ -86,8 +86,10 @@ def test_load_dossier_reads_only_up_to_as_of(c: Client) -> None:
     assert d.sentiment == 35 and d.mdd == -0.42 and d.volatility == 0.31 and d.perf_window == "3Y"
     assert d.regime_index == "KOSPI" and d.regime in ("unknown", None)  # 지수 행이 없으면 국면 모름
     assert d.factors == {"value": 60.0, "quality": 55.0, "growth": None, "momentum": 70.0}
-    # 부서 판단으로 이어진다: 증권사 중앙 +22.5% 찬성, 수급 17백만 ÷ 3천만 = 0.57 찬성, 지배구조 사건 → 반대·거부 조건
-    assert co.broker(d).stance == 1 and co.flows(d).stance == 1
+    # 부서 판단으로 이어진다: 증권사는 의견 있는 종목이 하나뿐이라 50 백분위(중립), 수급 17백만 ÷ 3천만 = 0.57 찬성,
+    # 지배구조 사건 → 반대·거부 조건
+    assert co.broker([d])[1].stance == 0 and "+22.5%" in co.broker([d])[1].evidence[0]["display"]
+    assert co.flows(d).stance == 1
     assert co.governance(d).veto
     j = job.dossier_json(d)
     assert j["broker"]["n"] == 2 and j["flows"]["days"] == 5
@@ -96,7 +98,7 @@ def test_load_dossier_reads_only_up_to_as_of(c: Client) -> None:
 def test_us_dossier_has_no_domestic_reads(c: Client) -> None:
     [d] = job.load_dossiers(c, [_행(2, "AAPL", "NASDAQ", 80)], "US", 기준)
     assert not d.domestic and d.broker_upsides == [] and d.flow_days == 0
-    assert co.broker(d).note and co.flows(d).note and co.governance(d).note
+    assert co.broker([d])[2].note and co.flows(d).note and co.governance(d).note
 
 
 def test_flows_need_all_recent_sessions_and_both_investors(c: Client) -> None:
