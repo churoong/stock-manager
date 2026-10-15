@@ -424,6 +424,44 @@ ALREADY_SENT_SQL = (
 )
 
 
+#: 실행 품질 (docs/paper.md 13장, 25.1452) — 실제 매매·리포트 주문표·매도 플래그를 읽기만 한다
+EXEC_TRADES_SQL = "SELECT stock_id, side, trade_date, price FROM trades WHERE trade_date >= ? AND trade_date <= ?"
+EXEC_ITEMS_SQL = (
+    "SELECT r.trade_date AS report_date, i.stock_id, i.payload_json FROM daily_reports r"
+    " CROSS JOIN report_items i ON i.report_id = r.id"
+    " WHERE r.trade_date >= ? AND r.trade_date <= ? AND i.section = ? AND i.stock_id IS NOT NULL"
+)
+EXEC_FLAGS_SQL = (
+    "SELECT stock_id, reason_code, level, MIN(first_seen_date) AS first_seen FROM sell_flags"
+    " WHERE as_of_date >= ? GROUP BY stock_id, reason_code, level"
+)
+
+
+def execution_lines(client: TursoClient, now: datetime) -> list[str]:
+    """월간 복기의 실행 품질 절 — 한국 날짜로 그달 1~7일에 지난달을 (docs/paper.md 13장, 25.1452)."""
+    from batch.jobs import paper as paper_job
+    from batch.services import execution_quality as eq
+    from batch.services import reports as rp_store
+
+    오늘 = now.astimezone(cal.market_tz("KR")).date()
+    if 오늘.day > paper_job.MONTHLY_REVIEW_DAYS:
+        return []
+    끝 = 오늘.replace(day=1) - timedelta(days=1)
+    시작 = 끝.replace(day=1)
+    앞 = (시작 - timedelta(days=eq.PLAN_LOOKBACK_DAYS)).isoformat()
+    매매 = client.execute(EXEC_TRADES_SQL, [시작.isoformat(), 끝.isoformat()]).dicts()
+    if not 매매:
+        return []
+    계획, 추천 = [], []
+    for 절, 담을곳 in ((rp_store.SECTION_BUY, 계획), (rp_store.SECTION_RECOMMEND, 추천)):
+        for r in client.execute(EXEC_ITEMS_SQL, [앞, 끝.isoformat(), 절]).dicts():
+            짐 = json.loads(r["payload_json"] or "{}")
+            담을곳.append({"stock_id": r["stock_id"], "report_date": r["report_date"],
+                         "prices": [t.get("price_at_or_below") for t in 짐.get("tranches") or []]})  # fmt: skip
+    플래그 = client.execute(EXEC_FLAGS_SQL, [(시작 - timedelta(days=eq.FLAG_LOOKBACK_DAYS)).isoformat()]).dicts()
+    return eq.lines(eq.measure(매매, 계획, 추천, 플래그, 시작.isoformat(), 끝.isoformat()))
+
+
 def week_key(moment: datetime) -> str:
     """그 시각이 속한 주 — 한국 날짜로 그 시각 이하의 가장 가까운 일요일.
     요약은 일요일 아침(한국)에 지난 7일을 보낸다"""
@@ -482,6 +520,11 @@ def run(dry_run: bool = False, force: bool = False) -> int:
             모의 = paper_job.summary_section(client, now)
         except Exception as exc:  # noqa: BLE001 — 곁다리 절이다
             모의 = [f"모의 투자 절을 만들지 못했습니다 ({type(exc).__name__})"]
+        # 실제 매매의 실행 품질 (docs/paper.md 13장, 25.1452) — 월 첫 요약에만. 곁다리
+        try:
+            모의 = [*모의, *execution_lines(client, now)]
+        except Exception as exc:  # noqa: BLE001 — 곁다리 절이다
+            모의 = [*모의, f"실행 품질 절을 만들지 못했습니다 ({type(exc).__name__})"]
         text = compose(runs=runs, last_success=last, now=now, reads_used=used, writes_used=쓰기, rot_lines=rot_lines,
                        postmortem_lines=사후, paper_lines=모의)  # fmt: skip
         print(text)

@@ -26,6 +26,7 @@ import pytest
 
 from batch.services import adjust as adj
 from batch.services import buyback as bb
+from batch.services import execution_quality as eqm
 from batch.services import factor_ic as fic
 from batch.services import metrics as m
 from batch.services import outcomes as oc
@@ -695,7 +696,7 @@ class Test밸류_분모:
     "gross_profitability", "robustness", "column_rot", "calibration", "self_grade", "holding_scores",
     "pick_history", "etf_accounts", "etf_tilt", "after_hours", "broker_stats", "disclosure_reaction", "luck", "postmortem",
     "divergence", "tax_sim", "verdict", "forecast_track", "patterns", "insights", "history",
-    "event_history", "simulation", "candidate_factors", "cb_overhang", "buy_thesis", "plan_fill", "target_units", "paper", "risk_gate",
+    "event_history", "simulation", "candidate_factors", "cb_overhang", "buy_thesis", "plan_fill", "target_units", "paper", "risk_gate", "execution_quality",
 )  # fmt: skip
 
 #: 아직 그물 밖인 모듈과 **왜 아직인지**. 하나씩 줄여 간다
@@ -891,6 +892,8 @@ class Test이웃_모듈들:
         검사(PAPER, f"하루 {rg.MAX_ORDERS_PER_DAY}건", "하루 매수 주문 상한 (25.1451)")
         검사(PAPER, f"여유 {rg.CAP_TOLERANCE_PCT:g}%p", "상한 재검사 여유 (25.1451)")
         검사(PAPER, f"{rg.STALE_PRICE_DAYS}일(달력일)보다 묵었으면", "기준 종가 묵음 (25.1451)")
+        검사(PAPER, f"{eqm.PLAN_LOOKBACK_DAYS}일(`PLAN_LOOKBACK_DAYS`)", "주문표 매수 창 (25.1452)")
+        검사(PAPER, f"{eqm.FLAG_LOOKBACK_DAYS}일(`FLAG_LOOKBACK_DAYS`)", "플래그 뒤 매도 창 (25.1452)")
         검사(PAPER, "**" + "·".join(str(n) for n in pp.DECISION_HORIZONS) + " 번째 거래일**", "결정 원장 성과 창")
 
     def test_스트레스_표본_하한(self) -> None:
