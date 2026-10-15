@@ -21,6 +21,10 @@ on:
         type: boolean
         default: false
 
+permissions:
+  contents: read
+  issues: write
+
 jobs:
   move:
     runs-on: ubuntu-latest
@@ -44,8 +48,18 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+      # **출력은 비공개 운영 이슈로만** (docs/infra.md 25.1433, 감사) — 옮길 행 수(매매·관심 건수)와 번호를 맞추지 못한 종목
+      # 티커(사용자가 매매·관심에 쓴 종목)가 공개 Actions 로그에 찍혔다(CLAUDE.md 절대 규칙). 백업·되살리기(25.1242)와 같은 길
       - name: 옮기기
         run: |
+          set -o pipefail
           ARGS="--from ${{ inputs.source }} --to ${{ inputs.target }}"
           if [ "${{ inputs.apply }}" = "true" ]; then ARGS="$ARGS --apply"; fi
-          python scripts/move_user_data.py $ARGS
+          python scripts/move_user_data.py $ARGS 2>&1 | python scripts/ops_tee.py move.txt
+      - name: 결과를 비공개 이슈로
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPS_REPO: ${{ secrets.OPS_REPO }}
+          OPS_TOKEN: ${{ secrets.OPS_TOKEN }}
+        run: python scripts/publish_output.py --title "운영 출력 (클라우드 세션용)" --file move.txt --note "사용자 데이터 옮기기"

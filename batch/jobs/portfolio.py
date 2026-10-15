@@ -683,13 +683,14 @@ def run() -> int:
                 "values": len(values), "reviews": len(reviews), "review_groups": len(review_stats),
                 "warnings": warnings[:10], "warning_count": len(warnings), "version": version}  # fmt: skip
         db.finish_batch_run(client, run_id, status="partial" if warnings else "success", step_log=step)
+        # **공개 저장소면 건수·금액·주의 줄을 로그에 찍지 않는다** (25.979·25.1433) — 평가액·손익·종목, 매매·보유 건수가
+        # 남이 보는 로그에 남는다(`portfolio.yml` 은 ops_tee 를 거치지 않는다). 같은 수는 실행 기록(step_log)에
+        if visibility.is_public():
+            print(f"  (공개 저장소 — 건수·평가액·손익과 주의 {len(warnings)}줄은 로그에 찍지 않음)")
+            return 0
         print(f"매매 {len(trades)}건, 배당 {len(receipts)}건 → 체결 묶음 {len(lots)},"
               f" 보유 {len(positions)}, 평가 {len(values)}일")  # fmt: skip
         print(f"복기 {len(reviews)}건, 집단 {len(review_stats)}개")
-        # **공개 저장소면 금액·주의 줄을 로그에 찍지 않는다** (25.979) — 평가액·손익·종목이 남이 보는 로그에 남는다
-        if visibility.is_public():
-            print(f"  (공개 저장소 — 평가액·손익과 주의 {len(warnings)}줄은 로그에 찍지 않음)")
-            return 0
         print(f"평가액 {totals['market_value_krw']:,.0f}원, 평가손익 {totals['unrealized_pnl_krw']:,.0f}원,"
               f" 실현손익 {totals['realized_pnl_krw']:,.0f}원")  # fmt: skip
         for warning in warnings[:10]:

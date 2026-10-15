@@ -26,6 +26,7 @@ def _단계(wf: str, 이름: str) -> str:
     ("backup.yml", "덤프", "scripts/backup_db.py"),
     ("restore-backup.yml", "되살리기", "scripts/restore_backup.py"),
     ("restore-drill.yml", "리허설", "scripts/restore_drill.py"),
+    ("move-user-data.yml", "옮기기", "scripts/move_user_data.py"),  # 25.1433 — 매매·관심 건수와 종목 티커
 ])  # fmt: skip
 def test_출력은_ops_tee_로(wf: str, 단계: str, 스크립트: str) -> None:
     글 = _단계(wf, 단계)

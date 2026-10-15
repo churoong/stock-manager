@@ -78,6 +78,8 @@ class Test배치_로그:
         src = (ROOT / "batch" / "jobs" / "portfolio.py").read_text(encoding="utf-8")
         i = src.index("if visibility.is_public():")
         assert src.index("평가액 {totals") > i, "평가액 줄이 공개 판정보다 먼저 찍힌다"
+        # 매매·보유 건수도 (25.1433) — `portfolio.yml` 은 ops_tee 를 거치지 않는다
+        assert src.index('print(f"매매 {len(trades)}건') > i, "건수 줄이 공개 판정보다 먼저 찍힌다"
 
     def test_신호_작업의_설정_경고는_공개면_찍지_않는다(self) -> None:
         """범위 밖 설정 경고는 총 투자가능금액을 문장에 넣는데 `signals.yml`·`recompute.yml` 은 `ops_tee` 를 거치지
