@@ -67,3 +67,22 @@ def test_부르기가_통째로_실패해도_그대로(client: Any) -> None:  # 
     _counts, warnings, rows, _info = _돌림(client, fetch)
     assert set(rows.values()) == {"편입"}
     assert any("하지 못했습니다" in w for w in warnings)
+
+
+def test_수치_사유로_빠진_종목도_KIS_사유로_바로잡는다(client: Any) -> None:  # noqa: F811
+    """장기 정지는 거래대금이 0 이라 수치 사유로 먼저 빠졌다 — 매도 플래그가 "거래대금미달" 로 나갔다 (25.1407)"""
+    부른것: list[list[str]] = []
+
+    def fetch(tickers: list[str]) -> tuple[dict[str, dict], int]:
+        부른것.append(tickers)
+        return {t: 보통 | {"iscd_stat_cls_code": "58"} if t == "005932" else 보통 for t in tickers}, 0
+
+    시세넣기(client.conn, 1, 40, 1_000_000_000)
+    시세넣기(client.conn, 2, 40, 0)  # 20일 거래대금 0 — 장기 정지
+    시세넣기(client.conn, 3, 40, 1_000_000_000)
+    info: dict[str, Any] = {}
+    job.build_snapshot(client, "KR", 기준일, kis_status=fetch, info=info)
+    rows = dict(client.conn.execute("SELECT stock_id, COALESCE(exclude_reason, '편입') FROM universe_members").fetchall())
+    assert "005932" in 부른것[0]
+    assert rows[2] == uni.REASON_HALTED  # 예전 거래대금미달
+    assert rows[1] == "편입" and rows[3] == "편입"

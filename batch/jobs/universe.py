@@ -42,6 +42,8 @@ KIS_PRICE_TR = "FHKST01010100"
 #: 이 몫보다 많이 실패하면 경고한다 — 몇 건의 일시 실패는 지금 판정 그대로 두면 되지만
 #: 대부분이 실패면 대조를 못 한 것이다 [확인필요: 첫 실행의 실패 수로 다시 본다]
 KIS_STATUS_FAIL_SHARE = 0.05
+#: KIS 상태로 사유를 다시 보는 수치 사유 (25.1407) — 정지·관리종목이 결격보다 먼저 걸리는 자리
+수치_재확인_사유 = frozenset({uni.REASON_LOW_TURNOVER, uni.REASON_SMALL_CAP, uni.REASON_NO_DATA})
 JOB_NAME = "universe"
 
 # 야후에 시총을 종목마다 물으면 주간 배치로 감당하기 어렵다(월 230~314분). 그래서 SEC 주식수를 쓴다.
@@ -795,7 +797,11 @@ def _kis_status_pass(
     if fetch is None:
         return ("KIS 키가 없어 종목 상태 대조를 하지 않았습니다 — 코스피 관리종목·시장 전체 거래정지는"
                 " 소속부로 걸리지 않습니다 (25.1328)")  # fmt: skip
-    편입 = [i for i, v in enumerate(verdicts) if v.included]
+    # **수치 사유로 빠진 종목도 본다** (docs/infra.md 25.1407, 주간 작업 감사). 20거래일 넘게 정지한 종목은 거래대금이
+    # 0 이라, 코스피 관리종목은 소속부 글자가 비어 KIS 대조 **전에** 수치 사유로 먼저 빠졌다 — 보유 중이면 매도 플래그가
+    # "유니버스에서 빠졌습니다(거래대금미달)" 로 나갔다. 결격이 수치보다 먼저인 `judge` 순서대로 사유만 바꾼다
+    # (제외는 그대로)
+    편입 = [i for i, v in enumerate(verdicts) if v.included or v.reason in 수치_재확인_사유]
     try:
         상태, 실패 = fetch([str(rows[i]["ticker"]) for i in 편입])
     except Exception as exc:  # noqa: BLE001 — 대조는 덧붙임이다. 못 하면 지금 판정 그대로 두고 말한다
@@ -805,6 +811,8 @@ def _kis_status_pass(
         ticker = str(rows[i]["ticker"])
         사유 = uni.kis_status_reason(상태.get(ticker))
         if 사유 is None:
+            continue
+        if not verdicts[i].included and verdicts[i].reason == 사유:
             continue
         verdicts[i] = uni.Verdict(included=False, reason=사유, listed_days=verdicts[i].listed_days)
         rows_data[i] = (rows_data[i][0], rows_data[i][1], 0, 사유, *rows_data[i][4:])
