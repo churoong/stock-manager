@@ -261,19 +261,21 @@ def impact_log(
     모름 = 0
     for a in allocations:
         sid = 종목.get(a.ticker)
-        첫 = a.tranches[0] if a.tranches else {}
-        비율 = float(첫.get("ratio") or 0) if isinstance(첫, dict) else 0.0
+        # 2부 분할 회차는 `_scaled_tranches` 모양 {price_at_or_below, amount} 다 — `ratio` 칸이 없다. 예전엔 ratio 만
+        # 읽어 운영에서 늘 "모름" 이었다(25.1414, 감사). 금액이 없을 때만 ratio(1부 계획 모양)로 물러난다
+        첫 = a.tranches[0] if a.tranches and isinstance(a.tranches[0], dict) else {}
+        첫금액 = float(첫["amount"]) if 첫.get("amount") is not None else a.amount * float(첫.get("ratio") or 0)
         대금 = sorted((values.get(sid) or {}).items())[-IMPACT_ADV_DAYS:] if sid is not None else []
         대금 = [(d, v) for d, v in 대금 if v and v > 0]
         종가 = [v for _, v in sorted((series.get(sid) or {}).items())][-(IMPACT_VOL_DAYS + 1):] if sid else []
         수익 = [b / a_ - 1 for a_, b in zip(종가, 종가[1:], strict=False) if a_ > 0]
-        if not (a.amount > 0 and 비율 > 0 and len(대금) >= IMPACT_ADV_DAYS // 2 and len(수익) >= 20):
+        if not (a.amount > 0 and 첫금액 > 0 and len(대금) >= IMPACT_ADV_DAYS // 2 and len(수익) >= 20):
             모름 += 1
             continue
         adv = sum(v for _, v in 대금) / len(대금)
         평균 = sum(수익) / len(수익)
         σ = math.sqrt(sum((x - 평균) ** 2 for x in 수익) / (len(수익) - 1))
-        p = a.amount * 비율 / adv
+        p = 첫금액 / adv
         ps.append(p)
         충격들.append(100 * σ * math.sqrt(p))
     def _두자리(x: float) -> float:

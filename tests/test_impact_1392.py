@@ -25,7 +25,10 @@ def _재료(대금: float, 수익: float) -> tuple[dict, dict]:
 
 
 def _배분(금액: float, 비율: float = 0.4) -> rs.Allocation:
-    return rs.Allocation("000001", "종목1", 금액, 10.0, tranches=[{"step": 1, "ratio": 비율}])
+    # 실제 2부 분할 회차 모양 — `_scaled_tranches` 가 짓는 {price_at_or_below, amount} (25.1414: 예전 이 도우미는
+    # 운영에 없는 `ratio` 칸을 넣어 통과했고, 운영 기록은 늘 "모름" 이었다)
+    계획 = [{"price": 10.0, "amount": 금액 * 비율}, {"price": 9.5, "amount": 금액 * 0.3}, {"price": 9.0, "amount": 금액 * 0.3}]
+    return rs.Allocation("000001", "종목1", 금액, 10.0, tranches=rp._scaled_tranches(계획, 금액, 금액))
 
 
 def test_1차_금액의_참여율과_제곱근_충격() -> None:
@@ -56,3 +59,12 @@ def test_금액은_기록에_남지_않는다() -> None:
     out = rp.impact_log([_배분(12_345_678.0)], [row(1)], 대금, 종가)
     assert "12345678" not in str(out) and "4938271" not in str(out)
     assert out["p_max"] == float(f"{12_345_678.0 * 0.4 / 777_777_777.0:.2g}")
+
+
+def test_1부_계획_모양이면_비율로_물러난다() -> None:
+    """금액 칸이 없는 회차(`ratio` 만)도 센다 — 둘 다 없으면 모름 (25.1414)"""
+    대금, 종가 = _재료(500_000_000.0, 0.03)
+    a = rs.Allocation("000001", "종목1", 12_500_000.0, 10.0, tranches=[{"step": 1, "ratio": 0.4}])
+    assert rp.impact_log([a], [row(1)], 대금, 종가)["p_max"] == 0.01
+    b = rs.Allocation("000001", "종목1", 12_500_000.0, 10.0, tranches=[])
+    assert rp.impact_log([b], [row(1)], 대금, 종가)["unknown"] == 1
