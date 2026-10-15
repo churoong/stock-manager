@@ -177,6 +177,62 @@ def sector_crowding_line(c: dict[str, Any]) -> str | None:
             f" 이 2부 섹터 상한 {c['max_sector_pct']:g}% 에 걸립니다{모름}")  # fmt: skip
 
 
+#: 참여율의 분모 — 20거래일 평균 거래대금(ADV20). 유니버스 거래대금 하한과 같은 창 (25.1392)
+IMPACT_ADV_DAYS = 20
+#: 일간 변동성을 재는 최근 수익 수 (25.1392). 신호의 MA60 과 같은 길이
+IMPACT_VOL_DAYS = 60
+
+
+def impact_log(
+    allocations: list[rs.Allocation], chosen: list[SignalRow],
+    values: dict[int, dict[str, float]], series: dict[int, dict[str, float]],
+) -> dict[str, Any]:
+    """2부 **1차 분할 금액**의 거래대금 참여율 p 와 제곱근 충격 (docs/factors.md 12.28 P5, 25.1392 — 기록만).
+
+    p = 1차 금액 ÷ ADV20, 충격(%) = 100 × σ_일 × √p (제곱근 법칙, 계수 Y = 1 가정 [확인필요] — Almgren 외 2005,
+    Frazzini·Israel·Moskowitz 2018 은 기관 주문으로 맞춘 값). 1차(가장 큰 분할)만 본다 — 전액은 세 번에 나눠 사므로
+    덜 과장한다(검증 B). 견주는 문턱은 백테스트 편도 슬리피지(`backtest.Costs.slippage_pct`, 0.10%) 하나 — 새 문턱 없음.
+    통화: 금액은 신호 통화(미국 달러), 미국 거래대금은 종가×거래량 **추정**(docs/data-sources.md). 거래대금이 빈 날은
+    분모에서 뺀다. **금액을 남기지 않는다** — p 는 유효숫자 둘로 반올림(금액 역산을 막는다, 검증 A)"""
+    from batch.services.backtest import Costs
+
+    문턱 = Costs().slippage_pct
+    종목 = {r.ticker: r.stock_id for r in chosen}
+    ps: list[float] = []
+    충격들: list[float] = []
+    모름 = 0
+    for a in allocations:
+        sid = 종목.get(a.ticker)
+        첫 = a.tranches[0] if a.tranches else {}
+        비율 = float(첫.get("ratio") or 0) if isinstance(첫, dict) else 0.0
+        대금 = sorted((values.get(sid) or {}).items())[-IMPACT_ADV_DAYS:] if sid is not None else []
+        대금 = [(d, v) for d, v in 대금 if v and v > 0]
+        종가 = [v for _, v in sorted((series.get(sid) or {}).items())][-(IMPACT_VOL_DAYS + 1):] if sid else []
+        수익 = [b / a_ - 1 for a_, b in zip(종가, 종가[1:], strict=False) if a_ > 0]
+        if not (a.amount > 0 and 비율 > 0 and len(대금) >= IMPACT_ADV_DAYS // 2 and len(수익) >= 20):
+            모름 += 1
+            continue
+        adv = sum(v for _, v in 대금) / len(대금)
+        평균 = sum(수익) / len(수익)
+        σ = math.sqrt(sum((x - 평균) ** 2 for x in 수익) / (len(수익) - 1))
+        p = a.amount * 비율 / adv
+        ps.append(p)
+        충격들.append(100 * σ * math.sqrt(p))
+    def _두자리(x: float) -> float:
+        return float(f"{x:.2g}")
+
+    out: dict[str, Any] = {"n": len(ps), "unknown": 모름, "threshold_pct": 문턱}
+    if ps:
+        충격들.sort()
+        out.update({
+            "p_max": _두자리(max(ps)),
+            "impact_median_pct": round(충격들[len(충격들) // 2], 3),
+            "impact_max_pct": round(충격들[-1], 3),
+            "over": sum(1 for x in 충격들 if x > 문턱),
+        })
+    return out
+
+
 def select_top(rows: list[SignalRow], n: int = TOP_STOCKS) -> list[SignalRow]:
     """점수 높은 서로 다른 종목 n 개의 신호 전부.
 

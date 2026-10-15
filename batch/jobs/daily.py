@@ -1222,7 +1222,8 @@ def _corr_unknown(client: TursoClient, as_of: str, warnings: list[str]) -> dict[
 
 
 def load_price_series(
-    client: TursoClient, stock_ids: list[int], as_of: str, warnings: list[str] | None = None
+    client: TursoClient, stock_ids: list[int], as_of: str, warnings: list[str] | None = None,
+    values: dict[int, dict[str, float]] | None = None,
 ) -> dict[int, dict[str, float]]:
     """상관을 내려고 읽는 `{종목번호: {날짜: 수정종가}}` (docs/signals.md 3.6).
 
@@ -1258,7 +1259,8 @@ def load_price_series(
             rs = client.execute(
                 # 수정주가 가운데 빈 행은 직전 계수로 메운다 (`adjust.fill_adjusted`, 25.1166) — 빈 행 하나가 +900%·−90%
                 # 이틀치 수익률이 되어 60일 상관을 혼자 끌었다
-                "SELECT stock_id, date, adj_close, close FROM prices"
+                # 거래대금(`value`)은 같은 행의 칸 하나 — 2부 참여율 기록용 (25.1392). 읽는 행 수는 그대로
+                "SELECT stock_id, date, adj_close, close, value FROM prices"
                 f" WHERE stock_id IN ({자리}) AND date >= ? AND date <= ? AND close IS NOT NULL"
                 " ORDER BY stock_id, date",
                 [*묶음, since, as_of],
@@ -1278,6 +1280,8 @@ def load_price_series(
             for row, (px, _) in zip(줄, adj.fill_adjusted(줄), strict=True):
                 if px is not None:
                     out.setdefault(sid, {})[str(row["date"])] = float(px)
+                if values is not None and row.get("value") is not None:
+                    values.setdefault(sid, {})[str(row["date"])] = float(row["value"])
     return out
 
 
@@ -2122,6 +2126,7 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
                         "max_weight_per_stock": 0.0, "min_order_amount": 0, "fx_missing": False, "fx": None}
         # 상관 기반 분산에 쓸 시세 (docs/signals.md 3.6). **후보와 보유를 한 번에** 읽는다.
         # 후보는 2부에 실릴 상위 다섯뿐이라 보유 수가 읽는 양을 정한다
+        거래대금: dict[int, dict[str, float]] = {}  # 2부 참여율 기록 (25.1392)
         corr_series = load_price_series(
             client,
             # 2부와 **같은 후보** — 근거표로 거른 뒤 상위 다섯 (docs/infra.md 25.507, 감사)
@@ -2129,6 +2134,7 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
             + [h.stock_id for h in holdings if h.asset_type != "etf"],  # ETF 는 대조하지 않는다 (25.908)
             signals_as_of or decision.trade_date,
             warnings,
+            values=거래대금,
         )
         # 본문을 만든 **뒤에** 생긴 경고는 끝에 따로 싣는다 (docs/infra.md 25.1103) — 아래 추천 이력·자기 채점·보유
         # 점수·
@@ -2211,6 +2217,11 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
         짝 = report_picks.same_issuer_pairs(composed.chosen) if 추천_오류 is None else []
         if 짝:
             step_log["same_issuer_pairs"] = [list(p) for p in 짝]
+        # 2부 1차 금액의 거래대금 참여율과 제곱근 충격 — 기록만, 글·금액은 그대로 (docs/factors.md 12.28 P5, 25.1392)
+        if 추천_오류 is None and composed.portfolio is not None and composed.portfolio.allocations:
+            충격 = report_picks.impact_log(composed.portfolio.allocations, composed.chosen, 거래대금, corr_series)
+            if 충격["n"] or 충격["unknown"]:
+                step_log["impact"] = 충격
         # 1부 업종 쏠림 — 기록만, 걸린 날은 1부 끝에 한 줄 (docs/factors.md 12.28 P6, 25.1390)
         if 추천_오류 is None and composed.crowding:
             step_log["part1_sector"] = {k: composed.crowding[k] for k in ("k", "sector", "unknown", "trip")}
