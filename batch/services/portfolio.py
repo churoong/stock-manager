@@ -23,7 +23,8 @@ from typing import Any
 #: 5 — 지급일 보유가 앞 6개월 최대의 절반 아래면 배당을 몫이 빠진 날에 붙인다 (docs/infra.md 25.828)
 #: 6 — 지표 곡선에 첫날 앞 기준점(25.1260), 배당은 기록한 몫만 TWR 에(25.1261)
 #: 7 — 환율 표가 체결보다 묵은 날은 체결 환율로 평가 (25.1308 — 보유 평가 25.1295 와 같은 규칙)
-CALC_VERSION = 7
+#: 8 — 배당 지수 몫의 기록 보유를 창이 열릴 때·날마다 마지막 보유로 (25.1400 — 몫이 빠진 날과 같은 규칙)
+CALC_VERSION = 8
 
 # 수량 비교 허용 오차. 소수 주식(미국)을 더하고 빼다 생기는 부동소수 찌꺼기
 QTY_EPS = 1e-9
@@ -651,20 +652,21 @@ def _carry_date(dates_sorted: list[str], cache: dict, series: dict[str, float]) 
 DIVIDEND_EARN_WINDOW_DAYS = 183
 
 
-def _몫이_빠진_날(d: DividendReceipt, trades: list[Trade]) -> str | None:
-    """지급일 보유가 앞 `DIVIDEND_EARN_WINDOW_DAYS` 일 최대 보유의 절반 아래면 절반 아래로 떨어진 마지막 날.
+def _창_보유(d: DividendReceipt, trades: list[Trade]) -> tuple[float, list[tuple[str, float]], float]:
+    """지급일 앞 `DIVIDEND_EARN_WINDOW_DAYS` 일 창의 (창이 열릴 때 보유, 창 안 날마다 마지막 보유, 지급일 보유).
 
-    아니면 None.
-    """
+    `_몫이_빠진_날` 과 `배당_지수_몫` 이 **같은 규칙**으로 센다 (docs/infra.md 25.1400, 포트폴리오 감사) — 예전에는
+    뒤쪽이 따로 세어, 창 앞 매매로는 창이 열릴 때가 아니라 첫 매수 직후 보유를, 창 안은 하루 안 왕복의 장중 정점까지
+    최대로 잡았다.
+
+    **지급일 당일의 매수는 그 배당을 벌지 못했다** (docs/infra.md 25.932, 감사 재현). 배당은 배당락일 전에 든 몫에
+    나오고 배당락일은 지급일보다 앞이다. 예전에는 `<=` 라 처음 산 날과 지급일이 같으면(기록 전부터 든 주식의 배당)
+    25.616 이 막으려던 부풀림이 경고 없이 났다(1.0 → 1.0381). 당일 매도는 그대로 센다 — 배당을 번 몫이 그날 나간 것이다.
+    `배당_붙일_날` 도 같은 규칙이다"""
     창_시작 = (date.fromisoformat(d.pay_date) - timedelta(days=DIVIDEND_EARN_WINDOW_DAYS)).isoformat()
     보유 = 0.0
     출발 = 0.0  # 창이 열릴 때의 보유
-    흐름: list[tuple[str, float]] = []  # 창 안의 (날, 그 매매 뒤 보유)
-    # **지급일 당일의 매수는 그 배당을 벌지 못했다** (docs/infra.md 25.932, 감사 재현). 배당은 배당락일 전에 든 몫에
-    # 나오고
-    # 배당락일은 지급일보다 앞이다. 예전에는 `<=` 라 처음 산 날과 지급일이 같으면(기록 전부터 든 주식의 배당) 25.616 이
-    # 막으려던 부풀림이 경고 없이 났다(1.0 → 1.0381). 당일 매도는 그대로 센다 — 배당을 번 몫이 그날 나간 것이다.
-    # `배당_붙일_날` 도 같은 규칙이다
+    흐름: list[tuple[str, float]] = []  # 창 안의 (날, 그날 마지막 보유)
     for t in sorted((t for t in trades if t.stock_id == d.stock_id
                      and (t.trade_date < d.pay_date or (t.trade_date == d.pay_date and t.side != "buy"))),
                     key=same_day_order):  # fmt: skip
@@ -673,11 +675,19 @@ def _몫이_빠진_날(d: DividendReceipt, trades: list[Trade]) -> str | None:
             출발 = 보유
         elif 흐름 and 흐름[-1][0] == t.trade_date:
             # **그날의 마지막 보유만** — 하루 안에 사고판 왕복의 장중 정점을 최대로 세면 배당이 그 왕복한 날에 붙어
-            # 묽어졌다
-            # (25.831, 교차검증)
+            # 묽어졌다 (25.831, 교차검증)
             흐름[-1] = (t.trade_date, 보유)
         else:
             흐름.append((t.trade_date, 보유))
+    return 출발, 흐름, 보유
+
+
+def _몫이_빠진_날(d: DividendReceipt, trades: list[Trade]) -> str | None:
+    """지급일 보유가 앞 `DIVIDEND_EARN_WINDOW_DAYS` 일 최대 보유의 절반 아래면 절반 아래로 떨어진 마지막 날.
+
+    아니면 None.
+    """
+    출발, 흐름, 보유 = _창_보유(d, trades)
     문턱 = max([출발] + [q for _, q in 흐름]) * 0.5
     if 보유 >= 문턱:
         return None
@@ -703,21 +713,14 @@ def 배당_지수_몫(d: DividendReceipt, trades: list[Trade]) -> float | None:
     평가액이라, 1주만 기록하고 500주 배당을 넣으면 지수가 3.8배, 100주면 배당 효과가 5배로 부풀었다(경고 없음).
     주식 수를 적었으면 `기록 몫 ÷ 받은 주식 수` 만큼만, 안 적었으면 원가 대비 `DIVIDEND_TWR_MAX_YIELD` 를 넘을 때 뺀다.
     기록 몫은 지급일 앞 `DIVIDEND_EARN_WINDOW_DAYS` 일의 최대 보유(25.828 과 같은 근사)."""
-    창_시작 = (date.fromisoformat(d.pay_date) - timedelta(days=DIVIDEND_EARN_WINDOW_DAYS)).isoformat()
-    보유 = 최대 = 0.0
+    # 기록 몫 = 창이 열릴 때와 창 안 날마다 마지막 보유 가운데 최대 — `_몫이_빠진_날` 과 같은 규칙 (25.1400)
+    출발, 흐름, 보유 = _창_보유(d, trades)
+    최대 = max([출발, 보유] + [q for _, q in 흐름])
     산값 = 산수 = 0.0
-    for t in sorted((t for t in trades if t.stock_id == d.stock_id
-                     and (t.trade_date < d.pay_date or (t.trade_date == d.pay_date and t.side != "buy"))),
-                    key=same_day_order):  # fmt: skip
-        if t.side == "buy":
-            보유 += t.quantity
+    for t in trades:
+        if t.stock_id == d.stock_id and t.side == "buy" and t.trade_date < d.pay_date:
             산값 += t.price * t.quantity
             산수 += t.quantity
-        else:
-            보유 = max(0.0, 보유 - t.quantity)
-        if t.trade_date >= 창_시작 or 최대 == 0.0:
-            최대 = max(최대, 보유)
-    최대 = max(최대, 보유)
     if 최대 <= QTY_EPS:
         return 1.0  # 기록 몫이 없으면 `배당_붙일_날` 이 이미 가른다(25.616)
     if d.quantity is not None and d.quantity > 0:
