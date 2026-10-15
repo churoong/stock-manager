@@ -2278,6 +2278,32 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
             if 미국중대:
                 step_log["us_8k_items"] = 미국중대
 
+        # 모의 투자 계좌 (docs/paper.md, 25.1445) — 곁다리. 실패해도 리포트는 그대로, 한도는 위와 같이 올린다.
+        # dry-run 은 주문을 남기지 않는다 — 남기면 그날 진짜 실행이 "이미 냄" 으로 건너뛴다
+        if not dry_run:
+            try:
+                from batch.jobs import paper as paper_job
+
+                모의줄, step_log["paper"] = paper_job.run_step(
+                    client, market=market, trade_date=decision.trade_date,
+                    late=decision.late_minutes is not None and decision.late_minutes <= 0,
+                    signal_rows=signal_rows if 추천_오류 is None else [],
+                    settings=settings if 추천_오류 is None else None, price_series=corr_series,
+                    series_unknown=_corr_unknown(client, signals_as_of or decision.trade_date, warnings),
+                    allocate=추천_오류 is None and 배분_안함 is None and not settings.get("fx_missing"),
+                    # 모의 보유 가운데 2부가 읽지 않은 종목의 시세 — 상관 축소가 같은 규칙으로 돌게 (docs/paper.md 2.1)
+                    series_loader=lambda ids: load_price_series(
+                        client, ids, signals_as_of or decision.trade_date, warnings),
+                )  # fmt: skip
+                if 모의줄:
+                    message += "\n\n" + "\n".join(모의줄)
+            except Exception as exc:  # noqa: BLE001 — 곁다리. 경고로 남기고 리포트는 보낸다
+                if db.quota_reason(exc):
+                    raise
+                log.exception("모의 투자 단계 실패")
+                warnings.append(_실패문("모의 투자 계좌", exc))
+                step_log["paper"] = {"error": str(exc)[:300]}
+
         if len(warnings) > 본문_경고수:
             message += "\n\n" + formatter.late_warnings(warnings[본문_경고수:])
 

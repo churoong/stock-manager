@@ -99,6 +99,20 @@ def load_holdings(client: TursoClient, today: date | None = None) -> tuple[list[
         # 말이 된다
         " WHERE s.asset_type = 'stock'"
     ).dicts()
+    return enrich(client, rows, today)
+
+
+def enrich(
+    client: TursoClient, rows: list[dict[str, Any]], today: date | None = None, *, dividends: bool = True
+) -> tuple[list[sf.HoldingInput], list[str]]:
+    """보유 행(로트 부분)에 **종목 공통** 입력을 붙여 판정 입력을 만든다 (docs/paper.md 2.2, docs/infra.md 25.1445).
+
+    행 열쇠: stock_id·name·country·horizon·first_buy_date·currency·cost·market_value·price_date·score_now·
+    score_now_date·score_at_buy·score_at_buy_date·horizon_since, 그리고 있으면 `lots`([(매수일, 수량, 단가)] —
+    권리락 계수를 매수분마다 맞출 때 `trades` 대신 쓴다). 실제 보유(`load_holdings`)와 모의 계좌(`jobs/paper`)가
+    **같은 보강**을 쓴다 — 규칙이 둘로 갈라지지 않게. `dividends=False` 면 배당 참고 행을 붙이지 않는다
+    (그 길은 `trades` 를 읽는다, 모의 판 1 은 배당 없음)
+    """
     out: list[sf.HoldingInput] = []
     못읽음: set[str] = set()
     시장시작: dict[str, str | None] = {}
@@ -277,11 +291,11 @@ def load_holdings(client: TursoClient, today: date | None = None) -> tuple[list[
                 sentiment_ref_date=_감성_기준일(r["country"], today),
                 horizon_since=r["horizon_since"],
                 corporate_action_recent=(
-                    행위 := _기업행위(client, sid, str(r["country"]), str(r["first_buy_date"]))
+                    행위 := _기업행위(client, sid, str(r["country"]), str(r["first_buy_date"]), r.get("lots"))
                 )[0],
                 rights_scale=행위[1],
                 dividend_note=(_배당_기준일(client, sid, r, today, 배당수집, 배당못읽음)
-                               if r["country"] == "KR" and today else None),
+                               if dividends and r["country"] == "KR" and today else None),
                 universe_included_since_buy=들었나,
             )
         )  # fmt: skip
@@ -425,7 +439,8 @@ def _배당_기준일(
 
 
 def _기업행위(
-    client: TursoClient, stock_id: int, country: str, first_buy_date: str | None = None
+    client: TursoClient, stock_id: int, country: str, first_buy_date: str | None = None,
+    lots: list[tuple[str, float, float]] | None = None,
 ) -> tuple[bool, float]:
     """(최근 20거래일 안의 분할·병합이 있나, 유상증자 권리락 계수) — 장중 감시(`monitor_targets.action_scale`,
     25.533·25.1139)와 같은 판정 (25.1093·25.1158). 계수는 권리락만으로 확인됐을 때만 1.0 이 아니다.
@@ -436,7 +451,8 @@ def _기업행위(
     try:
         # **매수분마다 그 뒤의 권리락만**, 보유 기간 전체에서 (25.1197, 매도 플래그 감사 재현) — 예전에는 최근 20거래일
         # 계수 곱을 포지션 전체에 곱해 권리락 뒤 매수분까지 깎았고(손절 놓침), 20거래일이 지나면 풀려 거짓 손절이 났다
-        배율 = monitor_targets.holding_rights_scale(client, stock_id, "US" if country == "US" else "KR", first_buy_date)
+        배율 = monitor_targets.holding_rights_scale(client, stock_id, "US" if country == "US" else "KR", first_buy_date,
+                                                  lots=lots)
     except Exception:  # noqa: BLE001 — 덧붙이는 말이 판정을 막으면 안 된다
         return False, 1.0
     return (True, 1.0) if 배율 is None else (False, float(배율))

@@ -119,6 +119,8 @@ class Valuation:
     pnl_krw: float
     pnl_pct: float | None
     unknown: list[dict[str, Any]] = field(default_factory=list)
+    #: 보유마다 [{stock_id, quantity, currency, cost_krw, value_krw, price_date}] — `paper_daily.positions_json`
+    rows: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _원(v: float) -> float:
@@ -288,29 +290,36 @@ def value(
     fills: list[Fill],
     closes: dict[int, tuple[float, str] | None],
     fx_now: dict[str, float | None],
+    frozen: set[int] | None = None,
 ) -> Valuation:
     """평가. `closes` 는 {종목: (마지막 종가, 날짜)}, `fx_now` 는 {통화: 원 환산률}.
 
-    종가나 환율을 모르는 보유는 **원가로** 넣고 `unknown` 에 적는다 — 0 으로 넣으면 손익이 거짓으로 무너진다
+    종가나 환율을 모르는 보유는 **원가로** 넣고 `unknown` 에 적는다 — 0 으로 넣으면 손익이 거짓으로 무너진다.
+    `frozen`(기업행위 경계로 멈춘 종목, docs/paper.md 2.3)도 원가로 —
+    분할 날 종가 × 분할 전 수량은 −75% 같은 거짓 값이다
     """
     현금 = cash(flows, fills)
     보유 = positions(fills)
     평가 = 0.0
     모름: list[dict[str, Any]] = []
+    줄: list[dict[str, Any]] = []
     for sid, p in sorted(보유.items()):
         c = closes.get(sid)
         환율 = 1.0 if p.currency == "KRW" else fx_now.get(p.currency)
-        if c is None or not 환율:
-            평가 += p.cost_krw
-            모름.append({"stock_id": sid, "why": "종가 없음" if c is None else f"{p.currency} 환율 없음"})
-            continue
-        평가 += c[0] * p.quantity * 환율
+        까닭 = ("기업행위(멈춤)" if sid in (frozen or set()) else "종가 없음" if c is None
+               else None if 환율 else f"{p.currency} 환율 없음")  # fmt: skip
+        값 = p.cost_krw if 까닭 or c is None or not 환율 else c[0] * p.quantity * 환율
+        if 까닭:
+            모름.append({"stock_id": sid, "why": 까닭})
+        평가 += 값
+        줄.append({"stock_id": sid, "quantity": p.quantity, "currency": p.currency, "cost_krw": _원(p.cost_krw),
+                  "value_krw": _원(값), "price_date": None if 까닭 or c is None else c[1]})  # fmt: skip
     입금 = invested(flows)
     총액 = 현금 + _원(평가)
     손익 = 총액 - 입금
     return Valuation(
         invested_krw=입금, cash_krw=현금, holdings_krw=_원(평가), equity_krw=총액, pnl_krw=손익,
-        pnl_pct=(손익 / 입금 * 100) if 입금 > 0 else None, unknown=모름,
+        pnl_pct=(손익 / 입금 * 100) if 입금 > 0 else None, unknown=모름, rows=줄,
     )  # fmt: skip
 
 

@@ -220,7 +220,8 @@ def rights_factors_since(client: TursoClient, stock_id: int, since: str) -> list
 
 
 def holding_rights_scale(
-    client: TursoClient, stock_id: int, market: str, first_buy_date: str | None = None
+    client: TursoClient, stock_id: int, market: str, first_buy_date: str | None = None,
+    lots: list[tuple[str, float, float]] | None = None,
 ) -> float | None:
     """보유 원가에 곱할 권리락 계수 — **매수분마다 그 매수 뒤의 권리락만** 곱한 가중 비율 (docs/infra.md 25.1197).
 
@@ -231,7 +232,8 @@ def holding_rights_scale(
         return None
     if market == "US":
         return 1.0
-    lots = open_buy_lots(client, stock_id)
+    # 모의 계좌는 제 장부의 매수분을 넘긴다 — `trades` 를 읽지 않는다 (docs/paper.md 0장, 25.1445)
+    lots = list(lots) if lots is not None else open_buy_lots(client, stock_id)
     if not lots and first_buy_date:
         # 매매 기록을 못 읽으면(보유 표만 있는 경우) 보유 전체를 첫 매수일 한 몫으로 본다 — 예전 판정과 같은 쪽
         lots = [(str(first_buy_date)[:10], 1.0, 1.0)]
@@ -558,7 +560,26 @@ def news_target_rows(client: TursoClient, market: str, monitor: list[tuple], now
         if stock_id not in seen:
             seen.add(stock_id)
             rows.append((market, stock_id, None, "monitor", now))
+    # **모의 계좌 보유도 모은다** (docs/paper.md 7장, 25.1445). 점수가 떨어져 상위에서 빠지는 바로 그때 수집이 끊기면
+    # 감성급락이 "판정 못 함" 이 되어 A−B 차이(감성급락은 A 만 따른다)가 수집 공백에 오염된다
+    try:
+        모의 = client.execute(PAPER_HELD_SQL, [country]).rows
+    except Exception as exc:  # noqa: BLE001 — 표가 없는 DB(마이그레이션 전)는 정상, 나머지는 말한다
+        모의 = []
+        if not db.표가_없나(exc):
+            log.warning("모의 계좌 보유를 뉴스 후보에 넣지 못했습니다: %s", exc)
+    for (stock_id,) in 모의:
+        if int(stock_id) not in seen:
+            seen.add(int(stock_id))
+            rows.append((market, int(stock_id), None, "paper", now))
     return rows
+
+
+#: 모의 계좌(어느 계좌든)가 지금 들고 있는 그 나라 종목 — 체결 장부의 순수량 > 0 (docs/paper.md 7장)
+PAPER_HELD_SQL = (
+    "SELECT f.stock_id FROM paper_fills f CROSS JOIN stocks s ON s.id = f.stock_id WHERE s.country = ?"
+    " GROUP BY f.account_id, f.stock_id HAVING SUM(CASE f.side WHEN 'buy' THEN f.quantity ELSE -f.quantity END) > 0"
+)
 
 
 def run(market: str) -> int:

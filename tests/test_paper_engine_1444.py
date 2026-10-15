@@ -85,6 +85,11 @@ def test_valuation_unknown_price_uses_cost_not_zero() -> None:
     assert v2.equity_krw == 1_000_000 - 100_015 + 120_000
     assert v2.pnl_krw == v2.equity_krw - 1_000_000
     assert v2.pnl_pct == pytest.approx(v2.pnl_krw / 10_000)
+    assert v2.rows == [{"stock_id": 7, "quantity": 10, "currency": "KRW", "cost_krw": 100_015, "value_krw": 120_000,
+                        "price_date": "2026-10-17"}]  # fmt: skip
+    # 기업행위로 멈춘 종목은 종가가 있어도 원가로 — 분할 날 종가 × 분할 전 수량은 거짓 손실이다
+    v3 = pp.value(흐름, 체결, {7: (2_400, "2026-10-17")}, {}, frozen={7})
+    assert v3.holdings_krw == 100_015 and v3.unknown == [{"stock_id": 7, "why": "기업행위(멈춤)"}]
 
 
 def test_invested_counts_cancel_rows() -> None:
