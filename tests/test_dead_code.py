@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -47,14 +48,23 @@ def 파이썬_파일들() -> list[Path]:
     )
 
 
-def 쓰이는가(이름: str, 전체: str, 정의모음: str) -> bool:
+def 세기(전체: str, 정의모음: str) -> tuple[Counter[str], Counter[str]]:
+    """(낱말마다 등장 수, 이름마다 정의 수) — 한 번만 훑는다.
+
+    `\\b이름\\b` 의 등장 수는 `\\w+` 로 자른 낱말 가운데 그 이름과 같은 것의 수와 같다(둘 다 유니코드 \\w).
+    예전엔 함수(1,348개)마다 본문 7MB 를 정규식으로 다시 훑어 이 시험 하나가 3~4분이었다 (25.1474)
+    """
+    return Counter(re.findall(r"\w+", 전체)), Counter(re.findall(r"^(?:async )?def (\w+)\(", 정의모음, re.M))
+
+
+def 쓰이는가(이름: str, 전체: str, 정의모음: str, 셈: tuple[Counter[str], Counter[str]] | None = None) -> bool:
     """이름이 **정의 말고 다른 데서** 나타나는가.
 
     정의는 파일마다 하나씩 셀 수 있으므로(같은 이름이 여러 모듈에 있을 수 있다)
-    그 수를 빼고 남는 등장이 있으면 누군가 부르는 것으로 본다.
+    그 수를 빼고 남는 등장이 있으면 누군가 부르는 것으로 본다. `셈` 은 `세기` 를 미리 한 것
     """
-    정의수 = len(re.findall(rf"^(?:async )?def {re.escape(이름)}\(", 정의모음, re.M))
-    return len(re.findall(rf"\b{re.escape(이름)}\b", 전체)) > 정의수
+    등장, 정의 = 셈 or 세기(전체, 정의모음)
+    return 등장[이름] > 정의[이름]
 
 
 def 아무도_안_부르는_함수() -> list[str]:
@@ -72,12 +82,13 @@ def 아무도_안_부르는_함수() -> list[str]:
 
     안쓰임 = []
     모든소스 = " ".join(본문.values())
+    셈 = 세기(전체, 모든소스)
     for 경로, 소스 in 본문.items():
         for m in re.finditer(r"^(?:async )?def ([a-zA-Z가-힣][\w가-힣]*)\(", 소스, re.M):
             이름 = m.group(1)
             if 이름 in 규약 or 이름.startswith("_") or 이름 in 두기로_한_것:
                 continue
-            if not 쓰이는가(이름, 전체, 모든소스):
+            if not 쓰이는가(이름, 전체, 모든소스, 셈):
                 줄 = 소스[: m.start()].count("\n") + 1
                 안쓰임.append(f"{경로.relative_to(뿌리)}:{줄}  {이름}()")
     return sorted(안쓰임)
@@ -203,6 +214,7 @@ def 아무도_안_쓰는_웹_이름() -> list[str]:
         for p in (뿌리 / d).rglob("*")
         if p.is_file() and p.suffix in (".md", ".yml", ".py")
     )
+    등장 = Counter(re.findall(r"\w+", 전체))  # 이름마다 정규식으로 다시 훑지 않는다 (25.1474, 위 `세기`)
     안쓰임 = []
     for 경로, 소스 in 본문.items():
         if 경로.parent.name != "lib" or "lib" not in 경로.parts:
@@ -213,7 +225,7 @@ def 아무도_안_쓰는_웹_이름() -> list[str]:
             이름 = m.group(1)
             if 이름 in 웹_두기로_한_것:
                 continue
-            if len(re.findall(rf"\b{re.escape(이름)}\b", 전체)) <= 1:
+            if 등장[이름] <= 1:
                 줄 = 소스[: m.start()].count("\n") + 1
                 안쓰임.append(f"{경로.relative_to(뿌리)}:{줄}  {이름}")
     return sorted(안쓰임)
