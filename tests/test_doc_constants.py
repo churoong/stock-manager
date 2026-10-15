@@ -26,6 +26,7 @@ import pytest
 
 from batch.services import adjust as adj
 from batch.services import buyback as bb
+from batch.services import company as co
 from batch.services import execution_quality as eqm
 from batch.services import factor_ic as fic
 from batch.services import metrics as m
@@ -68,6 +69,7 @@ INTRADAY = 읽기("intraday.md")
 BROKERS = 읽기("brokers.md")
 REACTION = 읽기("disclosure_reaction.md")
 PAPER = 읽기("paper.md")
+COMPANY = 읽기("company.md")
 
 
 def 검사(문서본문: str, 찾을것: str, 무엇: str) -> None:
@@ -696,7 +698,7 @@ class Test밸류_분모:
     "gross_profitability", "robustness", "column_rot", "calibration", "self_grade", "holding_scores",
     "pick_history", "etf_accounts", "etf_tilt", "after_hours", "broker_stats", "disclosure_reaction", "luck", "postmortem",
     "divergence", "tax_sim", "verdict", "forecast_track", "patterns", "insights", "history",
-    "event_history", "simulation", "candidate_factors", "cb_overhang", "buy_thesis", "plan_fill", "target_units", "paper", "risk_gate", "execution_quality",
+    "event_history", "simulation", "candidate_factors", "cb_overhang", "buy_thesis", "plan_fill", "target_units", "paper", "risk_gate", "execution_quality", "company",
 )  # fmt: skip
 
 #: 아직 그물 밖인 모듈과 **왜 아직인지**. 하나씩 줄여 간다
@@ -876,6 +878,23 @@ class Test이웃_모듈들:
         검사(SIGNALS, f"**{oc.POST_TOUCH_MAX_TAU}번째 날(`POST_TOUCH_MAX_TAU`)까지**", "터치 뒤 표류를 재는 터치 위치 상한 (25.1408)")
         검사(SIGNALS, f"**{oc.FIT_WINDOW}거래일**(`FIT_WINDOW`", "중기 기간 맞춤 창 (25.1441)")
         검사(SIGNALS, f"**{oc.FIT_MIN_STOCKS}개 이상**(`FIT_MIN_STOCKS`)", "중기 기간 맞춤 판정 표본 하한 (25.1441)")
+
+    def test_모의_투자사_부서_판단식(self) -> None:
+        """모의 투자사 판 2 부서 판단식 (docs/company.md 2·3장, docs/infra.md 25.1461)."""
+        검사(COMPANY, f"찬성 `pct ≥ {co.PCT_FOR}`,\n반대 `pct ≤ {co.PCT_AGAINST}`", "점수 부서 백분위 문턱")
+        검사(COMPANY, f"최근 {co.BROKER_DAYS}일 증권사 의견", "증권사 의견 창")
+        검사(COMPANY, f"`U ≥ +{co.BROKER_FOR * 100:g}%` 찬성, `U ≤ +{co.BROKER_AGAINST * 100:g}%` 반대", "증권사 문턱")
+        검사(COMPANY, f"`min(1, |U − {co.BROKER_MID * 100:g}%| / {co.BROKER_SPAN * 100:g}%)`", "증권사 확신")
+        검사(COMPANY, f"목표가 있는 의견 {co.BROKER_MIN_N}건 미만이면 자료 없음", "증권사 표본 하한")
+        검사(COMPANY, f"최근 {co.FLOW_DAYS}거래일 외국인·기관", "수급 창")
+        검사(COMPANY, f"`F ≥ +{co.FLOW_FOR:g}` 찬성, `F ≤ −{co.FLOW_FOR:g}` 반대, 확신 `min(1, |F| / {co.FLOW_SPAN:g})`", "수급 문턱")
+        검사(COMPANY, f"전환사채 합 ≥ {co.CB_PCT:g}% → 반대 확신 {co.CB_CONVICTION:g}", "전환사채 문턱")
+        검사(COMPANY, "최근 1년 횡령·배임", "지배구조 창")
+        assert co.GOV_DAYS == 365
+        검사(COMPANY, f"`S ≥ +{co.SENT_FOR:g}` 찬성, `S ≤ −{co.SENT_FOR:g}` 반대, 확신 `min(1, |S| / {co.SENT_SPAN:g})`", "감성 문턱")
+        검사(COMPANY, f"약세 → 반대 확신 {co.MACRO_CONVICTION:g}", "시장전략 확신")
+        검사(COMPANY, f"**찬성 부서 ≥ {co.QUORUM}**(정족수)", "정족수")
+        검사(COMPANY, f"전체 가중의 {co.MAX_WEIGHT_SHARE * 100:.0f}% 를 넘지 않는다", "한 부서 가중 상한")
 
     def test_모의_계좌_규칙서(self) -> None:
         """모의 투자 규칙서 판 1 (docs/paper.md, docs/infra.md 25.1444)."""
