@@ -2254,6 +2254,12 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
             if 일정:
                 message += "\n\n" + "\n".join(일정)
                 step_log["corp_events"] = len(일정) - 1
+            # 신호 기준일 뒤에 접수된 공시 — 사실 줄만 (docs/reports.md 3.7a, 28회차 P2, 25.1428)
+            뒤공시기록: dict[str, int] = {}
+            뒤공시 = _post_close_lines(client, 상위, warnings, 뒤공시기록)
+            if 뒤공시:
+                message += "\n\n" + "\n".join(뒤공시)
+            step_log["part1_post_close"] = 뒤공시기록
             # 추천인데 외국인·기관이 팔고 증권사가 목표가를 내리는 종목 (docs/reports.md 3.9, 25.1001) — 참고만
             엇갈림 = _divergence_lines(client, decision.trade_date, 상위, warnings)
             if 엇갈림:
@@ -2693,6 +2699,62 @@ def flow_turnover_shares(
     for sid, d, v in rs:
         값.setdefault(int(sid), {})[str(d)] = None if v is None else float(v)
     return {sid: divergence.turnover_share(v[1] + v[2], 값.get(sid, {}), v[3]) for sid, v in 반대.items()}
+
+
+#: 1부 종목의 신호 기준일 뒤 공시 (28회차 P2, 25.1428) — 기준일 이후 접수분만. 정정 공시는 뺀다
+#: (`disclosure_reaction.EXCLUDE` 의 "정정" 과 같은 낱말)
+POST_CLOSE_SQL = (
+    "SELECT d.stock_id, d.title, d.disclosed_at FROM disclosures d JOIN json_each(?) j ON j.value = d.stock_id"
+    " WHERE d.disclosed_at >= ? AND d.title NOT LIKE '%정정%' ORDER BY d.disclosed_at, d.id"
+)
+
+
+def _post_close_lines(
+    client: TursoClient, picks: list, warnings: list[str] | None = None, 기록: dict[str, int] | None = None
+) -> list[str]:
+    """국내 1부 종목에 **신호 기준일 뒤에 접수된 공시** 사실 줄 (docs/reports.md 3.7a, 28회차 P2, 25.1428).
+
+    신호는 기준일 종가로 계산했다 — 그 뒤(장 마감 뒤·연휴·당일 아침) 접수된 공시는 신호에 들어 있지 않다. DART 목록은
+    날짜만 주므로 **접수일 > 기준일** 인 것만 "확실히 뒤" 로 싣고, 접수일 = 기준일(장중일 수도 있다)은 `기록` 에만
+    센다(검증 B).
+    종목당 한 줄 "첫 제목 외 n건". 해석·행동을 권하는 말은 쓰지 않는다. 못 읽으면 빈 목록 + 경고"""
+    기준: dict[int, tuple[str, str, str]] = {}
+    for r in picks:
+        if r.as_of_date:
+            앞 = 기준.get(int(r.stock_id))
+            if 앞 is None or r.as_of_date < 앞[2]:
+                기준[int(r.stock_id)] = (r.name, r.ticker, r.as_of_date)
+    if 기록 is not None:
+        기록["picks"] = len(기준)
+    if not 기준:
+        return []
+    try:
+        rows = client.execute(POST_CLOSE_SQL, [json.dumps(sorted(기준)), min(v[2] for v in 기준.values())]).dicts()
+    except Exception as exc:  # noqa: BLE001 — 곁다리. 표가 없으면 조용히, 그 밖의 실패는 경고로
+        if not db.표가_없나(exc) and warnings is not None:
+            warnings.append(_실패문("기준일 뒤 공시 읽기", exc))
+        return []
+    뒤: dict[int, list[tuple[str, str]]] = {}
+    같은날: set[int] = set()
+    for r in rows:
+        sid = int(r["stock_id"])
+        날 = str(r["disclosed_at"])[:10]
+        if sid not in 기준 or 날 < 기준[sid][2]:
+            continue
+        if 날 == 기준[sid][2]:
+            같은날.add(sid)
+        else:
+            뒤.setdefault(sid, []).append((날, str(r["title"]).strip()))
+    if 기록 is not None:
+        기록["after"] = len(뒤)
+        기록["same_day_unknown"] = len(같은날 - set(뒤))
+    lines = []
+    for sid, 건들 in sorted(뒤.items(), key=lambda kv: kv[1][0][0]):
+        이름, 코드, 기준일 = 기준[sid]
+        날, 제목 = 건들[0]
+        덧 = f" 외 {len(건들) - 1}건" if len(건들) > 1 else ""
+        lines.append(f"· {이름}({코드}) '{제목}'{덧} ({날[5:]} 접수) — 신호는 {기준일[5:]} 종가로 계산")
+    return ["📰 신호 기준일 뒤에 접수된 공시 (DART)", *lines] if lines else []
 
 
 def _divergence_lines(
