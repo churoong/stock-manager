@@ -12,7 +12,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 from batch.core.rounding import fixed, half_up
@@ -154,6 +154,8 @@ class HoldingInput:
     #: 곱해 수익률을 낸다 — 권리락 날 시세는 신주인수권 값만큼 기계적으로 떨어지는데(장중 손절선은 25.1140 부터 같은
     #: 계수를 곱한다) 원가를 그대로 두면 실질 0% 인 날 "손절선에 닿았습니다" 가 났다
     rights_scale: float = 1.0
+    #: 매수 뒤 지난 배당 기준일 사실(`dividend_note`, 26회차 P1, docs/infra.md 25.1413). 국내만, None 은 없음·못 읽음
+    dividend_note: dict | None = None
     #: 매수 때(그때 쓰던 스냅샷)부터 지금까지 유니버스에 **한 번이라도** 들었나 (docs/infra.md 25.1095). None 은 모름 —
     #: 예전처럼 "빠졌습니다" 로 판정한다
     universe_included_since_buy: bool | None = None
@@ -211,6 +213,81 @@ def chained_score_drop(
     # **지금 잣대 구간에서 견준 쌍이 없으면 모름** — 마지막 걸음이 잣대 바뀜이면 지금 잣대로 얼마나 움직였는지 모른다.
     # 부르는 쪽이 예전 기준점 방식·"판정 못 한 날"(25.1405)로 물러난다
     return (round(하락, 6), 바뀜) if 마지막_견줌 else None
+
+
+#: 배당 기준일 이 날수 앞부터 매매가 있으면 그 기준일에 배당 받을 수량을 지금 수량으로 볼 수 없다 — 락일은 기준일 전
+#: 거래일이고 결제는 T+2 라 기준일 이틀(거래일) 전까지 산 주식만 받는다. 주말·연휴를 넉넉히 덮는 7일 (25.1413)
+DIVIDEND_TRADE_GUARD_DAYS = 7
+
+
+def _원(text: object) -> float | None:
+    try:
+        v = float(str(text).replace(",", "").strip())
+    except (TypeError, ValueError):
+        return None
+    return v if v == v else None
+
+
+def _날(ymd: object) -> str | None:
+    s = str(ymd or "").replace("/", "").replace("-", "").strip()
+    return f"{s[:4]}-{s[4:6]}-{s[6:8]}" if len(s) == 8 and s.isdigit() else None
+
+
+def dividend_note(events: list[dict], trade_dates: list[str], quantity: float, cost: float, first_buy_date: str,
+                  today: date, covered_since: str | None) -> dict | None:  # fmt: skip
+    """매수 뒤 **이미 지난** 배당 기준일의 사실 (docs/sell_flags.md 1.2, 26회차 P1 — 검증 B 의 사실 문구).
+
+    평가 수익률은 주가만 본다 — 락일에 빠진 가격만큼 받을 현금배당은 들어 있지 않다. 판정은 바꾸지 않고 사실만 센다.
+    `events` 는 예탁원 배당 일정(`kr_corp_events.detail` 을 푼 dict 와 `record_date`). 주당배당 `per_sto_divi_amt` 가
+    "0" 이면 **금액 미정**(10-15 실측 — 정해지기 전에는 0 으로 온다). 주식배당(`stk_divi_rate` > 0)은 따로 센다.
+    기준일 7일 전부터 매매가 있으면 그 기준일의 받을 수량을 모른다 — 금액에 넣지 않고 센다"""
+    지난 = sorted((e for e in events if first_buy_date < str(e.get("record_date") or "") <= today.isoformat()),
+                key=lambda e: str(e["record_date"]))  # fmt: skip
+    if not 지난:
+        return None
+    합, 주당, 지급전, 미정, 주식, 수량모름 = 0.0, 0.0, 0, 0, 0, 0
+    for e in 지난:
+        d = e.get("detail") if isinstance(e.get("detail"), dict) else {}
+        if (_원(d.get("stk_divi_rate")) or 0) > 0:
+            주식 += 1
+        경계 = (date.fromisoformat(str(e["record_date"])) - timedelta(days=DIVIDEND_TRADE_GUARD_DAYS)).isoformat()
+        if any(t >= 경계 for t in trade_dates):
+            수량모름 += 1
+            continue
+        amt = _원(d.get("per_sto_divi_amt"))
+        if not amt or amt <= 0:
+            미정 += 1
+            continue
+        합 += amt * quantity
+        주당 += amt
+        지급일 = _날(d.get("divi_pay_dt"))
+        if 지급일 is None or 지급일 > today.isoformat():
+            지급전 += 1
+    return {
+        "n": len(지난), "dates": [str(e["record_date"]) for e in 지난],
+        "per_share": round(주당, 2), "pct": round(합 / cost * 100, 6) if cost > 0 and 합 > 0 else None,
+        "pending": 지급전, "undetermined": 미정, "stock_div": 주식, "qty_unknown": 수량모름,
+        "uncovered_since": covered_since if covered_since and first_buy_date < covered_since else None,
+    }  # fmt: skip
+
+
+def dividend_row(note: dict, as_of: str | None) -> dict:
+    """`dividend_note` 를 근거표 참고 행으로. 해석 문장("배당락으로 빠진 몫")은 쓰지 않는다 — 락일 하락 ≠ 주당배당"""
+    글 = f"{note['n']}건 ({'·'.join(note['dates'][-3:])}{' 외' if note['n'] > 3 else ''})"
+    if note.get("pct") is not None:
+        글 += (f" · 현금배당 주당 합 {fixed(note['per_share'], 0)}원 = 원가의 {fixed(note['pct'], 2)}%p"
+               f" (지급 전 {note['pending']}건)")  # fmt: skip
+    말들 = (("undetermined", "금액 미정"), ("stock_div", "주식배당"), ("qty_unknown", "기준일 앞뒤 매매로 수량 모름"))
+    for 키, 말 in 말들:
+        if note.get(키):
+            글 += f" · {말} {note[키]}건"
+    if note.get("uncovered_since"):
+        글 += f" · {note['uncovered_since']} 전 기준일은 수집 전이라 모름"
+    행 = _criterion("매수 뒤 배당 기준일", 글,
+                    "참고 — 평가 수익률은 주가만 보고 받을 현금배당은 넣지 않는다. 판정 불변 (docs/sell_flags.md 1.2)",
+                    "kr_corp_events·trades", as_of)  # fmt: skip
+    행["passed"] = None
+    return 행
 
 
 def _criterion(label: str, display: str, threshold: str, source: str, as_of: str | None) -> dict:
@@ -274,7 +351,7 @@ def evaluate(h: HoldingInput, today: date, targets: dict | None = None) -> list[
                         "prices·kr_corp_events", h.price_date)]
             if 권리락
             else []
-        )  # fmt: skip
+        ) + ([dividend_row(h.dividend_note, h.price_date)] if h.dividend_note else [])  # fmt: skip
         if ret <= rules["stop_pct"]:
             flags.append(Flag(h.stock_id, "red", "손절",
                               f"{h.name}: {label} 손절선 {rules['stop_pct']:g}% 에 닿았습니다 ({수익}%){덧}",

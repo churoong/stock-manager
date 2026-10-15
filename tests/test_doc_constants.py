@@ -915,6 +915,11 @@ class Test매도_플래그_문턱:
             "기간 초과",
         )
 
+    def test_배당_기준일_매매_경계(self) -> None:
+        from batch.services import sell_flags as sf
+
+        검사(SELL_FLAGS, f"기준일 {sf.DIVIDEND_TRADE_GUARD_DAYS}일 전부터", "배당 기준일 참고 행 (25.1413)")
+
     def test_점수_하락(self) -> None:
         from batch.services import sell_flags as sf
 

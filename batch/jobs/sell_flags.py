@@ -76,7 +76,7 @@ def load_holdings(client: TursoClient, today: date | None = None) -> tuple[list[
     """
     rows = client.execute(
         "SELECT p.stock_id, COALESCE(s.name_ko, s.name_en, s.ticker) AS name, s.country, p.horizon, p.first_buy_date,"
-        " p.currency, p.cost, p.market_value, p.price_date,"
+        " p.currency, p.cost, p.market_value, p.price_date, p.quantity,"
         " (SELECT sc.total_score FROM scores sc WHERE sc.stock_id = p.stock_id"
         "   ORDER BY sc.as_of_date DESC, sc.calc_version DESC LIMIT 1) AS score_now,"
         " (SELECT sc.as_of_date FROM scores sc WHERE sc.stock_id = p.stock_id"
@@ -103,6 +103,8 @@ def load_holdings(client: TursoClient, today: date | None = None) -> tuple[list[
     못읽음: set[str] = set()
     시장시작: dict[str, str | None] = {}
     잣대바뀐종목: list[str] = []
+    배당수집: dict[str, str | None] = {}
+    배당못읽음: list[str] = []
     for r in rows:
         sid = int(r["stock_id"])
         fin = client.execute(
@@ -278,10 +280,15 @@ def load_holdings(client: TursoClient, today: date | None = None) -> tuple[list[
                     행위 := _기업행위(client, sid, str(r["country"]), str(r["first_buy_date"]))
                 )[0],
                 rights_scale=행위[1],
+                dividend_note=(_배당_기준일(client, sid, r, today, 배당수집, 배당못읽음)
+                               if r["country"] == "KR" and today else None),
                 universe_included_since_buy=들었나,
             )
         )  # fmt: skip
     경고 = [f"감성을 읽지 못해 감성급락은 판정하지 않았습니다 — {이유}" for 이유 in sorted(못읽음)]
+    if 배당못읽음:
+        경고.append(f"예탁원 배당 일정을 읽지 못해 손절·목표 근거표의 '매수 뒤 배당 기준일' 참고 행을 싣지 않았습니다"
+                  f" ({len(배당못읽음)}종목)")  # fmt: skip
     if 잣대바뀐종목:
         경고.append(
             f"점수 가중치·팩터 구성·계산 판이 매수 때와 달라 '점수 20점 하락' 은 보지 않았습니다"
@@ -318,6 +325,62 @@ def _수집_시작(client: TursoClient, country: str, 캐시: dict[str, str | No
         값 = None
     캐시[country] = str(값) if 값 else None
     return 캐시[country]
+
+
+#: 예탁원 배당 일정 수집 시작일(기준일 기준)을 한 번 재서 두는 설정 키 (25.1413) — 매일 `kr_corp_events` 를 훑지 않는다
+DIVIDEND_START_KEY = "corp_dividend_collection_started"
+DIVIDEND_EVENTS_SQL = (
+    "SELECT e.record_date, e.detail FROM kr_corp_events e JOIN stocks s ON s.ticker = e.code"
+    " WHERE s.id = ? AND e.kind = 'dividend' AND e.record_date > ? AND e.record_date <= ?"
+)
+
+
+def _배당_수집_시작(client: TursoClient, 캐시: dict[str, str | None]) -> str | None:
+    """예탁원 배당 일정이 덮는 첫 기준일 — 첫 수집 시각에서 `kis_flows.EVENT_BACK_DAYS` 앞. 못 읽으면 None"""
+    if "KR" in 캐시:
+        return 캐시["KR"]
+    값: str | None = None
+    try:
+        값 = db.get_setting(client, DIVIDEND_START_KEY, None)
+        if not 값:
+            from batch.jobs import kis_flows
+
+            첫 = client.execute("SELECT MIN(fetched_at) FROM kr_corp_events WHERE kind = 'dividend'").scalar()
+            if 첫:
+                값 = (date.fromisoformat(str(첫)[:10]) - timedelta(days=kis_flows.EVENT_BACK_DAYS)).isoformat()
+                db.set_setting(client, DIVIDEND_START_KEY, 값)
+    except Exception:  # noqa: BLE001 — 참고 행이 판정을 막으면 안 된다
+        값 = None
+    캐시["KR"] = str(값) if 값 else None
+    return 캐시["KR"]
+
+
+def _배당_기준일(
+    client: TursoClient, sid: int, r: dict, today: date, 캐시: dict[str, str | None], 못읽음: list[str]
+) -> dict | None:
+    """매수 뒤 지난 배당 기준일 사실 (`sf.dividend_note`, 25.1413). 못 읽으면 `못읽음` 에 적고 None — 참고 행일 뿐
+    판정과 무관하지만, 행이 없는 것이 "배당 없음" 으로 읽히지 않게 경고로 말한다"""
+    try:
+        첫매수 = str(r["first_buy_date"])
+        행들 = client.execute(DIVIDEND_EVENTS_SQL, [sid, 첫매수, today.isoformat()]).dicts()
+        if not 행들:
+            return None
+        사건 = []
+        for e in 행들:
+            try:
+                d = json.loads(e["detail"] or "{}")
+            except (TypeError, ValueError):
+                d = {}
+            사건.append({"record_date": e["record_date"], "detail": d if isinstance(d, dict) else {}})
+        매매 = client.execute(
+            "SELECT trade_date FROM trades WHERE stock_id = ? AND trade_date >= ?", [sid, 첫매수]
+        ).dicts()
+        return sf.dividend_note(사건, [str(t["trade_date"]) for t in 매매], float(r["quantity"] or 0),
+                                float(r["cost"] or 0), 첫매수, today, _배당_수집_시작(client, 캐시))  # fmt: skip
+    except Exception as exc:  # noqa: BLE001 — 참고 행이 판정을 막으면 안 된다
+        log.warning("배당 기준일을 읽지 못함 (stock_id=%s): %s", sid, exc)
+        못읽음.append(str(r["name"]))
+        return None
 
 
 def _기업행위(
@@ -566,9 +629,13 @@ def run(today: date | None = None) -> int:
         client.batch(statements)
 
         counts = {level: sum(1 for f in flags if f.level == level) for level in ("red", "yellow", "green")}
+        # 26회차 P1 기록 (25.1413): 손절·목표 플래그 가운데 매수 뒤 배당 기준일 참고 행이 붙은 수
+        손목 = [f for f in flags if f.reason_code in ("손절", "목표도달")]
+        배당 = {"stop_target": len(손목),
+                "with_div": sum(1 for f in 손목 if any(c.get("label") == "매수 뒤 배당 기준일" for c in f.criteria))}
         db.finish_batch_run(client, run_id, status="success",
                             step_log={"holdings": len(holdings), "flags": len(flags), **counts,
-                                      **({"carried_unjudged": 이음} if 이음 else {}),
+                                      **({"carried_unjudged": 이음} if 이음 else {}), "dividend_note": 배당,
                                       **({"warnings": 경고, "warning_count": len(경고)} if 경고 else {})})  # fmt: skip
         print(
             f"보유 {len(holdings)}종목 → 플래그 {len(flags)}개"
