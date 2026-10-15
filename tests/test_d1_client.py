@@ -306,6 +306,17 @@ class Test유니버스만_받기:
         )
         c.execute("INSERT INTO watchlist (stock_id, added_at) VALUES (3, 't')")
         assert job.watched_ids(mem) == {1, 3}  # type: ignore[arg-type]
+        # 미국 관심·다 판 국내 포지션은 세지 않는다 (25.1430 — 하루 쓰기 예산의 분모)
+        c.execute(
+            "INSERT INTO stocks (id, ticker, market, country, currency, status, source, fetched_at)"
+            " VALUES (9, 'AAPL', 'NASDAQ', 'US', 'USD', 'active', 't', 't')"
+        )
+        c.execute("INSERT INTO watchlist (stock_id, added_at) VALUES (9, 't')")
+        c.execute(
+            "INSERT INTO positions (stock_id, quantity, currency, avg_price, avg_fx, cost, cost_krw, first_buy_date,"
+            " updated_at) VALUES (4, 0, 'KRW', 1, 1, 0, 0, '2026-01-01', 't')"
+        )
+        assert job.watched_ids(mem) == {1, 3}  # type: ignore[arg-type]
 
     @pytest.mark.parametrize(
         ("remaining", "reserve", "per_day", "expected"),

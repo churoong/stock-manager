@@ -244,8 +244,12 @@ def watched_ids(client: TursoClient) -> set[int]:
     rs = client.execute(
         "SELECT u.stock_id FROM universe_members u JOIN stocks s ON s.id = u.stock_id"
         f" WHERE u.included = 1 AND s.country = 'KR' AND u.snapshot_date = {db.latest_snapshot_sql()}"
-        " UNION SELECT stock_id FROM positions"
-        " UNION SELECT stock_id FROM watchlist",
+        # **국내·지금 보유만** (docs/infra.md 25.1430, 감사) — 나라·수량 조건이 없어 미국 관심·보유와 다 판 포지션까지
+        # 세어, 시세 거르기엔 해가 없었지만 하루 쓰기 예산의 분모(`per_day`)가 부풀어 받는 날 수가 줄었다
+        # (`kis_flows.targets` 와 같게)
+        " UNION SELECT p.stock_id FROM positions p JOIN stocks sp ON sp.id = p.stock_id"
+        "   WHERE sp.country = 'KR' AND p.quantity > 0"
+        " UNION SELECT w.stock_id FROM watchlist w JOIN stocks sw ON sw.id = w.stock_id WHERE sw.country = 'KR'",
         ["KR"],
     )
     return {int(r[0]) for r in rs.rows}
