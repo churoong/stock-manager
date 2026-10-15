@@ -70,8 +70,8 @@ SCORE_NOW_SQL = (
 )
 INSERT_FILL_SQL = (
     "INSERT OR IGNORE INTO paper_fills (order_id, account_id, stock_id, side, fill_date, price, quantity, currency,"
-    " fx_rate, fx_date, fee, tax, slippage, cash_krw, horizon, score_at_trade, snapshot_as_of, created_at, day_close)"
-    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    " fx_rate, fx_date, fee, tax, slippage, cash_krw, horizon, score_at_trade, snapshot_as_of, created_at, day_close,"
+    " realized_krw) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 )
 FILLED_SQL = (
     "UPDATE paper_orders SET status = 'filled', closed_on = ?, close_note = ? WHERE id = ? AND status = 'open'"
@@ -90,14 +90,15 @@ INSERT_ORDER_SQL = (
 )
 UPSERT_DAILY_SQL = (
     "INSERT INTO paper_daily (account_id, as_of, invested_krw, cash_krw, holdings_krw, equity_krw, pnl_krw,"
-    " twr_index, kospi_krw, sp500_krw, positions_json, fills_today, recon_ok, recon_note, unknown_json, updated_at)"
-    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    " twr_index, kospi_krw, sp500_krw, positions_json, fills_today, recon_ok, recon_note, unknown_json, updated_at,"
+    " realized_krw, unrealized_krw) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
     " ON CONFLICT (account_id, as_of) DO UPDATE SET invested_krw = excluded.invested_krw,"
     " cash_krw = excluded.cash_krw, holdings_krw = excluded.holdings_krw, equity_krw = excluded.equity_krw,"
     " pnl_krw = excluded.pnl_krw, twr_index = excluded.twr_index, kospi_krw = excluded.kospi_krw,"
     " sp500_krw = excluded.sp500_krw, positions_json = excluded.positions_json,"
     " fills_today = paper_daily.fills_today + excluded.fills_today, recon_ok = excluded.recon_ok,"
-    " recon_note = excluded.recon_note, unknown_json = excluded.unknown_json, updated_at = excluded.updated_at"
+    " recon_note = excluded.recon_note, unknown_json = excluded.unknown_json, updated_at = excluded.updated_at,"
+    " realized_krw = excluded.realized_krw, unrealized_krw = excluded.unrealized_krw"
 )
 
 PAPER_TWR_SQL = "SELECT account_id, as_of, twr_index FROM paper_daily ORDER BY account_id, as_of"
@@ -394,8 +395,12 @@ def fill_orders(
                 _쓰기(client, [(EXPIRE_SQL, [trade_date, "현금 부족 (다른 미체결 매수 예약 포함)", o.id])])
                 기록["expired"] = 기록.get("expired", 0) + 1
                 continue
-        else:
+        실현 = None
+        if o.side == "sell":
             보유 = pp.positions([f for f in [*fills, *새것] if f.account_id == o.account_id]).get(o.stock_id)
+            if 보유 is not None and 보유.quantity > 0:
+                # 매도의 실현손익(원) — 평균 원가 기준, 화면의 거래내역 (25.1455)
+                실현 = _원(체결.cash_krw - 보유.cost_krw * o.quantity / 보유.quantity)
             if 보유 is None or 보유.quantity < o.quantity:
                 _쓰기(client, [(EXPIRE_SQL, [trade_date, "팔 보유가 모자람", o.id])])
                 기록["expired"] = 기록.get("expired", 0) + 1
@@ -408,7 +413,7 @@ def fill_orders(
             (INSERT_FILL_SQL, [체결.order_id, 체결.account_id, 체결.stock_id, 체결.side, 체결.fill_date, 체결.price,
                                체결.quantity, 체결.currency, 체결.fx_rate, 환율날, 체결.fee, 체결.tax, 체결.slippage,
                                체결.cash_krw, 체결.horizon, 체결.score_at_trade, 체결.snapshot_as_of, now,
-                               그날종가]),
+                               그날종가, 실현]),
             (FILLED_SQL, [trade_date, 까닭, o.id]),
         ])  # fmt: skip
         새것.append(체결)
@@ -512,6 +517,8 @@ def mark(
         account, today, v.invested_krw, v.cash_krw, v.holdings_krw, v.equity_krw, v.pnl_krw, 지수,
         그림자["KOSPI"], 그림자["SP500"], json.dumps(v.rows, ensure_ascii=False), new_fills, int(ok), 글,
         json.dumps(v.unknown, ensure_ascii=False) if v.unknown else None, now,
+        # 계좌의 실현손익 합 · 보유 평가손익 합 (25.1455)
+        float(sum(r["pnl_krw"] for r in pp.realized(계좌체결))), float(sum(r["unrealized_krw"] for r in v.rows)),
     ])])  # fmt: skip
     return v, {"recon_ok": ok, "recon_note": 글, "twr": 지수, "kospi": 그림자["KOSPI"], "sp500": 그림자["SP500"],
                "prev_twr": float(p["twr_index"]) if p else None}

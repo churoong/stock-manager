@@ -46,16 +46,17 @@ export const PAPER_OPEN_BUYS =
   "SELECT account_id, limit_price, quantity, currency FROM paper_orders WHERE status = 'open' AND side = 'buy'";
 export const PAPER_LATEST_DAILY = `SELECT d.account_id, d.as_of, d.invested_krw, d.cash_krw, d.holdings_krw, d.equity_krw,
   d.pnl_krw, d.twr_index, d.kospi_krw, d.sp500_krw, d.positions_json, d.recon_ok, d.recon_note, d.unknown_json, d.updated_at,
-  d.attribution_json
+  d.attribution_json, d.realized_krw, d.unrealized_krw
 FROM paper_daily d
 WHERE d.as_of = (SELECT MAX(x.as_of) FROM paper_daily x WHERE x.account_id = d.account_id)`;
 export const PAPER_HISTORY = `SELECT account_id, as_of, invested_krw, equity_krw, twr_index, kospi_krw, sp500_krw
 FROM paper_daily WHERE as_of >= ? ORDER BY as_of`;
+/** 거래내역 — 계좌마다 화면이 거른다(두 계좌 합쳐 최근 500건). 매도의 실현손익은 배치가 체결 때 적었다 (25.1455) */
 export const PAPER_FILLS = `SELECT f.id, f.account_id, f.stock_id, s.ticker, COALESCE(s.name_ko, s.name_en, s.ticker) AS name,
-  f.side, f.fill_date, f.price, f.quantity, f.currency, f.fx_rate, f.fee, f.tax, f.slippage, f.cash_krw,
+  f.side, f.fill_date, f.price, f.quantity, f.currency, f.fx_rate, f.fee, f.tax, f.slippage, f.cash_krw, f.realized_krw,
   o.reason, o.decided_on, o.rationale_json, o.close_note
 FROM paper_fills f JOIN paper_orders o ON o.id = f.order_id JOIN stocks s ON s.id = f.stock_id
-ORDER BY f.fill_date DESC, f.id DESC LIMIT 100`;
+ORDER BY f.fill_date DESC, f.id DESC LIMIT 500`;
 export const PAPER_OPEN_ORDERS = `SELECT o.id, o.account_id, o.market, s.ticker, COALESCE(s.name_ko, s.name_en, s.ticker) AS name,
   o.side, o.limit_price, o.quantity, o.currency, o.fill_session, o.tranche, o.reason
 FROM paper_orders o JOIN stocks s ON s.id = o.stock_id WHERE o.status = 'open' ORDER BY o.id`;
@@ -141,6 +142,8 @@ export interface DailyRow {
   recon_ok: number;
   recon_note: string | null;
   updated_at: string;
+  realized_krw?: number | null;
+  unrealized_krw?: number | null;
 }
 
 export interface AccountView {
@@ -158,6 +161,9 @@ export interface AccountView {
   twrPct: number | null;
   kospiPct: number | null;
   sp500Pct: number | null;
+  /** 그날까지 실현손익 합 · 보유 평가손익 합 — 배치가 적은 값 (25.1455) */
+  realized: number | null;
+  unrealized: number | null;
   /** 화면에 붉게 — 배치 검산이 어긋났거나 장부와 마지막 평가가 다르다 */
   notes: string[];
   reconOk: boolean;
@@ -178,7 +184,7 @@ export function accountView(
   if (!daily) {
     return {
       id, invested, cash, reserved, holdings: null, asOf: null, equity: invested > 0 ? cash : null,
-      pnl: null, pnlPct: null, twrPct: null, kospiPct: null, sp500Pct: null,
+      pnl: null, pnlPct: null, twrPct: null, kospiPct: null, sp500Pct: null, realized: null, unrealized: null,
       notes: invested > 0 ? ["아직 배치가 평가하지 않았습니다 — 다음 아침 리포트 때부터 매수·평가합니다"] : [], reconOk: true,
     };
   }
@@ -198,6 +204,8 @@ export function accountView(
     pnlPct: invested > 0 ? (손익 / invested) * 100 : null,
     twrPct: (Number(daily.twr_index) - 1) * 100,
     kospiPct: 기준(daily.kospi_krw), sp500Pct: 기준(daily.sp500_krw),
+    realized: daily.realized_krw == null ? null : Number(daily.realized_krw),
+    unrealized: daily.unrealized_krw == null ? null : Number(daily.unrealized_krw),
     notes, reconOk: Boolean(Number(daily.recon_ok)),
   };
 }
@@ -256,6 +264,7 @@ export interface Attribution {
   missed: AttrCell;
   sold: AttrCell;
   held_flag: AttrCell;
+  blocked?: AttrCell;
 }
 /** 배치 `ATTRIBUTION_MIN_SAMPLE` 과 같다 — 이보다 적은 칸은 "참고" */
 export const ATTRIBUTION_MIN_SAMPLE = 30;

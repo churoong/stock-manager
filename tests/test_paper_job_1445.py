@@ -140,6 +140,14 @@ def test_order_fill_rerun_and_stop_loss(client: Client, monkeypatch: pytest.Monk
     _하루(c, monkeypatch, "2026-10-19", signals=False)
     판것 = c.q("SELECT account_id, price, slippage FROM paper_fills WHERE side = 'sell' ORDER BY 1")
     assert [(a, p) for a, p, _s in 판것] == [("A", 8_800), ("B", 8_800)]
+    # 화면의 거래내역·평가손익 (25.1455) — 매도의 실현손익 = 현금 영향 − 평균 원가, 계좌 합은 평가 행에
+    실현, 현금, 매수원가 = c.q(
+        "SELECT s.realized_krw, s.cash_krw, -b.cash_krw FROM paper_fills s JOIN paper_fills b"
+        " ON b.account_id = s.account_id AND b.side = 'buy' WHERE s.side = 'sell' AND s.account_id = 'A'")[0]
+    assert 실현 == round(현금 - 매수원가) and 실현 < 0
+    assert c.q("SELECT realized_krw, unrealized_krw FROM paper_daily WHERE account_id = 'A' ORDER BY as_of DESC LIMIT 1")[0] == (
+        실현, 0)
+    assert c.q("SELECT realized_krw FROM paper_fills WHERE side = 'buy' AND account_id = 'A'") == [(None,)]
     assert 판것[0][2] == pytest.approx(8_800 * 4 * 0.001)  # 시장가 매도는 슬리피지
 
     # 실제 장부는 그대로

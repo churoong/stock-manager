@@ -315,10 +315,17 @@ def value(
         평가 += 값
         줄.append({"stock_id": sid, "quantity": p.quantity, "currency": p.currency, "cost_krw": _원(p.cost_krw),
                   "value_krw": _원(값), "price_date": None if 까닭 or c is None else c[1],
-                  "horizon": p.horizon})  # fmt: skip
+                  "horizon": p.horizon,
+                  # 화면의 보유내역 (25.1455) — 웹은 계산하지 않는다
+                  "avg_price": p.cost / p.quantity if p.quantity else None,
+                  "close": None if 까닭 or c is None else c[0], "first_buy_date": p.first_buy_date,
+                  "unrealized_krw": _원(값 - p.cost_krw),
+                  "unrealized_pct": (값 / p.cost_krw - 1) * 100 if p.cost_krw > 0 else None})  # fmt: skip
     입금 = invested(flows)
     총액 = 현금 + _원(평가)
     손익 = 총액 - 입금
+    for r in 줄:
+        r["weight_pct"] = r["value_krw"] / 총액 * 100 if 총액 > 0 else None
     return Valuation(
         invested_krw=입금, cash_krw=현금, holdings_krw=_원(평가), equity_krw=총액, pnl_krw=손익,
         pnl_pct=(손익 / 입금 * 100) if 입금 > 0 else None, unknown=모름, rows=줄,
