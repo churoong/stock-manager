@@ -85,8 +85,15 @@ export const LATEST_SCORE = `SELECT as_of_date, total_score, factor_scores, sent
   rank_in_market, rank_in_sector, skip_reason, calc_version
 FROM scores WHERE stock_id = ? ORDER BY as_of_date DESC, calc_version DESC LIMIT 1`;
 
+/**
+ * 팩터 표는 **점수 행과 같은 날**의 것 (docs/infra.md 25.1436, 감사). 배치는 그날 팩터를 다 쓴 뒤 점수를 쓴다(한 트랜잭션이
+ * 아니다) — 점수 쓰기가 실패한 날 상세 머리·레이더는 D−1 점수인데 아래 팩터 표는 D 값이라, 같은 팩터가 한 카드에 두 숫자였다.
+ * 점수 행이 없을 때만 팩터 표의 최신 날로 물러난다. 인자 [id, id, id]
+ */
 export const LATEST_FACTORS = `SELECT factor, raw_json, zscore, score, peer_group, peer_size, missing_fields, as_of_date, calc_version
-FROM factors WHERE stock_id = ? AND as_of_date = (SELECT MAX(as_of_date) FROM factors WHERE stock_id = ?)
+FROM factors WHERE stock_id = ? AND as_of_date = COALESCE(
+  (SELECT as_of_date FROM scores WHERE stock_id = ? ORDER BY as_of_date DESC, calc_version DESC LIMIT 1),
+  (SELECT MAX(as_of_date) FROM factors WHERE stock_id = ?))
 ORDER BY factor, calc_version DESC`;
 
 /** 보유 표를 만든 매매 기록 지문 (portfolio_summary.trades_version). `TRADES_VERSION` 과 다르면 재계산 전이다 */
@@ -363,7 +370,7 @@ export async function loadOverview(exec: Exec, id: number) {
   };
   const [score, factors, position, flags, watch, 요약판, 지금판] = await Promise.all([
     optional(LATEST_SCORE, [id], "종합 점수"),
-    optional(LATEST_FACTORS, [id, id], "팩터"),
+    optional(LATEST_FACTORS, [id, id, id], "팩터"),
     optional(POSITION, [id], "보유"),
     optional(STOCK_FLAGS, [id], "매도 플래그"),
     optional(WATCH, [id], "관심 종목 여부"),
