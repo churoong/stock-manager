@@ -230,9 +230,11 @@ def evaluate(h: HoldingInput, today: date, targets: dict | None = None) -> list[
     문턱출처 = (f"설정 horizon_targets.{horizon}" if (targets or {}).get(horizon)
                else "기본값 (CLAUDE.md 매매 규칙)")  # fmt: skip
     기간글 = label + ("" if h.horizon in DEFAULT_TARGETS else " (기간 없음 — 장기로 봄)")
-    기간행 = {"label": "투자 기간", "display": 기간글,
-              "threshold": "남은 매수 가운데 원가가 가장 큰 기간 (기간 없음은 장기와 합침, docs/sell_flags.md 3장)",
-              "source": "positions.horizon", "as_of": h.price_date, "passed": None}  # fmt: skip
+    # 등록된 도우미로 짓는다 — 근거표 계약 검사(`test_criteria_contract`)가 모양을 대 본다. 판정이 아닌 참고 행
+    기간행 = _criterion("투자 기간", 기간글,
+                       "남은 매수 가운데 원가가 가장 큰 기간 (기간 없음은 장기와 합침, docs/sell_flags.md 3장)",
+                       "positions.horizon", h.price_date)  # fmt: skip
+    기간행["passed"] = None
 
     if h.market_value is not None and h.cost > 0:
         # 경계(정확히 −7% 등)가 부동소수 찌꺼기(−6.9999…)로 빗나가지 않게 소수 여섯째 자리에서 반올림
