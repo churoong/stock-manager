@@ -14,14 +14,17 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
-#: 오늘 평가 총액이 어제보다 이만큼(%) 넘게 빠졌으면 그날 **새 매수**를 멈춘다(매도는 둔다). 하루 −3% 는
+#: 오늘 하루 수익(입출금을 뺀 시간가중)이 이만큼(%) 넘게 빠졌으면 그날 **새 매수**를 멈춘다(매도는 둔다). 하루 −3% 는
 #: 국내 지수로도 드문 날이다 — 계좌가 그만큼 빠졌으면 무언가(시세 오류·분할 미반영·쏠림)를 먼저 의심한다
 #: `[확인필요: 운영 1년 뒤 걸린 날 수로 다시]`
 DAILY_LOSS_HALT_PCT = -3.0
 #: 계좌·시장·하루 새 매수 주문 상한 — 2부 상위 다섯 × 3회차 = 15 의 두 배. 넘으면 배분 코드가 이상한 것이다
 MAX_ORDERS_PER_DAY = 30
-#: 상한 재검사의 여유(%p) — 배분은 금액으로, 주문은 정수 주로 내려 생기는 반올림 차이까지는 막지 않는다
+#: 상한 재검사의 여유 — 배분은 금액으로, 주문은 정수 주·예약 여유(수수료 1%·달러 환율 3%)로 내려 생기는
+#: 차이까지는 막지 않는다. 큰 쪽: 고정 0.5%p 또는 상한의 5%(상한 15% 면 0.75%p — 고정값만이면 미국 15% 상한의
+#: 정상 배분이 15.6% 로 막혔다, 25.1453)
 CAP_TOLERANCE_PCT = 0.5
+CAP_TOLERANCE_REL = 0.05
 #: 매수 기준 종가가 이 날수(달력일)보다 묵었으면 막는다 — 연휴(설·추석 최장 5일 안팎)를 넘는 묵음은
 #: 시세 수집이 멈춘 것이다
 STALE_PRICE_DAYS = 7
@@ -34,7 +37,8 @@ class Context:
     """한 계좌의 지금 — 원화."""
 
     equity_krw: float
-    prev_equity_krw: float | None
+    #: 오늘 하루 수익률(%) — **입출금을 뺀** 시간가중 지수로 낸 것. 첫날은 None (25.1453)
+    day_return_pct: float | None
     cash_available_krw: float  # 현금 − 다른 미체결 매수 예약
     holding_krw: dict[int, float]  # 종목 → 보유 평가(원)
     sector_of: dict[int, str | None]
@@ -54,10 +58,8 @@ class Candidate:
     key: Any = None  # 부르는 쪽이 다시 찾을 열쇠(회차 등)
 
 
-def daily_loss_pct(ctx: Context) -> float | None:
-    if not ctx.prev_equity_krw or ctx.prev_equity_krw <= 0:
-        return None
-    return (ctx.equity_krw / ctx.prev_equity_krw - 1) * 100
+def _여유(상한: float) -> float:
+    return max(CAP_TOLERANCE_PCT, 상한 * CAP_TOLERANCE_REL)
 
 
 def _매수_까닭(c: Candidate, ctx: Context, 손실: float | None, 매수수: int, 쓴현금: float,
@@ -69,11 +71,11 @@ def _매수_까닭(c: Candidate, ctx: Context, 손실: float | None, 매수수: 
         까닭.append(("max_orders", f"하루 매수 주문 {MAX_ORDERS_PER_DAY}건 넘음"))
     if ctx.equity_krw > 0:
         종목뒤 = (종목합.get(c.stock_id, 0.0) + c.cost_krw) / ctx.equity_krw * 100
-        if 종목뒤 > ctx.max_stock_pct + CAP_TOLERANCE_PCT:
+        if 종목뒤 > ctx.max_stock_pct + _여유(ctx.max_stock_pct):
             까닭.append(("stock_cap", f"사고 나면 종목 비중 {종목뒤:.1f}% > 상한 {ctx.max_stock_pct:g}%"))
         섹터 = ctx.sector_of.get(c.stock_id)
         섹터뒤 = (섹터합.get(str(섹터), 0.0) + c.cost_krw) / ctx.equity_krw * 100 if 섹터 else 0.0
-        if 섹터뒤 > ctx.max_sector_pct + CAP_TOLERANCE_PCT:
+        if 섹터뒤 > ctx.max_sector_pct + _여유(ctx.max_sector_pct):
             까닭.append(("sector_cap", f"사고 나면 {섹터} 비중 {섹터뒤:.1f}% > 상한 {ctx.max_sector_pct:g}%"))
     if 쓴현금 + c.cost_krw > ctx.cash_available_krw + 1:
         까닭.append(("cash", "현금(다른 미체결 매수 예약을 뺀) 넘음"))
@@ -91,7 +93,7 @@ def gate(candidates: list[Candidate], ctx: Context) -> tuple[list[Candidate], li
     """
     통과: list[Candidate] = []
     막힘: list[tuple[Candidate, list[Reason]]] = []
-    손실 = daily_loss_pct(ctx)
+    손실 = ctx.day_return_pct
     종목합 = dict(ctx.holding_krw)
     섹터합: dict[str, float] = {}
     for sid, v in ctx.holding_krw.items():

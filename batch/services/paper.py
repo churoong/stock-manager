@@ -624,6 +624,13 @@ def due_horizons(decided_on: str, today: str, have: dict[str, Any]) -> list[int]
 ATTRIBUTION_HORIZON = 20
 #: 이보다 표본이 적은 칸은 "참고" 로만 — 몇 건의 운을 실력으로 읽지 않게
 ATTRIBUTION_MIN_SAMPLE = 30
+#: 같은 종목·같은 결정이 이 달력일 안에 되풀이되면 한 번으로 센다 — 신호가 이어지는 동안 날마다 한 줄씩 쌓여
+#: 20 거래일 창이 겹친 표본이 되고, 종목 한두 개로 "참고" 문턱을 넘었다 (25.1453, 교차검증 [필수] 4).
+#: 20 거래일 ≈ 28 달력일
+ATTRIBUTION_EPISODE_DAYS = 28
+#: 선정 비교("주문 낸 후보 vs 안 낸 후보")에 넣지 않는 안 낸 까닭 — 이미 들고 있는 종목(상한 도달 = 지난 승자,
+#: 손절 보유 = 지난 패자)과 판 뒤 쉼은 새 후보와 다른 집단이다. 까닭별 줄에는 그대로 남긴다 (25.1453)
+NONCOMPARABLE_SKIP_PREFIXES = ("종목 비중 상한 도달", "보유 중 손절선 이탈", "판 뒤 ")
 
 
 def _초과(rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -634,6 +641,24 @@ def _초과(rows: list[dict[str, Any]]) -> dict[str, Any]:
     return {"n": len(xs), "avg": sum(xs) / len(xs), "hit": sum(x > 0 for x in xs) / len(xs) * 100}
 
 
+def _에피소드(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """같은 종목·같은 kind 가 `ATTRIBUTION_EPISODE_DAYS` 안에 되풀이되면 첫 줄만 (종목·날짜를 모르면 그대로)."""
+    from datetime import date
+
+    남김: list[dict[str, Any]] = []
+    마지막: dict[tuple[Any, Any], date] = {}
+    for r in sorted(rows, key=lambda x: (str(x.get("decided_on") or ""), str(x.get("stock_id")))):
+        if r.get("stock_id") is None or not r.get("decided_on"):
+            남김.append(r)
+            continue
+        열쇠, 날 = (r["stock_id"], r.get("kind")), date.fromisoformat(str(r["decided_on"])[:10])
+        if 열쇠 in 마지막 and (날 - 마지막[열쇠]).days < ATTRIBUTION_EPISODE_DAYS:
+            continue
+        마지막[열쇠] = 날
+        남김.append(r)
+    return 남김
+
+
 def attribution(decisions: list[dict[str, Any]], entries: list[tuple[float, float | None]]) -> dict[str, Any]:
     """성과 분해 — 어디가 돈을 버나 (docs/paper.md 10장, 25.1450). 순수 함수.
 
@@ -641,7 +666,10 @@ def attribution(decisions: list[dict[str, Any]], entries: list[tuple[float, floa
     진입 = 체결가가 그날 종가보다 얼마나 쌌나(%)와 안 찬 회차의 그 뒤, 청산 = 판 뒤와 플래그를 따르지 않고 든 뒤
     (판 뒤가 음수면 판 것이 옳았다). `entries` 는 매수 체결마다 (체결가, 체결일 종가)
     """
-    종류 = {k: [d for d in decisions if d.get("kind") == k] for k in ("buy", "skip", "missed", "sell", "hold_flag")}
+    decisions = _에피소드(decisions)
+    종류 = {k: [d for d in decisions if d.get("kind") == k]
+            for k in ("buy", "skip", "missed", "sell", "hold_flag", "blocked")}  # fmt: skip
+    견줄 = [d for d in 종류["skip"] if not str(d.get("reason")).startswith(NONCOMPARABLE_SKIP_PREFIXES)]
     까닭: dict[str, list[dict[str, Any]]] = {}
     for d in 종류["skip"]:
         까닭.setdefault(str(d.get("reason")), []).append(d)
@@ -649,12 +677,13 @@ def attribution(decisions: list[dict[str, Any]], entries: list[tuple[float, floa
     return {
         "horizon": ATTRIBUTION_HORIZON,
         "selection": _초과(종류["buy"]),
-        "skipped": _초과(종류["skip"]),
+        "skipped": _초과(견줄),
         "skip_by_reason": dict(sorted(((k, _초과(v)) for k, v in 까닭.items()), key=lambda kv: -kv[1]["n"])[:5]),
         "entry": {"n": len(진입), "avg": sum(진입) / len(진입) if 진입 else None},
         "missed": _초과(종류["missed"]),
         "sold": _초과(종류["sell"]),
         "held_flag": _초과(종류["hold_flag"]),
+        "blocked": _초과(종류["blocked"]),
     }
 
 
@@ -669,9 +698,11 @@ def attribution_lines(aid: str, a: dict[str, Any] | None) -> list[str]:
         글 = f"{s['avg']:+.1f}%p (n={s['n']}" + (f", 이긴 비율 {s['hit']:.0f}%" if s.get("hit") is not None else "")
         return 글 + (", 참고" if s["n"] < ATTRIBUTION_MIN_SAMPLE else "") + ")"
 
-    줄 = [f"  {aid} 선정: 산 후보 {칸(a['selection'])} · 안 산 후보 {칸(a['skipped'])}"]
+    줄 = [f"  {aid} 선정: 주문 낸 후보 {칸(a['selection'])} · 안 낸 새 후보 {칸(a['skipped'])}"]
     if a.get("skip_by_reason"):
-        줄.append(f"  {aid} 안 산 까닭별: " + " · ".join(f"{k} {칸(v)}" for k, v in a["skip_by_reason"].items()))
+        줄.append(f"  {aid} 안 낸 까닭별: " + " · ".join(f"{k} {칸(v)}" for k, v in a["skip_by_reason"].items()))
+    if (a.get("blocked") or {}).get("n"):
+        줄.append(f"  {aid} 위험 점검이 막은 것의 그 뒤: {칸(a['blocked'])}")
     e = a.get("entry") or {}
     진입 = f"체결가가 그날 종가보다 평균 {e['avg']:+.2f}% 쌌다 (n={e['n']})" if e.get("n") else "체결 표본 없음"
     줄.append(f"  {aid} 진입: {진입} · 안 찬 회차의 그 뒤 {칸(a['missed'])}")

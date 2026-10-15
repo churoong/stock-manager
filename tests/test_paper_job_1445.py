@@ -342,4 +342,45 @@ def test_halt_switch_blocks_new_orders_and_records_why(client: Client, monkeypat
     _, 기록 = _하루(c, monkeypatch, "2026-10-14")
     assert c.q("SELECT COUNT(*) FROM paper_orders") == [(0,)]
     assert 기록["halted"] is True and 기록["accounts"]["A"]["risk_blocked"] == 3
-    assert c.q("SELECT DISTINCT kind, reason FROM paper_decisions") == [("skip", "위험 점검: 멈춤 스위치가 켜져 있음")]
+    assert c.q("SELECT DISTINCT kind, reason FROM paper_decisions") == [("blocked", "위험 점검: 멈춤 스위치가 켜져 있음")]
+
+
+def test_outcome_queue_skips_rows_waiting_only_for_60d_and_notes_missing_ref(client: Client) -> None:
+    """성과 대기열 (25.1453, 교차검증 [필수] 1) — 60 만 기다리는 행은 자리를 먹지 않고, 기준가 없는 행은 바로 까닭을 적는다."""
+    c = client
+    ins = ("INSERT INTO paper_decisions (account_id, market, decided_on, stock_id, kind, reason, ref_close, ref_date,"
+           " ret_5d, ret_20d, created_at) VALUES ('A', 'KR', ?, 1, ?, 'x', ?, ?, ?, ?, 't')")  # fmt: skip
+    c.conn.execute(ins, ["2026-09-01", "skip", 10_000, "2026-09-01", 1.0, 2.0])  # 5·20 은 찼고 60 은 아직 때가 아님
+    c.conn.execute(ins, ["2026-09-02", "buy", None, None, None, None])  # 기준가 없음
+    c.conn.execute(ins, ["2026-10-01", "sell", 10_000, "2026-10-01", None, None])  # 5 가 찰 때
+    for i, d in enumerate(["2026-10-02", "2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08"], 1):
+        _시세(c, d, 10_000 + i * 100, 10_000 + i * 100)
+    기록 = job.fill_outcomes(c, "KR", "2026-10-15", "now")
+    assert 기록 == {"pending_read": 2, "filled": 1, "gave_up": 1}
+    assert c.q("SELECT outcome_note FROM paper_decisions WHERE decided_on = '2026-09-02'") == [("기준 종가 없음",)]
+    # 같은 날 다시 — 이미 채운 창만 다시 계산되면 쓰지 않는다
+    assert job.fill_outcomes(c, "KR", "2026-10-15", "now")["filled"] == 0
+
+
+def test_deposit_cancel_day_is_not_a_daily_loss(client: Client, monkeypatch: pytest.MonkeyPatch) -> None:
+    """입금 취소일을 −50% 손실로 읽어 매수를 막지 않는다 — 하루 수익은 시간가중으로 (25.1453, 교차검증 [필수] 2)."""
+    c = client
+    c.conn.execute("INSERT INTO paper_cash_flows (flow_date, amount_krw, kind, created_at, request_key)"
+                   " VALUES ('2026-10-14', 1000000, 'deposit', '2026-10-14T00:00:01+00:00', 'k2')")  # fmt: skip
+    _하루(c, monkeypatch, "2026-10-14", signals=False)  # 200만으로 첫 기록
+    c.conn.execute("INSERT INTO paper_cash_flows (flow_date, amount_krw, kind, cancels_id, created_at, request_key)"
+                   " VALUES ('2026-10-15', -1000000, 'cancel', 2, '2026-10-15T09:00:00.000Z', 'k3')")  # fmt: skip
+    _, 기록 = _하루(c, monkeypatch, "2026-10-15")
+    assert 기록["accounts"]["A"]["risk_blocked"] == 0
+    assert c.q("SELECT COUNT(*) FROM paper_orders WHERE account_id = 'A' AND decided_on = '2026-10-15'") == [(3,)]
+
+
+def test_gate_sees_candidate_sectors(client: Client, monkeypatch: pytest.MonkeyPatch) -> None:
+    """후보 종목의 업종도 관문에 — 보유만 채우면 새 종목의 섹터 상한이 꺼졌다 (25.1453, 교차검증 [필수] 3)."""
+    from batch.services import risk_gate as rg
+
+    본 = []
+    원래 = rg.gate
+    monkeypatch.setattr(rg, "gate", lambda 후보, 문맥: (본.append(문맥), 원래(후보, 문맥))[1])
+    _하루(client, monkeypatch, "2026-10-14")
+    assert any(문맥.sector_of.get(1) == "전자" for 문맥 in 본)

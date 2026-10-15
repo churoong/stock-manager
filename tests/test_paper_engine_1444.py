@@ -248,14 +248,24 @@ def test_attribution_splits_selection_entry_exit() -> None:
           결("missed", 12, 2), 결("sell", -6, -1), 결("hold_flag", 3, 1), {"kind": "buy", "ret_20d": None, "bench_20d": None}]
     a = pp.attribution(결정, [(10_000, 10_100), (9_800, 9_800), (100, None)])
     assert a["selection"] == {"n": 2, "avg": pytest.approx(1.0), "hit": pytest.approx(50.0)}
-    assert a["skipped"]["avg"] == pytest.approx(2.5)
+    assert a["skipped"]["avg"] == pytest.approx(-1.0)  # 보유 상한 도달(지난 승자)은 새 후보와 견주지 않는다
     assert a["skip_by_reason"]["종목 비중 상한 도달"]["avg"] == pytest.approx(6.0)
     assert a["entry"] == {"n": 2, "avg": pytest.approx(0.5)}
     assert a["missed"]["avg"] == pytest.approx(10.0)
     assert a["sold"]["avg"] == pytest.approx(-5.0) and a["held_flag"]["avg"] == pytest.approx(2.0)
     줄 = pp.attribution_lines("A", a)
-    assert "산 후보 +1.0%p (n=2, 이긴 비율 50%, 참고)" in 줄[0]
+    assert "주문 낸 후보 +1.0%p (n=2, 이긴 비율 50%, 참고)" in 줄[0]
     assert any("체결가가 그날 종가보다 평균 +0.50% 쌌다 (n=2)" in x for x in 줄)
     assert pp.attribution_lines("A", None) == []
     빈 = pp.attribution([], [])
-    assert pp.attribution_lines("B", 빈)[0].endswith("표본 없음 · 안 산 후보 표본 없음")
+    assert pp.attribution_lines("B", 빈)[0].endswith("표본 없음 · 안 낸 새 후보 표본 없음")
+
+
+
+def test_attribution_counts_episodes_not_days() -> None:
+    """같은 종목이 이어지는 날마다 쌓여도 한 번 — 28일 지나 다시 나오면 새 표본 (25.1453, 교차검증 [필수] 4)."""
+    줄 = [{"stock_id": 1, "decided_on": f"2026-09-{d:02d}", "kind": "buy", "ret_20d": 5, "bench_20d": 0} for d in range(1, 21)]
+    줄.append({"stock_id": 1, "decided_on": "2026-10-20", "kind": "buy", "ret_20d": -5, "bench_20d": 0})
+    줄.append({"stock_id": 2, "decided_on": "2026-09-02", "kind": "buy", "ret_20d": 1, "bench_20d": 0})
+    a = pp.attribution(줄, [])
+    assert a["selection"]["n"] == 3 and a["selection"]["avg"] == pytest.approx(1 / 3)

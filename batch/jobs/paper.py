@@ -54,7 +54,13 @@ PREV_DAILY_SQL = (
     "SELECT as_of, cash_krw, equity_krw, twr_index, updated_at FROM paper_daily"
     " WHERE account_id = ? AND as_of < ? ORDER BY as_of DESC LIMIT 1"
 )
-ORDERS_EXIST_SQL = "SELECT COUNT(*) FROM paper_orders WHERE account_id = ? AND market = ? AND decided_on = ?"
+#: 그 계좌·시장·거래일에 **결정**(주문이든 안 낸 결정이든)이 이미 있나 — 먼저 쓴 쪽이 이긴다 (docs/paper.md 2.4).
+#: 주문만 보면 다 막힌 날(멈춤·현금 부족) 다시 돌 때 skip 위에 buy 가 더 적혀 같은 날 두 집단에 다 셌다 (25.1453)
+ORDERS_EXIST_SQL = (
+    "SELECT (SELECT COUNT(*) FROM paper_orders WHERE account_id = ? AND market = ? AND decided_on = ?)"
+    " + (SELECT COUNT(*) FROM paper_decisions"
+    "    WHERE account_id = ? AND market = ? AND decided_on = ? AND kind != 'missed')"
+)
 STOCK_SQL = (
     "SELECT id, ticker, COALESCE(name_ko, name_en, ticker) AS name, sector, country, currency, asset_type"
     " FROM stocks WHERE id = ?"
@@ -105,9 +111,14 @@ DECISION_INSERT_SQL = (
     "INSERT OR IGNORE INTO paper_decisions (account_id, market, decided_on, stock_id, kind, reason, detail_json,"
     " ref_close, ref_date, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 )
+#: **창마다 찰 때가 된 행만** (25.1453, 교차검증 [필수] 1) — 예전엔 `ret_60d IS NULL` 인 오래된 순 300행이라,
+#: 5·20 은 채우고 60 을 기다리는 행이 앞자리를 차지해 새 결정의 20 거래일 성과가 두 달 넘게 밀렸다.
+#: `ret_60d IS NULL` 은 부분 색인을 타게 둔다
 PENDING_DECISIONS_SQL = (
     "SELECT id, stock_id, decided_on, ref_close, ref_date, ret_5d, ret_20d, ret_60d FROM paper_decisions"
-    " WHERE ret_60d IS NULL AND outcome_note IS NULL AND decided_on <= ? AND market = ? ORDER BY decided_on LIMIT ?"
+    " WHERE ret_60d IS NULL AND outcome_note IS NULL AND market = ?"
+    "   AND ((ret_5d IS NULL AND decided_on <= ?) OR (ret_20d IS NULL AND decided_on <= ?) OR decided_on <= ?)"
+    " ORDER BY decided_on LIMIT ?"
 )
 AFTER_CLOSES_SQL = (
     "SELECT date, close FROM prices WHERE stock_id = ? AND date > ? AND close > 0 ORDER BY date LIMIT ?"
@@ -124,7 +135,7 @@ UPDATE_OUTCOME_SQL = (
 OUTCOME_BATCH = 300
 #: 성과 분해 (docs/paper.md 10장, 25.1450) — 성과가 찬 결정과 체결일 종가가 있는 매수만, 최근 1년
 ATTR_DECISIONS_SQL = (
-    "SELECT kind, reason, ret_20d, bench_20d FROM paper_decisions"
+    "SELECT stock_id, decided_on, kind, reason, ret_20d, bench_20d FROM paper_decisions"
     " WHERE account_id = ? AND decided_on >= ? AND ret_20d IS NOT NULL"
 )
 ATTR_FILLS_SQL = (
@@ -171,8 +182,9 @@ def fill_outcomes(client: Any, market: str, today: str, now: str) -> dict[str, i
     """
     from datetime import date as _date
 
-    기한 = (_date.fromisoformat(today) - timedelta(days=min(pp.HORIZON_CALENDAR_DAYS.values()))).isoformat()
-    rows = client.execute(PENDING_DECISIONS_SQL, [기한, market, OUTCOME_BATCH]).dicts()
+    오늘 = _date.fromisoformat(today)
+    기한 = {n: (오늘 - timedelta(days=d)).isoformat() for n, d in pp.HORIZON_CALENDAR_DAYS.items()}
+    rows = client.execute(PENDING_DECISIONS_SQL, [market, 기한[5], 기한[20], 기한[60], OUTCOME_BATCH]).dicts()
     지수캐시: dict[str, float | None] = {}
     코드 = BENCH_INDEX.get(market, "KOSPI")
 
@@ -185,8 +197,13 @@ def fill_outcomes(client: Any, market: str, today: str, now: str) -> dict[str, i
     채움, 포기 = 0, 0
     문장: list[tuple[str, list[Any]]] = []
     for r in rows:
+        if r["ref_close"] is None or not r["ref_date"]:
+            # 기준 종가가 없는 행은 영영 못 채운다 — 대기열에 남아 자리를 먹지 않게 바로 까닭을 적는다 (25.1453)
+            문장.append((UPDATE_OUTCOME_SQL, [None] * 6 + ["기준 종가 없음", now, r["id"]]))
+            포기 += 1
+            continue
         창 = pp.due_horizons(str(r["decided_on"]), today, r)
-        if not 창 or r["ref_close"] is None or not r["ref_date"]:
+        if not 창:
             continue
         행들 = client.execute(AFTER_CLOSES_SQL, [r["stock_id"], r["ref_date"], max(창)]).rows
         뒤 = [(str(d), float(c)) for d, c in 행들]
@@ -194,13 +211,15 @@ def fill_outcomes(client: Any, market: str, today: str, now: str) -> dict[str, i
         o = pp.outcomes(r["ref_close"], 뒤, 지수(str(r["ref_date"])), 그날들)
         지난 = (_date.fromisoformat(today) - _date.fromisoformat(str(r["decided_on"]))).days
         포기함 = "ret_60d" not in o and 지난 >= pp.OUTCOME_GIVE_UP_DAYS
-        if not o and not 포기함:
+        # 이미 채운 창을 다시 계산한 것뿐이면 쓰지 않는다 — 날마다 같은 행을 다시 쓰고 `filled` 가 부풀었다 (25.1453)
+        새것 = any(r.get(f"ret_{n}d") is None and o.get(f"ret_{n}d") is not None for n in pp.DECISION_HORIZONS)
+        if not 새것 and not 포기함:
             continue
         문장.append((UPDATE_OUTCOME_SQL, [
             *(o.get(f"ret_{n}d") for n in pp.DECISION_HORIZONS), *(o.get(f"bench_{n}d") for n in pp.DECISION_HORIZONS),
             f"{pp.OUTCOME_GIVE_UP_DAYS}일 지나도 시세 {len(뒤)}거래일뿐" if 포기함 else None, now, r["id"],
         ]))  # fmt: skip
-        채움 += bool(o)
+        채움 += 새것
         포기 += 포기함
     if 문장:
         client.batch(문장)
@@ -495,7 +514,7 @@ def mark(
         json.dumps(v.unknown, ensure_ascii=False) if v.unknown else None, now,
     ])])  # fmt: skip
     return v, {"recon_ok": ok, "recon_note": 글, "twr": 지수, "kospi": 그림자["KOSPI"], "sp500": 그림자["SP500"],
-               "prev_equity": float(p["equity_krw"]) if p else None}
+               "prev_twr": float(p["twr_index"]) if p else None}
 
 
 def sell_decisions(
@@ -721,7 +740,10 @@ def run_step(
         예약 = pp.reserved_krw([o for o in 열린 if o.account_id == aid and o.side == "buy"],
                               {"USD": fx[0] if fx else None})
         문맥 = rg.Context(
-            equity_krw=v.equity_krw, prev_equity_krw=검["prev_equity"],
+            # 하루 수익은 **입출금을 뺀** 시간가중 지수로 (25.1453, 교차검증 [필수] 2) — 평가 총액끼리 견주면
+            # 입금 취소일이 −50% 로 읽혀 그날 매수가 모두 막혔고, 입금일엔 진짜 −10% 가 +90% 로 가려졌다
+            equity_krw=v.equity_krw,
+            day_return_pct=(검["twr"] / 검["prev_twr"] - 1) * 100 if 검["prev_twr"] else None,
             cash_available_krw=v.cash_krw - (예약 if 예약 is not None else v.cash_krw),
             holding_krw={int(r["stock_id"]): float(r["value_krw"]) for r in v.rows},
             sector_of={sid: _stock(client, sid, stock_cache).get("sector")
@@ -730,7 +752,7 @@ def run_step(
             max_sector_pct=float(상한.get("max_weight_per_sector") or 30.0),
             today=cal.local_today(market).isoformat(), halted=멈춤, frozen=frozenset(frozen),
         )  # fmt: skip
-        if int(client.execute(ORDERS_EXIST_SQL, [aid, market, trade_date]).scalar() or 0) > 0:
+        if int(client.execute(ORDERS_EXIST_SQL, [aid, market, trade_date] * 2).scalar() or 0) > 0:
             a기록["orders"] = "이미 냄"
         else:
             판정메모: dict[int, dict[str, Any]] = {}
@@ -756,8 +778,8 @@ def run_step(
                 종가, 날 = 메모["ref"]
                 if sid in 막힌매도id:
                     # 위험 점검이 매도를 막았다 — 들고 간 것으로 남긴다 (25.1451)
-                    문장.append(_결정(aid, market, trade_date, sid, "hold_flag",
-                                    "위험 점검: " + "; ".join(t for _c, t in 막힌매도id[sid]),
+                    문장.append(_결정(aid, market, trade_date, sid, "blocked",
+                                    "위험 점검(매도): " + "; ".join(t for _c, t in 막힌매도id[sid]),
                                     {"flags": [f["reason_code"] for f in 메모["flags"]]}, 종가, 날, 지금))  # fmt: skip
                 elif sid in 매도 and sid not in 이미팖:
                     문장.append(_결정(aid, market, trade_date, sid, "sell", ",".join(매도[sid][0]),
@@ -778,8 +800,11 @@ def run_step(
                     settings=settings, price_series=price_series, series_unknown=series_unknown,
                     fx_rate=fx[0] if fx else None, stop_ids=손절, sold_recently=최근판, stock_cache=stock_cache,
                 )  # fmt: skip
-                # 사전 위험 점검 (25.1451) — 통과한 회차만 주문. 한 회차도 못 지난 종목은 결정 원장에서 skip 으로
+                # 사전 위험 점검 (25.1451) — 통과한 회차만 주문. 한 회차도 못 지난 종목은 결정 원장에서 blocked 로
                 후보 = [rg.Candidate(o["stock_id"], "buy", o["cost_krw"], o["ref_date"], i) for i, o in enumerate(주문)]
+                # 후보 종목의 업종도 — 보유만 채우면 새 종목은 업종이 비어 섹터 상한이 꺼졌다 (25.1453, 검증 [필수] 3)
+                문맥 = dc_replace(문맥, sector_of={**문맥.sector_of, **{
+                    c.stock_id: _stock(client, c.stock_id, stock_cache).get("sector") for c in 후보}})
                 통과, 막힘 = rg.gate(후보, 문맥)
                 막힌수 += len(막힘)
                 주문 = [주문[c.key] for c in 통과]
@@ -787,7 +812,8 @@ def run_step(
                 막힌까닭 = {c.stock_id: "위험 점검: " + "; ".join(t for _c, t in 까닭) for c, 까닭 in 막힘}
                 for d in b기록.pop("_decisions", []):
                     if d["kind"] == "buy" and d["stock_id"] not in 낸종목:
-                        d = {**d, "kind": "skip", "reason": 막힌까닭.get(d["stock_id"], "위험 점검")}
+                        # 규칙은 사려 했는데 관문이 막았다 — skip 과 섞지 않는다 (25.1453)
+                        d = {**d, "kind": "blocked", "reason": 막힌까닭.get(d["stock_id"], "위험 점검")}
                     문장.append(_결정(aid, market, trade_date, d["stock_id"], d["kind"], d["reason"], d["detail"],
                                     d["ref_close"], d["ref_date"], 지금))  # fmt: skip
                 a기록["buy"] = b기록

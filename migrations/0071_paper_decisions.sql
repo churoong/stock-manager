@@ -9,7 +9,8 @@ CREATE TABLE IF NOT EXISTS paper_decisions (
     market       TEXT NOT NULL,            -- KR · US
     decided_on   TEXT NOT NULL,            -- 결정의 기준 거래일(그 시장 현지). 미체결은 안 찬 그 장날짜
     stock_id     INTEGER NOT NULL REFERENCES stocks (id),
-    kind         TEXT NOT NULL CHECK (kind IN ('buy', 'skip', 'sell', 'hold_flag', 'missed')),
+    -- blocked = 사전 위험 점검이 막은 주문(매수·매도) — 규칙의 결정과 섞지 않게 따로 (25.1453)
+    kind         TEXT NOT NULL CHECK (kind IN ('buy', 'skip', 'sell', 'hold_flag', 'missed', 'blocked')),
     reason       TEXT NOT NULL,            -- 2부 배분 · 제외 사유 · 플래그 사유 · 안 찬 까닭
     detail_json  TEXT,                     -- 그때의 기간·점수·비중·회차 가격·플래그 (작게)
     ref_close    REAL,                     -- 기준 종가 (종목 통화)

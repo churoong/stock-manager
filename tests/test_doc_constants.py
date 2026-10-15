@@ -889,6 +889,8 @@ class Test이웃_모듈들:
         검사(PAPER, f"**{pp.ATTRIBUTION_HORIZON} 거래일 뒤 지수 대비 초과(%p)**", "성과 분해 창 (25.1450)")
         검사(PAPER, f"표본이 {pp.ATTRIBUTION_MIN_SAMPLE}(`ATTRIBUTION_MIN_SAMPLE`) 미만", "성과 분해 참고 문턱 (25.1450)")
         검사(PAPER, f"어제보다 **{-rg.DAILY_LOSS_HALT_PCT:g}% 넘게** 빠졌으면", "하루 손실 한도 (25.1451)")
+        검사(PAPER, f"상한의 {rg.CAP_TOLERANCE_REL * 100:g}% 중 큰 쪽", "상한 재검사 상대 여유 (25.1453)")
+        검사(PAPER, f"{pp.ATTRIBUTION_EPISODE_DAYS}일(`ATTRIBUTION_EPISODE_DAYS`)", "성과 분해 에피소드 (25.1453)")
         검사(PAPER, f"하루 {rg.MAX_ORDERS_PER_DAY}건", "하루 매수 주문 상한 (25.1451)")
         검사(PAPER, f"여유 {rg.CAP_TOLERANCE_PCT:g}%p", "상한 재검사 여유 (25.1451)")
         검사(PAPER, f"{rg.STALE_PRICE_DAYS}일(달력일)보다 묵었으면", "기준 종가 묵음 (25.1451)")
