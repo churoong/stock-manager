@@ -2266,6 +2266,18 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
                 message += "\n\n" + "\n".join(엇갈림)
                 step_log["divergence"] = len(엇갈림) - 1
 
+        # 미국 1부 종목의 기준일 뒤 SEC 공시 사실 줄, 8-K 중대 항목은 기록만 (reports.md 3.7a, 28회차 P2·P3, 25.1429)
+        if market == "US" and 추천_오류 is None:
+            미국뒤: dict[str, Any] = {}
+            미국중대: dict[str, Any] = {}
+            줄 = _sec_post_close_lines(client, report_picks.select_top(report_picks.with_criteria(signal_rows)),
+                                    cal.local_today("US"), warnings, 미국뒤, 미국중대)  # fmt: skip
+            if 줄:
+                message += "\n\n" + "\n".join(줄)
+            step_log["part1_post_close"] = 미국뒤
+            if 미국중대:
+                step_log["us_8k_items"] = 미국중대
+
         if len(warnings) > 본문_경고수:
             message += "\n\n" + formatter.late_warnings(warnings[본문_경고수:])
 
@@ -2755,6 +2767,91 @@ def _post_close_lines(
         덧 = f" 외 {len(건들) - 1}건" if len(건들) > 1 else ""
         lines.append(f"· {이름}({코드}) '{제목}'{덧} ({날[5:]} 접수) — 신호는 {기준일[5:]} 종가로 계산")
     return ["📰 신호 기준일 뒤에 접수된 공시 (DART)", *lines] if lines else []
+
+
+SEC_CIK_SQL = "SELECT s.id, s.sec_cik FROM stocks s JOIN json_each(?) j ON j.value = s.id"
+
+
+def _sec_post_close_lines(
+    client: TursoClient, picks: list, today: date, warnings: list[str] | None = None,
+    기록: dict[str, Any] | None = None, 중대: dict[str, Any] | None = None,
+) -> list[str]:  # fmt: skip
+    """미국 1부 종목의 신호 기준일 뒤 SEC 공시 사실 줄과 최근 1년 8-K 중대 항목 기록 (docs/reports.md 3.7a,
+    28회차 P2·P3, 25.1429).
+
+    종목마다 submissions 한 번(1부 다섯 남짓). 접수 **날짜**(동부시간)만 쓴다 — `acceptanceDateTime` 은 진짜 UTC 가
+    아니다(docs/data-sources.md 14.4). 중대 항목(4.02·3.01·1.03)은 **기록만**(`중대` → step_log.us_8k_items) —
+    리포트 줄로 싣지 않는다(검증 B, 18회차 2 의 알림 피로 선례). CIK 는 `stocks.sec_cik`(25.1411),
+    없으면 SEC 티커표 한 번.
+    SEC 를 못 쓰면(UA 없음·오프라인·막힘) 절만 빠지고 기록에 이유를 남긴다 — 리포트를 막지 않는다"""
+    from batch.sources import sec_edgar
+
+    기준: dict[int, tuple[str, str, str]] = {}
+    for r in picks:
+        if r.as_of_date:
+            앞 = 기준.get(int(r.stock_id))
+            if 앞 is None or r.as_of_date < 앞[2]:
+                기준[int(r.stock_id)] = (r.name, r.ticker, r.as_of_date)
+    기록 = 기록 if 기록 is not None else {}
+    중대 = 중대 if 중대 is not None else {}
+    기록["picks"] = len(기준)
+    if not 기준:
+        return []
+    if config.SETTINGS.offline_mode:
+        기록["skipped"] = "오프라인"
+        return []
+    try:
+        sc = sec_edgar.SecClient(today)
+    except RuntimeError:
+        기록["skipped"] = "SEC_USER_AGENT 없음"
+        return []
+    ciks: dict[int, str] = {}
+    try:
+        ciks = {int(r["id"]): str(r["sec_cik"]) for r in client.execute(SEC_CIK_SQL, [json.dumps(sorted(기준))]).dicts()
+                if r["sec_cik"]}  # fmt: skip
+    except Exception as exc:  # noqa: BLE001 — 0069 전이면 칸이 없다. 티커표로 물러난다
+        if "no such column" not in str(exc).lower() and warnings is not None:
+            warnings.append(_실패문("SEC CIK 읽기", exc))
+    뒤: list[tuple[str, str, str, str, int, str]] = []
+    항목수: dict[str, int] = {}
+    걸림 = 모름 = 실패 = 0
+    try:
+        if any(sid not in ciks for sid in 기준):
+            표 = sc.ticker_map()
+            for sid, (_, 티커, _) in 기준.items():
+                if sid not in ciks and 표.get(티커.upper()):
+                    ciks[sid] = 표[티커.upper()]
+        for sid, (이름, 티커, 기준일) in 기준.items():
+            if sid not in ciks:
+                모름 += 1
+                continue
+            try:
+                응답 = sc.submissions(ciks[sid])
+            except sec_edgar.SecFailed:
+                실패 += 1
+                continue
+            if not 응답:
+                모름 += 1
+                continue
+            결과 = sec_edgar.post_close_and_items(응답, 기준일, today)
+            if 결과["after"]:
+                날, 폼 = 결과["after"][0]
+                뒤.append((날, 이름, 티커, 폼, len(결과["after"]) - 1, 기준일))
+            if 결과["same_day"] and not 결과["after"]:
+                기록["same_day_unknown"] = 기록.get("same_day_unknown", 0) + 1
+            if 결과["material"]:
+                걸림 += 1
+                for 항목, _ in 결과["material"]:
+                    항목수[항목] = 항목수.get(항목, 0) + 1
+            elif not 결과["covered"]:
+                모름 += 1
+    except sec_edgar.SecBlocked as exc:
+        기록["blocked"] = str(exc)
+    기록.update({"after": len(뒤), "unknown": 모름, "failed": 실패, "calls": sc.calls})
+    중대.update({"picks": len(기준), "flagged": 걸림, "unknown": 모름, "by_item": 항목수})
+    lines = [f"· {이름}({티커}) {폼}{f' 외 {n}건' if n else ''} ({날[5:]} 접수, 미국 동부 날짜)"
+             f" — 신호는 {기준일[5:]} 종가로 계산" for 날, 이름, 티커, 폼, n, 기준일 in sorted(뒤)]  # fmt: skip
+    return ["📰 신호 기준일 뒤에 접수된 공시 (SEC)", *lines] if lines else []
 
 
 def _divergence_lines(

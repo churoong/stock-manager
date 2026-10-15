@@ -180,6 +180,52 @@ def parse_filings(payload: dict, cik: str, forms: tuple[str, ...] = FILING_FORMS
     return out
 
 
+#: 1년 안에 있으면 사실로 셀 8-K 중대 항목 (docs/factors.md 12.30 P3, 25.1429 — 기록만). 4.02 재무제표 신뢰 철회,
+#: 3.01 상장 유지 요건 미달·상폐 통지, 1.03 파산·회생 (Palmrose 외 2004, Hennes 외 2008, Macey 외 2008 — 발표 시점 반응)
+MATERIAL_8K_ITEMS = ("4.02", "3.01", "1.03")
+MATERIAL_8K_DAYS = 365
+#: submissions `recent` 가 담는 최대 건수(2026-09-18 실측 1,001). 이보다 적으면 그 회사 이력 전체다
+RECENT_CAP = 1000
+
+
+def post_close_and_items(payload: dict, as_of: str, today: date) -> dict:
+    """submissions 응답 하나로 (1) 신호 기준일 뒤 공시와 (2) 최근 1년 8-K 중대 항목 (28회차 P2·P3, 25.1429).
+
+    **시각은 쓰지 않는다** — `acceptanceDateTime` 은 진짜 UTC 가 아니다(docs/data-sources.md 14.4, 10-15 탐침).
+    `filingDate`(동부시간 날짜)가 기준일보다 뒤인 것만 "확실히 뒤", 같은 날은 모름으로 센다. 정정본(`/A`)은
+    뺀다(국내 "정정" 과 같다). 중대 항목은 8-K·8-K/A 의 `items`(쉼표 글자 목록)에서 `MATERIAL_8K_ITEMS` 를 찾는다.
+    `recent` 가 1,000건을 다 채웠는데 가장 오래된 접수일이 1년 안이면 1년을 못 덮어 "모름" """
+    recent = ((payload.get("filings") or {}).get("recent") or {}) if isinstance(payload.get("filings"), dict) else {}
+    forms = recent.get("form") or []
+    filed = recent.get("filingDate") or []
+    items = recent.get("items") or []
+
+    def at(col: list, i: int) -> str:
+        v = col[i] if i < len(col) else None
+        return str(v).strip() if v else ""
+
+    after: list[tuple[str, str]] = []
+    same_day = 0
+    material: list[tuple[str, str]] = []
+    since = (today - timedelta(days=MATERIAL_8K_DAYS)).isoformat()
+    for i in range(len(forms)):
+        form, day = at(forms, i), at(filed, i)
+        if len(day) != 10:
+            continue
+        if form in FILING_FORMS and not form.endswith("/A"):
+            if day > as_of:
+                after.append((day, form))
+            elif day == as_of:
+                same_day += 1
+        if form in ("8-K", "8-K/A") and day >= since:
+            for item in (x.strip() for x in at(items, i).split(",")):
+                if item in MATERIAL_8K_ITEMS:
+                    material.append((item, day))
+    dates = [d for d in (at(filed, i) for i in range(len(forms))) if len(d) == 10]
+    covered = len(forms) < RECENT_CAP or (bool(dates) and min(dates) <= since)
+    return {"after": sorted(after), "same_day": same_day, "material": sorted(material), "covered": covered}
+
+
 class SecClient:
     def __init__(self, today: date | None = None) -> None:
         self.today = today or date.today()
@@ -228,6 +274,18 @@ class SecClient:
             return parse_sic(response.json())
         except ValueError:
             return None
+
+    def submissions(self, cik: str) -> dict | None:
+        """submissions 응답 전체(크다 — 평균 160KB). 없는 CIK 는 None"""
+        response = self._get(f"https://data.sec.gov/submissions/CIK{cik}.json")
+        if response.status_code == 404:
+            return None
+        if response.status_code != 200:
+            raise SecFailed(f"submissions {cik} HTTP {response.status_code}")
+        try:
+            return response.json()
+        except ValueError as exc:
+            raise SecFailed(f"submissions {cik} 본문이 JSON 이 아닙니다") from exc
 
     def filings(self, cik: str, forms: tuple[str, ...] = FILING_FORMS, limit: int = 20) -> list[Filing]:
         """최근 공시 목록. sic() 과 같은 응답을 쓰지만 호출은 따로다(한 번 더 부른다)."""
