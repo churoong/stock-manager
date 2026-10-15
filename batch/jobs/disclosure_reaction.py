@@ -121,10 +121,14 @@ def write_governance(client: TursoClient, 위험: dict[tuple[int, str, str], tup
 #: 전환사채 발행결정 상세를 한 번 실행에 부르는 상한 (docs/analysis.md 55장, 25.1192). 처음 1년치는 몇 주에 걸쳐 찬다 —
 #: 유니버스 종목의 1년 발행결정은 수백 건 어림 `[확인필요: 실측]`. DART 일 한도 2만의 2%
 CB_MAX_CALLS = 400
+#: **`is_material` 을 보지 않는다** (docs/infra.md 25.1389, 공시 감사). 같은 접수번호를 아침 배치의
+#: `disclosures_kr` 가 먼저 넣으면 `is_material = 0` 이고, 뒤의 B 목록 넣기는 `ON CONFLICT DO NOTHING` 이라
+#: 그 행이 대기열에서 영영 빠졌다.
+#: 제목(`LIKE` + `cb.is_cb_title`)만으로 발행결정을 고른다
 CB_PENDING_SQL = (
     "SELECT d.receipt_no, d.stock_id, d.corp_code, d.disclosed_at, d.title FROM disclosures d"
     " LEFT JOIN cb_issuances c ON c.receipt_no = d.receipt_no"
-    " WHERE d.disclosed_at >= ? AND d.stock_id IS NOT NULL AND d.is_material = 1"
+    " WHERE d.disclosed_at >= ? AND d.stock_id IS NOT NULL"
     " AND d.title LIKE '%전환사채권발행결정%' AND c.receipt_no IS NULL ORDER BY d.disclosed_at DESC"
 )
 CB_INSERT = (

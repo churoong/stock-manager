@@ -84,6 +84,14 @@ def test_발행결정마다_한_번만_부르고_없는_행은_다시_부르지_
     assert job.collect_cb(mem, date(2026, 10, 12))["calls"] == 0 and 불림 == []  # type: ignore[arg-type]
 
 
+def test_아침_공시_수집이_먼저_넣은_발행결정도_받는다(monkeypatch) -> None:
+    """`disclosures_kr` 는 `is_material = 0` 으로 넣고, 뒤의 B 목록은 같은 접수번호라 건너뛴다 (docs/infra.md 25.1389)"""
+    mem = _mem()
+    mem.conn.execute("UPDATE disclosures SET is_material = 0")
+    monkeypatch.setattr(job.dd, "fetch_cb_decision", lambda corp, day: (응답, None))
+    assert job.collect_cb(mem, date(2026, 10, 12))["calls"] == 2  # type: ignore[arg-type]
+
+
 def test_호출_오류면_적지_않고_멈춘다(monkeypatch) -> None:
     mem = _mem()
     monkeypatch.setattr(job.dd, "fetch_cb_decision", lambda corp, day: ([], "상태 020: 한도"))
