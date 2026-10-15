@@ -2510,6 +2510,7 @@ SQL read operations are forbidden (reads are blocked, ...)
 | 25.1460 | 모의 투자사 설계 — 회사·헌장·부서 9개·투자위원회·부서 성적표 (사용자 지시, 검증 [필수] 12 반영) |
 | 25.1461 | 모의 투자사 — 부서 판단식 8개와 투자위원회 절차 (순수 함수) |
 | 25.1462 | 판 2 매도 원칙 value·momentum 을 헌장보다 먼저 |
+| 25.1463 | 모의 투자사 — 부서 조사 자료 적재 (기준일 이하만 읽기) |
 
 ### 25.1 왜 D1 인가
 
@@ -32579,3 +32580,20 @@ KeyError 로 그날 모의 단계가 멈춘다.
 - docs/paper.md 2.2 규칙 목록에 더함
 
 **되돌리기 확인**: `momentum` 에 목표도달을 넣으면 `test_charter_sell_rules_exist_before_charters_apply` 가 깨진다.
+
+### 25.1463 모의 투자사 — 부서 조사 자료 적재 (기준일 이하만 읽기)
+
+docs/company.md 2·5장의 부서 원자료를 읽어 `services/company.Dossier` 를 채우는 `batch/jobs/company.py` (읽기만, 판단은 25.1461 의 순수 함수).
+
+- `agenda_rows` — 근거표가 있는 신호 종목 가운데 종합 점수 상위 N(같으면 티커), 종목마다 한 행
+- `load_dossiers(client, rows, country, as_of)` — **모든 읽기를 신호 기준일 이하로**:
+  - 증권사(`kr_opinions`): 기준일 전 90일, 목표가 있는 의견, 상승여력은 **그 의견 날짜 이하의 마지막 종가**로(발표 뒤 값 금지)
+  - 수급(`kr_flows`): 14일 안 **투자자별 금액이 있는 행만**(공매도만 있는 행을 순매수 0 으로 세면 안 된다 — 25.1042 와 같은 규칙) 최근 5행, 대금 백만원 → 원
+  - 20일 평균 거래대금: 기준일 이하 그 나라 최신 유니버스 스냅샷의 판정값(원)
+  - 공시(`governance_events` 1년), 전환사채(`cb_issuances` 1년, `status='ok'` 행만 합)
+  - 성과 지표는 `jobs/signals.load_metrics`(창 3Y→1Y·판 — 같은 규칙을 두 곳에 적지 않는다), 감성은 `jobs/scores.load_sentiments`(신선도), 국면은 `trend.regimes_for_country`
+  - 미국은 증권사·수급·공시를 읽지 않고 `domestic=False` — 그 부서들은 "자료 없음"
+- `dossier_json` — `paper_dossiers` 에 넣을 요약(증권사 의견은 건수·중앙값·최근)
+
+**되돌리기 확인**: 증권사 기준일 상한을 풀기(미래 의견이 들어옴) · 공매도만 있는 수급 행을 셈 · 대금 단위를 원으로 착각 · 전환사채 `no_row` 행까지 합 — 넷 다
+`test_load_dossier_reads_only_up_to_as_of` 가 깨졌다.
