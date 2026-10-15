@@ -134,6 +134,33 @@ def turnover_ratio_loo(turnovers: list[float]) -> float | None:
 KR_DAILY_LIMIT = 0.30
 
 
+#: 상한가를 세는 창(거래일) — Bali·Cakici·Whitelaw(2011) 의 "지난달" 그대로 (26회차 P3, docs/infra.md 25.1391)
+LIMIT_UP_WINDOW = 21
+
+
+def limit_up_days(closes: list[float | None], currency: str) -> int | None:
+    """최근 `LIMIT_UP_WINDOW` 거래일 가운데 **국내 상한가에 닫힌 날 수** (26회차 P3 — 기록만, docs/infra.md 25.1391).
+
+    상한가 = 전일 종가 × (1 + `KR_DAILY_LIMIT`) 를 호가 단위로 내린 값(`to_tick(…, "down")`) — 문턱은 가격제한폭
+    상수와 호가표에서만 나온다(발굴 원안의 0.29 는 눈으로 고른 값이라 검증 B 가 뺐다). 판정·근거표에는 쓰지 않는다.
+    국내(원화)만 — 미국은 가격제한이 없다. 창이 모자라거나 하루 움직임이 제한폭을 넘으면(수정주가 빈틈) None.
+    빈 종가(정지일)를 사이에 둔 쌍은 건너뛴다"""
+    if currency != "KRW":
+        return None
+    창 = closes[-(LIMIT_UP_WINDOW + 1):]
+    if len(창) < LIMIT_UP_WINDOW + 1:
+        return None
+    n = 0
+    for a, b in zip(창, 창[1:], strict=False):
+        if a is None or b is None or not (math.isfinite(a) and math.isfinite(b)) or a <= 0 or b <= 0:
+            continue
+        if abs(b / a - 1) > KR_DAILY_LIMIT + 1e-9:
+            return None
+        if b >= to_tick(a * (1 + KR_DAILY_LIMIT), "KRW", "down") - 1e-9:
+            n += 1
+    return n
+
+
 def recent_drawdown(closes: list[float], *, kr: bool, split_pending: bool) -> float | None:
     """최근 종가 창(`RECENT_DAYS` = 60 거래일)의 **고점 대비 최대 하락률** (음수, 22회차 P4 — 기록만, docs/infra.md
     25.1351). 저장된 MDD(`mdd`, 지표 창)보다 나쁜데도 비중 축소 배수가 그 MDD 로만 정해졌는지 센다.
@@ -509,6 +536,8 @@ def short_term(inp: SignalInput) -> tuple[bool, dict]:
         data["turnover_ratio"] = turnover_20 / turnover_60
     # 가장 큰 하루를 뺀 거래대금 비 — **기록만**(판정·근거표에 쓰지 않는다, 25.1350, 22회차 P2)
     data["turnover_ratio_loo"] = turnover_ratio_loo(inp.turnovers)
+    # 최근 21거래일 상한가에 닫힌 날 수 — **기록만**(판정·근거표에 쓰지 않는다, 25.1391, 26회차 P3)
+    data["limit_up_days_21"] = limit_up_days(inp.closes, inp.currency)
 
     passed = (
         ma20 > ma60
