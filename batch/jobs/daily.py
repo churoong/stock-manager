@@ -2846,12 +2846,20 @@ def main() -> int:
     parser.add_argument(
         "--dry-run", action="store_true", help="텔레그램으로 보내지 않고 출력만 한다"
     )
+    parser.add_argument(
+        "--notify-timeout", type=int, metavar="분", default=None,
+        help="배치를 돌리지 않고 '시간 제한으로 강제 종료됨' 실패 알림만 보낸다 (워크플로가 부른다, 25.1386)",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
         level=config.SETTINGS.log_level,
         format="%(asctime)s %(levelname)s %(name)s | %(message)s",
     )
+
+    if args.notify_timeout is not None:
+        notify_timeout(args.market.upper(), args.notify_timeout, dry_run=args.dry_run)
+        return 0
 
     try:
         return run(args.market, force=args.force, dry_run=args.dry_run)
@@ -2871,6 +2879,31 @@ def main() -> int:
         log.error("배치가 예기치 않게 중단됐습니다\n%s", traceback.format_exc())
         print(f"중단: {exc}")
         return 1
+
+
+def timeout_text(minutes: int) -> str:
+    """시간 제한으로 강제 종료된 실행의 실패 사유 (docs/infra.md 25.1386).
+
+    **리포트를 안 보냈다고 단정하지 않는다** — 발송 뒤 뒷단계(포트폴리오·사본 맞추기)에서 시간이 다 될 수도
+    있다(25.568 과 같은 이유). 기록 행은 프로세스가 죽어 닫히지 않으므로 `reap_stale_runs` 의 시간을 함께 적는다"""
+    return (
+        f"{minutes}분 시간 제한에 걸려 강제 종료됐습니다. 이 실행이 리포트를 보냈는지는 알 수 없습니다 — "
+        "오늘 리포트를 이미 받았다면 그것이 오늘 리포트입니다. "
+        f"실행 기록은 '실행 중'으로 남았다가 {db.STALE_RUN_HOURS}시간 뒤 정리됩니다"
+    )
+
+
+def notify_timeout(market: str, minutes: int, dry_run: bool) -> None:
+    """워크플로의 시간 제한(`timeout`)이 배치를 죽였을 때 실패 알림 (docs/infra.md 25.1386, 배치 실패 감사).
+
+    죽은 프로세스는 `_notify_failure` 에 닿지 못해, 예전에는 알림 없이 기록만 `running` 으로 남았다 —
+    무응답 감시(매시간)가 마감 뒤에야 원인 없이 "성공 기록이 없습니다" 로 알렸다.
+    DB 를 못 열어도 보낸다(마지막 성공은 "읽지 못했습니다")"""
+    try:
+        client: TursoClient | None = TursoClient()
+    except Exception:  # noqa: BLE001 — 실패 알림을 보내는 길이다. 연결 실패가 알림을 막으면 안 된다
+        client = None
+    _notify_failure(client, market, job_name(market), timeout_text(minutes), dry_run)  # type: ignore[arg-type]
 
 
 def _notify_quota(market: str, reason: str, dry_run: bool) -> None:

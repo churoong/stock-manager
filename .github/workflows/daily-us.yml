@@ -53,7 +53,9 @@ jobs:
     # 미국은 전종목을 심볼 조각으로 나눠 받는다. 한국거래소처럼 한 번에 오지
     # 않으므로 종목 수에 비례해 시간이 는다. 첫 운영 실행에서 실제 소요를 재고
     # 이 값을 다시 잡는다 [확인필요: 조각 하나당 응답 시간].
-    timeout-minutes: 30
+    # 배치 단계는 `timeout 30m` 으로 따로 끊는다 — 잡 시간 제한에 걸리면 뒤 단계(시간 초과 알림)가 돌지 않을 수 있어
+    # 여유 5분을 둔다 (docs/infra.md 25.1386)
+    timeout-minutes: 35
 
     steps:
       - uses: actions/checkout@v5
@@ -134,7 +136,11 @@ jobs:
           # 화면(/status 수동 실행)이 repository_dispatch 로 깨우면 client_payload.force 로 온다. 예약 시각 밖이라 --force 가 없으면 건너뛴다
           if [ "${{ inputs.force }}" = "true" ] || [ "${{ github.event.client_payload.force }}" = "true" ]; then ARGS="$ARGS --force"; fi
           if [ "${{ inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
-          python -m batch.jobs.daily $ARGS 2>&1 | python scripts/ops_tee.py -a run.log
+          # **시간 제한은 이 줄이 건다** (docs/infra.md 25.1386). 잡 시간 제한으로 죽으면 파이썬이 실패 알림에 닿지 못해
+          # 알림 없이 기록만 `running` 으로 남았다. 124(TERM)·137(KILL)이면 아래 '시간 초과 알림' 단계가 보낸다
+          rc=0
+          timeout --kill-after=30s 30m python -m batch.jobs.daily $ARGS 2>&1 | python scripts/ops_tee.py -a run.log || rc=$?
+          if [ "$rc" = "124" ] || [ "$rc" = "137" ]; then echo "timed_out=true" >> "$GITHUB_OUTPUT"; fi
           # **아무 일도 하지 않은 실행은 이슈에 올리지 않는다** (docs/infra.md 25.84).
           # 세션이 읽는 것은 이슈 #1 의 **마지막 코멘트** 하나인데(25.17), 휴장일·서머타임이
           # 안 맞는 시각에도 평일마다 빈 코멘트가 달려 정작 읽어야 할 것을 밀어냈다.
@@ -144,6 +150,25 @@ jobs:
           else
             echo "did_work=true" >> "$GITHUB_OUTPUT"
           fi
+          exit "$rc"
+
+      - name: 시간 초과 알림 (docs/infra.md 25.1386)
+        if: ${{ always() && steps.batch.outputs.timed_out == 'true' }}
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          DB_BACKEND: ${{ vars.DB_BACKEND }}
+          D1_ACCOUNT_ID: ${{ secrets.D1_ACCOUNT_ID }}
+          D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+          D1_API_TOKEN: ${{ secrets.D1_API_TOKEN }}
+          OFFLINE_MODE: "0"
+        run: |
+          set -o pipefail
+          ARGS="--market US --notify-timeout 30"
+          if [ "${{ inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
+          python -m batch.jobs.daily $ARGS 2>&1 | python scripts/ops_tee.py -a run.log
 
       - name: 기록을 이슈로 내보내기 (클라우드 세션이 로그를 못 읽는다)
         # 멈췄든 끝났든 남긴다 — **멈춘 이유를 읽으려고** 두는 것이다 (docs/infra.md 25.21)
