@@ -479,6 +479,10 @@ export function disclosureHit(
     // `rcept_nos` — 이 알림이 본 접수번호 전부 (25.1198). 다음 거래일 "이미 알림" 은 이 집합으로 가른다(`disclosureSeen`)
     data: {
       rcept_no: first.rcept_no, rcept_nos: (body.list ?? []).map((d) => String(d.rcept_no)), count,
+      // 대표 제목을 고를 후보 — 접수번호 내림차순 (25.1396). 경계(`rcept_no`)는 위 최댓값 그대로
+      items: [...(body.list ?? [])]
+        .sort((a, b) => (String(b.rcept_no) > String(a.rcept_no) ? 1 : -1))
+        .map((d) => ({ rcept_no: String(d.rcept_no), title: d.report_nm.trim() })),
       url: `https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${first.rcept_no}`, source: "dart_list",
     },
   };

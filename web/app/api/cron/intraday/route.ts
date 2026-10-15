@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { INTRADAY_ENABLED, INTRADAY_OFF_NOTE } from "@/lib/intradaySwitch";
 import { notifyQuotaOnce } from "@/lib/quotaNotice";
 import { batch, execute, ifMissingTable, quotaReason, rowsToObjects } from "@/lib/db";
-import { REACTION_ROWS, type ReactionRow, classifyTitle, reactionLine } from "@/lib/disclosureReaction";
+import { REACTION_ROWS, type ReactionRow, classifyTitle, reactionLine, representativeDisclosure } from "@/lib/disclosureReaction";
 import {
   SPARK_MAX_SYMBOLS,
   activeSession,
@@ -666,7 +666,15 @@ export async function GET(request: Request) {
         for (const h of dart.hits) {
           // 회사 이름이 아니라 공시 제목만 가른다(메시지의 따옴표 안)
           const 제목 = /"(.+)"/.exec(String(h.message))?.[1] ?? "";
-          const 줄 = reactionLine(classifyTitle(제목, 반응));
+          // 대표 제목은 반응 유형에 걸리는 것 가운데 우선순위가 가장 높은 것 (25.1396, 공시 감사 ③) — 접수번호 최댓값은
+          // 거래소 안내 공시라 주요사항보고가 가려졌다. 경계(`rcept_no`)는 그대로 두고 제목·링크만 바꾼다
+          const 후보 = Array.isArray(h.data.items) ? (h.data.items as Array<{ rcept_no: string; title: string }>) : [];
+          const 고른 = representativeDisclosure(후보, 반응);
+          if (고른 && 고른.item.title !== 제목 && 제목) {
+            h.message = String(h.message).replace(`"${제목}"`, `"${고른.item.title}"`);
+            h.data.url = `https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${고른.item.rcept_no}`;
+          }
+          const 줄 = reactionLine(고른 ? 고른.row : classifyTitle(제목, 반응));
           if (줄) {
             h.message += ` · ${줄}`;
             h.data.reaction = 줄;

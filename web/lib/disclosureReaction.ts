@@ -52,3 +52,23 @@ export function reactionLine(r: ReactionRow | null): string | null {
   const 정지 = Number(r.halted ?? 0);
   return `${r.label} 공시: 전날 종가부터 ${r.window_days}거래일째까지(공시일 반응 포함) 지수 대비 중앙값 ${signed(r.median_pct)} · 평균 ${signed(r.mean_pct)} · 오른 비율 ${r.pos_pct.toFixed(0)}% (${r.n}건${정지 ? `, 거래정지로 못 잰 ${정지}건 빠짐` : ""})`;
 }
+
+/**
+ * 장중 공시 알림의 **대표 제목** (docs/infra.md 25.1396, 공시 감사 ③). 예전에는 접수번호가 가장 큰 것을 골랐는데
+ * 거래소 경유(`80…`)가 금감원 직접 제출(`00…`)보다 늘 커서(25.1198), 같은 날 "주요사항보고서(유상증자결정)" 과
+ * "기업설명회(IR)개최" 가 함께 잡히면 IR 이 대표가 되고 유상증자의 반응 줄은 붙지 않았다 — 하루 한 번 규칙이라 그날 다시
+ * 알리지도 않는다. 이제 반응 유형에 걸리는 것 가운데 **우선순위가 가장 높은 것**(같으면 앞 — 접수번호 큰 쪽), 하나도 없으면
+ * 첫 것(접수번호 최댓값, 예전과 같다)
+ */
+export function representativeDisclosure<T extends { title: string }>(
+  items: T[],
+  rows: ReactionRow[],
+): { item: T; row: ReactionRow | null } | null {
+  let best: { item: T; row: ReactionRow | null } | null = null;
+  for (const item of items) {
+    const row = classifyTitle(item.title, rows);
+    if (!best) best = { item, row };
+    if (row && (!best.row || row.priority < best.row.priority)) best = { item, row };
+  }
+  return best;
+}
