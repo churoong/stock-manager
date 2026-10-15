@@ -44,10 +44,54 @@ class Outcome:
     days_available: int = 0
     #: 목표·손절에 **먼저 닿은 뒤** 60일째까지의 지수 대비 (27회차 P2, 25.1408 — 기록만). (무리, 터치일, 값)
     post_touch: tuple[str, str, float] | None = None
+    #: 중기 기간에 맞춘 126거래일 수익·지수 수익 (29회차 P4, 25.1441 — 기록만, 저장 칸·`WINDOWS` 밖)
+    ret_fit: float | None = None
+    bench_fit: float | None = None
 
     def excess(self, window: int) -> float | None:
         r, b = self.rets.get(window), self.bench.get(window)
         return None if r is None or b is None else r - b
+
+
+#: 중기(3~12개월) 신호의 기간에 맞춘 성적 창 — 거래일 (29회차 P4, docs/signals.md 10.4, 25.1441 — 기록만). 6개월 ≈ 126
+FIT_WINDOW = 126
+#: 판정을 볼 서로 다른 종목 수 하한(검증 B) — 같은 몇 달에 몰린 30종목은 유효 표본이 훨씬 적다
+FIT_MIN_STOCKS = 100
+
+
+def horizon_fit(outcomes: list[Outcome]) -> dict[str, Any]:
+    """중기 신호의 126일 지수 대비와 같은 신호의 60일 지수 대비 짝 차이 d = ex126 − ex60 (signals.md 10.4, 25.1441).
+
+    한 건 = (종목, 첫 신호일) — 같은 종목의 연속 신호는 같은 미래를 나눠 가진다. t 는 **신호 월로 묶은** 월 평균 d 의
+    t — 같은 날 공통 시장 항 때문에 종목 평균의 t 가 부푼다(검증 A·B, 29회차 P3 와 같은 이유). 앞·뒤 반 부호도 적는다"""
+    첫: dict[int, Outcome] = {}
+    for o in outcomes:
+        if o.horizon != "mid" or o.ret_fit is None or o.bench_fit is None or o.excess(60) is None:
+            continue
+        if o.stock_id not in 첫 or o.as_of_date < 첫[o.stock_id].as_of_date:
+            첫[o.stock_id] = o
+    건 = sorted(첫.values(), key=lambda o: o.as_of_date)
+    if not 건:
+        return {"n": 0}
+    d = [(o.as_of_date[:7], (o.ret_fit - o.bench_fit) - (o.excess(60) or 0.0)) for o in 건]  # type: ignore[operator]
+    달: dict[str, list[float]] = {}
+    for m, v in d:
+        달.setdefault(m, []).append(v)
+    월평균 = [sum(v) / len(v) for _, v in sorted(달.items())]
+    t = None
+    if len(월평균) >= 3:
+        μ = sum(월평균) / len(월평균)
+        sd = (sum((x - μ) ** 2 for x in 월평균) / (len(월평균) - 1)) ** 0.5
+        t = round(μ / (sd / len(월평균) ** 0.5), 3) if sd > 0 else None
+    반 = len(d) // 2
+    return {
+        "n": len(d), "months": len(달), "t_month": t,
+        "mean_ex60": round(sum((o.excess(60) or 0.0) for o in 건) / len(건), 4),
+        "mean_ex126": round(sum(o.ret_fit - o.bench_fit for o in 건) / len(건), 4),  # type: ignore[operator]
+        "mean_d": round(sum(v for _, v in d) / len(d), 4),
+        "halves": [round(sum(v for _, v in d[:반]) / 반, 4) if 반 else None,
+                   round(sum(v for _, v in d[반:]) / (len(d) - 반), 4)],
+    }  # fmt: skip
 
 
 #: 터치 뒤를 재려면 남아야 하는 창 — 터치가 40번째 날까지일 때만(성적표 20일 창 이상이 남는다). 결과 전 고정 (25.1408)
@@ -193,9 +237,19 @@ def evaluate(
         out.post_touch = post_touch(window, index_closes, 첫목표 if out.hit_target else None,
                                     첫손절 if out.hit_stop else None)  # fmt: skip
 
+    # 중기 기간 맞춤 126일 창 — 60일 창과 같은 규칙(실제 행으로 다 찼거나, 끊긴 종목은 마지막 종가로 청산) (25.1441)
+    if len(after) >= FIT_WINDOW:
+        out.ret_fit = _ret(after[FIT_WINDOW - 1][1], entry)
+    elif 끊김 and 거래일_뒤 >= FIT_WINDOW:
+        out.ret_fit = _ret(after[-1][1] if after else entry, entry)
+
     if index_closes:
         idx = dict(index_closes)
         base = idx.get(entry_date)
+        if base and out.ret_fit is not None:
+            끝 = (after[FIT_WINDOW - 1][0] if len(after) >= FIT_WINDOW
+                  else 시장일[FIT_WINDOW - 1] if len(시장일) >= FIT_WINDOW else None)  # fmt: skip
+            out.bench_fit = _ret(idx.get(끝), base) if 끝 else None
         for w in WINDOWS:
             if base and len(after) >= w:
                 later = idx.get(after[w - 1][0])

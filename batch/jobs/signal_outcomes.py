@@ -314,6 +314,7 @@ def run(market: str) -> int:
             step_log={"signals": len(results), "stats": [(s.horizon, s.window, s.n) for s in stats],
                       "calibration": 보정, "plan_fill": pf.summarize(계획),  # 기록 전용 (signals.md 10.2)
                       "post_touch": oc.summarize_post_touch(results),  # 기록 전용 (signals.md 10.3, 25.1408)
+                      "horizon_fit": oc.horizon_fit(results),  # 기록 전용 (signals.md 10.4, 25.1441)
                       "warnings": [보정_경고] if 보정_경고 else []},
         )  # fmt: skip
         print(f"신호 성적표 {country}: 신호 {len(results)}건")
