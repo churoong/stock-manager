@@ -88,6 +88,15 @@ class Test게이트:
     def test_G10_무배당_한_해(self) -> None:
         inp = good()
         inp.dividends[2022].cash_dividend_total = None
+        inp.dividends[2022].dps_common = None
+        assert judge(inp).first_failed_gate == "G10"
+
+    def test_G10_총액이_비고_주당배당만_있는_해도_배당한_해(self) -> None:
+        """미국 10-K 가 지급액 태그 없이 주당 값만 단 해 (docs/infra.md 25.1398)"""
+        inp = good()
+        inp.dividends[2022].cash_dividend_total = None
+        assert judge(inp).first_failed_gate is None
+        inp.dividends[2022].dps_common = 0
         assert judge(inp).first_failed_gate == "G10"
 
     def test_G10_은_총액으로_본다_주당값_급감은_상관없다(self) -> None:

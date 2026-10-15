@@ -561,7 +561,7 @@ def load_dividends(
     나온것: dict[int, float] = {}
     try:
         rows = client.execute(
-            "SELECT d.stock_id, d.fiscal_year, d.cash_dividend_total"
+            "SELECT d.stock_id, d.fiscal_year, d.cash_dividend_total, d.dps_common"
             " FROM stock_dividends d"
             " JOIN stocks s ON s.id = d.stock_id"
             " JOIN (SELECT stock_id, fiscal_year, MAX(report_year) AS ry FROM stock_dividends"
@@ -585,6 +585,13 @@ def load_dividends(
         if fy < 최신.get(sid, -1):
             continue
         최신[sid] = fy
+        # **총액이 비었는데 주당배당이 양수면 모름** (docs/infra.md 25.1398, 배당 감사). 미국 10-K 가 지급액 태그
+        # 없이 `CommonStockDividendsPerShareDeclared` 만 달면 행이 총액 NULL 로 들어오는데, 아래 0 규칙이 배당주를
+        # 무배당으로 읽어 배당수익률 0 이 밸류 팩터를 깎았다. 연도는 위에 남겨 `fill_us_no_dividend` 가 0 으로 다시
+        # 채우지 않게 한다
+        if r["cash_dividend_total"] is None and (r.get("dps_common") or 0) > 0:
+            나온것.pop(sid, None)
+            continue
         # None(그 해에 배당 항목이 비었다)은 **0 으로 본다** — 행이 있다는 것은 살펴봤다는 뜻이다
         나온것[sid] = float(r["cash_dividend_total"] or 0)
     if years is not None:

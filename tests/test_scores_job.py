@@ -691,3 +691,26 @@ def test_미회복_하한은_지표를_낸_날까지만_세고_묵은_지표는_
     묵음 = job.stale_metrics(지표, "2026-10-08")
     assert 묵음 == {"count": 1, "of": 1, "oldest": "2026-06-01"}
     assert job.stale_metrics(지표, "2026-06-10") is None
+
+
+def test_총액이_비고_주당배당만_있으면_모름이다() -> None:
+    """미국 10-K 가 지급액 태그 없이 주당 값만 단 해 — 0(무배당)이 아니다 (docs/infra.md 25.1398, 배당 감사)"""
+    from tests.test_portfolio_job import MemClient
+
+    mem = MemClient()
+    db.apply_migrations(mem)  # type: ignore[arg-type]
+    c = mem.conn
+    for sid in (1, 2, 3):
+        c.execute("INSERT INTO stocks (id, ticker, market, country, currency, source, fetched_at)"
+                  " VALUES (?, ?, 'NYSE', 'US', 'USD', 't', 't')", [sid, f"T{sid}"])  # fmt: skip
+    for sid, total, dps in ((1, None, 1.2), (2, None, None), (3, 5e8, 1.0)):
+        c.execute("INSERT INTO stock_dividends (stock_id, fiscal_year, report_year, receipt_no, as_of_date,"
+                  " cash_dividend_total, dps_common, source, fetched_at)"
+                  " VALUES (?, 2025, 2025, ?, '2026-02-20', ?, ?, 'sec', 't')", [sid, f"r{sid}", total, dps])  # fmt: skip
+    연도: dict[int, int] = {}
+    out = job.load_dividends(mem, "US", "2026-03-02", years=연도)  # type: ignore[arg-type]
+    assert out == {2: 0.0, 3: 5e8}  # 1 은 모름 — 키가 없다
+    assert 연도 == {1: 2025, 2: 2025, 3: 2025}
+    # 그해 10-K 가 있어도 0 으로 다시 채우지 않는다(연도가 이미 그해다)
+    assert job.fill_us_no_dividend(out, 연도, {1: {2025: {"report_date": "2026-02-19"}}}, "2026-03-02") == 0
+    assert 1 not in out

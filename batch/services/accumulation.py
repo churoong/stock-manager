@@ -400,7 +400,10 @@ def evaluate(inp: StockInput, years: list[int], thresholds: dict, as_of: date, r
         return fail("G9", f"유니버스 시총 {rules.max_cap_rank}위 밖")
 
     divs = [inp.dividends.get(y) for y in years]
-    paid = sum(1 for d in divs if d is not None and (d.cash_dividend_total or 0) > 0)
+    # 총액이 비고 주당배당만 있는 해도 배당한 해다 (docs/infra.md 25.1398) — 미국 10-K 가 지급액 태그 없이 주당 값만
+    # 달면 예전에는 "현금배당이 없는 해" 로 떨어졌다
+    paid = sum(1 for d in divs if d is not None and ((d.cash_dividend_total or 0) > 0
+                                                      or (d.cash_dividend_total is None and (d.dps_common or 0) > 0)))
     div_as_of = max((d.as_of_date for d in divs if d and d.as_of_date), default=None)
     # 국내는 배당 행이 **아예 없는** 해를 무배당과 가른다 (docs/infra.md 25.634, 감사). DART 는 무배당도 "-" 로
     # 행을 주므로(dart_dividends) 행이 없으면 수집이 안 됐거나 배당 항목 자체가 없다(013) — 한도·연속 실패로 멈춘 날
@@ -409,7 +412,7 @@ def evaluate(inp: StockInput, years: list[int], thresholds: dict, as_of: date, r
     # 미국은 태그가 없으면 행을 안 넣는 것이 무배당이라(us_financials) 가르지 않는다
     빈해 = sum(1 for d in divs if d is None) if rules.country == "KR" else 0
     shown_g10 = f"{span} 중 {paid}년 현금배당" + (f", {빈해}년 배당 자료 없음" if 빈해 else "")
-    rows.append(_criterion("G10 배당 연속성", shown_g10, f"{YEARS}/{YEARS}년 (총액 기준)",
+    rows.append(_criterion("G10 배당 연속성", shown_g10, f"{YEARS}/{YEARS}년 (총액 기준, 총액이 없으면 주당배당)",
                            source_div, div_as_of, paid == YEARS))
     if paid < YEARS:
         if 빈해 and paid + 빈해 == YEARS:

@@ -73,6 +73,6 @@ def test_배당_행이_없는_해는_무배당과_가른다() -> None:
 
     무배당 = good()
     첫해 = min(무배당.dividends)
-    무배당.dividends[첫해] = __import__("dataclasses").replace(무배당.dividends[첫해], cash_dividend_total=None)
+    무배당.dividends[첫해] = __import__("dataclasses").replace(무배당.dividends[첫해], cash_dividend_total=None, dps_common=None)
     j2 = judge(무배당)
     assert "현금배당이 없는 해" in (j2.excluded_reason or "")
