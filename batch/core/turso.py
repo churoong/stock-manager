@@ -277,7 +277,9 @@ class TursoClient:
 
         `batch()` 의 `/v2/pipeline` 은 트랜잭션이 아니다(문장마다 커밋, 25.1110). 마이그레이션이 본문과 적용 기록을 한
         파이프라인에 실으면, 중간 문장이 실패해도 앞 문장이 커밋되고 Hrana 가 뒤를 계속 실행하면 적용 기록까지 들어가
-        그 파일이 영영 다시 돌지 않는다 [확인필요: 실패 뒤 계속 실행하는지]. 서버가 받지 않으면 `AtomicUnsupported`"""
+        그 파일이 영영 다시 돌지 않는다 — `/v2/pipeline` 스펙: "The server always executes all requests, even if
+        some of them return errors"(libsql docs/HTTP_V2_SPEC.md, 25.1432). 서버가 받지 않으면(HTTP 400·BEGIN 실패)
+        `AtomicUnsupported`"""
         payload = {"requests": [{"type": "batch", "batch": {"steps": atomic_steps(statements)}}, {"type": "close"}]}
         resp = self._post_with_retry(payload)
         if resp.status_code == 401:
@@ -296,8 +298,9 @@ class TursoClient:
         return results
 
     def batch(self, statements: list[tuple[str, list[Any]]]) -> list[ResultSet]:
-        """여러 문장을 한 번에 보낸다. **트랜잭션이 아니다** — 앞 문장은 이미 커밋된다(25.1110). 실패한 문장 뒤를 서버가
-        계속 실행하는지는 [확인필요]. 전부 아니면 전무가 필요하면 `batch_atomic` (25.1431)"""
+        """여러 문장을 한 번에 보낸다. **트랜잭션이 아니다** — 문장마다 커밋되고(25.1110), 서버는 실패한 문장
+        뒤도 **끝까지 실행한다**(HTTP_V2_SPEC, 25.1432) — 여기서는 첫 오류를 올릴 뿐이다. 전부 아니면 전무는
+        `batch_atomic`"""
         payload = {
             "requests": [
                 {
@@ -364,7 +367,10 @@ def parse_atomic(body: dict[str, Any], n: int) -> list[ResultSet]:
     문장·COMMIT 이 실패하면 `TursoError`(이때 ROLLBACK 이 되돌렸다)"""
     item = (body.get("results") or [{}])[0]
     if item.get("type") == "error":
-        raise AtomicUnsupported(f"batch 요청 거절: {item.get('error', {}).get('message', '알 수 없음')}")
+        # **물러나지 않는다** (25.1432, 교차검증) — sqld 는 batch 안 어느 문장이든 파싱 오류(SQL_PARSE_ERROR)·
+        # 트랜잭션 시간 초과 등을 요청 오류로 돌려준다. 여기서 예전 파이프라인으로 물러나면 그 파이프라인은 실패 뒤도
+        # 끝까지 실행해(스펙) 앞 문장과 적용 기록이 커밋된다 — 고치려던 바로 그 결함. 실행 전 거절이라 들어간 것 없음
+        raise TursoError(f"batch 요청 실패(실행 안 됨): {item.get('error', {}).get('message', '알 수 없음')}")
     result = ((item.get("response") or {}).get("result")) or {}
     errors = result.get("step_errors") or []
     outs = result.get("step_results") or []

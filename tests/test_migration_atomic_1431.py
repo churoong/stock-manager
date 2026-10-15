@@ -144,3 +144,40 @@ def test_응답이_낯설어도_적용됐으면_다시_돌리지_않는다(monke
     monkeypatch.setattr(db, "MIGRATIONS_DIR", tmp_path)
     assert db.apply_migrations(c) == ["0001_a"]  # 두 번 돌았으면 duplicate column 으로 깨졌다
     assert h.con.execute("SELECT version FROM schema_migrations").fetchall() == [("0001_a",)]
+
+
+def test_요청_오류면_예전_방식으로_물러나지_않는다(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    """sqld 는 batch 안 문장의 파싱 오류를 요청 오류로 준다 — 물러나면 예전 파이프라인이 끝까지 실행해 기록까지 남는다 (25.1432)"""
+    h = _가짜Hrana()
+    c = _클라(h, monkeypatch)
+    원래 = h.post
+
+    def 파싱오류(payload: dict) -> Any:
+        if payload["requests"][0]["type"] == "batch":
+            return _Resp({"results": [{"type": "error", "error": {"message": "SQL_PARSE_ERROR", "code": "SQL_PARSE_ERROR"}}]})
+        return 원래(payload)
+
+    monkeypatch.setattr(c, "_post_with_retry", 파싱오류)
+    (tmp_path / "0001_a.sql").write_text("CREATE TABLE a (x);\nCREATE INDEX i ON a (없는칸);\n", encoding="utf-8")
+    monkeypatch.setattr(db, "MIGRATIONS_DIR", tmp_path)
+    with pytest.raises(turso.TursoError, match="실행 안 됨"):
+        db.apply_migrations(c)
+    assert h.con.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0] == 0
+    assert h.con.execute("SELECT name FROM sqlite_master WHERE name = 'a'").fetchall() == []
+
+
+def test_재시도가_중복으로_깨져도_기록이_있으면_적용됨(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    h = _가짜Hrana()
+    c = _클라(h, monkeypatch)
+    원래 = h.post
+
+    def 응답잃음(payload: dict) -> Any:
+        if payload["requests"][0]["type"] == "batch":
+            원래(payload)  # 커밋은 됐다
+            return 원래(payload)  # 재시도 — 중복으로 실패하고 되돌린다
+        return 원래(payload)
+
+    monkeypatch.setattr(c, "_post_with_retry", 응답잃음)
+    (tmp_path / "0001_a.sql").write_text("CREATE TABLE a (x);\n", encoding="utf-8")
+    monkeypatch.setattr(db, "MIGRATIONS_DIR", tmp_path)
+    assert db.apply_migrations(c) == ["0001_a"]

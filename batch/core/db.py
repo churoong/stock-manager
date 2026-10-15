@@ -245,11 +245,18 @@ def apply_migrations(client: TursoClient) -> list[str]:
         if 원자 is None:
             client.batch(묶음)
         else:
-            from batch.core.turso import AtomicUnsupported
+            from batch.core.turso import AtomicUnsupported, TursoError
 
             try:
                 원자(묶음)
-            except AtomicUnsupported as exc:
+            except TursoError as exc:
+                if not isinstance(exc, AtomicUnsupported):
+                    # 첫 시도가 커밋됐는데 응답만 잃고 재시도가 중복으로 깨진 경우 — 기록이 있으면 적용됨 (25.1432)
+                    if client.execute("SELECT 1 FROM schema_migrations WHERE version = ?", [version]).rows:
+                        log.warning("마이그레이션 재시도가 실패했지만 적용 기록이 있습니다: %s (%s)", version, exc)
+                        newly.append(version)
+                        continue
+                    raise
                 # 응답 모양만 낯설고 실제로는 적용됐을 수 있다 — 기록이 있으면 다시 돌리지 않는다(ALTER 가 깨진다)
                 if client.execute("SELECT 1 FROM schema_migrations WHERE version = ?", [version]).rows:
                     log.warning("마이그레이션 응답이 낯설지만 적용 기록이 있습니다: %s (%s)", version, exc)
