@@ -114,6 +114,8 @@ class HoldingInput:
     #: 비교 기준점이 **매수 당시 점수가 아니라 다시 잡은 점수**인가 (docs/sell_flags.md, infra 25.961). 매수 뒤 계산
     #: 판·가중치가 바뀌면 매수 당시 점수와는 견주지 않고, 지금과 같은 잣대의 **첫 점수**(매수일 이후)를 기준점으로 쓴다
     score_rebased: bool = False
+    #: 잣대(계산 판·가중치)가 바뀌었는데 같은 잣대의 기준점을 못 찾은 날 — 점수 하락을 **판정할 수 없었다** (25.1405)
+    score_scale_unknown: bool = False
     #: ② 하락의 팩터별 기여(지금 − 기준) — 합이 실제 차와 맞을 때만 잡이 채운다 (25.1342). 표시에만 쓴다
     score_drop_parts: dict[str, float] | None = None
     op_income_latest: float | None = None
@@ -346,6 +348,11 @@ def unjudged(h: HoldingInput, today: date) -> set[str]:
         out |= {"손절", "목표도달"}
     점수나이 = _며칠_전(h.score_now_date, today)
     if h.score_now is None or (점수나이 is not None and 점수나이 > _종가_묵음_일수()):
+        out.add("재무악화")
+    # **잣대가 바뀐 날도 판정하지 못한 날이다** (docs/infra.md 25.1405, 매도 플래그 감사 재현). 같은 잣대의 기준점이
+    # 없어 `score_at_buy` 가 비면 점수 하락을 보지 않는데, 지금 점수가 신선해 "판정함" 으로 쳐 어제 걸린 재무악화가
+    # 풀렸다(계산 판은 주에 몇 번씩 오른다). 그날은 잇는다
+    if h.score_scale_unknown:
         out.add("재무악화")
     기준 = date.fromisoformat(h.sentiment_ref_date) if h.sentiment_ref_date else today
     감성나이 = _며칠_전(h.sentiment_date, 기준)

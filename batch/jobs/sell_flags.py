@@ -242,6 +242,8 @@ def load_holdings(client: TursoClient, today: date | None = None) -> tuple[list[
                 score_at_buy=(_f(기준점["total_score"]) if 기준점 else None) if 잣대가_바뀜 else _f(r["score_at_buy"]),
                 score_at_buy_date=str(기준점["as_of_date"]) if 기준점 else r["score_at_buy_date"],
                 score_rebased=기준점 is not None,
+                # 잣대가 바뀌었는데 기준점을 못 찾음 — 판정 못 한 날로 (25.1405)
+                score_scale_unknown=잣대가_바뀜 and 기준점 is None and r["score_now"] is not None,
                 score_drop_parts=_하락_기여(기준점 if 기준점 else (None if 잣대가_바뀜 else (잣대[0] or [None])[0]),
                                        (잣대[1] or [None])[0]),
                 op_income_latest=_f(latest.get("operating_income")), op_income_prev=_f(prev.get("operating_income")),
