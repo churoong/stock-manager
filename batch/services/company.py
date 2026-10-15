@@ -549,3 +549,60 @@ def records_from(
          "stance": None if o.note and o.note.startswith("자료 없음") else o.stance, "excess": excess.get(i.stock_id)}
         for i in items for k, o in i.opinions.items()
     ]  # fmt: skip
+
+
+# ── 주간 위원회 복기 (docs/company.md 7장, 25.1473) ─────────────────────────────
+
+#: 위원회 복기에 올리는 "결정이 틀렸고 소수의견이 옳았던" 문턱 — 20 거래일 지수 대비 이만큼(%p) 넘게 빗나간 것만
+REVIEW_MISS_PCT = 5.0
+#: 복기에 올리는 건수
+REVIEW_TOP = 3
+
+
+def review_lines(
+    meetings: list[dict[str, Any]], decisions: list[dict[str, Any]], names: dict[int, str],
+    charters: dict[str, dict[str, Any]],
+) -> list[str]:
+    """주간 요약의 투자사 절 — 회사마다 이번 주 회의·가결·집행, 그리고 **소수의견이 옳았던 결정** 상위 셋.
+
+    `meetings` = 이번 주 `paper_meetings` 행(minutes_json), `decisions` = 20 거래일 성과가 찬 결정 원장 행
+    (detail_json 에 committee). 소수의견이 옳았다 = 부결(위원회)했는데 지수보다 `REVIEW_MISS_PCT` 넘게 올랐다
+    (찬성한 소수가 옳음), 또는 사서 그만큼 넘게 밑돌았다(반대한 소수가 옳음). 수치는 결정 원장 그대로
+    """
+    if not meetings and not decisions:
+        return []
+    out = ["[모의 투자사 — 투자위원회]"]
+    for aid in sorted(charters):
+        록들 = [m for m in meetings if m["account_id"] == aid]
+        항목 = [i for m in 록들 for i in (json.loads(m.get("minutes_json") or "{}").get("items") or [])]
+        out.append(f"  {aid} {charters[aid].get('name', '')}: 회의 {len(록들)} · 안건 {len(항목)}"
+                   f" · 가결 {sum(bool(i.get('passed')) for i in 항목)}"
+                   f" · 집행 {sum(bool(i.get('approved')) for i in 항목)}"
+                   f" · 쟁점 {sum(bool(i.get('issue')) for i in 항목)}")  # fmt: skip
+    빗나감: list[tuple[float, str]] = []
+    for d in decisions:
+        try:
+            위 = (json.loads(d.get("detail_json") or "{}") or {}).get("committee")
+        except ValueError:
+            continue
+        if not 위 or d.get("ret_20d") is None or d.get("bench_20d") is None:
+            continue
+        초과 = float(d["ret_20d"]) - float(d["bench_20d"])
+        산것 = d.get("kind") == "buy"
+        부결 = d.get("kind") == "skip" and str(d.get("reason") or "").startswith("위원회")
+        소수 = [DEPT_LABEL.get(k, k) for k in 위.get("minority") or []]
+        if not 소수:
+            continue
+        if 부결 and 초과 > REVIEW_MISS_PCT:
+            글 = f"부결했는데 {초과:+.1f}%p — 소수의견(찬성: {'·'.join(소수)})이 옳았다"
+        elif 산것 and 초과 < -REVIEW_MISS_PCT:
+            글 = f"샀는데 {초과:+.1f}%p — 소수의견(반대: {'·'.join(소수)})이 옳았다"
+        else:
+            continue
+        이름 = names.get(int(d["stock_id"]), str(d["stock_id"]))
+        빗나감.append((abs(초과), f"  {d['account_id']} {d['decided_on']} {이름}: {글}"))
+    if 빗나감:
+        out.append(f"  소수의견이 옳았던 결정 (20 거래일 지수 대비 {REVIEW_MISS_PCT:g}%p 넘게 빗나감,"
+                   f" 큰 순 {REVIEW_TOP}):")
+        out += [글 for _x, 글 in sorted(빗나감, key=lambda t: -t[0])[:REVIEW_TOP]]
+    return out

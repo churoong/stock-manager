@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 
 import pytest
 
 from batch.core import calendar as cal
 from batch.jobs import paper as job
+from batch.services import company as co
 from batch.services import report_picks
 from tests.test_paper_job_1445 import Client, _신호, 설정
 
@@ -171,3 +172,47 @@ def test_committee_skip_reasons_group_without_numbers() -> None:
     결정 = [{"stock_id": i, "decided_on": f"2026-09-{i:02d}", "kind": "skip", "reason": f"위원회: 표 0.{i} < 문턱 1",
              "ret_20d": 1.0, "bench_20d": 0.0} for i in range(1, 4)]  # fmt: skip
     assert list(pp.attribution(결정, [])["skip_by_reason"]) == ["위원회: 표 N < 문턱 N"]
+
+
+def test_weekly_committee_review(c: Client, monkeypatch: pytest.MonkeyPatch) -> None:
+    """주간 요약 투자사 절 — 회의 수와 소수의견이 옳았던 결정(부결했는데 지수보다 크게 오름) (25.1473)."""
+    _하루(c, monkeypatch, "2026-10-14")
+    # 부결한 3 이 20 거래일 뒤 지수보다 +12%p — 찬성한 소수(퀀트)가 옳았다고 친다
+    상세 = {"committee": {"opinions": {"research": [-1, 1.0], "quant": [1, 0.5]}, "minority": ["quant"]}}
+    c.conn.execute("UPDATE paper_decisions SET ret_20d = 15, bench_20d = 3, detail_json = ? WHERE account_id = 'A'"
+                   " AND stock_id = 3", [json.dumps(상세)])  # fmt: skip
+    줄 = job.committee_review(c, date(2026, 11, 12), {})
+    assert 줄[0] == "[모의 투자사 — 투자위원회]"
+    assert any(x.startswith("  A 가치투자사: 회의 0") for x in 줄)  # 11-12 기준 이번 주 회의는 없다
+    assert any("부결했는데 +12.0%p — 소수의견(찬성: 퀀트부)이 옳았다" in x and "종목3" in x for x in 줄)
+    # 이번 주 회의는 센다
+    줄 = job.committee_review(c, date(2026, 10, 16), {})
+    assert any(x.startswith("  A 가치투자사: 회의 1 · 안건 2 · 가결 1 · 집행 1") for x in 줄)
+    # 주간 요약에 실린다 (summary_section 이 부른다)
+    요약 = job.summary_section(c, datetime(2026, 10, 18, 0, 0, tzinfo=UTC))
+    assert "[모의 투자사 — 투자위원회]" in 요약
+
+
+def test_review_lines_threshold_and_order() -> None:
+    """문턱(5%p) 이하·소수의견 없음은 빼고, 산 것이 크게 밑돌면 반대한 소수, 빗나간 크기 순 셋까지 (25.1473)."""
+    def 결정(sid: int, kind: str, ret: float, minority: list[str], reason: str = "위원회 부결") -> dict:
+        return {"account_id": "A", "stock_id": sid, "decided_on": "2026-09-20", "kind": kind, "reason": reason,
+                "ret_20d": ret, "bench_20d": 0.0,
+                "detail_json": json.dumps({"committee": {"minority": minority}})}  # fmt: skip
+
+    결정들 = [
+        결정(1, "skip", 4.9, ["quant"]),             # 문턱 아래
+        결정(2, "skip", 20.0, []),                   # 소수의견 없음
+        결정(3, "buy", -8.0, ["risk"], "위원회 가결"),  # 산 것이 밑돎 → 반대한 소수
+        결정(4, "skip", 6.0, ["quant"]),
+        결정(5, "skip", 30.0, ["broker"]),
+        결정(6, "skip", 7.0, ["flows"]),
+        결정(7, "skip", 50.0, ["quant"], "자리 없음"),  # 위원회 부결이 아님
+    ]
+    줄 = co.review_lines([], 결정들, {}, {"A": {"name": "가치투자사"}})
+    빗 = [x for x in 줄 if x.startswith("  A 2026-09-20")]
+    assert [x.split(" ")[4].rstrip(":") for x in 빗] == ["5", "3", "6"]
+    assert "샀는데 -8.0%p — 소수의견(반대: 리스크관리부)이 옳았다" in 빗[1]
+    # 문턱 — 4.9%p 는 빼고 6%p 는 싣는다(셋 안에 들어도)
+    줄 = co.review_lines([], 결정들[:1] + 결정들[3:4], {}, {"A": {"name": "가치투자사"}})
+    assert [x.split(" ")[4].rstrip(":") for x in 줄 if x.startswith("  A 2026-09-20")] == ["4"]

@@ -1272,4 +1272,37 @@ def summary_section(client: Any, now: datetime) -> list[str]:
                 for x in pp.attribution_lines(aid, json.loads(daily[aid][-1].get("attribution_json") or "null"))]
         if 분해:
             줄 += [f"[노하우 성적표 — {pp.ATTRIBUTION_HORIZON} 거래일 뒤, 지수 대비]", *분해]
+    # 투자위원회 주간 복기 (docs/company.md 7장, 25.1473) — 곁다리. 0076 전 DB·읽기 실패면 그 절만 빠진다
+    if 줄:
+        try:
+            줄 += committee_review(client, 오늘, 캐시)
+        except Exception as exc:  # noqa: BLE001
+            줄.append(f"  투자위원회 복기를 못 했습니다 ({type(exc).__name__})")
     return 줄
+
+
+#: 이번 주 회의록 · 20 거래일 성과가 이번 주쯤 찬 결정(결정일이 28~35일 전 — 20 거래일 ≈ 28 달력일) (25.1473)
+WEEK_MEETINGS_SQL = "SELECT account_id, market, decided_on, minutes_json FROM paper_meetings WHERE decided_on >= ?"
+REVIEW_DECISIONS_SQL = (
+    "SELECT account_id, stock_id, decided_on, kind, reason, ret_20d, bench_20d, detail_json FROM paper_decisions"
+    " WHERE decided_on >= ? AND decided_on < ? AND ret_20d IS NOT NULL AND detail_json LIKE '%committee%'"
+)
+
+
+def committee_review(client: Any, today: date, stock_cache: dict[int, dict[str, Any]]) -> list[str]:
+    """주간 요약의 투자사 절 — 회사마다 이번 주 회의 수, 소수의견이 옳았던 결정 (services/company.review_lines)."""
+    헌장 = {}
+    for r in client.execute(ACCOUNTS_SQL).dicts():
+        try:
+            ch = json.loads(r.get("charter_json") or "null")
+        except ValueError:
+            ch = None
+        if isinstance(ch, dict):
+            헌장[str(r["id"])] = ch
+    if not 헌장:
+        return []
+    회의 = client.execute(WEEK_MEETINGS_SQL, [(today - timedelta(days=7)).isoformat()]).dicts()
+    결정 = client.execute(REVIEW_DECISIONS_SQL, [(today - timedelta(days=35)).isoformat(),
+                                                (today - timedelta(days=28)).isoformat()]).dicts()  # fmt: skip
+    이름 = {int(d["stock_id"]): str(_stock(client, int(d["stock_id"]), stock_cache).get("name")) for d in 결정}
+    return co.review_lines(회의, 결정, 이름, 헌장)
