@@ -62,7 +62,7 @@ def _준비(monkeypatch: pytest.MonkeyPatch, 실패수: int) -> tuple[list, list
     m(daily, "_pick_history", lambda c, mk, d, w: {})
     m(daily, "_self_grade", lambda c, mk, d, w, stats=None: None)
     m(daily, "_holding_scores", lambda c, a, w: [])
-    m(daily, "_corp_event_lines", lambda c, d, j, w=None: [])
+    m(daily, "_corp_event_lines", lambda c, d, j, w=None, 종가=None, 기록=None: [])
     m(daily, "_divergence_lines", lambda c, d, p, w=None: [])
     저장: list = []
     남은실패 = [실패수]

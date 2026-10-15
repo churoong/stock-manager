@@ -39,7 +39,7 @@ from typing import Any
 from batch import config
 from batch.core import calendar as cal
 from batch.core import client as backend
-from batch.core import db
+from batch.core import db, rounding
 from batch.core.client import TursoClient
 from batch.core.entry import NOTHING_DONE, guard
 from batch.notify import formatter, report_sections, telegram
@@ -2242,11 +2242,15 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
         # 못 읽으면 절만 빠진다. 보유이면서 추천이면 "보유" 로 적는다(뒤가 이긴다)
         if market == "KR" and 추천_오류 is None:
             상위 = report_picks.select_top(report_picks.with_criteria(signal_rows))
+            추천배당: dict[str, int] = {"picks": len({r.ticker for r in 상위})}
             일정 = _corp_event_lines(
                 client, decision.trade_date,
                 {r.ticker: (r.name, "추천") for r in 상위} | {h.ticker: (h.name, "보유") for h in holdings},
                 warnings,
-            )
+                종가={r.ticker: (float(r.close), r.as_of_date) for r in 상위 if r.close and r.as_of_date},
+                기록=추천배당,
+            )  # fmt: skip
+            step_log["pick_dividend"] = 추천배당  # 28회차 P6 (25.1420) — 2027-04-30 까지 amount_known 0 이면 접는다
             if 일정:
                 message += "\n\n" + "\n".join(일정)
                 step_log["corp_events"] = len(일정) - 1
@@ -2540,19 +2544,49 @@ _행사_이름 = {"dividend": "배당 기준일", "bonus": "무상증자 기준�
 _락_이름 = {"dividend": "배당락", "bonus": "권리락", "rights": "권리락"}
 
 
+def _추천_배당(detail: object, 종가: tuple[float, str] | None) -> tuple[str | None, str]:
+    """추천 종목 배당 행 → (덧붙일 글, 셈 이름) (28회차 P6, 25.1420). 금액이 정해진 **현금**배당만 글이 있다 —
+    주당배당 "0" 은 미정(26회차 실측), 주식배당(`stk_divi_rate` > 0)은 싣지 않는다. 해석·과세 말은 쓰지 않는다"""
+    try:
+        d = json.loads(detail) if isinstance(detail, str) else {}
+    except ValueError:
+        d = {}
+    d = d if isinstance(d, dict) else {}
+
+    def 수(v: object) -> float:
+        try:
+            x = float(str(v).replace(",", "").strip())
+        except (TypeError, ValueError):
+            return 0.0
+        return x if x == x else 0.0
+
+    if 수(d.get("stk_divi_rate")) > 0:
+        return None, "stock_div"
+    주당 = 수(d.get("per_sto_divi_amt"))
+    if 주당 <= 0:
+        return None, "undetermined"
+    if not 종가 or not 종가[0] or 종가[0] <= 0:
+        return None, "no_close"
+    return f"주당 {주당:,.0f}원 = {종가[1][5:]} 종가의 {rounding.fixed(주당 / 종가[0] * 100, 1)}%", "amount_known"
+
+
 def _corp_event_lines(
-    client: TursoClient, trade_date: str, 종목: dict[str, tuple[str, str]], warnings: list[str] | None = None
+    client: TursoClient, trade_date: str, 종목: dict[str, tuple[str, str]], warnings: list[str] | None = None,
+    종가: dict[str, tuple[float, str]] | None = None, 기록: dict[str, int] | None = None,
 ) -> list[str]:
     """보유·추천 종목의 기업행위 일정 (docs/reports.md 3.7, 25.989). `kr_corp_events`(KIS 예탁원, 25.988).
 
     표가 없거나(마이그레이션 전·KIS 키 없음) 못 읽으면 빈 목록 — 곁다리다. 배당은 거의 모든 종목에 있어 시끄러우니
-    **보유 종목만** 싣고, 무상·유상·액면교체는 추천에도 싣는다(가격이 크게 바뀐다)."""
+    보유 종목은 다 싣고, **추천 종목은 금액이 정해진 현금배당만** "주당 x원 = MM-DD 종가의 y%" 로 싣는다(2026-10-15,
+    28회차 P6, 25.1420 — `종가` 는 추천 종목의 신호 종가, `기록` 은 step_log.pick_dividend). 무상·유상·액면교체는
+    추천에도 싣는다(가격이 크게 바뀐다)."""
     if not 종목:
         return []
     끝 = (date.fromisoformat(trade_date) + timedelta(days=CORP_EVENT_DAYS)).isoformat()
     try:
         rows = client.execute(
-            "SELECT e.code, e.kind, e.record_date FROM kr_corp_events e JOIN json_each(?) j ON j.value = e.code"
+            "SELECT e.code, e.kind, e.record_date, e.detail FROM kr_corp_events e"
+            " JOIN json_each(?) j ON j.value = e.code"
             " WHERE e.record_date > ? AND e.record_date <= ?"
             # **일정이 바뀐 옛 행은 싣지 않는다** (25.1333, 배당 감사 #2). 표는 (종목, 종류, 기준일) 로 쌓기만 해
             # 기준일이
@@ -2575,13 +2609,19 @@ def _corp_event_lines(
     lines = []
     for r in rows:
         이름, 왜 = 종목[r["code"]]
-        if r["kind"] == "dividend" and 왜 != "보유":
-            continue
         락이름 = _락_이름.get(r["kind"])
         락 = cal.previous_session("KR", date.fromisoformat(r["record_date"])) if 락이름 else None
         if 락 is not None and 락 < 리포트날:
             continue
         덧 = f"{락이름} {락.isoformat()[5:]}, " if 락 is not None else ""
+        if r["kind"] == "dividend" and 왜 != "보유":
+            금액, 셈 = _추천_배당(r.get("detail"), (종가 or {}).get(r["code"]))
+            if 기록 is not None:
+                기록["in_window"] = 기록.get("in_window", 0) + 1
+                기록[셈] = 기록.get(셈, 0) + 1
+            if 금액 is None:
+                continue
+            덧 += f"{금액}, "
         lines.append(f"· {이름}({r['code']}) {_행사_이름.get(r['kind'], r['kind'])} {r['record_date'][5:]} ({덧}{왜})")
     return [f"📅 기업행위 일정 ({CORP_EVENT_DAYS}일 안, 예탁원·KIS)", *lines] if lines else []
 
