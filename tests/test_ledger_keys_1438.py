@@ -13,7 +13,9 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_원장_키가_코드에_있다() -> None:
     doc = (ROOT / "docs" / "factors.md").read_text(encoding="utf-8")
     절 = doc[doc.index("### 12.32 판정 대기 원장"):doc.index("### 12.6 지난 회차 판정 상태")]
-    keys = {k.split(".")[-1] for k in re.findall(r"\| `([a-z_0-9.]+)`(?:·`[a-z_]+`)? \|", 절)}
+    # 셋째 칸(실행 기록 키)의 첫 `…` — 대소문자·기호를 가리지 않고 잡아야 틀린 키가 조용히 빠지지 않는다
+    행들 = [줄.split("|") for 줄 in 절.splitlines() if re.match(r"\| \d+ \|", 줄)]
+    keys = {m.group(1).split(".")[-1] for 칸 in 행들 if (m := re.search(r"`([^`]+)`", 칸[3]))}
     코드 = "\n".join(p.read_text(encoding="utf-8") for p in (ROOT / "batch").rglob("*.py"))
     없음 = sorted(k for k in keys - 아직 if f'"{k}"' not in 코드)
-    assert len(keys) >= 20 and not 없음, 없음
+    assert len(행들) >= 27 and len(keys) >= 20 and not 없음, 없음
