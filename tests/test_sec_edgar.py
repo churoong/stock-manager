@@ -274,3 +274,20 @@ def test_외국_발행사의_20F·40F_주식수도_쓴다() -> None:
         ]}}  # fmt: skip
         found = sec_edgar.latest_shares(payload, "dei:EntityCommonStockSharesOutstanding")
         assert found is not None and found.value == 1_400_000_000 and found.form == form
+
+
+def test_CIK_를_적어_둔다() -> None:
+    """심볼이 바뀐 뒤에는 SEC 목록에서 옛 심볼의 CIK 를 찾을 수 없다 — 미리 적는다 (docs/infra.md 25.1411)"""
+    from batch.core import db
+    from tests.test_portfolio_job import MemClient
+
+    mem = MemClient()
+    db.apply_migrations(mem)  # type: ignore[arg-type]
+    mem.conn.execute("INSERT INTO stocks (id, ticker, market, country, currency, source, fetched_at)"
+                     " VALUES (1, 'SQ', 'NYSE', 'US', 'USD', 't', 't')")  # fmt: skip
+    statements, _ = us_shares.plan_statements({"SQ": 1, "ZZZZ": 2}, {"SQ": "0001512673"}, {}, set_listed_date=False)
+    cik문 = [(sql, p) for sql, p in statements if "sec_cik" in sql]
+    assert [p for _s, p in cik문] == [["0001512673", 1, "0001512673"]]  # 목록에 없는 ZZZZ 는 적지 않는다
+    for sql, p in cik문:
+        mem.conn.execute(sql, p)
+    assert mem.conn.execute("SELECT sec_cik FROM stocks WHERE id = 1").fetchone() == ("0001512673",)

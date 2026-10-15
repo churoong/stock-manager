@@ -47,6 +47,8 @@ _MARKET_CAP_SQL = (
     " market_cap_date = (SELECT MAX(date) FROM prices WHERE stock_id = ? AND close IS NOT NULL)"
     " WHERE id = ?"
 )
+#: 심볼 → SEC CIK 를 적는다 (docs/infra.md 25.1411) — 티커 변경을 옛 행에 잇는 열쇠. 같으면 쓰지 않는다(쓰기 한도)
+_CIK_SQL = "UPDATE stocks SET sec_cik = ? WHERE id = ? AND (sec_cik IS NULL OR sec_cik != ?)"
 # **앞으로만 당긴다. 비우지 않는다** (docs/infra.md 25.166).
 #
 # 예전에는 `SET listed_date = (SELECT MIN(date) …)` 하나였다. 관측 첫 거래일은 실제
@@ -110,6 +112,9 @@ def plan_statements(
     for symbol, stock_id in sorted(ids.items()):
         if set_listed_date:
             statements.append((_LISTED_DATE_SQL, [stock_id, stock_id, stock_id]))
+        # CIK 를 적어 둔다 — 심볼이 바뀐 뒤에는 SEC 목록에서 옛 심볼의 CIK 를 찾을 수 없다 (25.1411). 바뀔 때만 쓴다
+        if ciks.get(symbol):
+            statements.append((_CIK_SQL, [ciks[symbol], stock_id, ciks[symbol]]))
         found = shares.get(ciks.get(symbol, ""))
         if found is None:
             missing.append(symbol)
