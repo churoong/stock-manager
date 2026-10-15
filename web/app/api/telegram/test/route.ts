@@ -14,7 +14,8 @@ import { NextResponse } from "next/server";
 
 
 async function callTelegram(method: string, payload: unknown) {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
+  // 장중 발송(`lib/telegram`)과 같게 앞뒤 공백을 뺀다 (docs/infra.md 25.1387)
+  const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
   if (!token) {
     throw new Error("환경변수 TELEGRAM_BOT_TOKEN 이 비어 있습니다");
   }
@@ -24,6 +25,8 @@ async function callTelegram(method: string, payload: unknown) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
     cache: "no-store",
+    // 매달리면 설정 화면 단추가 함수 상한까지 돈다 (25.1387, 장중 발송과 같은 10초)
+    signal: AbortSignal.timeout(10_000),
   });
 
   const body = (await response.json().catch(() => ({}))) as {

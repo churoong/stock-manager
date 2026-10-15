@@ -146,6 +146,16 @@ describe("보내기", () => {
     expect(부름).toHaveBeenCalledTimes(1);
   });
 
+  it("토큰 앞뒤 공백을 빼고 주소를 만든다 — 끝 공백이 %20 으로 들어가 웹 발송만 거절됐다 (25.1387)", async () => {
+    process.env.TELEGRAM_BOT_TOKEN = " 123:abc \n";
+    process.env.TELEGRAM_CHAT_ID = "c";
+    const 부름 = 성공하는fetch();
+
+    await sendTelegram("짧다", 부름 as unknown as typeof fetch);
+
+    expect(String(부름.mock.calls[0][0])).toBe("https://api.telegram.org/bot123:abc/sendMessage");
+  });
+
   it("긴 글은 나눠서 여러 번 부른다", async () => {
     process.env.TELEGRAM_BOT_TOKEN = "t";
     process.env.TELEGRAM_CHAT_ID = "c";

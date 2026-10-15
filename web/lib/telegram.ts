@@ -100,7 +100,9 @@ export class TelegramUncertainError extends Error {
  * 응답 시간 초과는 `TelegramUncertainError` 로 던진다.
  */
 export async function sendTelegram(text: string, fetchImpl: typeof fetch = fetch): Promise<void> {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
+  // 토큰도 앞뒤 공백을 뺀다 (docs/infra.md 25.1387, 텔레그램 감사). 대화방 번호만 뺐을 때(25.587) 값 끝 공백 하나가
+  // 주소에 `%20` 으로 들어가 웹 발송(장중·무응답·질의 답)만 전부 거절됐다 — 배치·웹훅 켜기·환경 점검은 이미 뺀다
+  const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
   // 테스트 발송(`api/telegram/test`)과 같게 앞뒤 공백을 뺀다 — 값 끝 줄바꿈이면 테스트만 성공할 수 있었다 (25.587)
   const chatId = process.env.TELEGRAM_CHAT_ID?.trim();
   if (!token || !chatId) throw new Error("TELEGRAM_BOT_TOKEN·TELEGRAM_CHAT_ID 가 비어 있습니다");

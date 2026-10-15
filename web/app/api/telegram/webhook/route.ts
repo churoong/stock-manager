@@ -12,6 +12,13 @@ import { ANSWER_TIMEOUT_MS, answer, parseQuery, withTimeout } from "@/lib/telegr
  * 2. 말이 본인 대화방(`TELEGRAM_CHAT_ID`)에서 와야 한다. 다른 대화방의 말에는 답하지 않는다(데이터 제3자 제공 금지)
  * 비밀값이 없으면 경로 자체가 없는 것처럼 404. **언제나 200 으로 끝낸다** — 아니면 텔레그램이 같은 말을 계속 다시 보낸다.
  */
+/**
+ * 함수 실행 상한을 적어 둔다 (docs/infra.md 25.1387, 텔레그램 감사). 답 만들기 상한 8초(`ANSWER_TIMEOUT_MS`) + 발송 제한
+ * 10초(`sendTelegram`)면 18초를 넘을 수 있는데, 선언이 없으면 플랫폼 기본 상한에 맡겨진다 [확인필요: Vercel 무료 플랜 기본값].
+ * 그 전에 죽으면 200 이 없어 텔레그램이 같은 말을 다시 보낸다(25.1133 이 막으려던 모양). 장중·무응답 경로와 같은 30초
+ */
+export const maxDuration = 30;
+
 export async function POST(request: Request) {
   const secret = process.env.TELEGRAM_WEBHOOK_SECRET?.trim();
   const chatId = process.env.TELEGRAM_CHAT_ID?.trim();

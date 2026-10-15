@@ -60,3 +60,13 @@ describe("알림 답", () => {
     expect(text).toContain("미국 목표가");
   });
 });
+
+/** 안내 글이 실제 동작(시장별 마지막 알림 날)과 같은 말을 한다 (docs/infra.md 25.1387) */
+describe("/알림 안내 글", () => {
+  it("'오늘' 이라고 약속하지 않는다 — 장 전에는 전 거래일 알림이 온다", async () => {
+    const { HELP } = await import("@/lib/telegramQa");
+    const 줄 = HELP.split("\n").find((l) => l.includes("/알림")) ?? "";
+    expect(줄).not.toContain("오늘");
+    expect(줄).toContain("시장별");
+  });
+});
