@@ -55,6 +55,9 @@ export interface Tilt {
   source?: string;
   /** 순위에 쓴 점수 — "value_quality"(25.1108 뒤). 없으면 옛 기준(종합 점수)으로 낸 순위다 (25.1376) */
   score_basis?: string;
+  /** 실효 보유 종목 수 (Σw)²/Σw² — 잘린 목록·비중 합 95% 미만이면 null (27회차 P5, docs/infra.md 25.1409) */
+  n_eff?: number | null;
+  bench_n_eff?: number | null;
 }
 
 /** 집중 목록 머리의 점수 이름 — 행이 적은 기준대로 (docs/infra.md 25.1376). 기준이 없으면 옛 종합 점수 순위라고 말한다 */
@@ -102,7 +105,17 @@ export function tiltLine(t: Tilt): string {
   const 옮김 = t.carried_from ? ` (${t.carried_from} 판정 순위 — 이번 달은 SEC 가 막혀 다시 내지 못함)` : "";
   const 전체 = t.rank_all && t.rank_all_size ? ` · ${무리} ${t.rank_all_size}개 중 ${t.rank_all}위${옮김}` : "";
   const 대비 = t.vs_market === null ? "" : ` (${t.benchmark} 대비 ${signed(t.vs_market)})`;
-  return `${상위}${배수}${전체} · 평균 ${t.avg_score.toFixed(0)}점${대비}${출처}`;
+  return `${상위}${배수}${전체} · 평균 ${t.avg_score.toFixed(0)}점${대비}${출처}${effectiveCountText(t)}`;
+}
+
+/**
+ * 실효 보유 종목 수 — 숫자만 적는다(형용사 없음, 27회차 검증 B). 순위에는 쓰지 않는다 (docs/etf.md 11.5, 25.1409).
+ * 상위 비중(T) 순위가 몇 종목에 몰린 ETF 를 올릴 수 있어 "지수의 넓이" 를 실제 비중으로 함께 보인다
+ */
+export function effectiveCountText(t: Tilt): string {
+  if (t.n_eff == null) return "";
+  const 기준 = t.bench_n_eff != null ? ` (${t.benchmark} 약 ${t.bench_n_eff.toFixed(0)})` : "";
+  return ` · 실효 보유 종목 약 ${t.n_eff.toFixed(0)}${기준}`;
 }
 
 /** 넓은 지수지만 핵심 기준을 못 넘은 후보에 붙이는 말 (docs/infra.md 25.1283) — "넓은 지수가 아닙니다" 는 틀린 말이다 */

@@ -295,6 +295,7 @@ def load_market(client: TursoClient, country: str, key_to_symbol: dict[str, str]
 def build_payload(
     t: tilt.Tilt, doc: Fetched, src: str, proxy: bool, market: Market, bench: tilt.Tilt | None,
     rank: tuple[int, int] | None, rank_all: tuple[int, int] | None, group: str, pool: str,
+    n_eff: float | None = None, bench_n_eff: float | None = None,
 ) -> dict[str, Any]:
     bench_avg = bench.avg_score if bench else None
     vs = None if t.avg_score is None or bench_avg is None else t.avg_score - bench_avg
@@ -322,6 +323,9 @@ def build_payload(
         "group": group,
         "pool": pool,
         "score_basis": SCORE_BASIS,
+        # 실효 보유 종목 수 (27회차 P5, 25.1409) — 카드 사실 줄. 순위에는 쓰지 않는다
+        "n_eff": round(n_eff, 1) if n_eff is not None else None,
+        "bench_n_eff": round(bench_n_eff, 1) if bench_n_eff is not None else None,
     }
 
 
@@ -613,6 +617,9 @@ def run() -> int:
         건너뜀 = {
             int(p["pick_id"]) for p in picks if 미국_보류 and (sources.get(int(p["pick_id"])) or ("",))[0] == "us"
         }
+        # 실효 보유 종목 수 — **자르기 전** 보유로, KIS 출처(상위 30)는 모름 (25.1409, 27회차 검증 A)
+        실효 = {key: tilt.effective_count(d.holdings, truncated=d.source == kis.SOURCE) for key, d in docs.items()}
+        기준실효 = {"us": 실효.get(("us", tilt.MARKET_BENCHMARK)), "kr": 실효.get(("kr", tilt.KR_BENCHMARK))}
         updates = []
         for p in picks:
             pid = int(p["pick_id"])
@@ -626,6 +633,7 @@ def run() -> int:
                 # (docs/infra.md 25.1283, ETF 감사 재현). 넓은 지수 묶음(`bucket`)이 있으면 넓은 지수다
                 ranks.get(pid), ranks_all.get(pid), group_of(p),
                 "core" if p.get("passed") else ("broad" if p.get("bucket") else "wide"),
+                실효.get(src), 기준실효.get(kind),
             )
             updates.append((
                 "UPDATE etf_picks SET rationale_data = json_set(rationale_data, '$.tilt', json(?)) WHERE id = ?",
@@ -708,6 +716,10 @@ def run() -> int:
             "benchmark_top_pct": {k: (b.top_pct if b else None) for k, b in benches.items()},
             "top_cut_score": {k: m.top_cut for k, m in markets.items()},
             "single_factor": {k: m.single_factor for k, m in markets.items()},  # 25.1344 기록 전용
+            # 실효 보유 종목 수 분포 (25.1409, 기록 전용) — 순위에 쓰지 않는다
+            "neff": {"ranked": len(updates), "known": sum(1 for v in 실효.values() if v is not None),
+                     "below30": sum(1 for v in 실효.values() if v is not None and v < 30),
+                     "unknown": sum(1 for v in 실효.values() if v is None)},  # fmt: skip
             "leaders": {
                 g: [
                     (p["symbol"], round(tilts[sources[int(p["pick_id"])]].top_pct, 1))

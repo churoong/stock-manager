@@ -108,6 +108,29 @@ class Tilt:
         return {**asdict(self), "top": [asdict(c) for c in self.top]}
 
 
+#: 실효 보유 종목 수를 내는 비중 합 하한(%) — 잘린 목록(KIS 상위 30 등)은 정의상 N_eff ≤ 30 이라 거짓이 된다.
+#: 국내 KIS 구성종목을 "완전" 으로 보는 문턱(`jobs/etf_tilt.KIS_COMPLETE_PCT`, 25.1199)과 같은 값 (25.1409)
+NEFF_MIN_TOTAL_PCT = 95.0
+
+
+def effective_count(holdings: list[tuple[str, float]], truncated: bool = False) -> float | None:
+    """실효 보유 종목 수 N_eff = (Σw)² ÷ Σw² (27회차 P5, docs/infra.md 25.1409 — 카드 사실 줄과 기록만).
+
+    공시된 **실제 비중**으로 낸다(Adelman 1969 의 1/HHI). 같은 줄 키(CUSIP·단축코드)는 합치고 양수 비중만 쓴다 —
+    N-PORT 의 현금·담보 MMF 줄도 한 줄로 든다(그 ETF 가 실제로 그만큼 들고 있다). 잘린 목록(`truncated`)이거나 비중 합이
+    `NEFF_MIN_TOTAL_PCT` 미만이면 None. 순위·점수에는 쓰지 않는다"""
+    if truncated:
+        return None
+    합: dict[str, float] = {}
+    for key, w in holdings:
+        if w > 0:
+            합[key] = 합.get(key, 0.0) + w
+    전체 = sum(합.values())
+    if not 합 or 전체 < NEFF_MIN_TOTAL_PCT:
+        return None
+    return 전체 * 전체 / sum(w * w for w in 합.values())
+
+
 def lookthrough_weights(
     holdings: list[tuple[str, float]], key_to_symbol: dict[str, str], stock_by_symbol: dict[str, tuple[int, str, str]]
 ) -> dict[int, float]:

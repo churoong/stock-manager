@@ -641,6 +641,7 @@ class Test점수_담음:
         검사(ETF, f"기여한 {et.TOP_CONTRIBUTORS}종목", "근거표 기여 종목 수")
         검사(ETF, f"상위 {et.TOP_SHARE_PCT:.0f}% (동점은 함께)", "상위 종목 범위")
         검사(ETF, f"주식 비중 ≥ {et.POOL_MIN_STOCK_POSITION}", "후보 풀 주식 비중")
+        검사(ETF, f"비중 합이 {et.NEFF_MIN_TOTAL_PCT:.0f}%(`NEFF_MIN_TOTAL_PCT`) 미만이면", "실효 보유 종목 수 하한 (25.1409)")
         for cat in et.POOL_EXCLUDED_CATEGORIES:
             assert f"`{cat}`" in ETF, f"docs/etf.md 11.5 에 빼는 분류 {cat} 가 없다"
         assert et.POOL_MIN_ASSETS_USD == 100_000_000 and "순자산 ≥ 1억달러" in ETF, "후보 풀 순자산 하한이 문서와 다르다"
