@@ -29,6 +29,7 @@ from batch.services import buyback as bb
 from batch.services import factor_ic as fic
 from batch.services import metrics as m
 from batch.services import outcomes as oc
+from batch.services import paper as pp
 from batch.services import quarterly_earnings as qe
 from batch.services import scoring as sc
 from batch.services import sentiment as se
@@ -64,6 +65,7 @@ ANALYSIS = 읽기("analysis.md")
 INTRADAY = 읽기("intraday.md")
 BROKERS = 읽기("brokers.md")
 REACTION = 읽기("disclosure_reaction.md")
+PAPER = 읽기("paper.md")
 
 
 def 검사(문서본문: str, 찾을것: str, 무엇: str) -> None:
@@ -692,7 +694,7 @@ class Test밸류_분모:
     "gross_profitability", "robustness", "column_rot", "calibration", "self_grade", "holding_scores",
     "pick_history", "etf_accounts", "etf_tilt", "after_hours", "broker_stats", "disclosure_reaction", "luck", "postmortem",
     "divergence", "tax_sim", "verdict", "forecast_track", "patterns", "insights", "history",
-    "event_history", "simulation", "candidate_factors", "cb_overhang", "buy_thesis", "plan_fill", "target_units",
+    "event_history", "simulation", "candidate_factors", "cb_overhang", "buy_thesis", "plan_fill", "target_units", "paper",
 )  # fmt: skip
 
 #: 아직 그물 밖인 모듈과 **왜 아직인지**. 하나씩 줄여 간다
@@ -872,6 +874,15 @@ class Test이웃_모듈들:
         검사(SIGNALS, f"**{oc.POST_TOUCH_MAX_TAU}번째 날(`POST_TOUCH_MAX_TAU`)까지**", "터치 뒤 표류를 재는 터치 위치 상한 (25.1408)")
         검사(SIGNALS, f"**{oc.FIT_WINDOW}거래일**(`FIT_WINDOW`", "중기 기간 맞춤 창 (25.1441)")
         검사(SIGNALS, f"**{oc.FIT_MIN_STOCKS}개 이상**(`FIT_MIN_STOCKS`)", "중기 기간 맞춤 판정 표본 하한 (25.1441)")
+
+    def test_모의_계좌_규칙서(self) -> None:
+        """모의 투자 규칙서 판 1 (docs/paper.md, docs/infra.md 25.1444)."""
+        검사(PAPER, f"{pp.RECON_TOLERANCE_KRW:g}원이라도 어긋난다", "검산 허용 차")
+        검사(PAPER, f"수수료 여유 {pp.FEE_BUFFER * 100:g}%", "예약분 수수료 여유")
+        검사(PAPER, f"환율 여유 {pp.FX_BUFFER * 100:g}%", "예약분 환율 여유")
+        검사(PAPER, f"판 뒤 {pp.REBUY_COOLDOWN_SESSIONS}거래일은", "판 뒤 다시 사지 않는 기간")
+        검사(PAPER, f"`HALT_LIQUIDATE_SESSIONS`({pp.HALT_LIQUIDATE_SESSIONS}거래일)", "정지 매도 청산")
+        검사(PAPER, f"{pp.DEPOSIT_MIN_KRW // 10_000}만~{pp.DEPOSIT_MAX_KRW // 100_000_000}억", "입금 범위")
 
     def test_스트레스_표본_하한(self) -> None:
         검사(STRESS, f"창 길이의 {st.MIN_SAMPLE_MULTIPLE}배에 못 미치면", "스트레스 표본 하한")
