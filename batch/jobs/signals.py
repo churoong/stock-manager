@@ -26,7 +26,6 @@ import json
 import logging
 import math
 import sys
-from collections import defaultdict
 from datetime import UTC, datetime
 from typing import Any
 
@@ -878,7 +877,7 @@ def run(market: str, as_of: str | None = None) -> int:
         checks: list[tuple] = []
         by_horizon = dict.fromkeys(sg.HORIZONS, 0)
         하루기댐 = 0  # 단기 신호 가운데 가장 큰 하루를 빼면 1.2배 아래인 것 (25.1350, 기록만)
-        상한가: dict[str, int] = defaultdict(int)  # 국내 단기 신호의 21거래일 상한가 날 (25.1391, 기록만)
+        상한가 = dict.fromkeys(("signals", "limit_up", "none", "unknown"), 0)  # 상한가 날 (25.1391)
         최근낙폭 = 0  # 최근 60일 낙폭이 저장 MDD 보다 깊어 MDD 배수가 더 작았을 신호 (25.1351, 기록만)
         중기: list[tuple[int, sg.Signal, sg.SignalInput]] = []  # 국내 중기 신호 (rows 자리, 신호, 입력) — 25.1352
         #: 근거표가 비어 내보내지 않은 신호. 있으면 안 되는 목록이다
