@@ -189,3 +189,16 @@ describe("성과 분해 칸 (25.1450)", () => {
     expect(attrCellText(undefined)).toBe("표본 없음");
   });
 });
+
+describe("멈춤 스위치 (25.1451)", () => {
+  it("설정 키에 쓰고 배치와 같은 규칙으로 읽는다", async () => {
+    const { HALT_UPSERT, HALT_READ, haltOn, haltSchema } = await import("@/lib/paper");
+    db.prepare(HALT_UPSERT).run(JSON.stringify({ on: true, at: "t", why: "" }), "t");
+    expect(haltOn((db.prepare(HALT_READ).get() as { value: string }).value)).toBe(true);
+    db.prepare(HALT_UPSERT).run(JSON.stringify({ on: false }), "t2");
+    expect(haltOn((db.prepare(HALT_READ).get() as { value: string }).value)).toBe(false);
+    expect(haltOn(null)).toBe(false);
+    expect(haltOn("깨진 값")).toBe(false);
+    expect(haltSchema.safeParse({ on: "yes" }).success).toBe(false);
+  });
+});

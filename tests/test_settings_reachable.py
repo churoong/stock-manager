@@ -26,6 +26,8 @@ from pathlib import Path
     "us_split_detections": "배치 내부 기록(분할 감지일). 사람이 고칠 값이 아니다",
     # 주간 사후 분석이 어디까지 보고했나 (docs/infra.md 25.1151)
     "postmortem_through": "배치 내부 기록(사후 분석을 보고한 마지막 진입일). 사람이 고칠 값이 아니다",
+    # 모의 매매 멈춤 스위치 (docs/paper.md 11장, 25.1451) — 설정 화면이 아니라 /paper 화면의 단추가 쓴다
+    "paper_halt": "/paper 화면의 '모의 매매 멈춤' 단추가 쓴다(app/api/paper/halt). 설정 화면 밖",
 }
 
 

@@ -267,3 +267,21 @@ export function attrCellText(c: AttrCell | undefined, unit = "%p"): string {
   const 참고 = c.n < ATTRIBUTION_MIN_SAMPLE ? ", 참고" : "";
   return `${c.avg >= 0 ? "+" : ""}${c.avg.toFixed(unit === "%" ? 2 : 1)}${unit} (n=${c.n}${이김}${참고})`;
 }
+
+/** 모의 매매 멈춤 스위치 — 배치 `jobs/paper.HALT_SETTING_KEY` 와 같은 키 (docs/paper.md 11장, 25.1451) */
+export const HALT_SETTING_KEY = "paper_halt";
+export const HALT_UPSERT = `INSERT INTO settings (key, value, updated_at) VALUES ('${HALT_SETTING_KEY}', ?, ?)
+ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`;
+export const HALT_READ = `SELECT value FROM settings WHERE key = '${HALT_SETTING_KEY}'`;
+export const haltSchema = z.object({ on: z.boolean(), why: z.string().trim().max(100).optional() });
+
+/** 설정 값 → 켜졌나. 배치와 같은 읽기: {"on": true} 이거나 참 값 */
+export function haltOn(raw: unknown): boolean {
+  if (raw == null) return false;
+  try {
+    const v = typeof raw === "string" ? JSON.parse(raw) : raw;
+    return typeof v === "object" && v !== null ? Boolean((v as { on?: unknown }).on) : Boolean(v);
+  } catch {
+    return false;
+  }
+}

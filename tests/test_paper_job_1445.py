@@ -280,7 +280,7 @@ def test_real_portfolio_comparison_line(client: Client, monkeypatch: pytest.Monk
 
 
 def test_decision_ledger_records_what_was_not_done(client: Client, monkeypatch: pytest.MonkeyPatch) -> None:
-    """결정 원장 — 산 것·못 산 것(까닭)·안 찬 회차·판 것·플래그를 따르지 않고 든 것 (docs/paper.md 8장, 25.1449)."""
+    """결정 원장 — 산 것·못 산 것(까닭)·안 찬 회차·판 것·플래그를 따르지 않고 든 것 (docs/paper.md 9장, 25.1449)."""
     from batch.services import sell_flags as sf
 
     c = client
@@ -333,3 +333,13 @@ def test_decision_outcomes_fill_from_prices_and_index(client: Client) -> None:
     # 뒤 실행이 이미 채운 창을 지우지 않는다
     assert c.q("SELECT ret_5d, ret_20d, bench_5d FROM paper_decisions")[0] == (
         pytest.approx(5.0), pytest.approx(20.0), pytest.approx(2.5))
+
+
+def test_halt_switch_blocks_new_orders_and_records_why(client: Client, monkeypatch: pytest.MonkeyPatch) -> None:
+    """멈춤 스위치 — 새 주문을 내지 않고 결정 원장에 까닭을 남긴다 (docs/paper.md 11장, 25.1451)."""
+    c = client
+    c.conn.execute("INSERT INTO settings (key, value, updated_at) VALUES ('paper_halt', '{\"on\": true}', 't')")
+    _, 기록 = _하루(c, monkeypatch, "2026-10-14")
+    assert c.q("SELECT COUNT(*) FROM paper_orders") == [(0,)]
+    assert 기록["halted"] is True and 기록["accounts"]["A"]["risk_blocked"] == 3
+    assert c.q("SELECT DISTINCT kind, reason FROM paper_decisions") == [("skip", "위험 점검: 멈춤 스위치가 켜져 있음")]

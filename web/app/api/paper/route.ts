@@ -13,6 +13,8 @@ import {
   PAPER_OPEN_ORDERS,
   PAPER_STOCK_NAMES,
   PAPER_TWR,
+  HALT_READ,
+  haltOn,
   REAL_LOOKBACK_DAYS,
   REAL_TWR,
   accountView,
@@ -86,7 +88,14 @@ export async function GET() {
     } catch {
       realCompare = { error: "실제 포트폴리오 기록을 읽지 못해 비교를 싣지 않았습니다" };
     }
+    let halted = false;
+    try {
+      halted = haltOn((await execute(HALT_READ)).rows[0]?.[0]);
+    } catch {
+      halted = false; // 못 읽으면 꺼진 것으로 보인다 — 배치는 제 읽기로 판정한다
+    }
     return NextResponse.json({
+      halted,
       realCompare,
       invested: 입금,
       accounts: views,

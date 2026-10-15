@@ -24,6 +24,7 @@ from batch.core import settings_range as sr
 from batch.services import backtest as bt
 from batch.services import paper as pp
 from batch.services import report_picks
+from batch.services import risk_gate as rg
 from batch.services import sell_flags as sf
 
 log = logging.getLogger(__name__)
@@ -99,7 +100,7 @@ REAL_TWR_SQL = "SELECT date, twr_index FROM portfolio_values WHERE date >= ? ORD
 #: 실제 계열을 모의 첫 기록보다 이만큼 앞부터 읽는다 — 시작일 이하의 마지막 행을 잡으려고(주말·휴일 사이)
 REAL_LOOKBACK_DAYS = 14
 
-#: 결정 원장 (docs/paper.md 8장, 25.1449) — 안 한 결정까지. 재실행은 유일 제약이 막는다
+#: 결정 원장 (docs/paper.md 9장, 25.1449) — 안 한 결정까지. 재실행은 유일 제약이 막는다
 DECISION_INSERT_SQL = (
     "INSERT OR IGNORE INTO paper_decisions (account_id, market, decided_on, stock_id, kind, reason, detail_json,"
     " ref_close, ref_date, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
@@ -134,6 +135,9 @@ SAVE_ATTR_SQL = "UPDATE paper_daily SET attribution_json = ? WHERE account_id = 
 #: 성과 분해가 보는 기간(달력일)
 ATTR_WINDOW_DAYS = 365
 
+#: 사람이 켜는 모의 매매 멈춤 스위치 — /paper 화면의 단추가 쓴다 (docs/paper.md 11장, 25.1451)
+HALT_SETTING_KEY = "paper_halt"
+
 #: 결정의 기준 지수
 BENCH_INDEX = {"KR": "KOSPI", "US": "SP500"}
 
@@ -151,7 +155,7 @@ def _결정(
     aid: str, market: str, decided_on: str, sid: int, kind: str, reason: str, detail: dict[str, Any] | None,
     ref_close: Any, ref_date: Any, now: str,
 ) -> tuple[str, list[Any]]:
-    """결정 원장 한 줄 (docs/paper.md 8장)."""
+    """결정 원장 한 줄 (docs/paper.md 9장)."""
     return (DECISION_INSERT_SQL, [
         aid, market, decided_on, sid, kind, reason[:200],
         json.dumps(detail, ensure_ascii=False, default=str) if detail else None,
@@ -160,7 +164,7 @@ def _결정(
 
 
 def fill_outcomes(client: Any, market: str, today: str, now: str) -> dict[str, int]:
-    """결정 원장의 5·20·60 거래일 성과를 채운다 (docs/paper.md 8장, 25.1449).
+    """결정 원장의 5·20·60 거래일 성과를 채운다 (docs/paper.md 9장, 25.1449).
 
     달력일이 지나 찼을 수 있는 창만 읽는다(`paper.due_horizons`). 시세가 끊겨 `OUTCOME_GIVE_UP_DAYS` 가 지나도
     못 채우면 까닭을 적고 그만 본다
@@ -490,7 +494,8 @@ def mark(
         그림자["KOSPI"], 그림자["SP500"], json.dumps(v.rows, ensure_ascii=False), new_fills, int(ok), 글,
         json.dumps(v.unknown, ensure_ascii=False) if v.unknown else None, now,
     ])])  # fmt: skip
-    return v, {"recon_ok": ok, "recon_note": 글, "twr": 지수, "kospi": 그림자["KOSPI"], "sp500": 그림자["SP500"]}
+    return v, {"recon_ok": ok, "recon_note": 글, "twr": 지수, "kospi": 그림자["KOSPI"], "sp500": 그림자["SP500"],
+               "prev_equity": float(p["equity_krw"]) if p else None}
 
 
 def sell_decisions(
@@ -633,6 +638,10 @@ def buy_orders(
         r: report_picks.SignalRow = b["row"]
         out.append({
             **o, "currency": 통화, "horizon": r.horizon, "score": r.total_score, "score_as_of": r.as_of_date,
+            "ref_date": r.close_date,
+            # 위험 점검이 보는 원화 금액 — 예약과 같은 잣대 (25.1451)
+            "cost_krw": o["limit_price"] * o["quantity"] * (1 + pp.FEE_BUFFER) * 환율
+            * (1 if 통화 == "KRW" else 1 + pp.FX_BUFFER),
             "rationale": {
                 "alloc": {"amount": b["alloc"].amount, "weight_pct": b["alloc"].weight_pct, "note": b["alloc"].note},
                 "signal": {"horizon": r.horizon, "as_of": r.as_of_date, "total_score": r.total_score,
@@ -695,6 +704,9 @@ def run_step(
     for _ in range(pp.REBUY_COOLDOWN_SESSIONS - 1):
         쉼_시작 = cal.previous_session(market, date.fromisoformat(쉼_시작)).isoformat()
     보강캐시: dict[str, Any] = {}
+    멈춤값 = db.get_setting(client, "paper_halt", None)
+    멈춤 = bool(멈춤값.get("on")) if isinstance(멈춤값, dict) else bool(멈춤값)
+    기록["halted"] = 멈춤
     줄: list[str] = []
     계좌기록: dict[str, Any] = {}
     for acct in accounts:
@@ -704,6 +716,20 @@ def run_step(
                     shadows, 지금)  # fmt: skip
         a기록.update({"recon_ok": 검["recon_ok"], "unknown": len(v.unknown)})
         계좌체결 = [f for f in fills if f.account_id == aid]
+        # 사전 위험 점검의 문맥 (docs/paper.md 11장, 25.1451) — 배분과 따로 한 번 더 막는다
+        상한 = settings or {}
+        예약 = pp.reserved_krw([o for o in 열린 if o.account_id == aid and o.side == "buy"],
+                              {"USD": fx[0] if fx else None})
+        문맥 = rg.Context(
+            equity_krw=v.equity_krw, prev_equity_krw=검["prev_equity"],
+            cash_available_krw=v.cash_krw - (예약 if 예약 is not None else v.cash_krw),
+            holding_krw={int(r["stock_id"]): float(r["value_krw"]) for r in v.rows},
+            sector_of={sid: _stock(client, sid, stock_cache).get("sector")
+                       for sid in {int(r["stock_id"]) for r in v.rows}},
+            max_stock_pct=float(상한.get("max_weight_per_stock") or 10.0),
+            max_sector_pct=float(상한.get("max_weight_per_sector") or 30.0),
+            today=cal.local_today(market).isoformat(), halted=멈춤, frozen=frozenset(frozen),
+        )  # fmt: skip
         if int(client.execute(ORDERS_EXIST_SQL, [aid, market, trade_date]).scalar() or 0) > 0:
             a기록["orders"] = "이미 냄"
         else:
@@ -713,8 +739,11 @@ def run_step(
             이미팖 = {o.stock_id for o in 열린 if o.account_id == aid and o.side == "sell"}
             보유 = pp.positions(계좌체결)
             문장: list[tuple[str, list[Any]]] = []
+            _통과, 막힌매도 = rg.gate([rg.Candidate(sid, "sell", 0.0) for sid in sorted(매도)], 문맥)
+            막힌매도id = {c.stock_id: 까닭 for c, 까닭 in 막힌매도}
+            막힌수 = len(막힌매도)
             for sid, (사유, 근거) in sorted(매도.items()):
-                if sid in 이미팖 or sid not in 보유:
+                if sid in 이미팖 or sid not in 보유 or sid in 막힌매도id:
                     continue
                 문장.append((INSERT_ORDER_SQL, [
                     aid, market, sid, "sell", "market", None, 보유[sid].quantity, 보유[sid].currency, trade_date,
@@ -725,7 +754,12 @@ def run_step(
             # 결정 원장 (25.1449) — 판 것과, 플래그가 섰는데 계좌 규칙이 따르지 않아 들고 간 것(B 의 황색)
             for sid, 메모 in sorted(판정메모.items()):
                 종가, 날 = 메모["ref"]
-                if sid in 매도 and sid not in 이미팖:
+                if sid in 막힌매도id:
+                    # 위험 점검이 매도를 막았다 — 들고 간 것으로 남긴다 (25.1451)
+                    문장.append(_결정(aid, market, trade_date, sid, "hold_flag",
+                                    "위험 점검: " + "; ".join(t for _c, t in 막힌매도id[sid]),
+                                    {"flags": [f["reason_code"] for f in 메모["flags"]]}, 종가, 날, 지금))  # fmt: skip
+                elif sid in 매도 and sid not in 이미팖:
                     문장.append(_결정(aid, market, trade_date, sid, "sell", ",".join(매도[sid][0]),
                                     {"flags": [f["reason_code"] for f in 메모["flags"]]}, 종가, 날, 지금))  # fmt: skip
                 if 메모["hold"]:
@@ -744,7 +778,16 @@ def run_step(
                     settings=settings, price_series=price_series, series_unknown=series_unknown,
                     fx_rate=fx[0] if fx else None, stop_ids=손절, sold_recently=최근판, stock_cache=stock_cache,
                 )  # fmt: skip
+                # 사전 위험 점검 (25.1451) — 통과한 회차만 주문. 한 회차도 못 지난 종목은 결정 원장에서 skip 으로
+                후보 = [rg.Candidate(o["stock_id"], "buy", o["cost_krw"], o["ref_date"], i) for i, o in enumerate(주문)]
+                통과, 막힘 = rg.gate(후보, 문맥)
+                막힌수 += len(막힘)
+                주문 = [주문[c.key] for c in 통과]
+                낸종목 = {o["stock_id"] for o in 주문}
+                막힌까닭 = {c.stock_id: "위험 점검: " + "; ".join(t for _c, t in 까닭) for c, 까닭 in 막힘}
                 for d in b기록.pop("_decisions", []):
+                    if d["kind"] == "buy" and d["stock_id"] not in 낸종목:
+                        d = {**d, "kind": "skip", "reason": 막힌까닭.get(d["stock_id"], "위험 점검")}
                     문장.append(_결정(aid, market, trade_date, d["stock_id"], d["kind"], d["reason"], d["detail"],
                                     d["ref_close"], d["ref_date"], 지금))  # fmt: skip
                 a기록["buy"] = b기록
@@ -757,6 +800,7 @@ def run_step(
             else:
                 a기록["buy"] = {"skipped": "배분하지 않는 날(신호 없음·묵음·추천 못 읽음)"}
             _쓰기(client, 문장)
+            a기록["risk_blocked"] = 막힌수
             a기록["orders"] = sum(1 for sql, _a in 문장 if sql == INSERT_ORDER_SQL)
             a기록["decisions"] = sum(1 for sql, _a in 문장 if sql == DECISION_INSERT_SQL)
         계좌기록[aid] = a기록

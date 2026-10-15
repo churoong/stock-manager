@@ -581,7 +581,7 @@ def compare_line(c: dict[str, Any] | None) -> str | None:
             " — 실제는 보유분만·배당 포함, 모의는 현금 포함·배당 없음")  # fmt: skip
 
 
-#: 결정 원장의 성과 창 — 기준 뒤 몇 번째 거래일(그 종목 시세 행) 종가인가 (docs/paper.md 8장)
+#: 결정 원장의 성과 창 — 기준 뒤 몇 번째 거래일(그 종목 시세 행) 종가인가 (docs/paper.md 9장)
 DECISION_HORIZONS = (5, 20, 60)
 #: 달력일로 이만큼 지나야 그 거래일 수가 찼을 수 있다 — 아직 못 찰 행은 읽지 않는다(읽기 줄이기). 휴일이 몰려도 넉넉하게
 HORIZON_CALENDAR_DAYS = {5: 7, 20: 28, 60: 84}

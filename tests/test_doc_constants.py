@@ -31,6 +31,7 @@ from batch.services import metrics as m
 from batch.services import outcomes as oc
 from batch.services import paper as pp
 from batch.services import quarterly_earnings as qe
+from batch.services import risk_gate as rg
 from batch.services import scoring as sc
 from batch.services import sentiment as se
 from batch.services import share_issuance as si
@@ -694,7 +695,7 @@ class Test밸류_분모:
     "gross_profitability", "robustness", "column_rot", "calibration", "self_grade", "holding_scores",
     "pick_history", "etf_accounts", "etf_tilt", "after_hours", "broker_stats", "disclosure_reaction", "luck", "postmortem",
     "divergence", "tax_sim", "verdict", "forecast_track", "patterns", "insights", "history",
-    "event_history", "simulation", "candidate_factors", "cb_overhang", "buy_thesis", "plan_fill", "target_units", "paper",
+    "event_history", "simulation", "candidate_factors", "cb_overhang", "buy_thesis", "plan_fill", "target_units", "paper", "risk_gate",
 )  # fmt: skip
 
 #: 아직 그물 밖인 모듈과 **왜 아직인지**. 하나씩 줄여 간다
@@ -886,6 +887,10 @@ class Test이웃_모듈들:
         검사(PAPER, f"{pp.OUTCOME_GIVE_UP_DAYS}일이 지나도 못 채우면", "결정 원장 성과 포기 기한 (25.1449)")
         검사(PAPER, f"**{pp.ATTRIBUTION_HORIZON} 거래일 뒤 지수 대비 초과(%p)**", "성과 분해 창 (25.1450)")
         검사(PAPER, f"표본이 {pp.ATTRIBUTION_MIN_SAMPLE}(`ATTRIBUTION_MIN_SAMPLE`) 미만", "성과 분해 참고 문턱 (25.1450)")
+        검사(PAPER, f"어제보다 **{-rg.DAILY_LOSS_HALT_PCT:g}% 넘게** 빠졌으면", "하루 손실 한도 (25.1451)")
+        검사(PAPER, f"하루 {rg.MAX_ORDERS_PER_DAY}건", "하루 매수 주문 상한 (25.1451)")
+        검사(PAPER, f"여유 {rg.CAP_TOLERANCE_PCT:g}%p", "상한 재검사 여유 (25.1451)")
+        검사(PAPER, f"{rg.STALE_PRICE_DAYS}일(달력일)보다 묵었으면", "기준 종가 묵음 (25.1451)")
         검사(PAPER, "**" + "·".join(str(n) for n in pp.DECISION_HORIZONS) + " 번째 거래일**", "결정 원장 성과 창")
 
     def test_스트레스_표본_하한(self) -> None:

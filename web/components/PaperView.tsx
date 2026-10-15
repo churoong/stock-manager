@@ -33,7 +33,7 @@ interface FillRow {
 interface OrderRow { id: number; account_id: string; market: string; ticker: string; name: string; side: string; limit_price: number | null; quantity: number; currency: string; fill_session: string; tranche: number; reason: string }
 interface HistoryRow { account_id: string; as_of: string; invested_krw: number; equity_krw: number; kospi_krw: number | null; sp500_krw: number | null }
 interface RealCompareView { start?: string; end?: string; realPct?: number; paperPct?: Record<string, number | null>; error?: string }
-interface Data { realCompare: RealCompareView | null; invested: number; accounts: Account[]; flows: Flow[]; fills: FillRow[]; orders: OrderRow[]; history: HistoryRow[] }
+interface Data { halted: boolean; realCompare: RealCompareView | null; invested: number; accounts: Account[]; flows: Flow[]; fills: FillRow[]; orders: OrderRow[]; history: HistoryRow[] }
 
 /** 매매 일지의 근거는 **주문 때 얼린 것**이라 오래될수록 묵는 값이 아니다 — 기준일을 노랗게 칠하지 않는다 */
 const JOURNAL_NEVER_STALE_DAYS = 100_000;
@@ -126,6 +126,24 @@ export default function PaperView() {
     await load();
   }
 
+  async function toggleHalt() {
+    const 켜기 = !data?.halted;
+    const 물음 = 켜기
+      ? "모의 매매를 멈춥니다. 다음 배치부터 새 주문(매수·매도)을 내지 않고 결정 원장에 '멈춤' 으로 남깁니다. 체결 판정·평가는 그대로 돕니다. 멈출까요?"
+      : "모의 매매를 다시 켭니다. 다음 배치부터 규칙대로 주문합니다. 켤까요?";
+    if (!confirm(물음)) return;
+    setBusy(true);
+    const r = await readJson<{ ok?: boolean }>("/api/paper/halt", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ on: 켜기 }),
+    });
+    const body = bodyOf<{ ok?: boolean }>(r);
+    setBusy(false);
+    setNotice(body.errors?.length ? body.errors.join(" · ") : 켜기 ? "멈췄습니다 — 다음 배치부터" : "다시 켰습니다 — 다음 배치부터");
+    await load();
+  }
+
   async function cancel(flow: Flow) {
     const 지금 = data?.invested ?? 0;
     if (!confirm(`입금 #${flow.id} (${flow.flow_date}, ${won(flow.amount_krw)})을 취소합니다.\n장부에는 취소 행이 더해지고 원래 행은 남습니다.\n\n취소 뒤 총 투자금액: ${won(지금 - Number(flow.amount_krw))}\n\n취소할까요?`)) return;
@@ -176,6 +194,17 @@ export default function PaperView() {
           </button>
         </div>
         {notice ? <p className="mt-2 text-sm text-slate-700 dark:text-slate-300">{notice}</p> : null}
+        <div className="mt-3 flex items-center gap-2 text-sm">
+          {data.halted ? <span className="font-medium text-red-600 dark:text-red-400">⏸ 모의 매매 멈춤 중 — 새 주문을 내지 않습니다</span> : null}
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void toggleHalt()}
+            className="rounded border border-slate-300 px-2 py-1 text-xs dark:border-slate-700"
+          >
+            {data.halted ? "다시 켜기" : "모의 매매 멈춤"}
+          </button>
+        </div>
       </section>
 
       <div className="grid gap-4 md:grid-cols-2">
