@@ -905,8 +905,11 @@ def committee_step(
     문장.append((MEETING_INSERT_SQL, [account, market, trade_date, 지문,
                                      json.dumps(co.minutes_json(items, approved, charter, 메모), ensure_ascii=False,
                                                 default=str), now]))  # fmt: skip
+    # 부서 입장 = [입장, 확신(, 자료 없음 까닭)] — 회의록과 같은 모양. 까닭을 빼면 자료 없음이 결정 원장에서
+    # "중립" 으로 섞여 부서 성적표의 중립 표본이 부풀었다 (25.1471)
     기록 = {i.stock_id: {"vote": i.vote, "issue": i.issue, "vetoed_by": list(i.vetoed_by), "minority": list(i.minority),
-                        "opinions": {k: [o.stance, o.conviction] for k, o in i.opinions.items()},
+                        "opinions": {k: [o.stance, o.conviction] + ([o.note] if o.note else [])
+                                     for k, o in i.opinions.items()},
                         "charter_hash": 지문} for i in items}  # fmt: skip
     행들: dict[int, list[report_picks.SignalRow]] = {}
     for r in report_picks.with_criteria(signal_rows):

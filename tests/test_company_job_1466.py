@@ -68,6 +68,8 @@ def test_company_buys_only_what_committee_passed(c: Client, monkeypatch: pytest.
     부결 = c.q("SELECT kind, reason, rule_version, detail_json FROM paper_decisions WHERE account_id = 'A' AND stock_id = 3")
     assert 부결[0][0] == "skip" and 부결[0][1].startswith("위원회:") and 부결[0][2] == 2
     assert json.loads(부결[0][3])["committee"]["opinions"]["research"][0] == -1
+    # 자료 없음은 까닭과 함께 — 중립(0)과 가른다 (25.1471)
+    assert json.loads(부결[0][3])["committee"]["opinions"]["sentiment"][2].startswith("자료 없음")
     산것 = c.q("SELECT detail_json, rule_version FROM paper_decisions WHERE account_id = 'A' AND stock_id = 1")
     assert json.loads(산것[0][0])["committee"]["vote"] == pytest.approx(2.0) and 산것[0][1] == 2
     assert c.q("SELECT DISTINCT rule_version FROM paper_decisions WHERE account_id = 'B'") == [(1,)]
