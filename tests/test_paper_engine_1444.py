@@ -224,3 +224,16 @@ def test_window_change_edges() -> None:
     assert pp.window_change(rows, "2026-09-01", "2026-10-31") == (pytest.approx(20.0), "2026-10-01", "2026-10-05")
     assert pp.window_change(rows, "2026-10-06", "2026-10-31") == (pytest.approx(0.0), "2026-10-05", "2026-10-05")
     assert pp.window_change(rows, "2026-10-02", "2026-09-30") is None
+
+
+def test_decision_outcomes_and_due_windows() -> None:
+    """결정 원장 성과 (25.1449) — 거래일 수가 찬 창만, 지수는 그 날짜 이하 마지막 값으로."""
+    뒤 = [(f"2026-10-{d:02d}", 100 + d) for d in range(1, 26)]  # 25 거래일
+    o = pp.outcomes(100.0, 뒤, 2_000.0, {"2026-10-05": 2_100.0, "2026-10-20": None})
+    assert o["ret_5d"] == pytest.approx(5.0) and o["bench_5d"] == pytest.approx(5.0)
+    assert o["ret_20d"] == pytest.approx(20.0) and o["bench_20d"] is None
+    assert "ret_60d" not in o  # 60 거래일은 아직
+    assert pp.outcomes(None, 뒤, 1.0, {}) == {}
+    assert pp.due_horizons("2026-10-01", "2026-10-07", {}) == []
+    assert pp.due_horizons("2026-10-01", "2026-10-08", {}) == [5]
+    assert pp.due_horizons("2026-10-01", "2026-12-31", {"ret_5d": 1.0}) == [20, 60]

@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -63,7 +63,7 @@ def _신호() -> report_picks.SignalRow:
         tranche_plan=[{"step": 1, "ratio": 0.4, "price": 10_000, "amount": None},
                       {"step": 2, "ratio": 0.3, "price": 9_800, "amount": None},
                       {"step": 3, "ratio": 0.3, "price": 9_600, "amount": None}],
-        as_of_date="2026-10-14", total_score=72.0, sector="전자",
+        as_of_date="2026-10-14", total_score=72.0, sector="전자", close=10_000, close_date="2026-10-14",
     )  # fmt: skip
 
 
@@ -273,3 +273,60 @@ def test_real_portfolio_comparison_line(client: Client, monkeypatch: pytest.Monk
     assert len(비교) == 1 and "실제 +" in 비교[0]
     assert 기록["real_compare"]["start"] == "2026-10-14"
     assert c.q("SELECT COUNT(*) FROM portfolio_values") == [(3,)]  # 읽기만 했다
+
+
+
+def test_decision_ledger_records_what_was_not_done(client: Client, monkeypatch: pytest.MonkeyPatch) -> None:
+    """결정 원장 — 산 것·못 산 것(까닭)·안 찬 회차·판 것·플래그를 따르지 않고 든 것 (docs/paper.md 8장, 25.1449)."""
+    from batch.services import sell_flags as sf
+
+    c = client
+    금액없음 = report_picks.SignalRow(**{**_신호().__dict__, "stock_id": 3, "ticker": "000660", "suggested_weight_pct": None})
+    다음 = cal.next_session("KR", date(2026, 10, 14))
+    monkeypatch.setattr(cal, "local_today", lambda _m=None: 다음)
+    job.run_step(c, market="KR", trade_date="2026-10-14", late=False, signal_rows=[_신호(), 금액없음], settings=설정,
+                 price_series={}, series_unknown={}, allocate=True, now=datetime(2026, 10, 15, tzinfo=UTC))  # fmt: skip
+    결정 = c.q("SELECT account_id, stock_id, kind, reason, ref_close, ref_date FROM paper_decisions ORDER BY 1, 2")
+    assert ("A", 1, "buy", "2부 배분", 10_000, "2026-10-14") in 결정
+    assert any(r[:3] == ("A", 3, "skip") for r in 결정)  # 2부에서 빠진 후보도 까닭과 함께
+    _시세(c, "2026-10-15", 10_100, 9_900)
+    _하루(c, monkeypatch, "2026-10-15", signals=False)
+    안찬 = c.q("SELECT account_id, decided_on, ref_close FROM paper_decisions WHERE kind = 'missed' ORDER BY 1")
+    assert 안찬 == [("A", "2026-10-15", 9_900), ("B", "2026-10-15", 9_900)]  # 2·3회차는 한 줄로
+    # 감성급락만 선 날 — A 는 팔고, B 는 규칙상 들고 간다(그 결과를 잰다)
+    monkeypatch.setattr(sf, "evaluate", lambda h, _t, _r=None: [sf.Flag(h.stock_id, "yellow", "감성급락", "x", [])])
+    _시세(c, "2026-10-16", 9_900, 9_950)
+    _하루(c, monkeypatch, "2026-10-16", signals=False)
+    판정 = c.q("SELECT account_id, kind, reason FROM paper_decisions WHERE decided_on = '2026-10-16' ORDER BY 1")
+    assert 판정 == [("A", "sell", "감성급락"), ("B", "hold_flag", "감성급락")]
+    # 같은 날 다시 돌아도 원장은 그대로
+    n = c.q("SELECT COUNT(*) FROM paper_decisions")
+    _하루(c, monkeypatch, "2026-10-16", signals=False)
+    assert c.q("SELECT COUNT(*) FROM paper_decisions") == n
+
+
+def test_decision_outcomes_fill_from_prices_and_index(client: Client) -> None:
+    """성과 채우기 — 기준 뒤 5·20 거래일 종가와 같은 날짜 KOSPI, 60 은 아직 (25.1449)."""
+    c = client
+    c.conn.execute(
+        "INSERT INTO paper_decisions (account_id, market, decided_on, stock_id, kind, reason, ref_close, ref_date,"
+        " created_at) VALUES ('B', 'KR', '2026-09-01', 1, 'hold_flag', '감성급락', 10000, '2026-09-01', 't')"
+    )
+    날들 = [d for d in (date(2026, 9, 1) + timedelta(days=i) for i in range(1, 50)) if d.weekday() < 5][:30]
+    for i, d in enumerate(날들, 1):
+        _시세(c, d.isoformat(), 10_000 + i * 100, 10_000 + i * 100)
+        c.conn.execute("INSERT INTO index_prices (index_code, date, close, source, fetched_at) VALUES ('KOSPI', ?, ?, 't', 't')",
+                       [d.isoformat(), 2_000 + i * 10])  # fmt: skip
+    c.conn.execute("INSERT INTO index_prices (index_code, date, close, source, fetched_at) VALUES ('KOSPI', '2026-09-01', 2000, 't', 't')")
+    기록 = job.fill_outcomes(c, "KR", "2026-10-15", "now")
+    assert 기록["filled"] == 1
+    r5, r20, r60, b5, b20 = c.q("SELECT ret_5d, ret_20d, ret_60d, bench_5d, bench_20d FROM paper_decisions")[0]
+    assert r5 == pytest.approx(5.0) and r20 == pytest.approx(20.0) and r60 is None
+    assert b5 == pytest.approx(2.5) and b20 == pytest.approx(10.0)
+    # 시세가 끝내 모자라면 기한 뒤 까닭을 적고 그만 본다
+    기록 = job.fill_outcomes(c, "KR", "2027-04-01", "now")
+    assert 기록["gave_up"] == 1
+    assert "거래일뿐" in c.q("SELECT outcome_note FROM paper_decisions")[0][0]
+    # 뒤 실행이 이미 채운 창을 지우지 않는다
+    assert c.q("SELECT ret_5d, ret_20d, bench_5d FROM paper_decisions")[0] == (
+        pytest.approx(5.0), pytest.approx(20.0), pytest.approx(2.5))

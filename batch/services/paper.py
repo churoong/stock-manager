@@ -579,3 +579,42 @@ def compare_line(c: dict[str, Any] | None) -> str | None:
     모의 = " · ".join(f"{aid} {_퍼센트(v)}" for aid, v in c["paper_pct"].items())
     return (f"실제 투자와 비교({c['start']}~{c['end']}, 시간가중): 실제 {_퍼센트(c['real_pct'])} · {모의}"
             " — 실제는 보유분만·배당 포함, 모의는 현금 포함·배당 없음")  # fmt: skip
+
+
+#: 결정 원장의 성과 창 — 기준 뒤 몇 번째 거래일(그 종목 시세 행) 종가인가 (docs/paper.md 8장)
+DECISION_HORIZONS = (5, 20, 60)
+#: 달력일로 이만큼 지나야 그 거래일 수가 찼을 수 있다 — 아직 못 찰 행은 읽지 않는다(읽기 줄이기). 휴일이 몰려도 넉넉하게
+HORIZON_CALENDAR_DAYS = {5: 7, 20: 28, 60: 84}
+#: 이만큼 지나도 60 거래일 시세가 안 모이면(정지·상장폐지) 더 기다리지 않고 까닭을 적는다
+OUTCOME_GIVE_UP_DAYS = 200
+
+
+def outcomes(
+    ref_close: float | None, after: list[tuple[str, float]], bench_ref: float | None, bench_on: dict[str, float | None],
+) -> dict[str, float | None]:
+    """결정 뒤 성과 — `after` 는 기준일 **뒤** 그 종목 종가 [(날짜, 종가)] 날짜 순,
+    `bench_on` 은 {그 날짜: 지수(그날 이하 마지막)}.
+
+    거래일 수가 아직 안 찬 창은 넣지 않는다(이미 채운 값을 덮지 않게 부르는 쪽이 COALESCE).
+    지수를 모르면 지수 칸만 비운다
+    """
+    out: dict[str, float | None] = {}
+    if not ref_close or ref_close <= 0:
+        return out
+    for n in DECISION_HORIZONS:
+        if len(after) < n:
+            continue
+        날, 값 = after[n - 1]
+        out[f"ret_{n}d"] = (float(값) / float(ref_close) - 1) * 100
+        b = bench_on.get(날)
+        out[f"bench_{n}d"] = (float(b) / float(bench_ref) - 1) * 100 if b and bench_ref else None
+    return out
+
+
+def due_horizons(decided_on: str, today: str, have: dict[str, Any]) -> list[int]:
+    """오늘 채울 수 있을지 모르는(달력일이 지난) 아직 빈 창."""
+    from datetime import date
+
+    지난 = (date.fromisoformat(today) - date.fromisoformat(decided_on)).days
+    return [n for n in DECISION_HORIZONS
+            if have.get(f"ret_{n}d") is None and 지난 >= HORIZON_CALENDAR_DAYS[n]]  # fmt: skip

@@ -85,6 +85,8 @@ ESSENTIAL_TABLES = [
     "paper_orders",
     "paper_fills",
     "paper_daily",
+    # 결정 원장 — 그날 안 한 결정과 기준 종가. 지난 신호를 다시 내면 다른 판이라 되만들 수 없다 (25.1449)
+    "paper_decisions",
     "schema_migrations",
 ]
 

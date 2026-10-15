@@ -99,6 +99,31 @@ REAL_TWR_SQL = "SELECT date, twr_index FROM portfolio_values WHERE date >= ? ORD
 #: 실제 계열을 모의 첫 기록보다 이만큼 앞부터 읽는다 — 시작일 이하의 마지막 행을 잡으려고(주말·휴일 사이)
 REAL_LOOKBACK_DAYS = 14
 
+#: 결정 원장 (docs/paper.md 8장, 25.1449) — 안 한 결정까지. 재실행은 유일 제약이 막는다
+DECISION_INSERT_SQL = (
+    "INSERT OR IGNORE INTO paper_decisions (account_id, market, decided_on, stock_id, kind, reason, detail_json,"
+    " ref_close, ref_date, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+)
+PENDING_DECISIONS_SQL = (
+    "SELECT id, stock_id, decided_on, ref_close, ref_date, ret_5d, ret_20d, ret_60d FROM paper_decisions"
+    " WHERE ret_60d IS NULL AND outcome_note IS NULL AND decided_on <= ? AND market = ? ORDER BY decided_on LIMIT ?"
+)
+AFTER_CLOSES_SQL = (
+    "SELECT date, close FROM prices WHERE stock_id = ? AND date > ? AND close > 0 ORDER BY date LIMIT ?"
+)
+INDEX_ON_OR_BEFORE_SQL = (
+    "SELECT close FROM index_prices WHERE index_code = ? AND date <= ? ORDER BY date DESC LIMIT 1"
+)
+UPDATE_OUTCOME_SQL = (
+    "UPDATE paper_decisions SET ret_5d = COALESCE(ret_5d, ?), ret_20d = COALESCE(ret_20d, ?),"
+    " ret_60d = COALESCE(ret_60d, ?), bench_5d = COALESCE(bench_5d, ?), bench_20d = COALESCE(bench_20d, ?),"
+    " bench_60d = COALESCE(bench_60d, ?), outcome_note = ?, outcome_at = ? WHERE id = ?"
+)
+#: 한 번에 성과를 채우는 결정 수 — 하루 읽기 상한(행당 최대 60 시세 행 + 지수 몇 행)
+OUTCOME_BATCH = 300
+#: 결정의 기준 지수
+BENCH_INDEX = {"KR": "KOSPI", "US": "SP500"}
+
 #: 미국 환율이 이 날수보다 묵었으면 쓰지 않는다 — 2부와 같은 기준(`signals_job.load_settings` 7일)
 FX_MAX_AGE_DAYS = 7
 
@@ -107,6 +132,62 @@ KST_MARKET = "KR"
 
 def _원(v: float) -> float:
     return float(round(v))
+
+
+def _결정(
+    aid: str, market: str, decided_on: str, sid: int, kind: str, reason: str, detail: dict[str, Any] | None,
+    ref_close: Any, ref_date: Any, now: str,
+) -> tuple[str, list[Any]]:
+    """결정 원장 한 줄 (docs/paper.md 8장)."""
+    return (DECISION_INSERT_SQL, [
+        aid, market, decided_on, sid, kind, reason[:200],
+        json.dumps(detail, ensure_ascii=False, default=str) if detail else None,
+        None if ref_close is None else float(ref_close), ref_date, now,
+    ])  # fmt: skip
+
+
+def fill_outcomes(client: Any, market: str, today: str, now: str) -> dict[str, int]:
+    """결정 원장의 5·20·60 거래일 성과를 채운다 (docs/paper.md 8장, 25.1449).
+
+    달력일이 지나 찼을 수 있는 창만 읽는다(`paper.due_horizons`). 시세가 끊겨 `OUTCOME_GIVE_UP_DAYS` 가 지나도
+    못 채우면 까닭을 적고 그만 본다
+    """
+    from datetime import date as _date
+
+    기한 = (_date.fromisoformat(today) - timedelta(days=min(pp.HORIZON_CALENDAR_DAYS.values()))).isoformat()
+    rows = client.execute(PENDING_DECISIONS_SQL, [기한, market, OUTCOME_BATCH]).dicts()
+    지수캐시: dict[str, float | None] = {}
+    코드 = BENCH_INDEX.get(market, "KOSPI")
+
+    def 지수(날: str) -> float | None:
+        if 날 not in 지수캐시:
+            r = client.execute(INDEX_ON_OR_BEFORE_SQL, [코드, 날]).rows
+            지수캐시[날] = float(r[0][0]) if r else None
+        return 지수캐시[날]
+
+    채움, 포기 = 0, 0
+    문장: list[tuple[str, list[Any]]] = []
+    for r in rows:
+        창 = pp.due_horizons(str(r["decided_on"]), today, r)
+        if not 창 or r["ref_close"] is None or not r["ref_date"]:
+            continue
+        행들 = client.execute(AFTER_CLOSES_SQL, [r["stock_id"], r["ref_date"], max(창)]).rows
+        뒤 = [(str(d), float(c)) for d, c in 행들]
+        그날들 = {뒤[n - 1][0]: 지수(뒤[n - 1][0]) for n in 창 if len(뒤) >= n}
+        o = pp.outcomes(r["ref_close"], 뒤, 지수(str(r["ref_date"])), 그날들)
+        지난 = (_date.fromisoformat(today) - _date.fromisoformat(str(r["decided_on"]))).days
+        포기함 = "ret_60d" not in o and 지난 >= pp.OUTCOME_GIVE_UP_DAYS
+        if not o and not 포기함:
+            continue
+        문장.append((UPDATE_OUTCOME_SQL, [
+            *(o.get(f"ret_{n}d") for n in pp.DECISION_HORIZONS), *(o.get(f"bench_{n}d") for n in pp.DECISION_HORIZONS),
+            f"{pp.OUTCOME_GIVE_UP_DAYS}일 지나도 시세 {len(뒤)}거래일뿐" if 포기함 else None, now, r["id"],
+        ]))  # fmt: skip
+        채움 += bool(o)
+        포기 += 포기함
+    if 문장:
+        client.batch(문장)
+    return {"pending_read": len(rows), "filled": 채움, "gave_up": 포기}
 
 
 def _쓰기(client: Any, statements: list[tuple[str, list[Any]]]) -> None:
@@ -241,7 +322,13 @@ def fill_orders(
                 기록["deferred"] = 기록.get("deferred", 0) + 1
                 continue
         if 가격 is None:
-            _쓰기(client, [(EXPIRE_SQL, [trade_date, 까닭, o.id])])
+            문장 = [(EXPIRE_SQL, [trade_date, 까닭, o.id])]
+            if o.side == "buy" and bar is not None and not pp.halted(bar):
+                # 지정가가 안 찬 회차 — 그 뒤 얼마나 올랐나(놓친 기회)를 결정 원장으로 잰다 (25.1449)
+                문장.append(_결정(o.account_id, market, 날, o.stock_id, "missed", 까닭,
+                                {"limit_price": o.limit_price, "quantity": o.quantity, "order_id": o.id},
+                                bar.close, 날, now))  # fmt: skip
+            _쓰기(client, 문장)
             남은매수.pop(o.id, None)
             기록["expired"] = 기록.get("expired", 0) + 1
             continue
@@ -384,8 +471,13 @@ def mark(
 def sell_decisions(
     client: Any, market: str, sell_rule: str, account_fills: list[pp.Fill], frozen: set[int],
     stock_cache: dict[int, dict[str, Any]], targets: dict | None, today: date, enrich_cache: dict[str, Any],
+    notes: dict[int, dict[str, Any]] | None = None,
 ) -> dict[int, tuple[list[str], list[dict[str, Any]]]]:
-    """이 시장 보유의 매도 판정 — 실제 보유와 같은 보강·같은 `evaluate` (docs/paper.md 2.2)."""
+    """이 시장 보유의 매도 판정 — 실제 보유와 같은 보강·같은 `evaluate` (docs/paper.md 2.2).
+
+    `notes` 를 주면 종목마다 {ref: (종가, 날짜), hold: [계좌 규칙이 따르지 않은 플래그], flags: 근거} 를 채운다
+    — 결정 원장용(25.1449)
+    """
     from batch.jobs import sell_flags as sf_job
 
     행들: list[dict[str, Any]] = []
@@ -418,10 +510,15 @@ def sell_decisions(
             continue
         flags = sf.evaluate(h, today, targets)
         팔것 = pp.sells_for(sell_rule, {h.stock_id: {f.reason_code for f in flags}})
+        근거 = [{"reason_code": f.reason_code, "level": f.level, "rationale": f.rationale_text,
+                "criteria": f.criteria} for f in flags]  # fmt: skip
         if 팔것:
-            근거 = [{"reason_code": f.reason_code, "level": f.level, "rationale": f.rationale_text,
-                    "criteria": f.criteria} for f in flags]  # fmt: skip
             out[h.stock_id] = (팔것[h.stock_id], 근거)
+        if notes is not None and flags:
+            따름 = set(팔것.get(h.stock_id, []))
+            notes[h.stock_id] = {"ref": (행["market_value"] / 행["quantity"] if 행["market_value"] else None,
+                                         행["price_date"]),
+                                 "hold": sorted({f.reason_code for f in flags} - 따름), "flags": 근거}  # fmt: skip
     return out
 
 
@@ -488,6 +585,23 @@ def buy_orders(
         배분.append({"stock_id": best.stock_id, "amount": a.amount, "tranches": a.tranches, "row": best, "alloc": a})
     주문, 빠짐 = pp.size_buys(배분, valuation.cash_krw - 예약, 환율, sold_recently, 통화)
     by_sid = {b["stock_id"]: b for b in 배분}
+    # 결정 원장 (25.1449) — 산 후보·못 산 후보(까닭)와 그때의 기준 종가
+    결정: list[dict[str, Any]] = []
+    낸 = {o["stock_id"] for o in 주문}
+    for b in 배분:
+        r0: report_picks.SignalRow = b["row"]
+        까닭 = next((x["why"] for x in 빠짐 if x.get("stock_id") == b["stock_id"]), "주문 없음")
+        결정.append({"stock_id": b["stock_id"], "kind": "buy" if b["stock_id"] in 낸 else "skip",
+                     "reason": "2부 배분" if b["stock_id"] in 낸 else 까닭,
+                     "ref_close": r0.close, "ref_date": r0.close_date,
+                     "detail": {"horizon": r0.horizon, "score": r0.total_score, "weight_pct": r0.suggested_weight_pct,
+                                "amount": b["amount"], "prices": [t.get("price_at_or_below") for t in b["tranches"]]}})
+    for e in pv.excluded:
+        r0 = (by_ticker.get(e.ticker) or [None])[0]  # type: ignore[assignment]
+        if r0 is not None:
+            결정.append({"stock_id": r0.stock_id, "kind": "skip", "reason": e.reason, "ref_close": r0.close,
+                         "ref_date": r0.close_date,
+                         "detail": {"horizon": r0.horizon, "score": r0.total_score, "note": e.detail[:200]}})
     out: list[dict[str, Any]] = []
     for o in 주문:
         b = by_sid[o["stock_id"]]
@@ -504,7 +618,7 @@ def buy_orders(
             },
         })  # fmt: skip
     return out, {"allocations": len(pv.allocations), "orders": len(out), "skipped": 빠짐[:10],
-                 "excluded": len(pv.excluded)}  # fmt: skip
+                 "excluded": len(pv.excluded), "_decisions": 결정}  # fmt: skip
 
 
 def run_step(
@@ -568,8 +682,9 @@ def run_step(
         if int(client.execute(ORDERS_EXIST_SQL, [aid, market, trade_date]).scalar() or 0) > 0:
             a기록["orders"] = "이미 냄"
         else:
+            판정메모: dict[int, dict[str, Any]] = {}
             매도 = sell_decisions(client, market, 규칙, 계좌체결, frozen, stock_cache, targets,
-                               cal.local_today(market), 보강캐시)  # fmt: skip
+                               cal.local_today(market), 보강캐시, 판정메모)  # fmt: skip
             이미팖 = {o.stock_id for o in 열린 if o.account_id == aid and o.side == "sell"}
             보유 = pp.positions(계좌체결)
             문장: list[tuple[str, list[Any]]] = []
@@ -581,7 +696,17 @@ def run_step(
                     다음장, 기준, 0, ",".join(사유), None, None, None,
                     json.dumps({"flags": 근거, "sell_rule": 규칙}, ensure_ascii=False, default=str), 판, 지금,
                 ]))  # fmt: skip
-            a기록["sells"] = len(문장)
+            a기록["sells"] = len(문장)  # 이 자리까지는 매도 주문만 있다
+            # 결정 원장 (25.1449) — 판 것과, 플래그가 섰는데 계좌 규칙이 따르지 않아 들고 간 것(B 의 황색)
+            for sid, 메모 in sorted(판정메모.items()):
+                종가, 날 = 메모["ref"]
+                if sid in 매도 and sid not in 이미팖:
+                    문장.append(_결정(aid, market, trade_date, sid, "sell", ",".join(매도[sid][0]),
+                                    {"flags": [f["reason_code"] for f in 메모["flags"]]}, 종가, 날, 지금))  # fmt: skip
+                if 메모["hold"]:
+                    문장.append(_결정(aid, market, trade_date, sid, "hold_flag", ",".join(메모["hold"]),
+                                    {"flags": [f["reason_code"] for f in 메모["flags"]], "sell_rule": 규칙},
+                                    종가, 날, 지금))  # fmt: skip
             최근판 = {f.stock_id for f in 계좌체결 if f.side == "sell" and f.fill_date >= 쉼_시작} | set(매도)
             if allocate and settings is not None and signal_rows:
                 손절 = {sid for sid, (사유, _근거) in 매도.items() if "손절" in 사유}
@@ -594,6 +719,9 @@ def run_step(
                     settings=settings, price_series=price_series, series_unknown=series_unknown,
                     fx_rate=fx[0] if fx else None, stop_ids=손절, sold_recently=최근판, stock_cache=stock_cache,
                 )  # fmt: skip
+                for d in b기록.pop("_decisions", []):
+                    문장.append(_결정(aid, market, trade_date, d["stock_id"], d["kind"], d["reason"], d["detail"],
+                                    d["ref_close"], d["ref_date"], 지금))  # fmt: skip
                 a기록["buy"] = b기록
                 for o in 주문:
                     문장.append((INSERT_ORDER_SQL, [
@@ -604,7 +732,8 @@ def run_step(
             else:
                 a기록["buy"] = {"skipped": "배분하지 않는 날(신호 없음·묵음·추천 못 읽음)"}
             _쓰기(client, 문장)
-            a기록["orders"] = len(문장)
+            a기록["orders"] = sum(1 for sql, _a in 문장 if sql == INSERT_ORDER_SQL)
+            a기록["decisions"] = sum(1 for sql, _a in 문장 if sql == DECISION_INSERT_SQL)
         계좌기록[aid] = a기록
         손익률 = f"{v.pnl_pct:+.1f}%" if v.pnl_pct is not None else "—"
         줄.append(f"{aid}: 평가 {v.equity_krw:,.0f}원 (손익 {손익률}, 시간가중 {(검['twr'] - 1) * 100:+.1f}%,"
@@ -613,6 +742,11 @@ def run_step(
             줄.append(f"⚠️ 모의 {aid} 장부 검산 어긋남 — {검['recon_note']}")
     기록["accounts"] = 계좌기록
     기록["frozen"] = sorted(frozen)
+    # 결정 원장 성과 채우기 (25.1449) — 곁다리. 실패해도 오늘 단계는 그대로
+    try:
+        기록["decision_outcomes"] = fill_outcomes(client, market, 오늘, 지금)
+    except Exception as exc:  # noqa: BLE001 — 성과 채우기만 빠진다. 까닭은 기록에
+        기록["decision_outcomes"] = {"error": str(exc)[:200]}
     if 읽기0 is not None:
         기록["reads"] = getattr(client.reads, "total", 0) - 읽기0
     머리 = ["🧪 모의 투자 " + " · ".join(글 for 글 in 줄 if not 글.startswith("⚠️"))]
