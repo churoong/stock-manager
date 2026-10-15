@@ -37,9 +37,11 @@ def flow_card(rows: list[dict]) -> dict | None:
     40행 평균, 신용 잔고율 최신과 20행 전."""
     if not rows:
         return None
-    out: dict[str, Any] = {"latest": rows[0].get("date"), "windows": {}}
     # 투자자별 금액이 있는 행만 센다 — 공매도만 있는 행을 "순매수 0" 으로 세지 않는다 (25.1042, 교차검증 감사)
     매매 = [r for r in rows if r.get("frgn_net_amt") is not None]
+    # **기준일은 합에 든 행의 날짜** (docs/infra.md 25.1397, KIS 수급 감사). 첫 행은 공매도만 있는 행일 수 있어(투자자별
+    # 수집이 멈추면 늘 그렇다) "기준 오늘" 아래 2주 묵은 합이 실렸다
+    out: dict[str, Any] = {"latest": (매매[0] if 매매 else rows[0]).get("date"), "windows": {}}
     for w in FLOW_WINDOWS:
         창 = 매매[:w]
         if len(창) < w // 2:
@@ -59,9 +61,12 @@ def flow_card(rows: list[dict]) -> dict | None:
     공 = [float(r["short_vol_pct"]) for r in rows[:60] if isinstance(r.get("short_vol_pct"), (int, float))]
     if len(공) >= 30:
         out["short"] = {"recent": sum(공[:20]) / 20, "before": sum(공[20:]) / len(공[20:])}
-    신 = [r.get("credit_rmnd_pct") for r in rows]
-    if len(신) > 20 and isinstance(신[0], (int, float)) and isinstance(신[20], (int, float)):
-        out["credit"] = {"now": float(신[0]), "before": float(신[20])}
+    # 신용은 **신용 칸이 있는 행만** (25.1397) — 신용잔고는 결제일 뒤에야 나와 투자자별보다 늦다. 날짜순 첫 행은 늘
+    # 신용이 빈 행이라 예전에는 신용 줄이 영영 나오지 않았다. 20번째 값과 견주고 기준일을 함께 둔다
+    신 = [(r.get("date"), float(r["credit_rmnd_pct"])) for r in rows
+         if isinstance(r.get("credit_rmnd_pct"), (int, float))]  # fmt: skip
+    if len(신) > 20:
+        out["credit"] = {"now": 신[0][1], "before": 신[20][1], "date": 신[0][0]}
     return out
 
 
@@ -84,7 +89,8 @@ def flow_lines(card: dict | None) -> list[str]:
     if card.get("short"):
         줄.append(f"공매도 비중 최근 20일 평균 {card['short']['recent']:.1f}% (그 앞 {card['short']['before']:.1f}%)")
     if card.get("credit"):
-        줄.append(f"신용 잔고율 {card['credit']['now']:.2f}% (20거래일 전 {card['credit']['before']:.2f}%)")
+        기준 = f", {card['credit']['date']} 기준" if card["credit"].get("date") else ""
+        줄.append(f"신용 잔고율 {card['credit']['now']:.2f}% (20거래일 전 {card['credit']['before']:.2f}%{기준})")
     return 줄
 
 

@@ -314,8 +314,13 @@ def run(limit: int | None = None) -> int:
         step = {"stocks": len(stocks), "rows": len(statements), "opinions": len(의견행), "events": len(행사행),
                 "opinion_since": 의견창.isoformat(), "after_hours": 시간외, "calls": qc.calls, "failed": len(failed),
                 "failed_sample": dict(list(failed.items())[:10])}  # fmt: skip
-        # 절반 넘게 못 받았으면 실패로 남긴다 — 조금 빠진 것은 다음 날 겹쳐 받으며 메워진다(30일 창)
-        status = "failed" if len(failed) > len(stocks) * 4 / 2 else ("partial" if failed else "success")
+        # **출처마다** 절반 넘게 못 받았으면 실패로 남긴다 (docs/infra.md 25.1397, KIS 수급 감사) — 조금 빠진 것은
+        # 다음 날 겹쳐 받으며 메워진다(30일 창). 예전 문턱은 네 호출 합의 절반이라 투자자별 하나가 전 종목에서
+        # 실패해도(약 1/4) `partial` 이었고, 공매도 행이 그날 날짜를 계속 채워 신선도는 초록 — KIS 가 30일만 주므로
+        # 한 달 지나면 영영 잃는다
+        출처별 = failed_by_source(failed)
+        step["failed_by_source"] = 출처별
+        status = run_status(출처별, len(stocks), len(failed))
         db.finish_batch_run(client, run_id, status=status, step_log=step,
                             error_text=f"못 받은 호출 {len(failed)}개" if failed else None)  # fmt: skip
         print(f"수급 수집: 종목 {len(stocks)} · 행 {len(statements)} (의견 {len(의견행)} · 일정 {len(행사행)})"
@@ -323,6 +328,27 @@ def run(limit: int | None = None) -> int:
         return 1 if status == "failed" else 0
     finally:
         client.close()
+
+
+#: 종목마다 부르는 출처 — 실패 키 `"{코드}:{출처}"` 의 뒷부분 (25.1397)
+PER_STOCK_SOURCES = ("의견", "투자자", "공매도", "신용")
+
+
+def failed_by_source(failed: dict[str, str]) -> dict[str, int]:
+    """실패 키를 출처별로 센다. 종목에 딸리지 않은 실패(일정·시간외)는 `기타`"""
+    out: dict[str, int] = {}
+    for key in failed:
+        출처 = key.rsplit(":", 1)[-1] if ":" in key else ""
+        출처 = 출처 if 출처 in PER_STOCK_SOURCES else "기타"
+        out[출처] = out.get(출처, 0) + 1
+    return out
+
+
+def run_status(by_source: dict[str, int], n_stocks: int, n_failed: int) -> str:
+    """종목별 출처 하나라도 절반 넘게 실패하면 `failed`, 조금이라도 실패하면 `partial` (25.1397)"""
+    if n_stocks and any(by_source.get(k, 0) > n_stocks / 2 for k in PER_STOCK_SOURCES):
+        return "failed"
+    return "partial" if n_failed else "success"
 
 
 def main() -> int:
