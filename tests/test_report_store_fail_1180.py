@@ -60,7 +60,7 @@ def _준비(monkeypatch: pytest.MonkeyPatch, 실패수: int) -> tuple[list, list
     m(daily, "_other_report_reserved", lambda *a, **k: (0.0, None))
     m(daily, "_shake_weights", lambda c: (None, 0.0))
     m(daily, "_pick_history", lambda c, mk, d, w: {})
-    m(daily, "_self_grade", lambda c, mk, d, w: None)
+    m(daily, "_self_grade", lambda c, mk, d, w, stats=None: None)
     m(daily, "_holding_scores", lambda c, a, w: [])
     m(daily, "_corp_event_lines", lambda c, d, j, w=None: [])
     m(daily, "_divergence_lines", lambda c, d, p, w=None: [])
