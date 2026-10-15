@@ -170,3 +170,18 @@ def test_표_가운데서_잘리면_skip_rows_로_이어_넣는다(tmp_path: Pat
     out = capsys.readouterr().out
     assert "넣을 행 50" in out and "다음 실행" not in out
     assert restore.run(path, None, 100, dry_run=True, skip_rows=100) == 1  # 표를 고르지 않으면 쓸 수 없다
+
+
+def test_D1_예산으로_잘려도_skip_rows_로_이어_넣는다(monkeypatch, capsys) -> None:  # noqa: ANN001
+    """예산 길도 오프셋을 말한다 (docs/infra.md 25.1434, 백업 감사) — 예전엔 "--only T" 만 말해 같은 앞 행만 되풀이했다"""
+    from batch.core import client as backend
+    from batch.core import db as core_db
+    from scripts import restore_backup as restore
+
+    monkeypatch.setattr(backend, "resolved_backend", lambda: backend.D1)
+    monkeypatch.setattr(core_db, "remaining_d1_daily_writes", lambda c: restore.예산여유 + 80)
+    rows = [("news", f"n{i}") for i in range(120)] + [("sentiment_scores", "s")]
+    남긴 = restore._예산만큼(None, rows, None, skip_rows=40)
+    out = capsys.readouterr().out
+    assert len(남긴) == 80
+    assert "다음 실행: --only news --skip-rows 120" in out and "그다음: --only sentiment_scores" in out

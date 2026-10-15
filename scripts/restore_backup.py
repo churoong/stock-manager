@@ -316,7 +316,9 @@ def _남은표(rows: list[tuple[str, str]]) -> list[str]:
 예산여유 = 20_000
 
 
-def _예산만큼(client, rows: list[tuple[str, str]], max_rows: int | None) -> list[tuple[str, str]]:
+def _예산만큼(
+    client, rows: list[tuple[str, str]], max_rows: int | None, skip_rows: int = 0
+) -> list[tuple[str, str]]:
     """D1 이면 **남은 하루 쓰기**를 보고 더 자른다 (2026-09-22, docs/infra.md 25.120).
 
     이 스크립트의 설명문은 "D1 은 하루 쓰기 10만 행 제한이 있다. `--max-rows` 로 나눠 넣고"
@@ -341,9 +343,14 @@ def _예산만큼(client, rows: list[tuple[str, str]], max_rows: int | None) -> 
     자른것, 남은표, 쪼갠표 = 표_경계로_자르기(rows, 남은)
     print(f"  → 예산에 맞춰 {len(자른것):,}행만 넣는다")
     if 쪼갠표:
+        # **오프셋을 함께 말한다** (docs/infra.md 25.1434, 백업 감사) — `--max-rows` 길(25.1143)과 같게. 예전엔
+        # "--only T" 만 말해, 다음 날 같은 앞 행만 다시 보내(INSERT OR IGNORE 로 건너뜀) 또 잘리고 나머지는 영영 빠졌다
+        넣은수 = skip_rows + sum(1 for t, _s in 자른것 if t == 쪼갠표)
         print(f"  주의: {쪼갠표} 하나가 예산을 넘어 표 가운데서 잘랐다")
+        print(f"  다음 실행: --only {쪼갠표} --skip-rows {넣은수}")
+        남은표 = [t for t in 남은표 if t != 쪼갠표]
     if 남은표:
-        print(f"  다음 실행: --only {','.join(남은표)}")
+        print(f"  {'그다음' if 쪼갠표 else '다음 실행'}: --only {','.join(남은표)}")
     _ = max_rows
     return 자른것
 
@@ -497,7 +504,7 @@ def run(
                     실제 = sum(1 for sid, _ in 만들것 if sid in 파일_행)
                     print(f"  종목 {len(만들것):,}개를 백업 번호 그대로 넣었다(파일의 종목 행 {실제:,}, 이름 없는 자리"
                           f" {len(만들것) - 실제:,}) — 자리는 마스터 수집이 채운다")
-        rows = _예산만큼(client, rows, max_rows)
+        rows = _예산만큼(client, rows, max_rows, skip_rows)
         written = 0
         # **보낸 수가 아니라 실제로 들어간 수를 센다** (docs/infra.md 25.1136, 백업 감사 재현).
         # `skip` 은 INSERT OR IGNORE 라 대상에 같은 번호의 행이 있으면(복구 도중 웹이 새 매매를 id 1 로 먼저 쓴 경우 등)
