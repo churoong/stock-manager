@@ -2211,6 +2211,9 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
         짝 = report_picks.same_issuer_pairs(composed.chosen) if 추천_오류 is None else []
         if 짝:
             step_log["same_issuer_pairs"] = [list(p) for p in 짝]
+        # 1부 업종 쏠림 — 기록만, 걸린 날은 1부 끝에 한 줄 (docs/factors.md 12.28 P6, 25.1390)
+        if 추천_오류 is None and composed.crowding:
+            step_log["part1_sector"] = {k: composed.crowding[k] for k in ("k", "sector", "unknown", "trip")}
         if 추천_오류 is not None:
             # "오늘 추천할 종목이 없습니다" 는 계산했을 때의 말이다 — 못 읽은 날에 쓰지 않는다 (25.818)
             composed = dc_replace(

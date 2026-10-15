@@ -145,6 +145,38 @@ def same_issuer_pairs(rows: list[SignalRow]) -> list[tuple[str, str]]:
     return out
 
 
+def sector_crowding(rows: list[SignalRow], max_stock_pct: float, max_sector_pct: float) -> dict[str, Any]:
+    """1부 종목이 한 업종에 몰려 **함께 사면 2부 섹터 상한에 걸리는지** (factors.md 12.28 P6, 25.1390, 기록·사실 줄).
+
+    k = 같은 업종의 서로 다른 종목 수 최댓값. `k × 종목 상한 > 섹터 상한` 이면 걸린다 — 문턱은 설정의 두 상한에서만
+    나온다(새 문턱 없음, 기본 10%·30% 이면 k ≥ 4). 검증 B 가 원안의 평균 상관·유효 종목 수를 뺐다 — 1부에는 비중이
+    없어 같은 비중을 가정한 모형값이 오해를 부르고, 2부의 상관 배수(signals.md 3.6)가 이미 금액에서 다룬다.
+    업종이 빈 종목은 세지 않고 `unknown` 으로 적는다. 고른 종목·순서·금액은 그대로"""
+    본: dict[int, SignalRow] = {}
+    for r in rows:
+        본.setdefault(r.stock_id, r)
+    세기: dict[str, int] = {}
+    모름 = 0
+    for r in 본.values():
+        if r.sector:
+            세기[r.sector] = 세기.get(r.sector, 0) + 1
+        else:
+            모름 += 1
+    업종, k = max(세기.items(), key=lambda kv: (kv[1], kv[0])) if 세기 else (None, 0)
+    걸림 = bool(업종) and max_stock_pct > 0 and k * max_stock_pct > max_sector_pct
+    return {"k": k, "sector": 업종, "unknown": 모름, "trip": 걸림,
+            "max_stock_pct": max_stock_pct, "max_sector_pct": max_sector_pct}  # fmt: skip
+
+
+def sector_crowding_line(c: dict[str, Any]) -> str | None:
+    """걸릴 때만 한 줄. 업종 모름이 있으면 함께 적는다(모르는 종목이 같은 업종일 수 있다)"""
+    if not c.get("trip"):
+        return None
+    모름 = f" (업종 모름 {c['unknown']}종목 제외)" if c.get("unknown") else ""
+    return (f"· 1부 {c['k']}종목이 {c['sector']} 업종입니다 — 함께 사면 종목 상한 {c['max_stock_pct']:g}% × {c['k']}"
+            f" 이 2부 섹터 상한 {c['max_sector_pct']:g}% 에 걸립니다{모름}")  # fmt: skip
+
+
 def select_top(rows: list[SignalRow], n: int = TOP_STOCKS) -> list[SignalRow]:
     """점수 높은 서로 다른 종목 n 개의 신호 전부.
 
@@ -907,6 +939,8 @@ class Composed:
     portfolio: rs.PortfolioView | None
     #: 가중치 흔들기 결과 (docs/reports.md 3.2). 후보가 적거나 가중치를 못 받았으면 None
     shaken: robustness.Shaken | None = None
+    #: 1부 업종 쏠림 (`sector_crowding`, 25.1390). 일일 배치가 step_log 에 남긴다
+    crowding: dict[str, Any] | None = None
 
 
 def with_criteria(rows: list[SignalRow]) -> list[SignalRow]:
@@ -1016,11 +1050,14 @@ def compose(
     # 같은 발행사로 보이는 두 종목 — 1부 끝에 한 줄, 고른 종목·금액은 그대로 (25.1385)
     짝줄 = [f"· {a}·{b} 는 같은 발행사로 보입니다(퀄리티·성장 점수 같음) — 한 회사를 두 번 고른 것일 수 있습니다"
           for a, b in same_issuer_pairs(chosen)]  # fmt: skip
-    꼬리 = "\n".join([*([그림자] if 그림자 else []), *짝줄]) or None
+    # 1부 업종 쏠림 — 함께 사면 2부 섹터 상한에 걸릴 때만 한 줄 (25.1390)
+    쏠림 = sector_crowding(chosen, max_stock_pct, max_sector_pct) if chosen else None
+    쏠림줄 = sector_crowding_line(쏠림) if 쏠림 else None
+    꼬리 = "\n".join([*([그림자] if 그림자 else []), *짝줄, *([쏠림줄] if 쏠림줄 else [])]) or None
     body = rs.render(picks, portfolio, app_url=app_url, picks_footer=꼬리)
     if portfolio is None and sell_flags:
         body += "\n\n" + "\n".join(rs.render_sell_flags(sell_flags))
-    return Composed(f"{header}\n\n{body}", chosen, picks, portfolio, shaken)
+    return Composed(f"{header}\n\n{body}", chosen, picks, portfolio, shaken, crowding=쏠림)
 
 
 def render(*args: Any, **kwargs: Any) -> str:
