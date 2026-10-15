@@ -75,6 +75,7 @@ import pytest
     # 모의 투자 계좌(docs/paper.md, 25.1443) — 배치의 규칙서가 낸 주문·체결과 그 평가. 근거는 주문의 스냅샷에 있다
     "paper_accounts", "paper_orders", "paper_fills", "paper_daily",
     "paper_decisions",  # 결정 원장 — 안 한 결정까지와 그 뒤 성과 (25.1449)
+    "paper_decisions_new",  # 0073 재건축의 임시 이름 — 같은 마이그레이션에서 paper_decisions 로 바뀐다 (25.1453)
 }  # fmt: skip
 
 #: **사람이 넣은 것.** 출처는 사용자다. 시스템이 임의로 고치지 않는다(CLAUDE.md)
