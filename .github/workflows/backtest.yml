@@ -3,7 +3,8 @@ name: 백테스트·스트레스
 # **매달 3일에 기본 파라미터로 한 번씩 돈다** (국내·미국, docs/infra.md 25.942, 2026-10-04 사용자 결정 "다 진행해").
 # 기법 발굴 루프의 판정(docs/factors.md 12장 머리)은 "시장·달마다 그 달 첫 기본 실행" 만 세는데, 예약이 없어 사람이
 # 돌릴 때만 쌓였고 2026-10-04 까지 판정은 전부 "판정 불가" 였다. 이 예약 실행이 그 달의 첫 기본 실행이 된다 —
-# 그 뒤 같은 달에 사람이 돌린 것은 판정에 세지 않는다. 3일인 것은 1·2일에 전체 백업·ETF 판정이 Turso 읽기를 몰아 쓰기 때문이다.
+# 판정 실행은 깨운 주체와 무관하게 "그 달 3~7일 첫 성공 기본 실행" 이다(docs/factors.md 12장 머리, 25.1437 — 예전 문구 "사람이 돌린
+# 것은 세지 않는다" 는 기록으로 가를 수 없어 고쳤다). 3일인 것은 1·2일에 전체 백업·ETF 판정이 Turso 읽기를 몰아 쓰기 때문이다.
 # 나머지(파라미터를 바꾼 비교 실행)는 수동이다.
 #
 # 결과에는 항상 경고가 붙는다. 상장폐지 종목이 DB 에 없어 생존편향이 있다.
@@ -13,6 +14,10 @@ name: 백테스트·스트레스
 #   workflow_dispatch  → inputs.*            (토큰에 Actions: write 가 있을 때)
 #   repository_dispatch → client_payload.*   (Contents: write 만 있을 때. 포트폴리오가 쓰는 길)
 # 어느 길로 와도 같은 값을 쓰도록 아래 env 에서 한 번만 고른다.
+# **실행 이름에 예약 cron 을 싣는다** (docs/infra.md 25.1437, 29회차 P1) — GitHub 실행 목록에는 어느 cron 에서 왔는지 칸이 없어,
+# 빠진 예약 따라잡기(`scripts/schedule_catchup.per_cron`)가 국내(17:11)·미국(19:11)을 따로 볼 수 있게. 예전엔 가장 늦은 미국
+# 하나만 봐서 국내 예약이 빠지고 미국이 돌면 국내를 다시 깨우지 않았다
+run-name: 백테스트 ${{ (github.event.schedule || inputs.missed_schedule) && format('예약 {0}', github.event.schedule || inputs.missed_schedule) || '수동' }}
 on:
   schedule:
     - cron: "11 17 3 * *" # 매월 3일 17:11 UTC = 4일 02:11 KST — 국내 기본 실행
@@ -85,6 +90,8 @@ jobs:
       WHAT: ${{ inputs.what || github.event.client_payload.what || '둘다' }}
       # 따라잡기로 깨어난 미국 월 기준 실행도 미국으로 (25.1305)
       MARKET: ${{ (github.event.schedule || inputs.missed_schedule) == '11 19 3 * *' && 'US' || inputs.market || github.event.client_payload.market || 'KR' }}
+      # 판정 실행을 기록으로 가르게 (29회차 P1, 25.1437) — schedule | catchup | workflow_dispatch | repository_dispatch, 커밋
+      BACKTEST_TRIGGER: ${{ inputs.missed_schedule && 'catchup' || github.event_name }}
       YEARS: ${{ inputs.years || github.event.client_payload.years || '5' }}
       TOP_N: ${{ inputs.top_n || github.event.client_payload.top_n || '20' }}
       LONG_THRESHOLDS: ${{ inputs.long_thresholds || github.event.client_payload.long_thresholds || '60,55,50' }}

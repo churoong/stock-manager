@@ -29,6 +29,7 @@ import bisect
 import json
 import logging
 import math
+import os
 import sys
 import uuid
 from collections.abc import Callable
@@ -1921,7 +1922,10 @@ def run(
                       "factor_ic": ic_summary,
                       # 지표 교체 A/B (10회차, docs/factors.md 12.12) — 판정 키가 아니다. 기본 파라미터 실행만 센다
                       **({"factor_ab": ab.log()} if ab.ics else {}),
-                      "params": 실행_파라미터(years, top_n, long_thresholds, only_long, pit_universe, trend_filter),
+                      # 깨운 주체·커밋은 기록 칸만 (29회차 P1, 25.1437) — `default` 정의는 그대로
+                      "params": {**실행_파라미터(years, top_n, long_thresholds, only_long, pit_universe, trend_filter),
+                                 "trigger": os.environ.get("BACKTEST_TRIGGER") or None,
+                                 "sha": (os.environ.get("GITHUB_SHA") or "")[:12] or None},
                       "stocks": len(ids), "dates": len(dates), "warnings": warnings,
                       "pit_universe": {"on": pit_universe, "sizes": _pit_sizes(eligible_cache),
                                        "excluded": pit_reasons},

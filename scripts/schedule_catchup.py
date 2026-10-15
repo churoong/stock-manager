@@ -128,10 +128,59 @@ def candidate(name: str, text: str, now: datetime) -> datetime | None:
     return s
 
 
+def per_cron(text: str) -> bool:
+    """cron 마다 따로 따라잡는 워크플로인가 — `run-name` 에 예약 cron 을 싣는 것만 (docs/infra.md 25.1437, 29회차 P1).
+
+    GitHub 실행 목록에는 어느 cron 에서 왔는지 칸이 없다. 실행 이름(`display_title`)에 cron 글자가 있어야 가른다"""
+    return re.search(r"^run-name:.*missed_schedule", text, re.M) is not None
+
+
+def missed_crons(text: str, now: datetime) -> list[tuple[datetime, str]]:
+    """지연 여유를 넘겼고 LOOKBACK 안인 (예약 시각, cron) — 이른 것부터"""
+    out = []
+    for c in crons(text):
+        s = last_due(c, now - timedelta(hours=GRACE_HOURS))
+        if s is not None and now - s <= timedelta(days=LOOKBACK_DAYS):
+            out.append((s, c))
+    return sorted(out)
+
+
+def _per_cron_dispatch(repo: str, token: str, call, now: datetime, name: str, text: str) -> tuple[str, str | None]:  # noqa: ANN001
+    """cron 마다 그 예약 뒤 **그 cron 이름이 붙은** 실행이 있나 본다. 빠진 것 가운데 **가장 이른 하나만** 깨운다 —
+    같은 동시 실행 그룹은 대기를 하나만 둬, 한 번에 둘을 깨우면 하나가 밀려난다(backtest.yml). 다음 회에 다음 것을.
+    예전(`due`)은 가장 늦은 cron 하나만 봐서, 국내 백테스트(17:11) 예약이 빠지고 미국(19:11)이 돌면 국내를 깨우지
+    않았고 둘 다 빠지면 미국만 깨웠다. 돌았지만 스스로 건너뛴 실행(읽기 진도 문)은 "있음" 이다 — keepalive 에는
+    DB 비밀이 없어 가르지 않는다(그 달은 판정 불가, docs/factors.md 12장 머리).
+    돌려준 값: ("깨움"|"없음"|"실패", 이름)"""
+    for s, c in missed_crons(text, now):
+        status, body = call("GET", f"https://api.github.com/repos/{repo}/actions/workflows/{name}/runs"
+                                   f"?per_page=30&created=%3E%3D{s.strftime('%Y-%m-%dT%H:%M:%SZ')}", token)  # fmt: skip
+        if status != 200:
+            return "실패", f"{name}({status})"
+        runs = json.loads(body).get("workflow_runs") or []
+        if any(c in str(r.get("display_title") or "") for r in runs):
+            continue
+        code, _ = call("POST", f"https://api.github.com/repos/{repo}/actions/workflows/{name}/dispatches",
+                       token, {"ref": "main", "inputs": {"missed_schedule": c}})  # fmt: skip
+        return ("깨움", f"{name}[{c}]") if code == 204 else ("실패", f"{name}({code})")
+    return "없음", None
+
+
 def run(repo: str, token: str, call, now: datetime, root: Path) -> str:  # noqa: ANN001 — call 은 keepalive._call
     깨움, 못깨움, 실패, 미룸 = [], [], [], []
     for path in sorted((root / ".github" / "workflows").glob("*.yml")):
         text = path.read_text(encoding="utf-8")
+        if path.name not in SKIP and per_cron(text) and has_dispatch(text):
+            if len(깨움) >= MAX_PER_RUN:
+                if missed_crons(text, now):
+                    미룸.append(path.name)
+                continue
+            결과, 이름 = _per_cron_dispatch(repo, token, call, now, path.name, text)
+            if 결과 == "깨움":
+                깨움.append(이름)
+            elif 결과 == "실패":
+                실패.append(이름)
+            continue
         s = candidate(path.name, text, now)
         if s is None:
             continue
