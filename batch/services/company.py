@@ -397,6 +397,7 @@ def minutes_json(items: list[Item], approved: list[Item], charter: dict[str, Any
 #: — 바꾸면 판 번호를 올린다
 CHARTERS: dict[str, dict[str, Any]] = {
     "A": {
+        "sell_rule": "value",
         "name": "가치투자사", "philosophy": "싸고 튼튼한 회사를 산다. 손실이 커지거나 회사가 나빠지면 판다",
         "weights": {"research": 2, "quant": 0.5, "broker": 1, "flows": 0.5, "governance": 1, "sentiment": 0.5,
                     "risk": 1, "macro": 0.5},
@@ -404,6 +405,7 @@ CHARTERS: dict[str, dict[str, Any]] = {
         "max_mdd": None, "threshold": 1.0, "agenda": 20, "top_n": 5,
     },
     "C": {
+        "sell_rule": "momentum",
         "name": "모멘텀투자사", "philosophy": "오르는 것을 산다. 목표에서 팔지 않고, 손실·악재에는 바로 나온다",
         "weights": {"research": 0.5, "quant": 2, "broker": 1, "flows": 1.5, "governance": 0.5, "sentiment": 1,
                     "risk": 0.5, "macro": 1.5},
@@ -411,6 +413,7 @@ CHARTERS: dict[str, dict[str, Any]] = {
         "max_mdd": None, "threshold": 1.0, "agenda": 20, "top_n": 5,
     },
     "D": {
+        "sell_rule": "time",
         "name": "장기보유투자사", "philosophy": "좋은 회사를 사서 기다린다. 흔들림에 팔지 않는다",
         "weights": {"research": 2, "quant": 0.5, "broker": 1, "flows": 0.5, "governance": 1, "sentiment": 0,
                     "risk": 1, "macro": 0},
@@ -418,6 +421,7 @@ CHARTERS: dict[str, dict[str, Any]] = {
         "max_mdd": None, "threshold": 1.0, "agenda": 20, "top_n": 5,
     },
     "E": {
+        "sell_rule": "core",
         "name": "안정투자사", "philosophy": "잃지 않는 것이 먼저다. 넓게 나누고, 위험한 회사·약세장에서는 새로 덜 산다",
         "weights": {"research": 1, "quant": 0.5, "broker": 0.5, "flows": 0.5, "governance": 1, "sentiment": 0.5,
                     "risk": 2, "macro": 1.5},

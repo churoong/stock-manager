@@ -2509,6 +2509,7 @@ SQL read operations are forbidden (reads are blocked, ...)
 | 25.1459 | 25.1458 재검증 — 무작위 대조가 든 대체 종목을 잇기, 위험 점검 현금 잣대 분리, 웹 마이그레이션 전 대비 |
 | 25.1460 | 모의 투자사 설계 — 회사·헌장·부서 9개·투자위원회·부서 성적표 (사용자 지시, 검증 [필수] 12 반영) |
 | 25.1461 | 모의 투자사 — 부서 판단식 8개와 투자위원회 절차 (순수 함수) |
+| 25.1462 | 판 2 매도 원칙 value·momentum 을 헌장보다 먼저 |
 
 ### 25.1 왜 D1 인가
 
@@ -32565,3 +32566,16 @@ docs/company.md 2·3장(25.1460)을 순수 함수로 옮겼다 — `batch/servic
 
 **되돌리기 확인**: `PCT_FOR` 70→65(`test_doc_constants` 의 `test_모의_투자사_부서_판단식` 깨짐) · 주관 부서 반대 규칙 끔(`test_meet_quorum_lead_veto_and_order` — 3번 안건이 가결로) ·
 정족수 2→1(같은 시험 — 리서치 혼자 가결로). 모두 깨졌다.
+
+### 25.1462 판 2 매도 원칙 value·momentum 을 헌장보다 먼저
+
+판 2 헌장(docs/company.md 1장)의 매도 원칙 둘을 **헌장 마이그레이션보다 먼저** 코드에 넣는다 — 검증 [필수] 7: 헌장이 먼저 적용되면 `sells_for` 가 모르는 원칙(`SELL_RULES[...]`)에서
+KeyError 로 그날 모의 단계가 멈춘다.
+
+- `value`(A 가치투자사 "손실이 커지거나 회사가 나빠지면 판다"): 손절·목표도달·재무악화·점검 — 감성급락·기간초과는 들고 간다
+- `momentum`(C 모멘텀투자사 "목표에서 팔지 않고, 손실·악재에는 바로 나온다"): 손절·기간초과·재무악화·점검·감성급락 — **목표도달 제외**. 초안의 `all` 은 단기 +10% 에서 팔아
+  "오르는 것이 더 오른다" 와 반대였다(검증 [필수] 5)
+- `company.CHARTERS` 에 회사마다 `sell_rule` 을 적었다(A value · C momentum · D time · E core) — 마이그레이션이 이 값을 쓴다. 시험이 헌장의 원칙이 모두 `SELL_RULES` 에 있는지 본다
+- docs/paper.md 2.2 규칙 목록에 더함
+
+**되돌리기 확인**: `momentum` 에 목표도달을 넣으면 `test_charter_sell_rules_exist_before_charters_apply` 가 깨진다.

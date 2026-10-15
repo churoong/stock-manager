@@ -145,3 +145,17 @@ def test_memo_and_minutes_carry_no_evidence() -> None:
     j = co.minutes_json(items, approved, 헌장, m)
     assert j["items"][0]["approved"] and "evidence" not in str(j)  # 근거는 paper_dossiers 로 (5장)
     assert j["items"][1]["opinions"]["governance"][2].startswith("자료 없음")
+
+
+def test_charter_sell_rules_exist_before_charters_apply() -> None:
+    """판 2 헌장의 매도 원칙은 코드에 먼저 있어야 한다 — 헌장이 먼저 적용되면 `sells_for` 가 모르는 원칙에서 멈춘다 (25.1462).
+
+    헌장 문장과 원칙이 맞는지도(검증 [필수] 5): 가치는 목표에서 팔고 감성에는 안 판다, 모멘텀은 목표에서 안 판다
+    """
+    from batch.services import paper as pp
+
+    걸림 = {1: {"목표도달"}, 2: {"감성급락"}, 3: {"재무악화"}, 4: {"기간초과"}}
+    assert pp.sells_for("value", 걸림) == {1: ["목표도달"], 3: ["재무악화"]}
+    assert pp.sells_for("momentum", 걸림) == {2: ["감성급락"], 3: ["재무악화"], 4: ["기간초과"]}
+    assert {k: v["sell_rule"] for k, v in co.CHARTERS.items()} == {"A": "value", "C": "momentum", "D": "time", "E": "core"}
+    assert {v["sell_rule"] for v in co.CHARTERS.values()} <= set(pp.SELL_RULES)
