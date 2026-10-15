@@ -687,6 +687,8 @@ export const MAX_AS_OF_AGE_DAYS = 12;
 export const FX_STALE_DAYS = 7;
 /** 백업 복구 리허설 신선도 — 분기(약 92일) + 여유 (25.1306). 한 번 거르면 노랑, 두 번이면 빨강 */
 export const RESTORE_DRILL_STALE_DAYS = 100;
+/** 전체 백업 칸이 낡았다고 보는 날 — 매월 1일(예비 8일) 한 번이라 한 달 + 8일 예비 + 여유 (25.1442) */
+export const FULL_BACKUP_STALE_DAYS = 40;
 
 /**
  * 허용 일수. 넘으면 노랑, **두 배를 넘으면** 빨강.
@@ -834,6 +836,9 @@ export const FRESHNESS: FreshnessRow[] = [
   // 100일로 본다: 한 번 거르면 노랑, 두 번이면 빨강 (25.1306)
   { key: "restore_drill", label: "백업 복구 리허설(마지막 통과)", sql: "SELECT date(MAX(finished_at), '+9 hours') AS v FROM batch_runs WHERE job_name = 'restore_drill' AND status = 'success'", every: "year", staleDays: RESTORE_DRILL_STALE_DAYS },
   { key: "backup", label: "DB 백업(마지막 성공)", sql: "SELECT date(MAX(finished_at), '+9 hours') AS v FROM batch_runs WHERE job_name = 'backup' AND status = 'success'", every: "week" },
+  // **전체 백업은 따로 본다** (docs/infra.md 25.1442, 백업 감사) — 위 칸은 주간 필수 백업만으로도 초록이라, 1일·8일 전체 백업이
+  // 읽기 진도 문에 둘 다 미뤄져 그달 전체 백업이 0개여도 몰랐다(전체에만 있는 표가 아티팩트 보관 30일 뒤 사라진다)
+  { key: "backup_full", label: "DB 전체 백업(마지막 성공)", sql: "SELECT date(MAX(finished_at), '+9 hours') AS v FROM batch_runs WHERE job_name = 'backup' AND status = 'success' AND json_extract(step_log, '$.scope') = 'full'", every: "month", staleDays: FULL_BACKUP_STALE_DAYS },
   { key: "monitor_kr", label: "장중 감시 목록(국내)", sql: "SELECT date(MAX(built_at), '+9 hours') AS v FROM monitor_targets WHERE market = 'KR'", every: "session" },
   { key: "monitor_us", label: "장중 감시 목록(미국)", sql: "SELECT date(MAX(built_at), '+9 hours') AS v FROM monitor_targets WHERE market = 'US'", every: "session", restsOnD1: true },
 ];

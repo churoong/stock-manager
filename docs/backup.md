@@ -53,8 +53,9 @@ Turso 냐 D1 이냐를 고른다(25.12). 목록과 사유는 `backup_db.설정_�
 사유가 적혀 있어야 통과시킨다 — 목록끼리 대 보는 것(25.118)으로는 **두 목록에 모두
 빠진 새 표**를 못 잡기 때문이다. 사람 손이 닿는 것은 거의 다 웹으로 들어온다.
 
-지금 안 담는 여섯: `api_usage` · `cron_heartbeats` · `login_attempts` ·
-`news_fetch_log` · `sell_flags` · `trade_lots`.
+지금 안 담는 아홉: `analysis_requests` · `api_tokens` · `api_usage` · `cron_heartbeats` · `login_attempts` ·
+`news_fetch_log` · `sell_flags` · `trade_lots` · `trade_reviews` (2026-10-15 코드와 맞춤, infra 25.1442 — 예전 문서는 여섯이었다. 사유는 코드의 `백업_제외_사유`).
+**전체 백업**은 매월 1일, 미뤄지면 8일 예비가 다시 한다 — 8일은 읽기 진도선을 보지 않고 월 상한만 본다(25.1442). 상태 화면에 "DB 전체 백업" 칸이 따로 있다(40일 넘으면 낡음).
 `api_usage` 는 `[확인필요]` 가 붙어 있다 — 되살린 날 카운터가 0 에서 시작하므로
 그날 D1 하루 쓰기 예산을 실제보다 넉넉히 본다.
 

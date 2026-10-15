@@ -79,8 +79,12 @@ jobs:
             echo "deferred=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          # **8일 예비는 진도선을 보지 않는다** (docs/infra.md 25.1442, 백업 감사) — 1일·8일이 같은 진도선이라 월초 읽기가 많은
+          # 달엔 둘 다 미뤄져 그달 전체 백업이 0개가 되고, 지난달 것은 보관 30일로 사라졌다. 8일은 월 상한만 본다(25.1135 방식)
+          PACE=""
+          if [ "$SCHED" = "47 16 8 * *" ]; then PACE="--no-pace"; fi
           # 월 읽기량은 운영 수치라 공개 로그에 찍지 않는다 — 덤프와 같은 파일로 비공개 이슈에 (25.1307)
-          python scripts/turso_read_gate.py backup 8500000 2>&1 | python scripts/ops_tee.py -a backup.txt || true
+          python scripts/turso_read_gate.py backup 8500000 $PACE 2>&1 | python scripts/ops_tee.py -a backup.txt || true
 
       - name: 덤프
         id: dump

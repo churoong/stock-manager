@@ -98,6 +98,8 @@ def record_skip(client, job: str, text: str) -> None:
 def main() -> int:
     job = sys.argv[1] if len(sys.argv) > 1 else "작업"
     estimate = int(sys.argv[2]) if len(sys.argv) > 2 else 0
+    # `--no-pace`: 진도선은 보지 않고 월 상한만 (25.1135 와 같은 길). 1일에 미뤄진 전체 백업의 8일 예비가 쓴다 (25.1442)
+    pace = "--no-pace" not in sys.argv[3:]
     try:
         if backend.resolved_backend() != backend.TURSO:
             print(f"[Turso 읽기 문] {job}: Turso 가 아니라 이 문은 보지 않습니다")
@@ -109,7 +111,7 @@ def main() -> int:
     try:
         남음 = db.remaining_read_budget_or_none(client)
         used = None if 남음 is None else db.TURSO_MONTHLY_READ_LIMIT - 남음
-        ok, text = decide(used, estimate, datetime.now(UTC))
+        ok, text = decide(used, estimate, datetime.now(UTC), pace=pace)
         print(f"[Turso 읽기 문] {job}: {text}")
         if not ok:
             mark_deferred()
