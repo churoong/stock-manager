@@ -2182,7 +2182,10 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
         )
         # 리포트 자기 채점 (docs/reports.md 3.4, 25.951) — 지난 1부 종목의 5·20일 뒤 성적을 머리에. 못 읽으면 줄만
         # 빠진다
-        자기채점 = _self_grade(client, market, decision.trade_date, warnings) if 추천_오류 is None else None
+        채점수: dict[str, Any] = {}
+        자기채점 = _self_grade(client, market, decision.trade_date, warnings, 채점수) if 추천_오류 is None else None
+        if 채점수:
+            step_log["self_grade"] = 채점수  # 25.1404 — 20일 창 건수·종목 수·지수 덮임
         # 보유 종목 점수 영수증 (docs/reports.md 3.6, 25.953) — 샀을 때·지금 점수. 못 읽으면 절만 빠진다
         보유점수 = _holding_scores(client, signals_as_of, warnings) if holdings and 추천_오류 is None else []
         composed = report_picks.compose(
@@ -2752,12 +2755,15 @@ def _holding_scores(
     return holding_scores.from_rows(rows)
 
 
-def _self_grade(client: TursoClient, market: str, trade_date: str, warnings: list[str]) -> str | None:
+def _self_grade(
+    client: TursoClient, market: str, trade_date: str, warnings: list[str], stats: dict[str, Any] | None = None,
+) -> str | None:
     """지난 리포트 1부 종목 ⋈ 신호 성적 (docs/reports.md 3.4). 못 읽으면 None 과 경고 — 채점은 곁다리라 리포트를 막지
     않는다."""
     try:
         rs = client.execute(
-            "SELECT i.stock_id, r.trade_date, MAX(o.ret_5d) AS ret_5d, MAX(o.ret_20d) AS ret_20d"
+            "SELECT i.stock_id, r.trade_date, MAX(o.ret_5d) AS ret_5d, MAX(o.ret_20d) AS ret_20d,"
+            " MAX(o.bench_ret_20d) AS bench_ret_20d"  # 지수 대비 (25.1404) — 같은 행의 칸 하나
             " FROM report_items i JOIN daily_reports r ON r.id = i.report_id"
             " JOIN signal_outcomes o ON o.stock_id = i.stock_id"
             "  AND o.as_of_date = json_extract(i.payload_json, '$.as_of_date')"
@@ -2769,7 +2775,10 @@ def _self_grade(client: TursoClient, market: str, trade_date: str, warnings: lis
     except Exception as exc:  # noqa: BLE001 — 자기 채점은 곁다리다. 경고로 말하고 리포트는 그대로
         warnings.append(f"지난 추천의 성적을 읽지 못해 자기 채점 줄을 뺐습니다: {exc}")
         return None
-    return self_grade.line(self_grade.grade(rs.dicts()))
+    g = self_grade.grade(rs.dicts())
+    if stats is not None:
+        stats.update(self_grade.stats(g))
+    return self_grade.line(g)
 
 
 def _pick_history(

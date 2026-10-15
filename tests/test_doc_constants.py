@@ -363,6 +363,7 @@ class Test자기_채점:
 
         검사(REPORTS, f"표본 {sg.MIN_N}건 미만이면 내지 않는다", "자기 채점 표본 하한")
         검사(REPORTS, f"창       = {'·'.join(str(w) for w in sg.WINDOWS)} 거래일", "자기 채점 창")
+        검사(REPORTS, f"{sg.BENCH_WINDOW}일 창에는 원 수익 옆에", "자기 채점 지수 대비 창 (25.1404)")
 
 
 class Test계좌별_ETF:
