@@ -326,3 +326,12 @@ export function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   });
   return Promise.race([p, 늦음]).finally(() => clearTimeout(timer));
 }
+
+/**
+ * 웹훅 비밀값이 텔레그램 규칙(1~256자, 영문·숫자·_·-)에 맞고 **16자 이상**인가 (docs/infra.md 25.1421, 보안 감사).
+ * 켜는 단추(`webhook-setup`)만 이 검사를 했고 웹훅 경로는 비어 있지만 않으면 받았다 — 손으로 짧은 값으로 걸면 맞힐 수 있었다.
+ * 두 경로가 같은 함수를 쓴다
+ */
+export function webhookSecretStrong(secret: string | undefined | null): secret is string {
+  return !!secret && secret.length >= 16 && /^[A-Za-z0-9_-]+$/.test(secret);
+}

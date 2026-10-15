@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { execute } from "@/lib/db";
 import { tokenMatches } from "@/lib/intraday";
 import { sendTelegram } from "@/lib/telegram";
-import { ANSWER_TIMEOUT_MS, answer, parseQuery, withTimeout } from "@/lib/telegramQa";
+import { ANSWER_TIMEOUT_MS, answer, parseQuery, webhookSecretStrong, withTimeout } from "@/lib/telegramQa";
 
 /**
  * 텔레그램 질의응답 웹훅 (docs/telegram-qa.md, docs/infra.md 25.1004).
@@ -22,7 +22,8 @@ export const maxDuration = 30;
 export async function POST(request: Request) {
   const secret = process.env.TELEGRAM_WEBHOOK_SECRET?.trim();
   const chatId = process.env.TELEGRAM_CHAT_ID?.trim();
-  if (!secret || !chatId) return NextResponse.json({ error: "not found" }, { status: 404 });
+  // 약한 비밀값이면 경로가 없는 것처럼 — 켜는 단추와 같은 규칙 (25.1421)
+  if (!webhookSecretStrong(secret) || !chatId) return NextResponse.json({ error: "not found" }, { status: 404 });
   if (!tokenMatches(request.headers.get("x-telegram-bot-api-secret-token"), secret)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }

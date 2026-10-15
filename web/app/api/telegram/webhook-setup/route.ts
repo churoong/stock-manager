@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { webhookOrigin } from "@/lib/telegramQa";
+import { webhookOrigin, webhookSecretStrong } from "@/lib/telegramQa";
 
 /**
  * 텔레그램 질의응답 켜기·끄기 (docs/telegram-qa.md, 25.1004). 설정 화면의 단추가 부른다(로그인 뒤).
@@ -20,7 +20,7 @@ export async function POST(request: Request) {
   if (on && env && env !== "production") {
     return NextResponse.json({ error: `운영 배포에서만 켤 수 있습니다 (지금: ${env})` }, { status: 400 });
   }
-  if (on && (!secret || secret.length < 16 || !/^[A-Za-z0-9_-]+$/.test(secret))) {
+  if (on && !webhookSecretStrong(secret)) {
     return NextResponse.json(
       { error: "Vercel 환경변수 TELEGRAM_WEBHOOK_SECRET 에 16자 이상 영문·숫자·_·- 값을 넣고 다시 배포하세요" },
       { status: 400 },
