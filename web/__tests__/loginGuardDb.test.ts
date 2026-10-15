@@ -524,6 +524,12 @@ describe("전에 들어온 기기는 전체 잠금을 보지 않는다 (docs/inf
     expect(!막힘.allowed && 막힘.reason).toBe("ip");
   });
 
+  it("전체 문턱을 넘긴 것을 판정에 싣는다 — 부른 쪽이 알린다 (25.1425)", async () => {
+    심기(남, GLOBAL_MAX_FAILURES, 1);
+    const v = await reserveAttempt("기기해시", { trustedDevice: true });
+    expect(v.allowed && v.globalExceeded).toBe(true);
+  });
+
   it("기기 표 없는 요청이 전체 잠금을 기억해도 기기 요청은 막지 않는다 (25.914 기억)", async () => {
     심기(남, GLOBAL_MAX_FAILURES, 1);
     await reserveAttempt(나); // 잠금을 메모리에 기억

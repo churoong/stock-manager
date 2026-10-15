@@ -10,6 +10,8 @@ import {
 const 부름 = vi.hoisted(() => ({
   열쇠: [] as string[],
   믿음: [] as boolean[],
+  알림: 0,
+  넘음: false,
 }));
 vi.mock("@/lib/loginGuard", () => ({
   clientIp: () => "1.2.3.4",
@@ -19,12 +21,18 @@ vi.mock("@/lib/loginGuard", () => ({
   },
   reserveAttempt: async (_h: string, o: { trustedDevice?: boolean } = {}) => {
     부름.믿음.push(o.trustedDevice === true);
-    return { allowed: true, recentFailures: 0 };
+    return {
+      allowed: true,
+      recentFailures: 0,
+      ...(부름.넘음 ? { globalExceeded: true } : {}),
+    };
   },
   cleanupAttempts: async () => {},
   recordAttempt: async () => {},
   failureDelayMs: () => 0,
-  alertGlobalLock: async () => {},
+  alertGlobalLock: async () => {
+    부름.알림 += 1;
+  },
 }));
 
 // 기기 표 (docs/infra.md 25.1424, 보안 감사 #1) — 세션으로 쓸 수 없고, 비밀번호를 바꾸면 무효
@@ -64,6 +72,8 @@ describe("로그인 경로", () => {
     process.env.AUTH_SECRET = "테스트-서명키-0123456789abcdef";
     부름.열쇠.length = 0;
     부름.믿음.length = 0;
+    부름.알림 = 0;
+    부름.넘음 = false;
   });
   const 요청 = (password: string, cookie?: string) =>
     new Request("https://example.com/api/auth/login", {
@@ -91,5 +101,42 @@ describe("로그인 경로", () => {
     await POST(요청("9999", "sm_device=forged.value"));
     expect(부름.열쇠).toEqual([`device:${id}`, "1.2.3.4"]);
     expect(부름.믿음).toEqual([true, false]);
+  });
+
+  it("기기 표 요청이 전체 문턱을 넘긴 것을 보면 알린다 (25.1425)", async () => {
+    const { POST } = await import("@/app/api/auth/login/route");
+    부름.넘음 = true;
+    await POST(
+      요청("9999", `sm_device=${await createDeviceToken(newDeviceId())}`),
+    );
+    expect(부름.알림).toBe(1);
+  });
+
+  it("같은 이름 쿠키가 여럿이면 맞는 것을 찾는다 (25.1425)", async () => {
+    const { POST } = await import("@/app/api/auth/login/route");
+    const id = newDeviceId();
+    await POST(
+      요청(
+        "9999",
+        `sm_device=forged.value; sm_device=${await createDeviceToken(id)}`,
+      ),
+    );
+    expect(부름.열쇠).toEqual([`device:${id}`]);
+  });
+
+  it("로그아웃은 기기 표도 지운다 (25.1425)", async () => {
+    const { POST } = await import("@/app/api/auth/logout/route");
+    const { NextRequest } = await import("next/server");
+    const r = await POST(
+      new NextRequest("https://example.com/api/auth/logout", {
+        method: "POST",
+      }),
+    );
+    expect(r.headers.get("set-cookie") ?? "").toMatch(/sm_device=;/);
+  });
+
+  it("기기 표를 device. 로 다시 감싸도 세션이 아니다 (25.1425)", async () => {
+    const 표 = await createDeviceToken(newDeviceId());
+    expect(await verifySessionToken(`device.${표}`)).toBe(false);
   });
 });

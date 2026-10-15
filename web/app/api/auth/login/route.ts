@@ -28,22 +28,39 @@ import {
  * 알려주면 공격자에게만 도움이 된다. 잠겼을 때만 남은 시간을 알려준다.
  * 본인이 기다려야 할 시간을 모르면 곤란하기 때문이다.
  */
-function cookieValue(request: Request, name: string): string | undefined {
+/** 같은 이름의 쿠키 값 전부 — 형제 도메인이 같은 이름을 심어 진짜 표를 가려도 맞는 것을 찾게 (25.1425, 교차검증) */
+function cookieValues(request: Request, name: string): string[] {
+  const out: string[] = [];
   for (const part of (request.headers.get("cookie") ?? "").split(";")) {
     const i = part.indexOf("=");
-    if (i > 0 && part.slice(0, i).trim() === name) return part.slice(i + 1).trim();
+    if (i > 0 && part.slice(0, i).trim() === name) out.push(part.slice(i + 1).trim());
   }
-  return undefined;
+  return out;
+}
+
+/** 맞는 기기 표의 기기 번호. 못 읽으면(서명키 없음 등) null — 예전처럼 주소로 센다(더 엄격한 쪽) */
+async function trustedDeviceId(request: Request): Promise<string | null> {
+  for (const value of cookieValues(request, DEVICE_COOKIE)) {
+    try {
+      const id = await verifyDeviceToken(value);
+      if (id) return id;
+    } catch {
+      return null;
+    }
+  }
+  return null;
 }
 
 export async function POST(request: Request) {
   // **전에 들어온 기기면 전체 잠금을 보지 않고 기기 번호로 센다** (docs/infra.md 25.1424, 보안 감사 #1) — 남이 전체 잠금을 계속 걸어
   // 본인 로그인을 막지 못하게. 기기 표를 못 읽으면(AUTH_SECRET 없음 등) 예전처럼 주소로
-  const deviceId = await verifyDeviceToken(cookieValue(request, DEVICE_COOKIE)).catch(() => null);
+  const deviceId = await trustedDeviceId(request);
   const ipHash = await hashIp(deviceId ? `device:${deviceId}` : clientIp(request));
 
   // 먼저 실패로 적어 두고 센다 — 동시 요청이 서로를 보게 (docs/infra.md 25.393)
   const verdict = await reserveAttempt(ipHash, { trustedDevice: deviceId !== null });
+  // 기기 표 요청이 전체 문턱을 넘긴 것을 봤으면 그때도 알린다 (25.1425, 교차검증) — 잠그지는 않지만 누군가 두드리는 중이다
+  if (verdict.globalExceeded) await alertGlobalLock(new Date(), verdict.memory === true);
   if (!verdict.allowed) {
     if (verdict.reason === "global") {
       await alertGlobalLock(new Date(), verdict.memory === true);

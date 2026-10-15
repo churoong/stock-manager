@@ -102,6 +102,9 @@ export async function verifySessionToken(
 
   const payload = token.slice(0, dot);
   const signature = token.slice(dot + 1);
+  // 세션 쪽도 글자를 가른다 (25.1425, 교차검증) — 기기 표를 `device.<payload>` 로 다시 감싸면 HMAC 은 통과하고 해독기의 엄격함만이
+  // 막고 있었다. base64url 글자만 받는다
+  if (!/^[A-Za-z0-9_-]+$/.test(payload)) return false;
 
   const expected = toBase64Url(await hmac(payload));
   if (!timingSafeEqual(signature, expected)) return false;

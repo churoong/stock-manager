@@ -25,9 +25,19 @@ export const GLOBAL_MAX_FAILURES = 20;
 
 const CLEANUP_AFTER_HOURS = 24;
 
+/**
+ * `globalExceeded` — 기기 표 요청(`trustedDevice`)이라 전체 잠금을 보지 않았지만 전체 실패 수는 문턱을 넘었다 (docs/infra.md 25.1425,
+ * 교차검증). 부른 쪽이 전체 잠금 알림을 보낸다 — 아니면 기기 표를 가진 사람이 두드려도 텔레그램이 한 번도 오지 않았다
+ */
 export type GuardVerdict =
-  | { allowed: true; recentFailures: number }
-  | { allowed: false; reason: "ip" | "global" | "unavailable"; retryAfterSeconds: number; memory?: boolean };
+  | { allowed: true; recentFailures: number; globalExceeded?: boolean; memory?: boolean }
+  | {
+      allowed: false;
+      reason: "ip" | "global" | "unavailable";
+      retryAfterSeconds: number;
+      memory?: boolean;
+      globalExceeded?: boolean;
+    };
 
 /** 표가 아직 없다(마이그레이션 전)는 오류인가. 그때만 막지 않는다 (docs/infra.md 25.393) */
 function 표가_없나(error: unknown): boolean {
@@ -128,19 +138,20 @@ export function memoryReserve(ipHash: string, now: number = Date.now(), record =
   const 전체창 = now - GLOBAL_WINDOW_MINUTES * 60_000;
   const 주소 = (메모리_주소별.get(ipHash) ?? []).filter((t) => t > 주소창);
   메모리_전체 = 메모리_전체.filter((t) => t > 전체창);
+  const 전체넘음 = skipGlobal && 메모리_전체.length >= MEMORY_GLOBAL_MAX_FAILURES ? { globalExceeded: true, memory: true } : {};
   if (!skipGlobal && 메모리_전체.length >= MEMORY_GLOBAL_MAX_FAILURES) {
     return { allowed: false, reason: "global", memory: true, retryAfterSeconds: Math.max(1, Math.ceil((메모리_전체[0] + GLOBAL_WINDOW_MINUTES * 60_000 - now) / 1000)) };
   }
   if (주소.length >= MEMORY_PER_IP_MAX_FAILURES) {
     메모리_주소별.set(ipHash, 주소);
-    return { allowed: false, reason: "ip", memory: true, retryAfterSeconds: Math.max(1, Math.ceil((주소[0] + PER_IP_WINDOW_MINUTES * 60_000 - now) / 1000)) };
+    return { allowed: false, reason: "ip", memory: true, retryAfterSeconds: Math.max(1, Math.ceil((주소[0] + PER_IP_WINDOW_MINUTES * 60_000 - now) / 1000)), ...전체넘음 };
   }
-  if (!record) return { allowed: true, recentFailures: 주소.length };
+  if (!record) return { allowed: true, recentFailures: 주소.length, ...전체넘음 };
   // 먼저 실패로 적어 둔다 — 맞으면 `memoryClear` 가 지운다 (DB 쪽 25.393 과 같은 순서)
   주소.push(now);
   메모리_주소별.set(ipHash, 주소);
   메모리_전체.push(now);
-  return { allowed: true, recentFailures: 주소.length - 1 };
+  return { allowed: true, recentFailures: 주소.length - 1, ...전체넘음 };
 }
 
 /** 로그인 성공 — 그 주소의 메모리 실패를 지운다(전체 몫에서도 하나) */
@@ -299,10 +310,11 @@ function verdictOf(
   if (!skipGlobal && global >= GLOBAL_MAX_FAILURES) {
     return { allowed: false, reason: "global", retryAfterSeconds: retryAfter(v.global.oldest, GLOBAL_WINDOW_MINUTES) };
   }
+  const 전체넘음 = skipGlobal && global >= GLOBAL_MAX_FAILURES ? { globalExceeded: true } : {};
   if (ip >= PER_IP_MAX_FAILURES) {
-    return { allowed: false, reason: "ip", retryAfterSeconds: retryAfter(v.ip.oldest, PER_IP_WINDOW_MINUTES) };
+    return { allowed: false, reason: "ip", retryAfterSeconds: retryAfter(v.ip.oldest, PER_IP_WINDOW_MINUTES), ...전체넘음 };
   }
-  return { allowed: true, recentFailures: ip };
+  return { allowed: true, recentFailures: ip, ...전체넘음 };
 }
 
 async function checkGuardRaw(
