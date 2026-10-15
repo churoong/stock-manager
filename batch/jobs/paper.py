@@ -23,6 +23,7 @@ from batch.core import calendar as cal
 from batch.core import db
 from batch.core import settings_range as sr
 from batch.services import backtest as bt
+from batch.services import company as co
 from batch.services import paper as pp
 from batch.services import report_picks
 from batch.services import risk_gate as rg
@@ -31,7 +32,7 @@ from batch.services import sell_flags as sf
 log = logging.getLogger(__name__)
 
 ACCOUNTS_SQL = (
-    "SELECT id, sell_rule, rule_version, entry_rule, top_n, selection FROM paper_accounts ORDER BY id"
+    "SELECT id, sell_rule, rule_version, entry_rule, top_n, selection, charter_json FROM paper_accounts ORDER BY id"
 )
 FLOWS_SQL = "SELECT id, flow_date, amount_krw, kind, cancels_id, created_at FROM paper_cash_flows ORDER BY id"
 FILLS_SQL = (
@@ -64,6 +65,8 @@ ORDERS_EXIST_SQL = (
     "SELECT (SELECT COUNT(*) FROM paper_orders WHERE account_id = ? AND market = ? AND decided_on = ?)"
     " + (SELECT COUNT(*) FROM paper_decisions"
     "    WHERE account_id = ? AND market = ? AND decided_on = ? AND kind != 'missed')"
+    # 회의록도 센다 — 결정 없이 회의록만 먼저 써진 날 다시 돌면 결정이 또 써졌다 (docs/company.md 3장 8, 25.1466)
+    " + (SELECT COUNT(*) FROM paper_meetings WHERE account_id = ? AND market = ? AND decided_on = ?)"
 )
 STOCK_SQL = (
     "SELECT id, ticker, COALESCE(name_ko, name_en, ticker) AS name, sector, country, currency, asset_type"
@@ -115,7 +118,15 @@ REAL_LOOKBACK_DAYS = 14
 #: 결정 원장 (docs/paper.md 9장, 25.1449) — 안 한 결정까지. 재실행은 유일 제약이 막는다
 DECISION_INSERT_SQL = (
     "INSERT OR IGNORE INTO paper_decisions (account_id, market, decided_on, stock_id, kind, reason, detail_json,"
-    " ref_close, ref_date, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    " ref_close, ref_date, created_at, rule_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+)
+#: 투자위원회 회의록 · 조사 자료 (docs/company.md 3·5장, 25.1466) — 결정 원장과 한 묶음으로 쓴다
+MEETING_INSERT_SQL = (
+    "INSERT OR IGNORE INTO paper_meetings (account_id, market, decided_on, charter_hash, minutes_json, created_at)"
+    " VALUES (?, ?, ?, ?, ?, ?)"
+)
+DOSSIER_INSERT_SQL = (
+    "INSERT OR IGNORE INTO paper_dossiers (market, as_of, stock_id, dossier_json, created_at) VALUES (?, ?, ?, ?, ?)"
 )
 #: **창마다 찰 때가 된 행만** (25.1453, 교차검증 [필수] 1) — 예전엔 `ret_60d IS NULL` 인 오래된 순 300행이라,
 #: 5·20 은 채우고 60 을 기다리는 행이 앞자리를 차지해 새 결정의 20 거래일 성과가 두 달 넘게 밀렸다.
@@ -171,13 +182,13 @@ def _원(v: float) -> float:
 
 def _결정(
     aid: str, market: str, decided_on: str, sid: int, kind: str, reason: str, detail: dict[str, Any] | None,
-    ref_close: Any, ref_date: Any, now: str,
+    ref_close: Any, ref_date: Any, now: str, rule_version: int | None = None,
 ) -> tuple[str, list[Any]]:
-    """결정 원장 한 줄 (docs/paper.md 9장)."""
+    """결정 원장 한 줄 (docs/paper.md 9장). 판 번호를 붙인다 — 판 1·2 결정을 성적표가 섞지 않게 (company.md 1장)."""
     return (DECISION_INSERT_SQL, [
         aid, market, decided_on, sid, kind, reason[:200],
         json.dumps(detail, ensure_ascii=False, default=str) if detail else None,
-        None if ref_close is None else float(ref_close), ref_date, now,
+        None if ref_close is None else float(ref_close), ref_date, now, rule_version,
     ])  # fmt: skip
 
 
@@ -751,8 +762,12 @@ def buy_orders(
     top_n: int = report_picks.TOP_STOCKS, entry: str = "tranche",
     substitute: Callable[[list[report_picks.SignalRow]], list[report_picks.SignalRow]] | None = None,
     series_loader: Callable[[list[int]], dict] | None = None,
+    preselected: list[report_picks.SignalRow] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """2부와 같은 함수로 이 계좌의 매수 회차 주문을 낸다 (docs/paper.md 2.1). (주문 행, 기록).
+
+    `preselected` 는 투자위원회가 가결한 종목의 신호 행(표 순) — 있으면 점수 상위 `select_top` 대신 그것을 배분한다
+    (docs/company.md 3장 7, 25.1466).
 
     계좌 칸(25.1458): `top_n` 상위 몇 종목(E 10), `entry` tranche·open(시가 일괄, 2.1.1),
     `substitute` 는 고른 신호 행을 무작위 종목으로 바꾼다(R, 2.1.2). 2부가 시세를 읽지 않은 후보(6~10위·무작위 종목)는
@@ -778,7 +793,8 @@ def buy_orders(
         for r in valuation.rows
     ]
     총액 = valuation.equity_krw / 환율
-    고른 = report_picks.select_top(report_picks.with_criteria(signal_rows), top_n)
+    고른 = (preselected if preselected is not None
+            else report_picks.select_top(report_picks.with_criteria(signal_rows), top_n))  # fmt: skip
     후보수 = len({r.stock_id for r in 고른})  # 신호 종목이 top_n 보다 적은 날은 E 가 B 와 같다 — 기록에 남긴다
     다시 = rescale_rows(고른, 총액, float(settings.get("min_order_amount") or 0))
     if substitute is not None:
@@ -804,7 +820,7 @@ def buy_orders(
         배분.append({"stock_id": best.stock_id, "amount": a.amount, "tranches": a.tranches, "row": best, "alloc": a,
                      "ref_price": best.close})  # fmt: skip
     주문, 빠짐 = pp.size_buys(배분, valuation.cash_krw - 예약, 환율, sold_recently, 통화, entry)
-    사유 = "무작위 대조" if substitute is not None else "2부 배분"
+    사유 = "무작위 대조" if substitute is not None else "위원회 가결" if preselected is not None else "2부 배분"
     by_sid = {b["stock_id"]: b for b in 배분}
     # 결정 원장 (25.1449) — 산 후보·못 산 후보(까닭)와 그때의 기준 종가
     결정: list[dict[str, Any]] = []
@@ -854,6 +870,57 @@ def buy_orders(
         })  # fmt: skip
     return out, {"candidates": 후보수, "allocations": len(pv.allocations), "orders": len(out), "skipped": 빠짐[:10],
                  "excluded": len(pv.excluded), "_decisions": 결정}  # fmt: skip
+
+
+def committee_step(
+    client: Any, *, market: str, account: str, charter: dict[str, Any], charters: dict[str, dict[str, Any]],
+    signal_rows: list[report_picks.SignalRow], trade_date: str, cache: dict[str, Any], now: str, rule_version: int,
+) -> tuple[list[report_picks.SignalRow], dict[int, dict[str, Any]], list[tuple[str, list[Any]]], dict[str, Any]]:
+    """투자위원회 한 번 (docs/company.md 3장, 25.1466).
+
+    (가결 종목의 신호 행 — 표 순, {가결 종목: 위원회 기록}, 회의록·조사 자료·부결 결정 문장, 기록).
+    조사 자료는 하루 실행에 한 번(`cache`) — 모집단(신호 종목 전체)과 헌장들 가운데 가장 큰 안건.
+    회사는 그 앞부분을 쓴다.
+    문장은 부르는 쪽이 주문·결정과 **한 묶음으로** 쓴다(3장 8)
+    """
+    from batch.jobs import company as cjob
+
+    as_of = max((r.as_of_date for r in signal_rows if r.as_of_date), default=trade_date)
+    if "agenda" not in cache:
+        크기 = max(int(c["agenda"]) for c in charters.values())
+        cache["population"] = cjob.population_dossiers(client, signal_rows, market, as_of)
+        cache["agenda"] = cjob.load_dossiers(client, cjob.agenda_rows(signal_rows, 크기), market, as_of)
+    문장: list[tuple[str, list[Any]]] = []
+    if not cache.get("dossiers_written"):
+        문장 += [(DOSSIER_INSERT_SQL, [market, as_of, d.stock_id, json.dumps(cjob.dossier_json(d), ensure_ascii=False,
+                                                                            default=str), now])
+                 for d in cache["agenda"]]  # fmt: skip
+        cache["dossiers_written"] = True
+    items, approved = co.meet(cache["agenda"][: int(charter["agenda"])], charter, cache["population"])
+    메모 = co.memo(str(charter.get("name") or account), items, approved)
+    지문 = co.charter_hash(charter)
+    문장.append((MEETING_INSERT_SQL, [account, market, trade_date, 지문,
+                                     json.dumps(co.minutes_json(items, approved, charter, 메모), ensure_ascii=False,
+                                                default=str), now]))  # fmt: skip
+    기록 = {i.stock_id: {"vote": i.vote, "issue": i.issue, "vetoed_by": list(i.vetoed_by), "minority": list(i.minority),
+                        "opinions": {k: [o.stance, o.conviction] for k, o in i.opinions.items()},
+                        "charter_hash": 지문} for i in items}  # fmt: skip
+    행들: dict[int, list[report_picks.SignalRow]] = {}
+    for r in report_picks.with_criteria(signal_rows):
+        행들.setdefault(r.stock_id, []).append(r)
+    가결 = [i.stock_id for i in approved]
+    순서 = report_picks._기간_순
+    가결행 = [r for sid in 가결 for r in sorted(행들.get(sid, []), key=lambda r: 순서.get(r.horizon, 9))]
+    for i in items:
+        if i.stock_id in 가결:
+            continue
+        r0 = 행들[i.stock_id][0]
+        까닭 = i.reason if not i.passed else f"위원회: 가결이나 표 순 상위 {int(charter['top_n'])} 밖"
+        문장.append(_결정(account, market, trade_date, i.stock_id, "skip", 까닭,
+                        {"committee": 기록[i.stock_id], "horizon": r0.horizon, "score": r0.total_score},
+                        r0.close, r0.close_date, now, rule_version))  # fmt: skip
+    return 가결행, {sid: 기록[sid] for sid in 가결}, 문장, {
+        "memo": 메모, "agenda": len(items), "passed": sum(i.passed for i in items), "approved": len(approved)}
 
 
 def run_step(
@@ -915,8 +982,26 @@ def run_step(
     줄: list[str] = []
     계좌기록: dict[str, Any] = {}
     유니버스: list[int] | None = None  # 무작위 대조의 모집단 — 하루 실행에 한 번만 읽어 R1·R2 가 같이 쓴다
+    # 투자사 헌장 (docs/company.md, 25.1466) — 헌장이 맞는 계좌만 위원회를 연다.
+    # 틀리면 그 계좌는 판 1 그대로(기록에 까닭)
+    헌장들: dict[str, dict[str, Any]] = {}
+    헌장오류: dict[str, list[str]] = {}
+    for acct in accounts:
+        try:
+            ch = json.loads(acct.get("charter_json") or "null")
+        except ValueError:
+            ch, 헌장오류[str(acct["id"])] = None, ["헌장 JSON 을 읽지 못함"]
+        if isinstance(ch, dict):
+            틀림 = co.charter_errors(ch)
+            if 틀림:
+                헌장오류[str(acct["id"])] = 틀림
+            else:
+                헌장들[str(acct["id"])] = ch
+    조사: dict[str, Any] = {}  # 모집단·안건 조사 자료 — 하루 실행에 한 번, 회사들이 같이 쓴다
+    메모줄: list[str] = []  # 운용역 메모 — 회사마다 한 줄 (docs/company.md 7장, 텔레그램 길이)
     for acct in accounts:
         aid, 규칙, 판 = str(acct["id"]), str(acct["sell_rule"]), int(acct["rule_version"])
+        _결정판 = partial(_결정, rule_version=판)
         진입 = str(acct.get("entry_rule") or "tranche")
         종목수 = int(acct.get("top_n") or report_picks.TOP_STOCKS)
         무작위 = str(acct.get("selection") or "signal") == "random"
@@ -942,7 +1027,7 @@ def run_step(
             max_sector_pct=float(상한.get("max_weight_per_sector") or 30.0),
             today=cal.local_today(market).isoformat(), halted=멈춤, frozen=frozenset(frozen),
         )  # fmt: skip
-        if int(client.execute(ORDERS_EXIST_SQL, [aid, market, trade_date] * 2).scalar() or 0) > 0:
+        if int(client.execute(ORDERS_EXIST_SQL, [aid, market, trade_date] * 3).scalar() or 0) > 0:
             a기록["orders"] = "이미 냄"
         else:
             판정메모: dict[int, dict[str, Any]] = {}
@@ -968,14 +1053,14 @@ def run_step(
                 종가, 날 = 메모["ref"]
                 if sid in 막힌매도id:
                     # 위험 점검이 매도를 막았다 — 들고 간 것으로 남긴다 (25.1451)
-                    문장.append(_결정(aid, market, trade_date, sid, "blocked",
+                    문장.append(_결정판(aid, market, trade_date, sid, "blocked",
                                     "위험 점검(매도): " + "; ".join(t for _c, t in 막힌매도id[sid]),
                                     {"flags": [f["reason_code"] for f in 메모["flags"]]}, 종가, 날, 지금))  # fmt: skip
                 elif sid in 매도 and sid not in 이미팖:
-                    문장.append(_결정(aid, market, trade_date, sid, "sell", ",".join(매도[sid][0]),
+                    문장.append(_결정판(aid, market, trade_date, sid, "sell", ",".join(매도[sid][0]),
                                     {"flags": [f["reason_code"] for f in 메모["flags"]]}, 종가, 날, 지금))  # fmt: skip
                 if 메모["hold"]:
-                    문장.append(_결정(aid, market, trade_date, sid, "hold_flag", ",".join(메모["hold"]),
+                    문장.append(_결정판(aid, market, trade_date, sid, "hold_flag", ",".join(메모["hold"]),
                                     {"flags": [f["reason_code"] for f in 메모["flags"]], "sell_rule": 규칙},
                                     종가, 날, 지금))  # fmt: skip
             최근판 = {f.stock_id for f in 계좌체결 if f.side == "sell" and f.fill_date >= 쉼_시작} | set(매도)
@@ -996,12 +1081,22 @@ def run_step(
                                     held=held_substitutes(client, aid, set(pp.positions(계좌체결))),
                                     cooldown=최근판, stock_cache=stock_cache, today=cal.local_today(market),
                                     기록=a기록)  # fmt: skip
+                가결행: list[report_picks.SignalRow] | None = None
+                위원회: dict[int, dict[str, Any]] = {}
+                if aid in 헌장들:
+                    가결행, 위원회, 회의문장, 메모 = committee_step(
+                        client, market=market, account=aid, charter=헌장들[aid], charters=헌장들,
+                        signal_rows=signal_rows, trade_date=trade_date, cache=조사, now=지금, rule_version=판,
+                    )  # fmt: skip
+                    문장 += 회의문장
+                    a기록["committee"] = 메모
+                    종목수 = int(헌장들[aid]["top_n"])
                 주문, b기록 = buy_orders(
                     client, market=market, account=aid, account_fills=계좌체결, valuation=v,
                     open_buys=[o for o in 열린 if o.account_id == aid and o.side == "buy"], signal_rows=signal_rows,
                     settings=settings, price_series=price_series, series_unknown=series_unknown,
                     fx_rate=fx[0] if fx else None, stop_ids=손절, sold_recently=최근판, stock_cache=stock_cache,
-                    top_n=종목수, entry=진입, substitute=바꾸기, series_loader=series_loader,
+                    top_n=종목수, entry=진입, substitute=바꾸기, series_loader=series_loader, preselected=가결행,
                 )  # fmt: skip
                 # 사전 위험 점검 (25.1451) — 통과한 회차만 주문. 한 회차도 못 지난 종목은 결정 원장에서 blocked 로
                 후보 = [rg.Candidate(o["stock_id"], "buy", o["cost_krw"], o["ref_date"], i, o["cash_krw"])
@@ -1018,7 +1113,10 @@ def run_step(
                     if d["kind"] == "buy" and d["stock_id"] not in 낸종목:
                         # 규칙은 사려 했는데 관문이 막았다 — skip 과 섞지 않는다 (25.1453)
                         d = {**d, "kind": "blocked", "reason": 막힌까닭.get(d["stock_id"], "위험 점검")}
-                    문장.append(_결정(aid, market, trade_date, d["stock_id"], d["kind"], d["reason"], d["detail"],
+                    if d["stock_id"] in 위원회:
+                        # 가결된 안건 — 배분·관문 결과에 위원회 기록(부서 입장·표)을 붙인다 (docs/company.md 5장)
+                        d = {**d, "detail": {**(d["detail"] or {}), "committee": 위원회[d["stock_id"]]}}
+                    문장.append(_결정판(aid, market, trade_date, d["stock_id"], d["kind"], d["reason"], d["detail"],
                                     d["ref_close"], d["ref_date"], 지금))  # fmt: skip
                 a기록["buy"] = b기록
                 for o in 주문:
@@ -1034,7 +1132,11 @@ def run_step(
             a기록["risk_blocked"] = 막힌수
             a기록["orders"] = sum(1 for sql, _a in 문장 if sql == INSERT_ORDER_SQL)
             a기록["decisions"] = sum(1 for sql, _a in 문장 if sql == DECISION_INSERT_SQL)
+        if aid in 헌장오류:
+            a기록["charter_errors"] = 헌장오류[aid]
         계좌기록[aid] = a기록
+        if isinstance(a기록.get("committee"), dict):
+            메모줄.append(f"🏛 {aid} {a기록['committee']['memo']}")
         손익률 = f"{v.pnl_pct:+.1f}%" if v.pnl_pct is not None else "—"
         줄.append(f"{aid}: 평가 {v.equity_krw:,.0f}원 (손익 {손익률}, 시간가중 {(검['twr'] - 1) * 100:+.1f}%,"
                  f" 오늘 체결 {a기록['fills']}건)")  # fmt: skip
@@ -1068,7 +1170,7 @@ def run_step(
         머리.append(str(pp.compare_line(비교)))
     if frozen:
         머리.append(f"모의 계좌 멈춘 종목 {len(frozen)}개(기업행위 경계 — 원가로 평가, docs/paper.md 2.3)")
-    return 머리 + [글 for 글 in 줄 if 글.startswith("⚠️")], 기록
+    return 머리 + 메모줄 + [글 for 글 in 줄 if 글.startswith("⚠️")], 기록
 
 
 PAPER_SUMMARY_SQL = (
