@@ -176,6 +176,15 @@ def evaluate(h: HoldingInput, today: date, targets: dict | None = None) -> list[
     rules = {**DEFAULT_TARGETS[horizon], **((targets or {}).get(horizon) or {})}
     flags: list[Flag] = []
     label = HORIZON_LABEL[horizon]
+    # **문턱이 어디서 왔는지와 기간을 고른 규칙을 근거표에** (docs/infra.md 25.1410, 매도 플래그 감사 ③). 신호 쪽은
+    # 25.522 에서 적게 했는데 매도 플래그는 "≤ -7% (단기)" 만 적어, 설정값인지 기본값인지, 섞인 보유가 왜 단기인지
+    # 화면에서 확인할 수 없었다(CLAUDE.md 근거표 규칙)
+    문턱출처 = (f"설정 horizon_targets.{horizon}" if (targets or {}).get(horizon)
+               else "기본값 (CLAUDE.md 매매 규칙)")  # fmt: skip
+    기간글 = label + ("" if h.horizon in DEFAULT_TARGETS else " (기간 없음 — 장기로 봄)")
+    기간행 = {"label": "투자 기간", "display": 기간글,
+              "threshold": "남은 매수 가운데 원가가 가장 큰 기간 (기간 없음은 장기와 합침, docs/sell_flags.md 3장)",
+              "source": "positions.horizon", "as_of": h.price_date, "passed": None}  # fmt: skip
 
     if h.market_value is not None and h.cost > 0:
         # 경계(정확히 −7% 등)가 부동소수 찌꺼기(−6.9999…)로 빗나가지 않게 소수 여섯째 자리에서 반올림
@@ -219,14 +228,14 @@ def evaluate(h: HoldingInput, today: date, targets: dict | None = None) -> list[
         if ret <= rules["stop_pct"]:
             flags.append(Flag(h.stock_id, "red", "손절",
                               f"{h.name}: {label} 손절선 {rules['stop_pct']:g}% 에 닿았습니다 ({수익}%){덧}",
-                              [_criterion("손절선", shown, f"≤ {rules['stop_pct']:g}% ({label})",
-                                          "positions", h.price_date), *묵음행]))  # fmt: skip
+                              [_criterion("손절선", shown, f"≤ {rules['stop_pct']:g}% ({label} · {문턱출처})",
+                                          "positions", h.price_date), 기간행, *묵음행]))  # fmt: skip
         elif ret >= rules["target_pct"]:
             flags.append(Flag(h.stock_id, "green", "목표도달",
                               f"{h.name}: {label} 목표 {rules['target_pct']:g}% 에 닿았습니다 ({수익}%)."
                               f" 차익 실현을 검토하세요{덧}",
-                              [_criterion("목표 수익률", shown, f"≥ {rules['target_pct']:g}% ({label})",
-                                          "positions", h.price_date), *묵음행]))  # fmt: skip
+                              [_criterion("목표 수익률", shown, f"≥ {rules['target_pct']:g}% ({label} · {문턱출처})",
+                                          "positions", h.price_date), 기간행, *묵음행]))  # fmt: skip
 
     limit = MAX_HOLDING_DAYS.get(horizon)
     시작 = h.horizon_since or h.first_buy_date

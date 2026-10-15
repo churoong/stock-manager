@@ -138,7 +138,7 @@ class Test묵은_값으로_판정하지_않는다:
         flags = sf.evaluate(holding(market_value=700_000.0, price_date="2026-09-01"), TODAY)
         라벨 = [c["label"] for c in flags[0].criteria]
 
-        assert 라벨 == ["손절선", "종가 나이"], "근거표에 어느 행에서 왔는지 남아야 한다 (CLAUDE.md)"
+        assert 라벨 == ["손절선", "투자 기간", "종가 나이"], "근거표에 어느 행에서 왔는지 남아야 한다 (CLAUDE.md)"
 
     def test_목표도달에도_같은_말이_붙는다(self) -> None:
         """**같은 판단을 하는 다른 자리** — 녹색도 같은 종가를 쓴다."""
@@ -151,7 +151,7 @@ class Test묵은_값으로_판정하지_않는다:
         flags = sf.evaluate(holding(market_value=700_000.0, price_date="2026-09-16"), TODAY)
 
         assert "일 전" not in flags[0].rationale_text
-        assert [c["label"] for c in flags[0].criteria] == ["손절선"]
+        assert [c["label"] for c in flags[0].criteria] == ["손절선", "투자 기간"]  # 투자 기간 참고 행 (25.1410)
 
     def test_정상_휴장으로는_걸리지_않는다(self) -> None:
         """문턱은 `metrics.MAX_SESSION_GAP_DAYS`(11일 실측)다. 연휴는 안 걸린다."""
@@ -804,3 +804,16 @@ def test_수집이_끊겼던_종목은_첫_기사가_오래돼도_추적_중이_
     assert job.run(date(2026, 9, 16)) == 0
     뜬것 = [r[0] for r in c.execute("SELECT reason_code FROM sell_flags WHERE is_active = 1")]
     assert ("감성급락" in 뜬것) is 뜨나
+
+
+def test_근거표에_문턱_출처와_기간_규칙을_적는다() -> None:
+    """설정값인지 기본값인지, 섞인 보유가 왜 그 기간인지 (docs/infra.md 25.1410)"""
+    h = holding(horizon="short", market_value=920_000.0, price_date="2026-09-16")
+    기본 = sf.evaluate(h, date(2026, 9, 17))[0]
+    assert 기본.reason_code == "손절" and "기본값 (CLAUDE.md 매매 규칙)" in 기본.criteria[0]["threshold"]
+    설정 = sf.evaluate(h, date(2026, 9, 17), {"short": {"target_pct": 12.0, "stop_pct": -5.0}})[0]
+    assert "설정 horizon_targets.short" in 설정.criteria[0]["threshold"]
+    기간 = next(c for c in 설정.criteria if c["label"] == "투자 기간")
+    assert 기간["passed"] is None and "원가가 가장 큰 기간" in 기간["threshold"]
+    빈기간 = sf.evaluate(holding(horizon=None, market_value=700_000.0, price_date="2026-09-16"), date(2026, 9, 17))[0]
+    assert "기간 없음 — 장기로 봄" in next(c for c in 빈기간.criteria if c["label"] == "투자 기간")["display"]
