@@ -351,15 +351,24 @@ VOL_REGIME_MONTHS = (1, 3)
 def vol_regime(dates: list[str], closes: list[float]) -> dict[str, Any] | None:
     """변동성 국면 성적 (51장, 25.1071) — 날마다 최근 `VOL_WINDOW` 거래일 변동성(연환산)을 내고, 자기 이력에서 삼분위로
     나눈 칸마다 그 뒤 1·3개월 수익 분포. 지금 변동성이 자기 이력 몇 % 분위인지와 지금 칸. 칸 표본은 13장과 같은 하한."""
-    c = [float(x) for x in closes if x and x > 0]
+    쌍 = [(str(d), float(x)) for d, x in zip(dates, closes, strict=False) if x and x > 0]
+    c = [x for _, x in 쌍]
     if len(c) < MIN_DAYS + VOL_WINDOW:
         return None
     r = [math.log(b / a) for a, b in zip(c, c[1:], strict=False)]
+    # 11일 넘게 벌어진 쌍(거래정지 뒤 재개)이 든 창은 변동성을 내지 않는다 (docs/infra.md 25.1402,
+    # docs/metrics.md 0장) — 누적 낙폭이 하루치로 들어가 그 뒤 21일이 "시끄러운 편" 으로 몰렸다.
+    # 뒤 수익(여러 날)은 그대로 잰다
+    틈 = [pt.gap_too_long(a, b) for (a, _), (b, _) in zip(쌍, 쌍[1:], strict=False)]
     vol: list[tuple[int, float]] = []  # (종가 자리, 변동성)
     for i in range(VOL_WINDOW, len(r) + 1):
+        if any(틈[i - VOL_WINDOW : i]):
+            continue
         창 = r[i - VOL_WINDOW : i]
         m = sum(창) / VOL_WINDOW
         vol.append((i, math.sqrt(sum((x - m) ** 2 for x in 창) / (VOL_WINDOW - 1) * 252)))
+    if len(vol) < 3:
+        return None
     값 = sorted(v for _, v in vol)
     a, b = statistics.quantiles(값, n=3)
     def 칸(v: float) -> int:

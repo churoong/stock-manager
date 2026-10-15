@@ -243,10 +243,27 @@ EWMA_MIN = 60
 EWMA_DAYS = 500
 
 
+def gap_too_long(a: str, b: str) -> bool:
+    """두 날짜가 `metrics.MAX_SESSION_GAP_DAYS` 보다 벌어졌나 — 그 쌍의 수익률은 하루치가 아니다 (docs/metrics.md 0장).
+    날짜를 못 읽으면 거짓(예전처럼 센다)"""
+    from datetime import date as _date
+
+    from batch.services.metrics import MAX_SESSION_GAP_DAYS
+
+    try:
+        return (_date.fromisoformat(str(b)[:10]) - _date.fromisoformat(str(a)[:10])).days > MAX_SESSION_GAP_DAYS
+    except ValueError:
+        return False
+
+
 def ewma_vol(dates: list[str], closes: list[float]) -> dict | None:
-    """연환산 EWMA 변동성(√252 배). 씨앗 = 처음 21일 제곱 수익률 평균. 모자라면 None."""
+    """연환산 EWMA 변동성(√252 배). 씨앗 = 처음 21일 제곱 수익률 평균. 모자라면 None.
+
+    **11일 넘게 벌어진 쌍은 버린다** (docs/infra.md 25.1402, 주간 작업 감사 — docs/metrics.md 0장 규칙). 거래정지 뒤
+    재개일의 누적 낙폭을 하루치로 세어, 30일 정지 뒤 −40% 재개 20일 뒤의 EWMA 가 0.16 이 아니라 1.11 이었고
+    `verdict.term_sigma` 의 1년 σ 가 0.56 이 되어 오를 확률·가격 범위가 크게 틀어졌다"""
     쌍 = [(d, c) for d, c in zip(dates, closes, strict=False) if c and c > 0]
-    r = [math.log(b / a) for (_, a), (_, b) in zip(쌍, 쌍[1:], strict=False)]
+    r = [math.log(b / a) for (da, a), (db, b) in zip(쌍, 쌍[1:], strict=False) if not gap_too_long(da, db)]
     if len(r) < EWMA_MIN:
         return None
     var = sum(x * x for x in r[:21]) / 21
