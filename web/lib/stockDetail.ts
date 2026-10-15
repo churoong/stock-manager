@@ -11,7 +11,7 @@
 
 import { ifMissingTable, ifMissingTableThen } from "@/lib/db";
 import { LAST_CALC_DATE, LAST_CALC_DATE_FALLBACK, LAST_SIGNAL_SUCCESS, LATEST_SIGNAL_RUN, type SignalRunRow, signalRunNote } from "@/lib/recommend";
-import { LAST_EDIT, LAST_RECALC_RUN, TRADES_VERSION, recalcStuckNote } from "@/lib/portfolio";
+import { FX_MAX_STALE_DAYS, LAST_EDIT, LAST_RECALC_RUN, TRADES_VERSION, recalcStuckNote } from "@/lib/portfolio";
 import { localDate } from "@/lib/market";
 import { unmatchedNameNote } from "@/lib/newsKr";
 import { z } from "zod";
@@ -115,8 +115,25 @@ export const NEWS_TARGET_STATE = `SELECT s.country, s.name_ko,
 FROM stocks s WHERE s.id = ?`;
 
 export const POSITION = `SELECT quantity, currency, avg_price, cost, first_buy_date, horizon, price_date, close, market_value,
-  unrealized_pnl, unrealized_pnl_krw, unrealized_price_pnl_krw, unrealized_fx_pnl_krw, weight_pct, updated_at
+  unrealized_pnl, unrealized_pnl_krw, unrealized_price_pnl_krw, unrealized_fx_pnl_krw, weight_pct, updated_at, fx_date, fx_now
 FROM positions WHERE stock_id = ?`;
+
+/**
+ * 외화 보유의 원화 손익이 **어느 날 환율**로 낸 값인지 (docs/infra.md 25.1435, 감사). 예전 상세 카드는 "기준 {종가 날}" 만
+ * 보이고 원화 손익·환차를 적어, 환율 수집이 멈춰 13일 전 환율로 낸 값이 새것처럼 보였다(묵음 경고는 포트폴리오 화면에만).
+ * 원화 보유거나 환율 날이 없으면 null. 종가 날보다 `FX_MAX_STALE_DAYS`(7일) 넘게 앞이면 `stale`
+ */
+export function positionFxNote(
+  currency: string,
+  fxNow: unknown,
+  fxDate: unknown,
+  priceDate: unknown,
+): { text: string; stale: boolean } | null {
+  if (currency === "KRW" || typeof fxDate !== "string" || !fxDate) return null;
+  const 환율 = typeof fxNow === "number" && Number.isFinite(fxNow) ? `${fxNow.toLocaleString("ko-KR", { maximumFractionDigits: 2 })}원` : "?";
+  const 날 = typeof priceDate === "string" && priceDate ? (Date.parse(priceDate) - Date.parse(fxDate)) / 86_400_000 : 0;
+  return { text: `환율 ${환율} (${fxDate})`, stale: Number.isFinite(날) && 날 > FX_MAX_STALE_DAYS };
+}
 
 /**
  * 매도 플래그. **`rationale_data` 를 꼭 함께 읽는다** — 근거표다.

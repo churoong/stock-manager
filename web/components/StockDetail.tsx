@@ -48,9 +48,10 @@ import {
   sentimentNullReason,
   ETF_SECTION_NOTE,
   marketCapNote,
+  positionFxNote,
 } from "@/lib/stockDetail";
 import { unmatchedNameNote } from "@/lib/newsKr";
-import { money, pnlClass, qtyText, signedInt, signedWon } from "@/lib/portfolio";
+import { FX_MAX_STALE_DAYS, money, pnlClass, qtyText, signedInt, signedWon } from "@/lib/portfolio";
 import { localDate, userDateOf, userTimeOf } from "@/lib/market";
 import { addWatch, loadWatchIds, removeWatch } from "@/lib/watch";
 import QuickTrade from "@/components/QuickTrade";
@@ -622,6 +623,16 @@ function PositionBlock({ position, currency, stale }: { position: Row; currency:
           </span>
         )}
       </p>
+      {/* 원화 손익이 어느 날 환율로 낸 값인지 (docs/infra.md 25.1435) — 묵었으면 경고 */}
+      {(() => {
+        const fx = positionFxNote(currency, position.fx_now, position.fx_date, position.price_date);
+        if (!fx) return null;
+        return (
+          <p className={`text-xs ${fx.stale ? "text-amber-700 dark:text-amber-300" : "text-slate-500"}`}>
+            원화 손익 {fx.text} 기준{fx.stale && ` — 종가 날보다 ${FX_MAX_STALE_DAYS}일 넘게 묵은 환율입니다`}
+          </p>
+        );
+      })()}
       <Link href="/portfolio" className="text-xs text-slate-500 underline">
         포트폴리오에서 보기
       </Link>
