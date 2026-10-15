@@ -309,6 +309,23 @@ def _criterion(label: str, display: str, threshold: str, source: str, as_of: str
             "passed": True}  # fmt: skip
 
 
+def low_touch(h: HoldingInput, close: float | None, low: float | None, targets: dict | None = None) -> bool | None:
+    """전일 **저가**가 손절선 이하인데 **종가**는 손절선 위였나 (28회차 P1, docs/sell_flags.md 3장, 25.1419 — 기록만).
+
+    장중 감시가 꺼진 동안(10-08 사용자 결정) 장중 손절 터치는 아무도 보지 않는다 — 판정은 종가 그대로 두고 센다.
+    잣대는 판정식과 같다: 평가액 × (저가 ÷ 종가) 를 수수료 포함 원가 × 권리락 계수와 견준다(장중 평균단가 식을 쓰면 같은
+    근거표 안에서 숫자가 둘이 된다, 검증 B). 모름(None): 평가액·종가·저가 없음, 최근 20거래일 기업행위(수량 확인 전)"""
+    if (h.market_value is None or not close or not low or close <= 0 or low <= 0 or h.cost <= 0
+            or h.corporate_action_recent):  # fmt: skip
+        return None
+    horizon = h.horizon if h.horizon in DEFAULT_TARGETS else "long"
+    stop = {**DEFAULT_TARGETS[horizon], **((targets or {}).get(horizon) or {})}["stop_pct"]
+    원가 = h.cost * (h.rights_scale if h.rights_scale != 1.0 and h.rights_scale > 0 else 1.0)
+    종가수익 = round((h.market_value / 원가 - 1) * 100, 6)
+    저가수익 = round((h.market_value * (low / close) / 원가 - 1) * 100, 6)
+    return 저가수익 <= stop < 종가수익
+
+
 def evaluate(h: HoldingInput, today: date, targets: dict | None = None) -> list[Flag]:
     """한 보유 종목의 플래그. 여러 개가 동시에 걸릴 수 있다(예: 손절 + 재무 악화)."""
     horizon = h.horizon if h.horizon in DEFAULT_TARGETS else "long"

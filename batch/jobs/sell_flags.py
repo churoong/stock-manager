@@ -327,6 +327,29 @@ def _수집_시작(client: TursoClient, country: str, 캐시: dict[str, str | No
     return 캐시[country]
 
 
+#: 장중 감시 스위치 — `web/lib/intradaySwitch.ts` 의 `INTRADAY_ENABLED` 와 같아야 한다(`tests/test_low_touch_1419.py` 가
+#: 글자로 대조). 꺼진 동안만 전일 저가의 손절선 터치를 센다 — 켜지면 장중 `stop` 알림이 그 몫이다 (28회차 P1, 25.1419)
+INTRADAY_ENABLED = False
+LOW_TOUCH_SQL = (
+    "SELECT p.stock_id, p.close, pr.low FROM positions p"
+    " JOIN prices pr ON pr.stock_id = p.stock_id AND pr.date = p.price_date"
+)
+
+
+def _저가_터치(client: TursoClient, holdings: list[sf.HoldingInput], rules: dict, 경고: list[str]) -> dict | None:
+    """step_log.low_touch = {holdings, touch, unknown} — 장중 감시가 꺼진 동안만 (25.1419, 기록만). 못 읽으면 경고"""
+    holdings = [h for h in holdings if isinstance(h, sf.HoldingInput)]
+    if INTRADAY_ENABLED or not holdings:
+        return None
+    try:
+        저가 = {int(r["stock_id"]): (r["close"], r["low"]) for r in client.execute(LOW_TOUCH_SQL).dicts()}
+    except Exception as exc:  # noqa: BLE001 — 기록일 뿐이다. 판정을 막지 않고 말한다
+        경고.append(f"전일 저가를 읽지 못해 손절선 저가 터치 기록을 남기지 않았습니다 ({type(exc).__name__})")
+        return None
+    닿음 = [sf.low_touch(h, *(저가.get(h.stock_id) or (None, None)), rules) for h in holdings]
+    return {"holdings": len(holdings), "touch": sum(1 for x in 닿음 if x), "unknown": sum(1 for x in 닿음 if x is None)}
+
+
 #: 예탁원 배당 일정 수집 시작일(기준일 기준)을 한 번 재서 두는 설정 키 (25.1413) — 매일 `kr_corp_events` 를 훑지 않는다
 DIVIDEND_START_KEY = "corp_dividend_collection_started"
 #: 배당 일정이 온전히 덮는 첫 기준일의 하한 (25.1416, 교차검증 R1). 10-07 첫 수집은 배당 목록이 100행에서 잘렸고
@@ -564,6 +587,7 @@ def run(today: date | None = None) -> int:
         holdings, 보유경고 = load_holdings(client, today)
         경고 += 보유경고
         flags = sf.sort_flags([f for h in holdings for f in sf.evaluate(h, today, rules)])
+        저가터치 = _저가_터치(client, holdings, rules, 경고)
 
         # 이어지던 같은 (종목, 사유) 의 처음 걸린 날·확인 여부를 이어받는다.
         # **오늘 행도 본다** (docs/infra.md 25.198). 국내 아침·미국 저녁 배치가 같은 "사용자의 오늘"로
@@ -654,6 +678,7 @@ def run(today: date | None = None) -> int:
         db.finish_batch_run(client, run_id, status="success",
                             step_log={"holdings": len(holdings), "flags": len(flags), **counts,
                                       **({"carried_unjudged": 이음} if 이음 else {}), "dividend_note": 배당,
+                                      **({"low_touch": 저가터치} if 저가터치 else {}),
                                       **({"warnings": 경고, "warning_count": len(경고)} if 경고 else {})})  # fmt: skip
         print(
             f"보유 {len(holdings)}종목 → 플래그 {len(flags)}개"
