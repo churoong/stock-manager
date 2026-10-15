@@ -237,3 +237,25 @@ def test_decision_outcomes_and_due_windows() -> None:
     assert pp.due_horizons("2026-10-01", "2026-10-07", {}) == []
     assert pp.due_horizons("2026-10-01", "2026-10-08", {}) == [5]
     assert pp.due_horizons("2026-10-01", "2026-12-31", {"ret_5d": 1.0}) == [20, 60]
+
+
+def test_attribution_splits_selection_entry_exit() -> None:
+    """성과 분해 (25.1450) — 모두 20 거래일 뒤 지수 대비 초과(%p), 진입은 체결가 대비 그날 종가(%)."""
+    def 결(kind: str, ret: float, bench: float, reason: str = "x") -> dict:
+        return {"kind": kind, "reason": reason, "ret_20d": ret, "bench_20d": bench}
+
+    결정 = [결("buy", 10, 2), 결("buy", -4, 2), 결("skip", 8, 2, "종목 비중 상한 도달"), 결("skip", 1, 2, "현금 부족"),
+          결("missed", 12, 2), 결("sell", -6, -1), 결("hold_flag", 3, 1), {"kind": "buy", "ret_20d": None, "bench_20d": None}]
+    a = pp.attribution(결정, [(10_000, 10_100), (9_800, 9_800), (100, None)])
+    assert a["selection"] == {"n": 2, "avg": pytest.approx(1.0), "hit": pytest.approx(50.0)}
+    assert a["skipped"]["avg"] == pytest.approx(2.5)
+    assert a["skip_by_reason"]["종목 비중 상한 도달"]["avg"] == pytest.approx(6.0)
+    assert a["entry"] == {"n": 2, "avg": pytest.approx(0.5)}
+    assert a["missed"]["avg"] == pytest.approx(10.0)
+    assert a["sold"]["avg"] == pytest.approx(-5.0) and a["held_flag"]["avg"] == pytest.approx(2.0)
+    줄 = pp.attribution_lines("A", a)
+    assert "산 후보 +1.0%p (n=2, 이긴 비율 50%, 참고)" in 줄[0]
+    assert any("체결가가 그날 종가보다 평균 +0.50% 쌌다 (n=2)" in x for x in 줄)
+    assert pp.attribution_lines("A", None) == []
+    빈 = pp.attribution([], [])
+    assert pp.attribution_lines("B", 빈)[0].endswith("표본 없음 · 안 산 후보 표본 없음")

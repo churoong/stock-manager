@@ -83,6 +83,7 @@ def test_summary_section_reads_real_schema(monkeypatch: pytest.MonkeyPatch) -> N
     assert not any("월간" in x for x in 줄)
     월 = job.summary_section(c, datetime(2026, 11, 1, 0, 0, tzinfo=UTC))
     assert any("[모의 투자 월간 복기] 2026-10-01 부터" in x for x in 월)
+    assert any(x.startswith("[노하우 성적표 — 20 거래일 뒤") for x in 월)  # 성과 분해 (25.1450)
     assert job.summary_section(Client(), datetime(2026, 10, 18, tzinfo=UTC)) == []
     # 실제 포트폴리오가 있으면 모의 절 아래에 같은 기간 비교 한 줄 (25.1448)
     c.conn.executemany(

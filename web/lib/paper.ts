@@ -45,7 +45,8 @@ FROM paper_accounts a ORDER BY a.id`;
 export const PAPER_OPEN_BUYS =
   "SELECT account_id, limit_price, quantity, currency FROM paper_orders WHERE status = 'open' AND side = 'buy'";
 export const PAPER_LATEST_DAILY = `SELECT d.account_id, d.as_of, d.invested_krw, d.cash_krw, d.holdings_krw, d.equity_krw,
-  d.pnl_krw, d.twr_index, d.kospi_krw, d.sp500_krw, d.positions_json, d.recon_ok, d.recon_note, d.unknown_json, d.updated_at
+  d.pnl_krw, d.twr_index, d.kospi_krw, d.sp500_krw, d.positions_json, d.recon_ok, d.recon_note, d.unknown_json, d.updated_at,
+  d.attribution_json
 FROM paper_daily d
 WHERE d.as_of = (SELECT MAX(x.as_of) FROM paper_daily x WHERE x.account_id = d.account_id)`;
 export const PAPER_HISTORY = `SELECT account_id, as_of, invested_krw, equity_krw, twr_index, kospi_krw, sp500_krw
@@ -238,4 +239,31 @@ export function compareReal(paper: Record<string, Point[]>, real: Point[]): Real
   const paperPct: Record<string, number | null> = {};
   for (const [aid, rows] of 모의.sort(([a], [b]) => a.localeCompare(b))) paperPct[aid] = windowChange(rows, 시작, 끝)?.pct ?? null;
   return { start: 실제.start, end: 실제.end, realPct: 실제.pct, paperPct };
+}
+
+/** 성과 분해 한 칸 — 배치 `paper._초과` (docs/paper.md 10장, 25.1450) */
+export interface AttrCell {
+  n: number;
+  avg: number | null;
+  hit?: number | null;
+}
+export interface Attribution {
+  horizon: number;
+  selection: AttrCell;
+  skipped: AttrCell;
+  skip_by_reason: Record<string, AttrCell>;
+  entry: AttrCell;
+  missed: AttrCell;
+  sold: AttrCell;
+  held_flag: AttrCell;
+}
+/** 배치 `ATTRIBUTION_MIN_SAMPLE` 과 같다 — 이보다 적은 칸은 "참고" */
+export const ATTRIBUTION_MIN_SAMPLE = 30;
+
+/** 한 칸의 글 — "+1.2%p (n=40, 이긴 비율 55%)", 표본이 적으면 ", 참고" */
+export function attrCellText(c: AttrCell | undefined, unit = "%p"): string {
+  if (!c || !c.n || c.avg == null) return "표본 없음";
+  const 이김 = c.hit != null ? `, 이긴 비율 ${Math.round(c.hit)}%` : "";
+  const 참고 = c.n < ATTRIBUTION_MIN_SAMPLE ? ", 참고" : "";
+  return `${c.avg >= 0 ? "+" : ""}${c.avg.toFixed(unit === "%" ? 2 : 1)}${unit} (n=${c.n}${이김}${참고})`;
 }

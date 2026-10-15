@@ -884,6 +884,8 @@ class Test이웃_모듈들:
         검사(PAPER, f"`HALT_LIQUIDATE_SESSIONS`({pp.HALT_LIQUIDATE_SESSIONS}거래일)", "정지 매도 청산")
         검사(PAPER, f"{pp.DEPOSIT_MIN_KRW // 10_000}만~{pp.DEPOSIT_MAX_KRW // 100_000_000}억", "입금 범위")
         검사(PAPER, f"{pp.OUTCOME_GIVE_UP_DAYS}일이 지나도 못 채우면", "결정 원장 성과 포기 기한 (25.1449)")
+        검사(PAPER, f"**{pp.ATTRIBUTION_HORIZON} 거래일 뒤 지수 대비 초과(%p)**", "성과 분해 창 (25.1450)")
+        검사(PAPER, f"표본이 {pp.ATTRIBUTION_MIN_SAMPLE}(`ATTRIBUTION_MIN_SAMPLE`) 미만", "성과 분해 참고 문턱 (25.1450)")
         검사(PAPER, "**" + "·".join(str(n) for n in pp.DECISION_HORIZONS) + " 번째 거래일**", "결정 원장 성과 창")
 
     def test_스트레스_표본_하한(self) -> None:

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import CriteriaTable from "@/components/CriteriaTable";
 import EquityChart, { type Series } from "@/components/EquityChart";
 import { bodyOf, readJson } from "@/lib/http";
-import { DEPOSIT_MAX_KRW, DEPOSIT_MIN_KRW, type AccountView } from "@/lib/paper";
+import { DEPOSIT_MAX_KRW, DEPOSIT_MIN_KRW, attrCellText, type AccountView, type Attribution } from "@/lib/paper";
 import { won } from "@/lib/portfolio";
 
 /**
@@ -22,6 +22,7 @@ interface Account {
   view: AccountView;
   positions: Array<{ stock_id: number; ticker?: string; name?: string; quantity: number; cost_krw: number; value_krw: number; price_date: string | null }>;
   unknown: Array<{ stock_id: number; why: string }>;
+  attribution: Attribution | null;
 }
 interface Flow { id: number; flow_date: string; amount_krw: number; kind: string; cancels_id: number | null; memo: string | null; cancelled_by: number | null }
 interface FillRow {
@@ -198,6 +199,19 @@ export default function PaperView() {
               <p key={n} className={`mt-2 text-xs ${n.startsWith("⚠️") ? "text-red-600 dark:text-red-400" : "text-slate-500"}`}>{n}</p>
             ))}
             {a.unknown.length ? <p className="mt-1 text-xs text-amber-600">원가로 평가한 보유 {a.unknown.length}개 (종가·환율 없음 또는 기업행위 멈춤)</p> : null}
+            {a.attribution ? (
+              <details className="mt-3 text-xs">
+                <summary className="cursor-pointer font-medium">노하우 성적표 ({a.attribution.horizon} 거래일 뒤, 지수 대비)</summary>
+                <ul className="mt-1 space-y-0.5 text-slate-600 dark:text-slate-400">
+                  <li>선정: 산 후보 {attrCellText(a.attribution.selection)} · 안 산 후보 {attrCellText(a.attribution.skipped)}</li>
+                  {Object.entries(a.attribution.skip_by_reason ?? {}).map(([k, v]) => (
+                    <li key={k}>안 산 까닭 — {k}: {attrCellText(v)}</li>
+                  ))}
+                  <li>진입: 체결가 대비 그날 종가 {attrCellText(a.attribution.entry, "%")} · 안 찬 회차의 그 뒤 {attrCellText(a.attribution.missed)}</li>
+                  <li>청산: 판 뒤 {attrCellText(a.attribution.sold)} · 플래그를 따르지 않고 든 뒤 {attrCellText(a.attribution.held_flag)} (판 뒤가 음수면 판 것이 옳았다)</li>
+                </ul>
+              </details>
+            ) : null}
             {a.positions.length ? (
               <table className="mt-3 w-full text-xs">
                 <thead className="text-slate-500"><tr><th className="text-left">종목</th><th className="text-right">수량</th><th className="text-right">원가</th><th className="text-right">평가</th></tr></thead>

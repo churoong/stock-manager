@@ -618,3 +618,63 @@ def due_horizons(decided_on: str, today: str, have: dict[str, Any]) -> list[int]
     지난 = (date.fromisoformat(today) - date.fromisoformat(decided_on)).days
     return [n for n in DECISION_HORIZONS
             if have.get(f"ret_{n}d") is None and 지난 >= HORIZON_CALENDAR_DAYS[n]]  # fmt: skip
+
+
+#: 성과 분해의 창 — 결정 원장의 20 거래일(단기 투자 기간의 중간쯤) 지수 대비 초과 (docs/paper.md 10장)
+ATTRIBUTION_HORIZON = 20
+#: 이보다 표본이 적은 칸은 "참고" 로만 — 몇 건의 운을 실력으로 읽지 않게
+ATTRIBUTION_MIN_SAMPLE = 30
+
+
+def _초과(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    키, 기 = f"ret_{ATTRIBUTION_HORIZON}d", f"bench_{ATTRIBUTION_HORIZON}d"
+    xs = [float(r[키]) - float(r[기]) for r in rows if r.get(키) is not None and r.get(기) is not None]
+    if not xs:
+        return {"n": 0, "avg": None, "hit": None}
+    return {"n": len(xs), "avg": sum(xs) / len(xs), "hit": sum(x > 0 for x in xs) / len(xs) * 100}
+
+
+def attribution(decisions: list[dict[str, Any]], entries: list[tuple[float, float | None]]) -> dict[str, Any]:
+    """성과 분해 — 어디가 돈을 버나 (docs/paper.md 10장, 25.1450). 순수 함수.
+
+    모두 **20 거래일 뒤 지수 대비 초과(%p)**. 선정 = 산 후보 vs 안 산 후보, 비중 필터 = 안 산 까닭별,
+    진입 = 체결가가 그날 종가보다 얼마나 쌌나(%)와 안 찬 회차의 그 뒤, 청산 = 판 뒤와 플래그를 따르지 않고 든 뒤
+    (판 뒤가 음수면 판 것이 옳았다). `entries` 는 매수 체결마다 (체결가, 체결일 종가)
+    """
+    종류 = {k: [d for d in decisions if d.get("kind") == k] for k in ("buy", "skip", "missed", "sell", "hold_flag")}
+    까닭: dict[str, list[dict[str, Any]]] = {}
+    for d in 종류["skip"]:
+        까닭.setdefault(str(d.get("reason")), []).append(d)
+    진입 = [(float(c) - float(p)) / float(p) * 100 for p, c in entries if c and p and p > 0]
+    return {
+        "horizon": ATTRIBUTION_HORIZON,
+        "selection": _초과(종류["buy"]),
+        "skipped": _초과(종류["skip"]),
+        "skip_by_reason": dict(sorted(((k, _초과(v)) for k, v in 까닭.items()), key=lambda kv: -kv[1]["n"])[:5]),
+        "entry": {"n": len(진입), "avg": sum(진입) / len(진입) if 진입 else None},
+        "missed": _초과(종류["missed"]),
+        "sold": _초과(종류["sell"]),
+        "held_flag": _초과(종류["hold_flag"]),
+    }
+
+
+def attribution_lines(aid: str, a: dict[str, Any] | None) -> list[str]:
+    """주간 요약·리포트용 몇 줄. 표본이 `ATTRIBUTION_MIN_SAMPLE` 보다 적은 칸에는 "참고" 를 붙인다."""
+    if not a:
+        return []
+
+    def 칸(s: dict[str, Any]) -> str:
+        if not s.get("n"):
+            return "표본 없음"
+        글 = f"{s['avg']:+.1f}%p (n={s['n']}" + (f", 이긴 비율 {s['hit']:.0f}%" if s.get("hit") is not None else "")
+        return 글 + (", 참고" if s["n"] < ATTRIBUTION_MIN_SAMPLE else "") + ")"
+
+    줄 = [f"  {aid} 선정: 산 후보 {칸(a['selection'])} · 안 산 후보 {칸(a['skipped'])}"]
+    if a.get("skip_by_reason"):
+        줄.append(f"  {aid} 안 산 까닭별: " + " · ".join(f"{k} {칸(v)}" for k, v in a["skip_by_reason"].items()))
+    e = a.get("entry") or {}
+    진입 = f"체결가가 그날 종가보다 평균 {e['avg']:+.2f}% 쌌다 (n={e['n']})" if e.get("n") else "체결 표본 없음"
+    줄.append(f"  {aid} 진입: {진입} · 안 찬 회차의 그 뒤 {칸(a['missed'])}")
+    줄.append(f"  {aid} 청산: 판 뒤 {칸(a['sold'])} · 플래그를 따르지 않고 든 뒤 {칸(a['held_flag'])}"
+             " — 판 뒤가 음수면 판 것이 옳았다")
+    return 줄

@@ -178,3 +178,14 @@ describe("실제 투자와 비교 (25.1448)", () => {
     expect(db.prepare(PAPER_TWR).all()).toEqual([]);
   });
 });
+
+describe("성과 분해 칸 (25.1450)", () => {
+  it("표본이 적으면 참고, 없으면 표본 없음", async () => {
+    const { attrCellText } = await import("@/lib/paper");
+    expect(attrCellText({ n: 40, avg: 1.234, hit: 55 })).toBe("+1.2%p (n=40, 이긴 비율 55%)");
+    expect(attrCellText({ n: 3, avg: -2, hit: 0 })).toBe("-2.0%p (n=3, 이긴 비율 0%, 참고)");
+    expect(attrCellText({ n: 2, avg: 0.5 }, "%")).toBe("+0.50% (n=2, 참고)");
+    expect(attrCellText({ n: 0, avg: null })).toBe("표본 없음");
+    expect(attrCellText(undefined)).toBe("표본 없음");
+  });
+});

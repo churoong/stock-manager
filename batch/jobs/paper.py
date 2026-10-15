@@ -63,8 +63,8 @@ SCORE_NOW_SQL = (
 )
 INSERT_FILL_SQL = (
     "INSERT OR IGNORE INTO paper_fills (order_id, account_id, stock_id, side, fill_date, price, quantity, currency,"
-    " fx_rate, fx_date, fee, tax, slippage, cash_krw, horizon, score_at_trade, snapshot_as_of, created_at)"
-    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    " fx_rate, fx_date, fee, tax, slippage, cash_krw, horizon, score_at_trade, snapshot_as_of, created_at, day_close)"
+    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 )
 FILLED_SQL = (
     "UPDATE paper_orders SET status = 'filled', closed_on = ?, close_note = ? WHERE id = ? AND status = 'open'"
@@ -121,6 +121,19 @@ UPDATE_OUTCOME_SQL = (
 )
 #: 한 번에 성과를 채우는 결정 수 — 하루 읽기 상한(행당 최대 60 시세 행 + 지수 몇 행)
 OUTCOME_BATCH = 300
+#: 성과 분해 (docs/paper.md 10장, 25.1450) — 성과가 찬 결정과 체결일 종가가 있는 매수만, 최근 1년
+ATTR_DECISIONS_SQL = (
+    "SELECT kind, reason, ret_20d, bench_20d FROM paper_decisions"
+    " WHERE account_id = ? AND decided_on >= ? AND ret_20d IS NOT NULL"
+)
+ATTR_FILLS_SQL = (
+    "SELECT order_id, price, day_close FROM paper_fills"
+    " WHERE account_id = ? AND side = 'buy' AND day_close IS NOT NULL AND fill_date >= ?"
+)
+SAVE_ATTR_SQL = "UPDATE paper_daily SET attribution_json = ? WHERE account_id = ? AND as_of = ?"
+#: 성과 분해가 보는 기간(달력일)
+ATTR_WINDOW_DAYS = 365
+
 #: 결정의 기준 지수
 BENCH_INDEX = {"KR": "KOSPI", "US": "SP500"}
 
@@ -311,6 +324,7 @@ def fill_orders(
         bar = (pp.Bar(str(행[0]["date"]), 행[0]["open"], float(행[0]["close"]), 행[0]["volume"])
                if 행 and 행[0]["close"] is not None else None)  # fmt: skip
         가격, 까닭 = pp.judge(o, bar)
+        그날종가 = bar.close if bar is not None else None  # 진입 이득을 잴 체결일 종가 (25.1450)
         if 가격 is None and o.side == "sell" and pp.halted(bar):
             if int(r["deferrals"] or 0) + 1 >= pp.HALT_LIQUIDATE_SESSIONS:
                 마지막 = client.execute(LAST_CLOSE_SQL, [o.stock_id, 날]).rows
@@ -370,7 +384,8 @@ def fill_orders(
         _쓰기(client, [
             (INSERT_FILL_SQL, [체결.order_id, 체결.account_id, 체결.stock_id, 체결.side, 체결.fill_date, 체결.price,
                                체결.quantity, 체결.currency, 체결.fx_rate, 환율날, 체결.fee, 체결.tax, 체결.slippage,
-                               체결.cash_krw, 체결.horizon, 체결.score_at_trade, 체결.snapshot_as_of, now]),
+                               체결.cash_krw, 체결.horizon, 체결.score_at_trade, 체결.snapshot_as_of, now,
+                               그날종가]),
             (FILLED_SQL, [trade_date, 까닭, o.id]),
         ])  # fmt: skip
         새것.append(체결)
@@ -430,6 +445,16 @@ def real_comparison(client: Any) -> dict[str, Any] | None:
     부터 = (date.fromisoformat(처음) - timedelta(days=REAL_LOOKBACK_DAYS)).isoformat()
     실제 = [(str(r[0]), float(r[1])) for r in client.execute(REAL_TWR_SQL, [부터]).rows if r[1] is not None]
     return pp.compare_real(모의, 실제)
+
+
+def save_attribution(client: Any, aid: str, today: str) -> dict[str, Any]:
+    """그 계좌의 성과 분해를 내 오늘 평가 행에 적는다 (docs/paper.md 10장, 25.1450)."""
+    부터 = (date.fromisoformat(today) - timedelta(days=ATTR_WINDOW_DAYS)).isoformat()
+    결정 = client.execute(ATTR_DECISIONS_SQL, [aid, 부터]).dicts()
+    체결행 = client.execute(ATTR_FILLS_SQL, [aid, 부터]).dicts()
+    a = pp.attribution(결정, [(float(r["price"]), r["day_close"]) for r in 체결행])
+    _쓰기(client, [(SAVE_ATTR_SQL, [json.dumps(a, ensure_ascii=False), aid, today])])
+    return a
 
 
 def mark(
@@ -747,6 +772,13 @@ def run_step(
         기록["decision_outcomes"] = fill_outcomes(client, market, 오늘, 지금)
     except Exception as exc:  # noqa: BLE001 — 성과 채우기만 빠진다. 까닭은 기록에
         기록["decision_outcomes"] = {"error": str(exc)[:200]}
+    # 성과 분해 (25.1450) — 계좌마다 오늘 평가 행에. 곁다리
+    try:
+        for acct in accounts:
+            a = save_attribution(client, str(acct["id"]), 오늘)
+            기록.setdefault("attribution_n", {})[str(acct["id"])] = a["selection"]["n"]
+    except Exception as exc:  # noqa: BLE001 — 분해만 빠진다
+        기록["attribution_error"] = str(exc)[:200]
     if 읽기0 is not None:
         기록["reads"] = getattr(client.reads, "total", 0) - 읽기0
     머리 = ["🧪 모의 투자 " + " · ".join(글 for 글 in 줄 if not 글.startswith("⚠️"))]
@@ -765,8 +797,8 @@ def run_step(
 
 
 PAPER_SUMMARY_SQL = (
-    "SELECT account_id, as_of, invested_krw, equity_krw, pnl_krw, twr_index, kospi_krw, sp500_krw, positions_json"
-    " FROM paper_daily WHERE as_of >= ? ORDER BY account_id, as_of"
+    "SELECT account_id, as_of, invested_krw, equity_krw, pnl_krw, twr_index, kospi_krw, sp500_krw, positions_json,"
+    " attribution_json FROM paper_daily WHERE as_of >= ? ORDER BY account_id, as_of"
 )
 #: 월간 복기 — 한국 날짜로 그달 1~7일에 보내는 주간 요약이 지난달을 돌아본다 (docs/paper.md 6장)
 MONTHLY_REVIEW_DAYS = 7
@@ -810,4 +842,10 @@ def summary_section(client: Any, now: datetime) -> list[str]:
     if 줄 and 비교줄:
         자리 = next((i for i, x in enumerate(줄) if x.startswith("[모의 투자 월간")), len(줄))
         줄.insert(자리, "  " + 비교줄.strip())
+    # 월간 복기에 성과 분해 (25.1450) — 계좌마다 마지막 평가 행의 것
+    if 달초 and 줄:
+        분해 = [x for aid in sorted(daily)
+                for x in pp.attribution_lines(aid, json.loads(daily[aid][-1].get("attribution_json") or "null"))]
+        if 분해:
+            줄 += [f"[노하우 성적표 — {pp.ATTRIBUTION_HORIZON} 거래일 뒤, 지수 대비]", *분해]
     return 줄

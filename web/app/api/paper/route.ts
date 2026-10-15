@@ -48,7 +48,7 @@ export async function GET() {
     const 현금 = Object.fromEntries(rowsToObjects<{ account_id: string; cash_krw: number }>(cash).map((r) => [r.account_id, Number(r.cash_krw)]));
     const 환율 = rowsToObjects<{ rate: number }>(fx)[0]?.rate ?? null;
     const 예약 = reservedByAccount(rowsToObjects<OpenBuy>(buys), 환율 == null ? null : Number(환율));
-    const 마지막 = rowsToObjects<DailyRow & { positions_json: string; unknown_json: string | null }>(latest);
+    const 마지막 = rowsToObjects<DailyRow & { positions_json: string; unknown_json: string | null; attribution_json: string | null }>(latest);
     // 보유 이름 — 마지막 평가의 보유 목록에 든 종목만
     const 보유들 = Object.fromEntries(
       마지막.map((d) => [d.account_id, JSON.parse(d.positions_json || "[]") as Array<Record<string, unknown>>]),
@@ -66,6 +66,7 @@ export async function GET() {
       view: accountView(a.id, 입금, 현금[a.id] ?? 입금, 예약[a.id] === undefined ? 0 : 예약[a.id], 마지막.find((d) => d.account_id === a.id)),
       positions: (보유들[a.id] ?? []).map((p) => ({ ...p, ...(이름[Number(p.stock_id)] ?? {}) })),
       unknown: JSON.parse(마지막.find((d) => d.account_id === a.id)?.unknown_json || "[]"),
+      attribution: JSON.parse(마지막.find((d) => d.account_id === a.id)?.attribution_json || "null"),
     }));
     // 실제 투자와 같은 기간 비교 (25.1448) — 실제 표는 읽기만. 못 읽으면 비교만 빠진다
     let realCompare = null;

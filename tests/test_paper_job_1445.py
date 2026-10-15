@@ -119,6 +119,9 @@ def test_order_fill_rerun_and_stop_loss(client: Client, monkeypatch: pytest.Monk
     체결 = c.q("SELECT account_id, quantity, price, cash_krw FROM paper_fills ORDER BY 1")
     assert [(a, q, p) for a, q, p, _c in 체결] == [("A", 4, 10_000), ("B", 4, 10_000)]
     assert 체결[0][3] == -round(40_000 * 1.00015)  # 수수료만, 지정가는 슬리피지 없음
+    # 체결일 종가를 함께 적는다 — 진입 이득(25.1450). 성과 분해도 오늘 평가 행에
+    assert c.q("SELECT DISTINCT day_close FROM paper_fills") == [(9_900,)]
+    assert c.q("SELECT COUNT(*) FROM paper_daily WHERE as_of = '2026-10-16' AND attribution_json IS NOT NULL") == [(2,)]
     상태 = c.q("SELECT status, COUNT(*) FROM paper_orders GROUP BY status ORDER BY 1")
     assert 상태 == [("expired", 4), ("filled", 2)]
     일 = c.q("SELECT account_id, invested_krw, cash_krw, recon_ok FROM paper_daily WHERE as_of = '2026-10-16'")
