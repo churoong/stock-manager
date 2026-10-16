@@ -11,7 +11,8 @@ import {
 
 /**
  * 종목 여정 — 한 종목의 추천 → 결정 → 주문 → 가상 체결 → KIS 주문 (docs/desk.md 5장, docs/infra.md 25.1506). 미들웨어가 인증 뒤에 둔다.
- * `?ticker=005930` 또는 `?stock=123`. 같은 티커가 두 시장에 있으면 고를 목록을 돌려준다. 원장마다 종목·날짜 색인으로 최근 120줄까지.
+ * `?ticker=005930` 또는 `?stock=123`. 같은 티커가 여럿이면 고를 목록(시장·상태 함께, 활성 먼저). 원장마다 종목·날짜 색인으로 최근 120줄까지 —
+ * 자를 날은 화면이 `journeyCut` 으로 맞춘다.
  */
 const TICKER = /^[A-Za-z0-9.\-]{1,12}$/;
 
@@ -20,16 +21,17 @@ export async function GET(request: Request) {
   const ticker = url.searchParams.get("ticker")?.trim() ?? "";
   const stockParam = url.searchParams.get("stock");
   try {
-    let stock: { id: number; ticker: string; country: string; name: string } | null = null;
+    type Stock = { id: number; ticker: string; country: string; market: string; status: string; name: string };
+    let stock: Stock | null = null;
     if (stockParam != null) {
       if (!/^\d{1,9}$/.test(stockParam)) return NextResponse.json({ errors: ["종목 번호가 올바르지 않습니다"] }, { status: 400 });
-      const r = rowsToObjects<{ id: number; ticker: string; country: string; name: string }>(
-        await execute("SELECT id, ticker, country, COALESCE(name_ko, name_en, ticker) AS name FROM stocks WHERE id = ?", [Number(stockParam)]),
+      const r = rowsToObjects<Stock>(
+        await execute("SELECT id, ticker, country, market, status, COALESCE(name_ko, name_en, ticker) AS name FROM stocks WHERE id = ?", [Number(stockParam)]),
       );
       stock = r[0] ?? null;
     } else {
       if (!TICKER.test(ticker)) return NextResponse.json({ errors: ["티커를 넣어 주세요(영문·숫자 12자까지)"] }, { status: 400 });
-      const r = rowsToObjects<{ id: number; ticker: string; country: string; name: string }>(await execute(JOURNEY_STOCK_SQL, [ticker.toUpperCase()]));
+      const r = rowsToObjects<Stock>(await execute(JOURNEY_STOCK_SQL, [ticker.toUpperCase()]));
       if (r.length > 1) return NextResponse.json({ choices: r });
       stock = r[0] ?? null;
     }

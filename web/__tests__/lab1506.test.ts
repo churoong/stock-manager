@@ -14,7 +14,9 @@ import {
   JOURNEY_STOCK_SQL,
   LAB_ATTRIBUTION_SQL,
   LAB_HOLDING_SQL,
+  JOURNEY_LIMIT,
   holdingPoints,
+  journeyCut,
   journeyEvents,
   weightSeries,
   type JourneyRaw,
@@ -71,7 +73,7 @@ describe("종목 여정 질의", () => {
       ["2026-10-15", "추천", null],
     ]);
     const 글 = e.map((x) => x.text).join(" / ");
-    expect(글).toContain("베낌 매수 3주 · 체결 · 체결 3주 @ 9,790");
+    expect(글).toContain("베낌 매수 3주 · 체결 · 체결 3주 @ 9,790원");
     expect(글).toContain("매수 3주 @ 9,800원");
     expect(글).toContain("사기로 — 두 곳 이상 추천 · 20일 뒤 +3.1% (지수 +1.2%)");
     expect(글).toContain("매수 2주 · 지정가 9,600원 · 2차 · 2026-10-16 장");
@@ -114,5 +116,35 @@ describe("성과 분해·지주사 가중치", () => {
       { date: "2026-10-20", value: 1.2 },
     ]);
     expect(weightSeries(p, "US")[0].points).toEqual([{ date: "2026-10-17", value: 0.9 }]);
+  });
+});
+
+describe("검토 반영 (25.1509)", () => {
+  it("꽉 찬 원장들의 가장 오래된 날 가운데 가장 늦은 날에서 자른다", () => {
+    const 결정 = Array.from({ length: JOURNEY_LIMIT }, (_, i) => ({ id: i, account_id: "A", market: "KR", day: `2026-10-${String(20 - (i % 5)).padStart(2, "0")}`, kind: "skip", reason: "r", ret_20d: null, bench_20d: null }));
+    const 주문 = [{ id: 1, account_id: "H", market: "KR", day: "2026-08-01", side: "buy", order_type: "limit", limit_price: 1, quantity: 1, currency: "KRW", fill_session: "2026-08-02", tranche: 1, status: "open", closed_on: null, close_note: null, fill_date: null, fill_price: null, fill_qty: null }];
+    const raw = { signals: [], decisions: 결정, orders: 주문, broker: [] } as unknown as JourneyRaw;
+    expect(journeyCut(raw)).toBe("2026-10-16"); // 결정 원장만 꽉 참 — 그 가장 오래된 날
+    expect(journeyCut({ ...raw, decisions: 결정.slice(0, 10) })).toBeNull(); // 꽉 찬 원장이 없으면 자르지 않는다
+    expect(journeyEvents(raw).some((e) => e.day === "2026-08-01")).toBe(true); // 자르는 것은 화면 — 사건 자체는 그대로
+  });
+
+  it("KIS 줄은 원장의 계좌·시장 통화로", () => {
+    const raw = {
+      signals: [], decisions: [], orders: [],
+      broker: [{ id: 1, account_id: "B", market: "US", day: "2026-10-16", side: "buy", quantity: 2, order_type: "limit", limit_price: 180, status: "filled", filled_qty: 2, avg_price: 182.5, message: null, reason: "베낌" }],
+    } as unknown as JourneyRaw;
+    const e = journeyEvents(raw)[0];
+    expect(e.account).toBe("B");
+    expect(e.text).toContain("@ $182.50");
+  });
+
+  it("같은 티커 후보는 활성 먼저, 시장·상태와 함께", () => {
+    db.exec("INSERT INTO stocks (id, ticker, market, country, name_ko, currency, status, source, fetched_at) VALUES (2, '247540', 'KOSDAQ', 'KR', '옛 행', 'KRW', 'excluded', 't', 't'), (3, '247540', 'KOSPI', 'KR', '새 행', 'KRW', 'active', 't', 't')");
+    const r = db.prepare(JOURNEY_STOCK_SQL).all("247540") as Array<{ id: number; market: string; status: string }>;
+    expect(r.map((x) => [x.id, x.market, x.status])).toEqual([
+      [3, "KOSPI", "active"],
+      [2, "KOSDAQ", "excluded"],
+    ]);
   });
 });

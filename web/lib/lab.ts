@@ -63,18 +63,22 @@ export function weightSeries(points: HoldingPoint[], market: "KR" | "US"): Serie
 
 // ── 종목 여정 ─────────────────────────────────────────────
 
-/** 같은 티커가 두 시장에 있을 수 있다(드묾) — 다섯까지 돌려주고 고르게 한다 */
-export const JOURNEY_STOCK_SQL = `SELECT id, ticker, country, COALESCE(name_ko, name_en, ticker) AS name FROM stocks WHERE ticker = ? LIMIT 5`;
-/** 다섯 원장 — 종목·날짜 색인(0086·signals)으로 최근 것부터 */
+/**
+ * 같은 티커가 여럿일 수 있다 — 이전상장 옛 행(같은 코드, KOSDAQ↔KOSPI, status excluded)·미국 거래소 이동. 다섯까지, 활성 먼저.
+ * 시장·상태를 함께 돌려줘 고를 수 있게(25.1509, 검토 3)
+ */
+export const JOURNEY_STOCK_SQL = `SELECT id, ticker, country, market, status, COALESCE(name_ko, name_en, ticker) AS name FROM stocks
+WHERE ticker = ? ORDER BY status = 'active' DESC, id LIMIT 5`;
+/** 다섯 원장 — 종목·날짜 색인(0086·signals)으로 최근 것부터, 원장마다 같은 줄 수 */
 export const JOURNEY_LIMIT = 120;
 export const JOURNEY_SIGNALS_SQL = `SELECT as_of_date AS day, horizon, signal_type, buy_zone_low, buy_zone_high, currency
-FROM signals WHERE stock_id = ? ORDER BY as_of_date DESC LIMIT 30`;
+FROM signals WHERE stock_id = ? ORDER BY as_of_date DESC LIMIT ${JOURNEY_LIMIT}`;
 export const JOURNEY_DECISIONS_SQL = `SELECT id, account_id, market, decided_on AS day, kind, reason, ret_20d, bench_20d
 FROM paper_decisions WHERE stock_id = ? ORDER BY decided_on DESC LIMIT ${JOURNEY_LIMIT}`;
 export const JOURNEY_ORDERS_SQL = `SELECT o.id, o.account_id, o.market, o.decided_on AS day, o.side, o.order_type, o.limit_price, o.quantity, o.currency,
   o.fill_session, o.tranche, o.status, o.closed_on, o.close_note, f.fill_date, f.price AS fill_price, f.quantity AS fill_qty
 FROM paper_orders o LEFT JOIN paper_fills f ON f.order_id = o.id WHERE o.stock_id = ? ORDER BY o.decided_on DESC LIMIT ${JOURNEY_LIMIT}`;
-export const JOURNEY_BROKER_SQL = `SELECT id, trade_date AS day, side, quantity, order_type, limit_price, status, filled_qty, avg_price, message, reason
+export const JOURNEY_BROKER_SQL = `SELECT id, account_id, market, trade_date AS day, side, quantity, order_type, limit_price, status, filled_qty, avg_price, message, reason
 FROM paper_broker_orders WHERE stock_id = ? ORDER BY trade_date DESC LIMIT ${JOURNEY_LIMIT}`;
 
 export interface JourneyRaw {
@@ -84,7 +88,10 @@ export interface JourneyRaw {
     id: number; account_id: string; market: string; day: string; side: string; order_type: string | null; limit_price: number | null; quantity: number; currency: string;
     fill_session: string; tranche: number; status: string; closed_on: string | null; close_note: string | null; fill_date: string | null; fill_price: number | null; fill_qty: number | null;
   }>;
-  broker: Array<{ id: number; day: string; side: string; quantity: number; order_type: string; limit_price: number | null; status: string; filled_qty: number | null; avg_price: number | null; message: string | null; reason: string }>;
+  broker: Array<{
+    id: number; account_id: string; market: string; day: string; side: string; quantity: number; order_type: string; limit_price: number | null; status: string;
+    filled_qty: number | null; avg_price: number | null; message: string | null; reason: string;
+  }>;
 }
 
 export type JourneyStep = "추천" | "결정" | "주문" | "가상 체결" | "안 참" | "KIS";
@@ -119,12 +126,24 @@ export function journeyEvents(raw: JourneyRaw): JourneyEvent[] {
       out.push({ day: o.closed_on ?? o.fill_session, step: "안 참", account: o.account_id, order: 2.5, text: `${SIDE[o.side] ?? o.side} 안 참${o.close_note ? ` — ${o.close_note}` : ""}` });
   }
   for (const b of raw.broker) {
-    const 체결 = b.filled_qty ? ` · 체결 ${b.filled_qty}주${b.avg_price != null ? ` @ ${b.avg_price.toLocaleString("ko-KR")}` : ""}` : "";
+    // 통화는 시장으로 — 미국은 달러(25.1509, 검토 6). 계좌는 원장의 것 — 베끼는 계좌는 바뀔 수 있다(검토 2)
+    const 체결 = b.filled_qty ? ` · 체결 ${b.filled_qty}주${b.avg_price != null ? ` @ ${amountText(b.avg_price, b.market === "US" ? "USD" : "KRW")}` : ""}` : "";
     out.push({
-      day: b.day, step: "KIS", account: "H", order: 4,
+      day: b.day, step: "KIS", account: b.account_id, order: 4,
       text: `${b.reason} ${SIDE[b.side] ?? b.side} ${b.quantity}주 · ${statusText(b.status)}${체결}${b.status === "rejected" && b.message ? ` — ${b.message}` : ""}`,
     });
   }
   // 같은 날·같은 단계는 계좌 순 — 원장 행 순서(rowid)에 기대지 않게
   return out.sort((x, y) => y.day.localeCompare(x.day) || y.order - x.order || (x.account ?? "").localeCompare(y.account ?? ""));
+}
+
+/**
+ * 여정을 자를 날 — 줄 수 한도까지 꽉 찬 원장들의 가장 오래된 날 가운데 가장 늦은 날(25.1509, 검토 1).
+ * 원장마다 하루 줄 수가 달라(결정 원장은 계좌마다 날마다, 주문은 드묾) 120줄이 덮는 기간이 다르다 — 그대로 섞으면
+ * 오래된 주문은 보이는데 그날의 결정·추천은 없는 여정이 된다. 그 날보다 앞선 사건은 버리고 "그 전은 잘림" 을 보인다. 꽉 찬 원장이 없으면 null
+ */
+export function journeyCut(raw: JourneyRaw, limit = JOURNEY_LIMIT): string | null {
+  const 꽉 = [raw.signals, raw.decisions, raw.orders, raw.broker].filter((x) => x.length >= limit);
+  const 날 = 꽉.map((x) => x.reduce((m, r) => (r.day < m ? r.day : m), x[0].day));
+  return 날.length ? 날.reduce((a, b) => (a > b ? a : b)) : null;
 }

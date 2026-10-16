@@ -1,11 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import EquityChart from "@/components/EquityChart";
 import { bodyOf, readJson } from "@/lib/http";
-import { journeyEvents, weightSeries, type HoldingPoint, type JourneyRaw, type LabAttribution } from "@/lib/lab";
-import { attrCellText } from "@/lib/paper";
+import { JOURNEY_LIMIT, journeyCut, journeyEvents, weightSeries, type HoldingPoint, type JourneyRaw, type LabAttribution } from "@/lib/lab";
+import { ATTRIBUTION_MIN_SAMPLE, attrCellText } from "@/lib/paper";
 
 /**
  * 연구실 (docs/desk.md 5장, docs/infra.md 25.1506) — 전략을 고치려고 보는 자료. 값은 배치가 적은 그대로다.
@@ -20,31 +20,43 @@ const 칸: Array<[string, (a: NonNullable<LabAttribution["attribution"]>) => str
   ["판 뒤", (a) => attrCellText(a.sold)],
   ["플래그 무시하고 든 뒤", (a) => attrCellText(a.held_flag)],
   ["위험 점검이 막은 뒤", (a) => attrCellText(a.blocked)],
-  ["가상 대조 분위", (a) => (a.virtual?.n && a.virtual.avg_pct != null ? `${a.virtual.avg_pct.toFixed(0)} (n=${a.virtual.n})` : "표본 없음")],
+  [
+    "가상 대조 분위",
+    (a) => (a.virtual?.n && a.virtual.avg_pct != null ? `${a.virtual.avg_pct.toFixed(0)} (n=${a.virtual.n}${a.virtual.n < ATTRIBUTION_MIN_SAMPLE ? ", 참고" : ""})` : "표본 없음"),
+  ],
 ];
 
 function Journey() {
   const [ticker, setTicker] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<{ stock: { id: number; ticker: string; name: string; country: string } | null; raw?: JourneyRaw; choices?: Array<{ id: number; ticker: string; name: string; country: string }> } | null>(null);
+  type Stock = { id: number; ticker: string; name: string; country: string; market?: string; status?: string };
+  const [result, setResult] = useState<{ stock: Stock | null; raw?: JourneyRaw; choices?: Stock[] } | null>(null);
+  // 늦게 온 앞 요청의 응답이 뒤 요청의 결과를 덮지 않게 — 마지막 요청 번호만 받는다(25.1509, 검토 4)
+  const 번호 = useRef(0);
 
   async function look(q: string) {
+    const 나 = ++번호.current;
     setBusy(true);
     setError(null);
     const r = await readJson<NonNullable<typeof result>>(`/api/lab/journey?${q}`);
     const body = bodyOf<NonNullable<typeof result>>(r);
+    if (나 !== 번호.current) return;
     setBusy(false);
-    if (!r.ok || body.errors?.length) setError(body.errors?.join(" · ") || r.error || "읽지 못했습니다");
-    else setResult(body);
+    if (!r.ok || body.errors?.length) {
+      setResult(null); // 앞 종목의 여정이 새 오류 아래 남지 않게
+      setError(body.errors?.join(" · ") || r.error || "읽지 못했습니다");
+    } else setResult(body);
   }
 
-  const 사건 = result?.raw ? journeyEvents(result.raw) : [];
+  const 자름 = result?.raw ? journeyCut(result.raw) : null;
+  const 사건 = result?.raw ? journeyEvents(result.raw).filter((e) => !자름 || e.day >= 자름) : [];
   return (
     <section className={CARD}>
       <h2 className="text-base font-semibold">종목 여정</h2>
       <p className="mt-1 text-xs text-slate-500">
-        한 종목이 추천 → 계좌의 결정(산 것·안 산 것과 그 까닭) → 주문 → 가상 체결 → KIS모의투자 주문을 어떻게 지나갔는지 날짜순으로 봅니다. 원장마다 최근 120줄까지.
+        한 종목이 추천 → 계좌의 결정(산 것·안 산 것과 그 까닭) → 주문 → 가상 체결 → KIS모의투자 주문을 어떻게 지나갔는지 날짜순으로 봅니다. 원장마다 최근 {JOURNEY_LIMIT}줄 —
+        어느 원장이 꽉 차면 모든 원장을 그 원장의 가장 오래된 날에서 맞춰 자릅니다.
       </p>
       <form
         className="mt-2 flex gap-2"
@@ -68,8 +80,8 @@ function Journey() {
         <p className="mt-2 text-sm">
           같은 티커가 여럿입니다:{" "}
           {result.choices.map((c) => (
-            <button key={c.id} type="button" className="mr-2 underline" onClick={() => void look(`stock=${c.id}`)}>
-              {c.name} ({c.country})
+            <button key={c.id} type="button" disabled={busy} className="mr-2 underline disabled:opacity-50" onClick={() => void look(`stock=${c.id}`)}>
+              {c.name} ({[c.country, c.market, c.status].filter(Boolean).join(" · ")})
             </button>
           ))}
         </p>
@@ -83,6 +95,7 @@ function Journey() {
               종목 화면
             </Link>
           </p>
+          {자름 ? <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">{자름} 이전은 잘림 — 원장마다 최근 {JOURNEY_LIMIT}줄이라 그보다 앞은 일부 원장만 남습니다</p> : null}
           {사건.length ? (
             <ul className="mt-2 divide-y divide-slate-100 dark:divide-slate-800">
               {사건.map((e, i) => (
@@ -117,7 +130,11 @@ export default function LabView() {
     })();
   }, []);
 
-  const 마지막 = data?.holding.length ? data.holding[data.holding.length - 1] : null;
+  /** 시장마다 마지막 실행 — 오류면 그 문장(25.1509, 검토 5) */
+  const 마지막 = (m: "KR" | "US") => {
+    const xs = (data?.holding ?? []).filter((p) => p.market === m);
+    return xs.length ? xs[xs.length - 1] : null;
+  };
   return (
     <div className="space-y-5">
       <section className={CARD}>
@@ -165,29 +182,36 @@ export default function LabView() {
       <section className={CARD}>
         <h2 className="text-base font-semibold">지주사(H) 회사 가중치</h2>
         <p className="mt-1 text-xs text-slate-500">
-          H 는 회사들(A·C·D·E·B)의 추천을 그 회사의 최근 성적으로 가중해 합칩니다(docs/company.md 10장). 표본이 적을수록 1 에 가깝게 눌립니다. 날마다 운용 요약에 적힌 값 — 최근 120일.
+          H 는 회사들(A·C·D·E·B)의 추천을 그 회사의 최근 성적으로 가중해 합칩니다(docs/company.md 10장). 표본이 적을수록 1 에 가깝게 눌립니다. 날마다 운용 요약에 적힌 값 — 운용 요약
+          최근 120줄(배치가 돈 날).
         </p>
         {data && !data.holding.length ? <p className="mt-2 text-sm text-slate-500">아직 지주사 기록이 없습니다 — 일일 배치가 운용 요약에 적은 날부터 보입니다.</p> : null}
         {data
           ? (["KR", "US"] as const).map((m) => {
               const s = weightSeries(data.holding, m);
-              return s.length ? (
+              const 끝 = 마지막(m);
+              if (!끝) return null;
+              const 날 = new Date(끝.run_at).toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" });
+              return (
                 <div key={m} className="mt-3">
                   <h3 className="text-sm font-medium">{m === "KR" ? "국내" : "미국"}</h3>
-                  {s[0].points.length > 1 ? <EquityChart series={s} height={180} /> : null}
-                  <p className="text-xs text-slate-600 dark:text-slate-400">
-                    마지막: {s.map((x) => `${x.label.replace(" 가중치", "")} ${x.points[x.points.length - 1].value.toFixed(2)}`).join(" · ")}
-                  </p>
+                  {s.some((x) => x.points.length > 1) ? <EquityChart series={s} height={180} /> : null}
+                  {끝.memo.error ? (
+                    <p className="text-xs text-red-600 dark:text-red-400">
+                      {날} 실행: 지주사가 고르지 못함 — {끝.memo.error}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-slate-600 dark:text-slate-400">
+                      {날} 실행: {Object.entries(끝.memo.weights ?? {}).map(([c, w]) => `${c} ${Number(w).toFixed(2)}`).join(" · ")}
+                      {끝.memo.samples ? ` · 표본 ${Object.entries(끝.memo.samples).map(([c, n]) => `${c} ${n}`).join(" · ")}` : ""} · 추천 {끝.memo.recommended ?? "-"} · 두 곳 이상{" "}
+                      {끝.memo.eligible ?? "-"} · 고름 {끝.memo.chosen ?? "-"}
+                    </p>
+                  )}
                 </div>
-              ) : null;
+              );
             })
           : null}
-        {마지막?.memo.samples ? (
-          <p className="mt-2 text-xs text-slate-500">
-            마지막 실행 표본: {Object.entries(마지막.memo.samples).map(([c, n]) => `${c} ${n}`).join(" · ")} · 추천 {마지막.memo.recommended ?? "-"} · 두 곳 이상 {마지막.memo.eligible ?? "-"} · 고름{" "}
-            {마지막.memo.chosen ?? "-"}
-          </p>
-        ) : null}
+
       </section>
 
       <Journey />
