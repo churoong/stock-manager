@@ -18,7 +18,7 @@ export interface Series {
 }
 
 /** ratio: 시작 1.0 대비 배수(1.234). pct: 비율을 %로(−12.3%). 낙폭 차트가 pct 다 */
-export default function EquityChart({ series, height = 260, format = "ratio" }: { series: Series[]; height?: number; format?: "ratio" | "pct" }) {
+export default function EquityChart({ series, height = 260, format = "ratio" }: { series: Series[]; height?: number; format?: "ratio" | "pct" | "pct2" }) {
   const box = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -44,7 +44,10 @@ export default function EquityChart({ series, height = 260, format = "ratio" }: 
           horzLines: { color: dark ? "#1e293b" : "#f1f5f9" },
         },
         // 시작 1.0 대비 배수다. 1.234 처럼 세 자리면 충분하다. 낙폭은 %
-        localization: { priceFormatter: (p: number) => (format === "pct" ? `${(p * 100).toFixed(1)}%` : p.toFixed(3)) },
+        // pct2 = % 소수 둘째 자리 — 가격 차이처럼 0.45 와 0.5 를 갈라 봐야 하는 좁은 값(25.1507)
+        localization: {
+          priceFormatter: (p: number) => (format === "pct" ? `${(p * 100).toFixed(1)}%` : format === "pct2" ? `${(p * 100).toFixed(2)}%` : p.toFixed(3)),
+        },
         rightPriceScale: { borderVisible: false },
         timeScale: { borderVisible: false },
       });
@@ -55,7 +58,12 @@ export default function EquityChart({ series, height = 260, format = "ratio" }: 
           color: s.color,
           lineWidth: 2,
           title: s.label,
-          priceFormat: format === "pct" ? { type: "price", precision: 4, minMove: 0.0001 } : { type: "price", precision: 3, minMove: 0.001 },
+          priceFormat:
+            format === "pct2"
+              ? { type: "price", precision: 5, minMove: 0.00001 }
+              : format === "pct"
+                ? { type: "price", precision: 4, minMove: 0.0001 }
+                : { type: "price", precision: 3, minMove: 0.001 },
         });
         line.setData(s.points.map((p) => ({ time: p.date, value: p.value })));
       }

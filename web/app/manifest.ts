@@ -33,7 +33,7 @@ export default function manifest(): MetadataRoute.Manifest {
     shortcuts: [
       { name: "운용", url: "/" },
       { name: "전략", url: "/paper" },
-      { name: "오늘의 추천", url: "/recommend" },
+      { name: "KIS모의투자", url: "/kis" },
       { name: "시스템 상태", url: "/status" },
     ],
   };

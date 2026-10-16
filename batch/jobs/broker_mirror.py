@@ -119,9 +119,6 @@ H_TWR_SQL = (
     "SELECT twr_index, pnl_krw FROM paper_daily WHERE account_id = ? AND as_of <= ? ORDER BY as_of DESC LIMIT 1"
 )
 #: 주간 요약이 읽는 마지막 잔고 줄
-PREV_DAILY_SQL = (
-    "SELECT summary_json FROM paper_broker_daily WHERE broker = ? AND as_of < ? ORDER BY as_of DESC LIMIT 1"
-)
 LATEST_DAILY_SQL = (
     "SELECT as_of, diff_json, summary_json FROM paper_broker_daily WHERE broker = ? ORDER BY as_of DESC LIMIT 1"
 )
@@ -292,13 +289,22 @@ def run(
         json.dumps(비교 | {"account": 계좌, "account_krw": 원화계좌, "perf": 성과}, ensure_ascii=False),
     ])  # fmt: skip
     기록["compare"] = {"n": 비교["n"], "match_pct": 비교["match_pct"], "kept_pct": 비교["kept_pct"]}
-    # 괴리 알림 (docs/paper.md 15.8, 25.1504) — 문턱을 넘은 첫날만. 전날 줄 하나를 읽는다
+    # 괴리 알림 (docs/paper.md 15.8, 25.1504·25.1507) — 켜진 칸을 설정 `kis_diverge` 에 증권사마다
+    # {active, sent} 로 두고, 켜졌는데 **아직 보내지 않은** 칸만 알린다. 보냈다는 표시는 일일 배치가 알림을 보낸 뒤
+    # `mark_diverge_sent` 로 — 그 전에 실행이 죽거나 발송이 실패하면 다음 실행이 다시 알린다(검토 1),
+    # 같은 날 다시 돌려도 두 번 가지 않는다(검토 4)
     try:
-        전날 = client.execute(PREV_DAILY_SQL, [증권사, 오늘.isoformat()]).rows
-        전요약 = json.loads(전날[0][0]) if 전날 and 전날[0][0] else None
-        괴리 = bm.diverge(비교, 전요약 if isinstance(전요약, dict) else None, market)
-        if 괴리:
-            기록["diverge"] = 괴리
+        상태 = db.get_setting(client, "kis_diverge", None)
+        상태 = 상태 if isinstance(상태, dict) else {}
+        내상태 = 상태.get(증권사) if isinstance(상태.get(증권사), dict) else {}
+        켜짐 = bm.diverge_active(비교, set(내상태.get("active") or []))
+        보냄 = {k: d for k, d in (내상태.get("sent") or {}).items() if k in 켜짐}
+        새 = sorted(켜짐 - set(보냄))
+        상태[증권사] = {"active": sorted(켜짐), "sent": 보냄}
+        db.set_setting(client, "kis_diverge", 상태)
+        if 새:
+            기록["diverge"] = bm.diverge(비교, 새, market)
+            기록["diverge_keys"] = 새
     except Exception as exc:  # noqa: BLE001 — 알림 곁다리. 주문 보내기는 그대로
         기록["diverge_error"] = type(exc).__name__
     기록["holdings"] = len(보유)
@@ -399,3 +405,17 @@ def summary_lines(client: Any) -> list[str]:
         out += bm.compare_lines(json.loads(r["summary_json"]), len(json.loads(r.get("diff_json") or "{}")),
                                 str(r["as_of"]), 이름)  # fmt: skip
     return out
+
+
+def mark_diverge_sent(client: Any, market: str, keys: list[str], day: str) -> None:
+    """괴리 알림을 보낸 칸에 보낸 날을 적는다 (25.1507).
+
+    다음 실행은 꺼졌다 다시 켜질 때까지 그 칸을 다시 알리지 않는다
+    """
+    증권사 = BROKER_US if market == "US" else BROKER
+    상태 = db.get_setting(client, "kis_diverge", None)
+    상태 = 상태 if isinstance(상태, dict) else {}
+    내상태 = 상태.get(증권사) if isinstance(상태.get(증권사), dict) else {"active": list(keys), "sent": {}}
+    내상태["sent"] = {**(내상태.get("sent") or {}), **{k: day for k in keys}}
+    상태[증권사] = 내상태
+    db.set_setting(client, "kis_diverge", 상태)

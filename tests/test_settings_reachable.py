@@ -28,6 +28,8 @@ from pathlib import Path
     "postmortem_through": "배치 내부 기록(사후 분석을 보고한 마지막 진입일). 사람이 고칠 값이 아니다",
     # 모의 매매 멈춤 스위치 (docs/paper.md 11장, 25.1451) — 설정 화면이 아니라 /paper 화면의 단추가 쓴다
     "paper_halt": "/paper 화면의 '모의 매매 멈춤' 단추가 쓴다(app/api/paper/halt). 설정 화면 밖",
+    # KIS모의투자 괴리 알림 상태 (docs/paper.md 15.8, 25.1507) — 켜진 칸·보낸 날
+    "kis_diverge": "배치 내부 기록(괴리 알림의 켜진 칸·보낸 날). 사람이 고칠 값이 아니다",
 }
 
 

@@ -133,6 +133,7 @@ def failure_alert(
     last_success: dict[str, Any] | None,
     title: str = "배치 실패",
     last_unread: bool = False,
+    report_note: bool = True,
 ) -> str:
     """배치 실패 알림. `title` 이 기본이 아니면 **배치는 성공으로 닫힌 발송 문제**다 — 마지막 성공 줄을 싣지 않는다
     (docs/infra.md 25.504, 교차검증: 발송 모름·일부 발송이 "배치 실패 · 마지막 성공 어제" 로 와서 실패처럼 읽혔다).
@@ -150,6 +151,10 @@ def failure_alert(
     ]
 
     if title != "배치 실패":
+        if not report_note:
+            # KIS모의투자 알림처럼 리포트 발송과 상관없는 알림 —
+            # "리포트는 웹에" 줄이 내용과 맞지 않았다(25.1507, 검토 7)
+            return "\n".join(lines)
         lines.append("")
         # 이번 본문을 웹에 저장하지 않은 경우(모름 재실행, 25.574)엔 "웹에 전체가 있다" 가 거짓이다 (25.575, 교차검증)
         if WEB_SAVE_FAILED_MARK in error_text:

@@ -926,6 +926,9 @@ class Test이웃_모듈들:
         검사(PAPER, f"{bm.DIVERGE_MIN_N}건(`DIVERGE_MIN_N`) 이상", "괴리 알림 표본 (25.1504)")
         검사(PAPER, f"{bm.DIVERGE_MATCH_PCT:g}%(`DIVERGE_MATCH_PCT`) 아래로", "괴리 알림 일치율 문턱 (25.1504)")
         검사(PAPER, f"+{bm.DIVERGE_SLIP_PCT:g}%(`DIVERGE_SLIP_PCT`) 위로", "괴리 알림 가격 차이 문턱 (25.1504)")
+        검사(PAPER, f"{bm.DIVERGE_KEPT_PCT:g}%(`DIVERGE_KEPT_PCT`) 아래로", "괴리 알림 실현율 문턱 (25.1507)")
+        검사(PAPER, f"켜는 문턱 + {bm.DIVERGE_RECOVER_PP:g}%p(`DIVERGE_RECOVER_PP`)", "괴리 알림 끄는 여유 (25.1507)")
+        검사(PAPER, f"켜는 문턱 − {bm.DIVERGE_SLIP_RECOVER_PP:g}%p(`DIVERGE_SLIP_RECOVER_PP`)", "괴리 알림 가격 끄는 여유 (25.1507)")
         검사(COMPANY, "서로 다른 회사 **두 곳 이상**이 추천한 종목만 후보", "지주사 합의 조건 (25.1482)")
         assert hold.HOLDING_MIN_VOTERS == 2
         검사(COMPANY, f"세기 = min(표 ÷ 문턱, {hold.HOLDING_STRENGTH_MAX:g})", "지주사 세기 상한 (25.1482)")

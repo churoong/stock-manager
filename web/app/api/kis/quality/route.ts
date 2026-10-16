@@ -5,7 +5,7 @@ import { BROKER_KEYS } from "@/lib/paper";
 
 /**
  * KIS모의투자 실행 품질 추이 — 배치가 날마다 적은 비교 요약을 시장마다 읽기만 한다 (docs/paper.md 15.8, docs/infra.md 25.1504).
- * 미들웨어가 인증 뒤에 둔다. 0078·0080 전 DB 면 빈 계열.
+ * 미들웨어가 인증 뒤에 둔다. 0078 전 DB 면 표가 없어 빈 계열(0078~0080 사이는 `summary_json` 칸이 없어 오류 — 운영 DB 는 이미 그 뒤).
  */
 export async function GET() {
   const 부터 = new Date(Date.now() - QUALITY_DAYS * 86_400_000).toISOString().slice(0, 10);

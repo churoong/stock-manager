@@ -146,6 +146,8 @@ def checks(
                                                                     if h_orders else "")})  # fmt: skip
     if b.get("diverge"):
         out.append({"level": "high", "text": str(b["diverge"])[:300]})
+    if b.get("diverge_error"):
+        out.append({"level": "normal", "text": f"KIS 괴리 판정 실패({b['diverge_error']}) — 주문은 그대로 나갔습니다"})
     if b.get("not_sent"):
         까닭 = ", ".join(f"{k} {v}건" for k, v in sorted(b["not_sent"].items()))
         out.append({"level": "normal", "text": f"KIS모의투자에 안 낸 주문: {까닭}"})

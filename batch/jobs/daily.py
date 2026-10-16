@@ -1016,17 +1016,15 @@ def _건너뛴_까닭(job_name: str, since: str) -> str | None:
 
 
 def _kis_알림문(broker: dict[str, Any]) -> str | None:
-    """KIS모의투자 단계 결과에서 알릴 것 — 키 일부만 있음(설정 실수)·단계 실패·가상과 벌어진 첫날(25.1504).
+    """KIS모의투자 단계 결과에서 알릴 것 — 키 일부만 있음(설정 실수)·단계 실패.
 
-    키를 하나도 안 넣은 것·정상은 None (25.1492)
+    키를 하나도 안 넣은 것·정상은 None (25.1492).
+    가상과 벌어진 것(괴리)은 따로 알린다 — 보낸 뒤 표시를 남겨야 해서(25.1507)
     """
     if broker.get("missing"):
         return f"시크릿 {', '.join(broker['missing'])} 이(가) 비어 KIS모의투자 주문을 내지 않았습니다"
     if broker.get("error"):
         return f"KIS모의투자 단계 실패: {broker['error']}"
-    if broker.get("diverge"):
-        # 괴리 — 문턱을 넘은 첫날 (docs/paper.md 15.8, 25.1504)
-        return str(broker["diverge"])
     return None
 
 
@@ -2502,7 +2500,21 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
             if 원인:
                 if (step_log.get("broker") or {}).get("missing"):
                     warnings.append(원인)
-                _notify_failure(client, market, name, 원인, dry_run=dry_run, title="KIS모의투자 확인 필요")
+                _notify_failure(client, market, name, 원인, dry_run=dry_run, title="KIS모의투자 확인 필요",
+                                report_note=False)  # fmt: skip
+            # 괴리 — 켜졌는데 아직 안 보낸 칸만 (docs/paper.md 15.8, 25.1507). 보낸 뒤에만 "보냄" 을 적는다 —
+            # 발송이 실패하면 다음 실행이 다시 알린다
+            괴리 = (step_log.get("broker") or {}).get("diverge")
+            if 괴리 and _notify_failure(client, market, name, str(괴리), dry_run=dry_run, title="KIS모의투자 괴리",
+                                        report_note=False) and not dry_run:  # fmt: skip
+                try:
+                    from batch.jobs import broker_mirror as _bm
+
+                    _bm.mark_diverge_sent(client, market, list(step_log["broker"].get("diverge_keys") or []),
+                                          decision.trade_date)  # fmt: skip
+                except Exception as exc:  # noqa: BLE001 — 표시 실패면 다음 실행이 한 번 더 알린다
+                    log.exception("괴리 알림 보냄 표시 실패")
+                    step_log["broker"]["diverge_mark_error"] = type(exc).__name__
         # 운용 상황실 요약 (docs/desk.md 2장, 25.1501) — 웹 첫 화면이 읽는다. 곁다리: 실패해도 배치는 그대로,
         # 실행 기록에만. 가상모의투자 단계가 실패한 날에도 적는다 — 그 실패가 "확인할 일" 맨 위에 보여야 한다
         try:
@@ -3126,9 +3138,12 @@ def signal_age_sessions(market: str, signals_as_of: str | None, trade_date: str)
 
 
 def _notify_failure(
-    client: TursoClient, market: str, name: str, error_text: str, dry_run: bool, title: str = "배치 실패"
-) -> None:
-    """실패를 알린다. 알림 자체가 실패해도 배치 결과를 덮지 않는다.
+    client: TursoClient, market: str, name: str, error_text: str, dry_run: bool, title: str = "배치 실패",
+    report_note: bool = True,
+) -> bool:
+    """실패를 알린다. 알림 자체가 실패해도 배치 결과를 덮지 않는다. 보냈으면(dry-run 이면 찍었으면) True (25.1507).
+
+    `report_note` 가 거짓이면 "배치는 끝났고 리포트는 …" 줄을 붙이지 않는다 — KIS모의투자 알림은 리포트 발송과 상관없다.
 
     **DB 를 못 읽어도 알림은 나가야 한다.** 2026-09-17 에 Turso 월 한도를 넘겨 읽기가
     막혔을 때, 마지막 성공을 조회하다가 예외가 나면서 알림이 통째로 사라졌다
@@ -3146,7 +3161,8 @@ def _notify_failure(
 
     try:
         message = formatter.failure_alert(
-            market=market, job_name=name, error_text=error_text, last_success=last, title=title, last_unread=못읽음
+            market=market, job_name=name, error_text=error_text, last_success=last, title=title, last_unread=못읽음,
+            report_note=report_note,
         )
         if dry_run:
             print("--- 실패 알림 (dry-run) ---")
@@ -3162,8 +3178,10 @@ def _notify_failure(
                 log.warning("실패 알림 발송 여부를 몰라 한 번 더 보냅니다")
                 time.sleep(5)
                 telegram.send(message)
+        return True
     except Exception:  # noqa: BLE001 — 알림 실패가 배치의 종료코드를 덮으면 진짜 원인이 가려진다
         log.error("실패 알림을 보내지 못했습니다\n%s", traceback.format_exc())
+        return False
 
 
 def main() -> int:
