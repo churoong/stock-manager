@@ -201,6 +201,31 @@ class Costs:
 # ----------------------------------------------------------------------
 
 
+class SortedSeries:
+    """종목별 (날짜, 값) 정렬 목록을 **한 번** 만들어 두고 cutoff 마다 이분 탐색으로 자른다
+    (docs/backtest.md 10장 단계 0, 25.1522).
+
+    `PriceView` 가 cutoff 마다 전 종목 전 이력을 파이썬 반복으로 걸러 정렬했다 — 월 리밸런스 60번이면 견딜 만했지만
+    날마다 판단하는 장부형 전략(핵심 H)은 1,250번이라 수십억 번이 된다. 자른 결과는 **사본**(슬라이스)이라
+    "볼 것이 없다" 규칙은 그대로다. 결과는 예전 경로와 같다(시험이 대조)
+    """
+
+    def __init__(self, by_stock: dict[int, dict[str, float]] | None) -> None:
+        self.rows: dict[int, list[tuple[str, float]]] = {sid: sorted(d.items()) for sid, d in (by_stock or {}).items()}
+        self.dates: dict[int, list[str]] = {sid: [d for d, _v in rows] for sid, rows in self.rows.items()}
+
+    def upto(self, cutoff: str) -> dict[int, list[tuple[str, float]]]:
+        """cutoff 이하만 — 비면 그 종목은 뺀다(예전 경로와 같게)"""
+        from bisect import bisect_right
+
+        out: dict[int, list[tuple[str, float]]] = {}
+        for sid, rows in self.rows.items():
+            k = bisect_right(self.dates[sid], cutoff)
+            if k:
+                out[sid] = rows[:k]
+        return out
+
+
 class PriceView:
     """판단 함수에 넘기는 가격 창. cutoff 이후는 존재하지 않는다.
 
@@ -215,8 +240,19 @@ class PriceView:
         turnover: dict[int, dict[str, float]] | None = None,
         levels: dict[int, dict[str, float]] | None = None,
         holding: frozenset[int] | None = None,
+        presorted: tuple[SortedSeries, SortedSeries, SortedSeries] | None = None,
     ) -> None:
+        """`presorted` = (prices, turnover, levels) 를 미리 정렬한 것(`SortedSeries`) — 주면 정렬 없이 잘라 쓴다
+        (25.1522).
+        주지 않으면 예전처럼 `prices`·`turnover`·`levels` 를 걸러 정렬한다"""
         self.cutoff = cutoff
+        if presorted is not None:
+            값, 대금, 수준 = presorted
+            self.holding = holding
+            self._levels = 수준.upto(cutoff)
+            self._series = 값.upto(cutoff)
+            self._turnover = {sid: dict(rows) for sid, rows in 대금.upto(cutoff).items()}
+            return
         # **엔진이 지금 실제로 든 종목** (docs/infra.md 25.1231). 체결가가 없어 엔진이 빼 버린 종목·상장폐지로 판 종목을
         # 판단 함수가 알 수 있게 한다 — 보유 기간을 스스로 세는 전략(장기 신호)이 "산 줄 아는" 종목을 1년 붙들었다.
         # 미래 정보가 아니다(리밸런스 직전의 엔진 상태). 엔진 밖에서 만든 창은 None(모름)
@@ -518,6 +554,8 @@ def simulate(
         return sum(parts.values()) + cash_w * equity, parts
 
     마지막 = dates[-1]
+    # 가격 창을 cutoff 마다 다시 정렬하지 않게 한 번 정렬해 둔다(25.1522 — 결과는 같다)
+    미리 = (SortedSeries(prices), SortedSeries(turnover), SortedSeries(levels))
     for d in dates:
         # **마지막 날은 평가만 한다** (docs/infra.md 25.792, 백테스트 감사 #4). 날짜 축은 전 종목 날짜의 합집합이라,
         # 끝 날이 월초이고
@@ -539,8 +577,9 @@ def simulate(
             # 않을 것이고, 그것이 맞다. 엔진이 대신 비워 버리지 않는다
             든것 = frozenset(sid for sid, w in drifted.items() if w > 0)
             view = (
-                PriceView(prices, cutoff, turnover, levels, holding=든것) if cutoff else PriceView({}, d, holding=든것)
-            )
+                PriceView(prices, cutoff, turnover, levels, holding=든것, presorted=미리)
+                if cutoff else PriceView({}, d, holding=든것)
+            )  # fmt: skip
             proposed = weights_at(d, view)
 
             # **들고 있는데 오늘 체결가가 없고 뒤에 다시 거래되는 종목은 거래정지다 — 팔 수 없다** (infra 25.471).
