@@ -71,3 +71,12 @@ def test_buyable_us_is_read_only_mock_call(monkeypatch: pytest.MonkeyPatch) -> N
     assert url == kv.BASE + kv.US_PSAMOUNT_PATH and kw["headers"]["tr_id"] == "VTTS3007R"
     assert kw["params"] == {"CANO": "12345678", "ACNT_PRDT_CD": "01", "OVRS_EXCG_CD": "NASD", "OVRS_ORD_UNPR": "100.00",
                             "ITEM_CD": "AAPL"}  # fmt: skip
+
+
+def test_diagnosis_never_prints_values(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("KIS_VTS_APP_KEY", "secretkey")
+    monkeypatch.delenv("KIS_VTS_APP_SECRET", raising=False)
+    monkeypatch.setenv("KIS_VTS_ACCOUNT", "5012-3456 ")
+    글 = probe._진단()
+    assert "앱키 있음" in 글 and "시크릿 없음" in 글 and "숫자 8자리 + 그 밖 글자 2개" in 글
+    assert "secretkey" not in 글 and "5012" not in 글 and "3456" not in 글
