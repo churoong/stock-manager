@@ -24,15 +24,16 @@ def _money(value: float | None, currency: str) -> str:
     return f"{'-' if r < 0 else ''}${abs(r):,.2f}"  # "$-1,234.50" 이 아니라 "-$1,234.50" (25.613)
 
 
-def with_head(message: str, head: list[str], after_lines: int = 2) -> str:
-    """리포트 머리(제목·생성 줄 `after_lines` 줄) 바로 아래에 `head` 를 끼운다.
+def with_head(message: str, head: list[str]) -> str:
+    """리포트 머리 블록(제목·생성·요약·지연 — 첫 빈 줄까지) 바로 아래에 `head` 를 끼운다.
 
-    아침 운용 보고 (docs/desk.md 7장, 25.1510).
-
-    제목이 맨 위에 그대로 있어야 알림 미리보기·리포트 보관함에서 무슨 리포트인지 보인다
+    아침 운용 보고 (docs/desk.md 7장, 25.1510). 제목이 맨 위에 그대로 있어야 알림 미리보기·리포트 보관함에서 무슨
+    리포트인지 보인다. 처음엔 두 줄 뒤에 끼워 요약·"예정보다 N분 늦게" 줄이 운용 보고 끝에 붙어 그 일부처럼 읽혔다
+    (25.1512 검토 2) — 머리 블록이 끝나는 첫 빈 줄 뒤에, 끝에 빈 줄 하나를 두고 끼운다. 빈 줄이 없으면 끝에 붙인다
     """
     줄 = message.split("\n")
-    return "\n".join([*줄[:after_lines], "", *head, *줄[after_lines:]])
+    i = 줄.index("") if "" in 줄 else len(줄)
+    return "\n".join([*줄[: i + 1], *head, "", *줄[i + 1:]]).rstrip("\n")
 
 
 #: 경고 한 줄의 상한 (25.613, 감사). 예외 문장을 그대로 싣는 경고가 3,900자를 넘으면 조각이 줄 가운데서 잘리고,

@@ -143,19 +143,35 @@ def _시장칸(
 
 def report_head(
     client: Any, market: str, now: datetime, *, trade_date: str, session_date: str, step_log: dict[str, Any],
-    warnings: list[str],
+    warnings: list[str], after_close: bool = False,
 ) -> list[str]:
     """아침(미국은 밤) 리포트 머리의 운용 보고 (docs/desk.md 7장, 25.1510) — 가상모의투자 단계 바로 뒤, 보내기 전.
 
-    KIS모의투자는 리포트를 보낸 뒤 접수 시간에 내므로 이번 KIS 칸은 아직 비었다 — 지난 실행의 KIS 주문을 대신 싣는다.
+    KIS모의투자는 리포트를 보낸 뒤 접수 시간에 내므로 이번 KIS 칸은 아직 비었다 — 지난 실행이 보낸 결과를 대신 싣고,
+    이번에 내는지는 멈춤·키·장 끝난 뒤 손 실행을 보고 말한다(25.1512 검토 1 — 늘 "냅니다" 라 했다).
     읽기: 평가 계열(운용 요약과 같은 것을 한 번 더 — 열 계좌 1년 약 3천 행)·체결·주문·운용 요약 마지막 줄
     """
-    _계열, _틀린날, _계좌들, 순위 = _기초(client)
+    from batch.sources import kis_vts as kv
+
+    _계열, _틀린날, 계좌들, 순위 = _기초(client)
     칸 = _시장칸(client, market, now.astimezone(UTC).isoformat(), trade_date=trade_date, session_date=session_date,
                step_log=step_log, warnings=warnings)  # fmt: skip
+    h = bmj.MIRROR_ACCOUNT
+    if _멈춤(client):
+        상태 = "멈춤 스위치가 켜져 있어 내지 않습니다"
+    elif not kv.configured():
+        # 셋 다 비면 연결하지 않은 것(정상), 일부만이면 설정 실수 (25.1492)
+        상태 = "꺼짐(" + ("키 없음" if len(kv.missing()) >= 3 else "키 일부만 있음 — 설정 확인") + ")"
+    elif h not in {str(r["id"]) for r in 계좌들}:
+        상태 = f"꺼짐(베낄 계좌 {h} 없음)"
+    elif after_close:
+        상태 = "장 끝난 뒤 실행이라 오늘은 내지 않습니다"
+    else:
+        상태 = "이 주문을 접수 시간에 그대로 냅니다"
     지난 = client.execute(DESK_LAST_SQL).rows
-    지난칸 = (((_json(지난[0][0]) if 지난 else None) or {}).get("markets") or {}).get(market) or {}
-    return desk.report_lines(칸, 순위, bmj.MIRROR_ACCOUNT, prev_kis=list(지난칸.get("kis_orders") or []))
+    지난칸 = (((_json(지난[0][0]) if 지난 else None) or {}).get("markets") or {}).get(market)
+    지난kis = list(지난칸.get("kis_orders") or []) if isinstance(지난칸, dict) else None
+    return desk.report_lines(칸, 순위, h, prev_kis=지난kis, kis_state=상태)
 
 
 def write(

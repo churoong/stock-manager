@@ -373,11 +373,14 @@ def _돈(v: Any, currency: str) -> str:
 
 def report_lines(
     section: dict[str, Any], board: dict[str, Any], mirror: str, *, prev_kis: list[dict[str, Any]] | None = None,
+    kis_state: str | None = None,
 ) -> list[str]:
     """아침(미국은 밤) 리포트 머리의 **운용 보고** 몇 줄 — 종목 추천은 그 아래 재료로(CLAUDE.md "시스템의 중심").
 
     `section` = 운용 요약의 이 시장 칸(체결·주문·확인할 일 — KIS 칸은 아직 비었다, KIS 는 리포트 뒤에 낸다),
-    `board` = 계좌 순위, `prev_kis` = 지난 실행의 KIS 주문(상태별 건수)
+    `board` = 계좌 순위, `prev_kis` = 지난 실행이 KIS 에 **보낸 결과**(접수·거부 — 체결은 다음 실행의 맞추기 뒤라
+    아직 없다), None 이면 모름(그 부분을 뺀다). `kis_state` = 이번에 KIS 에 내는지의 글 —
+    None 이면 KIS 줄을 뺀다(25.1512)
     """
     out = ["📊 운용 보고 — 가상모의투자·KIS모의투자 (자세히: 웹 운용 화면)"]
     확인 = section.get("checks") or []
@@ -387,32 +390,39 @@ def report_lines(
                    + (f" 외 {len(확인) - REPORT_MAX_CHECKS}건" if len(확인) > REPORT_MAX_CHECKS else ""))  # fmt: skip
     else:
         out.append("확인할 일: 없음")
-    줄 = [r for r in board.get("rows") or [] if not r.get("young")]
-    if 줄:
-        def 칸(r: dict[str, Any]) -> str:
-            v = r.get("vs_r_pp")
-            return f"{r['id']} {r['window_pct']:+.2f}%" + (f"(R 대비 {v:+.2f}%p)" if v is not None else "")
+    모든 = list(board.get("rows") or [])
+    줄 = [r for r in 모든 if not r.get("young")]
 
-        위 = [r for r in 줄 if r.get("window_pct") is not None][:REPORT_TOP_ACCOUNTS]
-        챔 = next((r for r in 줄 if r["id"] == mirror and r.get("window_pct") is not None), None)
-        글 = " · ".join(칸(r) for r in 위)
+    def 칸(r: dict[str, Any]) -> str:
+        v = r.get("vs_r_pp")
+        return (f"{r['window_pct']:+.2f}%" + (f"(R 대비 {v:+.2f}%p)" if v is not None else "")
+                + (" — 갓 엶, 개설 후" if r.get("young") else ""))  # fmt: skip
+
+    위 = [r for r in 줄 if r.get("window_pct") is not None][:REPORT_TOP_ACCOUNTS]
+    # 챔피언은 갓 연 계좌여도 빠뜨리지 않는다 — KIS 가 베끼는 계좌가 순위 줄에서 사라지면 안 된다(25.1512 검토 5)
+    챔 = next((r for r in 모든 if r["id"] == mirror and r.get("window_pct") is not None), None)
+    if 위 or 챔:
+        글 = " · ".join(f"{r['id']} {칸(r)}" for r in 위)
         if 챔 and 챔 not in 위:
-            글 += f" … {mirror}(KIS) {칸(챔).split(' ', 1)[1]}"
+            글 += (" … " if 글 else "") + f"{mirror}(KIS) {칸(챔)}"
         out.append(f"순위(공통 구간 {board.get('window_start')}부터): {글}")
     체결 = section.get("fills_h") or []
     체결글 = [f"{_SIDE.get(f['side'], f['side'])} {f['name']} {f['quantity']}주 @ {_돈(f['price'], f['currency'])}"
              for f in 체결]  # fmt: skip
     out.append(f"{mirror} 체결(판정 {section.get('trade_date')}): " + (" · ".join(체결글) if 체결글 else "없음"))
     주문 = section.get("orders_h") or []
+    # 체결 장은 주문의 것 — 장 끝난 뒤 손 실행이면 다음다음 장이다(25.1512 검토 4)
+    장들 = sorted({str(o.get("fill_session")) for o in 주문 if o.get("fill_session")})
+    장 = 장들[0] if len(장들) == 1 else section.get("session_date")
     if 주문:
         글 = " · ".join(f"{_SIDE.get(o['side'], o['side'])} {o['name']} {o['quantity']}주"
                        + (" 시장가" if o.get("order_type") == "market" or o.get("limit_price") is None
                           else f" {_돈(o['limit_price'], o['currency'])}")
                        for o in 주문[:REPORT_MAX_ORDERS])  # fmt: skip
-        out.append(f"{mirror} 다음 장({section.get('session_date')}) 주문: {글}"
+        out.append(f"{mirror} 다음 장({장}) 주문: {글}"
                    + (f" 외 {len(주문) - REPORT_MAX_ORDERS}건" if len(주문) > REPORT_MAX_ORDERS else ""))  # fmt: skip
     else:
-        out.append(f"{mirror} 다음 장({section.get('session_date')}) 주문: 없음")
+        out.append(f"{mirror} 다음 장({장}) 주문: 없음")
 
     def 건수(c: dict[str, int] | None) -> str:
         xs = sorted((a, n) for a, n in (c or {}).items() if n and a != mirror)
@@ -420,13 +430,15 @@ def report_lines(
 
     체결수, 주문수 = 건수(section.get("fills_by_account")), 건수(section.get("orders_by_account"))
     out.append(f"다른 계좌 — 체결 {체결수} / 주문 {주문수}")
-    if prev_kis is not None:
-        셈: dict[str, int] = {}
-        for o in prev_kis:
-            셈[str(o.get("status"))] = 셈.get(str(o.get("status")), 0) + 1
-        말 = {"accepted": "접수", "filled": "체결", "partial": "부분", "unfilled": "미체결", "rejected": "거부",
-             "unknown": "모름", "sending": "응답 모름"}  # fmt: skip
-        지난 = " · ".join(f"{말.get(k, k)} {n}" for k, n in sorted(셈.items())) if 셈 else "낸 주문 없음"
-        out.append(f"KIS모의투자: 이 주문을 접수 시간에 그대로 냅니다 · 지난 실행 {지난}")
+    if kis_state is not None:
+        글 = f"KIS모의투자: {kis_state}"
+        if prev_kis is not None:
+            셈: dict[str, int] = {}
+            for o in prev_kis:
+                셈[str(o.get("status"))] = 셈.get(str(o.get("status")), 0) + 1
+            말 = {"accepted": "접수", "rejected": "거부", "sending": "응답 모름", "unknown": "모름"}
+            지난 = " · ".join(f"{말.get(k, k)} {n}" for k, n in sorted(셈.items())) if 셈 else "낸 주문 없음"
+            글 += f" · 지난 실행 보낸 결과 {지난}(체결은 다음 실행이 맞춤)"
+        out.append(글)
     return out
 

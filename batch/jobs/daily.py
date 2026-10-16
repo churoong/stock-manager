@@ -2323,13 +2323,16 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
         # 아침 운용 보고 (docs/desk.md 7장, 25.1510) — 리포트 머리(제목·생성 줄 바로 아래)에.
         # 종목 추천은 그 아래 재료로. 가상모의투자 단계가 돈 실행에만(dry-run·단계 실패는 빼고 — 실패는 경고 줄에
         # 있다). 곁다리: 실패해도 리포트는 그대로
-        if not dry_run and "paper" in step_log and not (step_log.get("paper") or {}).get("error"):
+        모의 = step_log.get("paper") or {}
+        # 쉬는 날(입금 없음 등 `skipped`)·실패한 날은 끼우지 않는다 — "없음" 뿐인 블록이 맨 위에 나갔다(25.1512 검토 6)
+        if not dry_run and "paper" in step_log and not 모의.get("error") and not 모의.get("skipped"):
             try:
                 from batch.jobs import desk as desk_job
 
                 머리 = desk_job.report_head(
                     client, market, datetime.now(UTC), trade_date=decision.trade_date,
                     session_date=decision.session_date, step_log=step_log, warnings=warnings,
+                    after_close=_장_끝남(market, decision.session_date),
                 )  # fmt: skip
                 if 머리:
                     message = formatter.with_head(message, 머리)
