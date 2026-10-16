@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import EquityChart, { type Series } from "@/components/EquityChart";
 import { bodyOf, readJson } from "@/lib/http";
 import { amountText, perfLines, priceText, statusText, type KisMarket, type KisMarketView, type KisWhole } from "@/lib/kisPaper";
+import type { LiveView } from "@/lib/kisVts";
 import { brokerLines } from "@/lib/paper";
 
 /**
@@ -35,12 +36,91 @@ export function kisSeries(w: Pick<KisWhole, "totals">): Series[] {
   return 첫 ? [{ label: "KIS모의투자 총액", color: "#dc2626", points: 값.map((t) => ({ date: t.as_of, value: t.total / 첫 })) }] : [];
 }
 
+/** 열 때 조회(B) 결과 — KIS 가 준 값 그대로 (docs/paper.md 15.7, 25.1498) */
+function LiveBox({ live }: { live: LiveView }) {
+  const cur = live.currency;
+  return (
+    <div className="mt-2 rounded-lg border border-emerald-200 p-2 dark:border-emerald-900">
+      <p className="text-xs text-emerald-700 dark:text-emerald-400">KIS에서 방금 조회 · {new Date(live.fetched_at).toLocaleString("ko-KR")}</p>
+      <p className="mt-1">
+        {cur === "KRW" ? "총평가" : "보유 평가 + 달러 예수금"} <b>{amountText(live.account.total, cur)}</b> · 현금 {amountText(live.account.cash, cur)} · 보유 평가 {amountText(live.account.holdings_value, cur)}
+      </p>
+      {live.holdings.length ? (
+        <div className="overflow-x-auto">
+          <table className="mt-1 w-full min-w-[560px] text-xs">
+            <thead>
+              <tr className="text-left text-slate-500">
+                <th className="py-1">종목</th>
+                <th className="text-right">수량</th>
+                <th className="text-right">평균가</th>
+                <th className="text-right">현재가</th>
+                <th className="text-right">평가금액</th>
+                <th className="text-right">평가손익</th>
+              </tr>
+            </thead>
+            <tbody>
+              {live.holdings.map((h) => (
+                <tr key={h.code} className="border-t border-slate-100 dark:border-slate-800">
+                  <td className="py-1">{h.name ?? h.code} <span className="text-slate-400">{h.code}</span></td>
+                  <td className="text-right">{h.qty.toLocaleString("ko-KR")}</td>
+                  <td className="text-right">{amountText(h.avg, cur)}</td>
+                  <td className="text-right">{amountText(h.price, cur)}</td>
+                  <td className="text-right">{amountText(h.value, cur)}</td>
+                  <td className={`text-right ${tone(h.pnl)}`}>
+                    {amountText(h.pnl, cur)}
+                    {h.pnl_pct != null ? ` (${h.pnl_pct >= 0 ? "+" : ""}${h.pnl_pct.toFixed(2)}%)` : ""}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="mt-1 text-xs text-slate-500">보유 종목 없음</p>
+      )}
+      <p className="mt-2 text-xs font-semibold">오늘 주문·체결</p>
+      {live.executions.length ? (
+        <ul className="text-xs">
+          {live.executions.map((e, i) => (
+            <li key={`${e.code}-${e.time}-${i}`}>
+              {e.time ?? ""} {e.name ?? e.code} {e.side === "buy" ? "매수" : e.side === "sell" ? "매도" : e.side} {e.qty}주 → 체결 {e.filled}주
+              {e.avg_price != null ? ` @ ${amountText(e.avg_price, cur)}` : ""}
+              {e.note ? ` (${e.note})` : ""}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-xs text-slate-500">
+          오늘 주문이 없습니다{cur === "USD" ? " — 미국 예약주문은 개장(한국 22:30 · 서머타임 끝나면 23:30) 뒤에야 주문이 되어 보입니다" : ""}.
+        </p>
+      )}
+    </div>
+  );
+}
+
 export default function KisPanel() {
   const [data, setData] = useState<Record<KisMarket, KisMarketView> | null>(null);
   const [whole, setWhole] = useState<KisWhole | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [market, setMarket] = useState<KisMarket>("KR");
   const [sub, setSub] = useState<Sub>("summary");
+  const [live, setLive] = useState<Partial<Record<KisMarket, LiveView>>>({});
+  const [liveNote, setLiveNote] = useState<string | null>(null);
+  const [liveBusy, setLiveBusy] = useState(false);
+
+  async function fetchLive(m: KisMarket) {
+    setLiveBusy(true);
+    setLiveNote(null);
+    const r = await readJson<{ live?: LiveView; off?: string; busy?: string; wait?: string }>("/api/paper/kis/live", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ market: m }),
+    });
+    const body = bodyOf<{ live?: LiveView; off?: string; busy?: string; wait?: string }>(r);
+    setLiveBusy(false);
+    if (body.live) setLive((x) => ({ ...x, [m]: body.live }));
+    setLiveNote(body.errors?.length ? body.errors.join(" · ") : (body.off ?? body.busy ?? body.wait ?? null));
+  }
 
   useEffect(() => {
     void (async () => {
@@ -106,6 +186,19 @@ export default function KisPanel() {
         ))}
       </div>
 
+      <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+        <button
+          type="button"
+          disabled={liveBusy}
+          onClick={() => void fetchLive(market)}
+          className="rounded border border-emerald-600 px-2 py-0.5 text-emerald-700 disabled:opacity-50 dark:text-emerald-400"
+        >
+          {liveBusy ? "조회 중…" : `${market === "KR" ? "국내" : "미국"} 지금 KIS에서 조회`}
+        </button>
+        <span className="text-xs text-slate-500">조회만 합니다 · 같은 시장은 30초에 한 번 · 일일 배치가 도는 동안은 막힘</span>
+      </div>
+      {liveNote ? <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">{liveNote}</p> : null}
+      {live[market] ? <LiveBox live={live[market]!} /> : null}
       {error ? <p className="mt-2 text-sm text-red-600">{error}</p> : null}
       {!data && !error ? <p className="mt-2 text-sm text-slate-500">불러오는 중…</p> : null}
       {v ? (

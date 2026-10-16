@@ -29,6 +29,8 @@ const 삼키는_무늬 =
  * 열쇠는 `파일::그 줄에만 있는 조각` 이다 — 줄 번호는 곧 어긋난다.
  */
 const 삼켜도_되는_곳: Record<string, string> = {
+  "app/api/paper/kis/live/route.ts::payload = await r.json().catch(":
+    "KIS모의투자 열 때 조회(25.1498) — JSON 이 아닌 응답은 null 로 받고 곧바로 `kisErrorCode` 가 \"JSON 아님\" 오류로 돌려준다. 빈 보유로 보이지 않는다",
   "app/api/cron/intraday/route.ts::대기 접기 실패":
     "묵은 대기 알림 접기(25.1289)는 곁다리다. 못 접어도 보낼 알림은 나가야 한다 — 묵은 것이 섞여 나갈 뿐이다(예전과 같다)",
   "lib/kis.ts::parseStrength(await response.json().catch(":
