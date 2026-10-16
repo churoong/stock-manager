@@ -1,0 +1,59 @@
+name: KIS모의투자 시험 주문
+
+# KIS모의투자(가상 돈)에서 주문·체결·잔고가 실제로 도는지 한 번 본다 (docs/paper.md 15장, docs/infra.md 25.1491).
+# 국내: 정규장이면 1주 시장가 매수 → 체결 확인 → 같은 1주 시장가 매도(남기지 않음). 미국: 매수가능금액 조회 +
+# 예약 접수 시간이면 1달러 지정가 1주 예약(찰 수 없는 값 — 접수만 본다). 모의 도메인·모의 키만(`sources/kis_vts`).
+# 손으로만 돌린다. 운영 DB 는 모의 토큰 줄(`api_tokens.name='kis_vts'`)만 읽고 쓴다.
+# 결과는 비공개 운영 저장소 이슈로만(잔고 수량·금액이 실린다 — 공개 로그엔 찍지 않는다).
+on:
+  workflow_dispatch:
+    inputs:
+      market:
+        description: 시험할 시장
+        type: choice
+        options: [both, KR, US]
+        default: both
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+      TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+      # DB 백엔드 전환 (docs/infra.md 25절). 비어 있으면 Turso 를 쓴다
+      DB_BACKEND: ${{ vars.DB_BACKEND }}
+      D1_ACCOUNT_ID: ${{ secrets.D1_ACCOUNT_ID }}
+      D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+      D1_API_TOKEN: ${{ secrets.D1_API_TOKEN }}
+      KIS_VTS_APP_KEY: ${{ secrets.KIS_VTS_APP_KEY }}
+      KIS_VTS_APP_SECRET: ${{ secrets.KIS_VTS_APP_SECRET }}
+      KIS_VTS_ACCOUNT: ${{ secrets.KIS_VTS_ACCOUNT }}
+      # 입력을 셸에 직접 끼우지 않고 환경변수로 넘긴다 (명령 주입 방지)
+      MARKET: ${{ inputs.market }}
+      OFFLINE_MODE: "0"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: 시험 주문
+        run: |
+          set -o pipefail
+          python scripts/probe_kis_vts.py --market "${MARKET:-both}" 2>&1 | python scripts/ops_tee.py kis-vts.txt
+      - name: 결과를 비공개 이슈로
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPS_REPO: ${{ secrets.OPS_REPO }}
+          OPS_TOKEN: ${{ secrets.OPS_TOKEN }}
+        run: python scripts/publish_output.py --title "운영 출력 (클라우드 세션용)" --file kis-vts.txt --note "KIS모의투자 시험 주문"

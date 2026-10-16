@@ -49,6 +49,10 @@ TR_US_CCNL, TR_US_BALANCE = "VTTS3035R", "VTTS3012R"
 US_RESV_PATH = "/uapi/overseas-stock/v1/trading/order-resv"
 US_CCNL_PATH = "/uapi/overseas-stock/v1/trading/inquire-ccnl"
 US_BALANCE_PATH = "/uapi/overseas-stock/v1/trading/inquire-balance"
+#: 미국 매수가능금액 (inquire_psamount.py L26·L96) — 시험 주문(`scripts/probe_kis_vts.py`, 25.1491)이 원화만 있는
+#: 모의계좌로 미국을 살 수 있는지(환전 뒤 주문가능) 보려고 읽기만 한다
+TR_US_PSAMOUNT = "VTTS3007R"
+US_PSAMOUNT_PATH = "/uapi/overseas-stock/v1/trading/inquire-psamount"
 #: `stocks.market`(nasdaq_symbols.EXCHANGE_CODES) → KIS 해외거래소 코드. 모르는 시장은 주문하지 않는다
 US_EXCHANGE = {"NASDAQ": "NASD", "NYSE": "NYSE", "NYSE American": "AMEX", "NYSE Arca": "AMEX"}
 ORDER_PATH = "/uapi/domestic-stock/v1/trading/order-cash"
@@ -362,6 +366,14 @@ class Session:
         return 보유, 합
 
     # ── 미국 (예약주문) ──────────────────────────────────────────────────────
+
+    def buyable_us(self, code: str, exchange: str, price: float) -> dict[str, Any]:
+        """미국 매수가능금액 조회(읽기만) — output 칸 그대로(주문가능외화금액·환전이후주문가능수량 등)."""
+        params = {"CANO": self.cano, "ACNT_PRDT_CD": self.prdt, "OVRS_EXCG_CD": exchange,
+                  "OVRS_ORD_UNPR": f"{price:.2f}", "ITEM_CD": code}  # fmt: skip
+        payload, _c = self._call("GET", US_PSAMOUNT_PATH, TR_US_PSAMOUNT, params=params)
+        out = _ok(payload, "모의 미국 매수가능금액 조회").get("output") or {}
+        return out if isinstance(out, dict) else (out[0] if out else {})
 
     def order_us(self, side: str, code: str, exchange: str, quantity: int, price: float) -> Accepted:
         """미국 예약주문 — 지정가(달러, 소수 둘째 자리). 시장가가 없어 매도는 부르는 쪽이 낮춘 지정가를 넘긴다."""
