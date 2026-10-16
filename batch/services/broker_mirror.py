@@ -292,6 +292,8 @@ def cells(rows: list[dict[str, Any]]) -> dict[str, Any]:
     """
     import statistics
 
+    from batch.services.desk import measured
+
     칸: dict[str, dict[str, Any]] = {}
     달: dict[str, dict[str, list[float]]] = {}
     for r in rows:
@@ -336,6 +338,8 @@ def cells(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "median": statistics.median(c["_vals"]) if c["_vals"] else None,
             "se": statistics.stdev(일평균) / len(일평균) ** 0.5 if len(일평균) >= 2 else None,
         }  # fmt: skip
+        # 보정에 쓰는 잣대 그대로 — 화면이 거래일만 보고 "잰 칸" 이라 하던 것을 맞춘다(25.1516, 검토 4)
+        out[키]["measured"] = measured(out[키], CELL_MIN_DAYS)
     월 = {m: {k: (sum(v[0::2]) / sum(v[1::2]) if sum(v[1::2]) > 0 else None) for k, v in d.items()}
          for m, d in sorted(달.items())}  # fmt: skip
     return {"cells": out, "cells_by_month": 월}

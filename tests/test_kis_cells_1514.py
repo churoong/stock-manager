@@ -124,10 +124,14 @@ def test_adjust_rows_keeps_order_and_flags_close_calls() -> None:
 
 
 def test_h_check() -> None:
-    perf = {"start": "2026-10-16", "last": "2026-11-20", "pnl_krw": 90_000.0, "h_pnl_krw": 100_000.0}
-    x = desk.h_check(perf, {"adj_pp": 0.08, "pi_pp": 0.01, "band_pp": 0.02, "unmeasured_pct": 3.0}, 10_000_000.0)
-    assert x is not None and x["actual_pp"] == pytest.approx(-0.1) and x["explained_pp"] == pytest.approx(-0.07)
-    assert desk.h_check({**perf, "h_pnl_krw": None}, {"adj_pp": 0}, 1.0) is None
+    """(KIS 9,000 − H 10,000) ÷ 1,000만 = −0.01%p · 설명 −0.08 + 0.01. 시작 평가가 0 이면 없음 (25.1516 에 인자를 바꿈)"""
+    adj = {"adj_pp": 0.08, "pi_pp": 0.01, "band_pp": 0.02, "unmeasured_pct": 3.0}
+    x = desk.h_check(start="2026-10-16", end="2026-11-20", kis0=1e8, kis1=1e8 + 9_000, h_pnl0=0.0, h_pnl1=10_000.0,
+                     h_equity0=10_000_000.0, h_adj=adj, pre_link=2)  # fmt: skip
+    assert x is not None and x["actual_pp"] == pytest.approx(-0.01) and x["explained_pp"] == pytest.approx(-0.07)
+    assert x["pre_link"] == 2 and (x["from"], x["to"]) == ("2026-10-16", "2026-11-20")
+    assert desk.h_check(start="a", end="b", kis0=0, kis1=0, h_pnl0=0, h_pnl1=0, h_equity0=0.0, h_adj=adj,
+                        pre_link=0) is None  # fmt: skip
 
 
 def test_cells_sql_books_slippage_pct() -> None:
@@ -152,34 +156,38 @@ def test_cells_sql_books_slippage_pct() -> None:
 
 
 def test_desk_write_puts_fill_adjust(monkeypatch: pytest.MonkeyPatch) -> None:
+    """B(챔피언으로 둠) 10-15 체결 100만(평가 1,000만 → 회전 10%) × 넘음 0.5 = 0.05%p.
+    대보기: 운용 요약 날짜 10-17 — 끝은 그 앞 KIS 줄 10-16. KIS 손익 9,000 − B 손익 10,000 → −0.01%p"""
     c = Client(accounts=None)
     monkeypatch.setattr(job.bmj, "MIRROR_ACCOUNT", "B")
     for aid in ("A", "B"):
-        for d, twr in (("2026-10-15", 1.0), ("2026-10-16", 1.01)):
+        for d, twr, pnl in (("2026-10-15", 1.0, 0.0), ("2026-10-16", 1.01, 10_000.0)):
             c.conn.execute("INSERT INTO paper_daily (account_id, as_of, invested_krw, cash_krw, holdings_krw,"
                            " equity_krw, pnl_krw, twr_index, positions_json, recon_ok, updated_at)"
-                           " VALUES (?, ?, 1000000, 0, 1000000, 1000000, 0, ?, '[]', 1, 't')", [aid, d, twr])  # fmt: skip
+                           " VALUES (?, ?, 10000000, 0, 10000000, 10000000, ?, ?, '[]', 1, 't')",
+                           [aid, d, pnl, twr])  # fmt: skip
     c.conn.execute("INSERT INTO paper_orders (id, account_id, market, stock_id, side, order_type, quantity, currency,"
                    " decided_on, fill_session, reason, rule_version, status, created_at)"
-                   " VALUES (90, 'B', 'KR', 1, 'buy', 'market', 10, 'KRW', '2026-10-15', '2026-10-16', 'r', 1,"
+                   " VALUES (90, 'B', 'KR', 1, 'buy', 'market', 100, 'KRW', '2026-10-14', '2026-10-15', 'r', 1,"
                    " 'filled', 't')")  # fmt: skip
     c.conn.execute("INSERT INTO paper_fills (order_id, account_id, stock_id, side, fill_date, price, quantity, currency,"
                    " fx_rate, fee, tax, slippage, cash_krw, created_at)"
-                   " VALUES (90, 'B', 1, 'buy', '2026-10-16', 10000, 10, 'KRW', 1, 0, 0, 100, -100100, 't')")  # fmt: skip
-    요약 = {"cells": {"buy_market": {"days": 30, "excess": 0.5, "se": 0.1}},
-          "perf": {"start": "2026-10-15", "last": "2026-10-16", "pnl_krw": -500.0, "h_pnl_krw": 0.0}}  # fmt: skip
-    c.conn.execute("INSERT INTO paper_broker_daily (broker, as_of, account_id, holdings_json, cash_krw, total_krw,"
-                   " diff_json, source, fetched_at, summary_json) VALUES ('kis_vts', '2026-10-16', 'B', '[]', 0, 0,"
-                   " '{}', 'kis_vts', 't', ?)", [json.dumps(요약)])  # fmt: skip
+                   " VALUES (90, 'B', 1, 'buy', '2026-10-15', 10000, 100, 'KRW', 1, 0, 0, 1000, -1001000, 't')")  # fmt: skip
+    칸 = {"cells": {"buy_market": {"days": 30, "excess": 0.5, "se": 0.1}}}
+    for d, total in (("2026-10-15", 100_000_000.0), ("2026-10-16", 100_009_000.0)):
+        c.conn.execute("INSERT INTO paper_broker_daily (broker, as_of, account_id, holdings_json, cash_krw, total_krw,"
+                       " diff_json, source, fetched_at, summary_json) VALUES ('kis_vts', ?, 'B', '[]', 0, 0,"
+                       " '{}', 'kis_vts', 't', ?)", [d, json.dumps(칸 | {"account_krw": {"total_krw": total}})])  # fmt: skip
     job.write(c, "KR", datetime(2026, 10, 16, 23, 40, tzinfo=UTC), trade_date="2026-10-16", session_date="2026-10-19",
               step_log={}, warnings=[])  # fmt: skip
     s = json.loads(c.q("SELECT summary_json FROM paper_desk")[0][0])
     b = s["fill_adjust"]["rows"]["B"]
     assert b["turnover_pct"] == pytest.approx(10.0) and b["adj_pp"] == pytest.approx(0.05)
-    assert b["adjusted_pct"] == pytest.approx(1.0 - 0.05)
+    assert b["measured_pct"] == pytest.approx(10.0) and b["adjusted_pct"] == pytest.approx(1.0 - 0.05)
     assert s["fill_adjust"]["rows"]["A"]["fills"] == 0
     h = s["fill_adjust"]["h_check"]
-    assert h["actual_pp"] == pytest.approx(-0.05) and h["explained_pp"] == pytest.approx(-0.05)
+    assert (h["from"], h["to"], h["pre_link"]) == ("2026-10-15", "2026-10-16", 0)
+    assert h["actual_pp"] == pytest.approx(-0.01) and h["explained_pp"] == pytest.approx(-0.05)
     assert s["fill_adjust_error"] is None
 
 
@@ -197,3 +205,60 @@ def test_desk_fill_adjust_failure_is_recorded(monkeypatch: pytest.MonkeyPatch) -
               step_log={}, warnings=[])  # fmt: skip
     s = json.loads(c.q("SELECT summary_json FROM paper_desk")[0][0])
     assert s["fill_adjust"] is None and s["fill_adjust_error"].startswith("RuntimeError")
+
+
+# ── 검토 반영 (25.1516) ──────────────────────────────────────────────────────
+
+
+def test_h_window_ends_before_today() -> None:
+    """끝은 오늘보다 앞선 KIS 줄 — 오늘 행은 아침엔 미국이 하루 늦다(검토 1). 하루뿐이면 없음"""
+    v = [("2026-10-15", 1.0), ("2026-10-16", None), ("2026-10-17", 1.0), ("2026-10-19", 1.0)]
+    assert desk.h_window(v, "2026-10-19") == ("2026-10-15", "2026-10-17")
+    assert desk.h_window(v, "2026-10-16") is None
+    assert desk.h_window([], "2026-10-19") is None
+
+
+def test_fill_adjust_end_split_guard_and_late_limit_buy() -> None:
+    평가 = {"X": [("2026-10-01", 1_000.0)]}
+    체결 = {"X": [
+        _f("buy", "limit", "2026-10-02", 100, 1, lim=100.0, op=25.0),                 # 분할 반영 시가 — 못 잼(검토 2)
+        _f("buy", "limit", "2026-10-02", 100, 1, basis="close", lim=100.0, op=90.0),  # 늦은 실행 지정가(검토 3)
+        _f("buy", "limit", "2026-10-05", 100, 1, lim=100.0, op=90.0),                 # 끝 날 — 뺌
+    ]}  # fmt: skip
+    x = desk.fill_adjust(fills=체결, equity=평가, starts={"X": "2026-10-01"}, ends={"X": "2026-10-05"}, cells={},
+                         min_days=20)["X"]  # fmt: skip
+    assert x["fills"] == 2 and x["pi_pp"] == 0 and x["pi_missing"] == 1
+    assert x["unmeasured_pct"] == 0 and x["limit_buy_pct"] == pytest.approx(100.0)  # 둘 다 지정가 매수로 센다
+
+
+def test_measured_flag_matches_adjust_rule() -> None:
+    """거래일은 넉넉한데 가격 표본이 하루뿐(se 없음)이면 잰 칸이 아니다 — 배치가 적어 화면이 그대로(검토 4)"""
+    s = bm.cells([_줄("buy", "filled", "filled", fq=1, avg=100.3, ip=100.0, slip=0.1, day=f"2026-10-{d:02d}")
+                  for d in range(1, 2)] + [_줄("buy", "unfilled", "filled", ip=100.0, day=f"2026-11-{d:02d}")
+                                           for d in range(1, 25)])  # fmt: skip
+    c = s["cells"]["buy_market"]
+    assert c["days"] == 25 and c["se"] is None and c["measured"] is False
+    assert desk.measured({"days": 20, "excess": 0.1, "se": 0.01}, 20) and not desk.measured(None, 20)
+
+
+def test_pre_link_counts_h_holdings_missing_at_kis(monkeypatch: pytest.MonkeyPatch) -> None:
+    c = Client(accounts=None)
+    c.conn.execute("INSERT INTO paper_daily (account_id, as_of, invested_krw, cash_krw, holdings_krw, equity_krw,"
+                   " pnl_krw, twr_index, positions_json, recon_ok, updated_at) VALUES ('H', '2026-10-15', 1, 1, 0, 100,"
+                   " 0, 1, ?, 1, 't')", [json.dumps([{"stock_id": 1}, {"stock_id": 2}, {"stock_id": 3}])])  # fmt: skip
+    for broker, hold in (("kis_vts", [{"id": 1, "code": "005930"}]), ("kis_vts_us", [{"id": 2, "code": "AAPL"}])):
+        c.conn.execute("INSERT INTO paper_broker_daily (broker, as_of, account_id, holdings_json, diff_json, source,"
+                       " fetched_at) VALUES (?, '2026-10-15', 'H', ?, '{}', 'kis_vts', 't')", [broker, json.dumps(hold)])
+    x = job._대보기(c, "H", ("2026-10-15", "2026-10-16"), {"2026-10-15": 1.0, "2026-10-16": 2.0},
+                   {"H": [("2026-10-15", 100.0)]}, {"H": [("2026-10-15", 0.0), ("2026-10-16", 1.0)]}, {}, {})  # fmt: skip
+    assert x is not None and x["pre_link"] == 1 and x["actual_pp"] == pytest.approx(0.0)
+
+
+def test_batch_delay_counts_only_measured_runs() -> None:
+    """준비 목록 "N회 중" 의 분모는 지연을 잰 실행만 — 손 실행(지연 없음)이 분모를 부풀리지 않는다(검토 6)"""
+    c = Client(accounts=None)
+    for delay in (100, 700, None, None):
+        c.conn.execute("INSERT INTO batch_runs (job_name, market, started_at, status, delay_seconds)"
+                       " VALUES ('daily_kr', 'KR', '2026-10-10T00:00:00', 'success', ?)", [delay])  # fmt: skip
+    r = c.execute(job.BATCH_DELAY_SQL, [600, "daily_kr", "daily_us", "2026-10-01"]).dicts()[0]
+    assert (r["n"], r["late"], r["max_delay"]) == (2, 1, 700)

@@ -965,6 +965,7 @@ class Test이웃_모듈들:
         검사(DESK, f"위 {dk.REPORT_TOP_ACCOUNTS}개(`REPORT_TOP_ACCOUNTS`)", "운용 보고 순위 수 (25.1510)")
         검사(DESK, f"{dk.REPORT_MAX_ORDERS}건(`REPORT_MAX_ORDERS`)", "운용 보고 주문 수 (25.1510)")
         검사(DESK, "무작위 대조 R1·R2 평균", "R 대비 기준선 (25.1501)")
+        검사(DESK, f"지정가의 {dk.PI_OPEN_FLOOR * 100:g}%(`PI_OPEN_FLOOR`)", "시가 개선 분할 막이 (25.1516)")
         assert dk.CONTROL_IDS == ("R1", "R2")
 
     def test_스트레스_표본_하한(self) -> None:

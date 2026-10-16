@@ -76,8 +76,14 @@ export interface ChampionRow { id: string; from: string; blocks: number; wins: n
 export interface FillAdjustRow {
   from: string; fills: number; turnover_pct: number; adj_pp: number; band_pp: number; unmeasured_pct: number;
   pi_pp: number; pi_missing: number; limit_buy_pct: number | null; adjusted_pct?: number | null; close_call?: boolean;
+  /** 잰 칸의 회전(%) — 25.1516 전 요약에는 없다 */
+  measured_pct?: number;
 }
-export interface FillAdjustCheck { from: string | null; to: string | null; actual_pp: number; explained_pp: number; band_pp: number; unmeasured_pct: number }
+export interface FillAdjustCheck {
+  from: string | null; to: string | null; actual_pp: number; explained_pp: number; band_pp: number; unmeasured_pct: number;
+  /** 시작일에 H 가 들고 KIS 에 없던 종목 수 — 있으면 실측이 흔들려 판정에서 뺀다(25.1516) */
+  pre_link?: number;
+}
 export interface FillAdjust { rows: Record<string, FillAdjustRow>; h_check: FillAdjustCheck | null; min_days: number }
 
 export interface DeskSummary {
@@ -276,18 +282,20 @@ export function championText(r: ChampionRow, mirror: string): string {
 export function adjustText(x: FillAdjustRow | undefined | null): { main: string; sub: string } {
   if (!x) return { main: "-", sub: "" };
   if (!x.fills) return { main: x.adjusted_pct == null ? "-" : pctText(x.adjusted_pct), sub: "체결 없음" };
-  const 잼 = x.adj_pp !== 0 || x.band_pp !== 0 || x.pi_pp !== 0;
+  // 잰 칸이 있었나는 배치 값(`measured_pct`)으로 — 지정가 개선만 있을 때 "±0.00" 으로 잰 것처럼 보였다(25.1516, 검토 5)
+  const 잼 = x.measured_pct != null ? x.measured_pct > 0 : x.adj_pp !== 0 || x.band_pp !== 0;
   const 조각 = [
     잼 ? `${x.adj_pp > 0 ? "−" : "+"}${Math.abs(x.adj_pp).toFixed(2)}%p ±${x.band_pp.toFixed(2)}` : "잰 칸 없음",
     x.pi_pp ? `지정가 개선 +${x.pi_pp.toFixed(2)}%p` : "",
     x.unmeasured_pct >= 0.5 ? `안 잰 회전 ${x.unmeasured_pct.toFixed(0)}%` : "",
     x.close_call ? "이웃과 뒤집힐 수 있음" : "",
   ].filter(Boolean);
-  return { main: 잼 && x.adjusted_pct != null ? pctText(x.adjusted_pct) : "-", sub: 조각.join(" · ") };
+  return { main: (잼 || x.pi_pp) && x.adjusted_pct != null ? pctText(x.adjusted_pct) : "-", sub: 조각.join(" · ") };
 }
 
 /** H 대보기 한 줄 — KIS 실측 손익 차이 vs 칸으로 설명한 몫 */
 export function adjustCheckText(c: FillAdjustCheck | null | undefined, mirror: string): string | null {
   if (!c) return null;
-  return `${c.from ?? "?"}~${c.to ?? "?"} KIS 실측 손익 차이 ${ppText(c.actual_pp)} (${mirror} 평가 대비) · 칸으로 설명한 몫 ${ppText(c.explained_pp)} ±${c.band_pp.toFixed(2)} · 안 잰 회전 ${c.unmeasured_pct.toFixed(0)}%`;
+  const 섞임 = c.pre_link ? ` · 연결 전 보유 ${c.pre_link}종목이 섞여 실측이 흔들림(판정에서 뺌)` : "";
+  return `${c.from ?? "?"}~${c.to ?? "?"} KIS 실측 손익 차이 ${ppText(c.actual_pp)} (${mirror} 평가 대비) · 칸으로 설명한 몫 ${ppText(c.explained_pp)} ±${c.band_pp.toFixed(2)} · 안 잰 회전 ${c.unmeasured_pct.toFixed(0)}%${섞임}`;
 }

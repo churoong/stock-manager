@@ -235,7 +235,11 @@ def readiness(*, runs: dict[str, Any] | None, kis: list[dict[str, Any]]) -> list
                   f" · 가장 늦음 {round((runs.get('max_delay') or 0) / 60)}분")  # fmt: skip
         if key == "broker" and kis:
             n = sum(int(x.get("n") or 0) for x in kis)
-            근거 = (f"최근 28일 끝난 베낀 주문 {n} · 모름 {sum(int(x.get('unknown') or 0) for x in kis)}"
+            # 창 길이는 요약이 적은 값(`COMPARE_DAYS`) — 글에 박지 않는다(25.1516, 검토 6)
+            from batch.services.broker_mirror import COMPARE_DAYS
+
+            창 = max((int(x.get("days") or 0) for x in kis), default=0) or COMPARE_DAYS
+            근거 = (f"최근 {창}일 끝난 베낀 주문 {n} · 모름 {sum(int(x.get('unknown') or 0) for x in kis)}"
                   f" · 거부 {sum(int(x.get('rejected') or 0) for x in kis)}")  # fmt: skip
         out.append({"key": key, "label": label, "status": status, "note": note, "evidence": 근거})
     return out
@@ -251,24 +255,40 @@ def combine_kept(summaries: list[dict[str, Any]]) -> dict[str, Any]:
 #: 보정에 쓰지 않는 칸 — 지정가 매수는 지정가보다 비싸게 찰 수 없어 가격 차이가 구조상 0 이하(가격 개선)다.
 #: 그 몫은 시가로 따로 잰다(`pi_pp`) — KIS 칸으로 한 번 더 빼면 두 번 센다 (docs/desk.md 8장, 25.1514)
 ADJ_SKIP_CELLS = ("buy_limit",)
+#: 시가가 지정가의 이만큼 아래면 시가 개선에 넣지 않고 `pi_missing` 으로 —
+#: 미국 분할을 감지하면 시세를 처음부터 다시 받아 지난 시가도 분할 반영 값으로 덮이는데 주문의 지정가는 그대로라,
+#: 4:1 분할 뒤 개선이 75% 로 부풀었다(25.1516, 검토 2).
+#: 하루 50% 넘는 갭 하락은 드물어 놓쳐도 작다
+PI_OPEN_FLOOR = 0.5
 
 
 def _칸키(f: dict[str, Any]) -> str:
+    """체결 칸. 지정가 매수는 판정 잣대와 상관없이 `buy_limit` — 늦은 실행이면 지정가 매수에도 `fill_basis='close'` 가
+    붙지만 판정(`judge`)은 지정가 매수에서 그 값을 보지 않는다(25.1516, 검토 3). 그 밖의 종가 판정은 `close`"""
+    if f["side"] == "buy" and f.get("order_type") != "market":
+        return "buy_limit"
     if f.get("fill_basis") == "close":
         return "close"
     return f"{f['side']}_{'market' if f.get('order_type') == 'market' else 'limit'}"
 
 
+def measured(c: dict[str, Any] | None, min_days: int) -> bool:
+    """칸을 "잰 것" 으로 쓰나 — 거래일 `min_days` 이상이고 excess·se 가 있다.
+    배치가 칸마다 적어 웹이 그대로 쓴다(25.1516, 검토 4)"""
+    c = c or {}
+    return int(c.get("days") or 0) >= min_days and c.get("excess") is not None and c.get("se") is not None
+
+
 def _회전(
-    fills: list[dict[str, Any]], equity: list[tuple[str, float]], start: str,
+    fills: list[dict[str, Any]], equity: list[tuple[str, float]], start: str, end: str | None = None,
 ) -> list[tuple[dict[str, Any], float]]:
-    """구간(`fill_date ≥ start`) 체결마다 (체결, 원화 금액 ÷ 그 전 평가 총액). 평가 총액 = 체결일 이하 마지막 평가
-    (그날 체결은 다음 실행이 적으므로 체결 전 값), 없으면 첫 평가"""
+    """구간(`start ≤ fill_date`, `end` 가 있으면 `< end`) 체결마다 (체결, 원화 금액 ÷ 그 전 평가 총액).
+    평가 총액 = 체결일 이하 마지막 평가(그날 체결은 다음 실행이 적으므로 체결 전 값), 없으면 첫 평가"""
     v = sorted(equity)
     out = []
     for f in fills:
         d = str(f.get("fill_date") or "")[:10]
-        if d < start:
+        if d < start or (end is not None and d >= end):
             continue
         앞 = [e for a, e in v if a <= d]
         e = 앞[-1] if 앞 else (v[0][1] if v else None)
@@ -280,28 +300,29 @@ def _회전(
 
 def fill_adjust(
     *, fills: dict[str, list[dict[str, Any]]], equity: dict[str, list[tuple[str, float]]], starts: dict[str, str],
-    cells: dict[str, dict[str, Any]], min_days: int,
+    cells: dict[str, dict[str, Any]], min_days: int, ends: dict[str, str] | None = None,
 ) -> dict[str, dict[str, Any]]:
     """KIS모의 체결 기준 보정(근사·참고, docs/desk.md 8장) — 계좌마다 순위 구간의 회전율 × KIS 가 잰 칸의
     "장부 가정 넘는 비용".
 
     `fills` = {계좌: [{market, side, order_type, fill_basis, fill_date, price, quantity, fx_rate, limit_price, open}]},
-    `equity` = {계좌: [(as_of, 원화 평가 총액)]}, `starts` = {계좌: 구간 시작}, `cells` = {시장: KIS 체결 칸}.
+    `equity` = {계좌: [(as_of, 원화 평가 총액)]}, `starts` = {계좌: 구간 시작}, `ends` = {계좌: 끝(그 날 체결은 뺌)},
+    `cells` = {시장: KIS 체결 칸}.
 
     - `turnover_pct` = Σ 체결 원화 금액 ÷ 그 전 평가 총액(%)
-    - `adj_pp` = Σ 회전 × excess(칸) — 잰 칸(거래일 `min_days` 이상, 지정가 매수 뺌)만.
-      양수면 KIS 기준으로 그만큼 덜 벌었다
-    - `band_pp` = Σ 회전 × 2·se — 칸 값의 불확실성(거래일 묶음 표준오차 둘)
+    - `adj_pp` = Σ 회전 × excess(칸) — 잰 칸(`measured`, 지정가 매수 뺌)만. 양수면 KIS 기준으로 그만큼 덜 벌었다
+    - `band_pp` = Σ 회전 × 2·se — 칸 값의 불확실성(거래일 묶음 표준오차 둘). `measured_pct` = 잰 칸의 회전(%)
     - `unmeasured_pct` = 잰 칸이 없는 회전(%) — 클수록 보정이 말해 주는 게 적다(지정가 매수는 따로라 뺌)
     - `pi_pp` = Σ 지정가 매수 회전 × (지정가 − min(시가, 지정가)) ÷ 지정가 — 가상 장부는 지정가로 사지만 시가가
-      더 낮게 열린 날은 실제로는 시가 언저리에 찬다(가격 개선, 가상이 비관). `pi_missing` = 시가가 없어 못 잰 건수
+      더 낮게 열린 날은 실제로는 시가 언저리에 찬다(가격 개선, 가상이 비관). 장 열린 뒤 낸 주문(`fill_basis='close'`)은
+      시가 뒤라 개선 0. `pi_missing` = 시가가 없거나 지정가의 `PI_OPEN_FLOOR` 아래(분할 의심)라 못 잰 건수
     - `limit_buy_pct` = 지정가 매수 금액 ÷ 매수 금액(%) — 칸의 miss·extra(체결 여부가 갈리는 몫)를 볼 무게
     보정 수익률(순위 수익률 − adj + pi)은 `adjust_rows` 가 붙인다. **순위는 바꾸지 않는다**(검증 에이전트 반박, 25.1514)
     """
     out: dict[str, dict[str, Any]] = {}
     for a, start in starts.items():
-        회 = _회전(fills.get(a) or [], equity.get(a) or [], start)
-        adj = band = 안잼 = pi = 지정 = 매수 = 0.0
+        회 = _회전(fills.get(a) or [], equity.get(a) or [], start, (ends or {}).get(a))
+        adj = band = 잼 = 안잼 = pi = 지정 = 매수 = 0.0
         pi_없음 = 0
         for f, t in 회:
             키 = _칸키(f)
@@ -310,20 +331,23 @@ def fill_adjust(
             if 키 in ADJ_SKIP_CELLS:
                 지정 += t
                 lim, op = f.get("limit_price"), f.get("open")
-                if lim and op and float(lim) > 0:
+                if f.get("fill_basis") == "close":
+                    continue
+                if lim and op and float(lim) > 0 and float(op) >= float(lim) * PI_OPEN_FLOOR:
                     pi += t * (float(lim) - min(float(op), float(lim))) / float(lim) * 100
                 else:
                     pi_없음 += 1
                 continue
             c = (cells.get(str(f.get("market") or "")) or {}).get(키) or {}
-            if int(c.get("days") or 0) >= min_days and c.get("excess") is not None and c.get("se") is not None:
+            if measured(c, min_days):
                 adj += t * float(c["excess"])
                 band += t * 2 * float(c["se"])
+                잼 += t
             else:
                 안잼 += t
         out[a] = {"from": start, "fills": len(회), "turnover_pct": sum(t for _f, t in 회) * 100, "adj_pp": adj,
-                  "band_pp": band, "unmeasured_pct": 안잼 * 100, "pi_pp": pi, "pi_missing": pi_없음,
-                  "limit_buy_pct": 지정 / 매수 * 100 if 매수 > 0 else None}  # fmt: skip
+                  "band_pp": band, "measured_pct": 잼 * 100, "unmeasured_pct": 안잼 * 100, "pi_pp": pi,
+                  "pi_missing": pi_없음, "limit_buy_pct": 지정 / 매수 * 100 if 매수 > 0 else None}  # fmt: skip
     return out
 
 
@@ -350,19 +374,36 @@ def adjust_rows(leaderboard: dict[str, Any], adj: dict[str, dict[str, Any]]) -> 
     return out
 
 
-def h_check(perf: dict[str, Any] | None, h_adj: dict[str, Any] | None, h_equity: float | None) -> dict[str, Any] | None:
-    """보정이 맞는지 H 로 대본다 — KIS 실측 손익 차이 vs 칸으로 설명한 몫 (docs/desk.md 8장, 25.1514).
+def h_window(kis_totals: list[tuple[str, float | None]], today: str) -> tuple[str, str] | None:
+    """대보기 기간 (시작, 끝) — 시작 = KIS 총액 첫날, 끝 = **오늘보다 앞선** KIS 총액 마지막 날.
 
-    실측 = (KIS 손익 − 같은 기간 H 손익) ÷ 시작 H 평가 총액(%p). KIS 는 H 주문을 같은 수량으로 베끼므로 손익
-    금액끼리 견준다(15.7). 설명 = −adj + pi(같은 기간으로 다시 잰 H 보정). 차이에는 체결 여부가 갈린 주문(miss·extra)·
-    환율·정리 주문·모름이 섞인다 — 두 달 넘게 설명이 실측을 못 따라가면 보정 열을 내린다(handoff)
+    KIS 총액은 국내 아침 배치가 적는다(국내·미국 모두 전 장 종가). 가상 평가 행은 그날 미국 저녁 배치가 덮어써야
+    국내·미국이 같은 장 종가가 된다 — 오늘 행은 아침에는 아직 미국이 하루 늦다(25.1516, 검토 1). 그래서 끝은 어제까지
     """
-    if not perf or not h_adj or not h_equity or perf.get("pnl_krw") is None or perf.get("h_pnl_krw") is None:
+    날 = sorted(d for d, v in kis_totals if v is not None and float(v) > 0)
+    끝 = [d for d in 날 if d < today]
+    return (날[0], 끝[-1]) if 날 and 끝 and 끝[-1] > 날[0] else None
+
+
+def h_check(
+    *, start: str, end: str, kis0: float, kis1: float, h_pnl0: float, h_pnl1: float, h_equity0: float,
+    h_adj: dict[str, Any], pre_link: int,
+) -> dict[str, Any] | None:
+    """보정이 맞는지 H 로 대본다 — KIS 실측 손익 차이 vs 칸으로 설명한 몫 (docs/desk.md 8장, 25.1514·25.1516).
+
+    실측 = ((KIS 끝 − 시작 총액) − (H 끝 − 시작 평가손익)) ÷ 시작 H 평가 총액(%p).
+    KIS 는 H 주문을 같은 수량으로 베끼므로 손익 금액끼리 견준다(15.7).
+    설명 = −adj + pi — `h_adj` 는 같은 기간(시작 ≤ 체결일 < 끝)으로 다시 잰 H 보정.
+    `pre_link` = 시작일에 H 가 들고 KIS 에 없던 종목 수 — 그 종목의 시세 변동은 H 에만 있어 실측을 흔든다
+    (판정에서 뺀다).
+    그 밖에 체결 여부가 갈린 주문(miss·extra)·환율·정리 주문·모름이 섞인다 — 두 달 넘게 설명이 실측을 못 따라가면
+    보정 열을 내린다(handoff)
+    """
+    if h_equity0 <= 0:
         return None
-    실측 = (float(perf["pnl_krw"]) - float(perf["h_pnl_krw"])) / float(h_equity) * 100
-    return {"from": perf.get("start"), "to": perf.get("last"), "actual_pp": 실측,
-            "explained_pp": -h_adj["adj_pp"] + h_adj["pi_pp"], "band_pp": h_adj["band_pp"],
-            "unmeasured_pct": h_adj["unmeasured_pct"]}  # fmt: skip
+    실측 = ((kis1 - kis0) - (h_pnl1 - h_pnl0)) / h_equity0 * 100
+    return {"from": start, "to": end, "actual_pp": 실측, "explained_pp": -h_adj["adj_pp"] + h_adj["pi_pp"],
+            "band_pp": h_adj["band_pp"], "unmeasured_pct": h_adj["unmeasured_pct"], "pre_link": pre_link}  # fmt: skip
 
 
 def risk_board(

@@ -40,6 +40,8 @@ export interface QualityRow {
 export interface Cell {
   n: number; days: number; both: number; internal_only: number; kis_only: number; neither: number; unknown: number;
   miss: number | null; extra: number | null; n_price: number; excess: number | null; median: number | null; se: number | null;
+  /** 보정에 쓰는 잣대(거래일·excess·se) — 배치가 적는다. 25.1516 전 줄에는 없어 거래일로만 본다 */
+  measured?: boolean;
 }
 export const CELL_LABEL: Record<string, string> = {
   buy_market: "시장가 매수",
@@ -65,7 +67,7 @@ export function cellRows(r: QualityRow | undefined): Array<{ key: string; label:
   return Object.entries(c)
     .filter(([, v]) => v && typeof v === "object")
     .sort(([a], [b]) => (순서.indexOf(a) < 0 ? 99 : 순서.indexOf(a)) - (순서.indexOf(b) < 0 ? 99 : 순서.indexOf(b)) || a.localeCompare(b))
-    .map(([key, cell]) => ({ key, label: CELL_LABEL[key] ?? key, cell, measured: Number(cell.days) >= CELL_MIN_DAYS }));
+    .map(([key, cell]) => ({ key, label: CELL_LABEL[key] ?? key, cell, measured: cell.measured ?? Number(cell.days) >= CELL_MIN_DAYS }));
 }
 
 /** 장부 가정 넘는 비용 — "+0.20% ±0.06 (중앙 +0.18, 가격 n=34)". 지정가 매수는 가격 개선이라 음수가 정상 */

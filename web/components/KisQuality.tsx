@@ -92,7 +92,7 @@ function CellTable({ rows }: { rows: ReturnType<typeof cellRows> }) {
             <tr key={key} className={measured ? "" : "text-slate-400"}>
               <td className="py-1">
                 {label}
-                {measured ? null : <span className="block text-[10px]">표본 적음(거래일 {CELL_MIN_DAYS}일 전)</span>}
+                {measured ? null : <span className="block text-[10px]">아직 안 잰 칸(거래일 {CELL_MIN_DAYS}일·가격 표본 둘 이상 전)</span>}
               </td>
               <td className="text-right">
                 {cell.days}일 · {cell.n}

@@ -22,7 +22,21 @@ from batch.core import db
 from batch.jobs import broker_mirror as bmj
 from batch.services import desk
 
-TWR_SQL = "SELECT account_id, as_of, twr_index, recon_ok, equity_krw FROM paper_daily ORDER BY account_id, as_of"
+TWR_SQL = (
+    "SELECT account_id, as_of, twr_index, recon_ok, equity_krw, pnl_krw FROM paper_daily ORDER BY account_id, as_of"
+)
+#: 대보기(25.1516) — KIS 계좌 전체 원화 총액 계열(국내 줄, 하루 한 행)
+KIS_TOTALS_SQL = (
+    "SELECT as_of, json_extract(summary_json, '$.account_krw.total_krw') AS total FROM paper_broker_daily"
+    " WHERE broker = ? ORDER BY as_of"
+)
+#: 대보기 시작일에 KIS 가 든 종목 — 그날 이하 마지막 잔고 줄(국내·미국)
+KIS_HOLD_AT_SQL = (
+    "SELECT holdings_json FROM paper_broker_daily WHERE broker = ? AND as_of <= ? ORDER BY as_of DESC LIMIT 1"
+)
+H_POS_AT_SQL = (
+    "SELECT positions_json FROM paper_daily WHERE account_id = ? AND as_of <= ? ORDER BY as_of DESC LIMIT 1"
+)
 #: 체결 보정(25.1514) — 순위 구간 체결에 주문 유형·판정 잣대·지정가·그날 시가를 붙인다
 #: (체결 색인 (account_id, fill_date), 시세 유일 색인 (stock_id, date)). 시작부터 누적이라 1년이면 수천 행 —
 #: 커지면 계좌별 합계만 SQL 로 낸다
@@ -40,12 +54,14 @@ LATEST_SQL = (
 STOCK_NAMES_SQL = (
     "SELECT id, COALESCE(name_ko, name_en, ticker) AS name FROM stocks WHERE id IN (SELECT value FROM json_each(?))"
 )
-#: 관문 — 최근 창의 일일 배치 실패 수(색인 job_name, started_at)
-#: 실전 준비 목록 — 최근 창의 일일 배치 늦음(색인 job_name, started_at)
+#: 실전 준비 목록 — 최근 창의 일일 배치 늦음(색인 job_name, started_at). 분모는 **지연을 잰 실행만**
+#: (`COUNT(delay_seconds)`) — 손 실행·예약 없는 실행·정리된 실행은 지연이 비어 "N회 중" 을 부풀렸다(25.1516, 검토 6)
 BATCH_DELAY_SQL = (
-    "SELECT COUNT(*) AS n, SUM(CASE WHEN delay_seconds > ? THEN 1 ELSE 0 END) AS late, MAX(delay_seconds) AS max_delay"
+    "SELECT COUNT(delay_seconds) AS n, SUM(CASE WHEN delay_seconds > ? THEN 1 ELSE 0 END) AS late,"
+    " MAX(delay_seconds) AS max_delay"
     " FROM batch_runs WHERE job_name IN (?, ?) AND started_at >= ? AND status != 'running'"
 )
+#: 관문 — 최근 창의 일일 배치 실패 수(색인 job_name, started_at)
 BATCH_FAILED_SQL = (
     "SELECT COUNT(*) FROM batch_runs WHERE job_name IN (?, ?) AND started_at >= ? AND status = 'failed'"
 )
@@ -99,28 +115,32 @@ REASON_CHARS = 80
 
 def _기초(client: Any) -> tuple[dict[str, list[tuple[str, float]]], set[str], list[dict[str, Any]], dict[str, Any]]:
     """평가 계열·검산 어긋난 날·계좌·순위 — 운용 요약과 아침 운용 보고가 같이 쓴다"""
-    계열, 검산틀린날, 계좌들, 순위, _평가 = _기초_평가(client)
+    계열, 검산틀린날, 계좌들, 순위, _평가, _손익 = _기초_평가(client)
     return 계열, 검산틀린날, 계좌들, 순위
 
 
 def _기초_평가(
     client: Any,
 ) -> tuple[dict[str, list[tuple[str, float]]], set[str], list[dict[str, Any]], dict[str, Any],
-           dict[str, list[tuple[str, float]]]]:  # fmt: skip
-    """`_기초` + 계좌마다 원화 평가 총액 계열(체결 보정의 회전율 분모, 25.1514) — 같은 한 번의 읽기"""
+           dict[str, list[tuple[str, float]]], dict[str, list[tuple[str, float]]]]:  # fmt: skip
+    """`_기초` + 계좌마다 원화 평가 총액 계열(체결 보정의 회전율 분모, 25.1514)·평가손익 계열(대보기, 25.1516)
+    — 같은 한 번의 읽기"""
     계열: dict[str, list[tuple[str, float]]] = {}
     평가: dict[str, list[tuple[str, float]]] = {}
+    손익: dict[str, list[tuple[str, float]]] = {}
     검산틀린날: set[str] = set()
     for r in client.execute(TWR_SQL).dicts():
         if r["twr_index"] is not None:
             계열.setdefault(str(r["account_id"]), []).append((str(r["as_of"]), float(r["twr_index"])))
         if r.get("equity_krw") is not None:
             평가.setdefault(str(r["account_id"]), []).append((str(r["as_of"]), float(r["equity_krw"])))
+        if r.get("pnl_krw") is not None:
+            손익.setdefault(str(r["account_id"]), []).append((str(r["as_of"]), float(r["pnl_krw"])))
         if r.get("recon_ok") == 0:
             검산틀린날.add(str(r["as_of"]))
     계좌들 = client.execute(NAMES_SQL).dicts()
     이름 = {str(r["id"]): str(r["name"] or r["id"]) for r in 계좌들}
-    return 계열, 검산틀린날, 계좌들, desk.leaderboard(계열, 이름), 평가
+    return 계열, 검산틀린날, 계좌들, desk.leaderboard(계열, 이름), 평가, 손익
 
 
 def _시장칸(
@@ -207,7 +227,7 @@ def write(
     """그날 운용 요약을 합쳐 적고, 실행 기록에 넣을 건수를 돌려준다."""
     as_of = now.astimezone(cal.market_tz("KR")).date().isoformat()
     지금 = now.astimezone(UTC).isoformat()
-    계열, 검산틀린날, 계좌들, 순위, 평가 = _기초_평가(client)
+    계열, 검산틀린날, 계좌들, 순위, 평가, 손익 = _기초_평가(client)
     h = bmj.MIRROR_ACCOUNT
     시장칸 = _시장칸(client, market, 지금, trade_date=trade_date, session_date=session_date, step_log=step_log,
                  warnings=warnings)  # fmt: skip
@@ -228,7 +248,7 @@ def write(
           **관문판,
           "kis_account": {"as_of": kis[0]["as_of"] if kis else None, "account_krw": 요약.get("account_krw"),
                           "perf": 요약.get("perf")},
-          **_보정판(client, 순위, 평가, h, 요약, 요약_us)}  # fmt: skip
+          **_보정판(client, 순위, 평가, 손익, h, 요약, 요약_us, as_of)}  # fmt: skip
     앞 = client.execute(DESK_READ_SQL, [as_of]).rows
     그날 = _json(앞[0][0]) if 앞 else None
     if 그날 is None:
@@ -258,39 +278,66 @@ def _칸합침(client: Any, 요약: dict[str, Any], 요약_us: dict[str, Any]) -
 
 
 def _보정판(
-    client: Any, 순위: dict[str, Any], 평가: dict[str, list[tuple[str, float]]], h: str,
-    요약: dict[str, Any], 요약_us: dict[str, Any],
+    client: Any, 순위: dict[str, Any], 평가: dict[str, list[tuple[str, float]]],
+    손익: dict[str, list[tuple[str, float]]], h: str, 요약: dict[str, Any], 요약_us: dict[str, Any], 오늘: str,
 ) -> dict[str, Any]:
     """KIS모의 체결 기준 보정(근사·참고, docs/desk.md 8장, 25.1514) — 실패해도 운용 요약은 적는다.
 
-    순위 구간(자리 잡은 계좌는 공통 구간 시작, 갓 연 계좌는 제 개설일)마다 회전율 × KIS 칸. H 는 KIS 성과 기간으로
-    한 번 더 재어 실측 손익 차이와 대본다
+    순위 구간(자리 잡은 계좌는 공통 구간 시작, 갓 연 계좌는 제 개설일)마다 회전율 × KIS 칸. H 는 대보기 기간
+    (`desk.h_window` — 끝은 어제까지, 25.1516)으로 한 번 더 재어 실측 손익 차이와 대본다
     """
     from batch.services import broker_mirror as bm
 
-    perf = 요약.get("perf")
     try:
         칸 = _칸합침(client, 요약, 요약_us)
         시작 = {str(r["id"]): str(r["open"] if r.get("young") else 순위.get("window_start"))
               for r in 순위.get("rows") or [] if r.get("open")}  # fmt: skip
         if not 시작:
             return {"fill_adjust": None, "fill_adjust_error": None}
-        h시작 = str((perf or {}).get("start") or "")
-        아래 = min([*시작.values(), *([h시작] if h시작 else [])])
+        총액 = [(str(r["as_of"]), r["total"]) for r in client.execute(KIS_TOTALS_SQL, [bmj.BROKER]).dicts()]
+        창 = desk.h_window(총액, 오늘) if h in 평가 else None
+        아래 = min([*시작.values(), *([창[0]] if 창 else [])])
         체결: dict[str, list[dict[str, Any]]] = {}
         for r in client.execute(ADJ_FILLS_SQL, [아래]).dicts():
             체결.setdefault(str(r["account_id"]), []).append(r)
         보정 = desk.fill_adjust(fills=체결, equity=평가, starts=시작, cells=칸, min_days=bm.CELL_MIN_DAYS)
-        대봄 = None
-        if h시작 and h in 평가:
-            h보정 = desk.fill_adjust(fills=체결, equity=평가, starts={h: h시작}, cells=칸,
-                                   min_days=bm.CELL_MIN_DAYS)[h]  # fmt: skip
-            앞 = [e for d, e in sorted(평가[h]) if d <= h시작]
-            대봄 = desk.h_check(perf, h보정, 앞[-1] if 앞 else None)
+        대봄 = _대보기(client, h, 창, dict(총액), 평가, 손익, 체결, 칸) if 창 else None
         return {"fill_adjust": {"rows": desk.adjust_rows(순위, 보정), "h_check": 대봄, "min_days": bm.CELL_MIN_DAYS},
                 "fill_adjust_error": None}  # fmt: skip
     except Exception as exc:  # noqa: BLE001 — 곁다리 안의 곁다리
         return {"fill_adjust": None, "fill_adjust_error": f"{type(exc).__name__}: {str(exc)[:120]}"}
+
+
+def _마지막(v: list[tuple[str, float]], d: str) -> float | None:
+    앞 = [x for a, x in sorted(v) if a <= d]
+    return 앞[-1] if 앞 else None
+
+
+def _대보기(
+    client: Any, h: str, 창: tuple[str, str], 총액: dict[str, Any], 평가: dict[str, list[tuple[str, float]]],
+    손익: dict[str, list[tuple[str, float]]], 체결: dict[str, list[dict[str, Any]]], 칸: dict[str, dict[str, Any]],
+) -> dict[str, Any] | None:
+    """H 대보기 (25.1516, 검토 1) — 시작·끝 행의 KIS 총액·H 평가손익, 그 사이(시작 ≤ 체결일 < 끝) 체결로 다시 잰 보정,
+    시작일에 H 가 들고 KIS 에 없던 종목 수"""
+    from batch.services import broker_mirror as bm
+
+    s, e = 창
+    p0, p1, e0 = _마지막(손익.get(h) or [], s), _마지막(손익.get(h) or [], e), _마지막(평가.get(h) or [], s)
+    if p0 is None or p1 is None or not e0:
+        return None
+    h보정 = desk.fill_adjust(fills=체결, equity=평가, starts={h: s}, ends={h: e}, cells=칸,
+                           min_days=bm.CELL_MIN_DAYS)[h]  # fmt: skip
+    줄 = client.execute(H_POS_AT_SQL, [h, s]).rows
+    h종목 = {int(q["stock_id"]) for q in _json_list(줄[0][0] if 줄 else None) if q.get("stock_id") is not None}
+    kis종목: set[int] = set()
+    for 증권사 in (bmj.BROKER, bmj.BROKER_US):
+        k = client.execute(KIS_HOLD_AT_SQL, [증권사, s]).rows
+        for q in json.loads(k[0][0] or "[]") if k else []:
+            sid = q.get("id") if isinstance(q, dict) else (q[0] if isinstance(q, list) and q else None)
+            if isinstance(sid, int):
+                kis종목.add(sid)
+    return desk.h_check(start=s, end=e, kis0=float(총액[s]), kis1=float(총액[e]), h_pnl0=p0, h_pnl1=p1, h_equity0=e0,
+                        h_adj=h보정, pre_link=len(h종목 - kis종목))  # fmt: skip
 
 
 def _관문판(

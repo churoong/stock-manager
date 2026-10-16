@@ -91,3 +91,24 @@ describe("KIS 체결 보정 (전략 순위)", () => {
     );
   });
 });
+
+describe("검토 반영 (25.1516)", () => {
+  it("잰 칸 없이 지정가 개선만 — ±0.00 으로 잰 척하지 않는다", () => {
+    expect(adjustText(보정({ adj_pp: 0, band_pp: 0, pi_pp: 0.2, measured_pct: 0, unmeasured_pct: 0, adjusted_pct: 1.2 }))).toEqual({
+      main: "+1.20%",
+      sub: "잰 칸 없음 · 지정가 개선 +0.20%p",
+    });
+    expect(adjustText(보정({ measured_pct: 10 })).sub).toBe("−0.05%p ±0.02 · 지정가 개선 +0.01%p · 안 잰 회전 20%");
+  });
+
+  it("배치가 적은 measured 를 그대로 — 거래일만 넉넉한 칸은 잰 칸이 아니다", () => {
+    const r = { as_of: "d", n: 1, match_pct: null, kept_pct: null, slip_buy: null, slip_sell: null, rejected: null, cells: JSON.stringify({ buy_market: 칸({ days: 25, se: null, measured: false }) }) };
+    expect(cellRows(r)[0].measured).toBe(false);
+  });
+
+  it("대보기 — 연결 전 보유가 섞이면 적는다", () => {
+    expect(adjustCheckText({ from: "a", to: "b", actual_pp: 0, explained_pp: 0, band_pp: 0, unmeasured_pct: 0, pre_link: 2 }, "H")).toContain(
+      "연결 전 보유 2종목이 섞여 실측이 흔들림(판정에서 뺌)",
+    );
+  });
+});

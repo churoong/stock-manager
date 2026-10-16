@@ -416,7 +416,7 @@ export function CompareCard({ data, desk }: { data: Data; desk?: DeskView | null
       </div>
       {desk?.fill_adjust ? (
         <p className="mt-2 text-xs text-slate-500">
-          KIS 체결 보정(근사·참고) = 공통 구간 수익률 − 회전 × KIS모의투자가 잰 &quot;장부 가정을 넘는 체결 비용&quot; + 지정가 매수가 시가로 더 싸게 찼을 몫.
+          KIS 체결 보정(근사·참고) = 순위 수익률(갓 연 계좌는 개설일부터) − 회전 × KIS모의투자가 잰 &quot;장부 가정을 넘는 체결 비용&quot; + 지정가 매수가 시가로 더 싸게 찼을 몫.
           KIS 칸은 거래일 {desk.fill_adjust.min_days}일 이상 쌓인 것만 쓰고 지정가 매수 칸은 쓰지 않습니다. ± 는 칸 값의 불확실성, &quot;안 잰 회전&quot; 이 크면 보정이
           말해 주는 것이 적습니다. KIS모의투자도 실제 시장과 다르고, 순위는 바꾸지 않습니다.
           {adjustCheckText(desk.fill_adjust.h_check, desk.mirror_account ?? "H") ? (
