@@ -3,7 +3,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { championText, evidenceText, gateNowText } from "@/lib/desk";
+import { championText, evidenceText, gateNowText, preregText } from "@/lib/desk";
 
 describe("결정 단위 선정 증거", () => {
   it("관문 칸 글", () => {
@@ -19,5 +19,15 @@ describe("결정 단위 선정 증거", () => {
     expect(evidenceText({ ...r, evidence_diff: { n_blocks: 5, mean: 1.2, lower: -0.4, alpha: 0.01 } })).toBe(" · 결정 단위 +1.20%p(하한 -0.40, 묶음 5)");
     expect(evidenceText({ ...r, evidence_diff: { n_blocks: 2, alpha: 0.01 } })).toBe(" · 결정 단위 근거 부족(묶음 2)");
     expect(championText(r, "H")).toBe("C · 블록 3개 중 3개 이김 · 같은 기간 +12.00% (H +6.00%) · 2026-01-01부터");
+  });
+});
+
+describe("판 사전 등록 (25.1520)", () => {
+  it("가설 한 줄·등록 없음·옛 요약", () => {
+    const r = { version: 1, from: "", to: null, orders: 1, pct: 1, control_pct: 0, vs_r_pp: 1 };
+    expect(preregText({ ...r, prereg: { hypothesis: "가", metric: "나", retro: true } })).toBe("가설: 가 · 판정: 나 (장치 전에 연 판 — 나중에 적음)");
+    expect(preregText({ ...r, prereg: { hypothesis: "가", metric: "나" } })).toBe("가설: 가 · 판정: 나");
+    expect(preregText({ ...r, prereg: null })).toContain("사전 등록 없음");
+    expect(preregText(r)).toBeNull();
   });
 });

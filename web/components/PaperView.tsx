@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import CriteriaTable from "@/components/CriteriaTable";
 import EquityChart, { type Series } from "@/components/EquityChart";
 import Link from "next/link";
-import { DESK_RULES, MARKET_LABEL, adjustCheckText, adjustText, championText, pctText as deskPct, ppText, ruleSpanText, rowsById, type DeskView, type RuleSpan } from "@/lib/desk";
+import { DESK_RULES, MARKET_LABEL, adjustCheckText, adjustText, championText, pctText as deskPct, ppText, preregText, ruleSpanText, rowsById, type DeskView, type RuleSpan } from "@/lib/desk";
 import { bodyOf, readJson } from "@/lib/http";
 import {
   DEPOSIT_MAX_KRW,
@@ -795,6 +795,7 @@ export function RulesPane({ a, spans, asOf }: { a: Account; spans: RuleSpan[] | 
           {spans.map((r) => (
             <li key={r.version} className={r.vs_r_pp == null ? "" : tone(r.vs_r_pp)}>
               {ruleSpanText(r)}
+              {preregText(r) ? <span className="block text-[11px] text-slate-500">{preregText(r)}</span> : null}
             </li>
           ))}
         </ul>

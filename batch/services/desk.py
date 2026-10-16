@@ -92,7 +92,7 @@ def rule_history(
     `versions` = 판 이력 표의 (계좌, 판, since). 한 판의 구간은 since 결정일 종가부터 다음 판 since 결정일 종가까지
     (지금 판이면 마지막 평가까지) — 그 판의 첫 결정이 처음 들어간 장부터 다음 판이 바꾸기 전까지의 시간가중 수익률이다.
     `from` 이 '' 면 계좌의 처음부터. 같은 구간 무작위 대조 R1·R2 평균과 그 차(%p)를 함께 — 판을 바꾼 뒤 나아졌는지를
-    운과 가른다. `orders` = {(계좌, 판): 주문 수} — 없으면 None
+    운과 가른다. `orders` = {(계좌, 판): 주문 수} — 없으면 None. `prereg` = 그 판의 사전 등록(25.1520)
     """
     판들: dict[str, list[tuple[str, int]]] = {}
     for a, ver, since in versions:
@@ -106,11 +106,47 @@ def rule_history(
             pct = _판구간(sorted(series.get(a) or []), since, 끝)
             대조 = [x for r in CONTROL_IDS if (x := _판구간(sorted(series.get(r) or []), since, 끝)) is not None]
             기준선 = sum(대조) / len(대조) if 대조 else None
-            out[a].append({"version": ver, "from": since, "to": 끝,
+            out[a].append({"version": ver, "from": since, "to": 끝, "prereg": prereg(a, ver),
                            "orders": None if orders is None else orders.get((a, ver), 0), "pct": pct,
                            "control_pct": 기준선, "vs_r_pp": None if pct is None or 기준선 is None or a in CONTROL_IDS
                            else pct - 기준선})  # fmt: skip
     return out
+
+
+# ── 판 사전 등록 (docs/paper.md 2.5, 25.1520) ─────────────────────────────────────────────────────
+
+#: 판마다 **바꾸기 전에** 적는 가설·잴 지표·판정 시점. 판을 올리는 마이그레이션과 같은 커밋에 한 줄을 더한다 —
+#: tests/test_selection_evidence_1518.py 가 계좌 표의 지금 판이 모두 여기 있는지 본다(없으면 그 커밋이 깨진다).
+#: 결과를 보고 가설을 고쳐 쓰면 운을 실력으로 읽는다 — 한 번 적은 줄은 고치지 않고 새 판에 새 줄. `retro` = 이 장치 전에
+#: 연 판을 나중에 적은 것(사전 등록이 아니다). 시도 횟수 = 판 수 — 많이 바꿀수록 같은 성적도 덜 믿는다
+PREREG: dict[tuple[str, int], dict[str, Any]] = {
+    ("A", 1): {"hypothesis": "판 1 — 매도 규칙 하나만 다른 짝(A−B 황색 매도 등, docs/paper.md 1장)", "retro": True},
+    ("C", 1): {"hypothesis": "판 1 — 매도 규칙 하나만 다른 짝(docs/paper.md 1장)", "retro": True},
+    ("D", 1): {"hypothesis": "판 1 — 매도 규칙 하나만 다른 짝(기간 매도, docs/paper.md 1장)", "retro": True},
+    ("E", 1): {"hypothesis": "판 1 — 매도 규칙 하나만 다른 짝(docs/paper.md 1장)", "retro": True},
+    ("A", 2): {"hypothesis": "가치투자사 헌장(docs/company.md)으로 고른 종목이 같은 날 안 산 새 후보보다 더 오른다",
+               "retro": True},
+    ("C", 2): {"hypothesis": "모멘텀투자사 헌장으로 고른 종목이 같은 날 안 산 새 후보보다 더 오른다", "retro": True},
+    ("D", 2): {"hypothesis": "장기보유투자사 헌장 — 덜 팔고 오래 들어 비용을 아끼면 기준(B)보다 낫다",
+               "retro": True},
+    ("E", 2): {"hypothesis": "안정투자사 헌장 — 낙폭을 줄여 변동성 대비 수익이 기준(B)보다 낫다", "retro": True},
+    ("B", 1): {"hypothesis": "기준 — 아침 리포트 2부(점수 상위 배분)를 그대로 사면 무작위 대조(R)와 지수보다 낫다",
+               "retro": True},
+    ("G", 1): {"hypothesis": "목표가 뒤 추세를 따라 파는 것이 목표에서 전량 파는 것(B)보다 낫다", "retro": True},
+    ("H", 1): {"hypothesis": "회사들의 성적 가중 합의로 고르면 점수 상위 5(G)보다 낫다 — 실전 후보(KIS 가 베낌)",
+               "retro": True},
+    ("R1", 1): {"hypothesis": "대조 — 가설 없음(같은 유니버스에서 무작위로 고르면 이만큼은 난다는 기준선)",
+                "retro": True},
+    ("R2", 1): {"hypothesis": "대조 — 가설 없음(R1 과 다른 씨앗의 무작위)", "retro": True},
+}
+#: 사전 등록 판의 공통 지표·판정 — 판마다 다르면 줄에 `metric`·`judge` 를 따로 적는다
+PREREG_METRIC = "결정 단위 선정 하한 > 50(28일 묶음 6개 뒤) · 관문 구간 지수 대비 > 0 · R 대비 > 0"
+
+
+def prereg(account: str, version: int) -> dict[str, Any] | None:
+    """그 판의 사전 등록 — 없으면 None(등록 없이 연 판 — 화면이 "사전 등록 없음" 으로 보인다)"""
+    x = PREREG.get((account, version))
+    return None if x is None else {"metric": PREREG_METRIC, **x}
 
 
 # ── 실전 전환 관문 · 위험판 · 챔피언 교체 후보 (docs/desk.md 6장, 25.1508·25.1511) ──────────────────────────────

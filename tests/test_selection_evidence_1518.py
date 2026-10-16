@@ -131,3 +131,27 @@ def test_gate_vs_index_item() -> None:
     지 = 칸(1200.0)
     assert 지["vs_r"]["ok"] and not 지["vs_index"]["ok"] and 지["vs_index"]["index_pct"] == pytest.approx(20.0)
     assert desk.gate(s, "H", recon_bad_days=0, batch_failed=0, kis=None)["items"][2]["now"] is None  # 그림자 없음 → 모름
+
+
+# ── 판 사전 등록 (25.1520) ──────────────────────────────────────────────────
+
+
+def test_every_current_rule_version_is_preregistered() -> None:
+    """계좌 표(마이그레이션)의 지금 판이 모두 사전 등록에 있다 — 판을 올리는 커밋이 가설을 같이 적지 않으면 여기서 깨진다"""
+    from batch.services import desk
+    from tests.test_paper_job_1445 import Client
+
+    c = Client(accounts=None, charters=True)
+    빠짐 = [(a, v) for a, v in c.q("SELECT id, rule_version FROM paper_accounts") if (str(a), int(v)) not in desk.PREREG]
+    assert not 빠짐, f"사전 등록 없는 판: {빠짐} — batch/services/desk.py PREREG 에 가설을 적는다(docs/paper.md 2.5)"
+    for x in desk.PREREG.values():
+        assert x.get("hypothesis")
+
+
+def test_rule_history_carries_prereg() -> None:
+    from batch.services import desk
+
+    h = desk.rule_history([("H", 1, ""), ("Z", 9, "")], {"H": [("2026-01-01", 1.0)], "Z": [("2026-01-01", 1.0)]})
+    assert h["H"][0]["prereg"]["hypothesis"].startswith("회사들의 성적 가중 합의") and h["H"][0]["prereg"]["retro"]
+    assert h["H"][0]["prereg"]["metric"] == desk.PREREG_METRIC
+    assert h["Z"][0]["prereg"] is None  # 등록 없이 연 판

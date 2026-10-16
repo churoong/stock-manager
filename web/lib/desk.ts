@@ -23,6 +23,8 @@ export interface DeskLeaderboard { window_start: string | null; control_pct?: nu
 export interface RuleSpan {
   version: number; from: string; to: string | null; orders: number | null;
   pct: number | null; control_pct: number | null; vs_r_pp: number | null;
+  /** 판 사전 등록(25.1520) — null = 등록 없이 연 판, 없음 = 그 전 요약 */
+  prereg?: { hypothesis: string; metric: string; retro?: boolean } | null;
 }
 export interface DeskCheck { level: "high" | "normal"; text: string }
 export interface DeskFill { side: string; name: string; ticker: string; quantity: number; price: number; currency: string; fill_date?: string }
@@ -250,6 +252,13 @@ export function ruleSpanText(r: RuleSpan): string {
   // from '' = 계좌의 처음부터, 주문 수 null = 셀 수 없었음 (25.1505)
   const 주문 = r.orders == null ? "" : ` · 주문 ${r.orders.toLocaleString("ko-KR")}건`;
   return `판 ${r.version} · ${r.from || "처음"}${끝}${주문} · 시간가중 ${pctText(r.pct)}${대조}`;
+}
+
+/** 판 가설 한 줄 — "가설: … · 판정: …(사후 등록)" / "사전 등록 없음" / 옛 요약이면 null (25.1520) */
+export function preregText(r: RuleSpan): string | null {
+  if (r.prereg === undefined) return null;
+  if (r.prereg === null) return "사전 등록 없음 — 가설 없이 연 판(성적을 덜 믿는다)";
+  return `가설: ${r.prereg.hypothesis} · 판정: ${r.prereg.metric}${r.prereg.retro ? " (장치 전에 연 판 — 나중에 적음)" : ""}`;
 }
 
 /** 순위표 줄을 계좌 id 로 — 계좌 비교 표에 공통 구간·R 대비 칸을 붙일 때 */

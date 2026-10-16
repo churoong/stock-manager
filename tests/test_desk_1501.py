@@ -113,8 +113,11 @@ def test_write_merges_both_markets(monkeypatch: pytest.MonkeyPatch) -> None:
     assert any("장부 검산 어긋남: 계좌 R1" in x["text"] for x in kr["checks"])
     assert [r["id"] for r in s["leaderboard"]["rows"]][0] in ("B", "R1")
     # 판 이력 표를 처음 채운다 — 계좌마다 지금 판, since '' (계좌의 처음부터). B 는 1.0 → 1.02 = +2%, R1 은 0%
-    assert s["rule_history"]["B"] == [{"version": 1, "from": "", "to": None, "orders": 1, "pct": pytest.approx(2.0),
-                                        "control_pct": pytest.approx(0.0), "vs_r_pp": pytest.approx(2.0)}]
+    b = s["rule_history"]["B"]
+    assert [{k: v for k, v in x.items() if k != "prereg"} for x in b] == [
+        {"version": 1, "from": "", "to": None, "orders": 1, "pct": pytest.approx(2.0),
+         "control_pct": pytest.approx(0.0), "vs_r_pp": pytest.approx(2.0)}]  # fmt: skip
+    assert b[0]["prereg"]["hypothesis"].startswith("기준")  # 판 사전 등록(25.1520)
     assert {"A", "B", "H", "R1"} <= s["rule_history"].keys()  # 주문이 없어도 판은 있다
     # 판을 올리면 그 실행의 판정일이 새 판의 since
     c.conn.execute("UPDATE paper_accounts SET rule_version = 2 WHERE id = 'B'")

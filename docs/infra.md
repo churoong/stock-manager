@@ -2567,6 +2567,7 @@ SQL read operations are forbidden (reads are blocked, ...)
 | 25.1517 | 도전자 슬롯·대보기 검토 9건 반영 — 계좌별 비교·분할 종가 문턱·대보기 시작·토큰 리디렉트 |
 | 25.1518 | 결정 단위 선정 증거 — 관문·챔피언이 운으로 통과하지 않게 |
 | 25.1519 | 관문에 지수 대비 칸 — 실전 돈의 기회비용은 R 이 아니라 지수 ETF |
+| 25.1520 | 판 사전 등록 — 판을 올리기 전에 가설을 적고 시험이 강제 |
 
 ### 25.1 왜 D1 인가
 
@@ -33764,3 +33765,17 @@ KOSPI200·S&P500 ETF 다(docs/etf.md 장기 적립).
 - 25.1518 의 반박 검증 에이전트는 사용자 중단으로 취소 — 가장 위험한 가정(H 가 같은 날 후보를 skip 으로 남기나)은 코드로 확인해 25.1518 절에 적었다
 
 **되돌려 확인**: 입금 차이 빼기를 없애면 `test_index_return_by_hand_with_deposit`, 지수 칸을 늘 통과로 두면 `test_gate_vs_index_item` 이 깨진다.
+
+### 25.1520 판 사전 등록 — 판을 올리기 전에 가설을 적고 시험이 강제
+
+handoff "실전 수익 쪽 다음 후보" 1번 뒤쪽(사전 등록). **모의투자에 무엇이 낫나**: 규칙을 성적 보고 자꾸 고치면 여러 번 시도한 것 중 운 좋은 것만 남는다 —
+판마다 가설을 먼저 적게 해 실전에 옮길 전략의 근거를 덜 부풀린다.
+
+**한 것**
+- `services/desk.PREREG`(계좌, 판) → 가설, 공통 판정 `PREREG_METRIC`(결정 단위 선정 하한 > 50 · 지수 대비 > 0 · R 대비 > 0), `prereg()`. 판 이력 줄마다 `prereg` 를 붙인다
+- 지금 판 13개(A·C·D·E 판 1·2, B·G·H·R1·R2 판 1)는 이 장치 전에 연 것이라 `retro`(나중에 적음)로 적었다 — 가설은 docs/paper.md 1장 짝 비교·docs/company.md 헌장에서
+- `test_every_current_rule_version_is_preregistered`: 마이그레이션을 적용한 계좌 표의 지금 판이 모두 등록돼 있어야 한다 — 판을 올리는 커밋이 가설 없이 들어오면 깨진다
+- 웹 전략 화면 판 이력 줄 아래 "가설: … · 판정: …"(등록 없이 연 판은 "사전 등록 없음"). 문서 docs/paper.md 2.5
+- 하지 않은 것: H 회사 가중치의 자동 기울기도 시도지만 아직 세지 않는다 `[확인필요]`
+
+**되돌려 확인**: H 판 1 줄을 지우면 `test_every_current_rule_version_is_preregistered`·`test_rule_history_carries_prereg` 가 깨진다. 웹 `selectionEvidence1518.test.ts` "판 사전 등록".
