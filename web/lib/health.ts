@@ -483,7 +483,8 @@ export interface CronExpect {
 export const CRON_EXPECTED: CronExpect[] = [
   { job: "health", market: "ALL", label: "무응답 감시", everyMinutes: 60, when: "always",
     stakes: "이것이 멈추면 **배치가 안 돌아도 알림이 오지 않습니다.** 아침 리포트가 빠진 날을 아무도 모릅니다" },
-  // 1분이던 것을 2026-10-02 사용자 결정으로 매시로 줄였다 (docs/infra.md 25.880)
+  // 1분이던 것을 2026-10-02 사용자 결정으로 매시로 줄였다 (docs/infra.md 25.880). 2026-10-16 사용자가 국내·미국 모두 30분으로 바꿨다 —
+  // 감시 문턱은 60분 그대로(더 자주 불리는 것은 괜찮고, 30분으로 줄이면 한 번 빠진 호출에도 빨갛게 된다)
   { job: "news", market: "US", label: "미국 뉴스 수집", everyMinutes: 60, when: "always",
     stakes: "한 호출에 한 종목씩 받습니다. 멈추면 미국 감성 점수가 옛 기사로 굳습니다" },
   { job: "news", market: "KR", label: "국내 뉴스 수집", everyMinutes: 60, when: "always",

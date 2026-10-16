@@ -931,6 +931,15 @@ class Test이웃_모듈들:
         검사(PAPER, f"켜는 문턱 + {bm.DIVERGE_RECOVER_PP:g}%p(`DIVERGE_RECOVER_PP`)", "괴리 알림 끄는 여유 (25.1507)")
         검사(PAPER, f"켜는 문턱 − {bm.DIVERGE_SLIP_RECOVER_PP:g}%p(`DIVERGE_SLIP_RECOVER_PP`)", "괴리 알림 가격 끄는 여유 (25.1507)")
         검사(PAPER, f"**{bm.CELL_MIN_DAYS}일(`CELL_MIN_DAYS`) 이상**", "체결 칸을 잰 것으로 보는 거래일 (25.1514)")
+        검사(PAPER, f"새 후보가 {pp.EVIDENCE_MIN_POOL}개(`EVIDENCE_MIN_POOL`)보다", "결정 단위 풀 하한 (25.1518)")
+        검사(PAPER, f"{pp.EVIDENCE_BLOCK_DAYS} 달력일(`EVIDENCE_BLOCK_DAYS`)", "결정 단위 묶음 (25.1518)")
+        검사(PAPER, f"묶음이 {pp.EVIDENCE_MIN_BLOCKS}개(`EVIDENCE_MIN_BLOCKS`)", "결정 단위 최소 묶음 (25.1518)")
+        검사(PAPER, f"한쪽 {round((1 - pp.EVIDENCE_ALPHA) * 100)}%(`EVIDENCE_ALPHA`)", "결정 단위 유의수준 (25.1518)")
+        검사(DESK, "50(`GATE_SEL_NULL`", "관문 결정 단위 기준 (25.1518)")
+        assert dk.GATE_SEL_NULL == 50.0
+        검사(DESK, f"묶음이 {dk.GATE_SEL_MIN_BLOCKS}개(`GATE_SEL_MIN_BLOCKS`", "관문 결정 단위 묶음 (25.1518)")
+        검사(DESK, f"묶음 {dk.CHAMPION_EVIDENCE_MIN_BLOCKS}개(`CHAMPION_EVIDENCE_MIN_BLOCKS`)", "챔피언 결정 단위 묶음 (25.1518)")
+        검사(DESK, f"유의수준 {dk.CHAMPION_ALPHA:g}(`CHAMPION_ALPHA`)", "챔피언 유의수준 (25.1518)")
         검사(COMPANY, "서로 다른 회사 **두 곳 이상**이 추천한 종목만 후보", "지주사 합의 조건 (25.1482)")
         assert hold.HOLDING_MIN_VOTERS == 2
         검사(COMPANY, f"세기 = min(표 ÷ 문턱, {hold.HOLDING_STRENGTH_MAX:g})", "지주사 세기 상한 (25.1482)")

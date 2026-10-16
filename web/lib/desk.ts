@@ -46,14 +46,17 @@ export interface DeskKisAccount {
   perf: import("@/lib/kisPaper").KisPerf | null;
 }
 /** 실전 전환 1단계 관문 (docs/desk.md 6장, 25.1508) — 읽기 전용. 넘어도 아무것도 열리지 않는다 */
-export interface GateItem { key: string; label: string; now: number | null; target: number | null; ok: boolean; n?: number; detail?: Record<string, number> }
+export interface GateItem { key: string; label: string; now: number | null; target: number | null; ok: boolean; n?: number; mean?: number | null; detail?: Record<string, number> }
 export interface Gate { stage: number; account: string; version?: number | null; from?: string | null; items: GateItem[]; passed: boolean; next: string }
 
 /**
  * 화면 글에 쓰는 문턱 — `batch/services/desk.py` 의 상수와 같은 값(테스트가 대조, 25.1511 검토 8).
  * 상수를 바꾸면 화면 글만 낡지 않게
  */
-export const DESK_RULES = { RISK_NEAR_STOP_PP: 2, CHAMPION_BLOCK: 20, CHAMPION_MIN_BLOCKS: 3, CHAMPION_WIN_SHARE: 0.67 } as const;
+export const DESK_RULES = {
+  RISK_NEAR_STOP_PP: 2, CHAMPION_BLOCK: 20, CHAMPION_MIN_BLOCKS: 3, CHAMPION_WIN_SHARE: 0.67,
+  GATE_SEL_MIN_BLOCKS: 6, CHAMPION_EVIDENCE_MIN_BLOCKS: 4, CHAMPION_ALPHA: 0.05,
+} as const;
 export interface RiskRow {
   id: string; exposure_pct: number | null; positions: number; top_weight_pct: number | null; top_name: string | null;
   near_stop: Array<{ name: string | null; unrealized_pct: number; stop_pct: number }>; dd_pct: number | null;
@@ -67,7 +70,11 @@ export const READINESS_TEXT: Record<ReadinessItem["status"], string> = {
   todo: "아직",
   user: "사용자 결정·확인",
 };
-export interface ChampionRow { id: string; from: string; blocks: number; wins: number; pct: number | null; champion_pct: number | null; candidate: boolean }
+/** 25.1518 — `blocks_ok` = 블록 규칙, `candidate` = 블록 규칙 + 결정 단위 짝 차이 하한 > 0. 그 전 요약에는 앞의 둘이 없다 */
+export interface ChampionRow {
+  id: string; from: string; blocks: number; wins: number; pct: number | null; champion_pct: number | null; candidate: boolean;
+  blocks_ok?: boolean; evidence_diff?: { n_blocks: number | null; mean?: number | null; lower?: number | null; alpha: number };
+}
 
 /**
  * KIS모의 체결 기준 보정(근사·참고, docs/desk.md 8장, 25.1514) — 배치가 낸 값. 순위는 바꾸지 않는다.
@@ -262,6 +269,9 @@ export function gateNowText(i: GateItem): string {
       return `${i.now.toFixed(3)} / R 평균 ${i.target == null ? "모름" : i.target.toFixed(3)}`;
     case "incidents":
       return `${i.now}건(검산 어긋난 날 ${i.detail?.recon_bad_days ?? "-"} · 배치 실패 ${i.detail?.batch_failed ?? "-"}) / 0`;
+    case "selection":
+      // 결정 단위 선정 — 한쪽 95% 하한 분위(무작위면 50), 평균·묶음 수 (25.1518)
+      return `하한 ${i.now.toFixed(1)}분위(평균 ${i.mean == null ? "-" : i.mean.toFixed(1)}, 28일 묶음 ${i.n ?? 0}) / ${i.target ?? 50} 초과`;
     case "kis":
       // 소수 첫째 자리 — 89.6 이 "90% / 90% 이상" 으로 보이는데 미충족이면 헷갈린다(25.1511 검토 4)
       return `${i.now.toFixed(1)}% (표본 ${i.n ?? 0}) / ${i.target}% 이상`;
@@ -272,7 +282,15 @@ export function gateNowText(i: GateItem): string {
 
 /** 챔피언 교체 후보 한 줄 — "C · 블록 3개 중 3개 이김 · 같은 기간 +12.00% (챔피언 +6.00%) · 2026-01-01부터" */
 export function championText(r: ChampionRow, mirror: string): string {
-  return `${r.id} · 블록 ${r.blocks}개 중 ${r.wins}개 이김 · 같은 기간 ${pctText(r.pct)} (${mirror} ${pctText(r.champion_pct)}) · ${r.from}부터`;
+  return `${r.id} · 블록 ${r.blocks}개 중 ${r.wins}개 이김 · 같은 기간 ${pctText(r.pct)} (${mirror} ${pctText(r.champion_pct)}) · ${r.from}부터${evidenceText(r)}`;
+}
+
+/** 결정 단위 짝 차이 — " · 결정 단위 +1.20%p(하한 −0.40, 묶음 5)" 또는 " · 결정 단위 근거 부족(묶음 2)". 25.1518 전 요약이면 빈 글 */
+export function evidenceText(r: ChampionRow): string {
+  const e = r.evidence_diff;
+  if (!e) return "";
+  if (e.lower == null || e.mean == null) return ` · 결정 단위 근거 부족(묶음 ${e.n_blocks ?? 0})`;
+  return ` · 결정 단위 ${ppText(e.mean)}(하한 ${e.lower >= 0 ? "+" : ""}${e.lower.toFixed(2)}, 묶음 ${e.n_blocks})`;
 }
 
 /**

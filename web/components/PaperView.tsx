@@ -442,7 +442,9 @@ export function CompareCard({ data, desk }: { data: Data; desk?: DeskView | null
           )}
           <p className="mt-1 text-slate-500">
             최근 끝에서부터 겹치지 않는 {DESK_RULES.CHAMPION_BLOCK} 평가 블록 {DESK_RULES.CHAMPION_MIN_BLOCKS}개 이상, 그 가운데 {Math.round(DESK_RULES.CHAMPION_WIN_SHARE * 100)}% 이상 이기고 전체도
-            앞서야 후보입니다. 교체는 사용자 결정 — 후보가 나와도 바꾸지 않습니다.
+            앞서고, <b>결정 단위로도</b> 앞서야(28일 묶음마다 산 종목의 지수 대비 초과를 챔피언과 짝지어, 차이의 한쪽 하한 &gt; 0 — 도전자 수로 유의수준
+            {Math.round(DESK_RULES.CHAMPION_ALPHA * 100)}% 를 나눔, 묶음 {DESK_RULES.CHAMPION_EVIDENCE_MIN_BLOCKS}개 이상) 후보입니다. 블록 규칙만으로는 실력이 없어도 석 달 안에
+            거의 늘 후보가 나왔습니다. 교체는 사용자 결정 — 후보가 나와도 바꾸지 않습니다.
           </p>
         </div>
       ) : null}

@@ -37,10 +37,11 @@ def test_gate_items_and_pass() -> None:
     h = [(d, 1 + 0.001 * i + (0.002 if i % 2 else 0)) for i, d in enumerate(날)]  # 꾸준히 오름
     r = [(d, 1 + (0.01 if i % 2 else -0.01)) for i, d in enumerate(날)]  # 제자리 출렁
     series = {"H": h, "R1": r, "R2": r}
-    g = desk.gate(series, "H", recon_bad_days=0, batch_failed=0, kis={"kept_pct": 92.0, "n": 120})
+    증거 = {"lower": 55.0, "n_blocks": 6, "mean": 62.0}  # 결정 단위 하한도 넘어야 통과(25.1518)
+    g = desk.gate(series, "H", recon_bad_days=0, batch_failed=0, kis={"kept_pct": 92.0, "n": 120}, evidence=증거)
     칸 = {i["key"]: i for i in g["items"]}
     assert 칸["days"]["now"] == 130 and 칸["days"]["ok"]
-    assert 칸["vs_r"]["ok"] and 칸["ratio"]["ok"] and 칸["incidents"]["ok"] and 칸["kis"]["ok"]
+    assert 칸["vs_r"]["ok"] and 칸["ratio"]["ok"] and 칸["incidents"]["ok"] and 칸["kis"]["ok"] and 칸["selection"]["ok"]
     assert g["passed"] and g["account"] == "H" and g["next"].startswith("2단계 손 매매")
     # 하나라도 아니면 통과 아님 — 표본 모자란 실현율·사고 하루·기간 모자람
     assert not desk.gate(series, "H", recon_bad_days=0, batch_failed=0, kis={"kept_pct": 99.0, "n": 99})["passed"]
@@ -56,9 +57,11 @@ def test_gate_own_window_and_current_version() -> None:
     날 = _날(160)
     h = [(d, 1 + 0.001 * i + (0.002 if i % 2 else 0)) for i, d in enumerate(날)]
     r = [(d, 1 + (0.01 if i % 2 else -0.01)) for i, d in enumerate(날)]
-    전 = desk.gate({"H": h, "R1": r, "R2": r}, "H", recon_bad_days=0, batch_failed=0, kis={"kept_pct": 95.0, "n": 200})
+    증거 = {"lower": 55.0, "n_blocks": 6}
+    전 = desk.gate({"H": h, "R1": r, "R2": r}, "H", recon_bad_days=0, batch_failed=0, kis={"kept_pct": 95.0, "n": 200},
+                  evidence=증거)  # fmt: skip
     새계좌 = {"H": h, "R1": r, "R2": r, "I": [(d, 1.0) for d in 날[-20:]]}
-    뒤 = desk.gate(새계좌, "H", recon_bad_days=0, batch_failed=0, kis={"kept_pct": 95.0, "n": 200})
+    뒤 = desk.gate(새계좌, "H", recon_bad_days=0, batch_failed=0, kis={"kept_pct": 95.0, "n": 200}, evidence=증거)
     assert 전["items"] == 뒤["items"] and 뒤["passed"] and 뒤["from"] == 날[0]
     # 판 2 를 날[100] 결정에서 봤다 — 그 뒤 평가 59번만 센다, 비교 구간도 그 뒤부터
     판2 = desk.gate({"H": h, "R1": r, "R2": r}, "H", since=날[100], version=2, recon_bad_days=0, batch_failed=0,
@@ -104,8 +107,9 @@ def test_champion_blocks_by_hand() -> None:
     d_ = [(d, (1 + 0.02 * i) if i <= 20 else (1.4 - 0.0001 * (i - 20))) for i, d in enumerate(날)]
     rows = {r["id"]: r for r in desk.champion({"H": h, "C": c, "D": d_, "R1": c}, "H")}
     assert "R1" not in rows and "H" not in rows
-    assert (rows["C"]["blocks"], rows["C"]["wins"], rows["C"]["candidate"]) == (3, 3, True)
-    assert (rows["D"]["blocks"], rows["D"]["wins"], rows["D"]["candidate"]) == (3, 1, False)
+    # 블록 규칙은 C 만 — 결정 단위 근거가 없으면 후보는 아니다(25.1518)
+    assert (rows["C"]["blocks"], rows["C"]["wins"], rows["C"]["blocks_ok"], rows["C"]["candidate"]) == (3, 3, True, False)
+    assert (rows["D"]["blocks"], rows["D"]["wins"], rows["D"]["blocks_ok"]) == (3, 1, False)
     assert rows["D"]["pct"] > rows["D"]["champion_pct"]  # 전체는 앞섰다
     assert [r["id"] for r in desk.champion({"H": h, "C": c, "D": d_}, "H")][0] == "C"
     # 블록이 모자라면 후보 아님

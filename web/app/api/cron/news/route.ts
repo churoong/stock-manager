@@ -20,8 +20,8 @@ import {
 } from "@/lib/news";
 
 /**
- * 미국 뉴스 수집 (docs/sentiment.md 1장). cron-job.org 가 **매시** 부르고, 한 번에 **한 종목**의 나스닥 RSS 를 받는다.
- * 1분이던 것을 2026-10-02 사용자 결정으로 매시로 줄였다 (docs/infra.md 25.880). 하루 24종목이다.
+ * 미국 뉴스 수집 (docs/sentiment.md 1장). cron-job.org 가 **30분마다** 부르고, 한 번에 **한 종목**의 나스닥 RSS 를 받는다.
+ * 1분이던 것을 2026-10-02 사용자 결정으로 매시로 줄였고(docs/infra.md 25.880), 2026-10-16 사용자가 30분으로 바꿨다. 하루 48종목이다.
  *
  *   GET /api/cron/news   헤더 x-cron-secret: <CRON_SECRET>
  *

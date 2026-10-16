@@ -158,7 +158,8 @@ OUTCOME_BATCH = 900
 #: 성과 분해·부서 성적표가 보는 결정 — **지금 판의 것만**(판 번호가 빈 옛 행은 판 1).
 #: 판 2 회사의 성적에 판 1 결정이 섞이지 않게 (docs/company.md 1장 검증 [필수] 7, 25.1472)
 ATTR_DECISIONS_SQL = (
-    "SELECT stock_id, decided_on, kind, reason, ret_20d, bench_20d, detail_json, control_pct FROM paper_decisions"
+    "SELECT stock_id, market, decided_on, kind, reason, ret_20d, bench_20d, detail_json, control_pct"
+    " FROM paper_decisions"
     " WHERE account_id = ? AND decided_on >= ? AND ret_20d IS NOT NULL AND COALESCE(rule_version, 1) = ?"
 )
 ATTR_FILLS_SQL = (
@@ -610,6 +611,8 @@ def save_attribution(client: Any, aid: str, today: str, rule_version: int = 1) -
     성적 = department_scorecard(결정)
     if 성적:
         a["departments"] = 성적
+    # 결정 단위 선정 증거(docs/paper.md 10.1, 25.1518) — 같은 행으로(읽기 0). 관문·챔피언 비교가 운용 요약에서 읽는다
+    a["evidence"] = pp.selection_evidence(결정)
     _쓰기(client, [(SAVE_ATTR_SQL, [json.dumps(a, ensure_ascii=False), aid, today])])
     return a
 

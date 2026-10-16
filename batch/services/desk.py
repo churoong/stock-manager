@@ -134,6 +134,13 @@ RISK_NEAR_STOP_PP = 2.0
 CHAMPION_BLOCK = 20
 CHAMPION_MIN_BLOCKS = 3
 CHAMPION_WIN_SHARE = 0.67
+#: 결정 단위 선정 증거(docs/paper.md 10.1, 25.1518) — 관문에 쓰려면 이만큼 묶음(28 달력일)이 쌓여야 한다(약 반년)
+GATE_SEL_MIN_BLOCKS = 6
+#: 무작위로 골랐을 때의 분위 — 관문은 한쪽 하한이 이것을 넘어야 한다
+GATE_SEL_NULL = 50.0
+#: 챔피언 교체 — 짝지은 묶음 차이의 최소 공통 묶음 수, 유의수준(여러 도전자를 견주므로 본페로니로 나눈다)
+CHAMPION_EVIDENCE_MIN_BLOCKS = 4
+CHAMPION_ALPHA = 0.05
 
 
 def _수익률들(v: list[tuple[str, float]]) -> list[float]:
@@ -155,7 +162,7 @@ def risk_ratio(v: list[tuple[str, float]], start: str | None = None) -> float | 
 
 def gate(
     series: dict[str, list[tuple[str, float]]], mirror: str, *, since: str = "", version: int | None = None,
-    recon_bad_days: int, batch_failed: int, kis: dict[str, Any] | None,
+    recon_bad_days: int, batch_failed: int, kis: dict[str, Any] | None, evidence: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """실전 전환 1단계 관문 진도 — {stage, account, version, from, items: [{key, label, now, target, ok}], passed,
     next}.
@@ -164,7 +171,8 @@ def gate(
     실전에 옮길 전략이다. `since` = 지금 판을 처음 본 결정일(판 이력, '' = 처음부터) — 그 뒤 평가만 센다
     (판을 섞지 않는다, 25.1511 검토 3). 비교 구간은 **관문 자기 구간** = 지금 판의 첫 평가와 R1·R2 첫 평가 가운데
     가장 늦은 날부터 — 순위표의 공통 구간을 빌리면 새 계좌 하나가 20번째 평가에 닿는 날 관문 판정이 뒤집혔다
-    (25.1511 검토 1). `kis` = {kept_pct, n}(국내·미국 합)
+    (25.1511 검토 1). `kis` = {kept_pct, n}(국내·미국 합). `evidence` = 그 계좌 지금 판의 결정 단위 선정 증거
+    (`paper.selection_evidence`, 25.1518) — "R 대비 > 0" 은 부호 하나라 실력이 없어도 반쯤 통과한다
     """
     전체 = sorted(series.get(mirror) or [])
     v = [p for p in 전체 if not since or p[0] > since]
@@ -177,6 +185,8 @@ def gate(
     대조비 = sum(대조) / len(대조) if 대조 else None
     내비 = risk_ratio(전체, 시작) if 시작 else None
     kept, kn = (kis or {}).get("kept_pct"), int((kis or {}).get("n") or 0)
+    ev = evidence or {}
+    하한, 묶음수 = ev.get("lower"), int(ev.get("n_blocks") or 0)
     판글 = f"지금 판{'' if version is None else f' {version}'}"
     items = [
         {"key": "days", "label": f"모의 기간({판글}의 평가 횟수)", "now": len(v), "target": GATE_MIN_POINTS,
@@ -190,6 +200,10 @@ def gate(
         {"key": "kis", "label": f"KIS 실현율(%, 최근 28일, 표본 {GATE_KEPT_MIN_N} 이상)", "now": kept,
          "target": GATE_KEPT_PCT, "n": kn,
          "ok": kept is not None and kn >= GATE_KEPT_MIN_N and float(kept) >= GATE_KEPT_PCT},
+        {"key": "selection",
+         "label": f"결정 단위 선정 — 같은 날 새 후보 안 분위의 한쪽 95% 하한(28일 묶음 {GATE_SEL_MIN_BLOCKS}개 이상)",
+         "now": 하한, "target": GATE_SEL_NULL, "n": 묶음수, "mean": ev.get("mean"),
+         "ok": 하한 is not None and 묶음수 >= GATE_SEL_MIN_BLOCKS and float(하한) > GATE_SEL_NULL},
     ]  # fmt: skip
     다음 = "2단계 손 매매 준수율·슬리피지 → 3단계 소액 승인형 → 4단계 한도 내 자동 — 단계마다 사용자 결정"
     return {"stage": 1, "account": mirror, "version": version, "from": 시작, "items": items,
@@ -451,13 +465,20 @@ def risk_board(
     return out
 
 
-def champion(series: dict[str, list[tuple[str, float]]], mirror: str) -> list[dict[str, Any]]:
+def champion(
+    series: dict[str, list[tuple[str, float]]], mirror: str, evidence: dict[str, dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     """챔피언 교체 후보 — 지금 챔피언(`mirror`, KIS 가 베끼는 계좌)을 **꾸준히** 앞서는 전략.
 
     계좌마다 챔피언과 둘 다 평가가 있는 날만 맞춰, 가장 최근 끝에서부터 겹치지 않는 `CHAMPION_BLOCK` 평가 블록으로
     나눠 블록마다 수익을 견준다.
     후보 = 블록 `CHAMPION_MIN_BLOCKS` 개 이상 · 이긴 블록 비율 `CHAMPION_WIN_SHARE` 이상 · 맞춘 기간 전체 수익도 앞섬.
-    한 번 크게 이긴 것이 아니라 여러 구간에서 이겼는지를 본다. 무작위 대조는 뺀다. 교체는 사용자 결정
+    한 번 크게 이긴 것이 아니라 여러 구간에서 이겼는지를 본다. 무작위 대조는 뺀다. 교체는 사용자 결정.
+
+    **결정 단위 근거도 있어야 후보다**(25.1518) — 블록 규칙만으로는 실력이 없는 도전자 여럿 가운데 석 달 안에 거의 늘
+    "후보" 가 나왔다. `evidence` = {계좌: 선정 증거}의 28일 묶음별 산 종목 20 거래일 지수 대비 초과(`excess_blocks`)를
+    챔피언과 **같은 묶음끼리 짝지어** 차이의 한쪽 하한을 낸다. 여러 도전자를 한꺼번에 보므로 유의수준을 도전자 수로
+    나눈다(본페로니). `blocks_ok` = 예전 블록 규칙, `candidate` = 블록 규칙 그리고 결정 단위 하한 > 0
     """
     h = dict(sorted(series.get(mirror) or []))
     out = []
@@ -477,9 +498,25 @@ def champion(series: dict[str, list[tuple[str, float]]], mirror: str) -> list[di
         후보 = (len(블록) >= CHAMPION_MIN_BLOCKS and 이김 / len(블록) >= CHAMPION_WIN_SHARE
               and 전체 is not None and 챔 is not None and 전체 > 챔)  # fmt: skip
         out.append({"id": a, "from": 날[0], "blocks": len(블록), "wins": 이김, "pct": 전체, "champion_pct": 챔,
-                    "candidate": 후보})  # fmt: skip
+                    "blocks_ok": 후보, "candidate": 후보})  # fmt: skip
+    _결정근거(out, mirror, evidence or {})
     return sorted(out, key=lambda r: (not r["candidate"], -(r["wins"] / r["blocks"] if r["blocks"] else 0),
                                       -((r["pct"] or 0) - (r["champion_pct"] or 0))))  # fmt: skip
+
+
+def _결정근거(rows: list[dict[str, Any]], mirror: str, evidence: dict[str, dict[str, Any]]) -> None:
+    """챔피언 후보 줄마다 결정 단위 짝 차이(`evidence_diff`)를 붙이고 `candidate` 를 그것까지로 좁힌다"""
+    from batch.services.paper import block_bound
+
+    챔 = (evidence.get(mirror) or {}).get("excess_blocks") or {}
+    n = max(len(rows), 1)
+    for r in rows:
+        내 = (evidence.get(r["id"]) or {}).get("excess_blocks") or {}
+        차 = {int(k): float(내[k]) - float(챔[k]) for k in 내 if k in 챔}
+        b = block_bound(차, CHAMPION_ALPHA / n) if len(차) >= CHAMPION_EVIDENCE_MIN_BLOCKS else {"n_blocks": len(차)}
+        r["evidence_diff"] = {"n_blocks": b.get("n_blocks"), "mean": b.get("mean"), "lower": b.get("lower"),
+                              "alpha": CHAMPION_ALPHA / n}  # fmt: skip
+        r["candidate"] = bool(r["blocks_ok"] and b.get("lower") is not None and float(b["lower"]) > 0)
 
 
 #: KIS 단계가 주문을 안 보낸 까닭 가운데 정상인 것 — 확인할 일에 넣지 않는다

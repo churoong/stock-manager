@@ -2565,6 +2565,7 @@ SQL read operations are forbidden (reads are blocked, ...)
 | 25.1515 | KIS모의투자 도전자 — 둘째 모의 계좌 슬롯(키 없으면 꺼짐) |
 | 25.1516 | 체결 보정·준비 목록 검토 7건 반영 — 대보기 시점·연결 전 보유·분할 시가·늦은 지정가 |
 | 25.1517 | 도전자 슬롯·대보기 검토 9건 반영 — 계좌별 비교·분할 종가 문턱·대보기 시작·토큰 리디렉트 |
+| 25.1518 | 결정 단위 선정 증거 — 관문·챔피언이 운으로 통과하지 않게 |
 
 ### 25.1 왜 D1 인가
 
@@ -33725,3 +33726,25 @@ docs/paper.md 14장 "실주문을 켜기 전에 갖출 것" 일곱 항목을 운
 **되돌려 확인**: 비교 SQL 계좌 조건을 빼면 `test_switch_keeps_compare_apart_and_cleanup_row_names_buyer`·`test_cells_sql_books_slippage_pct`, `hold_send` 를 끄면
 `test_hold_send_follows_main`, 종가 문턱을 빼면 `test_fill_adjust_end_split_guard_and_late_limit_buy`, 오래됨 검사를 빼면 `test_desk_challenger_cells_freshness_and_measured_first` 가 깨진다.
 `test_h_check_start_skips_pre_link_days`·`test_cells_keep_late_limit_buys_and_token_no_redirect`·`test_h_window_ends_before_today`(미국 배치 끝난 날).
+
+### 25.1518 결정 단위 선정 증거 — 관문·챔피언이 운으로 통과하지 않게
+
+2026-10-16 사용자 지시("실전투자를 통한 수익 창출 … 딥하게")에 따라 handoff "실전 수익 쪽 다음 후보" 1번. **모의투자에 무엇이 낫나**: 실전 전환 관문·챔피언 교체가
+운으로 통과하지 않게 — 실전에 돈을 넣을 근거의 정확성(우선순위 ②, 실전 손실 위험을 직접 줄인다).
+
+**문제**: 관문의 "R 대비 > 0" 은 계좌 곡선 하나의 부호라 실력이 없어도 약 50% 통과, 챔피언 블록 규칙(20평가 블록 2/3 승 + 전체 앞섬)은 도전자 여럿이면 석 달 안에 거의 늘 후보를 낸다.
+R 대비 추적오차를 연 20~25% 로 어림하면 반년에 t=2 를 넘으려면 연 60% 초과가 필요하다(어림 `[확인필요]` — 반박 검증 에이전트 계산).
+
+**한 것**
+- `services/paper.selection_evidence`: 같은 날·같은 시장 새 후보(성과 분해 "선정" 의 안 낸 새 후보) 안 산 종목 분위 → 28 달력일 묶음 평균 → 한쪽 95% 하한(t 분위는
+  Cornish–Fisher 네 항 근사 `t_quantile` — scipy 없이, t 표와 0.5% 안). 묶음마다 산 종목 20 거래일 지수 대비 초과(`excess_blocks`)도. 성과 분해와 같은 행을 읽는다
+  (`ATTR_DECISIONS_SQL` 에 `market` 만 더함 — 읽기 0), `attribution_json.evidence` 에 적는다
+- 관문 새 칸 "결정 단위 선정": 하한 > 50 · 묶음 6개 이상(약 반년). 통과가 더 어려워진다(보수적)
+- 챔피언: 같은 묶음끼리 짝지은 초과 차이의 한쪽 하한 > 0(묶음 4개 이상, 유의수준 0.05 ÷ 도전자 수 — 본페로니)이어야 `candidate`. 블록 규칙만 넘은 것은 `blocks_ok`
+- 운용 요약은 `LATEST_SQL` 에 `attribution_json` 을 더해 마지막 평가 행에서 읽는다. 웹: 관문 칸 글·챔피언 줄 "결정 단위 +x%p(하한 y, 묶음 n)"·설명 글
+- 문서 docs/paper.md 10.1, docs/desk.md 6장
+
+**설계 반박 검증**: 별도 에이전트가 진행 중 — 결과는 다음 25.x 에 반영한다(되돌릴 수 있는 문턱·통계량 선택).
+
+**되돌려 확인**: 새 후보 거르기를 빼면 `test_selection_evidence_same_day_pool`, 관문 묶음 수 조건을 빼면 `test_gate_selection_item`, 챔피언 결정 단위 조건·본페로니를 빼면
+`test_champion_needs_paired_decision_evidence_with_bonferroni` 가 깨진다. `test_t_quantile_matches_table`·`test_block_bound_by_hand`(손 계산).

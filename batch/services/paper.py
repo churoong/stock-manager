@@ -882,6 +882,94 @@ def attribution(decisions: list[dict[str, Any]], entries: list[tuple[float, floa
     }
 
 
+# ── 결정 단위 선정 증거 (docs/paper.md 10.1, 25.1518) ─────────────────────────────────────────────
+
+#: 같은 날 견줄 새 후보(안 산 것)가 이보다 적은 날은 뺀다 — 후보 둘 사이 분위는 0·50·100 뿐이라 거칠다
+EVIDENCE_MIN_POOL = 3
+#: 거래일 묶음(달력일) — 20 거래일 뒤 수익은 이웃한 날끼리 거의 다 겹쳐 하루를 표본 하나로 세면 표준오차를 크게 깎는다.
+#: 기간(20 거래일 ≈ 28 달력일)만큼 묶는다
+EVIDENCE_BLOCK_DAYS = 28
+#: 하한을 내는 최소 묶음 수 — 자유도 3 아래면 t 분위 근사(Cornish–Fisher)가 크게 틀린다
+EVIDENCE_MIN_BLOCKS = 4
+#: 한쪽 유의수준 — 하한 = 평균 − t(1−α, n−1) × 표준오차
+EVIDENCE_ALPHA = 0.05
+
+
+def t_quantile(p: float, df: int) -> float:
+    """t 분포 분위 근사 — 정규 분위에 Cornish–Fisher 보정 네 항 (Abramowitz & Stegun 26.7.5). 자유도 3 이상에서
+    t 표와 대조한 값은 시험에(tests/test_selection_evidence_1518.py). scipy 를 쓰지 않으려고"""
+    from statistics import NormalDist
+
+    z = NormalDist().inv_cdf(p)
+    g1 = (z**3 + z) / 4
+    g2 = (5 * z**5 + 16 * z**3 + 3 * z) / 96
+    g3 = (3 * z**7 + 19 * z**5 + 17 * z**3 - 15 * z) / 384
+    g4 = (79 * z**9 + 776 * z**7 + 1482 * z**5 - 1920 * z**3 - 945 * z) / 92160
+    return z + g1 / df + g2 / df**2 + g3 / df**3 + g4 / df**4
+
+
+def block_bound(values: dict[int, float], alpha: float = EVIDENCE_ALPHA) -> dict[str, Any]:
+    """묶음 값들 → {n_blocks, mean, se, lower}. 묶음이 `EVIDENCE_MIN_BLOCKS` 보다 적으면 lower 는 None"""
+    xs = list(values.values())
+    n = len(xs)
+    if not n:
+        return {"n_blocks": 0, "mean": None, "se": None, "lower": None}
+    m = sum(xs) / n
+    if n < 2:
+        return {"n_blocks": n, "mean": m, "se": None, "lower": None}
+    se = (sum((x - m) ** 2 for x in xs) / (n - 1)) ** 0.5 / n**0.5
+    lower = m - t_quantile(1 - alpha, n - 1) * se if n >= EVIDENCE_MIN_BLOCKS else None
+    return {"n_blocks": n, "mean": m, "se": se, "lower": lower}
+
+
+def _묶음(day: str) -> int:
+    from datetime import date
+
+    return date.fromisoformat(day[:10]).toordinal() // EVIDENCE_BLOCK_DAYS
+
+
+def selection_evidence(decisions: list[dict[str, Any]]) -> dict[str, Any]:
+    """결정 단위 선정 증거 — 산 종목이 **같은 날 같은 시장의 안 산 새 후보** 가운데 몇 분위였나 (docs/paper.md 10.1).
+
+    한 계좌의 평가 곡선 하나로는 반년에 연 수십 % 초과가 아니면 운과 실력을 못 가른다 — 결정마다 같은 날 후보와 견주면
+    시장 전체·같은 날 공통 움직임이 빠져 잡음이 크게 준다.
+    날마다 (산 종목 분위 평균) → `EVIDENCE_BLOCK_DAYS` 묶음 평균 → 묶음 평균들의 평균과 한쪽 하한.
+    무작위로 골랐으면 50. 견줄 새 후보 = `NONCOMPARABLE_SKIP_PREFIXES` 를 뺀 skip.
+    같이 20 거래일 지수 대비 초과(산 종목 평균)의 묶음 평균도 낸다 — 챔피언 비교(짝지은 묶음 차이)에 쓴다
+    """
+    키, 기 = f"ret_{ATTRIBUTION_HORIZON}d", f"bench_{ATTRIBUTION_HORIZON}d"
+    날: dict[tuple[str, str], dict[str, list[dict[str, Any]]]] = {}
+    for d in decisions:
+        if d.get(키) is None or not d.get("decided_on"):
+            continue
+        k = (str(d.get("market") or ""), str(d["decided_on"])[:10])
+        if d.get("kind") == "buy":
+            날.setdefault(k, {"buy": [], "skip": []})["buy"].append(d)
+        elif d.get("kind") == "skip" and not str(d.get("reason")).startswith(NONCOMPARABLE_SKIP_PREFIXES):
+            날.setdefault(k, {"buy": [], "skip": []})["skip"].append(d)
+    분위묶음: dict[int, list[float]] = {}
+    초과묶음: dict[int, list[float]] = {}
+    쓴날 = 0
+    for (_m, day), g in sorted(날.items()):
+        if not g["buy"]:
+            continue
+        for b in g["buy"]:
+            if b.get(기) is not None:
+                초과묶음.setdefault(_묶음(day), []).append(float(b[키]) - float(b[기]))
+        풀 = [float(x[키]) for x in g["skip"]]
+        if len(풀) < EVIDENCE_MIN_POOL:
+            continue
+        분위 = [(sum(r < float(b[키]) for r in 풀) + 0.5 * sum(r == float(b[키]) for r in 풀)) / len(풀) * 100
+              for b in g["buy"]]  # fmt: skip
+        분위묶음.setdefault(_묶음(day), []).append(sum(분위) / len(분위))
+        쓴날 += 1
+    블록 = {k: sum(v) / len(v) for k, v in 분위묶음.items()}
+    초과 = {k: sum(v) / len(v) for k, v in 초과묶음.items()}
+    return {"horizon": ATTRIBUTION_HORIZON, "days": 쓴날, **block_bound(블록),
+            "blocks": {str(k): v for k, v in sorted(블록.items())},
+            "excess_blocks": {str(k): v for k, v in sorted(초과.items())}}  # fmt: skip
+
+
 def attribution_lines(aid: str, a: dict[str, Any] | None) -> list[str]:
     """주간 요약·리포트용 몇 줄. 표본이 `ATTRIBUTION_MIN_SAMPLE` 보다 적은 칸에는 "참고" 를 붙인다."""
     if not a:

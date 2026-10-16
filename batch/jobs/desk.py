@@ -55,7 +55,8 @@ ADJ_FILLS_SQL = (
 )
 #: 위험판 (25.1508) — 계좌마다 마지막 평가 한 줄(기본키 (account_id, as_of) 로 계좌마다 하나)
 LATEST_SQL = (
-    "SELECT d.account_id, d.equity_krw, d.holdings_krw, d.positions_json FROM paper_accounts a JOIN paper_daily d"
+    "SELECT d.account_id, d.equity_krw, d.holdings_krw, d.positions_json, d.attribution_json"
+    " FROM paper_accounts a JOIN paper_daily d"
     " ON d.account_id = a.id AND d.as_of = (SELECT MAX(x.as_of) FROM paper_daily x WHERE x.account_id = a.id)"
 )
 STOCK_NAMES_SQL = (
@@ -403,9 +404,11 @@ def _관문판(
         창 = (now - timedelta(days=desk.GATE_INCIDENT_DAYS)).astimezone(cal.market_tz("KR")).date()
         창 = 창.isoformat()
         실패 = int(client.execute(BATCH_FAILED_SQL, [job_name("KR"), job_name("US"), 창]).rows[0][0] or 0)
-        관문 = desk.gate(계열, h, since=since, version=version, recon_bad_days=sum(1 for d in 검산틀린날 if d >= 창),
-                       batch_failed=실패, kis=desk.combine_kept(kis요약))  # fmt: skip
         마지막 = client.execute(LATEST_SQL).dicts()
+        # 결정 단위 선정 증거 — 가상 단계가 성과 분해와 함께 마지막 평가 행에 적은 것(25.1518, 읽기 0)
+        증거 = {str(r["account_id"]): ((_json(r.get("attribution_json")) or {}).get("evidence") or {}) for r in 마지막}
+        관문 = desk.gate(계열, h, since=since, version=version, recon_bad_days=sum(1 for d in 검산틀린날 if d >= 창),
+                       batch_failed=실패, kis=desk.combine_kept(kis요약), evidence=증거.get(h))  # fmt: skip
         보유들 = {str(r["account_id"]): (_json_list(r["positions_json"])) for r in 마지막}
         ids = sorted({int(q["stock_id"]) for v in 보유들.values() for q in v if q.get("stock_id") is not None})
         이름 = ({int(r["id"]): str(r["name"]) for r in client.execute(STOCK_NAMES_SQL, [json.dumps(ids)]).dicts()}
@@ -419,7 +422,7 @@ def _관문판(
             latest[a] = {"equity": r["equity_krw"], "holdings": r["holdings_krw"], "positions": 종목}
         늦음창 = (now - timedelta(days=desk.READY_WINDOW_DAYS)).astimezone(cal.market_tz("KR")).date().isoformat()
         늦음 = client.execute(BATCH_DELAY_SQL, [desk.READY_LATE_SEC, job_name("KR"), job_name("US"), 늦음창]).dicts()
-        판 = {"gate": 관문, "risk": desk.risk_board(latest, 계열, 손절), "champion": desk.champion(계열, h),
+        판 = {"gate": 관문, "risk": desk.risk_board(latest, 계열, 손절), "champion": desk.champion(계열, h, 증거),
              "readiness": desk.readiness(runs=늦음[0] if 늦음 else None, kis=kis요약), "gate_error": None}  # fmt: skip
         return 판, None
     except Exception as exc:  # noqa: BLE001 — 곁다리 안의 곁다리
