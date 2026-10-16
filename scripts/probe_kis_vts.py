@@ -116,6 +116,16 @@ def us(sess: kv.Session, code: str, exchange: str, now: datetime) -> bool:
     return ok
 
 
+def _진단() -> str:
+    """어느 칸이 비었나 — 값은 찍지 않는다. 계좌는 숫자 자릿수와 숫자 아닌 글자 수만(8 또는 10 이어야 한다)."""
+    e = kv._vars(None)
+    계좌 = str(e.get(kv.ACCOUNT_ENV) or "")
+    숫자 = sum(ch.isdigit() for ch in 계좌)
+    키, 비밀 = ("있음" if e.get(k) else "없음" for k in (kv.KEY_ENV, kv.SECRET_ENV))
+    칸 = "없음" if not 계좌 else f"숫자 {숫자}자리 + 그 밖 글자 {len(계좌) - 숫자}개"
+    return f"  진단: 앱키 {키} · 시크릿 {비밀} · 계좌 {칸}"
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--market", choices=("KR", "US", "both"), default="both")
@@ -125,6 +135,7 @@ def main() -> int:
     a = ap.parse_args()
     if not kv.configured():
         print("KIS모의투자 키·계좌 없음 — 시크릿 세 개(KIS_VTS_APP_KEY·KIS_VTS_APP_SECRET·KIS_VTS_ACCOUNT)를 확인")
+        print(_진단())
         return 1
     now = datetime.now(UTC)
     with TursoClient() as client:
