@@ -213,11 +213,13 @@ def compare(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }  # fmt: skip
 
 
-def compare_lines(s: dict[str, Any] | None, diff_count: int | None, as_of: str | None) -> list[str]:
+def compare_lines(
+    s: dict[str, Any] | None, diff_count: int | None, as_of: str | None, account: str = "H",
+) -> list[str]:
     """주간 요약 몇 줄. 끝난 베낀 주문이 없으면 빈 목록."""
     if not s or not (s.get("n") or s.get("unknown") or s.get("cleanup")):
         return []
-    out = [f"[KIS모의투자 — B 주문 베끼기, 지난 {s['days']}일]"]
+    out = [f"[KIS모의투자 — {account} 주문 베끼기, 지난 {s['days']}일]"]
     if s.get("n"):
         out.append(f"  주문 {s['n']} · 체결 일치 {s['match_pct']:.0f}% (둘 다 참 {s['both']}"
                    f" · 가상만 참 {s['internal_only']} · KIS만 참 {s['kis_only']} · 둘 다 안 참 {s['neither']})"

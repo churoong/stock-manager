@@ -111,7 +111,7 @@ export interface BrokerSummary {
 export interface BrokerLatest { as_of: string; diff: Record<string, [number, number]>; summary: BrokerSummary | null }
 /** 비교 요약을 사람이 읽는 줄로 — 배치(`services/broker_mirror.compare_lines`)와 같은 글. 값은 배치가 낸 그대로 */
 export function brokerLines(b: BrokerLatest | null | undefined): string[] {
-  if (!b) return ["아직 연결 전입니다 — KIS모의투자 키를 넣으면 다음 국내 배치부터 B 의 주문을 베껴 냅니다 (docs/paper.md 15장)."];
+  if (!b) return ["아직 연결 전입니다 — KIS모의투자 키를 넣으면 다음 국내 배치부터 H(지주사)의 주문을 베껴 냅니다 (docs/paper.md 15장)."];
   const s = b.summary;
   const out: string[] = [];
   if (s?.n) {

@@ -96,3 +96,24 @@ def test_h_does_not_buy_when_voter_charter_changed(일곱: Client, monkeypatch: 
     assert any(x.startswith("⚠️ 가상 H 지주사가 고르지 못함") for x in 줄)
     # 다른 계좌는 그대로 산다
     assert 일곱.q("SELECT COUNT(*) FROM paper_orders WHERE account_id = 'B'")[0][0] > 0
+
+
+def test_late_account_shadow_starts_at_open(일곱: Client, monkeypatch: pytest.MonkeyPatch) -> None:
+    """늦게 연 계좌의 "같은 돈 KOSPI" 는 연 날의 지수로 — 열기 전 시장 움직임을 넣지 않는다 (25.1484, 검증 [권장] 1)."""
+    for d, v in (("2026-10-14", 100.0), ("2026-10-15", 105.0), ("2026-10-16", 110.0)):
+        일곱.conn.execute("INSERT INTO index_prices (index_code, date, close, source, fetched_at)"
+                         " VALUES ('KOSPI', ?, ?, 't', 't')", [d, v])  # fmt: skip
+    일곱.conn.execute("UPDATE paper_accounts SET created_at = '2026-10-16T00:00:00+00:00' WHERE id = 'H'")
+    _하루(일곱, monkeypatch, "2026-10-15")
+    그림자 = dict(일곱.q("SELECT account_id, kospi_krw FROM paper_daily"))
+    # 10-14 입금 1,000,000원: B 는 그 돈이 처음 투자 가능해진 장의 지수로(110 보다 낮다) → 지금 110 이면 100 만 원보다 크다.
+    # H 는 10-16 에 열려 그날 지수 110 으로 → 그대로 1,000,000
+    assert 그림자["H"] == 1_000_000 and 그림자["B"] > 1_000_000
+
+
+def test_weekly_committee_review_skips_holding(일곱: Client, monkeypatch: pytest.MonkeyPatch) -> None:
+    from datetime import date
+
+    _하루(일곱, monkeypatch, "2026-10-14")
+    줄 = job.committee_review(일곱, date(2026, 10, 16), {})
+    assert not any(x.startswith("  H ") for x in 줄) and any(x.startswith("  A ") for x in 줄)

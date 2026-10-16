@@ -280,7 +280,7 @@ export default function PaperView() {
       ) : null}
 
       <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
-        <h2 className="text-base font-semibold">KIS모의투자 — B 주문 베끼기</h2>
+        <h2 className="text-base font-semibold">KIS모의투자 — H(지주사) 주문 베끼기</h2>
         <ul className="mt-1 space-y-0.5 text-sm">
           {brokerLines(data.broker).map((x) => (
             <li key={x}>{x}</li>

@@ -402,7 +402,7 @@ def test_compare_counts_match_and_signed_slippage() -> None:
     assert s["slip_buy"] == {"n": 1, "avg": pytest.approx(1.0)} and s["slip_sell"] == {"n": 1, "avg": pytest.approx(1.0)}
     assert s["reject_reasons"] == {"APBK0919": 1}
     줄 = bm.compare_lines(s, 2, "2026-10-19")
-    assert 줄[0] == "[KIS모의투자 — B 주문 베끼기, 지난 28일]"
+    assert 줄[0] == "[KIS모의투자 — H 주문 베끼기, 지난 28일]"
     assert "체결 일치 50% (둘 다 참 2 · 가상만 참 1 · KIS만 참 2 · 둘 다 안 참 1)" in 줄[1]
     assert 줄[2] == "  가격(+ 면 가상모의투자가 낙관): 매수 +1.00% (n=1) · 매도 +1.00% (n=1)"
     assert 줄[-1] == "  모름 1 · 정리 주문 1 · 잔고가 어긋난 종목 2 (2026-10-19)"

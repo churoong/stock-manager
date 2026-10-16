@@ -33,7 +33,8 @@ from batch.services import sell_flags as sf
 log = logging.getLogger(__name__)
 
 ACCOUNTS_SQL = (
-    "SELECT id, sell_rule, rule_version, entry_rule, top_n, selection, charter_json FROM paper_accounts ORDER BY id"
+    "SELECT id, sell_rule, rule_version, entry_rule, top_n, selection, charter_json, created_at FROM paper_accounts"
+    " ORDER BY id"
 )
 FLOWS_SQL = "SELECT id, flow_date, amount_krw, kind, cancels_id, created_at FROM paper_cash_flows ORDER BY id"
 FILLS_SQL = (
@@ -526,6 +527,29 @@ def _stock(client: Any, sid: int, 캐시: dict[int, dict[str, Any]]) -> dict[str
         캐시[sid] = rows[0] if rows else {"id": sid, "ticker": str(sid), "name": str(sid), "sector": None,
                                           "country": None, "currency": None, "asset_type": "stock"}  # fmt: skip
     return 캐시[sid]
+
+
+def _열린_그림자(
+    client: Any, flows: list[pp.CashFlow], shadows: dict[str, tuple[dict[int, float | None], float | None]],
+    opened: str, cache: dict[tuple[str, str], float | None],
+) -> dict[str, tuple[dict[int, float | None], float | None]]:
+    """늦게 연 계좌(G·H 등)의 그림자 기준 — 계좌를 열기 전의 입금은 **연 날**의 지수로 산 것으로 본다
+    (25.1484, 검증 [권장] 1).
+
+    입금 장부는 모든 계좌 공통이라 그대로 두면 계좌가 생기기 전의 시장 움직임까지 "같은 돈 KOSPI" 에 들어가,
+    연 첫날부터 지수 대비 몇 %p 뒤진 것으로 보였다. 처음부터 있던 계좌(열린 날 ≤ 입금일)는 바뀌지 않는다
+    """
+    if not opened or not any(f.flow_date < opened for f in flows):
+        return shadows
+    out: dict[str, tuple[dict[int, float | None], float | None]] = {}
+    for code, (lv, now_lv) in shadows.items():
+        if (code, opened) not in cache:
+            가짜 = [pp.CashFlow(-1, opened, 1.0, "deposit")]
+            cache[(code, opened)] = _level_of(client, 가짜, code, fx=code == "SP500")[0].get(-1)
+        시작 = cache[(code, opened)]
+        out[code] = ({f.id: (시작 if f.flow_date < opened else lv.get(f.id))
+                      for f in flows if f.kind == "deposit"}, now_lv)  # fmt: skip
+    return out
 
 
 def _level_of(
@@ -1069,7 +1093,8 @@ def _조사_준비(
 #: 지주사(H)의 성적 — H 자신의 결정 원장에서 표가 붙고 20 거래일 성과가 찬 행 (docs/company.md 10장, 25.1482)
 HOLDING_RECORDS_SQL = (
     "SELECT stock_id, decided_on, ret_20d, bench_20d, detail_json FROM paper_decisions"
-    " WHERE account_id = ? AND decided_on >= ? AND ret_20d IS NOT NULL AND detail_json LIKE '%\"votes\"%'"
+    " WHERE account_id = ? AND market = ? AND decided_on >= ? AND ret_20d IS NOT NULL"
+    " AND detail_json LIKE '%\"votes\"%'"
 )
 
 
@@ -1086,7 +1111,13 @@ def holding_step(
     투표 회사 헌장 지문이 `config.voters` 와 다르면 사지 않는다(검증 [필수] 8)
     """
     voters: dict[str, str] = dict(config.get("voters") or {})
-    바뀜 = sorted(c for c, h in voters.items() if c not in charters or co.charter_hash(charters[c]) != h)
+    if not voters:
+        # 비면 B 혼자 투표해 늘 "두 곳 이상 0" — 오류 없이 영영 안 산다(25.1484 검증 [참고] 5)
+        return [], {}, [], {"error": "H 의 투표 회사 목록(charter_json.voters)이 비었거나 읽지 못함"}
+    없음 = sorted(c for c in voters if c not in charters)
+    if 없음:
+        return [], {}, [], {"error": "투표 회사 헌장을 읽지 못함(헌장 오류·없음): " + ",".join(없음)}
+    바뀜 = sorted(c for c, h in voters.items() if co.charter_hash(charters[c]) != h)
     if 바뀜:
         return [], {}, [], {"error": "투표 회사 헌장이 H 에 적힌 지문과 다름(판을 올려야): " + ",".join(바뀜)}
     _조사_준비(client, market, signal_rows, charters, cache, trade_date)
@@ -1101,7 +1132,8 @@ def holding_step(
     b_top = int(config.get("b_top_n") or report_picks.TOP_STOCKS)
     표["B"] = {r.stock_id: 1.0 for r in report_picks.select_top(report_picks.with_criteria(signal_rows), b_top)}
     부터 = (today - timedelta(days=hold.HOLDING_WINDOW_DAYS)).isoformat()
-    가중, 성적 = hold.weights(client.execute(HOLDING_RECORDS_SQL, [account, 부터]).dicts(), sorted(표))
+    # 시장마다 따로 — 국내 결정은 KOSPI, 미국은 S&P500 대비라 섞으면 잣대가 다르다(25.1484 검증 [참고] 6)
+    가중, 성적 = hold.weights(client.execute(HOLDING_RECORDS_SQL, [account, market, 부터]).dicts(), sorted(표))
     점수 = {sid: float(rs[0].total_score or 0) for sid, rs in 행들.items()}
     순위 = hold.rank(표, 가중, 점수)
     고른 = [x["stock_id"] for x in 순위 if x["eligible"] and x["stock_id"] in 행들][:top_n]
@@ -1220,6 +1252,7 @@ def run_step(
 
     shadows = {"KOSPI": _level_of(client, flows, "KOSPI", fx=False),
                "SP500": _level_of(client, flows, "SP500", fx=True)}  # fmt: skip
+    열림캐시: dict[tuple[str, str], float | None] = {}
     targets, _ = sr.기간별_목표(db.get_setting(client, "horizon_targets", None))
     fx = _fx(client, 오늘)
     열린 = [_order(r) for r in client.execute(OPEN_ORDERS_SQL).dicts()]
@@ -1269,7 +1302,8 @@ def run_step(
         무작위 = str(acct.get("selection") or "signal") == "random"
         a기록: dict[str, Any] = {"fills": sum(1 for f in 새체결 if f.account_id == aid)}
         v, 검 = mark(client, aid, 오늘, flows, flow_created, fills, fill_created, a기록["fills"], frozen, stock_cache,
-                    shadows, 지금)  # fmt: skip
+                    _열린_그림자(client, flows, shadows, str(acct.get("created_at") or "")[:10], 열림캐시),
+                    지금)  # fmt: skip
         a기록.update({"recon_ok": 검["recon_ok"], "unknown": len(v.unknown)})
         계좌체결 = [f for f in fills if f.account_id == aid]
         # 사전 위험 점검의 문맥 (docs/paper.md 11장, 25.1451) — 배분과 따로 한 번 더 막는다
@@ -1594,6 +1628,8 @@ def committee_review(client: Any, today: date, stock_cache: dict[int, dict[str, 
     """주간 요약의 투자사 절 — 회사마다 이번 주 회의 수, 소수의견이 옳았던 결정 (services/company.review_lines)."""
     헌장 = {}
     for r in client.execute(ACCOUNTS_SQL).dicts():
+        if str(r.get("selection") or "") == "weighted":
+            continue  # 지주사(H)의 charter_json 은 투표 회사 지문이지 위원회가 아니다 (25.1484, 검증 [권장] 2)
         try:
             ch = json.loads(r.get("charter_json") or "null")
         except ValueError:

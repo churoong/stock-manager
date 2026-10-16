@@ -253,4 +253,5 @@ def summary_lines(client: Any) -> list[str]:
     if not rows or not rows[0].get("summary_json"):
         return []
     r = rows[0]
-    return bm.compare_lines(json.loads(r["summary_json"]), len(json.loads(r.get("diff_json") or "{}")), str(r["as_of"]))
+    return bm.compare_lines(json.loads(r["summary_json"]), len(json.loads(r.get("diff_json") or "{}")), str(r["as_of"]),
+                            MIRROR_ACCOUNT)  # fmt: skip
