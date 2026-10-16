@@ -145,7 +145,7 @@ export default function PaperView() {
     }
     const 지금 = data?.invested ?? 0;
     const 물음 =
-      `모의 계좌에 ${won(금액)}을 넣습니다 (모의 계좌 ${data?.accounts.length ?? 0}개 모두에 같은 금액).\n\n` +
+      `가상모의투자 계좌에 ${won(금액)}을 넣습니다 (가상모의투자 계좌 ${data?.accounts.length ?? 0}개 모두에 같은 금액).\n\n` +
       `지금 총 투자금액: ${won(지금)}\n입금 뒤 총 투자금액: ${won(지금 + 금액)}\n\n` +
       "매수는 다음 아침 리포트부터 배치가 규칙대로 합니다. 넣을까요?";
     if (!confirm(물음)) return;
@@ -171,8 +171,8 @@ export default function PaperView() {
   async function toggleHalt() {
     const 켜기 = !data?.halted;
     const 물음 = 켜기
-      ? "모의 매매를 멈춥니다. 다음 배치부터 새 주문(매수·매도)을 내지 않고 결정 원장에 '멈춤' 으로 남깁니다. 체결 판정·평가는 그대로 돕니다. 멈출까요?"
-      : "모의 매매를 다시 켭니다. 다음 배치부터 규칙대로 주문합니다. 켤까요?";
+      ? "가상모의투자·KIS모의투자 매매를 멈춥니다. 다음 배치부터 새 주문(매수·매도)을 내지 않고 결정 원장에 '멈춤' 으로 남깁니다. 체결 판정·평가는 그대로 돕니다. 멈출까요?"
+      : "가상모의투자·KIS모의투자 매매를 다시 켭니다. 다음 배치부터 규칙대로 주문합니다. 켤까요?";
     if (!confirm(물음)) return;
     setBusy(true);
     const r = await readJson<{ ok?: boolean }>("/api/paper/halt", {
@@ -209,7 +209,7 @@ export default function PaperView() {
       <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
         <h2 className="text-base font-semibold">입금</h2>
         <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-          장부의 총 투자금액 <b className="text-slate-900 dark:text-slate-100">{won(data.invested)}</b> — 입금 한 번이 모의 계좌 {data.accounts.length}개 모두에 같은 금액으로 들어갑니다.
+          장부의 총 투자금액 <b className="text-slate-900 dark:text-slate-100">{won(data.invested)}</b> — 입금 한 번이 가상모의투자 계좌 {data.accounts.length}개 모두에 같은 금액으로 들어갑니다.
         </p>
         <div className="mt-3 flex flex-wrap gap-2">
           <input
@@ -237,14 +237,14 @@ export default function PaperView() {
         </div>
         {notice ? <p className="mt-2 text-sm text-slate-700 dark:text-slate-300">{notice}</p> : null}
         <div className="mt-3 flex items-center gap-2 text-sm">
-          {data.halted ? <span className="font-medium text-red-600 dark:text-red-400">⏸ 모의 매매 멈춤 중 — 새 주문을 내지 않습니다</span> : null}
+          {data.halted ? <span className="font-medium text-red-600 dark:text-red-400">⏸ 매매 멈춤 중 — 가상모의투자·KIS모의투자 모두 새 주문을 내지 않습니다</span> : null}
           <button
             type="button"
             disabled={busy}
             onClick={() => void toggleHalt()}
             className="rounded border border-slate-300 px-2 py-1 text-xs dark:border-slate-700"
           >
-            {data.halted ? "다시 켜기" : "모의 매매 멈춤"}
+            {data.halted ? "다시 켜기" : "매매 멈춤"}
           </button>
         </div>
       </section>
@@ -265,12 +265,12 @@ export default function PaperView() {
                 <b className={tone(data.realCompare.realPct)}>{pctText(data.realCompare.realPct)}</b>
                 {Object.entries(data.realCompare.paperPct ?? {}).map(([aid, v]) => (
                   <span key={aid}>
-                    {" "}· 모의 {aid} <b className={tone(v)}>{pctText(v)}</b>
+                    {" "}· 가상 {aid} <b className={tone(v)}>{pctText(v)}</b>
                   </span>
                 ))}
               </p>
               <p className="mt-1 text-xs text-slate-500">
-                같은 잣대가 아닙니다 — 실제는 보유분만(현금 없음)·배당 포함, 모의는 현금 포함·배당 없음. 현금 비중만큼 모의가 덜 움직입니다.
+                같은 잣대가 아닙니다 — 실제는 보유분만(현금 없음)·배당 포함, 가상모의투자는 현금 포함·배당 없음. 현금 비중만큼 가상모의투자가 덜 움직입니다.
               </p>
             </>
           )}
@@ -381,7 +381,7 @@ export function AccountTabs({ data, acct, setAcct, sub, setSub }: {
   const 주문 = data.orders.filter((o) => o.account_id === a.id);
   return (
     <section className={CARD}>
-      <div className="flex gap-2 overflow-x-auto pb-1" role="tablist" aria-label="모의 계좌">
+      <div className="flex gap-2 overflow-x-auto pb-1" role="tablist" aria-label="가상모의투자 계좌">
         {data.accounts.map((x) => (
           <button
             key={x.id}
@@ -391,7 +391,7 @@ export function AccountTabs({ data, acct, setAcct, sub, setSub }: {
             onClick={() => setAcct(x.id)}
             className={`min-w-[7rem] flex-1 shrink-0 rounded-lg border px-3 py-2 text-left text-sm ${x.id === a.id ? "border-slate-900 bg-slate-900 text-white dark:border-slate-100 dark:bg-slate-100 dark:text-slate-900" : "border-slate-300 dark:border-slate-700"}`}
           >
-            <span className="block font-semibold">모의 {x.id}</span>
+            <span className="block font-semibold">가상 {x.id}</span>
             <span className="block truncate text-xs opacity-80">
               {won(x.view.equity)} · {pctText(x.view.pnlPct)}
             </span>

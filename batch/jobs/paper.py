@@ -1254,12 +1254,12 @@ def run_step(
         if isinstance(a기록.get("committee"), dict):
             위 = a기록["committee"]
             메모줄.append(f"🏛 {aid} {위['memo']}" if "memo" in 위
-                       else f"⚠️ 모의 {aid} 투자위원회를 열지 못함 — {위.get('error')}")  # fmt: skip
+                       else f"⚠️ 가상 {aid} 투자위원회를 열지 못함 — {위.get('error')}")  # fmt: skip
         손익률 = f"{v.pnl_pct:+.1f}%" if v.pnl_pct is not None else "—"
         줄.append(f"{aid}: 평가 {v.equity_krw:,.0f}원 (손익 {손익률}, 시간가중 {(검['twr'] - 1) * 100:+.1f}%,"
                  f" 오늘 체결 {a기록['fills']}건)")  # fmt: skip
         if not 검["recon_ok"]:
-            줄.append(f"⚠️ 모의 {aid} 장부 검산 어긋남 — {검['recon_note']}")
+            줄.append(f"⚠️ 가상 {aid} 장부 검산 어긋남 — {검['recon_note']}")
     기록["accounts"] = 계좌기록
     기록["frozen"] = sorted(frozen)
     # 결정 원장 성과 채우기 (25.1449) — 곁다리. 실패해도 오늘 단계는 그대로

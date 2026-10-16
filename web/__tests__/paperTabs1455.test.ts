@@ -51,7 +51,7 @@ describe("모의 계좌 탭", () => {
     expect(html).toContain("실현손익 (판 것, 비용 반영)");
     expect(html).toContain("-5,000원");
     expect(html).toContain("모의 A");
-    expect(html).toContain("모의 B");
+    expect(html).toContain("가상 B");
   });
 
   it("보유내역 — 평균단가·현재가·평가손익·비중·첫 매수", () => {

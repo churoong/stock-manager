@@ -34,7 +34,7 @@ const 규칙 = [
 const data = {
   halted: false, realCompare: null, invested: 1_000_000, flows: [], history: [], fills: [],
   accounts: 규칙.map(([id, sell_rule, entry_rule, top_n, selection]) => ({
-    id, name: `모의 ${id}`, sell_rule, entry_rule, top_n, selection, rule_version: 1, unknown: [], attribution: null, positions: [],
+    id, name: `가상 ${id}`, sell_rule, entry_rule, top_n, selection, rule_version: 1, unknown: [], attribution: null, positions: [],
     view: accountView(id, 1_000_000, 1_000_000, 0, undefined),
   })),
   orders: [
@@ -82,7 +82,7 @@ describe("모의 계좌 7개", () => {
     const html = renderToStaticMarkup(
       createElement(AccountTabs, { data, acct: "R1", setAcct: () => {}, sub: "orders", setSub: () => {} }),
     );
-    for (const id of ["A", "B", "C", "D", "E", "R1", "R2"]) expect(html).toContain(`모의 ${id}`);
+    for (const id of ["A", "B", "C", "D", "E", "R1", "R2"]) expect(html).toContain(`가상 ${id}`);
     expect(html).toContain("매수 시가 일괄 (기준가 200,000원 · 무작위 대조)");
     // 체결 0건이 고장처럼 보이지 않게 — 판정은 다음 배치가 일봉으로 (2026-10-16 사용자 질문)
     expect(html).toContain("가상모의투자는 장중에 체결하지 않습니다");

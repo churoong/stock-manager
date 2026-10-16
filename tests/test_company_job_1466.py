@@ -114,7 +114,7 @@ def test_committee_failure_stops_only_that_company(c: Client, monkeypatch: pytes
     assert c.q("SELECT COUNT(*) FROM paper_orders WHERE account_id = 'A'") == [(0,)]
     assert {r[0] for r in c.q("SELECT DISTINCT stock_id FROM paper_orders WHERE account_id = 'B'")} == {1, 3}
     assert 기록["accounts"]["A"]["committee"]["error"].startswith("조사 자료")
-    assert any(x.startswith("⚠️ 모의 A 투자위원회를 열지 못함") for x in 줄)
+    assert any(x.startswith("⚠️ 가상 A 투자위원회를 열지 못함") for x in 줄)
 
 
 def test_charter_migration_matches_code() -> None:
