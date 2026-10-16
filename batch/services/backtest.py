@@ -340,8 +340,51 @@ class PriceView:
         return series[-1][0] if series else None
 
 
-# 판단 함수. 리밸런스 날짜 t 와 t-1 까지의 창을 받아 {stock_id: 비중} 을 돌려준다.
-WeightsAt = Callable[[str, PriceView], dict[int, float]]
+@dataclass(frozen=True)
+class LedgerOrders:
+    """장부형 전략의 주문 (docs/backtest.md 10장, docs/infra.md 25.1526) — "이것만 팔고 이만큼 더 산다".
+
+    비중(dict)을 돌려주면 엔진은 그 비중으로 **다시 맞춘다** — 날마다 판단하는 전략이 지금 비중을 그대로 돌려줘도
+    가격이 움직인 만큼 사고팔아 비용이 붙고(보유 5종목이면 연 1% 남짓), 살 수 없는 몫을 다른 종목에 나눴다.
+    운영 가상모의투자는 든 종목을 그대로 두고 판 돈은 현금으로 남긴다. 이 꼴은 그 동작이다:
+    `sells` 는 전량 매도, `buys` 는 지금 자본 대비 더 살 비중(0 이상). 나머지 보유는 그대로 흘러간다.
+    """
+
+    sells: frozenset[int] = frozenset()
+    buys: dict[int, float] = field(default_factory=dict)
+
+
+# 판단 함수. 리밸런스 날짜 t 와 t-1 까지의 창을 받아 {stock_id: 비중} 또는 장부 주문(`LedgerOrders`)을 돌려준다.
+WeightsAt = Callable[[str, PriceView], "dict[int, float] | LedgerOrders"]
+
+
+def ledger_target(
+    orders: LedgerOrders, drifted: dict[int, float], tradable: Callable[[int], bool], halted: Callable[[int], bool]
+) -> tuple[dict[int, float], list[int]]:
+    """장부 주문을 t 의 목표 비중으로 (25.1526). (목표, 살 수 없어 뺀 매수 종목).
+
+    - 든 종목은 그대로 — 단 `sells` 에 있고 오늘 거래되면 판다.
+      거래정지(`halted`)면 팔 수 없어 묶어 둔다(25.471 과 같다)
+    - 상장폐지(오늘 거래 안 되고 정지도 아님)는 마지막 종가로 판다 — 비중 꼴과 같다
+    - `buys` 는 오늘 거래되는 종목만. 판 돈과 남은 현금 안에서만 사고, 넘치면 비례로 줄인다.
+      못 산 몫은 **현금으로 남긴다**
+    """
+    if any(w < 0 or not math.isfinite(w) for w in orders.buys.values()):
+        raise ValueError("buys 는 0 이상의 유한한 비중이어야 합니다 — 파는 것은 sells 로")
+    target: dict[int, float] = {}
+    for sid, w in drifted.items():
+        if w <= 0:
+            continue
+        if halted(sid) or (tradable(sid) and sid not in orders.sells):
+            target[sid] = w
+    dropped = [sid for sid in orders.buys if not tradable(sid) or halted(sid)]
+    살것 = {sid: w for sid, w in orders.buys.items() if sid not in dropped and w > 0}
+    room = max(1.0 - sum(target.values()), 0.0)
+    합 = sum(살것.values())
+    배 = min(1.0, room / 합) if 합 > 0 else 0.0
+    for sid, w in 살것.items():
+        target[sid] = target.get(sid, 0.0) + w * 배
+    return target, sorted(dropped)
 
 
 def top_n_equal_weight(
@@ -596,31 +639,41 @@ def simulate(
                 if cutoff else PriceView({}, d, holding=든것, weights=지금비중)
             )  # fmt: skip
             proposed = weights_at(d, view)
-
-            # **들고 있는데 오늘 체결가가 없고 뒤에 다시 거래되는 종목은 거래정지다 — 팔 수 없다** (infra 25.471).
-            # 예전에는 "살 수 없다" 목록에 섞여 정지 전 종가로 판 셈이 됐다 — 재개 뒤 갭(하락)을 피해 낙관적이었다.
-            # 지금 비중 그대로 묶어 두고, 거래가 재개된 다음 리밸런스에서 판단대로 사고판다. 상장폐지(뒤 거래 없음)는
-            # 그대로 마지막 종가로 매도한다(docs/backtest.md)
-            frozen = {
-                sid: w for sid, w in drifted.items()
-                if w > 0 and d not in prices.get(sid, {}) and last_date.get(sid, "") > d
-            }  # fmt: skip
-            # 오늘 체결가가 없거나 가격이 끊긴 종목은 살 수 없다.
-            dropped = [
-                sid
-                for sid in proposed
-                if sid not in frozen and (sid not in prices or d not in prices[sid] or last_date.get(sid, "") < d)
-            ]
-            target = {sid: w for sid, w in proposed.items() if sid not in dropped and sid not in frozen}
-            total_w = sum(target.values())
-            if total_w > 0:
-                # 판단 함수가 정한 투자 비율(비중 합)은 지키고, 살 수 없는 종목의 몫은 남은
-                # 종목에 나눈다. 합이 1 미만이면 나머지가 현금이고, 1 을 넘으면 1 로 줄인다.
-                # 묶인 정지 종목의 몫은 먼저 뺀다 — 그만큼은 이미 들고 있다
-                invested = min(max(sum(proposed.values()), 0.0), 1.0)
-                room = max(invested - sum(frozen.values()), 0.0)
-                target = {sid: w / total_w * room for sid, w in target.items()}
-            target = {**target, **frozen}
+            if isinstance(proposed, LedgerOrders):
+                # 장부 주문 — 든 것은 그대로 두고 판 것·산 것만 바꾼다(25.1526).
+                # 정지·상장폐지 규칙은 아래 비중 꼴과 같다
+                target, dropped = ledger_target(
+                    proposed,
+                    drifted,
+                    tradable=lambda sid, d=d: d in prices.get(sid, {}),
+                    halted=lambda sid, d=d: d not in prices.get(sid, {}) and last_date.get(sid, "") > d,
+                )
+            else:
+                # **들고 있는데 오늘 체결가가 없고 뒤에 다시 거래되는 종목은 거래정지다 — 팔 수 없다**
+                # (infra 25.471).
+                # 예전에는 "살 수 없다" 목록에 섞여 정지 전 종가로 판 셈이 됐다 — 재개 뒤 갭(하락)을 피해
+                # 낙관적이었다. 지금 비중 그대로 묶어 두고, 거래가 재개된 다음 리밸런스에서 판단대로 사고판다.
+                # 상장폐지(뒤 거래 없음)는 그대로 마지막 종가로 매도한다(docs/backtest.md)
+                frozen = {
+                    sid: w for sid, w in drifted.items()
+                    if w > 0 and d not in prices.get(sid, {}) and last_date.get(sid, "") > d
+                }  # fmt: skip
+                # 오늘 체결가가 없거나 가격이 끊긴 종목은 살 수 없다.
+                dropped = [
+                    sid
+                    for sid in proposed
+                    if sid not in frozen and (sid not in prices or d not in prices[sid] or last_date.get(sid, "") < d)
+                ]
+                target = {sid: w for sid, w in proposed.items() if sid not in dropped and sid not in frozen}
+                total_w = sum(target.values())
+                if total_w > 0:
+                    # 판단 함수가 정한 투자 비율(비중 합)은 지키고, 살 수 없는 종목의 몫은 남은
+                    # 종목에 나눈다. 합이 1 미만이면 나머지가 현금이고, 1 을 넘으면 1 로 줄인다.
+                    # 묶인 정지 종목의 몫은 먼저 뺀다 — 그만큼은 이미 들고 있다
+                    invested = min(max(sum(proposed.values()), 0.0), 1.0)
+                    room = max(invested - sum(frozen.values()), 0.0)
+                    target = {sid: w / total_w * room for sid, w in target.items()}
+                target = {**target, **frozen}
 
             keys = set(target) | set(drifted)
             # **거래대금 인자(`turnover`)와 다른 이름이어야 한다** (docs/infra.md 25.460). 같은 이름으로 덮어쓰면 다음

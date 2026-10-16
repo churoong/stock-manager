@@ -582,5 +582,13 @@ Turso 월 읽기 진도 문(추정 500만 행)을 지나야 돈다 — 미뤄지
 0. 엔진: `PriceView` 를 종목별 정렬 목록 + `bisect` 로 빠르게(결과 불변 — 같은 곡선 시험), 장부형 전략이 지금 비중을 읽는 `PriceView.weights`(읽기 전용)
    — **끝**(25.1522·25.1525). `weights` 는 cutoff(t−1) 종가로 다시 잰 비중이다 — 엔진의 리밸런스 직전 비중은 t 종가로 잰 것이라 그대로 주면 t 가격이 샌다
 1. 국내 MVP: 신호 재현·핵심 Dossier·장부 전략 다섯·순차 가중치·결정 단위 대조·DSR·`backtest.yml` 별도 작업(시간 한도 120분)·문서·look-ahead 시험
+   - 조각 1a ✅(25.1526) **장부 주문** `LedgerOrders(sells, buys)` — 비중 dict 는 날마다 다시 맞춰(보유 5종목이면 연 1% 남짓 비용) 운영과 다르다. 든 것은 그대로, 판 돈·못 산 몫은 현금
+   - 조각 1b `batch/services/core_backtest.py`(순수, DB 없음): `CoreMarket.at(view)` 가 주 1회 팩터 점수·날마다 신호 줄(`sg.evaluate` — 장기 PBR 하위 20% 뒤집기 포함,
+     `jobs/backtest.long_entry` 는 뒤집기가 없어 쓰지 않는다)·Dossier(broker·flows·sentiment 비움, **`gov_covered=False`** — True 면 "중립" 이 되어 자료 없음과 다르다)·
+     A/C/D/E/B 표·메모리 원장 → `hold.weights` → `hold.rank`. 원장 행은 20번째 뒤 종가가 cutoff 이하이고 결정일부터 28일이 지나야 보인다(운영 `due_horizons`)
+   - 조각 1c 변형 다섯의 매도(`sell_flags` 기본 목표·기간, `pp.trend_exit`)·재매수 쉼 5세션·크기(`weight_pct`×국면 배수, 종목 10%·섹터 30%, 현금 모자라면 통째로 건너뜀 — 운영 `build_portfolio`)
+   - 조각 1d 실행 연결·저장·`backtest.yml`·DSR·결정 단위 분위·반 나눈 기간
+   - 계획 검토가 찾은 어긋남(25.1526): 운영 종합 점수는 감성 10% 를 넣고 백테스트 `run` 은 5팩터 균등이라 안건 순서·B 상위 5 가 다를 수 있다 · 운영에는 **최대 종목 수가 없다**(현금·종목 10% 상한만) ·
+     `pit_equities` 는 자본이 없으면 옛 해로 물러나고 운영 `_latest_equity` 는 모름(25.1172) — PBR 이 다를 수 있다 · 체결은 t 종가(운영은 시가 매도·지정가 매수) — 크기·체결이 낙관 쪽
 2. 추적 검정(운영 H 와 결정을 다섯 수준으로 맞대기 — 입력·표(100% 일치)·가중치·선정·실행 손익, 기준은 결과 보기 전 사전 등록)·화면(/backtest·/lab)·분할 지정가 체결
 3. 자료 넓히기(국내 2016~ 시세·재무, 미국 더 길게, 공시 과거 백필, 사본에 시가) — 쓰기 한도에 묶여 몇 주
