@@ -27,6 +27,9 @@ export const VTS_PATH = {
 } as const;
 /** 같은 시장을 다시 부를 수 있는 최소 간격 */
 export const LIVE_MIN_GAP_MS = 30_000;
+/** 시장과 상관없이 두 조회 사이 최소 간격 — 국내·미국 단추를 같은 초에 누르면 같은 앱키의 초당 한도에 걸렸다(25.1499, 검토 [참고] 9) */
+export const LIVE_ANY_GAP_MS = 3_000;
+export const LIVE_ANY_KEY = "kis_live_at_ALL";
 /** 호출 사이 간격 — 배치(`MIN_INTERVAL` 1.0초)와 같게 */
 export const LIVE_CALL_GAP_MS = 1_000;
 export const LIVE_TIMEOUT_MS = 8_000;
@@ -70,6 +73,8 @@ const int = (v: unknown): number => Math.trunc(num(v) ?? 0);
 export interface LiveHolding { code: string; name: string | null; qty: number; avg: number | null; price: number | null; value: number | null; pnl: number | null; pnl_pct: number | null }
 export interface LiveExecution { date: string; time: string | null; code: string; name: string | null; side: "buy" | "sell" | string; qty: number; filled: number; avg_price: number | null; order_price: number | null; note: string | null }
 export interface LiveView {
+  /** 첫 쪽만 읽었다 — KIS 가 다음 쪽이 있다고 했다(모의 잔고 한 쪽 20종목·체결 약 15건). 나머지는 배치 기록(A)에 */
+  more?: boolean;
   market: VtsMarket;
   currency: "KRW" | "USD";
   fetched_at: string;

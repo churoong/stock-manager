@@ -168,6 +168,44 @@ def _us_window(now: datetime, day: Any) -> str | None:
     return None
 
 
+FX_SQL = "SELECT rate FROM fx_rates WHERE pair = 'USDKRW' AND date <= ? AND date >= ? ORDER BY date DESC LIMIT 1"
+
+
+def _account_perf(client: Any, sess: Any, 증권사: str, 오늘: str, 합: dict[str, Any],
+                  ) -> tuple[dict[str, Any], dict[str, Any] | None]:  # fmt: skip
+    """국내 배치의 계좌 전체 원화 총액과 성과 (docs/paper.md 15.7, 25.1497·25.1499).
+
+    총액 = 국내 총평가 + (미국 보유 외화평가 합 + 달러 예수금) × KIS 최초고시환율. 고시 전이라 환율이 0·없으면 —
+    미국 몫이 0 이면 환율이 상관없고, 아니면 우리 환율 표(7일 안)로 갈음한다(검토 [권장] 2). 한 조각이라도 모르면
+    그날 총액은 모름
+    """
+    try:
+        us = kv.us_totals(sess.present_us())
+    except (KisFailed, requests.RequestException):
+        us = {"value_usd": None, "cash_usd": None, "usd_krw": None}
+    값, 현금, 환율 = us["value_usd"], us["cash_usd"], us["usd_krw"]
+    if 값 is not None and 현금 is not None and not 환율:
+        if 값 == 0 and 현금 == 0:
+            환율 = 0.0
+        else:
+            from datetime import date as _date
+
+            일주 = (_date.fromisoformat(오늘) - timedelta(days=7)).isoformat()
+            줄 = client.execute(FX_SQL, [오늘, 일주]).rows
+            환율 = float(줄[0][0]) if 줄 and 줄[0][0] else None
+            us = us | {"usd_krw_source": "fx_rates"}
+    조각 = [합.get("total"), 값, 현금, 환율]
+    총 = None if any(x is None for x in 조각) else float(합["total"]) + (float(값) + float(현금)) * float(환율)  # type: ignore[arg-type]
+    원화계좌 = us | {"kr_total": 합.get("total"), "total_krw": 총}
+    계열 = [(str(d), v) for d, v in client.execute(TOTALS_SQL, [증권사, 오늘]).rows] + [(오늘, 총)]
+    시작 = bm.perf(계열)
+    if not 시작:
+        return 원화계좌, None
+    h0 = client.execute(H_TWR_SQL, [MIRROR_ACCOUNT, 시작["start"]]).rows
+    h1 = client.execute(H_TWR_SQL, [MIRROR_ACCOUNT, 오늘]).rows
+    return 원화계좌, bm.perf(계열, tuple(h0[0]) if h0 else None, tuple(h1[0]) if h1 else None)  # type: ignore[arg-type]
+
+
 def run(
     client: Any, market: str, now: datetime, *, session: Any = None, sleep: Any = time.sleep, clock: Any = None,
     frozen: set[int] | None = None,
@@ -238,20 +276,11 @@ def run(
     원화계좌: dict[str, Any] | None = None
     성과 = None
     if not 미국:
+        # 곁다리 안의 곁다리 — 여기서 무엇이 깨져도 아래 주문 보내기는 돈다(25.1499, 검토 [권장] 5)
         try:
-            us = kv.us_totals(sess.present_us())
-        except (KisFailed, requests.RequestException):
-            us = {"value_usd": None, "cash_usd": None, "usd_krw": None}
-        조각 = [합.get("total"), us["value_usd"], us["cash_usd"], us["usd_krw"]]
-        원화계좌 = us | {"kr_total": 합.get("total"), "total_krw": None if any(x is None for x in 조각) else
-                      float(합["total"]) + (float(us["value_usd"]) + float(us["cash_usd"])) * float(us["usd_krw"])}  # type: ignore[arg-type]  # fmt: skip
-        계열 = [(str(d), v) for d, v in client.execute(TOTALS_SQL, [증권사, 오늘.isoformat()]).rows] + [
-            (오늘.isoformat(), 원화계좌["total_krw"])]
-        시작 = bm.perf(계열)
-        if 시작:
-            h0 = client.execute(H_TWR_SQL, [MIRROR_ACCOUNT, 시작["start"]]).rows
-            h1 = client.execute(H_TWR_SQL, [MIRROR_ACCOUNT, 오늘.isoformat()]).rows
-            성과 = bm.perf(계열, tuple(h0[0]) if h0 else None, tuple(h1[0]) if h1 else None)  # type: ignore[arg-type]
+            원화계좌, 성과 = _account_perf(client, sess, 증권사, 오늘.isoformat(), 합)
+        except Exception as exc:  # noqa: BLE001
+            기록["perf_error"] = type(exc).__name__
     보유칸 = [{"id": 코드표.get(h.code), "code": h.code, "qty": h.quantity, "avg": h.avg_price, "price": h.price,
              "value": h.value, "pnl": h.pnl} for h in 보유]  # fmt: skip
     client.execute(DAILY_SQL, [

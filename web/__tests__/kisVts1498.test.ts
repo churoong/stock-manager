@@ -43,6 +43,11 @@ describe("실계좌로 새지 않는가 — 조회만", () => {
     expect(LIB + ROUTE).not.toMatch(/order-cash|order-resv|"V[A-Z]{3}\d{4}U"/);
     expect(VTS_SAVED_ROW_SQL).toContain("name = 'kis_vts'");
   });
+  it("리디렉트를 따라가지 않고, 함수 시간 30초, 시장 상관없이 3초 간격 (25.1499)", () => {
+    expect(ROUTE).toContain('redirect: "error"');
+    expect(ROUTE).toContain("export const maxDuration = 30");
+    expect(ROUTE).toContain("LIVE_ANY_KEY");
+  });
   it("계좌번호 8·10자리, 키 셋이 있어야 켜진다", () => {
     expect(vtsAccount({ KIS_VTS_ACCOUNT: "5012-3456" })).toEqual({ cano: "50123456", prdt: "01" });
     expect(vtsAccount({ KIS_VTS_ACCOUNT: "5012345601" })).toEqual({ cano: "50123456", prdt: "01" });

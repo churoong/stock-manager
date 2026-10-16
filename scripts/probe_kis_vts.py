@@ -62,6 +62,8 @@ KR_SUM_FIELDS = ("dnca_tot_amt", "nxdy_excc_amt", "prvs_rcdl_excc_amt", "scts_ev
                  "bfdy_tot_asst_evlu_amt")
 US_O2_FIELDS = ("crcy_cd", "frcr_dncl_amt_2", "frcr_drwg_psbl_amt_1", "frcr_evlu_amt2", "frst_bltn_exrt",
                 "frcr_buy_mgn_amt")
+US_O1_FIELDS = ("pdno", "cblc_qty13", "thdt_buy_ccld_qty1", "thdt_sll_ccld_qty1", "frcr_pchs_amt", "frcr_evlu_amt2",
+                "evlu_pfls_amt2", "ovrs_now_pric1", "bass_exrt", "pchs_rmnd_wcrc_amt")
 US_O3_FIELDS = ("pchs_amt_smtl", "evlu_amt_smtl", "evlu_pfls_amt_smtl", "dncl_amt", "tot_dncl_amt", "frcr_evlu_tota",
                 "evlu_amt_smtl_amt", "tot_evlu_pfls_amt", "tot_asst_amt", "wdrw_psbl_tot_amt", "ustl_sll_amt_smtl",
                 "ustl_buy_amt_smtl", "tot_frcr_cblc_smtl")
@@ -85,6 +87,8 @@ def accounts(sess: kv.Session) -> None:
         기준 = "원화" if won else "외화"
         for r in p["output2"]:
             print(f"[계좌 칸] 미국 {기준} output2: " + " · ".join(f"{k}={r.get(k)}" for k in US_O2_FIELDS))
+        for r in p["output1"]:
+            print(f"[계좌 칸] 미국 {기준} 보유: " + " · ".join(f"{k}={r.get(k)}" for k in US_O1_FIELDS))
         print(f"[계좌 칸] 미국 {기준} output3: "
               + " · ".join(f"{k}={p['output3'].get(k)}" for k in US_O3_FIELDS) + f" · 보유 {len(p['output1'])}줄")
 

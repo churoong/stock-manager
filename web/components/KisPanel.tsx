@@ -78,6 +78,7 @@ function LiveBox({ live }: { live: LiveView }) {
       ) : (
         <p className="mt-1 text-xs text-slate-500">보유 종목 없음</p>
       )}
+      {live.more ? <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">KIS 가 첫 쪽만 주었습니다 — 나머지 보유·체결은 아래 배치 기록(보유내역·거래내역)에서 보세요.</p> : null}
       <p className="mt-2 text-xs font-semibold">오늘 주문·체결</p>
       {live.executions.length ? (
         <ul className="text-xs">
@@ -127,9 +128,10 @@ export default function KisPanel() {
       const r = await readJson<{ whole: KisWhole; markets: Record<KisMarket, KisMarketView> }>("/api/paper/kis");
       const body = bodyOf<{ whole: KisWhole; markets: Record<KisMarket, KisMarketView> }>(r);
       if (body.errors?.length) setError(body.errors.join(" · "));
+      else if (!body.markets?.KR || !body.markets?.US) setError("KIS모의투자 기록을 읽지 못했습니다(응답 꼴이 다름 — 새로 고침해 주세요)");
       else {
         setData(body.markets);
-        setWhole(body.whole);
+        setWhole(body.whole ?? null);
       }
     })();
   }, []);
@@ -309,8 +311,10 @@ export default function KisPanel() {
                 ))}
               </ul>
               {whole && (kisSeries(whole)[0]?.points.length ?? 0) > 1 ? <EquityChart series={kisSeries(whole)} height={220} /> : null}
+              {whole?.totals_error ? <p className="text-xs text-amber-700">총액 추이를 읽지 못했습니다 — 위 숫자는 마지막 배치 값입니다.</p> : null}
               <p className="mt-1 text-xs text-slate-500">
                 성과는 국내·미국을 합친 계좌 전체 원화 총액으로 국내 배치가 날마다 냅니다(미국 매수 돈이 원화 예수금에서 자동 환전되어 시장별로 나누면 수익률이 되지 않습니다). 모의 계좌는 입출금이 없어 총액 비가 곧 수익률입니다.
+                [확인필요] 미국 주식을 사고판 직후 결제 전 하루는 미국 평가와 원화 예수금 차감이 엇갈려 총액이 잠깐 부풀거나 줄 수 있습니다 — 첫 미국 체결 뒤 확인합니다.
               </p>
             </>
           ) : null}

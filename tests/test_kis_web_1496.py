@@ -35,7 +35,8 @@ def test_us_totals_from_present_balance() -> None:
     p = {"output1": [{"pdno": "AAPL", "cblc_qty13": "3", "frcr_evlu_amt2": "630.5"}, {"pdno": "X", "cblc_qty13": "0"}],
          "output2": [{"crcy_cd": "JPY", "frst_bltn_exrt": "8.5"}, {"crcy_cd": "USD", "frcr_dncl_amt_2": "0.000000",
                                                                   "frst_bltn_exrt": "1348.50000000"}]}  # fmt: skip
-    assert kv.us_totals(p) == {"value_usd": 630.5, "cash_usd": 0.0, "usd_krw": 1348.5}
+    assert {k: kv.us_totals(p)[k] for k in ("value_usd", "cash_usd", "usd_krw")} == {"value_usd": 630.5, "cash_usd": 0.0,
+                                                                                    "usd_krw": 1348.5}  # fmt: skip
     p["output1"].append({"pdno": "IBM", "cblc_qty13": "1"})
     assert kv.us_totals(p)["value_usd"] is None
 
@@ -91,3 +92,29 @@ def test_us_row_has_no_perf_and_us_query_failure_means_unknown(c: Client) -> Non
     job.run(c, "KR", _at("08:40"), session=_미국실패(1_000_000.0), sleep=lambda _x: None, clock=lambda: _at("08:40"))
     s = json.loads(c.q("SELECT summary_json FROM paper_broker_daily WHERE broker = 'kis_vts'")[0][0])
     assert s["account_krw"]["total_krw"] is None and s["perf"] is None
+
+
+def test_fx_zero_and_perf_failure_do_not_block(c: Client, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
+    """08:30 KST 에 KIS 고시환율이 0 이어도 미국 몫이 0 이면 총액이 나오고, 아니면 우리 환율 표로 갈음한다(검토 [권장] 2).
+    성과 계산이 깨져도 그날 베낀 주문은 나간다(검토 [권장] 5)"""
+
+    class _환율0(_가격세션):
+        def present_us(self, won: bool = False) -> dict:
+            return {"output1": [{"pdno": "AAPL", "cblc_qty13": "1", "frcr_evlu_amt2": self.us_value}],
+                    "output2": [{"crcy_cd": "USD", "frcr_dncl_amt_2": "0", "frst_bltn_exrt": "0"}], "output3": {}}
+
+    job.run(c, "KR", _at("08:40"), session=_환율0(1_000_000.0, "0"), sleep=lambda _x: None, clock=lambda: _at("08:40"))
+    s = json.loads(c.q("SELECT summary_json FROM paper_broker_daily WHERE as_of = '2026-10-16'")[0][0])
+    assert s["account_krw"]["total_krw"] == pytest.approx(1_000_000.0)
+    c.conn.execute("INSERT INTO fx_rates (pair, date, rate, source, fetched_at) VALUES ('USDKRW', '2026-10-15', 1400, 't', 't')")
+    job.run(c, "KR", _at("08:40", "2026-10-19"), session=_환율0(1_000_000.0, "10"), sleep=lambda _x: None,
+            clock=lambda: _at("08:40", "2026-10-19"))  # fmt: skip
+    s = json.loads(c.q("SELECT summary_json FROM paper_broker_daily WHERE as_of = '2026-10-19'")[0][0])
+    assert s["account_krw"]["total_krw"] == pytest.approx(1_014_000.0) and s["account_krw"]["usd_krw_source"] == "fx_rates"
+
+    # 성과 계산이 깨진 날 — 주문은 그대로 나간다
+    monkeypatch.setattr(job, "TOTALS_SQL", "SELECT 깨진 질의")
+    c.conn.execute("DELETE FROM paper_broker_orders")
+    s2 = _가격세션(1_000_000.0)
+    기록 = job.run(c, "KR", _at("08:40"), session=s2, sleep=lambda _x: None, clock=lambda: _at("08:40"))
+    assert 기록["perf_error"] and 기록["sent"] == {"accepted": 2} and len(s2.orders) == 2

@@ -283,8 +283,14 @@ def us_totals(present: dict[str, Any]) -> dict[str, float | None]:
     값 = [_num(r.get("frcr_evlu_amt2")) for r in 보유]
     usd = next((r for r in present.get("output2") or [] if isinstance(r, dict)
                 and str(r.get("crcy_cd") or "").upper() == "USD"), {})  # fmt: skip
+    셋 = present.get("output3") or {}
+    셋 = 셋 if isinstance(셋, dict) else {}
+    # 미결제 매수·매도 합·외화매수증거금은 기록만 — 체결 기준 보유와 결제 기준 원화 차감이 하루 엇갈리는지
+    # 첫 미국 체결 뒤 계열로 보려고(25.1499, 검토 [필수] 1 `[확인필요]`)
     return {"value_usd": None if any(v is None for v in 값) else float(sum(v for v in 값 if v is not None)),
-            "cash_usd": _num(usd.get("frcr_dncl_amt_2")), "usd_krw": _float(usd.get("frst_bltn_exrt"))}  # fmt: skip
+            "cash_usd": _num(usd.get("frcr_dncl_amt_2")), "usd_krw": _float(usd.get("frst_bltn_exrt")),
+            "unsettled_buy": _num(셋.get("ustl_buy_amt_smtl")), "unsettled_sell": _num(셋.get("ustl_sll_amt_smtl")),
+            "buy_margin_usd": _num(usd.get("frcr_buy_mgn_amt"))}  # fmt: skip
 
 
 @dataclass(frozen=True)
@@ -355,9 +361,11 @@ class Session:
         self.calls += 1
         try:
             if method == "POST":
-                r = self.http.post(url, json=body, headers=headers, timeout=TIMEOUT)
+                r = self.http.post(url, json=body, headers=headers, timeout=TIMEOUT, allow_redirects=False)
             else:
-                r = self.http.get(url, params=params, headers=headers, timeout=TIMEOUT)
+                # 리디렉트를 따라가지 않는다 — 다른 호스트로 넘어가면 앱키·시크릿 머리글이 그대로 따라간다
+                # (25.1499, 검토 [참고] 6)
+                r = self.http.get(url, params=params, headers=headers, timeout=TIMEOUT, allow_redirects=False)
         except requests.RequestException as exc:
             # 예외 문장에 요청 주소(조회는 `?CANO=…` 계좌번호)가 실린다 — 이름만 남기고 원래 예외를 잇지 않는다
             # (traceback 에도 안 남게, 25.1475 검증 [권장] 2)

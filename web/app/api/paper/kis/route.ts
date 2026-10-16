@@ -48,14 +48,19 @@ export async function GET() {
         diff = {};
       }
       if (market === "KR" && r) {
-        // 계좌 전체 원화 성과·추이는 국내 배치 줄에만 있다(25.1497)
-        const totals = await execute(KIS_TOTALS, [key, 전(KIS_TOTALS_DAYS)]);
+        // 계좌 전체 원화 성과·추이는 국내 배치 줄에만 있다(25.1497). 추이를 못 읽어도 보유·거래내역은 보인다(25.1499, 검토 [참고] 11)
         whole = {
           as_of: r.as_of,
           account_krw: (summary?.account_krw as KisWhole["account_krw"]) ?? null,
           perf: (summary?.perf as KisWhole["perf"]) ?? null,
-          totals: rowsToObjects<{ as_of: string; total: number | null }>(totals).map((t) => ({ as_of: t.as_of, total: t.total == null ? null : Number(t.total) })),
+          totals: [],
         };
+        try {
+          const totals = await execute(KIS_TOTALS, [key, 전(KIS_TOTALS_DAYS)]);
+          whole.totals = rowsToObjects<{ as_of: string; total: number | null }>(totals).map((t) => ({ as_of: t.as_of, total: t.total == null ? null : Number(t.total) }));
+        } catch {
+          whole.totals_error = true;
+        }
       }
       return {
         as_of: r?.as_of ?? null,

@@ -46,7 +46,7 @@ export interface KisMarketView {
   orders: KisOrder[];
 }
 /** 계좌 전체(국내 배치 줄) — 원화 총액·성과·추이 */
-export interface KisWhole { as_of: string | null; account_krw: KisAccountKrw | null; perf: KisPerf | null; totals: Array<{ as_of: string; total: number | null }> }
+export interface KisWhole { as_of: string | null; account_krw: KisAccountKrw | null; perf: KisPerf | null; totals: Array<{ as_of: string; total: number | null }>; totals_error?: boolean }
 
 /** 보유 칸 — 지금 꼴은 객체, 25.1496 전 줄은 [id, 수량, 평균가] 배열(현재가·평가 없음) */
 export function parseHoldings(json: string | null | undefined): KisHolding[] {
