@@ -1357,6 +1357,14 @@ def summary_section(client: Any, now: datetime) -> list[str]:
             줄 += committee_review(client, 오늘, 캐시)
         except Exception as exc:  # noqa: BLE001
             줄.append(f"  투자위원회 복기를 못 했습니다 ({type(exc).__name__})")
+    # KIS모의투자 비교 (docs/paper.md 15.3, 25.1478) — 배치가 낸 요약을 읽기만. 키를 넣기 전이면 빈다
+    try:
+        from batch.jobs import broker_mirror
+
+        줄 += broker_mirror.summary_lines(client)
+    except Exception as exc:  # noqa: BLE001 — 0078 전 DB 면 표가 없다
+        if "no such" not in str(exc).lower():
+            줄.append(f"  KIS모의투자 비교를 못 읽었습니다 ({type(exc).__name__})")
     return 줄
 
 

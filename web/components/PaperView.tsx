@@ -15,6 +15,8 @@ import {
   stanceText,
   type AccountView,
   type Attribution,
+  type BrokerLatest,
+  brokerLines,
   virtualText,
 } from "@/lib/paper";
 import { money, won } from "@/lib/portfolio";
@@ -59,7 +61,7 @@ interface RealCompareView { start?: string; end?: string; realPct?: number; pape
 /** 투자위원회 회의록 한 장 (docs/company.md 3·5장) — 배치가 적은 그대로 */
 interface MeetingRow { account_id: string; market: string; decided_on: string; charter_hash: string; minutes_json: string }
 interface DossierRow { market: string; as_of: string; stock_id: number; dossier_json: string }
-export interface Data { halted: boolean; realCompare: RealCompareView | null; invested: number; accounts: Account[]; flows: Flow[]; fills: FillRow[]; orders: OrderRow[]; history: HistoryRow[]; meetings?: MeetingRow[]; dossiers?: DossierRow[] }
+export interface Data { halted: boolean; realCompare: RealCompareView | null; invested: number; accounts: Account[]; flows: Flow[]; fills: FillRow[]; orders: OrderRow[]; history: HistoryRow[]; meetings?: MeetingRow[]; dossiers?: DossierRow[]; broker?: BrokerLatest | null }
 
 /** 매매 일지의 근거는 **주문 때 얼린 것**이라 오래될수록 묵는 값이 아니다 — 기준일을 노랗게 칠하지 않는다 */
 const JOURNAL_NEVER_STALE_DAYS = 100_000;
@@ -274,6 +276,18 @@ export default function PaperView() {
           )}
         </section>
       ) : null}
+
+      <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+        <h2 className="text-base font-semibold">KIS모의투자 — B 주문 베끼기</h2>
+        <ul className="mt-1 space-y-0.5 text-sm">
+          {brokerLines(data.broker).map((x) => (
+            <li key={x}>{x}</li>
+          ))}
+        </ul>
+        <p className="mt-1 text-xs text-slate-500">
+          한국투자증권 모의투자 계좌(가상 돈)에 낸 같은 주문의 실제 체결과 가상모의투자의 일봉 판정을 견줍니다. 모의 체결도 실제 시장과 같지 않아 참고로만 봅니다.
+        </p>
+      </section>
 
       {data.history.length > 1 ? (
         <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">

@@ -3,7 +3,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { AccountTabs, CommitteePane, type Data } from "@/components/PaperView";
-import { accountView, deptScoreText, stanceText, virtualText } from "@/lib/paper";
+import { accountView, brokerLines, deptScoreText, stanceText, virtualText } from "@/lib/paper";
 
 const 헌장 = {
   name: "가치투자사", philosophy: "싸고 튼튼한 회사를 산다", weights: { research: 2, quant: 0.5, governance: 1 },
@@ -66,6 +66,19 @@ describe("투자위원회 탭", () => {
       meetings: [], dossiers: [],
     }));
     expect(html).toContain("리서치부: 찬성 40건 +2.1%p");
+  });
+
+  it("KIS모의투자 — 배치가 낸 비교 요약을 글로, 연결 전 안내 (25.1478)", () => {
+    expect(brokerLines(null)[0]).toContain("아직 연결 전입니다");
+    const 줄 = brokerLines({ as_of: "2026-10-19", diff: { "1": [3, 0] }, summary: {
+      days: 28, n: 6, match_pct: 50, both: 2, internal_only: 1, kis_only: 2, neither: 1, partial: 1, rejected: 1, unknown: 1, cleanup: 1,
+      slip_buy: { n: 1, avg: 1 }, slip_sell: { n: 0, avg: null }, reject_reasons: { APBK0919: 1 } } });
+    expect(줄).toEqual([
+      "지난 28일 주문 6 · 체결 일치 50% (둘 다 참 2 · 가상만 참 1 · KIS만 참 2 · 둘 다 안 참 1) · 부분 체결 1 · 거부 1",
+      "가격(+ 면 가상모의투자가 낙관): 매수 +1.00% (n=1) · 매도 표본 없음",
+      "거부 까닭: APBK0919 1",
+      "잔고가 어긋난 종목 1 (2026-10-19 기준)",
+    ]);
   });
 
   it("가상 대조 — 무작위 20종목 안 분위, 표본 없으면 숨김 (25.1476)", () => {

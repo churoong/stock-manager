@@ -917,6 +917,8 @@ class Test이웃_모듈들:
         검사(PAPER, f"{pp.ATTRIBUTION_EPISODE_DAYS}일(`ATTRIBUTION_EPISODE_DAYS`)", "성과 분해 에피소드 (25.1453)")
         검사(PAPER, f"하루 {rg.MAX_ORDERS_PER_DAY}건", "하루 매수 주문 상한 (25.1451)")
         검사(PAPER, f"하루 증권사 모의 주문 상한 {bm.MAX_ORDERS_PER_DAY}건", "증권사 모의 하루 주문 상한 (25.1475)")
+        검사(PAPER, f"지난 {bm.COMPARE_DAYS}일(`COMPARE_DAYS`)", "KIS모의투자 비교 창 (25.1478)")
+        검사(PAPER, f"상위 {bm.COMPARE_TOP_REASONS}개(`COMPARE_TOP_REASONS`)", "KIS모의투자 거부 까닭 수 (25.1478)")
         검사(COMPANY, f"무작위 {pp.VIRTUAL_CONTROLS}종목**의 20 거래일 수익 분포", "가상 대조 종목 수 (25.1476)")
         검사(COMPANY, f"낸 대조가 {pp.VIRTUAL_MIN_CONTROLS} 개보다 적으면 분위를 내지 않는다", "가상 대조 하한 (25.1476)")
         검사(PAPER, f"여유 {rg.CAP_TOLERANCE_PCT:g}%p", "상한 재검사 여유 (25.1451)")

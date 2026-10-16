@@ -11,6 +11,7 @@ import {
   PAPER_INVESTED,
   PAPER_LATEST_DAILY,
   PAPER_MEETINGS_LATEST,
+  PAPER_BROKER_LATEST,
   PAPER_DOSSIERS_LATEST,
   PAPER_OPEN_BUYS,
   PAPER_OPEN_BUYS_LEGACY,
@@ -108,6 +109,14 @@ export async function GET() {
       meetings = [];
       dossiers = [];
     }
+    // KIS모의투자 (docs/paper.md 15장, 25.1478) — 0078·0080 전 DB 에는 표·칸이 없다. 못 읽으면 그 칸만 "연결 전" 으로
+    let broker: { as_of: string; diff: unknown; summary: unknown } | null = null;
+    try {
+      const r = rowsToObjects<{ as_of: string; diff_json: string | null; summary_json: string | null }>(await execute(PAPER_BROKER_LATEST))[0];
+      broker = r ? { as_of: r.as_of, diff: JSON.parse(r.diff_json || "{}"), summary: JSON.parse(r.summary_json || "null") } : null;
+    } catch {
+      broker = null;
+    }
     let halted = false;
     try {
       halted = haltOn((await execute(HALT_READ)).rows[0]?.[0]);
@@ -117,6 +126,7 @@ export async function GET() {
     return NextResponse.json({
       halted,
       realCompare,
+      broker,
       meetings,
       dossiers,
       invested: 입금,

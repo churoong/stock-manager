@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 from typing import Any
 
@@ -147,3 +148,94 @@ def holdings_diff(broker: dict[int, int], internal: dict[int, int]) -> dict[int,
     """{종목: (증권사, 내부)} — 수량이 다른 종목만."""
     return {sid: (broker.get(sid, 0), internal.get(sid, 0))
             for sid in sorted(set(broker) | set(internal)) if broker.get(sid, 0) != internal.get(sid, 0)}  # fmt: skip
+
+
+# ── 비교 보고 (docs/paper.md 15.3, 25.1478) ────────────────────────────────────
+
+#: 비교 창(달력일) — 성과 분해의 에피소드(28일)와 같은 길이. 주문이 하루 수십 건이라 한 달이면 표본이 수백
+COMPARE_DAYS = 28
+#: 거부 까닭을 몇 개까지 싣나
+COMPARE_TOP_REASONS = 5
+_끝난 = ("filled", "partial", "unfilled", "rejected", "unknown")
+
+
+def _까닭(message: str | None) -> str:
+    """거부 문장에서 KIS 오류 코드(`APBK0919` 꼴)를 뽑는다. 없으면 앞 30자."""
+    import re
+
+    m = re.search(r"\b[A-Z]{2,}\d{3,}\b", message or "")
+    return m.group(0) if m else (message or "까닭 없음")[:30]
+
+
+def compare(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """베낀 주문마다 내부 판정 vs KIS모의투자 → 체결 일치율·가격 차이·거부 까닭.
+
+    `rows` = 증권사 주문 줄에 내부 주문 상태(`i_status`)·내부 체결가(`i_price`, 슬리피지 전)를 붙인 것.
+    끝난 것만 센다 — 내부가 아직 열려 있거나(미룬 매도) 증권사 줄이 `sending`·`accepted` 이면 뺀다.
+    부분 체결은 "KIS 참" 으로 세고 따로 센다. 가격 차이는 **불리한 쪽이 +**: 매수는 (KIS 평균가 − 내부 체결가)/내부,
+    매도는 (내부 − KIS)/내부, % — 양수면 내부가 낙관
+    """
+    칸 = Counter[str]()
+    차이: dict[str, list[float]] = {"buy": [], "sell": []}
+    까닭 = Counter[str]()
+    for r in rows:
+        if r.get("reason") == REASON_CLEANUP:
+            칸["cleanup"] += 1
+            continue
+        if r.get("status") not in _끝난 or r.get("i_status") not in ("filled", "expired"):
+            continue
+        if r["status"] == "unknown":
+            칸["unknown"] += 1
+            continue
+        칸["n"] += 1
+        # 그 거래일에 찬 것만 "가상 참" — 미룬 매도가 뒤 장에서 찬 것은 이 날 주문과 짝이 아니다
+        내부 = r["i_status"] == "filled" and str(r.get("i_fill_date") or "")[:10] == str(r.get("trade_date") or "")[:10]
+        kis = r["status"] in ("filled", "partial") and int(r.get("filled_qty") or 0) > 0
+        칸["partial"] += r["status"] == "partial"
+        if r["status"] == "rejected":
+            칸["rejected"] += 1
+            까닭[_까닭(r.get("message"))] += 1
+        칸[("both" if kis else "internal_only") if 내부 else ("kis_only" if kis else "neither")] += 1
+        if 내부 and kis and r.get("avg_price") and r.get("i_price"):
+            k, i = float(r["avg_price"]), float(r["i_price"])
+            차이[str(r["side"])].append(((k - i) if r["side"] == "buy" else (i - k)) / i * 100)
+    n = 칸["n"]
+
+    def 평균(xs: list[float]) -> dict[str, Any]:
+        return {"n": len(xs), "avg": sum(xs) / len(xs) if xs else None}
+
+    return {
+        "days": COMPARE_DAYS, "n": n, "match_pct": (칸["both"] + 칸["neither"]) / n * 100 if n else None,
+        **{k: 칸[k] for k in ("both", "internal_only", "kis_only", "neither", "partial", "rejected", "unknown",
+                             "cleanup")},
+        "slip_buy": 평균(차이["buy"]), "slip_sell": 평균(차이["sell"]),
+        "reject_reasons": dict(까닭.most_common(COMPARE_TOP_REASONS)),
+    }  # fmt: skip
+
+
+def compare_lines(s: dict[str, Any] | None, diff_count: int | None, as_of: str | None) -> list[str]:
+    """주간 요약 몇 줄. 끝난 베낀 주문이 없으면 빈 목록."""
+    if not s or not (s.get("n") or s.get("unknown") or s.get("cleanup")):
+        return []
+    out = [f"[KIS모의투자 — B 주문 베끼기, 지난 {s['days']}일]"]
+    if s.get("n"):
+        out.append(f"  주문 {s['n']} · 체결 일치 {s['match_pct']:.0f}% (둘 다 참 {s['both']}"
+                   f" · 가상만 참 {s['internal_only']} · KIS만 참 {s['kis_only']} · 둘 다 안 참 {s['neither']})"
+                   f" · 부분 체결 {s['partial']} · 거부 {s['rejected']}")  # fmt: skip
+
+    def 칸(x: dict[str, Any], 이름: str) -> str:
+        return f"{이름} {x['avg']:+.2f}% (n={x['n']})" if x.get("n") else f"{이름} 표본 없음"
+
+    out.append("  가격(+ 면 가상모의투자가 낙관): " + 칸(s["slip_buy"], "매수") + " · " + 칸(s["slip_sell"], "매도"))
+    if s.get("reject_reasons"):
+        out.append("  거부 까닭: " + " · ".join(f"{k} {v}" for k, v in s["reject_reasons"].items()))
+    끝 = []
+    if s.get("unknown"):
+        끝.append(f"모름 {s['unknown']}")
+    if s.get("cleanup"):
+        끝.append(f"정리 주문 {s['cleanup']}")
+    if diff_count is not None:
+        끝.append(f"잔고가 어긋난 종목 {diff_count}" + (f" ({as_of})" if as_of else ""))
+    if 끝:
+        out.append("  " + " · ".join(끝))
+    return out

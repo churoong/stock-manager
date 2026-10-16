@@ -92,6 +92,34 @@ export function ruleText(a: AccountRule): string {
   return `매수: ${고르기} · ${진입} — 매도: ${SELL_RULE_TEXT[a.sell_rule] ?? a.sell_rule}`;
 }
 /** 투자위원회 최근 회의록 — 회사·시장마다 마지막 날 한 장 (docs/company.md 3·5장, 25.1469). 0076 전에는 표가 없어 부르는 쪽이 오류를 삼킨다 */
+/** KIS모의투자 마지막 잔고 줄 — 배치가 낸 비교 요약을 읽기만 (docs/paper.md 15.3, 25.1478). 0078·0080 전 DB 면 표·칸이 없다(부르는 쪽이 try) */
+export const PAPER_BROKER_LATEST = `SELECT as_of, diff_json, summary_json, fetched_at FROM paper_broker_daily
+WHERE broker = 'kis_vts' ORDER BY as_of DESC LIMIT 1`;
+export interface BrokerSummary {
+  days: number; n: number; match_pct: number | null; both: number; internal_only: number; kis_only: number; neither: number;
+  partial: number; rejected: number; unknown: number; cleanup: number;
+  slip_buy: { n: number; avg: number | null }; slip_sell: { n: number; avg: number | null };
+  reject_reasons: Record<string, number>;
+}
+export interface BrokerLatest { as_of: string; diff: Record<string, [number, number]>; summary: BrokerSummary | null }
+/** 비교 요약을 사람이 읽는 줄로 — 배치(`services/broker_mirror.compare_lines`)와 같은 글. 값은 배치가 낸 그대로 */
+export function brokerLines(b: BrokerLatest | null | undefined): string[] {
+  if (!b) return ["아직 연결 전입니다 — KIS모의투자 키를 넣으면 다음 국내 배치부터 B 의 주문을 베껴 냅니다 (docs/paper.md 15장)."];
+  const s = b.summary;
+  const out: string[] = [];
+  if (s?.n) {
+    out.push(`지난 ${s.days}일 주문 ${s.n} · 체결 일치 ${(s.match_pct ?? 0).toFixed(0)}% (둘 다 참 ${s.both} · 가상만 참 ${s.internal_only} · KIS만 참 ${s.kis_only} · 둘 다 안 참 ${s.neither}) · 부분 체결 ${s.partial} · 거부 ${s.rejected}`);
+    const 칸 = (x: { n: number; avg: number | null }, 이름: string) =>
+      x.n && x.avg != null ? `${이름} ${x.avg >= 0 ? "+" : ""}${x.avg.toFixed(2)}% (n=${x.n})` : `${이름} 표본 없음`;
+    out.push(`가격(+ 면 가상모의투자가 낙관): ${칸(s.slip_buy, "매수")} · ${칸(s.slip_sell, "매도")}`);
+    const 까닭 = Object.entries(s.reject_reasons ?? {});
+    if (까닭.length) out.push(`거부 까닭: ${까닭.map(([k, v]) => `${k} ${v}`).join(" · ")}`);
+  } else {
+    out.push("아직 끝난 베낀 주문이 없습니다 — 낸 다음 거래일 아침 배치가 체결을 맞춥니다.");
+  }
+  out.push(`잔고가 어긋난 종목 ${Object.keys(b.diff ?? {}).length} (${b.as_of} 기준)`);
+  return out;
+}
 export const PAPER_MEETINGS_LATEST = `SELECT m.account_id, m.market, m.decided_on, m.charter_hash, m.minutes_json FROM paper_meetings m
 WHERE m.decided_on = (SELECT MAX(x.decided_on) FROM paper_meetings x WHERE x.account_id = m.account_id AND x.market = m.market)`;
 /** 조사 자료 — 시장마다 가장 최근 기준일 한 벌 (회사가 달라도 같다) */

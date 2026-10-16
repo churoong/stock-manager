@@ -84,9 +84,21 @@ RECON_SQL = (
 )
 DAILY_SQL = (
     "INSERT INTO paper_broker_daily (broker, as_of, account_id, cash_krw, total_krw, holdings_json, diff_json, source,"
-    " fetched_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (broker, as_of) DO UPDATE SET"
+    " fetched_at, summary_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (broker, as_of) DO UPDATE SET"
     " account_id = excluded.account_id, cash_krw = excluded.cash_krw, total_krw = excluded.total_krw,"
-    " holdings_json = excluded.holdings_json, diff_json = excluded.diff_json, fetched_at = excluded.fetched_at"
+    " holdings_json = excluded.holdings_json, diff_json = excluded.diff_json, fetched_at = excluded.fetched_at,"
+    " summary_json = excluded.summary_json"
+)
+#: 비교 보고 (docs/paper.md 15.3, 25.1478) — 지난 `COMPARE_DAYS` 일의 베낀 주문에 가상모의투자의 판정을 붙인다
+COMPARE_SQL = (
+    "SELECT b.trade_date, b.side, b.status, b.filled_qty, b.quantity, b.avg_price, b.message, b.reason,"
+    " o.status AS i_status, f.price AS i_price, f.fill_date AS i_fill_date FROM paper_broker_orders b"
+    " LEFT JOIN paper_orders o ON o.id = b.paper_order_id LEFT JOIN paper_fills f ON f.order_id = b.paper_order_id"
+    " WHERE b.broker = ? AND b.trade_date >= ? AND b.trade_date < ?"
+)
+#: 주간 요약이 읽는 마지막 잔고 줄
+LATEST_DAILY_SQL = (
+    "SELECT as_of, diff_json, summary_json FROM paper_broker_daily WHERE broker = ? ORDER BY as_of DESC LIMIT 1"
 )
 
 
@@ -146,11 +158,14 @@ def run(
     내부 = {int(r["stock_id"]): int(r["q"]) for r in client.execute(INTERNAL_QTY_SQL, [MIRROR_ACCOUNT]).dicts()
             if int(r["q"] or 0) > 0}  # fmt: skip
     어긋남 = bm.holdings_diff({k: v[0] for k, v in 증권.items()}, 내부)
+    부터 = (오늘 - timedelta(days=bm.COMPARE_DAYS)).isoformat()
+    비교 = bm.compare(client.execute(COMPARE_SQL, [BROKER, 부터, 오늘.isoformat()]).dicts())
     client.execute(DAILY_SQL, [
         BROKER, 오늘.isoformat(), MIRROR_ACCOUNT, 합.get("cash"), 합.get("total"),
         json.dumps([[코드표.get(h.code, h.code), h.quantity, h.avg_price] for h in 보유]),
-        json.dumps({str(k): list(v) for k, v in 어긋남.items()}), BROKER, 지금,
+        json.dumps({str(k): list(v) for k, v in 어긋남.items()}), BROKER, 지금, json.dumps(비교, ensure_ascii=False),
     ])  # fmt: skip
+    기록["compare"] = {"n": 비교["n"], "match_pct": 비교["match_pct"]}
     기록["holdings"] = len(보유)
     기록["diff"] = len(어긋남)
     if len(코드표) < len({h.code for h in 보유}):
@@ -214,3 +229,15 @@ def run(
         기록["not_sent"] = dict(Counter(까닭 for _o, _s, 까닭 in 안냄))
     기록["halted"] = 멈춤
     return 기록 | {"calls": sess.calls}
+
+
+def summary_lines(client: Any) -> list[str]:
+    """주간 요약의 KIS모의투자 절 — 배치가 마지막으로 낸 비교 요약을 읽기만 한다.
+
+    0078·0080 전이거나 줄이 없으면(키를 넣기 전) 빈 목록
+    """
+    rows = client.execute(LATEST_DAILY_SQL, [BROKER]).dicts()
+    if not rows or not rows[0].get("summary_json"):
+        return []
+    r = rows[0]
+    return bm.compare_lines(json.loads(r["summary_json"]), len(json.loads(r.get("diff_json") or "{}")), str(r["as_of"]))

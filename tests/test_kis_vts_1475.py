@@ -371,3 +371,55 @@ def test_job_halt_and_no_response(c: Client) -> None:
     job.run(c, "KR", _at("08:40"), session=s, sleep=lambda _x: None)
     assert c.q("SELECT DISTINCT status, message FROM paper_broker_orders") == [
         ("rejected", "모의 주문 실패 APBK0919 주문가능금액을 초과")]
+
+
+# ── 비교 보고 (docs/paper.md 15.3, 25.1478) ───────────────────────────────────
+
+
+def _줄(side: str, st: str, i_st: str, *, fq: int = 0, avg: float | None = None, ip: float | None = None,
+       msg: str | None = None, reason: str = "베낌", fd: str = "2026-10-16") -> dict[str, Any]:  # fmt: skip
+    return {"trade_date": "2026-10-16", "side": side, "status": st, "filled_qty": fq, "quantity": 3, "avg_price": avg,
+            "message": msg, "reason": reason, "i_status": i_st, "i_price": ip, "i_fill_date": fd}  # fmt: skip
+
+
+def test_compare_counts_match_and_signed_slippage() -> None:
+    s = bm.compare([
+        _줄("buy", "filled", "filled", fq=3, avg=10_100.0, ip=10_000.0),     # 둘 다 참, 매수 1% 불리
+        _줄("sell", "filled", "filled", fq=3, avg=19_800.0, ip=20_000.0),    # 둘 다 참, 매도 1% 불리
+        _줄("buy", "unfilled", "filled", ip=9_800.0),                        # 가상만 참 — 가상이 낙관
+        _줄("buy", "partial", "expired", fq=1, avg=9_700.0),                 # KIS만 참(부분)
+        _줄("buy", "rejected", "expired", msg="모의 주문 실패 APBK0919 주문가능금액을 초과"),  # 둘 다 안 참 + 거부
+        _줄("buy", "unknown", "filled"),                                     # 모름 — 일치에서 뺀다
+        _줄("sell", "filled", "filled", fq=3, avg=1.0, ip=1.0, fd="2026-10-19"),  # 미룬 매도가 뒤 장에서 참 — 이 날은 가상 안 참
+        _줄("sell", "filled", "", reason="정리"),                             # 정리는 따로
+        _줄("buy", "accepted", "filled"),                                    # 아직 안 끝남
+    ])  # fmt: skip
+    assert (s["n"], s["both"], s["internal_only"], s["kis_only"], s["neither"]) == (6, 2, 1, 2, 1)
+    assert (s["partial"], s["rejected"], s["unknown"], s["cleanup"]) == (1, 1, 1, 1)
+    assert s["match_pct"] == 50.0
+    assert s["slip_buy"] == {"n": 1, "avg": pytest.approx(1.0)} and s["slip_sell"] == {"n": 1, "avg": pytest.approx(1.0)}
+    assert s["reject_reasons"] == {"APBK0919": 1}
+    줄 = bm.compare_lines(s, 2, "2026-10-19")
+    assert 줄[0] == "[KIS모의투자 — B 주문 베끼기, 지난 28일]"
+    assert "체결 일치 50% (둘 다 참 2 · 가상만 참 1 · KIS만 참 2 · 둘 다 안 참 1)" in 줄[1]
+    assert 줄[2] == "  가격(+ 면 가상모의투자가 낙관): 매수 +1.00% (n=1) · 매도 +1.00% (n=1)"
+    assert 줄[-1] == "  모름 1 · 정리 주문 1 · 잔고가 어긋난 종목 2 (2026-10-19)"
+    assert bm.compare_lines(bm.compare([]), 0, None) == []
+
+
+def test_daily_summary_stored_and_weekly_reads_it(c: Client) -> None:
+    from batch.jobs import paper as paper_job
+
+    job.run(c, "KR", _at("08:40"), session=_Sess(), sleep=lambda _x: None, clock=lambda: _at("08:40"))
+    c.conn.execute("UPDATE paper_orders SET status = 'expired' WHERE id IN (101, 103)")
+    다음 = _Sess(executions=[kv.Execution("20261016", "N1", "005930", "buy", 3, 3, 9_790.0, 0, False),
+                            kv.Execution("20261016", "N2", "005930", "buy", 2, 0, None, 0, False)])  # fmt: skip
+    기록 = job.run(c, "KR", _at("08:40", "2026-10-19"), session=다음, sleep=lambda _x: None,
+                 clock=lambda: _at("08:40", "2026-10-19"))  # fmt: skip
+    assert 기록["compare"] == {"n": 2, "match_pct": 50.0}  # 101 은 KIS 만 참, 103 은 둘 다 안 참
+    s = json.loads(c.q("SELECT summary_json FROM paper_broker_daily WHERE as_of = '2026-10-19'")[0][0])
+    assert (s["kis_only"], s["neither"]) == (1, 1)
+    줄 = job.summary_lines(c)
+    assert 줄[0] == "[KIS모의투자 — B 주문 베끼기, 지난 28일]" and "잔고가 어긋난 종목 0 (2026-10-19)" in 줄[-1]
+    # 주간 요약은 가상모의투자 평가 행이 없으면 통째로 비고(입금 전), 있으면 이 절을 붙인다 — 붙이는 줄은 summary_section 끝
+    assert paper_job.summary_section(c, datetime(2026, 10, 25, tzinfo=UTC)) == []
