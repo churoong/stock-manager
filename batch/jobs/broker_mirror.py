@@ -119,6 +119,9 @@ H_TWR_SQL = (
     "SELECT twr_index, pnl_krw FROM paper_daily WHERE account_id = ? AND as_of <= ? ORDER BY as_of DESC LIMIT 1"
 )
 #: 주간 요약이 읽는 마지막 잔고 줄
+PREV_DAILY_SQL = (
+    "SELECT summary_json FROM paper_broker_daily WHERE broker = ? AND as_of < ? ORDER BY as_of DESC LIMIT 1"
+)
 LATEST_DAILY_SQL = (
     "SELECT as_of, diff_json, summary_json FROM paper_broker_daily WHERE broker = ? ORDER BY as_of DESC LIMIT 1"
 )
@@ -288,7 +291,16 @@ def run(
         json.dumps(보유칸), json.dumps({str(k): list(v) for k, v in 어긋남.items()}), BROKER, 지금,
         json.dumps(비교 | {"account": 계좌, "account_krw": 원화계좌, "perf": 성과}, ensure_ascii=False),
     ])  # fmt: skip
-    기록["compare"] = {"n": 비교["n"], "match_pct": 비교["match_pct"]}
+    기록["compare"] = {"n": 비교["n"], "match_pct": 비교["match_pct"], "kept_pct": 비교["kept_pct"]}
+    # 괴리 알림 (docs/paper.md 15.8, 25.1504) — 문턱을 넘은 첫날만. 전날 줄 하나를 읽는다
+    try:
+        전날 = client.execute(PREV_DAILY_SQL, [증권사, 오늘.isoformat()]).rows
+        전요약 = json.loads(전날[0][0]) if 전날 and 전날[0][0] else None
+        괴리 = bm.diverge(비교, 전요약 if isinstance(전요약, dict) else None, market)
+        if 괴리:
+            기록["diverge"] = 괴리
+    except Exception as exc:  # noqa: BLE001 — 알림 곁다리. 주문 보내기는 그대로
+        기록["diverge_error"] = type(exc).__name__
     기록["holdings"] = len(보유)
     if 연결전:
         기록["before_link"] = len(연결전)

@@ -1016,7 +1016,7 @@ def _건너뛴_까닭(job_name: str, since: str) -> str | None:
 
 
 def _kis_알림문(broker: dict[str, Any]) -> str | None:
-    """KIS모의투자 단계 결과에서 알릴 것 — 키 일부만 있음(설정 실수)·단계 실패.
+    """KIS모의투자 단계 결과에서 알릴 것 — 키 일부만 있음(설정 실수)·단계 실패·가상과 벌어진 첫날(25.1504).
 
     키를 하나도 안 넣은 것·정상은 None (25.1492)
     """
@@ -1024,6 +1024,9 @@ def _kis_알림문(broker: dict[str, Any]) -> str | None:
         return f"시크릿 {', '.join(broker['missing'])} 이(가) 비어 KIS모의투자 주문을 내지 않았습니다"
     if broker.get("error"):
         return f"KIS모의투자 단계 실패: {broker['error']}"
+    if broker.get("diverge"):
+        # 괴리 — 문턱을 넘은 첫날 (docs/paper.md 15.8, 25.1504)
+        return str(broker["diverge"])
     return None
 
 

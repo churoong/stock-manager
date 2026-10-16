@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import CriteriaTable from "@/components/CriteriaTable";
 import EquityChart, { type Series } from "@/components/EquityChart";
-import KisPanel from "@/components/KisPanel";
+import Link from "next/link";
 import { MARKET_LABEL, pctText as deskPct, ppText, ruleSpanText, rowsById, type DeskView, type RuleSpan } from "@/lib/desk";
 import { bodyOf, readJson } from "@/lib/http";
 import {
@@ -253,7 +253,14 @@ export default function PaperView() {
         </section>
       ) : null}
 
-      <KisPanel />
+      {/* KIS모의투자는 제 화면으로 옮겼다 (docs/desk.md 4장, 25.1504) */}
+      <section className="rounded-xl border border-slate-200 bg-white p-4 text-sm dark:border-slate-800 dark:bg-slate-900">
+        H 의 주문을 KIS모의투자에 그대로 낸 결과·실행 품질은{" "}
+        <Link href="/kis" className="underline">
+          KIS모의투자 화면
+        </Link>
+        에 있습니다.
+      </section>
 
       {data.history.length > 1 ? (
         <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">

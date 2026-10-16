@@ -15,6 +15,14 @@ const PATHS: Record<IconName, React.ReactNode> = {
       <path d="M3 20h18" />
     </>
   ),
+  // KIS모의투자 — 증권사 건물 (docs/desk.md 4장, 25.1504)
+  kis: (
+    <>
+      <path d="M3.5 9.5L12 4l8.5 5.5" />
+      <path d="M6 10v7M10 10v7M14 10v7M18 10v7" />
+      <path d="M3.5 20h17" />
+    </>
+  ),
   // 전략(가상모의투자 계좌들) — 과녁
   strategy: (
     <>

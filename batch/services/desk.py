@@ -117,6 +117,8 @@ def checks(
         out.append({"level": "high" if h_orders else "normal",
                     "text": f"KIS모의투자에 보내지 않음: {b['send']}" + (f" — 베낄 주문 {h_orders}건이 남았습니다"
                                                                     if h_orders else "")})  # fmt: skip
+    if b.get("diverge"):
+        out.append({"level": "high", "text": str(b["diverge"])[:300]})
     if b.get("not_sent"):
         까닭 = ", ".join(f"{k} {v}건" for k, v in sorted(b["not_sent"].items()))
         out.append({"level": "normal", "text": f"KIS모의투자에 안 낸 주문: {까닭}"})

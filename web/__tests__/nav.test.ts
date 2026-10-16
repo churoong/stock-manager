@@ -50,12 +50,12 @@ describe("폰 메뉴 자리", () => {
 
 describe("폰 아래 막대 (2026-09-18 사용자 결정)", () => {
   // 2026-10-08 사용자 지시로 알림 자리에 종목 분석(분석)이 들어가고 알림은 더보기로 갔다.
-  // 2026-10-16 개편(docs/desk.md 1장): 운용·전략이 맨 앞, 적립·찾기는 재료로 더보기에
-  it("운용·전략·추천·내 계좌·분석·더보기 여섯 칸, 아이콘과 글자가 함께 있다", () => {
-    expect(PHONE_TABS.map((t) => t.label)).toEqual(["운용", "전략", "추천", "내 계좌", "분석", "더보기"]);
-    expect(PHONE_TABS.slice(0, 2).map((t) => t.href)).toEqual(["/", "/paper"]);
-    expect(DESKTOP_TABS.slice(0, 2).map((t) => t.href)).toEqual(["/", "/paper"]);
-    for (const href of ["/alerts", "/etf", "/screener"]) expect(MORE_ITEMS.map((i) => i.href)).toContain(href);
+  // 2026-10-16 개편(docs/desk.md 1장): 운용·전략이 맨 앞, 적립·찾기는 재료로 더보기에. 3단계(25.1504)에 KIS 가 추천 자리에
+  it("운용·전략·KIS·내 계좌·분석·더보기 여섯 칸, 아이콘과 글자가 함께 있다", () => {
+    expect(PHONE_TABS.map((t) => t.label)).toEqual(["운용", "전략", "KIS", "내 계좌", "분석", "더보기"]);
+    expect(PHONE_TABS.slice(0, 3).map((t) => t.href)).toEqual(["/", "/paper", "/kis"]);
+    expect(DESKTOP_TABS.slice(0, 3).map((t) => t.href)).toEqual(["/", "/paper", "/kis"]);
+    for (const href of ["/alerts", "/etf", "/screener", "/recommend"]) expect(MORE_ITEMS.map((i) => i.href)).toContain(href);
     expect(PHONE_TABS.every((t) => t.icon)).toBe(true);
     expect(nav).toContain("<Icon name={tab.icon}");
   });
@@ -74,7 +74,8 @@ describe("폰 아래 막대 (2026-09-18 사용자 결정)", () => {
   it("더보기 안의 화면에 있으면 더보기 칸이 켜진다. 종목 상세는 어느 칸도 켜지 않는다", () => {
     expect(activePhoneTab("/")).toBe("/");
     expect(activePhoneTab("/paper")).toBe("/paper");
-    expect(activePhoneTab("/recommend")).toBe("/recommend");
+    expect(activePhoneTab("/kis")).toBe("/kis");
+    expect(activePhoneTab("/recommend")).toBe("/more"); // 오늘의 추천은 3단계(25.1504)에 더보기로
     expect(activePhoneTab("/etf")).toBe("/more"); // 적립은 2026-10-16 개편으로 더보기에
     expect(activePhoneTab("/reports")).toBe("/more");
     expect(activePhoneTab("/status")).toBe("/more");

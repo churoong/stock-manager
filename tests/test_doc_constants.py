@@ -923,6 +923,9 @@ class Test이웃_모듈들:
         검사(PAPER, f"지난 {bm.COMPARE_DAYS}일(`COMPARE_DAYS`)", "KIS모의투자 비교 창 (25.1478)")
         검사(PAPER, f"마지막 종가에서 {bm.US_MARKETABLE_PCT:g}%(`US_MARKETABLE_PCT`)", "미국 시장가 대신 지정가 폭 (25.1485)")
         검사(PAPER, f"차 {bm.PRICE_TOL:g}달러 미만, `PRICE_TOL`", "미국 맞추기 단가 허용 차 (25.1490)")
+        검사(PAPER, f"{bm.DIVERGE_MIN_N}건(`DIVERGE_MIN_N`) 이상", "괴리 알림 표본 (25.1504)")
+        검사(PAPER, f"{bm.DIVERGE_MATCH_PCT:g}%(`DIVERGE_MATCH_PCT`) 아래로", "괴리 알림 일치율 문턱 (25.1504)")
+        검사(PAPER, f"+{bm.DIVERGE_SLIP_PCT:g}%(`DIVERGE_SLIP_PCT`) 위로", "괴리 알림 가격 차이 문턱 (25.1504)")
         검사(COMPANY, "서로 다른 회사 **두 곳 이상**이 추천한 종목만 후보", "지주사 합의 조건 (25.1482)")
         assert hold.HOLDING_MIN_VOTERS == 2
         검사(COMPANY, f"세기 = min(표 ÷ 문턱, {hold.HOLDING_STRENGTH_MAX:g})", "지주사 세기 상한 (25.1482)")

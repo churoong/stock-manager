@@ -256,13 +256,64 @@ def compare(rows: list[dict[str, Any]]) -> dict[str, Any]:
     def 평균(xs: list[float]) -> dict[str, Any]:
         return {"n": len(xs), "avg": sum(xs) / len(xs) if xs else None}
 
+    가상참 = 칸["both"] + 칸["internal_only"]
     return {
         "days": COMPARE_DAYS, "n": n, "match_pct": (칸["both"] + 칸["neither"]) / n * 100 if n else None,
+        # 가상 체결이 KIS 에서도 찬 비율 — 가상 성적의 할인율(docs/desk.md 4장, 25.1504).
+        # 100 이면 가상 체결을 그대로 믿어도 된다
+        "kept_pct": 칸["both"] / 가상참 * 100 if 가상참 else None,
         **{k: 칸[k] for k in ("both", "internal_only", "kis_only", "neither", "partial", "rejected", "unknown",
                              "cleanup")},
         "slip_buy": 평균(차이["buy"]), "slip_sell": 평균(차이["sell"]),
         "reject_reasons": dict(까닭.most_common(COMPARE_TOP_REASONS)),
     }  # fmt: skip
+
+
+#: 괴리 알림 (docs/paper.md 15.8, 25.1504) — 끝난 베낀 주문이 이만큼 쌓여야 판단한다
+DIVERGE_MIN_N = 20
+#: 체결 일치율이 이 아래로 **내려가는 날** 알린다 — 첫 값(근거 없음 `[확인필요]`), 한 달 쌓이면 다시 본다
+DIVERGE_MATCH_PCT = 80.0
+#: 매수·매도 가격 차이 평균(불리한 쪽 +, %)이 이 위로 **올라가는 날** 알린다 — 첫 값 `[확인필요]`
+DIVERGE_SLIP_PCT = 0.5
+
+
+def _괴리(s: dict[str, Any] | None) -> list[str]:
+    """한 날 비교 요약에서 문턱을 넘은 것 — 표본이 모자라면 없다"""
+    if not s or int(s.get("n") or 0) < DIVERGE_MIN_N:
+        return []
+    out = []
+    if s.get("match_pct") is not None and float(s["match_pct"]) < DIVERGE_MATCH_PCT:
+        out.append("match")
+    for 쪽 in ("slip_buy", "slip_sell"):
+        x = s.get(쪽) or {}
+        충분 = int(x.get("n") or 0) >= DIVERGE_MIN_N
+        if 충분 and x.get("avg") is not None and float(x["avg"]) > DIVERGE_SLIP_PCT:
+            out.append(쪽)
+    return out
+
+
+def diverge(now: dict[str, Any] | None, prev: dict[str, Any] | None, market: str) -> str | None:
+    """KIS모의투자와 가상모의투자가 벌어진 **첫날**의 알림 글 — 어제도 넘어 있었으면 None(날마다 울리지 않는다).
+
+    체결 일치율이 `DIVERGE_MATCH_PCT` 아래로 내려가거나 가격 차이 평균이 `DIVERGE_SLIP_PCT` 위로 올라간 날.
+    가상 성적을 그만큼 덜 믿어야 한다는 신호다 — 가상 체결 판정(docs/paper.md 2.3)을 고칠지 사람이 본다
+    """
+    새 = [k for k in _괴리(now) if k not in _괴리(prev)]
+    if not 새 or not now:
+        return None
+    이름 = "국내" if market == "KR" else "미국"
+    글 = []
+    if "match" in 새:
+        어제 = f" (전날 {float(prev['match_pct']):.0f}%)" if prev and prev.get("match_pct") is not None else ""
+        글.append(f"체결 일치 {float(now['match_pct']):.0f}%{어제} — 문턱 {DIVERGE_MATCH_PCT:g}%."
+                 f" 가상만 참 {now.get('internal_only', 0)} · KIS만 참 {now.get('kis_only', 0)}")  # fmt: skip
+    for 쪽, 말 in (("slip_buy", "매수"), ("slip_sell", "매도")):
+        if 쪽 in 새:
+            글.append(f"{말} 가격 차이 평균 {float(now[쪽]['avg']):+.2f}% (n={now[쪽]['n']})"
+                     f" — 문턱 +{DIVERGE_SLIP_PCT:g}%")  # fmt: skip
+    기간 = f"지난 {now.get('days', COMPARE_DAYS)}일, 주문 {now.get('n')}"
+    머리 = f"KIS모의투자 {이름}이 가상모의투자와 벌어졌습니다({기간})"
+    return f"{머리}: " + " · ".join(글) + " — 가상 성적을 그만큼 덜 믿어야 합니다"
 
 
 def compare_lines(

@@ -13,10 +13,11 @@
  * 이 시스템의 목적은 자동 매매(로보어드바이저)이고 가상모의투자·KIS모의투자가 중심이다(CLAUDE.md "시스템의 중심").
  * 그래서 맨 앞 두 칸이 **운용(첫 화면 `/`)·전략(`/paper`)** 이 되고, 종목선정·분석 화면은 재료로 뒤로 간다. 폰 아래 막대는
  * 운용·전략·추천·내 계좌·분석·더보기 — 적립·찾기는 더보기로. KIS·연구실 화면이 생기면(desk.md 4·5장) 추천·분석 자리를 넘겨받는다.
+ * 3단계(25.1504): KIS(`/kis`)가 추천 자리에 — 오늘의 추천은 재료로 더보기 맨 위에.
  */
 
 export type IconName =
-  | "desk" | "strategy" | "recommend" | "search" | "wallet" | "bell" | "more" | "analysis"
+  | "desk" | "strategy" | "kis" | "recommend" | "search" | "wallet" | "bell" | "more" | "analysis"
   | "etf" | "report" | "backtest" | "status" | "settings"
   | "logout" | "back" | "chevron" | "close" | "info";
 
@@ -33,6 +34,7 @@ export const DESKTOP_TABS: Array<{ href: string; label: string }> = [
   // 운용 상황실과 전략(가상모의투자 계좌들)이 맨 앞 (docs/desk.md 1장, 2026-10-16)
   { href: "/", label: "운용" },
   { href: "/paper", label: "전략" },
+  { href: "/kis", label: "KIS모의투자" },
   { href: "/recommend", label: "오늘의 추천" },
   // 장기 적립은 타이밍을 보지 않아 오늘의 추천과 나눴다 (docs/etf.md 4장)
   { href: "/etf", label: "장기 적립" },
@@ -52,7 +54,7 @@ export const DESKTOP_TABS: Array<{ href: string; label: string }> = [
 export const PHONE_TABS: MenuItem[] = [
   { href: "/", label: "운용", icon: "desk" },
   { href: "/paper", label: "전략", icon: "strategy" },
-  { href: "/recommend", label: "추천", icon: "recommend" },
+  { href: "/kis", label: "KIS", icon: "kis" },
   { href: "/portfolio", label: "내 계좌", icon: "wallet" },
   { href: "/analysis", label: "분석", icon: "analysis" },
   { href: "/more", label: "더보기", icon: "more" },
@@ -60,7 +62,8 @@ export const PHONE_TABS: MenuItem[] = [
 
 /** 더보기 화면. 아래 막대에 없는 화면은 여기서 간다 (로그아웃도 여기 있다) */
 export const MORE_ITEMS: MenuItem[] = [
-  // 전략의 재료 — 종목선정·분석 (docs/desk.md 1장). 아래 막대에서 내려왔다(2026-10-16)
+  // 전략의 재료 — 종목선정·분석 (docs/desk.md 1장). 아래 막대에서 내려왔다(2026-10-16, 추천은 25.1504)
+  { href: "/recommend", label: "오늘의 추천", icon: "recommend", note: "재료 · 아침 리포트의 추천 종목" },
   { href: "/etf", label: "장기 적립", icon: "etf", note: "재료 · 타이밍을 보지 않는 ETF 적립" },
   { href: "/screener", label: "종목 찾기", icon: "search", note: "재료 · 조건으로 종목 거르기" },
   { href: "/reports", label: "일일 리포트", icon: "report", note: "텔레그램으로 보낸 아침 리포트 보관함" },
@@ -73,6 +76,7 @@ export const MORE_ITEMS: MenuItem[] = [
 /** 폰 위쪽 제목줄에 쓰는 화면 이름. 본문 제목은 폰에서 숨긴다(두 번 나오면 화면만 밀린다) */
 export const TITLES: Record<string, string> = {
   "/": "운용",
+  "/kis": "KIS모의투자",
   "/recommend": "오늘의 추천",
   "/etf": "장기 적립",
   "/screener": "종목 찾기",
@@ -95,6 +99,7 @@ export const TITLES: Record<string, string> = {
  */
 export const BACK_TO: Record<string, string> = {
   "/stocks": "/recommend",
+  "/recommend": "/more",
   "/etf": "/more",
   "/screener": "/more",
   "/reports": "/more",

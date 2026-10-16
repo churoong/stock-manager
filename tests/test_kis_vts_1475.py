@@ -433,7 +433,8 @@ def test_daily_summary_stored_and_weekly_reads_it(c: Client) -> None:
                             kv.Execution("20261016", "N2", "005930", "buy", 2, 0, None, 0, False)])  # fmt: skip
     기록 = job.run(c, "KR", _at("08:40", "2026-10-19"), session=다음, sleep=lambda _x: None,
                  clock=lambda: _at("08:40", "2026-10-19"))  # fmt: skip
-    assert 기록["compare"] == {"n": 2, "match_pct": 50.0}  # 101 은 KIS 만 참, 103 은 둘 다 안 참
+    # 101 은 KIS 만 참, 103 은 둘 다 안 참 — 가상이 찬 것이 없어 할인율(25.1504)은 모름
+    assert 기록["compare"] == {"n": 2, "match_pct": 50.0, "kept_pct": None}
     s = json.loads(c.q("SELECT summary_json FROM paper_broker_daily WHERE as_of = '2026-10-19'")[0][0])
     assert (s["kis_only"], s["neither"]) == (1, 1)
     줄 = job.summary_lines(c)
