@@ -71,15 +71,23 @@ def test_session_us_reservation_shape(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_session_us_balance_each_exchange_dedup(monkeypatch: pytest.MonkeyPatch) -> None:
     """모의는 거래소마다 따로 받는다 `[확인필요]` — 거래소마다 묻고, 같은 종목이 두 번 오면 한 번만."""
-    줄 = {"ovrs_pdno": "AAPL", "ovrs_cblc_qty": "3", "ord_psbl_qty": "3", "pchs_avg_pric": "201"}
+    줄 = {"ovrs_pdno": "AAPL", "ovrs_cblc_qty": "3", "ord_psbl_qty": "3", "pchs_avg_pric": "201", "now_pric2": "210",
+          "ovrs_stck_evlu_amt": "630", "frcr_evlu_pfls_amt": "27"}
+    현금 = {"rt_cd": "0", "output2": [{"crcy_cd": "JPY", "frcr_dncl_amt_2": "5"}, {"crcy_cd": "USD", "frcr_dncl_amt_2": "1000.5"}]}
     s, http = _세션(monkeypatch, [({"rt_cd": "0", "output1": [줄]}, ""),
                                  ({"rt_cd": "0", "output1": [줄]}, ""),
                                  ({"rt_cd": "0", "output1": [{"ovrs_pdno": "IBM", "ovrs_cblc_qty": "2",
-                                                              "ord_psbl_qty": "2"}]}, "")])  # fmt: skip
+                                                              "ord_psbl_qty": "2", "ovrs_stck_evlu_amt": "300",
+                                                              "frcr_evlu_pfls_amt": "-12.5"}]}, ""),
+                                 (현금, "")])  # fmt: skip
     보유, 합 = s.balance_us()
-    assert [(h.code, h.quantity) for h in 보유] == [("AAPL", 3), ("IBM", 2)] and 합 == {"cash": None, "total": None}
-    assert [kw["params"]["OVRS_EXCG_CD"] for _u, kw in http.sent] == ["AMEX", "NASD", "NYSE"]
-    assert all(kw["headers"]["tr_id"] == "VTTS3012R" for _u, kw in http.sent)
+    assert [(h.code, h.quantity, h.price, h.value, h.pnl) for h in 보유] == [("AAPL", 3, 210.0, 630.0, 27.0),
+                                                                           ("IBM", 2, None, 300.0, -12.5)]
+    # 계좌 총액(달러) = 외화예수금 + 보유 평가 (docs/paper.md 15.7, 25.1496)
+    assert 합 == {"cash": 1000.5, "total": 1930.5, "holdings_value": 930.0}
+    assert [kw["params"]["OVRS_EXCG_CD"] for _u, kw in http.sent[:3]] == ["AMEX", "NASD", "NYSE"]
+    assert all(kw["headers"]["tr_id"] == "VTTS3012R" for _u, kw in http.sent[:3])
+    assert http.sent[3][1]["headers"]["tr_id"] == "VTRP6504R" and http.sent[3][1]["params"]["WCRC_FRCR_DVSN_CD"] == "02"
 
 
 # ── 무엇을 낼지 (미국) ──────────────────────────────────────────────────────
@@ -252,7 +260,8 @@ def test_reconcile_same_qty_tranches_by_price() -> None:
 def test_rate_limit_retries_reads_not_orders(monkeypatch: pytest.MonkeyPatch) -> None:
     """모의는 첫 호출부터 EGW00201(초당 거래건수 초과)을 준 적이 있다(2026-10-16 시험) — 조회는 기다렸다 다시, 주문은 다시 보내지 않는다 (25.1494)."""
     한도 = {"rt_cd": "1", "msg_cd": "EGW00201", "msg1": "초당 거래건수를 초과하였습니다."}
-    s, http = _세션(monkeypatch, [(한도, ""), (한도, ""), ({"rt_cd": "0", "output1": []}, "")] * 3)
+    s, http = _세션(monkeypatch, [(한도, ""), (한도, ""), ({"rt_cd": "0", "output1": []}, "")] * 3
+                   + [({"rt_cd": "0", "output2": []}, "")])
     잠 = []
     s.sleep = 잠.append
     s.balance_us()

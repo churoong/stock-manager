@@ -11,7 +11,7 @@ on:
       market:
         description: 시험할 시장
         type: choice
-        options: [both, KR, US]
+        options: [both, KR, US, accounts]
         default: both
 
 permissions:
@@ -49,7 +49,9 @@ jobs:
       - name: 시험 주문
         run: |
           set -o pipefail
-          python scripts/probe_kis_vts.py --market "${MARKET:-both}" 2>&1 | python scripts/ops_tee.py kis-vts.txt
+          # accounts = 주문 없이 계좌 총액 칸만 (25.1496 설계 검증)
+          if [ "${MARKET}" = "accounts" ]; then ARGS="--accounts-only"; else ARGS="--market ${MARKET:-both}"; fi
+          python scripts/probe_kis_vts.py $ARGS 2>&1 | python scripts/ops_tee.py kis-vts.txt
       - name: 결과를 비공개 이슈로
         if: always()
         env:

@@ -122,7 +122,8 @@ def test_balance_follows_pages(monkeypatch: pytest.MonkeyPatch) -> None:
     쪽2 = {"rt_cd": "0", "output1": [{"pdno": "000660", "hldg_qty": "0", "ord_psbl_qty": "0"}], "output2": [{}]}
     s, http = _세션(monkeypatch, [(쪽1, "M"), (쪽2, "")])  # fmt: skip
     보유, 합 = s.balance()
-    assert 보유 == [kv.Holding("005930", 3, 3, 9800.0)] and 합 == {"cash": 1_000_000.0, "total": 1_029_400.0}
+    assert 보유 == [kv.Holding("005930", 3, 3, 9800.0)] and 합 == {"cash": 1_000_000.0, "total": 1_029_400.0,
+                                                               "holdings_value": None}  # fmt: skip
     assert http.sent[1][1]["params"]["CTX_AREA_NK100"] == "n" and http.sent[1][1]["headers"]["tr_cont"] == "N"
 
 

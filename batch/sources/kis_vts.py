@@ -53,6 +53,11 @@ US_BALANCE_PATH = "/uapi/overseas-stock/v1/trading/inquire-balance"
 #: 모의계좌로 미국을 살 수 있는지(환전 뒤 주문가능) 보려고 읽기만 한다
 TR_US_PSAMOUNT = "VTTS3007R"
 US_PSAMOUNT_PATH = "/uapi/overseas-stock/v1/trading/inquire-psamount"
+#: 미국 체결기준현재잔고(inquire_present_balance.py L26·L108) — 외화예수금(`output2.frcr_dncl_amt_2`)을 읽어
+#: 미국 계좌 총액(달러)을 낸다(docs/paper.md 15.7, 25.1496). 모의 지원은 예제가 tr_id 를 두므로 된다고 보되
+#: 실측 전 `[확인필요]`
+TR_US_PRESENT = "VTRP6504R"
+US_PRESENT_PATH = "/uapi/overseas-stock/v1/trading/inquire-present-balance"
 #: `stocks.market`(nasdaq_symbols.EXCHANGE_CODES) → KIS 해외거래소 코드. 모르는 시장은 주문하지 않는다
 US_EXCHANGE = {"NASDAQ": "NASD", "NYSE": "NYSE", "NYSE American": "AMEX", "NYSE Arca": "AMEX"}
 ORDER_PATH = "/uapi/domestic-stock/v1/trading/order-cash"
@@ -162,6 +167,14 @@ def _int(v: object) -> int:
         return 0
 
 
+def _num(v: object) -> float | None:
+    """부호 있는 수(손익) — 0·음수도 그대로, 못 읽으면 None."""
+    try:
+        return float(str(v).replace(",", ""))
+    except (TypeError, ValueError):
+        return None
+
+
 def _float(v: object) -> float | None:
     try:
         x = float(str(v).replace(",", ""))
@@ -252,7 +265,8 @@ def parse_us_balance(payload: object) -> list[Holding]:
     body = _ok(payload, "모의 미국 잔고 조회")
     return [
         Holding(str(r.get("ovrs_pdno") or "").strip(), _int(r.get("ovrs_cblc_qty")), _int(r.get("ord_psbl_qty")),
-                _float(r.get("pchs_avg_pric")))  # fmt: skip
+                _float(r.get("pchs_avg_pric")), _float(r.get("now_pric2")), _num(r.get("ovrs_stck_evlu_amt")),
+                _num(r.get("frcr_evlu_pfls_amt")))  # fmt: skip
         for r in body.get("output1") or []
         if _int(r.get("ovrs_cblc_qty")) > 0 and str(r.get("ovrs_pdno") or "").strip()
     ]
@@ -264,6 +278,10 @@ class Holding:
     quantity: int  # hldg_qty
     sellable: int  # ord_psbl_qty
     avg_price: float | None  # pchs_avg_pric
+    #: KIS 가 준 현재가·평가금액·평가손익(그 시장 통화) — 웹 보유내역이 그대로 보인다(docs/paper.md 15.7, 25.1496)
+    price: float | None = None  # prpr · now_pric2
+    value: float | None = None  # evlu_amt · ovrs_stck_evlu_amt
+    pnl: float | None = None  # evlu_pfls_amt · frcr_evlu_pfls_amt
 
 
 def parse_balance(payload: object) -> tuple[list[Holding], dict[str, float | None]]:
@@ -271,13 +289,15 @@ def parse_balance(payload: object) -> tuple[list[Holding], dict[str, float | Non
     body = _ok(payload, "모의 잔고 조회")
     보유 = [
         Holding(str(r.get("pdno") or "").strip(), _int(r.get("hldg_qty")), _int(r.get("ord_psbl_qty")),
-                _float(r.get("pchs_avg_pric")))  # fmt: skip
+                _float(r.get("pchs_avg_pric")), _float(r.get("prpr")), _num(r.get("evlu_amt")),
+                _num(r.get("evlu_pfls_amt")))  # fmt: skip
         for r in body.get("output1") or []
         if _int(r.get("hldg_qty")) > 0 and str(r.get("pdno") or "").strip()
     ]
     합 = body.get("output2") or [{}]
     합 = 합[0] if isinstance(합, list) and 합 else 합 if isinstance(합, dict) else {}
-    return 보유, {"cash": _float(합.get("dnca_tot_amt")), "total": _float(합.get("tot_evlu_amt"))}
+    return 보유, {"cash": _float(합.get("dnca_tot_amt")), "total": _float(합.get("tot_evlu_amt")),
+                "holdings_value": _num(합.get("scts_evlu_amt"))}  # fmt: skip
 
 
 class Session:
@@ -432,6 +452,26 @@ class Session:
             fk, nk, cont = str(payload.get("ctx_area_fk200") or ""), str(payload.get("ctx_area_nk200") or ""), "N"
         return out, False
 
+    def present_us(self, won: bool = False) -> dict[str, Any]:
+        """미국 체결기준현재잔고(읽기만) — {output1: [...], output2: [...], output3: {...}} 그대로.
+
+        `won` 이면 원화 기준(01), 아니면 외화(02)
+        """
+        params = {"CANO": self.cano, "ACNT_PRDT_CD": self.prdt, "WCRC_FRCR_DVSN_CD": "01" if won else "02",
+                  "NATN_CD": "840", "TR_MKET_CD": "00", "INQR_DVSN_CD": "00"}  # fmt: skip
+        payload, _c = self._call("GET", US_PRESENT_PATH, TR_US_PRESENT, params=params)
+        body = _ok(payload, "모의 미국 체결기준현재잔고")
+        목록 = {k: body.get(k) or [] for k in ("output1", "output2")}
+        목록 = {k: [v] if isinstance(v, dict) else v for k, v in 목록.items()}
+        셋 = body.get("output3") or {}
+        return 목록 | {"output3": 셋[0] if isinstance(셋, list) and 셋 else 셋 if isinstance(셋, dict) else {}}
+
+    def cash_us(self) -> float | None:
+        """미국 외화예수금(달러) — 체결기준현재잔고 외화 기준 `output2` 의 USD 줄 `frcr_dncl_amt_2`. 못 받으면 None."""
+        줄 = self.present_us()["output2"]
+        usd = next((r for r in 줄 if isinstance(r, dict) and str(r.get("crcy_cd") or "").upper() == "USD"), None)
+        return _num(usd.get("frcr_dncl_amt_2")) if usd else None
+
     def balance_us(self) -> tuple[list[Holding], dict[str, float | None]]:
         """미국 보유 — 거래소마다 묻고 종목 코드로 겹침을 뺀다.
 
@@ -451,4 +491,13 @@ class Session:
                 if 다음 not in ("M", "F") or not isinstance(payload, dict):
                     break
                 fk, nk, cont = str(payload.get("ctx_area_fk200") or ""), str(payload.get("ctx_area_nk200") or ""), "N"
-        return list(보유.values()), {"cash": None, "total": None}
+        목록 = list(보유.values())
+        # 계좌 총액(달러) = 외화예수금 + 보유 평가 합. 예수금 조회가 안 되면(모의 미지원 등) 총액은 모름 —
+        # 보유는 그대로 돌려준다
+        try:
+            현금 = self.cash_us()
+        except KisFailed:
+            현금 = None
+        평가 = sum(h.value for h in 목록 if h.value is not None) if all(h.value is not None for h in 목록) else None
+        총 = None if 현금 is None or 평가 is None else 현금 + 평가
+        return 목록, {"cash": 현금, "total": 총, "holdings_value": 평가}

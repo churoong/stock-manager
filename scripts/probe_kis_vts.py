@@ -56,6 +56,39 @@ def _보유(sess: kv.Session, code: str) -> int:
     return next((h.quantity for h in 보유 if h.code == code), 0)
 
 
+#: 계좌 총액 정의를 정하려고 찍는 칸(docs/paper.md 15.7, 25.1496 설계 검증) — 값은 비공개 운영 이슈로만
+KR_SUM_FIELDS = ("dnca_tot_amt", "nxdy_excc_amt", "prvs_rcdl_excc_amt", "scts_evlu_amt", "tot_evlu_amt", "nass_amt",
+                 "pchs_amt_smtl_amt", "evlu_amt_smtl_amt", "evlu_pfls_smtl_amt", "asst_icdc_amt",
+                 "bfdy_tot_asst_evlu_amt")
+US_O2_FIELDS = ("crcy_cd", "frcr_dncl_amt_2", "frcr_drwg_psbl_amt_1", "frcr_evlu_amt2", "frst_bltn_exrt",
+                "frcr_buy_mgn_amt")
+US_O3_FIELDS = ("pchs_amt_smtl", "evlu_amt_smtl", "evlu_pfls_amt_smtl", "dncl_amt", "tot_dncl_amt", "frcr_evlu_tota",
+                "evlu_amt_smtl_amt", "tot_evlu_pfls_amt", "tot_asst_amt", "wdrw_psbl_tot_amt", "ustl_sll_amt_smtl",
+                "ustl_buy_amt_smtl", "tot_frcr_cblc_smtl")
+
+
+def accounts(sess: kv.Session) -> None:
+    """계좌 총액 칸을 그대로 찍는다(읽기만) — 국내 잔고 output2, 미국 체결기준현재잔고 외화·원화 output2·output3."""
+    payload, _c = sess._call("GET", kv.BALANCE_PATH, kv.TR_BALANCE, params={
+        "CANO": sess.cano, "ACNT_PRDT_CD": sess.prdt, "AFHR_FLPR_YN": "N", "OFL_YN": "", "INQR_DVSN": "02",
+        "UNPR_DVSN": "01", "FUND_STTL_ICLD_YN": "N", "FNCG_AMT_AUTO_RDPT_YN": "N", "PRCS_DVSN": "00",
+        "CTX_AREA_FK100": "", "CTX_AREA_NK100": ""})  # fmt: skip
+    합 = (payload.get("output2") or [{}]) if isinstance(payload, dict) else [{}]
+    합 = 합[0] if isinstance(합, list) and 합 else 합 if isinstance(합, dict) else {}
+    print("[계좌 칸] 국내 잔고 output2: " + " · ".join(f"{k}={합.get(k)}" for k in KR_SUM_FIELDS))
+    for won in (False, True):
+        try:
+            p = sess.present_us(won)
+        except KisFailed as exc:
+            print(f"[계좌 칸] 미국 체결기준현재잔고({'원화' if won else '외화'}) 실패: {exc}")
+            continue
+        기준 = "원화" if won else "외화"
+        for r in p["output2"]:
+            print(f"[계좌 칸] 미국 {기준} output2: " + " · ".join(f"{k}={r.get(k)}" for k in US_O2_FIELDS))
+        print(f"[계좌 칸] 미국 {기준} output3: "
+              + " · ".join(f"{k}={p['output3'].get(k)}" for k in US_O3_FIELDS) + f" · 보유 {len(p['output1'])}줄")
+
+
 def kr(sess: kv.Session, code: str, now: datetime) -> bool:
     현지 = now.astimezone(cal.market_tz("KR"))
     print(f"[국내] {현지:%Y-%m-%d %H:%M} KST · 종목 {code}")
@@ -138,6 +171,7 @@ def main() -> int:
     ap.add_argument("--kr-code", default="005930")
     ap.add_argument("--us-code", default="AAPL")
     ap.add_argument("--us-exchange", default="NASD", choices=sorted(set(kv.US_EXCHANGE.values())))
+    ap.add_argument("--accounts-only", action="store_true", help="주문 없이 계좌 총액 칸만 찍는다")
     a = ap.parse_args()
     if not kv.configured():
         print("KIS모의투자 키·계좌 없음 — 시크릿 세 개(KIS_VTS_APP_KEY·KIS_VTS_APP_SECRET·KIS_VTS_ACCOUNT)를 확인")
@@ -152,6 +186,10 @@ def main() -> int:
             return 1
         print(f"토큰 OK ({'새로 받음' if sess.calls else '저장된 것'}) · 계좌 형식 OK(상품코드 {sess.prdt})")
         ok = True
+        if a.accounts_only:
+            accounts(sess)
+            print(f"호출 {sess.calls}회 · 한도 초과 뒤 다시 {sess.rate_retries}회")
+            return 0
         if a.market in ("KR", "both"):
             ok = kr(sess, a.kr_code, now) and ok
         if a.market in ("US", "both"):
