@@ -360,8 +360,8 @@
 - **미국 KIS모의투자 키 env**(25.1489): `daily-us.yml` 에 `KIS_VTS_*` 가 빠져 있었다 — 오늘 밤 첫 미국 배치 전에 고침. 13:20 UTC 확인에서 `step_log.broker` 가 `off` 가 아닌지 본다
 - **부서·지주사 판단식 지문**(25.1488, docs/company.md 11장): `company.py`·`holding.py` 논리를 바꾸면 `test_dept_logic_frozen_1488` 이 깨진다 — 판단이 바뀌면 판 표시·H 지문·`dept_param`·infra 를 같은 커밋에서
 - **KIS모의투자 웹 보기**(25.1496·25.1497, docs/paper.md 15.7): A(배치 기록) 들어감 — /paper KIS 칸에 계좌 전체 원화 성과·H 손익 비교·국내/미국 보유·거래내역. 첫 성과는 10-19 국내 배치부터.
-  B(단추로 KIS 조회, 25.1498)도 들어감 — **사용자가 할 일: Vercel 프로젝트 Settings → Environment Variables 에 `KIS_VTS_APP_KEY`·`KIS_VTS_APP_SECRET`·`KIS_VTS_ACCOUNT`(GitHub 시크릿과 같은 값) 넣고 재배포.**
-  넣기 전엔 단추가 "꺼짐". Vercel 에서 모의 포트 29443 으로 나가는지 첫 조회로 확인 `[확인필요]`.
+  B(단추로 KIS 조회, 25.1498)도 들어감 — 사용자가 2026-10-16 Vercel 에 `KIS_VTS_*` 세 개를 넣고 재배포했다(배포 커밋 71654172 = 25.1499).
+  Vercel 에서 모의 포트 29443 으로 나가는지는 사용자의 첫 단추 조회로 확인 `[확인필요]` — "응답 없음 (TypeError/TimeoutError)" 이면 포트가 막힌 것.
   **첫 미국 체결 다음 날 `probe-kis-vts.yml`(accounts) 한 번** — 미국 보유 줄·`ustl_buy/sll_amt_smtl`·국내 D+2 예수금으로 결제 전 하루 총액이 겹치는지 보고 총액 식을 정한다(25.1499 [필수] 1 `[확인필요]`)
 - **웹 입금 취소**(25.1486): 동시 취소 원자화·묵은 환율 모름 — 25.1483 감사 [참고] 6·9 끝. 남은 [참고] 7(같은 키 재전송 409)·8(마이그레이션 중간 글)은 장부에 해가 없어 둔다
 - **KIS모의투자 미국**(25.1485, docs/paper.md 15.6): 첫 미국 배치 뒤 db-status 로 `paper_broker_orders WHERE broker='kis_vts_us'` 의 status·message
