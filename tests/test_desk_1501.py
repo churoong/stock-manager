@@ -97,7 +97,8 @@ def test_write_merges_both_markets(monkeypatch: pytest.MonkeyPatch) -> None:
     지금 = datetime(2026, 10, 15, 23, 40, tzinfo=UTC)  # 10-16 08:40 KST
     기록 = job.write(c, "KR", 지금, trade_date="2026-10-15", session_date="2026-10-16",
                    step_log={"broker": {"sent": {"accepted": 1}}, "paper": {"accounts": {"R1": {"recon_ok": False},
-                                                                                       "B": {"recon_ok": True}}}},
+                                                                                       "B": {"recon_ok": True, "holding": {
+                                                                                           "weights": {"A": 1.1}}}}}},
                    warnings=["포트폴리오 경고"])  # fmt: skip
     assert 기록 == {"as_of": "2026-10-16", "accounts": 2, "checks": 2}
     job.write(c, "US", datetime(2026, 10, 16, 12, 30, tzinfo=UTC), trade_date="2026-10-15", session_date="2026-10-16",
@@ -107,6 +108,8 @@ def test_write_merges_both_markets(monkeypatch: pytest.MonkeyPatch) -> None:
     kr = s["markets"]["KR"]
     assert kr["orders_h"][0]["name"] == "종목1" and kr["orders_h"][0]["reason"].startswith("2부 배분")
     assert kr["orders_by_account"] == {"B": 1}
+    assert kr["holding"] == {"weights": {"A": 1.1}}  # 베끼는 계좌의 지주사 기록 — 연구실 가중치 추이(25.1506)
+    assert s["markets"]["US"]["holding"] is None
     assert any("장부 검산 어긋남: 계좌 R1" in x["text"] for x in kr["checks"])
     assert [r["id"] for r in s["leaderboard"]["rows"]][0] in ("B", "R1")
     # 판 이력 표를 처음 채운다 — 계좌마다 지금 판, since '' (계좌의 처음부터). B 는 1.0 → 1.02 = +2%, R1 은 0%

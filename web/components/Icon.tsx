@@ -23,6 +23,13 @@ const PATHS: Record<IconName, React.ReactNode> = {
       <path d="M3.5 20h17" />
     </>
   ),
+  // 연구실 — 플라스크 (docs/desk.md 5장, 25.1506)
+  lab: (
+    <>
+      <path d="M9.5 3.5h5M10.5 3.5v6L5 18.5a1.5 1.5 0 0 0 1.3 2h11.4a1.5 1.5 0 0 0 1.3-2L13.5 9.5v-6" />
+      <path d="M7.5 15h9" />
+    </>
+  ),
   // 전략(가상모의투자 계좌들) — 과녁
   strategy: (
     <>
