@@ -14,6 +14,7 @@ export async function GET() {
     const rows = rowsToObjects<{ as_of: string; summary_json: string | null; updated_at: string | null }>(result);
     return NextResponse.json({ ready: true, desk: pickDesk(rows) });
   } catch (e) {
-    return NextResponse.json({ error: explain(e instanceof Error ? e.message : String(e)) }, { status: 500 });
+    // 다른 경로와 같은 꼴(`errors` 배열) — 화면이 까닭을 그대로 보인다(25.1503, 검토 2)
+    return NextResponse.json({ errors: [explain(e instanceof Error ? e.message : String(e))] }, { status: 500 });
   }
 }

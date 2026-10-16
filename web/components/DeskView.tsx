@@ -10,6 +10,7 @@ import {
   fillLine,
   kisOffText,
   kisStatusText,
+  notSentText,
   orderLine,
   pctText,
   ppText,
@@ -33,19 +34,25 @@ function tone(v: number | null | undefined): string {
 
 const when = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleString("ko-KR", { dateStyle: "short", timeStyle: "short" }) : "-");
 
-function MarketCard({ m, k, mirror }: { m: DeskMarket & { as_of: string }; k: DeskMarketKey; mirror: string }) {
+export function MarketCard({ m, k, mirror }: { m: DeskMarket & { as_of: string }; k: DeskMarketKey; mirror: string }) {
   const off = kisOffText(m.kis_step);
+  const 안냄 = notSentText(m.kis_step);
+  // 모양이 바뀐 옛 요약에도 터지지 않게 (25.1503, 검토 7)
+  const fills = m.fills_h ?? [];
+  const orders = m.orders_h ?? [];
+  const kisOrders = m.kis_orders ?? [];
   return (
     <section className={CARD}>
       <h2 className="font-semibold">
         {MARKET_LABEL[k]} <span className="text-xs font-normal text-slate-500">실행 {when(m.run_at)} · 판정 {m.trade_date} · 다음 장 {m.session_date}</span>
       </h2>
       <p className="mt-2 text-sm font-medium">{mirror} 체결 (판정한 날 {m.trade_date})</p>
-      {m.fills_h.length ? (
+      {fills.length ? (
         <ul className="mt-1 space-y-0.5 text-sm">
-          {m.fills_h.map((f, i) => (
+          {fills.map((f, i) => (
             <li key={i} className={f.side === "buy" ? "text-red-700 dark:text-red-300" : "text-blue-700 dark:text-blue-300"}>
               {fillLine(f)}
+              {f.fill_date && f.fill_date !== m.trade_date ? <span className="text-xs text-slate-500"> · {f.fill_date} 장(밀린 체결)</span> : null}
             </li>
           ))}
         </ul>
@@ -53,11 +60,12 @@ function MarketCard({ m, k, mirror }: { m: DeskMarket & { as_of: string }; k: De
         <p className="mt-1 text-sm text-slate-500">없음</p>
       )}
       <p className="mt-3 text-sm font-medium">{mirror} 이 {m.session_date} 장에 낼 주문</p>
-      {m.orders_h.length ? (
+      {orders.length ? (
         <ul className="mt-1 space-y-1 text-sm">
-          {m.orders_h.map((o, i) => (
+          {orders.map((o, i) => (
             <li key={i}>
               {orderLine(o)}
+              {o.fill_session && o.fill_session !== m.session_date ? <span className="text-xs text-amber-700 dark:text-amber-400"> · {o.fill_session} 장</span> : null}
               {o.reason ? <span className="block text-xs text-slate-500">{o.reason}</span> : null}
             </li>
           ))}
@@ -70,13 +78,13 @@ function MarketCard({ m, k, mirror }: { m: DeskMarket & { as_of: string }; k: De
       </p>
       <p className="mt-3 text-sm font-medium">KIS모의투자 ({mirror} 베낌)</p>
       {off ? (
-        <p className="mt-1 text-sm text-amber-700 dark:text-amber-400">꺼짐 — {off}</p>
+        <p className="mt-1 text-sm text-amber-700 dark:text-amber-400">보내지 않음 — {off}</p>
       ) : (
         <>
-          <p className="mt-1 text-sm">{kisStatusText(m.kis_orders)}</p>
-          {m.kis_orders.some((o) => o.status !== "accepted" && o.status !== "filled") ? (
+          <p className="mt-1 text-sm">{kisStatusText(kisOrders)}</p>
+          {kisOrders.some((o) => o.status !== "accepted" && o.status !== "filled") ? (
             <ul className="mt-1 space-y-0.5 text-xs text-slate-500">
-              {m.kis_orders
+              {kisOrders
                 .filter((o) => o.status !== "accepted" && o.status !== "filled")
                 .map((o, i) => (
                   <li key={i}>
@@ -87,6 +95,7 @@ function MarketCard({ m, k, mirror }: { m: DeskMarket & { as_of: string }; k: De
           ) : null}
         </>
       )}
+      {안냄 ? <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">안 낸 주문 — {안냄}</p> : null}
     </section>
   );
 }
@@ -121,7 +130,7 @@ export default function DeskView() {
       </section>
     );
 
-  const checks = allChecks(desk.markets);
+  const checks = allChecks(desk.markets, desk.as_of);
   const lb = desk.leaderboard;
   const mirror = desk.mirror_account ?? "H";
   const kis = desk.kis_account;
@@ -138,7 +147,11 @@ export default function DeskView() {
             {checks.map((c, i) => (
               <li key={i} className={c.level === "high" ? "font-medium text-rose-600 dark:text-rose-400" : "text-amber-700 dark:text-amber-400"}>
                 {c.level === "high" ? "● " : "○ "}
-                <span className="text-xs text-slate-500">{MARKET_LABEL[c.market]}</span> {c.text}
+                <span className="text-xs text-slate-500">
+                  {MARKET_LABEL[c.market]}
+                  {c.ran ? ` ${c.ran} 실행` : ""}
+                </span>{" "}
+                {c.text}
               </li>
             ))}
           </ul>
@@ -149,11 +162,12 @@ export default function DeskView() {
 
       <section className={CARD}>
         <h2 className="font-semibold">전략 순위</h2>
-        {lb?.rows.length ? (
+        {lb?.rows?.length ? (
           <>
             <p className="mt-1 text-xs text-slate-500">
               공통 구간 {lb.window_start}부터의 시간가중 수익률 순 · R 대비 = 그 수익률 − 무작위 대조 R1·R2 평균
-              {lb.control_pct != null ? `(${pctText(lb.control_pct)})` : "(대조 기록 없음)"} — 운인가 실력인가
+              {lb.control_pct != null ? `(${pctText(lb.control_pct)})` : "(대조 기록 없음)"} — 운인가 실력인가. 갓 연 계좌(평가 20번 전)는 아래에, 제
+              개설일부터 같은 구간 R 과 견줍니다
             </p>
             <div className="overflow-x-auto">
               <table className="mt-2 w-full min-w-[520px] text-sm">
@@ -173,7 +187,10 @@ export default function DeskView() {
                       <td className="py-1">
                         <b>{r.id}</b> {r.name !== r.id ? <span className="text-xs text-slate-500">{r.name}</span> : null}
                       </td>
-                      <td className="text-xs">{r.kind}</td>
+                      <td className="text-xs">
+                        {r.kind}
+                        {r.young ? <span className="ml-1 text-amber-700 dark:text-amber-400">갓 엶 · {r.open}부터</span> : null}
+                      </td>
                       <td className={`text-right ${tone(r.window_pct)}`}>{pctText(r.window_pct)}</td>
                       <td className={`text-right ${tone(r.vs_r_pp)}`}>{ppText(r.vs_r_pp)}</td>
                       <td className={`text-right ${tone(r.since_open_pct)}`}>{pctText(r.since_open_pct)}</td>

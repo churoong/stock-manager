@@ -15,6 +15,8 @@ export type DeskMarketKey = "KR" | "US";
 export interface DeskRow {
   id: string; name: string; kind: string; open: string; last: string;
   since_open_pct: number; window_pct: number | null; vs_r_pp: number | null;
+  /** 갓 연 계좌 — 제 개설일부터 잰 수익률·같은 구간 R (25.1503). 그 전 요약에는 없다 */
+  young?: boolean;
 }
 export interface DeskLeaderboard { window_start: string | null; control_pct?: number | null; rows: DeskRow[] }
 /** 판 이력 한 줄 (docs/desk.md 3장) — 그 판 첫 결정일 종가부터 다음 판 첫 결정일 종가까지(to 가 null 이면 지금 판) */
@@ -23,10 +25,10 @@ export interface RuleSpan {
   pct: number | null; control_pct: number | null; vs_r_pp: number | null;
 }
 export interface DeskCheck { level: "high" | "normal"; text: string }
-export interface DeskFill { side: string; name: string; ticker: string; quantity: number; price: number; currency: string }
+export interface DeskFill { side: string; name: string; ticker: string; quantity: number; price: number; currency: string; fill_date?: string }
 export interface DeskOrder {
   side: string; name: string; ticker: string; quantity: number; order_type: string; limit_price: number | null;
-  tranche: number | null; currency: string; reason: string;
+  tranche: number | null; currency: string; reason: string; fill_session?: string;
 }
 export interface DeskKisOrder {
   side: string; name: string; quantity: number; order_type: string; limit_price: number | null; status: string;
@@ -94,15 +96,27 @@ export function pickDesk(rows: Array<{ as_of: string; summary_json: string | nul
 
 export const MARKET_LABEL: Record<DeskMarketKey, string> = { KR: "국내", US: "미국" };
 
-/** 확인할 일 — 시장 칸마다 따로 적힌 것을 합친다. 높음이 먼저, 같은 글은 한 번(멈춤 스위치처럼 두 시장에 다 나오는 것) */
-export function allChecks(markets: DeskView["markets"]): Array<DeskCheck & { market: DeskMarketKey }> {
+/** UTC 시각 → 한국 날짜(YYYY-MM-DD). 요약 날짜와 견줄 때 */
+export function kstDate(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const t = new Date(iso);
+  return Number.isNaN(t.getTime()) ? null : t.toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" });
+}
+
+/**
+ * 확인할 일 — 시장 칸마다 따로 적힌 것을 합친다. 높음이 먼저, 같은 글은 한 번(멈춤 스위치처럼 두 시장에 다 나오는 것).
+ * 그 칸이 요약 날짜보다 앞서 돈 실행이면(이어받은 칸 — 미국 휴장·밤 미국 배치 전) `ran` 에 그 실행일 (25.1503)
+ */
+export function allChecks(markets: DeskView["markets"], asOf?: string | null): Array<DeskCheck & { market: DeskMarketKey; ran: string | null }> {
   const 본 = new Set<string>();
-  const out: Array<DeskCheck & { market: DeskMarketKey }> = [];
+  const out: Array<DeskCheck & { market: DeskMarketKey; ran: string | null }> = [];
   for (const m of ["KR", "US"] as const) {
-    for (const c of markets[m]?.checks ?? []) {
+    const 칸 = markets[m];
+    const 날 = kstDate(칸?.run_at);
+    for (const c of 칸?.checks ?? []) {
       if (본.has(c.text)) continue;
       본.add(c.text);
-      out.push({ ...c, market: m });
+      out.push({ ...c, market: m, ran: 날 && asOf && 날 !== asOf ? 날 : null });
     }
   }
   return out.sort((a, b) => Number(a.level !== "high") - Number(b.level !== "high"));
@@ -144,10 +158,21 @@ export function kisStatusText(orders: DeskKisOrder[]): string {
   return 셈.size ? [...셈].map(([s, n]) => `${s} ${n}`).join(" · ") : "낸 주문 없음";
 }
 
-/** KIS 단계가 꺼져 있었으면 그 까닭(키 없음·멈춤 등). 켜져 돌았으면 null */
+/** KIS 단계가 꺼져 있었거나 보내지 않았으면 그 까닭(키 없음·장 끝난 뒤·접수 시작 전 등). 보냈으면 null (25.1503, 검토 1) */
 export function kisOffText(step: Record<string, unknown> | null | undefined): string | null {
-  const off = step?.off;
-  return typeof off === "string" && off ? off : null;
+  for (const k of ["off", "send"] as const) {
+    const v = step?.[k];
+    if (typeof v === "string" && v) return v;
+  }
+  return null;
+}
+
+/** 안 낸 주문 까닭별 건수 — "코드 없음 1 · 멈춤 2". 없으면 null */
+export function notSentText(step: Record<string, unknown> | null | undefined): string | null {
+  const v = step?.not_sent;
+  if (!v || typeof v !== "object") return null;
+  const 줄 = Object.entries(v as Record<string, number>).filter(([, n]) => Number(n) > 0);
+  return 줄.length ? 줄.map(([k, n]) => `${k} ${n}`).join(" · ") : null;
 }
 
 /** 판 이력 한 줄 글 — "판 2 · 2026-10-16~지금 · 주문 34건 · 시간가중 +1.20% (같은 기간 R 평균 +0.40%, R 대비 +0.80%p)" */

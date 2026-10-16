@@ -7,6 +7,9 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { beforeEach, describe, expect, it } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { MarketCard } from "@/components/DeskView";
 import {
   DESK_LATEST,
   EMPTY_DESK,
@@ -15,6 +18,8 @@ import {
   fillLine,
   kisOffText,
   kisStatusText,
+  kstDate,
+  notSentText,
   orderLine,
   pctText,
   pickDesk,
@@ -94,5 +99,44 @@ describe("글", () => {
     expect(kisStatusText([])).toBe("낸 주문 없음");
     expect(kisOffText({ off: "KIS모의투자 키 없음" })).toBe("KIS모의투자 키 없음");
     expect(kisOffText({ sent: { accepted: 1 } })).toBeNull();
+  });
+});
+
+describe("검토 반영 (25.1503)", () => {
+  it("어제 실행의 확인할 일에는 실행일을 붙인다 — 한국 날짜로", () => {
+    const c = allChecks(
+      {
+        KR: { ...market({ run_at: "2026-10-16T23:40:00+00:00", checks: [{ level: "high", text: "가" }] }), as_of: "2026-10-17" },
+        US: { ...market({ run_at: "2026-10-16T13:20:00+00:00", checks: [{ level: "normal", text: "나" }] }), as_of: "2026-10-17" },
+      },
+      "2026-10-17",
+    );
+    expect(c.map((x) => [x.text, x.ran])).toEqual([["가", null], ["나", "2026-10-16"]]);
+    expect(kstDate("2026-10-16T15:00:00Z")).toBe("2026-10-17");
+    expect(kstDate("x")).toBeNull();
+  });
+
+  it("KIS 에 안 보낸 까닭·안 낸 주문", () => {
+    expect(kisOffText({ send: "장 끝난 뒤 — 보내지 않음", sent: {} })).toBe("장 끝난 뒤 — 보내지 않음");
+    expect(notSentText({ not_sent: { "코드 없음": 1, 멈춤: 0 } })).toBe("코드 없음 1");
+    expect(notSentText({})).toBeNull();
+  });
+
+  it("옛 모양 칸(목록 없음)에도 시장 칸이 터지지 않는다 · 밀린 체결·다른 장 주문 표시", () => {
+    const 옛 = { run_at: "2026-10-16T23:40:00+00:00", trade_date: "2026-10-16", session_date: "2026-10-19", as_of: "2026-10-17" } as unknown as DeskMarket & { as_of: string };
+    expect(renderToStaticMarkup(createElement(MarketCard, { m: 옛, k: "KR", mirror: "H" }))).toContain("낸 주문 없음");
+    const 새 = {
+      ...market({
+        trade_date: "2026-10-16", session_date: "2026-10-19", kis_step: { send: "접수 시작 전 — 보내지 않음", not_sent: { "코드 없음": 2 } },
+        fills_h: [{ side: "buy", name: "삼성전자", ticker: "005930", quantity: 1, price: 100, currency: "KRW", fill_date: "2026-10-15" }],
+        orders_h: [{ side: "buy", name: "SK하이닉스", ticker: "000660", quantity: 1, order_type: "limit", limit_price: 100, tranche: 1, currency: "KRW", reason: "r", fill_session: "2026-10-20" }],
+      }),
+      as_of: "2026-10-17",
+    };
+    const html = renderToStaticMarkup(createElement(MarketCard, { m: 새, k: "KR", mirror: "H" }));
+    expect(html).toContain("2026-10-15 장(밀린 체결)");
+    expect(html).toContain("2026-10-20 장");
+    expect(html).toContain("보내지 않음 — 접수 시작 전 — 보내지 않음");
+    expect(html).toContain("안 낸 주문 — 코드 없음 2");
   });
 });

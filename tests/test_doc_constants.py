@@ -942,7 +942,7 @@ class Test이웃_모듈들:
 
     def test_운용_상황실(self) -> None:
         """운용 첫 화면 요약 (docs/desk.md 2장, docs/infra.md 25.1501)."""
-        검사(DESK, f"경고 줄은 {dk.MAX_WARNINGS}줄까지", "확인할 일 경고 줄 상한 (25.1501)")
+        검사(DESK, f"평가가 {dk.MIN_WINDOW_POINTS}번 쌓이기 전", "갓 연 계좌 문턱 (25.1503)")
         검사(DESK, "무작위 대조 R1·R2 평균", "R 대비 기준선 (25.1501)")
         assert dk.CONTROL_IDS == ("R1", "R2")
 
