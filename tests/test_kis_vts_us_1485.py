@@ -247,3 +247,17 @@ def test_reconcile_same_qty_tranches_by_price() -> None:
     assert kv.parse_us_executions({"rt_cd": "0", "output": [
         {"ord_dt": "20261016", "odno": "1", "sll_buy_dvsn_cd": "02", "pdno": "AAPL", "ft_ord_qty": "2",
          "ft_ccld_qty": "0", "ft_ord_unpr3": "101.00000"}]})[0].price == 101.0  # fmt: skip
+
+
+def test_rate_limit_retries_reads_not_orders(monkeypatch: pytest.MonkeyPatch) -> None:
+    """모의는 첫 호출부터 EGW00201(초당 거래건수 초과)을 준 적이 있다(2026-10-16 시험) — 조회는 기다렸다 다시, 주문은 다시 보내지 않는다 (25.1494)."""
+    한도 = {"rt_cd": "1", "msg_cd": "EGW00201", "msg1": "초당 거래건수를 초과하였습니다."}
+    s, http = _세션(monkeypatch, [(한도, ""), (한도, ""), ({"rt_cd": "0", "output1": []}, "")] * 3)
+    잠 = []
+    s.sleep = 잠.append
+    s.balance_us()
+    assert s.rate_retries >= 2 and kv.RATE_WAITS[0] in 잠 and kv.RATE_WAITS[1] in 잠
+    s, http = _세션(monkeypatch, [(한도, "")])
+    with pytest.raises(KisFailed, match="EGW00201"):
+        s.order_us("buy", "AAPL", "NASD", 1, 100.0)
+    assert len(http.sent) == 1 and s.rate_retries == 0

@@ -156,7 +156,7 @@ def main() -> int:
             ok = kr(sess, a.kr_code, now) and ok
         if a.market in ("US", "both"):
             ok = us(sess, a.us_code, a.us_exchange, datetime.now(UTC)) and ok
-        print(f"호출 {sess.calls}회 · 결과 {'통과' if ok else '확인 필요'}")
+        print(f"호출 {sess.calls}회 · 한도 초과 뒤 다시 {sess.rate_retries}회 · 결과 {'통과' if ok else '확인 필요'}")
     return 0 if ok else 1
 
 

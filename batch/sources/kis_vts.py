@@ -58,8 +58,13 @@ US_EXCHANGE = {"NASDAQ": "NASD", "NYSE": "NYSE", "NYSE American": "AMEX", "NYSE 
 ORDER_PATH = "/uapi/domestic-stock/v1/trading/order-cash"
 BALANCE_PATH = "/uapi/domestic-stock/v1/trading/inquire-balance"
 CCLD_PATH = "/uapi/domestic-stock/v1/trading/inquire-daily-ccld"
-#: 호출 사이 최소 간격(초) — 공식 예제의 모의 간격 0.5초보다 넉넉히. 하루 수십 건이라 느려도 몇십 초다
-MIN_INTERVAL = 0.6
+#: 호출 사이 최소 간격(초) — 공식 예제의 모의 간격 0.5초보다 넉넉히. 하루 수십 건이라 느려도 몇십 초다.
+#: 0.6 이던 것을 2026-10-16 시험에서 첫 호출부터 `EGW00201`(초당 거래건수 초과)을 받아 1.0 으로 (25.1494)
+MIN_INTERVAL = 1.0
+#: 조회(GET)가 `EGW00201` 을 받으면 이만큼 기다렸다 다시 — 공식 예제 backtester 는 61초("한도 초기화 대기") 뒤 다시
+#: (`kis_backtest/providers/kis/data.py` L12-14). 주문(POST)은 다시 보내지 않는다 — 두 번 주문 위험보다 거부 기록이 낫다
+RATE_LIMIT_CODE = "EGW00201"
+RATE_WAITS = (1.5, 61.0)
 #: 연속 조회(다음 쪽) 최대 — 잔고는 모의에서 한 번에 20건(inquire_balance.py L118 주석)
 MAX_PAGES = 10
 #: 체결 조회 쪽 최대 — 모의는 한 쪽에 15건쯤이라(검증 보고) 며칠 밀린 맞추기도 담게 넉넉히
@@ -287,6 +292,7 @@ class Session:
         self.http = http or requests.Session()
         self.sleep = sleep
         self.calls = 0
+        self.rate_retries = 0
         self._last = 0.0
         token, issued = kis.access_token(client, now or datetime.now(UTC), base=BASE, name=TOKEN_NAME,
                                          key_env=KEY_ENV, secret_env=SECRET_ENV, source=SOURCE)  # fmt: skip
@@ -303,7 +309,7 @@ class Session:
         self._last = time.monotonic()
 
     def _call(self, method: str, path: str, tr: str, *, params: dict | None = None, body: dict | None = None,
-              tr_cont: str = "") -> tuple[object, str]:  # fmt: skip
+              tr_cont: str = "", _retry: int = 0) -> tuple[object, str]:  # fmt: skip
         self._wait()
         url = _check_url(BASE + path, tr)
         headers = self.head | {"tr_id": tr, "tr_cont": tr_cont}
@@ -323,6 +329,10 @@ class Session:
             payload = None
         if not isinstance(payload, dict):
             raise NoResponse(f"모의 HTTP {r.status_code} — JSON 아님")
+        if method == "GET" and str(payload.get("msg_cd") or "") == RATE_LIMIT_CODE and _retry < len(RATE_WAITS):
+            self.sleep(RATE_WAITS[_retry])
+            self.rate_retries += 1
+            return self._call(method, path, tr, params=params, body=body, tr_cont=tr_cont, _retry=_retry + 1)
         return payload, str(getattr(r, "headers", {}).get("tr_cont", "") or "")
 
     def order(self, side: str, code: str, quantity: int, price: float | None) -> Accepted:
