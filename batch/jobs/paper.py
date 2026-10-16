@@ -1511,13 +1511,16 @@ def run_step(
         if db.quota_reason(exc):
             raise
         기록["virtual_control"] = {"error": str(exc)[:200]}
-    # 성과 분해 (25.1450) — 계좌마다 오늘 평가 행에. 곁다리
-    try:
-        for acct in accounts:
+    # 성과 분해 (25.1450) — 계좌마다 오늘 평가 행에. 곁다리. **계좌마다 따로 잡는다** — 한 try 로 묶여 있어 A~G 하나가
+    # 실패하면 일곱째인 H 의 결정 단위 증거가 그날 비어 관문·챔피언 비교가 "모름" 이 됐다(25.1523, 검토 3)
+    for acct in accounts:
+        try:
             a = save_attribution(client, str(acct["id"]), 오늘, int(acct["rule_version"]))
             기록.setdefault("attribution_n", {})[str(acct["id"])] = a["selection"]["n"]
-    except Exception as exc:  # noqa: BLE001 — 분해만 빠진다
-        기록["attribution_error"] = str(exc)[:200]
+        except Exception as exc:  # noqa: BLE001 — 그 계좌 분해만 빠진다
+            if db.quota_reason(exc):
+                raise
+            기록.setdefault("attribution_error", {})[str(acct["id"])] = str(exc)[:200]
     if 읽기0 is not None:
         기록["reads"] = getattr(client.reads, "total", 0) - 읽기0
     머리 = ["🧪 가상모의투자 " + " · ".join(글 for 글 in 줄 if not 글.startswith("⚠️"))]

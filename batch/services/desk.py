@@ -136,8 +136,9 @@ PREREG: dict[tuple[str, int], dict[str, Any]] = {
     ("H", 1): {"hypothesis": "회사들의 성적 가중 합의로 고르면 점수 상위 5(G)보다 낫다 — 실전 후보(KIS 가 베낌)",
                "retro": True},
     ("R1", 1): {"hypothesis": "대조 — 가설 없음(같은 유니버스에서 무작위로 고르면 이만큼은 난다는 기준선)",
+                "metric": "대조 — 판정 없음", "retro": True},
+    ("R2", 1): {"hypothesis": "대조 — 가설 없음(R1 과 다른 씨앗의 무작위)", "metric": "대조 — 판정 없음",
                 "retro": True},
-    ("R2", 1): {"hypothesis": "대조 — 가설 없음(R1 과 다른 씨앗의 무작위)", "retro": True},
 }
 #: 사전 등록 판의 공통 지표·판정 — 판마다 다르면 줄에 `metric`·`judge` 를 따로 적는다
 PREREG_METRIC = "결정 단위 선정 하한 > 50(28일 묶음 6개 뒤) · 관문 구간 지수 대비 > 0 · R 대비 > 0"
@@ -184,22 +185,41 @@ def _수익률들(v: list[tuple[str, float]]) -> list[float]:
     return [b / a - 1 for (_d1, a), (_d2, b) in zip(v, v[1:], strict=False) if a > 0 and b > 0]
 
 
-def index_return(rows: list[tuple[str, float | None, float | None, float]], start: str) -> float | None:
-    """지수 그림자 반반 수익률(%) — `start` 이하 마지막 행부터 마지막 행까지 (docs/desk.md 6장, 25.1519).
+def index_return(
+    rows: list[tuple[str, float | None, float | None, float]], start: str,
+) -> tuple[float | None, list[str]]:
+    """지수 그림자 수익률(%)과 쓴 지수 — `start` 이하 마지막 행부터 마지막 행까지 **행마다 이어 곱한다**
+    (docs/desk.md 6장).
 
-    그림자(docs/paper.md 4장)는 입금 날마다 그 돈으로 지수를 더 산 값이라 그 사이 입금(총 입금 차이)을 끝 값에서 뺀다.
-    KOSPI·S&P500 각각 (끝 − 입금 차이) ÷ 시작 − 1 의 평균 — 한쪽만 있으면 그쪽만. 둘 다 배당 빠진 가격지수라 기준이
-    연 1~2% 낮게 나온다(관문에 유리한 쪽 `[확인필요]`)
+    그림자(docs/paper.md 4장)는 입금마다 그 입금일 지수로 단위를 산 값이다. 처음(25.1519)에는
+    (끝 − 구간 입금) ÷ 시작 − 1 한 번으로 냈는데, 그러면 구간 중 입금이 입금 뒤에 낸 지수 수익이 시작 값을 분모로
+    한 번 더 들어갔다 — 1천만에 한 달 뒤 1천만 더 넣고 지수 +10% 면 +20% 로 나와 지수와 똑같은 전략이 관문에서
+    떨어지고, 지수 −10% 면 −20% 로 나와 지수와 같은 전략이 관문을 **잘못 통과**했다(25.1523, 검토 1).
+    행마다 (그날 그림자 − 그날 입금 증가) ÷ 전날 그림자 를 곱하면 입금은 그날 지수로 산 몫이라 빠진다
+    (입금일과 행 날짜가 하루 어긋나는 오차만 남는다). 취소 날은 원래 단위를 원래 값으로 되돌려 오차가 남는다
+    (취소는 모든 계좌에 현금이 남아야 돼서 드물다 `[확인필요]`).
+    KOSPI·S&P500 각각 이어 곱해 평균 — 한쪽 그림자가 빈 행이 있으면 그쪽은 뺀다(쓴 지수를 함께 돌려준다, 검토 2).
+    둘 다 배당 빠진 가격지수라 기준이 연 1~2% 낮게 나온다(관문에 유리한 쪽 `[확인필요]`)
     """
     v = sorted(rows)
-    앞 = [r for r in v if r[0] <= start]
-    if not 앞 or not v:
-        return None
-    a, b = 앞[-1], v[-1]
-    입금차 = float(b[3]) - float(a[3])
-    수익 = [(float(b[i]) - 입금차) / float(a[i]) - 1 for i in (1, 2)
-          if a[i] is not None and b[i] is not None and float(a[i]) > 0]  # fmt: skip
-    return sum(수익) / len(수익) * 100 if 수익 else None
+    앞 = [k for k, r in enumerate(v) if r[0] <= start]
+    if not 앞:
+        return None, []
+    구간 = v[앞[-1]:]
+    이름 = {1: "KOSPI", 2: "S&P500"}
+    수익: dict[int, float] = {}
+    for i in (1, 2):
+        곱 = 1.0
+        for a, b in zip(구간, 구간[1:], strict=False):
+            if a[i] is None or b[i] is None or float(a[i]) <= 0:
+                break
+            곱 *= (float(b[i]) - (float(b[3]) - float(a[3]))) / float(a[i])
+        else:
+            if 구간[0][i] is not None and float(구간[0][i]) > 0:
+                수익[i] = (곱 - 1) * 100
+    if not 수익:
+        return None, []
+    return sum(수익.values()) / len(수익), [이름[i] for i in sorted(수익)]
 
 
 def risk_ratio(v: list[tuple[str, float]], start: str | None = None) -> float | None:
@@ -241,7 +261,7 @@ def gate(
     대조 = [x for r in CONTROL_IDS if 시작 and (x := risk_ratio(sorted(series.get(r) or []), 시작)) is not None]
     대조비 = sum(대조) / len(대조) if 대조 else None
     내비 = risk_ratio(전체, 시작) if 시작 else None
-    지수 = index_return(index or [], 시작) if 시작 else None
+    지수, 쓴지수 = index_return(index or [], 시작) if 시작 else (None, [])
     vs_idx = pct - 지수 if pct is not None and 지수 is not None else None
     kept, kn = (kis or {}).get("kept_pct"), int((kis or {}).get("n") or 0)
     ev = evidence or {}
@@ -252,7 +272,7 @@ def gate(
          "ok": len(v) >= GATE_MIN_POINTS},
         {"key": "vs_r", "label": "관문 구간 R 대비(%p)", "now": vs_r, "target": 0, "ok": vs_r is not None and vs_r > 0},
         {"key": "vs_index", "label": "관문 구간 지수 대비(%p) — 같은 돈을 KOSPI·S&P500 반반에 넣었다면",
-         "now": vs_idx, "target": 0, "index_pct": 지수, "ok": vs_idx is not None and vs_idx > 0},
+         "now": vs_idx, "target": 0, "index_pct": 지수, "index_used": 쓴지수, "ok": vs_idx is not None and vs_idx > 0},
         {"key": "ratio", "label": "변동성 대비 수익 — 무작위 대조 평균보다", "now": 내비, "target": 대조비,
          "ok": 내비 is not None and 대조비 is not None and 내비 > 대조비},
         {"key": "incidents", "label": f"운영 무사고(최근 {GATE_INCIDENT_DAYS}일 장부 검산 어긋남·일일 배치 실패)",

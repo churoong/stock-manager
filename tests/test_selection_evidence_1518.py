@@ -17,10 +17,16 @@ def test_t_quantile_matches_table() -> None:
 
 
 def test_block_bound_by_hand() -> None:
-    """묶음 평균 50·60·70·80 → 평균 65, 표준편차 12.91, 표준오차 6.455, 하한 65 − 2.353×6.455 = 49.81"""
-    x = pp.block_bound({1: 50.0, 2: 60.0, 3: 70.0, 4: 80.0})
+    """떨어진 묶음 50·60·70·80 → 평균 65, 표준편차 12.91, 표준오차 6.455, 하한 65 − 2.353×6.455 = 49.81.
+    이웃한 묶음이면 시차 1 공분산(125/3)을 더한다(25.1523 검토 4): 분산 166.7 + 41.7 = 208.3 → 표준오차 7.217, 하한 48.02"""
+    x = pp.block_bound({1: 50.0, 3: 60.0, 5: 70.0, 7: 80.0})
     assert x["n_blocks"] == 4 and x["mean"] == pytest.approx(65.0)
     assert x["se"] == pytest.approx(6.455, rel=1e-3) and x["lower"] == pytest.approx(65 - 2.353 * 6.455, abs=0.05)
+    y = pp.block_bound({1: 50.0, 2: 60.0, 3: 70.0, 4: 80.0})
+    assert y["se"] == pytest.approx(7.217, rel=1e-3) and y["lower"] == pytest.approx(65 - 2.353 * 7.217, abs=0.05)
+    # 음의 상관이면 넓히기만 하고 좁히지 않는다
+    z = pp.block_bound({1: 50.0, 2: 80.0, 3: 60.0, 4: 70.0})
+    assert z["se"] == pytest.approx(6.455, rel=1e-3)
     assert pp.block_bound({1: 50.0, 2: 60.0, 3: 70.0})["lower"] is None  # 묶음 셋 — 하한 안 냄
     assert pp.block_bound({})["mean"] is None
 
@@ -30,8 +36,9 @@ def _d(kind: str, day: str, ret: float, *, reason: str = "r", market: str = "KR"
             "stock_id": hash((kind, day, ret, reason)) % 10_000}  # fmt: skip
 
 
-def test_selection_evidence_same_day_pool() -> None:
+def test_selection_evidence_same_day_pool(monkeypatch: pytest.MonkeyPatch) -> None:
     """같은 날 같은 시장 새 후보 안 분위 — 시장 전체가 오른 몫은 빠진다"""
+    monkeypatch.setattr(pp, "EVIDENCE_BLOCK_MIN_DAYS", 1)  # 이 시험은 묶음 하나에 날 하나
     rows = [
         # 10-01 국내: 산 것 +5 · 후보 +1·+2·+3·+10 → 3/4 = 75
         _d("buy", "2026-10-01", 5.0), *[_d("skip", "2026-10-01", r) for r in (1.0, 2.0, 3.0, 10.0)],
@@ -48,7 +55,8 @@ def test_selection_evidence_same_day_pool() -> None:
     assert sorted(e["excess_blocks"].values()) == [pytest.approx(2.0), pytest.approx(5.0)]
 
 
-def test_selection_evidence_ties_and_missing() -> None:
+def test_selection_evidence_ties_and_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(pp, "EVIDENCE_BLOCK_MIN_DAYS", 1)
     rows = [_d("buy", "2026-10-01", 2.0), *[_d("skip", "2026-10-01", r) for r in (2.0, 2.0, 1.0, 3.0)],
             {**_d("skip", "2026-10-01", 0.0), "ret_20d": None}]  # fmt: skip
     e = pp.selection_evidence(rows)
@@ -103,15 +111,28 @@ def test_champion_needs_paired_decision_evidence_with_bonferroni() -> None:
 # ── 관문 지수 대비 (25.1519) ─────────────────────────────────────────────────
 
 
-def test_index_return_by_hand_with_deposit() -> None:
-    """시작 KOSPI 그림자 1,000(입금 1,000) → 끝 1,650(그 사이 입금 500 → 그 돈만큼 빼면 1,150) = +15%,
-    S&P 1,000 → 1,550 − 500 = +5% → 반반 +10%. 한쪽이 비면 다른 쪽만"""
+def test_index_return_chains_through_deposits() -> None:
+    """1천만으로 시작(지수 100) → 한 달 뒤 지수 그대로 1천만 더 입금 → 지수 +10%. 그림자 1천만 → 2천만 → 2,200만.
+    지수 수익은 +10% — 처음 식((끝 − 구간 입금) ÷ 시작 − 1)은 +20% 로 냈다(25.1523 검토 1). 지수 −10% 면 −10%"""
     from batch.services import desk
 
-    rows = [("2026-01-01", 1000.0, 1000.0, 1000.0), ("2026-02-01", 1200.0, None, 1000.0), ("2026-03-01", 1650.0, 1550.0, 1500.0)]
-    assert desk.index_return(rows, "2026-01-15") == pytest.approx(10.0)
-    assert desk.index_return([(d, k, None, i) for d, k, _s, i in rows], "2026-01-01") == pytest.approx(15.0)
-    assert desk.index_return(rows, "2025-12-31") is None  # 시작 앞 행 없음
+    오름 = [("2026-01-01", 1e7, 1e7, 1e7), ("2026-02-01", 2e7, 2e7, 2e7), ("2026-03-01", 2.2e7, 2.2e7, 2e7)]
+    assert desk.index_return(오름, "2026-01-01") == (pytest.approx(10.0), ["KOSPI", "S&P500"])
+    내림 = [*오름[:2], ("2026-03-01", 1.8e7, 1.8e7, 2e7)]  # 지수 100 → 90
+    assert desk.index_return(내림, "2026-01-01")[0] == pytest.approx(-10.0)
+    # S&P 그림자가 가운데 빈 행이 있으면 그쪽은 빼고 KOSPI 만(쓴 지수를 알린다, 검토 2)
+    구멍 = [오름[0], ("2026-02-01", 2e7, None, 2e7), 오름[2]]
+    assert desk.index_return(구멍, "2026-01-01") == (pytest.approx(10.0), ["KOSPI"])
+    assert desk.index_return(오름, "2025-12-31") == (None, [])  # 시작 앞 행 없음
+
+
+def test_block_min_days() -> None:
+    """결정일이 셋 못 되는 묶음은 세지 않는다 — 끝 묶음 하루치가 같은 무게를 받지 않게(검토 5)"""
+    rows = []
+    for d in ("2026-10-01", "2026-10-02", "2026-10-05", "2026-12-01"):  # 앞 묶음 셋, 뒤 묶음 하루
+        rows += [_d("buy", d, 5.0), *[_d("skip", d, r) for r in (1.0, 2.0, 9.0)]]
+    e = pp.selection_evidence(rows)
+    assert e["days"] == 4 and e["n_blocks"] == 1
 
 
 def test_gate_vs_index_item() -> None:
@@ -130,6 +151,7 @@ def test_gate_vs_index_item() -> None:
     assert 칸(1100.0)["vs_index"]["ok"] and 칸(1100.0)["vs_r"]["ok"]
     지 = 칸(1200.0)
     assert 지["vs_r"]["ok"] and not 지["vs_index"]["ok"] and 지["vs_index"]["index_pct"] == pytest.approx(20.0)
+    assert 지["vs_index"]["index_used"] == ["KOSPI", "S&P500"]
     assert desk.gate(s, "H", recon_bad_days=0, batch_failed=0, kis=None)["items"][2]["now"] is None  # 그림자 없음 → 모름
 
 
@@ -155,3 +177,33 @@ def test_rule_history_carries_prereg() -> None:
     assert h["H"][0]["prereg"]["hypothesis"].startswith("회사들의 성적 가중 합의") and h["H"][0]["prereg"]["retro"]
     assert h["H"][0]["prereg"]["metric"] == desk.PREREG_METRIC
     assert h["Z"][0]["prereg"] is None  # 등록 없이 연 판
+
+
+#: 장치 전에 연 판(retro) 13줄의 지문 — 한 번 적은 줄은 고치지 않는다(docs/paper.md 2.5). 결과를 보고 가설 글을 고치면 여기서 깨진다.
+#: 새 판은 새 줄로 더하고(retro 없이) 이 지문은 그대로 둔다 (25.1523 검토 6)
+RETRO_KEYS = {("A", 1), ("C", 1), ("D", 1), ("E", 1), ("A", 2), ("C", 2), ("D", 2), ("E", 2), ("B", 1), ("G", 1), ("H", 1),
+              ("R1", 1), ("R2", 1)}  # fmt: skip
+RETRO_FINGERPRINT = "5040c7aa6ed2dff720f589ced978095b1a3415025bab2e0484d2de989b2a6db9"
+
+
+def test_prereg_lines_are_frozen() -> None:
+    import hashlib
+    import json
+
+    from batch.services import desk
+
+    assert {k for k, v in desk.PREREG.items() if v.get("retro")} == RETRO_KEYS  # 새 판에 retro 를 붙이지 않는다
+    줄 = sorted((f"{a}|{v}", json.dumps(e, ensure_ascii=False, sort_keys=True)) for (a, v), e in desk.PREREG.items()
+               if (a, v) in RETRO_KEYS)  # fmt: skip
+    assert hashlib.sha256(json.dumps(줄, ensure_ascii=False).encode()).hexdigest() == RETRO_FINGERPRINT
+
+
+def test_attribution_saved_per_account() -> None:
+    """한 계좌의 성과 분해가 실패해도 다른 계좌(H)의 증거는 적힌다 — 계좌마다 따로 잡는다(25.1523 검토 3)"""
+    import inspect
+
+    from batch.jobs import paper as pj
+
+    원문 = inspect.getsource(pj)
+    i = 원문.index("    for acct in accounts:\n        try:\n            a = save_attribution(")
+    assert "기록.setdefault(\"attribution_error\", {})[str(acct[\"id\"])]" in 원문[i:i + 800]

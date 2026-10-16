@@ -934,6 +934,7 @@ class Test이웃_모듈들:
         검사(PAPER, f"새 후보가 {pp.EVIDENCE_MIN_POOL}개(`EVIDENCE_MIN_POOL`)보다", "결정 단위 풀 하한 (25.1518)")
         검사(PAPER, f"{pp.EVIDENCE_BLOCK_DAYS} 달력일(`EVIDENCE_BLOCK_DAYS`)", "결정 단위 묶음 (25.1518)")
         검사(PAPER, f"묶음이 {pp.EVIDENCE_MIN_BLOCKS}개(`EVIDENCE_MIN_BLOCKS`)", "결정 단위 최소 묶음 (25.1518)")
+        검사(PAPER, f"결정일이 {pp.EVIDENCE_BLOCK_MIN_DAYS}일(`EVIDENCE_BLOCK_MIN_DAYS`)", "묶음 최소 결정일 (25.1523)")
         검사(PAPER, f"한쪽 {round((1 - pp.EVIDENCE_ALPHA) * 100)}%(`EVIDENCE_ALPHA`)", "결정 단위 유의수준 (25.1518)")
         검사(DESK, "50(`GATE_SEL_NULL`", "관문 결정 단위 기준 (25.1518)")
         assert dk.GATE_SEL_NULL == 50.0

@@ -12,6 +12,8 @@ describe("결정 단위 선정 증거", () => {
     );
     expect(gateNowText({ key: "selection", label: "", now: null, target: 50, ok: false, n: 2 })).toBe("모름");
     expect(gateNowText({ key: "vs_index", label: "", now: -3.5, target: 0, ok: false, index_pct: 8 })).toBe("-3.50%p (지수 반반 +8.00%) / 0 초과");
+    expect(gateNowText({ key: "vs_index", label: "", now: 1, target: 0, ok: true, index_pct: 8, index_used: ["KOSPI"] })).toBe("+1.00%p (지수 KOSPI만 +8.00%) / 0 초과");
+    expect(gateNowText({ key: "selection", label: "", now: null, target: 50, ok: false, n: 2, mean: 58 })).toBe("하한 모름(평균 58.0, 28일 묶음 2) / 50 초과");
   });
 
   it("챔피언 줄 — 짝 차이·근거 부족·옛 요약", () => {

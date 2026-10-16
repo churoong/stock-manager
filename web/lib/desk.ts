@@ -48,7 +48,7 @@ export interface DeskKisAccount {
   perf: import("@/lib/kisPaper").KisPerf | null;
 }
 /** 실전 전환 1단계 관문 (docs/desk.md 6장, 25.1508) — 읽기 전용. 넘어도 아무것도 열리지 않는다 */
-export interface GateItem { key: string; label: string; now: number | null; target: number | null; ok: boolean; n?: number; mean?: number | null; index_pct?: number | null; detail?: Record<string, number> }
+export interface GateItem { key: string; label: string; now: number | null; target: number | null; ok: boolean; n?: number; mean?: number | null; index_pct?: number | null; index_used?: string[]; detail?: Record<string, number> }
 export interface Gate { stage: number; account: string; version?: number | null; from?: string | null; items: GateItem[]; passed: boolean; next: string }
 
 /**
@@ -268,6 +268,8 @@ export function rowsById(lb: DeskLeaderboard | null | undefined): Map<string, De
 
 /** 관문 칸의 지금 값 글 — 칸마다 단위가 다르다 */
 export function gateNowText(i: GateItem): string {
+  // 결정 단위 — 묶음이 4개 전이라 하한이 없어도 평균·묶음 수는 보인다(25.1523 검토 7)
+  if (i.key === "selection" && i.now == null && i.mean != null) return `하한 모름(평균 ${i.mean.toFixed(1)}, 28일 묶음 ${i.n ?? 0}) / ${i.target ?? 50} 초과`;
   if (i.now == null) return "모름";
   switch (i.key) {
     case "days":
@@ -276,7 +278,8 @@ export function gateNowText(i: GateItem): string {
       return `${ppText(i.now)} / 0 초과`;
     case "vs_index":
       // 같은 돈을 KOSPI·S&P500 반반에 넣었다면(25.1519) — 지수 쪽 수익률을 같이
-      return `${ppText(i.now)} (지수 반반 ${pctText(i.index_pct)}) / 0 초과`;
+      // 한쪽 그림자가 비면 그쪽은 빠진다 — 어느 지수를 썼는지 적는다(25.1523 검토 2)
+      return `${ppText(i.now)} (지수 ${i.index_used?.length === 1 ? `${i.index_used[0]}만` : "반반"} ${pctText(i.index_pct)}) / 0 초과`;
     case "ratio":
       return `${i.now.toFixed(3)} / R 평균 ${i.target == null ? "모름" : i.target.toFixed(3)}`;
     case "incidents":

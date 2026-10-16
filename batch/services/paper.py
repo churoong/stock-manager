@@ -891,6 +891,9 @@ EVIDENCE_MIN_POOL = 3
 EVIDENCE_BLOCK_DAYS = 28
 #: 하한을 내는 최소 묶음 수 — 자유도 3 아래면 t 분위 근사(Cornish–Fisher)가 크게 틀린다
 EVIDENCE_MIN_BLOCKS = 4
+#: 묶음 하나로 세려면 결정일이 이만큼 있어야 한다 — 앞뒤 끝 묶음이 하루치여도 같은 무게를 받아 "묶음 6개 ≈ 반년" 이
+#: 석 달 남짓에 찼다(25.1523, 검토 5)
+EVIDENCE_BLOCK_MIN_DAYS = 3
 #: 한쪽 유의수준 — 하한 = 평균 − t(1−α, n−1) × 표준오차
 EVIDENCE_ALPHA = 0.05
 
@@ -917,7 +920,14 @@ def block_bound(values: dict[int, float], alpha: float = EVIDENCE_ALPHA) -> dict
     m = sum(xs) / n
     if n < 2:
         return {"n_blocks": n, "mean": m, "se": None, "lower": None}
-    se = (sum((x - m) ** 2 for x in xs) / (n - 1)) ** 0.5 / n**0.5
+    분산 = sum((x - m) ** 2 for x in xs) / (n - 1)
+    # 이웃 묶음끼리 상관 보정(뉴이–웨스트 시차 1, 바틀렛 가중 1/2) — 28일 묶음과 20 거래일 수익 창이 거의 같은 길이라
+    # 이웃 묶음 평균이 겹친다(ρ≈0.25 어림, 25.1523 검토 4). 더 커질 때만 쓴다(작아지는 쪽으로는 고치지 않는다)
+    키 = sorted(values)
+    짝 = [(values[a] - m) * (values[b] - m) for a, b in zip(키, 키[1:], strict=False) if b == a + 1]
+    if 짝:
+        분산 = max(분산, 분산 + 2 * 0.5 * sum(짝) / (n - 1))
+    se = 분산**0.5 / n**0.5
     lower = m - t_quantile(1 - alpha, n - 1) * se if n >= EVIDENCE_MIN_BLOCKS else None
     return {"n_blocks": n, "mean": m, "se": se, "lower": lower}
 
@@ -963,7 +973,7 @@ def selection_evidence(decisions: list[dict[str, Any]]) -> dict[str, Any]:
               for b in g["buy"]]  # fmt: skip
         분위묶음.setdefault(_묶음(day), []).append(sum(분위) / len(분위))
         쓴날 += 1
-    블록 = {k: sum(v) / len(v) for k, v in 분위묶음.items()}
+    블록 = {k: sum(v) / len(v) for k, v in 분위묶음.items() if len(v) >= EVIDENCE_BLOCK_MIN_DAYS}
     초과 = {k: sum(v) / len(v) for k, v in 초과묶음.items()}
     return {"horizon": ATTRIBUTION_HORIZON, "days": 쓴날, **block_bound(블록),
             "blocks": {str(k): v for k, v in sorted(블록.items())},
