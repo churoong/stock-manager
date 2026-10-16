@@ -472,3 +472,10 @@ def test_partial_keys_are_named_and_alerted() -> None:
     assert "KIS_VTS_APP_SECRET" in (daily._kis_알림문({"off": "x", "missing": ["KIS_VTS_APP_SECRET"]}) or "")
     assert "실패" in (daily._kis_알림문({"error": "토큰 HTTP 403"}) or "")
     assert daily._kis_알림문({"off": "KIS모의투자 키 없음"}) is None and daily._kis_알림문({"sent": {}}) is None
+
+
+def test_plan_skips_frozen_mirror_orders() -> None:
+    """기업행위 경계 종목은 정리뿐 아니라 베낀 주문도 내지 않는다 — 분할 전 수량으로 증권사에서만 팔린다 (25.1495, 감사 [참고] 1)."""
+    낼것, 안냄 = bm.plan([_o(11, 3, "sell", 2, None), _o(12, 1, "buy", 1, 9_800.0)], {1: "005930", 3: "000660"}, {3: 2},
+                       {3: (2, 2)}, {3}, already=set(), cleaned_today=set(), halted=False, frozen={3})  # fmt: skip
+    assert [x.paper_order_id for x in 낼것] == [12] and 안냄 == [(11, 3, "기업행위 경계 — 베끼지 않음")]

@@ -93,6 +93,11 @@ def plan(
         if not code:
             안냄.append((oid, sid, "종목 코드 없음"))
             continue
+        if sid in (frozen or set()):
+            # 기업행위 경계 종목 — 가상모의투자는 다음 날 그 주문을 멈춤으로 닫는다(jobs/paper). 분할 전 수량으로
+            # 증권사에서만 팔리지 않게 베끼지도 않는다(25.1495, 감사 [참고] 1)
+            안냄.append((oid, sid, "기업행위 경계 — 베끼지 않음"))
+            continue
         시장가 = o.get("order_type") == "market" or o.get("limit_price") is None
         # 매수 지정가는 호가 단위로 내린다 — 내부 회차 가격은 이미 호가 단위지만(25.657), 어긋나면 증권사가 거부한다
         가격 = (대신가(sid, str(o["side"])) if 시장가

@@ -113,7 +113,7 @@ export interface BrokerSummary {
 export interface BrokerLatest { as_of: string; diff: Record<string, [number, number]>; summary: BrokerSummary | null }
 /** 비교 요약을 사람이 읽는 줄로 — 배치(`services/broker_mirror.compare_lines`)와 같은 글. 값은 배치가 낸 그대로 */
 export function brokerLines(b: BrokerLatest | null | undefined): string[] {
-  if (!b) return ["아직 연결 전입니다 — KIS모의투자 키를 넣으면 다음 국내 배치부터 H(지주사)의 주문을 베껴 냅니다 (docs/paper.md 15장)."];
+  if (!b) return ["아직 이 시장의 KIS모의투자 기록이 없습니다 — 그 시장 일일 배치가 처음 돌면 H(지주사)의 주문을 베껴 내고 잔고를 적습니다 (docs/paper.md 15장)."];
   const s = b.summary;
   const out: string[] = [];
   if (s?.n) {
@@ -124,7 +124,7 @@ export function brokerLines(b: BrokerLatest | null | undefined): string[] {
     const 까닭 = Object.entries(s.reject_reasons ?? {});
     if (까닭.length) out.push(`거부 까닭: ${까닭.map(([k, v]) => `${k} ${v}`).join(" · ")}`);
   } else {
-    out.push("아직 끝난 베낀 주문이 없습니다 — 낸 다음 거래일 아침 배치가 체결을 맞춥니다.");
+    out.push("아직 끝난 베낀 주문이 없습니다 — 낸 다음 거래일의 같은 시장 배치가 체결을 맞춥니다.");
   }
   // 배치 `compare_lines` 와 같은 끝 줄 — 모름(보냈는지 모르는 주문)·정리 주문 (25.1483, 감사 [권장] 4)
   const 끝 = [] as string[];

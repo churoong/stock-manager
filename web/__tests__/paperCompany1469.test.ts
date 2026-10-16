@@ -78,7 +78,7 @@ describe("투자위원회 탭", () => {
   });
 
   it("KIS모의투자 — 배치가 낸 비교 요약을 글로, 연결 전 안내 (25.1478)", () => {
-    expect(brokerLines(null)[0]).toContain("아직 연결 전입니다");
+    expect(brokerLines(null)[0]).toContain("아직 이 시장의 KIS모의투자 기록이 없습니다");
     const 줄 = brokerLines({ as_of: "2026-10-19", diff: { "1": [3, 0] }, summary: {
       days: 28, n: 6, match_pct: 50, both: 2, internal_only: 1, kis_only: 2, neither: 1, partial: 1, rejected: 1, unknown: 1, cleanup: 1,
       slip_buy: { n: 1, avg: 1 }, slip_sell: { n: 0, avg: null }, reject_reasons: { APBK0919: 1 } } });
