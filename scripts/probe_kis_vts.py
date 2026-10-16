@@ -102,7 +102,13 @@ def us(sess: kv.Session, code: str, exchange: str, now: datetime) -> bool:
     except KisFailed as exc:
         print(f"  매수가능금액 조회 실패: {exc}")
         ok = False
-    막힘 = job._us_window(now, cal.local_today("US"))
+    # 예약은 **다음 정규장**으로 간다 — 한국 낮(뉴욕은 전날 밤)에는 현지 "오늘" 장이 이미 끝났으니 다음 장을 본다.
+    # 일일 배치는 개장 전 현지 날짜로 돌아 그날이 곧 다음 장이다
+    장 = cal.local_today("US")
+    개장 = cal.session_open_utc("US", 장)
+    if 개장 is None or now >= 개장 - job.US_RESV_CUTOFF:
+        장 = cal.next_session("US", 장)
+    막힘 = job._us_window(now, 장)
     if 막힘:
         print(f"  예약 시험 안 함 — {막힘}")
         return ok
