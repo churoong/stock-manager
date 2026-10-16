@@ -5,6 +5,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { ReadinessList } from "@/components/DeskView";
 import { CompareCard, type Data } from "@/components/PaperView";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -57,5 +58,22 @@ describe("화면 글의 문턱은 배치 상수와 같다 (25.1511)", () => {
     expect(값("CHAMPION_BLOCK")).toBe(DESK_RULES.CHAMPION_BLOCK);
     expect(값("CHAMPION_MIN_BLOCKS")).toBe(DESK_RULES.CHAMPION_MIN_BLOCKS);
     expect(값("CHAMPION_WIN_SHARE")).toBe(DESK_RULES.CHAMPION_WIN_SHARE);
+  });
+});
+
+describe("실전 준비 목록 (25.1513)", () => {
+  it("상태 말·근거·갖춤 수", () => {
+    const html = renderToStaticMarkup(
+      createElement(ReadinessList, {
+        items: [
+          { key: "audit", label: "감사 기록", status: "done", note: "결정 원장", evidence: null },
+          { key: "broker", label: "증권사 주문 연동", status: "rehearsal", note: "KIS모의투자", evidence: "최근 28일 끝난 베낀 주문 35" },
+        ],
+      }),
+    );
+    expect(html).toContain("갖춤 1/2");
+    expect(html).toContain("[모의로 연습 중]</span> 증권사 주문 연동");
+    expect(html).toContain("근거: 최근 28일 끝난 베낀 주문 35");
+    expect(pickDesk([{ as_of: "d", summary_json: "{}", updated_at: "u" }]).readiness).toEqual([]);
   });
 });

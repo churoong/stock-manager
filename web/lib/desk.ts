@@ -58,11 +58,20 @@ export interface RiskRow {
   id: string; exposure_pct: number | null; positions: number; top_weight_pct: number | null; top_name: string | null;
   near_stop: Array<{ name: string | null; unrealized_pct: number; stop_pct: number }>; dd_pct: number | null;
 }
+/** 실전 준비 목록 한 항목 (docs/paper.md 14장, 25.1513) — 상태는 배치 코드의 표, 근거는 기록에서 */
+export interface ReadinessItem { key: string; label: string; status: "done" | "partial" | "rehearsal" | "todo" | "user"; note: string; evidence: string | null }
+export const READINESS_TEXT: Record<ReadinessItem["status"], string> = {
+  done: "갖춤",
+  partial: "일부",
+  rehearsal: "모의로 연습 중",
+  todo: "아직",
+  user: "사용자 결정·확인",
+};
 export interface ChampionRow { id: string; from: string; blocks: number; wins: number; pct: number | null; champion_pct: number | null; candidate: boolean }
 
 export interface DeskSummary {
   leaderboard: DeskLeaderboard; rule_history?: Record<string, RuleSpan[]>; mirror_account: string; updated_at: string;
-  gate?: Gate | null; risk?: RiskRow[]; champion?: ChampionRow[]; gate_error?: string | null;
+  gate?: Gate | null; risk?: RiskRow[]; champion?: ChampionRow[]; gate_error?: string | null; readiness?: ReadinessItem[];
   last_market: DeskMarketKey;
   kis_account: DeskKisAccount; markets: Partial<Record<DeskMarketKey, DeskMarket>>;
 }
@@ -79,13 +88,15 @@ export interface DeskView {
   champion: ChampionRow[];
   /** 관문·위험판·챔피언 계산이 실패한 실행이면 그 까닭 (25.1511) */
   gate_error: string | null;
+  /** 25.1513 전 요약에는 없다 */
+  readiness: ReadinessItem[];
   mirror_account: string | null;
   kis_account: DeskKisAccount | null;
   markets: Partial<Record<DeskMarketKey, DeskMarket & { as_of: string }>>;
 }
 
 export const EMPTY_DESK: DeskView = {
-  as_of: null, updated_at: null, leaderboard: null, rule_history: {}, gate: null, risk: [], champion: [], gate_error: null, mirror_account: null, kis_account: null, markets: {},
+  as_of: null, updated_at: null, leaderboard: null, rule_history: {}, gate: null, risk: [], champion: [], gate_error: null, readiness: [], mirror_account: null, kis_account: null, markets: {},
 };
 
 /** 최근 줄들(날짜 역순)에서 보일 것을 고른다. 깨진 JSON 줄은 없는 셈 친다 */
@@ -114,6 +125,7 @@ export function pickDesk(rows: Array<{ as_of: string; summary_json: string | nul
     risk: Array.isArray(첫.s.risk) ? 첫.s.risk : [],
     champion: Array.isArray(첫.s.champion) ? 첫.s.champion : [],
     gate_error: 첫.s.gate_error ?? null,
+    readiness: Array.isArray(첫.s.readiness) ? 첫.s.readiness : [],
     mirror_account: 첫.s.mirror_account ?? null,
     kis_account: 첫.s.kis_account ?? null,
     markets,

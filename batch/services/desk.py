@@ -196,6 +196,51 @@ def gate(
             "passed": all(i["ok"] for i in items), "next": 다음}  # fmt: skip
 
 
+#: 실전 준비 목록 (docs/paper.md 14장, 25.1513) — 배치 늦음을 세는 창(달력일)과 "늦음" 문턱(초)
+READY_WINDOW_DAYS = 30
+READY_LATE_SEC = 600
+
+#: 14장 일곱 항목의 지금 상태 — done 갖춤 · partial 일부 · rehearsal 모의로 연습 중 · todo 아직 · user 사용자 결정·확인.
+#: **사람이 고친다** — 항목을 갖추는 일을 하면 이 표와 docs/paper.md 14장을 같은 커밋에서 고친다(시험이 대조)
+READINESS = (
+    ("always_on", "상시 실행 환경", "user",
+     "장중 주문·체결 확인·장중 손절이 정해진 시각에 돌아야 한다 — 지금은 예약 실행(지연·누락)."
+     " 비용 규칙(0원) 변경은 사용자 결정"),
+    ("broker", "증권사 주문 연동", "rehearsal",
+     "KIS모의투자로 주문·접수·거부·체결 조회·잔고 대조를 날마다 연습 중(실전 도메인 주문 경로는 없다)"),
+    ("risk_gate", "사전 위험 점검", "done",
+     "하루 손실 한도·하루 주문 수·비중 상한·묵은 종가·멈춤 스위치가 모의 주문 앞에서 돈다(25.1451)"),
+    ("failure", "장애 대처", "partial",
+     "묵은 종가면 주문 안 함·실패 알림·멈춤 스위치는 있음. 없는 것: 체결 확인이 안 되면 다음 주문을 멈추는 장치"),
+    ("cost", "세금·수수료 실값", "todo",
+     "지금은 추정 비용(수수료·거래세·슬리피지 가정). 실제 체결 비용은 2단계(손 매매)부터 잰다"),
+    ("terms", "이용 조건 확인", "user",
+     "증권사 API 의 자동 주문 허용 범위·호출 한도 — 약관 확인은 사용자 `[확인필요]`"),
+    ("audit", "감사 기록", "done", "결정 원장·근거표·판 번호·위험 점검 결과를 남긴다(25.1449)"),
+)
+
+
+def readiness(*, runs: dict[str, Any] | None, kis: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """실전 준비 목록 진도 — [{key, label, status, note, evidence}] (docs/paper.md 14장, 25.1513).
+
+    상태는 `READINESS` 표(사람이 고침), 근거 수치는 기록에서: 상시 실행 = 최근 `READY_WINDOW_DAYS` 일 일일 배치 중
+    예정보다 `READY_LATE_SEC` 초 넘게 늦은 횟수·가장 늦은 분, 증권사 연동 = KIS 마지막 줄들의 끝난 주문·모름·거부
+    """
+    out = []
+    for key, label, status, note in READINESS:
+        근거 = None
+        if key == "always_on" and runs and runs.get("n"):
+            늦음 = f"{READY_LATE_SEC // 60}분 넘게 늦음 {runs.get('late') or 0}회"
+            근거 = (f"최근 {READY_WINDOW_DAYS}일 일일 배치 {runs['n']}회 중 {늦음}"
+                  f" · 가장 늦음 {round((runs.get('max_delay') or 0) / 60)}분")  # fmt: skip
+        if key == "broker" and kis:
+            n = sum(int(x.get("n") or 0) for x in kis)
+            근거 = (f"최근 28일 끝난 베낀 주문 {n} · 모름 {sum(int(x.get('unknown') or 0) for x in kis)}"
+                  f" · 거부 {sum(int(x.get('rejected') or 0) for x in kis)}")  # fmt: skip
+        out.append({"key": key, "label": label, "status": status, "note": note, "evidence": 근거})
+    return out
+
+
 def combine_kept(summaries: list[dict[str, Any]]) -> dict[str, Any]:
     """국내·미국 KIS 비교 요약을 합친 실현율 — 둘 다 참 ÷ (둘 다 참 + 가상만 참), 표본 = 그 분모"""
     둘 = sum(int((x or {}).get("both") or 0) for x in summaries)

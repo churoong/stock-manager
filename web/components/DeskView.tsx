@@ -16,7 +16,9 @@ import {
   orderLine,
   pctText,
   ppText,
+  READINESS_TEXT,
   type DeskMarket,
+  type ReadinessItem,
   type DeskMarketKey,
   type DeskView as Desk,
 } from "@/lib/desk";
@@ -35,6 +37,33 @@ function tone(v: number | null | undefined): string {
 }
 
 const when = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleString("ko-KR", { dateStyle: "short", timeStyle: "short" }) : "-");
+
+/** 실전 준비 목록 진도 (docs/paper.md 14장, 25.1513) — 성적 밖에서 남은 거리 */
+export function ReadinessList({ items }: { items: ReadinessItem[] }) {
+  const 색: Record<ReadinessItem["status"], string> = {
+    done: "text-emerald-700 dark:text-emerald-400",
+    partial: "text-amber-700 dark:text-amber-400",
+    rehearsal: "text-sky-700 dark:text-sky-400",
+    todo: "text-slate-500",
+    user: "text-violet-700 dark:text-violet-400",
+  };
+  return (
+    <div className="mt-3 border-t border-slate-100 pt-2 dark:border-slate-800">
+      <p className="text-sm font-medium">
+        실전 준비 목록 — 갖춤 {items.filter((i) => i.status === "done").length}/{items.length}
+      </p>
+      <ul className="mt-1 space-y-1 text-xs">
+        {items.map((i) => (
+          <li key={i.key}>
+            <span className={`font-medium ${색[i.status] ?? ""}`}>[{READINESS_TEXT[i.status] ?? i.status}]</span> {i.label} — {i.note}
+            {i.evidence ? <span className="block text-slate-500">근거: {i.evidence}</span> : null}
+          </li>
+        ))}
+      </ul>
+      <p className="mt-1 text-xs text-slate-500">일곱이 모두 갖춰져도 실전 주문은 열리지 않습니다 — 단계 관문과 사용자 결정.</p>
+    </div>
+  );
+}
 
 export function MarketCard({ m, k, mirror }: { m: DeskMarket & { as_of: string }; k: DeskMarketKey; mirror: string }) {
   const off = kisOffText(m.kis_step);
@@ -232,6 +261,7 @@ export default function DeskView() {
             ))}
           </ul>
           <p className="mt-1 text-xs text-slate-500">그 뒤: {desk.gate.next}</p>
+          {desk.readiness.length ? <ReadinessList items={desk.readiness} /> : null}
         </section>
       ) : null}
 

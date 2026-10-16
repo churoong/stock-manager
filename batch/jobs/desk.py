@@ -32,6 +32,11 @@ STOCK_NAMES_SQL = (
     "SELECT id, COALESCE(name_ko, name_en, ticker) AS name FROM stocks WHERE id IN (SELECT value FROM json_each(?))"
 )
 #: 관문 — 최근 창의 일일 배치 실패 수(색인 job_name, started_at)
+#: 실전 준비 목록 — 최근 창의 일일 배치 늦음(색인 job_name, started_at)
+BATCH_DELAY_SQL = (
+    "SELECT COUNT(*) AS n, SUM(CASE WHEN delay_seconds > ? THEN 1 ELSE 0 END) AS late, MAX(delay_seconds) AS max_delay"
+    " FROM batch_runs WHERE job_name IN (?, ?) AND started_at >= ? AND status != 'running'"
+)
 BATCH_FAILED_SQL = (
     "SELECT COUNT(*) FROM batch_runs WHERE job_name IN (?, ?) AND started_at >= ? AND status = 'failed'"
 )
@@ -247,12 +252,14 @@ def _관문판(
             a = str(r["account_id"])
             종목 = [{**q, "name": 이름.get(int(q.get("stock_id") or 0))} for q in 보유들[a]]
             latest[a] = {"equity": r["equity_krw"], "holdings": r["holdings_krw"], "positions": 종목}
+        늦음창 = (now - timedelta(days=desk.READY_WINDOW_DAYS)).astimezone(cal.market_tz("KR")).date().isoformat()
+        늦음 = client.execute(BATCH_DELAY_SQL, [desk.READY_LATE_SEC, job_name("KR"), job_name("US"), 늦음창]).dicts()
         판 = {"gate": 관문, "risk": desk.risk_board(latest, 계열, 손절), "champion": desk.champion(계열, h),
-             "gate_error": None}  # fmt: skip
+             "readiness": desk.readiness(runs=늦음[0] if 늦음 else None, kis=kis요약), "gate_error": None}  # fmt: skip
         return 판, None
     except Exception as exc:  # noqa: BLE001 — 곁다리 안의 곁다리
         글 = f"{type(exc).__name__}: {str(exc)[:120]}"
-        return {"gate": None, "risk": [], "champion": [], "gate_error": 글}, 글
+        return {"gate": None, "risk": [], "champion": [], "readiness": [], "gate_error": 글}, 글
 
 
 def _json_list(text: Any) -> list[dict[str, Any]]:
