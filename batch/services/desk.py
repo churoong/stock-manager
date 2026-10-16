@@ -47,6 +47,42 @@ def leaderboard(series: dict[str, list[tuple[str, float]]], names: dict[str, str
     return {"window_start": 시작, "control_pct": 기준선, "rows": 줄}
 
 
+def _구간(v: list[tuple[str, float]], start: str, end: str | None) -> float | None:
+    """`start` 이하 마지막 값 대비 `end` 이하 마지막 값(없으면 마지막) 수익률(%). 그 전 기록이 없으면 첫 값부터"""
+    앞 = [t for d, t in v if d <= start]
+    기준 = 앞[-1] if 앞 else (v[0][1] if v else None)
+    뒤 = [t for d, t in v if end is None or d <= end]
+    return (뒤[-1] / 기준 - 1) * 100 if 기준 and 뒤 else None
+
+
+def rule_history(
+    spans: list[dict[str, Any]], series: dict[str, list[tuple[str, float]]],
+) -> dict[str, list[dict[str, Any]]]:
+    """판 이력 — {계좌: [{version, from, to, orders, pct, control_pct, vs_r_pp}]} 판 순 (docs/desk.md 3장).
+
+    `spans` = 주문 원장을 (계좌, 판)으로 묶은 것 [{account, version, first, last, orders}].
+    한 판의 구간은 그 판 첫 결정일 종가부터 다음 판 첫 결정일 종가까지(지금 판이면 마지막 평가까지) —
+    그 판의 주문이 처음 들어간 장부터 다음 판이 바꾸기 전까지의 시간가중 수익률이다.
+    같은 구간 무작위 대조 R1·R2 평균과 그 차(%p)를 함께 — 판을 바꾼 뒤 나아졌는지를 운과 가른다
+    """
+    판들: dict[str, list[dict[str, Any]]] = {}
+    for s in spans:
+        판들.setdefault(str(s["account"]), []).append(s)
+    out: dict[str, list[dict[str, Any]]] = {}
+    for a, 줄 in 판들.items():
+        줄.sort(key=lambda s: (s["first"], s["version"]))
+        out[a] = []
+        for i, s in enumerate(줄):
+            끝 = 줄[i + 1]["first"] if i + 1 < len(줄) else None
+            pct = _구간(sorted(series.get(a) or []), s["first"], 끝)
+            대조 = [x for r in CONTROL_IDS if (x := _구간(sorted(series.get(r) or []), s["first"], 끝)) is not None]
+            기준선 = sum(대조) / len(대조) if 대조 else None
+            out[a].append({"version": s["version"], "from": s["first"], "to": 끝, "orders": s["orders"], "pct": pct,
+                           "control_pct": 기준선, "vs_r_pp": None if pct is None or 기준선 is None or a in CONTROL_IDS
+                           else pct - 기준선})  # fmt: skip
+    return out
+
+
 def checks(
     *, halted: bool, paper: dict[str, Any] | None, broker: dict[str, Any] | None, recon_bad: list[str],
     warnings: list[str],

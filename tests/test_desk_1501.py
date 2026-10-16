@@ -75,3 +75,27 @@ def test_write_merges_both_markets(monkeypatch: pytest.MonkeyPatch) -> None:
     assert kr["orders_by_account"] == {"B": 1}
     assert any("장부 검산 어긋남: 계좌 R1" in x["text"] for x in kr["checks"])
     assert [r["id"] for r in s["leaderboard"]["rows"]][0] in ("B", "R1")
+    # R1 은 10-15 이하 기록이 없어 첫 값(10-16 1.0)부터 → 0%, B 는 1.0 → 1.02 = +2%
+    assert s["rule_history"]["B"] == [{"version": 1, "from": "2026-10-15", "to": None, "orders": 1, "pct": pytest.approx(2.0),
+                                        "control_pct": pytest.approx(0.0), "vs_r_pp": pytest.approx(2.0)}]
+    assert s["rule_history"].keys() == {"B"}
+
+
+def test_rule_history_spans_by_hand() -> None:
+    """A 판 1: 10-14 종가 1.0 → 판 2 첫 결정 10-16 종가 1.03 = +3% · 판 2: 1.03 → 마지막 1.05 = +1.9417%.
+    R1 같은 구간: 판 1 10-14 이하 없음 → 첫 값 1.0, 10-16 이하 마지막 1.0 → 0% · 판 2: 1.0 → 0.99 = −1%"""
+    series = {"A": [("2026-10-14", 1.0), ("2026-10-15", 1.02), ("2026-10-16", 1.03), ("2026-10-19", 1.05)],
+              "R1": [("2026-10-15", 1.0), ("2026-10-19", 0.99)]}  # fmt: skip
+    spans = [{"account": "A", "version": 2, "first": "2026-10-16", "last": "2026-10-19", "orders": 3},
+             {"account": "A", "version": 1, "first": "2026-10-14", "last": "2026-10-15", "orders": 5},
+             {"account": "R1", "version": 1, "first": "2026-10-15", "last": "2026-10-19", "orders": 4}]  # fmt: skip
+    h = desk.rule_history(spans, series)
+    a1, a2 = h["A"]
+    assert (a1["version"], a1["from"], a1["to"], a1["orders"]) == (1, "2026-10-14", "2026-10-16", 5)
+    assert a1["pct"] == pytest.approx(3.0) and a1["control_pct"] == pytest.approx(0.0)
+    assert a1["vs_r_pp"] == pytest.approx(3.0)
+    assert (a2["version"], a2["to"]) == (2, None)
+    assert a2["pct"] == pytest.approx((1.05 / 1.03 - 1) * 100) and a2["control_pct"] == pytest.approx(-1.0)
+    assert h["R1"][0]["vs_r_pp"] is None  # 대조끼리는 견주지 않는다
+    없음 = desk.rule_history([{"account": "X", "version": 1, "first": "d", "last": "d", "orders": 1}], {})
+    assert 없음["X"][0]["pct"] is None

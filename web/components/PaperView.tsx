@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import CriteriaTable from "@/components/CriteriaTable";
 import EquityChart, { type Series } from "@/components/EquityChart";
 import KisPanel from "@/components/KisPanel";
+import { MARKET_LABEL, pctText as deskPct, ppText, ruleSpanText, rowsById, type DeskView, type RuleSpan } from "@/lib/desk";
 import { bodyOf, readJson } from "@/lib/http";
 import {
   DEPOSIT_MAX_KRW,
@@ -19,6 +20,7 @@ import {
   hasCommittee,
   virtualText,
 } from "@/lib/paper";
+import { KIND_TEXT, afterText, beatBench, type DecisionRow } from "@/lib/paperDecisions";
 import { money, won } from "@/lib/portfolio";
 
 /**
@@ -67,13 +69,16 @@ export interface Data { halted: boolean; realCompare: RealCompareView | null; in
 const JOURNAL_NEVER_STALE_DAYS = 100_000;
 
 const HORIZON_LABEL: Record<string, string> = { short: "단기", mid: "중기", long: "장기" };
-export type SubTab = "summary" | "holdings" | "trades" | "orders" | "report" | "committee";
+export type SubTab = "summary" | "holdings" | "trades" | "orders" | "report" | "rules" | "skips" | "committee";
 const SUB_TABS: Array<[SubTab, string]> = [
   ["summary", "요약"],
   ["holdings", "보유내역"],
   ["trades", "거래내역"],
   ["orders", "체결 대기"],
   ["report", "성적표"],
+  // 전략 화면 (docs/desk.md 3장, 25.1502) — 규칙을 바꾼 날과 전후 성적, 안 한 결정과 그 뒤
+  ["rules", "판 이력"],
+  ["skips", "안 산 것"],
   ["committee", "투자위원회"],
 ];
 
@@ -120,6 +125,8 @@ export default function PaperView() {
   const [notice, setNotice] = useState<string | null>(null);
   const [acct, setAcct] = useState<string>("A");
   const [sub, setSub] = useState<SubTab>("summary");
+  // 전략 순위·판 이력은 배치가 낸 운용 요약(paper_desk)에서 — 못 읽어도 계좌 화면은 그대로 (25.1502)
+  const [desk, setDesk] = useState<DeskView | null>(null);
   // 한 번 입력에 한 키 — 두 번 눌러도, 응답이 끊겨 다시 보내도 같은 키라 장부에 한 줄만 들어간다
   const key = useRef<string>(newKey());
 
@@ -135,6 +142,11 @@ export default function PaperView() {
 
   useEffect(() => {
     void load();
+    void (async () => {
+      const r = await readJson<{ ready?: boolean; desk?: DeskView }>("/api/desk");
+      const body = bodyOf<{ ready?: boolean; desk?: DeskView }>(r);
+      if (!body.errors?.length && body.desk) setDesk(body.desk);
+    })();
   }, [load]);
 
   async function deposit() {
@@ -206,6 +218,50 @@ export default function PaperView() {
 
   return (
     <div className="space-y-5">
+      {data.halted ? (
+        <p className="rounded-lg bg-red-50 p-3 text-sm font-medium text-red-700 dark:bg-red-950 dark:text-red-300">
+          ⏸ 매매 멈춤 중 — 가상모의투자·KIS모의투자 모두 새 주문을 내지 않습니다(아래 입금 칸에서 다시 켭니다)
+        </p>
+      ) : null}
+
+      <CompareCard data={data} desk={desk} />
+
+      <AccountTabs data={data} acct={acct} setAcct={setAcct} sub={sub} setSub={setSub} desk={desk} />
+
+      {data.realCompare ? (
+        <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+          <h2 className="text-base font-semibold">실제 투자와 비교</h2>
+          {data.realCompare.error ? (
+            <p className="mt-1 text-sm text-amber-600">{data.realCompare.error}</p>
+          ) : (
+            <>
+              <p className="mt-1 text-sm">
+                {data.realCompare.start} ~ {data.realCompare.end} 시간가중 수익률 · 실제{" "}
+                <b className={tone(data.realCompare.realPct)}>{pctText(data.realCompare.realPct)}</b>
+                {Object.entries(data.realCompare.paperPct ?? {}).map(([aid, v]) => (
+                  <span key={aid}>
+                    {" "}· 가상 {aid} <b className={tone(v)}>{pctText(v)}</b>
+                    {data.realCompare?.paperStart?.[aid] ? ` (${data.realCompare.paperStart[aid]}부터)` : ""}
+                  </span>
+                ))}
+              </p>
+              <p className="mt-1 text-xs text-slate-500">
+                같은 잣대가 아닙니다 — 실제는 보유분만(현금 없음)·배당 포함, 가상모의투자는 현금 포함·배당 없음. 현금 비중만큼 가상모의투자가 덜 움직입니다.
+              </p>
+            </>
+          )}
+        </section>
+      ) : null}
+
+      <KisPanel />
+
+      {data.history.length > 1 ? (
+        <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+          <h2 className="text-base font-semibold">평가 ÷ 입금 (같은 돈 흐름)</h2>
+          <EquityChart series={chartSeries(data.history, data.accounts.map((a) => a.id))} height={240} />
+        </section>
+      ) : null}
+
       <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
         <h2 className="text-base font-semibold">입금</h2>
         <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
@@ -249,44 +305,6 @@ export default function PaperView() {
         </div>
       </section>
 
-      <CompareCard data={data} />
-
-      <AccountTabs data={data} acct={acct} setAcct={setAcct} sub={sub} setSub={setSub} />
-
-      {data.realCompare ? (
-        <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
-          <h2 className="text-base font-semibold">실제 투자와 비교</h2>
-          {data.realCompare.error ? (
-            <p className="mt-1 text-sm text-amber-600">{data.realCompare.error}</p>
-          ) : (
-            <>
-              <p className="mt-1 text-sm">
-                {data.realCompare.start} ~ {data.realCompare.end} 시간가중 수익률 · 실제{" "}
-                <b className={tone(data.realCompare.realPct)}>{pctText(data.realCompare.realPct)}</b>
-                {Object.entries(data.realCompare.paperPct ?? {}).map(([aid, v]) => (
-                  <span key={aid}>
-                    {" "}· 가상 {aid} <b className={tone(v)}>{pctText(v)}</b>
-                    {data.realCompare?.paperStart?.[aid] ? ` (${data.realCompare.paperStart[aid]}부터)` : ""}
-                  </span>
-                ))}
-              </p>
-              <p className="mt-1 text-xs text-slate-500">
-                같은 잣대가 아닙니다 — 실제는 보유분만(현금 없음)·배당 포함, 가상모의투자는 현금 포함·배당 없음. 현금 비중만큼 가상모의투자가 덜 움직입니다.
-              </p>
-            </>
-          )}
-        </section>
-      ) : null}
-
-      <KisPanel />
-
-      {data.history.length > 1 ? (
-        <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
-          <h2 className="text-base font-semibold">평가 ÷ 입금 (같은 돈 흐름)</h2>
-          <EquityChart series={chartSeries(data.history, data.accounts.map((a) => a.id))} height={240} />
-        </section>
-      ) : null}
-
       <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
         <h2 className="text-base font-semibold">입금 장부</h2>
         <p className="text-xs text-slate-500">지우지 않습니다 — 잘못 넣은 입금은 취소 행을 더합니다.</p>
@@ -318,14 +336,28 @@ const CARD = "rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-
  * 계좌 비교 (25.1458, 2026-10-15 사용자 지시 "두개의 모의투자자로는 부족할거 같다") — 일곱 계좌를 한 표에.
  * 값은 계좌 화면과 같은 배치 값이고, 짝은 "무엇을 재는 차이인가" 의 안내다(차이 계산은 주간 요약이 한다).
  */
-export function CompareCard({ data }: { data: Data }) {
+export function CompareCard({ data, desk }: { data: Data; desk?: DeskView | null }) {
   if (data.accounts.length < 2) return null;
   const 있음 = new Set(data.accounts.map((a) => a.id));
+  // 전략 순위 (docs/desk.md 3장, 25.1502) — 공통 구간·R 대비는 배치가 낸 운용 요약 값. 있으면 그 순서로, 없으면 계좌 순
+  const 순위 = rowsById(desk?.leaderboard);
+  const 차례 = desk?.leaderboard?.rows.map((r) => r.id) ?? [];
+  const 계좌들 = [...data.accounts].sort((x, y) => {
+    const i = 차례.indexOf(x.id), j = 차례.indexOf(y.id);
+    return (i < 0 ? 1e9 : i) - (j < 0 ? 1e9 : j) || x.id.localeCompare(y.id);
+  });
+  const lb = desk?.leaderboard;
   return (
     <section className={CARD}>
-      <h2 className="text-base font-semibold">계좌 비교</h2>
+      <h2 className="text-base font-semibold">전략 순위</h2>
+      {lb?.window_start ? (
+        <p className="mt-1 text-xs text-slate-500">
+          공통 구간 {lb.window_start}부터의 시간가중 수익률 순 · R 대비 = 그 수익률 − 무작위 대조 R1·R2 평균
+          {lb.control_pct != null ? `(${deskPct(lb.control_pct)})` : ""} — 늦게 연 계좌도 같은 잣대
+        </p>
+      ) : null}
       <div className="mt-2 overflow-x-auto">
-        <table className="w-full min-w-[560px] text-xs">
+        <table className="w-full min-w-[680px] text-xs">
           <thead className="text-slate-500">
             <tr>
               <th className="py-1 text-left">계좌</th>
@@ -333,18 +365,25 @@ export function CompareCard({ data }: { data: Data }) {
               <th className="text-right">평가 총액</th>
               <th className="text-right">손익</th>
               <th className="text-right">시간가중</th>
+              <th className="text-right">공통 구간</th>
+              <th className="text-right">R 대비</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-            {data.accounts.map((a) => (
-              <tr key={a.id}>
-                <td className="py-1 font-semibold">{a.id}</td>
-                <td className="text-slate-600 dark:text-slate-400">{ruleText(a)}</td>
-                <td className="text-right">{won(a.view.equity)}</td>
-                <td className={`text-right ${tone(a.view.pnlPct)}`}>{pctText(a.view.pnlPct)}</td>
-                <td className={`text-right ${tone(a.view.twrPct)}`}>{pctText(a.view.twrPct)}</td>
-              </tr>
-            ))}
+            {계좌들.map((a) => {
+              const r = 순위.get(a.id);
+              return (
+                <tr key={a.id}>
+                  <td className="py-1 font-semibold">{a.id}</td>
+                  <td className="text-slate-600 dark:text-slate-400">{ruleText(a)}</td>
+                  <td className="text-right">{won(a.view.equity)}</td>
+                  <td className={`text-right ${tone(a.view.pnlPct)}`}>{pctText(a.view.pnlPct)}</td>
+                  <td className={`text-right ${tone(a.view.twrPct)}`}>{pctText(a.view.twrPct)}</td>
+                  <td className={`text-right ${tone(r?.window_pct)}`}>{deskPct(r?.window_pct)}</td>
+                  <td className={`text-right ${tone(r?.vs_r_pp)}`}>{ppText(r?.vs_r_pp)}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -363,8 +402,8 @@ export function CompareCard({ data }: { data: Data }) {
  * 계좌별 화면 (2026-10-15 사용자 지시 "각 모의A나 모의B의 보유내역, 거래내역, 평가손익 등을 확인할 수 있어야해", 25.1455).
  * 위 탭으로 계좌를, 아래 탭으로 요약·보유내역·거래내역·미체결·성적표를 고른다. 값은 모두 배치가 적은 그대로다.
  */
-export function AccountTabs({ data, acct, setAcct, sub, setSub }: {
-  data: Data; acct: string; setAcct: (a: string) => void; sub: SubTab; setSub: (s: SubTab) => void;
+export function AccountTabs({ data, acct, setAcct, sub, setSub, desk }: {
+  data: Data; acct: string; setAcct: (a: string) => void; sub: SubTab; setSub: (s: SubTab) => void; desk?: DeskView | null;
 }) {
   const a = data.accounts.find((x) => x.id === acct) ?? data.accounts[0];
   if (!a) return null;
@@ -413,6 +452,8 @@ export function AccountTabs({ data, acct, setAcct, sub, setSub }: {
         {sub === "trades" ? <TradesPane fills={체결} /> : null}
         {sub === "orders" ? <OrdersPane orders={주문} /> : null}
         {sub === "report" ? <ReportPane a={a} /> : null}
+        {sub === "rules" ? <RulesPane a={a} spans={desk?.rule_history?.[a.id] ?? null} asOf={desk?.as_of ?? null} /> : null}
+        {sub === "skips" ? <SkipsPane key={a.id} account={a.id} /> : null}
         {sub === "committee" && hasCommittee(a) ? (
           <CommitteePane a={a} meetings={(data.meetings ?? []).filter((m) => m.account_id === a.id)} dossiers={data.dossiers ?? []} />
         ) : null}
@@ -670,6 +711,98 @@ export function CommitteePane({ a, meetings, dossiers }: { a: Account; meetings:
         )}
       </div>
       <p className="text-xs text-slate-500">부서는 규칙으로 판단하는 에이전트입니다 — 같은 자료면 같은 의견이 나옵니다(docs/company.md 0장).</p>
+    </div>
+  );
+}
+
+/** 판 이력 (docs/desk.md 3장, 25.1502) — 주문 원장의 판 번호로 나눈 구간과 그 구간 성적. 배치가 낸 값 그대로 */
+export function RulesPane({ a, spans, asOf }: { a: Account; spans: RuleSpan[] | null; asOf: string | null }) {
+  return (
+    <div className="text-sm">
+      <p>
+        지금 규칙서 판 <b>{a.rule_version}</b> — {ruleText(a)}
+      </p>
+      {spans === null ? (
+        <p className="mt-2 text-xs text-slate-500">판 이력은 운용 요약에서 읽습니다 — 다음 일일 배치가 적은 뒤부터 보입니다.</p>
+      ) : spans.length === 0 ? (
+        <p className="mt-2 text-xs text-slate-500">아직 이 계좌가 낸 주문이 없습니다.</p>
+      ) : (
+        <ul className="mt-2 space-y-1">
+          {spans.map((r) => (
+            <li key={r.version} className={r.vs_r_pp == null ? "" : tone(r.vs_r_pp)}>
+              {ruleSpanText(r)}
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="mt-2 text-xs text-slate-500">
+        판은 규칙서·헌장을 바꿀 때마다 올립니다(docs/paper.md 2장). 구간은 그 판 첫 결정일 종가부터 다음 판 첫 결정일 종가까지 — 몇 주 차이는 대부분 운이라
+        같은 구간 무작위 대조(R) 평균과 함께 봅니다{asOf ? ` · ${asOf} 운용 요약 기준` : ""}.
+      </p>
+    </div>
+  );
+}
+
+/** 안 산 것 (왜 안 샀나, docs/desk.md 3장, 25.1502) — 결정 원장의 안 한 결정과 그 뒤. 탭을 열 때만 읽는다 */
+function SkipsPane({ account }: { account: string }) {
+  const [market, setMarket] = useState<"KR" | "US">("KR");
+  const [rows, setRows] = useState<DecisionRow[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let 살아있음 = true;
+    setRows(null);
+    setError(null);
+    void (async () => {
+      const r = await readJson<{ rows?: DecisionRow[] }>(`/api/paper/decisions?account=${encodeURIComponent(account)}&market=${market}`);
+      const body = bodyOf<{ rows?: DecisionRow[] }>(r);
+      if (!살아있음) return;
+      if (body.errors?.length) setError(body.errors.join(" · "));
+      else setRows(body.rows ?? []);
+    })();
+    return () => {
+      살아있음 = false;
+    };
+  }, [account, market]);
+  return (
+    <div className="text-sm">
+      <div className="flex gap-1" role="tablist" aria-label="시장">
+        {(["KR", "US"] as const).map((m) => (
+          <button
+            key={m}
+            type="button"
+            role="tab"
+            aria-selected={market === m}
+            onClick={() => setMarket(m)}
+            className={`rounded px-3 py-1 text-xs ${market === m ? "bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900" : "border border-slate-300 dark:border-slate-700"}`}
+          >
+            {MARKET_LABEL[m]}
+          </button>
+        ))}
+      </div>
+      <p className="mt-2 text-xs text-slate-500">
+        안 낸 후보·위험 점검이 막은 것·안 찬 회차·매도 플래그를 따르지 않고 든 것과 그 뒤(가장 긴 찬 창, 같은 기간 지수). 안 산 것이 지수보다 올랐으면 놓친 것(빨강),
+        덜 올랐으면 잘 거른 것(파랑) — 하나하나는 운이고, 까닭별 묶음 성적은 성적표 탭에 있습니다. 최근 60줄.
+      </p>
+      {error ? <p className="mt-2 text-red-600">{error}</p> : null}
+      {!rows && !error ? <p className="mt-2 text-slate-500">불러오는 중…</p> : null}
+      {rows && rows.length === 0 ? <p className="mt-2 text-slate-500">이 시장에서 안 한 결정이 아직 없습니다.</p> : null}
+      {rows?.length ? (
+        <ul className="mt-2 divide-y divide-slate-100 dark:divide-slate-800">
+          {rows.map((d) => {
+            const 이김 = beatBench(d);
+            return (
+              <li key={d.id} className="py-1.5">
+                <span className="text-xs text-slate-500">{d.decided_on} · {KIND_TEXT[d.kind] ?? d.kind}</span>{" "}
+                <b>{d.name}</b> <span className="text-xs text-slate-400">{d.ticker}</span>
+                <span className="block text-xs text-slate-600 dark:text-slate-400">{d.reason}</span>
+                <span className={`block text-xs ${이김 == null ? "text-slate-500" : 이김 ? "text-red-600 dark:text-red-400" : "text-blue-600 dark:text-blue-400"}`}>
+                  그 뒤 {afterText(d)}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
     </div>
   );
 }

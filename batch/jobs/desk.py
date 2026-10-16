@@ -36,6 +36,12 @@ KIS_ORDERS_SQL = (
     " COALESCE(s.name_ko, s.name_en, s.ticker) AS name FROM paper_broker_orders b"
     " LEFT JOIN stocks s ON s.id = b.stock_id WHERE b.broker = ? AND b.trade_date = ? ORDER BY b.id"
 )
+#: 판 이력 — 주문 원장을 (계좌, 판)으로 묶는다. 주문 원장 전체를 훑는다(1년 수만 행 — 실행마다).
+#: 커지면 판이 바뀐 날만 읽게 줄인다
+RULES_SQL = (
+    "SELECT account_id, rule_version, MIN(decided_on) AS first, MAX(decided_on) AS last, COUNT(*) AS n"
+    " FROM paper_orders GROUP BY account_id, rule_version"
+)
 DESK_READ_SQL = "SELECT summary_json FROM paper_desk WHERE as_of = ?"
 DESK_UPSERT_SQL = (
     "INSERT INTO paper_desk (as_of, summary_json, updated_at) VALUES (?, ?, ?)"
@@ -86,7 +92,10 @@ def write(
     }  # fmt: skip
     kis = client.execute(KIS_SQL, [bmj.BROKER]).dicts()
     요약 = json.loads(kis[0]["summary_json"] or "{}") if kis else {}
-    공통 = {"leaderboard": 순위, "mirror_account": h, "updated_at": 지금, "last_market": market,
+    판 = [{"account": r["account_id"], "version": r["rule_version"], "first": r["first"], "last": r["last"],
+          "orders": r["n"]} for r in client.execute(RULES_SQL).dicts()]  # fmt: skip
+    공통 = {"leaderboard": 순위, "rule_history": desk.rule_history(판, 계열), "mirror_account": h, "updated_at": 지금,
+          "last_market": market,
           "kis_account": {"as_of": kis[0]["as_of"] if kis else None, "account_krw": 요약.get("account_krw"),
                           "perf": 요약.get("perf")}}  # fmt: skip
     앞 = client.execute(DESK_READ_SQL, [as_of]).rows

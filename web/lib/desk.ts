@@ -17,6 +17,11 @@ export interface DeskRow {
   since_open_pct: number; window_pct: number | null; vs_r_pp: number | null;
 }
 export interface DeskLeaderboard { window_start: string | null; control_pct?: number | null; rows: DeskRow[] }
+/** 판 이력 한 줄 (docs/desk.md 3장) — 그 판 첫 결정일 종가부터 다음 판 첫 결정일 종가까지(to 가 null 이면 지금 판) */
+export interface RuleSpan {
+  version: number; from: string; to: string | null; orders: number;
+  pct: number | null; control_pct: number | null; vs_r_pp: number | null;
+}
 export interface DeskCheck { level: "high" | "normal"; text: string }
 export interface DeskFill { side: string; name: string; ticker: string; quantity: number; price: number; currency: string }
 export interface DeskOrder {
@@ -39,7 +44,8 @@ export interface DeskKisAccount {
   perf: import("@/lib/kisPaper").KisPerf | null;
 }
 export interface DeskSummary {
-  leaderboard: DeskLeaderboard; mirror_account: string; updated_at: string; last_market: DeskMarketKey;
+  leaderboard: DeskLeaderboard; rule_history?: Record<string, RuleSpan[]>; mirror_account: string; updated_at: string;
+  last_market: DeskMarketKey;
   kis_account: DeskKisAccount; markets: Partial<Record<DeskMarketKey, DeskMarket>>;
 }
 /** 화면에 넘기는 꼴 — 순위·KIS 는 가장 최근 줄, 시장 칸은 시장마다 가장 최근 줄 것 */
@@ -47,12 +53,16 @@ export interface DeskView {
   as_of: string | null;
   updated_at: string | null;
   leaderboard: DeskLeaderboard | null;
+  /** 25.1502 전 요약에는 없다 */
+  rule_history: Record<string, RuleSpan[]>;
   mirror_account: string | null;
   kis_account: DeskKisAccount | null;
   markets: Partial<Record<DeskMarketKey, DeskMarket & { as_of: string }>>;
 }
 
-export const EMPTY_DESK: DeskView = { as_of: null, updated_at: null, leaderboard: null, mirror_account: null, kis_account: null, markets: {} };
+export const EMPTY_DESK: DeskView = {
+  as_of: null, updated_at: null, leaderboard: null, rule_history: {}, mirror_account: null, kis_account: null, markets: {},
+};
 
 /** 최근 줄들(날짜 역순)에서 보일 것을 고른다. 깨진 JSON 줄은 없는 셈 친다 */
 export function pickDesk(rows: Array<{ as_of: string; summary_json: string | null; updated_at: string | null }>): DeskView {
@@ -75,6 +85,7 @@ export function pickDesk(rows: Array<{ as_of: string; summary_json: string | nul
     as_of: 첫.as_of,
     updated_at: 첫.updated_at,
     leaderboard: 첫.s.leaderboard ?? null,
+    rule_history: 첫.s.rule_history ?? {},
     mirror_account: 첫.s.mirror_account ?? null,
     kis_account: 첫.s.kis_account ?? null,
     markets,
@@ -137,4 +148,16 @@ export function kisStatusText(orders: DeskKisOrder[]): string {
 export function kisOffText(step: Record<string, unknown> | null | undefined): string | null {
   const off = step?.off;
   return typeof off === "string" && off ? off : null;
+}
+
+/** 판 이력 한 줄 글 — "판 2 · 2026-10-16~지금 · 주문 34건 · 시간가중 +1.20% (같은 기간 R 평균 +0.40%, R 대비 +0.80%p)" */
+export function ruleSpanText(r: RuleSpan): string {
+  const 끝 = r.to ? `~${r.to}` : "~지금";
+  const 대조 = r.control_pct != null ? ` (같은 기간 R 평균 ${pctText(r.control_pct)}${r.vs_r_pp != null ? `, R 대비 ${ppText(r.vs_r_pp)}` : ""})` : "";
+  return `판 ${r.version} · ${r.from}${끝} · 주문 ${r.orders.toLocaleString("ko-KR")}건 · 시간가중 ${pctText(r.pct)}${대조}`;
+}
+
+/** 순위표 줄을 계좌 id 로 — 계좌 비교 표에 공통 구간·R 대비 칸을 붙일 때 */
+export function rowsById(lb: DeskLeaderboard | null | undefined): Map<string, DeskRow> {
+  return new Map((lb?.rows ?? []).map((r) => [r.id, r]));
 }
