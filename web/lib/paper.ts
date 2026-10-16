@@ -101,7 +101,9 @@ export function ruleText(a: AccountRule): string {
 /** 투자위원회 최근 회의록 — 회사·시장마다 마지막 날 한 장 (docs/company.md 3·5장, 25.1469). 0076 전에는 표가 없어 부르는 쪽이 오류를 삼킨다 */
 /** KIS모의투자 마지막 잔고 줄 — 배치가 낸 비교 요약을 읽기만 (docs/paper.md 15.3, 25.1478). 0078·0080 전 DB 면 표·칸이 없다(부르는 쪽이 try) */
 export const PAPER_BROKER_LATEST = `SELECT as_of, diff_json, summary_json, fetched_at FROM paper_broker_daily
-WHERE broker = 'kis_vts' ORDER BY as_of DESC LIMIT 1`;
+WHERE broker = ? ORDER BY as_of DESC LIMIT 1`;
+/** 증권사 칸 — 국내 `kis_vts`, 미국 `kis_vts_us` (batch/jobs/broker_mirror.py `BROKER`·`BROKER_US`, 25.1485) */
+export const BROKER_KEYS = { KR: "kis_vts", US: "kis_vts_us" } as const;
 export interface BrokerSummary {
   days: number; n: number; match_pct: number | null; both: number; internal_only: number; kis_only: number; neither: number;
   partial: number; rejected: number; unknown: number; cleanup: number;

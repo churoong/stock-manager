@@ -919,6 +919,7 @@ class Test이웃_모듈들:
         검사(PAPER, f"하루 {rg.MAX_ORDERS_PER_DAY}건", "하루 매수 주문 상한 (25.1451)")
         검사(PAPER, f"하루 증권사 모의 주문 상한 {bm.MAX_ORDERS_PER_DAY}건", "증권사 모의 하루 주문 상한 (25.1475)")
         검사(PAPER, f"지난 {bm.COMPARE_DAYS}일(`COMPARE_DAYS`)", "KIS모의투자 비교 창 (25.1478)")
+        검사(PAPER, f"마지막 종가에서 {bm.US_MARKETABLE_PCT:g}%(`US_MARKETABLE_PCT`)", "미국 시장가 대신 지정가 폭 (25.1485)")
         검사(COMPANY, "서로 다른 회사 **두 곳 이상**이 추천한 종목만 후보", "지주사 합의 조건 (25.1482)")
         assert hold.HOLDING_MIN_VOTERS == 2
         검사(COMPANY, f"세기 = min(표 ÷ 문턱, {hold.HOLDING_STRENGTH_MAX:g})", "지주사 세기 상한 (25.1482)")

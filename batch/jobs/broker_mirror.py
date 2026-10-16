@@ -1,7 +1,10 @@
 """내부 모의 계좌의 주문을 KIS 모의투자에 베껴 내고, 어제 것을 맞춘다 (docs/paper.md 15장, docs/infra.md 25.1475).
 
-국내 일일 배치가 모의 단계(`jobs/paper.run_step`) 바로 뒤에 부른다. 곁다리다 — 실패해도 리포트·내부 모의는 그대로.
+국내·미국 일일 배치가 리포트를 보낸 뒤 부른다. 곁다리다 — 실패해도 리포트·내부 모의는 그대로.
 키(`KIS_VTS_*`)가 없으면 아무것도 하지 않고 `{"off": …}` 만 돌려준다.
+미국(2026-10-16 사용자 지시 "국내+미국 계좌로 개설했으니까 미국주식도 투자하는걸로")은 **예약주문**으로 낸다 —
+미국 배치는 개장 약 1시간 전이라 정규 주문을 못 낸다. 시장가가 없어 시장가 주문은 종가 ± `bm.US_MARKETABLE_PCT`
+지정가. 줄은 `broker='kis_vts_us'` 로 국내와 가른다(잔고 표의 키가 (broker, as_of) 라 같은 날 두 시장이 겹치지 않게)
 
 1. 맞추기: 어제까지 낸 증권사 주문의 체결을 받아 마감(`services/broker_mirror.reconcile`)
 2. 잔고: 증권사 모의 보유·예수금을 적고 내부 장부와 어긋난 종목을 센다(`paper_broker_daily`)
@@ -28,6 +31,8 @@ from batch.sources import kis_vts as kv
 from batch.sources.kis import KisFailed
 
 BROKER = kv.SOURCE
+#: 미국 줄의 증권사 칸 — 같은 모의 계좌지만 국내와 날짜·잔고·비교를 따로 센다
+BROKER_US = "kis_vts_us"
 #: 베낄 가상 계좌 — **H(지주사, 성적 가중 합의)** (2026-10-16 사용자 결정 "KIS모의투자 연결도 바로 H로 진행해줘",
 #: docs/company.md 10장). 처음 설계는 B(25.1475). H 가 아직 없는 DB(0083 전)에서는 "베낄 계좌 없음" 으로
 #: 꺼진 채 지나간다
@@ -38,10 +43,15 @@ ORDER_OPEN_KST = dtime(8, 30)
 WAIT_MAX = timedelta(minutes=10)
 #: 종가 동시호가(15:20) 뒤에는 보내지 않는다 — 하루짜리 주문이 체결 기회 없이 끝난다
 ORDER_CLOSE_KST = dtime(15, 20)
+#: 미국 예약주문 접수 시간(KST) — 10:00 부터 정규장 시작 10분 전까지(23:20, 서머타임 22:20), 16:30~16:45 정산 시간 제외
+#: (공식 예제 order_resv.py 주석). 마감은 캘린더의 개장 시각에서 빼서 서머타임·반일장을 따른다
+US_RESV_OPEN_KST = dtime(10, 0)
+US_RESV_CUTOFF = timedelta(minutes=10)
+US_RESV_BREAK_KST = (dtime(16, 30), dtime(16, 45))
 
 OPEN_ORDERS_SQL = (
     "SELECT id, stock_id, side, order_type, limit_price, quantity FROM paper_orders"
-    " WHERE account_id = ? AND market = 'KR' AND status = 'open' AND fill_session = ? ORDER BY id"
+    " WHERE account_id = ? AND market = ? AND status = 'open' AND fill_session = ? ORDER BY id"
 )
 SENT_SQL = "SELECT paper_order_id, stock_id FROM paper_broker_orders WHERE broker = ? AND trade_date = ?"
 PENDING_SQL = (
@@ -60,16 +70,16 @@ OLD_SQL = (
 BOUGHT_SQL = (
     "SELECT DISTINCT stock_id FROM paper_broker_orders WHERE broker = ? AND side = 'buy' AND status <> 'rejected'"
 )
-#: 국내 종목만 — KIS모의투자는 국내만 베끼므로 미국 보유가 늘 "어긋남" 으로 남았다 (25.1483, 감사 [권장] 1)
+#: 그 시장 종목만 — 시장마다 따로 대 본다. 국내만 보던 때 미국 보유가 늘 "어긋남" 으로 남았다 (25.1483, 감사 [권장] 1)
 INTERNAL_QTY_SQL = (
     "SELECT f.stock_id, SUM(CASE WHEN f.side = 'buy' THEN f.quantity ELSE -f.quantity END) AS q FROM paper_fills f"
-    " JOIN stocks s ON s.id = f.stock_id WHERE f.account_id = ? AND s.country = 'KR' GROUP BY f.stock_id"
+    " JOIN stocks s ON s.id = f.stock_id WHERE f.account_id = ? AND s.country = ? GROUP BY f.stock_id"
 )
 ACCOUNT_SQL = "SELECT id FROM paper_accounts WHERE id = ?"
 INSERT_SQL = (
     "INSERT OR IGNORE INTO paper_broker_orders (broker, paper_order_id, account_id, market, stock_id, code, side,"
     " order_type, limit_price, quantity, trade_date, reason, status, source, created_at)"
-    " VALUES (?, ?, ?, 'KR', ?, ?, ?, ?, ?, ?, ?, ?, 'sending', ?, ?)"
+    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'sending', ?, ?)"
 )
 #: 방금 적은 줄 — 같은 시각 도장(`created_at`)으로 내 줄인지 가린다(동시에 돈 다른 실행의 줄이면 보내지 않는다)
 MINE_SQL = (
@@ -104,49 +114,82 @@ LATEST_DAILY_SQL = (
 )
 
 
-CODES_SQL = "SELECT id, ticker FROM stocks WHERE id IN (SELECT value FROM json_each(?))"
-IDS_SQL = "SELECT id, ticker FROM stocks WHERE country = 'KR' AND ticker IN (SELECT value FROM json_each(?))"
+CODES_SQL = "SELECT id, ticker, market FROM stocks WHERE id IN (SELECT value FROM json_each(?))"
+IDS_SQL = "SELECT id, ticker FROM stocks WHERE country = ? AND ticker IN (SELECT value FROM json_each(?))"
+#: 미국 시장가 대신 낼 지정가의 바탕 — 오늘(현지) 앞 마지막 종가. 배치는 개장 전이라 어제 종가다
+CLOSES_SQL = (
+    "SELECT j.value, (SELECT p.close FROM prices p WHERE p.stock_id = j.value AND p.date < ? AND p.close > 0"
+    " ORDER BY p.date DESC LIMIT 1) FROM json_each(?) j"
+)
 
 
-def _codes(client: Any, ids: set[int]) -> dict[int, str]:
+def _codes(client: Any, ids: set[int]) -> dict[int, tuple[str, str]]:
+    """{종목 id: (티커, stocks.market)}."""
     if not ids:
         return {}
-    return {int(i): str(t) for i, t in client.execute(CODES_SQL, [json.dumps(sorted(ids))]).rows if t}
+    return {int(i): (str(t), str(m or "")) for i, t, m in client.execute(CODES_SQL, [json.dumps(sorted(ids))]).rows
+            if t}  # fmt: skip
 
 
-def _ids(client: Any, codes: set[str]) -> dict[str, int]:
+def _ids(client: Any, codes: set[str], country: str) -> dict[str, int]:
     if not codes:
         return {}
-    return {str(t): int(i) for i, t in client.execute(IDS_SQL, [json.dumps(sorted(codes))]).rows}
+    return {str(t): int(i) for i, t in client.execute(IDS_SQL, [country, json.dumps(sorted(codes))]).rows}
+
+
+def _closes(client: Any, ids: set[int], before: str) -> dict[int, float]:
+    if not ids:
+        return {}
+    return {int(i): float(c) for i, c in client.execute(CLOSES_SQL, [before, json.dumps(sorted(ids))]).rows if c}
+
+
+def _us_window(now: datetime, day: Any) -> str | None:
+    """미국 예약주문을 지금 낼 수 없으면 그 까닭, 되면 None."""
+    kst = now.astimezone(cal.market_tz("KR"))
+    개장 = cal.session_open_utc("US", day)
+    if 개장 is None:
+        return "오늘은 장이 없다"
+    if now >= 개장 - US_RESV_CUTOFF:
+        return "예약 접수 마감 뒤 — 보내지 않음"
+    if kst.time() < US_RESV_OPEN_KST:
+        return "예약 접수 시작 전 — 보내지 않음"
+    if US_RESV_BREAK_KST[0] <= kst.time() < US_RESV_BREAK_KST[1]:
+        return "예약 접수 정산 시간 — 보내지 않음"
+    return None
 
 
 def run(
     client: Any, market: str, now: datetime, *, session: Any = None, sleep: Any = time.sleep, clock: Any = None,
     frozen: set[int] | None = None,
 ) -> dict[str, Any]:
-    """하루 한 번. 돌려주는 것은 실행 기록(`step_log.broker`)에 넣을 건수와 까닭. `clock` 은 보낸 시각(시험용)."""
+    """하루 한 번(시장마다). 돌려주는 것은 실행 기록(`step_log.broker`)에 넣을 건수와 까닭.
+
+    `clock` 은 보낸 시각(시험용)
+    """
     clock = clock or (lambda: datetime.now(UTC))
-    if market != "KR":
-        return {"off": "국내만 — 해외 모의 주문은 [확인필요]"}
+    if market not in ("KR", "US"):
+        return {"off": f"모르는 시장 {market}"}
     if not kv.configured():
         return {"off": "KIS모의투자 키 없음"}
     if not client.execute(ACCOUNT_SQL, [MIRROR_ACCOUNT]).rows:
         return {"off": f"베낄 계좌 {MIRROR_ACCOUNT} 없음"}
+    미국 = market == "US"
+    증권사 = BROKER_US if 미국 else BROKER
     지금 = now.isoformat()
-    현지 = now.astimezone(cal.market_tz("KR"))
+    현지 = now.astimezone(cal.market_tz(market))
     오늘 = 현지.date()
     sess = session or kv.Session(client, now)
     기록: dict[str, Any] = {}
 
     # 1. 맞추기 — 어제까지 낸 하루짜리 주문은 끝났다. 체결 조회는 3개월 안만 되므로 그보다 오래된 줄은 모름으로 닫는다
     한계 = (오늘 - timedelta(days=kv.CCLD_MAX_DAYS)).isoformat()
-    client.execute(OLD_SQL, [지금, BROKER, 한계])
-    남은 = client.execute(PENDING_SQL, [BROKER, 오늘.isoformat()]).dicts()
+    client.execute(OLD_SQL, [지금, 증권사, 한계])
+    남은 = client.execute(PENDING_SQL, [증권사, 오늘.isoformat()]).dicts()
     if 남은:
         시작 = min(str(r["trade_date"]) for r in 남은).replace("-", "")
         끝 = (오늘 - timedelta(days=1)).strftime("%Y%m%d")
-        체결, 다받음 = sess.executions(시작, 끝)
-        결과 = bm.reconcile(남은, 체결, complete=다받음)
+        체결, 다받음 = (sess.executions_us if 미국 else sess.executions)(시작, 끝)
+        결과 = bm.reconcile(남은, 체결, complete=다받음, missing=bm.MISSING_US if 미국 else bm.MISSING)
         client.batch([(RECON_SQL, [o.status, o.order_no, o.filled, o.avg_price, o.message, 지금, o.row_id])
                       for o in 결과])  # fmt: skip
         기록["reconciled"] = dict(Counter(o.status for o in 결과))
@@ -154,25 +197,25 @@ def run(
             기록["reconcile_truncated"] = True
 
     # 2. 잔고 — 내부 장부와 대 본다
-    보유, 합 = sess.balance()
-    코드표 = _ids(client, {h.code for h in 보유})
+    보유, 합 = sess.balance_us() if 미국 else sess.balance()
+    코드표 = _ids(client, {h.code for h in 보유}, market)
     증권 = {코드표[h.code]: (h.quantity, h.sellable) for h in 보유 if h.code in 코드표}
-    내부 = {int(r["stock_id"]): int(r["q"]) for r in client.execute(INTERNAL_QTY_SQL, [MIRROR_ACCOUNT]).dicts()
+    내부 = {int(r["stock_id"]): int(r["q"]) for r in client.execute(INTERNAL_QTY_SQL, [MIRROR_ACCOUNT, market]).dicts()
             if int(r["q"] or 0) > 0}  # fmt: skip
     # 어긋남은 **베낀 적 있는 종목**과 증권사 보유만 — 키를 넣기 전에 산 가상 보유는 "연결 전 보유" 로
     # 따로 센다(감사 [권장] 3). 같은 날 다시 돌면 시가에 찬 오늘 매수가 증권사엔 있고 가상 장부엔 다음 배치에야
     # 들어온다 — 그 수량을 뺀다(감사 [권장] 2)
-    산적0 = {int(r[0]) for r in client.execute(BOUGHT_SQL, [BROKER]).rows}
+    산적0 = {int(r[0]) for r in client.execute(BOUGHT_SQL, [증권사]).rows}
     오늘산0 = {int(r[0]): int(r[1] or 0)
-              for r in client.execute(BOUGHT_TODAY_SQL, [BROKER, 오늘.isoformat()]).rows}  # fmt: skip
+              for r in client.execute(BOUGHT_TODAY_SQL, [증권사, 오늘.isoformat()]).rows}  # fmt: skip
     증권수 = {k: v[0] - 오늘산0.get(k, 0) for k, v in 증권.items()}
     연결전 = sorted(sid for sid in 내부 if sid not in 산적0 and sid not in 증권)
     어긋남 = bm.holdings_diff({k: q for k, q in 증권수.items() if q > 0},
                             {k: q for k, q in 내부.items() if k not in 연결전})  # fmt: skip
     부터 = (오늘 - timedelta(days=bm.COMPARE_DAYS)).isoformat()
-    비교 = bm.compare(client.execute(COMPARE_SQL, [BROKER, 부터, 오늘.isoformat()]).dicts())
+    비교 = bm.compare(client.execute(COMPARE_SQL, [증권사, 부터, 오늘.isoformat()]).dicts())
     client.execute(DAILY_SQL, [
-        BROKER, 오늘.isoformat(), MIRROR_ACCOUNT, 합.get("cash"), 합.get("total"),
+        증권사, 오늘.isoformat(), MIRROR_ACCOUNT, 합.get("cash"), 합.get("total"),
         json.dumps([[코드표.get(h.code, h.code), h.quantity, h.avg_price] for h in 보유]),
         json.dumps({str(k): list(v) for k, v in 어긋남.items()}), BROKER, 지금, json.dumps(비교, ensure_ascii=False),
     ])  # fmt: skip
@@ -185,13 +228,18 @@ def run(
         기록["unknown_codes"] = len({h.code for h in 보유}) - len(코드표)
 
     # 3. 보내기
-    if not cal.is_session("KR", 오늘):
+    if not cal.is_session(market, 오늘):
         기록["send"] = "오늘은 장이 없다"
         return 기록 | {"calls": sess.calls}
-    if 현지.time() >= ORDER_CLOSE_KST:
+    if 미국:
+        막힘 = _us_window(now, 오늘)
+        if 막힘:
+            기록["send"] = 막힘
+            return 기록 | {"calls": sess.calls}
+    elif 현지.time() >= ORDER_CLOSE_KST:
         기록["send"] = "장 끝난 뒤 — 보내지 않음"
         return 기록 | {"calls": sess.calls}
-    if 현지.time() < ORDER_OPEN_KST:
+    elif 현지.time() < ORDER_OPEN_KST:
         기다림 = datetime.combine(오늘, ORDER_OPEN_KST, tzinfo=현지.tzinfo) - 현지
         if 기다림 > WAIT_MAX:
             기록["send"] = "접수 시작 전 — 보내지 않음"
@@ -199,31 +247,43 @@ def run(
         sleep(기다림.total_seconds() + 5)
     멈춤값 = db.get_setting(client, "paper_halt", None)
     멈춤 = bool(멈춤값.get("on")) if isinstance(멈춤값, dict) else bool(멈춤값)
-    주문들 = client.execute(OPEN_ORDERS_SQL, [MIRROR_ACCOUNT, 오늘.isoformat()]).dicts()
-    보냄 = client.execute(SENT_SQL, [BROKER, 오늘.isoformat()]).dicts()
+    주문들 = client.execute(OPEN_ORDERS_SQL, [MIRROR_ACCOUNT, market, 오늘.isoformat()]).dicts()
+    보냄 = client.execute(SENT_SQL, [증권사, 오늘.isoformat()]).dicts()
     이미 = {int(r["paper_order_id"]) for r in 보냄 if r["paper_order_id"] is not None}
     정리함 = {int(r["stock_id"]) for r in 보냄 if r["paper_order_id"] is None}
-    산적 = {int(r[0]) for r in client.execute(BOUGHT_SQL, [BROKER]).rows}
-    코드 = _codes(client, {int(o["stock_id"]) for o in 주문들} | set(증권))
-    오늘산 = {int(r[0]): int(r[1] or 0) for r in client.execute(BOUGHT_TODAY_SQL, [BROKER, 오늘.isoformat()]).rows}
+    산적 = {int(r[0]) for r in client.execute(BOUGHT_SQL, [증권사]).rows}
+    종목 = _codes(client, {int(o["stock_id"]) for o in 주문들} | set(증권))
+    # 미국은 KIS 거래소 코드를 모르는 종목(Cboe BZX·IEX 상장 등)을 내지 않는다 — 코드 없음으로 빠진다
+    거래소 = {sid: kv.US_EXCHANGE.get(m) for sid, (_t, m) in 종목.items()}
+    코드 = {sid: t for sid, (t, _m) in 종목.items() if not 미국 or 거래소.get(sid)}
+    종가 = _closes(client, set(코드), 오늘.isoformat()) if 미국 else None
+    오늘산 = {int(r[0]): int(r[1] or 0) for r in client.execute(BOUGHT_TODAY_SQL, [증권사, 오늘.isoformat()]).rows}
     낼것, 안냄 = bm.plan(주문들, 코드, 내부, 증권, 산적, already=이미, cleaned_today=정리함, halted=멈춤,
-                       bought_today=오늘산, frozen=frozen)  # fmt: skip
+                       bought_today=오늘산, frozen=frozen, currency="USD" if 미국 else "KRW",
+                       closes=종가)  # fmt: skip
     상태: Counter[str] = Counter()
     for it in 낼것:
+        # 미국은 늘 지정가(시장가 대신 종가 ± 폭) — 내부 주문이 시장가였으면 `limit_price` 가 그 폭 지정가다
         client.execute(INSERT_SQL, [
-            BROKER, it.paper_order_id, MIRROR_ACCOUNT, it.stock_id, it.code, it.side,
+            증권사, it.paper_order_id, MIRROR_ACCOUNT, market, it.stock_id, it.code, it.side,
             "market" if it.price is None else "limit", it.price, it.quantity, 오늘.isoformat(), it.reason, BROKER, 지금,
         ])  # fmt: skip
         내것 = -1 if it.paper_order_id is None else it.paper_order_id
-        mine = client.execute(MINE_SQL, [BROKER, 오늘.isoformat(), it.stock_id, it.side, 내것, 지금]).rows
+        mine = client.execute(MINE_SQL, [증권사, 오늘.isoformat(), it.stock_id, it.side, 내것, 지금]).rows
         if not mine:
             상태["skipped_other_run"] += 1
             continue
         rid = int(mine[0][0])
         보낸시각 = clock().isoformat()
         try:
-            받음 = sess.order(it.side, it.code, it.quantity, it.price)
-            client.execute(SENT_UPDATE_SQL, ["accepted", 받음.order_no, 보낸시각, None, 보낸시각, rid])
+            if 미국:
+                # 예약번호는 정규 주문번호가 아니다(개장 때 따로 생긴다) — 글로만 남기고 맞추기는 날·종목·방향·수량으로
+                받음 = sess.order_us(it.side, it.code, str(거래소[it.stock_id]), it.quantity, float(it.price or 0))
+                글 = f"예약번호 {받음.order_no}"
+                client.execute(SENT_UPDATE_SQL, ["accepted", None, 보낸시각, 글, 보낸시각, rid])
+            else:
+                받음 = sess.order(it.side, it.code, it.quantity, it.price)
+                client.execute(SENT_UPDATE_SQL, ["accepted", 받음.order_no, 보낸시각, None, 보낸시각, rid])
             상태["accepted"] += 1
         except (kv.NoResponse, requests.RequestException) as exc:
             # 갔는지 모른다 — 다시 보내지 않는다(두 번 주문). 다음 날 체결 조회로 맞춘다. `requests` 예외는 세션이
@@ -245,13 +305,16 @@ def run(
 
 
 def summary_lines(client: Any) -> list[str]:
-    """주간 요약의 KIS모의투자 절 — 배치가 마지막으로 낸 비교 요약을 읽기만 한다.
+    """주간 요약의 KIS모의투자 절 — 배치가 마지막으로 낸 비교 요약을 시장마다 읽기만 한다.
 
     0078·0080 전이거나 줄이 없으면(키를 넣기 전) 빈 목록
     """
-    rows = client.execute(LATEST_DAILY_SQL, [BROKER]).dicts()
-    if not rows or not rows[0].get("summary_json"):
-        return []
-    r = rows[0]
-    return bm.compare_lines(json.loads(r["summary_json"]), len(json.loads(r.get("diff_json") or "{}")), str(r["as_of"]),
-                            MIRROR_ACCOUNT)  # fmt: skip
+    out: list[str] = []
+    for 증권사, 이름 in ((BROKER, MIRROR_ACCOUNT), (BROKER_US, f"{MIRROR_ACCOUNT} 미국")):
+        rows = client.execute(LATEST_DAILY_SQL, [증권사]).dicts()
+        if not rows or not rows[0].get("summary_json"):
+            continue
+        r = rows[0]
+        out += bm.compare_lines(json.loads(r["summary_json"]), len(json.loads(r.get("diff_json") or "{}")),
+                                str(r["as_of"]), 이름)  # fmt: skip
+    return out

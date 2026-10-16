@@ -38,6 +38,19 @@ KEY_ENV, SECRET_ENV, ACCOUNT_ENV = "KIS_VTS_APP_KEY", "KIS_VTS_APP_SECRET", "KIS
 #: 모의 tr_id (order_cash.py L110-116 · inquire_balance.py L118 · inquire_daily_ccld.py L150 — 3개월 이내)
 TR_BUY, TR_SELL = "VTTC0012U", "VTTC0011U"
 TR_BALANCE, TR_DAILY_CCLD = "VTTC8434R", "VTTC0081R"
+#: 미국 — **예약주문**(정규장 밖에 접수, 개장 때 정규장 지정가로 전송). 우리 미국 배치는 개장 약 1시간 전이라 정규 주문
+#: 을 못 낸다. 모의 tr_id 가 따로 있다(order_resv.py L149-151: 매수 VTTT3014U · 매도 VTTT3016U). 접수 10:00~23:20 KST
+#: (서머타임 22:20), 16:30~16:45 정산 시간 제외(order_resv.py 주석). 미국 모의 정규 주문은 지정가만 되고, 매도 tr_id 는
+#: 주석(VTTT1001U)과 코드(VTTT1006U)가 엇갈려 쓰지 않는다
+TR_US_RESV_BUY, TR_US_RESV_SELL = "VTTT3014U", "VTTT3016U"
+#: 미국 체결·잔고 (inquire_ccnl.py L131 · inquire_balance.py L98). 모의 체결 조회는 매도매수·체결·거래소 칸이
+#: "전체" 만 된다
+TR_US_CCNL, TR_US_BALANCE = "VTTS3035R", "VTTS3012R"
+US_RESV_PATH = "/uapi/overseas-stock/v1/trading/order-resv"
+US_CCNL_PATH = "/uapi/overseas-stock/v1/trading/inquire-ccnl"
+US_BALANCE_PATH = "/uapi/overseas-stock/v1/trading/inquire-balance"
+#: `stocks.market`(nasdaq_symbols.EXCHANGE_CODES) → KIS 해외거래소 코드. 모르는 시장은 주문하지 않는다
+US_EXCHANGE = {"NASDAQ": "NASD", "NYSE": "NYSE", "NYSE American": "AMEX", "NYSE Arca": "AMEX"}
 ORDER_PATH = "/uapi/domestic-stock/v1/trading/order-cash"
 BALANCE_PATH = "/uapi/domestic-stock/v1/trading/inquire-balance"
 CCLD_PATH = "/uapi/domestic-stock/v1/trading/inquire-daily-ccld"
@@ -71,9 +84,19 @@ def configured(env: dict[str, str] | None = None) -> bool:
     return bool(e.get(KEY_ENV) and e.get(SECRET_ENV) and account(e))
 
 
+#: 계좌번호만 8자리로 넣었을 때의 상품코드 — 종합계좌 (공식 예제 `kis_devlp.yaml` `my_prod: "01" # 종합계좌`).
+#: 모의투자 화면은 8자리만 보여 준다(2026-10-16 사용자 확인 "계좌번호는 … 8자리던데")
+DEFAULT_PRODUCT = "01"
+
+
 def account(env: dict[str, str] | None = None) -> tuple[str, str] | None:
-    """(종합계좌번호 8자리, 상품코드 2자리). `12345678-01` · `1234567801` 둘 다 받는다. 모양이 틀리면 None."""
+    """(종합계좌번호 8자리, 상품코드 2자리). `12345678` · `12345678-01` · `1234567801` 모두 받는다. 모양이 틀리면 None.
+
+    8자리면 상품코드는 종합계좌 `01`(`DEFAULT_PRODUCT`)
+    """
     raw = "".join(ch for ch in str(_vars(env).get(ACCOUNT_ENV) or "") if ch.isdigit())
+    if len(raw) == 8:
+        return raw, DEFAULT_PRODUCT
     return (raw[:8], raw[8:]) if len(raw) == 10 else None
 
 
@@ -158,6 +181,53 @@ def parse_executions(payload: object) -> list[Execution]:
             cancelled=str(r.get("cncl_yn") or "").upper() == "Y",
         ))  # fmt: skip
     return out
+
+
+def parse_us_reservation(payload: object) -> Accepted:
+    """미국 예약주문 응답 — 예약번호(OVRS_RSVN_ODNO).
+
+    정규 주문번호는 개장 때 생겨, 체결 조회와는 날·종목·방향·수량으로 맞춘다
+    """
+    body = _ok(payload, "모의 미국 예약주문")
+    out = body.get("output") or {}
+    # 응답의 `ODNO` 는 "한국거래소전송주문조직번호" 라 주문번호가 아니다(chk_order_resv.py L23, 25.1485 검증 [참고] 2)
+    no = str(out.get("OVRS_RSVN_ODNO") or "").strip()
+    if not no:
+        raise NoResponse("모의 미국 예약주문 응답에 예약번호가 없습니다")
+    return Accepted(no, None)
+
+
+def parse_us_executions(payload: object) -> list[Execution]:
+    """미국 주문체결 내역(inquire-ccnl output) → `Execution`. 거부 사유가 있으면 거부 수량 = 주문 − 체결.
+
+    거부 사유 칸이 정상 주문에도 "0" 같은 값을 줄 수 있어 빈칸·0 은 사유 없음으로 본다 (25.1485 검증 [참고] 1)
+    """
+    body = _ok(payload, "모의 미국 체결 조회")
+    out = []
+    for r in body.get("output") or []:
+        no = str(r.get("odno") or "").strip()
+        if not no:
+            continue
+        code = str(r.get("sll_buy_dvsn_cd") or "")
+        주문, 체결 = _int(r.get("ft_ord_qty")), _int(r.get("ft_ccld_qty"))
+        거부 = str(r.get("rjct_rson") or "").strip().strip("0") != ""
+        out.append(Execution(
+            order_date=str(r.get("ord_dt") or ""), order_no=no, code=str(r.get("pdno") or "").strip(),
+            side="sell" if code == "01" else "buy" if code == "02" else code, quantity=주문, filled=체결,
+            avg_price=_float(r.get("ft_ccld_unpr3")), rejected=max(주문 - 체결, 0) if 거부 else 0,
+            cancelled=str(r.get("rvse_cncl_dvsn") or "") == "02",
+        ))  # fmt: skip
+    return out
+
+
+def parse_us_balance(payload: object) -> list[Holding]:
+    body = _ok(payload, "모의 미국 잔고 조회")
+    return [
+        Holding(str(r.get("ovrs_pdno") or "").strip(), _int(r.get("ovrs_cblc_qty")), _int(r.get("ord_psbl_qty")),
+                _float(r.get("pchs_avg_pric")))  # fmt: skip
+        for r in body.get("output1") or []
+        if _int(r.get("ovrs_cblc_qty")) > 0 and str(r.get("ovrs_pdno") or "").strip()
+    ]
 
 
 @dataclass(frozen=True)
@@ -287,3 +357,57 @@ class Session:
                 break
             fk, nk, cont = str(payload.get("ctx_area_fk100") or ""), str(payload.get("ctx_area_nk100") or ""), "N"
         return 보유, 합
+
+    # ── 미국 (예약주문) ──────────────────────────────────────────────────────
+
+    def order_us(self, side: str, code: str, exchange: str, quantity: int, price: float) -> Accepted:
+        """미국 예약주문 — 지정가(달러, 소수 둘째 자리). 시장가가 없어 매도는 부르는 쪽이 낮춘 지정가를 넘긴다."""
+        if (side not in ("buy", "sell") or quantity <= 0 or not code or price <= 0
+                or exchange not in US_EXCHANGE.values()):
+            raise KisFailed("모의 미국 주문 인자가 틀렸습니다")
+        body = {
+            "CANO": self.cano, "ACNT_PRDT_CD": self.prdt, "PDNO": code, "OVRS_EXCG_CD": exchange,
+            "FT_ORD_QTY": str(int(quantity)), "FT_ORD_UNPR3": f"{price:.2f}",
+        }  # fmt: skip
+        tr = TR_US_RESV_SELL if side == "sell" else TR_US_RESV_BUY
+        payload, _c = self._call("POST", US_RESV_PATH, tr, body=body)
+        return parse_us_reservation(payload)
+
+    def executions_us(self, start: str, end: str) -> tuple[list[Execution], bool]:
+        """미국 주문체결 내역 (start~end YYYYMMDD) — 국내 `executions` 와 같은 꼴. 모의는 칸 거르기가 "전체" 만 된다."""
+        out: list[Execution] = []
+        fk = nk = ""
+        cont = ""
+        for _ in range(CCLD_MAX_PAGES):
+            params = {
+                "CANO": self.cano, "ACNT_PRDT_CD": self.prdt, "PDNO": "", "ORD_STRT_DT": start, "ORD_END_DT": end,
+                "SLL_BUY_DVSN": "00", "CCLD_NCCS_DVSN": "00", "OVRS_EXCG_CD": "", "SORT_SQN": "DS", "ORD_DT": "",
+                "ORD_GNO_BRNO": "", "ODNO": "", "CTX_AREA_NK200": nk, "CTX_AREA_FK200": fk,
+            }  # fmt: skip
+            payload, 다음 = self._call("GET", US_CCNL_PATH, TR_US_CCNL, params=params, tr_cont=cont)
+            out += parse_us_executions(payload)
+            if 다음 not in ("M", "F") or not isinstance(payload, dict):
+                return out, True
+            fk, nk, cont = str(payload.get("ctx_area_fk200") or ""), str(payload.get("ctx_area_nk200") or ""), "N"
+        return out, False
+
+    def balance_us(self) -> tuple[list[Holding], dict[str, float | None]]:
+        """미국 보유 — 거래소마다 묻고 종목 코드로 겹침을 뺀다.
+
+        공식 예제 주석은 실전 `NASD` = 미국 전체, 모의는 NASD·NYSE·AMEX 를 따로 받는다고 적었다 `[확인필요]` — 모의가
+        NASD 로 전체를 주더라도 겹침을 빼므로 두 번 세지 않는다. 예수금·평가는 국내 원화 잔고와 단위가 달라 적지 않는다
+        """
+        보유: dict[str, Holding] = {}
+        for 거래소 in sorted(set(US_EXCHANGE.values())):
+            fk = nk = ""
+            cont = ""
+            for _ in range(MAX_PAGES):
+                params = {"CANO": self.cano, "ACNT_PRDT_CD": self.prdt, "OVRS_EXCG_CD": 거래소, "TR_CRCY_CD": "USD",
+                          "CTX_AREA_FK200": fk, "CTX_AREA_NK200": nk}  # fmt: skip
+                payload, 다음 = self._call("GET", US_BALANCE_PATH, TR_US_BALANCE, params=params, tr_cont=cont)
+                for h in parse_us_balance(payload):
+                    보유.setdefault(h.code, h)
+                if 다음 not in ("M", "F") or not isinstance(payload, dict):
+                    break
+                fk, nk, cont = str(payload.get("ctx_area_fk200") or ""), str(payload.get("ctx_area_nk200") or ""), "N"
+        return list(보유.values()), {"cash": None, "total": None}

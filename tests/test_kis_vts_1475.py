@@ -61,7 +61,9 @@ def test_reads_only_mock_keys(monkeypatch: pytest.MonkeyPatch) -> None:
     assert not kv.configured()
     assert kv.configured(키)
     assert kv.account({"KIS_VTS_ACCOUNT": "1234567801"}) == ("12345678", "01")
-    assert kv.account({"KIS_VTS_ACCOUNT": "1234-5678"}) is None
+    # 모의투자 화면은 8자리만 보여 준다 — 상품코드는 종합계좌 01 (25.1485)
+    assert kv.account({"KIS_VTS_ACCOUNT": "1234-5678"}) == ("12345678", "01")
+    assert kv.account({"KIS_VTS_ACCOUNT": "1234567"}) is None and kv.account({"KIS_VTS_ACCOUNT": "123456780"}) is None
 
 
 class _Http:
@@ -338,7 +340,7 @@ def 기록_상태(c: Client) -> list[str]:
 
 
 def test_job_off_and_timing(c: Client, monkeypatch: pytest.MonkeyPatch) -> None:
-    assert job.run(c, "US", _at("08:40"), session=_Sess()) == {"off": "국내만 — 해외 모의 주문은 [확인필요]"}
+    assert job.run(c, "JP", _at("08:40"), session=_Sess()) == {"off": "모르는 시장 JP"}
     monkeypatch.delenv("KIS_VTS_ACCOUNT")
     assert job.run(c, "KR", _at("08:40"), session=_Sess()) == {"off": "KIS모의투자 키 없음"}
     monkeypatch.setenv("KIS_VTS_ACCOUNT", "1234567801")

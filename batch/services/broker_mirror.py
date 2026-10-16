@@ -23,6 +23,10 @@ from batch.services.signals import to_tick
 MAX_ORDERS_PER_DAY = 40
 REASON_MIRROR = "베낌"
 REASON_CLEANUP = "정리"
+#: 미국은 시장가가 없다(모의 미국 주문은 지정가만, 예약주문도 단가를 받는다) — 시장가 주문(매도·정리·시가 매수)은
+#: 마지막 종가에서 이만큼(%) 불리한 지정가로 낸다(매도 아래·매수 위). 개장가가 그 안이면 개장가에 찬다. 하루 ±10% 넘는
+#: 갭은 드물다 — 넘으면 안 차고 다음 거래일 맞추기에서 `unfilled` 로 보인다 `[확인필요]`
+US_MARKETABLE_PCT = 10.0
 
 
 @dataclass(frozen=True)
@@ -40,7 +44,7 @@ def plan(
     open_orders: list[dict[str, Any]], codes: dict[int, str], internal_qty: dict[int, int],
     broker: dict[int, tuple[int, int]], bought_before: set[int], *, already: set[int], cleaned_today: set[int],
     halted: bool, max_orders: int = MAX_ORDERS_PER_DAY, bought_today: dict[int, int] | None = None,
-    frozen: set[int] | None = None,
+    frozen: set[int] | None = None, currency: str = "KRW", closes: dict[int, float] | None = None,
 ) -> tuple[list[Intent], list[tuple[int | None, int, str]]]:
     """(낼 것, [(내부 주문 id, 종목, 안 내는 까닭)]).
 
@@ -48,11 +52,24 @@ def plan(
     `broker` = {종목: (증권사 보유, 팔 수 있는 수량)}, `already` = 이미 증권사 주문 줄이 있는 내부 주문 id,
     `cleaned_today` = 오늘 정리 주문을 이미 낸 종목, `bought_today` = 오늘 이미 낸 베낀 매수 수량(같은 날 다시 돌 때 —
     시가에 찬 오늘 매수는 증권사 잔고에 있지만 내부 장부엔 다음 배치에야 들어와 "증권사에만 남은 것" 으로 보인다,
-    25.1475 검증 [필수] 1), `frozen` = 기업행위 경계 종목(분할로 증권사 수량만 늘어난 것을 팔지 않게)
+    25.1475 검증 [필수] 1), `frozen` = 기업행위 경계 종목(분할로 증권사 수량만 늘어난 것을 팔지 않게).
+    `currency="USD"` 면 시장가를 없앤다 — 마지막 종가(`closes`) ± `US_MARKETABLE_PCT` 지정가. 종가가 없으면 내지 않는다
     """
     안냄: list[tuple[int | None, int, str]] = []
     if halted:
         return [], [(int(o["id"]), int(o["stock_id"]), "멈춤 스위치가 켜져 있음") for o in open_orders]
+    미국 = currency == "USD"
+
+    def 대신가(sid: int, side: str) -> float | None:
+        """미국 시장가 대신 낼 지정가. 국내는 None(시장가 그대로). 종가가 없으면 0 — 부르는 쪽이 내지 않는다."""
+        if not 미국:
+            return None
+        c = (closes or {}).get(sid)
+        if not c or c <= 0:
+            return 0.0
+        폭 = US_MARKETABLE_PCT / 100
+        return to_tick(c * (1 - 폭), currency, "down") if side == "sell" else to_tick(c * (1 + 폭), currency, "up")
+
     팔수있음 = {sid: max(int(v[1]), 0) for sid, v in broker.items()}
     매도: list[Intent] = []
     for sid, (보유, _s) in sorted(broker.items()):
@@ -61,8 +78,11 @@ def plan(
                 or not codes.get(sid)):
             continue
         q = min(남는것, 팔수있음.get(sid, 0))
-        if q > 0:
-            매도.append(Intent(None, sid, codes[sid], "sell", q, None, REASON_CLEANUP))
+        가격 = 대신가(sid, "sell")
+        if q > 0 and 가격 == 0:
+            안냄.append((None, sid, "종가 없음 — 미국 정리 지정가를 못 정함"))
+        elif q > 0:
+            매도.append(Intent(None, sid, codes[sid], "sell", q, 가격, REASON_CLEANUP))
             팔수있음[sid] -= q
     매수: list[Intent] = []
     for o in open_orders:
@@ -74,17 +94,20 @@ def plan(
             안냄.append((oid, sid, "종목 코드 없음"))
             continue
         시장가 = o.get("order_type") == "market" or o.get("limit_price") is None
+        # 매수 지정가는 호가 단위로 내린다 — 내부 회차 가격은 이미 호가 단위지만(25.657), 어긋나면 증권사가 거부한다
+        가격 = (대신가(sid, str(o["side"])) if 시장가
+                else to_tick(float(o["limit_price"]), currency, "up" if o["side"] == "sell" else "down"))  # fmt: skip
+        if 가격 == 0:
+            안냄.append((oid, sid, "종가 없음 — 미국 시장가 대신 낼 지정가를 못 정함"))
+            continue
         if o["side"] == "sell":
             q = min(int(o["quantity"]), 팔수있음.get(sid, 0))
             if q <= 0:
                 안냄.append((oid, sid, "증권사 모의에 팔 수량 없음"))
                 continue
             팔수있음[sid] -= q
-            가격 = None if 시장가 else to_tick(float(o["limit_price"]), "KRW", "up")
             매도.append(Intent(oid, sid, code, "sell", q, 가격, REASON_MIRROR))
         else:
-            # 매수 지정가는 호가 단위로 내린다 — 내부 회차 가격은 이미 호가 단위지만(25.657), 어긋나면 증권사가 거부한다
-            가격 = None if 시장가 else to_tick(float(o["limit_price"]), "KRW", "down")
             매수.append(Intent(oid, sid, code, "buy", int(o["quantity"]), 가격, REASON_MIRROR))
     낼것 = 매도 + 매수
     if len(낼것) > max_orders:
@@ -109,7 +132,16 @@ def _번호(no: Any) -> str:
     return str(no or "").strip().lstrip("0")
 
 
-def reconcile(rows: list[dict[str, Any]], executions: list[Any], complete: bool = True) -> list[Outcome]:
+#: 체결 조회에 없는 줄의 글. 미국 예약주문은 접수 때 증거금·매도수량을 보지 않고 개장 때 모자라면
+#: **전송하지 않는다** — 그러면 체결 조회에 줄이 아예 없다(order_resv.py L80-83). 모의는 예약 목록 조회도
+#: 못 쓴다(order_resv_list "모의투자는 사용 불가") — 25.1485 검증 [권장] 1
+MISSING = "체결 조회에 없음"
+MISSING_US = "체결 조회에 없음 — 예약이 개장 때 전송되지 않은 것으로 봄(증거금·매도수량 부족 등)"
+
+
+def reconcile(
+    rows: list[dict[str, Any]], executions: list[Any], complete: bool = True, missing: str = MISSING,
+) -> list[Outcome]:
     """어제까지 낸 증권사 주문(`sending`·`accepted`) → 체결 조회 결과로 마감. 하루짜리라 지난 거래일 주문은 끝났다.
 
     주문번호가 있으면 (주문일, 번호)로 찾는다. 응답을 못 받아 번호가 없는 줄(`sending`)은 같은 날·종목·방향·수량의
@@ -128,7 +160,7 @@ def reconcile(rows: list[dict[str, Any]], executions: list[Any], complete: bool 
                      None)  # fmt: skip
         if e is None:
             if complete:
-                out.append(Outcome(int(r["id"]), "unknown", r.get("broker_order_no"), 0, None, "체결 조회에 없음"))
+                out.append(Outcome(int(r["id"]), "unknown", r.get("broker_order_no"), 0, None, missing))
             continue
         쓴.add((e.order_date, _번호(e.order_no)))
         if e.filled <= 0 and e.rejected > 0:

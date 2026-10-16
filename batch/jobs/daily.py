@@ -2469,8 +2469,9 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
         # 증권사 모의투자에 같은 주문을 베껴 낸다 (docs/paper.md 15장, 25.1475) — 곁다리. 키가 없으면 "꺼짐" 만 남는다.
         # **리포트를 보낸 뒤에** 둔다 — 08:30 접수 시작을 기다리는 몇 분이 리포트를 늦추거나 시간 제한에
         # 걸지 않게(검증 [참고] 7). 리포트가 이미 갔으므로 한도 예외도 올리지 않는다(25.567 과 같은 까닭).
-        # 내부 모의 단계가 실패한 날은 베끼지 않는다(장부가 어긋난 채 주문을 내지 않게)
-        if market == "KR" and "error" not in (step_log.get("paper") or {}):
+        # 내부 모의 단계가 실패한 날은 베끼지 않는다(장부가 어긋난 채 주문을 내지 않게).
+        # 미국도 예약주문으로 낸다(25.1485)
+        if "error" not in (step_log.get("paper") or {}):
             try:
                 from batch.jobs import broker_mirror
 

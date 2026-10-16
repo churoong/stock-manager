@@ -12,6 +12,7 @@ import {
   PAPER_LATEST_DAILY,
   PAPER_MEETINGS_LATEST,
   PAPER_BROKER_LATEST,
+  BROKER_KEYS,
   PAPER_DOSSIERS_LATEST,
   PAPER_OPEN_BUYS,
   PAPER_OPEN_BUYS_LEGACY,
@@ -110,13 +111,17 @@ export async function GET() {
       dossiers = [];
     }
     // KIS모의투자 (docs/paper.md 15장, 25.1478) — 0078·0080 전 DB 에는 표·칸이 없다. 못 읽으면 그 칸만 "연결 전" 으로
-    let broker: { as_of: string; diff: unknown; summary: unknown } | null = null;
-    try {
-      const r = rowsToObjects<{ as_of: string; diff_json: string | null; summary_json: string | null }>(await execute(PAPER_BROKER_LATEST))[0];
-      broker = r ? { as_of: r.as_of, diff: JSON.parse(r.diff_json || "{}"), summary: JSON.parse(r.summary_json || "null") } : null;
-    } catch {
-      broker = null;
-    }
+    // 미국(예약주문, 25.1485)은 줄이 따로(`kis_vts_us`) — 없으면 화면이 그 칸을 감춘다
+    const brokerRow = async (key: string): Promise<{ as_of: string; diff: unknown; summary: unknown } | null> => {
+      try {
+        const r = rowsToObjects<{ as_of: string; diff_json: string | null; summary_json: string | null }>(await execute(PAPER_BROKER_LATEST, [key]))[0];
+        return r ? { as_of: r.as_of, diff: JSON.parse(r.diff_json || "{}"), summary: JSON.parse(r.summary_json || "null") } : null;
+      } catch {
+        return null;
+      }
+    };
+    const broker = await brokerRow(BROKER_KEYS.KR);
+    const brokerUs = await brokerRow(BROKER_KEYS.US);
     let halted = false;
     try {
       halted = haltOn((await execute(HALT_READ)).rows[0]?.[0]);
@@ -127,6 +132,7 @@ export async function GET() {
       halted,
       realCompare,
       broker,
+      brokerUs,
       meetings,
       dossiers,
       invested: 입금,
