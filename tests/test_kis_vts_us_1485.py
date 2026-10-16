@@ -228,3 +228,20 @@ def test_web_reads_both_broker_keys() -> None:
     글 = (Path(__file__).resolve().parent.parent / "web" / "lib" / "paper.ts").read_text(encoding="utf-8")
     assert f'BROKER_KEYS = {{ KR: "{job.BROKER}", US: "{job.BROKER_US}" }}' in 글
     assert "WHERE broker = ? ORDER BY as_of DESC LIMIT 1" in 글
+
+
+def test_reconcile_same_qty_tranches_by_price() -> None:
+    """미국 분할 회차 셋이 모두 2주 — 101달러 회차만 찼다. 날·종목·방향·수량만으로는 99달러 회차가 찬 것으로 뒤바뀌었다 (25.1490)."""
+    rows = [{"id": i, "code": "AAPL", "side": "buy", "quantity": 2, "trade_date": "2026-10-16", "broker_order_no": None,
+             "limit_price": p} for i, p in ((1, 101.0), (2, 100.0), (3, 99.0))]  # fmt: skip
+    E = kv.Execution
+    ex = [E("20261016", "903", "AAPL", "buy", 2, 0, None, 0, False, 99.0),
+          E("20261016", "902", "AAPL", "buy", 2, 0, None, 0, False, 100.0),
+          E("20261016", "901", "AAPL", "buy", 2, 2, 100.7, 0, False, 101.0)]  # fmt: skip
+    got = {o.row_id: (o.status, o.order_no) for o in bm.reconcile(rows, ex, missing=bm.MISSING_US)}
+    assert got == {1: ("filled", "901"), 2: ("unfilled", "902"), 3: ("unfilled", "903")}
+    # 체결 조회가 단가를 안 주면(국내·칸 없음) 예전처럼 수량까지만 본다
+    assert bm.reconcile(rows[:1], [E("20261016", "9", "AAPL", "buy", 2, 2, 100.7, 0, False)])[0].status == "filled"
+    assert kv.parse_us_executions({"rt_cd": "0", "output": [
+        {"ord_dt": "20261016", "odno": "1", "sll_buy_dvsn_cd": "02", "pdno": "AAPL", "ft_ord_qty": "2",
+         "ft_ccld_qty": "0", "ft_ord_unpr3": "101.00000"}]})[0].price == 101.0  # fmt: skip

@@ -127,6 +127,20 @@ class Outcome:
     message: str | None
 
 
+#: 단가가 같다고 보는 차 — 미국 지정가는 센트 단위
+PRICE_TOL = 0.005
+
+
+def _단가_맞음(e: Any, r: dict[str, Any]) -> bool:
+    """번호 없이 맞출 때 단가도 본다.
+
+    미국 분할 회차는 수량이 같은 일이 흔해(2·2·2주) 날·종목·방향·수량만으로는 회차가 뒤바뀌었다(101달러 회차가 찼는데
+    99달러 회차가 찬 것으로, 25.1490). 어느 쪽 단가든 모르면(국내 체결 조회·시장가 줄) 보지 않는다
+    """
+    k, mine = getattr(e, "price", None), r.get("limit_price")
+    return k is None or mine is None or abs(float(k) - float(mine)) < PRICE_TOL
+
+
 def _번호(no: Any) -> str:
     """주문번호 — 주문 응답(ODNO)과 체결 조회(odno)의 앞 0 채움이 같다는 근거가 없어 떼고 견준다(검증 [참고] 9)."""
     return str(no or "").strip().lstrip("0")
@@ -156,7 +170,8 @@ def reconcile(
         e = by_no.get((날, _번호(r["broker_order_no"]))) if r.get("broker_order_no") else None
         if e is None and not r.get("broker_order_no"):
             e = next((x for x in executions if (x.order_date, _번호(x.order_no)) not in 쓴 and x.order_date == 날
-                      and x.code == r["code"] and x.side == r["side"] and x.quantity == int(r["quantity"])),
+                      and x.code == r["code"] and x.side == r["side"] and x.quantity == int(r["quantity"])
+                      and _단가_맞음(x, r)),
                      None)  # fmt: skip
         if e is None:
             if complete:

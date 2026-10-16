@@ -55,7 +55,7 @@ OPEN_ORDERS_SQL = (
 )
 SENT_SQL = "SELECT paper_order_id, stock_id FROM paper_broker_orders WHERE broker = ? AND trade_date = ?"
 PENDING_SQL = (
-    "SELECT id, code, side, quantity, trade_date, broker_order_no FROM paper_broker_orders"
+    "SELECT id, code, side, quantity, trade_date, broker_order_no, limit_price FROM paper_broker_orders"
     " WHERE broker = ? AND status IN ('sending', 'accepted') AND trade_date < ?"
 )
 #: 오늘 이미 낸 베낀 매수(거부 아닌 것) — 같은 날 다시 돌 때 정리가 오늘 산 것을 팔지 않게 (검증 [필수] 1)

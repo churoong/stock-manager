@@ -164,6 +164,9 @@ class Execution:
     avg_price: float | None  # avg_prvs
     rejected: int  # rjct_qty
     cancelled: bool  # cncl_yn
+    #: 주문 단가(미국 ft_ord_unpr3) — 번호 없이 맞추는 미국 예약주문에서 수량이 같은 분할 회차를 가른다(25.1490).
+    #: 국내는 비움
+    price: float | None = None
 
 
 def parse_executions(payload: object) -> list[Execution]:
@@ -215,7 +218,7 @@ def parse_us_executions(payload: object) -> list[Execution]:
             order_date=str(r.get("ord_dt") or ""), order_no=no, code=str(r.get("pdno") or "").strip(),
             side="sell" if code == "01" else "buy" if code == "02" else code, quantity=주문, filled=체결,
             avg_price=_float(r.get("ft_ccld_unpr3")), rejected=max(주문 - 체결, 0) if 거부 else 0,
-            cancelled=str(r.get("rvse_cncl_dvsn") or "") == "02",
+            cancelled=str(r.get("rvse_cncl_dvsn") or "") == "02", price=_float(r.get("ft_ord_unpr3")),
         ))  # fmt: skip
     return out
 
