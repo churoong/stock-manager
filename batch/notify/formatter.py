@@ -24,6 +24,17 @@ def _money(value: float | None, currency: str) -> str:
     return f"{'-' if r < 0 else ''}${abs(r):,.2f}"  # "$-1,234.50" 이 아니라 "-$1,234.50" (25.613)
 
 
+def with_head(message: str, head: list[str], after_lines: int = 2) -> str:
+    """리포트 머리(제목·생성 줄 `after_lines` 줄) 바로 아래에 `head` 를 끼운다.
+
+    아침 운용 보고 (docs/desk.md 7장, 25.1510).
+
+    제목이 맨 위에 그대로 있어야 알림 미리보기·리포트 보관함에서 무슨 리포트인지 보인다
+    """
+    줄 = message.split("\n")
+    return "\n".join([*줄[:after_lines], "", *head, *줄[after_lines:]])
+
+
 #: 경고 한 줄의 상한 (25.613, 감사). 예외 문장을 그대로 싣는 경고가 3,900자를 넘으면 조각이 줄 가운데서 잘리고,
 #: 경고는 1부보다 앞이라 1부를 둘째 조각으로 밀어냈다. 원문은 배치 기록에 있다
 WARNING_LINE_MAX = 300

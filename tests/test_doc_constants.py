@@ -957,6 +957,9 @@ class Test이웃_모듈들:
         검사(DESK, f"{dk.CHAMPION_BLOCK} 평가(`CHAMPION_BLOCK`)", "챔피언 블록 (25.1508)")
         검사(DESK, f"블록 {dk.CHAMPION_MIN_BLOCKS}개(`CHAMPION_MIN_BLOCKS`)", "챔피언 최소 블록 (25.1508)")
         검사(DESK, f"{round(dk.CHAMPION_WIN_SHARE * 100)}%(`CHAMPION_WIN_SHARE` {dk.CHAMPION_WIN_SHARE:g})", "챔피언 이긴 비율 (25.1508)")
+        검사(DESK, f"앞 {dk.REPORT_MAX_CHECKS}개(`REPORT_MAX_CHECKS`)", "운용 보고 확인할 일 수 (25.1510)")
+        검사(DESK, f"위 {dk.REPORT_TOP_ACCOUNTS}개(`REPORT_TOP_ACCOUNTS`)", "운용 보고 순위 수 (25.1510)")
+        검사(DESK, f"{dk.REPORT_MAX_ORDERS}건(`REPORT_MAX_ORDERS`)", "운용 보고 주문 수 (25.1510)")
         검사(DESK, "무작위 대조 R1·R2 평균", "R 대비 기준선 (25.1501)")
         assert dk.CONTROL_IDS == ("R1", "R2")
 

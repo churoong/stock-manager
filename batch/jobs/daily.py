@@ -2320,6 +2320,26 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
                 warnings.append(_실패문("가상모의투자 계좌", exc))
                 step_log["paper"] = {"error": str(exc)[:300]}
 
+        # 아침 운용 보고 (docs/desk.md 7장, 25.1510) — 리포트 머리(제목·생성 줄 바로 아래)에.
+        # 종목 추천은 그 아래 재료로. 가상모의투자 단계가 돈 실행에만(dry-run·단계 실패는 빼고 — 실패는 경고 줄에
+        # 있다). 곁다리: 실패해도 리포트는 그대로
+        if not dry_run and "paper" in step_log and not (step_log.get("paper") or {}).get("error"):
+            try:
+                from batch.jobs import desk as desk_job
+
+                머리 = desk_job.report_head(
+                    client, market, datetime.now(UTC), trade_date=decision.trade_date,
+                    session_date=decision.session_date, step_log=step_log, warnings=warnings,
+                )  # fmt: skip
+                if 머리:
+                    message = formatter.with_head(message, 머리)
+                    step_log["report_head"] = len(머리)
+            except Exception as exc:  # noqa: BLE001 — 곁다리
+                if db.quota_reason(exc):
+                    raise
+                log.exception("운용 보고 실패")
+                step_log["report_head"] = {"error": str(exc)[:200]}
+
         if len(warnings) > 본문_경고수:
             message += "\n\n" + formatter.late_warnings(warnings[본문_경고수:])
 

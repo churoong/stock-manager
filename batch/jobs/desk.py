@@ -74,6 +74,7 @@ RULES_SQL = (
 )
 DESK_READ_SQL = "SELECT summary_json FROM paper_desk WHERE as_of = ?"
 DESK_PREV_SQL = "SELECT summary_json FROM paper_desk WHERE as_of < ? ORDER BY as_of DESC LIMIT 1"
+DESK_LAST_SQL = "SELECT summary_json FROM paper_desk ORDER BY as_of DESC LIMIT 1"
 DESK_UPSERT_SQL = (
     "INSERT INTO paper_desk (as_of, summary_json, updated_at) VALUES (?, ?, ?)"
     " ON CONFLICT (as_of) DO UPDATE SET summary_json = excluded.summary_json, updated_at = excluded.updated_at"
@@ -82,15 +83,8 @@ DESK_UPSERT_SQL = (
 REASON_CHARS = 80
 
 
-def write(
-    client: Any, market: str, now: datetime, *, trade_date: str, session_date: str, step_log: dict[str, Any],
-    warnings: list[str],
-) -> dict[str, Any]:
-    """그날 운용 요약을 합쳐 적고, 실행 기록에 넣을 건수를 돌려준다."""
-    from datetime import date, timedelta
-
-    as_of = now.astimezone(cal.market_tz("KR")).date().isoformat()
-    지금 = now.astimezone(UTC).isoformat()
+def _기초(client: Any) -> tuple[dict[str, list[tuple[str, float]]], set[str], list[dict[str, Any]], dict[str, Any]]:
+    """평가 계열·검산 어긋난 날·계좌·순위 — 운용 요약과 아침 운용 보고가 같이 쓴다"""
     계열: dict[str, list[tuple[str, float]]] = {}
     검산틀린날: set[str] = set()
     for r in client.execute(TWR_SQL).dicts():
@@ -100,7 +94,15 @@ def write(
             검산틀린날.add(str(r["as_of"]))
     계좌들 = client.execute(NAMES_SQL).dicts()
     이름 = {str(r["id"]): str(r["name"] or r["id"]) for r in 계좌들}
-    순위 = desk.leaderboard(계열, 이름)
+    return 계열, 검산틀린날, 계좌들, desk.leaderboard(계열, 이름)
+
+
+def _시장칸(
+    client: Any, market: str, 지금: str, *, trade_date: str, session_date: str, step_log: dict[str, Any],
+    warnings: list[str],
+) -> dict[str, Any]:
+    """이 시장 칸 — 이 실행이 판정한 체결·낸 주문·KIS 주문·확인할 일"""
+    from datetime import date, timedelta
 
     h = bmj.MIRROR_ACCOUNT
     아래 = (date.fromisoformat(trade_date) - timedelta(days=FILL_LOOKBACK_DAYS)).isoformat()
@@ -112,7 +114,7 @@ def write(
     h주문 = [r for r in 주문 if r["account_id"] == h]
     증권사 = bmj.BROKER_US if market == "US" else bmj.BROKER
     kis주문 = client.execute(KIS_ORDERS_SQL, [증권사, session_date]).dicts()
-    시장칸 = {
+    return {
         "run_at": 지금, "trade_date": trade_date, "session_date": session_date,
         "fills_h": [{"side": r["side"], "name": r["name"], "ticker": r["ticker"], "quantity": r["quantity"],
                      "price": r["price"], "currency": r["currency"], "fill_date": r["fill_date"]}
@@ -137,6 +139,36 @@ def write(
             h_orders=len(h주문),
         ),
     }  # fmt: skip
+
+
+def report_head(
+    client: Any, market: str, now: datetime, *, trade_date: str, session_date: str, step_log: dict[str, Any],
+    warnings: list[str],
+) -> list[str]:
+    """아침(미국은 밤) 리포트 머리의 운용 보고 (docs/desk.md 7장, 25.1510) — 가상모의투자 단계 바로 뒤, 보내기 전.
+
+    KIS모의투자는 리포트를 보낸 뒤 접수 시간에 내므로 이번 KIS 칸은 아직 비었다 — 지난 실행의 KIS 주문을 대신 싣는다.
+    읽기: 평가 계열(운용 요약과 같은 것을 한 번 더 — 열 계좌 1년 약 3천 행)·체결·주문·운용 요약 마지막 줄
+    """
+    _계열, _틀린날, _계좌들, 순위 = _기초(client)
+    칸 = _시장칸(client, market, now.astimezone(UTC).isoformat(), trade_date=trade_date, session_date=session_date,
+               step_log=step_log, warnings=warnings)  # fmt: skip
+    지난 = client.execute(DESK_LAST_SQL).rows
+    지난칸 = (((_json(지난[0][0]) if 지난 else None) or {}).get("markets") or {}).get(market) or {}
+    return desk.report_lines(칸, 순위, bmj.MIRROR_ACCOUNT, prev_kis=list(지난칸.get("kis_orders") or []))
+
+
+def write(
+    client: Any, market: str, now: datetime, *, trade_date: str, session_date: str, step_log: dict[str, Any],
+    warnings: list[str],
+) -> dict[str, Any]:
+    """그날 운용 요약을 합쳐 적고, 실행 기록에 넣을 건수를 돌려준다."""
+    as_of = now.astimezone(cal.market_tz("KR")).date().isoformat()
+    지금 = now.astimezone(UTC).isoformat()
+    계열, 검산틀린날, 계좌들, 순위 = _기초(client)
+    h = bmj.MIRROR_ACCOUNT
+    시장칸 = _시장칸(client, market, 지금, trade_date=trade_date, session_date=session_date, step_log=step_log,
+                 warnings=warnings)  # fmt: skip
     kis = client.execute(KIS_SQL, [bmj.BROKER]).dicts()
     요약 = (_json(kis[0]["summary_json"]) or {}) if kis else {}
     kis_us = client.execute(KIS_SQL, [bmj.BROKER_US]).dicts()
