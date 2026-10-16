@@ -704,6 +704,57 @@ def sell_decisions(
     return out
 
 
+#: 살 때부터 매도 규칙에 걸리는지 미리 보는 계좌 규칙 — 보유와 무관한 플래그(재무악화·감성급락·점검·상장폐지)로 판다.
+#: `core`·`time` 은 손절·목표·기간(보유가 있어야 서는 것)만 따라 산 날 걸릴 수 없다 (25.1480)
+PREBUY_CHECK_RULES = frozenset({"all", "value", "momentum"})
+
+
+def prebuy_sell_flags(
+    client: Any, market: str, sell_rule: str, rows: list[report_picks.SignalRow], held: set[int], frozen: set[int],
+    stock_cache: dict[int, dict[str, Any]], targets: dict | None, today: date, enrich_cache: dict[str, Any],
+) -> dict[int, list[str]]:
+    """사면 **다음 배치에 바로 팔** 후보 — {종목: 걸린 사유}. 보유처럼 꾸며(오늘 종가에 1주, 점수 기준점 = 신호 점수)
+    `sell_decisions` 와 같은 보강·같은 `evaluate`·같은 계좌 규칙으로 본다.
+
+    매수 쪽이 매도 규칙을 보지 않아, 이미 적자 전환 공시가 난 종목을 A(value)·C(momentum)가 사고 다음 날 재무악화로 팔고
+    쉼(5거래일) 뒤 위원회가 또 가결해 사는 회전이 생겼다 — 왕복 비용이 A−B·C−B 비교에 섞인다 (25.1480, 감사 [필수] 1).
+    보유 중인 종목은 `sell_decisions` 가 이미 보았다(팔면 쉼에 든다)
+    """
+    if sell_rule not in PREBUY_CHECK_RULES:
+        return {}
+    from batch.jobs import sell_flags as sf_job
+
+    out: dict[int, list[str]] = {}
+    for r in {r.stock_id: r for r in rows}.values():
+        s = _stock(client, r.stock_id, stock_cache)
+        if r.stock_id in held or r.stock_id in frozen or s.get("country") != market:
+            continue
+        종가 = client.execute(LAST_CLOSE_SQL, [r.stock_id, today.isoformat()]).rows
+        if not 종가:
+            continue
+        점수 = client.execute(SCORE_NOW_SQL, [r.stock_id]).rows
+        값 = float(종가[0][0])
+        행 = {
+            "stock_id": r.stock_id, "name": s.get("name"), "country": market, "horizon": r.horizon,
+            "first_buy_date": today.isoformat(), "currency": r.currency, "cost": 값, "market_value": 값,
+            "price_date": str(종가[0][1]), "score_now": 점수[0][0] if 점수 else None,
+            "score_now_date": 점수[0][1] if 점수 else None, "score_at_buy": r.total_score,
+            "score_at_buy_date": r.as_of_date, "horizon_since": today.isoformat(),
+            "lots": [(today.isoformat(), 1.0, 값)], "quantity": 1,
+        }  # fmt: skip
+        열쇠 = json.dumps({k: v for k, v in 행.items() if k != "quantity"}, sort_keys=True, default=str)
+        if 열쇠 not in enrich_cache:
+            입력, 경고 = sf_job.enrich(client, [행], today, dividends=False)
+            enrich_cache[열쇠] = (입력[0] if 입력 else None, 경고)
+        h, _경고 = enrich_cache[열쇠]
+        if h is None:
+            continue
+        팔것 = pp.sells_for(sell_rule, {h.stock_id: {f.reason_code for f in sf.evaluate(h, today, targets)}})
+        if 팔것:
+            out[h.stock_id] = 팔것[h.stock_id]
+    return out
+
+
 #: 무작위 대조(R)가 고르는 모집단 — 그 나라 최신 주간 유니버스의 편입 개별주 (docs/paper.md 2.1.2, 25.1458)
 #: 스냅샷 날짜 서브쿼리는 `db.latest_snapshot_sql()` 과 같은 글이다(동적 질의를 늘리지 않으려고 적어 둔다 — 시험이 대조)
 UNIVERSE_SQL = (
@@ -1060,7 +1111,10 @@ def run_step(
     # (25.1458, 검증 권장)
     든것 = {sid for aid in {f.account_id for f in fills}
             for sid in pp.positions([f for f in fills if f.account_id == aid])}  # fmt: skip
-    관심 = 든것 | {int(r["stock_id"]) for r in client.execute(OPEN_ORDERS_SQL).dicts()}
+    # 오늘 새 후보도 — 빠지면 분할 의심 종목을 B 등이 사서 결정 원장에 buy 로 남기고 다음 날 주문만 멈춤으로 닫혔다
+    # (R 은 제 대체 고르기에서 따로 본다, 25.1480 감사 [권장] 2). 신호 종목은 수십 개라 읽기가 크게 늘지 않는다
+    관심 = (든것 | {int(r["stock_id"]) for r in client.execute(OPEN_ORDERS_SQL).dicts()}
+            | {int(r.stock_id) for r in signal_rows})  # fmt: skip
     market_of = {sid: str(_stock(client, sid, stock_cache).get("country") or "KR") for sid in 관심}
     frozen = frozen_ids(client, 관심, market_of)
 
@@ -1207,9 +1261,26 @@ def run_step(
                     문장 += 회의문장
                     a기록["committee"] = 메모
                     종목수 = int(헌장들[aid]["top_n"])
+                # 사면 바로 팔 후보는 사지 않는다 (25.1480) — 결정 원장에 skip 으로, 자리는 다음 후보가
+                즉시매도 = prebuy_sell_flags(client, market, 규칙, 가결행 if 가결행 is not None else signal_rows,
+                                         set(pp.positions(계좌체결)), frozen, stock_cache, targets,
+                                         cal.local_today(market), 보강캐시)  # fmt: skip
+                계좌신호 = signal_rows
+                if 즉시매도:
+                    계좌신호 = [r for r in signal_rows if r.stock_id not in 즉시매도]
+                    가결행 = None if 가결행 is None else [r for r in 가결행 if r.stock_id not in 즉시매도]
+                    a기록["prebuy_sell"] = len(즉시매도)
+                    for sid, 사유 in sorted(즉시매도.items()):
+                        행 = next(r for r in signal_rows if r.stock_id == sid)
+                        detail = {"flags": 사유, "sell_rule": 규칙}
+                        if sid in 위원회:
+                            detail["committee"] = 위원회[sid]
+                        문장.append(_결정판(aid, market, trade_date, sid, "skip",
+                                        "사면 바로 매도 규칙에 걸림: " + ",".join(사유), detail,
+                                        행.close, 행.close_date, 지금))  # fmt: skip
                 주문, b기록 = buy_orders(
                     client, market=market, account=aid, account_fills=계좌체결, valuation=v,
-                    open_buys=[o for o in 열린 if o.account_id == aid and o.side == "buy"], signal_rows=signal_rows,
+                    open_buys=[o for o in 열린 if o.account_id == aid and o.side == "buy"], signal_rows=계좌신호,
                     settings=settings, price_series=price_series, series_unknown=series_unknown,
                     fx_rate=fx[0] if fx else None, stop_ids=손절, sold_recently=최근판, stock_cache=stock_cache,
                     top_n=종목수, entry=진입, substitute=바꾸기, series_loader=series_loader, preselected=가결행,
