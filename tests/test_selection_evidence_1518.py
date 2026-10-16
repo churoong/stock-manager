@@ -98,3 +98,36 @@ def test_champion_needs_paired_decision_evidence_with_bonferroni() -> None:
     여럿 = {k: c for k in ("C", "D", "E", "G", "A", "B")} | {"H": h}
     rr = {x["id"]: x for x in desk.champion(여럿, "H", 꾸준)}["C"]
     assert rr["evidence_diff"]["alpha"] == pytest.approx(0.05 / 6) and rr["evidence_diff"]["lower"] < r["evidence_diff"]["lower"]
+
+
+# ── 관문 지수 대비 (25.1519) ─────────────────────────────────────────────────
+
+
+def test_index_return_by_hand_with_deposit() -> None:
+    """시작 KOSPI 그림자 1,000(입금 1,000) → 끝 1,650(그 사이 입금 500 → 그 돈만큼 빼면 1,150) = +15%,
+    S&P 1,000 → 1,550 − 500 = +5% → 반반 +10%. 한쪽이 비면 다른 쪽만"""
+    from batch.services import desk
+
+    rows = [("2026-01-01", 1000.0, 1000.0, 1000.0), ("2026-02-01", 1200.0, None, 1000.0), ("2026-03-01", 1650.0, 1550.0, 1500.0)]
+    assert desk.index_return(rows, "2026-01-15") == pytest.approx(10.0)
+    assert desk.index_return([(d, k, None, i) for d, k, _s, i in rows], "2026-01-01") == pytest.approx(15.0)
+    assert desk.index_return(rows, "2025-12-31") is None  # 시작 앞 행 없음
+
+
+def test_gate_vs_index_item() -> None:
+    """R 은 이겨도 지수에 지면 관문 통과 아님 — 실전 돈의 기회비용은 지수 ETF"""
+    from batch.services import desk
+
+    날 = _날(130)
+    h = [(d, 1 + 0.001 * i) for i, d in enumerate(날)]  # 약 +12.9%
+    s = {"H": h, "R1": [(d, 1.0) for d in 날], "R2": [(d, 1.0) for d in 날]}
+
+    def 칸(지수끝: float) -> dict:
+        g = desk.gate(s, "H", recon_bad_days=0, batch_failed=0, kis=None,
+                      index=[(날[0], 1000.0, 1000.0, 1000.0), (날[-1], 지수끝, 지수끝, 1000.0)])  # fmt: skip
+        return {i["key"]: i for i in g["items"]}
+
+    assert 칸(1100.0)["vs_index"]["ok"] and 칸(1100.0)["vs_r"]["ok"]
+    지 = 칸(1200.0)
+    assert 지["vs_r"]["ok"] and not 지["vs_index"]["ok"] and 지["vs_index"]["index_pct"] == pytest.approx(20.0)
+    assert desk.gate(s, "H", recon_bad_days=0, batch_failed=0, kis=None)["items"][2]["now"] is None  # 그림자 없음 → 모름

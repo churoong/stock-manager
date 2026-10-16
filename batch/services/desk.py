@@ -148,6 +148,24 @@ def _수익률들(v: list[tuple[str, float]]) -> list[float]:
     return [b / a - 1 for (_d1, a), (_d2, b) in zip(v, v[1:], strict=False) if a > 0 and b > 0]
 
 
+def index_return(rows: list[tuple[str, float | None, float | None, float]], start: str) -> float | None:
+    """지수 그림자 반반 수익률(%) — `start` 이하 마지막 행부터 마지막 행까지 (docs/desk.md 6장, 25.1519).
+
+    그림자(docs/paper.md 4장)는 입금 날마다 그 돈으로 지수를 더 산 값이라 그 사이 입금(총 입금 차이)을 끝 값에서 뺀다.
+    KOSPI·S&P500 각각 (끝 − 입금 차이) ÷ 시작 − 1 의 평균 — 한쪽만 있으면 그쪽만. 둘 다 배당 빠진 가격지수라 기준이
+    연 1~2% 낮게 나온다(관문에 유리한 쪽 `[확인필요]`)
+    """
+    v = sorted(rows)
+    앞 = [r for r in v if r[0] <= start]
+    if not 앞 or not v:
+        return None
+    a, b = 앞[-1], v[-1]
+    입금차 = float(b[3]) - float(a[3])
+    수익 = [(float(b[i]) - 입금차) / float(a[i]) - 1 for i in (1, 2)
+          if a[i] is not None and b[i] is not None and float(a[i]) > 0]  # fmt: skip
+    return sum(수익) / len(수익) * 100 if 수익 else None
+
+
 def risk_ratio(v: list[tuple[str, float]], start: str | None = None) -> float | None:
     """변동성 대비 수익 — `start` 이후 평가 사이 수익률의 평균 ÷ 표본표준편차. 같은 기간의 계좌끼리 견주는 값이라
     무위험 수익률은 빼지 않는다(빼도 둘 다 같은 만큼 빠진다 — 변동성이 다르면 정확히 같지는 않다 `[확인필요]`).
@@ -163,6 +181,7 @@ def risk_ratio(v: list[tuple[str, float]], start: str | None = None) -> float | 
 def gate(
     series: dict[str, list[tuple[str, float]]], mirror: str, *, since: str = "", version: int | None = None,
     recon_bad_days: int, batch_failed: int, kis: dict[str, Any] | None, evidence: dict[str, Any] | None = None,
+    index: list[tuple[str, float | None, float | None, float]] | None = None,
 ) -> dict[str, Any]:
     """실전 전환 1단계 관문 진도 — {stage, account, version, from, items: [{key, label, now, target, ok}], passed,
     next}.
@@ -172,7 +191,9 @@ def gate(
     (판을 섞지 않는다, 25.1511 검토 3). 비교 구간은 **관문 자기 구간** = 지금 판의 첫 평가와 R1·R2 첫 평가 가운데
     가장 늦은 날부터 — 순위표의 공통 구간을 빌리면 새 계좌 하나가 20번째 평가에 닿는 날 관문 판정이 뒤집혔다
     (25.1511 검토 1). `kis` = {kept_pct, n}(국내·미국 합). `evidence` = 그 계좌 지금 판의 결정 단위 선정 증거
-    (`paper.selection_evidence`, 25.1518) — "R 대비 > 0" 은 부호 하나라 실력이 없어도 반쯤 통과한다
+    (`paper.selection_evidence`, 25.1518) — "R 대비 > 0" 은 부호 하나라 실력이 없어도 반쯤 통과한다.
+    `index` = 그 계좌의 지수 그림자 [(as_of, KOSPI 그림자, S&P500 그림자, 총 입금)] — 실전 돈의 기회비용은 R 이 아니라
+    지수 ETF 다(25.1519)
     """
     전체 = sorted(series.get(mirror) or [])
     v = [p for p in 전체 if not since or p[0] > since]
@@ -184,6 +205,8 @@ def gate(
     대조 = [x for r in CONTROL_IDS if 시작 and (x := risk_ratio(sorted(series.get(r) or []), 시작)) is not None]
     대조비 = sum(대조) / len(대조) if 대조 else None
     내비 = risk_ratio(전체, 시작) if 시작 else None
+    지수 = index_return(index or [], 시작) if 시작 else None
+    vs_idx = pct - 지수 if pct is not None and 지수 is not None else None
     kept, kn = (kis or {}).get("kept_pct"), int((kis or {}).get("n") or 0)
     ev = evidence or {}
     하한, 묶음수 = ev.get("lower"), int(ev.get("n_blocks") or 0)
@@ -192,6 +215,8 @@ def gate(
         {"key": "days", "label": f"모의 기간({판글}의 평가 횟수)", "now": len(v), "target": GATE_MIN_POINTS,
          "ok": len(v) >= GATE_MIN_POINTS},
         {"key": "vs_r", "label": "관문 구간 R 대비(%p)", "now": vs_r, "target": 0, "ok": vs_r is not None and vs_r > 0},
+        {"key": "vs_index", "label": "관문 구간 지수 대비(%p) — 같은 돈을 KOSPI·S&P500 반반에 넣었다면",
+         "now": vs_idx, "target": 0, "index_pct": 지수, "ok": vs_idx is not None and vs_idx > 0},
         {"key": "ratio", "label": "변동성 대비 수익 — 무작위 대조 평균보다", "now": 내비, "target": 대조비,
          "ok": 내비 is not None and 대조비 is not None and 내비 > 대조비},
         {"key": "incidents", "label": f"운영 무사고(최근 {GATE_INCIDENT_DAYS}일 장부 검산 어긋남·일일 배치 실패)",

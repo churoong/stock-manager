@@ -46,7 +46,7 @@ export interface DeskKisAccount {
   perf: import("@/lib/kisPaper").KisPerf | null;
 }
 /** 실전 전환 1단계 관문 (docs/desk.md 6장, 25.1508) — 읽기 전용. 넘어도 아무것도 열리지 않는다 */
-export interface GateItem { key: string; label: string; now: number | null; target: number | null; ok: boolean; n?: number; mean?: number | null; detail?: Record<string, number> }
+export interface GateItem { key: string; label: string; now: number | null; target: number | null; ok: boolean; n?: number; mean?: number | null; index_pct?: number | null; detail?: Record<string, number> }
 export interface Gate { stage: number; account: string; version?: number | null; from?: string | null; items: GateItem[]; passed: boolean; next: string }
 
 /**
@@ -265,6 +265,9 @@ export function gateNowText(i: GateItem): string {
       return `${i.now}번 / ${i.target}번`;
     case "vs_r":
       return `${ppText(i.now)} / 0 초과`;
+    case "vs_index":
+      // 같은 돈을 KOSPI·S&P500 반반에 넣었다면(25.1519) — 지수 쪽 수익률을 같이
+      return `${ppText(i.now)} (지수 반반 ${pctText(i.index_pct)}) / 0 초과`;
     case "ratio":
       return `${i.now.toFixed(3)} / R 평균 ${i.target == null ? "모름" : i.target.toFixed(3)}`;
     case "incidents":

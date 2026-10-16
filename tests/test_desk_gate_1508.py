@@ -38,10 +38,13 @@ def test_gate_items_and_pass() -> None:
     r = [(d, 1 + (0.01 if i % 2 else -0.01)) for i, d in enumerate(날)]  # 제자리 출렁
     series = {"H": h, "R1": r, "R2": r}
     증거 = {"lower": 55.0, "n_blocks": 6, "mean": 62.0}  # 결정 단위 하한도 넘어야 통과(25.1518)
-    g = desk.gate(series, "H", recon_bad_days=0, batch_failed=0, kis={"kept_pct": 92.0, "n": 120}, evidence=증거)
+    # 지수 그림자 — 같은 기간 반반 지수 +2% (H 는 약 +13%)
+    지수 = [(날[0], 1000.0, 1000.0, 1000.0), (날[-1], 1020.0, 1020.0, 1000.0)]
+    g = desk.gate(series, "H", recon_bad_days=0, batch_failed=0, kis={"kept_pct": 92.0, "n": 120}, evidence=증거,
+                  index=지수)  # fmt: skip
     칸 = {i["key"]: i for i in g["items"]}
     assert 칸["days"]["now"] == 130 and 칸["days"]["ok"]
-    assert 칸["vs_r"]["ok"] and 칸["ratio"]["ok"] and 칸["incidents"]["ok"] and 칸["kis"]["ok"] and 칸["selection"]["ok"]
+    assert 칸["vs_r"]["ok"] and 칸["vs_index"]["ok"] and 칸["ratio"]["ok"] and 칸["incidents"]["ok"] and 칸["kis"]["ok"] and 칸["selection"]["ok"]
     assert g["passed"] and g["account"] == "H" and g["next"].startswith("2단계 손 매매")
     # 하나라도 아니면 통과 아님 — 표본 모자란 실현율·사고 하루·기간 모자람
     assert not desk.gate(series, "H", recon_bad_days=0, batch_failed=0, kis={"kept_pct": 99.0, "n": 99})["passed"]
@@ -58,10 +61,12 @@ def test_gate_own_window_and_current_version() -> None:
     h = [(d, 1 + 0.001 * i + (0.002 if i % 2 else 0)) for i, d in enumerate(날)]
     r = [(d, 1 + (0.01 if i % 2 else -0.01)) for i, d in enumerate(날)]
     증거 = {"lower": 55.0, "n_blocks": 6}
+    지수 = [(날[0], 1000.0, 1000.0, 1000.0), (날[-1], 1000.0, 1000.0, 1000.0)]
     전 = desk.gate({"H": h, "R1": r, "R2": r}, "H", recon_bad_days=0, batch_failed=0, kis={"kept_pct": 95.0, "n": 200},
-                  evidence=증거)  # fmt: skip
+                  evidence=증거, index=지수)  # fmt: skip
     새계좌 = {"H": h, "R1": r, "R2": r, "I": [(d, 1.0) for d in 날[-20:]]}
-    뒤 = desk.gate(새계좌, "H", recon_bad_days=0, batch_failed=0, kis={"kept_pct": 95.0, "n": 200}, evidence=증거)
+    뒤 = desk.gate(새계좌, "H", recon_bad_days=0, batch_failed=0, kis={"kept_pct": 95.0, "n": 200}, evidence=증거,
+                  index=지수)  # fmt: skip
     assert 전["items"] == 뒤["items"] and 뒤["passed"] and 뒤["from"] == 날[0]
     # 판 2 를 날[100] 결정에서 봤다 — 그 뒤 평가 59번만 센다, 비교 구간도 그 뒤부터
     판2 = desk.gate({"H": h, "R1": r, "R2": r}, "H", since=날[100], version=2, recon_bad_days=0, batch_failed=0,
