@@ -123,3 +123,90 @@ def test_desk_takes_challenger_cells_where_main_has_none() -> None:
     칸 = desk_job._칸합침(k, 요약, {})
     assert 칸["KR"]["buy_market"]["excess"] == 0.3 and 칸["KR"]["sell_market"]["excess"] == 0.1
     assert 칸["US"] == {}
+
+
+# ── 검토 반영 (25.1517) ──────────────────────────────────────────────────────
+
+
+def test_hold_send_follows_main(c: Client, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
+    """첫째가 보내지 못한 날은 둘째도 — 두 계좌의 주문 날이 어긋나지 않게(검토 8)"""
+    _켬(c, monkeypatch)
+    s = _Sess()
+    기록 = _run(c, s, hold_send="접수 시작 전 — 보내지 않음")
+    assert s.orders == [] and 기록["send"] == "접수 시작 전 — 보내지 않음"
+    import inspect
+
+    assert "hold_send=str(막힘2) if 막힘2 else None" in inspect.getsource(daily)
+
+
+def test_switch_keeps_compare_apart_and_cleanup_row_names_buyer(c: Client, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
+    """바꾼 뒤 비교·칸은 새 계좌 줄만, 정리 줄은 산 계좌(B)로 적는다(검토 6)"""
+    _켬(c, monkeypatch)
+    _run(c, _Sess())
+    칸 = [r[1] for r in c.q("PRAGMA table_info(paper_accounts)") if r[1] != "id"]
+    c.conn.execute(f"INSERT INTO paper_accounts (id, {', '.join(칸)}) SELECT 'C', {', '.join(칸)} FROM paper_accounts"
+                   " WHERE id = 'B'")  # fmt: skip
+    db.set_setting(c, "kis_challenger", {"account": "C", "at": "t"})
+    c.conn.execute("UPDATE paper_orders SET status = 'expired' WHERE id IN (101, 103)")  # B 의 내부 판정이 끝났다
+    다음 = _Sess(holdings=[kv.Holding("005930", 3, 3, 9_800.0)],
+               executions=[kv.Execution("20261016", "N1", "005930", "buy", 3, 3, 9_800.0, 0, False),
+                           kv.Execution("20261016", "N2", "005930", "buy", 2, 0, None, 0, False)])  # fmt: skip
+    _run(c, 다음, "2026-10-19")
+    assert c.q("SELECT account_id, reason FROM paper_broker_orders WHERE trade_date = '2026-10-19'") == [("B", "정리")]
+    요약 = json.loads(c.q("SELECT summary_json FROM paper_broker_daily WHERE as_of = '2026-10-19'")[0][0])
+    assert 요약["n"] == 0  # B 를 베끼던 10-16 주문은 C 의 비교에 들지 않는다
+
+
+def test_weekly_summary_includes_challenger(c: Client, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
+    _켬(c, monkeypatch)
+    _run(c, _Sess())
+    c.conn.execute("UPDATE paper_orders SET status = 'expired' WHERE id IN (101, 103)")  # 내부 판정이 끝났다
+    s = _Sess(executions=[kv.Execution("20261016", "N1", "005930", "buy", 3, 3, 9_800.0, 0, False)])
+    _run(c, s, "2026-10-19")
+    줄 = job.summary_lines(c)
+    assert any(x.startswith("[KIS모의투자 — 도전자 B 주문 베끼기") for x in 줄), 줄
+
+
+def test_desk_challenger_cells_freshness_and_measured_first() -> None:
+    k = Client(accounts=None)
+    ins = ("INSERT INTO paper_broker_daily (broker, as_of, account_id, holdings_json, diff_json, source, fetched_at,"
+           " summary_json) VALUES (?, ?, 'C', '[]', '{}', ?, 't', ?)")  # fmt: skip
+    k.conn.execute(ins, ["kis_vts2", "2026-11-20", "kis_vts2", json.dumps({"cells": {
+        "sell_market": {"days": 40, "excess": None, "se": None, "measured": False},
+        "buy_market": {"days": 25, "excess": 0.3, "se": 0.1, "measured": True}}})])
+    요약 = {"cells": {"sell_market": {"days": 30, "excess": 0.1, "se": 0.05, "measured": True}}}
+    칸 = desk_job._칸합침(k, 요약, {}, "2026-11-13")
+    assert 칸["KR"]["sell_market"]["excess"] == 0.1  # 거래일만 많은 안 잰 칸이 잰 칸을 밀지 않는다
+    assert 칸["KR"]["buy_market"]["excess"] == 0.3
+    assert "buy_market" not in desk_job._칸합침(k, 요약, {}, "2026-11-21")["KR"]  # 오래된 도전자 줄은 안 쓴다
+
+
+def test_h_check_start_skips_pre_link_days() -> None:
+    """10-15 에는 H 가 KIS 에 없는 종목 2 를 들었고 10-16 에는 다 같다 — 시작은 10-16(검토 2)"""
+    k = Client(accounts=None)
+    for d, pos in (("2026-10-15", [{"stock_id": 1}, {"stock_id": 2}]), ("2026-10-16", [{"stock_id": 1}])):
+        k.conn.execute("INSERT INTO paper_daily (account_id, as_of, invested_krw, cash_krw, holdings_krw, equity_krw,"
+                       " pnl_krw, twr_index, positions_json, recon_ok, updated_at) VALUES ('H', ?, 1, 1, 0, 100, 0, 1, ?,"
+                       " 1, 't')", [d, json.dumps(pos)])  # fmt: skip
+        k.conn.execute("INSERT INTO paper_broker_daily (broker, as_of, account_id, holdings_json, diff_json, source,"
+                       " fetched_at) VALUES ('kis_vts', ?, 'H', ?, '{}', 'kis_vts', 't')",
+                       [d, json.dumps([{"id": 1, "code": "005930"}])])  # fmt: skip
+    평가 = {"H": [("2026-10-15", 100.0), ("2026-10-16", 100.0)]}
+    손익 = {"H": [("2026-10-15", 0.0), ("2026-10-16", 0.0), ("2026-10-17", 1.0)]}
+    x = desk_job._대보기(k, "H", (["2026-10-15", "2026-10-16"], "2026-10-17"),
+                        {"2026-10-15": 1.0, "2026-10-16": 1.0, "2026-10-17": 2.0}, 평가, 손익, {}, {})  # fmt: skip
+    assert x is not None and (x["from"], x["pre_link"]) == ("2026-10-16", 0)
+
+
+def test_cells_keep_late_limit_buys_and_token_no_redirect() -> None:
+    from batch.services import broker_mirror as bm
+    from batch.sources import kis
+
+    줄 = {"trade_date": "2026-10-16", "side": "buy", "status": "filled", "filled_qty": 1, "avg_price": 99.0,
+          "reason": "베낌", "i_status": "filled", "i_price": 100.0, "i_fill_date": "2026-10-16",
+          "i_order_type": "limit", "i_fill_basis": "close", "i_slip_pct": 0.0}  # fmt: skip
+    assert bm.cells([줄])["cells"]["buy_limit"]["both"] == 1  # 지정가 매수는 판정 잣대와 상관없이(검토 5)
+    assert "buy_market" not in bm.cells([줄 | {"i_order_type": "market"}])["cells"]  # 종가 판정 시장가는 뺀다
+    import inspect
+
+    assert "allow_redirects=False" in inspect.getsource(kis.access_token)  # 검토 9

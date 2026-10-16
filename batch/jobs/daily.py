@@ -2545,7 +2545,10 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
                 from batch.jobs import broker_mirror as _bm2
 
                 멈춘2 = set((step_log.get("paper") or {}).get("frozen") or [])
-                step_log["broker2"] = _bm2.run(client, market, datetime.now(UTC), slot=_bm2.CHALLENGER, frozen=멈춘2)
+                # 첫째가 보내지 못한 날(접수 시작 전·장 끝난 뒤)은 둘째도 — 두 계좌의 주문 날이 어긋나지 않게(25.1517)
+                막힘2 = (step_log.get("broker") or {}).get("send")
+                step_log["broker2"] = _bm2.run(client, market, datetime.now(UTC), slot=_bm2.CHALLENGER, frozen=멈춘2,
+                                               hold_send=str(막힘2) if 막힘2 else None)  # fmt: skip
             except Exception as exc:  # noqa: BLE001 — 곁다리
                 log.exception("KIS모의투자 도전자 단계 실패")
                 warnings.append(_실패문("KIS모의투자 도전자", exc))

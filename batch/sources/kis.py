@@ -75,7 +75,8 @@ def access_token(
         f"{base}/oauth2/tokenP",
         json={"grant_type": "client_credentials", "appkey": os.environ[key_env],
               "appsecret": os.environ[secret_env]},
-        timeout=TIMEOUT,
+        # 리디렉트를 따라가지 않는다 — 앱키·시크릿 본문이 다른 호스트로 따라간다(25.1517 검토 9, 25.1499 는 조회만)
+        timeout=TIMEOUT, allow_redirects=False,
     )  # fmt: skip
     try:
         body = response.json()

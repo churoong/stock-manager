@@ -2564,6 +2564,7 @@ SQL read operations are forbidden (reads are blocked, ...)
 | 25.1514 | KIS 체결 칸 · KIS모의 체결 기준 보정(근사·참고) — 실현율로 순위를 깎는 설계는 반박돼 줄임 |
 | 25.1515 | KIS모의투자 도전자 — 둘째 모의 계좌 슬롯(키 없으면 꺼짐) |
 | 25.1516 | 체결 보정·준비 목록 검토 7건 반영 — 대보기 시점·연결 전 보유·분할 시가·늦은 지정가 |
+| 25.1517 | 도전자 슬롯·대보기 검토 9건 반영 — 계좌별 비교·분할 종가 문턱·대보기 시작·토큰 리디렉트 |
 
 ### 25.1 왜 D1 인가
 
@@ -33701,3 +33702,26 @@ docs/paper.md 14장 "실주문을 켜기 전에 갖출 것" 일곱 항목을 운
 
 **되돌려 확인**: 대보기 끝을 오늘까지 허용하면 `test_h_window_ends_before_today`, 분할 막이를 없애거나 늦은 지정가를 다시 `close` 로 보내면 `test_fill_adjust_end_split_guard_and_late_limit_buy`
 가 깨진다. `test_measured_flag_matches_adjust_rule`·`test_pre_link_counts_h_holdings_missing_at_kis`·`test_batch_delay_counts_only_measured_runs`, 웹 `kisCells1514.test.ts` "검토 반영".
+
+### 25.1517 도전자 슬롯·대보기 검토 9건 반영 — 계좌별 비교·분할 종가 문턱·대보기 시작·토큰 리디렉트
+
+25.1515·25.1516 을 독립 검토 에이전트가 읽었다. **돈 경로 높음 0건** — 도전자 슬롯이 첫째의 키·계좌·토큰을 쓰거나 첫째 줄에 쓰거나 남의 종목을 정리 매도하거나
+실전 도메인·V 아닌 tr_id 로 나가는 길은 없음(토큰 줄 `kis_vts`/`kis_vts2` 분리, 증권사 칸을 쓰는 SQL 전부 슬롯 값, `_check_url`, step_log·예외에 계좌·키 값 없음, 웹 POST 는
+`web/proxy.ts` 인증·같은 출처 검사 뒤, dry-run·가상 단계 실패 날엔 안 돎). 중간 2·낮음 7 을 코드에서 다시 확인하고 고쳤다.
+**모의투자에 무엇이 낫나**: 체결 보정·대보기의 숫자가 분할·계좌 바꿈·휴장으로 틀어지지 않게, 두 KIS 계좌의 기록이 섞이지 않게(우선순위 ① 정확성).
+
+1. **[중간] 시가 개선이 2:1·3:2 분할에서 여전히 부풂** — 시가 50% 문턱은 4:1 만 잡았다(지정가 100·원래 시가 102·2:1 뒤 51 → 개선 49%). → 그날 **종가**가 지정가의 80%(`PI_CLOSE_FLOOR`)
+   아래면 분할 의심으로 `pi_missing`(찬 지정가 매수는 원래 종가 ≤ 지정가이고 대개 바로 아래서 끝난다). `ADJ_FILLS_SQL` 에 `p.close`. 근본책(판정 때 시가를 장부에 적기)은 마이그레이션이 필요해 미룸
+2. **[중간] 대보기 시작이 KIS 첫날로 고정** — 그날 연결 전 보유가 있었으면 `pre_link > 0` 이 영영 남아 판정에서 영영 빠졌다. `KIS_TOTALS_SQL` 에 계좌 조건도 없었다.
+   → 시작 = H 를 베낀 줄(`account_id = h`)·H 평가가 있고 연결 전 보유가 없는 첫날(`H_START_SCAN` 60날까지, 끝내 없으면 첫 후보 + `pre_link`)
+3. **[낮음~중간] 도전자 칸에 오래됨 검사 없음 · 거래일만 보고 고름 · 대보기에 섞임** → `KIS_RECENT_DAYS` 지난 줄은 안 씀, 잰 칸 먼저, 대보기는 첫째 칸만
+4. **[낮음] 대보기 끝날이 미국 배치로 덮였는지 안 봄** → 끝 후보 = 그날 미국 일일 배치가 끝난 한국 날짜(`US_DONE_SQL`)
+5. **[낮음] 늦게 낸 지정가 매수가 KIS 칸에선 빠지고 보정에선 지정가 매수** → `cells` 도 지정가 매수는 잣대와 상관없이 넣는다(`judge` 와 같은 잣대)
+6. **[낮음] 도전자 바꾸면 측정이 섞이고 정리 줄 계좌가 틀림** → 비교·칸·성과 SQL 에 `account_id = 지금 베끼는 계좌`, 정리 줄은 그 종목을 산 계좌(`BOUGHT_BY_SQL`)
+7. **[낮음] 도전자 기록을 볼 곳이 없음** → 주간 요약 `summary_lines` 에 도전자 국내·미국 줄(웹 KisPanel 슬롯 고르기는 다음 후보 — handoff)
+8. **[낮음] 첫째가 안 낸 날 둘째만 낼 수 있음** → `run(hold_send=)` — 첫째 `send` 까닭을 둘째에 넘긴다
+9. **[낮음, 전부터] 토큰 발급이 리디렉트를 따라감**(앱키·시크릿 본문이 다른 호스트로) → `allow_redirects=False`
+
+**되돌려 확인**: 비교 SQL 계좌 조건을 빼면 `test_switch_keeps_compare_apart_and_cleanup_row_names_buyer`·`test_cells_sql_books_slippage_pct`, `hold_send` 를 끄면
+`test_hold_send_follows_main`, 종가 문턱을 빼면 `test_fill_adjust_end_split_guard_and_late_limit_buy`, 오래됨 검사를 빼면 `test_desk_challenger_cells_freshness_and_measured_first` 가 깨진다.
+`test_h_check_start_skips_pre_link_days`·`test_cells_keep_late_limit_buys_and_token_no_redirect`·`test_h_window_ends_before_today`(미국 배치 끝난 날).

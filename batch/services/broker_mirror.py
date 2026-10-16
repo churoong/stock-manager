@@ -279,7 +279,7 @@ def cells(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
     `rows` 는 비교 줄(`compare` 와 같음)에 내부 주문 유형 `i_order_type`·판정 잣대 `i_fill_basis`·장부가 이미 얹은
     슬리피지 `i_slip_pct`(%)를 붙인 것. 칸 키는 `buy_limit`·`buy_market`·`sell_market` 등. 장 열린 뒤 낸 주문
-    (`fill_basis='close'`)은 종가 판정이라 다른 칸이므로 뺀다. 정리 주문도 뺀다.
+    (`fill_basis='close'`)은 종가 판정이라 다른 칸이므로 뺀다(지정가 매수는 판정이 같아 넣는다). 정리 주문도 뺀다.
 
     칸마다: n(끝난 주문)·days(거래일 수)·둘 다 참·가상만 참·KIS만 참·둘 다 안 참·모름 ·
     `miss` = 가상만 참 ÷ (둘 다 참 + 가상만 참) — 가상이 찼다는데 KIS 는 안 찬 몫 ·
@@ -297,7 +297,10 @@ def cells(rows: list[dict[str, Any]]) -> dict[str, Any]:
     칸: dict[str, dict[str, Any]] = {}
     달: dict[str, dict[str, list[float]]] = {}
     for r in rows:
-        if r.get("reason") == REASON_CLEANUP or r.get("i_fill_basis") == "close":
+        지정가매수 = r.get("side") == "buy" and r.get("i_order_type") != "market"
+        # 지정가 매수는 판정 잣대와 상관없이 칸에 넣는다 — `judge` 가 지정가 매수에서 `fill_basis` 를 보지 않는다
+        # (보정의 `desk._칸키` 와 같은 잣대, 25.1517 검토 5)
+        if r.get("reason") == REASON_CLEANUP or (r.get("i_fill_basis") == "close" and not 지정가매수):
             continue
         if r.get("status") not in _끝난 or r.get("i_status") not in ("filled", "expired"):
             continue

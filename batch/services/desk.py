@@ -255,11 +255,12 @@ def combine_kept(summaries: list[dict[str, Any]]) -> dict[str, Any]:
 #: 보정에 쓰지 않는 칸 — 지정가 매수는 지정가보다 비싸게 찰 수 없어 가격 차이가 구조상 0 이하(가격 개선)다.
 #: 그 몫은 시가로 따로 잰다(`pi_pp`) — KIS 칸으로 한 번 더 빼면 두 번 센다 (docs/desk.md 8장, 25.1514)
 ADJ_SKIP_CELLS = ("buy_limit",)
-#: 시가가 지정가의 이만큼 아래면 시가 개선에 넣지 않고 `pi_missing` 으로 —
-#: 미국 분할을 감지하면 시세를 처음부터 다시 받아 지난 시가도 분할 반영 값으로 덮이는데 주문의 지정가는 그대로라,
-#: 4:1 분할 뒤 개선이 75% 로 부풀었다(25.1516, 검토 2).
-#: 하루 50% 넘는 갭 하락은 드물어 놓쳐도 작다
-PI_OPEN_FLOOR = 0.5
+#: 그날 종가가 지정가의 이만큼 아래면 시가 개선에 넣지 않고 `pi_missing` 으로 — 미국 분할을 감지하면 시세를 처음부터
+#: 다시 받아 지난 시가·종가도 분할 반영 값으로 덮이는데 주문의 지정가는 그대로라 개선이 부풀었다(25.1516 검토 2).
+#: 처음엔 시가 50% 문턱이었는데 2:1·3:2 분할을 못 잡았다(25.1517 검토 1) — 찬 지정가 매수는 원래 "종가 ≤ 지정가" 이고
+#: 대개 지정가 바로 아래에서 끝나므로, 종가가 지정가의 80% 아래면 k ≥ 1.25 분할로 본다.
+#: 하루 20% 넘게 빠지며 찬 날은 놓친다
+PI_CLOSE_FLOOR = 0.8
 
 
 def _칸키(f: dict[str, Any]) -> str:
@@ -315,7 +316,7 @@ def fill_adjust(
     - `unmeasured_pct` = 잰 칸이 없는 회전(%) — 클수록 보정이 말해 주는 게 적다(지정가 매수는 따로라 뺌)
     - `pi_pp` = Σ 지정가 매수 회전 × (지정가 − min(시가, 지정가)) ÷ 지정가 — 가상 장부는 지정가로 사지만 시가가
       더 낮게 열린 날은 실제로는 시가 언저리에 찬다(가격 개선, 가상이 비관). 장 열린 뒤 낸 주문(`fill_basis='close'`)은
-      시가 뒤라 개선 0. `pi_missing` = 시가가 없거나 지정가의 `PI_OPEN_FLOOR` 아래(분할 의심)라 못 잰 건수
+      시가 뒤라 개선 0. `pi_missing` = 시가·종가가 없거나 종가가 지정가의 `PI_CLOSE_FLOOR` 아래(분할 의심)라 못 잰 건수
     - `limit_buy_pct` = 지정가 매수 금액 ÷ 매수 금액(%) — 칸의 miss·extra(체결 여부가 갈리는 몫)를 볼 무게
     보정 수익률(순위 수익률 − adj + pi)은 `adjust_rows` 가 붙인다. **순위는 바꾸지 않는다**(검증 에이전트 반박, 25.1514)
     """
@@ -330,10 +331,10 @@ def fill_adjust(
                 매수 += t
             if 키 in ADJ_SKIP_CELLS:
                 지정 += t
-                lim, op = f.get("limit_price"), f.get("open")
+                lim, op, cl = f.get("limit_price"), f.get("open"), f.get("close")
                 if f.get("fill_basis") == "close":
                     continue
-                if lim and op and float(lim) > 0 and float(op) >= float(lim) * PI_OPEN_FLOOR:
+                if lim and op and cl and float(lim) > 0 and float(cl) >= float(lim) * PI_CLOSE_FLOOR:
                     pi += t * (float(lim) - min(float(op), float(lim))) / float(lim) * 100
                 else:
                     pi_없음 += 1
@@ -374,15 +375,22 @@ def adjust_rows(leaderboard: dict[str, Any], adj: dict[str, dict[str, Any]]) -> 
     return out
 
 
-def h_window(kis_totals: list[tuple[str, float | None]], today: str) -> tuple[str, str] | None:
-    """대보기 기간 (시작, 끝) — 시작 = KIS 총액 첫날, 끝 = **오늘보다 앞선** KIS 총액 마지막 날.
+def h_window(
+    kis_totals: list[tuple[str, float | None]], today: str, us_ok: set[str] | None = None,
+) -> tuple[list[str], str] | None:
+    """대보기 (시작 후보들, 끝) — 끝 = **오늘보다 앞선**, 그날 미국 일일 배치가 끝난 KIS 총액 마지막 날,
+    시작 후보 = 끝보다 앞선 KIS 총액 날(오름차순 — 부르는 쪽이 연결 전 보유 없는 첫날을 고른다, 25.1517 검토 2).
 
     KIS 총액은 국내 아침 배치가 적는다(국내·미국 모두 전 장 종가). 가상 평가 행은 그날 미국 저녁 배치가 덮어써야
-    국내·미국이 같은 장 종가가 된다 — 오늘 행은 아침에는 아직 미국이 하루 늦다(25.1516, 검토 1). 그래서 끝은 어제까지
+    국내·미국이 같은 장 종가가 된다 — 오늘 행은 아침에는 아직 미국이 하루 늦다(25.1516, 검토 1). 미국 휴장·미국 배치
+    실패로 덮이지 않은 날도 끝이 될 수 없다(`us_ok` = 미국 일일 배치가 끝난 한국 날짜, 25.1517 검토 4)
     """
     날 = sorted(d for d, v in kis_totals if v is not None and float(v) > 0)
-    끝 = [d for d in 날 if d < today]
-    return (날[0], 끝[-1]) if 날 and 끝 and 끝[-1] > 날[0] else None
+    끝 = [d for d in 날 if d < today and (us_ok is None or d in us_ok)]
+    if not 끝:
+        return None
+    시작 = [d for d in 날 if d < 끝[-1]]
+    return (시작, 끝[-1]) if 시작 else None
 
 
 def h_check(

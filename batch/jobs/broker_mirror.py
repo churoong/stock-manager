@@ -96,6 +96,11 @@ OLD_SQL = (
 BOUGHT_SQL = (
     "SELECT DISTINCT stock_id FROM paper_broker_orders WHERE broker = ? AND side = 'buy' AND status <> 'rejected'"
 )
+#: 종목마다 마지막으로 산 계좌(정리 줄의 계좌, 25.1517) — id 순이라 뒤 줄이 이긴다
+BOUGHT_BY_SQL = (
+    "SELECT stock_id, account_id FROM paper_broker_orders WHERE broker = ? AND side = 'buy' AND status <> 'rejected'"
+    " ORDER BY id"
+)
 #: 그 시장 종목만 — 시장마다 따로 대 본다. 국내만 보던 때 미국 보유가 늘 "어긋남" 으로 남았다 (25.1483, 감사 [권장] 1)
 INTERNAL_QTY_SQL = (
     "SELECT f.stock_id, SUM(CASE WHEN f.side = 'buy' THEN f.quantity ELSE -f.quantity END) AS q FROM paper_fills f"
@@ -132,7 +137,7 @@ COMPARE_SQL = (
     "SELECT b.trade_date, b.side, b.status, b.filled_qty, b.quantity, b.avg_price, b.message, b.reason,"
     " o.status AS i_status, f.price AS i_price, f.fill_date AS i_fill_date FROM paper_broker_orders b"
     " LEFT JOIN paper_orders o ON o.id = b.paper_order_id LEFT JOIN paper_fills f ON f.order_id = b.paper_order_id"
-    " WHERE b.broker = ? AND b.trade_date >= ? AND b.trade_date < ?"
+    " WHERE b.broker = ? AND b.trade_date >= ? AND b.trade_date < ? AND b.account_id = ?"
 )
 #: 체결 칸 (docs/paper.md 15.9, 25.1514) — 베끼기 시작부터 누적. 내부 주문 유형·판정 잣대·장부 슬리피지(%)를 붙인다.
 #: 증권사 주문 표의 order_type 은 미국 시장가를 limit 으로 적으므로 **내부** 주문 유형을 쓴다
@@ -141,13 +146,14 @@ CELLS_SQL = (
     " o.order_type AS i_order_type, o.fill_basis AS i_fill_basis, f.price AS i_price, f.fill_date AS i_fill_date,"
     " CASE WHEN f.price > 0 AND f.quantity > 0 THEN f.slippage / (f.price * f.quantity) * 100 END AS i_slip_pct"
     " FROM paper_broker_orders b LEFT JOIN paper_orders o ON o.id = b.paper_order_id"
-    " LEFT JOIN paper_fills f ON f.order_id = b.paper_order_id WHERE b.broker = ? AND b.trade_date < ?"
+    " LEFT JOIN paper_fills f ON f.order_id = b.paper_order_id"
+    " WHERE b.broker = ? AND b.trade_date < ? AND b.account_id = ?"
 )
 #: 성과 계열 — 국내 배치가 적는 **계좌 전체 원화 총액**(`summary_json.account_krw.total_krw`, 25.1497).
 #: 오늘 줄은 따로 붙인다
 TOTALS_SQL = (
     "SELECT as_of, json_extract(summary_json, '$.account_krw.total_krw') FROM paper_broker_daily"
-    " WHERE broker = ? AND as_of < ? ORDER BY as_of"
+    " WHERE broker = ? AND as_of < ? AND account_id = ? ORDER BY as_of"
 )
 #: 같은 기간 H 의 (시간가중 지수, 평가손익) — 시작일 이하 마지막 · 오늘 이하 마지막
 H_TWR_SQL = (
@@ -155,7 +161,8 @@ H_TWR_SQL = (
 )
 #: 주간 요약이 읽는 마지막 잔고 줄
 LATEST_DAILY_SQL = (
-    "SELECT as_of, diff_json, summary_json FROM paper_broker_daily WHERE broker = ? ORDER BY as_of DESC LIMIT 1"
+    "SELECT as_of, account_id, diff_json, summary_json FROM paper_broker_daily WHERE broker = ?"
+    " ORDER BY as_of DESC LIMIT 1"
 )
 
 
@@ -232,7 +239,7 @@ def _account_perf(client: Any, sess: Any, 증권사: str, 오늘: str, 합: dict
     조각 = [합.get("total"), 값, 현금, 환율]
     총 = None if any(x is None for x in 조각) else float(합["total"]) + (float(값) + float(현금)) * float(환율)  # type: ignore[arg-type]
     원화계좌 = us | {"kr_total": 합.get("total"), "total_krw": 총}
-    계열 = [(str(d), v) for d, v in client.execute(TOTALS_SQL, [증권사, 오늘]).rows] + [(오늘, 총)]
+    계열 = [(str(d), v) for d, v in client.execute(TOTALS_SQL, [증권사, 오늘, 계좌]).rows] + [(오늘, 총)]
     시작 = bm.perf(계열)
     if not 시작:
         return 원화계좌, None
@@ -243,11 +250,13 @@ def _account_perf(client: Any, sess: Any, 증권사: str, 오늘: str, 합: dict
 
 def run(
     client: Any, market: str, now: datetime, *, session: Any = None, sleep: Any = time.sleep, clock: Any = None,
-    frozen: set[int] | None = None, slot: Slot = MAIN,
+    frozen: set[int] | None = None, slot: Slot = MAIN, hold_send: str | None = None,
 ) -> dict[str, Any]:
     """하루 한 번(시장마다). 돌려주는 것은 실행 기록(`step_log.broker`)에 넣을 건수와 까닭.
 
-    `clock` 은 보낸 시각(시험용). `slot` = 어느 모의 계좌(첫째 — 챔피언, 둘째 — 도전자, 25.1515)
+    `clock` 은 보낸 시각(시험용). `slot` = 어느 모의 계좌(첫째 — 챔피언, 둘째 — 도전자, 25.1515).
+    `hold_send` = 첫째가 보내지 못한 까닭 — 있으면 둘째도 같은 까닭으로 보내지 않는다
+    (두 계좌의 주문 날이 어긋나지 않게, 25.1517)
     """
     clock = clock or (lambda: datetime.now(UTC))
     if market not in ("KR", "US"):
@@ -314,10 +323,12 @@ def run(
     어긋남 = bm.holdings_diff({k: q for k, q in 증권수.items() if q > 0},
                             {k: q for k, q in 내부.items() if k not in 연결전})  # fmt: skip
     부터 = (오늘 - timedelta(days=bm.COMPARE_DAYS)).isoformat()
-    비교 = bm.compare(client.execute(COMPARE_SQL, [증권사, 부터, 오늘.isoformat()]).dicts())
+    # 비교·칸·성과는 **지금 베끼는 계좌의 줄만** — 도전자를 C 에서 D 로 바꾸면 C 주문이 D 의 창에 섞였다
+    # (25.1517, 검토 6)
+    비교 = bm.compare(client.execute(COMPARE_SQL, [증권사, 부터, 오늘.isoformat(), 베낌]).dicts())
     # 체결 칸(15.9, 25.1514) — 곁다리: 실패해도 비교 요약은 그대로
     try:
-        비교 |= bm.cells(client.execute(CELLS_SQL, [증권사, 오늘.isoformat()]).dicts())
+        비교 |= bm.cells(client.execute(CELLS_SQL, [증권사, 오늘.isoformat(), 베낌]).dicts())
     except Exception as exc:  # noqa: BLE001
         기록["cells_error"] = type(exc).__name__
     # 웹 보유내역·성과(docs/paper.md 15.7, 25.1496·25.1497). 시장 칸은 그 시장 통화(국내 원 — 현금은 총평가와
@@ -373,6 +384,9 @@ def run(
         기록["unknown_codes"] = len({h.code for h in 보유}) - len(코드표)
 
     # 3. 보내기
+    if hold_send:
+        기록["send"] = hold_send
+        return 기록 | {"calls": sess.calls}
     if not cal.is_session(market, 오늘):
         기록["send"] = "오늘은 장이 없다"
         return 기록 | {"calls": sess.calls}
@@ -406,11 +420,15 @@ def run(
     낼것, 안냄 = bm.plan(주문들, 코드, 내부, 증권, 산적, already=이미, cleaned_today=정리함, halted=멈춤,
                        bought_today=오늘산, frozen=frozen, currency="USD" if 미국 else "KRW",
                        closes=종가)  # fmt: skip
+    # 정리 주문은 그 종목을 **산 계좌**로 적는다 — 베끼는 계좌를 바꾼 뒤 정리 줄이 새 계좌의 주문처럼 보였다
+    # (25.1517, 검토 6)
+    산계좌 = {int(r[0]): str(r[1]) for r in client.execute(BOUGHT_BY_SQL, [증권사]).rows}
     상태: Counter[str] = Counter()
     for it in 낼것:
         # 미국은 늘 지정가(시장가 대신 종가 ± 폭) — 내부 주문이 시장가였으면 `limit_price` 가 그 폭 지정가다
         client.execute(INSERT_SQL, [
-            증권사, it.paper_order_id, 베낌, market, it.stock_id, it.code, it.side,
+            증권사, it.paper_order_id, 산계좌.get(it.stock_id, 베낌) if it.reason == bm.REASON_CLEANUP else 베낌,
+            market, it.stock_id, it.code, it.side,
             "market" if it.price is None else "limit", it.price, it.quantity, 오늘.isoformat(), it.reason,
             slot.keys.source, 지금,
         ])  # fmt: skip
@@ -460,11 +478,15 @@ def summary_lines(client: Any) -> list[str]:
     0078·0080 전이거나 줄이 없으면(키를 넣기 전) 빈 목록
     """
     out: list[str] = []
-    for 증권사, 이름 in ((BROKER, MIRROR_ACCOUNT), (BROKER_US, f"{MIRROR_ACCOUNT} 미국")):
+    # 둘째(도전자, 25.1515) 줄도 — 거부·모름·어긋남을 볼 곳이 텔레그램 실패 알림뿐이었다(25.1517, 검토 7)
+    for 증권사, 이름 in ((BROKER, MIRROR_ACCOUNT), (BROKER_US, f"{MIRROR_ACCOUNT} 미국"),
+                       (CHALLENGER.broker, "도전자"), (CHALLENGER.broker_us, "도전자 미국")):  # fmt: skip
         rows = client.execute(LATEST_DAILY_SQL, [증권사]).dicts()
         if not rows or not rows[0].get("summary_json"):
             continue
         r = rows[0]
+        if 이름.startswith("도전자") and r.get("account_id"):
+            이름 = f"도전자 {r['account_id']}" + (" 미국" if 이름.endswith("미국") else "")
         out += bm.compare_lines(json.loads(r["summary_json"]), len(json.loads(r.get("diff_json") or "{}")),
                                 str(r["as_of"]), 이름)  # fmt: skip
     return out
