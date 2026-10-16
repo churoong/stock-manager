@@ -228,8 +228,7 @@ def write(
           **관문판,
           "kis_account": {"as_of": kis[0]["as_of"] if kis else None, "account_krw": 요약.get("account_krw"),
                           "perf": 요약.get("perf")},
-          **_보정판(client, 순위, 평가, h, {"KR": 요약.get("cells") or {}, "US": 요약_us.get("cells") or {}},
-                 요약.get("perf"))}  # fmt: skip
+          **_보정판(client, 순위, 평가, h, 요약, 요약_us)}  # fmt: skip
     앞 = client.execute(DESK_READ_SQL, [as_of]).rows
     그날 = _json(앞[0][0]) if 앞 else None
     if 그날 is None:
@@ -242,9 +241,25 @@ def write(
     return out | ({"rule_history_error": 판오류} if 판오류 else {}) | ({"gate_error": 관문오류} if 관문오류 else {})
 
 
+def _칸합침(client: Any, 요약: dict[str, Any], 요약_us: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """시장마다 체결 칸 — 첫째(챔피언) 계좌 것에 둘째(도전자, 25.1515) 계좌 것을 칸마다 더한다.
+
+    두 계좌의 같은 칸은 합치지 않고 **거래일이 더 많은 쪽**을 쓴다 — 금액 가중 평균을 합치려면 칸마다 총금액이 있어야
+    하는데 요약에 없다. 챔피언이 안 쓰는 칸(시장가 매수 등)은 도전자 것만 있어 그대로 들어온다
+    """
+    out = {"KR": dict(요약.get("cells") or {}), "US": dict(요약_us.get("cells") or {})}
+    for m, 증권사 in (("KR", bmj.CHALLENGER.broker), ("US", bmj.CHALLENGER.broker_us)):
+        줄 = client.execute(KIS_SQL, [증권사]).dicts()
+        둘째 = ((_json(줄[0]["summary_json"]) or {}).get("cells") or {}) if 줄 else {}
+        for k, c in 둘째.items():
+            if isinstance(c, dict) and int(c.get("days") or 0) > int((out[m].get(k) or {}).get("days") or 0):
+                out[m][k] = c
+    return out
+
+
 def _보정판(
     client: Any, 순위: dict[str, Any], 평가: dict[str, list[tuple[str, float]]], h: str,
-    칸: dict[str, dict[str, Any]], perf: dict[str, Any] | None,
+    요약: dict[str, Any], 요약_us: dict[str, Any],
 ) -> dict[str, Any]:
     """KIS모의 체결 기준 보정(근사·참고, docs/desk.md 8장, 25.1514) — 실패해도 운용 요약은 적는다.
 
@@ -253,7 +268,9 @@ def _보정판(
     """
     from batch.services import broker_mirror as bm
 
+    perf = 요약.get("perf")
     try:
+        칸 = _칸합침(client, 요약, 요약_us)
         시작 = {str(r["id"]): str(r["open"] if r.get("young") else 순위.get("window_start"))
               for r in 순위.get("rows") or [] if r.get("open")}  # fmt: skip
         if not 시작:

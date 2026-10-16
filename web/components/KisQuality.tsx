@@ -9,22 +9,25 @@ import { CELL_MIN_DAYS, DIVERGE, cellRows, excessText, qualityLine, qualitySerie
  * KIS모의투자 실행 품질 (docs/paper.md 15.8, docs/infra.md 25.1504) — 가상 체결 판정이 얼마나 낙관적인가.
  * 값은 배치가 날마다 적은 28일 창 비교 요약 그대로다.
  */
-const MARKETS: Array<["KR" | "US", string]> = [
+type Key = "KR" | "US" | "KR2" | "US2";
+const MARKETS: Array<[Key, string]> = [
   ["KR", "국내"],
   ["US", "미국"],
+  ["KR2", "도전자 국내"],
+  ["US2", "도전자 미국"],
 ];
 
 export default function KisQuality() {
-  const [data, setData] = useState<Record<"KR" | "US", QualityRow[]> | null>(null);
+  const [data, setData] = useState<Partial<Record<Key, QualityRow[]>> | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     void (async () => {
-      const r = await readJson<Record<"KR" | "US", QualityRow[]>>("/api/kis/quality");
-      const body = bodyOf<Record<"KR" | "US", QualityRow[]>>(r);
+      const r = await readJson<Partial<Record<Key, QualityRow[]>>>("/api/kis/quality");
+      const body = bodyOf<Partial<Record<Key, QualityRow[]>>>(r);
       if (!r.ok || body.errors?.length) setError(body.errors?.join(" · ") || r.error || "실행 품질을 읽지 못했습니다");
       else if (!Array.isArray(body.KR) || !Array.isArray(body.US)) setError("실행 품질을 읽지 못했습니다(응답 꼴이 다름 — 새로 고침해 주세요)");
-      else setData({ KR: body.KR, US: body.US });
+      else setData({ KR: body.KR, US: body.US, KR2: Array.isArray(body.KR2) ? body.KR2 : [], US2: Array.isArray(body.US2) ? body.US2 : [] });
     })();
   }, []);
 
@@ -40,12 +43,17 @@ export default function KisQuality() {
       {!data && !error ? <p className="mt-2 text-sm text-slate-500">불러오는 중…</p> : null}
       {data
         ? MARKETS.map(([m, label]) => {
-            const rows = data[m];
+            const rows = data[m] ?? [];
+            // 도전자 칸은 둘째 모의 계좌 줄이 있을 때만(키가 없으면 줄이 없다)
+            if (m.endsWith("2") && !rows.length) return null;
             const 일치 = qualitySeries(rows);
             const 가격 = slipSeries(rows);
             return (
               <div key={m} className="mt-3">
-                <h3 className="text-sm font-medium">{label}</h3>
+                <h3 className="text-sm font-medium">
+                  {label}
+                  {m.endsWith("2") && rows[rows.length - 1]?.account_id ? ` — ${rows[rows.length - 1]?.account_id} 를 베낌` : ""}
+                </h3>
                 <p className="text-sm">{qualityLine(rows[rows.length - 1])}</p>
                 {/* 계열 하나라도 두 점이면 그린다 — 첫 계열만 보면 매수가 한 점일 때 매도 그래프도 숨었다(검토 10) */}
                 {일치.some((x) => x.points.length > 1) ? <EquityChart series={일치} height={180} format="pct" /> : null}

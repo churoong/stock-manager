@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import time
 from collections import Counter
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from datetime import time as dtime
 from typing import Any
@@ -37,6 +38,31 @@ BROKER_US = "kis_vts_us"
 #: docs/company.md 10장). 처음 설계는 B(25.1475). H 가 아직 없는 DB(0083 전)에서는 "베낄 계좌 없음" 으로
 #: 꺼진 채 지나간다
 MIRROR_ACCOUNT = "H"
+
+
+@dataclass(frozen=True)
+class Slot:
+    """모의 계좌 하나 — 증권사 칸 이름(국내·미국)·키 이름·글 (docs/paper.md 15.10, 25.1515)"""
+
+    broker: str
+    broker_us: str
+    keys: kv.Keys
+    label: str
+
+
+#: 첫째 — 챔피언 `MIRROR_ACCOUNT` 를 베낀다
+MAIN = Slot(BROKER, BROKER_US, kv.MAIN, "KIS모의투자")
+#: 둘째 — 도전자(설정 `kis_challenger`, /kis 화면에서 고른다)를 베낀다. 키가 없으면(둘째 모의 계좌를 안 열었으면) 꺼짐.
+#: 챔피언 교체 판단(docs/desk.md 6장)에 도전자의 **실제 주문 경로 체결**을 대 보고,
+#: 챔피언이 안 쓰는 칸(시장가 매수 등)을 재어 체결 보정(desk 8장)의 "안 잰 회전" 을 줄인다
+CHALLENGER = Slot("kis_vts2", "kis_vts2_us", kv.CHALLENGER, "KIS모의투자 도전자")
+
+
+def challenger_account(client: Any) -> str | None:
+    """설정 `kis_challenger` = {"account": "C", "at": …} 의 계좌. 없거나 비면 None"""
+    v = db.get_setting(client, "kis_challenger", None)
+    a = v.get("account") if isinstance(v, dict) else None
+    return str(a) if a else None
 #: 장전 동시호가 접수 시작(08:30 KST) 전이면 이만큼까지만 기다린다. 더 이르면 보내지 않는다
 #: — 모의 접수 시작 시각은 공식 자료에서 못 찾았다 `[확인필요]`
 ORDER_OPEN_KST = dtime(8, 30)
@@ -180,7 +206,7 @@ def _us_window(now: datetime, day: Any) -> str | None:
 FX_SQL = "SELECT rate FROM fx_rates WHERE pair = 'USDKRW' AND date <= ? AND date >= ? ORDER BY date DESC LIMIT 1"
 
 
-def _account_perf(client: Any, sess: Any, 증권사: str, 오늘: str, 합: dict[str, Any],
+def _account_perf(client: Any, sess: Any, 증권사: str, 오늘: str, 합: dict[str, Any], 계좌: str,
                   ) -> tuple[dict[str, Any], dict[str, Any] | None]:  # fmt: skip
     """국내 배치의 계좌 전체 원화 총액과 성과 (docs/paper.md 15.7, 25.1497·25.1499).
 
@@ -210,37 +236,50 @@ def _account_perf(client: Any, sess: Any, 증권사: str, 오늘: str, 합: dict
     시작 = bm.perf(계열)
     if not 시작:
         return 원화계좌, None
-    h0 = client.execute(H_TWR_SQL, [MIRROR_ACCOUNT, 시작["start"]]).rows
-    h1 = client.execute(H_TWR_SQL, [MIRROR_ACCOUNT, 오늘]).rows
+    h0 = client.execute(H_TWR_SQL, [계좌, 시작["start"]]).rows
+    h1 = client.execute(H_TWR_SQL, [계좌, 오늘]).rows
     return 원화계좌, bm.perf(계열, tuple(h0[0]) if h0 else None, tuple(h1[0]) if h1 else None)  # type: ignore[arg-type]
 
 
 def run(
     client: Any, market: str, now: datetime, *, session: Any = None, sleep: Any = time.sleep, clock: Any = None,
-    frozen: set[int] | None = None,
+    frozen: set[int] | None = None, slot: Slot = MAIN,
 ) -> dict[str, Any]:
     """하루 한 번(시장마다). 돌려주는 것은 실행 기록(`step_log.broker`)에 넣을 건수와 까닭.
 
-    `clock` 은 보낸 시각(시험용)
+    `clock` 은 보낸 시각(시험용). `slot` = 어느 모의 계좌(첫째 — 챔피언, 둘째 — 도전자, 25.1515)
     """
     clock = clock or (lambda: datetime.now(UTC))
     if market not in ("KR", "US"):
         return {"off": f"모르는 시장 {market}"}
-    if not kv.configured():
-        빈칸 = kv.missing()
+    if not kv.configured(keys=slot.keys):
+        빈칸 = kv.missing(keys=slot.keys)
         if len(빈칸) < 3:
             # 일부만 들어온 것은 연결하려다 이름을 틀린 것이다 — 조용히 꺼지면 모른다(2026-10-16 시험 주문에서
             # 앱 시크릿 이름이 달라 하루를 꺼진 채 지날 뻔했다, 25.1491·25.1492). 일일 배치가 알림을 보낸다
-            return {"off": "KIS모의투자 키 일부만 있음", "missing": 빈칸}
-        return {"off": "KIS모의투자 키 없음"}
-    if not client.execute(ACCOUNT_SQL, [MIRROR_ACCOUNT]).rows:
-        return {"off": f"베낄 계좌 {MIRROR_ACCOUNT} 없음"}
+            return {"off": f"{slot.label} 키 일부만 있음", "missing": 빈칸}
+        return {"off": f"{slot.label} 키 없음"}
+    if slot == MAIN:
+        베낌 = MIRROR_ACCOUNT
+    else:
+        # 도전자 — 고르지 않았거나 챔피언과 같으면 꺼짐. 바꾸면 그 전 도전자가 산 종목은 다음 실행의 정리 주문이 판다
+        # (정리는 "이 증권사 칸에서 산 적 있고 지금 베끼는 계좌에 없는 종목", 15.2)
+        베낌 = challenger_account(client) or ""
+        if not 베낌:
+            return {"off": "도전자 계좌를 고르지 않음(/kis)"}
+        if 베낌 == MIRROR_ACCOUNT:
+            return {"off": f"도전자 {베낌} 가 챔피언과 같음"}
+        # 첫째와 같은 모의계좌면 두 베끼기의 잔고·체결 조회가 섞여 정리 주문이 남의 종목을 판다 — 설정 실수로 알린다
+        if kv.account(keys=kv.CHALLENGER) == kv.account(keys=kv.MAIN):
+            return {"off": f"{slot.label} 계좌가 첫째와 같음", "missing": ["KIS_VTS2_ACCOUNT(첫째와 같은 계좌)"]}
+    if not client.execute(ACCOUNT_SQL, [베낌]).rows:
+        return {"off": f"베낄 계좌 {베낌} 없음"}
     미국 = market == "US"
-    증권사 = BROKER_US if 미국 else BROKER
+    증권사 = slot.broker_us if 미국 else slot.broker
     지금 = now.isoformat()
     현지 = now.astimezone(cal.market_tz(market))
     오늘 = 현지.date()
-    sess = session or kv.Session(client, now)
+    sess = session or kv.Session(client, now, keys=slot.keys)
     기록: dict[str, Any] = {}
 
     # 1. 맞추기 — 어제까지 낸 하루짜리 주문은 끝났다. 체결 조회는 3개월 안만 되므로 그보다 오래된 줄은 모름으로 닫는다
@@ -262,7 +301,7 @@ def run(
     보유, 합 = sess.balance_us() if 미국 else sess.balance()
     코드표 = _ids(client, {h.code for h in 보유}, market)
     증권 = {코드표[h.code]: (h.quantity, h.sellable) for h in 보유 if h.code in 코드표}
-    내부 = {int(r["stock_id"]): int(r["q"]) for r in client.execute(INTERNAL_QTY_SQL, [MIRROR_ACCOUNT, market]).dicts()
+    내부 = {int(r["stock_id"]): int(r["q"]) for r in client.execute(INTERNAL_QTY_SQL, [베낌, market]).dicts()
             if int(r["q"] or 0) > 0}  # fmt: skip
     # 어긋남은 **베낀 적 있는 종목**과 증권사 보유만 — 키를 넣기 전에 산 가상 보유는 "연결 전 보유" 로
     # 따로 센다(감사 [권장] 3). 같은 날 다시 돌면 시가에 찬 오늘 매수가 증권사엔 있고 가상 장부엔 다음 배치에야
@@ -292,14 +331,14 @@ def run(
     if not 미국:
         # 곁다리 안의 곁다리 — 여기서 무엇이 깨져도 아래 주문 보내기는 돈다(25.1499, 검토 [권장] 5)
         try:
-            원화계좌, 성과 = _account_perf(client, sess, 증권사, 오늘.isoformat(), 합)
+            원화계좌, 성과 = _account_perf(client, sess, 증권사, 오늘.isoformat(), 합, 베낌)
         except Exception as exc:  # noqa: BLE001
             기록["perf_error"] = type(exc).__name__
     보유칸 = [{"id": 코드표.get(h.code), "code": h.code, "qty": h.quantity, "avg": h.avg_price, "price": h.price,
              "value": h.value, "pnl": h.pnl} for h in 보유]  # fmt: skip
     client.execute(DAILY_SQL, [
-        증권사, 오늘.isoformat(), MIRROR_ACCOUNT, None if 미국 else 합.get("cash"), None if 미국 else 합.get("total"),
-        json.dumps(보유칸), json.dumps({str(k): list(v) for k, v in 어긋남.items()}), BROKER, 지금,
+        증권사, 오늘.isoformat(), 베낌, None if 미국 else 합.get("cash"), None if 미국 else 합.get("total"),
+        json.dumps(보유칸), json.dumps({str(k): list(v) for k, v in 어긋남.items()}), slot.keys.source, 지금,
         json.dumps(비교 | {"account": 계좌, "account_krw": 원화계좌, "perf": 성과}, ensure_ascii=False),
     ])  # fmt: skip
     기록["compare"] = {"n": 비교["n"], "match_pct": 비교["match_pct"], "kept_pct": 비교["kept_pct"]}
@@ -307,7 +346,10 @@ def run(
     # {active, sent} 로 두고, 켜졌는데 **아직 보내지 않은** 칸만 알린다. 보냈다는 표시는 일일 배치가 알림을 보낸 뒤
     # `mark_diverge_sent` 로 — 그 전에 실행이 죽거나 발송이 실패하면 다음 실행이 다시 알린다(검토 1),
     # 같은 날 다시 돌려도 두 번 가지 않는다(검토 4)
+    # 도전자 계좌는 괴리 알림을 내지 않는다 — 재는 자일 뿐, 알림은 챔피언(실전으로 갈 전략)만(25.1515)
     try:
+        if slot != MAIN:
+            raise _건너뜀
         상태 = db.get_setting(client, "kis_diverge", None)
         상태 = 상태 if isinstance(상태, dict) else {}
         내상태 = 상태.get(증권사) if isinstance(상태.get(증권사), dict) else {}
@@ -319,6 +361,8 @@ def run(
         if 새:
             기록["diverge"] = bm.diverge(비교, 새, market)
             기록["diverge_keys"] = 새
+    except _건너뜀:
+        pass
     except Exception as exc:  # noqa: BLE001 — 알림 곁다리. 주문 보내기는 그대로
         기록["diverge_error"] = type(exc).__name__
     기록["holdings"] = len(보유)
@@ -348,7 +392,7 @@ def run(
         sleep(기다림.total_seconds() + 5)
     멈춤값 = db.get_setting(client, "paper_halt", None)
     멈춤 = bool(멈춤값.get("on")) if isinstance(멈춤값, dict) else bool(멈춤값)
-    주문들 = client.execute(OPEN_ORDERS_SQL, [MIRROR_ACCOUNT, market, 오늘.isoformat()]).dicts()
+    주문들 = client.execute(OPEN_ORDERS_SQL, [베낌, market, 오늘.isoformat()]).dicts()
     보냄 = client.execute(SENT_SQL, [증권사, 오늘.isoformat()]).dicts()
     이미 = {int(r["paper_order_id"]) for r in 보냄 if r["paper_order_id"] is not None}
     정리함 = {int(r["stock_id"]) for r in 보냄 if r["paper_order_id"] is None}
@@ -366,8 +410,9 @@ def run(
     for it in 낼것:
         # 미국은 늘 지정가(시장가 대신 종가 ± 폭) — 내부 주문이 시장가였으면 `limit_price` 가 그 폭 지정가다
         client.execute(INSERT_SQL, [
-            증권사, it.paper_order_id, MIRROR_ACCOUNT, market, it.stock_id, it.code, it.side,
-            "market" if it.price is None else "limit", it.price, it.quantity, 오늘.isoformat(), it.reason, BROKER, 지금,
+            증권사, it.paper_order_id, 베낌, market, it.stock_id, it.code, it.side,
+            "market" if it.price is None else "limit", it.price, it.quantity, 오늘.isoformat(), it.reason,
+            slot.keys.source, 지금,
         ])  # fmt: skip
         내것 = -1 if it.paper_order_id is None else it.paper_order_id
         mine = client.execute(MINE_SQL, [증권사, 오늘.isoformat(), it.stock_id, it.side, 내것, 지금]).rows
@@ -403,6 +448,10 @@ def run(
         기록["not_sent"] = dict(Counter(까닭 for _o, _s, 까닭 in 안냄))
     기록["halted"] = 멈춤
     return 기록 | {"calls": sess.calls}
+
+
+class _건너뜀(Exception):  # noqa: N818 — 흐름 표시
+    """도전자 계좌의 괴리 알림을 건너뛴다"""
 
 
 def summary_lines(client: Any) -> list[str]:

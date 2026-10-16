@@ -18,7 +18,7 @@ export const CELL_MIN_DAYS = 20;
 /** 추이를 읽는 기간(달력일) — 반년. 시장마다 하루 한 줄이라 최대 약 180행 */
 export const QUALITY_DAYS = 180;
 
-export const QUALITY_SQL = `SELECT as_of,
+export const QUALITY_SQL = `SELECT as_of, account_id,
   json_extract(summary_json, '$.n') AS n,
   json_extract(summary_json, '$.match_pct') AS match_pct,
   json_extract(summary_json, '$.kept_pct') AS kept_pct,
@@ -30,7 +30,7 @@ export const QUALITY_SQL = `SELECT as_of,
 FROM paper_broker_daily WHERE broker = ? AND as_of >= ? ORDER BY as_of`;
 
 export interface QualityRow {
-  as_of: string; n: number | null; match_pct: number | null; kept_pct: number | null;
+  as_of: string; account_id?: string | null; n: number | null; match_pct: number | null; kept_pct: number | null;
   slip_buy: number | null; slip_sell: number | null; rejected: number | null; unknown?: number | null;
   /** 체결 칸 JSON(25.1514 전 줄에는 없다) */
   cells?: string | null;

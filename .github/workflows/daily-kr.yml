@@ -114,6 +114,10 @@ jobs:
           KIS_VTS_APP_KEY: ${{ secrets.KIS_VTS_APP_KEY }}
           KIS_VTS_APP_SECRET: ${{ secrets.KIS_VTS_APP_SECRET }}
           KIS_VTS_ACCOUNT: ${{ secrets.KIS_VTS_ACCOUNT }}
+          # 둘째 모의 계좌 — 도전자 (docs/paper.md 15.10, 25.1515). 비면 꺼짐
+          KIS_VTS2_APP_KEY: ${{ secrets.KIS_VTS2_APP_KEY }}
+          KIS_VTS2_APP_SECRET: ${{ secrets.KIS_VTS2_APP_SECRET }}
+          KIS_VTS2_ACCOUNT: ${{ secrets.KIS_VTS2_ACCOUNT }}
           # 공시 수집 단계(jobs/disclosures_kr)가 DART 를 부른다. 빠져 있어 매일 "DART_API_KEY 가 비어 있습니다" 로
           # 공시를 하나도 못 받았다 (docs/infra.md 25.882)
           DART_API_KEY: ${{ secrets.DART_API_KEY }}

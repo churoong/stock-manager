@@ -2562,6 +2562,7 @@ SQL read operations are forbidden (reads are blocked, ...)
 | 25.1512 | 아침 운용 보고 검토 반영 — KIS 실제 상태·머리 블록 뒤에 끼움·보낸 결과 글·갓 연 챔피언 등 6건 |
 | 25.1513 | 실전 준비 목록 진도 — docs/paper.md 14장 일곱 항목을 상태·근거로 관문 카드에 |
 | 25.1514 | KIS 체결 칸 · KIS모의 체결 기준 보정(근사·참고) — 실현율로 순위를 깎는 설계는 반박돼 줄임 |
+| 25.1515 | KIS모의투자 도전자 — 둘째 모의 계좌 슬롯(키 없으면 꺼짐) |
 
 ### 25.1 왜 D1 인가
 
@@ -33654,3 +33655,25 @@ docs/paper.md 14장 "실주문을 켜기 전에 갖출 것" 일곱 항목을 운
 
 **되돌려 확인**: excess 에서 장부 슬리피지 빼기를 없애면 `test_cells_net_out_booked_slippage_value_weighted` 등 3건, 지정가 매수 칸 건너뛰기를 없애면 `test_fill_adjust_by_hand`·
 `test_fill_adjust_skips_limit_buy_cell_and_close_basis`, 시가 개선 계산을 끄면 `test_fill_adjust_by_hand` 가 깨진다. 웹은 `kisCells1514.test.ts`(CELL_MIN_DAYS 배치 대조 포함).
+
+### 25.1515 KIS모의투자 도전자 — 둘째 모의 계좌 슬롯(키 없으면 꺼짐)
+
+2026-10-16 사용자 지시 "1, 3, 4진행" 의 3번(도전자 KIS 계좌). **모의투자에 무엇이 낫나**: ① 챔피언 교체 후보를 가상 판정만이 아니라 실제 주문 경로로 견준다
+② 챔피언 H 가 안 쓰는 주문(시장가 매수 — C·R 의 진입)의 체결을 재어 25.1514 체결 보정의 "안 잰 회전" 을 줄인다. 둘 다 실전 전환 판단의 근거다.
+
+**한 것**
+- `sources/kis_vts.Keys`·`MAIN`·`CHALLENGER`: 키 이름·토큰 줄·출처를 묶었다. `configured`·`missing`·`account`·`Session` 이 `keys` 를 받는다(기본 첫째 — 기존 호출 그대로).
+  둘째는 `KIS_VTS2_*`, 토큰 줄 `kis_vts2`. 모의 도메인·V tr_id 검사는 그대로(실전 경로 없음)
+- `jobs/broker_mirror.Slot`·`MAIN`·`CHALLENGER`·`challenger_account`: `run(..., slot=)` 하나로 두 계좌. 둘째는 설정 `kis_challenger` 의 계좌를 베끼고, 고르지 않았거나 챔피언과 같으면 꺼짐,
+  **첫째와 같은 모의계좌번호면 꺼지고 `missing` 으로 알린다**(잔고·체결 조회가 섞이면 정리 주문이 남의 종목을 판다). 괴리 알림은 첫째만
+- `jobs/daily`: 첫째 뒤에 둘째(`step_log.broker2`), 설정 실수·실패 알림 "KIS모의투자 도전자 확인 필요". `_kis_알림문(broker, label)`
+- `jobs/desk._칸합침`: 보정에 쓰는 체결 칸에 둘째 것을 더한다(같은 칸이면 거래일 많은 쪽 — 요약에 칸별 총금액이 없어 가중 합침은 못 한다)
+- 워크플로 `daily-kr.yml`·`daily-us.yml` 배치 단계 env 에 `KIS_VTS2_*`, `.env.example` 8-2
+- 웹: `/kis` "도전자 — 둘째 모의 계좌" 고르기(`app/api/kis/challenger` GET·POST, `lib/kisChallenger.ts` — 챔피언·이상한 id 는 막음), 실행 품질에 도전자 국내·미국(줄 있을 때만)
+- 문서 docs/paper.md 15.10. 설정 키 `kis_challenger` 는 설정 화면 밖 예외(/kis 고르기가 쓴다)
+
+**설계 판단(되돌릴 수 있음, 보수적으로)**: 도전자를 GitHub 변수 대신 설정으로 — 폰에서 바꿀 수 있게. 바꾸면 정리 주문이 팔지만 가상 돈이라 확인 창 하나로 둔다.
+도전자 괴리 알림은 내지 않는다(알림 피로 — 재는 자). 한 사람이 모의계좌·모의 앱키를 둘 열 수 있는지 `[확인필요]`(검색으로 확인 못 함) — 안 되면 꺼진 채 무해.
+
+**되돌려 확인**: 같은 계좌 막기를 없애면 `test_off_states`, 둘째가 첫째 증권사 칸에 쓰게 하면 `test_challenger_mirrors_into_its_own_rows`, 괴리 건너뛰기를 없애면
+`test_challenger_never_raises_diverge` 가 깨진다. 웹 `kisChallenger1515.test.ts` 가 증권사 칸·챔피언·설정 키를 배치 원문과 대조한다.

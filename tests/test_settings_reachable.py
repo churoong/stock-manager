@@ -30,6 +30,8 @@ from pathlib import Path
     "paper_halt": "/paper 화면의 '모의 매매 멈춤' 단추가 쓴다(app/api/paper/halt). 설정 화면 밖",
     # KIS모의투자 괴리 알림 상태 (docs/paper.md 15.8, 25.1507) — 켜진 칸·보낸 날
     "kis_diverge": "배치 내부 기록(괴리 알림의 켜진 칸·보낸 날). 사람이 고칠 값이 아니다",
+    # KIS모의투자 도전자 (docs/paper.md 15.10, 25.1515) — 설정 화면이 아니라 /kis 화면의 고르기가 쓴다
+    "kis_challenger": "/kis 화면의 '도전자 — 둘째 모의 계좌' 고르기가 쓴다(app/api/kis/challenger). 설정 화면 밖",
 }
 
 

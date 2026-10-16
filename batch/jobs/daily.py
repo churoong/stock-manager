@@ -1015,16 +1015,17 @@ def _건너뛴_까닭(job_name: str, since: str) -> str | None:
     return f"신호를 계산하지 않았습니다 — {까닭}. 앞서 계산된 신호를 그대로 씁니다(기준일은 추천 머리에)"
 
 
-def _kis_알림문(broker: dict[str, Any]) -> str | None:
+def _kis_알림문(broker: dict[str, Any], label: str = "KIS모의투자") -> str | None:
     """KIS모의투자 단계 결과에서 알릴 것 — 키 일부만 있음(설정 실수)·단계 실패.
 
     키를 하나도 안 넣은 것·정상은 None (25.1492).
-    가상과 벌어진 것(괴리)은 따로 알린다 — 보낸 뒤 표시를 남겨야 해서(25.1507)
+    가상과 벌어진 것(괴리)은 따로 알린다 — 보낸 뒤 표시를 남겨야 해서(25.1507).
+    `label` = 둘째(도전자) 계좌면 "KIS모의투자 도전자"(25.1515)
     """
     if broker.get("missing"):
-        return f"시크릿 {', '.join(broker['missing'])} 이(가) 비어 KIS모의투자 주문을 내지 않았습니다"
+        return f"시크릿 {', '.join(broker['missing'])} 이(가) 비었거나 틀려 {label} 주문을 내지 않았습니다"
     if broker.get("error"):
-        return f"KIS모의투자 단계 실패: {broker['error']}"
+        return f"{label} 단계 실패: {broker['error']}"
     return None
 
 
@@ -2538,6 +2539,23 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
                 except Exception as exc:  # noqa: BLE001 — 표시 실패면 다음 실행이 한 번 더 알린다
                     log.exception("괴리 알림 보냄 표시 실패")
                     step_log["broker"]["diverge_mark_error"] = type(exc).__name__
+            # 둘째 모의 계좌 — 도전자(docs/paper.md 15.10, 25.1515). 첫째 뒤 — 첫째가 접수 시작을 기다렸으니 바로 낸다.
+            # 키가 없으면 "꺼짐" 만 남는다(알리지 않음). 괴리 알림은 내지 않는다(재는 자)
+            try:
+                from batch.jobs import broker_mirror as _bm2
+
+                멈춘2 = set((step_log.get("paper") or {}).get("frozen") or [])
+                step_log["broker2"] = _bm2.run(client, market, datetime.now(UTC), slot=_bm2.CHALLENGER, frozen=멈춘2)
+            except Exception as exc:  # noqa: BLE001 — 곁다리
+                log.exception("KIS모의투자 도전자 단계 실패")
+                warnings.append(_실패문("KIS모의투자 도전자", exc))
+                step_log["broker2"] = {"error": str(exc)[:300]}
+            원인2 = _kis_알림문(step_log.get("broker2") or {}, "KIS모의투자 도전자")
+            if 원인2:
+                if (step_log.get("broker2") or {}).get("missing"):
+                    warnings.append(원인2)
+                _notify_failure(client, market, name, 원인2, dry_run=dry_run, title="KIS모의투자 도전자 확인 필요",
+                                report_note=False)  # fmt: skip
         # 운용 상황실 요약 (docs/desk.md 2장, 25.1501) — 웹 첫 화면이 읽는다. 곁다리: 실패해도 배치는 그대로,
         # 실행 기록에만. 가상모의투자 단계가 실패한 날에도 적는다 — 그 실패가 "확인할 일" 맨 위에 보여야 한다
         try:

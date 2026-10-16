@@ -129,6 +129,10 @@ jobs:
           KIS_VTS_APP_KEY: ${{ secrets.KIS_VTS_APP_KEY }}
           KIS_VTS_APP_SECRET: ${{ secrets.KIS_VTS_APP_SECRET }}
           KIS_VTS_ACCOUNT: ${{ secrets.KIS_VTS_ACCOUNT }}
+          # 둘째 모의 계좌 — 도전자 (docs/paper.md 15.10, 25.1515). 비면 꺼짐
+          KIS_VTS2_APP_KEY: ${{ secrets.KIS_VTS2_APP_KEY }}
+          KIS_VTS2_APP_SECRET: ${{ secrets.KIS_VTS2_APP_SECRET }}
+          KIS_VTS2_ACCOUNT: ${{ secrets.KIS_VTS2_ACCOUNT }}
           OFFLINE_MODE: "0"
           LOG_LEVEL: INFO
           # 비우면 어댑터의 기본값(200)을 쓴다. 실측 전에는 바꾸지 않는다.

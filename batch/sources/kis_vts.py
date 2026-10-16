@@ -35,6 +35,24 @@ SOURCE = "kis_vts"
 BASE = "https://openapivts.koreainvestment.com:29443"
 TOKEN_NAME = "kis_vts"
 KEY_ENV, SECRET_ENV, ACCOUNT_ENV = "KIS_VTS_APP_KEY", "KIS_VTS_APP_SECRET", "KIS_VTS_ACCOUNT"
+
+
+@dataclass(frozen=True)
+class Keys:
+    """모의 계좌 하나의 키 이름·토큰 줄 이름. 키 값은 담지 않는다 — 이름만 (25.1515)"""
+
+    source: str
+    token: str
+    key_env: str
+    secret_env: str
+    account_env: str
+
+
+#: 첫째 모의 계좌 — 챔피언(H)을 베낀다
+MAIN = Keys(SOURCE, TOKEN_NAME, KEY_ENV, SECRET_ENV, ACCOUNT_ENV)
+#: 둘째 모의 계좌 — 도전자(설정 `kis_challenger`)를 베낀다 (docs/paper.md 15.10, 25.1515). 키가 없으면 꺼짐.
+#: 토큰 줄·출처도 따로 — 두 앱키의 토큰이 서로 덮지 않게
+CHALLENGER = Keys("kis_vts2", "kis_vts2", "KIS_VTS2_APP_KEY", "KIS_VTS2_APP_SECRET", "KIS_VTS2_ACCOUNT")
 #: 모의 tr_id (order_cash.py L110-116 · inquire_balance.py L118 · inquire_daily_ccld.py L150 — 3개월 이내)
 TR_BUY, TR_SELL = "VTTC0012U", "VTTC0011U"
 TR_BALANCE, TR_DAILY_CCLD = "VTTC8434R", "VTTC0081R"
@@ -80,7 +98,7 @@ TIMEOUT = 15
 
 
 def _vars(env: dict[str, str] | None) -> dict[str, str]:
-    """모의 전용 세 칸만 — 실전 키(`KIS_APP_KEY`)는 읽지 않는다.
+    """모의 전용 칸만(첫째·둘째 계좌) — 실전 키(`KIS_APP_KEY`)는 읽지 않는다.
 
     이름을 글자로 적어 둔다(tests/test_env_example.py 가 읽는 환경변수를 글자로 훑는다)
     """
@@ -90,21 +108,24 @@ def _vars(env: dict[str, str] | None) -> dict[str, str]:
         "KIS_VTS_APP_KEY": os.environ.get("KIS_VTS_APP_KEY", ""),
         "KIS_VTS_APP_SECRET": os.environ.get("KIS_VTS_APP_SECRET", ""),
         "KIS_VTS_ACCOUNT": os.environ.get("KIS_VTS_ACCOUNT", ""),
+        "KIS_VTS2_APP_KEY": os.environ.get("KIS_VTS2_APP_KEY", ""),
+        "KIS_VTS2_APP_SECRET": os.environ.get("KIS_VTS2_APP_SECRET", ""),
+        "KIS_VTS2_ACCOUNT": os.environ.get("KIS_VTS2_ACCOUNT", ""),
     }
 
 
-def configured(env: dict[str, str] | None = None) -> bool:
-    return not missing(env)
+def configured(env: dict[str, str] | None = None, keys: Keys = MAIN) -> bool:
+    return not missing(env, keys)
 
 
-def missing(env: dict[str, str] | None = None) -> list[str]:
+def missing(env: dict[str, str] | None = None, keys: Keys = MAIN) -> list[str]:
     """비었거나 모양이 틀린 칸 이름(값은 담지 않는다). 셋 다 비면 연결하지 않은 것, 일부만이면 설정 실수다 (25.1492)."""
     e = _vars(env)
-    out = [k for k in (KEY_ENV, SECRET_ENV) if not e.get(k)]
-    if not e.get(ACCOUNT_ENV):
-        out.append(ACCOUNT_ENV)
-    elif account(e) is None:
-        out.append(f"{ACCOUNT_ENV}(숫자 8·10자리 아님)")
+    out = [k for k in (keys.key_env, keys.secret_env) if not e.get(k)]
+    if not e.get(keys.account_env):
+        out.append(keys.account_env)
+    elif account(e, keys) is None:
+        out.append(f"{keys.account_env}(숫자 8·10자리 아님)")
     return out
 
 
@@ -113,12 +134,12 @@ def missing(env: dict[str, str] | None = None) -> list[str]:
 DEFAULT_PRODUCT = "01"
 
 
-def account(env: dict[str, str] | None = None) -> tuple[str, str] | None:
+def account(env: dict[str, str] | None = None, keys: Keys = MAIN) -> tuple[str, str] | None:
     """(종합계좌번호 8자리, 상품코드 2자리). `12345678` · `12345678-01` · `1234567801` 모두 받는다. 모양이 틀리면 None.
 
     8자리면 상품코드는 종합계좌 `01`(`DEFAULT_PRODUCT`)
     """
-    raw = "".join(ch for ch in str(_vars(env).get(ACCOUNT_ENV) or "") if ch.isdigit())
+    raw = "".join(ch for ch in str(_vars(env).get(keys.account_env) or "") if ch.isdigit())
     if len(raw) == 8:
         return raw, DEFAULT_PRODUCT
     return (raw[:8], raw[8:]) if len(raw) == 10 else None
@@ -328,10 +349,11 @@ def parse_balance(payload: object) -> tuple[list[Holding], dict[str, float | Non
 class Session:
     """토큰·계좌·호출 간격을 쥔 모의 세션. 만들 때 키가 없으면 `KisFailed`."""
 
-    def __init__(self, client: Any, now: datetime | None = None, *, http: Any = None, sleep: Any = time.sleep) -> None:
-        if not configured():
+    def __init__(self, client: Any, now: datetime | None = None, *, http: Any = None, sleep: Any = time.sleep,
+                 keys: Keys = MAIN) -> None:  # fmt: skip
+        if not configured(keys=keys):
             raise KisFailed("KIS모의투자 키·계좌가 없습니다")
-        acct = account()
+        acct = account(keys=keys)
         assert acct is not None
         self.cano, self.prdt = acct
         self.http = http or requests.Session()
@@ -339,12 +361,14 @@ class Session:
         self.calls = 0
         self.rate_retries = 0
         self._last = 0.0
-        token, issued = kis.access_token(client, now or datetime.now(UTC), base=BASE, name=TOKEN_NAME,
-                                         key_env=KEY_ENV, secret_env=SECRET_ENV, source=SOURCE)  # fmt: skip
+        token, issued = kis.access_token(
+            client, now or datetime.now(UTC), base=BASE, name=keys.token, key_env=keys.key_env,
+            secret_env=keys.secret_env, source=keys.source,
+        )  # fmt: skip
         self.calls += int(issued)
         self.head = {
             "content-type": "application/json; charset=utf-8", "authorization": f"Bearer {token}",
-            "appkey": os.environ["KIS_VTS_APP_KEY"], "appsecret": os.environ["KIS_VTS_APP_SECRET"], "custtype": "P",
+            "appkey": os.environ[keys.key_env], "appsecret": os.environ[keys.secret_env], "custtype": "P",
         }  # fmt: skip
 
     def _wait(self) -> None:

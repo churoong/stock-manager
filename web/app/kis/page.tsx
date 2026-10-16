@@ -1,4 +1,5 @@
 import Footer from "@/components/Footer";
+import KisChallenger from "@/components/KisChallenger";
 import KisPanel from "@/components/KisPanel";
 import KisQuality from "@/components/KisQuality";
 import Nav from "@/components/Nav";
@@ -21,6 +22,7 @@ export default function KisPage() {
         </PageHeader>
         <KisQuality />
         <KisPanel />
+        <KisChallenger />
       </main>
       <Footer />
     </div>
