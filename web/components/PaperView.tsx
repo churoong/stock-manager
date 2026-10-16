@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import CriteriaTable from "@/components/CriteriaTable";
 import EquityChart, { type Series } from "@/components/EquityChart";
 import Link from "next/link";
-import { MARKET_LABEL, pctText as deskPct, ppText, ruleSpanText, rowsById, type DeskView, type RuleSpan } from "@/lib/desk";
+import { MARKET_LABEL, championText, pctText as deskPct, ppText, ruleSpanText, rowsById, type DeskView, type RuleSpan } from "@/lib/desk";
 import { bodyOf, readJson } from "@/lib/http";
 import {
   DEPOSIT_MAX_KRW,
@@ -397,6 +397,23 @@ export function CompareCard({ data, desk }: { data: Data; desk?: DeskView | null
           </tbody>
         </table>
       </div>
+      {desk?.champion?.length ? (
+        <div className="mt-3 rounded-lg border border-slate-200 p-2 text-xs dark:border-slate-800">
+          <p className="font-medium">챔피언 교체 후보 — 지금 챔피언 {desk.mirror_account ?? "H"}(KIS 가 베낌)를 꾸준히 앞서는 전략</p>
+          {desk.champion.some((r) => r.candidate) ? (
+            <ul className="mt-1 space-y-0.5 text-emerald-700 dark:text-emerald-400">
+              {desk.champion.filter((r) => r.candidate).map((r) => (
+                <li key={r.id}>{championText(r, desk.mirror_account ?? "H")}</li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-1 text-slate-500">
+              아직 없음 — 가장 가까운 {championText(desk.champion[0], desk.mirror_account ?? "H")}
+            </p>
+          )}
+          <p className="mt-1 text-slate-500">겹치지 않는 20 평가 블록 셋 이상, 그 가운데 3분의 2 이상 이기고 전체도 앞서야 후보입니다. 교체는 사용자 결정 — 후보가 나와도 바꾸지 않습니다.</p>
+        </div>
+      ) : null}
       <p className="mt-2 text-xs text-slate-500">
         짝마다 규칙 하나만 다릅니다 —{" "}
         {PAIRS.filter(([x, y]) => 있음.has(x) && 있음.has(y))

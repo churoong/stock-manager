@@ -8,6 +8,7 @@ import {
   allChecks,
   countsText,
   fillLine,
+  gateNowText,
   kisOffText,
   kisStatusText,
   notSentText,
@@ -208,6 +209,63 @@ export default function DeskView() {
           <Link href="/paper" className="underline">계좌별 자세히 →</Link>
         </p>
       </section>
+
+      {desk.gate ? (
+        <section className={CARD}>
+          <h2 className="font-semibold">
+            실전 전환 {desk.gate.stage}단계 관문 —{" "}
+            <span className={desk.gate.passed ? "text-emerald-700 dark:text-emerald-400" : "text-slate-600 dark:text-slate-300"}>
+              {desk.gate.passed ? "통과(다음 단계는 사용자 결정)" : `${desk.gate.items.filter((i) => i.ok).length}/${desk.gate.items.length} 충족`}
+            </span>
+          </h2>
+          <p className="mt-1 text-xs text-slate-500">
+            잣대는 KIS 가 베끼는 계좌 {desk.gate.account}. 읽기 전용입니다 — 넘어도 실전 주문은 열리지 않습니다. 문턱은 첫 값(docs/desk.md 6장).
+          </p>
+          <ul className="mt-2 space-y-0.5 text-sm">
+            {desk.gate.items.map((i) => (
+              <li key={i.key} className={i.ok ? "text-emerald-700 dark:text-emerald-400" : ""}>
+                {i.ok ? "✓" : "·"} {i.label}: {gateNowText(i)}
+              </li>
+            ))}
+          </ul>
+          <p className="mt-1 text-xs text-slate-500">그 뒤: {desk.gate.next}</p>
+        </section>
+      ) : null}
+
+      {desk.risk.length ? (
+        <section className={CARD}>
+          <h2 className="font-semibold">위험판</h2>
+          <div className="overflow-x-auto">
+            <table className="mt-2 w-full min-w-[560px] text-sm">
+              <thead>
+                <tr className="text-left text-xs text-slate-500">
+                  <th className="py-1">계좌</th>
+                  <th className="text-right">노출</th>
+                  <th className="text-right">낙폭</th>
+                  <th className="pl-2">가장 큰 종목</th>
+                  <th className="pl-2">손절 가까움</th>
+                </tr>
+              </thead>
+              <tbody>
+                {desk.risk.map((r) => (
+                  <tr key={r.id} className="border-t border-slate-100 align-top dark:border-slate-800">
+                    <td className="py-1 font-semibold">{r.id}</td>
+                    <td className="text-right">{r.exposure_pct == null ? "-" : `${r.exposure_pct.toFixed(0)}%`}</td>
+                    <td className={`text-right ${tone(r.dd_pct)}`}>{pctText(r.dd_pct)}</td>
+                    <td className="pl-2 text-xs">
+                      {r.top_name ? `${r.top_name} ${r.top_weight_pct?.toFixed(1)}%` : "-"} <span className="text-slate-400">({r.positions}종목)</span>
+                    </td>
+                    <td className="pl-2 text-xs text-amber-700 dark:text-amber-400">
+                      {r.near_stop.length ? r.near_stop.map((x) => `${x.name ?? "?"} ${x.unrealized_pct.toFixed(1)}%(선 ${x.stop_pct}%)`).join(" · ") : <span className="text-slate-400">없음</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-1 text-xs text-slate-500">노출 = 보유 평가 ÷ 평가 총액, 낙폭 = 시간가중 지수의 지난 고점 대비, 손절 가까움 = 기간 손절선까지 2%p 안(손절을 쓰지 않는 계좌도 같은 선으로).</p>
+        </section>
+      ) : null}
 
       <section className={CARD}>
         <h2 className="font-semibold">KIS모의투자 계좌</h2>

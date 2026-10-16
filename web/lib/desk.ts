@@ -45,8 +45,18 @@ export interface DeskKisAccount {
   account_krw: { total_krw: number | null } | null;
   perf: import("@/lib/kisPaper").KisPerf | null;
 }
+/** 실전 전환 1단계 관문 (docs/desk.md 6장, 25.1508) — 읽기 전용. 넘어도 아무것도 열리지 않는다 */
+export interface GateItem { key: string; label: string; now: number | null; target: number | null; ok: boolean; n?: number; detail?: Record<string, number> }
+export interface Gate { stage: number; account: string; items: GateItem[]; passed: boolean; next: string }
+export interface RiskRow {
+  id: string; exposure_pct: number | null; positions: number; top_weight_pct: number | null; top_name: string | null;
+  near_stop: Array<{ name: string | null; unrealized_pct: number; stop_pct: number }>; dd_pct: number | null;
+}
+export interface ChampionRow { id: string; from: string; blocks: number; wins: number; pct: number | null; champion_pct: number | null; candidate: boolean }
+
 export interface DeskSummary {
   leaderboard: DeskLeaderboard; rule_history?: Record<string, RuleSpan[]>; mirror_account: string; updated_at: string;
+  gate?: Gate; risk?: RiskRow[]; champion?: ChampionRow[];
   last_market: DeskMarketKey;
   kis_account: DeskKisAccount; markets: Partial<Record<DeskMarketKey, DeskMarket>>;
 }
@@ -57,13 +67,17 @@ export interface DeskView {
   leaderboard: DeskLeaderboard | null;
   /** 25.1502 전 요약에는 없다 */
   rule_history: Record<string, RuleSpan[]>;
+  /** 25.1508 전 요약에는 없다 */
+  gate: Gate | null;
+  risk: RiskRow[];
+  champion: ChampionRow[];
   mirror_account: string | null;
   kis_account: DeskKisAccount | null;
   markets: Partial<Record<DeskMarketKey, DeskMarket & { as_of: string }>>;
 }
 
 export const EMPTY_DESK: DeskView = {
-  as_of: null, updated_at: null, leaderboard: null, rule_history: {}, mirror_account: null, kis_account: null, markets: {},
+  as_of: null, updated_at: null, leaderboard: null, rule_history: {}, gate: null, risk: [], champion: [], mirror_account: null, kis_account: null, markets: {},
 };
 
 /** 최근 줄들(날짜 역순)에서 보일 것을 고른다. 깨진 JSON 줄은 없는 셈 친다 */
@@ -88,6 +102,9 @@ export function pickDesk(rows: Array<{ as_of: string; summary_json: string | nul
     updated_at: 첫.updated_at,
     leaderboard: 첫.s.leaderboard ?? null,
     rule_history: 첫.s.rule_history ?? {},
+    gate: 첫.s.gate ?? null,
+    risk: Array.isArray(첫.s.risk) ? 첫.s.risk : [],
+    champion: Array.isArray(첫.s.champion) ? 첫.s.champion : [],
     mirror_account: 첫.s.mirror_account ?? null,
     kis_account: 첫.s.kis_account ?? null,
     markets,
@@ -187,4 +204,28 @@ export function ruleSpanText(r: RuleSpan): string {
 /** 순위표 줄을 계좌 id 로 — 계좌 비교 표에 공통 구간·R 대비 칸을 붙일 때 */
 export function rowsById(lb: DeskLeaderboard | null | undefined): Map<string, DeskRow> {
   return new Map((lb?.rows ?? []).map((r) => [r.id, r]));
+}
+
+/** 관문 칸의 지금 값 글 — 칸마다 단위가 다르다 */
+export function gateNowText(i: GateItem): string {
+  if (i.now == null) return "모름";
+  switch (i.key) {
+    case "days":
+      return `${i.now}번 / ${i.target}번`;
+    case "vs_r":
+      return `${ppText(i.now)} / 0 초과`;
+    case "ratio":
+      return `${i.now.toFixed(3)} / R 평균 ${i.target == null ? "모름" : i.target.toFixed(3)}`;
+    case "incidents":
+      return `${i.now}건(검산 어긋난 날 ${i.detail?.recon_bad_days ?? "-"} · 배치 실패 ${i.detail?.batch_failed ?? "-"}) / 0`;
+    case "kis":
+      return `${i.now.toFixed(0)}% (표본 ${i.n ?? 0}) / ${i.target}% 이상`;
+    default:
+      return `${i.now} / ${i.target ?? "-"}`;
+  }
+}
+
+/** 챔피언 교체 후보 한 줄 — "C · 블록 3개 중 3개 이김 · 같은 기간 +12.00% (챔피언 +6.00%) · 2026-01-01부터" */
+export function championText(r: ChampionRow, mirror: string): string {
+  return `${r.id} · 블록 ${r.blocks}개 중 ${r.wins}개 이김 · 같은 기간 ${pctText(r.pct)} (${mirror} ${pctText(r.champion_pct)}) · ${r.from}부터`;
 }

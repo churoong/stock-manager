@@ -949,6 +949,14 @@ class Test이웃_모듈들:
     def test_운용_상황실(self) -> None:
         """운용 첫 화면 요약 (docs/desk.md 2장, docs/infra.md 25.1501)."""
         검사(DESK, f"평가가 {dk.MIN_WINDOW_POINTS}번 쌓이기 전", "갓 연 계좌 문턱 (25.1503)")
+        검사(DESK, f"평가가 {dk.GATE_MIN_POINTS}번(`GATE_MIN_POINTS`", "관문 모의 기간 (25.1508)")
+        검사(DESK, f"수익률이 {dk.GATE_RATIO_MIN_N}개(`GATE_RATIO_MIN_N`)", "관문 위험조정 표본 (25.1508)")
+        검사(DESK, f"최근 {dk.GATE_INCIDENT_DAYS}일(`GATE_INCIDENT_DAYS`)", "관문 무사고 창 (25.1508)")
+        검사(DESK, f"{dk.GATE_KEPT_PCT:g}%(`GATE_KEPT_PCT`) 이상, 표본 {dk.GATE_KEPT_MIN_N}(`GATE_KEPT_MIN_N`)", "관문 KIS 실현율 (25.1508)")
+        검사(DESK, f"손절선까지 {dk.RISK_NEAR_STOP_PP:g}%p(`RISK_NEAR_STOP_PP`)", "위험판 손절 가까움 (25.1508)")
+        검사(DESK, f"{dk.CHAMPION_BLOCK} 평가(`CHAMPION_BLOCK`)", "챔피언 블록 (25.1508)")
+        검사(DESK, f"블록 {dk.CHAMPION_MIN_BLOCKS}개(`CHAMPION_MIN_BLOCKS`)", "챔피언 최소 블록 (25.1508)")
+        검사(DESK, f"{round(dk.CHAMPION_WIN_SHARE * 100)}%(`CHAMPION_WIN_SHARE` {dk.CHAMPION_WIN_SHARE:g})", "챔피언 이긴 비율 (25.1508)")
         검사(DESK, "무작위 대조 R1·R2 평균", "R 대비 기준선 (25.1501)")
         assert dk.CONTROL_IDS == ("R1", "R2")
 

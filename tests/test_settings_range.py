@@ -347,6 +347,8 @@ class Test기간별_목표:
     "batch/jobs/portfolio.py": "매매 복기의 '목표에 닿았나' 판정",
     # 모의 계좌의 매도 판정(실제 보유와 같은 `evaluate`)과 월간 복기의 손절선 점검 (docs/paper.md 2.2·6장, 25.1445)
     "batch/jobs/paper.py": "모의 계좌 매도 판정·월간 복기 손절선",
+    # 운용 화면 위험판의 "손절 가까움" — 같은 손절선으로 (docs/desk.md 6장, 25.1508)
+    "batch/jobs/desk.py": "운용 위험판 손절 가까움",
 }
 
 

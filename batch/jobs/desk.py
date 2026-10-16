@@ -22,7 +22,19 @@ from batch.core import db
 from batch.jobs import broker_mirror as bmj
 from batch.services import desk
 
-TWR_SQL = "SELECT account_id, as_of, twr_index FROM paper_daily ORDER BY account_id, as_of"
+TWR_SQL = "SELECT account_id, as_of, twr_index, recon_ok FROM paper_daily ORDER BY account_id, as_of"
+#: 위험판 (25.1508) — 계좌마다 마지막 평가 한 줄(기본키 (account_id, as_of) 로 계좌마다 하나)
+LATEST_SQL = (
+    "SELECT d.account_id, d.equity_krw, d.holdings_krw, d.positions_json FROM paper_accounts a JOIN paper_daily d"
+    " ON d.account_id = a.id AND d.as_of = (SELECT MAX(x.as_of) FROM paper_daily x WHERE x.account_id = a.id)"
+)
+STOCK_NAMES_SQL = (
+    "SELECT id, COALESCE(name_ko, name_en, ticker) AS name FROM stocks WHERE id IN (SELECT value FROM json_each(?))"
+)
+#: 관문 — 최근 창의 일일 배치 실패 수(색인 job_name, started_at)
+BATCH_FAILED_SQL = (
+    "SELECT COUNT(*) FROM batch_runs WHERE job_name IN (?, ?) AND started_at >= ? AND status = 'failed'"
+)
 NAMES_SQL = "SELECT id, name, rule_version FROM paper_accounts"
 #: 판 이력 (25.1505) — 계좌마다 판을 처음 본 결정일. 몇십 행
 RULE_VERSIONS_SQL = "SELECT account_id, rule_version, since FROM paper_rule_versions"
@@ -80,9 +92,12 @@ def write(
     as_of = now.astimezone(cal.market_tz("KR")).date().isoformat()
     지금 = now.astimezone(UTC).isoformat()
     계열: dict[str, list[tuple[str, float]]] = {}
+    검산틀린날: set[str] = set()
     for r in client.execute(TWR_SQL).dicts():
         if r["twr_index"] is not None:
             계열.setdefault(str(r["account_id"]), []).append((str(r["as_of"]), float(r["twr_index"])))
+        if r.get("recon_ok") == 0:
+            검산틀린날.add(str(r["as_of"]))
     계좌들 = client.execute(NAMES_SQL).dicts()
     이름 = {str(r["id"]): str(r["name"] or r["id"]) for r in 계좌들}
     순위 = desk.leaderboard(계열, 이름)
@@ -124,8 +139,12 @@ def write(
     }  # fmt: skip
     kis = client.execute(KIS_SQL, [bmj.BROKER]).dicts()
     요약 = (_json(kis[0]["summary_json"]) or {}) if kis else {}
+    kis_us = client.execute(KIS_SQL, [bmj.BROKER_US]).dicts()
+    요약_us = (_json(kis_us[0]["summary_json"]) or {}) if kis_us else {}
     판이력, 판오류 = _판이력(client, 계좌들, 계열, trade_date, 지금)
+    관문판, 관문오류 = _관문판(client, now, 계열, 순위, h, 검산틀린날, [요약, 요약_us])
     공통 = {"leaderboard": 순위, "rule_history": 판이력, "mirror_account": h, "updated_at": 지금, "last_market": market,
+          **관문판,
           "kis_account": {"as_of": kis[0]["as_of"] if kis else None, "account_krw": 요약.get("account_krw"),
                           "perf": 요약.get("perf")}}  # fmt: skip
     앞 = client.execute(DESK_READ_SQL, [as_of]).rows
@@ -137,7 +156,50 @@ def write(
     합 = desk.merge(그날, market, 시장칸, 공통)
     client.execute(DESK_UPSERT_SQL, [as_of, json.dumps(합, ensure_ascii=False), 지금])
     out = {"as_of": as_of, "accounts": len(순위["rows"]), "checks": len(시장칸["checks"])}
-    return out | ({"rule_history_error": 판오류} if 판오류 else {})
+    return out | ({"rule_history_error": 판오류} if 판오류 else {}) | ({"gate_error": 관문오류} if 관문오류 else {})
+
+
+def _관문판(
+    client: Any, now: datetime, 계열: dict[str, list[tuple[str, float]]], 순위: dict[str, Any], h: str,
+    검산틀린날: set[str], kis요약: list[dict[str, Any]],
+) -> tuple[dict[str, Any], str | None]:
+    """실전 전환 관문·위험판·챔피언 교체 후보 (docs/desk.md 6장, 25.1508) — 실패해도 운용 요약은 적는다."""
+    from datetime import timedelta
+
+    from batch.core import settings_range as sr
+    from batch.jobs.daily import job_name
+    from batch.services.signals import DEFAULT_TARGETS
+
+    try:
+        창 = (now - timedelta(days=desk.GATE_INCIDENT_DAYS)).astimezone(cal.market_tz("KR")).date()
+        창 = 창.isoformat()
+        실패 = int(client.execute(BATCH_FAILED_SQL, [job_name("KR"), job_name("US"), 창]).rows[0][0] or 0)
+        관문 = desk.gate(계열, 순위, h, recon_bad_days=sum(1 for d in 검산틀린날 if d >= 창), batch_failed=실패,
+                       kis=desk.combine_kept(kis요약))  # fmt: skip
+        마지막 = client.execute(LATEST_SQL).dicts()
+        보유들 = {str(r["account_id"]): (_json_list(r["positions_json"])) for r in 마지막}
+        ids = sorted({int(q["stock_id"]) for v in 보유들.values() for q in v if q.get("stock_id") is not None})
+        이름 = ({int(r["id"]): str(r["name"]) for r in client.execute(STOCK_NAMES_SQL, [json.dumps(ids)]).dicts()}
+              if ids else {})  # fmt: skip
+        목표, _경고 = sr.기간별_목표(db.get_setting(client, "horizon_targets", None))
+        손절 = {k: float(((목표 or {}).get(k) or v)["stop_pct"]) for k, v in DEFAULT_TARGETS.items()}
+        latest = {}
+        for r in 마지막:
+            a = str(r["account_id"])
+            종목 = [{**q, "name": 이름.get(int(q.get("stock_id") or 0))} for q in 보유들[a]]
+            latest[a] = {"equity": r["equity_krw"], "holdings": r["holdings_krw"], "positions": 종목}
+        판 = {"gate": 관문, "risk": desk.risk_board(latest, 계열, 손절), "champion": desk.champion(계열, h)}
+        return 판, None
+    except Exception as exc:  # noqa: BLE001 — 곁다리 안의 곁다리
+        return {}, f"{type(exc).__name__}: {str(exc)[:120]}"
+
+
+def _json_list(text: Any) -> list[dict[str, Any]]:
+    try:
+        v = json.loads(text) if text else []
+    except ValueError:
+        return []
+    return [x for x in v if isinstance(x, dict)] if isinstance(v, list) else []
 
 
 def _판이력(
