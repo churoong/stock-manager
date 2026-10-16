@@ -124,7 +124,12 @@ export function brokerLines(b: BrokerLatest | null | undefined): string[] {
   } else {
     out.push("아직 끝난 베낀 주문이 없습니다 — 낸 다음 거래일 아침 배치가 체결을 맞춥니다.");
   }
-  out.push(`잔고가 어긋난 종목 ${Object.keys(b.diff ?? {}).length} (${b.as_of} 기준)`);
+  // 배치 `compare_lines` 와 같은 끝 줄 — 모름(보냈는지 모르는 주문)·정리 주문 (25.1483, 감사 [권장] 4)
+  const 끝 = [] as string[];
+  if (s?.unknown) 끝.push(`모름 ${s.unknown}`);
+  if (s?.cleanup) 끝.push(`정리 주문 ${s.cleanup}`);
+  끝.push(`잔고가 어긋난 종목 ${Object.keys(b.diff ?? {}).length} (${b.as_of} 기준)`);
+  out.push(끝.join(" · "));
   return out;
 }
 export const PAPER_MEETINGS_LATEST = `SELECT m.account_id, m.market, m.decided_on, m.charter_hash, m.minutes_json FROM paper_meetings m

@@ -985,7 +985,7 @@ def buy_orders(
         다시, 총액, currency=통화, max_sector_pct=settings["max_weight_per_sector"], holdings=보유,
         max_stock_pct=settings["max_weight_per_stock"], price_series=price_series, series_unknown=series_unknown,
         min_order_amount=float(settings.get("min_order_amount") or 0), fx_missing=False, reserved=예약 / 환율,
-        stop_flags={sid: "모의 계좌 손절 판정" for sid in stop_ids},
+        stop_flags={sid: "가상모의투자 계좌 손절 판정" for sid in stop_ids},
     )  # fmt: skip
     by_ticker: dict[str, list[report_picks.SignalRow]] = {}
     for r in 다시:
@@ -1494,7 +1494,7 @@ def run_step(
         기록["real_compare"] = 비교
         머리.append(str(pp.compare_line(비교)))
     if frozen:
-        머리.append(f"모의 계좌 멈춘 종목 {len(frozen)}개(기업행위 경계 — 원가로 평가, docs/paper.md 2.3)")
+        머리.append(f"가상모의투자 멈춘 종목 {len(frozen)}개(기업행위 경계 — 원가로 평가, docs/paper.md 2.3)")
     return 머리 + 메모줄 + [글 for 글 in 줄 if 글.startswith("⚠️")], 기록
 
 

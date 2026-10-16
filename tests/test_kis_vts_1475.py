@@ -430,3 +430,23 @@ def test_daily_summary_stored_and_weekly_reads_it(c: Client) -> None:
 def test_mirror_account_is_h() -> None:
     """KIS모의투자는 H(지주사)를 베낀다 — 2026-10-16 사용자 결정 (docs/company.md 10장)."""
     assert job.MIRROR_ACCOUNT == "H"
+
+
+def test_holdings_diff_ignores_us_rerun_and_pre_link(c: Client) -> None:
+    """잔고 대조의 거짓 어긋남 셋 (25.1483, 감사 [권장] 1·2·3): 미국 보유, 같은 날 다시 돌 때 오늘 산 것, 키를 넣기 전에 산 가상 보유."""
+    # 가상 B 가 연결 전부터 3(국내)·2(미국 AAPL)를 들고 있다
+    for oid, sid in ((91, 3), (92, 2)):
+        c.conn.execute("INSERT INTO paper_orders (id, account_id, market, stock_id, side, order_type, quantity, currency,"
+                       " decided_on, fill_session, reason, rule_version, status, created_at)"
+                       " VALUES (?, 'B', 'KR', ?, 'buy', 'market', 2, 'KRW', '2026-10-13', '2026-10-14', 'r', 1,"
+                       " 'filled', 't')", [oid, sid])  # fmt: skip
+        c.conn.execute("INSERT INTO paper_fills (order_id, account_id, stock_id, side, fill_date, price, quantity, currency,"
+                       " fx_rate, fee, tax, slippage, cash_krw, created_at)"
+                       " VALUES (?, 'B', ?, 'buy', '2026-10-14', 100, 2, 'KRW', 1, 0, 0, 0, -200, 't')", [oid, sid])  # fmt: skip
+    c.conn.execute("DELETE FROM paper_orders WHERE id = 102")  # 3 을 파는 주문은 이 시험에서 빼 둔다
+    기록 = job.run(c, "KR", _at("08:40"), session=_Sess(), sleep=lambda _x: None, clock=lambda: _at("08:40"))
+    assert 기록["diff"] == 0 and 기록["before_link"] == 1  # 미국 2 는 세지 않고, 국내 3 은 연결 전 보유
+    # 10:30 다시 — 시가에 찬 오늘 매수(005930 3+2)가 증권사엔 있다
+    다시 = job.run(c, "KR", _at("10:30"), session=_Sess(holdings=[kv.Holding("005930", 5, 5, 9_700.0)]),
+                 sleep=lambda _x: None, clock=lambda: _at("10:30"))  # fmt: skip
+    assert 다시["diff"] == 0

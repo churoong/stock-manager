@@ -60,9 +60,10 @@ OLD_SQL = (
 BOUGHT_SQL = (
     "SELECT DISTINCT stock_id FROM paper_broker_orders WHERE broker = ? AND side = 'buy' AND status <> 'rejected'"
 )
+#: 국내 종목만 — KIS모의투자는 국내만 베끼므로 미국 보유가 늘 "어긋남" 으로 남았다 (25.1483, 감사 [권장] 1)
 INTERNAL_QTY_SQL = (
-    "SELECT stock_id, SUM(CASE WHEN side = 'buy' THEN quantity ELSE -quantity END) AS q FROM paper_fills"
-    " WHERE account_id = ? GROUP BY stock_id"
+    "SELECT f.stock_id, SUM(CASE WHEN f.side = 'buy' THEN f.quantity ELSE -f.quantity END) AS q FROM paper_fills f"
+    " JOIN stocks s ON s.id = f.stock_id WHERE f.account_id = ? AND s.country = 'KR' GROUP BY f.stock_id"
 )
 ACCOUNT_SQL = "SELECT id FROM paper_accounts WHERE id = ?"
 INSERT_SQL = (
@@ -158,7 +159,16 @@ def run(
     증권 = {코드표[h.code]: (h.quantity, h.sellable) for h in 보유 if h.code in 코드표}
     내부 = {int(r["stock_id"]): int(r["q"]) for r in client.execute(INTERNAL_QTY_SQL, [MIRROR_ACCOUNT]).dicts()
             if int(r["q"] or 0) > 0}  # fmt: skip
-    어긋남 = bm.holdings_diff({k: v[0] for k, v in 증권.items()}, 내부)
+    # 어긋남은 **베낀 적 있는 종목**과 증권사 보유만 — 키를 넣기 전에 산 가상 보유는 "연결 전 보유" 로
+    # 따로 센다(감사 [권장] 3). 같은 날 다시 돌면 시가에 찬 오늘 매수가 증권사엔 있고 가상 장부엔 다음 배치에야
+    # 들어온다 — 그 수량을 뺀다(감사 [권장] 2)
+    산적0 = {int(r[0]) for r in client.execute(BOUGHT_SQL, [BROKER]).rows}
+    오늘산0 = {int(r[0]): int(r[1] or 0)
+              for r in client.execute(BOUGHT_TODAY_SQL, [BROKER, 오늘.isoformat()]).rows}  # fmt: skip
+    증권수 = {k: v[0] - 오늘산0.get(k, 0) for k, v in 증권.items()}
+    연결전 = sorted(sid for sid in 내부 if sid not in 산적0 and sid not in 증권)
+    어긋남 = bm.holdings_diff({k: q for k, q in 증권수.items() if q > 0},
+                            {k: q for k, q in 내부.items() if k not in 연결전})  # fmt: skip
     부터 = (오늘 - timedelta(days=bm.COMPARE_DAYS)).isoformat()
     비교 = bm.compare(client.execute(COMPARE_SQL, [BROKER, 부터, 오늘.isoformat()]).dicts())
     client.execute(DAILY_SQL, [
@@ -168,6 +178,8 @@ def run(
     ])  # fmt: skip
     기록["compare"] = {"n": 비교["n"], "match_pct": 비교["match_pct"]}
     기록["holdings"] = len(보유)
+    if 연결전:
+        기록["before_link"] = len(연결전)
     기록["diff"] = len(어긋남)
     if len(코드표) < len({h.code for h in 보유}):
         기록["unknown_codes"] = len({h.code for h in 보유}) - len(코드표)
