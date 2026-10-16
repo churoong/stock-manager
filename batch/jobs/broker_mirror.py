@@ -108,6 +108,16 @@ COMPARE_SQL = (
     " LEFT JOIN paper_orders o ON o.id = b.paper_order_id LEFT JOIN paper_fills f ON f.order_id = b.paper_order_id"
     " WHERE b.broker = ? AND b.trade_date >= ? AND b.trade_date < ?"
 )
+#: 성과 계열 — 국내 배치가 적는 **계좌 전체 원화 총액**(`summary_json.account_krw.total_krw`, 25.1497).
+#: 오늘 줄은 따로 붙인다
+TOTALS_SQL = (
+    "SELECT as_of, json_extract(summary_json, '$.account_krw.total_krw') FROM paper_broker_daily"
+    " WHERE broker = ? AND as_of < ? ORDER BY as_of"
+)
+#: 같은 기간 H 의 (시간가중 지수, 평가손익) — 시작일 이하 마지막 · 오늘 이하 마지막
+H_TWR_SQL = (
+    "SELECT twr_index, pnl_krw FROM paper_daily WHERE account_id = ? AND as_of <= ? ORDER BY as_of DESC LIMIT 1"
+)
 #: 주간 요약이 읽는 마지막 잔고 줄
 LATEST_DAILY_SQL = (
     "SELECT as_of, diff_json, summary_json FROM paper_broker_daily WHERE broker = ? ORDER BY as_of DESC LIMIT 1"
@@ -219,10 +229,35 @@ def run(
                             {k: q for k, q in 내부.items() if k not in 연결전})  # fmt: skip
     부터 = (오늘 - timedelta(days=bm.COMPARE_DAYS)).isoformat()
     비교 = bm.compare(client.execute(COMPARE_SQL, [증권사, 부터, 오늘.isoformat()]).dicts())
+    # 웹 보유내역·성과(docs/paper.md 15.7, 25.1496·25.1497). 시장 칸은 그 시장 통화(국내 원 — 현금은 총평가와
+    # 같은 D+2, 미국 달러). 성과는 **국내 배치가 계좌 전체 원화 총액**으로 낸다 — 미국 매수 돈이 원화에서 자동
+    # 환전으로 나가 시장별 총액 비는 수익률이 아니다. 국내 배치 시각(08:30 KST)이면 두 시장 모두 전날 종가라 시점이
+    # 맞다
+    계좌 = {"currency": "USD" if 미국 else "KRW", "cash": 합.get("cash") if 미국 else 합.get("cash_d2", 합.get("cash")),
+          "holdings_value": 합.get("holdings_value"), "total": 합.get("total")}  # fmt: skip
+    원화계좌: dict[str, Any] | None = None
+    성과 = None
+    if not 미국:
+        try:
+            us = kv.us_totals(sess.present_us())
+        except (KisFailed, requests.RequestException):
+            us = {"value_usd": None, "cash_usd": None, "usd_krw": None}
+        조각 = [합.get("total"), us["value_usd"], us["cash_usd"], us["usd_krw"]]
+        원화계좌 = us | {"kr_total": 합.get("total"), "total_krw": None if any(x is None for x in 조각) else
+                      float(합["total"]) + (float(us["value_usd"]) + float(us["cash_usd"])) * float(us["usd_krw"])}  # type: ignore[arg-type]  # fmt: skip
+        계열 = [(str(d), v) for d, v in client.execute(TOTALS_SQL, [증권사, 오늘.isoformat()]).rows] + [
+            (오늘.isoformat(), 원화계좌["total_krw"])]
+        시작 = bm.perf(계열)
+        if 시작:
+            h0 = client.execute(H_TWR_SQL, [MIRROR_ACCOUNT, 시작["start"]]).rows
+            h1 = client.execute(H_TWR_SQL, [MIRROR_ACCOUNT, 오늘.isoformat()]).rows
+            성과 = bm.perf(계열, tuple(h0[0]) if h0 else None, tuple(h1[0]) if h1 else None)  # type: ignore[arg-type]
+    보유칸 = [{"id": 코드표.get(h.code), "code": h.code, "qty": h.quantity, "avg": h.avg_price, "price": h.price,
+             "value": h.value, "pnl": h.pnl} for h in 보유]  # fmt: skip
     client.execute(DAILY_SQL, [
-        증권사, 오늘.isoformat(), MIRROR_ACCOUNT, 합.get("cash"), 합.get("total"),
-        json.dumps([[코드표.get(h.code, h.code), h.quantity, h.avg_price] for h in 보유]),
-        json.dumps({str(k): list(v) for k, v in 어긋남.items()}), BROKER, 지금, json.dumps(비교, ensure_ascii=False),
+        증권사, 오늘.isoformat(), MIRROR_ACCOUNT, None if 미국 else 합.get("cash"), None if 미국 else 합.get("total"),
+        json.dumps(보유칸), json.dumps({str(k): list(v) for k, v in 어긋남.items()}), BROKER, 지금,
+        json.dumps(비교 | {"account": 계좌, "account_krw": 원화계좌, "perf": 성과}, ensure_ascii=False),
     ])  # fmt: skip
     기록["compare"] = {"n": 비교["n"], "match_pct": 비교["match_pct"]}
     기록["holdings"] = len(보유)

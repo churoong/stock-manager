@@ -272,6 +272,21 @@ def parse_us_balance(payload: object) -> list[Holding]:
     ]
 
 
+def us_totals(present: dict[str, Any]) -> dict[str, float | None]:
+    """체결기준현재잔고(외화 기준) → {value_usd: 보유 외화평가 합, cash_usd: 달러 예수금, usd_krw: KIS 최초고시환율}.
+
+    보유 줄 하나라도 평가가 없으면 value_usd 는 None. 2026-10-16 탐침: 모의는 달러 예수금 0 인데 매수가능
+    10만 달러(환전 뒤) — 미국 매수 돈이 원화 예수금에서 자동 환전으로 나간다(25.1497). 그래서 계좌 성과는
+    국내·미국을 합친 원화 한 계열로 본다
+    """
+    보유 = [r for r in present.get("output1") or [] if isinstance(r, dict) and _int(r.get("cblc_qty13")) > 0]
+    값 = [_num(r.get("frcr_evlu_amt2")) for r in 보유]
+    usd = next((r for r in present.get("output2") or [] if isinstance(r, dict)
+                and str(r.get("crcy_cd") or "").upper() == "USD"), {})  # fmt: skip
+    return {"value_usd": None if any(v is None for v in 값) else float(sum(v for v in 값 if v is not None)),
+            "cash_usd": _num(usd.get("frcr_dncl_amt_2")), "usd_krw": _float(usd.get("frst_bltn_exrt"))}  # fmt: skip
+
+
 @dataclass(frozen=True)
 class Holding:
     code: str  # pdno
@@ -296,8 +311,12 @@ def parse_balance(payload: object) -> tuple[list[Holding], dict[str, float | Non
     ]
     합 = body.get("output2") or [{}]
     합 = 합[0] if isinstance(합, list) and 합 else 합 if isinstance(합, dict) else {}
+    # 총평가(`tot_evlu_amt`)는 D+2 예수금 + 유가평가 — 현금도 D+2(`prvs_rcdl_excc_amt`)로 봐야 기준이 맞는다
+    # (2026-10-16 계좌 칸 탐침: 1주 사고판 뒤 D+0 500,000,000 · D+2 499,999,261 = 총평가, 25.1497).
+    # `cash` 는 예전처럼 D+0(`cash_krw` 칸)
     return 보유, {"cash": _float(합.get("dnca_tot_amt")), "total": _float(합.get("tot_evlu_amt")),
-                "holdings_value": _num(합.get("scts_evlu_amt"))}  # fmt: skip
+                "holdings_value": _num(합.get("scts_evlu_amt")),
+                "cash_d2": _num(합.get("prvs_rcdl_excc_amt"))}  # fmt: skip
 
 
 class Session:

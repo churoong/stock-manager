@@ -123,7 +123,7 @@ def test_balance_follows_pages(monkeypatch: pytest.MonkeyPatch) -> None:
     s, http = _세션(monkeypatch, [(쪽1, "M"), (쪽2, "")])  # fmt: skip
     보유, 합 = s.balance()
     assert 보유 == [kv.Holding("005930", 3, 3, 9800.0)] and 합 == {"cash": 1_000_000.0, "total": 1_029_400.0,
-                                                               "holdings_value": None}  # fmt: skip
+                                                               "holdings_value": None, "cash_d2": None}  # fmt: skip
     assert http.sent[1][1]["params"]["CTX_AREA_NK100"] == "n" and http.sent[1][1]["headers"]["tr_cont"] == "N"
 
 
@@ -246,6 +246,11 @@ class _Sess:
 
     def balance(self) -> tuple[list[kv.Holding], dict[str, float | None]]:
         return self.holdings, {"cash": 1_000_000.0, "total": 1_000_000.0}
+
+    def present_us(self, won: bool = False) -> dict:
+        """국내 배치가 계좌 전체 원화 총액을 내려고 읽는 미국 체결기준현재잔고 — 보유 없음·달러 예수금 0 (25.1497)."""
+        return {"output1": [], "output2": [{"crcy_cd": "USD", "frcr_dncl_amt_2": "0", "frst_bltn_exrt": "1350"}],
+                "output3": {}}
 
 
 @pytest.fixture()

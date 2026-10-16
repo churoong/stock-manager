@@ -293,3 +293,36 @@ def compare_lines(
     if 끝:
         out.append("  " + " · ".join(끝))
     return out
+
+
+# ── 웹 성과 (docs/paper.md 15.7, 25.1496) ─────────────────────────────────────
+
+
+def perf(
+    series: list[tuple[str, float | None]], h0: tuple[float | None, float | None] | None = None,
+    h1: tuple[float | None, float | None] | None = None,
+) -> dict[str, Any] | None:
+    """KIS모의투자 **계좌 전체 원화 총액** 계열(날짜순 (as_of, 총액)) → 성과. 총액이 없는 날(모름)은 뺀다.
+
+    계좌 하나에 원·달러가 같이 있고 미국 매수 돈이 원화에서 자동 환전으로 나가 시장별 총액 비는 수익률이 아니다
+    (25.1497) — 국내 총평가 + 미국 평가·달러 예수금 × 환율 한 계열로 본다. 모의 계좌는 입출금이 없어 총액 비가
+    곧 수익률: 수익률 = 마지막 ÷ 시작 − 1(%), 손익 = 마지막 − 시작(원), MDD = 고점 대비 최저(%, docs/metrics.md 2장).
+    `h0`·`h1` = 같은 기간 가상모의투자 H 의 (시간가중 지수, 평가손익 원) — 시작일 이하 마지막·마지막. 모의 예수금이
+    H 입금액보다 커 % 는 늘 KIS 쪽이 작게 나오므로 **견주는 것은 손익 금액**(H 손익 변화)이고 % 는 참고다.
+    총액이 하나도 없으면 None
+    """
+    줄 = [(d, float(v)) for d, v in sorted(series) if v is not None and float(v) > 0]
+    if not 줄:
+        return None
+    고점, 낙폭 = 줄[0][1], 0.0
+    for _d, v in 줄:
+        고점 = max(고점, v)
+        낙폭 = min(낙폭, v / 고점 - 1)
+    t0, p0 = h0 or (None, None)
+    t1, p1 = h1 or (None, None)
+    return {
+        "start": 줄[0][0], "start_total": 줄[0][1], "last": 줄[-1][0], "last_total": 줄[-1][1],
+        "pnl_krw": 줄[-1][1] - 줄[0][1], "return_pct": (줄[-1][1] / 줄[0][1] - 1) * 100, "mdd_pct": 낙폭 * 100,
+        "days": len(줄), "h_pnl_krw": p1 - p0 if p0 is not None and p1 is not None else None,
+        "h_return_pct": (t1 / t0 - 1) * 100 if t0 and t1 else None,
+    }  # fmt: skip

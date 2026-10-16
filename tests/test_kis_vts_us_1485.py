@@ -235,9 +235,11 @@ def test_web_reads_both_broker_keys() -> None:
     """웹은 계산하지 않고 배치가 적은 줄을 증권사 칸으로 읽는다 — 칸 이름이 배치와 같아야 미국 칸이 보인다."""
     from pathlib import Path
 
-    글 = (Path(__file__).resolve().parent.parent / "web" / "lib" / "paper.ts").read_text(encoding="utf-8")
+    웹 = Path(__file__).resolve().parent.parent / "web" / "lib"
+    글 = (웹 / "paper.ts").read_text(encoding="utf-8")
     assert f'BROKER_KEYS = {{ KR: "{job.BROKER}", US: "{job.BROKER_US}" }}' in 글
-    assert "WHERE broker = ? ORDER BY as_of DESC LIMIT 1" in 글
+    # 웹 KIS모의투자 칸은 lib/kisPaper.ts 가 증권사 칸으로 읽는다 (25.1496)
+    assert "WHERE broker = ? ORDER BY as_of DESC LIMIT 1" in (웹 / "kisPaper.ts").read_text(encoding="utf-8")
 
 
 def test_reconcile_same_qty_tranches_by_price() -> None:
