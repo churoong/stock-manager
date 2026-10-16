@@ -241,11 +241,19 @@ class PriceView:
         levels: dict[int, dict[str, float]] | None = None,
         holding: frozenset[int] | None = None,
         presorted: tuple[SortedSeries, SortedSeries, SortedSeries] | None = None,
+        weights: dict[int, float] | None = None,
     ) -> None:
         """`presorted` = (prices, turnover, levels) 를 미리 정렬한 것(`SortedSeries`) — 주면 정렬 없이 잘라 쓴다
         (25.1522).
-        주지 않으면 예전처럼 `prices`·`turnover`·`levels` 를 걸러 정렬한다"""
+        주지 않으면 예전처럼 `prices`·`turnover`·`levels` 를 걸러 정렬한다.
+
+        `weights` = 엔진이 지금 든 비중을 **cutoff 종가로** 잰 것(docs/backtest.md 10장 단계 0, docs/infra.md 25.1525).
+        장부형 전략(핵심 H)이 "지금 얼마를 들었나" 를 읽는다 — 읽기 전용(`MappingProxyType`).
+        합이 1 보다 작으면 나머지는 현금. 엔진 밖에서 만든 창은 None(모름)"""
+        from types import MappingProxyType
+
         self.cutoff = cutoff
+        self.weights = MappingProxyType(dict(weights)) if weights is not None else None
         if presorted is not None:
             값, 대금, 수준 = presorted
             self.holding = holding
@@ -576,9 +584,16 @@ def simulate(
             # 함수의 몫이다. 점수로 고르는 전략은 볼 것이 없어 아무것도 사지
             # 않을 것이고, 그것이 맞다. 엔진이 대신 비워 버리지 않는다
             든것 = frozenset(sid for sid, w in drifted.items() if w > 0)
+            # 판단 함수에 넘길 지금 비중은 **cutoff 종가로** 다시 잰다 (25.1525). `drifted` 는 t 종가로 잰 것이라
+            # 그대로 주면 판단 함수가 비중 변화로 t 의 가격을 거꾸로 읽는다(look-ahead).
+            # cutoff 가 없으면(첫날·빈 창) 든 것도 없다
+            지금비중: dict[int, float] = {}
+            if cutoff and weights:
+                판단총, 판단몫 = value_at(cutoff)
+                지금비중 = {sid: v / 판단총 for sid, v in 판단몫.items()} if 판단총 > 0 else {}
             view = (
-                PriceView(prices, cutoff, turnover, levels, holding=든것, presorted=미리)
-                if cutoff else PriceView({}, d, holding=든것)
+                PriceView(prices, cutoff, turnover, levels, holding=든것, presorted=미리, weights=지금비중)
+                if cutoff else PriceView({}, d, holding=든것, weights=지금비중)
             )  # fmt: skip
             proposed = weights_at(d, view)
 
