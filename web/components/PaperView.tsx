@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import CriteriaTable from "@/components/CriteriaTable";
 import EquityChart, { type Series } from "@/components/EquityChart";
 import Link from "next/link";
-import { MARKET_LABEL, championText, pctText as deskPct, ppText, ruleSpanText, rowsById, type DeskView, type RuleSpan } from "@/lib/desk";
+import { DESK_RULES, MARKET_LABEL, championText, pctText as deskPct, ppText, ruleSpanText, rowsById, type DeskView, type RuleSpan } from "@/lib/desk";
 import { bodyOf, readJson } from "@/lib/http";
 import {
   DEPOSIT_MAX_KRW,
@@ -411,7 +411,10 @@ export function CompareCard({ data, desk }: { data: Data; desk?: DeskView | null
               아직 없음 — 가장 가까운 {championText(desk.champion[0], desk.mirror_account ?? "H")}
             </p>
           )}
-          <p className="mt-1 text-slate-500">겹치지 않는 20 평가 블록 셋 이상, 그 가운데 3분의 2 이상 이기고 전체도 앞서야 후보입니다. 교체는 사용자 결정 — 후보가 나와도 바꾸지 않습니다.</p>
+          <p className="mt-1 text-slate-500">
+            최근 끝에서부터 겹치지 않는 {DESK_RULES.CHAMPION_BLOCK} 평가 블록 {DESK_RULES.CHAMPION_MIN_BLOCKS}개 이상, 그 가운데 {Math.round(DESK_RULES.CHAMPION_WIN_SHARE * 100)}% 이상 이기고 전체도
+            앞서야 후보입니다. 교체는 사용자 결정 — 후보가 나와도 바꾸지 않습니다.
+          </p>
         </div>
       ) : null}
       <p className="mt-2 text-xs text-slate-500">

@@ -174,7 +174,14 @@ def write(
     kis_us = client.execute(KIS_SQL, [bmj.BROKER_US]).dicts()
     요약_us = (_json(kis_us[0]["summary_json"]) or {}) if kis_us else {}
     판이력, 판오류 = _판이력(client, 계좌들, 계열, trade_date, 지금)
-    관문판, 관문오류 = _관문판(client, now, 계열, 순위, h, 검산틀린날, [요약, 요약_us])
+    # KIS 마지막 줄이 `KIS_RECENT_DAYS` 보다 오래되면 실현율에 넣지 않는다(25.1511 검토 7)
+    from datetime import timedelta
+
+    최근 = (now - timedelta(days=desk.KIS_RECENT_DAYS)).astimezone(cal.market_tz("KR")).date().isoformat()
+    kis요약 = [x for rows, x in ((kis, 요약), (kis_us, 요약_us)) if rows and str(rows[0]["as_of"]) >= 최근]
+    지금판 = (판이력.get(h) or [{}])[-1]
+    관문판, 관문오류 = _관문판(client, now, 계열, h, 검산틀린날, kis요약, since=str(지금판.get("from") or ""),
+                         version=지금판.get("version"))  # fmt: skip
     공통 = {"leaderboard": 순위, "rule_history": 판이력, "mirror_account": h, "updated_at": 지금, "last_market": market,
           **관문판,
           "kis_account": {"as_of": kis[0]["as_of"] if kis else None, "account_krw": 요약.get("account_krw"),
@@ -192,10 +199,14 @@ def write(
 
 
 def _관문판(
-    client: Any, now: datetime, 계열: dict[str, list[tuple[str, float]]], 순위: dict[str, Any], h: str,
-    검산틀린날: set[str], kis요약: list[dict[str, Any]],
+    client: Any, now: datetime, 계열: dict[str, list[tuple[str, float]]], h: str, 검산틀린날: set[str],
+    kis요약: list[dict[str, Any]], *, since: str, version: int | None,
 ) -> tuple[dict[str, Any], str | None]:
-    """실전 전환 관문·위험판·챔피언 교체 후보 (docs/desk.md 6장, 25.1508) — 실패해도 운용 요약은 적는다."""
+    """실전 전환 관문·위험판·챔피언 교체 후보 (docs/desk.md 6장, 25.1508) — 실패해도 운용 요약은 적는다.
+
+    실패하면 세 칸을 비우고 `gate_error` 를 적는다 — 그날 앞 실행의 값이 새 갱신 시각 아래 남거나 카드가 말없이
+    사라지지 않게(25.1511 검토 5). 성공하면 `gate_error` 를 None 으로 덮는다
+    """
     from datetime import timedelta
 
     from batch.core import settings_range as sr
@@ -206,8 +217,8 @@ def _관문판(
         창 = (now - timedelta(days=desk.GATE_INCIDENT_DAYS)).astimezone(cal.market_tz("KR")).date()
         창 = 창.isoformat()
         실패 = int(client.execute(BATCH_FAILED_SQL, [job_name("KR"), job_name("US"), 창]).rows[0][0] or 0)
-        관문 = desk.gate(계열, 순위, h, recon_bad_days=sum(1 for d in 검산틀린날 if d >= 창), batch_failed=실패,
-                       kis=desk.combine_kept(kis요약))  # fmt: skip
+        관문 = desk.gate(계열, h, since=since, version=version, recon_bad_days=sum(1 for d in 검산틀린날 if d >= 창),
+                       batch_failed=실패, kis=desk.combine_kept(kis요약))  # fmt: skip
         마지막 = client.execute(LATEST_SQL).dicts()
         보유들 = {str(r["account_id"]): (_json_list(r["positions_json"])) for r in 마지막}
         ids = sorted({int(q["stock_id"]) for v in 보유들.values() for q in v if q.get("stock_id") is not None})
@@ -220,10 +231,12 @@ def _관문판(
             a = str(r["account_id"])
             종목 = [{**q, "name": 이름.get(int(q.get("stock_id") or 0))} for q in 보유들[a]]
             latest[a] = {"equity": r["equity_krw"], "holdings": r["holdings_krw"], "positions": 종목}
-        판 = {"gate": 관문, "risk": desk.risk_board(latest, 계열, 손절), "champion": desk.champion(계열, h)}
+        판 = {"gate": 관문, "risk": desk.risk_board(latest, 계열, 손절), "champion": desk.champion(계열, h),
+             "gate_error": None}  # fmt: skip
         return 판, None
     except Exception as exc:  # noqa: BLE001 — 곁다리 안의 곁다리
-        return {}, f"{type(exc).__name__}: {str(exc)[:120]}"
+        글 = f"{type(exc).__name__}: {str(exc)[:120]}"
+        return {"gate": None, "risk": [], "champion": [], "gate_error": 글}, 글
 
 
 def _json_list(text: Any) -> list[dict[str, Any]]:

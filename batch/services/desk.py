@@ -113,7 +113,7 @@ def rule_history(
     return out
 
 
-# ── 실전 전환 관문 · 위험판 · 챔피언 교체 후보 (docs/desk.md 6장, 25.1507) ──────────────────────────────
+# ── 실전 전환 관문 · 위험판 · 챔피언 교체 후보 (docs/desk.md 6장, 25.1508·25.1511) ──────────────────────────────
 # 읽기 전용 계산이다 — 관문을 넘었다고 아무것도 열리지 않는다. 다음 단계는 사용자가 정한다(CLAUDE.md 단계 관문).
 # 문턱은 모두 **첫 값**이다 `[확인필요]` — 근거 없음, 쌓인 기록을 보고 사용자와 다시 정한다.
 
@@ -126,6 +126,8 @@ GATE_KEPT_PCT = 90.0
 GATE_KEPT_MIN_N = 100
 #: 위험조정 비교에 쓸 최소 일간 수익 수
 GATE_RATIO_MIN_N = 20
+#: KIS 마지막 줄이 이보다 오래되면(달력일) 실현율에 넣지 않는다 — 미국 베끼기가 꺼진 뒤의 옛 표본이 섞이지 않게(25.1511)
+KIS_RECENT_DAYS = 7
 #: 위험판 — 손절선까지 이만큼(%p) 안이면 "손절 가까움"
 RISK_NEAR_STOP_PP = 2.0
 #: 챔피언 교체 후보 — 겹치지 않는 블록 길이(평가 횟수), 최소 블록 수, 이긴 블록 비율
@@ -152,37 +154,46 @@ def risk_ratio(v: list[tuple[str, float]], start: str | None = None) -> float | 
 
 
 def gate(
-    series: dict[str, list[tuple[str, float]]], board: dict[str, Any], mirror: str, *, recon_bad_days: int,
-    batch_failed: int, kis: dict[str, Any] | None,
+    series: dict[str, list[tuple[str, float]]], mirror: str, *, since: str = "", version: int | None = None,
+    recon_bad_days: int, batch_failed: int, kis: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    """실전 전환 1단계 관문 진도 — {stage, items: [{key, label, now, target, ok}], passed, next}.
+    """실전 전환 1단계 관문 진도 — {stage, account, version, from, items: [{key, label, now, target, ok}], passed,
+    next}.
 
-    1단계 = 모의 성적·운영 무사고(CLAUDE.md). 잣대는 KIS 가 베끼는 계좌(`mirror`, 지금 H) — 실전에 옮길 전략이다.
-    `board` = `leaderboard()` 결과, `kis` = {kept_pct, n}(국내·미국 합)
+    1단계 = 모의 성적·운영 무사고(CLAUDE.md). 잣대는 KIS 가 베끼는 계좌(`mirror`, 지금 H)의 **지금 판** —
+    실전에 옮길 전략이다. `since` = 지금 판을 처음 본 결정일(판 이력, '' = 처음부터) — 그 뒤 평가만 센다
+    (판을 섞지 않는다, 25.1511 검토 3). 비교 구간은 **관문 자기 구간** = 지금 판의 첫 평가와 R1·R2 첫 평가 가운데
+    가장 늦은 날부터 — 순위표의 공통 구간을 빌리면 새 계좌 하나가 20번째 평가에 닿는 날 관문 판정이 뒤집혔다
+    (25.1511 검토 1). `kis` = {kept_pct, n}(국내·미국 합)
     """
-    v = sorted(series.get(mirror) or [])
-    줄 = {r["id"]: r for r in board.get("rows") or []}
-    시작 = board.get("window_start")
-    대조 = [x for r in CONTROL_IDS if (x := risk_ratio(sorted(series.get(r) or []), 시작)) is not None]
+    전체 = sorted(series.get(mirror) or [])
+    v = [p for p in 전체 if not since or p[0] > since]
+    첫들 = [x[0][0] for x in [v] + [sorted(series.get(r) or []) for r in CONTROL_IDS] if x]
+    시작 = max(첫들) if v and 첫들 else None
+    pct = _구간(전체, 시작, None) if 시작 else None
+    대조수익 = [x for r in CONTROL_IDS if 시작 and (x := _구간(sorted(series.get(r) or []), 시작, None)) is not None]
+    vs_r = pct - sum(대조수익) / len(대조수익) if pct is not None and 대조수익 else None
+    대조 = [x for r in CONTROL_IDS if 시작 and (x := risk_ratio(sorted(series.get(r) or []), 시작)) is not None]
     대조비 = sum(대조) / len(대조) if 대조 else None
-    내비 = risk_ratio(v, 시작)
-    vs_r = (줄.get(mirror) or {}).get("vs_r_pp")
+    내비 = risk_ratio(전체, 시작) if 시작 else None
     kept, kn = (kis or {}).get("kept_pct"), int((kis or {}).get("n") or 0)
+    판글 = f"지금 판{'' if version is None else f' {version}'}"
     items = [
-        {"key": "days", "label": "모의 기간(평가 횟수)", "now": len(v), "target": GATE_MIN_POINTS,
+        {"key": "days", "label": f"모의 기간({판글}의 평가 횟수)", "now": len(v), "target": GATE_MIN_POINTS,
          "ok": len(v) >= GATE_MIN_POINTS},
-        {"key": "vs_r", "label": "공통 구간 R 대비(%p)", "now": vs_r, "target": 0, "ok": vs_r is not None and vs_r > 0},
+        {"key": "vs_r", "label": "관문 구간 R 대비(%p)", "now": vs_r, "target": 0, "ok": vs_r is not None and vs_r > 0},
         {"key": "ratio", "label": "변동성 대비 수익 — 무작위 대조 평균보다", "now": 내비, "target": 대조비,
          "ok": 내비 is not None and 대조비 is not None and 내비 > 대조비},
         {"key": "incidents", "label": f"운영 무사고(최근 {GATE_INCIDENT_DAYS}일 장부 검산 어긋남·일일 배치 실패)",
          "now": recon_bad_days + batch_failed, "target": 0, "ok": recon_bad_days + batch_failed == 0,
          "detail": {"recon_bad_days": recon_bad_days, "batch_failed": batch_failed}},
-        {"key": "kis", "label": f"KIS 실현율(%, 표본 {GATE_KEPT_MIN_N} 이상)", "now": kept, "target": GATE_KEPT_PCT,
-         "n": kn,
+        {"key": "kis", "label": f"KIS 실현율(%, 최근 28일, 표본 {GATE_KEPT_MIN_N} 이상)", "now": kept,
+         "target": GATE_KEPT_PCT, "n": kn,
          "ok": kept is not None and kn >= GATE_KEPT_MIN_N and float(kept) >= GATE_KEPT_PCT},
     ]  # fmt: skip
     다음 = "2단계 손 매매 준수율·슬리피지 → 3단계 소액 승인형 → 4단계 한도 내 자동 — 단계마다 사용자 결정"
-    return {"stage": 1, "account": mirror, "items": items, "passed": all(i["ok"] for i in items), "next": 다음}
+    return {"stage": 1, "account": mirror, "version": version, "from": 시작, "items": items,
+            "passed": all(i["ok"] for i in items), "next": 다음}  # fmt: skip
 
 
 def combine_kept(summaries: list[dict[str, Any]]) -> dict[str, Any]:
@@ -197,8 +208,12 @@ def risk_board(
 ) -> list[dict[str, Any]]:
     """위험판 — 계좌마다 노출·집중·손절 가까움·낙폭.
 
-    `latest` = {계좌: {equity, holdings, positions: [{name, ticker, horizon, unrealized_pct, weight_pct}]}} (그날 평가),
-    `stops` = {기간: 손절 %(음수)}. 낙폭 = 시간가중 지수의 지금 ÷ 지난 고점 − 1(%)
+    `latest` = {계좌: {equity, holdings, positions: [{name, horizon, avg_price, close, weight_pct}]}} (그날 평가),
+    `stops` = {기간: 손절 %(음수)}. 낙폭 = 시간가중 지수의 지금 ÷ 지난 고점 − 1(%).
+    손절 가까움의 수익률은 **매도 플래그와 같은 잣대** — 종목 통화로 종가 ÷ 평균단가(수수료 포함 원가) − 1.
+    원화 평가손익률은 환율이 섞여 미국 종목이 달러로는 손절선 1%p 앞인데 "없음" 으로 보였다(25.1511 검토 2).
+    기간이 없거나 모르는 값이면 장기로 본다(매도 플래그와 같이). 유상증자 권리락 계수는 반영하지 않는다
+    (드묾 `[확인필요]`)
     """
     out = []
     for a in sorted(latest):
@@ -208,10 +223,14 @@ def risk_board(
         큰 = max(종목, key=lambda q: float(q.get("weight_pct") or 0), default=None)
         가까움 = []
         for q in 종목:
-            선 = stops.get(str(q.get("horizon") or ""))
-            u = q.get("unrealized_pct")
-            if 선 is not None and u is not None and float(u) <= 선 + RISK_NEAR_STOP_PP:
-                가까움.append({"name": q.get("name") or q.get("ticker"), "unrealized_pct": float(u), "stop_pct": 선})
+            기간 = str(q.get("horizon") or "")
+            선 = stops.get(기간 if 기간 in stops else "long")
+            avg, close = q.get("avg_price"), q.get("close")
+            if 선 is None or not avg or close is None or float(avg) <= 0:
+                continue
+            u = (float(close) / float(avg) - 1) * 100
+            if u <= 선 + RISK_NEAR_STOP_PP:
+                가까움.append({"name": q.get("name") or q.get("ticker"), "unrealized_pct": u, "stop_pct": 선})
         v = sorted(series.get(a) or [])
         고점 = max((t for _d, t in v), default=None)
         out.append({"id": a, "exposure_pct": 보유 / 자산 * 100 if 자산 > 0 else None, "positions": len(종목),
@@ -224,8 +243,8 @@ def risk_board(
 def champion(series: dict[str, list[tuple[str, float]]], mirror: str) -> list[dict[str, Any]]:
     """챔피언 교체 후보 — 지금 챔피언(`mirror`, KIS 가 베끼는 계좌)을 **꾸준히** 앞서는 전략.
 
-    계좌마다 챔피언과 둘 다 평가가 있는 날만 맞춰, 겹치지 않는 `CHAMPION_BLOCK` 평가 블록으로 나눠
-    블록마다 수익을 견준다.
+    계좌마다 챔피언과 둘 다 평가가 있는 날만 맞춰, 가장 최근 끝에서부터 겹치지 않는 `CHAMPION_BLOCK` 평가 블록으로
+    나눠 블록마다 수익을 견준다.
     후보 = 블록 `CHAMPION_MIN_BLOCKS` 개 이상 · 이긴 블록 비율 `CHAMPION_WIN_SHARE` 이상 · 맞춘 기간 전체 수익도 앞섬.
     한 번 크게 이긴 것이 아니라 여러 구간에서 이겼는지를 본다. 무작위 대조는 뺀다. 교체는 사용자 결정
     """
@@ -238,7 +257,9 @@ def champion(series: dict[str, list[tuple[str, float]]], mirror: str) -> list[di
         내 = dict(v)
         if len(날) < 2:
             continue
-        블록 = [날[i: i + CHAMPION_BLOCK + 1] for i in range(0, len(날) - CHAMPION_BLOCK, CHAMPION_BLOCK)]
+        # 가장 최근 끝에서 거꾸로 자른다 — 앞에서 자르면 마지막 미완성 블록(최근 19 평가까지)이 승패에서 빠져
+        # 최근에 크게 져도 후보로 남았다(25.1511 검토 6). 블록은 끝점을 나눠 갖는다(수익 구간은 겹치지 않는다)
+        블록 = [날[i - CHAMPION_BLOCK: i + 1] for i in range(len(날) - 1, CHAMPION_BLOCK - 1, -CHAMPION_BLOCK)]
         이김 = sum(내[b[-1]] / 내[b[0]] > h[b[-1]] / h[b[0]] for b in 블록 if 내[b[0]] and h[b[0]])
         전체 = (내[날[-1]] / 내[날[0]] - 1) * 100 if 내[날[0]] else None
         챔 = (h[날[-1]] / h[날[0]] - 1) * 100 if h[날[0]] else None

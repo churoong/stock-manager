@@ -47,7 +47,13 @@ export interface DeskKisAccount {
 }
 /** 실전 전환 1단계 관문 (docs/desk.md 6장, 25.1508) — 읽기 전용. 넘어도 아무것도 열리지 않는다 */
 export interface GateItem { key: string; label: string; now: number | null; target: number | null; ok: boolean; n?: number; detail?: Record<string, number> }
-export interface Gate { stage: number; account: string; items: GateItem[]; passed: boolean; next: string }
+export interface Gate { stage: number; account: string; version?: number | null; from?: string | null; items: GateItem[]; passed: boolean; next: string }
+
+/**
+ * 화면 글에 쓰는 문턱 — `batch/services/desk.py` 의 상수와 같은 값(테스트가 대조, 25.1511 검토 8).
+ * 상수를 바꾸면 화면 글만 낡지 않게
+ */
+export const DESK_RULES = { RISK_NEAR_STOP_PP: 2, CHAMPION_BLOCK: 20, CHAMPION_MIN_BLOCKS: 3, CHAMPION_WIN_SHARE: 0.67 } as const;
 export interface RiskRow {
   id: string; exposure_pct: number | null; positions: number; top_weight_pct: number | null; top_name: string | null;
   near_stop: Array<{ name: string | null; unrealized_pct: number; stop_pct: number }>; dd_pct: number | null;
@@ -56,7 +62,7 @@ export interface ChampionRow { id: string; from: string; blocks: number; wins: n
 
 export interface DeskSummary {
   leaderboard: DeskLeaderboard; rule_history?: Record<string, RuleSpan[]>; mirror_account: string; updated_at: string;
-  gate?: Gate; risk?: RiskRow[]; champion?: ChampionRow[];
+  gate?: Gate | null; risk?: RiskRow[]; champion?: ChampionRow[]; gate_error?: string | null;
   last_market: DeskMarketKey;
   kis_account: DeskKisAccount; markets: Partial<Record<DeskMarketKey, DeskMarket>>;
 }
@@ -71,13 +77,15 @@ export interface DeskView {
   gate: Gate | null;
   risk: RiskRow[];
   champion: ChampionRow[];
+  /** 관문·위험판·챔피언 계산이 실패한 실행이면 그 까닭 (25.1511) */
+  gate_error: string | null;
   mirror_account: string | null;
   kis_account: DeskKisAccount | null;
   markets: Partial<Record<DeskMarketKey, DeskMarket & { as_of: string }>>;
 }
 
 export const EMPTY_DESK: DeskView = {
-  as_of: null, updated_at: null, leaderboard: null, rule_history: {}, gate: null, risk: [], champion: [], mirror_account: null, kis_account: null, markets: {},
+  as_of: null, updated_at: null, leaderboard: null, rule_history: {}, gate: null, risk: [], champion: [], gate_error: null, mirror_account: null, kis_account: null, markets: {},
 };
 
 /** 최근 줄들(날짜 역순)에서 보일 것을 고른다. 깨진 JSON 줄은 없는 셈 친다 */
@@ -105,6 +113,7 @@ export function pickDesk(rows: Array<{ as_of: string; summary_json: string | nul
     gate: 첫.s.gate ?? null,
     risk: Array.isArray(첫.s.risk) ? 첫.s.risk : [],
     champion: Array.isArray(첫.s.champion) ? 첫.s.champion : [],
+    gate_error: 첫.s.gate_error ?? null,
     mirror_account: 첫.s.mirror_account ?? null,
     kis_account: 첫.s.kis_account ?? null,
     markets,
@@ -219,7 +228,8 @@ export function gateNowText(i: GateItem): string {
     case "incidents":
       return `${i.now}건(검산 어긋난 날 ${i.detail?.recon_bad_days ?? "-"} · 배치 실패 ${i.detail?.batch_failed ?? "-"}) / 0`;
     case "kis":
-      return `${i.now.toFixed(0)}% (표본 ${i.n ?? 0}) / ${i.target}% 이상`;
+      // 소수 첫째 자리 — 89.6 이 "90% / 90% 이상" 으로 보이는데 미충족이면 헷갈린다(25.1511 검토 4)
+      return `${i.now.toFixed(1)}% (표본 ${i.n ?? 0}) / ${i.target}% 이상`;
     default:
       return `${i.now} / ${i.target ?? "-"}`;
   }

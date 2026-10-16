@@ -6,6 +6,7 @@ import { bodyOf, readJson } from "@/lib/http";
 import {
   MARKET_LABEL,
   allChecks,
+  DESK_RULES,
   countsText,
   fillLine,
   gateNowText,
@@ -219,7 +220,9 @@ export default function DeskView() {
             </span>
           </h2>
           <p className="mt-1 text-xs text-slate-500">
-            잣대는 KIS 가 베끼는 계좌 {desk.gate.account}. 읽기 전용입니다 — 넘어도 실전 주문은 열리지 않습니다. 문턱은 첫 값(docs/desk.md 6장).
+            잣대는 KIS 가 베끼는 계좌 {desk.gate.account}
+            {desk.gate.version != null ? `의 지금 판 ${desk.gate.version}` : ""}
+            {desk.gate.from ? ` · ${desk.gate.from}부터(관문 자기 구간)` : ""}. 읽기 전용입니다 — 넘어도 실전 주문은 열리지 않습니다. 문턱은 첫 값(docs/desk.md 6장).
           </p>
           <ul className="mt-2 space-y-0.5 text-sm">
             {desk.gate.items.map((i) => (
@@ -229,6 +232,12 @@ export default function DeskView() {
             ))}
           </ul>
           <p className="mt-1 text-xs text-slate-500">그 뒤: {desk.gate.next}</p>
+        </section>
+      ) : null}
+
+      {desk.gate_error ? (
+        <section className={CARD}>
+          <p className="text-sm text-red-600 dark:text-red-400">실전 전환 관문·위험판·챔피언 계산 실패 — {desk.gate_error}</p>
         </section>
       ) : null}
 
@@ -263,7 +272,10 @@ export default function DeskView() {
               </tbody>
             </table>
           </div>
-          <p className="mt-1 text-xs text-slate-500">노출 = 보유 평가 ÷ 평가 총액, 낙폭 = 시간가중 지수의 지난 고점 대비, 손절 가까움 = 기간 손절선까지 2%p 안(손절을 쓰지 않는 계좌도 같은 선으로).</p>
+          <p className="mt-1 text-xs text-slate-500">
+            노출 = 보유 평가 ÷ 평가 총액, 낙폭 = 시간가중 지수의 지난 고점 대비, 손절 가까움 = 종목 통화로 종가 ÷ 평균단가가 기간 손절선까지 {DESK_RULES.RISK_NEAR_STOP_PP}%p 안(매도
+            플래그와 같은 잣대 · 손절을 쓰지 않는 계좌도 같은 선으로).
+          </p>
         </section>
       ) : null}
 

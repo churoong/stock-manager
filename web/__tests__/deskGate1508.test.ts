@@ -6,7 +6,9 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { CompareCard, type Data } from "@/components/PaperView";
-import { EMPTY_DESK, championText, gateNowText, pickDesk, type DeskView } from "@/lib/desk";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { DESK_RULES, EMPTY_DESK, championText, gateNowText, pickDesk, type DeskView } from "@/lib/desk";
 import { accountView } from "@/lib/paper";
 
 describe("관문 칸 글", () => {
@@ -17,13 +19,14 @@ describe("관문 칸 글", () => {
     expect(gateNowText({ key: "incidents", label: "", now: 2, target: 0, ok: false, detail: { recon_bad_days: 1, batch_failed: 1 } })).toBe(
       "2건(검산 어긋난 날 1 · 배치 실패 1) / 0",
     );
-    expect(gateNowText({ key: "kis", label: "", now: 91.6, target: 90, ok: false, n: 40 })).toBe("92% (표본 40) / 90% 이상");
+    expect(gateNowText({ key: "kis", label: "", now: 91.6, target: 90, ok: false, n: 40 })).toBe("91.6% (표본 40) / 90% 이상");
+    expect(gateNowText({ key: "kis", label: "", now: 89.6, target: 90, ok: false, n: 120 })).toBe("89.6% (표본 120) / 90% 이상"); // 반올림으로 "90%" 가 안 되게
     expect(gateNowText({ key: "kis", label: "", now: null, target: 90, ok: false })).toBe("모름");
   });
 
   it("25.1508 전 요약에는 관문·위험판·챔피언이 없다 — 빈 것으로", () => {
     const v = pickDesk([{ as_of: "d", summary_json: JSON.stringify({ markets: {} }), updated_at: "u" }]);
-    expect([v.gate, v.risk, v.champion]).toEqual([null, [], []]);
+    expect([v.gate, v.risk, v.champion, v.gate_error]).toEqual([null, [], [], null]);
   });
 });
 
@@ -43,5 +46,16 @@ describe("챔피언 교체 후보 (전략 화면)", () => {
     expect(없음).toContain("아직 없음 — 가장 가까운 C · 블록 3개 중 1개 이김");
     expect(없음).toContain("교체는 사용자 결정");
     expect(championText(줄(true), "H")).toBe("C · 블록 3개 중 3개 이김 · 같은 기간 +12.00% (H +6.00%) · 2026-01-01부터");
+  });
+});
+
+describe("화면 글의 문턱은 배치 상수와 같다 (25.1511)", () => {
+  it("desk.py 의 RISK_NEAR_STOP_PP·CHAMPION_*", () => {
+    const py = readFileSync(join(process.cwd(), "..", "batch", "services", "desk.py"), "utf8");
+    const 값 = (name: string) => Number(new RegExp(`^${name} = ([0-9.]+)`, "m").exec(py)?.[1]);
+    expect(값("RISK_NEAR_STOP_PP")).toBe(DESK_RULES.RISK_NEAR_STOP_PP);
+    expect(값("CHAMPION_BLOCK")).toBe(DESK_RULES.CHAMPION_BLOCK);
+    expect(값("CHAMPION_MIN_BLOCKS")).toBe(DESK_RULES.CHAMPION_MIN_BLOCKS);
+    expect(값("CHAMPION_WIN_SHARE")).toBe(DESK_RULES.CHAMPION_WIN_SHARE);
   });
 });
