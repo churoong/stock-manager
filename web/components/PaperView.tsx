@@ -57,7 +57,7 @@ interface FillRow {
 }
 interface OrderRow { id: number; account_id: string; market: string; ticker: string; name: string; side: string; order_type?: string; limit_price: number | null; ref_price?: number | null; quantity: number; currency: string; fill_session: string; tranche: number; reason: string }
 interface HistoryRow { account_id: string; as_of: string; invested_krw: number; equity_krw: number; kospi_krw: number | null; sp500_krw: number | null }
-interface RealCompareView { start?: string; end?: string; realPct?: number; paperPct?: Record<string, number | null>; error?: string }
+interface RealCompareView { start?: string; end?: string; realPct?: number; paperPct?: Record<string, number | null>; paperStart?: Record<string, string>; error?: string }
 /** 투자위원회 회의록 한 장 (docs/company.md 3·5장) — 배치가 적은 그대로 */
 interface MeetingRow { account_id: string; market: string; decided_on: string; charter_hash: string; minutes_json: string }
 interface DossierRow { market: string; as_of: string; stock_id: number; dossier_json: string }
@@ -266,6 +266,7 @@ export default function PaperView() {
                 {Object.entries(data.realCompare.paperPct ?? {}).map(([aid, v]) => (
                   <span key={aid}>
                     {" "}· 가상 {aid} <b className={tone(v)}>{pctText(v)}</b>
+                    {data.realCompare?.paperStart?.[aid] ? ` (${data.realCompare.paperStart[aid]}부터)` : ""}
                   </span>
                 ))}
               </p>

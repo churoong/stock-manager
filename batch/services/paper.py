@@ -22,7 +22,36 @@ SELL_RULES: dict[str, frozenset[str] | None] = {
     "value": frozenset({"손절", "목표도달", "재무악화", "점검"}),
     # C 모멘텀: 목표에서 팔지 않고 손실·악재에는 바로 나온다
     "momentum": frozenset({"손절", "기간초과", "재무악화", "점검", "감성급락"}),
+    # G 추세 익절 (docs/paper.md 2.2, 25.1481): B(core)와 매도 하나만 다르다 — 목표도달에서 팔지 않고,
+    # 목표에 한 번 닿은 뒤 고점 대비 손절폭만큼 빠지면(`TRAIL_CODE`, `trend_exit`) 전량. 손절·기간초과는 B 와 같다
+    "trend": frozenset({"손절", "기간초과", "추적손절"}),
 }
+#: 추세 익절(G)의 매도 사유 코드 — 매도 플래그(`sell_flags.evaluate`)가 아니라 모의 엔진이 낸다
+TRAIL_CODE = "추적손절"
+
+
+def trend_exit(
+    cost_per_share: float, peak_close: float | None, last_close: float | None, target_pct: float, stop_pct: float,
+    rights_scale: float = 1.0,
+) -> bool:
+    """추세 익절(G)의 판정 — 첫 매수 뒤 종가 고점이 **목표에 한 번 닿았고**(원가 × (1 + 목표%)),
+    지금 종가가 고점 × (1 + 손절%) 아래면 판다. 손절폭·목표는 그 보유 기간의 설정(`horizon_targets`, 기본 단기 −7/+10).
+
+    목표에 닿은 뒤에만 켜지므로 파는 자리는 늘 원가 위다
+    (단기 1.10 × 0.93 = +2.3%, 중기 1.25 × 0.85 = +6.3%, 장기 +12.5%) —
+    목표 절반에서 켜는 초안은 원가 아래에서 팔아 "손절 좁히기" 와 섞였다(25.1481 설계 검증 [필수] 4).
+    유상증자 권리락이 있으면 원가처럼 고점에도 계수를 곱한다 — 권리락 전 고점이 거짓 하락을 만들지 않게(검증 [권장] 5,
+    고점이 권리락 뒤였다면 덜 민감해지는 쪽 = 덜 판다)
+    """
+    if not peak_close or not last_close or cost_per_share <= 0:
+        return False
+    배 = rights_scale if rights_scale != 1.0 and rights_scale > 0 else 1.0
+    원가, 고점 = cost_per_share * 배, peak_close * 배
+    # 경계(정확히 +10%·−7%)가 부동소수 찌꺼기로 빗나가지 않게 소수 여섯째 자리에서 — 손절 판정(`sell_flags`)과 같은 처리
+    if round(고점 / 원가 - 1, 6) < round(target_pct / 100, 6):
+        return False
+    return round(last_close / 고점 - 1, 6) <= round(stop_pct / 100, 6)
+
 
 #: 시장가 매수(시가 일괄, C·R)의 예약·크기 잣대 = 기준가 × (1 + 이 값) (docs/paper.md 2.1.1, 25.1458).
 #: 하룻밤 틈(갭)의 대부분을 덮자는 값이고 실측 근거는 없다 [확인필요]. 넘게 뛰면 체결 때 현금 검사가 그 주문을 취소한다
@@ -36,6 +65,7 @@ PAIRS: tuple[tuple[str, str, str], ...] = (
     ("C", "B", "모멘텀투자사 대 기준"),
     ("D", "B", "장기보유투자사 대 기준"),
     ("E", "B", "안정투자사 대 기준"),
+    ("G", "B", "목표 뒤 추적 매도 대 목표에서 전량 매도"),
     ("B", "R1", "기준 대 무작위"),
     ("B", "R2", "기준 대 무작위"),
 )
@@ -543,11 +573,15 @@ def summary_lines(
     sectors: dict[int, str | None],
     limits: dict[str, Any],
     sell_rules: dict[str, str] | None = None,
+    starts: dict[str, str] | None = None,
+    twr_at: dict[tuple[str, str], float] | None = None,
 ) -> list[str]:
     """주간 요약의 모의 계좌 절 — 월 첫 요약이면 월간 복기까지 (docs/paper.md 6장). 순수 함수.
 
     `daily` 는 계좌마다 `paper_daily` 행(날짜 순, 월간이면 한 달 넘게), `limits` 는 {max_stock_pct, max_sector_pct,
-    stop_pct: {기간: %}}. 기준 지수는 같은 돈 흐름이라 평가 ÷ 입금으로 견준다
+    stop_pct: {기간: %}}. 기준 지수는 같은 돈 흐름이라 평가 ÷ 입금으로 견준다.
+    `starts` = 계좌마다 첫 평가일, `twr_at` = {(계좌, 날짜): 그날 이하 마지막 시간가중 지수} — 짝의 시작일이
+    다르면(늦게 연 계좌, 25.1481) 원화 차이 대신 **늦은 시작일부터의 공통 구간 시간가중 차이(%p)** 로 견준다
     """
     if not any(daily.values()):
         return []
@@ -587,6 +621,16 @@ def summary_lines(
         if 앞 in 끝값 and 뒤 in 끝값:
             덧 = (f"; 투자 비중 {앞} {비중[앞]:.0f}% · {뒤} {비중[뒤]:.0f}%"
                   if 비중.get(앞) is not None and 비중.get(뒤) is not None else "")  # fmt: skip
+            시작들 = {(starts or {}).get(앞), (starts or {}).get(뒤)}
+            if len(시작들) > 1 and None not in 시작들:
+                # 늦게 연 계좌 — 원화 차이는 기간이 달라 뜻이 없다. 늦은 시작일부터 같은 구간의 시간가중 차이로
+                공통 = max(str(x) for x in 시작들)
+                기 = {a: (twr_at or {}).get((a, 공통)) for a in (앞, 뒤)}
+                끝지수 = {a: float(daily[a][-1]["twr_index"] or 0) for a in (앞, 뒤)}
+                if all(기.values()):
+                    차 = (끝지수[앞] / 기[앞] - 끝지수[뒤] / 기[뒤]) * 100  # type: ignore[operator]
+                    out.append(f"  {앞}−{뒤}: 시간가중 {차:+.1f}%p ({공통}부터 공통 구간 — {무엇}{덧})")
+                continue
             out.append(f"  {앞}−{뒤}: {끝값[앞] - 끝값[뒤]:+,.0f}원 ({무엇}{덧})")
     if month_start is None:
         return out
@@ -659,17 +703,22 @@ def compare_real(
     모의 = {k: v for k, v in paper.items() if v}
     if not 모의 or not real:
         return None
-    시작 = max([real[0][0], *(v[0][0] for v in 모의.values())])
+    # 시작은 실제 첫 기록과 **가장 이른** 모의 첫 기록 가운데 늦은 날 — 가장 늦은 모의 계좌에 맞추면 계좌를
+    # 하나 더할 때마다 모든 계좌의 비교 창이 그 날로 밀렸다(25.1481 검증 [필수] 11).
+    # 늦게 연 계좌는 제 첫 기록부터(`paper_start`)
+    시작 = max([real[0][0], min(v[0][0] for v in 모의.values())])
     끝 = min([real[-1][0], *(v[-1][0] for v in 모의.values())])
     if 끝 < 시작:
         return None
     실제 = window_change(real, 시작, 끝)
     if 실제 is None:
         return None
-    out: dict[str, Any] = {"start": 실제[1], "end": 실제[2], "real_pct": 실제[0], "paper_pct": {}}
+    out: dict[str, Any] = {"start": 실제[1], "end": 실제[2], "real_pct": 실제[0], "paper_pct": {}, "paper_start": {}}
     for aid, rows in sorted(모의.items()):
         w = window_change(rows, 시작, 끝)
         out["paper_pct"][aid] = None if w is None else w[0]
+        if w is not None and w[1] > 실제[1]:
+            out["paper_start"][aid] = w[1]
     return out
 
 
@@ -677,7 +726,9 @@ def compare_line(c: dict[str, Any] | None) -> str | None:
     """리포트·요약에 싣는 한 줄. 견줄 수 없으면 None."""
     if not c:
         return None
-    모의 = " · ".join(f"{aid} {_퍼센트(v)}" for aid, v in c["paper_pct"].items())
+    늦음 = c.get("paper_start") or {}
+    모의 = " · ".join(f"{aid} {_퍼센트(v)}" + (f"({늦음[aid]}부터)" if aid in 늦음 else "")
+                     for aid, v in c["paper_pct"].items())  # fmt: skip
     return (f"실제 투자와 비교({c['start']}~{c['end']}, 시간가중): 실제 {_퍼센트(c['real_pct'])} · {모의}"
             " — 실제는 보유분만·배당 포함, 모의는 현금 포함·배당 없음")  # fmt: skip
 

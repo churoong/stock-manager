@@ -156,9 +156,9 @@ def test_seven_accounts_order_by_their_own_rules(c: Client, monkeypatch: pytest.
     원래 = report_picks.select_top
     monkeypatch.setattr(report_picks, "select_top", lambda rows, n=5: (n들.append(n), 원래(rows, n))[1])
     기록 = _하루(c, monkeypatch, "2026-10-14")
-    assert sorted(기록["accounts"]) == ["A", "B", "C", "D", "E", "R1", "R2"]
+    assert sorted(기록["accounts"]) == ["A", "B", "C", "D", "E", "G", "R1", "R2"]  # G 는 25.1481
     # E 만 상위 10 — 나머지는 5 (같은 select_top 에 계좌의 수)
-    assert sorted(n들) == [5, 5, 5, 5, 5, 5, 10]
+    assert sorted(n들) == [5, 5, 5, 5, 5, 5, 5, 10]
     주문 = c.q("SELECT account_id, stock_id, order_type, limit_price, ref_price, quantity, tranche, reason"
                " FROM paper_orders ORDER BY account_id, tranche")  # fmt: skip
     by: dict[str, list[tuple]] = {}
@@ -195,7 +195,7 @@ def test_open_entry_fills_at_open_and_random_mapping_is_stable(c: Client, monkey
     assert 기록["accounts"]["R1"]["random"] == {"1": _대체("R1")}
     assert {r[0] for r in c.q("SELECT DISTINCT stock_id FROM paper_orders WHERE account_id = 'R1'")} == {_대체("R1")}
     # 장부 검산은 일곱 계좌 모두
-    assert c.q("SELECT COUNT(*), SUM(recon_ok) FROM paper_daily WHERE as_of = '2026-10-16'") == [(7, 7)]
+    assert c.q("SELECT COUNT(*), SUM(recon_ok) FROM paper_daily WHERE as_of = '2026-10-16'") == [(8, 8)]
 
 
 def test_d_holds_through_stop_loss(c: Client, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -255,7 +255,8 @@ def test_accounts_rules_come_from_columns_not_names(c: Client) -> None:
     행 = c.q("SELECT id, sell_rule, entry_rule, top_n, selection FROM paper_accounts ORDER BY id")
     assert 행 == [("A", "all", "tranche", 5, "signal"), ("B", "core", "tranche", 5, "signal"),
                  ("C", "core", "open", 5, "signal"), ("D", "time", "tranche", 5, "signal"),
-                 ("E", "core", "tranche", 10, "signal"), ("R1", "core", "open", 5, "random"),
+                 ("E", "core", "tranche", 10, "signal"), ("G", "trend", "tranche", 5, "signal"),
+                 ("R1", "core", "open", 5, "random"),
                  ("R2", "core", "open", 5, "random")]  # fmt: skip
     assert set(r[1] for r in 행) <= set(pp.SELL_RULES)
 

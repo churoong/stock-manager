@@ -75,6 +75,7 @@ const SELL_RULE_TEXT: Record<string, string> = {
   time: "기간초과만(손절·목표 무시)",
   value: "손절·목표도달·재무악화·점검",
   momentum: "손절·기간초과·재무악화·점검·감성급락(목표에서 안 팖)",
+  trend: "손절·기간초과 + 목표에 닿은 뒤 고점 대비 손절폭 하락 시(목표에서 안 팖)",
 };
 export function ruleText(a: AccountRule): string {
   let 헌장: { name?: string; agenda?: number; top_n?: number } | null = null;
@@ -152,6 +153,7 @@ export const PAIRS: ReadonlyArray<readonly [string, string, string]> = [
   ["C", "B", "모멘텀투자사 대 기준"],
   ["D", "B", "장기보유투자사 대 기준"],
   ["E", "B", "안정투자사 대 기준"],
+  ["G", "B", "목표 뒤 추적 매도 대 목표에서 전량 매도"],
   ["B", "R1", "기준 대 무작위"],
   ["B", "R2", "기준 대 무작위"],
 ];
@@ -364,20 +366,28 @@ export interface RealCompare {
   end: string;
   realPct: number;
   paperPct: Record<string, number | null>;
+  /** 늦게 연 계좌의 그 계좌 첫 기록일 (25.1481) */
+  paperStart?: Record<string, string>;
 }
 
 /** 모의 계좌와 실제 포트폴리오를 같은 기간 시간가중으로 — 배치 `compare_real` 과 같은 규칙 (docs/paper.md 4장) */
 export function compareReal(paper: Record<string, Point[]>, real: Point[]): RealCompare | null {
   const 모의 = Object.entries(paper).filter(([, v]) => v.length);
   if (!모의.length || !real.length) return null;
-  const 시작 = [real[0][0], ...모의.map(([, v]) => v[0][0])].sort().at(-1)!;
+  // 실제 첫 기록과 **가장 이른** 모의 첫 기록 중 늦은 날 — 늦게 연 계좌(G 등)가 모든 계좌의 창을 밀지 않게 (25.1481)
+  const 시작 = [real[0][0], 모의.map(([, v]) => v[0][0]).sort()[0]].sort().at(-1)!;
   const 끝 = [real[real.length - 1][0], ...모의.map(([, v]) => v[v.length - 1][0])].sort()[0];
   if (끝 < 시작) return null;
   const 실제 = windowChange(real, 시작, 끝);
   if (!실제) return null;
   const paperPct: Record<string, number | null> = {};
-  for (const [aid, rows] of 모의.sort(([a], [b]) => a.localeCompare(b))) paperPct[aid] = windowChange(rows, 시작, 끝)?.pct ?? null;
-  return { start: 실제.start, end: 실제.end, realPct: 실제.pct, paperPct };
+  const paperStart: Record<string, string> = {};
+  for (const [aid, rows] of 모의.sort(([a], [b]) => a.localeCompare(b))) {
+    const w = windowChange(rows, 시작, 끝);
+    paperPct[aid] = w?.pct ?? null;
+    if (w && w.start > 실제.start) paperStart[aid] = w.start;
+  }
+  return { start: 실제.start, end: 실제.end, realPct: 실제.pct, paperPct, paperStart };
 }
 
 /** 성과 분해 한 칸 — 배치 `paper._초과` (docs/paper.md 10장, 25.1450) */

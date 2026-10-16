@@ -691,7 +691,12 @@ def sell_decisions(
         if h is None:
             continue
         flags = sf.evaluate(h, today, targets)
-        팔것 = pp.sells_for(sell_rule, {h.stock_id: {f.reason_code for f in flags}})
+        코드들 = {f.reason_code for f in flags}
+        if sell_rule == "trend" and _추적손절(client, h, 행, targets, today):
+            코드들.add(pp.TRAIL_CODE)
+            글 = "목표에 닿은 뒤 고점 대비 손절폭만큼 빠짐 (추세 익절, docs/paper.md 2.2)"
+            flags = [*flags, sf.Flag(stock_id=h.stock_id, reason_code=pp.TRAIL_CODE, level="red", rationale_text=글)]
+        팔것 = pp.sells_for(sell_rule, {h.stock_id: 코드들})
         근거 = [{"reason_code": f.reason_code, "level": f.level, "rationale": f.rationale_text,
                 "criteria": f.criteria} for f in flags]  # fmt: skip
         if 팔것:
@@ -702,6 +707,25 @@ def sell_decisions(
                                          행["price_date"]),
                                  "hold": sorted({f.reason_code for f in flags} - 따름), "flags": 근거}  # fmt: skip
     return out
+
+
+#: 추세 익절(G)의 고점 — 첫 매수일부터 오늘까지 종가 최댓값 (보유마다 한 번, 25.1481)
+PEAK_SQL = "SELECT MAX(close) FROM prices WHERE stock_id = ? AND date >= ? AND date <= ? AND close > 0"
+
+
+def _추적손절(client: Any, h: Any, 행: dict[str, Any], targets: dict | None, today: date) -> bool:
+    """G 의 추적 손절 판정 — 고점은 따로 읽는다(`enrich` 는 시세 이력을 읽지 않는다).
+
+    목표·손절은 `evaluate` 와 같은 표에서
+    """
+    if not 행.get("quantity") or not 행.get("market_value"):
+        return False
+    고점 = client.execute(PEAK_SQL, [h.stock_id, 행["first_buy_date"], today.isoformat()]).rows
+    기간 = h.horizon if h.horizon in sf.DEFAULT_TARGETS else "long"
+    표 = {**sf.DEFAULT_TARGETS[기간], **((targets or {}).get(기간) or {})}
+    return pp.trend_exit(float(행["cost"]) / float(행["quantity"]), 고점[0][0] if 고점 else None,
+                         float(행["market_value"]) / float(행["quantity"]), float(표["target_pct"]),
+                         float(표["stop_pct"]), float(getattr(h, "rights_scale", 1.0) or 1.0))  # fmt: skip
 
 
 #: 살 때부터 매도 규칙에 걸리는지 미리 보는 계좌 규칙 — 보유와 무관한 플래그(재무악화·감성급락·점검·상장폐지)로 판다.
@@ -1406,8 +1430,19 @@ def summary_section(client: Any, now: datetime) -> list[str]:
         "stop_pct": 손절,
     }
     규칙 = {str(r["id"]): str(r["sell_rule"]) for r in client.execute(ACCOUNTS_SQL).dicts()}
+    # 늦게 연 계좌의 짝 비교 (25.1481) — 계좌마다 첫 평가일, 짝의 시작이 다르면 늦은 시작일의 지수
+    시작일 = {str(r[0]): str(r[1]) for r in client.execute(FIRST_DAILY_SQL).rows}
+    지수: dict[tuple[str, str], float] = {}
+    for 앞, 뒤, *_ in pp.PAIRS:
+        if 앞 in 시작일 and 뒤 in 시작일 and 시작일[앞] != 시작일[뒤]:
+            공통 = max(시작일[앞], 시작일[뒤])
+            for a in (앞, 뒤):
+                if (a, 공통) not in 지수:
+                    r = client.execute(TWR_AT_SQL, [a, 공통]).rows
+                    if r and r[0][0]:
+                        지수[(a, 공통)] = float(r[0][0])
     줄 = pp.summary_lines(daily, by_acct, 주초, 달초, {k: str(v.get("name")) for k, v in 캐시.items()},
-                         {k: v.get("sector") for k, v in 캐시.items()}, limits, 규칙)  # fmt: skip
+                         {k: v.get("sector") for k, v in 캐시.items()}, limits, 규칙, 시작일, 지수)  # fmt: skip
     # 실제 투자와 같은 기간 비교 (25.1448) — 모의 절 바로 아래
     try:
         비교줄 = pp.compare_line(real_comparison(client))
@@ -1439,6 +1474,9 @@ def summary_section(client: Any, now: datetime) -> list[str]:
     return 줄
 
 
+#: 계좌마다 첫 평가일과 그날 이하 마지막 시간가중 지수 — 늦게 연 계좌의 짝 비교 (25.1481)
+FIRST_DAILY_SQL = "SELECT account_id, MIN(as_of) FROM paper_daily GROUP BY account_id"
+TWR_AT_SQL = "SELECT twr_index FROM paper_daily WHERE account_id = ? AND as_of <= ? ORDER BY as_of DESC LIMIT 1"
 #: 이번 주 회의록 · 20 거래일 성과가 이번 주쯤 찬 결정(결정일이 28~35일 전 — 20 거래일 ≈ 28 달력일) (25.1473)
 WEEK_MEETINGS_SQL = "SELECT account_id, market, decided_on, minutes_json FROM paper_meetings WHERE decided_on >= ?"
 REVIEW_DECISIONS_SQL = (
