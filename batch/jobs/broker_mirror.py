@@ -108,6 +108,15 @@ COMPARE_SQL = (
     " LEFT JOIN paper_orders o ON o.id = b.paper_order_id LEFT JOIN paper_fills f ON f.order_id = b.paper_order_id"
     " WHERE b.broker = ? AND b.trade_date >= ? AND b.trade_date < ?"
 )
+#: 체결 칸 (docs/paper.md 15.9, 25.1514) — 베끼기 시작부터 누적. 내부 주문 유형·판정 잣대·장부 슬리피지(%)를 붙인다.
+#: 증권사 주문 표의 order_type 은 미국 시장가를 limit 으로 적으므로 **내부** 주문 유형을 쓴다
+CELLS_SQL = (
+    "SELECT b.trade_date, b.side, b.status, b.filled_qty, b.avg_price, b.reason, o.status AS i_status,"
+    " o.order_type AS i_order_type, o.fill_basis AS i_fill_basis, f.price AS i_price, f.fill_date AS i_fill_date,"
+    " CASE WHEN f.price > 0 AND f.quantity > 0 THEN f.slippage / (f.price * f.quantity) * 100 END AS i_slip_pct"
+    " FROM paper_broker_orders b LEFT JOIN paper_orders o ON o.id = b.paper_order_id"
+    " LEFT JOIN paper_fills f ON f.order_id = b.paper_order_id WHERE b.broker = ? AND b.trade_date < ?"
+)
 #: 성과 계열 — 국내 배치가 적는 **계좌 전체 원화 총액**(`summary_json.account_krw.total_krw`, 25.1497).
 #: 오늘 줄은 따로 붙인다
 TOTALS_SQL = (
@@ -267,6 +276,11 @@ def run(
                             {k: q for k, q in 내부.items() if k not in 연결전})  # fmt: skip
     부터 = (오늘 - timedelta(days=bm.COMPARE_DAYS)).isoformat()
     비교 = bm.compare(client.execute(COMPARE_SQL, [증권사, 부터, 오늘.isoformat()]).dicts())
+    # 체결 칸(15.9, 25.1514) — 곁다리: 실패해도 비교 요약은 그대로
+    try:
+        비교 |= bm.cells(client.execute(CELLS_SQL, [증권사, 오늘.isoformat()]).dicts())
+    except Exception as exc:  # noqa: BLE001
+        기록["cells_error"] = type(exc).__name__
     # 웹 보유내역·성과(docs/paper.md 15.7, 25.1496·25.1497). 시장 칸은 그 시장 통화(국내 원 — 현금은 총평가와
     # 같은 D+2, 미국 달러). 성과는 **국내 배치가 계좌 전체 원화 총액**으로 낸다 — 미국 매수 돈이 원화에서 자동
     # 환전으로 나가 시장별 총액 비는 수익률이 아니다. 국내 배치 시각(08:30 KST)이면 두 시장 모두 전날 종가라 시점이

@@ -269,6 +269,78 @@ def compare(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }  # fmt: skip
 
 
+#: 체결 칸 (docs/paper.md 15.9, 25.1514) — 칸의 값을 "잰 것" 으로 쓰려면 이만큼 거래일이 쌓여야 한다.
+#: 같은 날 주문끼리는 함께 움직여 실효 표본은 거래일 수에 가깝다
+CELL_MIN_DAYS = 20
+
+
+def cells(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """베낀 주문을 (방향, **내부** 주문 유형) 칸으로 — 베끼기를 시작한 날부터 누적 (docs/paper.md 15.9, 25.1514).
+
+    `rows` 는 비교 줄(`compare` 와 같음)에 내부 주문 유형 `i_order_type`·판정 잣대 `i_fill_basis`·장부가 이미 얹은
+    슬리피지 `i_slip_pct`(%)를 붙인 것. 칸 키는 `buy_limit`·`buy_market`·`sell_market` 등. 장 열린 뒤 낸 주문
+    (`fill_basis='close'`)은 종가 판정이라 다른 칸이므로 뺀다. 정리 주문도 뺀다.
+
+    칸마다: n(끝난 주문)·days(거래일 수)·둘 다 참·가상만 참·KIS만 참·둘 다 안 참·모름 ·
+    `miss` = 가상만 참 ÷ (둘 다 참 + 가상만 참) — 가상이 찼다는데 KIS 는 안 찬 몫 ·
+    `extra` = KIS만 참 ÷ (KIS만 참 + 둘 다 안 참) — 가상은 놓쳤는데 KIS 는 찬 몫(가상 지정가는 **종가 ≤ 지정가** 로만
+    차서 장중에 닿기만 한 날을 놓친다 — 이 몫이 클 수 있다) ·
+    `excess` = 둘 다 찬 주문의 (불리한 쪽 + 가격 차이 − 장부가 이미 얹은 슬리피지)의 **금액 가중** 평균(%) — 양수면
+    장부의 비용 가정보다 KIS 가 더 나빴다 · `median` · `se` = 거래일 묶음 표준오차
+    (거래일마다 평균 → 표준편차 ÷ √거래일).
+    지정가 매수는 지정가보다 비싸게 찰 수 없어 excess 가 구조상 0 이하다(가격 개선) — 보정에 안 쓴다(desk.md 8장)
+    """
+    import statistics
+
+    칸: dict[str, dict[str, Any]] = {}
+    달: dict[str, dict[str, list[float]]] = {}
+    for r in rows:
+        if r.get("reason") == REASON_CLEANUP or r.get("i_fill_basis") == "close":
+            continue
+        if r.get("status") not in _끝난 or r.get("i_status") not in ("filled", "expired"):
+            continue
+        키 = f"{r['side']}_{'market' if r.get('i_order_type') == 'market' else 'limit'}"
+        c = 칸.setdefault(키, {"n": 0, "both": 0, "internal_only": 0, "kis_only": 0, "neither": 0, "unknown": 0,
+                              "_days": set(), "_by_day": {}, "_vals": []})  # fmt: skip
+        if r["status"] == "unknown":
+            c["unknown"] += 1
+            continue
+        날 = str(r.get("trade_date") or "")[:10]
+        c["n"] += 1
+        c["_days"].add(날)
+        내부 = r["i_status"] == "filled" and str(r.get("i_fill_date") or "")[:10] == 날
+        kis = r["status"] in ("filled", "partial") and int(r.get("filled_qty") or 0) > 0
+        c[("both" if kis else "internal_only") if 내부 else ("kis_only" if kis else "neither")] += 1
+        if 내부 and kis and r.get("avg_price") and r.get("i_price"):
+            k, i = float(r["avg_price"]), float(r["i_price"])
+            틈 = ((k - i) if r["side"] == "buy" else (i - k)) / i * 100
+            넘음 = 틈 - float(r.get("i_slip_pct") or 0.0)
+            w = k * int(r.get("filled_qty") or 0)
+            합 = c["_by_day"].setdefault(날, [0.0, 0.0])
+            합[0] += w * 넘음
+            합[1] += w
+            c["_vals"].append(넘음)
+            달.setdefault(날[:7], {}).setdefault(키, []).extend([w * 넘음, w])
+    out: dict[str, Any] = {}
+    for 키, c in 칸.items():
+        일평균 = [a / b for a, b in c["_by_day"].values() if b > 0]
+        총w = sum(b for _a, b in c["_by_day"].values())
+        가상참, 가상안참 = c["both"] + c["internal_only"], c["kis_only"] + c["neither"]
+        out[키] = {
+            "n": c["n"], "days": len(c["_days"]), **{k: c[k] for k in ("both", "internal_only", "kis_only", "neither",
+                                                                       "unknown")},
+            "miss": c["internal_only"] / 가상참 * 100 if 가상참 else None,
+            "extra": c["kis_only"] / 가상안참 * 100 if 가상안참 else None,
+            "n_price": len(c["_vals"]),
+            "excess": sum(a for a, _b in c["_by_day"].values()) / 총w if 총w > 0 else None,
+            "median": statistics.median(c["_vals"]) if c["_vals"] else None,
+            "se": statistics.stdev(일평균) / len(일평균) ** 0.5 if len(일평균) >= 2 else None,
+        }  # fmt: skip
+    월 = {m: {k: (sum(v[0::2]) / sum(v[1::2]) if sum(v[1::2]) > 0 else None) for k, v in d.items()}
+         for m, d in sorted(달.items())}  # fmt: skip
+    return {"cells": out, "cells_by_month": 월}
+
+
 #: 괴리 알림 (docs/paper.md 15.8, 25.1504·25.1507) — 그 칸의 표본이 이만큼 쌓여야 판단한다
 DIVERGE_MIN_N = 20
 #: 체결 일치율이 이 아래로 내려가면 켠다 — 첫 값(근거 없음 `[확인필요]`), 한 달 쌓이면 다시 본다

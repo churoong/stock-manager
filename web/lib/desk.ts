@@ -69,7 +69,19 @@ export const READINESS_TEXT: Record<ReadinessItem["status"], string> = {
 };
 export interface ChampionRow { id: string; from: string; blocks: number; wins: number; pct: number | null; champion_pct: number | null; candidate: boolean }
 
+/**
+ * KIS모의 체결 기준 보정(근사·참고, docs/desk.md 8장, 25.1514) — 배치가 낸 값. 순위는 바꾸지 않는다.
+ * adj = 회전 × KIS 가 잰 "장부 가정 넘는 비용"(양수면 덜 벌었다) · pi = 지정가 매수가 시가로 더 싸게 찼을 몫 · band = 칸 값 불확실성
+ */
+export interface FillAdjustRow {
+  from: string; fills: number; turnover_pct: number; adj_pp: number; band_pp: number; unmeasured_pct: number;
+  pi_pp: number; pi_missing: number; limit_buy_pct: number | null; adjusted_pct?: number | null; close_call?: boolean;
+}
+export interface FillAdjustCheck { from: string | null; to: string | null; actual_pp: number; explained_pp: number; band_pp: number; unmeasured_pct: number }
+export interface FillAdjust { rows: Record<string, FillAdjustRow>; h_check: FillAdjustCheck | null; min_days: number }
+
 export interface DeskSummary {
+  fill_adjust?: FillAdjust | null; fill_adjust_error?: string | null;
   leaderboard: DeskLeaderboard; rule_history?: Record<string, RuleSpan[]>; mirror_account: string; updated_at: string;
   gate?: Gate | null; risk?: RiskRow[]; champion?: ChampionRow[]; gate_error?: string | null; readiness?: ReadinessItem[];
   last_market: DeskMarketKey;
@@ -90,13 +102,16 @@ export interface DeskView {
   gate_error: string | null;
   /** 25.1513 전 요약에는 없다 */
   readiness: ReadinessItem[];
+  /** 25.1514 전 요약에는 없다 */
+  fill_adjust: FillAdjust | null;
+  fill_adjust_error: string | null;
   mirror_account: string | null;
   kis_account: DeskKisAccount | null;
   markets: Partial<Record<DeskMarketKey, DeskMarket & { as_of: string }>>;
 }
 
 export const EMPTY_DESK: DeskView = {
-  as_of: null, updated_at: null, leaderboard: null, rule_history: {}, gate: null, risk: [], champion: [], gate_error: null, readiness: [], mirror_account: null, kis_account: null, markets: {},
+  as_of: null, updated_at: null, leaderboard: null, rule_history: {}, gate: null, risk: [], champion: [], gate_error: null, readiness: [], fill_adjust: null, fill_adjust_error: null, mirror_account: null, kis_account: null, markets: {},
 };
 
 /** 최근 줄들(날짜 역순)에서 보일 것을 고른다. 깨진 JSON 줄은 없는 셈 친다 */
@@ -126,6 +141,8 @@ export function pickDesk(rows: Array<{ as_of: string; summary_json: string | nul
     champion: Array.isArray(첫.s.champion) ? 첫.s.champion : [],
     gate_error: 첫.s.gate_error ?? null,
     readiness: Array.isArray(첫.s.readiness) ? 첫.s.readiness : [],
+    fill_adjust: 첫.s.fill_adjust && typeof 첫.s.fill_adjust === "object" && 첫.s.fill_adjust.rows ? 첫.s.fill_adjust : null,
+    fill_adjust_error: 첫.s.fill_adjust_error ?? null,
     mirror_account: 첫.s.mirror_account ?? null,
     kis_account: 첫.s.kis_account ?? null,
     markets,
@@ -250,4 +267,27 @@ export function gateNowText(i: GateItem): string {
 /** 챔피언 교체 후보 한 줄 — "C · 블록 3개 중 3개 이김 · 같은 기간 +12.00% (챔피언 +6.00%) · 2026-01-01부터" */
 export function championText(r: ChampionRow, mirror: string): string {
   return `${r.id} · 블록 ${r.blocks}개 중 ${r.wins}개 이김 · 같은 기간 ${pctText(r.pct)} (${mirror} ${pctText(r.champion_pct)}) · ${r.from}부터`;
+}
+
+/**
+ * 보정 칸 글 — "+0.95%" 와 아래 작은 글 "−0.05%p ±0.02 · 개선 +0.01%p · 안 잰 회전 20%".
+ * 회전이 없으면 "체결 없음", 잰 칸도 개선도 없으면 보정값 대신 "안 잼"(안 잰 회전이 있으면 그 크기)
+ */
+export function adjustText(x: FillAdjustRow | undefined | null): { main: string; sub: string } {
+  if (!x) return { main: "-", sub: "" };
+  if (!x.fills) return { main: x.adjusted_pct == null ? "-" : pctText(x.adjusted_pct), sub: "체결 없음" };
+  const 잼 = x.adj_pp !== 0 || x.band_pp !== 0 || x.pi_pp !== 0;
+  const 조각 = [
+    잼 ? `${x.adj_pp > 0 ? "−" : "+"}${Math.abs(x.adj_pp).toFixed(2)}%p ±${x.band_pp.toFixed(2)}` : "잰 칸 없음",
+    x.pi_pp ? `지정가 개선 +${x.pi_pp.toFixed(2)}%p` : "",
+    x.unmeasured_pct >= 0.5 ? `안 잰 회전 ${x.unmeasured_pct.toFixed(0)}%` : "",
+    x.close_call ? "이웃과 뒤집힐 수 있음" : "",
+  ].filter(Boolean);
+  return { main: 잼 && x.adjusted_pct != null ? pctText(x.adjusted_pct) : "-", sub: 조각.join(" · ") };
+}
+
+/** H 대보기 한 줄 — KIS 실측 손익 차이 vs 칸으로 설명한 몫 */
+export function adjustCheckText(c: FillAdjustCheck | null | undefined, mirror: string): string | null {
+  if (!c) return null;
+  return `${c.from ?? "?"}~${c.to ?? "?"} KIS 실측 손익 차이 ${ppText(c.actual_pp)} (${mirror} 평가 대비) · 칸으로 설명한 몫 ${ppText(c.explained_pp)} ±${c.band_pp.toFixed(2)} · 안 잰 회전 ${c.unmeasured_pct.toFixed(0)}%`;
 }

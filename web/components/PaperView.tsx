@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import CriteriaTable from "@/components/CriteriaTable";
 import EquityChart, { type Series } from "@/components/EquityChart";
 import Link from "next/link";
-import { DESK_RULES, MARKET_LABEL, championText, pctText as deskPct, ppText, ruleSpanText, rowsById, type DeskView, type RuleSpan } from "@/lib/desk";
+import { DESK_RULES, MARKET_LABEL, adjustCheckText, adjustText, championText, pctText as deskPct, ppText, ruleSpanText, rowsById, type DeskView, type RuleSpan } from "@/lib/desk";
 import { bodyOf, readJson } from "@/lib/http";
 import {
   DEPOSIT_MAX_KRW,
@@ -343,6 +343,17 @@ const CARD = "rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-
  * 계좌 비교 (25.1458, 2026-10-15 사용자 지시 "두개의 모의투자자로는 부족할거 같다") — 일곱 계좌를 한 표에.
  * 값은 계좌 화면과 같은 배치 값이고, 짝은 "무엇을 재는 차이인가" 의 안내다(차이 계산은 주간 요약이 한다).
  */
+/** 순위표의 KIS 체결 보정 칸 (docs/desk.md 8장, 25.1514) — 값은 배치, 글만 여기서 */
+function AdjustCell({ x }: { x: Parameters<typeof adjustText>[0] }) {
+  const t = adjustText(x);
+  return (
+    <td className={`text-right ${x?.close_call ? "text-amber-700 dark:text-amber-400" : ""}`}>
+      {t.main}
+      {t.sub ? <span className="block text-[10px] text-slate-500">{t.sub}</span> : null}
+    </td>
+  );
+}
+
 export function CompareCard({ data, desk }: { data: Data; desk?: DeskView | null }) {
   if (data.accounts.length < 2) return null;
   const 있음 = new Set(data.accounts.map((a) => a.id));
@@ -370,6 +381,11 @@ export function CompareCard({ data, desk }: { data: Data; desk?: DeskView | null
               <th className="py-1 text-left">계좌</th>
               <th className="text-right">공통 구간</th>
               <th className="text-right">R 대비</th>
+              {desk?.fill_adjust ? (
+                <th className="text-right" title="KIS모의 체결 기준 보정(근사·참고) — 순위는 바꾸지 않습니다">
+                  KIS 체결 보정
+                </th>
+              ) : null}
               <th className="text-right">시간가중</th>
               <th className="text-right">손익</th>
               <th className="text-right">평가 총액</th>
@@ -387,6 +403,7 @@ export function CompareCard({ data, desk }: { data: Data; desk?: DeskView | null
                   </td>
                   <td className={`text-right ${tone(r?.window_pct)}`}>{deskPct(r?.window_pct)}</td>
                   <td className={`text-right ${tone(r?.vs_r_pp)}`}>{ppText(r?.vs_r_pp)}</td>
+                  {desk?.fill_adjust ? <AdjustCell x={desk.fill_adjust.rows[a.id]} /> : null}
                   <td className={`text-right ${tone(a.view.twrPct)}`}>{pctText(a.view.twrPct)}</td>
                   <td className={`text-right ${tone(a.view.pnlPct)}`}>{pctText(a.view.pnlPct)}</td>
                   <td className="text-right">{won(a.view.equity)}</td>
@@ -397,6 +414,18 @@ export function CompareCard({ data, desk }: { data: Data; desk?: DeskView | null
           </tbody>
         </table>
       </div>
+      {desk?.fill_adjust ? (
+        <p className="mt-2 text-xs text-slate-500">
+          KIS 체결 보정(근사·참고) = 공통 구간 수익률 − 회전 × KIS모의투자가 잰 &quot;장부 가정을 넘는 체결 비용&quot; + 지정가 매수가 시가로 더 싸게 찼을 몫.
+          KIS 칸은 거래일 {desk.fill_adjust.min_days}일 이상 쌓인 것만 쓰고 지정가 매수 칸은 쓰지 않습니다. ± 는 칸 값의 불확실성, &quot;안 잰 회전&quot; 이 크면 보정이
+          말해 주는 것이 적습니다. KIS모의투자도 실제 시장과 다르고, 순위는 바꾸지 않습니다.
+          {adjustCheckText(desk.fill_adjust.h_check, desk.mirror_account ?? "H") ? (
+            <span className="block">대보기 — {adjustCheckText(desk.fill_adjust.h_check, desk.mirror_account ?? "H")}</span>
+          ) : null}
+        </p>
+      ) : desk?.fill_adjust_error ? (
+        <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">KIS 체결 보정 계산 실패 — {desk.fill_adjust_error}</p>
+      ) : null}
       {desk?.champion?.length ? (
         <div className="mt-3 rounded-lg border border-slate-200 p-2 text-xs dark:border-slate-800">
           <p className="font-medium">챔피언 교체 후보 — 지금 챔피언 {desk.mirror_account ?? "H"}(KIS 가 베낌)를 꾸준히 앞서는 전략</p>
