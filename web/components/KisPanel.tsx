@@ -36,50 +36,53 @@ export function kisSeries(w: Pick<KisWhole, "totals">): Series[] {
   return 첫 ? [{ label: "KIS모의투자 총액", color: "#dc2626", points: 값.map((t) => ({ date: t.as_of, value: t.total / 첫 })) }] : [];
 }
 
-/** 열 때 조회(B) 결과 — KIS 가 준 값 그대로 (docs/paper.md 15.7, 25.1498) */
-function LiveBox({ live }: { live: LiveView }) {
+/** 열 때 조회(B) 결과의 머리 — KIS 가 준 값 그대로 (docs/paper.md 15.7, 25.1498) */
+function LiveHead({ live }: { live: LiveView }) {
+  return <p className="text-xs text-emerald-700 dark:text-emerald-400">KIS에서 방금 조회 · {new Date(live.fetched_at).toLocaleString("ko-KR")}</p>;
+}
+
+/** 보유 표 — 배치 기록과 방금 조회가 같은 열을 쓴다 */
+function HoldingsTable({ rows, cur, pct }: { rows: Array<{ code: string; name?: string | null; qty: number; avg: number | null; price: number | null; value: number | null; pnl: number | null; pnl_pct?: number | null }>; cur: "KRW" | "USD"; pct?: boolean }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="mt-1 w-full min-w-[560px] text-xs">
+        <thead>
+          <tr className="text-left text-slate-500">
+            <th className="py-1">종목</th>
+            <th className="text-right">수량</th>
+            <th className="text-right">평균가</th>
+            <th className="text-right">현재가</th>
+            <th className="text-right">평가금액</th>
+            <th className="text-right">평가손익</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((h) => (
+            <tr key={h.code} className="border-t border-slate-100 dark:border-slate-800">
+              <td className="py-1">{h.name ?? h.code} <span className="text-slate-400">{h.code}</span></td>
+              <td className="text-right">{h.qty.toLocaleString("ko-KR")}</td>
+              <td className="text-right">{amountText(h.avg, cur)}</td>
+              <td className="text-right">{amountText(h.price, cur)}</td>
+              <td className="text-right">{amountText(h.value, cur)}</td>
+              <td className={`text-right ${tone(h.pnl)}`}>
+                {amountText(h.pnl, cur)}
+                {pct && h.pnl_pct != null ? ` (${h.pnl_pct >= 0 ? "+" : ""}${h.pnl_pct.toFixed(2)}%)` : ""}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** 방금 조회한 오늘 주문·체결 (거래내역 칸 맨 위) */
+function LiveExecutions({ live }: { live: LiveView }) {
   const cur = live.currency;
   return (
-    <div className="mt-2 rounded-lg border border-emerald-200 p-2 dark:border-emerald-900">
-      <p className="text-xs text-emerald-700 dark:text-emerald-400">KIS에서 방금 조회 · {new Date(live.fetched_at).toLocaleString("ko-KR")}</p>
-      <p className="mt-1">
-        {cur === "KRW" ? "총평가" : "보유 평가 + 달러 예수금"} <b>{amountText(live.account.total, cur)}</b> · 현금 {amountText(live.account.cash, cur)} · 보유 평가 {amountText(live.account.holdings_value, cur)}
-      </p>
-      {live.holdings.length ? (
-        <div className="overflow-x-auto">
-          <table className="mt-1 w-full min-w-[560px] text-xs">
-            <thead>
-              <tr className="text-left text-slate-500">
-                <th className="py-1">종목</th>
-                <th className="text-right">수량</th>
-                <th className="text-right">평균가</th>
-                <th className="text-right">현재가</th>
-                <th className="text-right">평가금액</th>
-                <th className="text-right">평가손익</th>
-              </tr>
-            </thead>
-            <tbody>
-              {live.holdings.map((h) => (
-                <tr key={h.code} className="border-t border-slate-100 dark:border-slate-800">
-                  <td className="py-1">{h.name ?? h.code} <span className="text-slate-400">{h.code}</span></td>
-                  <td className="text-right">{h.qty.toLocaleString("ko-KR")}</td>
-                  <td className="text-right">{amountText(h.avg, cur)}</td>
-                  <td className="text-right">{amountText(h.price, cur)}</td>
-                  <td className="text-right">{amountText(h.value, cur)}</td>
-                  <td className={`text-right ${tone(h.pnl)}`}>
-                    {amountText(h.pnl, cur)}
-                    {h.pnl_pct != null ? ` (${h.pnl_pct >= 0 ? "+" : ""}${h.pnl_pct.toFixed(2)}%)` : ""}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : (
-        <p className="mt-1 text-xs text-slate-500">보유 종목 없음</p>
-      )}
-      {live.more ? <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">KIS 가 첫 쪽만 주었습니다 — 나머지 보유·체결은 아래 배치 기록(보유내역·거래내역)에서 보세요.</p> : null}
-      <p className="mt-2 text-xs font-semibold">오늘 주문·체결</p>
+    <div className="mb-3 rounded-lg border border-emerald-200 p-2 dark:border-emerald-900">
+      <LiveHead live={live} />
+      <p className="mt-1 text-xs font-semibold">오늘 주문·체결</p>
       {live.executions.length ? (
         <ul className="text-xs">
           {live.executions.map((e, i) => (
@@ -95,6 +98,134 @@ function LiveBox({ live }: { live: LiveView }) {
           오늘 주문이 없습니다{cur === "USD" ? " — 미국 예약주문은 개장(한국 22:30 · 서머타임 끝나면 23:30) 뒤에야 주문이 되어 보입니다" : ""}.
         </p>
       )}
+      {live.more ? <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">KIS 가 첫 쪽만 주었습니다 — 나머지 체결은 아래 배치 기록에서 보세요.</p> : null}
+    </div>
+  );
+}
+
+/**
+ * 고른 칸(요약·보유내역·거래내역·성과)의 본문 (docs/infra.md 25.1524). 방금 조회(B) 결과도 칸별로 나눠 넣는다 — 예전에는 조회 상자 하나(계좌·보유·
+ * 오늘 체결)가 칸 막대 바로 밑에 칸과 상관없이 붙어, 폰에서는 칸을 바꿔도 화면에 보이는 것이 그 상자뿐이라 "내용이 안 바뀐다" 로 보였다.
+ */
+export function KisBody({ sub, market, v, whole, live }: { sub: Sub; market: KisMarket; v: KisMarketView; whole: KisWhole | null; live?: LiveView | null }) {
+  const cur = market === "US" ? "USD" : "KRW";
+  return (
+    <div className="mt-3 text-sm" role="tabpanel" data-sub={sub}>
+      {sub === "summary" ? (
+        <>
+          {live ? (
+            <div className="mb-2 rounded-lg border border-emerald-200 p-2 dark:border-emerald-900">
+              <LiveHead live={live} />
+              <p className="mt-1">
+                {live.currency === "KRW" ? "총평가" : "보유 평가 + 달러 예수금"} <b>{amountText(live.account.total, live.currency)}</b> · 현금 {amountText(live.account.cash, live.currency)} · 보유 평가{" "}
+                {amountText(live.account.holdings_value, live.currency)} · 보유 {live.holdings.length}종목{live.more ? "+" : ""} · 오늘 주문 {live.executions.length}건
+              </p>
+            </div>
+          ) : null}
+          {v.account ? (
+            market === "US" ? (
+              <p>
+                보유 평가 <b>{amountText(v.account.holdings_value, cur)}</b> · 달러 예수금 {amountText(v.account.cash, cur)}
+                <span className="text-xs text-slate-500"> ({v.as_of} 배치 기준 — 미국 매수 돈은 원화 예수금에서 자동 환전으로 나갑니다)</span>
+              </p>
+            ) : (
+              <p>
+                총평가 <b>{amountText(v.account.total, cur)}</b> · 예수금(D+2) {amountText(v.account.cash, cur)} · 보유 평가 {amountText(v.account.holdings_value, cur)}
+                <span className="text-xs text-slate-500"> ({v.as_of} 배치 기준)</span>
+              </p>
+            )
+          ) : null}
+          <ul className="mt-2 space-y-0.5 text-slate-600 dark:text-slate-300">
+            {brokerLines(v.as_of ? { as_of: v.as_of, diff: v.diff, summary: v.summary } : null).map((x) => (
+              <li key={x}>{x}</li>
+            ))}
+          </ul>
+        </>
+      ) : null}
+
+      {sub === "holdings" ? (
+        <>
+          {live ? (
+            <div className="mb-3 rounded-lg border border-emerald-200 p-2 dark:border-emerald-900">
+              <LiveHead live={live} />
+              {live.holdings.length ? <HoldingsTable rows={live.holdings} cur={live.currency} pct /> : <p className="mt-1 text-xs text-slate-500">보유 종목 없음</p>}
+              {live.more ? <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">KIS 가 첫 쪽만 주었습니다 — 나머지 보유는 아래 배치 기록에서 보세요.</p> : null}
+            </div>
+          ) : null}
+          {live ? <p className="text-xs font-semibold text-slate-500">배치 기록</p> : null}
+          {v.holdings.length ? (
+            <>
+              <HoldingsTable rows={v.holdings} cur={cur} />
+              <p className="mt-1 text-xs text-slate-500">{v.as_of} 배치 때 KIS 잔고 조회 그대로(현재가는 그 시각 기준 — 국내는 전날 종가, 미국은 개장 전).</p>
+            </>
+          ) : (
+            <p className="text-slate-500">{v.as_of ? `${v.as_of} 배치 기준 보유 종목이 없습니다.` : "아직 잔고 기록이 없습니다."}</p>
+          )}
+        </>
+      ) : null}
+
+      {sub === "trades" ? (
+        <>
+          {live ? <LiveExecutions live={live} /> : null}
+          {v.orders.length ? (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[640px] text-xs">
+                <thead>
+                  <tr className="text-left text-slate-500">
+                    <th className="py-1">날짜</th>
+                    <th>종목</th>
+                    <th>구분</th>
+                    <th className="text-right">수량</th>
+                    <th className="text-right">주문가</th>
+                    <th>상태</th>
+                    <th className="text-right">체결</th>
+                    <th className="text-right">체결가</th>
+                    <th>비고</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {v.orders.map((o) => (
+                    <tr key={o.id} className="border-t border-slate-100 dark:border-slate-800">
+                      <td className="py-1 whitespace-nowrap">{o.trade_date}</td>
+                      <td>{o.name ?? o.code}</td>
+                      <td className={o.side === "buy" ? "text-red-600 dark:text-red-400" : "text-blue-600 dark:text-blue-400"}>
+                        {o.side === "buy" ? "매수" : "매도"}
+                        {o.reason === "정리" ? "(정리)" : ""}
+                      </td>
+                      <td className="text-right">{o.quantity.toLocaleString("ko-KR")}</td>
+                      <td className="text-right">{priceText(o, cur)}</td>
+                      <td>{statusText(o.status)}</td>
+                      <td className="text-right">{o.filled_qty ?? "-"}</td>
+                      <td className="text-right">{amountText(o.avg_price, cur)}</td>
+                      <td className="max-w-[16rem] truncate text-slate-500" title={o.message ?? ""}>
+                        {o.message ?? ""}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="text-slate-500">아직 낸 주문이 없습니다.</p>
+          )}
+        </>
+      ) : null}
+
+      {sub === "perf" ? (
+        <>
+          <ul className="space-y-0.5">
+            {perfLines(whole?.perf ?? null).map((x) => (
+              <li key={x}>{x}</li>
+            ))}
+          </ul>
+          {whole && (kisSeries(whole)[0]?.points.length ?? 0) > 1 ? <EquityChart series={kisSeries(whole)} height={220} /> : null}
+          {whole?.totals_error ? <p className="text-xs text-amber-700">총액 추이를 읽지 못했습니다 — 위 숫자는 마지막 배치 값입니다.</p> : null}
+          <p className="mt-1 text-xs text-slate-500">
+            성과는 국내·미국을 합친 계좌 전체 원화 총액으로 국내 배치가 날마다 냅니다(미국 매수 돈이 원화 예수금에서 자동 환전되어 시장별로 나누면 수익률이 되지 않습니다). 모의 계좌는 입출금이 없어 총액 비가 곧 수익률입니다.
+            [확인필요] 미국 주식을 사고판 직후 결제 전 하루는 미국 평가와 원화 예수금 차감이 엇갈려 총액이 잠깐 부풀거나 줄 수 있습니다 — 첫 미국 체결 뒤 확인합니다.
+          </p>
+        </>
+      ) : null}
     </div>
   );
 }
@@ -137,7 +268,6 @@ export default function KisPanel() {
   }, []);
 
   const v = data?.[market];
-  const cur = market === "US" ? "USD" : "KRW";
   return (
     <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
       <h2 className="text-base font-semibold">KIS모의투자 — H(지주사) 주문 베끼기</h2>
@@ -173,6 +303,18 @@ export default function KisPanel() {
           </button>
         ))}
       </div>
+      <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+        <button
+          type="button"
+          disabled={liveBusy}
+          onClick={() => void fetchLive(market)}
+          className="rounded border border-emerald-600 px-2 py-0.5 text-emerald-700 disabled:opacity-50 dark:text-emerald-400"
+        >
+          {liveBusy ? "조회 중…" : `${market === "KR" ? "국내" : "미국"} 지금 KIS에서 조회`}
+        </button>
+        <span className="text-xs text-slate-500">조회만 합니다 · 결과는 요약·보유내역·거래내역 칸에 나뉘어 보입니다 · 같은 시장은 30초에 한 번 · 일일 배치가 도는 동안은 막힘</span>
+      </div>
+      {liveNote ? <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">{liveNote}</p> : null}
       <div className="mt-3 flex gap-1 overflow-x-auto border-b border-slate-200 text-sm dark:border-slate-800" role="tablist" aria-label="KIS모의투자 화면">
         {SUBS.map(([s, label]) => (
           <button
@@ -188,138 +330,9 @@ export default function KisPanel() {
         ))}
       </div>
 
-      <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
-        <button
-          type="button"
-          disabled={liveBusy}
-          onClick={() => void fetchLive(market)}
-          className="rounded border border-emerald-600 px-2 py-0.5 text-emerald-700 disabled:opacity-50 dark:text-emerald-400"
-        >
-          {liveBusy ? "조회 중…" : `${market === "KR" ? "국내" : "미국"} 지금 KIS에서 조회`}
-        </button>
-        <span className="text-xs text-slate-500">조회만 합니다 · 같은 시장은 30초에 한 번 · 일일 배치가 도는 동안은 막힘</span>
-      </div>
-      {liveNote ? <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">{liveNote}</p> : null}
-      {live[market] ? <LiveBox live={live[market]!} /> : null}
       {error ? <p className="mt-2 text-sm text-red-600">{error}</p> : null}
       {!data && !error ? <p className="mt-2 text-sm text-slate-500">불러오는 중…</p> : null}
-      {v ? (
-        <div className="mt-3 text-sm">
-          {sub === "summary" ? (
-            <>
-              {v.account ? (
-                market === "US" ? (
-                  <p>
-                    보유 평가 <b>{amountText(v.account.holdings_value, cur)}</b> · 달러 예수금 {amountText(v.account.cash, cur)}
-                    <span className="text-xs text-slate-500"> ({v.as_of} 배치 기준 — 미국 매수 돈은 원화 예수금에서 자동 환전으로 나갑니다)</span>
-                  </p>
-                ) : (
-                  <p>
-                    총평가 <b>{amountText(v.account.total, cur)}</b> · 예수금(D+2) {amountText(v.account.cash, cur)} · 보유 평가 {amountText(v.account.holdings_value, cur)}
-                    <span className="text-xs text-slate-500"> ({v.as_of} 배치 기준)</span>
-                  </p>
-                )
-              ) : null}
-              <ul className="mt-2 space-y-0.5 text-slate-600 dark:text-slate-300">
-                {brokerLines(v.as_of ? { as_of: v.as_of, diff: v.diff, summary: v.summary } : null).map((x) => (
-                  <li key={x}>{x}</li>
-                ))}
-              </ul>
-            </>
-          ) : null}
-
-          {sub === "holdings" ? (
-            v.holdings.length ? (
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[560px] text-xs">
-                  <thead>
-                    <tr className="text-left text-slate-500">
-                      <th className="py-1">종목</th>
-                      <th className="text-right">수량</th>
-                      <th className="text-right">평균가</th>
-                      <th className="text-right">현재가</th>
-                      <th className="text-right">평가금액</th>
-                      <th className="text-right">평가손익</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {v.holdings.map((h) => (
-                      <tr key={h.code} className="border-t border-slate-100 dark:border-slate-800">
-                        <td className="py-1">{h.name ?? h.code} <span className="text-slate-400">{h.code}</span></td>
-                        <td className="text-right">{h.qty.toLocaleString("ko-KR")}</td>
-                        <td className="text-right">{amountText(h.avg, cur)}</td>
-                        <td className="text-right">{amountText(h.price, cur)}</td>
-                        <td className="text-right">{amountText(h.value, cur)}</td>
-                        <td className={`text-right ${tone(h.pnl)}`}>{amountText(h.pnl, cur)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                <p className="mt-1 text-xs text-slate-500">{v.as_of} 배치 때 KIS 잔고 조회 그대로(현재가는 그 시각 기준 — 국내는 전날 종가, 미국은 개장 전).</p>
-              </div>
-            ) : (
-              <p className="text-slate-500">{v.as_of ? `${v.as_of} 배치 기준 보유 종목이 없습니다.` : "아직 잔고 기록이 없습니다."}</p>
-            )
-          ) : null}
-
-          {sub === "trades" ? (
-            v.orders.length ? (
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[640px] text-xs">
-                  <thead>
-                    <tr className="text-left text-slate-500">
-                      <th className="py-1">날짜</th>
-                      <th>종목</th>
-                      <th>구분</th>
-                      <th className="text-right">수량</th>
-                      <th className="text-right">주문가</th>
-                      <th>상태</th>
-                      <th className="text-right">체결</th>
-                      <th className="text-right">체결가</th>
-                      <th>비고</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {v.orders.map((o) => (
-                      <tr key={o.id} className="border-t border-slate-100 dark:border-slate-800">
-                        <td className="py-1 whitespace-nowrap">{o.trade_date}</td>
-                        <td>{o.name ?? o.code}</td>
-                        <td className={o.side === "buy" ? "text-red-600 dark:text-red-400" : "text-blue-600 dark:text-blue-400"}>
-                          {o.side === "buy" ? "매수" : "매도"}{o.reason === "정리" ? "(정리)" : ""}
-                        </td>
-                        <td className="text-right">{o.quantity.toLocaleString("ko-KR")}</td>
-                        <td className="text-right">{priceText(o, cur)}</td>
-                        <td>{statusText(o.status)}</td>
-                        <td className="text-right">{o.filled_qty ?? "-"}</td>
-                        <td className="text-right">{amountText(o.avg_price, cur)}</td>
-                        <td className="max-w-[16rem] truncate text-slate-500" title={o.message ?? ""}>{o.message ?? ""}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <p className="text-slate-500">아직 낸 주문이 없습니다.</p>
-            )
-          ) : null}
-
-          {sub === "perf" ? (
-            <>
-              <ul className="space-y-0.5">
-                {perfLines(whole?.perf ?? null).map((x) => (
-                  <li key={x}>{x}</li>
-                ))}
-              </ul>
-              {whole && (kisSeries(whole)[0]?.points.length ?? 0) > 1 ? <EquityChart series={kisSeries(whole)} height={220} /> : null}
-              {whole?.totals_error ? <p className="text-xs text-amber-700">총액 추이를 읽지 못했습니다 — 위 숫자는 마지막 배치 값입니다.</p> : null}
-              <p className="mt-1 text-xs text-slate-500">
-                성과는 국내·미국을 합친 계좌 전체 원화 총액으로 국내 배치가 날마다 냅니다(미국 매수 돈이 원화 예수금에서 자동 환전되어 시장별로 나누면 수익률이 되지 않습니다). 모의 계좌는 입출금이 없어 총액 비가 곧 수익률입니다.
-                [확인필요] 미국 주식을 사고판 직후 결제 전 하루는 미국 평가와 원화 예수금 차감이 엇갈려 총액이 잠깐 부풀거나 줄 수 있습니다 — 첫 미국 체결 뒤 확인합니다.
-              </p>
-            </>
-          ) : null}
-        </div>
-      ) : null}
+      {v ? <KisBody sub={sub} market={market} v={v} whole={whole} live={live[market] ?? null} /> : null}
       <p className="mt-2 text-xs text-slate-500">
         한국투자증권 모의투자 계좌(가상 돈)에 낸 같은 주문의 실제 체결과 가상모의투자의 일봉 판정을 견줍니다. 모의 체결도 실제 시장과 같지 않아 참고로만 봅니다.
       </p>
