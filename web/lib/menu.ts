@@ -8,10 +8,15 @@
  * 사용자가 "장기 적립은 메뉴에 노출" 을 원해 다시 올렸다. 한 칸이 약 62px(375px 폭)이라 아이콘·글자는 들어간다.
  * 2026-10-08 사용자 지시 "메뉴에 알림이랑 종목분석이랑 바꿔줘" — 아래 막대의 알림 자리에 종목 분석(25.1016)이 들어가고,
  * 알림은 더보기로 갔다. 넓은 화면 위 메뉴에서도 두 칸의 자리를 맞바꿨다.
+ *
+ * **2026-10-16 개편 (docs/desk.md 1장)** — 사용자 지시 "이 시스템의 목적에 맞게 웹앱 페이지도 전면 개편"·"전부 다 진행해줘".
+ * 이 시스템의 목적은 자동 매매(로보어드바이저)이고 가상모의투자·KIS모의투자가 중심이다(CLAUDE.md "시스템의 중심").
+ * 그래서 맨 앞 두 칸이 **운용(첫 화면 `/`)·전략(`/paper`)** 이 되고, 종목선정·분석 화면은 재료로 뒤로 간다. 폰 아래 막대는
+ * 운용·전략·추천·내 계좌·분석·더보기 — 적립·찾기는 더보기로. KIS·연구실 화면이 생기면(desk.md 4·5장) 추천·분석 자리를 넘겨받는다.
  */
 
 export type IconName =
-  | "recommend" | "search" | "wallet" | "bell" | "more" | "analysis"
+  | "desk" | "strategy" | "recommend" | "search" | "wallet" | "bell" | "more" | "analysis"
   | "etf" | "report" | "backtest" | "status" | "settings"
   | "logout" | "back" | "chevron" | "close" | "info";
 
@@ -25,6 +30,9 @@ export interface MenuItem {
 
 /** 넓은 화면의 위쪽 가로 메뉴. 자리가 넉넉해 거의 다 보인다 */
 export const DESKTOP_TABS: Array<{ href: string; label: string }> = [
+  // 운용 상황실과 전략(가상모의투자 계좌들)이 맨 앞 (docs/desk.md 1장, 2026-10-16)
+  { href: "/", label: "운용" },
+  { href: "/paper", label: "전략" },
   { href: "/recommend", label: "오늘의 추천" },
   // 장기 적립은 타이밍을 보지 않아 오늘의 추천과 나눴다 (docs/etf.md 4장)
   { href: "/etf", label: "장기 적립" },
@@ -42,9 +50,9 @@ export const DESKTOP_TABS: Array<{ href: string; label: string }> = [
 
 /** 폰 아래 막대. 엄지가 닿는 자리에 자주 쓰는 다섯과 더보기 */
 export const PHONE_TABS: MenuItem[] = [
+  { href: "/", label: "운용", icon: "desk" },
+  { href: "/paper", label: "전략", icon: "strategy" },
   { href: "/recommend", label: "추천", icon: "recommend" },
-  { href: "/etf", label: "적립", icon: "etf" },
-  { href: "/screener", label: "찾기", icon: "search" },
   { href: "/portfolio", label: "내 계좌", icon: "wallet" },
   { href: "/analysis", label: "분석", icon: "analysis" },
   { href: "/more", label: "더보기", icon: "more" },
@@ -52,17 +60,19 @@ export const PHONE_TABS: MenuItem[] = [
 
 /** 더보기 화면. 아래 막대에 없는 화면은 여기서 간다 (로그아웃도 여기 있다) */
 export const MORE_ITEMS: MenuItem[] = [
-  { href: "/alerts", label: "알림", icon: "bell", note: "장중 알림 기록과 관심 종목" },
+  // 전략의 재료 — 종목선정·분석 (docs/desk.md 1장). 아래 막대에서 내려왔다(2026-10-16)
+  { href: "/etf", label: "장기 적립", icon: "etf", note: "재료 · 타이밍을 보지 않는 ETF 적립" },
+  { href: "/screener", label: "종목 찾기", icon: "search", note: "재료 · 조건으로 종목 거르기" },
   { href: "/reports", label: "일일 리포트", icon: "report", note: "텔레그램으로 보낸 아침 리포트 보관함" },
-  // 예수금을 넣으면 배치가 규칙대로 사고파는 쌍둥이 모의 계좌 (docs/paper.md, 2026-10-15 사용자 지시)
-  { href: "/paper", label: "가상모의투자", icon: "wallet", note: "예수금 입금 · 가상모의투자 계좌 손익과 매매 일지 (KIS모의투자 아님)" },
   { href: "/backtest", label: "백테스트", icon: "backtest", note: "규칙이 과거에 통했는지" },
+  { href: "/alerts", label: "알림", icon: "bell", note: "장중 알림 기록과 관심 종목" },
   { href: "/status", label: "시스템 상태", icon: "status", note: "배치·알림이 도는지 보고, 수동으로 돌린다" },
   { href: "/settings", label: "설정", icon: "settings", note: "가중치·목표가·손절선·세율" },
 ];
 
 /** 폰 위쪽 제목줄에 쓰는 화면 이름. 본문 제목은 폰에서 숨긴다(두 번 나오면 화면만 밀린다) */
 export const TITLES: Record<string, string> = {
+  "/": "운용",
   "/recommend": "오늘의 추천",
   "/etf": "장기 적립",
   "/screener": "종목 찾기",
@@ -70,7 +80,7 @@ export const TITLES: Record<string, string> = {
   "/portfolio": "내 포트폴리오",
   "/alerts": "알림",
   "/reports": "일일 리포트",
-  "/paper": "가상모의투자",
+  "/paper": "전략",
   "/backtest": "백테스트",
   "/settings": "설정",
   "/status": "시스템 상태",
@@ -85,8 +95,9 @@ export const TITLES: Record<string, string> = {
  */
 export const BACK_TO: Record<string, string> = {
   "/stocks": "/recommend",
+  "/etf": "/more",
+  "/screener": "/more",
   "/reports": "/more",
-  "/paper": "/more",
   "/backtest": "/more",
   "/settings": "/more",
   "/status": "/more",

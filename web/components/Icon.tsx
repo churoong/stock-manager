@@ -7,6 +7,22 @@ import type { IconName } from "@/lib/menu";
  * (2026-09-18 사용자 "메뉴 위치나 버튼을 찾기 어렵다"). 글자는 그대로 두고 아이콘을 더한다.
  */
 const PATHS: Record<IconName, React.ReactNode> = {
+  // 운용 상황실 — 계기판 (docs/desk.md, 25.1501)
+  desk: (
+    <>
+      <path d="M4 16.5a8 8 0 0 1 16 0" />
+      <path d="M12 16.5l3.8-4.8" />
+      <path d="M3 20h18" />
+    </>
+  ),
+  // 전략(가상모의투자 계좌들) — 과녁
+  strategy: (
+    <>
+      <circle cx="12" cy="12" r="8.5" />
+      <circle cx="12" cy="12" r="4.5" />
+      <circle cx="12" cy="12" r="1" />
+    </>
+  ),
   recommend: <path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z" />,
   search: (
     <>

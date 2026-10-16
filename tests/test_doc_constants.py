@@ -28,6 +28,7 @@ from batch.services import adjust as adj
 from batch.services import broker_mirror as bm
 from batch.services import buyback as bb
 from batch.services import company as co
+from batch.services import desk as dk
 from batch.services import execution_quality as eqm
 from batch.services import factor_ic as fic
 from batch.services import holding as hold
@@ -72,6 +73,7 @@ BROKERS = 읽기("brokers.md")
 REACTION = 읽기("disclosure_reaction.md")
 PAPER = 읽기("paper.md")
 COMPANY = 읽기("company.md")
+DESK = 읽기("desk.md")
 
 
 def 검사(문서본문: str, 찾을것: str, 무엇: str) -> None:
@@ -701,7 +703,7 @@ class Test밸류_분모:
     "pick_history", "etf_accounts", "etf_tilt", "after_hours", "broker_stats", "disclosure_reaction", "luck", "postmortem",
     "divergence", "tax_sim", "verdict", "forecast_track", "patterns", "insights", "history",
     "event_history", "simulation", "candidate_factors", "cb_overhang", "buy_thesis", "plan_fill", "target_units", "paper", "risk_gate", "execution_quality", "company",
-    "broker_mirror", "holding",
+    "broker_mirror", "holding", "desk",
 )  # fmt: skip
 
 #: 아직 그물 밖인 모듈과 **왜 아직인지**. 하나씩 줄여 간다
@@ -937,6 +939,12 @@ class Test이웃_모듈들:
         검사(PAPER, f"{eqm.PLAN_LOOKBACK_DAYS}일(`PLAN_LOOKBACK_DAYS`)", "주문표 매수 창 (25.1452)")
         검사(PAPER, f"{eqm.FLAG_LOOKBACK_DAYS}일(`FLAG_LOOKBACK_DAYS`)", "플래그 뒤 매도 창 (25.1452)")
         검사(PAPER, "**" + "·".join(str(n) for n in pp.DECISION_HORIZONS) + " 번째 거래일**", "결정 원장 성과 창")
+
+    def test_운용_상황실(self) -> None:
+        """운용 첫 화면 요약 (docs/desk.md 2장, docs/infra.md 25.1501)."""
+        검사(DESK, f"경고 줄은 {dk.MAX_WARNINGS}줄까지", "확인할 일 경고 줄 상한 (25.1501)")
+        검사(DESK, "무작위 대조 R1·R2 평균", "R 대비 기준선 (25.1501)")
+        assert dk.CONTROL_IDS == ("R1", "R2")
 
     def test_스트레스_표본_하한(self) -> None:
         검사(STRESS, f"창 길이의 {st.MIN_SAMPLE_MULTIPLE}배에 못 미치면", "스트레스 표본 하한")

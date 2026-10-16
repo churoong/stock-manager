@@ -28,10 +28,10 @@ import { DISCLAIMER } from "@/lib/notice";
 const 앱 = join(process.cwd(), "app");
 
 /** 화면이 아니라서 푸터가 없어도 되는 곳과 **왜인지** */
-const 화면이_아닌_것: Record<string, string> = {
-  "page.tsx":
-    "그리는 것이 없다. `redirect(\"/recommend\")` 한 줄이라 사용자가 보는 순간이 없다",
-};
+//
+// 뿌리 `page.tsx` 는 전에 `redirect("/recommend")` 한 줄이라 여기 있었다. 2026-10-16 개편으로 운용 상황실을 그리게 되어
+// 푸터를 달고 목록에서 뺐다 (docs/desk.md, 25.1501)
+const 화면이_아닌_것: Record<string, string> = {};
 
 function 화면들(디렉터리: string): string[] {
   const 나온것: string[] = [];

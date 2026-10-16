@@ -2500,6 +2500,18 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
                 if (step_log.get("broker") or {}).get("missing"):
                     warnings.append(원인)
                 _notify_failure(client, market, name, 원인, dry_run=dry_run, title="KIS모의투자 확인 필요")
+        # 운용 상황실 요약 (docs/desk.md 2장, 25.1501) — 웹 첫 화면이 읽는다. 곁다리: 실패해도 배치는 그대로,
+        # 실행 기록에만. 가상모의투자 단계가 실패한 날에도 적는다 — 그 실패가 "확인할 일" 맨 위에 보여야 한다
+        try:
+            from batch.jobs import desk as desk_job
+
+            step_log["desk"] = desk_job.write(
+                client, market, datetime.now(UTC), trade_date=decision.trade_date,
+                session_date=decision.session_date, step_log=step_log, warnings=warnings,
+            )  # fmt: skip
+        except Exception as exc:  # noqa: BLE001 — 곁다리
+            log.exception("운용 요약 단계 실패")
+            step_log["desk"] = {"error": str(exc)[:300]}
         status = "partial" if warnings else "success"
         try:
             db.finish_batch_run(client, run_id, status=status, step_log=step_log)

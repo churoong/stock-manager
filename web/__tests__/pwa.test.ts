@@ -20,7 +20,7 @@ describe("설치 준비", () => {
     expect(m.name).toBeTruthy();
     expect(m.short_name).toBeTruthy();
     expect(m.display).toBe("standalone");
-    expect(m.start_url).toBe("/recommend");
+    expect(m.start_url).toBe("/"); // 운용 상황실 (docs/desk.md, 2026-10-16 개편)
     const sizes = (m.icons ?? []).map((i) => i.sizes);
     expect(sizes).toContain("192x192");
     expect(sizes).toContain("512x512");

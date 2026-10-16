@@ -14,8 +14,8 @@ export default function manifest(): MetadataRoute.Manifest {
     name: "주식 분석·매매관리",
     short_name: "주식관리",
     description: "개인용 주식 분석·매매관리. 추천 근거를 화면에서 확인할 수 있다",
-    // 설치 뒤 열리는 화면. 매일 보는 것이 오늘의 추천이다
-    start_url: "/recommend",
+    // 설치 뒤 열리는 화면 = 운용 상황실 (docs/desk.md, 2026-10-16 개편 — 전에는 오늘의 추천)
+    start_url: "/",
     scope: "/",
     display: "standalone",
     orientation: "portrait",
@@ -31,8 +31,9 @@ export default function manifest(): MetadataRoute.Manifest {
       { src: "/icon-maskable-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
     ],
     shortcuts: [
+      { name: "운용", url: "/" },
+      { name: "전략", url: "/paper" },
       { name: "오늘의 추천", url: "/recommend" },
-      { name: "내 포트폴리오", url: "/portfolio" },
       { name: "시스템 상태", url: "/status" },
     ],
   };
