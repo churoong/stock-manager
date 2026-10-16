@@ -22,7 +22,7 @@ export default function KisQuality() {
     void (async () => {
       const r = await readJson<Record<"KR" | "US", QualityRow[]>>("/api/kis/quality");
       const body = bodyOf<Record<"KR" | "US", QualityRow[]>>(r);
-      if (body.errors?.length) setError(body.errors.join(" · "));
+      if (!r.ok || body.errors?.length) setError(body.errors?.join(" · ") || r.error || "실행 품질을 읽지 못했습니다");
       else if (!Array.isArray(body.KR) || !Array.isArray(body.US)) setError("실행 품질을 읽지 못했습니다(응답 꼴이 다름 — 새로 고침해 주세요)");
       else setData({ KR: body.KR, US: body.US });
     })();

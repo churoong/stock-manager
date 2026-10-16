@@ -23,7 +23,12 @@ from batch.jobs import broker_mirror as bmj
 from batch.services import desk
 
 TWR_SQL = "SELECT account_id, as_of, twr_index FROM paper_daily ORDER BY account_id, as_of"
-NAMES_SQL = "SELECT id, name FROM paper_accounts"
+NAMES_SQL = "SELECT id, name, rule_version FROM paper_accounts"
+#: 판 이력 (25.1505) — 계좌마다 판을 처음 본 결정일. 몇십 행
+RULE_VERSIONS_SQL = "SELECT account_id, rule_version, since FROM paper_rule_versions"
+RULE_VERSION_INSERT_SQL = (
+    "INSERT OR IGNORE INTO paper_rule_versions (account_id, rule_version, since, noted_at) VALUES (?, ?, ?, ?)"
+)
 #: 이 실행이 판정한 체결 = 주문이 이 판정일(`closed_on`)에 체결로 닫힌 것 —
 #: 배치가 하루 빠져 밀린 체결(체결일이 더 이른 것)도 든다(25.1503, 검토 5).
 #: 체결 색인(account_id, fill_date)을 타게 체결일 아래 끝을 둔다
@@ -49,7 +54,7 @@ KIS_ORDERS_SQL = (
     " COALESCE(s.name_ko, s.name_en, s.ticker) AS name FROM paper_broker_orders b"
     " LEFT JOIN stocks s ON s.id = b.stock_id WHERE b.broker = ? AND b.trade_date = ? ORDER BY b.id"
 )
-#: 판 이력 — 주문 원장을 (계좌, 판)으로 묶는다. 주문 원장 전체를 훑는다(1년 수만 행 — 실행마다).
+#: 판마다 주문 수 — 주문 원장을 (계좌, 판)으로 묶는다. 주문 원장 전체를 훑는다(1년 수만 행 — 실행마다).
 #: 커지면 판이 바뀐 날만 읽게 줄인다
 RULES_SQL = (
     "SELECT account_id, rule_version, MIN(decided_on) AS first, MAX(decided_on) AS last, COUNT(*) AS n"
@@ -78,7 +83,8 @@ def write(
     for r in client.execute(TWR_SQL).dicts():
         if r["twr_index"] is not None:
             계열.setdefault(str(r["account_id"]), []).append((str(r["as_of"]), float(r["twr_index"])))
-    이름 = {str(r["id"]): str(r["name"] or r["id"]) for r in client.execute(NAMES_SQL).dicts()}
+    계좌들 = client.execute(NAMES_SQL).dicts()
+    이름 = {str(r["id"]): str(r["name"] or r["id"]) for r in 계좌들}
     순위 = desk.leaderboard(계열, 이름)
 
     h = bmj.MIRROR_ACCOUNT
@@ -105,6 +111,10 @@ def write(
         "kis_orders": [{"side": r["side"], "name": r["name"] or r["code"], "quantity": r["quantity"],
                         "order_type": r["order_type"], "limit_price": r["limit_price"], "status": r["status"],
                         "reason": r["reason"], "message": str(r["message"] or "")[:REASON_CHARS]} for r in kis주문],
+        # 지주사(H) 그날 기록 — 회사별 가중치·표본·추천/자격/고름 수.
+        # 연구실이 날마다 쌓인 이 칸으로 가중치 추이를 그린다(25.1506)
+        "holding": next((v["holding"] for a, v in (p.get("accounts") or {}).items()
+                         if a == h and isinstance(v, dict) and isinstance(v.get("holding"), dict)), None),
         "kis_step": {k: v for k, v in (step_log.get("broker") or {}).items()
                      if k in ("off", "send", "sent", "planned", "not_sent", "reconciled", "error")},
         "checks": desk.checks(
@@ -114,10 +124,8 @@ def write(
     }  # fmt: skip
     kis = client.execute(KIS_SQL, [bmj.BROKER]).dicts()
     요약 = (_json(kis[0]["summary_json"]) or {}) if kis else {}
-    판 = [{"account": r["account_id"], "version": r["rule_version"], "first": r["first"], "last": r["last"],
-          "orders": r["n"]} for r in client.execute(RULES_SQL).dicts()]  # fmt: skip
-    공통 = {"leaderboard": 순위, "rule_history": desk.rule_history(판, 계열), "mirror_account": h, "updated_at": 지금,
-          "last_market": market,
+    판이력, 판오류 = _판이력(client, 계좌들, 계열, trade_date, 지금)
+    공통 = {"leaderboard": 순위, "rule_history": 판이력, "mirror_account": h, "updated_at": 지금, "last_market": market,
           "kis_account": {"as_of": kis[0]["as_of"] if kis else None, "account_krw": 요약.get("account_krw"),
                           "perf": 요약.get("perf")}}  # fmt: skip
     앞 = client.execute(DESK_READ_SQL, [as_of]).rows
@@ -128,7 +136,26 @@ def write(
         그날 = {"markets": ((_json(전[0][0]) if 전 else None) or {}).get("markets") or {}}
     합 = desk.merge(그날, market, 시장칸, 공통)
     client.execute(DESK_UPSERT_SQL, [as_of, json.dumps(합, ensure_ascii=False), 지금])
-    return {"as_of": as_of, "accounts": len(순위["rows"]), "checks": len(시장칸["checks"])}
+    out = {"as_of": as_of, "accounts": len(순위["rows"]), "checks": len(시장칸["checks"])}
+    return out | ({"rule_history_error": 판오류} if 판오류 else {})
+
+
+def _판이력(
+    client: Any, 계좌들: list[dict[str, Any]], 계열: dict[str, list[tuple[str, float]]], trade_date: str, 지금: str,
+) -> tuple[dict[str, Any], str | None]:
+    """판 이력 표를 채우고 판 이력을 낸다 — 실패해도 운용 요약은 적는다(판 이력만 비움, 25.1505 검토 8)."""
+    try:
+        알던 = [(str(r["account_id"]), int(r["rule_version"]), str(r["since"]))
+              for r in client.execute(RULE_VERSIONS_SQL).dicts()]  # fmt: skip
+        지금판 = {str(r["id"]): int(r["rule_version"]) for r in 계좌들 if r.get("rule_version") is not None}
+        새 = desk.new_versions(지금판, 알던, trade_date)
+        for a, v, since in 새:
+            client.execute(RULE_VERSION_INSERT_SQL, [a, v, since, 지금])
+        주문수 = {(str(r["account_id"]), int(r["rule_version"])): int(r["n"])
+                for r in client.execute(RULES_SQL).dicts()}  # fmt: skip
+        return desk.rule_history(알던 + 새, 계열, 주문수), None
+    except Exception as exc:  # noqa: BLE001 — 곁다리 안의 곁다리
+        return {}, f"{type(exc).__name__}: {str(exc)[:120]}"
 
 
 def _json(text: Any) -> dict[str, Any] | None:

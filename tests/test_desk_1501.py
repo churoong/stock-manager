@@ -109,30 +109,43 @@ def test_write_merges_both_markets(monkeypatch: pytest.MonkeyPatch) -> None:
     assert kr["orders_by_account"] == {"B": 1}
     assert any("장부 검산 어긋남: 계좌 R1" in x["text"] for x in kr["checks"])
     assert [r["id"] for r in s["leaderboard"]["rows"]][0] in ("B", "R1")
-    # R1 은 10-15 이하 기록이 없어 첫 값(10-16 1.0)부터 → 0%, B 는 1.0 → 1.02 = +2%
-    assert s["rule_history"]["B"] == [{"version": 1, "from": "2026-10-15", "to": None, "orders": 1, "pct": pytest.approx(2.0),
+    # 판 이력 표를 처음 채운다 — 계좌마다 지금 판, since '' (계좌의 처음부터). B 는 1.0 → 1.02 = +2%, R1 은 0%
+    assert s["rule_history"]["B"] == [{"version": 1, "from": "", "to": None, "orders": 1, "pct": pytest.approx(2.0),
                                         "control_pct": pytest.approx(0.0), "vs_r_pp": pytest.approx(2.0)}]
-    assert s["rule_history"].keys() == {"B"}
+    assert {"A", "B", "H", "R1"} <= s["rule_history"].keys()  # 주문이 없어도 판은 있다
+    # 판을 올리면 그 실행의 판정일이 새 판의 since
+    c.conn.execute("UPDATE paper_accounts SET rule_version = 2 WHERE id = 'B'")
+    job.write(c, "KR", datetime(2026, 10, 18, 23, 40, tzinfo=UTC), trade_date="2026-10-16", session_date="2026-10-19",
+              step_log={}, warnings=[])  # fmt: skip
+    assert c.q("SELECT rule_version, since FROM paper_rule_versions WHERE account_id = 'B' ORDER BY rule_version") == [
+        (1, ""), (2, "2026-10-16")]
 
 
 def test_rule_history_spans_by_hand() -> None:
-    """A 판 1: 10-14 종가 1.0 → 판 2 첫 결정 10-16 종가 1.03 = +3% · 판 2: 1.03 → 마지막 1.05 = +1.9417%.
-    R1 같은 구간: 판 1 10-14 이하 없음 → 첫 값 1.0, 10-16 이하 마지막 1.0 → 0% · 판 2: 1.0 → 0.99 = −1%"""
-    series = {"A": [("2026-10-14", 1.0), ("2026-10-15", 1.02), ("2026-10-16", 1.03), ("2026-10-19", 1.05)],
-              "R1": [("2026-10-15", 1.0), ("2026-10-19", 0.99)]}  # fmt: skip
-    spans = [{"account": "A", "version": 2, "first": "2026-10-16", "last": "2026-10-19", "orders": 3},
-             {"account": "A", "version": 1, "first": "2026-10-14", "last": "2026-10-15", "orders": 5},
-             {"account": "R1", "version": 1, "first": "2026-10-15", "last": "2026-10-19", "orders": 4}]  # fmt: skip
-    h = desk.rule_history(spans, series)
+    """검토(25.1505) 1 의 예 — `paper_daily.as_of` 는 배치를 돌린 한국 날짜, 그 행은 그때까지 나온 종가 평가.
+    금요일(10-16) 장에 판 1 보유가 +5%, 판 2 첫 결정은 판정일 10-16(월요일 10-19 아침 실행). 10-16 행 = 목요일 종가,
+    10-19 행 = 금요일 종가(1.05), 10-20 행 = 월요일 종가(1.05). 판 1: 처음 1.0 → 10-16 보다 늦은 첫 평가 1.05 = +5%,
+    판 2: 1.05 → 마지막 1.05 = 0% — 판 2 가 판 1 의 금요일을 가져가지 않는다.
+    R1 같은 구간: 1.0 → 1.01 = +1% · 1.01 → 1.0 = −0.990099%"""
+    series = {"A": [("2026-10-16", 1.0), ("2026-10-19", 1.05), ("2026-10-20", 1.05)],
+              "R1": [("2026-10-16", 1.0), ("2026-10-19", 1.01), ("2026-10-20", 1.0)]}  # fmt: skip
+    h = desk.rule_history([("A", 2, "2026-10-16"), ("A", 1, ""), ("R1", 1, "")], series, {("A", 2): 3})
     a1, a2 = h["A"]
-    assert (a1["version"], a1["from"], a1["to"], a1["orders"]) == (1, "2026-10-14", "2026-10-16", 5)
-    assert a1["pct"] == pytest.approx(3.0) and a1["control_pct"] == pytest.approx(0.0)
-    assert a1["vs_r_pp"] == pytest.approx(3.0)
-    assert (a2["version"], a2["to"]) == (2, None)
-    assert a2["pct"] == pytest.approx((1.05 / 1.03 - 1) * 100) and a2["control_pct"] == pytest.approx(-1.0)
+    assert (a1["version"], a1["from"], a1["to"], a1["orders"]) == (1, "", "2026-10-16", 0)
+    assert a1["pct"] == pytest.approx(5.0) and a1["control_pct"] == pytest.approx(1.0) and a1["vs_r_pp"] == pytest.approx(4.0)
+    assert (a2["version"], a2["to"], a2["orders"]) == (2, None, 3)
+    assert a2["pct"] == pytest.approx(0.0) and a2["control_pct"] == pytest.approx((1.0 / 1.01 - 1) * 100)
     assert h["R1"][0]["vs_r_pp"] is None  # 대조끼리는 견주지 않는다
-    없음 = desk.rule_history([{"account": "X", "version": 1, "first": "d", "last": "d", "orders": 1}], {})
-    assert 없음["X"][0]["pct"] is None
+    assert desk.rule_history([("X", 1, "")], {})["X"][0]["pct"] is None
+    assert desk.rule_history([("X", 1, "")], {}, None)["X"][0]["orders"] is None
+    # 아직 그 결정 뒤 평가가 없으면 모름
+    assert desk.rule_history([("A", 3, "2026-10-20")], series)["A"][0]["pct"] is None
+
+
+def test_new_versions_first_seen() -> None:
+    assert desk.new_versions({"A": 2, "B": 1}, [], "2026-10-16") == [("A", 2, ""), ("B", 1, "")]
+    assert desk.new_versions({"A": 3, "B": 1}, [("A", 2, ""), ("B", 1, "")], "2026-10-20") == [("A", 3, "2026-10-20")]
+    assert desk.new_versions({"A": 2}, [("A", 2, "")], "2026-10-20") == []
 
 
 def _주문(c: Client, oid: int, aid: str, *, market: str = "KR", sid: int = 1, decided: str, session: str,

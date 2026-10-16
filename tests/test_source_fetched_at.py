@@ -80,6 +80,7 @@ import pytest
     "paper_decisions_new",  # 0073 재건축의 임시 이름 — 같은 마이그레이션에서 paper_decisions 로 바뀐다 (25.1453)
     "paper_meetings", "paper_dossiers",  # 모의 투자사 회의록·조사 자료 — 배치가 만든 파생 (docs/company.md 5장, 25.1466)
     "paper_desk",  # 운용 상황실 요약 — 배치가 만든 파생 (docs/desk.md 2장, 25.1501)
+    "paper_rule_versions",  # 판 이력 — 배치가 계좌의 판을 처음 본 날 (docs/desk.md 3장, 25.1505)
 }  # fmt: skip
 
 #: **사람이 넣은 것.** 출처는 사용자다. 시스템이 임의로 고치지 않는다(CLAUDE.md)

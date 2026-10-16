@@ -12,7 +12,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { AccountTabs, CompareCard, type Data } from "@/components/PaperView";
 import { EMPTY_DESK, pickDesk, ruleSpanText, type DeskView } from "@/lib/desk";
 import { accountView } from "@/lib/paper";
-import { DECISIONS_SQL, DECISION_LIMIT, afterText, beatBench, validAccount } from "@/lib/paperDecisions";
+import { DECISIONS_SQL, DECISION_LIMIT, afterText, beatBench, groupDecisions, holdSide, validAccount, type DecisionRow } from "@/lib/paperDecisions";
 
 const MIGRATIONS = join(process.cwd(), "..", "migrations");
 
@@ -43,6 +43,29 @@ describe("안 산 것 — 결정 원장 질의", () => {
     // 질의 계획 — UNIQUE 색인(account_id, market, decided_on, …)으로 계좌·시장을 고정한다(표 전체를 훑지 않는다)
     const plan = (db.prepare(`EXPLAIN QUERY PLAN ${DECISIONS_SQL}`).all("A", "KR") as Array<{ detail: string }>).map((p) => p.detail).join(" | ");
     expect(plan).toMatch(/USING INDEX sqlite_autoindex_paper_decisions/);
+  });
+
+  it("견줄 창은 지수가 있는 가장 긴 창 — 60일 지수가 비면 20일과 견준다 (25.1505 검토 7)", () => {
+    const 빈 = { ret_5d: null, ret_20d: null, ret_60d: null, bench_5d: null, bench_20d: null, bench_60d: null, outcome_note: null };
+    const d = { ...빈, ret_60d: 9, ret_20d: 3, bench_20d: 1 };
+    expect(afterText(d)).toBe("20일 +3.0% (지수 +1.0%)");
+    expect(beatBench(d)).toBe(true);
+  });
+
+  it("보유 쪽 줄과 묶기 (25.1505 검토 3)", () => {
+    expect(holdSide({ kind: "hold_flag", reason: "x" })).toBe(true);
+    expect(holdSide({ kind: "blocked", reason: "위험 점검(매도): 정지" })).toBe(true);
+    expect(holdSide({ kind: "blocked", reason: "위험 점검: 한 종목 상한" })).toBe(false); // 매수를 막은 것은 안 산 쪽
+    expect(holdSide({ kind: "skip", reason: "종목 비중 상한 도달 — 이미 들고 있음" })).toBe(true);
+    expect(holdSide({ kind: "skip", reason: "판 뒤 3거래일" })).toBe(false);
+    const 줄 = (id: number, day: string, ticker: string, kind = "hold_flag", reason = "손절 플래그 무시") =>
+      ({ id, decided_on: day, kind, reason, ticker, name: ticker, ret_5d: id, ret_20d: null, ret_60d: null, bench_5d: 0, bench_20d: null, bench_60d: null, outcome_note: null }) as DecisionRow;
+    const g = groupDecisions([줄(5, "2026-10-20", "X"), 줄(4, "2026-10-19", "Y", "skip", "점수 미달"), 줄(3, "2026-10-19", "X"), 줄(1, "2026-10-16", "X")]);
+    expect(g.map((x) => [x.last.ticker, x.count, x.first.decided_on, x.last.decided_on])).toEqual([
+      ["X", 3, "2026-10-16", "2026-10-20"],
+      ["Y", 1, "2026-10-19", "2026-10-19"],
+    ]);
+    expect(g[0].first.id).toBe(1); // 그 뒤는 첫 결정 것
   });
 
   it("그 뒤 글 — 가장 긴 찬 창, 지수 나란히(% 단위 그대로), 아직·닫힘", () => {
@@ -112,11 +135,23 @@ describe("전략 순위·판 이력 화면", () => {
     expect(html).toContain("판 이력");
     expect(html).toContain("판 1 · 2026-10-14~2026-10-16 · 주문 5건 · 시간가중 +3.00% (같은 기간 R 평균 +0.00%, R 대비 +3.00%p)");
     expect(html).toContain("판 2 · 2026-10-16~지금 · 주문 1,234건");
-    // 요약에 그 계좌가 없으면(주문 0) · 요약 자체가 없으면
+    // 요약은 있는데 그 계좌의 판 이력이 없으면 · 요약 자체를 못 읽으면 — 글이 다르다(25.1505 검토 6)
     expect(renderToStaticMarkup(createElement(AccountTabs, { data, acct: "B", setAcct: () => {}, sub: "rules", setSub: () => {}, desk }))).toContain(
-      "다음 일일 배치가 적은 뒤부터",
+      "아직 이 계좌의 판 이력이 없습니다",
+    );
+    expect(renderToStaticMarkup(createElement(AccountTabs, { data, acct: "B", setAcct: () => {}, sub: "rules", setSub: () => {} }))).toContain(
+      "운용 요약을 읽지 못했거나 아직 없습니다",
     );
     expect(ruleSpanText({ version: 3, from: "d", to: null, orders: 0, pct: null, control_pct: null, vs_r_pp: null })).toBe("판 3 · d~지금 · 주문 0건 · 시간가중 -");
+    // from '' = 계좌의 처음부터, 주문 수를 못 셌으면 빼고 (25.1505)
+    expect(ruleSpanText({ version: 1, from: "", to: "2026-10-16", orders: null, pct: 5, control_pct: null, vs_r_pp: null })).toBe("판 1 · 처음~2026-10-16 · 시간가중 +5.00%");
+  });
+
+  it("전략 순위 — 순위 칸이 계좌 바로 옆(폰에서 밀지 않아도), 갓 연 계좌 표시 (25.1505 검토 4·9)", () => {
+    const young: DeskView = { ...desk, leaderboard: { ...desk.leaderboard!, rows: desk.leaderboard!.rows.map((r) => (r.id === "A" ? { ...r, young: true } : r)) } };
+    const html = renderToStaticMarkup(createElement(CompareCard, { data, desk: young }));
+    expect(html.indexOf("공통 구간</th>")).toBeLessThan(html.indexOf("평가 총액</th>"));
+    expect(html).toContain("갓 엶 · 2026-10-16부터");
   });
 
   it("안 산 것 탭은 열 때 읽는다(서버 렌더에서는 불러오는 중)", () => {

@@ -109,7 +109,7 @@ export default function DeskView() {
     void (async () => {
       const r = await readJson<{ ready: boolean; desk: Desk }>("/api/desk");
       const body = bodyOf<{ ready: boolean; desk: Desk }>(r);
-      if (body.errors?.length) setError(body.errors.join(" · "));
+      if (!r.ok || body.errors?.length) setError(body.errors?.join(" · ") || r.error || "운용 요약을 읽지 못했습니다");
       else if (!body.desk) setError("운용 요약을 읽지 못했습니다(응답 꼴이 다름 — 새로 고침해 주세요)");
       else {
         setReady(body.ready !== false);

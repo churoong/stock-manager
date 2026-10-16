@@ -58,29 +58,56 @@ def _구간(v: list[tuple[str, float]], start: str, end: str | None) -> float | 
     return (뒤[-1] / 기준 - 1) * 100 if 기준 and 뒤 else None
 
 
+def new_versions(
+    current: dict[str, int], known: list[tuple[str, int, str]], trade_date: str,
+) -> list[tuple[str, int, str]]:
+    """판 이력에 더할 (계좌, 판, since) — 처음 보는 (계좌, 판)만 (docs/desk.md 3장, 25.1505).
+
+    그 계좌를 처음 적으면 since = '' (계좌의 처음부터), 이미 다른 판이 있으면 이번 판정일
+    """
+    있음 = {(a, v) for a, v, _s in known}
+    계좌들 = {a for a, _v, _s in known}
+    return [(a, v, "" if a not in 계좌들 else trade_date) for a, v in sorted(current.items()) if (a, v) not in 있음]
+
+
+def _판구간(v: list[tuple[str, float]], since: str, to: str | None) -> float | None:
+    """판 구간 수익률(%) — 결정일 `since` 의 종가부터 다음 판 결정일 `to` 의 종가까지(없으면 마지막 평가까지).
+
+    `paper_daily.as_of` 는 배치를 돌린 **한국 날짜**이고 그 행은 그때까지 나온 종가로 잰 평가다 — 판정일 D 의 결정을 낸
+    실행의 행(= D 보다 늦은 첫 평가)이 곧 "D 종가" 평가다(25.1505, 검토 1). `since` 가 '' 면 계좌의 첫 평가부터
+    """
+    if not v:
+        return None
+    시작 = v[0][1] if not since else next((t for d, t in v if d > since), None)
+    끝 = v[-1][1] if to is None else next((t for d, t in v if d > to), v[-1][1])
+    return (끝 / 시작 - 1) * 100 if 시작 else None
+
+
 def rule_history(
-    spans: list[dict[str, Any]], series: dict[str, list[tuple[str, float]]],
+    versions: list[tuple[str, int, str]], series: dict[str, list[tuple[str, float]]],
+    orders: dict[tuple[str, int], int] | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     """판 이력 — {계좌: [{version, from, to, orders, pct, control_pct, vs_r_pp}]} 판 순 (docs/desk.md 3장).
 
-    `spans` = 주문 원장을 (계좌, 판)으로 묶은 것 [{account, version, first, last, orders}].
-    한 판의 구간은 그 판 첫 결정일 종가부터 다음 판 첫 결정일 종가까지(지금 판이면 마지막 평가까지) —
-    그 판의 주문이 처음 들어간 장부터 다음 판이 바꾸기 전까지의 시간가중 수익률이다.
-    같은 구간 무작위 대조 R1·R2 평균과 그 차(%p)를 함께 — 판을 바꾼 뒤 나아졌는지를 운과 가른다
+    `versions` = 판 이력 표의 (계좌, 판, since). 한 판의 구간은 since 결정일 종가부터 다음 판 since 결정일 종가까지
+    (지금 판이면 마지막 평가까지) — 그 판의 첫 결정이 처음 들어간 장부터 다음 판이 바꾸기 전까지의 시간가중 수익률이다.
+    `from` 이 '' 면 계좌의 처음부터. 같은 구간 무작위 대조 R1·R2 평균과 그 차(%p)를 함께 — 판을 바꾼 뒤 나아졌는지를
+    운과 가른다. `orders` = {(계좌, 판): 주문 수} — 없으면 None
     """
-    판들: dict[str, list[dict[str, Any]]] = {}
-    for s in spans:
-        판들.setdefault(str(s["account"]), []).append(s)
+    판들: dict[str, list[tuple[str, int]]] = {}
+    for a, ver, since in versions:
+        판들.setdefault(a, []).append((since, ver))
     out: dict[str, list[dict[str, Any]]] = {}
     for a, 줄 in 판들.items():
-        줄.sort(key=lambda s: (s["first"], s["version"]))
+        줄.sort()
         out[a] = []
-        for i, s in enumerate(줄):
-            끝 = 줄[i + 1]["first"] if i + 1 < len(줄) else None
-            pct = _구간(sorted(series.get(a) or []), s["first"], 끝)
-            대조 = [x for r in CONTROL_IDS if (x := _구간(sorted(series.get(r) or []), s["first"], 끝)) is not None]
+        for i, (since, ver) in enumerate(줄):
+            끝 = 줄[i + 1][0] if i + 1 < len(줄) else None
+            pct = _판구간(sorted(series.get(a) or []), since, 끝)
+            대조 = [x for r in CONTROL_IDS if (x := _판구간(sorted(series.get(r) or []), since, 끝)) is not None]
             기준선 = sum(대조) / len(대조) if 대조 else None
-            out[a].append({"version": s["version"], "from": s["first"], "to": 끝, "orders": s["orders"], "pct": pct,
+            out[a].append({"version": ver, "from": since, "to": 끝,
+                           "orders": None if orders is None else orders.get((a, ver), 0), "pct": pct,
                            "control_pct": 기준선, "vs_r_pp": None if pct is None or 기준선 is None or a in CONTROL_IDS
                            else pct - 기준선})  # fmt: skip
     return out

@@ -20,7 +20,7 @@ import {
   hasCommittee,
   virtualText,
 } from "@/lib/paper";
-import { KIND_TEXT, afterText, beatBench, type DecisionRow } from "@/lib/paperDecisions";
+import { KIND_TEXT, afterText, beatBench, groupDecisions, holdSide, type DecisionRow } from "@/lib/paperDecisions";
 import { money, won } from "@/lib/portfolio";
 
 /**
@@ -145,7 +145,7 @@ export default function PaperView() {
     void (async () => {
       const r = await readJson<{ ready?: boolean; desk?: DeskView }>("/api/desk");
       const body = bodyOf<{ ready?: boolean; desk?: DeskView }>(r);
-      if (!body.errors?.length && body.desk) setDesk(body.desk);
+      if (r.ok && !body.errors?.length && body.desk) setDesk(body.desk);
     })();
   }, [load]);
 
@@ -360,7 +360,7 @@ export function CompareCard({ data, desk }: { data: Data; desk?: DeskView | null
       {lb?.window_start ? (
         <p className="mt-1 text-xs text-slate-500">
           공통 구간 {lb.window_start}부터의 시간가중 수익률 순 · R 대비 = 그 수익률 − 무작위 대조 R1·R2 평균
-          {lb.control_pct != null ? `(${deskPct(lb.control_pct)})` : ""} — 늦게 연 계좌도 같은 잣대
+          {lb.control_pct != null ? `(${deskPct(lb.control_pct)})` : ""} — 늦게 연 계좌도 같은 잣대. "갓 엶" 계좌(평가 20번 전)는 제 개설일부터 잰 값입니다
         </p>
       ) : null}
       <div className="mt-2 overflow-x-auto">
@@ -368,12 +368,12 @@ export function CompareCard({ data, desk }: { data: Data; desk?: DeskView | null
           <thead className="text-slate-500">
             <tr>
               <th className="py-1 text-left">계좌</th>
-              <th className="text-left">규칙</th>
-              <th className="text-right">평가 총액</th>
-              <th className="text-right">손익</th>
-              <th className="text-right">시간가중</th>
               <th className="text-right">공통 구간</th>
               <th className="text-right">R 대비</th>
+              <th className="text-right">시간가중</th>
+              <th className="text-right">손익</th>
+              <th className="text-right">평가 총액</th>
+              <th className="pl-2 text-left">규칙</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -381,13 +381,16 @@ export function CompareCard({ data, desk }: { data: Data; desk?: DeskView | null
               const r = 순위.get(a.id);
               return (
                 <tr key={a.id}>
-                  <td className="py-1 font-semibold">{a.id}</td>
-                  <td className="text-slate-600 dark:text-slate-400">{ruleText(a)}</td>
-                  <td className="text-right">{won(a.view.equity)}</td>
-                  <td className={`text-right ${tone(a.view.pnlPct)}`}>{pctText(a.view.pnlPct)}</td>
-                  <td className={`text-right ${tone(a.view.twrPct)}`}>{pctText(a.view.twrPct)}</td>
+                  <td className="py-1 font-semibold">
+                    {a.id}
+                    {r?.young ? <span className="block text-[10px] font-normal text-amber-700 dark:text-amber-400">갓 엶 · {r.open}부터</span> : null}
+                  </td>
                   <td className={`text-right ${tone(r?.window_pct)}`}>{deskPct(r?.window_pct)}</td>
                   <td className={`text-right ${tone(r?.vs_r_pp)}`}>{ppText(r?.vs_r_pp)}</td>
+                  <td className={`text-right ${tone(a.view.twrPct)}`}>{pctText(a.view.twrPct)}</td>
+                  <td className={`text-right ${tone(a.view.pnlPct)}`}>{pctText(a.view.pnlPct)}</td>
+                  <td className="text-right">{won(a.view.equity)}</td>
+                  <td className="pl-2 text-slate-600 dark:text-slate-400">{ruleText(a)}</td>
                 </tr>
               );
             })}
@@ -459,7 +462,7 @@ export function AccountTabs({ data, acct, setAcct, sub, setSub, desk }: {
         {sub === "trades" ? <TradesPane fills={체결} /> : null}
         {sub === "orders" ? <OrdersPane orders={주문} /> : null}
         {sub === "report" ? <ReportPane a={a} /> : null}
-        {sub === "rules" ? <RulesPane a={a} spans={desk?.rule_history?.[a.id] ?? null} asOf={desk?.as_of ?? null} /> : null}
+        {sub === "rules" ? <RulesPane a={a} spans={desk ? (desk.rule_history?.[a.id] ?? []) : null} asOf={desk?.as_of ?? null} /> : null}
         {sub === "skips" ? <SkipsPane key={a.id} account={a.id} /> : null}
         {sub === "committee" && hasCommittee(a) ? (
           <CommitteePane a={a} meetings={(data.meetings ?? []).filter((m) => m.account_id === a.id)} dossiers={data.dossiers ?? []} />
@@ -722,7 +725,10 @@ export function CommitteePane({ a, meetings, dossiers }: { a: Account; meetings:
   );
 }
 
-/** 판 이력 (docs/desk.md 3장, 25.1502) — 주문 원장의 판 번호로 나눈 구간과 그 구간 성적. 배치가 낸 값 그대로 */
+/**
+ * 판 이력 (docs/desk.md 3장, 25.1502·25.1505) — 배치가 판을 처음 본 결정일로 나눈 구간과 그 구간 성적. 배치가 낸 값 그대로.
+ * `spans` null = 운용 요약을 못 읽음, [] = 요약은 있는데 이 계좌의 판 이력이 아직 없음
+ */
 export function RulesPane({ a, spans, asOf }: { a: Account; spans: RuleSpan[] | null; asOf: string | null }) {
   return (
     <div className="text-sm">
@@ -730,9 +736,9 @@ export function RulesPane({ a, spans, asOf }: { a: Account; spans: RuleSpan[] | 
         지금 규칙서 판 <b>{a.rule_version}</b> — {ruleText(a)}
       </p>
       {spans === null ? (
-        <p className="mt-2 text-xs text-slate-500">판 이력은 운용 요약에서 읽습니다 — 다음 일일 배치가 적은 뒤부터 보입니다.</p>
+        <p className="mt-2 text-xs text-slate-500">운용 요약을 읽지 못했거나 아직 없습니다 — 판 이력은 운용 요약에서 읽습니다.</p>
       ) : spans.length === 0 ? (
-        <p className="mt-2 text-xs text-slate-500">아직 이 계좌가 낸 주문이 없습니다.</p>
+        <p className="mt-2 text-xs text-slate-500">아직 이 계좌의 판 이력이 없습니다 — 다음 일일 배치가 지금 판부터 적습니다.</p>
       ) : (
         <ul className="mt-2 space-y-1">
           {spans.map((r) => (
@@ -743,7 +749,8 @@ export function RulesPane({ a, spans, asOf }: { a: Account; spans: RuleSpan[] | 
         </ul>
       )}
       <p className="mt-2 text-xs text-slate-500">
-        판은 규칙서·헌장을 바꿀 때마다 올립니다(docs/paper.md 2장). 구간은 그 판 첫 결정일 종가부터 다음 판 첫 결정일 종가까지 — 몇 주 차이는 대부분 운이라
+        판은 규칙서·헌장을 바꿀 때마다 올립니다(docs/paper.md 2장). 구간은 배치가 그 판을 처음 본 결정일의 종가부터 다음 판의 그날 종가까지("처음" = 계좌를 연
+        날부터) — 몇 주 차이는 대부분 운이라
         같은 구간 무작위 대조(R) 평균과 함께 봅니다{asOf ? ` · ${asOf} 운용 요약 기준` : ""}.
       </p>
     </div>
@@ -763,8 +770,10 @@ function SkipsPane({ account }: { account: string }) {
       const r = await readJson<{ rows?: DecisionRow[] }>(`/api/paper/decisions?account=${encodeURIComponent(account)}&market=${market}`);
       const body = bodyOf<{ rows?: DecisionRow[] }>(r);
       if (!살아있음) return;
-      if (body.errors?.length) setError(body.errors.join(" · "));
-      else setRows(body.rows ?? []);
+      // 못 읽은 것을 없는 것으로 말하지 않는다 — 로그인이 끊기면 401 {error} 라 errors 가 없다(25.163, 25.1505 검토 5)
+      if (!r.ok || body.errors?.length) setError(body.errors?.join(" · ") || r.error || "읽지 못했습니다");
+      else if (!Array.isArray(body.rows)) setError("응답 꼴이 다름 — 새로 고침해 주세요");
+      else setRows(body.rows);
     })();
     return () => {
       살아있음 = false;
@@ -787,23 +796,30 @@ function SkipsPane({ account }: { account: string }) {
         ))}
       </div>
       <p className="mt-2 text-xs text-slate-500">
-        안 낸 후보·위험 점검이 막은 것·안 찬 회차·매도 플래그를 따르지 않고 든 것과 그 뒤(가장 긴 찬 창, 같은 기간 지수). 안 산 것이 지수보다 올랐으면 놓친 것(빨강),
-        덜 올랐으면 잘 거른 것(파랑) — 하나하나는 운이고, 까닭별 묶음 성적은 성적표 탭에 있습니다. 최근 60줄.
+        안 낸 후보·위험 점검이 막은 것·안 찬 회차·매도 플래그를 따르지 않고 든 것과 그 뒤(지수가 있는 가장 긴 찬 창). 안 산 것이 지수보다 올랐으면 놓친 것(빨강),
+        덜 올랐으면 잘 거른 것(파랑). <b>보유 쪽</b> 줄(플래그 무시·매도 막힘·이미 들고 있어 더 안 삼)은 거꾸로 — 오르면 들고 간 것이 옳았으니 초록. 같은 종목·같은 까닭이
+        되풀이되면 한 줄로 묶고 그 뒤는 첫 결정 것. 하나하나는 운이고, 까닭별 묶음 성적은 성적표 탭에 있습니다. 최근 60줄.
       </p>
       {error ? <p className="mt-2 text-red-600">{error}</p> : null}
       {!rows && !error ? <p className="mt-2 text-slate-500">불러오는 중…</p> : null}
       {rows && rows.length === 0 ? <p className="mt-2 text-slate-500">이 시장에서 안 한 결정이 아직 없습니다.</p> : null}
       {rows?.length ? (
         <ul className="mt-2 divide-y divide-slate-100 dark:divide-slate-800">
-          {rows.map((d) => {
-            const 이김 = beatBench(d);
+          {groupDecisions(rows).map(({ first, last, count }) => {
+            const 이김 = beatBench(first);
+            const 보유 = holdSide(last);
+            const 색 = 이김 == null ? "text-slate-500" : 보유 ? (이김 ? "text-emerald-700 dark:text-emerald-400" : "text-amber-700 dark:text-amber-400") : 이김 ? "text-red-600 dark:text-red-400" : "text-blue-600 dark:text-blue-400";
             return (
-              <li key={d.id} className="py-1.5">
-                <span className="text-xs text-slate-500">{d.decided_on} · {KIND_TEXT[d.kind] ?? d.kind}</span>{" "}
-                <b>{d.name}</b> <span className="text-xs text-slate-400">{d.ticker}</span>
-                <span className="block text-xs text-slate-600 dark:text-slate-400">{d.reason}</span>
-                <span className={`block text-xs ${이김 == null ? "text-slate-500" : 이김 ? "text-red-600 dark:text-red-400" : "text-blue-600 dark:text-blue-400"}`}>
-                  그 뒤 {afterText(d)}
+              <li key={last.id} className="py-1.5">
+                <span className="text-xs text-slate-500">
+                  {count > 1 ? `${first.decided_on}~${last.decided_on} · ${count}번` : last.decided_on} · {KIND_TEXT[last.kind] ?? last.kind}
+                  {보유 ? " · 보유 쪽" : ""}
+                </span>{" "}
+                <b>{last.name}</b> <span className="text-xs text-slate-400">{last.ticker}</span>
+                <span className="block text-xs text-slate-600 dark:text-slate-400">{last.reason}</span>
+                <span className={`block text-xs ${색}`}>
+                  {count > 1 ? "첫 결정 뒤 " : "그 뒤 "}
+                  {afterText(first)}
                 </span>
               </li>
             );

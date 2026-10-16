@@ -36,28 +36,68 @@ export function validAccount(v: string | null): v is string {
 /** 수익·지수는 배치가 % 단위로 적었다(`batch/services/paper.outcomes` — 3.1 = +3.1%) */
 const pct = (v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`;
 
+type After = Pick<DecisionRow, "ret_5d" | "ret_20d" | "ret_60d" | "bench_5d" | "bench_20d" | "bench_60d">;
+
 /**
- * 그 뒤 성과 글 — "20일 +3.1% (지수 +1.2%)" 처럼 가장 긴 찬 창 하나.
- * 아직 안 찼으면 "아직(결정 뒤 5 거래일 전)", 못 채우고 닫았으면 그 까닭
+ * 견줄 창 — 수익과 지수가 **둘 다 있는** 가장 긴 창, 없으면 수익만 있는 가장 긴 창 (25.1505, 검토 7).
+ * 60일 수익이 차면 그 행은 성과 채우기에서 빠져 60일 지수가 영영 비는 수가 있다 — 그때 20일 지수와 견준다
  */
-export function afterText(d: Pick<DecisionRow, "ret_5d" | "ret_20d" | "ret_60d" | "bench_5d" | "bench_20d" | "bench_60d" | "outcome_note">): string {
-  const 창: Array<[string, number | null, number | null]> = [
+function 창(d: After): [string, number, number | null] | null {
+  const 창들: Array<[string, number | null, number | null]> = [
     ["60일", d.ret_60d, d.bench_60d],
     ["20일", d.ret_20d, d.bench_20d],
     ["5일", d.ret_5d, d.bench_5d],
   ];
-  const 찬 = 창.find(([, r]) => r != null);
-  if (찬) {
-    const [이름, r, b] = 찬;
-    return `${이름} ${pct(r as number)}${b != null ? ` (지수 ${pct(b)})` : ""}`;
-  }
+  const 둘 = 창들.find(([, r, b]) => r != null && b != null);
+  const 하나 = 창들.find(([, r]) => r != null);
+  const 고름 = 둘 ?? 하나;
+  return 고름 ? [고름[0], 고름[1] as number, 고름[2]] : null;
+}
+
+/**
+ * 그 뒤 성과 글 — "20일 +3.1% (지수 +1.2%)" 처럼 견줄 창 하나.
+ * 아직 안 찼으면 "아직(결정 뒤 5 거래일 전)", 못 채우고 닫았으면 그 까닭
+ */
+export function afterText(d: After & Pick<DecisionRow, "outcome_note">): string {
+  const c = 창(d);
+  if (c) return `${c[0]} ${pct(c[1])}${c[2] != null ? ` (지수 ${pct(c[2])})` : ""}`;
   return d.outcome_note ? `성과 없음 — ${d.outcome_note}` : "아직(결정 뒤 5 거래일 전)";
 }
 
-/** 그 뒤가 지수보다 나았나 — 색칠만(안 산 게 올랐으면 놓친 것). 둘 중 하나라도 없으면 null */
-export function beatBench(d: Pick<DecisionRow, "ret_5d" | "ret_20d" | "ret_60d" | "bench_5d" | "bench_20d" | "bench_60d">): boolean | null {
-  for (const [r, b] of [[d.ret_60d, d.bench_60d], [d.ret_20d, d.bench_20d], [d.ret_5d, d.bench_5d]] as const) {
-    if (r != null) return b == null ? null : r > b;
+/** 그 뒤가 지수보다 나았나 — 색칠만. 견줄 창에 지수가 없으면 null */
+export function beatBench(d: After): boolean | null {
+  const c = 창(d);
+  return c && c[2] != null ? c[1] > c[2] : null;
+}
+
+/**
+ * **들고 있는 쪽** 줄인가 (25.1505, 검토 3) — 매도 플래그를 따르지 않고 든 것·위험 점검이 매도를 막은 것·이미 들고 있어 더 사지 않은 것
+ * (배치 `NONCOMPARABLE_SKIP_PREFIXES` 의 보유 둘). 이 줄은 오르면 들고 간 것이 옳았다 — "놓침" 색이 반대 뜻이 된다
+ */
+export const HOLD_SIDE_SKIP_PREFIXES = ["종목 비중 상한 도달", "보유 중 손절선 이탈"] as const;
+export function holdSide(d: Pick<DecisionRow, "kind" | "reason">): boolean {
+  if (d.kind === "hold_flag") return true;
+  if (d.kind === "blocked") return d.reason.startsWith("위험 점검(매도)");
+  return d.kind === "skip" && HOLD_SIDE_SKIP_PREFIXES.some((p) => d.reason.startsWith(p));
+}
+
+export interface DecisionGroup { first: DecisionRow; last: DecisionRow; count: number }
+
+/**
+ * 같은 (종목, 종류, 까닭) 줄을 묶는다 — 들고 있는 종목은 날마다 한 줄씩 쌓여 60줄이 며칠치 같은 종목으로 찼다(검토 3).
+ * 최근 것 순. 그 뒤 성과는 묶음의 **첫 결정**(가장 이른 줄) 것을 보인다 — 최근 줄은 아직 안 찼다
+ */
+export function groupDecisions(rows: DecisionRow[]): DecisionGroup[] {
+  const 묶음 = new Map<string, DecisionGroup>();
+  for (const d of rows) {
+    const 키 = `${d.ticker}|${d.kind}|${d.reason}`;
+    const g = 묶음.get(키);
+    if (!g) 묶음.set(키, { first: d, last: d, count: 1 });
+    else {
+      g.count += 1;
+      if (d.decided_on < g.first.decided_on) g.first = d;
+      if (d.decided_on > g.last.decided_on) g.last = d;
+    }
   }
-  return null;
+  return [...묶음.values()].sort((x, y) => y.last.decided_on.localeCompare(x.last.decided_on) || y.last.id - x.last.id);
 }

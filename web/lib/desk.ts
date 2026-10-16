@@ -19,9 +19,9 @@ export interface DeskRow {
   young?: boolean;
 }
 export interface DeskLeaderboard { window_start: string | null; control_pct?: number | null; rows: DeskRow[] }
-/** 판 이력 한 줄 (docs/desk.md 3장) — 그 판 첫 결정일 종가부터 다음 판 첫 결정일 종가까지(to 가 null 이면 지금 판) */
+/** 판 이력 한 줄 (docs/desk.md 3장) — 그 판 첫 결정일 종가부터 다음 판 첫 결정일 종가까지(to 가 null 이면 지금 판, from '' 이면 계좌의 처음부터) */
 export interface RuleSpan {
-  version: number; from: string; to: string | null; orders: number;
+  version: number; from: string; to: string | null; orders: number | null;
   pct: number | null; control_pct: number | null; vs_r_pp: number | null;
 }
 export interface DeskCheck { level: "high" | "normal"; text: string }
@@ -179,7 +179,9 @@ export function notSentText(step: Record<string, unknown> | null | undefined): s
 export function ruleSpanText(r: RuleSpan): string {
   const 끝 = r.to ? `~${r.to}` : "~지금";
   const 대조 = r.control_pct != null ? ` (같은 기간 R 평균 ${pctText(r.control_pct)}${r.vs_r_pp != null ? `, R 대비 ${ppText(r.vs_r_pp)}` : ""})` : "";
-  return `판 ${r.version} · ${r.from}${끝} · 주문 ${r.orders.toLocaleString("ko-KR")}건 · 시간가중 ${pctText(r.pct)}${대조}`;
+  // from '' = 계좌의 처음부터, 주문 수 null = 셀 수 없었음 (25.1505)
+  const 주문 = r.orders == null ? "" : ` · 주문 ${r.orders.toLocaleString("ko-KR")}건`;
+  return `판 ${r.version} · ${r.from || "처음"}${끝}${주문} · 시간가중 ${pctText(r.pct)}${대조}`;
 }
 
 /** 순위표 줄을 계좌 id 로 — 계좌 비교 표에 공통 구간·R 대비 칸을 붙일 때 */
