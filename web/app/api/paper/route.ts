@@ -26,6 +26,8 @@ import {
   REAL_TWR,
   accountView,
   compareReal,
+  freshFx,
+  kstToday,
   reservedByAccount,
   withLegacy,
   type DailyRow,
@@ -56,8 +58,9 @@ export async function GET() {
     const history = rowsToObjects(await execute(PAPER_HISTORY, [시작]));
     const 입금 = Number(rowsToObjects<{ invested: number }>(invested)[0]?.invested ?? 0);
     const 현금 = Object.fromEntries(rowsToObjects<{ account_id: string; cash_krw: number }>(cash).map((r) => [r.account_id, Number(r.cash_krw)]));
-    const 환율 = rowsToObjects<{ rate: number }>(fx)[0]?.rate ?? null;
-    const 예약 = reservedByAccount(rowsToObjects<OpenBuy>(buys), 환율 == null ? null : Number(환율));
+    // 취소 판정과 같은 환율 — 묵은 환율이면 달러 예약을 모름으로(25.1486)
+    const 환율 = freshFx(rowsToObjects<{ rate: number; date: string }>(fx)[0], kstToday());
+    const 예약 = reservedByAccount(rowsToObjects<OpenBuy>(buys), 환율);
     const 마지막 = rowsToObjects<DailyRow & { positions_json: string; unknown_json: string | null; attribution_json: string | null }>(latest);
     // 보유 이름 — 마지막 평가의 보유 목록에 든 종목만
     const 보유들 = Object.fromEntries(

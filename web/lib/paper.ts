@@ -206,12 +206,34 @@ FROM paper_orders o JOIN stocks s ON s.id = o.stock_id WHERE o.status = 'open' O
 export const PAPER_STOCK_NAMES = `SELECT s.id, s.ticker, COALESCE(s.name_ko, s.name_en, s.ticker) AS name
 FROM json_each(?) j JOIN stocks s ON s.id = j.value`;
 export const PAPER_FX_LATEST = "SELECT rate, date FROM fx_rates WHERE pair = 'USDKRW' ORDER BY date DESC LIMIT 1";
+/** 이보다 묵은 환율은 모름 — 배치 `jobs/paper.FX_MAX_AGE_DAYS` 와 같다(시험이 대조) */
+export const FX_MAX_AGE_DAYS = 7;
+/**
+ * 마지막 USDKRW 를 쓸 수 있으면 그 값, `FX_MAX_AGE_DAYS` 넘게 묵었거나 없으면 null — 웹이 날짜를 보지 않아 환율 수집이 멈춘 뒤에도 옛 환율로
+ * 달러 예약을 셌다(배치보다 느슨, 25.1483 감사 [참고] 9, 25.1486). null 이면 `reservedByAccount` 가 그 계좌를 모름으로 두고 취소를 막는다
+ */
+export function freshFx(row: { rate: number | string | null; date: string } | undefined, today: string): number | null {
+  if (!row || row.rate == null || !row.date) return null;
+  const 묵음 = (Date.parse(today.slice(0, 10)) - Date.parse(String(row.date).slice(0, 10))) / 86_400_000;
+  return Number.isFinite(묵음) && 묵음 <= FX_MAX_AGE_DAYS && Number(row.rate) > 0 ? Number(row.rate) : null;
+}
 
 export const DEPOSIT_INSERT = `INSERT INTO paper_cash_flows (flow_date, amount_krw, kind, memo, created_at, request_key)
 VALUES (?, ?, 'deposit', ?, ?, ?) ON CONFLICT DO NOTHING`;
-/** 취소 행 — 요청 키와 `cancels_id` 가 둘 다 유일이라 두 번 눌러도, 두 탭에서 눌러도 한 번만 들어간다 */
+/**
+ * 취소 행 — 요청 키와 `cancels_id` 가 둘 다 유일이라 두 번 눌러도, 두 탭에서 눌러도 한 번만 들어간다.
+ * **장부가 읽은 뒤 그대로일 때만** 넣는다(`PAPER_LEDGER_VERSION` 의 세 값, 마지막 세 자리 인자) — 두 탭이 **서로 다른** 입금을
+ * 동시에 취소하면 둘 다 "현금 넉넉" 을 읽고 둘 다 들어가 현금이 음수가 될 수 있었다(25.1483 감사 [참고] 6, 25.1486).
+ * 한 문장이라 검사와 넣기가 원자적이다 — 늦은 쪽은 0 행이 되고 다시 누르면 새 장부로 다시 판정한다
+ */
 export const CANCEL_INSERT = `INSERT INTO paper_cash_flows (flow_date, amount_krw, kind, cancels_id, memo, created_at, request_key)
-VALUES (?, ?, 'cancel', ?, ?, ?, ?) ON CONFLICT DO NOTHING`;
+SELECT ?, ?, 'cancel', ?, ?, ?, ?
+WHERE (SELECT COUNT(*) FROM paper_cash_flows) = ? AND (SELECT COALESCE(SUM(amount_krw), 0) FROM paper_cash_flows) = ?
+  AND (SELECT COUNT(*) FROM paper_fills) = ?
+ON CONFLICT DO NOTHING`;
+/** 취소 판정에 쓴 장부의 판 — 입출금 줄 수·합, 체결 줄 수(배치가 사이에 체결을 넣어도 다시 판정) */
+export const PAPER_LEDGER_VERSION = `SELECT (SELECT COUNT(*) FROM paper_cash_flows) AS n,
+  (SELECT COALESCE(SUM(amount_krw), 0) FROM paper_cash_flows) AS s, (SELECT COUNT(*) FROM paper_fills) AS f`;
 export const FLOW_BY_ID = `SELECT f.id, f.amount_krw, f.kind, f.cancels_id,
   (SELECT COUNT(*) FROM paper_cash_flows c WHERE c.cancels_id = f.id) AS cancelled
 FROM paper_cash_flows f WHERE f.id = ?`;

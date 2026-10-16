@@ -10,6 +10,8 @@ import {
   CANCEL_INSERT,
   DEPOSIT_INSERT,
   FLOW_BY_ID,
+  FX_MAX_AGE_DAYS,
+  PAPER_LEDGER_VERSION,
   PAPER_CASH,
   PAPER_FILLS,
   PAPER_FLOWS,
@@ -22,6 +24,7 @@ import {
   accountView,
   cancelBlock,
   depositSchema,
+  freshFx,
   kstToday,
   reservedByAccount,
   type DailyRow,
@@ -38,6 +41,11 @@ beforeEach(() => {
   );
 });
 
+function 판(): [number, number, number] {
+  const v = db.prepare(PAPER_LEDGER_VERSION).get() as { n: number; s: number; f: number };
+  return [Number(v.n), Number(v.s), Number(v.f)];
+}
+
 function invested(): number {
   return Number((db.prepare(PAPER_INVESTED).get() as { invested: number }).invested);
 }
@@ -53,15 +61,40 @@ describe("입금 장부", () => {
   it("취소는 음수 행을 더하고 한 번만 된다 — 원래 행은 남는다", () => {
     db.prepare(DEPOSIT_INSERT).run("2026-10-15", 500_000, "첫 입금", "t", "key-aaaaaaaa");
     const can = db.prepare(CANCEL_INSERT);
-    expect(can.run("2026-10-16", -500_000, 1, "입금 #1 취소", "t", "key-bbbbbbbb").changes).toBe(1);
+    expect(can.run("2026-10-16", -500_000, 1, "입금 #1 취소", "t", "key-bbbbbbbb", ...판()).changes).toBe(1);
     // 다른 키로 같은 입금을 또 취소 — cancels_id 유일이 막는다
-    expect(can.run("2026-10-16", -500_000, 1, "입금 #1 취소", "t", "key-cccccccc").changes).toBe(0);
+    expect(can.run("2026-10-16", -500_000, 1, "입금 #1 취소", "t", "key-cccccccc", ...판()).changes).toBe(0);
     expect(invested()).toBe(0);
     const f = db.prepare(FLOW_BY_ID).get(1) as { kind: string; cancelled: number };
     expect(f.kind).toBe("deposit");
     expect(Number(f.cancelled)).toBe(1);
     const 목록 = db.prepare(PAPER_FLOWS).all() as Array<{ id: number; cancelled_by: number | null }>;
     expect(목록.find((r) => r.id === 1)?.cancelled_by).toBe(2);
+  });
+
+  it("두 탭이 서로 다른 입금을 동시에 취소하면 늦은 쪽은 들어가지 않는다 (25.1486)", () => {
+    const ins = db.prepare(DEPOSIT_INSERT);
+    ins.run("2026-10-15", 500_000, null, "t", "key-dep00001");
+    ins.run("2026-10-15", 500_000, null, "t", "key-dep00002");
+    const 읽은판 = 판(); // 두 탭이 같은 장부를 읽고 둘 다 "넉넉" 으로 판정
+    const can = db.prepare(CANCEL_INSERT);
+    expect(can.run("2026-10-16", -500_000, 1, "입금 #1 취소", "t", "key-can00001", ...읽은판).changes).toBe(1);
+    expect(can.run("2026-10-16", -500_000, 2, "입금 #2 취소", "t", "key-can00002", ...읽은판).changes).toBe(0);
+    expect(invested()).toBe(500_000);
+    // 다시 누르면 새 판으로 다시 판정 — 그때 넉넉하면 들어간다
+    expect(can.run("2026-10-16", -500_000, 2, "입금 #2 취소", "t", "key-can00003", ...판()).changes).toBe(1);
+  });
+
+  it("묵은 환율은 모름 — 배치 FX_MAX_AGE_DAYS 와 같다 (25.1486)", () => {
+    const 배치 = readFileSync(join(process.cwd(), "..", "batch", "jobs", "paper.py"), "utf8");
+    expect(배치).toContain(`FX_MAX_AGE_DAYS = ${FX_MAX_AGE_DAYS}\n`);
+    expect(freshFx({ rate: 1400, date: "2026-10-09" }, "2026-10-16")).toBe(1400);
+    expect(freshFx({ rate: 1400, date: "2026-10-08" }, "2026-10-16")).toBeNull();
+    expect(freshFx(undefined, "2026-10-16")).toBeNull();
+    // 모르는 환율이면 달러 예약이 있는 계좌는 모름 → 취소가 막힌다
+    const 예약 = reservedByAccount([{ account_id: "B", limit_price: 100, quantity: 1, currency: "USD" }],
+      freshFx({ rate: 1400, date: "2026-10-01" }, "2026-10-16"));
+    expect(예약.B).toBeNull();
   });
 
   it("스키마가 엉뚱한 행을 막는다 — 음수 입금, 원래 행 없는 취소", () => {
