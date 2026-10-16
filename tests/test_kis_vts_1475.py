@@ -342,7 +342,14 @@ def 기록_상태(c: Client) -> list[str]:
 def test_job_off_and_timing(c: Client, monkeypatch: pytest.MonkeyPatch) -> None:
     assert job.run(c, "JP", _at("08:40"), session=_Sess()) == {"off": "모르는 시장 JP"}
     monkeypatch.delenv("KIS_VTS_ACCOUNT")
+    # 일부만 있으면 설정 실수 — 빈 칸 이름을 돌려줘 일일 배치가 알린다 (25.1492)
+    assert job.run(c, "KR", _at("08:40"), session=_Sess()) == {"off": "KIS모의투자 키 일부만 있음",
+                                                                "missing": ["KIS_VTS_ACCOUNT"]}  # fmt: skip
+    monkeypatch.delenv("KIS_VTS_APP_KEY")
+    monkeypatch.delenv("KIS_VTS_APP_SECRET")
     assert job.run(c, "KR", _at("08:40"), session=_Sess()) == {"off": "KIS모의투자 키 없음"}
+    for k, v in 키.items():
+        monkeypatch.setenv(k, v)
     monkeypatch.setenv("KIS_VTS_ACCOUNT", "1234567801")
     # 너무 이르면 보내지 않는다(잔고는 적는다), 08:30 앞 10분 안이면 기다렸다 보낸다
     s = _Sess()
@@ -452,3 +459,16 @@ def test_holdings_diff_ignores_us_rerun_and_pre_link(c: Client) -> None:
     다시 = job.run(c, "KR", _at("10:30"), session=_Sess(holdings=[kv.Holding("005930", 5, 5, 9_700.0)]),
                  sleep=lambda _x: None, clock=lambda: _at("10:30"))  # fmt: skip
     assert 다시["diff"] == 0
+
+
+def test_partial_keys_are_named_and_alerted() -> None:
+    """앱 시크릿 이름을 틀려 하루를 꺼진 채 지날 뻔했다(2026-10-16 시험 주문, 25.1491) — 빈 칸 이름(값 없이)과 알림 문장 (25.1492)."""
+    from batch.jobs import daily
+
+    assert kv.missing({"KIS_VTS_APP_KEY": "k", "KIS_VTS_ACCOUNT": "12345678"}) == ["KIS_VTS_APP_SECRET"]
+    assert kv.missing({"KIS_VTS_APP_KEY": "k", "KIS_VTS_APP_SECRET": "s", "KIS_VTS_ACCOUNT": "1234567"}) == [
+        "KIS_VTS_ACCOUNT(숫자 8·10자리 아님)"]
+    assert kv.missing({}) == ["KIS_VTS_APP_KEY", "KIS_VTS_APP_SECRET", "KIS_VTS_ACCOUNT"] and kv.missing(키) == []
+    assert "KIS_VTS_APP_SECRET" in (daily._kis_알림문({"off": "x", "missing": ["KIS_VTS_APP_SECRET"]}) or "")
+    assert "실패" in (daily._kis_알림문({"error": "토큰 HTTP 403"}) or "")
+    assert daily._kis_알림문({"off": "KIS모의투자 키 없음"}) is None and daily._kis_알림문({"sent": {}}) is None

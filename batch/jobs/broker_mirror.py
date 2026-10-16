@@ -170,6 +170,11 @@ def run(
     if market not in ("KR", "US"):
         return {"off": f"모르는 시장 {market}"}
     if not kv.configured():
+        빈칸 = kv.missing()
+        if len(빈칸) < 3:
+            # 일부만 들어온 것은 연결하려다 이름을 틀린 것이다 — 조용히 꺼지면 모른다(2026-10-16 시험 주문에서
+            # 앱 시크릿 이름이 달라 하루를 꺼진 채 지날 뻔했다, 25.1491·25.1492). 일일 배치가 알림을 보낸다
+            return {"off": "KIS모의투자 키 일부만 있음", "missing": 빈칸}
         return {"off": "KIS모의투자 키 없음"}
     if not client.execute(ACCOUNT_SQL, [MIRROR_ACCOUNT]).rows:
         return {"off": f"베낄 계좌 {MIRROR_ACCOUNT} 없음"}

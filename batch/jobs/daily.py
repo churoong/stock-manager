@@ -1015,6 +1015,18 @@ def _건너뛴_까닭(job_name: str, since: str) -> str | None:
     return f"신호를 계산하지 않았습니다 — {까닭}. 앞서 계산된 신호를 그대로 씁니다(기준일은 추천 머리에)"
 
 
+def _kis_알림문(broker: dict[str, Any]) -> str | None:
+    """KIS모의투자 단계 결과에서 알릴 것 — 키 일부만 있음(설정 실수)·단계 실패.
+
+    키를 하나도 안 넣은 것·정상은 None (25.1492)
+    """
+    if broker.get("missing"):
+        return f"시크릿 {', '.join(broker['missing'])} 이(가) 비어 KIS모의투자 주문을 내지 않았습니다"
+    if broker.get("error"):
+        return f"KIS모의투자 단계 실패: {broker['error']}"
+    return None
+
+
 def _실패문(이름: str, exc: BaseException) -> str:
     """하위 작업이 예외로 끝난 것을 리포트 한 줄로. **한도는 "실패" 가 아니라 "건너뜀"** 이다 (docs/infra.md 25.666,
     교차검증) — 기록은 `skipped` 로 닫는데(25.664) 리포트는 "…실패: D1_ERROR …" 라 적어 둘이 어긋났다."""
@@ -2481,6 +2493,13 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
                 log.exception("KIS모의투자 단계 실패")
                 warnings.append(_실패문("KIS모의투자", exc))
                 step_log["broker"] = {"error": str(exc)[:300]}
+            # 설정 실수·단계 실패는 알림으로 — 일일 배치는 포트폴리오 경고로 거의 매일 partial 이라 경고만으로는
+            # 아무도 못 본다(25.1492). 키를 하나도 넣지 않은 것("키 없음")은 쓰지 않는 선택이라 알리지 않는다
+            원인 = _kis_알림문(step_log.get("broker") or {})
+            if 원인:
+                if (step_log.get("broker") or {}).get("missing"):
+                    warnings.append(원인)
+                _notify_failure(client, market, name, 원인, dry_run=dry_run, title="KIS모의투자 확인 필요")
         status = "partial" if warnings else "success"
         try:
             db.finish_batch_run(client, run_id, status=status, step_log=step_log)

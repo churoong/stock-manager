@@ -84,8 +84,18 @@ def _vars(env: dict[str, str] | None) -> dict[str, str]:
 
 
 def configured(env: dict[str, str] | None = None) -> bool:
+    return not missing(env)
+
+
+def missing(env: dict[str, str] | None = None) -> list[str]:
+    """비었거나 모양이 틀린 칸 이름(값은 담지 않는다). 셋 다 비면 연결하지 않은 것, 일부만이면 설정 실수다 (25.1492)."""
     e = _vars(env)
-    return bool(e.get(KEY_ENV) and e.get(SECRET_ENV) and account(e))
+    out = [k for k in (KEY_ENV, SECRET_ENV) if not e.get(k)]
+    if not e.get(ACCOUNT_ENV):
+        out.append(ACCOUNT_ENV)
+    elif account(e) is None:
+        out.append(f"{ACCOUNT_ENV}(숫자 8·10자리 아님)")
+    return out
 
 
 #: 계좌번호만 8자리로 넣었을 때의 상품코드 — 종합계좌 (공식 예제 `kis_devlp.yaml` `my_prod: "01" # 종합계좌`).
@@ -191,16 +201,22 @@ def parse_executions(payload: object) -> list[Execution]:
 
 
 def parse_us_reservation(payload: object) -> Accepted:
-    """미국 예약주문 응답 — 예약번호(OVRS_RSVN_ODNO).
+    """미국 예약주문 응답 — 성공 코드(`rt_cd` 0)면 받아들여진 것이다.
 
-    정규 주문번호는 개장 때 생겨, 체결 조회와는 날·종목·방향·수량으로 맞춘다
+    번호는 공식 예제의 `OVRS_RSVN_ODNO`(해외예약주문번호, 대소문자 무관), 없으면 `ODNO`.
+    2026-10-16 첫 시험 주문(25.1491)에서 모의가 성공 코드를 주면서 `OVRS_RSVN_ODNO` 를 주지 않았다 — 번호가 없다고
+    "모름" 으로 두면 받아들여진 주문을 응답 없는 주문으로 세었다. 번호가 없으면 응답의 **칸 이름만**(값 없이) 남겨
+    무엇이 오는지 보게 한다. 정규 주문번호는 개장 때 생겨 체결 조회와는 날·종목·방향·수량·단가로 맞추므로 이 번호는
+    기록일 뿐이다
     """
     body = _ok(payload, "모의 미국 예약주문")
     out = body.get("output") or {}
-    # 응답의 `ODNO` 는 "한국거래소전송주문조직번호" 라 주문번호가 아니다(chk_order_resv.py L23, 25.1485 검증 [참고] 2)
-    no = str(out.get("OVRS_RSVN_ODNO") or "").strip()
+    if isinstance(out, list):
+        out = out[0] if out and isinstance(out[0], dict) else {}
+    칸 = {str(k).upper(): v for k, v in out.items()} if isinstance(out, dict) else {}
+    no = str(칸.get("OVRS_RSVN_ODNO") or 칸.get("ODNO") or "").strip()
     if not no:
-        raise NoResponse("모의 미국 예약주문 응답에 예약번호가 없습니다")
+        no = "번호 칸 없음(" + ("·".join(sorted(칸)) or "output 비어 있음") + ")"
     return Accepted(no, None)
 
 

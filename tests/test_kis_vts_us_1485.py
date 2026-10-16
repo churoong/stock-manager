@@ -27,10 +27,12 @@ from tests.test_paper_job_1445 import Client
 def test_parse_us_shapes() -> None:
     assert kv.parse_us_reservation({"rt_cd": "0", "output": {"OVRS_RSVN_ODNO": "0030001234"}}) == kv.Accepted(
         "0030001234", None)
-    with pytest.raises(kv.NoResponse):  # 성공인데 번호가 없으면 '모름' — 거부로 닫지 않는다
-        kv.parse_us_reservation({"rt_cd": "0", "output": {}})
-    with pytest.raises(kv.NoResponse):  # ODNO 는 거래소 전송 조직번호 — 예약번호로 읽지 않는다 (검증 [참고] 2)
-        kv.parse_us_reservation({"rt_cd": "0", "output": {"ODNO": "01790"}})
+    # 성공 코드면 받아들여진 것 — 모의가 번호 칸을 안 줘도(2026-10-16 시험 주문) "모름" 으로 세지 않고 칸 이름만 남긴다 (25.1493)
+    assert kv.parse_us_reservation({"rt_cd": "0", "output": {}}).order_no == "번호 칸 없음(output 비어 있음)"
+    assert kv.parse_us_reservation({"rt_cd": "0", "output": {"rsvn_ord_rcit_dt": "20261016"}}).order_no == (
+        "번호 칸 없음(RSVN_ORD_RCIT_DT)")
+    assert kv.parse_us_reservation({"rt_cd": "0", "output": {"ovrs_rsvn_odno": "77"}}).order_no == "77"
+    assert kv.parse_us_reservation({"rt_cd": "0", "output": [{"ODNO": "01790"}]}).order_no == "01790"
     with pytest.raises(KisFailed, match="APBK1234"):
         kv.parse_us_reservation({"rt_cd": "1", "msg_cd": "APBK1234", "msg1": "주문가능금액 부족"})
     ex = kv.parse_us_executions({"rt_cd": "0", "output": [
