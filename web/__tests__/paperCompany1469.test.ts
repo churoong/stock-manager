@@ -3,7 +3,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { AccountTabs, CommitteePane, type Data } from "@/components/PaperView";
-import { accountView, brokerLines, deptScoreText, stanceText, virtualText } from "@/lib/paper";
+import { accountView, brokerLines, deptScoreText, hasCommittee, ruleText, stanceText, virtualText } from "@/lib/paper";
 
 const 헌장 = {
   name: "가치투자사", philosophy: "싸고 튼튼한 회사를 산다", weights: { research: 2, quant: 0.5, governance: 1 },
@@ -66,6 +66,15 @@ describe("투자위원회 탭", () => {
       meetings: [], dossiers: [],
     }));
     expect(html).toContain("리서치부: 찬성 40건 +2.1%p");
+  });
+
+  it("지주사 H — 위원회 탭 없음, 규칙 글 (25.1482)", () => {
+    const h = { id: "H", sell_rule: "trend", entry_rule: "tranche", top_n: 5, selection: "weighted",
+      charter_json: '{"kind": "holding", "voters": {"A": "x"}}' };
+    expect(hasCommittee(h)).toBe(false);
+    expect(hasCommittee({ charter_json: "{}", selection: "signal" })).toBe(true);
+    expect(ruleText(h as never)).toBe(
+      "매수: 지주사 — 회사 추천을 성적 가중치로 합친 점수, 두 곳 이상 추천한 종목 상위 5 · 3회 분할 지정가 — 매도: 손절·기간초과 + 목표에 닿은 뒤 고점 대비 손절폭 하락 시(목표에서 안 팖)");
   });
 
   it("KIS모의투자 — 배치가 낸 비교 요약을 글로, 연결 전 안내 (25.1478)", () => {

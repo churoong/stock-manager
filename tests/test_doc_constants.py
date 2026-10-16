@@ -30,6 +30,7 @@ from batch.services import buyback as bb
 from batch.services import company as co
 from batch.services import execution_quality as eqm
 from batch.services import factor_ic as fic
+from batch.services import holding as hold
 from batch.services import metrics as m
 from batch.services import outcomes as oc
 from batch.services import paper as pp
@@ -700,7 +701,7 @@ class Test밸류_분모:
     "pick_history", "etf_accounts", "etf_tilt", "after_hours", "broker_stats", "disclosure_reaction", "luck", "postmortem",
     "divergence", "tax_sim", "verdict", "forecast_track", "patterns", "insights", "history",
     "event_history", "simulation", "candidate_factors", "cb_overhang", "buy_thesis", "plan_fill", "target_units", "paper", "risk_gate", "execution_quality", "company",
-    "broker_mirror",
+    "broker_mirror", "holding",
 )  # fmt: skip
 
 #: 아직 그물 밖인 모듈과 **왜 아직인지**. 하나씩 줄여 간다
@@ -918,6 +919,14 @@ class Test이웃_모듈들:
         검사(PAPER, f"하루 {rg.MAX_ORDERS_PER_DAY}건", "하루 매수 주문 상한 (25.1451)")
         검사(PAPER, f"하루 증권사 모의 주문 상한 {bm.MAX_ORDERS_PER_DAY}건", "증권사 모의 하루 주문 상한 (25.1475)")
         검사(PAPER, f"지난 {bm.COMPARE_DAYS}일(`COMPARE_DAYS`)", "KIS모의투자 비교 창 (25.1478)")
+        검사(COMPANY, "서로 다른 회사 **두 곳 이상**이 추천한 종목만 후보", "지주사 합의 조건 (25.1482)")
+        assert hold.HOLDING_MIN_VOTERS == 2
+        검사(COMPANY, f"세기 = min(표 ÷ 문턱, {hold.HOLDING_STRENGTH_MAX:g})", "지주사 세기 상한 (25.1482)")
+        검사(COMPANY, f"k = n ÷ (n + {hold.HOLDING_SHRINK_N})", "지주사 축소 (25.1482)")
+        검사(COMPANY, f"÷ {hold.HOLDING_SCALE_PCT:g}%p", "지주사 성적 척도 (25.1482)")
+        검사(COMPANY, f"[{hold.HOLDING_W_MIN:g}, {hold.HOLDING_W_MAX:g}] 로 자른다", "지주사 가중치 범위 (25.1482)")
+        검사(COMPANY, f"최근 {hold.HOLDING_WINDOW_DAYS}일", "지주사 성적 창 (25.1482)")
+        검사(COMPANY, f"{hold.HOLDING_EPISODE_DAYS}일 에피소드로 한 번", "지주사 에피소드 (25.1482)")
         검사(PAPER, f"상위 {bm.COMPARE_TOP_REASONS}개(`COMPARE_TOP_REASONS`)", "KIS모의투자 거부 까닭 수 (25.1478)")
         검사(COMPANY, f"무작위 {pp.VIRTUAL_CONTROLS}종목**의 20 거래일 수익 분포", "가상 대조 종목 수 (25.1476)")
         검사(COMPANY, f"낸 대조가 {pp.VIRTUAL_MIN_CONTROLS} 개보다 적으면 분위를 내지 않는다", "가상 대조 하한 (25.1476)")

@@ -15,6 +15,7 @@ import {
   stanceText,
   type AccountView,
   type Attribution,
+  hasCommittee,
   type BrokerLatest,
   brokerLines,
   virtualText,
@@ -403,7 +404,7 @@ export function AccountTabs({ data, acct, setAcct, sub, setSub }: {
         {a.name} · 규칙서 판 {a.rule_version} · {ruleText(a)}
       </p>
       <div className="mt-3 flex gap-1 overflow-x-auto border-b border-slate-200 text-sm dark:border-slate-800" role="tablist" aria-label="계좌 화면">
-        {SUB_TABS.filter(([k]) => k !== "committee" || a.charter_json).map(([k, label]) => (
+        {SUB_TABS.filter(([k]) => k !== "committee" || hasCommittee(a)).map(([k, label]) => (
           <button
             key={k}
             type="button"
@@ -423,7 +424,7 @@ export function AccountTabs({ data, acct, setAcct, sub, setSub }: {
         {sub === "trades" ? <TradesPane fills={체결} /> : null}
         {sub === "orders" ? <OrdersPane orders={주문} /> : null}
         {sub === "report" ? <ReportPane a={a} /> : null}
-        {sub === "committee" && a.charter_json ? (
+        {sub === "committee" && hasCommittee(a) ? (
           <CommitteePane a={a} meetings={(data.meetings ?? []).filter((m) => m.account_id === a.id)} dossiers={data.dossiers ?? []} />
         ) : null}
       </div>

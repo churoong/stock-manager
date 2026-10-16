@@ -28,9 +28,10 @@ from batch.sources import kis_vts as kv
 from batch.sources.kis import KisFailed
 
 BROKER = kv.SOURCE
-#: 베낄 내부 계좌 — 지금 시스템(아침 리포트 2부 그대로). 회사(A·C·D·E)로 바꾸는 것은 판 2 성적이 쌓인 뒤
-#: (docs/paper.md 15장)
-MIRROR_ACCOUNT = "B"
+#: 베낄 가상 계좌 — **H(지주사, 성적 가중 합의)** (2026-10-16 사용자 결정 "KIS모의투자 연결도 바로 H로 진행해줘",
+#: docs/company.md 10장). 처음 설계는 B(25.1475). H 가 아직 없는 DB(0083 전)에서는 "베낄 계좌 없음" 으로
+#: 꺼진 채 지나간다
+MIRROR_ACCOUNT = "H"
 #: 장전 동시호가 접수 시작(08:30 KST) 전이면 이만큼까지만 기다린다. 더 이르면 보내지 않는다
 #: — 모의 접수 시작 시각은 공식 자료에서 못 찾았다 `[확인필요]`
 ORDER_OPEN_KST = dtime(8, 30)

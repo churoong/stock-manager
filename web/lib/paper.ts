@@ -77,6 +77,10 @@ const SELL_RULE_TEXT: Record<string, string> = {
   momentum: "손절·기간초과·재무악화·점검·감성급락(목표에서 안 팖)",
   trend: "손절·기간초과 + 목표에 닿은 뒤 고점 대비 손절폭 하락 시(목표에서 안 팖)",
 };
+/** 투자위원회 헌장이 있는 계좌인가 — 지주사(H, selection weighted)의 charter_json 은 투표 회사 지문이라 위원회가 아니다 (25.1482) */
+export function hasCommittee(a: { charter_json?: string | null; selection?: string | null }): boolean {
+  return Boolean(a.charter_json) && a.selection !== "weighted";
+}
 export function ruleText(a: AccountRule): string {
   let 헌장: { name?: string; agenda?: number; top_n?: number } | null = null;
   try {
@@ -84,7 +88,9 @@ export function ruleText(a: AccountRule): string {
   } catch {
     헌장 = null;
   }
-  const 고르기 = 헌장
+  const 고르기 = a.selection === "weighted"
+    ? `지주사 — 회사 추천을 성적 가중치로 합친 점수, 두 곳 이상 추천한 종목 상위 ${a.top_n ?? 5}`
+    : 헌장
     ? `${헌장.name ?? "투자사"} 위원회 가결(안건 ${헌장.agenda ?? "?"}개 중 최대 ${헌장.top_n ?? a.top_n ?? 5}종목)`
     : a.selection === "random"
       ? "무작위 대조(같은 자리·비중)"
@@ -154,6 +160,7 @@ export const PAIRS: ReadonlyArray<readonly [string, string, string]> = [
   ["D", "B", "장기보유투자사 대 기준"],
   ["E", "B", "안정투자사 대 기준"],
   ["G", "B", "목표 뒤 추적 매도 대 목표에서 전량 매도"],
+  ["H", "G", "성적 가중 합의 선정 대 점수 상위 5 (매도는 둘 다 추적)"],
   ["B", "R1", "기준 대 무작위"],
   ["B", "R2", "기준 대 무작위"],
 ];

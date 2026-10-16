@@ -249,6 +249,8 @@ class _Sess:
 def c(monkeypatch: pytest.MonkeyPatch) -> Client:
     for k, v in 키.items():
         monkeypatch.setenv(k, v)
+    # 이 파일의 흐름 시험은 B 의 주문으로 짓는다 — 운영은 H 를 베낀다(25.1482, `test_mirror_account_is_h`)
+    monkeypatch.setattr(job, "MIRROR_ACCOUNT", "B")
     c = Client()
     for oid, sid, side, typ, price, q, 회차 in ((101, 1, "buy", "limit", 9_800, 3, 1),
                                                (102, 3, "sell", "market", None, 2, 0),
@@ -423,3 +425,8 @@ def test_daily_summary_stored_and_weekly_reads_it(c: Client) -> None:
     assert 줄[0] == "[KIS모의투자 — B 주문 베끼기, 지난 28일]" and "잔고가 어긋난 종목 0 (2026-10-19)" in 줄[-1]
     # 주간 요약은 가상모의투자 평가 행이 없으면 통째로 비고(입금 전), 있으면 이 절을 붙인다 — 붙이는 줄은 summary_section 끝
     assert paper_job.summary_section(c, datetime(2026, 10, 25, tzinfo=UTC)) == []
+
+
+def test_mirror_account_is_h() -> None:
+    """KIS모의투자는 H(지주사)를 베낀다 — 2026-10-16 사용자 결정 (docs/company.md 10장)."""
+    assert job.MIRROR_ACCOUNT == "H"

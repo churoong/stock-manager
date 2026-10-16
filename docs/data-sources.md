@@ -269,7 +269,7 @@ GET https://data-dbg.krx.co.kr/svc/apis/{카테고리}/{api_id}.json?basDd=YYYYM
 
 ### 3.2 KIS모의투자 (2026-10-15 사용자 제안, docs/paper.md 15장, docs/infra.md 25.1475)
 
-- **무엇**: 가상 돈 계좌. 내부 모의 계좌 B 의 주문을 베껴 내고(현금 주문), 다음 날 일별 주문체결·잔고 조회로 맞춘다. 실전 계좌·실전 도메인 주문은 쓰지 않는다
+- **무엇**: 가상 돈 계좌. 가상모의투자 H(지주사, 2026-10-16 사용자 결정 — 처음엔 B)의 주문을 베껴 내고(현금 주문), 다음 날 일별 주문체결·잔고 조회로 맞춘다. 실전 계좌·실전 도메인 주문은 쓰지 않는다
 - **인증**: 모의투자 신청 → 모의계좌번호, KIS Developers 에서 **모의투자용 앱키를 실전과 따로** 받는다(공식 예제 README L203). 시크릿 `KIS_VTS_APP_KEY`·`KIS_VTS_APP_SECRET`·`KIS_VTS_ACCOUNT`
 - **도메인·tr_id**: `https://openapivts.koreainvestment.com:29443`, 매수 `VTTC0012U`·매도 `VTTC0011U`·잔고 `VTTC8434R`·일별 주문체결 `VTTC0081R` — 근거 줄은 docs/paper.md 15.5
 - **한도**: 모의 초당 한도는 공식 숫자 없음("모의투자 계좌는 REST API 호출 제한이 낮습니다") `[확인필요]` — 0.6초 간격, 하루 수십 건
