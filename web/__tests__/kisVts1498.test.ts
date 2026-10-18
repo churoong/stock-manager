@@ -15,6 +15,7 @@ import {
   liveRequests,
   parseKrLive,
   parseUsLive,
+  US_EXCHANGES,
   throttleKey,
   vtsAccount,
   vtsConfigured,
@@ -81,19 +82,37 @@ describe("고른 칸", () => {
     // 원시 응답의 다른 칸(계좌번호 등)은 싣지 않는다
     expect(JSON.stringify(v)).not.toContain("50123456");
   });
-  it("미국 — 체결기준현재잔고(외화) 보유·달러 예수금, 거부 사유 0 은 사유 없음", () => {
+  it("미국 — 보유는 거래소별 잔고에서(겹치면 한 번), 현금은 해외 현금·총자산 원화, 거부 사유 0 은 사유 없음 (25.1527)", () => {
+    const 줄 = { ovrs_pdno: "AAPL", ovrs_item_name: "애플", ovrs_cblc_qty: "2", pchs_avg_pric: "200.5", now_pric2: "210", ovrs_stck_evlu_amt: "420", frcr_evlu_pfls_amt: "19", evlu_pfls_rt: "4.74" };
     const v = parseUsLive(
+      [
+        { rt_cd: "0", output1: [] },
+        { rt_cd: "0", output1: [줄, { ovrs_pdno: "IBM", ovrs_cblc_qty: "0" }] },
+        { rt_cd: "0", output1: [줄] }, // 같은 종목이 다른 거래소 조회에서 또 와도 한 번만
+      ],
       {
         rt_cd: "0",
-        output1: [{ pdno: "AAPL", prdt_name: "애플", cblc_qty13: "2", avg_unpr3: "200.5", ovrs_now_pric1: "210", frcr_evlu_amt2: "420", evlu_pfls_amt2: "19", evlu_pfls_rt1: "4.74" }],
+        // 모의 체결기준현재잔고 보유 줄은 수량·평가가 0 — 보유로 읽지 않는다(예전에는 이것만 읽어 늘 "없음")
+        output1: [{ pdno: "AAPL", cblc_qty13: "0.00000000", frcr_evlu_amt2: "0.000000" }],
         output2: [{ crcy_cd: "JPY", frcr_dncl_amt_2: "1" }, { crcy_cd: "USD", frcr_dncl_amt_2: "0" }],
+        output3: { tot_asst_amt: "3000000", frcr_evlu_tota: "2400000" },
       },
       { rt_cd: "0", output: [{ ord_dt: "20261016", odno: "5501", sll_buy_dvsn_cd: "02", pdno: "AAPL", ft_ord_qty: "2", ft_ccld_qty: "2", ft_ccld_unpr3: "200.5", ft_ord_unpr3: "220.00", rjct_rson: "0" }] },
       "2026-10-16T14:00:00Z",
     );
-    expect(v.holdings[0]).toMatchObject({ code: "AAPL", qty: 2, avg: 200.5, price: 210, value: 420, pnl: 19 });
-    expect(v.account).toEqual({ cash: 0, holdings_value: 420, total: 420 });
+    expect(v.holdings).toHaveLength(1);
+    expect(v.holdings[0]).toMatchObject({ code: "AAPL", name: "애플", qty: 2, avg: 200.5, price: 210, value: 420, pnl: 19, pnl_pct: 4.74 });
+    expect(v.account).toEqual({ cash: 0, holdings_value: 420, total: 420, cash_krw: 2_400_000, assets_krw: 3_000_000 });
     expect(v.executions[0]).toMatchObject({ side: "buy", filled: 2, avg_price: 200.5, order_price: 220, note: null });
+  });
+  it("미국 조회는 거래소 셋(AMEX·NASD·NYSE)을 다 묻고, 순서가 파서 인자 순서와 같다", () => {
+    const q = liveRequests("US", { cano: "12345678", prdt: "01" }, "2026-10-16");
+    expect(q.map((x) => x.tr)).toEqual(["VTTS3012R", "VTTS3012R", "VTTS3012R", "VTRP6504R", "VTTS3035R"]);
+    expect(q.slice(0, 3).map((x) => x.params.OVRS_EXCG_CD)).toEqual([...US_EXCHANGES]);
+    // 배치 `kis_vts.US_EXCHANGE` 값과 같은 거래소
+    const py = readFileSync(join(process.cwd(), "..", "batch", "sources", "kis_vts.py"), "utf8");
+    const 배치 = /^US_EXCHANGE = \{(.*)\}/m.exec(py)?.[1] ?? "";
+    expect([...new Set([...배치.matchAll(/: "([A-Z]+)"/g)].map((m) => m[1]))].sort()).toEqual([...US_EXCHANGES]);
   });
 });
 

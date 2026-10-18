@@ -15,6 +15,7 @@ import {
   liveRequests,
   parseKrLive,
   parseUsLive,
+  US_EXCHANGES,
   throttleKey,
   vtsAccount,
   vtsConfigured,
@@ -89,7 +90,9 @@ export async function POST(request: Request) {
       받은.push(payload);
     }
     const 시각 = new Date().toISOString();
-    const live = market === "KR" ? parseKrLive(받은[0], 받은[1], 시각) : parseUsLive(받은[0], 받은[1], 시각);
+    const 거래소수 = US_EXCHANGES.length;
+    const live =
+      market === "KR" ? parseKrLive(받은[0], 받은[1], 시각) : parseUsLive(받은.slice(0, 거래소수), 받은[거래소수], 받은[거래소수 + 1], 시각);
     return NextResponse.json({ live: 더있음 ? { ...live, more: true } : live });
   } catch (e) {
     return NextResponse.json({ errors: [`조회 실패 (${e instanceof Error ? e.name : "오류"})`] }, { status: 500 });

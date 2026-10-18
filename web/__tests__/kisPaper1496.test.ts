@@ -22,7 +22,7 @@ beforeEach(() => {
   // 예전 줄(배열 보유·account 없음)과 새 줄(객체 보유·account·perf)이 섞여 있다
   ins.run("kis_vts", "2026-10-16", 1_000_000, 1_000_000, JSON.stringify([[1, 3, 9800]]), JSON.stringify({ n: 0 }));
   ins.run("kis_vts", "2026-10-19", 900_000, 1_050_000, JSON.stringify([{ id: 1, code: "005930", qty: 3, avg: 9800, price: 10000, value: 30000, pnl: 600 }]),
-    JSON.stringify({ n: 0, account: { currency: "KRW", cash: 900000, holdings_value: 150000, total: 1_050_000 }, account_krw: { kr_total: 1_050_000, value_usd: 110, cash_usd: 0, usd_krw: 1000, total_krw: 1_160_000 } }));
+    JSON.stringify({ n: 0, account: { currency: "KRW", cash: 900000, holdings_value: 150000, total: 1_050_000 }, account_krw: { kr_total: 1_050_000, value_usd: 110, cash_usd: 0, usd_krw: 1000, total_krw: 1_160_000, basis: 2 } }));
   ins.run("kis_vts_us", "2026-10-16", null, null, "[]", JSON.stringify({ n: 0, account: { currency: "USD", cash: 100000, holdings_value: 0, total: 100000 } }));
   db.exec(
     "INSERT INTO paper_broker_orders (broker, paper_order_id, account_id, market, stock_id, code, side, order_type, limit_price, quantity, trade_date, reason, status, source, created_at) VALUES ('kis_vts', NULL, 'H', 'KR', 1, '005930', 'buy', 'limit', 9800, 3, '2026-10-19', '베낌', 'filled', 'kis_vts', 't')",
@@ -33,11 +33,8 @@ describe("KIS모의투자 질의", () => {
   it("마지막 줄·총액 추이(시장 통화, 예전 줄은 total_krw)·거래내역·이름", () => {
     const r = db.prepare(KIS_LATEST).get("kis_vts") as { as_of: string; holdings_json: string };
     expect(r.as_of).toBe("2026-10-19");
-    // 계좌 전체 원화 총액은 국내 배치 줄의 account_krw 에만 — 없는 날은 null
-    expect(db.prepare(KIS_TOTALS).all("kis_vts", "2026-01-01")).toEqual([
-      { as_of: "2026-10-16", total: null },
-      { as_of: "2026-10-19", total: 1_160_000 },
-    ]);
+    // 계좌 전체 원화 총액은 국내 배치 줄의 account_krw 에만 — 기준(basis 2)이 다른·없는 줄은 잇지 않는다(25.1527)
+    expect(db.prepare(KIS_TOTALS).all("kis_vts", "2026-01-01")).toEqual([{ as_of: "2026-10-19", total: 1_160_000 }]);
     const o = db.prepare(KIS_ORDERS).all("kis_vts", "2026-10-01") as Array<{ name: string; status: string }>;
     expect(o).toHaveLength(1);
     expect(o[0]).toMatchObject({ name: "삼성전자", status: "filled" });

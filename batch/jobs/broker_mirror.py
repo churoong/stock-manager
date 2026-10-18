@@ -150,11 +150,19 @@ CELLS_SQL = (
     " WHERE b.broker = ? AND b.trade_date < ? AND b.account_id = ?"
 )
 #: 성과 계열 — 국내 배치가 적는 **계좌 전체 원화 총액**(`summary_json.account_krw.total_krw`, 25.1497).
-#: 오늘 줄은 따로 붙인다
+#: 오늘 줄은 따로 붙인다. **같은 기준(`basis`)의 줄만** 잇는다(25.1527) — 기준이 바뀐 날 총액이 뛰어 가짜 수익·낙폭이
+#: 영구히 남는다
 TOTALS_SQL = (
     "SELECT as_of, json_extract(summary_json, '$.account_krw.total_krw') FROM paper_broker_daily"
-    " WHERE broker = ? AND as_of < ? AND account_id = ? ORDER BY as_of"
+    " WHERE broker = ? AND as_of < ? AND account_id = ? AND json_extract(summary_json, '$.account_krw.basis') = ?"
+    " ORDER BY as_of"
 )
+#: 계좌 전체 원화 총액의 기준 (docs/paper.md 15.7, docs/infra.md 25.1527). 1(25.1497~25.1526) = 국내 총평가 + 미국
+#: 보유 외화평가 합·달러 예수금 × 고시환율 — 모의 계좌에서 틀렸다: 체결기준현재잔고 보유 줄은 수량·평가가 모두 0 이고,
+#: 미국 매수 돈은 원화 예수금이 아니라 **따로 있는 해외 자산**(2026-10-16 탐침 tot_asst_amt 341,636,000)에서 나가
+#: 미국 몫이 통째로 빠졌다.
+#: 2 = 국내 총평가 + KIS 해외 총자산 원화(`output3.tot_asst_amt` = 해외 주식 평가 + 해외 현금 원화 환산)
+TOTAL_BASIS = 2
 #: 같은 기간 H 의 (시간가중 지수, 평가손익) — 시작일 이하 마지막 · 오늘 이하 마지막
 H_TWR_SQL = (
     "SELECT twr_index, pnl_krw FROM paper_daily WHERE account_id = ? AND as_of <= ? ORDER BY as_of DESC LIMIT 1"
@@ -210,36 +218,26 @@ def _us_window(now: datetime, day: Any) -> str | None:
     return None
 
 
-FX_SQL = "SELECT rate FROM fx_rates WHERE pair = 'USDKRW' AND date <= ? AND date >= ? ORDER BY date DESC LIMIT 1"
 
 
 def _account_perf(client: Any, sess: Any, 증권사: str, 오늘: str, 합: dict[str, Any], 계좌: str,
                   ) -> tuple[dict[str, Any], dict[str, Any] | None]:  # fmt: skip
-    """국내 배치의 계좌 전체 원화 총액과 성과 (docs/paper.md 15.7, 25.1497·25.1499).
+    """국내 배치의 계좌 전체 원화 총액과 성과 (docs/paper.md 15.7, 25.1497·25.1527).
 
-    총액 = 국내 총평가 + (미국 보유 외화평가 합 + 달러 예수금) × KIS 최초고시환율. 고시 전이라 환율이 0·없으면 —
-    미국 몫이 0 이면 환율이 상관없고, 아니면 우리 환율 표(7일 안)로 갈음한다(검토 [권장] 2). 한 조각이라도 모르면
-    그날 총액은 모름
+    총액 = 국내 총평가 + KIS 해외 총자산 원화(`tot_asst_amt` — 해외 주식 평가 + 해외 현금). 모의 계좌는 미국 매수
+    돈이 원화 예수금이 아니라 따로 있는 해외 자산에서 나간다(25.1527 탐침 — 미국 매수 뒤 국내 D+2 그대로).
+    한 조각이라도 모르면
+    그날 총액은 모름. 계열은 같은 기준(`TOTAL_BASIS`)의 줄만 잇는다
     """
     try:
         us = kv.us_totals(sess.present_us())
     except (KisFailed, requests.RequestException):
-        us = {"value_usd": None, "cash_usd": None, "usd_krw": None}
-    값, 현금, 환율 = us["value_usd"], us["cash_usd"], us["usd_krw"]
-    if 값 is not None and 현금 is not None and not 환율:
-        if 값 == 0 and 현금 == 0:
-            환율 = 0.0
-        else:
-            from datetime import date as _date
-
-            일주 = (_date.fromisoformat(오늘) - timedelta(days=7)).isoformat()
-            줄 = client.execute(FX_SQL, [오늘, 일주]).rows
-            환율 = float(줄[0][0]) if 줄 and 줄[0][0] else None
-            us = us | {"usd_krw_source": "fx_rates"}
-    조각 = [합.get("total"), 값, 현금, 환율]
-    총 = None if any(x is None for x in 조각) else float(합["total"]) + (float(값) + float(현금)) * float(환율)  # type: ignore[arg-type]
-    원화계좌 = us | {"kr_total": 합.get("total"), "total_krw": 총}
-    계열 = [(str(d), v) for d, v in client.execute(TOTALS_SQL, [증권사, 오늘, 계좌]).rows] + [(오늘, 총)]
+        us = {"value_usd": None, "cash_usd": None, "usd_krw": None, "assets_krw": None}
+    해외 = us.get("assets_krw")
+    총 = None if 합.get("total") is None or 해외 is None else float(합["total"]) + float(해외)
+    원화계좌 = us | {"kr_total": 합.get("total"), "total_krw": 총, "basis": TOTAL_BASIS}
+    이전 = client.execute(TOTALS_SQL, [증권사, 오늘, 계좌, TOTAL_BASIS]).rows
+    계열 = [(str(d), v) for d, v in 이전] + [(오늘, 총)]
     시작 = bm.perf(계열)
     if not 시작:
         return 원화계좌, None
@@ -337,6 +335,10 @@ def run(
     # 맞다
     계좌 = {"currency": "USD" if 미국 else "KRW", "cash": 합.get("cash") if 미국 else 합.get("cash_d2", 합.get("cash")),
           "holdings_value": 합.get("holdings_value"), "total": 합.get("total")}  # fmt: skip
+    if 미국:
+        # 해외 현금·해외 총자산(원화 환산) — 달러 예수금 칸은 모의에서 늘 0 이라 그것만 보이면 "현금 0" 으로
+        # 읽힌다(25.1527)
+        계좌 |= {"cash_krw": 합.get("cash_krw"), "assets_krw": 합.get("assets_krw")}
     원화계좌: dict[str, Any] | None = None
     성과 = None
     if not 미국:

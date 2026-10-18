@@ -42,28 +42,31 @@ def test_us_totals_from_present_balance() -> None:
 
 
 class _가격세션(_Sess):
-    def __init__(self, total: float, us_value: str = "100", **kw: Any) -> None:
+    """`us_assets` = KIS 해외 총자산 원화(`output3.tot_asst_amt`). 보유 줄은 모의처럼 수량 0 (25.1527)"""
+
+    def __init__(self, total: float, us_assets: str = "100000", **kw: Any) -> None:
         super().__init__(**kw)
-        self.total, self.us_value = total, us_value
+        self.total, self.us_assets = total, us_assets
 
     def balance(self) -> tuple[list[kv.Holding], dict[str, float | None]]:
         return self.holdings, {"cash": 900_000.0, "total": self.total, "holdings_value": self.total - 899_000.0,
                                "cash_d2": 899_000.0}  # fmt: skip
 
     def present_us(self, won: bool = False) -> dict:
-        return {"output1": [{"pdno": "AAPL", "cblc_qty13": "1", "frcr_evlu_amt2": self.us_value}],
-                "output2": [{"crcy_cd": "USD", "frcr_dncl_amt_2": "0", "frst_bltn_exrt": "1000"}], "output3": {}}
+        return {"output1": [{"pdno": "AAPL", "cblc_qty13": "0.00000000", "frcr_evlu_amt2": "0.000000"}],
+                "output2": [{"crcy_cd": "USD", "frcr_dncl_amt_2": "0", "frst_bltn_exrt": "1000"}],
+                "output3": {"tot_asst_amt": self.us_assets}}
 
 
 def test_job_stores_holdings_account_and_account_level_perf(c: Client) -> None:  # noqa: F811
-    """국내 배치가 계좌 전체 원화 총액(국내 총평가 + 미국 평가·달러 × 고시환율)으로 성과를 낸다 (25.1497)."""
+    """국내 배치가 계좌 전체 원화 총액(국내 총평가 + KIS 해외 총자산 원화)으로 성과를 낸다 (25.1497·25.1527)."""
     c.conn.execute("INSERT INTO paper_daily (account_id, as_of, invested_krw, cash_krw, holdings_krw, equity_krw, pnl_krw,"
                    " twr_index, positions_json, recon_ok, updated_at) VALUES"
                    " ('B', '2026-10-15', 1, 1, 0, 1, 1000, 1.0, '[]', 1, 't'), ('B', '2026-10-19', 1, 1, 0, 1, 31000, 1.02, '[]', 1, 't')")  # fmt: skip
     보유 = [kv.Holding("005930", 3, 3, 9_800.0, 10_000.0, 30_000.0, 600.0)]
     job.run(c, "KR", _at("08:40"), session=_가격세션(1_000_000.0, holdings=보유), sleep=lambda _x: None,
             clock=lambda: _at("08:40"))  # fmt: skip
-    job.run(c, "KR", _at("08:40", "2026-10-19"), session=_가격세션(1_050_000.0, "110", holdings=보유),
+    job.run(c, "KR", _at("08:40", "2026-10-19"), session=_가격세션(1_050_000.0, "110000", holdings=보유),
             sleep=lambda _x: None, clock=lambda: _at("08:40", "2026-10-19"))  # fmt: skip
     줄 = c.q("SELECT as_of, holdings_json, summary_json, total_krw FROM paper_broker_daily WHERE broker = 'kis_vts'"
              " ORDER BY as_of")
@@ -73,8 +76,9 @@ def test_job_stores_holdings_account_and_account_level_perf(c: Client) -> None: 
     s = json.loads(줄[1][2])
     # 국내 칸 현금은 총평가와 같은 D+2
     assert s["account"] == {"currency": "KRW", "cash": 899_000.0, "holdings_value": 151_000.0, "total": 1_050_000.0}
-    # 계좌 전체 원화 = 1,050,000 + (110 + 0) × 1000 = 1,160,000 · 첫날 1,000,000 + 100 × 1000 = 1,100,000
-    assert s["account_krw"]["total_krw"] == pytest.approx(1_160_000.0)
+    # 계좌 전체 원화 = 국내 1,050,000 + 해외 총자산 110,000 = 1,160,000 · 첫날 1,000,000 + 100,000 = 1,100,000.
+    # 체결기준현재잔고 보유 줄(수량 0)은 총액에 쓰지 않는다(25.1527)
+    assert s["account_krw"]["total_krw"] == pytest.approx(1_160_000.0) and s["account_krw"]["basis"] == job.TOTAL_BASIS
     assert s["perf"]["start"] == "2026-10-16" and s["perf"]["pnl_krw"] == pytest.approx(60_000.0)
     # 같은 기간 H(이 시험은 B 를 베낀다) — 10-16 이하 마지막 (1.0, 1000) → 10-19 (1.02, 31000)
     assert s["perf"]["h_pnl_krw"] == pytest.approx(30_000.0) and s["perf"]["h_return_pct"] == pytest.approx(2.0)
@@ -95,22 +99,25 @@ def test_us_row_has_no_perf_and_us_query_failure_means_unknown(c: Client) -> Non
 
 
 def test_fx_zero_and_perf_failure_do_not_block(c: Client, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
-    """08:30 KST 에 KIS 고시환율이 0 이어도 미국 몫이 0 이면 총액이 나오고, 아니면 우리 환율 표로 갈음한다(검토 [권장] 2).
-    성과 계산이 깨져도 그날 베낀 주문은 나간다(검토 [권장] 5)"""
+    """08:30 KST 에 KIS 고시환율이 0 이어도 총액은 원화 해외 총자산이라 환율이 필요 없다(25.1527).
+    해외 총자산 칸이 없으면 그날 총액은 모름. 성과 계산이 깨져도 그날 베낀 주문은 나간다(검토 [권장] 5)"""
 
     class _환율0(_가격세션):
         def present_us(self, won: bool = False) -> dict:
-            return {"output1": [{"pdno": "AAPL", "cblc_qty13": "1", "frcr_evlu_amt2": self.us_value}],
-                    "output2": [{"crcy_cd": "USD", "frcr_dncl_amt_2": "0", "frst_bltn_exrt": "0"}], "output3": {}}
+            return super().present_us(won) | {"output2": [{"crcy_cd": "USD", "frcr_dncl_amt_2": "0", "frst_bltn_exrt": "0"}]}
 
     job.run(c, "KR", _at("08:40"), session=_환율0(1_000_000.0, "0"), sleep=lambda _x: None, clock=lambda: _at("08:40"))
     s = json.loads(c.q("SELECT summary_json FROM paper_broker_daily WHERE as_of = '2026-10-16'")[0][0])
     assert s["account_krw"]["total_krw"] == pytest.approx(1_000_000.0)
-    c.conn.execute("INSERT INTO fx_rates (pair, date, rate, source, fetched_at) VALUES ('USDKRW', '2026-10-15', 1400, 't', 't')")
-    job.run(c, "KR", _at("08:40", "2026-10-19"), session=_환율0(1_000_000.0, "10"), sleep=lambda _x: None,
+
+    class _해외모름(_가격세션):
+        def present_us(self, won: bool = False) -> dict:
+            return super().present_us(won) | {"output3": {}}
+
+    job.run(c, "KR", _at("08:40", "2026-10-19"), session=_해외모름(1_000_000.0), sleep=lambda _x: None,
             clock=lambda: _at("08:40", "2026-10-19"))  # fmt: skip
     s = json.loads(c.q("SELECT summary_json FROM paper_broker_daily WHERE as_of = '2026-10-19'")[0][0])
-    assert s["account_krw"]["total_krw"] == pytest.approx(1_014_000.0) and s["account_krw"]["usd_krw_source"] == "fx_rates"
+    assert s["account_krw"]["total_krw"] is None
 
     # 성과 계산이 깨진 날 — 주문은 그대로 나간다
     monkeypatch.setattr(job, "TOTALS_SQL", "SELECT 깨진 질의")
@@ -118,3 +125,13 @@ def test_fx_zero_and_perf_failure_do_not_block(c: Client, monkeypatch: pytest.Mo
     s2 = _가격세션(1_000_000.0)
     기록 = job.run(c, "KR", _at("08:40"), session=s2, sleep=lambda _x: None, clock=lambda: _at("08:40"))
     assert 기록["perf_error"] and 기록["sent"] == {"accepted": 2} and len(s2.orders) == 2
+
+
+def test_old_basis_rows_are_not_linked(c: Client) -> None:  # noqa: F811
+    """기준이 바뀐 줄(25.1497 식, `basis` 없음)은 계열에 잇지 않는다 — 이으면 해외 자산만큼 총액이 뛰어 가짜 수익이 남는다 (25.1527)"""
+    c.conn.execute("INSERT INTO paper_broker_daily (broker, as_of, account_id, holdings_json, diff_json, source, fetched_at,"
+                   " summary_json) VALUES ('kis_vts', '2026-10-15', 'B', '[]', '{}', 'kis_vts', 't', ?)",
+                   [json.dumps({"account_krw": {"total_krw": 500_000.0}})])  # fmt: skip
+    job.run(c, "KR", _at("08:40"), session=_가격세션(1_000_000.0), sleep=lambda _x: None, clock=lambda: _at("08:40"))
+    s = json.loads(c.q("SELECT summary_json FROM paper_broker_daily WHERE as_of = '2026-10-16'")[0][0])
+    assert s["perf"]["start"] == "2026-10-16" and s["perf"]["pnl_krw"] == pytest.approx(0.0)

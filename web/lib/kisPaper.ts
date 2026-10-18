@@ -3,8 +3,8 @@
  *
  * A: 배치가 적은 기록(`paper_broker_daily`·`paper_broker_orders`)을 읽기만 한다. 수익률·낙폭·H 비교는 배치가 낸 값(`summary_json.perf`),
  * 보유의 현재가·평가금액·손익은 KIS 가 준 값(`holdings_json`)이다 — 웹은 계산하지 않는다.
- * 성과는 **계좌 전체 원화**(국내 배치 줄의 `account_krw`·`perf`) — 계좌 하나에 원·달러가 같이 있고 미국 매수 돈이 원화에서 자동 환전으로
- * 나가 시장별 총액 비는 수익률이 아니다(25.1497).
+ * 성과는 **계좌 전체 원화**(국내 배치 줄의 `account_krw`·`perf`) — 국내 총평가 + KIS 해외 총자산 원화(25.1527). 모의 계좌는 미국 매수 돈이
+ * 원화 예수금이 아니라 따로 있는 해외 자산에서 나간다.
  */
 
 import { BROKER_KEYS, type BrokerSummary } from "@/lib/paper";
@@ -16,9 +16,13 @@ export const KIS_TOTALS_DAYS = 400;
 
 export const KIS_LATEST = `SELECT as_of, holdings_json, summary_json, diff_json, fetched_at FROM paper_broker_daily
 WHERE broker = ? ORDER BY as_of DESC LIMIT 1`;
-/** 계좌 전체 원화 총액 추이 — 배치 `TOTALS_SQL` 과 같은 잣대(국내 배치 줄에만 있다) */
+/** 계좌 전체 원화 총액의 기준 — 배치 `TOTAL_BASIS` 와 같다. 2 = 국내 총평가 + KIS 해외 총자산 원화(25.1527) */
+export const KIS_TOTAL_BASIS = 2;
+/** 계좌 전체 원화 총액 추이 — 배치 `TOTALS_SQL` 과 같은 잣대(국내 배치 줄에만 있다). **같은 기준의 줄만** — 기준이 바뀐 날을
+ * 이으면 해외 자산만큼 총액이 뛴다(25.1527) */
 export const KIS_TOTALS = `SELECT as_of, json_extract(summary_json, '$.account_krw.total_krw') AS total
-FROM paper_broker_daily WHERE broker = ? AND as_of >= ? ORDER BY as_of`;
+FROM paper_broker_daily WHERE broker = ? AND as_of >= ? AND json_extract(summary_json, '$.account_krw.basis') = ${KIS_TOTAL_BASIS}
+ORDER BY as_of`;
 export const KIS_ORDERS = `SELECT b.id, b.trade_date, b.side, b.code, b.order_type, b.limit_price, b.quantity, b.status, b.filled_qty,
   b.avg_price, b.reason, b.message, b.sent_at, b.stock_id, COALESCE(s.name_ko, s.name_en, s.ticker) AS name
 FROM paper_broker_orders b LEFT JOIN stocks s ON s.id = b.stock_id
@@ -26,12 +30,17 @@ WHERE b.broker = ? AND b.trade_date >= ? ORDER BY b.trade_date DESC, b.id DESC`;
 export const KIS_NAMES = `SELECT s.id, COALESCE(s.name_ko, s.name_en, s.ticker) AS name FROM json_each(?) j JOIN stocks s ON s.id = j.value`;
 
 export interface KisHolding { id: number | null; code: string; qty: number; avg: number | null; price: number | null; value: number | null; pnl: number | null; name?: string | null }
-export interface KisAccount { currency: "KRW" | "USD"; cash: number | null; holdings_value: number | null; total: number | null }
+/** 미국 칸의 `cash_krw`·`assets_krw` = KIS 해외 현금·해외 총자산(원화 환산, 25.1527) — 모의는 달러 예수금(`cash`)이 늘 0 이다 */
+export interface KisAccount { currency: "KRW" | "USD"; cash: number | null; holdings_value: number | null; total: number | null; cash_krw?: number | null; assets_krw?: number | null }
 export interface KisPerf {
   start: string; start_total: number; last: string; last_total: number; pnl_krw: number; return_pct: number; mdd_pct: number; days: number;
   h_pnl_krw: number | null; h_return_pct: number | null;
 }
-export interface KisAccountKrw { kr_total: number | null; value_usd: number | null; cash_usd: number | null; usd_krw: number | null; total_krw: number | null }
+/** `basis` 2(25.1527) = 국내 총평가 `kr_total` + 해외 총자산 `assets_krw`. 없으면 예전 식(25.1497 — 미국 몫이 빠졌다) */
+export interface KisAccountKrw {
+  kr_total: number | null; value_usd: number | null; cash_usd: number | null; usd_krw: number | null; total_krw: number | null;
+  assets_krw?: number | null; basis?: number;
+}
 export interface KisOrder {
   id: number; trade_date: string; side: string; code: string; order_type: string; limit_price: number | null; quantity: number; status: string;
   filled_qty: number | null; avg_price: number | null; reason: string; message: string | null; sent_at: string | null; stock_id: number; name: string | null;
@@ -90,6 +99,18 @@ export function amountText(v: number | null | undefined, currency: "KRW" | "USD"
   return currency === "USD"
     ? `$${v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
     : `${Math.round(v).toLocaleString("ko-KR")}원`;
+}
+
+/** 미국 칸의 현금 글 (25.1527) — KIS 해외 현금·해외 총자산(원화 환산)이 있으면 그것을, 없으면(예전 줄) 달러 예수금을 */
+export function usCashText(a: { cash: number | null; cash_krw?: number | null; assets_krw?: number | null }): string {
+  if (a.cash_krw == null && a.assets_krw == null) return `달러 예수금 ${amountText(a.cash, "USD")}`;
+  return `해외 현금 ${amountText(a.cash_krw ?? null, "KRW")} · 해외 총자산 ${amountText(a.assets_krw ?? null, "KRW")} (KIS 원화 환산)`;
+}
+
+/** 계좌 전체 총액의 나눔 글 (25.1527) — 기준 2 는 국내 총평가 + 해외 총자산, 예전 식은 미국 몫이 빠졌다고 밝힌다 */
+export function wholeBreakdownText(k: KisAccountKrw, asOf: string | null): string {
+  if (k.basis === KIS_TOTAL_BASIS) return `국내 ${amountText(k.kr_total, "KRW")} + 해외 총자산 ${amountText(k.assets_krw ?? null, "KRW")} · ${asOf ?? "-"} 국내 배치 기준`;
+  return `국내 ${amountText(k.kr_total, "KRW")} · ${asOf ?? "-"} 국내 배치 기준 — 예전 식이라 미국 몫이 빠졌습니다(다음 국내 배치부터 해외 총자산을 더합니다)`;
 }
 
 /** 지정가 글 — 미국은 시장가가 없어 늘 지정가(시장가 주문은 종가 ± 폭으로 낸 값, docs/paper.md 15.6) */

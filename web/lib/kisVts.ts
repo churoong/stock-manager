@@ -16,15 +16,19 @@ export const KIS_VTS_BASE = "https://openapivts.koreainvestment.com:29443";
 export const VTS_TR = {
   KR_BALANCE: "VTTC8434R",
   KR_CCLD: "VTTC0081R",
+  US_BALANCE: "VTTS3012R",
   US_PRESENT: "VTRP6504R",
   US_CCNL: "VTTS3035R",
 } as const;
 export const VTS_PATH = {
   KR_BALANCE: "/uapi/domestic-stock/v1/trading/inquire-balance",
   KR_CCLD: "/uapi/domestic-stock/v1/trading/inquire-daily-ccld",
+  US_BALANCE: "/uapi/overseas-stock/v1/trading/inquire-balance",
   US_PRESENT: "/uapi/overseas-stock/v1/trading/inquire-present-balance",
   US_CCNL: "/uapi/overseas-stock/v1/trading/inquire-ccnl",
 } as const;
+/** 미국 잔고를 묻는 거래소 — 배치 `kis_vts.US_EXCHANGE` 값과 같다. 모의는 거래소마다 따로 준다(25.1485·25.1527) */
+export const US_EXCHANGES = ["AMEX", "NASD", "NYSE"] as const;
 /** 같은 시장을 다시 부를 수 있는 최소 간격 */
 export const LIVE_MIN_GAP_MS = 30_000;
 /** 시장과 상관없이 두 조회 사이 최소 간격 — 국내·미국 단추를 같은 초에 누르면 같은 앱키의 초당 한도에 걸렸다(25.1499, 검토 [참고] 9) */
@@ -79,7 +83,8 @@ export interface LiveView {
   currency: "KRW" | "USD";
   fetched_at: string;
   holdings: LiveHolding[];
-  account: { cash: number | null; holdings_value: number | null; total: number | null };
+  /** 미국은 `cash_krw`·`assets_krw`(KIS 해외 현금·해외 총자산 원화 환산)도 — 모의는 달러 예수금 `cash` 가 늘 0 이다(25.1527) */
+  account: { cash: number | null; holdings_value: number | null; total: number | null; cash_krw?: number | null; assets_krw?: number | null };
   executions: LiveExecution[];
 }
 
@@ -115,14 +120,28 @@ export function parseKrLive(balance: unknown, ccld: unknown, fetchedAt: string):
   };
 }
 
-/** 미국 체결기준현재잔고(VTRP6504R, 외화) + 오늘 체결(VTTS3035R) → 고른 칸(달러) */
-export function parseUsLive(present: unknown, ccnl: unknown, fetchedAt: string): LiveView {
+/**
+ * 미국 거래소별 잔고(VTTS3012R) + 체결기준현재잔고(VTRP6504R, 외화) + 오늘 체결(VTTS3035R) → 고른 칸(달러) (25.1527).
+ *
+ * 보유는 **거래소별 잔고**에서 — 2026-10-18 탐침에서 모의 체결기준현재잔고의 보유 줄은 수량·평가가 모두 0 이었다(예전에는 그것만 읽어
+ * 미국 보유가 늘 "없음"). 같은 종목이 두 거래소에서 오면 한 번만. 체결기준현재잔고에서는 달러 예수금과 해외 현금·해외 총자산(원화)만 읽는다
+ */
+export function parseUsLive(balances: unknown[], present: unknown, ccnl: unknown, fetchedAt: string): LiveView {
   const usd = rows(present, "output2").find((r) => String(r.crcy_cd ?? "").toUpperCase() === "USD") ?? {};
-  const holdings = rows(present, "output1")
-    .filter((r) => int(r.cblc_qty13) > 0)
+  const 셋 = rows(present, "output3")[0] ?? {};
+  const 본: Set<string> = new Set();
+  const holdings = balances
+    .flatMap((b) => rows(b, "output1"))
+    .filter((r) => int(r.ovrs_cblc_qty) > 0 && String(r.ovrs_pdno ?? "").trim())
+    .filter((r) => {
+      const code = String(r.ovrs_pdno).trim();
+      if (본.has(code)) return false;
+      본.add(code);
+      return true;
+    })
     .map((r) => ({
-      code: String(r.pdno ?? "").trim(), name: r.prdt_name ? String(r.prdt_name) : null, qty: int(r.cblc_qty13), avg: num(r.avg_unpr3),
-      price: num(r.ovrs_now_pric1), value: num(r.frcr_evlu_amt2), pnl: num(r.evlu_pfls_amt2), pnl_pct: num(r.evlu_pfls_rt1),
+      code: String(r.ovrs_pdno).trim(), name: r.ovrs_item_name ? String(r.ovrs_item_name) : null, qty: int(r.ovrs_cblc_qty), avg: num(r.pchs_avg_pric),
+      price: num(r.now_pric2), value: num(r.ovrs_stck_evlu_amt), pnl: num(r.frcr_evlu_pfls_amt), pnl_pct: num(r.evlu_pfls_rt),
     }));
   const 평가 = holdings.every((h) => h.value != null) ? holdings.reduce((a, h) => a + (h.value ?? 0), 0) : null;
   const cash = num(usd.frcr_dncl_amt_2);
@@ -131,7 +150,7 @@ export function parseUsLive(present: unknown, ccnl: unknown, fetchedAt: string):
     currency: "USD",
     fetched_at: fetchedAt,
     holdings,
-    account: { cash, holdings_value: 평가, total: cash != null && 평가 != null ? cash + 평가 : null },
+    account: { cash, holdings_value: 평가, total: cash != null && 평가 != null ? cash + 평가 : null, cash_krw: num(셋.frcr_evlu_tota), assets_krw: num(셋.tot_asst_amt) },
     executions: rows(ccnl, "output")
       .filter((r) => String(r.odno ?? "").trim())
       .map((r) => ({
@@ -150,7 +169,7 @@ export function kisErrorCode(payload: unknown): string | null {
   return String(p.rt_cd) === "0" ? null : String(p.msg_cd ?? "오류");
 }
 
-/** 조회 인자 — 시장마다 두 번(잔고·오늘 체결). `day` 는 그 시장 현지 날짜 YYYY-MM-DD */
+/** 조회 인자 — 국내 두 번(잔고·오늘 체결), 미국 다섯 번(거래소별 잔고 셋·체결기준현재잔고·오늘 체결). `day` 는 그 시장 현지 날짜 YYYY-MM-DD */
 export function liveRequests(market: VtsMarket, acct: { cano: string; prdt: string }, day: string): Array<{ path: string; tr: string; params: Record<string, string> }> {
   const d = day.replaceAll("-", "");
   const a = { CANO: acct.cano, ACNT_PRDT_CD: acct.prdt };
@@ -160,6 +179,8 @@ export function liveRequests(market: VtsMarket, acct: { cano: string; prdt: stri
       { path: VTS_PATH.KR_CCLD, tr: VTS_TR.KR_CCLD, params: { ...a, INQR_STRT_DT: d, INQR_END_DT: d, SLL_BUY_DVSN_CD: "00", PDNO: "", CCLD_DVSN: "00", INQR_DVSN: "01", INQR_DVSN_3: "00", ORD_GNO_BRNO: "", ODNO: "", INQR_DVSN_1: "", EXCG_ID_DVSN_CD: "KRX", CTX_AREA_FK100: "", CTX_AREA_NK100: "" } },
     ];
   return [
+    // 거래소별 잔고 셋 — 보유는 여기서(25.1527). 순서가 `parseUsLive` 인자 순서다
+    ...US_EXCHANGES.map((x) => ({ path: VTS_PATH.US_BALANCE, tr: VTS_TR.US_BALANCE, params: { ...a, OVRS_EXCG_CD: x, TR_CRCY_CD: "USD", CTX_AREA_FK200: "", CTX_AREA_NK200: "" } })),
     { path: VTS_PATH.US_PRESENT, tr: VTS_TR.US_PRESENT, params: { ...a, WCRC_FRCR_DVSN_CD: "02", NATN_CD: "840", TR_MKET_CD: "00", INQR_DVSN_CD: "00" } },
     { path: VTS_PATH.US_CCNL, tr: VTS_TR.US_CCNL, params: { ...a, PDNO: "", ORD_STRT_DT: d, ORD_END_DT: d, SLL_BUY_DVSN: "00", CCLD_NCCS_DVSN: "00", OVRS_EXCG_CD: "", SORT_SQN: "DS", ORD_DT: "", ORD_GNO_BRNO: "", ODNO: "", CTX_AREA_NK200: "", CTX_AREA_FK200: "" } },
   ];

@@ -73,7 +73,8 @@ def test_session_us_balance_each_exchange_dedup(monkeypatch: pytest.MonkeyPatch)
     """모의는 거래소마다 따로 받는다 `[확인필요]` — 거래소마다 묻고, 같은 종목이 두 번 오면 한 번만."""
     줄 = {"ovrs_pdno": "AAPL", "ovrs_cblc_qty": "3", "ord_psbl_qty": "3", "pchs_avg_pric": "201", "now_pric2": "210",
           "ovrs_stck_evlu_amt": "630", "frcr_evlu_pfls_amt": "27"}
-    현금 = {"rt_cd": "0", "output2": [{"crcy_cd": "JPY", "frcr_dncl_amt_2": "5"}, {"crcy_cd": "USD", "frcr_dncl_amt_2": "1000.5"}]}
+    현금 = {"rt_cd": "0", "output2": [{"crcy_cd": "JPY", "frcr_dncl_amt_2": "5"}, {"crcy_cd": "USD", "frcr_dncl_amt_2": "1000.5"}],
+          "output3": {"tot_asst_amt": "3000000", "frcr_evlu_tota": "1800000", "evlu_amt_smtl": "1200000"}}
     s, http = _세션(monkeypatch, [({"rt_cd": "0", "output1": [줄]}, ""),
                                  ({"rt_cd": "0", "output1": [줄]}, ""),
                                  ({"rt_cd": "0", "output1": [{"ovrs_pdno": "IBM", "ovrs_cblc_qty": "2",
@@ -84,7 +85,8 @@ def test_session_us_balance_each_exchange_dedup(monkeypatch: pytest.MonkeyPatch)
     assert [(h.code, h.quantity, h.price, h.value, h.pnl) for h in 보유] == [("AAPL", 3, 210.0, 630.0, 27.0),
                                                                            ("IBM", 2, None, 300.0, -12.5)]
     # 계좌 총액(달러) = 외화예수금 + 보유 평가 (docs/paper.md 15.7, 25.1496)
-    assert 합 == {"cash": 1000.5, "total": 1930.5, "holdings_value": 930.0}
+    # 해외 현금·해외 총자산(원화 환산)도 같은 조회에서 (25.1527)
+    assert 합 == {"cash": 1000.5, "total": 1930.5, "holdings_value": 930.0, "cash_krw": 1_800_000.0, "assets_krw": 3_000_000.0}
     assert [kw["params"]["OVRS_EXCG_CD"] for _u, kw in http.sent[:3]] == ["AMEX", "NASD", "NYSE"]
     assert all(kw["headers"]["tr_id"] == "VTTS3012R" for _u, kw in http.sent[:3])
     assert http.sent[3][1]["headers"]["tr_id"] == "VTRP6504R" and http.sent[3][1]["params"]["WCRC_FRCR_DVSN_CD"] == "02"

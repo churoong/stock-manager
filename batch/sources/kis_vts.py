@@ -310,6 +310,11 @@ def us_totals(present: dict[str, Any]) -> dict[str, float | None]:
     # 첫 미국 체결 뒤 계열로 보려고(25.1499, 검토 [필수] 1 `[확인필요]`)
     return {"value_usd": None if any(v is None for v in 값) else float(sum(v for v in 값 if v is not None)),
             "cash_usd": _num(usd.get("frcr_dncl_amt_2")), "usd_krw": _float(usd.get("frst_bltn_exrt")),
+            # 해외 총자산·해외 주식 평가·해외 현금(원화 환산) — 계좌 총액은 이것을 쓴다(25.1527 — 모의는 output1 보유 줄
+            # 수량·평가가 0 이고 미국 돈은 원화 예수금과 따로 있다).
+            # 2026-10-18 탐침: tot_asst_amt = evlu_amt_smtl + frcr_evlu_tota
+            "assets_krw": _num(셋.get("tot_asst_amt")), "stocks_krw": _num(셋.get("evlu_amt_smtl")),
+            "cash_krw": _num(셋.get("frcr_evlu_tota")),
             "unsettled_buy": _num(셋.get("ustl_buy_amt_smtl")), "unsettled_sell": _num(셋.get("ustl_sll_amt_smtl")),
             "buy_margin_usd": _num(usd.get("frcr_buy_mgn_amt"))}  # fmt: skip
 
@@ -517,12 +522,6 @@ class Session:
         셋 = body.get("output3") or {}
         return 목록 | {"output3": 셋[0] if isinstance(셋, list) and 셋 else 셋 if isinstance(셋, dict) else {}}
 
-    def cash_us(self) -> float | None:
-        """미국 외화예수금(달러) — 체결기준현재잔고 외화 기준 `output2` 의 USD 줄 `frcr_dncl_amt_2`. 못 받으면 None."""
-        줄 = self.present_us()["output2"]
-        usd = next((r for r in 줄 if isinstance(r, dict) and str(r.get("crcy_cd") or "").upper() == "USD"), None)
-        return _num(usd.get("frcr_dncl_amt_2")) if usd else None
-
     def balance_us(self) -> tuple[list[Holding], dict[str, float | None]]:
         """미국 보유 — 거래소마다 묻고 종목 코드로 겹침을 뺀다.
 
@@ -544,11 +543,14 @@ class Session:
                 fk, nk, cont = str(payload.get("ctx_area_fk200") or ""), str(payload.get("ctx_area_nk200") or ""), "N"
         목록 = list(보유.values())
         # 계좌 총액(달러) = 외화예수금 + 보유 평가 합. 예수금 조회가 안 되면(모의 미지원 등) 총액은 모름 —
-        # 보유는 그대로 돌려준다
+        # 보유는 그대로 돌려준다. 해외 현금·해외 총자산(원화)도 같은 조회에서 붙인다
+        # (25.1527 — 모의는 달러 예수금이 늘 0)
         try:
-            현금 = self.cash_us()
+            셋 = us_totals(self.present_us())
         except KisFailed:
-            현금 = None
+            셋 = {}
+        현금 = 셋.get("cash_usd")
         평가 = sum(h.value for h in 목록 if h.value is not None) if all(h.value is not None for h in 목록) else None
         총 = None if 현금 is None or 평가 is None else 현금 + 평가
-        return 목록, {"cash": 현금, "total": 총, "holdings_value": 평가}
+        return 목록, {"cash": 현금, "total": 총, "holdings_value": 평가, "cash_krw": 셋.get("cash_krw"),
+                    "assets_krw": 셋.get("assets_krw")}

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import EquityChart, { type Series } from "@/components/EquityChart";
 import { bodyOf, readJson } from "@/lib/http";
-import { amountText, perfLines, priceText, statusText, type KisMarket, type KisMarketView, type KisWhole } from "@/lib/kisPaper";
+import { amountText, perfLines, priceText, statusText, usCashText, wholeBreakdownText, type KisMarket, type KisMarketView, type KisWhole } from "@/lib/kisPaper";
 import type { LiveView } from "@/lib/kisVts";
 import { brokerLines } from "@/lib/paper";
 
@@ -117,16 +117,28 @@ export function KisBody({ sub, market, v, whole, live }: { sub: Sub; market: Kis
             <div className="mb-2 rounded-lg border border-emerald-200 p-2 dark:border-emerald-900">
               <LiveHead live={live} />
               <p className="mt-1">
-                {live.currency === "KRW" ? "총평가" : "보유 평가 + 달러 예수금"} <b>{amountText(live.account.total, live.currency)}</b> · 현금 {amountText(live.account.cash, live.currency)} · 보유 평가{" "}
-                {amountText(live.account.holdings_value, live.currency)} · 보유 {live.holdings.length}종목{live.more ? "+" : ""} · 오늘 주문 {live.executions.length}건
+                {live.currency === "KRW" ? (
+                  <>
+                    총평가 <b>{amountText(live.account.total, "KRW")}</b> · 현금 {amountText(live.account.cash, "KRW")} · 보유 평가 {amountText(live.account.holdings_value, "KRW")}
+                  </>
+                ) : (
+                  <>
+                    보유 평가 <b>{amountText(live.account.holdings_value, "USD")}</b> · {usCashText(live.account)}
+                  </>
+                )}{" "}
+                · 보유 {live.holdings.length}종목{live.more ? "+" : ""} · 오늘 주문 {live.executions.length}건
               </p>
             </div>
           ) : null}
           {v.account ? (
             market === "US" ? (
               <p>
-                보유 평가 <b>{amountText(v.account.holdings_value, cur)}</b> · 달러 예수금 {amountText(v.account.cash, cur)}
-                <span className="text-xs text-slate-500"> ({v.as_of} 배치 기준 — 미국 매수 돈은 원화 예수금에서 자동 환전으로 나갑니다)</span>
+                보유 평가 <b>{amountText(v.account.holdings_value, cur)}</b> · {usCashText(v.account)}
+                <span className="text-xs text-slate-500">
+                  {" "}
+                  ({v.as_of} 배치 기준 — 미국 개장 전에 잰 값이라 그날 체결은 다음 미국 배치나 &quot;지금 KIS에서 조회&quot;에서 보입니다. 미국 매수 돈은 원화 예수금이 아니라 해외 자산에서
+                  나갑니다)
+                </span>
               </p>
             ) : (
               <p>
@@ -221,8 +233,9 @@ export function KisBody({ sub, market, v, whole, live }: { sub: Sub; market: Kis
           {whole && (kisSeries(whole)[0]?.points.length ?? 0) > 1 ? <EquityChart series={kisSeries(whole)} height={220} /> : null}
           {whole?.totals_error ? <p className="text-xs text-amber-700">총액 추이를 읽지 못했습니다 — 위 숫자는 마지막 배치 값입니다.</p> : null}
           <p className="mt-1 text-xs text-slate-500">
-            성과는 국내·미국을 합친 계좌 전체 원화 총액으로 국내 배치가 날마다 냅니다(미국 매수 돈이 원화 예수금에서 자동 환전되어 시장별로 나누면 수익률이 되지 않습니다). 모의 계좌는 입출금이 없어 총액 비가 곧 수익률입니다.
-            [확인필요] 미국 주식을 사고판 직후 결제 전 하루는 미국 평가와 원화 예수금 차감이 엇갈려 총액이 잠깐 부풀거나 줄 수 있습니다 — 첫 미국 체결 뒤 확인합니다.
+            성과는 계좌 전체 원화 총액(국내 총평가 + KIS 해외 총자산 원화 환산)으로 국내 배치가 날마다 냅니다. 모의 계좌는 입출금이 없어 총액 비가 곧 수익률입니다. 해외 총자산에는
+            달러 현금이 들어 있어 환율이 움직이면 총액도 움직입니다. 고침(25.1527) 전 줄은 미국 몫이 빠진 예전 식이라 추이에 잇지 않습니다. [확인필요] 미국 매수 당일 결제 전
+            해외 현금 차감이 늦는지는 아직 장중에 재 보지 않았습니다(체결 이틀 뒤 조회에서는 이미 빠져 있었습니다).
           </p>
         </>
       ) : null}
@@ -278,7 +291,7 @@ export default function KisPanel() {
               계좌 전체 <b>{amountText(whole.account_krw.total_krw, "KRW")}</b>
               <span className="text-xs text-slate-500">
                 {" "}
-                (국내 {amountText(whole.account_krw.kr_total, "KRW")} + 미국 {amountText((whole.account_krw.value_usd ?? 0) + (whole.account_krw.cash_usd ?? 0), "USD")} × {whole.account_krw.usd_krw ?? "-"}원 · {whole.as_of} 국내 배치 기준)
+                ({wholeBreakdownText(whole.account_krw, whole.as_of)})
               </span>
             </p>
           ) : null}
