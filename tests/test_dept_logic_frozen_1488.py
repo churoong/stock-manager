@@ -11,26 +11,47 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import io
+import tokenize
 from pathlib import Path
 
 뿌리 = Path(__file__).resolve().parent.parent
 
-#: 파일 → 마지막으로 확인한 논리 지문 (2026-10-16, 25.1488)
+#: 파일 → 마지막으로 확인한 논리 지문 (2026-10-16 25.1488 고정 — 2026-10-18 25.1530 에서 토큰 지문으로 다시 셈, 두 파일은
+#: 25.1485 뒤로 바뀌지 않았다. 3.12.3·3.13.16 같은 값, 3.11 은 f-문자열 토큰이 달라 다르다 — 이 저장소는 3.12)
 고정 = {
-    "batch/services/company.py": "cbbbea47b535",
-    "batch/services/holding.py": "84e36990d5c5",
+    "batch/services/company.py": "3fe468edb2f5",
+    "batch/services/holding.py": "bdfd94131e59",
 }
 
 
 def 논리_지문(path: Path) -> str:
-    """주석·독스트링을 뺀 구문 트리의 sha256 앞 12자 — 글 다듬기로는 바뀌지 않고 식·상수를 바꾸면 바뀐다."""
-    트리 = ast.parse(path.read_text(encoding="utf-8"))
-    for n in ast.walk(트리):
+    """주석·독스트링·줄바꿈·들여쓰기 폭을 뺀 **토큰 흐름**의 sha256 앞 12자 — 글 다듬기로는 바뀌지 않고 식·상수를 바꾸면 바뀐다.
+
+    예전에는 `ast.dump` 를 해시했는데 그 출력은 파이썬 패치 판마다 달라(2026-10-18 새 컨테이너 3.12.3 에서 코드 그대로인데 깨짐)
+    거짓 경보가 났다(docs/infra.md 25.1530). 토큰 종류와 글자는 같은 소판(3.12) 안에서 바뀌지 않는다
+    """
+    글 = path.read_text(encoding="utf-8")
+    독스트링: set[tuple[int, int]] = set()
+    for n in ast.walk(ast.parse(글)):
         if (isinstance(n, ast.Module | ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef) and n.body
                 and isinstance(n.body[0], ast.Expr) and isinstance(n.body[0].value, ast.Constant)
                 and isinstance(n.body[0].value.value, str)):  # fmt: skip
-            n.body = n.body[1:] or [ast.Pass()]
-    return hashlib.sha256(ast.dump(트리, annotate_fields=False).encode()).hexdigest()[:12]
+            독스트링.add((n.body[0].lineno, n.body[0].col_offset))
+    조각: list[str] = []
+    건너뜀 = False
+    for t in tokenize.generate_tokens(io.StringIO(글).readline):
+        if t.type in (tokenize.COMMENT, tokenize.NL, tokenize.ENDMARKER):
+            continue
+        if t.type == tokenize.STRING and t.start in 독스트링:
+            건너뜀 = True  # 독스트링과 그 뒤 줄 끝을 뺀다
+            continue
+        if 건너뜀 and t.type == tokenize.NEWLINE:
+            건너뜀 = False
+            continue
+        건너뜀 = False
+        조각.append(f"{tokenize.tok_name[t.type]}:{'' if t.type in (tokenize.INDENT, tokenize.DEDENT) else t.string}")
+    return hashlib.sha256("\n".join(조각).encode()).hexdigest()[:12]
 
 
 def test_dept_logic_fingerprint_unchanged() -> None:
