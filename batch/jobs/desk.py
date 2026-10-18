@@ -26,10 +26,13 @@ TWR_SQL = (
     "SELECT account_id, as_of, twr_index, recon_ok, equity_krw, pnl_krw, invested_krw, kospi_krw, sp500_krw"
     " FROM paper_daily ORDER BY account_id, as_of"
 )
-#: 대보기(25.1516) — KIS 계좌 전체 원화 총액 계열(국내 줄, 하루 한 행)
+#: 대보기(25.1516) — KIS 계좌 전체 원화 총액 계열(국내 줄, 하루 한 행). **같은 기준(`basis`)의 줄만**(25.1528) —
+#: 25.1527 이 총액에 해외 총자산을 더하면서 예전 줄과 섞으면 시작·끝 차이에 해외 자산 약 3.4억원이
+#: "KIS 손익" 으로 들어간다
 KIS_TOTALS_SQL = (
     "SELECT as_of, json_extract(summary_json, '$.account_krw.total_krw') AS total FROM paper_broker_daily"
-    " WHERE broker = ? AND account_id = ? ORDER BY as_of"
+    " WHERE broker = ? AND account_id = ? AND json_extract(summary_json, '$.account_krw.basis') = ?"
+    " ORDER BY as_of"
 )
 #: 대보기 끝 후보 — 미국 일일 배치가 끝난 한국 날짜(그날 가상 평가 행을 미국 종가로 덮었다, 25.1517)
 US_DONE_SQL = (
@@ -318,7 +321,8 @@ def _보정판(
               for r in 순위.get("rows") or [] if r.get("open")}  # fmt: skip
         if not 시작:
             return {"fill_adjust": None, "fill_adjust_error": None}
-        총액 = [(str(r["as_of"]), r["total"]) for r in client.execute(KIS_TOTALS_SQL, [bmj.BROKER, h]).dicts()]
+        총액 = [(str(r["as_of"]), r["total"])
+              for r in client.execute(KIS_TOTALS_SQL, [bmj.BROKER, h, bmj.TOTAL_BASIS]).dicts()]  # fmt: skip
         창 = None
         if h in 평가 and 총액:
             from batch.jobs.daily import job_name

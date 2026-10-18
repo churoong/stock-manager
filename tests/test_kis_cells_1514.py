@@ -163,7 +163,7 @@ def test_desk_write_puts_fill_adjust(monkeypatch: pytest.MonkeyPatch) -> None:
     c = Client(accounts=None)
     monkeypatch.setattr(job.bmj, "MIRROR_ACCOUNT", "B")
     for aid in ("A", "B"):
-        for d, twr, pnl in (("2026-10-15", 1.0, 0.0), ("2026-10-16", 1.01, 10_000.0)):
+        for d, twr, pnl in (("2026-10-14", 1.0, 0.0), ("2026-10-15", 1.0, 0.0), ("2026-10-16", 1.01, 10_000.0)):
             c.conn.execute("INSERT INTO paper_daily (account_id, as_of, invested_krw, cash_krw, holdings_krw,"
                            " equity_krw, pnl_krw, twr_index, positions_json, recon_ok, updated_at)"
                            " VALUES (?, ?, 10000000, 0, 10000000, 10000000, ?, ?, '[]', 1, 't')",
@@ -176,10 +176,13 @@ def test_desk_write_puts_fill_adjust(monkeypatch: pytest.MonkeyPatch) -> None:
                    " fx_rate, fee, tax, slippage, cash_krw, created_at)"
                    " VALUES (90, 'B', 1, 'buy', '2026-10-15', 10000, 100, 'KRW', 1, 0, 0, 1000, -1001000, 't')")  # fmt: skip
     칸 = {"cells": {"buy_market": {"days": 30, "excess": 0.5, "se": 0.1}}}
-    for d, total in (("2026-10-15", 100_000_000.0), ("2026-10-16", 100_009_000.0)):
+    # 10-14 줄은 예전 기준(25.1527 전 — basis 없음, 해외 자산 빠진 작은 총액) — 대보기 시작이 되면 안 된다(25.1528)
+    for d, total, basis in (("2026-10-14", 50_000_000.0, None), ("2026-10-15", 100_000_000.0, 2),
+                            ("2026-10-16", 100_009_000.0, 2)):  # fmt: skip
+        원화 = {"total_krw": total} | ({"basis": basis} if basis else {})
         c.conn.execute("INSERT INTO paper_broker_daily (broker, as_of, account_id, holdings_json, cash_krw, total_krw,"
                        " diff_json, source, fetched_at, summary_json) VALUES ('kis_vts', ?, 'B', '[]', 0, 0,"
-                       " '{}', 'kis_vts', 't', ?)", [d, json.dumps(칸 | {"account_krw": {"total_krw": total}})])  # fmt: skip
+                       " '{}', 'kis_vts', 't', ?)", [d, json.dumps(칸 | {"account_krw": 원화})])  # fmt: skip
     # 10-16 밤 미국 배치가 끝났다(그날 평가 행을 미국 종가로 덮음) — 대보기 끝이 될 수 있다
     c.conn.execute("INSERT INTO batch_runs (job_name, market, started_at, status) VALUES ('daily_us', 'US',"
                    " '2026-10-16T13:30:00+00:00', 'success')")  # fmt: skip
