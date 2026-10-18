@@ -825,17 +825,24 @@ def long_entry(
     return band is not None and series[-1] <= band.at(sg.BAND_ENTRY_PERCENTILE)
 
 
-def pit_equities(snapshots: list[dict[str, Any]], cutoff: str) -> list[tuple[str, float, int]]:
+def pit_equities(
+    snapshots: list[dict[str, Any]], cutoff: str, currency: str | None = None
+) -> list[tuple[str, float, int]]:
     """발표일이 cutoff 이하인 연간 자본총계 (발표일, 자본, 사업연도).
 
     같은 연도를 여러 번 내면 늦은 것까지 모두(시점 순).
 
-    사업연도를 함께 넘겨 `known_equity_at` 이 옛 연도 정정 대신 가장 늦은 연도를 고르게 한다 (25.549)."""
+    사업연도를 함께 넘겨 `known_equity_at` 이 옛 연도 정정 대신 가장 늦은 연도를 고르게 한다 (25.549).
+
+    `currency` 를 주면 **다른 통화로 낸 자본은 뺀다** — 운영 밴드(`jobs/signals.load_band`, 25.915)와 같다. 통화를
+    모르는 행(옛 스냅샷)은 남긴다(`scoring.same_currency` 와 같은 "모르는 것은 자르지 않는다"). 핵심 H 백테스트
+    (`services/core_backtest`, 25.1529)가 준다 — 주지 않으면 예전 그대로다"""
     snapshots = pit_basis_rows(snapshots, cutoff)
     rows = [
         (str(r["as_of_date"]), float(r["values"]["total_equity"]), int(r["fiscal_year"]))
         for r in snapshots
         if str(r["as_of_date"]) <= cutoff and r["values"].get("total_equity") is not None
+        and (currency is None or not r["values"].get("currency") or r["values"]["currency"] == currency)
     ]
     _guard(cutoff, *(row[0] for row in rows))
     return sorted(rows)

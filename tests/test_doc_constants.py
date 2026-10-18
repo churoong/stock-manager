@@ -450,6 +450,21 @@ class Test우연일_확률:
         검사(BACKTEST, f"γ = {luck.EULER_GAMMA:.4f}(오일러 상수)", "오일러 상수")
 
 
+class Test핵심_H_조각_1b:
+    """핵심 H 다년 백테스트의 하루 판단 (docs/backtest.md 10장, docs/infra.md 25.1529). 숫자 상수는 운영 정의처를 그대로 쓴다."""
+
+    def test_상수(self) -> None:
+        from batch.services import core_backtest as cbt
+
+        n = pp.ATTRIBUTION_HORIZON
+        검사(BACKTEST, f"{n}번째 뒤 종가가 cutoff 이하 그리고 cutoff − 결정일 ≥ {pp.HORIZON_CALENDAR_DAYS[n]}일", "원장 두 문")
+        검사(BACKTEST, f"결정일 앞 {hold.HOLDING_WINDOW_DAYS}일(`hold.HOLDING_WINDOW_DAYS`)", "원장 창")
+        검사(BACKTEST, f'voters=("{'","'.join(cbt.VOTERS)}")', "투표 회사")
+        assert set(cbt.EQUAL_WEIGHTS.values()) == {20.0}
+        검사(BACKTEST, "5팩터 균등(`EQUAL_WEIGHTS`)", "종합 점수 가중")
+        검사(BACKTEST, f"지수는 늘 {cbt.BENCH_INDEX}", "원장 지수")
+
+
 class Test사후_분석:
     """틀린 추천 사후 분석 (docs/reports.md 3.8, docs/infra.md 25.998)."""
 
@@ -704,7 +719,7 @@ class Test밸류_분모:
     "pick_history", "etf_accounts", "etf_tilt", "after_hours", "broker_stats", "disclosure_reaction", "luck", "postmortem",
     "divergence", "tax_sim", "verdict", "forecast_track", "patterns", "insights", "history",
     "event_history", "simulation", "candidate_factors", "cb_overhang", "buy_thesis", "plan_fill", "target_units", "paper", "risk_gate", "execution_quality", "company",
-    "broker_mirror", "holding", "desk",
+    "broker_mirror", "holding", "desk", "core_backtest",
 )  # fmt: skip
 
 #: 아직 그물 밖인 모듈과 **왜 아직인지**. 하나씩 줄여 간다

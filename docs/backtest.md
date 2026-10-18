@@ -583,9 +583,30 @@ Turso 월 읽기 진도 문(추정 500만 행)을 지나야 돈다 — 미뤄지
    — **끝**(25.1522·25.1525). `weights` 는 cutoff(t−1) 종가로 다시 잰 비중이다 — 엔진의 리밸런스 직전 비중은 t 종가로 잰 것이라 그대로 주면 t 가격이 샌다
 1. 국내 MVP: 신호 재현·핵심 Dossier·장부 전략 다섯·순차 가중치·결정 단위 대조·DSR·`backtest.yml` 별도 작업(시간 한도 120분)·문서·look-ahead 시험
    - 조각 1a ✅(25.1526) **장부 주문** `LedgerOrders(sells, buys)` — 비중 dict 는 날마다 다시 맞춰(보유 5종목이면 연 1% 남짓 비용) 운영과 다르다. 든 것은 그대로, 판 돈·못 산 몫은 현금
-   - 조각 1b `batch/services/core_backtest.py`(순수, DB 없음): `CoreMarket.at(view)` 가 주 1회 팩터 점수·날마다 신호 줄(`sg.evaluate` — 장기 PBR 하위 20% 뒤집기 포함,
-     `jobs/backtest.long_entry` 는 뒤집기가 없어 쓰지 않는다)·Dossier(broker·flows·sentiment 비움, **`gov_covered=False`** — True 면 "중립" 이 되어 자료 없음과 다르다)·
-     A/C/D/E/B 표·메모리 원장 → `hold.weights` → `hold.rank`. 원장 행은 20번째 뒤 종가가 cutoff 이하이고 결정일부터 28일이 지나야 보인다(운영 `due_horizons`)
+   - 조각 1b ✅(25.1529) `batch/services/core_backtest.py`(순수, DB·네트워크 없음) — 운영 H 하루의 **결정 입력**을 그 시점으로. 매도·크기·변형(1c)·연결·저장(1d)은 없다
+     - API: `CoreMarket(universe, snapshots_by_stock, indexes, *, country="KR", eligible_at=None, dividends_by_stock=None, factor_weights=None, trend_settings=None,
+       charters=None, voters=("A","C","D","E"), b_top_n=5, top_n=5, max_weight_per_stock=10.0, targets=None)` · `CoreMarket.at(view, day=None) -> DayView`
+       (cutoff·결정일·주간 점수와 그 cutoff·신호 입력·신호·신호 줄(`SignalRow`)·국면과 배수·모집단·안건·회사별 가결·표(B 포함)·회사 가중치와 성적·`hold.rank` 결과·
+       H 고름과 그 줄·B 상위 5) · `HoldingLedger.add/discard(decided_on, stock_id)/records(view, bench, day)` · `pit_growth`·`pit_latest_equity`.
+       운영과 같은 정의를 쓰려고 중기 성장률 규칙을 `jobs/signals.load_growth` 에서 `signals.annual_growth(current, previous, as_of, latest)` 로 옮겼다(운영 동작 그대로 —
+       `_growth` 는 `scoring.growth_rate`), `jobs/backtest.pit_equities` 에 `currency=`(다른 통화 자본을 뺀다, 주지 않으면 예전 그대로)를 더했다
+     - 순서: cutoff 는 **줄지 않게만** 부른다(거꾸로면 `ValueError`, 같은 cutoff 는 같은 결과 — 결정일이 다르면 `ValueError`). 국내만(미국은 `NotImplementedError` — 지수·통화·분할 대기 규칙을 아직 안 맞춤)
+     - 자료 규칙(미래를 볼 것이 없다): 가격·거래대금·가격 수준은 `PriceView` 만. 재무 스냅샷·배당·지수는 미래까지 통째로 받고 **쓰는 자리마다 자른다** — 재무는 접수일(정정은 늦게
+       접수된 것, 같은 날이면 접수번호)·기준(연결·별도)은 cutoff 에 알던 가장 늦은 해로, 지수는 날짜로. 시험이 미끼(가격·새 사업연도·정정·배당·지수)를 cutoff 뒤에 붙여 50 거래일 판단이
+       한 칸도 안 바뀜을, 같은 미끼를 cutoff 이하로 옮기면 바뀜(양성 대조)을 함께 본다
+     - 신호: 후보마다 `signals.SignalInput` 을 만들어 `sg.evaluate` 를 그대로 부른다 — 장기 PBR 하위 20% 뒤집기(`buy_zone`)가 들어간다(`jobs/backtest.long_entry` 는 뒤집기가 없어 쓰지 않는다).
+       팩터 점수는 `build_pit_inputs`→`score_factors` 를 **ISO 주의 첫 cutoff** 에 한 번, 종합 점수는 5팩터 균등(`EQUAL_WEIGHTS`). cutoff 종가가 없는 종목은 신호를 내지 않는다(운영 25.517).
+       장기 후보(`jobs/signals.needs_band`, 점수 순 `MAX_BAND_STOCKS`)만 밴드(`pbr_series`+`build_band`, 가격 수준 750행·종목 통화 자본), 현재 PBR 의 자본은 가장 늦은 해 행(그 행이 다른 통화·빈 값이면 모름 —
+       운영 `_latest_equity`). 국면은 `trend.regime_from_closes`+`factor_for`(KOSPI·KOSDAQ). 판정은 성과 지표를 보지 않으므로 신호가 걸린 종목만 `risk_from_prices` 로 MDD·변동성을 내 사이징·리스크관리부에 쓴다
+     - 조사 자료·표: `jobs/company.population_dossiers`·`load_dossiers`·`agenda_rows` 를 따라 — 증권사 의견 `[]`·수급 0일·감성 None·공시 사건 `[]`·**`gov_covered=False`**(True 면 "사건 없음 — 중립" 이 되어
+       자료 없음과 다르다). A·C·D·E 는 `co.meet`(안건은 헌장 크기만큼, 모집단은 그날 신호 종목 전체) → `hold.strength`, B 는 `select_top(with_criteria(rows), 5)` 각 1.0 — `jobs/paper.holding_step` 그대로
+     - 원장: 그날 추천받은 종목 전부를 넣는다(고른 것 `pick`, 못 고른 것 `skip`, 둘 다 표). 성과(% , 지수는 늘 KOSPI — `pp.outcomes`)는 **20번째 뒤 종가가 cutoff 이하 그리고 cutoff − 결정일 ≥ 28일**
+       (`pp.ATTRIBUTION_HORIZON`·`pp.HORIZON_CALENDAR_DAYS[20]`, 운영 `due_horizons`)일 때만 보이고, 결정일 앞 365일(`hold.HOLDING_WINDOW_DAYS`) 행만 `hold.weights` 로 → `hold.rank(tiebreak=종합 점수)` →
+       두 곳 이상 추천한 종목 상위 5. `discard(decided_on, stock_id)` 는 1c 가 표가 붙지 않는 운영 결정(사면 바로 매도 skip 등)을 지울 때 쓴다
+     - 운영과 다른 것(알고 둔다): 종합 점수에 감성 없음(운영 10%) · 팩터 점수 주 1회(운영 날마다) · 성과 지표를 신호 종목만 cutoff 창에서 그 자리 계산(운영 `performance_metrics` 행, 창 이름은 남기지 않는다) ·
+       원장 수익률은 창의 수정종가(운영은 원 종가 — 분할이 끼면 운영 쪽이 틀린다) · 신호 줄의 종가도 수정종가 · 사업보고서 뒤 분기 참고 행·내부자 참고 행 없음(근거표 참고 행일 뿐 판정·표에 안 쓴다) ·
+       시장 절반 넘게 묵으면 하루를 건너뛰는 운영 규칙(`too_stale`·점수 묵음)은 없다(엔진 날짜 축이 드문 날을 뺀다) · 통화를 모르는 옛 스냅샷 자본은 남긴다(운영 SQL 은 NULL 통화를 뺀다)
+     - 1d 에 넘길 것: `jobs/backtest._위험_캐시` 가 주마다 쌓인다(전 종목 × 주 수) — 실행 연결에서 비우는 자리를 둔다
    - 조각 1c 변형 다섯의 매도(`sell_flags` 기본 목표·기간, `pp.trend_exit`)·재매수 쉼 5세션·크기(`weight_pct`×국면 배수, 종목 10%·섹터 30%, 현금 모자라면 통째로 건너뜀 — 운영 `build_portfolio`)
    - 조각 1d 실행 연결·저장·`backtest.yml`·DSR·결정 단위 분위·반 나눈 기간
    - 계획 검토가 찾은 어긋남(25.1526): 운영 종합 점수는 감성 10% 를 넣고 백테스트 `run` 은 5팩터 균등이라 안건 순서·B 상위 5 가 다를 수 있다 · 운영에는 **최대 종목 수가 없다**(현금·종목 10% 상한만) ·

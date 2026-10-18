@@ -253,52 +253,17 @@ def load_growth(client: TursoClient, country: str, as_of: str, stock_ids: list[i
     for row in rs.dicts():
         by_stock.setdefault(int(row["stock_id"]), {})[int(row["fiscal_year"])] = row
 
+    # 종목마다 통화·짧은 해·묵은 보고서 규칙은 `services/signals.annual_growth` 하나가 본다 — 핵심 H 백테스트
+    # (`services/core_backtest`, 25.1529)가 같은 함수를 부른다
     out: dict[int, dict] = {}
     for stock_id, years in by_stock.items():
         latest = max(years)
-        current, previous = years[latest], years.get(latest - 1)
-        # **표시통화가 바뀐 해는 견주지 않는다** (docs/infra.md 25.919, 11회차). 두산밥캣은 2023 부터 연결을 USD 로 내
-        # 2023 영업이익
-        # 성장률이 −99.9%(달러 ÷ 원)였다. 전년 통화가 다르면 전년이 없는 것과 같다
-        if previous is not None and not scoring_svc.same_currency(current, previous):
-            previous = None
-        # **짧은 사업연도는 12개월 해와 견주지 않는다** (docs/infra.md 25.1293) — 점수(`scores.build_inputs`, 25.1286)와
-        # 같은 규칙. 분할 신설 첫해(7개월)의 매출을 전년 12개월과 견주면 "역성장" 이, 그 다음 해에는 "급성장" 이 나와
-        # 중기 신호(실적 모멘텀)가 기간 차이를 실적으로 읽었다
-        if scoring_svc.short_year(current) or scoring_svc.short_year(previous):
-            previous = None
-        # **묵은 사업보고서로 "실적 모멘텀" 을 내지 않는다** (docs/infra.md 25.660, 감사). 감사 지연·의견거절로
-        # 최신 사업보고서가 없는 회사가 재작년 성장률로 중기 신호를 받았다. 접수일이 15개월(약 457일)보다 오래되면
-        # 한 번의 사업보고서 주기를 건너뛴 것이라 성장률을 비운다 — 판정표에는 값 없음으로 떨어진다
-        # 정정공시가 접수일을 새로 덮는 구멍(25.663)까지 한 함수가 본다 — 점수·백테스트와 같은 정의 (25.808)
-        접수 = str(current.get("report_date") or "")[:10]
-        묵음 = sg.annual_stale_reason(접수 or None, as_of, latest)
-        if 묵음:
-            out[stock_id] = {"fiscal_year": latest, "consolidated": bool(current.get("consolidated", 1)),
-                             "revenue_growth": None, "operating_income_growth": None, "stale_report_date": 접수,
-                             "stale_reason": 묵음}
-            continue
-        out[stock_id] = {
-            "fiscal_year": latest,
-            # 연결이 없어 별도를 썼는지 — 근거 문장이 "사업보고서(별도)" 로 밝힌다 (docs/infra.md 25.314)
-            "consolidated": bool(current.get("consolidated", 1)),
-            "revenue_growth": _growth(
-                _opt_float(current.get("revenue")),
-                _opt_float(previous.get("revenue")) if previous else None,
-            ),
-            "operating_income_growth": _growth(
-                _opt_float(current.get("operating_income")),
-                _opt_float(previous.get("operating_income")) if previous else None,
-            ),
-        }
+        out[stock_id] = sg.annual_growth(years[latest], years.get(latest - 1), as_of, latest)
     return out
 
 
-def _growth(current: float | None, previous: float | None) -> float | None:
-    """전년이 0 이하면 성장률이 뜻을 잃는다. services/scoring.py 와 같은 규칙."""
-    if current is None or previous is None or previous <= 0:
-        return None
-    return current / previous - 1
+#: 전년이 0 이하면 성장률이 뜻을 잃는다 — 정의처는 `services/scoring.growth_rate` (25.1529 에 같은 식 두 벌을 하나로)
+_growth = scoring_svc.growth_rate
 
 
 def load_metrics(client: TursoClient, country: str, as_of: str, stock_ids: list[int] | None = None) -> dict[int, dict]:

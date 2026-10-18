@@ -67,7 +67,11 @@ def test_백테스트도_같은_규칙을_쓴다() -> None:
     assert "sc.same_currency(cur_v, prev_v)" in src and "sc.same_currency(cur_v, old_v)" in src and "밸류_v" in src
     assert "fin.currency AS ledger_currency" in inspect.getsource(backtest.load_snapshots)
     assert "sc.same_currency(merged, r.get(\"values\"))" in inspect.getsource(backtest.year_values)
-    assert "scoring_svc.same_currency(current, previous)" in inspect.getsource(signals.load_growth)
+    # 중기 성장률 규칙은 25.1529 에 `services/signals.annual_growth` 로 옮겼다 — 운영과 핵심 H 백테스트가 함께 부른다
+    from batch.services import signals as sg
+
+    assert "sg.annual_growth(" in inspect.getsource(signals.load_growth)
+    assert "scoring.same_currency(current, previous)" in inspect.getsource(sg.annual_growth)
 
 
 def test_앞_공시로_빈칸을_메울_때_통화가_다르면_건너뛴다() -> None:

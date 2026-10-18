@@ -662,6 +662,55 @@ def buy_zone(
 STALE_ANNUAL_DAYS = scoring.STALE_ANNUAL_DAYS
 annual_stale_reason = scoring.annual_stale_reason
 
+
+def _유한(value: Any) -> float | None:
+    """NaN·inf 는 None — 모름이다 (docs/infra.md 25.687, 예전 `jobs/signals._opt_float` 규칙)."""
+    if value is None:
+        return None
+    v = float(value)
+    return v if math.isfinite(v) else None
+
+
+def annual_growth(
+    current: dict[str, Any], previous: dict[str, Any] | None, as_of: str, latest: int
+) -> dict[str, Any]:
+    """한 종목의 중기 성장률 칸 — 최근 사업보고서(`current`, 사업연도 `latest`)와 전년(`previous`).
+
+    운영 `jobs/signals.load_growth` 와 핵심 H 백테스트(`services/core_backtest`, 25.1529)가 **같은 규칙**을 쓰려고
+    여기로 옮겼다 — 두 벌이면 한쪽만 고쳐진다. 행은 `revenue`·`operating_income`·`currency`·`period_days`·
+    `consolidated`·`report_date`(접수일) 를 가진 dict. 접수일이 `as_of` 뒤인 행은 부르는 쪽이 이미 뺐어야 한다.
+    """
+    # **표시통화가 바뀐 해는 견주지 않는다** (docs/infra.md 25.919, 11회차). 두산밥캣은 2023 부터 연결을 USD 로 내
+    # 2023 영업이익 성장률이 −99.9%(달러 ÷ 원)였다. 전년 통화가 다르면 전년이 없는 것과 같다
+    if previous is not None and not scoring.same_currency(current, previous):
+        previous = None
+    # **짧은 사업연도는 12개월 해와 견주지 않는다** (docs/infra.md 25.1293) — 점수(`scores.build_inputs`, 25.1286)와
+    # 같은 규칙. 분할 신설 첫해(7개월)의 매출을 전년 12개월과 견주면 "역성장" 이, 그 다음 해에는 "급성장" 이 나와
+    # 중기 신호(실적 모멘텀)가 기간 차이를 실적으로 읽었다
+    if scoring.short_year(current) or scoring.short_year(previous):
+        previous = None
+    # **묵은 사업보고서로 "실적 모멘텀" 을 내지 않는다** (docs/infra.md 25.660, 감사). 감사 지연·의견거절로
+    # 최신 사업보고서가 없는 회사가 재작년 성장률로 중기 신호를 받았다. 접수일이 15개월(약 457일)보다 오래되면
+    # 한 번의 사업보고서 주기를 건너뛴 것이라 성장률을 비운다 — 판정표에는 값 없음으로 떨어진다
+    # 정정공시가 접수일을 새로 덮는 구멍(25.663)까지 한 함수가 본다 — 점수·백테스트와 같은 정의 (25.808)
+    접수 = str(current.get("report_date") or "")[:10]
+    묵음 = annual_stale_reason(접수 or None, as_of, latest)
+    # 연결이 없어 별도를 썼는지 — 근거 문장이 "사업보고서(별도)" 로 밝힌다 (docs/infra.md 25.314)
+    연결 = bool(current.get("consolidated", 1))
+    if 묵음:
+        return {"fiscal_year": latest, "consolidated": 연결, "revenue_growth": None, "operating_income_growth": None,
+                "stale_report_date": 접수, "stale_reason": 묵음}  # fmt: skip
+    return {
+        "fiscal_year": latest,
+        "consolidated": 연결,
+        "revenue_growth": scoring.growth_rate(
+            _유한(current.get("revenue")), _유한(previous.get("revenue")) if previous else None
+        ),
+        "operating_income_growth": scoring.growth_rate(
+            _유한(current.get("operating_income")), _유한(previous.get("operating_income")) if previous else None
+        ),
+    }
+
 #: 국내 호가 단위 (2023-01-25 코스피·코스닥 통일). (이 가격 미만, 단위) [확인필요: 거래소 공지와 연 1회 대조]
 KR_TICKS: tuple[tuple[float, float], ...] = (
     (2_000, 1), (5_000, 5), (20_000, 10), (50_000, 50), (200_000, 100), (500_000, 500), (float("inf"), 1_000),
