@@ -91,6 +91,18 @@ def accounts(sess: kv.Session) -> None:
             print(f"[계좌 칸] 미국 {기준} 보유: " + " · ".join(f"{k}={r.get(k)}" for k in US_O1_FIELDS))
         print(f"[계좌 칸] 미국 {기준} output3: "
               + " · ".join(f"{k}={p['output3'].get(k)}" for k in US_O3_FIELDS) + f" · 보유 {len(p['output1'])}줄")
+    # 거래소별 잔고(VTTS3012R) — 배치 미국 보유가 쓰는 조회. 2026-10-18 탐침에서 체결기준현재잔고 보유 줄은
+    # 수량이 모두 0 이었다(25.1527) — 이 조회가 실제 보유를 주는지 본다(읽기만)
+    try:
+        보유, 합 = sess.balance_us()
+    except KisFailed as exc:
+        print(f"[계좌 칸] 미국 거래소별 잔고 실패: {exc}")
+        return
+    for h in 보유:
+        print(f"[계좌 칸] 미국 거래소별 잔고: {h.code} 수량 {h.quantity} · 평균가 {h.avg_price}"
+              f" · 현재가 {h.price} · 평가 {h.value}")
+    print(f"[계좌 칸] 미국 거래소별 잔고 {len(보유)}종목 · 평가 합 {합.get('holdings_value')}"
+          f" · 달러 예수금 {합.get('cash')}")
 
 
 def kr(sess: kv.Session, code: str, now: datetime) -> bool:
