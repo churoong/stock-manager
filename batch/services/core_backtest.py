@@ -120,7 +120,9 @@ class HoldingLedger:
     """H 의 결정 원장을 메모리에 (docs/backtest.md 10장 조각 1b). 회사 가중치는 이 원장만으로 순차 계산한다.
 
     성과(`ret_20d`·`bench_20d`, %)는 **두 문이 다 열려야** 보인다 — 운영 `fill_outcomes` 와 같다.
-    ① 기준일 뒤 `pp.ATTRIBUTION_HORIZON` 번째 그 종목 종가가 cutoff 이하(창에 있다) ② cutoff − 결정일 ≥
+    ① 기준일 뒤 `pp.ATTRIBUTION_HORIZON` 번째 그 종목 종가가 **cutoff 앞**(cutoff 날 종가는 아니다 — 25.1529 반박 검증:
+    운영은 결정일 t 의 회의가 t−1 실행 **끝에** 채운 성과만 읽고, t−1 실행이 가진 종가는 t−2(= cutoff 앞날)까지다.
+    휴장이 28일 창에 끼면 20번째 종가가 28일째에 걸려 하루 일찍 보였다) ② cutoff − 결정일 ≥
     `pp.HORIZON_CALENDAR_DAYS[20]` 달력일(운영 `due_horizons` — 그 전에는 읽지도 않는다). 지수는 늘 KOSPI(`pp.outcomes`)
     """
 
@@ -146,7 +148,7 @@ class HoldingLedger:
         지난 = (date.fromisoformat(view.cutoff[:10]) - date.fromisoformat(row.decided_on[:10])).days
         if 지난 < pp.HORIZON_CALENDAR_DAYS[n]:
             return
-        계열 = view.closes(row.stock_id)
+        계열 = [x for x in view.closes(row.stock_id) if x[0] < view.cutoff]  # cutoff 날 종가는 아직 안 채워졌다
         뒤 = 계열[bisect.bisect_right(계열, (row.ref_date, math.inf)):][:n]
         if len(뒤) < n:
             return
@@ -338,6 +340,10 @@ class CoreMarket:
                 return self._last
             if cutoff < self._last.cutoff:
                 raise ValueError(f"cutoff 가 거꾸로 간다 ({self._last.cutoff} → {cutoff}) — 원장은 순차로만 쌓는다")
+            # 결정일도 앞으로만 — 같은 결정일에 cutoff 만 바꿔 부르면 그날 줄이 두 번 쌓였다
+            # (운영은 거래일마다 한 벌, 25.1529 반박 검증)
+            if day <= self._last.day:
+                raise ValueError(f"결정일이 앞으로 가지 않는다 ({self._last.day} → {day}) — 원장 줄이 두 번 쌓인다")
         self._last = self._decide(view, day)
         return self._last
 

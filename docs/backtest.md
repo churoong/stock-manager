@@ -600,9 +600,9 @@ Turso 월 읽기 진도 문(추정 500만 행)을 지나야 돈다 — 미뤄지
        운영 `_latest_equity`). 국면은 `trend.regime_from_closes`+`factor_for`(KOSPI·KOSDAQ). 판정은 성과 지표를 보지 않으므로 신호가 걸린 종목만 `risk_from_prices` 로 MDD·변동성을 내 사이징·리스크관리부에 쓴다
      - 조사 자료·표: `jobs/company.population_dossiers`·`load_dossiers`·`agenda_rows` 를 따라 — 증권사 의견 `[]`·수급 0일·감성 None·공시 사건 `[]`·**`gov_covered=False`**(True 면 "사건 없음 — 중립" 이 되어
        자료 없음과 다르다). A·C·D·E 는 `co.meet`(안건은 헌장 크기만큼, 모집단은 그날 신호 종목 전체) → `hold.strength`, B 는 `select_top(with_criteria(rows), 5)` 각 1.0 — `jobs/paper.holding_step` 그대로
-     - 원장: 그날 추천받은 종목 전부를 넣는다(고른 것 `pick`, 못 고른 것 `skip`, 둘 다 표). 성과(% , 지수는 늘 KOSPI — `pp.outcomes`)는 **20번째 뒤 종가가 cutoff 이하 그리고 cutoff − 결정일 ≥ 28일**
+     - 원장: 그날 추천받은 종목 전부를 넣는다(고른 것 `pick`, 못 고른 것 `skip`, 둘 다 표). 성과(% , 지수는 늘 KOSPI — `pp.outcomes`)는 **20번째 뒤 종가가 cutoff 앞 그리고 cutoff − 결정일 ≥ 28일**(cutoff 날 종가는 운영이 다음 실행 끝에야 채운다 — 25.1531)
        (`pp.ATTRIBUTION_HORIZON`·`pp.HORIZON_CALENDAR_DAYS[20]`, 운영 `due_horizons`)일 때만 보이고, 결정일 앞 365일(`hold.HOLDING_WINDOW_DAYS`) 행만 `hold.weights` 로 → `hold.rank(tiebreak=종합 점수)` →
-       두 곳 이상 추천한 종목 상위 5. `discard(decided_on, stock_id)` 는 1c 가 표가 붙지 않는 운영 결정(사면 바로 매도 skip 등)을 지울 때 쓴다
+       두 곳 이상 추천한 종목 상위 5. `at` 은 cutoff 와 결정일 모두 앞으로만 간다(같은 결정일을 두 번 부르면 원장이 두 번 쌓인다, 25.1531). `discard(decided_on, stock_id)` 는 1c 가 표가 붙지 않는 운영 결정(사면 바로 매도 skip 등)을 지울 때 쓴다
      - 운영과 다른 것(알고 둔다): 종합 점수에 감성 없음(운영 10%) · 팩터 점수 주 1회(운영 날마다) · 성과 지표를 신호 종목만 cutoff 창에서 그 자리 계산(운영 `performance_metrics` 행, 창 이름은 남기지 않는다) ·
        원장 수익률은 창의 수정종가(운영은 원 종가 — 분할이 끼면 운영 쪽이 틀린다) · 신호 줄의 종가도 수정종가 · 사업보고서 뒤 분기 참고 행·내부자 참고 행 없음(근거표 참고 행일 뿐 판정·표에 안 쓴다) ·
        시장 절반 넘게 묵으면 하루를 건너뛰는 운영 규칙(`too_stale`·점수 묵음)은 없다(엔진 날짜 축이 드문 날을 뺀다) · 통화를 모르는 옛 스냅샷 자본은 남긴다(운영 SQL 은 NULL 통화를 뺀다)

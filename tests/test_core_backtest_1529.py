@@ -234,10 +234,34 @@ def test_원장_28일_문() -> None:
 
 
 def test_원장_20번째_종가_문() -> None:
-    """이틀마다 종가 — 28일이 지나도 20번째 뒤 종가(02-10)가 cutoff 에 없으면 안 보인다."""
+    """이틀마다 종가 — 28일이 지나도 20번째 뒤 종가(02-10)가 **cutoff 앞**에 없으면 안 보인다.
+    cutoff 날 종가 자체로는 아직이다 — 운영은 그 종가를 다음 실행 끝에야 채운다(25.1531, 반박 검증)"""
     assert _보이나("2023-02-09", 2) == []
-    [r] = _보이나("2023-02-10", 2)
+    assert _보이나("2023-02-10", 2) == []
+    [r] = _보이나("2023-02-11", 2)
     assert r["ret_20d"] == pytest.approx(20.0)
+
+
+def test_원장_휴장이_끼면_하루_늦게() -> None:
+    """반박 검증 재현 — 평일만 거래·2024-01-15 휴장. 결정 01-08(기준 01-05): 20번째 종가 02-05 = 결정 뒤 28일째.
+    운영 결정일 02-06 의 회의는 02-05 실행 끝에 채운 성과를 읽는데 그 실행의 종가는 02-02 까지 — 아직 안 보인다"""
+    날들, d = [], date(2024, 1, 2)
+    while d <= date(2024, 2, 20):
+        if d.weekday() < 5 and d != date(2024, 1, 15):
+            날들.append(d.isoformat())
+        d += timedelta(days=1)
+    가격 = {1: {x: 100.0 + k for k, x in enumerate(날들)}}
+    지수 = [(x, 1000.0) for x in 날들]
+
+    def 본다(cutoff: str) -> list[dict]:
+        led = cb.HoldingLedger()
+        led.add("2024-01-08", 1, "pick", "x", {"A": 1.0}, 가격[1]["2024-01-05"], "2024-01-05")
+        return led.records(bt.PriceView(가격, cutoff), [x for x in 지수 if x[0] <= cutoff], cutoff)
+
+    뒤 = [x for x in 날들 if x > "2024-01-05"]
+    assert 뒤[19] == "2024-02-05"
+    assert 본다("2024-02-05") == []  # 결정 02-06 — 운영도 아직
+    assert len(본다("2024-02-06")) == 1  # 결정 02-07 — 02-06 실행 끝에 채운 것
 
 
 def test_원장_365일_창과_빼기() -> None:
@@ -370,6 +394,58 @@ def test_cutoff_순서() -> None:
         cb.CoreMarket(u, s, ix).at(v1, 날[799])
     with pytest.raises(NotImplementedError):
         cb.CoreMarket(u, s, ix, country="US")
+    # 결정일도 앞으로만 — 같은 결정일에 cutoff 만 바꾸면 그날 원장 줄이 두 번 쌓였다(25.1531, 반박 검증)
+    m2 = cb.CoreMarket(u, s, ix)
+    m2.at(v0, 날[801])
+    with pytest.raises(ValueError, match="앞으로 가지 않는다"):
+        m2.at(v1, 날[801])
+
+
+# ── 반박 검증이 짚은 빈 곳 (25.1531) ─────────────────────────────────────────
+
+
+def test_기준일_종가가_없는_종목은_신호_입력에서_빠진다() -> None:
+    u, p, t, s, dv, ix = _복사()
+    k = 구간[0]
+    [평소] = _돌림((u, p, t, s, dv, ix), [k])
+    assert 1 in 평소.inputs
+    del p[1][전체날[k - 1]]  # 1번만 cutoff 날 종가가 없다(정지·늦은 수집)
+    [빠짐] = _돌림((u, p, t, s, dv, ix), [k])
+    assert 1 not in 빠짐.inputs and set(빠짐.inputs) == set(평소.inputs) - {1}
+
+
+def test_자본은_종목_통화로_자른다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """밴드·지금 PBR 의 자본은 그 종목 통화로만 — `_decide` 가 통화를 넘기는지(도우미만 보던 빈 곳)"""
+    u, p, t, s, dv, ix = _복사()
+    u[0]["currency"] = "USD"
+    본: dict[str, set] = {"pit_equities": set(), "latest": set()}
+    원래1, 원래2 = jb.pit_equities, cb.pit_latest_equity
+
+    def 자본들(snaps, cutoff, currency=None):  # noqa: ANN001, ANN202
+        본["pit_equities"].add(currency)
+        return 원래1(snaps, cutoff, currency=currency)
+
+    def 최신(snaps, cutoff, currency):  # noqa: ANN001, ANN202
+        본["latest"].add(currency)
+        return 원래2(snaps, cutoff, currency)
+
+    monkeypatch.setattr(jb, "pit_equities", 자본들)
+    monkeypatch.setattr(cb, "pit_latest_equity", 최신)
+    _돌림((u, p, t, s, dv, ix), 구간[:3])
+    assert None not in 본["pit_equities"] and None not in 본["latest"]
+    assert 본["pit_equities"] <= {"KRW", "USD"} and "KRW" in 본["pit_equities"]
+
+
+def test_시점_유니버스가_바뀌면_따른다() -> None:
+    u, p, t, s, dv, ix = _복사()
+    경계 = 전체날[구간[2] - 1]
+
+    def 편입(cutoff: str) -> set[int]:
+        return {r["stock_id"] for r in u} - ({1} if cutoff >= 경계 else set())
+
+    앞, _가운데, 뒤 = _돌림((u, p, t, s, dv, ix), 구간[:3], eligible_at=편입)
+    assert 1 in 앞.inputs and 1 not in 뒤.inputs
+    assert all(d.stock_id != 1 for d in 뒤.population)
 
 
 def test_원장에_오늘_줄이_쌓인다() -> None:
