@@ -457,7 +457,7 @@ class Test핵심_H_조각_1b:
         from batch.services import core_backtest as cbt
 
         n = pp.ATTRIBUTION_HORIZON
-        검사(BACKTEST, f"{n}번째 뒤 종가가 cutoff 이하 그리고 cutoff − 결정일 ≥ {pp.HORIZON_CALENDAR_DAYS[n]}일", "원장 두 문")
+        검사(BACKTEST, f"{n}번째 뒤 종가가 cutoff 앞 그리고 cutoff − 결정일 ≥ {pp.HORIZON_CALENDAR_DAYS[n]}일", "원장 두 문")
         검사(BACKTEST, f"결정일 앞 {hold.HOLDING_WINDOW_DAYS}일(`hold.HOLDING_WINDOW_DAYS`)", "원장 창")
         검사(BACKTEST, f'voters=("{'","'.join(cbt.VOTERS)}")', "투표 회사")
         assert set(cbt.EQUAL_WEIGHTS.values()) == {20.0}
