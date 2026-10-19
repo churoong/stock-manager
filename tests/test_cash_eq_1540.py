@@ -25,8 +25,23 @@ def test_손계산() -> None:
     pct, 비중 = desk.cash_equivalent_return(TWR, 현금, 지수, 날[0], ["KOSPI"])
     assert pct == pytest.approx(12.5) and 비중 == pytest.approx(25.0)
     # 두 지수 평균 — S&P 그림자는 제자리라 0.05 / 2
+    # 두 지수 — 지수마다 따로 이어 곱해 평균(25.1541): KOSPI 쪽 +12.5%, S&P 쪽(제자리) +10% → +11.25%
     pct2, _ = desk.cash_equivalent_return(TWR, 현금, 지수, 날[0], ["KOSPI", "S&P500"])
-    assert pct2 == pytest.approx((1 + 0.10 + 0.5 * 0.025) * 1.0 * 100 - 100)
+    assert pct2 == pytest.approx(11.25)
+
+
+def test_전부_현금이면_환산이_지수와_같다() -> None:
+    """반박 검증(25.1541) — 날마다 두 지수 평균을 곱하면 KOSPI 만 오르는 구간에서 0 이 아니었다"""
+    from datetime import date, timedelta
+
+    days = [(date(2026, 1, 1) + timedelta(days=i)).isoformat() for i in range(126)]
+    twr = [(d, 1.0) for d in days]
+    idx = [(d, 1000.0 * 1.0019**i, 1000.0 * (1.01 if i % 2 else 1.0), 1000.0) for i, d in enumerate(days)]
+    cash = [(d, 1000.0, 1000.0) for d in days]
+    지수수익, 쓴 = desk.index_return(idx, days[0])
+    pct, 비중 = desk.cash_equivalent_return(twr, cash, idx, days[0], 쓴)
+    assert 쓴 == ["KOSPI", "S&P500"] and 비중 == pytest.approx(100.0)
+    assert pct == pytest.approx(지수수익, abs=1e-9)
 
 
 def test_입금은_그날_지수로_산_몫이라_빠진다() -> None:

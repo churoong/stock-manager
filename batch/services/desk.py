@@ -230,8 +230,8 @@ def cash_equivalent_return(
     (25.1540, 31회차 P3).
 
     r_eq(t) = r_twr(t) + c(t−1)·r_idx(t). c = 전날 현금 ÷ 전날 평가(`paper_daily.cash_krw`·`equity_krw`),
-    r_idx = `index_return` 과 같은 행마다 입금 보정 그림자 수익을 **같은 지수(`used`)** 로 평균. 구간도 같다
-    (`start` 이하 마지막 행부터).
+    r_idx = `index_return` 과 같은 행마다 입금 보정 그림자 수익. **같은 지수(`used`)마다 따로 이어 곱해 끝에 평균**
+    (`index_return` 과 같은 꼴, 25.1541). 구간도 같다(`start` 이하 마지막 행부터).
     한 행이라도 현금·평가·그림자가 비면 None — 모름을 0 으로 채우지 않는다. 관문 통과(`passed`)에는 쓰지 않는다
     """
     현금 = {d: (c, e) for d, c, e in cash}
@@ -242,23 +242,25 @@ def cash_equivalent_return(
     if not 앞 or not used or any(u not in 칸 for u in used):
         return None, None
     구간 = v[앞[-1]:]
-    곱, 비중들 = 1.0, []
+    # 지수마다 따로 이어 곱하고 끝에 평균 — `index_return` 이 반반 사서 그대로 둔 꼴이라 같은 꼴이어야 현금 100% 계좌가
+    # 0 이 된다(날마다 평균을 곱하면 날마다 반반으로 다시 맞춘 꼴이라 KOSPI +27%·S&P 제자리에서 −1.84%p, 25.1541)
+    곱 = {u: 1.0 for u in used}
+    비중들: list[float] = []
     for (da, ta), (db, tb) in zip(구간, 구간[1:], strict=False):
         ce, ia, ib = 현금.get(da), 지수.get(da), 지수.get(db)
         if ce is None or ia is None or ib is None or not ce[1] or ce[1] <= 0 or ta <= 0:
             return None, None
-        r_idx: list[float] = []
+        c = float(ce[0]) / float(ce[1])
+        비중들.append(c)
         for u in used:
             i = 칸[u]
             if ia[i] is None or ib[i] is None or float(ia[i]) <= 0:
                 return None, None
-            r_idx.append((float(ib[i]) - (float(ib[3]) - float(ia[3]))) / float(ia[i]) - 1)
-        c = float(ce[0]) / float(ce[1])
-        비중들.append(c)
-        곱 *= 1 + (tb / ta - 1) + c * sum(r_idx) / len(r_idx)
+            r_idx = (float(ib[i]) - (float(ib[3]) - float(ia[3]))) / float(ia[i]) - 1
+            곱[u] *= 1 + (tb / ta - 1) + c * r_idx
     if not 비중들:
         return None, None
-    return (곱 - 1) * 100, 100 * sum(비중들) / len(비중들)
+    return (sum(곱.values()) / len(곱) - 1) * 100, 100 * sum(비중들) / len(비중들)
 
 
 def risk_ratio(v: list[tuple[str, float]], start: str | None = None) -> float | None:

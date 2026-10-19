@@ -22,7 +22,7 @@ from __future__ import annotations
 import bisect
 import json
 import math
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Any
@@ -595,9 +595,11 @@ class SharedDays:
         return self._pickle.loads(적힌[1])
 
 
-    def views(self) -> list[DayView]:
-        """적힌 하루 재료 전부(cutoff 순) — 실행이 끝난 뒤 진단(`holding_eq`, 25.1538)이 읽는다. 매번 새로 푼다"""
-        return [self._pickle.loads(b) for _c, (_d, b) in sorted(self._days.items())]
+    def views(self) -> Iterator[DayView]:
+        """적힌 하루 재료(cutoff 순)를 **하나씩** 푼다 — 실행이 끝난 뒤 진단(`holding_eq`, 25.1538)이 읽는다.
+        한꺼번에 풀면 피클의 약 5배라 5년이면 1GB 남짓 더 든다(25.1541 반박 검증) — 생성기로 하루치만 든다"""
+        for _c, (_d, b) in sorted(self._days.items()):
+            yield self._pickle.loads(b)
 
 
 def _slim(dv: DayView) -> DayView:
