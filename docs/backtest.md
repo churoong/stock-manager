@@ -630,11 +630,37 @@ Turso 월 읽기 진도 문(추정 500만 행)을 지나야 돈다 — 미뤄지
        직전 cutoff 비중 × 종가 변화(비용 뺌 없음) · 매수 비중이 엔진 자리보다 크면(오늘 오른 보유) 엔진이 줄이는데 원가 평균은 줄이기 전 비중으로 잰다
      - 시험(`tests/test_core_strategy_1532.py`): 손으로 센 장부 사례(목표·추적·93일째 기간초과·손절·쉼·목표까지만·10%·30%·현금 모자람·오늘 판 돈·수수료 원가), R 씨앗 = 운영,
        다섯 변형 끝까지(날마다 장부 = 엔진 보유), 결정성, 미끼(cutoff 뒤 가격 → 그 전 주문 불변, 양성 대조)
-   - 조각 1d 실행 연결·저장·`backtest.yml`·DSR·결정 단위 분위·반 나눈 기간
+   - 조각 1d ✅(25.1534, 검증 전) **실행 연결·저장·`backtest.yml`·반 나눈 기간** — `batch/jobs/core_backtest.py`, 하루 재료 나눠 읽기는 `services/core_backtest.SharedDays`
      - **속도 실측**(2026-10-19, 합성 자료 880종목·1,300일, 클라우드 컨테이너 1코어): `CoreMarket.at` 하루 평균 1.9초 — 주 첫날 약 6.2초(그 가운데 `build_pit_inputs`
        약 10초/주의 대부분이 `risk_from_prices`·`metrics.compute`), 나머지 날 약 1.2초. 5년(약 1,250일)이면 한 벌 약 70분(주간 약 43분 + 날마다 약 25분).
        변형 다섯이 제 `CoreMarket` 을 따로 돌리면 약 350분이라 시간 한도 120분을 넘는다 → **하루 재료(`DayView`)를 한 번만 내고 다섯이 나눠 읽게**,
        그리고 주간 위험 지표를 줄인다(창이 3년이라 주마다 다시 재도 거의 같다 — 월 1회로 할지 실측 뒤 정하고 편향을 적는다). 미국(약 2,500종목)은 그 뒤
+     - **나눠 읽기**: `SharedDays(CoreMarket(…))` → 변형마다 `make_core_strategy(variant, shared.reader(), sessions=…, costs=…)`. `DayView` 는 (cutoff, 결정일)과 H 메모리 원장에만
+       달린다 — `at` 은 창의 가격만 읽고 엔진 상태(`view.weights`·`view.holding`)를 읽지 않으며, 원장에는 그날 추천받은 종목이 변형의 매매와 무관하게 들어간다(1c 에 `discard` 를 부를 자리가 없다).
+       처음 그 cutoff 를 묻는 읽개(첫 변형)가 진짜 `at` 을 부르고 적는다. 기록은 **피클 바이트**로 들고 읽개마다 새로 푼다 — 한 변형이 받은 행을 고쳐도 다른 변형이 못 본다(읽기 전용).
+       유니버스 크기 칸 `SHARED_DROPPED` = inputs·factor_scores·total_scores 는 비운다(장부형 전략은 `rows`·`pick_rows` 만 읽는다 — 1,250일을 들어도 약 200MB, 하루 약 165KB).
+       읽개도 cutoff·결정일이 앞으로만 간다. 시험: 변형 다섯을 나눠 읽은 판과 변형마다 제 `CoreMarket` 을 둔 판의 날마다 주문·곡선·리밸런스가 같다
+     - **리스크 지표 주기**: `CoreMarket(risk_every=)` — `None` 이면 예전 길(`jobs/backtest._위험_캐시`, 주마다 쌓여 1,250일이면 전 종목 × 주 수), 그 밖은 판단기 안 메모(주기가 바뀌면 버린다 —
+       메모리가 종목 수로 묶인다). `build_pit_inputs(risk_for=)` 로 넘긴다(주지 않으면 예전 그대로). `risk_every` = week · month(실행 기본 `week`).
+       week 는 예전 길과 값이 같다(시험이 날마다 대조 — 점수·신호·고름). month 는 그 달 첫 점수 cutoff 에 잰 값을 그 달 나머지 주에도 쓴다(그 달 처음 보이는 종목은 처음 본 cutoff 에) —
+       **편향**: 리스크 팩터(MDD·변동성·샤프·베타 …)가 최대 약 4주 묵는다. 실행에 쓰면 결과 행에 경고가 붙는다
+     - **실측과 어림**(2026-10-19, 합성 880종목·1,300일 중 끝 61일, 위와 같은 컨테이너): 하루 재료 week 113.6초/60일(1.89초/일) · month 80.8초/60일(1.35초/일) · 나눠 읽는 변형 하나의
+       엔진+전략 10.2~11.4초/60일(약 0.18초/일 — 그 가운데 약 60% 가 엔진의 날마다 `PriceView` 만들기). 5년 1,250일: 하루 재료 week 약 39분(month 약 28분) + 엔진·전략 다섯 약 19분
+       = **week 약 58분**(month 약 47분) + 읽기(사본·Turso, 미실측 `[확인필요: 첫 실행 step_log.timing.load_s]`)·설치 몇 분. 한도 120분 안이라 **편향 없는 week 를 기본**으로 둔다 —
+       month 는 실제 실행의 `timing` 이 한도에 다가가면 쓰는 손잡이(`--risk-every month`). 같은 61일에서 week 와 `None`(예전 길)의 core_h 곡선이 같았고(1.0624) month 는 달랐다(1.0782)
+       원장이 쌓여도 느려지지 않는다 — 400일 이어 돌린 week 하루 재료가 평균 1.77초/일(첫 60일 1.76·끝 60일 1.78, 원장 3,912줄)
+     - **실행** `run_core(market="KR", years=5, *, risk_every="week", force=False, today=None, variants=…)` — 월 백테스트 `run` 과 같은 로더·같은 워밍업(3년 창 + 30일)·같은 시점 유니버스
+       (`pit_eligible`, `run` 은 그대로)·같은 비용(설정)·같은 무위험수익률. 날짜 축 `bt.market_dates`, 리밸런스 = 모든 거래일, 판 뒤 쉼은 워밍업 시장일 + 날짜 축으로 센다.
+       국면 배수는 설정(`trend.load_settings`). 변형 다섯을 `bt.simulate` 로 돌려 `store_run(…, rebalance="daily", extra=…)` 로 싣는다 — 같은 `group_id`, `top_n` 5, 리밸런스 열 "daily"
+       (`store_run` 은 `rebalance`·`extra` 를 주지 않으면 예전 그대로 "monthly"). `metrics_json` 에 `split_half`·`risk_every`·`account`·`benchmark`, 경고는 생존편향·배당 없음(엔진)·시점 유니버스·
+       무위험수익률 없음·기본 연수 아님·"핵심 H — …"(`WARN_CORE`)·month 면 `WARN_RISK_MONTHLY`. `batch_runs.job_name` = `backtest_core`(월 백테스트의 판정 칸 `backtest` 를 밀어내지 않게) —
+       step_log 에 묶음·반 나눈 기간·`timing`(읽기 초·변형별 초·낸 날·나눠 준 날·리스크 잰 수)·시점 유니버스 크기
+     - **반 나눈 기간**(`split_half`): 곡선을 날 수로 반 — 가운데 날은 두 반에 모두 든다(앞 반의 끝 = 뒤 반의 시작). 앞·뒤 반마다 시작·끝·날 수·CAGR·MDD(docs/metrics.md 식)
+     - **어긋남(1d)**: 초과 CAGR·이긴 달의 기준은 월 백테스트와 같은 유니버스 동일가중(월 리밸런스) — 다섯 행만 싣고 기준은 저장하지 않는다 · 노출(`invested_share`)은 리밸런스(= 날) 단위라
+       노출 경고 글의 "투자한 달" 은 "투자한 날" 로 읽는다 · 화면(/backtest)은 아직 없다 — 묶음 목록에 상위 5(기본 아님)로만 보이고 대표 묶음은 늘 종합 전략이 있는 월 백테스트다(웹 `LATEST_GROUP`)
+     - **돌리는 법**: GitHub Actions "백테스트·스트레스" → Run workflow → 무엇을 = `핵심H`(시장 입력은 보지 않는다 — 국내만, 기간 입력은 쓴다). `core` 작업만 돈다(시간 한도 120분, 예약·웹 깨우기 없음,
+       월 백테스트와 같은 비밀·시세 사본·읽기 진도 문 `turso_read_gate.py backtest_core`). 손으로: `python -m batch.jobs.core_backtest --market KR [--years 5] [--risk-every week|month]`
+   - 조각 1e DSR(`luck.judge`, 핵심 계열을 시도에 더함 — `REGISTERED_TRIALS` 는 그때)·결정 단위 분위(매수마다 그날 유니버스 무작위 20종목 안 분위)
    - 계획 검토가 찾은 어긋남(25.1526): 운영 종합 점수는 감성 10% 를 넣고 백테스트 `run` 은 5팩터 균등이라 안건 순서·B 상위 5 가 다를 수 있다 · 운영에는 **최대 종목 수가 없다**(현금·종목 10% 상한만) ·
      `pit_equities` 는 자본이 없으면 옛 해로 물러나고 운영 `_latest_equity` 는 모름(25.1172) — PBR 이 다를 수 있다 · 체결은 t 종가(운영은 시가 매도·지정가 매수) — 크기·체결이 낙관 쪽
 2. 추적 검정(운영 H 와 결정을 다섯 수준으로 맞대기 — 입력·표(100% 일치)·가중치·선정·실행 손익, 기준은 결과 보기 전 사전 등록)·화면(/backtest·/lab)·분할 지정가 체결

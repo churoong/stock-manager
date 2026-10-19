@@ -1,0 +1,279 @@
+"""핵심 H 다년 백테스트 실행 — 조각 1d (docs/backtest.md 10장, docs/infra.md 25.1534). 국내만.
+
+운영 가상모의투자 H·G·B·R1·R2 의 매매 규칙(조각 1c `core_strategy`)을 수년 그 시점 자료로 **날마다** 돌려
+`backtest_runs` 에 다섯 행(같은 `group_id`, 리밸런스 열 "daily")으로 싣는다.
+
+- 자료는 월 백테스트(`jobs/backtest.run`)와 **같은 읽기·같은 워밍업**이다 — 유니버스·가격(시세 사본 길 포함)·
+  재무 스냅샷·배당·지수, 시점 유니버스(`pit.members_at`), 거래비용(설정), 무위험수익률(설정)
+- 하루 판단 재료(`CoreMarket.at`)는 **한 번만** 내고 변형 다섯이 나눠 읽는다(`SharedDays`) — 변형의 장부와 무관하다
+- 팩터 점수의 리스크 지표는 판단기 안에서 주마다 잰다(`risk_every="week"` — 예전 주기와 같은 값, 메모리가
+  종목 수로 묶인다). 시간 한도가 모자라면 `--risk-every month`(달마다 한 번, 편향은 10장 조각 1d)로 줄일 수 있다
+- 결과 행: 변형마다 CAGR·MDD·샤프(엔진 `summarize`, 벤치마크는 월 백테스트와 같은 유니버스 동일가중 — 저장하지 않는다)와
+  **반 나눈 기간**(앞·뒤 반의 CAGR·MDD, `metrics_json.split_half`). DSR·결정 단위 분위는 조각 1e 다
+
+실행
+  python -m batch.jobs.core_backtest --market KR
+  python -m batch.jobs.core_backtest --market KR --years 3 --risk-every week
+"""
+
+from __future__ import annotations
+
+import argparse
+import logging
+import os
+import sys
+import time
+import uuid
+from datetime import UTC, date, datetime, timedelta
+from typing import Any
+
+from batch import config
+from batch.core import db
+from batch.core.client import TursoClient
+from batch.core.entry import guard
+from batch.jobs import backtest as jb
+from batch.jobs import metrics as metrics_job
+from batch.services import backtest as bt
+from batch.services import core_backtest as cb
+from batch.services import core_strategy as cs
+from batch.services import metrics as m
+from batch.services import pit_universe as pit
+from batch.services import trend
+from batch.services import universe as uni
+
+log = logging.getLogger("core_backtest")
+
+#: `batch_runs.job_name` — 월 백테스트(`backtest`)와 가른다. 기법 발굴 루프의 판정은 `backtest` 의 기본 실행만 센다
+#: (docs/factors.md 12장 머리) — 핵심 H 실행이 그 판정 칸을 밀어내지 않게
+JOB_NAME = "backtest_core"
+#: `backtest_runs.rebalance` — 장부형 전략은 날마다 판단한다(월 백테스트는 "monthly")
+REBALANCE = "daily"
+#: 기본 연수 — 월 백테스트와 같다(자료 약 5년, docs/backtest.md 10장 자료 깊이)
+DEFAULT_YEARS = jb.DEFAULT_YEARS
+#: 팩터 점수 리스크 지표 주기. "week" 는 예전 주기(주간 점수)와 같은 값이다(시험이 대조). 실측(25.1534, 합성 880종목):
+#: 하루 재료 week 1.89초/일 · month 1.35초/일 — 5년 약 40분 대 28분, 엔진·전략 다섯 약 19분을 더해도 week 가
+#: 120분 안이라 편향 없는 쪽을 기본으로 둔다. month 는 실행 기록 `timing` 이 한도에 다가가면 쓰는 손잡이다
+DEFAULT_RISK_EVERY = "week"
+#: 결과 행마다 붙는 경고 — 운영 H 와 다른 판이라는 것과 어디를 읽으면 되는지
+WARN_CORE = (
+    "핵심 H — 운영 가상모의투자 H 와 다른 판이다(재현 못 하는 부서 비움·t 종가 체결·팩터 점수 주 1회 등)."
+    " 어긋남은 docs/backtest.md 10장 — CAGR 절대값을 믿지 말고 짝(H−G·G−B)과 반 나눈 기간을 본다"
+)
+#: 리스크 지표를 달마다 잰 실행에만 붙는 경고(`--risk-every month`)
+WARN_RISK_MONTHLY = (
+    "리스크 팩터 지표를 달마다 한 번 쟀다 — 최대 약 4주 묵는다(docs/backtest.md 10장 조각 1d)."
+    " 주마다 잰 실행과 섞어 견주지 않는다"
+)
+#: 벤치마크를 저장하지 않는다는 표시(초과 CAGR·이긴 달의 기준) — `metrics_json.benchmark`
+BENCHMARK_NOTE = "유니버스 동일가중 월 리밸런스(월 백테스트 benchmark 와 같은 판단 함수, 저장 안 함)"
+
+
+def split_half(curve: list[tuple[str, float]]) -> dict[str, Any]:
+    """곡선을 날 수로 반 나눠 앞·뒤 반의 CAGR·MDD (docs/backtest.md 10장 "기간을 반으로 나눈 결과를 함께 싣는다").
+
+    가운데 날은 두 반에 모두 든다(앞 반의 끝 = 뒤 반의 시작 — 뒤 반 수익이 그날 자본에서 시작한다).
+    식은 docs/metrics.md 그대로(`metrics.cagr`·`max_drawdown`). 곡선이 셋보다 짧으면 비운다"""
+    if len(curve) < 3:
+        return {}
+    가운데 = len(curve) // 2
+    out: dict[str, Any] = {}
+    for 이름, 조각 in (("first", curve[: 가운데 + 1]), ("second", curve[가운데:])):
+        점 = [m.PricePoint(date=date.fromisoformat(d), close=v) for d, v in 조각]
+        out[이름] = {"start": 조각[0][0], "end": 조각[-1][0], "days": len(조각),
+                    "cagr": m.cagr(점), "mdd": m.max_drawdown(점).mdd}  # fmt: skip
+    return out
+
+
+def pit_eligible(
+    universe: list[dict[str, Any]], prices: dict[int, dict[str, float]], turnover: dict[int, dict[str, float]],
+    market_of: dict[int, str],
+) -> tuple[jb.EligibleAt, dict[str, set[int]], dict[str, int]]:
+    """국내 시점 유니버스 판정 — 월 백테스트 `run` 과 같은 하한·같은 20일 창·같은 이력 가장자리 (docs/backtest.md 1.3).
+
+    (판정 함수, cutoff → 종목 캐시, 제외 사유 수). `run` 은 바꾸지 않으려고 같은 조립을 여기 둔다"""
+    base = uni.UniverseFilters.korea()
+    stocks = jb.pit_stocks(universe, observed=False)  # 국내 listed_date 는 거래소가 준 실제 상장일
+    series = jb.pit_series(prices, turnover)  # 국내 수정주가는 분할만 조정 — 가격 수준과 같다(25.275)
+    filters = pit.Filters(
+        min_market_cap=base.min_market_cap, min_avg_turnover_20d=base.min_avg_turnover_20d,
+        min_listed_days=base.min_listed_days, history_starts=jb.history_starts(stocks, series),
+    )  # fmt: skip
+    시장일 = jb.pit_market_dates(series, market_of)
+    cache: dict[str, set[int]] = {}
+    reasons: dict[str, int] = {}
+
+    def eligible_at(cutoff: str) -> set[int]:
+        hit = cache.get(cutoff)
+        if hit is None:
+            hit, why = pit.members_at(stocks, series, cutoff, filters, 시장일)
+            cache[cutoff] = hit
+            for k, n in why.items():
+                reasons[k] = reasons.get(k, 0) + n
+        return hit
+
+    return eligible_at, cache, reasons
+
+
+def run_core(
+    market: str = "KR",
+    years: int = DEFAULT_YEARS,
+    *,
+    risk_every: str = DEFAULT_RISK_EVERY,
+    force: bool = False,
+    today: date | None = None,
+    variants: tuple[str, ...] = tuple(cs.VARIANTS),
+) -> int:
+    """핵심 H 변형 다섯을 날마다 돌려 저장한다. 0 = 성공. `today` 는 시험이 날짜를 고정할 때만 준다."""
+    market = market.upper()
+    if market != "KR":
+        # 미국은 지수·통화·분할 대기 규칙을 아직 안 맞췄다(`CoreMarket` 이 막는다) — 시작 전에 크게 멈춘다.
+        # 명령줄은 KR 만 받고 워크플로도 KR 만 넘기므로 예약 실행이 여기서 조용히 끝날 일은 없다
+        raise NotImplementedError("핵심 H 백테스트는 아직 국내(KR)만 돈다 — docs/backtest.md 10장")
+    if risk_every not in cb.RISK_EVERY:
+        raise ValueError(f"risk_every 는 {cb.RISK_EVERY} 가운데 하나 — {risk_every}")
+    country = "KR"
+    client = TursoClient()
+    try:
+        db.apply_migrations(client)
+        now = db.now_iso()
+        today = today or datetime.now(UTC).date()
+        since = jb.start_of_backtest(today, years)
+        batch_id = db.start_batch_run(client, job_name=JOB_NAME, market=market, trade_date=today.isoformat())
+
+        universe, warnings = jb.load_universe(client, country)
+        if not universe:
+            db.finish_batch_run(client, batch_id, status="failed", error_text="유니버스가 비어 있습니다")
+            print("유니버스가 비어 있습니다")
+            return 1
+
+        # 읽기 예산 — 월 백테스트와 같은 어림(종목 × (기간 + 있는 워밍업))
+        가장_이른 = client.execute(
+            "SELECT MIN(d) FROM (SELECT (SELECT MIN(p.date) FROM prices p WHERE p.stock_id = s.id) AS d"
+            " FROM stocks s WHERE s.country = ?)",
+            [country],
+        ).scalar()
+        워밍업_일 = 0
+        if 가장_이른:
+            앞선_일 = (date.fromisoformat(since) - date.fromisoformat(str(가장_이른)[:10])).days
+            워밍업_일 = max(0, min(jb.WARMUP_CALENDAR_DAYS, 앞선_일))
+        ok, text = db.check_read_budget(
+            client, len(universe) * (years * jb.TRADING_DAYS_PER_YEAR + 워밍업_일 * 252 // 365), "핵심 H 백테스트"
+        )
+        print(text)
+        if not ok and not force:
+            db.finish_batch_run(client, batch_id, status="skipped", error_text=text)
+            return 1
+
+        # 월 백테스트와 같은 워밍업(3년 창 + 30일) — 12-1 모멘텀·리스크·밴드(750행)가 첫날부터 찬다(25.532)
+        워밍업 = (date.fromisoformat(since) - timedelta(days=jb.WARMUP_CALENDAR_DAYS)).isoformat()
+        ids = [int(r["stock_id"]) for r in universe]
+        t0 = time.perf_counter()
+        prices, turnover = jb.load_prices_and_turnover(client, ids, 워밍업)
+        snapshots = jb.load_snapshots(client, country)
+        pit_divs = jb.load_pit_dividends(client, country)
+        # 국면(200일선)이 워밍업 첫날부터 서게 지수는 더 앞(400일)부터
+        지수 = jb.load_index_series(client, country, (date.fromisoformat(워밍업) - timedelta(days=400)).isoformat())
+        indexes = {code: dict(rows) for code, rows in 지수.items()}
+        delisted = jb.has_delisted(client, country, ids)
+        jb._RISK_FREE = metrics_job.risk_free_for(client, country)
+        jb._위험_캐시.clear()  # 핵심 H 는 쓰지 않지만 앞 실행이 남긴 것을 들고 가지 않는다
+        읽기_초 = time.perf_counter() - t0
+
+        시장_맵 = {int(r["stock_id"]): str(r["market"]) for r in universe if r.get("market")}
+        dates = bt.market_dates(prices, since, 시장_맵)
+        if len(dates) < 40:
+            db.finish_batch_run(client, batch_id, status="failed", error_text="거래일이 40일 미만입니다")
+            print("가격이 너무 적어 백테스트를 돌릴 수 없습니다. 백필을 먼저 돌리세요")
+            return 1
+        # 판 뒤 쉼을 세는 거래일 — 워밍업 구간의 시장일 + 엔진 날짜 축
+        sessions = [d for d in bt.market_dates(prices, 워밍업, 시장_맵) if d < dates[0]] + dates
+        costs = bt.Costs.for_country(country, db.get_setting(client, "fees", {}), db.get_setting(client, "taxes", {}))
+        eligible_at, pit_cache, pit_reasons = pit_eligible(universe, prices, turnover, 시장_맵)
+        warnings.append(jb.WARN_PIT_UNIVERSE)
+        warnings.append(WARN_CORE)
+        if risk_every == "month":
+            warnings.append(WARN_RISK_MONTHLY)
+        if years != DEFAULT_YEARS:
+            warnings.append(f"{jb.WARN_NOT_DEFAULT_PARAMS}: 기간 {years}년")
+        trend_settings = trend.load_settings(client)
+        group_id = uuid.uuid4().hex[:12]
+
+        market_ = cb.CoreMarket(
+            universe, snapshots, indexes, country=country, eligible_at=eligible_at, dividends_by_stock=pit_divs,
+            trend_settings=trend_settings, risk_every=risk_every,
+        )  # fmt: skip
+        shared = cb.SharedDays(market_)
+        results: dict[str, bt.BacktestResult] = {}
+        시간: dict[str, float] = {}
+        for i, variant in enumerate(variants):
+            try:
+                db.note_progress(client, batch_id, {"done": i, "total": len(variants) + 1, "current": variant})
+            except Exception:  # noqa: BLE001 — 진행 표시가 계산을 죽이면 안 된다
+                log.warning("진행 상태를 적지 못했습니다")
+            t1 = time.perf_counter()
+            strategy = cs.make_core_strategy(variant, shared.reader(), sessions=sessions, costs=costs)
+            results[variant] = bt.simulate(prices, dates, dates, strategy, costs, has_delisted=delisted,
+                                           turnover=turnover, dividends_included=False)  # fmt: skip
+            시간[variant] = round(time.perf_counter() - t1, 1)
+            print(f"  {variant:8s} 최종 {results[variant].curve[-1][1]:.3f}  ({시간[variant]:.0f}초)", flush=True)
+
+        # 초과 CAGR·이긴 달의 기준 — 월 백테스트와 같은 유니버스 동일가중(월 리밸런스). 다섯 행만 싣는다
+        벤치 = bt.simulate(
+            prices, dates, bt.month_starts(dates),
+            jb.make_strategy("benchmark", universe, snapshots, cs.VARIANTS[variants[0]].top_n, {}, [], eligible_at),
+            costs, has_delisted=delisted, turnover=turnover,
+        )  # fmt: skip
+        무위험 = jb.risk_free_with_warning(client, country, warnings)
+        반: dict[str, dict[str, Any]] = {}
+        for variant, result in results.items():
+            summary = bt.summarize(result, 벤치, risk_free_annual=무위험)
+            반[variant] = split_half(result.curve)
+            extra = {"split_half": 반[variant], "benchmark": BENCHMARK_NOTE, "risk_every": risk_every,
+                     "account": cs.VARIANTS[variant].account}  # fmt: skip
+            jb.store_run(client, market, variant, result, summary, cs.VARIANTS[variant].top_n, group_id, warnings,
+                         now, rebalance=REBALANCE, extra=extra)  # fmt: skip
+            mt = summary.metrics
+            앞, 뒤 = 반[variant].get("first", {}), 반[variant].get("second", {})
+            print(f"  요약 {variant:8s} CAGR {jb._pct(mt.cagr)}  MDD {jb._pct(mt.mdd)}  샤프 {jb._fmt(mt.sharpe)}"
+                  f"  초과 {jb._pct(summary.excess_cagr)}  앞 반 {jb._pct(앞.get('cagr'))}/{jb._pct(앞.get('mdd'))}"
+                  f"  뒤 반 {jb._pct(뒤.get('cagr'))}/{jb._pct(뒤.get('mdd'))}")  # fmt: skip
+
+        실제_리밸런스 = sum(1 for d in dates if d != dates[-1] or len(dates) == 1)
+        db.finish_batch_run(
+            client, batch_id, status="success",
+            step_log={
+                "group_id": group_id, "strategies": len(results), "rebalance": REBALANCE, "rebalances": 실제_리밸런스,
+                "split_half": 반, "stocks": len(ids), "dates": len(dates), "warnings": warnings,
+                "params": {"years": years, "risk_every": risk_every, "variants": list(variants),
+                           "trigger": os.environ.get("BACKTEST_TRIGGER") or None,
+                           "sha": (os.environ.get("GITHUB_SHA") or "")[:12] or None},
+                # 실측 — 시간 한도 120분 안인지 다음 실행 전에 본다(25.1534)
+                "timing": {"load_s": round(읽기_초, 1), "variants_s": 시간, "days_computed": shared.computed,
+                           "days_replayed": shared.replayed, "risk_computed": market_.risk_computed},
+                "pit_universe": {"sizes": jb._pit_sizes(pit_cache), "excluded": pit_reasons},
+            },
+        )  # fmt: skip
+        print(f"저장 {len(results)}개 변형, 리밸런스 {실제_리밸런스}회(날마다), 그룹 {group_id}")
+        for w in sorted(set(warnings)):
+            print(f"  경고: {w}")
+        return 0
+    finally:
+        # 도중에 깨지면 월 백테스트와 같이 `guard` 가 받는다(DB 한도는 건너뜀) — 기록은 `running` 으로 남아 정리된다
+        jb._위험_캐시.clear()
+        client.close()
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="핵심 H 다년 백테스트 (docs/backtest.md 10장)")
+    parser.add_argument("--market", default="KR", choices=["KR", "kr"])
+    parser.add_argument("--years", type=int, default=DEFAULT_YEARS)
+    parser.add_argument("--risk-every", dest="risk_every", choices=list(cb.RISK_EVERY), default=DEFAULT_RISK_EVERY,
+                        help="팩터 점수 리스크 지표 주기 — week(기본, 예전 주기와 같은 값) · month(한도가 모자랄 때)")
+    parser.add_argument("--force", action="store_true", help="읽기 예산이 모자라도 강행")
+    args = parser.parse_args()
+    logging.basicConfig(level=config.SETTINGS.log_level, format="%(asctime)s %(levelname)s %(name)s | %(message)s")
+    return run_core(args.market, args.years, risk_every=args.risk_every, force=args.force)
+
+
+if __name__ == "__main__":
+    sys.exit(guard(main))

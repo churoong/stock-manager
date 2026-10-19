@@ -4,7 +4,8 @@
 다시 낸다 — 신호 줄(`signals.evaluate` 그대로) → 조사 자료(Dossier, 재현할 수 없는 칸은 비움) →
 A·C·D·E 위원회(`company.meet`)·B 점수 상위 5 표 → 메모리 결정 원장(`HoldingLedger`)으로
 회사 가중치(`holding.weights`) → 합의 순위(`holding.rank`).
-매도·크기·변형 다섯(1c)과 실행 연결·저장(1d)은 여기 없다.
+매도·크기·변형 다섯(1c)과 실행 연결·저장(1d `jobs/core_backtest`)은 여기 없다. 변형 다섯이 하루 재료를 나눠 읽는
+`SharedDays`(1d, 25.1534)와 리스크 지표 주기(`risk_every`)는 여기 있다.
 
 **미래를 볼 것이 없다** (CLAUDE.md 절대 규칙, docs/backtest.md 1.1). 가격은 `PriceView`(cutoff 이하 사본)만 본다.
 부르는 쪽이 통째로 넘기는 재무 스냅샷·배당·지수는 쓰는 자리마다 cutoff 로 자른다 — 재무는 접수일(정정 포함)로,
@@ -40,6 +41,8 @@ VOTERS: tuple[str, ...] = ("A", "C", "D", "E")
 EQUAL_WEIGHTS: dict[str, float] = dict.fromkeys(sc.FACTORS, 20.0)
 #: 결정 원장 성과의 시장 지수 — 운영 `jobs/paper.BENCH_INDEX["KR"]` (결정 시장이 국내면 늘 KOSPI)
 BENCH_INDEX = "KOSPI"
+#: 팩터 점수 리스크 지표를 다시 재는 주기(`CoreMarket(risk_every=)`, 25.1534). 실행(`jobs/core_backtest`) 기본은 "week"
+RISK_EVERY: tuple[str, ...] = ("week", "month")
 
 
 # ── 재무 시점 고르기 ──────────────────────────────────────────────────────────
@@ -252,7 +255,10 @@ class CoreMarket:
         top_n: int = report_picks.TOP_STOCKS,
         max_weight_per_stock: float = 10.0,
         targets: dict | None = None,
+        risk_every: str | None = None,
     ) -> None:
+        if risk_every is not None and risk_every not in RISK_EVERY:
+            raise ValueError(f"risk_every 는 {RISK_EVERY} 가운데 하나(또는 None) — {risk_every}")
         if country != "KR":
             # 미국은 broker·flows·governance 가 원래 "자료 없음" 이라 Dossier 는 같지만,
             # 지수(SP500)·통화(USD 사이징·환율)·분할 재수집 대기 규칙을 아직 맞추지 않았다 —
@@ -281,6 +287,12 @@ class CoreMarket:
         self._scores: dict[int, dict[str, float | None]] = {}
         self._score_cutoff = ""
         self._last: DayView | None = None
+        #: 주간 팩터 점수의 리스크 지표를 다시 재는 주기 — None 이면 예전 길(`jobs/backtest._위험_캐시`, 주마다).
+        #: "week" 는 같은 값을 이 판단기 안에서 주마다, "month" 는 달마다 한 번(25.1534 — 아래 `_risk_fn`)
+        self.risk_every = risk_every
+        self._risk_period: tuple[int, int] | None = None
+        self._risk_memo: dict[int, dict[str, float | None]] = {}
+        self.risk_computed = 0  # 실제로 잰 종목 수(실측·시험)
 
     # 지수를 cutoff 로 자른다 — 국면·벤치마크·원장 성과가 모두 이 사본만 본다
     def _index_upto(self, code: str, cutoff: str) -> list[tuple[str, float]]:
@@ -303,11 +315,42 @@ class CoreMarket:
         if 주 == self._week:
             return
         벤치 = dict(self._index_upto(metrics_job.BENCHMARK[self.country], view.cutoff))
-        inputs = jb.build_pit_inputs(self.pool(view.cutoff), self.snapshots, view, self.dividends, 벤치)
+        inputs = jb.build_pit_inputs(self.pool(view.cutoff), self.snapshots, view, self.dividends, 벤치,
+                                     risk_for=self._risk_fn(view, 벤치) if self.risk_every else None)  # fmt: skip
         점수: dict[int, dict[str, float | None]] = {}
         for r in sc.score_factors(inputs) if inputs else []:
             점수.setdefault(r.stock_id, {})[r.factor] = r.score
         self._week, self._scores, self._score_cutoff = 주, 점수, view.cutoff  # type: ignore[assignment]
+
+    def _risk_fn(
+        self, view: bt.PriceView, bench: dict[str, float],
+    ) -> Callable[[int, list[tuple[str, float]]], dict[str, float | None]]:  # fmt: skip
+        """팩터 점수의 리스크 지표(`build_pit_inputs` 의 `risk_for`) — 주기(`risk_every`)마다 종목당 한 번 잰다.
+
+        식·입력은 예전 길과 같다: `risk_from_prices`(창 3Y→1Y, docs/metrics.md) · 지수는 cutoff 까지 · 창 끝은
+        `view.broad_last()`(25.723). 주기가 "week" 면 주간 점수와 같은 주기라 예전 길과 값이 같다(시험이 대조).
+        "month" 면 그 달 첫 점수 cutoff 에 잰 값을 그 달 나머지 주에도 쓴다 — 3년 창이라 몇 주 사이 값이 거의
+        같다. 그 달 처음 보이는 종목은 처음 본 cutoff 에 잰다. **편향**: 리스크 팩터(MDD·변동성·샤프·베타 …)가
+        최대 약 4주 묵는다(docs/backtest.md 10장 조각 1d)"""
+        from batch.jobs import backtest as jb
+        from batch.services import metrics as m
+
+        d = date.fromisoformat(view.cutoff[:10])
+        주기 = (d.isocalendar()[0], d.isocalendar()[1]) if self.risk_every == "week" else (d.year, d.month)
+        if 주기 != self._risk_period:
+            self._risk_period, self._risk_memo = 주기, {}  # 지난 주기의 값은 버린다(메모리가 종목 수로 묶인다)
+        점 = [m.PricePoint(date=date.fromisoformat(k), close=c) for k, c in sorted(bench.items()) if k <= view.cutoff]
+        끝 = date.fromisoformat(str(view.broad_last() or view.cutoff)[:10])
+
+        def risk_for(sid: int, closes: list[tuple[str, float]]) -> dict[str, float | None]:
+            hit = self._risk_memo.get(sid)
+            if hit is None:
+                hit = jb.risk_from_prices(closes, risk_free_annual=jb._RISK_FREE, benchmark_points=점, until=끝)
+                self._risk_memo[sid] = hit
+                self.risk_computed += 1
+            return hit
+
+        return risk_for
 
     def _risk(self, view: bt.PriceView, sid: int, bench: list[tuple[str, float]]) -> dict[str, float | None]:
         """신호 사이징·리스크관리부가 보는 성과 지표.
@@ -498,3 +541,91 @@ class CoreMarket:
             company_stats=성적, ranked=순위, picks=고른, pick_rows=고른행, b_top=b_top,
             holding={sid: 기록[sid] for sid in 고른},
         )  # fmt: skip
+
+
+# ── 변형 다섯이 하루 재료를 나눠 읽기 (조각 1d, 25.1534) ─────────────────────────────
+
+
+#: 나눠 줄 기록에서 비우는 칸 — 유니버스 크기(종목마다 신호 입력·팩터 점수)라 1,250일을 들면 메모리가 넘친다.
+#: 장부형 전략(`core_strategy`)은 `rows`·`pick_rows` 만 읽는다. 나머지 칸은 그대로 싣는다
+SHARED_DROPPED: tuple[str, ...] = ("inputs", "factor_scores", "total_scores")
+
+
+class SharedDays:
+    """`CoreMarket` 한 벌의 하루 재료(`DayView`)를 cutoff 마다 **한 번만** 내고 변형들이 나눠 읽는다
+    (docs/backtest.md 10장 조각 1d, 25.1534).
+
+    왜 같아도 되나: `DayView` 는 (cutoff, 결정일)과 H 메모리 원장에만 달린다. `CoreMarket.at` 은 창의 가격만 읽고
+    엔진 상태(`view.weights`·`view.holding`)를 읽지 않으며, 원장에는 그날 추천받은 종목이 변형의 매매와 무관하게
+    들어간다(조각 1c — 표 없는 운영 결정이 없어 `discard` 를 부를 자리가 없다). 그래서 변형마다 제 `CoreMarket` 을
+    돌리면 같은 계산을 다섯 번 한다(실측 약 350분 > 시간 한도 120분).
+
+    - 처음 그 cutoff 를 묻는 읽개가 진짜 `at` 을 부르고 적는다(따로 미리 도는 판이 없다). 다음 읽개는 적힌 것을 받는다
+    - **읽기 전용**: 기록은 피클 바이트로 들고 읽개마다 새로 푼다 — 한 변형이 받은 행을 고쳐도 다른 변형·다음 날이
+      보지 못한다(시험이 일부러 고쳐 본다). 바이트라 1,250일을 들어도 작다
+    - 기록에서는 유니버스 크기 칸(`SHARED_DROPPED`)을 비운다 — 모든 변형(처음 적는 변형 포함)이 같은 꼴을 받는다
+    - 순서 규칙은 `CoreMarket` 과 같다(읽개마다 cutoff·결정일이 앞으로만). 적히지 않은 앞 cutoff 를 물으면
+      `CoreMarket.at` 이 거꾸로 감을 막는다(`ValueError`)
+    """
+
+    def __init__(self, market: CoreMarket) -> None:
+        import pickle
+
+        self.market = market
+        self._pickle = pickle
+        self._days: dict[str, tuple[str, bytes]] = {}  # cutoff → (결정일, 피클)
+        self.computed = 0  # 진짜 `at` 을 부른 날 수
+        self.replayed = 0  # 적힌 것을 준 날 수
+
+    def reader(self) -> SharedMarket:
+        """변형 하나가 `CoreMarket` 대신 받는 읽개 — `make_core_strategy(variant, shared.reader(), …)`."""
+        return SharedMarket(self)
+
+    def _fetch(self, view: bt.PriceView, day: str) -> DayView:
+        적힌 = self._days.get(view.cutoff)
+        if 적힌 is None:
+            dv = self.market.at(view, day)
+            적힌 = (day, self._pickle.dumps(_slim(dv), protocol=self._pickle.HIGHEST_PROTOCOL))
+            self._days[view.cutoff] = 적힌
+            self.computed += 1
+        else:
+            if 적힌[0] != day:
+                raise ValueError(f"cutoff {view.cutoff} 를 다른 결정일({적힌[0]} → {day})로 — 변형의 날짜 축이 다르다")
+            self.replayed += 1
+        return self._pickle.loads(적힌[1])
+
+
+def _slim(dv: DayView) -> DayView:
+    from dataclasses import replace
+
+    return replace(dv, **{k: type(getattr(dv, k))() for k in SHARED_DROPPED})
+
+
+class SharedMarket:
+    """`SharedDays` 의 읽개 — 장부형 전략이 `CoreMarket` 에서 쓰는 것만 같은 이름으로 준다."""
+
+    def __init__(self, shared: SharedDays) -> None:
+        self.shared = shared
+        m = shared.market
+        self.country, self.universe = m.country, m.universe
+        self.max_weight_per_stock, self.targets = m.max_weight_per_stock, m.targets
+        self._last: tuple[str, str] | None = None  # (cutoff, 결정일)
+        self._dv: DayView | None = None
+
+    def pool(self, cutoff: str) -> list[dict[str, Any]]:
+        return self.shared.market.pool(cutoff)
+
+    def at(self, view: bt.PriceView, day: str | None = None) -> DayView:
+        """`CoreMarket.at` 과 같은 약속 — 같은 cutoff·결정일이면 같은 결과, 거꾸로 가면 `ValueError`."""
+        cutoff, day = view.cutoff, day or view.cutoff
+        if self._last is not None:
+            if cutoff == self._last[0]:
+                if day != self._last[1]:
+                    raise ValueError(f"같은 cutoff {cutoff} 를 다른 결정일({self._last[1]} → {day})로")
+                assert self._dv is not None
+                return self._dv
+            if cutoff < self._last[0] or day <= self._last[1]:
+                raise ValueError(f"cutoff·결정일이 앞으로 가지 않는다 ({self._last} → {(cutoff, day)})")
+        self._dv = self.shared._fetch(view, day)
+        self._last = (cutoff, day)
+        return self._dv

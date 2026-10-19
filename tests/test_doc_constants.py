@@ -478,6 +478,19 @@ class Test핵심_H_조각_1c:
         검사(BACKTEST, f"판 날 s 부터 s+{n} 까지 막고 s+{n + 1} 에 산다(판 뒤 쉼 {n}거래일)", "판 뒤 쉼")
 
 
+class Test핵심_H_조각_1d:
+    """핵심 H 실행 연결·나눠 읽기·리스크 주기 (docs/backtest.md 10장, docs/infra.md 25.1534)."""
+
+    def test_상수(self) -> None:
+        from batch.jobs import core_backtest as cjob
+        from batch.services import core_backtest as cbt
+
+        검사(BACKTEST, f"`SHARED_DROPPED` = {'·'.join(cbt.SHARED_DROPPED)}", "나눠 줄 때 비우는 칸")
+        검사(BACKTEST, f"`risk_every` = {' · '.join(cbt.RISK_EVERY)}(실행 기본 `{cjob.DEFAULT_RISK_EVERY}`)", "리스크 주기")
+        검사(BACKTEST, f"`batch_runs.job_name` = `{cjob.JOB_NAME}`", "실행 기록 이름")
+        검사(BACKTEST, f'리밸런스 열 "{cjob.REBALANCE}"', "리밸런스 열")
+
+
 class Test사후_분석:
     """틀린 추천 사후 분석 (docs/reports.md 3.8, docs/infra.md 25.998)."""
 

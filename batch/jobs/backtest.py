@@ -1046,9 +1046,14 @@ def build_pit_inputs(
     view: bt.PriceView,
     dividends_by_stock: dict[int, list[tuple[str, int, float]]] | None = None,
     benchmark_closes: dict[str, float] | None = None,
+    *,
+    risk_for: Callable[[int, list[tuple[str, float]]], dict[str, float | None]] | None = None,
 ) -> list[sc.StockInput]:
     """t-1 창에서 팩터 입력을 만든다. jobs/scores.py 의 build_inputs 와 같은 식이되
-    재무는 스냅샷에서, 리스크는 가격에서 그 자리에서 낸다."""
+    재무는 스냅샷에서, 리스크는 가격에서 그 자리에서 낸다.
+
+    `risk_for(종목, cutoff 까지 종가)` 를 주면 리스크 지표를 그것에게 묻는다 — 핵심 H 백테스트가 3년 창 지표를
+    달마다 한 번만 재는 자리(docs/backtest.md 10장 조각 1d, 25.1534). 주지 않으면 예전 그대로(`_위험_캐시`)."""
     cutoff = view.cutoff
     dividends_by_stock = dividends_by_stock or {}
     benchmark_closes = benchmark_closes or {}
@@ -1136,15 +1141,19 @@ def build_pit_inputs(
         # 같은 종목·같은 기준일의 리스크 지표는 전략이 달라도 같다 — 한 번만 낸다 (25.625). 전략 6개 + IC + 비용 0 이
         # 같은 리밸런스에서 입력을 다시 만들어 8번 계산했다
         # 가격 계열의 모양(길이·첫 날·마지막 값)까지 열쇠에 — 다른 가격으로 같은 종목·날짜를 부르면(테스트) 섞이지 않게
-        열쇠 = (sid, cutoff, _RISK_FREE, len(closes), closes[0][0], closes[-1][1], len(지수_점))
-        if 열쇠 not in _위험_캐시:
-            _위험_캐시[열쇠] = risk_from_prices(
-                closes, risk_free_annual=_RISK_FREE, benchmark_points=지수_점,
-                # 창 끝은 cutoff 가 아니라 **대부분의 종목이 들어온 날** (25.723, 교차검증 — 한 종목만 있는 날이
-                # cutoff 면 나머지가 None)
-                until=date.fromisoformat(str(view.broad_last() or cutoff)[:10]),
-            )
-        merged.update(_위험_캐시[열쇠])
+        if risk_for is not None:
+            # 핵심 H — 부르는 쪽이 같은 식(`risk_from_prices`)을 제 주기로 낸다(25.1534)
+            merged.update(risk_for(sid, closes))
+        else:
+            열쇠 = (sid, cutoff, _RISK_FREE, len(closes), closes[0][0], closes[-1][1], len(지수_점))
+            if 열쇠 not in _위험_캐시:
+                _위험_캐시[열쇠] = risk_from_prices(
+                    closes, risk_free_annual=_RISK_FREE, benchmark_points=지수_점,
+                    # 창 끝은 cutoff 가 아니라 **대부분의 종목이 들어온 날** (25.723, 교차검증 — 한 종목만 있는 날이
+                    # cutoff 면 나머지가 None)
+                    until=date.fromisoformat(str(view.broad_last() or cutoff)[:10]),
+                )
+            merged.update(_위험_캐시[열쇠])
 
         inputs.append(sc.StockInput(
             stock_id=sid, market=str(row["market"]), sector=row.get("sector") or None, metrics=merged,
@@ -1583,14 +1592,19 @@ def store_run(
     client: TursoClient, market: str, strategy: str, result: bt.BacktestResult,
     summary: bt.Summary, top_n: int, group_id: str, warnings: list[str], now: str,
     운판정: dict | None = None,
+    rebalance: str = "monthly",
+    extra: dict[str, Any] | None = None,
 ) -> int:
+    """결과 한 행과 곡선을 싣는다. `rebalance` = 리밸런스 주기 열(핵심 H 는 "daily", 25.1534),
+    `extra` = `metrics_json` 에 더 싣는 칸(핵심 H 의 반 나눈 기간 등). 둘 다 안 주면 예전 그대로다."""
     노출 = exposure_fields(result)
     노출말 = exposure_warning(strategy, 노출)
     row = (
-        market, strategy, result.curve[0][0], result.curve[-1][0], top_n, "monthly",
+        market, strategy, result.curve[0][0], result.curve[-1][0], top_n, rebalance,
         json.dumps(asdict(result.costs)), len(result.rebalances),
         summary.final_equity, summary.turnover_avg, summary.excess_cagr, summary.win_rate,
-        json.dumps({**asdict(summary.metrics), **노출, **({"luck": 운판정} if 운판정 else {})}, default=str),
+        json.dumps({**asdict(summary.metrics), **노출, **({"luck": 운판정} if 운판정 else {}), **(extra or {})},
+                   default=str),  # fmt: skip
         json.dumps(sorted(set(result.warnings + warnings + ([노출말] if 노출말 else []))), ensure_ascii=False),
         # 판 **둘**을 남긴다 (2026-09-22, docs/infra.md 25.101).
         # `calc_version` 은 엔진 판(리밸런스·비용·곡선), `scoring_calc_version` 은
