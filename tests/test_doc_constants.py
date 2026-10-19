@@ -463,6 +463,9 @@ class Test핵심_H_조각_1b:
         assert set(cbt.EQUAL_WEIGHTS.values()) == {20.0}
         검사(BACKTEST, "5팩터 균등(`EQUAL_WEIGHTS`)", "종합 점수 가중")
         검사(BACKTEST, f"지수는 늘 {cbt.BENCH_INDEX}", "원장 지수")
+        from batch.services import holding_eq as heq
+
+        검사(BACKTEST, f"묶음 < {heq.EQ_MIN_BLOCKS} 또는 서로 다른 짝 < {heq.EQ_MIN_PAIRS}", "가중 대조 판정 가능 (25.1538)")
 
 
 class Test핵심_H_조각_1c:
@@ -745,7 +748,7 @@ class Test밸류_분모:
     "pick_history", "etf_accounts", "etf_tilt", "after_hours", "broker_stats", "disclosure_reaction", "luck", "postmortem",
     "divergence", "tax_sim", "verdict", "forecast_track", "patterns", "insights", "history",
     "event_history", "simulation", "candidate_factors", "cb_overhang", "buy_thesis", "plan_fill", "target_units", "paper", "risk_gate", "execution_quality", "company",
-    "broker_mirror", "holding", "desk", "core_backtest", "core_strategy",
+    "broker_mirror", "holding", "desk", "core_backtest", "core_strategy", "holding_eq",
 )  # fmt: skip
 
 #: 아직 그물 밖인 모듈과 **왜 아직인지**. 하나씩 줄여 간다
