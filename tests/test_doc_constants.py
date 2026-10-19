@@ -896,6 +896,7 @@ class Test이웃_모듈들:
         검사(ADJUST, f"ACTION_TOLERANCE = {adj.ACTION_TOLERANCE}", "기업행위 문턱")
         검사(ADJUST, f"MIN_FACTOR {adj.MIN_FACTOR}", "계수 하한")
         검사(ADJUST, f"MAX_FACTOR {adj.MAX_FACTOR:.0f}", "계수 상한")
+        검사(ADJUST, f"`KR_UNKNOWN_PCT_JUMP = {adj.KR_UNKNOWN_PCT_JUMP}`", "등락률 없는 날 감시 문턱 (25.1554)")
 
     def test_감성_시간_감쇠와_최소_표본(self) -> None:
         검사(SENTIMENT, f"0.5^(경과일 / **{se.HALFLIFE_DAYS:.0f}**)", "반감기")

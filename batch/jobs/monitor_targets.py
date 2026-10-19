@@ -146,7 +146,8 @@ def action_factors(client: TursoClient, stock_id: int, market: str) -> list[tupl
     ).rows
     계수들: list[tuple[str, float]] = []
     for (close, pct, day), (prev, _p, _d) in zip(rows, rows[1:], strict=False):
-        f = adj.factor_of(float(prev), float(close), None if pct is None else float(pct))
+        # 등락률이 빈 날(야후 대체 출처)도 가격제한폭 밖이면 기업행위로 — 감시·멈춤 쪽만(25.1554)
+        f = adj.guard_factor(float(prev), float(close), None if pct is None else float(pct))
         if adj.is_action(f):
             계수들.append((str(day)[:10], f))
     if not 계수들:
@@ -182,7 +183,8 @@ def action_dates(client: TursoClient, stock_id: int, market: str) -> list[str]:
         [stock_id, ACTION_GUARD_ROWS + 1],
     ).rows
     for (close, pct, day), (prev, _p, _d) in zip(rows, rows[1:], strict=False):
-        f = adj.factor_of(float(prev), float(close), None if pct is None else float(pct))
+        # 등락률이 빈 날(야후 대체 출처)도 가격제한폭 밖이면 기업행위로 — 감시·멈춤 쪽만(25.1554)
+        f = adj.guard_factor(float(prev), float(close), None if pct is None else float(pct))
         if adj.is_action(f) and not _유상_권리락(client, stock_id, str(day)[:10]):
             out.append(str(day)[:10])
     return sorted(set(out))

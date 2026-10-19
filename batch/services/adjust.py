@@ -92,6 +92,29 @@ def factor_of(prev_close: float, close: float, change_pct: float | None) -> floa
     return factor
 
 
+#: 등락률을 모르는 국내 행(야후 대체 출처 — 거래소가 실패한 날)에서 기업행위로 보는 하루 움직임 — 가격제한폭(±30%)
+#: 밖은 시장이 낼 수 없다(25.1554). **감시·멈춤 쪽에만** 쓴다 — 수정주가 계열에는 쓰지 않는다
+#: (`factor_of` "모르면 조정하지 않는다")
+KR_UNKNOWN_PCT_JUMP = 0.30
+
+
+def guard_factor(prev_close: float, close: float, change_pct: float | None) -> float:
+    """국내 기업행위 **감시**용 계수 — 등락률이 있으면 `factor_of` 와 같고, 없으면 하루 움직임이
+    가격제한폭 밖일 때만 종가 비율(시장 움직임 0 으로 본 어림)을, 그 밖엔 1.0 (docs/adjust.md 2장, 25.1554).
+
+    야후 대체 출처로 받은 날은 등락률이 비어 `factor_of` 가 1.0 이라, 그날 2:1 분할이면 가상모의투자 장부가 멈추지 않고
+    −50% 거짓 손절을 냈다(25.1547 감사 남은 것). 가격제한폭 안의 작은 무상증자는 여전히 못 가른다(알고 둔다)
+    """
+    if change_pct is not None:
+        return factor_of(prev_close, close, change_pct)
+    if prev_close <= 0 or close <= 0:
+        return 1.0
+    비 = close / prev_close
+    if round(abs(비 - 1), 6) <= KR_UNKNOWN_PCT_JUMP or 비 < MIN_FACTOR or 비 > MAX_FACTOR:
+        return 1.0
+    return 비
+
+
 def is_action(factor: float) -> bool:
     """기업행위로 볼 만큼 1 에서 벗어났나."""
     return abs(factor - 1.0) > ACTION_TOLERANCE
