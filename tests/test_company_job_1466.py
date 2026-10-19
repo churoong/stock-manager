@@ -104,7 +104,7 @@ def test_bad_charter_runs_rule_one_and_says_why(c: Client, monkeypatch: pytest.M
     assert any("40%" in e for e in 기록["accounts"]["A"]["charter_errors"])
     산것 = {r[0] for r in c.q("SELECT DISTINCT stock_id FROM paper_orders WHERE account_id = 'A'")}
     if 판 >= 2:
-        assert 산것 == set() and any("헌장 검사 실패로 오늘 사지 않음" in x for x in 줄)
+        assert 산것 == set() and sum("헌장 검사 실패" in x for x in 줄) == 1  # ⚠️ 메모 줄 하나(25.1559)
     else:
         assert 산것 == {1, 3}
     assert c.q("SELECT COUNT(*) FROM paper_meetings") == [(0,)]
