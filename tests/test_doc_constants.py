@@ -466,6 +466,11 @@ class Test핵심_H_조각_1b:
         from batch.services import holding_eq as heq
 
         검사(BACKTEST, f"묶음 < {heq.EQ_MIN_BLOCKS} 또는 서로 다른 짝 < {heq.EQ_MIN_PAIRS}", "가중 대조 판정 가능 (25.1538)")
+        from batch.services import stop_vol as sv
+
+        검사(PAPER, f"수익 {sv.STOP_VOL_MIN_RETURNS}개 이상일 때만, 국내는 하루 ±{sv.STOP_VOL_KR_JUMP:.0%} 를 넘는 날을 뺀다",
+             "손절 거리 σ (25.1539)")
+        검사(PAPER, f"stop_z = |stop_pct|/100 ÷ (σ_d·√{sv.STOP_VOL_HORIZON_DAYS})", "손절 거리 σ 기간 (25.1539)")
 
 
 class Test핵심_H_조각_1c:
@@ -748,7 +753,7 @@ class Test밸류_분모:
     "pick_history", "etf_accounts", "etf_tilt", "after_hours", "broker_stats", "disclosure_reaction", "luck", "postmortem",
     "divergence", "tax_sim", "verdict", "forecast_track", "patterns", "insights", "history",
     "event_history", "simulation", "candidate_factors", "cb_overhang", "buy_thesis", "plan_fill", "target_units", "paper", "risk_gate", "execution_quality", "company",
-    "broker_mirror", "holding", "desk", "core_backtest", "core_strategy", "holding_eq",
+    "broker_mirror", "holding", "desk", "core_backtest", "core_strategy", "holding_eq", "stop_vol",
 )  # fmt: skip
 
 #: 아직 그물 밖인 모듈과 **왜 아직인지**. 하나씩 줄여 간다

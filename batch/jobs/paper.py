@@ -29,6 +29,7 @@ from batch.services import paper as pp
 from batch.services import report_picks
 from batch.services import risk_gate as rg
 from batch.services import sell_flags as sf
+from batch.services import stop_vol as sv
 
 log = logging.getLogger(__name__)
 
@@ -969,6 +970,7 @@ def buy_orders(
     substitute: Callable[[list[report_picks.SignalRow]], list[report_picks.SignalRow]] | None = None,
     series_loader: Callable[[list[int]], dict] | None = None,
     preselected: list[report_picks.SignalRow] | None = None, preselected_reason: str = "위원회 가결",
+    stop_pcts: dict[str, float] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """2부와 같은 함수로 이 계좌의 매수 회차 주문을 낸다 (docs/paper.md 2.1). (주문 행, 기록).
 
@@ -978,6 +980,9 @@ def buy_orders(
     계좌 칸(25.1458): `top_n` 상위 몇 종목(E 10), `entry` tranche·open(시가 일괄, 2.1.1),
     `substitute` 는 고른 신호 행을 무작위 종목으로 바꾼다(R, 2.1.2). 2부가 시세를 읽지 않은 후보(6~10위·무작위 종목)는
     `series_loader` 로 더 읽어 같은 상관 축소를 받는다
+
+    `stop_pcts`({기간: 손절 %}, 그날 매도 판정이 쓰는 값)를 주면 산 결정 행에 손절 거리 σ 단위(`detail.vol`, 25.1539)를
+    적는다 — 기록만, 주문은 그대로. 핵심 H 백테스트는 주지 않는다
     """
     통화 = "KRW" if market == "KR" else "USD"
     환율 = 1.0 if 통화 == "KRW" else fx_rate
@@ -1040,6 +1045,12 @@ def buy_orders(
                      "detail": {"horizon": r0.horizon, "score": r0.total_score, "weight_pct": r0.suggested_weight_pct,
                                 "amount": b["amount"], "entry": entry,
                                 "prices": [t.get("price_at_or_below") for t in b["tranches"]]}})  # fmt: skip
+        if stop_pcts is not None and b["stock_id"] in 낸:
+            # 손절 거리 σ 단위 (25.1539, 31회차 P2) — 2부가 든 상관 계열 그대로(읽기 0). 분할 재수집 대기는 모름
+            결정[-1]["detail"]["vol"] = (
+                {"unknown": "분할 재수집 대기"} if b["stock_id"] in series_unknown
+                else sv.stop_vol(price_series.get(b["stock_id"]), stop_pcts.get(r0.horizon or "long"), market)
+            )  # fmt: skip
     for e in pv.excluded:
         r0 = (by_ticker.get(e.ticker) or [None])[0]  # type: ignore[assignment]
         if r0 is not None:
@@ -1257,6 +1268,8 @@ def run_step(
                "SP500": _level_of(client, flows, "SP500", fx=True)}  # fmt: skip
     열림캐시: dict[tuple[str, str], float | None] = {}
     targets, _ = sr.기간별_목표(db.get_setting(client, "horizon_targets", None))
+    # 그날 매도 판정이 쓰는 손절폭 — 매수 결정 행의 σ 단위 기록(25.1539)이 같은 값을 적는다
+    손절폭 = {h: {**sf.DEFAULT_TARGETS[h], **((targets or {}).get(h) or {})}["stop_pct"] for h in sf.DEFAULT_TARGETS}
     fx = _fx(client, 오늘)
     열린 = [_order(r) for r in client.execute(OPEN_ORDERS_SQL).dicts()]
     다음장 = cal.next_session(market, date.fromisoformat(trade_date)).isoformat()
@@ -1440,7 +1453,7 @@ def run_step(
                     settings=settings, price_series=price_series, series_unknown=series_unknown,
                     fx_rate=fx[0] if fx else None, stop_ids=손절, sold_recently=최근판, stock_cache=stock_cache,
                     top_n=종목수, entry=진입, substitute=바꾸기, series_loader=series_loader, preselected=가결행,
-                    preselected_reason="지주사 합의" if aid in 지주설정 else "위원회 가결",
+                    preselected_reason="지주사 합의" if aid in 지주설정 else "위원회 가결", stop_pcts=손절폭,
                 )  # fmt: skip
                 # 사전 위험 점검 (25.1451) — 통과한 회차만 주문. 한 회차도 못 지난 종목은 결정 원장에서 blocked 로
                 후보 = [rg.Candidate(o["stock_id"], "buy", o["cost_krw"], o["ref_date"], i, o["cash_krw"])
