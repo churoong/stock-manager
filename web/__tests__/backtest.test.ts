@@ -217,9 +217,15 @@ describe("실행 요청", () => {
     expect(runInputSchema.safeParse({ market: "JP" }).success).toBe(false);
   });
 
-  it("고를 수 있는 항목이 워크플로의 선택지와 같다", () => {
+  it("고를 수 있는 항목이 워크플로의 선택지와 같다 — 수동 전용 `핵심H` 만 뺀다 (25.1535)", () => {
     const workflow = readFileSync(join(process.cwd(), "..", ".github", "workflows", "backtest.yml"), "utf-8");
-    expect(workflow).toContain(`options: [${WHAT_OPTIONS.join(", ")}]`);
+    // `핵심H`(핵심 H 다년 백테스트, 25.1534)는 **수동(workflow_dispatch)만** — 웹 길(repository_dispatch)로 보내면 inputs 가 비어
+    // `core` 작업이 아니라 월 백테스트(`run`)가 WHAT=핵심H 로 돌아 조용히 다른 일을 한다. 그래서 웹 선택지에 넣지 않는다
+    const 줄 = /options: \[(.*)\]/.exec(workflow.split("what:")[1] ?? "")?.[1] ?? "";
+    const 워크플로 = 줄.split(",").map((x) => x.trim());
+    expect(워크플로.filter((x) => x !== "핵심H")).toEqual([...WHAT_OPTIONS]);
+    expect(워크플로).toContain("핵심H");
+    expect(WHAT_OPTIONS as readonly string[]).not.toContain("핵심H");
     // 두 길 모두 워크플로가 읽는다
     expect(workflow).toContain("types: [backtest]");
     expect(workflow).toContain("github.event.client_payload.market");
