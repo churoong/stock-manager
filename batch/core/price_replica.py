@@ -192,7 +192,7 @@ def touched_ranges(remote, since_iso: str) -> tuple[str | None, dict[int, str]]:
             continue
         if t.get("all"):
             전체 = min(전체 or "9999", str(t["min_date"]))
-            continue
+            # 두 겹 기록(25.1537) — `all` 날보다 앞서 고친 몇 종목은 따로 적혀 온다. 예전 기록에는 `stocks` 가 없다
         for sid, day in (t.get("stocks") or {}).items():
             if str(day) < 종목별.get(int(sid), "9999"):
                 종목별[int(sid)] = str(day)

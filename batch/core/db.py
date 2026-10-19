@@ -520,13 +520,23 @@ def note_prices_touched(pairs: Iterable[tuple[Any, Any]]) -> None:
 
 
 def prices_touched_summary() -> dict[str, Any] | None:
-    """실행 기록에 적을 요약. 없으면 None."""
+    """실행 기록에 적을 요약. 없으면 None.
+
+    종목이 `PRICES_TOUCHED_MAX_STOCKS` 를 넘으면 **두 겹**으로 적는다 (docs/infra.md 25.1537): 가장 이른 날부터 줄 세워
+    앞 `PRICES_TOUCHED_MAX_STOCKS` 종목은 하나하나(`stocks`), 나머지는 "전 종목, 나머지 가운데 가장 이른 날부터"(`all`·
+    `min_date`). 예전에는 전부를 "전 종목, **가장 이른 날**부터" 로 줄였다 — 일일 배치는 오늘 시세를 수천 종목에 넣고
+    같은 실행에서 몇 종목의 수정주가를 몇 년 치 고친다. 그 몇 종목의 날짜(2021-09-16)가 전 종목에 번져 시세 사본이
+    "전 종목을 다시 받아야 한다" 로 날마다 비워졌고(10-13 부터), 점수·신호가 날마다 Turso 에서 시세를 읽었다
+    """
     if not _가격_손댐:
         return None
     가장_이른 = min(_가격_손댐.values())
-    if len(_가격_손댐) > PRICES_TOUCHED_MAX_STOCKS:
-        return {"all": True, "min_date": 가장_이른}
-    return {"all": False, "min_date": 가장_이른, "stocks": {str(k): v for k, v in sorted(_가격_손댐.items())}}
+    if len(_가격_손댐) <= PRICES_TOUCHED_MAX_STOCKS:
+        return {"all": False, "min_date": 가장_이른, "stocks": {str(k): v for k, v in sorted(_가격_손댐.items())}}
+    순서 = sorted(_가격_손댐.items(), key=lambda kv: (kv[1], kv[0]))
+    전체날 = 순서[PRICES_TOUCHED_MAX_STOCKS][1]
+    따로 = {str(k): v for k, v in sorted(순서[:PRICES_TOUCHED_MAX_STOCKS]) if v < 전체날}
+    return {"all": True, "min_date": 전체날, "stocks": 따로}
 
 #: 실행별 읽기량을 적는 step_log 열쇠. 하위 작업을 품은 실행(일일 배치)은 하위 몫까지 들어 있다
 ROWS_READ_KEY = "db_rows_read"

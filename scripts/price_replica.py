@@ -3,7 +3,7 @@
     python scripts/price_replica.py sync --path .price-replica/prices.db             # 비었으면 진도 문을 보고 만든다
     python scripts/price_replica.py sync --path .price-replica/prices.db --no-build  # 비었으면 만들지 않는다
 
-처음 만들 때는 시세 전부(2026-10-02 약 730만 행)를 한 번 읽는다 — Turso 월 읽기 진도 문(`turso_read_gate.decide`)이
+처음 만들 때는 시세 전부(2026-10-16 약 2,066만 행)를 한 번 읽는다 — Turso 월 읽기 진도 문(`turso_read_gate.decide`)이
 허락할 때만. 못 만들거나 맞추다 실패해도 **0 으로 끝난다**: 사본은 `usable=0` 이 되고
 작업은 Turso 에서 읽는다(예전과 같다).
 출력 `changed=true` 면 워크플로가 캐시에 새로 넣는다.
@@ -26,8 +26,9 @@ from batch.core import client as backend  # noqa: E402
 from batch.core import db  # noqa: E402
 from batch.core import price_replica as rep  # noqa: E402
 
-#: 처음 만들 때 진도 문에 내미는 예상 읽기 — 시세 `MAX(rowid)` 약 730만(2026-10-02)에 종목·검증 몫
-BUILD_ESTIMATE = 7_600_000
+#: 처음 만들 때 진도 문에 내미는 예상 읽기 — 시세 표 행 수 + 종목·검증 몫. 2026-10-02 약 730만이었는데 미국 시세 백필로
+#: 2026-10-16 약 2,066만(전체 훑기 실측)이 됐다 — 옛 값이면 진도 문이 비용을 3분의 1 로 잡았다 (docs/infra.md 25.1537)
+BUILD_ESTIMATE = 21_000_000
 
 
 def _gate_allows_build(remote) -> tuple[bool, str]:
