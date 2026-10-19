@@ -70,10 +70,11 @@ def judge(series: dict[str, list[float]], n_floor: int | None = None) -> dict[st
     """전략 → 월별 초과수익 → 판정. 같은 실행의 전략들을 한꺼번에 넘긴다(V 를 그 묶음에서 낸다).
 
     `n_floor` — 시도 수 N 의 하한 (docs/backtest.md 9장, docs/infra.md 25.1358, 23회차 P4). 일부 전략만 돌린 실행
-    (`--only-long` 은 N=3)이 같은 전략을 전체 실행(N=12)보다 덜 "운" 으로 보았다. N = max(이 실행, **이 앱에 등록된
+    (`--only-long` 은 N=3)이 같은 전략을 전체 실행보다 덜 "운" 으로 보았다. N = max(이 실행, **이 앱에 등록된
     전략 수**) — 판정은 더 보수적으로만 움직인다. 등록 수는 Bailey·López de Prado 의 누적 시도 수가 아니다(지난 회차에
     탈락한 기법·문턱 변형이 빠짐 — 여전히 적게 센다). V 는 그 실행의 전략들로만 낸다 — 전략 하나면 V=0 이라 하한도
-    효과가 없다. 기본 실행은 N 이 이미 등록 수라 바뀌지 않는다"""
+    효과가 없다. 25.1542 에 핵심 H 등록 전략 3 을 더해 하한이 15 라 월 기본 실행(12)에도 하한이 걸린다
+    ("이 실행 12개, 등록 전략 수 하한")"""
     m = {k: moments(v) for k, v in series.items()}
     srs = [x[0] for x in m.values() if x]
     n_run = len(srs)

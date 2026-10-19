@@ -228,25 +228,40 @@ def run_core(
             costs, has_delisted=delisted, turnover=turnover,
         )  # fmt: skip
         무위험 = jb.risk_free_with_warning(client, country, warnings)
-        # 조각 1e (25.1542) — 운 판정(DSR): 월 백테스트와 같은 `luck.judge`, 시도 수 하한은 핵심 계열을 더한 등록 수.
-        # 무작위 대조(R1·R2)도 V 에 들어간다(같은 실행에서 시험한 곡선) — 시도 수 하한에는 세지 않는다
-        벤치월 = luck.monthly_returns(벤치.curve)
-        운 = luck.judge({v: luck.excess_series(luck.monthly_returns(r.curve), 벤치월) for v, r in results.items()},
-                       n_floor=jb.REGISTERED_TRIALS)  # fmt: skip
-        # 결정 단위 판정 — 매수마다 같은 날 시점 유니버스 무작위 20종목 안 분위
-        # (가상모의투자 가상 대조와 같은 함수, 읽기 0)
-        종가 = ce.Closes(prices)
-        증거 = {v: ce.evidence(기록[v], 종가, eligible_at, indexes.get(cb.BENCH_INDEX) or {}) for v in results}
-        짝 = ce.pairs(증거)
+        # 조각 1e (25.1542·25.1544) — 운 판정(DSR): 월 백테스트와 같은 `luck.judge`, 시도 수 하한은 핵심 계열을
+        # 더한 등록 수.
+        # 무작위 대조(R1·R2)도 같은 실행의 곡선이라 V 와 "이 실행" 수에 들어간다(대개 V 를 키워 보수적) — 등록 시도 수
+        # 하한에는 세지 않는다. 결정 단위 판정은 실행 기록 진단이라 깨져도 다섯 행 저장을 막지 않는다(25.1544 [권고] 7)
+        t2 = time.perf_counter()
+        운: dict[str, dict] = {}
+        증거: dict[str, dict[str, Any]] = {}
+        짝: dict[str, dict[str, Any]] = {}
+        판정 = "판정 불가(계산 실패)"
+        try:
+            벤치월 = luck.monthly_returns(벤치.curve)
+            운 = luck.judge({v: luck.excess_series(luck.monthly_returns(r.curve), 벤치월) for v, r in results.items()},
+                           n_floor=jb.REGISTERED_TRIALS)  # fmt: skip
+            # 결정 단위 — 무작위 대조 분위(가상모의투자 가상 대조와 같은 함수)·관문과 같은 잣대·판 뒤(읽기 0)
+            종가 = ce.Closes(prices)
+            코스피 = indexes.get(cb.BENCH_INDEX) or {}
+            for v in results:
+                증거[v] = ce.evidence(기록[v], 종가, eligible_at, 코스피) | {
+                    "gate": ce.gate_evidence(기록[v], 종가), "after_sell": ce.after_sell(기록[v], 종가, 코스피)}
+            짝 = ce.pairs(증거)
+            판정 = ce.verdict(증거, 짝.get("core_h-core_g"))
+        except Exception as e:  # noqa: BLE001
+            log.exception("핵심 H 운 판정·결정 단위 판정 실패")
+            warnings.append(f"운 판정·결정 단위 판정 실패: {type(e).__name__}: {str(e)[:120]}")
+        증거_초 = round(time.perf_counter() - t2, 1)
         반: dict[str, dict[str, Any]] = {}
         for variant, result in results.items():
             summary = bt.summarize(result, 벤치, risk_free_annual=무위험)
             반[variant] = split_half(result.curve)
-            e = 증거[variant]
+            e = 증거.get(variant) or {}
             extra = {"split_half": 반[variant], "benchmark": BENCHMARK_NOTE, "risk_every": risk_every,
                      "account": cs.VARIANTS[variant].account,
-                     "evidence": {k: e[k] for k in ("buys", "scored", "no_control", "days", "n_blocks", "mean", "se",
-                                                    "lower")}}  # fmt: skip
+                     "evidence": {k: e.get(k) for k in ("buys", "scored", "no_control", "days", "n_blocks", "mean",
+                                                        "se", "lower", "gate", "after_sell")}}  # fmt: skip
             jb.store_run(client, market, variant, result, summary, cs.VARIANTS[variant].top_n, group_id, warnings,
                          now, 운.get(variant), rebalance=REBALANCE, extra=extra)  # fmt: skip
             mt = summary.metrics
@@ -279,12 +294,13 @@ def run_core(
                            "trigger": os.environ.get("BACKTEST_TRIGGER") or None,
                            "sha": (os.environ.get("GITHUB_SHA") or "")[:12] or None},
                 # 실측 — 시간 한도 120분 안인지 다음 실행 전에 본다(25.1534)
-                "timing": {"load_s": round(읽기_초, 1), "variants_s": 시간, "days_computed": shared.computed,
+                "timing": {"load_s": round(읽기_초, 1), "variants_s": 시간, "evidence_s": 증거_초,
+                           "days_computed": shared.computed,
                            "days_replayed": shared.replayed, "risk_computed": market_.risk_computed},
                 "pit_universe": {"sizes": jb._pit_sizes(pit_cache), "excluded": pit_reasons},
                 "holding_eq": holding_eq,
                 # 결정 단위 판정(조각 1e) — 변형마다 묶음 값까지, 짝(H−G·G−B) 차이
-                "evidence": 증거, "pairs": 짝,
+                "evidence": 증거, "pairs": 짝, "verdict": 판정,
             },
         )  # fmt: skip
         print(f"저장 {len(results)}개 변형, 리밸런스 {실제_리밸런스}회(날마다), 그룹 {group_id}")

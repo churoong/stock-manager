@@ -32,7 +32,7 @@ def test_앞으로_n번째_종가() -> None:
 
 
 def test_에피소드_첫_매수만() -> None:
-    logs = [SimpleNamespace(day=_날(1, d)[0], cutoff=c, buys={7: 0.1}) for d, c in
+    logs = [SimpleNamespace(day=_날(1, d)[0], cutoff=c, buys={7: 0.1}, held=frozenset()) for d, c in
             (("2025-01-02", "2025-01-01"), ("2025-01-10", "2025-01-09"), ("2025-02-05", "2025-02-04"))]  # fmt: skip
     # 01-10 은 01-02 뒤 8일 — 같은 에피소드, 02-05 는 34일 — 새 에피소드
     assert ce.first_buys(logs) == [("2025-01-01", 7), ("2025-02-04", 7)]
@@ -77,13 +77,61 @@ def test_대조는_가상모의투자와_같은_씨앗() -> None:
     c = ce.Closes(prices)
     q = pp.control_pct(c.forward(3, 날[4], 20)[0], [c.forward(x, 날[4], 20)[0] for x in 기대대조])
     assert e["scored"] == 1 and q is not None and e["days"] == 1
-    assert e["n_blocks"] == 0 and e["blocks"] == {}  # 하루뿐인 묶음은 묶음 하한(사흘) 밑이라 세지 않는다
+    # 핵심 H 는 매수가 드물어 하루뿐인 묶음도 센다(25.1544 [필수] 3 — 운영 증거는 사흘)
+    assert e["n_blocks"] == 1 and list(e["blocks"]) == [str(pp._묶음(날[4]))]
 
 
-def test_짝_차이는_같은_묶음끼리() -> None:
+def test_짝은_H_G_하나_같은_묶음끼리() -> None:
+    """G−B 는 매도 규칙만 달라 매수 성과 차이가 매도의 몫이 아니다 — 짝에서 뺐다(25.1544 [필수] 2)"""
     by = {"core_h": {"excess_blocks": {"1": 3.0, "2": 2.0, "3": 1.0}},
           "core_g": {"excess_blocks": {"1": 1.0, "2": 1.0, "4": 9.0}},
           "core_b": {"excess_blocks": {}}}  # fmt: skip
     p = ce.pairs(by)
+    assert set(p) == {"core_h-core_g"}
     assert p["core_h-core_g"]["n_blocks"] == 2 and p["core_h-core_g"]["mean"] == pytest.approx(1.5)
-    assert p["core_g-core_b"]["n_blocks"] == 0
+
+
+def test_추가_매수는_새_선정이_아니다() -> None:
+    """판단 직전 든 종목에 더 산 것은 빼고 센다(25.1544 [권고] 4)"""
+    logs = [SimpleNamespace(day="2025-01-02", cutoff="2025-01-01", buys={7: 0.1}, held=frozenset()),
+            SimpleNamespace(day="2025-03-02", cutoff="2025-03-01", buys={7: 0.05, 8: 0.1}, held=frozenset({7}))]  # fmt: skip
+    assert ce.first_buys(logs) == [("2025-01-01", 7), ("2025-03-01", 8)]
+
+
+def test_관문과_같은_잣대는_안_산_새_후보_안_분위() -> None:
+    prices = _자료(10)
+    # 날마다 9·10 을 사고(buy) 1~5 를 안 샀다(skip) — 산 것이 늘 위라 분위 100
+    logs = []
+    for k in range(60):
+        d = 날[k]
+        logs.append(SimpleNamespace(day=d, cutoff=d, buys={}, decisions=[
+            *({"stock_id": s, "kind": "buy", "reason": "2부 배분", "ref_date": d} for s in (9, 10)),
+            *({"stock_id": s, "kind": "skip", "reason": "상한", "ref_date": d} for s in range(1, 6)),
+            {"stock_id": 6, "kind": "blocked", "reason": "위험 점검: x", "ref_date": d},
+        ]))  # fmt: skip
+    g = ce.gate_evidence(logs, ce.Closes(prices))
+    assert g["days"] == 60 and g["mean"] == pytest.approx(100.0) and g["n_blocks"] >= 2
+
+
+def test_판_뒤는_미룬_매도를_빼고_지수_대비() -> None:
+    # 종목 1 은 매일 −1%, 지수 제자리 — 판 뒤 20일 초과 ≈ −18.2%(낮을수록 잘 판 것)
+    prices = {1: {d: 100 * 0.99**k for k, d in enumerate(날)}}
+    logs = [SimpleNamespace(day=날[k + 1], cutoff=날[k], sells={1: ["손절"]}) for k in (0, 30, 60)]
+    logs.append(SimpleNamespace(day=날[91], cutoff=날[90], sells={1: ["미룬 매도"]}))
+    a = ce.after_sell(logs, ce.Closes(prices), {d: 1000.0 for d in 날})
+    assert a["sells"] == 3 and a["mean"] == pytest.approx((0.99**20 - 1) * 100)
+
+
+def _v(n: int, lo: float | None) -> dict:
+    return {"n_blocks": n, "lower": lo}
+
+
+def test_사전_등록_판정() -> None:
+    짝 = _v(6, 0.1)
+    좋음 = {"core_h": _v(6, 52.0), "core_r1": _v(6, 45.0), "core_r2": _v(6, None)}
+    assert ce.verdict(좋음, 짝) == "선정에 엣지 근거"
+    assert ce.verdict({**좋음, "core_h": _v(5, 60.0)}, 짝) == "판정 불가(묶음 부족)"
+    assert ce.verdict(좋음, _v(5, 1.0)) == "판정 불가(묶음 부족)"
+    assert ce.verdict({**좋음, "core_r2": _v(6, 50.5)}, 짝).startswith("판정 불가(대조 모집단 편향")
+    assert ce.verdict({**좋음, "core_h": _v(6, 49.0)}, 짝) == "근거 없음"
+    assert ce.verdict(좋음, _v(6, -0.1)) == "근거 없음"

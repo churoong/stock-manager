@@ -94,6 +94,8 @@ class DayLog:
     cooldown: frozenset[int] = frozenset()
     day_return_pct: float | None = None
     random: dict[str, Any] = field(default_factory=dict)  # 무작위 대체 기록(운영 `기록["random"]`)
+    #: 판단 직전 든 종목(cutoff 비중 > 0) — 결정 단위 판정이 추가 매수를 뺀다(25.1544)
+    held: frozenset[int] = frozenset()
 
 
 class _Rows:
@@ -287,7 +289,7 @@ class CoreStrategy:
         dv = self.market.at(view, day)
         client = _ViewClient(view)
         today = date.fromisoformat(day[:10])
-        log = DayLog(day=day, cutoff=view.cutoff, day_return_pct=self._day_return(view))
+        log = DayLog(day=day, cutoff=view.cutoff, day_return_pct=self._day_return(view), held=frozenset(w))
 
         # ① 매도 — 계좌 규칙 전의 판정에서 손절을 따로 모은다(운영 검증 [필수] 4)
         매도: dict[int, list[str]] = {}

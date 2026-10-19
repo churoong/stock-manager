@@ -351,7 +351,7 @@ def test_run_core_반_나눈_기간과_실행_기록(실행: tuple[MemClient, in
         assert mj["risk_every"] == "week" and mj["account"] == cs.VARIANTS[r["strategy"]].account
         # 조각 1e (25.1542) — 운 판정·결정 단위 판정이 실린다(1년이라 운 판정은 "판정 안 함")
         assert mj["luck"]["n_trials"] == jb.REGISTERED_TRIALS and "판정 안 함" in mj["luck"]["verdict"]
-        assert {"buys", "scored", "no_control", "days", "n_blocks", "mean", "lower"} <= set(mj["evidence"])
+        assert {"buys", "scored", "no_control", "days", "n_blocks", "mean", "lower", "gate", "after_sell"} <= set(mj["evidence"])
     run = mem.execute("SELECT * FROM batch_runs WHERE job_name = ?", [cj.JOB_NAME]).dicts()
     assert len(run) == 1 and run[0]["status"] == "success" and run[0]["market"] == "KR"
     로그 = json.loads(run[0]["step_log"])
@@ -375,7 +375,11 @@ def test_run_core_결정_단위_판정을_싣는다(실행: tuple[MemClient, int
         assert e["scored"] + e["no_control"] <= e["buys"]
         if e["mean"] is not None:
             assert 0 <= e["mean"] <= 100
-    assert set(로그["pairs"]) == {"core_h-core_g", "core_g-core_b"}
+    assert set(로그["pairs"]) == {"core_h-core_g"}
+    assert 로그["verdict"].startswith(("판정 불가", "근거 없음", "선정에 엣지 근거"))
+    for e in ev.values():
+        assert {"days", "n_blocks", "mean", "lower"} <= set(e["gate"]) and "sells" in e["after_sell"]
+    assert 로그["timing"]["evidence_s"] >= 0
 
 
 def test_run_core_가중_대_동일가중_진단을_싣는다(실행: tuple[MemClient, int]) -> None:
@@ -404,6 +408,22 @@ def test_run_core_month_는_경고를_단다(monkeypatch: pytest.MonkeyPatch) ->
 
 
 # ── 예전 길은 그대로 ─────────────────────────────────────────────────────────
+
+
+def test_run_core_판정이_깨져도_행은_싣는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """운 판정·결정 단위 판정이 깨져도 계산한 변형 행은 저장한다(25.1544 [권고] 7)"""
+    from batch.services import core_evidence as ce
+
+    mem = _db(monkeypatch)
+
+    def 망(*_a: object, **_k: object) -> None:
+        raise RuntimeError("망")
+
+    monkeypatch.setattr(ce, "evidence", 망)
+    assert cj.run_core("KR", years=1, today=오늘, force=True, variants=("core_b",)) == 0
+    assert [r["strategy"] for r in _행들(mem)] == ["core_b"]
+    로그 = json.loads(mem.execute("SELECT step_log FROM batch_runs WHERE job_name = ?", [cj.JOB_NAME]).dicts()[0]["step_log"])
+    assert 로그["verdict"] == "판정 불가(계산 실패)" and any("판정 실패" in w for w in 로그["warnings"])
 
 
 def test_store_run_기본은_예전_그대로() -> None:

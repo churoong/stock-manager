@@ -470,6 +470,9 @@ class Test핵심_H_조각_1b:
 
         검사(BACKTEST, f"**핵심 H 등록 전략 {jb.CORE_REGISTERED_TRIALS}**", "핵심 등록 시도 수 (25.1542)")
         검사(BACKTEST, f"`REGISTERED_TRIALS`, 지금 {jb.REGISTERED_TRIALS}", "등록 시도 수 (25.1542)")
+        from batch.services import core_evidence as ce
+
+        검사(BACKTEST, f"`CORE_BLOCK_MIN_DAYS` = {ce.CORE_BLOCK_MIN_DAYS}", "핵심 H 분위 묶음 하한 (25.1544)")
         from batch.services import stop_vol as sv
 
         검사(PAPER, f"수익 {sv.STOP_VOL_MIN_RETURNS}개 이상일 때만, 국내는 하루 ±{sv.STOP_VOL_KR_JUMP:.0%} 를 넘는 날을 뺀다",

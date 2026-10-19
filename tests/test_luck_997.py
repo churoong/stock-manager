@@ -73,7 +73,7 @@ def test_시도_수_하한은_더_보수적으로만() -> None:
         assert 하한[k]["sr_star"] >= 셋[k]["sr_star"]
         assert 하한[k]["luck_pct"] >= 셋[k]["luck_pct"]
     assert "이 실행 3개" in luck.line(하한["s0"])
-    # 기본 실행은 이미 등록 수 — 바뀌지 않는다
+    # 하한이 실행 수와 같으면 바뀌지 않는다(함수 성질 — 25.1542 뒤 월 기본 실행 12 에는 하한 15 가 걸린다)
     열둘 = {f"s{i}": [rnd.gauss(0.002 * i, 0.03) for _ in range(48)] for i in range(12)}
     assert luck.judge(열둘) == luck.judge(열둘, n_floor=12)
     assert "이 실행" not in luck.line(luck.judge(열둘, n_floor=12)["s1"])
