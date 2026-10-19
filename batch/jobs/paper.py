@@ -489,7 +489,8 @@ def sticky_frozen(
     기록된 = {int(k) for key in (adjd.KR_ACTION_LOG_KEY, adjd.SPLIT_LOG_KEY)
               for k in (db.get_setting(client, key, {}) or {})}  # fmt: skip
     for sid in sorted((set(fresh) | 기록된) & set(first_buy)):
-        if sid not in first_buy or str(sid) in 표:
+        if sid not in first_buy or (str(sid) in 표 and sid not in fresh):
+            # 표에 있고 오늘 새 경계도 아니면 그대로 — 경계에 다시 들면(두 번째 분할) 날을 늦춰 적는다(25.1550 [참고] 2)
             continue
         try:
             날들 = monitor_targets.action_dates(client, sid, market_of.get(sid, "KR"))
@@ -497,7 +498,7 @@ def sticky_frozen(
             log.warning("기업행위 날을 읽지 못했습니다 (종목 %s): %s", sid, exc)
             continue
         먼저 = [d for d in 날들 if first_buy[sid] < d]
-        if 먼저:
+        if 먼저 and 먼저[-1] > 표.get(str(sid), ""):
             표[str(sid)] = 먼저[-1]
     if 표 != 저장:
         db.set_setting(client, ACTION_STICKY_KEY, 표)
@@ -1122,13 +1123,20 @@ def buy_orders(
     다시 = rescale_rows(고른, 총액, float(settings.get("min_order_amount") or 0))
     if substitute is not None:
         다시 = substitute(다시)
+        # 무작위 대체 종목에도 같은 막이 — 신호 종목으로 거른 뒤 바꾸므로 대체 종목의 열린 주문을 피해 갔다
+        # (25.1550 [참고] 1)
+        열린빠짐 += [r for r in 다시 if r.stock_id in 열린금액]
+        다시 = [r for r in 다시 if r.stock_id not in 열린금액]
     빠진후보 = sorted({r.stock_id for r in 다시} - set(price_series))
     if 빠진후보 and series_loader is not None:
         price_series = {**price_series, **series_loader(빠진후보)}
+    # 미체결 매수는 위 보유 목록에 이미 들어갔다 — 예약으로 또 빼면 남은 여력에서 두 번 빠진다(25.1550 반박 [필수] 1:
+    # 국내 아침엔 늘 전날 밤 미국 매수가 열려 있어 평상시 매일 그만큼 여력이 깎였다). 보유 목록에 못 넣은 몫만 예약으로
+    남은예약 = max(0.0, 예약 - sum(열린금액.values()))
     pv = report_picks.build_portfolio(
         다시, 총액, currency=통화, max_sector_pct=settings["max_weight_per_sector"], holdings=보유,
         max_stock_pct=settings["max_weight_per_stock"], price_series=price_series, series_unknown=series_unknown,
-        min_order_amount=float(settings.get("min_order_amount") or 0), fx_missing=False, reserved=예약 / 환율,
+        min_order_amount=float(settings.get("min_order_amount") or 0), fx_missing=False, reserved=남은예약 / 환율,
         stop_flags={sid: "가상모의투자 계좌 손절 판정" for sid in stop_ids},
     )  # fmt: skip
     by_ticker: dict[str, list[report_picks.SignalRow]] = {}
@@ -1661,6 +1669,10 @@ def run_step(
             줄.append(f"⚠️ 가상 {aid} 장부 검산 어긋남 — {검['recon_note']}")
     기록["accounts"] = 계좌기록
     기록["frozen"] = sorted(frozen)
+    # 계좌마다의 멈춤 — KIS모의투자 베끼기는 베끼는 계좌(H·도전자)의 것을 쓴다(25.1550 반박 [권고] 3: 전체 멈춤을
+    # 쓰면 다른
+    # 계좌의 이어 멈춤 때문에 H 의 정상 매수를 판 2 전까지 영영 베끼지 않아 H 와 KIS 가 갈렸다)
+    기록["frozen_by_account"] = {str(a["id"]): sorted(계좌별멈춤(str(a["id"]))) for a in accounts}
     # 결정 원장 성과 채우기 (25.1449) — 곁다리. 실패해도 오늘 단계는 그대로
     try:
         기록["decision_outcomes"] = fill_outcomes(client, market, 오늘, 지금)

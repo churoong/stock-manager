@@ -797,7 +797,8 @@ ATTRIBUTION_MIN_SAMPLE = 30
 ATTRIBUTION_EPISODE_DAYS = 28
 #: 선정 비교("주문 낸 후보 vs 안 낸 후보")에 넣지 않는 안 낸 까닭 — 이미 들고 있는 종목(상한 도달 = 지난 승자,
 #: 손절 보유 = 지난 패자)과 판 뒤 쉼은 새 후보와 다른 집단이다. 까닭별 줄에는 그대로 남긴다 (25.1453)
-NONCOMPARABLE_SKIP_PREFIXES = ("종목 비중 상한 도달", "보유 중 손절선 이탈", "판 뒤 ")
+#: "열린 매수 주문 있음"(25.1549) — 앞 실행의 주문이 그대로 차는 사실상 산 종목이라 안 산 후보와 견주지 않는다(25.1550)
+NONCOMPARABLE_SKIP_PREFIXES = ("종목 비중 상한 도달", "보유 중 손절선 이탈", "판 뒤 ", "열린 매수 주문 있음")
 
 
 def _초과(rows: list[dict[str, Any]]) -> dict[str, Any]:

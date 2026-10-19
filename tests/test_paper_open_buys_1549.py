@@ -80,3 +80,40 @@ def test_판_2_회사의_헌장이_깨지면_판_1_로_사지_않는다(monkeypa
     assert c.q("SELECT COUNT(*) FROM paper_orders") == [(0,)]
     assert 기록["accounts"]["A"]["committee"]["error"].startswith("헌장 검사 실패")
     assert any("헌장 검사 실패로 오늘 사지 않음" in x for x in 줄)
+
+
+def test_다른_시장_열린_매수가_여력에서_두_번_빠지지_않는다(c: Client, monkeypatch: pytest.MonkeyPatch) -> None:
+    """국내 아침엔 늘 전날 밤 미국 매수가 열려 있다 — 보유 목록과 예약에 같이 넣어 여력이 두 번 깎였다 (25.1550 반박 [필수] 1).
+    입금 100만, 미국 미체결 $470(환율 1,000 → 예약 약 48.9만), 국내 신호 10만 → 예전엔 "투자 여력 부족" 으로 0건"""
+    c.conn.execute("UPDATE stocks SET sector = 'Technology' WHERE id = 2")
+    c.conn.execute("INSERT INTO fx_rates (pair, date, rate, source, fetched_at) VALUES ('USDKRW', '2026-10-14', 1000, 't', 't')")
+    c.conn.execute(job.INSERT_ORDER_SQL, ["B", "US", 2, "buy", "limit", 1.0, 470, "USD", "2026-10-13", "2026-10-14",
+                                          "open", 1, "2부 배분", "short", 70, "2026-10-13", "{}", 1, "t", None])  # fmt: skip
+    _시세(c, "2026-10-14", 10_000, 10_000)
+    _실행(c, monkeypatch, "2026-10-14", "2026-10-15", "2026-10-14T23:30:00+00:00")
+    assert c.q("SELECT COUNT(*) FROM paper_orders WHERE market = 'KR' AND side = 'buy'") == [(3,)]
+
+
+def test_열린_매수_skip_은_안_산_후보와_견주지_않는다() -> None:
+    assert job.OPEN_BUY_SKIP_REASON.startswith(pp.NONCOMPARABLE_SKIP_PREFIXES)
+
+
+def test_KIS_베끼기는_베끼는_계좌의_멈춤만() -> None:
+    """다른 계좌의 이어 멈춤이 H 의 정상 매수 베끼기를 막지 않는다 (25.1550 반박 [권고] 3)"""
+    from batch.jobs import daily
+
+    log = {"frozen": [1, 2], "frozen_by_account": {"H": [2], "A": [1, 2]}}
+    assert daily.mirror_frozen(log, "H") == {2}
+    assert daily.mirror_frozen(log, None) == {1, 2} and daily.mirror_frozen({"frozen": [1]}, "H") == {1}
+
+
+def test_두_번째_분할이면_이어_멈춤_날을_늦춘다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """d1 분할 뒤 산 계좌도 d2 분할 전에 샀으면 멈춰야 한다 — 표의 날을 d2 로 (25.1550 [참고] 2)"""
+    from batch.jobs import monitor_targets
+
+    c = Client(accounts=("B",))
+    c.conn.execute("INSERT INTO settings (key, value, updated_at) VALUES (?, ?, 't')",
+                   [job.ACTION_STICKY_KEY, json.dumps({"1": "2026-06-09"})])  # fmt: skip
+    monkeypatch.setattr(monitor_targets, "action_dates", lambda *_a, **_k: ["2026-06-09", "2026-08-03"])
+    _멈춤, 표 = job.sticky_frozen(c, {1}, {1: "2026-06-02"}, {1: "KR"})
+    assert 표 == {"1": "2026-08-03"}

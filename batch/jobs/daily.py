@@ -1027,6 +1027,15 @@ def _건너뛴_까닭(job_name: str, since: str) -> str | None:
     return f"신호를 계산하지 않았습니다 — {까닭}. 앞서 계산된 신호를 그대로 씁니다(기준일은 추천 머리에)"
 
 
+def mirror_frozen(paper_log: dict[str, Any], account: str | None) -> set[int]:
+    """KIS모의투자 베끼기가 막을 종목 — 베끼는 계좌의 멈춤(25.1550).
+    계좌별 기록이 없거나(옛 실행) 그 계좌를 모르면 전체 멈춤"""
+    by = paper_log.get("frozen_by_account") or {}
+    if account and account in by:
+        return {int(x) for x in by[account]}
+    return {int(x) for x in paper_log.get("frozen") or []}
+
+
 def challenger_hold(first: dict[str, Any]) -> str | None:
     """둘째(도전자) KIS모의투자 계좌가 보내지 않을 까닭 — 첫째가 보내지 못한 까닭(`send`), 첫째 단계가 예외로 끝났으면
     그 사실 (docs/paper.md 15.10, 25.1517·25.1543). 첫째가 도중에 몇 건 보낸 뒤 깨졌어도 둘째는 내지 않는다 — 주문이 덜
@@ -2535,7 +2544,7 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
             try:
                 from batch.jobs import broker_mirror
 
-                멈춘종목 = set((step_log.get("paper") or {}).get("frozen") or [])
+                멈춘종목 = mirror_frozen(step_log.get("paper") or {}, broker_mirror.MIRROR_ACCOUNT)
                 step_log["broker"] = broker_mirror.run(client, market, datetime.now(UTC), frozen=멈춘종목)
             except Exception as exc:  # noqa: BLE001 — 곁다리
                 log.exception("KIS모의투자 단계 실패")
@@ -2567,7 +2576,7 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
             try:
                 from batch.jobs import broker_mirror as _bm2
 
-                멈춘2 = set((step_log.get("paper") or {}).get("frozen") or [])
+                멈춘2 = mirror_frozen(step_log.get("paper") or {}, _bm2.challenger_account(client))
                 # 첫째가 보내지 못한 날(접수 시작 전·장 끝난 뒤)은 둘째도 — 두 계좌의 주문 날이 어긋나지 않게(25.1517).
                 # 첫째 단계가 예외로 끝난 날도(KIS 토큰 실패 등, 25.1543 감사 7) — 예전엔 `send` 까닭만 넘겨 둘째만 냈다
                 막힘2 = challenger_hold(step_log.get("broker") or {})

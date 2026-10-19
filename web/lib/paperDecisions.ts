@@ -74,7 +74,8 @@ export function beatBench(d: After): boolean | null {
  * **들고 있는 쪽** 줄인가 (25.1505, 검토 3) — 매도 플래그를 따르지 않고 든 것·위험 점검이 매도를 막은 것·이미 들고 있어 더 사지 않은 것
  * (배치 `NONCOMPARABLE_SKIP_PREFIXES` 의 보유 둘). 이 줄은 오르면 들고 간 것이 옳았다 — "놓침" 색이 반대 뜻이 된다
  */
-export const HOLD_SIDE_SKIP_PREFIXES = ["종목 비중 상한 도달", "보유 중 손절선 이탈"] as const;
+/** "열린 매수 주문 있음"(25.1549) — 앞 실행 주문이 그대로 차는 종목이라 보유 쪽(25.1550) */
+export const HOLD_SIDE_SKIP_PREFIXES = ["종목 비중 상한 도달", "보유 중 손절선 이탈", "열린 매수 주문 있음"] as const;
 export function holdSide(d: Pick<DecisionRow, "kind" | "reason">): boolean {
   if (d.kind === "hold_flag") return true;
   if (d.kind === "blocked") return d.reason.startsWith("위험 점검(매도)");
