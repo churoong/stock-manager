@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import EquityChart, { type Series } from "@/components/EquityChart";
 import { bodyOf, readJson } from "@/lib/http";
 import { amountText, perfLines, priceText, statusText, usCashText, wholeBreakdownText, type KisMarket, type KisMarketView, type KisWhole } from "@/lib/kisPaper";
-import type { LiveView } from "@/lib/kisVts";
+import { orderTimeText, type LiveView } from "@/lib/kisVts";
+import { userTimeOf } from "@/lib/market";
 import { brokerLines } from "@/lib/paper";
 
 /**
@@ -38,7 +39,7 @@ export function kisSeries(w: Pick<KisWhole, "totals">): Series[] {
 
 /** 열 때 조회(B) 결과의 머리 — KIS 가 준 값 그대로 (docs/paper.md 15.7, 25.1498) */
 function LiveHead({ live }: { live: LiveView }) {
-  return <p className="text-xs text-emerald-700 dark:text-emerald-400">KIS에서 방금 조회 · {new Date(live.fetched_at).toLocaleString("ko-KR")}</p>;
+  return <p className="text-xs text-emerald-700 dark:text-emerald-400">KIS에서 방금 조회 · {userTimeOf(live.fetched_at)}</p>;
 }
 
 /** 보유 표 — 배치 기록과 방금 조회가 같은 열을 쓴다 */
@@ -87,7 +88,7 @@ function LiveExecutions({ live }: { live: LiveView }) {
         <ul className="text-xs">
           {live.executions.map((e, i) => (
             <li key={`${e.code}-${e.time}-${i}`}>
-              {e.time ?? ""} {e.name ?? e.code} {e.side === "buy" ? "매수" : e.side === "sell" ? "매도" : e.side} {e.qty}주 → 체결 {e.filled}주
+              {orderTimeText(e.time)} {e.name ?? e.code} {e.side === "buy" ? "매수" : e.side === "sell" ? "매도" : e.side} {e.qty}주 → 체결 {e.filled}주
               {e.avg_price != null ? ` @ ${amountText(e.avg_price, cur)}` : ""}
               {e.note ? ` (${e.note})` : ""}
             </li>

@@ -191,3 +191,13 @@ export function liveRequests(market: VtsMarket, acct: { cano: string; prdt: stri
     { path: VTS_PATH.US_CCNL, tr: VTS_TR.US_CCNL, optional: "오늘 체결", params: { ...a, PDNO: "", ORD_STRT_DT: d, ORD_END_DT: d, SLL_BUY_DVSN: "00", CCLD_NCCS_DVSN: "00", OVRS_EXCG_CD: "", SORT_SQN: "DS", ORD_DT: "", ORD_GNO_BRNO: "", ODNO: "", CTX_AREA_NK200: "", CTX_AREA_FK200: "" } },
   ];
 }
+
+/**
+ * 주문 시각 `ord_tmd`("093012") → "09:30:12". 여섯 자리 숫자가 아니면 받은 그대로(없으면 빈 글자) — 25.1563.
+ * 국내는 한국 시각이다. 미국 체결 조회의 시각이 한국 시각인지 현지 시각인지는 `[확인필요]`
+ */
+export function orderTimeText(t: string | null | undefined): string {
+  if (!t) return "";
+  const s = String(t).trim();
+  return /^\d{6}$/.test(s) ? `${s.slice(0, 2)}:${s.slice(2, 4)}:${s.slice(4, 6)}` : s;
+}
