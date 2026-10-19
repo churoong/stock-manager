@@ -168,7 +168,7 @@ function CoreCard({ core }: { core: NonNullable<Data["core"]> }) {
     <section className="mb-4 mt-4 rounded-xl border border-slate-200 px-3 py-2 text-xs dark:border-slate-800">
       <h3 className="text-sm font-semibold">핵심 H 다년 백테스트</h3>
       <p className="mt-0.5 text-slate-500">
-        마지막 실행 {core.run.started_at.slice(0, 16).replace("T", " ")} UTC · {statusLabel(core.run.status)}
+        마지막 실행 {userTimeOf(core.run.started_at)} · {statusLabel(core.run.status)}
         {core.run.status !== "success" && core.run.error_text ? ` — ${core.run.error_text.slice(0, 160)}` : ""}
       </p>
       {notes.length ? (
