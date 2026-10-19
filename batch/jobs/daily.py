@@ -409,7 +409,7 @@ def _detect_kr_actions(
             앞기록 = db.get_setting(client, adjd.KR_ACTION_LOG_KEY, {}) or {}
             db.set_setting(client, adjd.KR_ACTION_LOG_KEY,
                            adjd.merge_split_log(앞기록, sorted(set(걸린번호)), trade_date))  # fmt: skip
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001 — 감지 기록은 곁다리, 수집·수정주가 다시 내기를 막지 않는다
             log.exception("국내 기업행위 감지 기록 실패")
     if str(직전) < 진짜_직전:
         # **수집 구멍 뒤에는 수정주가·수량 안내를 붙이지 않는다** (docs/infra.md 25.572, 교차검증).

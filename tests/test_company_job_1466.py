@@ -95,12 +95,18 @@ def test_meeting_alone_blocks_rerun(c: Client, monkeypatch: pytest.MonkeyPatch) 
 
 
 def test_bad_charter_runs_rule_one_and_says_why(c: Client, monkeypatch: pytest.MonkeyPatch) -> None:
-    """헌장이 위원회 규칙에 어긋나면(한 부서 40% 넘음) 그 회사는 판 1 그대로 돌고 기록에 까닭을 남긴다."""
+    """헌장이 위원회 규칙에 어긋나면(한 부서 40% 넘음) 기록에 까닭을 남긴다. 판 2 이상 회사는 **그날 사지 않는다**
+    (25.1549 감사 [권고] 2 — 예전엔 판 1 그대로 점수 상위로 사면서 판 2 표시를 붙여 그 회사 기록에 판 1 매수가 섞였다)"""
     나쁜 = {**헌장, "weights": {"research": 5, "quant": 1}}
     c.conn.execute("UPDATE paper_accounts SET charter_json = ? WHERE id = 'A'", [json.dumps(나쁜)])
-    _, 기록 = _하루(c, monkeypatch, "2026-10-14")
+    판 = c.q("SELECT rule_version FROM paper_accounts WHERE id = 'A'")[0][0]
+    줄, 기록 = _하루(c, monkeypatch, "2026-10-14")
     assert any("40%" in e for e in 기록["accounts"]["A"]["charter_errors"])
-    assert {r[0] for r in c.q("SELECT DISTINCT stock_id FROM paper_orders WHERE account_id = 'A'")} == {1, 3}
+    산것 = {r[0] for r in c.q("SELECT DISTINCT stock_id FROM paper_orders WHERE account_id = 'A'")}
+    if 판 >= 2:
+        assert 산것 == set() and any("헌장 검사 실패로 오늘 사지 않음" in x for x in 줄)
+    else:
+        assert 산것 == {1, 3}
     assert c.q("SELECT COUNT(*) FROM paper_meetings") == [(0,)]
 
 
