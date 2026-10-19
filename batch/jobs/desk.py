@@ -23,7 +23,7 @@ from batch.jobs import broker_mirror as bmj
 from batch.services import desk
 
 TWR_SQL = (
-    "SELECT account_id, as_of, twr_index, recon_ok, equity_krw, pnl_krw, invested_krw, kospi_krw, sp500_krw"
+    "SELECT account_id, as_of, twr_index, recon_ok, equity_krw, pnl_krw, invested_krw, kospi_krw, sp500_krw, cash_krw"
     " FROM paper_daily ORDER BY account_id, as_of"
 )
 #: 대보기(25.1516) — KIS 계좌 전체 원화 총액 계열(국내 줄, 하루 한 행). **같은 기준(`basis`)의 줄만**(25.1528) —
@@ -127,7 +127,7 @@ REASON_CHARS = 80
 
 def _기초(client: Any) -> tuple[dict[str, list[tuple[str, float]]], set[str], list[dict[str, Any]], dict[str, Any]]:
     """평가 계열·검산 어긋난 날·계좌·순위 — 운용 요약과 아침 운용 보고가 같이 쓴다"""
-    계열, 검산틀린날, 계좌들, 순위, _평가, _손익, _그림자 = _기초_평가(client)
+    계열, 검산틀린날, 계좌들, 순위, _평가, _손익, _그림자, _현금 = _기초_평가(client)
     return 계열, 검산틀린날, 계좌들, 순위
 
 
@@ -135,7 +135,8 @@ def _기초_평가(
     client: Any,
 ) -> tuple[dict[str, list[tuple[str, float]]], set[str], list[dict[str, Any]], dict[str, Any],
            dict[str, list[tuple[str, float]]], dict[str, list[tuple[str, float]]],
-           dict[str, list[tuple[str, float | None, float | None, float]]]]:  # fmt: skip
+           dict[str, list[tuple[str, float | None, float | None, float]]],
+           dict[str, list[tuple[str, float, float]]]]:  # fmt: skip
     """`_기초` + 계좌마다 원화 평가 총액 계열(체결 보정의 회전율 분모, 25.1514)·평가손익 계열(대보기, 25.1516)
     — 같은 한 번의 읽기"""
     계열: dict[str, list[tuple[str, float]]] = {}
@@ -144,6 +145,8 @@ def _기초_평가(
     # 지수 그림자 계좌(같은 날 같은 돈을 KOSPI·S&P500 에 넣었다면, docs/paper.md 4장) — 관문 "지수 대비"(25.1519)
     그림자: dict[str, list[tuple[str, float | None, float | None, float]]] = {}
     검산틀린날: set[str] = set()
+    # 계좌마다 (as_of, 현금, 평가) — 관문 지수 대비의 현금 환산 참고 칸(25.1540). 같은 행이라 읽는 행 수는 그대로
+    현금: dict[str, list[tuple[str, float, float]]] = {}
     for r in client.execute(TWR_SQL).dicts():
         if r["twr_index"] is not None:
             계열.setdefault(str(r["account_id"]), []).append((str(r["as_of"]), float(r["twr_index"])))
@@ -154,11 +157,14 @@ def _기초_평가(
         if r.get("invested_krw") is not None:
             그림자.setdefault(str(r["account_id"]), []).append(
                 (str(r["as_of"]), r.get("kospi_krw"), r.get("sp500_krw"), float(r["invested_krw"])))
+        if r.get("cash_krw") is not None and r.get("equity_krw") is not None:
+            현금.setdefault(str(r["account_id"]), []).append(
+                (str(r["as_of"]), float(r["cash_krw"]), float(r["equity_krw"])))
         if r.get("recon_ok") == 0:
             검산틀린날.add(str(r["as_of"]))
     계좌들 = client.execute(NAMES_SQL).dicts()
     이름 = {str(r["id"]): str(r["name"] or r["id"]) for r in 계좌들}
-    return 계열, 검산틀린날, 계좌들, desk.leaderboard(계열, 이름), 평가, 손익, 그림자
+    return 계열, 검산틀린날, 계좌들, desk.leaderboard(계열, 이름), 평가, 손익, 그림자, 현금
 
 
 def _시장칸(
@@ -245,7 +251,7 @@ def write(
     """그날 운용 요약을 합쳐 적고, 실행 기록에 넣을 건수를 돌려준다."""
     as_of = now.astimezone(cal.market_tz("KR")).date().isoformat()
     지금 = now.astimezone(UTC).isoformat()
-    계열, 검산틀린날, 계좌들, 순위, 평가, 손익, 그림자 = _기초_평가(client)
+    계열, 검산틀린날, 계좌들, 순위, 평가, 손익, 그림자, 현금 = _기초_평가(client)
     h = bmj.MIRROR_ACCOUNT
     시장칸 = _시장칸(client, market, 지금, trade_date=trade_date, session_date=session_date, step_log=step_log,
                  warnings=warnings)  # fmt: skip
@@ -261,7 +267,7 @@ def write(
     kis요약 = [x for rows, x in ((kis, 요약), (kis_us, 요약_us)) if rows and str(rows[0]["as_of"]) >= 최근]
     지금판 = (판이력.get(h) or [{}])[-1]
     관문판, 관문오류 = _관문판(client, now, 계열, h, 검산틀린날, kis요약, since=str(지금판.get("from") or ""),
-                         version=지금판.get("version"), index=그림자.get(h))  # fmt: skip
+                         version=지금판.get("version"), index=그림자.get(h), cash=현금.get(h))  # fmt: skip
     공통 = {"leaderboard": 순위, "rule_history": 판이력, "mirror_account": h, "updated_at": 지금, "last_market": market,
           **관문판,
           "kis_account": {"as_of": kis[0]["as_of"] if kis else None, "account_krw": 요약.get("account_krw"),
@@ -400,6 +406,7 @@ def _관문판(
     client: Any, now: datetime, 계열: dict[str, list[tuple[str, float]]], h: str, 검산틀린날: set[str],
     kis요약: list[dict[str, Any]], *, since: str, version: int | None,
     index: list[tuple[str, float | None, float | None, float]] | None = None,
+    cash: list[tuple[str, float, float]] | None = None,
 ) -> tuple[dict[str, Any], str | None]:
     """실전 전환 관문·위험판·챔피언 교체 후보 (docs/desk.md 6장, 25.1508) — 실패해도 운용 요약은 적는다.
 
@@ -421,7 +428,7 @@ def _관문판(
         증거 = {str(r["account_id"]): ((_json(r.get("attribution_json")) or {}).get("evidence") or {}) for r in 마지막}
         관문 = desk.gate(계열, h, since=since, version=version, recon_bad_days=sum(1 for d in 검산틀린날 if d >= 창),
                        batch_failed=실패, kis=desk.combine_kept(kis요약), evidence=증거.get(h),
-                       index=index)  # fmt: skip
+                       index=index, cash=cash)  # fmt: skip
         보유들 = {str(r["account_id"]): (_json_list(r["positions_json"])) for r in 마지막}
         ids = sorted({int(q["stock_id"]) for v in 보유들.values() for q in v if q.get("stock_id") is not None})
         이름 = ({int(r["id"]): str(r["name"]) for r in client.execute(STOCK_NAMES_SQL, [json.dumps(ids)]).dicts()}

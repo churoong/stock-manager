@@ -222,6 +222,45 @@ def index_return(
     return sum(수익.values()) / len(수익), [이름[i] for i in sorted(수익)]
 
 
+def cash_equivalent_return(
+    twr: list[tuple[str, float]], cash: list[tuple[str, float, float]],
+    index: list[tuple[str, float | None, float | None, float]], start: str, used: list[str],
+) -> tuple[float | None, float | None]:
+    """쉬는 현금이 지수 수익을 냈다고 본 수익률(%)과 평균 현금 비중(%) — 관문 지수 대비 옆 **참고 칸**
+    (25.1540, 31회차 P3).
+
+    r_eq(t) = r_twr(t) + c(t−1)·r_idx(t). c = 전날 현금 ÷ 전날 평가(`paper_daily.cash_krw`·`equity_krw`),
+    r_idx = `index_return` 과 같은 행마다 입금 보정 그림자 수익을 **같은 지수(`used`)** 로 평균. 구간도 같다
+    (`start` 이하 마지막 행부터).
+    한 행이라도 현금·평가·그림자가 비면 None — 모름을 0 으로 채우지 않는다. 관문 통과(`passed`)에는 쓰지 않는다
+    """
+    현금 = {d: (c, e) for d, c, e in cash}
+    지수 = {r[0]: r for r in index}
+    v = sorted(twr)
+    앞 = [k for k, r in enumerate(v) if r[0] <= start]
+    칸 = {"KOSPI": 1, "S&P500": 2}
+    if not 앞 or not used or any(u not in 칸 for u in used):
+        return None, None
+    구간 = v[앞[-1]:]
+    곱, 비중들 = 1.0, []
+    for (da, ta), (db, tb) in zip(구간, 구간[1:], strict=False):
+        ce, ia, ib = 현금.get(da), 지수.get(da), 지수.get(db)
+        if ce is None or ia is None or ib is None or not ce[1] or ce[1] <= 0 or ta <= 0:
+            return None, None
+        r_idx: list[float] = []
+        for u in used:
+            i = 칸[u]
+            if ia[i] is None or ib[i] is None or float(ia[i]) <= 0:
+                return None, None
+            r_idx.append((float(ib[i]) - (float(ib[3]) - float(ia[3]))) / float(ia[i]) - 1)
+        c = float(ce[0]) / float(ce[1])
+        비중들.append(c)
+        곱 *= 1 + (tb / ta - 1) + c * sum(r_idx) / len(r_idx)
+    if not 비중들:
+        return None, None
+    return (곱 - 1) * 100, 100 * sum(비중들) / len(비중들)
+
+
 def risk_ratio(v: list[tuple[str, float]], start: str | None = None) -> float | None:
     """변동성 대비 수익 — `start` 이후 평가 사이 수익률의 평균 ÷ 표본표준편차. 같은 기간의 계좌끼리 견주는 값이라
     무위험 수익률은 빼지 않는다(빼도 둘 다 같은 만큼 빠진다 — 변동성이 다르면 정확히 같지는 않다 `[확인필요]`).
@@ -238,6 +277,7 @@ def gate(
     series: dict[str, list[tuple[str, float]]], mirror: str, *, since: str = "", version: int | None = None,
     recon_bad_days: int, batch_failed: int, kis: dict[str, Any] | None, evidence: dict[str, Any] | None = None,
     index: list[tuple[str, float | None, float | None, float]] | None = None,
+    cash: list[tuple[str, float, float]] | None = None,
 ) -> dict[str, Any]:
     """실전 전환 1단계 관문 진도 — {stage, account, version, from, items: [{key, label, now, target, ok}], passed,
     next}.
@@ -249,7 +289,7 @@ def gate(
     (25.1511 검토 1). `kis` = {kept_pct, n}(국내·미국 합). `evidence` = 그 계좌 지금 판의 결정 단위 선정 증거
     (`paper.selection_evidence`, 25.1518) — "R 대비 > 0" 은 부호 하나라 실력이 없어도 반쯤 통과한다.
     `index` = 그 계좌의 지수 그림자 [(as_of, KOSPI 그림자, S&P500 그림자, 총 입금)] — 실전 돈의 기회비용은 R 이 아니라
-    지수 ETF 다(25.1519)
+    지수 ETF 다(25.1519). `cash` = 그 계좌의 [(as_of, 현금, 평가)] — 지수 대비 항목의 참고 칸 `cash_eq`(25.1540)
     """
     전체 = sorted(series.get(mirror) or [])
     v = [p for p in 전체 if not since or p[0] > since]
@@ -263,6 +303,11 @@ def gate(
     내비 = risk_ratio(전체, 시작) if 시작 else None
     지수, 쓴지수 = index_return(index or [], 시작) if 시작 else (None, [])
     vs_idx = pct - 지수 if pct is not None and 지수 is not None else None
+    # 참고 — 쉬는 현금이 지수를 냈다면(25.1540). 통과 판정에 넣지 않는다(31회차 검증 A 1)
+    eq_pct, 현금비중 = (cash_equivalent_return(전체, cash or [], index or [], 시작, 쓴지수)
+                    if 시작 and 지수 is not None else (None, None))  # fmt: skip
+    cash_eq = {"vs_index": eq_pct - 지수 if eq_pct is not None and 지수 is not None else None,
+               "return_pct": eq_pct, "avg_cash_pct": 현금비중}  # fmt: skip
     kept, kn = (kis or {}).get("kept_pct"), int((kis or {}).get("n") or 0)
     ev = evidence or {}
     하한, 묶음수 = ev.get("lower"), int(ev.get("n_blocks") or 0)
@@ -272,7 +317,8 @@ def gate(
          "ok": len(v) >= GATE_MIN_POINTS},
         {"key": "vs_r", "label": "관문 구간 R 대비(%p)", "now": vs_r, "target": 0, "ok": vs_r is not None and vs_r > 0},
         {"key": "vs_index", "label": "관문 구간 지수 대비(%p) — 같은 돈을 KOSPI·S&P500 반반에 넣었다면",
-         "now": vs_idx, "target": 0, "index_pct": 지수, "index_used": 쓴지수, "ok": vs_idx is not None and vs_idx > 0},
+         "now": vs_idx, "target": 0, "index_pct": 지수, "index_used": 쓴지수, "cash_eq": cash_eq,
+         "ok": vs_idx is not None and vs_idx > 0},
         {"key": "ratio", "label": "변동성 대비 수익 — 무작위 대조 평균보다", "now": 내비, "target": 대조비,
          "ok": 내비 is not None and 대조비 is not None and 내비 > 대조비},
         {"key": "incidents", "label": f"운영 무사고(최근 {GATE_INCIDENT_DAYS}일 장부 검산 어긋남·일일 배치 실패)",
