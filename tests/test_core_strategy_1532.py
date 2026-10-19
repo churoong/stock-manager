@@ -58,13 +58,16 @@ class 가짜시장:
     max_weight_per_stock = 10.0
     targets = None
 
-    def __init__(self, universe: list[dict], 신호: dict[str, list[tuple]]) -> None:
-        self.universe, self.신호 = universe, 신호
+    def __init__(self, universe: list[dict], 신호: dict[str, list[tuple]], 설정: dict[str, dict] | None = None) -> None:
+        self.universe, self.신호, self.설정 = universe, 신호, 설정 or {}
 
     def pool(self, cutoff: str) -> list[dict]:
         return self.universe
 
     def at(self, view: bt.PriceView, day: str) -> cb.DayView:
+        # 결정일부터 바뀐 손절·목표 설정(운영 `horizon_targets`) — 전략은 `at` 뒤에 매도를 판정한다
+        바뀐 = [d for d in self.설정 if d <= day]
+        self.targets = self.설정[max(바뀐)] if 바뀐 else None
         rows = [_행(sid, view.cutoff, view.last_close(sid), *rest) for sid, *rest in self.신호.get(view.cutoff, [])]
         return cb.DayView(
             cutoff=view.cutoff, day=day, score_cutoff=view.cutoff, factor_scores={}, total_scores={}, inputs={},
@@ -78,16 +81,28 @@ def _종목들(n: int, sector=lambda i: f"업종{i}") -> list[dict]:
              "currency": "KRW"} for i in range(1, n + 1)]  # fmt: skip
 
 
-def _돌림(variant: str, 가격: dict[int, list[float]], 신호: dict[int, list[tuple]], *, 시작: str = "2024-01-05",
-          costs: bt.Costs | None = None, universe: list[dict] | None = None):  # fmt: skip
-    """가격은 종목마다 날 순서 목록(날 0 = 첫 날). 신호는 {cutoff 번호: [(종목, 비중, 기간, 점수, 업종)…]}."""
+def _돌림(variant: str, 가격: dict[int, list[float | None]], 신호: dict[int, list[tuple]], *, 시작: str = "2024-01-05",
+          costs: bt.Costs | None = None, universe: list[dict] | None = None, 설정: dict[int, dict] | None = None,
+          가로채기=None):  # fmt: skip
+    """가격은 종목마다 날 순서 목록(날 0 = 첫 날, None = 그날 시세 없음 — 거래정지, 목록이 짧으면 상장폐지).
+    신호는 {cutoff 번호: [(종목, 비중, 기간, 점수, 업종)…]}. 설정은 {결정일 번호: 손절·목표 설정}.
+    `가로채기(날, 주문)` 는 엔진에 넘기기 전 주문을 바꾼다(엔진이 체결하지 못한 것을 흉내).
+    날마다 맞춘 뒤 장부가 엔진 보유와 같은지 본다."""
     n = max(len(v) for v in 가격.values())
     날 = _영업일(시작, n)
-    prices = {sid: {날[k]: p for k, p in enumerate(v)} for sid, v in 가격.items()}
+    prices = {sid: {날[k]: p for k, p in enumerate(v) if p is not None} for sid, v in 가격.items()}
     costs = costs if costs is not None else bt.Costs.zero()
-    m = 가짜시장(universe or _종목들(max(가격)), {날[k]: rows for k, rows in 신호.items()})
+    m = 가짜시장(universe or _종목들(max(가격)), {날[k]: rows for k, rows in 신호.items()},
+               {날[k]: t for k, t in (설정 or {}).items()})  # fmt: skip
     s = cs.make_core_strategy(variant, m, sessions=날, costs=costs)
-    r = bt.simulate(prices, 날, 날, s, costs, has_delisted=True)
+
+    def 판단(day: str, view: bt.PriceView) -> bt.LedgerOrders:
+        o = s(day, view)
+        if view.stocks():
+            assert set(s.lots) == set(view.holding or ()), f"{day}: 장부 {set(s.lots)} ≠ 엔진 보유 {set(view.holding)}"
+        return 가로채기(day, o) if 가로채기 else o
+
+    r = bt.simulate(prices, 날, 날, 판단, costs, has_delisted=True)
     return s, r, 날
 
 
@@ -165,6 +180,120 @@ def test_판_뒤_쉼() -> None:
     assert 산날[:2] == [날[1], 날[4 + pp.REBUY_COOLDOWN_SESSIONS + 1]]
     for k in range(5, 10):
         assert _까닭(로그[날[k]], 1) == f"판 뒤 {pp.REBUY_COOLDOWN_SESSIONS}거래일 안"
+
+
+def test_정지로_미룬_손절은_실제로_판_날부터_쉰다() -> None:
+    """day3 종가 93(−7%) → day4 손절을 내지만 day4·day5 거래정지(시세 없음)라 엔진이 못 판다 → day6 재개일에 판다.
+    판 날은 처음 낸 day4 가 아니라 엔진이 실제로 판 day6 — 쉼은 day6~day11, 다시 사는 것은 day12.
+    손절에 걸린 보유는 그동안 더 사지 않는다(사유는 판 뒤 쉼이 아니라 손절 — 운영 `stop_ids`)."""
+    가격 = [100, 100, 100, 93, None, None, 93] + [93] * 8
+    s, r, 날 = _돌림("core_b", {1: 가격}, {k: [(1, 10.0)] for k in range(len(가격))})
+    로그 = _날별(s)
+    assert {d: lg.sells for d, lg in 로그.items() if lg.sells} == {날[k]: {1: ["손절"]} for k in (4, 5, 6)}
+    assert all(1 in r.rebalances[k].weights for k in (4, 5)) and 1 not in r.rebalances[6].weights
+    assert s.sold[1] == 날[6]
+    assert [d for d, lg in 로그.items() if 1 in lg.buys] == [날[1], 날[6 + pp.REBUY_COOLDOWN_SESSIONS + 1]]
+    for k in (4, 5, 6):
+        assert _까닭(로그[날[k]], 1) == rs.EXCLUDED_STOP_LOSS
+    for k in range(7, 6 + pp.REBUY_COOLDOWN_SESSIONS + 1):
+        assert _까닭(로그[날[k]], 1) == f"판 뒤 {pp.REBUY_COOLDOWN_SESSIONS}거래일 안"
+
+
+def test_정지_중에는_판정이_사라져도_미룬_매도를_다시_낸다() -> None:
+    """day4 손절을 냈는데 정지(day4·day5). day5 부터 설정의 손절선이 −50% 로 바뀌어 판정이 더는 서지 않아도
+    운영의 열린 매도 주문처럼 day5·day6 에 "미룬 매도" 로 다시 내고, day6 재개일에 판다."""
+    가격 = [100, 100, 100, 93, None, None, 93, 93, 93]
+    s, r, 날 = _돌림("core_b", {1: 가격}, {0: [(1, 10.0)]}, 설정={5: {"short": {"stop_pct": -50.0}}})
+    로그 = _날별(s)
+    assert {d: lg.sells for d, lg in 로그.items() if lg.sells} == {
+        날[4]: {1: ["손절"]},
+        날[5]: {1: ["미룬 매도"]},
+        날[6]: {1: ["미룬 매도"]},
+    }
+    assert 1 in r.rebalances[5].weights and 1 not in r.rebalances[6].weights
+    assert s.lots == {} and s.sold[1] == 날[6]
+
+
+def test_상장폐지로_엔진이_판_종목은_장부에서_지운다() -> None:
+    """1 은 day3 뒤 시세가 끊긴다 — 엔진이 day4 에 마지막 종가로 판다. 전략은 매도를 낸 적이 없지만 장부에서 지운다
+    (남겨 두면 비중 0 의 유령 보유가 된다). 날마다 장부 = 엔진 보유는 `_돌림` 이 본다."""
+    s, r, 날 = _돌림("core_b", {1: [100] * 4, 2: [100] * 8}, {0: [(1, 10.0)]})
+    assert 1 in r.rebalances[3].weights and 1 not in r.rebalances[4].weights
+    assert not any(lg.sells for lg in s.log)
+    assert s.lots == {} and 1 not in s.sold
+
+
+def test_엔진이_사지_못한_매수는_장부에_넣지_않는다() -> None:
+    """day1 에 낸 매수를 엔진이 체결하지 못했다(자리 없음 등 — 그날 체결가는 있다). 장부에 넣지 않고 다음 날 다시 산다.
+    넣으면 원가·첫 매수일이 산 적 없는 날로 남는다."""
+    못산날: list[str] = []
+
+    def 가로채기(day: str, o: bt.LedgerOrders) -> bt.LedgerOrders:
+        if o.buys and not 못산날:
+            못산날.append(day)
+            return bt.LedgerOrders(sells=o.sells)
+        return o
+
+    s, r, 날 = _돌림("core_b", {1: [100, 100, 100, 105, 105, 105]}, {0: [(1, 10.0)], 2: [(1, 10.0)]}, 가로채기=가로채기)
+    assert 못산날 == [날[1]] and 1 not in r.rebalances[1].weights
+    assert _날별(s)[날[3]].buys == pytest.approx({1: 0.10})
+    assert s.lots[1].first_buy == 날[3] and s.lots[1].unit_cost == pytest.approx(105)
+
+
+# ── 추적 손절의 고점 ─────────────────────────────────────────────────────────
+
+
+def test_G_고점은_첫_매수_뒤부터만_본다() -> None:
+    """산 날 전의 130 은 고점이 아니다 — 100 에 산 G 는 목표(110)에 닿은 적이 없어 추적손절하지 않는다."""
+    s, _r, 날 = _돌림("core_g", {1: [130, 130, 100, 100, 100, 100, 100, 100]}, {2: [(1, 10.0)]})
+    assert _날별(s)[날[3]].buys == pytest.approx({1: 0.10})
+    assert not any(lg.sells for lg in s.log) and s.lots[1].first_buy == 날[3]
+
+
+def test_G_다_팔고_다시_사면_고점을_새로_잰다() -> None:
+    """100 → 130 → 120(−7.7%) 에서 추적손절(day5). 쉼 뒤 day11 에 100 으로 다시 산 보유는 예전 고점 130 을 보지 않는다."""
+    가격 = [100, 100, 110, 130, 120] + [100] * 12
+    s, _r, 날 = _돌림("core_g", {1: 가격}, {k: [(1, 10.0)] for k in range(len(가격))})
+    로그 = _날별(s)
+    assert {d: lg.sells for d, lg in 로그.items() if lg.sells} == {날[5]: {1: [pp.TRAIL_CODE]}}
+    assert [d for d, lg in 로그.items() if 1 in lg.buys] == [날[1], 날[5 + pp.REBUY_COOLDOWN_SESSIONS + 1]]
+    assert s.lots[1].first_buy == 날[5 + pp.REBUY_COOLDOWN_SESSIONS + 1]
+
+
+# ── 사전 위험 점검 ───────────────────────────────────────────────────────────
+
+
+def test_하루_손실_한도를_넘은_날은_사지_않는다() -> None:
+    """day1 에 다섯 종목 10% 씩 → day3 모두 −6.5%(손절 −7% 위) → day4 의 하루 수익 0.5 × −6.5% = −3.25%
+    (한도 −3%) 라 그날 6 매수는 막힌다(blocked). 다음 날(수익 0%)에 산다."""
+    가격 = {i: [100, 100, 100, 93.5, 93.5, 93.5, 93.5] for i in range(1, 6)}
+    가격[6] = [100.0] * 7
+    s, _r, 날 = _돌림("core_b", 가격, {0: [(i, 10.0) for i in range(1, 6)], 3: [(6, 10.0)], 4: [(6, 10.0)]})
+    로그 = _날별(s)
+    assert 로그[날[4]].day_return_pct == pytest.approx(-3.25)
+    assert 로그[날[4]].buys == {} and not any(lg.sells for lg in s.log)
+    막힘 = [d for d in 로그[날[4]].decisions if d["stock_id"] == 6]
+    assert [d["kind"] for d in 막힘] == ["blocked"] and "하루 손실 한도" in 막힘[0]["reason"]
+    assert 로그[날[5]].day_return_pct == pytest.approx(0.0)
+    assert set(로그[날[5]].buys) == {6}
+
+
+def test_하루_수익은_엔진_자본곡선의_cutoff_사이_변화와_같다() -> None:
+    """비용 0 이면 위험 점검의 하루 수익(직전 cutoff 비중 × 종가 변화)은 엔진 자본의 cutoff → cutoff 변화와 같다 —
+    정지 재개일의 갭(2: day4·5 시세 없음 → day6 80)과 상장폐지(3: day7 뒤 끊김), 사고판 날도 포함. 첫 결정은 None."""
+    가격 = {1: [100, 100, 104, 99, 108, 111, 95, 97, 101, 103, 100, 98],
+            2: [100, 100, 101, 102, None, None, 80, 82, 83, 85, 86, 84],
+            3: [100, 100, 96, 99, 103, 101, 100, 98],
+            4: [100, 100, 100, 100, 100, 100, 110, 121, 115, 112, 117, 120]}  # fmt: skip
+    신호 = {0: [(1, 10.0), (2, 10.0), (3, 10.0)], 5: [(4, 10.0)]}
+    s, r, 날 = _돌림("core_b", 가격, 신호)
+    자본 = dict(r.curve)
+    로그 = list(s.log)
+    assert 로그[0].day_return_pct is None
+    for 앞, lg in zip(로그, 로그[1:], strict=False):
+        assert lg.day_return_pct == pytest.approx((자본[lg.cutoff] / 자본[앞.cutoff] - 1) * 100, abs=1e-9), lg.day
+    재개 = next(lg for lg in 로그 if lg.cutoff == 날[6])
+    assert 재개.day_return_pct < -1.5  # 정지 재개 갭 −20% × 약 10%
 
 
 # ── 크기 ─────────────────────────────────────────────────────────────────────
@@ -278,6 +407,7 @@ W, S, N = 130, 300, 12
 전체 = _영업일("2022-01-03", W + S + 10)
 날들 = 전체[: W + S]
 모의 = 날들[W:]
+정지, 폐지 = ((6, 233, 237), (2, 247, 248)), (12, 250)  # (종목, 모의 시작 번호, 끝 번호) — `_자료` 가 지운다
 
 
 @cache
@@ -309,24 +439,53 @@ def _자료() -> tuple:
         a *= math.exp(0.0003 + 0.01 * rng.gauss(0, 1))
         b *= math.exp(0.0002 + 0.012 * rng.gauss(0, 1))
         idx["KOSPI"][d], idx["KOSDAQ"][d] = a, b
+    # 거래정지와 상장폐지 — 난수를 다 뽑은 뒤 지워 그 전 길은 그대로다. 6 은 B·G 가 손절을 내는 날(모의 233)부터 나흘 정지,
+    # 12 는 B·G·H·R1 이 들고 있는 모의 250 부터 시세가 끊긴다
+    for sid, 빼기 in [*((sid, 모의[a:b]) for sid, a, b in 정지), (폐지[0], 모의[폐지[1] :])]:
+        for d in 빼기:
+            del prices[sid][d], turn[sid][d]
     return universe, prices, turn, snaps, idx
 
 
-def _끝까지(variant: str, prices: dict | None = None) -> tuple[cs.CoreStrategy, bt.BacktestResult, dict]:
-    """엔진으로 돌리며 날마다 ① 장부와 엔진 보유가 같은지 보고 ② 장부 주문을 남긴다."""
+def _끝까지(variant: str, prices: dict | None = None) -> tuple[cs.CoreStrategy, bt.BacktestResult, dict, dict]:
+    """엔진으로 돌리며 날마다 ① 맞추기 **전** 장부와 엔진 보유의 차이를 가격 자료로 설명하고(세어 둔다)
+    ② 맞춘 뒤 장부와 엔진 보유가 같은지 보고 ③ 장부 주문을 남긴다.
+
+    차이의 설명: 장부에서 빠진 것 = 어제 낸 매도가 찼다(어제 시세 있음) 또는 상장폐지(어제 시세 없고 뒤에도 없음).
+    어제 낸 매도가 남은 것 = 어제 정지. 어제 낸 매수가 없는 것 = 어제 시세 없음. 엔진이 장부 모르는 것을 들 수 없다."""
     universe, p0, turn, snaps, idx = _자료()
     prices = prices or p0
     s = cs.make_core_strategy(variant, cb.CoreMarket(universe, snaps, idx), sessions=날들, costs=bt.Costs())
     주문: dict[str, bt.LedgerOrders] = {}
+    셈 = {"매도 체결": 0, "정지로 미룸": 0, "상장폐지": 0, "못 산 매수": 0}
+    어제: list[str] = []
 
     def 판단(day: str, view: bt.PriceView) -> bt.LedgerOrders:
+        든 = set(view.holding or ())
+        앞장부, 낸매도, 낸매수 = set(s.lots), set(s._selling), {b.stock_id for b in s._bought}
+        assert 든 <= 앞장부 | 낸매수, f"{day}: 엔진이 장부 모르는 종목을 든다 {든 - 앞장부 - 낸매수}"
+        if 어제:
+            시세 = {sid: 어제[0] in prices.get(sid, {}) for sid in 앞장부 | 낸매수}
+            for sid in 앞장부 - 든:
+                if sid in 낸매도 and 시세[sid]:
+                    셈["매도 체결"] += 1
+                else:
+                    assert not 시세[sid] and max(prices[sid]) < 어제[0], f"{day}: {sid} 가 까닭 없이 빠졌다"
+                    셈["상장폐지"] += 1
+            for sid in 낸매도 & 든:
+                assert not 시세[sid], f"{day}: 어제 시세가 있는데 {sid} 매도가 안 찼다"
+                셈["정지로 미룸"] += 1
+            for sid in 낸매수 - 든 - 앞장부:
+                assert not 시세[sid], f"{day}: 어제 시세가 있는데 {sid} 매수가 안 찼다"
+                셈["못 산 매수"] += 1
         o = s(day, view)
-        assert set(s.lots) == set(view.holding or ()), f"{day}: 전략 장부와 엔진 보유가 다르다"
+        assert set(s.lots) == 든, f"{day}: 전략 장부와 엔진 보유가 다르다"
         주문[day] = o
+        어제[:] = [day]
         return o
 
     r = bt.simulate(prices, 모의, 모의, 판단, bt.Costs(), turnover=turn, has_delisted=True)
-    return s, r, 주문
+    return s, r, 주문, 셈
 
 
 @cache
@@ -336,7 +495,7 @@ def _기본(variant: str) -> tuple:
 
 @pytest.mark.parametrize("variant", sorted(cs.VARIANTS))
 def test_다섯_변형이_돌고_사고판다(variant: str) -> None:
-    s, r, 주문 = _기본(variant)
+    s, r, 주문, _셈 = _기본(variant)
     v = cs.VARIANTS[variant]
     assert len(r.curve) == len(모의) and all(x > 0 and math.isfinite(x) for _d, x in r.curve)
     assert sum(len(o.buys) for o in 주문.values()) >= 5 and sum(len(o.sells) for o in 주문.values()) >= 2
@@ -350,6 +509,23 @@ def test_다섯_변형이_돌고_사고판다(variant: str) -> None:
         assert any(row.kind == "pick" for row in s.market.ledger.rows)
 
 
+def test_끝까지_정지와_상장폐지를_엔진과_맞춘다() -> None:
+    """`_자료` 의 정지·상장폐지가 실제로 장부 맞추기를 거친다(셈은 `_끝까지` 가 가격 자료로 설명한 것만 센다).
+    6 은 모의 233 에 손절을 내고 정지(233~236) 동안 다시 내다가 재개일 237 에 판다 — 판 날은 237.
+    12 는 모의 250 부터 시세가 없다 — 매도를 낸 적 없이 엔진이 마지막 종가로 팔고 장부에서 지운다.
+    2 는 모의 247 하루 정지 — 그날 낸 매수를 엔진이 못 산다."""
+    s, r, _o, 셈 = _기본("core_b")
+    assert 셈["정지로 미룸"] == 4 and 셈["상장폐지"] == 1 and 셈["못 산 매수"] == 1 and 셈["매도 체결"] >= 5, 셈
+    assert _기본("core_g")[3]["정지로 미룸"] == 4 and _기본("core_h")[3]["못 산 매수"] == 1
+    로그 = _날별(s)
+    assert all(로그[모의[k]].sells.get(6) == ["손절"] for k in range(233, 238))
+    assert r.rebalances[236].date == 모의[236] and 6 in r.rebalances[236].weights
+    assert 6 not in r.rebalances[237].weights and s.sold[6] == 모의[237]
+    assert 12 in r.rebalances[249].weights and 12 not in r.rebalances[250].weights
+    assert not any(12 in 로그[d].sells for d in 모의[240:-1]) and 12 not in s.lots
+    assert 2 in 로그[모의[247]].buys and 2 not in r.rebalances[247].weights
+
+
 def test_G_와_B_는_매도만_다르다() -> None:
     g, b = _기본("core_g")[0], _기본("core_b")[0]
     assert not any("목표도달" in c for lg in g.log for c in lg.sells.values())
@@ -360,8 +536,8 @@ def test_G_와_B_는_매도만_다르다() -> None:
 
 
 def test_결정적이다() -> None:
-    s1, r1, o1 = _기본("core_r1")
-    s2, r2, o2 = _끝까지("core_r1")
+    s1, r1, o1, _ = _기본("core_r1")
+    s2, r2, o2, _ = _끝까지("core_r1")
     assert r1.curve == r2.curve and o1 == o2 and s1.lots == s2.lots
 
 
@@ -375,13 +551,13 @@ def _미끼(부터: str) -> dict:
 def test_미끼_cutoff_뒤_가격은_그_전_주문을_바꾸지_않는다(variant: str) -> None:
     """X 뒤 가격을 바꿔도 cutoff ≤ X 인 결정일(X 다음 날까지)의 장부 주문이 같다. 양성 대조: X 날부터 바꾸면
     X 다음 날 주문이 달라진다(든 종목이 세 배·5분의 1 이 되어 목표·손절에 걸린다)."""
-    _s, _r, 기본 = _기본(variant)
+    _s, _r, 기본, _ = _기본(variant)
     k = len(모의) - 40
     X = 모의[k]
     assert any(기본[d].buys or 기본[d].sells for d in 모의[k - 30 : k + 2])
-    _s2, _r2, 미끼 = _끝까지(variant, _미끼(모의[k + 1]))
+    _s2, _r2, 미끼, _ = _끝까지(variant, _미끼(모의[k + 1]))
     for d in 모의[: k + 2]:
         assert 미끼[d] == 기본[d], f"{d}: cutoff 뒤 가격이 주문을 바꿨다 — look-ahead"
-    _s3, _r3, 대조 = _끝까지(variant, _미끼(X))
+    _s3, _r3, 대조, _ = _끝까지(variant, _미끼(X))
     assert all(대조[d] == 기본[d] for d in 모의[: k + 1])
     assert 대조[모의[k + 1]] != 기본[모의[k + 1]], "양성 대조: cutoff 날 가격을 바꿨는데 주문이 같다 — 미끼가 물릴 자리가 없다"
