@@ -190,3 +190,28 @@ def test_기준일_수정주가가_비어도_앞_행으로_메운다() -> None:
                    [날[3], 날[3]])  # fmt: skip
     job.fill_outcomes(c, "KR", 날[29], "t")
     assert c.q("SELECT ret_5d FROM paper_decisions")[0][0] == pytest.approx(0.0)
+
+
+def test_하루_단계가_계좌별_멈춤을_체결과_평가에_넘긴다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`run_step` 연결 — 분할 전에 산 B 만 멈추고(주문 취소·원가 평가·매도 없음), 들지 않은 A 는 같은 종목을 산다
+    (25.1557 — 25.1548 반박 [권고] 2 의 `fill_orders` 단위 시험만 있고 하루 단계 연결은 시험이 없었다)."""
+    c = _장부(날[0])
+    c.conn.execute("INSERT OR IGNORE INTO paper_accounts (id, name, sell_rule, rule_version, created_at)"
+                   " SELECT 'A', 'A', sell_rule, rule_version, created_at FROM paper_accounts WHERE id = 'B'")  # fmt: skip
+    _시세(c, 분할 + 2, 5_000.0)
+    _돌림(c, monkeypatch, 분할 + 2)  # 경계 창 안 — 표에 적는다
+    _시세(c, 분할 + 22, 5_000.0)
+    for oid, aid in ((11, "A"), (12, "B")):
+        c.conn.execute("INSERT INTO paper_orders (id, account_id, market, stock_id, side, order_type, limit_price, quantity,"
+                       " currency, decided_on, fill_session, fill_basis, tranche, reason, horizon, status, rule_version,"
+                       " created_at) VALUES (?, ?, 'KR', 1, 'buy', 'limit', 6000, 1, 'KRW', ?, ?, 'open', 1, 't', 'short',"
+                       " 'open', 1, 't')", [oid, aid, 날[분할 + 21], 날[분할 + 22]])  # fmt: skip
+    기록 = _돌림(c, monkeypatch, 분할 + 22)
+    assert 기록["frozen_by_account"] == {"A": [], "B": [1]}
+    상태 = dict(c.q("SELECT account_id, status FROM paper_orders WHERE id IN (11, 12)"))
+    assert 상태 == {"A": "filled", "B": "expired"}
+    # B 는 원가 평가(모름: 기업행위) — 분할 뒤 종가 × 분할 전 수량(−50%)으로 매도가 나지 않는다
+    B평가 = json.loads(c.q("SELECT positions_json FROM paper_daily WHERE account_id = 'B' ORDER BY as_of DESC LIMIT 1")[0][0])
+    assert [p["value_krw"] for p in B평가 if p["stock_id"] == 1] == [100_000]
+    # (A 는 6,000 에 사서 종가 5,000 이라 제 손절이 정상으로 선다 — 멈추지 않았다는 뜻)
+    assert c.q("SELECT account_id FROM paper_orders WHERE side = 'sell'") == [("A",)]
