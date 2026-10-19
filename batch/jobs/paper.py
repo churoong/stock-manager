@@ -48,7 +48,7 @@ OPEN_ORDERS_SQL = (
     " WHERE status = 'open'"
     " ORDER BY id"
 )
-BAR_SQL = "SELECT date, open, close, volume FROM prices WHERE stock_id = ? AND date = ?"
+BAR_SQL = "SELECT date, open, close, volume, change_pct FROM prices WHERE stock_id = ? AND date = ?"
 #: 그 시장 전체에 그날 시세가 들어왔나 — 못 받은 날(배치 실패)과 정지를 가른다 (docs/paper.md 2.3)
 MARKET_DAY_SQL = (
     "SELECT 1 FROM prices p CROSS JOIN stocks s ON s.id = p.stock_id WHERE p.date = ? AND s.country = ? LIMIT 1"
@@ -544,11 +544,12 @@ def fill_orders(
                     기록["deferred"] = 기록.get("deferred", 0) + 1
             continue
         행 = client.execute(BAR_SQL, [o.stock_id, 날]).dicts()
-        bar = (pp.Bar(str(행[0]["date"]), 행[0]["open"], float(행[0]["close"]), 행[0]["volume"])
-               if 행 and 행[0]["close"] is not None else None)  # fmt: skip
+        bar = (pp.Bar(str(행[0]["date"]), 행[0]["open"], float(행[0]["close"]), 행[0]["volume"],
+                      행[0].get("change_pct")) if 행 and 행[0]["close"] is not None else None)  # fmt: skip
         가격, 까닭 = pp.judge(o, bar)
         그날종가 = bar.close if bar is not None else None  # 진입 이득을 잴 체결일 종가 (25.1450)
-        if 가격 is None and o.side == "sell" and pp.halted(bar):
+        # 하한가로 갇힌 시장가 매도도 정지처럼 다음 장으로 미룬다(25.1553) — 취소하면 그 보유가 매도 없이 남는다
+        if 가격 is None and o.side == "sell" and (pp.halted(bar) or 까닭.endswith(pp.LOCKED_SELL)):
             if int(r["deferrals"] or 0) + 1 >= pp.HALT_LIQUIDATE_SESSIONS:
                 마지막 = client.execute(LAST_CLOSE_SQL, [o.stock_id, 날]).rows
                 if 마지막:

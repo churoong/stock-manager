@@ -7,6 +7,7 @@ DB 를 읽지 않는다 — 장부(입금·체결)와 그날 시세를 받아 �
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -132,6 +133,45 @@ class Bar:
     open: float | None
     close: float
     volume: float | None = None
+    change_pct: float | None = None  # 그날 등락률(%) — 국내 가격제한폭의 기준가를 되살린다(`limit_locked`, 25.1553)
+
+
+#: 국내 하루 가격제한폭(±30%, 2015-06-15 부터) — 시장가 주문의 체결 시점 가격이 그 끝이면 찼다고 보지 않는다(25.1553)
+KR_PRICE_LIMIT = 0.30
+#: 하한가로 갇힌 시장가 매도의 까닭 끝 — 부르는 쪽이 이것을 보고 취소가 아니라 다음 장으로 미룬다
+LOCKED_SELL = "하한가 — 시장가 매도가 찼다고 보지 않는다"
+
+
+def limit_locked(order: Order, bar: Bar, price: float) -> bool:
+    """국내 시장가 주문의 체결 시점 가격이 가격제한폭 끝이었나 — 매수는 상한가 이상, 매도는 하한가 이하
+    (docs/paper.md 2.3).
+
+    상한가로 열면(또는 장 열린 뒤 낸 주문이 상한가로 닫으면) 사려는 쪽이 넘쳐 시장가 매수가 찼다고 볼 수 없다 — 예전에는
+    그 값에 다 찬 것으로 적어 C·R(시가 일괄)이 실제로는 못 샀을 종목을 샀다(25.1549 감사). 하한가 매도도 같다.
+    기준가 = 종가 ÷ (1 + 등락률), 상한가는 기준가 × 1.3 을 호가 단위로 내림·하한가는 × 0.7 을 올림(거래소 방식).
+    등락률은 소수 둘째 자리라 기준가가 조금 어긋나 끝 바로 한 단위 안쪽도 끝으로 볼 수 있다(보수 쪽 — 덜 산다).
+    등락률이 없으면(대체 출처) 모른다 — 예전처럼 찬다. 미국은 가격제한이 없다
+    """
+    if order.currency != "KRW" or order.order_type != "market" or bar.change_pct is None:
+        return False
+    if bar.close <= 0 or price <= 0:
+        return False
+    if bar.change_pct <= -100:
+        return False
+    기준 = bar.close / (1 + bar.change_pct / 100)
+    if order.side == "buy":
+        끝 = 기준 * (1 + KR_PRICE_LIMIT)
+        단위 = _tick(끝)
+        return price >= math.floor(round(끝 / 단위, 6)) * 단위
+    끝 = 기준 * (1 - KR_PRICE_LIMIT)
+    단위 = _tick(끝)
+    return price <= math.ceil(round(끝 / 단위, 6)) * 단위
+
+
+def _tick(price: float) -> float:
+    from batch.services.signals import tick_size
+
+    return tick_size(price, "KRW") or 1.0
 
 
 @dataclass(frozen=True)
@@ -274,7 +314,8 @@ def judge(order: Order, bar: Bar | None) -> tuple[float | None, str]:
 
     매수(지정가): 그날 **종가 ≤ 회차 가격**이면 회차 가격에 찬다 — 장중 저가로 찼을 몫은 놓친다(보수 쪽).
     매도(시장가): 그날 시가(`fill_basis='open'`), 장 열린 뒤 낸 주문은 종가. 시가가 없으면 종가.
-    정지한 날은 None — 매수는 부르는 쪽이 취소, 매도는 미룬다
+    정지한 날은 None — 매수는 부르는 쪽이 취소, 매도는 미룬다. 국내 시장가가 가격제한폭 끝이면(`limit_locked`) None —
+    매수는 취소, 매도는 미룬다(25.1553)
     """
     if halted(bar):
         return None, "정지(그날 시세 없음·거래량 0)"
@@ -282,10 +323,14 @@ def judge(order: Order, bar: Bar | None) -> tuple[float | None, str]:
     if order.side == "buy" and order.order_type == "market":
         # 시가 일괄 매수 (2.1.1) — 매도와 같은 잣대로 시가, 장 열린 뒤 낸 주문은 종가
         if order.fill_basis == "close":
-            return bar.close, "장 열린 뒤 낸 주문 — 종가"
-        if bar.open is not None and bar.open > 0:
-            return bar.open, "시가"
-        return bar.close, "시가 없음 — 종가"
+            가격, 까닭 = bar.close, "장 열린 뒤 낸 주문 — 종가"
+        elif bar.open is not None and bar.open > 0:
+            가격, 까닭 = bar.open, "시가"
+        else:
+            가격, 까닭 = bar.close, "시가 없음 — 종가"
+        if limit_locked(order, bar, 가격):
+            return None, f"{까닭.split(' — ')[-1]} 상한가 — 시장가 매수가 찼다고 보지 않는다"
+        return 가격, 까닭
     if order.side == "buy":
         if order.limit_price is None or order.limit_price <= 0:
             return None, "지정가 없음"
@@ -293,10 +338,14 @@ def judge(order: Order, bar: Bar | None) -> tuple[float | None, str]:
             return order.limit_price, "종가 ≤ 회차 가격"
         return None, f"종가 {bar.close:g} > 회차 가격 {order.limit_price:g}"
     if order.fill_basis == "close":
-        return bar.close, "장 열린 뒤 낸 주문 — 종가"
-    if bar.open is not None and bar.open > 0:
-        return bar.open, "시가"
-    return bar.close, "시가 없음 — 종가"
+        가격, 까닭 = bar.close, "장 열린 뒤 낸 주문 — 종가"
+    elif bar.open is not None and bar.open > 0:
+        가격, 까닭 = bar.open, "시가"
+    else:
+        가격, 까닭 = bar.close, "시가 없음 — 종가"
+    if limit_locked(order, bar, 가격):
+        return None, f"{까닭.split(' — ')[-1]} {LOCKED_SELL}"
+    return 가격, 까닭
 
 
 def make_fill(order: Order, price: float, fill_date: str, fx_rate: float, costs: Costs) -> Fill:
