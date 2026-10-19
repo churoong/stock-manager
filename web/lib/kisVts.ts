@@ -86,6 +86,8 @@ export interface LiveView {
   /** 미국은 `cash_krw`·`assets_krw`(KIS 해외 현금·해외 총자산 원화 환산)도 — 모의는 달러 예수금 `cash` 가 늘 0 이다(25.1527) */
   account: { cash: number | null; holdings_value: number | null; total: number | null; cash_krw?: number | null; assets_krw?: number | null };
   executions: LiveExecution[];
+  /** 실패해서 빠진 조회 이름(`liveRequests` 의 `optional`, 25.1546) — 그 칸은 비어 있다 */
+  missing?: string[];
 }
 
 function rows(payload: unknown, key: string): Array<Record<string, unknown>> {
@@ -170,18 +172,22 @@ export function kisErrorCode(payload: unknown): string | null {
 }
 
 /** 조회 인자 — 국내 두 번(잔고·오늘 체결), 미국 다섯 번(거래소별 잔고 셋·체결기준현재잔고·오늘 체결). `day` 는 그 시장 현지 날짜 YYYY-MM-DD */
-export function liveRequests(market: VtsMarket, acct: { cano: string; prdt: string }, day: string): Array<{ path: string; tr: string; params: Record<string, string> }> {
+/**
+ * `optional` 이 붙은 조회는 실패해도 나머지(잔고)를 보인다 — 빠진 것은 `LiveView.missing` 에 이름으로(25.1546 — 예전엔 미국
+ * 체결기준현재잔고 하나가 실패하면 이미 받은 거래소별 보유까지 버리고 502 를 냈다. 배치는 같은 실패를 견딘다)
+ */
+export function liveRequests(market: VtsMarket, acct: { cano: string; prdt: string }, day: string): Array<{ path: string; tr: string; params: Record<string, string>; optional?: string }> {
   const d = day.replaceAll("-", "");
   const a = { CANO: acct.cano, ACNT_PRDT_CD: acct.prdt };
   if (market === "KR")
     return [
       { path: VTS_PATH.KR_BALANCE, tr: VTS_TR.KR_BALANCE, params: { ...a, AFHR_FLPR_YN: "N", OFL_YN: "", INQR_DVSN: "02", UNPR_DVSN: "01", FUND_STTL_ICLD_YN: "N", FNCG_AMT_AUTO_RDPT_YN: "N", PRCS_DVSN: "00", CTX_AREA_FK100: "", CTX_AREA_NK100: "" } },
-      { path: VTS_PATH.KR_CCLD, tr: VTS_TR.KR_CCLD, params: { ...a, INQR_STRT_DT: d, INQR_END_DT: d, SLL_BUY_DVSN_CD: "00", PDNO: "", CCLD_DVSN: "00", INQR_DVSN: "01", INQR_DVSN_3: "00", ORD_GNO_BRNO: "", ODNO: "", INQR_DVSN_1: "", EXCG_ID_DVSN_CD: "KRX", CTX_AREA_FK100: "", CTX_AREA_NK100: "" } },
+      { path: VTS_PATH.KR_CCLD, tr: VTS_TR.KR_CCLD, optional: "오늘 체결", params: { ...a, INQR_STRT_DT: d, INQR_END_DT: d, SLL_BUY_DVSN_CD: "00", PDNO: "", CCLD_DVSN: "00", INQR_DVSN: "01", INQR_DVSN_3: "00", ORD_GNO_BRNO: "", ODNO: "", INQR_DVSN_1: "", EXCG_ID_DVSN_CD: "KRX", CTX_AREA_FK100: "", CTX_AREA_NK100: "" } },
     ];
   return [
     // 거래소별 잔고 셋 — 보유는 여기서(25.1527). 순서가 `parseUsLive` 인자 순서다
     ...US_EXCHANGES.map((x) => ({ path: VTS_PATH.US_BALANCE, tr: VTS_TR.US_BALANCE, params: { ...a, OVRS_EXCG_CD: x, TR_CRCY_CD: "USD", CTX_AREA_FK200: "", CTX_AREA_NK200: "" } })),
-    { path: VTS_PATH.US_PRESENT, tr: VTS_TR.US_PRESENT, params: { ...a, WCRC_FRCR_DVSN_CD: "02", NATN_CD: "840", TR_MKET_CD: "00", INQR_DVSN_CD: "00" } },
-    { path: VTS_PATH.US_CCNL, tr: VTS_TR.US_CCNL, params: { ...a, PDNO: "", ORD_STRT_DT: d, ORD_END_DT: d, SLL_BUY_DVSN: "00", CCLD_NCCS_DVSN: "00", OVRS_EXCG_CD: "", SORT_SQN: "DS", ORD_DT: "", ORD_GNO_BRNO: "", ODNO: "", CTX_AREA_NK200: "", CTX_AREA_FK200: "" } },
+    { path: VTS_PATH.US_PRESENT, tr: VTS_TR.US_PRESENT, optional: "해외 현금·총자산", params: { ...a, WCRC_FRCR_DVSN_CD: "02", NATN_CD: "840", TR_MKET_CD: "00", INQR_DVSN_CD: "00" } },
+    { path: VTS_PATH.US_CCNL, tr: VTS_TR.US_CCNL, optional: "오늘 체결", params: { ...a, PDNO: "", ORD_STRT_DT: d, ORD_END_DT: d, SLL_BUY_DVSN: "00", CCLD_NCCS_DVSN: "00", OVRS_EXCG_CD: "", SORT_SQN: "DS", ORD_DT: "", ORD_GNO_BRNO: "", ODNO: "", CTX_AREA_NK200: "", CTX_AREA_FK200: "" } },
   ];
 }

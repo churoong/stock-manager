@@ -62,6 +62,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ off: "KIS모의투자 토큰이 없습니다 — 다음 일일 배치가 받으면 조회됩니다" });
     const acct = vtsAccount()!;
     const 받은: unknown[] = [];
+    const 빠짐: string[] = [];
     let 더있음 = false;
     for (const [i, q] of liveRequests(market, acct, localDate(market, now)).entries()) {
       if (i) await new Promise((r) => setTimeout(r, LIVE_CALL_GAP_MS));
@@ -83,9 +84,20 @@ export async function POST(request: Request) {
         더있음 ||= ["M", "F"].includes(r.headers.get("tr_cont") ?? "");
       } catch (e) {
         // 예외 문장에는 요청 주소(`?CANO=…`)가 실린다 — 이름만
+        if (q.optional) {
+          빠짐.push(`${q.optional}(응답 없음)`);
+          받은.push(null);
+          continue;
+        }
         return NextResponse.json({ errors: [`KIS모의투자 응답 없음 (${e instanceof Error ? e.name : "오류"})`] }, { status: 502 });
       }
       const 코드 = kisErrorCode(payload);
+      if (코드 && q.optional) {
+        // 잔고는 받았는데 곁 조회만 실패 — 받은 보유는 보인다(25.1546)
+        빠짐.push(`${q.optional}(${코드})`);
+        받은.push(null);
+        continue;
+      }
       if (코드) return NextResponse.json({ errors: [`KIS모의투자 조회 실패 ${코드}${코드 === "EGW00201" ? " — 초당 한도, 잠시 뒤 다시" : ""}`] }, { status: 502 });
       받은.push(payload);
     }
@@ -93,7 +105,7 @@ export async function POST(request: Request) {
     const 거래소수 = US_EXCHANGES.length;
     const live =
       market === "KR" ? parseKrLive(받은[0], 받은[1], 시각) : parseUsLive(받은.slice(0, 거래소수), 받은[거래소수], 받은[거래소수 + 1], 시각);
-    return NextResponse.json({ live: 더있음 ? { ...live, more: true } : live });
+    return NextResponse.json({ live: { ...live, ...(더있음 ? { more: true } : {}), ...(빠짐.length ? { missing: 빠짐 } : {}) } });
   } catch (e) {
     return NextResponse.json({ errors: [`조회 실패 (${e instanceof Error ? e.name : "오류"})`] }, { status: 500 });
   }

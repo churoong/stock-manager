@@ -250,12 +250,13 @@ export default function KisPanel() {
   const [market, setMarket] = useState<KisMarket>("KR");
   const [sub, setSub] = useState<Sub>("summary");
   const [live, setLive] = useState<Partial<Record<KisMarket, LiveView>>>({});
-  const [liveNote, setLiveNote] = useState<string | null>(null);
+  // 조회 안내는 시장마다 — 미국에서 받은 "30초 안에…" 가 국내 칸에 남지 않게(25.1546)
+  const [liveNote, setLiveNote] = useState<Partial<Record<KisMarket, string | null>>>({});
   const [liveBusy, setLiveBusy] = useState(false);
 
   async function fetchLive(m: KisMarket) {
     setLiveBusy(true);
-    setLiveNote(null);
+    setLiveNote((x) => ({ ...x, [m]: null }));
     const r = await readJson<{ live?: LiveView; off?: string; busy?: string; wait?: string }>("/api/paper/kis/live", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -264,7 +265,8 @@ export default function KisPanel() {
     const body = bodyOf<{ live?: LiveView; off?: string; busy?: string; wait?: string }>(r);
     setLiveBusy(false);
     if (body.live) setLive((x) => ({ ...x, [m]: body.live }));
-    setLiveNote(body.errors?.length ? body.errors.join(" · ") : (body.off ?? body.busy ?? body.wait ?? null));
+    const 빠짐 = body.live?.missing?.length ? `일부를 받지 못했습니다: ${body.live.missing.join(" · ")} — 그 칸은 비어 있습니다` : null;
+    setLiveNote((x) => ({ ...x, [m]: body.errors?.length ? body.errors.join(" · ") : (body.off ?? body.busy ?? body.wait ?? 빠짐) }));
   }
 
   useEffect(() => {
@@ -327,7 +329,7 @@ export default function KisPanel() {
         </button>
         <span className="text-xs text-slate-500">조회만 합니다 · 결과는 요약·보유내역·거래내역 칸에 나뉘어 보입니다 · 같은 시장은 30초에 한 번 · 일일 배치가 도는 동안은 막힘</span>
       </div>
-      {liveNote ? <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">{liveNote}</p> : null}
+      {liveNote[market] ? <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">{liveNote[market]}</p> : null}
       <div className="mt-3 flex gap-1 overflow-x-auto border-b border-slate-200 text-sm dark:border-slate-800" role="tablist" aria-label="KIS모의투자 화면">
         {SUBS.map(([s, label]) => (
           <button
