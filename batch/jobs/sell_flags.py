@@ -344,9 +344,13 @@ def _수집_시작(client: TursoClient, country: str, 캐시: dict[str, str | No
 #: 장중 감시 스위치 — `web/lib/intradaySwitch.ts` 의 `INTRADAY_ENABLED` 와 같아야 한다(`tests/test_low_touch_1419.py` 가
 #: 글자로 대조). 꺼진 동안만 전일 저가의 손절선 터치를 센다 — 켜지면 장중 `stop` 알림이 그 몫이다 (28회차 P1, 25.1419)
 INTRADAY_ENABLED = False
+#: **CROSS JOIN 이어야 한다** (docs/infra.md 25.1536). 그냥 JOIN 이면 SQLite 플래너가 `positions.stock_id`
+#: (정수 기본 키) 쪽을 안에 두려고 `prices` 를 통째로 훑었다 — 실행마다 약 1,370만 행, 국내·미국 하루 두 번이라
+#: 10-15 부터 Turso 월 읽기 한도(5억)의 하루 5% 남짓을 이 한 줄이 썼다. CROSS JOIN 은 적힌 순서(보유 → 시세 색인)를
+#: 지킨다(`tests/test_prices_join_plan_1536.py` 가 질의 계획으로 고정)
 LOW_TOUCH_SQL = (
     "SELECT p.stock_id, p.close, pr.low FROM positions p"
-    " JOIN prices pr ON pr.stock_id = p.stock_id AND pr.date = p.price_date"
+    " CROSS JOIN prices pr ON pr.stock_id = p.stock_id AND pr.date = p.price_date"
 )
 
 
