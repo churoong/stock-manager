@@ -56,6 +56,20 @@ def test_monthly_review_best_worst_and_rule_checks() -> None:
     assert "종목 상한 넘은 날 1 · 섹터 상한 넘은 날 0 · 손절선 아래로 들고 간 날 1" in 본문
 
 
+def test_monthly_stop_check_uses_stock_currency_like_sell_engine() -> None:
+    """미국 보유 — 달러 종가 ÷ 평균단가(매도 엔진의 잣대)로 본다(25.1555). 원화 비율만 보면 환율 탓에 거꾸로 셌다."""
+    # ① 달러로는 −3%(손절 아님)인데 원화 약세(환율 −10%)로 원화 비율 −12.7% — 예전엔 "손절선 아래" 로 셌다
+    환율탓 = [{"stock_id": 3, "value_krw": 87_300, "cost_krw": 100_000, "horizon": "short", "currency": "USD",
+             "avg_price": 100.0, "close": 97.0}]  # fmt: skip
+    # ② 달러로는 −8%(손절 아래)인데 원화 강세로 원화 비율 −1% — 예전엔 놓쳤다
+    놓침 = [{"stock_id": 4, "value_krw": 99_000, "cost_krw": 100_000, "horizon": "short", "currency": "USD",
+           "avg_price": 100.0, "close": 92.0}]  # fmt: skip
+    for 보유, 기대 in ((환율탓, 0), (놓침, 1)):
+        daily = {"A": [_행("A", "2026-09-15", 1_000_000, 1_000_000, 1.0, 보유)]}
+        본문 = "\n".join(pp.summary_lines(daily, {}, "2026-09-26", "2026-09-01", {}, {}, 한도))
+        assert f"손절선 아래로 들고 간 날 {기대}" in 본문, 보유
+
+
 def test_no_paper_rows_no_section() -> None:
     assert pp.summary_lines({}, {}, "2026-10-03", None, {}, {}, 한도) == []
 

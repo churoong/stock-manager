@@ -723,8 +723,7 @@ def summary_lines(
                 if sectors.get(int(p["stock_id"])):
                     섹터합[str(sectors[int(p["stock_id"])])] = 섹터합.get(str(sectors[int(p["stock_id"])]), 0.0) + v
                 손절 = (limits.get("stop_pct") or {}).get(p.get("horizon") or "long")
-                if 손절 is not None and float(p.get("cost_krw") or 0) > 0 and (
-                        (v / float(p["cost_krw"]) - 1) * 100 <= float(손절)):
+                if 손절 is not None and (수익 := _종목통화_수익(p)) is not None and 수익 <= float(손절):
                     손절넘김.add(str(r["as_of"]))
             if any(합 / 총 * 100 > float(limits.get("max_sector_pct") or 100) for 합 in 섹터합.values()):
                 섹터넘음.add(str(r["as_of"]))
@@ -735,6 +734,19 @@ def summary_lines(
         out.append(f"  {aid} 규칙 점검: 종목 상한 넘은 날 {len(종목넘음)} · 섹터 상한 넘은 날 {len(섹터넘음)}"
                    f" · 손절선 아래로 들고 간 날 {len(손절넘김)}{덧}")
     return out
+
+
+def _종목통화_수익(p: dict[str, Any]) -> float | None:
+    """월간 복기 손절 점검의 수익률(%) — 매도 엔진(`sell_flags.evaluate`)과 같은 **종목 통화** 잣대: 종가 ÷ 평균단가
+    (수수료 포함). 예전에는 원화 평가 ÷ 원화 원가라 미국 보유는 환율만 움직여도 "손절선 아래로 들고 간 날" 이 생기거나
+    빠졌다(25.1547 감사 남은 것, 25.1555). 종가·평균단가가 없는 옛 행·원가로 둔 보유(멈춤·종가 없음)는 원화 비율로 —
+    원가로 둔 보유는 0% 라 걸리지 않는다
+    """
+    종가, 평단 = p.get("close"), p.get("avg_price")
+    if 종가 is not None and 평단 is not None and float(평단) > 0:
+        return (float(종가) / float(평단) - 1) * 100
+    원가 = float(p.get("cost_krw") or 0)
+    return (float(p.get("value_krw") or 0) / 원가 - 1) * 100 if 원가 > 0 else None
 
 
 def window_change(rows: list[tuple[str, float]], start: str, end: str) -> tuple[float, str, str] | None:
