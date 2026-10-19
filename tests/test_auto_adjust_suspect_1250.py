@@ -30,3 +30,10 @@ def test_구멍_위_계수를_경고한다() -> None:
     assert any("바로 다시 냈습니다" in m for m in 말)
     경고 = [m for m in 말 if m.startswith("⚠") and "빠진 거래일" in m]
     assert 경고 and "2026-09-09" in 경고[0]
+    # 단서 없는 감지는 날짜와 함께 남긴다 — 가상모의투자 이어 멈춤이 경계 창 뒤에도 본다 (25.1548)
+    import json
+
+    from batch.services import adjust_drift as adjd
+
+    기록 = c.conn.execute("SELECT value FROM settings WHERE key = ?", [adjd.KR_ACTION_LOG_KEY]).fetchone()
+    assert 기록 and json.loads(기록[0]) == {"1": "2026-09-11"}

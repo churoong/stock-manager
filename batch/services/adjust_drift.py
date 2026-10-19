@@ -85,6 +85,9 @@ def gap_drift(stock_id: int, last_stored: Sample, first_new: Sample, move: float
 SPLIT_LOG_KEY = "us_split_detections"
 #: 기록을 두는 기간(일). 분기 보고서 한 번(주식수 갱신)과 장중 보호 기간을 넉넉히 넘는다
 SPLIT_LOG_DAYS = 200
+#: 국내 기업행위 감지 기록 {종목: 감지한 거래일} — 일일 수집이 단서 없이 감지한 것만, `SPLIT_LOG_DAYS` 동안 (25.1548).
+#: 가상모의투자 이어 멈춤(25.1547)이 경계 창(21행)이 지난 뒤에도 "분할 전에 산 보유" 를 가린다
+KR_ACTION_LOG_KEY = "kr_action_detections"
 
 
 def merge_split_log(log: dict, stock_ids: list[int], now: str) -> dict[str, str]:

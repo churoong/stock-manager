@@ -169,17 +169,23 @@ def action_dates(client: TursoClient, stock_id: int, market: str) -> list[str]:
     if market == "US":
         감지 = (db.get_setting(client, "us_split_detections", {}) or {}).get(str(stock_id))
         return [str(감지)[:10]] if 감지 else []
+    # 일일 수집이 남긴 감지 기록(25.1548) — 경계 창(21행)이 지난 뒤에도 본다. 단서 없는 감지만 적힌다
+    from batch.services.adjust_drift import KR_ACTION_LOG_KEY
+
+    기록 = (db.get_setting(client, KR_ACTION_LOG_KEY, {}) or {}).get(str(stock_id))
+    out: list[str] = []
+    if 기록 and not _유상_권리락(client, stock_id, str(기록)[:10]):
+        out.append(str(기록)[:10])
     rows = client.execute(
         "SELECT close, change_pct, date FROM prices WHERE stock_id = ? AND close IS NOT NULL AND close > 0"
         " ORDER BY date DESC LIMIT ?",
         [stock_id, ACTION_GUARD_ROWS + 1],
     ).rows
-    out: list[str] = []
     for (close, pct, day), (prev, _p, _d) in zip(rows, rows[1:], strict=False):
         f = adj.factor_of(float(prev), float(close), None if pct is None else float(pct))
         if adj.is_action(f) and not _유상_권리락(client, stock_id, str(day)[:10]):
             out.append(str(day)[:10])
-    return sorted(out)
+    return sorted(set(out))
 
 
 def open_buy_lots(client: TursoClient, stock_id: int) -> list[tuple[str, float, float]]:

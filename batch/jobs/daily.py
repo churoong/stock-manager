@@ -399,6 +399,18 @@ def _detect_kr_actions(
         if 간격 > MAX_SESSION_GAP_DAYS
         else ""
     )
+    if not 꼬리 and 걸린번호:
+        # 국내 기업행위 감지 기록(25.1548) — 가상모의투자 이어 멈춤(25.1547)이 경계 창(21행)이 지난 뒤에도 "분할 전에 산
+        # 보유" 를 가릴 수 있게 미국(`us_split_detections`)처럼 날짜를 남긴다. 단서가 붙은 날(수집 구멍·벌어진 간격)은
+        # 기업행위라 단정하지 않으므로 적지 않는다(경계 창은 그대로 막는다). 기록 실패는 수집을 막지 않는다
+        try:
+            from batch.services import adjust_drift as adjd
+
+            앞기록 = db.get_setting(client, adjd.KR_ACTION_LOG_KEY, {}) or {}
+            db.set_setting(client, adjd.KR_ACTION_LOG_KEY,
+                           adjd.merge_split_log(앞기록, sorted(set(걸린번호)), trade_date))  # fmt: skip
+        except Exception:  # noqa: BLE001
+            log.exception("국내 기업행위 감지 기록 실패")
     if str(직전) < 진짜_직전:
         # **수집 구멍 뒤에는 수정주가·수량 안내를 붙이지 않는다** (docs/infra.md 25.572, 교차검증).
         # 25.569 는 꼬리 문구만 바꿔, 여전히 "수정주가를 다시 내야 합니다" 와 보유 종목의 "매매 기록 수량을

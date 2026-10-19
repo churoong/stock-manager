@@ -124,3 +124,69 @@ def test_성과_분해_진입_칸은_지금_판의_체결만() -> None:
                    " twr_index, positions_json, recon_ok, updated_at) VALUES ('B', '2026-10-19', 1, 1, 0, 1, 0, 1, '[]', 1, 't')")  # fmt: skip
     a = job.save_attribution(c, "B", "2026-10-19", rule_version=2)
     assert a["entry"]["n"] == 1
+
+
+
+def test_경계_안_실행을_놓쳐도_수집_감지_기록으로_멈춘다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """가상모의투자 단계가 경계 창(21행) 내내 못 돌았어도 일일 수집이 남긴 감지 기록으로 멈춘다 (25.1548 반박 [권고] 1)"""
+    from batch.services import adjust_drift as adjd
+
+    c = _장부(날[0])
+    _시세(c, 분할 + 22, 5_000.0)  # 창 안 실행 없이 창 밖으로
+    c.conn.execute("INSERT INTO settings (key, value, updated_at) VALUES (?, ?, 't')",
+                   [adjd.KR_ACTION_LOG_KEY, json.dumps({"1": 날[분할]})])  # fmt: skip
+    기록 = _돌림(c, monkeypatch, 분할 + 22)
+    assert 기록.get("action_sticky") == [1]
+    assert c.q("SELECT COUNT(*) FROM paper_orders WHERE side = 'sell'") == [(0,)]
+
+
+def test_멈춤은_분할_전에_산_계좌만() -> None:
+    """한 계좌가 분할 전에 샀다고 다른 계좌의 새 주문까지 막지 않는다 (25.1548 반박 [권고] 2)"""
+    c = Client(accounts=("A", "B"))
+    c.conn.execute("INSERT INTO paper_cash_flows (flow_date, amount_krw, kind, created_at, request_key)"
+                   " VALUES ('2026-06-01', 1000000, 'deposit', '2026-06-01T00:00:00+00:00', 'k1')")  # fmt: skip
+    for oid, aid in ((1, "A"), (2, "B")):
+        c.conn.execute("INSERT INTO paper_orders (id, account_id, market, stock_id, side, order_type, quantity, currency,"
+                       " decided_on, fill_session, reason, rule_version, status, created_at)"
+                       " VALUES (?, ?, 'KR', 1, 'buy', 'market', 1, 'KRW', '2026-07-01', '2026-07-02', 'r', 1, 'open', 't')",
+                       [oid, aid])  # fmt: skip
+    기록: dict = {}
+    job.fill_orders(c, "KR", "2026-07-02", [], [], None, None, set(), "t", 기록, frozen_by_account={"A": {1}})
+    상태 = dict(c.q("SELECT account_id, status FROM paper_orders ORDER BY id"))
+    assert 상태["A"] == "expired" and 상태["B"] != "expired"
+
+
+def test_미국_분할_재수집_대기_종목은_성과를_미룬다() -> None:
+    c = _장부(날[0])
+    for i, day in enumerate(날[:30]):
+        c.conn.execute("INSERT INTO prices (stock_id, date, open, high, low, close, volume, currency, source, fetched_at)"
+                       " VALUES (2, ?, 100, 100, 100, ?, 1000, 'USD', 't', 't')", [day, 100 if i < 20 else 50])  # fmt: skip
+        c.conn.execute("INSERT INTO index_prices (index_code, date, close, source, fetched_at) VALUES ('SP500', ?, 5000,"
+                       " 't', 't')", [day])  # fmt: skip
+    c.conn.execute("INSERT INTO paper_decisions (account_id, market, decided_on, stock_id, kind, reason, ref_close, ref_date,"
+                   " created_at, rule_version) VALUES ('B', 'US', ?, 2, 'buy', 't', 100, ?, 't', 1)", [날[0], 날[0]])  # fmt: skip
+    c.conn.execute("INSERT INTO adjust_refresh_queue (stock_id, detected_at, sample_date, ratio_before, ratio_after)"
+                   " VALUES (2, '2026-07-01', '2026-07-01', 1.0, 1.0)")  # fmt: skip
+    job.fill_outcomes(c, "US", 날[29], "t")
+    assert c.q("SELECT ret_5d, ret_20d FROM paper_decisions") == [(None, None)]
+    c.conn.execute("UPDATE adjust_refresh_queue SET done_at = 't'")
+    job.fill_outcomes(c, "US", 날[29], "t")
+    assert c.q("SELECT ret_5d FROM paper_decisions")[0][0] == pytest.approx(0.0)
+
+
+def test_기준일_수정주가가_비어도_앞_행으로_메운다() -> None:
+    """창 맨 앞(기준일) 수정주가 행이 비면 원 종가가 들어가 −50% 였다 (25.1548 반박 [참고] 5)"""
+    c = _장부(날[0])
+    for i, day in enumerate(날[:30]):
+        close = 10_000 if i < 분할 else 5_000
+        adj = None if i == 3 else 5000  # 기준일(날[3]) 행만 수정주가가 비었다
+        c.conn.execute("INSERT INTO prices (stock_id, date, open, high, low, close, adj_close, volume, currency, source,"
+                       " fetched_at) VALUES (1, ?, ?, ?, ?, ?, ?, 1000, 'KRW', 't', 't')",
+                       [day, close, close, close, close, adj])  # fmt: skip
+        c.conn.execute("INSERT INTO index_prices (index_code, date, close, source, fetched_at) VALUES ('KOSPI', ?, 2500,"
+                       " 't', 't')", [day])  # fmt: skip
+    c.conn.execute("INSERT INTO paper_decisions (account_id, market, decided_on, stock_id, kind, reason, ref_close, ref_date,"
+                   " created_at, rule_version) VALUES ('B', 'KR', ?, 1, 'buy', 't', 10000, ?, 't', 1)",
+                   [날[3], 날[3]])  # fmt: skip
+    job.fill_outcomes(c, "KR", 날[29], "t")
+    assert c.q("SELECT ret_5d FROM paper_decisions")[0][0] == pytest.approx(0.0)
