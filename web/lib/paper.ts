@@ -104,7 +104,7 @@ export function ruleText(a: AccountRule): string {
 export const BROKER_KEYS = { KR: "kis_vts", US: "kis_vts_us" } as const;
 export interface BrokerSummary {
   days: number; n: number; match_pct: number | null; both: number; internal_only: number; kis_only: number; neither: number;
-  partial: number; rejected: number; unknown: number; cleanup: number;
+  partial: number; rejected: number; unknown: number; cleanup: number; excluded?: number;
   slip_buy: { n: number; avg: number | null }; slip_sell: { n: number; avg: number | null };
   reject_reasons: Record<string, number>;
 }
@@ -115,17 +115,22 @@ export function brokerLines(b: BrokerLatest | null | undefined): string[] {
   const s = b.summary;
   const out: string[] = [];
   if (s?.n) {
-    out.push(`지난 ${s.days}일 주문 ${s.n} · 체결 일치 ${(s.match_pct ?? 0).toFixed(0)}% (둘 다 참 ${s.both} · 가상만 참 ${s.internal_only} · KIS만 참 ${s.kis_only} · 둘 다 안 참 ${s.neither}) · 부분 체결 ${s.partial} · 거부 ${s.rejected}`);
+    out.push(`지난 ${s.days}일 주문 ${s.n} · 체결 일치 ${(s.match_pct ?? 0).toFixed(0)}% (둘 다 참 ${s.both} · 가상만 참 ${s.internal_only} · KIS만 참 ${s.kis_only} · 둘 다 안 참 ${s.neither}) · 부분 체결 ${s.partial}`);
     const 칸 = (x: { n: number; avg: number | null }, 이름: string) =>
       x.n && x.avg != null ? `${이름} ${x.avg >= 0 ? "+" : ""}${x.avg.toFixed(2)}% (n=${x.n})` : `${이름} 표본 없음`;
     out.push(`가격(+ 면 가상모의투자가 낙관): ${칸(s.slip_buy, "매수")} · ${칸(s.slip_sell, "매도")}`);
-    const 까닭 = Object.entries(s.reject_reasons ?? {});
-    if (까닭.length) out.push(`거부 까닭: ${까닭.map(([k, v]) => `${k} ${v}`).join(" · ")}`);
+  } else if (s?.rejected || s?.excluded) {
+    out.push("체결을 견줄 주문은 아직 없습니다 — 거부·표본 밖 주문만 있습니다(아래).");
   } else {
     out.push("아직 끝난 베낀 주문이 없습니다 — 낸 다음 거래일의 같은 시장 배치가 체결을 맞춥니다.");
   }
+  // 거부는 체결 견줌 표본 밖이라 n 과 따로 (25.1564)
+  const 까닭 = Object.entries(s?.reject_reasons ?? {});
+  if (까닭.length) out.push(`거부 까닭: ${까닭.map(([k, v]) => `${k} ${v}`).join(" · ")}`);
   // 배치 `compare_lines` 와 같은 끝 줄 — 모름(보냈는지 모르는 주문)·정리 주문 (25.1483, 감사 [권장] 4)
   const 끝 = [] as string[];
+  if (s?.rejected) 끝.push(`거부 ${s.rejected}`);
+  if (s?.excluded) 끝.push(`표본 밖 ${s.excluded}(가상의 판정 아닌 만료·장 열린 뒤 시장가)`);
   if (s?.unknown) 끝.push(`모름 ${s.unknown}`);
   if (s?.cleanup) 끝.push(`정리 주문 ${s.cleanup}`);
   끝.push(`잔고가 어긋난 종목 ${Object.keys(b.diff ?? {}).length} (${b.as_of} 기준)`);

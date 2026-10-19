@@ -422,8 +422,12 @@ def test_compare_counts_match_and_signed_slippage() -> None:
     assert 줄[0] == "[KIS모의투자 — H 주문 베끼기, 지난 28일]"
     assert "체결 일치 50% (둘 다 참 2 · 가상만 참 1 · KIS만 참 2 · 둘 다 안 참 1)" in 줄[1]
     assert 줄[2] == "  가격(+ 면 가상모의투자가 낙관): 매수 +1.00% (n=1) · 매도 +1.00% (n=1)"
-    assert 줄[-1] == "  모름 1 · 정리 주문 1 · 잔고가 어긋난 종목 2 (2026-10-19)"
+    assert 줄[-1] == "  거부 1 · 모름 1 · 정리 주문 1 · 잔고가 어긋난 종목 2 (2026-10-19)"
     assert bm.compare_lines(bm.compare([]), 0, None) == []
+    # 거부만 있는 주도 요약을 낸다 (25.1564 — 예전엔 빈 목록이라 주간 요약에서 KIS 절이 사라졌다)
+    거부만 = bm.compare([_줄("buy", "rejected", "filled", msg="EGW00201 초당 거래건수 초과") for _ in range(5)])
+    줄 = bm.compare_lines(거부만, 0, "2026-10-20")
+    assert 줄[-1] == "  거부 5 · 잔고가 어긋난 종목 0 (2026-10-20)" and any("EGW00201 5" in x for x in 줄)
 
 
 def test_판정_아닌_가상_만료와_거부는_일치율_표본_밖() -> None:
@@ -515,6 +519,29 @@ def test_연결_뒤_거부된_매수는_연결_전_보유로_숨지_않는다(c:
     c.conn.execute("DELETE FROM paper_orders WHERE id = 102")  # 3 을 파는 주문은 이 시험에서 빼 둔다
     기록 = job.run(c, "KR", _at("08:40"), session=_Sess(), sleep=lambda _x: None, clock=lambda: _at("08:40"))
     assert 기록["diff"] == 1 and 기록.get("before_link", 0) == 0
+
+
+def test_연결_전부터_든_종목의_거부된_회차는_어긋남이_아니다(c: Client) -> None:
+    """연결 전부터 든 종목 3 의 연결 뒤 회차를 KIS 가 거부하고 가상도 안 찼다 — 둘 다 새로 산 게 없는데 영구 어긋남으로
+    세던 것 (25.1564 — 25.1561 반박 [권고] B). 연결 전 보유는 베끼기 시작한 날 전에 든 것으로 가른다"""
+    c.conn.execute("INSERT INTO paper_orders (id, account_id, market, stock_id, side, order_type, quantity, currency,"
+                   " decided_on, fill_session, reason, rule_version, status, created_at)"
+                   " VALUES (91, 'B', 'KR', 3, 'buy', 'market', 2, 'KRW', '2026-10-13', '2026-10-14', 'r', 1,"
+                   " 'filled', 't')")  # fmt: skip
+    c.conn.execute("INSERT INTO paper_fills (order_id, account_id, stock_id, side, fill_date, price, quantity, currency,"
+                   " fx_rate, fee, tax, slippage, cash_krw, created_at)"
+                   " VALUES (91, 'B', 3, 'buy', '2026-10-14', 100, 2, 'KRW', 1, 0, 0, 0, -200, 't')")  # fmt: skip
+    c.conn.execute("INSERT INTO paper_orders (id, account_id, market, stock_id, side, order_type, limit_price, quantity,"
+                   " currency, decided_on, fill_session, reason, rule_version, status, close_note, created_at)"
+                   " VALUES (93, 'B', 'KR', 3, 'buy', 'limit', 90, 1, 'KRW', '2026-10-15', '2026-10-16', 'r', 1,"
+                   " 'expired', '종가 100 > 회차 가격 90', 't')")  # fmt: skip
+    c.conn.execute("INSERT INTO paper_broker_orders (broker, paper_order_id, account_id, market, stock_id, code, side,"
+                   " order_type, quantity, trade_date, reason, status, message, source, created_at)"
+                   " VALUES ('kis_vts', 93, 'B', 'KR', 3, '000660', 'buy', 'limit', 1, '2026-10-16', '베낌',"
+                   " 'rejected', 'EGW00201 초당 거래건수 초과', 't', 't')")  # fmt: skip
+    c.conn.execute("DELETE FROM paper_orders WHERE id = 102")
+    기록 = job.run(c, "KR", _at("08:40"), session=_Sess(), sleep=lambda _x: None, clock=lambda: _at("08:40"))
+    assert 기록["diff"] == 0 and 기록["before_link"] == 1
 
 
 def test_partial_keys_are_named_and_alerted() -> None:

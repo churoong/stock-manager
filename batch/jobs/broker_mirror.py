@@ -96,9 +96,14 @@ OLD_SQL = (
 BOUGHT_SQL = (
     "SELECT DISTINCT stock_id FROM paper_broker_orders WHERE broker = ? AND side = 'buy' AND status <> 'rejected'"
 )
-#: 베끼려 한 적 있는 매수 종목(거부 포함) — "연결 전 보유" 를 가른다. 거부를 빼면 연결 뒤 KIS 가 거부한
-#: 매수(가상은 참)가 연결 전 보유로 숨어 어긋남이 0 으로 보였다(25.1561 — KIS 경로 감사 [권고] 2)
-ATTEMPTED_SQL = "SELECT DISTINCT stock_id FROM paper_broker_orders WHERE broker = ? AND side = 'buy'"
+#: 이 증권사 칸이 이 계좌를 베끼기 시작한 날 — "연결 전 보유" 를 가르는 잣대(25.1564)
+LINK_DATE_SQL = "SELECT MIN(trade_date) FROM paper_broker_orders WHERE broker = ? AND account_id = ?"
+#: 그날 **전** 체결로 든 가상 수량(연결 때 이미 들고 있던 몫)
+HELD_BEFORE_SQL = (
+    "SELECT f.stock_id, SUM(CASE WHEN f.side = 'buy' THEN f.quantity ELSE -f.quantity END) AS q FROM paper_fills f"
+    " JOIN stocks s ON s.id = f.stock_id WHERE f.account_id = ? AND s.country = ? AND f.fill_date < ?"
+    " GROUP BY f.stock_id"
+)
 #: 종목마다 마지막으로 산 계좌(정리 줄의 계좌, 25.1517) — id 순이라 뒤 줄이 이긴다
 BOUGHT_BY_SQL = (
     "SELECT stock_id, account_id FROM paper_broker_orders WHERE broker = ? AND side = 'buy' AND status <> 'rejected'"
@@ -352,8 +357,15 @@ def run(
     오늘산0 = {int(r[0]): int(r[1] or 0)
               for r in client.execute(BOUGHT_TODAY_SQL, [증권사, 오늘.isoformat()]).rows}  # fmt: skip
     증권수 = {k: v[0] - 오늘산0.get(k, 0) for k, v in 증권.items()}
-    베낀적 = {int(r[0]) for r in client.execute(ATTEMPTED_SQL, [증권사]).rows}
-    연결전 = sorted(sid for sid in 내부 if sid not in 베낀적 and sid not in 증권)
+    # "연결 전 보유" = **베끼기를 시작한 날 전에 이미 들고 있던** 가상 종목(25.1564). 예전 "산 적 있는 종목(거부 제외)"
+    # 은 연결 뒤 거부된 매수가 숨었고(25.1561), 고친 "베끼려 한 적 있는 종목(거부 포함)" 은 연결 전부터 든 종목의
+    # 거부된 2·3회차가 그 종목 전체를 영구 어긋남으로 만들었다(25.1561 반박 [권고] B). 날로 가르면 둘 다 없다 —
+    # 연결 뒤 산 가상 보유는 상한·코드 없음으로 보내지 못한 것까지 늘 대 본다(같은 반박 [참고] 4)
+    연결일 = client.execute(LINK_DATE_SQL, [증권사, 베낌]).rows
+    연결날 = str(연결일[0][0]) if 연결일 and 연결일[0][0] else None
+    연결때 = ({int(r["stock_id"]) for r in client.execute(HELD_BEFORE_SQL, [베낌, market, 연결날]).dicts()
+             if int(r["q"] or 0) > 0} if 연결날 else set(내부))  # fmt: skip
+    연결전 = sorted(sid for sid in 내부 if sid in 연결때 and sid not in 증권)
     어긋남 = bm.holdings_diff({k: q for k, q in 증권수.items() if q > 0},
                             {k: q for k, q in 내부.items() if k not in 연결전})  # fmt: skip
     부터 = (오늘 - timedelta(days=bm.COMPARE_DAYS)).isoformat()

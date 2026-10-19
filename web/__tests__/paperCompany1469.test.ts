@@ -83,10 +83,19 @@ describe("투자위원회 탭", () => {
       days: 28, n: 6, match_pct: 50, both: 2, internal_only: 1, kis_only: 2, neither: 1, partial: 1, rejected: 1, unknown: 1, cleanup: 1,
       slip_buy: { n: 1, avg: 1 }, slip_sell: { n: 0, avg: null }, reject_reasons: { APBK0919: 1 } } });
     expect(줄).toEqual([
-      "지난 28일 주문 6 · 체결 일치 50% (둘 다 참 2 · 가상만 참 1 · KIS만 참 2 · 둘 다 안 참 1) · 부분 체결 1 · 거부 1",
+      "지난 28일 주문 6 · 체결 일치 50% (둘 다 참 2 · 가상만 참 1 · KIS만 참 2 · 둘 다 안 참 1) · 부분 체결 1",
       "가격(+ 면 가상모의투자가 낙관): 매수 +1.00% (n=1) · 매도 표본 없음",
       "거부 까닭: APBK0919 1",
-      "모름 1 · 정리 주문 1 · 잔고가 어긋난 종목 1 (2026-10-19 기준)",  // 배치 compare_lines 와 같은 끝 줄 (25.1483)
+      "거부 1 · 모름 1 · 정리 주문 1 · 잔고가 어긋난 종목 1 (2026-10-19 기준)",  // 배치 compare_lines 와 같은 끝 줄 (25.1483·25.1564)
+    ]);
+    // 거부만 있는 주 — "주문 없음" 이 아니라 거부를 보인다 (25.1564)
+    const 거부만 = brokerLines({ as_of: "2026-10-20", diff: {}, summary: {
+      days: 28, n: 0, match_pct: null, both: 0, internal_only: 0, kis_only: 0, neither: 0, partial: 0, rejected: 5, unknown: 0, cleanup: 0,
+      excluded: 2, slip_buy: { n: 0, avg: null }, slip_sell: { n: 0, avg: null }, reject_reasons: { EGW00201: 5 } } });
+    expect(거부만).toEqual([
+      "체결을 견줄 주문은 아직 없습니다 — 거부·표본 밖 주문만 있습니다(아래).",
+      "거부 까닭: EGW00201 5",
+      "거부 5 · 표본 밖 2(가상의 판정 아닌 만료·장 열린 뒤 시장가) · 잔고가 어긋난 종목 0 (2026-10-20 기준)",
     ]);
   });
 

@@ -445,14 +445,15 @@ def diverge(now: dict[str, Any] | None, keys: list[str], market: str) -> str | N
 def compare_lines(
     s: dict[str, Any] | None, diff_count: int | None, as_of: str | None, account: str = "H",
 ) -> list[str]:
-    """주간 요약 몇 줄. 끝난 베낀 주문이 없으면 빈 목록."""
-    if not s or not (s.get("n") or s.get("unknown") or s.get("cleanup")):
+    """주간 요약 몇 줄. 끝난 베낀 주문이 없으면 빈 목록. 거부·표본 밖은 체결 견줌(n)과 따로 끝 줄에 — 거부만 있는 주에
+    "주문 없음" 으로 보이던 것(25.1564, 25.1561 반박 [권고] A)"""
+    if not s or not (s.get("n") or s.get("unknown") or s.get("cleanup") or s.get("rejected") or s.get("excluded")):
         return []
     out = [f"[KIS모의투자 — {account} 주문 베끼기, 지난 {s['days']}일]"]
     if s.get("n"):
         out.append(f"  주문 {s['n']} · 체결 일치 {s['match_pct']:.0f}% (둘 다 참 {s['both']}"
                    f" · 가상만 참 {s['internal_only']} · KIS만 참 {s['kis_only']} · 둘 다 안 참 {s['neither']})"
-                   f" · 부분 체결 {s['partial']} · 거부 {s['rejected']}")  # fmt: skip
+                   f" · 부분 체결 {s['partial']}")  # fmt: skip
 
     def 칸(x: dict[str, Any], 이름: str) -> str:
         return f"{이름} {x['avg']:+.2f}% (n={x['n']})" if x.get("n") else f"{이름} 표본 없음"
@@ -461,6 +462,10 @@ def compare_lines(
     if s.get("reject_reasons"):
         out.append("  거부 까닭: " + " · ".join(f"{k} {v}" for k, v in s["reject_reasons"].items()))
     끝 = []
+    if s.get("rejected"):
+        끝.append(f"거부 {s['rejected']}")
+    if s.get("excluded"):
+        끝.append(f"표본 밖 {s['excluded']}(가상의 판정 아닌 만료·장 열린 뒤 시장가)")
     if s.get("unknown"):
         끝.append(f"모름 {s['unknown']}")
     if s.get("cleanup"):
