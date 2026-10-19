@@ -10,6 +10,7 @@ import {
   luckText, groupTags, staleVersionNote,
   stressVersionNote,
 } from "@/lib/backtest";
+import { coreLines, coreNotes, type CoreRunRow } from "@/lib/coreBacktest";
 import { readJson } from "@/lib/http";
 import { readSavedCountry, saveCountry, userTimeOf, type Country } from "@/lib/market";
 import { pct, pctClass, sizePct } from "@/lib/portfolio";
@@ -30,6 +31,8 @@ import { pct, pctClass, sizePct } from "@/lib/portfolio";
 
 interface Data {
   market: string;
+  /** 핵심 H 다년 백테스트(국내, 25.1545) — 마지막 실행 기록과 그 묶음 행 */
+  core?: { run: { status: string; started_at: string; finished_at: string | null; step_log: string | null; error_text: string | null }; runs: CoreRunRow[] } | null;
   group_id: string | null;
   runs: BacktestRun[];
   curves: CurvePoint[];
@@ -150,8 +153,53 @@ export default function BacktestView() {
         </>
       )}
 
+      {data?.core ? <CoreCard core={data.core} /> : null}
+
       <Stress data={data} />
     </div>
+  );
+}
+
+/** 핵심 H 다년 백테스트 결과 (docs/backtest.md 10장, 25.1545) — 판정·변형별 운 판정·결정 단위 판정. 화면은 계산하지 않는다 */
+function CoreCard({ core }: { core: NonNullable<Data["core"]> }) {
+  const lines = coreLines(core.runs);
+  const notes = coreNotes(safeJson(core.run.step_log ?? "{}"));
+  return (
+    <section className="mb-4 mt-4 rounded-xl border border-slate-200 px-3 py-2 text-xs dark:border-slate-800">
+      <h3 className="text-sm font-semibold">핵심 H 다년 백테스트</h3>
+      <p className="mt-0.5 text-slate-500">
+        마지막 실행 {core.run.started_at.slice(0, 16).replace("T", " ")} UTC · {statusLabel(core.run.status)}
+        {core.run.status !== "success" && core.run.error_text ? ` — ${core.run.error_text.slice(0, 160)}` : ""}
+      </p>
+      {notes.length ? (
+        <ul className="mt-1 list-disc space-y-0.5 pl-4">
+          {notes.map((n) => (
+            <li key={n}>{n}</li>
+          ))}
+        </ul>
+      ) : null}
+      {lines.length ? (
+        <ul className="mt-2 flex flex-col gap-2">
+          {lines.map((l) => (
+            <li key={l.strategy} className="rounded-lg border border-slate-100 px-2 py-1.5 dark:border-slate-800">
+              <p className="font-medium">{l.label}</p>
+              <dl className="mt-0.5 grid grid-cols-2 gap-x-3 gap-y-0.5 sm:grid-cols-4">
+                <div className="flex justify-between gap-1"><dt className="text-slate-400">CAGR</dt><dd className="tabular-nums">{pct(l.cagr)}</dd></div>
+                <div className="flex justify-between gap-1"><dt className="text-slate-400">MDD</dt><dd className="tabular-nums">{pct(l.mdd)}</dd></div>
+                <div className="flex justify-between gap-1"><dt className="text-slate-400">초과 CAGR</dt><dd className="tabular-nums">{pct(l.excess)}</dd></div>
+                <div className="flex justify-between gap-1" title={l.luck.title ?? undefined}><dt className="text-slate-400">우연일 확률</dt><dd className="tabular-nums">{l.luck.cell}</dd></div>
+              </dl>
+              <p className="mt-0.5 text-slate-500">무작위 대조 분위: {l.pick}</p>
+              <p className="text-slate-500">관문 잣대(안 산 새 후보 안 분위): {l.gate}</p>
+              <p className="text-slate-500">판 뒤 20일(낮을수록 잘 판 것): {l.afterSell}</p>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-1 text-slate-500">이 실행의 결과 행이 없습니다(건너뜀·실패면 행을 남기지 않습니다).</p>
+      )}
+      <p className="mt-1 text-slate-400">분위는 무작위면 50 입니다. 판정은 첫 국내 기본 실행 하나로만 보고, 결과를 보고 규칙을 고치지 않습니다.</p>
+    </section>
   );
 }
 

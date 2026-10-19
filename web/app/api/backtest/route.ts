@@ -5,6 +5,7 @@ import {
   curvesSql, groupNotice, pickCurveRuns, stocksSql, stressNoSignalNote,
   type BacktestRun, type BatchRunRow, type CurvePoint, type StressRun,
 } from "@/lib/backtest";
+import { LATEST_CORE_RUN, type CoreRunRow } from "@/lib/coreBacktest";
 
 /**
  * 백테스트·스트레스 결과 조회 (docs/backtest.md, docs/stress.md).
@@ -60,8 +61,28 @@ export async function GET(request: Request) {
       }
     }
 
+    // 핵심 H 다년 백테스트(국내만, 25.1545) — 마지막 실행 기록 한 줄과 그 묶음 행. 실패해도 나머지 화면은 그대로
+    let core: { run: Record<string, unknown>; runs: CoreRunRow[] } | null = null;
+    if (market === "KR") {
+      try {
+        const run = rowsToObjects<Record<string, unknown>>(await execute(LATEST_CORE_RUN))[0];
+        if (run) {
+          let g: string | null = null;
+          try {
+            g = (JSON.parse(String(run.step_log ?? "{}")) as { group_id?: string }).group_id ?? null;
+          } catch {
+            g = null;
+          }
+          core = { run, runs: g ? rowsToObjects<CoreRunRow>(await execute(RUNS_IN_GROUP, [g, "KR"])) : [] };
+        }
+      } catch {
+        core = null;
+      }
+    }
+
     return NextResponse.json({
       market,
+      core,
       group_id: groupId,
       runs,
       curves,
