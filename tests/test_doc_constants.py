@@ -465,6 +465,19 @@ class Test핵심_H_조각_1b:
         검사(BACKTEST, f"지수는 늘 {cbt.BENCH_INDEX}", "원장 지수")
 
 
+class Test핵심_H_조각_1c:
+    """핵심 H 장부형 전략 다섯 (docs/backtest.md 10장, docs/infra.md 25.1532)."""
+
+    def test_상수(self) -> None:
+        from batch.services import core_strategy as cst
+
+        for 이름, v in cst.VARIANTS.items():
+            검사(BACKTEST, f"`{이름}` = {v.account}({v.sell_rule}·{v.entry}·상위 {v.top_n}·{v.selection})", "변형 칸")
+        검사(BACKTEST, f"`NOTIONAL_EQUITY` = {cst.NOTIONAL_EQUITY:g} 원", "명목 자본")
+        n = pp.REBUY_COOLDOWN_SESSIONS
+        검사(BACKTEST, f"판 날 s 부터 s+{n} 까지 막고 s+{n + 1} 에 산다(판 뒤 쉼 {n}거래일)", "판 뒤 쉼")
+
+
 class Test사후_분석:
     """틀린 추천 사후 분석 (docs/reports.md 3.8, docs/infra.md 25.998)."""
 
@@ -719,7 +732,7 @@ class Test밸류_분모:
     "pick_history", "etf_accounts", "etf_tilt", "after_hours", "broker_stats", "disclosure_reaction", "luck", "postmortem",
     "divergence", "tax_sim", "verdict", "forecast_track", "patterns", "insights", "history",
     "event_history", "simulation", "candidate_factors", "cb_overhang", "buy_thesis", "plan_fill", "target_units", "paper", "risk_gate", "execution_quality", "company",
-    "broker_mirror", "holding", "desk", "core_backtest",
+    "broker_mirror", "holding", "desk", "core_backtest", "core_strategy",
 )  # fmt: skip
 
 #: 아직 그물 밖인 모듈과 **왜 아직인지**. 하나씩 줄여 간다

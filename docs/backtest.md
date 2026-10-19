@@ -607,7 +607,29 @@ Turso 월 읽기 진도 문(추정 500만 행)을 지나야 돈다 — 미뤄지
        원장 수익률은 창의 수정종가(운영은 원 종가 — 분할이 끼면 운영 쪽이 틀린다) · 신호 줄의 종가도 수정종가 · 사업보고서 뒤 분기 참고 행·내부자 참고 행 없음(근거표 참고 행일 뿐 판정·표에 안 쓴다) ·
        시장 절반 넘게 묵으면 하루를 건너뛰는 운영 규칙(`too_stale`·점수 묵음)은 없다(엔진 날짜 축이 드문 날을 뺀다) · 통화를 모르는 옛 스냅샷 자본은 남긴다(운영 SQL 은 NULL 통화를 뺀다)
      - 1d 에 넘길 것: `jobs/backtest._위험_캐시` 가 주마다 쌓인다(전 종목 × 주 수) — 실행 연결에서 비우는 자리를 둔다
-   - 조각 1c 변형 다섯의 매도(`sell_flags` 기본 목표·기간, `pp.trend_exit`)·재매수 쉼 5세션·크기(`weight_pct`×국면 배수, 종목 10%·섹터 30%, 현금 모자라면 통째로 건너뜀 — 운영 `build_portfolio`)
+   - 조각 1c ✅(25.1532, 검증 전) `batch/services/core_strategy.py`(순수) — 변형 다섯의 **장부형 전략**. 날마다 `bt.LedgerOrders(sells, buys)`
+     - API: `make_core_strategy(variant, market, *, sessions, costs=None, max_sector_pct=30.0) -> CoreStrategy`(`bt.WeightsAt` — `bt.simulate(prices, dates, dates, …)`,
+       결정은 **날마다**·변형마다 새 `CoreMarket`) · `CoreStrategy.lots`(종목 → `Lot`: 첫 매수일·기간·주당 원가·`substitute_of`) · `.sold`(판 체결일) · `.log`(`DayLog`: 매도와 사유·
+       산 비중·운영 결정 원장 모양의 buy·skip·blocked·쉼 목록·하루 수익·무작위 대체) · `VARIANTS` · `NOTIONAL_EQUITY`
+     - 변형(운영 계좌 칸 — 마이그레이션 0070·0075·0082·0083): `core_h` = H(trend·tranche·상위 5·weighted) · `core_g` = G(trend·tranche·상위 5·signal) ·
+       `core_b` = B(core·tranche·상위 5·signal) · `core_r1` = R1(core·open·상위 5·random) · `core_r2` = R2(core·open·상위 5·random)
+     - 운영 대응(`jobs/paper.run_step` 한 계좌의 하루 — 함수를 **그대로 부른다**): 매도 `sell_flags.evaluate`(`DEFAULT_TARGETS`·`MAX_HOLDING_DAYS`, 기간은 첫 매수 기간,
+       달력일은 첫 매수일부터) + trend 는 `jobs/paper._추적손절`(고점 = 첫 매수일부터 cutoff 까지 종가 최댓값, `pp.trend_exit`) → `pp.sells_for`(`SELL_RULES`) ·
+       손절은 계좌 규칙 전 판정에서 모아 더 사지 않음 · 판 뒤 쉼은 운영 `쉼_시작`(리포트 거래일 = cutoff 에서 `REBUY_COOLDOWN_SESSIONS − 1` 거래일 앞) 뒤 체결 매도 + 오늘 매도 —
+       결정일로 세면 판 날 s 부터 s+5 까지 막고 s+6 에 산다(판 뒤 쉼 5거래일) · 매수 `jobs/paper.buy_orders`(`rescale_rows` → `build_portfolio` → `pp.size_buys`; H 는 `pick_rows`
+       미리 고름, G·B·R 은 `select_top` 상위 5, R 은 `random_substitute` — 씨앗 `pp.random_order(pool, "R1|KR|신호 종목")`, 든 대체 종목을 잇고 쉼이면 자리를 비움) ·
+       크기 = 신호 `weight_pct`(국면 배수가 이미 곱해짐) × 자본, 보유는 그 목표까지만, 종목 10%·섹터 30%, 남은 현금보다 크면 **통째로 건너뜀** · 현금은 cutoff 평가(오늘 판 몫은
+       보유로 남아 있다 — 운영은 시가 매도 체결 전 아침에 주문) · `risk_gate.gate`(하루 손실·상한 재검사·현금·묵은 종가) · 원가는 운영 `make_fill`(지정가는 수수료만, 시가 일괄은 슬리피지도)
+     - 운영 함수는 DB 클라이언트를 받는다 — `_ViewClient` 가 cutoff 로 자른 `PriceView` 로 마지막 종가·고점·기업행위 읽기에만 답하고 모르는 읽기는 `LookupError` 로 멈춘다
+     - 장부 맞추기: 산 날의 원가는 다음 결정에서(그날 종가가 창에 들어온 뒤) 정한다 — 엔진이 못 산 매수(체결가 없음·정지)는 버리고, 엔진이 판 보유(상장폐지)는 지운다,
+       정지로 못 판 매도는 날마다 다시 낸다("미룬 매도"). 더 산 몫의 평균 원가는 산 날 종가로 잰 비중에서 주식 수 비율(옛 (h − w)/h)
+     - H 원장: `market.at(view, day)` 를 결정일마다 한 번 — 고른 종목은 산 것·쉼·상한·현금으로 못 산 것 모두 운영처럼 표가 붙은 줄로 남는다. 표 없이 적히는 운영 결정(사면 바로 매도
+       skip)은 `PREBUY_CHECK_RULES`(all·value·momentum)에만 있어 trend·core 변형에는 없다 — `discard` 를 부를 자리가 없다(그 규칙 변형은 `NotImplementedError`)
+     - 운영과 다른 것(알고 둔다): 체결은 t 종가 전량(운영 3회 분할 지정가 하루짜리·시가 시장가 — 체결률 과대) · 상관 축소 없음(`price_series` 비움) · 명목 자본
+       `NOTIONAL_EQUITY` = 1e+12 원이라 정수 주·최소 주문 금액이 묶이지 않는다 · 기업행위 멈춤 없음(수정주가) · 정지 매도의 20거래일 청산 없음 · 하루 손실 관문의 수익률은
+       직전 cutoff 비중 × 종가 변화(비용 뺌 없음) · 매수 비중이 엔진 자리보다 크면(오늘 오른 보유) 엔진이 줄이는데 원가 평균은 줄이기 전 비중으로 잰다
+     - 시험(`tests/test_core_strategy_1532.py`): 손으로 센 장부 사례(목표·추적·93일째 기간초과·손절·쉼·목표까지만·10%·30%·현금 모자람·오늘 판 돈·수수료 원가), R 씨앗 = 운영,
+       다섯 변형 끝까지(날마다 장부 = 엔진 보유), 결정성, 미끼(cutoff 뒤 가격 → 그 전 주문 불변, 양성 대조)
    - 조각 1d 실행 연결·저장·`backtest.yml`·DSR·결정 단위 분위·반 나눈 기간
    - 계획 검토가 찾은 어긋남(25.1526): 운영 종합 점수는 감성 10% 를 넣고 백테스트 `run` 은 5팩터 균등이라 안건 순서·B 상위 5 가 다를 수 있다 · 운영에는 **최대 종목 수가 없다**(현금·종목 10% 상한만) ·
      `pit_equities` 는 자본이 없으면 옛 해로 물러나고 운영 `_latest_equity` 는 모름(25.1172) — PBR 이 다를 수 있다 · 체결은 t 종가(운영은 시가 매도·지정가 매수) — 크기·체결이 낙관 쪽
