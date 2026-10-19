@@ -69,7 +69,7 @@ def test_시도_수_하한은_더_보수적으로만() -> None:
     셋 = luck.judge(묶음)
     하한 = luck.judge(묶음, n_floor=bt_job.REGISTERED_TRIALS)
     for k in 묶음:
-        assert 하한[k]["n_trials"] == 12 and 하한[k]["n_trials_run"] == 3
+        assert 하한[k]["n_trials"] == bt_job.REGISTERED_TRIALS == 15 and 하한[k]["n_trials_run"] == 3
         assert 하한[k]["sr_star"] >= 셋[k]["sr_star"]
         assert 하한[k]["luck_pct"] >= 셋[k]["luck_pct"]
     assert "이 실행 3개" in luck.line(하한["s0"])
@@ -77,5 +77,10 @@ def test_시도_수_하한은_더_보수적으로만() -> None:
     열둘 = {f"s{i}": [rnd.gauss(0.002 * i, 0.03) for _ in range(48)] for i in range(12)}
     assert luck.judge(열둘) == luck.judge(열둘, n_floor=12)
     assert "이 실행" not in luck.line(luck.judge(열둘, n_floor=12)["s1"])
-    등록 = len(bt_job.STRATEGIES) - 1 + len(bt_job.DEFAULT_LONG_THRESHOLDS)
+    # 핵심 H 등록 전략(무작위 대조 R 은 시도가 아니다)을 더한다 (25.1542)
+    from batch.services import core_strategy as cs
+
+    핵심 = [v for v in cs.VARIANTS if not v.startswith("core_r")]
+    assert len(핵심) == bt_job.CORE_REGISTERED_TRIALS
+    등록 = len(bt_job.STRATEGIES) - 1 + len(bt_job.DEFAULT_LONG_THRESHOLDS) + len(핵심)
     assert 등록 == bt_job.REGISTERED_TRIALS

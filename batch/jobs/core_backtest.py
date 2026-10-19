@@ -35,11 +35,12 @@ from batch.jobs import backtest as jb
 from batch.jobs import metrics as metrics_job
 from batch.services import backtest as bt
 from batch.services import core_backtest as cb
+from batch.services import core_evidence as ce
 from batch.services import core_strategy as cs
 from batch.services import holding_eq as heq
+from batch.services import luck, trend
 from batch.services import metrics as m
 from batch.services import pit_universe as pit
-from batch.services import trend
 from batch.services import universe as uni
 
 log = logging.getLogger("core_backtest")
@@ -205,6 +206,7 @@ def run_core(
         )  # fmt: skip
         shared = cb.SharedDays(market_)
         results: dict[str, bt.BacktestResult] = {}
+        기록: dict[str, list[cs.DayLog]] = {}  # 변형 → 하루 기록(결정 단위 판정, 조각 1e)
         시간: dict[str, float] = {}
         for i, variant in enumerate(variants):
             try:
@@ -215,6 +217,7 @@ def run_core(
             strategy = cs.make_core_strategy(variant, shared.reader(), sessions=sessions, costs=costs)
             results[variant] = bt.simulate(prices, dates, dates, strategy, costs, has_delisted=delisted,
                                            turnover=turnover, dividends_included=False)  # fmt: skip
+            기록[variant] = strategy.log
             시간[variant] = round(time.perf_counter() - t1, 1)
             print(f"  {variant:8s} 최종 {results[variant].curve[-1][1]:.3f}  ({시간[variant]:.0f}초)", flush=True)
 
@@ -225,19 +228,34 @@ def run_core(
             costs, has_delisted=delisted, turnover=turnover,
         )  # fmt: skip
         무위험 = jb.risk_free_with_warning(client, country, warnings)
+        # 조각 1e (25.1542) — 운 판정(DSR): 월 백테스트와 같은 `luck.judge`, 시도 수 하한은 핵심 계열을 더한 등록 수.
+        # 무작위 대조(R1·R2)도 V 에 들어간다(같은 실행에서 시험한 곡선) — 시도 수 하한에는 세지 않는다
+        벤치월 = luck.monthly_returns(벤치.curve)
+        운 = luck.judge({v: luck.excess_series(luck.monthly_returns(r.curve), 벤치월) for v, r in results.items()},
+                       n_floor=jb.REGISTERED_TRIALS)  # fmt: skip
+        # 결정 단위 판정 — 매수마다 같은 날 시점 유니버스 무작위 20종목 안 분위
+        # (가상모의투자 가상 대조와 같은 함수, 읽기 0)
+        종가 = ce.Closes(prices)
+        증거 = {v: ce.evidence(기록[v], 종가, eligible_at, indexes.get(cb.BENCH_INDEX) or {}) for v in results}
+        짝 = ce.pairs(증거)
         반: dict[str, dict[str, Any]] = {}
         for variant, result in results.items():
             summary = bt.summarize(result, 벤치, risk_free_annual=무위험)
             반[variant] = split_half(result.curve)
+            e = 증거[variant]
             extra = {"split_half": 반[variant], "benchmark": BENCHMARK_NOTE, "risk_every": risk_every,
-                     "account": cs.VARIANTS[variant].account}  # fmt: skip
+                     "account": cs.VARIANTS[variant].account,
+                     "evidence": {k: e[k] for k in ("buys", "scored", "no_control", "days", "n_blocks", "mean", "se",
+                                                    "lower")}}  # fmt: skip
             jb.store_run(client, market, variant, result, summary, cs.VARIANTS[variant].top_n, group_id, warnings,
-                         now, rebalance=REBALANCE, extra=extra)  # fmt: skip
+                         now, 운.get(variant), rebalance=REBALANCE, extra=extra)  # fmt: skip
             mt = summary.metrics
             앞, 뒤 = 반[variant].get("first", {}), 반[variant].get("second", {})
             print(f"  요약 {variant:8s} CAGR {jb._pct(mt.cagr)}  MDD {jb._pct(mt.mdd)}  샤프 {jb._fmt(mt.sharpe)}"
                   f"  초과 {jb._pct(summary.excess_cagr)}  앞 반 {jb._pct(앞.get('cagr'))}/{jb._pct(앞.get('mdd'))}"
-                  f"  뒤 반 {jb._pct(뒤.get('cagr'))}/{jb._pct(뒤.get('mdd'))}")  # fmt: skip
+                  f"  뒤 반 {jb._pct(뒤.get('cagr'))}/{jb._pct(뒤.get('mdd'))}"
+                  f"  분위 하한 {jb._fmt(e.get('lower'))}(묶음 {e.get('n_blocks')})"
+                  f"  {luck.line(운.get(variant))}")  # fmt: skip
 
         # H 가중 대 동일가중 대조(25.1538, 31회차 P1) — 나눠 읽은 하루 재료와 메모리 원장으로, 읽기 0. 진단이 깨져도
         # 변형 결과는 이미 저장됐으니 실행을 죽이지 않고 기록에 남긴다
@@ -265,6 +283,8 @@ def run_core(
                            "days_replayed": shared.replayed, "risk_computed": market_.risk_computed},
                 "pit_universe": {"sizes": jb._pit_sizes(pit_cache), "excluded": pit_reasons},
                 "holding_eq": holding_eq,
+                # 결정 단위 판정(조각 1e) — 변형마다 묶음 값까지, 짝(H−G·G−B) 차이
+                "evidence": 증거, "pairs": 짝,
             },
         )  # fmt: skip
         print(f"저장 {len(results)}개 변형, 리밸런스 {실제_리밸런스}회(날마다), 그룹 {group_id}")

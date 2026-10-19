@@ -349,7 +349,9 @@ def test_run_core_반_나눈_기간과_실행_기록(실행: tuple[MemClient, in
         for 쪽 in ("first", "second"):
             assert {"cagr", "mdd", "days", "start", "end"} <= set(반[쪽])
         assert mj["risk_every"] == "week" and mj["account"] == cs.VARIANTS[r["strategy"]].account
-        assert "luck" not in mj  # DSR 은 조각 1e
+        # 조각 1e (25.1542) — 운 판정·결정 단위 판정이 실린다(1년이라 운 판정은 "판정 안 함")
+        assert mj["luck"]["n_trials"] == jb.REGISTERED_TRIALS and "판정 안 함" in mj["luck"]["verdict"]
+        assert {"buys", "scored", "no_control", "days", "n_blocks", "mean", "lower"} <= set(mj["evidence"])
     run = mem.execute("SELECT * FROM batch_runs WHERE job_name = ?", [cj.JOB_NAME]).dicts()
     assert len(run) == 1 and run[0]["status"] == "success" and run[0]["market"] == "KR"
     로그 = json.loads(run[0]["step_log"])
@@ -360,6 +362,20 @@ def test_run_core_반_나눈_기간과_실행_기록(실행: tuple[MemClient, in
     assert set(t["variants_s"]) == set(cs.VARIANTS)
     # 월 백테스트의 판정 칸(`backtest`)에는 아무것도 적지 않는다
     assert not mem.execute("SELECT COUNT(*) FROM batch_runs WHERE job_name = 'backtest'").scalar()
+
+
+def test_run_core_결정_단위_판정을_싣는다(실행: tuple[MemClient, int]) -> None:
+    """조각 1e (25.1542) — 변형마다 매수의 무작위 대조 분위, 짝 차이. 헛돌지 않게 매수가 있고 분위가 찬다"""
+    mem, _ = 실행
+    로그 = json.loads(mem.execute("SELECT step_log FROM batch_runs WHERE job_name = ?", [cj.JOB_NAME]).dicts()[0]["step_log"])
+    ev = 로그["evidence"]
+    assert set(ev) == set(cs.VARIANTS)
+    assert any(e["buys"] > 0 and e["scored"] > 0 for e in ev.values())
+    for e in ev.values():
+        assert e["scored"] + e["no_control"] <= e["buys"]
+        if e["mean"] is not None:
+            assert 0 <= e["mean"] <= 100
+    assert set(로그["pairs"]) == {"core_h-core_g", "core_g-core_b"}
 
 
 def test_run_core_가중_대_동일가중_진단을_싣는다(실행: tuple[MemClient, int]) -> None:

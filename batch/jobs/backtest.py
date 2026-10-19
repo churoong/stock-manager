@@ -94,8 +94,12 @@ CANDIDATE_STRATEGIES = ("momentum_sector", "ic_weighted", "shrink_missing")
 LONG_HOLD_DAYS = 365  # 장기 = 1년 이상 (CLAUDE.md 투자 기간). 들어간 뒤 1년은 신호가 꺼져도 들고 있다
 LONG_BAND_DAYS = sg.BAND_DAYS  # 정의처는 services/signals (docs/infra.md 25.108)
 DEFAULT_LONG_THRESHOLDS = (60.0, 55.0, 50.0)
-#: 운 판정(DSR)의 시도 수 하한 — 벤치마크를 뺀 등록 전략 + 기본 장기 문턱 (docs/backtest.md 9장, 25.1358)
-REGISTERED_TRIALS = len(STRATEGIES) - 1 + len(DEFAULT_LONG_THRESHOLDS)
+#: 핵심 H 백테스트의 등록 전략 — 합의(core_h)·추적 매도(core_g)·B 상위 5(core_b). 무작위 대조 R1·R2 는 시도가 아니다
+#: (docs/backtest.md 10장 조각 1e, 25.1542 — 시험이 `core_strategy.VARIANTS` 와 대조한다)
+CORE_REGISTERED_TRIALS = 3
+#: 운 판정(DSR)의 시도 수 하한 — 벤치마크를 뺀 등록 전략 + 기본 장기 문턱 + 핵심 H 등록 전략
+#: (docs/backtest.md 9장, 25.1358 · 25.1542 에서 핵심 계열을 더했다 — 월 백테스트·핵심 H 둘 다 이 하한)
+REGISTERED_TRIALS = len(STRATEGIES) - 1 + len(DEFAULT_LONG_THRESHOLDS) + CORE_REGISTERED_TRIALS
 
 WARN_NO_HISTORICAL_UNIVERSE = "과거 유니버스 스냅샷 없음. 현재 유니버스를 전 기간에 썼다"
 # 시점 유니버스를 쓰면 위 경고 대신 이것이 붙는다. 고친 것과 못 고친 것을 함께 적는다
