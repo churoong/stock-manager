@@ -118,6 +118,22 @@ export function coreNotes(stepLog: unknown): string[] {
       `가중 대 동일가중: ${뜻[eq.verdict] ?? eq.verdict} — 고른 종목이 갈린 날 ${num(eq.differ_days) ?? 0}일(${f1(num(eq.differ_pct))}%), 짝 ${num(eq.pairs) ?? 0}, 하한 ${signed(num(eq.lower))}`,
     );
   }
+  // 같은 로트 청산 대조·하루 손실 관문 빈도(25.1552) — 청산 대조는 사전 등록 판정, 관문 빈도는 보고만
+  const xp = obj(s.exit_pair);
+  if (typeof xp.error === "string") out.push(`청산 대조(추적 대 목표): 진단 오류 — ${xp.error}`);
+  else if (typeof xp.verdict === "string") {
+    const 뜻: Record<string, string> = { trend: "추적 매도 유지", target: "H 목표 매도 후보(판 올림 절차)", none: "지금대로", undecidable: "판정 불가" };
+    out.push(
+      `청산 대조(추적 대 목표, 단기): ${뜻[xp.verdict] ?? xp.verdict} — 목표 닿은 로트 ${num(xp.touched) ?? 0} · 판정에 쓴 ${num(xp.n) ?? 0}(묶음 ${num(xp.n_blocks) ?? 0}) · 평균 ${signed(num(xp.mean))} · 하한 ${signed(num(xp.lower))}`,
+    );
+  }
+  const lg = obj(s.loss_gate);
+  if (typeof lg.error === "string") out.push(`하루 손실 관문 빈도: 진단 오류 — ${lg.error}`);
+  else if (num(lg.days)) {
+    out.push(
+      `하루 손실 관문(보고만): 막힌 날 ${num(lg.blocked_days) ?? 0} / ${num(lg.days)}일(${f1(num(lg.blocked_pct))}%) · 그 가운데 KOSPI도 빠진 날 ${num(lg.kospi_down_days) ?? 0} · 시장 조정이었다면 ${num(lg.adjusted_days) ?? 0}일`,
+    );
+  }
   const t = obj(s.timing);
   const 변형초 = Object.values(obj(t.variants_s)).map(num).filter((x): x is number => x != null);
   if (변형초.length) out.push(`걸린 시간: 읽기 ${f1(num(t.load_s))}초 · 변형 ${f1(변형초.reduce((a, b) => a + b, 0))}초 · 판정 ${f1(num(t.evidence_s))}초`);

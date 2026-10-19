@@ -27,6 +27,9 @@ EQ_EPISODE_DAYS = hold.HOLDING_EPISODE_DAYS
 EQ_MIN_BLOCKS = 12
 #: 판정 가능 — 서로 다른 짝 수 하한(31회차 검증 B 문구)
 EQ_MIN_PAIRS = 30
+#: 규칙을 바꾸는 갈래(`equal`)의 한쪽 유의수준 — 본페로니. 같은 첫 실행에서 규칙을 바꿀 수 있는 갈래가 둘
+#: (이것과 `exit_pair` 의 `target`)이라 0.05 ÷ 2 (32회차 검증 B, 25.1552 — 첫 실행 결과 전에 고침, 더 보수적으로만)
+EQ_CHANGE_ALPHA = 0.025
 
 
 def picks(votes: dict[str, dict[int, float]], w: dict[str, float], tiebreak: dict[int, float], top_n: int) -> list[int]:
@@ -86,7 +89,7 @@ def summarize(days: list[tuple[str, list[int], list[int]]], outcomes: dict[tuple
     블록 = 묶음(값)
     bb = pp.block_bound(블록)
     n = bb["n_blocks"]
-    upper = (bb["mean"] + pp.t_quantile(1 - pp.EVIDENCE_ALPHA, n - 1) * bb["se"]
+    upper = (bb["mean"] + pp.t_quantile(1 - EQ_CHANGE_ALPHA, n - 1) * bb["se"]
              if n >= pp.EVIDENCE_MIN_BLOCKS and bb["se"] is not None else None)  # fmt: skip
     반 = len(값) // 2
     앞 = [x for _d, x in 값[:반]]
@@ -106,7 +109,9 @@ def decide(s: dict[str, Any]) -> str:
 
     - 판정 불가: 묶음 < `EQ_MIN_BLOCKS` 또는 서로 다른 짝 < `EQ_MIN_PAIRS` → 지금대로(가중 유지)
     - keep(가): 하한 > 0 이고 앞·뒤 반 평균 모두 > 0 → 기울기 그대로
-    - equal(나): 상한 < 0 이고 앞·뒤 반 평균 모두 < 0 → 판을 올려 w≡1 로 바꾸는 후보(PREREG 에 가설로 적고 판 올림 절차)
+    - equal(나): 상한 < 0 이고 앞·뒤 반 평균 모두 < 0 → 판을 올려 w≡1 로 바꾸는 후보
+      (PREREG 에 가설로 적고 판 올림 절차).
+      상한은 한쪽 97.5%(`EQ_CHANGE_ALPHA`, 25.1552 본페로니) — 하한(`keep`, 규칙 그대로)은 95% 그대로
     - none(다): 그 밖 → 지금대로. "W≠E 결정일 비율 x%" 를 infra 에 적고 다시 보지 않는다
     """
     if (s.get("n_blocks") or 0) < EQ_MIN_BLOCKS or (s.get("pairs") or 0) < EQ_MIN_PAIRS:

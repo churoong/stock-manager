@@ -96,6 +96,11 @@ class DayLog:
     random: dict[str, Any] = field(default_factory=dict)  # 무작위 대체 기록(운영 `기록["random"]`)
     #: 판단 직전 든 종목(cutoff 비중 > 0) — 결정 단위 판정이 추가 매수를 뺀다(25.1544)
     held: frozenset[int] = frozenset()
+    #: 오늘 매도 판정(`evaluate`)에 "목표도달" 이 선 보유 → 그 보유의 기간. 계좌 규칙과 무관하게 적는다 —
+    #: 같은 로트 청산 대조(`exit_pair`, 25.1552)가 "목표에서 팔았다면" 의 날로 쓴다
+    target_hit: dict[int, str | None] = field(default_factory=dict)
+    #: 하루 수익을 잰 비중의 합(직전 cutoff 투자 비중) — 하루 손실 관문 빈도(`loss_gate`, 25.1552)의 시장 조정
+    invested: float | None = None
 
 
 class _Rows:
@@ -289,7 +294,8 @@ class CoreStrategy:
         dv = self.market.at(view, day)
         client = _ViewClient(view)
         today = date.fromisoformat(day[:10])
-        log = DayLog(day=day, cutoff=view.cutoff, day_return_pct=self._day_return(view), held=frozenset(w))
+        log = DayLog(day=day, cutoff=view.cutoff, day_return_pct=self._day_return(view), held=frozenset(w),
+                     invested=sum(self._prev[2].values()) if self._prev else None)  # fmt: skip
 
         # ① 매도 — 계좌 규칙 전의 판정에서 손절을 따로 모은다(운영 검증 [필수] 4)
         매도: dict[int, list[str]] = {}
@@ -298,6 +304,8 @@ class CoreStrategy:
             코드들 = self._sell_codes(client, view, lot, w.get(sid, 0.0), today)
             if "손절" in 코드들:
                 손절.add(sid)
+            if "목표도달" in 코드들:
+                log.target_hit[sid] = lot.horizon
             팔것 = pp.sells_for(self.v.sell_rule, {sid: 코드들})
             if 팔것:
                 매도[sid] = 팔것[sid]

@@ -37,7 +37,9 @@ from batch.services import backtest as bt
 from batch.services import core_backtest as cb
 from batch.services import core_evidence as ce
 from batch.services import core_strategy as cs
+from batch.services import exit_pair as xp
 from batch.services import holding_eq as heq
+from batch.services import loss_gate as lg
 from batch.services import luck, trend
 from batch.services import metrics as m
 from batch.services import pit_universe as pit
@@ -283,6 +285,23 @@ def run_core(
             log.exception("H 가중 대조 진단 실패")
             holding_eq = {"error": str(e)[:200]}
         print(f"  H 가중 대 동일가중: {holding_eq}")
+        # 같은 로트 청산 대조·하루 손실 관문 빈도(25.1552, 32회차 P1·P4) — core_h 하루 기록·종가·지수로, 읽기 0.
+        # 깨져도 실행을 죽이지 않는다
+        exit_pair: dict[str, Any] = {}
+        loss_gate: dict[str, Any] = {}
+        if "core_h" in 기록:
+            try:
+                exit_pair = xp.summarize(기록["core_h"], ce.Closes(prices), indexes.get(cb.BENCH_INDEX) or {})
+            except Exception as e:  # noqa: BLE001
+                log.exception("같은 로트 청산 대조 진단 실패")
+                exit_pair = {"error": str(e)[:200]}
+            try:
+                loss_gate = lg.frequency(기록["core_h"], indexes.get(cb.BENCH_INDEX) or {})
+            except Exception as e:  # noqa: BLE001
+                log.exception("하루 손실 관문 빈도 진단 실패")
+                loss_gate = {"error": str(e)[:200]}
+        print(f"  같은 로트 청산 대조: {exit_pair}")
+        print(f"  하루 손실 관문 빈도: {loss_gate}")
 
         실제_리밸런스 = sum(1 for d in dates if d != dates[-1] or len(dates) == 1)
         db.finish_batch_run(
@@ -298,7 +317,7 @@ def run_core(
                            "days_computed": shared.computed,
                            "days_replayed": shared.replayed, "risk_computed": market_.risk_computed},
                 "pit_universe": {"sizes": jb._pit_sizes(pit_cache), "excluded": pit_reasons},
-                "holding_eq": holding_eq,
+                "holding_eq": holding_eq, "exit_pair": exit_pair, "loss_gate": loss_gate,
                 # 결정 단위 판정(조각 1e) — 변형마다 묶음 값까지, 짝(H−G·G−B) 차이
                 "evidence": 증거, "pairs": 짝, "verdict": 판정,
             },

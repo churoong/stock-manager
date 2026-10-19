@@ -42,4 +42,19 @@ describe("핵심 H 결과 글 (25.1545)", () => {
     expect(coreNotes({ ...step, params: { years: 1, risk_every: "week" } })[0]).toContain("기본 실행(5년·리스크 주마다)이 아니라 참고만");
     expect(coreNotes({ holding_eq: { error: "ValueError x" } })).toEqual(["가중 대 동일가중: 진단 오류 — ValueError x"]);
   });
+
+  it("청산 대조·관문 빈도 줄 (25.1552)", () => {
+    const n = coreNotes({
+      exit_pair: { verdict: "undecidable", touched: 41, n: 22, n_blocks: 9, mean: -0.5, lower: -3.1 },
+      loss_gate: { days: 1200, blocked_days: 18, blocked_pct: 1.5, kospi_down_days: 7, adjusted_days: 9 },
+    });
+    expect(n).toEqual([
+      "청산 대조(추적 대 목표, 단기): 판정 불가 — 목표 닿은 로트 41 · 판정에 쓴 22(묶음 9) · 평균 -0.50%p · 하한 -3.10%p",
+      "하루 손실 관문(보고만): 막힌 날 18 / 1200일(1.5%) · 그 가운데 KOSPI도 빠진 날 7 · 시장 조정이었다면 9일",
+    ]);
+    expect(coreNotes({ exit_pair: { error: "KeyError y" }, loss_gate: { error: "z" } })).toEqual([
+      "청산 대조(추적 대 목표): 진단 오류 — KeyError y",
+      "하루 손실 관문 빈도: 진단 오류 — z",
+    ]);
+  });
 });

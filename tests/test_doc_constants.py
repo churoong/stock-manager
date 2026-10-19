@@ -473,6 +473,19 @@ class Test핵심_H_조각_1b:
         from batch.services import core_evidence as ce
 
         검사(BACKTEST, f"`CORE_BLOCK_MIN_DAYS` = {ce.CORE_BLOCK_MIN_DAYS}", "핵심 H 분위 묶음 하한 (25.1544)")
+        검사(BACKTEST, f"`EQ_CHANGE_ALPHA` = {heq.EQ_CHANGE_ALPHA}", "가중 대조 바꾸는 갈래 97.5% (25.1552)")
+        from batch.services import exit_pair as xp
+
+        검사(BACKTEST, f"결정 대상 로트 < {xp.EXIT_PAIR_MIN_LOTS} 또는 x_C 28일 묶음 < {xp.EXIT_PAIR_MIN_BLOCKS}",
+             "청산 대조 판정 가능 (25.1552)")  # fmt: skip
+        검사(BACKTEST, f"**뉴이–웨스트 시차 {xp.EXIT_PAIR_NW_LAG}**", "청산 대조 시차 (25.1552)")
+        검사(BACKTEST, f"`EXIT_PAIR_ALPHA` = {xp.EXIT_PAIR_ALPHA}", "청산 대조 유의수준 (25.1552)")
+        검사(BACKTEST, f"기간 한도(`MAX_HOLDING_DAYS`) + {xp.EXIT_PAIR_TAIL_DAYS}일", "청산 대조 끝 절단 (25.1552)")
+        assert xp.EXIT_PAIR_DECIDE_HORIZON == "short"
+        검사(BACKTEST, "**단기**(`EXIT_PAIR_DECIDE_HORIZON`)", "청산 대조 결정 기간 (25.1552)")
+        from batch.services import loss_gate as lgate
+
+        검사(BACKTEST, f"KOSPI ≤ {lgate.LOSS_GATE_KOSPI_DOWN_PCT:g}%", "관문 빈도 지수 문턱 (25.1552)")
         from batch.services import stop_vol as sv
 
         검사(PAPER, f"수익 {sv.STOP_VOL_MIN_RETURNS}개 이상일 때만, 국내는 하루 ±{sv.STOP_VOL_KR_JUMP:.0%} 를 넘는 날을 뺀다",
@@ -761,6 +774,7 @@ class Test밸류_분모:
     "divergence", "tax_sim", "verdict", "forecast_track", "patterns", "insights", "history",
     "event_history", "simulation", "candidate_factors", "cb_overhang", "buy_thesis", "plan_fill", "target_units", "paper", "risk_gate", "execution_quality", "company",
     "broker_mirror", "holding", "desk", "core_backtest", "core_strategy", "holding_eq", "stop_vol", "core_evidence",
+    "exit_pair", "loss_gate",
 )  # fmt: skip
 
 #: 아직 그물 밖인 모듈과 **왜 아직인지**. 하나씩 줄여 간다
