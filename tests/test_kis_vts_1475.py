@@ -445,6 +445,16 @@ def test_판정_아닌_가상_만료와_거부는_일치율_표본_밖() -> None
     assert 칸["cells"]["buy_limit"]["n"] == 2
 
 
+def test_장_열린_뒤_낸_시장가는_비교_표본_밖() -> None:
+    """가상은 종가로, KIS 는 장중에 찬다 — 체결 칸만 빼고 비교(가격 차이·괴리)는 넣던 것 (25.1561, 감사 [참고] 2)"""
+    늦은 = [{**_줄("sell", "filled", "filled", fq=3, avg=9_900.0, ip=10_000.0), "i_order_type": "market",
+             "i_fill_basis": "close"} for _ in range(3)]  # fmt: skip
+    지정가 = {**_줄("buy", "filled", "filled", fq=3, avg=10_000.0, ip=10_000.0), "i_order_type": "limit",
+             "i_fill_basis": "close"}  # 지정가 매수는 잣대가 같아 그대로  # fmt: skip
+    s = bm.compare([*늦은, 지정가])
+    assert (s["n"], s["excluded"], s["slip_sell"]["n"]) == (1, 3, 0)
+
+
 def test_daily_summary_stored_and_weekly_reads_it(c: Client) -> None:
     from batch.jobs import paper as paper_job
 

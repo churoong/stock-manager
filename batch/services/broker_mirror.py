@@ -218,8 +218,11 @@ NON_JUDGMENT_EXPIRY = (
 
 
 def _판정밖(r: dict[str, Any]) -> bool:
-    """체결 판정과 무관한 줄 — 가상의 판정 아닌 만료이거나 KIS 거부(주문 경로 실패 — 따로 센다)"""
+    """체결 판정과 무관한 줄 — 가상의 판정 아닌 만료이거나 KIS 거부(주문 경로 실패 — 따로 센다), 또는 장 열린 뒤 낸
+    시장가(가상은 종가 판정 — KIS 는 장중 체결이라 같은 잣대가 아니다. 체결 칸이 이미 빼던 것을 비교도, 25.1561)"""
     if r.get("status") == "rejected":
+        return True
+    if r.get("i_fill_basis") == "close" and not (r.get("side") == "buy" and r.get("i_order_type") != "market"):
         return True
     return r.get("i_status") == "expired" and str(r.get("i_note") or "").startswith(NON_JUDGMENT_EXPIRY)
 

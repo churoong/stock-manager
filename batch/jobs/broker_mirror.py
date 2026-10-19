@@ -138,8 +138,8 @@ DAILY_SQL = (
 #: 비교 보고 (docs/paper.md 15.3, 25.1478) — 지난 `COMPARE_DAYS` 일의 베낀 주문에 가상모의투자의 판정을 붙인다
 COMPARE_SQL = (
     "SELECT b.trade_date, b.side, b.status, b.filled_qty, b.quantity, b.avg_price, b.message, b.reason,"
-    " o.status AS i_status, o.close_note AS i_note, f.price AS i_price, f.fill_date AS i_fill_date"
-    " FROM paper_broker_orders b"
+    " o.status AS i_status, o.close_note AS i_note, o.order_type AS i_order_type, o.fill_basis AS i_fill_basis,"
+    " f.price AS i_price, f.fill_date AS i_fill_date FROM paper_broker_orders b"
     " LEFT JOIN paper_orders o ON o.id = b.paper_order_id LEFT JOIN paper_fills f ON f.order_id = b.paper_order_id"
     " WHERE b.broker = ? AND b.trade_date >= ? AND b.trade_date < ? AND b.account_id = ?"
 )
