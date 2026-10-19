@@ -524,6 +524,14 @@ def fill_orders(
     for r in sorted(대상, key=lambda x: (x["side"] != "sell", int(x["id"]))):
         o = _order(r)
         날 = o.fill_session
+        if any(f.order_id == o.id for f in fills):
+            # 체결 행은 들어갔는데 주문 상태만 못 바꾼 채 끊겼던 것 — 상태만 맞추고 두 번 세지 않는다 (25.1447).
+            # **맨 앞에서 본다**(25.1558, 25.1547 감사 남은 것): 예전엔 현금·보유 검사 뒤라, 이미 든 체결이
+            # 장부에 한 번 더 얹혀 매수는 "현금 부족", 매도는 "팔 보유가 모자람" 으로 체결 행이 있는 주문을
+            # 취소했다(장부와 주문 상태가 어긋남)
+            남은매수.pop(o.id, None)
+            _쓰기(client, [(FILLED_SQL, [trade_date, "체결 행 있음 — 상태만 맞춤", o.id])])
+            continue
         if 날 not in 시장날:
             시장날[날] = bool(client.execute(MARKET_DAY_SQL, [날, market]).rows)
         if o.stock_id in frozen or o.stock_id in (frozen_by_account or {}).get(o.account_id, set()):
@@ -605,10 +613,6 @@ def fill_orders(
                 _쓰기(client, [(EXPIRE_SQL, [trade_date, "팔 보유가 모자람", o.id])])
                 기록["expired"] = 기록.get("expired", 0) + 1
                 continue
-        if any(f.order_id == o.id for f in fills):
-            # 체결 행은 들어갔는데 주문 상태만 못 바꾼 채 끊겼던 것 — 상태만 맞추고 두 번 세지 않는다 (25.1447)
-            _쓰기(client, [(FILLED_SQL, [trade_date, 까닭, o.id])])
-            continue
         _쓰기(client, [
             (INSERT_FILL_SQL, [체결.order_id, 체결.account_id, 체결.stock_id, 체결.side, 체결.fill_date, 체결.price,
                                체결.quantity, 체결.currency, 체결.fx_rate, 환율날, 체결.fee, 체결.tax, 체결.slippage,
