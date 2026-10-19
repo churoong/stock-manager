@@ -335,7 +335,7 @@ class CoreStrategy:
         )  # fmt: skip
         바꾸기 = None
         if self.v.selection == "random":
-            pool = [int(r["stock_id"]) for r in self.market._pool(view.cutoff)
+            pool = [int(r["stock_id"]) for r in self.market.pool(view.cutoff)
                     if (r.get("asset_type") or "stock") == "stock"]  # fmt: skip
             # 운영 `held_substitutes` — 지금 든 대체 종목, 나중에 산 것이 이긴다
             든대체 = {lot.substitute_of: sid for sid, lot in sorted(self.lots.items(), key=lambda kv: kv[1].last_buy)

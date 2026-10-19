@@ -61,7 +61,7 @@ class 가짜시장:
     def __init__(self, universe: list[dict], 신호: dict[str, list[tuple]]) -> None:
         self.universe, self.신호 = universe, 신호
 
-    def _pool(self, cutoff: str) -> list[dict]:
+    def pool(self, cutoff: str) -> list[dict]:
         return self.universe
 
     def at(self, view: bt.PriceView, day: str) -> cb.DayView:

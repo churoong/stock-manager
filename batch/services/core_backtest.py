@@ -287,7 +287,8 @@ class CoreMarket:
         rows = self.indexes.get(code, [])
         return rows[: bisect.bisect_right(rows, (cutoff, math.inf))]
 
-    def _pool(self, cutoff: str) -> list[dict[str, Any]]:
+    def pool(self, cutoff: str) -> list[dict[str, Any]]:
+        """그 cutoff 의 시점 유니버스 행 — `eligible_at` 이 없으면 전체(무작위 변형도 이것을 쓴다, 25.1532)"""
         if self.eligible_at is None:
             return self.universe
         allowed = self.eligible_at(cutoff)
@@ -302,7 +303,7 @@ class CoreMarket:
         if 주 == self._week:
             return
         벤치 = dict(self._index_upto(metrics_job.BENCHMARK[self.country], view.cutoff))
-        inputs = jb.build_pit_inputs(self._pool(view.cutoff), self.snapshots, view, self.dividends, 벤치)
+        inputs = jb.build_pit_inputs(self.pool(view.cutoff), self.snapshots, view, self.dividends, 벤치)
         점수: dict[int, dict[str, float | None]] = {}
         for r in sc.score_factors(inputs) if inputs else []:
             점수.setdefault(r.stock_id, {})[r.factor] = r.score
@@ -353,7 +354,7 @@ class CoreMarket:
 
         cutoff = view.cutoff
         self._weekly_scores(view)
-        pool = self._pool(cutoff)
+        pool = self.pool(cutoff)
         코스피 = self._index_upto(BENCH_INDEX, cutoff)
 
         # 1 국면 — 운영 `trend.regimes_for_country` 와 같은 지수, 같은 판정
