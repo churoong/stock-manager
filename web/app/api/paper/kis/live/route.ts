@@ -24,7 +24,7 @@ import {
 } from "@/lib/kisVts";
 import { localDate } from "@/lib/market";
 
-/** KIS 두 번(각 8초 상한) + 간격 + DB — 기본 함수 시간(10초)을 넘을 수 있다(25.1499, 검토 [권장] 4) */
+/** KIS 국내 두 번·미국 다섯 번(각 8초 상한, 25.1527) + 간격 + DB — 기본 함수 시간(10초)을 넘을 수 있다(25.1499, 검토 [권장] 4) */
 export const maxDuration = 30;
 
 /**

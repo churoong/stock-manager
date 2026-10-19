@@ -157,9 +157,12 @@ def test_cells_sql_books_slippage_pct() -> None:
     assert c.execute(bmj.CELLS_SQL, ["kis_vts", "2026-10-15", "B"]).dicts() == []  # 오늘 낸 주문은 아직 안 끝났다
 
 
-def test_desk_write_puts_fill_adjust(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("환", [None, (2_000_000.0, 1000.0, 2_040_000.0, 1020.0)])
+def test_desk_write_puts_fill_adjust(monkeypatch: pytest.MonkeyPatch, 환: tuple | None) -> None:
     """B(챔피언으로 둠) 10-15 체결 100만(평가 1,000만 → 회전 10%) × 넘음 0.5 = 0.05%p.
-    대보기: 운용 요약 날짜 10-17 — 끝은 그 앞 KIS 줄 10-16. KIS 손익 9,000 − B 손익 10,000 → −0.01%p"""
+    대보기: 운용 요약 날짜 10-17 — 끝은 그 앞 KIS 줄 10-16. KIS 손익 9,000 − B 손익 10,000 → −0.01%p.
+    `환` = (10-15 해외 현금, 환율, 10-16 해외 현금, 환율) — 쉬는 해외 현금 200만원어치가 환율 +2% 로 +40,000 이면
+    KIS 총액을 그만큼 올려 두어도 대보기는 그 몫을 빼 같은 −0.01%p (25.1543). 없으면 원래 총액에 `fx_mixed`"""
     c = Client(accounts=None)
     monkeypatch.setattr(job.bmj, "MIRROR_ACCOUNT", "B")
     for aid in ("A", "B"):
@@ -178,8 +181,10 @@ def test_desk_write_puts_fill_adjust(monkeypatch: pytest.MonkeyPatch) -> None:
     칸 = {"cells": {"buy_market": {"days": 30, "excess": 0.5, "se": 0.1}}}
     # 10-14 줄은 예전 기준(25.1527 전 — basis 없음, 해외 자산 빠진 작은 총액) — 대보기 시작이 되면 안 된다(25.1528)
     for d, total, basis in (("2026-10-14", 50_000_000.0, None), ("2026-10-15", 100_000_000.0, 2),
-                            ("2026-10-16", 100_009_000.0, 2)):  # fmt: skip
+                            ("2026-10-16", 100_009_000.0 + (40_000.0 if 환 else 0.0), 2)):  # fmt: skip
         원화 = {"total_krw": total} | ({"basis": basis} if basis else {})
+        if 환 and d in ("2026-10-15", "2026-10-16"):
+            원화 |= ({"cash_krw": 환[0], "usd_krw": 환[1]} if d == "2026-10-15" else {"cash_krw": 환[2], "usd_krw": 환[3]})
         c.conn.execute("INSERT INTO paper_broker_daily (broker, as_of, account_id, holdings_json, cash_krw, total_krw,"
                        " diff_json, source, fetched_at, summary_json) VALUES ('kis_vts', ?, 'B', '[]', 0, 0,"
                        " '{}', 'kis_vts', 't', ?)", [d, json.dumps(칸 | {"account_krw": 원화})])  # fmt: skip
@@ -196,6 +201,7 @@ def test_desk_write_puts_fill_adjust(monkeypatch: pytest.MonkeyPatch) -> None:
     h = s["fill_adjust"]["h_check"]
     assert (h["from"], h["to"], h["pre_link"]) == ("2026-10-15", "2026-10-16", 0)
     assert h["actual_pp"] == pytest.approx(-0.01) and h["explained_pp"] == pytest.approx(-0.05)
+    assert h["fx_mixed"] is (환 is None) and h["fx_cash_krw"] == (pytest.approx(40_000.0) if 환 else None)
     assert s["fill_adjust_error"] is None
 
 

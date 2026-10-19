@@ -1015,6 +1015,17 @@ def _건너뛴_까닭(job_name: str, since: str) -> str | None:
     return f"신호를 계산하지 않았습니다 — {까닭}. 앞서 계산된 신호를 그대로 씁니다(기준일은 추천 머리에)"
 
 
+def challenger_hold(first: dict[str, Any]) -> str | None:
+    """둘째(도전자) KIS모의투자 계좌가 보내지 않을 까닭 — 첫째가 보내지 못한 까닭(`send`), 첫째 단계가 예외로 끝났으면
+    그 사실 (docs/paper.md 15.10, 25.1517·25.1543). 첫째가 도중에 몇 건 보낸 뒤 깨졌어도 둘째는 내지 않는다 — 주문이 덜
+    나가는 쪽이 보수적이다(재는 계좌라 하루 빠짐은 기록으로 남는다)"""
+    if first.get("send"):
+        return str(first["send"])
+    if first.get("error"):
+        return "첫째 계좌 단계 실패 — 보내지 않음(두 계좌의 주문 날을 맞춘다)"
+    return None
+
+
 def _kis_알림문(broker: dict[str, Any], label: str = "KIS모의투자") -> str | None:
     """KIS모의투자 단계 결과에서 알릴 것 — 키 일부만 있음(설정 실수)·단계 실패.
 
@@ -2545,8 +2556,9 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
                 from batch.jobs import broker_mirror as _bm2
 
                 멈춘2 = set((step_log.get("paper") or {}).get("frozen") or [])
-                # 첫째가 보내지 못한 날(접수 시작 전·장 끝난 뒤)은 둘째도 — 두 계좌의 주문 날이 어긋나지 않게(25.1517)
-                막힘2 = (step_log.get("broker") or {}).get("send")
+                # 첫째가 보내지 못한 날(접수 시작 전·장 끝난 뒤)은 둘째도 — 두 계좌의 주문 날이 어긋나지 않게(25.1517).
+                # 첫째 단계가 예외로 끝난 날도(KIS 토큰 실패 등, 25.1543 감사 7) — 예전엔 `send` 까닭만 넘겨 둘째만 냈다
+                막힘2 = challenger_hold(step_log.get("broker") or {})
                 step_log["broker2"] = _bm2.run(client, market, datetime.now(UTC), slot=_bm2.CHALLENGER, frozen=멈춘2,
                                                hold_send=str(막힘2) if 막힘2 else None)  # fmt: skip
             except Exception as exc:  # noqa: BLE001 — 곁다리

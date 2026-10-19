@@ -30,15 +30,15 @@ TWR_SQL = (
 #: 25.1527 이 총액에 해외 총자산을 더하면서 예전 줄과 섞으면 시작·끝 차이에 해외 자산 약 3.4억원이
 #: "KIS 손익" 으로 들어간다
 KIS_TOTALS_SQL = (
-    "SELECT as_of, json_extract(summary_json, '$.account_krw.total_krw') AS total FROM paper_broker_daily"
+    "SELECT as_of, json_extract(summary_json, '$.account_krw.total_krw') AS total,"
+    " json_extract(summary_json, '$.account_krw.cash_krw') AS cash,"
+    " json_extract(summary_json, '$.account_krw.usd_krw') AS fx"
+    " FROM paper_broker_daily"
     " WHERE broker = ? AND account_id = ? AND json_extract(summary_json, '$.account_krw.basis') = ?"
     " ORDER BY as_of"
 )
-#: 대보기 끝 후보 — 미국 일일 배치가 끝난 한국 날짜(그날 가상 평가 행을 미국 종가로 덮었다, 25.1517)
-US_DONE_SQL = (
-    "SELECT DISTINCT date(started_at, '+9 hours') AS d FROM batch_runs WHERE job_name = ?"
-    " AND status IN ('success', 'partial') AND started_at >= ?"
-)
+#: 대보기 끝 후보 — 미국 일일 배치가 끝난 한국 날짜(25.1517). KIS 성과의 H 견주기와 같은 질의(25.1543)
+US_DONE_SQL = bmj.US_DONE_SQL
 #: 대보기 시작을 찾느라 훑는 날 수 상한 — 날마다 잔고 두 줄·평가 한 줄을 읽는다
 H_START_SCAN = 60
 #: 대보기 시작일에 KIS 가 든 종목 — 그날 이하 마지막 잔고 줄(국내·미국)
@@ -327,8 +327,10 @@ def _보정판(
               for r in 순위.get("rows") or [] if r.get("open")}  # fmt: skip
         if not 시작:
             return {"fill_adjust": None, "fill_adjust_error": None}
-        총액 = [(str(r["as_of"]), r["total"])
-              for r in client.execute(KIS_TOTALS_SQL, [bmj.BROKER, h, bmj.TOTAL_BASIS]).dicts()]  # fmt: skip
+        총액줄 = client.execute(KIS_TOTALS_SQL, [bmj.BROKER, h, bmj.TOTAL_BASIS]).dicts()
+        총액 = [(str(r["as_of"]), r["total"]) for r in 총액줄]
+        # 쉬는 해외 현금 환율 몫을 빼려고 (25.1543) — {날: (해외 현금 원화, KIS 고시환율)}
+        환 = {str(r["as_of"]): (r.get("cash"), r.get("fx")) for r in 총액줄}
         창 = None
         if h in 평가 and 총액:
             from batch.jobs.daily import job_name
@@ -342,7 +344,7 @@ def _보정판(
         보정 = desk.fill_adjust(fills=체결, equity=평가, starts=시작, cells=칸, min_days=bm.CELL_MIN_DAYS)
         # 대보기는 **첫째(H 자기) 칸만** — 도전자 칸을 섞으면 H 체결로 칸을 검증한다는 뜻이 흐려진다(25.1517 검토 3)
         첫칸 = {"KR": 요약.get("cells") or {}, "US": 요약_us.get("cells") or {}}
-        대봄 = _대보기(client, h, 창, dict(총액), 평가, 손익, 체결, 첫칸) if 창 else None
+        대봄 = _대보기(client, h, 창, dict(총액), 평가, 손익, 체결, 첫칸, 환) if 창 else None
         return {"fill_adjust": {"rows": desk.adjust_rows(순위, 보정), "h_check": 대봄, "min_days": bm.CELL_MIN_DAYS},
                 "fill_adjust_error": None}  # fmt: skip
     except Exception as exc:  # noqa: BLE001 — 곁다리 안의 곁다리
@@ -357,6 +359,7 @@ def _마지막(v: list[tuple[str, float]], d: str) -> float | None:
 def _대보기(
     client: Any, h: str, 창: tuple[list[str], str], 총액: dict[str, Any], 평가: dict[str, list[tuple[str, float]]],
     손익: dict[str, list[tuple[str, float]]], 체결: dict[str, list[dict[str, Any]]], 칸: dict[str, dict[str, Any]],
+    환: dict[str, tuple[Any, Any]] | None = None,
 ) -> dict[str, Any] | None:
     """H 대보기 (25.1516 검토 1·25.1517 검토 2) — 시작 = 후보 가운데 H 평가가 있고 **연결 전 보유가 없는** 첫날
     (`H_START_SCAN` 날까지 훑고, 끝내 없으면 첫 후보를 쓰되 `pre_link` 를 적어 판정에서 빠지게). 시작이 영영 KIS 첫날로
@@ -384,8 +387,17 @@ def _대보기(
     p0, e0 = _마지막(손익.get(h) or [], s), _마지막(평가.get(h) or [], s)
     h보정 = desk.fill_adjust(fills=체결, equity=평가, starts={h: s}, ends={h: e}, cells=칸,
                            min_days=bm.CELL_MIN_DAYS)[h]  # fmt: skip
-    return desk.h_check(start=s, end=e, kis0=float(총액[s]), kis1=float(총액[e]), h_pnl0=float(p0 or 0.0), h_pnl1=p1,
-                        h_equity0=float(e0 or 0.0), h_adj=h보정, pre_link=연결전)  # fmt: skip
+    # KIS 끝 총액은 쉬는 해외 현금의 환율 몫을 시작 환율에 묶어 견준다(25.1543) — 모르면 원래 총액, `fx_mixed` 로 알린다
+    c1, x1 = (환 or {}).get(e, (None, None))
+    _c0, x0 = (환 or {}).get(s, (None, None))
+    묶음 = bm.fx_neutral_total(float(총액[e]), c1, x0, x1)
+    판 = desk.h_check(start=s, end=e, kis0=float(총액[s]), kis1=묶음 if 묶음 is not None else float(총액[e]),
+                     h_pnl0=float(p0 or 0.0), h_pnl1=p1, h_equity0=float(e0 or 0.0), h_adj=h보정,
+                     pre_link=연결전)  # fmt: skip
+    if 판 is not None:
+        판["fx_mixed"] = 묶음 is None
+        판["fx_cash_krw"] = float(총액[e]) - 묶음 if 묶음 is not None else None
+    return 판
 
 
 def _연결전(client: Any, h: str, day: str) -> int:

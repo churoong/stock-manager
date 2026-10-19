@@ -35,6 +35,8 @@ export interface KisAccount { currency: "KRW" | "USD"; cash: number | null; hold
 export interface KisPerf {
   start: string; start_total: number; last: string; last_total: number; pnl_krw: number; return_pct: number; mdd_pct: number; days: number;
   h_pnl_krw: number | null; h_return_pct: number | null;
+  /** 25.1543 — H 견주기의 창(오늘보다 앞선·미국 배치가 끝난 날까지)과 KIS 쪽 손익(원래·쉬는 해외 현금 환율 몫 뺀 것) */
+  h_from?: string | null; h_to?: string | null; kis_pnl_krw?: number | null; kis_cmp_pnl_krw?: number | null; fx_cash_krw?: number | null;
 }
 /** `basis` 2(25.1527) = 국내 총평가 `kr_total` + 해외 총자산 `assets_krw`. 없으면 예전 식(25.1497 — 미국 몫이 빠졌다) */
 export interface KisAccountKrw {
@@ -126,7 +128,15 @@ export function perfLines(p: KisPerf | null): string[] {
   const out = [
     `${p.start} ${amountText(p.start_total, "KRW")} → ${p.last} ${amountText(p.last_total, "KRW")} · 손익 ${won(p.pnl_krw)} (${pct(p.return_pct)}) · 최대 낙폭 ${p.mdd_pct.toFixed(2)}% (${p.days}일)`,
   ];
-  if (p.h_pnl_krw != null)
+  if (p.h_to !== undefined) {
+    // 25.1543 — 같은 창으로 견준다. KIS 쪽은 쉬는 해외 현금의 환율 몫을 뺀 손익(H 는 현금을 원화로 든다)
+    if (p.h_to && p.h_pnl_krw != null) {
+      const kis = p.kis_cmp_pnl_krw != null
+        ? `KIS ${won(p.kis_cmp_pnl_krw)}${p.fx_cash_krw != null ? `(쉬는 해외 현금 환율 몫 ${won(p.fx_cash_krw)} 뺌)` : ""}`
+        : `KIS ${p.kis_pnl_krw != null ? won(p.kis_pnl_krw) : "-"}(환율 모름 — 해외 현금 환율 몫이 섞임)`;
+      out.push(`견주기 ${p.h_from} → ${p.h_to}: ${kis} · 가상모의투자 H ${won(p.h_pnl_krw)}${p.h_return_pct != null ? ` (${pct(p.h_return_pct)})` : ""} — 같은 주문을 베끼므로 손익 금액으로 견줍니다(끝은 미국 배치까지 끝난 날)`);
+    } else out.push("견주기: 아직 없습니다 — KIS 총액이 이틀 넘게 쌓이고 그 사이 미국 배치가 끝난 날이 있어야 같은 창으로 견줍니다.");
+  } else if (p.h_pnl_krw != null)
     out.push(`같은 기간 가상모의투자 H 손익 ${won(p.h_pnl_krw)}${p.h_return_pct != null ? ` (${pct(p.h_return_pct)})` : ""} — 같은 주문을 베끼므로 손익 금액으로 견줍니다(모의 예수금이 H 입금액보다 커 % 는 KIS 쪽이 늘 작습니다)`);
   return out;
 }

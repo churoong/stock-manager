@@ -71,9 +71,9 @@ US_BALANCE_PATH = "/uapi/overseas-stock/v1/trading/inquire-balance"
 #: 모의계좌로 미국을 살 수 있는지(환전 뒤 주문가능) 보려고 읽기만 한다
 TR_US_PSAMOUNT = "VTTS3007R"
 US_PSAMOUNT_PATH = "/uapi/overseas-stock/v1/trading/inquire-psamount"
-#: 미국 체결기준현재잔고(inquire_present_balance.py L26·L108) — 외화예수금(`output2.frcr_dncl_amt_2`)을 읽어
-#: 미국 계좌 총액(달러)을 낸다(docs/paper.md 15.7, 25.1496). 모의 지원은 예제가 tr_id 를 두므로 된다고 보되
-#: 실측 전 `[확인필요]`
+#: 미국 체결기준현재잔고(inquire_present_balance.py L26·L108) — `output3` 의 해외 총자산·해외 주식 평가·해외 현금(원화
+#: 환산)을 읽어 계좌 전체 원화 총액에 더하고(25.1527 — 모의는 보유 줄 수량·평가가 0), `output2` 의 KIS 고시환율로
+#: H 견주기의 쉬는 해외 현금 환율 몫을 뺀다(25.1543). 미국 보유는 거래소별 잔고(`VTTS3012R`)에서 읽는다(25.1527)
 TR_US_PRESENT = "VTRP6504R"
 US_PRESENT_PATH = "/uapi/overseas-stock/v1/trading/inquire-present-balance"
 #: `stocks.market`(nasdaq_symbols.EXCHANGE_CODES) → KIS 해외거래소 코드. 모르는 시장은 주문하지 않는다
@@ -296,9 +296,9 @@ def parse_us_balance(payload: object) -> list[Holding]:
 def us_totals(present: dict[str, Any]) -> dict[str, float | None]:
     """체결기준현재잔고(외화 기준) → {value_usd: 보유 외화평가 합, cash_usd: 달러 예수금, usd_krw: KIS 최초고시환율}.
 
-    보유 줄 하나라도 평가가 없으면 value_usd 는 None. 2026-10-16 탐침: 모의는 달러 예수금 0 인데 매수가능
-    10만 달러(환전 뒤) — 미국 매수 돈이 원화 예수금에서 자동 환전으로 나간다(25.1497). 그래서 계좌 성과는
-    국내·미국을 합친 원화 한 계열로 본다
+    보유 줄 하나라도 평가가 없으면 value_usd 는 None. 25.1497 은 "미국 매수 돈이 원화 예수금에서 자동 환전으로
+    나간다" 고 읽었는데 틀렸다 — 2026-10-18 탐침으로 모의 계좌의 미국 돈은 원화 예수금과 **따로 있는 해외 자산**이고
+    (미국 매수 뒤 국내 D+2 그대로), 계좌 총액은 국내 총평가 + `output3.tot_asst_amt` 다(25.1527)
     """
     보유 = [r for r in present.get("output1") or [] if isinstance(r, dict) and _int(r.get("cblc_qty13")) > 0]
     값 = [_num(r.get("frcr_evlu_amt2")) for r in 보유]

@@ -210,3 +210,12 @@ def test_cells_keep_late_limit_buys_and_token_no_redirect() -> None:
     import inspect
 
     assert "allow_redirects=False" in inspect.getsource(kis.access_token)  # 검토 9
+
+
+def test_first_error_holds_challenger() -> None:
+    """첫째 단계가 예외로 끝난 날 둘째도 보내지 않는다 (25.1543 감사 7) — 예전엔 `send` 까닭만 넘겼다"""
+    from batch.jobs import daily
+
+    assert daily.challenger_hold({"error": "KisFailed 토큰"}) == "첫째 계좌 단계 실패 — 보내지 않음(두 계좌의 주문 날을 맞춘다)"
+    assert daily.challenger_hold({"send": "접수 시작 전 — 보내지 않음"}) == "접수 시작 전 — 보내지 않음"
+    assert daily.challenger_hold({"sent": {"accepted": 2}}) is None and daily.challenger_hold({}) is None

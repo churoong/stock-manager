@@ -452,17 +452,55 @@ def compare_lines(
 # ── 웹 성과 (docs/paper.md 15.7, 25.1496) ─────────────────────────────────────
 
 
+def fx_neutral_total(
+    total: float | None, cash_krw: float | None, fx_ref: float | None, fx: float | None,
+) -> float | None:
+    """쉬는 해외 현금의 환율 몫을 뺀 총액 = 총액 + 해외 현금(원화) × (기준 환율 ÷ 그날 환율 − 1) (25.1543).
+
+    H 는 현금을 원화로 들고 미국 보유분만 환율을 탄다. KIS 모의 계좌는 따로 있는 해외 현금(약 2.3억원어치 달러,
+    25.1527)이 늘 환율을 탄다 — 그 몫을 기준 환율(견주기 창의 시작 날)에 묶어야 H 와 같은 잣대가 된다.
+    해외 현금은 그날 원화 환산(`frcr_evlu_tota`) ÷ KIS 고시환율로 달러로 되돌린다 — 구간 중 미국 매도로 생긴 현금도
+    시작 환율로 묶는 근사다(그 몫은 매도 대금 × 그 뒤 환율 변화 — 쉬는 현금보다 작다 `[확인필요]`). 하나라도 모르면 None
+    """
+    if total is None or cash_krw is None or not fx_ref or not fx or fx <= 0 or fx_ref <= 0:
+        return None
+    return float(total) + float(cash_krw) * (float(fx_ref) / float(fx) - 1)
+
+
+def h_compare(
+    rows: dict[str, tuple[float | None, float | None, float | None]], start: str, end: str,
+    h0: tuple[float | None, float | None] | None, h1: tuple[float | None, float | None] | None,
+) -> dict[str, Any]:
+    """KIS 대 가상모의투자 H 견주기 — **같은 창**(start ~ end)의 손익 (25.1543).
+
+    `rows` = {날: (총액, 해외 현금 원화, KIS 고시환율)}. 끝은 `desk.h_window` 처럼 오늘보다 앞선, 미국 일일 배치가 끝난
+    날이어야 H 평가 행이 KIS 총액과 같은 미국 장 종가다(아침 H 행은 미국이 한 장 늦다, 25.1516). KIS 쪽은 원래 손익
+    (`kis_pnl_krw`)과 쉬는 해외 현금의 환율 몫을 뺀 손익(`kis_cmp_pnl_krw`)을 함께 — 견주는 것은 뒤의 것이다
+    """
+    t0, t1 = rows[start][0], rows[end][0]
+    cmp1 = fx_neutral_total(t1, rows[end][1], rows[start][2], rows[end][2])
+    a0, p0 = h0 or (None, None)
+    a1, p1 = h1 or (None, None)
+    원래 = float(t1) - float(t0) if t0 is not None and t1 is not None else None
+    견줌 = cmp1 - float(t0) if cmp1 is not None and t0 is not None else None
+    return {"h_from": start, "h_to": end, "kis_pnl_krw": 원래, "kis_cmp_pnl_krw": 견줌,
+            "fx_cash_krw": 원래 - 견줌 if 원래 is not None and 견줌 is not None else None,
+            "h_pnl_krw": p1 - p0 if p0 is not None and p1 is not None else None,
+            "h_return_pct": (a1 / a0 - 1) * 100 if a0 and a1 else None}  # fmt: skip
+
+
 def perf(
     series: list[tuple[str, float | None]], h0: tuple[float | None, float | None] | None = None,
     h1: tuple[float | None, float | None] | None = None,
 ) -> dict[str, Any] | None:
     """KIS모의투자 **계좌 전체 원화 총액** 계열(날짜순 (as_of, 총액)) → 성과. 총액이 없는 날(모름)은 뺀다.
 
-    계좌 하나에 원·달러가 같이 있고 미국 매수 돈이 원화에서 자동 환전으로 나가 시장별 총액 비는 수익률이 아니다
-    (25.1497) — 국내 총평가 + 미국 평가·달러 예수금 × 환율 한 계열로 본다. 모의 계좌는 입출금이 없어 총액 비가
+    계좌 하나에 원·달러가 같이 있어 시장별 총액 비는 수익률이 아니다 — 국내 총평가 + KIS 해외 총자산 원화 한 계열로
+    본다(25.1497·25.1527). 모의 계좌는 입출금이 없어 총액 비가
     곧 수익률: 수익률 = 마지막 ÷ 시작 − 1(%), 손익 = 마지막 − 시작(원), MDD = 고점 대비 최저(%, docs/metrics.md 2장).
     `h0`·`h1` = 같은 기간 가상모의투자 H 의 (시간가중 지수, 평가손익 원) — 시작일 이하 마지막·마지막. 모의 예수금이
     H 입금액보다 커 % 는 늘 KIS 쪽이 작게 나오므로 **견주는 것은 손익 금액**(H 손익 변화)이고 % 는 참고다.
+    배치는 25.1543 부터 H 견주기를 `h_compare`(같은 창·환율 몫 뺌)로 덮어쓴다 — 이 함수의 h 칸은 그 전 꼴이다.
     총액이 하나도 없으면 None
     """
     줄 = [(d, float(v)) for d, v in sorted(series) if v is not None and float(v) > 0]

@@ -80,8 +80,9 @@ def test_job_stores_holdings_account_and_account_level_perf(c: Client) -> None: 
     # 체결기준현재잔고 보유 줄(수량 0)은 총액에 쓰지 않는다(25.1527)
     assert s["account_krw"]["total_krw"] == pytest.approx(1_160_000.0) and s["account_krw"]["basis"] == job.TOTAL_BASIS
     assert s["perf"]["start"] == "2026-10-16" and s["perf"]["pnl_krw"] == pytest.approx(60_000.0)
-    # 같은 기간 H(이 시험은 B 를 베낀다) — 10-16 이하 마지막 (1.0, 1000) → 10-19 (1.02, 31000)
-    assert s["perf"]["h_pnl_krw"] == pytest.approx(30_000.0) and s["perf"]["h_return_pct"] == pytest.approx(2.0)
+    # H 견주기는 오늘보다 앞선·미국 배치가 끝난 날로 끝나는 창이라(25.1543) 이틀뿐이고 미국 배치 기록이 없으면 없다 —
+    # 견주기는 tests/test_kis_compare_1543.py
+    assert s["perf"]["h_pnl_krw"] is None and s["perf"]["h_to"] is None
     assert "n" in s and "match_pct" in s  # 15.3 비교 요약은 그대로 같은 칸에
 
 

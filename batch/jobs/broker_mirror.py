@@ -153,9 +153,20 @@ CELLS_SQL = (
 #: 오늘 줄은 따로 붙인다. **같은 기준(`basis`)의 줄만** 잇는다(25.1527) — 기준이 바뀐 날 총액이 뛰어 가짜 수익·낙폭이
 #: 영구히 남는다
 TOTALS_SQL = (
-    "SELECT as_of, json_extract(summary_json, '$.account_krw.total_krw') FROM paper_broker_daily"
+    "SELECT as_of, json_extract(summary_json, '$.account_krw.total_krw') AS total,"
+    " json_extract(summary_json, '$.account_krw.assets_krw') AS assets,"
+    " json_extract(summary_json, '$.account_krw.cash_krw') AS cash,"
+    " json_extract(summary_json, '$.account_krw.usd_krw') AS fx"
+    " FROM paper_broker_daily"
     " WHERE broker = ? AND as_of < ? AND account_id = ? AND json_extract(summary_json, '$.account_krw.basis') = ?"
     " ORDER BY as_of"
+)
+#: 미국 일일 배치가 끝난 한국 날짜 — 그날 가상 평가 행을 미국 종가로 덮었다(25.1517).
+#: H 견주기의 끝 후보(25.1516·25.1543).
+#: 운용 화면 대보기(`jobs/desk`)도 이것을 쓴다
+US_DONE_SQL = (
+    "SELECT DISTINCT date(started_at, '+9 hours') AS d FROM batch_runs WHERE job_name = ?"
+    " AND status IN ('success', 'partial') AND started_at >= ?"
 )
 #: 계좌 전체 원화 총액의 기준 (docs/paper.md 15.7, docs/infra.md 25.1527). 1(25.1497~25.1526) = 국내 총평가 + 미국
 #: 보유 외화평가 합·달러 예수금 × 고시환율 — 모의 계좌에서 틀렸다: 체결기준현재잔고 보유 줄은 수량·평가가 모두 0 이고,
@@ -233,17 +244,37 @@ def _account_perf(client: Any, sess: Any, 증권사: str, 오늘: str, 합: dict
         us = kv.us_totals(sess.present_us())
     except (KisFailed, requests.RequestException):
         us = {"value_usd": None, "cash_usd": None, "usd_krw": None, "assets_krw": None}
+    from batch.jobs.daily import job_name
+    from batch.services import desk
+
+    이전 = client.execute(TOTALS_SQL, [증권사, 오늘, 계좌, TOTAL_BASIS]).dicts()
     해외 = us.get("assets_krw")
+    앞해외 = next((r["assets"] for r in reversed(이전) if r.get("assets") is not None), None)
+    영해외 = 해외 is not None and float(해외) <= 0 and 앞해외 is not None and float(앞해외) > 0
+    if 영해외:
+        # 어제까지 해외 자산이 있던 계좌에 0 이 오면 응답 실패로 본다 — 그대로 더하면 총액이 국내만 남아 가짜 −40%·영구
+        # MDD(25.1543 감사 3). 처음부터 해외 돈이 없는 계좌의 0 은 그대로 쓴다
+        해외 = None
     총 = None if 합.get("total") is None or 해외 is None else float(합["total"]) + float(해외)
-    원화계좌 = us | {"kr_total": 합.get("total"), "total_krw": 총, "basis": TOTAL_BASIS}
-    이전 = client.execute(TOTALS_SQL, [증권사, 오늘, 계좌, TOTAL_BASIS]).rows
-    계열 = [(str(d), v) for d, v in 이전] + [(오늘, 총)]
-    시작 = bm.perf(계열)
-    if not 시작:
+    원화계좌 = us | {"kr_total": 합.get("total"), "total_krw": 총, "basis": TOTAL_BASIS,
+                   **({"assets_zero": True} if 영해외 else {})}  # fmt: skip
+    계열 = [(str(r["as_of"]), r["total"]) for r in 이전] + [(오늘, 총)]
+    p = bm.perf(계열)
+    if not p:
         return 원화계좌, None
-    h0 = client.execute(H_TWR_SQL, [계좌, 시작["start"]]).rows
-    h1 = client.execute(H_TWR_SQL, [계좌, 오늘]).rows
-    return 원화계좌, bm.perf(계열, tuple(h0[0]) if h0 else None, tuple(h1[0]) if h1 else None)  # type: ignore[arg-type]
+    # H 견주기 — 같은 창(시작 ~ 오늘보다 앞선 미국 배치 끝난 날), 쉬는 해외 현금 환율 몫 뺌 (25.1543 감사 1·2)
+    줄 = {str(r["as_of"]): (r["total"], r.get("cash"), r.get("fx")) for r in 이전}
+    줄[오늘] = (총, us.get("cash_krw"), us.get("usd_krw"))
+    미국 = {str(r[0]) for r in client.execute(US_DONE_SQL, [job_name("US"), p["start"]]).rows}
+    창 = desk.h_window(계열, 오늘, 미국)
+    견줌: dict[str, Any] = {"h_from": None, "h_to": None, "kis_pnl_krw": None, "kis_cmp_pnl_krw": None,
+                          "fx_cash_krw": None, "h_pnl_krw": None, "h_return_pct": None}  # fmt: skip
+    if 창:
+        s, e = 창[0][0], 창[1]
+        h0 = client.execute(H_TWR_SQL, [계좌, s]).rows
+        h1 = client.execute(H_TWR_SQL, [계좌, e]).rows
+        견줌 = bm.h_compare(줄, s, e, tuple(h0[0]) if h0 else None, tuple(h1[0]) if h1 else None)  # type: ignore[arg-type]
+    return 원화계좌, p | 견줌
 
 
 def run(
@@ -330,9 +361,9 @@ def run(
     except Exception as exc:  # noqa: BLE001
         기록["cells_error"] = type(exc).__name__
     # 웹 보유내역·성과(docs/paper.md 15.7, 25.1496·25.1497). 시장 칸은 그 시장 통화(국내 원 — 현금은 총평가와
-    # 같은 D+2, 미국 달러). 성과는 **국내 배치가 계좌 전체 원화 총액**으로 낸다 — 미국 매수 돈이 원화에서 자동
-    # 환전으로 나가 시장별 총액 비는 수익률이 아니다. 국내 배치 시각(08:30 KST)이면 두 시장 모두 전날 종가라 시점이
-    # 맞다
+    # 같은 D+2, 미국 달러). 성과는 **국내 배치가 계좌 전체 원화 총액**(국내 총평가 + 해외 총자산, 25.1527)으로 낸다 —
+    # 원화와 따로 있는 해외 자산이 한 계좌라 시장별 총액 비는 수익률이 아니다. 국내 배치 시각(08:30 KST)이면 두 시장
+    # 모두 전날 종가라 시점이 맞다. H 견주기는 미국 배치까지 끝난 날로 창을 끊는다(25.1543)
     계좌 = {"currency": "USD" if 미국 else "KRW", "cash": 합.get("cash") if 미국 else 합.get("cash_d2", 합.get("cash")),
           "holdings_value": 합.get("holdings_value"), "total": 합.get("total")}  # fmt: skip
     if 미국:
