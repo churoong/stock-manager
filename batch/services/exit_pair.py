@@ -29,23 +29,29 @@ from batch.services import sell_flags as sf
 EXIT_PAIR_MIN_LOTS = 30
 #: 판정 가능 — x_C 28일 묶음 수 하한(32회차 검증 B 문구)
 EXIT_PAIR_MIN_BLOCKS = 12
-#: 뉴이–웨스트 시차 — 단기 창 x_C→x_T 는 첫 매수 뒤 92 달력일 안이라 28일 묶음 셋을 넘겨 겹친다(92 ÷ 28 ≈ 3.3).
-#: `pp.block_bound` 의 시차 1 은 20 거래일 창용이라 여기선 표준오차가 작게 나온다(32회차 검증 A·B)
-EXIT_PAIR_NW_LAG = 3
+#: 뉴이–웨스트 시차 — 단기 창 x_C→x_T 는 첫 매수 뒤 92 달력일 + 기간초과 다음 거래일·연휴로 약 101일까지라
+#: 28일 묶음 경계에 따라 넷 떨어진 묶음끼리도 겹친다(101 ÷ 28 ≈ 3.6 → 4).
+#: `pp.block_bound` 의 시차 1 은 20 거래일 창용이라 여기선 표준오차가 작게 나온다
+#: (32회차 검증 A·B 는 3, 구현 반박 검증 25.1556 이 4 로 — 결과 전, 더 보수적으로만)
+EXIT_PAIR_NW_LAG = 4
 #: 한쪽 유의수준 — 본페로니. 같은 첫 실행에서 규칙을 바꿀 수 있는 갈래가 둘(이것의 `target` 과 `holding_eq` 의 `equal`)
 EXIT_PAIR_ALPHA = 0.025
 #: 결정은 이 기간 로트만 — 중기(365일)·장기(끝 없음)는 창이 묶음 열둘을 넘겨 시차 3 으로도 못 덮는다. 사실로만 적는다
 EXIT_PAIR_DECIDE_HORIZON = "short"
-#: 끝 절단 여유(달력일) — 첫 매수 + 기간 한도 + 이것이 자료 끝을 넘으면 결정에서 뺀다.
-#: 기간초과 판정 뒤 정지로 미룬 매도를 덮는 값(정지 2주 어림 [확인필요]).
+#: 끝 절단 여유(달력일) — 첫 매수 + 기간 한도 + 이것이 자료 끝을 넘으면 결정에서 뺀다. x_T 는 결정일이라 정지로
+#: 미룬 매도도 결정일에 잡힌다 — 이 여유가 덮는 것은 기간초과 판정 다음 거래일까지의 주말·연휴다(25.1556 정정).
 #: 나간 것만 세면 빨리 나간 로트(추적이 일찍 걸린 것)만 남아 한쪽으로 기운다(32회차 검증 A)
 EXIT_PAIR_TAIL_DAYS = 14
 
 
 def _first_close(rows: list[tuple[str, float]], day: str) -> tuple[str, float] | None:
-    """그날 또는 그 뒤 첫 종가 — 엔진이 체결가 없는 날의 매도를 미루는 것과 같다"""
+    """그날 또는 그 뒤 첫 종가 — 엔진이 체결가 없는 날의 매도를 미루는 것과 같다. 그 뒤 종가가 없으면(상장폐지·자료 끝
+    정지) 그날 이하 마지막 종가 — 엔진이 상장폐지 종목을 마지막 종가로 판 것과 같다(25.1556 [권고] 3: 빼면 그날 크게
+    빠진 로트만 골라 빠져 `trend` 쪽으로 기울었다)"""
     k = bisect.bisect_left(rows, (day, -math.inf))
-    return rows[k] if k < len(rows) else None
+    if k < len(rows):
+        return rows[k]
+    return rows[-1] if rows else None
 
 
 def _index_upto(days: list[str], vals: list[float], d: str) -> float | None:
@@ -61,7 +67,7 @@ def episodes(logs: list[Any]) -> tuple[list[dict[str, Any]], dict[str, int]]:
     """
     열림: dict[int, dict[str, Any]] = {}
     끝: list[dict[str, Any]] = []
-    센 = {"lots": 0, "vanished": 0, "delisted": 0, "added_before_touch": 0}
+    센 = {"lots": 0, "vanished": 0, "delisted": 0, "added_before_touch": 0, "added_after_touch": 0}
     앞날: str | None = None
     for log in logs:
         for sid in list(열림):
@@ -92,15 +98,21 @@ def episodes(logs: list[Any]) -> tuple[list[dict[str, Any]], dict[str, int]]:
                 ep = 열림.get(sid)
                 if ep is not None and ep["xc"] is None:
                     ep["added"] = True
+                elif ep is not None and ep["xt"] is None:
+                    # 목표에 닿은 뒤 더 샀다 — 원가가 올라 추적이 꺼지거나 늦게 켜져 x_T 가 바뀐다.
+                    # core 규칙이었다면 x_C 에 팔아 이 매수는 없었다 → "같은 보유에 매도 규칙만 다르게" 가
+                    # 깨져 결정에서 뺀다(25.1556 [필수] 1)
+                    ep["added_after"] = True
                 continue
             if sid in 열림:
                 continue
             열림[sid] = {"sid": int(sid), "start": log.day, "xc": None, "xt": None, "horizon": None, "added": False,
-                        "delisted": False}  # fmt: skip
+                        "added_after": False, "delisted": False}  # fmt: skip
             센["lots"] += 1
         앞날 = log.day
     끝.extend(열림.values())  # 자료 끝까지 열린 것 — 목표에 닿았으면 끝 절단으로 센다
     센["added_before_touch"] = sum(1 for ep in 끝 if ep["xc"] is not None and ep["added"])
+    센["added_after_touch"] = sum(1 for ep in 끝 if ep["added_after"])
     return 끝, 센
 
 
@@ -129,9 +141,10 @@ def summarize(logs: list[Any], closes: Any, kospi: dict[str, float]) -> dict[str
     지수날 = sorted(kospi)
     지수값 = [float(kospi[d]) for d in 지수날]
     out: dict[str, Any] = dict(센)
-    out |= {"touched": 0, "truncated": 0, "no_price": 0}
+    out |= {"touched": 0, "truncated": 0, "no_price": 0, "excluded_added_after": 0}
     기간별: dict[str, list[float]] = {}
-    값: list[tuple[str, float]] = []
+    절단별: dict[str, int] = {}
+    값: list[tuple[str, int, float]] = []
     for ep in eps:
         if ep["xc"] is None:
             continue
@@ -143,6 +156,7 @@ def summarize(logs: list[Any], closes: Any, kospi: dict[str, float]) -> dict[str
             > date.fromisoformat(마지막[:10]))  # fmt: skip
         rows = closes.rows(ep["sid"])
         c = _first_close(rows, ep["xc"])
+        # 끝까지 안 나간 것(끝 절단)은 마지막 종가로 — 사실(기간별)에만 들어간다
         t = _first_close(rows, ep["xt"]) if ep["xt"] is not None else (rows[-1] if rows else None)
         if ep["delisted"] and ep["xt"] is not None:
             k = bisect.bisect_right(rows, (ep["xt"], math.inf))
@@ -156,18 +170,24 @@ def summarize(logs: list[Any], closes: Any, kospi: dict[str, float]) -> dict[str
         기간별.setdefault(기간, []).append(d)  # 사실 — 절단된 것도 마지막 날로 평가해 함께(기간마다 n·평균)
         if 절단:
             out["truncated"] += 1
+            절단별[기간] = 절단별.get(기간, 0) + 1
             continue
         if 기간 == EXIT_PAIR_DECIDE_HORIZON:
-            값.append((ep["xc"], d))
-    값.sort()
+            if ep["added_after"]:
+                out["excluded_added_after"] += 1
+                continue
+            값.append((ep["xc"], ep["sid"], d))
+    # 앞·뒤 반은 (x_C, 종목) 순 — d 값으로 정렬하면 같은 날 로트가 작은 d 부터 앞 반에 들어갔다(25.1556 [권고] 2)
+    값.sort(key=lambda v: (v[0], v[1]))
     블록: dict[int, list[float]] = {}
-    for day, x in 값:
+    for day, _sid, x in 값:
         블록.setdefault(pp._묶음(day), []).append(x)
     bb = nw_bound({k: sum(v) / len(v) for k, v in 블록.items()})
     반 = len(값) // 2
-    앞, 뒤 = [x for _d, x in 값[:반]], [x for _d, x in 값[반:]]
+    앞, 뒤 = [x for _d, _s, x in 값[:반]], [x for _d, _s, x in 값[반:]]
     out |= {
-        "by_horizon": {h: {"n": len(v), "mean": _r(sum(v) / len(v))} for h, v in sorted(기간별.items())},
+        "by_horizon": {h: {"n": len(v), "mean": _r(sum(v) / len(v)), "truncated": 절단별.get(h, 0)}
+                       for h, v in sorted(기간별.items())},  # fmt: skip
         "horizon": EXIT_PAIR_DECIDE_HORIZON, "n": len(값), "n_blocks": bb["n_blocks"], "mean": _r(bb["mean"]),
         "se": _r(bb["se"]), "lower": _r(bb["lower"]), "upper": _r(bb["upper"]), "lag": EXIT_PAIR_NW_LAG,
         "alpha": EXIT_PAIR_ALPHA, "first_half": _r(sum(앞) / len(앞)) if 앞 else None,
@@ -180,6 +200,7 @@ def summarize(logs: list[Any], closes: Any, kospi: dict[str, float]) -> dict[str
 def decide(s: dict[str, Any]) -> str:
     """사전 등록 결정 규칙(2026-10-19 고정 — 첫 실행 결과 전, 32회차 검증 B 문구).
 
+    - 결정 대상: 단기·끝 절단 아님·**목표 뒤 더 사지 않은** 로트(25.1556)
     - 판정 불가: 결정 대상 로트 < `EXIT_PAIR_MIN_LOTS` 또는 묶음 < `EXIT_PAIR_MIN_BLOCKS` → 지금대로
     - trend: 한쪽 97.5% 하한 > 0 이고 앞·뒤 반 평균 모두 > 0 → 지금 G·H 의 추적 매도 그대로(근거)
     - target: 대칭 상한 < 0 이고 앞·뒤 반 모두 < 0 → **H 만** 매도를 core 로 바꾸는 판 후보(G 는 추적 대조로 남긴다)

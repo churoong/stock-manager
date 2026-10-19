@@ -50,7 +50,7 @@ def frequency(logs: list[Any], kospi: dict[str, float]) -> dict[str, Any]:
                 막힘 += 1
                 지수도 += ir is not None and ir <= LOSS_GATE_KOSPI_DOWN_PCT
                 후보 += any(d.get("kind") == "blocked" for d in log.decisions)
-                원래만 += not adj
+                원래만 += ir is not None and not adj  # 지수를 모르면 조정 한도로 가를 수 없다(25.1556)
             조정 += adj
             조정만 += adj and not 걸림
         앞cut = str(log.cutoff)

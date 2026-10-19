@@ -65,7 +65,7 @@ def test_못_산_것_상장폐지_추가매수_끝절단을_센다() -> None:
     logs.append(_기록(날[20], held=[1]))  # 4 가 사라졌다 — 상장폐지(앞 거래일 날[11] 종가)
     logs.append(_기록(날[300], held=[1]))
     eps, 센 = xp.episodes(logs)
-    assert 센 == {"lots": 3, "vanished": 1, "delisted": 1, "added_before_touch": 1}
+    assert 센 == {"lots": 3, "vanished": 1, "delisted": 1, "added_before_touch": 1, "added_after_touch": 0}
     by = {e["sid"]: e for e in eps}
     assert by[3]["xt"] == 날[10] and by[4]["xt"] == 날[11] and by[4]["delisted"] and by[1]["xt"] is None
     prices = {s: {d: 100.0 + k for k, d in enumerate(날)} for s in (1, 3, 4)}
@@ -76,15 +76,36 @@ def test_못_산_것_상장폐지_추가매수_끝절단을_센다() -> None:
     assert out["first_half"] == pytest.approx(100 * math.log(110 / 103), abs=1e-4)
 
 
-def test_뉴이웨스트_시차3_손계산() -> None:
-    # 평균 3, 편차 −2·0·−1·3 → 분산 14/3, 시차 1 짝 0, 시차 2 짝 (0,2)=2 ×0.5, 시차 3 짝 (2,5)=−3 ×0.25 → 보정 0.25
-    b = xp.nw_bound({0: 1.0, 1: 3.0, 2: 2.0, 5: 6.0})
-    se = math.sqrt(14 / 3 + 2 * 0.25 / 3) / 2
-    t = pp.t_quantile(0.975, 3)
-    assert b["n_blocks"] == 4 and b["se"] == pytest.approx(se)
-    assert b["lower"] == pytest.approx(3 - t * se) and b["upper"] == pytest.approx(3 + t * se)
+def test_뉴이웨스트_시차4_손계산() -> None:
+    # 평균 2, 편차 −2·−2·−2·2·2·2 → 분산 24/5. 바틀렛 가중 1 − l/5: 시차 1 짝합 12 ×0.8, 2 → 0, 3 → −12 ×0.4,
+    # 4 → −8 ×0.2 → 보정 3.2 → 분산 4.8 + 2·3.2/5 = 6.08 (시차 1 이면 12 ×0.5 → 7.2 — 다르다)
+    b = xp.nw_bound({0: 0.0, 1: 0.0, 2: 0.0, 3: 4.0, 4: 4.0, 5: 4.0})
+    se = math.sqrt(6.08) / math.sqrt(6)
+    t = pp.t_quantile(0.975, 5)
+    assert b["n_blocks"] == 6 and b["se"] == pytest.approx(se)
+    assert b["lower"] == pytest.approx(2 - t * se) and b["upper"] == pytest.approx(2 + t * se)
     # 보정이 음수면 쓰지 않는다(더 작게 고치지 않는다)
     assert xp.nw_bound({0: 1.0, 1: -1.0, 2: 1.0, 3: -1.0})["se"] == pytest.approx(math.sqrt(4 / 3) / 2)
+
+
+def test_목표_뒤_더_산_로트는_빼고_같은날은_종목순_종가_없으면_마지막_종가() -> None:
+    """25.1556 반박 검증 — [필수] 1 목표 뒤 추가 매수, [권고] 2 앞·뒤 반 정렬, [권고] 3 뒤 종가 없음."""
+    날 = _날(400)
+    logs = [_기록(날[0], buys=[1, 2, 3, 4])]
+    logs.append(_기록(날[1], held=[1, 2, 3, 4]))
+    logs.append(_기록(날[3], held=[1, 2, 3, 4], hit={1: "short", 2: "short", 3: "short", 4: "short"}))
+    logs.append(_기록(날[5], held=[1, 2, 3, 4], buys=[4]))  # 4 는 목표 뒤 더 샀다
+    logs.append(_기록(날[10], held=[1, 2, 3, 4], sells={1: ["추적손절"], 2: ["추적손절"], 3: ["추적손절"],
+                                                          4: ["추적손절"]}))  # fmt: skip
+    logs.append(_기록(날[300], held=[]))
+    # 같은 날(x_C) 로트 1·2: 종목 1 이 오르고 2 가 내린다 — 종목 순이면 앞 반 = 1, 뒤 반 = 2(d 순이면 뒤바뀐다)
+    prices = {1: {날[3]: 100.0, 날[10]: 110.0}, 2: {날[3]: 100.0, 날[10]: 90.0}, 4: {날[3]: 100.0, 날[10]: 100.0},
+              3: {날[3]: 100.0}}  # 3 은 x_T 뒤 종가가 없다 — 마지막 종가(100)로  # fmt: skip
+    out = xp.summarize(logs, ce.Closes(prices), {d: 1000.0 for d in 날})
+    assert out["added_after_touch"] == 1 and out["excluded_added_after"] == 1 and out["no_price"] == 0
+    assert out["n"] == 3  # 1·2·3 (4 는 뺐다)
+    assert out["first_half"] == pytest.approx(100 * math.log(1.1), abs=1e-4)  # 앞 반 = 종목 1 하나
+    assert out["by_horizon"]["short"]["n"] == 4
 
 
 def _판(n, nb, lo, up, a, b) -> dict:

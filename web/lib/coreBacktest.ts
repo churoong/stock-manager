@@ -124,7 +124,7 @@ export function coreNotes(stepLog: unknown): string[] {
   else if (typeof xp.verdict === "string") {
     const 뜻: Record<string, string> = { trend: "추적 매도 유지", target: "H 목표 매도 후보(판 올림 절차)", none: "지금대로", undecidable: "판정 불가" };
     out.push(
-      `청산 대조(추적 대 목표, 단기): ${뜻[xp.verdict] ?? xp.verdict} — 목표 닿은 로트 ${num(xp.touched) ?? 0} · 판정에 쓴 ${num(xp.n) ?? 0}(묶음 ${num(xp.n_blocks) ?? 0}) · 평균 ${signed(num(xp.mean))} · 하한 ${signed(num(xp.lower))}`,
+      `청산 대조(추적 대 목표, 단기): ${뜻[xp.verdict] ?? xp.verdict} — 목표 닿은 로트 ${num(xp.touched) ?? 0} · 판정에 쓴 ${num(xp.n) ?? 0}(묶음 ${num(xp.n_blocks) ?? 0}) · 평균 ${signed(num(xp.mean))} · 하한 ${signed(num(xp.lower))} · 상한 ${signed(num(xp.upper))}`,
     );
   }
   const lg = obj(s.loss_gate);
