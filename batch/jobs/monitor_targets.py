@@ -533,7 +533,16 @@ def build_targets(client: TursoClient, market: str, now: str) -> list[tuple]:
         # 거래량 0 인 날(정지일)과 몇 달 전 행이 섞여 재개 뒤 평소 1.5배 거래에도 "20일 평균 3배" 가 났다.
         # 모자라면 None — 거래량 판정을 끈다(웹 route 와 같은 식)
         # 20일 평균 거래량은 조정하지 않은 거래소 원자료다 — 분할 뒤 며칠은 "거래량 N배" 가 거짓이다 (25.533)
-        평균거래량 = None if recent_action(client, t["stock_id"], market) else stats[1]
+        계수들 = action_factors(client, t["stock_id"], market)
+        평균거래량 = None if 계수들 is None else stats[1]
+        if "holding" not in t["reasons"]:
+            # **보유가 아닌 신호 종목에도 기업행위 표시를 단다** (25.1551 감사 [권고] 2) — 웹은 이 표시로 겹친 관심
+            # 종목의 관심 목표가를 거르는데, 표시가 보유에만 붙어 분할 뒤 그 종목이 신호에 남아 있는 동안 분할 전에 적은
+            # 관심 목표가로 "목표 매수가 도달" 이 날마다 나갔다. 읽기는 늘지 않는다(예전 `recent_action` 과 같은 읽기)
+            if 계수들 is None:
+                t["reasons"].append("action_guard")
+            elif math.prod(f for _날, f in 계수들) != 1.0:
+                t["reasons"].append("rights_ex")
         rows.append((
             market, t["stock_id"], t["symbol"], t["name"], t["currency"], json.dumps(t["reasons"]),
             zone_low, zone_high, t["target_price"], t["stop_price"], stats[0], 평균거래량,

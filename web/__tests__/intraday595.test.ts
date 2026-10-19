@@ -100,7 +100,8 @@ describe("기업행위 첫날 의심 (docs/infra.md 25.597)", () => {
     expect(dropOnActionSuspect("US").has("spike_down")).toBe(false);
     expect(dropOnActionSuspect("US").has("watch_price")).toBe(true);
     const 글 = readFileSync("app/api/cron/intraday/route.ts", "utf8");
-    expect(글).toContain("if (actionSuspect(market, quote.price, target.prev_close, quote.previous_close)) {");
+    // 25.1551 부터 KIS 시세면 기준가 가드도 켠다
+    expect(글).toContain("if (actionSuspect(market, quote.price, target.prev_close, quote.previous_close, quote.source === KIS_SOURCE)) {");
   });
 });
 

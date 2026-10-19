@@ -587,7 +587,7 @@ export async function GET(request: Request) {
       const 쓸목표가 = watchPriceUsable(watchBuy, target.prev_close);
       if (watchBuy !== null && 쓸목표가 === null) staleWatchPrices.push(target.yahoo_symbol);
       const 판정 = evaluate(target, quote, thresholds, 쓸목표가);
-      if (actionSuspect(market, quote.price, target.prev_close, quote.previous_close)) {
+      if (actionSuspect(market, quote.price, target.prev_close, quote.previous_close, quote.source === KIS_SOURCE)) {
         actionSuspects.push(target.yahoo_symbol);
         const 뺄것 = dropOnActionSuspect(market);
         hits.push(...판정.filter((h) => !뺄것.has(h.trigger)));

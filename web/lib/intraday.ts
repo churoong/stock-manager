@@ -678,6 +678,10 @@ export function recentActionUs(detectedAt: unknown, now: Date): boolean {
   return detectedAt >= new Date(now.getTime() - 기간).toISOString();
 }
 
+/** 국내 KIS 기준가와 DB 전일 종가가 이만큼(비율) 넘게 어긋나면 기업행위 첫날로 본다 (25.1551). 평소엔 같은 값이라 0 이다 —
+ * 2% 는 작은 무상증자(10% → 약 9% 어긋남)·할인 작은 유상증자 권리락까지 잡는 넉넉한 여유 */
+export const KIS_BASE_ACTION_GAP = 0.02;
+
 /**
  * **기업행위 첫날** 의심 (docs/infra.md 25.597). 배치 가드(`recent_action`)는 DB 의 지난 행만 봐서, 분할·병합 뒤 거래가 다시 열린 첫날엔
  * 붙지 않는다 — 분할 전 평균단가의 손절가(93,000)가 1:5 분할 뒤 19,500 과 비교되어 거짓 "손절선 터치"·"목표 매수가 도달"·"거래량 N배"
@@ -688,8 +692,17 @@ export function recentActionUs(detectedAt: unknown, now: Date): boolean {
  *   모든 종목의 손절을 지워 뺐다(25.600) — 3:2 분할(0.667) 첫날은 놓친다 [확인필요: 분할 첫날 야후 `previousClose` 가 조정된 값인지]
  * 모르면(DB 전일 종가 없음) 의심하지 않는다.
  */
-export function actionSuspect(market: string, price: number, dbPrevClose: number | null, yahooPrevClose: number | null): boolean {
+export function actionSuspect(
+  market: string, price: number, dbPrevClose: number | null, yahooPrevClose: number | null, kisBase = false,
+): boolean {
   if (!dbPrevClose || !(dbPrevClose > 0) || !(price > 0)) return false;
+  // **국내 KIS 시세면 기준가를 본다** (25.1551 감사 [필수] 1). KIS 전일 종가 칸은 거래소 **기준가**(`stck_sdpr`)라 권리락·무상증자·분할
+  // 첫날엔 조정된 값이다 — 평소엔 어제 종가 그대로라 DB 전일 종가와 같다. 현재가 비율(±31%)만 보면 유상증자 권리락·중간 크기 무상증자
+  // (−10~−30%)를 놓쳐, 권리락 계수가 평균단가에 곱해지기 전(다음 날부터, 25.1140)인 첫날 보유 종목에 거짓 "손절선 터치" 가 나갔다.
+  // DB 가 하루 묵은 날(25.600)은 어제 움직임만큼 어긋나 그날 알림이 빠질 수 있다 — 거짓 손절보다 낫다고 본다
+  if (market === "KR" && kisBase && yahooPrevClose !== null && yahooPrevClose > 0 && Math.abs(yahooPrevClose / dbPrevClose - 1) > KIS_BASE_ACTION_GAP) {
+    return true;
+  }
   const [lo, hi] = market === "KR" ? [0.69, 1.31] : [0.6, 1.7];
   const 밖 = (r: number) => r < lo || r > hi;
   if (!밖(price / dbPrevClose)) return false;
