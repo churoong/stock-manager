@@ -141,8 +141,12 @@ PENDING_DECISIONS_SQL = (
     "   AND ((ret_5d IS NULL AND decided_on <= ?) OR (ret_20d IS NULL AND decided_on <= ?) OR decided_on <= ?)"
     " ORDER BY decided_on LIMIT ?"
 )
-AFTER_CLOSES_SQL = (
-    "SELECT date, close FROM prices WHERE stock_id = ? AND date > ? AND close > 0 ORDER BY date LIMIT ?"
+#: 결정 원장 성과·가상 대조의 가격 — 기준일부터 **분할만 반영한** 계열(국내 수정주가·미국 야후 종가,
+#: `adj.split_only_prices`, 25.1547 감사 [권고] 2). 국내 `close` 는 원 종가라 저장한 기준 종가(분할 전 단위)를 분할 뒤
+#: 종가와 견주면 2:1 분할이 −50%, 1:10 병합이 +900% 로 남았다 — 성과 분해·결정 단위 증거·H 회사 가중치가 그 값을 쓴다
+SPLIT_FROM_SQL = (
+    "SELECT p.date, p.adj_close, p.close, s.country FROM prices p JOIN stocks s ON s.id = p.stock_id"
+    " WHERE p.stock_id = ? AND p.date >= ? AND p.close > 0 ORDER BY p.date LIMIT ?"
 )
 INDEX_ON_OR_BEFORE_SQL = (
     "SELECT close FROM index_prices WHERE index_code = ? AND date <= ? ORDER BY date DESC LIMIT 1"
@@ -163,9 +167,11 @@ ATTR_DECISIONS_SQL = (
     " FROM paper_decisions"
     " WHERE account_id = ? AND decided_on >= ? AND ret_20d IS NOT NULL AND COALESCE(rule_version, 1) = ?"
 )
+#: 진입 칸의 체결도 **지금 판의 주문만**(25.1547 감사 [참고] 4 — 위 주석과 달리 판을 거르지 않아 지난 판 체결이 섞였다)
 ATTR_FILLS_SQL = (
-    "SELECT order_id, price, day_close FROM paper_fills"
-    " WHERE account_id = ? AND side = 'buy' AND day_close IS NOT NULL AND fill_date >= ?"
+    "SELECT f.order_id, f.price, f.day_close FROM paper_fills f JOIN paper_orders o ON o.id = f.order_id"
+    " WHERE f.account_id = ? AND f.side = 'buy' AND f.day_close IS NOT NULL AND f.fill_date >= ?"
+    " AND COALESCE(o.rule_version, 1) = ?"
 )
 SAVE_ATTR_SQL = "UPDATE paper_daily SET attribution_json = ? WHERE account_id = ? AND as_of = ?"
 #: 성과 분해가 보는 기간(달력일)
@@ -234,11 +240,11 @@ def fill_outcomes(client: Any, market: str, today: str, now: str) -> dict[str, i
         # 같은 종목·기준일·창은 계좌가 일곱이어도 한 번만 읽는다 (25.1458, 검증 권장 — 결정이 계좌 수만큼 겹친다)
         열쇠 = (int(r["stock_id"]), str(r["ref_date"]), max(창))
         if 열쇠 not in 시세캐시:
-            시세캐시[열쇠] = client.execute(AFTER_CLOSES_SQL, [r["stock_id"], r["ref_date"], max(창)]).rows
-        행들 = 시세캐시[열쇠]
-        뒤 = [(str(d), float(c)) for d, c in 행들]
+            시세캐시[열쇠] = _분할맞춘(client, int(r["stock_id"]), str(r["ref_date"]), str(r["ref_date"]), max(창))
+        계열기준, 뒤 = 시세캐시[열쇠]
         그날들 = {뒤[n - 1][0]: 지수(뒤[n - 1][0]) for n in 창 if len(뒤) >= n}
-        o = pp.outcomes(r["ref_close"], 뒤, 지수(str(r["ref_date"])), 그날들)
+        # 기준일 값은 같은 계열에서 — 그날 행이 없을 때만 저장한 기준 종가(분할이 끼면 단위가 어긋날 수 있다)
+        o = pp.outcomes(계열기준 if 계열기준 else r["ref_close"], 뒤, 지수(str(r["ref_date"])), 그날들)
         지난 = (_date.fromisoformat(today) - _date.fromisoformat(str(r["decided_on"]))).days
         포기함 = "ret_60d" not in o and 지난 >= pp.OUTCOME_GIVE_UP_DAYS
         # 이미 채운 창을 다시 계산한 것뿐이면 쓰지 않는다 — 날마다 같은 행을 다시 쓰고 `filled` 가 부풀었다 (25.1453)
@@ -294,6 +300,26 @@ def _대조_모집단(client: Any, market: str, decided_on: str) -> list[int]:
     return []
 
 
+def _분할맞춘(
+    client: Any, sid: int, base_date: str, after: str, n: int,
+) -> tuple[float | None, list[tuple[str, float]]]:
+    """(기준일 값, `after` 뒤 n 거래일 [(날, 값)]) — 둘 다 같은 분할만 반영 계열에서(25.1547).
+    기준일 행이 없으면 None"""
+    from batch.services import adjust as adj
+
+    rows = client.execute(SPLIT_FROM_SQL, [sid, base_date[:10], n + OUTCOME_ROW_PAD]).dicts()
+    if not rows:
+        return None, []
+    값 = adj.split_only_prices(rows, str(rows[0]["country"]))
+    쌍 = [(str(r["date"])[:10], float(v)) for r, v in zip(rows, 값, strict=True) if v is not None and float(v) > 0]
+    기준 = 쌍[0][1] if 쌍 and 쌍[0][0] == base_date[:10] else None
+    return 기준, [x for x in 쌍 if x[0] > after[:10]][:n]
+
+
+#: 기준일과 `after` 사이(가상 대조의 묵은 기준 종가 — 최대 `CONTROL_STALE_DAYS` 달력일)를 덮을 덧 행
+OUTCOME_ROW_PAD = 10
+
+
 def fill_controls(client: Any, market: str) -> dict[str, int]:
     """매수마다 가상 대조 분위를 채운다 (docs/company.md 6장, 25.1476). 결정 원장의 성과가 찬 매수만, 한 번."""
     rows = client.execute(PENDING_CONTROL_SQL, [market, CONTROL_BATCH]).dicts()
@@ -306,9 +332,10 @@ def fill_controls(client: Any, market: str) -> dict[str, int]:
             값: float | None = None
             묵음 = (date.fromisoformat(ref_date) - date.fromisoformat(str(기준[0][0])[:10])).days if 기준 else None
             if 묵음 is not None and 묵음 <= CONTROL_STALE_DAYS:
-                뒤 = client.execute(AFTER_CLOSES_SQL, [sid, ref_date, pp.ATTRIBUTION_HORIZON]).rows
-                if len(뒤) >= pp.ATTRIBUTION_HORIZON:
-                    값 = (float(뒤[-1][1]) / float(기준[0][1]) - 1) * 100
+                # 기준·뒤 모두 분할만 반영 계열 — 매수 쪽 성과와 같은 잣대(25.1547)
+                값기준, 뒤 = _분할맞춘(client, sid, str(기준[0][0]), ref_date, pp.ATTRIBUTION_HORIZON)
+                if 값기준 and len(뒤) >= pp.ATTRIBUTION_HORIZON:
+                    값 = (뒤[-1][1] / 값기준 - 1) * 100
             수익캐시[(sid, ref_date)] = 값
         return 수익캐시[(sid, ref_date)]
 
@@ -407,6 +434,42 @@ def frozen_ids(client: Any, stock_ids: set[int], market_of: dict[int, str]) -> s
             log.warning("기업행위 경계를 읽지 못해 멈춥니다 (종목 %s): %s", sid, exc)
             out.add(sid)
     return out
+
+
+#: 보유 중에 수량이 바뀌는 기업행위가 난 종목 — {종목: 기업행위 날}. 경계 창(`monitor_targets.ACTION_GUARD_ROWS`,
+#: 20 거래일)이 지나도 멈춤을 이어 간다(25.1547 감사 [필수] 1). 장부 수량·단가를 고치는 `paper_adjustments`(판 2)가
+#: 생기기 전까지는 분할 전 수량 × 분할 뒤 종가로 평가해 2:1 분할이면 −50% 손절, 1:10 병합이면 없던 현금 약 100만 원이
+#: 장부에 들어왔다
+ACTION_STICKY_KEY = "paper_action_frozen"
+
+
+def sticky_frozen(
+    client: Any, fresh: set[int], first_buy: dict[int, str], market_of: dict[int, str],
+) -> tuple[set[int], dict[str, str]]:
+    """(이어 멈출 종목, 저장한 표). `fresh` = 오늘 기업행위 경계에 든 종목, `first_buy` = 지금 든 종목 → 가장 이른
+    첫 매수일.
+
+    경계에 든 보유 종목 가운데 **기업행위 날보다 먼저 산 것**만 표에 적는다(분할 뒤에 산 몫은 수량이 맞다). 표의 종목은
+    아무 계좌도 들지 않게 되면 지운다. 적힌 종목은 원가 평가·매도 판정 안 함·새 매수 안 함 — 경계 안과 같은 멈춤이다
+    """
+    from batch.jobs import monitor_targets
+
+    저장 = db.get_setting(client, ACTION_STICKY_KEY, {}) or {}
+    표 = {k: str(v) for k, v in (저장.items() if isinstance(저장, dict) else []) if int(k) in first_buy}
+    for sid in sorted(fresh):
+        if sid not in first_buy or str(sid) in 표:
+            continue
+        try:
+            날들 = monitor_targets.action_dates(client, sid, market_of.get(sid, "KR"))
+        except Exception as exc:  # noqa: BLE001 — 모르면 적지 않는다(오늘은 경계 멈춤이 이미 막는다), 내일 다시 본다
+            log.warning("기업행위 날을 읽지 못했습니다 (종목 %s): %s", sid, exc)
+            continue
+        먼저 = [d for d in 날들 if first_buy[sid] < d]
+        if 먼저:
+            표[str(sid)] = 먼저[-1]
+    if 표 != 저장:
+        db.set_setting(client, ACTION_STICKY_KEY, 표)
+    return {int(k) for k in 표}, 표
 
 
 def fill_orders(
@@ -607,7 +670,7 @@ def save_attribution(client: Any, aid: str, today: str, rule_version: int = 1) -
     """
     부터 = (date.fromisoformat(today) - timedelta(days=ATTR_WINDOW_DAYS)).isoformat()
     결정 = client.execute(ATTR_DECISIONS_SQL, [aid, 부터, rule_version]).dicts()
-    체결행 = client.execute(ATTR_FILLS_SQL, [aid, 부터]).dicts()
+    체결행 = client.execute(ATTR_FILLS_SQL, [aid, 부터, rule_version]).dicts()
     a = pp.attribution(결정, [(float(r["price"]), r["day_close"]) for r in 체결행])
     성적 = department_scorecard(결정)
     if 성적:
@@ -1258,6 +1321,15 @@ def run_step(
             | {int(r.stock_id) for r in signal_rows})  # fmt: skip
     market_of = {sid: str(_stock(client, sid, stock_cache).get("country") or "KR") for sid in 관심}
     frozen = frozen_ids(client, 관심, market_of)
+    # 보유 중 기업행위 — 경계 창이 지나도 장부 수량을 고치기 전까지 멈춤을 이어 간다(25.1547)
+    첫매수: dict[int, str] = {}
+    for aid in {f.account_id for f in fills}:
+        for sid, p in pp.positions([f for f in fills if f.account_id == aid]).items():
+            첫매수[sid] = min(첫매수.get(sid, p.first_buy_date), p.first_buy_date)
+    이어멈춤, _표 = sticky_frozen(client, frozen, 첫매수, market_of)
+    if 이어멈춤 - frozen:
+        기록["action_sticky"] = sorted(이어멈춤 - frozen)
+    frozen |= 이어멈춤
 
     새체결 = fill_orders(client, market, trade_date, flows, fills, fees, taxes, frozen, 지금, 기록)
     fills = [*fills, *새체결]

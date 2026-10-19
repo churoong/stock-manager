@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from batch.jobs import desk, sell_flags, signals, verdicts, weekly_summary
+from batch.jobs import desk, paper, sell_flags, signals, verdicts, weekly_summary
 
 뿌리 = Path(__file__).resolve().parent.parent
 
@@ -38,6 +38,7 @@ def _계획(c: sqlite3.Connection, sql: str) -> list[str]:
     "desk.ADJ_FILLS_SQL": desk.ADJ_FILLS_SQL,
     "weekly_summary.SECTOR_ROWS_SQL": weekly_summary.SECTOR_ROWS_SQL,
     "signals.RECENT_PRICES_FOR_SQL": signals.RECENT_PRICES_FOR_SQL,
+    "paper.SPLIT_FROM_SQL": paper.SPLIT_FROM_SQL,
 }
 
 

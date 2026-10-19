@@ -159,6 +159,29 @@ def action_factors(client: TursoClient, stock_id: int, market: str) -> list[tupl
     return 계수들
 
 
+def action_dates(client: TursoClient, stock_id: int, market: str) -> list[str]:
+    """수량이 바뀌는 기업행위(분할·병합·무상증자 — 유상증자 권리락 아님)가 난 날 목록 — 최근 `ACTION_GUARD_ROWS`
+    거래일 안 (docs/paper.md 2.3, docs/infra.md 25.1547). 국내는 계수가 튄 시세 행의 날, 미국은 분할 감지 기록의 날
+    (실제 분할일보다 늦을 수 있다 — 그 사이에 산 몫도 "분할 전" 으로 보는 보수 쪽).
+    가상모의투자가 "분할 전에 산 보유" 를 가려 멈춤을 이어 갈 때 쓴다"""
+    from batch.services import adjust as adj
+
+    if market == "US":
+        감지 = (db.get_setting(client, "us_split_detections", {}) or {}).get(str(stock_id))
+        return [str(감지)[:10]] if 감지 else []
+    rows = client.execute(
+        "SELECT close, change_pct, date FROM prices WHERE stock_id = ? AND close IS NOT NULL AND close > 0"
+        " ORDER BY date DESC LIMIT ?",
+        [stock_id, ACTION_GUARD_ROWS + 1],
+    ).rows
+    out: list[str] = []
+    for (close, pct, day), (prev, _p, _d) in zip(rows, rows[1:], strict=False):
+        f = adj.factor_of(float(prev), float(close), None if pct is None else float(pct))
+        if adj.is_action(f) and not _유상_권리락(client, stock_id, str(day)[:10]):
+            out.append(str(day)[:10])
+    return sorted(out)
+
+
 def open_buy_lots(client: TursoClient, stock_id: int) -> list[tuple[str, float, float]]:
     """보유 중인 매수분 (체결일, 남은 수량, 단가). 먼저 산 것부터 판다 — `services/portfolio.match_fifo` 와 같은 순서
     (날짜 → 같은 날 매수 먼저 → id, 25.397). 수수료는 비율만 쓰는 자리라 넣지 않는다."""
