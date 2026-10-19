@@ -470,6 +470,11 @@ def frozen_ids(client: Any, stock_ids: set[int], market_of: dict[int, str]) -> s
 ACTION_STICKY_KEY = "paper_action_frozen"
 
 
+#: 이어 멈춤 표의 날을 다시 보는 기간(달력일) — 감지 창(`ACTION_GUARD_ROWS` 21행 ≈ 29 달력일) 안쪽이라 그 날의 행이
+#: 아직 보인다. 그보다 오래된 날은 다시 볼 길이 없어 그대로 둔다(25.1560)
+ACTION_STICKY_RECHECK_DAYS = 20
+
+
 def sticky_frozen(
     client: Any, fresh: set[int], first_buy: dict[int, str], market_of: dict[int, str],
 ) -> tuple[set[int], dict[str, str]]:
@@ -500,6 +505,20 @@ def sticky_frozen(
         먼저 = [d for d in 날들 if first_buy[sid] < d]
         if 먼저 and 먼저[-1] > 표.get(str(sid), ""):
             표[str(sid)] = 먼저[-1]
+    # **거짓 감지 되돌리기**(25.1560 — 25.1554 반박 [권고]): 야후 대체 날(등락률 빈칸)이 시세 구멍 위에 서면 누적
+    # 움직임이 ±30% 를 넘어 기업행위로 적히고, 다음 날 그 구멍을 거래소 값으로 메워도 표는 그대로라 그 보유가 영영
+    # 원가 평가·손절 꺼짐으로 남았다. 적은 날이 `ACTION_STICKY_RECHECK_DAYS` 안이면(감지 창 21행이 아직 덮는다)
+    # 다시 보고, 그 날이 더는 기업행위로 안 나오면 지운다. 창 밖이면 다시 볼 길이 없어 그대로 둔다(보수 쪽)
+    오늘 = cal.local_today("KR")
+    for k, 날 in sorted(표.items()):
+        sid = int(k)
+        if sid in fresh or (오늘 - date.fromisoformat(날[:10])).days > ACTION_STICKY_RECHECK_DAYS:
+            continue
+        try:
+            if 날 not in monitor_targets.action_dates(client, sid, market_of.get(sid, "KR")):
+                del 표[k]
+        except Exception as exc:  # noqa: BLE001 — 모르면 지우지 않는다
+            log.warning("이어 멈춤을 다시 보지 못했습니다 (종목 %s): %s", sid, exc)
     if 표 != 저장:
         db.set_setting(client, ACTION_STICKY_KEY, 표)
     return {int(k) for k in 표}, 표
@@ -561,7 +580,8 @@ def fill_orders(
             if int(r["deferrals"] or 0) + 1 >= pp.HALT_LIQUIDATE_SESSIONS:
                 마지막 = client.execute(LAST_CLOSE_SQL, [o.stock_id, 날]).rows
                 if 마지막:
-                    가격, 까닭 = float(마지막[0][0]), f"정지 {pp.HALT_LIQUIDATE_SESSIONS}거래일 — 마지막 종가로 청산"
+                    가격 = float(마지막[0][0])
+                    까닭 = f"정지·하한가로 {pp.HALT_LIQUIDATE_SESSIONS}거래일 미룸 — 마지막 종가로 청산"
             if 가격 is None:
                 _쓰기(client, [(DEFER_SQL, [cal.next_session(market, date.fromisoformat(날)).isoformat(),
                                            f"{까닭} — 다음 장으로", o.id])])  # fmt: skip

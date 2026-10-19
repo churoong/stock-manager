@@ -156,7 +156,9 @@ def limit_locked(order: Order, bar: Bar, price: float) -> bool:
         return False
     if bar.close <= 0 or price <= 0:
         return False
-    if bar.change_pct <= -100:
+    if bar.change_pct <= -100 or abs(bar.change_pct) > KR_PRICE_LIMIT * 100 + 0.5:
+        # 등락률이 제한폭 밖이면 그날은 가격제한이 없는 날이다(정리매매·기준가 재설정) — 끝이 없다(25.1560,
+        # 25.1553 반박 [권고]: 정리매매 매도를 하한가로 보고 20거래일 미뤘다)
         return False
     기준 = bar.close / (1 + bar.change_pct / 100)
     if order.side == "buy":
@@ -740,7 +742,8 @@ def _종목통화_수익(p: dict[str, Any]) -> float | None:
     """월간 복기 손절 점검의 수익률(%) — 매도 엔진(`sell_flags.evaluate`)과 같은 **종목 통화** 잣대: 종가 ÷ 평균단가
     (수수료 포함). 예전에는 원화 평가 ÷ 원화 원가라 미국 보유는 환율만 움직여도 "손절선 아래로 들고 간 날" 이 생기거나
     빠졌다(25.1547 감사 남은 것, 25.1555). 종가·평균단가가 없는 옛 행·원가로 둔 보유(멈춤·종가 없음)는 원화 비율로 —
-    원가로 둔 보유는 0% 라 걸리지 않는다
+    원가로 둔 보유는 0% 라 걸리지 않는다. **예외**: 유상증자 권리락 보유는 엔진이 원가에 권리락 계수를 곱하는데
+    여기서는 곱하지 않아 엔진이 팔지 않은 날도 위반으로 셀 수 있다(25.1560 반박 정정 — 예전 원화 비율도 같았다)
     """
     종가, 평단 = p.get("close"), p.get("avg_price")
     if 종가 is not None and 평단 is not None and float(평단) > 0:

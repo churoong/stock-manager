@@ -215,3 +215,18 @@ def test_하루_단계가_계좌별_멈춤을_체결과_평가에_넘긴다(monk
     assert [p["value_krw"] for p in B평가 if p["stock_id"] == 1] == [100_000]
     # (A 는 6,000 에 사서 종가 5,000 이라 제 손절이 정상으로 선다 — 멈추지 않았다는 뜻)
     assert c.q("SELECT account_id FROM paper_orders WHERE side = 'sell'") == [("A",)]
+
+
+@pytest.mark.parametrize(("뒤", "지난날", "남나"), [(10_000.0, 2, False), (5_000.0, 2, True), (10_000.0, 25, True)],
+                         ids=["거짓 감지 — 지운다", "진짜 분할 — 둔다", "다시 볼 창 밖 — 둔다"])  # fmt: skip
+def test_이어_멈춤_표의_거짓_감지는_다시_보고_지운다(monkeypatch: pytest.MonkeyPatch, 뒤: float, 지난날: int, 남나: bool) -> None:
+    """야후 대체 날이 시세 구멍 위에 서 적힌 거짓 기업행위가 표에 영영 남아 손절이 꺼지던 것 (25.1560 — 25.1554 반박 [권고])"""
+    c = _장부(날[0])
+    _시세(c, 분할 + 2, 뒤)
+    c.conn.execute("INSERT INTO settings (key, value, updated_at) VALUES (?, ?, 't')",
+                   [job.ACTION_STICKY_KEY, json.dumps({"1": 날[분할]})])  # fmt: skip
+    오늘 = date.fromordinal(date.fromisoformat(날[분할]).toordinal() + 지난날)
+    monkeypatch.setattr(cal, "local_today", lambda _m=None: 오늘)
+    멈춤, 표 = job.sticky_frozen(c, set(), {1: 날[0]}, {1: "KR"})
+    assert (멈춤 == {1} and 표 == {"1": 날[분할]}) if 남나 else (멈춤 == set() and 표 == {})
+
