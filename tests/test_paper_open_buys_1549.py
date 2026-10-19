@@ -1,0 +1,82 @@
+"""아직 안 찬 매수 주문도 종목·섹터 상한에 보유처럼 센다 — 같은 종목 두 벌 막기 (docs/paper.md 2.1, docs/infra.md 25.1549).
+감사 재현: 아침 배치 때 어제 시세가 아직 없으면 어제 장 주문을 열어 둔 채 오늘 장 주문을 또 내, 두 벌이 모두 차 비중 19%."""
+
+from __future__ import annotations
+
+import json
+from datetime import date, datetime
+
+import pytest
+
+from batch.core import calendar as cal
+from batch.jobs import paper as job
+from batch.services import paper as pp
+from batch.services import report_picks
+from tests.test_paper_job_1445 import Client, _시세, _신호, 설정
+
+
+@pytest.fixture()
+def c(monkeypatch: pytest.MonkeyPatch) -> Client:
+    monkeypatch.setattr(report_picks, "with_criteria", lambda rows: rows)
+    monkeypatch.setattr(report_picks, "select_top", lambda rows, _n=5: rows)
+    monkeypatch.setattr(job, "frozen_ids", lambda *_a, **_k: set())
+    c = Client(accounts=("B",))
+    c.conn.execute("INSERT INTO paper_cash_flows (flow_date, amount_krw, kind, created_at, request_key)"
+                   " VALUES ('2026-10-13', 1000000, 'deposit', '2026-10-13T00:00:00+00:00', 'k1')")  # fmt: skip
+    return c
+
+
+def _실행(c: Client, monkeypatch: pytest.MonkeyPatch, trade_date: str, today: str, now: str) -> dict:
+    monkeypatch.setattr(cal, "local_today", lambda _m=None: date.fromisoformat(today))
+    _줄, 기록 = job.run_step(c, market="KR", trade_date=trade_date, late=False, signal_rows=[_신호()], settings=설정,
+                            price_series={}, series_unknown={}, allocate=True,
+                            now=datetime.fromisoformat(now))  # fmt: skip
+    return 기록
+
+
+def test_어제_시세가_늦은_아침에_같은_종목을_두_벌_사지_않는다(c: Client, monkeypatch: pytest.MonkeyPatch) -> None:
+    _시세(c, "2026-10-14", 10_000, 10_000)
+    _실행(c, monkeypatch, "2026-10-14", "2026-10-15", "2026-10-14T23:30:00+00:00")  # 10-15 장 주문 세 회차
+    _실행(c, monkeypatch, "2026-10-15", "2026-10-16", "2026-10-15T23:30:00+00:00")  # 10-15 시세가 아직 없다
+    assert c.q("SELECT COUNT(*) FROM paper_orders WHERE side = 'buy'") == [(3,)]
+    결정 = c.q("SELECT reason FROM paper_decisions WHERE decided_on = '2026-10-15' AND stock_id = 1")
+    assert (job.OPEN_BUY_SKIP_REASON,) in 결정
+    _시세(c, "2026-10-15", 9_600, 9_500)
+    _시세(c, "2026-10-16", 9_600, 9_500)
+    _실행(c, monkeypatch, "2026-10-16", "2026-10-19", "2026-10-18T23:30:00+00:00")
+    p = json.loads(c.q("SELECT positions_json FROM paper_daily WHERE as_of = '2026-10-19'")[0][0])
+    # 한 벌(10주) — 예전엔 두 벌 20주·19.1%
+    assert [x["quantity"] for x in p] == [10] and p[0]["weight_pct"] <= 10.0
+
+
+def test_종목별_예약은_현금_예약과_같은_식() -> None:
+    o = [pp.Order(id=1, account_id="B", stock_id=1, side="buy", order_type="limit", limit_price=100.0, quantity=10,
+                  currency="KRW", fill_session="s"),
+         pp.Order(id=2, account_id="B", stock_id=1, side="buy", order_type="limit", limit_price=90.0, quantity=10,
+                  currency="KRW", fill_session="s"),
+         pp.Order(id=3, account_id="B", stock_id=2, side="buy", order_type="limit", limit_price=10.0, quantity=1,
+                  currency="USD", fill_session="s")]  # fmt: skip
+    by = pp.reserved_by_stock(o, {"USD": 1000.0})
+    assert by is not None and sum(by.values()) == pytest.approx(pp.reserved_krw(o, {"USD": 1000.0}))
+    assert set(by) == {1, 2}
+    assert pp.reserved_by_stock(o, {"USD": None}) is None
+
+
+def test_판_2_회사의_헌장이_깨지면_판_1_로_사지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """헌장 검사에 걸린 판 2 회사는 위원회 없이 점수 상위로 사면서 판 2 표시를 붙였다 — 사지 않고 까닭만 (25.1549 [권고] 2)"""
+    monkeypatch.setattr(report_picks, "with_criteria", lambda rows: rows)
+    monkeypatch.setattr(report_picks, "select_top", lambda rows, _n=5: rows)
+    monkeypatch.setattr(job, "frozen_ids", lambda *_a, **_k: set())
+    c = Client(accounts=("A",), charters=True)
+    ch = json.loads(c.q("SELECT charter_json FROM paper_accounts WHERE id = 'A'")[0][0])
+    ch["weights"]["research"] = 50  # 한 부서 가중 40% 초과 — 검사에 걸림
+    c.conn.execute("UPDATE paper_accounts SET charter_json = ? WHERE id = 'A'", [json.dumps(ch)])
+    c.conn.execute("INSERT INTO paper_cash_flows (flow_date, amount_krw, kind, created_at, request_key)"
+                   " VALUES ('2026-10-13', 1000000, 'deposit', '2026-10-13T00:00:00+00:00', 'k1')")  # fmt: skip
+    monkeypatch.setattr(cal, "local_today", lambda _m=None: date(2026, 10, 15))
+    줄, 기록 = job.run_step(c, market="KR", trade_date="2026-10-14", late=False, signal_rows=[_신호()], settings=설정,
+                           price_series={}, series_unknown={}, allocate=True,
+                           now=datetime.fromisoformat("2026-10-14T23:30:00+00:00"))  # fmt: skip
+    assert c.q("SELECT COUNT(*) FROM paper_orders") == [(0,)]
+    assert 기록["accounts"]["A"]["committee"]["error"].startswith("헌장 검사 실패")
+    assert any("헌장 검사 실패로 오늘 사지 않음" in x for x in 줄)

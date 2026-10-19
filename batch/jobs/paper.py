@@ -437,6 +437,17 @@ def costs_for(market: str, fees: dict | None, taxes: dict | None, day: str) -> p
                     slippage_pct=c.slippage_pct)  # fmt: skip
 
 
+def _보유와_열린매수(
+    rows: list[dict[str, Any]], open_buys: list[pp.Order], fx: dict[str, float | None],
+) -> dict[int, float]:
+    """사전 위험 점검의 종목별 원화 — 평가 + 미체결 매수 예약(25.1549).
+    달러 환율을 모르면 평가만(그날 매수는 이미 안 함)"""
+    out = {int(r["stock_id"]): float(r["value_krw"]) for r in rows}
+    for sid, x in (pp.reserved_by_stock(open_buys, fx) or {}).items():
+        out[sid] = out.get(sid, 0.0) + x
+    return out
+
+
 def frozen_ids(client: Any, stock_ids: set[int], market_of: dict[int, str]) -> set[int]:
     """기업행위 경계(분할·병합 의심)에 든 종목 — 판 1 은 멈춘다 (docs/paper.md 2.3, 검증 [필수] 6)."""
     from batch.jobs import monitor_targets
@@ -1046,6 +1057,10 @@ def rescale_rows(rows: list[report_picks.SignalRow], total: float, min_order: fl
     return out
 
 
+#: 열린 매수 주문이 있는 종목을 다시 고르지 않은 까닭(25.1549) — 결정 원장 skip
+OPEN_BUY_SKIP_REASON = "열린 매수 주문 있음 — 같은 종목을 두 벌 사지 않음"
+
+
 def buy_orders(
     client: Any, *, market: str, account: str, account_fills: list[pp.Fill], valuation: pp.Valuation,
     open_buys: list[pp.Order], signal_rows: list[report_picks.SignalRow], settings: dict[str, Any],
@@ -1078,19 +1093,31 @@ def buy_orders(
         return [], {"skipped": "미체결 달러 주문의 환율 모름"}
     if valuation.cash_krw < 0:
         return [], {"skipped": "장부 현금이 음수"}
+    # **아직 안 찬 매수 주문도 보유처럼 센다**(25.1549 감사 [필수] 1) — 예전엔 현금 예약에만 들어가
+    # 종목·섹터 상한 계산에서
+    # 빠졌다. 장 끝난 뒤 손 실행 다음 아침·어제 시세가 늦은 아침에 같은 장(fill_session)으로 같은 종목 회차가 두 벌 나가
+    # 종목 비중이 19% 까지 갔다(KIS모의투자도 그대로 베꼈다)
+    열린금액 = pp.reserved_by_stock(open_buys, {"USD": fx_rate}) or {}
+    평가 = {int(r["stock_id"]): float(r["value_krw"]) for r in valuation.rows}
+    for sid, x in 열린금액.items():
+        평가[sid] = 평가.get(sid, 0.0) + x
     보유 = [
         report_picks.Holding(
-            stock_id=r["stock_id"], ticker=str(_stock(client, r["stock_id"], stock_cache).get("ticker")),
-            name=str(_stock(client, r["stock_id"], stock_cache).get("name")),
-            sector=_stock(client, r["stock_id"], stock_cache).get("sector"), value=r["value_krw"] / 환율,
-            country=_stock(client, r["stock_id"], stock_cache).get("country"),
-            asset_type=str(_stock(client, r["stock_id"], stock_cache).get("asset_type") or "stock"),
+            stock_id=sid, ticker=str(_stock(client, sid, stock_cache).get("ticker")),
+            name=str(_stock(client, sid, stock_cache).get("name")),
+            sector=_stock(client, sid, stock_cache).get("sector"), value=x / 환율,
+            country=_stock(client, sid, stock_cache).get("country"),
+            asset_type=str(_stock(client, sid, stock_cache).get("asset_type") or "stock"),
         )  # fmt: skip
-        for r in valuation.rows
+        for sid, x in 평가.items()
     ]
     총액 = valuation.equity_krw / 환율
     고른 = (preselected if preselected is not None
             else report_picks.select_top(report_picks.with_criteria(signal_rows), top_n))  # fmt: skip
+    # 열린 매수 주문이 있는 종목은 새로 사지 않는다 — 같은 종목을 두 벌 사지 않게(25.1549).
+    # 결정 원장에는 까닭과 함께 skip
+    열린빠짐 = [r for r in 고른 if r.stock_id in 열린금액]
+    고른 = [r for r in 고른 if r.stock_id not in 열린금액]
     후보수 = len({r.stock_id for r in 고른})  # 신호 종목이 top_n 보다 적은 날은 E 가 B 와 같다 — 기록에 남긴다
     다시 = rescale_rows(고른, 총액, float(settings.get("min_order_amount") or 0))
     if substitute is not None:
@@ -1136,6 +1163,10 @@ def buy_orders(
                 {"unknown": "분할 재수집 대기"} if b["stock_id"] in series_unknown
                 else sv.stop_vol(price_series.get(b["stock_id"]), stop_pcts.get(r0.horizon or "long"), market)
             )  # fmt: skip
+    for r0 in {r.stock_id: r for r in 열린빠짐}.values():
+        결정.append({"stock_id": r0.stock_id, "kind": "skip", "reason": OPEN_BUY_SKIP_REASON, "ref_close": r0.close,
+                     "ref_date": r0.close_date,
+                     "detail": {"horizon": r0.horizon, "score": r0.total_score}})  # fmt: skip
     for e in pv.excluded:
         r0 = (by_ticker.get(e.ticker) or [None])[0]  # type: ignore[assignment]
         if r0 is not None:
@@ -1441,9 +1472,12 @@ def run_step(
             equity_krw=v.equity_krw,
             day_return_pct=(검["twr"] / 검["prev_twr"] - 1) * 100 if 검["prev_twr"] else None,
             cash_available_krw=v.cash_krw - (예약 if 예약 is not None else v.cash_krw),
-            holding_krw={int(r["stock_id"]): float(r["value_krw"]) for r in v.rows},
+            # 열린 매수 주문도 보유처럼 — 종목·섹터 상한이 아직 안 찬 주문을 보게(25.1549)
+            holding_krw=_보유와_열린매수(v.rows, [o for o in 열린 if o.account_id == aid and o.side == "buy"],
+                                     {"USD": fx[0] if fx else None}),
             sector_of={sid: _stock(client, sid, stock_cache).get("sector")
-                       for sid in {int(r["stock_id"]) for r in v.rows}},
+                       for sid in {int(r["stock_id"]) for r in v.rows}
+                       | {o.stock_id for o in 열린 if o.account_id == aid and o.side == "buy"}},
             max_stock_pct=float(상한.get("max_weight_per_stock") or 10.0),
             max_sector_pct=float(상한.get("max_weight_per_sector") or 30.0),
             today=cal.local_today(market).isoformat(), halted=멈춤, frozen=frozenset(멈춘),
@@ -1520,6 +1554,12 @@ def run_step(
                     문장 += 회의문장
                     a기록["committee"] = 메모
                     종목수 = int(헌장들[aid]["top_n"])
+                elif aid in 헌장오류 and 판 >= 2:
+                    # 헌장이 있는 판(2~) 회사의 헌장이 검사에 걸리면 위원회 없이 판 1(점수 상위)로 사면서 판 2 표시를
+                    # 붙였다(25.1549 감사 [권고] 2) — 위원회가 못 열린 날과 같이 사지 않고 까닭만 남긴다
+                    가결행 = []
+                    a기록["committee"] = {"error": "헌장 검사 실패 — " + "; ".join(헌장오류[aid])[:180]}
+                    줄.append(f"가상 {aid}: 헌장 검사 실패로 오늘 사지 않음 — {'; '.join(헌장오류[aid])[:120]}")
                 지주: dict[int, dict[str, Any]] = {}
                 if aid in 지주설정:
                     # 지주사(H) — 회사들의 추천을 성적 가중치로 합쳐 고른다 (docs/company.md 10장, 25.1482).

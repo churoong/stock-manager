@@ -190,6 +190,20 @@ def invested(flows: list[CashFlow]) -> float:
     return float(sum(f.amount_krw for f in flows))
 
 
+def reserved_by_stock(open_buys: list[Order], fx_now: dict[str, float | None]) -> dict[int, float] | None:
+    """종목마다 미체결 매수가 묶은 원화(`reserved_krw` 와 같은 식) — 종목·섹터 상한에 보유처럼 센다(25.1549).
+    달러 주문인데 환율을 모르면 None"""
+    out: dict[int, float] = {}
+    for o in open_buys:
+        if o.side != "buy":
+            continue
+        x = reserved_krw([o], fx_now)
+        if x is None:
+            return None
+        out[o.stock_id] = out.get(o.stock_id, 0.0) + x
+    return out
+
+
 def reserved_krw(open_buys: list[Order], fx_now: dict[str, float | None]) -> float | None:
     """미체결 매수가 묶어 둔 현금(원) — 수수료 여유, 달러는 환율 여유까지 (docs/paper.md 2.1, 검증 [필수] 2).
 
