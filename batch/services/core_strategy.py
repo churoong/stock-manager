@@ -101,6 +101,9 @@ class _Rows:
         self.rows = rows
 
     def dicts(self) -> list[dict[str, Any]]:
+        # 줄이 있는데 dict 로 읽는 운영 읽기는 아직 없다 — 생기면 조용히 빈 값을 주지 않고 깨진다(25.1533)
+        if self.rows:
+            raise LookupError("핵심 H 백테스트 창은 dict 읽기를 모른다 — 운영 함수가 바뀌었다")
         return []
 
 
@@ -115,6 +118,9 @@ class _ViewClient:
         from batch.jobs import paper as jp
 
         self.view, self._last, self._peak = view, jp.LAST_CLOSE_SQL, jp.PEAK_SQL
+        #: 모르는 읽기 — 운영 `frozen_ids` 처럼 예외를 삼키는 함수 안에서 나면 "멈춤" 으로 조용히 바뀐다. 적어 두고
+        #: 그날 판단이 끝나면 다시 던진다(25.1533, 25.1532 반박 검증)
+        self.misses: list[str] = []
 
     def execute(self, sql: str, params: list[Any] | tuple[Any, ...] = ()) -> _Rows:
         if sql == self._last:
@@ -127,6 +133,7 @@ class _ViewClient:
             return _Rows([(max(값) if 값 else None,)])
         if sql.startswith(_ACTION_SQL_HEAD):
             return _Rows([])
+        self.misses.append(sql[:80])
         raise LookupError(f"핵심 H 백테스트 창이 모르는 읽기 — 운영 함수가 바뀌었다: {sql[:80]}")
 
 
@@ -305,6 +312,9 @@ class CoreStrategy:
         현금 = max(1.0 - sum(w.values()), 0.0)
         buys, bought = self._buys(client, view, dv, w, 현금, 손절, 최근판, today, log)
 
+        if client.misses:
+            # 운영 함수가 삼킨 모르는 읽기 — 백테스트가 운영과 다른 판단을 조용히 쓰지 않게 여기서 깨진다
+            raise LookupError(f"핵심 H 백테스트 창이 모르는 읽기({len(client.misses)}건, 삼켜짐): {client.misses[0]}")
         for sid in 매도:
             self._selling.setdefault(sid, day)
         self._bought = bought
