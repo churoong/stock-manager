@@ -96,6 +96,9 @@ OLD_SQL = (
 BOUGHT_SQL = (
     "SELECT DISTINCT stock_id FROM paper_broker_orders WHERE broker = ? AND side = 'buy' AND status <> 'rejected'"
 )
+#: 베끼려 한 적 있는 매수 종목(거부 포함) — "연결 전 보유" 를 가른다. 거부를 빼면 연결 뒤 KIS 가 거부한
+#: 매수(가상은 참)가 연결 전 보유로 숨어 어긋남이 0 으로 보였다(25.1561 — KIS 경로 감사 [권고] 2)
+ATTEMPTED_SQL = "SELECT DISTINCT stock_id FROM paper_broker_orders WHERE broker = ? AND side = 'buy'"
 #: 종목마다 마지막으로 산 계좌(정리 줄의 계좌, 25.1517) — id 순이라 뒤 줄이 이긴다
 BOUGHT_BY_SQL = (
     "SELECT stock_id, account_id FROM paper_broker_orders WHERE broker = ? AND side = 'buy' AND status <> 'rejected'"
@@ -135,7 +138,8 @@ DAILY_SQL = (
 #: 비교 보고 (docs/paper.md 15.3, 25.1478) — 지난 `COMPARE_DAYS` 일의 베낀 주문에 가상모의투자의 판정을 붙인다
 COMPARE_SQL = (
     "SELECT b.trade_date, b.side, b.status, b.filled_qty, b.quantity, b.avg_price, b.message, b.reason,"
-    " o.status AS i_status, f.price AS i_price, f.fill_date AS i_fill_date FROM paper_broker_orders b"
+    " o.status AS i_status, o.close_note AS i_note, f.price AS i_price, f.fill_date AS i_fill_date"
+    " FROM paper_broker_orders b"
     " LEFT JOIN paper_orders o ON o.id = b.paper_order_id LEFT JOIN paper_fills f ON f.order_id = b.paper_order_id"
     " WHERE b.broker = ? AND b.trade_date >= ? AND b.trade_date < ? AND b.account_id = ?"
 )
@@ -143,6 +147,7 @@ COMPARE_SQL = (
 #: 증권사 주문 표의 order_type 은 미국 시장가를 limit 으로 적으므로 **내부** 주문 유형을 쓴다
 CELLS_SQL = (
     "SELECT b.trade_date, b.side, b.status, b.filled_qty, b.avg_price, b.reason, o.status AS i_status,"
+    " o.close_note AS i_note,"
     " o.order_type AS i_order_type, o.fill_basis AS i_fill_basis, f.price AS i_price, f.fill_date AS i_fill_date,"
     " CASE WHEN f.price > 0 AND f.quantity > 0 THEN f.slippage / (f.price * f.quantity) * 100 END AS i_slip_pct"
     " FROM paper_broker_orders b LEFT JOIN paper_orders o ON o.id = b.paper_order_id"
@@ -344,11 +349,11 @@ def run(
     # 어긋남은 **베낀 적 있는 종목**과 증권사 보유만 — 키를 넣기 전에 산 가상 보유는 "연결 전 보유" 로
     # 따로 센다(감사 [권장] 3). 같은 날 다시 돌면 시가에 찬 오늘 매수가 증권사엔 있고 가상 장부엔 다음 배치에야
     # 들어온다 — 그 수량을 뺀다(감사 [권장] 2)
-    산적0 = {int(r[0]) for r in client.execute(BOUGHT_SQL, [증권사]).rows}
     오늘산0 = {int(r[0]): int(r[1] or 0)
               for r in client.execute(BOUGHT_TODAY_SQL, [증권사, 오늘.isoformat()]).rows}  # fmt: skip
     증권수 = {k: v[0] - 오늘산0.get(k, 0) for k, v in 증권.items()}
-    연결전 = sorted(sid for sid in 내부 if sid not in 산적0 and sid not in 증권)
+    베낀적 = {int(r[0]) for r in client.execute(ATTEMPTED_SQL, [증권사]).rows}
+    연결전 = sorted(sid for sid in 내부 if sid not in 베낀적 and sid not in 증권)
     어긋남 = bm.holdings_diff({k: q for k, q in 증권수.items() if q > 0},
                             {k: q for k, q in 내부.items() if k not in 연결전})  # fmt: skip
     부터 = (오늘 - timedelta(days=bm.COMPARE_DAYS)).isoformat()

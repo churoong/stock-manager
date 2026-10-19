@@ -209,6 +209,19 @@ COMPARE_DAYS = 28
 #: 거부 까닭을 몇 개까지 싣나
 COMPARE_TOP_REASONS = 5
 _끝난 = ("filled", "partial", "unfilled", "rejected", "unknown")
+#: 가상 쪽 만료 가운데 **체결 판정이 아닌 것**(`jobs/paper.fill_orders` 의 만료 까닭 머리) — 체결 규칙과 무관해
+#: 일치율·실현율·체결 칸 표본에서 뺀다. 넣으면 그날 KIS 가 찬 주문이 "KIS만 참" 으로 세져 괴리 알림이
+#: "가상 판정이 비관" 이라고 엉뚱한 방향을 말했다(25.1561 — KIS 경로 감사 [권고] 1)
+NON_JUDGMENT_EXPIRY = (
+    "현금 부족", "기업행위 경계", "쓸 수 있는 환율 없음", "그날 시세를 받지 못해", "팔 보유가 모자람",
+)  # fmt: skip
+
+
+def _판정밖(r: dict[str, Any]) -> bool:
+    """체결 판정과 무관한 줄 — 가상의 판정 아닌 만료이거나 KIS 거부(주문 경로 실패 — 따로 센다)"""
+    if r.get("status") == "rejected":
+        return True
+    return r.get("i_status") == "expired" and str(r.get("i_note") or "").startswith(NON_JUDGMENT_EXPIRY)
 
 
 def _까닭(message: str | None) -> str:
@@ -239,14 +252,19 @@ def compare(rows: list[dict[str, Any]]) -> dict[str, Any]:
         if r["status"] == "unknown":
             칸["unknown"] += 1
             continue
+        if r["status"] == "rejected":
+            # 거부는 주문 경로 실패라 체결 규칙 표본이 아니다 — 수와 까닭만(25.1561)
+            칸["rejected"] += 1
+            까닭[_까닭(r.get("message"))] += 1
+            continue
+        if _판정밖(r):
+            칸["excluded"] += 1
+            continue
         칸["n"] += 1
         # 그 거래일에 찬 것만 "가상 참" — 미룬 매도가 뒤 장에서 찬 것은 이 날 주문과 짝이 아니다
         내부 = r["i_status"] == "filled" and str(r.get("i_fill_date") or "")[:10] == str(r.get("trade_date") or "")[:10]
         kis = r["status"] in ("filled", "partial") and int(r.get("filled_qty") or 0) > 0
         칸["partial"] += r["status"] == "partial"
-        if r["status"] == "rejected":
-            칸["rejected"] += 1
-            까닭[_까닭(r.get("message"))] += 1
         칸[("both" if kis else "internal_only") if 내부 else ("kis_only" if kis else "neither")] += 1
         if 내부 and kis and r.get("avg_price") and r.get("i_price"):
             k, i = float(r["avg_price"]), float(r["i_price"])
@@ -263,7 +281,7 @@ def compare(rows: list[dict[str, Any]]) -> dict[str, Any]:
         # 100 이면 가상 체결을 그대로 믿어도 된다
         "kept_pct": 칸["both"] / 가상참 * 100 if 가상참 else None,
         **{k: 칸[k] for k in ("both", "internal_only", "kis_only", "neither", "partial", "rejected", "unknown",
-                             "cleanup")},
+                             "cleanup", "excluded")},
         "slip_buy": 평균(차이["buy"]), "slip_sell": 평균(차이["sell"]),
         "reject_reasons": dict(까닭.most_common(COMPARE_TOP_REASONS)),
     }  # fmt: skip
@@ -310,6 +328,8 @@ def cells(rows: list[dict[str, Any]]) -> dict[str, Any]:
         if r["status"] == "unknown":
             c["unknown"] += 1
             continue
+        if _판정밖(r):
+            continue  # KIS 거부·가상의 판정 아닌 만료는 칸 표본이 아니다(25.1561)
         날 = str(r.get("trade_date") or "")[:10]
         c["n"] += 1
         c["_days"].add(날)

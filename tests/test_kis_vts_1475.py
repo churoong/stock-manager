@@ -394,9 +394,10 @@ def test_job_halt_and_no_response(c: Client) -> None:
 
 
 def _줄(side: str, st: str, i_st: str, *, fq: int = 0, avg: float | None = None, ip: float | None = None,
-       msg: str | None = None, reason: str = "베낌", fd: str = "2026-10-16") -> dict[str, Any]:  # fmt: skip
+       msg: str | None = None, reason: str = "베낌", fd: str = "2026-10-16", note: str | None = None) -> dict[str, Any]:  # fmt: skip
     return {"trade_date": "2026-10-16", "side": side, "status": st, "filled_qty": fq, "quantity": 3, "avg_price": avg,
-            "message": msg, "reason": reason, "i_status": i_st, "i_price": ip, "i_fill_date": fd}  # fmt: skip
+            "message": msg, "reason": reason, "i_status": i_st, "i_price": ip, "i_fill_date": fd,
+            "i_note": note}  # fmt: skip
 
 
 def test_compare_counts_match_and_signed_slippage() -> None:
@@ -405,14 +406,15 @@ def test_compare_counts_match_and_signed_slippage() -> None:
         _줄("sell", "filled", "filled", fq=3, avg=19_800.0, ip=20_000.0),    # 둘 다 참, 매도 1% 불리
         _줄("buy", "unfilled", "filled", ip=9_800.0),                        # 가상만 참 — 가상이 낙관
         _줄("buy", "partial", "expired", fq=1, avg=9_700.0),                 # KIS만 참(부분)
-        _줄("buy", "rejected", "expired", msg="모의 주문 실패 APBK0919 주문가능금액을 초과"),  # 둘 다 안 참 + 거부
+        _줄("buy", "rejected", "expired", msg="모의 주문 실패 APBK0919 주문가능금액을 초과"),  # 거부 — 표본 밖(25.1561)
+        _줄("buy", "unfilled", "expired"),                                   # 둘 다 안 참(판정 만료)
         _줄("buy", "unknown", "filled"),                                     # 모름 — 일치에서 뺀다
         _줄("sell", "filled", "filled", fq=3, avg=1.0, ip=1.0, fd="2026-10-19"),  # 미룬 매도가 뒤 장에서 참 — 이 날은 가상 안 참
         _줄("sell", "filled", "", reason="정리"),                             # 정리는 따로
         _줄("buy", "accepted", "filled"),                                    # 아직 안 끝남
     ])  # fmt: skip
     assert (s["n"], s["both"], s["internal_only"], s["kis_only"], s["neither"]) == (6, 2, 1, 2, 1)
-    assert (s["partial"], s["rejected"], s["unknown"], s["cleanup"]) == (1, 1, 1, 1)
+    assert (s["partial"], s["rejected"], s["unknown"], s["cleanup"], s["excluded"]) == (1, 1, 1, 1, 0)
     assert s["match_pct"] == 50.0
     assert s["slip_buy"] == {"n": 1, "avg": pytest.approx(1.0)} and s["slip_sell"] == {"n": 1, "avg": pytest.approx(1.0)}
     assert s["reject_reasons"] == {"APBK0919": 1}
@@ -422,6 +424,25 @@ def test_compare_counts_match_and_signed_slippage() -> None:
     assert 줄[2] == "  가격(+ 면 가상모의투자가 낙관): 매수 +1.00% (n=1) · 매도 +1.00% (n=1)"
     assert 줄[-1] == "  모름 1 · 정리 주문 1 · 잔고가 어긋난 종목 2 (2026-10-19)"
     assert bm.compare_lines(bm.compare([]), 0, None) == []
+
+
+def test_판정_아닌_가상_만료와_거부는_일치율_표본_밖() -> None:
+    """현금 부족·멈춤 등 가상의 판정 아닌 만료와 KIS 거부가 "KIS만 참"·"가상만 참" 으로 세져 괴리 알림 방향이 틀리던 것
+    (25.1561 — KIS 경로 감사 [권고] 1). 체결 칸도 같다"""
+    줄들 = [_줄("buy", "filled", "filled", fq=3, avg=10_000.0, ip=10_000.0)]
+    줄들 += [_줄("buy", "filled", "expired", fq=3, avg=10_000.0, note=n) for n in
+             ("현금 부족 (다른 미체결 매수 예약 포함)", "기업행위 경계 — 멈춤 (docs/paper.md 2.3)", "쓸 수 있는 환율 없음",
+              "그날 시세를 받지 못해 판정 못 함")]  # fmt: skip
+    줄들 += [_줄("sell", "filled", "expired", fq=3, avg=1.0, note="팔 보유가 모자람")]
+    줄들 += [_줄("buy", "rejected", "filled", ip=10_000.0, msg="EGW00201 초당 거래건수 초과")]
+    # 판정 만료(종가 > 회차 가격)는 그대로 표본 — KIS 가 찼으면 KIS만 참
+    줄들 += [_줄("buy", "filled", "expired", fq=3, avg=9_900.0, note="종가 10100 > 회차 가격 9900")]
+    s = bm.compare(줄들)
+    assert (s["n"], s["both"], s["kis_only"], s["internal_only"], s["excluded"], s["rejected"]) == (2, 1, 1, 0, 5, 1)
+    assert s["kept_pct"] == 100.0
+    칸 = bm.cells([{**r, "i_order_type": "limit" if r["side"] == "buy" else "market", "i_fill_basis": "open"}
+                  for r in 줄들])  # fmt: skip
+    assert 칸["cells"]["buy_limit"]["n"] == 2
 
 
 def test_daily_summary_stored_and_weekly_reads_it(c: Client) -> None:
@@ -466,6 +487,24 @@ def test_holdings_diff_ignores_us_rerun_and_pre_link(c: Client) -> None:
     다시 = job.run(c, "KR", _at("10:30"), session=_Sess(holdings=[kv.Holding("005930", 5, 5, 9_700.0)]),
                  sleep=lambda _x: None, clock=lambda: _at("10:30"))  # fmt: skip
     assert 다시["diff"] == 0
+
+
+def test_연결_뒤_거부된_매수는_연결_전_보유로_숨지_않는다(c: Client) -> None:
+    """KIS 가 거부한 매수(가상은 참)가 "연결 전 보유" 로 빠져 어긋남이 0 으로 보이던 것 (25.1561 — KIS 경로 감사 [권고] 2)"""
+    c.conn.execute("INSERT INTO paper_orders (id, account_id, market, stock_id, side, order_type, quantity, currency,"
+                   " decided_on, fill_session, reason, rule_version, status, created_at)"
+                   " VALUES (91, 'B', 'KR', 3, 'buy', 'market', 2, 'KRW', '2026-10-15', '2026-10-16', 'r', 1,"
+                   " 'filled', 't')")  # fmt: skip
+    c.conn.execute("INSERT INTO paper_fills (order_id, account_id, stock_id, side, fill_date, price, quantity, currency,"
+                   " fx_rate, fee, tax, slippage, cash_krw, created_at)"
+                   " VALUES (91, 'B', 3, 'buy', '2026-10-16', 100, 2, 'KRW', 1, 0, 0, 0, -200, 't')")  # fmt: skip
+    c.conn.execute("INSERT INTO paper_broker_orders (broker, paper_order_id, account_id, market, stock_id, code, side,"
+                   " order_type, quantity, trade_date, reason, status, message, source, created_at)"
+                   " VALUES ('kis_vts', 91, 'B', 'KR', 3, '000660', 'buy', 'market', 2, '2026-10-16', '베낌',"
+                   " 'rejected', 'EGW00201 초당 거래건수 초과', 't', 't')")  # fmt: skip
+    c.conn.execute("DELETE FROM paper_orders WHERE id = 102")  # 3 을 파는 주문은 이 시험에서 빼 둔다
+    기록 = job.run(c, "KR", _at("08:40"), session=_Sess(), sleep=lambda _x: None, clock=lambda: _at("08:40"))
+    assert 기록["diff"] == 1 and 기록.get("before_link", 0) == 0
 
 
 def test_partial_keys_are_named_and_alerted() -> None:
