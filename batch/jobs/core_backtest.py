@@ -36,6 +36,7 @@ from batch.jobs import metrics as metrics_job
 from batch.services import backtest as bt
 from batch.services import core_backtest as cb
 from batch.services import core_strategy as cs
+from batch.services import holding_eq as heq
 from batch.services import metrics as m
 from batch.services import pit_universe as pit
 from batch.services import trend
@@ -238,6 +239,18 @@ def run_core(
                   f"  초과 {jb._pct(summary.excess_cagr)}  앞 반 {jb._pct(앞.get('cagr'))}/{jb._pct(앞.get('mdd'))}"
                   f"  뒤 반 {jb._pct(뒤.get('cagr'))}/{jb._pct(뒤.get('mdd'))}")  # fmt: skip
 
+        # H 가중 대 동일가중 대조(25.1538, 31회차 P1) — 나눠 읽은 하루 재료와 메모리 원장으로, 읽기 0. 진단이 깨져도
+        # 변형 결과는 이미 저장됐으니 실행을 죽이지 않고 기록에 남긴다
+        try:
+            eq_days = [(dv.day, *heq.day_sets(dv, market_.top_n)) for dv in shared.views()]
+            성과 = {(r.decided_on, r.stock_id): r.ret_20d - r.bench_20d for r in market_.ledger.rows
+                    if r.ret_20d is not None and r.bench_20d is not None}  # fmt: skip
+            holding_eq: dict[str, Any] = heq.summarize(eq_days, 성과)
+        except Exception as e:  # noqa: BLE001
+            log.exception("H 가중 대조 진단 실패")
+            holding_eq = {"error": str(e)[:200]}
+        print(f"  H 가중 대 동일가중: {holding_eq}")
+
         실제_리밸런스 = sum(1 for d in dates if d != dates[-1] or len(dates) == 1)
         db.finish_batch_run(
             client, batch_id, status="success",
@@ -251,6 +264,7 @@ def run_core(
                 "timing": {"load_s": round(읽기_초, 1), "variants_s": 시간, "days_computed": shared.computed,
                            "days_replayed": shared.replayed, "risk_computed": market_.risk_computed},
                 "pit_universe": {"sizes": jb._pit_sizes(pit_cache), "excluded": pit_reasons},
+                "holding_eq": holding_eq,
             },
         )  # fmt: skip
         print(f"저장 {len(results)}개 변형, 리밸런스 {실제_리밸런스}회(날마다), 그룹 {group_id}")

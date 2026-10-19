@@ -595,6 +595,11 @@ class SharedDays:
         return self._pickle.loads(적힌[1])
 
 
+    def views(self) -> list[DayView]:
+        """적힌 하루 재료 전부(cutoff 순) — 실행이 끝난 뒤 진단(`holding_eq`, 25.1538)이 읽는다. 매번 새로 푼다"""
+        return [self._pickle.loads(b) for _c, (_d, b) in sorted(self._days.items())]
+
+
 def _slim(dv: DayView) -> DayView:
     from dataclasses import replace
 

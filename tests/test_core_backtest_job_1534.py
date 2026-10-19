@@ -362,6 +362,18 @@ def test_run_core_반_나눈_기간과_실행_기록(실행: tuple[MemClient, in
     assert not mem.execute("SELECT COUNT(*) FROM batch_runs WHERE job_name = 'backtest'").scalar()
 
 
+def test_run_core_가중_대_동일가중_진단을_싣는다(실행: tuple[MemClient, int]) -> None:
+    """31회차 P1(25.1538) — 나눠 읽은 하루 재료로 끝난 뒤 센다. 날마다 하나, 진단이 깨지지 않는다"""
+    mem, _ = 실행
+    run = mem.execute("SELECT step_log FROM batch_runs WHERE job_name = ?", [cj.JOB_NAME]).dicts()
+    eq = json.loads(run[0]["step_log"])["holding_eq"]
+    assert "error" not in eq, eq
+    t = json.loads(run[0]["step_log"])["timing"]
+    assert eq["days"] == t["days_computed"]
+    assert eq["differ_days"] >= eq["missing_days"] + eq["repeat_days"] + eq["n"] - 0
+    assert eq["verdict"] in ("undecidable", "keep", "equal", "none")
+
+
 def test_run_core_는_국내만() -> None:
     with pytest.raises(NotImplementedError):
         cj.run_core("US")
