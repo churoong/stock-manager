@@ -14,6 +14,14 @@ export const DECISIONS_SQL = `SELECT d.id, d.decided_on, d.kind, d.reason, d.ret
 FROM paper_decisions d JOIN stocks s ON s.id = d.stock_id
 WHERE d.account_id = ? AND d.market = ? AND d.kind IN ('skip', 'blocked', 'missed', 'hold_flag')
 ORDER BY d.decided_on DESC, d.id DESC LIMIT ${DECISION_LIMIT}`;
+/**
+ * 그 뒤 성과(5일)가 찬 최근 줄 — 위원회 계좌는 하루 수십 줄을 적어 최근 60줄이 이삼일치라 성과 찬 줄이 하나도 안 보였다
+ * (25.1578, 위원회 감사 [권고] 4). 같은 색인을 거꾸로 읽다 60줄 차면 멈춘다
+ */
+export const DECISIONS_DONE_SQL = DECISIONS_SQL.replace(
+  "AND d.kind IN ('skip', 'blocked', 'missed', 'hold_flag')",
+  "AND d.kind IN ('skip', 'blocked', 'missed', 'hold_flag') AND d.ret_5d IS NOT NULL",
+);
 
 export interface DecisionRow {
   id: number; decided_on: string; kind: string; reason: string; ticker: string; name: string;
@@ -88,10 +96,25 @@ export interface DecisionGroup { first: DecisionRow; last: DecisionRow; count: n
  * 같은 (종목, 종류, 까닭) 줄을 묶는다 — 들고 있는 종목은 날마다 한 줄씩 쌓여 60줄이 며칠치 같은 종목으로 찼다(검토 3).
  * 최근 것 순. 그 뒤 성과는 묶음의 **첫 결정**(가장 이른 줄) 것을 보인다 — 최근 줄은 아직 안 찼다
  */
+/**
+ * 묶음 열쇠의 까닭 — 수를 지운다. 위원회 까닭은 "위원회: 표 0.83 < 문턱 1" 처럼 날마다 수가 달라 같은 종목·같은 까닭이 묶이지 않았다
+ * (25.1578, 위원회 감사 [권고] 4). 보이는 까닭은 묶음의 최근 줄 것
+ */
+export function reasonKey(reason: string): string {
+  return reason.replace(/[-+]?\d+(?:[.,]\d+)*/g, "#");
+}
+
+/** 두 질의(최근·성과 찬 최근)를 합친다 — 같은 줄은 한 번, 최근 것 순 */
+export function mergeDecisions(...lists: DecisionRow[][]): DecisionRow[] {
+  const 본 = new Map<number, DecisionRow>();
+  for (const xs of lists) for (const d of xs) 본.set(d.id, d);
+  return [...본.values()].sort((x, y) => y.decided_on.localeCompare(x.decided_on) || y.id - x.id);
+}
+
 export function groupDecisions(rows: DecisionRow[]): DecisionGroup[] {
   const 묶음 = new Map<string, DecisionGroup>();
   for (const d of rows) {
-    const 키 = `${d.ticker}|${d.kind}|${d.reason}`;
+    const 키 = `${d.ticker}|${d.kind}|${reasonKey(d.reason)}`;
     const g = 묶음.get(키);
     if (!g) 묶음.set(키, { first: d, last: d, count: 1 });
     else {

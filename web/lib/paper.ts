@@ -137,11 +137,18 @@ export function brokerLines(b: BrokerLatest | null | undefined): string[] {
   out.push(끝.join(" · "));
   return out;
 }
-export const PAPER_MEETINGS_LATEST = `SELECT m.account_id, m.market, m.decided_on, m.charter_hash, m.minutes_json FROM paper_meetings m
-WHERE m.decided_on = (SELECT MAX(x.decided_on) FROM paper_meetings x WHERE x.account_id = m.account_id AND x.market = m.market)`;
-/** 조사 자료 — 시장마다 가장 최근 기준일 한 벌 (회사가 달라도 같다) */
-export const PAPER_DOSSIERS_LATEST = `SELECT d.market, d.as_of, d.stock_id, d.dossier_json FROM paper_dossiers d
-WHERE d.as_of = (SELECT MAX(x.as_of) FROM paper_dossiers x WHERE x.market = d.market)`;
+/**
+ * 계좌·시장마다 가장 최근 회의록. 계좌표·두 시장을 바깥에 두고(CROSS JOIN 으로 순서 고정) 기본 키로 그 한 행만 찾는다 —
+ * 예전엔 회의록 표 전체를 훑으며 행마다 최댓값을 다시 구했다(25.1578, 위원회 감사 [권고] 5)
+ */
+export const PAPER_MEETINGS_LATEST = `SELECT m.account_id, m.market, m.decided_on, m.charter_hash, m.minutes_json
+FROM paper_accounts a CROSS JOIN (SELECT 'KR' AS market UNION ALL SELECT 'US') k CROSS JOIN paper_meetings m
+WHERE m.account_id = a.id AND m.market = k.market
+  AND m.decided_on = (SELECT MAX(x.decided_on) FROM paper_meetings x WHERE x.account_id = a.id AND x.market = k.market)`;
+/** 조사 자료 — 시장마다 가장 최근 기준일 한 벌 (회사가 달라도 같다). 기본 키 (market, as_of, …) 앞부분으로 그날만 (25.1578) */
+export const PAPER_DOSSIERS_LATEST = `SELECT d.market, d.as_of, d.stock_id, d.dossier_json
+FROM (SELECT 'KR' AS market UNION ALL SELECT 'US') k CROSS JOIN paper_dossiers d
+WHERE d.market = k.market AND d.as_of = (SELECT MAX(x.as_of) FROM paper_dossiers x WHERE x.market = k.market)`;
 /** 부서 이름 — batch/services/company.py `DEPT_LABEL` 과 같은 목록(시험이 대조) */
 export const DEPT_LABEL: Record<string, string> = {
   research: "리서치부",
@@ -189,8 +196,8 @@ export const PAPER_OPEN_BUYS =
 export const PAPER_LATEST_DAILY = `SELECT d.account_id, d.as_of, d.invested_krw, d.cash_krw, d.holdings_krw, d.equity_krw,
   d.pnl_krw, d.twr_index, d.kospi_krw, d.sp500_krw, d.positions_json, d.recon_ok, d.recon_note, d.unknown_json, d.updated_at,
   d.attribution_json, d.realized_krw, d.unrealized_krw
-FROM paper_daily d
-WHERE d.as_of = (SELECT MAX(x.as_of) FROM paper_daily x WHERE x.account_id = d.account_id)`;
+FROM paper_accounts a CROSS JOIN paper_daily d
+WHERE d.account_id = a.id AND d.as_of = (SELECT MAX(x.as_of) FROM paper_daily x WHERE x.account_id = a.id)`;
 export const PAPER_HISTORY = `SELECT account_id, as_of, invested_krw, equity_krw, twr_index, kospi_krw, sp500_krw
 FROM paper_daily WHERE as_of >= ? ORDER BY as_of`;
 /** 계좌마다 거래내역에 싣는 최근 체결 수 — 계좌가 일곱이라 합쳐 자르면 한 계좌가 다른 계좌 몫을 밀어냈다 (25.1458) */
