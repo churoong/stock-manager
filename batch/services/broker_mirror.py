@@ -149,7 +149,11 @@ def _단가_맞음(e: Any, r: dict[str, Any]) -> bool:
     어느 쪽 단가든 모르면(시장가 줄·단가 칸 없는 응답) 보지 않는다
     """
     k, mine = getattr(e, "price", None), r.get("limit_price")
-    return k is None or mine is None or abs(float(k) - float(mine)) < PRICE_TOL
+    if mine is None:
+        # 내 줄이 시장가면 체결 줄도 단가가 없어야(시장가) 맞다 — 시장가 줄이 지정가 체결 줄을 가져갔다(25.1569, 25.1566
+        # 반박 [권고]). 단가 칸이 아예 안 오는 응답이면 모두 None 이라 예전과 같다
+        return k is None
+    return k is None or abs(float(k) - float(mine)) < PRICE_TOL
 
 
 def _번호(no: Any) -> str:

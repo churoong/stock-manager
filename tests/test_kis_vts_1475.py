@@ -179,6 +179,19 @@ def test_국내_번호_없는_줄도_주문_단가로_회차를_가른다() -> N
     assert 결과 == {1: ("unfilled", None), 2: ("filled", 9800.0), 3: ("filled", 100.0)}
 
 
+
+def test_국내_번호_없는_시장가_줄은_지정가_체결_줄을_가져가지_않는다() -> None:
+    """시장가 줄(단가 없음)이 9,600 지정가 체결 줄을 먼저 집던 것 (25.1569 — 25.1566 반박 [권고])"""
+    ex = [kv.Execution("20261016", "7", "005930", "buy", 2, 2, 9600.0, 0, False, price=9600.0),
+          kv.Execution("20261016", "8", "005930", "buy", 2, 0, None, 0, False, price=None)]  # fmt: skip
+    줄 = [{"id": 1, "trade_date": "2026-10-16", "code": "005930", "side": "buy", "quantity": 2, "limit_price": None,
+           "broker_order_no": None},
+          {"id": 2, "trade_date": "2026-10-16", "code": "005930", "side": "buy", "quantity": 2, "limit_price": 9600.0,
+           "broker_order_no": None}]  # fmt: skip
+    결과 = {o.row_id: o.status for o in bm.reconcile(줄, ex)}
+    assert 결과 == {1: "unfilled", 2: "filled"}
+
+
 # ── 무엇을 낼지 ───────────────────────────────────────────────────────────────
 
 

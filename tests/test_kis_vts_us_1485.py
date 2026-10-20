@@ -181,6 +181,7 @@ def test_us_보내는_사이_예약_마감을_넘기면_남은_것은_안_보낸
     기록 = job.run(c, "US", _kst("22:19"), session=s, clock=lambda: _kst("22:21" if s.orders else "22:19"))
     assert len(s.orders) == 1 and 기록["sent"] == {"accepted": 1}
     assert 기록["not_sent"]["예약 접수 마감 뒤 — 보내지 않음"] == 1
+    assert 기록["planned"] == {"cleanup": 0, "mirror": 1}  # 끊긴 줄은 계획에서 빠진다(25.1569)
     assert c.q("SELECT COUNT(*) FROM paper_broker_orders") == [(1,)]
 
 

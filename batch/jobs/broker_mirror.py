@@ -84,9 +84,9 @@ PENDING_SQL = (
     "SELECT id, code, side, quantity, trade_date, broker_order_no, limit_price FROM paper_broker_orders"
     " WHERE broker = ? AND status IN ('sending', 'accepted') AND trade_date < ?"
 )
-#: 오늘 이미 낸 베낀 매수(거부 아닌 것) — 같은 날 다시 돌 때 정리가 오늘 산 것을 팔지 않게 (검증 [필수] 1)
 #: 오늘 이 증권사 칸에 이미 적은 줄 수(거부 포함) — 하루 주문 상한을 실행이 아니라 하루로 센다(25.1567)
 SENT_TODAY_SQL = "SELECT COUNT(*) FROM paper_broker_orders WHERE broker = ? AND trade_date = ?"
+#: 오늘 이미 낸 베낀 매수(거부 아닌 것) — 같은 날 다시 돌 때 정리가 오늘 산 것을 팔지 않게 (검증 [필수] 1)
 BOUGHT_TODAY_SQL = (
     "SELECT stock_id, SUM(quantity) FROM paper_broker_orders WHERE broker = ? AND trade_date = ? AND side = 'buy'"
     " AND status <> 'rejected' GROUP BY stock_id"
@@ -482,6 +482,7 @@ def run(
             # 보내는 사이 예약 접수 마감(개장 전 `US_RESV_CUTOFF`)을 넘겼다 — 단계 시작 때 한 번만 보면 마감 뒤에도
             # 나머지를 보냈다(25.1568, KIS 경로 감사 [참고] 4). 남은 것은 보내지 않고 까닭을 남긴다
             안냄.extend((x.paper_order_id, x.stock_id, 마감) for x in 낼것[i:])
+            낼것 = 낼것[:i]  # 기록의 `planned` 가 끊긴 줄까지 세어 `not_sent` 와 두 번 셌다(25.1569)
             break
         # 미국은 늘 지정가(시장가 대신 종가 ± 폭) — 내부 주문이 시장가였으면 `limit_price` 가 그 폭 지정가다
         client.execute(INSERT_SQL, [
