@@ -1563,6 +1563,14 @@ def run_step(
                     json.dumps({"flags": 근거, "sell_rule": 규칙}, ensure_ascii=False, default=str), 판, 지금, None,
                 ]))  # fmt: skip
             a기록["sells"] = len(문장)  # 이 자리까지는 매도 주문만 있다
+            # 전량 매도를 내는 종목의 남은 매수 회차는 거둔다 — 매도는 그때 보유 수량만 팔아, 같은 장에 남은 회차가
+            # 함께 차면 판 종목을 새로 들고 남았다(장 끝난 뒤 손 실행이 낸 회차 → 다음 아침 손절, 25.1591 감사 [권고] 1)
+            파는 = {sid for sid in 매도 if sid not in 이미팖 and sid in 보유 and sid not in 막힌매도id}
+            거둠 = [o for o in 열린 if o.account_id == aid and o.side == "buy" and o.stock_id in 파는]
+            문장 += [(EXPIRE_SQL, [trade_date, "같은 종목 전량 매도 — 남은 매수 회차 거둠 (docs/paper.md 2.2)", o.id])
+                    for o in 거둠]  # fmt: skip
+            if 거둠:
+                a기록["buys_withdrawn"] = len(거둠)
             # 결정 원장 (25.1449) — 판 것과, 플래그가 섰는데 계좌 규칙이 따르지 않아 들고 간 것(B 의 황색)
             for sid, 메모 in sorted(판정메모.items()):
                 종가, 날 = 메모["ref"]
@@ -1578,7 +1586,10 @@ def run_step(
                     문장.append(_결정판(aid, market, trade_date, sid, "hold_flag", ",".join(메모["hold"]),
                                     {"flags": [f["reason_code"] for f in 메모["flags"]], "sell_rule": 규칙},
                                     종가, 날, 지금))  # fmt: skip
-            최근판 = {f.stock_id for f in 계좌체결 if f.side == "sell" and f.fill_date >= 쉼_시작} | set(매도)
+            # 미뤄진 열린 매도(하한가·정지)도 판 것으로 — 빠지면 다음 배치가 같은 종목을 다시 사 같은 장에 매도와 매수가
+            # 함께 찼다(25.1591 감사 [권고] 1 길 B)
+            최근판 = ({f.stock_id for f in 계좌체결 if f.side == "sell" and f.fill_date >= 쉼_시작} | set(매도)
+                   | 이미팖)  # fmt: skip
             if allocate and settings is not None and signal_rows:
                 # 손절이 선 보유에 더 사지 않는다 — **계좌 규칙 전의** 판정에서 (검증 [필수] 4: 규칙으로 거른 뒤의
                 # 매도에서 뽑으면 손절을 따르지 않는 D 는 늘 비어, 떨어진 보유를 목표 비중까지 날마다 더 샀다 —
