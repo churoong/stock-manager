@@ -51,3 +51,7 @@ def test_가결이나_상위_밖은_부결로_세지_않는다() -> None:
     막힘 = [{"account_id": "D", "stock_id": 11, "decided_on": "2026-10-01", "kind": "blocked", "reason": "위험 점검: 한 종목 상한",
              "ret_20d": 4.0, "bench_20d": 0.0, "detail_json": json.dumps({"committee": {"minority": ["risk"]}})}]
     assert "다수 쪽이 맞음 1 ·" in "\n".join(co.review_lines([], 막힘, {}, {"D": {"name": "장기보유투자사"}}))
+    # 가결했는데 안 산 줄이 크게 밑돌면 소수(반대) 쪽이 옳았다 — 산 것만 보던 비대칭 (25.1586)
+    막힘[0]["ret_20d"] = -9.0
+    글 = "\n".join(co.review_lines([], 막힘, {11: "십일"}, {"D": {"name": "장기보유투자사"}}))
+    assert "소수 쪽이 5%p 넘게 맞음 1" in 글 and "십일: 가결했는데(안 삼) -9.0%p — 소수의견(반대: 리스크관리부)이 옳았다" in 글

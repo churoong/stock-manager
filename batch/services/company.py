@@ -606,8 +606,10 @@ def review_lines(
         다수맞음 += (부결 and 초과 < 0) or (not 부결 and 초과 > 0)
         if 부결 and 초과 > REVIEW_MISS_PCT:
             글 = f"부결했는데 {초과:+.1f}%p — 소수의견(찬성: {'·'.join(소수)})이 옳았다"
-        elif 산것 and 초과 < -REVIEW_MISS_PCT:
-            글 = f"샀는데 {초과:+.1f}%p — 소수의견(반대: {'·'.join(소수)})이 옳았다"
+        elif not 부결 and 초과 < -REVIEW_MISS_PCT:
+            # 가결 쪽도 가결 기준(25.1586 — 산 것만 보면 상위 밖·막힘·사면 바로 매도로 안 산 가결이 빠졌다)
+            앞 = "샀는데" if 산것 else "가결했는데(안 삼)"
+            글 = f"{앞} {초과:+.1f}%p — 소수의견(반대: {'·'.join(소수)})이 옳았다"
         else:
             continue
         이름 = names.get(int(d["stock_id"]), str(d["stock_id"]))

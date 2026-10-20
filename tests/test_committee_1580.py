@@ -84,3 +84,13 @@ def test_받은_상세는_다시_부른_결과로_덮지_않는다() -> None:
                      " VALUES ('r1', 1, '2026-03-01', 'ok', 5.0, 't', 't')")  # fmt: skip
     mem.conn.execute(djob.CB_INSERT, ["r1", 1, "2026-03-01", "no_row", *[None] * 7, "t", "t2"])
     assert mem.conn.execute("SELECT status, shares_pct FROM cb_issuances WHERE receipt_no = 'r1'").fetchall() == [("ok", 5.0)]
+
+
+def test_오래_서_있던_발생이_뒤에_섰다_끝난_발생보다_먼저다() -> None:
+    """08-20 부터 서 있던 적 손절과 09-10~09-15 에 섰다 끝난 황 — 매도 때 서 있던 08-20 부터 센다 (25.1586, 25.1583 반박 [권고] 2)."""
+    플래그 = [{"stock_id": 1, "reason_code": "손절", "level": "red", "first_seen": "2026-08-20", "last_seen": "2026-09-30"},
+              {"stock_id": 1, "reason_code": "기간초과", "level": "yellow", "first_seen": "2026-09-10", "last_seen": "2026-09-15"},
+              {"stock_id": 1, "reason_code": "급락", "level": "yellow", "first_seen": "2026-09-25", "last_seen": "2026-09-30"}]  # fmt: skip
+    매매 = [{"stock_id": 1, "side": "sell", "trade_date": "2026-09-30", "price": 1}]
+    m = eq.measure(매매, [], [], 플래그, "2026-09-01", "2026-09-30")
+    assert (m["sell_delay_avg"], m["sells_by_level"]) == (41.0, {"red": 1})
