@@ -477,7 +477,12 @@ def run(
     # (25.1517, 검토 6)
     산계좌 = {int(r[0]): str(r[1]) for r in client.execute(BOUGHT_BY_SQL, [증권사]).rows}
     상태: Counter[str] = Counter()
-    for it in 낼것:
+    for i, it in enumerate(낼것):
+        if 미국 and (마감 := _us_window(clock(), 오늘)):
+            # 보내는 사이 예약 접수 마감(개장 전 `US_RESV_CUTOFF`)을 넘겼다 — 단계 시작 때 한 번만 보면 마감 뒤에도
+            # 나머지를 보냈다(25.1568, KIS 경로 감사 [참고] 4). 남은 것은 보내지 않고 까닭을 남긴다
+            안냄.extend((x.paper_order_id, x.stock_id, 마감) for x in 낼것[i:])
+            break
         # 미국은 늘 지정가(시장가 대신 종가 ± 폭) — 내부 주문이 시장가였으면 `limit_price` 가 그 폭 지정가다
         client.execute(INSERT_SQL, [
             증권사, it.paper_order_id, 산계좌.get(it.stock_id, 베낌) if it.reason == bm.REASON_CLEANUP else 베낌,

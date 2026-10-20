@@ -174,6 +174,16 @@ def _kst(hhmm: str, day: str = "2026-10-16") -> datetime:
     return datetime.fromisoformat(f"{day}T{hhmm}:00+09:00").astimezone(UTC)
 
 
+def test_us_보내는_사이_예약_마감을_넘기면_남은_것은_안_보낸다(c: Client) -> None:
+    """22:19 KST 에 시작해 첫 예약을 보낸 뒤 22:21(마감 22:20 뒤)이 됐다 — 남은 예약은 보내지 않는다
+    (25.1568, KIS 경로 감사 [참고] 4 — 예전엔 단계 시작 때 한 번만 봐 마감 뒤에도 보냈다)"""
+    s = _UsSess()
+    기록 = job.run(c, "US", _kst("22:19"), session=s, clock=lambda: _kst("22:21" if s.orders else "22:19"))
+    assert len(s.orders) == 1 and 기록["sent"] == {"accepted": 1}
+    assert 기록["not_sent"]["예약 접수 마감 뒤 — 보내지 않음"] == 1
+    assert c.q("SELECT COUNT(*) FROM paper_broker_orders") == [(1,)]
+
+
 def test_us_job_sends_reservations_and_keeps_kr_apart(c: Client) -> None:
     """10-16(금) 서머타임 — 개장 22:30 KST, 예약 마감 22:20. 미국 배치(21:27 KST)는 그 안이다."""
     s = _UsSess()
