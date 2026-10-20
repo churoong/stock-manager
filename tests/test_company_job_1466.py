@@ -131,7 +131,8 @@ def test_charter_migration_matches_code() -> None:
     c = Client(accounts=None, charters=True)
     행 = {r[0]: r[1:] for r in c.q("SELECT id, charter_json, charter_since, rule_version, sell_rule FROM paper_accounts")}
     for aid, ch in co.CHARTERS.items():
-        assert json.loads(행[aid][0]) == ch and 행[aid][1:] == ("2026-10-16", 2, ch["sell_rule"]), aid
+        # 판 3 — 0088 이 공시부 덮개 결함 수정으로 올렸다(25.1576). 헌장 값·헌장 시작일은 그대로
+        assert json.loads(행[aid][0]) == ch and 행[aid][1:] == ("2026-10-16", 3, ch["sell_rule"]), aid
         assert co.charter_errors(ch) == [] and ch["sell_rule"] in pp.SELL_RULES
     for aid in ("B", "R1", "R2"):
         assert 행[aid][0] is None and 행[aid][2] == 1, aid

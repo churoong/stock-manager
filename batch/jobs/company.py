@@ -46,6 +46,20 @@ GOV_SQL = (
 )
 #: 공시 사건 표가 덮은 구간 — 매주 통째로 다시 쓰여 행마다 같은 덮개를 적는다(0063). 비면 덮개 모름
 GOV_COVER_SQL = "SELECT MIN(covered_from), MAX(covered_to) FROM governance_events"
+#: 주간 사건 표 덮개 끝(금요일) 뒤 ~ 기준일까지 **날마다** 시장 전체 거래소 공시를 받은 날
+#: (`disclosure_coverage` kind I — 평일 18:17 KST 수집, 주말도 받는다). 이 구간이 다 차 있으면 그 사이 사건을
+#: 공시 표에서 보충해 기준일까지 덮은 것으로 본다(25.1576, 위원회 감사 [필수] — 예전엔 금요일에만 덮여
+#: 화~금 배치는 공시부가 "자료 없음" 이었다)
+GOV_DAILY_COVER_SQL = "SELECT day FROM disclosure_coverage WHERE kind = 'I' AND day > ? AND day <= ?"
+#: 그 구간의 안건 종목 공시 — 종목 칸이 비고 고유번호로만 이어진 줄도(`REACTION_EVENTS_SQL` 과 같은 이음). 색인
+#: (stock_id, disclosed_at) 으로 날짜 범위만 읽는다
+GOV_RECENT_SQL = (
+    "SELECT d.stock_id, d.disclosed_at, d.title FROM disclosures d WHERE d.stock_id IN (SELECT value FROM json_each(?))"
+    " AND d.disclosed_at > ? AND d.disclosed_at <= ?"
+    " UNION ALL SELECT s.id, d.disclosed_at, d.title FROM stocks s JOIN disclosures d"
+    " ON d.stock_id IS NULL AND d.corp_code = s.dart_corp_code"
+    " WHERE s.id IN (SELECT value FROM json_each(?)) AND d.disclosed_at > ? AND d.disclosed_at <= ?"
+)
 CB_SQL = (
     "SELECT stock_id, SUM(shares_pct) FROM cb_issuances WHERE stock_id IN (SELECT value FROM json_each(?))"
     " AND status = 'ok' AND decided_at > ? AND decided_at <= ? GROUP BY stock_id"
@@ -141,9 +155,20 @@ def load_dossiers(client: Any, rows: list[report_picks.SignalRow], country: str,
     덮음 = False
     if 국내:
         덮개 = client.execute(GOV_COVER_SQL).rows
+        보충끝: str | None = None  # 주간 표 덮개 끝 — 그 뒤 사건은 공시 표에서 보충한다
         if 덮개 and 덮개[0][0] and 덮개[0][1]:
-            덮음 = (str(덮개[0][0]) <= (기준 - timedelta(days=co.GOV_DAYS)).isoformat()
-                  and str(덮개[0][1]) >= as_of[:10])  # fmt: skip
+            시작덮음 = str(덮개[0][0]) <= (기준 - timedelta(days=co.GOV_DAYS)).isoformat()
+            끝 = str(덮개[0][1])[:10]
+            if 시작덮음 and 끝 >= as_of[:10]:
+                덮음 = True
+            elif 시작덮음:
+                받은날 = {str(r[0])[:10] for r in client.execute(GOV_DAILY_COVER_SQL, [끝, as_of[:10]]).rows}
+                d, 빈날 = date.fromisoformat(끝) + timedelta(days=1), False
+                while d <= 기준:
+                    빈날 = 빈날 or d.isoformat() not in 받은날
+                    d += timedelta(days=1)
+                if not 빈날:
+                    덮음, 보충끝 = True, 끝
         # 수급은 **최근 5거래일이 다 있어야** — 그 종목에 기준일 행이 빠졌으면 더 묵은 5일을 쓰게 된다
         # (25.1465 검증 권장)
         최근날 = recent_sessions("KR", as_of, co.FLOW_DAYS)
@@ -160,6 +185,18 @@ def load_dossiers(client: Any, rows: list[report_picks.SignalRow], country: str,
             GOV_SQL, [_ids(ids), (기준 - timedelta(days=co.GOV_DAYS)).isoformat(), as_of]
         ).rows:
             사건.setdefault(int(sid), []).append((str(day), str(kind)))
+        if 보충끝:
+            from batch.services import disclosure_reaction as dr
+
+            # 주간 표가 아직 담지 않은 덮개 끝 뒤 사건 — 주간 계산과 같은 분류(`dr.classify`·`GOVERNANCE_TYPES`)
+            본 = {(s, d, k) for s, xs in 사건.items() for d, k in xs}
+            for sid, day, title in client.execute(GOV_RECENT_SQL, [_ids(ids), 보충끝, as_of[:10]] * 2).rows:
+                kind = dr.classify(str(title))
+                if sid is not None and kind in dr.GOVERNANCE_TYPES and (int(sid), str(day)[:10], kind) not in 본:
+                    본.add((int(sid), str(day)[:10], kind))
+                    사건.setdefault(int(sid), []).append((str(day)[:10], str(kind)))
+            for xs in 사건.values():
+                xs.sort(reverse=True)  # 최근 것부터(주간 표 읽기와 같은 순서)
         for sid, pct in client.execute(
             CB_SQL, [_ids(ids), (기준 - timedelta(days=co.GOV_DAYS)).isoformat(), as_of]
         ).rows:

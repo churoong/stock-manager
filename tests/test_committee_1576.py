@@ -1,0 +1,41 @@
+"""위원회·지주사 감사 반영 (docs/company.md, docs/infra.md 25.1576) — H 가중치 기준 평균은 표본 가중,
+주간 위원회 복기는 "가결이나 상위 N 밖" 을 부결로 세지 않는다."""
+
+from __future__ import annotations
+
+import json
+from datetime import date, timedelta
+
+from batch.services import company as co
+from batch.services import holding as hold
+
+
+def _기록(회사: str, n: int, 초과: float, 시작: int = 0) -> list[dict]:
+    d0 = date(2026, 1, 1)
+    return [{"decided_on": (d0 + timedelta(days=40 * (시작 + i))).isoformat(), "stock_id": 1000 + 시작 + i,
+             "ret_20d": 초과, "bench_20d": 0.0, "detail_json": json.dumps({"holding": {"votes": {회사: 1.0}}})}
+            for i in range(n)]  # fmt: skip
+
+
+def test_표본_1건_회사의_운이_나머지를_하한으로_끌지_않는다() -> None:
+    """A n=1 +50%p, 나머지 n=60 0%p — 단순 평균(12.5%p)이면 나머지가 0.25 하한까지 내려갔다"""
+    rec = _기록("A", 1, 50.0) + _기록("C", 60, 0.0, 100) + _기록("D", 60, 0.0, 300) + _기록("E", 60, 0.0, 500)
+    w, 성적 = hold.weights(rec, ["A", "C", "D", "E"])
+    assert 성적["A"]["n"] == 1 and 성적["C"]["n"] == 60
+    for v in ("C", "D", "E"):
+        assert w[v] > 0.95, w
+    평균 = 50.0 / 181
+    assert w["A"] == round(1 + (1 / 31) * (50.0 - 평균) / hold.HOLDING_SCALE_PCT, 4)
+
+
+def test_가결이나_상위_밖은_부결로_세지_않는다() -> None:
+    결정 = [{"account_id": "D", "stock_id": 7, "decided_on": "2026-10-01", "kind": "skip",
+             "reason": "위원회: 가결이나 표 순 상위 5 밖", "ret_20d": 11.0, "bench_20d": 0.0,
+             "detail_json": json.dumps({"committee": {"minority": ["risk"]}})},
+            {"account_id": "D", "stock_id": 8, "decided_on": "2026-10-01", "kind": "skip",
+             "reason": "위원회: 표 0.83 < 문턱 1", "ret_20d": 11.0, "bench_20d": 0.0,
+             "detail_json": json.dumps({"committee": {"minority": ["quant"]}})}]  # fmt: skip
+    줄 = co.review_lines([], 결정, {7: "칠", 8: "팔"}, {"D": {"name": "장기보유투자사"}})
+    본문 = "\n".join(줄)
+    assert "칠" not in 본문  # 가결이었다 — 반대 소수를 "찬성" 으로 거꾸로 적지 않는다
+    assert "팔: 부결했는데 +11.0%p" in 본문  # 진짜 부결은 그대로

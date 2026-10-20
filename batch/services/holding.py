@@ -34,7 +34,8 @@ def weights(records: list[dict[str, Any]], voters: list[str]) -> tuple[dict[str,
 
     `records` 는 H 결정 원장 행(decided_on·stock_id·ret_20d·bench_20d·detail_json). detail.holding.votes = {회사: 세기}
     인 행에서, 회사마다 그 회사가 추천한 종목의 20 거래일 지수 대비 초과(%p)를 에피소드로 평균.
-    w = 1 + k × (성적 − 회사들 평균) ÷ `HOLDING_SCALE_PCT`, k = n ÷ (n + `HOLDING_SHRINK_N`), [하한, 상한] 으로 자른다.
+    w = 1 + k × (성적 − 회사들 표본 가중 평균) ÷ `HOLDING_SCALE_PCT`,
+    k = n ÷ (n + `HOLDING_SHRINK_N`), [하한, 상한] 으로 자른다.
     표본이 없는 회사는 성적 None·가중치 1. 성적이 있는 회사가 하나뿐이면 견줄 평균이 없어 모두 1
     """
     표: dict[str, list[tuple[str, int, float]]] = {v: [] for v in voters}
@@ -60,8 +61,10 @@ def weights(records: list[dict[str, Any]], voters: list[str]) -> tuple[dict[str,
             마지막[sid] = d
             남김.append(x)
         성적[v] = {"n": len(남김), "avg": sum(남김) / len(남김) if 남김 else None}
-    있는 = [s["avg"] for s in 성적.values() if s["avg"] is not None]
-    평균 = sum(있는) / len(있는) if len(있는) >= 2 else None
+    있는 = [(s["n"], s["avg"]) for s in 성적.values() if s["avg"] is not None]
+    # 기준은 **표본 수로 가중한** 회사들 평균(에피소드를 모두 합친 평균) — 회사 평균을 단순 평균하면 표본 1건 회사의
+    # 운 하나가 기준을 끌어올려 나머지를 하한까지 내렸다(25.1576, 위원회 감사 [권고] 3, H 판 2)
+    평균 = sum(n * a for n, a in 있는) / sum(n for n, _a in 있는) if len(있는) >= 2 else None
     out: dict[str, float] = {}
     for v in voters:
         s = 성적[v]

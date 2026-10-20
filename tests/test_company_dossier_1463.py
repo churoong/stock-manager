@@ -124,6 +124,34 @@ def test_governance_without_coverage_is_no_data_not_neutral(c: Client) -> None:
     assert co.governance(d).note.startswith("자료 없음")  # type: ignore[union-attr]
 
 
+def test_주간_표_덮개_뒤는_날마다_공시_덮개로_잇고_사건을_보충한다(c: Client) -> None:
+    """주간 사건 표는 금요일에만 다시 쓰여 덮개 끝이 금요일 — 화~금 배치는 공시부가 "자료 없음" 이었다 (25.1576,
+    위원회 감사 [필수]). 덮개 끝(10-12) 뒤 10-13~10-15 를 날마다 받았으면 덮었고, 그 사이 횡령 공시도 거부 조건이 된다"""
+    x = c.conn.execute
+    x("DELETE FROM governance_events WHERE day = '2026-05-01'")
+    x("DELETE FROM cb_issuances")
+    x("UPDATE governance_events SET covered_to = '2026-10-12'")
+    [d] = job.load_dossiers(c, [_행(1, "005930", "KOSPI", 80)], "KR", 기준)
+    assert not d.gov_covered  # 날마다 덮개가 없으면 예전처럼 모름
+    for day in ("2026-10-13", "2026-10-14", "2026-10-15"):
+        x("INSERT INTO disclosure_coverage (kind, day, rows, calls, source, fetched_at) VALUES ('I', ?, 1, 1, 't', 't')",
+          [day])  # fmt: skip
+    [d] = job.load_dossiers(c, [_행(1, "005930", "KOSPI", 80)], "KR", 기준)
+    assert d.gov_covered and co.governance(d).note.startswith("사건 없음")  # type: ignore[union-attr]
+    # 종목 칸 없이 고유번호로만 이어진 공시도 — 기준일 뒤(10-16)는 보지 않는다
+    x("UPDATE stocks SET dart_corp_code = '00126380' WHERE id = 1")
+    x("INSERT INTO disclosures (stock_id, corp_code, receipt_no, title, disclosed_at, source, fetched_at)"
+      " VALUES (NULL, '00126380', 'd1', '횡령ㆍ배임혐의발생', '2026-10-14', 't', 't')")  # fmt: skip
+    x("INSERT INTO disclosures (stock_id, corp_code, receipt_no, title, disclosed_at, source, fetched_at)"
+      " VALUES (1, '00126380', 'd2', '불성실공시법인지정', '2026-10-16', 't', 't')")  # fmt: skip
+    [d] = job.load_dossiers(c, [_행(1, "005930", "KOSPI", 80)], "KR", 기준)
+    assert d.gov_events == [("2026-10-14", "fraud")] and co.governance(d).veto
+    # 하루라도 빠지면 덮지 않음(보충도 하지 않음)
+    x("DELETE FROM disclosure_coverage WHERE day = '2026-10-14'")
+    [d] = job.load_dossiers(c, [_행(1, "005930", "KOSPI", 80)], "KR", 기준)
+    assert not d.gov_covered and d.gov_events == []
+
+
 def test_population_ranks_beyond_agenda(c: Client) -> None:
     """점수 부서의 백분위는 신호 종목 전체 안에서 — 안건 크기(회사마다 20·30)가 같은 종목의 입장을 바꾸지 않게 (25.1465 [필수] 1)."""
     rows = [_행(i, f"T{i:02d}", "KOSPI", 100 - i) for i in range(1, 41)]

@@ -18,10 +18,12 @@ from pathlib import Path
 뿌리 = Path(__file__).resolve().parent.parent
 
 #: 파일 → 마지막으로 확인한 논리 지문 (2026-10-16 25.1488 고정 — 2026-10-18 25.1530 에서 토큰 지문으로 다시 셈, 두 파일은
-#: 25.1485 뒤로 바뀌지 않았다. 3.12.3·3.13.16 같은 값, 3.11 은 f-문자열 토큰이 달라 다르다 — 이 저장소는 3.12)
+#: 25.1485 뒤로 바뀌지 않았다. 3.12.3·3.13.16 같은 값, 3.11 은 f-문자열 토큰이 달라 다르다 — 이 저장소는 3.12).
+#: 2026-10-20 25.1576 갱신 — company.py 는 주간 복기의 부결 판정만(판단 그대로, 절차 1), holding.py 는 기준 평균을 표본
+#: 가중으로(판단 바뀜, 절차 2 — 0088 에서 H 판 2·A·C·D·E 판 3)
 고정 = {
-    "batch/services/company.py": "3fe468edb2f5",
-    "batch/services/holding.py": "bdfd94131e59",
+    "batch/services/company.py": "f6b76cae6982",
+    "batch/services/holding.py": "2f3a2bd5e7fe",
 }
 
 

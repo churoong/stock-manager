@@ -589,7 +589,9 @@ def review_lines(
             continue
         초과 = float(d["ret_20d"]) - float(d["bench_20d"])
         산것 = d.get("kind") == "buy"
-        부결 = d.get("kind") == "skip" and str(d.get("reason") or "").startswith("위원회")
+        까닭글 = str(d.get("reason") or "")
+        # "위원회: 가결이나 표 순 상위 N 밖" 은 가결이다 — 부결로 세면 반대한 소수를 "찬성" 으로 거꾸로 적었다(25.1576)
+        부결 = d.get("kind") == "skip" and 까닭글.startswith("위원회") and "가결" not in 까닭글
         소수 = [DEPT_LABEL.get(k, k) for k in 위.get("minority") or []]
         if not 소수:
             continue
