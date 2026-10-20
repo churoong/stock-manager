@@ -223,8 +223,9 @@ class Execution:
 
 
 def _단가(v: object) -> float | None:
-    """주문 단가 — 0 이하(시장가)·빈칸은 모름(None). `ord_unpr` 칸이 국내 모의 체결 조회에 오는지는 공식 칸 표 기준이고
-    실측 응답으로는 아직 못 봤다 `[확인필요]` — 안 오면 None 이라 예전처럼 단가를 보지 않는다(25.1566)"""
+    """주문 단가 — 0 이하(시장가)·빈칸은 모름(None). `ord_unpr`(주문단가)는 공식 예제의 칸 표에 있다
+    (open-trading-api `examples_llm/domestic_stock/inquire_daily_ccld/chk_inquire_daily_ccld.py`, 2026-10-20 확인).
+    모의 실측 응답으로는 아직 못 봤다 `[확인필요]` — 안 오면 None 이라 예전처럼 단가를 보지 않는다(25.1566)"""
     x = _float(v)
     return x if x is not None and x > 0 else None
 
