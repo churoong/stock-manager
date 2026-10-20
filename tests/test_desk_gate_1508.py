@@ -135,9 +135,16 @@ def test_write_puts_gate_risk_champion(monkeypatch: pytest.MonkeyPatch) -> None:
                        " twr_index, positions_json, recon_ok, updated_at) VALUES (?, ?, 1000, 400, 600, 1000, 0, ?, ?, ?, 't')",
                        [aid, as_of, twr, json.dumps([{"stock_id": 1, "horizon": "short", "avg_price": 100.0, "close": 94.0,
                                                       "weight_pct": 60.0}]), recon])  # fmt: skip
-    c.conn.execute("INSERT INTO batch_runs (job_name, market, started_at, status) VALUES ('daily_kr', 'KR', '2026-10-10T00:00:00', 'failed')")
-    job.write(c, "KR", datetime(2026, 10, 16, 23, 40, tzinfo=UTC), trade_date="2026-10-16", session_date="2026-10-19",
-              step_log={}, warnings=[])  # fmt: skip
+    # 사고 날은 거래일로 센다(25.1572) — 창 안 거래일을 모두 성공으로 채우고, 10-08 하루만 실패 뒤 성공으로 둔다
+    지금 = datetime(2026, 10, 16, 23, 40, tzinfo=UTC)
+    창 = "2026-08-18"
+    for m, 작업 in (("KR", "daily_kr"), ("US", "daily_us")):
+        for d in job._expected_trade_dates(m, 창, 지금):
+            c.conn.execute("INSERT INTO batch_runs (job_name, market, trade_date, started_at, status)"
+                           " VALUES (?, ?, ?, ?, 'success')", [작업, m, d, f"{d}T23:30:00"])  # fmt: skip
+    c.conn.execute("INSERT INTO batch_runs (job_name, market, trade_date, started_at, status)"
+                   " VALUES ('daily_kr', 'KR', '2026-10-08', '2026-10-09T00:00:00', 'failed')")  # fmt: skip
+    job.write(c, "KR", 지금, trade_date="2026-10-16", session_date="2026-10-19", step_log={}, warnings=[])  # fmt: skip
     s = json.loads(c.q("SELECT summary_json FROM paper_desk")[0][0])
     칸 = {i["key"]: i for i in s["gate"]["items"]}
     assert s["gate"]["account"] == "B" and 칸["incidents"]["detail"] == {"recon_bad_days": 1, "batch_failed": 1}
