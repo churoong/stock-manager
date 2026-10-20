@@ -61,6 +61,9 @@ def test_company_skips_candidate_it_would_sell_next_day(monkeypatch: pytest.Monk
     assert c.q("SELECT kind, reason FROM paper_decisions WHERE account_id = 'A' AND stock_id = 1") == [
         ("skip", "사면 바로 매도 규칙에 걸림: 재무악화")]
     assert 기록["accounts"]["A"]["prebuy_sell"] == 1
+    # 다른 결정 줄처럼 점수·기간도 — 점수 순서를 결정 원장에서 다시 낼 수 있게 (25.1584)
+    상세 = json.loads(c.q("SELECT detail_json FROM paper_decisions WHERE account_id = 'A' AND stock_id = 1")[0][0])
+    assert 상세.get("score") is not None and 상세.get("horizon")
     # B(core)는 재무악화를 따르지 않으니 그대로 산다
     assert c.q("SELECT COUNT(*) FROM paper_orders WHERE account_id = 'B' AND stock_id = 1")[0][0] > 0
 

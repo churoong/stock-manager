@@ -39,3 +39,10 @@ def test_가결이나_상위_밖은_부결로_세지_않는다() -> None:
     본문 = "\n".join(줄)
     assert "칠" not in 본문  # 가결이었다 — 반대 소수를 "찬성" 으로 거꾸로 적지 않는다
     assert "팔: 부결했는데 +11.0%p" in 본문  # 진짜 부결은 그대로
+    # 분모 — 일화만 보이지 않게 같은 행에서 다수 쪽이 맞은 수도 (25.1584)
+    결정.append({"account_id": "D", "stock_id": 9, "decided_on": "2026-10-01", "kind": "skip", "reason": "위원회: 표 0.2 < 문턱 1",
+                 "ret_20d": -3.0, "bench_20d": 0.0, "detail_json": json.dumps({"committee": {"minority": ["quant"]}})})
+    결정.append({"account_id": "D", "stock_id": 10, "decided_on": "2026-10-01", "kind": "buy", "reason": "위원회 가결",
+                 "ret_20d": 2.0, "bench_20d": 0.0, "detail_json": json.dumps({"committee": {"minority": []}})})
+    본문 = "\n".join(co.review_lines([], 결정, {7: "칠", 8: "팔"}, {"D": {"name": "장기보유투자사"}}))
+    assert "성과 찬 결정 4 · 소수의견 있던 것 3 · 그 가운데 다수 쪽이 맞음 1 · 소수 쪽이 5%p 넘게 맞음 1" in 본문

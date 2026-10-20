@@ -1647,7 +1647,10 @@ def run_step(
                     a기록["prebuy_sell"] = len(즉시매도)
                     for sid, 사유 in sorted(즉시매도.items()):
                         행 = next(r for r in signal_rows if r.stock_id == sid)
-                        detail = {"flags": 사유, "sell_rule": 규칙}
+                        # 점수·기간도 다른 결정 줄처럼 — 이 줄만 빠져 점수 순서를 결정 원장에서
+                        # 다시 낼 수 없었다(25.1584)
+                        detail = {"flags": 사유, "sell_rule": 규칙, "horizon": 행.horizon,
+                                  "score": 행.total_score}
                         if sid in 위원회:
                             detail["committee"] = 위원회[sid]
                         문장.append(_결정판(aid, market, trade_date, sid, "skip",

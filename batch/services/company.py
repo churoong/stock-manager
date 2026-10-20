@@ -582,6 +582,7 @@ def review_lines(
                    f" · 집행 {sum(bool(i.get('approved')) for i in 항목)}"
                    f" · 쟁점 {sum(bool(i.get('issue')) for i in 항목)}")  # fmt: skip
     빗나감: list[tuple[float, str]] = []
+    분모, 소수있음, 다수맞음 = 0, 0, 0
     for d in decisions:
         try:
             위 = (json.loads(d.get("detail_json") or "{}") or {}).get("committee")
@@ -594,9 +595,13 @@ def review_lines(
         까닭글 = str(d.get("reason") or "")
         # "위원회: 가결이나 표 순 상위 N 밖" 은 가결이다 — 부결로 세면 반대한 소수를 "찬성" 으로 거꾸로 적었다(25.1576)
         부결 = d.get("kind") == "skip" and 까닭글.startswith("위원회") and "가결" not in 까닭글
+        분모 += 1
         소수 = [DEPT_LABEL.get(k, k) for k in 위.get("minority") or []]
         if not 소수:
             continue
+        소수있음 += 1
+        # 다수 쪽이 맞음 = 부결했는데 지수보다 못했다, 또는 사서 지수보다 나았다
+        다수맞음 += (부결 and 초과 < 0) or (산것 and 초과 > 0)
         if 부결 and 초과 > REVIEW_MISS_PCT:
             글 = f"부결했는데 {초과:+.1f}%p — 소수의견(찬성: {'·'.join(소수)})이 옳았다"
         elif 산것 and 초과 < -REVIEW_MISS_PCT:
@@ -605,6 +610,11 @@ def review_lines(
             continue
         이름 = names.get(int(d["stock_id"]), str(d["stock_id"]))
         빗나감.append((abs(초과), f"  {d['account_id']} {d['decided_on']} {이름}: {글}"))
+    if 분모:
+        # 분모 — 소수의견이 옳았던 일화만 보이면 이야기 편향이다. 같은 행에서 다수 쪽이 맞은 수도 센다(25.1584,
+        # 33회차 검증 B). 판정 근거가 아니다(성적은 부서 성적표)
+        out.append(f"  성과 찬 결정 {분모} · 소수의견 있던 것 {소수있음} · 그 가운데 다수 쪽이 맞음 {다수맞음}"
+                   f" · 소수 쪽이 {REVIEW_MISS_PCT:g}%p 넘게 맞음 {len(빗나감)} (일화 — 판정 근거 아님)")
     if 빗나감:
         out.append(f"  소수의견이 옳았던 결정 (20 거래일 지수 대비 {REVIEW_MISS_PCT:g}%p 넘게 빗나감,"
                    f" 큰 순 {REVIEW_TOP}):")
