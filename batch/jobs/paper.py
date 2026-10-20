@@ -149,7 +149,7 @@ SPLIT_FROM_SQL = (
     " WHERE p.stock_id = ? AND p.date >= ? AND p.close > 0 ORDER BY p.date LIMIT ?"
 )
 INDEX_ON_OR_BEFORE_SQL = (
-    "SELECT close FROM index_prices WHERE index_code = ? AND date <= ? ORDER BY date DESC LIMIT 1"
+    "SELECT close, date FROM index_prices WHERE index_code = ? AND date <= ? ORDER BY date DESC LIMIT 1"
 )
 UPDATE_OUTCOME_SQL = (
     "UPDATE paper_decisions SET ret_5d = COALESCE(ret_5d, ?), ret_20d = COALESCE(ret_20d, ?),"
@@ -224,14 +224,23 @@ def fill_outcomes(client: Any, market: str, today: str, now: str) -> dict[str, i
     # 덮고 옛 행은 주간 재수집까지 분할 전 단위라, 그 사이 찬 창은 −50% 가 영구히 남았다
     # (한 번 채운 창은 다시 쓰지 않는다)
     대기 = db.split_pending_us(client) if market == "US" and rows else set()
-    지수캐시: dict[str, float | None] = {}
+    지수캐시: dict[str, tuple[float, str] | None] = {}
     코드 = BENCH_INDEX.get(market, "KOSPI")
 
-    def 지수(날: str) -> float | None:
+    def _지수행(날: str) -> tuple[float, str] | None:
         if 날 not in 지수캐시:
             r = client.execute(INDEX_ON_OR_BEFORE_SQL, [코드, 날]).rows
-            지수캐시[날] = float(r[0][0]) if r else None
+            지수캐시[날] = (float(r[0][0]), str(r[0][1])[:10]) if r else None
         return 지수캐시[날]
+
+    def 지수(날: str) -> float | None:
+        r = _지수행(날)
+        return r[0] if r else None
+
+    def 기다림(날: str) -> bool:
+        """그날 지수 행이 아직 없고(묵은 값뿐) 기다릴 기한 안이다 (25.1579)"""
+        r = _지수행(날)
+        return (r is None or r[1] < 날) and (오늘 - _date.fromisoformat(날)).days < pp.BENCH_WAIT_DAYS
 
     채움, 포기 = 0, 0
     문장: list[tuple[str, list[Any]]] = []
@@ -253,8 +262,12 @@ def fill_outcomes(client: Any, market: str, today: str, now: str) -> dict[str, i
         그날들 = {뒤[n - 1][0]: 지수(뒤[n - 1][0]) for n in 창 if len(뒤) >= n}
         # 기준일 값은 같은 계열에서 — 그날 행이 없을 때만 저장한 기준 종가(분할이 끼면 단위가 어긋날 수 있다)
         o = pp.outcomes(계열기준 if 계열기준 else r["ref_close"], 뒤, 지수(str(r["ref_date"])), 그날들)
+        미룸 = [n for n in 창 if len(뒤) >= n and 기다림(뒤[n - 1][0])]
+        for n in 미룸:
+            o.pop(f"ret_{n}d", None)
+            o.pop(f"bench_{n}d", None)
         지난 = (_date.fromisoformat(today) - _date.fromisoformat(str(r["decided_on"]))).days
-        포기함 = "ret_60d" not in o and 지난 >= pp.OUTCOME_GIVE_UP_DAYS
+        포기함 = "ret_60d" not in o and 60 not in 미룸 and 지난 >= pp.OUTCOME_GIVE_UP_DAYS
         # 이미 채운 창을 다시 계산한 것뿐이면 쓰지 않는다 — 날마다 같은 행을 다시 쓰고 `filled` 가 부풀었다 (25.1453)
         새것 = any(r.get(f"ret_{n}d") is None and o.get(f"ret_{n}d") is not None for n in pp.DECISION_HORIZONS)
         if not 새것 and not 포기함:

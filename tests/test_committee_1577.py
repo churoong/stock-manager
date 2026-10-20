@@ -12,8 +12,8 @@ from __future__ import annotations
 
 import json
 
-from batch.jobs import company as job
-from batch.jobs import paper as pj
+from batch.jobs import company as cjob
+from batch.jobs import paper as job
 from batch.jobs import weekly_summary as ws
 from batch.services import company as co
 from tests.test_company_dossier_1463 import _행, c, 기준  # noqa: F401 — 픽스처
@@ -38,17 +38,17 @@ def _공시(c: Client, no: str, title: str, day: str) -> None:  # noqa: F811
 def test_상세_전_전환사채_결정이면_자료_없음(c: Client) -> None:  # noqa: F811
     _덮개(c)
     _공시(c, "cb1", "주요사항보고서(전환사채권발행결정)", "2026-10-14")
-    [d] = job.load_dossiers(c, [_행(1, "005930", "KOSPI", 80)], "KR", 기준)
+    [d] = cjob.load_dossiers(c, [_행(1, "005930", "KOSPI", 80)], "KR", 기준)
     assert not d.gov_covered and co.governance(d).note.startswith("자료 없음")  # type: ignore[union-attr]
     # 금요일에 상세를 받으면 다시 덮는다
     c.conn.execute("INSERT INTO cb_issuances (receipt_no, stock_id, decided_at, status, shares_pct, source, fetched_at)"
                    " VALUES ('cb1', 1, '2026-10-14', 'ok', 1.0, 't', 't')")  # fmt: skip
-    [d] = job.load_dossiers(c, [_행(1, "005930", "KOSPI", 80)], "KR", 기준)
+    [d] = cjob.load_dossiers(c, [_행(1, "005930", "KOSPI", 80)], "KR", 기준)
     assert d.gov_covered
     # 정정 공시는 결정이 아니다
     c.conn.execute("DELETE FROM cb_issuances")
     c.conn.execute("UPDATE disclosures SET title = '[기재정정]주요사항보고서(전환사채권발행결정)'")
-    [d] = job.load_dossiers(c, [_행(1, "005930", "KOSPI", 80)], "KR", 기준)
+    [d] = cjob.load_dossiers(c, [_행(1, "005930", "KOSPI", 80)], "KR", 기준)
     assert d.gov_covered
 
 
@@ -57,7 +57,7 @@ def test_이미_아는_전환사채가_문턱_이상이면_반대는_그대로(c
     c.conn.execute("INSERT INTO cb_issuances (receipt_no, stock_id, decided_at, status, shares_pct, source, fetched_at)"
                    " VALUES ('old', 1, '2026-08-01', 'ok', ?, 't', 't')", [co.CB_PCT + 1])  # fmt: skip
     _공시(c, "cb2", "주요사항보고서(전환사채권발행결정)", "2026-10-14")
-    [d] = job.load_dossiers(c, [_행(1, "005930", "KOSPI", 80)], "KR", 기준)
+    [d] = cjob.load_dossiers(c, [_행(1, "005930", "KOSPI", 80)], "KR", 기준)
     op = co.governance(d)
     assert d.gov_covered and op.stance == -1 and op.conviction == co.CB_CONVICTION
 
@@ -65,7 +65,7 @@ def test_이미_아는_전환사채가_문턱_이상이면_반대는_그대로(c
 def test_덮개_끝_날의_공시도_보충하고_출처를_가리킨다(c: Client) -> None:  # noqa: F811
     _덮개(c)
     _공시(c, "f1", "횡령ㆍ배임혐의발생", "2026-10-12")  # 금요일 저녁 — 주간 표가 지어진 뒤
-    [d] = job.load_dossiers(c, [_행(1, "005930", "KOSPI", 80)], "KR", 기준)
+    [d] = cjob.load_dossiers(c, [_행(1, "005930", "KOSPI", 80)], "KR", 기준)
     assert d.gov_events == [("2026-10-12", "fraud")] and d.gov_source == "governance_events·disclosures"
     [기준행] = co.governance(d).evidence
     assert 기준행["source"] == "governance_events·disclosures"
@@ -73,7 +73,7 @@ def test_덮개_끝_날의_공시도_보충하고_출처를_가리킨다(c: Clie
     c.conn.execute("INSERT INTO governance_events (receipt_no, stock_id, day, type, title, covered_from, covered_to,"
                    " source, computed_at) VALUES ('f1', 1, '2026-10-12', 'fraud', 't', '2025-01-01', '2026-10-12',"
                    " 't', 't')")  # fmt: skip
-    [d] = job.load_dossiers(c, [_행(1, "005930", "KOSPI", 80)], "KR", 기준)
+    [d] = cjob.load_dossiers(c, [_행(1, "005930", "KOSPI", 80)], "KR", 기준)
     assert d.gov_events == [("2026-10-12", "fraud")] and d.gov_source == "governance_events"
 
 
@@ -85,7 +85,7 @@ def test_지주사_기록은_지금_판만() -> None:
             " detail_json, rule_version, created_at) VALUES ('B', 'KR', ?, '2026-10-01', 'buy', 't', 5, 0, ?, ?, 't')",
             [sid, json.dumps({"holding": {"votes": {"A": 1.0}}}), v],
         )
-    rows = m.execute(pj.HOLDING_RECORDS_SQL, ["B", "KR", "2026-01-01", 2]).dicts()
+    rows = m.execute(job.HOLDING_RECORDS_SQL, ["B", "KR", "2026-01-01", 2]).dicts()
     assert [r["stock_id"] for r in rows] == [3]
 
 
@@ -98,4 +98,5 @@ def test_실행_품질_플래그는_발생마다_따로() -> None:
         )
     rows = sorted(m.execute(ws.EXEC_FLAGS_SQL, ["2026-01-01"]).dicts(), key=lambda r: r["first_seen"])
     assert [(r["first_seen"], r["last_seen"]) for r in rows] == [("2026-05-01", "2026-05-02"), ("2026-09-08", "2026-09-08")]
+
 
