@@ -432,9 +432,10 @@ EXEC_ITEMS_SQL = (
     " WHERE r.trade_date >= ? AND r.trade_date <= ? AND i.section = ? AND i.stock_id IS NOT NULL"
 )
 EXEC_FLAGS_SQL = (
-    "SELECT stock_id, reason_code, level, MIN(first_seen_date) AS first_seen, MAX(as_of_date) AS last_seen"
+    "SELECT stock_id, reason_code, level, first_seen_date AS first_seen, MAX(as_of_date) AS last_seen"
     " FROM sell_flags"
-    " WHERE as_of_date >= ? GROUP BY stock_id, reason_code, level"
+    # 발생(first_seen_date)마다 따로 — 묶으면 꺼졌다 다시 선 플래그가 첫 발생에 합쳐져 그 사이 매매를 덮었다(25.1577)
+    " WHERE as_of_date >= ? GROUP BY stock_id, reason_code, level, first_seen_date"
 )
 
 

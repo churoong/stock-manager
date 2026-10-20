@@ -22,7 +22,7 @@ from pathlib import Path
 #: 2026-10-20 25.1576 갱신 — company.py 는 주간 복기의 부결 판정만(판단 그대로, 절차 1), holding.py 는 기준 평균을 표본
 #: 가중으로(판단 바뀜, 절차 2 — 0088 에서 H 판 2·A·C·D·E 판 3)
 고정 = {
-    "batch/services/company.py": "f6b76cae6982",
+    "batch/services/company.py": "f0dd97a268e2",
     "batch/services/holding.py": "2f3a2bd5e7fe",
 }
 

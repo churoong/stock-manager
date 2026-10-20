@@ -54,12 +54,14 @@ GOV_DAILY_COVER_SQL = "SELECT day FROM disclosure_coverage WHERE kind = 'I' AND 
 #: 그 구간의 안건 종목 공시 — 종목 칸이 비고 고유번호로만 이어진 줄도(`REACTION_EVENTS_SQL` 과 같은 이음). 색인
 #: (stock_id, disclosed_at) 으로 날짜 범위만 읽는다
 GOV_RECENT_SQL = (
-    "SELECT d.stock_id, d.disclosed_at, d.title FROM disclosures d WHERE d.stock_id IN (SELECT value FROM json_each(?))"
-    " AND d.disclosed_at > ? AND d.disclosed_at <= ?"
-    " UNION ALL SELECT s.id, d.disclosed_at, d.title FROM stocks s JOIN disclosures d"
+    "SELECT d.stock_id, d.disclosed_at, d.title, d.receipt_no FROM disclosures d"
+    " WHERE d.stock_id IN (SELECT value FROM json_each(?)) AND d.disclosed_at >= ? AND d.disclosed_at <= ?"
+    " UNION ALL SELECT s.id, d.disclosed_at, d.title, d.receipt_no FROM stocks s JOIN disclosures d"
     " ON d.stock_id IS NULL AND d.corp_code = s.dart_corp_code"
-    " WHERE s.id IN (SELECT value FROM json_each(?)) AND d.disclosed_at > ? AND d.disclosed_at <= ?"
+    " WHERE s.id IN (SELECT value FROM json_each(?)) AND d.disclosed_at >= ? AND d.disclosed_at <= ?"
 )
+#: 보충 구간의 전환사채 발행결정 공시가 상세(`cb_issuances`)를 받았나 — 상세는 주 1회(금요일)만 받는다
+CB_RECEIVED_SQL = "SELECT receipt_no FROM cb_issuances WHERE receipt_no IN (SELECT value FROM json_each(?))"
 CB_SQL = (
     "SELECT stock_id, SUM(shares_pct) FROM cb_issuances WHERE stock_id IN (SELECT value FROM json_each(?))"
     " AND status = 'ok' AND decided_at > ? AND decided_at <= ? GROUP BY stock_id"
@@ -153,6 +155,8 @@ def load_dossiers(client: Any, rows: list[report_picks.SignalRow], country: str,
     사건: dict[int, list[tuple[str, str]]] = {}
     전환사채: dict[int, float] = {}
     덮음 = False
+    보충종목: set[int] = set()  # 사건을 공시 표에서 보충한 종목 — 근거표 출처가 다르다(25.1577)
+    전환모름: set[int] = set()  # 상세를 못 받은 전환사채 결정이 있는 종목
     if 국내:
         덮개 = client.execute(GOV_COVER_SQL).rows
         보충끝: str | None = None  # 주간 표 덮개 끝 — 그 뒤 사건은 공시 표에서 보충한다
@@ -186,15 +190,29 @@ def load_dossiers(client: Any, rows: list[report_picks.SignalRow], country: str,
         ).rows:
             사건.setdefault(int(sid), []).append((str(day), str(kind)))
         if 보충끝:
+            from batch.services import cb_overhang as cbo
             from batch.services import disclosure_reaction as dr
 
-            # 주간 표가 아직 담지 않은 덮개 끝 뒤 사건 — 주간 계산과 같은 분류(`dr.classify`·`GOVERNANCE_TYPES`)
+            # 주간 표가 아직 담지 않은 사건 — 주간 계산과 같은 분류(`dr.classify`·`GOVERNANCE_TYPES`). 덮개 끝 **날**
+            # 부터 읽는다: 주간 표는 금요일 18:17 에 지어져 그날 저녁 공시가 다음 주까지 빠졌다(25.1577, 반박 [권고] B).
+            # 겹치는 날의 같은 사건은 `본` 이 거른다
             본 = {(s, d, k) for s, xs in 사건.items() for d, k in xs}
-            for sid, day, title in client.execute(GOV_RECENT_SQL, [_ids(ids), 보충끝, as_of[:10]] * 2).rows:
+            전환대기: dict[str, int] = {}
+            for sid, day, title, no in client.execute(GOV_RECENT_SQL, [_ids(ids), 보충끝, as_of[:10]] * 2).rows:
+                if sid is None:
+                    continue
                 kind = dr.classify(str(title))
-                if sid is not None and kind in dr.GOVERNANCE_TYPES and (int(sid), str(day)[:10], kind) not in 본:
+                if kind in dr.GOVERNANCE_TYPES and (int(sid), str(day)[:10], kind) not in 본:
                     본.add((int(sid), str(day)[:10], kind))
                     사건.setdefault(int(sid), []).append((str(day)[:10], str(kind)))
+                    보충종목.add(int(sid))
+                if cbo.is_cb_title(str(title)):
+                    전환대기[str(no)] = int(sid)
+            if 전환대기:
+                # 상세를 아직 못 받은 전환사채 결정 — 그 종목은 전환사채 반대를 낼 수 없어 공시부를 "자료 없음" 으로
+                # (25.1577, 반박 [권고] A — 상세는 금요일에만 받아 주중 결정이 다음 월요일에야 반대가 됐다)
+                받음 = {str(r[0]) for r in client.execute(CB_RECEIVED_SQL, [json.dumps(sorted(전환대기))]).rows}
+                전환모름 |= {s for no, s in 전환대기.items() if no not in 받음}
             for xs in 사건.values():
                 xs.sort(reverse=True)  # 최근 것부터(주간 표 읽기와 같은 순서)
         for sid, pct in client.execute(
@@ -216,7 +234,11 @@ def load_dossiers(client: Any, rows: list[report_picks.SignalRow], country: str,
             flow_sum=sum(v for _d, v in 흐름) if 흐름 else None, turnover_20d=거래대금.get(r.stock_id),
             flow_days=len(흐름), flow_date=흐름[0][0] if 흐름 else None,
             gov_events=사건.get(r.stock_id) or [], cb_pct=전환사채.get(r.stock_id), domestic=국내,
-            sentiment=감성.get(r.stock_id), sentiment_error=감성오류, gov_covered=덮음 if 국내 else True,
+            sentiment=감성.get(r.stock_id), sentiment_error=감성오류,
+            # 이미 아는 전환사채가 문턱 이상이면 반대는 그대로 선다(하한) — 모르는 것은 문턱 아래일 때만
+            gov_covered=(덮음 and not (r.stock_id in 전환모름 and (전환사채.get(r.stock_id) or 0) < co.CB_PCT))
+            if 국내 else True,
+            gov_source="governance_events·disclosures" if r.stock_id in 보충종목 else "governance_events",
             mdd=m.get("mdd"), volatility=m.get("volatility_ann"), perf_window=m.get("window"),
             perf_as_of=m.get("as_of_date"),
             regime=g.state if g else None, regime_index=idx, regime_date=g.date if g else None,
@@ -235,7 +257,8 @@ def dossier_json(d: co.Dossier) -> dict[str, Any]:
         "broker": {"n": len(u), "median_upside": median(u) if u else None,
                    "latest": max((x[0] for x in d.broker_upsides), default=None)},
         "flows": {"sum_krw": d.flow_sum, "turnover_20d": d.turnover_20d, "days": d.flow_days, "date": d.flow_date},
-        "governance": {"events": d.gov_events[:5], "cb_pct": d.cb_pct}, "domestic": d.domestic,
+        "governance": {"events": d.gov_events[:5], "cb_pct": d.cb_pct, "covered": d.gov_covered,
+                       "source": d.gov_source}, "domestic": d.domestic,
         "sentiment": d.sentiment, "risk": {"mdd": d.mdd, "volatility": d.volatility, "window": d.perf_window,
                                             "as_of": d.perf_as_of},
         "regime": {"state": d.regime, "index": d.regime_index, "date": d.regime_date},

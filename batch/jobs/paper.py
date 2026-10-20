@@ -1262,7 +1262,7 @@ def _조사_준비(
 HOLDING_RECORDS_SQL = (
     "SELECT stock_id, decided_on, ret_20d, bench_20d, detail_json FROM paper_decisions"
     " WHERE account_id = ? AND market = ? AND decided_on >= ? AND ret_20d IS NOT NULL"
-    " AND detail_json LIKE '%\"votes\"%'"
+    " AND detail_json LIKE '%\"votes\"%' AND rule_version = ?"
 )
 
 
@@ -1301,7 +1301,9 @@ def holding_step(
     표["B"] = {r.stock_id: 1.0 for r in report_picks.select_top(report_picks.with_criteria(signal_rows), b_top)}
     부터 = (today - timedelta(days=hold.HOLDING_WINDOW_DAYS)).isoformat()
     # 시장마다 따로 — 국내 결정은 KOSPI, 미국은 S&P500 대비라 섞으면 잣대가 다르다(25.1484 검증 [참고] 6)
-    가중, 성적 = hold.weights(client.execute(HOLDING_RECORDS_SQL, [account, market, 부터]).dicts(), sorted(표))
+    # 지금 판의 기록만 — 판이 바뀌면 투표 회사의 판단도 바뀌어 예전 적중률을 이어 쓰지 않는다(25.1577)
+    기록행 = client.execute(HOLDING_RECORDS_SQL, [account, market, 부터, rule_version]).dicts()
+    가중, 성적 = hold.weights(기록행, sorted(표))
     점수 = {sid: float(rs[0].total_score or 0) for sid, rs in 행들.items()}
     순위 = hold.rank(표, 가중, 점수)
     고른 = [x["stock_id"] for x in 순위 if x["eligible"] and x["stock_id"] in 행들][:top_n]

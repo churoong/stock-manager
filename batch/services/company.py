@@ -73,6 +73,8 @@ class Dossier:
     sentiment_date: str | None = None
     sentiment_error: str | None = None  # 감성을 **못 읽었다**(한도 등) — "아직 없다" 와 가른다 (25.164)
     gov_covered: bool = True  # 공시 사건 표가 기준일 앞 1년을 덮나 — 안 덮으면 "사건 없음" 이 아니라 "자료 없음"
+    #: 사건의 근거표 출처 — 주간 표 뒤를 공시 표에서 보충했으면 둘 다(25.1577 — 근거표가 실제 행을 가리키게)
+    gov_source: str = "governance_events"
     mdd: float | None = None  # 음수 비율 (−0.35 = 35% 하락)
     volatility: float | None = None
     perf_window: str | None = None
@@ -249,11 +251,11 @@ def governance(d: Dossier) -> Opinion:
     if not d.gov_covered and not d.gov_events:
         # 표가 빈 날(덮개가 끊겨 다시 쓰는 중)·기준일 앞 1년을 덮지 않는 날 — 사건이 없는지 모른다.
         # 중립이면 거부권이 조용히 꺼진다
-        return _없음("governance", f"공시 사건 표가 기준일 앞 {GOV_DAYS}일을 덮지 않음")
+        return _없음("governance", f"공시 사건 표가 기준일 앞 {GOV_DAYS}일을 덮지 않음(또는 상세 전 전환사채 결정)")
     if d.gov_events:
         return Opinion("governance", -1, 1.0, [_criterion(
             "지배구조 사건", ", ".join(f"{day} {kind}" for day, kind in d.gov_events[:3]),
-            f"최근 {GOV_DAYS}일 1건 이상 — 거부 조건", "governance_events", max(x[0] for x in d.gov_events))],
+            f"최근 {GOV_DAYS}일 1건 이상 — 거부 조건", d.gov_source, max(x[0] for x in d.gov_events))],
             veto=True)  # fmt: skip
     if d.cb_pct is not None and d.cb_pct >= CB_PCT:
         return Opinion("governance", -1, CB_CONVICTION, [_criterion(
