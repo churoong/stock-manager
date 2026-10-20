@@ -285,6 +285,12 @@ def write(
     지금판 = (판이력.get(h) or [{}])[-1]
     관문판, 관문오류 = _관문판(client, now, 계열, h, 검산틀린날, kis요약, since=str(지금판.get("from") or ""),
                          version=지금판.get("version"), index=그림자.get(h), cash=현금.get(h))  # fmt: skip
+    if 판오류:
+        # 판 이력을 못 읽으면 "지금 판" 의 시작을 모른다 — since='' 로 관문을 내면 모든 판의 평가를 지금 판으로
+        # 섞어 셌다(25.1573, 운용 감사 [참고]). 관문만 비우고 까닭을 화면(gate_error)에 올린다.
+        # 위험판·챔피언은 판과 무관해 둔다
+        관문오류 = f"판 이력을 읽지 못해 관문을 내지 않음(판을 섞지 않게) — {판오류}"
+        관문판 = {**관문판, "gate": None, "gate_error": 관문오류}
     공통 = {"leaderboard": 순위, "rule_history": 판이력, "mirror_account": h, "updated_at": 지금, "last_market": market,
           **관문판,
           "kis_account": {"as_of": kis[0]["as_of"] if kis else None, "account_krw": 요약.get("account_krw"),

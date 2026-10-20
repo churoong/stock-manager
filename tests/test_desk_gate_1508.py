@@ -170,3 +170,18 @@ def test_gate_failure_clears_cards(monkeypatch: pytest.MonkeyPatch) -> None:
     s = json.loads(c.q("SELECT summary_json FROM paper_desk WHERE as_of = '2026-10-17'")[0][0])
     assert (s["gate"], s["risk"], s["champion"]) == (None, [], []) and s["gate_error"].startswith("RuntimeError")
     assert 기록["gate_error"].startswith("RuntimeError")
+
+
+def test_판_이력을_못_읽으면_관문을_비우고_까닭을_남긴다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """since='' 로 모든 판을 섞어 관문을 내던 것 (25.1573, 운용 감사 [참고])"""
+    from datetime import UTC, datetime
+
+    c = Client(accounts=None)
+    monkeypatch.setattr(job.bmj, "MIRROR_ACCOUNT", "B")
+    monkeypatch.setattr(job, "_판이력", lambda *_a, **_k: ({}, "OperationalError: 표 없음"))
+    기록 = job.write(c, "KR", datetime(2026, 10, 16, 23, 40, tzinfo=UTC), trade_date="2026-10-16",
+                   session_date="2026-10-19", step_log={}, warnings=[])  # fmt: skip
+    s = json.loads(c.q("SELECT summary_json FROM paper_desk")[0][0])
+    assert s["gate"] is None and s["gate_error"].startswith("판 이력을 읽지 못해 관문을 내지 않음")
+    assert 기록["rule_history_error"].startswith("OperationalError")
+
