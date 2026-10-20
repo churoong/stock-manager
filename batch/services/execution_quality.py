@@ -74,9 +74,15 @@ def measure(
         if 선:
             # 매도 때 아직 서 있던 발생(마지막 본 날이 `FLAG_ACTIVE_GAP_DAYS` 안) 가운데 가장 먼저 선 것 — 발생마다
             # 따로 읽으니(25.1577) 60일 안에 끝난 옛 발생까지 견주면 지연이 옛 발생부터로 셌다(25.1580, 25.1577 반박
-            # [권고] 4). 마지막 본 날을 모르면 예전처럼 전부
+            # [권고] 4). 서 있던 것이 없으면 가장 최근 발생(25.1583 — 가장 이른 것이면 같은 오류가 남았다).
+            # 마지막 본 날을 모르는 행이 있으면 예전처럼 전부에서 가장 이른 것
             활성 = [f for f in 선 if f.get("last_seen") and (날 - _날(f["last_seen"])).days <= FLAG_ACTIVE_GAP_DAYS]
-            덮은 = min(활성 or 선, key=lambda f: str(f["first_seen"]))
+            if 활성:
+                덮은 = min(활성, key=lambda f: str(f["first_seen"]))
+            elif all(f.get("last_seen") for f in 선):
+                덮은 = max(선, key=lambda f: str(f["first_seen"]))
+            else:
+                덮은 = min(선, key=lambda f: str(f["first_seen"]))
             지연.append((날 - _날(덮은["first_seen"])).days)
             by_level[str(덮은["level"])] = by_level.get(str(덮은["level"]), 0) + 1
         else:

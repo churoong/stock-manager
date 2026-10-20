@@ -67,3 +67,20 @@ def test_매도_때_서_있던_발생부터_센다() -> None:
     매매 = [{"stock_id": 1, "side": "sell", "trade_date": "2026-09-30", "price": 1}]
     m = eq.measure(매매, [], [], 플래그, "2026-09-01", "2026-09-30")
     assert (m["sells_after_flag"], m["sell_delay_avg"]) == (1, 3.0)
+
+
+def test_서_있던_발생이_없으면_가장_최근_발생부터() -> None:
+    """60일 안에 끝난 발생 둘 — 가장 이른 것(51일)이 아니라 최근 것(15일) (25.1583, 25.1580 반박 [권고] 2)."""
+    플래그 = [{"stock_id": 1, "reason_code": "손절", "level": "red", "first_seen": "2026-08-10", "last_seen": "2026-08-12"},
+              {"stock_id": 1, "reason_code": "손절", "level": "red", "first_seen": "2026-09-15", "last_seen": "2026-09-20"}]  # fmt: skip
+    매매 = [{"stock_id": 1, "side": "sell", "trade_date": "2026-09-30", "price": 1}]
+    assert eq.measure(매매, [], [], 플래그, "2026-09-01", "2026-09-30")["sell_delay_avg"] == 15.0
+
+
+def test_받은_상세는_다시_부른_결과로_덮지_않는다() -> None:
+    """`CB_INSERT` 의 덮기는 `no_row` 행만 (25.1583, 25.1580 반박 [권고] 3 — 대기 질의가 ok 를 안 골라 방어만 하던 조건)."""
+    mem = _mem()
+    mem.conn.execute("INSERT INTO cb_issuances (receipt_no, stock_id, decided_at, status, shares_pct, source, fetched_at)"
+                     " VALUES ('r1', 1, '2026-03-01', 'ok', 5.0, 't', 't')")  # fmt: skip
+    mem.conn.execute(djob.CB_INSERT, ["r1", 1, "2026-03-01", "no_row", *[None] * 7, "t", "t2"])
+    assert mem.conn.execute("SELECT status, shares_pct FROM cb_issuances WHERE receipt_no = 'r1'").fetchall() == [("ok", 5.0)]

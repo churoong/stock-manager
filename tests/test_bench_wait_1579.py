@@ -59,3 +59,23 @@ def test_60일_창을_기다리는_날은_포기로_닫지_않는다() -> None:
     기록 = job.fill_outcomes(m, "KR", (마지막 + timedelta(days=2)).isoformat(), "t")
     assert 기록["gave_up"] == 0
     assert m.q("SELECT ret_60d, outcome_note FROM paper_decisions")[0] == (None, None)
+
+
+def test_5일_창을_기다리는_날도_포기로_닫지_않는다() -> None:
+    """200일 정지 뒤 재개 — 5번째 날 지수를 기다리는데 60 창은 시세가 모자라 미룸에 없으면 포기로 닫아 5일 창이 영영 비었다
+    (25.1583, 25.1579 반박 [권고] 1)."""
+    m = Client()
+    m.conn.execute(
+        "INSERT INTO paper_decisions (account_id, market, decided_on, stock_id, kind, reason, ref_close, ref_date,"
+        " created_at) VALUES ('B', 'KR', '2026-01-02', 1, 'hold_flag', 't', 10000, '2026-01-02', 't')"
+    )
+    지수 = "INSERT INTO index_prices (index_code, date, close, source, fetched_at) VALUES ('KOSPI', ?, 2000, 't', 't')"
+    m.conn.execute(지수, ["2026-01-02"])
+    날들 = [date(2026, 8, 3) + timedelta(days=i) for i in range(5)]
+    for d in 날들:
+        m.conn.execute("INSERT INTO prices (stock_id, date, open, high, low, close, volume, currency, source, fetched_at)"
+                       " VALUES (1, ?, 1, 1, 1, 10000, 1000, 'KRW', 't', 't')", [d.isoformat()])  # fmt: skip
+        if d != 날들[-1]:
+            m.conn.execute(지수, [d.isoformat()])
+    기록 = job.fill_outcomes(m, "KR", (날들[-1] + timedelta(days=1)).isoformat(), "t")
+    assert 기록["gave_up"] == 0 and m.q("SELECT outcome_note FROM paper_decisions")[0] == (None,)

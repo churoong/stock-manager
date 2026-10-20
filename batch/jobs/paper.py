@@ -267,7 +267,8 @@ def fill_outcomes(client: Any, market: str, today: str, now: str) -> dict[str, i
             o.pop(f"ret_{n}d", None)
             o.pop(f"bench_{n}d", None)
         지난 = (_date.fromisoformat(today) - _date.fromisoformat(str(r["decided_on"]))).days
-        포기함 = "ret_60d" not in o and 60 not in 미룸 and 지난 >= pp.OUTCOME_GIVE_UP_DAYS
+        # 미룬 창이 하나라도 있으면 포기로 닫지 않는다 — 닫으면 미룬 5·20 창도 대기열에서 빠져 영영 빈다(25.1583)
+        포기함 = "ret_60d" not in o and not 미룸 and 지난 >= pp.OUTCOME_GIVE_UP_DAYS
         # 이미 채운 창을 다시 계산한 것뿐이면 쓰지 않는다 — 날마다 같은 행을 다시 쓰고 `filled` 가 부풀었다 (25.1453)
         새것 = any(r.get(f"ret_{n}d") is None and o.get(f"ret_{n}d") is not None for n in pp.DECISION_HORIZONS)
         if not 새것 and not 포기함:
