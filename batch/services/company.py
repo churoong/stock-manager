@@ -387,14 +387,25 @@ def meet(
     5 표결(표 ≥ threshold · 찬성 ≥ 정족수) 6 거부권 7 결정. 가중 40% 상한은 `charter_errors` 가 헌장을 읽을 때 본다.
     `population` 은 점수 부서의 백분위를 낼 그날 신호 종목 전체(`opinions`)
     """
+    표 = opinions(agenda, charter, population)
+    return tally([(d.stock_id, d.ticker) for d in agenda], 표, charter)
+
+
+def tally(
+    agenda: list[tuple[int, str]], 표: dict[int, dict[str, Opinion]], charter: dict[str, Any],
+) -> tuple[list[Item], list[Item]]:
+    """회의 3~7 단계 — 의견서(`표`)를 받아 쟁점·주관 반대·표결·거부권·결정만 (`meet` 에서 뗌, 25.1589).
+
+    판단은 `meet` 그대로다. 회의록의 입장으로 부서 하나를 빼고 다시 여는 진단(`decisive_share`)이 같은 식을 쓰게
+    떼었다 — 절차를 다른 곳에 다시 적으면 이 파일이 바뀔 때 조용히 어긋난다(33회차 검증 A·B)
+    """
     가중 = {k: float(v) for k, v in (charter.get("weights") or {}).items() if float(v) > 0}
     주관 = str(charter.get("lead"))
     거부권 = set(charter.get("veto") or [])
     문턱 = float(charter["threshold"])
-    표 = opinions(agenda, charter, population)
     결과: list[Item] = []
-    for d in agenda:
-        의견 = 표[d.stock_id]
+    for sid, ticker in agenda:
+        의견 = 표[sid]
         득표 = round(sum(가중[k] * o.stance * o.conviction for k, o in 의견.items()), 6)
         찬성 = sum(1 for o in 의견.values() if o.stance > 0)
         쟁점 = 찬성 > 0 and any(o.stance < 0 for o in 의견.values())
@@ -411,10 +422,45 @@ def meet(
         else:
             까닭, 가결 = f"위원회 가결: 표 {득표:.2f} · 찬성 {찬성}", True
         소수 = tuple(sorted(k for k, o in 의견.items() if (o.stance < 0 if 가결 else o.stance > 0)))
-        결과.append(Item(d.stock_id, d.ticker, 의견, 득표, 찬성, 쟁점, 가결, 까닭, 거부, 소수))
+        결과.append(Item(sid, ticker, 의견, 득표, 찬성, 쟁점, 가결, 까닭, 거부, 소수))
     가결들 = sorted((i for i in 결과 if i.passed), key=lambda i: (-i.vote, i.ticker))[: int(charter["top_n"])]
     return 결과, 가결들
 
+
+
+def decisive_share(minutes: list[dict[str, Any]], charter: dict[str, Any]) -> dict[str, Any]:
+    """부서 결정 기여 — 회의록의 입장으로 부서 하나를 빼고 다시 열어 가결 집합이 바뀐 회의 수 (33회차 P2, 25.1589).
+
+    `minutes` = 같은 헌장으로 연 회의록(`minutes_json`) 목록. 주관이 아니고 가중이 0 보다 큰 부서마다
+    {"n": 다시 연 회의 수, "changed": 가결(집행) 집합이 바뀐 회의 수}. 먼저 빼지 않고 다시 열어 저장된 표·가결·집행과
+    맞는지 본다 — 어긋난 회의는 빼고 `mismatch` 로 센다(회의록이 결정을 재현하지 못하면 그 자체가 결함).
+    수익을 보지 않는다. 판정·자동 변경 없음 — 기록만(docs/factors.md 12.36). 회의는 서로 독립이 아니다(같은 종목이
+    며칠 이어 안건) — 비율에 구간을 붙일 때는 날 묶음으로
+    """
+    가중 = {k: float(v) for k, v in (charter.get("weights") or {}).items() if float(v) > 0}
+    빼볼 = sorted(k for k in 가중 if k != str(charter.get("lead")))
+    out: dict[str, Any] = {"meetings": 0, "mismatch": 0, "depts": {k: {"n": 0, "changed": 0} for k in 빼볼}}
+    for 록 in minutes:
+        items = 록.get("items") or []
+        안건 = [(int(i["stock_id"]), str(i["ticker"])) for i in items]
+        표 = {int(i["stock_id"]): {k: Opinion(k, int(v[0]), float(v[1]), [], veto=k in (i.get("vetoed_by") or []),
+                                             note=v[2] if len(v) > 2 else None)
+                                  for k, v in (i.get("opinions") or {}).items()} for i in items}  # fmt: skip
+        다시, 집행 = tally(안건, 표, charter)
+        저장 = {int(i["stock_id"]): i for i in items}
+        if (any(abs(x.vote - float(저장[x.stock_id]["vote"])) > 1e-6 or x.passed != bool(저장[x.stock_id]["passed"])
+                for x in 다시)
+                or {x.stock_id for x in 집행} != {s for s, i in 저장.items() if i.get("approved")}):  # fmt: skip
+            out["mismatch"] += 1
+            continue
+        out["meetings"] += 1
+        기준 = {x.stock_id for x in 집행}
+        for k in 빼볼:
+            헌장 = {**charter, "weights": {**charter["weights"], k: 0}}
+            _x, 뺀집행 = tally(안건, {s: {d: o for d, o in 의견.items() if d != k} for s, 의견 in 표.items()}, 헌장)
+            out["depts"][k]["n"] += 1
+            out["depts"][k]["changed"] += {x.stock_id for x in 뺀집행} != 기준
+    return out
 
 def memo(company: str, items: list[Item], approved: list[Item]) -> str:
     """운용역 메모 — 템플릿 (docs/company.md 3장 9). 지어낸 말 없이 회의 결과의 수만."""

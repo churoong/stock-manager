@@ -177,6 +177,8 @@
 
 ## 11. 판단식을 코드로 바꿀 때 (2026-10-16, docs/infra.md 25.1488)
 
+> 회의 3~7 단계(쟁점·주관 반대·표결·거부권·결정)는 `company.tally` 하나에 있다 — `meet` 은 의견서(`opinions`) + `tally`, 회의록에서 부서 하나를 빼고 다시 여는 진단 `decisive_share`(33회차 P2, 기록만)도 같은 `tally` 를 부른다(25.1589). 절차를 다른 곳에 다시 적지 않는다.
+
 헌장 지문(`charter_hash`)은 헌장 **값**만 덮는다. 부서 판단식·회의 절차(`batch/services/company.py`)나 H 의 가중 식(`batch/services/holding.py`)을 **코드로** 바꾸면
 지문·부서 성적표 열쇠(`dept_param`)·H 의 고정 투표 지문(0083)이 그대로라, 판 2·H·KIS모의투자 기록이 바뀌기 전후로 조용히 섞인다(30회차 검증 B, docs/factors.md 12.33).
 그래서 두 파일의 **논리 지문**(주석·독스트링을 뺀 구문 트리)을 시험(`tests/test_dept_logic_frozen_1488.py`)이 고정한다. 깨지면:
