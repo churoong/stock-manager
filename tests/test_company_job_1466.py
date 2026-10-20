@@ -66,6 +66,8 @@ def test_company_buys_only_what_committee_passed(c: Client, monkeypatch: pytest.
     assert [a for a, _m in 회의] == ["A"]
     assert json.loads(회의[0][1])["memo"].startswith("가치투자사 위원회: 안건 2 · 가결 1")
     assert c.q("SELECT stock_id FROM paper_dossiers ORDER BY stock_id") == [(1,), (3,)]
+    # 회의록의 조사 기준일 = 조사 자료의 기준일 — 화면이 근거가 이 회의의 것인지 가른다 (25.1582)
+    assert c.q("SELECT DISTINCT as_of FROM paper_dossiers") == [(json.loads(회의[0][1])["as_of"],)]
     부결 = c.q("SELECT kind, reason, rule_version, detail_json FROM paper_decisions WHERE account_id = 'A' AND stock_id = 3")
     assert 부결[0][0] == "skip" and 부결[0][1].startswith("위원회:") and 부결[0][2] == 2
     assert json.loads(부결[0][3])["committee"]["opinions"]["research"][0] == -1

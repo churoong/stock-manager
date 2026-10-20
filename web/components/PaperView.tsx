@@ -701,19 +701,29 @@ export function CommitteePane({ a, meetings, dossiers }: { a: Account; meetings:
       </div>
       {meetings.length === 0 ? <p className="text-slate-500">아직 회의록이 없습니다 — 다음 아침 배치부터 날마다 열립니다.</p> : null}
       {meetings.map((m) => {
-        let 록: { memo?: string; items?: MinutesItem[] } = {};
+        let 록: { memo?: string; items?: MinutesItem[]; as_of?: string } = {};
         try {
           록 = JSON.parse(m.minutes_json);
         } catch {
           록 = {};
         }
-        const 근거 = new Map(dossiers.filter((d) => d.market === m.market).map((d) => [Number(d.stock_id), d.dossier_json]));
+        // 근거는 시장의 **최신** 조사 자료 한 벌뿐 — 이 회의의 조사 기준일(`as_of`, 25.1582 부터 회의록에 적힘)과 다르면 싣지 않는다.
+        // 그 계좌의 회의가 하루 빠졌으면 다른 날 근거를 이 회의의 것처럼 보였다(25.1582, 위원회 감사 [참고])
+        const 시장근거 = dossiers.filter((d) => d.market === m.market);
+        const 근거날 = 시장근거[0]?.as_of ?? null;
+        const 맞음 = !록.as_of || 록.as_of === 근거날;
+        const 근거 = new Map(맞음 ? 시장근거.map((d) => [Number(d.stock_id), d.dossier_json]) : []);
         return (
           <section key={`${m.market}-${m.decided_on}`}>
             <h3 className="font-medium">
               {m.market} · {m.decided_on} 회의
             </h3>
             {록.memo ? <p className="text-xs text-slate-600 dark:text-slate-400">{록.memo}</p> : null}
+            {!맞음 && 근거날 ? (
+              <p className="text-xs text-amber-700 dark:text-amber-400">
+                이 회의의 조사 기준일은 {록.as_of} — 남은 조사 자료는 {근거날} 것뿐이라 근거를 펼치지 않습니다.
+              </p>
+            ) : null}
             <div className="mt-1 overflow-x-auto">
               <table className="w-full min-w-[640px] text-xs">
                 <thead className="text-slate-500">
@@ -733,7 +743,7 @@ export function CommitteePane({ a, meetings, dossiers }: { a: Account; meetings:
                         {i.ticker}
                         {근거.has(Number(i.stock_id)) ? (
                           <details>
-                            <summary className="cursor-pointer text-slate-400">근거</summary>
+                            <summary className="cursor-pointer text-slate-400">근거 {근거날 ? `(조사 기준 ${근거날})` : ""}</summary>
                             <pre className="whitespace-pre-wrap text-[10px] text-slate-500">{근거.get(Number(i.stock_id))}</pre>
                           </details>
                         ) : null}

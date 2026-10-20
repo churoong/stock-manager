@@ -42,9 +42,22 @@ describe("투자위원회 탭", () => {
       dossiers: [{ market: "KR", as_of: "2026-10-15", stock_id: 1, dossier_json: '{"broker":{"n":3}}' }],
     }));
     for (const 글 of ["가치투자사", "싸고 튼튼한 회사를 산다", "리서치부 2", "주관 리서치부", "거부권 공시·지배구조부", "KR · 2026-10-16 회의",
-      "가치투자사 위원회: 안건 2", "▲80", "▼60", "가결·집행", "부결 — 쟁점에서 주관 부서(리서치부) 반대", "소수의견 퀀트부", "근거"]) {
+      "가치투자사 위원회: 안건 2", "▲80", "▼60", "가결·집행", "부결 — 쟁점에서 주관 부서(리서치부) 반대", "소수의견 퀀트부",
+      "근거 (조사 기준 2026-10-15)"]) {
       expect(html).toContain(글);
     }
+  });
+
+  it("근거가 이 회의의 조사 기준일 것이 아니면 펼치지 않는다 (25.1582)", () => {
+    const 그림 = (as_of: string) => renderToStaticMarkup(createElement(CommitteePane, {
+      a: 계좌 as never,
+      meetings: [{ account_id: "A", market: "KR", decided_on: "2026-10-16", charter_hash: "h", minutes_json: JSON.stringify({ ...회의록, as_of }) }],
+      dossiers: [{ market: "KR", as_of: "2026-10-15", stock_id: 1, dossier_json: '{"broker":{"n":3}}' }],
+    }));
+    expect(그림("2026-10-15")).toContain("근거 (조사 기준 2026-10-15)");
+    const 다름 = 그림("2026-10-14");
+    expect(다름).not.toContain("근거 (조사 기준");
+    expect(다름).toContain("이 회의의 조사 기준일은 2026-10-14 — 남은 조사 자료는 2026-10-15 것뿐");
   });
 
   it("헌장 없는 계좌(B·R)에는 탭이 없다", () => {

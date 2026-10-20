@@ -103,7 +103,7 @@
 
 - `paper_accounts.charter_json`·`charter_since` · `paper_decisions.rule_version` (ALTER ADD COLUMN — 결정 원장 표를 다시 짓지 않는다)
 - `paper_meetings(account_id, market, decided_on, minutes_json, created_at)` — (계좌, 시장, 날짜) 유일. 회의록은 **부서 근거를 담지 않고** 입장·확신·표·쟁점·거부·결정·소수의견만.
-  근거는 `paper_dossiers(market, as_of, stock_id, dossier_json)` 에 (시장, 날짜, 종목)마다 한 번 — 원자료는 회사가 달라도 같다(리서치의 비율만 다르다).
+  근거는 `paper_dossiers(market, as_of, stock_id, dossier_json)` 에 (시장, 날짜, 종목)마다 한 번 — 원자료는 회사가 달라도 같다(리서치의 비율만 다르다). 회의록(`minutes_json.as_of`)에 그 회의의 조사 기준일을 적어, 화면은 남은 최신 조사 자료가 그 회의의 것일 때만 근거를 펼친다(25.1582 — 회의 날과 조사 기준일은 보통 하루 다르다).
   초안대로 회의록마다 근거를 실으면 한 장 약 60KB, 1년 약 130MB 로 추정됐다(검증 권장)
 - 결정 원장 `detail_json`: `opinions = {부서: [입장, 확신]}` · `vote` · `vetoed_by` · `issue` · `charter_hash`
 
