@@ -65,4 +65,11 @@ def test_loader_reads_reports_trades_flags_on_real_schema() -> None:
     줄 = ws.execution_lines(c, datetime(2026, 10, 3, tzinfo=UTC))  # 한국 10-03 = 월 첫 주 → 9월을 본다
     assert 줄[0] == "[실행 품질 — 실제 매매 2026-09-01~2026-09-30]"
     assert "체결가는 1차 가격보다 평균 +1.00%" in "\n".join(줄)
-    assert ws.execution_lines(c, datetime(2026, 10, 12, tzinfo=UTC)) == []  # 월 첫 주가 아니면 없다
+    assert ws.execution_lines(c, datetime(2026, 10, 15, tzinfo=UTC)) == []  # 따라잡기 창(14일) 밖이면 없다
+    # 8~14일은 이번 달 월간 복기를 아직 안 실었을 때만 따라잡는다(25.1571)
+    assert ws.execution_lines(c, datetime(2026, 10, 12, tzinfo=UTC)) != []
+    from batch.core import db as _db
+    from batch.jobs import paper as _pj
+
+    _db.set_setting(c, _pj.MONTHLY_REVIEW_KEY, "2026-10")
+    assert ws.execution_lines(c, datetime(2026, 10, 12, tzinfo=UTC)) == []
