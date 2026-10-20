@@ -70,7 +70,7 @@ def new_versions(
     return [(a, v, "" if a not in 계좌들 else trade_date) for a, v in sorted(current.items()) if (a, v) not in 있음]
 
 
-def _판구간(v: list[tuple[str, float]], since: str, to: str | None) -> float | None:
+def _판구간(v: list[tuple[str, float]], since: str, to: str | None, first: str | None = None) -> float | None:
     """판 구간 수익률(%) — 결정일 `since` 의 종가부터 다음 판 결정일 `to` 의 종가까지(없으면 마지막 평가까지).
 
     `paper_daily.as_of` 는 배치를 돌린 **한국 날짜**이고 그 행은 그때까지 나온 종가로 잰 평가다 — 판정일 D 의 결정을 낸
@@ -78,7 +78,12 @@ def _판구간(v: list[tuple[str, float]], since: str, to: str | None) -> float 
     """
     if not v:
         return None
-    시작 = v[0][1] if not since else next((t for d, t in v if d > since), None)
+    if not since and first:
+        # 대조(R)를 "처음부터" 판과 견줄 때는 그 계좌의 첫 평가일부터 — R 의 처음부터 재면 늦게 연 계좌(G·H)의
+        # R 대비에 열기 전 R 의 움직임이 들어갔다(25.1571, 운용 감사 [권고] 3)
+        시작 = next((t for d, t in v if d >= first), None)
+    else:
+        시작 = v[0][1] if not since else next((t for d, t in v if d > since), None)
     끝 = v[-1][1] if to is None else next((t for d, t in v if d > to), v[-1][1])
     return (끝 / 시작 - 1) * 100 if 시작 else None
 
@@ -103,8 +108,10 @@ def rule_history(
         out[a] = []
         for i, (since, ver) in enumerate(줄):
             끝 = 줄[i + 1][0] if i + 1 < len(줄) else None
-            pct = _판구간(sorted(series.get(a) or []), since, 끝)
-            대조 = [x for r in CONTROL_IDS if (x := _판구간(sorted(series.get(r) or []), since, 끝)) is not None]
+            내것 = sorted(series.get(a) or [])
+            pct = _판구간(내것, since, 끝)
+            첫날 = 내것[0][0] if 내것 else None
+            대조 = [x for r in CONTROL_IDS if (x := _판구간(sorted(series.get(r) or []), since, 끝, 첫날)) is not None]
             기준선 = sum(대조) / len(대조) if 대조 else None
             out[a].append({"version": ver, "from": since, "to": 끝, "prereg": prereg(a, ver),
                            "orders": None if orders is None else orders.get((a, ver), 0), "pct": pct,
@@ -323,7 +330,8 @@ def gate(
          "ok": vs_idx is not None and vs_idx > 0},
         {"key": "ratio", "label": "변동성 대비 수익 — 무작위 대조 평균보다", "now": 내비, "target": 대조비,
          "ok": 내비 is not None and 대조비 is not None and 내비 > 대조비},
-        {"key": "incidents", "label": f"운영 무사고(최근 {GATE_INCIDENT_DAYS}일 장부 검산 어긋남·일일 배치 실패)",
+        {"key": "incidents",
+         "label": f"운영 무사고(최근 {GATE_INCIDENT_DAYS}일 장부 검산 어긋남·일일 배치 실패·한도 건너뜀)",
          "now": recon_bad_days + batch_failed, "target": 0, "ok": recon_bad_days + batch_failed == 0,
          "detail": {"recon_bad_days": recon_bad_days, "batch_failed": batch_failed}},
         {"key": "kis", "label": f"KIS 실현율(%, 최근 28일, 표본 {GATE_KEPT_MIN_N} 이상)", "now": kept,

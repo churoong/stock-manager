@@ -163,10 +163,13 @@ OUTCOME_BATCH = 900
 #: 성과 분해 (docs/paper.md 10장, 25.1450) — 성과가 찬 결정과 체결일 종가가 있는 매수만, 최근 1년
 #: 성과 분해·부서 성적표가 보는 결정 — **지금 판의 것만**(판 번호가 빈 옛 행은 판 1).
 #: 판 2 회사의 성적에 판 1 결정이 섞이지 않게 (docs/company.md 1장 검증 [필수] 7, 25.1472)
+#: `market IN` 은 유일 색인 (account_id, market, decided_on…) 의 날짜 범위까지 타게 한다 — 없으면 계좌의 전 기간 행을
+#: 읽었다(25.1571, 운용 감사 [권고] 5). 시장은 둘뿐이다
 ATTR_DECISIONS_SQL = (
     "SELECT stock_id, market, decided_on, kind, reason, ret_20d, bench_20d, detail_json, control_pct"
     " FROM paper_decisions"
-    " WHERE account_id = ? AND decided_on >= ? AND ret_20d IS NOT NULL AND COALESCE(rule_version, 1) = ?"
+    " WHERE account_id = ? AND market IN ('KR', 'US') AND decided_on >= ? AND ret_20d IS NOT NULL"
+    " AND COALESCE(rule_version, 1) = ?"
 )
 #: 진입 칸의 체결도 **지금 판의 주문만**(25.1547 감사 [참고] 4 — 위 주석과 달리 판을 거르지 않아 지난 판 체결이 섞였다)
 ATTR_FILLS_SQL = (
@@ -1746,6 +1749,23 @@ PAPER_SUMMARY_SQL = (
 )
 #: 월간 복기 — 한국 날짜로 그달 1~7일에 보내는 주간 요약이 지난달을 돌아본다 (docs/paper.md 6장)
 MONTHLY_REVIEW_DAYS = 7
+#: 그 주 요약이 못 나갔으면(DB 한도 등으로 건너뜀) 이날까지의 다음 요약이 따라잡는다(25.1571)
+MONTHLY_CATCHUP_DAYS = 14
+#: 월간 복기를 실어 보낸 달(한국 날짜 "YYYY-MM") — 따라잡기가 두 번 싣지 않게
+MONTHLY_REVIEW_KEY = "paper_monthly_review_sent"
+
+
+def review_due(client: Any, 오늘: date) -> bool:
+    """이번 주 요약에 지난달 월간 복기를 싣나 — 1~7일이면 싣고, 8~14일이면 이번 달에 아직 안 실었을 때만(따라잡기).
+
+    월간 복기는 그 달 첫 일요일 요약 한 번에만 걸려, 그 실행이 한도로 건너뛰면 통째로 사라졌다(25.1571, 운용 감사
+    [확인필요] 7 — 2026-11-01 실행은 10-31 22:41 UTC 라 10월 한도가 찬 채일 수 있다)
+    """
+    if 오늘.day <= MONTHLY_REVIEW_DAYS:
+        return True
+    if 오늘.day > MONTHLY_CATCHUP_DAYS:
+        return False
+    return db.get_setting(client, MONTHLY_REVIEW_KEY, None) != 오늘.strftime("%Y-%m")
 
 
 def summary_section(client: Any, now: datetime) -> list[str]:
@@ -1753,7 +1773,7 @@ def summary_section(client: Any, now: datetime) -> list[str]:
     오늘 = now.astimezone(cal.market_tz("KR")).date()
     주초 = (오늘 - timedelta(days=7)).isoformat()
     달초 = ((오늘.replace(day=1) - timedelta(days=1)).replace(day=1).isoformat()
-            if 오늘.day <= MONTHLY_REVIEW_DAYS else None)  # fmt: skip
+            if review_due(client, 오늘) else None)  # fmt: skip
     시작 = min(x for x in ((오늘 - timedelta(days=14)).isoformat(), 달초) if x)
     rows = client.execute(PAPER_SUMMARY_SQL, [시작]).dicts()
     if not rows:

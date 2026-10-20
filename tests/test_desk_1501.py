@@ -148,6 +148,16 @@ def test_rule_history_spans_by_hand() -> None:
     assert desk.rule_history([("A", 3, "2026-10-20")], series)["A"][0]["pct"] is None
 
 
+
+def test_늦게_연_계좌의_처음부터_판은_R_도_그_계좌_첫_평가부터() -> None:
+    """H 를 R 보다 하루 늦게 열었고 그 하루 R 이 +5% — H 판 1 의 R 대비가 −5%p 로 나오던 것 (25.1571, 운용 감사 [권고] 3)"""
+    series = {"H": [("2026-10-16", 1.0), ("2026-10-19", 1.0)],
+              "R1": [("2026-10-15", 1.0), ("2026-10-16", 1.05), ("2026-10-19", 1.05)]}  # fmt: skip
+    h = desk.rule_history([("H", 1, ""), ("R1", 1, "")], series)
+    assert h["H"][0]["control_pct"] == pytest.approx(0.0) and h["H"][0]["vs_r_pp"] == pytest.approx(0.0)
+    assert h["R1"][0]["pct"] == pytest.approx(5.0)  # R 제 판은 제 처음부터
+
+
 def test_new_versions_first_seen() -> None:
     assert desk.new_versions({"A": 2, "B": 1}, [], "2026-10-16") == [("A", 2, ""), ("B", 1, "")]
     assert desk.new_versions({"A": 3, "B": 1}, [("A", 2, ""), ("B", 1, "")], "2026-10-20") == [("A", 3, "2026-10-20")]

@@ -444,7 +444,7 @@ def execution_lines(client: TursoClient, now: datetime) -> list[str]:
     from batch.services import reports as rp_store
 
     오늘 = now.astimezone(cal.market_tz("KR")).date()
-    if 오늘.day > paper_job.MONTHLY_REVIEW_DAYS:
+    if not paper_job.review_due(client, 오늘):  # 1~7일, 못 나갔으면 14일까지 따라잡기(25.1571)
         return []
     끝 = 오늘.replace(day=1) - timedelta(days=1)
     시작 = 끝.replace(day=1)
@@ -514,9 +514,11 @@ def run(dry_run: bool = False, force: bool = False) -> int:
         except Exception as exc:  # noqa: BLE001 — 곁다리 절이다
             사후 = [f"지난 추천 사후 분석을 못 했습니다 ({type(exc).__name__})"]
         # 모의 투자 계좌 (docs/paper.md 6장, 25.1447) — 곁다리 절. 못 읽으면 그렇다고 한 줄
+        월간 = False
         try:
             from batch.jobs import paper as paper_job
 
+            월간 = paper_job.review_due(client, now.astimezone(cal.market_tz("KR")).date())
             모의 = paper_job.summary_section(client, now)
         except Exception as exc:  # noqa: BLE001 — 곁다리 절이다
             모의 = [f"가상모의투자 절을 만들지 못했습니다 ({type(exc).__name__})"]
@@ -540,6 +542,15 @@ def run(dry_run: bool = False, force: bool = False) -> int:
                     db.set_setting(client, POSTMORTEM_THROUGH_KEY, 본_끝[0])
                 except Exception as exc:  # noqa: BLE001 — 이미 보냈다. 다음 주 사후 분석이 같은 손실을 한 번 더 말할 뿐이다
                     뒤경고.append(f"사후 분석 진척을 적지 못함: {type(exc).__name__}")
+            if 월간:
+                # 월간 복기를 실어 보냈다 — 8~14일 따라잡기가 두 번 싣지 않게(25.1571)
+                try:
+                    from batch.jobs import paper as paper_job
+
+                    db.set_setting(client, paper_job.MONTHLY_REVIEW_KEY,
+                                   now.astimezone(cal.market_tz("KR")).date().strftime("%Y-%m"))  # fmt: skip
+                except Exception as exc:  # noqa: BLE001 — 이미 보냈다. 다음 주에 한 번 더 실릴 뿐이다
+                    뒤경고.append(f"월간 복기 표시를 적지 못함: {type(exc).__name__}")
         db.finish_batch_run(
             # **확인 실행은 `dryrun`** (docs/infra.md 25.1304, 운영 감사 재현) — 예전엔 `success` 로 닫아 다시
             # 보내지 않는 검사가 "이미 보냈다" 로 읽었다. 화·수에 손으로 확인하면 그 주 일요일 요약이 통째로 빠지고

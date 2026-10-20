@@ -58,9 +58,10 @@ ADJ_FILLS_SQL = (
     " WHERE f.account_id IN (SELECT id FROM paper_accounts) AND f.fill_date >= ?"
 )
 #: 위험판 (25.1508) — 계좌마다 마지막 평가 한 줄(기본키 (account_id, as_of) 로 계좌마다 하나)
+#: `CROSS JOIN` 으로 계좌(몇 줄)부터 돈다 — 그냥 JOIN 이면 계획기가 평가 표 전체를 훑었다(25.1571, 운용 감사 [권고] 5)
 LATEST_SQL = (
     "SELECT d.account_id, d.equity_krw, d.holdings_krw, d.positions_json, d.attribution_json"
-    " FROM paper_accounts a JOIN paper_daily d"
+    " FROM paper_accounts a CROSS JOIN paper_daily d"
     " ON d.account_id = a.id AND d.as_of = (SELECT MAX(x.as_of) FROM paper_daily x WHERE x.account_id = a.id)"
 )
 STOCK_NAMES_SQL = (
@@ -73,9 +74,12 @@ BATCH_DELAY_SQL = (
     " MAX(delay_seconds) AS max_delay"
     " FROM batch_runs WHERE job_name IN (?, ?) AND started_at >= ? AND status != 'running'"
 )
-#: 관문 — 최근 창의 일일 배치 실패 수(색인 job_name, started_at)
+#: 관문 — 최근 창의 일일 배치 실패 수(색인 job_name, started_at). **DB 한도로 건너뜀·끝맺지 못해 정리된 실행도 센다**
+#: — 그날 매매가 없었던 운영 사건이다. 예전엔 `failed` 만 세어 한도로 나흘 멈춘 동안 "무사고 0건 ✓" 였다(25.1571, 운용
+#: 감사 [권고] 4). 휴장·이미 함·거래소 아직(다음 실행이 다시 돈다)의 건너뜀은 세지 않는다
 BATCH_FAILED_SQL = (
-    "SELECT COUNT(*) FROM batch_runs WHERE job_name IN (?, ?) AND started_at >= ? AND status = 'failed'"
+    "SELECT COUNT(*) FROM batch_runs WHERE job_name IN (?, ?) AND started_at >= ? AND (status = 'failed'"
+    " OR (status = 'skipped' AND (error_text LIKE 'DB 한도로 건너뜀%' OR error_text LIKE '끝맺지 못한 기록%')))"
 )
 NAMES_SQL = "SELECT id, name, rule_version FROM paper_accounts"
 #: 판 이력 (25.1505) — 계좌마다 판을 처음 본 결정일. 몇십 행
