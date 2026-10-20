@@ -160,11 +160,14 @@ export const DEPT_LABEL: Record<string, string> = {
   risk: "리스크관리부",
   macro: "시장전략부",
 };
-/** 부서 입장 한 칸 — [입장, 확신, (자료 없음 까닭)] → 글 */
+/**
+ * 부서 입장 한 칸 — [입장, 확신, (메모)] → 글. 메모가 "자료 없음" 으로 시작할 때만 "–" — 배치 `_없음` 이 그렇게 적는다.
+ * 공시부 "사건 없음 — 중립" 처럼 자료가 있는 중립도 메모를 달아, 예전엔 그것까지 "–"(자료 없음)로 보였다(25.1581)
+ */
 export function stanceText(op: unknown[] | undefined): string {
   if (!op) return "";
   const [입장, 확신, 메모] = op as [number, number, string | undefined];
-  if (메모) return "–";
+  if (typeof 메모 === "string" && 메모.startsWith("자료 없음")) return "–";
   if (입장 > 0) return `▲${Math.round(Number(확신) * 100)}`;
   if (입장 < 0) return `▼${Math.round(Number(확신) * 100)}`;
   return "·";

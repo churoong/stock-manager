@@ -30,6 +30,9 @@ describe("투자위원회 탭", () => {
     expect(stanceText([-1, 0.6])).toBe("▼60");
     expect(stanceText([0, 0])).toBe("·");
     expect(stanceText([0, 0, "자료 없음"])).toBe("–");
+    // 자료가 있는 중립(공시부 "사건 없음") 은 "–" 가 아니라 중립 (25.1581)
+    expect(stanceText([0, 0, "사건 없음 — 중립(사건이 없는 것은 기본값)"])).toBe("·");
+    expect(stanceText([0, 0, "자료 없음 — 공시 사건 표가 기준일 앞 365일을 덮지 않음"])).toBe("–");
   });
 
   it("헌장과 회의록 — 결정·소수의견·근거 펼침", () => {
