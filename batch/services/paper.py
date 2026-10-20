@@ -1017,6 +1017,17 @@ def _묶음(day: str) -> int:
     return date.fromisoformat(day[:10]).toordinal() // EVIDENCE_BLOCK_DAYS
 
 
+def _추가매수(d: dict[str, Any]) -> bool:
+    """결정 때 이미 든 종목을 더 산 것인가(`detail.held`, 25.1570 부터 적힌다 — 그 전 행은 모름이라 예전처럼 센다)"""
+    det = d.get("detail")
+    if det is None:
+        try:
+            det = json.loads(d.get("detail_json") or "{}")
+        except (TypeError, ValueError):
+            det = {}
+    return bool(isinstance(det, dict) and det.get("held"))
+
+
 def selection_evidence(decisions: list[dict[str, Any]]) -> dict[str, Any]:
     """결정 단위 선정 증거 — 산 종목이 **같은 날 같은 시장의 안 산 새 후보** 가운데 몇 분위였나 (docs/paper.md 10.1).
 
@@ -1032,12 +1043,20 @@ def selection_evidence(decisions: list[dict[str, Any]]) -> dict[str, Any]:
         if d.get(키) is None or not d.get("decided_on"):
             continue
         k = (str(d.get("market") or ""), str(d["decided_on"])[:10])
+        if d.get("kind") == "buy" and _추가매수(d):
+            # 상한까지 채우는 추가 매수는 새 선정이 아니다 — 같은 종목이 날마다 산 쪽을 차지했다(25.1570, 운용 감사
+            # [확인필요] 6. 핵심 H 무작위 대조 분위가 25.1544 [권고] 4 에서 뺀 것과 같은 뜻)
+            continue
         if d.get("kind") == "buy":
             날.setdefault(k, {"buy": [], "skip": []})["buy"].append(d)
         elif d.get("kind") == "skip" and not str(d.get("reason")).startswith(NONCOMPARABLE_SKIP_PREFIXES):
             날.setdefault(k, {"buy": [], "skip": []})["skip"].append(d)
     분위묶음: dict[int, list[float]] = {}
     초과묶음: dict[int, list[float]] = {}
+    # 묶음의 결정일 수는 **달력 날짜**로 센다 — (시장, 날짜)로 세면 두 시장 계좌(H)는 같은 날 국내·미국이 이틀이 됐다
+    # (25.1570, 운용 감사 [권고] 1). 짝 차이(초과)도 같은 사흘 문턱(같은 감사 [권고] 2 — 하루치 끝 묶음이 같은 무게)
+    분위날: dict[int, set[str]] = {}
+    초과날: dict[int, set[str]] = {}
     쓴날 = 0
     for (_m, day), g in sorted(날.items()):
         if not g["buy"]:
@@ -1045,15 +1064,17 @@ def selection_evidence(decisions: list[dict[str, Any]]) -> dict[str, Any]:
         for b in g["buy"]:
             if b.get(기) is not None:
                 초과묶음.setdefault(_묶음(day), []).append(float(b[키]) - float(b[기]))
+                초과날.setdefault(_묶음(day), set()).add(day)
         풀 = [float(x[키]) for x in g["skip"]]
         if len(풀) < EVIDENCE_MIN_POOL:
             continue
         분위 = [(sum(r < float(b[키]) for r in 풀) + 0.5 * sum(r == float(b[키]) for r in 풀)) / len(풀) * 100
               for b in g["buy"]]  # fmt: skip
         분위묶음.setdefault(_묶음(day), []).append(sum(분위) / len(분위))
+        분위날.setdefault(_묶음(day), set()).add(day)
         쓴날 += 1
-    블록 = {k: sum(v) / len(v) for k, v in 분위묶음.items() if len(v) >= EVIDENCE_BLOCK_MIN_DAYS}
-    초과 = {k: sum(v) / len(v) for k, v in 초과묶음.items()}
+    블록 = {k: sum(v) / len(v) for k, v in 분위묶음.items() if len(분위날[k]) >= EVIDENCE_BLOCK_MIN_DAYS}
+    초과 = {k: sum(v) / len(v) for k, v in 초과묶음.items() if len(초과날[k]) >= EVIDENCE_BLOCK_MIN_DAYS}
     return {"horizon": ATTRIBUTION_HORIZON, "days": 쓴날, **block_bound(블록),
             "blocks": {str(k): v for k, v in sorted(블록.items())},
             "excess_blocks": {str(k): v for k, v in sorted(초과.items())}}  # fmt: skip

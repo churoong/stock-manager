@@ -695,7 +695,7 @@ Turso 월 읽기 진도 문(추정 500만 행)을 지나야 돈다 — 미뤄지
        — 날 평균 → 28일 묶음(매수 날 **하나라도**, `CORE_BLOCK_MIN_DAYS` = 1 — 핵심 H 는 매수가 드물어 운영의 "사흘 이상" 이면 묶음 대부분이 버려진다) → `pp.block_bound` 한쪽 하한. 무작위면 50.
        결과 행 `metrics_json.evidence`(buys·scored·no_control·days·n_blocks·mean·se·lower·gate·after_sell), 실행 기록 `step_log.evidence`(묶음 값까지)
      - **관문과 같은 잣대**(`gate_evidence` → `evidence.gate`): 하루 기록의 운영 결정 원장 모양(`DayLog.decisions` 의 buy·skip)을 그대로 `pp.selection_evidence` 에 — 산 종목이 같은 날 **안 산 새 후보** 안 몇 분위
-       (결정일 묶음, 사흘 이상). 실전 전환 관문(desk GATE_SEL)과 같은 숫자다. 무작위 대조 분위와는 귀무가 달라 직접 견주지 않는다(25.1544 [필수] 1 — 처음엔 하나를 "관문과 같은 잣대" 라 적었다)
+       (결정일 묶음, 사흘 이상). 실전 전환 관문(desk GATE_SEL)과 같은 숫자다(25.1570 부터 운영과 함께 추가 매수(`detail.held`)를 빼고 결정일을 달력 날짜로 센다). 무작위 대조 분위와는 귀무가 달라 직접 견주지 않는다(25.1544 [필수] 1 — 처음엔 하나를 "관문과 같은 잣대" 라 적었다)
      - **판 뒤**(`after_sell` → `evidence.after_sell`): 매도(정지로 미룬 것 빼고)마다 cutoff 뒤 20 거래일 KOSPI 대비 초과 — 낮을수록 잘 판 것. 매도 규칙의 몫은 이것으로 본다
      - 짝(`step_log.pairs`): **core_h−core_g 하나**(둘은 매도 규칙이 같아 매수 성과 차이 = 합의 선정의 몫) — 같은 28일 묶음끼리 20 거래일 KOSPI 대비 초과 평균의 차이 → `pp.block_bound`.
        core_g−core_b 는 매도 규칙만 달라 매수 성과 차이가 "현금이 언제 났나" 의 우연이라 뺐다(25.1544 [필수] 2)

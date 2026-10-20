@@ -1181,6 +1181,8 @@ def buy_orders(
     # 결정 원장 (25.1449) — 산 후보·못 산 후보(까닭)와 그때의 기준 종가
     결정: list[dict[str, Any]] = []
     낸 = {o["stock_id"] for o in 주문}
+    # 결정 때 이미 든 종목(상한까지 채우는 추가 매수) — 결정 단위 선정 증거가 새 선정만 세게 적는다(25.1570)
+    든 = {int(r["stock_id"]) for r in valuation.rows if float(r.get("value_krw") or 0) > 0}
     for b in 배분:
         r0: report_picks.SignalRow = b["row"]
         까닭 = next((x["why"] for x in 빠짐 if x.get("stock_id") == b["stock_id"]), "주문 없음")
@@ -1188,7 +1190,7 @@ def buy_orders(
                      "reason": 사유 if b["stock_id"] in 낸 else 까닭,
                      "ref_close": r0.close, "ref_date": r0.close_date,
                      "detail": {"horizon": r0.horizon, "score": r0.total_score, "weight_pct": r0.suggested_weight_pct,
-                                "amount": b["amount"], "entry": entry,
+                                "amount": b["amount"], "entry": entry, "held": b["stock_id"] in 든,
                                 "prices": [t.get("price_at_or_below") for t in b["tranches"]]}})  # fmt: skip
         if stop_pcts is not None and b["stock_id"] in 낸:
             # 손절 거리 σ 단위 (25.1539, 31회차 P2) — 2부가 든 상관 계열 그대로(읽기 0). 분할 재수집 대기는 모름
