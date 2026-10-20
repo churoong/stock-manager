@@ -158,6 +158,27 @@ def test_parse_errors_keep_kis_code_only() -> None:
     assert ex == [kv.Execution("20261016", "1", "005930", "buy", 3, 2, 9790.0, 0, False)]
 
 
+def test_국내_번호_없는_줄도_주문_단가로_회차를_가른다() -> None:
+    """같은 종목·같은 수량 회차 둘이 모두 응답 없이(번호 없이) 남았다 — 9,800 회차만 찼는데 9,600 줄이 "체결 @9,800" 이
+    되던 것 (25.1566, KIS 경로 감사 [참고] 1). 시장가(단가 0)는 단가를 보지 않는다"""
+    ex = kv.parse_executions({"rt_cd": "0", "output1": [
+        {"ord_dt": "20261016", "odno": "7", "pdno": "005930", "sll_buy_dvsn_cd": "02", "ord_qty": "3",
+         "tot_ccld_qty": "3", "avg_prvs": "9800", "rjct_qty": "0", "cncl_yn": "N", "ord_unpr": "9800"},
+        {"ord_dt": "20261016", "odno": "8", "pdno": "005930", "sll_buy_dvsn_cd": "02", "ord_qty": "3",
+         "tot_ccld_qty": "0", "avg_prvs": "0", "rjct_qty": "0", "cncl_yn": "N", "ord_unpr": "9600"},
+        {"ord_dt": "20261016", "odno": "9", "pdno": "000660", "sll_buy_dvsn_cd": "01", "ord_qty": "1",
+         "tot_ccld_qty": "1", "avg_prvs": "100", "rjct_qty": "0", "cncl_yn": "N", "ord_unpr": "0"}]})  # fmt: skip
+    assert [e.price for e in ex] == [9800.0, 9600.0, None]
+    줄 = [{"id": 1, "trade_date": "2026-10-16", "code": "005930", "side": "buy", "quantity": 3, "limit_price": 9600.0,
+           "broker_order_no": None},
+          {"id": 2, "trade_date": "2026-10-16", "code": "005930", "side": "buy", "quantity": 3, "limit_price": 9800.0,
+           "broker_order_no": None},
+          {"id": 3, "trade_date": "2026-10-16", "code": "000660", "side": "sell", "quantity": 1, "limit_price": None,
+           "broker_order_no": None}]  # fmt: skip
+    결과 = {o.row_id: (o.status, o.avg_price) for o in bm.reconcile(줄, ex)}
+    assert 결과 == {1: ("unfilled", None), 2: ("filled", 9800.0), 3: ("filled", 100.0)}
+
+
 # ── 무엇을 낼지 ───────────────────────────────────────────────────────────────
 
 

@@ -217,9 +217,16 @@ class Execution:
     avg_price: float | None  # avg_prvs
     rejected: int  # rjct_qty
     cancelled: bool  # cncl_yn
-    #: 주문 단가(미국 ft_ord_unpr3) — 번호 없이 맞추는 미국 예약주문에서 수량이 같은 분할 회차를 가른다(25.1490).
-    #: 국내는 비움
+    #: 주문 단가(미국 ft_ord_unpr3, 국내 ord_unpr) — 번호 없이 맞추는 줄에서 수량이 같은 분할 회차를 가른다
+    #: (미국 25.1490, 국내 25.1566). 0 이하(시장가)·빈칸은 None
     price: float | None = None
+
+
+def _단가(v: object) -> float | None:
+    """주문 단가 — 0 이하(시장가)·빈칸은 모름(None). `ord_unpr` 칸이 국내 모의 체결 조회에 오는지는 공식 칸 표 기준이고
+    실측 응답으로는 아직 못 봤다 `[확인필요]` — 안 오면 None 이라 예전처럼 단가를 보지 않는다(25.1566)"""
+    x = _float(v)
+    return x if x is not None and x > 0 else None
 
 
 def parse_executions(payload: object) -> list[Execution]:
@@ -234,7 +241,7 @@ def parse_executions(payload: object) -> list[Execution]:
             order_date=str(r.get("ord_dt") or ""), order_no=no, code=str(r.get("pdno") or "").strip(),
             side="sell" if code == "01" else "buy" if code == "02" else code, quantity=_int(r.get("ord_qty")),
             filled=_int(r.get("tot_ccld_qty")), avg_price=_float(r.get("avg_prvs")), rejected=_int(r.get("rjct_qty")),
-            cancelled=str(r.get("cncl_yn") or "").upper() == "Y",
+            cancelled=str(r.get("cncl_yn") or "").upper() == "Y", price=_단가(r.get("ord_unpr")),
         ))  # fmt: skip
     return out
 
