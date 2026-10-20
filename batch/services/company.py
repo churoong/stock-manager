@@ -440,8 +440,13 @@ def decisive_share(minutes: list[dict[str, Any]], charter: dict[str, Any]) -> di
     가중 = {k: float(v) for k, v in (charter.get("weights") or {}).items() if float(v) > 0}
     빼볼 = sorted(k for k in 가중 if k != str(charter.get("lead")))
     out: dict[str, Any] = {"meetings": 0, "mismatch": 0, "depts": {k: {"n": 0, "changed": 0} for k in 빼볼}}
+    지문 = charter_hash(charter)
     for 록 in minutes:
         items = 록.get("items") or []
+        # 다른 헌장으로 연 회의·헌장 가중에 없는 부서 의견은 재현할 수 없다 — 멈추지 않고 mismatch 로(25.1590)
+        if 록.get("charter_hash") != 지문 or any(k not in 가중 for i in items for k in (i.get("opinions") or {})):
+            out["mismatch"] += 1
+            continue
         안건 = [(int(i["stock_id"]), str(i["ticker"])) for i in items]
         표 = {int(i["stock_id"]): {k: Opinion(k, int(v[0]), float(v[1]), [], veto=k in (i.get("vetoed_by") or []),
                                              note=v[2] if len(v) > 2 else None)

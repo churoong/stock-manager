@@ -55,3 +55,40 @@ def test_거부권과_자료없음_메모를_되살린다() -> None:
     r = co.decisive_share([록], 헌장)
     # 리스크를 빼면 1 의 거부가 풀려(표 3.0) 집행이 2 → 1 로 바뀐다. 퀀트(자료 없음)를 빼도 그대로
     assert r["mismatch"] == 0 and r["depts"] == {"quant": {"n": 1, "changed": 0}, "risk": {"n": 1, "changed": 1}}
+
+
+def test_다른_헌장의_회의록은_재현하지_않는다() -> None:
+    """지문이 다르거나 헌장 가중에 없는 부서 의견이 있으면 mismatch (25.1590, 25.1589 반박 [권고] 1)."""
+    다른 = {**헌장, "threshold": 2}
+    assert co.decisive_share([_회의록()], 다른)["mismatch"] == 1
+    록 = _회의록()
+    록["items"][0]["opinions"]["macro"] = [0, 0.0]
+    assert co.decisive_share([록], 헌장)["mismatch"] == 1  # KeyError 로 멈추지 않는다
+
+
+def test_무작위_회의_왕복은_늘_재현된다() -> None:
+    """고정 씨앗 무작위 안건 — 회의록 왕복이 표·가결·집행을 늘 재현하고(mismatch 0), 부서를 뺀 결과가 가중 0 헌장의 tally 와 같다."""
+    import random
+
+    rng = random.Random(1589)
+    부서 = ["research", "quant", "risk", "flows", "macro"]
+    for _ in range(300):
+        가중 = {k: rng.choice([0, 0.5, 1, 2]) for k in 부서}
+        가중["research"] = 2
+        h = {"weights": 가중, "lead": "research", "veto": rng.sample(부서, rng.randint(0, 2)),
+             "threshold": rng.choice([0.5, 1, 1.5]), "top_n": rng.randint(1, 4), "agenda": 8}  # fmt: skip
+        쓰는 = [k for k, w in 가중.items() if w > 0]
+        안건 = [(i, f"T{rng.randint(0, 5)}") for i in range(rng.randint(0, 8))]
+        표 = {sid: {k: co.Opinion(k, rng.choice([-1, 0, 1]), rng.random(), [], veto=rng.random() < 0.1) for k in 쓰는}
+             for sid, _t in 안건}  # fmt: skip
+        items, approved = co.tally(안건, 표, h)
+        록 = json.loads(json.dumps(co.minutes_json(items, approved, h, "m")))
+        r = co.decisive_share([록], h)
+        assert r["mismatch"] == 0
+        기준 = {x.stock_id for x in approved}
+        for k in 쓰는:
+            if k == "research":
+                continue
+            _i, 뺀 = co.tally(안건, {s: {d: o for d, o in v.items() if d != k} for s, v in 표.items()},
+                              {**h, "weights": {**가중, k: 0}})  # fmt: skip
+            assert r["depts"][k]["changed"] == int({x.stock_id for x in 뺀} != 기준)
