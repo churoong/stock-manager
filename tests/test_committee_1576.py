@@ -45,4 +45,9 @@ def test_가결이나_상위_밖은_부결로_세지_않는다() -> None:
     결정.append({"account_id": "D", "stock_id": 10, "decided_on": "2026-10-01", "kind": "buy", "reason": "위원회 가결",
                  "ret_20d": 2.0, "bench_20d": 0.0, "detail_json": json.dumps({"committee": {"minority": []}})})
     본문 = "\n".join(co.review_lines([], 결정, {7: "칠", 8: "팔"}, {"D": {"name": "장기보유투자사"}}))
-    assert "성과 찬 결정 4 · 소수의견 있던 것 3 · 그 가운데 다수 쪽이 맞음 1 · 소수 쪽이 5%p 넘게 맞음 1" in 본문
+    # 7 은 "가결이나 상위 밖" — 가결 쪽(다수)이 맞았다(+11). 9 는 부결했는데 −3 — 다수가 맞음. 8 은 소수가 맞음 (25.1585)
+    assert "성과 찬 결정 4 · 소수의견 있던 것 3 · 그 가운데 다수 쪽이 맞음 2 · 소수 쪽이 5%p 넘게 맞음 1" in 본문
+    # 위험 점검에 막힌 가결(blocked)도 가결 쪽으로 센다
+    막힘 = [{"account_id": "D", "stock_id": 11, "decided_on": "2026-10-01", "kind": "blocked", "reason": "위험 점검: 한 종목 상한",
+             "ret_20d": 4.0, "bench_20d": 0.0, "detail_json": json.dumps({"committee": {"minority": ["risk"]}})}]
+    assert "다수 쪽이 맞음 1 ·" in "\n".join(co.review_lines([], 막힘, {}, {"D": {"name": "장기보유투자사"}}))
