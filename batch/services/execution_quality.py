@@ -20,6 +20,9 @@ PLAN_LOOKBACK_DAYS = 7
 #: 매도 전 이 달력일 안에 처음 선 플래그만 "플래그 뒤 판 것" 으로 본다 — 두 달 전에 섰다 풀린 플래그를
 #: 오늘 매도의 까닭으로 잇지 않게
 FLAG_LOOKBACK_DAYS = 60
+#: 그보다 먼저 섰어도 매도 이만큼(달력일) 앞까지 **계속 서 있던** 플래그(`last_seen`)면 그 매도의 까닭이다 —
+#: 60일 넘게 서 있던 플래그 뒤 판 것을 "플래그 없이 판 것" 으로 셌다(25.1574, 운용 감사 [참고]). 주말·연휴를 덮는 길이
+FLAG_ACTIVE_GAP_DAYS = 7
 
 
 def _날(s: str) -> date:
@@ -65,8 +68,9 @@ def measure(
             else:
                 계획밖 += 1
             continue
-        선 = [f for f in flags if int(f["stock_id"]) == sid
-             and 0 <= (날 - _날(f["first_seen"])).days <= FLAG_LOOKBACK_DAYS]  # fmt: skip
+        선 = [f for f in flags if int(f["stock_id"]) == sid and (날 - _날(f["first_seen"])).days >= 0
+             and ((날 - _날(f["first_seen"])).days <= FLAG_LOOKBACK_DAYS
+                  or (f.get("last_seen") and (날 - _날(f["last_seen"])).days <= FLAG_ACTIVE_GAP_DAYS))]  # fmt: skip
         if 선:
             첫플래그 = min(선, key=lambda f: str(f["first_seen"]))
             지연.append((날 - _날(첫플래그["first_seen"])).days)

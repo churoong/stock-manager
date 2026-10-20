@@ -1028,6 +1028,7 @@ class Test이웃_모듈들:
         검사(PAPER, f"{rg.STALE_PRICE_DAYS}일(달력일)보다 묵었으면", "기준 종가 묵음 (25.1451)")
         검사(PAPER, f"{eqm.PLAN_LOOKBACK_DAYS}일(`PLAN_LOOKBACK_DAYS`)", "주문표 매수 창 (25.1452)")
         검사(PAPER, f"{eqm.FLAG_LOOKBACK_DAYS}일(`FLAG_LOOKBACK_DAYS`)", "플래그 뒤 매도 창 (25.1452)")
+        검사(PAPER, f"{eqm.FLAG_ACTIVE_GAP_DAYS}일(`FLAG_ACTIVE_GAP_DAYS`)", "계속 서 있던 플래그 (25.1574)")
         검사(PAPER, "**" + "·".join(str(n) for n in pp.DECISION_HORIZONS) + " 번째 거래일**", "결정 원장 성과 창")
 
     def test_운용_상황실(self) -> None:

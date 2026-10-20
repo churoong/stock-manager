@@ -432,7 +432,8 @@ EXEC_ITEMS_SQL = (
     " WHERE r.trade_date >= ? AND r.trade_date <= ? AND i.section = ? AND i.stock_id IS NOT NULL"
 )
 EXEC_FLAGS_SQL = (
-    "SELECT stock_id, reason_code, level, MIN(first_seen_date) AS first_seen FROM sell_flags"
+    "SELECT stock_id, reason_code, level, MIN(first_seen_date) AS first_seen, MAX(as_of_date) AS last_seen"
+    " FROM sell_flags"
     " WHERE as_of_date >= ? GROUP BY stock_id, reason_code, level"
 )
 

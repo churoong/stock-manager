@@ -45,6 +45,17 @@ def test_sells_after_flag_and_delay() -> None:
     assert "플래그가 선 뒤 판 것 1(처음 선 날부터 평균 5.0일) · 플래그 없이 판 것 2" in eq.lines(m)[1]
 
 
+def test_60일_넘게_계속_서_있던_플래그_뒤_매도도_플래그_뒤() -> None:
+    """두 달 넘게 선 채 풀리지 않은 손절 플래그 뒤 판 것을 "플래그 없이" 로 세던 것 (25.1574, 운용 감사 [참고]).
+    섰다 풀린 지 오래된 플래그는 그대로 잇지 않는다"""
+    플래그 = [{"stock_id": 3, "reason_code": "손절", "level": "red", "first_seen": "2026-05-01", "last_seen": "2026-09-09"},
+              {"stock_id": 5, "reason_code": "손절", "level": "red", "first_seen": "2026-05-01", "last_seen": "2026-06-01"}]  # fmt: skip
+    매매 = [{"stock_id": 3, "side": "sell", "trade_date": "2026-09-10", "price": 1},
+            {"stock_id": 5, "side": "sell", "trade_date": "2026-09-10", "price": 1}]  # fmt: skip
+    m = eq.measure(매매, [], [], 플래그, "2026-09-01", "2026-09-30")
+    assert (m["sells_after_flag"], m["sells_no_flag"], m["sell_delay_avg"]) == (1, 1, 132.0)
+
+
 def test_no_trades_no_section() -> None:
     assert eq.lines(eq.measure([], 계획, 추천, [], "2026-09-01", "2026-09-30")) == []
     assert eq.lines(None) == []
