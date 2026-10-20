@@ -45,6 +45,7 @@ def plan(
     broker: dict[int, tuple[int, int]], bought_before: set[int], *, already: set[int], cleaned_today: set[int],
     halted: bool, max_orders: int = MAX_ORDERS_PER_DAY, bought_today: dict[int, int] | None = None,
     frozen: set[int] | None = None, currency: str = "KRW", closes: dict[int, float] | None = None,
+    sent_today: int = 0,
 ) -> tuple[list[Intent], list[tuple[int | None, int, str]]]:
     """(낼 것, [(내부 주문 id, 종목, 안 내는 까닭)]).
 
@@ -115,10 +116,13 @@ def plan(
         else:
             매수.append(Intent(oid, sid, code, "buy", int(o["quantity"]), 가격, REASON_MIRROR))
     낼것 = 매도 + 매수
-    if len(낼것) > max_orders:
-        for x in 낼것[max_orders:]:
+    # 상한은 **하루** 단위 — 같은 날 앞 실행이 이미 낸 줄(`sent_today`, 거부 포함)을 뺀 몫만 낸다. 예전엔 실행마다 세어
+    # 같은 날 손 실행이 상한을 넘겨 냈다(25.1567, KIS 경로 감사 [참고] 3)
+    남은 = max(max_orders - int(sent_today), 0)
+    if len(낼것) > 남은:
+        for x in 낼것[남은:]:
             안냄.append((x.paper_order_id, x.stock_id, f"하루 주문 상한 {max_orders}"))
-        낼것 = 낼것[:max_orders]
+        낼것 = 낼것[:남은]
     return 낼것, 안냄
 
 

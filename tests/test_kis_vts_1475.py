@@ -187,6 +187,17 @@ def _o(oid: int, sid: int, side: str, q: int, price: float | None) -> dict[str, 
             "limit_price": price, "quantity": q}  # fmt: skip
 
 
+def test_하루_상한은_같은_날_앞_실행이_낸_줄까지_센다() -> None:
+    """상한 3, 앞 실행이 이미 2줄 — 이번엔 1줄만 (25.1567, KIS 경로 감사 [참고] 3 — 예전엔 실행마다 3)"""
+    주문 = [_o(20 + i, 1, "buy", 1, 9_000.0 + i) for i in range(4)]
+    낼것, 안냄 = bm.plan(주문, {1: "005930"}, internal_qty={}, broker={}, bought_before=set(), already=set(),
+                       cleaned_today=set(), halted=False, max_orders=3, sent_today=2)  # fmt: skip
+    assert len(낼것) == 1 and sum("하루 주문 상한 3" in w for _o2, _s, w in 안냄) == 3
+    낼것, _ = bm.plan(주문, {1: "005930"}, internal_qty={}, broker={}, bought_before=set(), already=set(),
+                     cleaned_today=set(), halted=False, max_orders=3, sent_today=5)  # fmt: skip
+    assert 낼것 == []
+
+
 def test_plan_sells_first_clamps_and_cleans_only_ours() -> None:
     코드 = {1: "005930", 3: "000660", 9: "035720"}
     낼것, 안냄 = bm.plan(

@@ -85,6 +85,8 @@ PENDING_SQL = (
     " WHERE broker = ? AND status IN ('sending', 'accepted') AND trade_date < ?"
 )
 #: 오늘 이미 낸 베낀 매수(거부 아닌 것) — 같은 날 다시 돌 때 정리가 오늘 산 것을 팔지 않게 (검증 [필수] 1)
+#: 오늘 이 증권사 칸에 이미 적은 줄 수(거부 포함) — 하루 주문 상한을 실행이 아니라 하루로 센다(25.1567)
+SENT_TODAY_SQL = "SELECT COUNT(*) FROM paper_broker_orders WHERE broker = ? AND trade_date = ?"
 BOUGHT_TODAY_SQL = (
     "SELECT stock_id, SUM(quantity) FROM paper_broker_orders WHERE broker = ? AND trade_date = ? AND side = 'buy'"
     " AND status <> 'rejected' GROUP BY stock_id"
@@ -467,9 +469,10 @@ def run(
     코드 = {sid: t for sid, (t, _m) in 종목.items() if not 미국 or 거래소.get(sid)}
     종가 = _closes(client, set(코드), 오늘.isoformat()) if 미국 else None
     오늘산 = {int(r[0]): int(r[1] or 0) for r in client.execute(BOUGHT_TODAY_SQL, [증권사, 오늘.isoformat()]).rows}
+    낸수 = client.execute(SENT_TODAY_SQL, [증권사, 오늘.isoformat()]).rows
     낼것, 안냄 = bm.plan(주문들, 코드, 내부, 증권, 산적, already=이미, cleaned_today=정리함, halted=멈춤,
                        bought_today=오늘산, frozen=frozen, currency="USD" if 미국 else "KRW",
-                       closes=종가)  # fmt: skip
+                       closes=종가, sent_today=int(낸수[0][0] or 0) if 낸수 else 0)  # fmt: skip
     # 정리 주문은 그 종목을 **산 계좌**로 적는다 — 베끼는 계좌를 바꾼 뒤 정리 줄이 새 계좌의 주문처럼 보였다
     # (25.1517, 검토 6)
     산계좌 = {int(r[0]): str(r[1]) for r in client.execute(BOUGHT_BY_SQL, [증권사]).rows}
