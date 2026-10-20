@@ -283,7 +283,7 @@ export function gateNowText(i: GateItem): string {
     case "ratio":
       return `${i.now.toFixed(3)} / R 평균 ${i.target == null ? "모름" : i.target.toFixed(3)}`;
     case "incidents":
-      return `${i.now}건(검산 어긋난 날 ${i.detail?.recon_bad_days ?? "-"} · 배치 실패 ${i.detail?.batch_failed ?? "-"}) / 0`;
+      return `${i.now}건(검산 어긋난 날 ${i.detail?.recon_bad_days ?? "-"} · 배치 사고 날 ${i.detail?.batch_failed ?? "-"}) / 0`;
     case "selection":
       // 결정 단위 선정 — 한쪽 95% 하한 분위(무작위면 50), 평균·묶음 수 (25.1518)
       return `하한 ${i.now.toFixed(1)}분위(평균 ${i.mean == null ? "-" : i.mean.toFixed(1)}, 28일 묶음 ${i.n ?? 0}) / ${i.target ?? 50} 초과`;

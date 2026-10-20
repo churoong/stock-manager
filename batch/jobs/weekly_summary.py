@@ -518,8 +518,11 @@ def run(dry_run: bool = False, force: bool = False) -> int:
         try:
             from batch.jobs import paper as paper_job
 
-            월간 = paper_job.review_due(client, now.astimezone(cal.market_tz("KR")).date())
             모의 = paper_job.summary_section(client, now)
+            # 월간 복기를 **실제로 실었을 때만** 표시한다
+            # — 절이 깨져 오류 한 줄만 나간 날에 표시하면 따라잡기가 사라졌다
+            # (25.1572, 25.1571 반박 [권고] 4)
+            월간 = any("월간 복기" in x for x in 모의)
         except Exception as exc:  # noqa: BLE001 — 곁다리 절이다
             모의 = [f"가상모의투자 절을 만들지 못했습니다 ({type(exc).__name__})"]
         # 실제 매매의 실행 품질 (docs/paper.md 13장, 25.1452) — 월 첫 요약에만. 곁다리

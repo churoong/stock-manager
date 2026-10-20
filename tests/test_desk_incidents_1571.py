@@ -7,18 +7,26 @@ from batch.jobs import desk as jd
 from tests.test_portfolio_job import MemClient
 
 
-def test_한도_건너뜀과_끝맺지_못함은_세고_휴장_거래소_아직은_안_센다() -> None:
-    mem = MemClient()
-    db.apply_migrations(mem)  # type: ignore[arg-type]
-    줄 = [("daily_kr", "failed", "x"), ("daily_us", "skipped", "DB 한도로 건너뜀: Turso 월 읽기 한도"),
-          ("daily_kr", "skipped", "끝맺지 못한 기록. 6시간 뒤 정리했다"), ("daily_kr", "skipped", None),
-          ("daily_kr", "skipped", "거래소가 아직 전일 시세를 내지 않았습니다"), ("daily_kr", "success", None),
-          ("weekly", "skipped", "DB 한도로 건너뜀: x")]  # fmt: skip
-    for i, (job, st, err) in enumerate(줄):
-        mem.conn.execute("INSERT INTO batch_runs (job_name, market, started_at, status, error_text)"
-                         " VALUES (?, 'KR', ?, ?, ?)", [job, f"2026-10-2{i % 9}T00:00:00+00:00", st, err])  # fmt: skip
-    n = mem.execute(jd.BATCH_FAILED_SQL, ["daily_kr", "daily_us", "2026-10-01"]).rows[0][0]
-    assert n == 3
+def test_사고_날은_성공_기록이_없거나_실패가_있던_거래일() -> None:
+    """한도로 첫 읽기에서 깨지면 실행 기록 행조차 없다 — 행이 아니라 거래일로 센다 (25.1572, 25.1571 반박 [필수])"""
+    from batch.services import desk
+
+    기대 = {"daily_kr": ["2026-10-14", "2026-10-15", "2026-10-16", "2026-10-19"], "daily_us": ["2026-10-15"]}
+    줄 = [{"job_name": "daily_kr", "trade_date": "2026-10-14", "status": "success"},
+          {"job_name": "daily_kr", "trade_date": "2026-10-15", "status": "failed"},
+          {"job_name": "daily_kr", "trade_date": "2026-10-15", "status": "success"},  # 실패 뒤 성공 — 그래도 사고
+          {"job_name": "daily_kr", "trade_date": "2026-10-16", "status": "skipped"},  # 한도 건너뜀 — 성공 없음
+          # 10-19 는 행이 아예 없다(한도로 첫 읽기에서 깨짐)
+          {"job_name": "daily_us", "trade_date": "2026-10-15", "status": "partial"}]  # fmt: skip
+    assert desk.batch_incident_days(줄, 기대) == 3
+
+
+def test_다뤘어야_할_거래일은_장날마다_직전_거래일_오늘은_뺀다() -> None:
+    from datetime import UTC, datetime
+
+    # 10-20(화) 08:30 KST — 장날 10-13(화)~10-19(월): 다룬 거래일은 그 직전 거래일들, 오늘(10-20) 장날은 뺀다
+    날들 = jd._expected_trade_dates("KR", "2026-10-13", datetime(2026, 10, 19, 23, 30, tzinfo=UTC))
+    assert 날들 == ["2026-10-12", "2026-10-13", "2026-10-14", "2026-10-15", "2026-10-16"]
 
 
 def test_성과_분해_대조_대기_최신_평가_질의는_표를_훑지_않는다() -> None:
@@ -68,5 +76,14 @@ def test_주간_요약이_월간_복기를_보내면_그_달을_적는다(monkey
             return datetime(2026, 11, 8, 0, 0, tzinfo=UTC)
 
     monkeypatch.setattr(ws, "datetime", 고정)
-    assert ws.run() == 0  # 11-08 KST — 따라잡기
+    # 절이 깨져 오류 한 줄만 나가면 표시하지 않는다(25.1572, 25.1571 반박 [권고] 4) — 다음 주가 따라잡는다
+    def 깨짐(*_a, **_k):  # noqa: ANN002, ANN003, ANN202
+        raise RuntimeError("한도")
+
+    monkeypatch.setattr(jp, "summary_section", 깨짐)
+    assert ws.run(force=True) == 0
+    assert db.get_setting(mem, jp.MONTHLY_REVIEW_KEY, None) is None  # type: ignore[arg-type]
+    # 월간 복기를 실어 보내면 그 달을 적는다
+    monkeypatch.setattr(jp, "summary_section", lambda *_a, **_k: ["[가상모의투자 월간 복기] 2026-10-01 부터"])
+    assert ws.run(force=True) == 0  # 11-08 KST — 따라잡기
     assert db.get_setting(mem, jp.MONTHLY_REVIEW_KEY, None) == "2026-11"  # type: ignore[arg-type]

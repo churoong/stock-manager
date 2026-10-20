@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from batch.core import calendar as cal
@@ -74,14 +74,27 @@ BATCH_DELAY_SQL = (
     " MAX(delay_seconds) AS max_delay"
     " FROM batch_runs WHERE job_name IN (?, ?) AND started_at >= ? AND status != 'running'"
 )
-#: 관문 — 최근 창의 일일 배치 실패 수(색인 job_name, started_at). **DB 한도로 건너뜀·끝맺지 못해 정리된 실행도 센다**
-#: — 그날 매매가 없었던 운영 사건이다. 예전엔 `failed` 만 세어 한도로 나흘 멈춘 동안 "무사고 0건 ✓" 였다(25.1571, 운용
-#: 감사 [권고] 4). 휴장·이미 함·거래소 아직(다음 실행이 다시 돈다)의 건너뜀은 세지 않는다
-BATCH_FAILED_SQL = (
-    "SELECT COUNT(*) FROM batch_runs WHERE job_name IN (?, ?) AND started_at >= ? AND (status = 'failed'"
-    " OR (status = 'skipped' AND (error_text LIKE 'DB 한도로 건너뜀%' OR error_text LIKE '끝맺지 못한 기록%')))"
-)
+#: 관문 — 최근 창의 일일 배치 기록(색인 job_name, started_at).
+#: **사고 날 = 그 시장 거래일 가운데 성공 기록이 없거나 실패가
+#: 있던 날**(`desk.batch_incident_days`). 실행 기록이 아니라 거래일로 센다 — Turso 한도로 막히면 첫 읽기에서 깨져
+#: 실행 기록 행이 아예 남지 않는다(25.1572, 25.1571 반박 [필수]: 예전엔 `failed` 행만, 25.1571 은 건너뜀 행까지 셌지만
+#: 행이 없는 날을 못 봤다)
+BATCH_RUNS_SQL = "SELECT job_name, trade_date, status FROM batch_runs WHERE job_name IN (?, ?) AND started_at >= ?"
 NAMES_SQL = "SELECT id, name, rule_version FROM paper_accounts"
+
+
+def _expected_trade_dates(market: str, since: str, now: datetime) -> list[str]:
+    """창(`since` 이후) 안에서 그 시장 일일 배치가 다뤘어야 할 거래일들 — 장날 S 마다 `previous_session(S)`
+    (배치는 장 전에
+    직전 거래일을 다룬다, `cal.decide`). 오늘 장날은 뺀다(오늘 실행은 지금 도는 중이거나 아직이다)"""
+    오늘 = now.astimezone(cal.market_tz(market)).date()
+    out: list[str] = []
+    d = date.fromisoformat(since)
+    while d < 오늘:
+        if cal.is_session(market, d):
+            out.append(cal.previous_session(market, d).isoformat())
+        d += timedelta(days=1)
+    return out
 #: 판 이력 (25.1505) — 계좌마다 판을 처음 본 결정일. 몇십 행
 RULE_VERSIONS_SQL = "SELECT account_id, rule_version, since FROM paper_rule_versions"
 RULE_VERSION_INSERT_SQL = (
@@ -438,7 +451,11 @@ def _관문판(
     try:
         창 = (now - timedelta(days=desk.GATE_INCIDENT_DAYS)).astimezone(cal.market_tz("KR")).date()
         창 = 창.isoformat()
-        실패 = int(client.execute(BATCH_FAILED_SQL, [job_name("KR"), job_name("US"), 창]).rows[0][0] or 0)
+        기대 = {job_name(m): _expected_trade_dates(m, 창, now) for m in ("KR", "US")}
+        # 실행은 거래일 다음 장날 아침이라 started_at 창을 며칠 앞당겨 읽는다(긴 연휴 ≤ 11일)
+        앞당김 = (date.fromisoformat(창) - timedelta(days=12)).isoformat()
+        실행들 = client.execute(BATCH_RUNS_SQL, [job_name("KR"), job_name("US"), 앞당김]).dicts()
+        실패 = desk.batch_incident_days(실행들, 기대)
         마지막 = client.execute(LATEST_SQL).dicts()
         # 결정 단위 선정 증거 — 가상 단계가 성과 분해와 함께 마지막 평가 행에 적은 것(25.1518, 읽기 0)
         증거 = {str(r["account_id"]): ((_json(r.get("attribution_json")) or {}).get("evidence") or {}) for r in 마지막}

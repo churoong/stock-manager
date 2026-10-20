@@ -282,6 +282,22 @@ def risk_ratio(v: list[tuple[str, float]], start: str | None = None) -> float | 
     return m / sd if sd > 0 else None
 
 
+def batch_incident_days(rows: list[dict[str, Any]], expected: dict[str, list[str]]) -> int:
+    """일일 배치 사고 날 수 — 일마다(`expected` = {작업: 다뤘어야 할 거래일들}) 성공(`success`·`partial`) 기록이 없거나
+    실패(`failed`) 기록이 있던 날 (docs/desk.md 5장 관문 "운영 무사고", 25.1572).
+    한도로 건너뜀·끝맺지 못함·실행 기록조차
+    못 남긴 날(한도로 첫 읽기에서 깨짐) 모두 "성공 없음" 으로 잡힌다"""
+    성공: set[tuple[str, str]] = set()
+    실패: set[tuple[str, str]] = set()
+    for r in rows:
+        k = (str(r.get("job_name")), str(r.get("trade_date") or "")[:10])
+        if r.get("status") in ("success", "partial"):
+            성공.add(k)
+        elif r.get("status") == "failed":
+            실패.add(k)
+    return sum(1 for job, 날들 in expected.items() for d in set(날들) if (job, d) not in 성공 or (job, d) in 실패)
+
+
 def gate(
     series: dict[str, list[tuple[str, float]]], mirror: str, *, since: str = "", version: int | None = None,
     recon_bad_days: int, batch_failed: int, kis: dict[str, Any] | None, evidence: dict[str, Any] | None = None,
@@ -331,7 +347,7 @@ def gate(
         {"key": "ratio", "label": "변동성 대비 수익 — 무작위 대조 평균보다", "now": 내비, "target": 대조비,
          "ok": 내비 is not None and 대조비 is not None and 내비 > 대조비},
         {"key": "incidents",
-         "label": f"운영 무사고(최근 {GATE_INCIDENT_DAYS}일 장부 검산 어긋남·일일 배치 실패·한도 건너뜀)",
+         "label": f"운영 무사고(최근 {GATE_INCIDENT_DAYS}일 장부 검산 어긋남·일일 배치 사고 날 — 실패·성공 없음)",
          "now": recon_bad_days + batch_failed, "target": 0, "ok": recon_bad_days + batch_failed == 0,
          "detail": {"recon_bad_days": recon_bad_days, "batch_failed": batch_failed}},
         {"key": "kis", "label": f"KIS 실현율(%, 최근 28일, 표본 {GATE_KEPT_MIN_N} 이상)", "now": kept,

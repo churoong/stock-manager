@@ -146,8 +146,11 @@ def gate_evidence(logs: list[Any], closes: Closes) -> dict[str, Any]:
             f = closes.forward(int(d["stock_id"]), str(d.get("ref_date") or log.cutoff), n)
             if f is None:
                 continue
+            # `detail` 도 넘긴다 — 운영처럼 이미 든 종목의 추가 매수(`detail.held`)를 빼게
+            # (25.1572, 25.1570 반박 [권고] 2:
+            # 다시 만든 줄에 detail 이 없어 "운영과 같은 잣대" 가 아니었다)
             줄.append({"decided_on": log.day, "market": "KR", "kind": d["kind"], "reason": str(d.get("reason") or ""),
-                      f"ret_{n}d": f[0], f"bench_{n}d": None})  # fmt: skip
+                      f"ret_{n}d": f[0], f"bench_{n}d": None, "detail": d.get("detail") or {}})  # fmt: skip
     e = pp.selection_evidence(줄)
     return {k: e.get(k) for k in ("days", "n_blocks", "mean", "se", "lower")}
 

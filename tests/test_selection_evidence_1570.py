@@ -81,3 +81,25 @@ def test_배치가_매수_결정에_보유_여부를_적는다(monkeypatch) -> N
     _하루(cl, monkeypatch, "2026-10-14")
     det = [json.loads(r[0]) for r in cl.q("SELECT detail_json FROM paper_decisions WHERE kind = 'buy'")]
     assert det and all(d.get("held") is False for d in det)
+
+
+def test_핵심_H_관문_잣대도_추가_매수를_뺀다() -> None:
+    """`gate_evidence` 가 다시 만든 줄에 detail 이 없어 운영과 같은 잣대가 아니었다 (25.1572, 25.1570 반박 [권고] 2)"""
+    from types import SimpleNamespace
+
+    from batch.services import core_evidence as ce
+
+    날 = [(date(2026, 1, 5) + timedelta(days=i)).isoformat() for i in range(80)]
+    prices = {sid: {d: 100.0 + (sid % 7) * i for i, d in enumerate(날)} for sid in range(1, 12)}
+
+    def 기록(held: bool) -> list:
+        logs = []
+        for i in range(0, 40):
+            d = 날[i]
+            결정 = [{"kind": "buy", "stock_id": 1, "reason": "지주사 합의", "ref_date": d, "detail": {"held": held}}]
+            결정 += [{"kind": "skip", "stock_id": s, "reason": "점수 부족", "ref_date": d} for s in range(2, 12)]
+            logs.append(SimpleNamespace(day=d, cutoff=d, decisions=결정))
+        return logs
+
+    assert ce.gate_evidence(기록(True), ce.Closes(prices))["days"] == 0
+    assert ce.gate_evidence(기록(False), ce.Closes(prices))["days"] > 0
