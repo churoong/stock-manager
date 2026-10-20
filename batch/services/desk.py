@@ -620,6 +620,7 @@ def risk_board(
 
 def champion(
     series: dict[str, list[tuple[str, float]]], mirror: str, evidence: dict[str, dict[str, Any]] | None = None,
+    since: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     """챔피언 교체 후보 — 지금 챔피언(`mirror`, KIS 가 베끼는 계좌)을 **꾸준히** 앞서는 전략.
 
@@ -634,11 +635,15 @@ def champion(
     나눈다(본페로니). `blocks_ok` = 예전 블록 규칙, `candidate` = 블록 규칙 그리고 결정 단위 하한 > 0
     """
     h = dict(sorted(series.get(mirror) or []))
+    판 = since or {}
     out = []
     for a, v in sorted(series.items()):
         if a == mirror or a in CONTROL_IDS:
             continue
-        날 = [d for d, _t in sorted(v) if d in h]
+        # **두 계좌 모두 지금 판인 구간만**(`since` = 계좌마다 지금 판의 시작 결정일, 판 이력) — 관문은 지금 판만 보는데
+        # 챔피언 블록·같은 기간 수익은 판을 가리지 않아 옛 판 성적으로 후보가 섰다(25.1575, 운용 감사 [참고])
+        시작 = max(판.get(mirror) or "", 판.get(a) or "")
+        날 = [d for d, _t in sorted(v) if d in h and (not 시작 or d > 시작)]
         내 = dict(v)
         if len(날) < 2:
             continue

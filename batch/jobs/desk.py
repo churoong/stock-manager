@@ -284,7 +284,8 @@ def write(
     kis요약 = [x for rows, x in ((kis, 요약), (kis_us, 요약_us)) if rows and str(rows[0]["as_of"]) >= 최근]
     지금판 = (판이력.get(h) or [{}])[-1]
     관문판, 관문오류 = _관문판(client, now, 계열, h, 검산틀린날, kis요약, since=str(지금판.get("from") or ""),
-                         version=지금판.get("version"), index=그림자.get(h), cash=현금.get(h))  # fmt: skip
+                         version=지금판.get("version"), index=그림자.get(h), cash=현금.get(h),
+                         판시작={a: str((줄 or [{}])[-1].get("from") or "") for a, 줄 in 판이력.items()})  # fmt: skip
     if 판오류:
         # 판 이력을 못 읽으면 "지금 판" 의 시작을 모른다 — since='' 로 관문을 내면 모든 판의 평가를 지금 판으로
         # 섞어 셌다(25.1573, 운용 감사 [참고]). 관문만 비우고 까닭을 화면(gate_error)에 올린다.
@@ -441,7 +442,7 @@ def _관문판(
     client: Any, now: datetime, 계열: dict[str, list[tuple[str, float]]], h: str, 검산틀린날: set[str],
     kis요약: list[dict[str, Any]], *, since: str, version: int | None,
     index: list[tuple[str, float | None, float | None, float]] | None = None,
-    cash: list[tuple[str, float, float]] | None = None,
+    cash: list[tuple[str, float, float]] | None = None, 판시작: dict[str, str] | None = None,
 ) -> tuple[dict[str, Any], str | None]:
     """실전 전환 관문·위험판·챔피언 교체 후보 (docs/desk.md 6장, 25.1508) — 실패해도 운용 요약은 적는다.
 
@@ -481,7 +482,8 @@ def _관문판(
             latest[a] = {"equity": r["equity_krw"], "holdings": r["holdings_krw"], "positions": 종목}
         늦음창 = (now - timedelta(days=desk.READY_WINDOW_DAYS)).astimezone(cal.market_tz("KR")).date().isoformat()
         늦음 = client.execute(BATCH_DELAY_SQL, [desk.READY_LATE_SEC, job_name("KR"), job_name("US"), 늦음창]).dicts()
-        판 = {"gate": 관문, "risk": desk.risk_board(latest, 계열, 손절), "champion": desk.champion(계열, h, 증거),
+        판 = {"gate": 관문, "risk": desk.risk_board(latest, 계열, 손절),
+             "champion": desk.champion(계열, h, 증거, 판시작),
              "readiness": desk.readiness(runs=늦음[0] if 늦음 else None, kis=kis요약), "gate_error": None}  # fmt: skip
         return 판, None
     except Exception as exc:  # noqa: BLE001 — 곁다리 안의 곁다리

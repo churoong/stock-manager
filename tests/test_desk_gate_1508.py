@@ -185,3 +185,15 @@ def test_판_이력을_못_읽으면_관문을_비우고_까닭을_남긴다(mon
     assert s["gate"] is None and s["gate_error"].startswith("판 이력을 읽지 못해 관문을 내지 않음")
     assert 기록["rule_history_error"].startswith("OperationalError")
 
+
+def test_챔피언_비교는_두_계좌_모두_지금_판인_구간만() -> None:
+    """C 가 판 1 에서 크게 이기고 판 2 에선 H 만큼만 오른다 — 예전엔 판 1 성적으로 블록 규칙을 통과했다
+    (25.1575, 운용 감사 [참고])"""
+    날 = _날(120)
+    h = [(d, 1 + 0.001 * i) for i, d in enumerate(날)]
+    c = [(d, (1 + 0.004 * i) if i < 100 else (1.4 + 0.001 * (i - 100))) for i, d in enumerate(날)]
+    전부 = {r["id"]: r for r in desk.champion({"H": h, "C": c}, "H")}["C"]
+    assert 전부["blocks_ok"]
+    판2 = {r["id"]: r for r in desk.champion({"H": h, "C": c}, "H", since={"C": 날[99]})}["C"]
+    assert 판2["from"] == 날[100] and not 판2["blocks_ok"]
+
