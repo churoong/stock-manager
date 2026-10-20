@@ -569,7 +569,8 @@ def review_lines(
 
     `meetings` = 이번 주 `paper_meetings` 행(minutes_json), `decisions` = 20 거래일 성과가 찬 결정 원장 행
     (detail_json 에 committee). 소수의견이 옳았다 = 부결(위원회)했는데 지수보다 `REVIEW_MISS_PCT` 넘게 올랐다
-    (찬성한 소수가 옳음), 또는 사서 그만큼 넘게 밑돌았다(반대한 소수가 옳음). 수치는 결정 원장 그대로
+    (찬성한 소수가 옳음), 또는 가결했는데(산 것·상위 밖·막힘 — 25.1586) 그만큼 넘게 밑돌았다(반대한 소수가 옳음).
+    수치는 결정 원장 그대로
     """
     if not meetings and not decisions:
         return []
