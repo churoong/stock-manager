@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { beforeEach, describe, expect, it } from "vitest";
 import { PAPER_DOSSIERS_LATEST, PAPER_LATEST_DAILY, PAPER_MEETINGS_LATEST } from "@/lib/paper";
-import { DECISIONS_DONE_SQL, DECISIONS_SQL, groupDecisions, mergeDecisions, reasonKey, type DecisionRow } from "@/lib/paperDecisions";
+import { DECISIONS_DONE_SQL, DECISIONS_SQL, doneWindow, groupDecisions, mergeDecisions, reasonKey, type DecisionRow } from "@/lib/paperDecisions";
 
 const MIGRATIONS = join(process.cwd(), "..", "migrations");
 let db: DatabaseSync;
@@ -73,12 +73,22 @@ describe("왜 안 샀나 — 위원회 계좌", () => {
     const 날 = (i: number) => new Date(Date.UTC(2026, 9, 2) + i * 86_400_000).toISOString().slice(0, 10);
     for (let i = 0; i < 70; i++) ins.run(날(i), 1, `위원회: 표 0.${i} < 문턱 1`, null);
     const 최근 = db.prepare(DECISIONS_SQL).all("A", "KR") as unknown as DecisionRow[];
-    const 찬것 = db.prepare(DECISIONS_DONE_SQL).all("A", "KR") as unknown as DecisionRow[];
+    const 찬것 = db.prepare(DECISIONS_DONE_SQL).all("A", "KR", ...doneWindow("2026-12-10")) as unknown as DecisionRow[];
     expect(최근.some((r) => r.ret_5d != null)).toBe(false);
     expect(찬것.map((r) => r.ret_5d)).toEqual([2.5]);
     const 합 = mergeDecisions(최근, 찬것, 찬것);
     expect(합).toHaveLength(61);
     expect(합[합.length - 1].decided_on).toBe("2026-10-01");
-    expect(계획(DECISIONS_DONE_SQL, "A", "KR")).toMatch(/USING INDEX sqlite_autoindex_paper_decisions/);
+    // 결정일 범위를 색인으로 건너뛴다 — 7일 안(못 찬 줄)과 120일 밖은 읽지 않는다 (25.1580)
+    expect(계획(DECISIONS_DONE_SQL, "A", "KR", "x", "y")).toMatch(/USING INDEX sqlite_autoindex_paper_decisions_1 \(account_id=\? AND market=\? AND decided_on>\? AND decided_on<\?\)/);
+    expect(doneWindow("2026-10-20")).toEqual(["2026-10-13", "2026-06-22"]);
+    expect(db.prepare(DECISIONS_DONE_SQL).all("A", "KR", ...doneWindow("2026-10-07")).length).toBe(0); // 결정 뒤 7일 전
+    expect(db.prepare(DECISIONS_DONE_SQL).all("A", "KR", ...doneWindow("2027-02-01")).length).toBe(0); // 120일 밖
+  });
+
+  it("경로가 두 질의를 다 읽는다", () => {
+    const src = readFileSync(join(process.cwd(), "app", "api", "paper", "decisions", "route.ts"), "utf8");
+    expect(src).toMatch(/execute\(DECISIONS_SQL, \[account, market\]\)/);
+    expect(src).toMatch(/execute\(DECISIONS_DONE_SQL, \[account, market, \.\.\.doneWindow\(kstToday\(\)\)\]\)/);
   });
 });

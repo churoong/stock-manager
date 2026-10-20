@@ -986,6 +986,7 @@ class Test이웃_모듈들:
         검사(PAPER, f"기준가 × {1 + pp.KR_PRICE_LIMIT:g}(±{pp.KR_PRICE_LIMIT:.0%}, `KR_PRICE_LIMIT`)", "국내 가격제한폭 (25.1553)")
         검사(PAPER, f"{pp.DEPOSIT_MIN_KRW // 10_000}만~{pp.DEPOSIT_MAX_KRW // 100_000_000}억", "입금 범위")
         검사(PAPER, f"{pp.OUTCOME_GIVE_UP_DAYS}일이 지나도 못 채우면", "결정 원장 성과 포기 기한 (25.1449)")
+        검사(PAPER, f"달력 {pp.BENCH_WAIT_DAYS}일(`BENCH_WAIT_DAYS`)", "창 끝날 지수 기다림 (25.1579)")
         검사(PAPER, f"**{pp.ATTRIBUTION_HORIZON} 거래일 뒤 지수 대비 초과(%p)**", "성과 분해 창 (25.1450)")
         검사(PAPER, f"표본이 {pp.ATTRIBUTION_MIN_SAMPLE}(`ATTRIBUTION_MIN_SAMPLE`) 미만", "성과 분해 참고 문턱 (25.1450)")
         검사(PAPER, f"어제보다 **{-rg.DAILY_LOSS_HALT_PCT:g}% 넘게** 빠졌으면", "하루 손실 한도 (25.1451)")

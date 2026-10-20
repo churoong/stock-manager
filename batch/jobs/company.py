@@ -61,7 +61,10 @@ GOV_RECENT_SQL = (
     " WHERE s.id IN (SELECT value FROM json_each(?)) AND d.disclosed_at >= ? AND d.disclosed_at <= ?"
 )
 #: 보충 구간의 전환사채 발행결정 공시가 상세(`cb_issuances`)를 받았나 — 상세는 주 1회(금요일)만 받는다
-CB_RECEIVED_SQL = "SELECT receipt_no FROM cb_issuances WHERE receipt_no IN (SELECT value FROM json_each(?))"
+#: `no_row`(그날 DART 상세에 행이 없었음)는 받은 것으로 치지 않는다 — 수집이 2주 안에 다시 부른다(25.1580)
+CB_RECEIVED_SQL = (
+    "SELECT receipt_no FROM cb_issuances WHERE receipt_no IN (SELECT value FROM json_each(?)) AND status = 'ok'"
+)
 CB_SQL = (
     "SELECT stock_id, SUM(shares_pct) FROM cb_issuances WHERE stock_id IN (SELECT value FROM json_each(?))"
     " AND status = 'ok' AND decided_at > ? AND decided_at <= ? GROUP BY stock_id"
@@ -165,6 +168,9 @@ def load_dossiers(client: Any, rows: list[report_picks.SignalRow], country: str,
             끝 = str(덮개[0][1])[:10]
             if 시작덮음 and 끝 >= as_of[:10]:
                 덮음 = True
+                # 덮개 끝이 기준일 그날(월요일 배치 — 주간 표가 금요일 18:17 에 지어졌다)이면 그날 뒤 공시도 보충한다
+                # (25.1580, 25.1577 반박 [권고] 1 — 금요일 저녁 횡령 공시가 월요일 배치에서 빠졌다)
+                보충끝 = 끝 if 끝 == as_of[:10] else None
             elif 시작덮음:
                 받은날 = {str(r[0])[:10] for r in client.execute(GOV_DAILY_COVER_SQL, [끝, as_of[:10]]).rows}
                 d, 빈날 = date.fromisoformat(끝) + timedelta(days=1), False

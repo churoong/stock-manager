@@ -16,12 +16,22 @@ WHERE d.account_id = ? AND d.market = ? AND d.kind IN ('skip', 'blocked', 'misse
 ORDER BY d.decided_on DESC, d.id DESC LIMIT ${DECISION_LIMIT}`;
 /**
  * 그 뒤 성과(5일)가 찬 최근 줄 — 위원회 계좌는 하루 수십 줄을 적어 최근 60줄이 이삼일치라 성과 찬 줄이 하나도 안 보였다
- * (25.1578, 위원회 감사 [권고] 4). 같은 색인을 거꾸로 읽다 60줄 차면 멈춘다
+ * (25.1578, 위원회 감사 [권고] 4). 인자: 계좌·시장·위 끝·아래 끝(`doneWindow`) — `ret_5d` 는 색인 밖이라 아직 못 찬 줄을
+ * 하나하나 읽으며 60줄을 모았다. 결정 뒤 달력 7일 전에는 찰 수 없으니 그 앞은 색인 범위에서 건너뛰고, 아래 끝으로 성과 채우기가
+ * 밀린 날에도 읽기를 묶는다(25.1580, 25.1578 반박 [권고] 2)
  */
 export const DECISIONS_DONE_SQL = DECISIONS_SQL.replace(
   "AND d.kind IN ('skip', 'blocked', 'missed', 'hold_flag')",
-  "AND d.kind IN ('skip', 'blocked', 'missed', 'hold_flag') AND d.ret_5d IS NOT NULL",
+  "AND d.decided_on <= ? AND d.decided_on >= ? AND d.kind IN ('skip', 'blocked', 'missed', 'hold_flag') AND d.ret_5d IS NOT NULL",
 );
+/** 5일 성과가 찰 수 있는 가장 늦은 결정일 — 배치 `HORIZON_CALENDAR_DAYS[5]` 와 같은 7 달력일 */
+export const DONE_MIN_AGE_DAYS = 7;
+/** 성과 찬 줄을 찾는 가장 이른 결정일 — 이보다 오래 밀린 성과는 이 창에 싣지 않는다(읽기 상한) */
+export const DONE_MAX_AGE_DAYS = 120;
+export function doneWindow(today: string): [string, string] {
+  const 날 = (n: number) => new Date(Date.parse(`${today}T00:00:00Z`) - n * 86_400_000).toISOString().slice(0, 10);
+  return [날(DONE_MIN_AGE_DAYS), 날(DONE_MAX_AGE_DAYS)];
+}
 
 export interface DecisionRow {
   id: number; decided_on: string; kind: string; reason: string; ticker: string; name: string;

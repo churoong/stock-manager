@@ -136,7 +136,8 @@ CB_PENDING_SQL = (
     " ORDER BY (s2.status = 'active') DESC, s2.ticker LIMIT 1)) AS stock_id,"
     " d.corp_code, d.disclosed_at, d.title FROM disclosures d"
     " LEFT JOIN cb_issuances c ON c.receipt_no = d.receipt_no"
-    " WHERE d.disclosed_at >= ? AND d.title LIKE '%전환사채권발행결정%' AND c.receipt_no IS NULL)"
+    " WHERE d.disclosed_at >= ? AND d.title LIKE '%전환사채권발행결정%'"
+    " AND (c.receipt_no IS NULL OR (c.status = 'no_row' AND d.disclosed_at >= ?)))"
     " WHERE stock_id IS NOT NULL ORDER BY disclosed_at DESC"
 )
 #: 공시 반응 통계·공시 위험 이력이 읽는 국내 공시 — `stock_id` 가 없으면 고유번호로 다시 잇는다 (25.1395)
@@ -152,17 +153,25 @@ CB_INSERT = (
     "INSERT INTO cb_issuances (receipt_no, stock_id, decided_at, status, face_amount, conv_price, conv_shares,"
     " shares_pct, claim_start, claim_end, refix_floor, source, fetched_at)"
     " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-    " ON CONFLICT (receipt_no) DO NOTHING"
+    # 최근 `no_row` 는 다시 불러 행이 생겼으면 덮는다(25.1580). 받은(`ok`) 행은 그대로
+    " ON CONFLICT (receipt_no) DO UPDATE SET status = excluded.status, face_amount = excluded.face_amount,"
+    " conv_price = excluded.conv_price, conv_shares = excluded.conv_shares, shares_pct = excluded.shares_pct,"
+    " claim_start = excluded.claim_start, claim_end = excluded.claim_end, refix_floor = excluded.refix_floor,"
+    " fetched_at = excluded.fetched_at WHERE cb_issuances.status = 'no_row'"
 )
+#: 상세에 행이 없던(`no_row`) 결정을 다시 부르는 기한 — 금요일 당일 공시는 그날 상세가 아직 없을 수 있다
+#: `[확인필요]`(DART 상세 API 의 당일 반영). 다음 주 금요일 한 번 더(달력 14일)
+CB_NO_ROW_RETRY_DAYS = 14
 
 
 def collect_cb(client: TursoClient, today: date, max_calls: int = CB_MAX_CALLS) -> dict:
     """B 목록의 전환사채 발행결정 가운데 아직 안 받은 것을 DART 상세로 받는다 (docs/analysis.md 55장, 25.1192).
 
-    접수번호마다 한 번. 응답에 그 접수번호 행이 없으면 `no_row` 로 적어 다시 부르지 않는다.
+    접수번호마다 한 번. 응답에 그 접수번호 행이 없으면 `no_row` 로 적고 `CB_NO_ROW_RETRY_DAYS` 안에서만 다시 부른다.
     오류면 적지 않고 멈춘다(다음 실행)."""
     since = (today - timedelta(days=cb.WINDOW_DAYS)).isoformat()
-    대기 = [r for r in client.execute(CB_PENDING_SQL, [since]).dicts() if cb.is_cb_title(str(r["title"]))]
+    다시 = (today - timedelta(days=CB_NO_ROW_RETRY_DAYS)).isoformat()
+    대기 = [r for r in client.execute(CB_PENDING_SQL, [since, 다시]).dicts() if cb.is_cb_title(str(r["title"]))]
     stamp, calls, ok, 없음, err = db.now_iso(), 0, 0, 0, None
     stmts: list[tuple[str, list]] = []
     for r in 대기[:max_calls]:

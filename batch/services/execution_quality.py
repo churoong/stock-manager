@@ -72,9 +72,13 @@ def measure(
              and ((날 - _날(f["first_seen"])).days <= FLAG_LOOKBACK_DAYS
                   or (f.get("last_seen") and (날 - _날(f["last_seen"])).days <= FLAG_ACTIVE_GAP_DAYS))]  # fmt: skip
         if 선:
-            첫플래그 = min(선, key=lambda f: str(f["first_seen"]))
-            지연.append((날 - _날(첫플래그["first_seen"])).days)
-            by_level[str(첫플래그["level"])] = by_level.get(str(첫플래그["level"]), 0) + 1
+            # 매도 때 아직 서 있던 발생(마지막 본 날이 `FLAG_ACTIVE_GAP_DAYS` 안) 가운데 가장 먼저 선 것 — 발생마다
+            # 따로 읽으니(25.1577) 60일 안에 끝난 옛 발생까지 견주면 지연이 옛 발생부터로 셌다(25.1580, 25.1577 반박
+            # [권고] 4). 마지막 본 날을 모르면 예전처럼 전부
+            활성 = [f for f in 선 if f.get("last_seen") and (날 - _날(f["last_seen"])).days <= FLAG_ACTIVE_GAP_DAYS]
+            덮은 = min(활성 or 선, key=lambda f: str(f["first_seen"]))
+            지연.append((날 - _날(덮은["first_seen"])).days)
+            by_level[str(덮은["level"])] = by_level.get(str(덮은["level"]), 0) + 1
         else:
             플래그없음 += 1
     return {
