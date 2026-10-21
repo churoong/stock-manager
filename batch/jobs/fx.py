@@ -28,6 +28,10 @@ LOOKBACK_DAYS = 10
 #: 안쪽,
 #: 큰 날도 3~5% — 10% 는 깨진 값만 거르는 문턱이다 `[확인필요: 실측 아님]`
 FX_STEP_RATIO = 0.10
+#: 원·달러로 있을 수 있는 범위(원) — 밖이면 기준점과 상관없이 늘 뺀다. ÷100·×100 같은 단위 오류는 이것만으로 막힌다
+#: (기준점이 없을 때 첫 창 과반이 깨지거나 저장된 기준점부터 깨진 경우도, 25.1598 — 25.1597 반박 [권고] 1·2).
+#: 1997 외환위기 꼭대기도 2,000 안쪽, 2000 년대 바닥도 900 위 — 넉넉히 500~3,000
+FX_PLAUSIBLE_KRW = (500.0, 3000.0)
 #: 튄 날이 이만큼 이어지고 서로 맞으면(그 안에서 하루 `FX_STEP_RATIO` 안) 진짜 국면 변화로 받아들인다 — 아니면 한 번
 #: 크게
 #: 움직인 뒤 저장이 영구히 멈췄다(25.1596 반박 [필수] 1). 단 직전 값의 `FX_REGIME_MAX` 배 넘게 다르면(÷100 같은 단위
@@ -61,17 +65,23 @@ def drop_outliers(rows: list[tuple], anchor: float | None = None) -> tuple[list[
     판단을 보류하고 다 남기며 경고한다. 튄 날이 `FX_REGIME_RUN` 일 이어지고 서로 맞으며 직전 값의 50% 안이면 진짜
     국면 변화로 받아들인다(경고) — 기준점 하나와 견주면 진짜 큰 움직임 뒤 저장이 영구히 멈췄다(25.1596 반박 [필수])
     """
-    차례 = sorted(rows, key=lambda r: str(r[1]))
-    if not 차례:
-        return rows, []
+    낮, 높 = FX_PLAUSIBLE_KRW
+    범위밖 = [r for r in rows if not 낮 <= float(r[2]) <= 높]
+    차례 = sorted((r for r in rows if 낮 <= float(r[2]) <= 높), key=lambda r: str(r[1]))
     경고: list[str] = []
+    if 범위밖:
+        글 = ", ".join(f"{r[1]} {float(r[2]):,.2f}" for r in 범위밖[:10])
+        경고.append(f"환율 {len(범위밖)}일이 있을 수 있는 범위({낮:,.0f}~{높:,.0f}원) 밖이라 저장하지 않음: {글}")
+    if not 차례:
+        return [], 경고
     직전 = anchor
     if 직전 is None:
         if len(차례) < 3:
-            return 차례, []
+            return 차례, 경고
         아래, 위 = _중앙([float(r[2]) for r in 차례[:11]])
         if abs(위 / 아래 - 1) > FX_STEP_RATIO:
-            return 차례, [f"환율 이상값 판단 보류: 받은 첫 날들이 둘로 갈림({아래:,.2f} · {위:,.2f}) — 모두 저장함"]
+            보류 = f"환율 이상값 판단 보류: 받은 첫 날들이 둘로 갈림({아래:,.2f} · {위:,.2f}) — 모두 저장함"
+            return 차례, [*경고, 보류]
         직전 = 아래
     남김: list[tuple] = []
     뺌: list[tuple] = []
@@ -131,7 +141,8 @@ def _anchor(client: TursoClient, first_day: str | None) -> float | None:
     from datetime import date, timedelta
 
     부터 = (date.fromisoformat(first_day[:10]) - timedelta(days=FX_ANCHOR_MAX_AGE_DAYS)).isoformat()
-    값 = [float(r[0]) for r in client.execute(ANCHOR_SQL, [fx.PAIR, first_day, 부터]).rows]
+    값 = [float(r[0]) for r in client.execute(ANCHOR_SQL, [fx.PAIR, first_day, 부터]).rows
+         if FX_PLAUSIBLE_KRW[0] <= float(r[0]) <= FX_PLAUSIBLE_KRW[1]]
     if len(값) < 3:
         return None
     아래, 위 = _중앙(값)

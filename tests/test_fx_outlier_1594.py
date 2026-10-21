@@ -29,20 +29,29 @@ def test_큰_추세와_큰_하루는_그대로() -> None:
     assert len(남김) == 7 and not 경고
 
 
-def test_셋_미만은_그대로() -> None:
-    assert job.drop_outliers(_줄([1380.0, 13.8])) == (_줄([1380.0, 13.8]), [])
+def test_셋_미만은_범위만_본다() -> None:
+    assert job.drop_outliers(_줄([1380.0, 1700.0])) == (_줄([1380.0, 1700.0]), [])
+    남김, 경고 = job.drop_outliers(_줄([1380.0, 13.8]))
+    assert [r[2] for r in 남김] == [1380.0] and "범위" in 경고[0]  # ÷100 은 기준점 없이도 (25.1598)
+
+
+def test_단위_오류는_기준점이_없어도_과반이어도_뺀다() -> None:
+    """첫 창 과반이 ÷100 이면 예전엔 깨진 쪽을 저장하고 정상을 뺐다(25.1598, 25.1597 반박 [권고] 1)."""
+    남김, _ = job.drop_outliers(_줄([14.0, 14.1, 14.2, 14.3, 1400.0, 1401.0, 1402.0]))
+    assert [r[2] for r in 남김] == [1400.0, 1401.0, 1402.0]
 
 
 def test_짝수_창_절반이_깨져도_뒤집히지_않는다() -> None:
     """×100 둘 + 정상 둘 — 위 중앙값 하나면 깨진 값을 저장하고 정상을 뺐다(25.1596, 25.1594 반박 [필수]).
     기준점이 없으면 판단할 수 없어 둘 다 남기고(뒤집지 않음), 기준점이 있으면 깨진 쪽만 뺀다"""
-    줄 = _줄([1400.0, 1401.0, 140000.0, 140100.0])
+    줄 = _줄([1400.0, 1401.0, 1820.0, 1821.0])  # 범위 안의 깨짐(×1.3) — 단위 오류는 범위가 먼저 거른다(25.1598)
     남김, _ = job.drop_outliers(줄)
     assert {r[2] for r in 남김} >= {1400.0, 1401.0}  # 정상값을 빼지 않는다
     _남김, 경고 = job.drop_outliers(줄)
     assert 경고 and "판단 보류" in 경고[0]  # 깨진 값을 조용히 저장하지 않고 알린다(25.1597)
     남김, 경고 = job.drop_outliers(줄, anchor=1398.0)
     assert [r[2] for r in 남김] == [1400.0, 1401.0] and "저장하지 않음" in 경고[0]
+    # 저장된 기준점부터 깨졌으면(÷100 사흘) 범위 밖이라 기준점으로 쓰지 않는다 — _anchor 시험 참고
 
 
 def test_기준점이_있으면_깨진_값이_절반을_넘어도_거른다() -> None:
@@ -95,3 +104,6 @@ def test_옛_저장값은_기준점으로_쓰지_않는다(monkeypatch) -> None:
                          [f"2021-01-0{i + 1}"])  # fmt: skip
     assert job._anchor(mem, "2021-01-08") == 1150.0  # type: ignore[arg-type]
     assert job._anchor(mem, "2021-03-01") is None  # type: ignore[arg-type]
+    for i in range(3):  # 깨진 채 저장된 다섯 날 가운데 셋(÷100) — 범위로 걸러 기준점이 깨진 값이 되지 않는다(25.1598)
+        mem.conn.execute("UPDATE fx_rates SET rate = 11.5 WHERE date = ?", [f"2021-01-0{i + 1}"])
+    assert job._anchor(mem, "2021-01-08") is None  # type: ignore[arg-type]  # 남은 둘 — 셋 미만이라 기준점 없음
