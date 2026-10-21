@@ -87,6 +87,9 @@ INSERT_FILL_SQL = (
 FILLED_SQL = (
     "UPDATE paper_orders SET status = 'filled', closed_on = ?, close_note = ? WHERE id = ? AND status = 'open'"
 )
+#: 전량 매도 때 거둔 매수 회차의 만료 까닭(25.1591) — KIS 비교에서 판정 밖 만료로 뺀다
+#: (`broker_mirror.NON_JUDGMENT_EXPIRY`)
+WITHDRAWN_NOTE = "같은 종목 전량 매도 — 남은 매수 회차 거둠 (docs/paper.md 2.2)"
 EXPIRE_SQL = (
     "UPDATE paper_orders SET status = 'expired', closed_on = ?, close_note = ? WHERE id = ? AND status = 'open'"
 )
@@ -1566,11 +1569,16 @@ def run_step(
             # 전량 매도를 내는 종목의 남은 매수 회차는 거둔다 — 매도는 그때 보유 수량만 팔아, 같은 장에 남은 회차가
             # 함께 차면 판 종목을 새로 들고 남았다(장 끝난 뒤 손 실행이 낸 회차 → 다음 아침 손절, 25.1591 감사 [권고] 1)
             파는 = {sid for sid in 매도 if sid not in 이미팖 and sid in 보유 and sid not in 막힌매도id}
-            거둠 = [o for o in 열린 if o.account_id == aid and o.side == "buy" and o.stock_id in 파는]
-            문장 += [(EXPIRE_SQL, [trade_date, "같은 종목 전량 매도 — 남은 매수 회차 거둠 (docs/paper.md 2.2)", o.id])
-                    for o in 거둠]  # fmt: skip
+            # **아직 오지 않은 장**의 회차만 — 시세가 아직 없어 열어 둔 지나간 장의 회차는 그 장에서 찼을 수 있고
+            # KIS 에도 이미 나갔다(소급 취소가 된다, 25.1592 — 25.1591 반박 [필수])
+            거둠 = [o for o in 열린 if o.account_id == aid and o.side == "buy" and o.stock_id in 파는
+                  and str(o.fill_session) > trade_date]  # fmt: skip
+            문장 += [(EXPIRE_SQL, [trade_date, WITHDRAWN_NOTE, o.id]) for o in 거둠]
             if 거둠:
                 a기록["buys_withdrawn"] = len(거둠)
+                # 같은 실행의 매수 배분이 거둔 회차를 열린 것으로 보지 않게(현금 예약·같은 종목 두 벌 막이 까닭)
+                거둔id = {o.id for o in 거둠}
+                열린 = [o for o in 열린 if o.id not in 거둔id]
             # 결정 원장 (25.1449) — 판 것과, 플래그가 섰는데 계좌 규칙이 따르지 않아 들고 간 것(B 의 황색)
             for sid, 메모 in sorted(판정메모.items()):
                 종가, 날 = 메모["ref"]

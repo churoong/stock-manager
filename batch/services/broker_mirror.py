@@ -224,6 +224,7 @@ _끝난 = ("filled", "partial", "unfilled", "rejected", "unknown")
 #: "가상 판정이 비관" 이라고 엉뚱한 방향을 말했다(25.1561 — KIS 경로 감사 [권고] 1)
 NON_JUDGMENT_EXPIRY = (
     "현금 부족", "기업행위 경계", "쓸 수 있는 환율 없음", "그날 시세를 받지 못해", "팔 보유가 모자람",
+    "같은 종목 전량 매도",  # 25.1592 — 거둔 매수 회차(`jobs/paper.WITHDRAWN_NOTE`)
 )  # fmt: skip
 
 

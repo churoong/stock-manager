@@ -89,3 +89,27 @@ def test_길B_미뤄진_매도가_있는_종목은_다시_사지_않는다(monke
     assert c.q("SELECT COUNT(*) FROM paper_orders WHERE side = 'sell' AND status = 'open'") == [(1,)]
     assert not c.q("SELECT id FROM paper_orders WHERE side = 'buy' AND status = 'open'")
     assert c.q("SELECT kind FROM paper_decisions WHERE decided_on = '2026-10-12' AND reason LIKE '판 뒤%'") == [("skip",)]
+
+
+def test_지나간_장의_회차와_다른_계좌는_거두지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """시세가 아직 없어 열어 둔 지나간 장(fill_session == trade_date)의 회차는 그 장에서 찼을 수 있다 — 거두면 소급 취소
+    (25.1592, 25.1591 반박 [필수]). 다른 계좌의 같은 종목 회차도 그대로. 거둔 까닭은 KIS 비교에서 판정 밖"""
+    from batch.services import broker_mirror as bm
+
+    c = Client(accounts=("A", "B"))
+    c.conn.execute("INSERT INTO paper_cash_flows (flow_date, amount_krw, kind, created_at, request_key)"
+                   " VALUES ('2026-10-01', 1000000, 'deposit', '2026-10-01T00:00:00+00:00', 'k1')")  # fmt: skip
+    신호 = lambda d: dataclasses.replace(_신호(), as_of_date=d, close_date=d)  # noqa: E731
+    _시세(c, "2026-10-13", 10_000, 10_000)
+    _돌림(c, monkeypatch, "2026-10-13", "2026-10-14", "2026-10-13T23:30:00+00:00", 신호("2026-10-13"))
+    _시세(c, "2026-10-14", 10_000, 9_900)
+    _돌림(c, monkeypatch, "2026-10-14", "2026-10-15", "2026-10-14T23:30:00+00:00", 신호("2026-10-14"))
+    열림 = {r[0] for r in c.q("SELECT id FROM paper_orders WHERE side = 'buy' AND status = 'open'")}
+    assert 열림  # 10-15 장 회차가 열려 있다
+    # 10-16 아침 — 10-15 시세가 아직 없어(아침 일찍) 10-15 장 회차는 판정 못 하고 열어 둔다. 그날 손절 매도가 서도
+    # 지나간 장(10-15)의 회차는 거두지 않는다
+    monkeypatch.setattr(job, "sell_decisions", lambda *a, **k: {1: (["손절"], [])})
+    _돌림(c, monkeypatch, "2026-10-15", "2026-10-16", "2026-10-15T23:30:00+00:00", None)
+    남음 = {r[0] for r in c.q("SELECT id FROM paper_orders WHERE side = 'buy' AND status = 'open'")}
+    assert 남음 == 열림
+    assert bm._판정밖({"i_status": "expired", "i_note": job.WITHDRAWN_NOTE})
