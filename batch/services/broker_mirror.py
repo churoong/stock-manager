@@ -489,15 +489,19 @@ def diverge_active(s: dict[str, Any] | None, prev: set[str]) -> set[str]:
 
 
 def _문턱값(값: float, 문턱: float, 아래: bool, 부호: bool = False) -> str:
-    """문턱 쪽으로 반올림돼 "85% — 문턱 85%" 처럼 같아 보이지 않게 자릿수를 늘린다.
+    """"값% — 문턱 n% 아래/위" — 문턱 쪽으로 반올림돼 "85% — 문턱 85%" 처럼 같아 보이지 않게 자릿수를 늘린다.
 
-    25.1631 — 25.653 `_넘은_비율` 과 같은 뜻
+    25.1631 — 25.653 `_넘은_비율` 과 같은 뜻. 값이 문턱을 넘지 않았으면(켜진 칸을 꺼짐 문턱까지 켜 두는 `diverge_active`
+    — 전날 알림이 실패해 오늘 다시 글로 오는 칸) 방향을 말하지 않고 예전 자릿수로(25.1631 교차검증 [필수] — "82.000% —
+    문턱 80% 아래" 같은 거짓 방향이 났다)
     """
-    for 자리 in range(2 if 부호 else 0, 4):  # 가격 차이는 예전처럼 소수 둘째 자리부터
+    꼴 = "+" if 부호 else ""
+    첫 = 2 if 부호 else 0  # 가격 차이는 예전처럼 소수 둘째 자리부터
+    for 자리 in range(첫, 7):
         r = round(값, 자리)
         if (r < 문턱) if 아래 else (r > 문턱):
-            return f"{값:{'+' if 부호 else ''}.{자리}f}"
-    return f"{값:{'+' if 부호 else ''}.3f}"
+            return f"{값:{꼴}.{자리}f}% — 문턱 {'+' if 부호 else ''}{문턱:g}% {'아래' if 아래 else '위'}"
+    return f"{값:{꼴}.{첫}f}% — 문턱 {'+' if 부호 else ''}{문턱:g}%"  # 넘지 않음 — 방향을 말하지 않는다
 
 
 def diverge(now: dict[str, Any] | None, keys: list[str], market: str) -> str | None:
@@ -515,16 +519,16 @@ def diverge(now: dict[str, Any] | None, keys: list[str], market: str) -> str | N
               else "KIS만 참이 더 많음 — 가상 체결 판정이 비관, 가상 성적이 실제보다 낮게 나옵니다" if kis만 > 내만
               else "가상만 참과 KIS만 참이 같음")  # fmt: skip
         일치 = _문턱값(float(now["match_pct"]), DIVERGE_MATCH_PCT, True)
-        글.append(f"체결 일치 {일치}% — 문턱 {DIVERGE_MATCH_PCT:g}% 아래."
+        글.append(f"체결 일치 {일치}."
                  f" 가상만 참 {내만} · KIS만 참 {kis만}: {방향}")  # fmt: skip
     if "kept" in keys:
         실현 = _문턱값(float(now["kept_pct"]), DIVERGE_KEPT_PCT, True)
-        글.append(f"실현율 {실현}%(가상이 찼다고 한 주문 가운데 KIS 에서도 찬 비율) — 문턱"
-                 f" {DIVERGE_KEPT_PCT:g}% 아래: 가상 성적을 그만큼 덜 믿어야 합니다")  # fmt: skip
+        글.append(f"실현율(가상이 찼다고 한 주문 가운데 KIS 에서도 찬 비율) {실현}: 가상 성적을 그만큼 덜 믿어야"
+                 " 합니다")  # fmt: skip
     for 쪽, 말 in (("slip_buy", "매수"), ("slip_sell", "매도")):
         if 쪽 in keys:
-            글.append(f"{말} 가격 차이 평균 {_문턱값(float(now[쪽]['avg']), DIVERGE_SLIP_PCT, False, True)}%"
-                     f" (n={now[쪽]['n']}) — 문턱 +{DIVERGE_SLIP_PCT:g}% 위: 가상이 체결가를 낙관")  # fmt: skip
+            차이 = _문턱값(float(now[쪽]["avg"]), DIVERGE_SLIP_PCT, False, True)
+            글.append(f"{말} 가격 차이 평균(n={now[쪽]['n']}) {차이}: 가상이 체결가를 낙관")
     기간 = f"지난 {now.get('days', COMPARE_DAYS)}일, 주문 {now.get('n')}"
     return f"KIS모의투자 {이름} 가상모의투자와 벌어졌습니다({기간}): " + " · ".join(글)
 

@@ -23,6 +23,9 @@ def test_send_block_은_단계와_같은_판정() -> None:
     assert bmj.send_block("US", datetime(2026, 10, 21, 13, 25, tzinfo=UTC)) == "예약 접수 마감 뒤 — 보내지 않음"
     # 국내 07:50 KST 손 실행 — 접수 08:30 까지 40분, 기다림 상한 10분 넘음
     assert bmj.send_block("KR", datetime(2026, 10, 21, 22, 50, tzinfo=UTC)) == "접수 시작 전 — 보내지 않음"
+    # 국내 08:20:00 KST 정각 — 기다림이 상한(10분)과 같으면 기다려 낸다(넘을 때만 막음)
+    assert bmj.send_block("KR", datetime(2026, 10, 21, 23, 20, tzinfo=UTC)) is None
+    assert bmj.send_block("KR", datetime(2026, 10, 21, 23, 19, 59, tzinfo=UTC)) == "접수 시작 전 — 보내지 않음"
     # 국내 08:25 KST — 5분 기다려 낸다
     assert bmj.send_block("KR", datetime(2026, 10, 21, 23, 25, tzinfo=UTC)) is None
     # 국내 15:30 KST — 장 끝난 뒤
@@ -47,6 +50,9 @@ def test_운용_보고는_접수_시간_밖이면_내지_않는다고_말한다(
         "KIS모의투자: 오늘은 내지 않습니다 — 접수 시작 전")
     assert 머리("KR", datetime(2026, 10, 21, 23, 25, tzinfo=UTC)).startswith(
         "KIS모의투자: 이 주문을 접수 시간에 그대로 냅니다")
+    # 까닭은 앞말만(" — 보내지 않음" 떼고), "오늘은" 겹치지 않게
+    assert 머리("KR", datetime(2026, 10, 23, 23, 25, tzinfo=UTC)) == "KIS모의투자: 오늘은 내지 않습니다 — 장이 없다"
+    assert 머리("US", datetime(2026, 10, 21, 13, 25, tzinfo=UTC)) == "KIS모의투자: 오늘은 내지 않습니다 — 예약 접수 마감 뒤"
 
 
 def _요약(**k: object) -> dict:
@@ -57,11 +63,22 @@ def test_괴리_알림은_문턱과_같아_보이지_않는다() -> None:
     글 = bm.diverge(_요약(match_pct=79.6, kept_pct=84.6, slip_buy={"avg": 0.503, "n": 12}),
                     ["match", "kept", "slip_buy"], "KR")  # fmt: skip
     assert 글 is not None
-    assert "체결 일치 79.6% — 문턱 80% 아래" in 글
-    assert "실현율 84.6%(" in 글 and "문턱 85% 아래" in 글
-    assert "매수 가격 차이 평균 +0.503% (n=12) — 문턱 +0.5% 위" in 글
+    assert "체결 일치 79.6% — 문턱 80% 아래." in 글
+    assert "비율) 84.6% — 문턱 85% 아래:" in 글
+    assert "매수 가격 차이 평균(n=12) +0.503% — 문턱 +0.5% 위:" in 글
+    # 0.5 바로 위도 넘어 보이게(교차검증 [권고])
+    assert "+0.5002% — 문턱 +0.5% 위" in (bm.diverge(_요약(slip_buy={"avg": 0.5002, "n": 30}), ["slip_buy"], "KR") or "")
     # 멀리 떨어진 값은 예전 자릿수 그대로
-    assert "실현율 70%(" in (bm.diverge(_요약(kept_pct=70.0), ["kept"], "KR") or "")
+    assert "비율) 70% — 문턱 85% 아래" in (bm.diverge(_요약(kept_pct=70.0), ["kept"], "KR") or "")
+
+
+def test_문턱_안쪽으로_돌아온_켜진_칸엔_방향을_말하지_않는다() -> None:
+    """교차검증 [필수] — 켜진 칸은 꺼짐 문턱까지 켜 두고, 전날 알림이 실패하면 오늘 다시 글로 온다. 값이 문턱 안쪽이면
+    "82.000% — 문턱 80% 아래" 같은 거짓 방향이 났다."""
+    글 = bm.diverge(_요약(match_pct=82.0, kept_pct=88.0, slip_buy={"avg": 0.45, "n": 12}),
+                    ["match", "kept", "slip_buy"], "KR") or ""  # fmt: skip
+    assert "체결 일치 82% — 문턱 80%." in 글 and "비율) 88% — 문턱 85%:" in 글
+    assert "평균(n=12) +0.45% — 문턱 +0.5%:" in 글 and "아래" not in 글 and " 위" not in 글
 
 
 def test_위원회_메모는_가결과_집행을_가른다() -> None:

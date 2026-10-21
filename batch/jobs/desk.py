@@ -256,7 +256,7 @@ def report_head(
     elif 막힘 := bmj.send_block(market, now):
         # KIS 단계와 같은 판정(25.1631) — 예약 마감 뒤·접수 시작 전이면 "냅니다" 가 거짓이었다. 리포트를 보낸 몇 분 뒤
         # 단계가 돌므로 경계 몇 분은 어긋날 수 있다 — 그날 실제 결과는 다음 운용 보고의 "지난 실행" 이 말한다
-        상태 = f"오늘은 내지 않습니다 — {막힘.split(' — ')[0]}"
+        상태 = f"오늘은 내지 않습니다 — {막힘.split(' — ')[0].removeprefix('오늘은 ')}"
     else:
         상태 = "이 주문을 접수 시간에 그대로 냅니다"
     지난 = client.execute(DESK_LAST_SQL).rows

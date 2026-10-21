@@ -59,7 +59,8 @@ def test_diverge_text_says_which_way() -> None:
     비관 = bm.diverge(_요약(30, 70.0, internal_only=1, kis_only=8), ["match"], "US")
     assert 비관 is not None and 비관.startswith("KIS모의투자 미국이") and "가상 체결 판정이 비관" in 비관
     글 = bm.diverge(_요약(30, 90.0, kept=80.0, buy=0.8), ["kept", "slip_buy"], "KR")
-    assert 글 is not None and "실현율 80%" in 글 and "매수 가격 차이 평균 +0.80% (n=30) — 문턱 +0.5% 위" in 글
+    assert 글 is not None and "실현율(가상이 찼다고 한 주문 가운데 KIS 에서도 찬 비율) 80% — 문턱 85% 아래" in 글
+    assert "매수 가격 차이 평균(n=30) +0.80% — 문턱 +0.5% 위" in 글
     assert bm.diverge(_요약(30, 70.0), [], "KR") is None
 
 
