@@ -2362,7 +2362,7 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
         # 있다). 곁다리: 실패해도 리포트는 그대로
         모의 = step_log.get("paper") or {}
         # 쉬는 날(입금 없음 등 `skipped`)·실패한 날은 끼우지 않는다 — "없음" 뿐인 블록이 맨 위에 나갔다(25.1512 검토 6)
-        if not dry_run and "paper" in step_log and not 모의.get("error") and not 모의.get("skipped"):
+        if not dry_run and "paper" in step_log and "error" not in 모의 and not 모의.get("skipped"):
             try:
                 from batch.jobs import desk as desk_job
 

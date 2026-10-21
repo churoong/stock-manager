@@ -109,5 +109,5 @@ def test_daily_puts_head_after_paper_step() -> None:
     글 = (Path(__file__).resolve().parent.parent / "batch" / "jobs" / "daily.py").read_text(encoding="utf-8")
     단계, 머리, 보냄 = 글.index("paper_job.run_step_locked("), 글.index("desk_job.report_head("), 글.index("telegram.send(message)")
     assert 단계 < 머리 < 보냄
-    assert 'not dry_run and "paper" in step_log and not 모의.get("error") and not 모의.get("skipped")' in 글
+    assert 'not dry_run and "paper" in step_log and "error" not in 모의 and not 모의.get("skipped")' in 글
     assert "after_close=_장_끝남(market, decision.session_date)" in 글[머리:보냄]

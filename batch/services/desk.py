@@ -303,7 +303,7 @@ def paper_step_failed(row: dict[str, Any]) -> bool:
     """그 실행의 가상모의투자 단계가 끝까지 돌지 못했나 — `step_log.paper.error`(예외) 또는 입금 없음 밖의 `skipped`
     (다른 시장 잠금 등). 실행은 `partial` 로 끝나 예전엔 무사고로 셌다(25.1636, 36회차 P3). `paper` 칸이 없는 실행
     (기능 전 옛 행·dry-run)은 모름 — 사고로 세지 않는다"""
-    if row.get("paper_error"):
+    if row.get("paper_error") is not None:  # 빈 글 예외(`StopIteration()` 등)도 — 교차검증 [필수]
         return True
     건너뜀 = row.get("paper_skipped")
     return bool(건너뜀) and str(건너뜀) not in PAPER_SKIP_OK

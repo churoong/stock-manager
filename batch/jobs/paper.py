@@ -966,7 +966,7 @@ def mark(
     관문지수, 기준 = _관문_지수(p, v, 지수, 새입금) if p else (None, None)
     return v, {"recon_ok": ok, "recon_note": 글, "twr": 지수, "kospi": 그림자["KOSPI"], "sp500": 그림자["SP500"],
                "prev_twr": float(p["twr_index"]) if p else None, "gate_twr": 관문지수, "basis": 기준,
-               "prev_as_of": str(p["as_of"]) if p else None}
+               "prev_as_of": str(p["as_of"]) if p else None, "prev_updated_at": str(p["updated_at"]) if p else None}
 
 
 def _관문_지수(p: dict[str, Any], v: pp.Valuation, 지수: float, 새입금: float) -> tuple[float | None, str | None]:
@@ -1753,6 +1753,8 @@ def run_step(
                 "raw": round((검["twr"] / 검["prev_twr"] - 1) * 100, 4),
                 "gate": None if 검["gate_twr"] is None else round((검["gate_twr"] / 검["prev_twr"] - 1) * 100, 4),
                 "prev": 검["prev_as_of"],
+                # 그 어제 행을 마지막으로 쓴 실행 시각 — 미국 실행이 덮었으면 국내 장 움직임이 미국 관문에도 다시 든다
+                "prev_at": 검["prev_updated_at"],
             }
         계좌체결 = [f for f in fills if f.account_id == aid]
         # 사전 위험 점검의 문맥 (docs/paper.md 11장, 25.1451) — 배분과 따로 한 번 더 막는다

@@ -104,15 +104,21 @@ def test_가상모의투자_단계가_못_돈_실행은_성공으로_세지_않�
           {"job_name": "daily_kr", "trade_date": "2026-10-19", "status": "success", "paper_skipped": "입금 없음"},
           {"job_name": "daily_kr", "trade_date": "2026-10-20", "status": "success"}]  # paper 칸 없음 — 모름, 세지 않음
     assert desk.batch_incident_days(줄, 기대) == 2
+    # 메시지가 빈 예외(`StopIteration()`)도 사고 — 교차검증 [필수]
+    assert desk.paper_step_failed({"paper_error": ""}) and not desk.paper_step_failed({"paper_error": None})
 
 
 def test_실행_기록_질의는_깨진_step_log_에도_돈다() -> None:
     mem = MemClient()
     db.apply_migrations(mem)  # type: ignore[arg-type]
-    for i, (log, st) in enumerate((("not json", "success"), ('{"paper": {"error": "x"}}', "partial"), (None, "success"))):
+    for i, (log, st) in enumerate((("not json", "success"), ('{"paper": {"error": "x"}}', "partial"), (None, "success"),
+                                   ('{"paper": {"skipped": "입금 없음", "accounts": {"H": {"buy": {"skipped": "y"}}}}}',
+                                    "success"))):  # fmt: skip
         mem.conn.execute(
             "INSERT INTO batch_runs (job_name, trade_date, status, started_at, step_log) VALUES (?, ?, ?, ?, ?)",
             ["daily_kr", f"2026-10-1{i}", st, f"2026-10-1{i}T00:00:00+00:00", log])
     줄 = [dict(zip(("job_name", "trade_date", "status", "paper_error", "paper_skipped"), r, strict=True))
           for r in mem.conn.execute(jd.BATCH_RUNS_SQL, ["daily_kr", "daily_us", "2026-01-01"]).fetchall()]
-    assert [r["paper_error"] for r in 줄] == [None, "x", None]
+    줄.sort(key=lambda r: r["trade_date"])  # 질의에 순서가 없다
+    assert [r["paper_error"] for r in 줄] == [None, "x", None, None]
+    assert [r["paper_skipped"] for r in 줄] == [None, None, None, "입금 없음"]  # 매수 단계 `buy.skipped` 와 섞이지 않음
