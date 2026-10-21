@@ -81,3 +81,28 @@ def test_제외_skip_줄에도_보유_여부를_적는다(monkeypatch: pytest.Mo
 
     src = inspect.getsource(job.buy_orders)
     assert '"note": e.detail[:200],' in src and '"held": r0.stock_id in 든}' in src
+
+
+def test_위원회_부결_skip_에도_보유_여부를_적는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """이미 든 종목이 안건에 올라 부결되면 그 skip 도 새 후보가 아니다 — 위원회·지주사 skip 줄엔 `held` 가 없었다
+    (25.1601, 25.1600 반박 [권고])."""
+    from tests import test_company_job_1466 as cj
+
+    c = Client()
+    c.conn.execute("INSERT INTO paper_cash_flows (flow_date, amount_krw, kind, created_at, request_key)"
+                   " VALUES ('2026-10-01', 1000000, 'deposit', '2026-10-01T00:00:00+00:00', 'k1')")  # fmt: skip
+    c.conn.execute("UPDATE paper_accounts SET charter_json = ?, rule_version = 2 WHERE id = 'A'", [json.dumps(cj.헌장)])
+    monkeypatch.setattr(report_picks, "with_criteria", lambda rows: rows)
+    monkeypatch.setattr(report_picks, "select_top", lambda rows, n=5: rows)
+    monkeypatch.setattr(job, "frozen_ids", lambda *_a, **_k: set())
+    # A 가 이미 종목 3 을 들고 있다(지난 판 매수)
+    c.conn.execute("INSERT INTO paper_orders (id, account_id, market, stock_id, side, order_type, limit_price, quantity,"
+                   " currency, decided_on, fill_session, fill_basis, tranche, reason, horizon, status, rule_version,"
+                   " created_at) VALUES (900, 'A', 'KR', 3, 'buy', 'limit', 10000, 2, 'KRW', '2026-10-01', '2026-10-02',"
+                   " 'open', 1, 't', 'short', 'filled', 1, 't')")  # fmt: skip
+    c.conn.execute("INSERT INTO paper_fills (order_id, account_id, stock_id, side, fill_date, price, quantity, currency,"
+                   " fx_rate, fee, tax, slippage, cash_krw, horizon, created_at) VALUES (900, 'A', 3, 'buy', '2026-10-02',"
+                   " 10000, 2, 'KRW', 1, 3, 0, 0, -20003, 'short', 't')")  # fmt: skip
+    cj._하루(c, monkeypatch, "2026-10-14")
+    [(상세,)] = c.q("SELECT detail_json FROM paper_decisions WHERE account_id = 'A' AND stock_id = 3 AND kind = 'skip'")
+    assert json.loads(상세)["held"] is True

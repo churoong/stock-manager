@@ -1300,7 +1300,7 @@ HOLDING_RECORDS_SQL = (
 def holding_step(
     client: Any, *, market: str, account: str, config: dict[str, Any], charters: dict[str, dict[str, Any]],
     signal_rows: list[report_picks.SignalRow], trade_date: str, cache: dict[str, Any], now: str, rule_version: int,
-    today: date, top_n: int,
+    today: date, top_n: int, held: frozenset[int] = frozenset(),
 ) -> tuple[list[report_picks.SignalRow], dict[int, dict[str, Any]], list[tuple[str, list[Any]]], dict[str, Any]]:
     """지주사(H) 한 번 (docs/company.md 10장, 25.1482).
 
@@ -1351,7 +1351,7 @@ def holding_step(
         까닭 = ("지주사: 추천 회사 1곳" if not x["eligible"]
                else f"지주사: 점수 순위 밖(상위 {top_n})")  # fmt: skip
         문장.append(_결정(account, market, trade_date, sid, "skip", 까닭,
-                        {"holding": 기록[sid], "horizon": r0.horizon, "score": r0.total_score},
+                        {"holding": 기록[sid], "horizon": r0.horizon, "score": r0.total_score, "held": sid in held},
                         r0.close, r0.close_date, now, rule_version))  # fmt: skip
     return 고른행, {sid: 기록[sid] for sid in 고른}, 문장, {
         "recommended": len(순위), "eligible": sum(x["eligible"] for x in 순위), "chosen": len(고른),
@@ -1361,6 +1361,7 @@ def holding_step(
 def committee_step(
     client: Any, *, market: str, account: str, charter: dict[str, Any], charters: dict[str, dict[str, Any]],
     signal_rows: list[report_picks.SignalRow], trade_date: str, cache: dict[str, Any], now: str, rule_version: int,
+    held: frozenset[int] = frozenset(),
 ) -> tuple[list[report_picks.SignalRow], dict[int, dict[str, Any]], list[tuple[str, list[Any]]], dict[str, Any]]:
     """투자위원회 한 번 (docs/company.md 3장, 25.1466).
 
@@ -1406,7 +1407,8 @@ def committee_step(
         r0 = 행들[i.stock_id][0]
         까닭 = i.reason if not i.passed else f"위원회: 가결이나 표 순 상위 {int(charter['top_n'])} 밖"
         문장.append(_결정(account, market, trade_date, i.stock_id, "skip", 까닭,
-                        {"committee": 기록[i.stock_id], "horizon": r0.horizon, "score": r0.total_score},
+                        {"committee": 기록[i.stock_id], "horizon": r0.horizon, "score": r0.total_score,
+                         "held": i.stock_id in held},  # 이미 든 종목 — 새 후보 풀 밖(25.1601)
                         r0.close, r0.close_date, now, rule_version))  # fmt: skip
     return 가결행, {sid: 기록[sid] for sid in 가결}, 문장, {
         "memo": 메모, "agenda": len(items), "passed": sum(i.passed for i in items), "approved": len(approved)}
@@ -1637,6 +1639,7 @@ def run_step(
                         가결행, 위원회, 회의문장, 메모 = committee_step(
                             client, market=market, account=aid, charter=헌장들[aid], charters=헌장들,
                             signal_rows=signal_rows, trade_date=trade_date, cache=조사, now=지금, rule_version=판,
+                            held=frozenset(pp.positions(계좌체결)),
                         )  # fmt: skip
                     except Exception as exc:  # noqa: BLE001 — 그 회사만 오늘 사지 않는다. 다른 계좌·매도는 그대로
                         if db.quota_reason(exc):
@@ -1663,7 +1666,7 @@ def run_step(
                         가결행, 지주, 지주문장, 지주메모 = holding_step(
                             client, market=market, account=aid, config=지주설정[aid], charters=헌장들,
                             signal_rows=signal_rows, trade_date=trade_date, cache=조사, now=지금, rule_version=판,
-                            today=cal.local_today(market), top_n=종목수,
+                            today=cal.local_today(market), top_n=종목수, held=frozenset(pp.positions(계좌체결)),
                         )  # fmt: skip
                     except Exception as exc:  # noqa: BLE001 — 그 계좌만 오늘 사지 않는다
                         if db.quota_reason(exc):
