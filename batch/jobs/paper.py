@@ -95,11 +95,10 @@ STOP_WITHDRAWN_NOTE = "손절이 선 보유 — 남은 매수 회차 거둠 (doc
 EXPIRE_SQL = (
     "UPDATE paper_orders SET status = 'expired', closed_on = ?, close_note = ? WHERE id = ? AND status = 'open'"
 )
-#: 미룬 주문은 다음 장 **시가** 잣대 — 장 열린 뒤 낸(`fill_basis='close'`) 매도가 정지·하한가로 미뤄지면 다음 장엔
-#: 개장 전에 이미 있던 주문인데 종가로 찼다(KIS 는 다음 날 시장가로 다시 내 시가에 찬다, 25.1620 체결 판정 감사
-#: [필수] 1)
+#: 미룬 주문은 다음 장 **시가** 잣대 — 판정 때 `pp.Order.basis` 가 미룬 횟수로 가린다(25.1621). 여기서 `fill_basis` 를
+#: 바꾸면 KIS 비교의 첫날 줄까지 시가 표본에 들어갔다(25.1620 반박 [필수] 1)
 DEFER_SQL = (
-    "UPDATE paper_orders SET fill_session = ?, deferrals = deferrals + 1, close_note = ?, fill_basis = 'open'"
+    "UPDATE paper_orders SET fill_session = ?, deferrals = deferrals + 1, close_note = ?"
     " WHERE id = ? AND status = 'open'"
 )
 INSERT_ORDER_SQL = (
@@ -444,7 +443,7 @@ def _order(r: dict[str, Any]) -> pp.Order:
         order_type=str(r["order_type"]), limit_price=r["limit_price"], quantity=int(r["quantity"]),
         currency=str(r["currency"]), fill_session=str(r["fill_session"]), horizon=r["horizon"],
         score_at_order=r["score_at_order"], score_as_of=r["score_as_of"], fill_basis=str(r["fill_basis"] or "open"),
-        ref_price=r.get("ref_price"),
+        ref_price=r.get("ref_price"), deferrals=int(r.get("deferrals") or 0),
     )  # fmt: skip
 
 
@@ -670,8 +669,11 @@ def fill_orders(
         if o.side == "buy":
             계좌체결 = [f for f in [*fills, *새것] if f.account_id == o.account_id]
             남은매수.pop(o.id, None)
-            다른예약 = pp.reserved_krw([x for x in 남은매수.values() if x.account_id == o.account_id],
-                                   {"USD": 오늘환율[0] if 오늘환율 else None})
+            # 뒤 장 매수의 예약은 빼지 않는다 — 장 순서로 판정하니 뒤 장 매도 대금이 안 들어오는데 뒤 장 매수 예약만
+            # 빼면 앞 장 매수가 현금 부족으로 취소됐다(25.1621, 25.1620 반박 [필수] 2)
+            다른예약 = pp.reserved_krw([x for x in 남은매수.values() if x.account_id == o.account_id
+                                    and x.fill_session <= o.fill_session],
+                                   {"USD": 오늘환율[0] if 오늘환율 else None})  # fmt: skip
             # 다른 달러 예약의 환율을 모르면(None) 예약을 빼지 않고 빚만 막는다 — 주문 때 이미 현금 안에서 냈다
             if pp.cash(flows, 계좌체결) + 체결.cash_krw - (다른예약 or 0.0) < 0:
                 _쓰기(client, [(EXPIRE_SQL, [trade_date, "현금 부족 (다른 미체결 매수 예약 포함)", o.id])])

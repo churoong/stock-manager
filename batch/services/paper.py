@@ -125,6 +125,15 @@ class Order:
     score_as_of: str | None = None
     fill_basis: str = "open"  # open · close (장 열린 뒤 낸 주문)
     ref_price: float | None = None  # 시장가 매수의 기준가 — 예약 잣대 (2.1.1)
+    #: 미룬 횟수 — 미룬 주문은 다음 장엔 개장 전에 이미 있던 주문이라 종가 잣대(`close`)라도 시가로 판정한다(25.1621).
+    #: 저장된 `fill_basis` 는 바꾸지 않는다 — KIS 비교는 날마다의 베낀 줄을 그 칸으로 가르는데, 바꾸면 첫날(종가 판정)
+    #: 줄까지 시가 표본에 들어가 괴리 판정이 거꾸로 섰다(25.1620 반박 [필수] 1)
+    deferrals: int = 0
+
+    @property
+    def basis(self) -> str:
+        """그 장의 판정 잣대 — 장 열린 뒤 낸 주문도 미뤄졌으면 시가"""
+        return "open" if self.deferrals else self.fill_basis
 
 
 @dataclass(frozen=True)
@@ -324,7 +333,7 @@ def judge(order: Order, bar: Bar | None) -> tuple[float | None, str]:
     assert bar is not None
     if order.side == "buy" and order.order_type == "market":
         # 시가 일괄 매수 (2.1.1) — 매도와 같은 잣대로 시가, 장 열린 뒤 낸 주문은 종가
-        if order.fill_basis == "close":
+        if order.basis == "close":
             가격, 까닭 = bar.close, "장 열린 뒤 낸 주문 — 종가"
         elif bar.open is not None and bar.open > 0:
             가격, 까닭 = bar.open, "시가"
@@ -339,7 +348,7 @@ def judge(order: Order, bar: Bar | None) -> tuple[float | None, str]:
         if bar.close <= order.limit_price:
             return order.limit_price, "종가 ≤ 회차 가격"
         return None, f"종가 {bar.close:g} > 회차 가격 {order.limit_price:g}"
-    if order.fill_basis == "close":
+    if order.basis == "close":
         가격, 까닭 = bar.close, "장 열린 뒤 낸 주문 — 종가"
     elif bar.open is not None and bar.open > 0:
         가격, 까닭 = bar.open, "시가"

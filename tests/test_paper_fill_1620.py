@@ -46,7 +46,8 @@ def test_A_장_열린_뒤_매도가_미뤄지면_다음_장_시가(client: Clien
     s = 주문(c, side="sell", typ="market", q=4, decided="2026-10-15", session="2026-10-16", basis="close", tranche=0)
     시세(c, 1, "2026-10-16", 0, 9_900, vol=0)  # 정지
     판정(c, "KR", "2026-10-16")
-    assert c.q("SELECT fill_session, deferrals, fill_basis FROM paper_orders WHERE id=?", [s]) == [("2026-10-19", 1, "open")]
+    # 저장 잣대는 그대로(KIS 비교의 첫날 줄이 종가 판정 표본 밖에 남게, 25.1621) — 판정만 시가
+    assert c.q("SELECT fill_session, deferrals, fill_basis FROM paper_orders WHERE id=?", [s]) == [("2026-10-19", 1, "close")]
     시세(c, 1, "2026-10-19", 8_000, 9_500)
     판정(c, "KR", "2026-10-19")
     assert c.q("SELECT price, fill_date FROM paper_fills WHERE order_id=?", [s]) == [(8000.0, "2026-10-19")]
