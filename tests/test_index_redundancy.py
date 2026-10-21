@@ -42,8 +42,15 @@ def _표별_인덱스(con: sqlite3.Connection) -> dict[str, list[tuple[str, tupl
             이름 = row[1]
             열 = tuple(c[2] for c in con.execute(f"PRAGMA index_info('{이름}')"))
             목록.append((이름, 열))
+            if row[4]:
+                부분.add(이름)
         결과[표] = 목록
     return 결과
+
+
+#: 부분 색인(`WHERE …`) — 조건 밖 행이 없어 일반 질의를 대신하지 못한다. "대신 쓸 인덱스" 로 치지 않는다(25.1637 —
+#: `idx_paper_broker_cleanup … WHERE paper_order_id IS NULL` 이 날짜 범위 색인을 겹친 것으로 잘못 짚었다)
+부분: set[str] = set()
 
 
 def 겹치는_인덱스() -> list[tuple[str, str, tuple, str, tuple]]:
@@ -54,7 +61,7 @@ def 겹치는_인덱스() -> list[tuple[str, str, tuple, str, tuple]]:
         for 표, 목록 in _표별_인덱스(con).items():
             for 이름1, 열1 in 목록:
                 for 이름2, 열2 in 목록:
-                    if 이름1 == 이름2 or 이름1 in 허용:
+                    if 이름1 == 이름2 or 이름1 in 허용 or 이름2 in 부분:
                         continue
                     같은길이_자동 = len(열1) == len(열2) and 이름1.startswith("sqlite_autoindex_")
                     if len(열1) <= len(열2) and 열2[: len(열1)] == 열1 and not 같은길이_자동:
