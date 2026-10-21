@@ -117,3 +117,17 @@ def test_weekly_committee_review_skips_holding(일곱: Client, monkeypatch: pyte
     _하루(일곱, monkeypatch, "2026-10-14")
     줄 = job.committee_review(일곱, date(2026, 10, 16), {})
     assert not any(x.startswith("  H ") for x in 줄) and any(x.startswith("  A ") for x in 줄)
+
+
+def test_h_skip_줄에_보유_여부(일곱: Client, monkeypatch: pytest.MonkeyPatch) -> None:
+    """H 가 이미 든 종목이 "추천 회사 1곳" 으로 skip 되면 `held` — 새 후보 풀에서 뺀다(25.1601 반박 [권고])."""
+    일곱.conn.execute("INSERT INTO paper_orders (id, account_id, market, stock_id, side, order_type, limit_price, quantity,"
+                     " currency, decided_on, fill_session, fill_basis, tranche, reason, horizon, status, rule_version,"
+                     " created_at) VALUES (900, 'H', 'KR', 3, 'buy', 'limit', 10000, 2, 'KRW', '2026-10-01', '2026-10-02',"
+                     " 'open', 1, 't', 'short', 'filled', 1, 't')")  # fmt: skip
+    일곱.conn.execute("INSERT INTO paper_fills (order_id, account_id, stock_id, side, fill_date, price, quantity, currency,"
+                     " fx_rate, fee, tax, slippage, cash_krw, horizon, created_at) VALUES (900, 'H', 3, 'buy', '2026-10-02',"
+                     " 10000, 2, 'KRW', 1, 3, 0, 0, -20003, 'short', 't')")  # fmt: skip
+    _하루(일곱, monkeypatch, "2026-10-14")
+    [(상세,)] = 일곱.q("SELECT detail_json FROM paper_decisions WHERE account_id = 'H' AND stock_id = 3 AND kind = 'skip'")
+    assert json.loads(상세)["held"] is True
