@@ -875,6 +875,7 @@ function SkipsPane({ account }: { account: string }) {
               <li key={last.id} className="py-1.5">
                 <span className="text-xs text-slate-500">
                   {count > 1 ? `${first.decided_on}~${last.decided_on} · 보인 줄 ${count}번` : last.decided_on} · {KIND_TEXT[last.kind] ?? last.kind}
+                  {last.rule_version != null ? ` · 판 ${last.rule_version}` : ""}
                   {보유 ? " · 보유 쪽" : ""}
                 </span>{" "}
                 <b>{last.name}</b> <span className="text-xs text-slate-400">{last.ticker}</span>

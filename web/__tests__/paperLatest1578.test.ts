@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { beforeEach, describe, expect, it } from "vitest";
 import { PAPER_DOSSIERS_LATEST, PAPER_LATEST_ATTR, PAPER_LATEST_DAILY, PAPER_MEETINGS_LATEST } from "@/lib/paper";
-import { DECISIONS_DONE_SQL, DECISIONS_SQL, doneWindow, groupDecisions, mergeDecisions, reasonKey, type DecisionRow } from "@/lib/paperDecisions";
+import { DECISIONS_DONE_SQL, DECISIONS_SQL, doneWindow, groupDecisions, holdSide, mergeDecisions, reasonKey, type DecisionRow } from "@/lib/paperDecisions";
 
 const MIGRATIONS = join(process.cwd(), "..", "migrations");
 let db: DatabaseSync;
@@ -103,5 +103,23 @@ describe("성과 분해는 적힌 가장 최근 행에서 (25.1602)", () => {
     const 행 = db.prepare(PAPER_LATEST_ATTR).all() as Array<{ account_id: string; as_of: string }>;
     expect(행.map((r) => [r.account_id, r.as_of]).sort()).toEqual([["A", "2026-10-20"], ["B", "2026-10-21"]]);
     expect(계획(PAPER_LATEST_ATTR)).toMatch(/SEARCH d USING/);
+  });
+});
+
+describe("안 산 것 — 판과 보유 여부 (25.1603)", () => {
+  it("판이 다르면 묶지 않고, 이미 든 종목의 skip 은 보유 쪽", () => {
+    const ins = db.prepare(
+      "INSERT INTO paper_decisions (account_id, market, decided_on, stock_id, kind, reason, detail_json, rule_version, created_at) VALUES ('A', 'KR', ?, ?, 'skip', ?, ?, ?, 't')",
+    );
+    ins.run("2026-10-16", 1, "위원회: 표 0.83 < 문턱 1", null, 2);
+    ins.run("2026-10-21", 1, "위원회: 표 0.9 < 문턱 1.2", JSON.stringify({ held: false }), 3);
+    ins.run("2026-10-21", 2, "투자 여력 부족", JSON.stringify({ held: true }), 3);
+    const rows = db.prepare(DECISIONS_SQL).all("A", "KR") as unknown as DecisionRow[];
+    const 판 = Object.fromEntries(rows.map((r) => [`${r.id}`, r.rule_version]));
+    expect(Object.values(판).sort()).toEqual([2, 3, 3]);
+    expect(groupDecisions(rows.filter((r) => r.ticker === "005930"))).toHaveLength(2);
+    const 든 = rows.find((r) => r.reason === "투자 여력 부족")!;
+    expect(Boolean(든.held)).toBe(true);
+    expect(holdSide(든)).toBe(true);
   });
 });

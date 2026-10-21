@@ -10,7 +10,8 @@
 export const DECISION_LIMIT = 60;
 
 export const DECISIONS_SQL = `SELECT d.id, d.decided_on, d.kind, d.reason, d.ret_5d, d.ret_20d, d.ret_60d, d.bench_5d, d.bench_20d, d.bench_60d,
-  d.outcome_note, s.ticker, COALESCE(s.name_ko, s.name_en, s.ticker) AS name
+  d.outcome_note, s.ticker, COALESCE(s.name_ko, s.name_en, s.ticker) AS name, COALESCE(d.rule_version, 1) AS rule_version,
+  json_extract(d.detail_json, '$.held') AS held
 FROM paper_decisions d JOIN stocks s ON s.id = d.stock_id
 WHERE d.account_id = ? AND d.market = ? AND d.kind IN ('skip', 'blocked', 'missed', 'hold_flag')
 ORDER BY d.decided_on DESC, d.id DESC LIMIT ${DECISION_LIMIT}`;
@@ -37,6 +38,8 @@ export interface DecisionRow {
   id: number; decided_on: string; kind: string; reason: string; ticker: string; name: string;
   ret_5d: number | null; ret_20d: number | null; ret_60d: number | null;
   bench_5d: number | null; bench_20d: number | null; bench_60d: number | null; outcome_note: string | null;
+  /** 결정의 판 · 결정 때 이미 든 종목인가(배치 `detail.held`, 25.1600·25.1601 부터) — 25.1603 */
+  rule_version?: number; held?: number | boolean | null;
 }
 
 export const KIND_TEXT: Record<string, string> = {
@@ -94,8 +97,10 @@ export function beatBench(d: After): boolean | null {
  */
 /** "열린 매수 주문 있음"(25.1549) — 앞 실행 주문이 그대로 차는 종목이라 보유 쪽(25.1550) */
 export const HOLD_SIDE_SKIP_PREFIXES = ["종목 비중 상한 도달", "보유 중 손절선 이탈", "열린 매수 주문 있음"] as const;
-export function holdSide(d: Pick<DecisionRow, "kind" | "reason">): boolean {
+export function holdSide(d: Pick<DecisionRow, "kind" | "reason"> & Partial<Pick<DecisionRow, "held">>): boolean {
   if (d.kind === "hold_flag") return true;
+  // 이미 든 종목의 skip(투자 여력 부족 등)도 들고 있는 쪽 — 오르면 "놓침" 이 아니다(25.1603, 웹 화면 감사 [참고] 4)
+  if (d.kind === "skip" && d.held) return true;
   if (d.kind === "blocked") return d.reason.startsWith("위험 점검(매도)");
   return d.kind === "skip" && HOLD_SIDE_SKIP_PREFIXES.some((p) => d.reason.startsWith(p));
 }
@@ -124,7 +129,8 @@ export function mergeDecisions(...lists: DecisionRow[][]): DecisionRow[] {
 export function groupDecisions(rows: DecisionRow[]): DecisionGroup[] {
   const 묶음 = new Map<string, DecisionGroup>();
   for (const d of rows) {
-    const 키 = `${d.ticker}|${d.kind}|${reasonKey(d.reason)}`;
+    // 판도 열쇠에 — 까닭의 수를 지우면 문턱이 바뀐 판끼리 한 묶음이 되어 판 2 결정의 성과가 판 3 줄에 붙었다(25.1603)
+    const 키 = `${d.ticker}|${d.kind}|${reasonKey(d.reason)}|${d.rule_version ?? 1}`;
     const g = 묶음.get(키);
     if (!g) 묶음.set(키, { first: d, last: d, count: 1 });
     else {
