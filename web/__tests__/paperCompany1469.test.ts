@@ -109,7 +109,7 @@ describe("투자위원회 탭", () => {
       days: 28, n: 0, match_pct: null, both: 0, internal_only: 0, kis_only: 0, neither: 0, partial: 0, rejected: 5, unknown: 0, cleanup: 0,
       excluded: 2, slip_buy: { n: 0, avg: null }, slip_sell: { n: 0, avg: null }, reject_reasons: { EGW00201: 5 } } });
     expect(거부만).toEqual([
-      "체결을 견줄 주문은 아직 없습니다 — 거부·표본 밖 주문만 있습니다(아래).",
+      "체결을 견줄 주문은 아직 없습니다 — 거부·표본 밖·모름·정리 주문만 있습니다(아래).",
       "거부 까닭: EGW00201 5",
       "거부 5 · 표본 밖 2(가상의 판정 아닌 만료·장 열린 뒤 시장가) · 잔고가 어긋난 종목 0 (2026-10-20 기준)",
     ]);

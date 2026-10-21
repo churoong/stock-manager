@@ -119,8 +119,9 @@ export function brokerLines(b: BrokerLatest | null | undefined): string[] {
     const 칸 = (x: { n: number; avg: number | null }, 이름: string) =>
       x.n && x.avg != null ? `${이름} ${x.avg >= 0 ? "+" : ""}${x.avg.toFixed(2)}% (n=${x.n})` : `${이름} 표본 없음`;
     out.push(`가격(+ 면 가상모의투자가 낙관): ${칸(s.slip_buy, "매수")} · ${칸(s.slip_sell, "매도")}`);
-  } else if (s?.rejected || s?.excluded) {
-    out.push("체결을 견줄 주문은 아직 없습니다 — 거부·표본 밖 주문만 있습니다(아래).");
+  } else if (s?.rejected || s?.excluded || s?.unknown || s?.cleanup) {
+    // 모름·정리 주문만 있는 날도 — 배치 `compare_lines` 는 이때 줄을 낸다(25.1617, KIS 웹 감사 [필수])
+    out.push("체결을 견줄 주문은 아직 없습니다 — 거부·표본 밖·모름·정리 주문만 있습니다(아래).");
   } else {
     out.push("아직 끝난 베낀 주문이 없습니다 — 낸 다음 거래일의 같은 시장 배치가 체결을 맞춥니다.");
   }

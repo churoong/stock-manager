@@ -35,6 +35,11 @@ describe("KIS모의투자 질의", () => {
     expect(r.as_of).toBe("2026-10-19");
     // 계좌 전체 원화 총액은 국내 배치 줄의 account_krw 에만 — 기준(basis 2)이 다른·없는 줄은 잇지 않는다(25.1527)
     expect(db.prepare(KIS_TOTALS).all("kis_vts", "2026-01-01")).toEqual([{ as_of: "2026-10-19", total: 1_160_000 }]);
+    // 지금 베끼는 계좌의 줄만 — 챔피언을 바꾸기 전 다른 계좌 줄은 잇지 않는다(25.1617, 배치 `TOTALS_SQL` 처럼)
+    db.exec(
+      "INSERT INTO paper_broker_daily (broker, as_of, account_id, holdings_json, diff_json, source, fetched_at, summary_json) VALUES ('kis_vts', '2026-10-15', 'B', '[]', '{}', 'kis_vts', 't', '{\"account_krw\": {\"total_krw\": 999, \"basis\": 2}}')",
+    );
+    expect(db.prepare(KIS_TOTALS).all("kis_vts", "2026-01-01")).toEqual([{ as_of: "2026-10-19", total: 1_160_000 }]);
     const o = db.prepare(KIS_ORDERS).all("kis_vts", "2026-10-01") as Array<{ name: string; status: string }>;
     expect(o).toHaveLength(1);
     expect(o[0]).toMatchObject({ name: "삼성전자", status: "filled" });
