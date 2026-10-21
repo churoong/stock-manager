@@ -39,8 +39,10 @@ def test_짝수_창_절반이_깨져도_뒤집히지_않는다() -> None:
     줄 = _줄([1400.0, 1401.0, 140000.0, 140100.0])
     남김, _ = job.drop_outliers(줄)
     assert {r[2] for r in 남김} >= {1400.0, 1401.0}  # 정상값을 빼지 않는다
+    _남김, 경고 = job.drop_outliers(줄)
+    assert 경고 and "판단 보류" in 경고[0]  # 깨진 값을 조용히 저장하지 않고 알린다(25.1597)
     남김, 경고 = job.drop_outliers(줄, anchor=1398.0)
-    assert [r[2] for r in 남김] == [1400.0, 1401.0] and "직전 저장 환율" in 경고[0]
+    assert [r[2] for r in 남김] == [1400.0, 1401.0] and "저장하지 않음" in 경고[0]
 
 
 def test_기준점이_있으면_깨진_값이_절반을_넘어도_거른다() -> None:
@@ -68,3 +70,28 @@ def test_수집이_저장된_환율을_기준점으로_쓴다(monkeypatch) -> No
     assert n == 2 and 경고
     assert mem.conn.execute("SELECT date FROM fx_rates WHERE date >= '2026-10-01' ORDER BY date").fetchall() == [
         ("2026-10-01",), ("2026-10-04",)]
+
+
+
+def test_진짜_큰_움직임은_사흘_이어지면_받아들이고_저장이_멈추지_않는다() -> None:
+    """1200 → 1350(+12.5%) 로 올라 머묾 — 기준점 하나와 견주면 그 뒤 저장이 영구히 멈췄다(25.1597, 25.1596 반박 [필수] 1)."""
+    남김, 경고 = job.drop_outliers(_줄([1201.0, 1350.0, 1352.0, 1351.0, 1353.0]), anchor=1200.0)
+    assert [r[2] for r in 남김] == [1201.0, 1350.0, 1352.0, 1351.0, 1353.0]
+    assert any("크게 움직였고 3일 이어져 받아들임" in x for x in 경고)
+    # ÷100 이 사흘 이어져도 50% 넘게 다르면 받아들이지 않는다
+    남김, _ = job.drop_outliers(_줄([1201.0, 12.0, 12.1, 12.0, 1203.0]), anchor=1200.0)
+    assert [r[2] for r in 남김] == [1201.0, 1203.0]
+
+
+def test_옛_저장값은_기준점으로_쓰지_않는다(monkeypatch) -> None:  # noqa: ANN001
+    """5년치를 다시 채울 때 창 첫날보다 10일 넘게 옛 값을 기준점으로 쓰면 최근 몇 년치를 뺐다(25.1597, 반박 [필수] 2)."""
+    from batch.core import db
+    from tests.test_portfolio_job import MemClient
+
+    mem = MemClient()
+    db.apply_migrations(mem)  # type: ignore[arg-type]
+    for i in range(5):
+        mem.conn.execute("INSERT INTO fx_rates (pair, date, rate, source, fetched_at) VALUES ('USDKRW', ?, 1150, 't', 't')",
+                         [f"2021-01-0{i + 1}"])  # fmt: skip
+    assert job._anchor(mem, "2021-01-08") == 1150.0  # type: ignore[arg-type]
+    assert job._anchor(mem, "2021-03-01") is None  # type: ignore[arg-type]
