@@ -175,6 +175,7 @@ class CoreStrategy:
 
     def __init__(
         self, variant: str, market: cb.CoreMarket, *, sessions: list[str], costs: bt.Costs | None = None,
+        buy_fee_pct: float | None = None,
         max_sector_pct: float = report_picks.DEFAULT_MAX_SECTOR_PCT,
     ) -> None:  # fmt: skip
         from batch.jobs import paper as jp
@@ -189,8 +190,12 @@ class CoreStrategy:
         self.market = market
         self.sessions = sorted(sessions)
         c = costs if costs is not None else bt.Costs.for_country(market.country)
-        # 운영 `make_fill`: 지정가 매수는 슬리피지 없이 수수료만, 시장가(시가 일괄)는 슬리피지도 원가에
-        self.unit_factor = 1 + c.commission_pct / 100 + (c.slippage_pct / 100 if self.v.entry == "open" else 0.0)
+        # 운영 `make_fill`: 지정가 매수는 슬리피지 없이 수수료만, 시장가(시가 일괄)는 슬리피지도 원가에.
+        # 수수료는 **매수 쪽** — 운영은 25.1620 부터 매수·매도 수수료를 따로 붙인다(`jobs/paper._수수료`). 엔진의
+        # `commission_pct` 는 편도 평균이라 설정이 쪽마다 다르면 원가가 운영과 갈렸다(25.1625, 25.1621 [권고]).
+        # 안 주면 예전처럼 편도 평균(설정이 비면 둘이 같다)
+        매수 = c.commission_pct if buy_fee_pct is None else float(buy_fee_pct)
+        self.unit_factor = 1 + 매수 / 100 + (c.slippage_pct / 100 if self.v.entry == "open" else 0.0)
         self.settings = {"max_weight_per_stock": float(market.max_weight_per_stock),
                          "max_weight_per_sector": float(max_sector_pct), "min_order_amount": 0.0}  # fmt: skip
         self._cache = {
@@ -400,10 +405,12 @@ class CoreStrategy:
 
 def make_core_strategy(
     variant: str, market: cb.CoreMarket, *, sessions: list[str], costs: bt.Costs | None = None,
+    buy_fee_pct: float | None = None,
     max_sector_pct: float = report_picks.DEFAULT_MAX_SECTOR_PCT,
 ) -> CoreStrategy:  # fmt: skip
     """변형 하나의 판단 함수 — `bt.simulate(prices, dates, dates, make_core_strategy(…), costs)` 로 돌린다.
 
     `costs` 는 엔진에 넘기는 것과 같은 값을 준다(원가의 수수료·슬리피지). 변형마다 새 `CoreMarket` 을 준다"""
-    return CoreStrategy(variant, market, sessions=sessions, costs=costs, max_sector_pct=max_sector_pct)
+    return CoreStrategy(variant, market, sessions=sessions, costs=costs, max_sector_pct=max_sector_pct,
+                        buy_fee_pct=buy_fee_pct)
 

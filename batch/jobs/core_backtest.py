@@ -191,7 +191,12 @@ def run_core(
             return 1
         # 판 뒤 쉼을 세는 거래일 — 워밍업 구간의 시장일 + 엔진 날짜 축
         sessions = [d for d in bt.market_dates(prices, 워밍업, 시장_맵) if d < dates[0]] + dates
-        costs = bt.Costs.for_country(country, db.get_setting(client, "fees", {}), db.get_setting(client, "taxes", {}))
+        수수료설정 = db.get_setting(client, "fees", {})
+        costs = bt.Costs.for_country(country, 수수료설정, db.get_setting(client, "taxes", {}))
+        # 로트 원가의 매수 수수료는 운영 가상모의투자와 같은 쪽 값(25.1625) — 엔진의 회전 비용은 편도 평균 그대로
+        from batch.jobs import paper as jp
+
+        매수수수료 = jp._수수료(country, 수수료설정)[0]
         eligible_at, pit_cache, pit_reasons = pit_eligible(universe, prices, turnover, 시장_맵)
         warnings.append(jb.WARN_PIT_UNIVERSE)
         warnings.append(WARN_CORE)
@@ -216,7 +221,8 @@ def run_core(
             except Exception:  # noqa: BLE001 — 진행 표시가 계산을 죽이면 안 된다
                 log.warning("진행 상태를 적지 못했습니다")
             t1 = time.perf_counter()
-            strategy = cs.make_core_strategy(variant, shared.reader(), sessions=sessions, costs=costs)
+            strategy = cs.make_core_strategy(variant, shared.reader(), sessions=sessions, costs=costs,
+                                             buy_fee_pct=매수수수료)  # fmt: skip
             results[variant] = bt.simulate(prices, dates, dates, strategy, costs, has_delisted=delisted,
                                            turnover=turnover, dividends_included=False)  # fmt: skip
             기록[variant] = strategy.log
