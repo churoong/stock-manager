@@ -1192,10 +1192,13 @@ def buy_orders(
     # 판 뒤 쉼·기업행위 멈춤(계좌별) 종목은 **배분 전에** 뺀다 — 예전엔 배분이 그 몫에 여력·섹터 자리를 먼저 주고
     # `size_buys`·위험 점검에서야 걸러, 살 수 있는 다른 후보가 "섹터 상한 도달"·"투자 여력 부족" 으로 빠졌다(25.1618,
     # 매수 배분 감사 [필수]). 그 자리는 현금으로 남는다(다음 후보로 채우지 않는다 — 고른 종목 수는 그대로)
-    멈춤 = set(frozen or ())
-    쉼빠짐 = [r for r in 다시 if r.stock_id in sold_recently]
-    멈춤빠짐 = [r for r in 다시 if r.stock_id in 멈춤 and r.stock_id not in sold_recently]
-    다시 = [r for r in 다시 if r.stock_id not in sold_recently and r.stock_id not in 멈춤]
+    # 손절이 선 종목은 그대로 둔다 — 배분(`stop_flags`)이 "보유 중 손절선 이탈" 로 빼 자리를 먹지 않고, 그 까닭이 쉼보다
+    # 앞선다(핵심 H 백테스트 `test_core_strategy_1532` 가 지키는 순서)
+    멈춤 = set(frozen or ()) - set(stop_ids)
+    쉼 = set(sold_recently) - set(stop_ids)
+    쉼빠짐 = [r for r in 다시 if r.stock_id in 쉼]
+    멈춤빠짐 = [r for r in 다시 if r.stock_id in 멈춤 and r.stock_id not in 쉼]
+    다시 = [r for r in 다시 if r.stock_id not in 쉼 and r.stock_id not in 멈춤]
     빠진후보 = sorted({r.stock_id for r in 다시} - set(price_series))
     if 빠진후보 and series_loader is not None:
         price_series = {**price_series, **series_loader(빠진후보)}
@@ -1289,7 +1292,8 @@ def buy_orders(
             },
         })  # fmt: skip
     return out, {"candidates": 후보수, "allocations": len(pv.allocations), "orders": len(out), "skipped": 빠짐[:10],
-                 "excluded": len(pv.excluded), "_decisions": 결정}  # fmt: skip
+                 "excluded": len(pv.excluded), "frozen_blocked": len({r.stock_id for r in 멈춤빠짐}),
+                 "_decisions": 결정}  # fmt: skip
 
 
 def _조사_준비(
@@ -1741,7 +1745,9 @@ def run_step(
                 문맥 = dc_replace(문맥, sector_of={**문맥.sector_of, **{
                     c.stock_id: _stock(client, c.stock_id, stock_cache).get("sector") for c in 후보}})
                 통과, 막힘 = rg.gate(후보, 문맥)
-                막힌수 += len(막힘)
+                # 배분 전에 뺀 기업행위 멈춤 종목도 관문이 막은 것으로 센다(종목당 하나 — 예전엔 회차마다 셌다) — 11장
+                # `risk_blocked` 는 "관문이 얼마나 자주 걸리나" 의 근거다(25.1619, 25.1618 교차검증 [권고] 1)
+                막힌수 += len(막힘) + int(b기록.get("frozen_blocked") or 0)
                 주문 = [주문[c.key] for c in 통과]
                 낸종목 = {o["stock_id"] for o in 주문}
                 막힌까닭 = {c.stock_id: "위험 점검: " + "; ".join(t for _c, t in 까닭) for c, 까닭 in 막힘}

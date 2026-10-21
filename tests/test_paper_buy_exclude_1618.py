@@ -46,9 +46,10 @@ def test_멈춘_종목이_섹터_자리를_먹지_않는다(monkeypatch: pytest.
     c.conn.execute("INSERT INTO paper_cash_flows (flow_date, amount_krw, kind, created_at, request_key)"
                    " VALUES ('2026-10-13', 1000000, 'deposit', '2026-10-13T00:00:00+00:00', 'k1')")  # fmt: skip
     설정 = {"max_weight_per_sector": 10.0, "max_weight_per_stock": 10.0, "min_order_amount": 0}
-    job.run_step(c, market="KR", trade_date="2026-10-14", late=False, signal_rows=_두_후보(), settings=설정,
-                 price_series={}, series_unknown={}, allocate=True,
-                 now=datetime.fromisoformat("2026-10-14T23:30:00+00:00"))  # fmt: skip
+    _, 기록 = job.run_step(c, market="KR", trade_date="2026-10-14", late=False, signal_rows=_두_후보(), settings=설정,
+                          price_series={}, series_unknown={}, allocate=True,
+                          now=datetime.fromisoformat("2026-10-14T23:30:00+00:00"))  # fmt: skip
+    assert 기록["accounts"]["B"]["risk_blocked"] == 1  # 배분 전에 뺀 멈춤도 관문 막음으로 센다(25.1619)
     assert {r[0] for r in c.q("SELECT stock_id FROM paper_orders")} == {3}
     assert sorted(c.q("SELECT stock_id, kind, reason FROM paper_decisions")) == [
         (1, "blocked", "위험 점검: 기업행위 경계(분할·병합 의심)"), (3, "buy", "2부 배분")]

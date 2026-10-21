@@ -20,10 +20,11 @@ WHERE broker = ? ORDER BY as_of DESC LIMIT 1`;
 export const KIS_TOTAL_BASIS = 2;
 /** 계좌 전체 원화 총액 추이 — 배치 `TOTALS_SQL` 과 같은 잣대(국내 배치 줄에만 있다). **같은 기준의 줄만** — 기준이 바뀐 날을
  * 이으면 해외 자산만큼 총액이 뛴다(25.1527). **지금 베끼는 계좌의 줄만** — 배치 성과(`TOTALS_SQL`)가 그 계좌로 거른다. 챔피언을
- * 바꾸면 그래프의 1.0 기준이 성과의 시작과 달라졌다(25.1617, KIS 웹 감사 [권고]) */
+ * 바꾸면 그래프의 1.0 기준이 성과의 시작과 달라졌다(25.1617, KIS 웹 감사 [권고]). 인자는 [증권사, 시작일, 증권사] —
+ * 번호 자리표(?1)는 운영 드라이버(Turso HTTP·D1)에서 확인하지 않아 쓰지 않는다(25.1619, `portfolio.ts` 관례) */
 export const KIS_TOTALS = `SELECT as_of, json_extract(summary_json, '$.account_krw.total_krw') AS total
-FROM paper_broker_daily WHERE broker = ?1 AND as_of >= ?2 AND json_extract(summary_json, '$.account_krw.basis') = ${KIS_TOTAL_BASIS}
-  AND account_id = (SELECT account_id FROM paper_broker_daily WHERE broker = ?1 ORDER BY as_of DESC LIMIT 1)
+FROM paper_broker_daily WHERE broker = ? AND as_of >= ? AND json_extract(summary_json, '$.account_krw.basis') = ${KIS_TOTAL_BASIS}
+  AND account_id = (SELECT account_id FROM paper_broker_daily WHERE broker = ? ORDER BY as_of DESC LIMIT 1)
 ORDER BY as_of`;
 export const KIS_ORDERS = `SELECT b.id, b.trade_date, b.side, b.code, b.order_type, b.limit_price, b.quantity, b.status, b.filled_qty,
   b.avg_price, b.reason, b.message, b.sent_at, b.stock_id, COALESCE(s.name_ko, s.name_en, s.ticker) AS name

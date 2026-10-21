@@ -56,7 +56,7 @@ export async function GET() {
           totals: [],
         };
         try {
-          const totals = await execute(KIS_TOTALS, [key, 전(KIS_TOTALS_DAYS)]);
+          const totals = await execute(KIS_TOTALS, [key, 전(KIS_TOTALS_DAYS), key]);
           whole.totals = rowsToObjects<{ as_of: string; total: number | null }>(totals).map((t) => ({ as_of: t.as_of, total: t.total == null ? null : Number(t.total) }));
         } catch {
           whole.totals_error = true;
