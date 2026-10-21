@@ -90,6 +90,9 @@ FILLED_SQL = (
 #: 전량 매도 때 거둔 매수 회차의 만료 까닭(25.1591) — KIS 비교에서 판정 밖 만료로 뺀다
 #: (`broker_mirror.NON_JUDGMENT_EXPIRY`)
 WITHDRAWN_NOTE = "같은 종목 전량 매도 — 남은 매수 회차 거둠 (docs/paper.md 2.2)"
+#: 매수 단계가 일찍 끝난 날 고른 종목의 skip 까닭 머리(25.1622) — 선정 결과가 아니라 견줄 후보에서 뺀다
+#: (`pp.NONCOMPARABLE_SKIP_PREFIXES`)
+BUY_STEP_SKIP_PREFIX = pp.BUY_STEP_SKIP_PREFIX
 #: 손절이 선 보유(따르지 않는 계좌·매도가 막힌 날 포함)의 남은 매수 회차를 거둘 때(25.1612). 판정 밖 만료로 센다
 STOP_WITHDRAWN_NOTE = "손절이 선 보유 — 남은 매수 회차 거둠 (docs/paper.md 2.2)"
 EXPIRE_SQL = (
@@ -1773,7 +1776,19 @@ def run_step(
                 주문 = [주문[c.key] for c in 통과]
                 낸종목 = {o["stock_id"] for o in 주문}
                 막힌까닭 = {c.stock_id: "위험 점검: " + "; ".join(t for _c, t in 까닭) for c, 까닭 in 막힘}
-                for d in b기록.pop("_decisions", []):
+                결정들 = b기록.pop("_decisions", None)
+                if 결정들 is None and 가결행 and b기록.get("skipped"):
+                    # 매수 단계가 일찍 끝난 날(환율 모름·장부 현금 음수) — 위원회·지주사가 고른 종목의 줄이 하나도
+                    # 안 남아 그 표(`committee`·`holding`)가 원장에서 빠졌다. 고르지 않은 종목만 남아 H 가중치 표본·
+                    # 부서 성적표가 치우쳤고, 같은 날 다시 돌면 "이미 냄" 으로 그날 표본을 영영 잃었다(25.1622,
+                    # H 감사 [필수])
+                    든것 = set(pp.positions(계좌체결))
+                    까닭0 = f"{BUY_STEP_SKIP_PREFIX}{b기록['skipped']}"
+                    결정들 = [{"stock_id": r.stock_id, "kind": "skip", "reason": 까닭0,
+                             "ref_close": r.close, "ref_date": r.close_date,
+                             "detail": {"horizon": r.horizon, "score": r.total_score, "held": r.stock_id in 든것}}
+                            for r in {r.stock_id: r for r in 가결행}.values()]  # fmt: skip
+                for d in 결정들 or []:
                     if d["kind"] == "buy" and d["stock_id"] not in 낸종목:
                         # 규칙은 사려 했는데 관문이 막았다 — skip 과 섞지 않는다 (25.1453)
                         d = {**d, "kind": "blocked", "reason": 막힌까닭.get(d["stock_id"], "위험 점검")}
