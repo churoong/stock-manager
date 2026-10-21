@@ -53,6 +53,12 @@ BAR_SQL = "SELECT date, open, close, volume, change_pct FROM prices WHERE stock_
 MARKET_DAY_SQL = (
     "SELECT 1 FROM prices p CROSS JOIN stocks s ON s.id = p.stock_id WHERE p.date = ? AND s.country = ? LIMIT 1"
 )
+#: 그 나라 시세가 있는 마지막 날(오늘 이하) — 그림자 지수의 지금 값을 보유와 같은 날로(25.1626). 날짜 색인을 끝에서부터
+#: 읽어 첫 행에서 멈춘다
+LAST_MARKET_DAY_SQL = (
+    "SELECT p.date FROM prices p CROSS JOIN stocks s ON s.id = p.stock_id WHERE p.date <= ? AND s.country = ?"
+    " ORDER BY p.date DESC LIMIT 1"
+)
 LAST_CLOSE_SQL = (
     "SELECT close, date FROM prices WHERE stock_id = ? AND date <= ? AND close > 0 ORDER BY date DESC LIMIT 1"
 )
@@ -736,15 +742,20 @@ def _열린_그림자(
 
 
 def _level_of(
-    client: Any, flows: list[pp.CashFlow], code: str, fx: bool
+    client: Any, flows: list[pp.CashFlow], code: str, fx: bool, upto: str | None = None, fx_on: str | None = None,
 ) -> tuple[dict[int, float | None], float | None]:
-    """그림자 기준 — 입금마다 그 돈이 처음 투자 가능해진 장의 원화 기준 값, 그리고 지금 값 (docs/paper.md 4장)."""
-    지금 = client.execute(INDEX_NOW_SQL, [code]).rows
+    """그림자 기준 — 입금마다 그 돈이 처음 투자 가능해진 장의 원화 기준 값, 그리고 지금 값 (docs/paper.md 4장).
+
+    `upto` 를 주면 지금 값은 그 날 이하 지수 종가(그 시장 보유가 쓴 마지막 시세 날짜), `fx_on` 을 주면 그 날 환율 —
+    평가(`mark`)와 같은 시점이다. 지수는 장이 끝난 날 바로 들어오고 종목 시세는 다음 배치가 받아, 미국 저녁 행의
+    KOSPI 가 국내 보유보다 하루 앞섰다(S&P500 은 아침 행·환율 날짜가 같은 꼴, 25.1626 미국 경로 감사 [필수])"""
+    지금 = (client.execute(INDEX_ON_OR_BEFORE_SQL, [code, upto]).rows if upto
+            else client.execute(INDEX_NOW_SQL, [code]).rows)  # fmt: skip
     if not 지금:
         return {}, None
     지금값, 지금날 = float(지금[0][0]), str(지금[0][1])
     if fx:
-        환 = _fx(client, 지금날)
+        환 = _fx(client, fx_on or 지금날)
         if 환 is None:
             return {}, None
         지금값 *= 환[0]
@@ -753,8 +764,9 @@ def _level_of(
         if f.kind != "deposit":
             continue
         행 = client.execute(INDEX_FROM_SQL, [code, f.flow_date]).rows
-        if not 행:
-            # 아직 장이 닫히지 않았다 — 지금 값으로 산 것으로 본다(평가 = 넣은 돈). 다음 날 진짜 값으로 바뀐다
+        if not 행 or str(행[0][1]) > 지금날:
+            # 아직 장이 닫히지 않았다(또는 그 장이 지금 값 날보다 뒤 — 보유 시세가 아직 그 장 전) — 지금 값으로 산
+            # 것으로 본다(평가 = 넣은 돈). 다음 날 진짜 값으로 바뀐다
             out[f.id] = 지금값
             continue
         값 = float(행[0][0])
@@ -1525,8 +1537,11 @@ def run_step(
     for f in 새체결:
         fill_created[f.order_id] = 지금
 
-    shadows = {"KOSPI": _level_of(client, flows, "KOSPI", fx=False),
-               "SP500": _level_of(client, flows, "SP500", fx=True)}  # fmt: skip
+    # 그림자 지금 값은 그 시장 보유가 쓴 마지막 시세 날짜·평가 환율로(25.1626)
+    끝시세 = {c: (r[0][0] if (r := client.execute(LAST_MARKET_DAY_SQL, [오늘, c]).rows) else None)
+            for c in ("KR", "US")}  # fmt: skip
+    shadows = {"KOSPI": _level_of(client, flows, "KOSPI", fx=False, upto=끝시세["KR"]),
+               "SP500": _level_of(client, flows, "SP500", fx=True, upto=끝시세["US"], fx_on=오늘)}  # fmt: skip
     열림캐시: dict[tuple[str, str], float | None] = {}
     targets, _ = sr.기간별_목표(db.get_setting(client, "horizon_targets", None))
     # 그날 매도 판정이 쓰는 손절폭 — 매수 결정 행의 σ 단위 기록(25.1539)이 같은 값을 적는다
