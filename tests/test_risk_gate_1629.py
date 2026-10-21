@@ -252,3 +252,14 @@ def test_원가_평가_종목이_없으면_하루_손실을_본다(monkeypatch: 
     a = 기록["accounts"]["B"]
     assert "day_loss_basis" not in a
     assert c.q("SELECT kind, reason FROM paper_decisions WHERE decided_on='2026-10-16'")[0][0] == "blocked"
+
+
+def test_하루_손실_경계는_넘게() -> None:
+    """문서 "3% **넘게** 빠졌으면" — 정확히 −3.0% 는 막지 않는다(25.1632, 감사 [권고])."""
+    def 문맥(r: float) -> rg.Context:
+        return rg.Context(equity_krw=1e6, day_return_pct=r, cash_available_krw=1e6, holding_krw={}, sector_of={},
+                          max_stock_pct=100, max_sector_pct=100, today="2026-10-21")  # fmt: skip
+
+    후보 = [rg.Candidate(1, "buy", 1000.0, "2026-10-20")]
+    assert rg.gate(후보, 문맥(rg.DAILY_LOSS_HALT_PCT))[1] == []
+    assert rg.gate(후보, 문맥(rg.DAILY_LOSS_HALT_PCT - 0.01))[1][0][1][0][0] == "daily_loss"

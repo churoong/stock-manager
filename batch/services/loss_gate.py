@@ -24,7 +24,8 @@ LOSS_GATE_KOSPI_DOWN_PCT = -2.0
 def frequency(logs: list[Any], kospi: dict[str, float]) -> dict[str, Any]:
     """하루 기록(`DayLog`)·KOSPI → 실행 기록 `loss_gate`.
 
-    막힘은 사유 글이 아니라 코드 기준(`day_return_pct ≤ DAILY_LOSS_HALT_PCT`). KOSPI 하루 수익은 하루 수익과 같은 창
+    막힘은 사유 글이 아니라 코드 기준(`day_return_pct < DAILY_LOSS_HALT_PCT` — 관문과 같은 "넘게", 25.1632).
+    KOSPI 하루 수익은 하루 수익과 같은 창
     (직전 cutoff → 이번 cutoff). 시장 조정 = 하루 수익 − 투자 비중 × KOSPI 하루 수익 —
     그 한도였다면 걸린 날 수를 사실로만
     """
@@ -44,8 +45,8 @@ def frequency(logs: list[Any], kospi: dict[str, float]) -> dict[str, Any]:
             n += 1
             a, b = upto(앞cut), upto(str(log.cutoff))
             ir = (b / a - 1) * 100 if a and b else None
-            걸림 = r <= 한도
-            adj = ir is not None and log.invested is not None and r - log.invested * ir <= 한도
+            걸림 = r < 한도
+            adj = ir is not None and log.invested is not None and r - log.invested * ir < 한도
             if 걸림:
                 막힘 += 1
                 지수도 += ir is not None and ir <= LOSS_GATE_KOSPI_DOWN_PCT

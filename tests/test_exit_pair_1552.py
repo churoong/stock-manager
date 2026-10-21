@@ -132,7 +132,7 @@ def test_관문_빈도_손계산() -> None:
     kospi = {날[0]: 100.0, 날[1]: 100.0, 날[2]: 97.0, 날[3]: 97.0, 날[4]: 97.0, 날[5]: 97.0}
     logs = [
         _관문기록(날[0], None, None),
-        _관문기록(날[1], -3.0, 0.5),  # 문턱 그대로 걸림, 지수 0 → 조정해도 −3 걸림
+        _관문기록(날[1], -3.1, 0.5),  # 문턱 넘어 걸림, 지수 0 → 조정해도 −3.1 걸림 (정확히 −3 은 안 걸림, 25.1632)
         _관문기록(날[2], -4.0, 0.5, blocked=True),  # 지수 −3% → 조정 −4 + 1.5 = −2.5 안 걸림, 지수도 빠진 날
         _관문기록(날[3], -2.9, 0.5),  # 안 걸림
         _관문기록(날[4], None, 0.5),  # 하루 수익 모름 — 세지 않음
@@ -143,6 +143,9 @@ def test_관문_빈도_손계산() -> None:
     assert f["kospi_down_days"] == 1 and f["with_candidates"] == 1
     assert f["adjusted_days"] == 1 and f["only_raw"] == 1 and f["only_adjusted"] == 0
     assert f["threshold_pct"] == rg.DAILY_LOSS_HALT_PCT
+    # 정확히 문턱이면 관문처럼 걸리지 않는다 — "넘게"(25.1632)
+    딱 = lg.frequency([_관문기록(날[0], None, None), _관문기록(날[1], rg.DAILY_LOSS_HALT_PCT, 0.5)], kospi)
+    assert 딱["days"] == 1 and 딱["blocked_days"] == 0 and 딱["adjusted_days"] == 0
 
 
 def test_가중_대조_상한은_975() -> None:

@@ -20,7 +20,8 @@ from typing import Any
 #: 핵심 H 백테스트 빈도(`loss_gate`, 25.1552)는 수정주가·결함 없는 환경이라 운영 빈도의 하한일 뿐
 #: 이 자리를 채우지 않는다
 DAILY_LOSS_HALT_PCT = -3.0
-#: 계좌·시장·하루 새 매수 주문 상한 — 2부 상위 다섯 × 3회차 = 15 의 두 배. 넘으면 배분 코드가 이상한 것이다
+#: 계좌·시장·하루 새 매수 주문 상한 — 처음 근거는 2부 상위 다섯 × 3회차 = 15 의 두 배. 넘으면 배분 코드가 이상한 것이다.
+#: E(상위 10 × 3회차 = 30)는 이 상한과 같아 이상 탐지 여유가 없다 — docs/paper.md 2장 "알고 둔다"(25.1632)
 MAX_ORDERS_PER_DAY = 30
 #: 상한 재검사의 여유 — 배분은 금액으로, 주문은 정수 주·예약 여유(수수료 1%·달러 환율 3%)로 내려 생기는
 #: 차이까지는 막지 않는다. 큰 쪽: 고정 0.5%p 또는 상한의 5%(상한 15% 면 0.75%p — 고정값만이면 미국 15% 상한의
@@ -80,7 +81,7 @@ def _여유(상한: float) -> float:
 def _매수_까닭(c: Candidate, ctx: Context, 손실: float | None, 매수수: int, 쓴현금: float,
               종목합: dict[int, float], 섹터합: dict[str, float]) -> list[Reason]:  # fmt: skip
     까닭: list[Reason] = []
-    if 손실 is not None and 손실 <= DAILY_LOSS_HALT_PCT:
+    if 손실 is not None and 손실 < DAILY_LOSS_HALT_PCT:  # "3% **넘게**" — 정확히 −3% 는 막지 않는다(25.1632)
         까닭.append(("daily_loss", f"오늘 계좌 {손실:+.1f}% — 하루 손실 한도 {DAILY_LOSS_HALT_PCT:g}% 넘음"))
     if 매수수 >= MAX_ORDERS_PER_DAY:
         까닭.append(("max_orders", f"하루 매수 주문 {MAX_ORDERS_PER_DAY}건 넘음"))
