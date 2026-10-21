@@ -113,3 +113,29 @@ def test_지나간_장의_회차와_다른_계좌는_거두지_않는다(monkeyp
     남음 = {r[0] for r in c.q("SELECT id FROM paper_orders WHERE side = 'buy' AND status = 'open'")}
     assert 남음 == 열림
     assert bm._판정밖({"i_status": "expired", "i_note": job.WITHDRAWN_NOTE})
+
+
+def test_매도하는_계좌의_다음_장_회차만_거두고_까닭도_바르다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A·B 둘 다 장 끝난 뒤 손 실행으로 다음 장 회차를 냈고 다음 아침 A 만 손절 — A 의 회차만 거두고 B 는 그대로,
+    A 의 skip 까닭은 "열린 매수 주문 있음" 이 아니라 손절(거둔 회차를 같은 실행 배분이 보지 않음) (25.1592 반박 [권고])."""
+    c = Client(accounts=("A", "B"))
+    c.conn.execute("INSERT INTO paper_cash_flows (flow_date, amount_krw, kind, created_at, request_key)"
+                   " VALUES ('2026-10-01', 1000000, 'deposit', '2026-10-01T00:00:00+00:00', 'k1')")  # fmt: skip
+    신호 = lambda d: dataclasses.replace(_신호(), as_of_date=d, close_date=d)  # noqa: E731
+    _시세(c, "2026-10-13", 10_000, 10_000)
+    _돌림(c, monkeypatch, "2026-10-13", "2026-10-14", "2026-10-13T23:30:00+00:00", 신호("2026-10-13"))
+    _시세(c, "2026-10-14", 10_000, 9_900)
+    _돌림(c, monkeypatch, "2026-10-14", "2026-10-15", "2026-10-15T07:00:00+00:00", 신호("2026-10-14"), after_close=True)
+    _시세(c, "2026-10-15", 9_300, 9_200)
+
+    def 오직A(client, market, 규칙, 체결, *a, **k):  # noqa: ANN001, ANN002, ANN003, ANN202
+        return {1: (["손절"], [])} if 체결 and 체결[0].account_id == "A" else {}
+
+    monkeypatch.setattr(job, "sell_decisions", 오직A)
+    기록 = _돌림(c, monkeypatch, "2026-10-15", "2026-10-16", "2026-10-15T23:30:00+00:00", 신호("2026-10-15"))
+    assert 기록["accounts"]["A"].get("buys_withdrawn") == 3 and not 기록["accounts"]["B"].get("buys_withdrawn")
+    남음 = c.q("SELECT account_id, status FROM paper_orders WHERE side = 'buy' AND fill_session = '2026-10-16'"
+               " AND decided_on = '2026-10-14'")  # fmt: skip
+    assert sorted(set(남음)) == [("A", "expired"), ("B", "open")]
+    까닭 = [r for (r,) in c.q("SELECT reason FROM paper_decisions WHERE account_id = 'A' AND decided_on = '2026-10-15'")]
+    assert not any(r.startswith("열린 매수 주문 있음") for r in 까닭)
