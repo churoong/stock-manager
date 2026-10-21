@@ -9,11 +9,12 @@ import type { Series } from "@/components/EquityChart";
 import { amountText, statusText } from "@/lib/kisPaper";
 import type { Attribution } from "@/lib/paper";
 
+/** 계좌마다 한 번 — 바깥이 평가 행 전체를 훑고 행마다 하위 질의를 돌면 읽는 양이 계좌 행 수의 제곱까지 컸다(25.1630 교차검증 [권고] 3) */
 export const LAB_ATTRIBUTION_SQL = `SELECT d.account_id, d.as_of, d.attribution_json, a.name
-FROM paper_daily d JOIN paper_accounts a ON a.id = d.account_id
-WHERE d.as_of = COALESCE(
-  (SELECT MAX(x.as_of) FROM paper_daily x WHERE x.account_id = d.account_id AND x.attribution_json IS NOT NULL),
-  (SELECT MAX(x.as_of) FROM paper_daily x WHERE x.account_id = d.account_id))
+FROM paper_accounts a CROSS JOIN paper_daily d
+WHERE d.account_id = a.id AND d.as_of = COALESCE(
+  (SELECT MAX(x.as_of) FROM paper_daily x WHERE x.account_id = a.id AND x.attribution_json IS NOT NULL),
+  (SELECT MAX(x.as_of) FROM paper_daily x WHERE x.account_id = a.id))
 ORDER BY d.account_id`;
 /** 운용 요약 최근 120일 — 시장 칸의 지주사 기록만 꺼낸다(기본키 역순이라 120행) */
 export const LAB_HOLDING_DAYS = 120;

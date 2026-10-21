@@ -45,3 +45,23 @@ def test_견줄_skip_은_여전히_28일에_한_번() -> None:
     a = pp.attribution(rows, [])
     assert a["skipped"]["n"] == 2 and a["skipped"]["avg"] == 2.0  # 3-10 은 같은 에피소드, 4-06 은 새 에피소드
     assert a["skip_by_reason"]["섹터 상한 도달"]["n"] == 1
+
+
+def test_까닭별_칸도_같은_종목은_28일에_한_번() -> None:
+    """교차검증 [권고] 2 — 까닭별 칸의 묶기가 빠지면 날마다 한 건씩 세여 겹친 표본(25.1453)이 되살아난다."""
+    rows = [_d(1, "2026-03-02", "skip", "투자 여력 부족", 1.0, held=False),
+            _d(1, "2026-03-05", "skip", "투자 여력 부족", 2.0, held=False)]  # fmt: skip
+    assert pp.attribution(rows, [])["skip_by_reason"]["투자 여력 부족"]["n"] == 1
+
+
+def test_까닭별_상위_5는_입력_순서와_무관() -> None:
+    """교차검증 [권고] 1 — n 이 같은 까닭이 여럿이면 이름 순. 결정 원장 질의엔 순서가 없다."""
+    import random
+
+    rows = [_d(i, "2026-03-02", "skip", f"까닭{i}", float(i), held=False) for i in range(1, 8)]
+    본 = set()
+    for seed in range(10):
+        섞음 = rows[:]
+        random.Random(seed).shuffle(섞음)
+        본.add(tuple(pp.attribution(섞음, [])["skip_by_reason"]))
+    assert 본 == {("까닭1", "까닭2", "까닭3", "까닭4", "까닭5")}

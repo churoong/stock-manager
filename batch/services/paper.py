@@ -994,7 +994,10 @@ def attribution(decisions: list[dict[str, Any]], entries: list[tuple[float, floa
     # **거른 뒤 에피소드로 묶는다**(25.1630) — 예전엔 묶은 뒤 걸러, 에피소드 첫 줄이 견주지 않는 skip("판 뒤"·"상한
     # 도달"·이미 든 종목)이면 28일 안에 다시 새 후보가 된 같은 종목의 skip 까지 빠졌다(판 뒤 다시 산 줄은 buy 라 남아
     # 안 산 쪽만 빠짐 — 선정 비교가 한쪽으로 기움, 25.1601 [참고]). 까닭별 칸도 까닭마다 따로 묶는다
-    원skip = [d for d in 원래 if d.get("kind") == "skip"]
+    # 날짜·종목 순 — 결정 원장 질의에 순서가 없어 까닭 묶음의 순서(n 이 같은 까닭의 상위 5)가 DB 가 돌려준 순서를 따랐다
+    # (25.1630 교차검증 [권고] 1)
+    원skip = sorted((d for d in 원래 if d.get("kind") == "skip"),
+                   key=lambda x: (str(x.get("decided_on") or ""), str(x.get("stock_id"))))  # fmt: skip
     견줄 = _에피소드([d for d in 원skip if not str(d.get("reason")).startswith(NONCOMPARABLE_SKIP_PREFIXES)
                    and not _추가매수(d)])  # fmt: skip
     까닭: dict[str, list[dict[str, Any]]] = {}
@@ -1006,7 +1009,8 @@ def attribution(decisions: list[dict[str, Any]], entries: list[tuple[float, floa
         "horizon": ATTRIBUTION_HORIZON,
         "selection": _초과(종류["buy"]),
         "skipped": _초과(견줄),
-        "skip_by_reason": dict(sorted(((k, _초과(v)) for k, v in 까닭.items()), key=lambda kv: -kv[1]["n"])[:5]),
+        "skip_by_reason": dict(sorted(((k, _초과(v)) for k, v in 까닭.items()),
+                                      key=lambda kv: (-kv[1]["n"], kv[0]))[:5]),  # fmt: skip
         "entry": {"n": len(진입), "avg": sum(진입) / len(진입) if 진입 else None},
         "missed": _초과(종류["missed"]),
         "sold": _초과(종류["sell"]),
