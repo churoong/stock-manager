@@ -2330,22 +2330,33 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
             try:
                 from batch.jobs import paper as paper_job
 
-                모의줄, step_log["paper"] = paper_job.run_step(
-                    client, market=market, trade_date=decision.trade_date,
-                    # 개장 뒤인가는 **개장까지 남은 분으로** — 손 실행(force)은 `late_minutes` 를 채우지 않는다
-                    # (25.1447, 교차검증 [필수] 3: /status 수동 실행이 장중이면 매도가 주문보다 앞선 시가로 찼다)
-                    late=decision.minutes_to_open is not None and decision.minutes_to_open <= 0,
-                    after_close=_장_끝남(market, decision.session_date),
-                    signal_rows=signal_rows if 추천_오류 is None else [],
-                    settings=settings if 추천_오류 is None else None, price_series=corr_series,
-                    series_unknown=_corr_unknown(client, signals_as_of or decision.trade_date, warnings),
-                    allocate=추천_오류 is None and 배분_안함 is None and not settings.get("fx_missing"),
-                    # 모의 보유 가운데 2부가 읽지 않은 종목의 시세 — 상관 축소가 같은 규칙으로 돌게 (docs/paper.md 2.1)
-                    series_loader=lambda ids: load_price_series(
-                        client, ids, signals_as_of or decision.trade_date, warnings),
-                )  # fmt: skip
-                if 모의줄:
-                    message += "\n\n" + "\n".join(모의줄)
+                # 다른 시장의 이 단계와 겹치지 않게(25.1633 — 겹치면 장부 현금이 음수가 될 수 있었다)
+                with paper_job.step_lock(client, market) as 잠금:
+                    if 잠금 is None:
+                        step_log["paper"] = {"skipped": "다른 시장의 가상모의투자 단계가 도는 중(잠금)"}
+                        warnings.append(
+                            f"가상모의투자 단계를 건너뜀 — 다른 시장의 같은 단계가 {paper_job.STEP_LOCK_WAIT} 넘게 돌고"
+                            " 있습니다(장부가 겹치지 않게). 그 실행이 끝난 뒤 손 실행으로 다시 돌리세요"
+                        )
+                    else:
+                        모의줄, step_log["paper"] = paper_job.run_step(
+                            client, market=market, trade_date=decision.trade_date,
+                            # 개장 뒤인가는 **개장까지 남은 분으로** — 손 실행(force)은 `late_minutes` 를 채우지 않는다
+                            # (25.1447, 교차검증 [필수] 3: /status 수동 실행이 장중이면 매도가 주문보다 앞선 시가로
+                            # 찼다)
+                            late=decision.minutes_to_open is not None and decision.minutes_to_open <= 0,
+                            after_close=_장_끝남(market, decision.session_date),
+                            signal_rows=signal_rows if 추천_오류 is None else [],
+                            settings=settings if 추천_오류 is None else None, price_series=corr_series,
+                            series_unknown=_corr_unknown(client, signals_as_of or decision.trade_date, warnings),
+                            allocate=추천_오류 is None and 배분_안함 is None and not settings.get("fx_missing"),
+                            # 모의 보유 가운데 2부가 읽지 않은 종목의 시세 — 상관 축소가 같은 규칙으로 돌게
+                            # (docs/paper.md 2.1)
+                            series_loader=lambda ids: load_price_series(
+                                client, ids, signals_as_of or decision.trade_date, warnings),
+                        )  # fmt: skip
+                        if 모의줄:
+                            message += "\n\n" + "\n".join(모의줄)
             except Exception as exc:  # noqa: BLE001 — 곁다리. 경고로 남기고 리포트는 보낸다
                 if db.quota_reason(exc):
                     raise

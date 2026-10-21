@@ -13,7 +13,10 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Callable
+import time
+import uuid
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import replace as dc_replace
 from datetime import UTC, date, datetime, timedelta
 from functools import partial
@@ -422,6 +425,48 @@ def _쓰기(client: Any, statements: list[tuple[str, list[Any]]]) -> None:
         except AtomicUnsupported:
             pass
     client.batch(statements)
+
+
+#: 가상모의투자 단계 임대 잠금 (docs/paper.md 2.4, 25.1633). 국내·미국 일일 배치는 Actions 동시 실행 그룹이 시장마다
+#: 따로라(`daily-kr`·`daily-us`) 손 실행·늦은 예약이면 두 시장의 이 단계가 겹칠 수 있다. 겹치면 체결 장부를 읽은 뒤 상대
+#: 시장이 낸 체결을 못 보고 현금 검사를 해 장부 현금이 음수가 됐고(재현: −900,284원), 늦게 쓴 평가 행이 상대 체결을
+#: 못 본 채 덮어 다음 날 검산이 거짓으로 어긋났다(실행 겹침 감사 [필수] 1·2). settings 한 행(값 {token, market,
+#: until})을 조건부 UPDATE 로 잡는다 — 마이그레이션 없이, 한 시장 한 실행에 읽기·쓰기 몇 번
+STEP_LOCK_KEY = "paper_step_lock"
+#: 임대 기한 — 끊긴 실행이 놓지 못해도 이만큼 뒤 풀린다. 단계는 보통 몇 분 `[확인필요: step_log 소요 시간 실측]`
+STEP_LOCK_TTL = timedelta(minutes=60)
+#: 상대 시장 단계가 끝나길 기다리는 최대 — 넘으면 이번 실행은 이 단계를 건너뛰고 경고(손 실행으로 다시)
+STEP_LOCK_WAIT = timedelta(minutes=30)
+STEP_LOCK_POLL_SECONDS = 20
+
+
+@contextmanager
+def step_lock(
+    client: Any, market: str, *, clock: Callable[[], datetime] | None = None,
+    sleep: Callable[[float], None] = time.sleep,
+) -> Iterator[dict[str, Any] | None]:
+    """가상모의투자 단계 잠금 — 잡으면 {token, market, until}, `STEP_LOCK_WAIT` 안에 못 잡으면 None. 나올 때 내 token
+    일 때만 놓는다(기한이 지나 남이 잡았으면 건드리지 않는다)."""
+    clock = clock or (lambda: datetime.now(UTC))
+    token = uuid.uuid4().hex
+    시작 = clock()
+    잡음: dict[str, Any] | None = None
+    while True:
+        지금 = clock().astimezone(UTC)
+        값 = {"token": token, "market": market, "until": (지금 + STEP_LOCK_TTL).isoformat()}
+        if db.lease_try(client, STEP_LOCK_KEY, 값, 지금.isoformat()):
+            잡음 = 값
+            break
+        if 지금 - 시작 >= STEP_LOCK_WAIT:
+            log.warning("가상모의투자 단계 잠금을 %s 안에 못 잡음 — 지금 잡은 쪽 %s", STEP_LOCK_WAIT,
+                        db.get_setting(client, STEP_LOCK_KEY, {}))  # fmt: skip
+            break
+        sleep(STEP_LOCK_POLL_SECONDS)
+    try:
+        yield 잡음
+    finally:
+        if 잡음 is not None:
+            db.lease_release(client, STEP_LOCK_KEY, token, clock().astimezone(UTC).isoformat())
 
 
 def _flows(client: Any) -> tuple[list[pp.CashFlow], dict[int, str]]:
@@ -1539,6 +1584,11 @@ def run_step(
     오늘 = cal.local_today(KST_MARKET).isoformat()
     기록: dict[str, Any] = {"trade_date": trade_date}
     flows, flow_created = _flows(client)
+    # **실행 시작 뒤 들어온 입금은 다음 실행이 센다** (25.1633, 실행 겹침 감사 [필수] 3) — 이 실행의 평가 행은 시각
+    # `지금` 으로 적히고 다음 날 그 뒤의 입금을 "새 입금" 으로 센다. `지금` 과 이 읽기 사이에 들어온 입금은 오늘
+    # 평가에도
+    # 들고 다음 날 또 새 입금으로 세여 시간가중 지수가 영구히 반토막 났다(재현: 0.5)
+    flows = [f for f in flows if not pp.after(flow_created.get(f.id, ""), 지금)]
     if not flows:
         return [], {"skipped": "입금 없음"}
     accounts = client.execute(ACCOUNTS_SQL).dicts()
