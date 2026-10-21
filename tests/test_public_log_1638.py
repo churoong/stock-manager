@@ -35,3 +35,18 @@ def test_운영_출력은_잘못된_바이트에도_죽지_않는다(tmp_path: P
                        capture_output=True, env={**os.environ, "REPO_PUBLIC": "true", "PYTHONIOENCODING": "utf-8:strict"}, check=False)  # fmt: skip
     assert r.returncode == 0, r.stderr
     assert 로그.read_text(encoding="utf-8").splitlines()[-1] == "end"
+
+
+def test_운영_출력으로_넘기는_파이썬은_stderr_까지() -> None:
+    """교차검증 [권고] — `2>&1` 이 빠지면 stderr 로 나가는 경고·예외(보유 CIK·금액이 든 줄)가 공개 로그에 찍힌다."""
+    빠짐 = []
+    for 파일 in sorted(WF.glob("*.yml")):
+        글 = 파일.read_text(encoding="utf-8").replace("\\\n", " ")  # 줄 이음을 한 줄로
+        for 줄 in 글.splitlines():
+            s = 줄.strip()
+            if s.startswith("#") or "| python scripts/ops_tee.py" not in s:
+                continue
+            앞 = s.split("| python scripts/ops_tee.py", 1)[0]
+            if "python " in 앞 and "2>&1" not in 앞:
+                빠짐.append(f"{파일.name}: {s[:120]}")
+    assert not 빠짐, 빠짐
