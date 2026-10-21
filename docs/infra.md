@@ -36701,7 +36701,7 @@ handoff "실전 수익 쪽 다음 후보" 2번(핵심 H 다년 백테스트)의 
 
 **왜**: 핵심 H 백테스트 정확성 감사(감사 에이전트, 우선순위 ② — 11-03 첫 판정 전). 결과 행·실행 기록·웹 카드에 실리는 "관문 잣대"(`evidence.gate`)가 실전 전환 관문(desk GATE_SEL)과 같은 숫자라고 문서가 말하는데 다른 모집단으로 셌다. 효용: 핵심 H 가 운영 관문과 같은 잣대로 "선정이 안 산 새 후보보다 나았나" 를 미리 보여 준다(사전 등록 판정 `verdict` 는 이 칸을 쓰지 않는다).
 
-**[필수] — 지주사가 고르지 않은 추천 종목의 skip 줄 빠짐**: 운영 H 는 `holding_step` 이 추천받았지만 고르지 않은 종목을 "지주사: 추천 회사 1곳"·"지주사: 점수 순위 밖(상위 5)" skip 으로 결정 원장에 적고, `selection_evidence` 가 그 줄을 "안 산 새 후보" 로 센다. 백테스트 `CoreStrategy._buys` 는 `buy_orders` 의 결정(고른 종목의 buy·skip)만 `DayLog.decisions` 에 넣어 — 지주사 skip 은 메모리 원장(`CoreMarket.ledger`)에만 — 견줄 풀이 "고른 종목 가운데 못 산 것" 뿐이었다. 재현(1534 픽스처 30종목·600일): 매수 날 65일에 백테스트 견줄 skip 2줄 대 운영 꼴 지주사 skip 84줄. 실제 국내(수백 종목)에선 운영 풀은 차고 백테스트 풀은 거의 빈다.
+**[필수] — 지주사가 고르지 않은 추천 종목의 skip 줄 빠짐**: 운영 H 는 `holding_step` 이 추천받았지만 고르지 않은 종목을 "지주사: 추천 회사 1곳"·"지주사: 점수 순위 밖(상위 5)" skip 으로 결정 원장에 적고, `selection_evidence` 가 그 줄을 "안 산 새 후보" 로 센다. 백테스트 `CoreStrategy._buys` 는 `buy_orders` 의 결정(고른 종목의 buy·skip)만 `DayLog.decisions` 에 넣어 — 지주사 skip 은 메모리 원장(`CoreMarket.ledger`)에만 — 견줄 풀이 "고른 종목 가운데 못 산 것" 뿐이었다. 재현(감사 에이전트가 1534 픽스처를 30종목·600일로 늘린 판 — 저장소 시험 픽스처는 89일): 매수 날 65일에 백테스트 견줄 skip 2줄 대 운영 꼴 지주사 skip 84줄. 실제 국내(수백 종목)에선 운영 풀은 차고 백테스트 풀은 거의 빈다.
 
 **고침**: `core_strategy.holding_skips(dv, top_n, held)` — `dv.ranked` 가운데 `dv.picks` 밖이고 신호 행이 있는 종목마다 운영과 같은 사유·`ref_close`·`ref_date`(첫 행)·`detail.held`(그날 보유) skip 줄. `selection == "weighted"`(core_h)일 때 결정에 더한다.
 
@@ -36710,6 +36710,8 @@ handoff "실전 수익 쪽 다음 후보" 2번(핵심 H 다년 백테스트)의 
 **판**: 없음(백테스트 진단 칸 — 운영 매매·판 그대로). 문서 바로잡음: backtest.md 종합 점수 가중은 "지금 설정값" 이 아니라 균등(`EQUAL_WEIGHTS`), `make_core_strategy` 서명에 `buy_fee_pct`(25.1625).
 
 **남긴 [권고]**(감사): 엔진이 지정가 매수에도 슬리피지를 매김(운영 `make_fill`·로트 원가는 안 매김 — 합성 600일 연 약 0.055%p, 보수 쪽, H−G 짝 영향 없음) · 수수료 설정이 한쪽만 찼을 때 엔진 왕복이 운영과 다름(`backtest.py:154-156` 빈 쪽에도 찬 값 대 운영 기본값 — 10-22 db-status 로 운영 `fees` 확인) · `run_core` 가 설정 `max_weight_per_stock`·섹터 상한을 읽지 않음(10%·30% 고정).
+
+**교차검증**(다른 에이전트, `-k core` 328): 코드 반박 없음 — 운영의 지주사 skip(추천받았지만 안 고른 종목)과 `prebuy_sell_flags`·`buy_orders`·관문 결정(고른 종목)은 종목이 겹치지 않아 유일 키·INSERT OR IGNORE 순서와 무관, `held` = `DayLog.held`(w>0) 불일치 0, `dv.picks` 는 운영 `고른` 과 같은 식으로 상위 5 로 잘림, `dv.rows` 첫 행 = 운영 `행들[sid][0]`, 다른 칸(`loss_gate`·`exit_pair`·`holding_eq`)은 이 줄을 안 읽음. **[필수] — 시험이 핵심을 못 지킴**: `kind` 를 blocked 로·`held` 를 늘 False 로·사유 둘 바꿈·`ref_date` None 이 모두 살아남았고, 89일 픽스처는 "점수 순위 밖" 갈래를 돌지 않음 → 합성 `test_holding_skips_는_운영과_같은_꼴`(두 사유·held·kind·기준일·신호 행 없는 종목 건너뜀)과 `test_core_h_지주사_skip_의_held_는_그날_보유` 더함(네 변이 모두 깨짐 확인). [권고]: 고른 종목 자르기(`CoreMarket.top_n`)와 사유 글(`Variant.top_n`)의 출처가 둘(지금 둘 다 5) · 운영 줄 `detail.holding`(표)은 백테스트에 없음(읽는 곳 없음).
 
 ### 25.1635 36회차 통과분 — 관문 하루 수익·까닭 코드별 막힘 계측
 
