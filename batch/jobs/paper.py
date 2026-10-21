@@ -95,8 +95,11 @@ STOP_WITHDRAWN_NOTE = "손절이 선 보유 — 남은 매수 회차 거둠 (doc
 EXPIRE_SQL = (
     "UPDATE paper_orders SET status = 'expired', closed_on = ?, close_note = ? WHERE id = ? AND status = 'open'"
 )
+#: 미룬 주문은 다음 장 **시가** 잣대 — 장 열린 뒤 낸(`fill_basis='close'`) 매도가 정지·하한가로 미뤄지면 다음 장엔
+#: 개장 전에 이미 있던 주문인데 종가로 찼다(KIS 는 다음 날 시장가로 다시 내 시가에 찬다, 25.1620 체결 판정 감사
+#: [필수] 1)
 DEFER_SQL = (
-    "UPDATE paper_orders SET fill_session = ?, deferrals = deferrals + 1, close_note = ?"
+    "UPDATE paper_orders SET fill_session = ?, deferrals = deferrals + 1, close_note = ?, fill_basis = 'open'"
     " WHERE id = ? AND status = 'open'"
 )
 INSERT_ORDER_SQL = (
@@ -456,19 +459,33 @@ def _fx(client: Any, day: str) -> tuple[float, str] | None:
     return rate, 날
 
 
+def _수수료(market: str, fees: dict | None) -> tuple[float, float]:
+    """매수·매도 수수료(%)를 **따로** — 사용자 설정(`{kr|us}_{buy|sell}_pct`), 빈 쪽만 백테스트 기본값. 예전엔
+    백테스트의 편도 평균(`commission_pct`)을 양쪽에 붙여 매수 0.015·매도 0.25 면 둘 다 0.1325, 매도만 채우면 매수에도
+    0.25 가 붙었다(25.1620, 체결 판정 감사 [필수] 3). 백테스트는 왕복을 편도 ×2 로 내므로 평균이 맞고, 체결마다 붙이는
+    가상모의투자는 쪽마다가 맞다"""
+    앞 = "us" if market.upper() == "US" else "kr"
+    잎, _ = sr.잎마다(fees, (f"{앞}_buy_pct", f"{앞}_sell_pct"))
+    매수, 매도 = (bt._pct(잎.get(f"{앞}_{side}_pct")) for side in ("buy", "sell"))
+    기본 = bt.Costs.commission_pct
+    return (기본 if 매수 is None else 매수), (기본 if 매도 is None else 매도)
+
+
 def costs_for(market: str, fees: dict | None, taxes: dict | None, day: str) -> pp.Costs:
     """그 시장 비용 — 사용자 설정, 비면 백테스트 기본값(국내 매도세는 시행일 표) (docs/paper.md 2.3)."""
     c = bt.Costs.for_country(market, fees, taxes)
-    return pp.Costs(buy_fee_pct=c.commission_pct, sell_fee_pct=c.commission_pct, sell_tax_pct=c.tax_at(day),
-                    slippage_pct=c.slippage_pct)  # fmt: skip
+    매수, 매도 = _수수료(market, fees)
+    return pp.Costs(buy_fee_pct=매수, sell_fee_pct=매도, sell_tax_pct=c.tax_at(day), slippage_pct=c.slippage_pct)
 
 
 def cost_snapshot(market: str, fees: dict | None, taxes: dict | None, day: str) -> dict[str, Any]:
-    """주문 근거에 남기는 비용 — 그 장(`day`) 기준 편도 수수료·매도세·슬리피지와 **기본값을 쓴 항목**
-    (docs/paper.md 2.3 — 문서는 적는다고 했는데 주문 스냅샷에 없었다, 25.1595). 실제 비용은 체결일 설정으로 붙는다"""
+    """주문 근거에 남기는 비용 — 그 장(`day`) 기준 매수·매도 수수료·매도세·슬리피지와 **기본값을 쓴 항목**
+    (docs/paper.md 2.3 — 문서는 적는다고 했는데 주문 스냅샷에 없었다, 25.1595). 실제 비용은 체결일 설정으로 붙는다.
+    `fee_pct` 는 예전 칸(편도 평균) — 옛 근거와 견주려고 남긴다(25.1620)"""
     c = bt.Costs.for_country(market, fees, taxes)
-    return {"fee_pct": c.commission_pct, "sell_tax_pct": c.tax_at(day), "slippage_pct": c.slippage_pct,
-            "defaults": list(c.defaults), "as_of": day}  # fmt: skip
+    매수, 매도 = _수수료(market, fees)
+    return {"fee_pct": c.commission_pct, "buy_fee_pct": 매수, "sell_fee_pct": 매도, "sell_tax_pct": c.tax_at(day),
+            "slippage_pct": c.slippage_pct, "defaults": list(c.defaults), "as_of": day}  # fmt: skip
 
 
 def _보유와_열린매수(
@@ -573,8 +590,11 @@ def fill_orders(
     오늘환율 = _fx(client, trade_date)
     # 다른 시장의 미체결 매수도 현금을 묶고 있다 — 체결 검사에서 함께 뺀다 (25.1447, 교차검증 권장)
     남은매수 = {int(r["id"]): _order(r) for r in 전부 if r["side"] == "buy"}
-    # 매도 먼저(현금이 생긴다), 그다음 매수 — 같은 날 안에서는 주문 순서
-    for r in sorted(대상, key=lambda x: (x["side"] != "sell", int(x["id"]))):
+    # 장 순서 먼저, 그 안에서 매도 먼저(현금이 생긴다), 그다음 매수 — 같은 날 안에서는 주문 순서. 장 순서가 없으면 두
+    # 장의 주문을 한 실행에서 판정할 때(어제 시세가 늦은 아침) 뒤 장 매도가 앞 장 매수보다 먼저 처리돼
+    # 거래별 실현손익이 평균 원가 장부(`pp.realized`)와 어긋나고 앞 장 매수의 현금 검사에 뒤 장 매도 대금이 들어갔다
+    # (25.1620, 체결 판정 감사 [필수] 2 — `pp.positions` 정렬과 맞춤)
+    for r in sorted(대상, key=lambda x: (str(x["fill_session"]), x["side"] != "sell", int(x["id"]))):
         o = _order(r)
         날 = o.fill_session
         if any(f.order_id == o.id for f in fills):
