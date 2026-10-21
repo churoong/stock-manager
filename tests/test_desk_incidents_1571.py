@@ -87,3 +87,32 @@ def test_주간_요약이_월간_복기를_보내면_그_달을_적는다(monkey
     monkeypatch.setattr(jp, "summary_section", lambda *_a, **_k: ["[가상모의투자 월간 복기] 2026-10-01 부터"])
     assert ws.run(force=True) == 0  # 11-08 KST — 따라잡기
     assert db.get_setting(mem, jp.MONTHLY_REVIEW_KEY, None) == "2026-11"  # type: ignore[arg-type]
+
+
+def test_가상모의투자_단계가_못_돈_실행은_성공으로_세지_않는다() -> None:
+    """25.1636(36회차 P3) — 단계가 예외·잠금으로 끝나도 실행은 partial 이라 무사고로 셌다."""
+    from batch.services import desk
+
+    기대 = {"daily_kr": ["2026-10-14", "2026-10-15", "2026-10-16", "2026-10-19", "2026-10-20"]}
+    줄 = [{"job_name": "daily_kr", "trade_date": "2026-10-14", "status": "partial", "paper_error": "boom"},
+          {"job_name": "daily_kr", "trade_date": "2026-10-15", "status": "partial",
+           "paper_skipped": "다른 시장의 가상모의투자 단계가 도는 중(잠금)"},
+          # 잠금으로 건너뛴 뒤 같은 거래일 손 실행이 끝까지 돌았다 — 사고 아님
+          {"job_name": "daily_kr", "trade_date": "2026-10-16", "status": "partial",
+           "paper_skipped": "다른 시장의 가상모의투자 단계가 도는 중(잠금)"},
+          {"job_name": "daily_kr", "trade_date": "2026-10-16", "status": "success"},
+          {"job_name": "daily_kr", "trade_date": "2026-10-19", "status": "success", "paper_skipped": "입금 없음"},
+          {"job_name": "daily_kr", "trade_date": "2026-10-20", "status": "success"}]  # paper 칸 없음 — 모름, 세지 않음
+    assert desk.batch_incident_days(줄, 기대) == 2
+
+
+def test_실행_기록_질의는_깨진_step_log_에도_돈다() -> None:
+    mem = MemClient()
+    db.apply_migrations(mem)  # type: ignore[arg-type]
+    for i, (log, st) in enumerate((("not json", "success"), ('{"paper": {"error": "x"}}', "partial"), (None, "success"))):
+        mem.conn.execute(
+            "INSERT INTO batch_runs (job_name, trade_date, status, started_at, step_log) VALUES (?, ?, ?, ?, ?)",
+            ["daily_kr", f"2026-10-1{i}", st, f"2026-10-1{i}T00:00:00+00:00", log])
+    줄 = [dict(zip(("job_name", "trade_date", "status", "paper_error", "paper_skipped"), r, strict=True))
+          for r in mem.conn.execute(jd.BATCH_RUNS_SQL, ["daily_kr", "daily_us", "2026-01-01"]).fetchall()]
+    assert [r["paper_error"] for r in 줄] == [None, "x", None]

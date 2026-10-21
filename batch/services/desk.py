@@ -295,16 +295,31 @@ def risk_ratio(v: list[tuple[str, float]], start: str | None = None) -> float | 
     return m / sd if sd > 0 else None
 
 
+#: 가상모의투자 단계의 건너뜀 가운데 사고가 아닌 것 — 입금이 없으면 할 일이 없다
+PAPER_SKIP_OK = ("입금 없음",)
+
+
+def paper_step_failed(row: dict[str, Any]) -> bool:
+    """그 실행의 가상모의투자 단계가 끝까지 돌지 못했나 — `step_log.paper.error`(예외) 또는 입금 없음 밖의 `skipped`
+    (다른 시장 잠금 등). 실행은 `partial` 로 끝나 예전엔 무사고로 셌다(25.1636, 36회차 P3). `paper` 칸이 없는 실행
+    (기능 전 옛 행·dry-run)은 모름 — 사고로 세지 않는다"""
+    if row.get("paper_error"):
+        return True
+    건너뜀 = row.get("paper_skipped")
+    return bool(건너뜀) and str(건너뜀) not in PAPER_SKIP_OK
+
+
 def batch_incident_days(rows: list[dict[str, Any]], expected: dict[str, list[str]]) -> int:
-    """일일 배치 사고 날 수 — 일마다(`expected` = {작업: 다뤘어야 할 거래일들}) 성공(`success`·`partial`) 기록이 없거나
-    실패(`failed`) 기록이 있던 날 (docs/desk.md 5장 관문 "운영 무사고", 25.1572).
+    """일일 배치 사고 날 수 — 일마다(`expected` = {작업: 다뤘어야 할 거래일들}) 성공(`success`·`partial` **이면서
+    가상모의투자 단계가 끝까지 돈** — 25.1636) 기록이 없거나 실패(`failed`) 기록이 있던 날 (docs/desk.md 5장 관문
+    "운영 무사고", 25.1572). 단계가 잠금으로 건너뛴 뒤 같은 거래일 손 실행이 끝까지 돌았으면 사고가 아니다.
     한도로 건너뜀·끝맺지 못함·실행 기록조차
     못 남긴 날(한도로 첫 읽기에서 깨짐) 모두 "성공 없음" 으로 잡힌다"""
     성공: set[tuple[str, str]] = set()
     실패: set[tuple[str, str]] = set()
     for r in rows:
         k = (str(r.get("job_name")), str(r.get("trade_date") or "")[:10])
-        if r.get("status") in ("success", "partial"):
+        if r.get("status") in ("success", "partial") and not paper_step_failed(r):
             성공.add(k)
         elif r.get("status") == "failed":
             실패.add(k)

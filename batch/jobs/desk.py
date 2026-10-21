@@ -79,7 +79,14 @@ BATCH_DELAY_SQL = (
 #: 있던 날**(`desk.batch_incident_days`). 실행 기록이 아니라 거래일로 센다 — Turso 한도로 막히면 첫 읽기에서 깨져
 #: 실행 기록 행이 아예 남지 않는다(25.1572, 25.1571 반박 [필수]: 예전엔 `failed` 행만, 25.1571 은 건너뜀 행까지 셌지만
 #: 행이 없는 날을 못 봤다)
-BATCH_RUNS_SQL = "SELECT job_name, trade_date, status FROM batch_runs WHERE job_name IN (?, ?) AND started_at >= ?"
+#: 가상모의투자 단계 결과도 같은 행에서(읽기 행 +0) — 단계가 예외·잠금으로 끝나도 실행은 `partial` 이라 무사고로 셌다
+#: (25.1636). 깨진 `step_log` 한 행이 관문 전체를 오류로 만들지 않게 `json_valid` 로 가른다(25.1633 의 같은 교훈)
+BATCH_RUNS_SQL = (
+    "SELECT job_name, trade_date, status,"
+    " CASE WHEN json_valid(step_log) THEN json_extract(step_log, '$.paper.error') END AS paper_error,"
+    " CASE WHEN json_valid(step_log) THEN json_extract(step_log, '$.paper.skipped') END AS paper_skipped"
+    " FROM batch_runs WHERE job_name IN (?, ?) AND started_at >= ?"
+)
 NAMES_SQL = "SELECT id, name, rule_version FROM paper_accounts"
 
 
