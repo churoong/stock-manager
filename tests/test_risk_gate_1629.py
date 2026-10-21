@@ -136,12 +136,104 @@ def test_멈춤으로_원가_평가가_바뀐_날은_하루_손실을_보지_않
     a = 기록["accounts"]["B"]
     지수 = [r[0] for r in c.q("SELECT twr_index FROM paper_daily ORDER BY as_of")]
     assert 지수[-1] / 지수[-2] - 1 < rg.DAILY_LOSS_HALT_PCT / 100  # 지수는 그대로 깎였다(기록은 손대지 않음)
-    assert a["day_loss_unknown"] and a["risk_blocked"] == 0
+    assert a["day_loss_basis"] == "보정" and a["risk_blocked"] == 0  # 멈춘 종목은 어제 평가 그대로 — 0%
     assert c.q("SELECT kind FROM paper_decisions WHERE decided_on='2026-10-16'") == [("buy",)]
 
 
-def test_원가_평가_종목이_그대로면_하루_손실을_본다(monkeypatch: pytest.MonkeyPatch) -> None:
-    """멈춤이 어제부터 이어진 날은 평소대로 — 진짜 −3% 넘는 하락은 막는다."""
+def _멈춤_계좌(monkeypatch: pytest.MonkeyPatch, 멈춤: set[int], 어제부터: bool = False) -> Client:
+    """종목 1(+35% 평가이익, 작은 몫)·종목 3(큰 몫)을 든 B — 10-16 아침 전까지. `어제부터` 면 10-15 행부터 종목 1 멈춤."""
+    monkeypatch.setattr(job, "frozen_ids", lambda *_a, **_k: set(멈춤))
+    c = Client(accounts=("B",))
+    _입금(c, "2026-10-01")
+    넓은 = {"max_weight_per_sector": 100.0, "max_weight_per_stock": 100.0, "min_order_amount": 0}
+    s1 = dataclasses.replace(_신호(), horizon="long", suggested_weight_pct=10.0, as_of_date="2026-10-13",
+                             close_date="2026-10-13", tranche_plan=[{"step": 1, "ratio": 1.0, "price": 10_000}])
+    s3 = dataclasses.replace(_신호(), stock_id=3, ticker="000660", name="종목3", horizon="long",
+                             suggested_weight_pct=80.0, as_of_date="2026-10-13", close_date="2026-10-13",
+                             tranche_plan=[{"step": 1, "ratio": 1.0, "price": 10_000}])  # fmt: skip
+    _시세(c, "2026-10-13", 10_000, 10_000)
+    _시세3(c, "2026-10-13", 10_000, 10_000)
+    _돌림(c, monkeypatch, "2026-10-13", "2026-10-14", "2026-10-13T23:30:00+00:00", [s1, s3], 넓은)
+    _시세(c, "2026-10-14", 10_000, 10_000)
+    _시세3(c, "2026-10-14", 10_000, 10_000)
+    _돌림(c, monkeypatch, "2026-10-14", "2026-10-15", "2026-10-14T23:30:00+00:00", [], 넓은)
+    _시세(c, "2026-10-15", 13_500, 13_500)
+    _시세3(c, "2026-10-15", 10_000, 10_000)
+    if 어제부터:
+        멈춤.add(1)
+    _돌림(c, monkeypatch, "2026-10-15", "2026-10-16", "2026-10-15T23:30:00+00:00", [], 넓은)
+    assert {r[0] for r in c.q("SELECT stock_id FROM paper_fills")} == {1, 3}
+    return c
+
+
+def _종목4로_사봄(c: Client, monkeypatch: pytest.MonkeyPatch, 종목1: float, 종목3: float) -> dict[str, Any]:
+    c.conn.execute("INSERT OR IGNORE INTO stocks (id, ticker, market, country, name_ko, sector, currency, status,"
+                   " source, fetched_at, asset_type) VALUES (4, '000270', 'M', 'KR', '종목4', '다른업종', 'KRW',"
+                   " 'active', 't', 't', 'stock')")  # fmt: skip
+    c.conn.execute("INSERT INTO prices (stock_id, date, open, high, low, close, volume, currency, source, fetched_at)"
+                   " VALUES (1, '2026-10-16', ?, ?, ?, ?, 1000, 'KRW', 't', 't')", [종목1] * 4)  # fmt: skip
+    _시세3(c, "2026-10-16", 종목3, 종목3)
+    s4 = dataclasses.replace(_신호(), stock_id=4, ticker="000270", name="종목4", horizon="long",
+                             suggested_weight_pct=5.0, as_of_date="2026-10-16", close_date="2026-10-16")  # fmt: skip
+    넓은 = {"max_weight_per_sector": 100.0, "max_weight_per_stock": 100.0, "min_order_amount": 0}
+    return _돌림(c, monkeypatch, "2026-10-16", "2026-10-19", "2026-10-18T23:30:00+00:00", [s4], 넓은)["accounts"]["B"]
+
+
+def test_멈춤과_진짜_하락이_겹친_날도_막는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """교차검증 [권고] 1 — 멈춘 종목만 어제 평가로 두므로 다른 보유의 −12% 는 그대로 하루 손실이다."""
+    멈춤: set[int] = set()
+    c = _멈춤_계좌(monkeypatch, 멈춤)
+    멈춤.add(1)
+    a = _종목4로_사봄(c, monkeypatch, 13_500, 8_800)
+    assert a["day_loss_basis"] == "보정"
+    assert c.q("SELECT kind FROM paper_decisions WHERE decided_on='2026-10-16' AND stock_id=4")[0][0] == "blocked"
+
+
+def test_이틀째_이어진_멈춤은_평소대로_본다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """어제부터 멈춘 종목은 기준이 바뀌지 않았다 — 보정 없이 지수 그대로(진짜 하락은 막힘)."""
+    멈춤: set[int] = set()
+    c = _멈춤_계좌(monkeypatch, 멈춤, 어제부터=True)
+    assert c.q("SELECT unknown_json IS NOT NULL FROM paper_daily ORDER BY as_of DESC LIMIT 1") == [(1,)]
+    a = _종목4로_사봄(c, monkeypatch, 13_500, 8_800)
+    assert "day_loss_basis" not in a
+    assert c.q("SELECT kind FROM paper_decisions WHERE decided_on='2026-10-16' AND stock_id=4")[0][0] == "blocked"
+
+
+def test_달력_범위_밖은_옛_잣대() -> None:
+    """교차검증 [권고] 2 — 긴 백테스트(`--years 20`)가 첫 매수일에 멈추지 않게."""
+    assert rg.ref_floor("KR", date(1990, 1, 10)) is None
+    assert rg.stale("1990-01-01", date(1990, 1, 10), None) is True
+    assert rg.stale("1990-01-05", date(1990, 1, 10), None) is False
+    assert rg.stale("2025-10-02", date(2025, 10, 10), rg.ref_floor("KR", date(2025, 10, 10))) is False
+
+
+def test_무작위_대체도_긴_연휴_뒤_자리를_비우지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """R 의 대체 종목 자료 검사도 관문과 같은 거래일 잣대(25.1629) — 달력일이면 추석 뒤 첫날 자리가 비었다."""
+    from batch.services import paper as pp
+
+    monkeypatch.setattr(job, "frozen_ids", lambda *_a, **_k: set())
+    c = Client(accounts=None)
+    for sid in (1, 3):
+        c.conn.execute("INSERT INTO prices (stock_id, date, open, high, low, close, volume, currency, source,"
+                       " fetched_at) VALUES (?, '2025-10-02', 10000, 10000, 10000, 10000, 1000, 'KRW', 't', 't')",
+                       [sid])  # fmt: skip
+    s = dataclasses.replace(_신호(), as_of_date="2025-10-02", close_date="2025-10-02")
+    기록: dict[str, Any] = {}
+    줄 = job.random_substitute(c, [s], account="R1", market="KR", pool=[1, 3], cooldown=set(), stock_cache={},
+                               today=date(2025, 10, 10), 기록=기록)  # fmt: skip
+    assert [r.stock_id for r in 줄] == [pp.random_order([1, 3], "R1|KR|1")[0]]
+
+
+def test_핵심_H_백테스트_관문도_거래일_잣대() -> None:
+    import inspect
+
+    from batch.services import core_strategy
+
+    assert "ref_floor=rg.ref_floor(self.market.country, today)" in inspect.getsource(core_strategy)
+
+
+def test_원가_평가_종목이_없으면_하루_손실을_본다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """원가 평가 종목이 없는 평소 날 — 진짜 −3% 넘는 하락은 막는다."""
     monkeypatch.setattr(job, "frozen_ids", lambda *_a, **_k: set())
     c = Client(accounts=("B",))
     _입금(c, "2026-10-01")
@@ -158,5 +250,5 @@ def test_원가_평가_종목이_그대로면_하루_손실을_본다(monkeypatc
                              as_of_date="2026-10-16", close_date="2026-10-16")  # fmt: skip
     기록 = _돌림(c, monkeypatch, "2026-10-16", "2026-10-19", "2026-10-18T23:30:00+00:00", [s3], 설정)
     a = 기록["accounts"]["B"]
-    assert "day_loss_unknown" not in a
+    assert "day_loss_basis" not in a
     assert c.q("SELECT kind, reason FROM paper_decisions WHERE decided_on='2026-10-16'")[0][0] == "blocked"

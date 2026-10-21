@@ -66,7 +66,7 @@ FX_SQL = "SELECT rate, date FROM fx_rates WHERE pair = 'USDKRW' AND date <= ? OR
 INDEX_FROM_SQL = "SELECT close, date FROM index_prices WHERE index_code = ? AND date >= ? ORDER BY date LIMIT 1"
 INDEX_NOW_SQL = "SELECT close, date FROM index_prices WHERE index_code = ? ORDER BY date DESC LIMIT 1"
 PREV_DAILY_SQL = (
-    "SELECT as_of, cash_krw, equity_krw, twr_index, updated_at, unknown_json FROM paper_daily"
+    "SELECT as_of, cash_krw, equity_krw, twr_index, updated_at, unknown_json, positions_json FROM paper_daily"
     " WHERE account_id = ? AND as_of < ? ORDER BY as_of DESC LIMIT 1"
 )
 #: 그 계좌·시장·거래일에 **결정**(주문이든 안 낸 결정이든)이 이미 있나 — 먼저 쓴 쪽이 이긴다 (docs/paper.md 2.4).
@@ -855,6 +855,7 @@ def mark(
     v = pp.value(flows, 계좌체결, 종가, {"USD": fx[0] if fx else None}, frozen)
     어제 = client.execute(PREV_DAILY_SQL, [account, today]).dicts()
     p = 어제[0] if 어제 else None
+    새입금 = 0.0
     if p is None:
         ok, 글 = True, "첫 기록"
         지수 = 1.0
@@ -874,15 +875,33 @@ def mark(
         # 계좌의 실현손익 합 · 보유 평가손익 합 (25.1455)
         float(sum(r["pnl_krw"] for r in pp.realized(계좌체결))), float(sum(r["unrealized_krw"] for r in v.rows)),
     ])])  # fmt: skip
-    # 원가로 평가한 보유(멈춤·시세·환율 모름)가 어제 행과 다르면 오늘 지수의 변화엔 시세가 아닌 평가 기준의
-    # 변화가 섞였다 — 관문의 하루 손실은 그날 모름으로 본다(25.1629, 위험 점검 감사 [필수] 3)
-    try:
-        어제모름 = {int(u["stock_id"]) for u in json.loads(p.get("unknown_json") or "[]")} if p else set()
-    except (TypeError, ValueError, KeyError):
-        어제모름 = None
-    오늘모름 = {int(u["stock_id"]) for u in v.unknown}
+    관문지수, 기준 = _관문_지수(p, v, 지수, 새입금) if p else (None, None)
     return v, {"recon_ok": ok, "recon_note": 글, "twr": 지수, "kospi": 그림자["KOSPI"], "sp500": 그림자["SP500"],
-               "prev_twr": float(p["twr_index"]) if p else None, "basis_changed": 어제모름 != 오늘모름}
+               "prev_twr": float(p["twr_index"]) if p else None, "gate_twr": 관문지수, "basis": 기준}
+
+
+def _관문_지수(p: dict[str, Any], v: pp.Valuation, 지수: float, 새입금: float) -> tuple[float | None, str | None]:
+    """관문 하루 손실이 볼 오늘 지수와 평가 기준 메모 (25.1629, 위험 점검 감사 [필수] 3·교차검증 [권고] 1).
+
+    원가로 평가한 보유(멈춤·시세·환율 모름)가 어제 행과 다르면 지수 변화에 시세가 아닌 **평가 기준의 변화**가 섞인다 —
+    많이 오른 종목이 분할로 멈추면 시가 → 원가만큼이 "하루 손실" 로 읽혀 매수가 막혔다. 그 종목만 어제 평가 그대로 둔
+    총액으로 다시 낸다(그 종목은 0% 로 본다 — 다른 보유의 진짜 하락은 그대로 막힌다). 바뀐 종목의 수량이 어제와 다르거나
+    (사고판 날) 어제 행을 읽을 수 없으면 모름(None). 기록하는 시간가중 지수 자체는 손대지 않는다(풀리는 날 되돌아온다)
+    """
+    try:
+        어제모름 = {int(u["stock_id"]) for u in json.loads(p.get("unknown_json") or "[]")}
+        어제줄 = {int(r["stock_id"]): r for r in json.loads(p.get("positions_json") or "[]")}
+    except (TypeError, ValueError, KeyError):
+        return None, "모름"
+    바뀐 = 어제모름 ^ {int(u["stock_id"]) for u in v.unknown}
+    if not 바뀐:
+        return 지수, None
+    오늘줄 = {int(r["stock_id"]): r for r in v.rows}
+    if any(sid not in 어제줄 or sid not in 오늘줄 or float(어제줄[sid].get("quantity") or 0)
+           != float(오늘줄[sid]["quantity"]) for sid in 바뀐):  # fmt: skip
+        return None, "모름"
+    보정 = sum(float(어제줄[sid].get("value_krw") or 0) - float(오늘줄[sid]["value_krw"]) for sid in 바뀐)
+    return pp.twr_step(float(p["twr_index"]), float(p["equity_krw"]), v.equity_krw + 보정, 새입금), "보정"
 
 
 def _관문_열린칸(
@@ -1077,7 +1096,7 @@ def random_substitute(
         # 기준 종가는 **신호의 종가 날짜까지** — C 의 기준가와 같은 시점
         # (검증 권장: 장 끝난 뒤 손 실행에서 하루 어긋남)
         종가 = client.execute(LAST_CLOSE_SQL, [c, 기준일[sid]]).rows
-        if not 종가 or str(종가[0][1])[:10] < 묵음선:
+        if not 종가 or rg.stale(str(종가[0][1]), today, 묵음선):
             return None
         if c in frozen_ids(client, {c}, {c: market}):
             return None
@@ -1629,8 +1648,9 @@ def run_step(
                                 at={"KOSPI": (끝시세["KR"], None), "SP500": (끝시세["US"], 오늘)}),
                     지금)  # fmt: skip
         a기록.update({"recon_ok": 검["recon_ok"], "unknown": len(v.unknown)})
-        if 검["basis_changed"] and 검["prev_twr"]:
-            a기록["day_loss_unknown"] = "원가 평가 종목이 어제와 다름"  # 관문 하루 손실을 보지 않은 날(25.1629)
+        if 검["basis"]:
+            # 원가 평가 종목이 어제와 달라 관문 하루 손실을 그 종목 0% 로 보정했거나(보정) 보지 않은 날(모름) — 25.1629
+            a기록["day_loss_basis"] = 검["basis"]
         계좌체결 = [f for f in fills if f.account_id == aid]
         # 사전 위험 점검의 문맥 (docs/paper.md 11장, 25.1451) — 배분과 따로 한 번 더 막는다
         상한 = settings or {}
@@ -1638,11 +1658,10 @@ def run_step(
         문맥 = rg.Context(
             # 하루 수익은 **입출금을 뺀** 시간가중 지수로 (25.1453, 교차검증 [필수] 2) — 평가 총액끼리 견주면
             # 입금 취소일이 −50% 로 읽혀 그날 매수가 모두 막혔고, 입금일엔 진짜 −10% 가 +90% 로 가려졌다.
-            # 원가로 평가한 보유(멈춤·시세 모름)가 어제와 달라진 날은 모름 — 시가 → 원가로 바뀐 만큼이 하루 손실로
-            # 읽혀 매수가 막혔다(25.1629, 위험 점검 감사 [필수] 3)
+            # 원가로 평가한 보유가 어제와 달라진 날은 그 종목을 어제 평가로 둔 지수(`_관문_지수`, 25.1629)
             equity_krw=v.equity_krw,
-            day_return_pct=(검["twr"] / 검["prev_twr"] - 1) * 100
-            if 검["prev_twr"] and not 검["basis_changed"] else None,
+            day_return_pct=(검["gate_twr"] / 검["prev_twr"] - 1) * 100
+            if 검["prev_twr"] and 검["gate_twr"] is not None else None,
             **_관문_열린칸(client, aid, v, 열린, fx, stock_cache),
             max_stock_pct=float(상한.get("max_weight_per_stock") or 10.0),
             max_sector_pct=float(상한.get("max_weight_per_sector") or 30.0),

@@ -140,14 +140,28 @@ def gate(candidates: list[Candidate], ctx: Context) -> tuple[list[Candidate], li
     return 통과, 막힘
 
 
-def ref_floor(market: str, today: date) -> str:
-    """오늘 앞 `STALE_PRICE_SESSIONS` 번째 거래일 — 기준 종가가 이보다 앞서면 묵음. 달력만 읽는다(DB 아님)."""
+def ref_floor(market: str, today: date) -> str | None:
+    """오늘 앞 `STALE_PRICE_SESSIONS` 번째 거래일 — 기준 종가가 이보다 앞서면 묵음. 달력만 읽는다(DB 아님).
+
+    달력 범위(라이브러리 기본 — 앞 20년·뒤 1년) 밖이면 None — 부르는 쪽이 옛 달력일 잣대로 돈다. 예전엔 긴 백테스트
+    (`--years 20`)가 첫 매수일에 통째로 멈출 뻔했다(25.1629 교차검증 [권고] 2)
+    """
     from batch.core import calendar as cal
 
     d = today
-    for _ in range(STALE_PRICE_SESSIONS):
-        d = cal.previous_session(market, d)
+    try:
+        for _ in range(STALE_PRICE_SESSIONS):
+            d = cal.previous_session(market, d)
+    except Exception:  # noqa: BLE001 — 달력 범위 밖(DateOutOfBounds 등)
+        return None
     return d.isoformat()
+
+
+def stale(ref_date: str, today: date, floor: str | None) -> bool:
+    """기준 종가가 묵었나 — `ref_floor` 가 있으면 거래일, 없으면 달력일 `STALE_PRICE_DAYS`."""
+    if floor is not None:
+        return ref_date[:10] < floor
+    return (today - date.fromisoformat(ref_date[:10])).days > STALE_PRICE_DAYS
 
 
 def summary(막힘: list[tuple[Candidate, list[Reason]]]) -> dict[str, Any]:
