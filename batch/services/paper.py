@@ -946,7 +946,10 @@ def attribution(decisions: list[dict[str, Any]], entries: list[tuple[float, floa
     decisions = _에피소드(decisions)
     종류 = {k: [d for d in decisions if d.get("kind") == k]
             for k in ("buy", "skip", "missed", "sell", "hold_flag", "blocked")}  # fmt: skip
-    견줄 = [d for d in 종류["skip"] if not str(d.get("reason")).startswith(NONCOMPARABLE_SKIP_PREFIXES)]
+    # 이미 든 종목의 skip 도 "안 낸 새 후보" 가 아니다 — 다 투자한 계좌는 목표 비중 아래로 내려간 보유(대개 최근에 빠진
+    # 종목)가 날마다 "투자 여력 부족" 으로 이 풀에 들었다(25.1600, 매도·성과 분해 감사 [권고] 3)
+    견줄 = [d for d in 종류["skip"]
+            if not str(d.get("reason")).startswith(NONCOMPARABLE_SKIP_PREFIXES) and not _추가매수(d)]  # fmt: skip
     까닭: dict[str, list[dict[str, Any]]] = {}
     for d in 종류["skip"]:
         까닭.setdefault(_까닭_묶음(str(d.get("reason"))), []).append(d)
@@ -1022,7 +1025,8 @@ def _묶음(day: str) -> int:
 
 
 def _추가매수(d: dict[str, Any]) -> bool:
-    """결정 때 이미 든 종목을 더 산 것인가(`detail.held`, 25.1570 부터 적힌다 — 그 전 행은 모름이라 예전처럼 센다)"""
+    """결정 때 이미 든 종목인가(`detail.held`, 매수 줄 25.1570·제외 skip 줄 25.1600 부터 적힌다 — 그 전 행은 모름이라
+    예전처럼 센다). 산 줄이면 추가 매수, skip 줄이면 새 후보가 아닌 보유"""
     det = d.get("detail")
     if det is None:
         try:
@@ -1053,7 +1057,8 @@ def selection_evidence(decisions: list[dict[str, Any]]) -> dict[str, Any]:
             continue
         if d.get("kind") == "buy":
             날.setdefault(k, {"buy": [], "skip": []})["buy"].append(d)
-        elif d.get("kind") == "skip" and not str(d.get("reason")).startswith(NONCOMPARABLE_SKIP_PREFIXES):
+        elif (d.get("kind") == "skip" and not str(d.get("reason")).startswith(NONCOMPARABLE_SKIP_PREFIXES)
+              and not _추가매수(d)):  # 이미 든 종목의 skip 은 새 후보 풀 밖(25.1600)
             날.setdefault(k, {"buy": [], "skip": []})["skip"].append(d)
     분위묶음: dict[int, list[float]] = {}
     초과묶음: dict[int, list[float]] = {}

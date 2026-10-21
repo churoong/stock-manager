@@ -1240,7 +1240,8 @@ def buy_orders(
         if r0 is not None:
             결정.append({"stock_id": r0.stock_id, "kind": "skip", "reason": e.reason, "ref_close": r0.close,
                          "ref_date": r0.close_date,
-                         "detail": {"horizon": r0.horizon, "score": r0.total_score, "note": e.detail[:200]}})
+                         "detail": {"horizon": r0.horizon, "score": r0.total_score, "note": e.detail[:200],
+                                    "held": r0.stock_id in 든}})  # 이미 든 종목인가(25.1600 — 새 후보 풀에서 뺀다)
     out: list[dict[str, Any]] = []
     for o in 주문:
         b = by_sid[o["stock_id"]]
@@ -1601,7 +1602,10 @@ def run_step(
                 elif sid in 매도 and sid not in 이미팖:
                     문장.append(_결정판(aid, market, trade_date, sid, "sell", ",".join(매도[sid][0]),
                                     {"flags": [f["reason_code"] for f in 메모["flags"]]}, 종가, 날, 지금))  # fmt: skip
-                if 메모["hold"]:
+                # 그날 파는(또는 매도가 막힌·이미 매도가 열린) 종목은 들고 간 것이 아니다 — 함께 적으면 성과 분해의
+                # "판 뒤" 와 "들고 간 뒤" 에 같은 결정이 두 번 들었다(25.1600, 매도·성과 분해 감사 [권고] 2 —
+                # G·H 추적손절인데 목표 위, C 기간초과와 목표도달이 함께 선 날)
+                if 메모["hold"] and sid not in 매도:
                     문장.append(_결정판(aid, market, trade_date, sid, "hold_flag", ",".join(메모["hold"]),
                                     {"flags": [f["reason_code"] for f in 메모["flags"]], "sell_rule": 규칙},
                                     종가, 날, 지금))  # fmt: skip
