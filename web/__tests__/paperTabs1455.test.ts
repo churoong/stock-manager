@@ -2,7 +2,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { AccountTabs, type Data, type SubTab } from "@/components/PaperView";
+import { ACCOUNT_COLOR, AccountTabs, type Data, type SubTab } from "@/components/PaperView";
 import { accountView } from "@/lib/paper";
 
 const 평가 = (aid: string, realized: number, unrealized: number) => ({
@@ -75,5 +75,26 @@ describe("모의 계좌 탭", () => {
   it("미체결은 그 계좌 것만", () => {
     expect(그림("B", "orders")).toContain("매수 2회차 195,000원 이하");
     expect(그림("A", "orders")).toContain("체결 대기 주문이 없습니다");
+  });
+});
+
+describe("보유 손익 표시·그래프 색 (25.1604)", () => {
+  it("달러 종목은 원화 % 와 종목 통화 % 를 함께, 원가로 둔 줄은 까닭", () => {
+    const 미국 = { ...보유A, stock_id: 7, ticker: "AAPL", name: "Apple", currency: "USD", avg_price: 100, close: 92,
+      unrealized_krw: 1_000, unrealized_pct: 1.2, unrealized_local_pct: -8.0, unknown_why: null };
+    const 멈춤 = { ...보유A, stock_id: 8, ticker: "000001", name: "멈춘종목", price_date: null, close: null,
+      unrealized_krw: 0, unrealized_pct: 0, unknown_why: "기업행위(멈춤)" };
+    const d = { ...data, accounts: [{ ...data.accounts[0], positions: [미국, 멈춤] }] } as unknown as Data;
+    const html = renderToStaticMarkup(createElement(AccountTabs, { data: d, acct: "A", setAcct: () => {}, sub: "holdings", setSub: () => {} }));
+    expect(html).toContain("+1.2% 원화");
+    expect(html).toContain("-8.0% USD(환차 뺌)");
+    expect(html).toContain("원가로 평가 — 기업행위(멈춤)");
+  });
+
+  it("그래프 색은 계좌마다 다르고 R 만 회색", () => {
+    const 색 = Object.values(ACCOUNT_COLOR);
+    expect(new Set(색).size).toBe(색.length);
+    expect(ACCOUNT_COLOR.R1).toBe("#9ca3af");
+    expect(ACCOUNT_COLOR.G).not.toBe(ACCOUNT_COLOR.R1);
   });
 });

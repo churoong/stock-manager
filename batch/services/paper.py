@@ -462,7 +462,13 @@ def value(
                   "avg_price": p.cost / p.quantity if p.quantity else None,
                   "close": None if 까닭 or c is None else c[0], "first_buy_date": p.first_buy_date,
                   "unrealized_krw": _원(값 - p.cost_krw),
-                  "unrealized_pct": (값 / p.cost_krw - 1) * 100 if p.cost_krw > 0 else None})  # fmt: skip
+                  "unrealized_pct": (값 / p.cost_krw - 1) * 100 if p.cost_krw > 0 else None,
+                  # 종목 통화 기준(환차 뺀) 평가손익 % 와 원가로 둔 까닭 — 원화 % 는 달러 종목이면 환차가 섞여
+                  # 손절 판단과 부호가 갈렸고, 원가로 둔 줄은 "0원 · +0.0%" 로만 보였다
+                  # (25.1604, 웹 화면 감사 [권고] 6·7)
+                  "unrealized_local_pct": (c[0] / (p.cost / p.quantity) - 1) * 100
+                  if not 까닭 and c is not None and p.quantity and p.cost > 0 else None,
+                  "unknown_why": 까닭})  # fmt: skip
     입금 = invested(flows)
     총액 = 현금 + _원(평가)
     손익 = 총액 - 입금

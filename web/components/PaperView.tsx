@@ -10,6 +10,7 @@ import {
   DEPOSIT_MAX_KRW,
   DEPOSIT_MIN_KRW,
   DEPT_LABEL,
+  FILLS_PER_ACCOUNT,
   PAIRS,
   attrCellText,
   deptScoreText,
@@ -49,6 +50,8 @@ interface Position {
   stock_id: number; ticker?: string; name?: string; quantity: number; currency: string; cost_krw: number; value_krw: number;
   price_date: string | null; horizon?: string | null; avg_price?: number | null; close?: number | null; first_buy_date?: string;
   unrealized_krw?: number | null; unrealized_pct?: number | null; weight_pct?: number | null;
+  /** 종목 통화 기준 평가손익 % · 원가로 둔 까닭 (배치가 적음, 25.1604) */
+  unrealized_local_pct?: number | null; unknown_why?: string | null;
 }
 interface Flow { id: number; flow_date: string; amount_krw: number; kind: string; cancels_id: number | null; memo: string | null; cancelled_by: number | null }
 interface FillRow {
@@ -97,8 +100,12 @@ function tone(v: number | null | undefined): string {
   return v > 0 ? "text-red-600 dark:text-red-400" : "text-blue-600 dark:text-blue-400";
 }
 
-/** 계좌 선 색 — 무작위 대조(R)는 회색 계열로 눌러 둔다 */
-const ACCOUNT_COLORS = ["#dc2626", "#7c3aed", "#ea580c", "#16a34a", "#2563eb", "#9ca3af", "#cbd5e1"];
+/** 계좌 선 색 — 계좌 id 로 고정, 무작위 대조(R)는 회색 계열로 눌러 둔다. 차례로 돌려 쓰면 계좌가 아홉이라 R1 이 A 색,
+ *  G·H 가 R 의 회색을 가져갔다(25.1604, 웹 화면 감사 [권고] 5) */
+export const ACCOUNT_COLOR: Record<string, string> = {
+  A: "#dc2626", B: "#7c3aed", C: "#ea580c", D: "#16a34a", E: "#2563eb", G: "#ca8a04", H: "#db2777", R1: "#9ca3af", R2: "#cbd5e1",
+};
+const SPARE_COLORS = ["#0d9488", "#4f46e5", "#a16207"];
 
 /** 같은 돈 흐름이라 평가 ÷ 입금으로 견준다 — 모든 계좌·KOSPI·S&P500 이 같은 날 같은 금액을 받았다 (docs/paper.md 4장) */
 function chartSeries(history: HistoryRow[], ids: string[]): Series[] {
@@ -110,7 +117,7 @@ function chartSeries(history: HistoryRow[], ids: string[]): Series[] {
       return v == null ? [] : [{ date: h.as_of, value: Number(v) / Number(h.invested_krw) }];
     });
   return [
-    ...ids.map((aid, i) => ({ label: aid, color: ACCOUNT_COLORS[i % ACCOUNT_COLORS.length], points: ratio(by(aid), (h) => h.equity_krw) })),
+    ...ids.map((aid, i) => ({ label: aid, color: ACCOUNT_COLOR[aid] ?? SPARE_COLORS[i % SPARE_COLORS.length], points: ratio(by(aid), (h) => h.equity_krw) })),
     { label: "KOSPI", color: "#64748b", points: ratio(첫, (h) => h.kospi_krw) },
     { label: "S&P500", color: "#0891b2", points: ratio(첫, (h) => h.sp500_krw) },
   ];
@@ -368,6 +375,10 @@ export function CompareCard({ data, desk }: { data: Data; desk?: DeskView | null
   return (
     <section className={CARD}>
       <h2 className="text-base font-semibold">전략 순위</h2>
+      {/* 기준 날짜 — 공통 구간·R 대비는 운용 요약, 시간가중·손익·평가 총액은 평가 행에서 와 날이 다를 수 있다(25.1604) */}
+      <p className="mt-1 text-[11px] text-slate-400">
+        운용 요약 {desk?.as_of ?? "없음"} · 평가 {[...new Set(data.accounts.map((a) => a.view.asOf).filter(Boolean))].sort().join("·") || "없음"} 기준
+      </p>
       {lb?.window_start ? (
         <p className="mt-1 text-xs text-slate-500">
           공통 구간 {lb.window_start}부터의 시간가중 수익률 순 · R 대비 = 그 수익률 − 무작위 대조 R1·R2 평균
@@ -503,7 +514,7 @@ export function AccountTabs({ data, acct, setAcct, sub, setSub, desk }: {
             className={`shrink-0 px-3 py-2 ${sub === k ? "border-b-2 border-slate-900 font-medium dark:border-slate-100" : "text-slate-500"}`}
           >
             {label}
-            {k === "holdings" ? ` ${a.positions.length}` : k === "trades" ? ` ${체결.length}` : k === "orders" ? ` ${주문.length}` : ""}
+            {k === "holdings" ? ` ${a.positions.length}` : k === "trades" ? ` ${체결.length >= FILLS_PER_ACCOUNT ? `${FILLS_PER_ACCOUNT}+` : 체결.length}` : k === "orders" ? ` ${주문.length}` : ""}
           </button>
         ))}
       </div>
@@ -585,9 +596,23 @@ function HoldingsPane({ a }: { a: Account }) {
               </td>
               <td className="text-right">{won(p.cost_krw)}</td>
               <td className="text-right">{won(p.value_krw)}</td>
-              <td className={`text-right ${tone(p.unrealized_krw)}`}>
-                {won(p.unrealized_krw ?? null)}
-                <span className="block">{pctText(p.unrealized_pct)}</span>
+              <td className={`text-right ${p.unknown_why ? "text-slate-400" : tone(p.unrealized_krw)}`}>
+                {p.unknown_why ? (
+                  <span className="text-xs">원가로 평가 — {p.unknown_why}</span>
+                ) : (
+                  <>
+                    {won(p.unrealized_krw ?? null)}
+                    <span className="block">
+                      {pctText(p.unrealized_pct)}
+                      {p.currency && p.currency !== "KRW" ? " 원화" : ""}
+                    </span>
+                    {p.currency && p.currency !== "KRW" && p.unrealized_local_pct != null ? (
+                      <span className={`block text-[10px] ${tone(p.unrealized_local_pct)}`}>
+                        {pctText(p.unrealized_local_pct)} {p.currency}(환차 뺌)
+                      </span>
+                    ) : null}
+                  </>
+                )}
               </td>
               <td className="text-right">{p.weight_pct == null ? "-" : `${p.weight_pct.toFixed(1)}%`}</td>
               <td className="text-right">
@@ -647,7 +672,7 @@ function OrdersPane({ orders }: { orders: OrderRow[] }) {
   return (
     <div className="text-sm">
       <p className="mb-1 text-xs text-slate-500">
-        가상모의투자는 장중에 체결하지 않습니다. 판정할 장이 끝난 뒤 다음 국내 배치(다음 거래일 아침)가 그날 일봉(시가·저가·종가)으로
+        가상모의투자는 장중에 체결하지 않습니다. 판정할 장이 끝난 뒤 그 시장의 다음 배치(국내는 다음 거래일 아침, 미국은 다음 미국 배치)가 그날 일봉(시가·저가·종가)으로
         찼는지 정합니다 — 그 전까지는 모두 여기 남습니다. 실제 주문 경로의 체결은 KIS모의투자(docs/paper.md 15장)가 따로 잽니다.
       </p>
       <ul className="space-y-1">
