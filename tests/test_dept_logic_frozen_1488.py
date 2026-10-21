@@ -21,8 +21,9 @@ from pathlib import Path
 #: 25.1485 뒤로 바뀌지 않았다. 3.12.3·3.13.16 같은 값, 3.11 은 f-문자열 토큰이 달라 다르다 — 이 저장소는 3.12).
 #: 2026-10-20 25.1576 갱신 — company.py 는 주간 복기의 부결 판정만(판단 그대로, 절차 1), holding.py 는 기준 평균을 표본
 #: 가중으로(판단 바뀜, 절차 2 — 0088 에서 H 판 2·A·C·D·E 판 3)
+#: 2026-10-21 25.1631 갱신 — company.py 운용역 메모 글만("가결 n(집행 m)", 판단 그대로, 절차 1)
 고정 = {
-    "batch/services/company.py": "ed116bdbc3b1",
+    "batch/services/company.py": "a530630c6638",
     "batch/services/holding.py": "2f3a2bd5e7fe",
 }
 

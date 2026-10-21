@@ -144,7 +144,7 @@ def test_memo_and_minutes_carry_no_evidence() -> None:
           _d(2, factors={"value": 10, "momentum": 10}, domestic=False)]  # fmt: skip
     items, approved = co.meet(ds, 헌장)
     m = co.memo("가치투자사", items, approved)
-    assert m.startswith("가치투자사 위원회: 안건 2 · 가결 1 · 부결 1 · 거부 0") and "T01" in m
+    assert m.startswith("가치투자사 위원회: 안건 2 · 가결 1(집행 1) · 부결 1 · 거부 0") and "T01" in m
     j = co.minutes_json(items, approved, 헌장, m)
     assert j["items"][0]["approved"] and "evidence" not in str(j)  # 근거는 paper_dossiers 로 (5장)
     assert j["items"][1]["opinions"]["governance"][2].startswith("자료 없음")

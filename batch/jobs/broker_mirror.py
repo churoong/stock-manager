@@ -273,6 +273,28 @@ def _us_window(now: datetime, day: Any) -> str | None:
 
 
 
+def send_block(market: str, now: datetime) -> str | None:
+    """지금 KIS 주문을 낼 수 없으면 그 까닭, 되면 None.
+
+    `run` 의 보내기 문과 리포트 머리 운용 보고(`desk.report_head`)가 **같은 판정**을 쓴다(25.1631 — 운용 보고가
+    멈춤·키·장 끝난 뒤만 보고 "그대로 냅니다" 라 했는데 실제 단계는 예약 마감 뒤·접수 시작 전으로 보내지 않은 날이
+    있었다). 국내 접수 시작 전 `WAIT_MAX` 안이면 기다려 내므로 None
+    """
+    현지 = now.astimezone(cal.market_tz(market))
+    오늘 = 현지.date()
+    if not cal.is_session(market, 오늘):
+        return "오늘은 장이 없다"
+    if market == "US":
+        return _us_window(now, 오늘)
+    if 현지.time() >= ORDER_CLOSE_KST:
+        return "장 끝난 뒤 — 보내지 않음"
+    if 현지.time() < ORDER_OPEN_KST and (
+        datetime.combine(오늘, ORDER_OPEN_KST, tzinfo=현지.tzinfo) - 현지 > WAIT_MAX
+    ):
+        return "접수 시작 전 — 보내지 않음"
+    return None
+
+
 def _account_perf(client: Any, sess: Any, 증권사: str, 오늘: str, 합: dict[str, Any], 계좌: str,
                   ) -> tuple[dict[str, Any], dict[str, Any] | None]:  # fmt: skip
     """국내 배치의 계좌 전체 원화 총액과 성과 (docs/paper.md 15.7, 25.1497·25.1527).
@@ -485,23 +507,12 @@ def run(
     if hold_send:
         기록["send"] = hold_send
         return 기록 | {"calls": sess.calls}
-    if not cal.is_session(market, 오늘):
-        기록["send"] = "오늘은 장이 없다"
+    막힘 = send_block(market, now)
+    if 막힘:
+        기록["send"] = 막힘
         return 기록 | {"calls": sess.calls}
-    if 미국:
-        막힘 = _us_window(now, 오늘)
-        if 막힘:
-            기록["send"] = 막힘
-            return 기록 | {"calls": sess.calls}
-    elif 현지.time() >= ORDER_CLOSE_KST:
-        기록["send"] = "장 끝난 뒤 — 보내지 않음"
-        return 기록 | {"calls": sess.calls}
-    elif 현지.time() < ORDER_OPEN_KST:
-        기다림 = datetime.combine(오늘, ORDER_OPEN_KST, tzinfo=현지.tzinfo) - 현지
-        if 기다림 > WAIT_MAX:
-            기록["send"] = "접수 시작 전 — 보내지 않음"
-            return 기록 | {"calls": sess.calls}
-        sleep(기다림.total_seconds() + 5)
+    if not 미국 and 현지.time() < ORDER_OPEN_KST:
+        sleep((datetime.combine(오늘, ORDER_OPEN_KST, tzinfo=현지.tzinfo) - 현지).total_seconds() + 5)
     멈춤값 = db.get_setting(client, "paper_halt", None)
     멈춤 = bool(멈춤값.get("on")) if isinstance(멈춤값, dict) else bool(멈춤값)
     주문들 = client.execute(OPEN_ORDERS_SQL, [베낌, market, 오늘.isoformat()]).dicts()

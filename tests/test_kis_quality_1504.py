@@ -55,11 +55,11 @@ def test_diverge_active_hysteresis_and_thin_samples() -> None:
 def test_diverge_text_says_which_way() -> None:
     낙관 = bm.diverge(_요약(30, 70.0, internal_only=8, kis_only=1), ["match"], "KR")
     assert 낙관 is not None and 낙관.startswith("KIS모의투자 국내가 가상모의투자와 벌어졌습니다(지난 28일, 주문 30)")
-    assert "체결 일치 70% — 문턱 80%. 가상만 참 8 · KIS만 참 1: 가상만 참이 더 많음 — 가상 체결 판정이 낙관" in 낙관
+    assert "체결 일치 70% — 문턱 80% 아래. 가상만 참 8 · KIS만 참 1: 가상만 참이 더 많음 — 가상 체결 판정이 낙관" in 낙관
     비관 = bm.diverge(_요약(30, 70.0, internal_only=1, kis_only=8), ["match"], "US")
     assert 비관 is not None and 비관.startswith("KIS모의투자 미국이") and "가상 체결 판정이 비관" in 비관
     글 = bm.diverge(_요약(30, 90.0, kept=80.0, buy=0.8), ["kept", "slip_buy"], "KR")
-    assert 글 is not None and "실현율 80%" in 글 and "매수 가격 차이 평균 +0.80% (n=30) — 문턱 +0.5%" in 글
+    assert 글 is not None and "실현율 80%" in 글 and "매수 가격 차이 평균 +0.80% (n=30) — 문턱 +0.5% 위" in 글
     assert bm.diverge(_요약(30, 70.0), [], "KR") is None
 
 

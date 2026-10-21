@@ -472,7 +472,10 @@ def memo(company: str, items: list[Item], approved: list[Item]) -> str:
     부결 = [i for i in items if not i.passed]
     거부 = [i for i in 부결 if i.vetoed_by]
     쟁점 = [i for i in items if i.issue]
-    글 = (f"{company} 위원회: 안건 {len(items)} · 가결 {len(approved)} · 부결 {len(부결) - len(거부)}"
+    # 가결은 표결 통과 수, 집행은 그 가운데 상위 top_n — 예전엔 집행 수를 "가결" 로 적어 합이 안건 수와 안
+    # 맞았다(25.1631)
+    글 = (f"{company} 위원회: 안건 {len(items)} · 가결 {len(items) - len(부결)}(집행 {len(approved)})"
+          f" · 부결 {len(부결) - len(거부)}"
           f" · 거부 {len(거부)} · 쟁점 {len(쟁점)}")
     if approved:
         t = approved[0]
