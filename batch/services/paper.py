@@ -674,7 +674,9 @@ def summary_lines(
         # 체결은 다음 배치가 판정해 그날 행에 들어간다(금요일 장 → 월요일 행) — "이번 주" 는 주초 행 뒤에 장부에 든
         # 체결, 곧 [주초 행 날, 끝 행 날). 예전 `fill_date >= week_start` 는 금요일 장 체결을 어느 주에도 세지 않았는데
         # 그 체결은 이번 주 시간가중에는 들어 있었다(25.1609, 운용 요약 감사 [필수] 1)
-        이번주 = 장부에_든(fills.get(aid, []), 주초["as_of"] if 주초 else None, 끝["as_of"])
+        # 주초 행이 없으면(읽은 2주 안에 그 앞 행이 없다 — 배치 공백·새 계좌) 처음부터가 아니라 week_start 부터 —
+        # 처음부터면 전체 이력을 이번 주로 셌다(25.1611, 25.1609 교차검증 [필수] 2)
+        이번주 = 장부에_든(fills.get(aid, []), 주초["as_of"] if 주초 else week_start, 끝["as_of"])
         보유 = json.loads(끝.get("positions_json") or "[]")
         날짜 = sorted({str(p.get("price_date")) for p in 보유 if p.get("price_date")})
         누적 = (float(끝["twr_index"]) - 1) * 100

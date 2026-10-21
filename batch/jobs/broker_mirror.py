@@ -201,11 +201,13 @@ CODES_SQL = "SELECT id, ticker, market FROM stocks WHERE id IN (SELECT value FRO
 #: 같은 티커가 두 행이면(거래소를 옮긴 종목 — 유일 키는 (ticker, market)) **이 증권사 칸에서 산 적 있는 행**, 그다음
 #: 상장 중인 쪽, 그다음 새 행 — 순서 없이 읽으면 옛(상장폐지) 행에 KIS 보유가 붙어 어긋남이 거짓으로 서고 H 가 팔아도
 #: KIS 는 영영 팔지 않았다(25.1605, KIS 미국 감사 [권고] 1). 상장 여부만 보면 H 가 이사 전 행을 든 채일 때 같은 해가
-#: 방향만 바꿔 남았다 — KIS 보유는 그 주식을 산 주문의 id 에 붙는 것이 맞다(25.1608, 25.1607 교차검증 [필수])
+#: 방향만 바꿔 남았다 — KIS 보유는 그 주식을 산 주문의 id 에 붙는 것이 맞다(25.1608, 25.1607 교차검증 [필수]).
+#: "산 적" 은 **찬** 매수만(안 찬 매수가 이기면 H 가 든 옛 행 주식을 정리로 팔았다, 25.1611). 여러 행이면 잔고를
+#: 행마다 나눈다(`bm.split_holding`)
 IDS_SQL = (
     "SELECT s.id, s.ticker FROM stocks s WHERE s.country = ? AND s.ticker IN (SELECT value FROM json_each(?))"
     " ORDER BY EXISTS (SELECT 1 FROM paper_broker_orders o WHERE o.broker = ? AND o.stock_id = s.id"
-    " AND o.side = 'buy' AND o.status <> 'rejected'), (s.status = 'active'), s.id"
+    " AND o.side = 'buy' AND o.filled_qty > 0), (s.status = 'active'), s.id"
 )
 #: 미국 시장가 대신 낼 지정가의 바탕 — 오늘(현지) 앞 마지막 종가. 배치는 개장 전이라 어제 종가다
 CLOSES_SQL = (
@@ -222,11 +224,18 @@ def _codes(client: Any, ids: set[int]) -> dict[int, tuple[str, str]]:
             if t}  # fmt: skip
 
 
-def _ids(client: Any, codes: set[str], country: str, broker: str) -> dict[str, int]:
+def _ids_all(client: Any, codes: set[str], country: str, broker: str) -> dict[str, list[int]]:
+    """티커마다 그 행들 — 뒤에 오는 행(찬 매수 있음·상장 중·새 id)이 이긴다(마지막)."""
     if not codes:
         return {}
-    # 뒤에 오는 행(산 적 있음·상장 중·새 id)이 이긴다
-    return {str(t): int(i) for i, t in client.execute(IDS_SQL, [country, json.dumps(sorted(codes)), broker]).rows}
+    out: dict[str, list[int]] = {}
+    for i, t in client.execute(IDS_SQL, [country, json.dumps(sorted(codes)), broker]).rows:
+        out.setdefault(str(t), []).append(int(i))
+    return out
+
+
+def _ids(client: Any, codes: set[str], country: str, broker: str) -> dict[str, int]:
+    return {t: ids[-1] for t, ids in _ids_all(client, codes, country, broker).items()}
 
 
 def _closes(client: Any, ids: set[int], before: str) -> dict[int, float]:
@@ -358,10 +367,11 @@ def run(
 
     # 2. 잔고 — 내부 장부와 대 본다
     보유, 합 = sess.balance_us() if 미국 else sess.balance()
-    코드표 = _ids(client, {h.code for h in 보유}, market, 증권사)
-    증권 = {코드표[h.code]: (h.quantity, h.sellable) for h in 보유 if h.code in 코드표}
     내부 = {int(r["stock_id"]): int(r["q"]) for r in client.execute(INTERNAL_QTY_SQL, [베낌, market]).dicts()
             if int(r["q"] or 0) > 0}  # fmt: skip
+    코드표 = _ids_all(client, {h.code for h in 보유}, market, 증권사)
+    증권 = {sid: v for h in 보유 if h.code in 코드표
+            for sid, v in bm.split_holding(h.quantity, h.sellable, 코드표[h.code], 내부).items()}  # fmt: skip
     # 어긋남은 **베낀 적 있는 종목**과 증권사 보유만 — 키를 넣기 전에 산 가상 보유는 "연결 전 보유" 로
     # 따로 센다(감사 [권장] 3). 같은 날 다시 돌면 시가에 찬 오늘 매수가 증권사엔 있고 가상 장부엔 다음 배치에야
     # 들어온다 — 그 수량을 뺀다(감사 [권장] 2)
@@ -406,8 +416,8 @@ def run(
             원화계좌, 성과 = _account_perf(client, sess, 증권사, 오늘.isoformat(), 합, 베낌)
         except Exception as exc:  # noqa: BLE001
             기록["perf_error"] = type(exc).__name__
-    보유칸 = [{"id": 코드표.get(h.code), "code": h.code, "qty": h.quantity, "avg": h.avg_price, "price": h.price,
-             "value": h.value, "pnl": h.pnl} for h in 보유]  # fmt: skip
+    보유칸 = [{"id": (코드표.get(h.code) or [None])[-1], "code": h.code, "qty": h.quantity, "avg": h.avg_price,
+             "price": h.price, "value": h.value, "pnl": h.pnl} for h in 보유]  # fmt: skip
     client.execute(DAILY_SQL, [
         증권사, 오늘.isoformat(), 베낌, None if 미국 else 합.get("cash"), None if 미국 else 합.get("total"),
         json.dumps(보유칸), json.dumps({str(k): list(v) for k, v in 어긋남.items()}), slot.keys.source, 지금,

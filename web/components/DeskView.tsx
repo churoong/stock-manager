@@ -267,7 +267,7 @@ export default function DeskView() {
 
       {desk.gate_error ? (
         <section className={CARD}>
-          <p className="text-sm text-red-600 dark:text-red-400">실전 전환 관문·위험판·챔피언 계산 실패 — {desk.gate_error}</p>
+          <p className="text-sm text-red-600 dark:text-red-400">실전 전환 관문 등 일부를 내지 않음 — {desk.gate_error}</p>
         </section>
       ) : null}
 

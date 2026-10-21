@@ -458,6 +458,8 @@ export function CompareCard({ data, desk }: { data: Data; desk?: DeskView | null
             거의 늘 후보가 나왔습니다. 교체는 사용자 결정 — 후보가 나와도 바꾸지 않습니다.
           </p>
         </div>
+      ) : desk?.gate_error ? (
+        <p className="mt-3 text-xs text-amber-700 dark:text-amber-400">챔피언 교체 후보를 내지 않음 — {desk.gate_error}</p>
       ) : null}
       <p className="mt-2 text-xs text-slate-500">
         짝마다 규칙 하나만 다릅니다 —{" "}
