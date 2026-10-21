@@ -270,6 +270,7 @@ _끝난 = ("filled", "partial", "unfilled", "rejected", "unknown")
 NON_JUDGMENT_EXPIRY = (
     "현금 부족", "기업행위 경계", "쓸 수 있는 환율 없음", "그날 시세를 받지 못해", "팔 보유가 모자람",
     "같은 종목 전량 매도",  # 25.1592 — 거둔 매수 회차(`jobs/paper.WITHDRAWN_NOTE`)
+    "손절이 선 보유",  # 25.1612 — 손절 보유의 거둔 매수 회차(`jobs/paper.STOP_WITHDRAWN_NOTE`)
 )  # fmt: skip
 
 

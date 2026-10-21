@@ -90,6 +90,8 @@ FILLED_SQL = (
 #: 전량 매도 때 거둔 매수 회차의 만료 까닭(25.1591) — KIS 비교에서 판정 밖 만료로 뺀다
 #: (`broker_mirror.NON_JUDGMENT_EXPIRY`)
 WITHDRAWN_NOTE = "같은 종목 전량 매도 — 남은 매수 회차 거둠 (docs/paper.md 2.2)"
+#: 손절이 선 보유(따르지 않는 계좌·매도가 막힌 날 포함)의 남은 매수 회차를 거둘 때(25.1612). 판정 밖 만료로 센다
+STOP_WITHDRAWN_NOTE = "손절이 선 보유 — 남은 매수 회차 거둠 (docs/paper.md 2.2)"
 EXPIRE_SQL = (
     "UPDATE paper_orders SET status = 'expired', closed_on = ?, close_note = ? WHERE id = ? AND status = 'open'"
 )
@@ -1568,7 +1570,10 @@ def run_step(
             이미팖 = {o.stock_id for o in 열린 if o.account_id == aid and o.side == "sell"}
             보유 = pp.positions(계좌체결)
             문장: list[tuple[str, list[Any]]] = []
-            _통과, 막힌매도 = rg.gate([rg.Candidate(sid, "sell", 0.0) for sid in sorted(매도)], 문맥)
+            # 이미 매도가 열린 종목은 새 매도를 내지 않으니 위험 점검에도 넣지 않는다 — 넣으면 멈춤 스위치 날
+            # "막힘" 으로 원장에 적혔는데 그 열린 매도는 다음 장에 그대로 찼다(25.1612, 매도 경로 감사 [필수] 1)
+            _통과, 막힌매도 = rg.gate([rg.Candidate(sid, "sell", 0.0) for sid in sorted(매도) if sid not in 이미팖],
+                                  문맥)  # fmt: skip
             막힌매도id = {c.stock_id: 까닭 for c, 까닭 in 막힌매도}
             막힌수 = len(막힌매도)
             for sid, (사유, 근거) in sorted(매도.items()):
@@ -1586,9 +1591,16 @@ def run_step(
             파는 = {sid for sid in 매도 if sid not in 이미팖 and sid in 보유 and sid not in 막힌매도id}
             # **아직 오지 않은 장**의 회차만 — 시세가 아직 없어 열어 둔 지나간 장의 회차는 그 장에서 찼을 수 있고
             # KIS 에도 이미 나갔다(소급 취소가 된다, 25.1592 — 25.1591 반박 [필수])
-            거둠 = [o for o in 열린 if o.account_id == aid and o.side == "buy" and o.stock_id in 파는
+            # 손절이 선 보유도 — 손절을 따르지 않는 계좌(D)나 매도가 막힌 날엔 `파는` 에 없어, 장 끝난 뒤 손 실행이 낸
+            # 회차가 다음 장에 차 손절 보유에 더 샀다("손절이 선 보유에는 더 사지 않는다" 를 어김, 25.1612 매도 경로
+            # 감사 [필수] 2). 판정은 아래 새 배분과 같은 **계좌 규칙 전의** 플래그
+            손절 = {sid for sid, 메모 in 판정메모.items() if any(f["reason_code"] == "손절" for f in 메모["flags"])}
+            손절 |= {sid for sid, (사유, _근거) in 매도.items() if "손절" in 사유}
+            거둘곳 = ({sid: WITHDRAWN_NOTE for sid in 파는}
+                    | {sid: STOP_WITHDRAWN_NOTE for sid in 손절 - 파는 if sid in 보유})  # fmt: skip
+            거둠 = [o for o in 열린 if o.account_id == aid and o.side == "buy" and o.stock_id in 거둘곳
                   and str(o.fill_session) > trade_date]  # fmt: skip
-            문장 += [(EXPIRE_SQL, [trade_date, WITHDRAWN_NOTE, o.id]) for o in 거둠]
+            문장 += [(EXPIRE_SQL, [trade_date, 거둘곳[o.stock_id], o.id]) for o in 거둠]
             if 거둠:
                 a기록["buys_withdrawn"] = len(거둠)
                 # 같은 실행의 매수 배분이 거둔 회차를 열린 것으로 보지 않게(현금 예약·같은 종목 두 벌 막이 까닭)
@@ -1608,7 +1620,7 @@ def run_step(
                 # 그날 파는(또는 매도가 막힌·이미 매도가 열린) 종목은 들고 간 것이 아니다 — 함께 적으면 성과 분해의
                 # "판 뒤" 와 "들고 간 뒤" 에 같은 결정이 두 번 들었다(25.1600, 매도·성과 분해 감사 [권고] 2 —
                 # G·H 추적손절인데 목표 위, C 기간초과와 목표도달이 함께 선 날)
-                if 메모["hold"] and sid not in 매도:
+                if 메모["hold"] and sid not in 매도 and sid not in 이미팖:  # 열린 매도대로 팔린다(25.1612)
                     문장.append(_결정판(aid, market, trade_date, sid, "hold_flag", ",".join(메모["hold"]),
                                     {"flags": [f["reason_code"] for f in 메모["flags"]], "sell_rule": 규칙},
                                     종가, 날, 지금))  # fmt: skip
@@ -1620,8 +1632,7 @@ def run_step(
                 # 손절이 선 보유에 더 사지 않는다 — **계좌 규칙 전의** 판정에서 (검증 [필수] 4: 규칙으로 거른 뒤의
                 # 매도에서 뽑으면 손절을 따르지 않는 D 는 늘 비어, 떨어진 보유를 목표 비중까지 날마다 더 샀다 —
                 # B−D 에 물타기가 섞였다)
-                손절 = {sid for sid, 메모 in 판정메모.items() if any(f["reason_code"] == "손절" for f in 메모["flags"])}
-                손절 |= {sid for sid, (사유, _근거) in 매도.items() if "손절" in 사유}
+                # (`손절` 은 위 회차 거둠에서 같은 식으로 만들었다)
                 빠진시세 = sorted({int(r["stock_id"]) for r in v.rows} - set(price_series))
                 if 빠진시세 and series_loader is not None:
                     price_series = {**price_series, **series_loader(빠진시세)}
