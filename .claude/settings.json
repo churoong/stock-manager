@@ -26,8 +26,20 @@
       "SendMessage",
       "NotebookEdit",
       "ReadNotifications",
-      "Workflow"
+      "Workflow",
+      "Artifact",
+      "ArtifactComments",
+      "ArtifactData",
+      "AskUserQuestion",
+      "CronCreate",
+      "CronDelete",
+      "CronList",
+      "EnterWorktree",
+      "ExitWorktree",
+      "PushNotification",
+      "SendUserFile",
+      "mcp__Claude_Docs"
     ],
-    "defaultMode": "acceptEdits"
+    "defaultMode": "bypassPermissions"
   }
 }
