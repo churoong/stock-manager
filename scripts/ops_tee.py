@@ -26,7 +26,10 @@ def main(argv: list[str]) -> int:
         else:
             files.append(a)
     public = is_public()
-    handles = [open(f, "a" if append else "w", encoding="utf-8") for f in files]  # noqa: SIM115
+    # 잘못된 바이트·서로게이트가 와도 죽지 않게 — 죽으면 파일엔 앞부분만 남고 앞쪽 배치가 BrokenPipe 로 멈출 수 있었다
+    # (25.1638 공개 로그 감사 [권고])
+    sys.stdin.reconfigure(errors="replace")  # type: ignore[union-attr]
+    handles = [open(f, "a" if append else "w", encoding="utf-8", errors="replace") for f in files]  # noqa: SIM115
     lines = 0
     try:
         for line in sys.stdin:

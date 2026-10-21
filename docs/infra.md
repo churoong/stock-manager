@@ -2685,6 +2685,7 @@ SQL read operations are forbidden (reads are blocked, ...)
 | 25.1635 | 36회차 통과분 — 관문 하루 수익·까닭 코드별 막힘 계측 |
 | 25.1636 | 관문 운영 무사고 — 가상모의투자 단계가 못 돈 실행은 성공으로 세지 않음 |
 | 25.1637 | 웹 /kis·운용 숫자 — 문턱과 같아 보이는 반올림·한도 오류를 기록 없음으로·주문 날짜 색인 |
+| 25.1638 | 공개 로그 — 미국 공시 수집 운영 출력으로·웹앱 주소 시크릿 먼저·ops_tee 잘못된 바이트 |
 
 ### 25.1 왜 D1 인가
 
@@ -36756,3 +36757,15 @@ handoff "실전 수익 쪽 다음 후보" 2번(핵심 H 다년 백테스트)의 
 **판**: 없음(화면·색인). **관문에서 고친 것**: `tests/test_index_redundancy.py` 가 0089 를 "`idx_paper_broker_cleanup (broker, trade_date, stock_id, side)` 의 접두사" 로 짚었다 — 그 색인은 `WHERE paper_order_id IS NULL` 부분 색인이라 정리 주문 행만 있어 날짜 범위 질의를 대신하지 못한다(질의 계획도 안 탔다). 시험이 부분 색인을 "대신 쓸 인덱스" 로 치지 않게 고쳤다.
 
 **교차검증**: `apartDigits`(NaN·±∞·문턱 null 은 기본 자리, `toFixed` 이진 반올림은 단조라 방향이 뒤집힌 표시 없음, 정확히 문턱인 값은 ok 와 맞음, `ppText` 다른 호출처 그대로)·경로 오류 처리(`totals_error` 그대로, 표 없음은 두 시장 같이)는 반박 없음. **[필수] 1** — 0089 가 `test_index_redundancy` 를 깨뜨림(위 관문에서 고친 것과 같음, 부분 색인 오탐). **[필수] 2** — 0089 가 생기자 KIS 맞추기 `broker_mirror.IDS_SQL` 의 상관 EXISTS 가 통계 없는 운영 DB 에서 종목 색인 대신 새 색인의 `(broker=?)` 를 골라 종목마다 그 증권사 주문을 처음부터 훑었다(1년치 재현 EXISTS 안 읽기 38 → 75,237행 — 아끼려던 /kis 읽기보다 큼) → `+o.broker = ?`(그 열로 색인을 못 고르게)로 종목 색인 복귀, `test_맞추기_종목_질의는_종목_색인을_탄다`. 뜻은 같고 계획만 바뀐다. [권고] 고침: 여섯째 자리까지 같으면 기본 자리(배치 `_문턱값` 과 같게) · 지수 대비 칸·0080 전 "no such column" 빈 보기·웹 `KIS_ORDERS` 계획(파이썬이 TS 상수를 읽어 대조) 시험 · 0089 주석의 "(broker) 유일 색인" → 실제로 타던 `idx_paper_broker_open (broker, status, trade_date)`. 0089 로 계획이 좋아지는 질의: `SENT_SQL`·`SENT_TODAY_SQL`·`BOUGHT_TODAY_SQL`·`CELLS_SQL`·`jd.KIS_ORDERS_SQL`(정렬 임시 트리 사라짐), 같은 것: `LINK_DATE`·`BOUGHT`·`BOUGHT_BY`·`NET`. 남은 [권고]: KIS 칸 "경로 포함"(참고 칸)은 `toFixed(1)` 그대로.
+
+### 25.1638 공개 로그 — 미국 공시 수집 운영 출력으로·웹앱 주소 시크릿 먼저·ops_tee 잘못된 바이트
+
+**왜**: 공개 저장소·공개 Actions 로그로 개인정보·운영 출력이 새는 길 감사(감사 에이전트 — CLAUDE.md 절대 규칙 "코드는 공개, 데이터와 운영 출력은 비공개"). 감사 범위의 KIS·가상모의투자·일일 배치 경로는 모두 `ops_tee` 안이라 [문제 없음], 새는 길 둘은 그 밖.
+
+**[필수] 1 — 미국 공시 수집이 보유·관심 종목을 공개 로그에**: `.github/workflows/disclosures-us.yml` 이 `python -m batch.jobs.disclosures_us` 를 `ops_tee` 없이 돌렸다. 수집 대상(`disclosures_us.py:40-47`)이 보유(`positions` 수량 > 0)·관심(`watchlist`)이라 "SEC 티커 목록에 없는 심볼 N개: …"(심볼 최대 5개)·실패 CIK·대상 수가 공개 로그에 찍혔다(`REPO_PUBLIC=true` 재현 — 보유 ETF 는 SEC 목록에 없는 경우가 많아 실제로 찍혔을 가능성 큼). → `set -o pipefail; … 2>&1 | python scripts/ops_tee.py run.log` + `publish_output` 단계(`if: always()`), `permissions: issues: write`.
+**[필수] 2 — 웹앱 주소가 매 일일 배치 로그에 평문으로**: `daily-kr.yml`·`daily-us.yml` 의 `APP_URL: ${{ vars.APP_URL }}` — Actions 변수는 가려지지 않아 단계 머리 `env:` 에 그대로 찍힌다(로그 표시 방식이라 로컬 재현은 못 함 `[확인필요]` — GitHub 문서의 변수/시크릿 차이로 판단). → `secrets.APP_URL || vars.APP_URL`(시크릿이면 가려진다). **운영에서 끝내려면 사용자가 Actions Secrets 에 `APP_URL` 을 넣고 Variables 의 `APP_URL` 을 지워야 한다** — 외부 계정 설정이라 handoff "사용자 결정 필요". docs/public-repo.md D12·`batch/config.py` 주석 고침.
+**[권고] 고침**: `scripts/ops_tee.py` 가 잘못된 바이트·서로게이트에 예외로 죽어(rc 1) 파일엔 앞부분만, 앞쪽 배치가 BrokenPipe 로 멈출 수 있었다 → 입력·파일 모두 `errors="replace"`.
+
+**되돌려 확인**(`tests/test_public_log_1638.py`): 공시 수집 감싸기를 되돌림 → `test_미국_공시_수집은_운영_출력으로만` 깨짐 · 입력 `errors="replace"` 를 지움(엄격 디코딩 환경) → `test_운영_출력은_잘못된_바이트에도_죽지_않는다` 깨짐 · `test_웹앱_주소는_시크릿을_먼저` 가 두 워크플로를 본다.
+
+**남긴 [권고]**(감사): `step0-check.yml` 이 `TELEGRAM_CHAT_ID` 가 비었을 때 대화방 번호 후보를 공개 로그에(조건부 — 시크릿이 있으면 안 남) · `db-status.yml` `QUERY`·`analyze-stock.yml` `STOCK_ID` 입력값이 로그 머리에 평문 · `portfolio.yml` 실행 시각 = 매매 입력 시각(금액 없음) · `publish_output.py:42` "전문은 Actions 로그에" 문구가 공개 저장소엔 틀림 · docs/infra.md 몇 곳에 운영 실측 보유 수·KIS모의(가상 돈) 예수금 값 · `.coverage` 가 git 에 추적됨(경로뿐).

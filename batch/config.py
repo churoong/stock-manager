@@ -78,7 +78,8 @@ SETTINGS = Settings.load()
 
 #: 웹앱 주소 (예: https://stock.example.vercel.app). 텔레그램 리포트의 종목 줄에 **매매 입력 딥링크**를 붙이는 데 쓴다
 #: (docs/infra.md 25.944). 비어 있으면 링크를 붙이지 않는다 — 리포트의 다른 내용은 그대로다.
-#: 비밀이 아니라 Actions 변수(`vars.APP_URL`)다
+#: Actions **시크릿** `APP_URL` 로 둔다 — 변수(`vars.APP_URL`)는 공개 저장소의 로그 단계 머리에 평문으로 찍힌다(25.1638).
+#: 워크플로는 시크릿이 없으면 변수로 물러난다
 APP_URL = get("APP_URL").rstrip("/")
 
 # 투자 책임 고지. 모든 텔레그램 메시지 끝에 붙인다.

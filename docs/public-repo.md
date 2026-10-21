@@ -56,7 +56,8 @@ GitHub 은 시크릿 값을 다시 보여 주지 않는다. 옛 저장소에서 
 
 **Variables 탭 → New repository variable**
 - [ ] D11. `DB_BACKEND` — **`turso`** (옛 저장소는 `auto` 였다. `auto` 는 D1 을 함께 보는 모드라 D1 값이 필요하다 — D8 을 건너뛰므로 `turso` 로 고정한다. Vercel 의 값은 그대로 둔다)
-- [ ] D12. `APP_URL` — 웹앱 주소 (Vercel 의 `APP_URL` 과 같은 값)
+- [ ] D12. ~~`APP_URL` 변수~~ → **Secrets 탭에 `APP_URL`** — 웹앱 주소 (Vercel 의 `APP_URL` 과 같은 값). 변수는 Actions 로그 단계 머리의
+  `env:` 에 평문으로 찍혀 공개 저장소에서 웹앱 주소가 드러난다(25.1638). 워크플로는 `secrets.APP_URL || vars.APP_URL` 를 읽으니 시크릿을 넣고 변수를 지우면 된다
 
 ### E. Vercel (5분) — vercel.com → 프로젝트
 - [ ] E1. Settings → **Git** → Disconnect → Connect Git Repository → 새 `churoong/stock-manager` 선택 (Vercel GitHub 앱이 새 저장소에 접근하도록 허용하라는 창이 뜨면 허용)

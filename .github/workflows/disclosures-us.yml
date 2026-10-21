@@ -18,6 +18,10 @@ concurrency:
   group: disclosures-us
   cancel-in-progress: false
 
+permissions:
+  contents: read
+  issues: write # 운영 출력을 이슈 코멘트로 내보낸다 (docs/infra.md 25.17)
+
 jobs:
   run:
     runs-on: ubuntu-latest
@@ -47,5 +51,21 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+      # 수집 대상에 보유·관심 종목이 들어 있어 "SEC 티커 목록에 없는 심볼"·실패 CIK 줄이 그것을 드러낸다 — 공개
+      # 로그에 찍지 않고 비공개 운영 이슈로(docs/public-repo.md, docs/infra.md 25.1638)
       - name: 수집
-        run: python -m batch.jobs.disclosures_us --max "${{ inputs.max || '300' }}"
+        run: |
+          set -o pipefail
+          python -m batch.jobs.disclosures_us --max "${{ inputs.max || '300' }}" 2>&1 | python scripts/ops_tee.py run.log
+
+      - name: 기록을 이슈로 내보내기
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPS_REPO: ${{ secrets.OPS_REPO }}
+          OPS_TOKEN: ${{ secrets.OPS_TOKEN }}
+        run: |
+          python scripts/publish_output.py \
+            --title "운영 출력 (클라우드 세션용)" \
+            --file run.log \
+            --note "미국 공시 수집 (${{ job.status }})"

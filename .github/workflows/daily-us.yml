@@ -114,7 +114,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           # 리포트 종목 줄의 "매매 입력" 링크 (docs/infra.md 25.944). 변수가 비어 있으면 링크 없이 보낸다
-          APP_URL: ${{ vars.APP_URL }}
+          APP_URL: ${{ secrets.APP_URL || vars.APP_URL }} # 시크릿이면 로그 머리에서 가려진다(25.1638 — 변수는 평문으로 찍힌다)
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
           # DB 백엔드 전환 (docs/infra.md 25절). 비어 있으면 Turso 를 쓴다
