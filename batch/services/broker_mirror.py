@@ -146,14 +146,14 @@ def plan(
 
 
 def split_holding(
-    quantity: int, sellable: int, ids: list[int], held: dict[int, int]
+    quantity: int, sellable: int, ids: list[int], held: dict[int, int], sell_first: set[int] | None = None
 ) -> dict[int, tuple[int, int]]:
     """증권사 잔고 한 줄(티커 하나)을 같은 티커의 행들(`ids`, 마지막이 이긴 행)에 나눈다 — 이긴 행 아닌 행에는 그 행의
     몫(`held` — jobs 에서 증권사 쪽 순매수와 내부 보유 가운데 작은 것)만큼 먼저, 나머지는 이긴 행에. 거래소를 옮긴
     종목을 두 행에 들고 있으면 한 행에 다 붙여 남는 몫을 정리로 팔았다(25.1611). 내부 보유만으로 나누면 KIS 가 산 적
     없는 행이 몫을 가져갔다(25.1613). **주문가능은 이긴 행부터** — 베낀 매도는 대개 상장 중인 이긴 행으로 나가는데,
-    주문가능이 모자란 날 옛 행에 먼저 붙이면 그 매도가 막혔다(25.1614, 25.1613 교차검증 [권고] 4).
-    행이 하나면 그대로."""
+    주문가능이 모자란 날 옛 행에 먼저 붙이면 그 매도가 막혔다(25.1614, 25.1613 교차검증 [권고] 4). 단 **오늘 베낄
+    매도가 걸린 행**(`sell_first`)이 먼저 — 고정 순서면 옛 행 매도가 막혔다(25.1615). 행이 하나면 그대로."""
     수량: dict[int, int] = {}
     q = int(quantity)
     for sid in ids[:-1]:
@@ -165,7 +165,8 @@ def split_holding(
         수량[ids[-1]] = q
     out: dict[int, tuple[int, int]] = {}
     s = int(sellable)
-    for sid in [ids[-1], *ids[:-1]]:
+    순서 = [ids[-1], *ids[:-1]]
+    for sid in sorted(순서, key=lambda x: x not in (sell_first or set())):  # 안정 정렬 — 그 안에선 이긴 행부터
         if sid in 수량:
             b = min(s, 수량[sid])
             out[sid] = (수량[sid], b)
