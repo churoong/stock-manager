@@ -1133,6 +1133,7 @@ def buy_orders(
     preselected: list[report_picks.SignalRow] | None = None, preselected_reason: str = "위원회 가결",
     costs: dict[str, Any] | None = None,
     stop_pcts: dict[str, float] | None = None,
+    frozen: set[int] | frozenset[int] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """2부와 같은 함수로 이 계좌의 매수 회차 주문을 낸다 (docs/paper.md 2.1). (주문 행, 기록).
 
@@ -1188,6 +1189,13 @@ def buy_orders(
         # (25.1550 [참고] 1)
         열린빠짐 += [r for r in 다시 if r.stock_id in 열린금액]
         다시 = [r for r in 다시 if r.stock_id not in 열린금액]
+    # 판 뒤 쉼·기업행위 멈춤(계좌별) 종목은 **배분 전에** 뺀다 — 예전엔 배분이 그 몫에 여력·섹터 자리를 먼저 주고
+    # `size_buys`·위험 점검에서야 걸러, 살 수 있는 다른 후보가 "섹터 상한 도달"·"투자 여력 부족" 으로 빠졌다(25.1618,
+    # 매수 배분 감사 [필수]). 그 자리는 현금으로 남는다(다음 후보로 채우지 않는다 — 고른 종목 수는 그대로)
+    멈춤 = set(frozen or ())
+    쉼빠짐 = [r for r in 다시 if r.stock_id in sold_recently]
+    멈춤빠짐 = [r for r in 다시 if r.stock_id in 멈춤 and r.stock_id not in sold_recently]
+    다시 = [r for r in 다시 if r.stock_id not in sold_recently and r.stock_id not in 멈춤]
     빠진후보 = sorted({r.stock_id for r in 다시} - set(price_series))
     if 빠진후보 and series_loader is not None:
         price_series = {**price_series, **series_loader(빠진후보)}
@@ -1238,6 +1246,13 @@ def buy_orders(
         결정.append({"stock_id": r0.stock_id, "kind": "skip", "reason": OPEN_BUY_SKIP_REASON, "ref_close": r0.close,
                      "ref_date": r0.close_date,
                      "detail": {"horizon": r0.horizon, "score": r0.total_score}})  # fmt: skip
+    for 줄들, kind, 까닭 in ((쉼빠짐, "skip", f"판 뒤 {pp.REBUY_COOLDOWN_SESSIONS}거래일 안"),
+                          (멈춤빠짐, "blocked", "위험 점검: 기업행위 경계(분할·병합 의심)")):  # 예전 까닭 글 그대로
+        for r0 in {r.stock_id: r for r in 줄들}.values():
+            결정.append({"stock_id": r0.stock_id, "kind": kind, "reason": 까닭, "ref_close": r0.close,
+                         "ref_date": r0.close_date,
+                         "detail": {"horizon": r0.horizon, "score": r0.total_score,
+                                    "held": r0.stock_id in 든}})  # fmt: skip
     for e in pv.excluded:
         r0 = (by_ticker.get(e.ticker) or [None])[0]  # type: ignore[assignment]
         if r0 is not None:
@@ -1717,7 +1732,7 @@ def run_step(
                     fx_rate=fx[0] if fx else None, stop_ids=손절, sold_recently=최근판, stock_cache=stock_cache,
                     top_n=종목수, entry=진입, substitute=바꾸기, series_loader=series_loader, preselected=가결행,
                     preselected_reason="지주사 합의" if aid in 지주설정 else "위원회 가결", stop_pcts=손절폭,
-                    costs=비용표,
+                    costs=비용표, frozen=멈춘,
                 )  # fmt: skip
                 # 사전 위험 점검 (25.1451) — 통과한 회차만 주문. 한 회차도 못 지난 종목은 결정 원장에서 blocked 로
                 후보 = [rg.Candidate(o["stock_id"], "buy", o["cost_krw"], o["ref_date"], i, o["cash_krw"])
