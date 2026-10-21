@@ -57,8 +57,15 @@ def plan(
     `currency="USD"` 면 시장가를 없앤다 — 마지막 종가(`closes`) ± `US_MARKETABLE_PCT` 지정가. 종가가 없으면 내지 않는다
     """
     안냄: list[tuple[int | None, int, str]] = []
+    # 증권사에만 남은 몫(정리 대상) — 정리를 못 낼 때도 까닭을 남긴다. 예전엔 멈춤·기업행위 경계·코드 없음·
+    # 주문가능 0 이면 기록 없이 빠져 어긋남이 날마다 남는데 왜인지 실행 기록으로 알 수 없었다
+    # (25.1605, KIS 미국 감사 [권고] 2)
+    남음 = {sid: int(보유) - int(internal_qty.get(sid, 0)) - int((bought_today or {}).get(sid, 0))
+           for sid, (보유, _s) in broker.items()}  # fmt: skip
+    정리대상 = sorted(sid for sid, n in 남음.items() if n > 0 and sid in bought_before and sid not in cleaned_today)
     if halted:
-        return [], [(int(o["id"]), int(o["stock_id"]), "멈춤 스위치가 켜져 있음") for o in open_orders]
+        return [], [(int(o["id"]), int(o["stock_id"]), "멈춤 스위치가 켜져 있음") for o in open_orders] + [
+            (None, sid, "멈춤 스위치가 켜져 있음 — 정리 안 함") for sid in 정리대상]
     미국 = currency == "USD"
 
     def 대신가(sid: int, side: str) -> float | None:
@@ -75,12 +82,19 @@ def plan(
     매도: list[Intent] = []
     for sid, (보유, _s) in sorted(broker.items()):
         남는것 = int(보유) - int(internal_qty.get(sid, 0)) - int((bought_today or {}).get(sid, 0))
-        if (남는것 <= 0 or sid not in bought_before or sid in cleaned_today or sid in (frozen or set())
-                or not codes.get(sid)):
+        if 남는것 <= 0 or sid not in bought_before or sid in cleaned_today:
+            continue
+        if sid in (frozen or set()):
+            안냄.append((None, sid, "기업행위 경계 — 정리 안 함"))
+            continue
+        if not codes.get(sid):
+            안냄.append((None, sid, "종목 코드 없음 — 정리 못 함"))
             continue
         q = min(남는것, 팔수있음.get(sid, 0))
         가격 = 대신가(sid, "sell")
-        if q > 0 and 가격 == 0:
+        if q <= 0:
+            안냄.append((None, sid, "증권사 주문가능 수량 0 — 정리 못 함"))
+        elif 가격 == 0:
             안냄.append((None, sid, "종가 없음 — 미국 정리 지정가를 못 정함"))
         elif q > 0:
             매도.append(Intent(None, sid, codes[sid], "sell", q, 가격, REASON_CLEANUP))

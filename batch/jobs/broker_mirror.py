@@ -198,7 +198,13 @@ LATEST_DAILY_SQL = (
 
 
 CODES_SQL = "SELECT id, ticker, market FROM stocks WHERE id IN (SELECT value FROM json_each(?))"
-IDS_SQL = "SELECT id, ticker FROM stocks WHERE country = ? AND ticker IN (SELECT value FROM json_each(?))"
+#: 같은 티커가 두 행이면(거래소를 옮긴 종목 — 유일 키는 (ticker, market)) 상장 중인 쪽, 그다음 새 행 — 순서 없이
+#: 읽으면 옛(상장폐지) 행에 KIS 보유가 붙어 어긋남이 거짓으로 서고 H 가 팔아도 KIS 는 영영 팔지 않았다
+#: (25.1605, KIS 미국 감사 [권고] 1)
+IDS_SQL = (
+    "SELECT id, ticker FROM stocks WHERE country = ? AND ticker IN (SELECT value FROM json_each(?))"
+    " ORDER BY (status = 'active'), id"
+)
 #: 미국 시장가 대신 낼 지정가의 바탕 — 오늘(현지) 앞 마지막 종가. 배치는 개장 전이라 어제 종가다
 CLOSES_SQL = (
     "SELECT j.value, (SELECT p.close FROM prices p WHERE p.stock_id = j.value AND p.date < ? AND p.close > 0"
@@ -217,6 +223,7 @@ def _codes(client: Any, ids: set[int]) -> dict[int, tuple[str, str]]:
 def _ids(client: Any, codes: set[str], country: str) -> dict[str, int]:
     if not codes:
         return {}
+    # 뒤에 오는 행(상장 중·새 id)이 이긴다
     return {str(t): int(i) for i, t in client.execute(IDS_SQL, [country, json.dumps(sorted(codes))]).rows}
 
 
