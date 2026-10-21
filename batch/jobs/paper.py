@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import signal
 import time
 import uuid
@@ -457,10 +458,16 @@ def step_lock(
     token = uuid.uuid4().hex
     시작 = clock()
     잡음: dict[str, Any] | None = None
+    # 같은 시장 넘겨받기는 **Actions 실행끼리만** — 같은 그룹이 차례로 돌린다는 전제가 Actions 안에서만 맞다. 로컬
+    # `python -m batch.jobs.daily` 는 살아 있는 Actions 잠금을 빼앗지도, 빼앗기지도 않는다(25.1633 두 번째 검증
+    # [권고] 1)
+    액션 = os.environ.get("GITHUB_ACTIONS") == "true"
+    주인 = market if 액션 else f"{market}-local"
     while True:
         지금 = clock().astimezone(UTC)
-        값 = {"token": token, "owner": market, "until": (지금 + STEP_LOCK_TTL).isoformat()}
-        if db.lease_try(client, STEP_LOCK_KEY, 값, 지금.isoformat(), owner=market):
+        값 = {"token": token, "owner": 주인, "until": (지금 + STEP_LOCK_TTL).isoformat()}
+        넘겨받을 = market if 액션 else None
+        if db.lease_try(client, STEP_LOCK_KEY, 값, 지금.isoformat(), owner=넘겨받을):
             잡음 = 값
             break
         if 지금 - 시작 >= STEP_LOCK_WAIT:
@@ -477,13 +484,15 @@ def step_lock(
     try:
         yield 잡음
     finally:
-        if 예전처리기 is not None:
-            signal.signal(signal.SIGTERM, 예전처리기)
-        if 잡음 is not None:
-            try:
+        # 놓은 **뒤에** 처리기를 되돌린다 — 놓는 왕복 도중 SIGTERM 이 오면 즉사해 잠금이 남았다(두 번째 검증 [권고] 5)
+        try:
+            if 잡음 is not None:
                 db.lease_release(client, STEP_LOCK_KEY, token, clock().astimezone(UTC).isoformat())
-            except Exception:  # noqa: BLE001 — 놓기 실패가 단계의 원래 예외를 가리지 않게. 기한이 푼다
-                log.exception("가상모의투자 단계 잠금을 놓지 못함 — %s 뒤 풀린다", STEP_LOCK_TTL)
+        except Exception:  # noqa: BLE001 — 놓기 실패가 단계의 원래 예외를 가리지 않게. 기한이 푼다
+            log.exception("가상모의투자 단계 잠금을 놓지 못함 — %s 뒤 풀린다", STEP_LOCK_TTL)
+        finally:
+            if 예전처리기 is not None:
+                signal.signal(signal.SIGTERM, 예전처리기)
 
 
 def _종료신호(signum: int, _frame: Any) -> None:

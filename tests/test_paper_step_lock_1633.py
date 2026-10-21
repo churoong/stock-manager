@@ -16,6 +16,11 @@ from batch.jobs import paper as job
 from tests.test_paper_job_1445 import Client, 설정
 
 
+@pytest.fixture(autouse=True)
+def _액션(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")  # 운영(Actions) 조건 — 로컬 경우는 시험 안에서 따로
+
+
 class _시계:
     def __init__(self, t: datetime) -> None:
         self.t = t
@@ -153,8 +158,55 @@ def test_쥔_동안_종료_신호가_오면_놓고_끝난다() -> None:
     import signal
 
     c = Client(accounts=None)
+    signal.signal(signal.SIGTERM, signal.SIG_DFL)  # 앞 시험이 남긴 처리기와 견주지 않게(두 번째 검증 [권고] 2)
     예전 = signal.getsignal(signal.SIGTERM)
     with pytest.raises(SystemExit) as 끝, job.step_lock(c, "KR"):
         os.kill(os.getpid(), signal.SIGTERM)
     assert 끝.value.code == 128 + signal.SIGTERM and _값(c) == {}
     assert signal.getsignal(signal.SIGTERM) == 예전  # 처리기는 잠금 밖에선 예전대로
+
+
+def test_로컬_실행은_살아_있는_같은_시장_잠금을_빼앗지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """두 번째 검증 [권고] 1 — 로컬 실행은 Actions 동시 실행 그룹 밖이라 같은 시장이어도 살아 있는 잠금일 수 있다."""
+    c = Client(accounts=None)
+    시계 = _시계(datetime(2026, 10, 21, 23, 30, tzinfo=UTC))
+    with job.step_lock(c, "KR", clock=시계, sleep=시계.잠) as 액션:
+        assert 액션 is not None
+        monkeypatch.delenv("GITHUB_ACTIONS")
+        with job.step_lock(c, "KR", clock=시계, sleep=시계.잠) as 로컬:
+            assert 로컬 is None
+        assert _값(c)["token"] == 액션["token"]
+    with job.step_lock(c, "KR", clock=시계, sleep=시계.잠) as 로컬:
+        assert 로컬 is not None and 로컬["owner"] == "KR-local"
+        monkeypatch.setenv("GITHUB_ACTIONS", "true")
+        with job.step_lock(c, "KR", clock=시계, sleep=시계.잠) as 액션:
+            assert 액션 is None  # Actions 도 로컬이 쥔 잠금은 넘겨받지 않는다(기한까지)
+
+
+def test_잠금_기한은_배치_프로세스_한도보다_길고_기다림은_짧다() -> None:
+    """두 번째 검증 [권고] 3 — 기한이 한도보다 짧으면 살아 있는 실행의 잠금을 빼앗고, 기다림이 길면 리포트째 죽는다."""
+    import re
+    from pathlib import Path
+
+    뿌리 = Path(__file__).resolve().parent.parent / ".github" / "workflows"
+    한도 = {}
+    for 이름 in ("daily-kr.yml", "daily-us.yml"):
+        m = re.search(r"timeout --kill-after=\d+s (\d+)m python -m batch\.jobs\.daily", (뿌리 / 이름).read_text())
+        assert m, 이름
+        한도[이름] = int(m.group(1))
+    assert timedelta(minutes=max(한도.values())) < job.STEP_LOCK_TTL
+    assert timedelta(minutes=min(한도.values())) / 4 >= job.STEP_LOCK_WAIT
+
+
+def test_놓기가_실패해도_원래_예외가_올라간다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """두 번째 검증 [권고] 4 — 놓기 실패(통신)가 단계의 원래 예외를 가리지 않게."""
+    from batch.core import db
+
+    c = Client(accounts=None)
+
+    def 깨짐(*_a: object, **_k: object) -> None:
+        raise ConnectionError("놓기 실패")
+
+    monkeypatch.setattr(db, "lease_release", 깨짐)
+    with pytest.raises(RuntimeError, match="단계 실패"), job.step_lock(c, "KR"):
+        raise RuntimeError("단계 실패")
