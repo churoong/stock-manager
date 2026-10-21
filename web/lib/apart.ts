@@ -10,5 +10,5 @@ export function apartDigits(
   if (t == null || !Number.isFinite(t) || v === t) return base;
   for (let d = base; d <= 6; d++)
     if (Number(v.toFixed(d)) !== Number(t.toFixed(d))) return d;
-  return 6;
+  return base; // 여섯째 자리까지 같으면 기본 자리로 — 배치 `_문턱값` 이 방향을 말하지 않는 것과 같게(교차검증 [권고])
 }

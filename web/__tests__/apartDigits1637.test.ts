@@ -17,6 +17,7 @@ describe("문턱과 구별되는 자릿수", () => {
     expect(apartDigits(48.3, 50, 1)).toBe(1);
     expect(apartDigits(50, 50, 1)).toBe(1); // 정확히 같으면 그대로
     expect(apartDigits(0.004, 0, 2)).toBe(3);
+    expect(apartDigits(90.0000001, 90, 1)).toBe(1); // 여섯째 자리까지 같으면 기본 자리 — 배치와 같게
   });
 
   it("관문 칸", () => {
@@ -37,6 +38,16 @@ describe("문턱과 구별되는 자릿수", () => {
     expect(gateNowText({ ...칸, key: "vs_r", now: -0.004, target: 0 })).toBe(
       "-0.004%p / 0 초과",
     );
+    expect(
+      gateNowText({
+        ...칸,
+        key: "vs_index",
+        now: 0.004,
+        target: 0,
+        index_pct: 1.5,
+        index_used: ["KOSPI", "SP500"],
+      }),
+    ).toBe("+0.004%p (지수 반반 +1.50%) / 0 초과");
     expect(
       gateNowText({ ...칸, key: "ratio", now: 0.1234, target: 0.1231 }),
     ).toBe("0.1234 / R 평균 0.1231");
@@ -91,6 +102,10 @@ describe("/api/paper/kis — 한도·인증 실패를 기록 없음으로 말하
     const 빈 = await GET();
     expect(빈.status).toBe(200);
     expect((await 빈.json()).markets.KR.orders).toEqual([]);
+    execute.mockImplementation(async () => {
+      throw new Error("SQLite error: no such column: account_id");
+    });
+    expect((await GET()).status).toBe(200); // 0080 전 DB — 칸이 없으면 빈 보기
     execute.mockImplementation(async () => {
       throw new Error("SQLITE_BLOCKED: reads are blocked");
     });

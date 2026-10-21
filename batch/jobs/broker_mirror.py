@@ -205,9 +205,12 @@ CODES_SQL = "SELECT id, ticker, market FROM stocks WHERE id IN (SELECT value FRO
 #: "산 적" 은 **찼거나 아직 맞추지 않은(오늘 낸)** 매수(25.1613 — 찬 것만 보면 오늘 처음 산 새 행이 다음 날 맞추기
 #: 전까지 지고, 같은 날 다시 돌 때 옛 행에 붙은 잔고를 정리로 팔았다. 안 찬 매수까지 보면 H 가 든 옛 행 주식을 팔았다,
 #: 25.1611). 여러 행이면 잔고를 **이 증권사에서 그 행에 찬 순매수**(`NET_SQL`)만큼 나눈다(`bm.split_holding`)
+#: `+o.broker` — 그 열로 색인을 고르지 못하게 해 종목 색인(`idx_paper_broker_orders_stock`)을 타게 한다. 0089 의
+#: `(broker, trade_date)` 색인이 생기자 통계 없는 운영 DB 에서 플래너가 그것을 골라 종목마다 그 증권사 주문을 처음부터
+#: 훑었다(25.1637 교차검증 [필수] 2 — 1년치 재현 EXISTS 안 읽기 38 → 75,237행)
 IDS_SQL = (
     "SELECT s.id, s.ticker FROM stocks s WHERE s.country = ? AND s.ticker IN (SELECT value FROM json_each(?))"
-    " ORDER BY EXISTS (SELECT 1 FROM paper_broker_orders o WHERE o.broker = ? AND o.stock_id = s.id"
+    " ORDER BY EXISTS (SELECT 1 FROM paper_broker_orders o WHERE +o.broker = ? AND o.stock_id = s.id"
     " AND o.side = 'buy' AND (o.filled_qty > 0 OR o.status IN ('sending', 'accepted'))), (s.status = 'active'), s.id"
 )
 #: 행마다 이 증권사 쪽 순보유 — 찬 매수 − 찬 매도, 아직 맞추지 않은 매수는 낸 수량으로(그날 시가에 찼다고 본다 —
