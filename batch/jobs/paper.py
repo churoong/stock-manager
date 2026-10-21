@@ -1678,7 +1678,8 @@ def run_step(
                         가결행 = []
                     문장 += 지주문장
                     a기록["holding"] = 지주메모
-                # 사면 바로 팔 후보는 사지 않는다 (25.1480) — 결정 원장에 skip 으로, 자리는 다음 후보가
+                # 사면 바로 팔 후보는 사지 않는다 (25.1480) — 결정 원장에 skip 으로. 자리는 위원회 없는 계좌면 다음
+                # 후보가, 위원회 계좌(A·C)는 상위 N 을 자른 뒤라 현금으로 남는다(25.1588)
                 즉시매도 = prebuy_sell_flags(client, market, 규칙, 가결행 if 가결행 is not None else signal_rows,
                                          set(pp.positions(계좌체결)), 멈춘, stock_cache, targets,
                                          cal.local_today(market), 보강캐시)  # fmt: skip
