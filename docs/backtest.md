@@ -567,7 +567,7 @@ Turso 월 읽기 진도 문(추정 500만 행)을 지나야 돈다 — 미뤄지
 | governance(공시 거부권) | 지금은 안 된다(표가 1년 창) — DART 과거 백필이면 된다(3단계) |
 
 - 알고 둔 편향: 공시 거부권이 꺼져 낙관 쪽, 정족수 2 를 채우기 어려워 가결이 준다 — 핵심 H 는 운영 H 의 부분집합이 아니라 **다른 판**이다. 미국 운영 H 는 이미 감성만 다르다
-- 안건(그날 신호 종목)도 PIT 로 다시 낸다 — `signals.RULES`·`buy_zone`(장기 PBR 하위 20% 뒤집기 포함). 종합 점수 가중은 지금 설정값(과거 가중 이력 없음 — 경고)
+- 안건(그날 신호 종목)도 PIT 로 다시 낸다 — `signals.RULES`·`buy_zone`(장기 PBR 하위 20% 뒤집기 포함). 종합 점수 가중은 균등(`EQUAL_WEIGHTS` — 과거 설정 가중 이력이 없어 지금 설정값을 쓰지 않는다. 25.1634 바로잡음 — 예전 문구 "지금 설정값")
 - 회사 가중치는 메모리 원장으로 **순차 계산**(결정일 t 에는 20 거래일 성과가 cutoff 이하로 찬 행만) — `hold.weights` 를 그대로 부른다. 상수(5%p·30·[0.25, 2])는 맞추지 않는다
 - 변형: `core_h`(합의)·`core_g`(B 상위 5 + 추적 매도)·`core_b`(B 상위 5 + core 매도)·`core_r1`·`core_r2`(같은 씨앗 무작위) — 짝 차이가 운영과 같은 뜻(H−G 선정, G−B 매도)
 - 장부형 전략: 날마다 판단(팩터 점수는 주 1회 캐시 — 모멘텀이 최대 4 거래일 묵는 편향, 추적 구간에서 크기를 잰다), 매도는 `trend_exit`·기간·손절 기본값, 판 뒤 쉼·섹터 상한
@@ -608,7 +608,7 @@ Turso 월 읽기 진도 문(추정 500만 행)을 지나야 돈다 — 미뤄지
        시장 절반 넘게 묵으면 하루를 건너뛰는 운영 규칙(`too_stale`·점수 묵음)은 없다(엔진 날짜 축이 드문 날을 뺀다) · 통화를 모르는 옛 스냅샷 자본은 남긴다(운영 SQL 은 NULL 통화를 뺀다)
      - 1d 에 넘길 것: `jobs/backtest._위험_캐시` 가 주마다 쌓인다(전 종목 × 주 수) — 실행 연결에서 비우는 자리를 둔다
    - 조각 1c ✅(25.1532, 검증 전) `batch/services/core_strategy.py`(순수) — 변형 다섯의 **장부형 전략**. 날마다 `bt.LedgerOrders(sells, buys)`
-     - API: `make_core_strategy(variant, market, *, sessions, costs=None, max_sector_pct=30.0) -> CoreStrategy`(`bt.WeightsAt` — `bt.simulate(prices, dates, dates, …)`,
+     - API: `make_core_strategy(variant, market, *, sessions, costs=None, max_sector_pct=30.0, buy_fee_pct=…) -> CoreStrategy`(매수 수수료 — 25.1625)(`bt.WeightsAt` — `bt.simulate(prices, dates, dates, …)`,
        결정은 **날마다**·변형마다 새 `CoreMarket`) · `CoreStrategy.lots`(종목 → `Lot`: 첫 매수일·기간·주당 원가·`substitute_of`) · `.sold`(판 체결일) · `.log`(`DayLog`: 매도와 사유·
        산 비중·운영 결정 원장 모양의 buy·skip·blocked·쉼 목록·하루 수익·무작위 대체) · `VARIANTS` · `NOTIONAL_EQUITY`
      - 변형(운영 계좌 칸 — 마이그레이션 0070·0075·0082·0083): `core_h` = H(trend·tranche·상위 5·weighted) · `core_g` = G(trend·tranche·상위 5·signal) ·
@@ -694,7 +694,7 @@ Turso 월 읽기 진도 문(추정 500만 행)을 지나야 돈다 — 미뤄지
        기준일 = 그 결정의 cutoff. 그날 시점 유니버스(`eligible_at(cutoff)`)에서 **가상모의투자 가상 대조와 같은 `pp.control_picks`("virtual|KR|기준일" 씨앗, 산 종목 빼고 20)·`pp.control_pct`**(대조 10 미만이면 `no_control`)
        — 날 평균 → 28일 묶음(매수 날 **하나라도**, `CORE_BLOCK_MIN_DAYS` = 1 — 핵심 H 는 매수가 드물어 운영의 "사흘 이상" 이면 묶음 대부분이 버려진다) → `pp.block_bound` 한쪽 하한. 무작위면 50.
        결과 행 `metrics_json.evidence`(buys·scored·no_control·days·n_blocks·mean·se·lower·gate·after_sell), 실행 기록 `step_log.evidence`(묶음 값까지)
-     - **관문과 같은 잣대**(`gate_evidence` → `evidence.gate`): 하루 기록의 운영 결정 원장 모양(`DayLog.decisions` 의 buy·skip)을 그대로 `pp.selection_evidence` 에 — 산 종목이 같은 날 **안 산 새 후보** 안 몇 분위
+     - **관문과 같은 잣대**(`gate_evidence` → `evidence.gate`): 하루 기록의 운영 결정 원장 모양(`DayLog.decisions` 의 buy·skip — **지주사가 추천받았지만 고르지 않은 종목의 skip 줄 "지주사: …" 도**, 운영 `holding_step` 과 같은 사유·`held`, 25.1634 — 예전엔 빠져 "안 산 새 후보" 풀이 거의 비었다)을 그대로 `pp.selection_evidence` 에 — 산 종목이 같은 날 **안 산 새 후보** 안 몇 분위
        (결정일 묶음, 사흘 이상). 실전 전환 관문(desk GATE_SEL)과 같은 숫자다(25.1570 부터 운영과 함께 추가 매수(`detail.held`)를 빼고 결정일을 달력 날짜로 센다). 무작위 대조 분위와는 귀무가 달라 직접 견주지 않는다(25.1544 [필수] 1 — 처음엔 하나를 "관문과 같은 잣대" 라 적었다)
      - **판 뒤**(`after_sell` → `evidence.after_sell`): 매도(정지로 미룬 것 빼고)마다 cutoff 뒤 20 거래일 KOSPI 대비 초과 — 낮을수록 잘 판 것. 매도 규칙의 몫은 이것으로 본다
      - 짝(`step_log.pairs`): **core_h−core_g 하나**(둘은 매도 규칙이 같아 매수 성과 차이 = 합의 선정의 몫) — 같은 28일 묶음끼리 20 거래일 KOSPI 대비 초과 평균의 차이 → `pp.block_bound`.

@@ -165,6 +165,30 @@ def _substitute_of(order: dict[str, Any]) -> int | None:
     return None
 
 
+def holding_skips(dv: cb.DayView, top_n: int, held: set[int]) -> list[dict[str, Any]]:
+    """지주사가 추천받았지만 고르지 않은 종목의 skip 결정 — 운영 `jobs.paper.holding_step` 과 같은 사유·같은 꼴.
+
+    예전엔 `buy_orders` 의 결정(고른 종목의 buy·skip)만 넣어, 관문 잣대(`selection_evidence`)의 "안 산 새 후보" 풀이
+    운영 H 와 달리 거의 비었다 — 운영은 이 줄을 원장에 적어 그 풀로 센다(25.1634, 핵심 H 감사 [필수]). 신호 행이 있는
+    종목만(운영 `sid not in 행들` 건너뜀과 같다)
+    """
+    행 = {}
+    for r in dv.rows:
+        행.setdefault(r.stock_id, r)
+    고른 = set(dv.picks)
+    out: list[dict[str, Any]] = []
+    for x in dv.ranked:
+        sid = x["stock_id"]
+        if sid in 고른 or sid not in 행:
+            continue
+        r0 = 행[sid]
+        out.append({"stock_id": sid, "kind": "skip",
+                    "reason": "지주사: 추천 회사 1곳" if not x["eligible"] else f"지주사: 점수 순위 밖(상위 {top_n})",
+                    "ref_close": r0.close, "ref_date": r0.close_date,
+                    "detail": {"horizon": r0.horizon, "score": r0.total_score, "held": sid in held}})  # fmt: skip
+    return out
+
+
 class CoreStrategy:
     """변형 하나의 장부형 판단 함수(`bt.WeightsAt`). 시장 판단기(`CoreMarket`)는 변형마다 따로 —
     cutoff 가 순차여야 한다.
@@ -392,6 +416,8 @@ class CoreStrategy:
             if d["kind"] == "buy" and d["stock_id"] not in 낸:
                 d = {**d, "kind": "blocked", "reason": 막힌까닭.get(d["stock_id"], "위험 점검")}
             log.decisions.append(d)
+        if self.v.selection == "weighted":
+            log.decisions += holding_skips(dv, self.v.top_n, {sid for sid, x in w.items() if x > 0})
         buys: dict[int, float] = {}
         첫주문: dict[int, dict[str, Any]] = {}
         for o in 주문:
