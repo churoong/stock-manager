@@ -145,21 +145,31 @@ def plan(
     return 낼것, 안냄
 
 
-def split_holding(quantity: int, sellable: int, ids: list[int], held: dict[int, int]) -> dict[int, tuple[int, int]]:
+def split_holding(
+    quantity: int, sellable: int, ids: list[int], held: dict[int, int]
+) -> dict[int, tuple[int, int]]:
     """증권사 잔고 한 줄(티커 하나)을 같은 티커의 행들(`ids`, 마지막이 이긴 행)에 나눈다 — 이긴 행 아닌 행에는 그 행의
-    **증권사 쪽 순보유**(`held`, jobs `NET_SQL`)만큼 먼저, 나머지는 이긴 행에. 주문가능도 같은 순서로. 거래소를 옮긴
-    종목을 두 행에 들고 있으면 한 행에 다 붙여 남는 몫을 정리로 팔았다(25.1611). 내부 보유로 나누면 KIS 가 산 적 없는
-    행이 몫을 가져갔다(25.1613). 행이 하나면 그대로."""
-    out: dict[int, tuple[int, int]] = {}
-    q, s = int(quantity), int(sellable)
+    몫(`held` — jobs 에서 증권사 쪽 순매수와 내부 보유 가운데 작은 것)만큼 먼저, 나머지는 이긴 행에. 거래소를 옮긴
+    종목을 두 행에 들고 있으면 한 행에 다 붙여 남는 몫을 정리로 팔았다(25.1611). 내부 보유만으로 나누면 KIS 가 산 적
+    없는 행이 몫을 가져갔다(25.1613). **주문가능은 이긴 행부터** — 베낀 매도는 대개 상장 중인 이긴 행으로 나가는데,
+    주문가능이 모자란 날 옛 행에 먼저 붙이면 그 매도가 막혔다(25.1614, 25.1613 교차검증 [권고] 4).
+    행이 하나면 그대로."""
+    수량: dict[int, int] = {}
+    q = int(quantity)
     for sid in ids[:-1]:
         a = min(q, max(int(held.get(sid, 0)), 0))
         if a > 0:
-            b = min(s, a)
-            out[sid] = (a, b)
-            q, s = q - a, s - b
-    if q > 0 or not out:  # 다 나눠 0 이 남은 이긴 행은 보유가 아니다
-        out[ids[-1]] = (q, s)
+            수량[sid] = a
+            q -= a
+    if q > 0 or not 수량:  # 다 나눠 0 이 남은 이긴 행은 보유가 아니다
+        수량[ids[-1]] = q
+    out: dict[int, tuple[int, int]] = {}
+    s = int(sellable)
+    for sid in [ids[-1], *ids[:-1]]:
+        if sid in 수량:
+            b = min(s, 수량[sid])
+            out[sid] = (수량[sid], b)
+            s -= b
     return out
 
 

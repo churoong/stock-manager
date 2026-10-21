@@ -382,8 +382,12 @@ def run(
     여럿 = sorted(i for ids in 코드표.values() if len(ids) > 1 for i in ids)  # 한 행뿐이면 읽지 않는다
     순보유 = ({int(r[0]): int(r[1] or 0) for r in client.execute(NET_SQL, [증권사, json.dumps(여럿)]).rows}
              if 여럿 else {})  # fmt: skip
+    # 이긴 행 아닌 행의 몫은 순보유와 내부 보유 가운데 작은 것 — 그 행의 매도가 KIS 에선 찼는데 기록이 0(`unknown`·
+    # 잘린 맞추기)이거나 예전 판이 남긴 음수면, 순보유만으로는 H 가 든 이긴 행 주식을 정리로 팔거나 베낀 매도가 막혔다
+    # (25.1614, 25.1613 교차검증 [권고] 1·2). 남는 몫은 이긴 행 — 정리는 그 행의 내부 보유를 넘는 만큼만 판다
+    몫 = {sid: min(max(n, 0), 내부.get(sid, 0)) for sid, n in 순보유.items()}
     증권 = {sid: v for h in 보유 if h.code in 코드표
-            for sid, v in bm.split_holding(h.quantity, h.sellable, 코드표[h.code], 순보유).items()}  # fmt: skip
+            for sid, v in bm.split_holding(h.quantity, h.sellable, 코드표[h.code], 몫).items()}  # fmt: skip
     # 어긋남은 **베낀 적 있는 종목**과 증권사 보유만 — 키를 넣기 전에 산 가상 보유는 "연결 전 보유" 로
     # 따로 센다(감사 [권장] 3). 같은 날 다시 돌면 시가에 찬 오늘 매수가 증권사엔 있고 가상 장부엔 다음 배치에야
     # 들어온다 — 그 수량을 뺀다(감사 [권장] 2)
