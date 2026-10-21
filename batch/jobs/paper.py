@@ -1843,7 +1843,9 @@ def summary_section(client: Any, now: datetime) -> list[str]:
     주초 = (오늘 - timedelta(days=7)).isoformat()
     달초 = ((오늘.replace(day=1) - timedelta(days=1)).replace(day=1).isoformat()
             if review_due(client, 오늘) else None)  # fmt: skip
-    시작 = min(x for x in ((오늘 - timedelta(days=14)).isoformat(), 달초) if x)
+    # 월간 복기는 그달 앞 마지막 행부터 센다(25.1609) — 달초보다 2주 앞까지 읽는다. 그 안에 행이 없으면 달초부터
+    시작 = min(x for x in ((오늘 - timedelta(days=14)).isoformat(),
+                          달초 and (date.fromisoformat(달초) - timedelta(days=14)).isoformat()) if x)
     rows = client.execute(PAPER_SUMMARY_SQL, [시작]).dicts()
     if not rows:
         return []

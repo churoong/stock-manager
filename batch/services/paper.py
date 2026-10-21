@@ -516,7 +516,8 @@ def after(ts: object, base: object) -> bool:
 def twr_step(prev_index: float | None, prev_equity: float | None, equity: float, flow_since: float) -> float:
     """시간가중 수익 지수를 하루 잇는다 (docs/paper.md 3장).
 
-    입금은 그날 아침에 들어와 그날 평가에 섞였다고 본다 — 오늘 수익률 = (오늘 총액 − 새 입금) ÷ 어제 총액 − 1.
+    입금은 그날 끝(평가 직전)의 흐름으로 본다 — 그날 수익에 섞지 않는다:
+    오늘 수익률 = (오늘 총액 − 새 입금) ÷ 어제 총액 − 1.
     어제 총액이 없거나 0 이면(첫 입금 날) 지수는 그대로 이어 간다(첫날 1)
     """
     if prev_index is None:
@@ -670,7 +671,10 @@ def summary_lines(
         끝값[aid] = 총액
         주간 = (float(끝["twr_index"]) / float(주초["twr_index"]) - 1) * 100 if 주초 and 주초["twr_index"] else None
         손익, 코스피, 미국 = (_대비(v, 입금) for v in (총액, 끝.get("kospi_krw"), 끝.get("sp500_krw")))
-        이번주 = [f for f in fills.get(aid, []) if f.fill_date >= week_start]
+        # 체결은 다음 배치가 판정해 그날 행에 들어간다(금요일 장 → 월요일 행) — "이번 주" 는 주초 행 뒤에 장부에 든
+        # 체결, 곧 [주초 행 날, 끝 행 날). 예전 `fill_date >= week_start` 는 금요일 장 체결을 어느 주에도 세지 않았는데
+        # 그 체결은 이번 주 시간가중에는 들어 있었다(25.1609, 운용 요약 감사 [필수] 1)
+        이번주 = 장부에_든(fills.get(aid, []), 주초["as_of"] if 주초 else None, 끝["as_of"])
         보유 = json.loads(끝.get("positions_json") or "[]")
         날짜 = sorted({str(p.get("price_date")) for p in 보유 if p.get("price_date")})
         누적 = (float(끝["twr_index"]) - 1) * 100
@@ -706,9 +710,19 @@ def summary_lines(
             out.append(f"  {앞}−{뒤}: {끝값[앞] - 끝값[뒤]:+,.0f}원 ({무엇}{덧})")
     if month_start is None:
         return out
-    out.append(f"[가상모의투자 월간 복기] {month_start} 부터")
+    # 그달 = 그달 행들에 장부로 든 것 — [그달 앞 마지막 행 날, 그달 마지막 행 날). 체결일로 자르면 그달 마지막 장의
+    # 매매가 복기 때 아직 장부에 없고 다음 달 복기에선 체결일이 앞이라 빠져 영영 안 보였다. 위 끝도 없어 복기를 연
+    # 이번 달 첫 며칠의 매매·규칙 점검 날이 섞였다(25.1609, 운용 요약 감사 [필수] 2·[권고])
+    y, m = int(month_start[:4]), int(month_start[5:7])
+    다음달 = f"{y + m // 12:04d}-{m % 12 + 1:02d}-01"
+    out.append(f"[가상모의투자 월간 복기] {month_start} 부터 {다음달} 전까지")
     for aid in sorted(daily):
-        실현 = [r for r in realized(fills.get(aid, [])) if r["fill_date"] >= month_start]
+        앞행 = next((r for r in reversed(daily[aid]) if str(r["as_of"]) < month_start), None)
+        끝행 = next((r for r in reversed(daily[aid]) if str(r["as_of"]) < 다음달), None)
+        든것 = 장부에_든(fills.get(aid, []), 앞행["as_of"] if 앞행 else month_start,
+                       끝행["as_of"] if 끝행 else month_start)  # fmt: skip
+        든주문 = {f.order_id for f in 든것}
+        실현 = [r for r in realized(fills.get(aid, [])) if r["order_id"] in 든주문]
         if 실현:
             좋은 = sorted(실현, key=lambda r: -r["pnl_krw"])[:3]
             나쁜 = sorted(실현, key=lambda r: r["pnl_krw"])[:3]
@@ -717,10 +731,10 @@ def summary_lines(
             out.append(f"  {aid} 이익 셋: " + (", ".join(글(r) for r in 좋은 if r["pnl_krw"] > 0) or "없음"))
             out.append(f"  {aid} 손실 셋: " + (", ".join(글(r) for r in 나쁜 if r["pnl_krw"] < 0) or "없음"))
         else:
-            out.append(f"  {aid}: 이번 달 판 종목 없음")
+            out.append(f"  {aid}: 그달 판 종목 없음")
         종목넘음, 섹터넘음, 손절넘김 = set(), set(), set()
         for r in daily[aid]:
-            if str(r["as_of"]) < month_start or not float(r["equity_krw"]):
+            if not month_start <= str(r["as_of"]) < 다음달 or not float(r["equity_krw"]):
                 continue
             총 = float(r["equity_krw"])
             섹터합: dict[str, float] = {}
@@ -742,6 +756,14 @@ def summary_lines(
         out.append(f"  {aid} 규칙 점검: 종목 상한 넘은 날 {len(종목넘음)} · 섹터 상한 넘은 날 {len(섹터넘음)}"
                    f" · 손절선 아래로 들고 간 날 {len(손절넘김)}{덧}")
     return out
+
+
+def 장부에_든(fills: list[Fill], after_row: Any, upto_row: Any) -> list[Fill]:
+    """`after_row` 날의 평가 행 뒤 ~ `upto_row` 날의 평가 행까지 장부에 든 체결 — 행 X 에는 체결일 < X 인 체결이
+    든다(국내는 다음 날 아침, 미국은 다음 현지일 개장 전 배치가 판정). `after_row` 가 없으면(앞 행 없는 새 계좌)
+    처음부터."""
+    아래, 위 = str(after_row) if after_row else "", str(upto_row)
+    return [f for f in fills if 아래 <= f.fill_date < 위]
 
 
 def _종목통화_수익(p: dict[str, Any]) -> float | None:
