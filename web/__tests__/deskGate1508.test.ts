@@ -18,7 +18,7 @@ describe("관문 칸 글", () => {
     expect(gateNowText({ key: "vs_r", label: "", now: 1.234, target: 0, ok: true })).toBe("+1.23%p / 0 초과");
     expect(gateNowText({ key: "ratio", label: "", now: 0.12345, target: null, ok: false })).toBe("0.123 / R 평균 모름");
     expect(gateNowText({ key: "incidents", label: "", now: 2, target: 0, ok: false, detail: { recon_bad_days: 1, batch_failed: 1 } })).toBe(
-      "2건(검산 어긋난 날 1 · 배치 사고 날 1) / 0",
+      "2일(검산 어긋난 날 1 · 배치 사고 날 1) / 0",
     );
     expect(gateNowText({ key: "kis", label: "", now: 91.6, target: 90, ok: false, n: 40 })).toBe("91.6% (표본 40) / 90% 이상");
     expect(gateNowText({ key: "kis", label: "", now: 89.6, target: 90, ok: false, n: 120 })).toBe("89.6% (표본 120) / 90% 이상"); // 반올림으로 "90%" 가 안 되게

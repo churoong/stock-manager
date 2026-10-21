@@ -8,6 +8,8 @@
 
 import { z } from "zod";
 import { localDate } from "@/lib/market";
+import { apartDigits } from "@/lib/apart";
+import { DIVERGE } from "@/lib/kisQuality";
 
 /** 입금 한 번의 범위(원) — `batch/services/paper.py` 와 같은 값 (docs/paper.md 5장) */
 export const DEPOSIT_MIN_KRW = 10_000;
@@ -115,9 +117,10 @@ export function brokerLines(b: BrokerLatest | null | undefined): string[] {
   const s = b.summary;
   const out: string[] = [];
   if (s?.n) {
-    out.push(`지난 ${s.days}일 주문 ${s.n} · 체결 일치 ${(s.match_pct ?? 0).toFixed(0)}% (둘 다 참 ${s.both} · 가상만 참 ${s.internal_only} · KIS만 참 ${s.kis_only} · 둘 다 안 참 ${s.neither}) · 부분 체결 ${s.partial}`);
+    const 일치 = s.match_pct ?? 0;
+    out.push(`지난 ${s.days}일 주문 ${s.n} · 체결 일치 ${일치.toFixed(apartDigits(일치, DIVERGE.MATCH_PCT, 0))}% (둘 다 참 ${s.both} · 가상만 참 ${s.internal_only} · KIS만 참 ${s.kis_only} · 둘 다 안 참 ${s.neither}) · 부분 체결 ${s.partial}`);
     const 칸 = (x: { n: number; avg: number | null }, 이름: string) =>
-      x.n && x.avg != null ? `${이름} ${x.avg >= 0 ? "+" : ""}${x.avg.toFixed(2)}% (n=${x.n})` : `${이름} 표본 없음`;
+      x.n && x.avg != null ? `${이름} ${x.avg >= 0 ? "+" : ""}${x.avg.toFixed(apartDigits(x.avg, DIVERGE.SLIP_PCT, 2))}% (n=${x.n})` : `${이름} 표본 없음`;
     out.push(`가격(+ 면 가상모의투자가 낙관): ${칸(s.slip_buy, "매수")} · ${칸(s.slip_sell, "매도")}`);
   } else if (s?.rejected || s?.excluded || s?.unknown || s?.cleanup) {
     // 모름·정리 주문만 있는 날도 — 배치 `compare_lines` 는 이때 줄을 낸다(25.1617, KIS 웹 감사 [필수])

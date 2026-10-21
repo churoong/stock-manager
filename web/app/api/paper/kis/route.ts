@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { execute, rowsToObjects } from "@/lib/db";
+import { execute, explain, rowsToObjects } from "@/lib/db";
 import {
   KIS_LATEST,
   KIS_NAMES,
@@ -71,10 +71,18 @@ export async function GET() {
         diff,
         orders: rowsToObjects<KisOrder>(orders),
       };
-    } catch {
-      return 빈;
+    } catch (e) {
+      // **표·칸이 아직 없을 때만** 빈 보기(0078·0080 전 DB) — 한도·인증 실패까지 삼키면 "아직 낸 주문이 없습니다" 로
+      // 보였다(25.1637, 웹 화면 감사 [필수] 3 — 25.163 꼴. 같은 화면의 실행 품질·운용 경로는 이미 이렇게 한다)
+      const m = e instanceof Error ? e.message : String(e);
+      if (/no such (table|column)/i.test(m)) return 빈;
+      throw e;
     }
   };
-  const [KR, US] = await Promise.all([one("KR"), one("US")]);
-  return NextResponse.json({ whole, markets: { KR, US } });
+  try {
+    const [KR, US] = await Promise.all([one("KR"), one("US")]);
+    return NextResponse.json({ whole, markets: { KR, US } });
+  } catch (e) {
+    return NextResponse.json({ errors: [explain(e instanceof Error ? e.message : String(e))] }, { status: 500 });
+  }
 }

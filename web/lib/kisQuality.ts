@@ -6,6 +6,7 @@
  */
 
 import type { Series } from "@/components/EquityChart";
+import { apartDigits } from "@/lib/apart";
 
 /**
  * 괴리 알림 문턱 — `batch/services/broker_mirror.py` 의 DIVERGE_* 와 같은 값(테스트가 대조, 25.1507). 화면 설명 글에만 쓴다
@@ -119,8 +120,9 @@ export function qualityLine(r: QualityRow | undefined): string {
     if (r && 닫힘.length) return `${r.as_of} 기준 지난 ${DIVERGE.COMPARE_DAYS}일 체결을 견줄 주문 없음 · ${닫힘.join(" · ")}(일치·실현율에서 빠짐)`;
     return "아직 끝난 베낀 주문이 없습니다 — 낸 다음 거래일의 같은 시장 배치가 체결을 맞춥니다.";
   }
-  const pct = (v: number | null) => (v == null ? "-" : `${Number(v).toFixed(0)}%`);
-  const 실현 = r.kept_pct == null ? "실현율 모름(가상이 찬 주문 없음)" : `실현율 ${pct(r.kept_pct)}(가상 체결 가운데 KIS 에서도 찬 비율)`;
+  // 알림 문턱과 같아 보이지 않게(79.6 이 "80%" 로 — 바로 위 설명은 "80% 아래로 내려가면 알립니다", 25.1637)
+  const pct = (v: number | null, t: number) => (v == null ? "-" : `${Number(v).toFixed(apartDigits(Number(v), t, 0))}%`);
+  const 실현 = r.kept_pct == null ? "실현율 모름(가상이 찬 주문 없음)" : `실현율 ${pct(r.kept_pct, DIVERGE.KEPT_PCT)}(가상 체결 가운데 KIS 에서도 찬 비율)`;
   const 모름 = Number(r.unknown) > 0 ? ` · 모름 ${r.unknown}건(일치·실현율에서 빠짐)` : "";
-  return `${r.as_of} 기준 지난 ${DIVERGE.COMPARE_DAYS}일 끝난 주문 ${r.n} · 체결 일치 ${pct(r.match_pct)} · ${실현}${모름}`;
+  return `${r.as_of} 기준 지난 ${DIVERGE.COMPARE_DAYS}일 끝난 주문 ${r.n} · 체결 일치 ${pct(r.match_pct, DIVERGE.MATCH_PCT)} · ${실현}${모름}`;
 }

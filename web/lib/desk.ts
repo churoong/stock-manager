@@ -6,6 +6,7 @@
  * 새 줄에 미국 칸이 없다. 그래서 두 줄을 읽어 **시장마다 가장 최근 칸**을 고른다(각 칸의 실행 시각을 함께 보인다).
  */
 
+import { apartDigits } from "@/lib/apart";
 import { amountText, statusText } from "@/lib/kisPaper";
 
 /** 최근 두 날 — 시장마다 가장 최근 칸을 고르려고. 기본키 역순이라 두 행만 읽는다 */
@@ -197,9 +198,9 @@ export function pctText(v: number | null | undefined): string {
   return `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
 }
 
-export function ppText(v: number | null | undefined): string {
+export function ppText(v: number | null | undefined, threshold?: number): string {
   if (v == null || !Number.isFinite(v)) return "-";
-  return `${v >= 0 ? "+" : ""}${v.toFixed(2)}%p`;
+  return `${v >= 0 ? "+" : ""}${v.toFixed(apartDigits(v, threshold, 2))}%p`;
 }
 
 const SIDE: Record<string, string> = { buy: "매수", sell: "매도" };
@@ -276,22 +277,25 @@ export function gateNowText(i: GateItem): string {
     case "days":
       return `${i.now}번 / ${i.target}번`;
     case "vs_r":
-      return `${ppText(i.now)} / 0 초과`;
+      return `${ppText(i.now, 0)} / 0 초과`;
     case "vs_index":
       // 같은 돈을 KOSPI·S&P500 반반에 넣었다면(25.1519) — 지수 쪽 수익률을 같이
       // 한쪽 그림자가 비면 그쪽은 빠진다 — 어느 지수를 썼는지 적는다(25.1523 검토 2)
-      return `${ppText(i.now)} (지수 ${i.index_used?.length === 1 ? `${i.index_used[0]}만` : "반반"} ${pctText(i.index_pct)}) / 0 초과`;
-    case "ratio":
-      return `${i.now.toFixed(3)} / R 평균 ${i.target == null ? "모름" : i.target.toFixed(3)}`;
+      return `${ppText(i.now, 0)} (지수 ${i.index_used?.length === 1 ? `${i.index_used[0]}만` : "반반"} ${pctText(i.index_pct)}) / 0 초과`;
+    case "ratio": {
+      const d = apartDigits(i.now, i.target, 3);
+      return `${i.now.toFixed(d)} / R 평균 ${i.target == null ? "모름" : i.target.toFixed(d)}`;
+    }
     case "incidents":
-      return `${i.now}건(검산 어긋난 날 ${i.detail?.recon_bad_days ?? "-"} · 배치 사고 날 ${i.detail?.batch_failed ?? "-"}) / 0`;
+      // 단위는 날 수 — 검산 어긋난 날 + 배치 사고 날(docs/desk.md 6장, 25.1637 — 예전 "건")
+      return `${i.now}일(검산 어긋난 날 ${i.detail?.recon_bad_days ?? "-"} · 배치 사고 날 ${i.detail?.batch_failed ?? "-"}) / 0`;
     case "selection":
       // 결정 단위 선정 — 한쪽 95% 하한 분위(무작위면 50), 평균·묶음 수 (25.1518)
-      return `하한 ${i.now.toFixed(1)}분위(평균 ${i.mean == null ? "-" : i.mean.toFixed(1)}, 28일 묶음 ${i.n ?? 0}) / ${i.target ?? 50} 초과`;
+      return `하한 ${i.now.toFixed(apartDigits(i.now, i.target ?? 50, 1))}분위(평균 ${i.mean == null ? "-" : i.mean.toFixed(1)}, 28일 묶음 ${i.n ?? 0}) / ${i.target ?? 50} 초과`;
     case "kis":
       // 소수 첫째 자리 — 89.6 이 "90% / 90% 이상" 으로 보이는데 미충족이면 헷갈린다(25.1511 검토 4)
       // 경로 포함(모름·거부를 못 찬 것으로, 참고 — 판정 칸 아님, 25.1624)
-      return `${i.now.toFixed(1)}% (표본 ${i.n ?? 0}) / ${i.target}% 이상${i.path_pct != null ? ` · 경로 포함 ${i.path_pct.toFixed(1)}%(표본 ${i.path_n ?? 0}, 참고)` : ""}`;
+      return `${i.now.toFixed(apartDigits(i.now, i.target, 1))}% (표본 ${i.n ?? 0}) / ${i.target}% 이상${i.path_pct != null ? ` · 경로 포함 ${i.path_pct.toFixed(1)}%(표본 ${i.path_n ?? 0}, 참고)` : ""}`;
     default:
       return `${i.now} / ${i.target ?? "-"}`;
   }
