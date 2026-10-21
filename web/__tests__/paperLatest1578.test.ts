@@ -121,5 +121,8 @@ describe("안 산 것 — 판과 보유 여부 (25.1603)", () => {
     const 든 = rows.find((r) => r.reason === "투자 여력 부족")!;
     expect(Boolean(든.held)).toBe(true);
     expect(holdSide(든)).toBe(true);
+    // 같은 판·같은 까닭이라도 안 들었을 때와 든 뒤는 따로 묶는다
+    const 섞임 = [{ ...든, id: 901, decided_on: "2026-10-20", held: 0 }, 든];
+    expect(groupDecisions(섞임)).toHaveLength(2);
   });
 });

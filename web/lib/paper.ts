@@ -390,7 +390,7 @@ export function accountView(
   const 손익 = 총액 - invested;
   if (섞임) {
     notes.push(
-      `⚠️ ${daily.as_of} 평가 뒤 체결(현금 ${평가뒤체결 > 0 ? "+" : ""}${Math.round(평가뒤체결).toLocaleString("ko-KR")}원)이 장부에 있습니다 — 평가 총액·손익은 그 평가 기준(+ 입금 변화), 다음 배치가 다시 잽니다`,
+      `⚠️ ${daily.as_of} 평가 뒤 체결(현금 ${평가뒤체결 > 0 ? "+" : ""}${Math.round(평가뒤체결).toLocaleString("ko-KR")}원)이 장부에 있습니다 — 평가 총액·손익은 그 평가 기준(+ 입금 변화), 배치가 이 계좌를 다시 재면 풀립니다`,
     );
   }
   if (입금변화 !== 0) {

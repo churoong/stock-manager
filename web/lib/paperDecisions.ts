@@ -130,7 +130,8 @@ export function groupDecisions(rows: DecisionRow[]): DecisionGroup[] {
   const 묶음 = new Map<string, DecisionGroup>();
   for (const d of rows) {
     // 판도 열쇠에 — 까닭의 수를 지우면 문턱이 바뀐 판끼리 한 묶음이 되어 판 2 결정의 성과가 판 3 줄에 붙었다(25.1603)
-    const 키 = `${d.ticker}|${d.kind}|${reasonKey(d.reason)}|${d.rule_version ?? 1}`;
+    // 보유 여부도 — 안 들었을 때 skip 과 든 뒤 skip 이 한 줄이 되면 안 든 결정의 성과에 보유 쪽 색이 칠해졌다(25.1602 반박 [권고])
+    const 키 = `${d.ticker}|${d.kind}|${reasonKey(d.reason)}|${d.rule_version ?? 1}|${d.held ? 1 : 0}`;
     const g = 묶음.get(키);
     if (!g) 묶음.set(키, { first: d, last: d, count: 1 });
     else {
