@@ -425,15 +425,23 @@ def readiness(*, runs: dict[str, Any] | None, kis: list[dict[str, Any]]) -> list
     return out
 
 
+def _경로실패(x: dict[str, Any]) -> int:
+    """가상은 찼는데 경로가 실패한(모름·거부) 주문 수(`path_fail`, 25.1627). 그 칸이 없는 옛 요약(하루치)은
+    모름·거부 전부 — 낮은 쪽으로"""
+    if "path_fail" in x:
+        return int(x["path_fail"] or 0)
+    return int(x.get("unknown") or 0) + int(x.get("rejected") or 0)
+
+
 def combine_kept(summaries: list[dict[str, Any]]) -> dict[str, Any]:
     """국내·미국 KIS 비교 요약을 합친 실현율 — 둘 다 참 ÷ (둘 다 참 + 가상만 참), 표본 = 그 분모.
 
-    `path_pct` = **경로 포함 실현율**(참고 칸, 관문 판정에 넣지 않는다) — 모름(미국 예약이 개장 때 전송 안 됨 등)·거부를
-    못 찬 것으로 분모에 더한 최악 경계. 실현율은 둘을 빼 높게 기울 수 있다(15.8) — 경로 실패가 잦으면 두 칸이 벌어진다
-    (25.1624, 35회차 곁가지 1 — 검증 둘 다 "판정 칸은 그대로, 별도 칸" 조건)"""
+    `path_pct` = **경로 포함 실현율**(참고 칸, 관문 판정에 넣지 않는다) — 가상은 찼는데 모름(미국 예약이 개장 때
+    전송 안 됨 등)·거부인 주문을 못 찬 것으로 분모에 더한 최악 경계(가상도 안 찬 주문은 넣지 않는다, 25.1627).
+    실현율은 둘을 빼 높게 기울 수 있다(15.8) — 경로 실패가 잦으면 두 칸이 벌어진다(25.1624, 35회차 곁가지 1)"""
     둘 = sum(int((x or {}).get("both") or 0) for x in summaries)
     가상만 = sum(int((x or {}).get("internal_only") or 0) for x in summaries)
-    경로 = sum(int((x or {}).get("unknown") or 0) + int((x or {}).get("rejected") or 0) for x in summaries)
+    경로 = sum(_경로실패(x or {}) for x in summaries)
     return {"kept_pct": 둘 / (둘 + 가상만) * 100 if 둘 + 가상만 else None, "n": 둘 + 가상만,
             "path_pct": 둘 / (둘 + 가상만 + 경로) * 100 if 둘 + 가상만 + 경로 else None,
             "path_n": 둘 + 가상만 + 경로}  # fmt: skip

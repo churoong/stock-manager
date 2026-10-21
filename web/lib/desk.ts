@@ -270,7 +270,8 @@ export function rowsById(lb: DeskLeaderboard | null | undefined): Map<string, De
 export function gateNowText(i: GateItem): string {
   // 결정 단위 — 묶음이 4개 전이라 하한이 없어도 평균·묶음 수는 보인다(25.1523 검토 7)
   if (i.key === "selection" && i.now == null && i.mean != null) return `하한 모름(평균 ${i.mean.toFixed(1)}, 28일 묶음 ${i.n ?? 0}) / ${i.target ?? 50} 초과`;
-  if (i.now == null) return "모름";
+  // 가상 체결이 모두 경로 실패(모름·거부)면 실현율은 모르지만 경로 포함 값은 있다 — 미국 예약 미전송처럼 이 칸이 가장 필요한 때(25.1627)
+  if (i.now == null) return i.key === "kis" && i.path_pct != null ? `모름 · 경로 포함 ${i.path_pct.toFixed(1)}%(표본 ${i.path_n ?? 0}, 참고)` : "모름";
   switch (i.key) {
     case "days":
       return `${i.now}번 / ${i.target}번`;

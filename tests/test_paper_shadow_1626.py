@@ -103,3 +103,34 @@ def test_sp500_그림자는_평가와_같은_환율(c: Client, monkeypatch: pyte
     r = c.conn.execute("SELECT invested_krw, equity_krw, holdings_krw, sp500_krw, positions_json FROM paper_daily"
                        " WHERE as_of='2026-10-16'").fetchone()
     assert r[3] == pytest.approx(1_100_000)  # 평가와 같은 오늘 환율 — 예전엔 지수 날짜 환율이라 1,000,000 그대로
+
+
+def test_늦게_연_계좌의_여는_날_kospi_그림자(c: Client, monkeypatch: pytest.MonkeyPatch) -> None:  # 25.1627
+    지수(c, "KOSPI", "2026-10-14", 100.0)
+    지수(c, "KOSPI", "2026-10-15", 100.0)
+    시세(c, 1, "2026-10-15", 10_000, 10_000, "KRW")
+    # 계좌 A 는 10-16 에 열었다(입금은 10-14) — 열기 전 입금은 연 날 지수로 산 것으로
+    c.conn.execute("UPDATE paper_accounts SET created_at='2026-10-16T01:00:00+00:00' WHERE id='A'")
+    돌림(c, monkeypatch, "KR", "2026-10-15", "2026-10-16", "2026-10-15", "2026-10-15T23:30:00+00:00")
+    아침 = 행(c, "2026-10-16")[9]
+    지수(c, "KOSPI", "2026-10-16", 110.0)  # 저녁: KOSPI 10-16 확정, 국내 시세는 아직 10-15
+    돌림(c, monkeypatch, "US", "2026-10-15", "2026-10-16", "2026-10-16", "2026-10-16T12:30:00+00:00")
+    저녁 = 행(c, "2026-10-16")
+    print("아침 kospi_krw", 아침, "저녁 kospi_krw", 저녁[9], "equity", 저녁[2], "invested?")
+    assert 저녁[9] == pytest.approx(1_000_000)  # 연 날 행: 평가 = 넣은 돈이어야
+
+
+def test_늦게_연_계좌의_여는_날_sp500_그림자(c: Client, monkeypatch: pytest.MonkeyPatch) -> None:  # 25.1627
+    for d in ("2026-10-14", "2026-10-15", "2026-10-16"):
+        환율(c, d, 1300)
+    지수(c, "SP500", "2026-10-14", 1000.0)
+    지수(c, "SP500", "2026-10-15", 1000.0)
+    시세(c, 2, "2026-10-15", 100, 100, "USD")
+    시세(c, 1, "2026-10-16", 10_000, 10_000, "KRW")
+    c.conn.execute("UPDATE paper_accounts SET created_at='2026-10-16T01:00:00+00:00' WHERE id='A'")
+    지수(c, "SP500", "2026-10-16", 1100.0)  # 미국 10-16 장 지수는 한국 10-17 아침 전에 들어옴, 미국 종목 시세는 아직 10-15
+    환율(c, "2026-10-17", 1300)
+    돌림(c, monkeypatch, "KR", "2026-10-16", "2026-10-17", "2026-10-16", "2026-10-16T23:30:00+00:00")
+    r = 행(c, "2026-10-17")
+    print("sp500_krw", r[8])
+    assert r[8] == pytest.approx(1_000_000)

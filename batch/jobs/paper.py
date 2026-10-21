@@ -721,6 +721,7 @@ def _stock(client: Any, sid: int, 캐시: dict[int, dict[str, Any]]) -> dict[str
 def _열린_그림자(
     client: Any, flows: list[pp.CashFlow], shadows: dict[str, tuple[dict[int, float | None], float | None]],
     opened: str, cache: dict[tuple[str, str], float | None],
+    at: dict[str, tuple[str | None, str | None]] | None = None,
 ) -> dict[str, tuple[dict[int, float | None], float | None]]:
     """늦게 연 계좌(G·H 등)의 그림자 기준 — 계좌를 열기 전의 입금은 **연 날**의 지수로 산 것으로 본다
     (25.1484, 검증 [권장] 1).
@@ -734,7 +735,11 @@ def _열린_그림자(
     for code, (lv, now_lv) in shadows.items():
         if (code, opened) not in cache:
             가짜 = [pp.CashFlow(-1, opened, 1.0, "deposit")]
-            cache[(code, opened)] = _level_of(client, 가짜, code, fx=code == "SP500")[0].get(-1)
+            # 연 날 기준도 지금 값과 같은 시점(`at` = 그 지수의 upto·fx_on, 25.1626) — 빠지면 기준은 최신 지수, 지금
+            # 값은 보유 시세 날짜라 여는 날 행이 하루치 지수만큼 틀렸다(25.1627, 25.1626 반박 [필수] 1)
+            upto, fx_on = (at or {}).get(code, (None, None))
+            cache[(code, opened)] = _level_of(client, 가짜, code, fx=code == "SP500", upto=upto,
+                                              fx_on=fx_on)[0].get(-1)  # fmt: skip
         시작 = cache[(code, opened)]
         out[code] = ({f.id: (시작 if f.flow_date < opened else lv.get(f.id))
                       for f in flows if f.kind == "deposit"}, now_lv)  # fmt: skip
@@ -1596,7 +1601,8 @@ def run_step(
         a기록: dict[str, Any] = {"fills": sum(1 for f in 새체결 if f.account_id == aid)}
         멈춘 = 계좌별멈춤(aid)
         v, 검 = mark(client, aid, 오늘, flows, flow_created, fills, fill_created, a기록["fills"], 멈춘, stock_cache,
-                    _열린_그림자(client, flows, shadows, str(acct.get("created_at") or "")[:10], 열림캐시),
+                    _열린_그림자(client, flows, shadows, str(acct.get("created_at") or "")[:10], 열림캐시,
+                                at={"KOSPI": (끝시세["KR"], None), "SP500": (끝시세["US"], 오늘)}),
                     지금)  # fmt: skip
         a기록.update({"recon_ok": 검["recon_ok"], "unknown": len(v.unknown)})
         계좌체결 = [f for f in fills if f.account_id == aid]

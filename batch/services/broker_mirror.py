@@ -321,6 +321,12 @@ def compare(rows: list[dict[str, Any]]) -> dict[str, Any]:
             continue
         if r.get("status") not in _끝난 or r.get("i_status") not in ("filled", "expired"):
             continue
+        # 그 거래일에 찬 것만 "가상 참" — 미룬 매도가 뒤 장에서 찬 것은 이 날 주문과 짝이 아니다
+        내부 = r["i_status"] == "filled" and str(r.get("i_fill_date") or "")[:10] == str(r.get("trade_date") or "")[:10]
+        if r["status"] in ("unknown", "rejected") and 내부:
+            # 가상은 찼는데 경로가 실패한 주문 — 경로 포함 실현율(`desk.combine_kept.path_pct`)의 분모에만(25.1627 —
+            # 가상도 안 찬 주문까지 넣으면 "최악 경계" 보다 낮게 나왔다, 25.1624 반박 [필수] 2)
+            칸["path_fail"] += 1
         if r["status"] == "unknown":
             칸["unknown"] += 1
             continue
@@ -333,8 +339,6 @@ def compare(rows: list[dict[str, Any]]) -> dict[str, Any]:
             칸["excluded"] += 1
             continue
         칸["n"] += 1
-        # 그 거래일에 찬 것만 "가상 참" — 미룬 매도가 뒤 장에서 찬 것은 이 날 주문과 짝이 아니다
-        내부 = r["i_status"] == "filled" and str(r.get("i_fill_date") or "")[:10] == str(r.get("trade_date") or "")[:10]
         kis = r["status"] in ("filled", "partial") and int(r.get("filled_qty") or 0) > 0
         칸["partial"] += r["status"] == "partial"
         칸[("both" if kis else "internal_only") if 내부 else ("kis_only" if kis else "neither")] += 1
@@ -353,7 +357,7 @@ def compare(rows: list[dict[str, Any]]) -> dict[str, Any]:
         # 100 이면 가상 체결을 그대로 믿어도 된다
         "kept_pct": 칸["both"] / 가상참 * 100 if 가상참 else None,
         **{k: 칸[k] for k in ("both", "internal_only", "kis_only", "neither", "partial", "rejected", "unknown",
-                             "cleanup", "excluded")},
+                             "cleanup", "excluded", "path_fail")},
         "slip_buy": 평균(차이["buy"]), "slip_sell": 평균(차이["sell"]),
         "reject_reasons": dict(까닭.most_common(COMPARE_TOP_REASONS)),
     }  # fmt: skip

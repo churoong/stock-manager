@@ -11,3 +11,20 @@ describe("경로 포함 실현율", () => {
     expect(gateNowText(칸)).toBe("90.0% (표본 30) / 90% 이상");
   });
 });
+
+describe("실현율 모름일 때도 경로 포함 값 (25.1627)", () => {
+  it("가상 체결이 모두 경로 실패면 모름과 함께", () => {
+    expect(
+      gateNowText({
+        key: "kis",
+        label: "",
+        now: null,
+        target: 90,
+        ok: false,
+        n: 0,
+        path_pct: 0,
+        path_n: 3,
+      }),
+    ).toBe("모름 · 경로 포함 0.0%(표본 3, 참고)");
+  });
+});
