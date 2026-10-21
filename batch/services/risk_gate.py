@@ -146,13 +146,15 @@ def ref_floor(market: str, today: date) -> str | None:
     달력 범위(라이브러리 기본 — 앞 20년·뒤 1년) 밖이면 None — 부르는 쪽이 옛 달력일 잣대로 돈다. 예전엔 긴 백테스트
     (`--years 20`)가 첫 매수일에 통째로 멈출 뻔했다(25.1629 교차검증 [권고] 2)
     """
+    from exchange_calendars.errors import DateOutOfBounds
+
     from batch.core import calendar as cal
 
     d = today
     try:
         for _ in range(STALE_PRICE_SESSIONS):
             d = cal.previous_session(market, d)
-    except Exception:  # noqa: BLE001 — 달력 범위 밖(DateOutOfBounds 등)
+    except DateOutOfBounds:  # 달력 범위 밖만 — 다른 실패는 그대로 올린다
         return None
     return d.isoformat()
 
