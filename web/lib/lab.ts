@@ -1,7 +1,7 @@
 /**
  * 연구실 — 전략을 고치려고 보는 자료 (docs/desk.md 5장, docs/infra.md 25.1506).
  *
- * 성과 분해 비교(계좌마다 배치가 낸 `paper_daily.attribution_json` 마지막 것) · 지주사(H) 회사 가중치 추이(운용 요약의 시장 칸 `holding`) ·
+ * 성과 분해 비교(계좌마다 배치가 낸 `paper_daily.attribution_json` 이 **적힌** 마지막 것 — 25.1630, /paper 의 25.1602 와 같게. 한 번도 안 적힌 계좌는 마지막 평가 행 그대로 '표본 없음') · 지주사(H) 회사 가중치 추이(운용 요약의 시장 칸 `holding`) ·
  * 종목 여정(한 종목의 추천 → 결정 → 주문 → 가상 체결 → KIS 주문). 값은 배치가 적은 그대로 — 웹은 고르고 줄 세우고 글을 만든다.
  */
 
@@ -11,7 +11,10 @@ import type { Attribution } from "@/lib/paper";
 
 export const LAB_ATTRIBUTION_SQL = `SELECT d.account_id, d.as_of, d.attribution_json, a.name
 FROM paper_daily d JOIN paper_accounts a ON a.id = d.account_id
-WHERE d.as_of = (SELECT MAX(x.as_of) FROM paper_daily x WHERE x.account_id = d.account_id) ORDER BY d.account_id`;
+WHERE d.as_of = COALESCE(
+  (SELECT MAX(x.as_of) FROM paper_daily x WHERE x.account_id = d.account_id AND x.attribution_json IS NOT NULL),
+  (SELECT MAX(x.as_of) FROM paper_daily x WHERE x.account_id = d.account_id))
+ORDER BY d.account_id`;
 /** 운용 요약 최근 120일 — 시장 칸의 지주사 기록만 꺼낸다(기본키 역순이라 120행) */
 export const LAB_HOLDING_DAYS = 120;
 export const LAB_HOLDING_SQL = `SELECT as_of,

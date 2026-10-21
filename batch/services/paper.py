@@ -985,16 +985,22 @@ def attribution(decisions: list[dict[str, Any]], entries: list[tuple[float, floa
     진입 = 체결가가 그날 종가보다 얼마나 쌌나(%)와 안 찬 회차의 그 뒤, 청산 = 판 뒤와 플래그를 따르지 않고 든 뒤
     (판 뒤가 음수면 판 것이 옳았다). `entries` 는 매수 체결마다 (체결가, 체결일 종가)
     """
+    원래 = decisions
     decisions = _에피소드(decisions)
     종류 = {k: [d for d in decisions if d.get("kind") == k]
             for k in ("buy", "skip", "missed", "sell", "hold_flag", "blocked")}  # fmt: skip
     # 이미 든 종목의 skip 도 "안 낸 새 후보" 가 아니다 — 다 투자한 계좌는 목표 비중 아래로 내려간 보유(대개 최근에 빠진
-    # 종목)가 날마다 "투자 여력 부족" 으로 이 풀에 들었다(25.1600, 매도·성과 분해 감사 [권고] 3)
-    견줄 = [d for d in 종류["skip"]
-            if not str(d.get("reason")).startswith(NONCOMPARABLE_SKIP_PREFIXES) and not _추가매수(d)]  # fmt: skip
+    # 종목)가 날마다 "투자 여력 부족" 으로 이 풀에 들었다(25.1600, 매도·성과 분해 감사 [권고] 3).
+    # **거른 뒤 에피소드로 묶는다**(25.1630) — 예전엔 묶은 뒤 걸러, 에피소드 첫 줄이 견주지 않는 skip("판 뒤"·"상한
+    # 도달"·이미 든 종목)이면 28일 안에 다시 새 후보가 된 같은 종목의 skip 까지 빠졌다(판 뒤 다시 산 줄은 buy 라 남아
+    # 안 산 쪽만 빠짐 — 선정 비교가 한쪽으로 기움, 25.1601 [참고]). 까닭별 칸도 까닭마다 따로 묶는다
+    원skip = [d for d in 원래 if d.get("kind") == "skip"]
+    견줄 = _에피소드([d for d in 원skip if not str(d.get("reason")).startswith(NONCOMPARABLE_SKIP_PREFIXES)
+                   and not _추가매수(d)])  # fmt: skip
     까닭: dict[str, list[dict[str, Any]]] = {}
-    for d in 종류["skip"]:
+    for d in 원skip:
         까닭.setdefault(_까닭_묶음(str(d.get("reason"))), []).append(d)
+    까닭 = {k: _에피소드(v) for k, v in 까닭.items()}
     진입 = [(float(c) - float(p)) / float(p) * 100 for p, c in entries if c and p and p > 0]
     return {
         "horizon": ATTRIBUTION_HORIZON,

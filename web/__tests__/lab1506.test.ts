@@ -89,6 +89,8 @@ describe("성과 분해·지주사 가중치", () => {
     ins.run("A", "2026-10-15", '{"horizon": 20}');
     ins.run("A", "2026-10-16", '{"horizon": 21}');
     ins.run("B", "2026-10-16", null);
+    // 오늘 평가 행에 성과 분해가 아직 안 적혔으면(국내 배치는 단계 끝에 적는다·실패한 날) 적힌 어제 것 — 25.1630
+    ins.run("A", "2026-10-17", null);
     const rows = db.prepare(LAB_ATTRIBUTION_SQL).all() as Array<{ account_id: string; as_of: string; attribution_json: string | null }>;
     expect(rows.map((r) => [r.account_id, r.as_of, r.attribution_json])).toEqual([
       ["A", "2026-10-16", '{"horizon": 21}'],
