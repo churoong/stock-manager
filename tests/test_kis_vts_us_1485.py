@@ -191,7 +191,7 @@ def test_us_job_sends_reservations_and_keeps_kr_apart(c: Client) -> None:
     기록 = job.run(c, "US", _kst("21:27"), session=s, clock=lambda: _kst("21:27"))
     # IEX 상장 5 는 KIS 거래소 코드가 없어 빠진다. 시장가 매수 4 는 180.05 × 1.1
     assert s.orders == [("buy", "AAPL", "NASD", 3, 200.0), ("buy", "IBM", "NYSE", 1, 198.06)]
-    assert 기록["sent"] == {"accepted": 2} and 기록["not_sent"] == {"종목 코드 없음": 1}
+    assert 기록["sent"] == {"accepted": 2} and 기록["not_sent"] == {"KIS 미국 거래소 코드 없음(IEX)": 1}
     줄 = c.q("SELECT broker, market, paper_order_id, order_type, limit_price, broker_order_no, message, status"
              " FROM paper_broker_orders ORDER BY id")
     assert 줄 == [("kis_vts_us", "US", 201, "limit", 200.0, None, "예약번호 R1", "accepted"),

@@ -23,6 +23,8 @@ from batch.services.signals import to_tick
 MAX_ORDERS_PER_DAY = 40
 REASON_MIRROR = "베낌"
 REASON_CLEANUP = "정리"
+#: 주문가능 수량이 모자라 정리를 일부만 낸 까닭(25.1607)
+PARTIAL_CLEANUP = "증권사 주문가능 수량 모자람 — 일부만 정리"
 #: 미국은 시장가가 없다(모의 미국 주문은 지정가만, 예약주문도 단가를 받는다) — 시장가 주문(매도·정리·시가 매수)은
 #: 마지막 종가에서 이만큼(%) 불리한 지정가로 낸다(매도 아래·매수 위). 개장가가 그 안이면 개장가에 찬다. 하루 ±10% 넘는
 #: 갭은 드물다 — 넘으면 안 차고 다음 거래일 맞추기에서 `unfilled` 로 보인다 `[확인필요]`
@@ -100,7 +102,7 @@ def plan(
             매도.append(Intent(None, sid, codes[sid], "sell", q, 가격, REASON_CLEANUP))
             팔수있음[sid] -= q
             if q < 남는것:  # 일부만 — 나머지 몫도 까닭을(25.1607, 25.1605 반박 [참고])
-                안냄.append((None, sid, "증권사 주문가능 수량 모자람 — 일부만 정리"))
+                안냄.append((None, sid, PARTIAL_CLEANUP))
     매수: list[Intent] = []
     for o in open_orders:
         oid, sid = int(o["id"]), int(o["stock_id"])
@@ -138,8 +140,18 @@ def plan(
     if len(낼것) > 남은:
         for x in 낼것[남은:]:
             안냄.append((x.paper_order_id, x.stock_id, f"하루 주문 상한 {max_orders}"))
+        안냄 = without_partial(안냄, 낼것[남은:])
         낼것 = 낼것[:남은]
     return 낼것, 안냄
+
+
+def without_partial(
+    not_sent: list[tuple[int | None, int, str]], cut: list[Intent]
+) -> list[tuple[int | None, int, str]]:
+    """잘려 나가지 못한 정리 주문의 "일부만 정리" 까닭을 지운다 — 하나도 안 냈는데 일부는 냈다고 읽혔다(25.1608,
+    25.1607 교차검증 [권고] 1). 잘린 까닭(상한·예약 마감)은 따로 남는다."""
+    잘림 = {x.stock_id for x in cut if x.paper_order_id is None}
+    return [r for r in not_sent if not (r[0] is None and r[1] in 잘림 and r[2] == PARTIAL_CLEANUP)]
 
 
 @dataclass(frozen=True)

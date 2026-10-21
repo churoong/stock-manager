@@ -198,12 +198,14 @@ LATEST_DAILY_SQL = (
 
 
 CODES_SQL = "SELECT id, ticker, market FROM stocks WHERE id IN (SELECT value FROM json_each(?))"
-#: 같은 티커가 두 행이면(거래소를 옮긴 종목 — 유일 키는 (ticker, market)) 상장 중인 쪽, 그다음 새 행 — 순서 없이
-#: 읽으면 옛(상장폐지) 행에 KIS 보유가 붙어 어긋남이 거짓으로 서고 H 가 팔아도 KIS 는 영영 팔지 않았다
-#: (25.1605, KIS 미국 감사 [권고] 1)
+#: 같은 티커가 두 행이면(거래소를 옮긴 종목 — 유일 키는 (ticker, market)) **이 증권사 칸에서 산 적 있는 행**, 그다음
+#: 상장 중인 쪽, 그다음 새 행 — 순서 없이 읽으면 옛(상장폐지) 행에 KIS 보유가 붙어 어긋남이 거짓으로 서고 H 가 팔아도
+#: KIS 는 영영 팔지 않았다(25.1605, KIS 미국 감사 [권고] 1). 상장 여부만 보면 H 가 이사 전 행을 든 채일 때 같은 해가
+#: 방향만 바꿔 남았다 — KIS 보유는 그 주식을 산 주문의 id 에 붙는 것이 맞다(25.1608, 25.1607 교차검증 [필수])
 IDS_SQL = (
-    "SELECT id, ticker FROM stocks WHERE country = ? AND ticker IN (SELECT value FROM json_each(?))"
-    " ORDER BY (status = 'active'), id"
+    "SELECT s.id, s.ticker FROM stocks s WHERE s.country = ? AND s.ticker IN (SELECT value FROM json_each(?))"
+    " ORDER BY EXISTS (SELECT 1 FROM paper_broker_orders o WHERE o.broker = ? AND o.stock_id = s.id"
+    " AND o.side = 'buy' AND o.status <> 'rejected'), (s.status = 'active'), s.id"
 )
 #: 미국 시장가 대신 낼 지정가의 바탕 — 오늘(현지) 앞 마지막 종가. 배치는 개장 전이라 어제 종가다
 CLOSES_SQL = (
@@ -220,11 +222,11 @@ def _codes(client: Any, ids: set[int]) -> dict[int, tuple[str, str]]:
             if t}  # fmt: skip
 
 
-def _ids(client: Any, codes: set[str], country: str) -> dict[str, int]:
+def _ids(client: Any, codes: set[str], country: str, broker: str) -> dict[str, int]:
     if not codes:
         return {}
-    # 뒤에 오는 행(상장 중·새 id)이 이긴다
-    return {str(t): int(i) for i, t in client.execute(IDS_SQL, [country, json.dumps(sorted(codes))]).rows}
+    # 뒤에 오는 행(산 적 있음·상장 중·새 id)이 이긴다
+    return {str(t): int(i) for i, t in client.execute(IDS_SQL, [country, json.dumps(sorted(codes)), broker]).rows}
 
 
 def _closes(client: Any, ids: set[int], before: str) -> dict[int, float]:
@@ -356,7 +358,7 @@ def run(
 
     # 2. 잔고 — 내부 장부와 대 본다
     보유, 합 = sess.balance_us() if 미국 else sess.balance()
-    코드표 = _ids(client, {h.code for h in 보유}, market)
+    코드표 = _ids(client, {h.code for h in 보유}, market, 증권사)
     증권 = {코드표[h.code]: (h.quantity, h.sellable) for h in 보유 if h.code in 코드표}
     내부 = {int(r["stock_id"]): int(r["q"]) for r in client.execute(INTERNAL_QTY_SQL, [베낌, market]).dicts()
             if int(r["q"] or 0) > 0}  # fmt: skip
@@ -480,6 +482,12 @@ def run(
     낼것, 안냄 = bm.plan(주문들, 코드, 내부, 증권, 산적, already=이미, cleaned_today=정리함, halted=멈춤,
                        bought_today=오늘산, frozen=frozen, currency="USD" if 미국 else "KRW",
                        closes=종가, sent_today=int(낸수[0][0] or 0) if 낸수 else 0)  # fmt: skip
+    # 미국에서 티커는 있는데 KIS 거래소 코드가 없어 뺀 종목은 "종목 코드 없음" 이 아니다 — 까닭을 바로 적는다
+    # (25.1608, 25.1607 교차검증 [권고] 2. 내지 않는 처리 자체는 25.1485 그대로)
+    if 미국:
+        안냄 = [(oid, sid, r.replace("종목 코드 없음", f"KIS 미국 거래소 코드 없음({종목[sid][1]})", 1))
+              if sid in 종목 and sid not in 코드 and r.startswith("종목 코드 없음") else (oid, sid, r)
+              for oid, sid, r in 안냄]  # fmt: skip
     # 정리 주문은 그 종목을 **산 계좌**로 적는다 — 베끼는 계좌를 바꾼 뒤 정리 줄이 새 계좌의 주문처럼 보였다
     # (25.1517, 검토 6)
     산계좌 = {int(r[0]): str(r[1]) for r in client.execute(BOUGHT_BY_SQL, [증권사]).rows}
@@ -489,6 +497,7 @@ def run(
             # 보내는 사이 예약 접수 마감(개장 전 `US_RESV_CUTOFF`)을 넘겼다 — 단계 시작 때 한 번만 보면 마감 뒤에도
             # 나머지를 보냈다(25.1568, KIS 경로 감사 [참고] 4). 남은 것은 보내지 않고 까닭을 남긴다
             안냄.extend((x.paper_order_id, x.stock_id, 마감) for x in 낼것[i:])
+            안냄 = bm.without_partial(안냄, 낼것[i:])
             낼것 = 낼것[:i]  # 기록의 `planned` 가 끊긴 줄까지 세어 `not_sent` 와 두 번 셌다(25.1569)
             break
         # 미국은 늘 지정가(시장가 대신 종가 ± 폭) — 내부 주문이 시장가였으면 `limit_price` 가 그 폭 지정가다

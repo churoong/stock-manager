@@ -18,13 +18,13 @@ def test_같은_티커_두_행이면_상장_중인_행(c: Client) -> None:  # no
                    " fetched_at, asset_type) VALUES (9, 'AAPL', 'NYSE', 'US', '옛행', '전자', 'USD', 'delisted', 't',"
                    " 't', 'stock')")  # fmt: skip
     상장 = c.q("SELECT id FROM stocks WHERE ticker = 'AAPL' AND status = 'active'")[0][0]
-    assert job._ids(c, {"AAPL"}, "US") == {"AAPL": 상장}
+    assert job._ids(c, {"AAPL"}, "US", "kis_vts_us") == {"AAPL": 상장}
     # 상장 중인 행이 여럿이면 새 id — 새 행(12)의 시장 이름이 색인에서 앞서도(동률을 색인 순서에 맡기지 않게,
     # 25.1607, 25.1605 반박 [권고])
     c.conn.execute("INSERT INTO stocks (id, ticker, market, country, name_ko, sector, currency, status, source,"
                    " fetched_at, asset_type) VALUES (12, 'AAPL', 'AMEX', 'US', '새행', '전자', 'USD', 'active', 't',"
                    " 't', 'stock')")  # fmt: skip
-    assert job._ids(c, {"AAPL"}, "US") == {"AAPL": 12}
+    assert job._ids(c, {"AAPL"}, "US", "kis_vts_us") == {"AAPL": 12}
 
 
 def test_정리를_못_내는_길도_까닭을_남긴다() -> None:
