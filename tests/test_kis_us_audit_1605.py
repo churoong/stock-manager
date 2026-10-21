@@ -19,6 +19,12 @@ def test_같은_티커_두_행이면_상장_중인_행(c: Client) -> None:  # no
                    " 't', 'stock')")  # fmt: skip
     상장 = c.q("SELECT id FROM stocks WHERE ticker = 'AAPL' AND status = 'active'")[0][0]
     assert job._ids(c, {"AAPL"}, "US") == {"AAPL": 상장}
+    # 상장 중인 행이 여럿이면 새 id — 새 행(12)의 시장 이름이 색인에서 앞서도(동률을 색인 순서에 맡기지 않게,
+    # 25.1607, 25.1605 반박 [권고])
+    c.conn.execute("INSERT INTO stocks (id, ticker, market, country, name_ko, sector, currency, status, source,"
+                   " fetched_at, asset_type) VALUES (12, 'AAPL', 'AMEX', 'US', '새행', '전자', 'USD', 'active', 't',"
+                   " 't', 'stock')")  # fmt: skip
+    assert job._ids(c, {"AAPL"}, "US") == {"AAPL": 12}
 
 
 def test_정리를_못_내는_길도_까닭을_남긴다() -> None:
@@ -31,6 +37,10 @@ def test_정리를_못_내는_길도_까닭을_남긴다() -> None:
         assert 낼것 == [] and 안냄 == [(None, 7, 까닭)]
     낼것, 안냄 = bm.plan([], {7: "X"}, broker={7: (3, 3)}, halted=True, **공통)  # type: ignore[arg-type]
     assert 낼것 == [] and 안냄 == [(None, 7, "멈춤 스위치가 켜져 있음 — 정리 안 함")]
+    # 주문가능이 일부면 그만큼만 내고 나머지 까닭도
+    낼것, 안냄 = bm.plan([], {7: "X"}, broker={7: (3, 1)}, halted=False, **공통)  # type: ignore[arg-type]
+    assert [(i.side, i.quantity) for i in 낼것] == [("sell", 1)]
+    assert 안냄 == [(None, 7, "증권사 주문가능 수량 모자람 — 일부만 정리")]
     # 정리할 수 있으면 예전처럼 낸다
     낼것, 안냄 = bm.plan([], {7: "X"}, broker={7: (3, 3)}, halted=False, **공통)  # type: ignore[arg-type]
     assert [(i.side, i.quantity) for i in 낼것] == [("sell", 3)] and 안냄 == []

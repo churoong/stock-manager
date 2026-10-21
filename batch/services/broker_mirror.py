@@ -80,10 +80,10 @@ def plan(
 
     팔수있음 = {sid: max(int(v[1]), 0) for sid, v in broker.items()}
     매도: list[Intent] = []
-    for sid, (보유, _s) in sorted(broker.items()):
-        남는것 = int(보유) - int(internal_qty.get(sid, 0)) - int((bought_today or {}).get(sid, 0))
-        if 남는것 <= 0 or sid not in bought_before or sid in cleaned_today:
+    for sid in sorted(broker):
+        if sid not in 정리대상:  # 위 `남음` 과 같은 식 하나로(25.1607)
             continue
+        남는것 = 남음[sid]
         if sid in (frozen or set()):
             안냄.append((None, sid, "기업행위 경계 — 정리 안 함"))
             continue
@@ -99,6 +99,8 @@ def plan(
         elif q > 0:
             매도.append(Intent(None, sid, codes[sid], "sell", q, 가격, REASON_CLEANUP))
             팔수있음[sid] -= q
+            if q < 남는것:  # 일부만 — 나머지 몫도 까닭을(25.1607, 25.1605 반박 [참고])
+                안냄.append((None, sid, "증권사 주문가능 수량 모자람 — 일부만 정리"))
     매수: list[Intent] = []
     for o in open_orders:
         oid, sid = int(o["id"]), int(o["stock_id"])
