@@ -48,7 +48,7 @@ export interface DeskKisAccount {
   perf: import("@/lib/kisPaper").KisPerf | null;
 }
 /** 실전 전환 1단계 관문 (docs/desk.md 6장, 25.1508) — 읽기 전용. 넘어도 아무것도 열리지 않는다 */
-export interface GateItem { key: string; label: string; now: number | null; target: number | null; ok: boolean; n?: number; mean?: number | null; index_pct?: number | null; index_used?: string[]; detail?: Record<string, number> }
+export interface GateItem { key: string; label: string; now: number | null; target: number | null; ok: boolean; n?: number; mean?: number | null; index_pct?: number | null; index_used?: string[]; detail?: Record<string, number>; path_pct?: number | null; path_n?: number | null }
 export interface Gate { stage: number; account: string; version?: number | null; from?: string | null; items: GateItem[]; passed: boolean; next: string }
 
 /**
@@ -289,7 +289,8 @@ export function gateNowText(i: GateItem): string {
       return `하한 ${i.now.toFixed(1)}분위(평균 ${i.mean == null ? "-" : i.mean.toFixed(1)}, 28일 묶음 ${i.n ?? 0}) / ${i.target ?? 50} 초과`;
     case "kis":
       // 소수 첫째 자리 — 89.6 이 "90% / 90% 이상" 으로 보이는데 미충족이면 헷갈린다(25.1511 검토 4)
-      return `${i.now.toFixed(1)}% (표본 ${i.n ?? 0}) / ${i.target}% 이상`;
+      // 경로 포함(모름·거부를 못 찬 것으로, 참고 — 판정 칸 아님, 25.1624)
+      return `${i.now.toFixed(1)}% (표본 ${i.n ?? 0}) / ${i.target}% 이상${i.path_pct != null ? ` · 경로 포함 ${i.path_pct.toFixed(1)}%(표본 ${i.path_n ?? 0}, 참고)` : ""}`;
     default:
       return `${i.now} / ${i.target ?? "-"}`;
   }

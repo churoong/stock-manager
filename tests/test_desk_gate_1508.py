@@ -78,8 +78,8 @@ def test_gate_own_window_and_current_version() -> None:
 
 def test_combine_kept() -> None:
     assert desk.combine_kept([{"both": 8, "internal_only": 2}, {"both": 1, "internal_only": 1}]) == {
-        "kept_pct": pytest.approx(75.0), "n": 12}
-    assert desk.combine_kept([{}, {}]) == {"kept_pct": None, "n": 0}
+        "kept_pct": pytest.approx(75.0), "n": 12, "path_pct": pytest.approx(75.0), "path_n": 12}
+    assert desk.combine_kept([{}, {}]) == {"kept_pct": None, "n": 0, "path_pct": None, "path_n": 0}  # 25.1624 참고 칸
 
 
 def test_risk_board_by_hand() -> None:
