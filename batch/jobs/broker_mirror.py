@@ -211,11 +211,14 @@ IDS_SQL = (
     " AND o.side = 'buy' AND (o.filled_qty > 0 OR o.status IN ('sending', 'accepted'))), (s.status = 'active'), s.id"
 )
 #: 행마다 이 증권사 쪽 순보유 — 찬 매수 − 찬 매도, 아직 맞추지 않은 매수는 낸 수량으로(그날 시가에 찼다고 본다 —
-#: `BOUGHT_TODAY_SQL` 과 같은 가정). 내부 보유로 나누면 KIS 가 산 적 없는 행(거부·상한)이 이긴 행의 잔고를
-#: 가져가 베낀 매도가 막혔다(25.1613, 25.1611 교차검증 [필수] 1)
+#: `BOUGHT_TODAY_SQL` 과 같은 가정). **국내만** 맞추지 못한 `unknown` 매수도 낸 수량으로 — 실제로 찼는데 0 으로 세면
+#: H 가 든 그 행 주식이 이긴 행 정리로 팔렸다(25.1616). 미국 `unknown` 은 대개 예약이 개장 때 전송되지 않은 것(실제로
+#: 안 참)이라 찬 것으로 세면 반대로 그 행이 없는 몫을 가져갔다(같은 건 경우 열거). 내부 보유로 나누면 KIS 가 산 적
+#: 없는 행(거부·상한)이 이긴 행의 잔고를 가져가 베낀 매도가 막혔다(25.1613, 25.1611 교차검증 [필수] 1)
 NET_SQL = (
     "SELECT stock_id, SUM(CASE WHEN side = 'buy' THEN (CASE WHEN filled_qty > 0 THEN filled_qty"
-    " WHEN status IN ('sending', 'accepted') THEN quantity ELSE 0 END) ELSE -COALESCE(filled_qty, 0) END)"
+    " WHEN status IN ('sending', 'accepted') OR (status = 'unknown' AND ?) THEN quantity ELSE 0 END)"
+    " ELSE -COALESCE(filled_qty, 0) END)"
     " FROM paper_broker_orders WHERE broker = ? AND stock_id IN (SELECT value FROM json_each(?)) GROUP BY stock_id"
 )
 #: 미국 시장가 대신 낼 지정가의 바탕 — 오늘(현지) 앞 마지막 종가. 배치는 개장 전이라 어제 종가다
@@ -380,7 +383,8 @@ def run(
             if int(r["q"] or 0) > 0}  # fmt: skip
     코드표 = _ids_all(client, {h.code for h in 보유}, market, 증권사)
     여럿 = sorted(i for ids in 코드표.values() if len(ids) > 1 for i in ids)  # 한 행뿐이면 읽지 않는다
-    순보유 = ({int(r[0]): int(r[1] or 0) for r in client.execute(NET_SQL, [증권사, json.dumps(여럿)]).rows}
+    순보유 = ({int(r[0]): int(r[1] or 0)
+              for r in client.execute(NET_SQL, [int(not 미국), 증권사, json.dumps(여럿)]).rows}
              if 여럿 else {})  # fmt: skip
     # 같은 날 다시 돌면 시가에 찬 오늘 매수가 증권사엔 있고 가상 장부엔 다음 배치에야 들어온다(감사 [권장] 2)
     오늘산0 = {int(r[0]): int(r[1] or 0)
@@ -504,6 +508,9 @@ def run(
     보냄 = client.execute(SENT_SQL, [증권사, 오늘.isoformat()]).dicts()
     이미 = {int(r["paper_order_id"]) for r in 보냄 if r["paper_order_id"] is not None}
     정리함 = {int(r["stock_id"]) for r in 보냄 if r["paper_order_id"] is None}
+    # 오늘 정리한 종목은 **같은 티커의 모든 행**으로 — 같은 날 다시 돌 때 이긴 행이 바뀌면(오늘 새 행을 처음 삼) 앞
+    # 실행이 옛 행으로 낸 정리를 못 보고 새 행으로 한 번 더 정리했다(25.1616, 25.1615 교차검증 [필수] 1)
+    정리함 |= {i for ids in 코드표.values() if 정리함 & set(ids) for i in ids}
     산적 = {int(r[0]) for r in client.execute(BOUGHT_SQL, [증권사]).rows}
     종목 = _codes(client, {int(o["stock_id"]) for o in 주문들} | set(증권))
     # 미국은 KIS 거래소 코드를 모르는 종목(Cboe BZX·IEX 상장 등)을 내지 않는다 — 코드 없음으로 빠진다
