@@ -142,6 +142,8 @@ ESSENTIAL_TABLES = [
     " (scripts/turso_return.FILL_PLAN_KEY)",
     "login_global_lock_alerted_at": "잠금 알림을 한 번만 보내려고 둔 표시."
     " 되살리면 진짜 잠긴 날의 알림이 막힌다 (web/lib/loginGuard)",
+    "paper_step_lock": "가상모의투자 단계의 시장 사이 임대 잠금. 그 실행에만 뜻이 있다"
+    " (batch/jobs/paper.STEP_LOCK_KEY, 25.1633)",
 }
 
 # 한 번에 읽어 오는 행 수. Turso HTTP 응답이 지나치게 커지지 않게 나눠 읽는다.

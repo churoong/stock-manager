@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import signal
 import time
 import uuid
 from collections.abc import Callable, Iterator
@@ -433,10 +434,14 @@ def _쓰기(client: Any, statements: list[tuple[str, list[Any]]]) -> None:
 #: 못 본 채 덮어 다음 날 검산이 거짓으로 어긋났다(실행 겹침 감사 [필수] 1·2). settings 한 행(값 {token, market,
 #: until})을 조건부 UPDATE 로 잡는다 — 마이그레이션 없이, 한 시장 한 실행에 읽기·쓰기 몇 번
 STEP_LOCK_KEY = "paper_step_lock"
-#: 임대 기한 — 끊긴 실행이 놓지 못해도 이만큼 뒤 풀린다. 단계는 보통 몇 분 `[확인필요: step_log 소요 시간 실측]`
-STEP_LOCK_TTL = timedelta(minutes=60)
-#: 상대 시장 단계가 끝나길 기다리는 최대 — 넘으면 이번 실행은 이 단계를 건너뛰고 경고(손 실행으로 다시)
-STEP_LOCK_WAIT = timedelta(minutes=30)
+#: 임대 기한 — 끊긴 실행(Actions `timeout` 의 SIGTERM·러너 죽음)이 놓지 못해도 이만큼 뒤 풀린다. 배치 프로세스 한도
+#: (`daily-kr.yml` 15분·`daily-us.yml` 30분)보다 길어야 살아 있는 실행의 잠금을 빼앗지 않는다 — 큰 쪽 + 5분.
+#: 같은 시장이 남긴 잠금은 기한 전에도 넘겨받는다(같은 시장은 Actions 동시 실행 그룹이 이미 차례로 돌린다)
+STEP_LOCK_TTL = timedelta(minutes=35)
+#: 다른 시장 단계가 끝나길 기다리는 최대 — 넘으면 이번 실행은 이 단계를 건너뛰고 경고, 리포트는 보낸다. 프로세스 한도
+#: (국내 15분) 안에서 리포트까지 갈 시간을 남겨야 한다(25.1633 교차검증 [필수] 1 — 처음 30분은 한도보다 길어 리포트째
+#: 사라질 수 있었다)
+STEP_LOCK_WAIT = timedelta(minutes=3)
 STEP_LOCK_POLL_SECONDS = 20
 
 
@@ -445,16 +450,17 @@ def step_lock(
     client: Any, market: str, *, clock: Callable[[], datetime] | None = None,
     sleep: Callable[[float], None] = time.sleep,
 ) -> Iterator[dict[str, Any] | None]:
-    """가상모의투자 단계 잠금 — 잡으면 {token, market, until}, `STEP_LOCK_WAIT` 안에 못 잡으면 None. 나올 때 내 token
-    일 때만 놓는다(기한이 지나 남이 잡았으면 건드리지 않는다)."""
+    """가상모의투자 단계 잠금 — 잡으면 {token, owner(시장), until}, `STEP_LOCK_WAIT` 안에 못 잡으면 None. 나올 때 내
+    token 일 때만 놓는다(기한이 지나 남이 잡았으면 건드리지 않는다). 쥔 동안 SIGTERM(Actions `timeout`)이 오면 예외로
+    바꿔 놓고 끝난다 — 예전엔 처리기가 없어 finally 가 돌지 않고 잠금이 기한까지 남았다(교차검증 [필수] 2)"""
     clock = clock or (lambda: datetime.now(UTC))
     token = uuid.uuid4().hex
     시작 = clock()
     잡음: dict[str, Any] | None = None
     while True:
         지금 = clock().astimezone(UTC)
-        값 = {"token": token, "market": market, "until": (지금 + STEP_LOCK_TTL).isoformat()}
-        if db.lease_try(client, STEP_LOCK_KEY, 값, 지금.isoformat()):
+        값 = {"token": token, "owner": market, "until": (지금 + STEP_LOCK_TTL).isoformat()}
+        if db.lease_try(client, STEP_LOCK_KEY, 값, 지금.isoformat(), owner=market):
             잡음 = 값
             break
         if 지금 - 시작 >= STEP_LOCK_WAIT:
@@ -462,11 +468,39 @@ def step_lock(
                         db.get_setting(client, STEP_LOCK_KEY, {}))  # fmt: skip
             break
         sleep(STEP_LOCK_POLL_SECONDS)
+    예전처리기 = None
+    if 잡음 is not None:
+        try:
+            예전처리기 = signal.signal(signal.SIGTERM, _종료신호)
+        except ValueError:  # 주 스레드가 아니면 처리기를 못 단다 — 그때는 기한이 푼다
+            예전처리기 = None
     try:
         yield 잡음
     finally:
+        if 예전처리기 is not None:
+            signal.signal(signal.SIGTERM, 예전처리기)
         if 잡음 is not None:
-            db.lease_release(client, STEP_LOCK_KEY, token, clock().astimezone(UTC).isoformat())
+            try:
+                db.lease_release(client, STEP_LOCK_KEY, token, clock().astimezone(UTC).isoformat())
+            except Exception:  # noqa: BLE001 — 놓기 실패가 단계의 원래 예외를 가리지 않게. 기한이 푼다
+                log.exception("가상모의투자 단계 잠금을 놓지 못함 — %s 뒤 풀린다", STEP_LOCK_TTL)
+
+
+def _종료신호(signum: int, _frame: Any) -> None:
+    raise SystemExit(128 + signum)
+
+
+def run_step_locked(client: Any, market: str, warnings: list[str], **kw: Any) -> tuple[list[str], dict[str, Any]]:
+    """`run_step` 을 시장 사이 잠금 안에서 (25.1633). 못 잡으면 단계를 건너뛰고 경고 — 리포트는 그대로 나간다."""
+    with step_lock(client, market) as 잠금:
+        if 잠금 is None:
+            분 = int(STEP_LOCK_WAIT.total_seconds() // 60)
+            warnings.append(
+                f"가상모의투자 단계를 건너뜀 — 다른 시장의 같은 단계가 {분}분 넘게"
+                " 돌고 있습니다(장부가 겹치지 않게). 그 실행이 끝난 뒤 손 실행으로 다시 돌리세요"
+            )
+            return [], {"skipped": "다른 시장의 가상모의투자 단계가 도는 중(잠금)"}
+        return run_step(client, market=market, **kw)
 
 
 def _flows(client: Any) -> tuple[list[pp.CashFlow], dict[int, str]]:

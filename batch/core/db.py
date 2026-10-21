@@ -1275,16 +1275,18 @@ def set_setting(client: TursoClient, key: str, value: Any) -> None:
     )
 
 
-def lease_try(client: TursoClient, key: str, value: dict[str, Any], now_utc: str) -> bool:
-    """settings 한 행을 임대 잠금으로 — 비었거나 기한(`$.until`)이 `now_utc` 보다 앞이면 `value`(token·until 포함)로
-    잡는다. 잡았으면 True (25.1633, 가상모의투자 단계 시장 사이 잠금). 사용자 설정이 아니라 잠금 행이다 — 웹은
-    읽지 않는다
+def lease_try(client: TursoClient, key: str, value: dict[str, Any], now_utc: str, owner: str | None = None) -> bool:
+    """settings 한 행을 임대 잠금으로 — 비었거나 기한(`$.until`)이 `now_utc` 보다 앞이거나, 쥔 쪽이 같은 `owner`
+    (`$.owner` — 같은 주인은 바깥이 이미 차례로 돌리므로 남은 잠금은 끊긴 실행의 것)면 `value` 로 잡는다. 잡았으면
+    True (25.1633, 가상모의투자 단계 시장 사이 잠금). 사용자 설정이 아니라 잠금 행이다 — 웹은 읽지 않는다.
+    값이 JSON 이 아니면(손으로 넣은 값) 빈 것으로 본다 — `json_extract` 가 오류를 내 날마다 실패하지 않게 `CASE` 로
+    가른다
     """
     client.execute("INSERT OR IGNORE INTO settings (key, value, updated_at) VALUES (?, '{}', ?)", [key, now_utc])
     client.execute(
-        "UPDATE settings SET value = ?, updated_at = ? WHERE key = ?"
-        " AND (json_extract(value, '$.until') IS NULL OR json_extract(value, '$.until') < ?)",
-        [json.dumps(value, ensure_ascii=False), now_utc, key, now_utc],
+        "UPDATE settings SET value = ?, updated_at = ? WHERE key = ? AND CASE WHEN json_valid(value) THEN"
+        " (COALESCE(json_extract(value, '$.until'), '') < ? OR json_extract(value, '$.owner') = ?) ELSE 1 END",
+        [json.dumps(value, ensure_ascii=False), now_utc, key, now_utc, owner],
     )
     본 = get_setting(client, key, {})
     return isinstance(본, dict) and 본.get("token") == value.get("token")
@@ -1293,7 +1295,8 @@ def lease_try(client: TursoClient, key: str, value: dict[str, Any], now_utc: str
 def lease_release(client: TursoClient, key: str, token: str, now_utc: str) -> None:
     """내 token 일 때만 놓는다 — 기한이 지나 남이 잡은 잠금은 건드리지 않는다."""
     client.execute(
-        "UPDATE settings SET value = '{}', updated_at = ? WHERE key = ? AND json_extract(value, '$.token') = ?",
+        "UPDATE settings SET value = '{}', updated_at = ? WHERE key = ?"
+        " AND CASE WHEN json_valid(value) THEN json_extract(value, '$.token') = ? ELSE 0 END",
         [now_utc, key, token],
     )
 
