@@ -39,22 +39,38 @@ def rows_from_bars(bars: list[yfinance_src.DailyBar], source: str, now: str) -> 
     ]
 
 
-def drop_outliers(rows: list[tuple]) -> tuple[list[tuple], list[str]]:
-    """날마다 앞뒤 `FX_OUTLIER_NEIGHBORS` 일(자기 포함)의 중앙값에서 `FX_OUTLIER_RATIO` 넘게 벗어난 날을 뺀다
-    (25.1594). 창 전체 중앙값이 아니라 이웃 — 5년치 채우기(`--lookback 1900`)에선 환율 자체가 몇십 % 움직였다.
-    셋 미만이면 그대로"""
-    if len(rows) < 3:
-        return rows, []
+def _중앙(xs: list[float]) -> tuple[float, float]:
+    """(아래 중앙값, 위 중앙값) — 홀수면 같다."""
+    ys = sorted(xs)
+    return ys[(len(ys) - 1) // 2], ys[len(ys) // 2]
+
+
+def drop_outliers(rows: list[tuple], anchor: float | None = None) -> tuple[list[tuple], list[str]]:
+    """깨진 날을 뺀다 (25.1594·25.1596). `anchor` = DB 에 이미 있는 창 앞 최근 환율의 중앙값.
+
+    기준점이 있으면 그것에서 `FX_OUTLIER_RATIO` 넘게 벗어난 날 — 깨진 값이 창의 절반을 넘어도 걸러진다.
+    없으면(첫 수집·5년치 채우기) 날마다 앞뒤 `FX_OUTLIER_NEIGHBORS` 일(자기 포함)의 **아래·위 중앙값 둘 다**에서
+    벗어난 날만 — 짝수 창에서 깨진 값이 절반이면 위 중앙값 하나로는 결과가 뒤집혔다(정상값을 빼고 깨진 값을 저장,
+    25.1594 반박 [필수]).
+    창 전체가 아니라 이웃이라 5년 사이 몇십 % 움직인 환율도 그대로. 셋 미만이고 기준점도 없으면 그대로
+    """
     차례 = sorted(rows, key=lambda r: str(r[1]))
-    뺌: list[tuple] = []
-    for i, r in enumerate(차례):
-        이웃 = sorted(float(x[2]) for x in 차례[max(0, i - FX_OUTLIER_NEIGHBORS): i + FX_OUTLIER_NEIGHBORS + 1])
-        가운데 = 이웃[len(이웃) // 2]
-        if abs(float(r[2]) / 가운데 - 1) > FX_OUTLIER_RATIO:
-            뺌.append(r)
+    벗어남 = (lambda v, m: abs(v / m - 1) > FX_OUTLIER_RATIO)  # noqa: E731
+    if anchor:
+        뺌 = [r for r in 차례 if 벗어남(float(r[2]), anchor)]
+    elif len(차례) < 3:
+        return rows, []
+    else:
+        뺌 = []
+        for i, r in enumerate(차례):
+            이웃 = 차례[max(0, i - FX_OUTLIER_NEIGHBORS): i + FX_OUTLIER_NEIGHBORS + 1]
+            아래, 위 = _중앙([float(x[2]) for x in 이웃])
+            if 벗어남(float(r[2]), 아래) and 벗어남(float(r[2]), 위):
+                뺌.append(r)
     남김 = [r for r in 차례 if r not in 뺌]
     글 = ", ".join(f"{r[1]} {float(r[2]):,.2f}" for r in 뺌)
-    경고 = f"환율 이상값 {len(뺌)}일을 저장하지 않음: {글} (앞뒤 이웃 중앙값에서 {FX_OUTLIER_RATIO:.0%} 넘게 벗어남)"
+    기준 = f"직전 저장 환율 {anchor:,.2f}" if anchor else "앞뒤 이웃 중앙값"
+    경고 = f"환율 이상값 {len(뺌)}일을 저장하지 않음: {글} ({기준}에서 {FX_OUTLIER_RATIO:.0%} 넘게 벗어남)"
     return 남김, [경고] if 뺌 else []
 
 
@@ -64,12 +80,24 @@ def collect(client: TursoClient, lookback_days: int = LOOKBACK_DAYS) -> tuple[in
     db.record_api_call(client, "yfinance", count=1)
     if not result.ok:
         return 0, [f"환율 수집 실패: {result.error or '알 수 없음'} (미국 권장 금액이 비게 됩니다)"]
-    rows, 경고 = drop_outliers(rows_from_bars(result.data, result.source, db.now_iso()))
+    받음 = rows_from_bars(result.data, result.source, db.now_iso())
+    rows, 경고 = drop_outliers(받음, _anchor(client, min((str(r[1]) for r in 받음), default=None)))
     if not rows:
         return 0, ["환율 수집: 받은 행이 없습니다 (미국 권장 금액이 비게 됩니다)", *경고]
     for start in range(0, len(rows), 300):
         _store(client, rows[start : start + 300])
     return len(rows), 경고
+
+
+#: 기준점 — 창 앞의 이미 저장된 최근 다섯 날(읽기 5행). 그 값도 예전 수집이 저장한 것이라 깨졌을 수 있어 중앙값으로
+ANCHOR_SQL = "SELECT rate FROM fx_rates WHERE pair = ? AND date < ? AND rate > 0 ORDER BY date DESC LIMIT 5"
+
+
+def _anchor(client: TursoClient, first_day: str | None) -> float | None:
+    if first_day is None:
+        return None
+    값 = [float(r[0]) for r in client.execute(ANCHOR_SQL, [fx.PAIR, first_day]).rows]
+    return _중앙(값)[0] if len(값) >= 3 else None
 
 
 def _store(client: TursoClient, rows: list[tuple]) -> None:

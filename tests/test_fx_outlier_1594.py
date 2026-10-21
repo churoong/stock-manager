@@ -31,3 +31,40 @@ def test_큰_추세와_큰_하루는_그대로() -> None:
 
 def test_셋_미만은_그대로() -> None:
     assert job.drop_outliers(_줄([1380.0, 13.8])) == (_줄([1380.0, 13.8]), [])
+
+
+def test_짝수_창_절반이_깨져도_뒤집히지_않는다() -> None:
+    """×100 둘 + 정상 둘 — 위 중앙값 하나면 깨진 값을 저장하고 정상을 뺐다(25.1596, 25.1594 반박 [필수]).
+    기준점이 없으면 판단할 수 없어 둘 다 남기고(뒤집지 않음), 기준점이 있으면 깨진 쪽만 뺀다"""
+    줄 = _줄([1400.0, 1401.0, 140000.0, 140100.0])
+    남김, _ = job.drop_outliers(줄)
+    assert {r[2] for r in 남김} >= {1400.0, 1401.0}  # 정상값을 빼지 않는다
+    남김, 경고 = job.drop_outliers(줄, anchor=1398.0)
+    assert [r[2] for r in 남김] == [1400.0, 1401.0] and "직전 저장 환율" in 경고[0]
+
+
+def test_기준점이_있으면_깨진_값이_절반을_넘어도_거른다() -> None:
+    줄 = _줄([1402.0, 1403.0, 1404.0, 14.0, 14.1, 14.2, 14.3, 14.4, 14.5, 1405.0])
+    남김, _ = job.drop_outliers(줄, anchor=1400.0)
+    assert [r[2] for r in 남김] == [1402.0, 1403.0, 1404.0, 1405.0]
+
+
+def test_수집이_저장된_환율을_기준점으로_쓴다(monkeypatch) -> None:  # noqa: ANN001
+    from batch.core import db
+    from batch.sources import yfinance_src
+    from tests.test_portfolio_job import MemClient
+
+    mem = MemClient()
+    db.apply_migrations(mem)  # type: ignore[arg-type]
+    for i, v in enumerate([1390.0, 1391.0, 1392.0, 1393.0, 1394.0]):
+        mem.conn.execute("INSERT INTO fx_rates (pair, date, rate, source, fetched_at) VALUES ('USDKRW', ?, ?, 't', 't')",
+                         [f"2026-09-2{i}", v])  # fmt: skip
+    bars = [yfinance_src.DailyBar(ticker="KRW=X", date=f"2026-10-0{i + 1}", open=v, high=v, low=v, close=v, volume=0)
+            for i, v in enumerate([1400.0, 140000.0, 140100.0, 1401.0])]  # fmt: skip
+    monkeypatch.setattr(yfinance_src, "fetch_daily_bars", lambda *a, **k: type("R", (), {"ok": True, "data": bars,
+                                                                                         "source": "t", "error": None})())
+    monkeypatch.setattr(db, "record_api_call", lambda *a, **k: None)
+    n, 경고 = job.collect(mem)  # type: ignore[arg-type]
+    assert n == 2 and 경고
+    assert mem.conn.execute("SELECT date FROM fx_rates WHERE date >= '2026-10-01' ORDER BY date").fetchall() == [
+        ("2026-10-01",), ("2026-10-04",)]
