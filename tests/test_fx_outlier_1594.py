@@ -107,3 +107,12 @@ def test_옛_저장값은_기준점으로_쓰지_않는다(monkeypatch) -> None:
     for i in range(3):  # 깨진 채 저장된 다섯 날 가운데 셋(÷100) — 범위로 걸러 기준점이 깨진 값이 되지 않는다(25.1598)
         mem.conn.execute("UPDATE fx_rates SET rate = 11.5 WHERE date = ?", [f"2021-01-0{i + 1}"])
     assert job._anchor(mem, "2021-01-08") is None  # type: ignore[arg-type]  # 남은 둘 — 셋 미만이라 기준점 없음
+
+
+
+def test_범위는_열배_단위_오류를_막고_큰_충격은_들인다() -> None:
+    """지금 수준의 ÷10·×10 은 범위 밖, 1997 같은 ×2.2 충격(3,100원대)은 범위 안 (25.1599, 25.1598 반박 [권고])."""
+    낮, 높 = job.FX_PLAUSIBLE_KRW
+    assert 낮 > 1450 / 10 and 높 < 1450 * 10 and 높 > 1450 * 2.2
+    남김, 경고 = job.drop_outliers(_줄([1450.0, 145.0, 1452.0, 14500.0, 1455.0]))
+    assert [r[2] for r in 남김] == [1450.0, 1452.0, 1455.0] and "범위" in 경고[0]
