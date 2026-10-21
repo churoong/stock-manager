@@ -202,12 +202,21 @@ CODES_SQL = "SELECT id, ticker, market FROM stocks WHERE id IN (SELECT value FRO
 #: 상장 중인 쪽, 그다음 새 행 — 순서 없이 읽으면 옛(상장폐지) 행에 KIS 보유가 붙어 어긋남이 거짓으로 서고 H 가 팔아도
 #: KIS 는 영영 팔지 않았다(25.1605, KIS 미국 감사 [권고] 1). 상장 여부만 보면 H 가 이사 전 행을 든 채일 때 같은 해가
 #: 방향만 바꿔 남았다 — KIS 보유는 그 주식을 산 주문의 id 에 붙는 것이 맞다(25.1608, 25.1607 교차검증 [필수]).
-#: "산 적" 은 **찬** 매수만(안 찬 매수가 이기면 H 가 든 옛 행 주식을 정리로 팔았다, 25.1611). 여러 행이면 잔고를
-#: 행마다 나눈다(`bm.split_holding`)
+#: "산 적" 은 **찼거나 아직 맞추지 않은(오늘 낸)** 매수(25.1613 — 찬 것만 보면 오늘 처음 산 새 행이 다음 날 맞추기
+#: 전까지 지고, 같은 날 다시 돌 때 옛 행에 붙은 잔고를 정리로 팔았다. 안 찬 매수까지 보면 H 가 든 옛 행 주식을 팔았다,
+#: 25.1611). 여러 행이면 잔고를 **이 증권사에서 그 행에 찬 순매수**(`NET_SQL`)만큼 나눈다(`bm.split_holding`)
 IDS_SQL = (
     "SELECT s.id, s.ticker FROM stocks s WHERE s.country = ? AND s.ticker IN (SELECT value FROM json_each(?))"
     " ORDER BY EXISTS (SELECT 1 FROM paper_broker_orders o WHERE o.broker = ? AND o.stock_id = s.id"
-    " AND o.side = 'buy' AND o.filled_qty > 0), (s.status = 'active'), s.id"
+    " AND o.side = 'buy' AND (o.filled_qty > 0 OR o.status IN ('sending', 'accepted'))), (s.status = 'active'), s.id"
+)
+#: 행마다 이 증권사 쪽 순보유 — 찬 매수 − 찬 매도, 아직 맞추지 않은 매수는 낸 수량으로(그날 시가에 찼다고 본다 —
+#: `BOUGHT_TODAY_SQL` 과 같은 가정). 내부 보유로 나누면 KIS 가 산 적 없는 행(거부·상한)이 이긴 행의 잔고를
+#: 가져가 베낀 매도가 막혔다(25.1613, 25.1611 교차검증 [필수] 1)
+NET_SQL = (
+    "SELECT stock_id, SUM(CASE WHEN side = 'buy' THEN (CASE WHEN filled_qty > 0 THEN filled_qty"
+    " WHEN status IN ('sending', 'accepted') THEN quantity ELSE 0 END) ELSE -COALESCE(filled_qty, 0) END)"
+    " FROM paper_broker_orders WHERE broker = ? AND stock_id IN (SELECT value FROM json_each(?)) GROUP BY stock_id"
 )
 #: 미국 시장가 대신 낼 지정가의 바탕 — 오늘(현지) 앞 마지막 종가. 배치는 개장 전이라 어제 종가다
 CLOSES_SQL = (
@@ -370,8 +379,11 @@ def run(
     내부 = {int(r["stock_id"]): int(r["q"]) for r in client.execute(INTERNAL_QTY_SQL, [베낌, market]).dicts()
             if int(r["q"] or 0) > 0}  # fmt: skip
     코드표 = _ids_all(client, {h.code for h in 보유}, market, 증권사)
+    여럿 = sorted(i for ids in 코드표.values() if len(ids) > 1 for i in ids)  # 한 행뿐이면 읽지 않는다
+    순보유 = ({int(r[0]): int(r[1] or 0) for r in client.execute(NET_SQL, [증권사, json.dumps(여럿)]).rows}
+             if 여럿 else {})  # fmt: skip
     증권 = {sid: v for h in 보유 if h.code in 코드표
-            for sid, v in bm.split_holding(h.quantity, h.sellable, 코드표[h.code], 내부).items()}  # fmt: skip
+            for sid, v in bm.split_holding(h.quantity, h.sellable, 코드표[h.code], 순보유).items()}  # fmt: skip
     # 어긋남은 **베낀 적 있는 종목**과 증권사 보유만 — 키를 넣기 전에 산 가상 보유는 "연결 전 보유" 로
     # 따로 센다(감사 [권장] 3). 같은 날 다시 돌면 시가에 찬 오늘 매수가 증권사엔 있고 가상 장부엔 다음 배치에야
     # 들어온다 — 그 수량을 뺀다(감사 [권장] 2)

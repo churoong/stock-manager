@@ -119,6 +119,10 @@ def test_C_둘다_상장중_둘다_산적_옛행_큰id(c: Client) -> None:  # no
     c.conn.execute("INSERT INTO paper_fills (order_id, account_id, stock_id, side, fill_date, price, quantity, currency,"
                    " fx_rate, fee, tax, slippage, cash_krw, created_at) VALUES (302, 'B', 30, 'sell', '2026-10-14', 200,"
                    " 3, 'USD', 1400, 0, 0, 0, 840000, 't')")
+    c.conn.execute("INSERT INTO paper_broker_orders (broker, paper_order_id, account_id, market, stock_id, code, side,"
+                   " order_type, limit_price, quantity, trade_date, reason, status, filled_qty, source, created_at)"
+                   " VALUES ('kis_vts_us', 302, 'B', 'US', 30, 'AAPL', 'sell', 'limit', 180, 3, '2026-10-14', '베낌',"
+                   " 'filled', 3, 't', 't')")  # KIS 도 옛 행을 다 팔았다  # fmt: skip
     _새행_매수(c, 2, "filled", 2, internal=True)
     orders, 기록, diff = _run(c, 2)
     assert orders == [] and diff == {}
@@ -140,3 +144,20 @@ def test_D_안_찬_매수는_산_적이_아니다_정리는_찬_행의_거래소
                    " 'unfilled', 0, 't', 't')")  # fmt: skip
     orders, _기록, _diff = _run(c, 3)
     assert [(o[0], o[1], o[2], o[3]) for o in orders] == [("sell", "AAPL", "NYSE", 3)]
+
+
+# 25.1613 — 25.1611 교차검증 [필수] 1·2: 나누는 잣대는 증권사 쪽 순보유, 오늘 낸 매수도 산 적
+
+
+def test_E_kis가_안_산_옛_행은_몫을_가져가지_않는다(c: Client) -> None:  # noqa: F811
+    # H 는 옛 행(30) 3주를 들지만 KIS 매수는 거부. 새 행(2) 은 H·KIS 2주. 오늘 H 가 새 행 2주를 판다 → KIS 도 NASD 로
+    _두_행(c, 30, "NYSE", 2, "NASDAQ")
+    c.conn.execute("UPDATE paper_broker_orders SET status = 'rejected', filled_qty = 0 WHERE stock_id = 30")
+    c.conn.execute("DELETE FROM paper_orders WHERE id = 301")
+    _새행_매수(c, 2, "filled", 2, internal=True)
+    c.conn.execute("INSERT INTO paper_orders (id, account_id, market, stock_id, side, order_type, limit_price, quantity,"
+                   " currency, decided_on, fill_session, reason, rule_version, tranche, created_at) VALUES (311, 'B',"
+                   " 'US', 2, 'sell', 'market', NULL, 2, 'USD', '2026-10-15', '2026-10-16', 'r', 1, 1, 't')")  # fmt: skip
+    orders, _기록, diff = _run(c, 2)
+    assert [(o[0], o[2], o[3]) for o in orders] == [("sell", "NASD", 2)]
+    assert diff == {"30": [0, 3]}  # KIS 가 못 산 옛 행 — 참 어긋남
