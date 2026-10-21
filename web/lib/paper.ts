@@ -201,6 +201,14 @@ export const PAPER_LATEST_DAILY = `SELECT d.account_id, d.as_of, d.invested_krw,
   d.attribution_json, d.realized_krw, d.unrealized_krw
 FROM paper_accounts a CROSS JOIN paper_daily d
 WHERE d.account_id = a.id AND d.as_of = (SELECT MAX(x.as_of) FROM paper_daily x WHERE x.account_id = a.id)`;
+/**
+ * 계좌마다 **성과 분해가 적힌** 가장 최근 평가 행 (25.1602) — 국내 배치는 평가 행을 먼저 만들고 성과 분해를 단계 끝에 적어,
+ * 최신 행만 읽으면 그 사이(또는 그 단계가 실패한 날 하루 종일) 있는 성적이 "아직 표본 없음" 으로 보였다
+ */
+export const PAPER_LATEST_ATTR = `SELECT d.account_id, d.as_of, d.attribution_json
+FROM paper_accounts a CROSS JOIN paper_daily d
+WHERE d.account_id = a.id
+  AND d.as_of = (SELECT MAX(x.as_of) FROM paper_daily x WHERE x.account_id = a.id AND x.attribution_json IS NOT NULL)`;
 export const PAPER_HISTORY = `SELECT account_id, as_of, invested_krw, equity_krw, twr_index, kospi_krw, sp500_krw
 FROM paper_daily WHERE as_of >= ? ORDER BY as_of`;
 /** 계좌마다 거래내역에 싣는 최근 체결 수 — 계좌가 일곱이라 합쳐 자르면 한 계좌가 다른 계좌 몫을 밀어냈다 (25.1458) */
@@ -354,6 +362,7 @@ export interface AccountView {
 /**
  * 계좌 요약 — **총 입금액·현금은 지금 장부로**, 보유 평가는 배치가 마지막으로 잰 값으로 (docs/paper.md 3장).
  * 마지막 평가 뒤에 입금·취소가 있으면 평가 총액은 지금 현금 + 그때 보유로 다시 더하고, 그 사실을 적는다(지어내지 않는다).
+ * 평가 뒤 **체결**이 있으면(현금 변화가 입금 변화로 설명되지 않음) 그 평가 총액 + 입금 변화로 두고 까닭을 적는다(25.1602).
  */
 export function accountView(
   id: string,
@@ -371,10 +380,21 @@ export function accountView(
     };
   }
   const 보유 = Number(daily.holdings_krw);
-  const 총액 = cash + 보유;
+  const 입금변화 = invested - Number(daily.invested_krw);
+  // 평가 뒤 체결 — 장부 현금의 변화가 입금 변화로 설명되지 않으면 그 사이 체결이 들었다. 지금 현금 + 그때 보유를 더하면
+  // 산 종목이 현금에선 빠지고 보유엔 없어 손익이 크게 틀렸다(25.1602, 웹 화면 감사 [권고] 1 — 체결 뒤 평가 전에 끊긴 배치).
+  // 그때는 그 평가의 총액 + 입금 변화로 두고 까닭을 적는다
+  const 평가뒤체결 = cash - Number(daily.cash_krw) - 입금변화;
+  const 섞임 = Math.abs(평가뒤체결) >= 1;
+  const 총액 = 섞임 ? Number(daily.equity_krw) + 입금변화 : cash + 보유;
   const 손익 = 총액 - invested;
-  if (Number(daily.invested_krw) !== invested) {
-    const 차 = invested - Number(daily.invested_krw);
+  if (섞임) {
+    notes.push(
+      `⚠️ ${daily.as_of} 평가 뒤 체결(현금 ${평가뒤체결 > 0 ? "+" : ""}${Math.round(평가뒤체결).toLocaleString("ko-KR")}원)이 장부에 있습니다 — 평가 총액·손익은 그 평가 기준(+ 입금 변화), 다음 배치가 다시 잽니다`,
+    );
+  }
+  if (입금변화 !== 0) {
+    const 차 = 입금변화;
     notes.push(
       `${daily.as_of} 평가 뒤 입금·취소 ${차 > 0 ? "+" : ""}${차.toLocaleString("ko-KR")}원 — 다음 배치부터 매수 여력에 들어갑니다`,
     );
@@ -459,6 +479,9 @@ export interface Attribution {
   departments?: DeptScore[];
   /** 가상 대조 (docs/company.md 6장, 25.1476) — 산 종목이 같은 날 무작위 20종목 안 몇 분위였나. 무작위면 50 */
   virtual?: VirtualControl;
+  /** 센 판 (25.1602 부터 배치가 적는다) · 그 성과 분해를 적은 평가일(웹이 붙인다) */
+  rule_version?: number;
+  as_of?: string;
 }
 export interface VirtualControl { n: number; avg_pct: number | null; top_half: number | null }
 /** 가상 대조 한 줄 — 표본이 없으면 null. 30 미만은 "참고" (성과 분해와 같은 문턱) */

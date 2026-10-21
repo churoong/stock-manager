@@ -768,6 +768,7 @@ def save_attribution(client: Any, aid: str, today: str, rule_version: int = 1) -
         a["departments"] = 성적
     # 결정 단위 선정 증거(docs/paper.md 10.1, 25.1518) — 같은 행으로(읽기 0). 관문·챔피언 비교가 운용 요약에서 읽는다
     a["evidence"] = pp.selection_evidence(결정)
+    a["rule_version"] = rule_version  # 이 판의 결정만 셌다 — 화면이 "판을 올리면 처음부터" 를 말한다(25.1602)
     _쓰기(client, [(SAVE_ATTR_SQL, [json.dumps(a, ensure_ascii=False), aid, today])])
     return a
 

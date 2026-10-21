@@ -8,7 +8,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { beforeEach, describe, expect, it } from "vitest";
-import { PAPER_DOSSIERS_LATEST, PAPER_LATEST_DAILY, PAPER_MEETINGS_LATEST } from "@/lib/paper";
+import { PAPER_DOSSIERS_LATEST, PAPER_LATEST_ATTR, PAPER_LATEST_DAILY, PAPER_MEETINGS_LATEST } from "@/lib/paper";
 import { DECISIONS_DONE_SQL, DECISIONS_SQL, doneWindow, groupDecisions, mergeDecisions, reasonKey, type DecisionRow } from "@/lib/paperDecisions";
 
 const MIGRATIONS = join(process.cwd(), "..", "migrations");
@@ -90,5 +90,18 @@ describe("왜 안 샀나 — 위원회 계좌", () => {
     const src = readFileSync(join(process.cwd(), "app", "api", "paper", "decisions", "route.ts"), "utf8");
     expect(src).toMatch(/execute\(DECISIONS_SQL, \[account, market\]\)/);
     expect(src).toMatch(/execute\(DECISIONS_DONE_SQL, \[account, market, \.\.\.doneWindow\(kstToday\(\)\)\]\)/);
+  });
+});
+
+
+describe("성과 분해는 적힌 가장 최근 행에서 (25.1602)", () => {
+  it("오늘 평가 행에 아직 없으면 어제 것 — 계좌마다", () => {
+    const 일 = db.prepare("INSERT INTO paper_daily (account_id, as_of, invested_krw, cash_krw, holdings_krw, equity_krw, pnl_krw, twr_index, positions_json, recon_ok, updated_at, attribution_json) VALUES (?, ?, 1, 1, 0, 1, 0, 1, '[]', 1, 't', ?)");
+    일.run("A", "2026-10-20", '{"horizon":20,"n":42}');
+    일.run("A", "2026-10-21", null); // 평가 행은 먼저, 성과 분해는 단계 끝에
+    일.run("B", "2026-10-21", '{"horizon":20,"n":1}');
+    const 행 = db.prepare(PAPER_LATEST_ATTR).all() as Array<{ account_id: string; as_of: string }>;
+    expect(행.map((r) => [r.account_id, r.as_of]).sort()).toEqual([["A", "2026-10-20"], ["B", "2026-10-21"]]);
+    expect(계획(PAPER_LATEST_ATTR)).toMatch(/SEARCH d USING/);
   });
 });

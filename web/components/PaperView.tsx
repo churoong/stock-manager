@@ -900,7 +900,11 @@ function ReportPane({ a }: { a: Account }) {
   if (!t) return <p className="text-sm text-slate-500">아직 성과가 찬 결정이 없습니다 — 결정 뒤 20 거래일이 지나야 채워집니다.</p>;
   return (
     <div className="text-sm">
-      <p className="text-xs text-slate-500">노하우 성적표 — {t.horizon} 거래일 뒤, 지수 대비 초과(%p). 표본 30건 미만은 참고만.</p>
+      <p className="text-xs text-slate-500">
+        노하우 성적표 — {t.horizon} 거래일 뒤, 지수 대비 초과(%p). 표본 30건 미만은 참고만.
+        {t.as_of ? ` 기준 ${t.as_of}.` : ""}
+        {t.rule_version != null ? ` 판 ${t.rule_version} 결정만 셉니다 — 판을 올리면 처음부터 다시 쌓입니다.` : ""}
+      </p>
       <ul className="mt-1 space-y-0.5 text-slate-700 dark:text-slate-300">
         <li>선정: 주문 낸 후보 {attrCellText(t.selection)} · 안 낸 새 후보 {attrCellText(t.skipped)}</li>
         {Object.entries(t.skip_by_reason ?? {}).map(([k, v]) => (

@@ -236,3 +236,24 @@ describe("멈춤 스위치 (25.1451)", () => {
     expect(haltSchema.safeParse({ on: "yes" }).success).toBe(false);
   });
 });
+
+describe("평가 뒤 체결 (25.1602)", () => {
+  const 평가: DailyRow = {
+    account_id: "C", as_of: "2026-10-20", invested_krw: 1_000_000, cash_krw: 1_000_000, holdings_krw: 0, equity_krw: 1_000_000,
+    pnl_krw: 0, twr_index: 1, kospi_krw: 1_000_000, sp500_krw: null, recon_ok: 1, recon_note: "맞음", updated_at: "t",
+  };
+
+  it("체결 뒤 평가 전에 끊기면 지금 현금 + 그때 보유를 더하지 않는다 — 그 평가 기준 + 입금 변화", () => {
+    const v = accountView("C", 1_000_000, 499_925, 0, 평가); // 50만 원 매수 체결만 들어감
+    expect(v.equity).toBe(1_000_000);
+    expect(v.pnl).toBe(0);
+    expect(v.notes[0]).toContain("평가 뒤 체결(현금 -500,075원)");
+    // 입금만 있었으면 예전처럼 지금 현금 + 그때 보유
+    const w = accountView("C", 1_200_000, 1_200_000, 0, 평가);
+    expect(w.equity).toBe(1_200_000);
+    expect(w.notes.some((n) => n.includes("평가 뒤 체결"))).toBe(false);
+    // 체결과 입금이 함께면 평가 총액 + 입금 변화
+    const x = accountView("C", 1_200_000, 699_925, 0, 평가);
+    expect(x.equity).toBe(1_200_000);
+  });
+});

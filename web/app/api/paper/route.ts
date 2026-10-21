@@ -10,6 +10,7 @@ import {
   PAPER_HISTORY,
   PAPER_INVESTED,
   PAPER_LATEST_DAILY,
+  PAPER_LATEST_ATTR,
   PAPER_MEETINGS_LATEST,
   PAPER_DOSSIERS_LATEST,
   PAPER_OPEN_BUYS,
@@ -72,6 +73,17 @@ export async function GET() {
           ),
         )
       : {};
+    // 성과 분해는 적힌 가장 최근 행에서 — 그날 평가 행에 아직 없으면 그 앞 행(기준일을 붙여 보인다, 25.1602)
+    const 분해행 = rowsToObjects<{ account_id: string; as_of: string; attribution_json: string }>(await execute(PAPER_LATEST_ATTR));
+    const 성과분해 = (id: string) => {
+      const r = 분해행.find((x) => x.account_id === id);
+      if (!r) return null;
+      try {
+        return { ...JSON.parse(r.attribution_json), as_of: r.as_of };
+      } catch {
+        return null;
+      }
+    };
     const views = rowsToObjects<{
       id: string; name: string; sell_rule: string; rule_version: number;
       // 계좌 규칙 칸 (migrations/0075, 25.1458) — 화면의 규칙 글·계좌 비교가 읽는다
@@ -81,7 +93,7 @@ export async function GET() {
       view: accountView(a.id, 입금, 현금[a.id] ?? 입금, 예약[a.id] === undefined ? 0 : 예약[a.id], 마지막.find((d) => d.account_id === a.id)),
       positions: (보유들[a.id] ?? []).map((p) => ({ ...p, ...(이름[Number(p.stock_id)] ?? {}) })),
       unknown: JSON.parse(마지막.find((d) => d.account_id === a.id)?.unknown_json || "[]"),
-      attribution: JSON.parse(마지막.find((d) => d.account_id === a.id)?.attribution_json || "null"),
+      attribution: 성과분해(a.id),
     }));
     // 실제 투자와 같은 기간 비교 (25.1448) — 실제 표는 읽기만. 못 읽으면 비교만 빠진다
     let realCompare = null;

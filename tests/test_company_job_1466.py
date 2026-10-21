@@ -164,6 +164,7 @@ def test_department_scorecard_from_decision_ledger(c: Client, monkeypatch: pytes
                    [json.dumps({"committee": {"opinions": {"research": [1, 1]}}})])  # fmt: skip
     다음 = cal.next_session("KR", date(2026, 10, 14)).isoformat()
     a = job.save_attribution(c, "A", 다음, 2)
+    assert a["rule_version"] == 2  # 센 판 — 화면이 "판을 올리면 처음부터" 를 말한다(25.1602)
     리서치 = next(x for x in a["departments"] if x["dept"] == "research")
     assert (리서치["n_for"], 리서치["n_against"]) == (1, 1)
     assert 리서치["spread"] == pytest.approx(0.08)

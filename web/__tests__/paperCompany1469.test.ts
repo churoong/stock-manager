@@ -122,3 +122,16 @@ describe("투자위원회 탭", () => {
     expect(virtualText(undefined)).toBeNull();
   });
 });
+
+describe("성적표 머리 (25.1602)", () => {
+  it("성과 분해의 기준일과 센 판을 보인다", () => {
+    const 칸 = { n: 0, avg: null, hit: null };
+    const 분해 = { horizon: 20, selection: 칸, skipped: 칸, skip_by_reason: {}, entry: 칸, missed: 칸, sold: 칸, held_flag: 칸,
+      rule_version: 3, as_of: "2026-10-20" };
+    const data = { halted: false, realCompare: null, invested: 1, flows: [], history: [], fills: [], orders: [], meetings: [], dossiers: [],
+      accounts: [{ ...계좌, attribution: 분해 }] } as unknown as Data;
+    const html = renderToStaticMarkup(createElement(AccountTabs, { data, acct: "A", setAcct: () => {}, sub: "report", setSub: () => {} }));
+    expect(html).toContain("기준 2026-10-20.");
+    expect(html).toContain("판 3 결정만 셉니다");
+  });
+});
