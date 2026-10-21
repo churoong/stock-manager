@@ -965,7 +965,8 @@ def mark(
     ])])  # fmt: skip
     관문지수, 기준 = _관문_지수(p, v, 지수, 새입금) if p else (None, None)
     return v, {"recon_ok": ok, "recon_note": 글, "twr": 지수, "kospi": 그림자["KOSPI"], "sp500": 그림자["SP500"],
-               "prev_twr": float(p["twr_index"]) if p else None, "gate_twr": 관문지수, "basis": 기준}
+               "prev_twr": float(p["twr_index"]) if p else None, "gate_twr": 관문지수, "basis": 기준,
+               "prev_as_of": str(p["as_of"]) if p else None}
 
 
 def _관문_지수(p: dict[str, Any], v: pp.Valuation, 지수: float, 새입금: float) -> tuple[float | None, str | None]:
@@ -1744,6 +1745,15 @@ def run_step(
         if 검["basis"]:
             # 원가 평가 종목이 어제와 달라 관문 하루 손실을 그 종목 0% 로 보정했거나(보정) 보지 않은 날(모름) — 25.1629
             a기록["day_loss_basis"] = 검["basis"]
+        # 관문이 본 하루 수익 계측(36회차 P1 계측만, 25.1635) — 평가 행은 한국 날짜 한 행을 국내·미국이 덮어써 아침 관문
+        # 값이 저녁에 사라졌다. 계좌·실행마다 남겨 `DAILY_LOSS_HALT_PCT` 의 `[확인필요: 운영 1년 뒤]` 근거로. 결정 규칙
+        # 없음(검증 B — 판정을 내리면 늘 푸는 쪽으로만 기운다). `prev` = 견준 어제 행 날짜(여러 날치가 "하루" 인지)
+        if 검["prev_twr"]:
+            a기록["gate_day"] = {
+                "raw": round((검["twr"] / 검["prev_twr"] - 1) * 100, 4),
+                "gate": None if 검["gate_twr"] is None else round((검["gate_twr"] / 검["prev_twr"] - 1) * 100, 4),
+                "prev": 검["prev_as_of"],
+            }
         계좌체결 = [f for f in fills if f.account_id == aid]
         # 사전 위험 점검의 문맥 (docs/paper.md 11장, 25.1451) — 배분과 따로 한 번 더 막는다
         상한 = settings or {}
@@ -1776,6 +1786,7 @@ def run_step(
                                   문맥)  # fmt: skip
             막힌매도id = {c.stock_id: 까닭 for c, 까닭 in 막힌매도}
             막힌수 = len(막힌매도)
+            막힌모두 = list(막힌매도)  # 까닭 코드별 건수(`risk_blocked_by`) — 매도·매수 회차 모두(36회차 P2 ①, 25.1635)
             for sid, (사유, 근거) in sorted(매도.items()):
                 if sid in 이미팖 or sid not in 보유 or sid in 막힌매도id:
                     continue
@@ -1934,6 +1945,7 @@ def run_step(
                 # 배분 전에 뺀 기업행위 멈춤 종목도 관문이 막은 것으로 센다(종목당 하나 — 예전엔 회차마다 셌다) — 11장
                 # `risk_blocked` 는 "관문이 얼마나 자주 걸리나" 의 근거다(25.1619, 25.1618 교차검증 [권고] 1)
                 막힌수 += len(막힘) + int(b기록.get("frozen_blocked") or 0)
+                막힌모두 += 막힘
                 주문 = [주문[c.key] for c in 통과]
                 낸종목 = {o["stock_id"] for o in 주문}
                 막힌까닭 = {c.stock_id: "위험 점검: " + "; ".join(t for _c, t in 까닭) for c, 까닭 in 막힘}
@@ -1973,6 +1985,11 @@ def run_step(
                 a기록["buy"] = {"skipped": "배분하지 않는 날(신호 없음·묵음·추천 못 읽음)"}
             _쓰기(client, 문장)
             a기록["risk_blocked"] = 막힌수
+            if 막힌모두:
+                # 관문 까닭 코드별 회차 수 — 배분 뒤 두 번째 줄이라 상한·현금·주문 수·묵음 막힘은 정상이면 0 이다. 0 이
+                # 아니면 배분과 관문이 어긋난 결함 신호(25.1629 [필수] 1 "거둔 회차 현금" 이 이 꼴이었다). 멈춤 스위치·
+                # 기업행위·하루 손실은 정상 막힘. 같은 실행 값이라 읽기 0, 그날 바로(36회차 P2 ①, 25.1635)
+                a기록["risk_blocked_by"] = rg.summary(막힌모두)["by_reason"]
             a기록["orders"] = sum(1 for sql, _a in 문장 if sql == INSERT_ORDER_SQL)
             a기록["decisions"] = sum(1 for sql, _a in 문장 if sql == DECISION_INSERT_SQL)
         if aid in 헌장오류:
