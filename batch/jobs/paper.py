@@ -66,7 +66,7 @@ FX_SQL = "SELECT rate, date FROM fx_rates WHERE pair = 'USDKRW' AND date <= ? OR
 INDEX_FROM_SQL = "SELECT close, date FROM index_prices WHERE index_code = ? AND date >= ? ORDER BY date LIMIT 1"
 INDEX_NOW_SQL = "SELECT close, date FROM index_prices WHERE index_code = ? ORDER BY date DESC LIMIT 1"
 PREV_DAILY_SQL = (
-    "SELECT as_of, cash_krw, equity_krw, twr_index, updated_at FROM paper_daily"
+    "SELECT as_of, cash_krw, equity_krw, twr_index, updated_at, unknown_json FROM paper_daily"
     " WHERE account_id = ? AND as_of < ? ORDER BY as_of DESC LIMIT 1"
 )
 #: 그 계좌·시장·거래일에 **결정**(주문이든 안 낸 결정이든)이 이미 있나 — 먼저 쓴 쪽이 이긴다 (docs/paper.md 2.4).
@@ -874,8 +874,31 @@ def mark(
         # 계좌의 실현손익 합 · 보유 평가손익 합 (25.1455)
         float(sum(r["pnl_krw"] for r in pp.realized(계좌체결))), float(sum(r["unrealized_krw"] for r in v.rows)),
     ])])  # fmt: skip
+    # 원가로 평가한 보유(멈춤·시세·환율 모름)가 어제 행과 다르면 오늘 지수의 변화엔 시세가 아닌 평가 기준의
+    # 변화가 섞였다 — 관문의 하루 손실은 그날 모름으로 본다(25.1629, 위험 점검 감사 [필수] 3)
+    try:
+        어제모름 = {int(u["stock_id"]) for u in json.loads(p.get("unknown_json") or "[]")} if p else set()
+    except (TypeError, ValueError, KeyError):
+        어제모름 = None
+    오늘모름 = {int(u["stock_id"]) for u in v.unknown}
     return v, {"recon_ok": ok, "recon_note": 글, "twr": 지수, "kospi": 그림자["KOSPI"], "sp500": 그림자["SP500"],
-               "prev_twr": float(p["twr_index"]) if p else None}
+               "prev_twr": float(p["twr_index"]) if p else None, "basis_changed": 어제모름 != 오늘모름}
+
+
+def _관문_열린칸(
+    client: Any, aid: str, v: pp.Valuation, 열린: list[pp.Order], fx: tuple[float, str] | None,
+    stock_cache: dict[int, dict[str, Any]],
+) -> dict[str, Any]:
+    """관문 문맥 가운데 열린 매수에 기대는 칸 — 같은 실행에서 거둔 회차를 뺀 뒤 다시 만든다(25.1629)."""
+    열린매수 = [o for o in 열린 if o.account_id == aid and o.side == "buy"]
+    예약 = pp.reserved_krw(열린매수, {"USD": fx[0] if fx else None})
+    return {
+        "cash_available_krw": v.cash_krw - (예약 if 예약 is not None else v.cash_krw),
+        # 열린 매수 주문도 보유처럼 — 종목·섹터 상한이 아직 안 찬 주문을 보게(25.1549)
+        "holding_krw": _보유와_열린매수(v.rows, 열린매수, {"USD": fx[0] if fx else None}),
+        "sector_of": {sid: _stock(client, sid, stock_cache).get("sector")
+                      for sid in {int(r["stock_id"]) for r in v.rows} | {o.stock_id for o in 열린매수}},
+    }  # fmt: skip
 
 
 def sell_decisions(
@@ -1044,6 +1067,7 @@ def random_substitute(
     바꿈: dict[int, int] = {}
     빈자리: dict[str, str] = {}
     기준일 = {r.stock_id: (r.close_date or today.isoformat())[:10] for r in rows}
+    묵음선 = rg.ref_floor(market, today)  # 관문과 같은 거래일 잣대(25.1629)
 
     def 자료(c: int, sid: int) -> dict[str, Any] | None:
         """자료가 맞으면 종목 정보(종가 포함), 아니면 None."""
@@ -1053,7 +1077,7 @@ def random_substitute(
         # 기준 종가는 **신호의 종가 날짜까지** — C 의 기준가와 같은 시점
         # (검증 권장: 장 끝난 뒤 손 실행에서 하루 어긋남)
         종가 = client.execute(LAST_CLOSE_SQL, [c, 기준일[sid]]).rows
-        if not 종가 or (today - date.fromisoformat(str(종가[0][1])[:10])).days > rg.STALE_PRICE_DAYS:
+        if not 종가 or str(종가[0][1])[:10] < 묵음선:
             return None
         if c in frozen_ids(client, {c}, {c: market}):
             return None
@@ -1605,26 +1629,25 @@ def run_step(
                                 at={"KOSPI": (끝시세["KR"], None), "SP500": (끝시세["US"], 오늘)}),
                     지금)  # fmt: skip
         a기록.update({"recon_ok": 검["recon_ok"], "unknown": len(v.unknown)})
+        if 검["basis_changed"] and 검["prev_twr"]:
+            a기록["day_loss_unknown"] = "원가 평가 종목이 어제와 다름"  # 관문 하루 손실을 보지 않은 날(25.1629)
         계좌체결 = [f for f in fills if f.account_id == aid]
         # 사전 위험 점검의 문맥 (docs/paper.md 11장, 25.1451) — 배분과 따로 한 번 더 막는다
         상한 = settings or {}
-        예약 = pp.reserved_krw([o for o in 열린 if o.account_id == aid and o.side == "buy"],
-                              {"USD": fx[0] if fx else None})
+
         문맥 = rg.Context(
             # 하루 수익은 **입출금을 뺀** 시간가중 지수로 (25.1453, 교차검증 [필수] 2) — 평가 총액끼리 견주면
-            # 입금 취소일이 −50% 로 읽혀 그날 매수가 모두 막혔고, 입금일엔 진짜 −10% 가 +90% 로 가려졌다
+            # 입금 취소일이 −50% 로 읽혀 그날 매수가 모두 막혔고, 입금일엔 진짜 −10% 가 +90% 로 가려졌다.
+            # 원가로 평가한 보유(멈춤·시세 모름)가 어제와 달라진 날은 모름 — 시가 → 원가로 바뀐 만큼이 하루 손실로
+            # 읽혀 매수가 막혔다(25.1629, 위험 점검 감사 [필수] 3)
             equity_krw=v.equity_krw,
-            day_return_pct=(검["twr"] / 검["prev_twr"] - 1) * 100 if 검["prev_twr"] else None,
-            cash_available_krw=v.cash_krw - (예약 if 예약 is not None else v.cash_krw),
-            # 열린 매수 주문도 보유처럼 — 종목·섹터 상한이 아직 안 찬 주문을 보게(25.1549)
-            holding_krw=_보유와_열린매수(v.rows, [o for o in 열린 if o.account_id == aid and o.side == "buy"],
-                                     {"USD": fx[0] if fx else None}),
-            sector_of={sid: _stock(client, sid, stock_cache).get("sector")
-                       for sid in {int(r["stock_id"]) for r in v.rows}
-                       | {o.stock_id for o in 열린 if o.account_id == aid and o.side == "buy"}},
+            day_return_pct=(검["twr"] / 검["prev_twr"] - 1) * 100
+            if 검["prev_twr"] and not 검["basis_changed"] else None,
+            **_관문_열린칸(client, aid, v, 열린, fx, stock_cache),
             max_stock_pct=float(상한.get("max_weight_per_stock") or 10.0),
             max_sector_pct=float(상한.get("max_weight_per_sector") or 30.0),
             today=cal.local_today(market).isoformat(), halted=멈춤, frozen=frozenset(멈춘),
+            ref_floor=rg.ref_floor(market, cal.local_today(market)),
         )  # fmt: skip
         if int(client.execute(ORDERS_EXIST_SQL, [aid, market, trade_date] * 3).scalar() or 0) > 0:
             a기록["orders"] = "이미 냄"
@@ -1787,9 +1810,14 @@ def run_step(
                 # 사전 위험 점검 (25.1451) — 통과한 회차만 주문. 한 회차도 못 지난 종목은 결정 원장에서 blocked 로
                 후보 = [rg.Candidate(o["stock_id"], "buy", o["cost_krw"], o["ref_date"], i, o["cash_krw"])
                         for i, o in enumerate(주문)]  # fmt: skip
+                # 현금·보유 칸은 **거둔 회차를 뺀** 열린 매수로 다시 — 위 문맥은 거두기 전이라 거둔 예약이 현금에서
+                # 한 번 더 빠져 `buy_orders` 가 낸 정상 매수가 "현금 넘음" 으로 막혔다(25.1629, 위험 점검 감사
+                # [필수] 1).
                 # 후보 종목의 업종도 — 보유만 채우면 새 종목은 업종이 비어 섹터 상한이 꺼졌다 (25.1453, 검증 [필수] 3)
-                문맥 = dc_replace(문맥, sector_of={**문맥.sector_of, **{
-                    c.stock_id: _stock(client, c.stock_id, stock_cache).get("sector") for c in 후보}})
+                새칸 = _관문_열린칸(client, aid, v, 열린, fx, stock_cache)
+                새칸["sector_of"] = {**새칸["sector_of"], **{
+                    c.stock_id: _stock(client, c.stock_id, stock_cache).get("sector") for c in 후보}}
+                문맥 = dc_replace(문맥, **새칸)
                 통과, 막힘 = rg.gate(후보, 문맥)
                 # 배분 전에 뺀 기업행위 멈춤 종목도 관문이 막은 것으로 센다(종목당 하나 — 예전엔 회차마다 셌다) — 11장
                 # `risk_blocked` 는 "관문이 얼마나 자주 걸리나" 의 근거다(25.1619, 25.1618 교차검증 [권고] 1)

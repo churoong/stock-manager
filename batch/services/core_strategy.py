@@ -382,7 +382,7 @@ class CoreStrategy:
             equity_krw=N, day_return_pct=log.day_return_pct, cash_available_krw=현금 * N,
             holding_krw={sid: x * N for sid, x in w.items()}, sector_of=sector_of,
             max_stock_pct=self.settings["max_weight_per_stock"], max_sector_pct=self.settings["max_weight_per_sector"],
-            today=today.isoformat(),
+            today=today.isoformat(), ref_floor=rg.ref_floor(self.market.country, today),  # 거래일 잣대(25.1629)
         )  # fmt: skip
         통과, 막힘 = rg.gate(후보, 문맥)
         주문 = [주문[c.key] for c in 통과]

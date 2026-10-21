@@ -5,7 +5,7 @@
 그대로 주문이 되지 않게** 독립된 점검이 있어야 한다. 지금은 모의 주문이 이 관문을 지나고, 걸린 것은 결정 원장
 (`paper_decisions`, reason "위험 점검: …")에 남는다. 실주문을 여는 날(사용자 결정 뒤) 같은 관문을 그대로 쓴다.
 
-순수 함수다 — DB 를 읽지 않는다. 같은 입력이면 같은 판정.
+순수 함수다 — DB 를 읽지 않는다. 같은 입력이면 같은 판정(`ref_floor` 만 거래소 달력을 읽는다).
 """
 
 from __future__ import annotations
@@ -27,8 +27,11 @@ MAX_ORDERS_PER_DAY = 30
 #: 정상 배분이 15.6% 로 막혔다, 25.1453)
 CAP_TOLERANCE_PCT = 0.5
 CAP_TOLERANCE_REL = 0.05
-#: 매수 기준 종가가 이 날수(달력일)보다 묵었으면 막는다 — 연휴(설·추석 최장 5일 안팎)를 넘는 묵음은
-#: 시세 수집이 멈춘 것이다
+#: 매수 기준 종가가 오늘 앞 이 거래일 수(그 시장 달력)보다 묵었으면 막는다 — 평소 주엔 예전 잣대(달력일 7일)와 같다.
+#: 예전엔 달력일로만 세어 긴 연휴 뒤 첫 아침(국내 2025-10-02 → 10-10 이 8일, 2017-09-29 → 10-10 이 11일)에 바로 앞
+#: 거래일 종가까지 "묵음" 으로 읽혀 그날 매수가 모두 막혔다(25.1629, 위험 점검 감사 [필수] 2)
+STALE_PRICE_SESSIONS = 5
+#: 달력을 주지 않은 문맥(`ref_floor` 없음)의 옛 잣대 — 달력일
 STALE_PRICE_DAYS = 7
 
 Reason = tuple[str, str]  # (코드, 사람이 읽는 글)
@@ -49,6 +52,8 @@ class Context:
     today: str
     halted: bool = False  # 사람이 켠 멈춤 스위치
     frozen: frozenset[int] = field(default_factory=frozenset)
+    #: 이 날보다 앞선 기준 종가는 묵음(`ref_floor`) — 비면 달력일 `STALE_PRICE_DAYS` 로
+    ref_floor: str | None = None
 
 
 @dataclass(frozen=True)
@@ -91,6 +96,9 @@ def _매수_까닭(c: Candidate, ctx: Context, 손실: float | None, 매수수: 
         까닭.append(("cash", "현금(다른 미체결 매수 예약을 뺀) 넘음"))
     if not c.ref_date:
         까닭.append(("no_ref", "기준 종가 날짜 모름"))
+    elif ctx.ref_floor is not None:
+        if c.ref_date[:10] < ctx.ref_floor:
+            까닭.append(("stale", f"기준 종가가 {c.ref_date} — {STALE_PRICE_SESSIONS}거래일 넘게 묵음"))
     elif (date.fromisoformat(ctx.today) - date.fromisoformat(c.ref_date[:10])).days > STALE_PRICE_DAYS:
         까닭.append(("stale", f"기준 종가가 {c.ref_date} — {STALE_PRICE_DAYS}일 넘게 묵음"))
     return 까닭
@@ -130,6 +138,16 @@ def gate(candidates: list[Candidate], ctx: Context) -> tuple[list[Candidate], li
                 k = str(ctx.sector_of[c.stock_id])
                 섹터합[k] = 섹터합.get(k, 0.0) + c.cost_krw
     return 통과, 막힘
+
+
+def ref_floor(market: str, today: date) -> str:
+    """오늘 앞 `STALE_PRICE_SESSIONS` 번째 거래일 — 기준 종가가 이보다 앞서면 묵음. 달력만 읽는다(DB 아님)."""
+    from batch.core import calendar as cal
+
+    d = today
+    for _ in range(STALE_PRICE_SESSIONS):
+        d = cal.previous_session(market, d)
+    return d.isoformat()
 
 
 def summary(막힘: list[tuple[Candidate, list[Reason]]]) -> dict[str, Any]:
