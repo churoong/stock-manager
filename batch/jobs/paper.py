@@ -461,6 +461,14 @@ def costs_for(market: str, fees: dict | None, taxes: dict | None, day: str) -> p
                     slippage_pct=c.slippage_pct)  # fmt: skip
 
 
+def cost_snapshot(market: str, fees: dict | None, taxes: dict | None, day: str) -> dict[str, Any]:
+    """주문 근거에 남기는 비용 — 그 장(`day`) 기준 편도 수수료·매도세·슬리피지와 **기본값을 쓴 항목**
+    (docs/paper.md 2.3 — 문서는 적는다고 했는데 주문 스냅샷에 없었다, 25.1595). 실제 비용은 체결일 설정으로 붙는다"""
+    c = bt.Costs.for_country(market, fees, taxes)
+    return {"fee_pct": c.commission_pct, "sell_tax_pct": c.tax_at(day), "slippage_pct": c.slippage_pct,
+            "defaults": list(c.defaults), "as_of": day}  # fmt: skip
+
+
 def _보유와_열린매수(
     rows: list[dict[str, Any]], open_buys: list[pp.Order], fx: dict[str, float | None],
 ) -> dict[int, float]:
@@ -1120,6 +1128,7 @@ def buy_orders(
     substitute: Callable[[list[report_picks.SignalRow]], list[report_picks.SignalRow]] | None = None,
     series_loader: Callable[[list[int]], dict] | None = None,
     preselected: list[report_picks.SignalRow] | None = None, preselected_reason: str = "위원회 가결",
+    costs: dict[str, Any] | None = None,
     stop_pcts: dict[str, float] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """2부와 같은 함수로 이 계좌의 매수 회차 주문을 낸다 (docs/paper.md 2.1). (주문 행, 기록).
@@ -1257,7 +1266,7 @@ def buy_orders(
                 "entry": entry, "top_n": top_n, "ref_price": o.get("ref_price"),
                 "settings": {k: settings.get(k) for k in ("max_weight_per_stock", "max_weight_per_sector",
                                                           "min_order_amount")},
-                "equity": 총액, "reserved": 예약 / 환율, "fx": 환율,
+                "equity": 총액, "reserved": 예약 / 환율, "fx": 환율, "costs": costs,
             },
         })  # fmt: skip
     return out, {"candidates": 후보수, "allocations": len(pv.allocations), "orders": len(out), "skipped": 빠짐[:10],
@@ -1480,6 +1489,7 @@ def run_step(
         # **장이 끝난 뒤의 손 실행** (25.1447, 교차검증 [필수] 3) — 오늘 장의 시가·종가 모두 주문보다 앞선다.
         # 다음 장 시가로
         다음장, 기준 = cal.next_session(market, date.fromisoformat(다음장)).isoformat(), "open"
+    비용표 = cost_snapshot(market, fees, taxes, 다음장)  # 주문 근거에 남기는 비용(25.1595) — 체결할 장 기준
     쉼_시작 = trade_date
     for _ in range(pp.REBUY_COOLDOWN_SESSIONS - 1):
         쉼_시작 = cal.previous_session(market, date.fromisoformat(쉼_시작)).isoformat()
@@ -1563,7 +1573,8 @@ def run_step(
                 문장.append((INSERT_ORDER_SQL, [
                     aid, market, sid, "sell", "market", None, 보유[sid].quantity, 보유[sid].currency, trade_date,
                     다음장, 기준, 0, ",".join(사유), None, None, None,
-                    json.dumps({"flags": 근거, "sell_rule": 규칙}, ensure_ascii=False, default=str), 판, 지금, None,
+                    json.dumps({"flags": 근거, "sell_rule": 규칙, "costs": 비용표}, ensure_ascii=False,
+                               default=str), 판, 지금, None,
                 ]))  # fmt: skip
             a기록["sells"] = len(문장)  # 이 자리까지는 매도 주문만 있다
             # 전량 매도를 내는 종목의 남은 매수 회차는 거둔다 — 매도는 그때 보유 수량만 팔아, 같은 장에 남은 회차가
@@ -1686,6 +1697,7 @@ def run_step(
                     fx_rate=fx[0] if fx else None, stop_ids=손절, sold_recently=최근판, stock_cache=stock_cache,
                     top_n=종목수, entry=진입, substitute=바꾸기, series_loader=series_loader, preselected=가결행,
                     preselected_reason="지주사 합의" if aid in 지주설정 else "위원회 가결", stop_pcts=손절폭,
+                    costs=비용표,
                 )  # fmt: skip
                 # 사전 위험 점검 (25.1451) — 통과한 회차만 주문. 한 회차도 못 지난 종목은 결정 원장에서 blocked 로
                 후보 = [rg.Candidate(o["stock_id"], "buy", o["cost_krw"], o["ref_date"], i, o["cash_krw"])
