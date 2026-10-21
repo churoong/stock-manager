@@ -1787,7 +1787,7 @@ def run_step(
                     결정들 = [{"stock_id": r.stock_id, "kind": "skip", "reason": 까닭0,
                              "ref_close": r.close, "ref_date": r.close_date,
                              "detail": {"horizon": r.horizon, "score": r.total_score, "held": r.stock_id in 든것}}
-                            for r in {r.stock_id: r for r in 가결행}.values()]  # fmt: skip
+                            for r in {r.stock_id: r for r in reversed(가결행)}.values()]  # fmt: skip
                 for d in 결정들 or []:
                     if d["kind"] == "buy" and d["stock_id"] not in 낸종목:
                         # 규칙은 사려 했는데 관문이 막았다 — skip 과 섞지 않는다 (25.1453)

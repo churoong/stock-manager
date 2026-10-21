@@ -105,6 +105,16 @@ export function holdSide(d: Pick<DecisionRow, "kind" | "reason"> & Partial<Pick<
   return d.kind === "skip" && HOLD_SIDE_SKIP_PREFIXES.some((p) => d.reason.startsWith(p));
 }
 
+/**
+ * 운영 사정으로 못 산 줄인가 — 매수 단계가 일찍 끝난 날(환율 모름·장부 현금 음수) 위원회·지주사가 **고른** 종목(배치
+ * `BUY_STEP_SKIP_PREFIX`, 25.1622). 거른 결정도 놓친 결정도 아니라 색을 칠하지 않는다(25.1623 — 지수보다 덜 오르면
+ * "잘 거른 것" 으로 읽혔다)
+ */
+export const OPERATIONAL_SKIP_PREFIX = "매수 단계 건너뜀: ";
+export function operationalSkip(d: Pick<DecisionRow, "kind" | "reason">): boolean {
+  return d.kind === "skip" && d.reason.startsWith(OPERATIONAL_SKIP_PREFIX);
+}
+
 export interface DecisionGroup { first: DecisionRow; last: DecisionRow; count: number }
 
 /**

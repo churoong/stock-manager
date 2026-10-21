@@ -21,7 +21,7 @@ import {
   hasCommittee,
   virtualText,
 } from "@/lib/paper";
-import { KIND_TEXT, afterText, beatBench, groupDecisions, holdSide, type DecisionRow } from "@/lib/paperDecisions";
+import { KIND_TEXT, afterText, beatBench, groupDecisions, holdSide, operationalSkip, type DecisionRow } from "@/lib/paperDecisions";
 import { money, won } from "@/lib/portfolio";
 
 /**
@@ -897,13 +897,15 @@ function SkipsPane({ account }: { account: string }) {
           {groupDecisions(rows).map(({ first, last, count }) => {
             const 이김 = beatBench(first);
             const 보유 = holdSide(last);
-            const 색 = 이김 == null ? "text-slate-500" : 보유 ? (이김 ? "text-emerald-700 dark:text-emerald-400" : "text-amber-700 dark:text-amber-400") : 이김 ? "text-red-600 dark:text-red-400" : "text-blue-600 dark:text-blue-400";
+            const 운영 = operationalSkip(last);
+            const 색 = 이김 == null || 운영 ? "text-slate-500" : 보유 ? (이김 ? "text-emerald-700 dark:text-emerald-400" : "text-amber-700 dark:text-amber-400") : 이김 ? "text-red-600 dark:text-red-400" : "text-blue-600 dark:text-blue-400";
             return (
               <li key={last.id} className="py-1.5">
                 <span className="text-xs text-slate-500">
                   {count > 1 ? `${first.decided_on}~${last.decided_on} · 보인 줄 ${count}번` : last.decided_on} · {KIND_TEXT[last.kind] ?? last.kind}
                   {last.rule_version != null ? ` · 판 ${last.rule_version}` : ""}
                   {보유 ? " · 보유 쪽" : ""}
+                  {운영 ? " · 운영 사정(고른 종목)" : ""}
                 </span>{" "}
                 <b>{last.name}</b> <span className="text-xs text-slate-400">{last.ticker}</span>
                 <span className="block text-xs text-slate-600 dark:text-slate-400">{last.reason}</span>
