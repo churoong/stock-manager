@@ -270,7 +270,7 @@ export function rowsById(lb: DeskLeaderboard | null | undefined): Map<string, De
 /** 관문 칸의 지금 값 글 — 칸마다 단위가 다르다 */
 export function gateNowText(i: GateItem): string {
   // 결정 단위 — 묶음이 4개 전이라 하한이 없어도 평균·묶음 수는 보인다(25.1523 검토 7)
-  if (i.key === "selection" && i.now == null && i.mean != null) return `하한 모름(평균 ${i.mean.toFixed(1)}, 28일 묶음 ${i.n ?? 0}) / ${i.target ?? 50} 초과`;
+  if ((i.key === "selection" || i.key === "control") && i.now == null && i.mean != null) return `하한 모름(평균 ${i.mean.toFixed(1)}, 28일 묶음 ${i.n ?? 0}) / ${i.target ?? 50} 초과`;
   // 가상 체결이 모두 경로 실패(모름·거부)면 실현율은 모르지만 경로 포함 값은 있다 — 미국 예약 미전송처럼 이 칸이 가장 필요한 때(25.1627)
   if (i.now == null) return i.key === "kis" && i.path_pct != null ? `모름 · 경로 포함 ${i.path_pct.toFixed(1)}%(표본 ${i.path_n ?? 0}, 참고)` : "모름";
   switch (i.key) {
@@ -290,7 +290,8 @@ export function gateNowText(i: GateItem): string {
       // 단위는 날 수 — 검산 어긋난 날 + 배치 사고 날(docs/desk.md 6장, 25.1637 — 예전 "건")
       return `${i.now}일(검산 어긋난 날 ${i.detail?.recon_bad_days ?? "-"} · 배치 사고 날 ${i.detail?.batch_failed ?? "-"}) / 0`;
     case "selection":
-      // 결정 단위 선정 — 한쪽 95% 하한 분위(무작위면 50), 평균·묶음 수 (25.1518)
+    case "control":
+      // 결정 단위 선정·가상 대조 — 한쪽 95% 하한 분위(무작위면 50), 평균·묶음 수 (25.1518·25.1697)
       return `하한 ${i.now.toFixed(apartDigits(i.now, i.target ?? 50, 1))}분위(평균 ${i.mean == null ? "-" : i.mean.toFixed(1)}, 28일 묶음 ${i.n ?? 0}) / ${i.target ?? 50} 초과`;
     case "kis":
       // 소수 첫째 자리 — 89.6 이 "90% / 90% 이상" 으로 보이는데 미충족이면 헷갈린다(25.1511 검토 4)

@@ -364,6 +364,8 @@ def gate(
     kept, kn = (kis or {}).get("kept_pct"), int((kis or {}).get("n") or 0)
     ev = evidence or {}
     하한, 묶음수 = ev.get("lower"), int(ev.get("n_blocks") or 0)
+    가상 = ev.get("control") or {}
+    대조하한, 대조묶음수 = 가상.get("lower"), int(가상.get("n_blocks") or 0)
     판글 = f"지금 판{'' if version is None else f' {version}'}"
     items = [
         {"key": "days", "label": f"모의 기간({판글}의 평가 횟수)", "now": len(v), "target": GATE_MIN_POINTS,
@@ -385,6 +387,13 @@ def gate(
          "label": f"결정 단위 선정 — 같은 날 새 후보 안 분위의 한쪽 95% 하한(28일 묶음 {GATE_SEL_MIN_BLOCKS}개 이상)",
          "now": 하한, "target": GATE_SEL_NULL, "n": 묶음수, "mean": ev.get("mean"),
          "ok": 하한 is not None and 묶음수 >= GATE_SEL_MIN_BLOCKS and float(하한) > GATE_SEL_NULL},
+        # 가상 대조(25.1697, H·R 감사 [필수]) — R 대비가 규칙 차이(진입·매도·투자 속도)를 재는 것을 받친다.
+        # AND 로만 더함
+        {"key": "control",
+         "label": ("가상 대조 — 산 새 종목이 같은 날 무작위 20종목 안 분위의 한쪽 95% 하한"
+                   f"(28일 묶음 {GATE_SEL_MIN_BLOCKS}개 이상)"),
+         "now": 대조하한, "target": GATE_SEL_NULL, "n": 대조묶음수, "mean": 가상.get("mean"),
+         "ok": 대조하한 is not None and 대조묶음수 >= GATE_SEL_MIN_BLOCKS and float(대조하한) > GATE_SEL_NULL},
     ]  # fmt: skip
     다음 = "2단계 손 매매 준수율·슬리피지 → 3단계 소액 승인형 → 4단계 한도 내 자동 — 단계마다 사용자 결정"
     return {"stage": 1, "account": mirror, "version": version, "from": 시작, "items": items,

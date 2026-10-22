@@ -1188,9 +1188,22 @@ def selection_evidence(decisions: list[dict[str, Any]]) -> dict[str, Any]:
         쓴날 += 1
     블록 = {k: sum(v) / len(v) for k, v in 분위묶음.items() if len(분위날[k]) >= EVIDENCE_BLOCK_MIN_DAYS}
     초과 = {k: sum(v) / len(v) for k, v in 초과묶음.items() if len(초과날[k]) >= EVIDENCE_BLOCK_MIN_DAYS}
+    # **가상 대조 분위의 묶음 하한** (25.1697, H·R 감사 [필수]) — 산 새 종목이 같은 날·같은 시장 유니버스의 무작위
+    # 20종목 안 몇 분위였나(`control_pct`, `fill_controls`). 진입 방식(분할 지정가·시가 일괄)·매도 규칙·현금 비중과
+    # 무관하게 선정만 잰다 — 관문 "R 대비" 는 H 와 R 의 규칙이 달라(진입·매도·투자 속도) 하락장엔 현금만으로 통과하고
+    # 상승장엔 실력이 있어도 떨어졌다. 같은 묶음·같은 하한 계산(무작위면 50)
+    대조묶음: dict[int, list[float]] = {}
+    대조날: dict[int, set[str]] = {}
+    for (_m, day), g in sorted(날.items()):
+        xs = [float(b["control_pct"]) for b in g["buy"] if b.get("control_pct") is not None]
+        if xs:
+            대조묶음.setdefault(_묶음(day), []).append(sum(xs) / len(xs))
+            대조날.setdefault(_묶음(day), set()).add(day)
+    대조 = {k: sum(v) / len(v) for k, v in 대조묶음.items() if len(대조날[k]) >= EVIDENCE_BLOCK_MIN_DAYS}
     return {"horizon": ATTRIBUTION_HORIZON, "days": 쓴날, **block_bound(블록),
             "blocks": {str(k): v for k, v in sorted(블록.items())},
-            "excess_blocks": {str(k): v for k, v in sorted(초과.items())}}  # fmt: skip
+            "excess_blocks": {str(k): v for k, v in sorted(초과.items())},
+            "control": {**block_bound(대조), "blocks": {str(k): v for k, v in sorted(대조.items())}}}  # fmt: skip
 
 
 def attribution_lines(aid: str, a: dict[str, Any] | None) -> list[str]:
