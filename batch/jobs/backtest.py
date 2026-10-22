@@ -102,7 +102,8 @@ CORE_REGISTERED_TRIALS = 3
 #: 운 판정(DSR)의 시도 수 하한 — 벤치마크를 뺀 등록 전략 + 기본 장기 문턱 + 핵심 H 등록 전략
 #: (docs/backtest.md 9장, 25.1358 · 25.1542 에서 핵심 계열을 더했다 — 월 백테스트·핵심 H 둘 다 이 하한)
 #: 등록만 하고 코드는 아직인 후보 전략 — 37회차 B′ `pead_event`(12.40, 사건 표 뒤). 결과를 보기 전에 시도 수 하한에
-#: 미리 센다(더 보수적으로만). 코드가 `STRATEGIES` 에 들어가는 커밋에서 이 수를 뺀다
+#: 미리 센다(더 보수적으로만). `pead_event` 가 **시도 수에 잡히는 커밋에서** 이 수를 뺀다 — `STRATEGIES` 밖의 따로 도는
+#: 사건형이면 그 커밋이 하한 식에 직접 더한다(25.1646 교차검증 [권고])
 PENDING_TRIALS = 1
 REGISTERED_TRIALS = len(STRATEGIES) - 1 + len(DEFAULT_LONG_THRESHOLDS) + CORE_REGISTERED_TRIALS + PENDING_TRIALS
 
@@ -1972,7 +1973,7 @@ def run(
             step_log={"group_id": group_id, "strategies": stored, "rebalances": 실제_리밸런스,
                       "factor_ic": ic_summary,
                       # 37회차 A (factors.md 12.40, 원장 #35·#36) — 공통 구간 판정과 중복 진단. 기록 전용
-                      **({"high52_judge": {**h52.judge(results, h52_trace.get("full_from"), 무위험),
+                      **({"high52_judge": {**_high52_judge(results, h52_trace.get("full_from"), 무위험),
                                            "ties_cut": h52_trace.get("ties_cut", 0)},
                           "high52_overlap": h52.overlap_summary(h52_trace.get("vs_score", []),
                                                                 h52_trace.get("vs_12_1", []))}
@@ -1995,6 +1996,16 @@ def run(
         return 0
     finally:
         client.close()
+
+
+def _high52_judge(results: dict[str, bt.BacktestResult], start: str | None, risk_free: float | None) -> dict[str, Any]:
+    """37회차 A 판정(`h52.judge`) — 계산이 예외로 죽어도 실행은 성공으로 닫고 "판정 불가(계산 실패)" 로 남긴다.
+    그러지 않으면 그달 판정 실행 하나가 원장 모든 행의 판정과 함께 사라진다(25.1646 교차검증 [권고])."""
+    try:
+        return h52.judge(results, start, risk_free)
+    except Exception as exc:  # noqa: BLE001 — 기록 전용 판정. 실패를 그대로 적고 다른 기록은 살린다
+        log.exception("high52 판정 계산 실패")
+        return {"start": start, "verdict": "판정 불가", "why": f"계산 실패: {type(exc).__name__}"}
 
 
 def _pit_sizes(cache: dict[str, set[int]]) -> dict[str, int]:

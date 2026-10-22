@@ -39,8 +39,12 @@ def test_시장_안_백분위와_작은_시장_모음() -> None:
     시장 = {**{i: "KOSPI" for i in 큰}, 101: "BZX", 102: "BZX", 103: "ARCA"}
     p = h.market_percentiles(값, 시장)
     assert p[30] == pytest.approx(1.0) and p[1] == pytest.approx(1 / 30)
-    # 30 미만 시장은 한데 — 4종목 시장의 1등이 큰 시장 1등과 같은 1.0 이 되지 않게(동점 0.9 둘은 같은 값)
-    assert p[101] == pytest.approx(1 / 3) and p[102] == p[103] == pytest.approx(1.0)
+    # 30 미만 시장은 한데 — 모아도 셋이라 전 종목 33 안에서 잰다(25.1650): 작은 시장 1등이 1.0 이 되지 않는다
+    assert p[101] == pytest.approx(1 / 33) and p[102] == p[103] == pytest.approx(3 / 33)
+    # 모은 무리가 30 이상이면 그 무리 안에서
+    큰기타 = {**큰, **{200 + i: float(i) for i in range(30)}}
+    큰기타시장 = {**{i: "KOSPI" for i in 큰}, **{200 + i: f"작은{i % 3}" for i in range(30)}}
+    assert h.market_percentiles(큰기타, 큰기타시장)[229] == pytest.approx(1.0)
     assert 104 not in h.market_percentiles({**값, 104: None}, 시장)
 
 
@@ -168,3 +172,37 @@ def test_전략은_기준일까지만_보고_처음_다_채운_날과_진단을_
 def test_등록된_후보이고_시도_수에_든다() -> None:
     assert "high52" in job.STRATEGIES and "high52" in job.CANDIDATE_STRATEGIES
     assert job.REGISTERED_TRIALS == 17
+
+
+# --- 25.1650 교차검증 [권고] ---------------------------------------------------------------------------------
+
+
+def test_중복_문턱은_반올림_전_값으로() -> None:
+    assert h.overlap_summary([0.89996] * 3, [0.1] * 3)["open_account"] is True
+    assert h.overlap_summary([0.9] * 3, [0.1] * 3)["open_account"] is False
+
+
+def test_모은_기타도_작으면_전_종목_안에서_잰다() -> None:
+    값 = {i: i / 500 for i in range(1, 501)}  # NASDAQ 500 — 0.002 ~ 1.0
+    값 |= {601: 0.5, 602: 0.4, 603: 0.3, 604: 0.2}  # 작은 시장 넷 — 모아도 4
+    시장 = {**{i: "NASDAQ" for i in range(1, 501)}, 601: "ARCA", 602: "BZX", 603: "IEX", 604: "ARCA"}
+    p = h.market_percentiles(값, 시장)
+    assert p[500] == pytest.approx(1.0)
+    assert p[601] == pytest.approx(254 / 504)  # 0.5 이하: NASDAQ 250 + 작은 넷 — 예전엔 기타 1등이라 1.0
+    assert p[604] < p[601] < 1.0
+
+
+def test_빈칸_까닭과_무위험수익률() -> None:
+    결과 = {"high52": _결과([0.02] * 40), "momentum": _결과([0.01] * 40), "benchmark": _결과([0.0] * 40)}
+    판 = h.judge(결과, "2022-01-03", None, lambda *_a, **_k: SimpleNamespace(
+        metrics=SimpleNamespace(cagr=0.1, sharpe=None, mdd=-0.1)))  # fmt: skip
+    assert 판["verdict"] == "판정 불가" and "high52.sharpe" in 판["why"] and "무위험수익률 설정 없음" in 판["why"]
+
+
+def test_판정_계산이_죽어도_판정_불가로_남는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    def 죽음(*_a: object, **_k: object) -> dict:
+        raise ZeroDivisionError
+
+    monkeypatch.setattr(job.h52, "judge", 죽음)
+    판 = job._high52_judge({}, "2022-01-03", None)
+    assert 판 == {"start": "2022-01-03", "verdict": "판정 불가", "why": "계산 실패: ZeroDivisionError"}

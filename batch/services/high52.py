@@ -45,7 +45,9 @@ def proximity(closes: list[float], kr: bool) -> float | None:
 
 def market_percentiles(values: dict[int, float | None], market_of: dict[int, str]) -> dict[int, float]:
     """시장 안 백분위 = 그 시장 안 값이 자기 이하인 종목 수 ÷ 그 시장 종목 수(동점은 같은 값, 0 < p ≤ 1).
-    값이 있는 종목이 `MIN_PEER_SIZE` 미만인 시장은 `SMALL_GROUP` 하나로 모은다. 값 없는 종목은 빠진다."""
+    값이 있는 종목이 `MIN_PEER_SIZE` 미만인 시장은 `SMALL_GROUP` 하나로 모은다. **모은 무리도 그보다 작으면**
+    그 종목들은 값이 있는 전 종목(그 실행의 나라 전체) 안에서 잰다 — 작은 무리의 1등이 큰 시장 1등과 같은 1.0 이
+    되지 않게(25.1646 교차검증 [권고]). 값 없는 종목은 빠진다."""
     무리: dict[str, list[int]] = {}
     for sid, v in values.items():
         if v is not None:
@@ -54,8 +56,10 @@ def market_percentiles(values: dict[int, float | None], market_of: dict[int, str
     for 시장, ids in 무리.items():
         합친.setdefault(시장 if len(ids) >= MIN_PEER_SIZE else SMALL_GROUP, []).extend(ids)
     out: dict[int, float] = {}
-    for ids in 합친.values():
-        정렬 = sorted(float(values[s]) for s in ids)  # type: ignore[arg-type]
+    전체 = [s for ids in 무리.values() for s in ids]
+    for 이름, ids in 합친.items():
+        잣대 = 전체 if 이름 == SMALL_GROUP and len(ids) < MIN_PEER_SIZE else ids
+        정렬 = sorted(float(values[s]) for s in 잣대)  # type: ignore[arg-type]
         n = len(정렬)
         for s in ids:
             v = float(values[s])  # type: ignore[arg-type]
@@ -140,8 +144,13 @@ def judge(
         out["why"] = f"공통 구간 리밸런스 {리밸} < {JUDGE_MIN_REBALANCES}"
         return out
     h = 지표["high52"]
-    if any(v is None for x in 지표.values() for v in x.values()) or None in out["halves"]:
-        out["why"] = "지표 빈칸"
+    빈칸 = [f"{이름}.{k}" for 이름, x in 지표.items() for k, v in x.items() if v is None]
+    if 빈칸 or None in out["halves"]:
+        # 어느 칸인지 적는다 — 무위험수익률 설정이 비면 샤프가 늘 비어 다음 달에도 같은 까닭으로 불가다
+        # (25.1646 교차검증)
+        out["why"] = "지표 빈칸: " + ", ".join(빈칸 or ["월 초과 반"])
+        if any(k.endswith(".sharpe") for k in 빈칸) and risk_free_annual is None:
+            out["why"] += " — 무위험수익률 설정 없음"
         return out
     실패: list[str] = []
     for 대조 in ("momentum", "benchmark"):
@@ -165,8 +174,10 @@ def overlap_summary(vs_score: list[float | None], vs_12_1: list[float | None]) -
 
     def 평균(xs: list[float | None]) -> float | None:
         ys = [x for x in xs if x is not None]
-        return round(sum(ys) / len(ys), 4) if ys else None
+        return sum(ys) / len(ys) if ys else None
 
+    # 문턱은 반올림 **전** 값으로 가른다 — 0.89996 이 0.9 로 올라 계좌를 닫던 것(25.1646 교차검증 [권고])
     a, b = 평균(vs_score), 평균(vs_12_1)
-    return {"vs_momentum_score": a, "vs_momentum_12_1": b, "n": sum(1 for x in vs_score if x is not None),
+    return {"vs_momentum_score": None if a is None else round(a, 4),
+            "vs_momentum_12_1": None if b is None else round(b, 4), "n": sum(1 for x in vs_score if x is not None),
             "open_account": None if a is None or b is None else (a < OVERLAP_MAX and b < OVERLAP_MAX)}  # fmt: skip
