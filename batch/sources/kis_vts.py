@@ -373,6 +373,9 @@ class Session:
         self.sleep = sleep
         self.calls = 0
         self.rate_retries = 0
+        #: 마지막 잔고 조회가 쪽 상한(`MAX_PAGES`)에 닿아 잘렸나(25.1712) — 체결 조회는 "다 받음" 을 돌려주는데 잔고는
+        #: 말없이 잘라 정리·베낀 매도·실현손익 기준점이 빠진 보유를 0 으로 읽었다
+        self.balance_truncated = False
         self._last = 0.0
         token, issued = kis.access_token(
             client, now or datetime.now(UTC), base=BASE, name=keys.token, key_env=keys.key_env,
@@ -460,6 +463,7 @@ class Session:
         합: dict[str, float | None] = {}
         fk = nk = ""
         cont = ""
+        self.balance_truncated = True
         for _ in range(MAX_PAGES):
             params = {
                 "CANO": self.cano, "ACNT_PRDT_CD": self.prdt, "AFHR_FLPR_YN": "N", "OFL_YN": "", "INQR_DVSN": "02",
@@ -469,8 +473,11 @@ class Session:
             payload, 다음 = self._call("GET", BALANCE_PATH, TR_BALANCE, params=params, tr_cont=cont)
             쪽, 쪽합 = parse_balance(payload)
             보유 += 쪽
-            합 = 합 or 쪽합
+            # 합계는 값이 있는 마지막 쪽 것 — 첫 쪽만 보면 끝 쪽에만 오는 합계를 놓쳤다
+            # (25.1712, 감사 [참고] 4 `[확인필요]`)
+            합 = 쪽합 if any(v is not None for v in (쪽합 or {}).values()) else 합
             if 다음 not in ("M", "F") or not isinstance(payload, dict):
+                self.balance_truncated = False
                 break
             fk, nk, cont = str(payload.get("ctx_area_fk100") or ""), str(payload.get("ctx_area_nk100") or ""), "N"
         return 보유, 합
@@ -537,9 +544,11 @@ class Session:
         NASD 로 전체를 주더라도 겹침을 빼므로 두 번 세지 않는다. 예수금·평가는 국내 원화 잔고와 단위가 달라 적지 않는다
         """
         보유: dict[str, Holding] = {}
+        self.balance_truncated = False
         for 거래소 in sorted(set(US_EXCHANGE.values())):
             fk = nk = ""
             cont = ""
+            잘림 = True
             for _ in range(MAX_PAGES):
                 params = {"CANO": self.cano, "ACNT_PRDT_CD": self.prdt, "OVRS_EXCG_CD": 거래소, "TR_CRCY_CD": "USD",
                           "CTX_AREA_FK200": fk, "CTX_AREA_NK200": nk}  # fmt: skip
@@ -547,8 +556,10 @@ class Session:
                 for h in parse_us_balance(payload):
                     보유.setdefault(h.code, h)
                 if 다음 not in ("M", "F") or not isinstance(payload, dict):
+                    잘림 = False
                     break
                 fk, nk, cont = str(payload.get("ctx_area_fk200") or ""), str(payload.get("ctx_area_nk200") or ""), "N"
+            self.balance_truncated = self.balance_truncated or 잘림
         목록 = list(보유.values())
         # 계좌 총액(달러) = 외화예수금 + 보유 평가 합. 예수금 조회가 안 되면(모의 미지원 등) 총액은 모름 —
         # 보유는 그대로 돌려준다. 해외 현금·해외 총자산(원화)도 같은 조회에서 붙인다

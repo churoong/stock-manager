@@ -96,8 +96,13 @@ OLD_SQL = (
     "UPDATE paper_broker_orders SET status = 'unknown', message = '3개월 지나 맞추지 못함', fetched_at = ?"
     " WHERE broker = ? AND status IN ('sending', 'accepted') AND trade_date < ?"
 )
+#: 정리 대상 "우리가 산 적 있는 종목" — **찼거나 아직 맞추지 않은**(`unknown` 은 실제로 찼을 수 있다) 매수만
+#: (25.1712, KIS 경로 감사 [권고] 2). 예전엔 거부만 빼 안 찬(`unfilled`) 매수도 들어가, 베낀 매수가 안 찬 종목을
+#: 사람이 그 모의계좌에서 손으로 사면 정리가 그 주식을 팔았다(docs/paper.md 15.1 "손으로 산 종목까지 팔지 않게" 와
+#: 어긋남 — 25.1611 이 행 고르기에서 고친 것과 같은 낱말)
 BOUGHT_SQL = (
-    "SELECT DISTINCT stock_id FROM paper_broker_orders WHERE broker = ? AND side = 'buy' AND status <> 'rejected'"
+    "SELECT DISTINCT stock_id FROM paper_broker_orders WHERE broker = ? AND side = 'buy'"
+    " AND (filled_qty > 0 OR status IN ('sending', 'accepted', 'unknown'))"
 )
 #: 이 증권사 칸이 이 계좌를 베끼기 시작한 날 — "연결 전 보유" 를 가르는 잣대(25.1564)
 LINK_DATE_SQL = "SELECT MIN(trade_date) FROM paper_broker_orders WHERE broker = ? AND account_id = ?"
@@ -144,7 +149,8 @@ REALIZED_FX_SQL = "SELECT date, rate FROM fx_rates WHERE pair = 'USDKRW' AND dat
 REALIZED_FX_MAX_AGE_DAYS = 7
 #: 지난 실행들이 읽어 둔 KIS 잔고 — 실현손익 다시 세기의 기준점(25.1701). 개장 전에 읽은 것만 쓴다(`_개장전_잔고`)
 REALIZED_SNAPSHOT_SQL = (
-    "SELECT as_of, fetched_at, holdings_json FROM paper_broker_daily WHERE broker = ? AND as_of >= ? ORDER BY as_of"
+    "SELECT as_of, fetched_at, holdings_json, summary_json FROM paper_broker_daily WHERE broker = ? AND as_of >= ?"
+    " ORDER BY as_of"
 )
 
 RECON_SQL = (
@@ -309,6 +315,12 @@ def _개장전_잔고(rows: list[dict[str, Any]], market: str) -> list[tuple[str
             continue
         if 개장 is not None and 시각 >= 개장:
             continue
+        # 잔고가 쪽 상한에 닿아 잘린 날 줄은 기준점이 아니다(25.1712) — 빠진 보유가 0 으로 읽혀 기록을 0 으로 맞췄다
+        try:
+            if (json.loads(r.get("summary_json") or "{}") or {}).get("balance_truncated"):
+                continue
+        except (TypeError, ValueError, AttributeError):
+            pass
         잔: dict[str, int] = {}
         온전 = isinstance(보유, list)
         for h in 보유 if isinstance(보유, list) else []:
@@ -487,7 +499,9 @@ def run(
         잔고: dict[str, int] = {}
         for h in 보유:
             잔고[h.code] = 잔고.get(h.code, 0) + int(h.quantity or 0)
-        기록["realized_updated"] = update_realized(client, 증권사, market, 잔고)
+        # 잘린 잔고와는 견주지 않는다 — 빠진 보유가 0 으로 읽혀 맞는 값을 모름으로 돌렸다(25.1712)
+        잘린잔고 = bool(getattr(sess, "balance_truncated", False))
+        기록["realized_updated"] = update_realized(client, 증권사, market, None if 잘린잔고 else 잔고)
     except Exception as exc:  # noqa: BLE001
         if db.quota_reason(exc):
             raise
@@ -561,7 +575,9 @@ def run(
     client.execute(DAILY_SQL, [
         증권사, 오늘.isoformat(), 베낌, None if 미국 else 합.get("cash"), None if 미국 else 합.get("total"),
         json.dumps(보유칸), json.dumps({str(k): list(v) for k, v in 어긋남.items()}), slot.keys.source, 지금,
-        json.dumps(비교 | {"account": 계좌, "account_krw": 원화계좌, "perf": 성과}, ensure_ascii=False),
+        json.dumps(비교 | {"account": 계좌, "account_krw": 원화계좌, "perf": 성과}
+                   | ({"balance_truncated": True} if getattr(sess, "balance_truncated", False) else {}),
+                   ensure_ascii=False),
     ])  # fmt: skip
     기록["compare"] = {"n": 비교["n"], "match_pct": 비교["match_pct"], "kept_pct": 비교["kept_pct"]}
     # 괴리 알림 (docs/paper.md 15.8, 25.1504·25.1507) — 켜진 칸을 설정 `kis_diverge` 에 증권사마다
@@ -594,7 +610,11 @@ def run(
     if len(코드표) < len({h.code for h in 보유}):
         기록["unknown_codes"] = len({h.code for h in 보유}) - len(코드표)
 
-    # 3. 보내기
+    # 3. 보내기 — 잔고가 잘렸으면 정리·베낀 매도가 빠진 보유를 0 으로 읽는다. 그날은 내지 않는다(25.1712)
+    if getattr(sess, "balance_truncated", False):
+        기록["balance_truncated"] = True
+        기록["send"] = "증권사 잔고 조회가 쪽 상한에 닿아 잘림 — 오늘 주문 안 냄"
+        return 기록 | {"calls": sess.calls}
     if hold_send:
         기록["send"] = hold_send
         return 기록 | {"calls": sess.calls}
