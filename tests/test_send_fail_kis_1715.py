@@ -207,3 +207,45 @@ def test_환율_없는_매도는_오늘_다음_장으로(monkeypatch: pytest.Mon
                    price_series={}, series_unknown={}, allocate=False,
                    now=datetime.fromisoformat("2026-10-19T12:00:00+00:00"))  # fmt: skip
     assert c.q("SELECT status, fill_session FROM paper_orders WHERE id = 2") == [("open", "2026-10-19")]
+
+
+def _발송직전_오류(monkeypatch: pytest.MonkeyPatch) -> None:
+    n = [0]
+
+    def sent_exists(*a, **k):  # noqa: ANN002, ANN003, ANN202
+        n[0] += 1
+        if n[0] >= 2:
+            raise RuntimeError("Hrana: stream expired")
+        return False
+
+    monkeypatch.setattr(daily.reports, "sent_exists", sent_exists)
+
+
+def test_바깥_except_는_실패_알림이_KIS_보다_먼저(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1719 (25.1717 교차검증 [참고] 1) — 실패 기록·알림 먼저. KIS 가 접수 시작을 기다리다 시간 제한에 걸려도 알림은 갔다"""
+    _준비(monkeypatch, 0)
+    _kis_desk(monkeypatch)
+    순서: list[str] = []
+    monkeypatch.setattr(daily, "_notify_failure", lambda *a, **k: 순서.append("notify") or True)
+    monkeypatch.setattr(daily.db, "fail_open_runs", lambda t: 순서.append("fail_open"))
+    monkeypatch.setattr(broker_mirror, "run", lambda *a, **k: 순서.append("kis") or {"sent": {}})
+    _발송직전_오류(monkeypatch)
+    with pytest.raises(RuntimeError, match="stream expired"):
+        daily.run("KR")
+    assert 순서[:2] == ["fail_open", "notify"] and 순서.count("kis") == 2, 순서
+
+
+def test_실패_알림이_깨져도_KIS_는_돈다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1719 — finally: `_notify_failure` 가 예외를 내도 KIS·요약은 돈다"""
+    _준비(monkeypatch, 0)
+    부름 = _kis_desk(monkeypatch)
+
+    def 깨짐(*a, **k):  # noqa: ANN002, ANN003, ANN202
+        raise OSError("telegram down")
+
+    monkeypatch.setattr(daily, "_notify_failure", 깨짐)
+    monkeypatch.setattr(daily.db, "fail_open_runs", lambda t: None)
+    _발송직전_오류(monkeypatch)
+    with pytest.raises(OSError):
+        daily.run("KR")
+    assert len(부름["kis"]) == 2 and 부름["desk"] == [1]

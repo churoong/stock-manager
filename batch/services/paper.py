@@ -812,11 +812,14 @@ def 장부에_든(
 
     두 행의 기록 시각(`updated_at`)과 체결 행을 쓴 시각(`created`)을 알면 그것으로 — 같은 실행이 같은 시각으로 쓴다.
     체결일로 가르면 종목 행을 기다려(25.1713) 체결일 D 인 체결이 D+3 행에 든 것이 어느 주·달에도 안 셌다(25.1716, 평가
-    감사 [권고] 1). 모르면(앞 행 없음) 예전처럼 체결일 — 행 X 에는 체결일 < X 인 체결이 든다. `after_row` 가 없으면
-    처음부터"""
+    감사 [권고] 1). 앞 행의 기록 시각을 모르면(계좌 첫 달·주) 아래는 체결일, 위는 끝 행의 기록 시각 — 위까지 체결일로
+    자르면 끝 행 뒤에 늦게 든 체결이 첫 달(체결일)·다음 달(기록 시각) 둘 다에 셌다(25.1719, 25.1716 교차검증 [권고] 1).
+    둘 다 모르면 예전처럼 체결일 — 행 X 에는 체결일 < X 인 체결이 든다. `after_row` 가 없으면 처음부터"""
     if created is not None and after_at and upto_at:
         return [f for f in fills if str(after_at) < created.get(f.order_id, "") <= str(upto_at)]
     아래, 위 = str(after_row) if after_row else "", str(upto_row)
+    if created is not None and upto_at:
+        return [f for f in fills if 아래 <= f.fill_date and created.get(f.order_id, "") <= str(upto_at)]
     return [f for f in fills if 아래 <= f.fill_date < 위]
 
 
