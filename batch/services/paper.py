@@ -347,7 +347,9 @@ def judge(order: Order, bar: Bar | None) -> tuple[float | None, str]:
             return None, "지정가 없음"
         if bar.close <= order.limit_price:
             return order.limit_price, "종가 ≤ 회차 가격"
-        return None, f"종가 {bar.close:g} > 회차 가격 {order.limit_price:g}"
+        # `.10g` — `:g`(유효숫자 6자리)는 백만 원 넘는 가격을 "1.294e+06" 으로 적어 결정 원장·화면에서 읽을 수 없었다
+        # (25.1640, 10-22 운영 점검). 그보다 작은 값의 글은 예전과 같다
+        return None, f"종가 {bar.close:.10g} > 회차 가격 {order.limit_price:.10g}"
     if order.basis == "close":
         가격, 까닭 = bar.close, "장 열린 뒤 낸 주문 — 종가"
     elif bar.open is not None and bar.open > 0:
