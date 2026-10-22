@@ -83,3 +83,18 @@ def test_취소는_시각이_실행_시작_뒤로_찍혀도_이번_실행에_든
                    " VALUES ('2026-10-15', 300000, 'deposit', '2026-10-15T23:30:05.000Z', 'k3')")  # fmt: skip
     _하루(c, monkeypatch, "2026-10-16", "2026-10-15", "2026-10-15T23:30:00+00:00")
     assert c.q("SELECT invested_krw FROM paper_daily WHERE as_of = '2026-10-16'")[0][0] == 500_000.0
+
+
+def test_입금과_그_취소가_둘_다_실행_시작_뒤면_둘_다_다음_실행(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1669 — 취소만 남으면 입금·현금이 −50만으로 셌다(교차검증 [권고])."""
+    c = Client(accounts=("A",))
+    c.conn.execute("INSERT INTO paper_cash_flows (flow_date, amount_krw, kind, created_at, request_key)"
+                   " VALUES ('2026-10-14', 1000000, 'deposit', '2026-10-14T00:00:00+00:00', 'k0')")  # fmt: skip
+    _하루(c, monkeypatch, "2026-10-15", "2026-10-14", "2026-10-14T23:30:00+00:00")
+    c.conn.execute("INSERT INTO paper_cash_flows (flow_date, amount_krw, kind, created_at, request_key)"
+                   " VALUES ('2026-10-15', 500000, 'deposit', '2026-10-15T23:30:01.000Z', 'k1')")  # fmt: skip
+    c.conn.execute("INSERT INTO paper_cash_flows (flow_date, amount_krw, kind, cancels_id, created_at, request_key)"
+                   " VALUES ('2026-10-15', -500000, 'cancel', 2, '2026-10-15T23:30:02.000Z', 'k2')")  # fmt: skip
+    _하루(c, monkeypatch, "2026-10-16", "2026-10-15", "2026-10-15T23:30:00+00:00")
+    행 = c.q("SELECT invested_krw, cash_krw FROM paper_daily WHERE as_of = '2026-10-16'")[0]
+    assert 행 == (1_000_000.0, 1_000_000.0)

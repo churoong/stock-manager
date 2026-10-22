@@ -1655,7 +1655,10 @@ def run_step(
     # 들어간 취소의 `created_at` 이 `지금` 뒤로 찍혀 이번 실행에서 빠지고, 취소된 돈으로 산 뒤 다음 실행에서 현금이
     # 음수가 됐다(25.1666 이 막으려던 것). 단계 도중 취소는 25.1666 이 막으므로 지금 있는 취소는 다 앞선 것이다.
     # 시간가중 지수는 입금 합 차이로 세어(25.1667) 이 거름과 무관하다
-    flows = [f for f in flows if f.amount_krw < 0 or not pp.after(flow_created.get(f.id, ""), 지금)]
+    # 단 취소가 가리키는 입금이 함께 걸러졌으면(둘 다 시계 차이 구간 — 사실상 없음) 그 취소도 다음 실행 몫(25.1669 —
+    # 취소만 남으면 입금·현금이 −50만으로 셌다, 교차검증 [권고])
+    남은 = {f.id for f in flows if f.amount_krw >= 0 and not pp.after(flow_created.get(f.id, ""), 지금)}
+    flows = [f for f in flows if (f.amount_krw < 0 and (f.cancels_id is None or f.cancels_id in 남은)) or f.id in 남은]
     if not flows:
         return [], {"skipped": "입금 없음"}
     accounts = client.execute(ACCOUNTS_SQL).dicts()
