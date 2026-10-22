@@ -774,7 +774,7 @@ class Test밸류_분모:
     "divergence", "tax_sim", "verdict", "forecast_track", "patterns", "insights", "history",
     "event_history", "simulation", "candidate_factors", "cb_overhang", "buy_thesis", "plan_fill", "target_units", "paper", "risk_gate", "execution_quality", "company",
     "broker_mirror", "holding", "desk", "core_backtest", "core_strategy", "holding_eq", "stop_vol", "core_evidence",
-    "exit_pair", "loss_gate", "high52",
+    "exit_pair", "loss_gate", "high52", "earnings_events",
 )  # fmt: skip
 
 #: 아직 그물 밖인 모듈과 **왜 아직인지**. 하나씩 줄여 간다
@@ -1175,3 +1175,12 @@ def test_52주_고점_전략_상수_1646() -> None:
     검사(FACTORS, f"MDD 가 {h.JUDGE_MDD_SLACK * 100:g}%p 넘게 나빠지지 않고", "high52 MDD 여유 (12.40)")
     검사(FACTORS, f"공통 구간 리밸런스 {h.JUDGE_MIN_REBALANCES} 이상", "high52 리밸런스 하한 (12.40)")
     검사(FACTORS, f"평균 {h.OVERLAP_MAX:g} 이상이면 계좌를 열지 않는다", "high52 중복 문턱 (12.40)")
+
+
+def test_실적_발표_반응_상수_1658() -> None:
+    """37회차 B 의 창·문턱은 factors.md 12.40 사전 등록 문장과 같다 (docs/infra.md 25.1658)."""
+    from batch.services import earnings_events as ee
+
+    검사(FACTORS, f"{ee.FRESH_DAYS}거래일보다 묵으면 NULL", "EAR 신선도 (12.40)")
+    검사(FACTORS, f"지난 {ee.HISTORY_DAYS}거래일 EAR 의 {ee.TOP_QUANTILE * 100:g}번째 백분위", "매수 문턱 (12.40 B′)")
+    검사(FACTORS, f"⌈{ee.TOP_QUANTILE:g}·n⌉ 번째", "최근 순위법 (12.40 B 계산 세부)")
