@@ -279,31 +279,41 @@ def holding_rights_scale(
     return 맞춘 / 원 if 원 > 0 else 1.0
 
 
-def rights_only(events: list[tuple[str, str]], action_day: str, next_day: str) -> bool:
+def rights_only(events: list[tuple[str, str]], action_day: str, next_day: str | None = None) -> bool:
     """계수가 잡힌 날이 **유상증자 권리락뿐**인가 — 예탁원 일정(`kr_corp_events`)으로 (25.1139, 18회차 검증 조건).
 
-    권리락일 = 기준일 전 1거래일 → 기준일 = 계수가 잡힌 날의 **다음 거래일**(새 숫자 없이 달력으로).
-    그 기준일에 `rights` 가 있고, 계수가 잡힌 날부터 그 기준일 사이에 **다른 종류**(무상·주식배당이 섞일 수 있는
-    배당·액면교체·합병·분할)가 하나도 없을 때만 참.
+    그 날이 권리락일(`cal.ex_date_kr(기준일)`)인 `rights` 가 있고, 계수가 잡힌 날부터 그 기준일 사이에 **다른 종류**
+    (무상·주식배당이 섞일 수 있는 배당·액면교체·합병·분할)가 하나도 없을 때만 참. 예전엔 "기준일 = 다음 거래일" 로
+    거꾸로 찾아, 기준일이 휴장일(주말·12-31)이면 유상증자 권리락을 못 알아보고 막았다(25.1729, 25.1728 교차검증
+    [권고] 1).
+    `next_day` 는 옛 호출 호환 — 쓰지 않는다.
     일정이 없으면(10-07 전, 잘린 날의 비보유 종목) "모름" 이라 거짓 — 예전처럼 막는다.
     """
-    유상 = any(kind == "rights" and day == next_day for kind, day in events)
-    다른 = any(kind != "rights" and action_day <= day <= next_day for kind, day in events)
-    return 유상 and not 다른
+    del next_day
+    기준일들 = [day for kind, day in events
+               if kind == "rights" and cal.ex_date_kr(date.fromisoformat(day)).isoformat() == action_day]  # fmt: skip
+    if not 기준일들:
+        return False
+    끝 = max(기준일들)
+    return not any(kind != "rights" and action_day <= day <= 끝 for kind, day in events)
+
+
+#: 유상증자 기준일을 계수가 잡힌 날부터 이만큼(달력일) 앞까지 읽는다 — 기준일이 연휴 끝이어도(25.1726 과 같은 여유)
+RIGHTS_LOOKAHEAD_DAYS = 14
 
 
 def _유상_권리락(client: TursoClient, stock_id: int, action_day: str) -> bool:
     """그 종목·그날의 계수가 유상증자 권리락인가. 못 읽으면 거짓(막는다)."""
     try:
-        다음 = cal.next_session("KR", date.fromisoformat(action_day)).isoformat()
+        끝 = (date.fromisoformat(action_day) + timedelta(days=RIGHTS_LOOKAHEAD_DAYS)).isoformat()
         rows = client.execute(
             "SELECT e.kind, e.record_date FROM kr_corp_events e JOIN stocks s ON s.ticker = e.code"
             " WHERE s.id = ? AND e.record_date >= ? AND e.record_date <= ?",
-            [stock_id, action_day, 다음],
+            [stock_id, action_day, 끝],
         ).rows
+        return rights_only([(str(k), str(d)[:10]) for k, d in rows], action_day)
     except Exception:  # noqa: BLE001 — 표가 없거나(KIS 키 없음) 달력 밖이면 모른다 → 예전처럼 막는다
         return False
-    return rights_only([(str(k), str(d)[:10]) for k, d in rows], action_day, 다음)
 
 
 def expected_signal_date(market: str, now: datetime | None = None) -> str:
