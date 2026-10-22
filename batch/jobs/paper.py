@@ -821,6 +821,7 @@ def fill_orders(
                     기록["deferred"] = 기록.get("deferred", 0) + 1
             continue
         행 = client.execute(BAR_SQL, [o.stock_id, 날]).dicts()
+        기다림끝 = False
         if not 행:
             # 시장엔 그날 시세가 있는데 이 종목 행만 없다 — 바로 정지로 보면(매수 만료·매도 다음 장 시가) 수집 일부
             # 실패를 정지로 판정해 KIS모의투자(실제로 참)와 갈렸다(25.1713). 더 뒤 날 행이 없고 기다릴 날 안이면
@@ -828,9 +829,14 @@ def fill_orders(
             기한 = date.fromisoformat(날)
             for _ in range(MISSING_BAR_WAIT_SESSIONS):
                 기한 = cal.next_session(market, 기한)
-            if trade_date < 기한.isoformat() and not client.execute(LATER_BAR_SQL, [o.stock_id, 날]).rows:
+            뒤행 = bool(client.execute(LATER_BAR_SQL, [o.stock_id, 날]).rows)
+            if trade_date < 기한.isoformat() and not 뒤행:
                 기록["waiting_bar"] = 기록.get("waiting_bar", 0) + 1
                 continue
+            # 기다림이 끝났는데 뒤 날 행도 없다 — 그 사이 장도 다 정지였다. 미루는 매도는 **오늘 판정일 다음 장**으로:
+            # `next_session(날)` 은 오늘보다 뒤처져 KIS 베끼기(그날 체결 장 주문만 보냄)가 그 매도를 영영 내지 못했다
+            # (25.1714, 25.1713 교차검증 [권고] 1)
+            기다림끝 = not 뒤행
         bar = (pp.Bar(str(행[0]["date"]), 행[0]["open"], float(행[0]["close"]), 행[0]["volume"],
                       행[0].get("change_pct")) if 행 and 행[0]["close"] is not None else None)  # fmt: skip
         가격, 까닭 = pp.judge(o, bar)
@@ -843,8 +849,8 @@ def fill_orders(
                     가격 = float(마지막[0][0])
                     까닭 = f"정지·하한가로 {pp.HALT_LIQUIDATE_SESSIONS}거래일 미룸 — 마지막 종가로 청산"
             if 가격 is None:
-                _쓰기(client, [(DEFER_SQL, [cal.next_session(market, date.fromisoformat(날)).isoformat(),
-                                           f"{까닭} — 다음 장으로", o.id])])  # fmt: skip
+                미룰장 = cal.next_session(market, date.fromisoformat(trade_date if 기다림끝 else 날))
+                _쓰기(client, [(DEFER_SQL, [미룰장.isoformat(), f"{까닭} — 다음 장으로", o.id])])
                 기록["deferred"] = 기록.get("deferred", 0) + 1
                 continue
         if 가격 is None:
@@ -1984,14 +1990,14 @@ def run_step(
             손절 |= {sid for sid, (사유, _근거) in 매도.items() if "손절" in 사유}
             거둘곳 = ({sid: WITHDRAWN_NOTE for sid in 파는}
                     | {sid: STOP_WITHDRAWN_NOTE for sid in 손절 - 파는 if sid in 보유})  # fmt: skip
-            # "아직 오지 않은 장" 은 이 실행의 주문 장(`다음장`) 기준으로(25.1713, 체결 판정 감사 [권고]) — 예전
-            # `fill_session > trade_date` 는 장 끝난 뒤·장 열린 뒤 실행(trade_date 가 D-1)에서 오늘 D 장 회차도 안 온
-            # 장으로 봐, 이미 지나간(진행 중인) 장의 회차를 거뒀다(25.1592 소급 취소 금지 어김). 개장 전 실행(시가
-            # 기준 — 장 끝난 뒤 손 실행도 `다음장` 을 그다음 장으로 옮겨 시가 기준)이면 주문 장부터 아직 안 열렸고,
-            # 장 열린 뒤(종가 기준) 실행이면 진행 중인 주문 장은 빼고 그 뒤만 — 주문 기준을 정한 같은 시각 판단을 쓴다
-            주문장포함 = 기준 == "open"
+            # "아직 오지 않은 장" 은 이 실행의 **주문 장(`다음장`)부터**(25.1713·1714) — 예전
+            # `fill_session > trade_date` 는 장 끝난 뒤 손 실행(trade_date 가 D-1, `다음장` 은 D+1 로 옮겨짐)에서 이미
+            # 끝난 D 장 회차를 거뒀다(25.1592 소급 취소 금지 어김, 체결 판정 감사 [권고]). 장 열린 뒤(종가 기준) 첫
+            # 실행의 진행 중인 D 장 회차는 **거둔다** — KIS 베끼기는 이 단계 **뒤**에 돌아 그 회차는 아직 KIS 에 나가지
+            # 않았고, 두면 손절을 정한 같은 실행이 그 종목을 다시 산다(25.1714, 25.1713 교차검증 [필수] — 25.1612
+            # "손절 보유에 더 사지 않는다")
             거둠 = [o for o in 열린 if o.account_id == aid and o.side == "buy" and o.stock_id in 거둘곳
-                  and (str(o.fill_session) >= 다음장 if 주문장포함 else str(o.fill_session) > 다음장)]  # fmt: skip
+                  and str(o.fill_session) >= 다음장]  # fmt: skip
             문장 += [(EXPIRE_SQL, [trade_date, 거둘곳[o.stock_id], o.id]) for o in 거둠]
             if 거둠:
                 a기록["buys_withdrawn"] = len(거둠)

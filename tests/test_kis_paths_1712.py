@@ -75,3 +75,14 @@ def test_잔고_합계는_값이_있는_마지막_쪽(monkeypatch: pytest.Monkey
     s, _h = _세션(monkeypatch, [(첫, "M"), (끝, "D")])
     _보유, 합 = s.balance()
     assert 합["total"] == 5000
+
+
+
+def test_미국_unknown_매수는_정리_대상이_아니다(c: Client) -> None:  # noqa: F811
+    """25.1714 (25.1712 교차검증 [참고] 3) — 미국 `unknown` 은 대개 예약이 개장 때 안 나간 것. 국내 `unknown` 은 실제로
+    찼을 수 있어 그대로 정리 대상"""
+    for sid, m, st in ((1, "US", "unknown"), (2, "KR", "unknown"), (3, "US", "accepted")):
+        c.conn.execute("INSERT INTO paper_broker_orders (broker, paper_order_id, account_id, market, stock_id, code,"
+                       " side, order_type, quantity, trade_date, reason, status, source, created_at) VALUES ('x', NULL,"
+                       " 'B', ?, ?, 'C', 'buy', 'limit', 1, '2026-10-15', '베낌', ?, 't', 't')", [m, sid, st])  # fmt: skip
+    assert sorted(r[0] for r in c.execute(job.BOUGHT_SQL, ["x"]).rows) == [2, 3]

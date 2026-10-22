@@ -100,9 +100,11 @@ OLD_SQL = (
 #: (25.1712, KIS 경로 감사 [권고] 2). 예전엔 거부만 빼 안 찬(`unfilled`) 매수도 들어가, 베낀 매수가 안 찬 종목을
 #: 사람이 그 모의계좌에서 손으로 사면 정리가 그 주식을 팔았다(docs/paper.md 15.1 "손으로 산 종목까지 팔지 않게" 와
 #: 어긋남 — 25.1611 이 행 고르기에서 고친 것과 같은 낱말)
+#: 미국 `unknown` 은 대개 예약이 개장 때 안 나간 것(안 참)이라 넣지 않는다 — `NET_SQL` 과 같은 잣대(25.1714, 25.1712
+#: 교차검증 [참고] 3)
 BOUGHT_SQL = (
     "SELECT DISTINCT stock_id FROM paper_broker_orders WHERE broker = ? AND side = 'buy'"
-    " AND (filled_qty > 0 OR status IN ('sending', 'accepted', 'unknown'))"
+    " AND (filled_qty > 0 OR status IN ('sending', 'accepted') OR (status = 'unknown' AND market = 'KR'))"
 )
 #: 이 증권사 칸이 이 계좌를 베끼기 시작한 날 — "연결 전 보유" 를 가르는 잣대(25.1564)
 LINK_DATE_SQL = "SELECT MIN(trade_date) FROM paper_broker_orders WHERE broker = ? AND account_id = ?"

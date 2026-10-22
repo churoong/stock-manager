@@ -93,17 +93,40 @@ def test_장_끝난_뒤_실행은_지나간_장의_회차를_거두지_않는다
         ("open",)]
 
 
-def test_장_열린_뒤_실행은_진행_중인_장의_회차를_거두지_않는다(client: Client, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
-    """장 열린 뒤(종가 기준) 실행 — 진행 중인 10-19 장의 회차는 KIS 에도 이미 나갔다. 그 뒤 장만 거둔다"""
+def test_장_열린_뒤_첫_실행은_주문_장_회차를_거둔다(client: Client, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
+    """25.1714 (25.1713 교차검증 [필수]) — 장 열린 뒤(종가 기준) 첫 실행: 진행 중인 10-19 장 회차는 KIS 베끼기(이 단계
+    뒤에 돎)에 아직 안 나갔다. 두면 손절을 정한 같은 실행이 그 종목을 다시 산다 — 거둔다"""
     c = client
     _하루(c, monkeypatch, "2026-10-14")
     _시세(c, "2026-10-15", 10_100, 9_900)
     _손실행(c, monkeypatch, "2026-10-15", "2026-10-16")
     _시세(c, "2026-10-16", 9_100, 9_000)
-    _하루(c, monkeypatch, "2026-10-16", late=True, signals=False)  # 10-19 장중(종가 기준) 실행
+    _하루(c, monkeypatch, "2026-10-16", late=True, signals=False)  # 10-19 장중(종가 기준) 첫 실행
     assert c.q("SELECT DISTINCT status FROM paper_orders WHERE side = 'buy' AND fill_session = '2026-10-19'") == [
-        ("open",)]
+        ("expired",)]
+    _시세(c, "2026-10-19", 9_000, 8_900)
+    _하루(c, monkeypatch, "2026-10-19", signals=False)
+    assert c.q("SELECT COUNT(*) FROM paper_fills WHERE side = 'buy' AND fill_date = '2026-10-19'") == [(0,)]
 
+
+def test_기다림_끝난_매도는_오늘_다음_장으로_미룬다(client: Client, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
+    """25.1714 (25.1713 교차검증 [권고] 1) — 10-19 손절 매도 장에 3번 행이 없고 그 뒤로도 없다. 10-21 실행에서 기다림이
+    끝나면 정지로 보고 **10-22** 로 미룬다 — `next_session(10-19)`=10-20 이면 오늘(10-21)보다 뒤처져 KIS 베끼기가 그
+    매도를 영영 내지 못했다"""
+    c = client
+    _3번_주문(c, monkeypatch)
+    _시세(c, "2026-10-15", 10_000, 10_000)
+    _시세3(c, "2026-10-15", 10_100, 9_900)
+    _하루(c, monkeypatch, "2026-10-15", signals=False)
+    _시세(c, "2026-10-16", 10_000, 10_000)
+    _시세3(c, "2026-10-16", 9_100, 9_000)  # −9% 손절 → 10-19 매도
+    _하루(c, monkeypatch, "2026-10-16", signals=False)
+    assert c.q("SELECT DISTINCT fill_session FROM paper_orders WHERE side = 'sell'") == [("2026-10-19",)]
+    for d in ("2026-10-19", "2026-10-20", "2026-10-21"):
+        _시세(c, d, 10_000, 10_000)
+        _하루(c, monkeypatch, d, signals=False)
+    assert c.q("SELECT DISTINCT status, fill_session FROM paper_orders WHERE side = 'sell'") == [
+        ("open", "2026-10-22")]
 
 def test_종가_0_행은_정지() -> None:
     from batch.services import paper as pp
