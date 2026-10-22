@@ -51,13 +51,17 @@ export interface QualityRow {
 }
 
 /**
- * 지금 베끼는 계좌의 줄만 — 마지막 줄과 같은 `account_id` 인 줄(25.1642). 도전자 칸(`KR2`·`US2`)은 도전자를 바꾸면
- * 같은 증권사 키에 앞 계좌와 새 계좌의 비교 요약이 이어 쌓여 한 선으로 그려졌다(배치 비교는 이미 계좌로 거른다, `COMPARE_SQL`).
- * 마지막 줄에 계좌가 없으면(옛 줄) 그대로
+ * 지금 베끼는 계좌의 줄만 — 끝에서부터 마지막 줄과 같은 `account_id` 가 끊김 없이 이어진 줄(25.1642). 도전자 칸(`KR2`·`US2`)은
+ * 도전자를 바꾸면 같은 증권사 키에 앞 계좌와 새 계좌의 비교 요약이 이어 쌓여 한 선으로 그려졌다(배치 비교는 이미 계좌로 거른다,
+ * `COMPARE_SQL`). E→D→E 로 되돌리면 첫 E 구간은 빼 D 구간을 가로지르는 선을 긋지 않는다(교차검증 [권고]).
+ * 마지막 줄에 계좌가 없으면(옛 줄 — 스키마상 NOT NULL 이라 방어용) 그대로
  */
 export function currentAccountRows(rows: QualityRow[]): QualityRow[] {
   const 지금 = rows[rows.length - 1]?.account_id;
-  return 지금 ? rows.filter((r) => r.account_id === 지금) : rows;
+  if (!지금) return rows;
+  let i = rows.length;
+  while (i > 0 && rows[i - 1].account_id === 지금) i--;
+  return rows.slice(i);
 }
 
 /** 배치 `bm.cells` 의 칸 하나 (docs/paper.md 15.9) */
