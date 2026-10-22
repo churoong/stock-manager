@@ -117,3 +117,22 @@ def test_취소가_가리키는_입금_행이_지워지면_취소는_남아_검�
     행 = c.q("SELECT invested_krw, recon_ok FROM paper_daily WHERE as_of = '2026-10-16'")[0]
     웹합 = c.q("SELECT SUM(amount_krw) FROM paper_cash_flows")[0][0]
     assert 행 == (웹합, 0) and 웹합 == 500_000.0
+
+
+def test_읽지_못하는_시각의_입금은_바로_세고_첫날_한_번_잡는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1677 — 예전 `pp.after` 는 읽지 못하면 문자열로 견줘 `'2026/10/15 09:00'` 입금이 늘 "실행 시작 뒤" 로 걸러졌다
+    (투자금이 웹 합과 영구히 어긋난 채 "맞음", 교차검증 [권고])."""
+    from batch.services import paper as pp
+
+    assert not pp.after("2026/10/15 09:00", "2026-10-14T23:30:00+00:00")
+    assert not pp.after("2026-10-15T09:00:00Z", "nope") and not pp.after("nope", "2026-10-14T23:30:00+00:00")
+    c = Client(accounts=("A",))
+    c.conn.execute("INSERT INTO paper_cash_flows (flow_date, amount_krw, kind, created_at, request_key)"
+                   " VALUES ('2026-10-14', 1000000, 'deposit', '2026-10-14T00:00:00+00:00', 'k0')")  # fmt: skip
+    _하루(c, monkeypatch, "2026-10-15", "2026-10-14", "2026-10-14T23:30:00+00:00")
+    c.conn.execute("INSERT INTO paper_cash_flows (flow_date, amount_krw, kind, created_at, request_key)"
+                   " VALUES ('2026-10-15', 500000, 'deposit', '2026/10/15 09:00', 'k1')")  # fmt: skip
+    _하루(c, monkeypatch, "2026-10-16", "2026-10-15", "2026-10-15T23:30:00+00:00")
+    _하루(c, monkeypatch, "2026-10-17", "2026-10-16", "2026-10-16T23:30:00+00:00")
+    행 = c.q("SELECT as_of, invested_krw, recon_ok FROM paper_daily WHERE as_of >= '2026-10-16' ORDER BY as_of")
+    assert 행 == [("2026-10-16", 1_500_000.0, 0), ("2026-10-17", 1_500_000.0, 1)]

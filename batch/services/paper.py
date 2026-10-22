@@ -509,7 +509,10 @@ def reconcile(prev_cash: float | None, flows_today: float, fills_today: float, l
 def after(ts: object, base: object) -> bool:
     """`ts` 가 `base` 보다 뒤의 시각인가 — 웹(`…Z`)·배치(`…+00:00`)·공백 구분 모양을 모두 읽어 견준다 (25.1447).
 
-    문자열로 견주면 모양이 다른 두 시각이 엇갈린다. 읽지 못하면 문자열로 견준다(예전 동작)
+    문자열로 견주면 모양이 다른 두 시각이 엇갈린다. **어느 하나라도 읽지 못하면 뒤가 아니다**(25.1677) — 예전엔
+    문자열로 견줘, 손 SQL 로 `'2026/10/15 09:00'` 처럼 적힌 입금이 `'/'` > `'-'` 라 늘 "실행 시작 뒤" 로 걸러져 어느
+    실행에도 들지 않았고(입금 장부 견줌도 같은 목록이라 "맞음" — 웹 합과 영구히 어긋남), `'nope'` 취소는 날마다
+    "어제 뒤 새 입금" 으로 셌다. 모르는 시각은 이미 지난 것으로 세면 들어온 첫날 입금 장부 견줌이 한 번 잡는다
     """
     from datetime import UTC, datetime
 
@@ -521,7 +524,7 @@ def after(ts: object, base: object) -> bool:
         return d if d.tzinfo else d.replace(tzinfo=UTC)
 
     a, b = 읽기(ts), 읽기(base)
-    return a > b if a and b else str(ts) > str(base)
+    return bool(a and b and a > b)
 
 
 def twr_step(prev_index: float | None, prev_equity: float | None, equity: float, flow_since: float) -> float:
