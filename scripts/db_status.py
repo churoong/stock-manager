@@ -160,7 +160,12 @@ def is_read_only(sql: str) -> bool:
     Turso 토큰에 쓰기 권한이 있어서 이 검사가 유일한 안전장치다. 애매하면 거절한다
     (문자열 안의 'update' 같은 낱말도 거절된다. 읽기 질의에서 그런 경우는 드물다).
     """
-    body = sql.strip().rstrip(";").strip()
+    # 머리의 주석 줄(`-- …`)은 걷는다 — 진단 SQL 파일(scripts/diag/*.sql)이 정의·출처를 주석으로 머리에 적어 원문 그대로
+    # 넣으면 거절됐다(25.1651). 몸 안의 주석은 그대로 두고 아래 검사를 받는다
+    줄 = sql.strip().splitlines()
+    while 줄 and (not 줄[0].strip() or 줄[0].lstrip().startswith("--")):
+        줄.pop(0)
+    body = "\n".join(줄).strip().rstrip(";").strip()
     if not body or ";" in body:
         return False
     # 실행 계획(`EXPLAIN QUERY PLAN`)도 읽기다 — 운영 플래너가 로컬과 다른 길을 고르는지 본다 (docs/infra.md 25.899)

@@ -6,38 +6,45 @@
 --   **공통 구간 시작 달 다음 달부터만** 센다 — `high52_judge` 의 월 초과와 같은 달들(그 앞은 252일이 안 쌓여 현금으로 쉰 달,
 --   부분 허용 국면 평균을 비튼다 — 37회차 교차검증 [필수])
 --   국면 경계는 28회차와 같다 [확인필요: 금융위원회 보도자료 원문 대조]
--- 대상 실행: 2026-11-03 이후 국내 실행 가운데 `high52` 판정(`high52_judge.verdict`)이 처음 통과·탈락으로 난 실행 — 판정에 쓴 그 달
--- 첫 기본 실행과 같은지 실행 기록(params.default)으로 대조한다. 다르면 이 조건을 고치지 말고 그 group_id 를 적어 다시 돈다
-WITH g AS (
-  SELECT json_extract(b.step_log, '$.group_id') AS group_id, json_extract(b.step_log, '$.high52_judge.start') AS start
+-- 대상 실행(`label`): **판정 실행**(12장 머리 정의 — 그 달 trade_date 3~7일 사이 기본·성공 국내 실행 가운데 가장 먼저 시작한 하나)
+--   가운데 ① 'first' = 2026-11 이후 `high52_judge.verdict` 가 처음 통과·탈락인 것 ② '2028-04' = 2028-04 판정 실행(다시 보기, 있으면).
+--   그 달 판정 실행이 판정 불가면 다음 달로(손으로 돌린 같은 달 뒤 실행은 세지 않는다 — 37회차 교차검증 [권고], 25.1651)
+-- 읽기: 곡선을 한 번씩만 훑는다(윈도 함수 — 상관 하위 질의는 곡선 길이의 네제곱으로 읽어 월 한도를 넘었다, 25.1651)
+WITH judge AS (
+  SELECT b.id, b.started_at, substr(b.trade_date, 1, 7) AS mon, json_extract(b.step_log, '$.group_id') AS group_id,
+    json_extract(b.step_log, '$.high52_judge.start') AS start, json_extract(b.step_log, '$.high52_judge.verdict') AS verdict,
+    ROW_NUMBER() OVER (PARTITION BY substr(b.trade_date, 1, 7) ORDER BY b.started_at ASC, b.id ASC) AS k
   FROM batch_runs b
-  WHERE b.job_name = 'backtest' AND b.market = 'KR' AND b.status = 'success' AND b.started_at >= '2026-11-03'
+  WHERE b.job_name = 'backtest' AND b.market = 'KR' AND b.status = 'success' AND b.trade_date >= '2026-11-01'
+    AND CAST(substr(b.trade_date, 9, 2) AS INTEGER) BETWEEN 3 AND 7
     AND json_valid(b.step_log) AND json_extract(b.step_log, '$.params.default') = 1
-    AND json_extract(b.step_log, '$.high52_judge.verdict') IN ('통과', '탈락')
-  ORDER BY b.started_at ASC, b.id ASC LIMIT 1
+), g AS (
+  SELECT * FROM (SELECT 'first' AS label, group_id, start FROM judge WHERE k = 1 AND verdict IN ('통과', '탈락')
+                 ORDER BY started_at ASC LIMIT 1)
+  UNION ALL
+  SELECT '2028-04', group_id, start FROM judge WHERE k = 1 AND mon = '2028-04' AND verdict IN ('통과', '탈락')
 ), runs AS (
-  SELECT r.id, r.strategy FROM backtest_runs r JOIN g ON g.group_id = r.group_id
+  SELECT r.id, r.strategy, g.label, g.start FROM backtest_runs r JOIN g ON g.group_id = r.group_id
   WHERE r.strategy IN ('high52', 'momentum')
 ), me AS (
-  SELECT c.run_id, substr(c.date, 1, 7) AS m, c.equity
-  FROM backtest_curves c JOIN runs ON runs.id = c.run_id
-  WHERE c.date = (SELECT MAX(c2.date) FROM backtest_curves c2
-                  WHERE c2.run_id = c.run_id AND substr(c2.date, 1, 7) = substr(c.date, 1, 7))
+  SELECT run_id, m, equity, d FROM (
+    SELECT c.run_id, substr(c.date, 1, 7) AS m, c.equity, c.date AS d,
+      ROW_NUMBER() OVER (PARTITION BY c.run_id, substr(c.date, 1, 7) ORDER BY c.date DESC) AS rn
+    FROM backtest_curves c JOIN runs ON runs.id = c.run_id
+  ) WHERE rn = 1
 ), mr AS (
-  SELECT runs.strategy AS s, a.m, a.equity / b.equity - 1 AS ret,
-    (SELECT MAX(c3.date) FROM backtest_curves c3 WHERE c3.run_id = a.run_id AND substr(c3.date, 1, 7) = a.m) AS d
-  FROM me a JOIN me b ON b.run_id = a.run_id
-    AND b.m = (SELECT MAX(x.m) FROM me x WHERE x.run_id = a.run_id AND x.m < a.m)
-  JOIN runs ON runs.id = a.run_id
-  WHERE b.equity > 0
+  SELECT runs.label, runs.start, runs.strategy AS s, x.m, x.equity / x.prev - 1 AS ret, x.d
+  FROM (SELECT run_id, m, d, equity, LAG(equity) OVER (PARTITION BY run_id ORDER BY m) AS prev FROM me) x
+  JOIN runs ON runs.id = x.run_id
+  WHERE x.prev > 0
 ), pair AS (
-  SELECT c.s AS cand, c.m, c.ret - b.ret AS ex,
+  SELECT c.label, c.s AS cand, c.m, c.ret - b.ret AS ex,
     CASE WHEN c.d < '2023-11-06' THEN '1_부분허용' WHEN c.d < '2025-03-31' THEN '2_전면금지' ELSE '3_전면재개' END AS regime
-  FROM mr c JOIN mr b ON b.m = c.m AND b.s = 'momentum'
-  WHERE c.s = 'high52' AND c.m > (SELECT substr(start, 1, 7) FROM g)
+  FROM mr c JOIN mr b ON b.m = c.m AND b.label = c.label AND b.s = 'momentum'
+  WHERE c.s = 'high52' AND c.m > substr(c.start, 1, 7)
 )
-SELECT cand, regime, COUNT(*) AS months, ROUND(AVG(ex), 5) AS mean_ex, SUM(ex > 0) AS pos_months
-FROM pair GROUP BY cand, regime
+SELECT label, cand, regime, COUNT(*) AS months, ROUND(AVG(ex), 5) AS mean_ex, SUM(ex > 0) AS pos_months
+FROM pair GROUP BY label, cand, regime
 UNION ALL
-SELECT cand, '0_전체', COUNT(*), ROUND(AVG(ex), 5), SUM(ex > 0) FROM pair GROUP BY cand
-ORDER BY 1, 2;
+SELECT label, cand, '0_전체', COUNT(*), ROUND(AVG(ex), 5), SUM(ex > 0) FROM pair GROUP BY label, cand
+ORDER BY 1, 2, 3;

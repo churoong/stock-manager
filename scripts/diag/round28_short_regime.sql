@@ -1,6 +1,7 @@
 -- 28회차 P5 (docs/factors.md 12.30·12장 "켜는 기준" 국면 조항, docs/infra.md 25.1418): 국내 기본 실행의 후보 전략을 공매도 국면별로
 -- 나눠 비교 기준 대비 월 초과수익의 평균·부호·달 수를 낸다. **11-03 예약 실행 전에 고정**(결과 보기 전). 계산 경로는 건드리지 않고
 -- 저장된 `backtest_curves` 만 읽는다. 실행: db-status.yml 의 sql 입력으로 한 번(국내 첫 기본 실행 group_id 를 아래 g 에 넣는다).
+--   2026-10-22 정의는 그대로 두고 계산 꼴만 윈도 함수로 바꿨다(읽기 — 37회차 교차검증 [필수], 25.1651)
 --   후보 → 비교 기준(같은 실행 group_id): momentum_sector → momentum, ic_weighted → composite, shrink_missing → composite
 --   월수익 = 달의 마지막 equity 끼리(`luck.monthly_returns` 와 같음). 그 달은 **월말 날짜가 속한 국면**에 센다(경계가 걸친 달 포함)
 --   국면 [확인필요: 금융위원회 보도자료 원문 대조]: 부분 허용 2021-05-03~2023-11-05(코스피200·코스닥150 만) /
@@ -15,17 +16,17 @@ WITH g AS (
   SELECT r.id, r.strategy FROM backtest_runs r JOIN g ON g.group_id = r.group_id
   WHERE r.strategy IN ('momentum_sector', 'ic_weighted', 'shrink_missing', 'momentum', 'composite')
 ), me AS (
-  SELECT c.run_id, substr(c.date, 1, 7) AS m, c.equity
-  FROM backtest_curves c JOIN runs ON runs.id = c.run_id
-  WHERE c.date = (SELECT MAX(c2.date) FROM backtest_curves c2
-                  WHERE c2.run_id = c.run_id AND substr(c2.date, 1, 7) = substr(c.date, 1, 7))
+  -- 달마다 마지막 날 하나(윈도 함수 — 예전 상관 하위 질의는 곡선 길이의 네제곱으로 읽었다, 25.1651. 결과는 같다)
+  SELECT run_id, m, equity, d FROM (
+    SELECT c.run_id, substr(c.date, 1, 7) AS m, c.equity, c.date AS d,
+      ROW_NUMBER() OVER (PARTITION BY c.run_id, substr(c.date, 1, 7) ORDER BY c.date DESC) AS rn
+    FROM backtest_curves c JOIN runs ON runs.id = c.run_id
+  ) WHERE rn = 1
 ), mr AS (
-  SELECT runs.strategy AS s, a.m, a.equity / b.equity - 1 AS ret,
-    (SELECT MAX(c3.date) FROM backtest_curves c3 WHERE c3.run_id = a.run_id AND substr(c3.date, 1, 7) = a.m) AS d
-  FROM me a JOIN me b ON b.run_id = a.run_id
-    AND b.m = (SELECT MAX(x.m) FROM me x WHERE x.run_id = a.run_id AND x.m < a.m)
-  JOIN runs ON runs.id = a.run_id
-  WHERE b.equity > 0
+  SELECT runs.strategy AS s, x.m, x.equity / x.prev - 1 AS ret, x.d
+  FROM (SELECT run_id, m, d, equity, LAG(equity) OVER (PARTITION BY run_id ORDER BY m) AS prev FROM me) x
+  JOIN runs ON runs.id = x.run_id
+  WHERE x.prev > 0
 ), pair AS (
   SELECT c.s AS cand, c.m, c.ret - b.ret AS ex,
     CASE WHEN c.d < '2023-11-06' THEN '1_부분허용' WHEN c.d < '2025-03-31' THEN '2_전면금지' ELSE '3_전면재개' END AS regime
