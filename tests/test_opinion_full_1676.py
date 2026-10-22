@@ -47,9 +47,14 @@ def test_이어_받음은_종목마다_마지막_날로_센다() -> None:
 def test_상태는_기록_한_행에_통째로_남고_다시_읽힌다() -> None:
     d = 열림 + timedelta(5)
     상태 = {1: d, 2: d - timedelta(3), 9: d}
-    칸 = job.state_fields(상태, d)
+    칸 = job.state_fields(상태, d, _c([1, 9]))
     assert 칸 == {"continuous_ids": [1, 9], "continuous_carry": {"2": str(d - timedelta(3))}}
     assert job.load_state([(str(d), json.dumps({"opinion_coverage": 칸}))]) == 상태
+    # 같은 날 두 번째 실행 — 앞 실행이 이은 1·9 가 이번엔 잘림·대상 아님이면 continuous_ids 가 아니라 carry(같은 날)로
+    # (25.1684 — 12.40 C 의 "그 실행에서 받고 잘리지 않았고")
+    둘째 = job.state_fields(상태, d, _c([1], [1]))
+    assert 둘째["continuous_ids"] == [] and set(둘째["continuous_carry"]) == {"1", "2", "9"}
+    assert job.load_state([(str(d), json.dumps({"opinion_coverage": 둘째}))]) == 상태
     for 깨짐 in ([(str(d), "{깨짐")], [("x", json.dumps({"opinion_coverage": 칸}))], [], [(str(d), None)]):
         assert job.load_state(깨짐) == {}
 
@@ -123,7 +128,7 @@ class _Client:
 @pytest.mark.parametrize("오늘", [열림 - timedelta(1), 열림])
 def test_실행은_고른_종목만_365일로_받고_기록에_남긴다(monkeypatch: pytest.MonkeyPatch, 오늘: date) -> None:
     어제 = 오늘 - timedelta(1)
-    이력 = [(str(어제), json.dumps({"opinion_coverage": job.state_fields({1: 어제}, 어제)}))]
+    이력 = [(str(어제), json.dumps({"opinion_coverage": job.state_fields({1: 어제}, 어제, _c([1]))}))]
     c = _Client(이력)
     창: dict[str, int] = {}
     부름: list[tuple[str, int]] = []

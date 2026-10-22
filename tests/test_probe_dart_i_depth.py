@@ -63,6 +63,12 @@ def test_회사는_해마다_첫_쪽으로_세고_이름을_찍는다(capsys) ->
         ("20200101", "20201231", 1), ("20210101", "20211231", 1), ("20220101", "20221231", 1)]
     out = capsys.readouterr().out
     assert "2021: status 000 전체 7건" in out and "실적 1" in out and "회사 이름 가나" in out
+    # 올해는 오늘까지 — 미래 날짜를 보내지 않는다(25.1684)
+    from datetime import date
+
+    부름.clear()
+    probe.corp_years(C(), "00126380", range(date.today().year, date.today().year + 1))
+    assert 부름[0]["end_de"] == date.today().strftime("%Y%m%d")
 
 
 def test_워크플로는_손으로만_돌고_결과는_비공개로() -> None:

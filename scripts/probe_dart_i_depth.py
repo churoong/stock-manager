@@ -95,7 +95,9 @@ def corp_years(c: Caller, corp: str, years: range) -> None:
     print(f"== ② 회사 {corp} 해마다")
     이름 = None
     for y in years:
-        body = c.page({"corp_code": corp, "bgn_de": f"{y}0101", "end_de": f"{y}1231", "page_no": 1})
+        # 올해는 오늘까지 — 미래 날짜를 DART 가 받는지 모른다 `[확인필요]` (25.1684, 교차검증 [권고])
+        끝 = min(date(y, 12, 31), date.today()).strftime("%Y%m%d")
+        body = c.page({"corp_code": corp, "bgn_de": f"{y}0101", "end_de": 끝, "page_no": 1})
         if body is None:
             return
         rows = body.get("list") or []

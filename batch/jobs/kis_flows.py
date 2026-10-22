@@ -47,11 +47,13 @@ OPINION_FULL_PER_RUN = 300
 #: 365일 창이 잘리면(응답 100행) 반씩 쪼개는 깊이 상한 — 365일 → 약 23일(4번, 종목당 최대 31호출). 그래도 100행이면
 #: 잘림으로 남긴다(다음 실행이 다시 365일)
 OPINION_SPLIT_DEPTH = 4
-#: 이어 받음 상태 — **마지막 기록 한 행만** 읽는다(25.1681, 교차검증 [권고] — 예전엔 실행 기록 전체를 매번 다시 읽어
-#: 끝없이 늘었다). 상태는 기록마다 통째로 다시 적힌다(`continuous_ids`·`continuous_carry`)
+#: 이어 받음 상태 — 마지막 기록 한 행(25.1681). 상태는 기록마다 통째로 다시 적힌다(`continuous_ids`·`continuous_carry`).
+#: **`started_at` 으로 정렬한다**(25.1684, 교차검증 [권고]) — `ORDER BY id` 는 `(job_name)` 으로 찾은 뒤 그 작업 행을
+#: 전부 읽어 임시 정렬해 하루 한 행씩 늘었다. `idx_batch_runs_job (job_name, started_at DESC)` 를 타면 첫 일치에서
+#: 멈춘다(로컬 1년치 가짜 표 VM 5,867 → 28 단계). 이 작업은 동시 실행 그룹으로 하나씩 돌아 순서는 같다
 OPINION_STATE_SQL = (
     "SELECT trade_date, step_log FROM batch_runs WHERE job_name = ? AND step_log LIKE '%\"continuous_ids\"%'"
-    " ORDER BY id DESC LIMIT 1"
+    " ORDER BY started_at DESC LIMIT 1"
 )
 #: 기업행위 일정 창 — 지난 7일(정정분)부터 앞으로 45일 (25.994). 한 번에 100행까지라 배당은 지난30~앞90일이면 잘렸다
 #: (실측 100행). 리포트는 앞 10일만 쓴다(`daily.CORP_EVENT_DAYS`)
@@ -320,11 +322,14 @@ def advance(state: dict[int, date], day: date, coverage: dict[str, Any]) -> dict
     return {sid: d for sid, d in 새.items() if (day - d).days <= OPINION_DAYS}
 
 
-def state_fields(state: dict[int, date], day: date) -> dict[str, Any]:
-    """기록에 적을 상태 — 이번에 이어 받은 종목(`continuous_ids` — 계좌 X 의 덮음: 이 실행에서 받았고 잘리지 않았고
-    365일 뒤 끊김 없음)과 아직 이어진 나머지(`continuous_carry`, 종목 → 마지막 날)."""
-    return {"continuous_ids": sorted(sid for sid, d in state.items() if d == day),
-            "continuous_carry": {str(sid): d.isoformat() for sid, d in sorted(state.items()) if d != day}}
+def state_fields(state: dict[int, date], day: date, coverage: dict[str, Any]) -> dict[str, Any]:
+    """기록에 적을 상태 — 이번에 이어 받은 종목(`continuous_ids` — 계좌 X 의 덮음: **이 실행에서** 받았고 잘리지 않았고
+    365일 뒤 끊김 없음)과 아직 이어진 나머지(`continuous_carry`, 종목 → 마지막 날). 같은 날 두 번 돌면 앞 실행이 받은
+    종목도 날짜가 오늘이라, 이번 실행의 받음·잘림으로 한 번 더 거른다(25.1684, 교차검증 [권고] — 12.40 C 의 정의)."""
+    이번 = set(coverage.get("covered_ids") or []) - set(coverage.get("truncated_ids") or [])
+    return {"continuous_ids": sorted(sid for sid, d in state.items() if d == day and sid in 이번),
+            "continuous_carry": {str(sid): d.isoformat() for sid, d in sorted(state.items())
+                                 if not (d == day and sid in 이번)}}  # fmt: skip
 
 
 def full_fetch_ids(
@@ -420,7 +425,7 @@ def run(limit: int | None = None) -> int:
         # 읽을 수밖에 없었다(14회차 12.16)
         덮음 = opinion_coverage([sid for sid, _c in stocks], 의견원행, 전부)
         덮음["full_since"] = 전창.isoformat()
-        덮음.update(state_fields(advance(상태, today, 덮음), today))
+        덮음.update(state_fields(advance(상태, today, 덮음), today, 덮음))
         step["opinion_coverage"] = 덮음
         # **출처마다** 절반 넘게 못 받았으면 실패로 남긴다 (docs/infra.md 25.1397, KIS 수급 감사) — 조금 빠진 것은
         # 다음 날 겹쳐 받으며 메워진다(30일 창). 예전 문턱은 네 호출 합의 절반이라 투자자별 하나가 전 종목에서
