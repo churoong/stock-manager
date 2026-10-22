@@ -12,7 +12,9 @@ from tests.test_paper_summary_1447 import _체결, _행, 한도
 
 
 def _이번주(줄: list[str]) -> str:
-    return next(x for x in 줄 if x.startswith("  A:")).split("이번 주 체결 ")[1].split(" (")[0]
+    # 계좌마다 두 줄 — 체결은 둘째 줄(25.1727)
+    i = next(k for k, x in enumerate(줄) if x.startswith("  A 평가 "))
+    return 줄[i + 1].split("이번 주 체결 ")[1].split(" (")[0]
 
 
 def test_금요일_장_체결은_다음_주_요약에_한_번() -> None:

@@ -11,6 +11,8 @@ import math
 from dataclasses import dataclass, field
 from typing import Any
 
+from batch.notify.formatter import won_short
+
 #: 계좌 규칙별로 **따라 파는** 매도 플래그 사유 (docs/paper.md 1장). None 은 모든 플래그
 SELL_RULES: dict[str, frozenset[str] | None] = {
     "all": None,
@@ -701,6 +703,19 @@ def summary_lines(
     if not any(daily.values()):
         return []
     out = ["[가상모의투자]"]
+    # 계좌마다 두 줄 — 평가·손익·시간가중 / 입금·같은 돈 지수·이번 주 체결(25.1727, 리포트 가독성 2026-10-22 사용자
+    # 지시 — 예전엔 계좌마다 이 모두와 평가일·종가 범위가 한 줄이라 폰에서 아홉 계좌가 큰 문단이 됐다).
+    # 평가일·종가 범위가 모든 계좌에 같으면 머리에 한 번, 다르면 그 계좌 둘째 줄 끝에
+    def 종가날(행: dict[str, Any]) -> list[str]:
+        보유 = json.loads(행.get("positions_json") or "[]")
+        return sorted({str(p.get("price_date")) for p in 보유 if p.get("price_date")})
+
+    기준들 = {aid: (str(행들[-1]["as_of"]), 종가날(행들[-1])) for aid, 행들 in daily.items() if 행들}
+    평가일들 = {v[0] for v in 기준들.values()}
+    공통평가 = next(iter(평가일들)) if len(평가일들) == 1 else None
+    if 공통평가:
+        모든종가 = sorted({d for v in 기준들.values() for d in v[1]})
+        out[0] += f" {공통평가} 평가" + (f" (보유 종가 {모든종가[0]}~{모든종가[-1]})" if 모든종가 else "")
     끝값: dict[str, float] = {}
     for aid in sorted(daily):
         행들 = daily[aid]
@@ -723,12 +738,12 @@ def summary_lines(
         보유 = json.loads(끝.get("positions_json") or "[]")
         날짜 = sorted({str(p.get("price_date")) for p in 보유 if p.get("price_date")})
         누적 = (float(끝["twr_index"]) - 1) * 100
+        out.append(f"  {aid} 평가 {won_short(총액)} · 손익 {_퍼센트(손익)} · 시간가중 이번 주 {_퍼센트(주간)}"
+                   f" · 누적 {_퍼센트(누적)}")  # fmt: skip
         out.append(
-            f"  {aid}: 입금 {입금:,.0f}원 · 평가 {총액:,.0f}원 (손익 {_퍼센트(손익)},"
-            f" 이번 주 시간가중 {_퍼센트(주간)}, 누적 {_퍼센트(누적)})"
-            f" · 같은 돈 KOSPI {_퍼센트(코스피)} · S&P500 {_퍼센트(미국)}"
+            f"     입금 {won_short(입금)} · 같은 돈 KOSPI {_퍼센트(코스피)} · S&P500 {_퍼센트(미국)}"
             f" · 이번 주 체결 매수 {sum(f.side == 'buy' for f in 이번주)}·매도 {sum(f.side == 'sell' for f in 이번주)}"
-            f" ({끝['as_of']} 평가" + (f", 종가 {날짜[0]}~{날짜[-1]}" if 날짜 else "") + ")"
+            + ("" if 공통평가 else f" ({끝['as_of']} 평가" + (f", 종가 {날짜[0]}~{날짜[-1]}" if 날짜 else "") + ")")
         )
     # 짝 비교 (25.1458) — 한 번에 하나만 다르게 지은 짝. 차이는 그 규칙을 따른 정책 전체의 효과다(docs/paper.md 1장).
     # **투자 비중을 함께 싣는다**(검증 [필수] 7) — E 는 처음 몇 달 B 의 두 배를 사고 D 는 거의 팔지 않아, 차이의 큰 몫이

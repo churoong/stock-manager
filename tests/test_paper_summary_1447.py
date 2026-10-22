@@ -35,11 +35,12 @@ def test_weekly_lines_compare_same_money_benchmarks_and_twins() -> None:
         "B": [_행("B", "2026-10-02", 1_000_000, 1_000_000, 1.0), _행("B", "2026-10-09", 1_000_000, 1_030_000, 1.03)],
     }  # fmt: skip
     줄 = pp.summary_lines(daily, {"A": [_체결(1, "buy", "2026-10-05", 10_000)]}, "2026-10-03", None, {}, {}, 한도)
-    assert 줄[0] == "[가상모의투자]"
-    assert "A: 입금 1,000,000원 · 평가 1,050,000원 (손익 +5.0%, 이번 주 시간가중 +5.0%, 누적 +5.0%)" in 줄[1]
-    assert "같은 돈 KOSPI +2.0%" in 줄[1] and "S&P500 —" in 줄[1]
-    assert "이번 주 체결 매수 1·매도 0" in 줄[1]
-    assert 줄[3].startswith("  A−B: +20,000원")
+    # 계좌마다 두 줄, 공통 평가일은 머리에(25.1727 — 리포트 가독성)
+    assert 줄[0] == "[가상모의투자] 2026-10-09 평가"
+    assert 줄[1] == "  A 평가 105만원 · 손익 +5.0% · 시간가중 이번 주 +5.0% · 누적 +5.0%"
+    assert 줄[2].startswith("     입금 100만원 · ") and "같은 돈 KOSPI +2.0%" in 줄[2] and "S&P500 —" in 줄[2]
+    assert "이번 주 체결 매수 1·매도 0" in 줄[2]
+    assert 줄[5].startswith("  A−B: +20,000원")
     assert not any("월간" in x for x in 줄)
 
 
@@ -94,7 +95,7 @@ def test_summary_section_reads_real_schema(monkeypatch: pytest.MonkeyPatch) -> N
     _시세(c, "2026-10-15", 10_100, 9_900)
     _하루(c, monkeypatch, "2026-10-15", signals=False)
     줄 = job.summary_section(c, datetime(2026, 10, 18, 0, 0, tzinfo=UTC))
-    assert 줄[0] == "[가상모의투자]" and any(x.startswith("  A: 입금 1,000,000원") for x in 줄)
+    assert 줄[0].startswith("[가상모의투자]") and any(x.startswith("  A 평가 ") for x in 줄)
     assert any("이번 주 체결 매수 1·매도 0" in x for x in 줄)
     assert not any("월간" in x for x in 줄)
     월 = job.summary_section(c, datetime(2026, 11, 1, 0, 0, tzinfo=UTC))
@@ -109,3 +110,14 @@ def test_summary_section_reads_real_schema(monkeypatch: pytest.MonkeyPatch) -> N
     월 = job.summary_section(c, datetime(2026, 11, 1, 0, 0, tzinfo=UTC))
     비교 = [i for i, x in enumerate(월) if "실제 투자와 비교" in x]
     assert len(비교) == 1 and 비교[0] < next(i for i, x in enumerate(월) if x.startswith("[가상모의투자 월간"))
+
+
+def test_평가일이_다르면_그_계좌_줄에() -> None:
+    """25.1727 — 한 계좌만 평가가 늦으면 머리 대신 그 계좌 둘째 줄 끝에 평가일을 적는다"""
+    daily = {
+        "A": [_행("A", "2026-10-02", 1_000_000, 1_000_000, 1.0), _행("A", "2026-10-09", 1_000_000, 1_050_000, 1.05)],
+        "B": [_행("B", "2026-10-02", 1_000_000, 1_000_000, 1.0), _행("B", "2026-10-08", 1_000_000, 1_030_000, 1.03)],
+    }  # fmt: skip
+    줄 = pp.summary_lines(daily, {}, "2026-10-03", None, {}, {}, 한도)
+    assert 줄[0] == "[가상모의투자]"
+    assert 줄[2].endswith("(2026-10-09 평가)") and 줄[4].endswith("(2026-10-08 평가)")
