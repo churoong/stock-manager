@@ -724,6 +724,11 @@ def _결정근거(rows: list[dict[str, Any]], mirror: str, evidence: dict[str, d
 SEND_OK = ("오늘은 장이 없다",)
 
 
+#: 확인할 일에 싣는 괴리 글의 상한 — `broker_mirror.diverge` 의 네 칸 글(약 400자)이 다 들어가는 값.
+#: 꼴이 깨진 값만 막는다
+DIVERGE_TEXT_MAX = 800
+
+
 def checks(
     *, halted: bool, paper: dict[str, Any] | None, broker: dict[str, Any] | None, recon_bad: list[str],
     warnings: int, h_orders: int = 0,
@@ -752,7 +757,11 @@ def checks(
                     "text": f"KIS모의투자에 보내지 않음: {b['send']}" + (f" — 베낄 주문 {h_orders}건이 남았습니다"
                                                                     if h_orders else "")})  # fmt: skip
     if b.get("diverge"):
-        out.append({"level": "high", "text": str(b["diverge"])[:300]})
+        # 괴리 글은 배치가 만든 정해진 꼴(칸 넷이 다 켜져도 약 400자)이라 다 싣는다 — 예전 300자 자르기는 네 칸이
+        # 켜진 날 매도 가격 칸을 말 중간에서 잘랐다(25.1641 교차검증 [권고], 25.1649).
+        # 꼴이 깨진 긴 값만 막고 자른 표시를 붙인다
+        글 = str(b["diverge"])
+        out.append({"level": "high", "text": 글 if len(글) <= DIVERGE_TEXT_MAX else 글[: DIVERGE_TEXT_MAX - 1] + "…"})
     if b.get("diverge_error"):
         out.append({"level": "normal", "text": f"KIS 괴리 판정 실패({b['diverge_error']}) — 주문은 그대로 나갔습니다"})
     if b.get("not_sent"):

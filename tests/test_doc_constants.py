@@ -806,6 +806,8 @@ class Test밸류_분모:
 
 #: **문서에 적을 것이 아닌 상수.** 사유가 곧 판단의 기록이다 (docs/infra.md 25.147)
 문서_불필요 = {
+    "DIVERGE_TEXT_MAX": "운용 화면 확인할 일에 싣는 KIS 괴리 글의 길이 상한이다. 판정 문턱이 아니라 꼴이 깨진 값을 막는"
+    " 표시 안전판이고, 정상 글이 다 들어가는지는 `tests/test_desk_diverge_text_1649.py` 가 본다(25.1649)",
     "CALC_VERSION": "계산 판 번호다. 식이 아니라 이력이고, 판이 움직일 때 무엇을 고칠지는"
     " `tests/test_calc_version_pick.py` 가 따로 본다",
     "VOL_ANN_EPS": "0 으로 나누기를 막는 엡실론이다. 판정 문턱이 아니라 수치 안정용이라"
