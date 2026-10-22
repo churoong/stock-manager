@@ -150,8 +150,12 @@ def 행수_점검(표들: list[str]) -> list[tuple[str, str]]:
     return 나온것
 
 _WRITE_WORDS = re.compile(
-    # analyze 는 통계 표(`sqlite_stat1`)를 만들어 운영 플래너의 계획을 뒤집는다(25.1655)
-    r"\b(insert|update|delete|replace|drop|alter|create|attach|detach|pragma|vacuum|reindex|upsert|analyze)\b",
+    # analyze 는 통계 표(`sqlite_stat1`)를 만들어 운영 플래너의 계획을 뒤집는다(25.1655).
+    # `pragma` 는 끝 경계 없이 — `pragma_optimize` 같은 pragma 표 함수는 `_` 가 낱말 글자라 `\bpragma\b` 를 비켜 갔고,
+    # `SELECT … FROM pragma_optimize` 가 SELECT 한 문장 안에서 ANALYZE 를 돌렸다(25.1657, 교차검증 [필수] — 재현).
+    # `optimize`·`load_extension` 도 막는다
+    r"\b(insert|update|delete|replace|drop|alter|create|attach|detach|vacuum|reindex|upsert|analyze|optimize"
+    r"|load_extension)\b|\bpragma\w*",
     re.IGNORECASE,
 )
 

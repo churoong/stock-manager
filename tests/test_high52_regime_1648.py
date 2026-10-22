@@ -135,6 +135,24 @@ def test_db_status_는_줄바꿈_흉내로_속지_않는다() -> None:
         assert not m.is_read_only(f"-- 머리{끊음}SELECT 1\nANALYZE")
     assert not m.is_read_only("ANALYZE") and not m.is_read_only("SELECT 1 FROM x; ANALYZE")
     assert m.is_read_only("-- 머리\n-- 둘째\nSELECT 1")
+    # 줄 자르기 고침만 따로 붙잡는다 — 쓰기 낱말이 없는 몸(25.1657, 교차검증 [권고])
+    assert not m.is_read_only("-- x\rSELECT 1\nBEGIN")
+    # Windows 줄끝으로 붙여 넣어도 받는다
+    assert m.is_read_only("-- 머리\r\n-- 둘째\r\nSELECT 1\r\nFROM t\r\n")
+
+
+def test_db_status_는_pragma_표_함수를_막는다() -> None:
+    """`pragma_optimize` 는 `\\bpragma\\b` 를 비켜 SELECT 한 문장 안에서 ANALYZE 를 돌렸다(25.1657, 교차검증 [필수])."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("db_status", Path(__file__).resolve().parent.parent / "scripts/db_status.py")
+    m = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
+    spec.loader.exec_module(m)  # type: ignore[union-attr]
+    for 나쁨 in ("SELECT * FROM pragma_optimize", "SELECT (SELECT 1) AS n, * FROM PRAGMA_OPTIMIZE",
+                 "SELECT * FROM pragma_table_info('x')", "SELECT load_extension('x')"):  # fmt: skip
+        assert not m.is_read_only(나쁨), 나쁨
+    assert m.is_read_only("SELECT pragmatic FROM t") is False  # 애매하면 거절(보수적)
+    assert m.is_read_only("SELECT job_name FROM batch_runs WHERE job_name = 'analyze_stock'")
 
 
 def test_2028_04_판정_불가여도_시작이_있으면_다시_본다() -> None:

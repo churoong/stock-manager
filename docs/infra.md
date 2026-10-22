@@ -2704,6 +2704,7 @@ SQL read operations are forbidden (reads are blocked, ...)
 | 25.1654 | KIS모의투자 괴리 알림 — 고장 알림의 "원인" 머리 대신 "내용" (25.1631 권고) |
 | 25.1655 | 37회차 교차검증 — PEAD 사건·중복·모름 세 갈래, 28회차 SQL 곡선 훑기, db-status 줄바꿈 흉내 (25.1651 [필수] 1) |
 | 25.1656 | 리포트 머리 기업행위 멈춤 줄 — 경계와 이어 멈춤을 나눠 셈 (25.1653 참고) |
+| 25.1657 | db-status 읽기 전용 검사 — pragma 표 함수(pragma_optimize)로 ANALYZE 가 돌던 구멍 (25.1655 교차검증 [필수]) |
 
 ### 25.1 왜 D1 인가
 
@@ -37026,3 +37027,14 @@ handoff "실전 수익 쪽 다음 후보" 2번(핵심 H 다년 백테스트)의 
 **고침**: `batch/services/paper.py` `frozen_line(frozen, sticky)` — "가상모의투자 멈춘 종목 — 기업행위 경계 a개(모든 계좌) · 이어 멈춤 b개(경계 전부터 든 계좌만) — 멈춘 계좌는 원가로 평가". `jobs/paper.py run_step` 이 실행 기록 `action_sticky` 로 부른다. 평가·판단은 그대로, 판 없음. 옛 시험(`test_paper_job_1445`)의 "멈춘 종목 1개" 기대를 새 문구로.
 
 **되돌리기 확인**: `batch/` 를 되돌리면 `tests/test_frozen_line_1656.py` 둘 다 깨짐.
+
+### 25.1657 db-status 읽기 전용 검사 — pragma 표 함수(pragma_optimize)로 ANALYZE 가 돌던 구멍 (25.1655 교차검증 [필수])
+
+**왜**: 25.1655 교차검증(다른 에이전트 — 적대 검사, SQLite 3.45.1·실제 마이그레이션 스키마 파일 DB 에서 재현) **[필수] 1·[권고] 3**. db-status 읽기 전용 검사는 쓰기 권한이 있는 Turso 토큰 앞의 **유일한 안전장치**다(`scripts/db_status.py`).
+
+**[필수] — 이번 변경 전부터 있던 구멍**: 쓰기 낱말 `\bpragma\b` 가 `pragma_optimize` 를 못 잡았다(`_` 가 낱말 글자라 경계가 없다). `SELECT … FROM pragma_optimize` 는 SELECT 한 문장이라 시작 검사도 통과하고 원문 그대로 실행돼, 같은 문장 안에서 ANALYZE 를 걸어 `sqlite_stat1` 을 만든다 — 25.1655 가 `analyze` 를 막으며 피하려던 바로 그 해(운영 플래너 계획이 뒤집힘). pragma 표 함수 66개 × 인자 7가지 가운데 DB 를 바꾸는 것은 `optimize` 하나(검증 실측). Turso 서버가 pragma 표 함수를 받는지는 `[확인필요]` — 막는 쪽으로. → `pragma\w*`(끝 경계 없이)·`optimize`·`load_extension` 을 쓰기 낱말에. `analyze_stock` 같은 이름은 그대로 받는다. 저장소 안 db-status 질의에 `pragma_` 를 쓰는 곳 없음(grep).
+
+**[권고] 고침**: 시험이 25.1655 의 두 고침(줄 자르기·`analyze`)을 따로 붙잡지 못했다 — 하나만 되돌려도 다른 쪽이 잡아 통과 → 쓰기 낱말 없는 몸(`-- x\rSELECT 1\nBEGIN`)으로 줄 자르기만 고정, Windows 줄끝(`\r\n`) 붙여 넣기는 받는 시험 · PEAD ⑤ 의 빈칸 닫음: 정기보고서 B 자체가 믿지 못하는 경계면 앞 실적 사건이 있으면 중복·없으면 모름, 중복은 앞 사건 EAR 이 NULL 이면 NULL 그대로, E 전에 다음 보고서 기한이 지났는데 경계가 없으면 모름(중간 보고서가 빠져 두 회계 기간에 걸침 — E 시점에 안다) · 28회차 고정본 머리에 25.1655 변경 줄.
+**[확인한 것]**: `/* */` 안 줄바꿈·문자열 안 `--`·NBSP·`WITH … DELETE/INSERT`·끝 `;` 공백 — 통과하는 길 없음. 국면 SQL 은 옛 꼴과 무작위 60판에서 차이 0, 실행 계획은 두 파일 모두 `SEARCH c (run_id=?)` 만. PEAD 에 미래 정보 없음, "중복의 앞 사건이 모름" 은 정의상 생기지 않음.
+
+**되돌리기 확인**: 쓰기 낱말을 `pragma\b` 로 되돌리면 `tests/test_high52_regime_1648.py::test_db_status_는_pragma_표_함수를_막는다` 깨짐. 줄 자르기만 되돌리면 `…줄바꿈_흉내로_속지_않는다` 의 `BEGIN` 줄이 깨짐.
