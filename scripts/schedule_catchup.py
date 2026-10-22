@@ -145,6 +145,14 @@ def missed_crons(text: str, now: datetime) -> list[tuple[datetime, str]]:
     return sorted(out)
 
 
+#: 끝났지만 일을 못 한 실행 — "있음" 으로 보지 않는다(25.1660, 11-03 판정 실행 감사 [필수]).
+#: 같은 그룹의 셋째 요청이 대기 실행을 밀어내 취소되거나, 시간초과·설치 실패면 그 예약은 빠진 것과 같다
+BAD_CONCLUSIONS = frozenset({"cancelled", "failure", "timed_out", "startup_failure"})
+#: 같은 예약을 다시 깨우는 상한 — 일을 못 한 실행이 이만큼 쌓였으면 더 깨우지 않고 "실패" 로 알린다(같은 까닭으로 되풀이
+#: 실패하는 실행이 따라잡기마다 다시 깨어나지 않게)
+MAX_BAD_RETRIES = 2
+
+
 def _per_cron_dispatch(repo: str, token: str, call, now: datetime, name: str, text: str) -> tuple[str, str | None]:  # noqa: ANN001
     """cron 마다 그 예약 뒤 **그 cron 이름이 붙은** 실행이 있나 본다. 빠진 것 가운데 **가장 이른 하나만** 깨운다 —
     같은 동시 실행 그룹은 대기를 하나만 둬, 한 번에 둘을 깨우면 하나가 밀려난다(backtest.yml). 다음 회에 다음 것을.
@@ -157,9 +165,12 @@ def _per_cron_dispatch(repo: str, token: str, call, now: datetime, name: str, te
                                    f"?per_page=30&created=%3E%3D{s.strftime('%Y-%m-%dT%H:%M:%SZ')}", token)  # fmt: skip
         if status != 200:
             return "실패", f"{name}({status})"
-        runs = json.loads(body).get("workflow_runs") or []
-        if any(c in str(r.get("display_title") or "") for r in runs):
-            continue
+        runs = [r for r in json.loads(body).get("workflow_runs") or [] if c in str(r.get("display_title") or "")]
+        못함 = [r for r in runs if r.get("status") == "completed" and r.get("conclusion") in BAD_CONCLUSIONS]
+        if len(못함) < len(runs):
+            continue  # 돌고 있거나 끝까지 돈 실행이 있다(스스로 건너뛴 것 포함 — 위 설명)
+        if len(못함) >= MAX_BAD_RETRIES:
+            return "실패", f"{name}[{c}] 일을 못 한 실행 {len(못함)}번"
         code, _ = call("POST", f"https://api.github.com/repos/{repo}/actions/workflows/{name}/dispatches",
                        token, {"ref": "main", "inputs": {"missed_schedule": c}})  # fmt: skip
         return ("깨움", f"{name}[{c}]") if code == 204 else ("실패", f"{name}({code})")

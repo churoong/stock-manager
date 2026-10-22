@@ -206,3 +206,23 @@ def test_판정_계산이_죽어도_판정_불가로_남는다(monkeypatch: pyte
     monkeypatch.setattr(job.h52, "judge", 죽음)
     판 = job._high52_judge({}, "2022-01-03", None)
     assert 판 == {"start": "2022-01-03", "verdict": "판정 불가", "why": "계산 실패: ZeroDivisionError"}
+
+
+def test_중복_진단이_죽어도_전략은_돈다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1660 — 판단 함수 안 기록 전용 진단의 예외가 그달 판정 실행 전체를 죽이지 않는다."""
+    dates = _영업일(300)
+    ids = list(range(1, 41))
+    prices = {sid: {d: 100.0 + i * (sid - 20.5) / 50 for i, d in enumerate(dates)} for sid in ids}
+    monkeypatch.setattr(job, "build_pit_inputs", lambda rows, *a, **k: [
+        SimpleNamespace(stock_id=r["stock_id"], market="KOSPI", sector=None,
+                        metrics={"mdd_abs": 0.1, "momentum_12_1": 1.0}) for r in rows])  # fmt: skip
+    monkeypatch.setattr(job.sc, "score_factors", lambda inputs: [])
+
+    def 죽음(*_a: object) -> float:
+        raise ZeroDivisionError
+
+    monkeypatch.setattr(job.h52, "overlap", 죽음)
+    자취: dict = {}
+    decide = job.make_strategy("high52", [{"stock_id": s} for s in ids], {}, 5, {"momentum": 100.0}, [], trace=자취)
+    assert len(decide(dates[281], bt.PriceView(prices, dates[280]))) == 5
+    assert 자취["vs_score"] == [None] and 자취["overlap_errors"] == 1

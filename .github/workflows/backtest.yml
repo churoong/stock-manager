@@ -74,8 +74,10 @@ jobs:
     # 핵심H 는 아래 `core` 작업이 돈다 — 예약·웹 깨우기는 입력이 비어 늘 여기로 온다
     if: ${{ inputs.what != '핵심H' }}
     runs-on: ubuntu-latest
-    # 첫 실행에서 실제 소요를 재고 조정한다 [확인필요]
-    timeout-minutes: 60
+    # 120분 (25.1660, 11-03 판정 실행 감사 [필수]) — 합성 측정(4 vCPU, 5년·상위 20 기본, 지수 포함)이 종목당 약 1.3초로
+    # 미국 약 1,860종목이면 계산만 약 40분, 설치·사본·적재를 더하면 60분이 빠듯했다. 잘리면 기록이 running 으로 남았다가
+    # 6시간 뒤 skipped — 그달 판정 실행이 사라진다. 실제 소요는 첫 판정 실행 뒤 다시 본다 `[확인필요]`
+    timeout-minutes: 120
     env:
       TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
       TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
@@ -95,6 +97,10 @@ jobs:
       MARKET: ${{ (github.event.schedule || inputs.missed_schedule) == '11 19 3 * *' && 'US' || inputs.market || github.event.client_payload.market || 'KR' }}
       # 판정 실행을 기록으로 가르게 (29회차 P1, 25.1437) — schedule | catchup | workflow_dispatch | repository_dispatch, 커밋
       BACKTEST_TRIGGER: ${{ inputs.missed_schedule && 'catchup' || github.event_name }}
+      # 판정 창 실행(예약·따라잡기)은 읽기 진도선을 보지 않고 월 상한만 (25.1660, 감사 [필수]) — 1~2일 백업·사본·미뤄진 주간
+      # 작업이 몰려 3일 진도선(약 6,500만)을 넘기 쉬워, 진도 문이 그달 하나뿐인 판정 실행을 미뤘다(따라잡기는 다시 안 깨운다).
+      # 8일 백업 예비(25.1442)와 같은 길. 사람이 돌리는 비교 실행은 그대로 진도를 본다
+      GATE_PACE: ${{ (github.event_name == 'schedule' || inputs.missed_schedule) && '--no-pace' || '' }}
       YEARS: ${{ inputs.years || github.event.client_payload.years || '5' }}
       TOP_N: ${{ inputs.top_n || github.event.client_payload.top_n || '20' }}
       LONG_THRESHOLDS: ${{ inputs.long_thresholds || github.event.client_payload.long_thresholds || '60,55,50' }}
@@ -139,8 +145,10 @@ jobs:
 
       - name: 시세 사본 맞추기
         id: replica
-        # 비었으면 Turso 월 읽기 진도가 허락할 때 처음부터 만든다(약 760만 행, 한 번). 못 맞추면 작업이 Turso 에서 읽는다
-        run: python scripts/price_replica.py sync --path .price-replica/prices.db
+        # **비었으면 만들지 않는다**(`--no-build`, 25.1660 감사 [필수]) — 처음 만들기는 약 2,100만 행이라 백테스트가 스스로 만들면
+        # 곧바로 읽기 문에 막히고 시간도 먹는다. 처음 만들기는 주간 작업이 한다(25.1537). 사본이 없으면 작업이 Turso 에서 읽는다
+        # (국내 약 180만 행, 25.1534)
+        run: python scripts/price_replica.py sync --path .price-replica/prices.db --no-build
 
       - name: 시세 사본 암호화
         id: replica_crypt
@@ -165,7 +173,7 @@ jobs:
         # 월 읽기량은 운영 수치라 공개 로그에는 줄 수만 (25.1307). 미루면 `batch_runs` 의 "건너뜀" 이 까닭을 적는다
         run: |
           set -o pipefail
-          python scripts/turso_read_gate.py backtest 5000000 2>&1 | python scripts/ops_tee.py gate.txt || true
+          python scripts/turso_read_gate.py backtest 5000000 $GATE_PACE 2>&1 | python scripts/ops_tee.py gate.txt || true
 
       - name: 백테스트
         if: ${{ steps.gate.outputs.deferred != 'true' && env.WHAT != '스트레스' && env.WHAT != '장기문턱' }}
@@ -240,8 +248,10 @@ jobs:
 
       - name: 시세 사본 맞추기
         id: replica
-        # 비었으면 Turso 월 읽기 진도가 허락할 때 처음부터 만든다(약 760만 행, 한 번). 못 맞추면 작업이 Turso 에서 읽는다
-        run: python scripts/price_replica.py sync --path .price-replica/prices.db
+        # **비었으면 만들지 않는다**(`--no-build`, 25.1660 감사 [필수]) — 처음 만들기는 약 2,100만 행이라 백테스트가 스스로 만들면
+        # 곧바로 읽기 문에 막히고 시간도 먹는다. 처음 만들기는 주간 작업이 한다(25.1537). 사본이 없으면 작업이 Turso 에서 읽는다
+        # (국내 약 180만 행, 25.1534)
+        run: python scripts/price_replica.py sync --path .price-replica/prices.db --no-build
 
       - name: 시세 사본 암호화
         id: replica_crypt

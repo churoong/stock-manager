@@ -374,11 +374,18 @@ def make_strategy(
                 if len(고름) >= top_n and trace.get("full_from") is None:
                     trace["full_from"] = t
                 trace["ties_cut"] = trace.get("ties_cut", 0) + 갈린
-                # 중복 진단(같은 실행 메모리, 읽기 0) — 모멘텀 팩터 점수·12-1 과의 시장 안 스피어만
-                trace.setdefault("vs_score", []).append(
-                    h52.overlap(값, {sid: fs.get("momentum") for sid, fs in by_stock.items()}, 시장))
-                trace.setdefault("vs_12_1", []).append(
-                    h52.overlap(값, {i.stock_id: i.metrics.get("momentum_12_1") for i in inputs}, 시장))
+                # 중복 진단(같은 실행 메모리, 읽기 0) — 모멘텀 팩터 점수·12-1 과의 시장 안 스피어만.
+                # 기록 전용이라 실패해도 전략은 그대로 돈다 — 판단 함수 안 예외는 그달 판정 실행 전체를
+                # 죽인다(25.1660 감사)
+                try:
+                    가 = h52.overlap(값, {sid: fs.get("momentum") for sid, fs in by_stock.items()}, 시장)
+                    나 = h52.overlap(값, {i.stock_id: i.metrics.get("momentum_12_1") for i in inputs}, 시장)
+                except Exception:  # noqa: BLE001 — 기록 전용 진단. 그 리밸런스는 빈칸(None)으로
+                    log.exception("high52 중복 진단 실패")
+                    가 = 나 = None
+                    trace["overlap_errors"] = trace.get("overlap_errors", 0) + 1
+                trace.setdefault("vs_score", []).append(가)
+                trace.setdefault("vs_12_1", []).append(나)
             return 고름
         elif strategy == "momentum_sector":
             # 업종 모멘텀 상위 절반 업종 안에서 모멘텀 상위 N (docs/factors.md 12.2, 기법 루프 D, 25.439)
@@ -1434,7 +1441,7 @@ def load_buyback_events(
     (호출이 성공했고 쪽 상한에 안 잘린 종목)에게만 [실행일 − days, 실행일] 을 준다. 예전(25.484)에는 DART 고유번호가
     있는 종목 전부에 주어, 수집 당시 유니버스 밖이었던 종목이 수집된 적 없이 0 이 됐다.
     `covered_ids` 가 없는 옛 기록은 쓰지 않는다."""
-    rows = client.execute(BUYBACK_EVENTS_SQL, [country, "%자기주식%"]).dicts()
+    rows = client.execute(BUYBACK_EVENTS_SQL, [country, "%자기주식%", country, "%자기주식%"]).dicts()
     events: dict[int, list[str]] = {}
     for r in rows:
         if bb.is_buyback(str(r["title"])):
@@ -1466,16 +1473,26 @@ def load_buyback_events(
 
 
 #: 종목에 아직 잇지 못한 공시(stock_id 없음)도 DART 고유번호로 이어 읽는다 (25.1014). 시장 전체 수집은 잇지 못한 행을
-#: 버리지 않는다 — 신규 상장이 `stocks` 에 들어오기 전 공시가 빠지면 덮은 날인데 0 이 된다
+#: 버리지 않는다 — 신규 상장이 `stocks` 에 들어오기 전 공시가 빠지면 덮은 날인데 0 이 된다.
+#: **두 갈래를 UNION ALL 로** (25.1660, 11-03 판정 실행 감사 [필수]) — 예전 `ON s.id = d.stock_id OR
+#: (d.stock_id IS NULL AND …)` 는 플래너가 종목 표를 훑으며 종목마다 stock_id 없는 공시를 통째로 다시 읽어
+#: "국내 종목 수 × 잇지 못한 공시 수" 행을 읽었다(합성 2,650종목·1만 건: VM 1억 5,928만 단계 → 24만).
+#: 두 갈래는 stock_id 유무로 겹치지 않아 결과가 같다. 고정 글로 둘 다 적는다(틀로 만들면 `test_sql_schema` 가 못 본다)
 BUYBACK_EVENTS_SQL = (
-    "SELECT s.id AS stock_id, d.title, d.disclosed_at FROM disclosures d JOIN stocks s"
-    " ON s.id = d.stock_id OR (d.stock_id IS NULL AND s.dart_corp_code = d.corp_code)"
+    "SELECT s.id AS stock_id, d.title, d.disclosed_at FROM disclosures d JOIN stocks s ON s.id = d.stock_id"
     " WHERE s.country = ? AND d.title LIKE ?"
+    " UNION ALL"
+    " SELECT s.id AS stock_id, d.title, d.disclosed_at FROM disclosures d JOIN stocks s"
+    " ON s.dart_corp_code = d.corp_code"
+    " WHERE d.stock_id IS NULL AND s.country = ? AND d.title LIKE ?"
 )
 DILUTION_EVENTS_SQL = (
-    "SELECT s.id AS stock_id, d.title, d.disclosed_at FROM disclosures d JOIN stocks s"
-    " ON s.id = d.stock_id OR (d.stock_id IS NULL AND s.dart_corp_code = d.corp_code)"
+    "SELECT s.id AS stock_id, d.title, d.disclosed_at FROM disclosures d JOIN stocks s ON s.id = d.stock_id"
     " WHERE s.country = ? AND (d.title LIKE '%증자%' OR d.title LIKE '%사채%')"
+    " UNION ALL"
+    " SELECT s.id AS stock_id, d.title, d.disclosed_at FROM disclosures d JOIN stocks s"
+    " ON s.dart_corp_code = d.corp_code"
+    " WHERE d.stock_id IS NULL AND s.country = ? AND (d.title LIKE '%증자%' OR d.title LIKE '%사채%')"
 )
 COVERAGE_B_SQL = "SELECT day FROM disclosure_coverage WHERE kind = 'B' ORDER BY day"
 
@@ -1495,7 +1512,7 @@ def load_dilution_events(client: TursoClient, country: str) -> dict[int, list[st
     """종목 → 희석 사건 공시 접수일들 (3회차 C, docs/factors.md 12.2, 25.738).
 
     수집 구간은 `load_buyback_events` 의 것을 쓴다 — 같은 공시 수집(`disclosures_kr --all`)이다."""
-    rows = client.execute(DILUTION_EVENTS_SQL, [country]).dicts()
+    rows = client.execute(DILUTION_EVENTS_SQL, [country, country]).dicts()
     events: dict[int, list[str]] = {}
     for r in rows:
         if dil.is_dilution(str(r["title"])):
