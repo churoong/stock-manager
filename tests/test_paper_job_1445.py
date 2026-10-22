@@ -210,7 +210,7 @@ def test_late_run_sells_at_close_and_frozen_stock_stops(client: Client, monkeypa
         ("기업행위 경계 — 멈춤 (docs/paper.md 2.3)",)]
     평가 = c.q("SELECT holdings_krw, unknown_json FROM paper_daily WHERE account_id = 'A' AND as_of = '2026-10-20'")
     assert 평가[0][0] == round(40_000 * 1.00015) and "기업행위" in 평가[0][1]
-    assert any("멈춘 종목 1개" in 글 for 글 in 줄)
+    assert any("멈춘 종목 — 기업행위 경계 1개(모든 계좌)" in 글 for 글 in 줄)  # 25.1656 — 경계·이어 멈춤을 나눠 셈
 
 
 def test_rerun_with_other_picks_does_not_add_orders(client: Client, monkeypatch: pytest.MonkeyPatch) -> None:

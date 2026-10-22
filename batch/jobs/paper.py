@@ -2058,7 +2058,7 @@ def run_step(
         기록["real_compare"] = 비교
         머리.append(str(pp.compare_line(비교)))
     if frozen:
-        머리.append(f"가상모의투자 멈춘 종목 {len(frozen)}개(기업행위 경계 — 원가로 평가, docs/paper.md 2.3)")
+        머리.append(pp.frozen_line(frozen, set(기록.get("action_sticky") or [])))
     return 머리 + 메모줄 + [글 for 글 in 줄 if 글.startswith("⚠️")], 기록
 
 

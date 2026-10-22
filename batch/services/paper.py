@@ -624,6 +624,19 @@ def size_buys(
     return 주문, 빠짐
 
 
+def frozen_line(frozen: set[int], sticky: set[int]) -> str:
+    """리포트 머리의 기업행위 멈춤 줄 — 경계 멈춤(모든 계좌)과 이어 멈춤(경계 전부터 든 계좌만)을 나눠 센다(25.1656).
+
+    예전 "멈춘 종목 N개(기업행위 경계 — …)" 는 두 수를 합쳐, 이어 멈춤 종목을 다른 계좌가 사고판다는 것을 가렸다
+    (25.1653 과 같은 결함 — 운용 화면만 고쳤었다, 교차검증 [참고]). 둘 다 멈춘 계좌에서는 원가로 평가한다(2.3)
+    """
+    경계 = len(frozen - sticky)
+    이어 = len(frozen & sticky)
+    조각 = ([f"기업행위 경계 {경계}개(모든 계좌)"] if 경계 else []) + (
+        [f"이어 멈춤 {이어}개(경계 전부터 든 계좌만)"] if 이어 else [])  # fmt: skip
+    return f"가상모의투자 멈춘 종목 — {' · '.join(조각)} — 멈춘 계좌는 원가로 평가(docs/paper.md 2.3)"
+
+
 def random_order(pool: list[int], seed: str) -> list[int]:
     """무작위 대조(R1·R2)가 종목을 고르는 순서 — 고정 씨앗 (docs/paper.md 2.1.2, 25.1458).
 
