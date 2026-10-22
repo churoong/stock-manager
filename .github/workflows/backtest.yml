@@ -184,6 +184,10 @@ jobs:
 
       - name: 스트레스
         if: ${{ steps.gate.outputs.deferred != 'true' && env.WHAT != '백테스트' && env.WHAT != '장기문턱' }}
+        # 백테스트와 함께 돌 때(둘다 — 예약·따라잡기)는 스트레스만 실패해도 실행을 실패로 닫지 않는다 (25.1672) — 실패로 닫으면
+        # 빠진 예약 따라잡기가 판정 창에 무거운 백테스트를 두 번 더 돌린다(판정은 첫 성공만 세니 읽기만 쓴다). 스트레스 실패는
+        # `batch_runs`(job stress, failed)에 남는다. 스트레스만 돌릴 때는 그대로 실패
+        continue-on-error: ${{ env.WHAT != '스트레스' }}
         run: python -m batch.jobs.stress --market "$MARKET"
 
       - name: 장기 신호 문턱 비교
