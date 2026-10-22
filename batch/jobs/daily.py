@@ -2367,6 +2367,95 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
                 warnings.append(_실패문("가상모의투자 계좌", exc))
                 step_log["paper"] = {"error": str(exc)[:300]}
 
+        # KIS모의투자 베끼기·운용 요약 — 리포트 발송 뒤에 돌지만 **발송이 실패해도 돈다**(25.1715, 일일 배치 감사
+        # [필수] 1). 예전엔 발송 예외가 `_send_failed` 로 바로 끝나, 가상 H 는 그날 주문을 적었는데 KIS 베끼기·운용
+        # 요약이 빠졌다(대화방 시크릿이 빠진 날이면 날마다 — 실패 알림도 같은 텔레그램이라 닿지 않는다). 한 번만 돈다
+        베낌: dict[str, bool] = {"done": False}
+
+        def _kis와_요약() -> None:
+            if 베낌["done"]:
+                return
+            베낌["done"] = True
+            # 증권사 모의투자에 같은 주문을 베껴 낸다 (docs/paper.md 15장, 25.1475) — 곁다리. 키가 없으면 "꺼짐"
+            # 만 남는다. **리포트를 보낸 뒤에** 둔다 — 08:30 접수 시작을 기다리는 몇 분이 리포트를 늦추거나 시간 제한에
+            # 걸지 않게(검증 [참고] 7). 리포트가 이미 갔으므로 한도 예외도 올리지 않는다(25.567 과 같은 까닭).
+            # 내부 모의 단계가 실패한 날은 베끼지 않는다(장부가 어긋난 채 주문을 내지 않게).
+            # 미국도 예약주문으로 낸다(25.1485)
+            # 가상모의투자 단계의 결과가 있는 실행에만(25.1715 — 이 함수는 단계 뒤에서만 불리지만 지키는 글로 둔다).
+            # 잠금으로 건너뛴 날은 맞추기·잔고만 하고 내지 않는다 — 그날 체결 판정이 안 돌아 장부가 KIS 보다 뒤처져,
+            # 정리가 아직 판정 안 된 매수를 "증권사에만 남은 것" 으로 팔았다(일일 배치 감사 [필수] 2 ②)
+            모의 = step_log.get("paper")
+            잠김 = isinstance(모의, dict) and str(모의.get("skipped") or "").endswith("(잠금)")
+            if isinstance(모의, dict) and "error" not in 모의:
+                try:
+                    from batch.jobs import broker_mirror
+
+                    멈춘종목 = mirror_frozen(모의, broker_mirror.MIRROR_ACCOUNT)
+                    step_log["broker"] = broker_mirror.run(
+                        client, market, datetime.now(UTC), frozen=멈춘종목,
+                        hold_send="가상모의투자 단계를 건너뜀(잠금) — 오늘 베끼지 않음" if 잠김 else None,
+                    )  # fmt: skip
+                except Exception as exc:  # noqa: BLE001 — 곁다리
+                    log.exception("KIS모의투자 단계 실패")
+                    warnings.append(_실패문("KIS모의투자", exc))
+                    step_log["broker"] = {"error": str(exc)[:300]}
+                # 설정 실수·단계 실패는 알림으로 — 일일 배치는 포트폴리오 경고로 거의 매일 partial 이라 경고만으로는
+                # 아무도 못 본다(25.1492). 키를 하나도 넣지 않은 것("키 없음")은 쓰지 않는 선택이라 알리지 않는다
+                원인 = _kis_알림문(step_log.get("broker") or {})
+                if 원인:
+                    if (step_log.get("broker") or {}).get("missing"):
+                        warnings.append(원인)
+                    _notify_failure(client, market, name, 원인, dry_run=dry_run, title="KIS모의투자 확인 필요",
+                                    report_note=False)  # fmt: skip
+                # 괴리 — 켜졌는데 아직 안 보낸 칸만 (docs/paper.md 15.8, 25.1507). 보낸 뒤에만 "보냄" 을 적는다 —
+                # 발송이 실패하면 다음 실행이 다시 알린다
+                괴리 = (step_log.get("broker") or {}).get("diverge")
+                # 고장이 아니라 판단 정보라 본문 머리는 "내용"(25.1654)
+                if 괴리 and _notify_failure(client, market, name, str(괴리), dry_run=dry_run, title="KIS모의투자 괴리",
+                                            report_note=False, head="내용") and not dry_run:  # fmt: skip
+                    try:
+                        from batch.jobs import broker_mirror as _bm
+
+                        _bm.mark_diverge_sent(client, market, list(step_log["broker"].get("diverge_keys") or []),
+                                              decision.trade_date)  # fmt: skip
+                    except Exception as exc:  # noqa: BLE001 — 표시 실패면 다음 실행이 한 번 더 알린다
+                        log.exception("괴리 알림 보냄 표시 실패")
+                        step_log["broker"]["diverge_mark_error"] = type(exc).__name__
+                # 둘째 모의 계좌 — 도전자(docs/paper.md 15.10, 25.1515). 첫째 뒤 — 첫째가 접수 시작을 기다렸으니
+                # 바로 낸다. 키가 없으면 "꺼짐" 만 남는다(알리지 않음). 괴리 알림은 내지 않는다(재는 자)
+                try:
+                    from batch.jobs import broker_mirror as _bm2
+
+                    멈춘2 = mirror_frozen(step_log.get("paper") or {}, _bm2.challenger_account(client))
+                    # 첫째가 보내지 못한 날(접수 시작 전·장 끝난 뒤)은 둘째도 — 두 계좌의 주문 날이 어긋나지
+                    # 않게(25.1517). 첫째 단계가 예외로 끝난 날도(KIS 토큰 실패 등, 25.1543 감사 7) — 예전엔
+                    # `send` 까닭만 넘겨 둘째만 냈다
+                    막힘2 = challenger_hold(step_log.get("broker") or {})
+                    step_log["broker2"] = _bm2.run(client, market, datetime.now(UTC), slot=_bm2.CHALLENGER,
+                                                   frozen=멈춘2, hold_send=str(막힘2) if 막힘2 else None)  # fmt: skip
+                except Exception as exc:  # noqa: BLE001 — 곁다리
+                    log.exception("KIS모의투자 도전자 단계 실패")
+                    warnings.append(_실패문("KIS모의투자 도전자", exc))
+                    step_log["broker2"] = {"error": str(exc)[:300]}
+                원인2 = _kis_알림문(step_log.get("broker2") or {}, "KIS모의투자 도전자")
+                if 원인2:
+                    if (step_log.get("broker2") or {}).get("missing"):
+                        warnings.append(원인2)
+                    _notify_failure(client, market, name, 원인2, dry_run=dry_run, title="KIS모의투자 도전자 확인 필요",
+                                    report_note=False)  # fmt: skip
+            # 운용 상황실 요약 (docs/desk.md 2장, 25.1501) — 웹 첫 화면이 읽는다. 곁다리: 실패해도 배치는 그대로,
+            # 실행 기록에만. 가상모의투자 단계가 실패한 날에도 적는다 — 그 실패가 "확인할 일" 맨 위에 보여야 한다
+            try:
+                from batch.jobs import desk as desk_job
+
+                step_log["desk"] = desk_job.write(
+                    client, market, datetime.now(UTC), trade_date=decision.trade_date,
+                    session_date=decision.session_date, step_log=step_log, warnings=warnings,
+                )  # fmt: skip
+            except Exception as exc:  # noqa: BLE001 — 곁다리
+                log.exception("운용 요약 단계 실패")
+                step_log["desk"] = {"error": str(exc)[:300]}
+
         # 아침 운용 보고 (docs/desk.md 7장, 25.1510) — 리포트 머리(제목·생성 줄 바로 아래)에.
         # 종목 추천은 그 아래 재료로. 가상모의투자 단계가 돈 실행에만(dry-run·단계 실패는 빼고 — 실패는 경고 줄에
         # 있다). 곁다리: 실패해도 리포트는 그대로
@@ -2547,78 +2636,10 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
             _notify_failure(client, market, name, f"리포트 발송 여부 모름(다시 보내지 않음): {exc}{덧말}",
                             dry_run=dry_run, title="리포트 발송 여부 모름")
         except Exception as exc:
+            _kis와_요약()
             return _send_failed(client, run_id, step_log, market, name, exc, dry_run)
 
-        # 증권사 모의투자에 같은 주문을 베껴 낸다 (docs/paper.md 15장, 25.1475) — 곁다리. 키가 없으면 "꺼짐" 만 남는다.
-        # **리포트를 보낸 뒤에** 둔다 — 08:30 접수 시작을 기다리는 몇 분이 리포트를 늦추거나 시간 제한에
-        # 걸지 않게(검증 [참고] 7). 리포트가 이미 갔으므로 한도 예외도 올리지 않는다(25.567 과 같은 까닭).
-        # 내부 모의 단계가 실패한 날은 베끼지 않는다(장부가 어긋난 채 주문을 내지 않게).
-        # 미국도 예약주문으로 낸다(25.1485)
-        if "error" not in (step_log.get("paper") or {}):
-            try:
-                from batch.jobs import broker_mirror
-
-                멈춘종목 = mirror_frozen(step_log.get("paper") or {}, broker_mirror.MIRROR_ACCOUNT)
-                step_log["broker"] = broker_mirror.run(client, market, datetime.now(UTC), frozen=멈춘종목)
-            except Exception as exc:  # noqa: BLE001 — 곁다리
-                log.exception("KIS모의투자 단계 실패")
-                warnings.append(_실패문("KIS모의투자", exc))
-                step_log["broker"] = {"error": str(exc)[:300]}
-            # 설정 실수·단계 실패는 알림으로 — 일일 배치는 포트폴리오 경고로 거의 매일 partial 이라 경고만으로는
-            # 아무도 못 본다(25.1492). 키를 하나도 넣지 않은 것("키 없음")은 쓰지 않는 선택이라 알리지 않는다
-            원인 = _kis_알림문(step_log.get("broker") or {})
-            if 원인:
-                if (step_log.get("broker") or {}).get("missing"):
-                    warnings.append(원인)
-                _notify_failure(client, market, name, 원인, dry_run=dry_run, title="KIS모의투자 확인 필요",
-                                report_note=False)  # fmt: skip
-            # 괴리 — 켜졌는데 아직 안 보낸 칸만 (docs/paper.md 15.8, 25.1507). 보낸 뒤에만 "보냄" 을 적는다 —
-            # 발송이 실패하면 다음 실행이 다시 알린다
-            괴리 = (step_log.get("broker") or {}).get("diverge")
-            # 고장이 아니라 판단 정보라 본문 머리는 "내용"(25.1654)
-            if 괴리 and _notify_failure(client, market, name, str(괴리), dry_run=dry_run, title="KIS모의투자 괴리",
-                                        report_note=False, head="내용") and not dry_run:  # fmt: skip
-                try:
-                    from batch.jobs import broker_mirror as _bm
-
-                    _bm.mark_diverge_sent(client, market, list(step_log["broker"].get("diverge_keys") or []),
-                                          decision.trade_date)  # fmt: skip
-                except Exception as exc:  # noqa: BLE001 — 표시 실패면 다음 실행이 한 번 더 알린다
-                    log.exception("괴리 알림 보냄 표시 실패")
-                    step_log["broker"]["diverge_mark_error"] = type(exc).__name__
-            # 둘째 모의 계좌 — 도전자(docs/paper.md 15.10, 25.1515). 첫째 뒤 — 첫째가 접수 시작을 기다렸으니 바로 낸다.
-            # 키가 없으면 "꺼짐" 만 남는다(알리지 않음). 괴리 알림은 내지 않는다(재는 자)
-            try:
-                from batch.jobs import broker_mirror as _bm2
-
-                멈춘2 = mirror_frozen(step_log.get("paper") or {}, _bm2.challenger_account(client))
-                # 첫째가 보내지 못한 날(접수 시작 전·장 끝난 뒤)은 둘째도 — 두 계좌의 주문 날이 어긋나지 않게(25.1517).
-                # 첫째 단계가 예외로 끝난 날도(KIS 토큰 실패 등, 25.1543 감사 7) — 예전엔 `send` 까닭만 넘겨 둘째만 냈다
-                막힘2 = challenger_hold(step_log.get("broker") or {})
-                step_log["broker2"] = _bm2.run(client, market, datetime.now(UTC), slot=_bm2.CHALLENGER, frozen=멈춘2,
-                                               hold_send=str(막힘2) if 막힘2 else None)  # fmt: skip
-            except Exception as exc:  # noqa: BLE001 — 곁다리
-                log.exception("KIS모의투자 도전자 단계 실패")
-                warnings.append(_실패문("KIS모의투자 도전자", exc))
-                step_log["broker2"] = {"error": str(exc)[:300]}
-            원인2 = _kis_알림문(step_log.get("broker2") or {}, "KIS모의투자 도전자")
-            if 원인2:
-                if (step_log.get("broker2") or {}).get("missing"):
-                    warnings.append(원인2)
-                _notify_failure(client, market, name, 원인2, dry_run=dry_run, title="KIS모의투자 도전자 확인 필요",
-                                report_note=False)  # fmt: skip
-        # 운용 상황실 요약 (docs/desk.md 2장, 25.1501) — 웹 첫 화면이 읽는다. 곁다리: 실패해도 배치는 그대로,
-        # 실행 기록에만. 가상모의투자 단계가 실패한 날에도 적는다 — 그 실패가 "확인할 일" 맨 위에 보여야 한다
-        try:
-            from batch.jobs import desk as desk_job
-
-            step_log["desk"] = desk_job.write(
-                client, market, datetime.now(UTC), trade_date=decision.trade_date,
-                session_date=decision.session_date, step_log=step_log, warnings=warnings,
-            )  # fmt: skip
-        except Exception as exc:  # noqa: BLE001 — 곁다리
-            log.exception("운용 요약 단계 실패")
-            step_log["desk"] = {"error": str(exc)[:300]}
+        _kis와_요약()
         status = "partial" if warnings else "success"
         try:
             db.finish_batch_run(client, run_id, status=status, step_log=step_log)
@@ -2654,6 +2675,14 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
         # CLAUDE.md: "배치 실패 시 텔레그램 실패 알림". 한도 오류는 `main()` 이 따로 다루므로 그대로 올린다
         if db.quota_reason(exc):
             raise
+        # 가상모의투자 단계가 이미 그날 주문을 적었으면 KIS 베끼기·운용 요약은 돌린다(25.1715, 일일 배치 감사 [필수] 1 —
+        # 발송 직전 DB 일시 오류 등). 단계 전에 깨졌으면 `_kis와_요약` 이 아직 없다
+        뒤처리 = locals().get("_kis와_요약")
+        if 뒤처리 is not None:
+            try:
+                뒤처리()
+            except Exception:  # noqa: BLE001 — 실패 알림이 먼저다
+                log.exception("실패한 실행의 KIS모의투자·운용 요약 단계 실패")
         db.fail_open_runs(str(exc))
         _notify_failure(client, market, name, str(exc), dry_run=dry_run)
         raise

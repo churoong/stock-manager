@@ -124,6 +124,13 @@ INTERNAL_QTY_SQL = (
     "SELECT f.stock_id, SUM(CASE WHEN f.side = 'buy' THEN f.quantity ELSE -f.quantity END) AS q FROM paper_fills f"
     " JOIN stocks s ON s.id = f.stock_id WHERE f.account_id = ? AND s.country = ? GROUP BY f.stock_id"
 )
+#: 가상 장부가 **아직 판정하지 않은 지난 장 매수**(25.1715, 일일 배치 감사 [필수] 2) — 종목 행을 기다리는
+#: 회차(25.1713)는 KIS 에선 이미 찼을 수 있다. 정리 계산에서 빼지 않으면 "증권사에만 남은 것" 으로 시장가로 팔았다
+#: (재현: H 10주 · KIS 0주로 갈리고 H 의 뒤 매도는 "팔 수량 없음" 으로 영영 안 나감)
+PENDING_BUY_QTY_SQL = (
+    "SELECT stock_id, SUM(quantity) AS q FROM paper_orders WHERE account_id = ? AND market = ? AND side = 'buy'"
+    " AND status = 'open' AND fill_session < ? GROUP BY stock_id"
+)
 ACCOUNT_SQL = "SELECT id FROM paper_accounts WHERE id = ?"
 INSERT_SQL = (
     "INSERT OR IGNORE INTO paper_broker_orders (broker, paper_order_id, account_id, market, stock_id, code, side,"
@@ -643,7 +650,13 @@ def run(
     종가 = _closes(client, set(코드), 오늘.isoformat()) if 미국 else None
     오늘산 = {int(r[0]): int(r[1] or 0) for r in client.execute(BOUGHT_TODAY_SQL, [증권사, 오늘.isoformat()]).rows}
     낸수 = client.execute(SENT_TODAY_SQL, [증권사, 오늘.isoformat()]).rows
-    낼것, 안냄 = bm.plan(주문들, 코드, 내부, 증권, 산적, already=이미, cleaned_today=정리함, halted=멈춤,
+    # 판정 대기 매수는 정리 계산에서 내부 보유로 친다(25.1715) — 찼으면 곧 장부에 들고, 안 찼으면 다음 날 정리
+    대기 = {int(r["stock_id"]): int(r["q"] or 0)
+           for r in client.execute(PENDING_BUY_QTY_SQL, [베낌, market, 오늘.isoformat()]).dicts()}  # fmt: skip
+    if 대기:
+        기록["pending_fill_buys"] = len(대기)
+    정리기준 = {sid: 내부.get(sid, 0) + 대기.get(sid, 0) for sid in set(내부) | set(대기)}
+    낼것, 안냄 = bm.plan(주문들, 코드, 정리기준, 증권, 산적, already=이미, cleaned_today=정리함, halted=멈춤,
                        bought_today=오늘산, frozen=frozen, currency="USD" if 미국 else "KRW",
                        closes=종가, sent_today=int(낸수[0][0] or 0) if 낸수 else 0)  # fmt: skip
     # 미국에서 티커는 있는데 KIS 거래소 코드가 없어 뺀 종목은 "종목 코드 없음" 이 아니다 — 까닭을 바로 적는다

@@ -348,7 +348,9 @@ def test_job_reconciles_next_day_and_cleans_up(c: Client) -> None:
     job.run(c, "KR", _at("08:40"), session=s, sleep=lambda _x: None, clock=lambda: _at("08:40"))
     # 매도 102 는 증권사에 팔 수량이 없어 내지 않았다 — 매수 둘만
     assert [o[0] for o in s.orders] == ["buy", "buy"]
-    # 다음 거래일: 101 은 다 찼고 103 은 안 찼다. 내부 B 는 아무것도 안 들었다(가정) → 증권사 3 주는 정리
+    # 다음 거래일: 101 은 다 찼고 103 은 안 찼다. 내부 B 는 아무것도 안 들었다(가정 — 가상 판정이 끝나 매수가 닫힘,
+    # 25.1715: 아직 열린 지난 장 매수는 판정 대기로 정리에서 뺀다) → 증권사 3 주는 정리
+    c.conn.execute("UPDATE paper_orders SET status = 'expired' WHERE side = 'buy'")
     다음 = _Sess(holdings=[kv.Holding("005930", 3, 3, 9_800.0)],
                executions=[kv.Execution("20261016", "N1", "005930", "buy", 3, 3, 9_800.0, 0, False),
                            kv.Execution("20261016", "N2", "005930", "buy", 2, 0, None, 0, False)])  # fmt: skip
@@ -607,3 +609,17 @@ def test_plan_skips_frozen_mirror_orders() -> None:
     낼것, 안냄 = bm.plan([_o(11, 3, "sell", 2, None), _o(12, 1, "buy", 1, 9_800.0)], {1: "005930", 3: "000660"}, {3: 2},
                        {3: (2, 2)}, {3}, already=set(), cleaned_today=set(), halted=False, frozen={3})  # fmt: skip
     assert [x.paper_order_id for x in 낼것] == [12] and 안냄 == [(11, 3, "기업행위 경계 — 베끼지 않음")]
+
+
+
+def test_판정_대기_매수는_정리하지_않는다(c: Client) -> None:  # noqa: F811
+    """25.1715 (일일 배치 감사 [필수] 2) — 가상 장부가 그 장 매수를 아직 판정하지 않았다(종목 행 기다림·잠금 건너뜀).
+    KIS 에선 찼어도 "증권사에만 남은 것" 이 아니다 — 팔지 않는다"""
+    s = _Sess()
+    job.run(c, "KR", _at("08:40"), session=s, sleep=lambda _x: None, clock=lambda: _at("08:40"))
+    다음 = _Sess(holdings=[kv.Holding("005930", 3, 3, 9_800.0)],
+               executions=[kv.Execution("20261016", "N1", "005930", "buy", 3, 3, 9_800.0, 0, False),
+                           kv.Execution("20261016", "N2", "005930", "buy", 2, 0, None, 0, False)])  # fmt: skip
+    기록 = job.run(c, "KR", _at("08:40", "2026-10-19"), session=다음, sleep=lambda _x: None,
+                 clock=lambda: _at("08:40", "2026-10-19"))  # fmt: skip
+    assert 다음.orders == [] and 기록["planned"]["cleanup"] == 0 and 기록["pending_fill_buys"] == 1

@@ -816,7 +816,9 @@ def fill_orders(
                     남은매수.pop(o.id, None)
                     기록["expired"] = 기록.get("expired", 0) + 1
                 else:
-                    _쓰기(client, [(DEFER_SQL, [cal.next_session(market, date.fromisoformat(날)).isoformat(),
+                    # 오늘 판정일 다음 장으로 — `next_session(날)` 은 오늘보다 앞서 KIS 베끼기(그날 장 주문만 냄)가 그
+                    # 매도를 내지 못했고, 이미 지난 장 시가로 팔았다(25.1715, 평가 감사 [권고] 2 — 25.1714 와 같은 꼴)
+                    _쓰기(client, [(DEFER_SQL, [cal.next_session(market, date.fromisoformat(trade_date)).isoformat(),
                                                "그날 시세를 받지 못함 — 다음 장으로", o.id])])  # fmt: skip
                     기록["deferred"] = 기록.get("deferred", 0) + 1
             continue
@@ -873,7 +875,7 @@ def fill_orders(
                     남은매수.pop(o.id, None)
                     기록["expired"] = 기록.get("expired", 0) + 1
                 else:
-                    _쓰기(client, [(DEFER_SQL, [cal.next_session(market, date.fromisoformat(날)).isoformat(),
+                    _쓰기(client, [(DEFER_SQL, [cal.next_session(market, date.fromisoformat(trade_date)).isoformat(),
                                                "쓸 수 있는 환율 없음 — 다음 장으로", o.id])])  # fmt: skip
                     기록["deferred"] = 기록.get("deferred", 0) + 1
                 continue

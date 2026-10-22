@@ -36,5 +36,5 @@ def test_daily_batch_passes_mock_keys(name: str) -> None:
 def test_broker_step_runs_for_both_markets() -> None:
     """위 시험이 두 시장을 보는 까닭 — 일일 배치가 시장을 가리지 않고 KIS모의투자 단계를 부르고, 단계는 KR·US 를 받는다."""
     원문 = inspect.getsource(daily)
-    assert 'if "error" not in (step_log.get("paper") or {}):' in 원문 and 'market == "KR" and "error"' not in 원문
+    assert 'if isinstance(모의, dict) and "error" not in 모의:' in 원문 and 'market == "KR" and "error"' not in 원문
     assert 'market not in ("KR", "US")' in inspect.getsource(broker_mirror.run)
