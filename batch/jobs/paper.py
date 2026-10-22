@@ -161,8 +161,11 @@ DECISION_INSERT_SQL = (
 )
 #: 투자위원회 회의록 · 조사 자료 (docs/company.md 3·5장, 25.1466) — 결정 원장과 한 묶음으로 쓴다
 #: 그날 그 시장의 회의록 — H 가 같은 날 다시 돌 때 회사들의 표를 회의록에서 읽는다(25.1732)
+#: 투표 회사로 좁혀 기본키(account_id, market, decided_on)를 탄다(25.1733, 25.1732 교차검증 [참고] 1 — 없으면 표
+#: 전체를 훑었다)
 MEETINGS_DAY_SQL = (
-    "SELECT account_id, charter_hash, minutes_json FROM paper_meetings WHERE market = ? AND decided_on = ?"
+    "SELECT account_id, charter_hash, minutes_json FROM paper_meetings"
+    " WHERE account_id IN (SELECT value FROM json_each(?)) AND market = ? AND decided_on = ?"
 )
 MEETING_INSERT_SQL = (
     "INSERT OR IGNORE INTO paper_meetings (account_id, market, decided_on, charter_hash, minutes_json, created_at)"
@@ -1670,7 +1673,8 @@ def holding_step(
     # 그날 회의록과 갈렸다(재현 9종목) — H 결정의 근거가 어디에도 없고 회사 가중치도 없던 추천으로 움직였다. 회의록이
     # 없거나 지문·조사 기준일이 다르거나 못 읽으면 예전처럼 연다(25.1481 [필수] 7 "다시 돌 때 표가 비었다" 와 부딪히지
     # 않게). 회사마다 표를 어디서 가져왔는지 기록에(`votes_from`)
-    남은록 = {str(r[0]): (r[1], r[2]) for r in client.execute(MEETINGS_DAY_SQL, [market, trade_date]).rows}
+    남은록 = {str(r[0]): (r[1], r[2])
+             for r in client.execute(MEETINGS_DAY_SQL, [json.dumps(sorted(voters)), market, trade_date]).rows}
     출처: dict[str, str] = {}
     for c in sorted(voters):
         ch = charters[c]

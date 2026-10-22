@@ -874,3 +874,37 @@ def test_같은_날_락인_다른_종류가_휴장일_기준일이어도_막는�
     """25.1731 (25.1729 교차검증 [권고] 1) — rights 5-29(토) + 배당 5-30(일) → 둘 다 락 5-27. 배당 기준일이 구간 밖이라 통과했다"""
     assert not job.rights_only([("rights", "2027-05-29"), ("dividend", "2027-05-30")], "2027-05-27")
     assert job.rights_only([("rights", "2027-05-29")], "2027-05-27")
+
+
+def _유상_db(가격: list[tuple[str, float, float | None]], 기준일들: list[str]) -> object:
+    from batch.core import db
+    from tests.test_portfolio_job import MemClient
+
+    mem = MemClient()
+    db.apply_migrations(mem)  # type: ignore[arg-type]
+    c = mem.conn
+    c.execute("INSERT INTO stocks (id, ticker, market, country, name_ko, currency, status, yahoo_symbol, source,"
+              " fetched_at) VALUES (1, '005930', 'KOSPI', 'KR', '가', 'KRW', 'active', '005930.KS', 't', 't')")  # fmt: skip
+    for day, close, pct in 가격:
+        c.execute("INSERT INTO prices (stock_id, date, close, change_pct, currency, source, fetched_at)"
+                  " VALUES (1, ?, ?, ?, 'KRW', 't', 't')", [day, close, pct])  # fmt: skip
+    for 기준일 in 기준일들:
+        c.execute("INSERT INTO kr_corp_events (code, kind, record_date, source, fetched_at)"
+                  " VALUES ('005930', 'rights', ?, 'kis', 't')", [기준일])  # fmt: skip
+    return mem
+
+
+def test_같은_락일_기준일_행이_둘이어도_원가_계수는_한_번() -> None:
+    """25.1733 (25.1731 교차검증 [필수] 1) — 기준일 정정(10-23 금 → 10-24 토)으로 옛 행이 남으면 락일(10-22)이 같아 계수 0.8 을 두 번
+    곱해 배율 0.64 · 손절선이 너무 낮았다"""
+    mem = _유상_db([("2026-10-20", 100_000, 0.0), ("2026-10-21", 100_000, 0.0), ("2026-10-22", 80_000, 0.0),
+                    ("2026-10-23", 80_000, 0.0)], ["2026-10-23", "2026-10-24"])  # fmt: skip
+    assert job.rights_factors_since(mem, 1, "2026-01-02") == [("2026-10-22", pytest.approx(0.8))]  # type: ignore[arg-type]
+
+
+def test_락일_등락률이_비면_유상증자로_풀지_않는다() -> None:
+    """25.1733 (25.1731 교차검증 [권고] 1) — 등락률이 빈 날(야후 대체)의 −32% 는 감시 쪽 어림 계수로만 잡혀, 유상증자로 풀면 감시·멈춤은
+    풀리는데 원가 계수는 1.0 이라 거짓 손절이 났다. 그날은 예전처럼 막는다"""
+    mem = _유상_db([("2026-10-20", 100_000, 0.0), ("2026-10-21", 100_000, 0.0), ("2026-10-22", 68_000, None),
+                    ("2026-10-23", 68_000, 0.0)], ["2026-10-24"])  # fmt: skip
+    assert job.action_factors(mem, 1, "KR") is None  # type: ignore[arg-type]

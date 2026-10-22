@@ -145,17 +145,23 @@ def action_factors(client: TursoClient, stock_id: int, market: str) -> list[tupl
         [stock_id, ACTION_GUARD_ROWS + 1],
     ).rows
     계수들: list[tuple[str, float]] = []
+    어림: set[str] = set()
     for (close, pct, day), (prev, _p, _d) in zip(rows, rows[1:], strict=False):
         # 등락률이 빈 날(야후 대체 출처)도 가격제한폭 밖이면 기업행위로 — 감시·멈춤 쪽만(25.1554)
         f = adj.guard_factor(float(prev), float(close), None if pct is None else float(pct))
         if adj.is_action(f):
             계수들.append((str(day)[:10], f))
+            if pct is None:
+                어림.add(str(day)[:10])
     if not 계수들:
         return []
     # **유상증자 권리락으로 확인되면 막지 않는다** (docs/factors.md 12.20, docs/infra.md 25.1139 — 18회차 검증 B).
     # 계수만으로는 유상증자 권리락과 작은 무상증자를 가르지 못해, 유상증자 뒤 20거래일 동안 보유 종목의 목표·손절
     # 감시가 꺼지고 매도 플래그에 "수량 확인" 이 붙었다. 권리락이면 수량이 그대로라 손절선이 맞다(계수만 맞추면)
-    if not all(_유상_권리락(client, stock_id, 날) for 날, _f in 계수들):
+    # 등락률이 빈 날의 계수(어림)는 원가 계수(`rights_factors_since` — `factor_of`, 빈 날은 1.0)가 따라오지 못한다 —
+    # 유상증자 권리락으로 풀면 감시·멈춤은 풀리는데 원가는 안 맞아 거짓 손절이 났다. 그날은 예전처럼 막는다
+    # (25.1733, 25.1731 교차검증 [권고] 1)
+    if 어림 or not all(_유상_권리락(client, stock_id, 날) for 날, _f in 계수들):
         return None
     return 계수들
 
@@ -235,6 +241,7 @@ def rights_factors_since(client: TursoClient, stock_id: int, since: str) -> list
             return []
         raise
     out: list[tuple[str, float]] = []
+    본락일: set[str] = set()
     for 기준일 in 기준일들:
         # 락일 = `cal.ex_date_kr(기준일)` — "기준일 직전 시세 행" 은 기준일이 휴장일(토·12-31)이면 하루 늦은 행
         # (계수 1.0)을 읽었다. 25.1729 가 판정(`rights_only`)만 고쳐 감시·멈춤은 풀리는데 원가는 안 맞아 권리락 하락이
@@ -248,8 +255,11 @@ def rights_factors_since(client: TursoClient, stock_id: int, since: str) -> list
             " ORDER BY date DESC LIMIT 2",
             [stock_id, 락일],
         ).rows
-        if len(rows) < 2 or str(rows[0][2])[:10] != 락일 or 락일 <= since:
+        # 락일이 같은 기준일 행은 한 번만 — 정정으로 남은 옛 행(금→토, 12-30→12-31)이 같은 계수를 두 번 곱해 손절선을
+        # 너무 낮췄다(25.1733, 25.1731 교차검증 [필수] 1)
+        if len(rows) < 2 or str(rows[0][2])[:10] != 락일 or 락일 <= since or 락일 in 본락일:
             continue
+        본락일.add(락일)
         (close, pct, day), (prev, _p, _d) = rows
         f = adj.factor_of(float(prev), float(close), None if pct is None else float(pct))
         if adj.is_action(f) and _유상_권리락(client, stock_id, str(day)[:10]):
