@@ -35,4 +35,8 @@ def test_잘림은_걸러진_뒤가_아니라_응답의_원래_행_수로(monkey
 
 def test_수집_실행이_기록에_남긴다() -> None:
     본문 = inspect.getsource(job.run)
-    assert "qc.opinions_with_count(" in 본문 and 'step["opinion_coverage"] = opinion_coverage(' in 본문
+    # 25.1681 부터 모든 창을 `opinions_split`(안에서 `opinions_with_count`)으로 받고, 기록은 상태 칸을 더해 넣는다 —
+    # 실제 기록은 tests/test_opinion_full_1676.py 의 실행 시험이 본다
+    assert "opinions_split(qc, code," in 본문 and "덮음 = opinion_coverage(" in 본문
+    assert 'step["opinion_coverage"] = 덮음' in 본문
+    assert "qc.opinions_with_count(" in inspect.getsource(job.opinions_split)

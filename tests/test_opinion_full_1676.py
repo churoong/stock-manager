@@ -24,32 +24,42 @@ def test_365일로_받아_잘리지_않은_종목만_full() -> None:
     assert "full_ids" not in job.opinion_coverage([1], {1: 0})  # 예전 꼴 그대로
 
 
-def test_이어_받음은_실패·잘림·끊김에서_풀린다() -> None:
+def test_이어_받음은_종목마다_마지막_날로_센다() -> None:
+    """25.1681 — 실행 단위로 끊던 것(25.1676)을 종목마다 마지막으로 이어 받은 날로. 못 받음·잘림·대상 아님은 그날을
+    그대로 두고, 그 틈이 60일 안이면 다음 실행의 60일 창이 메운다."""
     d = 열림
-    이력 = [(str(d), _c([1, 2, 3], full=[1, 2, 3])),
-            (str(d + timedelta(1)), _c([1, 3], [3])),  # 2 실패, 3 잘림
-            (str(d + timedelta(2)), _c([1, 2, 3], full=[2]))]  # fmt: skip
-    assert job.opinion_continuous(이력, d + timedelta(3)) == {1, 2}
-    # 앞 실행과 60일 넘게 떨어지면 60일 창이 앞 창에 닿지 않는다 — 모두 끊김
-    끊긴 = [*이력, (str(d + timedelta(2 + job.OPINION_DAYS + 1)), _c([1, 2, 3]))]
-    assert job.opinion_continuous(끊긴, d + timedelta(2 + job.OPINION_DAYS + 1)) == set()
-    # 마지막 실행이 오늘과 그만큼 떨어져도
-    assert job.opinion_continuous(이력, d + timedelta(2 + job.OPINION_DAYS + 1)) == set()
-    assert job.opinion_continuous(이력, d + timedelta(2 + job.OPINION_DAYS)) == {1, 2}
-    assert job.opinion_continuous([], d) == set()
+    상태 = job.advance({}, d, _c([1, 2, 3, 4], [4], full=[1, 2, 3]))  # 4 는 365일이 잘림 — 잇지 않음
+    assert 상태 == {1: d, 2: d, 3: d}
+    상태 = job.advance(상태, d + timedelta(1), _c([1, 3], [3]))  # 2 실패, 3 잘림 — 마지막 날 그대로
+    assert 상태 == {1: d + timedelta(1), 2: d, 3: d}
+    상태 = job.advance(상태, d + timedelta(2), _c([1, 2, 3]))  # 다시 받으면 이어짐(틈 60일 안)
+    assert 상태 == {s: d + timedelta(2) for s in (1, 2, 3)}
+    # 대상이 아니었던 종목(손 --limit)은 끊기지 않는다 — 예전엔 나머지 전부의 이어 받음을 끊었다
+    상태 = job.advance(상태, d + timedelta(3), _c([1]))
+    assert 상태 == {1: d + timedelta(3), 2: d + timedelta(2), 3: d + timedelta(2)}
+    # 60일 넘게 묵으면 빠진다 — 365일로 다시 받아야 한다
+    먼 = d + timedelta(2 + job.OPINION_DAYS + 1)
+    assert job.advance(상태, 먼, _c([2])) == {1: d + timedelta(3)}
+    # 365일로 받은 것은 묵었어도 새로 잇는다
+    assert job.advance({}, 먼, _c([5], full=[5])) == {5: 먼}
+
+
+def test_상태는_기록_한_행에_통째로_남고_다시_읽힌다() -> None:
+    d = 열림 + timedelta(5)
+    상태 = {1: d, 2: d - timedelta(3), 9: d}
+    칸 = job.state_fields(상태, d)
+    assert 칸 == {"continuous_ids": [1, 9], "continuous_carry": {"2": str(d - timedelta(3))}}
+    assert job.load_state([(str(d), json.dumps({"opinion_coverage": 칸}))]) == 상태
+    for 깨짐 in ([(str(d), "{깨짐")], [("x", json.dumps({"opinion_coverage": 칸}))], [], [(str(d), None)]):
+        assert job.load_state(깨짐) == {}
 
 
 def test_고를_종목은_여는_날부터_이어_오지_않은_것을_상한까지() -> None:
-    assert job.full_fetch_ids([1, 2, 3], [], 열림 - timedelta(1)) == set()
-    이력 = [(str(열림), _c([1, 2, 3], full=[2]))]
-    assert job.full_fetch_ids([5, 1, 2, 3], 이력, 열림 + timedelta(1)) == {5, 1, 3}
-    assert job.full_fetch_ids([5, 1, 2, 3], 이력, 열림 + timedelta(1), cap=2) == {5, 1}
-
-
-def test_이력_읽기는_깨진_기록을_건너뛴다() -> None:
-    rows = [("2026-11-04", json.dumps({"opinion_coverage": _c([1], full=[1])})), ("2026-11-05", "{깨짐"),
-            ("2026-11-06", json.dumps({"opinion_coverage": "x"})), ("2026-11-07", None)]  # fmt: skip
-    assert job.coverage_history(rows) == [("2026-11-04", _c([1], full=[1]))]
+    assert job.full_fetch_ids([1, 2, 3], {}, 열림 - timedelta(1)) == set()
+    오늘 = 열림 + timedelta(job.OPINION_DAYS + 1)
+    상태 = {2: 오늘 - timedelta(job.OPINION_DAYS), 3: 오늘 - timedelta(job.OPINION_DAYS + 1)}  # 2 는 닿음, 3 은 묵음
+    assert job.full_fetch_ids([5, 1, 2, 3], 상태, 오늘) == {5, 1, 3}
+    assert job.full_fetch_ids([5, 1, 2, 3], 상태, 오늘, cap=2) == {5, 1}
 
 
 class _QC:
@@ -96,7 +106,7 @@ class _Client:
         self.이력, self.묶음 = 이력, []
 
     def execute(self, sql: str, args=None):  # noqa: ANN001, ANN201
-        if sql == job.OPINION_HISTORY_SQL:
+        if sql == job.OPINION_STATE_SQL:
             assert args == [job.JOB_NAME]
             return _Rs(self.이력)
         if "kr_opinions" in sql:
@@ -112,9 +122,11 @@ class _Client:
 
 @pytest.mark.parametrize("오늘", [열림 - timedelta(1), 열림])
 def test_실행은_고른_종목만_365일로_받고_기록에_남긴다(monkeypatch: pytest.MonkeyPatch, 오늘: date) -> None:
-    이력 = [(str(오늘 - timedelta(1)), json.dumps({"opinion_coverage": _c([1, 2], full=[1])}))]
+    어제 = 오늘 - timedelta(1)
+    이력 = [(str(어제), json.dumps({"opinion_coverage": job.state_fields({1: 어제}, 어제)}))]
     c = _Client(이력)
     창: dict[str, int] = {}
+    부름: list[tuple[str, int]] = []
     끝: dict = {}
 
     class QC:
@@ -124,8 +136,10 @@ def test_실행은_고른_종목만_365일로_받고_기록에_남긴다(monkeyp
             pass
 
         def opinions_with_count(self, code, since, until):  # noqa: ANN001, ANN201
-            창[code] = (until - since).days
-            return [], 0
+            창.setdefault(code, (until - since).days)
+            부름.append((code, (until - since).days))
+            # 000001 은 30일 넘는 창이 100행에 잘린다 — 60일 창도 쪼개야 이어진다(25.1681)
+            return [], kis.OPINION_PAGE_ROWS if code == "000001" and (until - since).days > 30 else 0
 
         def investor(self, code):  # noqa: ANN001, ANN201
             return {}
@@ -157,3 +171,6 @@ def test_실행은_고른_종목만_365일로_받고_기록에_남긴다(monkeyp
         assert 창 == {"000001": job.OPINION_DAYS, "000002": job.OPINION_FIRST_DAYS, "000003": job.OPINION_FIRST_DAYS}
         assert 덮음["full_ids"] == [2, 3]
     assert 덮음["full_since"] == str(오늘 - timedelta(job.OPINION_FIRST_DAYS))
+    # 000001 의 60일 창은 쪼개져 잘리지 않았고, 어제 이어 받은 종목이라 오늘도 이어진다
+    assert len([w for c, w in 부름 if c == "000001"]) == 3 and 덮음["truncated_ids"] == []
+    assert 덮음["continuous_ids"] == ([1] if 오늘 < 열림 else [1, 2, 3]) and 덮음["continuous_carry"] == {}
