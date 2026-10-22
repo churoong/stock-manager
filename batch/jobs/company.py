@@ -149,7 +149,8 @@ def load_dossiers(client: Any, rows: list[report_picks.SignalRow], country: str,
     기준 = date.fromisoformat(as_of[:10])
     국내 = country == "KR"
     지표 = signals_job.load_metrics(client, country, as_of, ids)
-    감성, 감성오류 = scores_job.load_sentiments(client, country, as_of, ids)
+    감성날: dict[int, str] = {}
+    감성, 감성오류 = scores_job.load_sentiments(client, country, as_of, ids, dates=감성날)
     국면 = trend.regimes_for_country(client, country, as_of)
 
     증권사: dict[int, list[tuple[str, str, float]]] = {}
@@ -240,7 +241,7 @@ def load_dossiers(client: Any, rows: list[report_picks.SignalRow], country: str,
             flow_sum=sum(v for _d, v in 흐름) if 흐름 else None, turnover_20d=거래대금.get(r.stock_id),
             flow_days=len(흐름), flow_date=흐름[0][0] if 흐름 else None,
             gov_events=사건.get(r.stock_id) or [], cb_pct=전환사채.get(r.stock_id), domestic=국내,
-            sentiment=감성.get(r.stock_id), sentiment_error=감성오류,
+            sentiment=감성.get(r.stock_id), sentiment_error=감성오류, sentiment_date=감성날.get(r.stock_id),
             # 이미 아는 전환사채가 문턱 이상이면 반대는 그대로 선다(하한) — 모르는 것은 문턱 아래일 때만
             gov_covered=(덮음 and not (r.stock_id in 전환모름 and (전환사채.get(r.stock_id) or 0) < co.CB_PCT))
             if 국내 else True,
@@ -265,8 +266,8 @@ def dossier_json(d: co.Dossier) -> dict[str, Any]:
         "flows": {"sum_krw": d.flow_sum, "turnover_20d": d.turnover_20d, "days": d.flow_days, "date": d.flow_date},
         "governance": {"events": d.gov_events[:5], "cb_pct": d.cb_pct, "covered": d.gov_covered,
                        "source": d.gov_source}, "domestic": d.domestic,
-        "sentiment": d.sentiment, "risk": {"mdd": d.mdd, "volatility": d.volatility, "window": d.perf_window,
-                                            "as_of": d.perf_as_of},
+        "sentiment": d.sentiment, "sentiment_date": d.sentiment_date,
+        "risk": {"mdd": d.mdd, "volatility": d.volatility, "window": d.perf_window, "as_of": d.perf_as_of},
         "regime": {"state": d.regime, "index": d.regime_index, "date": d.regime_date},
     }  # fmt: skip
 
