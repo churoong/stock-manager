@@ -131,3 +131,28 @@ def test_h_skip_줄에_보유_여부(일곱: Client, monkeypatch: pytest.MonkeyP
     _하루(일곱, monkeypatch, "2026-10-14")
     [(상세,)] = 일곱.q("SELECT detail_json FROM paper_decisions WHERE account_id = 'H' AND stock_id = 3 AND kind = 'skip'")
     assert json.loads(상세)["held"] is True
+
+
+def test_같은_날_다시_돌면_H_는_그날_회의록의_표를_쓴다(일곱: Client, monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1732 (위원회·H 감사 [권고] 2) — A~E 가 회의록을 쓴 뒤 H 만 실패한 날 다시 돌면, H 혼자 자료를 다시 읽어 회의를 열어 그 사이
+    바뀐 자료로 H 의 표가 그날 회의록과 갈렸다. 회의록을 고쳐(A 가 1 을 집행하지 않았다고) 두고 다시 돌리면 H 는 그 회의록을 따른다"""
+    진짜 = job.holding_step
+
+    def 실패(*_a: object, **_k: object) -> None:
+        raise RuntimeError("일시 읽기 실패")
+
+    monkeypatch.setattr(job, "holding_step", 실패)
+    _하루(일곱, monkeypatch, "2026-10-14")
+    assert 일곱.q("SELECT COUNT(*) FROM paper_decisions WHERE account_id = 'H'") == [(0,)]
+    (mj,) = 일곱.q("SELECT minutes_json FROM paper_meetings WHERE account_id = 'A'")[0]
+    록 = json.loads(mj)
+    for i in 록["items"]:
+        if i["stock_id"] == 1:
+            i["approved"] = False
+    일곱.conn.execute("UPDATE paper_meetings SET minutes_json = ? WHERE account_id = 'A'", [json.dumps(록)])
+    monkeypatch.setattr(job, "holding_step", 진짜)
+    _줄, 기록 = _하루(일곱, monkeypatch, "2026-10-14")
+    h = 기록["accounts"]["H"]["holding"]
+    assert set(h["votes_from"].values()) == {"minutes"}
+    표 = json.loads(일곱.q("SELECT detail_json FROM paper_decisions WHERE account_id = 'H' AND stock_id = 1")[0][0])
+    assert "A" not in 표["holding"]["votes"] and {"C", "D", "E"} <= set(표["holding"]["votes"])

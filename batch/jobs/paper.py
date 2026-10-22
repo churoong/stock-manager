@@ -160,6 +160,10 @@ DECISION_INSERT_SQL = (
     " ref_close, ref_date, created_at, rule_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 )
 #: 투자위원회 회의록 · 조사 자료 (docs/company.md 3·5장, 25.1466) — 결정 원장과 한 묶음으로 쓴다
+#: 그날 그 시장의 회의록 — H 가 같은 날 다시 돌 때 회사들의 표를 회의록에서 읽는다(25.1732)
+MEETINGS_DAY_SQL = (
+    "SELECT account_id, charter_hash, minutes_json FROM paper_meetings WHERE market = ? AND decided_on = ?"
+)
 MEETING_INSERT_SQL = (
     "INSERT OR IGNORE INTO paper_meetings (account_id, market, decided_on, charter_hash, minutes_json, created_at)"
     " VALUES (?, ?, ?, ?, ?, ?)"
@@ -1645,7 +1649,8 @@ def holding_step(
 
     (고른 종목의 신호 행 — 점수 순, {고른 종목: 지주 기록}, 추천받았지만 고르지 않은 종목의 결정 문장, 기록).
     투표는 H 가 **직접** 낸다 — A·C·D·E 는 그 헌장으로 `co.meet`(같은 조사 자료), B 는 점수 상위 `b_top_n`.
-    다른 계좌의 실행 결과를 빌리지 않는다(다시 돌 때 표가 비었다, 25.1481 검증 [필수] 7).
+    다른 계좌의 실행 결과를 메모리로 빌리지 않는다(다시 돌 때 표가 비었다, 25.1481 검증 [필수] 7) — 그날 회의록이 DB 에
+    있으면 그 표(25.1732).
     투표 회사 헌장 지문이 `config.voters` 와 다르면 사지 않는다(검증 [필수] 8)
     """
     voters: dict[str, str] = dict(config.get("voters") or {})
@@ -1658,12 +1663,31 @@ def holding_step(
     바뀜 = sorted(c for c, h in voters.items() if co.charter_hash(charters[c]) != h)
     if 바뀜:
         return [], {}, [], {"error": "투표 회사 헌장이 H 에 적힌 지문과 다름(판을 올려야): " + ",".join(바뀜)}
-    _조사_준비(client, market, signal_rows, charters, cache, trade_date)
+    as_of = _조사_준비(client, market, signal_rows, charters, cache, trade_date)
     표: dict[str, dict[int, float]] = {}
+    # **그날 회의록이 있으면 그 표를 쓴다** (25.1732, 위원회·H 감사 [권고] 2 — 교차검증이 (b) 를 골랐다). A~E 가
+    # 회의록을 쓴 뒤 H 만 실패한 날 다시 돌면 H 혼자 자료를 다시 읽어 회의를 열어, 그 사이 정정된 수급 등으로 H 의 표가
+    # 그날 회의록과 갈렸다(재현 9종목) — H 결정의 근거가 어디에도 없고 회사 가중치도 없던 추천으로 움직였다. 회의록이
+    # 없거나 지문·조사 기준일이 다르거나 못 읽으면 예전처럼 연다(25.1481 [필수] 7 "다시 돌 때 표가 비었다" 와 부딪히지
+    # 않게). 회사마다 표를 어디서 가져왔는지 기록에(`votes_from`)
+    남은록 = {str(r[0]): (r[1], r[2]) for r in client.execute(MEETINGS_DAY_SQL, [market, trade_date]).rows}
+    출처: dict[str, str] = {}
     for c in sorted(voters):
         ch = charters[c]
+        록 = None
+        if c in 남은록 and 남은록[c][0] == voters[c]:
+            try:
+                록 = json.loads(남은록[c][1])
+            except ValueError:
+                록 = None
+        if 록 is not None and 록.get("as_of") == as_of and 록.get("charter_hash") == voters[c]:
+            표[c] = {int(i["stock_id"]): hold.strength(float(i["vote"]), float(ch["threshold"]))
+                    for i in 록.get("items") or [] if i.get("approved")}
+            출처[c] = "minutes"
+            continue
         _items, approved = co.meet(cache["agenda"][: int(ch["agenda"])], ch, cache["population"])
         표[c] = {i.stock_id: hold.strength(i.vote, float(ch["threshold"])) for i in approved}
+        출처[c] = "meeting"
     행들: dict[int, list[report_picks.SignalRow]] = {}
     for r in report_picks.with_criteria(signal_rows):
         행들.setdefault(r.stock_id, []).append(r)
@@ -1694,7 +1718,7 @@ def holding_step(
                         r0.close, r0.close_date, now, rule_version))  # fmt: skip
     return 고른행, {sid: 기록[sid] for sid in 고른}, 문장, {
         "recommended": len(순위), "eligible": sum(x["eligible"] for x in 순위), "chosen": len(고른),
-        "weights": 가중, "samples": {c: s["n"] for c, s in 성적.items()}}
+        "weights": 가중, "samples": {c: s["n"] for c, s in 성적.items()}, "votes_from": 출처}
 
 
 def committee_step(
