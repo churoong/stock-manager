@@ -1,22 +1,19 @@
 """37회차 후보 B — 실적 발표 반응 EAR 의 사건 분류·값 (docs/factors.md 12.40 B·B′, docs/infra.md 25.1658).
 
-Chan·Jegadeesh·Lakonishok(1996)·Brandt 외(2008, `[확인필요: 원문]`): 실적 발표 직후 시장 대비 오른 폭(EAR)이 큰 종목이
-이어서
-오른다(실적 발표 뒤 표류, PEAD). **정의·창·문턱은 12.40 에 결과를 보기 전에 적었다 — 바꾸지 않는다.** 실제 추천에는
-쓰지 않는다.
-계산만 한다 — DB 도 시각도 모른다. 사건 표·백필·IC·`pead_event` 는 11-01 Turso 리셋 뒤(12.40 순서).
+Chan·Jegadeesh·Lakonishok(1996)·Brandt 외(2008, `[확인필요: 원문]`): 실적 발표 직후 시장 대비 오른 폭(EAR)이
+큰 종목이 이어서 오른다(실적 발표 뒤 표류, PEAD). **정의·창·문턱은 12.40 에 결과를 보기 전에 적었다 — 바꾸지
+않는다.** 실제 추천에는 쓰지 않는다. 계산만 한다 — DB 도 시각도 모른다. 사건 표·백필·IC·`pead_event` 는
+11-01 Turso 리셋 뒤(12.40 순서).
 
-사건 분류(12.40 B ①~⑤, 25.1648·25.1651·25.1655·25.1657 교차검증으로 닫음) — **기준일까지 접수된 앞쪽 경계만 본다**:
-- 경계 = 정기보고서 (회계연도, 보고서 코드)의 처음 접수일 하나. 정정 행은 경계도 사건도 아니다(부르는 쪽이
-`first_receipts` 로)
-- 믿는 경계 = 법정 기한(회계 기간 끝 + 분기·반기 45일, 사업 90일 — `portfolio` 값, 말일이 휴장이면 다음 거래일) 안에
-  처음 접수됐고, 바로 앞 보고서의 경계도 그보다 먼저 있다. 결산월을 확인하지 못한 회사는 믿지 않는다
-- 실적 사건(잠정·손익구조) E: 앞 경계 P 를 믿고, P 다음 보고서 기한이 E 전에 지나지 않았고, (P, E] 를 거래소 공시(I)
-수집이
-  덮었고, (P, E) 에 앞선 실적 사건이 없으면 **사건**. 앞선 실적 사건이 있으면 **중복**. 그 밖은 **모름**
-- 정기보고서 B: B 와 P 를 둘 다 믿고 (P, B] 가 덮였고 그 안에 실적 사건이 없으면 사건, 있으면 중복. B 를 못 믿으면 앞
-실적
-  사건이 있으면 중복·없으면 모름. 같은 날 낸 잠정은 그 보고서보다 먼저다
+사건 분류(12.40 B ①~⑤, 25.1648·1651·1655·1657 교차검증으로 닫음) — **기준일까지 접수된 앞쪽 경계만 본다**:
+- 경계 = 정기보고서 (회계연도, 보고서 코드)의 처음 접수일 하나. 정정 행은 경계도 사건도 아니다
+  (부르는 쪽이 `first_receipts` 로)
+- 믿는 경계 = 법정 기한(회계 기간 끝 + 분기·반기 45일, 사업 90일 — `portfolio` 값, 말일이 휴장이면 다음
+  거래일) 안에 처음 접수됐고, 바로 앞 보고서의 경계가 그보다 먼저 있다. 12월 결산만 믿는다
+- 실적 사건(잠정·손익구조) E: 앞 경계 P 를 믿고, P 다음 보고서 기한이 E 전에 지나지 않았고, (P, E] 를
+  거래소 공시(I) 수집이 덮었고, 같은 구간에 앞선 실적 사건이 없으면 **사건**, 있으면 **중복**, 그 밖은 **모름**
+- 정기보고서 B: B 와 P 를 둘 다 믿고 (P, B] 가 덮였고 그 안에 실적 사건이 없으면 사건, 있으면 중복.
+  B 를 못 믿으면 같은 구간에 앞선 **사건**이 있으면 중복, 없으면 모름. 같은 날 낸 잠정은 그 보고서보다 먼저다
 """
 
 from __future__ import annotations
@@ -26,7 +23,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, timedelta
 
-from batch.services.disclosure_reaction import ACTION_TOLERANCE, classify
+from batch.services.adjust import ACTION_TOLERANCE
+from batch.services.disclosure_reaction import classify
 from batch.services.portfolio import ANNUAL_DEADLINE_DAYS, QUARTER_DEADLINE_DAYS
 from batch.sources.dart import ANNUAL_REPORT_CODE
 
@@ -142,8 +140,10 @@ def classify_events(
             continue
         assert 순 == 1
         if not 믿음(r):
-            out.append(Classified(날, "보고서", "중복" if 앞선 else "모름",
-                                  "보고서를 믿지 못함" + (" — 앞 실적 사건 있음" if 앞선 else "")))  # fmt: skip
+            # 앞선 실적 공시가 "사건" 일 때만 중복(그 값을 이어 감) — 앞 공시도 모름이면 모름(25.1659, 교차검증 [권고])
+            사건있음 = any(c.kind == "사건" for c in 앞선)
+            out.append(Classified(날, "보고서", "중복" if 사건있음 else "모름",
+                                  "보고서를 믿지 못함" + (" — 앞 실적 사건 있음" if 사건있음 else "")))  # fmt: skip
         elif P is None or not 믿음(P):
             out.append(Classified(날, "보고서", "모름", "앞 경계 없음·믿지 못함"))
         elif not covered(P.receipt, 날):
@@ -155,12 +155,20 @@ def classify_events(
     return out
 
 
+def event_day(axis: list[str], received: date) -> str | None:
+    """사건일 D = 접수일, 거래일이 아니면 다음 거래일(12.40). 축 끝 뒤면 None(아직 모른다)."""
+    k = received.isoformat()
+    return next((d for d in axis if d >= k), None)
+
+
 def ear(
-    axis: list[str], d: str, closes: dict[str, float], index: dict[str, float],
-    factors: dict[str, float] | None = None,
+    axis: list[str], d: str, closes: dict[str, float], index: dict[str, float], factors: dict[str, float] | None,
 ) -> float | None:
-    """EAR = (P(D+1)/P(D−2) − 1) − (I(D+1)/I(D−2) − 1). `axis` = 그 시장 거래일(오름차순), `d` = 사건일(거래일).
-    값이 하나라도 없거나(정지), 창 안 수정계수(원 종가 ÷ 수정종가) 변화가 `ACTION_TOLERANCE` 를 넘으면 None."""
+    """EAR = (P(D+1)/P(D−2) − 1) − (I(D+1)/I(D−2) − 1). `axis` = 그 시장 거래일(오름차순), `d` = 사건일
+    (`event_day` 로 바꾼 거래일). 값이 하나라도 없거나(정지), 창 안 수정계수(원 종가 ÷ 수정종가) 변화가
+    `adjust.ACTION_TOLERANCE` 를 넘으면 None. `factors` 는 **꼭 넘긴다** — None 은 "기업행위 검사를 하지 않는다" 는
+    뜻이라(미국처럼 원 종가가 없는 시장) 부르는 쪽이 일부러 고른다(25.1659, 교차검증 [권고] — 기본값이 검사를
+    건너뛰었다)."""
     if d not in axis:
         return None
     i = axis.index(d)
@@ -182,9 +190,11 @@ def value_at(
 ) -> float | None:
     """기준일 t 의 IC 값 — 기준일까지 보이는(D+1 ≤ t) 가장 최근 사건의 EAR.
 
-    `events` = (사건일 D(거래일), 분류, EAR). 사건이면 값이 그 EAR 로, 중복이면 그대로, 모름이면 None 으로 바뀐다.
-    값이 정해진 날(D+1)이 t 에서 `FRESH_DAYS` 거래일보다 앞이거나, 그 창(t 앞 `FRESH_DAYS` 거래일 ~ t)을 덮지 못하면
-    None.
+    `events` = (사건일 D(거래일 — `event_day`), 분류, EAR). 사건이면 값이 그 EAR 로, 중복이면 그대로, 모름이면 None.
+    값이 정해진 날(D+1)이 t 에서 `FRESH_DAYS` 거래일보다 앞이거나, 값이 살아 있을 수 있는 창 전체
+    ((t 의 `FRESH_DAYS`+1 거래일 앞, t] — 가장 묵은 사건일 다음 날부터 t 까지)를 덮지 못하면 None.
+    사건일이 축에 없으면(거래일로 안 바꾼 날) 조용히 건너뛰지 않고 ValueError — 토요일 "모름" 이 빠져 묵은 값이
+    살아남았다(25.1659, 교차검증 [권고]).
     """
     if t not in axis:
         return None
@@ -192,7 +202,9 @@ def value_at(
     값: float | None = None
     정한날: int | None = None
     for d, 분류, e in sorted(events, key=lambda x: x[0]):
-        if d not in axis or axis.index(d) + 1 > k:
+        if d not in axis:
+            raise ValueError(f"사건일 {d} 이 거래일 축에 없다 — event_day 로 바꿔 넘긴다")
+        if axis.index(d) + 1 > k:
             continue
         if 분류 == "사건":
             값, 정한날 = e, axis.index(d) + 1
@@ -200,16 +212,17 @@ def value_at(
             값, 정한날 = None, axis.index(d) + 1
     if 값 is None or 정한날 is None or k - 정한날 > FRESH_DAYS:
         return None
-    if k < FRESH_DAYS or not covered(axis[k - FRESH_DAYS], t):
+    # 창은 (t 의 64거래일 앞, t] — 정한날이 k−63 까지 허용되므로 사건일은 k−64 까지 온다. 예전 (k−63, t] 는 하루
+    # 짧아, 덮지 못한 날이 창 밖으로 밀리면 NULL 이던 값이 묵을수록 다시 살아났다(25.1659, 교차검증 [필수])
+    if k < FRESH_DAYS + 1 or not covered(axis[k - FRESH_DAYS - 1], t):
         return None
     return 값
 
 
 def top_cut(axis: list[str], t: str, known: list[tuple[str, float]], first_day: str) -> float | None:
-    """매수 문턱 — 그 시장에서 t 앞 `HISTORY_DAYS` 거래일(t 포함) 안에 **보인**(D+1) EAR 들의 `TOP_QUANTILE` 분위(최근
-    순위법:
-    오름차순 ⌈0.9·n⌉ 번째). `first_day`(그 시장 사건 자료 시작)부터 `HISTORY_DAYS` 가 다 차기 전이면 None — 그 구간은
-    사지 않는다."""
+    """매수 문턱 — 그 시장에서 t 앞 `HISTORY_DAYS` 거래일(t 포함) 안에 **보인**(D+1) EAR 들의 `TOP_QUANTILE` 분위
+    (최근 순위법: 오름차순 ⌈0.9·n⌉ 번째). `first_day`(그 시장 사건 자료 시작)부터 `HISTORY_DAYS` 가 다 차기
+    전이면 None — 그 구간은 사지 않는다."""
     if t not in axis or first_day not in axis:
         return None
     k, s = axis.index(t), axis.index(first_day)
