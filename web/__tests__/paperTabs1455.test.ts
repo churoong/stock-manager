@@ -62,6 +62,11 @@ describe("모의 계좌 탭", () => {
     expect(그림("B", "holdings")).toContain("보유 종목이 없습니다");
   });
 
+  it("실현손익 탭 — 기간을 고르고 그 기간의 매도를 서버에서 읽는다(25.1693)", () => {
+    const html = 그림("A", "realized");
+    for (const 글 of ["실현손익", "이번 달", "지난 달", "최근 30일", "올해", "전체", "직접", "읽는 중"]) expect(html).toContain(글);
+  });
+
   it("거래내역은 그 계좌 것만 — 매도에는 실현손익", () => {
     const a = 그림("A", "trades");
     expect(a).toContain("SK하이닉스");

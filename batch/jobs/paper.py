@@ -94,8 +94,11 @@ SCORE_NOW_SQL = (
 INSERT_FILL_SQL = (
     "INSERT OR IGNORE INTO paper_fills (order_id, account_id, stock_id, side, fill_date, price, quantity, currency,"
     " fx_rate, fx_date, fee, tax, slippage, cash_krw, horizon, score_at_trade, snapshot_as_of, created_at, day_close,"
-    " realized_krw) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    " realized_krw, realized_fx_krw) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 )
+#: 환차 몫이 아직 빈 매도(0090 전 매도) — 부분 색인으로 남은 것만 (25.1693)
+FX_PENDING_SQL = "SELECT order_id, account_id FROM paper_fills WHERE side = 'sell' AND realized_fx_krw IS NULL"
+FX_FILL_SQL = "UPDATE paper_fills SET realized_fx_krw = ? WHERE order_id = ? AND realized_fx_krw IS NULL"
 FILLED_SQL = (
     "UPDATE paper_orders SET status = 'filled', closed_on = ?, close_note = ? WHERE id = ? AND status = 'open'"
 )
@@ -258,6 +261,22 @@ def _결정(
         json.dumps(detail, ensure_ascii=False, default=str) if detail else None,
         None if ref_close is None else float(ref_close), ref_date, now, rule_version,
     ])  # fmt: skip
+
+
+def fill_realized_fx(client: Any, fills: list[pp.Fill]) -> int:
+    """환차 몫이 빈 매도에 `pp.realized` 의 값을 적는다(25.1693). 장부 평균 원가로 셀 수 없는 매도(팔 때 보유 없음)는
+    빈 채로 둔다 — 실현손익도 비어 있다. 적은 수를 돌려준다"""
+    남은 = client.execute(FX_PENDING_SQL).rows
+    if not 남은:
+        return 0
+    계좌들 = {str(r[1]) for r in 남은}
+    값: dict[int, float] = {}
+    for aid in 계좌들:
+        값.update({int(r["order_id"]): r["fx_krw"] for r in pp.realized([f for f in fills if f.account_id == aid])})
+    문장 = [(FX_FILL_SQL, [값[int(r[0])], int(r[0])]) for r in 남은 if int(r[0]) in 값]
+    if 문장:
+        _쓰기(client, 문장)
+    return len(문장)
 
 
 def fill_outcomes(client: Any, market: str, today: str, now: str) -> dict[str, int]:
@@ -835,12 +854,15 @@ def fill_orders(
                 _쓰기(client, [(EXPIRE_SQL, [trade_date, "현금 부족 (다른 미체결 매수 예약 포함)", o.id])])
                 기록["expired"] = 기록.get("expired", 0) + 1
                 continue
-        실현 = None
+        실현 = 환차 = None
         if o.side == "sell":
             보유 = pp.positions([f for f in [*fills, *새것] if f.account_id == o.account_id]).get(o.stock_id)
             if 보유 is not None and 보유.quantity > 0:
                 # 매도의 실현손익(원) — 평균 원가 기준, 화면의 거래내역 (25.1455)
                 실현 = _원(체결.cash_krw - 보유.cost_krw * o.quantity / 보유.quantity)
+                # 그 가운데 환차 몫 (25.1693, CLAUDE.md "해외 종목은 환차손익을 주가 손익과 분리") — 같은 평균 원가 장부
+                환차 = next((r["fx_krw"] for r in pp.realized(
+                    [f for f in [*fills, *새것, 체결] if f.account_id == o.account_id]) if r["order_id"] == o.id), None)
             if 보유 is None or 보유.quantity < o.quantity:
                 _쓰기(client, [(EXPIRE_SQL, [trade_date, "팔 보유가 모자람", o.id])])
                 기록["expired"] = 기록.get("expired", 0) + 1
@@ -849,7 +871,7 @@ def fill_orders(
             (INSERT_FILL_SQL, [체결.order_id, 체결.account_id, 체결.stock_id, 체결.side, 체결.fill_date, 체결.price,
                                체결.quantity, 체결.currency, 체결.fx_rate, 환율날, 체결.fee, 체결.tax, 체결.slippage,
                                체결.cash_krw, 체결.horizon, 체결.score_at_trade, 체결.snapshot_as_of, now,
-                               그날종가, 실현]),
+                               그날종가, 실현, 환차]),
             (FILLED_SQL, [trade_date, 까닭, o.id]),
         ])  # fmt: skip
         새것.append(체결)
@@ -1766,6 +1788,13 @@ def run_step(
     fills = [*fills, *새체결]
     for f in 새체결:
         fill_created[f.order_id] = 지금
+    # 0090 전 매도의 환차 몫을 한 번 채운다(25.1693) — 부분 색인으로 남은 것만 읽어 다 채우면 읽기 0. 곁다리
+    try:
+        기록["realized_fx_filled"] = fill_realized_fx(client, fills)
+    except Exception as exc:  # noqa: BLE001 — 실현손익 화면의 환차 칸만 늦는다. 까닭은 기록에
+        if db.quota_reason(exc):
+            raise
+        기록["realized_fx_filled"] = {"error": str(exc)[:200]}
 
     # 그림자 지금 값은 그 시장 보유가 쓴 마지막 시세 날짜·평가 환율로(25.1626)
     끝시세 = {c: (r[0][0] if (r := client.execute(LAST_MARKET_DAY_SQL, [오늘, c]).rows) else None)

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import CriteriaTable from "@/components/CriteriaTable";
+import PaperRealized from "@/components/PaperRealized";
 import EquityChart, { type Series } from "@/components/EquityChart";
 import Link from "next/link";
 import { DESK_RULES, MARKET_LABEL, adjustCheckText, adjustText, championText, pctText as deskPct, ppText, preregText, ruleSpanText, rowsById, type DeskView, type RuleSpan } from "@/lib/desk";
@@ -73,11 +74,13 @@ export interface Data { halted: boolean; realCompare: RealCompareView | null; in
 const JOURNAL_NEVER_STALE_DAYS = 100_000;
 
 const HORIZON_LABEL: Record<string, string> = { short: "단기", mid: "중기", long: "장기" };
-export type SubTab = "summary" | "holdings" | "trades" | "orders" | "report" | "rules" | "skips" | "committee";
+export type SubTab = "summary" | "holdings" | "trades" | "realized" | "orders" | "report" | "rules" | "skips" | "committee";
 const SUB_TABS: Array<[SubTab, string]> = [
   ["summary", "요약"],
   ["holdings", "보유내역"],
   ["trades", "거래내역"],
+  // 기간 실현손익·일자별 (2026-10-22 사용자 지시, 25.1693)
+  ["realized", "실현손익"],
   ["orders", "체결 대기"],
   ["report", "성적표"],
   // 전략 화면 (docs/desk.md 3장, 25.1502) — 규칙을 바꾼 날과 전후 성적, 안 한 결정과 그 뒤
@@ -525,6 +528,7 @@ export function AccountTabs({ data, acct, setAcct, sub, setSub, desk }: {
         {sub === "summary" ? <SummaryPane a={a} /> : null}
         {sub === "holdings" ? <HoldingsPane a={a} /> : null}
         {sub === "trades" ? <TradesPane fills={체결} /> : null}
+        {sub === "realized" ? <PaperRealized key={a.id} account={a.id} /> : null}
         {sub === "orders" ? <OrdersPane orders={주문} /> : null}
         {sub === "report" ? <ReportPane a={a} /> : null}
         {sub === "rules" ? <RulesPane a={a} spans={desk ? (desk.rule_history?.[a.id] ?? []) : null} asOf={desk?.as_of ?? null} /> : null}

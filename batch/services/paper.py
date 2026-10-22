@@ -422,20 +422,30 @@ def positions(fills: list[Fill]) -> dict[int, Position]:
 
 
 def realized(fills: list[Fill]) -> list[dict[str, Any]]:
-    """매도 체결마다 실현손익(원) — 평균 원가 기준. 월간 리포트의 "가장 큰 이익·손실" 에 쓴다 (docs/paper.md 6장)."""
-    보유: dict[int, tuple[int, float]] = {}
+    """매도 체결마다 실현손익(원) — 평균 원가 기준. 월간 리포트의 "가장 큰 이익·손실" 에 쓴다 (docs/paper.md 6장).
+
+    해외 종목은 **환차손익 몫**(`fx_krw`)을 가른다 (25.1692, CLAUDE.md "해외 종목은 환차손익을 주가 손익과 분리") —
+    원가를 원화와 현지 통화 둘로 쌓아(매수 비용 포함, 평균 원가), 실현손익 = 매도 대금(원) − 원화 원가 를
+    주가 몫 = (현지 매도 대금 − 현지 원가) × 매도 환율, 환차 몫 = 현지 원가 × (매도 환율 − 매수 평균 환율) 로 나눈다.
+    둘의 합은 실현손익과 같다(반올림 1원 안). 원화 종목의 환차 몫은 0
+    """
+    보유: dict[int, tuple[int, float, float]] = {}  # 수량, 원화 원가, 현지 통화 원가
     out: list[dict[str, Any]] = []
     for f in sorted(fills, key=lambda x: (x.fill_date, 0 if x.side == "sell" else 1, x.order_id)):
-        q, c = 보유.get(f.stock_id, (0, 0.0))
+        q, c, 현 = 보유.get(f.stock_id, (0, 0.0, 0.0))
+        환율 = f.fx_rate if f.currency != "KRW" and f.fx_rate else 1.0
         if f.side == "buy":
-            보유[f.stock_id] = (q + f.quantity, c - f.cash_krw)
+            보유[f.stock_id] = (q + f.quantity, c - f.cash_krw, 현 - f.cash_krw / 환율)
             continue
         if q <= 0:
             continue
         원가 = c * f.quantity / q
+        현지원가 = 현 * f.quantity / q
+        손익 = _원(f.cash_krw - 원가)
+        환차 = 0.0 if f.currency == "KRW" else _원(현지원가 * 환율 - 원가)
         out.append({"stock_id": f.stock_id, "fill_date": f.fill_date, "order_id": f.order_id,
-                    "pnl_krw": _원(f.cash_krw - 원가), "cost_krw": _원(원가)})  # fmt: skip
-        보유[f.stock_id] = (q - f.quantity, c - 원가)
+                    "pnl_krw": 손익, "cost_krw": _원(원가), "fx_krw": 환차, "price_krw": 손익 - 환차})  # fmt: skip
+        보유[f.stock_id] = (q - f.quantity, c - 원가, 현 - 현지원가)
     return out
 
 

@@ -151,7 +151,7 @@ def test_order_fill_rerun_and_stop_loss(client: Client, monkeypatch: pytest.Monk
     매도 = c.q("SELECT account_id, quantity, reason, fill_basis FROM paper_orders WHERE side = 'sell' ORDER BY 1")
     assert 매도 == [("A", 4, "손절", "open"), ("B", 4, "손절", "open")]
     _시세(c, "2026-10-19", 8_800, 9_200)
-    _하루(c, monkeypatch, "2026-10-19", signals=False)
+    _, 판날 = _하루(c, monkeypatch, "2026-10-19", signals=False)
     판것 = c.q("SELECT account_id, price, slippage FROM paper_fills WHERE side = 'sell' ORDER BY 1")
     assert [(a, p) for a, p, _s in 판것] == [("A", 8_800), ("B", 8_800)]
     # 화면의 거래내역·평가손익 (25.1455) — 매도의 실현손익 = 현금 영향 − 평균 원가, 계좌 합은 평가 행에
@@ -162,6 +162,9 @@ def test_order_fill_rerun_and_stop_loss(client: Client, monkeypatch: pytest.Monk
     assert c.q("SELECT realized_krw, unrealized_krw FROM paper_daily WHERE account_id = 'A' ORDER BY as_of DESC LIMIT 1")[0] == (
         실현, 0)
     assert c.q("SELECT realized_krw FROM paper_fills WHERE side = 'buy' AND account_id = 'A'") == [(None,)]
+    # 그 가운데 환차 몫 — 원화 종목은 0 으로 체결 때 적는다(25.1693)
+    assert c.q("SELECT DISTINCT realized_fx_krw FROM paper_fills WHERE side = 'sell'") == [(0.0,)]
+    assert 판날["realized_fx_filled"] == 0  # 체결 때 적었다 — 뒤 채우기가 메운 것이 아니다
     assert 판것[0][2] == pytest.approx(8_800 * 4 * 0.001)  # 시장가 매도는 슬리피지
 
     # 실제 장부는 그대로
