@@ -49,7 +49,9 @@ export interface DeskKisAccount {
   perf: import("@/lib/kisPaper").KisPerf | null;
 }
 /** 실전 전환 1단계 관문 (docs/desk.md 6장, 25.1508) — 읽기 전용. 넘어도 아무것도 열리지 않는다 */
-export interface GateItem { key: string; label: string; now: number | null; target: number | null; ok: boolean; n?: number; mean?: number | null; index_pct?: number | null; index_used?: string[]; detail?: Record<string, number>; path_pct?: number | null; path_n?: number | null; exposure_matched?: ExposureMatched | null }
+export interface GateItem { key: string; label: string; now: number | null; target: number | null; ok: boolean; n?: number; mean?: number | null; index_pct?: number | null; index_used?: string[]; detail?: Record<string, number>; path_pct?: number | null; path_n?: number | null; exposure_matched?: ExposureMatched | null; valuation_gap?: ValuationGap | null }
+/** 관문 R 대비 옆 — 원가·묵은 평가 비중(관문 구간 평균 %). 문턱을 넘으면 R 대비 불통 (25.1709) */
+export interface ValuationGap { h_pct: number | null; r_pct: number | null; limit: number; over: boolean }
 /** 관문 R 대비 옆 참고 칸 — 노출을 H 에 맞춘 R (25.1702). 통과 판정에 들지 않는다 */
 export interface ExposureMatched { vs_r?: number; r_pct: number; h_exposure_pct: number; r_exposure_pct: number; skipped_days: number }
 export interface Gate { stage: number; account: string; version?: number | null; from?: string | null; items: GateItem[]; passed: boolean; next: string }
@@ -284,7 +286,12 @@ export function gateNowText(i: GateItem): string {
       const 참고 = m && m.vs_r != null
         ? ` (참고: 노출 맞춘 R 대비 ${ppText(m.vs_r, 0)} — 평균 투자 비중 H ${m.h_exposure_pct.toFixed(0)}% · R ${m.r_exposure_pct.toFixed(0)}%)`
         : "";
-      return `${ppText(i.now, 0)} / 0 초과${참고}`;
+      // 원가·묵은 평가 비중(25.1709) — 넘었을 때만 판정이 바뀌니 그때만 붙인다
+      const v = i.valuation_gap;
+      const 멈춤 = v?.over
+        ? ` · 원가·묵은 평가 H ${v.h_pct == null ? "-" : v.h_pct.toFixed(1)}% · R ${v.r_pct == null ? "-" : v.r_pct.toFixed(1)}% — ${v.limit}% 넘어 믿기 어려움`
+        : "";
+      return `${ppText(i.now, 0)} / 0 초과${참고}${멈춤}`;
     }
     case "vs_index":
       // 같은 돈을 KOSPI·S&P500 반반에 넣었다면(25.1519) — 지수 쪽 수익률을 같이

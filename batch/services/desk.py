@@ -326,6 +326,49 @@ def batch_incident_days(rows: list[dict[str, Any]], expected: dict[str, list[str
     return sum(1 for job, 날들 in expected.items() for d in set(날들) if (job, d) not in 성공 or (job, d) in 실패)
 
 
+#: 관문 R 대비를 믿기 어려운 원가·묵은 평가 비중(관문 구간 평균, 평가 총액 대비 %) — 25.1709, H·R 감사 [권고] 3.
+#: 5% 는 정한 값(되돌릴 수 있음): R 대비 추적오차(연 20% 안팎 어림)에 견주어 평가가 멈춘 몫이 이보다 크면 비교가
+#: 그 몫의 실제 손익을 빠뜨린다 — 넘으면 R 대비 칸을 불통으로(더 엄격하게만)
+GATE_VALUATION_GAP_PCT = 5.0
+#: 마지막 종가가 그날보다 이 달력일보다 오래되면 묵은 평가(장기 정지·상장폐지 절차) — 긴 연휴(국내 최장 약 10일)
+#: 첫날엔 잠깐 잡히지만 구간 평균이라 작다
+VALUATION_STALE_DAYS = 7
+
+
+def valuation_gaps(rows: list[dict[str, Any]]) -> dict[str, list[tuple[str, float]]]:
+    """`paper_daily` 줄(account_id·as_of·equity_krw·positions_json) → {계좌: [(as_of, 원가·묵은 평가 비중 %)]}
+    (25.1709). 원가 평가 = 보유 줄의 `unknown_why`(기업행위 멈춤·종가 없음·환율 없음 — 평가가 원가로 멈춤), 묵은
+    평가 = `price_date` 가 그날보다 `VALUATION_STALE_DAYS` 넘게 앞섬. 평가 총액이 없거나 0 이하인 줄은 뺀다"""
+    import json
+    from datetime import date
+
+    out: dict[str, list[tuple[str, float]]] = {}
+    for r in rows:
+        eq = r.get("equity_krw")
+        if eq is None or float(eq) <= 0:
+            continue
+        try:
+            줄 = json.loads(r.get("positions_json") or "[]")
+            날 = date.fromisoformat(str(r["as_of"])[:10])
+        except (TypeError, ValueError):
+            continue
+        멈춤 = 0.0
+        for p in 줄 if isinstance(줄, list) else []:
+            v = float(p.get("value_krw") or 0) if isinstance(p, dict) else 0.0
+            if not isinstance(p, dict) or v <= 0:
+                continue
+            if p.get("unknown_why"):
+                멈춤 += v
+            elif p.get("price_date"):
+                try:
+                    if (날 - date.fromisoformat(str(p["price_date"])[:10])).days > VALUATION_STALE_DAYS:
+                        멈춤 += v
+                except ValueError:
+                    continue
+        out.setdefault(str(r["account_id"]), []).append((str(r["as_of"]), 100 * 멈춤 / float(eq)))
+    return out
+
+
 #: 노출 맞춘 R 대비(25.1702)에서 R 의 투자 비중이 이보다 작은 날은 뺀다 — 주식 몫 수익(하루 수익 ÷ 투자 비중)이
 #: 분모 0 근처에서 터진다. 5% 는 정한 값(되돌릴 수 있음) — 뺀 날 수를 칸에 적는다
 EXPOSURE_MIN = 0.05
@@ -382,6 +425,7 @@ def gate(
     index: list[tuple[str, float | None, float | None, float]] | None = None,
     cash: list[tuple[str, float, float]] | None = None,
     control_cash: dict[str, list[tuple[str, float, float]]] | None = None,
+    valuation: dict[str, list[tuple[str, float]]] | None = None,
 ) -> dict[str, Any]:
     """실전 전환 1단계 관문 진도 — {stage, account, version, from, items: [{key, label, now, target, ok}], passed,
     next}.
@@ -407,6 +451,18 @@ def gate(
           if 시작 and cash and control_cash else None)  # fmt: skip
     if 맞춤 is not None and pct is not None:
         맞춤["vs_r"] = pct - 맞춤["r_pct"]
+    # 원가·묵은 평가 비중(25.1709) — 관문 구간(시작 뒤) 평균. H 나 R(R1·R2 평균)이 문턱을 넘으면 R 대비를 믿기 어렵다
+    멈춘평가: dict[str, Any] | None = None
+    if valuation is not None and 시작:
+        def 평균(a: str) -> float | None:
+            xs = [x for d, x in valuation.get(a) or [] if d > 시작]
+            return sum(xs) / len(xs) if xs else None
+
+        r평균 = [x for r in CONTROL_IDS if (x := 평균(r)) is not None]
+        멈춘평가 = {"h_pct": 평균(mirror), "r_pct": sum(r평균) / len(r평균) if r평균 else None,
+                 "limit": GATE_VALUATION_GAP_PCT}  # fmt: skip
+        멈춘평가["over"] = any(x is not None and x > GATE_VALUATION_GAP_PCT
+                             for x in (멈춘평가["h_pct"], 멈춘평가["r_pct"]))  # fmt: skip
     대조 = [x for r in CONTROL_IDS if 시작 and (x := risk_ratio(sorted(series.get(r) or []), 시작)) is not None]
     대조비 = sum(대조) / len(대조) if 대조 else None
     내비 = risk_ratio(전체, 시작) if 시작 else None
@@ -427,7 +483,8 @@ def gate(
         {"key": "days", "label": f"모의 기간({판글}의 평가 횟수)", "now": len(v), "target": GATE_MIN_POINTS,
          "ok": len(v) >= GATE_MIN_POINTS},
         {"key": "vs_r", "label": "관문 구간 R 대비(%p)", "now": vs_r, "target": 0, "exposure_matched": 맞춤,
-         "ok": vs_r is not None and vs_r > 0},
+         "valuation_gap": 멈춘평가,
+         "ok": vs_r is not None and vs_r > 0 and not (멈춘평가 or {}).get("over")},
         {"key": "vs_index", "label": "관문 구간 지수 대비(%p) — 같은 돈을 KOSPI·S&P500 반반에 넣었다면",
          "now": vs_idx, "target": 0, "index_pct": 지수, "index_used": 쓴지수, "cash_eq": cash_eq,
          "ok": vs_idx is not None and vs_idx > 0},
