@@ -46,7 +46,13 @@ def test_기록보다_많이_판_매도가_나오면_그_구간_전부_모름() 
                      _o(3, "2026-10-16", "sell", 7, 105.0),
                      _o(4, "2026-10-20", "buy", 1, 50.0), _o(5, "2026-10-21", "sell", 1, 60.0)], lambda d: None)  # fmt: skip
     assert r[2] == (None, None) and r[3] == (None, None)
-    assert r[5] == (10.0, 0.0)  # 다 판 뒤 새로 산 구간은 다시 센다
+    # KIS 에 기록 밖 주식이 남았을 수 있다 — 개장 전 잔고가 0 을 보이기 전까지 그 뒤 구간도 모름(25.1701)
+    assert r[5] == (None, None)
+    r2 = bm.realized([_o(1, "2026-10-14", "buy", 10, 100.0), _o(2, "2026-10-15", "sell", 8, 110.0),
+                      _o(3, "2026-10-16", "sell", 7, 105.0),
+                      _o(4, "2026-10-20", "buy", 1, 50.0), _o(5, "2026-10-21", "sell", 1, 60.0)], lambda d: None,
+                     snapshots=[("2026-10-19", {})])  # fmt: skip
+    assert r2[5] == (10.0, 0.0)  # 10-19 개장 전 KIS 0 — 원가가 새로 시작
 
 
 def test_KIS_잔고와_기록_끝_수량이_다르면_마지막_구간은_모름() -> None:
@@ -56,6 +62,8 @@ def test_KIS_잔고와_기록_끝_수량이_다르면_마지막_구간은_모름
     assert bm.realized(rows, lambda d: None, {"C1": 5}) == {2: (50.0, 0.0), 4: (8.0, 0.0)}  # 맞음
     # KIS 는 7주 — 기록에 없는 2주가 있다. 다 판 C2 를 KIS 도 0 으로 들면 그대로
     assert bm.realized(rows, lambda d: None, {"C1": 7}) == {2: (None, None), 4: (8.0, 0.0)}
+    # KIS 가 **적게** 든 것(기록 밖 매도)은 원가를 흐리지 않는다 — 매도는 평균 원가를 바꾸지 않는다(25.1701)
+    assert bm.realized(rows, lambda d: None, {"C1": 3}) == {2: (50.0, 0.0), 4: (8.0, 0.0)}
     # 다 판 종목을 KIS 가 아직 들고 있으면 그 마지막 구간도 모름
     assert bm.realized(rows, lambda d: None, {"C1": 5, "C2": 3})[4] == (None, None)
 
@@ -78,7 +86,7 @@ def test_잔고를_받아_넘긴다() -> None:
 
 
 def test_실행이_잔고를_넘긴다(c) -> None:  # noqa: ANN001, F811
-    """`run` 이 같은 실행에서 읽은 KIS 잔고로 견준다 — 기록 끝 2주인데 KIS 가 3주면 모름(안 적음), 2주면 적는다"""
+    """`run` 이 같은 실행에서 읽은 KIS 잔고로 견준다 — 기록 끝 2주에 KIS 2주면 적고, 3주면 모름으로 거둔다"""
     import pytest
 
     from batch.sources import kis_vts as kv
@@ -94,13 +102,66 @@ def test_실행이_잔고를_넘긴다(c) -> None:  # noqa: ANN001, F811
       " limit_price, quantity, trade_date, reason, status, filled_qty, avg_price, source, created_at) VALUES"
       " ('kis_vts_us', NULL, 'B', 'US', 30, 'AAPL', 'sell', 'limit', 180, 1, '2026-10-15', '정리', 'filled', 1, 210,"
       " 't', 't')")  # fmt: skip
-    기록 = job.run(c, "US", _kst("21:27"), session=_UsSess(holdings=[kv.Holding("AAPL", 3, 3, 200.0)]),
-                   clock=lambda: _kst("21:27"))  # fmt: skip
-    assert 기록["realized_updated"] == 0
-    assert c.q("SELECT realized_krw FROM paper_broker_orders WHERE reason = '정리' AND status = 'filled'") == [(None,)]
     기록 = job.run(c, "US", _kst("21:27"), session=_UsSess(holdings=[kv.Holding("AAPL", 2, 2, 200.0)]),
                    clock=lambda: _kst("21:27"))  # fmt: skip
     assert 기록["realized_updated"] == 1
     # 210 × 1,410 − 200 × 1,400 = 16,100 = 주가 10 × 1,410 + 환차 200 × 10
     assert c.q("SELECT realized_krw, realized_fx_krw FROM paper_broker_orders WHERE reason = '정리'"
                " AND status = 'filled'") == [(pytest.approx(16_100.0), pytest.approx(2_000.0))]  # fmt: skip
+    # 같은 날 다시 — KIS 가 3주(기록 밖 1주): 적어 둔 값을 모름으로 거둔다
+    기록 = job.run(c, "US", _kst("21:27"), session=_UsSess(holdings=[kv.Holding("AAPL", 3, 3, 200.0)]),
+                   clock=lambda: _kst("21:27"))  # fmt: skip
+    assert 기록["realized_updated"] == 1
+    assert c.q("SELECT realized_krw FROM paper_broker_orders WHERE reason = '정리' AND status = 'filled'") == [(None,)]
+
+
+# ── 개장 전 잔고 기준점 (25.1701, 25.1698 교차검증 [권고] 1·2) ─────────────────────────────────────────
+
+
+def test_앞_구간에서_시작된_어긋남도_다시_사면_풀리지_않는다() -> None:
+    """S1 — 10주 @100(기록) + 5주 @130(`unknown` 으로 닫았지만 참). 10주 @120 매도로 기록은 0, KIS 는 5. 3주 @110 을
+    다시 사고 8주 @125 매도. 마지막 구간만 보던 때는 다시 산 뒤 10주 매도가 200 으로 적혔다(KIS 평균 원가로는 100)"""
+    rows = [_o(1, "2026-10-14", "buy", 10, 100.0), _o(3, "2026-10-15", "sell", 10, 120.0),
+            _o(4, "2026-10-16", "buy", 3, 110.0), _o(5, "2026-10-19", "sell", 8, 125.0)]  # fmt: skip
+    r = bm.realized(rows, lambda d: None, {}, snapshots=[("2026-10-16", {"C1": 5}), ("2026-10-20", {})])
+    assert r == {3: (None, None), 5: (None, None)}
+
+
+def test_KIS_0_으로_확인한_구간은_뒤의_어긋남이_건드리지_않는다() -> None:
+    """S2 — 깨끗하게 닫혀 10-16 개장 전 KIS 0 으로 확인한 구간(200)은, 뒤에 기록보다 많이 판 매도가 나와도 그대로"""
+    rows = [_o(1, "2026-10-14", "buy", 10, 100.0), _o(2, "2026-10-15", "sell", 10, 120.0),
+            _o(3, "2026-10-19", "sell", 5, 130.0)]  # fmt: skip
+    assert bm.realized(rows, lambda d: None, snapshots=[("2026-10-16", {})]) == {2: (200.0, 0.0), 3: (None, None)}
+    # 0 을 확인하지 못했으면 같은 구간이라 모름(보수)
+    assert bm.realized(rows, lambda d: None)[2] == (None, None)
+
+
+def test_기록_밖_매도는_원가를_흐리지_않는다() -> None:
+    """S8 — 4주 매도가 `unknown` 으로 닫혔는데 참(KIS 6, 기록 10). 그 뒤 6주 @120 매도는 평균 원가 100 그대로라 120 이
+    맞다 — 예전엔 기록이 KIS 보다 많은 것도 어긋남으로 봐 영구히 모름이었다. KIS 0 인 날 기록을 0 으로 맞춰 새로 산 것도 센다"""
+    rows = [_o(1, "2026-10-14", "buy", 10, 100.0), _o(3, "2026-10-16", "sell", 6, 120.0),
+            _o(4, "2026-10-20", "buy", 2, 50.0), _o(5, "2026-10-21", "sell", 2, 55.0)]  # fmt: skip
+    r = bm.realized(rows, lambda d: None, {}, snapshots=[("2026-10-16", {"C1": 6}), ("2026-10-19", {})])
+    assert r == {3: (120.0, 0.0), 5: (10.0, 0.0)}
+    # KIS 0 확인이 없으면 기록에 남은 4주(유령)가 새 매수 원가에 섞인다 — 2주 매도는 기록 6주 가운데서 판 것
+    assert bm.realized(rows, lambda d: None)[5] != (10.0, 0.0)
+
+
+def test_같은_날_매수_먼저가_기록_밖_보유를_가리지_않는다() -> None:
+    """S5 — 개장 전 KIS 에 기록 밖 5주가 있는 날 5주 사고 5주 팔았다 — 매수 먼저 규칙으로는 0, KIS 평균 원가로는 다르다"""
+    rows = [_o(1, "2026-10-15", "buy", 5, 100.0), _o(2, "2026-10-15", "sell", 5, 100.0)]
+    assert bm.realized(rows, lambda d: None, snapshots=[("2026-10-15", {"C1": 5})]) == {2: (None, None)}
+    assert bm.realized(rows, lambda d: None, snapshots=[("2026-10-15", {})]) == {2: (0.0, 0.0)}
+
+
+def test_개장_뒤에_덮어쓴_잔고는_기준점이_아니다() -> None:
+    """국내 10-15 개장 09:00 KST(00:00 UTC) — 08:27 KST 에 읽은 것만. 예전 꼴 보유 칸·코드 없는 칸도 읽는다"""
+    rows = [
+        {"as_of": "2026-10-15", "fetched_at": "2026-10-14T23:27:00+00:00",
+         "holdings_json": '[{"id": 1, "code": "005930", "qty": 3}, {"id": 2, "code": "005930", "qty": 2}]'},
+        {"as_of": "2026-10-16", "fetched_at": "2026-10-16T01:00:00+00:00", "holdings_json": '[{"code": "A", "qty": 1}]'},
+        {"as_of": "2026-10-17", "fetched_at": "2026-10-17T05:00:00+00:00", "holdings_json": "[]"},  # 토요일 — 장 없음
+        {"as_of": "2026-10-19", "fetched_at": "2026-10-18T23:00:00", "holdings_json": '[["000660", 4, 100.0], [7, 1, 1.0]]'},
+    ]  # fmt: skip
+    assert job._개장전_잔고(rows, "KR") == [("2026-10-15", {"005930": 5}), ("2026-10-17", {}),
+                                        ("2026-10-19", {"000660": 4})]  # fmt: skip

@@ -654,30 +654,40 @@ def perf(
 
 def realized(
     rows: list[dict[str, Any]], fx_on: Any, balance: dict[str, int] | None = None,
+    snapshots: list[tuple[str, dict[str, int]]] | None = None,
 ) -> dict[int, tuple[float | None, float | None]]:
     """KIS모의투자 매도마다 실현손익(원)과 그 가운데 환차 몫 — **우리 주문 기록**(체결 수량·평균 체결가)의 평균 원가
-    (docs/paper.md 15장, 25.1694, 2026-10-22 사용자 지시 "모의투자에 실현손익이나 기간실현손익").
+    (docs/paper.md 15.7.1, 25.1694, 2026-10-22 사용자 지시 "모의투자에 실현손익이나 기간실현손익").
 
     `rows` = 체결이 있는 주문(id·trade_date·side·stock_id·code·filled_qty·avg_price — 미국은 달러).
     `fx_on(날짜)` = 그날 USDKRW(모르면 None — 국내는 부르지 않는다). `balance` = 같은 실행이 읽은 KIS 잔고 {코드: 수량}.
+    `snapshots` = 지난 실행들이 **개장 전에** 읽은 KIS 잔고 [(그날, {코드: 수량})] — 그날 앞 체결까지 담긴다.
     돌려주는 것: {매도 주문 id: (실현손익, 환차 몫)}. **KIS 가 매긴 수수료·세금은 빠진다** — 기록에 없다
     `[확인필요: KIS 모의 비용]`.
 
-    - **코드로 묶는다**(25.1698) — KIS 잔고는 티커 하나에 평균 원가 하나다. 같은 티커의 두 행(25.1616)을 행마다 묶으면
-      옛 행 매도·정리 매도가 다른 원가로 적혔다
+    - **티커(`code`)로 묶는다**(25.1698) — KIS 잔고는 티커 하나에 평균 원가 하나다
     - 같은 날은 매도 먼저(가상모의투자 `paper.realized` 와 같은 순서 — 주문은 장 전에 한꺼번에), 다만 매도가 그때
-      기록 보유보다 많으면 같은 날 매수를 먼저 넣는다(개장 뒤 다시 돌아 산 날 판 것 — 매도 먼저면 유령 보유가 남았다)
-    - **모름**: 원가를 모르는 매수(환율 없는 미국)가 든 동안의 매도. 그리고 기록이 KIS 와 어긋난 흔적이 있는
-      **보유 구간**(기록 보유 0 에서 산 때부터 다시 0 이 될 때까지)의 매도 전부 — ① 기록보다 많이 판 매도가
-      나옴(정리·`unknown` 으로 닫은 매수가 실제로 참·기록 전 보유) ② 마지막 구간의 기록 끝 수량이 `balance` 와 다름.
-      어긋난 몫의 원가를 모르므로 KIS 평균 원가와 다른 값을 조용히 적지 않는다(25.1694 교차검증 [권고] 1)
+      기록 보유보다 많으면 같은 날 매수를 먼저 넣는다(개장 뒤 다시 돌아 산 날 판 것)
+    - 평균 원가는 **매수로만** 바뀐다(매도는 수량만 줄인다). 그래서 KIS 가 기록보다 **많이** 든 것(기록 밖 매수 —
+      `unknown` 으로 닫은 매수가 실제로 참·손 매수·기록 전 보유)은 원가를 흐리고, **적게** 든 것(기록 밖 매도)은
+      KIS 가 0 이 되어 원가가 새로 시작할 때까지 원가를 흐리지 않는다(25.1701)
+    - **오염**(25.1701, 25.1698 교차검증 [권고] 1·2): 개장 전 잔고가 기록보다 많거나 기록보다 많이 판 매도가 나오면
+      그 티커의 지금(또는 마지막) 보유 구간 매도를 모름으로 하고, 그 뒤 매도도 모름 — **개장 전 잔고가 0** 인 날 기록을
+      0 으로 맞추고(원가 새로 시작) 오염을 푼다. 0 을 확인한 구간은 닫는다(뒤의 어긋남이 그 구간을 건드리지 않음).
+      `balance` 는 이 실행의 잔고로 같은 잣대(기록보다 많으면 마지막 구간 모름)
+    - 원가를 모르는 매수(환율 없는 미국)가 든 동안의 매도도 모름 — 다 판 뒤 새로 살 때까지
     """
     보유: dict[str, tuple[int, float, float, bool]] = {}  # 수량, 현지 원가, 원화 원가, 원가 모름
     구간: dict[str, list[int]] = {}  # 코드마다 지금(또는 마지막) 보유 구간의 매도 id
+    오염: set[str] = set()
     out: dict[int, tuple[float | None, float | None]] = {}
 
     def 열쇠(r: dict[str, Any]) -> str:
         return str(r.get("code") or f"#{r['stock_id']}")
+
+    def 모름표시(k: str) -> None:
+        for x in 구간.get(k, []):
+            out[x] = (None, None)
 
     def 사기(r: dict[str, Any]) -> None:
         k, q체결, 가 = 열쇠(r), int(r["filled_qty"]), r.get("avg_price")
@@ -698,12 +708,12 @@ def realized(
         구간.setdefault(k, []).append(i)
         남 = max(q - q체결, 0)
         if q체결 > q:
-            # 기록보다 많이 팔렸다 — 이 구간 전부 원가를 모른다(①)
-            for x in 구간[k]:
-                out[x] = (None, None)
+            # 기록보다 많이 팔렸다 = KIS 가 기록 밖 주식을 들고 있었다 — 이 구간 전부, 그 뒤도 원가를 모른다
+            오염.add(k)
+            모름표시(k)
             보유[k] = (0, 0.0, 0.0, False)
             return
-        if 가 is None or float(가) <= 0 or 환율 is None or 모름:
+        if 가 is None or float(가) <= 0 or 환율 is None or 모름 or k in 오염:
             out[i] = (None, None)
             보유[k] = (남, 현 * 남 / q, 원 * 남 / q, 모름 and 남 > 0)
             return
@@ -712,12 +722,29 @@ def realized(
         out[i] = (float(손익), float(round(현지원가 * 환율 - 원화원가)) if 미국 else 0.0)
         보유[k] = (남, 현 - 현지원가, 원 - 원화원가, False)
 
+    def 잔고와(잔: dict[str, int], 끝: bool) -> None:
+        # 기록에 한 번이라도 나오는 티커 전부 — 첫 매수 전에 KIS 가 이미 든 것(기록 전 보유)도 원가를 흐린다
+        for k in 기록코드:
+            q, kis = 보유.get(k, (0,))[0], int(잔.get(k, 0))
+            if kis > q:
+                오염.add(k)
+                모름표시(k)
+            elif kis == 0 and not 끝:
+                # KIS 가 0 — 원가가 새로 시작한다. 기록 밖 매도로 남은 기록 수량은 버리고 오염을 푼다
+                보유[k] = (0, 0.0, 0.0, False)
+                오염.discard(k)
+                구간[k] = []
+
     찬 = [r for r in rows if int(r.get("filled_qty") or 0) > 0]
+    기록코드 = sorted({열쇠(r) for r in 찬})
     날들: dict[str, list[dict[str, Any]]] = {}
     for r in 찬:
-        날들.setdefault(str(r["trade_date"]), []).append(r)
-    for 날 in sorted(날들):
-        줄 = sorted(날들[날], key=lambda x: (0 if x["side"] == "sell" else 1, int(x["id"])))
+        날들.setdefault(str(r["trade_date"])[:10], []).append(r)
+    스냅 = {str(d)[:10]: v for d, v in (snapshots or [])}
+    for 날 in sorted(set(날들) | set(스냅)):
+        if 날 in 스냅:
+            잔고와(스냅[날], False)
+        줄 = sorted(날들.get(날, []), key=lambda x: (0 if x["side"] == "sell" else 1, int(x["id"])))
         넣음: set[int] = set()
         for r in 줄:
             if r["side"] == "buy":
@@ -731,9 +758,6 @@ def realized(
                         넣음.add(int(b["id"]))
             팔기(r)
     if balance is not None:
-        # 마지막 구간의 기록 끝 수량이 KIS 잔고와 다르면 그 구간 매도는 모름(②). 기록에 없는 코드는 견주지 않는다
-        for k, v in 보유.items():
-            if int(balance.get(k, 0)) != v[0]:
-                for x in 구간.get(k, []):
-                    out[x] = (None, None)
+        # 이 실행의 잔고(개장 뒤 다시 돈 실행이면 오늘 체결이 섞일 수 있다 — 기록을 바꾸지 않고 표시만)
+        잔고와(balance, True)
     return out

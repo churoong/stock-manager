@@ -50,6 +50,7 @@ class _Client:
     def __init__(self, orders: list[dict], fx: list | None = None) -> None:
         self.orders, self.batches, self.fx_calls = orders, [], []
         self.fx = fx if fx is not None else [("2026-10-15", 1_300.0)]
+        self.snapshots: list[tuple[str, str, str]] = []
 
     def execute(self, sql: str, args: list | None = None) -> _Rs:
         if sql == job.REALIZED_ROWS_SQL:
@@ -59,6 +60,8 @@ class _Client:
         if sql == job.REALIZED_FX_SQL:
             self.fx_calls.append(args)
             return _Rs([x for x in self.fx if args[0] <= x[0] <= args[1]])
+        if sql == job.REALIZED_SNAPSHOT_SQL:
+            return _Rs([list(x) for x in self.snapshots], ["as_of", "fetched_at", "holdings_json"])
         raise AssertionError(sql)
 
     def batch(self, statements: list) -> None:
@@ -75,6 +78,8 @@ def test_바뀐_줄만_적는다() -> None:
 
 
 def test_묵은_환율은_모름() -> None:
-    orders = [_o(1, "2026-10-30", "buy", 1, 100.0, market="US"), _o(2, "2026-10-31", "sell", 1, 110.0, market="US")]
-    c = _Client(orders)  # 환율 표의 마지막이 10-15 — 7일 넘게 묵음
+    """환율 표가 09-28 뿐 — 10-01 매수는 사흘 묵어 쓰고, 10-30 매도는 32일 묵어 모름. 읽는 범위(첫 체결 7일 앞~)
+    안에 그 행이 있어야 묵음 분기를 탄다(25.1698 교차검증 [권고] 3 — 예전엔 빈 표 분기로 통과했다)"""
+    orders = [_o(1, "2026-10-01", "buy", 1, 100.0, market="US"), _o(2, "2026-10-30", "sell", 1, 110.0, market="US")]
+    c = _Client(orders, fx=[("2026-09-28", 1_300.0)])
     assert job.update_realized(c, "kis_vts_us", "US") == 0  # (None, None) 은 지금 값과 같아 쓰지 않는다

@@ -142,6 +142,10 @@ REALIZED_SET_SQL = "UPDATE paper_broker_orders SET realized_krw = ?, realized_fx
 #: 체결 첫날 7일 앞부터 마지막 날까지 한 번에 읽는다(25.1698 — 예전엔 체결 거래일마다 한 번, 3년이면 750번)
 REALIZED_FX_SQL = "SELECT date, rate FROM fx_rates WHERE pair = 'USDKRW' AND date >= ? AND date <= ? ORDER BY date"
 REALIZED_FX_MAX_AGE_DAYS = 7
+#: 지난 실행들이 읽어 둔 KIS 잔고 — 실현손익 다시 세기의 기준점(25.1701). 개장 전에 읽은 것만 쓴다(`_개장전_잔고`)
+REALIZED_SNAPSHOT_SQL = (
+    "SELECT as_of, fetched_at, holdings_json FROM paper_broker_daily WHERE broker = ? AND as_of >= ? ORDER BY as_of"
+)
 
 RECON_SQL = (
     "UPDATE paper_broker_orders SET status = ?, broker_order_no = COALESCE(?, broker_order_no), filled_qty = ?,"
@@ -288,6 +292,32 @@ def _us_window(now: datetime, day: Any) -> str | None:
 
 
 
+def _개장전_잔고(rows: list[dict[str, Any]], market: str) -> list[tuple[str, dict[str, int]]]:
+    """`paper_broker_daily` 줄 → [(그날, {코드: 수량})] — **그날 개장 전에** 읽은 것만(25.1701). 개장 뒤 다시 돈 실행이
+    덮어쓴 줄은 그날 체결이 섞여 "그날 앞 체결까지" 와 견줄 수 없어 뺀다. 장이 없는 날 줄은 그대로 쓴다.
+    보유 칸은 지금 꼴 [{code, qty, …}] 과 예전 꼴 [[종목 id 또는 코드, 수량, 평균가]](0078) — 코드가 없는 것은 뺀다"""
+    out: list[tuple[str, dict[str, int]]] = []
+    for r in rows:
+        날 = str(r["as_of"])[:10]
+        try:
+            시각 = datetime.fromisoformat(str(r["fetched_at"]))
+            시각 = 시각 if 시각.tzinfo else 시각.replace(tzinfo=UTC)
+            개장 = cal.session_open_utc(market, date.fromisoformat(날))
+            보유 = json.loads(r["holdings_json"] or "[]")
+        except (TypeError, ValueError):
+            continue
+        if 개장 is not None and 시각 >= 개장:
+            continue
+        잔: dict[str, int] = {}
+        for h in 보유 if isinstance(보유, list) else []:
+            code, qty = ((h.get("code"), h.get("qty")) if isinstance(h, dict)
+                         else (h[0], h[1]) if isinstance(h, list) and len(h) >= 2 else (None, None))  # fmt: skip
+            if isinstance(code, str) and code and qty is not None:
+                잔[code] = 잔.get(code, 0) + int(qty)
+        out.append((날, 잔))
+    return out
+
+
 def update_realized(client: Any, 증권사: str, market: str, balance: dict[str, int] | None = None) -> int:
     """KIS모의투자 매도마다 실현손익·환차 몫을 다시 세어 바뀐 줄만 적는다 (25.1694, `bm.realized`). 적은 수.
     `balance` = 같은 실행이 읽은 KIS 잔고 {코드: 수량} — 기록 끝 수량과 다른 종목의 마지막 보유 구간은 모름(25.1698)"""
@@ -307,7 +337,9 @@ def update_realized(client: Any, 증권사: str, market: str, balance: dict[str,
             return None
         return 표[k][1]
 
-    값 = bm.realized([{**r, "market": market} for r in rows], 환율, balance)
+    첫날 = min(str(r["trade_date"])[:10] for r in rows)
+    스냅 = _개장전_잔고(client.execute(REALIZED_SNAPSHOT_SQL, [증권사, 첫날]).dicts(), market)
+    값 = bm.realized([{**r, "market": market} for r in rows], 환율, balance, 스냅)
     지금값 = {int(r["id"]): (r["realized_krw"], r["realized_fx_krw"]) for r in rows}
     문장 = [(REALIZED_SET_SQL, [v[0], v[1], i]) for i, v in 값.items() if 지금값.get(i) != v]
     if 문장:
