@@ -925,6 +925,9 @@ ATTRIBUTION_EPISODE_DAYS = 28
 #: "열린 매수 주문 있음"(25.1549) — 앞 실행의 주문이 그대로 차는 사실상 산 종목이라 안 산 후보와 견주지 않는다(25.1550)
 #: 매수 단계가 일찍 끝난 날(환율 모름·장부 현금 음수) 위원회·지주사가 고른 종목의 skip 까닭 머리(25.1622, jobs/paper)
 BUY_STEP_SKIP_PREFIX = "매수 단계 건너뜀: "
+#: 위험 점검이 **매도**를 막은 결정의 까닭 머리(jobs/paper) — 성과 분해가 막은 매수와 가른다(25.1688: 막은 매수는
+#: 오르면, 막은 매도는 내리면 점검이 비용이라 한 평균에 섞으면 +8 과 −8 이 0 으로 지워졌다)
+BLOCKED_SELL_PREFIX = "위험 점검(매도)"
 NONCOMPARABLE_SKIP_PREFIXES = ("종목 비중 상한 도달", "보유 중 손절선 이탈", "판 뒤 ", "열린 매수 주문 있음",
                                BUY_STEP_SKIP_PREFIX)  # fmt: skip
 
@@ -996,6 +999,10 @@ def _까닭_묶음(reason: str) -> str:
     return re.sub(r"[-+]?\d+(?:\.\d+)?", "N", reason) if reason.startswith("위원회") else reason
 
 
+def _막은매도(d: dict[str, Any]) -> bool:
+    return str(d.get("reason") or "").startswith(BLOCKED_SELL_PREFIX)
+
+
 def attribution(
     decisions: list[dict[str, Any]], entries: list[tuple[float, float | None]], limit_fills: int = 0,
 ) -> dict[str, Any]:
@@ -1038,7 +1045,9 @@ def attribution(
         "missed": _초과(종류["missed"]),
         "sold": _초과(종류["sell"]),
         "held_flag": _초과(종류["hold_flag"]),
-        "blocked": _초과(종류["blocked"]),
+        # 막은 매수·막은 매도를 가른다(25.1688, 결정 원장 감사 [권고]) — 뜻이 반대다
+        "blocked": _초과([d for d in 종류["blocked"] if not _막은매도(d)]),
+        "blocked_sell": _초과([d for d in 종류["blocked"] if _막은매도(d)]),
         "virtual": _가상(종류["buy"]),
     }
 
@@ -1179,7 +1188,9 @@ def attribution_lines(aid: str, a: dict[str, Any] | None) -> list[str]:
     if a.get("skip_by_reason"):
         줄.append(f"  {aid} 안 낸 까닭별: " + " · ".join(f"{k} {칸(v)}" for k, v in a["skip_by_reason"].items()))
     if (a.get("blocked") or {}).get("n"):
-        줄.append(f"  {aid} 위험 점검이 막은 것의 그 뒤: {칸(a['blocked'])}")
+        줄.append(f"  {aid} 위험 점검이 막은 매수의 그 뒤: {칸(a['blocked'])} — 오르면 막은 것이 비용")
+    if (a.get("blocked_sell") or {}).get("n"):
+        줄.append(f"  {aid} 위험 점검이 막은 매도의 그 뒤: {칸(a['blocked_sell'])} — 내리면 막은 것이 비용")
     e = a.get("entry") or {}
     # 음수면 "−0.85% 쌌다" 가 아니라 "0.85% 비쌌다" — 부호가 뜻을 뒤집어 읽혔다(25.1644, 25.1630 감사 [권고])
     if not e.get("n"):

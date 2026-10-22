@@ -495,7 +495,9 @@ export interface Attribution {
   missed: AttrCell;
   sold: AttrCell;
   held_flag: AttrCell;
+  /** 위험 점검이 막은 **매수**(25.1688 부터 — 그 전 행은 매도도 섞임) · 막은 매도 */
   blocked?: AttrCell;
+  blocked_sell?: AttrCell;
   /** 투자사 부서 성적표 (docs/company.md 6장, 25.1472) — 초과는 소수(0.05 = +5%p) */
   departments?: DeptScore[];
   /** 가상 대조 (docs/company.md 6장, 25.1476) — 산 종목이 같은 날 무작위 20종목 안 몇 분위였나. 무작위면 50 */

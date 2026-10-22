@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import EquityChart from "@/components/EquityChart";
 import { bodyOf, readJson } from "@/lib/http";
 import { JOURNEY_LIMIT, journeyCut, journeyEvents, weightSeries, type HoldingPoint, type JourneyRaw, type LabAttribution } from "@/lib/lab";
-import { ATTRIBUTION_MIN_SAMPLE, attrCellText } from "@/lib/paper";
+import { ATTRIBUTION_MIN_SAMPLE, attrCellText, entryCellText } from "@/lib/paper";
 
 /**
  * 연구실 (docs/desk.md 5장, docs/infra.md 25.1506) — 전략을 고치려고 보는 자료. 값은 배치가 적은 그대로다.
@@ -15,11 +15,12 @@ const CARD = "rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-
 const 칸: Array<[string, (a: NonNullable<LabAttribution["attribution"]>) => string]> = [
   ["낸 후보", (a) => attrCellText(a.selection)],
   ["안 낸 새 후보", (a) => attrCellText(a.skipped)],
-  ["진입(체결가→종가)", (a) => attrCellText(a.entry, "%")],
+  ["진입(시장가 체결가→종가)", (a) => entryCellText(a.entry)],
   ["안 찬 회차", (a) => attrCellText(a.missed)],
   ["판 뒤", (a) => attrCellText(a.sold)],
   ["플래그 무시하고 든 뒤", (a) => attrCellText(a.held_flag)],
-  ["위험 점검이 막은 뒤", (a) => attrCellText(a.blocked)],
+  ["막은 매수 뒤", (a) => attrCellText(a.blocked)],
+  ["막은 매도 뒤", (a) => attrCellText(a.blocked_sell)],
   [
     "가상 대조 분위",
     (a) => (a.virtual?.n && a.virtual.avg_pct != null ? `${a.virtual.avg_pct.toFixed(0)} (n=${a.virtual.n}${a.virtual.n < ATTRIBUTION_MIN_SAMPLE ? ", 참고" : ""})` : "표본 없음"),

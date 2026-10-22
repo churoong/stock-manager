@@ -1903,7 +1903,7 @@ def run_step(
                 if sid in 막힌매도id:
                     # 위험 점검이 매도를 막았다 — 들고 간 것으로 남긴다 (25.1451)
                     문장.append(_결정판(aid, market, trade_date, sid, "blocked",
-                                    "위험 점검(매도): " + "; ".join(t for _c, t in 막힌매도id[sid]),
+                                    f"{pp.BLOCKED_SELL_PREFIX}: " + "; ".join(t for _c, t in 막힌매도id[sid]),
                                     {"flags": [f["reason_code"] for f in 메모["flags"]]}, 종가, 날, 지금))  # fmt: skip
                 elif sid in 매도 and sid not in 이미팖:
                     문장.append(_결정판(aid, market, trade_date, sid, "sell", ",".join(매도[sid][0]),
