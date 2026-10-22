@@ -41,6 +41,30 @@ def test_호출_상한에서_멈춘다(monkeypatch) -> None:  # noqa: ANN001
     assert len(부름) == 2 and all(p["pblntf_ty"] == "I" for p in 부름)
 
 
+def test_표본일은_국내_거래일이다() -> None:
+    """25.1680 — 평일만 고르면 2019-02-04(설 연휴 휴장)가 걸려 그해만 0건으로 읽혔다(교차검증 [권고])."""
+    from datetime import date
+
+    assert probe.sample_day(2019) == date(2019, 2, 7) and probe.sample_day(2026) == date(2026, 2, 3)
+
+
+def test_회사는_해마다_첫_쪽으로_세고_이름을_찍는다(capsys) -> None:  # noqa: ANN001
+    부름: list[dict] = []
+
+    class C:
+        def page(self, params: dict) -> dict:
+            부름.append(params)
+            return {"status": "000", "total_count": 7, "total_page": 1,
+                    "list": [{"rcept_no": f"{params['bgn_de'][:4]}0130800001", "corp_name": "가나",
+                              "report_nm": "영업(잠정)실적(공정공시)"}]}  # fmt: skip
+
+    probe.corp_years(C(), "00126380", range(2020, 2023))
+    assert [(p["bgn_de"], p["end_de"], p["page_no"]) for p in 부름] == [
+        ("20200101", "20201231", 1), ("20210101", "20211231", 1), ("20220101", "20221231", 1)]
+    out = capsys.readouterr().out
+    assert "2021: status 000 전체 7건" in out and "실적 1" in out and "회사 이름 가나" in out
+
+
 def test_워크플로는_손으로만_돌고_결과는_비공개로() -> None:
     src = (ROOT / ".github" / "workflows" / "probe-dart-i-depth.yml").read_text(encoding="utf-8")
     assert "workflow_dispatch" in src and "schedule" not in src and "TURSO" not in src

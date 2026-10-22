@@ -3,8 +3,9 @@
 37회차 후보 B(실적 발표 반응 `ear_x_mom3`·`pead_event`)는 I 덮은 날 구간 안의 잠정실적 공시가 재료다. 판정 기준이
 "I 백필이 2021 년까지 안 되면 판정 불가" 라, 백필을 설계하기 전에 DART `list.json` 이 I 를 **얼마나 과거까지·어느 길로**
 주는지 한 번 본다 `[확인필요]`:
-  ① 시장 전체 하루치(회사 없음) — 해마다 2월 첫 주 하루씩: status·전체 건수·첫 쪽의 실적 공시 수
-  ② 회사 하나 긴 구간(회사 있음) — 2010-01-01 ~ 오늘: status·쪽 수·가장 이른 접수일·해마다 건수와 실적 공시 수
+  ① 시장 전체 하루치(회사 없음) — 해마다 2월 3일 뒤 첫 국내 거래일 하루씩: status·전체 건수·첫 쪽의 실적 공시 수
+  ② 회사 하나 해마다(회사 있음) — 해마다 1-01~12-31 첫 쪽: status·전체 건수·첫 쪽의 실적 공시 수·회사 이름
+     (긴 구간 한 번은 DART 기본 정렬이 접수일 내림차순이라 쪽 상한에 걸리면 "가장 이른 해" 가 늦게 나온다 — 25.1680)
 운영 DB 를 읽지도 쓰지도 않는다(Turso 0). 공시 제목(회사 공개 정보)과 건수만 찍는다. 호출 수 상한을 둔다.
 
     python scripts/probe_dart_i_depth.py --corps 00126380,00164779 --years 2015-2026
@@ -24,11 +25,10 @@ import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from batch.core import calendar as cal  # noqa: E402
 from batch.services.earnings_events import is_result_title  # noqa: E402
 
 DART = "https://opendart.fss.or.kr/api"
-#: 회사 하나 긴 구간에서 넘길 쪽 상한 — 100건 × 30쪽 = 3,000건(대형사 16년치 I 를 덮을 어림 `[확인필요]`)
-MAX_PAGES = 30
 #: 이 탐침 전체 호출 상한 — DART 하루 한도(2만, docs/data-sources.md)의 일일 배치 몫을 건드리지 않게
 MAX_CALLS = 300
 #: 기본 표본 — 삼성전자·SK하이닉스(대형, 잠정실적을 꾸준히 냄) `[확인필요: 고유번호]`. 워크플로 입력으로 바꾼다
@@ -69,11 +69,16 @@ class Caller:
             return {}
 
 
+def sample_day(y: int) -> date:
+    """그해 2월 3일 뒤 첫 국내 거래일 — 평일만 고르면 2019-02-04(설 연휴)처럼 휴장일이 걸려 그해만 0건으로 "구멍" 처럼
+    읽혔다(25.1680, 교차검증 [권고])."""
+    return next(date(y, 2, k) for k in range(3, 20) if cal.is_session("KR", date(y, 2, k)))
+
+
 def market_days(c: Caller, years: range) -> None:
-    print("== ① 시장 전체 하루치 (회사 없음, 해마다 2월 첫 평일 무렵 — 4분기 잠정실적 철)")
+    print("== ① 시장 전체 하루치 (회사 없음, 해마다 2월 3일 뒤 첫 거래일 — 4분기 잠정실적 철)")
     for y in years:
-        # 2월 3~7일 가운데 첫 평일
-        d = next(date(y, 2, k) for k in range(3, 8) if date(y, 2, k).weekday() < 5)
+        d = sample_day(y)
         de = d.strftime("%Y%m%d")
         body = c.page({"bgn_de": de, "end_de": de, "page_no": 1})
         if body is None:
@@ -84,35 +89,29 @@ def market_days(c: Caller, years: range) -> None:
               f" · 첫 쪽 {len(rows)}행 중 실적 {sum(실적.values())}")  # fmt: skip
 
 
-def corp_range(c: Caller, corp: str, start: str, end: str) -> None:
-    print(f"== ② 회사 {corp} {start}~{end}")
-    rows: list[dict[str, Any]] = []
-    for page in range(1, MAX_PAGES + 1):
-        body = c.page({"corp_code": corp, "bgn_de": start, "end_de": end, "page_no": page})
+def corp_years(c: Caller, corp: str, years: range) -> None:
+    """회사 하나를 해마다 첫 쪽만 — 전체 건수(`total_count`)는 정렬과 상관없고, 첫 쪽(100건)의 실적 공시 수는 그해 I 가
+    100건 안이면 전부다."""
+    print(f"== ② 회사 {corp} 해마다")
+    이름 = None
+    for y in years:
+        body = c.page({"corp_code": corp, "bgn_de": f"{y}0101", "end_de": f"{y}1231", "page_no": 1})
         if body is None:
-            break
-        if str(body.get("status")) != "000":
-            print(f"   {page}쪽: status {body.get('status')} {body.get('message', '')}")
-            break
-        rows += body.get("list") or []
-        if page >= int(body.get("total_page") or 1):
-            print(f"   {page}쪽 끝 · 전체 {body.get('total_count')}건")
-            break
-    else:
-        print(f"   쪽 상한 {MAX_PAGES} 에서 멈춤 — 더 있다")
-    해, 실적, 이른 = summarize_rows(rows)
-    print(f"   받은 {len(rows)}행 · 가장 이른 접수일 {이른}")
-    for y in sorted(해):
-        print(f"   {y}: {해[y]}건, 실적 {실적[y]}")
-    for r in [r for r in rows if is_result_title(str(r.get("report_nm") or ""))][-2:]:
-        print(f"   (가장 이른 실적 예) {str(r.get('rcept_no'))[:8]} {r.get('report_nm')}")
+            return
+        rows = body.get("list") or []
+        이름 = 이름 or next((r.get("corp_name") for r in rows if r.get("corp_name")), None)
+        _, 실적, 이른 = summarize_rows(rows)
+        print(f"   {y}: status {body.get('status')} 전체 {body.get('total_count')}건 {body.get('total_page')}쪽"
+              f" · 첫 쪽 {len(rows)}행 중 실적 {sum(실적.values())} · 첫 쪽 가장 이른 {이른}")  # fmt: skip
+    # 고유번호가 맞는 회사인지 탐침이 스스로 보인다(기본값 `[확인필요]`)
+    print(f"   회사 이름 {이름}")
 
 
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--corps", default=DEFAULT_CORPS, help="쉼표로 나눈 DART 고유번호")
     p.add_argument("--years", default="2015-2026", help="시장 전체 하루치를 볼 해 범위 (예: 2015-2026)")
-    p.add_argument("--start", default="20100101", help="회사 긴 구간 시작 YYYYMMDD")
+    p.add_argument("--start", default="2010", help="회사별로 볼 첫 해")
     args = p.parse_args()
     key = os.environ.get("DART_API_KEY", "")
     if not key:
@@ -121,9 +120,8 @@ def main() -> int:
     a, b = (int(x) for x in args.years.split("-"))
     c = Caller(key)
     market_days(c, range(a, b + 1))
-    끝 = date.today().strftime("%Y%m%d")
     for corp in [x.strip() for x in args.corps.split(",") if x.strip()]:
-        corp_range(c, corp, args.start, 끝)
+        corp_years(c, corp, range(int(args.start[:4]), date.today().year + 1))
     print(f"호출 {c.calls}")
     return 0
 
