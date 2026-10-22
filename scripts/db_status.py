@@ -150,7 +150,9 @@ def 행수_점검(표들: list[str]) -> list[tuple[str, str]]:
     return 나온것
 
 _WRITE_WORDS = re.compile(
-    r"\b(insert|update|delete|replace|drop|alter|create|attach|detach|pragma|vacuum|reindex|upsert)\b", re.IGNORECASE
+    # analyze 는 통계 표(`sqlite_stat1`)를 만들어 운영 플래너의 계획을 뒤집는다(25.1655)
+    r"\b(insert|update|delete|replace|drop|alter|create|attach|detach|pragma|vacuum|reindex|upsert|analyze)\b",
+    re.IGNORECASE,
 )
 
 
@@ -162,7 +164,10 @@ def is_read_only(sql: str) -> bool:
     """
     # 머리의 주석 줄(`-- …`)은 걷는다 — 진단 SQL 파일(scripts/diag/*.sql)이 정의·출처를 주석으로 머리에 적어 원문 그대로
     # 넣으면 거절됐다(25.1651). 몸 안의 주석은 그대로 두고 아래 검사를 받는다
-    줄 = sql.strip().splitlines()
+    # `\n` 에서만 자른다 — SQLite 의 `--` 주석은 `\n` 에서만 끝나는데 `splitlines()` 는 `\r`·`\f`·`\x85`·`\u2028` 에서도
+    # 잘라, "-- 머리\rSELECT 1\nANALYZE" 가 SELECT 로 시작하는 것처럼 보이고 실제로는 ANALYZE 만 돌았다
+    # (25.1655, 교차검증)
+    줄 = sql.strip().split("\n")
     while 줄 and (not 줄[0].strip() or 줄[0].lstrip().startswith("--")):
         줄.pop(0)
     body = "\n".join(줄).strip().rstrip(";").strip()

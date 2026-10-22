@@ -107,3 +107,38 @@ def test_3_7일_밖_실행만_있는_달은_판정_실행이_없다() -> None:
     k = _db()
     _실행(k, 6, "nov_hand", "2023-08-01", "통과", "2026-11-20")
     assert _행(k) == {}
+
+
+def _계획(sql: str) -> list[str]:
+    """실제 마이그레이션 스키마(곡선 표 UNIQUE(run_id, date)) 위의 실행 계획."""
+    k = sqlite3.connect(":memory:")
+    for f in sorted((Path(__file__).resolve().parent.parent / "migrations").glob("*.sql")):
+        k.executescript(f.read_text(encoding="utf-8"))
+    return [str(r[-1]) for r in k.execute("EXPLAIN QUERY PLAN " + sql)]
+
+
+def test_곡선_표는_실행_번호로만_찾는다() -> None:
+    """28회차 꼴이 `JOIN runs` 로 곡선 표 전체를 세 번 훑었다(382,500행 표에서 114만 회, 25.1655 교차검증)."""
+    for 파일 in ("round28_short_regime.sql", "round37_high52_regime.sql"):
+        계획 = _계획((DIAG / 파일).read_text(encoding="utf-8"))
+        훑기 = [p for p in 계획 if p.startswith("SCAN c") or "SCAN backtest_curves" in p]
+        assert not 훑기, (파일, 계획)
+
+
+def test_db_status_는_줄바꿈_흉내로_속지_않는다() -> None:
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("db_status", Path(__file__).resolve().parent.parent / "scripts/db_status.py")
+    m = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
+    spec.loader.exec_module(m)  # type: ignore[union-attr]
+    for 끊음 in ("\r", "\f", "\x85", " "):
+        assert not m.is_read_only(f"-- 머리{끊음}SELECT 1\nANALYZE")
+    assert not m.is_read_only("ANALYZE") and not m.is_read_only("SELECT 1 FROM x; ANALYZE")
+    assert m.is_read_only("-- 머리\n-- 둘째\nSELECT 1")
+
+
+def test_2028_04_판정_불가여도_시작이_있으면_다시_본다() -> None:
+    k = _db()
+    _실행(k, 2, "dec", "2023-09-01", "통과", "2026-12-03")
+    _실행(k, 7, "apr28", "2023-08-01", "판정 불가", "2028-04-04", 높음=0.0)  # 예: 무위험수익률 없음
+    assert _행(k)[("2028-04", "high52", "0_전체")][0] == 5

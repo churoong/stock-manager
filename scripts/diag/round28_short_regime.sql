@@ -20,7 +20,7 @@ WITH g AS (
   SELECT run_id, m, equity, d FROM (
     SELECT c.run_id, substr(c.date, 1, 7) AS m, c.equity, c.date AS d,
       ROW_NUMBER() OVER (PARTITION BY c.run_id, substr(c.date, 1, 7) ORDER BY c.date DESC) AS rn
-    FROM backtest_curves c JOIN runs ON runs.id = c.run_id
+    FROM backtest_curves c WHERE c.run_id IN (SELECT id FROM runs)
   ) WHERE rn = 1
 ), mr AS (
   SELECT runs.strategy AS s, x.m, x.equity / x.prev - 1 AS ret, x.d

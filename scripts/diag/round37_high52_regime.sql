@@ -7,7 +7,8 @@
 --   부분 허용 국면 평균을 비튼다 — 37회차 교차검증 [필수])
 --   국면 경계는 28회차와 같다 [확인필요: 금융위원회 보도자료 원문 대조]
 -- 대상 실행(`label`): **판정 실행**(12장 머리 정의 — 그 달 trade_date 3~7일 사이 기본·성공 국내 실행 가운데 가장 먼저 시작한 하나)
---   가운데 ① 'first' = 2026-11 이후 `high52_judge.verdict` 가 처음 통과·탈락인 것 ② '2028-04' = 2028-04 판정 실행(다시 보기, 있으면).
+--   가운데 ① 'first' = 2026-11 이후 `high52_judge.verdict` 가 처음 통과·탈락인 것 ② '2028-04' = 2028-04 판정 실행(다시 보기 — 그 달
+--   판정이 판정 불가여도 공통 구간 시작이 있으면, 25.1655).
 --   그 달 판정 실행이 판정 불가면 다음 달로(손으로 돌린 같은 달 뒤 실행은 세지 않는다 — 37회차 교차검증 [권고], 25.1651)
 -- 읽기: 곡선을 한 번씩만 훑는다(윈도 함수 — 상관 하위 질의는 곡선 길이의 네제곱으로 읽어 월 한도를 넘었다, 25.1651)
 WITH judge AS (
@@ -22,7 +23,7 @@ WITH judge AS (
   SELECT * FROM (SELECT 'first' AS label, group_id, start FROM judge WHERE k = 1 AND verdict IN ('통과', '탈락')
                  ORDER BY started_at ASC LIMIT 1)
   UNION ALL
-  SELECT '2028-04', group_id, start FROM judge WHERE k = 1 AND mon = '2028-04' AND verdict IN ('통과', '탈락')
+  SELECT '2028-04', group_id, start FROM judge WHERE k = 1 AND mon = '2028-04' AND start IS NOT NULL
 ), runs AS (
   SELECT r.id, r.strategy, g.label, g.start FROM backtest_runs r JOIN g ON g.group_id = r.group_id
   WHERE r.strategy IN ('high52', 'momentum')
@@ -30,7 +31,7 @@ WITH judge AS (
   SELECT run_id, m, equity, d FROM (
     SELECT c.run_id, substr(c.date, 1, 7) AS m, c.equity, c.date AS d,
       ROW_NUMBER() OVER (PARTITION BY c.run_id, substr(c.date, 1, 7) ORDER BY c.date DESC) AS rn
-    FROM backtest_curves c JOIN runs ON runs.id = c.run_id
+    FROM backtest_curves c WHERE c.run_id IN (SELECT id FROM runs)
   ) WHERE rn = 1
 ), mr AS (
   SELECT runs.label, runs.start, runs.strategy AS s, x.m, x.equity / x.prev - 1 AS ret, x.d
