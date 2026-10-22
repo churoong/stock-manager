@@ -56,3 +56,38 @@ def test_원장_키를_그_작업이_쓴다() -> None:
         꼴 = re.compile(rf'"{re.escape(k)}"\s*:|\["{re.escape(k)}"\]\s*(=|\[)')
         없음 += [f"{k} ← {f}" for f in 파일들 if not 꼴.search((ROOT / "batch" / f).read_text(encoding="utf-8"))]
     assert not 없음, 없음
+
+
+def _안에(src: str, 위: str, 키: str) -> bool:
+    """`위` 묶음 **안에** `키` 를 쓰는가 — `["위"]["키"]` 또는 `"위": { … "키": … }`(괄호 짝을 맞춰 그 안만)."""
+    if re.search(rf'\["{re.escape(위)}"\]\["{re.escape(키)}"\]', src):
+        return True
+    for m in re.finditer(rf'"{re.escape(위)}"\s*:\s*\{{', src):
+        깊이, i = 1, m.end()
+        while i < len(src) and 깊이:
+            깊이 += {"{": 1, "}": -1}.get(src[i], 0)
+            i += 1
+        if re.search(rf'"{re.escape(키)}"\s*:', src[m.end():i]):
+            return True
+    return False
+
+
+def test_점으로_이은_키는_그_묶음_안에_쓴다() -> None:
+    """25.1671 교차검증 [권고] — 마디를 따로만 보면 `trigger` 를 `params` 밖 맨 위로 옮겨도 통과했다(원장은
+    `params.trigger` 로 읽는다). 같은 칸에서 점 없는 키가 점 있는 키 뒤에 오면 같은 묶음이다(`params.trigger`·`sha`)."""
+    doc = (ROOT / "docs" / "factors.md").read_text(encoding="utf-8")
+    절 = doc[doc.index("### 12.32 판정 대기 원장"):doc.index("### 12.6 지난 회차 판정 상태")]
+    경로: set[tuple[str, str]] = set()
+    for 줄 in 절.splitlines():
+        if not re.match(r"\| \d+ \|", 줄):
+            continue
+        위 = None
+        for 키 in re.findall(r"`([^`]+)`", 줄.split("|")[3]):
+            if "." in 키:
+                위, 키 = 키.rsplit(".", 1)
+            if 위:
+                경로.add((위, 키))
+    assert ("params", "sha") in 경로 and ("correlation", "corr_async") in 경로
+    없음 = [f"{위}.{키} ← {f}" for 위, 키 in sorted(경로) for f in 쓰는곳[키]
+            if not _안에((ROOT / "batch" / f).read_text(encoding="utf-8"), 위, 키)]
+    assert not 없음, 없음
