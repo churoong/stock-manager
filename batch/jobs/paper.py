@@ -299,9 +299,10 @@ def fill_outcomes(client: Any, market: str, today: str, now: str, data_date: str
     # 상한을 먼저 채워 60일 창은 사실상 돌지 않았다(시뮬: 60일 성과 약 90% 가 200일 포기 쪽에서야 참, 연휴엔 20일도
     # 멈춤).
     # 직전 마감 장에서 n 거래일 앞(그 뒤 결정은 n 번째 장 시세가 아직 없다)과 달력 기한 가운데 이른 날까지만 읽는다.
-    # 직전 마감 장 = 한국 날짜의 앞 장과 **이 실행이 실제로 받은 시세 날짜** 가운데 이른 날(25.1699, 25.1692 교차검증
-    # [권고] 1) — 미국 실행이 한국 자정을 넘기거나(한국 토 00:30 = 뉴욕 금 장중) 한국 낮 손 실행(시세는 뉴욕 D-2)이면
-    # 한국 날짜의 앞 장 종가가 아직 없어 못 차는 행이 상한을 먼저 채웠다
+    # 직전 마감 장 = 한국 날짜의 앞 장과 **이 실행의 거래일**(`trade_date` — `cal.decide` 가 실행 시각으로 정한 그 시장
+    # 직전 장, 시세를 받는 날) 가운데 이른 날(25.1699, 25.1692 교차검증 [권고] 1) — 미국 실행이 한국 자정을 넘기거나
+    # (한국 토 00:30 = 뉴욕 금 장중) 한국 낮 손 실행(뉴욕 D-2)이면 한국 날짜의 앞 장 종가가 아직 없어 못 차는 행이
+    # 상한을 먼저 채웠다. 야후가 그날 미국 봉을 아직 안 냈어도 단계는 돌아 그날은 하루 이르다(예전과 같음, 25.1703)
     마지막장 = cal.previous_session(market, 오늘)
     if data_date:
         마지막장 = min(마지막장, _date.fromisoformat(str(data_date)[:10]))
@@ -314,8 +315,7 @@ def fill_outcomes(client: Any, market: str, today: str, now: str, data_date: str
     이십아래 = (_date.fromisoformat(기한[20]) - timedelta(days=OUTCOME_20D_BAND_DAYS)).isoformat()
     rows: list[dict[str, Any]] = []
     본: set[Any] = set()
-    # 상한에 닿은 구간의 (경계 결정일 — 마지막으로 읽은 날 — 행 id, 포기 구간인가)
-    가득: list[tuple[set[Any], bool]] = []
+    가득: list[set[Any]] = []  # 상한에 닿은 구간의 경계 결정일(마지막으로 읽은 날) 행 id
     for sql, args, 상한 in (
         (PENDING_5D_SQL, [market, 기한[20], 기한[5]], OUTCOME_BATCH),
         (PENDING_20D_SQL, [market, 이십아래, 기한[20]], OUTCOME_BATCH),
@@ -325,7 +325,7 @@ def fill_outcomes(client: Any, market: str, today: str, now: str, data_date: str
         got = client.execute(sql, [*args, 상한]).dicts()
         if got and len(got) >= 상한:
             경계 = str(got[-1]["decided_on"])
-            가득.append(({r["id"] for r in got if str(r["decided_on"]) == 경계}, sql == PENDING_OLD_SQL))
+            가득.append({r["id"] for r in got if str(r["decided_on"]) == 경계})
         rows += [r for r in got if r["id"] not in 본]
         본.update(r["id"] for r in got)
     # 미국 분할 재수집 대기 종목은 오늘 채우지 않는다(25.1548 반박 [권고] 4) — 일일 수집은 최근 10일만 분할 반영 값으로
@@ -352,7 +352,6 @@ def fill_outcomes(client: Any, market: str, today: str, now: str, data_date: str
 
     채움, 포기 = 0, 0
     처리: set[Any] = set()  # 이번에 채우거나 닫은 행
-    채운: set[Any] = set()  # 그 가운데 성과를 새로 적은 행
     문장: list[tuple[str, list[Any]]] = []
     시세캐시: dict[tuple[int, str, int], list] = {}
     for r in rows:
@@ -391,19 +390,16 @@ def fill_outcomes(client: Any, market: str, today: str, now: str, data_date: str
         채움 += 새것
         포기 += 포기함
         처리.add(r["id"])
-        if 새것:
-            채운.add(r["id"])
     if 문장:
         client.batch(문장)
     # 밀림 = 상한에 닿은 구간의 **경계 결정일**(마지막으로 읽은 날 — 그 날과 그 너머가 못 읽고 남았다) 행 가운데 이번에
     # 처리한 것이 있다 — 시세가 끊긴 행만 남아 상한에 닿은 것은 밀림이 아니다(25.1692, 교차검증 [권고] 1).
     # 25.1699(25.1692 교차검증 [권고] 2): 마지막 한 행만 보면 같은 결정일에 끊긴 행과 찰 행이 섞여 그 행이 끊긴 행일 때
-    # 경고가 빠졌고(끊긴 행이 상한을 먹어 5·20일 성과가 크게 늦는 바로 그때), 포기 구간은 끊긴 행을 **닫기만** 밀려도
-    # 경고했다 — 포기 구간은 성과를 새로 적은 행이 있을 때만 센다(닫기 밀림은 `close_backlog` 로 따로)
-    찬구간 = sum(1 for ids, 포기구간 in 가득 if ids & (채운 if 포기구간 else 처리))
-    닫기밀림 = sum(1 for ids, 포기구간 in 가득 if 포기구간 and not ids & 채운 and ids & 처리)
-    return {"pending_read": len(rows), "filled": 채움, "gave_up": 포기, "full_bands": 찬구간,
-            "close_backlog": 닫기밀림}  # fmt: skip
+    # 경고가 빠졌다(끊긴 행이 상한을 먹어 5·20일 성과가 크게 늦는 바로 그때). 포기 구간도 같은 잣대 — 닫기만 밀린
+    # 것도 센다: 25.1699 는 그것을 빼 봤으나, 정지가 길면 끊긴 행 뒤에서 밀려 200일까지 온 **찰 행**이 그 닫기 밀림 뒤에
+    # 남아 경고 없이 늦었다(25.1699 교차검증 [권고] 2, 25.1703)
+    찬구간 = sum(1 for ids in 가득 if ids & 처리)
+    return {"pending_read": len(rows), "filled": 채움, "gave_up": 포기, "full_bands": 찬구간}
 
 
 #: 가상 대조 (docs/company.md 6장, 25.1476) — 성과가 찼는데 아직 대조를 안 본 매수

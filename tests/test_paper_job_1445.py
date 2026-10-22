@@ -484,7 +484,7 @@ def test_outcome_queue_skips_rows_waiting_only_for_60d_and_notes_missing_ref(cli
     for i, d in enumerate(["2026-10-02", "2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08"], 1):
         _시세(c, d, 10_000 + i * 100, 10_000 + i * 100)
     기록 = job.fill_outcomes(c, "KR", "2026-10-15", "now")
-    assert 기록 == {"pending_read": 2, "filled": 1, "gave_up": 1, "full_bands": 0, "close_backlog": 0}
+    assert 기록 == {"pending_read": 2, "filled": 1, "gave_up": 1, "full_bands": 0}
     assert c.q("SELECT outcome_note FROM paper_decisions WHERE decided_on = '2026-09-02'") == [("기준 종가 없음",)]
     # 같은 날 다시 — 이미 채운 창만 다시 계산되면 쓰지 않는다
     assert job.fill_outcomes(c, "KR", "2026-10-15", "now")["filled"] == 0

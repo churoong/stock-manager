@@ -71,28 +71,17 @@ def test_같은_결정일에_끊긴_행과_찰_행이_섞이면_밀림(client: C
     assert 기록["filled"] == 1 and 기록["full_bands"] == 1
 
 
-def test_포기_구간은_닫기만_밀리면_경고하지_않는다(client: Client, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
-    """200일 넘은 끊긴 행 둘, 포기 구간 상한 1 — 하나를 닫고 하나가 남는다. 성과 손실은 없으니 밀림 경고가 아니라
-    `close_backlog` 로만 센다. 같은 구간에서 늦게 든 시세로 성과를 새로 적었으면 밀림"""
+def test_포기_구간도_경계_결정일로_센다(client: Client, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
+    """포기 구간(200일 넘음, 오래된 순) 상한 2 — 3-02·3-03 끊긴 행을 닫고 3-04 찰 행이 못 읽혔다. 닫기만 밀린 것도
+    밀림이다: 정지가 길면 끊긴 행 뒤에서 밀려 200일까지 온 찰 행이 그 뒤에 남는다(25.1699 교차검증 [권고] 2 — 25.1699 는
+    이것을 빼 경고 없이 늦었다, 25.1703)"""
     c = client
-    monkeypatch.setattr(job, "OUTCOME_OLD_BATCH", 1)
-    for d in ("2026-03-02", "2026-03-03"):
-        c.conn.execute(_INS, [d, 3, d])
+    monkeypatch.setattr(job, "OUTCOME_OLD_BATCH", 2)
+    for d, sid in (("2026-03-02", 3), ("2026-03-03", 3), ("2026-03-04", 1)):
+        c.conn.execute(_INS, [d, sid, d])
     기록 = job.fill_outcomes(c, "KR", "2026-10-15", "now", "2026-10-14")
-    assert (기록["gave_up"], 기록["full_bands"], 기록["close_backlog"]) == (1, 0, 1)
-    # 늦게 든 시세 — 1 번 종목 3-04 결정이 60 거래일까지 찬다
-    c.conn.execute("DELETE FROM paper_decisions")
-    c.conn.execute(_INS, ["2026-03-04", 1, "2026-03-04"])
-    c.conn.execute(_INS, ["2026-03-05", 1, "2026-03-05"])
-    from datetime import date, timedelta
-
-    날 = [(date(2026, 3, 4) + timedelta(days=i)).isoformat() for i in range(120)]
-    날 = [d for d in 날 if date.fromisoformat(d).weekday() < 5]
-    for i, d in enumerate(날):
-        _시세(c, d, 10_000 + i, 10_000 + i)
-    _지수(c, 날)
-    기록 = job.fill_outcomes(c, "KR", "2026-10-15", "now", "2026-10-14")
-    assert 기록["filled"] == 1 and (기록["full_bands"], 기록["close_backlog"]) == (1, 0)
+    assert (기록["gave_up"], 기록["full_bands"]) == (2, 1)
+    assert c.q("SELECT ret_5d FROM paper_decisions WHERE decided_on = '2026-03-04'") == [(None,)]  # 다음 배치
 
 
 def test_경계_날_결정은_그날_찬다(client: Client) -> None:  # noqa: F811
@@ -105,3 +94,14 @@ def test_경계_날_결정은_그날_찬다(client: Client) -> None:  # noqa: F8
         _시세(c, d, 10_000 + i * 100, 10_000 + i * 100)
     _지수(c, 날)
     assert job.fill_outcomes(c, "KR", "2026-10-15", "now", "2026-10-14")["filled"] == 1
+
+
+def test_기준가_없어_닫은_경계_행도_처리로_센다(client: Client, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
+    """5일 구간 상한 1 — 경계 행이 기준 종가가 없어 바로 닫혔다(성과를 적지 않은 처리). 그 뒤에 찰 행이 남았으니 밀림"""
+    c = client
+    monkeypatch.setattr(job, "OUTCOME_BATCH", 1)
+    c.conn.execute(_INS, ["2026-10-02", 1, "2026-10-02"])
+    c.conn.execute("INSERT INTO paper_decisions (account_id, market, decided_on, stock_id, kind, reason, created_at)"
+                   " VALUES ('A', 'KR', '2026-10-05', 1, 'skip', 'x', 't')")  # fmt: skip
+    기록 = job.fill_outcomes(c, "KR", "2026-10-15", "now", "2026-10-14")
+    assert (기록["gave_up"], 기록["filled"], 기록["full_bands"]) == (1, 0, 1)
