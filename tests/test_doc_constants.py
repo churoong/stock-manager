@@ -774,7 +774,7 @@ class Test밸류_분모:
     "divergence", "tax_sim", "verdict", "forecast_track", "patterns", "insights", "history",
     "event_history", "simulation", "candidate_factors", "cb_overhang", "buy_thesis", "plan_fill", "target_units", "paper", "risk_gate", "execution_quality", "company",
     "broker_mirror", "holding", "desk", "core_backtest", "core_strategy", "holding_eq", "stop_vol", "core_evidence",
-    "exit_pair", "loss_gate",
+    "exit_pair", "loss_gate", "high52",
 )  # fmt: skip
 
 #: 아직 그물 밖인 모듈과 **왜 아직인지**. 하나씩 줄여 간다
@@ -1164,3 +1164,12 @@ def test_해외_양도_공제는_한_곳에서_정의한다() -> None:
 
     assert ts.US_GAIN_DEDUCTION_KRW is pf.US_CGT_DEDUCTION_KRW
     assert "15.4" not in job.ETF_GAIN_TAX_NOTE
+
+
+def test_52주_고점_전략_상수_1646() -> None:
+    """37회차 A `high52` 의 판정·중복 문턱은 factors.md 12.40 사전 등록 문장과 같다 (docs/infra.md 25.1646)."""
+    from batch.services import high52 as h
+
+    검사(FACTORS, f"MDD 가 {h.JUDGE_MDD_SLACK * 100:g}%p 넘게 나빠지지 않고", "high52 MDD 여유 (12.40)")
+    검사(FACTORS, f"공통 구간 리밸런스 {h.JUDGE_MIN_REBALANCES} 이상", "high52 리밸런스 하한 (12.40)")
+    검사(FACTORS, f"평균 {h.OVERLAP_MAX:g} 이상이면 계좌를 열지 않는다", "high52 중복 문턱 (12.40)")

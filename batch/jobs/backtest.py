@@ -53,6 +53,7 @@ from batch.services import factor_ab as fab
 from batch.services import factor_ic as fic
 from batch.services import flow_surge as fs_
 from batch.services import gross_profitability as gp
+from batch.services import high52 as h52
 from batch.services import luck, sectors, trend
 from batch.services import metrics as m
 from batch.services import pit_universe as pit
@@ -84,11 +85,12 @@ WARN_NOT_DEFAULT_PARAMS = "기본 파라미터 아님 (비교용, 규칙 판단�
 RISK_LOOKBACK_DAYS = 800
 
 STRATEGIES = ("composite", "value", "quality", "growth", "momentum", "risk", "benchmark", "momentum_sector",
-              "ic_weighted", "shrink_missing")  # fmt: skip
+              "ic_weighted", "shrink_missing", "high52")  # fmt: skip
 #: 발굴 루프로 넣은 **후보** 전략 (docs/factors.md 12장). 실제 추천에는 켜는 기준을 넘기 전까지 쓰지 않는다.
 #: `ic_weighted`·`shrink_missing` 은 2026-10-09 사용자 지시분(12.17 S1·S2). 이름을 `composite` 로 시작하지 않는다 —
 #: 웹 `strategyKind` 가 그런 이름을 대표 전략으로 묶는다
-CANDIDATE_STRATEGIES = ("momentum_sector", "ic_weighted", "shrink_missing")
+#: `high52` 는 2026-10-22 사용자 지시분(37회차 A, 12.40 — 판정은 `step_log.high52_judge`)
+CANDIDATE_STRATEGIES = ("momentum_sector", "ic_weighted", "shrink_missing", "high52")
 
 # 장기 신호 백테스트 (docs/backtest.md 7장)
 LONG_HOLD_DAYS = 365  # 장기 = 1년 이상 (CLAUDE.md 투자 기간). 들어간 뒤 1년은 신호가 꺼져도 들고 있다
@@ -99,7 +101,10 @@ DEFAULT_LONG_THRESHOLDS = (60.0, 55.0, 50.0)
 CORE_REGISTERED_TRIALS = 3
 #: 운 판정(DSR)의 시도 수 하한 — 벤치마크를 뺀 등록 전략 + 기본 장기 문턱 + 핵심 H 등록 전략
 #: (docs/backtest.md 9장, 25.1358 · 25.1542 에서 핵심 계열을 더했다 — 월 백테스트·핵심 H 둘 다 이 하한)
-REGISTERED_TRIALS = len(STRATEGIES) - 1 + len(DEFAULT_LONG_THRESHOLDS) + CORE_REGISTERED_TRIALS
+#: 등록만 하고 코드는 아직인 후보 전략 — 37회차 B′ `pead_event`(12.40, 사건 표 뒤). 결과를 보기 전에 시도 수 하한에
+#: 미리 센다(더 보수적으로만). 코드가 `STRATEGIES` 에 들어가는 커밋에서 이 수를 뺀다
+PENDING_TRIALS = 1
+REGISTERED_TRIALS = len(STRATEGIES) - 1 + len(DEFAULT_LONG_THRESHOLDS) + CORE_REGISTERED_TRIALS + PENDING_TRIALS
 
 WARN_NO_HISTORICAL_UNIVERSE = "과거 유니버스 스냅샷 없음. 현재 유니버스를 전 기간에 썼다"
 # 시점 유니버스를 쓰면 위 경고 대신 이것이 붙는다. 고친 것과 못 고친 것을 함께 적는다
@@ -261,8 +266,12 @@ def make_strategy(
     dividends_by_stock: dict[int, list[tuple[str, int, float]]] | None = None,
     benchmark_closes: dict[str, float] | None = None,
     cache: dict[str, tuple[list, list]] | None = None,
+    trace: dict[str, Any] | None = None,
 ) -> bt.WeightsAt:
     """전략 이름에 맞는 판단 함수를 만든다.
+
+    trace 를 주면 `high52`(37회차, factors.md 12.40)가 처음 상위 N 을 다 채운 리밸런스(`full_from`)·동점 수·중복 진단
+    스피어만을 거기 적는다 — 판정(`h52.judge`)과 계좌 개설 진단의 재료.
 
     cache 를 주면 기준일마다 (입력, 팩터 결과)를 전략끼리 나눠 쓴다 — 같은 실행의 전략들은 같은 후보·같은 기준일이라
     결과가 같다(15회차 후보 전략 둘이 늘어 실행 시간이 늘지 않게, 12.17 검증 A).
@@ -354,6 +363,22 @@ def make_strategy(
             scores = {
                 sid: sc.total_score(fs, weights).total for sid, fs in by_stock.items()
             }
+        elif strategy == "high52":
+            # 37회차 A (12.40) — 근접도 하나로, 시장 안 백분위 상위 N. 국내는 252일 창 안 ±30% 밖 날이 있으면 뺀다
+            값 = {i.stock_id: h52.proximity([c for _d, c in view.closes(i.stock_id)], i.market in KR_MARKETS)
+                 for i in inputs}  # fmt: skip
+            시장 = {i.stock_id: i.market for i in inputs}
+            고름, 갈린 = h52.pick(값, 시장, top_n)
+            if trace is not None:
+                if len(고름) >= top_n and trace.get("full_from") is None:
+                    trace["full_from"] = t
+                trace["ties_cut"] = trace.get("ties_cut", 0) + 갈린
+                # 중복 진단(같은 실행 메모리, 읽기 0) — 모멘텀 팩터 점수·12-1 과의 시장 안 스피어만
+                trace.setdefault("vs_score", []).append(
+                    h52.overlap(값, {sid: fs.get("momentum") for sid, fs in by_stock.items()}, 시장))
+                trace.setdefault("vs_12_1", []).append(
+                    h52.overlap(값, {i.stock_id: i.metrics.get("momentum_12_1") for i in inputs}, 시장))
+            return 고름
         elif strategy == "momentum_sector":
             # 업종 모멘텀 상위 절반 업종 안에서 모멘텀 상위 N (docs/factors.md 12.2, 기법 루프 D, 25.439)
             means = secmom.sector_means(inputs)
@@ -1843,12 +1868,13 @@ def run(
                 log.warning("진행 상태를 적지 못했습니다")
 
         점수_캐시: dict[str, tuple[list, list]] = {}  # 기준일 → (입력, 팩터 결과), 전략끼리 나눠 쓴다 (12.17)
+        h52_trace: dict[str, Any] = {}  # 37회차 A — 공통 구간 시작·동점·중복 진단 (12.40)
         for strategy in planned:
             progress(len(results), strategy)
             strat_warnings: list[str] = []
             decide = make_strategy(
                 strategy, universe, snapshots, top_n, weights, strat_warnings, eligible, pit_divs,
-                bench_closes, 점수_캐시,
+                bench_closes, 점수_캐시, h52_trace if strategy == "high52" else None,
             )
             if strategy != "benchmark":
                 decide = overlay(decide, strat_warnings)  # 벤치마크는 비교 기준이라 그대로 둔다
@@ -1945,6 +1971,12 @@ def run(
             # 마지막 날은 평가만 한다(25.792) — 결과 행의 `rebalances` 와 같은 수를 적는다 (25.795, 교차검증)
             step_log={"group_id": group_id, "strategies": stored, "rebalances": 실제_리밸런스,
                       "factor_ic": ic_summary,
+                      # 37회차 A (factors.md 12.40, 원장 #35·#36) — 공통 구간 판정과 중복 진단. 기록 전용
+                      **({"high52_judge": {**h52.judge(results, h52_trace.get("full_from"), 무위험),
+                                           "ties_cut": h52_trace.get("ties_cut", 0)},
+                          "high52_overlap": h52.overlap_summary(h52_trace.get("vs_score", []),
+                                                                h52_trace.get("vs_12_1", []))}
+                         if "high52" in results and not trend_filter else {}),
                       # 지표 교체 A/B (10회차, docs/factors.md 12.12) — 판정 키가 아니다. 기본 파라미터 실행만 센다
                       **({"factor_ab": ab.log()} if ab.ics else {}),
                       # 깨운 주체·커밋은 기록 칸만 (29회차 P1, 25.1437) — `default` 정의는 그대로

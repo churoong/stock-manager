@@ -200,6 +200,8 @@ const STRATEGY_LABEL: Record<string, string> = {
   // 2026-10-09 사용자 지시분 (docs/factors.md 12.17) — 실제 추천에는 안 쓴다
   ic_weighted: "종합 — 팩터 IC 가중 (후보)",
   shrink_missing: "종합 — 결측 많은 종목 50 쪽 수축 (후보)",
+  // 2026-10-22 사용자 지시분 37회차 A (docs/factors.md 12.40) — 실제 추천에는 안 쓴다
+  high52: "52주 고점 근접 — 시장 안 백분위 상위 (후보)",
 };
 
 /** long_q55 처럼 문턱이 붙는 전략은 규칙으로 읽는다 (docs/backtest.md 7장) */
@@ -213,7 +215,7 @@ export function strategyLabel(strategy: string): string {
 
 /** 표에서 묶어 보여 주는 갈래. 팩터 하나짜리는 성과요인분석이다 (docs/backtest.md 2.2) */
 /** 발굴 루프로 넣은 **후보** 전략 — batch/jobs/backtest.CANDIDATE_STRATEGIES 와 같아야 한다 (docs/infra.md 25.443) */
-export const CANDIDATE_STRATEGIES = ["momentum_sector", "ic_weighted", "shrink_missing"] as const;
+export const CANDIDATE_STRATEGIES = ["momentum_sector", "ic_weighted", "shrink_missing", "high52"] as const;
 
 export function strategyKind(strategy: string): "main" | "factor" | "long" | "candidate" {
   if (strategy === "benchmark" || strategy.startsWith("composite"))

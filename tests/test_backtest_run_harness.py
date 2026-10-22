@@ -304,6 +304,10 @@ def test_실행_기록의_팩터_IC_에_모든_이름과_판정이_있다(실행
     # 판정에 세는 실행인지 기록만 보고 가를 수 있다 (25.781). 이 틀은 2년·장기 문턱으로 돌아 기본 실행이 아니다
     assert step_log["params"]["years"] != backtest_module.DEFAULT_YEARS
     assert step_log["params"]["default"] is False
+    # 37회차 A (factors.md 12.40, 원장 #35·#36) — 실제 실행이 판정·중복 진단 기록을 남긴다(2년 합성이라 판정은 불가)
+    판 = step_log["high52_judge"]
+    assert 판["verdict"] in ("통과", "탈락", "판정 불가") and "ties_cut" in 판
+    assert {"vs_momentum_score", "vs_momentum_12_1", "n", "open_account"} <= set(step_log["high52_overlap"])
 
 
 def test_진행_칸은_단계마다_하나씩_늘고_전체를_넘지_않는다(실행: tuple[가짜클라이언트, int]) -> None:
