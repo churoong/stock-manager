@@ -98,7 +98,7 @@ jobs:
       # 판정 실행을 기록으로 가르게 (29회차 P1, 25.1437) — schedule | catchup | workflow_dispatch | repository_dispatch, 커밋
       BACKTEST_TRIGGER: ${{ inputs.missed_schedule && 'catchup' || github.event_name }}
       # 판정 창 실행(예약·따라잡기)은 읽기 진도선을 보지 않고 월 상한만 (25.1660, 감사 [필수]) — 1~2일 백업·사본·미뤄진 주간
-      # 작업이 몰려 3일 진도선(약 6,500만)을 넘기 쉬워, 진도 문이 그달 하나뿐인 판정 실행을 미뤘다(따라잡기는 다시 안 깨운다).
+      # 작업이 몰려 3일 진도선(11-03 17:11 UTC 약 7,000만)을 넘기 쉬워, 진도 문이 그달 하나뿐인 판정 실행을 미뤘다(따라잡기는 다시 안 깨운다).
       # 8일 백업 예비(25.1442)와 같은 길. 사람이 돌리는 비교 실행은 그대로 진도를 본다
       GATE_PACE: ${{ (github.event_name == 'schedule' || inputs.missed_schedule) && '--no-pace' || '' }}
       YEARS: ${{ inputs.years || github.event.client_payload.years || '5' }}

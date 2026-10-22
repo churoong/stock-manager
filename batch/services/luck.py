@@ -74,7 +74,8 @@ def judge(series: dict[str, list[float]], n_floor: int | None = None) -> dict[st
     전략 수**) — 판정은 더 보수적으로만 움직인다. 등록 수는 Bailey·López de Prado 의 누적 시도 수가 아니다(지난 회차에
     탈락한 기법·문턱 변형이 빠짐 — 여전히 적게 센다). V 는 그 실행의 전략들로만 낸다 — 전략 하나면 V=0 이라 하한도
     효과가 없다. 25.1542 에 핵심 H 등록 전략 3 을, 25.1646 에 `high52`·미리 센 `pead_event` 를 더해 하한이 17 이라
-    월 예약 기본 실행(10 — 장기 문턱은 따로 돈다, 25.1660)에도 하한이 걸린다("이 실행 10개, 등록 전략 수 하한")"""
+    월 예약 기본 실행(10 — 장기 문턱은 사람이 what=장기문턱으로 돌릴 때만, 25.1660)에도 하한이 걸린다
+    ("이 실행 10개, 등록 전략 수 하한")"""
     m = {k: moments(v) for k, v in series.items()}
     srs = [x[0] for x in m.values() if x]
     n_run = len(srs)

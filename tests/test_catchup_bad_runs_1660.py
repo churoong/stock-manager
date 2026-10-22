@@ -49,3 +49,12 @@ def test_돌고_있거나_성공했거나_스스로_건너뛴_것은_있음(tmp_
 def test_일을_못_한_실행이_두_번이면_더_깨우지_않고_실패로(tmp_path: Path) -> None:
     보냄, out = _돌림(tmp_path, [(KR, "completed", "failure"), (KR, "completed", "failure"), (US, "completed", "success")])
     assert 보냄 == [] and "실패" in out
+
+
+def test_국내를_더_깨우지_않아도_미국은_본다(tmp_path: Path) -> None:
+    """25.1661 — 국내가 두 번 일을 못 한 달에 미국 예약이 빠졌으면 미국을 깨운다(예전엔 국내 "실패" 에서 멈췄다)."""
+    보냄, out = _돌림(tmp_path, [(KR, "completed", "failure"), (KR, "completed", "failure")])
+    assert 보냄 == [{"ref": "main", "inputs": {"missed_schedule": US}}] and "깨움 1개" in out
+    보냄, out = _돌림(tmp_path / "2", [(KR, "completed", "failure"), (KR, "completed", "failure"),
+                                       (US, "completed", "timed_out")])  # fmt: skip
+    assert 보냄 == [{"ref": "main", "inputs": {"missed_schedule": US}}]

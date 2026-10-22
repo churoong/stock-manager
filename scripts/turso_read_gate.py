@@ -65,7 +65,8 @@ def decide(
     진도선 = int(limit * 몫 + limit * PACE_SLACK)
     상한선 = int(limit - CORE_DAILY_READS * 남은날)
     허용 = min(진도선, 상한선) if pace else 상한선
-    진도글 = f"진도 {몫:.0%}·여유 {PACE_SLACK:.0%} → {진도선:,}" if pace else "진도선 보지 않음 — 이후 읽기를 줄이는 일"
+    # `--no-pace` 는 이후 읽기를 줄이는 일(사본 처음 만들기, 25.1135)과 그달 하나뿐인 판정 실행(25.1660)이 쓴다
+    진도글 = f"진도 {몫:.0%}·여유 {PACE_SLACK:.0%} → {진도선:,}" if pace else "진도선 보지 않음(사본 만들기·판정 실행)"
     글 = (f"이번 달 {used:,}행 + 예상 {estimate:,}행 = {used + estimate:,}행, 허용선 {허용:,}행"
           f" ({진도글} / 남은 {남은날:.1f}일 몫을 뺀 상한 {상한선:,})")  # fmt: skip
     if used + estimate <= 허용:

@@ -159,7 +159,10 @@ def _per_cron_dispatch(repo: str, token: str, call, now: datetime, name: str, te
     예전(`due`)은 가장 늦은 cron 하나만 봐서, 국내 백테스트(17:11) 예약이 빠지고 미국(19:11)이 돌면 국내를 깨우지
     않았고 둘 다 빠지면 미국만 깨웠다. 돌았지만 스스로 건너뛴 실행(읽기 진도 문)은 "있음" 이다 — keepalive 에는
     DB 비밀이 없어 가르지 않는다(그 달은 판정 불가, docs/factors.md 12장 머리).
-    돌려준 값: ("깨움"|"없음"|"실패", 이름)"""
+    돌려준 값: ("깨움"|"없음"|"실패", 이름). **더 깨우지 않는 cron(일을 못 한 실행이 상한만큼)은 모아 두고
+    다음 cron 을 본다** — 바로 돌려주면 국내가 두 번 실패한 달에 미국 예약이 빠져도 4일 내내 깨우지 않았다
+    (25.1661, 교차검증 [필수])"""
+    멈춤: list[str] = []
     for s, c in missed_crons(text, now):
         status, body = call("GET", f"https://api.github.com/repos/{repo}/actions/workflows/{name}/runs"
                                    f"?per_page=30&created=%3E%3D{s.strftime('%Y-%m-%dT%H:%M:%SZ')}", token)  # fmt: skip
@@ -170,11 +173,14 @@ def _per_cron_dispatch(repo: str, token: str, call, now: datetime, name: str, te
         if len(못함) < len(runs):
             continue  # 돌고 있거나 끝까지 돈 실행이 있다(스스로 건너뛴 것 포함 — 위 설명)
         if len(못함) >= MAX_BAD_RETRIES:
-            return "실패", f"{name}[{c}] 일을 못 한 실행 {len(못함)}번"
+            멈춤.append(f"{name}[{c}] 일을 못 한 실행 {len(못함)}번")
+            continue
         code, _ = call("POST", f"https://api.github.com/repos/{repo}/actions/workflows/{name}/dispatches",
                        token, {"ref": "main", "inputs": {"missed_schedule": c}})  # fmt: skip
-        return ("깨움", f"{name}[{c}]") if code == 204 else ("실패", f"{name}({code})")
-    return "없음", None
+        if code == 204:
+            return "깨움", f"{name}[{c}]" + (f" · 멈춤 {'; '.join(멈춤)}" if 멈춤 else "")
+        return "실패", f"{name}({code})"
+    return ("실패", "; ".join(멈춤)) if 멈춤 else ("없음", None)
 
 
 def run(repo: str, token: str, call, now: datetime, root: Path) -> str:  # noqa: ANN001 — call 은 keepalive._call

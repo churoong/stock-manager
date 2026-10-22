@@ -169,8 +169,9 @@ def judge(
     return out
 
 
-def overlap_summary(vs_score: list[float | None], vs_12_1: list[float | None]) -> dict[str, Any]:
-    """리밸런스마다 잰 스피어만의 평균 — 하나라도 `OVERLAP_MAX` 이상이면 계좌를 열지 않는다(전략 판정은 그대로)."""
+def overlap_summary(errors: int, vs_score: list[float | None], vs_12_1: list[float | None]) -> dict[str, Any]:
+    """리밸런스마다 잰 스피어만의 평균 — 하나라도 `OVERLAP_MAX` 이상이면 계좌를 열지 않는다(전략 판정은 그대로).
+    계산 실패가 하나라도 있으면(`errors`) 열지 말지를 정하지 않는다(None) — 남은 일부로 조용히 정하지 않게(25.1661)."""
 
     def 평균(xs: list[float | None]) -> float | None:
         ys = [x for x in xs if x is not None]
@@ -180,4 +181,6 @@ def overlap_summary(vs_score: list[float | None], vs_12_1: list[float | None]) -
     a, b = 평균(vs_score), 평균(vs_12_1)
     return {"vs_momentum_score": None if a is None else round(a, 4),
             "vs_momentum_12_1": None if b is None else round(b, 4), "n": sum(1 for x in vs_score if x is not None),
-            "open_account": None if a is None or b is None else (a < OVERLAP_MAX and b < OVERLAP_MAX)}  # fmt: skip
+            "errors": errors,
+            "open_account": None if errors or a is None or b is None
+            else (a < OVERLAP_MAX and b < OVERLAP_MAX)}  # fmt: skip

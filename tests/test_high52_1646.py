@@ -124,10 +124,11 @@ def test_판정_불가_와_뒤_반이_지면_탈락() -> None:
 
 
 def test_중복_진단_요약() -> None:
-    assert h.overlap_summary([0.5, 0.7, None], [0.3, 0.4]) == {
-        "vs_momentum_score": 0.6, "vs_momentum_12_1": 0.35, "n": 2, "open_account": True}
-    assert h.overlap_summary([0.95, 0.9], [0.1, 0.2])["open_account"] is False
-    assert h.overlap_summary([], [])["open_account"] is None
+    assert h.overlap_summary(0, [0.5, 0.7, None], [0.3, 0.4]) == {
+        "vs_momentum_score": 0.6, "vs_momentum_12_1": 0.35, "n": 2, "errors": 0, "open_account": True}
+    assert h.overlap_summary(1, [0.5, 0.7], [0.3, 0.4])["open_account"] is None  # 실패가 있으면 정하지 않는다
+    assert h.overlap_summary(0, [0.95, 0.9], [0.1, 0.2])["open_account"] is False
+    assert h.overlap_summary(0, [], [])["open_account"] is None
 
 
 def _영업일(n: int) -> list[str]:
@@ -178,8 +179,8 @@ def test_등록된_후보이고_시도_수에_든다() -> None:
 
 
 def test_중복_문턱은_반올림_전_값으로() -> None:
-    assert h.overlap_summary([0.89996] * 3, [0.1] * 3)["open_account"] is True
-    assert h.overlap_summary([0.9] * 3, [0.1] * 3)["open_account"] is False
+    assert h.overlap_summary(0, [0.89996] * 3, [0.1] * 3)["open_account"] is True
+    assert h.overlap_summary(0, [0.9] * 3, [0.1] * 3)["open_account"] is False
 
 
 def test_모은_기타도_작으면_전_종목_안에서_잰다() -> None:
@@ -225,4 +226,4 @@ def test_중복_진단이_죽어도_전략은_돈다(monkeypatch: pytest.MonkeyP
     자취: dict = {}
     decide = job.make_strategy("high52", [{"stock_id": s} for s in ids], {}, 5, {"momentum": 100.0}, [], trace=자취)
     assert len(decide(dates[281], bt.PriceView(prices, dates[280]))) == 5
-    assert 자취["vs_score"] == [None] and 자취["overlap_errors"] == 1
+    assert 자취["vs_score"] == [None] and 자취["vs_12_1"] == [None] and 자취["overlap_errors"] == 2

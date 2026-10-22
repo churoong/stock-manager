@@ -377,15 +377,16 @@ def make_strategy(
                 # 중복 진단(같은 실행 메모리, 읽기 0) — 모멘텀 팩터 점수·12-1 과의 시장 안 스피어만.
                 # 기록 전용이라 실패해도 전략은 그대로 돈다 — 판단 함수 안 예외는 그달 판정 실행 전체를
                 # 죽인다(25.1660 감사)
-                try:
-                    가 = h52.overlap(값, {sid: fs.get("momentum") for sid, fs in by_stock.items()}, 시장)
-                    나 = h52.overlap(값, {i.stock_id: i.metrics.get("momentum_12_1") for i in inputs}, 시장)
-                except Exception:  # noqa: BLE001 — 기록 전용 진단. 그 리밸런스는 빈칸(None)으로
-                    log.exception("high52 중복 진단 실패")
-                    가 = 나 = None
-                    trace["overlap_errors"] = trace.get("overlap_errors", 0) + 1
-                trace.setdefault("vs_score", []).append(가)
-                trace.setdefault("vs_12_1", []).append(나)
+                # 짝마다 따로 감싼다 — 하나가 죽어도 다른 하나는 남는다(25.1661 교차검증 [권고])
+                짝 = (("vs_score", {sid: fs.get("momentum") for sid, fs in by_stock.items()}),
+                      ("vs_12_1", {i.stock_id: i.metrics.get("momentum_12_1") for i in inputs}))  # fmt: skip
+                for 칸, 대조 in 짝:
+                    try:
+                        trace.setdefault(칸, []).append(h52.overlap(값, 대조, 시장))
+                    except Exception:  # noqa: BLE001 — 기록 전용 진단. 그 리밸런스는 빈칸, 수는 기록에
+                        log.exception("high52 중복 진단 실패")
+                        trace.setdefault(칸, []).append(None)
+                        trace["overlap_errors"] = trace.get("overlap_errors", 0) + 1
             return 고름
         elif strategy == "momentum_sector":
             # 업종 모멘텀 상위 절반 업종 안에서 모멘텀 상위 N (docs/factors.md 12.2, 기법 루프 D, 25.439)
@@ -1992,7 +1993,8 @@ def run(
                       # 37회차 A (factors.md 12.40, 원장 #35·#36) — 공통 구간 판정과 중복 진단. 기록 전용
                       **({"high52_judge": {**_high52_judge(results, h52_trace.get("full_from"), 무위험),
                                            "ties_cut": h52_trace.get("ties_cut", 0)},
-                          "high52_overlap": h52.overlap_summary(h52_trace.get("vs_score", []),
+                          "high52_overlap": h52.overlap_summary(h52_trace.get("overlap_errors", 0),
+                                                                h52_trace.get("vs_score", []),
                                                                 h52_trace.get("vs_12_1", []))}
                          if "high52" in results and not trend_filter else {}),
                       # 지표 교체 A/B (10회차, docs/factors.md 12.12) — 판정 키가 아니다. 기본 파라미터 실행만 센다
