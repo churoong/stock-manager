@@ -16,6 +16,34 @@ function tone(v: number | null | undefined): string {
  * "기간을 조회하면 해당 기간 내 일자별 실현손익도"). 값은 배치가 매도 때 적은 그대로 — 화면은 기간 안을 더하고 묶기만 한다.
  */
 export default function PaperRealized({ account }: { account: string }) {
+  return (
+    <RealizedView
+      url={(from, to) => `/api/paper/realized?account=${encodeURIComponent(account)}&from=${from}&to=${to}`}
+      costs
+      note="실현손익 = 판 금액 − 평균 원가(매수·매도 수수료·세금·슬리피지 반영)이고, 해외 종목은 환차손익을 주가 손익과 나눠 적습니다(환차 = 현지 통화 원가 × (판 날 환율 − 산 평균 환율)). 값은 배치가 매도 때 적은 그대로입니다."
+      unknownNote="팔 때 장부에 보유가 없던 것"
+    />
+  );
+}
+
+/**
+ * KIS모의투자 실현손익 (docs/paper.md 15장, docs/infra.md 25.1694) — **우리 주문 기록**(체결 수량·평균 체결가)의 평균 원가.
+ * KIS 가 매긴 수수료·세금은 기록에 없어 빠진다 `[확인필요]`
+ */
+export function KisRealized({ market }: { market: "KR" | "US" }) {
+  return (
+    <RealizedView
+      url={(from, to) => `/api/paper/kis/realized?market=${market}&from=${from}&to=${to}`}
+      costs={false}
+      note="KIS모의투자 계좌에서 실제로 찬 매도의 실현손익 = 체결 금액 − 평균 원가(우리가 낸 주문의 체결 수량·평균 체결가로 셈). KIS 가 매긴 수수료·세금은 기록에 없어 빠집니다(비용 전 값). 미국은 체결일 환율로 원화로 바꾸고 환차손익을 나눠 적습니다. 값은 일일 배치가 맞추기 뒤 적은 그대로입니다."
+      unknownNote="아직 세지 않았거나(다음 배치) 원가를 모르는 것 — 환율이 없던 미국 매수, 우리 기록보다 많이 판 매도"
+    />
+  );
+}
+
+function RealizedView({ url, costs, note, unknownNote }: {
+  url: (from: string, to: string) => string; costs: boolean; note: string; unknownNote: string;
+}) {
   const 오늘 = kstToday();
   const [period, setPeriod] = useState<PeriodKey>("this_month");
   const [custom, setCustom] = useState({ from: `${오늘.slice(0, 7)}-01`, to: 오늘 });
@@ -29,8 +57,7 @@ export default function PaperRealized({ account }: { account: string }) {
     setRows(null);
     setError(null);
     void (async () => {
-      const q = `account=${encodeURIComponent(account)}&from=${from}&to=${to}`;
-      const r = await readJson<{ rows?: RealizedRow[] }>(`/api/paper/realized?${q}`);
+      const r = await readJson<{ rows?: RealizedRow[] }>(url(from, to));
       const body = bodyOf<{ rows?: RealizedRow[] }>(r);
       if (!살아있음) return;
       // 못 읽은 것을 "실현손익 0" 으로 말하지 않는다(25.163·25.1505 검토 5 와 같은 규칙)
@@ -41,7 +68,9 @@ export default function PaperRealized({ account }: { account: string }) {
     return () => {
       살아있음 = false;
     };
-  }, [account, from, to, 거꾸로]);
+    // `url` 은 부를 때마다 새 함수라 의존에 넣지 않는다 — 바뀌는 것은 계좌·시장(부모가 key 로 다시 그린다)과 기간뿐
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [from, to, 거꾸로]);
   const 보고 = rows ? realizedReport(rows) : null;
   return (
     <div className="text-sm">
@@ -74,8 +103,7 @@ export default function PaperRealized({ account }: { account: string }) {
         </div>
       ) : null}
       <p className="mt-2 text-xs text-slate-500">
-        {from} ~ {to} 에 체결한 매도(체결일은 그 시장 날짜). 실현손익 = 판 금액 − 평균 원가(매수·매도 수수료·세금·슬리피지 반영)이고, 해외 종목은
-        환차손익을 주가 손익과 나눠 적습니다(환차 = 현지 통화 원가 × (판 날 환율 − 산 평균 환율)). 값은 배치가 매도 때 적은 그대로입니다.
+        {from} ~ {to} 에 체결한 매도(체결일은 그 시장 날짜). {note}
       </p>
       {거꾸로 ? <p className="mt-3 text-amber-700 dark:text-amber-400">시작이 끝보다 늦습니다.</p> : null}
       {error ? <p className="mt-3 text-red-600 dark:text-red-400">실현손익을 읽지 못했습니다 — {error}</p> : null}
@@ -103,15 +131,19 @@ export default function PaperRealized({ account }: { account: string }) {
             <dd className="text-right">
               {보고.n}건 ({보고.wins} · {보고.losses}){보고.n ? ` · 이긴 비율 ${Math.round((보고.wins / 보고.n) * 100)}%` : ""}
             </dd>
-            <dt className="text-slate-500">매도 비용(수수료·세금·슬리피지)</dt>
-            <dd className="text-right">
-              {Object.keys(보고.costs).length
-                ? Object.entries(보고.costs).map(([c, v]) => (c === "KRW" ? won(v) : `${v.toFixed(2)} ${c}`)).join(" · ")
-                : "—"}
-            </dd>
+            {costs ? (
+              <>
+                <dt className="text-slate-500">매도 비용(수수료·세금·슬리피지)</dt>
+                <dd className="text-right">
+                  {Object.keys(보고.costs).length
+                    ? Object.entries(보고.costs).map(([c, v]) => (c === "KRW" ? won(v) : `${v.toFixed(2)} ${c}`)).join(" · ")
+                    : "—"}
+                </dd>
+              </>
+            ) : null}
           </dl>
           {보고.unknown ? (
-            <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">실현손익이 비어 있는 매도 {보고.unknown}건은 합에 넣지 않았습니다(팔 때 장부에 보유가 없던 것).</p>
+            <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">실현손익이 비어 있는 매도 {보고.unknown}건은 합에 넣지 않았습니다({unknownNote}).</p>
           ) : null}
           {보고.byDay.length ? (
             <div className="mt-4 overflow-x-auto">

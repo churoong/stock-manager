@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import EquityChart, { type Series } from "@/components/EquityChart";
+import { KisRealized } from "@/components/PaperRealized";
 import { bodyOf, readJson } from "@/lib/http";
 import { amountText, perfLines, priceText, statusText, usCashText, wholeBreakdownText, type KisMarket, type KisMarketView, type KisWhole } from "@/lib/kisPaper";
 import { orderTimeText, type LiveView } from "@/lib/kisVts";
@@ -13,11 +14,13 @@ import { brokerLines } from "@/lib/paper";
  * 값은 배치가 적은 그대로다(보유의 현재가·평가는 KIS 가 준 값, 수익률·낙폭은 배치가 낸 값).
  */
 
-type Sub = "summary" | "holdings" | "trades" | "perf";
+type Sub = "summary" | "holdings" | "trades" | "realized" | "perf";
 const SUBS: Array<[Sub, string]> = [
   ["summary", "요약"],
   ["holdings", "보유내역"],
   ["trades", "거래내역"],
+  // 기간 실현손익·일자별 (2026-10-22 사용자 지시, 25.1694)
+  ["realized", "실현손익"],
   ["perf", "성과"],
 ];
 const MARKETS: Array<[KisMarket, string]> = [
@@ -176,6 +179,8 @@ export function KisBody({ sub, market, v, whole, live }: { sub: Sub; market: Kis
           )}
         </>
       ) : null}
+
+      {sub === "realized" ? <KisRealized key={market} market={market} /> : null}
 
       {sub === "trades" ? (
         <>

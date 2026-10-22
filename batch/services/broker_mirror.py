@@ -650,3 +650,45 @@ def perf(
         "days": len(줄), "h_pnl_krw": p1 - p0 if p0 is not None and p1 is not None else None,
         "h_return_pct": (t1 / t0 - 1) * 100 if t0 and t1 else None,
     }  # fmt: skip
+
+
+def realized(rows: list[dict[str, Any]], fx_on: Any) -> dict[int, tuple[float | None, float | None]]:
+    """KIS모의투자 매도마다 실현손익(원)과 그 가운데 환차 몫 — **우리 주문 기록**(체결 수량·평균 체결가)의 평균 원가
+    (docs/paper.md 15장, 25.1694, 2026-10-22 사용자 지시 "모의투자에 실현손익이나 기간실현손익").
+
+    `rows` = 체결이 있는 주문(id·trade_date·side·stock_id·filled_qty·avg_price — 미국은 달러), 날짜 순·같은 날 매도 먼저
+    (가상모의투자 `paper.realized` 와 같은 순서). `fx_on(날짜)` = 그날 USDKRW(모르면 None — 국내는 부르지 않는다).
+    돌려주는 것: {매도 주문 id: (실현손익, 환차 몫)}. **KIS 가 매긴 수수료·세금은 빠진다** — 기록에 없다
+    `[확인필요: KIS 모의 비용]`. 원가를 모르게 된 종목(환율 없는 미국 매수, 장부보다 많이 판 매도)은 다 판 뒤 새로 살
+    때까지 None
+    """
+    보유: dict[int, tuple[int, float, float, bool]] = {}  # 수량, 현지 원가, 원화 원가, 원가 모름
+    out: dict[int, tuple[float | None, float | None]] = {}
+    for r in sorted(rows, key=lambda x: (str(x["trade_date"]), 0 if x["side"] == "sell" else 1, int(x["id"]))):
+        sid, q체결, 가 = int(r["stock_id"]), int(r.get("filled_qty") or 0), r.get("avg_price")
+        if q체결 <= 0:
+            continue
+        q, 현, 원, 모름 = 보유.get(sid, (0, 0.0, 0.0, False))
+        미국 = r.get("market") == "US"
+        환율 = fx_on(str(r["trade_date"])) if 미국 else 1.0
+        if 가 is None or float(가) <= 0 or 환율 is None:
+            if r["side"] == "buy":
+                보유[sid] = (q + q체결, 현, 원, True)
+            else:
+                out[int(r["id"])] = (None, None)
+                남 = max(q - q체결, 0)
+                보유[sid] = (남, 현 * 남 / q if q else 0.0, 원 * 남 / q if q else 0.0, 모름 and 남 > 0)
+            continue
+        if r["side"] == "buy":
+            보유[sid] = (q + q체결, 현 + q체결 * float(가), 원 + q체결 * float(가) * 환율, 모름)
+            continue
+        if q <= 0 or q체결 > q or 모름:
+            out[int(r["id"])] = (None, None)
+            남 = max(q - q체결, 0)
+            보유[sid] = (남, 현 * 남 / q if q else 0.0, 원 * 남 / q if q else 0.0, 모름 and 남 > 0)
+            continue
+        현지원가, 원화원가 = 현 * q체결 / q, 원 * q체결 / q
+        손익 = round(q체결 * float(가) * 환율 - 원화원가)
+        out[int(r["id"])] = (float(손익), float(round(현지원가 * 환율 - 원화원가)) if 미국 else 0.0)
+        보유[sid] = (q - q체결, 현 - 현지원가, 원 - 원화원가, False)
+    return out

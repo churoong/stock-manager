@@ -19,6 +19,22 @@ export const PAPER_REALIZED_LEGACY = `SELECT f.id, f.fill_date, f.stock_id, s.ti
 FROM paper_fills f JOIN stocks s ON s.id = f.stock_id
 WHERE f.account_id = ? AND f.side = 'sell' AND f.fill_date >= ? AND f.fill_date <= ? ORDER BY f.fill_date, f.id`;
 
+/**
+ * KIS모의투자 기간 안 체결 매도(25.1694) — 같은 꼴로 읽는다(수수료·세금은 기록에 없어 0, 화면은 비용 칸을 숨긴다).
+ * 인자: 통화, 증권사 칸(`BROKER_KEYS`), 시작, 끝. 색인 (broker, trade_date)
+ */
+export const KIS_REALIZED = `SELECT b.id, b.trade_date AS fill_date, b.stock_id, b.code AS ticker,
+  COALESCE(s.name_ko, s.name_en, s.ticker, b.code) AS name, ? AS currency, b.filled_qty AS quantity, b.avg_price AS price,
+  0 AS fee, 0 AS tax, 0 AS slippage, b.realized_krw, b.realized_fx_krw
+FROM paper_broker_orders b LEFT JOIN stocks s ON s.id = b.stock_id
+WHERE b.broker = ? AND b.side = 'sell' AND b.filled_qty > 0 AND b.trade_date >= ? AND b.trade_date <= ? ORDER BY b.trade_date, b.id`;
+/** 0091 이 적용되기 전 — 실현손익을 모름으로 읽는다(배치가 다음 아침 적용·계산) */
+export const KIS_REALIZED_LEGACY = `SELECT b.id, b.trade_date AS fill_date, b.stock_id, b.code AS ticker,
+  COALESCE(s.name_ko, s.name_en, s.ticker, b.code) AS name, ? AS currency, b.filled_qty AS quantity, b.avg_price AS price,
+  0 AS fee, 0 AS tax, 0 AS slippage, NULL AS realized_krw, NULL AS realized_fx_krw
+FROM paper_broker_orders b LEFT JOIN stocks s ON s.id = b.stock_id
+WHERE b.broker = ? AND b.side = 'sell' AND b.filled_qty > 0 AND b.trade_date >= ? AND b.trade_date <= ? ORDER BY b.trade_date, b.id`;
+
 export interface RealizedRow {
   id: number;
   fill_date: string;

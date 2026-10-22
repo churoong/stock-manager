@@ -53,6 +53,7 @@ def test_kis_보유는_산_적_있는_행에_붙는다(c: Client, held: int, hel
     기록 = job.run(c, "US", _kst("21:27"), session=s, clock=lambda: _kst("21:27"))
     assert [(o[0], o[1], o[3]) for o in s.orders] == [("sell", "AAPL", 3)]
     assert "not_sent" not in 기록
+    assert 기록["realized_updated"] == 0  # 실현손익 다시 세기가 돈다(25.1694) — 찬 매도가 아직 없다
     assert json.loads(c.q("SELECT diff_json FROM paper_broker_daily")[0][0]) == {}
     # 다른 증권사 칸에서 산 것은 이 칸의 잣대가 아니다 — 상장 중인 행
     assert job._ids(c, {"AAPL"}, "US", "kis_vts_us_b") == {"AAPL": other}

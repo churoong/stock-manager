@@ -19,7 +19,7 @@ import json
 import time
 from collections import Counter
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from datetime import time as dtime
 from typing import Any
 
@@ -131,6 +131,16 @@ SENT_UPDATE_SQL = (
     "UPDATE paper_broker_orders SET status = ?, broker_order_no = ?, sent_at = ?, message = ?, fetched_at = ?"
     " WHERE id = ?"
 )
+#: KIS모의투자 실현손익 (25.1694) — 체결이 있는 이 증권사 칸의 주문 전부를 날짜 순으로 다시 센다(하루 몇 줄씩 늘어남)
+REALIZED_ROWS_SQL = (
+    "SELECT id, trade_date, side, stock_id, filled_qty, avg_price, realized_krw, realized_fx_krw"
+    " FROM paper_broker_orders WHERE broker = ? AND filled_qty > 0"
+)
+REALIZED_SET_SQL = "UPDATE paper_broker_orders SET realized_krw = ?, realized_fx_krw = ? WHERE id = ?"
+#: 미국 체결의 원화 환산 — 가상모의투자와 같은 환율 표(그날 이하 마지막). 7일 넘게 묵었으면 모름
+REALIZED_FX_SQL = "SELECT rate, date FROM fx_rates WHERE pair = 'USDKRW' AND date <= ? ORDER BY date DESC LIMIT 1"
+REALIZED_FX_MAX_AGE_DAYS = 7
+
 RECON_SQL = (
     "UPDATE paper_broker_orders SET status = ?, broker_order_no = COALESCE(?, broker_order_no), filled_qty = ?,"
     " avg_price = ?, message = COALESCE(?, message), fetched_at = ? WHERE id = ?"
@@ -276,6 +286,28 @@ def _us_window(now: datetime, day: Any) -> str | None:
 
 
 
+def update_realized(client: Any, 증권사: str, market: str) -> int:
+    """KIS모의투자 매도마다 실현손익·환차 몫을 다시 세어 바뀐 줄만 적는다 (25.1694, `bm.realized`). 적은 수"""
+    rows = client.execute(REALIZED_ROWS_SQL, [증권사]).dicts()
+    if not rows:
+        return 0
+    캐시: dict[str, float | None] = {}
+
+    def 환율(날: str) -> float | None:
+        if 날 not in 캐시:
+            r = client.execute(REALIZED_FX_SQL, [날]).rows
+            묵음 = (date.fromisoformat(날[:10]) - date.fromisoformat(str(r[0][1])[:10])).days if r else None
+            캐시[날] = float(r[0][0]) if r and 묵음 is not None and 묵음 <= REALIZED_FX_MAX_AGE_DAYS else None
+        return 캐시[날]
+
+    값 = bm.realized([{**r, "market": market} for r in rows], 환율)
+    지금값 = {int(r["id"]): (r["realized_krw"], r["realized_fx_krw"]) for r in rows}
+    문장 = [(REALIZED_SET_SQL, [v[0], v[1], i]) for i, v in 값.items() if 지금값.get(i) != v]
+    if 문장:
+        client.batch(문장)
+    return len(문장)
+
+
 def send_block(market: str, now: datetime) -> str | None:
     """지금 KIS 주문을 낼 수 없으면 그 까닭, 되면 None.
 
@@ -401,6 +433,13 @@ def run(
         기록["reconciled"] = dict(Counter(o.status for o in 결과))
         if not 다받음:
             기록["reconcile_truncated"] = True
+    # 1b. 실현손익 (25.1694, 2026-10-22 사용자 지시) — 맞춘 체결로 다시 센다. 곁다리: 실패해도 맞추기·주문은 그대로
+    try:
+        기록["realized_updated"] = update_realized(client, 증권사, market)
+    except Exception as exc:  # noqa: BLE001
+        if db.quota_reason(exc):
+            raise
+        기록["realized_updated"] = {"error": str(exc)[:200]}
 
     # 2. 잔고 — 내부 장부와 대 본다
     보유, 합 = sess.balance_us() if 미국 else sess.balance()

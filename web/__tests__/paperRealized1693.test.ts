@@ -1,5 +1,21 @@
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { periodRange, realizedReport, validRange, type RealizedRow } from "@/lib/paperRealized";
+import { KisRealized } from "@/components/PaperRealized";
+import { BROKER_KEYS } from "@/lib/paper";
+import {
+  KIS_REALIZED,
+  KIS_REALIZED_LEGACY,
+  PAPER_REALIZED,
+  PAPER_REALIZED_LEGACY,
+  periodRange,
+  realizedReport,
+  validRange,
+  type RealizedRow,
+} from "@/lib/paperRealized";
 
 // docs/infra.md 25.1693 — 가상모의투자 기간 실현손익·일자별 실현손익(2026-10-22 사용자 지시)
 const 줄 = (id: number, d: string, sid: number, v: number | null, cur = "KRW", fx: number | null = 0): RealizedRow => ({
@@ -61,5 +77,47 @@ describe("기간 실현손익", () => {
     expect(x.fxUnknown).toBe(1);
     expect(Number.isNaN(x.price)).toBe(true);
     expect(realizedReport([]).byDay).toEqual([]);
+  });
+});
+
+// 질의는 실제 마이그레이션을 적용한 SQLite 에 돌린다(25.1693·25.1694)
+
+function 디비(): DatabaseSync {
+  const db = new DatabaseSync(":memory:");
+  const 폴더 = join(process.cwd(), "..", "migrations");
+  for (const f of readdirSync(폴더).filter((x) => x.endsWith(".sql")).sort()) db.exec(readFileSync(join(폴더, f), "utf8"));
+  db.exec("INSERT INTO stocks (id, ticker, market, country, name_ko, currency, status, source, fetched_at) VALUES (1, 'AAPL', 'NASDAQ', 'US', '애플', 'USD', 'active', 't', 't')");
+  return db;
+}
+
+describe("기간 실현손익 질의", () => {
+  it("가상모의투자 — 그 계좌·그 기간의 매도만, 환차 칸", () => {
+    const db = 디비();
+    for (const [id, side, d, 실현, 환차] of [[1, "buy", "2026-10-15", null, null], [2, "sell", "2026-10-16", 237_160, 100_100], [3, "sell", "2026-11-02", 5, 0]] as const) {
+      db.prepare("INSERT INTO paper_orders (id, account_id, market, stock_id, side, order_type, quantity, currency, decided_on, fill_session, reason, rule_version, created_at) VALUES (?, 'A', 'US', 1, ?, 'market', 10, 'USD', ?, ?, 'x', 1, 't')").run(id, side, d, d);
+      db.prepare("INSERT INTO paper_fills (order_id, account_id, stock_id, side, fill_date, price, quantity, currency, fx_rate, fee, tax, slippage, cash_krw, created_at, realized_krw, realized_fx_krw) VALUES (?, 'A', 1, ?, ?, 100, 10, 'USD', 1300, 1, 0, 0, 1, 't', ?, ?)").run(id, side, d, 실현, 환차);
+    }
+    const rows = db.prepare(PAPER_REALIZED).all("A", "2026-10-01", "2026-10-31") as Array<Record<string, unknown>>;
+    expect(rows.map((r) => [r.fill_date, r.name, r.realized_krw, r.realized_fx_krw])).toEqual([["2026-10-16", "애플", 237_160, 100_100]]);
+    expect(db.prepare(PAPER_REALIZED_LEGACY).all("A", "2026-10-01", "2026-10-31")).toHaveLength(1);
+    expect(db.prepare(PAPER_REALIZED).all("B", "2026-10-01", "2026-10-31")).toHaveLength(0);
+  });
+
+  it("KIS모의투자 — 체결된 매도만, 통화는 시장대로", () => {
+    const db = 디비();
+    db.exec("INSERT INTO paper_accounts (id, name, rule_version, created_at) SELECT 'H', 'H', 1, 't' WHERE NOT EXISTS (SELECT 1 FROM paper_accounts WHERE id = 'H')");
+    const 넣기 = db.prepare("INSERT INTO paper_broker_orders (broker, account_id, market, stock_id, code, side, order_type, quantity, trade_date, reason, status, filled_qty, avg_price, source, created_at, realized_krw, realized_fx_krw) VALUES (?, 'H', 'US', 1, 'AAPL', ?, 'market', 10, ?, '베낌', ?, ?, 110, 'kis_vts', 't', ?, ?)");
+    넣기.run(BROKER_KEYS.US, "sell", "2026-10-20", "filled", 10, 240_000, 100_000);
+    넣기.run(BROKER_KEYS.US, "sell", "2026-10-21", "unfilled", 0, null, null);
+    넣기.run(BROKER_KEYS.US, "buy", "2026-10-15", "filled", 10, null, null);
+    const rows = db.prepare(KIS_REALIZED).all("USD", BROKER_KEYS.US, "2026-10-01", "2026-10-31") as Array<Record<string, unknown>>;
+    expect(rows.map((r) => [r.fill_date, r.currency, r.quantity, r.realized_krw, r.realized_fx_krw])).toEqual([["2026-10-20", "USD", 10, 240_000, 100_000]]);
+    expect((db.prepare(KIS_REALIZED_LEGACY).all("USD", BROKER_KEYS.US, "2026-10-01", "2026-10-31")[0] as Record<string, unknown>).realized_krw).toBeNull();
+  });
+
+  it("KIS 화면은 비용 칸 없이 '비용 전' 을 밝힌다", () => {
+    const html = renderToStaticMarkup(createElement(KisRealized, { market: "US" }));
+    expect(html).toContain("수수료·세금은 기록에 없어 빠집니다");
+    expect(html).toContain("이번 달");
   });
 });
