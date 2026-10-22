@@ -98,3 +98,22 @@ def test_입금과_그_취소가_둘_다_실행_시작_뒤면_둘_다_다음_실
     _하루(c, monkeypatch, "2026-10-16", "2026-10-15", "2026-10-15T23:30:00+00:00")
     행 = c.q("SELECT invested_krw, cash_krw FROM paper_daily WHERE as_of = '2026-10-16'")[0]
     assert 행 == (1_000_000.0, 1_000_000.0)
+
+
+def test_취소가_가리키는_입금_행이_지워지면_취소는_남아_검산이_잡는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1673 — 25.1669 는 가리키는 입금이 이번 목록에 없으면 취소를 뺐다. 입금 행이 지워진 경우도 빼서 시각 입금·장부
+    입금이 둘 다 0 이 돼 "맞음" 이었고, 투자금이 웹(장부 전체 합)과 영구히 어긋났다(교차검증 [필수])."""
+    c = Client(accounts=("A",))
+    for 키, 금액 in (("k0", 1000000), ("k1", 500000)):
+        c.conn.execute("INSERT INTO paper_cash_flows (flow_date, amount_krw, kind, created_at, request_key)"
+                       " VALUES ('2026-10-14', ?, 'deposit', '2026-10-14T00:00:00+00:00', ?)", [금액, 키])  # fmt: skip
+    c.conn.execute("INSERT INTO paper_cash_flows (flow_date, amount_krw, kind, cancels_id, created_at, request_key)"
+                   " VALUES ('2026-10-14', -500000, 'cancel', 2, '2026-10-14T00:00:01+00:00', 'k2')")  # fmt: skip
+    _하루(c, monkeypatch, "2026-10-15", "2026-10-14", "2026-10-14T23:30:00+00:00")
+    c.conn.commit()
+    c.conn.execute("PRAGMA foreign_keys = OFF")  # 손 SQL 로 지운 장면 — 외래키가 막지 않는 DB 를 흉내(`[확인필요]` Turso)
+    c.conn.execute("DELETE FROM paper_cash_flows WHERE request_key = 'k1'")
+    _하루(c, monkeypatch, "2026-10-16", "2026-10-15", "2026-10-15T23:30:00+00:00")
+    행 = c.q("SELECT invested_krw, recon_ok FROM paper_daily WHERE as_of = '2026-10-16'")[0]
+    웹합 = c.q("SELECT SUM(amount_krw) FROM paper_cash_flows")[0][0]
+    assert 행 == (웹합, 0) and 웹합 == 500_000.0
