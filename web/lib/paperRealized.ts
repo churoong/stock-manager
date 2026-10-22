@@ -95,7 +95,10 @@ export function validRange(from: string | null, to: string | null): from is stri
 export interface RealizedGroup {
   key: string;
   label: string;
+  /** 실현손익을 아는 매도 수 — `realized` 는 이것만 더한 값 */
   n: number;
+  /** 실현손익이 비어 있는 매도 수(25.1722) — 예전엔 묶음에서 통째로 빠져 그 날·종목이 표에 없었다 */
+  unknown: number;
   realized: number;
   /** 환차 몫 합 — 해외 매도가 없으면 0. 모르는 매도가 있으면 아는 것만(`fxUnknown` 건) */
   fx: number;
@@ -122,11 +125,15 @@ export interface RealizedReport {
 }
 
 function 빈묶음(key: string, label: string): RealizedGroup {
-  return { key, label, n: 0, realized: 0, fx: 0, fxUnknown: 0, wins: 0, losses: 0 };
+  return { key, label, n: 0, unknown: 0, realized: 0, fx: 0, fxUnknown: 0, wins: 0, losses: 0 };
 }
 
-/** 기간 안 매도를 합치고 일자별·종목별로 묶는다 — 더하기만(값은 배치가 적은 그대로) */
-export function realizedReport(rows: RealizedRow[]): RealizedReport {
+/**
+ * 기간 안 매도를 합치고 일자별·종목별로 묶는다 — 더하기만(값은 배치가 적은 그대로).
+ * `byTicker` = 종목별을 티커로 묶는다 — KIS모의투자는 배치(`bm.realized`)가 티커로 세므로 같은 티커의 두 종목 행(거래소 이전)이
+ * 같은 이름 두 줄로 갈리지 않게(25.1722, 웹 감사 [권고] 2)
+ */
+export function realizedReport(rows: RealizedRow[], byTicker = false): RealizedReport {
   const 일: Map<string, RealizedGroup> = new Map();
   const 종목: Map<string, RealizedGroup> = new Map();
   const out: RealizedReport = {
@@ -137,17 +144,24 @@ export function realizedReport(rows: RealizedRow[]): RealizedReport {
     const 해외 = r.currency !== "KRW";
     out.hasForeign ||= 해외;
     out.costs[r.currency] = (out.costs[r.currency] ?? 0) + Number(r.fee) + Number(r.tax) + Number(r.slippage);
+    const 열쇠들 = [
+      [일, r.fill_date, r.fill_date],
+      [종목, byTicker ? r.ticker : String(r.stock_id), `${r.name} (${r.ticker})`],
+    ] as const;
     if (r.realized_krw == null) {
+      // 모르는 매도도 그 날·종목 묶음에 센다 — 합에는 넣지 않는다(25.1722, 웹 감사 [필수] 1)
       out.unknown += 1;
+      for (const [표, 열쇠, 이름] of 열쇠들) {
+        const g = 표.get(열쇠) ?? 빈묶음(열쇠, 이름);
+        g.unknown += 1;
+        표.set(열쇠, g);
+      }
       continue;
     }
     const v = Number(r.realized_krw);
     const 환차 = 해외 ? (r.realized_fx_krw == null ? null : Number(r.realized_fx_krw)) : 0;
     if (환차 == null) out.fxUnknown += 1;
-    for (const [표, 열쇠, 이름] of [
-      [일, r.fill_date, r.fill_date],
-      [종목, String(r.stock_id), `${r.name} (${r.ticker})`],
-    ] as const) {
+    for (const [표, 열쇠, 이름] of 열쇠들) {
       const g = 표.get(열쇠) ?? 빈묶음(열쇠, 이름);
       g.n += 1;
       g.realized += v;

@@ -61,15 +61,18 @@ describe("기간 실현손익", () => {
     expect(r.costs).toEqual({ KRW: 9, USD: 6 });
   });
   it("일자별 — 날짜 순, 누적", () => {
-    expect(r.byDay.map((d) => [d.key, d.n, d.realized, d.fx, d.cumulative])).toEqual([
-      ["2026-10-15", 2, 13_000, 1_200, 13_000],
-      ["2026-10-16", 2, -3_000, -500, 10_000],
+    // 실현손익을 모르는 매도의 날도 표에 남는다(25.1722) — 합·누적에는 0
+    expect(r.byDay.map((d) => [d.key, d.n, d.unknown, d.realized, d.fx, d.cumulative])).toEqual([
+      ["2026-10-15", 2, 0, 13_000, 1_200, 13_000],
+      ["2026-10-16", 2, 0, -3_000, -500, 10_000],
+      ["2026-10-17", 0, 1, 0, 0, 10_000],
     ]);
   });
   it("종목별 — 실현손익 큰 순", () => {
-    expect(r.byStock.map((s) => [s.label, s.n, s.realized])).toEqual([
-      ["종목1 (T1)", 2, 5_000],
-      ["종목2 (T2)", 2, 5_000],
+    expect(r.byStock.map((s) => [s.label, s.n, s.unknown, s.realized])).toEqual([
+      ["종목1 (T1)", 2, 0, 5_000],
+      ["종목2 (T2)", 2, 0, 5_000],
+      ["종목3 (T3)", 0, 1, 0],
     ]);
   });
   it("환차 몫을 아직 모르는 해외 매도가 있으면 주가 몫도 모름", () => {

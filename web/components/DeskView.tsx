@@ -36,7 +36,9 @@ function tone(v: number | null | undefined): string {
   return v > 0 ? "text-red-600 dark:text-red-400" : "text-blue-600 dark:text-blue-400";
 }
 
-const when = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleString("ko-KR", { dateStyle: "short", timeStyle: "short" }) : "-");
+// 한국 시간으로 고정한다(25.1722, 웹 감사 [권고] 5) — 기기 시간대로 그려 해외에선 실행 날짜가 판정일 앞날로 보였다
+export const when = (iso: string | null | undefined) =>
+  iso ? new Date(iso).toLocaleString("ko-KR", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Seoul" }) : "-";
 
 /** 실전 준비 목록 진도 (docs/paper.md 14장, 25.1513) — 성적 밖에서 남은 거리 */
 export function ReadinessList({ items }: { items: ReadinessItem[] }) {
