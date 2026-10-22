@@ -100,3 +100,14 @@ def test_긴_연휴_뒤_기준일도_잡는다() -> None:
     c = Client(accounts=None)
     _일정(c, "005930", "rights", "2017-10-10", "2017-09-01T00:00:00+00:00")
     assert mt.action_day_ids(c, [1], "2017-09-28T23:00:00+00:00") == ({1}, "2017-09-29")
+
+
+def test_리포트_일정_줄도_같은_락일() -> None:
+    """25.1728 — 리포트 기업행위 일정의 락일도 기준일 이하 마지막 거래일의 전 거래일(2024 기준일 12-31 배당락은 12-27)"""
+    from datetime import date
+
+    from batch.core import calendar as cal
+
+    assert cal.ex_date_kr(date(2024, 12, 31)) == date(2024, 12, 27)
+    assert cal.ex_date_kr(date(2026, 10, 26)) == date(2026, 10, 23)
+    assert mt.ex_date("2026-10-24") == cal.ex_date_kr(date(2026, 10, 24))

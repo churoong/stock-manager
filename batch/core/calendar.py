@@ -155,6 +155,17 @@ def previous_session(market: str, before: date | None = None) -> date:
     return landed.date()
 
 
+def ex_date_kr(record_date: date) -> date:
+    """국내 권리락·배당락일 = 기준일 **이하 마지막 거래일**의 전 거래일 (T+2 결제, docs/infra.md 25.1726·25.1728).
+
+    "기준일 전 1거래일" 은 기준일이 거래일일 때만 맞다 — 기준일이 휴장일(12-31·1-1·주말)이면 하루 늦었다
+    (2024 기준일 12-31 배당락은 12-27 — 마지막 거래일 12-30 의 전 거래일). `previous_session` 은 "엄격히 이전" 이라
+    하루를 더해 감싼다
+    """
+    마지막 = previous_session("KR", record_date + timedelta(days=1))
+    return previous_session("KR", 마지막)
+
+
 def default_as_of(market: str, today: date | None = None) -> str:
     """손으로 기준일을 안 줬을 때 계산 작업이 쓸 기준일 — **직전 거래일** (docs/infra.md 25.234).
 

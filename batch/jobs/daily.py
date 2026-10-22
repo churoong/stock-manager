@@ -2871,7 +2871,9 @@ def _corp_event_lines(
     for r in rows:
         이름, 왜 = 종목[r["code"]]
         락이름 = _락_이름.get(r["kind"])
-        락 = cal.previous_session("KR", date.fromisoformat(r["record_date"])) if 락이름 else None
+        # 락일은 기준일 **이하** 마지막 거래일의 전 거래일 — 기준일이 휴장일이면 "기준일 전 거래일" 이 하루
+        # 늦었다(25.1728)
+        락 = cal.ex_date_kr(date.fromisoformat(r["record_date"])) if 락이름 else None
         if 락 is not None and 락 < 리포트날:
             continue
         덧 = f"{락이름} {락.isoformat()[5:]}, " if 락 is not None else ""

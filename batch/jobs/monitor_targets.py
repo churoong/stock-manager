@@ -439,10 +439,8 @@ ACTION_DAY_SQL = (
 
 
 def ex_date(record_date: str) -> date:
-    """권리락일 = 기준일 **이하 마지막 거래일**의 전 거래일 (T+2 결제, 25.1725 교차검증 [권고] 2 — 기준일이 휴장일
-    (12-31·주말)이면 "기준일 전 1거래일" 이 하루 늦었다)"""
-    마지막 = cal.previous_session("KR", date.fromisoformat(record_date) + timedelta(days=1))
-    return cal.previous_session("KR", 마지막)
+    """권리락일 — `cal.ex_date_kr` (25.1725 교차검증 [권고] 2, 리포트 일정 줄과 같은 함수 25.1728)"""
+    return cal.ex_date_kr(date.fromisoformat(record_date))
 
 
 def action_day_ids(client: TursoClient, stock_ids: list[int], now: str) -> tuple[set[int], str | None]:
