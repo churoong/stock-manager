@@ -320,6 +320,32 @@ def test_production_run_rechecks_open_at_order_time(client: Client, monkeypatch:
     assert c.q("SELECT DISTINCT fill_session, fill_basis FROM paper_orders") == [("2026-10-15", 기준)]
 
 
+def test_order_basis_is_rechecked_per_account(client: Client, monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1696 (25.1686 교차검증 [권고]) — 앞 계좌의 평가·위원회 동안 개장을 넘기면 뒤 계좌 주문은 종가 기준."""
+    c = client
+    고정 = datetime.fromisoformat("2026-10-15T00:05:00+00:00")  # 개장(00:00Z) 5분 뒤
+
+    class _시계(datetime):
+        @classmethod
+        def now(cls, tz=None):  # noqa: ANN001, ANN206
+            return 고정
+
+    부름 = {"n": 0}
+    진짜 = cal.session_open_utc
+
+    def 개장(market: str, day: date):  # noqa: ANN202 — 단계 앞·계좌 A 까지는 아직 안 열림, B 부터 열림
+        부름["n"] += 1
+        return 고정 + timedelta(hours=1) if 부름["n"] <= 2 else 진짜(market, day)
+
+    다음 = cal.next_session("KR", date(2026, 10, 14))
+    monkeypatch.setattr(cal, "local_today", lambda _m=None: 다음)
+    monkeypatch.setattr(job, "datetime", _시계)
+    monkeypatch.setattr(cal, "session_open_utc", 개장)
+    job.run_step(c, market="KR", trade_date="2026-10-14", late=False, signal_rows=[_신호()], settings=설정,
+                 price_series={}, series_unknown={}, allocate=True)  # fmt: skip
+    assert c.q("SELECT DISTINCT account_id, fill_basis FROM paper_orders ORDER BY 1") == [("A", "open"), ("B", "close")]
+
+
 def test_real_portfolio_comparison_line(client: Client, monkeypatch: pytest.MonkeyPatch) -> None:
     """실제 포트폴리오와 같은 기간 비교 — 실제 표는 읽기만 (2026-10-15 사용자 지시, 25.1448)."""
     c = client

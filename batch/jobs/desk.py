@@ -63,7 +63,7 @@ ADJ_FILLS_SQL = (
 #: 실패해 마지막 행이 비면 선정 칸이 "모름" 이 되고 챔피언 후보가 모두 빠졌다(웹 /paper·연구실은 이미 적힌 것을 읽는다).
 #: 기본키 (account_id, as_of) 를 거꾸로 훑어 대개 한 행에서 멈춘다
 LATEST_SQL = (
-    "SELECT d.account_id, d.equity_krw, d.holdings_krw, d.positions_json,"
+    "SELECT d.account_id, d.equity_krw, d.holdings_krw, d.positions_json, a.rule_version,"
     " (SELECT y.attribution_json FROM paper_daily y WHERE y.account_id = a.id AND y.attribution_json IS NOT NULL"
     "  ORDER BY y.as_of DESC LIMIT 1) AS attribution_json"
     " FROM paper_accounts a CROSS JOIN paper_daily d"
@@ -483,7 +483,9 @@ def _관문판(
         실패 = desk.batch_incident_days(실행들, 기대)
         마지막 = client.execute(LATEST_SQL).dicts()
         # 결정 단위 선정 증거 — 가상 단계가 성과 분해와 함께 마지막 평가 행에 적은 것(25.1518, 읽기 0)
-        증거 = {str(r["account_id"]): ((_json(r.get("attribution_json")) or {}).get("evidence") or {}) for r in 마지막}
+        # 대신 읽은 성과 분해가 **지금 판** 것일 때만(25.1696, 25.1690 교차검증 [권고]) — 판을 올린 날부터 성과 분해가
+        # 실패하면 옛 판의 증거로 "지금 판" 선정 칸이 통과할 수 있었다. 판을 모르는 옛 행(25.1602 전)은 판 1
+        증거 = {str(r["account_id"]): _this_version_evidence(r) for r in 마지막}
         관문 = desk.gate(계열, h, since=since, version=version, recon_bad_days=sum(1 for d in 검산틀린날 if d >= 창),
                        batch_failed=실패, kis=desk.combine_kept(kis요약), evidence=증거.get(h),
                        index=index, cash=cash)  # fmt: skip
@@ -507,6 +509,12 @@ def _관문판(
     except Exception as exc:  # noqa: BLE001 — 곁다리 안의 곁다리
         글 = f"{type(exc).__name__}: {str(exc)[:120]}"
         return {"gate": None, "risk": [], "champion": [], "readiness": [], "gate_error": 글}, 글
+
+
+def _this_version_evidence(row: dict[str, Any]) -> dict[str, Any]:
+    """`LATEST_SQL` 한 줄 → 결정 단위 증거. 성과 분해의 판이 계좌의 지금 판과 다르면 빈 것(모름) (25.1696)"""
+    a = _json(row.get("attribution_json")) or {}
+    return (a.get("evidence") or {}) if a.get("rule_version", 1) == int(row.get("rule_version") or 1) else {}
 
 
 def _json_list(text: Any) -> list[dict[str, Any]]:

@@ -13,7 +13,8 @@ import { ATTRIBUTION_MIN_SAMPLE, attrCellText, entryCellText } from "@/lib/paper
 const CARD = "rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900";
 
 const 칸: Array<[string, (a: NonNullable<LabAttribution["attribution"]>) => string]> = [
-  ["낸 후보", (a) => attrCellText(a.selection)],
+  ["낸 새 후보", (a) => attrCellText(a.selection)],
+  ["이미 든 종목 추가 매수", (a) => attrCellText(a.add_on)],
   ["안 낸 새 후보", (a) => attrCellText(a.skipped)],
   ["진입(시장가 체결가→종가)", (a) => entryCellText(a.entry)],
   ["안 찬 회차", (a) => attrCellText(a.missed)],

@@ -1814,13 +1814,21 @@ def run_step(
     열린 = [_order(r) for r in client.execute(OPEN_ORDERS_SQL).dicts()]
     다음장 = cal.next_session(market, date.fromisoformat(trade_date)).isoformat()
     기준 = "close" if late else "open"
-    # **운영 실행은 주문 기준을 지금 다시 잰다** (25.1686, 25.1682 교차검증 [권고]) — `late` 는 일일 배치가 이 단계에
-    # 들어오기 **전**에 정해, 잠금 대기(최대 `STEP_LOCK_WAIT`)·체결·평가 동안 개장을 넘기면 주문이 그날 시가로 찼다.
-    # 시각을 넘긴 실행(`now` — 시험·재현)은 그 시각을 믿는다
-    if now is None and 기준 == "open" and not after_close:
-        열림 = cal.session_open_utc(market, date.fromisoformat(다음장))
-        if 열림 is not None and datetime.now(UTC) >= 열림:
-            기준 = "close"
+
+    def 다시잰기준(지금기준: str) -> str:
+        """**운영 실행은 주문 기준을 지금 다시 잰다** (25.1686, 25.1682 교차검증 [권고]) — `late` 는 일일 배치가 이
+        단계에 들어오기 **전**에 정해, 잠금 대기(최대 `STEP_LOCK_WAIT`)·체결·평가 동안 개장을 넘기면 주문이 그날
+        시가로 찼다. 계좌마다 주문을 만들기 직전에도 다시 부른다(25.1696 — 앞 계좌의 평가·위원회 동안 넘을 수 있다).
+        시가 → 종가로만
+        바뀐다. 시각을 넘긴 실행(`now` — 시험·재현)은 그 시각을 믿는다. 단계 도중 **마감**을 넘기는 것(아주 늦은 실행이
+        몇 분 사이 마감을 지남)은 다시 재지 않는다 — 계좌마다 체결 장이 갈리게 되어서 알고 둔다"""
+        if now is None and 지금기준 == "open" and not after_close:
+            열림 = cal.session_open_utc(market, date.fromisoformat(다음장))
+            if 열림 is not None and datetime.now(UTC) >= 열림:
+                return "close"
+        return 지금기준
+
+    기준 = 다시잰기준(기준)
     if after_close:
         # **장이 끝난 뒤의 손 실행** (25.1447, 교차검증 [필수] 3) — 오늘 장의 시가·종가 모두 주문보다 앞선다.
         # 다음 장 시가로
@@ -1860,6 +1868,7 @@ def run_step(
     메모줄: list[str] = []  # 운용역 메모 — 회사마다 한 줄 (docs/company.md 7장, 텔레그램 길이)
     for acct in accounts:
         aid, 규칙, 판 = str(acct["id"]), str(acct["sell_rule"]), int(acct["rule_version"])
+        기준 = 다시잰기준(기준)
         _결정판 = partial(_결정, rule_version=판)
         진입 = str(acct.get("entry_rule") or "tranche")
         종목수 = int(acct.get("top_n") or report_picks.TOP_STOCKS)

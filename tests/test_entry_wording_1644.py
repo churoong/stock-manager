@@ -54,3 +54,16 @@ def test_산_쪽도_새_후보만_추가_매수는_따로() -> None:
     assert a["selection"] == {"n": 1, "avg": 2.0, "hit": 100.0} and a["add_on"]["avg"] == -12.0
     assert a["skipped"]["avg"] == 2.0
     assert "이미 든 종목 추가 매수 -12.0%p" in pp.attribution_lines("A", a)[0]
+
+
+def test_막은_매도_뒤_막은_매수와_추가_매수_뒤_새_매수가_묻히지_않는다() -> None:
+    """25.1696 (25.1688·1689 교차검증 [권고]) — 에피소드 열쇠가 (종목, kind) 라 28일 안의 다른 갈래가 먼저 온 쪽에 묻혔다."""
+    def 줄(kind: str, d: str, ret: float, **kw: object) -> dict:
+        return {"kind": kind, "decided_on": d, "stock_id": 1, "ret_20d": ret, "bench_20d": 0.0, **kw}
+
+    a = pp.attribution([줄("blocked", "2026-09-01", -6.0, reason=f"{pp.BLOCKED_SELL_PREFIX}: 멈춤"),
+                        줄("blocked", "2026-09-15", 9.0, reason="위험 점검: 하루 주문 수"),
+                        줄("buy", "2026-09-01", -5.0, reason="x", detail={"held": True}),
+                        줄("buy", "2026-09-20", 7.0, reason="x", detail={"held": False})], [])  # fmt: skip
+    assert (a["blocked"]["n"], a["blocked_sell"]["n"]) == (1, 1)
+    assert a["selection"]["avg"] == 7.0 and a["add_on"]["avg"] == -5.0

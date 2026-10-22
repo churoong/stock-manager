@@ -951,16 +951,22 @@ def _초과(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _에피소드(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """같은 종목·같은 kind 가 `ATTRIBUTION_EPISODE_DAYS` 안에 되풀이되면 첫 줄만 (종목·날짜를 모르면 그대로)."""
+    """같은 종목·같은 kind 가 `ATTRIBUTION_EPISODE_DAYS` 안에 되풀이되면 첫 줄만 (종목·날짜를 모르면 그대로).
+
+    성과 분해가 따로 세는 갈래(막은 매수·막은 매도, 새 매수·추가 매수)는 **다른 갈래**로 묶는다(25.1696, 25.1688·1689
+    교차검증 [권고]) — (종목, kind) 하나로 묶으면 막은 매도 뒤 28일 안 막은 매수가, 추가 매수 뒤 다시 산 새 매수가
+    먼저 온 쪽에 묻혀 사라졌다(25.1630 이 skip 에서 고친 "거른 뒤 묶기" 와 같은 뜻)."""
     from datetime import date
 
     남김: list[dict[str, Any]] = []
-    마지막: dict[tuple[Any, Any], date] = {}
+    마지막: dict[tuple[Any, Any, str], date] = {}
     for r in sorted(rows, key=lambda x: (str(x.get("decided_on") or ""), str(x.get("stock_id")))):
         if r.get("stock_id") is None or not r.get("decided_on"):
             남김.append(r)
             continue
-        열쇠, 날 = (r["stock_id"], r.get("kind")), date.fromisoformat(str(r["decided_on"])[:10])
+        갈래 = ("매도" if r.get("kind") == "blocked" and _막은매도(r)
+                else "추가" if r.get("kind") == "buy" and _추가매수(r) else "")  # fmt: skip
+        열쇠, 날 = (r["stock_id"], r.get("kind"), 갈래), date.fromisoformat(str(r["decided_on"])[:10])
         if 열쇠 in 마지막 and (날 - 마지막[열쇠]).days < ATTRIBUTION_EPISODE_DAYS:
             continue
         마지막[열쇠] = 날

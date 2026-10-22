@@ -42,3 +42,16 @@ def test_마지막_행이_비면_적힌_마지막_성과_분해를_읽는다() -
     assert json.loads(행["attribution_json"]) == {"evidence": {"n": 7}}
     계획 = m.conn.execute("EXPLAIN QUERY PLAN " + desk_job.LATEST_SQL).fetchall()
     assert not any("SCAN y" in str(r) or "SCAN paper_daily" in str(r) for r in 계획), 계획
+
+
+def test_대신_읽은_성과_분해가_옛_판이면_증거는_모름() -> None:
+    """25.1696 (25.1690 교차검증 [권고]) — 판을 올린 날부터 성과 분해가 실패하면 옛 판의 증거로 지금 판 선정 칸이 통과할 수
+    있었다."""
+    assert desk_job._this_version_evidence({"attribution_json": json.dumps({"evidence": {"n": 7}, "rule_version": 2}),
+                                            "rule_version": 2}) == {"n": 7}  # fmt: skip
+    assert desk_job._this_version_evidence({"attribution_json": json.dumps({"evidence": {"n": 7}, "rule_version": 1}),
+                                            "rule_version": 2}) == {}  # fmt: skip
+    assert desk_job._this_version_evidence({"attribution_json": json.dumps({"evidence": {"n": 7}}), "rule_version": 1}) \
+        == {"n": 7}  # 판을 모르는 옛 행은 판 1
+    assert desk_job._this_version_evidence({"attribution_json": None, "rule_version": 3}) == {}
+
