@@ -191,7 +191,10 @@ def action_dates(client: TursoClient, stock_id: int, market: str) -> list[str]:
     for (close, pct, day), (prev, _p, _d) in zip(rows, rows[1:], strict=False):
         # 등락률이 빈 날(야후 대체 출처)도 가격제한폭 밖이면 기업행위로 — 감시·멈춤 쪽만(25.1554)
         f = adj.guard_factor(float(prev), float(close), None if pct is None else float(pct))
-        if adj.is_action(f) and not _유상_권리락(client, stock_id, str(day)[:10]):
+        # 등락률이 빈 날(어림 계수)은 유상증자여도 적는다 — `action_factors` 가 그날을 막는데(25.1733) 여기서 빼면
+        # 이어 멈춤 표에 안 적혀, 20거래일 창이 지나면 가상모의투자 멈춤만 풀리고 원가 계수는 빠졌다(25.1734,
+        # 25.1733 교차검증 [권고] 1). 거래소 값으로 채워지면 25.1560 다시 보기가 표에서 지운다
+        if adj.is_action(f) and (pct is None or not _유상_권리락(client, stock_id, str(day)[:10])):
             out.append(str(day)[:10])
     return sorted(set(out))
 
