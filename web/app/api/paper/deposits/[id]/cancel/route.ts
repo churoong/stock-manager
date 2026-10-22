@@ -70,7 +70,14 @@ export async function POST(request: Request, { params }: Params) {
     if (rs.affectedRows === 0) {
       // 같은 키가 이미 들어갔으면(두 번 누름) 성공, 아니면 그 사이 장부가 바뀐 것 — 넣지 않았다
       const 같은키 = rowsToObjects(await execute(FLOW_BY_KEY, [parsed.data.request_key]))[0];
-      if (!같은키) return NextResponse.json({ errors: ["그 사이 다른 입금·취소·체결이 들어왔습니다 — 다시 눌러 주세요"] }, { status: 409 });
+      if (!같은키) {
+        // 잠금을 본 뒤 넣기 전에 배치 단계가 시작됐을 수 있다 — 까닭을 맞게 말한다(25.1668)
+        const 도는중 = rowsToObjects(await execute(PAPER_STEP_LOCK_HELD, [new Date().toISOString()])).length > 0;
+        const 글 = 도는중
+          ? "가상모의투자 배치가 지금 도는 중입니다 — 끝난 뒤(길어야 35분) 다시 눌러 주세요"
+          : "그 사이 다른 입금·취소·체결이 들어왔습니다 — 다시 눌러 주세요";
+        return NextResponse.json({ errors: [글] }, { status: 409 });
+      }
     }
     const invested = Number(rowsToObjects<{ invested: number }>(await execute(PAPER_INVESTED))[0]?.invested ?? 0);
     return NextResponse.json({ ok: true, already: rs.affectedRows === 0, invested });

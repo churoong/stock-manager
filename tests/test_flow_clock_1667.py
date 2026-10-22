@@ -34,6 +34,52 @@ def test_웹_시각이_앞서도_늦게_저장된_입금은_다음_날_흐름이
     행 = c.q("SELECT invested_krw, twr_index, recon_ok FROM paper_daily WHERE as_of = '2026-10-16'")[0]
     assert 행[0] == 2_000_000.0
     assert 행[1] == pytest.approx(1.0)  # 예전엔 2.0 — 입금이 수익으로 셌다
-    assert 행[2] == 1
+    # 검산은 어긋남으로 남긴다 — 시계가 어긋난 날을 사람이 보게(25.1668)
+    assert 행[2] == 0
+    assert "입금 장부 어긋남" in c.q("SELECT recon_note FROM paper_daily WHERE as_of = '2026-10-16'")[0][0]
     # 시각 비교였다면 달랐을 몫은 진단으로 남는다
     assert 기록["accounts"]["A"]["flow_clock_gap"] == pytest.approx(1_000_000.0)
+
+
+
+@pytest.mark.parametrize("고침", [
+    "UPDATE paper_cash_flows SET amount_krw = 300000 WHERE request_key = 'k1'",
+    "DELETE FROM paper_cash_flows WHERE request_key = 'k1'",
+])
+def test_지난_입금_행을_고치거나_지우면_검산이_잡는다(monkeypatch: pytest.MonkeyPatch, 고침: str) -> None:
+    """25.1668 — 합 차이만 검산에 넘기면 입금 항이 지워져 이것도 "맞음" 이었다(교차검증 [필수])."""
+    c = Client(accounts=("A",))
+    for 키 in ("k0", "k1"):  # 입금 둘 — 하나를 지워도 계좌가 "입금 없음" 으로 쉬지 않게
+        c.conn.execute("INSERT INTO paper_cash_flows (flow_date, amount_krw, kind, created_at, request_key)"
+                       " VALUES ('2026-10-14', 500000, 'deposit', '2026-10-14T00:00:00+00:00', ?)", [키])  # fmt: skip
+    _하루(c, monkeypatch, "2026-10-15", "2026-10-14", "2026-10-14T23:30:00+00:00")
+    c.conn.execute(고침)
+    _하루(c, monkeypatch, "2026-10-16", "2026-10-15", "2026-10-15T23:30:00+00:00")
+    assert c.q("SELECT recon_ok FROM paper_daily WHERE as_of = '2026-10-16'")[0][0] == 0
+
+
+def test_평소에는_맞음(monkeypatch: pytest.MonkeyPatch) -> None:
+    c = Client(accounts=("A",))
+    c.conn.execute("INSERT INTO paper_cash_flows (flow_date, amount_krw, kind, created_at, request_key)"
+                   " VALUES ('2026-10-14', 500000, 'deposit', '2026-10-14T00:00:00+00:00', 'k1')")  # fmt: skip
+    _하루(c, monkeypatch, "2026-10-15", "2026-10-14", "2026-10-14T23:30:00+00:00")
+    c.conn.execute("INSERT INTO paper_cash_flows (flow_date, amount_krw, kind, created_at, request_key)"
+                   " VALUES ('2026-10-15', 200000, 'deposit', '2026-10-15T05:00:00.000Z', 'k2')")  # fmt: skip
+    _하루(c, monkeypatch, "2026-10-16", "2026-10-15", "2026-10-15T23:30:00+00:00")
+    assert c.q("SELECT recon_ok, twr_index FROM paper_daily WHERE as_of = '2026-10-16'")[0] == (1, 1.0)
+
+
+def test_취소는_시각이_실행_시작_뒤로_찍혀도_이번_실행에_든다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1668 — 웹 시계가 러너보다 앞서 단계 전에 들어간 취소가 `지금` 뒤로 찍혀도 빼지 않는다(빼면 취소된 돈으로 샀다)."""
+    c = Client(accounts=("A",))
+    for 키 in ("k0", "k1"):
+        c.conn.execute("INSERT INTO paper_cash_flows (flow_date, amount_krw, kind, created_at, request_key)"
+                       " VALUES ('2026-10-14', 500000, 'deposit', '2026-10-14T00:00:00+00:00', ?)", [키])  # fmt: skip
+    _하루(c, monkeypatch, "2026-10-15", "2026-10-14", "2026-10-14T23:30:00+00:00")
+    c.conn.execute("INSERT INTO paper_cash_flows (flow_date, amount_krw, kind, cancels_id, created_at, request_key)"
+                   " VALUES ('2026-10-15', -500000, 'cancel', 2, '2026-10-15T23:30:05.000Z', 'k2')")  # fmt: skip
+    # 입금은 여전히 실행 시작 뒤면 다음 실행 몫
+    c.conn.execute("INSERT INTO paper_cash_flows (flow_date, amount_krw, kind, created_at, request_key)"
+                   " VALUES ('2026-10-15', 300000, 'deposit', '2026-10-15T23:30:05.000Z', 'k3')")  # fmt: skip
+    _하루(c, monkeypatch, "2026-10-16", "2026-10-15", "2026-10-15T23:30:00+00:00")
+    assert c.q("SELECT invested_krw FROM paper_daily WHERE as_of = '2026-10-16'")[0][0] == 500_000.0
