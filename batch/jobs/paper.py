@@ -284,11 +284,11 @@ def fill_realized_fx(client: Any, fills: list[pp.Fill]) -> int:
     return len(문장)
 
 
-def fill_outcomes(client: Any, market: str, today: str, now: str) -> dict[str, int]:
+def fill_outcomes(client: Any, market: str, today: str, now: str, data_date: str | None = None) -> dict[str, int]:
     """결정 원장의 5·20·60 거래일 성과를 채운다 (docs/paper.md 9장, 25.1449).
 
     달력일이 지나 찼을 수 있는 창만 읽는다(`paper.due_horizons`). 시세가 끊겨 `OUTCOME_GIVE_UP_DAYS` 가 지나도
-    못 채우면 까닭을 적고 그만 본다
+    못 채우면 까닭을 적고 그만 본다. `data_date` = 이 실행이 시세를 받은 마지막 장(일일 배치의 `trade_date`)
     """
     from datetime import date as _date
 
@@ -298,8 +298,13 @@ def fill_outcomes(client: Any, market: str, today: str, now: str) -> dict[str, i
     # 있는 날일 뿐이라(아침 실행엔 그날 종가가 없고 평일 휴장이 끼면 더 늦다), 최근 것부터 읽으면 아직 못 차는 행이
     # 상한을 먼저 채워 60일 창은 사실상 돌지 않았다(시뮬: 60일 성과 약 90% 가 200일 포기 쪽에서야 참, 연휴엔 20일도
     # 멈춤).
-    # 직전 마감 장에서 n 거래일 앞(그 뒤 결정은 n 번째 장 시세가 아직 없다)과 달력 기한 가운데 이른 날까지만 읽는다
+    # 직전 마감 장에서 n 거래일 앞(그 뒤 결정은 n 번째 장 시세가 아직 없다)과 달력 기한 가운데 이른 날까지만 읽는다.
+    # 직전 마감 장 = 한국 날짜의 앞 장과 **이 실행이 실제로 받은 시세 날짜** 가운데 이른 날(25.1699, 25.1692 교차검증
+    # [권고] 1) — 미국 실행이 한국 자정을 넘기거나(한국 토 00:30 = 뉴욕 금 장중) 한국 낮 손 실행(시세는 뉴욕 D-2)이면
+    # 한국 날짜의 앞 장 종가가 아직 없어 못 차는 행이 상한을 먼저 채웠다
     마지막장 = cal.previous_session(market, 오늘)
+    if data_date:
+        마지막장 = min(마지막장, _date.fromisoformat(str(data_date)[:10]))
     for n in pp.DECISION_HORIZONS:
         x = 마지막장
         for _ in range(n):
@@ -309,7 +314,8 @@ def fill_outcomes(client: Any, market: str, today: str, now: str) -> dict[str, i
     이십아래 = (_date.fromisoformat(기한[20]) - timedelta(days=OUTCOME_20D_BAND_DAYS)).isoformat()
     rows: list[dict[str, Any]] = []
     본: set[Any] = set()
-    가득: list[Any] = []  # 상한에 닿은 구간의 마지막(가장 오래된) 행 — 그것까지 찼으면 뒤에 더 남았다
+    # 상한에 닿은 구간의 (경계 결정일 — 마지막으로 읽은 날 — 행 id, 포기 구간인가)
+    가득: list[tuple[set[Any], bool]] = []
     for sql, args, 상한 in (
         (PENDING_5D_SQL, [market, 기한[20], 기한[5]], OUTCOME_BATCH),
         (PENDING_20D_SQL, [market, 이십아래, 기한[20]], OUTCOME_BATCH),
@@ -318,7 +324,8 @@ def fill_outcomes(client: Any, market: str, today: str, now: str) -> dict[str, i
     ):
         got = client.execute(sql, [*args, 상한]).dicts()
         if got and len(got) >= 상한:
-            가득.append(got[-1]["id"])
+            경계 = str(got[-1]["decided_on"])
+            가득.append(({r["id"] for r in got if str(r["decided_on"]) == 경계}, sql == PENDING_OLD_SQL))
         rows += [r for r in got if r["id"] not in 본]
         본.update(r["id"] for r in got)
     # 미국 분할 재수집 대기 종목은 오늘 채우지 않는다(25.1548 반박 [권고] 4) — 일일 수집은 최근 10일만 분할 반영 값으로
@@ -345,6 +352,7 @@ def fill_outcomes(client: Any, market: str, today: str, now: str) -> dict[str, i
 
     채움, 포기 = 0, 0
     처리: set[Any] = set()  # 이번에 채우거나 닫은 행
+    채운: set[Any] = set()  # 그 가운데 성과를 새로 적은 행
     문장: list[tuple[str, list[Any]]] = []
     시세캐시: dict[tuple[int, str, int], list] = {}
     for r in rows:
@@ -383,13 +391,19 @@ def fill_outcomes(client: Any, market: str, today: str, now: str) -> dict[str, i
         채움 += 새것
         포기 += 포기함
         처리.add(r["id"])
+        if 새것:
+            채운.add(r["id"])
     if 문장:
         client.batch(문장)
-    # 밀림 = 상한에 닿은 구간의 가장 오래된 행까지 찼거나 닫혔다(그 뒤에 찰 행이 더 있을 것) — 시세가 끊긴 행만 남아
-    # 상한에 닿은 것은 밀림이 아니다(25.1692, 교차검증 [권고] 1). 포기 구간도 센다([권고] 2 — 예전엔 경고에서 빠져
-    # 조용히 쌓였다)
-    찬구간 = sum(1 for i in 가득 if i in 처리)
-    return {"pending_read": len(rows), "filled": 채움, "gave_up": 포기, "full_bands": 찬구간}
+    # 밀림 = 상한에 닿은 구간의 **경계 결정일**(마지막으로 읽은 날 — 그 날과 그 너머가 못 읽고 남았다) 행 가운데 이번에
+    # 처리한 것이 있다 — 시세가 끊긴 행만 남아 상한에 닿은 것은 밀림이 아니다(25.1692, 교차검증 [권고] 1).
+    # 25.1699(25.1692 교차검증 [권고] 2): 마지막 한 행만 보면 같은 결정일에 끊긴 행과 찰 행이 섞여 그 행이 끊긴 행일 때
+    # 경고가 빠졌고(끊긴 행이 상한을 먹어 5·20일 성과가 크게 늦는 바로 그때), 포기 구간은 끊긴 행을 **닫기만** 밀려도
+    # 경고했다 — 포기 구간은 성과를 새로 적은 행이 있을 때만 센다(닫기 밀림은 `close_backlog` 로 따로)
+    찬구간 = sum(1 for ids, 포기구간 in 가득 if ids & (채운 if 포기구간 else 처리))
+    닫기밀림 = sum(1 for ids, 포기구간 in 가득 if 포기구간 and not ids & 채운 and ids & 처리)
+    return {"pending_read": len(rows), "filled": 채움, "gave_up": 포기, "full_bands": 찬구간,
+            "close_backlog": 닫기밀림}  # fmt: skip
 
 
 #: 가상 대조 (docs/company.md 6장, 25.1476) — 성과가 찼는데 아직 대조를 안 본 매수
@@ -2161,7 +2175,7 @@ def run_step(
     기록["frozen_by_account"] = {str(a["id"]): sorted(계좌별멈춤(str(a["id"]))) for a in accounts}
     # 결정 원장 성과 채우기 (25.1449) — 곁다리. 실패해도 오늘 단계는 그대로
     try:
-        기록["decision_outcomes"] = fill_outcomes(client, market, 오늘, 지금)
+        기록["decision_outcomes"] = fill_outcomes(client, market, 오늘, 지금, trade_date)
         if 기록["decision_outcomes"].get("full_bands"):
             # 창 하나라도 상한에 닿았다 = 대기열이 밀렸다(긴 휴장·한도 공백 뒤, 또는 시세가 끊긴 행이 많음). 새 결정부터
             # 채우고 나머지는 다음 배치 — H 가중치·성적표가 늦어진다는 것을 보인다(25.1588·25.1685)
