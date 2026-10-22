@@ -84,6 +84,26 @@ def test_판_2_회사의_헌장이_깨지면_판_1_로_사지_않는다(monkeypa
     assert any(x.startswith("⚠️ 가상 A 투자위원회를 열지 못함 — 헌장 검사 실패") for x in 줄)
 
 
+def test_판_3_회사의_헌장이_비면_판_1_로_사지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1720 (배분 감사 [참고] 3) — 헌장을 받은 회사(`charter_since`)의 `charter_json` 이 비면(손 SQL) dict 가 아니라 헌장
+    오류에도 안 들어, 위원회 없이 점수 상위로 사고 판 3 표시를 붙였다(판이 섞임). 깨진 헌장과 같이 사지 않는다"""
+    monkeypatch.setattr(report_picks, "with_criteria", lambda rows: rows)
+    monkeypatch.setattr(report_picks, "select_top", lambda rows, _n=5: rows)
+    monkeypatch.setattr(job, "frozen_ids", lambda *_a, **_k: set())
+    c = Client(accounts=("A", "B"), charters=True)
+    c.conn.execute("UPDATE paper_accounts SET charter_json = NULL WHERE id = 'A'")
+    c.conn.execute("INSERT INTO paper_cash_flows (flow_date, amount_krw, kind, created_at, request_key)"
+                   " VALUES ('2026-10-13', 1000000, 'deposit', '2026-10-13T00:00:00+00:00', 'k1')")  # fmt: skip
+    monkeypatch.setattr(cal, "local_today", lambda _m=None: date(2026, 10, 15))
+    _줄, 기록 = job.run_step(c, market="KR", trade_date="2026-10-14", late=False, signal_rows=[_신호()], settings=설정,
+                            price_series={}, series_unknown={}, allocate=True,
+                            now=datetime.fromisoformat("2026-10-14T23:30:00+00:00"))  # fmt: skip
+    assert c.q("SELECT COUNT(*) FROM paper_orders WHERE account_id = 'A'") == [(0,)]
+    assert "헌장이 비었음" in 기록["accounts"]["A"]["committee"]["error"]
+    # 헌장을 받은 적 없는 판 1 계좌(B)는 그대로 점수 상위로 산다
+    assert c.q("SELECT COUNT(*) FROM paper_orders WHERE account_id = 'B'")[0][0] > 0
+
+
 def test_다른_시장_열린_매수가_여력에서_두_번_빠지지_않는다(c: Client, monkeypatch: pytest.MonkeyPatch) -> None:
     """국내 아침엔 늘 전날 밤 미국 매수가 열려 있다 — 보유 목록과 예약에 같이 넣어 여력이 두 번 깎였다 (25.1550 반박 [필수] 1).
     입금 100만, 미국 미체결 $470(환율 1,000 → 예약 약 48.9만), 국내 신호 10만 → 예전엔 "투자 여력 부족" 으로 0건"""

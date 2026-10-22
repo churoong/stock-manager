@@ -39,8 +39,8 @@ from batch.services import stop_vol as sv
 log = logging.getLogger(__name__)
 
 ACCOUNTS_SQL = (
-    "SELECT id, sell_rule, rule_version, entry_rule, top_n, selection, charter_json, created_at FROM paper_accounts"
-    " ORDER BY id"
+    "SELECT id, sell_rule, rule_version, entry_rule, top_n, selection, charter_json, charter_since, created_at"
+    " FROM paper_accounts ORDER BY id"
 )
 FLOWS_SQL = "SELECT id, flow_date, amount_krw, kind, cancels_id, created_at FROM paper_cash_flows ORDER BY id"
 FILLS_SQL = (
@@ -1902,6 +1902,11 @@ def run_step(
                 헌장오류[str(acct["id"])] = 틀림
             else:
                 헌장들[str(acct["id"])] = ch
+        elif acct.get("charter_since") and str(acct["id"]) not in 헌장오류:
+            # 헌장을 받은 회사(`charter_since`)의 헌장이 비면(손 SQL 등) 검사 실패와 같다 — 예전엔 dict 가 아니라
+            # 오류에도 안 들어, 판 3 회사가 위원회 없이 판 1(점수 상위)로 사고 판 3 표시를 붙였다(25.1720, 배분 감사
+            # [참고] 3)
+            헌장오류[str(acct["id"])] = ["헌장이 비었음(charter_json 없음)"]
     조사: dict[str, Any] = {}  # 모집단·안건 조사 자료 — 하루 실행에 한 번, 회사들이 같이 쓴다
     메모줄: list[str] = []  # 운용역 메모 — 회사마다 한 줄 (docs/company.md 7장, 텔레그램 길이)
     for acct in accounts:
