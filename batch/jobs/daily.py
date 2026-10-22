@@ -2569,8 +2569,9 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
             # 괴리 — 켜졌는데 아직 안 보낸 칸만 (docs/paper.md 15.8, 25.1507). 보낸 뒤에만 "보냄" 을 적는다 —
             # 발송이 실패하면 다음 실행이 다시 알린다
             괴리 = (step_log.get("broker") or {}).get("diverge")
+            # 고장이 아니라 판단 정보라 본문 머리는 "내용"(25.1654)
             if 괴리 and _notify_failure(client, market, name, str(괴리), dry_run=dry_run, title="KIS모의투자 괴리",
-                                        report_note=False) and not dry_run:  # fmt: skip
+                                        report_note=False, head="내용") and not dry_run:  # fmt: skip
                 try:
                     from batch.jobs import broker_mirror as _bm
 
@@ -3225,6 +3226,7 @@ def signal_age_sessions(market: str, signals_as_of: str | None, trade_date: str)
 def _notify_failure(
     client: TursoClient, market: str, name: str, error_text: str, dry_run: bool, title: str = "배치 실패",
     report_note: bool = True,
+    head: str = "원인",
 ) -> bool:
     """실패를 알린다. 알림 자체가 실패해도 배치 결과를 덮지 않는다. 보냈으면(dry-run 이면 찍었으면) True (25.1507).
 
@@ -3247,7 +3249,7 @@ def _notify_failure(
     try:
         message = formatter.failure_alert(
             market=market, job_name=name, error_text=error_text, last_success=last, title=title, last_unread=못읽음,
-            report_note=report_note,
+            report_note=report_note, head=head,
         )
         if dry_run:
             print("--- 실패 알림 (dry-run) ---")

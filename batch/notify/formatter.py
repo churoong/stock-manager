@@ -146,8 +146,12 @@ def failure_alert(
     title: str = "배치 실패",
     last_unread: bool = False,
     report_note: bool = True,
+    head: str = "원인",
 ) -> str:
-    """배치 실패 알림. `title` 이 기본이 아니면 **배치는 성공으로 닫힌 발송 문제**다 — 마지막 성공 줄을 싣지 않는다
+    """배치 실패 알림. `head` 는 본문 머리 — 실패가 아닌 알림(KIS모의투자 괴리)은 "내용" 으로(25.1654 — "원인" 머리가
+    고장 알림처럼 읽혔다, 25.1631 감사 [권고]).
+
+    `title` 이 기본이 아니면 **배치는 성공으로 닫힌 발송 문제**다 — 마지막 성공 줄을 싣지 않는다
     (docs/infra.md 25.504, 교차검증: 발송 모름·일부 발송이 "배치 실패 · 마지막 성공 어제" 로 와서 실패처럼 읽혔다).
 
     마지막 성공 리포트가 언제 것인지 함께 알려 준다.
@@ -158,7 +162,7 @@ def failure_alert(
         f"[{label}] {title}",
         f"작업 {job_name}",
         "",
-        "원인",
+        head,
         f"  {error_text[:500]}" + (" … (잘림, 배치 기록 참고)" if len(error_text) > 500 else ""),
     ]
 
