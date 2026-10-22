@@ -31,6 +31,15 @@ describe("bodyOf", () => {
     });
     expect(j.errors).toEqual(["수량"]);
   });
+
+  it("실패 본문에 errors 가 없으면(문지기 401·403 의 {error}) 채운다 — 성공처럼 보이지 않게 (25.1664)", () => {
+    const j = bodyOf<{ ok?: boolean }>({ ok: false, data: { error: "로그인이 필요합니다" }, error: "로그인이 필요합니다", status: 401 });
+    expect(j.errors).toEqual(["로그인이 필요합니다"]);
+    const 금지 = bodyOf({ ok: false, data: { error: "다른 출처" }, error: "다른 출처", status: 403 });
+    expect(금지.errors).toEqual(["다른 출처"]);
+    // 성공 본문은 그대로 — errors 를 만들지 않는다
+    expect(bodyOf<{ ok?: boolean }>({ ok: true, data: { ok: true }, error: null, status: 200 })).toEqual({ ok: true });
+  });
 });
 
 describe("화면 컴포넌트", () => {

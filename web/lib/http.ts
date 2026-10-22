@@ -70,6 +70,12 @@ export async function readJson<T = unknown>(
  * 네트워크 끊김이면 예외로 끝나 **"저장 중…" 에 멈추고** 검색은 조용히 죽었다.
  */
 export function bodyOf<T extends object = Record<string, unknown>>(r: Read<unknown>): T & { errors?: string[] } {
-  if (r.data && typeof r.data === "object") return r.data as T & { errors?: string[] };
+  if (r.data && typeof r.data === "object") {
+    const d = r.data as T & { errors?: string[] };
+    // **실패면 errors 를 반드시 채운다** (docs/infra.md 25.1664). 문지기(`proxy.ts`)의 401·403 본문은 `{error}`(단수)라
+    // 부르는 쪽의 `body.errors` 가 비어, 세션이 끝난 화면에서 멈춤 단추를 누르면 실패인데 "멈췄습니다" 가 떴다
+    if (!r.ok && !(Array.isArray(d.errors) && d.errors.length)) return { ...d, errors: [r.error ?? "응답을 읽지 못했습니다"] };
+    return d;
+  }
   return { errors: [r.error ?? "응답을 읽지 못했습니다"] } as unknown as T & { errors?: string[] };
 }
