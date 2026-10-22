@@ -418,22 +418,39 @@ def next_tranche(client: TursoClient, stock_id: int, today: date) -> tuple[float
     return (float(가격), 산 + 1, 기준일) if 가격 else (None, None, None)
 
 
-#: 다음 장이 기업행위 첫날인지 보는 일정 종류 — 현금배당은 빼고(수 % 기계적 하락), 주가가 크게 바뀌는 것만
-ACTION_DAY_KINDS = ("rights", "bonus", "split")
-#: 그 기준일 창의 일정(시장 전체 — 하루 한두 날 창이라 작다)을 읽고 감시 종목은 파이썬에서 거른다. 종류는 위와 같은 글
+#: 다음 장이 기업행위 첫날인지 보는 일정 종류 — 현금배당은 빼고(수 % 기계적 하락), 주가가 크게 바뀌는 것만. 분할·병합
+#: (`split`)은 매매정지 뒤 변경상장일이 첫날이라 "기준일 전 거래일" 규칙이 맞지 않아 뺀다 — 그 첫날은 ±31%
+#: 가드(25.597)가 잡는다(25.1725 교차검증 [권고] 3, 25.1332 리포트 락일과 같은 까닭)
+ACTION_DAY_KINDS = ("rights", "bonus")
+#: 기준일을 다음 장부터 이만큼(달력일) 앞까지 읽는다 — 기준일이 연휴 끝이어도 권리락일이 다음 장인 행을 놓치지 않게.
+#: 2007~2027 달력에서 필요한 최댓값은 10일(2025-10-02), 2017년 열흘 추석은 11일 — 여유를 두어 14
+#: (25.1726 교차검증 [권고] 1)
+ACTION_DAY_LOOKAHEAD_DAYS = 14
+#: 그 창의 일정(시장 전체 — 열흘 창이라 작다)을 읽고 감시 종목·권리락일은 파이썬에서 거른다. 종류는 위와 같은 글.
+#: **일정이 바뀐 옛 행은 뺀다** — 같은 종목·종류에 더 나중에 받은 다른 기준일 행이 있으면(25.1333 리포트와 같은 조건,
+#: 25.1725 교차검증 [필수] 1 — 옛 기준일로 하루 내내 가격 알림이 빠졌다). 철회는 못 가린다 — 그래서 웹은 KIS 시세가
+#: 아닐 때만 이 표시를 쓴다
 ACTION_DAY_SQL = (
-    "SELECT DISTINCT s.id FROM kr_corp_events e JOIN stocks s ON s.ticker = e.code"
-    " WHERE e.kind IN ('rights', 'bonus', 'split') AND e.record_date > ? AND e.record_date <= ?"
+    "SELECT DISTINCT s.id, e.record_date FROM kr_corp_events e JOIN stocks s ON s.ticker = e.code"
+    " WHERE e.kind IN ('rights', 'bonus') AND e.record_date > ? AND e.record_date <= ?"
+    " AND NOT EXISTS (SELECT 1 FROM kr_corp_events n WHERE n.code = e.code AND n.kind = e.kind"
+    "   AND n.record_date <> e.record_date AND substr(n.fetched_at, 1, 10) > substr(e.fetched_at, 1, 10))"
 )
 
 
-def action_day_ids(client: TursoClient, stock_ids: list[int], now: str) -> tuple[set[int], str | None]:
-    """이 목록이 쓰일 **다음 국내 장**이 권리락일(= 기준일 전 1거래일)인 종목 (docs/infra.md 25.1725, 장중 감사
-    [필수] 1).
+def ex_date(record_date: str) -> date:
+    """권리락일 = 기준일 **이하 마지막 거래일**의 전 거래일 (T+2 결제, 25.1725 교차검증 [권고] 2 — 기준일이 휴장일
+    (12-31·주말)이면 "기준일 전 1거래일" 이 하루 늦었다)"""
+    마지막 = cal.previous_session("KR", date.fromisoformat(record_date) + timedelta(days=1))
+    return cal.previous_session("KR", 마지막)
 
-    25.1551 의 기준가 가드는 KIS 시세일 때만 걸려, 야후로 넘어간 날(KIS 키 없음·토큰 실패·달력 어긋남) 무상·유상증자
-    권리락 첫날 보유 종목에 거짓 "손절선 터치"(야후 전일 종가가 조정 안 됐으면 거짓 −29% 급락도)가 나갔다. 예탁원 일정
-    (`kr_corp_events`, KIS — 키가 없으면 비어 있다)으로 기준일이 (다음 장, 그 다음 장] 에 있으면 다음 장이 권리락일이다.
+
+def action_day_ids(client: TursoClient, stock_ids: list[int], now: str) -> tuple[set[int], str | None]:
+    """이 목록이 쓰일 **다음 국내 장**이 무상·유상증자 권리락일인 종목 (docs/infra.md 25.1725, 장중 감사 [필수] 1).
+
+    25.1551 의 기준가 가드는 KIS 시세일 때만 걸려, 야후로 넘어간 날(KIS 키 없음·토큰 실패·달력 어긋남) 권리락 첫날
+    보유 종목에 거짓 "손절선 터치"(야후 전일 종가가 조정 안 됐으면 거짓 −29% 급락도)가 나갔다. 예탁원 일정
+    (`kr_corp_events`, KIS — 키가 없으면 비어 있다)의 기준일로 권리락일(`ex_date`)을 내 다음 장과 같은 종목.
     (종목 집합, 다음 장 날짜) — 표에 날짜를 붙여, 배치가 하루 빠져 묵은 목록이 다른 날 알림을 빼지 않게.
     못 읽으면 빈 집합
     """
@@ -445,12 +462,14 @@ def action_day_ids(client: TursoClient, stock_ids: list[int], now: str) -> tuple
         장 = next((d for d, _o, c, _s in session_rows("KR", 오늘) if datetime.fromisoformat(c) > 지금), None)
         if 장 is None:
             return set(), None
-        그다음 = cal.next_session("KR", date.fromisoformat(장)).isoformat()
-        rows = client.execute(ACTION_DAY_SQL, [장, 그다음]).rows
+        끝 = (date.fromisoformat(장) + timedelta(days=ACTION_DAY_LOOKAHEAD_DAYS)).isoformat()
+        rows = client.execute(ACTION_DAY_SQL, [장, 끝]).rows
+        감시 = set(stock_ids)
+        첫날 = {int(r[0]) for r in rows if int(r[0]) in 감시 and ex_date(str(r[1])[:10]).isoformat() == 장}
     except Exception as exc:  # noqa: BLE001 — 표가 없거나(KIS 키 없음) 달력 밖이면 모른다 — 예전처럼 둔다
         log.warning("기업행위 첫날 표시를 달지 못했습니다: %s", exc)
         return set(), None
-    return {int(r[0]) for r in rows} & set(stock_ids), 장
+    return 첫날, 장
 
 
 def build_targets(client: TursoClient, market: str, now: str) -> list[tuple]:
@@ -556,8 +575,8 @@ def build_targets(client: TursoClient, market: str, now: str) -> list[tuple]:
             if 손절 is not None:
                 t["stop_price"] = 손절 if t["stop_price"] is None else max(t["stop_price"], 손절)
 
-    # 다음 장이 권리락·무상증자·분할 **첫날**인 국내 종목 — 시세 출처와 무관하게 그날 가격 알림을 빼게 표시한다(25.1725)
-    첫날 = action_day_ids(client, list(by_stock), now) if market == "KR" else ({}, None)
+    # 다음 장이 무상·유상증자 권리락일인 국내 종목 — 웹이 KIS 시세가 아닐 때 그날 가격 알림을 빼게 표시(25.1725·1726)
+    첫날 = action_day_ids(client, list(by_stock), now) if market == "KR" else (set(), None)
     rows = []
     for t in by_stock.values():
         if t["stock_id"] in 첫날[0]:

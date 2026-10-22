@@ -8,9 +8,9 @@ from batch.jobs import monitor_targets as mt
 from tests.test_paper_job_1445 import Client
 
 
-def _일정(c: Client, code: str, kind: str, day: str) -> None:
+def _일정(c: Client, code: str, kind: str, day: str, fetched: str = "2026-10-01T00:00:00+00:00") -> None:
     c.conn.execute("INSERT INTO kr_corp_events (code, kind, record_date, name, detail, source, fetched_at)"
-                   " VALUES (?, ?, ?, 'n', '{}', 't', 't')", [code, kind, day])  # fmt: skip
+                   " VALUES (?, ?, ?, 'n', '{}', 't', ?)", [code, kind, day, fetched])  # fmt: skip
 
 
 def test_다음_장이_권리락일인_종목만() -> None:
@@ -63,3 +63,40 @@ def test_질의의_종류가_상수와_같다() -> None:
     for k in mt.ACTION_DAY_KINDS:
         assert f"'{k}'" in mt.ACTION_DAY_SQL
     assert "'dividend'" not in mt.ACTION_DAY_SQL
+
+
+# ── 25.1725 교차검증 반영 ───────────────────────────────────────────────────────
+
+
+def test_기준일이_옮겨진_옛_행은_보지_않는다() -> None:
+    """[필수] 1 — 유상증자 기준일이 10-26 → 11-10 으로 정정되면 옛 행이 남아 10-23 에 하루 내내 가격 알림이 빠졌다"""
+    c = Client(accounts=None)
+    _일정(c, "005930", "rights", "2026-10-26", "2026-10-05T00:00:00+00:00")
+    _일정(c, "005930", "rights", "2026-11-10", "2026-10-15T00:00:00+00:00")
+    assert mt.action_day_ids(c, [1], "2026-10-22T23:00:00+00:00") == (set(), "2026-10-23")
+
+
+def test_기준일이_휴장일이면_그_앞_마지막_거래일의_전_거래일() -> None:
+    """[권고] 2 — 기준일 10-24(토)면 마지막 거래일 10-23 의 전 거래일 10-22 가 권리락일(예전 창은 10-23 으로 하루 늦었다)"""
+    assert mt.ex_date("2026-10-24").isoformat() == "2026-10-22"
+    assert mt.ex_date("2026-10-26").isoformat() == "2026-10-23"  # 거래일이면 전 1거래일
+    c = Client(accounts=None)
+    _일정(c, "005930", "bonus", "2026-10-24")
+    assert mt.action_day_ids(c, [1], "2026-10-21T23:00:00+00:00") == ({1}, "2026-10-22")
+    assert mt.action_day_ids(c, [1], "2026-10-22T23:00:00+00:00")[0] == set()
+
+
+def test_분할은_표시하지_않는다() -> None:
+    """[권고] 3 — 분할·병합은 매매정지 뒤 변경상장일이 첫날이라 기준일 규칙이 맞지 않는다(±31% 가드가 잡는다)"""
+    c = Client(accounts=None)
+    _일정(c, "005930", "split", "2026-10-26")
+    assert mt.action_day_ids(c, [1], "2026-10-22T23:00:00+00:00")[0] == set()
+    assert "'split'" not in mt.ACTION_DAY_SQL
+
+
+def test_긴_연휴_뒤_기준일도_잡는다() -> None:
+    """25.1726 교차검증 [권고] 1 — 2017 열흘 추석(9-30~10-9) 뒤 첫 거래일 10-10 이 기준일이면 권리락일은 9-29. 창이 10일이면 놓쳤다"""
+    assert mt.ex_date("2017-10-10").isoformat() == "2017-09-29"
+    c = Client(accounts=None)
+    _일정(c, "005930", "rights", "2017-10-10", "2017-09-01T00:00:00+00:00")
+    assert mt.action_day_ids(c, [1], "2017-09-28T23:00:00+00:00") == ({1}, "2017-09-29")

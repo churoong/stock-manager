@@ -589,7 +589,9 @@ export async function GET(request: Request) {
       if (watchBuy !== null && 쓸목표가 === null) staleWatchPrices.push(target.yahoo_symbol);
       const 판정 = evaluate(target, quote, thresholds, 쓸목표가);
       if (
-        actionDayToday(target.reasons, session.date) ||
+        // 배치의 권리락일 표시는 **KIS 시세가 아닐 때만** — KIS 날은 기준가 가드가 정확하고, 일정 표는 철회된 옛 행을 못 가려
+        // 정상인 날 진짜 손절까지 뺐다(25.1725 교차검증 [필수] 1)
+        (quote.source !== KIS_SOURCE && actionDayToday(target.reasons, session.date)) ||
         actionSuspect(market, quote.price, target.prev_close, quote.previous_close, quote.source === KIS_SOURCE)
       ) {
         actionSuspects.push(target.yahoo_symbol);
