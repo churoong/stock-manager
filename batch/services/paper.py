@@ -689,6 +689,7 @@ def summary_lines(
     sell_rules: dict[str, str] | None = None,
     starts: dict[str, str] | None = None,
     twr_at: dict[tuple[str, str], float] | None = None,
+    created: dict[int, str] | None = None,
 ) -> list[str]:
     """주간 요약의 모의 계좌 절 — 월 첫 요약이면 월간 복기까지 (docs/paper.md 6장). 순수 함수.
 
@@ -717,7 +718,8 @@ def summary_lines(
         # 그 체결은 이번 주 시간가중에는 들어 있었다(25.1609, 운용 요약 감사 [필수] 1)
         # 주초 행이 없으면(읽은 2주 안에 그 앞 행이 없다 — 배치 공백·새 계좌) 처음부터가 아니라 week_start 부터 —
         # 처음부터면 전체 이력을 이번 주로 셌다(25.1611, 25.1609 교차검증 [필수] 2)
-        이번주 = 장부에_든(fills.get(aid, []), 주초["as_of"] if 주초 else week_start, 끝["as_of"])
+        이번주 = 장부에_든(fills.get(aid, []), 주초["as_of"] if 주초 else week_start, 끝["as_of"], created,
+                        주초.get("updated_at") if 주초 else None, 끝.get("updated_at"))  # fmt: skip
         보유 = json.loads(끝.get("positions_json") or "[]")
         날짜 = sorted({str(p.get("price_date")) for p in 보유 if p.get("price_date")})
         누적 = (float(끝["twr_index"]) - 1) * 100
@@ -763,7 +765,8 @@ def summary_lines(
         앞행 = next((r for r in reversed(daily[aid]) if str(r["as_of"]) < month_start), None)
         끝행 = next((r for r in reversed(daily[aid]) if str(r["as_of"]) < 다음달), None)
         든것 = 장부에_든(fills.get(aid, []), 앞행["as_of"] if 앞행 else month_start,
-                       끝행["as_of"] if 끝행 else month_start)  # fmt: skip
+                       끝행["as_of"] if 끝행 else month_start, created, 앞행.get("updated_at") if 앞행 else None,
+                       끝행.get("updated_at") if 끝행 else None)  # fmt: skip
         든주문 = {f.order_id for f in 든것}
         실현 = [r for r in realized(fills.get(aid, [])) if r["order_id"] in 든주문]
         if 실현:
@@ -801,10 +804,18 @@ def summary_lines(
     return out
 
 
-def 장부에_든(fills: list[Fill], after_row: Any, upto_row: Any) -> list[Fill]:
-    """`after_row` 날의 평가 행 뒤 ~ `upto_row` 날의 평가 행까지 장부에 든 체결 — 행 X 에는 체결일 < X 인 체결이
-    든다(국내는 다음 날 아침, 미국은 다음 현지일 개장 전 배치가 판정). `after_row` 가 없으면(앞 행 없는 새 계좌)
-    처음부터."""
+def 장부에_든(
+    fills: list[Fill], after_row: Any, upto_row: Any, created: dict[int, str] | None = None,
+    after_at: Any = None, upto_at: Any = None,
+) -> list[Fill]:
+    """`after_row` 날의 평가 행 뒤 ~ `upto_row` 날의 평가 행까지 장부에 든 체결.
+
+    두 행의 기록 시각(`updated_at`)과 체결 행을 쓴 시각(`created`)을 알면 그것으로 — 같은 실행이 같은 시각으로 쓴다.
+    체결일로 가르면 종목 행을 기다려(25.1713) 체결일 D 인 체결이 D+3 행에 든 것이 어느 주·달에도 안 셌다(25.1716, 평가
+    감사 [권고] 1). 모르면(앞 행 없음) 예전처럼 체결일 — 행 X 에는 체결일 < X 인 체결이 든다. `after_row` 가 없으면
+    처음부터"""
+    if created is not None and after_at and upto_at:
+        return [f for f in fills if str(after_at) < created.get(f.order_id, "") <= str(upto_at)]
     아래, 위 = str(after_row) if after_row else "", str(upto_row)
     return [f for f in fills if 아래 <= f.fill_date < 위]
 

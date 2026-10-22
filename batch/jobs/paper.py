@@ -2253,7 +2253,7 @@ def run_step(
 
 PAPER_SUMMARY_SQL = (
     "SELECT account_id, as_of, invested_krw, equity_krw, pnl_krw, twr_index, kospi_krw, sp500_krw, positions_json,"
-    " attribution_json FROM paper_daily WHERE as_of >= ? ORDER BY account_id, as_of"
+    " attribution_json, updated_at FROM paper_daily WHERE as_of >= ? ORDER BY account_id, as_of"
 )
 #: 월간 복기 — 한국 날짜로 그달 1~7일에 보내는 주간 요약이 지난달을 돌아본다 (docs/paper.md 6장)
 MONTHLY_REVIEW_DAYS = 7
@@ -2291,7 +2291,7 @@ def summary_section(client: Any, now: datetime) -> list[str]:
     daily: dict[str, list[dict[str, Any]]] = {}
     for r in rows:
         daily.setdefault(str(r["account_id"]), []).append(r)
-    fills, _ = _fills(client)
+    fills, 만든시각 = _fills(client)
     by_acct: dict[str, list[pp.Fill]] = {}
     for f in fills:
         by_acct.setdefault(f.account_id, []).append(f)
@@ -2319,7 +2319,8 @@ def summary_section(client: Any, now: datetime) -> list[str]:
                     if r and r[0][0]:
                         지수[(a, 공통)] = float(r[0][0])
     줄 = pp.summary_lines(daily, by_acct, 주초, 달초, {k: str(v.get("name")) for k, v in 캐시.items()},
-                         {k: v.get("sector") for k, v in 캐시.items()}, limits, 규칙, 시작일, 지수)  # fmt: skip
+                         {k: v.get("sector") for k, v in 캐시.items()}, limits, 규칙, 시작일, 지수,
+                         created=만든시각)  # fmt: skip
     # 실제 투자와 같은 기간 비교 (25.1448) — 모의 절 바로 아래
     try:
         비교줄 = pp.compare_line(real_comparison(client))
