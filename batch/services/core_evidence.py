@@ -136,7 +136,8 @@ def evidence(
 def gate_evidence(logs: list[Any], closes: Closes) -> dict[str, Any]:
     """관문과 같은 잣대 — `pp.selection_evidence` 에 하루 기록의 운영 결정 원장 모양을 그대로 넘긴다
     (산 것 vs 같은 날 안 산
-    새 후보, 묶음 안 사흘 이상, 결정일 묶음). 성과는 각 결정의 기준 종가 날(`ref_date`, 없으면 cutoff) 뒤 20 거래일"""
+    새 후보, 묶음 안 사흘 이상, 결정일 묶음). 성과는 각 결정의 기준 종가 날(`ref_date`, 없으면 cutoff) 뒤 20 거래일.
+    관문의 "가상 대조" 칸(25.1697 — 결과의 `control`)은 백테스트 결정에 `control_pct` 가 없어 비어 나온다(25.1706)"""
     n = pp.ATTRIBUTION_HORIZON
     줄: list[dict[str, Any]] = []
     for log in logs:

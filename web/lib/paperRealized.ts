@@ -108,7 +108,7 @@ export interface RealizedReport {
   realized: number;
   fx: number;
   price: number;
-  /** 해외 매도 가운데 환차 몫을 아직 모르는 수(0090 전 매도를 배치가 채우기 전) */
+  /** 해외 매도 가운데 환차 몫을 모르는 수 — 0090 전 매도를 배치가 채우기 전, 또는 다른 원가로 적혀 채우지 않는 옛 매도(25.1695) */
   fxUnknown: number;
   hasForeign: boolean;
   wins: number;

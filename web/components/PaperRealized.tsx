@@ -61,7 +61,8 @@ function RealizedView({ url, costs, note, unknownNote }: {
   const 오늘 = kstToday();
   const [period, setPeriod] = useState<PeriodKey>("this_month");
   const [custom, setCustom] = useState({ from: `${오늘.slice(0, 7)}-01`, to: 오늘 });
-  const [rows, setRows] = useState<RealizedRow[] | null>(null);
+  // 읽은 기간과 함께 둔다 — 기간을 바꾼 첫 그림에 앞 기간 숫자가 새 제목 아래 한 번 보이지 않게(25.1706)
+  const [읽음, setRows] = useState<{ key: string; rows: RealizedRow[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [from, to] = periodRange(period, 오늘, custom);
   const 거꾸로 = from > to;
@@ -77,7 +78,7 @@ function RealizedView({ url, costs, note, unknownNote }: {
       // 못 읽은 것을 "실현손익 0" 으로 말하지 않는다(25.163·25.1505 검토 5 와 같은 규칙)
       if (!r.ok || body.errors?.length) setError(body.errors?.join(" · ") || r.error || "읽지 못했습니다");
       else if (!Array.isArray(body.rows)) setError("응답 꼴이 다름 — 새로 고침해 주세요");
-      else setRows(body.rows);
+      else setRows({ key: `${from}|${to}`, rows: body.rows });
     })();
     return () => {
       살아있음 = false;
@@ -86,6 +87,7 @@ function RealizedView({ url, costs, note, unknownNote }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [from, to, 거꾸로]);
   // 시작 > 끝이면 앞 기간 숫자를 그 제목 아래 보이지 않는다(25.1695, 교차검증 [권고] 1)
+  const rows = 읽음 && 읽음.key === `${from}|${to}` ? 읽음.rows : null;
   const 보고 = rows && !거꾸로 ? realizedReport(rows) : null;
   return (
     <div className="text-sm">
@@ -133,7 +135,7 @@ function RealizedView({ url, costs, note, unknownNote }: {
                 <dt className="text-slate-500">그 가운데 주가 손익 · 환차손익</dt>
                 <dd className="text-right">
                   {보고.fxUnknown ? (
-                    `환차 몫 모름 ${보고.fxUnknown}건(다음 배치가 채움)`
+                    `환차 몫 모름 ${보고.fxUnknown}건(다음 배치가 채우거나, 다른 원가로 적힌 옛 매도라 비어 있음)`
                   ) : (
                     <>
                       <span className={tone(보고.price)}>{won(보고.price)}</span> · <span className={tone(보고.fx)}>{won(보고.fx)}</span>

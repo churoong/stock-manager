@@ -447,7 +447,7 @@ def gate(
         # 가상 대조(25.1697, H·R 감사 [필수]) — R 대비가 규칙 차이(진입·매도·투자 속도)를 재는 것을 받친다.
         # AND 로만 더함
         {"key": "control",
-         "label": ("가상 대조 — 산 새 종목이 같은 날 무작위 20종목 안 분위의 한쪽 95% 하한"
+         "label": ("가상 대조 — 주문 낸 새 종목이 같은 날 무작위 20종목 안 분위의 한쪽 95% 하한"
                    f"(28일 묶음 {GATE_SEL_MIN_BLOCKS}개 이상)"),
          "now": 대조하한, "target": GATE_SEL_NULL, "n": 대조묶음수, "mean": 가상.get("mean"),
          "ok": 대조하한 is not None and 대조묶음수 >= GATE_SEL_MIN_BLOCKS and float(대조하한) > GATE_SEL_NULL},

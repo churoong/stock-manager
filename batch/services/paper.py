@@ -1192,10 +1192,14 @@ def selection_evidence(decisions: list[dict[str, Any]]) -> dict[str, Any]:
     # 20종목 안 몇 분위였나(`control_pct`, `fill_controls`). 진입 방식(분할 지정가·시가 일괄)·매도 규칙·현금 비중과
     # 무관하게 선정만 잰다 — 관문 "R 대비" 는 H 와 R 의 규칙이 달라(진입·매도·투자 속도) 하락장엔 현금만으로 통과하고
     # 상승장엔 실력이 있어도 떨어졌다. 같은 묶음·같은 하한 계산(무작위면 50)
+    # 같은 종목이 28일 안에 되풀이해 새 매수 결정이 되면 첫 결정만(25.1706, 25.1697 교차검증 [권고] 1) — 분할 지정가가
+    # 안 차면 다음 날 같은 종목이 다시 "새 매수" 가 되어 몇 종목만으로 결정일 문턱·묶음 6개가 찼다. 연구실 가상 대조
+    # (`_가상` — 에피소드)·핵심 백테스트(`core_evidence.first_buys`)와 같은 잣대
+    첫매수 = {id(b) for b in _에피소드([b for g in 날.values() for b in g["buy"]])}
     대조묶음: dict[int, list[float]] = {}
     대조날: dict[int, set[str]] = {}
     for (_m, day), g in sorted(날.items()):
-        xs = [float(b["control_pct"]) for b in g["buy"] if b.get("control_pct") is not None]
+        xs = [float(b["control_pct"]) for b in g["buy"] if b.get("control_pct") is not None and id(b) in 첫매수]
         if xs:
             대조묶음.setdefault(_묶음(day), []).append(sum(xs) / len(xs))
             대조날.setdefault(_묶음(day), set()).add(day)

@@ -79,3 +79,13 @@ def test_gate_control_item_is_and() -> None:
         assert all(i["ok"] for i in g["items"] if i["key"] != "control")  # 다른 칸은 그대로 통과
     칸 = {i["key"]: i for i in 관문({"n_blocks": 3, "mean": 70.0})["items"]}["control"]
     assert (칸["now"], 칸["n"], 칸["mean"], 칸["target"]) == (None, 3, 70.0, 50.0)
+
+
+def test_control_counts_first_buy_per_episode(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1706 (25.1697 교차검증 [권고] 1) — 같은 종목이 사흘 내리 새 매수 결정이 되어도(분할 지정가가 안 참) 첫 날만.
+    1 번 종목 90 이 10-01·02·03, 2 번 종목 30 이 10-02 → 날 평균 90·30 → 묶음 60 (되풀이를 세면 90·60·90 → 80)"""
+    monkeypatch.setattr(pp, "EVIDENCE_BLOCK_MIN_DAYS", 1)
+    rows = [{**_d("buy", d, 1.0, 90.0), "stock_id": 1} for d in ("2026-10-01", "2026-10-02", "2026-10-03")]
+    rows.append({**_d("buy", "2026-10-02", 1.0, 30.0), "stock_id": 2})
+    c = pp.selection_evidence(rows)["control"]
+    assert c["n_blocks"] == 1 and c["mean"] == pytest.approx(60.0)
