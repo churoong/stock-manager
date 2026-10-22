@@ -2218,10 +2218,12 @@ def summary_section(client: Any, now: datetime) -> list[str]:
     if 줄 and 비교줄:
         자리 = next((i for i, x in enumerate(줄) if x.startswith("[가상모의투자 월간")), len(줄))
         줄.insert(자리, "  " + 비교줄.strip())
-    # 월간 복기에 성과 분해 (25.1450) — 계좌마다 마지막 평가 행의 것
+    # 월간 복기에 성과 분해 (25.1450) — 계좌마다 성과 분해가 **적힌** 마지막 평가 행의 것(25.1690 — 마지막 행이 비면
+    # 그 계좌 줄이 통째로 빠졌다)
     if 달초 and 줄:
         분해 = [x for aid in sorted(daily)
-                for x in pp.attribution_lines(aid, json.loads(daily[aid][-1].get("attribution_json") or "null"))]
+                for x in pp.attribution_lines(aid, json.loads(next(
+                    (r["attribution_json"] for r in reversed(daily[aid]) if r.get("attribution_json")), "null")))]
         if 분해:
             줄 += [f"[노하우 성적표 — {pp.ATTRIBUTION_HORIZON} 거래일 뒤, 지수 대비]", *분해]
     # 투자위원회 주간 복기 (docs/company.md 7장, 25.1473) — 곁다리. 0076 전 DB·읽기 실패면 그 절만 빠진다

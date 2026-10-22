@@ -59,8 +59,13 @@ ADJ_FILLS_SQL = (
 )
 #: 위험판 (25.1508) — 계좌마다 마지막 평가 한 줄(기본키 (account_id, as_of) 로 계좌마다 하나)
 #: `CROSS JOIN` 으로 계좌(몇 줄)부터 돈다 — 그냥 JOIN 이면 계획기가 평가 표 전체를 훑었다(25.1571, 운용 감사 [권고] 5)
+#: 성과 분해(관문의 결정 단위 증거·챔피언)는 **적힌** 마지막 것(25.1690, 결정 원장 감사 [권고]) — 그날 성과 분해가
+#: 실패해 마지막 행이 비면 선정 칸이 "모름" 이 되고 챔피언 후보가 모두 빠졌다(웹 /paper·연구실은 이미 적힌 것을 읽는다).
+#: 기본키 (account_id, as_of) 를 거꾸로 훑어 대개 한 행에서 멈춘다
 LATEST_SQL = (
-    "SELECT d.account_id, d.equity_krw, d.holdings_krw, d.positions_json, d.attribution_json"
+    "SELECT d.account_id, d.equity_krw, d.holdings_krw, d.positions_json,"
+    " (SELECT y.attribution_json FROM paper_daily y WHERE y.account_id = a.id AND y.attribution_json IS NOT NULL"
+    "  ORDER BY y.as_of DESC LIMIT 1) AS attribution_json"
     " FROM paper_accounts a CROSS JOIN paper_daily d"
     " ON d.account_id = a.id AND d.as_of = (SELECT MAX(x.as_of) FROM paper_daily x WHERE x.account_id = a.id)"
 )
