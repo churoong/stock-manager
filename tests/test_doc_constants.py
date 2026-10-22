@@ -1014,6 +1014,7 @@ class Test이웃_모듈들:
         검사(DESK, "50(`GATE_SEL_NULL`", "관문 결정 단위 기준 (25.1518)")
         assert dk.GATE_SEL_NULL == 50.0
         검사(DESK, f"묶음이 {dk.GATE_SEL_MIN_BLOCKS}개(`GATE_SEL_MIN_BLOCKS`", "관문 결정 단위 묶음 (25.1518)")
+        검사(DESK, f"R 투자 비중 {dk.EXPOSURE_MIN * 100:.0f}%(`EXPOSURE_MIN`)", "노출 맞춘 R 대비 (25.1702)")
         검사(DESK, f"묶음 {dk.CHAMPION_EVIDENCE_MIN_BLOCKS}개(`CHAMPION_EVIDENCE_MIN_BLOCKS`)", "챔피언 결정 단위 묶음 (25.1518)")
         검사(DESK, f"유의수준 {dk.CHAMPION_ALPHA:g}(`CHAMPION_ALPHA`)", "챔피언 유의수준 (25.1518)")
         검사(COMPANY, "서로 다른 회사 **두 곳 이상**이 추천한 종목만 후보", "지주사 합의 조건 (25.1482)")

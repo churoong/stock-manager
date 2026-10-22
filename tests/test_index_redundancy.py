@@ -49,7 +49,10 @@ def _표별_인덱스(con: sqlite3.Connection) -> dict[str, list[tuple[str, tupl
 
 
 #: 부분 색인(`WHERE …`) — 조건 밖 행이 없어 일반 질의를 대신하지 못한다. "대신 쓸 인덱스" 로 치지 않는다(25.1637 —
-#: `idx_paper_broker_cleanup … WHERE paper_order_id IS NULL` 이 날짜 범위 색인을 겹친 것으로 잘못 짚었다)
+#: `idx_paper_broker_cleanup … WHERE paper_order_id IS NULL` 이 날짜 범위 색인을 겹친 것으로 잘못 짚었다).
+#: 거꾸로 **겹치는 쪽**으로도 치지 않는다 — 부분 색인은 조건에 드는 몇 행만 읽으려고 따로 둔 것이라, 열이 일반 색인의
+#: 접두사여도 지우면 그 질의가 계좌의 모든 행을 읽는다(25.1704 — `idx_paper_fills_fx_pending … WHERE side = 'sell' AND
+#: realized_fx_krw IS NULL` 을 `idx_paper_fills_account` 의 접두사로 짚어 25.1693 부터 이 시험이 깨져 있었다)
 부분: set[str] = set()
 
 
@@ -61,7 +64,7 @@ def 겹치는_인덱스() -> list[tuple[str, str, tuple, str, tuple]]:
         for 표, 목록 in _표별_인덱스(con).items():
             for 이름1, 열1 in 목록:
                 for 이름2, 열2 in 목록:
-                    if 이름1 == 이름2 or 이름1 in 허용 or 이름2 in 부분:
+                    if 이름1 == 이름2 or 이름1 in 허용 or 이름1 in 부분 or 이름2 in 부분:
                         continue
                     같은길이_자동 = len(열1) == len(열2) and 이름1.startswith("sqlite_autoindex_")
                     if len(열1) <= len(열2) and 열2[: len(열1)] == 열1 and not 같은길이_자동:

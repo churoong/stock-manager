@@ -1803,7 +1803,9 @@ def run_step(
     fills = [*fills, *새체결]
     for f in 새체결:
         fill_created[f.order_id] = 지금
-    # 0090 전 매도의 환차 몫을 한 번 채운다(25.1693) — 부분 색인으로 남은 것만 읽어 다 채우면 읽기 0. 곁다리
+    # 0090 전 매도의 환차 몫을 한 번 채운다(25.1693) — 부분 색인으로 남은 것만 읽는다. 다른 원가로 적힌 옛
+    # 매도(25.1695)는 영영 비어 날마다 다시 읽힌다 — 그 몇 행뿐이라 읽기는 거의 0(25.1704, 25.1695 교차검증 [참고] 2).
+    # 곁다리
     try:
         기록["realized_fx_filled"] = fill_realized_fx(client, fills)
     except Exception as exc:  # noqa: BLE001 — 실현손익 화면의 환차 칸만 늦는다. 까닭은 기록에
