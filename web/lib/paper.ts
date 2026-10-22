@@ -487,7 +487,9 @@ export interface AttrCell {
 }
 export interface Attribution {
   horizon: number;
+  /** 주문 낸 **새** 후보(25.1689 부터 — 그 전 행은 추가 매수도 섞임) · 이미 든 종목 추가 매수 */
   selection: AttrCell;
+  add_on?: AttrCell;
   skipped: AttrCell;
   skip_by_reason: Record<string, AttrCell>;
   /** 시장가 매수만 잰다 — 지정가 체결은 `limit_n` 에 수만(모형상 늘 종가 이상, 25.1687) */

@@ -937,7 +937,10 @@ function ReportPane({ a }: { a: Account }) {
         {t.rule_version != null ? ` 판 ${t.rule_version} 결정만 셉니다 — 판을 올리면 처음부터 다시 쌓입니다.` : ""}
       </p>
       <ul className="mt-1 space-y-0.5 text-slate-700 dark:text-slate-300">
-        <li>선정: 주문 낸 후보 {attrCellText(t.selection)} · 안 낸 새 후보 {attrCellText(t.skipped)}</li>
+        <li>
+          선정: 주문 낸 새 후보 {attrCellText(t.selection)} · 안 낸 새 후보 {attrCellText(t.skipped)}
+          {t.add_on?.n ? ` · 이미 든 종목 추가 매수 ${attrCellText(t.add_on)}` : ""}
+        </li>
         {Object.entries(t.skip_by_reason ?? {}).map(([k, v]) => (
           <li key={k}>안 낸 까닭 — {k}: {attrCellText(v)}</li>
         ))}

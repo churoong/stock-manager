@@ -41,3 +41,16 @@ def test_막은_매수와_막은_매도는_따로_센다() -> None:
     줄 = pp.attribution_lines("A", a)
     assert any("막은 매수의 그 뒤: +8.0%p" in x and "오르면 막은 것이 비용" in x for x in 줄)
     assert any("막은 매도의 그 뒤: -8.0%p" in x and "내리면 막은 것이 비용" in x for x in 줄)
+
+
+def test_산_쪽도_새_후보만_추가_매수는_따로() -> None:
+    """25.1689 (결정 원장 감사 [권고]) — 안 산 쪽은 이미 든 종목을 빼는데 산 쪽엔 추가 매수가 남았다. 재현: 새 매수 +2,
+    추가 매수 −12, 안 산 새 후보 +2 → 선정이 −5 대 +2 로 나왔다."""
+    def 결(kind: str, ret: float, sid: int, held: bool = False) -> dict:
+        return {"kind": kind, "reason": "x", "ret_20d": ret, "bench_20d": 0.0, "stock_id": sid,
+                "decided_on": "2026-10-01", "detail": {"held": held}}  # fmt: skip
+
+    a = pp.attribution([결("buy", 2.0, 1), 결("buy", -12.0, 2, held=True), 결("skip", 2.0, 3)], [])
+    assert a["selection"] == {"n": 1, "avg": 2.0, "hit": 100.0} and a["add_on"]["avg"] == -12.0
+    assert a["skipped"]["avg"] == 2.0
+    assert "이미 든 종목 추가 매수 -12.0%p" in pp.attribution_lines("A", a)[0]

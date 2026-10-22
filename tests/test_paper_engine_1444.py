@@ -260,7 +260,7 @@ def test_attribution_splits_selection_entry_exit() -> None:
     assert a["missed"]["avg"] == pytest.approx(10.0)
     assert a["sold"]["avg"] == pytest.approx(-5.0) and a["held_flag"]["avg"] == pytest.approx(2.0)
     줄 = pp.attribution_lines("A", a)
-    assert "주문 낸 후보 +1.0%p (n=2, 이긴 비율 50%, 참고)" in 줄[0]
+    assert "주문 낸 새 후보 +1.0%p (n=2, 이긴 비율 50%, 참고)" in 줄[0]
     assert any("체결가가 그날 종가보다 평균 0.50% 쌌다 (n=2)" in x for x in 줄)
     assert pp.attribution_lines("A", None) == []
     빈 = pp.attribution([], [])

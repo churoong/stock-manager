@@ -1034,9 +1034,13 @@ def attribution(
         까닭.setdefault(_까닭_묶음(str(d.get("reason"))), []).append(d)
     까닭 = {k: _에피소드(v) for k, v in 까닭.items()}
     진입 = [(float(c) - float(p)) / float(p) * 100 for p, c in entries if c and p and p > 0]
+    새매수 = [d for d in 종류["buy"] if not _추가매수(d)]
     return {
         "horizon": ATTRIBUTION_HORIZON,
-        "selection": _초과(종류["buy"]),
+        # 산 쪽도 **새** 후보만(25.1689, 결정 원장 감사 [권고]) — 안 산 쪽은 이미 든 종목을 빼는데 산 쪽엔 추가 매수가
+        # 남아 한쪽만 뺐다(결정 단위 증거 `selection_evidence` 는 이미 양쪽 다 뺀다). 추가 매수는 따로 한 칸
+        "selection": _초과(새매수),
+        "add_on": _초과([d for d in 종류["buy"] if _추가매수(d)]),
         "skipped": _초과(견줄),
         "skip_by_reason": dict(sorted(((k, _초과(v)) for k, v in 까닭.items()),
                                       key=lambda kv: (-kv[1]["n"], kv[0]))[:5]),  # fmt: skip
@@ -1048,7 +1052,7 @@ def attribution(
         # 막은 매수·막은 매도를 가른다(25.1688, 결정 원장 감사 [권고]) — 뜻이 반대다
         "blocked": _초과([d for d in 종류["blocked"] if not _막은매도(d)]),
         "blocked_sell": _초과([d for d in 종류["blocked"] if _막은매도(d)]),
-        "virtual": _가상(종류["buy"]),
+        "virtual": _가상(새매수),
     }
 
 
@@ -1184,7 +1188,8 @@ def attribution_lines(aid: str, a: dict[str, Any] | None) -> list[str]:
         글 = f"{s['avg']:+.1f}%p (n={s['n']}" + (f", 이긴 비율 {s['hit']:.0f}%" if s.get("hit") is not None else "")
         return 글 + (", 참고" if s["n"] < ATTRIBUTION_MIN_SAMPLE else "") + ")"
 
-    줄 = [f"  {aid} 선정: 주문 낸 후보 {칸(a['selection'])} · 안 낸 새 후보 {칸(a['skipped'])}"]
+    줄 = [f"  {aid} 선정: 주문 낸 새 후보 {칸(a['selection'])} · 안 낸 새 후보 {칸(a['skipped'])}"
+          + (f" · 이미 든 종목 추가 매수 {칸(a['add_on'])}" if (a.get("add_on") or {}).get("n") else "")]
     if a.get("skip_by_reason"):
         줄.append(f"  {aid} 안 낸 까닭별: " + " · ".join(f"{k} {칸(v)}" for k, v in a["skip_by_reason"].items()))
     if (a.get("blocked") or {}).get("n"):
