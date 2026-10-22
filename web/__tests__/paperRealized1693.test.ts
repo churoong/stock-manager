@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { KisRealized } from "@/components/PaperRealized";
+import { KisRealized, headline } from "@/components/PaperRealized";
 import { BROKER_KEYS } from "@/lib/paper";
 import {
   KIS_REALIZED,
@@ -121,5 +121,7 @@ describe("기간 실현손익 질의", () => {
     const html = renderToStaticMarkup(createElement(KisRealized, { market: "US" }));
     expect(html).toContain("수수료·세금은 기록에 없어 빠집니다");
     expect(html).toContain("이번 달");
+    // 머리 칸에도(25.1698) — 비용 전 값을 비용 뺀 가상과 나란히 읽지 않게
+    expect([headline(false), headline(true)]).toEqual(["기간 실현손익(비용 전)", "기간 실현손익"]);
   });
 });

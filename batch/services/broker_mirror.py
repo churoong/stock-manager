@@ -652,43 +652,88 @@ def perf(
     }  # fmt: skip
 
 
-def realized(rows: list[dict[str, Any]], fx_on: Any) -> dict[int, tuple[float | None, float | None]]:
+def realized(
+    rows: list[dict[str, Any]], fx_on: Any, balance: dict[str, int] | None = None,
+) -> dict[int, tuple[float | None, float | None]]:
     """KIS모의투자 매도마다 실현손익(원)과 그 가운데 환차 몫 — **우리 주문 기록**(체결 수량·평균 체결가)의 평균 원가
     (docs/paper.md 15장, 25.1694, 2026-10-22 사용자 지시 "모의투자에 실현손익이나 기간실현손익").
 
-    `rows` = 체결이 있는 주문(id·trade_date·side·stock_id·filled_qty·avg_price — 미국은 달러), 날짜 순·같은 날 매도 먼저
-    (가상모의투자 `paper.realized` 와 같은 순서). `fx_on(날짜)` = 그날 USDKRW(모르면 None — 국내는 부르지 않는다).
+    `rows` = 체결이 있는 주문(id·trade_date·side·stock_id·code·filled_qty·avg_price — 미국은 달러).
+    `fx_on(날짜)` = 그날 USDKRW(모르면 None — 국내는 부르지 않는다). `balance` = 같은 실행이 읽은 KIS 잔고 {코드: 수량}.
     돌려주는 것: {매도 주문 id: (실현손익, 환차 몫)}. **KIS 가 매긴 수수료·세금은 빠진다** — 기록에 없다
-    `[확인필요: KIS 모의 비용]`. 원가를 모르게 된 종목(환율 없는 미국 매수, 장부보다 많이 판 매도)은 다 판 뒤 새로 살
-    때까지 None
+    `[확인필요: KIS 모의 비용]`.
+
+    - **코드로 묶는다**(25.1698) — KIS 잔고는 티커 하나에 평균 원가 하나다. 같은 티커의 두 행(25.1616)을 행마다 묶으면
+      옛 행 매도·정리 매도가 다른 원가로 적혔다
+    - 같은 날은 매도 먼저(가상모의투자 `paper.realized` 와 같은 순서 — 주문은 장 전에 한꺼번에), 다만 매도가 그때
+      기록 보유보다 많으면 같은 날 매수를 먼저 넣는다(개장 뒤 다시 돌아 산 날 판 것 — 매도 먼저면 유령 보유가 남았다)
+    - **모름**: 원가를 모르는 매수(환율 없는 미국)가 든 동안의 매도. 그리고 기록이 KIS 와 어긋난 흔적이 있는
+      **보유 구간**(기록 보유 0 에서 산 때부터 다시 0 이 될 때까지)의 매도 전부 — ① 기록보다 많이 판 매도가
+      나옴(정리·`unknown` 으로 닫은 매수가 실제로 참·기록 전 보유) ② 마지막 구간의 기록 끝 수량이 `balance` 와 다름.
+      어긋난 몫의 원가를 모르므로 KIS 평균 원가와 다른 값을 조용히 적지 않는다(25.1694 교차검증 [권고] 1)
     """
-    보유: dict[int, tuple[int, float, float, bool]] = {}  # 수량, 현지 원가, 원화 원가, 원가 모름
+    보유: dict[str, tuple[int, float, float, bool]] = {}  # 수량, 현지 원가, 원화 원가, 원가 모름
+    구간: dict[str, list[int]] = {}  # 코드마다 지금(또는 마지막) 보유 구간의 매도 id
     out: dict[int, tuple[float | None, float | None]] = {}
-    for r in sorted(rows, key=lambda x: (str(x["trade_date"]), 0 if x["side"] == "sell" else 1, int(x["id"]))):
-        sid, q체결, 가 = int(r["stock_id"]), int(r.get("filled_qty") or 0), r.get("avg_price")
-        if q체결 <= 0:
-            continue
-        q, 현, 원, 모름 = 보유.get(sid, (0, 0.0, 0.0, False))
+
+    def 열쇠(r: dict[str, Any]) -> str:
+        return str(r.get("code") or f"#{r['stock_id']}")
+
+    def 사기(r: dict[str, Any]) -> None:
+        k, q체결, 가 = 열쇠(r), int(r["filled_qty"]), r.get("avg_price")
+        q, 현, 원, 모름 = 보유.get(k, (0, 0.0, 0.0, False))
+        if q <= 0:
+            구간[k] = []
+        환율 = fx_on(str(r["trade_date"])) if r.get("market") == "US" else 1.0
+        if 가 is None or float(가) <= 0 or 환율 is None:
+            보유[k] = (q + q체결, 현, 원, True)
+        else:
+            보유[k] = (q + q체결, 현 + q체결 * float(가), 원 + q체결 * float(가) * 환율, 모름)
+
+    def 팔기(r: dict[str, Any]) -> None:
+        k, q체결, 가, i = 열쇠(r), int(r["filled_qty"]), r.get("avg_price"), int(r["id"])
+        q, 현, 원, 모름 = 보유.get(k, (0, 0.0, 0.0, False))
         미국 = r.get("market") == "US"
         환율 = fx_on(str(r["trade_date"])) if 미국 else 1.0
-        if 가 is None or float(가) <= 0 or 환율 is None:
-            if r["side"] == "buy":
-                보유[sid] = (q + q체결, 현, 원, True)
-            else:
-                out[int(r["id"])] = (None, None)
-                남 = max(q - q체결, 0)
-                보유[sid] = (남, 현 * 남 / q if q else 0.0, 원 * 남 / q if q else 0.0, 모름 and 남 > 0)
-            continue
-        if r["side"] == "buy":
-            보유[sid] = (q + q체결, 현 + q체결 * float(가), 원 + q체결 * float(가) * 환율, 모름)
-            continue
-        if q <= 0 or q체결 > q or 모름:
-            out[int(r["id"])] = (None, None)
-            남 = max(q - q체결, 0)
-            보유[sid] = (남, 현 * 남 / q if q else 0.0, 원 * 남 / q if q else 0.0, 모름 and 남 > 0)
-            continue
+        구간.setdefault(k, []).append(i)
+        남 = max(q - q체결, 0)
+        if q체결 > q:
+            # 기록보다 많이 팔렸다 — 이 구간 전부 원가를 모른다(①)
+            for x in 구간[k]:
+                out[x] = (None, None)
+            보유[k] = (0, 0.0, 0.0, False)
+            return
+        if 가 is None or float(가) <= 0 or 환율 is None or 모름:
+            out[i] = (None, None)
+            보유[k] = (남, 현 * 남 / q, 원 * 남 / q, 모름 and 남 > 0)
+            return
         현지원가, 원화원가 = 현 * q체결 / q, 원 * q체결 / q
         손익 = round(q체결 * float(가) * 환율 - 원화원가)
-        out[int(r["id"])] = (float(손익), float(round(현지원가 * 환율 - 원화원가)) if 미국 else 0.0)
-        보유[sid] = (q - q체결, 현 - 현지원가, 원 - 원화원가, False)
+        out[i] = (float(손익), float(round(현지원가 * 환율 - 원화원가)) if 미국 else 0.0)
+        보유[k] = (남, 현 - 현지원가, 원 - 원화원가, False)
+
+    찬 = [r for r in rows if int(r.get("filled_qty") or 0) > 0]
+    날들: dict[str, list[dict[str, Any]]] = {}
+    for r in 찬:
+        날들.setdefault(str(r["trade_date"]), []).append(r)
+    for 날 in sorted(날들):
+        줄 = sorted(날들[날], key=lambda x: (0 if x["side"] == "sell" else 1, int(x["id"])))
+        넣음: set[int] = set()
+        for r in 줄:
+            if r["side"] == "buy":
+                if int(r["id"]) not in 넣음:
+                    사기(r)
+                continue
+            if int(r["filled_qty"]) > 보유.get(열쇠(r), (0,))[0]:
+                for b in 줄:
+                    if b["side"] == "buy" and 열쇠(b) == 열쇠(r) and int(b["id"]) not in 넣음:
+                        사기(b)
+                        넣음.add(int(b["id"]))
+            팔기(r)
+    if balance is not None:
+        # 마지막 구간의 기록 끝 수량이 KIS 잔고와 다르면 그 구간 매도는 모름(②). 기록에 없는 코드는 견주지 않는다
+        for k, v in 보유.items():
+            if int(balance.get(k, 0)) != v[0]:
+                for x in 구간.get(k, []):
+                    out[x] = (None, None)
     return out

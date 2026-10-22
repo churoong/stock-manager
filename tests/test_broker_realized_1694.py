@@ -6,9 +6,10 @@ from batch.jobs import broker_mirror as job
 from batch.services import broker_mirror as bm
 
 
-def _o(i: int, d: str, side: str, qty: int, price: float | None, sid: int = 1, market: str = "KR") -> dict:
-    return {"id": i, "trade_date": d, "side": side, "stock_id": sid, "filled_qty": qty, "avg_price": price,
-            "market": market, "realized_krw": None, "realized_fx_krw": None}  # fmt: skip
+def _o(i: int, d: str, side: str, qty: int, price: float | None, sid: int = 1, market: str = "KR",
+       code: str | None = None) -> dict:  # fmt: skip
+    return {"id": i, "trade_date": d, "side": side, "stock_id": sid, "code": code or f"C{sid}", "filled_qty": qty,
+            "avg_price": price, "market": market, "realized_krw": None, "realized_fx_krw": None}  # fmt: skip
 
 
 def test_국내_평균_원가_부분_매도() -> None:
@@ -46,15 +47,18 @@ class _Rs:
 
 
 class _Client:
-    def __init__(self, orders: list[dict]) -> None:
-        self.orders, self.batches = orders, []
+    def __init__(self, orders: list[dict], fx: list | None = None) -> None:
+        self.orders, self.batches, self.fx_calls = orders, [], []
+        self.fx = fx if fx is not None else [("2026-10-15", 1_300.0)]
 
     def execute(self, sql: str, args: list | None = None) -> _Rs:
         if sql == job.REALIZED_ROWS_SQL:
-            cols = ["id", "trade_date", "side", "stock_id", "filled_qty", "avg_price", "realized_krw", "realized_fx_krw"]
+            cols = ["id", "trade_date", "side", "stock_id", "code", "filled_qty", "avg_price", "realized_krw",
+                    "realized_fx_krw"]  # fmt: skip
             return _Rs([[o[c] for c in cols] for o in self.orders], cols)
         if sql == job.REALIZED_FX_SQL:
-            return _Rs([(1_300.0, "2026-10-15")])
+            self.fx_calls.append(args)
+            return _Rs([x for x in self.fx if args[0] <= x[0] <= args[1]])
         raise AssertionError(sql)
 
     def batch(self, statements: list) -> None:

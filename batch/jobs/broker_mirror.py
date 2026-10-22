@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import bisect
 import json
 import time
 from collections import Counter
@@ -133,12 +134,13 @@ SENT_UPDATE_SQL = (
 )
 #: KIS모의투자 실현손익 (25.1694) — 체결이 있는 이 증권사 칸의 주문 전부를 날짜 순으로 다시 센다(하루 몇 줄씩 늘어남)
 REALIZED_ROWS_SQL = (
-    "SELECT id, trade_date, side, stock_id, filled_qty, avg_price, realized_krw, realized_fx_krw"
+    "SELECT id, trade_date, side, stock_id, code, filled_qty, avg_price, realized_krw, realized_fx_krw"
     " FROM paper_broker_orders WHERE broker = ? AND filled_qty > 0"
 )
 REALIZED_SET_SQL = "UPDATE paper_broker_orders SET realized_krw = ?, realized_fx_krw = ? WHERE id = ?"
-#: 미국 체결의 원화 환산 — 가상모의투자와 같은 환율 표(그날 이하 마지막). 7일 넘게 묵었으면 모름
-REALIZED_FX_SQL = "SELECT rate, date FROM fx_rates WHERE pair = 'USDKRW' AND date <= ? ORDER BY date DESC LIMIT 1"
+#: 미국 체결의 원화 환산 — 가상모의투자와 같은 환율 표(그날 이하 마지막). 7일 넘게 묵었으면 모름.
+#: 체결 첫날 7일 앞부터 마지막 날까지 한 번에 읽는다(25.1698 — 예전엔 체결 거래일마다 한 번, 3년이면 750번)
+REALIZED_FX_SQL = "SELECT date, rate FROM fx_rates WHERE pair = 'USDKRW' AND date >= ? AND date <= ? ORDER BY date"
 REALIZED_FX_MAX_AGE_DAYS = 7
 
 RECON_SQL = (
@@ -286,21 +288,26 @@ def _us_window(now: datetime, day: Any) -> str | None:
 
 
 
-def update_realized(client: Any, 증권사: str, market: str) -> int:
-    """KIS모의투자 매도마다 실현손익·환차 몫을 다시 세어 바뀐 줄만 적는다 (25.1694, `bm.realized`). 적은 수"""
+def update_realized(client: Any, 증권사: str, market: str, balance: dict[str, int] | None = None) -> int:
+    """KIS모의투자 매도마다 실현손익·환차 몫을 다시 세어 바뀐 줄만 적는다 (25.1694, `bm.realized`). 적은 수.
+    `balance` = 같은 실행이 읽은 KIS 잔고 {코드: 수량} — 기록 끝 수량과 다른 종목의 마지막 보유 구간은 모름(25.1698)"""
     rows = client.execute(REALIZED_ROWS_SQL, [증권사]).dicts()
     if not rows:
         return 0
-    캐시: dict[str, float | None] = {}
+    표: list[tuple[str, float]] = []
+    if market == "US":
+        날들 = sorted(str(r["trade_date"])[:10] for r in rows)
+        앞 = (date.fromisoformat(날들[0]) - timedelta(days=REALIZED_FX_MAX_AGE_DAYS)).isoformat()
+        표 = [(str(d)[:10], float(v)) for d, v in client.execute(REALIZED_FX_SQL, [앞, 날들[-1]]).rows if v is not None]
+    표날 = [d for d, _v in 표]
 
     def 환율(날: str) -> float | None:
-        if 날 not in 캐시:
-            r = client.execute(REALIZED_FX_SQL, [날]).rows
-            묵음 = (date.fromisoformat(날[:10]) - date.fromisoformat(str(r[0][1])[:10])).days if r else None
-            캐시[날] = float(r[0][0]) if r and 묵음 is not None and 묵음 <= REALIZED_FX_MAX_AGE_DAYS else None
-        return 캐시[날]
+        k = bisect.bisect_right(표날, 날[:10]) - 1
+        if k < 0 or (date.fromisoformat(날[:10]) - date.fromisoformat(표날[k])).days > REALIZED_FX_MAX_AGE_DAYS:
+            return None
+        return 표[k][1]
 
-    값 = bm.realized([{**r, "market": market} for r in rows], 환율)
+    값 = bm.realized([{**r, "market": market} for r in rows], 환율, balance)
     지금값 = {int(r["id"]): (r["realized_krw"], r["realized_fx_krw"]) for r in rows}
     문장 = [(REALIZED_SET_SQL, [v[0], v[1], i]) for i, v in 값.items() if 지금값.get(i) != v]
     if 문장:
@@ -433,16 +440,19 @@ def run(
         기록["reconciled"] = dict(Counter(o.status for o in 결과))
         if not 다받음:
             기록["reconcile_truncated"] = True
-    # 1b. 실현손익 (25.1694, 2026-10-22 사용자 지시) — 맞춘 체결로 다시 센다. 곁다리: 실패해도 맞추기·주문은 그대로
+    # 2. 잔고 — 내부 장부와 대 본다
+    보유, 합 = sess.balance_us() if 미국 else sess.balance()
+    # 2a. 실현손익 (25.1694, 2026-10-22 사용자 지시) — 맞춘 체결로 다시 센다. 잔고를 읽은 뒤 — 기록 끝 수량이 KIS 잔고와
+    # 다른 종목은 원가를 모른다(25.1698). 곁다리: 실패해도 맞추기·주문은 그대로
     try:
-        기록["realized_updated"] = update_realized(client, 증권사, market)
+        잔고: dict[str, int] = {}
+        for h in 보유:
+            잔고[h.code] = 잔고.get(h.code, 0) + int(h.quantity or 0)
+        기록["realized_updated"] = update_realized(client, 증권사, market, 잔고)
     except Exception as exc:  # noqa: BLE001
         if db.quota_reason(exc):
             raise
         기록["realized_updated"] = {"error": str(exc)[:200]}
-
-    # 2. 잔고 — 내부 장부와 대 본다
-    보유, 합 = sess.balance_us() if 미국 else sess.balance()
     내부 = {int(r["stock_id"]): int(r["q"]) for r in client.execute(INTERNAL_QTY_SQL, [베낌, market]).dicts()
             if int(r["q"] or 0) > 0}  # fmt: skip
     코드표 = _ids_all(client, {h.code for h in 보유}, market, 증권사)

@@ -12,6 +12,14 @@ function fxCell(g: { fx: number; fxUnknown: number }): string {
   return g.fx ? won(g.fx) : "—";
 }
 
+/**
+ * 머리 칸 이름 — KIS모의투자는 비용 전 값이라 숫자 옆에 밝힌다(25.1698, 25.1694 교차검증 [권고] 2:
+ * 비용을 뺀 가상과 견주면 KIS 가 왕복 비용만큼 늘 좋아 보인다)
+ */
+export function headline(costs: boolean): string {
+  return costs ? "기간 실현손익" : "기간 실현손익(비용 전)";
+}
+
 function tone(v: number | null | undefined): string {
   if (v == null || !Number.isFinite(v) || v === 0) return "";
   return v > 0 ? "text-red-600 dark:text-red-400" : "text-blue-600 dark:text-blue-400";
@@ -118,7 +126,7 @@ function RealizedView({ url, costs, note, unknownNote }: {
       {보고 ? (
         <>
           <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1">
-            <dt className="text-slate-500">기간 실현손익</dt>
+            <dt className="text-slate-500">{headline(costs)}</dt>
             <dd className={`text-right font-semibold ${tone(보고.realized)}`}>{보고.n ? won(보고.realized) : "매도 없음"}</dd>
             {보고.hasForeign ? (
               <>
