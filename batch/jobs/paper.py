@@ -71,7 +71,8 @@ FX_SQL = "SELECT rate, date FROM fx_rates WHERE pair = 'USDKRW' AND date <= ? OR
 INDEX_FROM_SQL = "SELECT close, date FROM index_prices WHERE index_code = ? AND date >= ? ORDER BY date LIMIT 1"
 INDEX_NOW_SQL = "SELECT close, date FROM index_prices WHERE index_code = ? ORDER BY date DESC LIMIT 1"
 PREV_DAILY_SQL = (
-    "SELECT as_of, cash_krw, equity_krw, twr_index, updated_at, unknown_json, positions_json FROM paper_daily"
+    "SELECT as_of, cash_krw, equity_krw, twr_index, updated_at, unknown_json, positions_json, invested_krw"
+    " FROM paper_daily"
     " WHERE account_id = ? AND as_of < ? ORDER BY as_of DESC LIMIT 1"
 )
 #: 그 계좌·시장·거래일에 **결정**(주문이든 안 낸 결정이든)이 이미 있나 — 먼저 쓴 쪽이 이긴다 (docs/paper.md 2.4).
@@ -949,7 +950,15 @@ def mark(
         지수 = 1.0
     else:
         기준 = str(p["updated_at"])
-        새입금 = sum(f.amount_krw for f in flows if pp.after(flow_created.get(f.id, ""), 기준))
+        # **새 입금 = 오늘 읽은 입금 합 − 어제 행이 센 입금 합** (25.1667, 웹 쓰기 경로 감사 [필수] 3) — 두 시계
+        # (웹 Vercel 이 저장 **전**에 찍은 `created_at`, 배치 러너의 `updated_at`)를 견주지 않는다. 예전엔 웹 시각이
+        # 배치 `지금` 보다 앞인데 행이 배치의 입금 읽기 **뒤**에 저장되면, 오늘은 못 읽고(행 없음) 다음 날엔
+        # "어제 행보다 앞" 이라 흐름에서 빠져 평가에만 더해져 지수가 그 입금만큼 뛰었다(재현 지수 2.0). 차이는 같은
+        # 장부·같은 거름(실행 시작 뒤 흐름은 다음 실행, 25.1633)으로 센 두 합이라 시계와 무관하다.
+        # 어제 행에 합이 없으면(옛 행) 시각 비교로
+        시각입금 = sum(f.amount_krw for f in flows if pp.after(flow_created.get(f.id, ""), 기준))
+        새입금 = (v.invested_krw - float(p["invested_krw"])) if p.get("invested_krw") is not None \
+            else 시각입금
         새체결 = sum(f.cash_krw for f in 계좌체결 if pp.after(fill_created.get(f.order_id, now), 기준))
         ok, 글 = pp.reconcile(float(p["cash_krw"]), 새입금, 새체결, v.cash_krw)
         # **어제 행을 적은 뒤에 들어온 입금**이 흐름이다 (25.1447, 교차검증 [필수] 1) — 입금 날짜(`flow_date > as_of`)로
@@ -966,7 +975,9 @@ def mark(
     관문지수, 기준 = _관문_지수(p, v, 지수, 새입금) if p else (None, None)
     return v, {"recon_ok": ok, "recon_note": 글, "twr": 지수, "kospi": 그림자["KOSPI"], "sp500": 그림자["SP500"],
                "prev_twr": float(p["twr_index"]) if p else None, "gate_twr": 관문지수, "basis": 기준,
-               "prev_as_of": str(p["as_of"]) if p else None, "prev_updated_at": str(p["updated_at"]) if p else None}
+               "prev_as_of": str(p["as_of"]) if p else None, "prev_updated_at": str(p["updated_at"]) if p else None,
+               # 시각 비교로 셌다면 달랐을 입금(진단 — 0 이 아니면 웹·배치 시계가 어긋난 날, 25.1667)
+               **({"flow_clock_gap": 새입금 - 시각입금} if p and abs(새입금 - 시각입금) > 0.5 else {})}
 
 
 def _관문_지수(p: dict[str, Any], v: pp.Valuation, 지수: float, 새입금: float) -> tuple[float | None, str | None]:
@@ -1742,6 +1753,8 @@ def run_step(
                                 at={"KOSPI": (끝시세["KR"], None), "SP500": (끝시세["US"], 오늘)}),
                     지금)  # fmt: skip
         a기록.update({"recon_ok": 검["recon_ok"], "unknown": len(v.unknown)})
+        if "flow_clock_gap" in 검:  # 웹·배치 시계가 어긋난 날(25.1667) — 지수는 합 차이로 맞게 셌다
+            a기록["flow_clock_gap"] = 검["flow_clock_gap"]
         if 검["basis"]:
             # 원가 평가 종목이 어제와 달라 관문 하루 손실을 그 종목 0% 로 보정했거나(보정) 보지 않은 날(모름) — 25.1629
             a기록["day_loss_basis"] = 검["basis"]
