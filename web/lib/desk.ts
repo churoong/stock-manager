@@ -271,6 +271,12 @@ export function rowsById(lb: DeskLeaderboard | null | undefined): Map<string, De
   return new Map((lb?.rows ?? []).map((r) => [r.id, r]));
 }
 
+/** H 의 원가·묵은 평가 비중이 문턱을 넘었을 때만 붙는 까닭(25.1709·1711) — R 대비·지수 대비 칸이 같이 쓴다 */
+export function valuationGapText(v: ValuationGap | null | undefined): string {
+  if (!v?.over || v.h_pct == null) return "";
+  return ` · H 원가·묵은 평가 ${v.h_pct.toFixed(2)}%(R ${v.r_pct == null ? "-" : v.r_pct.toFixed(2)}%) — ${v.limit}% 넘어 믿기 어려움`;
+}
+
 /** 관문 칸의 지금 값 글 — 칸마다 단위가 다르다 */
 export function gateNowText(i: GateItem): string {
   // 결정 단위 — 묶음이 4개 전이라 하한이 없어도 평균·묶음 수는 보인다(25.1523 검토 7)
@@ -286,17 +292,12 @@ export function gateNowText(i: GateItem): string {
       const 참고 = m && m.vs_r != null
         ? ` (참고: 노출 맞춘 R 대비 ${ppText(m.vs_r, 0)} — 평균 투자 비중 H ${m.h_exposure_pct.toFixed(0)}% · R ${m.r_exposure_pct.toFixed(0)}%)`
         : "";
-      // 원가·묵은 평가 비중(25.1709) — 넘었을 때만 판정이 바뀌니 그때만 붙인다
-      const v = i.valuation_gap;
-      const 멈춤 = v?.over
-        ? ` · 원가·묵은 평가 H ${v.h_pct == null ? "-" : v.h_pct.toFixed(1)}% · R ${v.r_pct == null ? "-" : v.r_pct.toFixed(1)}% — ${v.limit}% 넘어 믿기 어려움`
-        : "";
-      return `${ppText(i.now, 0)} / 0 초과${참고}${멈춤}`;
+      return `${ppText(i.now, 0)} / 0 초과${참고}${valuationGapText(i.valuation_gap)}`;
     }
     case "vs_index":
       // 같은 돈을 KOSPI·S&P500 반반에 넣었다면(25.1519) — 지수 쪽 수익률을 같이
       // 한쪽 그림자가 비면 그쪽은 빠진다 — 어느 지수를 썼는지 적는다(25.1523 검토 2)
-      return `${ppText(i.now, 0)} (지수 ${i.index_used?.length === 1 ? `${i.index_used[0]}만` : "반반"} ${pctText(i.index_pct)}) / 0 초과`;
+      return `${ppText(i.now, 0)} (지수 ${i.index_used?.length === 1 ? `${i.index_used[0]}만` : "반반"} ${pctText(i.index_pct)}) / 0 초과${valuationGapText(i.valuation_gap)}`;
     case "ratio": {
       const d = apartDigits(i.now, i.target, 3);
       return `${i.now.toFixed(d)} / R 평균 ${i.target == null ? "모름" : i.target.toFixed(d)}`;

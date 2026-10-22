@@ -24,24 +24,32 @@ def test_valuation_gaps_by_hand() -> None:
     assert desk.valuation_gaps(rows) == {"H": [("2026-10-15", pytest.approx(7.0))]}
 
 
-def test_gate_vs_r_unreliable_when_gap_over_limit() -> None:
-    """R 대비가 + 여도 R 쪽 원가·묵은 평가 평균이 5% 를 넘으면 불통 — 다른 칸은 그대로"""
+def test_gate_blocks_on_h_gap_only() -> None:
+    """25.1711 (25.1709 교차검증 [권고] 1·2) — H 쪽이 5% 를 넘으면 R 대비·지수 대비 둘 다 불통. R 쪽만 넘으면 참고(판정
+    그대로) — 원가로 멈춘 R 보유는 R 을 좋아 보이게 해 R 대비를 이미 작게 만든다. 구간은 시작 **뒤**(시작 날 값은 안 셈)"""
     날 = _날(130)
     h = [(d, 1 + 0.001 * i) for i, d in enumerate(날)]
     r = [(d, 1.0) for d in 날]
-    def 관문(r_gap: float) -> dict:  # noqa: E306
-        v = {"H": [(d, 3.0) for d in 날], "R1": [(d, r_gap) for d in 날], "R2": [(d, r_gap) for d in 날]}
-        g = desk.gate({"H": h, "R1": r, "R2": r}, "H", recon_bad_days=0, batch_failed=0, kis=None, valuation=v)
-        return {i["key"]: i for i in g["items"]}["vs_r"]
+    지수 = [(날[0], 1000.0, 1000.0, 1000.0), (날[-1], 1000.0, 1000.0, 1000.0)]
 
-    assert 관문(4.0)["ok"] and 관문(4.0)["valuation_gap"] == {"h_pct": pytest.approx(3.0), "r_pct": pytest.approx(4.0),
-                                                           "limit": 5.0, "over": False}  # fmt: skip
-    칸 = 관문(8.0)
-    assert not 칸["ok"] and 칸["now"] > 0 and 칸["valuation_gap"]["over"]
+    def 칸들(h_gap: float, r_gap: float, 첫날: float | None = None) -> dict:
+        hv = [(d, h_gap) for d in 날]
+        if 첫날 is not None:
+            hv[0] = (날[0], 첫날)
+        v = {"H": hv, "R1": [(d, r_gap) for d in 날], "R2": [(d, r_gap) for d in 날]}
+        g = desk.gate({"H": h, "R1": r, "R2": r}, "H", recon_bad_days=0, batch_failed=0, kis=None, valuation=v,
+                      index=지수)  # fmt: skip
+        return {i["key"]: i for i in g["items"]}
+
+    ok = 칸들(4.0, 9.0)
+    assert ok["vs_r"]["ok"] and ok["vs_index"]["ok"] and ok["vs_r"]["valuation_gap"]["r_pct"] == pytest.approx(9.0)
+    막힘 = 칸들(6.0, 0.0)
+    assert not 막힘["vs_r"]["ok"] and not 막힘["vs_index"]["ok"] and 막힘["vs_r"]["now"] > 0
+    # 시작 날(날[0]) 값은 구간 밖 — 그날만 크게 높아도 평균에 들지 않는다
+    assert 칸들(4.0, 0.0, 첫날=500.0)["vs_r"]["ok"]
     # 계열을 안 주면(못 읽음) 판정은 예전대로
     g = desk.gate({"H": h, "R1": r, "R2": r}, "H", recon_bad_days=0, batch_failed=0, kis=None)
     assert {i["key"]: i for i in g["items"]}["vs_r"]["ok"]
-
 
 def test_job_reads_valuation(monkeypatch: pytest.MonkeyPatch) -> None:
     from datetime import UTC, datetime

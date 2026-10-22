@@ -349,9 +349,9 @@ def batch_incident_days(rows: list[dict[str, Any]], expected: dict[str, list[str
     return sum(1 for job, 날들 in expected.items() for d in set(날들) if (job, d) not in 성공 or (job, d) in 실패)
 
 
-#: 관문 R 대비를 믿기 어려운 원가·묵은 평가 비중(관문 구간 평균, 평가 총액 대비 %) — 25.1709, H·R 감사 [권고] 3.
-#: 5% 는 정한 값(되돌릴 수 있음): R 대비 추적오차(연 20% 안팎 어림)에 견주어 평가가 멈춘 몫이 이보다 크면 비교가
-#: 그 몫의 실제 손익을 빠뜨린다 — 넘으면 R 대비 칸을 불통으로(더 엄격하게만)
+#: 관문 R 대비·지수 대비를 믿기 어려운 H 의 원가·묵은 평가 비중(관문 구간 평균, 평가 총액 대비 %) — 25.1709·1711,
+#: H·R 감사 [권고] 3. 5% 는 정한 값(되돌릴 수 있음): 평가가 멈춘 몫이 이보다 크면 그 몫의 실제 손익이 비교에서 빠진다
+#: — H 가 넘으면 두 칸을 불통으로(더 엄격하게만). R 쪽은 참고
 GATE_VALUATION_GAP_PCT = 5.0
 #: 마지막 종가가 그날보다 이 달력일보다 오래되면 묵은 평가(장기 정지·상장폐지 절차) — 긴 연휴(국내 최장 약 10일)
 #: 첫날엔 잠깐 잡히지만 구간 평균이라 작다
@@ -484,8 +484,11 @@ def gate(
         r평균 = [x for r in CONTROL_IDS if (x := 평균(r)) is not None]
         멈춘평가 = {"h_pct": 평균(mirror), "r_pct": sum(r평균) / len(r평균) if r평균 else None,
                  "limit": GATE_VALUATION_GAP_PCT}  # fmt: skip
-        멈춘평가["over"] = any(x is not None and x > GATE_VALUATION_GAP_PCT
-                             for x in (멈춘평가["h_pct"], 멈춘평가["r_pct"]))  # fmt: skip
+        # **H 쪽만 판정에 넣는다**(25.1711, 25.1709 교차검증 [권고] 1·2) — 원가로 멈춘 보유는 대개 손실을 숨긴다.
+        # H 가 숨기면 H 가 좋아 보여 거짓 통과로 가고, R 이 숨기면 R 이 좋아 보여 R 대비가 **작아진다**(이미 보수 쪽).
+        # R 쪽까지 막으면 R1 의 이어 멈춤 종목 하나로 H 관문이 판 끝까지 닫혔다(풀 길이 판 올림·장부 고침뿐). R 은
+        # 참고로 싣는다. 같은 H 수익을 쓰는 지수 대비 칸도 같이 막는다
+        멈춘평가["over"] = 멈춘평가["h_pct"] is not None and 멈춘평가["h_pct"] > GATE_VALUATION_GAP_PCT
     대조 = [x for r in CONTROL_IDS if 시작 and (x := risk_ratio(sorted(series.get(r) or []), 시작)) is not None]
     대조비 = sum(대조) / len(대조) if 대조 else None
     내비 = risk_ratio(전체, 시작) if 시작 else None
@@ -510,7 +513,8 @@ def gate(
          "ok": vs_r is not None and vs_r > 0 and not (멈춘평가 or {}).get("over")},
         {"key": "vs_index", "label": "관문 구간 지수 대비(%p) — 같은 돈을 KOSPI·S&P500 반반에 넣었다면",
          "now": vs_idx, "target": 0, "index_pct": 지수, "index_used": 쓴지수, "cash_eq": cash_eq,
-         "ok": vs_idx is not None and vs_idx > 0},
+         "valuation_gap": 멈춘평가,
+         "ok": vs_idx is not None and vs_idx > 0 and not (멈춘평가 or {}).get("over")},
         {"key": "ratio", "label": "변동성 대비 수익 — 무작위 대조 평균보다", "now": 내비, "target": 대조비,
          "ok": 내비 is not None and 대조비 is not None and 내비 > 대조비},
         {"key": "incidents",

@@ -46,3 +46,23 @@ def test_job_puts_prereg_status_in_daily_summary(monkeypatch: pytest.MonkeyPatch
     s = json.loads(c.q("SELECT summary_json FROM paper_desk")[0][0])
     assert {"A", "B"} <= set(s["prereg_status"]) and "R1" not in s["prereg_status"]
     assert s["prereg_status"]["A"]["points"] >= 1
+
+
+
+def test_prereg_failure_keeps_gate(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1711 (25.1710 교차검증 [권고]) — 곁다리 기록이 깨져도 H 관문·위험판은 그대로, 까닭만"""
+    from batch.jobs import desk as job
+    from tests.test_paper_job_1445 import Client
+
+    c = Client(accounts=None)
+    monkeypatch.setattr(job.bmj, "MIRROR_ACCOUNT", "B")
+    monkeypatch.setattr(job.desk, "prereg_status", lambda *_a, **_k: 1 / 0)
+    for i, as_of in enumerate(("2026-10-14", "2026-10-15")):
+        c.conn.execute("INSERT INTO paper_daily (account_id, as_of, invested_krw, cash_krw, holdings_krw, equity_krw,"
+                       " pnl_krw, twr_index, positions_json, recon_ok, updated_at) VALUES ('B', ?, 1000, 0, 1000, 1000, 0,"
+                       " ?, '[]', 1, 't')", [as_of, 1 + 0.01 * i])  # fmt: skip
+    job.write(c, "KR", datetime(2026, 10, 16, 23, 40, tzinfo=UTC), trade_date="2026-10-16", session_date="2026-10-19",
+              step_log={}, warnings=[])  # fmt: skip
+    s = json.loads(c.q("SELECT summary_json FROM paper_desk")[0][0])
+    assert s["gate"] is not None and s["gate_error"] is None
+    assert s["prereg_status"]["error"].startswith("ZeroDivisionError")

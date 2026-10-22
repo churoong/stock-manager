@@ -526,9 +526,13 @@ def _관문판(
             latest[a] = {"equity": r["equity_krw"], "holdings": r["holdings_krw"], "positions": 종목}
         늦음창 = (now - timedelta(days=desk.READY_WINDOW_DAYS)).astimezone(cal.market_tz("KR")).date().isoformat()
         늦음 = client.execute(BATCH_DELAY_SQL, [desk.READY_LATE_SEC, job_name("KR"), job_name("US"), 늦음창]).dicts()
-        # 판마다 사전 등록 지표의 오늘 값(25.1710) — 날마다 이 줄에 남아 판정 시점의 값을 나중에 그대로 읽는다
-        판들 = {a: (int(v), 판시작.get(a, "")) for a, v in (판버전 or {}).items()}
-        사전 = desk.prereg_status(계열, 판들, 증거, 그림자 or {})
+        # 판마다 사전 등록 지표의 오늘 값(25.1710) — 날마다 이 줄에 남아 판정 시점의 값을 나중에 그대로 읽는다.
+        # 따로 감싼다 — 곁다리 기록의 실패가 H 관문·위험판까지 지우지 않게(25.1711, 25.1710 교차검증 [권고])
+        try:
+            판들 = {a: (int(v), 판시작.get(a, "")) for a, v in (판버전 or {}).items()}
+            사전: dict[str, Any] = desk.prereg_status(계열, 판들, 증거, 그림자 or {})
+        except Exception as exc:  # noqa: BLE001
+            사전 = {"error": f"{type(exc).__name__}: {str(exc)[:120]}"}
         판 = {"gate": 관문, "risk": desk.risk_board(latest, 계열, 손절), "prereg_status": 사전,
              "champion": desk.champion(계열, h, 증거, 판시작),
              "readiness": desk.readiness(runs=늦음[0] if 늦음 else None, kis=kis요약), "gate_error": None}  # fmt: skip
