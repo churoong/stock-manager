@@ -37,6 +37,21 @@ SHORT_LOOKBACK_DAYS = 45
 #: 투자의견 조회 창 — 표가 비었으면(첫 실행) 1년, 아니면 겹치게 60일 (25.988)
 OPINION_FIRST_DAYS = 365
 OPINION_DAYS = 60
+#: **종목마다** 첫 365일 의견 수집 (37회차 C 전제 ②, docs/factors.md 12.40, docs/infra.md 25.1676) — 예전 "첫 수집" 은
+#: 의견 표 전체 기준이라 새로 편입된 종목·실패·잘린 종목은 60일만 받아 목표가 개정(기준창 t−365~t−90)을 덮지 못했다.
+#: 이날부터 연다 — 10월은 Turso 0, 11-01·02 백업·ETF, 11-03 판정 실행이라 그 뒤(쓰기 몇만 행, 한 번)
+OPINION_FULL_FROM = date(2026, 11, 4)
+#: 한 실행에 365일로 받을 종목 상한 — 첫날 약 930종목이 한꺼번에 몰리지 않게(나흘에 나눔). 실행 시간·쓰기 행을
+#: 묶는 값이다 `[확인필요: KIS 응답 시간 실측]`
+OPINION_FULL_PER_RUN = 300
+#: 365일 창이 잘리면(응답 100행) 반씩 쪼개는 깊이 상한 — 365일 → 약 23일(4번, 종목당 최대 31호출). 그래도 100행이면
+#: 잘림으로 남긴다(다음 실행이 다시 365일)
+OPINION_SPLIT_DEPTH = 4
+#: 지난 의견 수집 기록 — 종목마다 365일 수집 뒤 끊김 없이 이어졌는지를 센다(`opinion_continuous`)
+OPINION_HISTORY_SQL = (
+    "SELECT trade_date, step_log FROM batch_runs WHERE job_name = ? AND step_log LIKE '%\"opinion_coverage\"%'"
+    " ORDER BY id"
+)
 #: 기업행위 일정 창 — 지난 7일(정정분)부터 앞으로 45일 (25.994). 한 번에 100행까지라 배당은 지난30~앞90일이면 잘렸다
 #: (실측 100행). 리포트는 앞 10일만 쓴다(`daily.CORP_EVENT_DAYS`)
 EVENT_BACK_DAYS = 7
@@ -257,13 +272,81 @@ def collect_events(client: TursoClient, qc: kis.QuoteClient, today: date, failed
     return 행사
 
 
-def opinion_coverage(targets: list[int], raw_rows: dict[int, int]) -> dict[str, Any]:
+def opinion_coverage(
+    targets: list[int], raw_rows: dict[int, int], full: set[int] | None = None,
+) -> dict[str, Any]:
     """의견 호출 결과 — 받은 종목(`covered_ids`, 0건 응답도 받은 것), 못 받은 종목(`failed_ids`), 응답 원래 행이
-    `kis.OPINION_PAGE_ROWS` 이상이라 창 앞쪽이 잘렸을 수 있는 종목(`truncated_ids`). 모두 종목 번호 오름차순."""
+    `kis.OPINION_PAGE_ROWS` 이상이라 창 앞쪽이 잘렸을 수 있는 종목(`truncated_ids`). 모두 종목 번호 오름차순.
+    `full` 을 주면 365일 창으로 받아 잘리지 않은 종목(`full_ids`, 25.1676)도."""
     받음 = sorted(raw_rows)
-    return {"covered_ids": 받음, "failed_ids": sorted(set(targets) - set(raw_rows)),
-            "truncated_ids": sorted(sid for sid, n in raw_rows.items() if n >= kis.OPINION_PAGE_ROWS),
-            "page_rows": kis.OPINION_PAGE_ROWS}  # fmt: skip
+    잘림 = sorted(sid for sid, n in raw_rows.items() if n >= kis.OPINION_PAGE_ROWS)
+    out: dict[str, Any] = {"covered_ids": 받음, "failed_ids": sorted(set(targets) - set(raw_rows)),
+                           "truncated_ids": 잘림, "page_rows": kis.OPINION_PAGE_ROWS}  # fmt: skip
+    if full is not None:
+        out["full_ids"] = sorted(s for s in full if s in raw_rows and s not in set(잘림))
+    return out
+
+
+def coverage_history(rows: list) -> list[tuple[str, dict[str, Any]]]:  # noqa: ANN001 — DB 행
+    """(trade_date, step_log 글) 행 → (trade_date, `opinion_coverage`). 읽지 못한 기록은 건너뛴다 — 건너뛴 날은
+    `opinion_continuous` 에서 끊김으로 셀 수 있어 365일을 한 번 더 받을 뿐 덜 받지 않는다."""
+    out: list[tuple[str, dict[str, Any]]] = []
+    for r in rows:
+        try:
+            c = json.loads(r[1] or "{}").get("opinion_coverage")
+        except (ValueError, AttributeError):
+            continue
+        if isinstance(c, dict):
+            out.append((str(r[0]), c))
+    return out
+
+
+def opinion_continuous(history: list[tuple[str, dict[str, Any]]], today: date) -> set[int]:
+    """365일 창을 받은 뒤 **끊김 없이** 이어 받은 종목 (25.1676, 37회차 C 전제 ② — 계좌 X 의 "덮음" 재료).
+
+    `history` = 지난 실행의 (trade_date, `opinion_coverage`) 오래된 순. 실행마다: 이어 온 종목 가운데 이번에 받고 잘리지
+    않은 것 + 이번에 365일로 받은 것(`full_ids`). 앞 실행과 `OPINION_DAYS` 넘게 떨어지면(60일 창이 앞 창에 닿지 않음)
+    모두 끊긴다. 마지막 실행이 오늘과 그만큼 떨어져도 끊긴다."""
+    이어: set[int] = set()
+    앞날: date | None = None
+    for d, c in history:
+        try:
+            날 = date.fromisoformat(str(d)[:10])
+        except ValueError:
+            continue
+        if 앞날 is not None and (날 - 앞날).days > OPINION_DAYS:
+            이어 = set()
+        덮음 = set(c.get("covered_ids") or []) - set(c.get("truncated_ids") or [])
+        이어 = (이어 & 덮음) | set(c.get("full_ids") or [])
+        앞날 = 날
+    if 앞날 is None or (today - 앞날).days > OPINION_DAYS:
+        return set()
+    return 이어
+
+
+def full_fetch_ids(
+    stock_ids: list[int], history: list[tuple[str, dict[str, Any]]], today: date, cap: int = OPINION_FULL_PER_RUN,
+) -> set[int]:
+    """이번 실행에 365일 창으로 받을 종목 — `OPINION_FULL_FROM` 부터, 이어 오지 않은 종목(새 편입·실패·잘림·끊김)을
+    종목 번호 순으로 `cap` 개까지. 나머지는 다음 실행."""
+    if today < OPINION_FULL_FROM:
+        return set()
+    이어 = opinion_continuous(history, today)
+    return set([s for s in stock_ids if s not in 이어][:cap])
+
+
+def opinions_split(
+    qc: kis.QuoteClient, code: str, since: date, until: date, depth: int = 0,
+) -> tuple[list[dict], int]:
+    """창이 잘리면(원래 행 ≥ `kis.OPINION_PAGE_ROWS`) 반으로 쪼개 다시 받는다 — `OPINION_SPLIT_DEPTH` 까지.
+    돌려주는 행 수는 조각들 가운데 **가장 큰** 원래 행 수(하나라도 100행이면 잘림으로 남는다)."""
+    읽음, n = qc.opinions_with_count(code, since, until)
+    if n < kis.OPINION_PAGE_ROWS or depth >= OPINION_SPLIT_DEPTH or (until - since).days < 2:
+        return 읽음, n
+    중간 = since + timedelta(days=(until - since).days // 2)
+    a, na = opinions_split(qc, code, since, 중간, depth + 1)
+    b, nb = opinions_split(qc, code, 중간 + timedelta(days=1), until, depth + 1)
+    return a + b, max(na, nb)
 
 
 def run(limit: int | None = None) -> int:
@@ -281,13 +364,23 @@ def run(limit: int | None = None) -> int:
         failed: dict[str, str] = {}
         첫의견 = client.execute("SELECT COUNT(*) FROM (SELECT 1 FROM kr_opinions LIMIT 1)").scalar() == 0
         의견창 = today - timedelta(days=OPINION_FIRST_DAYS if 첫의견 else OPINION_DAYS)
+        전창 = today - timedelta(days=OPINION_FIRST_DAYS)
+        # 종목마다 첫 365일 수집 (25.1676) — 표가 비었으면(첫 실행) 전 종목이 이미 365일
+        if 첫의견:
+            전부 = {sid for sid, _c in stocks}
+        else:
+            지난 = coverage_history(client.execute(OPINION_HISTORY_SQL, [JOB_NAME]).rows)
+            전부 = full_fetch_ids([sid for sid, _c in stocks], 지난, today)
         의견: dict[int, list[dict]] = {}
         의견원행: dict[int, int] = {}  # 받은 종목 → 응답의 원래 행 수(잘림 판정, 25.1647)
 
         def one(item: tuple[int, str]) -> tuple[int, dict[str, dict]]:
             sid, code = item
             try:
-                의견[sid], 의견원행[sid] = qc.opinions_with_count(code, 의견창, today)
+                if sid in 전부:
+                    의견[sid], 의견원행[sid] = opinions_split(qc, code, 전창, today)
+                else:
+                    의견[sid], 의견원행[sid] = qc.opinions_with_count(code, 의견창, today)
             except (kis.KisFailed, OSError) as exc:
                 failed[f"{code}:의견"] = str(exc)
             parts = []
@@ -328,7 +421,8 @@ def run(limit: int | None = None) -> int:
         # 의견 호출이 덮은 종목·실패·잘림 (37회차 C 전제 ①, factors.md 12.40, 25.1647) — 목표가 IC·계좌가
         # "의견 없음(0)" 과 "모름(NULL)" 을 가르는 재료. 지금 이것이 없어 실패·잘린 종목의 빈 창을 의견 없음으로
         # 읽을 수밖에 없었다(14회차 12.16)
-        step["opinion_coverage"] = opinion_coverage([sid for sid, _c in stocks], 의견원행)
+        step["opinion_coverage"] = opinion_coverage([sid for sid, _c in stocks], 의견원행, 전부)
+        step["opinion_coverage"]["full_since"] = 전창.isoformat()
         # **출처마다** 절반 넘게 못 받았으면 실패로 남긴다 (docs/infra.md 25.1397, KIS 수급 감사) — 조금 빠진 것은
         # 다음 날 겹쳐 받으며 메워진다(30일 창). 예전 문턱은 네 호출 합의 절반이라 투자자별 하나가 전 종목에서
         # 실패해도(약 1/4) `partial` 이었고, 공매도 행이 그날 날짜를 계속 채워 신선도는 초록 — KIS 가 30일만 주므로
