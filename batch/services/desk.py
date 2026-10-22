@@ -326,11 +326,62 @@ def batch_incident_days(rows: list[dict[str, Any]], expected: dict[str, list[str
     return sum(1 for job, 날들 in expected.items() for d in set(날들) if (job, d) not in 성공 or (job, d) in 실패)
 
 
+#: 노출 맞춘 R 대비(25.1702)에서 R 의 투자 비중이 이보다 작은 날은 뺀다 — 주식 몫 수익(하루 수익 ÷ 투자 비중)이
+#: 분모 0 근처에서 터진다. 5% 는 정한 값(되돌릴 수 있음) — 뺀 날 수를 칸에 적는다
+EXPOSURE_MIN = 0.05
+
+
+def exposure_matched_r(
+    series: dict[str, list[tuple[str, float]]], cash: dict[str, list[tuple[str, float, float]]], mirror: str,
+    start: str,
+) -> dict[str, Any] | None:
+    """**노출 맞춘 R 수익**(%) — R 의 주식 몫 하루 수익(하루 수익 ÷ 전날 투자 비중)에 **H 의 전날 투자 비중**을 곱해
+    이어 곱한 것, R1·R2 평균 (25.1702, H·R 감사 [필수] 1 고칠 방향 2). 관문 "R 대비" 는 H 와 R 의 투자 속도(분할
+    지정가·합의 후보 수 vs 시가 일괄)가 달라 하락장엔 현금만으로 통과하고 상승장엔 실력이 있어도 떨어졌다 — 같은 노출로
+    맞추면 그 몫이 빠진다. 투자 비중 = 1 − 현금 ÷ 평가(`paper_daily`, 현금은 이자 0).
+    구간은 `_구간` 과 같다(`start` 이하 마지막 행부터). H·R 어느 쪽이든 그날 현금·평가가 비면 모름(None) — 0 으로 채우지
+    않는다. R 투자 비중이 `EXPOSURE_MIN` 아래인 날은 빼고 수를 센다. **참고 칸** — 관문 통과(`passed`)에 쓰지 않는다
+    """
+    def 비중(c: float, e: float) -> float:
+        return min(max(1 - c / e, 0.0), 1.0)
+
+    h현금 = {d: (c, e) for d, c, e in cash.get(mirror) or []}
+    수익들: list[float] = []
+    h비중: list[float] = []
+    r비중: list[float] = []
+    뺀 = 0
+    for rid in CONTROL_IDS:
+        v = sorted(series.get(rid) or [])
+        r현금 = {d: (c, e) for d, c, e in cash.get(rid) or []}
+        앞 = [k for k, r in enumerate(v) if r[0] <= start]
+        구간 = v[(앞[-1] if 앞 else 0):]
+        if len(구간) < 2:
+            continue
+        곱 = 1.0
+        for (da, ta), (_db, tb) in zip(구간, 구간[1:], strict=False):
+            h, r = h현금.get(da), r현금.get(da)
+            if h is None or r is None or not h[1] or not r[1] or h[1] <= 0 or r[1] <= 0 or ta <= 0:
+                return None
+            eh, er = 비중(float(h[0]), float(h[1])), 비중(float(r[0]), float(r[1]))
+            h비중.append(eh)
+            r비중.append(er)
+            if er < EXPOSURE_MIN:
+                뺀 += 1
+                continue
+            곱 *= 1 + eh * (tb / ta - 1) / er
+        수익들.append((곱 - 1) * 100)
+    if not 수익들:
+        return None
+    return {"r_pct": sum(수익들) / len(수익들), "h_exposure_pct": 100 * sum(h비중) / len(h비중),
+            "r_exposure_pct": 100 * sum(r비중) / len(r비중), "skipped_days": 뺀}  # fmt: skip
+
+
 def gate(
     series: dict[str, list[tuple[str, float]]], mirror: str, *, since: str = "", version: int | None = None,
     recon_bad_days: int, batch_failed: int, kis: dict[str, Any] | None, evidence: dict[str, Any] | None = None,
     index: list[tuple[str, float | None, float | None, float]] | None = None,
     cash: list[tuple[str, float, float]] | None = None,
+    control_cash: dict[str, list[tuple[str, float, float]]] | None = None,
 ) -> dict[str, Any]:
     """실전 전환 1단계 관문 진도 — {stage, account, version, from, items: [{key, label, now, target, ok}], passed,
     next}.
@@ -351,6 +402,11 @@ def gate(
     pct = _구간(전체, 시작, None) if 시작 else None
     대조수익 = [x for r in CONTROL_IDS if 시작 and (x := _구간(sorted(series.get(r) or []), 시작, None)) is not None]
     vs_r = pct - sum(대조수익) / len(대조수익) if pct is not None and 대조수익 else None
+    # 참고 — 노출을 H 에 맞춘 R(25.1702). 통과 판정에 넣지 않는다
+    맞춤 = (exposure_matched_r(series, {mirror: cash or [], **(control_cash or {})}, mirror, 시작)
+          if 시작 and cash and control_cash else None)  # fmt: skip
+    if 맞춤 is not None and pct is not None:
+        맞춤["vs_r"] = pct - 맞춤["r_pct"]
     대조 = [x for r in CONTROL_IDS if 시작 and (x := risk_ratio(sorted(series.get(r) or []), 시작)) is not None]
     대조비 = sum(대조) / len(대조) if 대조 else None
     내비 = risk_ratio(전체, 시작) if 시작 else None
@@ -370,7 +426,8 @@ def gate(
     items = [
         {"key": "days", "label": f"모의 기간({판글}의 평가 횟수)", "now": len(v), "target": GATE_MIN_POINTS,
          "ok": len(v) >= GATE_MIN_POINTS},
-        {"key": "vs_r", "label": "관문 구간 R 대비(%p)", "now": vs_r, "target": 0, "ok": vs_r is not None and vs_r > 0},
+        {"key": "vs_r", "label": "관문 구간 R 대비(%p)", "now": vs_r, "target": 0, "exposure_matched": 맞춤,
+         "ok": vs_r is not None and vs_r > 0},
         {"key": "vs_index", "label": "관문 구간 지수 대비(%p) — 같은 돈을 KOSPI·S&P500 반반에 넣었다면",
          "now": vs_idx, "target": 0, "index_pct": 지수, "index_used": 쓴지수, "cash_eq": cash_eq,
          "ok": vs_idx is not None and vs_idx > 0},

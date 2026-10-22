@@ -49,7 +49,9 @@ export interface DeskKisAccount {
   perf: import("@/lib/kisPaper").KisPerf | null;
 }
 /** 실전 전환 1단계 관문 (docs/desk.md 6장, 25.1508) — 읽기 전용. 넘어도 아무것도 열리지 않는다 */
-export interface GateItem { key: string; label: string; now: number | null; target: number | null; ok: boolean; n?: number; mean?: number | null; index_pct?: number | null; index_used?: string[]; detail?: Record<string, number>; path_pct?: number | null; path_n?: number | null }
+export interface GateItem { key: string; label: string; now: number | null; target: number | null; ok: boolean; n?: number; mean?: number | null; index_pct?: number | null; index_used?: string[]; detail?: Record<string, number>; path_pct?: number | null; path_n?: number | null; exposure_matched?: ExposureMatched | null }
+/** 관문 R 대비 옆 참고 칸 — 노출을 H 에 맞춘 R (25.1702). 통과 판정에 들지 않는다 */
+export interface ExposureMatched { vs_r?: number; r_pct: number; h_exposure_pct: number; r_exposure_pct: number; skipped_days: number }
 export interface Gate { stage: number; account: string; version?: number | null; from?: string | null; items: GateItem[]; passed: boolean; next: string }
 
 /**
@@ -276,8 +278,14 @@ export function gateNowText(i: GateItem): string {
   switch (i.key) {
     case "days":
       return `${i.now}번 / ${i.target}번`;
-    case "vs_r":
-      return `${ppText(i.now, 0)} / 0 초과`;
+    case "vs_r": {
+      // 노출 맞춘 R 대비(참고, 25.1702) — 하락장엔 현금만으로, 상승장엔 덜 들어가 지는 몫을 뺀 값
+      const m = i.exposure_matched;
+      const 참고 = m && m.vs_r != null
+        ? ` (참고: 노출 맞춘 R 대비 ${ppText(m.vs_r, 0)} — 평균 투자 비중 H ${m.h_exposure_pct.toFixed(0)}% · R ${m.r_exposure_pct.toFixed(0)}%)`
+        : "";
+      return `${ppText(i.now, 0)} / 0 초과${참고}`;
+    }
     case "vs_index":
       // 같은 돈을 KOSPI·S&P500 반반에 넣었다면(25.1519) — 지수 쪽 수익률을 같이
       // 한쪽 그림자가 비면 그쪽은 빠진다 — 어느 지수를 썼는지 적는다(25.1523 검토 2)

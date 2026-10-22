@@ -301,6 +301,7 @@ def write(
     지금판 = (판이력.get(h) or [{}])[-1]
     관문판, 관문오류 = _관문판(client, now, 계열, h, 검산틀린날, kis요약, since=str(지금판.get("from") or ""),
                          version=지금판.get("version"), index=그림자.get(h), cash=현금.get(h),
+                         control_cash={r: 현금.get(r) or [] for r in desk.CONTROL_IDS},
                          판시작={a: str((줄 or [{}])[-1].get("from") or "") for a, 줄 in 판이력.items()})  # fmt: skip
     if 판오류:
         # 판 이력을 못 읽으면 "지금 판" 의 시작을 모른다 — since='' 로 관문을 내면 모든 판의 평가를 지금 판으로
@@ -461,6 +462,7 @@ def _관문판(
     kis요약: list[dict[str, Any]], *, since: str, version: int | None,
     index: list[tuple[str, float | None, float | None, float]] | None = None,
     cash: list[tuple[str, float, float]] | None = None, 판시작: dict[str, str] | None = None,
+    control_cash: dict[str, list[tuple[str, float, float]]] | None = None,
 ) -> tuple[dict[str, Any], str | None]:
     """실전 전환 관문·위험판·챔피언 교체 후보 (docs/desk.md 6장, 25.1508) — 실패해도 운용 요약은 적는다.
 
@@ -488,7 +490,7 @@ def _관문판(
         증거 = {str(r["account_id"]): _this_version_evidence(r) for r in 마지막}
         관문 = desk.gate(계열, h, since=since, version=version, recon_bad_days=sum(1 for d in 검산틀린날 if d >= 창),
                        batch_failed=실패, kis=desk.combine_kept(kis요약), evidence=증거.get(h),
-                       index=index, cash=cash)  # fmt: skip
+                       index=index, cash=cash, control_cash=control_cash)  # fmt: skip
         보유들 = {str(r["account_id"]): (_json_list(r["positions_json"])) for r in 마지막}
         ids = sorted({int(q["stock_id"]) for v in 보유들.values() for q in v if q.get("stock_id") is not None})
         이름 = ({int(r["id"]): str(r["name"]) for r in client.execute(STOCK_NAMES_SQL, [json.dumps(ids)]).dicts()}
