@@ -2373,7 +2373,9 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
         베낌: dict[str, bool] = {"done": False}
 
         def _kis와_요약() -> None:
-            if 베낌["done"]:
+            # dry-run 은 돌지 않는다 — 확인용 실행이 바깥 except 로 빠지면 그날 운용 요약을 덮었다(25.1717,
+            # 25.1715 교차검증 [참고] 5). 정상 경로는 dry-run 이 발송 앞에서 끝나 여기 닿지 않는다
+            if 베낌["done"] or dry_run:
                 return
             베낌["done"] = True
             # 증권사 모의투자에 같은 주문을 베껴 낸다 (docs/paper.md 15장, 25.1475) — 곁다리. 키가 없으면 "꺼짐"
@@ -2386,6 +2388,7 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
             # 정리가 아직 판정 안 된 매수를 "증권사에만 남은 것" 으로 팔았다(일일 배치 감사 [필수] 2 ②)
             모의 = step_log.get("paper")
             잠김 = isinstance(모의, dict) and str(모의.get("skipped") or "").endswith("(잠금)")
+            잠금보류 = "가상모의투자 단계를 건너뜀(잠금) — 오늘 베끼지 않음" if 잠김 else None
             if isinstance(모의, dict) and "error" not in 모의:
                 try:
                     from batch.jobs import broker_mirror
@@ -2393,7 +2396,7 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
                     멈춘종목 = mirror_frozen(모의, broker_mirror.MIRROR_ACCOUNT)
                     step_log["broker"] = broker_mirror.run(
                         client, market, datetime.now(UTC), frozen=멈춘종목,
-                        hold_send="가상모의투자 단계를 건너뜀(잠금) — 오늘 베끼지 않음" if 잠김 else None,
+                        hold_send=잠금보류,
                     )  # fmt: skip
                 except Exception as exc:  # noqa: BLE001 — 곁다리
                     log.exception("KIS모의투자 단계 실패")
@@ -2430,7 +2433,10 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
                     # 첫째가 보내지 못한 날(접수 시작 전·장 끝난 뒤)은 둘째도 — 두 계좌의 주문 날이 어긋나지
                     # 않게(25.1517). 첫째 단계가 예외로 끝난 날도(KIS 토큰 실패 등, 25.1543 감사 7) — 예전엔
                     # `send` 까닭만 넘겨 둘째만 냈다
-                    막힘2 = challenger_hold(step_log.get("broker") or {})
+                    # 잠금 보류는 직접 넘긴다(25.1717, 25.1715 교차검증 [권고] 1) — 첫째가 키 없음·베낄 계좌
+                    # 없음으로 "꺼짐" 이면 첫째 기록에 `send` 가 안 남아 `challenger_hold` 가 None 이었고, 도전자는
+                    # 보류 없이 주문·정리를 냈다
+                    막힘2 = 잠금보류 or challenger_hold(step_log.get("broker") or {})
                     step_log["broker2"] = _bm2.run(client, market, datetime.now(UTC), slot=_bm2.CHALLENGER,
                                                    frozen=멈춘2, hold_send=str(막힘2) if 막힘2 else None)  # fmt: skip
                 except Exception as exc:  # noqa: BLE001 — 곁다리
@@ -2677,14 +2683,18 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
             raise
         # 가상모의투자 단계가 이미 그날 주문을 적었으면 KIS 베끼기·운용 요약은 돌린다(25.1715, 일일 배치 감사 [필수] 1 —
         # 발송 직전 DB 일시 오류 등). 단계 전에 깨졌으면 `_kis와_요약` 이 아직 없다
+        # 실패 기록·알림을 **먼저** 한다(25.1717, 25.1715 교차검증 [참고] 5) — KIS 가 접수 시작을 기다리다 시간 제한에
+        # 걸리면 실패 알림이 빠졌다. 기록·알림이 깨져도 KIS·요약은 돈다(finally)
         뒤처리 = locals().get("_kis와_요약")
-        if 뒤처리 is not None:
-            try:
-                뒤처리()
-            except Exception:  # noqa: BLE001 — 실패 알림이 먼저다
-                log.exception("실패한 실행의 KIS모의투자·운용 요약 단계 실패")
-        db.fail_open_runs(str(exc))
-        _notify_failure(client, market, name, str(exc), dry_run=dry_run)
+        try:
+            db.fail_open_runs(str(exc))
+            _notify_failure(client, market, name, str(exc), dry_run=dry_run)
+        finally:
+            if 뒤처리 is not None:
+                try:
+                    뒤처리()
+                except Exception:  # noqa: BLE001 — 원래 예외를 올린다
+                    log.exception("실패한 실행의 KIS모의투자·운용 요약 단계 실패")
         raise
 
     finally:

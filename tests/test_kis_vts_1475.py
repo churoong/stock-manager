@@ -623,3 +623,21 @@ def test_판정_대기_매수는_정리하지_않는다(c: Client) -> None:  # n
     기록 = job.run(c, "KR", _at("08:40", "2026-10-19"), session=다음, sleep=lambda _x: None,
                  clock=lambda: _at("08:40", "2026-10-19"))  # fmt: skip
     assert 다음.orders == [] and 기록["planned"]["cleanup"] == 0 and 기록["pending_fill_buys"] == 1
+
+
+def test_다른_계좌의_판정_대기_매수는_정리를_막지_않는다(c: Client) -> None:  # noqa: F811
+    """25.1717 (25.1715 교차검증 [권고] 2 M7) — 대기 매수는 베끼는 계좌(B)의 것만 센다. 다른 계좌(A)가 같은 종목을 지난
+    장에 사려고 열어 두었어도 B 장부에 없는 KIS 보유는 정리로 판다"""
+    s = _Sess()
+    job.run(c, "KR", _at("08:40"), session=s, sleep=lambda _x: None, clock=lambda: _at("08:40"))
+    c.conn.execute("UPDATE paper_orders SET status = 'expired' WHERE side = 'buy'")
+    c.conn.execute("INSERT INTO paper_orders (id, account_id, market, stock_id, side, order_type, limit_price, quantity,"
+                   " currency, decided_on, fill_session, reason, rule_version, tranche, created_at)"
+                   " VALUES (201, 'A', 'KR', 1, 'buy', 'limit', 9800, 3, 'KRW', '2026-10-15', '2026-10-16', 'r', 1,"
+                   " 1, 't')")  # fmt: skip
+    다음 = _Sess(holdings=[kv.Holding("005930", 3, 3, 9_800.0)],
+               executions=[kv.Execution("20261016", "N1", "005930", "buy", 3, 3, 9_800.0, 0, False),
+                           kv.Execution("20261016", "N2", "005930", "buy", 2, 0, None, 0, False)])  # fmt: skip
+    기록 = job.run(c, "KR", _at("08:40", "2026-10-19"), session=다음, sleep=lambda _x: None,
+                 clock=lambda: _at("08:40", "2026-10-19"))  # fmt: skip
+    assert 다음.orders == [("sell", "005930", 3, None)] and "pending_fill_buys" not in 기록

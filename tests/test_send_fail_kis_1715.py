@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+
 import pytest
 
 from batch.jobs import broker_mirror, daily, desk, paper
@@ -79,12 +81,67 @@ def test_가상_단계가_잠금으로_건너뛰면_KIS_는_내지_않는다(mon
     assert 부름["hold"][0] == "가상모의투자 단계를 건너뜀(잠금) — 오늘 베끼지 않음"
 
 
-def test_dry_run_이면_KIS_를_돌리지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
-    """가상 단계가 안 도는 dry-run 에서 맞추기 뒤 정리가 가상 장부와 무관하게 나갈 수 있었다(25.1715)"""
+def test_dry_run_이_깨져도_운용요약을_덮지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1717 (25.1715 교차검증 [참고] 3·5) — dry-run 의 기록 닫기가 깨지면 바깥 except 가 `_kis와_요약` 을 불러 확인용
+    실행이 그날 운용 요약을 덮었다"""
     _준비(monkeypatch, 0)
     부름 = _kis_desk(monkeypatch)
-    daily.run("KR", dry_run=True)
-    assert 부름["kis"] == []
+
+    def 닫기(c, rid, **k):  # noqa: ANN001, ANN003, ANN202
+        if k.get("status") == "dryrun":
+            raise RuntimeError("Hrana: stream expired")
+
+    monkeypatch.setattr(daily.db, "finish_batch_run", 닫기)
+    monkeypatch.setattr(daily.db, "fail_open_runs", lambda t: None)
+    with pytest.raises(RuntimeError, match="stream expired"):
+        daily.run("KR", dry_run=True)
+    assert 부름["kis"] == [] and 부름["desk"] == []
+
+
+def test_잠금이면_도전자도_보류한다_첫째가_꺼져도(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1717 (25.1715 교차검증 [권고] 1) — 첫째가 키 없음·베낄 계좌 없음으로 "꺼짐" 이면 첫째 기록에 `send` 가 없어
+    도전자는 보류 없이 주문·정리를 냈다"""
+    _준비(monkeypatch, 0)
+    _kis_desk(monkeypatch, {"skipped": "다른 시장의 가상모의투자 단계가 도는 중(잠금)"})
+    holds: list = []
+
+    def kis(*_a, **k):  # noqa: ANN002, ANN003, ANN202
+        holds.append((k.get("slot"), k.get("hold_send")))
+        return {"off": "키 없음"} if k.get("slot") is None else {"sent": {}}
+
+    monkeypatch.setattr(broker_mirror, "run", kis)
+    assert daily.run("KR") == 0
+    assert len(holds) == 2 and all(h == "가상모의투자 단계를 건너뜀(잠금) — 오늘 베끼지 않음" for _s, h in holds)
+
+
+def test_잠금이_아닌_건너뜀은_보류하지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1717 (M12) — 입금 없음 같은 건너뜀은 그날 판정이 돈 것과 같다(낼 주문이 없을 뿐) — 정리·맞추기는 그대로"""
+    _준비(monkeypatch, 0)
+    부름 = _kis_desk(monkeypatch, {"skipped": "입금 없음"})
+    assert daily.run("KR") == 0
+    assert 부름["hold"] == [None, None]
+
+
+def test_발송_실패_뒤_기록이_깨져도_KIS_는_한_번만(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1717 (M3) — 발송 실패 경로에서 `_kis와_요약` 뒤 `_send_failed` 의 기록 닫기가 깨지면 바깥 except 가 다시 부른다.
+    두 번째는 돌지 않는다(알림이 두 번, DB 가 깨진 날이라 같은 날 중복 막이도 믿기 어렵다)"""
+    _준비(monkeypatch, 0)
+    부름 = _kis_desk(monkeypatch)
+
+    def 실패(text, *a, **k):  # noqa: ANN001, ANN002, ANN003, ANN202
+        from batch.notify import telegram
+
+        raise telegram.TelegramError("429 retry_after 3600")
+
+    def 닫기(c, rid, **k):  # noqa: ANN001, ANN003, ANN202
+        raise RuntimeError("Hrana: stream expired")
+
+    monkeypatch.setattr(daily.telegram, "send", 실패)
+    monkeypatch.setattr(daily.db, "finish_batch_run", 닫기)
+    monkeypatch.setattr(daily.db, "fail_open_runs", lambda t: None)
+    with contextlib.suppress(RuntimeError):
+        daily.run("KR")
+    assert len(부름["kis"]) == 2 and 부름["desk"] == [1]
 
 
 def test_시장_전체가_빠진_장의_매도는_오늘_다음_장으로(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -117,4 +174,36 @@ def test_시장_전체가_빠진_장의_매도는_오늘_다음_장으로(monkey
     paper.run_step(c, market="KR", trade_date="2026-10-16", late=False, signal_rows=[], settings=설정,
                    price_series={}, series_unknown={}, allocate=False,
                    now=datetime.fromisoformat("2026-10-18T23:40:00+00:00"))  # fmt: skip
+    assert c.q("SELECT status, fill_session FROM paper_orders WHERE id = 2") == [("open", "2026-10-19")]
+
+
+def test_환율_없는_매도는_오늘_다음_장으로(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1717 (25.1715 교차검증 [권고] 2 M10) — 미국 10-15 장 매도를 10-16 판정 실행이 환율이 없어 미루면 10-19 로.
+    예전 `next_session(10-15)`=10-16 이면 오늘 판정일보다 앞서 KIS 베끼기가 내지 못했고 이미 지난 10-16 시가로 팔았다"""
+    from datetime import date, datetime
+
+    from batch.core import calendar as cal
+    from tests.test_paper_job_1445 import Client, 설정
+
+    c = Client(accounts=("A",))
+    monkeypatch.setattr(paper, "frozen_ids", lambda *_a, **_k: set())
+    x = c.conn.execute
+    x("INSERT INTO paper_cash_flows (flow_date, amount_krw, kind, created_at, request_key)"
+      " VALUES ('2026-10-13', 1000000, 'deposit', '2026-10-13T00:00:00+00:00', 'k1')")
+    x("INSERT INTO paper_orders (id, account_id, market, stock_id, side, order_type, limit_price, quantity, currency,"
+      " decided_on, fill_session, fill_basis, tranche, reason, rule_version, created_at, status) VALUES (1, 'A', 'US', 2,"
+      " 'buy', 'limit', 100, 2, 'USD', '2026-10-12', '2026-10-13', 'open', 1, 't', 1, 't', 'filled')")
+    x("INSERT INTO paper_fills (order_id, account_id, stock_id, side, fill_date, price, quantity, currency, fx_rate,"
+      " fee, tax, slippage, cash_krw, created_at) VALUES (1, 'A', 2, 'buy', '2026-10-13', 100, 2, 'USD', 1300, 0, 0,"
+      " 0, -260000, '2026-10-13T12:00:00+00:00')")
+    x("INSERT INTO paper_orders (id, account_id, market, stock_id, side, order_type, limit_price, quantity, currency,"
+      " decided_on, fill_session, fill_basis, tranche, reason, rule_version, created_at) VALUES (2, 'A', 'US', 2,"
+      " 'sell', 'market', NULL, 2, 'USD', '2026-10-14', '2026-10-15', 'open', 0, '손절', 1, 't')")
+    for d in ("2026-10-13", "2026-10-15", "2026-10-16"):
+        x("INSERT INTO prices (stock_id, date, open, high, low, close, volume, currency, source, fetched_at)"
+          " VALUES (2, ?, 90, 90, 90, 90, 1000, 'USD', 't', 't')", [d])
+    monkeypatch.setattr(cal, "local_today", lambda m=None: date(2026, 10, 19))
+    paper.run_step(c, market="US", trade_date="2026-10-16", late=False, signal_rows=[], settings=설정,
+                   price_series={}, series_unknown={}, allocate=False,
+                   now=datetime.fromisoformat("2026-10-19T12:00:00+00:00"))  # fmt: skip
     assert c.q("SELECT status, fill_session FROM paper_orders WHERE id = 2") == [("open", "2026-10-19")]
