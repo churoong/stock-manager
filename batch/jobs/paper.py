@@ -97,7 +97,9 @@ INSERT_FILL_SQL = (
     " realized_krw, realized_fx_krw) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 )
 #: 환차 몫이 아직 빈 매도(0090 전 매도) — 부분 색인으로 남은 것만 (25.1693)
-FX_PENDING_SQL = "SELECT order_id, account_id FROM paper_fills WHERE side = 'sell' AND realized_fx_krw IS NULL"
+FX_PENDING_SQL = (
+    "SELECT order_id, account_id, realized_krw FROM paper_fills WHERE side = 'sell' AND realized_fx_krw IS NULL"
+)
 FX_FILL_SQL = "UPDATE paper_fills SET realized_fx_krw = ? WHERE order_id = ? AND realized_fx_krw IS NULL"
 FILLED_SQL = (
     "UPDATE paper_orders SET status = 'filled', closed_on = ?, close_note = ? WHERE id = ? AND status = 'open'"
@@ -265,15 +267,18 @@ def _결정(
 
 def fill_realized_fx(client: Any, fills: list[pp.Fill]) -> int:
     """환차 몫이 빈 매도에 `pp.realized` 의 값을 적는다(25.1693). 장부 평균 원가로 셀 수 없는 매도(팔 때 보유 없음)는
-    빈 채로 둔다 — 실현손익도 비어 있다. 적은 수를 돌려준다"""
+    빈 채로 둔다 — 실현손익도 비어 있다. **저장된 실현손익과 지금 다시 센 것이 1원 넘게 다르면 적지 않는다**(25.1695,
+    교차검증 [권고] 2 — 25.1620 전엔 한 실행에서 두 장을 판정하면 체결 때 실현손익이 다른 원가로 적혔다. 그 위에 환차를
+    적으면 "주가 몫 = 실현 − 환차" 가 틀린다; 그런 매도는 화면에 "환차 모름" 으로 남는다). 적은 수를 돌려준다"""
     남은 = client.execute(FX_PENDING_SQL).rows
     if not 남은:
         return 0
     계좌들 = {str(r[1]) for r in 남은}
-    값: dict[int, float] = {}
+    값: dict[int, dict[str, Any]] = {}
     for aid in 계좌들:
-        값.update({int(r["order_id"]): r["fx_krw"] for r in pp.realized([f for f in fills if f.account_id == aid])})
-    문장 = [(FX_FILL_SQL, [값[int(r[0])], int(r[0])]) for r in 남은 if int(r[0]) in 값]
+        값.update({int(r["order_id"]): r for r in pp.realized([f for f in fills if f.account_id == aid])})
+    문장 = [(FX_FILL_SQL, [값[int(r[0])]["fx_krw"], int(r[0])]) for r in 남은
+            if int(r[0]) in 값 and r[2] is not None and abs(float(r[2]) - 값[int(r[0])]["pnl_krw"]) <= 1]
     if 문장:
         _쓰기(client, 문장)
     return len(문장)

@@ -97,8 +97,9 @@ export interface RealizedGroup {
   label: string;
   n: number;
   realized: number;
-  /** 환차 몫 합 — 해외 매도가 없으면 0. 모르는 매도가 있으면 아는 것만 */
+  /** 환차 몫 합 — 해외 매도가 없으면 0. 모르는 매도가 있으면 아는 것만(`fxUnknown` 건) */
   fx: number;
+  fxUnknown: number;
   wins: number;
   losses: number;
 }
@@ -121,7 +122,7 @@ export interface RealizedReport {
 }
 
 function 빈묶음(key: string, label: string): RealizedGroup {
-  return { key, label, n: 0, realized: 0, fx: 0, wins: 0, losses: 0 };
+  return { key, label, n: 0, realized: 0, fx: 0, fxUnknown: 0, wins: 0, losses: 0 };
 }
 
 /** 기간 안 매도를 합치고 일자별·종목별로 묶는다 — 더하기만(값은 배치가 적은 그대로) */
@@ -151,6 +152,7 @@ export function realizedReport(rows: RealizedRow[]): RealizedReport {
       g.n += 1;
       g.realized += v;
       g.fx += 환차 ?? 0;
+      g.fxUnknown += 환차 == null ? 1 : 0;
       g.wins += v > 0 ? 1 : 0;
       g.losses += v < 0 ? 1 : 0;
       표.set(열쇠, g);

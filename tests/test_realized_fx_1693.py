@@ -48,11 +48,31 @@ def test_열이_생기기_전_매도는_배치가_한_번_채운다() -> None:
                        " decided_on, fill_session, reason, rule_version, created_at) VALUES (?, 'A', 'US', 2, ?,"
                        " 'market', 10, 'USD', ?, ?, 'x', 1, 't')", [oid, side, d, d])  # fmt: skip
     체결 = [_f(1, "buy", "2026-10-01", 100, 10, 1300, 1.0), _f(2, "sell", "2026-10-05", 110, 10, 1400, 1.1)]
-    for f in 체결:
+    for f, 실현 in zip(체결, (None, 237_160.0), strict=True):
         c.conn.execute("INSERT INTO paper_fills (order_id, account_id, stock_id, side, fill_date, price, quantity,"
-                       " currency, fx_rate, fee, tax, slippage, cash_krw, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,"
-                       " ?, 0, 0, ?, 't')", [f.order_id, f.account_id, f.stock_id, f.side, f.fill_date, f.price,
-                                             f.quantity, f.currency, f.fx_rate, f.fee, f.cash_krw])  # fmt: skip
+                       " currency, fx_rate, fee, tax, slippage, cash_krw, created_at, realized_krw) VALUES (?, ?, ?, ?, ?,"
+                       " ?, ?, ?, ?, ?, 0, 0, ?, 't', ?)", [f.order_id, f.account_id, f.stock_id, f.side, f.fill_date,
+                                                           f.price, f.quantity, f.currency, f.fx_rate, f.fee, f.cash_krw,
+                                                           실현])  # fmt: skip
     assert job.fill_realized_fx(c, 체결) == 1
     assert c.q("SELECT realized_fx_krw FROM paper_fills WHERE order_id = 2") == [(100_100.0,)]
     assert job.fill_realized_fx(c, 체결) == 0  # 다 채우면 남은 것 없음
+
+
+def test_저장된_실현손익과_다시_센_것이_다르면_환차를_적지_않는다() -> None:
+    """25.1695 (교차검증 [권고] 2) — 25.1620 전 체결은 다른 원가로 실현손익이 적혔을 수 있다. 그 위에 환차를 적으면 주가 몫이
+    틀린다 — 적지 않고 화면에 "환차 모름" 으로 남긴다."""
+    c = Client()
+    for oid, side, d in ((1, "buy", "2026-10-01"), (2, "sell", "2026-10-05")):
+        c.conn.execute("INSERT INTO paper_orders (id, account_id, market, stock_id, side, order_type, quantity, currency,"
+                       " decided_on, fill_session, reason, rule_version, created_at) VALUES (?, 'A', 'US', 2, ?,"
+                       " 'market', 10, 'USD', ?, ?, 'x', 1, 't')", [oid, side, d, d])  # fmt: skip
+    체결 = [_f(1, "buy", "2026-10-01", 100, 10, 1300, 1.0), _f(2, "sell", "2026-10-05", 110, 10, 1400, 1.1)]
+    for f, 실현 in zip(체결, (None, 230_000.0), strict=True):  # 저장된 실현이 다시 센 237,160 과 다르다
+        c.conn.execute("INSERT INTO paper_fills (order_id, account_id, stock_id, side, fill_date, price, quantity,"
+                       " currency, fx_rate, fee, tax, slippage, cash_krw, created_at, realized_krw) VALUES (?, ?, ?, ?, ?,"
+                       " ?, ?, ?, ?, ?, 0, 0, ?, 't', ?)", [f.order_id, f.account_id, f.stock_id, f.side, f.fill_date,
+                                                           f.price, f.quantity, f.currency, f.fx_rate, f.fee, f.cash_krw,
+                                                           실현])  # fmt: skip
+    assert job.fill_realized_fx(c, 체결) == 0
+    assert c.q("SELECT realized_fx_krw FROM paper_fills WHERE order_id = 2") == [(None,)]

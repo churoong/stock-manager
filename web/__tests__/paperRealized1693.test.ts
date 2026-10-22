@@ -73,8 +73,10 @@ describe("기간 실현손익", () => {
     ]);
   });
   it("환차 몫을 아직 모르는 해외 매도가 있으면 주가 몫도 모름", () => {
-    const x = realizedReport([줄(1, "2026-10-15", 2, 3_000, "USD", null)]);
+    const x = realizedReport([줄(1, "2026-10-15", 2, 3_000, "USD", null), 줄(2, "2026-10-15", 2, 1_000, "USD", 200)]);
     expect(x.fxUnknown).toBe(1);
+    // 일자별·종목별 묶음도 모르는 수를 센다(25.1695 — 아는 것만 더한 값을 다 아는 것처럼 보이지 않게)
+    expect([x.byDay[0].fx, x.byDay[0].fxUnknown, x.byStock[0].fxUnknown]).toEqual([200, 1, 1]);
     expect(Number.isNaN(x.price)).toBe(true);
     expect(realizedReport([]).byDay).toEqual([]);
   });

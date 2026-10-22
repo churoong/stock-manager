@@ -6,6 +6,12 @@ import { kstToday } from "@/lib/paper";
 import { PERIODS, periodRange, realizedReport, type PeriodKey, type RealizedRow } from "@/lib/paperRealized";
 import { won } from "@/lib/portfolio";
 
+/** 묶음의 환차 칸 — 모르는 매도가 섞였으면 아는 것만 더했다고 밝힌다(25.1695) */
+function fxCell(g: { fx: number; fxUnknown: number }): string {
+  if (g.fxUnknown) return `${g.fx ? won(g.fx) : ""}${g.fx ? " + " : ""}모름 ${g.fxUnknown}건`;
+  return g.fx ? won(g.fx) : "—";
+}
+
 function tone(v: number | null | undefined): string {
   if (v == null || !Number.isFinite(v) || v === 0) return "";
   return v > 0 ? "text-red-600 dark:text-red-400" : "text-blue-600 dark:text-blue-400";
@@ -71,7 +77,8 @@ function RealizedView({ url, costs, note, unknownNote }: {
     // `url` 은 부를 때마다 새 함수라 의존에 넣지 않는다 — 바뀌는 것은 계좌·시장(부모가 key 로 다시 그린다)과 기간뿐
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [from, to, 거꾸로]);
-  const 보고 = rows ? realizedReport(rows) : null;
+  // 시작 > 끝이면 앞 기간 숫자를 그 제목 아래 보이지 않는다(25.1695, 교차검증 [권고] 1)
+  const 보고 = rows && !거꾸로 ? realizedReport(rows) : null;
   return (
     <div className="text-sm">
       <div className="flex flex-wrap gap-1" role="tablist" aria-label="기간">
@@ -164,7 +171,7 @@ function RealizedView({ url, costs, note, unknownNote }: {
                       <td className="py-1">{d.label}</td>
                       <td className="text-right">{d.n}</td>
                       <td className={`text-right ${tone(d.realized)}`}>{won(d.realized)}</td>
-                      {보고.hasForeign ? <td className={`text-right ${tone(d.fx)}`}>{d.fx ? won(d.fx) : "—"}</td> : null}
+                      {보고.hasForeign ? <td className={`text-right ${tone(d.fx)}`}>{fxCell(d)}</td> : null}
                       <td className={`text-right ${tone(d.cumulative)}`}>{won(d.cumulative)}</td>
                     </tr>
                   ))}
@@ -190,7 +197,7 @@ function RealizedView({ url, costs, note, unknownNote }: {
                       <td className="py-1">{s.label}</td>
                       <td className="text-right">{s.n}</td>
                       <td className={`text-right ${tone(s.realized)}`}>{won(s.realized)}</td>
-                      {보고.hasForeign ? <td className={`text-right ${tone(s.fx)}`}>{s.fx ? won(s.fx) : "—"}</td> : null}
+                      {보고.hasForeign ? <td className={`text-right ${tone(s.fx)}`}>{fxCell(s)}</td> : null}
                     </tr>
                   ))}
                 </tbody>
