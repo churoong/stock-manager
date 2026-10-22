@@ -680,6 +680,7 @@ def realized(
     보유: dict[str, tuple[int, float, float, bool]] = {}  # 수량, 현지 원가, 원화 원가, 원가 모름
     구간: dict[str, list[int]] = {}  # 코드마다 지금(또는 마지막) 보유 구간의 매도 id
     오염: set[str] = set()
+    산뒤: set[str] = set()  # 직전 기준점 뒤 매수가 있었던 티커
     out: dict[int, tuple[float | None, float | None]] = {}
 
     def 열쇠(r: dict[str, Any]) -> str:
@@ -692,6 +693,7 @@ def realized(
     def 사기(r: dict[str, Any]) -> None:
         k, q체결, 가 = 열쇠(r), int(r["filled_qty"]), r.get("avg_price")
         q, 현, 원, 모름 = 보유.get(k, (0, 0.0, 0.0, False))
+        산뒤.add(k)
         if q <= 0:
             구간[k] = []
         환율 = fx_on(str(r["trade_date"])) if r.get("market") == "US" else 1.0
@@ -734,6 +736,19 @@ def realized(
                 보유[k] = (0, 0.0, 0.0, False)
                 오염.discard(k)
                 구간[k] = []
+            elif kis < q:
+                # KIS 가 적다(25.1704, 25.1701 교차검증 [필수] 1) — 기록 밖 매도면 평균 원가는 같지만, 남은 유령 수량이
+                # 다음 매수와 가중 평균되어 원가가 어긋난다. 직전 기준점 뒤 이 티커 매수가 없었으면 어긋남은 매도뿐 —
+                # 기록 수량을 KIS 로 줄이고 원가를 같은 비율로(평균 원가법에선 정확). 매수가 있었으면 그 매수가 유령
+                # (기록은 찼는데 KIS 는 안 참)이거나 이미 섞였을 수 있어 오염
+                if k in 산뒤:
+                    오염.add(k)
+                    모름표시(k)
+                elif not 끝:
+                    q0, 현, 원, 모름 = 보유[k]
+                    보유[k] = (kis, 현 * kis / q0, 원 * kis / q0, 모름)
+        if not 끝:
+            산뒤.clear()
 
     찬 = [r for r in rows if int(r.get("filled_qty") or 0) > 0]
     기록코드 = sorted({열쇠(r) for r in 찬})

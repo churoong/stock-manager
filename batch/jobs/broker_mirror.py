@@ -295,7 +295,8 @@ def _us_window(now: datetime, day: Any) -> str | None:
 def _개장전_잔고(rows: list[dict[str, Any]], market: str) -> list[tuple[str, dict[str, int]]]:
     """`paper_broker_daily` 줄 → [(그날, {코드: 수량})] — **그날 개장 전에** 읽은 것만(25.1701). 개장 뒤 다시 돈 실행이
     덮어쓴 줄은 그날 체결이 섞여 "그날 앞 체결까지" 와 견줄 수 없어 뺀다. 장이 없는 날 줄은 그대로 쓴다.
-    보유 칸은 지금 꼴 [{code, qty, …}] 과 예전 꼴 [[종목 id 또는 코드, 수량, 평균가]](0078) — 코드가 없는 것은 뺀다"""
+    보유 칸은 지금 꼴 [{code, qty, …}] 과 예전 꼴 [[종목 id 또는 코드, 수량, 평균가]](0078) — 코드가 없는 칸이 있으면
+    그 줄을 뺀다"""
     out: list[tuple[str, dict[str, int]]] = []
     for r in rows:
         날 = str(r["as_of"])[:10]
@@ -309,12 +310,18 @@ def _개장전_잔고(rows: list[dict[str, Any]], market: str) -> list[tuple[str
         if 개장 is not None and 시각 >= 개장:
             continue
         잔: dict[str, int] = {}
+        온전 = isinstance(보유, list)
         for h in 보유 if isinstance(보유, list) else []:
             code, qty = ((h.get("code"), h.get("qty")) if isinstance(h, dict)
                          else (h[0], h[1]) if isinstance(h, list) and len(h) >= 2 else (None, None))  # fmt: skip
             if isinstance(code, str) and code and qty is not None:
                 잔[code] = 잔.get(code, 0) + int(qty)
-        out.append((날, 잔))
+            else:
+                온전 = False
+        # 코드를 모르는 칸이 하나라도 있으면 그 줄을 기준점으로 쓰지 않는다 — 1a9dff1(10-16) 전 줄은 첫 칸이 종목 id 라
+        # 그 티커가 KIS 0 으로 읽혀 기록을 0 으로 맞췄다(25.1704, 25.1701 교차검증 [참고] 1)
+        if 온전:
+            out.append((날, 잔))
     return out
 
 
