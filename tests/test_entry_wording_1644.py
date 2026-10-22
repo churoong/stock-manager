@@ -14,3 +14,16 @@ def test_싸면_쌌다_비싸면_비쌌다_같으면_같았다() -> None:
     assert "-0.85" not in _진입줄(-0.85, 3)
     assert "종가와 평균 같았다 (n=4)" in _진입줄(-0.001, 4)
     assert "체결 표본 없음" in _진입줄(None, 0)
+
+
+def test_지정가_체결은_진입에서_재지_않고_수만_적는다() -> None:
+    """25.1687 (결정 원장 감사 [필수] 2) — 지정가는 "종가 ≤ 회차 가격이면 회차 가격" 이라 체결가가 늘 종가 이상이어서
+    B·H 의 진입이 실력과 상관없이 늘 "비쌌다" 였다. 시장가 체결만 재고 지정가는 수만."""
+    a = pp.attribution([], [], limit_fills=3)
+    assert a["entry"] == {"n": 0, "avg": None, "limit_n": 3}
+    줄 = next(x for x in pp.attribution_lines("B", a) if " 진입: " in x)
+    assert "지정가 체결 3건은 재지 않음(모형상 늘 종가 이상)" in 줄 and "비쌌다" not in 줄
+    섞임 = pp.attribution([], [(10_000, 10_100)], limit_fills=2)
+    줄 = next(x for x in pp.attribution_lines("C", 섞임) if " 진입: " in x)
+    assert "평균 1.00% 쌌다 (n=1), 지정가 체결 2건은 재지 않음" in 줄
+    assert pp.attribution([], [(10_000, 10_100)])["entry"] == {"n": 1, "avg": 1.0}  # 지정가 없으면 예전 꼴

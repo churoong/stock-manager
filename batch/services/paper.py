@@ -996,12 +996,16 @@ def _까닭_묶음(reason: str) -> str:
     return re.sub(r"[-+]?\d+(?:\.\d+)?", "N", reason) if reason.startswith("위원회") else reason
 
 
-def attribution(decisions: list[dict[str, Any]], entries: list[tuple[float, float | None]]) -> dict[str, Any]:
+def attribution(
+    decisions: list[dict[str, Any]], entries: list[tuple[float, float | None]], limit_fills: int = 0,
+) -> dict[str, Any]:
     """성과 분해 — 어디가 돈을 버나 (docs/paper.md 10장, 25.1450). 순수 함수.
 
     모두 **20 거래일 뒤 지수 대비 초과(%p)**. 선정 = 산 후보 vs 안 산 후보, 비중 필터 = 안 산 까닭별,
     진입 = 체결가가 그날 종가보다 얼마나 쌌나(%)와 안 찬 회차의 그 뒤, 청산 = 판 뒤와 플래그를 따르지 않고 든 뒤
-    (판 뒤가 음수면 판 것이 옳았다). `entries` 는 매수 체결마다 (체결가, 체결일 종가)
+    (판 뒤가 음수면 판 것이 옳았다). `entries` 는 **시장가** 매수 체결마다 (체결가, 체결일 종가). 지정가 매수 체결은
+    `limit_fills` 로 수만 받는다 — 체결 모형이 "종가 ≤ 회차 가격이면 회차 가격" 이라 체결가가 늘 종가 이상이어서 진입이
+    실력과 상관없이 0 이하로 나왔다(25.1687, 결정 원장 감사 [필수] 2 — B·H 가 늘 "비쌌다")
     """
     원래 = decisions
     decisions = _에피소드(decisions)
@@ -1029,7 +1033,8 @@ def attribution(decisions: list[dict[str, Any]], entries: list[tuple[float, floa
         "skipped": _초과(견줄),
         "skip_by_reason": dict(sorted(((k, _초과(v)) for k, v in 까닭.items()),
                                       key=lambda kv: (-kv[1]["n"], kv[0]))[:5]),  # fmt: skip
-        "entry": {"n": len(진입), "avg": sum(진입) / len(진입) if 진입 else None},
+        "entry": {"n": len(진입), "avg": sum(진입) / len(진입) if 진입 else None,
+                  **({"limit_n": limit_fills} if limit_fills else {})},
         "missed": _초과(종류["missed"]),
         "sold": _초과(종류["sell"]),
         "held_flag": _초과(종류["hold_flag"]),
@@ -1183,6 +1188,10 @@ def attribution_lines(aid: str, a: dict[str, Any] | None) -> list[str]:
         진입 = f"체결가가 그날 종가와 평균 같았다 (n={e['n']})"
     else:
         진입 = f"체결가가 그날 종가보다 평균 {abs(e['avg']):.2f}% {'쌌다' if e['avg'] > 0 else '비쌌다'} (n={e['n']})"
+    if e.get("limit_n"):
+        # 지정가 체결은 재지 않는다 — 모형상 늘 종가 이상(25.1687). 진입 규칙은 안 찬 회차의 그 뒤로 본다
+        지정 = f"지정가 체결 {e['limit_n']}건은 재지 않음(모형상 늘 종가 이상)"
+        진입 = 지정 if not e.get("n") else f"{진입}, {지정}"
     줄.append(f"  {aid} 진입: {진입} · 안 찬 회차의 그 뒤 {칸(a['missed'])}")
     줄.append(f"  {aid} 청산: 판 뒤 {칸(a['sold'])} · 플래그를 따르지 않고 든 뒤 {칸(a['held_flag'])}"
              " — 판 뒤가 음수면 판 것이 옳았다")

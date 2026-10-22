@@ -490,7 +490,8 @@ export interface Attribution {
   selection: AttrCell;
   skipped: AttrCell;
   skip_by_reason: Record<string, AttrCell>;
-  entry: AttrCell;
+  /** 시장가 매수만 잰다 — 지정가 체결은 `limit_n` 에 수만(모형상 늘 종가 이상, 25.1687) */
+  entry: AttrCell & { limit_n?: number };
   missed: AttrCell;
   sold: AttrCell;
   held_flag: AttrCell;
@@ -527,6 +528,13 @@ export function attrCellText(c: AttrCell | undefined, unit = "%p"): string {
   const 이김 = c.hit != null ? `, 이긴 비율 ${Math.round(c.hit)}%` : "";
   const 참고 = c.n < ATTRIBUTION_MIN_SAMPLE ? ", 참고" : "";
   return `${c.avg >= 0 ? "+" : ""}${c.avg.toFixed(unit === "%" ? 2 : 1)}${unit} (n=${c.n}${이김}${참고})`;
+}
+
+/** 진입 칸의 글 — 지정가 체결은 재지 않고 수만 적는다(배치 `attribution_lines` 와 같은 뜻, 25.1687) */
+export function entryCellText(c: (AttrCell & { limit_n?: number }) | undefined): string {
+  const 지정 = c?.limit_n ? `지정가 체결 ${c.limit_n}건은 재지 않음(모형상 늘 종가 이상)` : "";
+  if (!c?.n) return 지정 || attrCellText(c, "%");
+  return 지정 ? `${attrCellText(c, "%")}, ${지정}` : attrCellText(c, "%");
 }
 
 /** 모의 매매 멈춤 스위치 — 배치 `jobs/paper.HALT_SETTING_KEY` 와 같은 키 (docs/paper.md 11장, 25.1451) */

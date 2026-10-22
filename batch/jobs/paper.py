@@ -224,7 +224,7 @@ ATTR_DECISIONS_SQL = (
 )
 #: 진입 칸의 체결도 **지금 판의 주문만**(25.1547 감사 [참고] 4 — 위 주석과 달리 판을 거르지 않아 지난 판 체결이 섞였다)
 ATTR_FILLS_SQL = (
-    "SELECT f.order_id, f.price, f.day_close FROM paper_fills f JOIN paper_orders o ON o.id = f.order_id"
+    "SELECT f.order_id, f.price, f.day_close, o.order_type FROM paper_fills f JOIN paper_orders o ON o.id = f.order_id"
     " WHERE f.account_id = ? AND f.side = 'buy' AND f.day_close IS NOT NULL AND f.fill_date >= ?"
     " AND COALESCE(o.rule_version, 1) = ?"
 )
@@ -934,7 +934,9 @@ def save_attribution(client: Any, aid: str, today: str, rule_version: int = 1) -
     부터 = (date.fromisoformat(today) - timedelta(days=ATTR_WINDOW_DAYS)).isoformat()
     결정 = client.execute(ATTR_DECISIONS_SQL, [aid, 부터, rule_version]).dicts()
     체결행 = client.execute(ATTR_FILLS_SQL, [aid, 부터, rule_version]).dicts()
-    a = pp.attribution(결정, [(float(r["price"]), r["day_close"]) for r in 체결행])
+    # 진입은 시장가 매수만 잰다 — 지정가는 수만(25.1687)
+    a = pp.attribution(결정, [(float(r["price"]), r["day_close"]) for r in 체결행 if r.get("order_type") != "limit"],
+                       limit_fills=sum(1 for r in 체결행 if r.get("order_type") == "limit"))
     성적 = department_scorecard(결정)
     if 성적:
         a["departments"] = 성적
