@@ -376,6 +376,26 @@ def test_halt_switch_blocks_new_orders_and_records_why(client: Client, monkeypat
     assert c.q("SELECT DISTINCT kind, reason FROM paper_decisions") == [("blocked", "위험 점검: 멈춤 스위치가 켜져 있음")]
 
 
+def test_outcome_queue_reads_new_decisions_before_stuck_ones(client: Client, monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1685 (결정 원장 감사 [필수] 1) — 시세가 끊긴 종목의 행이 상한만큼 쌓여도 새 결정의 성과가 찬다. 예전엔 오래된
+    순 하나라 끊긴 행이 포기(200일)까지 날마다 자리를 다 먹었다."""
+    c = client
+    monkeypatch.setattr(job, "OUTCOME_BATCH", 5)
+    ins = ("INSERT INTO paper_decisions (account_id, market, decided_on, stock_id, kind, reason, ref_close, ref_date,"
+           " created_at) VALUES ('A', 'KR', ?, ?, 'skip', 'x', 10000, ?, 't')")  # fmt: skip
+    for i in range(10):  # 3 번 종목은 9-20 뒤 시세가 없다(정지)
+        d = f"2026-09-{20 + i:02d}"
+        c.conn.execute(ins, [d, 3, d])
+    c.conn.execute(ins, ["2026-10-01", 1, "2026-10-01"])
+    for i, d in enumerate(["2026-10-01", "2026-10-02", "2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08"]):
+        _시세(c, d, 10_000 + i * 100, 10_000 + i * 100)
+        c.conn.execute("INSERT INTO index_prices (index_code, date, close, source, fetched_at)"
+                       " VALUES ('KOSPI', ?, ?, 't', 't')", [d, 2000 + i])  # fmt: skip
+    기록 = job.fill_outcomes(c, "KR", "2026-10-15", "now")
+    assert c.q("SELECT ret_5d FROM paper_decisions WHERE decided_on = '2026-10-01'")[0][0] is not None
+    assert 기록["full_bands"] == 1 and 기록["filled"] == 1
+
+
 def test_outcome_queue_skips_rows_waiting_only_for_60d_and_notes_missing_ref(client: Client) -> None:
     """성과 대기열 (25.1453, 교차검증 [필수] 1) — 60 만 기다리는 행은 자리를 먹지 않고, 기준가 없는 행은 바로 까닭을 적는다."""
     c = client
@@ -387,7 +407,7 @@ def test_outcome_queue_skips_rows_waiting_only_for_60d_and_notes_missing_ref(cli
     for i, d in enumerate(["2026-10-02", "2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08"], 1):
         _시세(c, d, 10_000 + i * 100, 10_000 + i * 100)
     기록 = job.fill_outcomes(c, "KR", "2026-10-15", "now")
-    assert 기록 == {"pending_read": 2, "filled": 1, "gave_up": 1}
+    assert 기록 == {"pending_read": 2, "filled": 1, "gave_up": 1, "full_bands": 0}
     assert c.q("SELECT outcome_note FROM paper_decisions WHERE decided_on = '2026-09-02'") == [("기준 종가 없음",)]
     # 같은 날 다시 — 이미 채운 창만 다시 계산되면 쓰지 않는다
     assert job.fill_outcomes(c, "KR", "2026-10-15", "now")["filled"] == 0

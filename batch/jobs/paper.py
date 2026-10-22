@@ -156,13 +156,35 @@ DOSSIER_INSERT_SQL = (
 )
 #: **창마다 찰 때가 된 행만** (25.1453, 교차검증 [필수] 1) — 예전엔 `ret_60d IS NULL` 인 오래된 순 300행이라,
 #: 5·20 은 채우고 60 을 기다리는 행이 앞자리를 차지해 새 결정의 20 거래일 성과가 두 달 넘게 밀렸다.
-#: `ret_60d IS NULL` 은 부분 색인을 타게 둔다
-PENDING_DECISIONS_SQL = (
+#: **창마다 따로, 새 결정부터** (25.1685, 결정 원장 감사 [필수] 1) — 그 뒤에도 질의가 오래된 순 하나라, 시세가 끊긴
+#: 종목(정지·폐지·인수)의 행이 포기(200일)까지 날마다 맨 앞에 다시 읽혀 한 시장에서 상한을 넘으면 새 결정이 하나도 안
+#: 찼다(재현: 정지 종목 하나 9계좌 × 4종류 × 26일 = 936행 → 9-01 결정의 20 거래일 성과가 석 달 빔). 이제 창마다 그
+#: 창이 막 찰 구간(5: 7~28일, 20: 28~56일, 60: 84~200일 전)을 **최근 것부터** 읽어, 끊긴 행은 남는 자리만 쓴다.
+#: 200일 지난 행은 따로 오래된 순으로 읽어 포기로 닫는다. 넷 다 `ret_60d IS NULL AND outcome_note IS NULL` 부분
+#: 색인의 날짜 범위를 탄다
+PENDING_5D_SQL = (
+    "SELECT id, stock_id, decided_on, ref_close, ref_date, ret_5d, ret_20d, ret_60d FROM paper_decisions"
+    " WHERE ret_60d IS NULL AND outcome_note IS NULL AND market = ? AND ret_5d IS NULL"
+    "   AND decided_on > ? AND decided_on <= ? ORDER BY decided_on DESC LIMIT ?"
+)
+PENDING_20D_SQL = (
+    "SELECT id, stock_id, decided_on, ref_close, ref_date, ret_5d, ret_20d, ret_60d FROM paper_decisions"
+    " WHERE ret_60d IS NULL AND outcome_note IS NULL AND market = ? AND ret_20d IS NULL"
+    "   AND decided_on > ? AND decided_on <= ? ORDER BY decided_on DESC LIMIT ?"
+)
+PENDING_60D_SQL = (
     "SELECT id, stock_id, decided_on, ref_close, ref_date, ret_5d, ret_20d, ret_60d FROM paper_decisions"
     " WHERE ret_60d IS NULL AND outcome_note IS NULL AND market = ?"
-    "   AND ((ret_5d IS NULL AND decided_on <= ?) OR (ret_20d IS NULL AND decided_on <= ?) OR decided_on <= ?)"
+    "   AND decided_on > ? AND decided_on <= ? ORDER BY decided_on DESC LIMIT ?"
+)
+PENDING_OLD_SQL = (
+    "SELECT id, stock_id, decided_on, ref_close, ref_date, ret_5d, ret_20d, ret_60d FROM paper_decisions"
+    " WHERE ret_60d IS NULL AND outcome_note IS NULL AND market = ? AND decided_on <= ?"
     " ORDER BY decided_on LIMIT ?"
 )
+#: 20 거래일 창의 구간 너비(달력일) — 28~56일 전. 그보다 묵었는데 20 이 빈 행은 시세가 끊긴 것이라 60 구간(84일)에서
+#: 다시 본다
+OUTCOME_20D_BAND_DAYS = 28
 #: 결정 원장 성과·가상 대조의 가격 — 기준일부터 **분할만 반영한** 계열(국내 수정주가·미국 야후 종가,
 #: `adj.split_only_prices`, 25.1547 감사 [권고] 2). 국내 `close` 는 원 종가라 저장한 기준 종가(분할 전 단위)를 분할 뒤
 #: 종가와 견주면 2:1 분할이 −50%, 1:10 병합이 +900% 로 남았다 — 성과 분해·결정 단위 증거·H 회사 가중치가 그 값을 쓴다
@@ -184,8 +206,11 @@ UPDATE_OUTCOME_SQL = (
 #: 어림(25.1588): 전 계좌가 하루·시장마다 약 130~150행(위원회 네 곳 약 90 · H 15~25 · B·G·R 각 5 ·
 #: 매도·hold_flag)을 남기고
 #: 행마다 5·20·60 세 번 대기열에 들어 평소 하루 약 400~450행(휴장·지수 기다림이면 더).
-#: 한도 공백(하루 약 400행씩 쌓임) 뒤에는 상한에 닿아 며칠 밀린다 — 닿으면 운용 줄에 경고를 낸다
-OUTCOME_BATCH = 900
+#: 한도 공백(하루 약 400행씩 쌓임) 뒤에는 상한에 닿아 며칠 밀린다 — 닿으면 운용 줄에 경고를 낸다.
+#: 25.1685 부터 **창(구간)마다** 이만큼 — 창 하나에 평소 하루 약 150행
+OUTCOME_BATCH = 400
+#: 200일 지난(포기할) 행을 한 번에 닫는 수
+OUTCOME_OLD_BATCH = 200
 #: 성과 분해 (docs/paper.md 10장, 25.1450) — 성과가 찬 결정과 체결일 종가가 있는 매수만, 최근 1년
 #: 성과 분해·부서 성적표가 보는 결정 — **지금 판의 것만**(판 번호가 빈 옛 행은 판 1).
 #: 판 2 회사의 성적에 판 1 결정이 섞이지 않게 (docs/company.md 1장 검증 [필수] 7, 25.1472)
@@ -245,7 +270,21 @@ def fill_outcomes(client: Any, market: str, today: str, now: str) -> dict[str, i
 
     오늘 = _date.fromisoformat(today)
     기한 = {n: (오늘 - timedelta(days=d)).isoformat() for n, d in pp.HORIZON_CALENDAR_DAYS.items()}
-    rows = client.execute(PENDING_DECISIONS_SQL, [market, 기한[5], 기한[20], 기한[60], OUTCOME_BATCH]).dicts()
+    포기날 = (오늘 - timedelta(days=pp.OUTCOME_GIVE_UP_DAYS)).isoformat()
+    이십아래 = (_date.fromisoformat(기한[20]) - timedelta(days=OUTCOME_20D_BAND_DAYS)).isoformat()
+    rows: list[dict[str, Any]] = []
+    본: set[Any] = set()
+    찬구간 = 0
+    for sql, args, 상한 in (
+        (PENDING_5D_SQL, [market, 기한[20], 기한[5]], OUTCOME_BATCH),
+        (PENDING_20D_SQL, [market, 이십아래, 기한[20]], OUTCOME_BATCH),
+        (PENDING_60D_SQL, [market, 포기날, 기한[60]], OUTCOME_BATCH),
+        (PENDING_OLD_SQL, [market, 포기날], OUTCOME_OLD_BATCH),
+    ):
+        got = client.execute(sql, [*args, 상한]).dicts()
+        찬구간 += sql is not PENDING_OLD_SQL and len(got) >= 상한
+        rows += [r for r in got if r["id"] not in 본]
+        본.update(r["id"] for r in got)
     # 미국 분할 재수집 대기 종목은 오늘 채우지 않는다(25.1548 반박 [권고] 4) — 일일 수집은 최근 10일만 분할 반영 값으로
     # 덮고 옛 행은 주간 재수집까지 분할 전 단위라, 그 사이 찬 창은 −50% 가 영구히 남았다
     # (한 번 채운 창은 다시 쓰지 않는다)
@@ -307,7 +346,7 @@ def fill_outcomes(client: Any, market: str, today: str, now: str) -> dict[str, i
         포기 += 포기함
     if 문장:
         client.batch(문장)
-    return {"pending_read": len(rows), "filled": 채움, "gave_up": 포기}
+    return {"pending_read": len(rows), "filled": 채움, "gave_up": 포기, "full_bands": 찬구간}
 
 
 #: 가상 대조 (docs/company.md 6장, 25.1476) — 성과가 찼는데 아직 대조를 안 본 매수
@@ -2052,10 +2091,11 @@ def run_step(
     # 결정 원장 성과 채우기 (25.1449) — 곁다리. 실패해도 오늘 단계는 그대로
     try:
         기록["decision_outcomes"] = fill_outcomes(client, market, 오늘, 지금)
-        if 기록["decision_outcomes"]["pending_read"] >= OUTCOME_BATCH:
-            # 상한에 닿았다 = 대기열이 밀렸다(긴 휴장·한도 공백 뒤). 다음 배치가 이어 채우지만 H 가중치·성적표가
-            # 늦어진다는 것을 보인다(25.1588 — 평소 하루 약 400행, 아홉 날 공백이면 일주일쯤 밀린다)
-            줄.append(f"⚠️ 결정 원장 성과 채우기 밀림 — 한 번에 {OUTCOME_BATCH}행 상한에 닿음(다음 배치가 이어 채움)")
+        if 기록["decision_outcomes"].get("full_bands"):
+            # 창 하나라도 상한에 닿았다 = 대기열이 밀렸다(긴 휴장·한도 공백 뒤, 또는 시세가 끊긴 행이 많음). 새 결정부터
+            # 채우고 나머지는 다음 배치 — H 가중치·성적표가 늦어진다는 것을 보인다(25.1588·25.1685)
+            줄.append(f"⚠️ 결정 원장 성과 채우기 밀림 — 한 번에 {OUTCOME_BATCH}행 상한에 닿음"
+                     "(창마다 새 결정부터 채우고 나머지는 다음 배치)")
     except Exception as exc:  # noqa: BLE001 — 성과 채우기만 빠진다. 까닭은 기록에
         기록["decision_outcomes"] = {"error": str(exc)[:200]}
     # 가상 대조 (docs/company.md 6장, 25.1476) — 곁다리. 0079 전 DB·읽기 실패면 그 칸만 빈다
