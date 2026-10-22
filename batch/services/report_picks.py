@@ -811,6 +811,15 @@ def build_portfolio(
             # 기준이라, 신호가 하루 묵었거나 총액을 줄인 날 변동성·MDD 로 4% 로 줄인 종목에 상한 10% 까지 배분됐다
             amount = 목표
             capped_note = f"권장 비중 {fixed(목표 / 분모 * 100, 1)}%까지만(오늘 총액 기준)"
+        # 목표 글 — 상관 배수를 곱했으면 그 과정을 함께(25.1639, 리포트 1·2부 감사 [필수] 1). 예전엔 곱한 값만
+        # "권장 비중(1.2%)" 이라 적어 1부 근거표의 권장 비중(4.0%)과 달랐고 빠진 실제 까닭(보유와 상관)이 안 보였다
+        목표말 = f"권장 비중({fixed(목표 / 분모 * 100, 1)}%)" if 분모 > 0 else "권장 비중"
+        if 상관_배수 < 1.0 and 권장비중 > 0 and 분모 > 0:
+            닮은 = corr_근거.get("most_similar")
+            상관 = corr_근거.get("max_correlation")
+            누구 = (f"(보유 {닮은}와 상관 {float(상관):.2f})" if 닮은 is not None and 상관 is not None else "")
+            목표말 = (f"권장 비중 {fixed(권장비중, 1)}% × 상관 배수 {상관_배수:.2f}{누구}"
+                     f" = {fixed(목표 / 분모 * 100, 1)}%")  # fmt: skip
         if held > 0 and 목표 > 0 and (stock_limit is None or 목표 < stock_limit):
             목표_여지 = 목표 - held
             if 목표_여지 <= 0:
@@ -822,8 +831,7 @@ def build_portfolio(
                 )
                 view.excluded.append(rs.Excluded(
                     first.ticker, first.name, rs.EXCLUDED_STOCK_CAP,
-                    f"보유 {fixed(held / 분모 * 100, 1)}%"
-                    f" — 이미 권장 비중({fixed(목표 / 분모 * 100, 1)}%) 이상 보유{넘음}",
+                    f"보유 {fixed(held / 분모 * 100, 1)}% — 이미 {목표말} 이상 보유{넘음}",
                 ))
                 continue
             if amount > 목표_여지:

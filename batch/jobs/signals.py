@@ -358,7 +358,7 @@ def load_settings(client: TursoClient, currency: str = "KRW", as_of: str | None 
     """사이징에 쓰는 설정. 없으면 기본값.
 
     금액 설정은 원화다. currency 가 USD 면 as_of 이전 최신 환율로 나눈다(docs/signals.md 3.4).
-    환율이 없으면 총액을 0 으로 둬 금액을 내지 않고 fx_missing 을 켠다.
+    환율이 없으면 총액을 0 으로 둬 금액을 내지 않고 fx_missing 을 켠다(원화 총액이 있을 때만 — 25.1639).
 
     **범위 밖 값은 기본값으로 되돌리고 `setting_warnings` 에 담는다**
     (docs/infra.md 25.170). 여기 값들은 전부 **돈에 닿는다** — 권장 금액·비중 상한·
@@ -402,7 +402,9 @@ def load_settings(client: TursoClient, currency: str = "KRW", as_of: str | None 
 
     rate = fx.latest_rate(client, as_of or datetime.now(UTC).date().isoformat())
     if rate is None:
-        out.update(total_investable=0.0, fx_missing=True)
+        # 원화 총액이 있을 때만 "환율 없음" — 총액을 안 넣은 날까지 켜면 2부 사유·근거표·경고가 "환율 없음(설정은 그대로
+        # 둔다)" 로 나가 총액을 넣어야 할 사용자를 엉뚱한 곳으로 보냈다(25.1639, 리포트 1·2부 감사 [필수] 2)
+        out.update(total_investable=0.0, fx_missing=total_krw > 0)
         return out
     # **`or` 로 되돌리지 않는다** (2026-09-23, docs/infra.md 25.179).
     #
