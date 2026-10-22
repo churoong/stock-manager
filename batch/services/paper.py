@@ -1160,7 +1160,13 @@ def attribution_lines(aid: str, a: dict[str, Any] | None) -> list[str]:
     if (a.get("blocked") or {}).get("n"):
         줄.append(f"  {aid} 위험 점검이 막은 것의 그 뒤: {칸(a['blocked'])}")
     e = a.get("entry") or {}
-    진입 = f"체결가가 그날 종가보다 평균 {e['avg']:+.2f}% 쌌다 (n={e['n']})" if e.get("n") else "체결 표본 없음"
+    # 음수면 "−0.85% 쌌다" 가 아니라 "0.85% 비쌌다" — 부호가 뜻을 뒤집어 읽혔다(25.1644, 25.1630 감사 [권고])
+    if not e.get("n"):
+        진입 = "체결 표본 없음"
+    elif round(e["avg"], 2) == 0:
+        진입 = f"체결가가 그날 종가와 평균 같았다 (n={e['n']})"
+    else:
+        진입 = f"체결가가 그날 종가보다 평균 {abs(e['avg']):.2f}% {'쌌다' if e['avg'] > 0 else '비쌌다'} (n={e['n']})"
     줄.append(f"  {aid} 진입: {진입} · 안 찬 회차의 그 뒤 {칸(a['missed'])}")
     줄.append(f"  {aid} 청산: 판 뒤 {칸(a['sold'])} · 플래그를 따르지 않고 든 뒤 {칸(a['held_flag'])}"
              " — 판 뒤가 음수면 판 것이 옳았다")
