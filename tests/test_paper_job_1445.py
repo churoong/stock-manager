@@ -292,6 +292,26 @@ def test_session_open_helper_and_paper_late_uses_now() -> None:
     assert "or _장_열림(market, decision.session_date)" in 글
 
 
+@pytest.mark.parametrize(("지금", "기준"), [("2026-10-14T23:50:00+00:00", "open"), ("2026-10-15T00:05:00+00:00", "close")])
+def test_production_run_rechecks_open_at_order_time(client: Client, monkeypatch: pytest.MonkeyPatch, 지금: str,
+                                                    기준: str) -> None:  # fmt: skip
+    """25.1686 — 단계에 들어오기 전에 정한 `late=False` 라도, 주문을 만들 때 그 장이 이미 열렸으면 종가 기준."""
+    c = client
+    고정 = datetime.fromisoformat(지금)
+
+    class _시계(datetime):
+        @classmethod
+        def now(cls, tz=None):  # noqa: ANN001, ANN206
+            return 고정
+
+    다음 = cal.next_session("KR", date(2026, 10, 14))
+    monkeypatch.setattr(cal, "local_today", lambda _m=None: 다음)
+    monkeypatch.setattr(job, "datetime", _시계)
+    job.run_step(c, market="KR", trade_date="2026-10-14", late=False, signal_rows=[_신호()], settings=설정,
+                 price_series={}, series_unknown={}, allocate=True)  # fmt: skip
+    assert c.q("SELECT DISTINCT fill_session, fill_basis FROM paper_orders") == [("2026-10-15", 기준)]
+
+
 def test_real_portfolio_comparison_line(client: Client, monkeypatch: pytest.MonkeyPatch) -> None:
     """실제 포트폴리오와 같은 기간 비교 — 실제 표는 읽기만 (2026-10-15 사용자 지시, 25.1448)."""
     c = client

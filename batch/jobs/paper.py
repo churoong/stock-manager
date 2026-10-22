@@ -1759,6 +1759,13 @@ def run_step(
     열린 = [_order(r) for r in client.execute(OPEN_ORDERS_SQL).dicts()]
     다음장 = cal.next_session(market, date.fromisoformat(trade_date)).isoformat()
     기준 = "close" if late else "open"
+    # **운영 실행은 주문 기준을 지금 다시 잰다** (25.1686, 25.1682 교차검증 [권고]) — `late` 는 일일 배치가 이 단계에
+    # 들어오기 **전**에 정해, 잠금 대기(최대 `STEP_LOCK_WAIT`)·체결·평가 동안 개장을 넘기면 주문이 그날 시가로 찼다.
+    # 시각을 넘긴 실행(`now` — 시험·재현)은 그 시각을 믿는다
+    if now is None and 기준 == "open" and not after_close:
+        열림 = cal.session_open_utc(market, date.fromisoformat(다음장))
+        if 열림 is not None and datetime.now(UTC) >= 열림:
+            기준 = "close"
     if after_close:
         # **장이 끝난 뒤의 손 실행** (25.1447, 교차검증 [필수] 3) — 오늘 장의 시가·종가 모두 주문보다 앞선다.
         # 다음 장 시가로
