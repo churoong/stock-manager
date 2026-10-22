@@ -700,6 +700,8 @@ export function actionSuspect(
   // 첫날엔 조정된 값이다 — 평소엔 어제 종가 그대로라 DB 전일 종가와 같다. 현재가 비율(±31%)만 보면 유상증자 권리락·중간 크기 무상증자
   // (−10~−30%)를 놓쳐, 권리락 계수가 평균단가에 곱해지기 전(다음 날부터, 25.1140)인 첫날 보유 종목에 거짓 "손절선 터치" 가 나갔다.
   // DB 가 하루 묵은 날(25.600)은 어제 움직임만큼 어긋나 그날 알림이 빠질 수 있다 — 거짓 손절보다 낫다고 본다
+  // 야후 시세에는 넓히지 않는다(25.1725) — 야후·DB 전일 종가 어긋남 규칙은 DB 가 하루 묵은 날 어제 크게 움직인 종목의 진짜 손절까지
+  // 지워 25.600 에서 뺐다. KIS 가 안 되는 날의 권리락 첫날은 배치의 예탁원 일정 표시(`action_day:날짜`, `actionDayToday`)가 막는다
   if (market === "KR" && kisBase && yahooPrevClose !== null && yahooPrevClose > 0 && Math.abs(yahooPrevClose / dbPrevClose - 1) > KIS_BASE_ACTION_GAP) {
     return true;
   }
@@ -712,6 +714,14 @@ export function actionSuspect(
   // 분할이면 야후가 조정했든(야후/DB 가 범위 밖) 안 했든(오늘/야후 가 범위 밖) 둘 중 하나는 범위 밖이다
   if (yahooPrevClose !== null && yahooPrevClose > 0 && !밖(price / yahooPrevClose) && !밖(yahooPrevClose / dbPrevClose)) return false;
   return true;
+}
+
+/**
+ * 배치가 예탁원 일정으로 단 **기업행위 첫날** 표시(`action_day:YYYY-MM-DD`, docs/infra.md 25.1725)가 오늘 장 것인가.
+ * 날짜를 함께 보는 것은 배치가 하루 빠져 묵은 목록이 다른 날 알림을 빼지 않게
+ */
+export function actionDayToday(reasons: readonly string[], sessionDate: string): boolean {
+  return reasons.includes(`action_day:${sessionDate}`);
 }
 
 /**

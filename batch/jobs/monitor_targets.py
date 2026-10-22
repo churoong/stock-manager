@@ -418,6 +418,41 @@ def next_tranche(client: TursoClient, stock_id: int, today: date) -> tuple[float
     return (float(가격), 산 + 1, 기준일) if 가격 else (None, None, None)
 
 
+#: 다음 장이 기업행위 첫날인지 보는 일정 종류 — 현금배당은 빼고(수 % 기계적 하락), 주가가 크게 바뀌는 것만
+ACTION_DAY_KINDS = ("rights", "bonus", "split")
+#: 그 기준일 창의 일정(시장 전체 — 하루 한두 날 창이라 작다)을 읽고 감시 종목은 파이썬에서 거른다. 종류는 위와 같은 글
+ACTION_DAY_SQL = (
+    "SELECT DISTINCT s.id FROM kr_corp_events e JOIN stocks s ON s.ticker = e.code"
+    " WHERE e.kind IN ('rights', 'bonus', 'split') AND e.record_date > ? AND e.record_date <= ?"
+)
+
+
+def action_day_ids(client: TursoClient, stock_ids: list[int], now: str) -> tuple[set[int], str | None]:
+    """이 목록이 쓰일 **다음 국내 장**이 권리락일(= 기준일 전 1거래일)인 종목 (docs/infra.md 25.1725, 장중 감사
+    [필수] 1).
+
+    25.1551 의 기준가 가드는 KIS 시세일 때만 걸려, 야후로 넘어간 날(KIS 키 없음·토큰 실패·달력 어긋남) 무상·유상증자
+    권리락 첫날 보유 종목에 거짓 "손절선 터치"(야후 전일 종가가 조정 안 됐으면 거짓 −29% 급락도)가 나갔다. 예탁원 일정
+    (`kr_corp_events`, KIS — 키가 없으면 비어 있다)으로 기준일이 (다음 장, 그 다음 장] 에 있으면 다음 장이 권리락일이다.
+    (종목 집합, 다음 장 날짜) — 표에 날짜를 붙여, 배치가 하루 빠져 묵은 목록이 다른 날 알림을 빼지 않게.
+    못 읽으면 빈 집합
+    """
+    if not stock_ids:
+        return set(), None
+    try:
+        지금 = datetime.fromisoformat(now)
+        오늘 = 지금.astimezone(cal.market_tz("KR")).date()
+        장 = next((d for d, _o, c, _s in session_rows("KR", 오늘) if datetime.fromisoformat(c) > 지금), None)
+        if 장 is None:
+            return set(), None
+        그다음 = cal.next_session("KR", date.fromisoformat(장)).isoformat()
+        rows = client.execute(ACTION_DAY_SQL, [장, 그다음]).rows
+    except Exception as exc:  # noqa: BLE001 — 표가 없거나(KIS 키 없음) 달력 밖이면 모른다 — 예전처럼 둔다
+        log.warning("기업행위 첫날 표시를 달지 못했습니다: %s", exc)
+        return set(), None
+    return {int(r[0]) for r in rows} & set(stock_ids), 장
+
+
 def build_targets(client: TursoClient, market: str, now: str) -> list[tuple]:
     # 범위 밖·반쪽 짝은 버리고 기본값을 쓴다 (docs/infra.md 25.180)
     targets_setting, 설정경고 = sr.기간별_목표(db.get_setting(client, "horizon_targets", None))
@@ -521,8 +556,12 @@ def build_targets(client: TursoClient, market: str, now: str) -> list[tuple]:
             if 손절 is not None:
                 t["stop_price"] = 손절 if t["stop_price"] is None else max(t["stop_price"], 손절)
 
+    # 다음 장이 권리락·무상증자·분할 **첫날**인 국내 종목 — 시세 출처와 무관하게 그날 가격 알림을 빼게 표시한다(25.1725)
+    첫날 = action_day_ids(client, list(by_stock), now) if market == "KR" else ({}, None)
     rows = []
     for t in by_stock.values():
+        if t["stock_id"] in 첫날[0]:
+            t["reasons"].append(f"action_day:{첫날[1]}")
         stats = client.execute(
             "SELECT (SELECT close FROM prices WHERE stock_id = ? AND close IS NOT NULL ORDER BY date DESC LIMIT 1),"
             " (SELECT CASE WHEN COUNT(*) = 20 AND MIN(date) >= date(MAX(date), '-45 days') THEN AVG(volume) END"
