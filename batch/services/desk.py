@@ -794,8 +794,14 @@ def checks(
         if a.get("charter_errors"):
             out.append({"level": "high", "text": f"가상 {aid} 헌장 오류: {'; '.join(a['charter_errors'])[:120]}"})
     if p.get("frozen"):
-        out.append({"level": "normal",
-                    "text": f"기업행위 경계로 멈춘 종목 {len(p['frozen'])}개 — 그 종목은 사고팔지 않습니다"})
+        # `frozen` 은 경계 멈춤(모든 계좌) + 이어 멈춤(경계 전부터 든 계좌만, `action_sticky`)의 합이다 —
+        # 합친 수를 "그 종목은 사고팔지 않습니다" 로 쓰면 이어 멈춤 종목을 다른 계좌가 사고팔 수 있다는 것을
+        # 가렸다(25.1631 감사 [권고], 25.1653)
+        이어 = set(p.get("action_sticky") or [])
+        경계 = [s for s in p["frozen"] if s not in 이어]
+        조각 = ([f"기업행위 경계로 멈춘 종목 {len(경계)}개 — 모든 계좌가 사고팔지 않습니다"] if 경계 else []) + (
+            [f"경계 전부터 든 계좌만 이어 멈춘 종목 {len(이어)}개"] if 이어 else [])  # fmt: skip
+        out.append({"level": "normal", "text": " · ".join(조각)})
     if warnings:
         out.append({"level": "normal", "text": f"이 실행의 경고 {warnings}줄 — 시스템 상태 화면에서"})
     return sorted(out, key=lambda x: x["level"] != "high")
