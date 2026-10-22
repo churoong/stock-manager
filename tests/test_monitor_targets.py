@@ -841,3 +841,36 @@ class Test권리락_원가는_매수분마다_25_1197:
                           ("buy", "2026-09-16", 10, 90_000)])  # fmt: skip
         assert job.open_buy_lots(mem, 1) == [("2026-09-16", 10.0, 90_000.0)]  # type: ignore[arg-type]
         assert job.holding_rights_scale(mem, 1, "KR") == pytest.approx(1.0)  # type: ignore[arg-type]
+
+
+def test_휴장일_기준일_유상증자는_감시와_원가를_함께_맞춘다() -> None:
+    """25.1731 (25.1729 교차검증 [필수] 1) — 기준일 10-24(토)·12-31(휴장) 유상증자. 판정(`action_factors`)은 권리락으로 알아보는데
+    원가 계수(`rights_factors_since`)는 "기준일 직전 시세 행"(하루 늦은 1.0)을 읽어 감시는 풀리고 원가는 안 맞아, 권리락 하락이
+    손절로 읽혔다. DB 를 거쳐 판정·원가 배율·손절선을 함께 본다(14일 읽기 창도 — 25.1729 교차검증 [권고] 2)"""
+    from batch.core import db
+    from tests.test_portfolio_job import MemClient
+
+    for 기준일, 가격 in (
+        ("2026-10-24", [("2026-10-20", 100_000), ("2026-10-21", 100_000), ("2026-10-22", 90_000), ("2026-10-23", 90_000)]),
+        ("2026-12-31", [("2026-12-24", 100_000), ("2026-12-28", 100_000), ("2026-12-29", 90_000), ("2026-12-30", 90_000)]),
+    ):  # fmt: skip
+        mem = MemClient()
+        db.apply_migrations(mem)  # type: ignore[arg-type]
+        c = mem.conn
+        c.execute("INSERT INTO stocks (id, ticker, market, country, name_ko, currency, status, yahoo_symbol, source,"
+                  " fetched_at) VALUES (1, '005930', 'KOSPI', 'KR', '가', 'KRW', 'active', '005930.KS', 't', 't')")  # fmt: skip
+        for day, close in 가격:
+            c.execute("INSERT INTO prices (stock_id, date, close, change_pct, currency, source, fetched_at)"
+                      " VALUES (1, ?, ?, 0, 'KRW', 't', 't')", [day, close])  # fmt: skip
+        c.execute("INSERT INTO kr_corp_events (code, kind, record_date, source, fetched_at)"
+                  " VALUES ('005930', 'rights', ?, 'kis', 't')", [기준일])  # fmt: skip
+        락일 = 가격[2][0]
+        assert job.action_factors(mem, 1, "KR") == [(락일, pytest.approx(0.9))]  # type: ignore[arg-type]
+        assert job.recent_action(mem, 1, "KR") is False  # type: ignore[arg-type]
+        assert job.rights_factors_since(mem, 1, "2026-01-02") == [(락일, pytest.approx(0.9))]  # type: ignore[arg-type]
+
+
+def test_같은_날_락인_다른_종류가_휴장일_기준일이어도_막는다() -> None:
+    """25.1731 (25.1729 교차검증 [권고] 1) — rights 5-29(토) + 배당 5-30(일) → 둘 다 락 5-27. 배당 기준일이 구간 밖이라 통과했다"""
+    assert not job.rights_only([("rights", "2027-05-29"), ("dividend", "2027-05-30")], "2027-05-27")
+    assert job.rights_only([("rights", "2027-05-29")], "2027-05-27")

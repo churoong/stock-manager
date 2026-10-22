@@ -236,12 +236,19 @@ def rights_factors_since(client: TursoClient, stock_id: int, since: str) -> list
         raise
     out: list[tuple[str, float]] = []
     for 기준일 in 기준일들:
+        # 락일 = `cal.ex_date_kr(기준일)` — "기준일 직전 시세 행" 은 기준일이 휴장일(토·12-31)이면 하루 늦은 행
+        # (계수 1.0)을 읽었다. 25.1729 가 판정(`rights_only`)만 고쳐 감시·멈춤은 풀리는데 원가는 안 맞아 권리락 하락이
+        # 손절로 읽혔다(25.1731, 25.1729 교차검증 [필수] 1). 락일 행이 없으면(시세 빠짐) 맞추지 않는다
+        try:
+            락일 = cal.ex_date_kr(date.fromisoformat(기준일)).isoformat()
+        except Exception:  # noqa: BLE001 — 달력 밖이면 모른다
+            continue
         rows = client.execute(
-            "SELECT close, change_pct, date FROM prices WHERE stock_id = ? AND date < ? AND close > 0"
+            "SELECT close, change_pct, date FROM prices WHERE stock_id = ? AND date <= ? AND close > 0"
             " ORDER BY date DESC LIMIT 2",
-            [stock_id, 기준일],
+            [stock_id, 락일],
         ).rows
-        if len(rows) < 2 or str(rows[0][2])[:10] <= since:
+        if len(rows) < 2 or str(rows[0][2])[:10] != 락일 or 락일 <= since:
             continue
         (close, pct, day), (prev, _p, _d) = rows
         f = adj.factor_of(float(prev), float(close), None if pct is None else float(pct))
@@ -290,12 +297,17 @@ def rights_only(events: list[tuple[str, str]], action_day: str, next_day: str | 
     일정이 없으면(10-07 전, 잘린 날의 비보유 종목) "모름" 이라 거짓 — 예전처럼 막는다.
     """
     del next_day
-    기준일들 = [day for kind, day in events
-               if kind == "rights" and cal.ex_date_kr(date.fromisoformat(day)).isoformat() == action_day]  # fmt: skip
+    def 락(day: str) -> str:
+        return cal.ex_date_kr(date.fromisoformat(day)).isoformat()
+
+    기준일들 = [day for kind, day in events if kind == "rights" and 락(day) == action_day]
     if not 기준일들:
         return False
     끝 = max(기준일들)
-    return not any(kind != "rights" and action_day <= day <= 끝 for kind, day in events)
+    # 다른 종류는 기준일 구간에 더해 **락일이 같은 것**도 — 유상 기준일 뒤 휴장일에 기준일이 있는 배당·무상은 구간
+    # 밖이지만 같은 날 락이다(rights 5-29(토) + 배당 5-30(일) → 둘 다 락 5-27, 25.1729 교차검증 [권고] 1)
+    return not any(kind != "rights" and (action_day <= day <= 끝 or 락(day) == action_day)
+                   for kind, day in events)  # fmt: skip
 
 
 #: 유상증자 기준일을 계수가 잡힌 날부터 이만큼(달력일) 앞까지 읽는다 — 기준일이 연휴 끝이어도(25.1726 과 같은 여유)
