@@ -650,6 +650,9 @@ def test_마지막_예비_실행의_실패는_다시_시도를_약속하지_않�
     예비 = datetime(2026, 10, 14, 0, 36, tzinfo=UTC)  # 09:36 KST
     assert "한 번 더" not in cal.next_scheduled_hint("KR", 예비)
     assert "오늘은 더 시도하지 않습니다" in cal.next_scheduled_hint("KR", 예비)
-    assert "오늘은 더 시도하지 않습니다" in cal.next_scheduled_hint("US", datetime(2026, 10, 14, 13, 28, tzinfo=UTC))
+    assert "오늘은 더 시도하지 않습니다" in cal.next_scheduled_hint("US", datetime(2026, 10, 14, 14, 28, tzinfo=UTC))
+    # 겨울 본 실행(13:27 UTC)의 실패는 14:27 UTC 예비를 약속한다 (25.1678 — 예전엔 "오늘은 더 시도하지 않습니다")
+    for 날 in (datetime(2026, 11, 2, 13, 40, tzinfo=UTC), datetime(2026, 10, 14, 13, 28, tzinfo=UTC)):
+        assert "23:27 KST" in cal.next_scheduled_hint("US", 날)
     # 08:27 KST 본 실행(UTC 로는 전날 23:27)은 예비 실행을 약속한다
     assert "한 번 더" in cal.next_scheduled_hint("KR", datetime(2026, 10, 13, 23, 28, tzinfo=UTC))

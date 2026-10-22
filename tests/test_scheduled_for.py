@@ -57,3 +57,12 @@ def test_국내_예비_실행은_D1_한도가_풀린_뒤다() -> None:
     """08:27 KST 실행은 전날 UTC 몫의 D1 읽기 한도를 쓴다 — 예비는 자정 UTC 뒤여야 뜻이 있다 (docs/infra.md 25.870)."""
     _본, (h, m) = _cron_utc("daily-kr.yml")
     assert (h, m) == (0, 35)
+
+
+def test_미국은_개장_무렵_예비가_마지막이다() -> None:
+    """25.1678 — 겨울엔 12:27 이 늘 이르고 13:27 이 주 경로와 같은 시각이라 다시 시도가 없었다. 마지막 예비가
+    `LAST_DAILY_TRIGGER` 와 같아야 실패 알림이 맞게 말한다."""
+    예약들 = _cron_utc("daily-us.yml")
+    tz, h, m = cal.LAST_DAILY_TRIGGER["US"]
+    assert tz == "UTC" and max(예약들) == (h, m) == (14, 27)
+    assert {(12, 27), (13, 27)} <= set(예약들)
