@@ -317,6 +317,10 @@ def halted(bar: Bar | None) -> bool:
         return True
     if bar.volume is not None and bar.volume <= 0:
         return True
+    # 종가 ≤ 0 도 — 시가·거래량이 비고 종가 0 인 행은 "시가 없음 — 종가" 로 0 원에 찼다고 판정했는데 체결 행은 가격
+    # CHECK 에 걸려 `INSERT OR IGNORE` 로 조용히 빠지고 주문만 찬 것으로 닫혔다(25.1713, 체결 판정 감사 [참고] 3)
+    if bar.close is not None and bar.close <= 0:
+        return True
     return bar.open is not None and bar.open <= 0
 
 

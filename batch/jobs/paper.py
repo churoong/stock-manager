@@ -54,6 +54,13 @@ OPEN_ORDERS_SQL = (
     " ORDER BY id"
 )
 BAR_SQL = "SELECT date, open, close, volume, change_pct FROM prices WHERE stock_id = ? AND date = ?"
+#: 그 종목의 더 뒤 날 시세가 있나 — 그날 행만 빠진 것(수집 일부 실패)과 정지를 가른다(25.1713)
+LATER_BAR_SQL = "SELECT 1 FROM prices WHERE stock_id = ? AND date > ? LIMIT 1"
+#: 그날 행이 **아예 없는** 종목(시장엔 그날 시세가 있음)을 정지로 보기 전에 기다리는 거래일 수(25.1713, 체결 판정 감사
+#: [필수]) — 미국 조각 수집(`yfinance_src.fetch_daily_bars`)은 일부 조각만 받아도 성공이고, 국내도 코스닥만 실패해도
+#: 배치가 나아가 그 종목 행만 빠질 수 있다. 다음 배치의 다시 받기·빈 날 메우기(`_heal_yahoo_days`)가 대개 하루 안에
+#: 채운다. 2 는 정한 값 — 그 사이 매수 예약은 현금을 묶고, 더 뒤 날 행이 생기면(거래 재개) 기다리지 않는다
+MISSING_BAR_WAIT_SESSIONS = 2
 #: 그 시장 전체에 그날 시세가 들어왔나 — 못 받은 날(배치 실패)과 정지를 가른다 (docs/paper.md 2.3)
 MARKET_DAY_SQL = (
     "SELECT 1 FROM prices p CROSS JOIN stocks s ON s.id = p.stock_id WHERE p.date = ? AND s.country = ? LIMIT 1"
@@ -814,6 +821,16 @@ def fill_orders(
                     기록["deferred"] = 기록.get("deferred", 0) + 1
             continue
         행 = client.execute(BAR_SQL, [o.stock_id, 날]).dicts()
+        if not 행:
+            # 시장엔 그날 시세가 있는데 이 종목 행만 없다 — 바로 정지로 보면(매수 만료·매도 다음 장 시가) 수집 일부
+            # 실패를 정지로 판정해 KIS모의투자(실제로 참)와 갈렸다(25.1713). 더 뒤 날 행이 없고 기다릴 날 안이면
+            # 열어 둔다
+            기한 = date.fromisoformat(날)
+            for _ in range(MISSING_BAR_WAIT_SESSIONS):
+                기한 = cal.next_session(market, 기한)
+            if trade_date < 기한.isoformat() and not client.execute(LATER_BAR_SQL, [o.stock_id, 날]).rows:
+                기록["waiting_bar"] = 기록.get("waiting_bar", 0) + 1
+                continue
         bar = (pp.Bar(str(행[0]["date"]), 행[0]["open"], float(행[0]["close"]), 행[0]["volume"],
                       행[0].get("change_pct")) if 행 and 행[0]["close"] is not None else None)  # fmt: skip
         가격, 까닭 = pp.judge(o, bar)
@@ -1967,8 +1984,14 @@ def run_step(
             손절 |= {sid for sid, (사유, _근거) in 매도.items() if "손절" in 사유}
             거둘곳 = ({sid: WITHDRAWN_NOTE for sid in 파는}
                     | {sid: STOP_WITHDRAWN_NOTE for sid in 손절 - 파는 if sid in 보유})  # fmt: skip
+            # "아직 오지 않은 장" 은 이 실행의 주문 장(`다음장`) 기준으로(25.1713, 체결 판정 감사 [권고]) — 예전
+            # `fill_session > trade_date` 는 장 끝난 뒤·장 열린 뒤 실행(trade_date 가 D-1)에서 오늘 D 장 회차도 안 온
+            # 장으로 봐, 이미 지나간(진행 중인) 장의 회차를 거뒀다(25.1592 소급 취소 금지 어김). 개장 전 실행(시가
+            # 기준 — 장 끝난 뒤 손 실행도 `다음장` 을 그다음 장으로 옮겨 시가 기준)이면 주문 장부터 아직 안 열렸고,
+            # 장 열린 뒤(종가 기준) 실행이면 진행 중인 주문 장은 빼고 그 뒤만 — 주문 기준을 정한 같은 시각 판단을 쓴다
+            주문장포함 = 기준 == "open"
             거둠 = [o for o in 열린 if o.account_id == aid and o.side == "buy" and o.stock_id in 거둘곳
-                  and str(o.fill_session) > trade_date]  # fmt: skip
+                  and (str(o.fill_session) >= 다음장 if 주문장포함 else str(o.fill_session) > 다음장)]  # fmt: skip
             문장 += [(EXPIRE_SQL, [trade_date, 거둘곳[o.stock_id], o.id]) for o in 거둠]
             if 거둠:
                 a기록["buys_withdrawn"] = len(거둠)
