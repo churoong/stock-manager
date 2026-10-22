@@ -1278,7 +1278,8 @@ def set_setting(client: TursoClient, key: str, value: Any) -> None:
 def lease_try(client: TursoClient, key: str, value: dict[str, Any], now_utc: str, owner: str | None = None) -> bool:
     """settings 한 행을 임대 잠금으로 — 비었거나 기한(`$.until`)이 `now_utc` 보다 앞이거나, 쥔 쪽이 같은 `owner`
     (`$.owner` — 같은 주인은 바깥이 이미 차례로 돌리므로 남은 잠금은 끊긴 실행의 것)면 `value` 로 잡는다. 잡았으면
-    True (25.1633, 가상모의투자 단계 시장 사이 잠금). 사용자 설정이 아니라 잠금 행이다 — 웹은 읽지 않는다.
+    True (25.1633, 가상모의투자 단계 시장 사이 잠금). 사용자 설정이 아니라 잠금 행이다 — 웹은 입금 취소를
+    막을 때만 기한을 읽는다(`PAPER_STEP_LOCK_HELD`, 25.1666 — `$.until` 칸 이름·ISO 꼴을 바꾸면 웹도 같이).
     값이 JSON 이 아니면(손으로 넣은 값) 빈 것으로 본다 — `json_extract` 가 오류를 내 날마다 실패하지 않게 `CASE` 로
     가른다
     """

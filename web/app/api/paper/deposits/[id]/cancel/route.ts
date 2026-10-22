@@ -6,6 +6,7 @@ import {
   FLOW_BY_ID,
   FLOW_BY_KEY,
   PAPER_LEDGER_VERSION,
+  PAPER_STEP_LOCK_HELD,
   PAPER_CASH,
   PAPER_FX_LATEST,
   PAPER_INVESTED,
@@ -39,7 +40,11 @@ export async function POST(request: Request, { params }: Params) {
   if (!parsed.success) return NextResponse.json({ errors: issueTexts(parsed.error.issues) }, { status: 400 });
   try {
     // 판(version)을 먼저 읽는다 — 판정에 쓴 현금이 이 판보다 새것이어도 넣을 때 판이 같으면 그 사이 바뀐 것이 없다
-    const 판 = rowsToObjects<{ n: number; s: number; f: number }>(await execute(PAPER_LEDGER_VERSION))[0];
+    const 지금 = new Date().toISOString();
+    // 배치 단계가 도는 동안은 받지 않는다 — 넣는 문장도 같은 조건을 다시 본다(25.1666)
+    if (rowsToObjects(await execute(PAPER_STEP_LOCK_HELD, [지금])).length)
+      return NextResponse.json({ errors: ["가상모의투자 배치가 지금 도는 중입니다 — 끝난 뒤(길어야 35분) 다시 눌러 주세요"] }, { status: 409 });
+    const 판 = rowsToObjects<{ n: number; s: number; f: number; o: number }>(await execute(PAPER_LEDGER_VERSION))[0];
     const [flow, cash, buys, fx] = await Promise.all([
       execute(FLOW_BY_ID, [id]),
       execute(PAPER_CASH),
@@ -59,8 +64,8 @@ export async function POST(request: Request, { params }: Params) {
     if (막음) return NextResponse.json({ errors: [막음] }, { status: 409 });
     const 금액 = Number(행!.amount_krw);
     const rs = await execute(CANCEL_INSERT, [
-      kstToday(), -금액, id, `입금 #${id} 취소`, new Date().toISOString(), parsed.data.request_key,
-      Number(판?.n ?? 0), Number(판?.s ?? 0), Number(판?.f ?? 0),
+      kstToday(), -금액, id, `입금 #${id} 취소`, 지금, parsed.data.request_key,
+      Number(판?.n ?? 0), Number(판?.s ?? 0), Number(판?.f ?? 0), Number(판?.o ?? 0), 지금,
     ]);
     if (rs.affectedRows === 0) {
       // 같은 키가 이미 들어갔으면(두 번 누름) 성공, 아니면 그 사이 장부가 바뀐 것 — 넣지 않았다

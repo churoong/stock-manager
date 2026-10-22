@@ -12,6 +12,7 @@ import {
   FLOW_BY_ID,
   FX_MAX_AGE_DAYS,
   PAPER_LEDGER_VERSION,
+  PAPER_STEP_LOCK_HELD,
   PAPER_CASH,
   PAPER_FILLS,
   PAPER_FLOWS,
@@ -41,9 +42,10 @@ beforeEach(() => {
   );
 });
 
-function 판(): [number, number, number] {
-  const v = db.prepare(PAPER_LEDGER_VERSION).get() as { n: number; s: number; f: number };
-  return [Number(v.n), Number(v.s), Number(v.f)];
+/** 장부 판(입출금 수·합, 체결 수, 주문 수) + 넣는 시각 — `CANCEL_INSERT` 끝 인자들 */
+function 판(지금 = "2026-10-16T01:00:00.000Z"): [number, number, number, number, string] {
+  const v = db.prepare(PAPER_LEDGER_VERSION).get() as { n: number; s: number; f: number; o: number };
+  return [Number(v.n), Number(v.s), Number(v.f), Number(v.o), 지금];
 }
 
 function invested(): number {
@@ -83,6 +85,29 @@ describe("입금 장부", () => {
     expect(invested()).toBe(500_000);
     // 다시 누르면 새 판으로 다시 판정 — 그때 넉넉하면 들어간다
     expect(can.run("2026-10-16", -500_000, 2, "입금 #2 취소", "t", "key-can00003", ...판()).changes).toBe(1);
+  });
+
+  it("배치 단계가 도는 동안·읽은 뒤 주문이 들어오면 취소가 들어가지 않는다 (25.1666)", () => {
+    db.prepare(DEPOSIT_INSERT).run("2026-10-15", 1_000_000, null, "t", "key-dep00009");
+    const can = db.prepare(CANCEL_INSERT);
+    // 단계 잠금 — 기한이 넣는 시각 뒤(배치 꼴: +00:00·마이크로초)
+    db.prepare("INSERT INTO settings (key, value, updated_at) VALUES ('paper_step_lock', ?, 't')").run(
+      JSON.stringify({ token: "x", owner: "KR", until: "2026-10-16T01:20:00.123456+00:00" }),
+    );
+    expect(db.prepare(PAPER_STEP_LOCK_HELD).all("2026-10-16T01:00:00.000Z").length).toBe(1);
+    expect(can.run("2026-10-16", -1_000_000, 1, "입금 #1 취소", "t", "key-can00009", ...판()).changes).toBe(0);
+    // 같은 초도 쥔 것으로(보수) · 기한이 지나면 넣는다 · 놓은 잠금('{}')도
+    expect(db.prepare(PAPER_STEP_LOCK_HELD).all("2026-10-16T01:20:00.999Z").length).toBe(1);
+    expect(db.prepare(PAPER_STEP_LOCK_HELD).all("2026-10-16T01:20:01.000Z").length).toBe(0);
+    db.prepare("UPDATE settings SET value = '{}' WHERE key = 'paper_step_lock'").run();
+    const 읽은판 = 판();
+    // 웹이 읽은 뒤 배치가 매수 주문을 냈다 — 판이 달라 들어가지 않는다
+    db.prepare(
+      "INSERT INTO paper_orders (account_id, market, stock_id, side, order_type, limit_price, quantity, currency, decided_on, fill_session, tranche, reason, rule_version, status, created_at)"
+        + " VALUES ('A', 'KR', 1, 'buy', 'market', NULL, 10, 'KRW', '2026-10-16', '2026-10-17', 1, '2부 배분', 1, 'open', 't')",
+    ).run();
+    expect(can.run("2026-10-16", -1_000_000, 1, "입금 #1 취소", "t", "key-can00010", ...읽은판).changes).toBe(0);
+    expect(can.run("2026-10-16", -1_000_000, 1, "입금 #1 취소", "t", "key-can00011", ...판()).changes).toBe(1);
   });
 
   it("묵은 환율은 모름 — 배치 FX_MAX_AGE_DAYS 와 같다 (25.1486)", () => {

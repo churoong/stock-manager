@@ -254,11 +254,27 @@ VALUES (?, ?, 'deposit', ?, ?, ?) ON CONFLICT DO NOTHING`;
 export const CANCEL_INSERT = `INSERT INTO paper_cash_flows (flow_date, amount_krw, kind, cancels_id, memo, created_at, request_key)
 SELECT ?, ?, 'cancel', ?, ?, ?, ?
 WHERE (SELECT COUNT(*) FROM paper_cash_flows) = ? AND (SELECT COALESCE(SUM(amount_krw), 0) FROM paper_cash_flows) = ?
-  AND (SELECT COUNT(*) FROM paper_fills) = ?
+  AND (SELECT COUNT(*) FROM paper_fills) = ? AND (SELECT COUNT(*) FROM paper_orders) = ?
+  AND NOT EXISTS (SELECT 1 FROM settings WHERE key = 'paper_step_lock' AND json_valid(value)
+    AND substr(COALESCE(json_extract(value, '$.until'), ''), 1, 19) >= substr(?, 1, 19))
 ON CONFLICT DO NOTHING`;
-/** 취소 판정에 쓴 장부의 판 — 입출금 줄 수·합, 체결 줄 수(배치가 사이에 체결을 넣어도 다시 판정) */
+/**
+ * 취소 판정에 쓴 장부의 판 — 입출금 줄 수·합, 체결 줄 수, **주문 줄 수**(배치가 사이에 주문·체결을 넣어도 다시 판정).
+ * 주문 수는 25.1666 에 더했다 — 웹이 읽은 뒤 배치가 매수 주문을 내도 판이 같아, 그 예약을 빼지 않은 현금으로 취소가 들어가
+ * (현금 − 예약)이 음수가 됐다(웹 쓰기 경로 감사 [필수] 2)
+ */
 export const PAPER_LEDGER_VERSION = `SELECT (SELECT COUNT(*) FROM paper_cash_flows) AS n,
-  (SELECT COALESCE(SUM(amount_krw), 0) FROM paper_cash_flows) AS s, (SELECT COUNT(*) FROM paper_fills) AS f`;
+  (SELECT COALESCE(SUM(amount_krw), 0) FROM paper_cash_flows) AS s, (SELECT COUNT(*) FROM paper_fills) AS f,
+  (SELECT COUNT(*) FROM paper_orders) AS o`;
+/**
+ * 가상모의투자 배치 단계가 지금 도는가 — 단계 임대 잠금(`paper_step_lock`, 25.1633)의 기한이 지금 이후면 쥐고 있다.
+ * **도는 동안 입금 취소를 막는다**(25.1666, 웹 쓰기 경로 감사 [필수] 2): 단계는 실행 시작(`지금`) 뒤 흐름을 빼고 읽은 목록으로
+ * 배분·체결 현금 검사를 하므로, 도중 취소는 이번 실행엔 안 보이고 다음 실행에 들어가 장부 현금이 음수가 됐다(재현 −40,621원 —
+ * 취소된 돈으로 산 시장가 매수). 시각은 앞 19자리(초까지)로 견준다 — 배치는 `+00:00`·마이크로초, 웹은 `.sssZ` 라 글자 비교가
+ * 1초 안에서 어긋난다. 같은 초면 쥔 것으로 본다(보수)
+ */
+export const PAPER_STEP_LOCK_HELD = `SELECT 1 AS held FROM settings WHERE key = 'paper_step_lock' AND json_valid(value)
+  AND substr(COALESCE(json_extract(value, '$.until'), ''), 1, 19) >= substr(?, 1, 19)`;
 export const FLOW_BY_ID = `SELECT f.id, f.amount_krw, f.kind, f.cancels_id,
   (SELECT COUNT(*) FROM paper_cash_flows c WHERE c.cancels_id = f.id) AS cancelled
 FROM paper_cash_flows f WHERE f.id = ?`;
