@@ -2009,7 +2009,8 @@ def run_step(
                        else f"⚠️ 가상 {aid} 지주사가 고르지 못함 — {지.get('error')}")  # fmt: skip
         손익률 = f"{v.pnl_pct:+.1f}%" if v.pnl_pct is not None else "—"
         줄.append(f"{aid}: 평가 {v.equity_krw:,.0f}원 (손익 {손익률}, 시간가중 {(검['twr'] - 1) * 100:+.1f}%,"
-                 f" 오늘 체결 {a기록['fills']}건)")  # fmt: skip
+                 # "이번 실행" — 아침 실행이 판정하는 체결은 전 거래일 장의 것이라 "오늘 체결" 은 틀린 말이었다(25.1643)
+                 f" 이번 실행 체결 {a기록['fills']}건)")  # fmt: skip
         if not 검["recon_ok"]:
             줄.append(f"⚠️ 가상 {aid} 장부 검산 어긋남 — {검['recon_note']}")
     기록["accounts"] = 계좌기록
