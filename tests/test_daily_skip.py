@@ -656,3 +656,24 @@ def test_마지막_예비_실행의_실패는_다시_시도를_약속하지_않�
         assert "23:27 KST" in cal.next_scheduled_hint("US", 날)
     # 08:27 KST 본 실행(UTC 로는 전날 23:27)은 예비 실행을 약속한다
     assert "한 번 더" in cal.next_scheduled_hint("KR", datetime(2026, 10, 13, 23, 28, tzinfo=UTC))
+
+
+def test_이미_성공한_거래일의_마감_뒤_예비는_건너뜀을_남기지_않는다(
+    client: MemClient, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """25.1682 — 마감 뒤 늦게 온 예비 예약이 성공한 날에도 skipped 를 남겨 주간 요약이 문제로 셌다. 성공이 없으면 그대로 남긴다."""
+    from batch.core import calendar as cal
+
+    끝남 = cal.RunDecision(should_run=False, reason="이미 장이 끝났습니다 (개장 400분 경과). 다음 거래일 배치가 이어받습니다",
+                          trade_date="2026-10-30", session_date="2026-11-02")  # fmt: skip
+    monkeypatch.setattr(daily.cal, "decide", lambda market, now=None, force=False: 끝남)
+    assert daily.run("US") == 0
+    assert client.conn.execute("SELECT COUNT(*) FROM batch_runs WHERE status = 'skipped'").fetchone()[0] == 1
+    client.conn.execute("DELETE FROM batch_runs")
+    client.conn.execute("INSERT INTO batch_runs (job_name, market, trade_date, status, started_at, finished_at)"
+                        " VALUES ('daily_us', 'US', '2026-10-30', 'success', '2026-11-02T13:30:00+00:00',"
+                        " '2026-11-02T13:50:00+00:00')")  # fmt: skip
+    assert daily.run("US") == 0
+    assert client.conn.execute("SELECT COUNT(*) FROM batch_runs WHERE status = 'skipped'").fetchone()[0] == 0
+    assert any(줄.startswith(daily.NOTHING_DONE) for 줄 in capsys.readouterr().out.splitlines())
+

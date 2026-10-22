@@ -2008,7 +2008,11 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
             # 알림이 갔다. 건너뜀 기록은 남기려 애쓰되, 못 남겨도 조용히 끝낸다 — 할 일이 없는 실행이다
             깊이 = db.open_run_depth()
             try:
-                _record_skip(client, name, market, decision, trigger)
+                # **그 거래일이 이미 성공했으면 건너뜀을 남기지 않는다** (25.1682, 25.1678 교차검증 [권고]) —
+                # 장 마감 뒤 늦게 온 예비 예약(Actions 지연 4~7시간)이 "이미 장이 끝났습니다" skipped 를 남겨
+                # 주간 요약이 문제로 셌다
+                if not (decision.trade_date and db.has_successful_run(client, name, decision.trade_date)):
+                    _record_skip(client, name, market, decision, trigger)
             except Exception as exc:  # noqa: BLE001
                 log.warning("건너뜀 기록을 남기지 못했습니다(알림 없음): %s", exc)
                 # 시작 행만 들어간 채 끊겼으면 닫는다 — 'running' 으로 6시간 남아 /status 수동 실행 단추를 막았다
@@ -2338,7 +2342,9 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
                     # 개장 뒤인가는 **개장까지 남은 분으로** — 손 실행(force)은 `late_minutes` 를 채우지 않는다
                     # (25.1447, 교차검증 [필수] 3: /status 수동 실행이 장중이면 매도가 주문보다 앞선 시가로
                     # 찼다)
-                    late=decision.minutes_to_open is not None and decision.minutes_to_open <= 0,
+                    # 시작 때 개장 뒤였거나, **지금** 개장 뒤면(25.1682 — 개장 직전에 시작해 이 단계에 닿기 전에 열림)
+                    late=(decision.minutes_to_open is not None and decision.minutes_to_open <= 0)
+                    or _장_열림(market, decision.session_date),
                     after_close=_장_끝남(market, decision.session_date),
                     signal_rows=signal_rows if 추천_오류 is None else [],
                     settings=settings if 추천_오류 is None else None, price_series=corr_series,
@@ -2661,6 +2667,19 @@ SENT_AT_LOST = (
     "리포트는 보냈지만 발송 시각을 적지 못했습니다 — 웹에는 '못 보냄' 으로 보이고"
     " 다음 리포트의 매도 플래그 NEW 가 다시 붙을 수 있습니다"
 )
+
+
+def _장_열림(market: str, session_date: str) -> bool:
+    """오늘 장이 **지금** 이미 열렸나 — 가상모의투자 단계에 닿은 시각으로 잰다 (25.1682). 모르면 False.
+
+    `decide` 의 개장까지 남은 분은 실행 **시작** 때 값이라, 개장 3분 전에 시작한 실행(겨울 14:27 UTC 예비·늦게 온
+    예약)이 시세·점수 단계를 지나 가상모의투자 단계에 닿을 때는 이미 개장 뒤인데 주문이 그날 **시가**로 찼다 — 주문보다
+    앞선 값으로 차는 25.1447 [필수] 3 과 같은 꼴(25.1678 교차검증 [권고])."""
+    try:
+        열림 = cal.session_open_utc(market, date.fromisoformat(session_date))
+    except Exception:  # noqa: BLE001 — 모르면 시작 때 판정 그대로
+        return False
+    return 열림 is not None and datetime.now(UTC) >= 열림
 
 
 def _장_끝남(market: str, session_date: str) -> bool:

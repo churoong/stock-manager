@@ -278,6 +278,20 @@ def test_session_closed_helper() -> None:
     assert daily._장_끝남("KR", "2099-01-02") is False
 
 
+def test_session_open_helper_and_paper_late_uses_now() -> None:
+    """25.1682 — 개장 직전에 시작한 실행이 가상모의투자 단계에 닿을 때 개장 뒤면 종가 기준(시가로 차지 않게)."""
+    import inspect
+
+    from batch.jobs import daily
+
+    assert daily._장_열림("KR", "2020-01-02") is True
+    assert daily._장_열림("KR", "2099-01-02") is False
+    assert daily._장_열림("KR", "2026-10-03") is False  # 휴장(개천절) — 개장 시각 없음
+    assert daily._장_열림("KR", "아님") is False
+    글 = inspect.getsource(daily.run)
+    assert "or _장_열림(market, decision.session_date)" in 글
+
+
 def test_real_portfolio_comparison_line(client: Client, monkeypatch: pytest.MonkeyPatch) -> None:
     """실제 포트폴리오와 같은 기간 비교 — 실제 표는 읽기만 (2026-10-15 사용자 지시, 25.1448)."""
     c = client
