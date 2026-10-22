@@ -111,7 +111,7 @@ def lines(m: dict[str, Any] | None) -> list[str]:
     if m["buys_on_plan"]:
         out.append(f"  주문표 매수 가운데 1차 가격 이하 {m['buys_within_limit']}/{m['buys_on_plan']}건,"
                    f" 체결가는 1차 가격보다 평균 {m['vs_first_avg']:+.2f}%"
-                   " — 모의는 회차 가격 그대로 찬다고 본다(양수면 모의가 낙관)")  # fmt: skip
+                   " — 가상모의투자는 회차 가격 그대로 찬다고 본다(양수면 가상모의투자가 낙관)")  # fmt: skip
     if 매도:
         글 = (f"  매도 {매도}건: 플래그가 선 뒤 판 것 {m['sells_after_flag']}"
               + (f"(처음 선 날부터 평균 {m['sell_delay_avg']:.1f}일)" if m["sell_delay_avg"] is not None else "")

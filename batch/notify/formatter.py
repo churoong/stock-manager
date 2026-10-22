@@ -29,9 +29,10 @@ def _money(value: float | None, currency: str) -> str:
 #: 화면을 가득 채웠다(25.1721, 2026-10-22 사용자 지시 "텔레그램 리포트가 너무 가독성이 떨어진다").
 #: 뒤에서부터 되풀이해 뗀다
 _이름_꼬리 = re.compile(
-    r"(,?\s+(Class [A-Z]\s+)?(Common Stock|Ordinary Shares|American Depositary Shares|Depositary Shares|Common Shares"
-    r"|Shares of Beneficial Interest|Inc\.?|Incorporated|Corporation|Corp\.?|Company|Co\.?|Ltd\.?|Limited|plc|PLC"
-    r"|N\.V\.|S\.A\.|L\.P\.|Holdings?|Group|\(The\)))+$"
+    r"(,?\s+(Class [A-Z]\s+)?(Common Stock|Capital Stock|Ordinary Shares|American Depositary Shares|Depositary Shares"
+    r"|Common Shares|Shares of Beneficial Interest|Class [A-Z]|Inc\.?|Incorporated|Corporation|Corp\.?|Company|Co\.?"
+    r"|Ltd\.?|Limited|plc|N\.V\.|S\.A\.|L\.P\.|Holdings?|Group|\(The\)))+$",
+    re.IGNORECASE,
 )
 #: 줄인 이름의 길이 상한(글자) — 넘으면 자르고 "…"
 SHORT_NAME_MAX = 24
@@ -47,6 +48,9 @@ def short_name(name: Any, ticker: Any = None, currency: str = "KRW") -> str:
     if currency == "KRW":
         return 이름 or 티커
     짧게 = _이름_꼬리.sub("", 이름).strip(" ,") or 이름
+    # 앞의 "The " 도 뗀다(25.1723) — "The Goldman Sachs Group, Inc." → "Goldman Sachs". 떼서 비면 그대로
+    if 짧게.lower().startswith("the ") and len(짧게) > 4:
+        짧게 = 짧게[4:]
     if len(짧게) > SHORT_NAME_MAX:
         짧게 = 짧게[: SHORT_NAME_MAX - 1].rstrip(" ,") + "…"
     if not 짧게:
@@ -58,11 +62,12 @@ def won_short(value: float | None) -> str:
     """큰 원화를 억·만 단위로 — 996,547,801 → "9억 9,655만원" (25.1721, 리포트 가독성). 1만 원 아래는 원 그대로"""
     if value is None or value != value:
         return "-"
-    x = round(float(value))
-    부호, x = ("-" if x < 0 else ""), abs(x)
+    # 반올림은 늘 0.5 올림(25.1723 — 파이썬 `round` 는 짝수 쪽이라 15,000 → 2만, 25,000 → 2만 이었다)
+    x = int(abs(float(value)) + 0.5)
+    부호 = "-" if float(value) < 0 and x else ""
     if x < 10_000:
         return f"{부호}{x:,}원"
-    만 = round(x / 10_000)
+    만 = (x + 5_000) // 10_000
     억, 나머지 = divmod(만, 10_000)
     if not 억:
         return f"{부호}{만:,}만원"

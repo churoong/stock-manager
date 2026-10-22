@@ -1025,7 +1025,8 @@ def report_lines(
         out.append(f"▸ 순위 (공통 구간 {board.get('window_start')}부터)")
         out += [f"  {k + 1}. {r['id']} {칸(r)}" for k, r in enumerate(위)]
         if 챔 and 챔 not in 위:
-            out.append(f"  … {mirror}(KIS) {칸(챔)}")
+            # 위 계좌가 없으면 "…" 를 붙이지 않는다(25.1723 — 빠진 계좌가 있는 것처럼 읽혔다)
+            out.append(f"  {'… ' if 위 else ''}{mirror}(KIS) {칸(챔)}")
     체결 = section.get("fills_h") or []
     out.append(f"▸ {mirror} 체결 (판정 {section.get('trade_date')})" + ("" if 체결 else ": 없음"))
     out += [f"  {_SIDE.get(f['side'], f['side'])} {formatter.short_name(f['name'], f.get('ticker'), f['currency'])}"
@@ -1038,7 +1039,7 @@ def report_lines(
     out.append(f"▸ {mirror} 다음 장 주문 ({장})" + ("" if 묶음 else ": 없음"))
     out += ["  " + g for g in 묶음[:REPORT_MAX_ORDERS]]
     if len(묶음) > REPORT_MAX_ORDERS:
-        out.append(f"  … 외 {len(묶음) - REPORT_MAX_ORDERS}종목")
+        out.append(f"  … 외 {len(묶음) - REPORT_MAX_ORDERS}종목")  # 종목·방향 묶음 수
 
     def 건수(c: dict[str, int] | None) -> str:
         xs = sorted((a, n) for a, n in (c or {}).items() if n and a != mirror)
@@ -1073,13 +1074,15 @@ def order_groups(orders: list[dict[str, Any]]) -> list[str]:
         수량 = sum(int(o.get("quantity") or 0) for o in os_)
         값 = sorted(float(o["limit_price"]) for o in os_
                    if o.get("limit_price") is not None and o.get("order_type") != "market")  # fmt: skip
-        시장가 = any(o.get("order_type") == "market" or o.get("limit_price") is None for o in os_)
+        시장가 = [o for o in os_ if o.get("order_type") == "market" or o.get("limit_price") is None]
         가격 = []
         if 값:
             가격.append(_돈(값[0], o0["currency"]) if 값[0] == 값[-1]
                        else f"{_돈(값[0], o0['currency'])}~{_돈(값[-1], o0['currency'])}")  # fmt: skip
         if 시장가:
-            가격.append("시장가")
+            # 지정가와 섞이면 시장가 몫 수량을 밝힌다(25.1723)
+            가격.append("시장가" if len(시장가) == len(os_)
+                       else f"시장가 {sum(int(o.get('quantity') or 0) for o in 시장가):,}주")  # fmt: skip
         회차 = f"{len(os_)}회차 " if len(os_) > 1 else ""
         out.append(f"{_SIDE.get(side, side)} {formatter.short_name(o0.get('name'), o0.get('ticker'), o0['currency'])}"
                    f" {회차}{수량:,}주 {' + '.join(가격)}".rstrip())  # fmt: skip

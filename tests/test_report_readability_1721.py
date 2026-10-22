@@ -49,3 +49,42 @@ def test_실제_투자_비교는_여러_줄이고_가상모의투자라고_쓴�
     assert 줄[0] == "실제 투자와 비교 (2026-10-16~2026-10-21, 시간가중)"
     assert 줄[1] == "  실제 +0.3%" and 줄[2] == "  가상 A -0.3% · B -0.6%"
     assert "가상모의투자는" in 줄[3] and "모의는" not in 글
+
+
+# ── 25.1723 (25.1721 교차검증 반영) ────────────────────────────────────────────────
+
+
+def test_가상모의투자_절에서_나뉘면_2부_머리를_붙이지_않는다() -> None:
+    """[권고] 1 — 🧪·실제 투자 비교가 끝 절(`_끝_절`)에 없어 "2부 포트폴리오 (이어서)" 가 그 위에 붙었다"""
+    from batch.notify import telegram as tg
+
+    for 첫 in ("🧪 가상모의투자 (평가 · 손익 · 이번 실행 체결)", "실제 투자와 비교 (2026-10-16~2026-10-21, 시간가중)"):
+        결과 = tg._carry_headers(["2부 포트폴리오\n종목1  1,000,000원 (3.3%)", f"{첫}\n  A 10억원 · 손익 +0.0% · 체결 0건"])
+        assert 결과[1].split("\n")[0] == 첫
+
+
+def test_억_만_반올림은_늘_올림() -> None:
+    """[참고] 1 — 파이썬 `round` 는 짝수 쪽이라 15,000·25,000 이 둘 다 "2만원" 이었다"""
+    assert [formatter.won_short(x) for x in (15_000, 25_000, 99_985_000, 99_995_000, -15_000, -0.4)] == [
+        "2만원", "3만원", "9,999만원", "1억원", "-2만원", "0원"]  # fmt: skip
+
+
+def test_이름_앞_The_와_Class_꼬리_대문자도_뗀다() -> None:
+    """[참고] 2"""
+    assert formatter.short_name("The Goldman Sachs Group, Inc.", "GS", "USD") == "Goldman Sachs(GS)"
+    assert formatter.short_name("Berkshire Hathaway Inc. Class B", "BRK.B", "USD") == "Berkshire Hathaway(BRK.B)"
+    assert formatter.short_name("Alphabet Inc. Class C Capital Stock", "GOOG", "USD") == "Alphabet(GOOG)"
+    assert formatter.short_name("APPLE INC", "AAPL", "USD") == "APPLE(AAPL)"
+    assert formatter.short_name("Group 1 Automotive, Inc.", "GPI", "USD") == "Group 1 Automotive(GPI)"
+
+
+def test_시장가가_섞이면_그_수량을_밝히고_챔피언만이면_말줄임_없음() -> None:
+    """[참고] 3·4"""
+    주문 = [{"side": "buy", "name": "가", "ticker": "A1", "quantity": q, "order_type": t, "limit_price": p,
+             "currency": "KRW"} for q, t, p in ((10, "limit", 8600), (20, "market", None))]  # fmt: skip
+    assert desk.order_groups(주문) == ["매수 가 2회차 30주 8,600원 + 시장가 20주"]
+    칸 = {"trade_date": "2026-10-16", "session_date": "2026-10-19", "checks": [], "fills_h": [], "orders_h": [],
+          "fills_by_account": {}, "orders_by_account": {}}  # fmt: skip
+    줄 = desk.report_lines(칸, {"window_start": "2026-10-16", "rows": [
+        {"id": "H", "window_pct": 1.0, "vs_r_pp": None, "young": True}]}, "H")  # fmt: skip
+    assert "  H(KIS) +1.00% — 갓 엶, 개설 후" in 줄
