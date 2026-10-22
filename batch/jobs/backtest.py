@@ -1667,7 +1667,10 @@ def store_run(
     rs = client.execute(f"INSERT INTO backtest_runs ({_RUN_COLS}) VALUES ({placeholders})", list(row))
     run_id = rs.last_insert_rowid
     if run_id is None:
-        rs2 = client.execute("SELECT MAX(id) FROM backtest_runs")
+        # 그 실행·그 전략의 행으로 좁힌다 — 핵심 H 와 월 백테스트가 나란히 돌면(25.1662) 표 전체의 MAX 는 상대 실행의
+        # 행을 집어 자본곡선을 엉뚱한 행에 붙였다(25.1663, 교차검증 [권고])
+        rs2 = client.execute("SELECT MAX(id) FROM backtest_runs WHERE group_id = ? AND strategy = ?",
+                             [group_id, strategy])  # fmt: skip
         run_id = int(rs2.scalar())
 
     per = 300
