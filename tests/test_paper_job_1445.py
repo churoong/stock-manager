@@ -418,7 +418,30 @@ def test_outcome_queue_reads_new_decisions_before_stuck_ones(client: Client, mon
                        " VALUES ('KOSPI', ?, ?, 't', 't')", [d, 2000 + i])  # fmt: skip
     기록 = job.fill_outcomes(c, "KR", "2026-10-15", "now")
     assert c.q("SELECT ret_5d FROM paper_decisions WHERE decided_on = '2026-10-01'")[0][0] is not None
-    assert 기록["full_bands"] == 1 and 기록["filled"] == 1
+    # 상한에 닿았지만 남은 것이 끊긴 행뿐이면 밀림이 아니다(25.1692, 교차검증 [권고] 1)
+    assert 기록["full_bands"] == 0 and 기록["filled"] == 1
+
+
+def test_outcome_queue_upper_bound_is_a_fillable_day_and_backlog_counts(client: Client,
+                                                                        monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1692 (25.1685 교차검증 [필수]) — 구간 위쪽이 달력일이면 아직 못 차는 최신 행이 상한을 먼저 채워 찰 수 있는 옛 행이
+    안 읽혔다. 직전 마감 장에서 n 거래일 앞까지만 읽는다. 상한에 닿고 가장 오래 읽은 행까지 찼으면 밀림."""
+    c = client
+    monkeypatch.setattr(job, "OUTCOME_BATCH", 1)
+    ins = ("INSERT INTO paper_decisions (account_id, market, decided_on, stock_id, kind, reason, ref_close, ref_date,"
+           " created_at) VALUES ('A', 'KR', ?, 1, 'skip', 'x', 10000, ?, 't')")  # fmt: skip
+    # 10-15 아침: 직전 마감 장 10-14, 5 거래일 앞 = 10-06(10-09 한글날 휴장). 10-07·10-08 결정은 달력 7일은 지났어도
+    # 5번째 장 시세가 아직 없다 — 예전엔 이것이 상한(1)을 먼저 채워 10-02 결정이 안 읽혔다
+    for d in ("2026-10-02", "2026-10-07", "2026-10-08"):
+        c.conn.execute(ins, [d, d])
+    for i, d in enumerate(["2026-10-02", "2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08", "2026-10-12",
+                           "2026-10-13", "2026-10-14"]):  # fmt: skip
+        _시세(c, d, 10_000 + i * 100, 10_000 + i * 100)
+        c.conn.execute("INSERT INTO index_prices (index_code, date, close, source, fetched_at)"
+                       " VALUES ('KOSPI', ?, ?, 't', 't')", [d, 2000 + i])  # fmt: skip
+    기록 = job.fill_outcomes(c, "KR", "2026-10-15", "now")
+    assert c.q("SELECT decided_on FROM paper_decisions WHERE ret_5d IS NOT NULL") == [("2026-10-02",)]
+    assert 기록["full_bands"] == 1  # 상한 1 에 닿았고 그 행이 찼다 — 밀림
 
 
 def test_outcome_queue_skips_rows_waiting_only_for_60d_and_notes_missing_ref(client: Client) -> None:

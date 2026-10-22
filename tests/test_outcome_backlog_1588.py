@@ -13,6 +13,8 @@ def test_상한에_닿으면_밀림_경고(client: Client, monkeypatch: pytest.M
     줄, 기록 = _하루(c, monkeypatch, "2026-10-14")
     assert 기록["decision_outcomes"]["pending_read"] < job.OUTCOME_BATCH
     assert not any("성과 채우기 밀림" in x for x in 줄)
-    monkeypatch.setattr(job, "OUTCOME_BATCH", 0)  # 대기열이 상한만큼 찼다
+    # 창 하나가 상한에 닿고 그 끝까지 찼다(25.1692 부터 그때만 밀림 — 시세가 끊긴 행만 남은 것은 아니다)
+    monkeypatch.setattr(job, "fill_outcomes",
+                        lambda *a, **k: {"pending_read": 400, "filled": 400, "gave_up": 0, "full_bands": 1})
     줄, _ = _하루(c, monkeypatch, "2026-10-15", signals=False)
-    assert any(x.startswith("⚠️ 결정 원장 성과 채우기 밀림 — 한 번에 0행 상한") for x in 줄)
+    assert any(x.startswith(f"⚠️ 결정 원장 성과 채우기 밀림 — 한 번에 {job.OUTCOME_BATCH}행 상한") for x in 줄)

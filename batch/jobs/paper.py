@@ -270,11 +270,22 @@ def fill_outcomes(client: Any, market: str, today: str, now: str) -> dict[str, i
 
     오늘 = _date.fromisoformat(today)
     기한 = {n: (오늘 - timedelta(days=d)).isoformat() for n, d in pp.HORIZON_CALENDAR_DAYS.items()}
+    # **구간 위쪽은 실제로 찰 수 있는 날까지** (25.1692, 25.1685 교차검증 [필수]) — 달력 7·28·84일은 가장 빨리 찰 수
+    # 있는 날일 뿐이라(아침 실행엔 그날 종가가 없고 평일 휴장이 끼면 더 늦다), 최근 것부터 읽으면 아직 못 차는 행이
+    # 상한을 먼저 채워 60일 창은 사실상 돌지 않았다(시뮬: 60일 성과 약 90% 가 200일 포기 쪽에서야 참, 연휴엔 20일도
+    # 멈춤).
+    # 직전 마감 장에서 n 거래일 앞(그 뒤 결정은 n 번째 장 시세가 아직 없다)과 달력 기한 가운데 이른 날까지만 읽는다
+    마지막장 = cal.previous_session(market, 오늘)
+    for n in pp.DECISION_HORIZONS:
+        x = 마지막장
+        for _ in range(n):
+            x = cal.previous_session(market, x)
+        기한[n] = min(기한[n], x.isoformat())
     포기날 = (오늘 - timedelta(days=pp.OUTCOME_GIVE_UP_DAYS)).isoformat()
     이십아래 = (_date.fromisoformat(기한[20]) - timedelta(days=OUTCOME_20D_BAND_DAYS)).isoformat()
     rows: list[dict[str, Any]] = []
     본: set[Any] = set()
-    찬구간 = 0
+    가득: list[Any] = []  # 상한에 닿은 구간의 마지막(가장 오래된) 행 — 그것까지 찼으면 뒤에 더 남았다
     for sql, args, 상한 in (
         (PENDING_5D_SQL, [market, 기한[20], 기한[5]], OUTCOME_BATCH),
         (PENDING_20D_SQL, [market, 이십아래, 기한[20]], OUTCOME_BATCH),
@@ -282,7 +293,8 @@ def fill_outcomes(client: Any, market: str, today: str, now: str) -> dict[str, i
         (PENDING_OLD_SQL, [market, 포기날], OUTCOME_OLD_BATCH),
     ):
         got = client.execute(sql, [*args, 상한]).dicts()
-        찬구간 += sql is not PENDING_OLD_SQL and len(got) >= 상한
+        if got and len(got) >= 상한:
+            가득.append(got[-1]["id"])
         rows += [r for r in got if r["id"] not in 본]
         본.update(r["id"] for r in got)
     # 미국 분할 재수집 대기 종목은 오늘 채우지 않는다(25.1548 반박 [권고] 4) — 일일 수집은 최근 10일만 분할 반영 값으로
@@ -308,6 +320,7 @@ def fill_outcomes(client: Any, market: str, today: str, now: str) -> dict[str, i
         return (r is None or r[1] < 날) and (오늘 - _date.fromisoformat(날)).days < pp.BENCH_WAIT_DAYS
 
     채움, 포기 = 0, 0
+    처리: set[Any] = set()  # 이번에 채우거나 닫은 행
     문장: list[tuple[str, list[Any]]] = []
     시세캐시: dict[tuple[int, str, int], list] = {}
     for r in rows:
@@ -315,6 +328,7 @@ def fill_outcomes(client: Any, market: str, today: str, now: str) -> dict[str, i
             # 기준 종가가 없는 행은 영영 못 채운다 — 대기열에 남아 자리를 먹지 않게 바로 까닭을 적는다 (25.1453)
             문장.append((UPDATE_OUTCOME_SQL, [None] * 6 + ["기준 종가 없음", now, r["id"]]))
             포기 += 1
+            처리.add(r["id"])
             continue
         창 = pp.due_horizons(str(r["decided_on"]), today, r)
         if not 창 or int(r["stock_id"]) in 대기:
@@ -344,8 +358,13 @@ def fill_outcomes(client: Any, market: str, today: str, now: str) -> dict[str, i
         ]))  # fmt: skip
         채움 += 새것
         포기 += 포기함
+        처리.add(r["id"])
     if 문장:
         client.batch(문장)
+    # 밀림 = 상한에 닿은 구간의 가장 오래된 행까지 찼거나 닫혔다(그 뒤에 찰 행이 더 있을 것) — 시세가 끊긴 행만 남아
+    # 상한에 닿은 것은 밀림이 아니다(25.1692, 교차검증 [권고] 1). 포기 구간도 센다([권고] 2 — 예전엔 경고에서 빠져
+    # 조용히 쌓였다)
+    찬구간 = sum(1 for i in 가득 if i in 처리)
     return {"pending_read": len(rows), "filled": 채움, "gave_up": 포기, "full_bands": 찬구간}
 
 
