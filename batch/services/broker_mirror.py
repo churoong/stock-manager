@@ -505,9 +505,10 @@ def _문턱값(값: float, 문턱: float, 아래: bool, 부호: bool = False) ->
 
 
 def _값글(값: Any, 문턱: float, 아래: bool, 부호: bool = False) -> str:
-    """`_문턱값` 앞 — 값이 없으면 "오늘 값 없음(표본 부족 — 어제 켜진 그대로)" (25.1641)"""
+    """`_문턱값` 앞 — 값이 없으면 "오늘 값 없음(표본 부족 — 전에 켜진 그대로)" (25.1641). "전에" — `prev` 는 마지막
+    실행의 상태라 휴장이 이어지면 며칠 전이다(교차검증 [권고])"""
     if 값 is None:
-        return f"오늘 값 없음(표본 부족 — 어제 켜진 그대로, 문턱 {'+' if 부호 else ''}{문턱:g}%)"
+        return f"오늘 값 없음(표본 부족 — 전에 켜진 그대로, 문턱 {'+' if 부호 else ''}{문턱:g}%)"
     return _문턱값(float(값), 문턱, 아래, 부호)
 
 
@@ -515,8 +516,9 @@ def diverge(now: dict[str, Any] | None, keys: list[str], market: str) -> str | N
     """새로 켜진 괴리 칸(`keys`)의 알림 글 — 어느 쪽으로 벌어졌는지까지(25.1507, 검토 2).
 
     가상만 참이 많으면 가상 체결 판정이 낙관(가상 성적을 덜 믿어야), KIS만 참이 많으면 비관(가상 성적이 낮게 나옴).
-    오늘 그 칸 값이 없으면(표본 0 — `diverge_active` 가 어제 켜진 칸을 그대로 두고, 어제 알림이 실패해 오늘 다시 글로
-    오는 경우) "오늘 값 없음" 으로 쓴다 — `float(None)` 으로 글 전체가 사라지고 다음 날도 되풀이되던 것(25.1641)
+    오늘 그 칸 값이 없으면(표본 0 — `diverge_active` 가 전에 켜진 칸을 그대로 두고, 그때 알림이 실패해 오늘 다시 글로
+    오는 경우) "오늘 값 없음" 으로 쓰고 결론 글(낙관·덜 믿어야)은 붙이지 않는다 — 견줄 값이 없다. 예전에는 `float(None)`
+    으로 글 전체가 사라지고 다음 날도 되풀이됐다(25.1641)
     """
     if not keys or not now:
         return None
@@ -528,17 +530,18 @@ def diverge(now: dict[str, Any] | None, keys: list[str], market: str) -> str | N
               else "KIS만 참이 더 많음 — 가상 체결 판정이 비관, 가상 성적이 실제보다 낮게 나옵니다" if kis만 > 내만
               else "가상만 참과 KIS만 참이 같음")  # fmt: skip
         일치 = _값글(now.get("match_pct"), DIVERGE_MATCH_PCT, True)
-        글.append(f"체결 일치 {일치}."
-                 f" 가상만 참 {내만} · KIS만 참 {kis만}: {방향}")  # fmt: skip
+        글.append(f"체결 일치 {일치}." + (f" 가상만 참 {내만} · KIS만 참 {kis만}: {방향}"
+                                          if now.get("match_pct") is not None else ""))  # fmt: skip
     if "kept" in keys:
         실현 = _값글(now.get("kept_pct"), DIVERGE_KEPT_PCT, True)
-        글.append(f"실현율(가상이 찼다고 한 주문 가운데 KIS 에서도 찬 비율) {실현}: 가상 성적을 그만큼 덜 믿어야"
-                 " 합니다")  # fmt: skip
+        글.append(f"실현율(가상이 찼다고 한 주문 가운데 KIS 에서도 찬 비율) {실현}"
+                 + (": 가상 성적을 그만큼 덜 믿어야 합니다" if now.get("kept_pct") is not None else ""))  # fmt: skip
     for 쪽, 말 in (("slip_buy", "매수"), ("slip_sell", "매도")):
         if 쪽 in keys:
             x = now.get(쪽) or {}
             차이 = _값글(x.get("avg"), DIVERGE_SLIP_PCT, False, True)
-            글.append(f"{말} 가격 차이 평균(n={x.get('n') or 0}) {차이}: 가상이 체결가를 낙관")
+            글.append(f"{말} 가격 차이 평균(n={x.get('n') or 0}) {차이}"
+                     + (": 가상이 체결가를 낙관" if x.get("avg") is not None else ""))  # fmt: skip
     기간 = f"지난 {now.get('days', COMPARE_DAYS)}일, 주문 {now.get('n')}"
     return f"KIS모의투자 {이름} 가상모의투자와 벌어졌습니다({기간}): " + " · ".join(글)
 
