@@ -22,6 +22,7 @@ import logging
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime, timedelta
+from typing import Any
 
 from batch.core import calendar as cal
 from batch.core import db
@@ -256,6 +257,15 @@ def collect_events(client: TursoClient, qc: kis.QuoteClient, today: date, failed
     return 행사
 
 
+def opinion_coverage(targets: list[int], raw_rows: dict[int, int]) -> dict[str, Any]:
+    """의견 호출 결과 — 받은 종목(`covered_ids`, 0건 응답도 받은 것), 못 받은 종목(`failed_ids`), 응답 원래 행이
+    `kis.OPINION_PAGE_ROWS` 이상이라 창 앞쪽이 잘렸을 수 있는 종목(`truncated_ids`). 모두 종목 번호 오름차순."""
+    받음 = sorted(raw_rows)
+    return {"covered_ids": 받음, "failed_ids": sorted(set(targets) - set(raw_rows)),
+            "truncated_ids": sorted(sid for sid, n in raw_rows.items() if n >= kis.OPINION_PAGE_ROWS),
+            "page_rows": kis.OPINION_PAGE_ROWS}  # fmt: skip
+
+
 def run(limit: int | None = None) -> int:
     client = TursoClient()
     try:
@@ -272,11 +282,12 @@ def run(limit: int | None = None) -> int:
         첫의견 = client.execute("SELECT COUNT(*) FROM (SELECT 1 FROM kr_opinions LIMIT 1)").scalar() == 0
         의견창 = today - timedelta(days=OPINION_FIRST_DAYS if 첫의견 else OPINION_DAYS)
         의견: dict[int, list[dict]] = {}
+        의견원행: dict[int, int] = {}  # 받은 종목 → 응답의 원래 행 수(잘림 판정, 25.1647)
 
         def one(item: tuple[int, str]) -> tuple[int, dict[str, dict]]:
             sid, code = item
             try:
-                의견[sid] = qc.opinions(code, 의견창, today)
+                의견[sid], 의견원행[sid] = qc.opinions_with_count(code, 의견창, today)
             except (kis.KisFailed, OSError) as exc:
                 failed[f"{code}:의견"] = str(exc)
             parts = []
@@ -314,6 +325,10 @@ def run(limit: int | None = None) -> int:
         step = {"stocks": len(stocks), "rows": len(statements), "opinions": len(의견행), "events": len(행사행),
                 "opinion_since": 의견창.isoformat(), "after_hours": 시간외, "calls": qc.calls, "failed": len(failed),
                 "failed_sample": dict(list(failed.items())[:10])}  # fmt: skip
+        # 의견 호출이 덮은 종목·실패·잘림 (37회차 C 전제 ①, factors.md 12.40, 25.1647) — 목표가 IC·계좌가
+        # "의견 없음(0)" 과 "모름(NULL)" 을 가르는 재료. 지금 이것이 없어 실패·잘린 종목의 빈 창을 의견 없음으로
+        # 읽을 수밖에 없었다(14회차 12.16)
+        step["opinion_coverage"] = opinion_coverage([sid for sid, _c in stocks], 의견원행)
         # **출처마다** 절반 넘게 못 받았으면 실패로 남긴다 (docs/infra.md 25.1397, KIS 수급 감사) — 조금 빠진 것은
         # 다음 날 겹쳐 받으며 메워진다(30일 창). 예전 문턱은 네 호출 합의 절반이라 투자자별 하나가 전 종목에서
         # 실패해도(약 1/4) `partial` 이었고, 공매도 행이 그날 날짜를 계속 채워 신선도는 초록 — KIS 가 30일만 주므로

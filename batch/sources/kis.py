@@ -207,6 +207,12 @@ EVENT_APIS = {
 }
 
 
+#: 투자의견 한 번 호출이 돌려주는 최대 행으로 본 값 — 기업행위 일정과 같은 KIS 조회 한 쪽 100행(25.1008 실측)을
+#: 그대로 쓴다 `[확인필요: 의견 API 자체의 상한 실측]`. 원래 행 수가 이만큼이면 창 앞쪽(오래된 의견)이 잘렸을 수 있다고
+#: **보수적으로** 기록한다(37회차 C 전제 ①, factors.md 12.40 · 14회차 12.16 다시 낼 조건)
+OPINION_PAGE_ROWS = 100
+
+
 def parse_opinions(payload: object) -> list[dict]:
     out = []
     for r in _list(payload, "output"):
@@ -295,9 +301,15 @@ class QuoteClient:
             "FID_INPUT_DATE_1": until.strftime("%Y%m%d")}))  # fmt: skip
 
     def opinions(self, code: str, since: date, until: date) -> list[dict]:
-        return parse_opinions(self.get(Q + "invest-opinion", "FHKST663300C0", {
+        return self.opinions_with_count(code, since, until)[0]
+
+    def opinions_with_count(self, code: str, since: date, until: date) -> tuple[list[dict], int]:
+        """(읽은 의견, 응답의 원래 행 수) — 원래 행 수가 `OPINION_PAGE_ROWS` 이상이면 창 앞쪽이 잘렸을 수
+        있다(25.1647)."""
+        payload = self.get(Q + "invest-opinion", "FHKST663300C0", {
             "FID_COND_MRKT_DIV_CODE": "J", "FID_COND_SCR_DIV_CODE": "16633", "FID_INPUT_ISCD": code,
-            "FID_INPUT_DATE_1": since.strftime("%Y%m%d"), "FID_INPUT_DATE_2": until.strftime("%Y%m%d")}))  # fmt: skip
+            "FID_INPUT_DATE_1": since.strftime("%Y%m%d"), "FID_INPUT_DATE_2": until.strftime("%Y%m%d")})  # fmt: skip
+        return parse_opinions(payload), len(_list(payload, "output"))
 
 
     def events(self, kind: str, since: date, until: date, code: str = "") -> list[dict]:
