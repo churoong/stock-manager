@@ -36,7 +36,7 @@ def test_상관으로_줄어_빠지면_그_과정과_닮은_보유를_적는다(
     assert v.allocations == []
     [e] = v.excluded
     assert e.reason == "종목 비중 상한 도달"
-    assert e.detail == "보유 2.0% — 이미 권장 비중 4.0% × 상관 배수 0.30(보유 BBB와 상관 1.00) = 1.2% 이상 보유"
+    assert e.detail == "보유 2.0% — 이미 권장 비중 4.0% × 상관 배수 0.30(보유 BBB와 상관 1.00) ≈ 1.2% 이상 보유"
 
 
 def test_상관이_없으면_예전_글() -> None:
@@ -61,4 +61,43 @@ def test_총액이_없으면_환율이_없어도_총액_미설정(monkeypatch: p
     # 총액이 있으면 그대로 "환율 없음"
     monkeypatch.setattr(db, "get_setting_in_range",
                         lambda _c, k, d: (10_000_000.0, None) if k == "total_investable_amount" else (None, None))  # fmt: skip
-    assert sj.load_settings(object(), "USD", "2026-10-20")["fx_missing"] is True  # type: ignore[arg-type]
+    s2 = sj.load_settings(object(), "USD", "2026-10-20")  # type: ignore[arg-type]
+    assert s2["fx_missing"] is True and s2["fx_unavailable"] is True
+    # 배분(가상모의투자 포함)을 막는 값은 총액과 상관없이 — 교차검증 [필수] 3
+    assert s["fx_unavailable"] is True
+
+
+def test_가장_닮은_것이_앞선_후보면_보유라_부르지_않는다() -> None:
+    """교차검증 [필수] 1 — 후보 [CCC(보유 아님), AAA(보유 2%)] 에서 AAA 가 CCC 와 닮아 빠지면 "보유 CCC" 라 했다."""
+    rnd = random.Random(2)
+    날 = [f"2026-{m:02d}-{d:02d}" for m in range(3, 11) for d in range(1, 29)][:140]
+    p, a, c = 100.0, {}, {}
+    for d in 날:
+        p *= 1 + rnd.gauss(0, 0.02)
+        a[d], c[d] = p, p * (1 + rnd.gauss(0, 0.001))
+    v = rp.build_portfolio([_행(3, "CCC", total_score=95), _행(1, "AAA")], 100_000_000,
+                           holdings=[rp.Holding(1, "AAA", "AAA", "S1", 2_000_000)], price_series={1: a, 3: c},
+                           min_order_amount=100_000)  # fmt: skip
+    상세 = [e.detail for e in v.excluded if e.ticker == "AAA"]
+    assert 상세 and "(이번 리포트의 앞선 후보 CCC와 상관" in 상세[0] and "보유 CCC" not in 상세[0], 상세
+
+
+def test_근거표도_총액이_없으면_환율_탓이라_하지_않는다() -> None:
+    """교차검증 [필수] 2 — 1부 근거표는 따로 판정해 그대로 "환율이 없어 원화 총액을 달러로 바꾸지 못해" 라 했다."""
+    import inspect
+
+    from batch.services import signals as sg
+
+    본문 = inspect.getsource(sg.evaluate)
+    assert "fx_missing=(inp.currency != \"KRW\" and fx is None) if fx_missing is None" in 본문
+    from batch.jobs import signals as sj
+
+    assert "fx_missing=settings[\"fx_missing\"]" in inspect.getsource(sj)
+
+
+def test_가상모의투자_배분은_실제_환율_없음으로만_막는다() -> None:
+    import inspect
+
+    from batch.jobs import daily
+
+    assert 'not settings.get("fx_unavailable", settings.get("fx_missing"))' in inspect.getsource(daily)

@@ -817,9 +817,12 @@ def build_portfolio(
         if 상관_배수 < 1.0 and 권장비중 > 0 and 분모 > 0:
             닮은 = corr_근거.get("most_similar")
             상관 = corr_근거.get("max_correlation")
-            누구 = (f"(보유 {닮은}와 상관 {float(상관):.2f})" if 닮은 is not None and 상관 is not None else "")
+            # 가장 닮은 것이 이번 리포트의 앞선 후보면 "보유" 라 부르지 않는다(위 `corr_note` 와 같게, 25.1639 교차검증)
+            쪽 = "이번 리포트의 앞선 후보" if corr_근거.get("most_similar_id") in 앞선_후보 else "보유"
+            누구 = (f"({쪽} {닮은}와 상관 {float(상관):.2f})" if 닮은 is not None and 상관 is not None else "")
+            # "≈" — 반올림한 두 값을 곱하면 셋째 값과 0.1 어긋나 보이는 조합이 있다(교차검증 [권고])
             목표말 = (f"권장 비중 {fixed(권장비중, 1)}% × 상관 배수 {상관_배수:.2f}{누구}"
-                     f" = {fixed(목표 / 분모 * 100, 1)}%")  # fmt: skip
+                     f" ≈ {fixed(목표 / 분모 * 100, 1)}%")  # fmt: skip
         if held > 0 and 목표 > 0 and (stock_limit is None or 목표 < stock_limit):
             목표_여지 = 목표 - held
             if 목표_여지 <= 0:

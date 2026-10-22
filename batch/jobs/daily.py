@@ -2169,7 +2169,8 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
             # 2부 배분이 없으니 보유도 넘기지 않는다
             signal_rows, signals_as_of, regime_line = [], None, None
             settings = {"total_investable": 0, "fx_note": None, "max_weight_per_sector": 0.0,
-                        "max_weight_per_stock": 0.0, "min_order_amount": 0, "fx_missing": False, "fx": None}
+                        "max_weight_per_stock": 0.0, "min_order_amount": 0, "fx_missing": False, "fx": None,
+                        "fx_unavailable": False}
         # 상관 기반 분산에 쓸 시세 (docs/signals.md 3.6). **후보와 보유를 한 번에** 읽는다.
         # 후보는 2부에 실릴 상위 다섯뿐이라 보유 수가 읽는 양을 정한다
         거래대금: dict[int, dict[str, float]] = {}  # 2부 참여율 기록 (25.1392)
@@ -2342,7 +2343,10 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
                     signal_rows=signal_rows if 추천_오류 is None else [],
                     settings=settings if 추천_오류 is None else None, price_series=corr_series,
                     series_unknown=_corr_unknown(client, signals_as_of or decision.trade_date, warnings),
-                    allocate=추천_오류 is None and 배분_안함 is None and not settings.get("fx_missing"),
+                    # 배분을 막는 것은 **실제로 환율이 없는가**(`fx_unavailable`) — 리포트 사유용 `fx_missing` 은
+                    # 총액이 있을 때만 켜져, 그것으로 막으면 사용자 총액이 가상모의투자 원장을 갈랐다(25.1639 교차검증)
+                    allocate=추천_오류 is None and 배분_안함 is None
+                    and not settings.get("fx_unavailable", settings.get("fx_missing")),
                     # 모의 보유 가운데 2부가 읽지 않은 종목의 시세 — 상관 축소가 같은 규칙으로 돌게
                     # (docs/paper.md 2.1)
                     series_loader=lambda ids: load_price_series(

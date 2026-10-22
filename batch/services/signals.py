@@ -1569,12 +1569,15 @@ def evaluate(
     fx: dict | None = None,
     regime_factor: float = 1.0,
     regime_data: dict | None = None,
+    fx_missing: bool | None = None,
 ) -> list[Signal]:
     """한 종목의 기간별 신호. 조건을 만족하는 기간만 돌려준다.
 
     total_investable·min_order_amount 는 이미 종목 통화로 환산된 값이다(docs/signals.md 3.4).
     fx 는 환산에 쓴 환율. 근거표에 참고 행으로 남긴다.
     regime_factor·regime_data 는 시장 추세 필터(3.5). 비중에만 곱하고 판정은 바꾸지 않는다.
+    `fx_missing` 은 근거표의 "환율이 없어 금액을 내지 않았다" 판정 — 주면 그 값(`jobs.signals.load_settings` 는 원화
+    총액이 있을 때만 켠다, 25.1639), 비면 예전처럼 원화가 아니고 환율이 없으면
     """
     out: list[Signal] = []
 
@@ -1632,7 +1635,8 @@ def evaluate(
                         inp, horizon, low, high, target_price, stop_price, targets, amount, total_investable, weight,
                         min_order_amount,
                         # 원화가 아닌데 환율이 없으면 총액 0 의 까닭은 환율이다(jobs/signals.load_settings)
-                        fx_missing=inp.currency != "KRW" and fx is None,
+                        fx_missing=(inp.currency != "KRW" and fx is None) if fx_missing is None
+                        else (fx_missing and inp.currency != "KRW"),
                         data=data,
                     )
                     + insider.criteria_rows(inp.insider, inp.listed_shares),

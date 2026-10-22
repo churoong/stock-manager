@@ -395,6 +395,9 @@ def load_settings(client: TursoClient, currency: str = "KRW", as_of: str | None 
         "currency": currency,
         "fx": None,
         "fx_missing": False,
+        # 실제로 쓸 환율이 없는가 — 배분(가상모의투자 포함)을 막는 값. `fx_missing` 은 리포트 사유용(총액이 있을 때만,
+        # 25.1639 교차검증 [필수] 3 — 하나로 두면 사용자 총액이 가상모의투자 원장을 갈랐다)
+        "fx_unavailable": False,
         "setting_warnings": 경고,
     }
     if currency == "KRW":
@@ -404,7 +407,7 @@ def load_settings(client: TursoClient, currency: str = "KRW", as_of: str | None 
     if rate is None:
         # 원화 총액이 있을 때만 "환율 없음" — 총액을 안 넣은 날까지 켜면 2부 사유·근거표·경고가 "환율 없음(설정은 그대로
         # 둔다)" 로 나가 총액을 넣어야 할 사용자를 엉뚱한 곳으로 보냈다(25.1639, 리포트 1·2부 감사 [필수] 2)
-        out.update(total_investable=0.0, fx_missing=total_krw > 0)
+        out.update(total_investable=0.0, fx_missing=total_krw > 0, fx_unavailable=True)
         return out
     # **`or` 로 되돌리지 않는다** (2026-09-23, docs/infra.md 25.179).
     #
@@ -864,6 +867,7 @@ def run(market: str, as_of: str | None = None) -> int:
                 min_order_amount=settings["min_order_amount"],
                 targets=settings["targets"],
                 fx=settings["fx"],
+                fx_missing=settings["fx_missing"],
                 regime_factor=regime_factor,
                 regime_data=regime_data,
             ):
