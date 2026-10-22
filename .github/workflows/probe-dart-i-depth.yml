@@ -1,0 +1,52 @@
+name: DART 거래소공시 과거 깊이 탐침
+
+# 37회차 후보 B(실적 발표 반응)의 I 백필을 설계하기 전에 DART 가 I 를 얼마나 과거까지·어느 길로 주는지 한 번 본다
+# (docs/factors.md 12.40 B 순서 ②, docs/infra.md 25.1674). **11-01 뒤에** 손으로만 돌린다(검증 B 순서).
+# 운영 DB 를 읽지도 쓰지도 않는다(Turso 0). 결과는 비공개 운영 저장소 이슈로만(공개 로그엔 줄 수만).
+on:
+  workflow_dispatch:
+    inputs:
+      corps:
+        description: 쉼표로 나눈 DART 고유번호 (기본 삼성전자·SK하이닉스)
+        type: string
+        default: "00126380,00164779"
+      years:
+        description: 시장 전체 하루치를 볼 해 범위
+        type: string
+        default: "2015-2026"
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CORPS: ${{ inputs.corps }}
+      YEARS: ${{ inputs.years }}
+      OFFLINE_MODE: "0"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: 탐침
+        env:
+          DART_API_KEY: ${{ secrets.DART_API_KEY }}
+        run: |
+          set -o pipefail
+          python scripts/probe_dart_i_depth.py --corps "${CORPS:-00126380,00164779}" --years "${YEARS:-2015-2026}" 2>&1 | python scripts/ops_tee.py i-depth.txt
+      - name: 결과를 비공개 이슈로
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPS_REPO: ${{ secrets.OPS_REPO }}
+          OPS_TOKEN: ${{ secrets.OPS_TOKEN }}
+        run: python scripts/publish_output.py --title "운영 출력 (클라우드 세션용)" --file i-depth.txt --note "DART 거래소공시 과거 깊이 탐침"

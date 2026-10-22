@@ -70,6 +70,7 @@ IRRELEVANT_ON_D1 = {
     "probe-dart-audit.yml": "DART 감사의견 필드 탐침 (infra 25.1138) — 운영 DB 를 안 쓴다",
     "probe-dart-cb.yml": "DART 전환사채 필드 탐침 (infra 25.1177) — 운영 DB 를 안 쓴다",
     "probe-dart-cashflow.yml": "DART 영업현금흐름 필드 탐침 (infra 25.1317) — 운영 DB 를 안 쓴다",
+    "probe-dart-i-depth.yml": "DART 거래소공시 과거 깊이 탐침 (infra 25.1674) — 운영 DB 를 안 쓴다",
     "probe-heavy-reads.yml": "스펙 확인용 probe",
     "probe-sec-filings.yml": "스펙 확인용 probe",
     "probe-sec-deals.yml": "SEC 인수·합병 공시 색인 탐침 (infra 25.1329) — 운영 DB 를 안 쓴다",
