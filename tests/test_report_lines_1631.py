@@ -45,14 +45,14 @@ def test_운용_보고는_접수_시간_밖이면_내지_않는다고_말한다(
                                step_log={"paper": {"accounts": {}}}, warnings=[])[-1]  # fmt: skip
 
     assert 머리("US", datetime(2026, 10, 21, 13, 25, tzinfo=UTC)).startswith(
-        "KIS모의투자: 오늘은 내지 않습니다 — 예약 접수 마감 뒤")
+        "▸ KIS모의투자: 오늘은 내지 않습니다 — 예약 접수 마감 뒤")
     assert 머리("KR", datetime(2026, 10, 21, 22, 50, tzinfo=UTC)).startswith(
-        "KIS모의투자: 오늘은 내지 않습니다 — 접수 시작 전")
+        "▸ KIS모의투자: 오늘은 내지 않습니다 — 접수 시작 전")
     assert 머리("KR", datetime(2026, 10, 21, 23, 25, tzinfo=UTC)).startswith(
-        "KIS모의투자: 이 주문을 접수 시간에 그대로 냅니다")
+        "▸ KIS모의투자: 이 주문을 접수 시간에 그대로 냅니다")
     # 까닭은 앞말만(" — 보내지 않음" 떼고), "오늘은" 겹치지 않게
-    assert 머리("KR", datetime(2026, 10, 23, 23, 25, tzinfo=UTC)) == "KIS모의투자: 오늘은 내지 않습니다 — 장이 없다"
-    assert 머리("US", datetime(2026, 10, 21, 13, 25, tzinfo=UTC)) == "KIS모의투자: 오늘은 내지 않습니다 — 예약 접수 마감 뒤"
+    assert 머리("KR", datetime(2026, 10, 23, 23, 25, tzinfo=UTC)) == "▸ KIS모의투자: 오늘은 내지 않습니다 — 장이 없다"
+    assert 머리("US", datetime(2026, 10, 21, 13, 25, tzinfo=UTC)) == "▸ KIS모의투자: 오늘은 내지 않습니다 — 예약 접수 마감 뒤"
 
 
 def _요약(**k: object) -> dict:

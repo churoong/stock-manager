@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -22,6 +23,50 @@ def _money(value: float | None, currency: str) -> str:
         return f"{round(value):,}원"  # 정수로 반올림 — "-0원" 이 나오지 않는다 (25.613)
     r = round(value, 2)
     return f"{'-' if r < 0 else ''}${abs(r):,.2f}"  # "$-1,234.50" 이 아니라 "-$1,234.50" (25.613)
+
+
+#: 미국 종목 정식 이름에서 떼는 꼬리 — 리포트 한 줄에 "LTC Properties, Inc. Common Stock" 이 다 실려 주문 다섯 건이
+#: 화면을 가득 채웠다(25.1721, 2026-10-22 사용자 지시 "텔레그램 리포트가 너무 가독성이 떨어진다").
+#: 뒤에서부터 되풀이해 뗀다
+_이름_꼬리 = re.compile(
+    r"(,?\s+(Class [A-Z]\s+)?(Common Stock|Ordinary Shares|American Depositary Shares|Depositary Shares|Common Shares"
+    r"|Shares of Beneficial Interest|Inc\.?|Incorporated|Corporation|Corp\.?|Company|Co\.?|Ltd\.?|Limited|plc|PLC"
+    r"|N\.V\.|S\.A\.|L\.P\.|Holdings?|Group|\(The\)))+$"
+)
+#: 줄인 이름의 길이 상한(글자) — 넘으면 자르고 "…"
+SHORT_NAME_MAX = 24
+
+
+def short_name(name: Any, ticker: Any = None, currency: str = "KRW") -> str:
+    """리포트에 싣는 짧은 종목 이름 — 국내는 이름 그대로, 미국은 법인 꼬리를 뗀 이름 + (티커).
+
+    이름을 다 떼어 비면 티커만. 원래 이름은 웹(종목 상세)에 그대로 있다
+    """
+    이름 = str(name or "").strip()
+    티커 = str(ticker or "").strip()
+    if currency == "KRW":
+        return 이름 or 티커
+    짧게 = _이름_꼬리.sub("", 이름).strip(" ,") or 이름
+    if len(짧게) > SHORT_NAME_MAX:
+        짧게 = 짧게[: SHORT_NAME_MAX - 1].rstrip(" ,") + "…"
+    if not 짧게:
+        return 티커
+    return f"{짧게}({티커})" if 티커 and 티커 != 짧게 else 짧게
+
+
+def won_short(value: float | None) -> str:
+    """큰 원화를 억·만 단위로 — 996,547,801 → "9억 9,655만원" (25.1721, 리포트 가독성). 1만 원 아래는 원 그대로"""
+    if value is None or value != value:
+        return "-"
+    x = round(float(value))
+    부호, x = ("-" if x < 0 else ""), abs(x)
+    if x < 10_000:
+        return f"{부호}{x:,}원"
+    만 = round(x / 10_000)
+    억, 나머지 = divmod(만, 10_000)
+    if not 억:
+        return f"{부호}{만:,}만원"
+    return f"{부호}{억:,}억" + (f" {나머지:,}만원" if 나머지 else "원")
 
 
 def with_head(message: str, head: list[str]) -> str:

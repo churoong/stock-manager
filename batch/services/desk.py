@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from batch.notify import formatter
+
 #: 계좌 종류 — 화면 글. 모르는 계좌는 이름만 (docs/paper.md 1장, docs/company.md)
 KIND = {"A": "회사", "C": "회사", "D": "회사", "E": "회사", "B": "기준(점수 상위)", "G": "추세 익절",
         "H": "지주사(KIS가 베낌)", "R1": "무작위 대조", "R2": "무작위 대조"}  # fmt: skip
@@ -996,63 +998,90 @@ def report_lines(
     아직 없다), None 이면 모름(그 부분을 뺀다). `kis_state` = 이번에 KIS 에 내는지의 글 —
     None 이면 KIS 줄을 뺀다(25.1512)
     """
+    # 항목마다 줄을 나누고 들여 쓴다(25.1721, 2026-10-22 사용자 지시 "텔레그램 리포트가 너무 가독성이 떨어진다").
+    # 예전엔 순위·체결·주문이 한 줄에 " · " 로 이어져 폰 화면에서 한 문단이 됐고, 미국 정식 이름("…, Inc. Common
+    # Stock")과 회차마다 따로 적힌 같은 종목 주문이 줄을 채웠다. 종목은 짧은 이름, 같은 종목·방향 주문은 한 줄로 묶는다
     out = ["📊 운용 보고 — 가상모의투자·KIS모의투자 (자세히: 웹 운용 화면)"]
     확인 = section.get("checks") or []
     if 확인:
-        out.append("확인할 일: " + " / ".join(("❗" if c["level"] == "high" else "") + c["text"]
-                                          for c in 확인[:REPORT_MAX_CHECKS])
-                   + (f" 외 {len(확인) - REPORT_MAX_CHECKS}건" if len(확인) > REPORT_MAX_CHECKS else ""))  # fmt: skip
+        out.append("▸ 확인할 일")
+        out += ["  " + ("❗" if c["level"] == "high" else "") + c["text"] for c in 확인[:REPORT_MAX_CHECKS]]
+        if len(확인) > REPORT_MAX_CHECKS:
+            out.append(f"  … 외 {len(확인) - REPORT_MAX_CHECKS}건")
     else:
-        out.append("확인할 일: 없음")
+        out.append("▸ 확인할 일: 없음")
     모든 = list(board.get("rows") or [])
     줄 = [r for r in 모든 if not r.get("young")]
 
     def 칸(r: dict[str, Any]) -> str:
         v = r.get("vs_r_pp")
-        return (f"{r['window_pct']:+.2f}%" + (f"(R 대비 {v:+.2f}%p)" if v is not None else "")
+        return (f"{r['window_pct']:+.2f}%" + (f" (R 대비 {v:+.2f}%p)" if v is not None else "")
                 + (" — 갓 엶, 개설 후" if r.get("young") else ""))  # fmt: skip
 
     위 = [r for r in 줄 if r.get("window_pct") is not None][:REPORT_TOP_ACCOUNTS]
     # 챔피언은 갓 연 계좌여도 빠뜨리지 않는다 — KIS 가 베끼는 계좌가 순위 줄에서 사라지면 안 된다(25.1512 검토 5)
     챔 = next((r for r in 모든 if r["id"] == mirror and r.get("window_pct") is not None), None)
     if 위 or 챔:
-        글 = " · ".join(f"{r['id']} {칸(r)}" for r in 위)
+        out.append(f"▸ 순위 (공통 구간 {board.get('window_start')}부터)")
+        out += [f"  {k + 1}. {r['id']} {칸(r)}" for k, r in enumerate(위)]
         if 챔 and 챔 not in 위:
-            글 += (" … " if 글 else "") + f"{mirror}(KIS) {칸(챔)}"
-        out.append(f"순위(공통 구간 {board.get('window_start')}부터): {글}")
+            out.append(f"  … {mirror}(KIS) {칸(챔)}")
     체결 = section.get("fills_h") or []
-    체결글 = [f"{_SIDE.get(f['side'], f['side'])} {f['name']} {f['quantity']}주 @ {_돈(f['price'], f['currency'])}"
-             for f in 체결]  # fmt: skip
-    out.append(f"{mirror} 체결(판정 {section.get('trade_date')}): " + (" · ".join(체결글) if 체결글 else "없음"))
+    out.append(f"▸ {mirror} 체결 (판정 {section.get('trade_date')})" + ("" if 체결 else ": 없음"))
+    out += [f"  {_SIDE.get(f['side'], f['side'])} {formatter.short_name(f['name'], f.get('ticker'), f['currency'])}"
+            f" {int(f['quantity']):,}주 @ {_돈(f['price'], f['currency'])}" for f in 체결]  # fmt: skip
     주문 = section.get("orders_h") or []
     # 체결 장은 주문의 것 — 장 끝난 뒤 손 실행이면 다음다음 장이다(25.1512 검토 4)
     장들 = sorted({str(o.get("fill_session")) for o in 주문 if o.get("fill_session")})
     장 = 장들[0] if len(장들) == 1 else section.get("session_date")
-    if 주문:
-        글 = " · ".join(f"{_SIDE.get(o['side'], o['side'])} {o['name']} {o['quantity']}주"
-                       + (" 시장가" if o.get("order_type") == "market" or o.get("limit_price") is None
-                          else f" {_돈(o['limit_price'], o['currency'])}")
-                       for o in 주문[:REPORT_MAX_ORDERS])  # fmt: skip
-        out.append(f"{mirror} 다음 장({장}) 주문: {글}"
-                   + (f" 외 {len(주문) - REPORT_MAX_ORDERS}건" if len(주문) > REPORT_MAX_ORDERS else ""))  # fmt: skip
-    else:
-        out.append(f"{mirror} 다음 장({장}) 주문: 없음")
+    묶음 = order_groups(주문)
+    out.append(f"▸ {mirror} 다음 장 주문 ({장})" + ("" if 묶음 else ": 없음"))
+    out += ["  " + g for g in 묶음[:REPORT_MAX_ORDERS]]
+    if len(묶음) > REPORT_MAX_ORDERS:
+        out.append(f"  … 외 {len(묶음) - REPORT_MAX_ORDERS}종목")
 
     def 건수(c: dict[str, int] | None) -> str:
         xs = sorted((a, n) for a, n in (c or {}).items() if n and a != mirror)
         return " · ".join(f"{a} {n}" for a, n in xs) or "없음"
 
-    체결수, 주문수 = 건수(section.get("fills_by_account")), 건수(section.get("orders_by_account"))
-    out.append(f"다른 계좌 — 체결 {체결수} / 주문 {주문수}")
+    out.append("▸ 다른 계좌 (건)")
+    out.append(f"  체결 {건수(section.get('fills_by_account'))}")
+    out.append(f"  주문 {건수(section.get('orders_by_account'))}")
     if kis_state is not None:
-        글 = f"KIS모의투자: {kis_state}"
+        out.append(f"▸ KIS모의투자: {kis_state}")
         if prev_kis is not None:
             셈: dict[str, int] = {}
             for o in prev_kis:
                 셈[str(o.get("status"))] = 셈.get(str(o.get("status")), 0) + 1
             말 = {"accepted": "접수", "rejected": "거부", "sending": "응답 모름", "unknown": "모름"}
             지난 = " · ".join(f"{말.get(k, k)} {n}" for k, n in sorted(셈.items())) if 셈 else "낸 주문 없음"
-            글 += f" · 지난 실행 보낸 결과 {지난}(체결은 다음 실행이 맞춤)"
-        out.append(글)
+            out.append(f"  지난 실행 보낸 결과: {지난} (체결은 다음 실행이 맞춤)")
+    return out
+
+
+def order_groups(orders: list[dict[str, Any]]) -> list[str]:
+    """주문을 종목·방향마다 한 줄로 — 분할 지정가 회차가 셋이면 "3회차 412주 $88.47~$93.12" (25.1721).
+
+    순서는 처음 나온 차례 그대로. 시장가가 섞이면 "시장가" 를 붙인다
+    """
+    묶: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for o in orders:
+        묶.setdefault((str(o.get("side")), str(o.get("ticker") or o.get("name"))), []).append(o)
+    out: list[str] = []
+    for (side, _k), os_ in 묶.items():
+        o0 = os_[0]
+        수량 = sum(int(o.get("quantity") or 0) for o in os_)
+        값 = sorted(float(o["limit_price"]) for o in os_
+                   if o.get("limit_price") is not None and o.get("order_type") != "market")  # fmt: skip
+        시장가 = any(o.get("order_type") == "market" or o.get("limit_price") is None for o in os_)
+        가격 = []
+        if 값:
+            가격.append(_돈(값[0], o0["currency"]) if 값[0] == 값[-1]
+                       else f"{_돈(값[0], o0['currency'])}~{_돈(값[-1], o0['currency'])}")  # fmt: skip
+        if 시장가:
+            가격.append("시장가")
+        회차 = f"{len(os_)}회차 " if len(os_) > 1 else ""
+        out.append(f"{_SIDE.get(side, side)} {formatter.short_name(o0.get('name'), o0.get('ticker'), o0['currency'])}"
+                   f" {회차}{수량:,}주 {' + '.join(가격)}".rstrip())  # fmt: skip
     return out
 

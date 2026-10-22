@@ -27,6 +27,7 @@ from typing import Any
 from batch.core import calendar as cal
 from batch.core import db
 from batch.core import settings_range as sr
+from batch.notify import formatter
 from batch.services import backtest as bt
 from batch.services import company as co
 from batch.services import holding as hold
@@ -2192,18 +2193,27 @@ def run_step(
         계좌기록[aid] = a기록
         if isinstance(a기록.get("committee"), dict):
             위 = a기록["committee"]
-            메모줄.append(f"🏛 {aid} {위['memo']}" if "memo" in 위
-                       else f"⚠️ 가상 {aid} 투자위원회를 열지 못함 — {위.get('error')}")  # fmt: skip
+            if "memo" in 위:
+                # 회의 수와 "가장 높은 표" 를 두 줄로(25.1721, 리포트 가독성)
+                앞, 뒤 = (str(위["memo"]).split(". 가장 높은 표 ", 1) + [""])[:2]
+                메모줄.append(f"🏛 {aid} {앞}")
+                if 뒤:
+                    메모줄.append(f"   가장 높은 표 {뒤}")
+            else:
+                메모줄.append(f"⚠️ 가상 {aid} 투자위원회를 열지 못함 — {위.get('error')}")
         if isinstance(a기록.get("holding"), dict):
             지 = a기록["holding"]
-            가중글 = " ".join(f"{c} {w:g}" for c, w in sorted((지.get("weights") or {}).items()))
+            가중글 = " · ".join(f"{c} {w:g}" for c, w in sorted((지.get("weights") or {}).items()))
             메모줄.append(f"🏢 {aid} 지주사: 추천 {지['recommended']} · 두 곳 이상 {지['eligible']}"
                        f" · 고름 {지['chosen']} · 가중 {가중글}" if "error" not in 지
                        else f"⚠️ 가상 {aid} 지주사가 고르지 못함 — {지.get('error')}")  # fmt: skip
         손익률 = f"{v.pnl_pct:+.1f}%" if v.pnl_pct is not None else "—"
-        줄.append(f"{aid}: 평가 {v.equity_krw:,.0f}원 (손익 {손익률}, 시간가중 {(검['twr'] - 1) * 100:+.1f}%,"
-                 # "이번 실행" — 아침 실행이 판정하는 체결은 전 거래일 장의 것이라 "오늘 체결" 은 틀린 말이었다(25.1643)
-                 f" 이번 실행 체결 {a기록['fills']}건)")  # fmt: skip
+        시간가중 = f"{(검['twr'] - 1) * 100:+.1f}%"
+        # 계좌마다 한 줄, 억·만 원(25.1721, 리포트 가독성 — 예전엔 아홉 계좌가 " · " 로 한 문단이었다). 시간가중은
+        # 손익과 다를 때만(입금이 끼면 달라진다). "이번 실행" — 아침 실행이 판정하는 체결은 전 거래일 장의 것(25.1643)
+        줄.append(f"  {aid} {formatter.won_short(v.equity_krw)} · 손익 {손익률}"
+                 + (f"(시간가중 {시간가중})" if 시간가중 != 손익률 else "")
+                 + f" · 체결 {a기록['fills']}건")  # fmt: skip
         if not 검["recon_ok"]:
             줄.append(f"⚠️ 가상 {aid} 장부 검산 어긋남 — {검['recon_note']}")
     기록["accounts"] = 계좌기록
@@ -2241,19 +2251,20 @@ def run_step(
             기록.setdefault("attribution_error", {})[str(acct["id"])] = str(exc)[:200]
     if 읽기0 is not None:
         기록["reads"] = getattr(client.reads, "total", 0) - 읽기0
-    머리 = ["🧪 가상모의투자 " + " · ".join(글 for 글 in 줄 if not 글.startswith("⚠️"))]
+    머리 = ["🧪 가상모의투자 (평가 · 손익 · 이번 실행 체결)", *(글 for 글 in 줄 if not 글.startswith("⚠️"))]
     # 실제 투자와 같은 기간 비교 (2026-10-15 사용자 지시, 25.1448) — 곁다리. 못 읽으면 그 줄만 빠진다
     try:
         비교 = real_comparison(client)
     except Exception as exc:  # noqa: BLE001 — 비교 줄만 빠진다. 까닭은 기록에
         비교 = None
         기록["real_compare_error"] = str(exc)[:200]
-    if 비교:
-        기록["real_compare"] = 비교
-        머리.append(str(pp.compare_line(비교)))
     if frozen:
         머리.append(pp.frozen_line(frozen, set(기록.get("action_sticky") or [])))
-    return 머리 + 메모줄 + [글 for 글 in 줄 if 글.startswith("⚠️")], 기록
+    if 비교:
+        기록["real_compare"] = 비교
+        머리 += ["", *str(pp.compare_line(비교)).split("\n")]
+    # 절 사이에 빈 줄(25.1721, 리포트 가독성)
+    return 머리 + ([""] + 메모줄 if 메모줄 else []) + [글 for 글 in 줄 if 글.startswith("⚠️")], 기록
 
 
 PAPER_SUMMARY_SQL = (
@@ -2333,7 +2344,7 @@ def summary_section(client: Any, now: datetime) -> list[str]:
         비교줄 = f"  실제 투자와 비교를 못 했습니다 ({type(exc).__name__})"
     if 줄 and 비교줄:
         자리 = next((i for i, x in enumerate(줄) if x.startswith("[가상모의투자 월간")), len(줄))
-        줄.insert(자리, "  " + 비교줄.strip())
+        줄[자리:자리] = ["  " + x.strip() if i == 0 else "  " + x for i, x in enumerate(비교줄.split("\n"))]
     # 월간 복기에 성과 분해 (25.1450) — 계좌마다 성과 분해가 **적힌** 마지막 평가 행의 것(25.1690 — 마지막 행이 비면
     # 그 계좌 줄이 통째로 빠졌다)
     if 달초 and 줄:

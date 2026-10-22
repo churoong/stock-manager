@@ -76,8 +76,9 @@ def test_company_buys_only_what_committee_passed(c: Client, monkeypatch: pytest.
     산것 = c.q("SELECT detail_json, rule_version FROM paper_decisions WHERE account_id = 'A' AND stock_id = 1")
     assert json.loads(산것[0][0])["committee"]["vote"] == pytest.approx(2.0) and 산것[0][1] == 2
     assert c.q("SELECT DISTINCT rule_version FROM paper_decisions WHERE account_id = 'B'") == [(1,)]
-    # 운용역 메모 한 줄
-    assert any(x.startswith("🏛 A 가치투자사 위원회:") for x in 줄)
+    # 운용역 메모 — 회의 수 한 줄 + "가장 높은 표" 들여 쓴 한 줄(25.1721, 리포트 가독성)
+    i = next(k for k, x in enumerate(줄) if x.startswith("🏛 A 가치투자사 위원회:"))
+    assert "가장 높은 표" not in 줄[i] and 줄[i + 1].startswith("   가장 높은 표 ")
     assert 기록["accounts"]["A"]["committee"]["approved"] == 1
 
     # 같은 날 다시 — 회의록·결정·주문이 두 번 생기지 않는다

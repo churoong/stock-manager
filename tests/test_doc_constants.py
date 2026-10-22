@@ -1054,7 +1054,7 @@ class Test이웃_모듈들:
         검사(DESK, f"{round(dk.CHAMPION_WIN_SHARE * 100)}%(`CHAMPION_WIN_SHARE` {dk.CHAMPION_WIN_SHARE:g})", "챔피언 이긴 비율 (25.1508)")
         검사(DESK, f"앞 {dk.REPORT_MAX_CHECKS}개(`REPORT_MAX_CHECKS`)", "운용 보고 확인할 일 수 (25.1510)")
         검사(DESK, f"위 {dk.REPORT_TOP_ACCOUNTS}개(`REPORT_TOP_ACCOUNTS`)", "운용 보고 순위 수 (25.1510)")
-        검사(DESK, f"{dk.REPORT_MAX_ORDERS}건(`REPORT_MAX_ORDERS`)", "운용 보고 주문 수 (25.1510)")
+        검사(DESK, f"{dk.REPORT_MAX_ORDERS}종목(`REPORT_MAX_ORDERS`)", "운용 보고 주문 수 (25.1510)")
         검사(DESK, "무작위 대조 R1·R2 평균", "R 대비 기준선 (25.1501)")
         검사(DESK, f"지정가의 {dk.PI_CLOSE_FLOOR * 100:g}%(`PI_CLOSE_FLOOR`)", "시가 개선 분할 막이 (25.1517)")
         검사(DESK, f"{dj.H_START_SCAN}날(`H_START_SCAN`)", "대보기 시작 훑는 날 (25.1517)")

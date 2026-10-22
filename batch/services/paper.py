@@ -887,14 +887,19 @@ def compare_real(
 
 
 def compare_line(c: dict[str, Any] | None) -> str | None:
-    """리포트·요약에 싣는 한 줄. 견줄 수 없으면 None."""
+    """리포트·요약에 싣는 줄들(줄바꿈으로 이음). 견줄 수 없으면 None.
+
+    머리 한 줄 + 들여 쓴 실제·가상·단서 줄(25.1721, 리포트 가독성 — 예전엔 한 줄에 아홉 계좌와 단서가 다 실렸다)
+    """
     if not c:
         return None
     늦음 = c.get("paper_start") or {}
     모의 = " · ".join(f"{aid} {_퍼센트(v)}" + (f"({늦음[aid]}부터)" if aid in 늦음 else "")
                      for aid, v in c["paper_pct"].items())  # fmt: skip
-    return (f"실제 투자와 비교({c['start']}~{c['end']}, 시간가중): 실제 {_퍼센트(c['real_pct'])} · {모의}"
-            " — 실제는 보유분만·배당 포함, 모의는 현금 포함·배당 없음")  # fmt: skip
+    return "\n".join([
+        f"실제 투자와 비교 ({c['start']}~{c['end']}, 시간가중)", f"  실제 {_퍼센트(c['real_pct'])}", f"  가상 {모의}",
+        "  (실제는 보유분만·배당 포함, 가상모의투자는 현금 포함·배당 없음)",
+    ])  # fmt: skip
 
 
 #: 결정 원장의 성과 창 — 기준 뒤 몇 번째 거래일(그 종목 시세 행) 종가인가 (docs/paper.md 9장)

@@ -119,7 +119,7 @@ def test_order_fill_rerun_and_stop_loss(client: Client, monkeypatch: pytest.Monk
     assert 주문 == [("A", 1, 10_000, 4, "2026-10-15"), ("A", 2, 9_800, 3, "2026-10-15"), ("A", 3, 9_600, 3, "2026-10-15"),
                   ("B", 1, 10_000, 4, "2026-10-15"), ("B", 2, 9_800, 3, "2026-10-15"),
                   ("B", 3, 9_600, 3, "2026-10-15")]  # fmt: skip
-    assert "가상모의투자 A: 평가 1,000,000원" in 줄[0]
+    assert "  A 100만원 · 손익 +0.0% · 체결 0건" in 줄
     assert 기록["accounts"]["A"]["orders"] == 3
 
     # 다음 장: 종가 9,900 — 1회차(10,000)만 찬다. 장중 저가로 닿았을 2·3회차는 놓친다(보수)
@@ -334,8 +334,8 @@ def test_real_portfolio_comparison_line(client: Client, monkeypatch: pytest.Monk
     )  # fmt: skip
     _시세(c, "2026-10-15", 10_100, 9_900)
     줄, 기록 = _하루(c, monkeypatch, "2026-10-15", signals=False)
-    비교 = [x for x in 줄 if x.startswith("실제 투자와 비교")]
-    assert len(비교) == 1 and "실제 +" in 비교[0]
+    비교 = [i for i, x in enumerate(줄) if x.startswith("실제 투자와 비교")]
+    assert len(비교) == 1 and 줄[비교[0] + 1].startswith("  실제 +") and 줄[비교[0] + 2].startswith("  가상 ")
     assert 기록["real_compare"]["start"] == "2026-10-14"
     assert c.q("SELECT COUNT(*) FROM portfolio_values") == [(3,)]  # 읽기만 했다
 

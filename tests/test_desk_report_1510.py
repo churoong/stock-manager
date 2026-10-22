@@ -35,16 +35,20 @@ def test_report_lines_by_hand() -> None:
     줄 = desk.report_lines(칸, board, "H", prev_kis=[{"status": "accepted"}, {"status": "accepted"}, {"status": "rejected"}],
                          kis_state="이 주문을 접수 시간에 그대로 냅니다")  # fmt: skip
     assert 줄[0].startswith("📊 운용 보고")
-    assert 줄[1] == "확인할 일: ❗멈춤 / a / b 외 1건"
-    assert 줄[2] == "순위(공통 구간 2026-10-16부터): C +3.00%(R 대비 +2.50%p) · A +2.00%(R 대비 +1.50%p) · B +1.00%(R 대비 +0.50%p) … H(KIS) -1.00%(R 대비 -1.50%p)"
-    assert 줄[3] == "H 체결(판정 2026-10-16): 매수 삼성 3주 @ 9,800원"
-    assert 줄[4].startswith("H 다음 장(2026-10-19) 주문: 매수 종목0 1주 $10.50 · ") and 줄[4].endswith("외 2건")
-    assert 줄[5] == "다른 계좌 — 체결 A 2 · C 1 / 주문 B 3"
-    assert 줄[6] == "KIS모의투자: 이 주문을 접수 시간에 그대로 냅니다 · 지난 실행 보낸 결과 접수 2 · 거부 1(체결은 다음 실행이 맞춤)"
+    # 항목마다 줄을 나누고 들여 쓴다(25.1721 — 예전엔 한 줄에 " · " 로 이어 폰에서 한 문단이 됐다)
+    assert 줄[1:6] == ["▸ 확인할 일", "  ❗멈춤", "  a", "  b", "  … 외 1건"]
+    assert 줄[6:11] == ["▸ 순위 (공통 구간 2026-10-16부터)", "  1. C +3.00% (R 대비 +2.50%p)",
+                        "  2. A +2.00% (R 대비 +1.50%p)", "  3. B +1.00% (R 대비 +0.50%p)",
+                        "  … H(KIS) -1.00% (R 대비 -1.50%p)"]  # fmt: skip
+    assert 줄[11:13] == ["▸ H 체결 (판정 2026-10-16)", "  매수 삼성 3주 @ 9,800원"]
+    assert 줄[13] == "▸ H 다음 장 주문 (2026-10-19)" and 줄[14] == "  매수 종목0 1주 $10.50" and 줄[19] == "  … 외 2종목"
+    assert 줄[20:23] == ["▸ 다른 계좌 (건)", "  체결 A 2 · C 1", "  주문 B 3"]
+    assert 줄[23:] == ["▸ KIS모의투자: 이 주문을 접수 시간에 그대로 냅니다",
+                       "  지난 실행 보낸 결과: 접수 2 · 거부 1 (체결은 다음 실행이 맞춤)"]  # fmt: skip
     # 비었으면 "없음", KIS 상태를 모르면 그 줄을 뺀다
     빈 = desk.report_lines(_칸(), {"rows": []}, "H")
-    assert 빈[1:] == ["확인할 일: 없음", "H 체결(판정 2026-10-16): 없음", "H 다음 장(2026-10-19) 주문: 없음",
-                      "다른 계좌 — 체결 없음 / 주문 없음"]  # fmt: skip
+    assert 빈[1:] == ["▸ 확인할 일: 없음", "▸ H 체결 (판정 2026-10-16): 없음", "▸ H 다음 장 주문 (2026-10-19): 없음",
+                      "▸ 다른 계좌 (건)", "  체결 없음", "  주문 없음"]  # fmt: skip
 
 
 def test_with_head_keeps_header_block_on_top() -> None:
@@ -62,9 +66,11 @@ def test_report_lines_kis_state_and_young_champion() -> None:
     칸 = _칸(orders_h=[{"side": "buy", "name": "가", "quantity": 1, "order_type": "market", "limit_price": None,
                       "currency": "KRW", "fill_session": "2026-10-20"}])  # fmt: skip
     줄 = desk.report_lines(칸, board, "H", prev_kis=None, kis_state="멈춤 스위치가 켜져 있어 내지 않습니다")
-    assert 줄[2] == "순위(공통 구간 2026-10-16부터): C +3.00%(R 대비 +2.50%p) … H(KIS) +1.00% — 갓 엶, 개설 후"
-    assert 줄[4] == "H 다음 장(2026-10-20) 주문: 매수 가 1주 시장가"  # 장 끝난 뒤 손 실행 — 주문의 장
-    assert 줄[-1] == "KIS모의투자: 멈춤 스위치가 켜져 있어 내지 않습니다"  # 지난 실행을 모르면 그 부분을 뺀다
+    assert 줄[2:5] == ["▸ 순위 (공통 구간 2026-10-16부터)", "  1. C +3.00% (R 대비 +2.50%p)",
+                       "  … H(KIS) +1.00% — 갓 엶, 개설 후"]  # fmt: skip
+    # 장 끝난 뒤 손 실행 — 주문의 장
+    assert 줄[6:8] == ["▸ H 다음 장 주문 (2026-10-20)", "  매수 가 1주 시장가"]
+    assert 줄[-1] == "▸ KIS모의투자: 멈춤 스위치가 켜져 있어 내지 않습니다"  # 지난 실행을 모르면 그 부분을 뺀다
 
 
 def test_report_head_reads_last_kis(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -81,19 +87,20 @@ def test_report_head_reads_last_kis(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(k, raising=False)
     줄 = job.report_head(c, "KR", datetime(2026, 10, 18, 23, 40, tzinfo=UTC), trade_date="2026-10-16",
                         session_date="2026-10-19", step_log={"paper": {"accounts": {}}}, warnings=[])  # fmt: skip
-    assert "B 다음 장(2026-10-19) 주문: 매수 종목1 3주 9,800원" in 줄
+    i = 줄.index("▸ B 다음 장 주문 (2026-10-19)")
+    assert 줄[i + 1] == "  매수 종목1 3주 9,800원"
     # 키가 없으면 "꺼짐(키 없음)" — 늘 "냅니다" 라 하지 않는다(25.1512 검토 1)
-    assert 줄[-1] == "KIS모의투자: 꺼짐(키 없음) · 지난 실행 보낸 결과 거부 1(체결은 다음 실행이 맞춤)"
+    assert 줄[-2:] == ["▸ KIS모의투자: 꺼짐(키 없음)", "  지난 실행 보낸 결과: 거부 1 (체결은 다음 실행이 맞춤)"]
     monkeypatch.setenv("KIS_VTS_APP_KEY", "k")
     monkeypatch.setenv("KIS_VTS_APP_SECRET", "s")
     monkeypatch.setenv("KIS_VTS_ACCOUNT", "12345678-01")
     켜짐 = job.report_head(c, "KR", datetime(2026, 10, 18, 23, 40, tzinfo=UTC), trade_date="2026-10-16",
                           session_date="2026-10-19", step_log={"paper": {"accounts": {}}}, warnings=[], after_close=True)  # fmt: skip
-    assert 켜짐[-1].startswith("KIS모의투자: 장 끝난 뒤 실행이라 오늘은 내지 않습니다")
+    assert 켜짐[-2].startswith("▸ KIS모의투자: 장 끝난 뒤 실행이라 오늘은 내지 않습니다")
     c.conn.execute("INSERT INTO settings (key, value, updated_at) VALUES ('paper_halt', '{\"on\": true}', 't')")
     assert job.report_head(c, "KR", datetime(2026, 10, 18, 23, 40, tzinfo=UTC), trade_date="2026-10-16",
                            session_date="2026-10-19", step_log={"paper": {"accounts": {}}}, warnings=[]
-                           )[-1].startswith("KIS모의투자: 멈춤 스위치가 켜져 있어 내지 않습니다")  # fmt: skip
+                           )[-2].startswith("▸ KIS모의투자: 멈춤 스위치가 켜져 있어 내지 않습니다")  # fmt: skip
     # 운용 요약 줄이 없으면 지난 실행은 모름 — "낸 주문 없음" 이라 하지 않는다
     c.conn.execute("DELETE FROM paper_desk")
     assert "지난 실행" not in job.report_head(c, "KR", datetime(2026, 10, 18, 23, 40, tzinfo=UTC),
