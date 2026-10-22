@@ -517,3 +517,30 @@ def test_order_basis_is_rechecked_right_before_writing(client: Client, monkeypat
                  price_series={}, series_unknown={}, allocate=True)  # fmt: skip
     기준 = dict(c.q("SELECT account_id, MIN(fill_basis) FROM paper_orders GROUP BY account_id"))
     assert 기준.get("A") == "open" and 기준.get("B") == "close"
+
+
+def test_buy_basis_is_rechecked_after_allocation(client: Client, monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1708 (25.1707 교차검증 [참고]) — 매도 문장 뒤, 매수 위험 점검(배분 뒤) 동안 개장을 넘기면 그 계좌 매수는 종가.
+    매도 쪽 다시 재기만으로는 못 잡는 자리"""
+    c = client
+    열림 = datetime.fromisoformat("2026-10-15T00:00:00+00:00")
+    지금 = {"t": 열림 - timedelta(minutes=1)}
+
+    class _시계(datetime):
+        @classmethod
+        def now(cls, tz=None):  # noqa: ANN001, ANN206
+            return 지금["t"]
+
+    진짜 = job.rg.gate
+
+    def 느린(후보, 문맥):  # noqa: ANN001, ANN202 — 첫 매수 점검에서 개장을 넘긴다
+        if any(x.side == "buy" for x in 후보):
+            지금["t"] = 열림 + timedelta(minutes=1)
+        return 진짜(후보, 문맥)
+
+    monkeypatch.setattr(cal, "local_today", lambda _m=None: cal.next_session("KR", date(2026, 10, 14)))
+    monkeypatch.setattr(job, "datetime", _시계)
+    monkeypatch.setattr(job.rg, "gate", 느린)
+    job.run_step(c, market="KR", trade_date="2026-10-14", late=False, signal_rows=[_신호()], settings=설정,
+                 price_series={}, series_unknown={}, allocate=True)  # fmt: skip
+    assert c.q("SELECT DISTINCT side, fill_basis FROM paper_orders") == [("buy", "close")]

@@ -45,7 +45,7 @@ def test_가상모의투자_단계가_받은_시세_날짜를_넘긴다(client: 
 
     def 가짜(*a: Any, **k: Any) -> dict[str, int]:
         받음.append((a, k))
-        return {"pending_read": 0, "filled": 0, "gave_up": 0, "full_bands": 0, "close_backlog": 0}
+        return {"pending_read": 0, "filled": 0, "gave_up": 0, "full_bands": 0}
 
     monkeypatch.setattr(job, "fill_outcomes", 가짜)
     _하루(client, monkeypatch, "2026-10-14")

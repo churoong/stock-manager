@@ -22,7 +22,9 @@ from pathlib import Path
 
 뿌리 = Path(__file__).resolve().parent.parent
 
-#: (파일, 이름) → 마지막으로 확인한 논리 지문 (2026-10-22 25.1700 고정, 파이썬 3.12)
+#: (파일, 이름) → 마지막으로 확인한 논리 지문 (2026-10-22 25.1700 고정, 파이썬 3.12). 25.1708: R 전용 후보 풀(`UNIVERSE_SQL`)·
+#: 든 대체 종목 잇기(`held_substitutes`·`SUBSTITUTE_ORDERS_SQL`)·가상 대조 묵음(`CONTROL_STALE_DAYS`) 더함(25.1700
+#: 교차검증 [권고]). `run_step` 안의 호출 인자(`today=`·`cooldown=`)는 함수 전체를 묶어야 해 넣지 않았다 — 알고 둔 빈틈
 고정 = {
     ("batch/services/paper.py", "random_order"): "f7370bfc4208",
     ("batch/services/paper.py", "control_picks"): "d76daecaa849",
@@ -37,6 +39,10 @@ from pathlib import Path
     ("batch/jobs/paper.py", "SNAPSHOT_AT_SQL"): "fa0e7436b8da",
     ("batch/jobs/paper.py", "UNIVERSE_AT_SQL"): "5a07b84d5e50",
     ("batch/jobs/paper.py", "CLOSE_ON_OR_BEFORE_SQL"): "bfd792951af1",
+    ("batch/jobs/paper.py", "UNIVERSE_SQL"): "ce77214ad6b5",
+    ("batch/jobs/paper.py", "SUBSTITUTE_ORDERS_SQL"): "43a1dcf4a8fb",
+    ("batch/jobs/paper.py", "held_substitutes"): "824ba41940b8",
+    ("batch/jobs/paper.py", "CONTROL_STALE_DAYS"): "504632c8fea2",
 }
 
 
@@ -44,7 +50,9 @@ def _조각(path: Path, 이름: str) -> str:
     글 = path.read_text(encoding="utf-8")
     for n in ast.parse(글).body:
         if isinstance(n, ast.FunctionDef) and n.name == 이름:
-            return textwrap.dedent(ast.get_source_segment(글, n) or "")
+            # 데코레이터(`@cache` 등)도 판단을 바꾼다 — 구문 조각에 들지 않아 따로 붙인다(25.1708)
+            장식 = "".join(f"@{ast.get_source_segment(글, d)}\n" for d in n.decorator_list)
+            return 장식 + textwrap.dedent(ast.get_source_segment(글, n) or "")
         if isinstance(n, ast.Assign | ast.AnnAssign):
             표적 = n.targets if isinstance(n, ast.Assign) else [n.target]
             if any(isinstance(t, ast.Name) and t.id == 이름 for t in 표적):

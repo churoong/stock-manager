@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from batch.jobs import broker_mirror as job
 from batch.services import broker_mirror as bm
 from tests.test_broker_realized_1694 import _Client, _o
@@ -190,3 +192,13 @@ def test_기록_밖_매도_뒤_다시_사도_원가가_맞다() -> None:
     # 유령 매수 — 기록은 4주가 찼는데 KIS 는 안 참. 기준점 사이 매수가 있으니 줄이지 않고 모름
     assert bm.realized(rows[:2] + [_o(4, "2026-10-20", "sell", 10, 150.0)], lambda d: None, {},
                        [("2026-10-15", {"C1": 10}), ("2026-10-20", {"C1": 10})])[4] == (None, None)  # fmt: skip
+
+
+def test_미국_줄이기는_현지_원가와_원화_원가를_같이() -> None:
+    """25.1708 (25.1705 교차검증 [권고]) — 미국 10주 @100(1,300원), 4주 기록 밖 매도(KIS 6). 6주 @120(1,250원) 매도:
+    원화 원가 780,000 → 실현 900,000 − 780,000 = 120,000, 환차 = 현지 원가 600 × 1,250 − 780,000 = −30,000.
+    현지 원가를 줄이지 않으면 환차가 +470,000 으로 적힌다"""
+    rows = [_o(1, "2026-10-14", "buy", 10, 100.0, market="US"), _o(2, "2026-10-19", "sell", 6, 120.0, market="US")]
+    환율 = {"2026-10-14": 1_300.0, "2026-10-19": 1_250.0}
+    r = bm.realized(rows, 환율.get, {}, [("2026-10-15", {"C1": 10}), ("2026-10-16", {"C1": 6})])
+    assert r == {2: (pytest.approx(120_000.0), pytest.approx(-30_000.0))}
