@@ -308,7 +308,9 @@ def write(
                          version=지금판.get("version"), index=그림자.get(h), cash=현금.get(h),
                          control_cash={r: 현금.get(r) or [] for r in desk.CONTROL_IDS},
                          valuation=_멈춘평가(client, h, str(지금판.get("from") or "")),
-                         판시작={a: str((줄 or [{}])[-1].get("from") or "") for a, 줄 in 판이력.items()})  # fmt: skip
+                         판시작={a: str((줄 or [{}])[-1].get("from") or "") for a, 줄 in 판이력.items()},
+                         판버전={a: int((줄 or [{}])[-1].get("version") or 1) for a, 줄 in 판이력.items()},
+                         그림자=그림자)  # fmt: skip
     if 판오류:
         # 판 이력을 못 읽으면 "지금 판" 의 시작을 모른다 — since='' 로 관문을 내면 모든 판의 평가를 지금 판으로
         # 섞어 셌다(25.1573, 운용 감사 [참고]). 관문을 비우고 까닭을 화면(gate_error)에 올린다.
@@ -316,7 +318,7 @@ def write(
         # [필수] 3 — 예전 주석 "판과 무관" 은 25.1575 가 챔피언을 지금 판 구간으로 좁힌 뒤로 틀렸다).
         # 위험판은 판과 무관해 둔다
         관문오류 = f"판 이력을 읽지 못해 관문을 내지 않음(판을 섞지 않게, 챔피언 후보도 비움) — {판오류}"
-        관문판 = {**관문판, "gate": None, "champion": [], "gate_error": 관문오류}
+        관문판 = {**관문판, "gate": None, "champion": [], "prereg_status": {}, "gate_error": 관문오류}
     공통 = {"leaderboard": 순위, "rule_history": 판이력, "mirror_account": h, "updated_at": 지금, "last_market": market,
           **관문판,
           "kis_account": {"as_of": kis[0]["as_of"] if kis else None, "account_krw": 요약.get("account_krw"),
@@ -481,6 +483,8 @@ def _관문판(
     cash: list[tuple[str, float, float]] | None = None, 판시작: dict[str, str] | None = None,
     control_cash: dict[str, list[tuple[str, float, float]]] | None = None,
     valuation: dict[str, list[tuple[str, float]]] | None = None,
+    판버전: dict[str, int] | None = None,
+    그림자: dict[str, list[tuple[str, float | None, float | None, float]]] | None = None,
 ) -> tuple[dict[str, Any], str | None]:
     """실전 전환 관문·위험판·챔피언 교체 후보 (docs/desk.md 6장, 25.1508) — 실패해도 운용 요약은 적는다.
 
@@ -522,13 +526,16 @@ def _관문판(
             latest[a] = {"equity": r["equity_krw"], "holdings": r["holdings_krw"], "positions": 종목}
         늦음창 = (now - timedelta(days=desk.READY_WINDOW_DAYS)).astimezone(cal.market_tz("KR")).date().isoformat()
         늦음 = client.execute(BATCH_DELAY_SQL, [desk.READY_LATE_SEC, job_name("KR"), job_name("US"), 늦음창]).dicts()
-        판 = {"gate": 관문, "risk": desk.risk_board(latest, 계열, 손절),
+        # 판마다 사전 등록 지표의 오늘 값(25.1710) — 날마다 이 줄에 남아 판정 시점의 값을 나중에 그대로 읽는다
+        판들 = {a: (int(v), 판시작.get(a, "")) for a, v in (판버전 or {}).items()}
+        사전 = desk.prereg_status(계열, 판들, 증거, 그림자 or {})
+        판 = {"gate": 관문, "risk": desk.risk_board(latest, 계열, 손절), "prereg_status": 사전,
              "champion": desk.champion(계열, h, 증거, 판시작),
              "readiness": desk.readiness(runs=늦음[0] if 늦음 else None, kis=kis요약), "gate_error": None}  # fmt: skip
         return 판, None
     except Exception as exc:  # noqa: BLE001 — 곁다리 안의 곁다리
         글 = f"{type(exc).__name__}: {str(exc)[:120]}"
-        return {"gate": None, "risk": [], "champion": [], "readiness": [], "gate_error": 글}, 글
+        return {"gate": None, "risk": [], "champion": [], "readiness": [], "prereg_status": {}, "gate_error": 글}, 글
 
 
 def _this_version_evidence(row: dict[str, Any]) -> dict[str, Any]:

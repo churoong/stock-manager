@@ -170,6 +170,29 @@ def prereg(account: str, version: int) -> dict[str, Any] | None:
     return None if x is None else {"metric": PREREG_METRIC, **x}
 
 
+def prereg_status(
+    series: dict[str, list[tuple[str, float]]], versions: dict[str, tuple[int, str]],
+    evidence: dict[str, dict[str, Any]], index: dict[str, list[tuple[str, float | None, float | None, float]]],
+) -> dict[str, dict[str, Any]]:
+    """판마다 사전 등록 지표(`PREREG_METRIC`)의 **오늘 값** — {계좌: {version, from, n_blocks, lower, vs_index, vs_r}}
+    (25.1710, 결정 원장 감사 [권고] 7 — 25.1691 에 남긴 것). 관문은 H 만 계산해 A·B·C·D·E·G 판을 판정할 값이 날마다
+    남지 않았다 — 나중에 "묶음 6 에 처음 닿은 날" 의 값을 그대로 읽으려면 그날 값을 그날 적어 둬야 한다(날마다
+    다시 셈하면 날마다 들여다보는 꼴). 운용 요약 줄(`paper_desk`, 하루 한 줄)에 실린다 — 읽기 0.
+    `versions` = {계좌: (지금 판, 판 시작 결정일)}. 대조(R1·R2)는 뺀다. 관문과 같은 식(`gate` 의 칸)이라 잣대가 같다
+    """
+    out: dict[str, dict[str, Any]] = {}
+    for a, (판, 시작) in sorted(versions.items()):
+        if a in CONTROL_IDS or not series.get(a):
+            continue
+        g = gate(series, a, since=시작, version=판, recon_bad_days=0, batch_failed=0, kis=None,
+                 evidence=evidence.get(a), index=index.get(a))  # fmt: skip
+        칸 = {i["key"]: i for i in g["items"]}
+        out[a] = {"version": 판, "from": g["from"], "points": 칸["days"]["now"], "n_blocks": 칸["selection"]["n"],
+                  "lower": 칸["selection"]["now"], "vs_index": 칸["vs_index"]["now"],
+                  "vs_r": 칸["vs_r"]["now"]}  # fmt: skip
+    return out
+
+
 # ── 실전 전환 관문 · 위험판 · 챔피언 교체 후보 (docs/desk.md 6장, 25.1508·25.1511) ──────────────────────────────
 # 읽기 전용 계산이다 — 관문을 넘었다고 아무것도 열리지 않는다. 다음 단계는 사용자가 정한다(CLAUDE.md 단계 관문).
 # 문턱은 모두 **첫 값**이다 `[확인필요]` — 근거 없음, 쌓인 기록을 보고 사용자와 다시 정한다.
