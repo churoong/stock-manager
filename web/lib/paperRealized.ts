@@ -120,7 +120,8 @@ export interface RealizedReport {
   costs: Record<string, number>;
   /** 실현손익이 비어 있는 매도(팔 때 장부 보유 없음) — 합에 넣지 않는다 */
   unknown: number;
-  byDay: Array<RealizedGroup & { cumulative: number }>;
+  /** `cumulative` 는 아는 매도가 처음 나온 날부터 — 그 앞은 null(모름) */
+  byDay: Array<RealizedGroup & { cumulative: number | null }>;
   byStock: RealizedGroup[];
 }
 
@@ -179,8 +180,17 @@ export function realizedReport(rows: RealizedRow[], byTicker = false): RealizedR
   }
   // 환차 몫을 모르는 매도가 있으면 주가 몫도 모른다 — 아는 것끼리만 빼지 않는다
   out.price = out.fxUnknown ? NaN : out.realized - out.fx;
+  // 아는 매도가 나오기 전의 누적은 0원이 아니라 모름(null, 25.1724 — 25.1722 교차검증 [참고] 2)
   let 누적 = 0;
-  out.byDay = [...일.values()].map((g) => ({ ...g, cumulative: (누적 += g.realized) }));
-  out.byStock = [...종목.values()].sort((a, b) => b.realized - a.realized || a.label.localeCompare(b.label));
+  let 앎 = false;
+  out.byDay = [...일.values()].map((g) => {
+    누적 += g.realized;
+    앎 ||= g.n > 0;
+    return { ...g, cumulative: 앎 ? 누적 : null };
+  });
+  // 모름뿐인 종목은 맨 뒤 — 0원 자리(이익과 손실 사이)에 끼지 않게(25.1724, 25.1722 교차검증 [권고] 1)
+  out.byStock = [...종목.values()].sort(
+    (a, b) => Number(a.n === 0) - Number(b.n === 0) || b.realized - a.realized || a.label.localeCompare(b.label),
+  );
   return out;
 }

@@ -202,7 +202,7 @@ function RealizedView({ url, costs, note, unknownNote, byTicker = false }: {
                       <td className="text-right">{countCell(d)}</td>
                       <td className={`text-right ${tone(d.n ? d.realized : null)}`}>{realizedCell(d)}</td>
                       {보고.hasForeign ? <td className={`text-right ${tone(d.fx)}`}>{fxCell(d)}</td> : null}
-                      <td className={`text-right ${tone(d.cumulative)}`}>{won(d.cumulative)}</td>
+                      <td className={`text-right ${tone(d.cumulative)}`}>{d.cumulative == null ? "—" : won(d.cumulative)}</td>
                     </tr>
                   ))}
                 </tbody>

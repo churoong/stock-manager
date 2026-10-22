@@ -550,8 +550,9 @@ function SummaryPane({ a }: { a: Account }) {
     [`보유 평가액${v.asOf ? ` (${v.asOf})` : ""}`, won(v.holdings), null],
     ["평가 총액", won(v.equity), null],
     ["총 손익 (평가 총액 − 총 입금액)", `${won(v.pnl)} (${pctText(v.pnlPct)})`, v.pnl],
-    ["평가손익 (보유분, 아직 안 판 것)", won(v.unrealized), v.unrealized],
-    ["실현손익 (판 것, 비용 반영)", won(v.realized), v.realized],
+    // 원화 합이라 해외 종목은 환차가 섞여 있다 — 나눈 값은 보유 표(USD 환차 뺀 %)와 실현손익 탭(25.1724, 웹 감사 [권고] 4)
+    ["평가손익 (보유분, 아직 안 판 것 · 해외는 환차 포함)", won(v.unrealized), v.unrealized],
+    ["실현손익 (판 것, 비용 반영 · 해외는 환차 포함)", won(v.realized), v.realized],
     ["시간가중 수익률", pctText(v.twrPct), v.twrPct],
     ["같은 돈을 KOSPI · S&P500 에", `${pctText(v.kospiPct)} · ${pctText(v.sp500Pct)}`, null],
   ];

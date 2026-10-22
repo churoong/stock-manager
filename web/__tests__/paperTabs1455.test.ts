@@ -46,9 +46,9 @@ function 그림(acct: string, sub: SubTab): string {
 describe("모의 계좌 탭", () => {
   it("요약 — 총 손익·평가손익·실현손익을 따로", () => {
     const html = 그림("A", "summary");
-    expect(html).toContain("평가손익 (보유분, 아직 안 판 것)");
+    expect(html).toContain("평가손익 (보유분, 아직 안 판 것 · 해외는 환차 포함)");
     expect(html).toContain("9,985원");
-    expect(html).toContain("실현손익 (판 것, 비용 반영)");
+    expect(html).toContain("실현손익 (판 것, 비용 반영 · 해외는 환차 포함)");
     expect(html).toContain("-5,000원");
     expect(html).toContain("모의 A");
     expect(html).toContain("가상 B");
