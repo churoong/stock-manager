@@ -50,7 +50,8 @@ export const SUCCESS_WINDOW_HOURS = 12;
 
 export const WATCHES: Watch[] = [
   { job: "daily_kr", market: "KR", label: "국내 일일 배치", dueOffsetMinutes: 20, where: "GitHub Actions → 일일 배치 (국내)", schedule: "매 거래일 08:27 KST (cron-job.org → daily-kr.yml), 실패·건너뜀이면 09:35 KST 예비 실행", retryNote: "09:35 KST 에 예비 실행이 한 번 더 시도합니다 — 그 뒤에도 없으면 손으로 확인하세요" },
-  { job: "daily_us", market: "US", label: "미국 일일 배치", dueOffsetMinutes: 0, where: "GitHub Actions → 일일 배치 (미국)", schedule: "미국 정규장 1시간 전 (08:27 ET, daily-us.yml)" },
+  // 재시도 안내는 실패 알림(`cal.next_scheduled_hint`)과 같게 — 14:27 UTC(23:27 KST) 예비 (25.1678·25.1683)
+  { job: "daily_us", market: "US", label: "미국 일일 배치", dueOffsetMinutes: 0, where: "GitHub Actions → 일일 배치 (미국)", schedule: "미국 정규장 1시간 전 (08:27 ET, daily-us.yml), 실패·건너뜀이면 23:27 KST 예비 실행", retryNote: "23:27 KST(개장 무렵)에 예비 실행이 한 번 더 시도합니다 — 그 뒤에도 없으면 손으로 확인하세요" },
   { job: "sentiment", market: "KR", label: "국내 뉴스 감성 채점", dueOffsetMinutes: -30, where: "GitHub Actions → 국내 뉴스 감성", schedule: "매 거래일 07:40 KST (sentiment-kr.yml)" },
 ];
 

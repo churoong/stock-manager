@@ -2036,7 +2036,7 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
             return 0
         # **그날 리포트를 이미 보냈으면 예약 재실행은 다시 보내지 않는다** (25.600, 감사). 발송 뒤 기록을 못
         # 닫으면(한도·시간 초과)
-        # 성공 기록이 없어 예비 예약(국내 08:27·미국 12:27/13:27 UTC)이 리포트 전체를 한 번 더 보냈다. 수동
+        # 성공 기록이 없어 예비 예약(국내 09:35·미국 12:27/13:27/14:27 UTC)이 리포트 전체를 한 번 더 보냈다. 수동
         # 실행(force)은 사람이 원한 것이라 막지 않는다
         if not force and reports.sent_exists(client, market, decision.trade_date):
             print(
