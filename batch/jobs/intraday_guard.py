@@ -42,7 +42,8 @@ from batch.sources import kis_vts as kv
 from batch.sources.kis import KisFailed
 
 log = logging.getLogger("intraday_guard")
-JOB_NAME = "kis_guard"
+#: 실행 기록 이름 = 모듈 이름(주간 요약의 기대 주기 표가 워크플로의 `-m batch.jobs.<이름>` 으로 대 본다)
+JOB_NAME = "intraday_guard"
 
 #: 감시선을 담는 설정 키 — {시장: {as_of, account, rule, lines: {종목 id: 선}}}. 아침 가상모의투자 단계가 적는다
 GUARD_KEY = "kis_guard_lines"
@@ -58,16 +59,25 @@ BATCH_RUNNING_SQL = (
     "SELECT 1 FROM batch_runs WHERE job_name IN ('daily_kr', 'daily_us') AND status = 'running' AND started_at >= ?"
     " LIMIT 1"
 )
-#: 오늘 이미 장중 매도를 낸 종목 — 한 종목 하루 한 번(유일 색인 `idx_paper_broker_cleanup` 도 막는다)
+#: 오늘 이미 장중 매도를 낸 종목 — 한 종목 하루 한 번(유일 색인 `idx_paper_broker_cleanup` 도 막는다). 다만
+#: **순간 거부**(초당 한도·토큰)는 같은 줄로 다시 보낸다 — 색인이 둘째 줄을 막아 첫 시도가 한도에 걸리면 그날
+#: 내내 손절이 안 나갔다(25.1769, 25.1768 교차검증 [권고])
 GUARDED_TODAY_SQL = (
-    "SELECT stock_id FROM paper_broker_orders WHERE broker = ? AND trade_date = ? AND side = 'sell'"
-    " AND reason IN (?, ?)"
+    "SELECT id, stock_id, status, message FROM paper_broker_orders WHERE broker = ? AND trade_date = ?"
+    " AND side = 'sell' AND reason IN (?, ?)"
 )
+#: 다시 보내도 되는 거부 — KIS 초당 한도(`EGW00201`)·토큰 만료. 잔고·가격 제한 같은 진짜 거부는 그대로 둔다
+TRANSIENT_CODES = (kv.RATE_LIMIT_CODE, "EGW00123", "EGW00121")
+RETRY_SQL = (
+    "UPDATE paper_broker_orders SET status = 'sending', message = NULL, created_at = ? WHERE id = ?"
+    " AND status = 'rejected'"
+)
+#: 아침 감시선이 없는 날 한 번만 알린다 — {날짜} (25.1769, 교차검증 [권고]: 아침 단계가 실패하면 하루 종일 조용히
+#: 꺼졌다)
+NO_LINES_ALERT_KEY = "kis_guard_no_lines_alerted"
 NAME_SQL = (
     "SELECT id, COALESCE(name_ko, name_en, ticker) AS name FROM stocks WHERE id IN (SELECT value FROM json_each(?))"
 )
-#: 경계값(정확히 손절선)이 부동소수 찌꺼기로 빗나가지 않게 — 판정식의 소수 여섯째 자리 반올림과 같은 여유
-EPS = 1e-9
 
 
 @dataclass(frozen=True)
@@ -118,13 +128,22 @@ def hits(holdings: list[kv.Holding], lines: dict[str, tuple[int, dict[str, Any]]
             continue
         sid, 선 = 짝
         p = float(h.price)
-        if 선.get("stop") is not None and p <= float(선["stop"]) * (1 + EPS):
+        if _닿음(p, 선.get("stop"), "아래"):
             out.append(Hit(sid, h.code, int(h.sellable), p, float(선["stop"]), "stop", bm.REASON_GUARD_STOP))
-        elif 선.get("trail") is not None and p <= float(선["trail"]) * (1 + EPS):
+        elif _닿음(p, 선.get("trail"), "아래"):
             out.append(Hit(sid, h.code, int(h.sellable), p, float(선["trail"]), "trail", bm.REASON_GUARD_TAKE))
-        elif 선.get("target") is not None and p >= float(선["target"]) * (1 - EPS):
+        elif _닿음(p, 선.get("target"), "위"):
             out.append(Hit(sid, h.code, int(h.sellable), p, float(선["target"]), "target", bm.REASON_GUARD_TAKE))
     return out
+
+
+def _닿음(price: float, line: Any, 쪽: str) -> bool:
+    """선에 닿았나 — 판정식(`sell_flags.evaluate`·`pp.trend_exit`)처럼 비를 소수 여섯째 자리에서 반올림해 견준다(경계가
+    부동소수 찌꺼기로 빗나가지 않게, 25.1769 — 곱한 여유 `1 + 1e-9` 는 `<` 로 바꿔도 시험이 못 잡았다)"""
+    if line is None or float(line) <= 0:
+        return False
+    비 = round(price / float(line) - 1, 6)
+    return 비 <= 0 if 쪽 == "아래" else 비 >= 0
 
 
 def note(hit: Hit) -> str:
@@ -147,7 +166,7 @@ def run(
     값 = db.get_setting(client, GUARD_KEY, None)
     칸 = (값 or {}).get("KR") if isinstance(값, dict) else None
     if not isinstance(칸, dict) or 칸.get("as_of") != 오늘.isoformat():
-        return {"off": "오늘 감시선 없음 — 아침 가상모의투자 단계가 아직 안 돌았거나 실패"}
+        return {"off": f"{NO_LINES} — 아침 가상모의투자 단계가 아직 안 돌았거나 실패"}
     선들 = {str(v.get("code")): (int(sid), v) for sid, v in (칸.get("lines") or {}).items() if v.get("code")}
     if not 선들:
         return {"lines": 0}
@@ -158,8 +177,11 @@ def run(
     기록: dict[str, Any] = {"lines": len(선들), "holdings": len(보유)}
     if getattr(sess, "balance_truncated", False):
         return 기록 | {"skipped": "잔고 조회가 쪽 상한에 닿아 잘림", "calls": sess.calls}
-    이미 = {int(r[0]) for r in client.execute(
-        GUARDED_TODAY_SQL, [bmj.BROKER, 오늘.isoformat(), bm.REASON_GUARD_STOP, bm.REASON_GUARD_TAKE]).rows}
+    오늘줄 = client.execute(GUARDED_TODAY_SQL, [bmj.BROKER, 오늘.isoformat(), bm.REASON_GUARD_STOP,
+                                               bm.REASON_GUARD_TAKE]).dicts()  # fmt: skip
+    다시 = {int(r["stock_id"]): int(r["id"]) for r in 오늘줄
+            if r["status"] == "rejected" and any(c in str(r["message"] or "") for c in TRANSIENT_CODES)}  # fmt: skip
+    이미 = {int(r["stock_id"]) for r in 오늘줄} - set(다시)
     닿음 = [x for x in hits(보유, 선들) if x.stock_id not in 이미]
     종류 = [x.kind for x in 닿음]
     기록["hits"] = {k: 종류.count(k) for k in ("stop", "trail", "target") if k in 종류}
@@ -168,50 +190,99 @@ def run(
     지금 = now.isoformat()
     상태: dict[str, int] = {}
     보낸: list[tuple[Hit, str]] = []
+    기록줄오류: Exception | None = None
     for x in 닿음:
-        client.execute(bmj.INSERT_SQL, [
-            bmj.BROKER, None, GUARD_ACCOUNT, "KR", x.stock_id, x.code, "sell", "market", None, x.quantity,
-            오늘.isoformat(), x.reason, kv.MAIN.source, 지금,
-        ])  # fmt: skip
-        mine = client.execute(bmj.MINE_SQL, [bmj.BROKER, 오늘.isoformat(), x.stock_id, "sell", -1, 지금]).rows
-        if not mine:
-            상태["skipped_other_row"] = 상태.get("skipped_other_row", 0) + 1  # 같은 날 정리 매도가 이미 있다
-            continue
-        rid = int(mine[0][0])
+        try:
+            if x.stock_id in 다시:
+                rid = 다시[x.stock_id]
+                client.execute(RETRY_SQL, [지금, rid])
+                상태["retried"] = 상태.get("retried", 0) + 1
+            else:
+                client.execute(bmj.INSERT_SQL, [
+                    bmj.BROKER, None, GUARD_ACCOUNT, "KR", x.stock_id, x.code, "sell", "market", None, x.quantity,
+                    오늘.isoformat(), x.reason, kv.MAIN.source, 지금,
+                ])  # fmt: skip
+                mine = client.execute(bmj.MINE_SQL, [bmj.BROKER, 오늘.isoformat(), x.stock_id, "sell", -1, 지금]).rows
+                if not mine:
+                    상태["skipped_other_row"] = 상태.get("skipped_other_row", 0) + 1  # 같은 날 정리 매도가 이미 있다
+                    continue
+                rid = int(mine[0][0])
+        except Exception as exc:  # noqa: BLE001 — 줄을 못 적었으면 보내지 않는다(두 번 주문 막기가 줄에 기댄다)
+            기록줄오류 = exc
+            break
         보낸시각 = clock().isoformat()
         try:
             받음 = sess.order("sell", x.code, x.quantity, None)
-            client.execute(bmj.SENT_UPDATE_SQL, ["accepted", 받음.order_no, 보낸시각, note(x), 보낸시각, rid])
+            결과, 값 = "접수", ["accepted", 받음.order_no, 보낸시각, note(x), 보낸시각, rid]
             상태["accepted"] = 상태.get("accepted", 0) + 1
-            보낸.append((x, "접수"))
         except (kv.NoResponse, requests.RequestException) as exc:
             # 갔는지 모른다 — 다시 보내지 않는다(두 번 주문). 다음 아침 체결 조회로 맞춘다
             글 = str(exc)[:200] if isinstance(exc, kv.NoResponse) else f"응답 없음 ({type(exc).__name__})"
-            client.execute(bmj.SENT_UPDATE_SQL, ["sending", None, 보낸시각, f"{note(x)} · {글}", None, rid])
+            결과, 값 = "응답 없음 — 내일 아침 맞춤", ["sending", None, 보낸시각, f"{note(x)} · {글}", None, rid]
             상태["no_response"] = 상태.get("no_response", 0) + 1
-            보낸.append((x, "응답 없음 — 내일 아침 맞춤"))
         except KisFailed as exc:
-            글 = f"{note(x)} · {str(exc)[:150]}"
-            client.execute(bmj.SENT_UPDATE_SQL, ["rejected", None, 보낸시각, 글, 보낸시각, rid])
+            결과, 값 = "거부", ["rejected", None, 보낸시각, f"{note(x)} · {str(exc)[:150]}", 보낸시각, rid]
             상태["rejected"] = 상태.get("rejected", 0) + 1
-            보낸.append((x, "거부"))
+        보낸.append((x, 결과))  # 주문은 이미 나갔다 — 기록이 깨져도 알림은 간다(25.1769)
+        try:
+            client.execute(bmj.SENT_UPDATE_SQL, 값)
+        except Exception as exc:  # noqa: BLE001 — 줄은 `sending` 으로 남아 다음 아침 체결 조회가 맞춘다
+            기록줄오류 = exc
+            break
     기록["sent"] = 상태
     if 보낸:
         기록["alert"] = alert_text(client, 보낸)
+    if 기록줄오류 is not None:
+        # 알림을 실어 올린다 — `main` 이 알림을 보낸 뒤 실패로 닫는다
+        raise GuardRecordError(기록 | {"calls": sess.calls}) from 기록줄오류
     return 기록 | {"calls": sess.calls}
+
+
+class GuardRecordError(RuntimeError):
+    """주문 뒤 기록을 못 적었다 — 실행 기록(알림 글 포함)을 들고 올라간다"""
+
+    def __init__(self, 기록: dict[str, Any]) -> None:
+        super().__init__("장중 매도 기록 실패")
+        self.record = 기록
 
 
 def alert_text(client: Any, sent: list[tuple[Hit, str]]) -> str:
     """텔레그램 한 통 — 종목 이름·선·현재가·수량·결과. 비공개 대화방으로만 간다(공개 로그에는 찍지 않는다)"""
     import json
 
-    줄들 = client.execute(NAME_SQL, [json.dumps([x.stock_id for x, _ in sent])]).dicts()
-    이름 = {int(r["id"]): str(r["name"]) for r in 줄들}
+    try:
+        줄들 = client.execute(NAME_SQL, [json.dumps([x.stock_id for x, _ in sent])]).dicts()
+        이름 = {int(r["id"]): str(r["name"]) for r in 줄들}
+    except Exception:  # noqa: BLE001 — 이름을 못 읽어도 코드로 알린다(주문은 이미 나갔다)
+        이름 = {}
     줄 = ["⚡ KIS모의투자 장중 매도 (H 의 손절·익절선을 장중에)"]
     for x, 결과 in sent:
         줄.append(f"  · {이름.get(x.stock_id, x.code)} {x.quantity:,}주 시장가 — {note(x)} → {결과}")
     줄.append("  가상모의투자 H 는 아침 일봉 판정 그대로입니다(docs/paper.md 15.11)")
     return "\n".join(줄)
+
+
+#: 아침 감시선이 없어 꺼진 까닭의 머리 — 이것만 문제(건너뜀)로 세고 알린다
+NO_LINES = "오늘 감시선 없음"
+
+
+def run_status(기록: dict[str, Any]) -> str:
+    """실행 기록 상태 — **진짜 멈춤만** `skipped`(주간 요약이 문제로 센다): 아침 감시선 없음·잘린 잔고.
+    일일 배치 실행 중·키 없음·멈춤 스위치·보유 없음은 정상 쉼이라 `success`(25.1769, 교차검증 [권고] — 쉼까지
+    건너뜀이면 주간 요약에 매주 "건너뜀 N" 이 떠 진짜 멈춤이 묻혔다)"""
+    if str(기록.get("off", "")).startswith(NO_LINES) or "잘림" in str(기록.get("skipped", "")):
+        return "skipped"
+    return "success"
+
+
+def no_lines_alert(client: Any, now: datetime) -> str | None:
+    """아침 감시선이 없는 날 첫 실행에서 한 번 — 장중 손절·익절이 그날 꺼졌다(25.1769)"""
+    오늘 = now.astimezone(cal.market_tz("KR")).date().isoformat()
+    if db.get_setting(client, NO_LINES_ALERT_KEY, None) == 오늘:
+        return None
+    db.set_setting(client, NO_LINES_ALERT_KEY, 오늘)
+    return ("⚠️ KIS모의투자 장중 손절·익절 꺼짐 — 오늘 아침 가상모의투자 단계가 감시선을 적지 못했습니다"
+            "(일일 배치 확인). 그날 매도는 아침 일봉 판정만 따릅니다")
 
 
 def main() -> int:
@@ -231,16 +302,23 @@ def main() -> int:
     rid = db.start_batch_run(client, job_name=JOB_NAME, market="KR",
                              trade_date=now.astimezone(cal.market_tz("KR")).date().isoformat())  # fmt: skip
     try:
-        기록 = run(client, now, dry_run=args.dry_run)
+        try:
+            기록 = run(client, now, dry_run=args.dry_run)
+            실패: BaseException | None = None
+        except GuardRecordError as exc:
+            기록, 실패 = exc.record, exc.__cause__ or exc
         글 = 기록.pop("alert", None)
+        if not 글 and str(기록.get("off", "")).startswith(NO_LINES):
+            글 = no_lines_alert(client, now)
         if 글:
             try:
-                telegram.send(글, with_disclaimer=False)
+                telegram.send(글)
                 기록["alerted"] = True
             except Exception as exc:  # noqa: BLE001 — 주문은 이미 냈다. 알림만 빠진다
                 기록["alert_error"] = type(exc).__name__
-        상태 = "skipped" if ("off" in 기록 or "skipped" in 기록) else "success"
-        db.finish_batch_run(client, rid, status=상태, step_log={"guard": 기록})
+        if 실패 is not None:
+            raise 실패
+        db.finish_batch_run(client, rid, status=run_status(기록), step_log={"guard": 기록})
         log.info("장중 감시: %s", {k: v for k, v in 기록.items() if k in ("off", "skipped", "lines", "hits", "sent")})
         return 0
     except Exception as exc:

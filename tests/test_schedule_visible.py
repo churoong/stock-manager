@@ -61,6 +61,8 @@ HEALTH = (뿌리 / "web" / "lib" / "health.ts").read_text(encoding="utf-8")
 
 #: 알림도 신선도 칸도 두지 않기로 **정한** 것들. 사유가 곧 판단의 기록이다.
 안_보는_이유 = {
+    "kis-guard.yml": "장중 10분마다라 무응답 알림 감시로는 과하다 — 주간 요약의 기대 주기 표(`intraday_guard` 4일)가"
+    " 멈춤을 알리고, 장중 매도는 그때마다 텔레그램으로 온다 (docs/paper.md 15.11, 25.1768)",
     "backup.yml": "DB 에 흔적을 남기지 않는다 — 결과물은 Actions 아티팩트다."
     " 멈춘 것은 워크플로 실행 이력에서 본다 (scripts/backup_db.py)",
     "d1-catchup.yml": "제 일이 없다. 굶은 다른 작업을 대신 돌리는 것이라"

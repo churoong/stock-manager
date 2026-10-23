@@ -144,7 +144,7 @@ function KisTrades({ orders, cur }: { orders: KisOrder[]; cur: "KRW" | "USD" }) 
                 <td>{o.name ?? o.code}</td>
                 <td className={o.side === "buy" ? "text-red-600 dark:text-red-400" : "text-blue-600 dark:text-blue-400"}>
                   {o.side === "buy" ? "매수" : "매도"}
-                  {o.reason === "정리" ? "(정리)" : ""}
+                  {o.reason === "정리" || o.reason === "장중손절" || o.reason === "장중익절" ? `(${o.reason})` : ""}
                 </td>
                 <td className="text-right">{o.quantity.toLocaleString("ko-KR")}</td>
                 <td className="text-right">{priceText(o, cur)}</td>

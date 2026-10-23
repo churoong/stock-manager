@@ -1210,7 +1210,13 @@ def sell_decisions(
         flags = sf.evaluate(h, today, targets)
         코드들 = {f.reason_code for f in flags}
         if lines is not None:
-            선 = guard_line(client, h, 행, sell_rule, targets, today, _stock(client, h.stock_id, stock_cache))
+            # 곁다리 — 감시선을 못 내도 매도 판정은 그대로(25.1769, 25.1768 교차검증 [권고]). 한도 오류만 올린다
+            try:
+                선 = guard_line(client, h, 행, sell_rule, targets, today, _stock(client, h.stock_id, stock_cache))
+            except Exception as exc:  # noqa: BLE001
+                if db.quota_reason(exc):
+                    raise
+                선 = None
             if 선:
                 lines[h.stock_id] = 선
         if sell_rule == "trend" and _추적손절(client, h, 행, targets, today):
@@ -2045,7 +2051,9 @@ def run_step(
             판정메모: dict[int, dict[str, Any]] = {}
             from batch.jobs import intraday_guard
 
-            감시선: dict[int, dict[str, Any]] | None = {} if aid == intraday_guard.GUARD_ACCOUNT else None
+            # 국내만 — 장중 감시는 국내 정규장에서만 돈다(미국은 다음 단계, 25.1769)
+            감시선: dict[int, dict[str, Any]] | None = (
+                {} if aid == intraday_guard.GUARD_ACCOUNT and market == "KR" else None)
             매도 = sell_decisions(client, market, 규칙, 계좌체결, 멈춘, stock_cache, targets,
                                cal.local_today(market), 보강캐시, 판정메모, 감시선)  # fmt: skip
             if 감시선 is not None:

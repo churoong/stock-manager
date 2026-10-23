@@ -109,10 +109,16 @@ describe("투자위원회 탭", () => {
       days: 28, n: 0, match_pct: null, both: 0, internal_only: 0, kis_only: 0, neither: 0, partial: 0, rejected: 5, unknown: 0, cleanup: 0,
       excluded: 2, slip_buy: { n: 0, avg: null }, slip_sell: { n: 0, avg: null }, reject_reasons: { EGW00201: 5 } } });
     expect(거부만).toEqual([
-      "체결을 견줄 주문은 아직 없습니다 — 거부·표본 밖·모름·정리 주문만 있습니다(아래).",
+      "체결을 견줄 주문은 아직 없습니다 — 거부·표본 밖·모름·정리·장중 매도만 있습니다(아래).",
       "거부 까닭: EGW00201 5",
       "거부 5 · 표본 밖 2(가상의 판정 아닌 만료·장 열린 뒤 시장가) · 잔고가 어긋난 종목 0 (2026-10-20 기준)",
     ]);
+    // 장중 손절·익절만 있는 창 — "아직 끝난 베낀 주문이 없습니다" 가 아니라 장중 매도를 보인다(25.1769, 배치 compare_lines 와 같은 끝 줄)
+    const 장중만 = brokerLines({ as_of: "2026-10-27", diff: {}, summary: {
+      days: 28, n: 0, match_pct: null, both: 0, internal_only: 0, kis_only: 0, neither: 0, partial: 0, rejected: 0, unknown: 0, cleanup: 0,
+      guard: 2, slip_buy: { n: 0, avg: null }, slip_sell: { n: 0, avg: null }, reject_reasons: {} } });
+    expect(장중만[0]).toContain("체결을 견줄 주문은 아직 없습니다");
+    expect(장중만.at(-1)).toBe("장중 손절·익절 2(H 는 아침 일봉 판정 — 짝 없음) · 잔고가 어긋난 종목 0 (2026-10-27 기준)");
   });
 
   it("가상 대조 — 무작위 20종목 안 분위, 표본 없으면 숨김 (25.1476)", () => {

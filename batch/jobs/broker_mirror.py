@@ -133,12 +133,18 @@ PENDING_BUY_QTY_SQL = (
     " AND status = 'open' AND fill_session < ? GROUP BY stock_id"
 )
 ACCOUNT_SQL = "SELECT id FROM paper_accounts WHERE id = ?"
-#: 장중 손절·익절로 KIS 에서만 판 종목 — 그 뒤 H 가 아직 들고 있어도 "어긋남" 이 아니다(15.11, 25.1768). H 가 그 뒤 다시
-#: 산 체결이 있으면 그 몫은 KIS 도 베껴 샀으니 다시 대 본다(장중 매도가 H 의 마지막 매수 체결일 이후일 때만 뺀다)
-GUARD_SOLD_SQL = (
-    "SELECT DISTINCT b.stock_id FROM paper_broker_orders b WHERE b.broker = ? AND b.side = 'sell'"
-    " AND b.reason IN (?, ?) AND b.status <> 'rejected' AND b.trade_date >= COALESCE((SELECT MAX(f.fill_date)"
-    " FROM paper_fills f WHERE f.account_id = ? AND f.stock_id = b.stock_id AND f.side = 'buy'), '')"
+#: 장중 손절·익절로 KIS 에서만 판 종목과 그 마지막 날(15.11, 25.1768). **찼거나 아직 맞추지 않은** 줄만 — 안 찬
+#: (하한가)·거부 줄은 KIS 가 아직 들고 있다(25.1769, 25.1768 교차검증 [참고]). 국내 `unknown` 은 실제로 찼을 수 있다
+#: (`BOUGHT_SQL` 잣대)
+GUARD_SELLS_SQL = (
+    "SELECT stock_id, MAX(trade_date) FROM paper_broker_orders WHERE broker = ? AND side = 'sell' AND reason IN (?, ?)"
+    " AND (filled_qty > 0 OR status IN ('sending', 'accepted') OR (status = 'unknown' AND market = 'KR'))"
+    " GROUP BY stock_id"
+)
+#: 그 종목들의 베끼는 계좌 체결 — 장중 매도 뒤에도 **같은 보유**(그 사이 0 주가 된 적 없음)를 드는지 가른다
+GUARD_FILLS_SQL = (
+    "SELECT stock_id, fill_date, side, quantity FROM paper_fills WHERE account_id = ?"
+    " AND stock_id IN (SELECT value FROM json_each(?)) ORDER BY fill_date, id"
 )
 INSERT_SQL = (
     "INSERT OR IGNORE INTO paper_broker_orders (broker, paper_order_id, account_id, market, stock_id, code, side,"
@@ -273,6 +279,32 @@ CLOSES_SQL = (
     "SELECT j.value, (SELECT p.close FROM prices p WHERE p.stock_id = j.value AND p.date < ? AND p.close > 0"
     " ORDER BY p.date DESC LIMIT 1) FROM json_each(?) j"
 )
+
+
+def guard_held(client: Any, 증권사: str, 계좌: str) -> set[int]:
+    """장중 손절·익절로 KIS 에서 판 뒤 베끼는 계좌(H)가 **같은 보유**를 아직 드는 종목 (25.1769).
+
+    그 보유가 처음 열린 날(마지막으로 0 주에서 늘어난 체결일)이 장중 매도일 이하면 같은 보유다. 이 종목은 KIS 에 0 주가
+    맞는 상태라 잔고 "어긋남" 에서 빼고, H 의 추가·회차 매수를 베끼지 않는다(`bm.plan(guard_held=…)`). H 가 그 보유를
+    다 팔면 빠지고, 그 뒤 새로 산 보유는 다시 베낀다. 같은 날 매도·매수 순서는 `pp.positions` 와 같다(매도 먼저)"""
+    판날 = {int(r[0]): str(r[1]) for r in client.execute(
+        GUARD_SELLS_SQL, [증권사, bm.REASON_GUARD_STOP, bm.REASON_GUARD_TAKE]).rows}  # fmt: skip
+    if not 판날:
+        return set()
+    체결: dict[int, list[tuple[str, str, int]]] = {}
+    for r in client.execute(GUARD_FILLS_SQL, [계좌, json.dumps(sorted(판날))]).rows:
+        체결.setdefault(int(r[0]), []).append((str(r[1]), str(r[2]), int(r[3] or 0)))
+    out: set[int] = set()
+    for sid, 날 in 판날.items():
+        수량, 열린날 = 0, None
+        for d, side, q in sorted(체결.get(sid, []), key=lambda x: (x[0], 0 if x[1] == "sell" else 1)):
+            앞 = 수량
+            수량 += q if side == "buy" else -q
+            if 앞 <= 0 < 수량:
+                열린날 = d
+        if 수량 > 0 and 열린날 is not None and 열린날 <= 날:
+            out.add(sid)
+    return out
 
 
 def _codes(client: Any, ids: set[int]) -> dict[int, tuple[str, str]]:
@@ -563,8 +595,7 @@ def run(
     연결때 = ({int(r["stock_id"]) for r in client.execute(HELD_BEFORE_SQL, [베낌, market, 연결날]).dicts()
              if int(r["q"] or 0) > 0} if 연결날 else set(내부))  # fmt: skip
     연결전 = sorted(sid for sid in 내부 if sid in 연결때 and sid not in 증권)
-    장중판 = {int(r[0]) for r in client.execute(GUARD_SOLD_SQL, [증권사, bm.REASON_GUARD_STOP, bm.REASON_GUARD_TAKE,
-                                                                 베낌]).rows} if not 미국 else set()  # fmt: skip
+    장중판 = guard_held(client, 증권사, 베낌) if not 미국 else set()
     어긋남 = bm.holdings_diff({k: q for k, q in 증권수.items() if q > 0 and k not in 장중판},
                             {k: q for k, q in 내부.items() if k not in 연결전 and k not in 장중판})  # fmt: skip
     if 장중판 & set(내부):
@@ -675,7 +706,8 @@ def run(
     정리기준 = {sid: 내부.get(sid, 0) + 대기.get(sid, 0) for sid in set(내부) | set(대기)}
     낼것, 안냄 = bm.plan(주문들, 코드, 정리기준, 증권, 산적, already=이미, cleaned_today=정리함, halted=멈춤,
                        bought_today=오늘산, frozen=frozen, currency="USD" if 미국 else "KRW",
-                       closes=종가, sent_today=int(낸수[0][0] or 0) if 낸수 else 0)  # fmt: skip
+                       closes=종가, sent_today=int(낸수[0][0] or 0) if 낸수 else 0,
+                       guard_held=장중판)  # fmt: skip
     # 미국에서 티커는 있는데 KIS 거래소 코드가 없어 뺀 종목은 "종목 코드 없음" 이 아니다 — 까닭을 바로 적는다
     # (25.1608, 25.1607 교차검증 [권고] 2. 내지 않는 처리 자체는 25.1485 그대로)
     if 미국:

@@ -386,7 +386,9 @@ WHERE sent_at IS NULL OR (sent_at >= 'claim:' AND sent_at < ?) ORDER BY created_
 
 export const RECENT_BATCH_RUNS = `SELECT id, job_name, market, trade_date, trigger_source, scheduled_for, started_at,
   finished_at, status, delay_seconds, step_log, error_text
-FROM batch_runs ORDER BY id DESC LIMIT 25`;
+FROM batch_runs WHERE job_name <> 'intraday_guard' ORDER BY id DESC LIMIT 25`;
+// 장중 손절·익절(25.1768)은 장중 10분마다 한 줄이라 오후엔 25칸을 다 덮어 일일 배치 줄이 밀려났다 — 목록에서 뺀다(25.1769).
+// 그 작업의 멈춤은 주간 요약 기대 주기 표가 본다
 // `id` 순서 = 시작 순서다(`start_batch_run` 이 시작할 때 넣는다). `started_at` 으로 정렬하면 색인이 없어 표 전체를 정렬했다 —
 // 1년이면 약 1.5만 행을 상태 화면을 열 때마다 읽었다 (docs/infra.md 25.862, 감사)
 
