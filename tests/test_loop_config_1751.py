@@ -41,7 +41,8 @@ def test_에이전트_머리() -> None:
 
 
 def _쓰는_에이전트(js: str) -> set[str]:
-    return set(re.findall(r"agentType:\s*'([^']+)'", js))
+    """`역할('이름', …)` 으로 부르는 역할 — 등록 이름이 없으면 범용 에이전트가 그 정의 파일을 읽는다(25.1751)"""
+    return set(re.findall(r"역할\('([^']+)'", js)) | (set(re.findall(r"agentType:\s*'([^']+)'", js)) - {"general-purpose"})
 
 
 @pytest.mark.parametrize("f", sorted(흐름.glob("*.js")), ids=lambda f: f.stem)
@@ -49,7 +50,9 @@ def test_workflow_이름_phase_문법(f: Path) -> None:
     js = f.read_text(encoding="utf-8")
     assert js.startswith("export const meta = {"), "meta 가 맨 앞이어야 한다"
     assert re.search(rf"name:\s*'{re.escape(f.stem)}'", js), "meta.name 이 파일 이름과 다르다"
-    없는 = _쓰는_에이전트(js) - {p.stem for p in 에이전트.glob("*.md")}
+    쓰는 = _쓰는_에이전트(js)
+    assert 쓰는, "역할을 하나도 부르지 않는다 — 정규식이 빗나갔나"
+    없는 = 쓰는 - {p.stem for p in 에이전트.glob("*.md")}
     assert not 없는, f"없는 에이전트를 부른다: {없는}"
     meta_phase = set(re.findall(r"\{ title: '([^']+)'", js.split("\n}\n", 1)[0]))
     쓰는_phase = set(re.findall(r"phase\('([^']+)'\)", js)) | set(re.findall(r"phase: '([^']+)'", js))

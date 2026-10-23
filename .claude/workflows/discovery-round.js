@@ -8,6 +8,20 @@ export const meta = {
   ],
 }
 
+// 역할 에이전트 부르기 — 등록된 이름(`.claude/agents/<이름>.md`)으로 먼저, 세션이 그 정의를 아직 읽지 않았으면(세션
+// 시작 뒤에 더한 역할은 목록에 없다 — 25.1751 첫 실행) 범용 에이전트가 그 정의 파일을 읽고 따르게 한다. 정의는 한 곳
+const 저장소 = (args && args.repo) || '/home/user/stock-manager'
+async function 역할(이름, 글, opts) {
+  try {
+    const r = await agent(글, { ...opts, agentType: 이름 })
+    if (r !== null && r !== undefined) return r
+  } catch (e) {
+    log(`${이름} 이 등록돼 있지 않아 정의 파일로 부른다`)
+  }
+  return agent(`역할 정의 ${저장소}/.claude/agents/${이름}.md 를 먼저 읽고 그 지시(읽기 전용·출력 꼴)를 그대로 따르세요.\n\n${글}`,
+    { ...opts, agentType: 'general-purpose', label: `${opts.label || 이름}*` })
+}
+
 // args: { round: 38, focus?: '운용 쪽 매도·비중', userDirected?: false, max?: 4 }
 const 회차 = (args && args.round) || '다음'
 const 초점 = (args && args.focus) || '운용(매도·비중·자본 배분)과 종목선정 모두'
@@ -43,9 +57,9 @@ const VERDICT = {
 }
 
 phase('Discover')
-const 발굴 = await agent(
+const 발굴 = await 역할('stock-discoverer', 
   `발굴 루프 ${회차}회차. 초점: ${초점}. docs/factors.md 12장 지난 회차 표와 겹치지 않는 후보를 최대 ${최대}개 내세요.`,
-  { agentType: 'stock-discoverer', schema: CANDIDATES, label: 'discover', phase: 'Discover' },
+  { schema: CANDIDATES, label: 'discover', phase: 'Discover' },
 )
 const 후보 = ((발굴 && 발굴.candidates) || []).slice(0, 최대)
 if (발굴 && 발굴.candidates && 발굴.candidates.length > 최대) log(`후보 ${발굴.candidates.length}개 중 ${최대}개만 검증 — 나머지는 다음 회차`)
@@ -55,10 +69,10 @@ const 순위 = { fail: 3, hold: 2, conditional: 1, pass: 0 }
 const 결과 = await pipeline(
   후보,
   (c) => parallel([
-    () => agent(`발굴 루프 ${회차}회차 후보를 검증 A 로 반박하세요.\n후보 ${c.id} ${c.name} (${c.kind}): ${c.summary}`,
-      { agentType: 'stock-verifier-data', schema: VERDICT, label: `A:${c.id}`, phase: 'Verify' }),
-    () => agent(`발굴 루프 ${회차}회차 후보를 검증 B 로 반박하세요.\n후보 ${c.id} ${c.name} (${c.kind}): ${c.summary}`,
-      { agentType: 'stock-verifier-stats', schema: VERDICT, label: `B:${c.id}`, phase: 'Verify' }),
+    () => 역할('stock-verifier-data', `발굴 루프 ${회차}회차 후보를 검증 A 로 반박하세요.\n후보 ${c.id} ${c.name} (${c.kind}): ${c.summary}`,
+      { schema: VERDICT, label: `A:${c.id}`, phase: 'Verify' }),
+    () => 역할('stock-verifier-stats', `발굴 루프 ${회차}회차 후보를 검증 B 로 반박하세요.\n후보 ${c.id} ${c.name} (${c.kind}): ${c.summary}`,
+      { schema: VERDICT, label: `B:${c.id}`, phase: 'Verify' }),
   ]),
   ([a, b], c) => {
     const 둘 = [a, b].filter(Boolean)

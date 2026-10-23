@@ -5,6 +5,20 @@ export const meta = {
   phases: [{ title: 'Verify', detail: '렌즈마다 교차검증 에이전트 하나' }],
 }
 
+// 역할 에이전트 부르기 — 등록된 이름(`.claude/agents/<이름>.md`)으로 먼저, 세션이 그 정의를 아직 읽지 않았으면(세션
+// 시작 뒤에 더한 역할은 목록에 없다 — 25.1751 첫 실행) 범용 에이전트가 그 정의 파일을 읽고 따르게 한다. 정의는 한 곳
+const 저장소 = (args && args.repo) || '/home/user/stock-manager'
+async function 역할(이름, 글, opts) {
+  try {
+    const r = await agent(글, { ...opts, agentType: 이름 })
+    if (r !== null && r !== undefined) return r
+  } catch (e) {
+    log(`${이름} 이 등록돼 있지 않아 정의 파일로 부른다`)
+  }
+  return agent(`역할 정의 ${저장소}/.claude/agents/${이름}.md 를 먼저 읽고 그 지시(읽기 전용·출력 꼴)를 그대로 따르세요.\n\n${글}`,
+    { ...opts, agentType: 'general-purpose', label: `${opts.label || 이름}*` })
+}
+
 // args: { range?: 'origin/main..HEAD', lenses?: string[] }
 const 범위 = (args && args.range) || 'origin/main..HEAD'
 const 렌즈 = (args && args.lenses) || [
@@ -34,8 +48,8 @@ const RESULT = {
 
 phase('Verify')
 const 결과 = await parallel(렌즈.map((l, i) => () =>
-  agent(`커밋 범위 ${범위} 를 교차검증하세요. 렌즈: ${l}. 첫 판단을 must(=[필수] 수)에 넣으세요.`,
-    { agentType: 'stock-cross-verifier', schema: RESULT, label: `xv:${i + 1}`, phase: 'Verify' })))
+  역할('stock-cross-verifier', `커밋 범위 ${범위} 를 교차검증하세요. 렌즈: ${l}. 첫 판단을 must(=[필수] 수)에 넣으세요.`,
+    { schema: RESULT, label: `xv:${i + 1}`, phase: 'Verify' })))
 const 살아 = 결과.filter(Boolean)
 // 렌즈 하나라도 결과가 없으면 통과로 치지 않는다 — 위험 커밋 푸시 문
 const 필수 = 살아.reduce((s, r) => s + (r.must || 0), 0)

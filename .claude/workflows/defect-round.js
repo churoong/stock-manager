@@ -8,6 +8,20 @@ export const meta = {
   ],
 }
 
+// 역할 에이전트 부르기 — 등록된 이름(`.claude/agents/<이름>.md`)으로 먼저, 세션이 그 정의를 아직 읽지 않았으면(세션
+// 시작 뒤에 더한 역할은 목록에 없다 — 25.1751 첫 실행) 범용 에이전트가 그 정의 파일을 읽고 따르게 한다. 정의는 한 곳
+const 저장소 = (args && args.repo) || '/home/user/stock-manager'
+async function 역할(이름, 글, opts) {
+  try {
+    const r = await agent(글, { ...opts, agentType: 이름 })
+    if (r !== null && r !== undefined) return r
+  } catch (e) {
+    log(`${이름} 이 등록돼 있지 않아 정의 파일로 부른다`)
+  }
+  return agent(`역할 정의 ${저장소}/.claude/agents/${이름}.md 를 먼저 읽고 그 지시(읽기 전용·출력 꼴)를 그대로 따르세요.\n\n${글}`,
+    { ...opts, agentType: 'general-purpose', label: `${opts.label || 이름}*` })
+}
+
 // args: { areas?: string[], maxRefute?: 5 }. 영역을 안 주면 아래 넷 — 주 세션이 docs/loops.md 회전표로 골라 준다
 const 기본영역 = [
   '가상모의투자 장부·체결 판정 (batch/services/paper.py, batch/jobs/paper.py, docs/paper.md 2~3장)',
@@ -48,8 +62,8 @@ const REFUTE = {
 
 phase('Audit')
 const 감사 = await parallel(영역.map((a, i) => () =>
-  agent(`맡은 영역: ${a}\n돈·장부·주문·알림을 틀리게 하는 실제 결함을 재현과 함께 찾으세요. docs/infra.md 25.x 에 이미 있는 것은 빼세요.`,
-    { agentType: 'stock-defect-auditor', schema: FINDINGS, label: `audit:${i + 1}`, phase: 'Audit' })))
+  역할('stock-defect-auditor', `맡은 영역: ${a}\n돈·장부·주문·알림을 틀리게 하는 실제 결함을 재현과 함께 찾으세요. docs/infra.md 25.x 에 이미 있는 것은 빼세요.`,
+    { schema: FINDINGS, label: `audit:${i + 1}`, phase: 'Audit' })))
 const 무게 = { must: 0, should: 1, note: 2 }
 // 영역을 넘어 같은 자리를 둘이 낸 것은 하나로 — 반박 전에 전체가 필요해 여기는 장벽이 맞다
 const 본 = new Set()
@@ -60,8 +74,8 @@ const 고른 = 모두.filter((f) => f.severity !== 'note').slice(0, 반박상한
 if (모두.length > 고른.length) log(`결함 ${모두.length}건 중 ${고른.length}건만 반박 — 참고·넘친 것은 다음 회차(결과의 skipped)`)
 
 const 판정 = await parallel(고른.map((f, i) => () =>
-  agent(`다음 결함 주장을 반박하세요.\n제목: ${f.title}\n자리: ${f.where}\n주장한 재현: ${f.repro}\n주장한 고칠 방향: ${f.fix || ''}`,
-    { agentType: 'stock-refuter', schema: REFUTE, label: `refute:${i + 1}`, phase: 'Refute' })
+  역할('stock-refuter', `다음 결함 주장을 반박하세요.\n제목: ${f.title}\n자리: ${f.where}\n주장한 재현: ${f.repro}\n주장한 고칠 방향: ${f.fix || ''}`,
+    { schema: REFUTE, label: `refute:${i + 1}`, phase: 'Refute' })
     .then((v) => ({ ...f, refute: v }))))
 const 진짜 = 판정.filter(Boolean).filter((f) => f.refute && f.refute.real === 'real')
 return {
