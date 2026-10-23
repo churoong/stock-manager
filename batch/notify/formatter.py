@@ -47,7 +47,10 @@ def short_name(name: Any, ticker: Any = None, currency: str = "KRW") -> str:
     티커 = str(ticker or "").strip()
     if currency == "KRW":
         return 이름 or 티커
-    짧게 = _이름_꼬리.sub("", 이름).strip(" ,") or 이름
+    # " - Class C Capital Stock" 처럼 줄표로 이은 꼬리는 줄표까지 떼고, 그 앞에 드러난 법인 꼬리("Inc.")도 한 번 더
+    # 뗀다(25.1744 — "Alphabet Inc. -(GOOG)" 가 나갔다)
+    짧게 = _이름_꼬리.sub("", 이름).strip(" ,-")
+    짧게 = _이름_꼬리.sub("", 짧게).strip(" ,-") or 이름
     # 앞의 "The " 도 뗀다(25.1723) — "The Goldman Sachs Group, Inc." → "Goldman Sachs". 떼서 비면 그대로
     if 짧게.lower().startswith("the ") and len(짧게) > 4:
         짧게 = 짧게[4:]

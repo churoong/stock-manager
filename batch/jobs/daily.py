@@ -44,6 +44,7 @@ from batch.core.client import TursoClient
 from batch.core.entry import NOTHING_DONE, guard
 from batch.notify import formatter, report_sections, telegram
 from batch.services import divergence, holding_scores, pick_history, report_picks, reports, self_grade, trend
+from batch.services.accumulation import display_name
 
 log = logging.getLogger("daily")
 
@@ -3119,7 +3120,10 @@ def _sec_post_close_lines(
         기록["blocked"] = str(exc)
     기록.update({"after": len(뒤), "unknown": 모름, "failed": 실패, "calls": sc.calls})
     중대.update({"picks": len(기준), "flagged": 걸림, "unknown": 모름, "by_item": 항목수})
-    lines = [(기준일, f"· {이름}({티커}) {폼}{f' 외 {n}건' if n else ''} ({날[5:]} 접수, 미국 동부 날짜)")
+    # 이름은 1부와 같은 짧은 꼴(25.1744 — 25.1740 이 1부·2부만 바꿔 공시 줄엔 "…, Inc. common stock" 이 남았다).
+    # 뒤에 티커를 붙이므로 `short_name` 에는 넘기지 않는다
+    lines = [(기준일, f"· {formatter.short_name(display_name(이름), None, 'USD')}({티커}) {폼}"
+                    f"{f' 외 {n}건' if n else ''} ({날[5:]} 접수, 미국 동부 날짜)")
              for 날, 이름, 티커, 폼, n, 기준일 in sorted(뒤)]  # fmt: skip
     return _공시_절("SEC", lines)
 
@@ -3180,7 +3184,7 @@ def _holding_scores(
 
     try:
         rs = client.execute(
-            "SELECT p.stock_id, COALESCE(s.name_ko, s.name_en, s.ticker) AS name, s.market,"
+            "SELECT p.stock_id, COALESCE(s.name_ko, s.name_en, s.ticker) AS name, s.market, s.ticker, s.currency,"
             "  sc.total_score AS score_now, sc.rank_in_market, sc.as_of_date,"
             "  sc.calc_version, sc.weights_json, sc.sentiment_weight_used,"
             "  (SELECT t.score_at_trade"

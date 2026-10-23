@@ -67,5 +67,14 @@ def test_시장가_갭_판정도_분할을_거른다_25_1741() -> None:
     분할 = _줄("unfilled", 0, "filled", 48, 50, limit=None, order_type="market", side="sell") | {"b_limit": 90, "p_high": 51}
     역분할 = _줄("unfilled", 0, "filled", 95, 100, limit=None, order_type="market") | {"b_limit": 11, "p_high": 101}
     assert bm.mismatch_cause(분할, True) == "bar_suspect" and bm.mismatch_cause(역분할, True) == "bar_suspect"
-    # 10% 넘는 실제 갭은 그대로 갭
-    assert bm.mismatch_cause(분할 | {"p_low": 78, "p_high": 80, "p_close": 79}, True) == "gap_beyond_limit"
+    # 10% 넘는 실제 갭은 그대로 갭 — 기준은 직전 종가(보낸 90 ÷ 0.9 = 100)라 −15% 날은 안쪽(25.1744)
+    assert bm.mismatch_cause(분할 | {"p_low": 84, "p_high": 86, "p_close": 85}, True) == "gap_beyond_limit"
+
+
+def test_분할_방어의_기준은_직전_종가_25_1744() -> None:
+    """25.1740·1741 교차검증 [권고] 1 — 보낸 값(직전 종가 ∓10%)과 바로 견줘 ±13% 하루 움직임도 분할 의심이 됐다"""
+    매도 = _줄("unfilled", 0, "filled", 104, 113, limit=None, order_type="market", side="sell") | {"b_limit": 90, "p_high": 115}
+    매수 = _줄("unfilled", 0, "filled", 85, 87, limit=None, order_type="market") | {"b_limit": 110, "p_high": 99}
+    assert bm.mismatch_cause(매도, True) == "market_unfilled" and bm.mismatch_cause(매수, True) == "market_unfilled"
+    # −20% 넘는 날은 분할과 가르지 못해 "가르지 않음"(지어내지 않는 쪽) — 남긴 것
+    assert bm.mismatch_cause(매도 | {"p_low": 68, "p_high": 72, "p_close": 70}, True) == "bar_suspect"

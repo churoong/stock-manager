@@ -408,7 +408,7 @@ def render_portfolio(portfolio: PortfolioView, picks: list[StockPick]) -> str:
         lines.append("")
         lines.append("배분에서 빠진 종목")
         for item in portfolio.excluded:
-            통화 = next((p.currency for p in picks if p.ticker == item.ticker), "KRW")
+            통화 = next((p.currency for p in picks if p.ticker == item.ticker), portfolio.budget_currency or "KRW")
             line = f"  {_이름(item.name, item.ticker, 통화)} — {item.reason}"
             if item.detail:
                 line += f" ({item.detail})"

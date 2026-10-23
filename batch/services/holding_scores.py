@@ -44,6 +44,10 @@ class HoldingScore:
     #: 10-06 리포트의 보유 9종목 전부가 판 8(매수 10-01)과 판 9(지금) 점수를 뺀 값이었다.
     #: 매도 플래그 25.209 와 같은 판정)
     same_yardstick: bool = True
+    #: 티커·통화(25.1744) — 미국 이름을 짧게 할 때 같은 회사 클래스주(Berkshire A·B)가 한 이름으로 겹치지 않게
+    #: 티커를 붙인다. 통화가 있으면 시장 이름으로 국내·미국을 가르지 않는다
+    ticker: str | None = None
+    currency: str | None = None
 
 
 def _short(d: str | None) -> str:
@@ -63,6 +67,7 @@ def from_rows(rows: list[dict[str, Any]]) -> list[HoldingScore]:
             score_at_trade=None if r.get("score_at_trade") is None else float(r["score_at_trade"]),
             first_buy=r.get("first_buy"),
             same_yardstick=r.get("same_yardstick", True) is not False,
+            ticker=r.get("ticker"), currency=r.get("currency"),
         ))  # fmt: skip
     return out
 
@@ -88,8 +93,8 @@ def line(h: HoldingScore) -> str:
         else:
             차이 = f" → {int(half_up(h.score_now) - half_up(h.score_at_trade)):+d}점"
     # 머리가 "보유 종목 점수" 라 줄마다 "보유" 를 붙이지 않는다(25.1740). 미국 이름은 짧게 — 티커가 없어 이름만
-    통화 = "KRW" if h.market is None or h.market in KR_MARKETS else "USD"
-    return f"{short_name(display_name(h.name), None, 통화)}: {지금} · {그때}{차이}"
+    통화 = h.currency or ("KRW" if h.market is None or h.market in KR_MARKETS else "USD")
+    return f"{short_name(display_name(h.name), h.ticker, 통화)}: {지금} · {그때}{차이}"
 
 
 def render(scores: list[HoldingScore]) -> list[str]:

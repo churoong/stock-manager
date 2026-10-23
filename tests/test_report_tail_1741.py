@@ -56,14 +56,16 @@ class _Rows:
 
 def test_위원회_가장_높은_표는_종목_이름으로() -> None:
     con = sqlite3.connect(":memory:")
-    con.execute("CREATE TABLE stocks (ticker TEXT, country TEXT, name_ko TEXT, name_en TEXT)")
-    con.execute("INSERT INTO stocks VALUES ('097950', 'KR', 'CJ제일제당', NULL), ('097950', 'US', NULL, 'X')")
+    con.execute("CREATE TABLE stocks (ticker TEXT, country TEXT, name_ko TEXT, name_en TEXT, status TEXT)")
+    # 같은 티커의 옛 폐지 행이 있어도 지금 것이 이긴다(25.1744)
+    con.execute("INSERT INTO stocks VALUES ('097950', 'KR', 'CJ제일제당', NULL, 'active'), ('097950', 'US', NULL, 'X', 'active'),"
+                " ('097950', 'KR', '옛회사', NULL, 'delisted')")
     줄 = ["🏛 A 가치투자사 위원회: 안건 20", "   가장 높은 표 097950 2.40 (찬성 리서치부)", "   가장 높은 표 999999 1.00 (찬성 없음)"]
     기록: dict = {}
     assert pj._표_이름(_Rows(con), "KR", 줄, 기록) == [
         "🏛 A 가치투자사 위원회: 안건 20", "   가장 높은 표 CJ제일제당 2.40 (찬성 리서치부)", "   가장 높은 표 999999 1.00 (찬성 없음)"]
     # 미국은 짧은 이름 + 티커
-    con.execute("INSERT INTO stocks VALUES ('LTC', 'US', NULL, 'LTC Properties, Inc.')")
+    con.execute("INSERT INTO stocks VALUES ('LTC', 'US', NULL, 'LTC Properties, Inc.', 'active')")
     assert pj._표_이름(_Rows(con), "US", ["   가장 높은 표 LTC 1.82 (찬성 퀀트부)"], 기록) == [
         "   가장 높은 표 LTC Properties(LTC) 1.82 (찬성 퀀트부)"]
 

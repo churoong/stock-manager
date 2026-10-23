@@ -2308,6 +2308,8 @@ def run_step(
 TOP_VOTE_NAMES_SQL = (
     "SELECT ticker, COALESCE(name_ko, name_en, ticker) AS name FROM stocks"
     " WHERE country = ? AND ticker IN (SELECT value FROM json_each(?))"
+    # 같은 티커 행이 둘이면(폐지된 옛 회사) 지금 것이 뒤에 와 이긴다(25.1744, 25.1741 교차검증 [참고] 5)
+    " ORDER BY status = 'active'"
 )
 _가장_높은_표 = re.compile(r"^(   가장 높은 표 )(\S+) ")
 
