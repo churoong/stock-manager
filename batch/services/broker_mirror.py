@@ -29,6 +29,7 @@ REASON_GUARD_STOP = "장중손절"
 REASON_GUARD_TAKE = "장중익절"
 GUARD_REASONS = frozenset({REASON_GUARD_STOP, REASON_GUARD_TAKE})
 GUARD_HELD_SKIP = "장중 매도 뒤 H 가 같은 보유를 듦 — 매수 베끼지 않음"
+STOP_FLOOR_SKIP = "장중 손절선 이하 회차 — 베끼지 않음"
 #: 주문가능 수량이 모자라 정리를 일부만 낸 까닭(25.1607)
 PARTIAL_CLEANUP = "증권사 주문가능 수량 모자람 — 일부만 정리"
 #: 미국은 시장가가 없다(모의 미국 주문은 지정가만, 예약주문도 단가를 받는다) — 시장가 주문(매도·정리·시가 매수)은
@@ -53,7 +54,7 @@ def plan(
     broker: dict[int, tuple[int, int]], bought_before: set[int], *, already: set[int], cleaned_today: set[int],
     halted: bool, max_orders: int = MAX_ORDERS_PER_DAY, bought_today: dict[int, int] | None = None,
     frozen: set[int] | None = None, currency: str = "KRW", closes: dict[int, float] | None = None,
-    sent_today: int = 0, guard_held: set[int] | None = None,
+    sent_today: int = 0, guard_held: set[int] | None = None, stop_floor: dict[int, float] | None = None,
 ) -> tuple[list[Intent], list[tuple[int | None, int, str]]]:
     """(낼 것, [(내부 주문 id, 종목, 안 내는 까닭)]).
 
@@ -65,7 +66,10 @@ def plan(
     `currency="USD"` 면 시장가를 없앤다 — 마지막 종가(`closes`) ± `US_MARKETABLE_PCT` 지정가. 종가가 없으면 내지 않는다.
     `guard_held` = 장중 손절·익절로 KIS 에서 판 뒤 H 가 **같은 보유**를 아직 든 종목 — 그 종목의 H 매수(추가·회차)는
     베끼지 않는다(25.1769, 25.1768 교차검증 [필수] 1·[권고] — 베끼면 KIS 엔 새 몫만 남아 잔고가 H 가 팔 때까지 어긋나고,
-    감시선 근처에서 "시가에 사고 장중에 판다" 가 되풀이된다). H 가 그 보유를 다 판 뒤 새로 사면 다시 베낀다
+    감시선 근처에서 "시가에 사고 장중에 판다" 가 되풀이된다). H 가 그 보유를 다 판 뒤 새로 사면 다시 베낀다.
+    `stop_floor` = {종목: 오늘 장중 손절선} — 그 값 **이하** 지정가 매수 회차는 베끼지 않는다(25.1770, 25.1769
+    교차검증 [권고]: 그날 장중 손절로 판 뒤 더 빠지면 하루짜리 회차가 KIS 에서만 차 같은 날 다시 샀다. 손절선
+    아래에서 사는 회차는 H 에서도 찬 순간 손절선 아래 보유라 다음 아침 손절로 나간다)
     """
     안냄: list[tuple[int | None, int, str]] = []
     # 증권사에만 남은 몫(정리 대상) — 정리를 못 낼 때도 까닭을 남긴다. 예전엔 멈춤·기업행위 경계·코드 없음·
@@ -142,6 +146,8 @@ def plan(
             매도.append(Intent(oid, sid, code, "sell", q, 가격, REASON_MIRROR))
         elif sid in (guard_held or set()):
             안냄.append((oid, sid, GUARD_HELD_SKIP))
+        elif not 시장가 and (stop_floor or {}).get(sid) and 가격 <= float((stop_floor or {})[sid]):
+            안냄.append((oid, sid, STOP_FLOOR_SKIP))
         else:
             매수.append(Intent(oid, sid, code, "buy", int(o["quantity"]), 가격, REASON_MIRROR))
     낼것 = 매도 + 매수

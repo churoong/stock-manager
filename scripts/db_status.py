@@ -64,8 +64,8 @@ CHECKS: list[tuple[str, str]] = [
         "최근 배치 30건 (batch_runs, UTC)",
         "SELECT job_name, market, trade_date, status, started_at, finished_at,"
         " substr(COALESCE(error_text, step_log, ''), 1, 160) AS note"
-        # 장중 손절·익절(intraday_guard)은 장중 10분마다 한 줄 — 빼지 않으면 30칸을 다 덮는다(25.1769)
-        " FROM batch_runs WHERE job_name <> 'intraday_guard' ORDER BY id DESC LIMIT 30",
+        # 장중 손절·익절(intraday_guard)은 장중 10분마다 한 줄 — 성공 줄만 뺀다(25.1769·25.1770, 실패·멈춤은 보이게)
+        " FROM batch_runs WHERE NOT (job_name = 'intraday_guard' AND status = 'success') ORDER BY id DESC LIMIT 30",
     ),
     (
         "장중·뉴스 크론 호출 기록 (cron_heartbeats, called_at UTC)",

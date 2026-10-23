@@ -1282,8 +1282,9 @@ def guard_line(
     계수 = float(getattr(h, "rights_scale", 1.0) or 1.0)
     배 = 계수 if 계수 != 1.0 and 계수 > 0 else 1.0
     원가 = float(행["cost"]) / q * 배
+    # `qty` = 이 계좌의 보유 수량 — 장중 매도는 여기까지만(사람이 모의계좌에서 손으로 산 몫까지 팔지 않게, 25.1770)
     선: dict[str, Any] = {"code": str(stock.get("ticker") or ""), "horizon": h.horizon, "stop_pct": 손절,
-                         "target_pct": 목표, "cost": round(원가, 6), "rule": sell_rule}  # fmt: skip
+                         "target_pct": 목표, "cost": round(원가, 6), "rule": sell_rule, "qty": int(q)}  # fmt: skip
     if "손절" in 따름:
         선["stop"] = round(원가 * (1 + 손절 / 100), 6)
     if "목표도달" in 따름:

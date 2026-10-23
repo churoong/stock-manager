@@ -281,6 +281,17 @@ CLOSES_SQL = (
 )
 
 
+def _오늘_손절선(client: Any, 오늘: Any) -> dict[int, float]:
+    """아침 가상모의투자 단계가 적은 오늘 국내 장중 손절선 {종목: 값} — 없으면 빈 것(25.1770)"""
+    from batch.jobs import intraday_guard
+
+    값 = db.get_setting(client, intraday_guard.GUARD_KEY, None)
+    칸 = 값.get("KR") if isinstance(값, dict) else None
+    if not isinstance(칸, dict) or 칸.get("as_of") != str(오늘):
+        return {}
+    return {int(sid): float(v["stop"]) for sid, v in (칸.get("lines") or {}).items() if v.get("stop")}
+
+
 def guard_held(client: Any, 증권사: str, 계좌: str) -> set[int]:
     """장중 손절·익절로 KIS 에서 판 뒤 베끼는 계좌(H)가 **같은 보유**를 아직 드는 종목 (25.1769).
 
@@ -596,8 +607,11 @@ def run(
              if int(r["q"] or 0) > 0} if 연결날 else set(내부))  # fmt: skip
     연결전 = sorted(sid for sid in 내부 if sid in 연결때 and sid not in 증권)
     장중판 = guard_held(client, 증권사, 베낌) if not 미국 else set()
-    어긋남 = bm.holdings_diff({k: q for k, q in 증권수.items() if q > 0 and k not in 장중판},
-                            {k: q for k, q in 내부.items() if k not in 연결전 and k not in 장중판})  # fmt: skip
+    # 잔고 대보기에서는 **KIS 가 0 주일 때만** 뺀다 — 일부만 찬 장중 매도·같은 날 다시 찬 회차로 남은 몫은
+    # 보이게(25.1770)
+    장중0 = {k for k in 장중판 if 증권수.get(k, 0) <= 0}
+    어긋남 = bm.holdings_diff({k: q for k, q in 증권수.items() if q > 0 and k not in 장중0},
+                            {k: q for k, q in 내부.items() if k not in 연결전 and k not in 장중0})  # fmt: skip
     if 장중판 & set(내부):
         기록["guard_sold_held"] = len(장중판 & set(내부))  # KIS 는 장중에 팔았고 H 는 아직 든 종목(일봉 판정 차이)
     부터 = (오늘 - timedelta(days=bm.COMPARE_DAYS)).isoformat()
@@ -707,7 +721,7 @@ def run(
     낼것, 안냄 = bm.plan(주문들, 코드, 정리기준, 증권, 산적, already=이미, cleaned_today=정리함, halted=멈춤,
                        bought_today=오늘산, frozen=frozen, currency="USD" if 미국 else "KRW",
                        closes=종가, sent_today=int(낸수[0][0] or 0) if 낸수 else 0,
-                       guard_held=장중판)  # fmt: skip
+                       guard_held=장중판, stop_floor=_오늘_손절선(client, 오늘) if not 미국 else None)  # fmt: skip
     # 미국에서 티커는 있는데 KIS 거래소 코드가 없어 뺀 종목은 "종목 코드 없음" 이 아니다 — 까닭을 바로 적는다
     # (25.1608, 25.1607 교차검증 [권고] 2. 내지 않는 처리 자체는 25.1485 그대로)
     if 미국:

@@ -157,10 +157,20 @@ def test_주문_뒤_기록이_깨져도_알림은_간다(c: Client) -> None:
 def test_안_도는_날(c: Client, monkeypatch: pytest.MonkeyPatch) -> None:
     s = _Sess([_h("005930", 9_250.0)])
     # 감시선이 오늘 것이 아니면(아침 단계 실패) 꺼진다
-    없음 = ig.run(c, datetime(2026, 10, 27, 1, 30, tzinfo=UTC), session=s)
-    assert ig.run_status(없음) == "skipped"  # 진짜 멈춤 — 주간 요약이 센다
+    화 = datetime(2026, 10, 27, 1, 30, tzinfo=UTC)
+    # 오늘 국내 일일 배치가 아직 안 끝났으면 기다림 — 알림·멈춤 아님(25.1770, 배치가 늦는 날 거짓 "꺼짐" 이었다)
+    assert ig.run(c, 화, session=s) == {"off": ig.WAITING} and ig.run_status({"off": ig.WAITING}) == "success"
+    c.conn.execute("INSERT INTO batch_runs (job_name, market, trade_date, trigger_source, started_at, status)"
+                   " VALUES ('daily_kr', 'KR', '2026-10-26', 'cron', '2026-10-27T01:10:00+00:00', 'running')")  # 09:35 예비
+    assert "skipped" in ig.run(c, 화, session=s)  # 실행 중이면 감시선을 보기 전에 쉰다
+    c.conn.execute("UPDATE batch_runs SET status = 'success'")
+    없음 = ig.run(c, 화, session=s)  # 배치는 끝났는데 감시선이 없다 — 진짜 멈춤
+    assert ig.run_status(없음) == "skipped"  # 주간 요약이 센다
     assert ig.no_lines_alert(c, datetime(2026, 10, 27, 1, 30, tzinfo=UTC)).startswith("⚠️ KIS모의투자 장중 손절·익절 꺼짐")
-    assert ig.no_lines_alert(c, datetime(2026, 10, 27, 1, 40, tzinfo=UTC)) is None  # 하루 한 번
+    assert ig.no_lines_alert(c, datetime(2026, 10, 27, 1, 40, tzinfo=UTC)) is not None  # 보내기 전엔 표시 없음
+    ig.mark_alerted(c, 화)
+    assert ig.no_lines_alert(c, datetime(2026, 10, 27, 1, 40, tzinfo=UTC)) is None  # 보낸 뒤 하루 한 번
+    c.conn.execute("DELETE FROM batch_runs")
     # 모의 매매 멈춤이면 내지 않는다
     db.set_setting(c, "paper_halt", {"on": True})
     assert ig.run(c, 월, session=s) == {"off": "모의 매매 멈춤(/paper)"}
@@ -223,8 +233,9 @@ def test_잔고_대보기_코드가_장중판_종목을_뺀다() -> None:
     import inspect
 
     원문 = inspect.getsource(bmj.run)
-    assert "q > 0 and k not in 장중판" in 원문 and "k not in 연결전 and k not in 장중판" in 원문
-    assert "guard_held=장중판" in 원문
+    assert "q > 0 and k not in 장중0" in 원문 and "k not in 연결전 and k not in 장중0" in 원문
+    assert "장중0 = {k for k in 장중판 if 증권수.get(k, 0) <= 0}" in 원문  # KIS 가 0 주일 때만 뺀다(25.1770)
+    assert "guard_held=장중판" in 원문 and "stop_floor=_오늘_손절선(client, 오늘)" in 원문
 
 
 def test_아침_가상모의투자_단계가_베끼는_계좌의_감시선을_적는다(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -246,3 +257,79 @@ def test_아침_가상모의투자_단계가_베끼는_계좌의_감시선을_�
     assert 선["stop"] == pytest.approx(원가 * 0.93) and 선["target"] == pytest.approx(원가 * 1.10)
     assert 기록["accounts"]["B"]["guard_lines"] == {"n": 1, "stop": 1, "trail": 0, "target": 1}
     assert "guard_lines" not in 기록["accounts"]["A"]
+
+
+def test_장중_매도는_H_수량까지만() -> None:
+    """사람이 모의계좌에서 손으로 산 몫까지 팔지 않는다(25.1770, 정리 주문 원칙)"""
+    선 = {"A": (1, {"code": "A", "stop": 93.0, "qty": 4})}
+    assert [x.quantity for x in ig.hits([_h("A", 90.0, sellable=10)], 선)] == [4]
+    assert [x.quantity for x in ig.hits([_h("A", 90.0, sellable=3)], 선)] == [3]
+
+
+def test_장중_손절선_이하_회차는_베끼지_않는다() -> None:
+    """같은 날 장중 손절 뒤 더 빠져 하루짜리 회차가 KIS 에서만 차는 길(25.1770)"""
+    주문 = [{"id": 7, "stock_id": 1, "side": "buy", "order_type": "limit", "limit_price": 9_200, "quantity": 5},
+            {"id": 8, "stock_id": 1, "side": "buy", "order_type": "limit", "limit_price": 9_400, "quantity": 5}]
+    낼것, 안냄 = bm.plan(주문, {1: "005930"}, {}, {}, set(), already=set(), cleaned_today=set(), halted=False,
+                         stop_floor={1: 9_300.0})  # fmt: skip
+    assert [x.paper_order_id for x in 낼것] == [8] and 안냄 == [(7, 1, bm.STOP_FLOOR_SKIP)]
+
+
+def test_장중_매도만_있는_주도_주간_요약에_나온다() -> None:
+    비교 = bm.compare([{"reason": bm.REASON_GUARD_STOP, "status": "filled", "side": "sell"}] * 2)
+    줄 = bm.compare_lines(비교, None, None)
+    assert 줄 and "장중 손절·익절 2" in 줄[-1]
+
+
+def test_정상_쉼과_진짜_멈춤() -> None:
+    assert ig.run_status({"skipped": "잔고 조회가 쪽 상한에 닿아 잘림"}) == "skipped"
+    assert ig.run_status({"skipped": "일일 배치 실행 중 — KIS 초당 한도를 나눠 쓰지 않게"}) == "success"
+    assert ig.run_status({"off": "모의 매매 멈춤(/paper)"}) == "success"
+
+
+def test_감시선_계산이_깨져도_매도_판정은_그대로(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`guard_line` 예외를 삼킨다 — H 매도 판정·가상모의투자 단계를 깨지 않게(25.1769·25.1770)"""
+    from tests.test_paper_job_1445 import _시세, _하루
+    from tests.test_paper_job_1445 import client as 픽스처
+
+    def 깨짐(*_a: Any, **_k: Any) -> None:
+        raise RuntimeError("고점 읽기 실패")
+
+    c = 픽스처.__wrapped__(monkeypatch)  # type: ignore[attr-defined]
+    monkeypatch.setattr(ig, "GUARD_ACCOUNT", "B")
+    monkeypatch.setattr(jp, "guard_line", 깨짐)
+    _하루(c, monkeypatch, "2026-10-14")
+    _시세(c, "2026-10-15", 10_100, 9_900)
+    _, 기록 = _하루(c, monkeypatch, "2026-10-15", signals=False)
+    assert 기록["accounts"]["B"]["guard_lines"] == {"n": 0, "stop": 0, "trail": 0, "target": 0}
+    assert "sells" in 기록["accounts"]["B"]  # 매도 판정은 그대로 돌았다
+
+
+def test_main_은_보낸_뒤에_표시하고_실패도_알린다(c: Client, monkeypatch: pytest.MonkeyPatch) -> None:
+    """감시선이 없는 날 알림 한 번(보낸 뒤 표시), 실행 예외는 하루 한 번 알림 뒤 실패(25.1770)"""
+    from batch.core import client as client_mod
+    from batch.notify import telegram
+
+    보낸: list[str] = []
+    monkeypatch.setattr(telegram, "send", lambda t, *a, **k: 보낸.append(t) or [1])
+    c.close = lambda: None  # type: ignore[attr-defined]
+    monkeypatch.setattr(client_mod, "TursoClient", lambda: c)
+    monkeypatch.setattr(ig, "datetime", type("고정", (datetime,), {"now": classmethod(lambda cls, tz=None: 월)}))
+    monkeypatch.setattr("sys.argv", ["intraday_guard"])
+    db.set_setting(c, ig.GUARD_KEY, {})  # 감시선 없음
+    c.conn.execute("INSERT INTO batch_runs (job_name, market, trade_date, trigger_source, started_at, status)"
+                   " VALUES ('daily_kr', 'KR', '2026-10-26', 'cron', '2026-10-25T23:27:00+00:00', 'success')")
+    assert ig.main() == 0 and len(보낸) == 1 and "꺼짐" in 보낸[0]
+    assert ig.main() == 0 and len(보낸) == 1  # 하루 한 번
+    assert c.q("SELECT status FROM batch_runs WHERE job_name = 'intraday_guard'") == [("skipped",), ("skipped",)]
+
+    def 터짐(*_a: Any, **_k: Any) -> dict:
+        raise RuntimeError("토큰")
+
+    monkeypatch.setattr(ig, "run", 터짐)
+    with pytest.raises(RuntimeError):
+        ig.main()
+    assert len(보낸) == 2 and "실행 실패 (RuntimeError)" in 보낸[1]
+    with pytest.raises(RuntimeError):
+        ig.main()
+    assert len(보낸) == 2  # 같은 날 같은 실패는 한 번
