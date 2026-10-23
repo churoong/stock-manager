@@ -345,7 +345,7 @@ def run(
     기록["hits"] = {k: 종류.count(k) for k in ("stop", "trail", "target") if k in 종류}
     if dry_run:  # 확인 실행은 세기만 — 주문·알림·표시 없음(25.1772)
         return 기록 | {"dry_run": True, "calls": sess.calls}
-    오류글 = (f"⚠️ KIS모의투자 장중 감시 — 오늘 감시선 계산 오류 {기록['line_errors']}종목은 장중 손절·익절 밖"
+    오류글 = (f"⚠️ KIS모의투자 장중 감시 — 오늘 감시선 계산 오류 {기록['line_errors']}건, 그 종목은 장중 손절·익절 밖"
              "(일일 배치 실행 기록 guard_lines 확인)") if 날표시 else ""  # fmt: skip
     if not 닿음:
         글 = [x for x in (suspect_text(client, 의심) if 의심 else "", 오류글) if x]
@@ -417,6 +417,8 @@ def run(
     if any(글):
         기록["alert"], 기록["marks"] = "\n".join(x for x in 글 if x), {k: v for k, v in 표시.items() if v}
         기록["date_marks"] = 날표시
+    if 보낸:
+        기록["sale_alert"] = 글[0]  # 못 보내면 이 글만 남긴다 — 다른 문단은 표시가 안 적혀 다음 회차가 다시 만든다
     if 기록줄오류 is not None:
         # 알림을 실어 올린다 — `main` 이 알림을 보낸 뒤 실패로 닫는다
         raise GuardRecordError(기록 | {"calls": sess.calls}) from 기록줄오류
@@ -494,10 +496,12 @@ def run_status(기록: dict[str, Any]) -> str:
     판 뒤 알림을 못 보냈으면 `partial` — 주문은 나갔는데 사람은 모른다(25.1772)"""
     if str(기록.get("off", "")).startswith(NO_LINES) or "잘림" in str(기록.get("skipped", "")):  # 대기·실행 중은 정상
         return "skipped"
-    if (기록.get("sent") or {}).get("skipped_other_row") or 기록.get("line_errors"):
-        return "skipped"
+    # 판 뒤 알림 실패가 먼저 — 계산 오류·정리 줄 겹침이 있는 날에도 "주문은 나갔는데 사람은 모름" 이 묻히지 않게
+    # (25.1775)
     if 기록.get("alert_error") and set(기록.get("sent") or {}) & {"accepted", "no_response", "rejected"}:
         return "partial"
+    if (기록.get("sent") or {}).get("skipped_other_row") or 기록.get("line_errors"):
+        return "skipped"
     return "success"
 
 
@@ -522,12 +526,21 @@ def kst_today(now: datetime) -> str:
     return now.astimezone(cal.market_tz("KR")).date().isoformat()
 
 
-def unsent_text(client: Any, now: datetime) -> str | None:
-    """앞 회차에 못 보낸 장중 매도 알림(오늘 것만) — 앞에 붙여 다시 보낸다"""
+def unsent_raw(client: Any) -> dict[str, str] | None:
+    """남겨 둔 못 보낸 장중 매도 알림 원문 — {date, text}. 없으면 None(행은 보낸 뒤 지운다)"""
     값 = db.get_setting(client, UNSENT_KEY, None)
-    if not isinstance(값, dict) or 값.get("date") != kst_today(now) or not 값.get("text"):
+    return 값 if isinstance(값, dict) and 값.get("text") else None
+
+
+def unsent_text(client: Any, now: datetime) -> str | None:
+    """앞 회차(또는 지난 장 마지막 회차)에 못 보낸 장중 매도 알림 — 머리를 한 번 붙여 다시 보낸다. 지난 날 글도 버리지
+    않는다(25.1775 — 마지막 회차에서 실패하면 다음 날 날짜가 달라 조용히 버려졌다). 머리는 "겹칠 수 있음" — 전송 여부
+    모름(`TelegramUncertainError`)·일부만 감(`TelegramPartialError`)도 여기로 온다"""
+    값 = unsent_raw(client)
+    if 값 is None:
         return None
-    return f"(앞 회차에 보내지 못한 알림)\n{값['text']}"
+    언제 = "앞 회차" if 값.get("date") == kst_today(now) else f"지난 장({값.get('date')})"
+    return f"({언제}에 보내지 못했거나 전송 여부를 모르는 장중 매도 알림 — 겹칠 수 있음)\n{값['text']}"
 
 
 def mark_alerted(client: Any, now: datetime, key: str = NO_LINES_ALERT_KEY) -> None:
@@ -575,17 +588,21 @@ def main() -> int:
                 기록["alerted"] = True
             except Exception as exc:  # noqa: BLE001 — 주문은 이미 냈다. 알림만 빠진다
                 기록["alert_error"] = type(exc).__name__
-                if set(기록.get("sent") or {}) & {"accepted", "no_response", "rejected"} or 못보냄:
-                    # 판 알림은 다음 회차가 다시 만들지 못한다 — 글을 남겨 다음 회차가 보낸다(25.1774)
-                    db.set_setting(client, UNSENT_KEY, {"date": kst_today(now), "text": 글})
+                if 판글 := 기록.get("sale_alert"):
+                    # 판 알림은 다음 회차가 다시 만들지 못한다 — **판 알림 원문만** 머리 없이 쌓아 다음 회차가 보낸다
+                    # (25.1774·25.1775 — 글 전체를 남기면 머리·표시성 문단이 회차마다 겹쳐 쌓였다)
+                    앞 = unsent_raw(client)
+                    db.set_setting(client, UNSENT_KEY, {"date": kst_today(now),
+                                                       "text": f"{앞['text']}\n{판글}" if 앞 else 판글})  # fmt: skip
             else:  # 표시는 보낸 뒤에만 — 실패한 날은 다음 회차가 다시 알린다
                 if 감시선없음:
                     mark_alerted(client, now)
                 for key in 날표시:
                     mark_alerted(client, now, key)
                 mark_ids(client, now, 표시)
-                if 못보냄:
-                    db.set_setting(client, UNSENT_KEY, None)
+                if 못보냄:  # 행을 지운다 — null 로 덮으면 매 회차 "설정을 읽지 못함" 경고가 났다(25.1775)
+                    client.execute("DELETE FROM settings WHERE key = ?", [UNSENT_KEY])
+        기록.pop("sale_alert", None)  # 글은 실행 기록(step_log)에 넣지 않는다 — 종목·수량
         if 실패 is not None:
             raise 실패
         db.finish_batch_run(client, rid, status=run_status(기록), step_log={"guard": 기록})

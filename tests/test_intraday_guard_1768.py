@@ -795,7 +795,7 @@ def test_판_뒤_알림이_실패하면_부분으로_닫고_다음_회차가_다
     assert c.q("SELECT status FROM paper_broker_orders") == [("accepted",)]
     _main_준비(c, monkeypatch, 보낸)
     assert ig.main() == 0 and len(보낸) == 1
-    assert 보낸[0].startswith("(앞 회차에 보내지 못한 알림)") and "⚡ KIS모의투자 장중 매도" in 보낸[0]
+    assert 보낸[0].startswith("(앞 회차에 보내지 못했거나 전송 여부를 모르는") and "⚡ KIS모의투자 장중 매도" in 보낸[0]
     assert ig.main() == 0 and len(보낸) == 1  # 보낸 뒤 지웠다
 
 
@@ -805,7 +805,7 @@ def test_일부_보유의_감시선_계산이_깨지면_멈춤으로_남기고_�
                       {"KeyError": 2})  # fmt: skip
     assert r["n"] == 1 and db.get_setting(c, ig.GUARD_KEY, None)["KR"]["line_errors"] == 2
     a = ig.run(c, 월, session=_Sess([_h("005930", 9_500.0)]), clock=lambda: 월)
-    assert ig.run_status(a) == "skipped" and "감시선 계산 오류 2종목" in a["alert"] and a["date_marks"] == [ig.LINE_ERR_KEY]
+    assert ig.run_status(a) == "skipped" and "감시선 계산 오류 2건" in a["alert"] and a["date_marks"] == [ig.LINE_ERR_KEY]
     ig.mark_alerted(c, 월, ig.LINE_ERR_KEY)
     b = ig.run(c, 월, session=_Sess([_h("005930", 9_500.0)]), clock=lambda: 월)
     assert "alert" not in b and ig.run_status(b) == "skipped"
@@ -845,4 +845,73 @@ def test_main_은_계산_오류_알림을_하루_한_번(c: Client, monkeypatch:
     ig.save_lines(c, "KR", date(2026, 10, 26), "H", "trend", {1: {"code": "005930", "stop": 9_300.0}}, {"KeyError": 1})
     monkeypatch.setattr(kv, "Session", lambda *a, **k: _Sess([_h("005930", 9_500.0)]))
     assert ig.main() == 0 and ig.main() == 0
-    assert len(보낸) == 1 and "감시선 계산 오류 1종목" in 보낸[0]
+    assert len(보낸) == 1 and "감시선 계산 오류 1건" in 보낸[0]
+
+
+
+def test_계산_오류가_있는_날도_판_뒤_알림_실패는_부분(c: Client, monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1775 — 멈춤(skipped) 검사가 앞에 있어 '주문은 나갔는데 사람은 모름' 이 묻혔다"""
+    보낸: list[str] = []
+    _main_준비(c, monkeypatch, 보낸, 실패=True)
+    ig.save_lines(c, "KR", date(2026, 10, 26), "H", "trend", {1: {"code": "005930", "stop": 9_300.0}}, {"KeyError": 1})
+    monkeypatch.setattr(kv, "Session", lambda *a, **k: _Sess([_h("005930", 9_250.0)]))
+    assert ig.main() == 0
+    assert c.q("SELECT status FROM batch_runs WHERE job_name = 'intraday_guard'") == [("partial",)]
+    # 남긴 글은 판 알림 원문뿐(머리·계산 오류 문단 없음) — 다음 회차가 오류 문단을 다시 만든다
+    남김 = db.get_setting(c, ig.UNSENT_KEY, None)["text"]
+    assert 남김.startswith("⚡ KIS모의투자 장중 매도") and "계산 오류" not in 남김
+    assert ig.main() == 0  # 또 실패 — 머리 없이 그대로(판 종목은 '이미')
+    assert db.get_setting(c, ig.UNSENT_KEY, None)["text"] == 남김
+
+
+def test_판_회차에도_계산_오류를_알린다(c: Client) -> None:
+    ig.save_lines(c, "KR", date(2026, 10, 26), "H", "trend", {1: {"code": "005930", "stop": 9_300.0}}, {"KeyError": 1})
+    r = ig.run(c, 월, session=_Sess([_h("005930", 9_250.0)]), clock=lambda: 월)
+    assert "⚡ KIS모의투자 장중 매도" in r["alert"] and "감시선 계산 오류 1건" in r["alert"]
+    assert r["date_marks"] == [ig.LINE_ERR_KEY] and r["sent"] == {"accepted": 1}
+
+
+def test_못_보낸_글은_보낸_뒤_지우고_지난_장_글도_보낸다(c: Client, monkeypatch: pytest.MonkeyPatch) -> None:
+    """마지막 회차에서 실패하면 다음 날 날짜가 달라 버려졌다. 지울 때 null 로 덮으면 매 회차 경고가 났다(25.1775)"""
+    import logging
+
+    보낸: list[str] = []
+    _main_준비(c, monkeypatch, 보낸)
+    db.set_setting(c, ig.UNSENT_KEY, {"date": "2026-10-23", "text": "⚡ 지난 장 매도"})
+    monkeypatch.setattr(kv, "Session", lambda *a, **k: _Sess([_h("005930", 9_500.0)]))
+    assert ig.main() == 0 and len(보낸) == 1 and 보낸[0].startswith("(지난 장(2026-10-23)에 보내지 못했거나")
+    assert c.q("SELECT COUNT(*) FROM settings WHERE key = ?", [ig.UNSENT_KEY]) == [(0,)]
+    with monkeypatch.context():
+        로그: list[str] = []
+        h = logging.Handler()
+        h.emit = lambda rec: 로그.append(rec.getMessage())  # type: ignore[method-assign]
+        logging.getLogger().addHandler(h)
+        try:
+            assert ig.main() == 0 and len(보낸) == 1
+        finally:
+            logging.getLogger().removeHandler(h)
+        assert not [x for x in 로그 if ig.UNSENT_KEY in x]
+
+
+def test_확인_실행은_못_보낸_글을_보내지도_지우지도_않는다(c: Client, monkeypatch: pytest.MonkeyPatch) -> None:
+    보낸: list[str] = []
+    _main_준비(c, monkeypatch, 보낸)
+    monkeypatch.setattr("sys.argv", ["intraday_guard", "--dry-run"])
+    db.set_setting(c, ig.UNSENT_KEY, {"date": "2026-10-26", "text": "⚡ 매도"})
+    monkeypatch.setattr(kv, "Session", lambda *a, **k: _Sess([_h("005930", 9_500.0)]))
+    assert ig.main() == 0 and 보낸 == [] and db.get_setting(c, ig.UNSENT_KEY, None)["text"] == "⚡ 매도"
+
+
+def test_판_게_없는_알림이_실패하면_남기지_않는다(c: Client, monkeypatch: pytest.MonkeyPatch) -> None:
+    """의심·오류·감시선 없음 알림은 표시가 안 적혀 다음 회차가 다시 만든다 — 남기면 두 번 간다"""
+    보낸: list[str] = []
+    _main_준비(c, monkeypatch, 보낸, 실패=True)
+    ig.save_lines(c, "KR", date(2026, 10, 26), "H", "trend", {1: {"code": "005930", "stop": 9_300.0}}, {"KeyError": 1})
+    monkeypatch.setattr(kv, "Session", lambda *a, **k: _Sess([_h("005930", 9_500.0)]))
+    assert ig.main() == 0 and db.get_setting(c, ig.UNSENT_KEY, None) is None
+
+
+def test_45분_안의_실행_중_기록은_막는다(c: Client) -> None:
+    c.conn.execute("INSERT INTO batch_runs (job_name, market, trade_date, trigger_source, started_at, status)"
+                   " VALUES ('daily_kr', 'KR', '2026-10-26', 'cron', '2026-10-26T00:46:00+00:00', 'running')")  # 44분 전
+    assert "skipped" in ig.run(c, 월, session=_Sess([_h("005930", 9_500.0)]), clock=lambda: 월)
