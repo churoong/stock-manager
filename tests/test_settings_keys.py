@@ -284,6 +284,16 @@ def test_중첩_기본값_추세_필터_조용시간_알림_문턱() -> None:
     "x = _담다(db.get_setting_in_range(\n    c, 'max_weight_per_stock', None),\n    10.0)",
     "DEFAULT_MAX_SECTOR_PCT: Final[float] = (\n    30.0\n)",
     "설정 = {'max_weight_per_stock': 10}",
+    # 정의처와 다른 값 — 같은 값보다 해롭다(25.1757 교차검증 [권고])
+    "def f(max_sector_pct: float = 25.0): ...",
+    "x = d.get('max_weight_per_stock') or 15",
+    "x = get_setting(c, 'max_weight_per_sector', 20)",
+    "x = g(max_stock_pct=5)",
+    # 복합 문장의 머리(25.1757 교차검증 [권고] — 통째로 빼서 놓쳤다)
+    "if (d.get('max_weight_per_sector') or 30) < y:\n    pass",
+    "with ctx(max_stock_pct=10):\n    pass",
+    "@deco(max_stock_pct=10)\ndef f(): ...",
+    "while 섹터상한 > 30:\n    pass",
 ])  # fmt: skip
 def test_비중_상한_사본_검사가_꼴을_가리지_않는다(글: str) -> None:
     """검사 자체의 되돌리기 확인 — 지난 교차검증들이 찾은 꼴을 모두 잡는다(25.1757)"""
@@ -293,3 +303,6 @@ def test_비중_상한_사본_검사가_꼴을_가리지_않는다(글: str) -> 
 def test_비중_상한_사본_검사는_0_과_다른_숫자를_잡지_않는다() -> None:
     # 0 은 "배분하지 않음"(`jobs/daily`), 상한과 무관한 문장의 10 은 남의 일
     assert not 상한_숫자("x = g(max_stock_pct=0.0)\ny = round(z, 10)\ndef f(max_sector_pct=sr.DEFAULT_MAX_SECTOR_PCT): ...")
+    # 100 은 "제한 없음"(`services/paper`), 상한 값에 붙은 남의 인자(반올림 자리)는 남의 일, 몸통 숫자는 머리가 아니다
+    assert not 상한_숫자("a = float(limits.get('max_stock_pct') or 100)\nb = round(get(c, 'max_weight_per_stock'), 1)\n"
+                       "if 섹터상한 is None:\n    n = 30")  # fmt: skip

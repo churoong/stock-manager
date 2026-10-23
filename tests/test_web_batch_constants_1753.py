@@ -67,6 +67,7 @@ def test_가격제한과_환율_묵음은_정의처_하나() -> None:
 @pytest.mark.parametrize("글", [
     "KR_PRICE_LIMIT = 0.30", "KR_DAILY_LIMIT: Final[float] = 0.3", "KR_DAILY_LIMIT: float | None = 0.30",
     "LT_KR_LIMIT = (\n    0.30\n)", "STOP_VOL_KR_JUMP = 1 - 0.7", "class A:\n    FX_MAX_AGE_DAYS = 7",
+    "KR_PRICE_LIMIT += 0.01", "y = (KR_DAILY_LIMIT := 0.3)",
 ])  # fmt: skip
 def test_사본_검사가_꼴을_가리지_않는다(글: str) -> None:
     """검사 자체의 되돌리기 확인(25.1757) — 정의처를 따르는 꼴(`X = markets.KR_DAILY_LIMIT`)은 잡지 않는다"""
