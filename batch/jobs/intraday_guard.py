@@ -52,8 +52,14 @@ GUARD_KEY = "kis_guard_lines"
 #: 감시선을 만드는 계좌 = KIS모의투자가 베끼는 계좌
 GUARD_ACCOUNT = bmj.MIRROR_ACCOUNT
 #: 국내 정규장 안에서 보는 시각(한국) — 시가 단일가(09:00) 직후와 장 마감 동시호가(15:20~) 앞은 뺀다. 동시호가 시간에는
-#: 시장가가 마감 단일가로 가 "현재가 닿음" 과 체결가가 따로 논다
+#: 시장가가 마감 단일가로 가 "현재가 닿음" 과 체결가가 따로 논다. 달력을 못 읽을 때만 쓰는 기본값이다
 WINDOW_KST = (dtime(9, 5), dtime(15, 15))
+#: 실제 창 = 그날 개장 + 5분 ~ 마감 − 15분(달력 `session_open_utc`·`session_close_utc`) — 새해 첫 거래일 10:00 개장은
+#: 달력이 주고, 수능일은 달력에 없어 `monitor_targets.KR_CSAT_DAYS` 로 한 시간 늦춘다(25.1774, 25.1773 교차검증 [권고]:
+#: 고정 창이라 그 두 날 09:13~09:53 실행이 장 열리기 전 가격으로 판정해 시장가 매도를 낼 수 있었다). 수능일 15:53 뒤
+#: (16:03·16:13)는 예약(`0-6` 시)이 부르지 않는다 — 한 해 하루라 두고 handoff 에 적는다
+OPEN_MARGIN = timedelta(minutes=5)
+CLOSE_MARGIN = timedelta(minutes=15)
 #: 일일 배치가 돌고 있으면 쉰다 — 같은 앱키의 초당 한도를 나눠 쓰면 배치 주문이 `EGW00201` 거부로 적힌다(웹 조회와 같은
 #: 막기, `web/lib/kisVts.BATCH_RUNNING_WINDOW_MS`)
 BATCH_RUNNING_MINUTES = 45
@@ -81,6 +87,9 @@ GUARDED_TODAY_SQL = (
 )
 #: 다시 보내도 되는 거부 — KIS 초당 한도(`EGW00201`)·토큰 만료. 잔고·가격 제한 같은 진짜 거부는 그대로 둔다
 TRANSIENT_CODES = (kv.RATE_LIMIT_CODE, "EGW00123", "EGW00121")
+#: 순간 거부 알림 — 다시 보내는 것은 다음 회차에도 선에 닿아 있을 때뿐이다(25.1774, 25.1773 교차검증 [권고]:
+#: "다음 회차에 다시 보냄" 만 적어 반등한 날은 약속한 매도도 후속 알림도 없었다)
+TRANSIENT_TEXT = "거부(초당 한도·토큰) — 다음 회차에 선에 아직 닿아 있으면 다시 보냄"
 #: 다시 보낼 때 수량·사유도 지금 값으로(25.1770 — 처음 값이 남으면 다음 아침 맞추기가 거짓 `partial`·`unknown`)
 RETRY_SQL = (
     "UPDATE paper_broker_orders SET status = 'sending', message = NULL, created_at = ?, quantity = ?, reason = ?"
@@ -99,6 +108,11 @@ SUSPECT_KEY = "kis_guard_suspect_alerted"
 OTHER_ROW_KEY = "kis_guard_other_row_alerted"
 #: 순간 거부(초당 한도·토큰)를 알린 종목 — 다시 보내는 동안 10분마다 같은 거부 알림이 가지 않게(25.1772)
 TRANSIENT_KEY = "kis_guard_transient_alerted"
+#: 감시선 계산이 일부 보유에서 깨진 날 한 번 알린 날짜(25.1774)
+LINE_ERR_KEY = "kis_guard_line_error_alerted"
+#: 판 뒤 텔레그램을 못 보낸 알림 글 — {date, text}. 판 종목은 다음 회차부터 "이미" 로 빠져 글이 다시 안 만들어지므로
+#: 글을 남겨 두고 다음 회차가 앞에 붙여 다시 보낸다(25.1774, 25.1773 교차검증 [권고])
+UNSENT_KEY = "kis_guard_unsent_alert"
 #: 아침 감시선이 없는 날 한 번만 알린다 — {날짜} (25.1769, 교차검증 [권고]: 아침 단계가 실패하면 하루 종일 조용히
 #: 꺼졌다)
 NO_LINES_ALERT_KEY = "kis_guard_no_lines_alerted"
@@ -130,15 +144,16 @@ def save_lines(
     """아침 가상모의투자 단계가 부른다 — 그 시장의 감시선을 오늘 날짜로 덮어쓴다(다른 시장 칸은 그대로).
     건수만 돌려준다. `errors` = 감시선 계산 예외 {이름: 수} — 예외로 선이 하나도 안 섰으면 `dropped`(25.1773)"""
     빼기, 까닭 = action_today(client, sorted(lines), today) if market == "KR" else (set(), None)
-    if errors and not lines:
-        까닭 = 까닭 or f"감시선 계산 오류({', '.join(sorted(errors))})"
+    계산 = f"감시선 계산 오류({', '.join(sorted(errors))})" if errors else None
     lines = {sid: 선 for sid, 선 in lines.items() if sid not in 빼기}
     값 = db.get_setting(client, GUARD_KEY, None)
     값 = 값 if isinstance(값, dict) else {}
     값[market] = {"as_of": today.isoformat(), "account": account, "rule": rule,
                  "lines": {str(sid): 선 for sid, 선 in sorted(lines.items())},
                  # 일정을 몰라 선을 모두 뺀 날 — 장중 감시가 "감시선 없음" 으로 알리고 멈춤으로 남긴다(25.1772)
-                 **({"dropped": 까닭} if 까닭 and (빼기 or not lines) else {})}  # fmt: skip
+                 **({"dropped": 까닭} if 까닭 and 빼기 else {"dropped": 계산} if 계산 and not lines else {}),
+                 # 일부만 깨진 날 — 나머지 선은 서고 장중 실행이 멈춤·알림(그 종목은 감시 밖, 25.1774)
+                 **({"line_errors": sum(errors.values())} if errors and lines else {})}  # fmt: skip
     db.set_setting(client, GUARD_KEY, 값)
     return {"n": len(lines), **{k: sum(k in 선 for 선 in lines.values()) for k in ("stop", "trail", "target")},
             **({"action_day": len(빼기)} if 빼기 else {}), **({"action_day_error": 까닭} if 까닭 else {}),
@@ -176,7 +191,7 @@ def action_today(client: Any, stock_ids: list[int], today: date) -> tuple[set[in
     except Exception as exc:  # noqa: BLE001 — 모르면 그날 선을 만들지 않는다(거짓 손절보다 꺼짐이 낫다)
         if db.quota_reason(exc):
             raise
-        return set(stock_ids), type(exc).__name__
+        return set(stock_ids), f"기업행위 일정 읽기 실패({type(exc).__name__})"  # 알림이 일정 쪽을 보게(25.1774)
 
 
 #: 주식배당 일정 — 배당 일정 가운데 주식배당 비율이 있는 행(파이썬에서 거른다, `stock_dividend`). 창은 권리락과 같다
@@ -210,9 +225,25 @@ def due(now: datetime, market: str = "KR") -> str | None:
     현지 = now.astimezone(cal.market_tz(market))
     if not cal.is_session(market, 현지.date()):
         return "휴장일"
-    if not WINDOW_KST[0] <= 현지.time() <= WINDOW_KST[1]:
+    창 = window(market, 현지.date())
+    if 창 is None:
+        if not WINDOW_KST[0] <= 현지.time() <= WINDOW_KST[1]:
+            return "장중 감시 시간 밖"
+    elif not 창[0] <= now <= 창[1]:
         return "장중 감시 시간 밖"
     return None
+
+
+def window(market: str, day: date) -> tuple[datetime, datetime] | None:
+    """그날 장중 감시 창(UTC) — 개장 + 5분 ~ 마감 − 15분. 수능일은 한 시간 늦춘다. 달력이 모르면 None"""
+    from batch.jobs import monitor_targets as mt
+
+    열림, 닫힘 = cal.session_open_utc(market, day), cal.session_close_utc(market, day)
+    if 열림 is None or 닫힘 is None:
+        return None
+    if market == "KR" and day.isoformat() in mt.KR_CSAT_DAYS and 열림.astimezone(UTC).hour == 0:
+        열림, 닫힘 = 열림 + mt.CSAT_SHIFT, 닫힘 + mt.CSAT_SHIFT
+    return 열림 + OPEN_MARGIN, 닫힘 - CLOSE_MARGIN
 
 
 def hits(holdings: list[kv.Holding], lines: dict[str, tuple[int, dict[str, Any]]]) -> list[Hit]:
@@ -290,6 +321,11 @@ def run(
     sess = session or kv.Session(client, now, keys=kv.MAIN)
     보유, _합 = sess.balance()
     기록: dict[str, Any] = {"lines": len(선들), "holdings": len(보유)}
+    날표시: list[str] = []  # 보낸 뒤 `main` 이 오늘 날짜를 적는 하루 한 번 표시
+    if 칸.get("line_errors"):
+        기록["line_errors"] = int(칸["line_errors"])  # 일부 보유의 감시선 계산이 깨졌다 — 그 종목은 오늘 감시 밖
+        if db.get_setting(client, LINE_ERR_KEY, None) != 오늘.isoformat():
+            날표시.append(LINE_ERR_KEY)
     if getattr(sess, "balance_truncated", False):
         return 기록 | {"skipped": "잔고 조회가 쪽 상한에 닿아 잘림", "calls": sess.calls}
     오늘줄 = client.execute(GUARDED_TODAY_SQL, [bmj.BROKER, 오늘.isoformat(), bm.REASON_GUARD_STOP,
@@ -309,9 +345,12 @@ def run(
     기록["hits"] = {k: 종류.count(k) for k in ("stop", "trail", "target") if k in 종류}
     if dry_run:  # 확인 실행은 세기만 — 주문·알림·표시 없음(25.1772)
         return 기록 | {"dry_run": True, "calls": sess.calls}
+    오류글 = (f"⚠️ KIS모의투자 장중 감시 — 오늘 감시선 계산 오류 {기록['line_errors']}종목은 장중 손절·익절 밖"
+             "(일일 배치 실행 기록 guard_lines 확인)") if 날표시 else ""  # fmt: skip
     if not 닿음:
-        if 의심:
-            기록["alert"], 기록["marks"] = suspect_text(client, 의심), 표시
+        글 = [x for x in (suspect_text(client, 의심) if 의심 else "", 오류글) if x]
+        if 글:
+            기록["alert"], 기록["marks"], 기록["date_marks"] = "\n".join(글), 표시, 날표시
         return 기록 | {"dry_run": False, "calls": sess.calls}
     지금 = now.isoformat()
     상태: dict[str, int] = {}
@@ -355,7 +394,7 @@ def run(
             상태["no_response"] = 상태.get("no_response", 0) + 1
         except KisFailed as exc:
             순간 = any(c in str(exc) for c in TRANSIENT_CODES)
-            결과 = "거부(초당 한도·토큰) — 다음 회차에 다시 보냄" if 순간 else f"거부 ({bm._까닭(str(exc))})"
+            결과 = TRANSIENT_TEXT if 순간 else f"거부 ({bm._까닭(str(exc))})"
             값 = ["rejected", None, 보낸시각, f"{note(x)} · {str(exc)[:150]}", 보낸시각, rid]
             상태["rejected"] = 상태.get("rejected", 0) + 1
             if 순간:  # 다시 보내는 동안 같은 거부 알림은 종목마다 하루 한 번
@@ -374,9 +413,10 @@ def run(
     if 겹침:
         표시[OTHER_ROW_KEY] = [x.stock_id for x in 겹침]
     글 = [alert_text(client, 보낸) if 보낸 else "", other_row_text(client, 겹침) if 겹침 else "",
-          suspect_text(client, 의심) if 의심 else ""]  # fmt: skip
+          suspect_text(client, 의심) if 의심 else "", 오류글]  # fmt: skip
     if any(글):
         기록["alert"], 기록["marks"] = "\n".join(x for x in 글 if x), {k: v for k, v in 표시.items() if v}
+        기록["date_marks"] = 날표시
     if 기록줄오류 is not None:
         # 알림을 실어 올린다 — `main` 이 알림을 보낸 뒤 실패로 닫는다
         raise GuardRecordError(기록 | {"calls": sess.calls}) from 기록줄오류
@@ -454,7 +494,7 @@ def run_status(기록: dict[str, Any]) -> str:
     판 뒤 알림을 못 보냈으면 `partial` — 주문은 나갔는데 사람은 모른다(25.1772)"""
     if str(기록.get("off", "")).startswith(NO_LINES) or "잘림" in str(기록.get("skipped", "")):  # 대기·실행 중은 정상
         return "skipped"
-    if (기록.get("sent") or {}).get("skipped_other_row"):
+    if (기록.get("sent") or {}).get("skipped_other_row") or 기록.get("line_errors"):
         return "skipped"
     if 기록.get("alert_error") and set(기록.get("sent") or {}) & {"accepted", "no_response", "rejected"}:
         return "partial"
@@ -476,6 +516,18 @@ def no_lines_alert(client: Any, now: datetime, why: str = "") -> str | None:
     else:
         볼곳 = "아침 가상모의투자 단계가 감시선을 적지 못했습니다(일일 배치 확인)"
     return f"⚠️ KIS모의투자 장중 손절·익절 꺼짐 — {볼곳}. 그날 매도는 아침 일봉 판정만 따릅니다"
+
+
+def kst_today(now: datetime) -> str:
+    return now.astimezone(cal.market_tz("KR")).date().isoformat()
+
+
+def unsent_text(client: Any, now: datetime) -> str | None:
+    """앞 회차에 못 보낸 장중 매도 알림(오늘 것만) — 앞에 붙여 다시 보낸다"""
+    값 = db.get_setting(client, UNSENT_KEY, None)
+    if not isinstance(값, dict) or 값.get("date") != kst_today(now) or not 값.get("text"):
+        return None
+    return f"(앞 회차에 보내지 못한 알림)\n{값['text']}"
 
 
 def mark_alerted(client: Any, now: datetime, key: str = NO_LINES_ALERT_KEY) -> None:
@@ -510,19 +562,30 @@ def main() -> int:
         except GuardRecordError as exc:
             기록, 실패 = exc.record, exc.__cause__ or exc
         글, 표시 = 기록.pop("alert", None), 기록.pop("marks", None) or {}
+        날표시 = 기록.pop("date_marks", None) or []
         감시선없음 = not 글 and str(기록.get("off", "")).startswith(NO_LINES)
         if 감시선없음 and not args.dry_run:  # 확인 실행은 알림·표시를 내지 않는다(25.1772)
             글 = no_lines_alert(client, now, str(기록.get("off", "")))
+        못보냄 = unsent_text(client, now) if not args.dry_run else None
+        if 못보냄:
+            글 = f"{못보냄}\n{글}" if 글 else 못보냄
         if 글:
             try:
                 telegram.send(글)
                 기록["alerted"] = True
             except Exception as exc:  # noqa: BLE001 — 주문은 이미 냈다. 알림만 빠진다
                 기록["alert_error"] = type(exc).__name__
+                if set(기록.get("sent") or {}) & {"accepted", "no_response", "rejected"} or 못보냄:
+                    # 판 알림은 다음 회차가 다시 만들지 못한다 — 글을 남겨 다음 회차가 보낸다(25.1774)
+                    db.set_setting(client, UNSENT_KEY, {"date": kst_today(now), "text": 글})
             else:  # 표시는 보낸 뒤에만 — 실패한 날은 다음 회차가 다시 알린다
                 if 감시선없음:
                     mark_alerted(client, now)
+                for key in 날표시:
+                    mark_alerted(client, now, key)
                 mark_ids(client, now, 표시)
+                if 못보냄:
+                    db.set_setting(client, UNSENT_KEY, None)
         if 실패 is not None:
             raise 실패
         db.finish_batch_run(client, rid, status=run_status(기록), step_log={"guard": 기록})

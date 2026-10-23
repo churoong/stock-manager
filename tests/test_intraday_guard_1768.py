@@ -318,7 +318,6 @@ def test_감시선_계산이_깨져도_매도_판정은_그대로(monkeypatch: p
     _, 기록 = _하루(c, monkeypatch, "2026-10-15", signals=False)
     # 예외는 세어 두고, 선이 하나도 안 섰으면 장중 감시가 "감시선 없음" 으로 알린다(25.1773)
     assert 기록["accounts"]["B"]["guard_lines"] == {"n": 0, "stop": 0, "trail": 0, "target": 0,
-                                                 "action_day_error": "감시선 계산 오류(RuntimeError)",
                                                  "line_errors": {"RuntimeError": 1}}  # fmt: skip
     assert db.get_setting(c, ig.GUARD_KEY, None)["KR"]["dropped"] == "감시선 계산 오류(RuntimeError)"
     assert "sells" in 기록["accounts"]["B"]  # 매도 판정은 그대로 돌았다
@@ -364,7 +363,7 @@ def test_권리락일은_감시선을_만들지_않는다(c: Client) -> None:
     s = _Sess([_h("005930", 5_000.0)])
     assert "sent" not in ig.run(c, 월, session=s, clock=lambda: 월) and s.orders == []
     # 일정을 못 읽으면 그날 선을 모두 뺀다(보수)
-    assert ig.action_today(None, [1, 3], date(2026, 10, 26)) == ({1, 3}, "AttributeError")  # type: ignore[arg-type]
+    assert ig.action_today(None, [1, 3], date(2026, 10, 26)) == ({1, 3}, "기업행위 일정 읽기 실패(AttributeError)")  # type: ignore[arg-type]
 
 
 def test_가격제한폭_밖_현재가는_기업행위_의심으로_팔지_않는다(c: Client) -> None:
@@ -461,7 +460,7 @@ def test_순간_거부_알림은_종목마다_하루_한_번(c: Client) -> None:
                       clock=lambda: 월)  # fmt: skip
 
     r = 한번()
-    assert "거부(초당 한도·토큰) — 다음 회차에 다시 보냄" in r["alert"] and r["marks"] == {ig.TRANSIENT_KEY: [1]}
+    assert ig.TRANSIENT_TEXT in r["alert"] and "선에 아직 닿아 있으면" in r["alert"] and r["marks"] == {ig.TRANSIENT_KEY: [1]}
     ig.mark_ids(c, 월, r["marks"])
     assert "alert" not in 한번()  # 다시 보낸 것도 또 순간 거부 — 같은 알림은 하지 않는다
     r = ig.run(c, 월, session=_Sess([_h("005930", 9_250.0)]), clock=lambda: 월)
@@ -752,3 +751,98 @@ def test_장중_감시_워크플로는_공개_로그에_찍지_않는다() -> No
     글 = (Path(__file__).resolve().parents[1] / ".github" / "workflows" / "kis-guard.yml").read_text(encoding="utf-8")
     assert "python -m batch.jobs.intraday_guard $ARGS 2>&1 | python scripts/ops_tee.py run.log" in 글
     assert "set -o pipefail" in 글 and "if: always() && (failure()" in 글 and "scripts/publish_output.py" in 글
+
+
+def test_감시_창은_그날_개장과_마감을_따른다() -> None:
+    """새해 첫 거래일(10:00 개장)·수능일(한 시간 늦춤) — 고정 창이면 장 열리기 전 가격으로 팔았다(25.1774)"""
+    def at(d: str, hm: str) -> datetime:
+        return datetime.fromisoformat(f"{d}T{hm}:00+00:00")
+
+    assert ig.due(at("2027-01-04", "00:13")) == "장중 감시 시간 밖"  # 09:13 KST — 아직 장전
+    assert ig.due(at("2027-01-04", "01:06")) is None  # 10:06
+    assert ig.due(at("2026-11-19", "00:53")) == "장중 감시 시간 밖"  # 수능일 09:53
+    assert ig.due(at("2026-11-19", "01:06")) is None and ig.due(at("2026-11-19", "07:13")) is None  # 16:13
+    assert ig.due(at("2026-11-19", "07:20")) == "장중 감시 시간 밖"  # 16:20 — 마감 동시호가
+    assert ig.due(at("2026-10-26", "06:15")) is None and ig.due(at("2026-10-26", "06:16")) == "장중 감시 시간 밖"
+    assert ig.due(at("2026-10-26", "00:05")) is None and ig.due(at("2026-10-26", "00:04")) == "장중 감시 시간 밖"
+
+
+def test_어제_배치_성공은_오늘_끝남이_아니다(c: Client) -> None:
+    """'오늘' 경계 — 어제 성공 기록으로 끝남을 세면 배치가 늦는 날 거짓 꺼짐이 되살아난다(25.1770 [필수])"""
+    c.conn.execute("INSERT INTO batch_runs (job_name, market, trade_date, trigger_source, started_at, status)"
+                   " VALUES ('daily_kr', 'KR', '2026-10-23', 'cron', '2026-10-25T23:27:00+00:00', 'success')")  # 10-26 08:27
+    assert ig.run(c, datetime(2026, 10, 27, 1, 30, tzinfo=UTC), session=_Sess([])) == {"off": ig.WAITING}
+
+
+def test_오늘이_아닌_락일은_선을_남긴다(c: Client) -> None:
+    """권리락·주식배당 거르기는 **오늘** 락일만 — 창(14일) 안 다른 날까지 빼면 락일 전 2주 동안 감시가 조용히 빠졌다"""
+    c.conn.execute("INSERT INTO kr_corp_events (code, kind, record_date, source, fetched_at) VALUES ('005930', 'bonus',"
+                   " '2026-10-29', 'kis', '2026-10-20T00:00:00+00:00')")  # 권리락일 10-28
+    c.conn.execute("INSERT INTO kr_corp_events (code, kind, record_date, detail, source, fetched_at) VALUES ('000660',"
+                   " 'dividend', '2026-10-29', '{\"stk_divi_rate\":\"5\"}', 'kis', '2026-10-20T00:00:00+00:00')")
+    r = ig.save_lines(c, "KR", date(2026, 10, 26), "H", "trend", {1: {"code": "005930", "stop": 9_300.0},
+                                                                   3: {"code": "000660", "stop": 50_000.0}})
+    assert r["n"] == 2 and "action_day" not in r
+
+
+def test_판_뒤_알림이_실패하면_부분으로_닫고_다음_회차가_다시_보낸다(c: Client, monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1773 교차검증 [권고] — 판 종목은 다음 회차부터 '이미' 로 빠져 알림 글이 다시 안 만들어졌다"""
+    보낸: list[str] = []
+    _main_준비(c, monkeypatch, 보낸, 실패=True)
+    monkeypatch.setattr(kv, "Session", lambda *a, **k: _Sess([_h("005930", 9_250.0)]))
+    assert ig.main() == 0
+    assert c.q("SELECT status FROM batch_runs WHERE job_name = 'intraday_guard'") == [("partial",)]
+    assert c.q("SELECT status FROM paper_broker_orders") == [("accepted",)]
+    _main_준비(c, monkeypatch, 보낸)
+    assert ig.main() == 0 and len(보낸) == 1
+    assert 보낸[0].startswith("(앞 회차에 보내지 못한 알림)") and "⚡ KIS모의투자 장중 매도" in 보낸[0]
+    assert ig.main() == 0 and len(보낸) == 1  # 보낸 뒤 지웠다
+
+
+def test_일부_보유의_감시선_계산이_깨지면_멈춤으로_남기고_하루_한_번_알린다(c: Client) -> None:
+    """25.1773 교차검증 [권고] — 모두 깨질 때만 막아 일부만 깨진 종목은 매일 조용히 감시 밖이었다"""
+    r = ig.save_lines(c, "KR", date(2026, 10, 26), "H", "trend", {1: {"code": "005930", "stop": 9_300.0}},
+                      {"KeyError": 2})  # fmt: skip
+    assert r["n"] == 1 and db.get_setting(c, ig.GUARD_KEY, None)["KR"]["line_errors"] == 2
+    a = ig.run(c, 월, session=_Sess([_h("005930", 9_500.0)]), clock=lambda: 월)
+    assert ig.run_status(a) == "skipped" and "감시선 계산 오류 2종목" in a["alert"] and a["date_marks"] == [ig.LINE_ERR_KEY]
+    ig.mark_alerted(c, 월, ig.LINE_ERR_KEY)
+    b = ig.run(c, 월, session=_Sess([_h("005930", 9_500.0)]), clock=lambda: 월)
+    assert "alert" not in b and ig.run_status(b) == "skipped"
+
+
+def test_익절선은_고점이_목표에_정확히_닿으면_선다() -> None:
+    h, 행 = _보유()
+    assert "trail" in jp.guard_line(_C(110.0), h, 행, "trend", None, date(2026, 10, 23), {"ticker": "005930"})
+
+
+def test_다_판_종목은_다시_받기_대상이_아니다() -> None:
+    from batch.jobs import kis_flows as kf
+
+    c = Client(accounts=None)
+    for oid, side in ((900, "buy"), (901, "sell")):
+        c.conn.execute(
+            "INSERT INTO paper_orders (id, account_id, market, stock_id, side, order_type, limit_price, quantity,"
+            " currency, decided_on, fill_session, reason, rule_version, tranche, created_at)"
+            " VALUES (?, 'H', 'KR', 1, ?, 'limit', 100, 10, 'KRW', '2026-10-20', '2026-10-20', 'r', 1, 1, 't')",
+            [oid, side])  # fmt: skip
+        c.conn.execute(
+            "INSERT INTO paper_fills (order_id, account_id, stock_id, side, fill_date, price, quantity, currency,"
+            " fx_rate, fee, tax, slippage, cash_krw, created_at) VALUES (?, 'H', 1, ?, '2026-10-20', 100, 10, 'KRW', 1,"
+            " 0, 0, 0, -100, 't')", [oid, side])  # fmt: skip
+    assert ("005930",) not in c.q(kf.HELD_KR_TICKERS)
+
+
+def test_묵은_실행_중_기록은_45분_뒤엔_막지_않는다(c: Client) -> None:
+    c.conn.execute("INSERT INTO batch_runs (job_name, market, trade_date, trigger_source, started_at, status)"
+                   " VALUES ('daily_kr', 'KR', '2026-10-26', 'cron', '2026-10-26T00:44:00+00:00', 'running')")  # 46분 전
+    assert "skipped" not in ig.run(c, 월, session=_Sess([_h("005930", 9_500.0)]), clock=lambda: 월)
+
+
+def test_main_은_계산_오류_알림을_하루_한_번(c: Client, monkeypatch: pytest.MonkeyPatch) -> None:
+    보낸: list[str] = []
+    _main_준비(c, monkeypatch, 보낸)
+    ig.save_lines(c, "KR", date(2026, 10, 26), "H", "trend", {1: {"code": "005930", "stop": 9_300.0}}, {"KeyError": 1})
+    monkeypatch.setattr(kv, "Session", lambda *a, **k: _Sess([_h("005930", 9_500.0)]))
+    assert ig.main() == 0 and ig.main() == 0
+    assert len(보낸) == 1 and "감시선 계산 오류 1종목" in 보낸[0]
