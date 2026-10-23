@@ -73,15 +73,18 @@ class Regime:
             "note": self.note,
         }
 
-    def describe(self) -> str:
-        """리포트·근거표 한 조각. 'KOSPI 2,512 < 200일선 2,640 → 약세'"""
+    def describe(self, with_date: bool = True) -> str:
+        """리포트·근거표 한 조각. 'KOSPI 2,512 < 200일선 2,640 → 약세 (날짜)'.
+
+        `with_date` 거짓이면 날짜를 뺀다 — 리포트 머리에 한 번 적은 경우(25.1739)
+        """
         if self.state == "unknown" or self.close is None or self.sma is None:
             return f"{self.index_code} 미판정 ({self.note or '지수 없음'})"
         sign = "<" if self.state == "bear" else "≥"
         # 반올림으로 두 값이 같아 보이면 자리를 늘린다 — "2,640 < 2,640" 은 모순이다 (25.489, 25.369 와 같은 모양).
         # 지수 날짜를 붙인다 — 최대 며칠 묵은 지수로 판정할 수 있다
         자리 = 가르는_자리(self.close, self.sma)
-        날 = f" ({self.date})" if self.date else ""
+        날 = f" ({self.date})" if self.date and with_date else ""
         return (f"{self.index_code} {self.close:,.{자리}f} {sign} 200일선 {self.sma:,.{자리}f}"
                 f" → {STATE_LABEL[self.state]}{날}")
 
@@ -201,13 +204,19 @@ def regimes_for_country(client: TursoClient, country: str, as_of: str) -> dict[s
 
 
 def report_line(regimes: dict[str, Regime], settings: dict[str, Any]) -> str:
-    """리포트 1부 머리의 한 줄. 무엇을 보고 얼마나 줄였는지가 먼저 보여야 한다."""
+    """리포트 1부 머리. 무엇을 보고 얼마나 줄였는지가 먼저 보여야 한다.
+
+    지수마다 한 줄 들여 쓴다(25.1739, 2026-10-23 사용자 "여전히 내용이 가독성이 떨어지는데" — 한 줄에 지수 둘과 날짜 둘·
+    비중 배수가 이어져 117자였다). 날짜가 모두 같으면 머리에 한 번만. 꺼짐·지수 없음은 한 줄 그대로
+    """
     if not settings.get("enabled", DEFAULT_ENABLED):
         return "시장 국면: 추세 필터 꺼짐 (설정)"
-    parts = [r.describe() for r in regimes.values()]
-    if not parts:
+    if not regimes:
         return "시장 국면: 지수 없음"
-    line = "시장 국면: " + " · ".join(parts)
+    날들 = {r.date for r in regimes.values()}
+    한날 = next(iter(날들)) if len(날들) == 1 and None not in 날들 else None
+    lines = ["시장 국면" + (f" ({한날})" if 한날 else "")]
+    lines += [f"  {r.describe(with_date=한날 is None)}" for r in regimes.values()]
     if any(r.state == "bear" for r in regimes.values()):
-        line += f" — 약세 지수의 신규 매수 비중 ×{settings.get('bear_factor', DEFAULT_BEAR_FACTOR):.2f}"
-    return line
+        lines.append(f"  약세 지수의 신규 매수 비중 ×{settings.get('bear_factor', DEFAULT_BEAR_FACTOR):.2f}")
+    return "\n".join(lines)

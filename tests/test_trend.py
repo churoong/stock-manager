@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+from dataclasses import replace as dc_replace
 
 import pytest
 
@@ -110,8 +111,13 @@ class Test설정과_지수매핑:
     def test_리포트_한_줄(self) -> None:
         regimes = {"KOSPI": Test배수.BEAR, "KOSDAQ": Test배수.BULL}
         line = trend.report_line(regimes, Test배수.ON)
-        assert line.startswith("시장 국면: KOSPI 90 < 200일선 100 → 약세")
-        assert "×0.50" in line
+        # 지수마다 한 줄, 같은 날짜는 머리에 한 번(25.1739 — 한 줄 117자였다)
+        assert line.split("\n") == ["시장 국면 (2026-09-15)", "  KOSPI 90 < 200일선 100 → 약세",
+                                     "  KOSPI 110 ≥ 200일선 100 → 강세", "  약세 지수의 신규 매수 비중 ×0.50"]
+        # 날짜가 다르면 줄마다
+        다른날 = {"KOSPI": Test배수.BEAR, "KOSDAQ": dc_replace(Test배수.BULL, date="2026-09-12")}
+        assert trend.report_line(다른날, Test배수.ON).split("\n")[:3] == [
+            "시장 국면", "  KOSPI 90 < 200일선 100 → 약세 (2026-09-15)", "  KOSPI 110 ≥ 200일선 100 → 강세 (2026-09-12)"]
         assert "꺼짐" in trend.report_line(regimes, {"enabled": False})
 
 

@@ -738,7 +738,7 @@ def summary_lines(
         보유 = json.loads(끝.get("positions_json") or "[]")
         날짜 = sorted({str(p.get("price_date")) for p in 보유 if p.get("price_date")})
         누적 = (float(끝["twr_index"]) - 1) * 100
-        out.append(f"  {aid} 평가 {won_short(총액)} · 손익 {_퍼센트(손익)} · 시간가중 이번 주 {_퍼센트(주간)}"
+        out.append(f"  {aid} 평가 {won_short(총액)} · 입금 대비 {_퍼센트(손익)} · 시간가중 이번 주 {_퍼센트(주간)}"
                    f" · 누적 {_퍼센트(누적)}")  # fmt: skip
         out.append(
             f"     입금 {won_short(입금)} · 같은 돈 KOSPI {_퍼센트(코스피)} · S&P500 {_퍼센트(미국)}"

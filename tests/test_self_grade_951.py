@@ -33,9 +33,12 @@ class Test채점:
 class Test글:
     def test_한_줄(self) -> None:
         g = sg.SelfGrade((sg.WindowGrade(5, 31, 0.0081, 0.5416), sg.WindowGrade(20, 0, None, None)), "2026-09-17", "2026-09-26")
-        assert sg.line(g) == "지난 추천 자기 채점: 5일 뒤 평균 +0.8% · 이긴 54% (31건) · 20일 뒤 아직 셀 수 없음 (0건) — 09-17~09-26 리포트"
+        # 창마다 한 줄, 기간은 머리에(25.1739)
+        assert sg.line(g) == ("지난 추천 자기 채점 (09-17~09-26 리포트)\n  5일 뒤 평균 +0.8% · 이긴 54% (31건)\n"
+                              "  20일 뒤 아직 셀 수 없음 (0건)")
         # 같은 날 하나면 날짜를 한 번만 (10-06 리포트 "10-01~10-01")
-        assert sg.line(sg.SelfGrade((sg.WindowGrade(5, 0, None, None),), "2026-10-01", "2026-10-01")).endswith("— 10-01 리포트")
+        assert sg.line(sg.SelfGrade((sg.WindowGrade(5, 0, None, None),), "2026-10-01", "2026-10-01")).startswith(
+            "지난 추천 자기 채점 (10-01 리포트)\n")
         # 반올림해 0 이면 "-0.0%" 가 아니다
         assert "+0.0%" in sg.line(sg.SelfGrade((sg.WindowGrade(5, 5, -0.0003, 0.4),), "2026-09-17", "2026-09-17"))
 

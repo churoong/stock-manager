@@ -2239,7 +2239,8 @@ def run_step(
         시간가중 = f"{(검['twr'] - 1) * 100:+.1f}%"
         # 계좌마다 한 줄, 억·만 원(25.1721, 리포트 가독성 — 예전엔 아홉 계좌가 " · " 로 한 문단이었다). 시간가중은
         # 손익과 다를 때만(입금이 끼면 달라진다). "이번 실행" — 아침 실행이 판정하는 체결은 전 거래일 장의 것(25.1643)
-        줄.append(f"  {aid} {formatter.won_short(v.equity_krw)} · 손익 {손익률}"
+        # "입금 대비" — 순위(공통 구간)·실제 비교(시간가중)와 다른 수라 무엇의 대비인지 적는다(25.1739)
+        줄.append(f"  {aid} {formatter.won_short(v.equity_krw)} · 입금 대비 {손익률}"
                  + (f"(시간가중 {시간가중})" if 시간가중 != 손익률 else "")
                  + f" · 체결 {a기록['fills']}건")  # fmt: skip
         if not 검["recon_ok"]:
@@ -2279,7 +2280,7 @@ def run_step(
             기록.setdefault("attribution_error", {})[str(acct["id"])] = str(exc)[:200]
     if 읽기0 is not None:
         기록["reads"] = getattr(client.reads, "total", 0) - 읽기0
-    머리 = ["🧪 가상모의투자 (평가 · 손익 · 이번 실행 체결)", *(글 for 글 in 줄 if not 글.startswith("⚠️"))]
+    머리 = ["🧪 가상모의투자 (평가 · 입금 대비 손익 · 이번 실행 체결)", *(글 for 글 in 줄 if not 글.startswith("⚠️"))]
     # 실제 투자와 같은 기간 비교 (2026-10-15 사용자 지시, 25.1448) — 곁다리. 못 읽으면 그 줄만 빠진다
     try:
         비교 = real_comparison(client)
