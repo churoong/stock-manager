@@ -43,21 +43,23 @@ def test_웹_사본이_배치와_같다(파일: str, 이름: str, 배치: float)
 
 #: 정의처를 따라야 하는 사본 이름 — 숫자로 다시 적으면 정의처만 바꾼 날 조용히 갈라진다(25.1755, 25.1753 교차검증 [권고]:
 #: 값만 견줘 `KR_PRICE_LIMIT = 0.30` 으로 되돌려도 통과했다). 정의처 파일(`core/markets.py`·`services/fx.py`)은 뺀다
-_사본 = ("KR_PRICE_LIMIT", "KR_DAILY_LIMIT", "KR_UNKNOWN_PCT_JUMP", "LT_KR_LIMIT", "FX_MAX_AGE_DAYS",
+_사본 = ("KR_PRICE_LIMIT", "KR_DAILY_LIMIT", "KR_UNKNOWN_PCT_JUMP", "LT_KR_LIMIT", "STOP_VOL_KR_JUMP", "FX_MAX_AGE_DAYS",
          "REALIZED_FX_MAX_AGE_DAYS")  # fmt: skip
+#: 빼는 정의처 파일 — 이름이 아니라 경로로(25.1756 — 이름으로 빼서 `batch/jobs/fx.py` 까지 빠졌다)
+_정의처 = ("batch/core/markets.py", "batch/services/fx.py")
 
 
 def test_가격제한과_환율_묵음은_정의처_하나() -> None:
     from batch.core import markets
     from batch.jobs import broker_mirror as bmj
     from batch.jobs import paper as pj
-    from batch.services import adjust, candidate_factors
+    from batch.services import adjust, candidate_factors, stop_vol
 
     assert pp.KR_PRICE_LIMIT == signals.KR_DAILY_LIMIT == adjust.KR_UNKNOWN_PCT_JUMP == candidate_factors.LT_KR_LIMIT == (
-        markets.KR_DAILY_LIMIT)
+        stop_vol.STOP_VOL_KR_JUMP) == markets.KR_DAILY_LIMIT
     assert pj.FX_MAX_AGE_DAYS == bmj.REALIZED_FX_MAX_AGE_DAYS == fx.MAX_STALE_DAYS
     뿌리 = Path(__file__).resolve().parent.parent
-    따로 = [f"{f.relative_to(뿌리)}:{k}" for f in (뿌리 / "batch").rglob("*.py") if f.name not in ("markets.py", "fx.py")
+    따로 = [f"{f.relative_to(뿌리)}:{k}" for f in (뿌리 / "batch").rglob("*.py") if str(f.relative_to(뿌리)) not in _정의처
             for k, 줄 in enumerate(f.read_text(encoding="utf-8").splitlines(), 1)
             if re.match(rf"^({'|'.join(_사본)})\s*(:\s*\w+\s*)?=\s*[\d.]", 줄)]  # fmt: skip
     assert not 따로, f"정의처 사본을 숫자로 다시 적었다 — core/markets·services/fx 를 쓴다: {따로}"

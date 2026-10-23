@@ -12,10 +12,12 @@ from __future__ import annotations
 import math
 from typing import Any
 
+from batch.core import markets
+
 #: σ 를 내는 일간 수익 수 하한 — 2부 상관 계열(약 140 거래일)의 절반쯤. 그보다 적으면 모름
 STOP_VOL_MIN_RETURNS = 60
 #: 국내 하루 등락 제한(±30%)을 넘는 날은 수정 안 된 분할·병합으로 보고 뺀다(16회차 규칙) — 미국은 제한이 없다
-STOP_VOL_KR_JUMP = 0.30
+STOP_VOL_KR_JUMP = markets.KR_DAILY_LIMIT  # 정의처 core/markets(25.1756 — 다섯째 사본이었다)
 #: 손절 거리를 견주는 기간 — 성과 분해의 20 거래일과 같은 한 달
 STOP_VOL_HORIZON_DAYS = 20
 

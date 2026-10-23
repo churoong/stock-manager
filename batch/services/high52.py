@@ -12,11 +12,13 @@ import hashlib
 from collections.abc import Callable
 from typing import Any
 
+from batch.core import markets
 from batch.services import backtest as bt
 from batch.services import factor_ic as fic
 from batch.services import luck
 from batch.services.scoring import HIGH_52W_DAYS, MIN_PEER_SIZE, high_52w_proximity
-from batch.services.signals import KR_DAILY_LIMIT
+
+KR_DAILY_LIMIT = markets.KR_DAILY_LIMIT  # 정의처 core/markets 에서 바로(25.1756 — signals 를 거쳤다)
 
 #: 동점(근접도 1.0 — 신고가 날)을 깨는 고정 씨앗. 엔진 기본(종목 번호 순)은 근거 없이 기운다 — R 계좌와 같은 랑데부 해싱
 TIE_SEED = "high52"

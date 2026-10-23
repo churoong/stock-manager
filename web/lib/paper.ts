@@ -232,7 +232,7 @@ FROM paper_orders o JOIN stocks s ON s.id = o.stock_id WHERE o.status = 'open' O
 export const PAPER_STOCK_NAMES = `SELECT s.id, s.ticker, COALESCE(s.name_ko, s.name_en, s.ticker) AS name
 FROM json_each(?) j JOIN stocks s ON s.id = j.value`;
 export const PAPER_FX_LATEST = "SELECT rate, date FROM fx_rates WHERE pair = 'USDKRW' ORDER BY date DESC LIMIT 1";
-/** 이보다 묵은 환율은 모름 — 배치 `jobs/paper.FX_MAX_AGE_DAYS` 와 같다(시험이 대조) */
+/** 이보다 묵은 환율은 모름 — 배치 정의처 `services/fx.MAX_STALE_DAYS` 와 같다(시험이 대조, 25.1753) */
 export const FX_MAX_AGE_DAYS = 7;
 /**
  * 마지막 USDKRW 를 쓸 수 있으면 그 값, `FX_MAX_AGE_DAYS` 넘게 묵었거나 없으면 null — 웹이 날짜를 보지 않아 환율 수집이 멈춘 뒤에도 옛 환율로

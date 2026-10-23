@@ -157,8 +157,9 @@ def test_비중_상한_기본값이_같다() -> None:
     따로 = [f"{f.relative_to(뿌리)}:{k}" for f in (뿌리 / "batch").rglob("*.py")
             for k, 줄 in enumerate(f.read_text(encoding="utf-8").splitlines(), 1)
             if re.search(r'"max_weight_per_(stock|sector)"\)? *(,|or) *\d', 줄)
-            or re.search(r'max_(weight_per_stock|stock_pct|sector_pct)\s*(:\s*float)?\s*=\s*\d', 줄)
-            or re.search(r'\b(10|30)(\.0)? if \w*상한', 줄)]  # fmt: skip
+            or re.search(r'max_(weight_per_(stock|sector)|stock_pct|sector_pct)"?\s*(:\s*float)?\s*[:=]\s*[1-9]', 줄)
+            # 0 은 "배분하지 않음"(추천을 못 읽은 날 — `jobs/daily`)이라 뺀다
+            or re.search(r'\b(10|30)(\.0)? if \w*상한|상한 is (not )?None else (10|30)\b', 줄)]  # fmt: skip
     # 줄을 넘긴 두 번째 인자(`_담다(get_setting_in_range(…, 기본), 10.0)`)도 — 파일 글 전체에서(25.1755)
     따로 += [str(f.relative_to(뿌리)) for f in (뿌리 / "batch").rglob("*.py")
              if re.search(r'_담다\([^()]*\([^()]*"max_weight_per_\w+"[^()]*\),\s*\d', f.read_text(encoding="utf-8"))]
