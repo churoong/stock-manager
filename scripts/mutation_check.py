@@ -152,12 +152,19 @@ def main(argv: list[str] | None = None) -> int:
         # **기준 실행** — 돌연변이 없이 대상 시험이 먼저 통과해야 한다. 이미 깨져 있으면 모든 돌연변이가 "잡힘" 으로
         # 나와 구멍을 가린다(25.1747, 25.1743 교차검증 [권고] 2)
         시험들 = sorted({t for m in 고른 for t in m.tests})
-        기준 = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", *시험들], cwd=사본,
-                            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}, capture_output=True, text=True,
-                            timeout=a.timeout * 2)  # fmt: skip
+        try:
+            기준 = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", *시험들], cwd=사본,
+                                env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}, capture_output=True, text=True,
+                                timeout=a.timeout * 2)  # fmt: skip
+        except subprocess.TimeoutExpired:
+            print(f"BASELINE TIMEOUT — 대상 시험이 {a.timeout * 2}초 안에 끝나지 않는다")
+            return 1
         if 기준.returncode != 0:
+            # 수집 오류(ImportError 등)는 "ERROR" 로 나온다 — 둘 다 없으면 끝 몇 줄(25.1749)
+            출력 = 기준.stdout.splitlines()
+            줄 = [x for x in 출력 if x.startswith(("FAILED", "ERROR"))] or 출력[-15:]
             print("BASELINE FAIL — 돌연변이 없이도 대상 시험이 깨진다. 먼저 고친다:")
-            print("\n".join(x for x in 기준.stdout.splitlines() if x.startswith("FAILED"))[:2000])
+            print("\n".join(줄)[:2000])
             return 1
         for m in 고른:
             결과, 덧 = _돌림(사본, m, a.timeout)

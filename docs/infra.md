@@ -2796,6 +2796,7 @@ SQL read operations are forbidden (reads are blocked, ...)
 | 25.1746 | 중복 규칙 감사 ⑦ 1차 — 목표·손절 정의처 하나, 웹↔배치 중첩 기본값 대조, 국내 시장 목록 하나 |
 | 25.1747 | 25.1742~1744 교차검증 권고 — 돌연변이 점검 기준 실행·사본 정리, '& Co.' 이름, 주간 머리 동률 |
 | 25.1748 | 중복 규칙 감사 ⑦ 2차 — 목표·손절 합치기 식 하나(rules_for), 가상 대조 묵음 주석 바로잡음 |
+| 25.1749 | 25.1745~1748 교차검증 권고 — 돌연변이 기준 실행 시간 초과·수집 오류, rules_for 직접 import, 인계 범위 표기 |
 
 ### 25.1 왜 D1 인가
 
@@ -38580,3 +38581,20 @@ KIS 시세에도 표시 → `intraday595` 경로 글 검사. 모두 깨짐 — �
 
 **되돌리기 확인**: `rules_for` 를 통째 덮기로 바꾸면 `test_칸별로_덮고_모르는_기간은_장기`, `monitor_targets` 에 합치기 식을 다시 적으면 `test_합치기_식을_그_자리에_다시_적지_않는다` 가 깨짐 —
 되돌림. R·가상 대조 지문 시험(`test_r_logic_frozen_1700`)은 그대로 통과(대조 논리 불변). 돌연변이 점검 `stop_loss_boundary` 는 커밋 뒤 다시 돌려 확인.
+
+### 25.1749 25.1745~1748 교차검증 권고 — 돌연변이 기준 실행 시간 초과·수집 오류, rules_for 직접 import, 인계 범위 표기
+
+**교차검증 (25.1745~25.1748, 다른 에이전트)**: [필수] 0. `rules_for` 를 예전 식과 70조합(기간 None·빈 글·셋·모름·정수 × 설정 None·빈·일부·전부·다른 기간만·None 칸·여분 키)으로 대조해
+모두 같음, desk 의 통째 덮기 → 칸별은 반쪽 설정에서만 다른데 `settings_range.기간별_목표` 가 그런 설정을 통과시키지 않아 운영 결과 같음, 바뀐 모듈 13개 따로 import 해 순환 없음,
+`DEFAULT_TARGETS` 를 제자리에서 고치는 곳 0, "& Co." 묶음이 Johnson & Johnson·AT&T·Procter & Gamble 등에서 오탐 없음.
+
+**고친 것**:
+- [권고] `scripts/mutation_check.py` 기준 실행이 시간을 넘기면 트레이스백으로 끝났다 → "BASELINE TIMEOUT" 과 1. 실패 출력이 `FAILED` 줄만 골라 수집 오류(`ERROR`, ImportError 등)면 본문이
+  비었다 → `ERROR` 도, 둘 다 없으면 끝 15줄
+- [참고] `jobs/paper`·`monitor_targets` 의 `sf.signals.rules_for` 는 sell_flags 가 `signals` 를 모듈째 import 한다는 데 기댔다 → `from batch.services import signals as sg` 로 직접
+- 전체 검사에서 `test_infra_index` `test_범위의_끝이_실제_마지막_절이다` 가 깨졌다 — 인계 메모에 적은 "25.1738~25.1742" 를 인계 범위 표기로 읽었다 → 가운뎃점으로 나열
+
+**남긴 것([참고])**: 재발 방지 정규식이 좁다(`sg.DEFAULT_TARGETS[`·통째 덮기, 집합·순서 바꾼 시장 목록은 못 잡음) · 중첩 기본값 파서는 문자열 속 `{}`·`//` 에 약하다(깨지면 시끄럽게
+깨지는 쪽이라 그대로).
+
+**되돌리기 확인**: 범위 표기를 되살리면 `test_infra_index` 가 깨짐 — 되돌림. 직접 import 는 `test_trend_g_1481`·`test_monitor_targets` 가 그 경로를 지난다.

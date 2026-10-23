@@ -36,6 +36,7 @@ from batch.services import paper as pp
 from batch.services import report_picks
 from batch.services import risk_gate as rg
 from batch.services import sell_flags as sf
+from batch.services import signals as sg
 from batch.services import stop_vol as sv
 
 log = logging.getLogger(__name__)
@@ -1234,7 +1235,7 @@ def _추적손절(client: Any, h: Any, 행: dict[str, Any], targets: dict | None
     if not 행.get("quantity") or not 행.get("market_value"):
         return False
     고점 = client.execute(PEAK_SQL, [h.stock_id, 행["first_buy_date"], today.isoformat()]).rows
-    표 = sf.signals.rules_for(h.horizon, targets)
+    표 = sg.rules_for(h.horizon, targets)
     return pp.trend_exit(float(행["cost"]) / float(행["quantity"]), 고점[0][0] if 고점 else None,
                          float(행["market_value"]) / float(행["quantity"]), float(표["target_pct"]),
                          float(표["stop_pct"]), float(getattr(h, "rights_scale", 1.0) or 1.0))  # fmt: skip
@@ -1878,7 +1879,7 @@ def run_step(
     열림캐시: dict[tuple[str, str], float | None] = {}
     targets, _ = sr.기간별_목표(db.get_setting(client, "horizon_targets", None))
     # 그날 매도 판정이 쓰는 손절폭 — 매수 결정 행의 σ 단위 기록(25.1539)이 같은 값을 적는다
-    손절폭 = {h: sf.signals.rules_for(h, targets)["stop_pct"] for h in sf.DEFAULT_TARGETS}
+    손절폭 = {h: sg.rules_for(h, targets)["stop_pct"] for h in sf.DEFAULT_TARGETS}
     fx = _fx(client, 오늘)
     열린 = [_order(r) for r in client.execute(OPEN_ORDERS_SQL).dicts()]
     다음장 = cal.next_session(market, date.fromisoformat(trade_date)).isoformat()
@@ -2386,7 +2387,7 @@ def summary_section(client: Any, now: datetime) -> list[str]:
     for sid in {f.stock_id for f in fills} | 보유id:
         _stock(client, sid, 캐시)
     rules, _ = sr.기간별_목표(db.get_setting(client, "horizon_targets", None))
-    손절 = {h: sf.signals.rules_for(h, rules)["stop_pct"] for h in sf.DEFAULT_TARGETS}
+    손절 = {h: sg.rules_for(h, rules)["stop_pct"] for h in sf.DEFAULT_TARGETS}
     limits = {
         "max_stock_pct": db.get_setting_in_range(client, "max_weight_per_stock", 10.0)[0],
         "max_sector_pct": db.get_setting_in_range(client, "max_weight_per_sector", 30.0)[0],
