@@ -144,9 +144,21 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     사본 = Path(tempfile.mkdtemp(prefix="mutation_wt_"))
     shutil.rmtree(사본)
-    subprocess.run(["git", "-C", str(뿌리), "worktree", "add", "-q", "--detach", str(사본), "HEAD"], check=True)
     나쁨 = 0
+    # 사본 만들기도 try 안에서 — 만드는 중에 끊기면 사본이 `git worktree list` 에 남았다
+    # (25.1747, 25.1743 교차검증 [권고] 1)
     try:
+        subprocess.run(["git", "-C", str(뿌리), "worktree", "add", "-q", "--detach", str(사본), "HEAD"], check=True)
+        # **기준 실행** — 돌연변이 없이 대상 시험이 먼저 통과해야 한다. 이미 깨져 있으면 모든 돌연변이가 "잡힘" 으로
+        # 나와 구멍을 가린다(25.1747, 25.1743 교차검증 [권고] 2)
+        시험들 = sorted({t for m in 고른 for t in m.tests})
+        기준 = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", *시험들], cwd=사본,
+                            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}, capture_output=True, text=True,
+                            timeout=a.timeout * 2)  # fmt: skip
+        if 기준.returncode != 0:
+            print("BASELINE FAIL — 돌연변이 없이도 대상 시험이 깨진다. 먼저 고친다:")
+            print("\n".join(x for x in 기준.stdout.splitlines() if x.startswith("FAILED"))[:2000])
+            return 1
         for m in 고른:
             결과, 덧 = _돌림(사본, m, a.timeout)
             나쁨 += 결과 != "caught"
@@ -154,7 +166,9 @@ def main(argv: list[str] | None = None) -> int:
             if 결과 != "caught":
                 print(f"          └ {m.why}")
     finally:
-        subprocess.run(["git", "-C", str(뿌리), "worktree", "remove", "--force", str(사본)], check=False)
+        subprocess.run(["git", "-C", str(뿌리), "worktree", "remove", "--force", str(사본)], check=False,
+                       capture_output=True)  # fmt: skip
+        subprocess.run(["git", "-C", str(뿌리), "worktree", "prune"], check=False)
     print(f"\n{len(고른)}개 중 잡힘 {len(고른) - 나쁨} · 문제 {나쁨}")
     return 1 if 나쁨 else 0
 

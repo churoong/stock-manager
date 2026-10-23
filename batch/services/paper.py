@@ -731,12 +731,16 @@ def summary_lines(
             입 = float(행들[-1]["invested_krw"])
             지수값[aid] = (won_short(입), *(_퍼센트(_대비(행들[-1].get(k), 입)) for k in ("kospi_krw", "sp500_krw")))
     셈 = Counter(지수값.values())
-    주된, 주된수 = max(셈.items(), key=lambda kv: (kv[1], kv[0])) if 셈 else (None, 0)
+    # 동률이면 이름순 첫 계좌가 든 값을 머리로 — 글자 사전순으로 고르면 "—"(지수 없음)가 "+" 보다 커 빈 값이 머리로
+    # 올라갔다(25.1747, 25.1744 교차검증 [참고])
+    첫계좌 = {v: min(a for a in 지수값 if 지수값[a] == v) for v in 셈}
+    주된, 주된수 = min(셈.items(), key=lambda kv: (-kv[1], 첫계좌[kv[0]])) if 셈 else (None, 0)
     if 주된 is None or (주된수 < 2 and len(지수값) > 1):
         주된 = None
     else:
         누구 = "" if 주된수 == len(지수값) else f" ({'·'.join(a for a in sorted(지수값) if 지수값[a] == 주된)})"
-        out.append(f"  입금 {주된[0]}씩 · 같은 돈 KOSPI {주된[1]} · S&P500 {주된[2]}{누구}")
+        씩 = "씩" if len(지수값) > 1 else ""  # 계좌가 하나면 "씩" 이 어색하다(25.1747)
+        out.append(f"  입금 {주된[0]}{씩} · 같은 돈 KOSPI {주된[1]} · S&P500 {주된[2]}{누구}")
     끝값: dict[str, float] = {}
     for aid in sorted(daily):
         행들 = daily[aid]

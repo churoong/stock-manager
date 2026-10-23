@@ -24,3 +24,28 @@ def test_보유_점수는_티커로_클래스주를_가른다() -> None:
                                    currency="KRW")).startswith("카카오: ")  # fmt: skip
     rows = hs.from_rows([{"name": "X Inc.", "market": "NYSE", "ticker": "X", "currency": "USD"}])
     assert rows[0].ticker == "X" and rows[0].currency == "USD"
+
+
+def test_앤드_컴퍼니는_이름의_일부_25_1747() -> None:
+    """25.1744 교차검증 [권고] 3 — "JPMorgan Chase &(JPM)"·"Eli Lilly and(LLY)" 가 나갔다"""
+    assert formatter.short_name("JPMorgan Chase & Co. Common Stock", "JPM", "USD") == "JPMorgan Chase & Co.(JPM)"
+    assert formatter.short_name("Eli Lilly and Company Common Stock", "LLY", "USD") == "Eli Lilly and Company(LLY)"
+    assert formatter.short_name("Apple Inc. Common Stock", "AAPL", "USD") == "Apple(AAPL)"  # 그대로
+
+
+def test_주간_머리는_동률이면_첫_계좌_값_계좌_하나면_씩_없음_25_1747() -> None:
+    from batch.services import paper as pp
+    from tests.test_paper_summary_1447 import _행, 한도
+
+    행 = {a: [_행(a, "2026-10-02", 1_000_000, 1_000_000, 1.0),
+             _행(a, "2026-10-09", 1_000_000, 1_000_000, 1.0, kospi=1_020_000 if a in ("A", "B") else None)]
+         for a in ("A", "B", "C", "D")}  # fmt: skip
+    줄 = pp.summary_lines(행, {}, "2026-10-03", None, {}, {}, 한도)
+    assert 줄[1] == "  입금 100만원씩 · 같은 돈 KOSPI +2.0% · S&P500 — (A·B)"  # 2:2 동률 — A 가 든 값
+    # 거꾸로 — 첫 계좌 쪽 값이 사전순으로 뒤("—")여도 그 값이 머리
+    거꾸로 = {a: [_행(a, "2026-10-02", 1_000_000, 1_000_000, 1.0),
+                 _행(a, "2026-10-09", 1_000_000, 1_000_000, 1.0, kospi=1_020_000 if a in ("C", "D") else None)]
+             for a in ("A", "B", "C", "D")}  # fmt: skip
+    assert pp.summary_lines(거꾸로, {}, "2026-10-03", None, {}, {}, 한도)[1].endswith("KOSPI — · S&P500 — (A·B)")
+    하나 = pp.summary_lines({"A": 행["A"]}, {}, "2026-10-03", None, {}, {}, 한도)
+    assert 하나[1] == "  입금 100만원 · 같은 돈 KOSPI +2.0% · S&P500 —"

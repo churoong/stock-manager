@@ -34,6 +34,9 @@ _이름_꼬리 = re.compile(
     r"|Ltd\.?|Limited|plc|N\.V\.|S\.A\.|L\.P\.|Holdings?|Group|\(The\)))+$",
     re.IGNORECASE,
 )
+#: "& Co."·"and Company" — 꼬리 정규식이 "Co."·"Company" 만 떼어 "&"·"and" 로 끝나는 이름이 됐다(25.1747)
+_이름_회사 = re.compile(r"\s+(&|and)\s+(Co\.?|Company)(?=[\s,]|$)", re.IGNORECASE)
+_묶음표 = "\u0000"
 #: 줄인 이름의 길이 상한(글자) — 넘으면 자르고 "…"
 SHORT_NAME_MAX = 24
 
@@ -49,8 +52,11 @@ def short_name(name: Any, ticker: Any = None, currency: str = "KRW") -> str:
         return 이름 or 티커
     # " - Class C Capital Stock" 처럼 줄표로 이은 꼬리는 줄표까지 떼고, 그 앞에 드러난 법인 꼬리("Inc.")도 한 번 더
     # 뗀다(25.1744 — "Alphabet Inc. -(GOOG)" 가 나갔다)
-    짧게 = _이름_꼬리.sub("", 이름).strip(" ,-")
-    짧게 = _이름_꼬리.sub("", 짧게).strip(" ,-") or 이름
+    # "& Co."·"and Company" 는 이름의 일부다 — 묶어 두고 뗀다(25.1747, 25.1744 교차검증 [권고] 3: "JPMorgan Chase &
+    # Co. Common Stock" 이 "JPMorgan Chase &(JPM)", "Eli Lilly and Company" 가 "Eli Lilly and" 가 됐다)
+    묶음 = _이름_회사.sub(lambda m: f"{_묶음표}{m.group(1)}{_묶음표}{m.group(2)}", 이름)
+    짧게 = _이름_꼬리.sub("", 묶음).strip(" ,-")
+    짧게 = _이름_꼬리.sub("", 짧게).strip(" ,-").replace(_묶음표, " ") or 이름
     # 앞의 "The " 도 뗀다(25.1723) — "The Goldman Sachs Group, Inc." → "Goldman Sachs". 떼서 비면 그대로
     if 짧게.lower().startswith("the ") and len(짧게) > 4:
         짧게 = 짧게[4:]
