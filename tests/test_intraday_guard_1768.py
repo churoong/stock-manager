@@ -880,7 +880,7 @@ def test_못_보낸_글은_보낸_뒤_지우고_지난_장_글도_보낸다(c: C
     db.set_setting(c, ig.UNSENT_KEY, {"date": "2026-10-23", "text": "⚡ 지난 장 매도"})
     monkeypatch.setattr(kv, "Session", lambda *a, **k: _Sess([_h("005930", 9_500.0)]))
     assert ig.main() == 0 and len(보낸) == 1 and 보낸[0].startswith("(지난 장(2026-10-23)에 보내지 못했거나")
-    assert c.q("SELECT COUNT(*) FROM settings WHERE key = ?", [ig.UNSENT_KEY]) == [(0,)]
+    assert db.get_setting(c, ig.UNSENT_KEY, None) == {}  # 빈 칸 — 배치는 설정 행을 지우지 않는다
     with monkeypatch.context():
         로그: list[str] = []
         h = logging.Handler()
@@ -915,3 +915,70 @@ def test_45분_안의_실행_중_기록은_막는다(c: Client) -> None:
     c.conn.execute("INSERT INTO batch_runs (job_name, market, trade_date, trigger_source, started_at, status)"
                    " VALUES ('daily_kr', 'KR', '2026-10-26', 'cron', '2026-10-26T00:46:00+00:00', 'running')")  # 44분 전
     assert "skipped" in ig.run(c, 월, session=_Sess([_h("005930", 9_500.0)]), clock=lambda: 월)
+
+
+
+def test_못_보낸_판_알림은_회차를_넘어_쌓이고_처음_날짜를_지킨다(c: Client, monkeypatch: pytest.MonkeyPatch) -> None:
+    """두 회차에 판 알림이 모두 실패해도 둘 다 간다(덮어쓰면 앞 매도 알림이 사라졌다). 지난 장 글이 남은 채 오늘도
+    실패하면 날짜는 처음 못 보낸 날 그대로(25.1775 교차검증)"""
+    import json
+
+    ig.save_lines(c, "KR", date(2026, 10, 26), "H", "trend",
+                  {1: {"code": "005930", "stop": 9_300.0}, 3: {"code": "000660", "stop": 50_000.0}})  # fmt: skip
+    보낸: list[str] = []
+    _main_준비(c, monkeypatch, 보낸, 실패=True)
+    db.set_setting(c, ig.UNSENT_KEY, {"date": "2026-10-23", "text": "⚡ 지난 장 매도"})
+    monkeypatch.setattr(kv, "Session", lambda *a, **k: _Sess([_h("005930", 9_250.0), _h("000660", 60_000.0)]))
+    assert ig.main() == 0
+    monkeypatch.setattr(kv, "Session", lambda *a, **k: _Sess([_h("005930", 9_250.0), _h("000660", 49_000.0)]))
+    assert ig.main() == 0
+    남김 = db.get_setting(c, ig.UNSENT_KEY, None)
+    assert 남김["date"] == "2026-10-23" and 남김["text"].count("⚡ KIS모의투자 장중 매도") == 2
+    # 실행 기록에 종목·수량 글은 넣지 않는다, 앞 글이 남은 채 실패한 회차도 부분
+    로그 = [json.loads(x[0]) for x in c.q("SELECT step_log FROM batch_runs WHERE job_name = 'intraday_guard'")]
+    assert all("sale_alert" not in x["guard"] for x in 로그)
+    assert c.q("SELECT status FROM batch_runs WHERE job_name = 'intraday_guard'") == [("partial",), ("partial",)]
+    monkeypatch.setattr(kv, "Session", lambda *a, **k: _Sess([_h("005930", 9_250.0), _h("000660", 49_000.0)]))
+    assert ig.main() == 0  # 새로 판 게 없고 남은 글 다시 보내기만 실패 — 그래도 부분
+    assert c.q("SELECT status FROM batch_runs WHERE job_name = 'intraday_guard' ORDER BY id DESC LIMIT 1") == [
+        ("partial",)]
+    _main_준비(c, monkeypatch, 보낸)
+    assert ig.main() == 0 and len(보낸) == 1 and 보낸[0].count("종목") >= 2 and "⚡ 지난 장 매도" in 보낸[0]
+
+
+@pytest.mark.parametrize("실패", ["응답 없음", "거부"])
+def test_응답_없음과_거부도_못_보내면_남긴다(c: Client, monkeypatch: pytest.MonkeyPatch, 실패: str) -> None:
+    from batch.sources.kis import KisFailed
+
+    보낸: list[str] = []
+    _main_준비(c, monkeypatch, 보낸, 실패=True)
+    예외 = kv.NoResponse("모의 응답 없음") if 실패 == "응답 없음" else KisFailed("APBK0400 주문가능수량 부족")
+    monkeypatch.setattr(kv, "Session", lambda *a, **k: _Sess([_h("005930", 9_250.0)], fail={"005930": 예외}))
+    assert ig.main() == 0 and "⚡ KIS모의투자 장중 매도" in db.get_setting(c, ig.UNSENT_KEY, None)["text"]
+
+
+def test_기록이_깨지고_알림도_실패하면_글을_남긴다(c: Client, monkeypatch: pytest.MonkeyPatch) -> None:
+    보낸: list[str] = []
+    _main_준비(c, monkeypatch, 보낸, 실패=True)
+    진짜 = c.execute
+
+    def execute(sql: str, args: list[Any] | None = None) -> Any:
+        if sql == bmj.SENT_UPDATE_SQL:
+            raise RuntimeError("DB 끊김")
+        return 진짜(sql, args)
+
+    c.execute = execute  # type: ignore[method-assign]
+    monkeypatch.setattr(kv, "Session", lambda *a, **k: _Sess([_h("005930", 9_250.0)]))
+    with pytest.raises(RuntimeError):
+        ig.main()
+    c.execute = 진짜  # type: ignore[method-assign]
+    assert "⚡ KIS모의투자 장중 매도" in db.get_setting(c, ig.UNSENT_KEY, None)["text"]
+
+
+def test_예전_null_행은_고친다(c: Client, monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1774 가 다시 보낸 뒤 null 로 덮은 행 — 매 회차 '설정을 읽지 못함' 경고가 났다"""
+    보낸: list[str] = []
+    _main_준비(c, monkeypatch, 보낸)
+    db.set_setting(c, ig.UNSENT_KEY, None)
+    monkeypatch.setattr(kv, "Session", lambda *a, **k: _Sess([_h("005930", 9_500.0)]))
+    assert ig.main() == 0 and c.q("SELECT value FROM settings WHERE key = ?", [ig.UNSENT_KEY]) == [("{}",)]

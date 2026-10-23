@@ -498,7 +498,8 @@ def run_status(기록: dict[str, Any]) -> str:
         return "skipped"
     # 판 뒤 알림 실패가 먼저 — 계산 오류·정리 줄 겹침이 있는 날에도 "주문은 나갔는데 사람은 모름" 이 묻히지 않게
     # (25.1775)
-    if 기록.get("alert_error") and set(기록.get("sent") or {}) & {"accepted", "no_response", "rejected"}:
+    if 기록.get("alert_error") and (set(기록.get("sent") or {}) & {"accepted", "no_response", "rejected"}
+                                   or 기록.get("unsent_pending")):  # fmt: skip
         return "partial"
     if (기록.get("sent") or {}).get("skipped_other_row") or 기록.get("line_errors"):
         return "skipped"
@@ -526,17 +527,22 @@ def kst_today(now: datetime) -> str:
     return now.astimezone(cal.market_tz("KR")).date().isoformat()
 
 
-def unsent_raw(client: Any) -> dict[str, str] | None:
-    """남겨 둔 못 보낸 장중 매도 알림 원문 — {date, text}. 없으면 None(행은 보낸 뒤 지운다)"""
-    값 = db.get_setting(client, UNSENT_KEY, None)
+def unsent_raw(client: Any, *, repair: bool = False) -> dict[str, str] | None:
+    """남겨 둔 못 보낸 장중 매도 알림 원문 — {date, text}. 없으면 None. 보낸 뒤에는 빈 칸(`{}`)으로 비운다 — 배치는
+    설정 행을 지우지 않는다(`test_settings_keys`). `repair` 면 25.1774 가 남긴 `null` 행(매 회차 "설정을 읽지 못함"
+    경고)을 빈 칸으로 고친다(25.1775 교차검증 [권고])"""
+    못읽음: list[str] = []
+    값 = db.get_setting(client, UNSENT_KEY, None, 못읽음=못읽음)
+    if 못읽음 and repair:
+        db.set_setting(client, UNSENT_KEY, {})
     return 값 if isinstance(값, dict) and 값.get("text") else None
 
 
-def unsent_text(client: Any, now: datetime) -> str | None:
+def unsent_text(client: Any, now: datetime, *, repair: bool = False) -> str | None:
     """앞 회차(또는 지난 장 마지막 회차)에 못 보낸 장중 매도 알림 — 머리를 한 번 붙여 다시 보낸다. 지난 날 글도 버리지
     않는다(25.1775 — 마지막 회차에서 실패하면 다음 날 날짜가 달라 조용히 버려졌다). 머리는 "겹칠 수 있음" — 전송 여부
     모름(`TelegramUncertainError`)·일부만 감(`TelegramPartialError`)도 여기로 온다"""
-    값 = unsent_raw(client)
+    값 = unsent_raw(client, repair=repair)
     if 값 is None:
         return None
     언제 = "앞 회차" if 값.get("date") == kst_today(now) else f"지난 장({값.get('date')})"
@@ -579,7 +585,7 @@ def main() -> int:
         감시선없음 = not 글 and str(기록.get("off", "")).startswith(NO_LINES)
         if 감시선없음 and not args.dry_run:  # 확인 실행은 알림·표시를 내지 않는다(25.1772)
             글 = no_lines_alert(client, now, str(기록.get("off", "")))
-        못보냄 = unsent_text(client, now) if not args.dry_run else None
+        못보냄 = unsent_text(client, now, repair=True) if not args.dry_run else None
         if 못보냄:
             글 = f"{못보냄}\n{글}" if 글 else 못보냄
         if 글:
@@ -588,11 +594,14 @@ def main() -> int:
                 기록["alerted"] = True
             except Exception as exc:  # noqa: BLE001 — 주문은 이미 냈다. 알림만 빠진다
                 기록["alert_error"] = type(exc).__name__
+                if 못보냄:
+                    기록["unsent_pending"] = True  # 앞 판 알림이 아직 사람에게 안 갔다 — 이 회차도 부분(25.1775)
                 if 판글 := 기록.get("sale_alert"):
                     # 판 알림은 다음 회차가 다시 만들지 못한다 — **판 알림 원문만** 머리 없이 쌓아 다음 회차가 보낸다
                     # (25.1774·25.1775 — 글 전체를 남기면 머리·표시성 문단이 회차마다 겹쳐 쌓였다)
                     앞 = unsent_raw(client)
-                    db.set_setting(client, UNSENT_KEY, {"date": kst_today(now),
+                    # 날짜는 처음 못 보낸 날 그대로 — 지난 장 글이 "앞 회차" 머리로 읽히지 않게(25.1775 교차검증)
+                    db.set_setting(client, UNSENT_KEY, {"date": 앞["date"] if 앞 else kst_today(now),
                                                        "text": f"{앞['text']}\n{판글}" if 앞 else 판글})  # fmt: skip
             else:  # 표시는 보낸 뒤에만 — 실패한 날은 다음 회차가 다시 알린다
                 if 감시선없음:
@@ -600,8 +609,8 @@ def main() -> int:
                 for key in 날표시:
                     mark_alerted(client, now, key)
                 mark_ids(client, now, 표시)
-                if 못보냄:  # 행을 지운다 — null 로 덮으면 매 회차 "설정을 읽지 못함" 경고가 났다(25.1775)
-                    client.execute("DELETE FROM settings WHERE key = ?", [UNSENT_KEY])
+                if 못보냄:  # 빈 칸으로 — null 로 덮으면 매 회차 "설정을 읽지 못함" 경고가 났다(25.1775)
+                    db.set_setting(client, UNSENT_KEY, {})
         기록.pop("sale_alert", None)  # 글은 실행 기록(step_log)에 넣지 않는다 — 종목·수량
         if 실패 is not None:
             raise 실패
