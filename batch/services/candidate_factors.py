@@ -21,6 +21,7 @@ import statistics
 from collections.abc import Callable
 from datetime import date
 
+from batch.core import markets
 from batch.services import factor_ic as fic
 from batch.services.scoring import MARKET_CAP_STALE_DAYS
 
@@ -32,7 +33,7 @@ from batch.services.scoring import MARKET_CAP_STALE_DAYS
 LT_NEAR = 252
 LT_FAR = 756
 #: 국내 가격제한(±30%) 밖의 하루 움직임 — 수정 안 된 분할·병합 흔적이라 그 창은 NULL (docs/adjust.md)
-LT_KR_LIMIT = 0.30
+LT_KR_LIMIT = markets.KR_DAILY_LIMIT  # 정의처 core/markets(25.1755)
 
 
 def lt_reversal(closes: list[float], kr: bool) -> float | None:

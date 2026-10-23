@@ -492,7 +492,7 @@ def run() -> int:
         if 투자가능경고:
             warnings.append(투자가능경고)
         alloc = pf.allocation(
-            positions, sector_of, 30.0 if 섹터상한 is None else float(섹터상한),
+            positions, sector_of, sr.DEFAULT_MAX_SECTOR_PCT if 섹터상한 is None else float(섹터상한),
             total_investable_krw=float(투자가능 or 0.0),
         )
         # 계좌 전체 노출 — 보유 ETF 를 구성종목으로 펼친다 (docs/portfolio.md 8장, 25.1002)

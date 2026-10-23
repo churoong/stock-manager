@@ -41,12 +41,26 @@ def test_웹_사본이_배치와_같다(파일: str, 이름: str, 배치: float)
     assert _ts(파일, 이름) == float(배치), f"web/lib/{파일} {이름} 이 배치({배치})와 다르다"
 
 
+#: 정의처를 따라야 하는 사본 이름 — 숫자로 다시 적으면 정의처만 바꾼 날 조용히 갈라진다(25.1755, 25.1753 교차검증 [권고]:
+#: 값만 견줘 `KR_PRICE_LIMIT = 0.30` 으로 되돌려도 통과했다). 정의처 파일(`core/markets.py`·`services/fx.py`)은 뺀다
+_사본 = ("KR_PRICE_LIMIT", "KR_DAILY_LIMIT", "KR_UNKNOWN_PCT_JUMP", "LT_KR_LIMIT", "FX_MAX_AGE_DAYS",
+         "REALIZED_FX_MAX_AGE_DAYS")  # fmt: skip
+
+
 def test_가격제한과_환율_묵음은_정의처_하나() -> None:
+    from batch.core import markets
     from batch.jobs import broker_mirror as bmj
     from batch.jobs import paper as pj
+    from batch.services import adjust, candidate_factors
 
-    assert pp.KR_PRICE_LIMIT == signals.KR_DAILY_LIMIT
+    assert pp.KR_PRICE_LIMIT == signals.KR_DAILY_LIMIT == adjust.KR_UNKNOWN_PCT_JUMP == candidate_factors.LT_KR_LIMIT == (
+        markets.KR_DAILY_LIMIT)
     assert pj.FX_MAX_AGE_DAYS == bmj.REALIZED_FX_MAX_AGE_DAYS == fx.MAX_STALE_DAYS
+    뿌리 = Path(__file__).resolve().parent.parent
+    따로 = [f"{f.relative_to(뿌리)}:{k}" for f in (뿌리 / "batch").rglob("*.py") if f.name not in ("markets.py", "fx.py")
+            for k, 줄 in enumerate(f.read_text(encoding="utf-8").splitlines(), 1)
+            if re.match(rf"^({'|'.join(_사본)})\s*(:\s*\w+\s*)?=\s*[\d.]", 줄)]  # fmt: skip
+    assert not 따로, f"정의처 사본을 숫자로 다시 적었다 — core/markets·services/fx 를 쓴다: {따로}"
 
 
 def test_장중_기업행위_의심_폭은_가격제한_바로_밖() -> None:

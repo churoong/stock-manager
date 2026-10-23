@@ -11,3 +11,8 @@ from __future__ import annotations
 
 #: `stocks.market` 의 국내 값 — KRX `MKT_TP_NM` 그대로(`jobs/universe`)
 KR_MARKETS = frozenset({"KOSPI", "KOSDAQ", "KONEX"})
+
+#: 국내 하루 가격제한폭(±30%, 2015-06-15 부터). **정의처는 여기 하나**(25.1755 — 신호 최근 낙폭 빈틈 판정·가상모의투자
+#: 상·하한가 시장가 판정·기업행위 의심·후보 지표 창 넷에 따로 적혀 있었다. 25.1753 은 장부 모듈이 무거운 `signals` 를
+#: import 하게 만들어 의존 없는 여기로 옮겼다). 웹 장중 의심 폭은 `tests/test_web_batch_constants_1753.py` 가 대조
+KR_DAILY_LIMIT = 0.30

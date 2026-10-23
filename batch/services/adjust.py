@@ -25,6 +25,8 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
+from batch.core import markets
+
 CALC_VERSION = 1
 
 #: 계수가 1 에서 이만큼 벗어나면 기업행위로 본다.
@@ -95,7 +97,7 @@ def factor_of(prev_close: float, close: float, change_pct: float | None) -> floa
 #: 등락률을 모르는 국내 행(야후 대체 출처 — 거래소가 실패한 날)에서 기업행위로 보는 하루 움직임 — 가격제한폭(±30%)
 #: 밖은 시장이 낼 수 없다(25.1554). **감시·멈춤 쪽에만** 쓴다 — 수정주가 계열에는 쓰지 않는다
 #: (`factor_of` "모르면 조정하지 않는다")
-KR_UNKNOWN_PCT_JUMP = 0.30
+KR_UNKNOWN_PCT_JUMP = markets.KR_DAILY_LIMIT  # 정의처 core/markets(25.1755)
 
 
 def guard_factor(prev_close: float, close: float, change_pct: float | None) -> float:

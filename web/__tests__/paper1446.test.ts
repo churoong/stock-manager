@@ -110,9 +110,9 @@ describe("입금 장부", () => {
     expect(can.run("2026-10-16", -1_000_000, 1, "입금 #1 취소", "t", "key-can00011", ...판()).changes).toBe(1);
   });
 
-  it("묵은 환율은 모름 — 배치 FX_MAX_AGE_DAYS 와 같다 (25.1486)", () => {
-    const 배치 = readFileSync(join(process.cwd(), "..", "batch", "jobs", "paper.py"), "utf8");
-    expect(배치).toContain(`FX_MAX_AGE_DAYS = ${FX_MAX_AGE_DAYS}\n`);
+  it("묵은 환율은 모름 — 배치 정의처 fx.MAX_STALE_DAYS 와 같다 (25.1486, 25.1753 정의처 하나)", () => {
+    const 배치 = readFileSync(join(process.cwd(), "..", "batch", "services", "fx.py"), "utf8");
+    expect(배치).toContain(`MAX_STALE_DAYS = ${FX_MAX_AGE_DAYS}\n`);
     expect(freshFx({ rate: 1400, date: "2026-10-09" }, "2026-10-16")).toBe(1400);
     expect(freshFx({ rate: 1400, date: "2026-10-08" }, "2026-10-16")).toBeNull();
     expect(freshFx(undefined, "2026-10-16")).toBeNull();

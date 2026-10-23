@@ -18,6 +18,7 @@ import math
 from dataclasses import dataclass, field
 from typing import Any
 
+from batch.core import markets
 from batch.core import settings_range as sr
 from batch.core.rounding import fixed
 from batch.services import insider, scoring
@@ -144,7 +145,7 @@ def turnover_ratio_loo(turnovers: list[float]) -> float | None:
 
 
 #: 국내 하루 가격제한폭(±30%). 이보다 큰 하루 움직임은 수정주가 빈틈으로 보고 최근 낙폭을 모른다고 한다 (25.1351)
-KR_DAILY_LIMIT = 0.30
+KR_DAILY_LIMIT = markets.KR_DAILY_LIMIT  # 정의처 core/markets(25.1755)
 
 
 #: 상한가를 세는 창(거래일) — Bali·Cakici·Whitelaw(2011) 의 "지난달" 그대로 (26회차 P3, docs/infra.md 25.1391)
