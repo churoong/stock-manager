@@ -160,3 +160,8 @@ def test_복기_상한은_배분과_같은_맞추기를_거친다(monkeypatch: p
     monkeypatch.setattr(pp, "summary_lines", lambda *a, **k: 본.append(a[6]) or 진짜(*a, **k))
     job.summary_section(c, datetime(2026, 11, 1, 0, 0, tzinfo=UTC))
     assert 본 and 본[0]["max_stock_pct"] == 20.0 and 본[0]["max_sector_pct"] == 20.0
+    # 보통 조합(종목 ≤ 섹터)은 그대로 — 무조건 섹터 상한으로 바꾸면 여기서 깨진다(25.1766 교차검증 [권고])
+    db.set_setting(c, "max_weight_per_stock", 10.0)
+    db.set_setting(c, "max_weight_per_sector", 30.0)
+    job.summary_section(c, datetime(2026, 11, 1, 0, 0, tzinfo=UTC))
+    assert 본[-1]["max_stock_pct"] == 10.0 and 본[-1]["max_sector_pct"] == 30.0
