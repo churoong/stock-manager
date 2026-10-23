@@ -1088,3 +1088,68 @@ def order_groups(orders: list[dict[str, Any]]) -> list[str]:
                    f" {회차}{수량:,}주 {' + '.join(가격)}".rstrip())  # fmt: skip
     return out
 
+
+
+# ── 실전 준비도 한 장 (주간 요약, 25.1735 — 2026-10-23 사용자 "그렇게 진행해줘", 아이디어 ④) ──────────
+
+#: 관문 항목의 짧은 이름 — 전체 이름(`gate` 의 label)은 웹 운용 화면에 있다
+_준비_이름 = {
+    "days": "모의 기간", "vs_r": "R(무작위) 대비", "vs_index": "지수 대비", "ratio": "변동성 대비 수익",
+    "incidents": "운영 무사고", "kis": "KIS 실현율", "selection": "선정 실력(분위 하한)",
+    "control": "가상 대조(분위 하한)",
+}
+_준비_상태 = {"done": "갖춤", "partial": "일부", "rehearsal": "연습 중", "todo": "아직", "user": "사용자 결정"}
+
+
+def _준비_값(i: dict[str, Any]) -> str:
+    """관문 항목 하나의 "지금 / 목표 (남은 거리)" 글 — 모르면 "아직 모름" """
+    k, now, t = i.get("key"), i.get("now"), i.get("target")
+    if now is None:
+        return "아직 모름"
+    if k == "days":
+        남음 = max(0, int(t) - int(now))
+        return f"{int(now)} / {int(t)}회" + (f" ({남음}회 남음)" if 남음 else "")
+    if k in ("vs_r", "vs_index"):
+        글 = f"{float(now):+.2f}%p (목표 > 0)"
+        if (i.get("valuation_gap") or {}).get("over"):
+            글 += " — 원가로 멈춘 평가가 많아 판정 보류"
+        return 글
+    if k == "ratio":
+        return f"{float(now):.2f} (대조 {float(t):.2f} 보다 커야)" if t is not None else f"{float(now):.2f}"
+    if k == "incidents":
+        return f"사고 {int(now)}일 (최근 {GATE_INCIDENT_DAYS}일, 목표 0)"
+    if k == "kis":
+        return f"{float(now):.0f}% / {float(t):.0f}% (표본 {int(i.get('n') or 0)}/{GATE_KEPT_MIN_N})"
+    if k in ("selection", "control"):
+        return f"{float(now):.0f} (50 넘어야, 28일 묶음 {int(i.get('n') or 0)}/{GATE_SEL_MIN_BLOCKS})"
+    return str(now)
+
+
+def readiness_lines(gate: dict[str, Any] | None, ready: list[dict[str, Any]] | None, gate_error: str | None = None
+                    ) -> list[str]:  # fmt: skip
+    """주간 요약의 **실전 준비도** 한 장 — 1단계 관문 항목마다 지금 값·목표·남은 거리, 실전 준비 목록 상태 수,
+    다음 단계.
+
+    값은 운용 요약(`paper_desk`)이 날마다 적은 그대로 — 새로 셈하지 않는다. 관문·준비 목록이 웹 운용 화면에 흩어져 "언제
+    실전으로 갈 수 있나" 를 한눈에 보기 어려웠다(아이디어 ④)
+    """
+    if not gate:
+        return ["🧭 실전 준비도 — 관문을 세지 못했습니다" + (f" ({gate_error[:80]})" if gate_error else "")]
+    items = list(gate.get("items") or [])
+    통과 = sum(1 for i in items if i.get("ok"))
+    판 = gate.get("version")
+    머리 = (f"🧭 실전 준비도 — 1단계 관문(모의 성적·무사고) 통과 {통과}/{len(items)}"
+          f" · {gate.get('account')}{'' if 판 is None else f' 판 {판}'}"
+          + (f", {gate.get('from')}부터" if gate.get("from") else ""))  # fmt: skip
+    out = [머리]
+    for i in items:
+        이름 = _준비_이름.get(str(i.get("key")), str(i.get("label")))
+        out.append(f"  {'✅' if i.get('ok') else '⬜'} {이름}: {_준비_값(i)}")
+    if ready:
+        셈: dict[str, int] = {}
+        for r in ready:
+            셈[str(r.get("status"))] = 셈.get(str(r.get("status")), 0) + 1
+        out.append("  준비 목록 " + " · ".join(f"{말} {셈[k]}" for k, 말 in _준비_상태.items() if 셈.get(k)))
+    if gate.get("next"):
+        out.append(f"  그다음: {gate['next']}")
+    return out

@@ -528,6 +528,18 @@ def run(dry_run: bool = False, force: bool = False) -> int:
             월간 = any("월간 복기" in x for x in 모의)
         except Exception as exc:  # noqa: BLE001 — 곁다리 절이다
             모의 = [f"가상모의투자 절을 만들지 못했습니다 ({type(exc).__name__})"]
+        # 실전 준비도 한 장 (25.1735, 아이디어 ④) — 운용 요약 마지막 줄의 관문·준비 목록. 맨 위에 — 시스템의 목적이다.
+        # 읽기 한 행. 못 읽으면 그 한 줄만
+        try:
+            from batch.jobs import desk as desk_job
+            from batch.services import desk as desk_svc
+
+            줄 = client.execute(desk_job.DESK_LAST_SQL).rows
+            요약 = json.loads(줄[0][0]) if 줄 and 줄[0][0] else {}
+            준비 = desk_svc.readiness_lines(요약.get("gate"), 요약.get("readiness"), 요약.get("gate_error"))
+            모의 = [*준비, "", *모의]
+        except Exception as exc:  # noqa: BLE001 — 곁다리 절이다
+            모의 = [f"실전 준비도를 만들지 못했습니다 ({type(exc).__name__})", "", *모의]
         # 실제 매매의 실행 품질 (docs/paper.md 13장, 25.1452) — 월 첫 요약에만. 곁다리
         try:
             모의 = [*모의, *execution_lines(client, now)]
