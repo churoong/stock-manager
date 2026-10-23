@@ -54,7 +54,7 @@ def plan(
     broker: dict[int, tuple[int, int]], bought_before: set[int], *, already: set[int], cleaned_today: set[int],
     halted: bool, max_orders: int = MAX_ORDERS_PER_DAY, bought_today: dict[int, int] | None = None,
     frozen: set[int] | None = None, currency: str = "KRW", closes: dict[int, float] | None = None,
-    sent_today: int = 0, guard_held: set[int] | None = None, stop_floor: dict[int, float] | None = None,
+    sent_today: int = 0, guard_held: set[int] | None = None, stop_floor: dict[int, dict[str, Any]] | None = None,
 ) -> tuple[list[Intent], list[tuple[int | None, int, str]]]:
     """(낼 것, [(내부 주문 id, 종목, 안 내는 까닭)]).
 
@@ -67,9 +67,10 @@ def plan(
     `guard_held` = 장중 손절·익절로 KIS 에서 판 뒤 H 가 **같은 보유**를 아직 든 종목 — 그 종목의 H 매수(추가·회차)는
     베끼지 않는다(25.1769, 25.1768 교차검증 [필수] 1·[권고] — 베끼면 KIS 엔 새 몫만 남아 잔고가 H 가 팔 때까지 어긋나고,
     감시선 근처에서 "시가에 사고 장중에 판다" 가 되풀이된다). H 가 그 보유를 다 판 뒤 새로 사면 다시 베낀다.
-    `stop_floor` = {종목: 오늘 장중 손절선} — 그 값 **이하** 지정가 매수 회차는 베끼지 않는다(25.1770, 25.1769
-    교차검증 [권고]: 그날 장중 손절로 판 뒤 더 빠지면 하루짜리 회차가 KIS 에서만 차 같은 날 다시 샀다. 손절선
-    아래에서 사는 회차는 H 에서도 찬 순간 손절선 아래 보유라 다음 아침 손절로 나간다)
+    `stop_floor` = {종목: 오늘 감시선(원가·수량·손절%)} — 그 회차가 차면 **평균 원가로 다시 낸 손절선** 이하에서 사는
+    지정가 매수 회차는 베끼지 않는다(`buys_below_stop`, 25.1770·25.1771 — 그날 장중 손절로 판 뒤 더 빠지면 하루짜리
+    회차가 KIS 에서만 차 같은 날 다시 샀다). 그런 회차는 H 에서도 종가 ≤ 지정가 ≤ 새 손절선이라 다음 아침 손절로
+    나간다(25.1771 교차검증: 처음엔 옛 손절선과 견줘, 회차가 차 평균 원가가 내려가 손절이 안 나는 경우까지 걸렀다)
     """
     안냄: list[tuple[int | None, int, str]] = []
     # 증권사에만 남은 몫(정리 대상) — 정리를 못 낼 때도 까닭을 남긴다. 예전엔 멈춤·기업행위 경계·코드 없음·
@@ -146,7 +147,8 @@ def plan(
             매도.append(Intent(oid, sid, code, "sell", q, 가격, REASON_MIRROR))
         elif sid in (guard_held or set()):
             안냄.append((oid, sid, GUARD_HELD_SKIP))
-        elif not 시장가 and (stop_floor or {}).get(sid) and 가격 <= float((stop_floor or {})[sid]):
+        elif not 시장가 and sid in (stop_floor or {}) and buys_below_stop(
+                (stop_floor or {})[sid], float(가격), int(o["quantity"])):  # fmt: skip
             안냄.append((oid, sid, STOP_FLOOR_SKIP))
         else:
             매수.append(Intent(oid, sid, code, "buy", int(o["quantity"]), 가격, REASON_MIRROR))
@@ -160,6 +162,19 @@ def plan(
         안냄 = without_partial(안냄, 낼것[남은:])
         낼것 = 낼것[:남은]
     return 낼것, 안냄
+
+
+def buys_below_stop(line: dict[str, Any], price: float, quantity: int) -> bool:
+    """이 회차가 차면 바로 손절선 아래 보유인가 — 평균 원가(수수료 포함 원가 × 계수 기준, 감시선의 `cost`·`qty`)로
+    다시 낸 손절선 이하에서 산다(25.1771). 감시선에 손절이 없거나 값이 모자라면 False(거르지 않음)"""
+    try:
+        원가, 수량, 손절 = float(line["cost"]), int(line["qty"]), float(line["stop_pct"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    if line.get("stop") is None or 수량 <= 0 or quantity <= 0 or 원가 <= 0:
+        return False
+    평균 = (원가 * 수량 + price * quantity) / (수량 + quantity)
+    return round(price / (평균 * (1 + 손절 / 100)) - 1, 6) <= 0
 
 
 def split_holding(

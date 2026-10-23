@@ -70,6 +70,7 @@ def test_감시선은_아침_판정식과_같다() -> None:
     # 추세(H): 손절 = 원가 × 0.93, 고점이 목표(+10%)에 닿았으면 익절선 = 고점 × 0.93
     선 = jp.guard_line(_C(115.0), h, 행, "trend", None, 오늘, 종목)
     assert 선 is not None and 선["code"] == "005930" and 선["stop"] == pytest.approx(93.0)
+    assert 선["qty"] == 10 and 선["ref"] == pytest.approx(105.0)  # H 수량·아침 판정 종가(25.1770·25.1771)
     assert 선["trail"] == pytest.approx(115.0 * 0.93) and "target" not in 선
     assert "trail" not in (jp.guard_line(_C(109.0), h, 행, "trend", None, 오늘, 종목) or {})  # 목표 전
     # 목표에서 파는 규칙(B core)은 목표가 익절선, 손절을 안 따르는 D(time)는 선이 없다
@@ -235,7 +236,7 @@ def test_잔고_대보기_코드가_장중판_종목을_뺀다() -> None:
     원문 = inspect.getsource(bmj.run)
     assert "q > 0 and k not in 장중0" in 원문 and "k not in 연결전 and k not in 장중0" in 원문
     assert "장중0 = {k for k in 장중판 if 증권수.get(k, 0) <= 0}" in 원문  # KIS 가 0 주일 때만 뺀다(25.1770)
-    assert "guard_held=장중판" in 원문 and "stop_floor=_오늘_손절선(client, 오늘)" in 원문
+    assert "guard_held=장중판" in 원문 and "stop_floor=_오늘_손절선(client, 오늘, 베낌) if slot == MAIN" in 원문
 
 
 def test_아침_가상모의투자_단계가_베끼는_계좌의_감시선을_적는다(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -268,11 +269,16 @@ def test_장중_매도는_H_수량까지만() -> None:
 
 def test_장중_손절선_이하_회차는_베끼지_않는다() -> None:
     """같은 날 장중 손절 뒤 더 빠져 하루짜리 회차가 KIS 에서만 차는 길(25.1770)"""
-    주문 = [{"id": 7, "stock_id": 1, "side": "buy", "order_type": "limit", "limit_price": 9_200, "quantity": 5},
-            {"id": 8, "stock_id": 1, "side": "buy", "order_type": "limit", "limit_price": 9_400, "quantity": 5}]
+    선 = {"stop": 9_300.0, "cost": 10_000.0, "qty": 10, "stop_pct": -7.0}
+    # 8,000 × 5 가 차면 평균 9,333 · 새 손절선 8,680 — 그 아래에서 사니 H 도 다음 아침 손절로 나간다 → 베끼지 않음.
+    # 9,200 × 5 는 평균 9,733 · 새 손절선 9,052 위 — H 는 손절이 안 나 계속 든다 → 베낀다(옛 손절선 9,300 과 견주면
+    # 걸러 KIS 만 수량이 모자랐다, 25.1771 교차검증)
+    주문 = [{"id": 7, "stock_id": 1, "side": "buy", "order_type": "limit", "limit_price": 8_000, "quantity": 5},
+            {"id": 8, "stock_id": 1, "side": "buy", "order_type": "limit", "limit_price": 9_200, "quantity": 5}]
     낼것, 안냄 = bm.plan(주문, {1: "005930"}, {}, {}, set(), already=set(), cleaned_today=set(), halted=False,
-                         stop_floor={1: 9_300.0})  # fmt: skip
+                         stop_floor={1: 선})  # fmt: skip
     assert [x.paper_order_id for x in 낼것] == [8] and 안냄 == [(7, 1, bm.STOP_FLOOR_SKIP)]
+    assert not bm.buys_below_stop({"cost": 10_000.0, "qty": 10, "stop_pct": -7.0}, 8_000, 5)  # 손절이 없는 선
 
 
 def test_장중_매도만_있는_주도_주간_요약에_나온다() -> None:
@@ -333,3 +339,55 @@ def test_main_은_보낸_뒤에_표시하고_실패도_알린다(c: Client, monk
     with pytest.raises(RuntimeError):
         ig.main()
     assert len(보낸) == 2  # 같은 날 같은 실패는 한 번
+
+
+def test_권리락일은_감시선을_만들지_않는다(c: Client) -> None:
+    """25.1770 교차검증 [필수] — 기계적 하락이 나는 바로 그날 권리락 전 원가의 손절선에 닿아 거짓 장중 매도가 나갔다"""
+    c.conn.execute("INSERT INTO kr_corp_events (code, kind, record_date, source, fetched_at)"
+                   " VALUES ('005930', 'bonus', '2026-10-27', 'kis', '2026-10-20T00:00:00+00:00')")  # 권리락일 10-26
+    r = ig.save_lines(c, "KR", date(2026, 10, 26), "H", "trend", {1: {"code": "005930", "stop": 9_300.0},
+                                                                   3: {"code": "000660", "stop": 50_000.0}})
+    assert r["action_day"] == 1 and set(db.get_setting(c, ig.GUARD_KEY, None)["KR"]["lines"]) == {"3"}
+    s = _Sess([_h("005930", 5_000.0)])
+    assert "sent" not in ig.run(c, 월, session=s, clock=lambda: 월) and s.orders == []
+    # 일정을 못 읽으면 그날 선을 모두 뺀다(보수)
+    assert ig.action_today(None, [1, 3], date(2026, 10, 26)) == ({1, 3}, "AttributeError")  # type: ignore[arg-type]
+
+
+def test_가격제한폭_밖_현재가는_기업행위_의심으로_팔지_않는다(c: Client) -> None:
+    """액면분할 재상장 첫날처럼 기준가가 바뀐 날 — ±31%(웹 장중 감시 25.597 과 같은 문턱) 밖이면 알림만(25.1771)"""
+    ig.save_lines(c, "KR", date(2026, 10, 26), "H", "trend",
+                  {1: {"code": "005930", "stop": 9_300.0, "qty": 10, "ref": 10_000.0}})  # fmt: skip
+    s = _Sess([_h("005930", 2_000.0, sellable=50)])  # 1:5 분할 재상장
+    r = ig.run(c, 월, session=s, clock=lambda: 월)
+    assert s.orders == [] and r["suspect"] == 1 and "기업행위 의심" in r["alert"]
+    assert "alert" not in ig.run(c, 월, session=s, clock=lambda: 월)  # 종목마다 하루 한 번
+    assert [x.kind for x in ig.hits([_h("005930", 9_250.0)], {"005930": (1, {"stop": 9_300.0, "ref": 10_000.0})})] == [
+        "stop"]  # -7.5% 는 장중 움직임
+
+
+def test_오늘_감시선을_아침_베끼기가_읽는다(c: Client) -> None:
+    """`_오늘_손절선` — 오늘·베끼는 계좌의 선만(25.1771 교차검증: 늘 빈 것을 돌려줘도 시험이 통과했다)"""
+    assert set(bmj._오늘_손절선(c, date(2026, 10, 26), "H")) == {1, 3}
+    assert bmj._오늘_손절선(c, date(2026, 10, 27), "H") == {}  # 어제 선
+    assert bmj._오늘_손절선(c, date(2026, 10, 26), "C") == {}  # 다른 계좌(도전자)
+
+
+def test_다시_보낼_때_수량과_사유도_지금_값으로(c: Client) -> None:
+    from batch.sources.kis import KisFailed
+
+    ig.run(c, 월, session=_Sess([_h("005930", 9_250.0)], fail={"005930": KisFailed("EGW00201 초당")}),
+           clock=lambda: 월)  # fmt: skip
+    ig.run(c, 월, session=_Sess([_h("005930", 9_250.0, sellable=7)]), clock=lambda: 월)
+    assert c.q("SELECT quantity, reason, status FROM paper_broker_orders") == [(7, "장중손절", "accepted")]
+
+
+def test_배치가_실패했거나_늦어도_감시선이_없으면_멈춤(c: Client) -> None:
+    s = _Sess([_h("005930", 9_250.0)])
+    화 = datetime(2026, 10, 27, 1, 30, tzinfo=UTC)  # 10:30 KST
+    c.conn.execute("INSERT INTO batch_runs (job_name, market, trade_date, trigger_source, started_at, status)"
+                   " VALUES ('daily_kr', 'KR', '2026-10-26', 'cron', '2026-10-26T23:27:00+00:00', 'failed')")
+    assert str(ig.run(c, 화, session=s)["off"]).startswith(ig.NO_LINES)  # 실패로 끝났다 — 감시선은 영영 안 생긴다
+    c.conn.execute("DELETE FROM batch_runs")
+    assert ig.run(c, 화, session=s) == {"off": ig.WAITING}
+    assert str(ig.run(c, datetime(2026, 10, 27, 2, 10, tzinfo=UTC), session=s)["off"]).startswith(ig.NO_LINES)  # 11:10

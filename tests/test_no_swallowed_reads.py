@@ -33,6 +33,7 @@ from pathlib import Path
     ("batch/notify/telegram.py", "discover_chat_ids"): "설정을 돕는 **후보 목록**이다(25.392). 못 찾아도 '보내지 않는다' 는 결론은 같고 오류 문구에서 후보만 빠진다",
     ("batch/jobs/backtest.py", "load_pit_dividends"): "백테스트의 배당 이력이다. 사람이 돌려 읽고 경고 로그가 남는다(25.221)",
     ("batch/services/adjust.py", "_빠진_거래일"): "DB 읽기가 아니라 달력 계산이다. 못 세면 None 이 '날짜 간격 규칙으로 물러난다'는 뜻이다(25.569)",
+    ("batch/jobs/intraday_guard.py", "_names"): "알림 글의 **종목 이름**이다(25.1771). 주문은 이미 나갔다 — 이름을 못 읽으면 코드로 알린다",
 }
 
 

@@ -386,9 +386,11 @@ WHERE sent_at IS NULL OR (sent_at >= 'claim:' AND sent_at < ?) ORDER BY created_
 
 export const RECENT_BATCH_RUNS = `SELECT id, job_name, market, trade_date, trigger_source, scheduled_for, started_at,
   finished_at, status, delay_seconds, step_log, error_text
-FROM batch_runs WHERE NOT (job_name = 'intraday_guard' AND status = 'success') ORDER BY id DESC LIMIT 25`;
-// 장중 손절·익절(25.1768)은 장중 10분마다 한 줄이라 오후엔 25칸을 다 덮어 일일 배치 줄이 밀려났다 — **성공 줄만** 뺀다
-// (25.1769·25.1770 — 실패·멈춤 줄까지 빼면 매 회차 실패해도 화면 어디에도 안 보였다)
+FROM batch_runs WHERE job_name <> 'intraday_guard'
+  OR id = (SELECT MAX(id) FROM batch_runs WHERE job_name = 'intraday_guard')
+ORDER BY id DESC LIMIT 25`;
+// 장중 손절·익절(25.1768)은 장중 10분마다 한 줄이라 오후엔 25칸을 다 덮어 일일 배치 줄이 밀려났다 — **마지막 한 줄만**
+// 남긴다(25.1771 — 성공 줄만 빼면 장애가 난 날 실패·멈춤 줄 37개가 다시 덮었다. 마지막 줄이 지금 상태를 보인다)
 // `id` 순서 = 시작 순서다(`start_batch_run` 이 시작할 때 넣는다). `started_at` 으로 정렬하면 색인이 없어 표 전체를 정렬했다 —
 // 1년이면 약 1.5만 행을 상태 화면을 열 때마다 읽었다 (docs/infra.md 25.862, 감사)
 

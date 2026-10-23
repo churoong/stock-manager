@@ -34,7 +34,7 @@ import requests
 
 from batch import config
 from batch.core import calendar as cal
-from batch.core import db
+from batch.core import db, markets
 from batch.core.entry import guard
 from batch.jobs import broker_mirror as bmj
 from batch.services import broker_mirror as bm
@@ -61,9 +61,11 @@ BATCH_RUNNING_SQL = (
 )
 #: 오늘(한국 날짜) 국내 일일 배치가 끝났나 — 감시선이 없을 때 "기다림" 과 "멈춤" 을 가른다(25.1770)
 DAILY_DONE_SQL = (
-    "SELECT 1 FROM batch_runs WHERE job_name = 'daily_kr' AND status IN ('success', 'partial') AND started_at >= ?"
-    " LIMIT 1"
+    "SELECT 1 FROM batch_runs WHERE job_name = 'daily_kr' AND status IN ('success', 'partial', 'failed', 'skipped')"
+    " AND started_at >= ? LIMIT 1"
 )
+#: 이 시각(한국)이 지나도 감시선이 없으면 배치 기록과 상관없이 멈춤으로 본다 — 배치가 기록조차 못 남긴 날(25.1771)
+WAIT_LIMIT_KST = dtime(11, 0)
 WAITING = "아침 국내 일일 배치 대기 — 끝나면 감시선이 생긴다"
 #: 오늘 이미 장중 매도를 낸 종목 — 한 종목 하루 한 번(유일 색인 `idx_paper_broker_cleanup` 도 막는다). 다만
 #: **순간 거부**(초당 한도·토큰)는 같은 줄로 다시 보낸다 — 색인이 둘째 줄을 막아 첫 시도가 한도에 걸리면 그날
@@ -79,6 +81,8 @@ RETRY_SQL = (
     "UPDATE paper_broker_orders SET status = 'sending', message = NULL, created_at = ?, quantity = ?, reason = ?"
     " WHERE id = ? AND status = 'rejected'"
 )
+#: 기업행위 의심으로 팔지 않은 종목을 알린 날·종목 — 10분마다 같은 알림을 되풀이하지 않게(25.1771)
+SUSPECT_KEY = "kis_guard_suspect_alerted"
 #: 아침 감시선이 없는 날 한 번만 알린다 — {날짜} (25.1769, 교차검증 [권고]: 아침 단계가 실패하면 하루 종일 조용히
 #: 꺼졌다)
 NO_LINES_ALERT_KEY = "kis_guard_no_lines_alerted"
@@ -100,7 +104,7 @@ class Hit:
     reason: str  # bm.REASON_GUARD_STOP · bm.REASON_GUARD_TAKE
 
 
-KIND_TEXT = {"stop": "손절선", "trail": "익절선(고점 대비)", "target": "목표가"}
+KIND_TEXT = {"stop": "손절선", "trail": "익절선(고점 대비)", "target": "목표가", "suspect": "기준 종가"}
 
 
 def save_lines(
@@ -108,12 +112,36 @@ def save_lines(
 ) -> dict[str, int]:
     """아침 가상모의투자 단계가 부른다 — 그 시장의 감시선을 오늘 날짜로 덮어쓴다(다른 시장 칸은 그대로).
     건수만 돌려준다"""
+    빼기, 까닭 = action_today(client, sorted(lines), today) if market == "KR" else (set(), None)
+    lines = {sid: 선 for sid, 선 in lines.items() if sid not in 빼기}
     값 = db.get_setting(client, GUARD_KEY, None)
     값 = 값 if isinstance(값, dict) else {}
     값[market] = {"as_of": today.isoformat(), "account": account, "rule": rule,
                  "lines": {str(sid): 선 for sid, 선 in sorted(lines.items())}}  # fmt: skip
     db.set_setting(client, GUARD_KEY, 값)
-    return {"n": len(lines), **{k: sum(k in 선 for 선 in lines.values()) for k in ("stop", "trail", "target")}}
+    return {"n": len(lines), **{k: sum(k in 선 for 선 in lines.values()) for k in ("stop", "trail", "target")},
+            **({"action_day": len(빼기)} if 빼기 else {}), **({"action_day_error": 까닭} if 까닭 else {})}
+
+
+def action_today(client: Any, stock_ids: list[int], today: date) -> tuple[set[int], str | None]:
+    """**오늘**이 무상·유상증자 권리락일인 종목 — 그날은 감시선을 만들지 않는다(25.1771, 25.1770 교차검증 [필수]:
+    기계적 하락이 나는 바로 그날은 아침 배치가 아직 그 하락을 못 봐 `corporate_action_recent` 가 거르지 못했고, 권리락
+    전 원가의 손절선에 조정된 현재가가 닿아 거짓 장중 손절이 실제 KIS 매도로 나갔다). 장중 알림의 25.1725 와 같은 일정
+    (`kr_corp_events` 기준일 → 권리락일)이지만 "다음 장" 이 아니라 오늘로 본다(아침 단계가 개장 뒤에 돌 수 있다).
+    못 읽으면 **모두** 뺀다(보수 — 그날 장중 감시가 꺼질 뿐) — (종목, 못 읽은 까닭)"""
+    from batch.jobs import monitor_targets as mt
+
+    if not stock_ids:
+        return set(), None
+    try:
+        끝 = (today + timedelta(days=mt.ACTION_DAY_LOOKAHEAD_DAYS)).isoformat()
+        rows = client.execute(mt.ACTION_DAY_SQL, [today.isoformat(), 끝]).rows
+        감시 = set(stock_ids)
+        return {int(r[0]) for r in rows if int(r[0]) in 감시 and mt.ex_date(str(r[1])[:10]) == today}, None
+    except Exception as exc:  # noqa: BLE001 — 모르면 그날 선을 만들지 않는다(거짓 손절보다 꺼짐이 낫다)
+        if db.quota_reason(exc):
+            raise
+        return set(stock_ids), type(exc).__name__
 
 
 def due(now: datetime, market: str = "KR") -> str | None:
@@ -135,6 +163,12 @@ def hits(holdings: list[kv.Holding], lines: dict[str, tuple[int, dict[str, Any]]
             continue
         sid, 선 = 짝
         p = float(h.price)
+        # 아침 선의 기준 종가 대비 하루 가격제한폭(±30%)을 넘는 현재가는 장중 움직임이 아니다 — 액면분할 재상장·병합
+        # 첫날처럼 기준가 자체가 바뀐 날(25.1771, 25.1770 교차검증 [필수]. 웹 장중 감시의 ±31% 가드 25.597 과 같은 문턱)
+        기준 = float(선.get("ref") or 0)
+        if 기준 > 0 and abs(p / 기준 - 1) > markets.KR_DAILY_LIMIT + 0.01:
+            out.append(Hit(sid, h.code, 0, p, 기준, "suspect", ""))
+            continue
         # H 수량까지만 판다 — 사람이 그 모의계좌에서 손으로 산 주식까지 팔지 않게(정리 주문 원칙, paper.md 15.1 —
         # 25.1770, 25.1769 교차검증 [권고]). 오늘 KIS 에서만 찬 회차는 H 장부에 내일 들어오니 그날은 남는다(보수 쪽)
         수량 = min(int(h.sellable), int(선.get("qty") or h.sellable))
@@ -183,9 +217,11 @@ def run(
         # 오늘 국내 일일 배치가 아직 끝나지 않았으면 기다리는 것이다(정상 쉼, 알림 없음).
         # 끝났는데 감시선이 없을 때만 멈춤
         시작 = datetime.combine(오늘, dtime(0, 0), tzinfo=cal.market_tz("KR")).astimezone(UTC).isoformat()
-        if not client.execute(DAILY_DONE_SQL, [시작]).rows:
+        # 끝남 = 성공·부분뿐 아니라 실패·건너뜀(한도)도 — 그날은 감시선이 영영 안 생긴다(25.1771 교차검증 [권고])
+        if (not client.execute(DAILY_DONE_SQL, [시작]).rows
+                and now.astimezone(cal.market_tz("KR")).time() < WAIT_LIMIT_KST):  # fmt: skip
             return {"off": WAITING}
-        return {"off": f"{NO_LINES} — 오늘 국내 일일 배치는 끝났는데 가상모의투자 단계가 감시선을 적지 못함"}
+        return {"off": f"{NO_LINES} — 오늘 국내 일일 배치가 끝났거나 {WAIT_LIMIT_KST:%H:%M} 이 지났는데 감시선이 없음"}
     선들 = {str(v.get("code")): (int(sid), v) for sid, v in (칸.get("lines") or {}).items() if v.get("code")}
     if not 선들:
         return {"lines": 0}
@@ -200,9 +236,21 @@ def run(
             if r["status"] == "rejected" and any(c in str(r["message"] or "") for c in TRANSIENT_CODES)}  # fmt: skip
     이미 = {int(r["stock_id"]) for r in 오늘줄} - set(다시)
     닿음 = [x for x in hits(보유, 선들) if x.stock_id not in 이미]
+    의심 = [x for x in 닿음 if x.kind == "suspect"]
+    닿음 = [x for x in 닿음 if x.kind != "suspect"]
+    if 의심:
+        기록["suspect"] = len(의심)  # 기업행위 의심 — 팔지 않는다(알림만, 종목마다 하루 한 번)
+        본 = db.get_setting(client, SUSPECT_KEY, None)
+        본 = set(본.get("ids") or []) if isinstance(본, dict) and 본.get("date") == 오늘.isoformat() else set()
+        의심 = [x for x in 의심 if x.stock_id not in 본]
+        if 의심 and not dry_run:
+            db.set_setting(client, SUSPECT_KEY, {"date": 오늘.isoformat(),
+                                                 "ids": sorted(본 | {x.stock_id for x in 의심})})  # fmt: skip
     종류 = [x.kind for x in 닿음]
     기록["hits"] = {k: 종류.count(k) for k in ("stop", "trail", "target") if k in 종류}
     if dry_run or not 닿음:
+        if 의심 and not dry_run:
+            기록["alert"] = suspect_text(client, 의심)
         return 기록 | {"dry_run": dry_run, "calls": sess.calls}
     지금 = now.isoformat()
     상태: dict[str, int] = {}
@@ -250,7 +298,9 @@ def run(
             break
     기록["sent"] = 상태
     if 보낸:
-        기록["alert"] = alert_text(client, 보낸)
+        기록["alert"] = alert_text(client, 보낸) + ("\n" + suspect_text(client, 의심) if 의심 else "")
+    elif 의심:
+        기록["alert"] = suspect_text(client, 의심)
     if 기록줄오류 is not None:
         # 알림을 실어 올린다 — `main` 이 알림을 보낸 뒤 실패로 닫는다
         raise GuardRecordError(기록 | {"calls": sess.calls}) from 기록줄오류
@@ -265,15 +315,26 @@ class GuardRecordError(RuntimeError):
         self.record = 기록
 
 
-def alert_text(client: Any, sent: list[tuple[Hit, str]]) -> str:
-    """텔레그램 한 통 — 종목 이름·선·현재가·수량·결과. 비공개 대화방으로만 간다(공개 로그에는 찍지 않는다)"""
+def suspect_text(client: Any, xs: list[Hit]) -> str:
+    """기업행위 의심으로 팔지 않은 종목(종목마다 하루 한 번 — `run` 이 거른다)"""
+    이름 = _names(client, [x.stock_id for x in xs])
+    줄 = [f"  · {이름.get(x.stock_id, x.code)} 현재가 {x.price:,.0f} — 아침 기준 종가 {x.line:,.0f} 의 ±31% 밖"
+          for x in xs]
+    return "\n".join(["⚠️ KIS모의투자 장중 감시 — 기업행위 의심(분할·병합 재상장 등)으로 장중 매도를 내지 않음", *줄])
+
+
+def _names(client: Any, ids: list[int]) -> dict[int, str]:
     import json
 
     try:
-        줄들 = client.execute(NAME_SQL, [json.dumps([x.stock_id for x, _ in sent])]).dicts()
-        이름 = {int(r["id"]): str(r["name"]) for r in 줄들}
+        return {int(r["id"]): str(r["name"]) for r in client.execute(NAME_SQL, [json.dumps(ids)]).dicts()}
     except Exception:  # noqa: BLE001 — 이름을 못 읽어도 코드로 알린다(주문은 이미 나갔다)
-        이름 = {}
+        return {}
+
+
+def alert_text(client: Any, sent: list[tuple[Hit, str]]) -> str:
+    """텔레그램 한 통 — 종목 이름·선·현재가·수량·결과. 비공개 대화방으로만 간다(공개 로그에는 찍지 않는다)"""
+    이름 = _names(client, [x.stock_id for x, _ in sent])
     줄 = ["⚡ KIS모의투자 장중 매도 (H 의 손절·익절선을 장중에)"]
     for x, 결과 in sent:
         줄.append(f"  · {이름.get(x.stock_id, x.code)} {x.quantity:,}주 시장가 — {note(x)} → {결과}")
