@@ -859,7 +859,7 @@ def test_계산_오류가_있는_날도_판_뒤_알림_실패는_부분(c: Clien
     assert c.q("SELECT status FROM batch_runs WHERE job_name = 'intraday_guard'") == [("partial",)]
     # 남긴 글은 판 알림 원문뿐(머리·계산 오류 문단 없음) — 다음 회차가 오류 문단을 다시 만든다
     남김 = db.get_setting(c, ig.UNSENT_KEY, None)["text"]
-    assert 남김.startswith("⚡ KIS모의투자 장중 매도") and "계산 오류" not in 남김
+    assert 남김.startswith("[2026-10-26] ⚡ KIS모의투자 장중 매도") and "계산 오류" not in 남김
     assert ig.main() == 0  # 또 실패 — 머리 없이 그대로(판 종목은 '이미')
     assert db.get_setting(c, ig.UNSENT_KEY, None)["text"] == 남김
 
@@ -879,7 +879,7 @@ def test_못_보낸_글은_보낸_뒤_지우고_지난_장_글도_보낸다(c: C
     _main_준비(c, monkeypatch, 보낸)
     db.set_setting(c, ig.UNSENT_KEY, {"date": "2026-10-23", "text": "⚡ 지난 장 매도"})
     monkeypatch.setattr(kv, "Session", lambda *a, **k: _Sess([_h("005930", 9_500.0)]))
-    assert ig.main() == 0 and len(보낸) == 1 and 보낸[0].startswith("(지난 장(2026-10-23)에 보내지 못했거나")
+    assert ig.main() == 0 and len(보낸) == 1 and 보낸[0].startswith("(지난 장(2026-10-23)부터 보내지 못했거나")
     assert db.get_setting(c, ig.UNSENT_KEY, None) == {}  # 빈 칸 — 배치는 설정 행을 지우지 않는다
     with monkeypatch.context():
         로그: list[str] = []
@@ -982,3 +982,35 @@ def test_예전_null_행은_고친다(c: Client, monkeypatch: pytest.MonkeyPatch
     db.set_setting(c, ig.UNSENT_KEY, None)
     monkeypatch.setattr(kv, "Session", lambda *a, **k: _Sess([_h("005930", 9_500.0)]))
     assert ig.main() == 0 and c.q("SELECT value FROM settings WHERE key = ?", [ig.UNSENT_KEY]) == [("{}",)]
+
+
+
+def test_남은_글은_문단마다_날짜를_달고_쉬는_회차도_보낸다(c: Client, monkeypatch: pytest.MonkeyPatch) -> None:
+    """지난 장 글 + 오늘 실패 — 한 머리 아래 서로의 날짜로 읽혔다. 다음 장 첫 회차가 감시선 대기여도 남은 글은 간다"""
+    보낸: list[str] = []
+    _main_준비(c, monkeypatch, 보낸, 실패=True)
+    db.set_setting(c, ig.UNSENT_KEY, {"date": "2026-10-23", "text": "[2026-10-23] ⚡ 지난 장 매도"})
+    monkeypatch.setattr(kv, "Session", lambda *a, **k: _Sess([_h("005930", 9_250.0)]))
+    assert ig.main() == 0
+    assert db.get_setting(c, ig.UNSENT_KEY, None)["text"].split("\n")[1].startswith("[2026-10-26] ⚡")
+    db.set_setting(c, ig.GUARD_KEY, {})  # 감시선 없음(배치는 끝남) 회차
+    c.conn.execute("INSERT INTO batch_runs (job_name, market, trade_date, trigger_source, started_at, status)"
+                   " VALUES ('daily_kr', 'KR', '2026-10-26', 'cron', '2026-10-25T23:27:00+00:00', 'success')")
+    assert ig.main() == 0  # 또 실패 — 감시선이 없는(멈춤) 회차라도 부분
+    assert c.q("SELECT status FROM batch_runs WHERE job_name = 'intraday_guard' ORDER BY id DESC LIMIT 1") == [
+        ("partial",)]
+    _main_준비(c, monkeypatch, 보낸)
+    assert ig.main() == 0 and 보낸[0].startswith("(지난 장(2026-10-23)부터 보내지 못했거나")
+    assert "[2026-10-23] ⚡ 지난 장 매도" in 보낸[0] and "[2026-10-26] ⚡ KIS모의투자 장중 매도" in 보낸[0]
+
+
+def test_알림이_끊긴_동안_순간_거부_문단은_한_번만_쌓인다(c: Client, monkeypatch: pytest.MonkeyPatch) -> None:
+    from batch.sources.kis import KisFailed
+
+    보낸: list[str] = []
+    _main_준비(c, monkeypatch, 보낸, 실패=True)
+    monkeypatch.setattr(kv, "Session", lambda *a, **k: _Sess([_h("005930", 9_250.0)],
+                                                            fail={"005930": KisFailed("EGW00201 초당")}))  # fmt: skip
+    for _ in range(3):
+        assert ig.main() == 0
+    assert db.get_setting(c, ig.UNSENT_KEY, None)["text"].count("거부(초당") == 1

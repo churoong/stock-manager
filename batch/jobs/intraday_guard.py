@@ -494,6 +494,9 @@ def run_status(기록: dict[str, Any]) -> str:
     일일 배치 실행 중·키 없음·멈춤 스위치·보유 없음은 정상 쉼이라 `success`(25.1769, 교차검증 [권고] — 쉼까지
     건너뜀이면 주간 요약에 매주 "건너뜀 N" 이 떠 진짜 멈춤이 묻혔다). 정리 줄과 겹쳐 못 낸 종목도 멈춤이다.
     판 뒤 알림을 못 보냈으면 `partial` — 주문은 나갔는데 사람은 모른다(25.1772)"""
+    # 남은 판 알림이 또 못 갔다 — 감시선 없음·잘림 회차라도 부분(25.1777)
+    if 기록.get("alert_error") and 기록.get("unsent_pending"):
+        return "partial"
     if str(기록.get("off", "")).startswith(NO_LINES) or "잘림" in str(기록.get("skipped", "")):  # 대기·실행 중은 정상
         return "skipped"
     # 판 뒤 알림 실패가 먼저 — 계산 오류·정리 줄 겹침이 있는 날에도 "주문은 나갔는데 사람은 모름" 이 묻히지 않게
@@ -545,8 +548,8 @@ def unsent_text(client: Any, now: datetime, *, repair: bool = False) -> str | No
     값 = unsent_raw(client, repair=repair)
     if 값 is None:
         return None
-    언제 = "앞 회차" if 값.get("date") == kst_today(now) else f"지난 장({값.get('date')})"
-    return f"({언제}에 보내지 못했거나 전송 여부를 모르는 장중 매도 알림 — 겹칠 수 있음)\n{값['text']}"
+    언제 = "앞 회차에" if 값.get("date") == kst_today(now) else f"지난 장({값.get('date')})부터"
+    return f"({언제} 보내지 못했거나 전송 여부를 모르는 장중 매도 알림 — 겹칠 수 있음)\n{값['text']}"
 
 
 def mark_alerted(client: Any, now: datetime, key: str = NO_LINES_ALERT_KEY) -> None:
@@ -600,9 +603,14 @@ def main() -> int:
                     # 판 알림은 다음 회차가 다시 만들지 못한다 — **판 알림 원문만** 머리 없이 쌓아 다음 회차가 보낸다
                     # (25.1774·25.1775 — 글 전체를 남기면 머리·표시성 문단이 회차마다 겹쳐 쌓였다)
                     앞 = unsent_raw(client)
-                    # 날짜는 처음 못 보낸 날 그대로 — 지난 장 글이 "앞 회차" 머리로 읽히지 않게(25.1775 교차검증)
+                    # 날짜는 처음 못 보낸 날 그대로(머리), 문단마다 그날 날짜를 단다 — 지난 장 글과 오늘 매도가
+                    # 한 머리 아래 서로의 날짜로 읽히지 않게(25.1776·25.1777 교차검증)
+                    문단 = f"[{kst_today(now)}] {판글}"
                     db.set_setting(client, UNSENT_KEY, {"date": 앞["date"] if 앞 else kst_today(now),
-                                                       "text": f"{앞['text']}\n{판글}" if 앞 else 판글})  # fmt: skip
+                                                       "text": f"{앞['text']}\n{문단}" if 앞 else 문단})  # fmt: skip
+                    # 글이 남았으니 순간 거부는 "알린 것" 으로 친다 — 안 그러면 텔레그램이 끊긴 동안 같은 거부
+                    # 문단이 회차마다 쌓였다(25.1777 교차검증 [권고])
+                    mark_ids(client, now, {TRANSIENT_KEY: 표시.get(TRANSIENT_KEY, [])})
             else:  # 표시는 보낸 뒤에만 — 실패한 날은 다음 회차가 다시 알린다
                 if 감시선없음:
                     mark_alerted(client, now)
