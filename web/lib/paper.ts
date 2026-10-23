@@ -109,6 +109,8 @@ export interface BrokerSummary {
   partial: number; rejected: number; unknown: number; cleanup: number; excluded?: number;
   /** KIS 에서만 낸 장중 손절·익절 매도 수(25.1768) — 짝(가상 판정)이 없어 따로 */
   guard?: number;
+  /** 장중 매도 뒤 H 만 든 종목 수 — 잔고 대보기에서 뺐다(25.1772) */
+  guard_held?: number;
   slip_buy: { n: number; avg: number | null }; slip_sell: { n: number; avg: number | null };
   reject_reasons: Record<string, number>;
 }
@@ -125,7 +127,7 @@ export function brokerLines(b: BrokerLatest | null | undefined): string[] {
     const 칸 = (x: { n: number; avg: number | null }, 이름: string) =>
       x.n && x.avg != null ? `${이름} ${x.avg >= 0 ? "+" : ""}${x.avg.toFixed(apartDigits(x.avg, DIVERGE.SLIP_PCT, 2))}% (n=${x.n})` : `${이름} 표본 없음`;
     out.push(`가격(+ 면 가상모의투자가 낙관): ${칸(s.slip_buy, "매수")} · ${칸(s.slip_sell, "매도")}`);
-  } else if (s?.rejected || s?.excluded || s?.unknown || s?.cleanup || s?.guard) {
+  } else if (s?.rejected || s?.excluded || s?.unknown || s?.cleanup || s?.guard || s?.guard_held) {
     // 모름·정리 주문만 있는 날도 — 배치 `compare_lines` 는 이때 줄을 낸다(25.1617, KIS 웹 감사 [필수])
     out.push("체결을 견줄 주문은 아직 없습니다 — 거부·표본 밖·모름·정리·장중 매도만 있습니다(아래).");
   } else {
@@ -141,6 +143,7 @@ export function brokerLines(b: BrokerLatest | null | undefined): string[] {
   if (s?.unknown) 끝.push(`모름 ${s.unknown}`);
   if (s?.cleanup) 끝.push(`정리 주문 ${s.cleanup}`);
   if (s?.guard) 끝.push(`장중 손절·익절 ${s.guard}(H 는 아침 일봉 판정 — 짝 없음)`);
+  if (s?.guard_held) 끝.push(`장중 매도 뒤 H 만 든 종목 ${s.guard_held}(잔고 대보기에서 뺌)`);
   끝.push(`잔고가 어긋난 종목 ${Object.keys(b.diff ?? {}).length} (${b.as_of} 기준)`);
   out.push(끝.join(" · "));
   return out;

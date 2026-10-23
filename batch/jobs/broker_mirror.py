@@ -619,6 +619,8 @@ def run(
     # 비교·칸·성과는 **지금 베끼는 계좌의 줄만** — 도전자를 C 에서 D 로 바꾸면 C 주문이 D 의 창에 섞였다
     # (25.1517, 검토 6)
     비교 = bm.compare(client.execute(COMPARE_SQL, [증권사, 부터, 오늘.isoformat(), 베낌]).dicts())
+    if 장중0 & set(내부):  # 잔고 대보기에서 뺀 종목 수를 요약에도(웹·주간 요약 끝 줄, 25.1772 교차검증 [권고])
+        비교["guard_held"] = len(장중0 & set(내부))
     # 체결 칸(15.9, 25.1514) — 곁다리: 실패해도 비교 요약은 그대로
     try:
         비교 |= bm.cells(client.execute(CELLS_SQL, [증권사, 오늘.isoformat(), 베낌]).dicts())

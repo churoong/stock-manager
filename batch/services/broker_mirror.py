@@ -69,8 +69,9 @@ def plan(
     감시선 근처에서 "시가에 사고 장중에 판다" 가 되풀이된다). H 가 그 보유를 다 판 뒤 새로 사면 다시 베낀다.
     `stop_floor` = {종목: 오늘 감시선(원가·수량·손절%)} — 그 회차가 차면 **평균 원가로 다시 낸 손절선** 이하에서 사는
     지정가 매수 회차는 베끼지 않는다(`buys_below_stop`, 25.1770·25.1771 — 그날 장중 손절로 판 뒤 더 빠지면 하루짜리
-    회차가 KIS 에서만 차 같은 날 다시 샀다). 그런 회차는 H 에서도 종가 ≤ 지정가 ≤ 새 손절선이라 다음 아침 손절로
-    나간다(25.1771 교차검증: 처음엔 옛 손절선과 견줘, 회차가 차 평균 원가가 내려가 손절이 안 나는 경우까지 걸렀다)
+    회차가 KIS 에서만 차 같은 날 다시 샀다). 그 회차가 차는 날은 그 이상 회차도 함께 차므로 평균에 함께 넣는다 —
+    그러면 H 도 종가 ≤ 지정가 ≤ (함께 찬 회차까지 넣은) 새 손절선이라 다음 아침 손절로 나간다(25.1771 교차검증: 처음엔
+    옛 손절선과 견줬고, 25.1772: 회차 하나만 찬다고 봤다)
     """
     안냄: list[tuple[int | None, int, str]] = []
     # 증권사에만 남은 몫(정리 대상) — 정리를 못 낼 때도 까닭을 남긴다. 예전엔 멈춤·기업행위 경계·코드 없음·
@@ -118,6 +119,13 @@ def plan(
             if q < 남는것:  # 일부만 — 나머지 몫도 까닭을(25.1607, 25.1605 반박 [참고])
                 안냄.append((None, sid, PARTIAL_CLEANUP))
     매수: list[Intent] = []
+    # 같은 종목의 열린 지정가 매수 회차 — 낮은 회차가 차면 그 이상 회차도 다 찬다(25.1772, 25.1771 교차검증 [권고]:
+    # 회차마다 "이것 하나만 찬다" 로 평균을 내면 둘 다 차 손절이 안 나는 경우까지 걸러 KIS 만 수량이 모자랐다)
+    회차: dict[int, list[tuple[int, float, int]]] = {}
+    for o in open_orders:
+        if o["side"] == "buy" and o.get("order_type") != "market" and o.get("limit_price") is not None:
+            회차.setdefault(int(o["stock_id"]), []).append(
+                (int(o["id"]), float(o["limit_price"]), int(o["quantity"])))
     for o in open_orders:
         oid, sid = int(o["id"]), int(o["stock_id"])
         if oid in already:
@@ -148,7 +156,8 @@ def plan(
         elif sid in (guard_held or set()):
             안냄.append((oid, sid, GUARD_HELD_SKIP))
         elif not 시장가 and sid in (stop_floor or {}) and buys_below_stop(
-                (stop_floor or {})[sid], float(가격), int(o["quantity"])):  # fmt: skip
+                (stop_floor or {})[sid], float(가격), int(o["quantity"]),
+                [(p, n) for i, p, n in 회차.get(sid, []) if i != oid and p >= float(o["limit_price"])]):  # fmt: skip
             안냄.append((oid, sid, STOP_FLOOR_SKIP))
         else:
             매수.append(Intent(oid, sid, code, "buy", int(o["quantity"]), 가격, REASON_MIRROR))
@@ -164,16 +173,20 @@ def plan(
     return 낼것, 안냄
 
 
-def buys_below_stop(line: dict[str, Any], price: float, quantity: int) -> bool:
+def buys_below_stop(
+    line: dict[str, Any], price: float, quantity: int, above: list[tuple[float, int]] | None = None,
+) -> bool:
     """이 회차가 차면 바로 손절선 아래 보유인가 — 평균 원가(수수료 포함 원가 × 계수 기준, 감시선의 `cost`·`qty`)로
-    다시 낸 손절선 이하에서 산다(25.1771). 감시선에 손절이 없거나 값이 모자라면 False(거르지 않음)"""
+    다시 낸 손절선 이하에서 산다(25.1771). `above` = 이 회차가 찰 때 함께 차는 같은 종목의 그 이상 지정가 회차
+    (가격, 수량) — 평균에 넣는다(25.1772). 감시선에 손절이 없거나 값이 모자라면 False(거르지 않음)"""
     try:
         원가, 수량, 손절 = float(line["cost"]), int(line["qty"]), float(line["stop_pct"])
     except (KeyError, TypeError, ValueError):
         return False
     if line.get("stop") is None or 수량 <= 0 or quantity <= 0 or 원가 <= 0:
         return False
-    평균 = (원가 * 수량 + price * quantity) / (수량 + quantity)
+    위 = above or []
+    평균 = (원가 * 수량 + sum(p * n for p, n in 위) + price * quantity) / (수량 + sum(n for _p, n in 위) + quantity)
     return round(price / (평균 * (1 + 손절 / 100)) - 1, 6) <= 0
 
 
@@ -658,7 +671,7 @@ def compare_lines(
     """주간 요약 몇 줄. 끝난 베낀 주문이 없으면 빈 목록. 거부·표본 밖은 체결 견줌(n)과 따로 끝 줄에 — 거부만 있는 주에
     "주문 없음" 으로 보이던 것(25.1564, 25.1561 반박 [권고] A)"""
     if not s or not (s.get("n") or s.get("unknown") or s.get("cleanup") or s.get("guard") or s.get("rejected")
-                     or s.get("excluded")):  # fmt: skip
+                     or s.get("excluded") or s.get("guard_held")):  # fmt: skip
         return []
     out = [f"[KIS모의투자 — {account} 주문 베끼기, 지난 {s['days']}일]"]
     if s.get("n"):
@@ -687,6 +700,8 @@ def compare_lines(
         끝.append(f"정리 주문 {s['cleanup']}")
     if s.get("guard"):
         끝.append(f"장중 손절·익절 {s['guard']}(H 는 아침 일봉 판정 — 짝 없음)")
+    if s.get("guard_held"):  # 잔고 대보기에서 뺀 종목 — "어긋난 종목 0" 이 거짓말로 읽히지 않게(25.1772)
+        끝.append(f"장중 매도 뒤 H 만 든 종목 {s['guard_held']}(잔고 대보기에서 뺌)")
     if diff_count is not None:
         끝.append(f"잔고가 어긋난 종목 {diff_count}" + (f" ({as_of})" if as_of else ""))
     if 끝:

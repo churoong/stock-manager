@@ -1274,6 +1274,11 @@ def guard_line(
         return None
     if getattr(h, "corporate_action_recent", False):
         return None
+    # 판정 종가가 직전 거래일 것이 아니면(거래정지) 선을 만들지 않는다 — 정지 뒤 재개 첫날은 인적분할·합병으로 기준가가
+    # ±31% 안에서 바뀌어도 아침 배치는 모른다(25.1772, 25.1771 교차검증 [권고])
+    직전 = cal.previous_session(str(행.get("country") or "KR"), today).isoformat()
+    if 행.get("price_date") and str(행["price_date"])[:10] < 직전:
+        return None
     따름 = pp.SELL_RULES.get(sell_rule, frozenset())
     if 따름 is None:  # `all` — 모든 플래그(손절·목표도달 포함, 추적손절은 추세 계좌만)
         따름 = frozenset({"손절", "목표도달"})

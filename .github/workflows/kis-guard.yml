@@ -19,6 +19,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 # 앞 실행이 끝나기 전에 다음 예약이 오면 기다린다 — 두 실행이 같은 종목을 두 번 팔지 않게(줄 유일 색인도 막는다)
 concurrency:
@@ -57,7 +58,23 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           OFFLINE_MODE: "0"
           LOG_LEVEL: INFO
+        # 공개 로그에는 줄 수만(예외 traceback 의 KIS 거부 문구·DB 오류가 남지 않게, 25.1772 — 다른 KIS 워크플로와 같다)
         run: |
+          set -o pipefail
           ARGS=""
           if [ "${{ inputs.dry_run }}" = "true" ]; then ARGS="--dry-run"; fi
-          python -m batch.jobs.intraday_guard $ARGS
+          python -m batch.jobs.intraday_guard $ARGS 2>&1 | python scripts/ops_tee.py run.log
+
+      # 실패했거나 손으로 돌린 실행만 비공개 운영 이슈로 — 10분마다 하루 40번 올리면 운영 이슈가 묻힌다. 평소 결과는
+      # 실행 기록(batch_runs)·텔레그램에 있다
+      - name: 기록을 이슈로 내보내기
+        if: always() && (failure() || github.event_name == 'workflow_dispatch')
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPS_REPO: ${{ secrets.OPS_REPO }}
+          OPS_TOKEN: ${{ secrets.OPS_TOKEN }}
+        run: |
+          python scripts/publish_output.py \
+            --title "운영 출력 (클라우드 세션용)" \
+            --file run.log \
+            --note "KIS모의투자 장중 손절·익절 (${{ job.status }})"
