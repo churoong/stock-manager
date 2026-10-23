@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import CriteriaTable from "@/components/CriteriaTable";
 import PaperRealized from "@/components/PaperRealized";
+import Pager from "@/components/Pager";
 import EquityChart, { type Series } from "@/components/EquityChart";
 import Link from "next/link";
 import { DESK_RULES, MARKET_LABEL, adjustCheckText, adjustText, championText, pctText as deskPct, ppText, preregText, ruleSpanText, rowsById, type DeskView, type RuleSpan } from "@/lib/desk";
@@ -23,6 +24,7 @@ import {
   hasCommittee,
   virtualText,
 } from "@/lib/paper";
+import { pageOf } from "@/lib/paging";
 import { KIND_TEXT, afterText, beatBench, groupDecisions, holdSide, operationalSkip, type DecisionRow } from "@/lib/paperDecisions";
 import { money, won } from "@/lib/portfolio";
 
@@ -56,7 +58,7 @@ interface Position {
   unrealized_local_pct?: number | null; unknown_why?: string | null;
 }
 interface Flow { id: number; flow_date: string; amount_krw: number; kind: string; cancels_id: number | null; memo: string | null; cancelled_by: number | null }
-interface FillRow {
+export interface FillRow {
   id: number; account_id: string; ticker: string; name: string; side: string; fill_date: string; price: number; quantity: number;
   currency: string; fx_rate: number; fee: number; tax: number; slippage: number; cash_krw: number; realized_krw: number | null;
   reason: string; decided_on: string;
@@ -527,7 +529,7 @@ export function AccountTabs({ data, acct, setAcct, sub, setSub, desk }: {
       <div className="mt-3">
         {sub === "summary" ? <SummaryPane a={a} /> : null}
         {sub === "holdings" ? <HoldingsPane a={a} /> : null}
-        {sub === "trades" ? <TradesPane fills={체결} /> : null}
+        {sub === "trades" ? <TradesPane key={a.id} fills={체결} /> : null}
         {sub === "realized" ? <PaperRealized key={a.id} account={a.id} /> : null}
         {sub === "orders" ? <OrdersPane orders={주문} /> : null}
         {sub === "report" ? <ReportPane a={a} /> : null}
@@ -636,11 +638,15 @@ function HoldingsPane({ a }: { a: Account }) {
   );
 }
 
-function TradesPane({ fills }: { fills: FillRow[] }) {
+/** 거래내역 — 20건씩 쪽으로(2026-10-23 사용자 지시 "거래내역 탭이 점점 길어져", 25.1767). 계좌를 바꾸면 첫 쪽(부르는 쪽이 `key`) */
+export function TradesPane({ fills }: { fills: FillRow[] }) {
+  const [page, setPage] = useState(0);
   if (!fills.length) return <p className="text-sm text-slate-500">아직 체결이 없습니다.</p>;
+  const p = pageOf(fills, page);
   return (
+    <>
     <ul className="divide-y divide-slate-100 text-sm dark:divide-slate-800">
-      {fills.map((f) => {
+      {p.rows.map((f) => {
         const 근거 = (() => {
           try {
             return f.rationale_json ? JSON.parse(f.rationale_json) : null;
@@ -672,6 +678,8 @@ function TradesPane({ fills }: { fills: FillRow[] }) {
         );
       })}
     </ul>
+    <Pager p={p} onPage={setPage} />
+    </>
   );
 }
 

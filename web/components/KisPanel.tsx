@@ -4,9 +4,11 @@ import { useEffect, useState } from "react";
 import EquityChart, { type Series } from "@/components/EquityChart";
 import { KisRealized } from "@/components/PaperRealized";
 import { bodyOf, readJson } from "@/lib/http";
-import { amountText, perfLines, priceText, statusText, usCashText, wholeBreakdownText, type KisMarket, type KisMarketView, type KisWhole } from "@/lib/kisPaper";
+import Pager from "@/components/Pager";
+import { amountText, perfLines, priceText, sentTimeText, statusText, usCashText, wholeBreakdownText, type KisMarket, type KisMarketView, type KisOrder, type KisWhole } from "@/lib/kisPaper";
 import { orderTimeText, type LiveView } from "@/lib/kisVts";
 import { userTimeOf } from "@/lib/market";
+import { pageOf } from "@/lib/paging";
 import { brokerLines } from "@/lib/paper";
 
 /**
@@ -91,7 +93,7 @@ function LiveExecutions({ live }: { live: LiveView }) {
         <ul className="text-xs">
           {live.executions.map((e, i) => (
             <li key={`${e.code}-${e.time}-${i}`}>
-              {orderTimeText(e.time)} {e.name ?? e.code} {e.side === "buy" ? "매수" : e.side === "sell" ? "매도" : e.side} {e.qty}주 → 체결 {e.filled}주
+              {e.time ? `주문 ${orderTimeText(e.time)} · ` : ""}{e.name ?? e.code} {e.side === "buy" ? "매수" : e.side === "sell" ? "매도" : e.side} {e.qty}주 → 체결 {e.filled}주
               {e.avg_price != null ? ` @ ${amountText(e.avg_price, cur)}` : ""}
               {e.note ? ` (${e.note})` : ""}
             </li>
@@ -104,6 +106,64 @@ function LiveExecutions({ live }: { live: LiveView }) {
       )}
       {live.more ? <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">KIS 가 첫 쪽만 주었습니다 — 나머지 체결은 아래 배치 기록에서 보세요.</p> : null}
     </div>
+  );
+}
+
+/**
+ * 배치가 적은 KIS 주문 기록 — 20건씩 쪽으로(2026-10-23 사용자 지시 "거래내역 탭이 점점 길어져", 25.1767). 주문 시각은 배치가 KIS 에
+ * 보낸 시각(`sent_at`, 한국 시각)이다. **체결 시각은 아직 없다** — KIS 일별 체결 조회는 주문 단위 합계라 체결 시각 칸이 있는지
+ * `[확인필요]`이고, 저장하려면 마이그레이션이 필요해 11월에 한다(docs/paper.md 15.7)
+ */
+function KisTrades({ orders, cur }: { orders: KisOrder[]; cur: "KRW" | "USD" }) {
+  const [page, setPage] = useState(0);
+  if (!orders.length) return <p className="text-slate-500">아직 낸 주문이 없습니다.</p>;
+  const p = pageOf(orders, page);
+  return (
+    <>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[700px] text-xs">
+          <thead>
+            <tr className="text-left text-slate-500">
+              <th className="py-1">날짜</th>
+              <th>주문 시각</th>
+              <th>종목</th>
+              <th>구분</th>
+              <th className="text-right">수량</th>
+              <th className="text-right">주문가</th>
+              <th>상태</th>
+              <th className="text-right">체결</th>
+              <th className="text-right">체결가</th>
+              <th>비고</th>
+            </tr>
+          </thead>
+          <tbody>
+            {p.rows.map((o) => (
+              <tr key={o.id} className="border-t border-slate-100 dark:border-slate-800">
+                <td className="py-1 whitespace-nowrap">{o.trade_date}</td>
+                <td className="whitespace-nowrap text-slate-500">{sentTimeText(o.sent_at, o.trade_date)}</td>
+                <td>{o.name ?? o.code}</td>
+                <td className={o.side === "buy" ? "text-red-600 dark:text-red-400" : "text-blue-600 dark:text-blue-400"}>
+                  {o.side === "buy" ? "매수" : "매도"}
+                  {o.reason === "정리" ? "(정리)" : ""}
+                </td>
+                <td className="text-right">{o.quantity.toLocaleString("ko-KR")}</td>
+                <td className="text-right">{priceText(o, cur)}</td>
+                <td>{statusText(o.status)}</td>
+                <td className="text-right">{o.filled_qty ?? "-"}</td>
+                <td className="text-right">{amountText(o.avg_price, cur)}</td>
+                <td className="max-w-[16rem] truncate text-slate-500" title={o.message ?? ""}>
+                  {o.message ?? ""}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <Pager p={p} onPage={setPage} />
+      <p className="mt-1 text-xs text-slate-500">
+        주문 시각은 KIS 에 보낸 시각(한국)입니다 — 국내 장전 주문은 09:00 시가 단일가에서, 미국 예약주문은 개장 뒤에 체결됩니다. 체결 시각은 아직 기록하지 않습니다.
+      </p>
+    </>
   );
 }
 
@@ -185,47 +245,7 @@ export function KisBody({ sub, market, v, whole, live }: { sub: Sub; market: Kis
       {sub === "trades" ? (
         <>
           {live ? <LiveExecutions live={live} /> : null}
-          {v.orders.length ? (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[640px] text-xs">
-                <thead>
-                  <tr className="text-left text-slate-500">
-                    <th className="py-1">날짜</th>
-                    <th>종목</th>
-                    <th>구분</th>
-                    <th className="text-right">수량</th>
-                    <th className="text-right">주문가</th>
-                    <th>상태</th>
-                    <th className="text-right">체결</th>
-                    <th className="text-right">체결가</th>
-                    <th>비고</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {v.orders.map((o) => (
-                    <tr key={o.id} className="border-t border-slate-100 dark:border-slate-800">
-                      <td className="py-1 whitespace-nowrap">{o.trade_date}</td>
-                      <td>{o.name ?? o.code}</td>
-                      <td className={o.side === "buy" ? "text-red-600 dark:text-red-400" : "text-blue-600 dark:text-blue-400"}>
-                        {o.side === "buy" ? "매수" : "매도"}
-                        {o.reason === "정리" ? "(정리)" : ""}
-                      </td>
-                      <td className="text-right">{o.quantity.toLocaleString("ko-KR")}</td>
-                      <td className="text-right">{priceText(o, cur)}</td>
-                      <td>{statusText(o.status)}</td>
-                      <td className="text-right">{o.filled_qty ?? "-"}</td>
-                      <td className="text-right">{amountText(o.avg_price, cur)}</td>
-                      <td className="max-w-[16rem] truncate text-slate-500" title={o.message ?? ""}>
-                        {o.message ?? ""}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <p className="text-slate-500">아직 낸 주문이 없습니다.</p>
-          )}
+          <KisTrades key={market} orders={v.orders} cur={cur} />
         </>
       ) : null}
 

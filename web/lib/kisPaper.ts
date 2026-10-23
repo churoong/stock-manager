@@ -123,6 +123,18 @@ export function priceText(o: Pick<KisOrder, "order_type" | "limit_price">, curre
   return o.order_type === "market" || o.limit_price == null ? "시장가" : amountText(o.limit_price, currency);
 }
 
+/**
+ * 주문을 KIS 에 보낸 시각(`sent_at`, UTC) → 한국 시각 (25.1767). 거래일과 한국 날짜가 같으면 "08:31", 다르면(미국 예약주문은 전날 밤에
+ * 보내기도 한다) "10-22 22:05". 없거나 읽을 수 없으면 "-"
+ */
+export function sentTimeText(sentAt: string | null | undefined, tradeDate: string): string {
+  if (!sentAt) return "-";
+  const t = Date.parse(sentAt);
+  if (Number.isNaN(t)) return "-";
+  const 한국 = new Date(t + 9 * 3_600_000).toISOString();
+  return 한국.slice(0, 10) === tradeDate ? 한국.slice(11, 16) : `${한국.slice(5, 10)} ${한국.slice(11, 16)}`;
+}
+
 /** 성과 몇 줄 — 값은 배치가 낸 그대로(계좌 전체 원화) */
 export function perfLines(p: KisPerf | null): string[] {
   if (!p) return ["아직 계좌 총액 기록이 없습니다 — 국내 일일 배치가 국내·미국 잔고를 함께 적은 날부터 보입니다."];
