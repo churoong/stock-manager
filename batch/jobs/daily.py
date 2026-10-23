@@ -2201,6 +2201,9 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
             summary=summary,
             delay_seconds=지연,
             composed_at=datetime.now(UTC),
+            # 첫 화면엔 볼 일과 운용 보고·추천 — 대표 종목 시세는 끝으로(25.1738, 사용자 "아직 수정안한거야?")
+            todo=formatter.todo_line(sell_flag_rows, currency),
+            rows_in_head=False,
         )
         step_log["correlation"] = {"stocks": len(corr_series), "holdings": len(holdings)}
         # 나라가 다른 쌍을 하루 밀어 맞추면 상관이 얼마나 오르나 — 기록만, 금액 불변 (docs/infra.md 25.1357, 23회차 P1)
@@ -2485,6 +2488,7 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
                 log.exception("운용 보고 실패")
                 step_log["report_head"] = {"error": str(exc)[:200]}
 
+        message += "\n\n" + formatter.watched_block(rows, decision.trade_date)
         if len(warnings) > 본문_경고수:
             message += "\n\n" + formatter.late_warnings(warnings[본문_경고수:])
 

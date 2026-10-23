@@ -955,7 +955,9 @@ def checks(
             [f"경계 전부터 든 계좌만 이어 멈춘 종목 {len(이어)}개"] if 이어 else [])  # fmt: skip
         out.append({"level": "normal", "text": " · ".join(조각)})
     if warnings:
-        out.append({"level": "normal", "text": f"이 실행의 경고 {warnings}줄 — 시스템 상태 화면에서"})
+        # `kind` — 텔레그램 리포트는 경고를 본문에 그대로 싣으니 운용 보고에선 이 줄을 뺀다(25.1738)
+        out.append({"level": "normal", "text": f"이 실행의 경고 {warnings}줄 — 시스템 상태 화면에서",
+                    "kind": "warnings"})
     return sorted(out, key=lambda x: x["level"] != "high")
 
 
@@ -1002,7 +1004,8 @@ def report_lines(
     # 예전엔 순위·체결·주문이 한 줄에 " · " 로 이어져 폰 화면에서 한 문단이 됐고, 미국 정식 이름("…, Inc. Common
     # Stock")과 회차마다 따로 적힌 같은 종목 주문이 줄을 채웠다. 종목은 짧은 이름, 같은 종목·방향 주문은 한 줄로 묶는다
     out = ["📊 운용 보고 — 가상모의투자·KIS모의투자 (자세히: 웹 운용 화면)"]
-    확인 = section.get("checks") or []
+    # 경고 개수 줄은 뺀다 — 이 리포트가 경고를 본문에 그대로 싣는다(25.1738, 웹 운용 화면에는 남는다)
+    확인 = [c for c in section.get("checks") or [] if c.get("kind") != "warnings"]
     if 확인:
         out.append("▸ 확인할 일")
         out += ["  " + ("❗" if c["level"] == "high" else "") + c["text"] for c in 확인[:REPORT_MAX_CHECKS]]
@@ -1041,13 +1044,8 @@ def report_lines(
     if len(묶음) > REPORT_MAX_ORDERS:
         out.append(f"  … 외 {len(묶음) - REPORT_MAX_ORDERS}종목")  # 종목·방향 묶음 수
 
-    def 건수(c: dict[str, int] | None) -> str:
-        xs = sorted((a, n) for a, n in (c or {}).items() if n and a != mirror)
-        return " · ".join(f"{a} {n}" for a, n in xs) or "없음"
-
-    out.append("▸ 다른 계좌 (건)")
-    out.append(f"  체결 {건수(section.get('fills_by_account'))}")
-    out.append(f"  주문 {건수(section.get('orders_by_account'))}")
+    # 다른 계좌의 체결·주문 건수 줄은 뺐다(25.1738) — 아래 가상모의투자 절이 계좌마다 "체결 n건" 을 싣고, 다음 장 주문
+    # 건수는 판단에 쓰이지 않았다(실물로 찍어 본 리포트 검토). 웹 운용 화면에는 그대로 있다
     if kis_state is not None:
         out.append(f"▸ KIS모의투자: {kis_state}")
         if prev_kis is not None:

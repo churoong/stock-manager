@@ -82,7 +82,10 @@ def with_head(message: str, head: list[str]) -> str:
     (25.1512 검토 2) — 머리 블록이 끝나는 첫 빈 줄 뒤에, 끝에 빈 줄 하나를 두고 끼운다. 빈 줄이 없으면 끝에 붙인다
     """
     줄 = message.split("\n")
-    i = 줄.index("") if "" in 줄 else len(줄)
+    if "" not in 줄:
+        # 머리 블록만 있는 글(대표 종목을 끝으로 옮긴 날 뒤 절이 모두 빈 경우, 25.1738) — 머리와 붙지 않게 빈 줄을 둔다
+        줄.append("")
+    i = 줄.index("")
     return "\n".join([*줄[: i + 1], *head, "", *줄[i + 1:]]).rstrip("\n")
 
 
@@ -127,11 +130,16 @@ def daily_report(
     composed_at: datetime | None = None,
     warnings: list[str] | None = None,
     summary: str | None = None,
+    todo: str | None = None,
+    rows_in_head: bool = True,
 ) -> str:
     """일일 리포트 본문을 만든다.
 
     Args:
         rows: 종목별 dict. name, close, change_pct, volume, currency, source 를 담는다
+        todo: 제목 바로 아래 "오늘 볼 것" 한 줄(`todo_line`) — 없으면 뺀다
+        rows_in_head: 거짓이면 대표 종목·출처를 싣지 않는다 — 부르는 쪽이 리포트 끝에 `watched_block` 으로 붙인다
+            (25.1738, 사용자 "아직 수정안한거야?" — 대표 종목 시세가 첫 화면을 차지해 운용 보고·추천이 밀렸다)
     """
     label = cal.MARKETS[market.upper()]["label"]
     lines = [
@@ -142,6 +150,9 @@ def daily_report(
     # 08:50 에 시작하면 개장 뒤에 도착해도 본문은 "생성 08:50" 만 말했다. 1분 넘게 차이 날 때만 붙인다
     if composed_at is not None and (composed_at - started_at).total_seconds() >= 60:
         lines[-1] += f" · 작성 끝 {cal.format_local(composed_at, market)}"
+    # 오늘 볼 것은 제목 바로 아래 — 알림 미리보기 두 줄에 들게(25.1738)
+    if todo:
+        lines.insert(1, todo)
 
     if summary:
         lines.append(summary)
@@ -151,32 +162,69 @@ def daily_report(
 
     lines.append("")
 
+    if rows_in_head:
+        lines += watched_block(rows, trade_date).split("\n") + [""]
+
+    if warnings:
+        lines.append("경고")
+        for warning in warnings:
+            lines.append(f"  - {_한_줄(warning)}")
+
+    return "\n".join(lines).rstrip("\n")
+
+
+def watched_block(rows: list[dict[str, Any]], trade_date: str) -> str:
+    """대표 종목 시세 — 종목마다 한 줄, 끝에 출처 (docs/design.md 3.9, 25.1738 — 예전엔 종목마다 석 줄)."""
     if not rows:
-        lines.append("가져온 종목이 없습니다.")
+        return "대표 종목: 가져온 종목이 없습니다."
+    lines = [f"대표 종목 ({trade_date} 종가)"]
     for row in rows:
         currency = row.get("currency", "KRW")
         # 그 종목의 마지막 시세가 리포트 날짜가 아니면 **그 날짜를 적는다** (docs/infra.md 25.326).
         # 예전에는 머리글의 "{trade_date} 종가" 아래에 지난 종가가 날짜 없이 실렸다
         그날 = row.get("trade_date")
-        lines.append(f"{row['name']}" + (f" ({그날} 종가)" if 그날 and 그날 != trade_date else ""))
-        lines.append(
-            f"  {_money(row.get('close'), currency)}  {_change(row.get('change_pct'))}"
-        )
+        줄 = f"  {row['name']}" + (f" ({그날} 종가)" if 그날 and 그날 != trade_date else "")
+        줄 += f" {_money(row.get('close'), currency)} {_change(row.get('change_pct'))}"
         if row.get("volume") is not None:
-            lines.append(f"  거래량 {_volume(row.get('volume'))}")
-
-    if warnings:
-        lines.append("")
-        lines.append("경고")
-        for warning in warnings:
-            lines.append(f"  - {_한_줄(warning)}")
-
+            줄 += f" · 거래량 {_volume(row.get('volume'))}"
+        lines.append(줄)
     sources = sorted({row.get("source", "") for row in rows if row.get("source")})
     if sources:
-        lines.append("")
         lines.append(f"출처 {', '.join(sources)}")
-
     return "\n".join(lines)
+
+
+#: 오늘 볼 것 줄의 매도 플래그 이름 (docs/sell_flags.md — 적 손절 · 녹 목표도달 · 황 기간초과·재무악화·점검·감성)
+_할일_이름 = {"red": "손절", "green": "목표 도달", "yellow": "점검"}
+#: 묶음마다 이름을 싣는 종목 수 — 넘으면 "외 n"
+TODO_MAX_NAMES = 3
+
+
+def todo_line(flags: list[dict[str, Any]], currency: str = "KRW") -> str | None:
+    """제목 바로 아래 **오늘 볼 것** 한 줄 — 보유 매도 플래그를 손절·목표 도달·점검으로 묶어 종목 이름과 (25.1738).
+
+    2026-10-23 사용자 "오늘 아침에 온 리포트보면 여전히 내용이 가독성이 떨어지는데" — 실물로 찍어 보니 손절 플래그가
+    150번째 줄에 있었다. 플래그 절은 그대로 두고(근거 문장) 첫 화면에는 무엇을 볼지만. 플래그가 없으면 None(줄 없음)
+    """
+    묶음: dict[str, list[str]] = {}
+    새로 = set()
+    for f in flags:
+        이름 = short_name(f.get("name"), None, currency)
+        칸 = 묶음.setdefault(str(f.get("level")), [])
+        if 이름 not in 칸:
+            칸.append(이름)
+        if f.get("new"):
+            새로.add(이름)
+    조각 = []
+    for level in ("red", "green", "yellow"):
+        xs = 묶음.get(level) or []
+        if not xs:
+            continue
+        보임 = "·".join(xs[:TODO_MAX_NAMES]) + (f" 외 {len(xs) - TODO_MAX_NAMES}" if len(xs) > TODO_MAX_NAMES else "")
+        조각.append(f"{_할일_이름[level]} {len(xs)}({보임})")
+    if not 조각:
+        return None
+    return "🔔 보유 매도 플래그: " + " · ".join(조각) + (f" — 새로 걸림 {len(새로)}" if 새로 else "")
 
 
 #: 이번 재실행 본문을 웹에 저장하지 않았다는 표시 (daily 모름 경로, 25.574·25.575)

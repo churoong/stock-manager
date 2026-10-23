@@ -42,13 +42,13 @@ def test_report_lines_by_hand() -> None:
                         "  … H(KIS) -1.00% (R 대비 -1.50%p)"]  # fmt: skip
     assert 줄[11:13] == ["▸ H 체결 (판정 2026-10-16)", "  매수 삼성 3주 @ 9,800원"]
     assert 줄[13] == "▸ H 다음 장 주문 (2026-10-19)" and 줄[14] == "  매수 종목0 1주 $10.50" and 줄[19] == "  … 외 2종목"
-    assert 줄[20:23] == ["▸ 다른 계좌 (건)", "  체결 A 2 · C 1", "  주문 B 3"]
-    assert 줄[23:] == ["▸ KIS모의투자: 이 주문을 접수 시간에 그대로 냅니다",
+    # 다른 계좌 건수 줄은 뺐다(25.1738 — 가상모의투자 절이 계좌마다 체결 수를 싣는다)
+    assert not any("다른 계좌" in x for x in 줄)
+    assert 줄[20:] == ["▸ KIS모의투자: 이 주문을 접수 시간에 그대로 냅니다",
                        "  지난 실행 보낸 결과: 접수 2 · 거부 1 (체결은 다음 실행이 맞춤)"]  # fmt: skip
     # 비었으면 "없음", KIS 상태를 모르면 그 줄을 뺀다
     빈 = desk.report_lines(_칸(), {"rows": []}, "H")
-    assert 빈[1:] == ["▸ 확인할 일: 없음", "▸ H 체결 (판정 2026-10-16): 없음", "▸ H 다음 장 주문 (2026-10-19): 없음",
-                      "▸ 다른 계좌 (건)", "  체결 없음", "  주문 없음"]  # fmt: skip
+    assert 빈[1:] == ["▸ 확인할 일: 없음", "▸ H 체결 (판정 2026-10-16): 없음", "▸ H 다음 장 주문 (2026-10-19): 없음"]
 
 
 def test_with_head_keeps_header_block_on_top() -> None:
@@ -56,7 +56,8 @@ def test_with_head_keeps_header_block_on_top() -> None:
     m = "[국내] 2026-10-16 종가\n생성 08:40\n국내 900종목 저장\n예정보다 15분 늦게 실행됨\n\n1부"
     assert formatter.with_head(m, ["📊 운용 보고", "x"]) == (
         "[국내] 2026-10-16 종가\n생성 08:40\n국내 900종목 저장\n예정보다 15분 늦게 실행됨\n\n📊 운용 보고\nx\n\n1부")
-    assert formatter.with_head("제목", ["x"]) == "제목\nx"  # 빈 줄이 없으면 끝에
+    # 빈 줄이 없으면 끝에 — 머리와 붙지 않게 빈 줄을 두고(25.1738)
+    assert formatter.with_head("제목", ["x"]) == "제목\n\nx"
 
 
 def test_report_lines_kis_state_and_young_champion() -> None:
