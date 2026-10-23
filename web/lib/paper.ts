@@ -321,7 +321,8 @@ export function reservedByAccount(buys: OpenBuy[], usdKrw: number | null): Recor
 }
 
 /**
- * 그 입금을 취소할 수 있나 — 못 하면 까닭 (배치 `cancellable` 과 같은 규칙, docs/paper.md 5장).
+ * 그 입금을 취소할 수 있나 — 못 하면 까닭 (배치 `cancellable` 과 같은 규칙, docs/paper.md 5장). 문구는 웹만 예약을
+ * 모르는(null) 계좌의 까닭을 따로 적는다 — 배치는 환율이 묵으면 그 단계를 건너뛰어 null 이 없다(25.1764)
  * `available` 은 계좌마다 (현금 − 미체결 매수 예약). 예약을 모르면(null) 막는다 — 모르는 것을 넉넉하다고 보지 않는다
  */
 export function cancelBlock(
@@ -344,7 +345,7 @@ export function cancelBlock(
   const 까닭 = [
     ...(모자람.length ? [`그 돈으로 이미 사서 현금이 모자랍니다 (계좌 ${모자람.join(", ")})`] : []),
     ...(모름.length
-      ? [`달러 미체결 매수의 예약을 셀 환율이 없습니다 — USDKRW 가 ${FX_MAX_AGE_DAYS}일 넘게 묵음, 환율 수집 확인 (계좌 ${모름.join(", ")})`]
+      ? [`달러 미체결 매수의 예약을 셀 환율이 없습니다 — USDKRW 가 없거나 ${FX_MAX_AGE_DAYS}일 넘게 묵음, 환율 수집 확인 (계좌 ${모름.join(", ")})`]
       : []),
   ];
   return 까닭.length ? 까닭.join(" · ") : null;

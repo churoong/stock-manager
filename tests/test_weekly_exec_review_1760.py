@@ -91,3 +91,28 @@ def test_잘린_목록은_나머지_수를_적고_묵은_작업은_심한_것부
     절 = 모두.split("기대 주기를 넘긴 예약 작업\n", 1)[1].split("\n\n", 1)[0].splitlines()
     assert len(이름) > ws.MAX_LINES and len(절) == ws.MAX_LINES + 1
     assert 절[-1] == f"  … 외 {len(이름) - ws.MAX_LINES}개 (웹 /status)"
+
+
+def test_문제_작업과_되풀이_경고도_나머지_수를_적는다() -> None:
+    """25.1762 교차검증 [권고] — 세 목록 가운데 묵은 작업만 시험해, 나머지 둘의 "… 외 N개" 를 빼도 통과했다"""
+    now = datetime(2026, 10, 24, tzinfo=UTC)
+    n = ws.MAX_LINES + 2
+    runs = [ws.Run(f"job{i}", "KR", "failed", "2026-10-20T00:00:00+00:00", None, ()) for i in range(n)]
+    # 머리말(PREFIX_LEN)이 서로 다른 경고를 두 번씩 — 되풀이로 묶인다
+    경고 = tuple(f"경고{i:02d} " + "가" * ws.PREFIX_LEN for i in range(ws.MAX_LINES + 1))
+    runs += [ws.Run("daily_kr", "KR", "partial", f"2026-10-2{k}T00:00:00+00:00", None, 경고) for k in (1, 2)]
+    글 = ws.compose(runs, dict.fromkeys(ws.EXPECTED_DAYS, "2026-10-23T00:00:00+00:00"), now, 0)
+    문제 = 글.split("\n\n", 1)[1].split("\n\n", 1)[0].splitlines()
+    assert 문제[-1] == f"  … 외 {n + 1 - ws.MAX_LINES}개 (웹 /status)"  # 실패 n + 부분 1 작업
+    되풀이 = 글.split("되풀이된 경고·실패 사유", 1)[1].split("\n\n", 1)[0].splitlines()
+    assert 되풀이[-1] == "  … 외 1개 (웹 /status)"
+
+
+def test_묵은_작업은_일수가_아니라_기대_주기_대비로() -> None:
+    """daily_kr 6일(기대 4일 — 1.5배)이 dividends 400일(기대 370일 — 1.08배)보다 앞 (25.1762 교차검증 [참고])"""
+    now = datetime(2026, 10, 24, tzinfo=UTC)
+    마지막 = dict.fromkeys(ws.EXPECTED_DAYS, "2026-10-23T00:00:00+00:00")
+    마지막["daily_kr"] = "2026-10-18T00:00:00+00:00"
+    마지막["dividends"] = "2025-09-19T00:00:00+00:00"
+    절 = ws.compose([], 마지막, now, 0).split("기대 주기를 넘긴 예약 작업\n", 1)[1].split("\n\n", 1)[0].splitlines()
+    assert [x.split(":")[0].strip() for x in 절] == ["daily_kr", "dividends"]

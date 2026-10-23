@@ -55,7 +55,7 @@ def test_결론은_규칙의_사실로만_위에서부터() -> None:
     assert [e["label"] for e in g["evidence"] if "플래그" in e["label"]] == ["매도 플래그(녹색)"]
     # 보유가 아니면 녹색을 붙이지 않는다(보유 종목에만 서는 플래그 — 들어와도 남의 일)
     assert "녹색" not in vd.build(vd.Inputs(**기본, signals=[SIGNAL], flags=[{**flag, "level": "green"}]))["headline"]
-    h0 =vd.build(vd.Inputs(**기본, position={"quantity": 1, "pnl_pct": 3.25, "price_date": "2026-10-07"}))
+    h0 = vd.build(vd.Inputs(**기본, position={"quantity": 1, "pnl_pct": 3.25, "price_date": "2026-10-07"}))
     assert h0["headline"] == "보유 유지 — 매도 플래그 없음 · 평가손익률 +3.2% (2026-10-07)"
     # 점수가 없으면 보류
     u = vd.build(vd.Inputs(name="나", ticker="000002", score={**SCORE, "total": None, "skip_reason": "재무 없음"}))
