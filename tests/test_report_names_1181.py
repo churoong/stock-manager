@@ -23,7 +23,8 @@ def test_2부와_제외_줄에도_이름_꼬리를_뗀다() -> None:
                  size_reduction=0.0)]  # fmt: skip
     글 = rp.compose(rows, 20000.0, "2026-10-08", currency="USD").text
     assert "Common Stock" not in 글 and "Ordinary Shares" not in 글
-    assert "Kennametal Inc." in 글 and "Acme Holding Ltd" in 글
+    # 25.1740 부터 1부·2부·제외 줄 모두 운용 보고와 같은 짧은 이름 + (티커) — 법인 꼬리("Inc."·"Holding Ltd")도 뗀다
+    assert "Kennametal(T1)" in 글 and "Acme(T2)" in 글 and "Inc." not in 글
 
 
 def test_보내지_못한_리포트는_추천_이력에_세지_않는다() -> None:
