@@ -105,6 +105,18 @@ DEFAULT_TARGETS = {
     "long": {"target_pct": 50.0, "stop_pct": -25.0},
 }
 
+
+
+def rules_for(horizon: str | None, targets: dict[str, Any] | None = None) -> dict[str, float]:
+    """그 기간의 목표·손절(%) — 설정을 **칸별로** 덮고, 모르는 기간(기간 없음)은 장기로 본다.
+
+    가상모의투자 매도·장중 손절가·청산 대조·매도 플래그·운용 화면이 같은 식을 저마다 적고 있었다(7곳, 25.1748 중복 규칙
+    감사 ⑦). 신호의 목표가·손절가(`targets_for` 계열)는 출처 표시(25.522) 때문에 제 식을 쓴다
+    """
+    기간 = horizon if horizon in DEFAULT_TARGETS else "long"
+    return {**DEFAULT_TARGETS[기간], **((targets or {}).get(기간) or {})}
+
+
 SECTOR_CAP_UNAVAILABLE = "섹터 상한 미적용 (업종 데이터 없음)"
 
 

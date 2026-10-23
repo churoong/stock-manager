@@ -364,8 +364,7 @@ def signal_date_current(signal_date: str, market: str) -> bool:
 
 def holding_levels(avg_price: float, horizon: str | None, targets: dict | None) -> tuple[float, float]:
     """보유 종목의 목표가·손절가. 매도 플래그와 같은 문턱(docs/sell_flags.md 1장)."""
-    key = horizon if horizon in sf.DEFAULT_TARGETS else "long"
-    rules = {**sf.DEFAULT_TARGETS[key], **((targets or {}).get(key) or {})}
+    rules = sf.signals.rules_for(horizon, targets)
     return avg_price * (1 + rules["target_pct"] / 100), avg_price * (1 + rules["stop_pct"] / 100)
 
 

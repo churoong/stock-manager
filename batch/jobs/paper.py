@@ -438,7 +438,10 @@ CONTROL_UPDATE_SQL = "UPDATE paper_decisions SET control_pct = ?, control_n = ? 
 #: 한 번에 대조를 보는 매수 수 — 같은 기준일의 매수는 대조군을 나눠 쓰므로 읽기는 기준일 수에 비례한다
 #: (기준일마다 유니버스 수천 행 + 대조 20 × 21 행)
 CONTROL_BATCH = 300
-#: 대조 종목의 기준일 종가가 이보다 묵었으면(정지 등) 그 대조는 뺀다 — 위험 점검의 묵음 기준(7일)과 같은 값
+#: 대조 종목의 기준일 종가가 이보다 묵었으면(정지 등) 그 대조는 뺀다(달력일). **위험 점검과 다르다** — 위험 점검은
+#: 25.1629 부터 거래일 `STALE_PRICE_SESSIONS`(5)라 긴 연휴 뒤엔 H 의 매수는 통과하고 그날 대조 종목은 빠질 수 있다.
+#: 관문 기준선(25.1700 지문)이라 H 판 2 관문 구간 중간에 바꾸지 않고, 다음 R 판 올림 때 `risk_gate.stale` 로 맞춘다
+#: (25.1748, 중복 규칙 감사 ⑦ — 예전 주석은 "위험 점검과 같은 값" 이라 했다)
 CONTROL_STALE_DAYS = 7
 
 
@@ -1231,8 +1234,7 @@ def _추적손절(client: Any, h: Any, 행: dict[str, Any], targets: dict | None
     if not 행.get("quantity") or not 행.get("market_value"):
         return False
     고점 = client.execute(PEAK_SQL, [h.stock_id, 행["first_buy_date"], today.isoformat()]).rows
-    기간 = h.horizon if h.horizon in sf.DEFAULT_TARGETS else "long"
-    표 = {**sf.DEFAULT_TARGETS[기간], **((targets or {}).get(기간) or {})}
+    표 = sf.signals.rules_for(h.horizon, targets)
     return pp.trend_exit(float(행["cost"]) / float(행["quantity"]), 고점[0][0] if 고점 else None,
                          float(행["market_value"]) / float(행["quantity"]), float(표["target_pct"]),
                          float(표["stop_pct"]), float(getattr(h, "rights_scale", 1.0) or 1.0))  # fmt: skip
@@ -1876,7 +1878,7 @@ def run_step(
     열림캐시: dict[tuple[str, str], float | None] = {}
     targets, _ = sr.기간별_목표(db.get_setting(client, "horizon_targets", None))
     # 그날 매도 판정이 쓰는 손절폭 — 매수 결정 행의 σ 단위 기록(25.1539)이 같은 값을 적는다
-    손절폭 = {h: {**sf.DEFAULT_TARGETS[h], **((targets or {}).get(h) or {})}["stop_pct"] for h in sf.DEFAULT_TARGETS}
+    손절폭 = {h: sf.signals.rules_for(h, targets)["stop_pct"] for h in sf.DEFAULT_TARGETS}
     fx = _fx(client, 오늘)
     열린 = [_order(r) for r in client.execute(OPEN_ORDERS_SQL).dicts()]
     다음장 = cal.next_session(market, date.fromisoformat(trade_date)).isoformat()
@@ -2384,7 +2386,7 @@ def summary_section(client: Any, now: datetime) -> list[str]:
     for sid in {f.stock_id for f in fills} | 보유id:
         _stock(client, sid, 캐시)
     rules, _ = sr.기간별_목표(db.get_setting(client, "horizon_targets", None))
-    손절 = {h: {**sf.DEFAULT_TARGETS[h], **((rules or {}).get(h) or {})}["stop_pct"] for h in sf.DEFAULT_TARGETS}
+    손절 = {h: sf.signals.rules_for(h, rules)["stop_pct"] for h in sf.DEFAULT_TARGETS}
     limits = {
         "max_stock_pct": db.get_setting_in_range(client, "max_weight_per_stock", 10.0)[0],
         "max_sector_pct": db.get_setting_in_range(client, "max_weight_per_sector", 30.0)[0],

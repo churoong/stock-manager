@@ -316,8 +316,7 @@ def low_touch(h: HoldingInput, close: float | None, low: float | None, targets: 
     if (h.market_value is None or not close or not low or close <= 0 or low <= 0 or h.cost <= 0
             or h.corporate_action_recent):  # fmt: skip
         return None
-    horizon = h.horizon if h.horizon in DEFAULT_TARGETS else "long"
-    stop = {**DEFAULT_TARGETS[horizon], **((targets or {}).get(horizon) or {})}["stop_pct"]
+    stop = signals.rules_for(h.horizon, targets)["stop_pct"]
     원가 = h.cost * (h.rights_scale if h.rights_scale != 1.0 and h.rights_scale > 0 else 1.0)
     종가수익 = round((h.market_value / 원가 - 1) * 100, 6)
     저가수익 = round((h.market_value * (low / close) / 원가 - 1) * 100, 6)
@@ -327,7 +326,7 @@ def low_touch(h: HoldingInput, close: float | None, low: float | None, targets: 
 def evaluate(h: HoldingInput, today: date, targets: dict | None = None) -> list[Flag]:
     """한 보유 종목의 플래그. 여러 개가 동시에 걸릴 수 있다(예: 손절 + 재무 악화)."""
     horizon = h.horizon if h.horizon in DEFAULT_TARGETS else "long"
-    rules = {**DEFAULT_TARGETS[horizon], **((targets or {}).get(horizon) or {})}
+    rules = signals.rules_for(h.horizon, targets)
     flags: list[Flag] = []
     label = HORIZON_LABEL[horizon]
     # **문턱이 어디서 왔는지와 기간을 고른 규칙을 근거표에** (docs/infra.md 25.1410, 매도 플래그 감사 ③). 신호 쪽은

@@ -495,7 +495,7 @@ def _관문판(
 
     from batch.core import settings_range as sr
     from batch.jobs.daily import job_name
-    from batch.services.signals import DEFAULT_TARGETS
+    from batch.services.signals import DEFAULT_TARGETS, rules_for
 
     try:
         창 = (now - timedelta(days=desk.GATE_INCIDENT_DAYS)).astimezone(cal.market_tz("KR")).date()
@@ -518,7 +518,8 @@ def _관문판(
         이름 = ({int(r["id"]): str(r["name"]) for r in client.execute(STOCK_NAMES_SQL, [json.dumps(ids)]).dicts()}
               if ids else {})  # fmt: skip
         목표, _경고 = sr.기간별_목표(db.get_setting(client, "horizon_targets", None))
-        손절 = {k: float(((목표 or {}).get(k) or v)["stop_pct"]) for k, v in DEFAULT_TARGETS.items()}
+        # 칸별로 덮는다 — 가상모의투자 매도와 같은 식(`signals.rules_for`, 25.1748)
+        손절 = {k: float(rules_for(k, 목표)["stop_pct"]) for k in DEFAULT_TARGETS}
         latest = {}
         for r in 마지막:
             a = str(r["account_id"])
