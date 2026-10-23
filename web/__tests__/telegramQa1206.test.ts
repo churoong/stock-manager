@@ -52,7 +52,7 @@ describe("텔레그램 질의응답 (25.1206)", () => {
     db.exec(`${S} (1,'005930','KOSPI','KR','삼성전자',NULL,'KRW','active','t','t')`);
     db.exec(`INSERT INTO sell_flags (stock_id, as_of_date, level, reason_code, rationale_text, rationale_data, first_seen_date, created_at)
       VALUES (1,'2026-09-15','red','손절','손절가 이탈','{}','2026-09-15','t')`);
-    expect(await answer({ kind: "stock", q: "삼성전자" }, exec)).toContain("매도 플래그(적, 2026-09-15): 손절가 이탈");
+    expect(await answer({ kind: "stock", q: "삼성전자" }, exec)).toContain("매도 플래그(🔴, 2026-09-15): 손절가 이탈");
   });
 
   it("같은 티커·이름의 두 행이면 하나로 묶고 보유가 있는 행을 고른다", async () => {

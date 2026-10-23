@@ -52,7 +52,8 @@ function rows<T>(rs: ResultSet): T[] {
 }
 
 const HORIZON: Record<string, string> = { short: "단기", mid: "중기", long: "장기" };
-const LEVEL: Record<string, string> = { red: "적", yellow: "황", green: "녹" };
+/** 매도 플래그 색 — 아침 리포트와 같은 동그라미(25.1745, 리포트 25.1741 — "적·황·녹" 글자는 뜻이 안 읽혔다) */
+const LEVEL: Record<string, string> = { red: "🔴", yellow: "🟡", green: "🟢" };
 
 /**
  * 숫자 글자 — **웹과 같은 반올림**(`Number(x.toFixed(n))`, docs/infra.md 25.1105·25.1345). 예전 `toLocaleString` 은 ICU 반올림이라
