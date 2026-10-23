@@ -192,6 +192,12 @@ def adjust_needed(runs: list[Run]) -> list[str]:
     return list(남은)
 
 
+def _외(전체: int) -> list[str]:
+    """`MAX_LINES` 로 자른 목록의 나머지 수 — 표시 없이 자르면 나머지 멈춘 작업·실패가 알림에서 사라진다
+    (25.1762, 결함 루프 L2)"""
+    return [f"  … 외 {전체 - MAX_LINES}개 (웹 /status)"] if 전체 > MAX_LINES else []
+
+
 def stale_jobs(last_success: dict[str, str], now: datetime) -> list[tuple[str, int | None]]:
     """기대 주기를 넘긴 작업. (이름, 며칠 전) — 한 번도 돈 적(성공·부분)이 없으면 None."""
     out: list[tuple[str, int | None]] = []
@@ -369,6 +375,7 @@ def compose(
                                                       ("running", "미완"), ("dryrun", "확인 실행"))
                  if c[키]]  # fmt: skip
         lines.append(f"  {j}: {' · '.join(조각)}")
+    lines += _외(len(심한순))
 
     되풀이 = repeated_reasons(runs)
     if 되풀이:
@@ -376,6 +383,7 @@ def compose(
         for 글, n in 되풀이[:MAX_LINES]:
             한줄 = 글.replace("\n", " ")
             lines.append(f"  ×{n} {한줄[:120]}{'…' if len(한줄) > 120 else ''}")
+        lines += _외(len(되풀이))
 
     lines += ["", reads_line(reads_used, read_limit, now)]
     # **월 쓰기도 함께** (docs/infra.md 25.1380, 주간 요약 감사) — 9월에 계정을 막은 것은 쓰기 한도였는데 요약에 없었다.
@@ -396,9 +404,13 @@ def compose(
     묵은 = stale_jobs(last_success, now)
     if 묵은:
         lines += ["", "기대 주기를 넘긴 예약 작업"]
+        # 심한 것부터 — 기대 주기 대비 넘긴 정도, 돈 기록 없음이 맨 앞(25.1762: 정의 순서로 앞 8개만 실려
+        # 뒤의 멈춘 작업이 안 보였다)
+        묵은 = sorted(묵은, key=lambda x: -(float("inf") if x[1] is None else x[1] / EXPECTED_DAYS[x[0]]))
         for job, 지난 in 묵은[:MAX_LINES]:
             언제 = "돈 기록 없음" if 지난 is None else f"마지막 실행 {지난}일 전"
             lines.append(f"  {job}: {언제} (기대 {EXPECTED_DAYS[job]}일 안)")
+        lines += _외(len(묵은))
 
     if rot_lines:
         lines += ["", *rot_lines]

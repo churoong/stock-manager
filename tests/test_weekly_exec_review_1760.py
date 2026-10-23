@@ -74,3 +74,20 @@ def test_첫_주에_가상모의투자_절만_깨지면_실행_품질은_두_번
     assert db.get_setting(mem, jp.MONTHLY_REVIEW_KEY, None) is None  # type: ignore[arg-type]
     글 = _돌림(monkeypatch, mem, 둘째주, _모의, _실행)
     assert "월간 복기" in 글 and "[실행 품질 — 실제 매매]" not in 글
+
+
+def test_잘린_목록은_나머지_수를_적고_묵은_작업은_심한_것부터() -> None:
+    """25.1762(결함 루프 L2 참고) — 모든 작업이 묵으면 정의 순서 앞 8개만 실리고 나머지가 표시 없이 사라졌다"""
+    now = datetime(2026, 10, 24, tzinfo=UTC)
+    이름 = list(ws.EXPECTED_DAYS)
+    없음, 심함 = 이름[-1], 이름[-2]  # 정의 순서 맨 끝 둘 — 예전엔 잘려 안 보였다
+    마지막 = {j: "2026-10-23T00:00:00+00:00" for j in 이름[:-1]}
+    마지막[심함] = "2020-01-01T00:00:00+00:00"
+    절 = ws.compose(runs=[], last_success=마지막, now=now, reads_used=0).split("기대 주기를 넘긴 예약 작업\n", 1)[1]
+    절 = 절.split("\n\n", 1)[0].splitlines()
+    assert 절[0].startswith(f"  {없음}: 돈 기록 없음") and 절[1].startswith(f"  {심함}: 마지막 실행")
+    # 모두 묵으면 8줄 + 나머지 수
+    모두 = ws.compose(runs=[], last_success=dict.fromkeys(이름, "2020-01-01T00:00:00+00:00"), now=now, reads_used=0)
+    절 = 모두.split("기대 주기를 넘긴 예약 작업\n", 1)[1].split("\n\n", 1)[0].splitlines()
+    assert len(이름) > ws.MAX_LINES and len(절) == ws.MAX_LINES + 1
+    assert 절[-1] == f"  … 외 {len(이름) - ws.MAX_LINES}개 (웹 /status)"
