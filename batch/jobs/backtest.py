@@ -38,7 +38,7 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from batch import config
-from batch.core import db
+from batch.core import db, markets
 from batch.core.client import TursoClient
 from batch.core.entry import guard
 from batch.jobs import metrics as metrics_job
@@ -661,7 +661,7 @@ def factor_ics(
         시장 = {i.stock_id: i.market for i in inputs}
         # 배당 중단 — 이진값, 걸린 비율도 남긴다 (docs/factors.md 12.2, 25.479)
         # **국내만** (2회차 검증 조건). 미국은 주당배당만 있는 해도 지급액 0 으로 실려 거짓 "중단" 이 난다 (25.481)
-        국내 = {i.stock_id for i in inputs if i.market in ("KOSPI", "KOSDAQ")}
+        국내 = {i.stock_id for i in inputs if i.market in KR_MARKETS}
         중단 = {sid: (dvo.omitted((dividends_by_stock or {}).get(sid, []), cutoff) if sid in 국내 else None)
                 for sid in by_stock}  # fmt: skip
         중단점수 = {sid: (None if v is None else (-1.0 if v else 0.0)) for sid, v in 중단.items()}
@@ -705,7 +705,7 @@ def factor_ics(
         # 16회차 지각생 (12.18) — 기준일까지의 `COMOVE_DAYS` 거래일로 짝(시장 몫을 뺀 상관 상위)을 고르고,
         # 지난 `PAIRS_DAYS` 거래일 짝 평균 − 자기 수익. 짝 고르기·벌어진 폭 모두 기준일 이하 가격만(view)
         짝후보 = [r for r in 후보 if view.last_close(r["stock_id"])]
-        국내후보 = {r["stock_id"] for r in 후보 if r.get("market") in ("KOSPI", "KOSDAQ")}
+        국내후보 = {r["stock_id"] for r in 후보 if r.get("market") in KR_MARKETS}
         지각점수, 자기반전 = pairs_scores(view, 짝후보, list(by_stock), benchmark_closes, cutoff, 국내후보)
         ke = kr_extra or KrExtra()
         신용점수: dict[int, float | None] = {}
@@ -1075,7 +1075,7 @@ def latest_10k_year(snapshots: list[dict[str, Any]], cutoff: str) -> int | None:
 
 
 #: 국내 시장. 나머지는 미국이다 — 미국만 10-K 기준 무배당 채움을 한다 (25.561)
-KR_MARKETS = frozenset({"KOSPI", "KOSDAQ", "KONEX"})
+KR_MARKETS = markets.KR_MARKETS
 
 
 def build_pit_inputs(

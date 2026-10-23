@@ -17,14 +17,12 @@ from typing import Any
 
 from batch.core.rounding import fixed, half_up
 from batch.services import scoring as sc
-from batch.services import sentiment
+from batch.services import sentiment, signals
 
-# CLAUDE.md 매매 규칙 기본값. 설정 horizon_targets 가 있으면 그것을 쓴다
-DEFAULT_TARGETS = {
-    "short": {"target_pct": 10.0, "stop_pct": -7.0},
-    "mid": {"target_pct": 25.0, "stop_pct": -15.0},
-    "long": {"target_pct": 50.0, "stop_pct": -25.0},
-}
+# CLAUDE.md 매매 규칙 기본값. 설정 horizon_targets 가 있으면 그것을 쓴다. **정의처는 `signals.DEFAULT_TARGETS` 하나**
+# (25.1746, 중복 규칙 감사 ⑦ — 두 벌이 따로 적혀 있어 한쪽만 바꾸면 가상모의투자 매도·장중 손절가(이쪽)와 신호 손절가·
+# 운용 화면 손절 근접(저쪽)이 다른 손절선을 말했다). 웹 기본값과의 대조는 `tests/test_settings_keys.py`
+DEFAULT_TARGETS = signals.DEFAULT_TARGETS
 # 기간 초과: 투자 기간의 위쪽 끝(단기 3개월, 중기 12개월). 장기는 끝이 없다
 MAX_HOLDING_DAYS = {"short": 92, "mid": 365}
 # 재무 악화: 매수 당시보다 종합 점수가 이만큼 떨어지면 [확인필요: 문턱 근거 없음. 운영하며 조정]

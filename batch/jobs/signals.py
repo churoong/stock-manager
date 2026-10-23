@@ -31,7 +31,7 @@ from typing import Any
 
 from batch import config
 from batch.core import calendar as cal
-from batch.core import db, visibility
+from batch.core import db, markets, visibility
 from batch.core import settings_range as sr
 from batch.core.client import TursoClient
 from batch.core.entry import guard
@@ -59,7 +59,7 @@ NEWER_QUARTER_SQL = (
 # 1단계에서 읽을 거래일 수. 60일 이동평균에 필요한 만큼이다.
 RECENT_DAYS = sg.MA_LONG_DAYS
 #: 국내 시장 — 최근 낙폭에 가격제한폭 검사를 거는 쪽 (25.1351)
-KR_MARKETS = frozenset({"KOSPI", "KOSDAQ", "KONEX"})
+KR_MARKETS = markets.KR_MARKETS
 
 # 2단계에서 읽을 거래일 수. 3년치다.
 # **숫자를 여기 다시 적지 않는다** (2026-09-22, docs/infra.md 25.108).

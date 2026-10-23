@@ -23,6 +23,7 @@ import math
 from dataclasses import dataclass, field
 from typing import Any
 
+from batch.core import markets
 from batch.core.rounding import fixed
 from batch.notify import report_sections as rs
 from batch.services import criteria as crit
@@ -112,7 +113,7 @@ def parse_json(raw: Any, default: Any) -> Any:
 
 
 #: 국내 시장 — 같은 발행사 열쇠가 6자리 코드를 다르게 다룬다
-_KR_MARKETS = frozenset({"KOSPI", "KOSDAQ", "KONEX"})
+_KR_MARKETS = markets.KR_MARKETS
 
 
 def same_issuer_pairs(rows: list[SignalRow]) -> list[tuple[str, str]]:

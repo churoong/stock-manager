@@ -223,3 +223,46 @@ def test_숫자_기본값으로_읽는_키는_모두_대_본다() -> None:
 
 def test_역방향_훑기가_실제로_문다() -> None:
     assert {"sentiment_weight", "min_order_amount"} <= 배치가_숫자_기본값으로_읽는_키()
+
+
+# ----------------------------------------------------------------------
+# **중첩 칸**의 기본값도 같은가 (docs/infra.md 25.1746, 중복 규칙 감사 ⑦)
+# ----------------------------------------------------------------------
+# 위 대조는 맨 윗단 숫자만 본다. `PUT /api/settings` 는 중첩 칸(기간 목표·손절, 추세 필터, 조용시간, 알림 문턱)도
+# 웹 기본값으로 **전부** DB 에 쓰니, 갈라지면 사용자가 아무 설정을 한 번 저장한 날 가상모의투자 손절선·약세장 비중이
+# 조용히 바뀐다
+
+
+def 웹_중첩_기본값(키: str) -> dict:
+    """`DEFAULT_SETTINGS` 의 `키: { … }` 를 파이썬 dict 로 — 글자 그대로 옮긴다(키에 따옴표, 끝 쉼표·주석 뺌)."""
+    import json
+
+    글 = 스키마파일.read_text(encoding="utf-8")
+    본문 = 글[글.index("DEFAULT_SETTINGS") :]
+    i = 본문.index(f"\n  {키}: {{") + len(f"\n  {키}: ")
+    깊이, j = 0, i
+    while True:
+        깊이 += {"{": 1, "}": -1}.get(본문[j], 0)
+        j += 1
+        if 깊이 == 0:
+            break
+    덩이 = re.sub(r"//[^\n]*", "", 본문[i:j])
+    덩이 = re.sub(r"([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)\s*:", r'\1"\2":', 덩이)
+    덩이 = re.sub(r",(\s*})", r"\1", 덩이)
+    return json.loads(re.sub(r"(\d)_(\d)", r"\1\2", 덩이))  # 100_000 꼴 숫자
+
+
+def test_중첩_기본값_기간_목표_손절() -> None:
+    from batch.services import sell_flags, signals
+
+    웹 = 웹_중첩_기본값("horizon_targets")
+    assert 웹 == {k: {kk: float(vv) for kk, vv in v.items()} for k, v in signals.DEFAULT_TARGETS.items()}
+    assert sell_flags.DEFAULT_TARGETS is signals.DEFAULT_TARGETS  # 정의처 하나(25.1746)
+
+
+def test_중첩_기본값_추세_필터_조용시간_알림_문턱() -> None:
+    from batch.services import after_hours, trend
+
+    assert 웹_중첩_기본값("trend_filter") == {"enabled": trend.DEFAULT_ENABLED, "bear_factor": trend.DEFAULT_BEAR_FACTOR}
+    assert 웹_중첩_기본값("quiet_hours") == after_hours.DEFAULT_QUIET
+    assert 웹_중첩_기본값("alert_thresholds")["spike_pct"] == after_hours.DEFAULT_SPIKE_PCT

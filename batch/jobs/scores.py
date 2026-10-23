@@ -23,7 +23,7 @@ from typing import Any
 
 from batch import config
 from batch.core import calendar as cal
-from batch.core import db
+from batch.core import db, markets
 from batch.core import settings_range as sr
 from batch.core.client import TursoClient
 from batch.core.entry import guard
@@ -868,7 +868,7 @@ def scaled_market_cap(
     cap_date = row.get("market_cap_date")
     snapshot_date = row.get("snapshot_date")
     dates, closes, _values = series.get(stock_id, ([], [], []))
-    국내 = str(row.get("market") or "") in ("KOSPI", "KOSDAQ")
+    국내 = str(row.get("market") or "") in markets.KR_MARKETS
     factor: float | None = None
     reason: str | None = None
     # 배수는 시총의 가격 날짜부터 낸다. 옮길지 말지(날짜 순서·14일·띠)는 `scale_market_cap` 이 정한다 (25.960)

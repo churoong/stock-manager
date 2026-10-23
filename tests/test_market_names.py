@@ -98,3 +98,21 @@ def test_대소문자를_가리지_않는다() -> None:
     assert trend.index_for_market("nyse arca") == "SP500"
     assert trend.index_for_market(None) is None
     assert trend.index_for_market("") is None
+
+
+def test_국내_시장_목록은_한_곳에서_25_1746() -> None:
+    """국내 시장 목록을 그 자리에 다시 적지 않는다 — KONEX 를 넣은 곳과 뺀 곳이 섞여 있었다(중복 규칙 감사 ⑦)"""
+    from batch.core import markets
+
+    따로 = []
+    for f in (뿌리 / "batch").rglob("*.py"):
+        if f.name == "markets.py":
+            continue
+        for k, 줄 in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
+            # 소속 판정(`x in (…)`·집합)만 본다 — 수집 반복문(`for m in ("KOSPI", "KOSDAQ")`)은 KRX 에서 받는 두
+            # 시장이라 KONEX 를 넣지 않는 것이 맞다
+            if re.search(r"""frozenset\(\{\s*["']KOSPI["']""", 줄) or (
+                    re.search(r"""\bin \(["']KOSPI["'], ["']KOSDAQ["']\)""", 줄) and not re.search(r"\bfor \w+ in \(", 줄)):
+                따로.append(f"{f.relative_to(뿌리)}:{k}")
+    assert not 따로, f"국내 시장 목록을 따로 적었다 — batch.core.markets.KR_MARKETS 를 쓴다: {따로}"
+    assert {"KOSPI", "KOSDAQ", "KONEX"} == markets.KR_MARKETS
