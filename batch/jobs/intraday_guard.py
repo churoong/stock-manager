@@ -125,20 +125,24 @@ KIND_TEXT = {"stop": "손절선", "trail": "익절선(고점 대비)", "target":
 
 def save_lines(
     client: Any, market: str, today: date, account: str, rule: str, lines: dict[int, dict[str, Any]],
+    errors: dict[str, int] | None = None,
 ) -> dict[str, int]:
     """아침 가상모의투자 단계가 부른다 — 그 시장의 감시선을 오늘 날짜로 덮어쓴다(다른 시장 칸은 그대로).
-    건수만 돌려준다"""
+    건수만 돌려준다. `errors` = 감시선 계산 예외 {이름: 수} — 예외로 선이 하나도 안 섰으면 `dropped`(25.1773)"""
     빼기, 까닭 = action_today(client, sorted(lines), today) if market == "KR" else (set(), None)
+    if errors and not lines:
+        까닭 = 까닭 or f"감시선 계산 오류({', '.join(sorted(errors))})"
     lines = {sid: 선 for sid, 선 in lines.items() if sid not in 빼기}
     값 = db.get_setting(client, GUARD_KEY, None)
     값 = 값 if isinstance(값, dict) else {}
     값[market] = {"as_of": today.isoformat(), "account": account, "rule": rule,
                  "lines": {str(sid): 선 for sid, 선 in sorted(lines.items())},
                  # 일정을 몰라 선을 모두 뺀 날 — 장중 감시가 "감시선 없음" 으로 알리고 멈춤으로 남긴다(25.1772)
-                 **({"dropped": 까닭} if 까닭 and 빼기 else {})}  # fmt: skip
+                 **({"dropped": 까닭} if 까닭 and (빼기 or not lines) else {})}  # fmt: skip
     db.set_setting(client, GUARD_KEY, 값)
     return {"n": len(lines), **{k: sum(k in 선 for 선 in lines.values()) for k in ("stop", "trail", "target")},
-            **({"action_day": len(빼기)} if 빼기 else {}), **({"action_day_error": 까닭} if 까닭 else {})}
+            **({"action_day": len(빼기)} if 빼기 else {}), **({"action_day_error": 까닭} if 까닭 else {}),
+            **({"line_errors": errors} if errors else {})}
 
 
 def action_today(client: Any, stock_ids: list[int], today: date) -> tuple[set[int], str | None]:
@@ -161,11 +165,37 @@ def action_today(client: Any, stock_ids: list[int], today: date) -> tuple[set[in
         끝 = (today + timedelta(days=mt.ACTION_DAY_LOOKAHEAD_DAYS)).isoformat()
         rows = client.execute(mt.ACTION_DAY_SQL, [today.isoformat(), 끝]).rows
         감시 = set(stock_ids)
-        return {int(r[0]) for r in rows if int(r[0]) in 감시 and mt.ex_date(str(r[1])[:10]) == today}, None
+        빼기 = {int(r[0]) for r in rows if int(r[0]) in 감시 and mt.ex_date(str(r[1])[:10]) == today}
+        # 주식배당 락일도 — 배당 일정(`dividend`)에 주식배당 비율(`stk_divi_rate` > 0)로 온다. 5~10% 기계적 하락은 ±31%
+        # 가드에 안 걸리고, 다음 아침 H 는 기업행위로 그 종목을 멈춰 KIS 만 판 채로 갈렸다
+        # (25.1773, 25.1772 교차검증 [필수])
+        for r in client.execute(STOCK_DIV_SQL, [today.isoformat(), 끝]).rows:
+            if int(r[0]) in 감시 and stock_dividend(r[2]) and mt.ex_date(str(r[1])[:10]) == today:
+                빼기.add(int(r[0]))
+        return 빼기, None
     except Exception as exc:  # noqa: BLE001 — 모르면 그날 선을 만들지 않는다(거짓 손절보다 꺼짐이 낫다)
         if db.quota_reason(exc):
             raise
         return set(stock_ids), type(exc).__name__
+
+
+#: 주식배당 일정 — 배당 일정 가운데 주식배당 비율이 있는 행(파이썬에서 거른다, `stock_dividend`). 창은 권리락과 같다
+STOCK_DIV_SQL = (
+    "SELECT s.id, e.record_date, e.detail FROM kr_corp_events e JOIN stocks s ON s.ticker = e.code"
+    " WHERE e.kind = 'dividend' AND e.record_date > ? AND e.record_date <= ?"
+)
+
+
+def stock_dividend(detail: Any) -> bool:
+    """예탁원 배당 일정의 주식배당 비율(`stk_divi_rate`)이 0 보다 큰가 — `daily.py`·`sell_flags` 와 같은 칸.
+    못 읽으면 False"""
+    import json
+
+    try:
+        d = json.loads(detail) if isinstance(detail, str) else detail
+        return float(str((d or {}).get("stk_divi_rate") or 0).replace(",", "").strip()) > 0
+    except (TypeError, ValueError, AttributeError):
+        return False
 
 
 #: 기업행위 일정(`kr_corp_events`)이 이 날수보다 묵으면 모름 — `kis-flows` 는 평일 18:17 KST 에 돈다. 금요일 수집 뒤
@@ -431,14 +461,21 @@ def run_status(기록: dict[str, Any]) -> str:
     return "success"
 
 
-def no_lines_alert(client: Any, now: datetime) -> str | None:
+def no_lines_alert(client: Any, now: datetime, why: str = "") -> str | None:
     """오늘 국내 일일 배치는 끝났는데 감시선이 없는 날 한 번 — 장중 손절·익절이 그날 꺼졌다(25.1769). 보냈다는
     표시는 **보낸 뒤** `mark_alerted` 로(25.1770 — 먼저 적으면 전송 실패에 그날 알림이 다시 안 갔다)"""
     오늘 = now.astimezone(cal.market_tz("KR")).date().isoformat()
     if db.get_setting(client, NO_LINES_ALERT_KEY, None) == 오늘:
         return None
-    return ("⚠️ KIS모의투자 장중 손절·익절 꺼짐 — 오늘 아침 가상모의투자 단계가 감시선을 적지 못했습니다"
-            "(일일 배치 확인). 그날 매도는 아침 일봉 판정만 따릅니다")
+    # 까닭을 싣는다 — 일정 묵음이면 일일 배치가 아니라 `kis-flows`·실전 시세 키를 봐야 한다(25.1773)
+    까닭 = why.split(" — ", 1)[1] if " — " in why else ""
+    if "기업행위 일정" in 까닭:
+        볼곳 = f"{까닭} — kis-flows 실행·실전 시세 키 확인"
+    elif "계산 오류" in 까닭:
+        볼곳 = f"{까닭} — 일일 배치 실행 기록 guard_lines 확인"
+    else:
+        볼곳 = "아침 가상모의투자 단계가 감시선을 적지 못했습니다(일일 배치 확인)"
+    return f"⚠️ KIS모의투자 장중 손절·익절 꺼짐 — {볼곳}. 그날 매도는 아침 일봉 판정만 따릅니다"
 
 
 def mark_alerted(client: Any, now: datetime, key: str = NO_LINES_ALERT_KEY) -> None:
@@ -475,7 +512,7 @@ def main() -> int:
         글, 표시 = 기록.pop("alert", None), 기록.pop("marks", None) or {}
         감시선없음 = not 글 and str(기록.get("off", "")).startswith(NO_LINES)
         if 감시선없음 and not args.dry_run:  # 확인 실행은 알림·표시를 내지 않는다(25.1772)
-            글 = no_lines_alert(client, now)
+            글 = no_lines_alert(client, now, str(기록.get("off", "")))
         if 글:
             try:
                 telegram.send(글)

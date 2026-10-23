@@ -63,8 +63,14 @@ EVENT_AHEAD_DAYS = 45
 #: 09-30~ 창에 걸렸다. 청약은 기준일 뒤 약 5주라, 앞 10일 안 기준일을 놓치지 않게 앞 창을 넉넉히 둔다 (25.1008)
 #: `[확인필요: 명세의 거르는 날짜]`
 EVENT_AHEAD_DAYS_BY_KIND = {"rights": 120}
+#: 잘린 일정 종류를 종목마다 다시 받는 대상 — 사용자 실보유 + **KIS모의투자가 베끼는 계좌(H)의 국내 보유**(25.1773,
+#: 25.1772 교차검증 [필수]: 연말·분기말 배당 목록이 100행에서 잘리면 H 만 든 종목의 주식배당 일정이 빠져 장중 감시가
+#: 락일을 못 걸렀다). 계좌 이름은 `jobs/broker_mirror.MIRROR_ACCOUNT` 와 같다(시험이 대조)
 HELD_KR_TICKERS = (
     "SELECT s.ticker FROM positions p JOIN stocks s ON s.id = p.stock_id WHERE p.quantity > 0 AND s.country = 'KR'"
+    " UNION SELECT s.ticker FROM paper_fills f JOIN stocks s ON s.id = f.stock_id"
+    " WHERE f.account_id = 'H' AND s.country = 'KR'"
+    " GROUP BY s.ticker HAVING SUM(CASE WHEN f.side = 'buy' THEN f.quantity ELSE -f.quantity END) > 0"
 )
 #: 한 종류가 이만큼 오면 잘렸을 수 있다 — 실행 기록에 남긴다
 EVENT_PAGE_ROWS = 100

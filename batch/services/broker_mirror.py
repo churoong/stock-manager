@@ -433,7 +433,8 @@ def compare(rows: list[dict[str, Any]]) -> dict[str, Any]:
             if r.get("status") == "rejected":
                 # 장중 매도 거부도 거부로 센다 — 하한가·VI 로 되풀이되면 주간 요약 까닭에 보여야 한다(25.1769)
                 칸["rejected"] += 1
-                까닭[_까닭(r.get("message"))] += 1
+                # 비고가 "장중 현재가 … · KIS 문구" 꼴이라 뒤쪽만 — 앞 30자(가격 글)로 건마다 쪼개지지 않게(25.1773)
+                까닭[_까닭(str(r.get("message") or "").split(" · ", 1)[-1])] += 1
             continue
         if r.get("status") not in _끝난 or r.get("i_status") not in ("filled", "expired"):
             continue

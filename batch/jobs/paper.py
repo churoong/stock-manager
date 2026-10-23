@@ -1170,6 +1170,7 @@ def sell_decisions(
     client: Any, market: str, sell_rule: str, account_fills: list[pp.Fill], frozen: set[int],
     stock_cache: dict[int, dict[str, Any]], targets: dict | None, today: date, enrich_cache: dict[str, Any],
     notes: dict[int, dict[str, Any]] | None = None, lines: dict[int, dict[str, Any]] | None = None,
+    line_errors: dict[str, int] | None = None,
 ) -> dict[int, tuple[list[str], list[dict[str, Any]]]]:
     """이 시장 보유의 매도 판정 — 실제 보유와 같은 보강·같은 `evaluate` (docs/paper.md 2.2).
 
@@ -1217,6 +1218,8 @@ def sell_decisions(
                 if db.quota_reason(exc):
                     raise
                 선 = None
+                if line_errors is not None:  # 세어 둔다 — 모두 깨지면 장중 감시가 조용히 꺼지지 않게(25.1773)
+                    line_errors[type(exc).__name__] = line_errors.get(type(exc).__name__, 0) + 1
             if 선:
                 lines[h.stock_id] = 선
         if sell_rule == "trend" and _추적손절(client, h, 행, targets, today):
@@ -2062,13 +2065,14 @@ def run_step(
             # 국내만 — 장중 감시는 국내 정규장에서만 돈다(미국은 다음 단계, 25.1769)
             감시선: dict[int, dict[str, Any]] | None = (
                 {} if aid == intraday_guard.GUARD_ACCOUNT and market == "KR" else None)
+            감시오류: dict[str, int] = {}
             매도 = sell_decisions(client, market, 규칙, 계좌체결, 멈춘, stock_cache, targets,
-                               cal.local_today(market), 보강캐시, 판정메모, 감시선)  # fmt: skip
+                               cal.local_today(market), 보강캐시, 판정메모, 감시선, 감시오류)  # fmt: skip
             if 감시선 is not None:
                 # KIS모의투자 장중 감시선(15.11, 25.1768) — 곁다리: 못 적으면 그날 장중 감시만 꺼진다(이 단계는 그대로)
                 try:
                     a기록["guard_lines"] = intraday_guard.save_lines(client, market, cal.local_today(market), aid,
-                                                                    규칙, 감시선)  # fmt: skip
+                                                                    규칙, 감시선, 감시오류)  # fmt: skip
                 except Exception as exc:  # noqa: BLE001
                     if db.quota_reason(exc):
                         raise
