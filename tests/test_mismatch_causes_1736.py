@@ -60,3 +60,12 @@ def test_KIS_에_보낸_지정가가_잣대다_25_1737() -> None:
     # 지정가 매수 — 보낸 값(호가 단위로 내림)이 내부 값보다 낮으면 그 값으로 견준다
     내림 = _줄("unfilled", 0, "filled", 9_995, 9_995, limit=10_000) | {"b_limit": 9_990}
     assert bm.mismatch_cause(내림, True) == "unexplained"
+
+
+def test_시장가_갭_판정도_분할을_거른다_25_1741() -> None:
+    """25.1737 교차검증 [권고] 1 — 2:1 분할 뒤 시장가 매도·1:10 역분할 뒤 시가 일괄 매수가 "갭" 으로 지어졌다"""
+    분할 = _줄("unfilled", 0, "filled", 48, 50, limit=None, order_type="market", side="sell") | {"b_limit": 90, "p_high": 51}
+    역분할 = _줄("unfilled", 0, "filled", 95, 100, limit=None, order_type="market") | {"b_limit": 11, "p_high": 101}
+    assert bm.mismatch_cause(분할, True) == "bar_suspect" and bm.mismatch_cause(역분할, True) == "bar_suspect"
+    # 10% 넘는 실제 갭은 그대로 갭
+    assert bm.mismatch_cause(분할 | {"p_low": 78, "p_high": 80, "p_close": 79}, True) == "gap_beyond_limit"

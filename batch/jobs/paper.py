@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import signal
 import time
 import uuid
@@ -2292,8 +2293,39 @@ def run_step(
     if 비교:
         기록["real_compare"] = 비교
         머리 += ["", *str(pp.compare_line(비교)).split("\n")]
+    메모줄 = _표_이름(client, market, 메모줄, 기록)
     # 절 사이에 빈 줄(25.1721, 리포트 가독성)
     return 머리 + ([""] + 메모줄 if 메모줄 else []) + [글 for 글 in 줄 if 글.startswith("⚠️")], 기록
+
+
+#: 위원회 "가장 높은 표" 종목 이름(25.1741) — 회의록 메모는 티커만 담아 국내는 "097950" 같은 코드가 리포트에 나갔다.
+#: 메모(저장)는 그대로 두고 리포트 줄에만 이름을 붙인다. 회사 넷 × 한 종목이라 읽기 몇 행
+TOP_VOTE_NAMES_SQL = (
+    "SELECT ticker, COALESCE(name_ko, name_en, ticker) AS name FROM stocks"
+    " WHERE country = ? AND ticker IN (SELECT value FROM json_each(?))"
+)
+_가장_높은_표 = re.compile(r"^(   가장 높은 표 )(\S+) ")
+
+
+def _표_이름(client: Any, market: str, 메모줄: list[str], 기록: dict[str, Any]) -> list[str]:
+    """메모 줄의 "가장 높은 표 {티커}" 를 짧은 종목 이름으로. 못 읽으면 티커 그대로(곁다리 — 까닭은 기록에)"""
+    티커들 = sorted({m.group(2) for x in 메모줄 if (m := _가장_높은_표.match(x))})
+    if not 티커들:
+        return 메모줄
+    try:
+        이름 = {str(r[0]): str(r[1]) for r in client.execute(TOP_VOTE_NAMES_SQL, [market, json.dumps(티커들)]).rows}
+    except Exception as exc:  # noqa: BLE001 — 이름만 빠진다
+        if db.quota_reason(exc):
+            raise
+        기록["top_vote_names_error"] = type(exc).__name__
+        return 메모줄
+    통화 = "USD" if market == "US" else "KRW"
+
+    def 바꿈(m: re.Match[str]) -> str:
+        t = m.group(2)
+        return f"{m.group(1)}{formatter.short_name(이름[t], t, 통화) if t in 이름 else t} "
+
+    return [_가장_높은_표.sub(바꿈, x, count=1) for x in 메모줄]
 
 
 PAPER_SUMMARY_SQL = (

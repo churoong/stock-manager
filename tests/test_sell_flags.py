@@ -204,7 +204,7 @@ class Test묵은_값으로_판정하지_않는다:
 class Test리포트:
     def test_추천이_없는_날에도_플래그를_싣는다(self) -> None:
         text = rp.render([], 0, None, sell_flags=[{"level": "red", "name": "A", "rationale": "A: 손절선", "new": True}])
-        assert "매도 플래그" in text and "[적] NEW A: 손절선" in text
+        assert "매도 플래그" in text and "🔴 NEW A: 손절선" in text
 
 
 class Test배치:

@@ -2890,8 +2890,16 @@ def _corp_event_lines(
             if 금액 is None:
                 continue
             덧 += f"{금액}, "
-        lines.append(f"· {이름}({r['code']}) {_행사_이름.get(r['kind'], r['kind'])} {r['record_date'][5:]} ({덧}{왜})")
-    return [f"📅 기업행위 일정 ({CORP_EVENT_DAYS}일 안, 예탁원·KIS)", *lines] if lines else []
+        행사 = _행사_이름.get(r["kind"], r["kind"])
+        lines.append(((행사, r["record_date"][5:], f"{덧}{왜}"), f"{이름}({r['code']})"))
+    # 같은 일정(종류·기준일·락일·보유/추천)은 한 줄에 종목을 모은다(25.1741 — 보유 넷의 같은 날 배당이 넉 줄이었다).
+    # 추천 배당은 금액이 종목마다 달라 저절로 따로 남는다. 순서는 처음 나온 차례
+    묶음: dict[tuple[str, str, str], list[str]] = {}
+    for 열쇠, 종목글 in lines:
+        묶음.setdefault(열쇠, []).append(종목글)
+    줄 = [f"· {'·'.join(xs)} {행사} {기준} ({덧})" if len(xs) == 1 else f"· {행사} {기준} ({덧}) — {'·'.join(xs)}"
+         for (행사, 기준, 덧), xs in 묶음.items()]  # fmt: skip
+    return [f"📅 기업행위 일정 ({CORP_EVENT_DAYS}일 안, 예탁원·KIS)", *줄] if 줄 else []
 
 
 DIVERGENCE_FLOWS_SQL = (
@@ -3015,8 +3023,20 @@ def _post_close_lines(
         이름, 코드, 기준일 = 기준[sid]
         날, 제목 = 건들[0]
         덧 = f" 외 {len(건들) - 1}건" if len(건들) > 1 else ""
-        lines.append(f"· {이름}({코드}) '{제목}'{덧} ({날[5:]} 접수) — 신호는 {기준일[5:]} 종가로 계산")
-    return ["📰 신호 기준일 뒤에 접수된 공시 (DART)", *lines] if lines else []
+        lines.append((기준일, f"· {이름}({코드}) '{제목}'{덧} ({날[5:]} 접수)"))
+    return _공시_절("DART", lines)
+
+
+def _공시_절(출처: str, lines: list[tuple[str, str]]) -> list[str]:
+    """신호 기준일 뒤 공시 절 — 기준일이 모두 같으면 "신호는 … 종가로 계산" 을 머리에 한 번만(25.1741 — 줄마다
+    되풀이됐다). 다르면 줄마다 그대로"""
+    if not lines:
+        return []
+    기준들 = {d for d, _ in lines}
+    if len(기준들) == 1:
+        머리 = f"📰 신호 기준일 뒤에 접수된 공시 ({출처}) — 신호는 {next(iter(기준들))[5:]} 종가로 계산"
+        return [머리, *(x for _, x in lines)]
+    return [f"📰 신호 기준일 뒤에 접수된 공시 ({출처})", *(f"{x} — 신호는 {d[5:]} 종가로 계산" for d, x in lines)]
 
 
 SEC_CIK_SQL = "SELECT s.id, s.sec_cik FROM stocks s JOIN json_each(?) j ON j.value = s.id"
@@ -3099,9 +3119,9 @@ def _sec_post_close_lines(
         기록["blocked"] = str(exc)
     기록.update({"after": len(뒤), "unknown": 모름, "failed": 실패, "calls": sc.calls})
     중대.update({"picks": len(기준), "flagged": 걸림, "unknown": 모름, "by_item": 항목수})
-    lines = [f"· {이름}({티커}) {폼}{f' 외 {n}건' if n else ''} ({날[5:]} 접수, 미국 동부 날짜)"
-             f" — 신호는 {기준일[5:]} 종가로 계산" for 날, 이름, 티커, 폼, n, 기준일 in sorted(뒤)]  # fmt: skip
-    return ["📰 신호 기준일 뒤에 접수된 공시 (SEC)", *lines] if lines else []
+    lines = [(기준일, f"· {이름}({티커}) {폼}{f' 외 {n}건' if n else ''} ({날[5:]} 접수, 미국 동부 날짜)")
+             for 날, 이름, 티커, 폼, n, 기준일 in sorted(뒤)]  # fmt: skip
+    return _공시_절("SEC", lines)
 
 
 def _divergence_lines(

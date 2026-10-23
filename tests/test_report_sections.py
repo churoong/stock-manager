@@ -257,7 +257,7 @@ class Test2부:
         text = rs.render_portfolio(portfolio, [])
 
         assert "매도 플래그" in text
-        assert "[적]" in text
+        assert "🔴" in text
         assert "손절선 -15% 도달" in text
 
     def test_정합성_문제를_리포트에_드러낸다(self) -> None:

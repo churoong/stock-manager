@@ -153,7 +153,8 @@ export default function ReportView() {
                         {item.name ?? item.ticker ?? String(item.payload.ticker ?? "")}
                       </Link>
                     ) : (
-                      <span className="font-medium">{String(item.payload.text ?? item.payload.ticker ?? "")}</span>
+                      // 알림 글은 여러 줄일 수 있다 — 시장 국면은 지수마다 한 줄(25.1741, 배치 25.1739). 줄바꿈을 살린다
+                      <span className="whitespace-pre-line font-medium">{String(item.payload.text ?? item.payload.ticker ?? "")}</span>
                     )}
                     {section === "recommend" && (
                       <span className="text-slate-500">

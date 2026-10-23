@@ -23,10 +23,10 @@ def test_오늘_볼_것은_플래그를_색마다_묶어_이름과() -> None:
              _flag("SK하이닉스", "green"), _flag("가", "yellow"), _flag("나", "yellow"), _flag("다", "yellow"),
              _flag("라", "yellow")]  # fmt: skip
     assert formatter.todo_line(flags) == (
-        "🔔 보유 매도 플래그: 손절 2(카카오·펄어비스) · 목표 도달 1(SK하이닉스) · 점검 4(가·나·다 외 1) — 새로 걸림 1")
+        "🔔 보유 매도 플래그: 🔴손절 2(카카오·펄어비스) · 🟢목표 도달 1(SK하이닉스) · 🟡점검 4(가·나·다 외 1) — 새로 걸림 1")
     assert formatter.todo_line([]) is None
     # 미국 이름은 짧게
-    assert formatter.todo_line([_flag("Apple Inc. Common Stock", "green")], "USD") == "🔔 보유 매도 플래그: 목표 도달 1(Apple)"
+    assert formatter.todo_line([_flag("Apple Inc. Common Stock", "green")], "USD") == "🔔 보유 매도 플래그: 🟢목표 도달 1(Apple)"
 
 
 def test_오늘_볼_것은_제목_바로_아래_대표_종목은_머리에_없다() -> None:

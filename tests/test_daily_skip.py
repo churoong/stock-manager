@@ -565,7 +565,7 @@ def test_추천을_못_읽어도_리포트는_매도_플래그와_함께_나간�
     assert daily.run("KR", dry_run=True) == 0
     글 = capsys.readouterr().out
     assert "추천을 읽지 못해" in 글 and "D1 시간 초과" in 글
-    assert "매도 플래그 (자동 매도 없음" in 글 and "[적]" in 글
+    assert "매도 플래그 (자동 매도 없음" in 글 and "🔴" in 글
     assert "오늘 추천할 종목이 없습니다" not in 글  # 못 읽은 것을 "없다" 로 적지 않는다
 
 

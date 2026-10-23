@@ -952,7 +952,8 @@ def run(market: str, as_of: str | None = None) -> int:
         print(f"대상 {len(candidates)}종목, 밴드 {len(bands)}종목")
         if 멈춘:
             print(f"  주의: {as_of} 종가가 없는 {len(멈춘)}종목은 신호를 내지 않았습니다 ({', '.join(멈춘[:5])} 등)")
-        print(f"  {trend.report_line(regimes, trend_settings)}")
+        # 시장 국면은 여러 줄이다(25.1739) — 줄마다 들여 쓴다
+        print("\n".join(f"  {x}" for x in trend.report_line(regimes, trend_settings).split("\n")))
         print(f"신호 {len(rows)}건")
         for horizon in sg.HORIZONS:
             print(f"  {sg.HORIZON_LABEL[horizon]}: {by_horizon[horizon]}건")

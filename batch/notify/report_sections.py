@@ -460,9 +460,10 @@ def render_sell_flags(flags: list[dict[str, Any]]) -> list[str]:
     날들 = sorted({str(f["as_of_date"]) for f in flags if f.get("as_of_date")})
     lines = [f"매도 플래그 (자동 매도 없음{', 판정일 ' + ', '.join(날들) if 날들 else ''})"]
     for flag in flags:
-        mark = {"green": "녹", "red": "적", "yellow": "황"}.get(str(flag.get("level")), "?")
+        # 색 동그라미로(25.1741 — "[적]·[녹]" 이 무슨 뜻인지 리포트만 보고는 몰랐다). 뜻은 근거 문장이 말한다
+        mark = {"green": "🟢", "red": "🔴", "yellow": "🟡"}.get(str(flag.get("level")), "?")
         new = " NEW" if flag.get("new") else ""
-        lines.append(f"  [{mark}]{new} {flag.get('rationale', '')}")
+        lines.append(f"  {mark}{new} {flag.get('rationale', '')}")
     return lines
 
 

@@ -340,6 +340,11 @@ def mismatch_cause(r: dict[str, Any], internal: bool) -> str:
         # 미국 시장가(매도·시가 일괄 매수)는 KIS 에 종가 ±10% 지정가로 나간다(`plan` 의 대신가) — 그날 고가·저가가
         # 그 값에 못 미쳤으면 접수 문제가 아니라 갭이다
         재료 = internal and 보낸 is not None and r.get("p_low") is not None and r.get("p_high") is not None
+        # 분할 뒤 다시 받은 일봉을 "갭" 으로 짓지 않는다 — 보낸 값은 직전 종가 ±10% 라 정상 비율은 0.91~1.11, 10% 넘는
+        # 실제 갭도 0.8~1.25 안이다(25.1741, 25.1737 교차검증 [권고] 1)
+        if 재료 and r.get("p_close") is not None and float(보낸) > 0 and not (
+                BAR_RATIO_FLOOR <= _값(r["p_close"]) / _값(보낸) <= 1 / BAR_RATIO_FLOOR):
+            return "bar_suspect"
         if 재료 and ((side == "sell" and _값(r["p_high"]) < _값(보낸))
                    or (side == "buy" and _값(r["p_low"]) > _값(보낸))):  # fmt: skip
             return "gap_beyond_limit"

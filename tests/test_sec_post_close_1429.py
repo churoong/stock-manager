@@ -64,7 +64,8 @@ def test_사실_줄과_중대_항목_기록(monkeypatch: pytest.MonkeyPatch) -> 
     기록: dict = {}
     중대: dict = {}
     lines = daily._sec_post_close_lines(_Client(con), picks, 오늘, [], 기록, 중대)
-    assert lines[1:] == ["· 에이(AAA) 8-K 외 1건 (10-15 접수, 미국 동부 날짜) — 신호는 10-14 종가로 계산"]
+    assert lines == ["📰 신호 기준일 뒤에 접수된 공시 (SEC) — 신호는 10-14 종가로 계산",
+                     "· 에이(AAA) 8-K 외 1건 (10-15 접수, 미국 동부 날짜)"]
     assert 기록["after"] == 1 and 기록["unknown"] == 0
     # CIK 가 없던 비는 티커표로 찾았고, 3.01 은 리포트 줄이 아니라 기록에만
     assert 중대 == {"picks": 2, "flagged": 1, "unknown": 0, "by_item": {"3.01": 1}}

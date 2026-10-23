@@ -195,7 +195,7 @@ def watched_block(rows: list[dict[str, Any]], trade_date: str) -> str:
 
 
 #: 오늘 볼 것 줄의 매도 플래그 이름 (docs/sell_flags.md — 적 손절 · 녹 목표도달 · 황 기간초과·재무악화·점검·감성)
-_할일_이름 = {"red": "손절", "green": "목표 도달", "yellow": "점검"}
+_할일_이름 = {"red": "🔴손절", "green": "🟢목표 도달", "yellow": "🟡점검"}  # 동그라미는 매도 플래그 절과 같다(25.1741)
 #: 묶음마다 이름을 싣는 종목 수 — 넘으면 "외 n"
 TODO_MAX_NAMES = 3
 
