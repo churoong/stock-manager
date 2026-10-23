@@ -177,8 +177,11 @@ DAILY_SQL = (
 COMPARE_SQL = (
     "SELECT b.trade_date, b.side, b.status, b.filled_qty, b.quantity, b.avg_price, b.message, b.reason,"
     " o.status AS i_status, o.close_note AS i_note, o.order_type AS i_order_type, o.fill_basis AS i_fill_basis,"
-    " f.price AS i_price, f.fill_date AS i_fill_date FROM paper_broker_orders b"
+    " f.price AS i_price, f.fill_date AS i_fill_date,"
+    # 어긋난 까닭을 가르는 재료(25.1736, 아이디어 ⑤) — 내부 지정가와 그 거래일 일봉(PK 한 행씩)
+    " o.limit_price AS i_limit, p.low AS p_low, p.close AS p_close FROM paper_broker_orders b"
     " LEFT JOIN paper_orders o ON o.id = b.paper_order_id LEFT JOIN paper_fills f ON f.order_id = b.paper_order_id"
+    " LEFT JOIN prices p ON p.stock_id = o.stock_id AND p.date = b.trade_date"
     " WHERE b.broker = ? AND b.trade_date >= ? AND b.trade_date < ? AND b.account_id = ?"
 )
 #: 체결 칸 (docs/paper.md 15.9, 25.1514) — 베끼기 시작부터 누적. 내부 주문 유형·판정 잣대·장부 슬리피지(%)를 붙인다.

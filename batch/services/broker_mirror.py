@@ -304,6 +304,34 @@ def _까닭(message: str | None) -> str:
     return m.group(0) if m else (message or "까닭 없음")[:30]
 
 
+#: 가상과 KIS 가 어긋난 주문의 까닭 (25.1736, 2026-10-23 사용자 "그렇게 진행해줘" — 아이디어 ⑤). 그날 일봉만으로 가른다
+#: — 장중 순서·호가 대기열은 모른다. 가상 매수(지정가)는 **종가 ≤ 회차 가격**이면 찬다(`paper.judge`)
+MISMATCH_CAUSES = {
+    "intraday_touch": "장중엔 지정가에 닿았는데 종가는 위(가상 잣대가 보수 — KIS만 참)",
+    "exact_touch": "지정가에 딱 닿음(호가 대기 순서 — 가상만 참)",
+    "through_unfilled": "지정가 아래로 내려왔는데 KIS 안 참(접수·시각·수량 — 가상만 참)",
+    "market_unfilled": "시장가가 KIS 에서 안 참(접수·정지 — 가상만 참)",
+    "unexplained": "일봉으로 설명 안 됨",
+    "no_bar": "그날 일봉 없음",
+}
+
+
+def mismatch_cause(r: dict[str, Any], internal: bool) -> str:
+    """어긋난 주문 한 줄(가상만 참 `internal=True` / KIS만 참)의 까닭 — `MISMATCH_CAUSES` 열쇠"""
+    if r.get("i_order_type") == "market" or r.get("i_limit") is None:
+        return "market_unfilled" if internal else "unexplained"
+    if r.get("p_low") is None or r.get("p_close") is None:
+        return "no_bar"
+    한도, 저가 = float(r["i_limit"]), float(r["p_low"])
+    if str(r.get("side")) != "buy":
+        return "unexplained"
+    if internal:
+        if 저가 < 한도:
+            return "through_unfilled"
+        return "exact_touch" if 저가 == 한도 else "unexplained"
+    return "intraday_touch" if 저가 <= 한도 < float(r["p_close"]) else "unexplained"
+
+
 def compare(rows: list[dict[str, Any]]) -> dict[str, Any]:
     """베낀 주문마다 내부 판정 vs KIS모의투자 → 체결 일치율·가격 차이·거부 까닭.
 
@@ -315,6 +343,7 @@ def compare(rows: list[dict[str, Any]]) -> dict[str, Any]:
     칸 = Counter[str]()
     차이: dict[str, list[float]] = {"buy": [], "sell": []}
     까닭 = Counter[str]()
+    어긋남 = Counter[str]()
     for r in rows:
         if r.get("reason") == REASON_CLEANUP:
             칸["cleanup"] += 1
@@ -342,6 +371,8 @@ def compare(rows: list[dict[str, Any]]) -> dict[str, Any]:
         kis = r["status"] in ("filled", "partial") and int(r.get("filled_qty") or 0) > 0
         칸["partial"] += r["status"] == "partial"
         칸[("both" if kis else "internal_only") if 내부 else ("kis_only" if kis else "neither")] += 1
+        if 내부 != kis:
+            어긋남[mismatch_cause(r, 내부)] += 1
         if 내부 and kis and r.get("avg_price") and r.get("i_price"):
             k, i = float(r["avg_price"]), float(r["i_price"])
             차이[str(r["side"])].append(((k - i) if r["side"] == "buy" else (i - k)) / i * 100)
@@ -360,6 +391,7 @@ def compare(rows: list[dict[str, Any]]) -> dict[str, Any]:
                              "cleanup", "excluded", "path_fail")},
         "slip_buy": 평균(차이["buy"]), "slip_sell": 평균(차이["sell"]),
         "reject_reasons": dict(까닭.most_common(COMPARE_TOP_REASONS)),
+        "mismatch_causes": dict(어긋남.most_common()),
     }  # fmt: skip
 
 
@@ -563,6 +595,10 @@ def compare_lines(
         return f"{이름} {x['avg']:+.2f}% (n={x['n']})" if x.get("n") else f"{이름} 표본 없음"
 
     out.append("  가격(+ 면 가상모의투자가 낙관): " + 칸(s["slip_buy"], "매수") + " · " + 칸(s["slip_sell"], "매도"))
+    if s.get("mismatch_causes"):
+        # 가상과 KIS 가 어긋난 까닭(25.1736) — 가상 체결 가정이 낙관인지 보수인지
+        out.append("  어긋난 까닭:")
+        out += [f"    {MISMATCH_CAUSES.get(k, k)} {v}" for k, v in s["mismatch_causes"].items()]
     if s.get("reject_reasons"):
         out.append("  거부 까닭: " + " · ".join(f"{k} {v}" for k, v in s["reject_reasons"].items()))
     끝 = []
