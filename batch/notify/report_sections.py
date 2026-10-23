@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from batch.core.rounding import fixed
+from batch.notify.formatter import short_name
 from batch.services import holding_scores, pick_history, robustness
 from batch.services.accumulation import display_name
 
@@ -239,6 +240,15 @@ def _score(value: float | None) -> str:
     return fixed(value)  # .5 를 올린다 — 근거 문장·웹과 같게 (25.1105)
 
 
+def _이름(name: str, ticker: str | None, currency: str) -> str:
+    """리포트 종목 이름 — 미국은 법인 꼬리를 뗀 짧은 이름 + (티커), 국내는 그대로(25.1740, 운용 보고 `short_name` 꼴).
+
+    예전엔 1부·2부가 `display_name`(나스닥 목록 꼬리만, 대소문자 구분)이라 "Medical Properties Trust, Inc. common
+    stock" 이 그대로 나갔고, 운용 보고의 "LTC Properties(LTC)" 와 같은 종목이 다른 이름으로 읽혔다
+    """
+    return short_name(display_name(name), ticker, currency)
+
+
 def trade_link(app_url: str | None, pick: StockPick) -> str | None:
     """종목 상세의 매매 폼이 **그 종목·그 기간으로 채워진 채** 열리는 주소 (docs/infra.md 25.944).
 
@@ -272,28 +282,39 @@ def render_picks(picks: list[StockPick], app_url: str | None = None, footer: str
         lines.append("")
         lines.append(f"[{HORIZON_LABEL[horizon]}]")
 
-        for pick in group:
+        for k, pick in enumerate(group):
+            # 같은 기간 안 종목 사이에 빈 줄(25.1740 — 종목 끝 줄과 다음 종목 머리가 붙어 경계가 안 보였다)
+            if k:
+                lines.append("")
             반복 = pick.ticker in 첫_기간
             첫_기간.setdefault(pick.ticker, horizon)
+            # 종목 하나를 덜 줄로(25.1740, 사용자 "여전히 내용이 가독성이 떨어지는데" — 종목마다 11~12줄이라 다섯
+            # 종목이 폰 여러 화면이었다). 순서: 머리(점수·순위·신호) → 종가·매수 구간 → 팩터 → 센티먼트 → 근거 문장 →
+            # 이력·흔들기·과거 → 매매 입력 주소(길어서 끝). 담는 것은 그대로다(CLAUDE.md 1부 완결)
             # 미국 목록 이름의 꼬리(" Common Stock" 등)는 뗀다 (25.957). report_items 에는 원래 이름이 남는다
-            head = f"{display_name(pick.name)}"
+            head = _이름(pick.name, pick.ticker, pick.currency)
             if pick.total_score is not None:
                 head += f"  {_score(pick.total_score)}점"
                 if pick.rank_in_market:
                     head += f" ({pick.market} {pick.rank_in_market}위)"
+            if pick.signal_type:
+                head += f" · 신호 {pick.signal_type}"
             lines.append(head)
-            # 매매 입력 딥링크 — 텔레그램은 평문 주소를 그대로 링크로 만든다. 미리보기는 `send` 가 끈다 (25.944)
-            링크 = trade_link(app_url, pick)
-            if 링크:
-                lines.append(f"  매매 입력 {링크}")
             if 반복:
                 lines.append(f"  (종가·팩터·과거는 위 [{HORIZON_LABEL[첫_기간[pick.ticker]]}] 참고)")
 
             # **"현재가" 가 아니다** (docs/infra.md 25.348). 신호 기준일 이하의 마지막 종가이고, 신호가 묵었거나
             # 그날 시세가 없던 종목은 며칠 전 값이다. 대표 종목 줄(25.326)처럼 날짜를 붙인다
+            값줄 = []
             if not 반복 and pick.close is not None:
                 when = f" ({pick.close_date})" if pick.close_date else ""
-                lines.append(f"  종가 {_money(pick.close, pick.currency)}{when}")
+                값줄.append(f"종가 {_money(pick.close, pick.currency)}{when}")
+            if pick.buy_zone_low is not None and pick.buy_zone_high is not None:
+                low = _money(pick.buy_zone_low, pick.currency)
+                high = _money(pick.buy_zone_high, pick.currency)
+                값줄.append(f"매수 구간 {low} ~ {high}")
+            if 값줄:
+                lines.append("  " + " · ".join(값줄))
 
             if not 반복 and pick.factor_scores:
                 parts = [
@@ -306,23 +327,18 @@ def render_picks(picks: list[StockPick], app_url: str | None = None, footer: str
                 # 정수로 먼저 반올림한다 — `:+.0f` 는 −0.3 을 "-0" 으로 찍었다 (docs/infra.md 25.421)
                 lines.append(f"  센티먼트 {fixed(pick.sentiment, sign=True)}")  # .5 올림 (25.1105)
 
-            # 가중치 흔들기 — 이 점수가 설정값에 얼마나 기대는지 (docs/reports.md 3.2). 점수 줄 바로 아래
-            흔들기 = None if 반복 else robustness.stability_line(pick.stability)
-            if 흔들기:
-                lines.append(f"  {흔들기}")
+            if pick.rationale:
+                lines.append(f"  {pick.rationale}")
 
             # 건너뛴 추천 영수증 — 몇 번째 추천이고 처음 본 날 종가 대비 얼마나 움직였나 (docs/reports.md 3.3)
             if not 반복 and pick.history is not None:
                 통화 = pick.currency
                 lines.append(f"  {pick_history.history_line(pick.history, pick.close, lambda v, c=통화: _money(v, c))}")
 
-            if pick.signal_type:
-                lines.append(f"  신호 {pick.signal_type}")
-
-            if pick.buy_zone_low is not None and pick.buy_zone_high is not None:
-                low = _money(pick.buy_zone_low, pick.currency)
-                high = _money(pick.buy_zone_high, pick.currency)
-                lines.append(f"  매수 구간 {low} ~ {high}")
+            # 가중치 흔들기 — 이 점수가 설정값에 얼마나 기대는지 (docs/reports.md 3.2)
+            흔들기 = None if 반복 else robustness.stability_line(pick.stability)
+            if 흔들기:
+                lines.append(f"  {흔들기}")
 
             performance = []
             if pick.cagr is not None:
@@ -338,8 +354,11 @@ def render_picks(picks: list[StockPick], app_url: str | None = None, footer: str
                 창 = ", ".join(x for x in (pick.perf_window, 기준) if x)
                 lines.append(f"  과거{f'({창})' if 창 else ''} {' · '.join(performance)}")
 
-            if pick.rationale:
-                lines.append(f"  {pick.rationale}")
+            # 매매 입력 딥링크 — 텔레그램은 평문 주소를 그대로 링크로 만든다. 미리보기는 `send` 가 끈다 (25.944).
+            # 주소가 길어 폰에서 두 줄을 먹으니 종목 끝에(25.1740)
+            링크 = trade_link(app_url, pick)
+            if 링크:
+                lines.append(f"  매매 입력 {링크}")
 
     if footer:
         lines.append("")
@@ -352,21 +371,23 @@ def render_portfolio(portfolio: PortfolioView, picks: list[StockPick]) -> str:
     lines = ["2부 포트폴리오"]
 
     if portfolio.total_budget is not None:
-        line = f"총 투자가능금액 {_money(portfolio.total_budget, portfolio.budget_currency)}"
+        lines.append(f"총 투자가능금액 {_money(portfolio.total_budget, portfolio.budget_currency)}")
+        # 메모는 다음 줄에 들여 쓴다(25.1740 — 괄호 안 괄호로 130자 한 줄이었다)
         if portfolio.budget_note:
-            line += f" ({portfolio.budget_note})"
-        lines.append(line)
+            lines += [f"  {x}" for x in portfolio.budget_note.split(" · ") if x]
 
     if not portfolio.allocations:
         lines.append("")
         사유 = portfolio.no_allocation_reason
         lines.append(f"{사유}." if 사유 else "배분할 종목이 없습니다.")
     else:
-        lines.append("")
         for allocation in portfolio.allocations:
+            # 종목 사이에 빈 줄(25.1740 — 회차 줄과 다음 종목 머리가 붙어 경계가 안 보였다)
+            lines.append("")
             lines.append(
                 # 미국 목록 이름 꼬리("Common Stock" 등)는 1부처럼 뗀다 (25.957 을 2부·제외 줄에도, 25.1181)
-                f"{display_name(allocation.name)}  {_money(allocation.amount, allocation.currency)} "
+                f"{_이름(allocation.name, allocation.ticker, allocation.currency)}"
+                f"  {_money(allocation.amount, allocation.currency)} "
                 f"({fixed(allocation.weight_pct, 1)}%)"
             )
             for i, tranche in enumerate(allocation.tranches, 1):
@@ -387,7 +408,8 @@ def render_portfolio(portfolio: PortfolioView, picks: list[StockPick]) -> str:
         lines.append("")
         lines.append("배분에서 빠진 종목")
         for item in portfolio.excluded:
-            line = f"  {display_name(item.name)} — {item.reason}"
+            통화 = next((p.currency for p in picks if p.ticker == item.ticker), "KRW")
+            line = f"  {_이름(item.name, item.ticker, 통화)} — {item.reason}"
             if item.detail:
                 line += f" ({item.detail})"
             lines.append(line)

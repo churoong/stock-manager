@@ -16,12 +16,12 @@ def h(**kw) -> hs.HoldingScore:
 
 class Test글:
     def test_한_줄(self) -> None:
-        assert hs.line(h()) == "보유 코스맥스: 지금 55점 (KOSPI 120위, 10-01) · 매수 때 62점 (09-20) → -7점"
-        assert hs.line(h(score_at_trade=50.0)) == "보유 코스맥스: 지금 55점 (KOSPI 120위, 10-01) · 매수 때 50점 (09-20) → +5점"
+        assert hs.line(h()) == "코스맥스: 지금 55점 (KOSPI 120위, 10-01) · 매수 때 62점 (09-20) → -7점"
+        assert hs.line(h(score_at_trade=50.0)) == "코스맥스: 지금 55점 (KOSPI 120위, 10-01) · 매수 때 50점 (09-20) → +5점"
 
     def test_없는_값은_없다고_적는다(self) -> None:
-        assert hs.line(h(score_now=None, rank_now=None, as_of=None)) == "보유 코스맥스: 지금 점수 없음 · 매수 때 62점 (09-20)"
-        assert hs.line(h(score_at_trade=None, first_buy=None)) == "보유 코스맥스: 지금 55점 (KOSPI 120위, 10-01) · 매수 때 점수 없음"
+        assert hs.line(h(score_now=None, rank_now=None, as_of=None)) == "코스맥스: 지금 점수 없음 · 매수 때 62점 (09-20)"
+        assert hs.line(h(score_at_trade=None, first_buy=None)) == "코스맥스: 지금 55점 (KOSPI 120위, 10-01) · 매수 때 점수 없음"
         assert hs.line(h(score_now=55.4, score_at_trade=55.0)) .endswith("→ +0점")  # "-0점" 이 아니다
         # 보이는 두 숫자의 차이 (25.959, 10-06 리포트 "지금 60점 · 매수 때 61점 → +0점")
         assert hs.line(h(score_now=60.4, score_at_trade=60.6)).endswith("지금 60점 (KOSPI 120위, 10-01) · 매수 때 61점 (09-20) → -1점")
@@ -46,13 +46,13 @@ class Test2부:
         composed = rp.compose([srow(1)], 50_000_000.0, "2026-10-02", holdings=holdings, holding_scores=[h()])
         text = composed.text
         assert "보유 종목 점수 — 샀을 때와 지금 (표시일 뿐 매도 신호가 아닙니다)" in text
-        assert text.index("현재 보유 평가") < text.index("보유 코스맥스: 지금 55점")
+        assert text.index("현재 보유 평가") < text.index("코스맥스: 지금 55점")
         # 안 넘기면 전과 같다
         assert "보유 종목 점수" not in rp.compose([srow(1)], 50_000_000.0, "2026-10-02", holdings=holdings).text
 
     def test_payload_에는_남지_않고_글에만(self) -> None:
         view = rs.PortfolioView(holdings_value=1.0, holdings_count=1, holding_scores=[h()])
-        assert "보유 코스맥스" in rs.render_portfolio(view, [])
+        assert "코스맥스: " in rs.render_portfolio(view, [])
 
 
 class Test잣대와_보유분:

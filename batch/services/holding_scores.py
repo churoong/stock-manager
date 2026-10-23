@@ -21,8 +21,12 @@ from dataclasses import dataclass
 from typing import Any
 
 from batch.core.rounding import fixed, half_up
+from batch.notify.formatter import short_name
 from batch.services.accumulation import display_name
 
+#: 국내 시장 이름 — 이 밖(미국 거래소 여럿, `nasdaq_symbols.EXCHANGE_CODES`)이면 이름을 짧게 한다. 국내 목록이 짧고
+#: 닫혀 있어 미국 쪽을 손으로 적지 않는다(25.184 — 미국 시장 목록을 손으로 적어 빠뜨린 적이 있다). 시장을 모르면 그대로
+KR_MARKETS = frozenset({"KOSPI", "KOSDAQ", "KONEX"})
 #: 2부에 싣는 보유 줄 상한. 보유가 많아도 한 조각(3,900자) 안에 들게
 MAX_LINES = 8
 
@@ -83,7 +87,9 @@ def line(h: HoldingScore) -> str:
             차이 = " (계산 판·가중치가 달라 차이는 적지 않음)"
         else:
             차이 = f" → {int(half_up(h.score_now) - half_up(h.score_at_trade)):+d}점"
-    return f"보유 {display_name(h.name)}: {지금} · {그때}{차이}"
+    # 머리가 "보유 종목 점수" 라 줄마다 "보유" 를 붙이지 않는다(25.1740). 미국 이름은 짧게 — 티커가 없어 이름만
+    통화 = "KRW" if h.market is None or h.market in KR_MARKETS else "USD"
+    return f"{short_name(display_name(h.name), None, 통화)}: {지금} · {그때}{차이}"
 
 
 def render(scores: list[HoldingScore]) -> list[str]:
