@@ -57,6 +57,9 @@ def test_ledger_cash_positions_and_realized() -> None:
     보유 = pp.positions(체결)
     assert 보유[7].quantity == 6
     assert 보유[7].cost_krw == pytest.approx(100_015 * 0.6)
+    # 종목 통화 원가도 같은 비율로 던다 — 평균 단가·종목 통화 수익(달러 종목의 환차 뺀 수익)이 이 값을 쓴다
+    # (25.1743 돌연변이 점검 `positions_cost_on_sell` 이 살아남았다 — 원화 원가만 보고 있었다)
+    assert 보유[7].cost == pytest.approx(100_015 * 0.6)
     assert 보유[7].first_buy_date == "2026-10-16"
     assert 보유[7].horizon == "short" and 보유[7].score_at_buy == 71.0
     실현 = pp.realized(체결)
@@ -66,6 +69,10 @@ def test_ledger_cash_positions_and_realized() -> None:
 def test_sell_more_than_held_is_an_error() -> None:
     with pytest.raises(ValueError):
         pp.positions([pp.make_fill(_주문("sell", None), 10_000, "2026-10-16", 1.0, 비용)])
+    # 들고 있는 것보다 많이 — 보유 없음과 다른 갈래(25.1743 돌연변이 점검 `positions_oversell` 이 살아남았다)
+    with pytest.raises(ValueError, match="보유보다 많은"):
+        pp.positions([pp.make_fill(_주문(qty=3), 10_000, "2026-10-16", 1.0, 비용),
+                      pp.make_fill(_주문("sell", None, qty=5, oid=2), 10_000, "2026-10-17", 1.0, 비용)])  # fmt: skip
 
 
 def test_full_sell_resets_basis() -> None:
