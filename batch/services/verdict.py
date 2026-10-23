@@ -775,6 +775,10 @@ def build(inp: Inputs) -> dict:
 
     # 결론 (3장)
     붉은 = [x for x in inp.flags if x.get("level") in ("red", "yellow")]
+    # **녹색(목표 도달)은 점검이 아니지만 "플래그 없음" 도 아니다** (docs/infra.md 25.1091, 감사 재현) —
+    # 보유 유지·매수 검토 두 갈래 모두에 적는다(25.1761 — 매수 신호가 겹친 보유 종목은 "추가 매수 검토" 만 보여
+    # 차익 실현 검토를 건너뛰었다)
+    녹색 = [x for x in inp.flags if x.get("level") == "green"] if inp.position else []
     near = nearest(inp.checks)
     if inp.position and 붉은:
         key = "check_holding"
@@ -791,17 +795,19 @@ def build(inp: Inputs) -> dict:
         손절 = f" · 손절 {_price(s['stop_price'], inp.currency)}" if s.get("stop_price") else ""
         headline = (f"매수 검토 — {기간} 매수 신호 ({s['as_of']}). 권장 매수 구간 "
                     f"{_price(s['buy_zone_low'], inp.currency)}~{_price(s['buy_zone_high'], inp.currency)}{목표}{손절}"
-                    + (" · 이미 보유 중(추가 매수라면 비중 상한 확인)" if inp.position else ""))  # fmt: skip
+                    + (" · 이미 보유 중(추가 매수라면 비중 상한 확인)" if inp.position else "")
+                    + (f" · 매도 플래그 녹색: {녹색[0]['rationale_text']}" if 녹색 else ""))  # fmt: skip
         for g in inp.signals:
             구간 = f"{_price(g['buy_zone_low'], inp.currency)}~{_price(g['buy_zone_high'], inp.currency)}"
             evidence.append(_row(f"{HORIZON.get(g['horizon'], g['horizon'])} 매수 신호", 구간, "docs/signals.md",
                                  "signals", g["as_of"]))
+        for x in 녹색:
+            evidence.append(
+                _row("매도 플래그(녹색)", x["rationale_text"], "docs/sell_flags.md", "sell_flags", x.get("as_of"))
+            )
     elif inp.position:
         key = "hold"
         손익 = pnl_text(inp.position, inp.currency)
-        # **녹색(목표 도달)은 점검이 아니지만 "플래그 없음" 도 아니다** (docs/infra.md 25.1091, 감사 재현) — 차익 실현을
-        # 검토하라는 플래그가 걸린 날 "매도 플래그 없음" 이라 적고 근거표에서도 뺐다
-        녹색 = [x for x in inp.flags if x.get("level") == "green"]
         for x in 녹색:
             evidence.append(
                 _row("매도 플래그(녹색)", x["rationale_text"], "docs/sell_flags.md", "sell_flags", x.get("as_of"))

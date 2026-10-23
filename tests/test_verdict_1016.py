@@ -47,7 +47,15 @@ def test_결론은_규칙의_사실로만_위에서부터() -> None:
     assert h["verdict"] == "hold" and h["headline"] == (
         "보유 유지 — 매도 플래그 녹색: 손절선 -7% 터치 · 평가손익률 +3.2% (2026-10-07)")  # 녹색도 적는다 (25.1091)
     assert any(e["label"] == "매도 플래그(녹색)" for e in h["evidence"])
-    h0 = vd.build(vd.Inputs(**기본, position={"quantity": 1, "pnl_pct": 3.25, "price_date": "2026-10-07"}))
+    # 보유 + 매수 신호 + 녹색 → 매수 검토에도 녹색을 적는다(25.1761 — "추가 매수 검토" 만 보여 차익 실현 검토를 건너뛰었다)
+    g = vd.build(vd.Inputs(**기본, signals=[SIGNAL], position={"quantity": 1, "pnl_pct": 55.0},
+                           flags=[{**flag, "level": "green", "rationale_text": "목표수익률 도달 — 차익 실현 검토"}]))  # fmt: skip
+    assert g["verdict"] == "consider_buy" and g["headline"].endswith(
+        " · 이미 보유 중(추가 매수라면 비중 상한 확인) · 매도 플래그 녹색: 목표수익률 도달 — 차익 실현 검토")
+    assert [e["label"] for e in g["evidence"] if "플래그" in e["label"]] == ["매도 플래그(녹색)"]
+    # 보유가 아니면 녹색을 붙이지 않는다(보유 종목에만 서는 플래그 — 들어와도 남의 일)
+    assert "녹색" not in vd.build(vd.Inputs(**기본, signals=[SIGNAL], flags=[{**flag, "level": "green"}]))["headline"]
+    h0 =vd.build(vd.Inputs(**기본, position={"quantity": 1, "pnl_pct": 3.25, "price_date": "2026-10-07"}))
     assert h0["headline"] == "보유 유지 — 매도 플래그 없음 · 평가손익률 +3.2% (2026-10-07)"
     # 점수가 없으면 보류
     u = vd.build(vd.Inputs(name="나", ticker="000002", score={**SCORE, "total": None, "skip_reason": "재무 없음"}))
