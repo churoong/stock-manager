@@ -2352,17 +2352,18 @@ MONTHLY_CATCHUP_DAYS = 14
 MONTHLY_REVIEW_KEY = "paper_monthly_review_sent"
 
 
-def review_due(client: Any, 오늘: date) -> bool:
+def review_due(client: Any, 오늘: date, key: str = MONTHLY_REVIEW_KEY) -> bool:
     """이번 주 요약에 지난달 월간 복기를 싣나 — 1~7일이면 싣고, 8~14일이면 이번 달에 아직 안 실었을 때만(따라잡기).
 
     월간 복기는 그 달 첫 일요일 요약 한 번에만 걸려, 그 실행이 한도로 건너뛰면 통째로 사라졌다(25.1571, 운용 감사
-    [확인필요] 7 — 2026-11-01 실행은 10-31 22:41 UTC 라 10월 한도가 찬 채일 수 있다)
+    [확인필요] 7 — 2026-11-01 실행은 10-31 22:41 UTC 라 10월 한도가 찬 채일 수 있다). `key` 는 절마다 따로다 —
+    실행 품질 절이 이 절의 표시를 같이 쓰면 한쪽만 깨진 달에 다른 쪽이 빠지거나 두 번 나갔다(25.1760)
     """
     if 오늘.day <= MONTHLY_REVIEW_DAYS:
         return True
     if 오늘.day > MONTHLY_CATCHUP_DAYS:
         return False
-    return db.get_setting(client, MONTHLY_REVIEW_KEY, None) != 오늘.strftime("%Y-%m")
+    return db.get_setting(client, key, None) != 오늘.strftime("%Y-%m")
 
 
 def summary_section(client: Any, now: datetime) -> list[str]:

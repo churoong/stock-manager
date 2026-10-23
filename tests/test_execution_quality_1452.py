@@ -82,5 +82,7 @@ def test_loader_reads_reports_trades_flags_on_real_schema() -> None:
     from batch.core import db as _db
     from batch.jobs import paper as _pj
 
-    _db.set_setting(c, _pj.MONTHLY_REVIEW_KEY, "2026-10")
+    _db.set_setting(c, _pj.MONTHLY_REVIEW_KEY, "2026-10")  # 가상모의투자 복기 표시와는 따로다(25.1760)
+    assert ws.execution_lines(c, datetime(2026, 10, 12, tzinfo=UTC)) != []
+    _db.set_setting(c, ws.EXEC_REVIEW_KEY, "2026-10")
     assert ws.execution_lines(c, datetime(2026, 10, 12, tzinfo=UTC)) == []

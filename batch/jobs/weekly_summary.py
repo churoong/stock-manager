@@ -440,14 +440,26 @@ EXEC_FLAGS_SQL = (
 )
 
 
+#: 실행 품질 절을 실은 달("YYYY-MM") — 가상모의투자 월간 복기 표시(`paper.MONTHLY_REVIEW_KEY`)와 따로
+#: (25.1760, 결함 루프 L2: 한 표시를 같이 쓰면 첫 일요일에 이 절만 깨진 달은 8~14일 따라잡기가 없어 통째로 빠지고,
+#: 저 절만 깨진 달은 이 절이 두 번 나갔다)
+EXEC_REVIEW_KEY = "exec_quality_review_sent"
+
+
+def execution_due(client: TursoClient, now: datetime) -> bool:
+    """이번 요약에 지난달 실행 품질 절을 싣나 — 1~7일, 못 실었으면 14일까지 따라잡기(25.1571·25.1760)"""
+    from batch.jobs import paper as paper_job
+
+    return paper_job.review_due(client, now.astimezone(cal.market_tz("KR")).date(), EXEC_REVIEW_KEY)
+
+
 def execution_lines(client: TursoClient, now: datetime) -> list[str]:
     """월간 복기의 실행 품질 절 — 한국 날짜로 그달 1~7일에 지난달을 (docs/paper.md 13장, 25.1452)."""
-    from batch.jobs import paper as paper_job
     from batch.services import execution_quality as eq
     from batch.services import reports as rp_store
 
     오늘 = now.astimezone(cal.market_tz("KR")).date()
-    if not paper_job.review_due(client, 오늘):  # 1~7일, 못 나갔으면 14일까지 따라잡기(25.1571)
+    if not execution_due(client, now):
         return []
     끝 = 오늘.replace(day=1) - timedelta(days=1)
     시작 = 끝.replace(day=1)
@@ -540,9 +552,13 @@ def run(dry_run: bool = False, force: bool = False) -> int:
             모의 = [*준비, "", *모의]
         except Exception as exc:  # noqa: BLE001 — 곁다리 절이다
             모의 = [f"실전 준비도를 만들지 못했습니다 ({type(exc).__name__})", "", *모의]
-        # 실제 매매의 실행 품질 (docs/paper.md 13장, 25.1452) — 월 첫 요약에만. 곁다리
+        # 실제 매매의 실행 품질 (docs/paper.md 13장, 25.1452) — 월 첫 요약에만. 곁다리. **깨지지 않고 만들었을 때만**
+        # 그달을 표시한다(매매가 없어 빈 절이면 "보낼 것 없음" 이라 표시 — 25.1760)
+        실행 = False
         try:
+            실행_때 = execution_due(client, now)
             모의 = [*모의, *execution_lines(client, now)]
+            실행 = 실행_때
         except Exception as exc:  # noqa: BLE001 — 곁다리 절이다
             모의 = [*모의, f"실행 품질 절을 만들지 못했습니다 ({type(exc).__name__})"]
         text = compose(runs=runs, last_success=last, now=now, reads_used=used, writes_used=쓰기, rot_lines=rot_lines,
@@ -569,6 +585,12 @@ def run(dry_run: bool = False, force: bool = False) -> int:
                                    now.astimezone(cal.market_tz("KR")).date().strftime("%Y-%m"))  # fmt: skip
                 except Exception as exc:  # noqa: BLE001 — 이미 보냈다. 다음 주에 한 번 더 실릴 뿐이다
                     뒤경고.append(f"월간 복기 표시를 적지 못함: {type(exc).__name__}")
+            if 실행:
+                try:
+                    db.set_setting(client, EXEC_REVIEW_KEY,
+                                   now.astimezone(cal.market_tz("KR")).date().strftime("%Y-%m"))  # fmt: skip
+                except Exception as exc:  # noqa: BLE001 — 이미 보냈다. 다음 주에 한 번 더 실릴 뿐이다
+                    뒤경고.append(f"실행 품질 표시를 적지 못함: {type(exc).__name__}")
         db.finish_batch_run(
             # **확인 실행은 `dryrun`** (docs/infra.md 25.1304, 운영 감사 재현) — 예전엔 `success` 로 닫아 다시
             # 보내지 않는 검사가 "이미 보냈다" 로 읽었다. 화·수에 손으로 확인하면 그 주 일요일 요약이 통째로 빠지고
