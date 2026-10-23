@@ -10,7 +10,7 @@ tools: Read, Grep, Glob, Bash
 - 맡은 영역의 문서(docs/paper.md·desk.md·intraday.md·reports.md 등)와 코드를 함께 읽고, **문서가 말하는 규칙과 코드가 어긋나는 곳**, 경계값·빈 값·휴장일·분할·환율·시각대·재실행·부분 실패를 본다
 - `docs/infra.md` 25.x 에 이미 고친·알고 둔 것은 다시 내지 않는다(grep 으로 확인)
 - 결함마다 **구체적 재현**(입력·상태 → 틀린 출력)을 만든다. 재현이 필요하면 직접 worktree 를 만들어 작은 스크립트·대상 시험을 돌리고 지운다
-  (`git -C <저장소> worktree add /tmp/<이름> HEAD`, `export PATH=/root/venv312/bin:$PATH PYTHONDONTWRITEBYTECODE=1`). 전체 pytest 는 돌리지 않는다
+  (`W=$(mktemp -d /tmp/wt-XXXXXX) && git -C <저장소> worktree add "$W" HEAD` — 이름을 손으로 짓지 않는다, 명령마다 `cd "$W" || exit 1` 로 시작하고 저장소 본체 경로에는 sed·checkout 같은 쓰기를 하지 않는다(25.1759 — 나란히 돈 에이전트의 worktree 이름이 겹쳐 사라졌고, cd 가 실패해 본체에서 sed·checkout 이 돌았다), `export PATH=/root/venv312/bin:$PATH PYTHONDONTWRITEBYTECODE=1`). 전체 pytest 는 돌리지 않는다
 
 출력 (한국어)
 - 결함마다: 제목, 심각도(필수 = 돈·장부·주문·알림을 틀리게 하거나 멈춤·절을 잃음 / 권고 / 참고), file:line, 재현, 고칠 방향

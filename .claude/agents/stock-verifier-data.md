@@ -15,5 +15,5 @@ tools: Read, Grep, Glob, Bash
 
 판정과 출력
 - 후보마다 **통과 / 조건부(조건을 명시) / 탈락 / 보류** 와 근거(file:line). 한국어, 후보마다 10줄 안팎, 끝에 "공통으로 막는 것" 한 단락
-- 읽기만 한다. 실행이 필요하면 직접 worktree 를 만들어 쓰고 지운다(`git -C <저장소> worktree add /tmp/<이름> HEAD`,
+- 읽기만 한다. 실행이 필요하면 직접 worktree 를 만들어 쓰고 지운다(`W=$(mktemp -d /tmp/wt-XXXXXX) && git -C <저장소> worktree add "$W" HEAD` — 이름을 손으로 짓지 않는다, 명령마다 `cd "$W" || exit 1` 로 시작하고 저장소 본체 경로에는 sed·checkout 같은 쓰기를 하지 않는다(25.1759 — 나란히 돈 에이전트의 worktree 이름이 겹쳐 사라졌고, cd 가 실패해 본체에서 sed·checkout 이 돌았다),
   `export PATH=/root/venv312/bin:$PATH PYTHONDONTWRITEBYTECODE=1`). Turso·운영 DB·네트워크 조회 금지. 서지가 확실치 않으면 `[확인필요]`
