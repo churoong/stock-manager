@@ -178,8 +178,10 @@ COMPARE_SQL = (
     "SELECT b.trade_date, b.side, b.status, b.filled_qty, b.quantity, b.avg_price, b.message, b.reason,"
     " o.status AS i_status, o.close_note AS i_note, o.order_type AS i_order_type, o.fill_basis AS i_fill_basis,"
     " f.price AS i_price, f.fill_date AS i_fill_date,"
-    # 어긋난 까닭을 가르는 재료(25.1736, 아이디어 ⑤) — 내부 지정가와 그 거래일 일봉(PK 한 행씩)
-    " o.limit_price AS i_limit, p.low AS p_low, p.close AS p_close FROM paper_broker_orders b"
+    # 어긋난 까닭을 가르는 재료(25.1736, 아이디어 ⑤) — 내부 지정가·KIS 에 보낸 지정가와 그 거래일 일봉
+    # (`UNIQUE(stock_id, date)` 한 행씩). 미국 시장가는 KIS 에 종가 ±10% 지정가로 나가 고가도 읽는다(25.1737)
+    " o.limit_price AS i_limit, b.limit_price AS b_limit, p.low AS p_low, p.high AS p_high, p.close AS p_close"
+    " FROM paper_broker_orders b"
     " LEFT JOIN paper_orders o ON o.id = b.paper_order_id LEFT JOIN paper_fills f ON f.order_id = b.paper_order_id"
     " LEFT JOIN prices p ON p.stock_id = o.stock_id AND p.date = b.trade_date"
     " WHERE b.broker = ? AND b.trade_date >= ? AND b.trade_date < ? AND b.account_id = ?"

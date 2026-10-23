@@ -111,7 +111,8 @@ export interface BrokerSummary {
   reject_reasons: Record<string, number>;
 }
 export interface BrokerLatest { as_of: string; diff: Record<string, [number, number]>; summary: BrokerSummary | null }
-/** 비교 요약을 사람이 읽는 줄로 — 배치(`services/broker_mirror.compare_lines`)와 같은 글. 값은 배치가 낸 그대로 */
+/** 비교 요약을 사람이 읽는 줄로 — 배치(`services/broker_mirror.compare_lines`)와 같은 글("어긋난 까닭" 은 주간 요약에만,
+ *  25.1736). 값은 배치가 낸 그대로 */
 export function brokerLines(b: BrokerLatest | null | undefined): string[] {
   if (!b) return ["아직 이 시장의 KIS모의투자 기록이 없습니다 — 그 시장 일일 배치가 처음 돌면 H(지주사)의 주문을 베껴 내고 잔고를 적습니다 (docs/paper.md 15장)."];
   const s = b.summary;

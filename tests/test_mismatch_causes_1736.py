@@ -30,3 +30,29 @@ def test_어긋난_주문을_일봉으로_가른다() -> None:
     줄 = bm.compare_lines(s, 0, "2026-10-21")
     i = 줄.index("  어긋난 까닭:")
     assert any("장중엔 지정가에 닿았는데 종가는 위" in x for x in 줄[i + 1:])
+
+
+def test_미국_소수_끝자리_오차는_딱_닿음으로_25_1737() -> None:
+    """yfinance 저가 `123.44999694824219` 와 지정가 `123.45` — 날값 비교면 "아래로 내려옴" 으로 갔다(교차검증 [권고] 1)"""
+    가상만 = _줄("unfilled", 0, "filled", 123.44999694824219, 123.44999694824219, limit=123.45)
+    kis만 = _줄("filled", 10, "expired", 123.45000457763672, 124.0, limit=123.45)
+    assert bm.mismatch_cause(가상만, True) == "exact_touch"
+    assert bm.mismatch_cause(kis만, False) == "intraday_touch"
+
+
+def test_분할_뒤_다시_받은_일봉은_가르지_않는다_25_1737() -> None:
+    """2:1 분할 뒤 일봉은 지정가의 절반 — 까닭을 지어내지 않고 "분할 의심" 으로(교차검증 [권고] 2)"""
+    assert bm.mismatch_cause(_줄("filled", 10, "expired", 4_950, 5_050), False) == "bar_suspect"
+    assert bm.mismatch_cause(_줄("unfilled", 0, "filled", 5_000, 5_000), True) == "bar_suspect"
+
+
+def test_KIS_에_보낸_지정가가_잣대다_25_1737() -> None:
+    """미국 시장가 매도는 KIS 에 종가 −10% 지정가로 나간다 — 갭 하락으로 고가가 못 미쳤으면 갭(교차검증 [권고] 3)"""
+    갭 = _줄("unfilled", 0, "filled", 8_500, 8_700, limit=None, order_type="market", side="sell") | {
+        "b_limit": 9_000, "p_high": 8_800}
+    assert bm.mismatch_cause(갭, True) == "gap_beyond_limit"
+    닿음 = 갭 | {"p_high": 9_100}
+    assert bm.mismatch_cause(닿음, True) == "market_unfilled"
+    # 지정가 매수 — 보낸 값(호가 단위로 내림)이 내부 값보다 낮으면 그 값으로 견준다
+    내림 = _줄("unfilled", 0, "filled", 9_995, 9_995, limit=10_000) | {"b_limit": 9_990}
+    assert bm.mismatch_cause(내림, True) == "unexplained"

@@ -311,25 +311,52 @@ MISMATCH_CAUSES = {
     "exact_touch": "지정가에 딱 닿음(호가 대기 순서 — 가상만 참)",
     "through_unfilled": "지정가 아래로 내려왔는데 KIS 안 참(접수·시각·수량 — 가상만 참)",
     "market_unfilled": "시장가가 KIS 에서 안 참(접수·정지 — 가상만 참)",
+    "gap_beyond_limit": "시장가 대신 낸 지정가(종가 ±10%)에 일봉이 못 미침(갭 — 가상만 참)",
+    "bar_suspect": "일봉이 지정가와 너무 멀어 분할 의심(가르지 않음)",
     "unexplained": "일봉으로 설명 안 됨",
     "no_bar": "그날 일봉 없음",
 }
+#: 종가가 지정가의 이 배 아래(또는 그 역수 배 위)면 분할 뒤 다시 받은 일봉으로 보고 가르지 않는다 — 미국 시세는 분할을
+#: 감지하면 지난 저가·종가를 분할 반영 값으로 덮는데 주문의 지정가는 그대로다(25.1737, 25.1736 교차검증 [권고] 2).
+#: 값은 `desk.PI_CLOSE_FLOOR`(25.1517 지정가 개선 칸의 같은 방어)와 같다 — desk 가 이 모듈을 읽어 거꾸로 읽지 않는다
+BAR_RATIO_FLOOR = 0.8
+
+
+def _값(v: Any) -> float:
+    """미국 일봉은 yfinance 값을 반올림 없이 저장한다(`123.44999694824219`) — 0.01 단위 지정가와 같다/작다를 날값으로
+    견주면 딱 닿은 것이 다른 까닭으로 갔다(25.1737, 25.1736 교차검증 [권고] 1). 소수 넷째 자리에서 맞춘다"""
+    return round(float(v), 4)
 
 
 def mismatch_cause(r: dict[str, Any], internal: bool) -> str:
-    """어긋난 주문 한 줄(가상만 참 `internal=True` / KIS만 참)의 까닭 — `MISMATCH_CAUSES` 열쇠"""
+    """어긋난 주문 한 줄(가상만 참 `internal=True` / KIS만 참)의 까닭 — `MISMATCH_CAUSES` 열쇠.
+
+    잣대는 **KIS 에 실제로 보낸 지정가**(`b_limit`, 호가 단위로 맞춘 것)다 — 없으면 내부 지정가(25.1737, 교차검증
+    [권고] 3). 국내 지정가 매수는 둘이 같다
+    """
+    side = str(r.get("side"))
+    보낸 = r.get("b_limit")
     if r.get("i_order_type") == "market" or r.get("i_limit") is None:
+        # 미국 시장가(매도·시가 일괄 매수)는 KIS 에 종가 ±10% 지정가로 나간다(`plan` 의 대신가) — 그날 고가·저가가
+        # 그 값에 못 미쳤으면 접수 문제가 아니라 갭이다
+        재료 = internal and 보낸 is not None and r.get("p_low") is not None and r.get("p_high") is not None
+        if 재료 and ((side == "sell" and _값(r["p_high"]) < _값(보낸))
+                   or (side == "buy" and _값(r["p_low"]) > _값(보낸))):  # fmt: skip
+            return "gap_beyond_limit"
         return "market_unfilled" if internal else "unexplained"
     if r.get("p_low") is None or r.get("p_close") is None:
         return "no_bar"
-    한도, 저가 = float(r["i_limit"]), float(r["p_low"])
-    if str(r.get("side")) != "buy":
+    한도 = _값(보낸 if 보낸 is not None else r["i_limit"])
+    저가, 종가 = _값(r["p_low"]), _값(r["p_close"])
+    if 한도 <= 0 or not (BAR_RATIO_FLOOR <= 종가 / 한도 <= 1 / BAR_RATIO_FLOOR):
+        return "bar_suspect"
+    if side != "buy":
         return "unexplained"
     if internal:
         if 저가 < 한도:
             return "through_unfilled"
         return "exact_touch" if 저가 == 한도 else "unexplained"
-    return "intraday_touch" if 저가 <= 한도 < float(r["p_close"]) else "unexplained"
+    return "intraday_touch" if 저가 <= 한도 < 종가 else "unexplained"
 
 
 def compare(rows: list[dict[str, Any]]) -> dict[str, Any]:
