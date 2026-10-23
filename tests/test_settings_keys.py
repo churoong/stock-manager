@@ -20,6 +20,10 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
+
+from tests._ast_copies import 상한_숫자, 훑기
+
 뿌리 = Path(__file__).resolve().parent.parent
 스키마파일 = 뿌리 / "web" / "lib" / "settings.ts"
 설계 = 뿌리 / "docs" / "design.md"
@@ -154,15 +158,9 @@ def test_비중_상한_기본값이_같다() -> None:
 
     assert 웹_기본값("max_weight_per_stock") == sr.DEFAULT_MAX_STOCK_PCT == rp.DEFAULT_MAX_STOCK_PCT
     assert 웹_기본값("max_weight_per_sector") == sr.DEFAULT_MAX_SECTOR_PCT == rp.DEFAULT_MAX_SECTOR_PCT
-    따로 = [f"{f.relative_to(뿌리)}:{k}" for f in (뿌리 / "batch").rglob("*.py")
-            for k, 줄 in enumerate(f.read_text(encoding="utf-8").splitlines(), 1)
-            if re.search(r'"max_weight_per_(stock|sector)"\)? *(,|or) *\d', 줄)
-            or re.search(r'max_(weight_per_(stock|sector)|stock_pct|sector_pct)"?\s*(:\s*float)?\s*[:=]\s*[1-9]', 줄)
-            # 0 은 "배분하지 않음"(추천을 못 읽은 날 — `jobs/daily`)이라 뺀다
-            or re.search(r'\b(10|30)(\.0)? if \w*상한|상한 is (not )?None else (10|30)\b', 줄)]  # fmt: skip
-    # 줄을 넘긴 두 번째 인자(`_담다(get_setting_in_range(…, 기본), 10.0)`)도 — 파일 글 전체에서(25.1755)
-    따로 += [str(f.relative_to(뿌리)) for f in (뿌리 / "batch").rglob("*.py")
-             if re.search(r'_담다\([^()]*\([^()]*"max_weight_per_\w+"[^()]*\),\s*\d', f.read_text(encoding="utf-8"))]
+    # 줄 정규식은 교차검증마다 새 꼴이 빠져나갔다(25.1754~25.1756) — 구문 나무로 본다(25.1757, `tests/_ast_copies.py`).
+    # 정의처 `core/settings_range.py` 는 경로로 뺀다
+    따로 = 훑기(상한_숫자, ("batch/core/settings_range.py",))
     assert not 따로, f"비중 상한 기본값을 숫자로 다시 적었다 — settings_range.DEFAULT_MAX_* 를 쓴다: {따로}"
 
 
@@ -275,3 +273,23 @@ def test_중첩_기본값_추세_필터_조용시간_알림_문턱() -> None:
     assert 웹_중첩_기본값("trend_filter") == {"enabled": trend.DEFAULT_ENABLED, "bear_factor": trend.DEFAULT_BEAR_FACTOR}
     assert 웹_중첩_기본값("quiet_hours") == after_hours.DEFAULT_QUIET
     assert 웹_중첩_기본값("alert_thresholds")["spike_pct"] == after_hours.DEFAULT_SPIKE_PCT
+
+
+@pytest.mark.parametrize("글", [
+    "def f(max_sector_pct: float | None = 30.0): ...",
+    "def f(*, max_weight_per_stock=0.1): ...",
+    "x = g(max_stock_pct=10)",
+    "x = float(d.get('max_weight_per_sector') or 30)",
+    "x = 10 if 종목상한 is None else 종목상한",
+    "x = _담다(db.get_setting_in_range(\n    c, 'max_weight_per_stock', None),\n    10.0)",
+    "DEFAULT_MAX_SECTOR_PCT: Final[float] = (\n    30.0\n)",
+    "설정 = {'max_weight_per_stock': 10}",
+])  # fmt: skip
+def test_비중_상한_사본_검사가_꼴을_가리지_않는다(글: str) -> None:
+    """검사 자체의 되돌리기 확인 — 지난 교차검증들이 찾은 꼴을 모두 잡는다(25.1757)"""
+    assert 상한_숫자(글), 글
+
+
+def test_비중_상한_사본_검사는_0_과_다른_숫자를_잡지_않는다() -> None:
+    # 0 은 "배분하지 않음"(`jobs/daily`), 상한과 무관한 문장의 10 은 남의 일
+    assert not 상한_숫자("x = g(max_stock_pct=0.0)\ny = round(z, 10)\ndef f(max_sector_pct=sr.DEFAULT_MAX_SECTOR_PCT): ...")

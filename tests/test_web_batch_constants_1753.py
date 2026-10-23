@@ -17,6 +17,7 @@ from batch.services import fx, signals
 from batch.services import paper as pp
 from batch.sources import kis_vts as kv
 from batch.sources import nasdaq_symbols as ns
+from tests._ast_copies import 사본_대입, 훑기
 
 웹 = Path(__file__).resolve().parent.parent / "web" / "lib"
 
@@ -53,16 +54,24 @@ def test_가격제한과_환율_묵음은_정의처_하나() -> None:
     from batch.core import markets
     from batch.jobs import broker_mirror as bmj
     from batch.jobs import paper as pj
-    from batch.services import adjust, candidate_factors, stop_vol
+    from batch.services import adjust, candidate_factors, high52, stop_vol
 
     assert pp.KR_PRICE_LIMIT == signals.KR_DAILY_LIMIT == adjust.KR_UNKNOWN_PCT_JUMP == candidate_factors.LT_KR_LIMIT == (
-        stop_vol.STOP_VOL_KR_JUMP) == markets.KR_DAILY_LIMIT
+        stop_vol.STOP_VOL_KR_JUMP) == high52.KR_DAILY_LIMIT == markets.KR_DAILY_LIMIT
     assert pj.FX_MAX_AGE_DAYS == bmj.REALIZED_FX_MAX_AGE_DAYS == fx.MAX_STALE_DAYS
-    뿌리 = Path(__file__).resolve().parent.parent
-    따로 = [f"{f.relative_to(뿌리)}:{k}" for f in (뿌리 / "batch").rglob("*.py") if str(f.relative_to(뿌리)) not in _정의처
-            for k, 줄 in enumerate(f.read_text(encoding="utf-8").splitlines(), 1)
-            if re.match(rf"^({'|'.join(_사본)})\s*(:\s*\w+\s*)?=\s*[\d.]", 줄)]  # fmt: skip
+    # 줄 정규식은 `Final[float]`·줄을 넘긴 값을 놓쳤다(25.1756 교차검증) — 구문 나무로 본다(25.1757, `tests/_ast_copies.py`)
+    따로 = 훑기(lambda 글: 사본_대입(글, _사본), _정의처)
     assert not 따로, f"정의처 사본을 숫자로 다시 적었다 — core/markets·services/fx 를 쓴다: {따로}"
+
+
+@pytest.mark.parametrize("글", [
+    "KR_PRICE_LIMIT = 0.30", "KR_DAILY_LIMIT: Final[float] = 0.3", "KR_DAILY_LIMIT: float | None = 0.30",
+    "LT_KR_LIMIT = (\n    0.30\n)", "STOP_VOL_KR_JUMP = 1 - 0.7", "class A:\n    FX_MAX_AGE_DAYS = 7",
+])  # fmt: skip
+def test_사본_검사가_꼴을_가리지_않는다(글: str) -> None:
+    """검사 자체의 되돌리기 확인(25.1757) — 정의처를 따르는 꼴(`X = markets.KR_DAILY_LIMIT`)은 잡지 않는다"""
+    assert 사본_대입(글, _사본), 글
+    assert not 사본_대입("KR_PRICE_LIMIT = markets.KR_DAILY_LIMIT\nOTHER = 0.3", _사본)
 
 
 def test_장중_기업행위_의심_폭은_가격제한_바로_밖() -> None:
