@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from batch.notify.formatter import won_short
+from batch.services import signals as _signals
 
 #: 계좌 규칙별로 **따라 파는** 매도 플래그 사유 (docs/paper.md 1장). None 은 모든 플래그
 SELL_RULES: dict[str, frozenset[str] | None] = {
@@ -148,8 +149,9 @@ class Bar:
     change_pct: float | None = None  # 그날 등락률(%) — 국내 가격제한폭의 기준가를 되살린다(`limit_locked`, 25.1553)
 
 
-#: 국내 하루 가격제한폭(±30%, 2015-06-15 부터) — 시장가 주문의 체결 시점 가격이 그 끝이면 찼다고 보지 않는다(25.1553)
-KR_PRICE_LIMIT = 0.30
+#: 국내 하루 가격제한폭(±30%, 2015-06-15 부터) — 시장가 주문의 체결 시점 가격이 그 끝이면 찼다고 보지 않는다(25.1553).
+#: 정의처는 `signals.KR_DAILY_LIMIT` 하나(25.1753, 중복 규칙 감사 ⑦)
+KR_PRICE_LIMIT = _signals.KR_DAILY_LIMIT
 #: 하한가로 갇힌 시장가 매도의 까닭 끝 — 부르는 쪽이 이것을 보고 취소가 아니라 다음 장으로 미룬다
 LOCKED_SELL = "하한가 — 시장가 매도가 찼다고 보지 않는다"
 

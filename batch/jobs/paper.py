@@ -31,6 +31,7 @@ from batch.core import settings_range as sr
 from batch.notify import formatter
 from batch.services import backtest as bt
 from batch.services import company as co
+from batch.services import fx as fx_svc
 from batch.services import holding as hold
 from batch.services import paper as pp
 from batch.services import report_picks
@@ -260,8 +261,9 @@ HALT_SETTING_KEY = "paper_halt"
 #: 결정의 기준 지수
 BENCH_INDEX = {"KR": "KOSPI", "US": "SP500"}
 
-#: 미국 환율이 이 날수보다 묵었으면 쓰지 않는다 — 2부와 같은 기준(`signals_job.load_settings` 7일)
-FX_MAX_AGE_DAYS = 7
+#: 미국 환율이 이 날수보다 묵었으면 쓰지 않는다 — 정의처는 `services/fx.MAX_STALE_DAYS` 하나(25.1753, 중복 규칙 감사 ⑦ —
+#: 배치 셋·웹 셋에 따로 적혀 있었다. 웹 사본은 `tests/test_web_batch_constants_1753.py` 가 대조)
+FX_MAX_AGE_DAYS = fx_svc.MAX_STALE_DAYS
 
 KST_MARKET = "KR"
 

@@ -29,6 +29,7 @@ import requests
 from batch.core import calendar as cal
 from batch.core import db
 from batch.services import broker_mirror as bm
+from batch.services import fx as fx_svc
 from batch.sources import kis_vts as kv
 from batch.sources.kis import KisFailed
 
@@ -155,7 +156,7 @@ REALIZED_SET_SQL = "UPDATE paper_broker_orders SET realized_krw = ?, realized_fx
 #: 미국 체결의 원화 환산 — 가상모의투자와 같은 환율 표(그날 이하 마지막). 7일 넘게 묵었으면 모름.
 #: 체결 첫날 7일 앞부터 마지막 날까지 한 번에 읽는다(25.1698 — 예전엔 체결 거래일마다 한 번, 3년이면 750번)
 REALIZED_FX_SQL = "SELECT date, rate FROM fx_rates WHERE pair = 'USDKRW' AND date >= ? AND date <= ? ORDER BY date"
-REALIZED_FX_MAX_AGE_DAYS = 7
+REALIZED_FX_MAX_AGE_DAYS = fx_svc.MAX_STALE_DAYS  # 정의처 하나(25.1753)
 #: 지난 실행들이 읽어 둔 KIS 잔고 — 실현손익 다시 세기의 기준점(25.1701). 개장 전에 읽은 것만 쓴다(`_개장전_잔고`)
 REALIZED_SNAPSHOT_SQL = (
     "SELECT as_of, fetched_at, holdings_json, summary_json FROM paper_broker_daily WHERE broker = ? AND as_of >= ?"
