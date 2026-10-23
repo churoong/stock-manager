@@ -332,11 +332,22 @@ export function cancelBlock(
   if (flow.kind !== "deposit") return "취소 행은 다시 취소할 수 없습니다";
   if (Number(flow.cancelled) > 0) return "이미 취소한 입금입니다";
   const 모자람 = Object.entries(available)
-    .filter(([, v]) => v === null || v < flow.amount_krw)
+    .filter(([, v]) => v !== null && v < flow.amount_krw)
     .map(([k]) => k)
     .sort();
-  if (모자람.length) return `그 돈으로 이미 사서 현금이 모자랍니다 (계좌 ${모자람.join(", ")})`;
-  return null;
+  // 예약을 모르는 계좌(null)는 까닭이 다르다 — 달러 미체결 매수를 원화로 셀 환율이 묵었다(25.1764, 결함 루프 L2 참고:
+  // "현금이 모자랍니다" 라고 해 환율 수집이 멈춘 사실이 가려졌다). 막는 것은 그대로
+  const 모름 = Object.entries(available)
+    .filter(([, v]) => v === null)
+    .map(([k]) => k)
+    .sort();
+  const 까닭 = [
+    ...(모자람.length ? [`그 돈으로 이미 사서 현금이 모자랍니다 (계좌 ${모자람.join(", ")})`] : []),
+    ...(모름.length
+      ? [`달러 미체결 매수의 예약을 셀 환율이 없습니다 — USDKRW 가 ${FX_MAX_AGE_DAYS}일 넘게 묵음, 환율 수집 확인 (계좌 ${모름.join(", ")})`]
+      : []),
+  ];
+  return 까닭.length ? 까닭.join(" · ") : null;
 }
 
 export interface DailyRow {
