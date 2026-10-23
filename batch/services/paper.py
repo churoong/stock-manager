@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import math
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -680,6 +681,11 @@ def _대비(v: Any, 입금: float) -> float | None:
     return (float(v) / 입금 - 1) * 100 if v is not None and 입금 > 0 else None
 
 
+def _범위(날들: list[str]) -> str:
+    """정렬된 날짜 목록의 "처음~끝" — 하루면 그날 하나(25.1742 — "2026-10-22~2026-10-22" 가 나갔다)"""
+    return 날들[0] if 날들[0] == 날들[-1] else f"{날들[0]}~{날들[-1]}"
+
+
 def summary_lines(
     daily: dict[str, list[dict[str, Any]]],
     fills: dict[str, list[Fill]],
@@ -715,7 +721,22 @@ def summary_lines(
     공통평가 = next(iter(평가일들)) if len(평가일들) == 1 else None
     if 공통평가:
         모든종가 = sorted({d for v in 기준들.values() for d in v[1]})
-        out[0] += f" {공통평가} 평가" + (f" (보유 종가 {모든종가[0]}~{모든종가[-1]})" if 모든종가 else "")
+        out[0] += f" {공통평가} 평가" + (f" (보유 종가 {_범위(모든종가)})" if 모든종가 else "")
+    # 입금·같은 돈 지수가 여러 계좌에 같으면 머리 아래 한 줄로 모으고 계좌 줄에선 뺀다(25.1742 — 아홉 계좌 둘째
+    # 줄마다 "입금 10억원 · 같은 돈 KOSPI +2.2% · S&P500 +0.7%" 가 되풀이됐다). 가장 많은 계좌의 값을 머리에, 다른
+    # 계좌는 제 줄에. 계좌가 하나면 그 값을 머리에
+    지수값: dict[str, tuple[str, str, str]] = {}
+    for aid, 행들 in daily.items():
+        if 행들:
+            입 = float(행들[-1]["invested_krw"])
+            지수값[aid] = (won_short(입), *(_퍼센트(_대비(행들[-1].get(k), 입)) for k in ("kospi_krw", "sp500_krw")))
+    셈 = Counter(지수값.values())
+    주된, 주된수 = max(셈.items(), key=lambda kv: (kv[1], kv[0])) if 셈 else (None, 0)
+    if 주된 is None or (주된수 < 2 and len(지수값) > 1):
+        주된 = None
+    else:
+        누구 = "" if 주된수 == len(지수값) else f" ({'·'.join(a for a in sorted(지수값) if 지수값[a] == 주된)})"
+        out.append(f"  입금 {주된[0]}씩 · 같은 돈 KOSPI {주된[1]} · S&P500 {주된[2]}{누구}")
     끝값: dict[str, float] = {}
     for aid in sorted(daily):
         행들 = daily[aid]
@@ -740,11 +761,13 @@ def summary_lines(
         누적 = (float(끝["twr_index"]) - 1) * 100
         out.append(f"  {aid} 평가 {won_short(총액)} · 입금 대비 {_퍼센트(손익)} · 시간가중 이번 주 {_퍼센트(주간)}"
                    f" · 누적 {_퍼센트(누적)}")  # fmt: skip
+        매수, 매도 = sum(f.side == "buy" for f in 이번주), sum(f.side == "sell" for f in 이번주)
         out.append(
-            f"     입금 {won_short(입금)} · 같은 돈 KOSPI {_퍼센트(코스피)} · S&P500 {_퍼센트(미국)}"
-            f" · 이번 주 체결 매수 {sum(f.side == 'buy' for f in 이번주)}·매도 {sum(f.side == 'sell' for f in 이번주)}"
-            + ("" if 공통평가 else f" ({끝['as_of']} 평가" + (f", 종가 {날짜[0]}~{날짜[-1]}" if 날짜 else "") + ")")
-        )
+            f"     이번 주 체결 매수 {매수}·매도 {매도}"
+            + ("" if 지수값[aid] == 주된 else
+               f" · 입금 {won_short(입금)} · 같은 돈 KOSPI {_퍼센트(코스피)} · S&P500 {_퍼센트(미국)}")
+            + ("" if 공통평가 else f" ({끝['as_of']} 평가" + (f", 종가 {_범위(날짜)}" if 날짜 else "") + ")")
+        )  # fmt: skip
     # 짝 비교 (25.1458) — 한 번에 하나만 다르게 지은 짝. 차이는 그 규칙을 따른 정책 전체의 효과다(docs/paper.md 1장).
     # **투자 비중을 함께 싣는다**(검증 [필수] 7) — E 는 처음 몇 달 B 의 두 배를 사고 D 는 거의 팔지 않아, 차이의 큰 몫이
     # 규칙이 아니라 "얼마나 시장에 들어가 있었나"(베타)일 수 있다

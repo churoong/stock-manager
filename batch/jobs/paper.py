@@ -2233,9 +2233,14 @@ def run_step(
         if isinstance(a기록.get("holding"), dict):
             지 = a기록["holding"]
             가중글 = " · ".join(f"{c} {w:g}" for c, w in sorted((지.get("weights") or {}).items()))
-            메모줄.append(f"🏢 {aid} 지주사: 추천 {지['recommended']} · 두 곳 이상 {지['eligible']}"
-                       f" · 고름 {지['chosen']} · 가중 {가중글}" if "error" not in 지
-                       else f"⚠️ 가상 {aid} 지주사가 고르지 못함 — {지.get('error')}")  # fmt: skip
+            # 두 줄 — 고른 과정 / 회사별 가중치(25.1742 — 한 줄에 "가중 A 1 · B 1 …" 까지 붙어 무엇의 수인지 흐렸다)
+            if "error" not in 지:
+                메모줄.append(f"🏢 {aid} 지주사: 회사들 추천 {지['recommended']}종목 · 두 곳 이상 추천 {지['eligible']}"
+                           f" · 고름 {지['chosen']}")  # fmt: skip
+                if 가중글:
+                    메모줄.append(f"   회사별 가중치 {가중글}")
+            else:
+                메모줄.append(f"⚠️ 가상 {aid} 지주사가 고르지 못함 — {지.get('error')}")
         손익률 = f"{v.pnl_pct:+.1f}%" if v.pnl_pct is not None else "—"
         시간가중 = f"{(검['twr'] - 1) * 100:+.1f}%"
         # 계좌마다 한 줄, 억·만 원(25.1721, 리포트 가독성 — 예전엔 아홉 계좌가 " · " 로 한 문단이었다). 시간가중은

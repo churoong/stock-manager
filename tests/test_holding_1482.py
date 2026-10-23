@@ -83,7 +83,8 @@ def test_h_buys_only_multi_voter_stocks_and_records_votes(일곱: Client, monkey
     assert 결정[1][:2] == ("buy", "지주사 합의") and set(결정[1][2]["votes"]) == {"A", "B", "C", "D", "E"}
     assert 결정[3][:2] == ("skip", "지주사: 추천 회사 1곳") and 결정[3][2]["votes"] == {"B": 1.0}
     assert {r[0] for r in 일곱.q("SELECT DISTINCT stock_id FROM paper_orders WHERE account_id = 'H'")} == {1}
-    assert any(x.startswith("🏢 H 지주사: 추천 2 · 두 곳 이상 1 · 고름 1") for x in 줄)
+    assert "🏢 H 지주사: 회사들 추천 2종목 · 두 곳 이상 추천 1 · 고름 1" in 줄
+    assert any(x.startswith("   회사별 가중치 ") for x in 줄)  # 둘째 줄(25.1742)
 
 
 def test_h_does_not_buy_when_voter_charter_changed(일곱: Client, monkeypatch: pytest.MonkeyPatch) -> None:

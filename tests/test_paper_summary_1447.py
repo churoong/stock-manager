@@ -37,9 +37,9 @@ def test_weekly_lines_compare_same_money_benchmarks_and_twins() -> None:
     줄 = pp.summary_lines(daily, {"A": [_체결(1, "buy", "2026-10-05", 10_000)]}, "2026-10-03", None, {}, {}, 한도)
     # 계좌마다 두 줄, 공통 평가일은 머리에(25.1727 — 리포트 가독성)
     assert 줄[0] == "[가상모의투자] 2026-10-09 평가"
+    # 두 계좌의 같은 돈 지수가 달라 머리에 모으지 않고 계좌 줄에(25.1742)
     assert 줄[1] == "  A 평가 105만원 · 입금 대비 +5.0% · 시간가중 이번 주 +5.0% · 누적 +5.0%"
-    assert 줄[2].startswith("     입금 100만원 · ") and "같은 돈 KOSPI +2.0%" in 줄[2] and "S&P500 —" in 줄[2]
-    assert "이번 주 체결 매수 1·매도 0" in 줄[2]
+    assert 줄[2] == "     이번 주 체결 매수 1·매도 0 · 입금 100만원 · 같은 돈 KOSPI +2.0% · S&P500 —"
     assert 줄[5].startswith("  A−B: +20,000원")
     assert not any("월간" in x for x in 줄)
 
@@ -120,4 +120,19 @@ def test_평가일이_다르면_그_계좌_줄에() -> None:
     }  # fmt: skip
     줄 = pp.summary_lines(daily, {}, "2026-10-03", None, {}, {}, 한도)
     assert 줄[0] == "[가상모의투자]"
-    assert 줄[2].endswith("(2026-10-09 평가)") and 줄[4].endswith("(2026-10-08 평가)")
+    둘째 = [x for x in 줄 if x.startswith("     이번 주 체결")]
+    assert 둘째[0].endswith("(2026-10-09 평가)") and 둘째[1].endswith("(2026-10-08 평가)")
+
+
+def test_입금과_같은_돈_지수는_여럿이_같으면_머리에_한_번_25_1742() -> None:
+    """아홉 계좌 둘째 줄마다 "입금 10억원 · 같은 돈 KOSPI … · S&P500 …" 이 되풀이됐다 — 가장 많은 값을 머리에, 다른 계좌만 제 줄에.
+    보유 종가가 하루면 "a~a" 가 아니라 그날 하나"""
+    행 = {a: [_행(a, "2026-10-02", 1_000_000, 1_000_000, 1.0),
+             _행(a, "2026-10-09", 1_000_000, 1_000_000, 1.0, kospi=1_020_000 if a != "H" else 1_010_000)]
+         for a in ("A", "B", "H")}  # fmt: skip
+    줄 = pp.summary_lines(행, {}, "2026-10-03", None, {}, {}, 한도)
+    assert 줄[1] == "  입금 100만원씩 · 같은 돈 KOSPI +2.0% · S&P500 — (A·B)"
+    둘째 = {x.split()[0]: y for x, y in zip(줄, 줄[1:], strict=False) if x.startswith("  ") and " 평가 " in x}
+    assert 둘째["A"] == "     이번 주 체결 매수 0·매도 0"
+    assert 둘째["H"] == "     이번 주 체결 매수 0·매도 0 · 입금 100만원 · 같은 돈 KOSPI +1.0% · S&P500 —"
+    assert pp._범위(["2026-10-22"]) == "2026-10-22" and pp._범위(["2026-10-21", "2026-10-22"]) == "2026-10-21~2026-10-22"
