@@ -44,6 +44,10 @@ def test_분할_뒤_다시_받은_일봉은_가르지_않는다_25_1737() -> Non
     """2:1 분할 뒤 일봉은 지정가의 절반 — 까닭을 지어내지 않고 "분할 의심" 으로(교차검증 [권고] 2)"""
     assert bm.mismatch_cause(_줄("filled", 10, "expired", 4_950, 5_050), False) == "bar_suspect"
     assert bm.mismatch_cause(_줄("unfilled", 0, "filled", 5_000, 5_000), True) == "bar_suspect"
+    # 운용 화면 지정가 개선 칸의 같은 방어와 같은 값 — 한쪽만 바뀌면 같은 분할을 두 화면이 다르게 거른다
+    from batch.services import desk
+
+    assert bm.BAR_RATIO_FLOOR == desk.PI_CLOSE_FLOOR
 
 
 def test_KIS_에_보낸_지정가가_잣대다_25_1737() -> None:
