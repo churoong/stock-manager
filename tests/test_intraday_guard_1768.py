@@ -1014,3 +1014,13 @@ def test_알림이_끊긴_동안_순간_거부_문단은_한_번만_쌓인다(c:
     for _ in range(3):
         assert ig.main() == 0
     assert db.get_setting(c, ig.UNSENT_KEY, None)["text"].count("거부(초당") == 1
+    # 텔레그램이 돌아오면 그 한 문단이 가고, 표시는 다시 보내기(RETRY)를 막지 않는다 — 거부 줄은 같은 줄로 다시 접수
+    _main_준비(c, monkeypatch, 보낸)
+    monkeypatch.setattr(kv, "Session", lambda *a, **k: _Sess([_h("005930", 9_250.0)]))
+    assert ig.main() == 0 and 보낸[0].count("거부(초당") == 1 and "→ 접수" in 보낸[0]
+    assert c.q("SELECT COUNT(*), MAX(status) FROM paper_broker_orders") == [(1, "accepted")]
+
+
+def test_대기_잘림_회차도_남은_글이_또_못_가면_부분() -> None:
+    assert ig.run_status({"skipped": "잔고 조회가 쪽 상한에 닿아 잘림", "alert_error": "X", "unsent_pending": True}) == "partial"
+    assert ig.run_status({"off": ig.WAITING, "alert_error": "X", "unsent_pending": True}) == "partial"
