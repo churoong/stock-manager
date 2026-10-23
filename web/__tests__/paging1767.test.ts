@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import { KisBody } from "@/components/KisPanel";
 import { TradesPane, type FillRow } from "@/components/PaperView";
 import { sentTimeText, type KisMarketView, type KisOrder } from "@/lib/kisPaper";
+import type { LiveView } from "@/lib/kisVts";
 import { PAGE_SIZE, pageOf, pageRangeText } from "@/lib/paging";
 
 describe("쪽 나누기", () => {
@@ -32,7 +33,8 @@ describe("쪽 나누기", () => {
 describe("KIS 주문 시각", () => {
   it("보낸 시각을 한국 시각으로 — 거래일과 날짜가 다르면 날짜도", () => {
     expect(sentTimeText("2026-10-22T23:31:00Z", "2026-10-23")).toBe("08:31"); // 국내 장전 주문
-    expect(sentTimeText("2026-10-22T13:05:00+00:00", "2026-10-23")).toBe("10-22 22:05"); // 전날 밤 미국 예약주문
+    expect(sentTimeText("2026-10-22T13:05:00.123456+00:00", "2026-10-22")).toBe("22:05"); // 미국 예약주문 — 배치가 적는 꼴(마이크로초)
+    expect(sentTimeText("2026-10-23T15:05:00+00:00", "2026-10-23")).toBe("10-24 00:05"); // 재실행·지연 같은 드문 길만 날짜가 붙는다
     expect(sentTimeText(null, "2026-10-23")).toBe("-");
     expect(sentTimeText("깨짐", "2026-10-23")).toBe("-");
   });
@@ -56,6 +58,15 @@ describe("거래내역 칸이 쪽으로 나뉜다", () => {
     expect(html).toContain(">08:31<");
   });
 
+  it("방금 조회의 오늘 주문 시각은 '주문' 시각이라고 적는다 — KIS ord_tmd 는 체결 시각이 아니다", () => {
+    const v: KisMarketView = { as_of: null, fetched_at: null, holdings: [], account: null, summary: null, diff: {}, orders: [] };
+    const live = {
+      market: "KR", currency: "KRW", fetched_at: "2026-10-23T01:00:00Z", account: { cash: 0, holdings_value: 0, total: 0 }, holdings: [],
+      executions: [{ date: "20261023", time: "093012", code: "C", name: "조회", side: "buy", qty: 1, filled: 1, avg_price: 100, order_price: 100, note: null }],
+    } as unknown as LiveView;
+    expect(renderToStaticMarkup(createElement(KisBody, { sub: "trades", market: "KR", v, whole: null, live }))).toContain("주문 09:30:12 · 조회");
+  });
+
   it("한 쪽뿐이면 쪽 넘기기를 그리지 않는다", () => {
     const v: KisMarketView = { as_of: null, fetched_at: null, holdings: [], account: null, summary: null, diff: {}, orders: [주문(1)] };
     expect(renderToStaticMarkup(createElement(KisBody, { sub: "trades", market: "KR", v, whole: null, live: null }))).not.toContain("쪽 넘기기");
@@ -70,5 +81,9 @@ describe("거래내역 칸이 쪽으로 나뉜다", () => {
     expect(html).toContain("체결19");
     expect(html).not.toContain("체결20");
     expect(html).toContain("1 / 2쪽 · 1–20 / 23건");
+    expect(html).not.toContain("최근 300건만");
+    // 서버가 자른 300건이면 그렇다고 적는다(25.1767 교차검증 [권고])
+    const 꽉 = Array.from({ length: 300 }, (_, i) => ({ ...체결[0], id: i })) as FillRow[];
+    expect(renderToStaticMarkup(createElement(TradesPane, { fills: 꽉 }))).toContain("최근 300건만 보입니다");
   });
 });

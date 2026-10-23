@@ -679,6 +679,8 @@ export function TradesPane({ fills }: { fills: FillRow[] }) {
       })}
     </ul>
     <Pager p={p} onPage={setPage} />
+    {/* 서버는 계좌마다 최근 FILLS_PER_ACCOUNT 건만 준다 — 쪽 글의 "300건" 이 전부로 읽히지 않게(25.1767 교차검증 [권고], 칸 막대는 "300+") */}
+    {fills.length >= FILLS_PER_ACCOUNT ? <p className="mt-1 text-xs text-slate-500">최근 {FILLS_PER_ACCOUNT}건만 보입니다 — 더 오래된 체결은 이 목록에 없습니다(매도의 실현손익은 실현손익 탭 기간 조회에 남습니다).</p> : null}
     </>
   );
 }

@@ -161,7 +161,7 @@ function KisTrades({ orders, cur }: { orders: KisOrder[]; cur: "KRW" | "USD" }) 
       </div>
       <Pager p={p} onPage={setPage} />
       <p className="mt-1 text-xs text-slate-500">
-        주문 시각은 KIS 에 보낸 시각(한국)입니다 — 국내 장전 주문은 09:00 시가 단일가에서, 미국 예약주문은 개장 뒤에 체결됩니다. 체결 시각은 아직 기록하지 않습니다.
+        주문 시각은 KIS 에 보낸 시각(한국)이지 체결 시각이 아닙니다 — 체결 시각은 아직 기록하지 않습니다. 장전에 보낸 국내 주문은 빠르면 09:00 시가 단일가에서, 미국 예약주문은 빠르면 개장 때 체결되지만 지정가는 더 늦게 차거나 끝내 안 찰 수 있습니다.
       </p>
     </>
   );

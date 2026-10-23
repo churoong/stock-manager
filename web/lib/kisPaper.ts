@@ -124,8 +124,9 @@ export function priceText(o: Pick<KisOrder, "order_type" | "limit_price">, curre
 }
 
 /**
- * 주문을 KIS 에 보낸 시각(`sent_at`, UTC) → 한국 시각 (25.1767). 거래일과 한국 날짜가 같으면 "08:31", 다르면(미국 예약주문은 전날 밤에
- * 보내기도 한다) "10-22 22:05". 없거나 읽을 수 없으면 "-"
+ * 주문을 KIS 에 보낸 시각(`sent_at`, UTC) → 한국 시각 (25.1767). 거래일과 한국 날짜가 같으면 "08:31", 다르면 "10-22 22:05".
+ * 평소엔 늘 같다 — 국내는 그날 장전에, 미국은 거래일(현지 날짜)의 한국 10:00~개장 직전에 보낸다(`broker_mirror._us_window`).
+ * 날짜가 붙는 것은 재실행·지연 같은 드문 길뿐이다(25.1767 교차검증이 바로잡음). 없거나 읽을 수 없으면 "-"
  */
 export function sentTimeText(sentAt: string | null | undefined, tradeDate: string): string {
   if (!sentAt) return "-";
