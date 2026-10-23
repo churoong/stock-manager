@@ -86,8 +86,10 @@ def judge(series: dict[str, list[float]], n_floor: int | None = None) -> dict[st
     for k, xs in series.items():
         mm = m[k]
         if not mm or len(xs) < MIN_MONTHS:
-            out[k] = {"months": len(xs), "n_trials": n, "n_trials_run": n_run,
-                      "verdict": f"판정 안 함(월 {len(xs)}개 < {MIN_MONTHS})"}  # fmt: skip
+            # 사유를 가른다 — 24개월이 넘는데 초과수익 변동이 0 이면(샤프 정의 안 됨) "월 30개 < 24" 라는
+            # 거짓 문장이었다(25.1763)
+            왜 = f"월 {len(xs)}개 < {MIN_MONTHS}" if len(xs) < MIN_MONTHS else "초과수익 변동 0 — 샤프 정의 안 됨"
+            out[k] = {"months": len(xs), "n_trials": n, "n_trials_run": n_run, "verdict": f"판정 안 함({왜})"}
             continue
         sr, skew, kurt = mm
         p0, pd = psr(sr, 0.0, len(xs), skew, kurt), psr(sr, bar, len(xs), skew, kurt)

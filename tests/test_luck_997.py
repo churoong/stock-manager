@@ -33,7 +33,10 @@ def test_판정_한_전략이면_DSR_은_PSR_과_같고_짧으면_판정_안_함
     assert math.isclose(one["luck_pct"], round((1 - one["dsr"]) * 100, 1))
     short = luck.judge({"b": xs[: luck.MIN_MONTHS - 1]})["b"]
     assert "luck_pct" not in short
-    assert "판정 안 함" in short["verdict"]
+    assert short["verdict"] == f"판정 안 함(월 {luck.MIN_MONTHS - 1}개 < {luck.MIN_MONTHS})"
+    # 길어도 변동이 0 이면 사유가 다르다 — "월 30개 < 24" 라는 거짓 문장이었다(25.1763, 결함 루프 L2 참고)
+    평평 = luck.judge({"c": [0.01] * 30, "d": xs})["c"]
+    assert 평평["verdict"] == "판정 안 함(초과수익 변동 0 — 샤프 정의 안 됨)" and 평평["months"] == 30
 
 
 def _잡음(seed: int, n: int, mean: float) -> list[float]:
