@@ -1169,12 +1169,13 @@ def _관문_열린칸(
 def sell_decisions(
     client: Any, market: str, sell_rule: str, account_fills: list[pp.Fill], frozen: set[int],
     stock_cache: dict[int, dict[str, Any]], targets: dict | None, today: date, enrich_cache: dict[str, Any],
-    notes: dict[int, dict[str, Any]] | None = None,
+    notes: dict[int, dict[str, Any]] | None = None, lines: dict[int, dict[str, Any]] | None = None,
 ) -> dict[int, tuple[list[str], list[dict[str, Any]]]]:
     """이 시장 보유의 매도 판정 — 실제 보유와 같은 보강·같은 `evaluate` (docs/paper.md 2.2).
 
     `notes` 를 주면 종목마다 {ref: (종가, 날짜), hold: [계좌 규칙이 따르지 않은 플래그], flags: 근거} 를 채운다
-    — 결정 원장용(25.1449)
+    — 결정 원장용(25.1449). `lines` 를 주면 종목마다 **장중 감시선**(`guard_line` — 같은 판정식을 가격으로 바꾼 손절선·
+    익절선)을 채운다 — KIS모의투자 장중 손절·익절(docs/paper.md 15.11, 25.1768)
     """
     from batch.jobs import sell_flags as sf_job
 
@@ -1208,6 +1209,10 @@ def sell_decisions(
             continue
         flags = sf.evaluate(h, today, targets)
         코드들 = {f.reason_code for f in flags}
+        if lines is not None:
+            선 = guard_line(client, h, 행, sell_rule, targets, today, _stock(client, h.stock_id, stock_cache))
+            if 선:
+                lines[h.stock_id] = 선
         if sell_rule == "trend" and _추적손절(client, h, 행, targets, today):
             코드들.add(pp.TRAIL_CODE)
             글 = "목표에 닿은 뒤 고점 대비 손절폭만큼 빠짐 (추세 익절, docs/paper.md 2.2)"
@@ -1241,6 +1246,49 @@ def _추적손절(client: Any, h: Any, 행: dict[str, Any], targets: dict | None
     return pp.trend_exit(float(행["cost"]) / float(행["quantity"]), 고점[0][0] if 고점 else None,
                          float(행["market_value"]) / float(행["quantity"]), float(표["target_pct"]),
                          float(표["stop_pct"]), float(getattr(h, "rights_scale", 1.0) or 1.0))  # fmt: skip
+
+
+def guard_line(
+    client: Any, h: Any, 행: dict[str, Any], sell_rule: str, targets: dict | None, today: date, stock: dict[str, Any],
+) -> dict[str, Any] | None:
+    """KIS모의투자 장중 감시선 한 종목 (docs/paper.md 15.11, 25.1768 — 2026-10-23 사용자 지시 "보유 종목에 대한 제안은
+    진행해줘" · "아니야 이건 지금 바로 반영해줘" · "손절만이 아니라 익절도 같이 반영해야돼").
+
+    **아침 매도 판정과 같은 식을 가격으로 바꾼 것**이다 — 장중 현재가가 이 값에 닿으면 그 규칙이 종가로 판정했을 것을
+    장중에 한다. 원가 = 수수료 포함 원가 ÷ 수량 × 권리락 계수(`sell_flags.evaluate` 와 같다).
+    - `stop` 손절선 = 원가 × (1 + 손절%) — 그 계좌 규칙이 손절을 따를 때만
+    - `trail` 익절선(추세 계좌 G·H 의 추적손절) = 종가 고점 × 계수 × (1 + 손절%) — 고점이 목표(원가 × (1 + 목표%))에
+      한 번 닿은 뒤에만(`pp.trend_exit` 과 같다). 고점은 **종가** 고점이다 — 장중 신고가로 올리지 않는다
+      (아침 판정과 같은 선)
+    - `target` 익절선(목표도달에서 파는 계좌 A·B 등) = 원가 × (1 + 목표%) — 장중 현재가가 이 값 **이상**이면
+    최근 20거래일 기업행위(수량 확인 전)·평가액 없음이면 None — 거짓 손절을 장중에 내지 않는다(`low_touch` 와 같은 모름)
+    """
+    q = float(행.get("quantity") or 0)
+    if q <= 0 or float(행.get("cost") or 0) <= 0 or 행.get("market_value") is None:
+        return None
+    if getattr(h, "corporate_action_recent", False):
+        return None
+    따름 = pp.SELL_RULES.get(sell_rule, frozenset())
+    if 따름 is None:  # `all` — 모든 플래그(손절·목표도달 포함, 추적손절은 추세 계좌만)
+        따름 = frozenset({"손절", "목표도달"})
+    표 = sg.rules_for(h.horizon, targets)
+    손절, 목표 = float(표["stop_pct"]), float(표["target_pct"])
+    계수 = float(getattr(h, "rights_scale", 1.0) or 1.0)
+    배 = 계수 if 계수 != 1.0 and 계수 > 0 else 1.0
+    원가 = float(행["cost"]) / q * 배
+    선: dict[str, Any] = {"code": str(stock.get("ticker") or ""), "horizon": h.horizon, "stop_pct": 손절,
+                         "target_pct": 목표, "cost": round(원가, 6), "rule": sell_rule}  # fmt: skip
+    if "손절" in 따름:
+        선["stop"] = round(원가 * (1 + 손절 / 100), 6)
+    if "목표도달" in 따름:
+        선["target"] = round(원가 * (1 + 목표 / 100), 6)
+    if pp.TRAIL_CODE in 따름:
+        고점 = client.execute(PEAK_SQL, [h.stock_id, 행["first_buy_date"], today.isoformat()]).rows
+        꼭대기 = float(고점[0][0]) if 고점 and 고점[0][0] else None
+        if 꼭대기 and round(꼭대기 * 배 / 원가 - 1, 6) >= round(목표 / 100, 6):
+            선["trail"] = round(꼭대기 * 배 * (1 + 손절 / 100), 6)
+            선["peak"] = 꼭대기
+    return 선 if {"stop", "target", "trail"} & set(선) and 선["code"] else None
 
 
 #: 살 때부터 매도 규칙에 걸리는지 미리 보는 계좌 규칙 — 보유와 무관한 플래그(재무악화·감성급락·점검·상장폐지)로 판다.
@@ -1995,8 +2043,20 @@ def run_step(
             a기록["orders"] = "이미 냄"
         else:
             판정메모: dict[int, dict[str, Any]] = {}
+            from batch.jobs import intraday_guard
+
+            감시선: dict[int, dict[str, Any]] | None = {} if aid == intraday_guard.GUARD_ACCOUNT else None
             매도 = sell_decisions(client, market, 규칙, 계좌체결, 멈춘, stock_cache, targets,
-                               cal.local_today(market), 보강캐시, 판정메모)  # fmt: skip
+                               cal.local_today(market), 보강캐시, 판정메모, 감시선)  # fmt: skip
+            if 감시선 is not None:
+                # KIS모의투자 장중 감시선(15.11, 25.1768) — 곁다리: 못 적으면 그날 장중 감시만 꺼진다(이 단계는 그대로)
+                try:
+                    a기록["guard_lines"] = intraday_guard.save_lines(client, market, cal.local_today(market), aid,
+                                                                    규칙, 감시선)  # fmt: skip
+                except Exception as exc:  # noqa: BLE001
+                    if db.quota_reason(exc):
+                        raise
+                    a기록["guard_lines"] = {"error": type(exc).__name__}
             이미팖 = {o.stock_id for o in 열린 if o.account_id == aid and o.side == "sell"}
             보유 = pp.positions(계좌체결)
             문장: list[tuple[str, list[Any]]] = []

@@ -1,0 +1,63 @@
+name: KIS모의투자 장중 손절·익절
+
+# 국내 정규장 동안 10분마다 KIS모의투자 보유를 아침에 적어 둔 감시선(H 의 손절선·익절선)과 대 본다
+# (docs/paper.md 15.11, docs/infra.md 25.1768 — 2026-10-23 사용자 지시). 닿으면 KIS 모의에서만 시장가로 판다.
+# 시각·휴장일은 스크립트가 다시 본다(09:05~15:15 KST 밖이면 DB 를 열지 않고 끝난다).
+# 예약 실행은 지연·누락이 잦다 — cron-job.org 가 repository_dispatch(kis-guard)로 깨우면 정시성이 낫다(외부 계정 설정,
+# docs/handoff.md 사용자 결정). 매시 정각은 혼잡하므로 3분 비튼다.
+on:
+  schedule:
+    - cron: "3-59/10 0-6 * * 1-5" # 00:03~06:53 UTC = 09:03~15:53 KST (월~금)
+  repository_dispatch:
+    types: [kis-guard]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 닿은 종목만 세고 주문·알림은 내지 않음
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+# 앞 실행이 끝나기 전에 다음 예약이 오면 기다린다 — 두 실행이 같은 종목을 두 번 팔지 않게(줄 유일 색인도 막는다)
+concurrency:
+  group: kis-guard
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 장중 감시
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          DB_BACKEND: ${{ vars.DB_BACKEND }}
+          D1_ACCOUNT_ID: ${{ secrets.D1_ACCOUNT_ID }}
+          D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+          D1_API_TOKEN: ${{ secrets.D1_API_TOKEN }}
+          KIS_VTS_APP_KEY: ${{ secrets.KIS_VTS_APP_KEY }}
+          KIS_VTS_APP_SECRET: ${{ secrets.KIS_VTS_APP_SECRET }}
+          KIS_VTS_ACCOUNT: ${{ secrets.KIS_VTS_ACCOUNT }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          OFFLINE_MODE: "0"
+          LOG_LEVEL: INFO
+        run: |
+          ARGS=""
+          if [ "${{ inputs.dry_run }}" = "true" ]; then ARGS="--dry-run"; fi
+          python -m batch.jobs.intraday_guard $ARGS

@@ -133,6 +133,13 @@ PENDING_BUY_QTY_SQL = (
     " AND status = 'open' AND fill_session < ? GROUP BY stock_id"
 )
 ACCOUNT_SQL = "SELECT id FROM paper_accounts WHERE id = ?"
+#: 장중 손절·익절로 KIS 에서만 판 종목 — 그 뒤 H 가 아직 들고 있어도 "어긋남" 이 아니다(15.11, 25.1768). H 가 그 뒤 다시
+#: 산 체결이 있으면 그 몫은 KIS 도 베껴 샀으니 다시 대 본다(장중 매도가 H 의 마지막 매수 체결일 이후일 때만 뺀다)
+GUARD_SOLD_SQL = (
+    "SELECT DISTINCT b.stock_id FROM paper_broker_orders b WHERE b.broker = ? AND b.side = 'sell'"
+    " AND b.reason IN (?, ?) AND b.status <> 'rejected' AND b.trade_date >= COALESCE((SELECT MAX(f.fill_date)"
+    " FROM paper_fills f WHERE f.account_id = ? AND f.stock_id = b.stock_id AND f.side = 'buy'), '')"
+)
 INSERT_SQL = (
     "INSERT OR IGNORE INTO paper_broker_orders (broker, paper_order_id, account_id, market, stock_id, code, side,"
     " order_type, limit_price, quantity, trade_date, reason, status, source, created_at)"
@@ -556,8 +563,12 @@ def run(
     연결때 = ({int(r["stock_id"]) for r in client.execute(HELD_BEFORE_SQL, [베낌, market, 연결날]).dicts()
              if int(r["q"] or 0) > 0} if 연결날 else set(내부))  # fmt: skip
     연결전 = sorted(sid for sid in 내부 if sid in 연결때 and sid not in 증권)
-    어긋남 = bm.holdings_diff({k: q for k, q in 증권수.items() if q > 0},
-                            {k: q for k, q in 내부.items() if k not in 연결전})  # fmt: skip
+    장중판 = {int(r[0]) for r in client.execute(GUARD_SOLD_SQL, [증권사, bm.REASON_GUARD_STOP, bm.REASON_GUARD_TAKE,
+                                                                 베낌]).rows} if not 미국 else set()  # fmt: skip
+    어긋남 = bm.holdings_diff({k: q for k, q in 증권수.items() if q > 0 and k not in 장중판},
+                            {k: q for k, q in 내부.items() if k not in 연결전 and k not in 장중판})  # fmt: skip
+    if 장중판 & set(내부):
+        기록["guard_sold_held"] = len(장중판 & set(내부))  # KIS 는 장중에 팔았고 H 는 아직 든 종목(일봉 판정 차이)
     부터 = (오늘 - timedelta(days=bm.COMPARE_DAYS)).isoformat()
     # 비교·칸·성과는 **지금 베끼는 계좌의 줄만** — 도전자를 C 에서 D 로 바꾸면 C 주문이 D 의 창에 섞였다
     # (25.1517, 검토 6)

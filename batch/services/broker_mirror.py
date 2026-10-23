@@ -23,6 +23,11 @@ from batch.services.signals import to_tick
 MAX_ORDERS_PER_DAY = 40
 REASON_MIRROR = "베낌"
 REASON_CLEANUP = "정리"
+#: KIS모의투자 장중 손절·익절(docs/paper.md 15.11, 25.1768) — 내부 주문 없이 KIS 에서만 낸 매도. 비교·체결 칸은 정리처럼
+#: 짝(가상 판정)이 없어 따로 센다
+REASON_GUARD_STOP = "장중손절"
+REASON_GUARD_TAKE = "장중익절"
+GUARD_REASONS = frozenset({REASON_GUARD_STOP, REASON_GUARD_TAKE})
 #: 주문가능 수량이 모자라 정리를 일부만 낸 까닭(25.1607)
 PARTIAL_CLEANUP = "증권사 주문가능 수량 모자람 — 일부만 정리"
 #: 미국은 시장가가 없다(모의 미국 주문은 지정가만, 예약주문도 단가를 받는다) — 시장가 주문(매도·정리·시가 매수)은
@@ -383,6 +388,9 @@ def compare(rows: list[dict[str, Any]]) -> dict[str, Any]:
         if r.get("reason") == REASON_CLEANUP:
             칸["cleanup"] += 1
             continue
+        if r.get("reason") in GUARD_REASONS:
+            칸["guard"] += 1
+            continue
         if r.get("status") not in _끝난 or r.get("i_status") not in ("filled", "expired"):
             continue
         # 그 거래일에 찬 것만 "가상 참" — 미룬 매도가 뒤 장에서 찬 것은 이 날 주문과 짝이 아니다
@@ -423,7 +431,7 @@ def compare(rows: list[dict[str, Any]]) -> dict[str, Any]:
         # 100 이면 가상 체결을 그대로 믿어도 된다
         "kept_pct": 칸["both"] / 가상참 * 100 if 가상참 else None,
         **{k: 칸[k] for k in ("both", "internal_only", "kis_only", "neither", "partial", "rejected", "unknown",
-                             "cleanup", "excluded", "path_fail")},
+                             "cleanup", "guard", "excluded", "path_fail")},
         "slip_buy": 평균(차이["buy"]), "slip_sell": 평균(차이["sell"]),
         "reject_reasons": dict(까닭.most_common(COMPARE_TOP_REASONS)),
         "mismatch_causes": dict(어긋남.most_common()),
@@ -461,7 +469,7 @@ def cells(rows: list[dict[str, Any]]) -> dict[str, Any]:
         지정가매수 = r.get("side") == "buy" and r.get("i_order_type") != "market"
         # 지정가 매수는 판정 잣대와 상관없이 칸에 넣는다 — `judge` 가 지정가 매수에서 `fill_basis` 를 보지 않는다
         # (보정의 `desk._칸키` 와 같은 잣대, 25.1517 검토 5)
-        if r.get("reason") == REASON_CLEANUP or (r.get("i_fill_basis") == "close" and not 지정가매수):
+        if r.get("reason") in (REASON_CLEANUP, *GUARD_REASONS) or (r.get("i_fill_basis") == "close" and not 지정가매수):
             continue
         if r.get("status") not in _끝난 or r.get("i_status") not in ("filled", "expired"):
             continue
@@ -618,7 +626,8 @@ def compare_lines(
 ) -> list[str]:
     """주간 요약 몇 줄. 끝난 베낀 주문이 없으면 빈 목록. 거부·표본 밖은 체결 견줌(n)과 따로 끝 줄에 — 거부만 있는 주에
     "주문 없음" 으로 보이던 것(25.1564, 25.1561 반박 [권고] A)"""
-    if not s or not (s.get("n") or s.get("unknown") or s.get("cleanup") or s.get("rejected") or s.get("excluded")):
+    if not s or not (s.get("n") or s.get("unknown") or s.get("cleanup") or s.get("guard") or s.get("rejected")
+                     or s.get("excluded")):  # fmt: skip
         return []
     out = [f"[KIS모의투자 — {account} 주문 베끼기, 지난 {s['days']}일]"]
     if s.get("n"):
@@ -645,6 +654,8 @@ def compare_lines(
         끝.append(f"모름 {s['unknown']}")
     if s.get("cleanup"):
         끝.append(f"정리 주문 {s['cleanup']}")
+    if s.get("guard"):
+        끝.append(f"장중 손절·익절 {s['guard']}(H 는 아침 일봉 판정 — 짝 없음)")
     if diff_count is not None:
         끝.append(f"잔고가 어긋난 종목 {diff_count}" + (f" ({as_of})" if as_of else ""))
     if 끝:
