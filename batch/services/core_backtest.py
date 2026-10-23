@@ -253,7 +253,7 @@ class CoreMarket:
         voters: tuple[str, ...] = VOTERS,
         b_top_n: int = report_picks.TOP_STOCKS,
         top_n: int = report_picks.TOP_STOCKS,
-        max_weight_per_stock: float = 10.0,
+        max_weight_per_stock: float = report_picks.DEFAULT_MAX_STOCK_PCT,
         targets: dict | None = None,
         risk_every: str | None = None,
     ) -> None:

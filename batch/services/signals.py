@@ -18,6 +18,7 @@ import math
 from dataclasses import dataclass, field
 from typing import Any
 
+from batch.core import settings_range as sr
 from batch.core.rounding import fixed
 from batch.services import insider, scoring
 
@@ -1574,7 +1575,7 @@ def _unit(inp: SignalInput) -> str:
 
 def evaluate(
     inp: SignalInput,
-    max_weight_per_stock: float = 10.0,
+    max_weight_per_stock: float = sr.DEFAULT_MAX_STOCK_PCT,
     total_investable: float = 0.0,
     min_order_amount: float = 100_000.0,
     targets: dict | None = None,

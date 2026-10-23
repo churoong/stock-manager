@@ -484,7 +484,7 @@ def run() -> int:
         warnings.extend(w)
 
         sector_of = {sid: row.get("sector") for sid, row in stocks.items()}
-        섹터상한, 섹터상한경고 = db.get_setting_in_range(client, "max_weight_per_sector", 30.0)
+        섹터상한, 섹터상한경고 = db.get_setting_in_range(client, "max_weight_per_sector", sr.DEFAULT_MAX_SECTOR_PCT)
         if 섹터상한경고:
             warnings.append(섹터상한경고)
         # 상한의 분모 = 총 투자가능금액 (docs/infra.md 25.238). 리포트 2부와 같은 잣대

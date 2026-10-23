@@ -1986,8 +1986,8 @@ def run_step(
             day_return_pct=(검["gate_twr"] / 검["prev_twr"] - 1) * 100
             if 검["prev_twr"] and 검["gate_twr"] is not None else None,
             **_관문_열린칸(client, aid, v, 열린, fx, stock_cache),
-            max_stock_pct=float(상한.get("max_weight_per_stock") or 10.0),
-            max_sector_pct=float(상한.get("max_weight_per_sector") or 30.0),
+            max_stock_pct=float(상한.get("max_weight_per_stock") or sr.DEFAULT_MAX_STOCK_PCT),
+            max_sector_pct=float(상한.get("max_weight_per_sector") or sr.DEFAULT_MAX_SECTOR_PCT),
             today=cal.local_today(market).isoformat(), halted=멈춤, frozen=frozenset(멈춘),
             ref_floor=rg.ref_floor(market, cal.local_today(market)),
         )  # fmt: skip
@@ -2391,8 +2391,8 @@ def summary_section(client: Any, now: datetime) -> list[str]:
     rules, _ = sr.기간별_목표(db.get_setting(client, "horizon_targets", None))
     손절 = {h: sg.rules_for(h, rules)["stop_pct"] for h in sf.DEFAULT_TARGETS}
     limits = {
-        "max_stock_pct": db.get_setting_in_range(client, "max_weight_per_stock", 10.0)[0],
-        "max_sector_pct": db.get_setting_in_range(client, "max_weight_per_sector", 30.0)[0],
+        "max_stock_pct": db.get_setting_in_range(client, "max_weight_per_stock", sr.DEFAULT_MAX_STOCK_PCT)[0],
+        "max_sector_pct": db.get_setting_in_range(client, "max_weight_per_sector", sr.DEFAULT_MAX_SECTOR_PCT)[0],
         "stop_pct": 손절,
     }
     규칙 = {str(r["id"]): str(r["sell_rule"]) for r in client.execute(ACCOUNTS_SQL).dicts()}

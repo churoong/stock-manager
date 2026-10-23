@@ -148,13 +148,17 @@ def test_최소_주문_기본값이_같다() -> None:
 
 
 def test_비중_상한_기본값이_같다() -> None:
-    """배치는 `get_setting_in_range(…, 10.0)`·`(…, 30.0)` 으로 읽는다."""
-    import inspect
+    """배치의 정의처는 `settings_range.DEFAULT_MAX_*` 하나(25.1754) — 웹 기본값과 같고, 배치 어디서도 숫자로 다시 적지 않는다."""
+    from batch.core import settings_range as sr
+    from batch.services import report_picks as rp
 
-    원본 = inspect.getsource(__import__("batch.jobs.signals", fromlist=["x"]).load_settings)
-
-    assert f'"max_weight_per_stock", {웹_기본값("max_weight_per_stock"):g}.0' in 원본
-    assert f'"max_weight_per_sector", {웹_기본값("max_weight_per_sector"):g}.0' in 원본
+    assert 웹_기본값("max_weight_per_stock") == sr.DEFAULT_MAX_STOCK_PCT == rp.DEFAULT_MAX_STOCK_PCT
+    assert 웹_기본값("max_weight_per_sector") == sr.DEFAULT_MAX_SECTOR_PCT == rp.DEFAULT_MAX_SECTOR_PCT
+    따로 = [f"{f.relative_to(뿌리)}:{k}" for f in (뿌리 / "batch").rglob("*.py")
+            for k, 줄 in enumerate(f.read_text(encoding="utf-8").splitlines(), 1)
+            if re.search(r'"max_weight_per_(stock|sector)"\)? *(,|or) *\d', 줄)
+            or re.search(r'max_weight_per_stock: float = \d', 줄)]  # fmt: skip
+    assert not 따로, f"비중 상한 기본값을 숫자로 다시 적었다 — settings_range.DEFAULT_MAX_* 를 쓴다: {따로}"
 
 
 def test_대_보는_목록이_낡지_않았다() -> None:

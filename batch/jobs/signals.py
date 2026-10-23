@@ -380,8 +380,10 @@ def load_settings(client: TursoClient, currency: str = "KRW", as_of: str | None 
     )
     targets, 목표경고 = sr.기간별_목표(db.get_setting(client, "horizon_targets", None, 못읽음=경고))
     경고 += 목표경고
-    종목상한 = _담다(db.get_setting_in_range(client, "max_weight_per_stock", 10.0), 10.0)
-    섹터상한 = _담다(db.get_setting_in_range(client, "max_weight_per_sector", 30.0), 30.0)
+    종목상한 = _담다(db.get_setting_in_range(client, "max_weight_per_stock", sr.DEFAULT_MAX_STOCK_PCT),
+                 sr.DEFAULT_MAX_STOCK_PCT)  # fmt: skip
+    섹터상한 = _담다(db.get_setting_in_range(client, "max_weight_per_sector", sr.DEFAULT_MAX_SECTOR_PCT),
+                 sr.DEFAULT_MAX_SECTOR_PCT)  # fmt: skip
     종목상한, 말 = sr.비중_상한_맞추기(종목상한, 섹터상한)
     if 말:
         경고.append(말)

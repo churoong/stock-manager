@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from batch.core import markets
+from batch.core import settings_range as sr
 from batch.core.rounding import fixed
 from batch.notify import report_sections as rs
 from batch.services import criteria as crit
@@ -369,8 +370,8 @@ def to_picks(
     return picks
 
 
-DEFAULT_MAX_SECTOR_PCT = 30.0  # CLAUDE.md 매매 규칙 "단일 섹터 상한 30%". 설정 max_weight_per_sector
-DEFAULT_MAX_STOCK_PCT = 10.0  # CLAUDE.md "비중 상한 기본 10%". 설정 max_weight_per_stock
+DEFAULT_MAX_SECTOR_PCT = sr.DEFAULT_MAX_SECTOR_PCT  # CLAUDE.md "단일 섹터 상한 30%" — 정의처 settings_range(25.1754)
+DEFAULT_MAX_STOCK_PCT = sr.DEFAULT_MAX_STOCK_PCT  # CLAUDE.md "비중 상한 기본 10%" — 정의처 settings_range(25.1754)
 
 
 

@@ -171,6 +171,12 @@ def _기본표시(기본: float | None) -> str:
 #: 센티먼트 가중치 상한. 웹 `checkWeightConsistency` 가 저장을 막는 값과 같다(50 초과면 뉴스가 재무보다 커진다)
 SENTIMENT_WEIGHT_MAX = 50.0
 
+#: 비중 상한 기본값(%) — CLAUDE.md 매매 규칙 "비중 상한 기본 10%, 단일 섹터 상한 30%". 설정 `max_weight_per_stock`·
+#: `max_weight_per_sector` 가 없을 때. **정의처는 여기 하나**(25.1754, 중복 규칙 감사 ⑦ — 2부 배분·가상모의투자 배분·
+#: 위험 점검·백테스트·포트폴리오 경고 일곱 곳에 숫자로 적혀 있었다). 웹 기본값과는 `tests/test_settings_keys.py` 가 대조
+DEFAULT_MAX_STOCK_PCT = 10.0
+DEFAULT_MAX_SECTOR_PCT = 30.0
+
 
 def 센티먼트_가중치(값: float, 기본: float) -> tuple[float, str | None]:
     """웹이 저장을 막는 50 초과를 배치도 받지 않는다 (docs/infra.md 25.300).
