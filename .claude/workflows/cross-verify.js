@@ -1,7 +1,7 @@
 export const meta = {
   name: 'cross-verify',
   description: 'stock-manager 푸시 전 교차검증 — 커밋 범위를 렌즈 셋(돈·장부·주문 / 리포트·텔레그램·웹 / 기록·시험)으로 반박, [필수] 합계 (docs/loops.md L3)',
-  whenToUse: '묶음 푸시 전. 위험 커밋(KIS·일일 흐름·워크플로·마이그레이션·가상모의투자 주문 경로)은 [필수] 0 이어야 푸시',
+  whenToUse: '묶음 푸시 전. 위험 커밋(docs/loops.md L3 목록)은 [필수] 0 이어야 푸시',
   phases: [{ title: 'Verify', detail: '렌즈마다 교차검증 에이전트 하나' }],
 }
 
@@ -9,9 +9,11 @@ export const meta = {
 // 시작 뒤에 더한 역할은 목록에 없다 — 25.1751 첫 실행) 범용 에이전트가 그 정의 파일을 읽고 따르게 한다. 정의는 한 곳
 const 저장소 = (args && args.repo) || '/home/user/stock-manager'
 async function 역할(이름, 글, opts) {
+  // 대체 경로는 **등록 안 됨(예외)** 일 때만 — 에이전트가 null(죽음·건너뜀)을 돌려주면 그대로 돌려준다(다시 돌리면
+  // 예산이 두 배가 됐다, 25.1752). 대체 경로는 범용 에이전트라 도구 제한이 없다 — 읽기 전용은 지시문으로만 지킨다.
+  // 그래서 주 세션은 workflow 뒤 `git status`·`git worktree list` 가 그대로인지 본다(docs/loops.md 0장)
   try {
-    const r = await agent(글, { ...opts, agentType: 이름 })
-    if (r !== null && r !== undefined) return r
+    return await agent(글, { ...opts, agentType: 이름 })
   } catch (e) {
     log(`${이름} 이 등록돼 있지 않아 정의 파일로 부른다`)
   }

@@ -12,9 +12,11 @@ export const meta = {
 // 시작 뒤에 더한 역할은 목록에 없다 — 25.1751 첫 실행) 범용 에이전트가 그 정의 파일을 읽고 따르게 한다. 정의는 한 곳
 const 저장소 = (args && args.repo) || '/home/user/stock-manager'
 async function 역할(이름, 글, opts) {
+  // 대체 경로는 **등록 안 됨(예외)** 일 때만 — 에이전트가 null(죽음·건너뜀)을 돌려주면 그대로 돌려준다(다시 돌리면
+  // 예산이 두 배가 됐다, 25.1752). 대체 경로는 범용 에이전트라 도구 제한이 없다 — 읽기 전용은 지시문으로만 지킨다.
+  // 그래서 주 세션은 workflow 뒤 `git status`·`git worktree list` 가 그대로인지 본다(docs/loops.md 0장)
   try {
-    const r = await agent(글, { ...opts, agentType: 이름 })
-    if (r !== null && r !== undefined) return r
+    return await agent(글, { ...opts, agentType: 이름 })
   } catch (e) {
     log(`${이름} 이 등록돼 있지 않아 정의 파일로 부른다`)
   }
@@ -73,15 +75,23 @@ const 모두 = 감사.filter(Boolean).flatMap((r) => r.findings || [])
 const 고른 = 모두.filter((f) => f.severity !== 'note').slice(0, 반박상한)
 if (모두.length > 고른.length) log(`결함 ${모두.length}건 중 ${고른.length}건만 반박 — 참고·넘친 것은 다음 회차(결과의 skipped)`)
 
+const 죽은영역 = 영역.filter((_, i) => !감사[i])
+if (죽은영역.length) log(`감사 ${죽은영역.length}곳이 결과 없이 끝남 — 그 영역은 "결함 0" 이 아니다`)
 const 판정 = await parallel(고른.map((f, i) => () =>
   역할('stock-refuter', `다음 결함 주장을 반박하세요.\n제목: ${f.title}\n자리: ${f.where}\n주장한 재현: ${f.repro}\n주장한 고칠 방향: ${f.fix || ''}`,
     { schema: REFUTE, label: `refute:${i + 1}`, phase: 'Refute' })
     .then((v) => ({ ...f, refute: v }))))
-const 진짜 = 판정.filter(Boolean).filter((f) => f.refute && f.refute.real === 'real')
+// 반박이 죽은 결함은 버리지 않는다 — `unrefuted` 로(소리 없는 자르기 금지, 25.1752 교차검증 [권고])
+const 판정됨 = 고른.map((f, i) => 판정[i] || { ...f, refute: null })
+const 진짜 = 판정됨.filter((f) => f.refute && f.refute.real === 'real')
 return {
   confirmed: 진짜,
-  uncertain: 판정.filter(Boolean).filter((f) => f.refute && f.refute.real === 'uncertain'),
-  refuted: 판정.filter(Boolean).filter((f) => f.refute && f.refute.real === 'false').map((f) => f.title),
+  uncertain: 판정됨.filter((f) => f.refute && f.refute.real === 'uncertain'),
+  unrefuted: 판정됨.filter((f) => !f.refute),
+  refuted: 판정됨.filter((f) => f.refute && f.refute.real === 'false').map((f) => f.title),
   skipped: 모두.filter((f) => !고른.includes(f)),
+  failedAreas: 죽은영역,
   scopes: 감사.filter(Boolean).map((r) => r.scope || ''),
+  // 주 세션이 "진짜 0 — 날짜만 고친다" 로 닫아도 되는가: 죽은 감사·반박 없는 결함이 없을 때만
+  clean: 진짜.length === 0 && 죽은영역.length === 0 && 판정됨.every((f) => f.refute),
 }

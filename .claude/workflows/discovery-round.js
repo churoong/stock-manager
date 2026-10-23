@@ -12,9 +12,11 @@ export const meta = {
 // 시작 뒤에 더한 역할은 목록에 없다 — 25.1751 첫 실행) 범용 에이전트가 그 정의 파일을 읽고 따르게 한다. 정의는 한 곳
 const 저장소 = (args && args.repo) || '/home/user/stock-manager'
 async function 역할(이름, 글, opts) {
+  // 대체 경로는 **등록 안 됨(예외)** 일 때만 — 에이전트가 null(죽음·건너뜀)을 돌려주면 그대로 돌려준다(다시 돌리면
+  // 예산이 두 배가 됐다, 25.1752). 대체 경로는 범용 에이전트라 도구 제한이 없다 — 읽기 전용은 지시문으로만 지킨다.
+  // 그래서 주 세션은 workflow 뒤 `git status`·`git worktree list` 가 그대로인지 본다(docs/loops.md 0장)
   try {
-    const r = await agent(글, { ...opts, agentType: 이름 })
-    if (r !== null && r !== undefined) return r
+    return await agent(글, { ...opts, agentType: 이름 })
   } catch (e) {
     log(`${이름} 이 등록돼 있지 않아 정의 파일로 부른다`)
   }
@@ -61,9 +63,12 @@ const 발굴 = await 역할('stock-discoverer',
   `발굴 루프 ${회차}회차. 초점: ${초점}. docs/factors.md 12장 지난 회차 표와 겹치지 않는 후보를 최대 ${최대}개 내세요.`,
   { schema: CANDIDATES, label: 'discover', phase: 'Discover' },
 )
-const 후보 = ((발굴 && 발굴.candidates) || []).slice(0, 최대)
-if (발굴 && 발굴.candidates && 발굴.candidates.length > 최대) log(`후보 ${발굴.candidates.length}개 중 ${최대}개만 검증 — 나머지는 다음 회차`)
-if (!후보.length) return { round: 회차, candidates: [], note: '발굴 결과 없음' }
+// 발굴이 죽은 것과 후보 0 을 가른다 — 죽었는데 "발굴 결과 없음" 으로 적히면 안 된다(25.1752)
+if (!발굴) return { round: 회차, error: '발굴 에이전트 결과 없음 — 다시 돌린다', results: [] }
+const 후보 = (발굴.candidates || []).slice(0, 최대)
+const 넘침 = (발굴.candidates || []).slice(최대)
+if (넘침.length) log(`후보 ${발굴.candidates.length}개 중 ${최대}개만 검증 — 나머지는 결과의 skipped 로 다음 회차`)
+if (!후보.length) return { round: 회차, results: [], note: '발굴 결과 없음(후보 0)' }
 
 const 순위 = { fail: 3, hold: 2, conditional: 1, pass: 0 }
 const 결과 = await pipeline(
@@ -83,4 +88,4 @@ const 결과 = await pipeline(
     return { ...c, A: a, B: b, verdict: 합 }
   },
 )
-return { round: 회차, userDirected: 지시분, results: 결과.filter(Boolean) }
+return { round: 회차, userDirected: 지시분, results: 결과.filter(Boolean), skipped: 넘침 }

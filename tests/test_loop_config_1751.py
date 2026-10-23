@@ -36,7 +36,7 @@ def test_에이전트_머리() -> None:
         assert h.get("name") == f.stem, f"{f.name}: name 이 파일 이름과 다르다"
         assert h.get("description") and h.get("tools"), f"{f.name}: description·tools 없음"
         # 모든 역할은 읽기 전용 — 고치기·기록·푸시는 주 세션이 한다(찾는 쪽과 고치는 쪽을 가른다)
-        도구 = {x.strip() for x in h["tools"].split(",")}
+        도구 = {x.strip(" []\"'") for x in h["tools"].split(",")}  # `[Read, Write]` 꼴도
         assert not 도구 & {"Edit", "Write", "NotebookEdit"}, f"{f.name}: 읽기 전용 역할에 쓰기 도구"
 
 
@@ -73,3 +73,101 @@ def test_루프_문서가_모두를_적었다() -> None:
     글 = 루프문서.read_text(encoding="utf-8")
     for p in [*에이전트.glob("*.md"), *흐름.glob("*.js")]:
         assert p.stem in 글, f"docs/loops.md 에 {p.stem} 이 없다"
+
+
+# ----------------------------------------------------------------------
+# 문(gate) 규칙을 실제로 돌린다 (25.1752, 25.1751 교차검증 [권고] — 이름·문법만 봐서 "렌즈가 죽어도 must 0",
+# "보수적 합침을 뒤집음", "동결 규칙을 지움" 돌연변이가 모두 통과했다). workflow 본문을 가짜 agent·parallel·
+# pipeline 으로 감싸 node 로 돌린다 — 가짜 agent 는 label 로 응답을 고른다
+# ----------------------------------------------------------------------
+
+_가짜 = r"""
+const 응답 = __CFG__;
+const 불린 = [];
+async function agent(prompt, opts) {
+  불린.push({ label: opts.label, agentType: opts.agentType });
+  if (응답.__unregistered && String(opts.agentType || '').startsWith('stock-')) throw new Error('agent type not found');
+  const k = Object.keys(응답).find((x) => !x.startsWith('__') && String(opts.label).replace(/\*$/, '') === x);
+  if (k === undefined) return null;
+  const v = 응답[k];
+  if (v === '__throw') throw new Error('죽음');
+  return v;
+}
+async function parallel(thunks) { return Promise.all(thunks.map((t) => t().catch(() => null))); }
+async function pipeline(items, ...stages) {
+  return Promise.all(items.map(async (it, i) => {
+    let v = it;
+    try { for (const s of stages) v = await s(v, it, i); return v; } catch (e) { return null; }
+  }));
+}
+function phase() {}
+function log() {}
+const args = __ARGS__;
+(async function () {
+  const r = await (async function () {
+__BODY__
+  })();
+  console.log(JSON.stringify({ r, 불린 }));
+})();
+"""
+
+
+def _돌림(이름: str, cfg: dict, args: dict | None = None) -> dict:
+    import json
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node 없음")
+    몸 = (흐름 / f"{이름}.js").read_text(encoding="utf-8").replace("export const meta", "const meta", 1)
+    글 = (_가짜.replace("__CFG__", json.dumps(cfg, ensure_ascii=False))
+          .replace("__ARGS__", json.dumps(args or {}, ensure_ascii=False)).replace("__BODY__", 몸))  # fmt: skip
+    r = subprocess.run([node, "-"], input=글, capture_output=True, text=True, check=False)
+    assert r.returncode == 0, r.stderr[:800]
+    return json.loads(r.stdout.strip().splitlines()[-1])
+
+
+def test_교차검증_렌즈_하나가_죽으면_통과로_치지_않는다() -> None:
+    좋음 = {"must": 0, "items": []}
+    assert _돌림("cross-verify", {"xv:1": 좋음, "xv:2": 좋음, "xv:3": 좋음})["r"]["must"] == 0
+    assert _돌림("cross-verify", {"xv:1": 좋음, "xv:2": {"must": 2, "items": []}, "xv:3": 좋음})["r"]["must"] == 2
+    죽음 = _돌림("cross-verify", {"xv:1": 좋음, "xv:2": None, "xv:3": 좋음})["r"]
+    assert 죽음["must"] is None and 죽음["missingLenses"] == 1
+
+
+def test_발굴_보수적_합침과_동결_규칙() -> None:
+    후보 = {"candidates": [{"id": "P1", "name": "가", "kind": "ic", "summary": "x"}]}
+    def 판(a: str, b: str, 지시: bool = False) -> str:  # noqa: E306
+        r = _돌림("discovery-round", {"discover": 후보, "A:P1": {"verdict": a, "reasons": ""},
+                                      "B:P1": {"verdict": b, "reasons": ""}}, {"userDirected": 지시})  # fmt: skip
+        return r["r"]["results"][0]["verdict"]
+    assert 판("pass", "fail") == "fail" and 판("pass", "pass") == "pass" and 판("conditional", "pass") == "hold"
+    assert 판("conditional", "conditional", 지시=True) == "conditional"  # 사용자 지시분만 조건부가 산다
+    # 검증 하나가 죽으면 보류, 발굴이 죽으면 "후보 0" 이 아니라 error
+    assert _돌림("discovery-round", {"discover": 후보, "A:P1": {"verdict": "pass", "reasons": ""}})["r"]["results"][0][
+        "verdict"] == "hold"
+    assert "error" in _돌림("discovery-round", {"discover": None})["r"]
+
+
+def test_결함_루프는_죽은_감사와_반박을_버리지_않는다() -> None:
+    결함 = {"findings": [{"title": "t", "severity": "must", "where": "a.py:1", "repro": "r"}], "scope": "s"}
+    없음 = {"findings": [], "scope": "s"}
+    r = _돌림("defect-round", {"audit:1": 결함, "audit:2": 없음}, {"areas": ["가", "나"]})["r"]
+    assert r["unrefuted"] and not r["clean"]  # 반박이 죽었다(null)
+    r = _돌림("defect-round", {"audit:1": 결함, "audit:2": 없음, "refute:1": "__throw"}, {"areas": ["가", "나"]})["r"]
+    assert [f["title"] for f in r["unrefuted"]] == ["t"] and not r["clean"]  # 반박이 예외로 죽어도 결함이 남는다
+    r = _돌림("defect-round", {"audit:1": 없음, "audit:2": None}, {"areas": ["가", "나"]})["r"]
+    assert r["failedAreas"] == ["나"] and not r["clean"]  # 감사가 죽은 영역은 "결함 0" 이 아니다
+    r = _돌림("defect-round", {"audit:1": 결함, "audit:2": 없음,
+                               "refute:1": {"real": "false", "evidence": ""}}, {"areas": ["가", "나"]})["r"]  # fmt: skip
+    assert r["clean"] and r["refuted"] == ["t"]
+
+
+def test_등록_안_된_역할은_정의_파일로_한_번만() -> None:
+    r = _돌림("cross-verify", {"__unregistered": True, "xv:1": {"must": 0, "items": []},
+                               "xv:2": {"must": 0, "items": []}, "xv:3": {"must": 0, "items": []}})  # fmt: skip
+    assert r["r"]["must"] == 0
+    대체 = [x for x in r["불린"] if x["agentType"] == "general-purpose"]
+    assert len(대체) == 3 and all(x["label"].endswith("*") for x in 대체)
+    # 등록돼 있는데 null(죽음)이면 다시 부르지 않는다 — 예산이 두 배가 되지 않게
+    r = _돌림("cross-verify", {"xv:1": None, "xv:2": None, "xv:3": None})
+    assert len(r["불린"]) == 3
