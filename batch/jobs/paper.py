@@ -2391,11 +2391,13 @@ def summary_section(client: Any, now: datetime) -> list[str]:
         _stock(client, sid, 캐시)
     rules, _ = sr.기간별_목표(db.get_setting(client, "horizon_targets", None))
     손절 = {h: sg.rules_for(h, rules)["stop_pct"] for h in sf.DEFAULT_TARGETS}
-    limits = {
-        "max_stock_pct": db.get_setting_in_range(client, "max_weight_per_stock", sr.DEFAULT_MAX_STOCK_PCT)[0],
-        "max_sector_pct": db.get_setting_in_range(client, "max_weight_per_sector", sr.DEFAULT_MAX_SECTOR_PCT)[0],
-        "stop_pct": 손절,
-    }
+    섹터상한 = db.get_setting_in_range(client, "max_weight_per_sector", sr.DEFAULT_MAX_SECTOR_PCT)[0]
+    # 배분(`jobs/signals`)과 같은 맞추기를 거친다 — 종목 상한 > 섹터 상한인 설정이면 배분은 섹터 상한까지로
+    # 줄인 값을 쓰는데 복기는 설정 그대로 세 "종목 상한 넘음" 이 배분과 다른 잣대였다(25.1766, ⑦ 감사)
+    종목상한 = db.get_setting_in_range(client, "max_weight_per_stock", sr.DEFAULT_MAX_STOCK_PCT)[0]
+    if 종목상한 is not None and 섹터상한 is not None:
+        종목상한, _ = sr.비중_상한_맞추기(종목상한, 섹터상한)
+    limits = {"max_stock_pct": 종목상한, "max_sector_pct": 섹터상한, "stop_pct": 손절}
     규칙 = {str(r["id"]): str(r["sell_rule"]) for r in client.execute(ACCOUNTS_SQL).dicts()}
     # 늦게 연 계좌의 짝 비교 (25.1481) — 계좌마다 첫 평가일, 짝의 시작이 다르면 늦은 시작일의 지수
     시작일 = {str(r[0]): str(r[1]) for r in client.execute(FIRST_DAILY_SQL).rows}

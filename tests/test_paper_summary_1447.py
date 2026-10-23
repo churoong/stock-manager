@@ -136,3 +136,27 @@ def test_입금과_같은_돈_지수는_여럿이_같으면_머리에_한_번_25
     assert 둘째["A"] == "     이번 주 체결 매수 0·매도 0"
     assert 둘째["H"] == "     이번 주 체결 매수 0·매도 0 · 입금 100만원 · 같은 돈 KOSPI +1.0% · S&P500 —"
     assert pp._범위(["2026-10-22"]) == "2026-10-22" and pp._범위(["2026-10-21", "2026-10-22"]) == "2026-10-21~2026-10-22"
+
+
+def test_복기_상한은_배분과_같은_맞추기를_거친다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """종목 상한 > 섹터 상한인 설정이면 배분(`jobs/signals`)은 섹터 상한까지로 줄여 쓰는데 복기는 설정 그대로 셌다(25.1766)"""
+    from batch.core import db
+
+    c = Client()
+    c.conn.execute(
+        "INSERT INTO paper_cash_flows (flow_date, amount_krw, kind, created_at, request_key)"
+        " VALUES ('2026-10-14', 1000000, 'deposit', '2026-10-14T00:00:00+00:00', 'k1')"
+    )
+    from batch.services import report_picks
+
+    monkeypatch.setattr(report_picks, "with_criteria", lambda rows: rows)
+    monkeypatch.setattr(report_picks, "select_top", lambda rows, _n=5: rows)
+    monkeypatch.setattr(job, "frozen_ids", lambda *_a, **_k: set())
+    _하루(c, monkeypatch, "2026-10-14")
+    db.set_setting(c, "max_weight_per_stock", 25.0)
+    db.set_setting(c, "max_weight_per_sector", 20.0)
+    본: list[dict] = []
+    진짜 = pp.summary_lines
+    monkeypatch.setattr(pp, "summary_lines", lambda *a, **k: 본.append(a[6]) or 진짜(*a, **k))
+    job.summary_section(c, datetime(2026, 11, 1, 0, 0, tzinfo=UTC))
+    assert 본 and 본[0]["max_stock_pct"] == 20.0 and 본[0]["max_sector_pct"] == 20.0
