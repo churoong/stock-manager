@@ -430,14 +430,16 @@ def next_tranche(client: TursoClient, stock_id: int, today: date) -> tuple[float
     # 장기 카드(10-12 기준)로 산 종목이 10-13 기준 단기 신호의 계획(2차 99,000)으로 바뀌어 25.1262 가 되살아났다
     # **지금 보유가 0 에서 다시 열린 날 뒤의 매수만** — 30일 안 전량 매도 뒤 다시 사면 지난 보유의 매수까지 세어 계획에
     # 없는 "3차 가격 도달" 을 냈다(25.1789, 결함 루프 — infra 25.1551 [참고] 로 알고 두었던 것). 열린 날은 매매 기록을
-    # 누적해 **수량이 마지막으로 0 이하가 된 뒤 첫 매수일**이다(같은 날은 매도 먼저, `pp.positions` 와 같다).
+    # 누적해 **수량이 마지막으로 0 이하가 된 뒤 첫 매수일**이다(같은 날은 **매수 먼저** — 실제 매매 장부의 처리 순서
+    # `portfolio.same_day_order` 와 같다, 25.1792. 처음엔 가상모의투자 `pp.positions` 의 매도 먼저를 잘못 따라 같은 날
+    # 팔고 산 보유를 다시 연 것으로 봤다).
     # `positions.first_buy_date` 는 남은 FIFO 로트의 가장 이른 날이라 일부 매도로 1차 로트가 빠지면 2차 매수일로 밀려
     # 차수를 처음부터 다시 셌다(25.1791, 25.1789 교차검증 [필수])
     열린날 = ""
     수량 = 0.0
     for d, side, q in client.execute(
         "SELECT trade_date, side, quantity FROM trades WHERE stock_id = ?"
-        " ORDER BY trade_date, CASE side WHEN 'sell' THEN 0 ELSE 1 END, id",
+        " ORDER BY trade_date, CASE side WHEN 'buy' THEN 0 ELSE 1 END, id",
         [stock_id],
     ).rows:
         앞 = 수량

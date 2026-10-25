@@ -78,3 +78,28 @@ def test_일부만_판_보유는_계획을_이어_센다() -> None:
                    " 't', 't')")  # fmt: skip  # 1주만 — 보유는 이어진다
     assert mt.next_tranche(c, 1, date(2026, 10, 8)) == (80_000.0, 3, "2026-10-01")
 
+
+def test_같은_날_사고_판_보유는_장부처럼_매수_먼저() -> None:
+    """25.1792 (25.1791 교차검증 [권고]) — 실제 장부는 같은 날 매수 먼저(`portfolio.same_day_order`). 매도 먼저로 세면
+    10주 들고 같은 날 5주 사고 10주 판 보유를 0 에서 다시 연 것으로 봐 차수를 처음부터 셌다"""
+    c = _db()
+    _신호(c, "2026-10-01", "long", [100_000, 90_000, 80_000])
+    c.conn.execute("INSERT INTO trades (stock_id, side, trade_date, price, quantity, currency, fx_rate, fx_rate_source,"
+                   " horizon, created_at, updated_at) VALUES (1, 'buy', '2026-10-02', 100, 10, 'KRW', 1, 'none', 'long',"
+                   " 't', 't')")  # fmt: skip
+    _신호(c, "2026-10-04", "long", [95_000, 85_000, 75_000])
+    c.conn.execute("INSERT INTO trades (stock_id, side, trade_date, price, quantity, currency, fx_rate, fx_rate_source,"
+                   " horizon, created_at, updated_at) VALUES (1, 'sell', '2026-10-05', 100, 10, 'KRW', 1, 'none', 'long',"
+                   " 't', 't')")  # fmt: skip
+    c.conn.execute("INSERT INTO trades (stock_id, side, trade_date, price, quantity, currency, fx_rate, fx_rate_source,"
+                   " horizon, created_at, updated_at) VALUES (1, 'buy', '2026-10-05', 100, 5, 'KRW', 1, 'none', 'long',"
+                   " 't', 't')")  # fmt: skip
+    assert mt.next_tranche(c, 1, date(2026, 10, 12)) == (80_000.0, 3, "2026-10-01")  # 보유는 이어졌다(10→15→5)
+
+
+def test_감시_목록은_FIFO_최소_로트일을_넘기지_않는다() -> None:
+    """25.1791 — `positions.first_buy_date`(남은 FIFO 로트의 가장 이른 날)를 다시 넘기면 일부 매도 퇴행이 돌아온다"""
+    import inspect
+
+    assert "first_buy_date" not in inspect.signature(mt.next_tranche).parameters
+    assert 'next_tranche(client, int(r["stock_id"]), cal.local_today(market))' in inspect.getsource(mt.build_targets)
