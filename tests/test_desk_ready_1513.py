@@ -24,6 +24,9 @@ def test_readiness_evidence() -> None:
                                                kis=[{"n": 30, "unknown": 1, "rejected": 2}, {"n": 5}])}  # fmt: skip
     assert r["always_on"]["evidence"] == "최근 30일 일일 배치 40회 중 10분 넘게 늦음 3회 · 가장 늦음 30분"
     assert r["broker"]["evidence"] == "최근 28일 끝난 베낀 주문 35 · 모름 1 · 거부 2"
+    # 장중 손절·익절 거부는 베낀 주문 거부에서 빼 따로(25.1779)
+    장중 = {x["key"]: x for x in desk.readiness(runs=None, kis=[{"n": 30, "rejected": 3, "guard_rejected": 1}])}
+    assert 장중["broker"]["evidence"] == "최근 28일 끝난 베낀 주문 30 · 모름 0 · 거부 2 · 장중 매도 거부 1"
     assert r["audit"]["status"] == "done" and r["audit"]["evidence"] is None
     빈 = {x["key"]: x for x in desk.readiness(runs=None, kis=[])}
     assert 빈["always_on"]["evidence"] is None and 빈["broker"]["evidence"] is None

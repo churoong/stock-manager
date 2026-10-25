@@ -586,8 +586,12 @@ def readiness(*, runs: dict[str, Any] | None, kis: list[dict[str, Any]]) -> list
             from batch.services.broker_mirror import COMPARE_DAYS
 
             창 = max((int(x.get("days") or 0) for x in kis), default=0) or COMPARE_DAYS
+            # 거부는 **베낀 주문**의 거부만 — 장중 손절·익절(KIS 에서만 낸 매도) 거부는 따로(25.1779, 25.1773 교차검증
+            # [참고]: "끝난 베낀 주문 n · 거부 X" 의 X 에 베낀 주문이 아닌 장중 매도 거부가 섞였다)
+            장중거부 = sum(int(x.get("guard_rejected") or 0) for x in kis)
             근거 = (f"최근 {창}일 끝난 베낀 주문 {n} · 모름 {sum(int(x.get('unknown') or 0) for x in kis)}"
-                  f" · 거부 {sum(int(x.get('rejected') or 0) for x in kis)}")  # fmt: skip
+                  f" · 거부 {sum(int(x.get('rejected') or 0) for x in kis) - 장중거부}"
+                  + (f" · 장중 매도 거부 {장중거부}" if 장중거부 else ""))  # fmt: skip
         out.append({"key": key, "label": label, "status": status, "note": note, "evidence": 근거})
     return out
 

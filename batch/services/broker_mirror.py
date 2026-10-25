@@ -433,6 +433,7 @@ def compare(rows: list[dict[str, Any]]) -> dict[str, Any]:
             if r.get("status") == "rejected":
                 # 장중 매도 거부도 거부로 센다 — 하한가·VI 로 되풀이되면 주간 요약 까닭에 보여야 한다(25.1769)
                 칸["rejected"] += 1
+                칸["guard_rejected"] += 1  # 베낀 주문 거부와 가르게 — 데스크 실전 준비 근거가 뺀다(25.1779)
                 # 비고가 "장중 현재가 … · KIS 문구" 꼴이라 뒤쪽만 — 앞 30자(가격 글)로 건마다 쪼개지지 않게(25.1773)
                 까닭[_까닭(str(r.get("message") or "").split(" · ", 1)[-1])] += 1
             continue
@@ -480,6 +481,7 @@ def compare(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "slip_buy": 평균(차이["buy"]), "slip_sell": 평균(차이["sell"]),
         "reject_reasons": dict(까닭.most_common(COMPARE_TOP_REASONS)),
         "mismatch_causes": dict(어긋남.most_common()),
+        **({"guard_rejected": 칸["guard_rejected"]} if 칸["guard_rejected"] else {}),
     }  # fmt: skip
 
 

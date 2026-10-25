@@ -201,6 +201,7 @@ def test_비교와_잔고_대보기에서_장중_매도는_따로() -> None:
     비교 = bm.compare(줄)
     assert 비교["n"] == 0 and 비교["guard"] == 2
     assert 비교["rejected"] == 1 and 비교["reject_reasons"] == {"APBK0400": 1}  # 장중 매도 거부도 까닭을 보인다
+    assert 비교["guard_rejected"] == 1 and "guard_rejected" not in bm.compare([])  # 데스크 근거가 뺀다(25.1779)
     assert any("장중 손절·익절 2" in x for x in bm.compare_lines(비교, None, None))
 
 
