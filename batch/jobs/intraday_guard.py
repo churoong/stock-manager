@@ -663,7 +663,7 @@ def main() -> int:
                 db.finish_batch_run(client, rid, status="skipped", error_text=한도)
             else:
                 db.finish_batch_run(client, rid, status="failed", error_text=f"{type(exc).__name__}: {str(exc)[:300]}")
-        except Exception:  # noqa: BLE001 — 닫지 못한 기록은 `entry.guard` 의 `fail_open_runs`·다음 실행의 reap 이 닫는다
+        except Exception:  # noqa: BLE001 — 한도면 다음 실행의 reap 이, 그 밖에는 `entry.guard` 의 `fail_open_runs` 가 닫는다
             log.warning("실행 기록을 닫지 못했습니다")
         if 한도:
             return 0

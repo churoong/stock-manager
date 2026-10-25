@@ -21,6 +21,8 @@ def test_오늘_재무를_봤으면_적자_전환은_잇지_않는다() -> None:
     assert sf.carry_criteria(h, "재무악화", [적자, 점수]) == [점수]  # 점수 하락 근거만 잇는다
     모름 = sf.HoldingInput(**{**h.__dict__, "op_income_latest": None})
     assert sf.carry_criteria(모름, "재무악화", [적자, 점수]) == [적자, 점수]  # 재무도 못 봤으면 그대로
+    전년모름 = sf.HoldingInput(**{**h.__dict__, "op_income_prev": None})
+    assert sf.carry_criteria(전년모름, "재무악화", [적자, 점수]) == [적자, 점수]  # 전년을 몰라도 판정 못 함(25.1793)
     assert sf.carry_criteria(h, "감성급락", [적자]) == [적자]  # 다른 사유는 그대로
 
 

@@ -76,6 +76,9 @@ def test_일부만_판_보유는_계획을_이어_센다() -> None:
     c.conn.execute("INSERT INTO trades (stock_id, side, trade_date, price, quantity, currency, fx_rate, fx_rate_source,"
                    " horizon, created_at, updated_at) VALUES (1, 'sell', '2026-10-06', 100, 1, 'KRW', 1, 'none', 'long',"
                    " 't', 't')")  # fmt: skip  # 1주만 — 보유는 이어진다
+    # 실제 포트폴리오 재계산이 적는 꼴 — 남은 FIFO 로트의 가장 이른 날 = 2차 매수일. 어느 경로로 이것을 써도 깨지게(25.1793)
+    c.conn.execute("INSERT INTO positions (stock_id, quantity, currency, avg_price, avg_fx, cost, cost_krw, first_buy_date,"
+                   " horizon, updated_at) VALUES (1, 1, 'KRW', 100, 1, 100, 100, '2026-10-05', 'long', 't')")  # fmt: skip
     assert mt.next_tranche(c, 1, date(2026, 10, 8)) == (80_000.0, 3, "2026-10-01")
 
 
@@ -103,3 +106,28 @@ def test_감시_목록은_FIFO_최소_로트일을_넘기지_않는다() -> None
 
     assert "first_buy_date" not in inspect.signature(mt.next_tranche).parameters
     assert 'next_tranche(client, int(r["stock_id"]), cal.local_today(market))' in inspect.getsource(mt.build_targets)
+
+
+def _거래(c, d: str, side: str, q: float) -> None:  # noqa: ANN001
+    c.conn.execute("INSERT INTO trades (stock_id, side, trade_date, price, quantity, currency, fx_rate, fx_rate_source,"
+                   " horizon, created_at, updated_at) VALUES (1, ?, ?, 100, ?, 'KRW', 1, 'none', 'long', 't', 't')",
+                   [side, d, q])  # fmt: skip
+
+
+def test_소수점_전량_매도와_과다_매도도_장부처럼_닫힌다() -> None:
+    """25.1793 (25.1792 교차검증 [권고]) — 장부는 `QTY_EPS` 이하를 닫힘으로, 과다 매도는 보유분까지만 본다"""
+    c = _db()
+    _신호(c, "2026-10-01", "long", [100_000, 90_000, 80_000])
+    _거래(c, "2026-10-02", "buy", 0.1)
+    _거래(c, "2026-10-03", "buy", 0.2)
+    _거래(c, "2026-10-06", "sell", 0.3)  # 0.1+0.2−0.3 = 5.55e-17 — 장부로는 0
+    _신호(c, "2026-10-07", "long", [95_000, 85_000, 75_000])
+    _거래(c, "2026-10-08", "buy", 0.5)
+    assert mt.next_tranche(c, 1, date(2026, 10, 12)) == (85_000.0, 2, "2026-10-07")
+    c = _db()
+    _신호(c, "2026-10-01", "long", [100_000, 90_000, 80_000])
+    _거래(c, "2026-10-02", "buy", 10)
+    _거래(c, "2026-10-06", "sell", 15)  # 오입력 — 장부는 보유분(10)까지만
+    _신호(c, "2026-10-07", "long", [95_000, 85_000, 75_000])
+    _거래(c, "2026-10-08", "buy", 3)
+    assert mt.next_tranche(c, 1, date(2026, 10, 12)) == (85_000.0, 2, "2026-10-07")

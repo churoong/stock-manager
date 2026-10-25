@@ -435,6 +435,11 @@ def next_tranche(client: TursoClient, stock_id: int, today: date) -> tuple[float
     # 팔고 산 보유를 다시 연 것으로 봤다).
     # `positions.first_buy_date` 는 남은 FIFO 로트의 가장 이른 날이라 일부 매도로 1차 로트가 빠지면 2차 매수일로 밀려
     # 차수를 처음부터 다시 셌다(25.1791, 25.1789 교차검증 [필수])
+    # 장부(`portfolio.match_fifo`)와 같은 두 규칙 — 남은 수량이 `QTY_EPS` 이하면 닫힘(소수점 주식 0.1+0.2−0.3 의
+    # 부동소수 찌꺼기), 보유보다 많이 판 매도는 보유분까지만(0 에서 자름, 오입력). 안 그러면 다시 연 보유를
+    # 이어진 것으로 봤다(25.1793)
+    from batch.services.portfolio import QTY_EPS
+
     열린날 = ""
     수량 = 0.0
     for d, side, q in client.execute(
@@ -443,8 +448,8 @@ def next_tranche(client: TursoClient, stock_id: int, today: date) -> tuple[float
         [stock_id],
     ).rows:
         앞 = 수량
-        수량 += float(q or 0) if side == "buy" else -float(q or 0)
-        if 앞 <= 0 < 수량:
+        수량 = 수량 + float(q or 0) if side == "buy" else max(0.0, 수량 - float(q or 0))
+        if 앞 <= QTY_EPS < 수량:
             열린날 = str(d)[:10]
     매수줄 = client.execute(
         "SELECT trade_date, horizon FROM trades WHERE stock_id = ? AND side = 'buy' AND trade_date > ?"
