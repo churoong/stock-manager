@@ -1050,7 +1050,7 @@ def save_attribution(client: Any, aid: str, today: str, rule_version: int = 1) -
 
 def is_close_judged(r: dict[str, Any]) -> bool:
     """종가로 판정된 시장가 매수 체결인가 — 늦은 실행(`fill_basis` close) 또는 시가가 빈 날("시가 없음 — 종가")"""
-    return r.get("fill_basis") == "close" or str(r.get("close_note") or "").startswith("시가 없음")
+    return r.get("fill_basis") == "close" or str(r.get("close_note") or "").startswith(pp.NO_OPEN_CLOSE_NOTE)
 
 
 def department_scorecard(decisions: list[dict[str, Any]]) -> list[dict[str, Any]]:

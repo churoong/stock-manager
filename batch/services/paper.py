@@ -347,7 +347,7 @@ def judge(order: Order, bar: Bar | None) -> tuple[float | None, str]:
         elif bar.open is not None and bar.open > 0:
             가격, 까닭 = bar.open, "시가"
         else:
-            가격, 까닭 = bar.close, "시가 없음 — 종가"
+            가격, 까닭 = bar.close, NO_OPEN_CLOSE_NOTE
         if limit_locked(order, bar, 가격):
             return None, f"{까닭.split(' — ')[-1]} 상한가 — 시장가 매수가 찼다고 보지 않는다"
         return 가격, 까닭
@@ -364,7 +364,7 @@ def judge(order: Order, bar: Bar | None) -> tuple[float | None, str]:
     elif bar.open is not None and bar.open > 0:
         가격, 까닭 = bar.open, "시가"
     else:
-        가격, 까닭 = bar.close, "시가 없음 — 종가"
+        가격, 까닭 = bar.close, NO_OPEN_CLOSE_NOTE
     if limit_locked(order, bar, 가격):
         return None, f"{까닭.split(' — ')[-1]} {LOCKED_SELL}"
     return 가격, 까닭
@@ -1084,6 +1084,11 @@ def _까닭_묶음(reason: str) -> str:
 
 def _막은매도(d: dict[str, Any]) -> bool:
     return str(d.get("reason") or "").startswith(BLOCKED_SELL_PREFIX)
+
+
+#: 시가가 비어 시장가를 그날 종가로 판정한 까닭 글 — 성과 분해 진입 칸이 이 글로 "종가 판정" 을 가른다
+#: (`jobs/paper.is_close_judged`, 25.1783·25.1786 — 글자가 바뀌면 종가 판정 체결이 진입 평균에 조용히 다시 섞인다)
+NO_OPEN_CLOSE_NOTE = "시가 없음 — 종가"
 
 
 def attribution(

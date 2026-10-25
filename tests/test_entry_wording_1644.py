@@ -97,3 +97,18 @@ def test_종가로_판정된_시장가_매수는_진입에서_재지_않는다()
     줄 = next(x for x in pp.attribution_lines("C", a) if " 진입: " in x)
     assert "평균 3.00% 쌌다 (n=10), 종가로 판정된 시장가 체결 10건은 재지 않음" in 줄
     assert jp.is_close_judged({"fill_basis": "close"}) and not jp.is_close_judged({"fill_basis": "open", "close_note": "시가"})
+    # 판정 까닭 글은 `pp.judge` 가 실제로 내는 글로 — 글자가 바뀌어도 거르기가 따라간다(25.1786)
+    가격, 까닭 = pp.judge(pp.Order(1, "C", 1, "buy", "market", None, 1, "KRW", "2026-10-26"),
+                          pp.Bar("2026-10-26", None, 103.0, 1000))  # fmt: skip
+    assert 가격 == 103.0 and 까닭 == pp.NO_OPEN_CLOSE_NOTE and jp.is_close_judged({"close_note": 까닭})
+
+
+def test_진입_줄_전체_글은_웹과_같다() -> None:
+    """배치 `attribution_lines` 와 웹 `entryCellText` 가 같은 까닭 글(웹 시험 entryLimit1687 과 같은 입력, 25.1786)"""
+    def 줄(e: dict) -> str:
+        a = {"selection": {}, "skipped": {}, "missed": {}, "sold": {}, "held_flag": {}, "entry": e}
+        return next(x for x in pp.attribution_lines("C", a) if " 진입: " in x)
+
+    assert "종가로 판정된 시장가 체결 10건은 재지 않음(체결가가 그날 종가라 늘 0)" in 줄({"n": 10, "avg": 3.0, "close_n": 10})
+    assert ("진입: 지정가 체결 2건, 종가로 판정된 시장가 체결 1건은 재지 않음(지정가는 모형상 늘 종가 이상, 종가 판정은 늘 0)"
+            in 줄({"n": 0, "avg": None, "limit_n": 2, "close_n": 1}))

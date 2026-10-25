@@ -511,7 +511,7 @@ export interface Attribution {
   add_on?: AttrCell;
   skipped: AttrCell;
   skip_by_reason: Record<string, AttrCell>;
-  /** 시장가 매수만 잰다 — 지정가 체결은 `limit_n` 에 수만(모형상 늘 종가 이상, 25.1687) */
+  /** 시가에 찬 시장가 매수만 잰다 — 지정가 체결은 `limit_n`(모형상 늘 종가 이상, 25.1687), 종가로 판정된 시장가 체결은 `close_n`(늘 0, 25.1783)에 수만 */
   entry: AttrCell & { limit_n?: number; close_n?: number };
   missed: AttrCell;
   sold: AttrCell;
