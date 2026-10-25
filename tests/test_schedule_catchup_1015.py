@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -66,7 +66,6 @@ def test_우리_워크플로의_cron_을_모두_읽는다() -> None:
 
 def test_주간_요약은_이번_주에_이미_보냈으면_다시_보내지_않는다(monkeypatch) -> None:  # noqa: ANN001
     """따라잡기와 늦게 온 GitHub 예약이 겹쳐도 한 통 (25.1015)."""
-    from datetime import timedelta
 
     from batch.core import db
     from batch.jobs import weekly_summary as ws
@@ -76,9 +75,14 @@ def test_주간_요약은_이번_주에_이미_보냈으면_다시_보내지_않
     db.apply_migrations(mem)  # type: ignore[arg-type]
     mem.close = lambda: None  # type: ignore[method-assign]
     monkeypatch.setattr(ws, "TursoClient", lambda: mem)
-    어제 = (datetime.now(UTC) - timedelta(days=1)).isoformat()
+    # **이번 주**(한국 날짜 일요일 시작, `ws.week_key`) 안의 한 시각 — 예전엔 "어제" 라 한국 일요일에 돌리면 어제(토)가
+    # 지난주라 매주 일요일 이 시험만 깨졌다(25.1782). 그 주 일요일 정오(한국)는 언제 돌려도 같은 주다
+    from batch.core import calendar as cal
+
+    주 = date.fromisoformat(ws.week_key(datetime.now(UTC)))
+    보냄 = datetime.combine(주, datetime.min.time().replace(hour=12), tzinfo=cal.market_tz("KR")).isoformat()
     mem.conn.execute("INSERT INTO batch_runs (job_name, started_at, status) VALUES ('weekly_summary', ?, 'success')",
-                     [어제])  # fmt: skip
+                     [보냄])  # fmt: skip
     시작: list = []
     monkeypatch.setattr(ws.db, "start_batch_run", lambda *a, **k: 시작.append(1) or 1)
     assert ws.run() == 0 and 시작 == []
