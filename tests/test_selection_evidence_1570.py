@@ -15,9 +15,11 @@ def _결정(market: str, day: str, kind: str, ret: float, sid: int, held: bool |
             "ret_20d": ret, "bench_20d": 0.0, "stock_id": sid, "detail_json": json.dumps(det)}  # fmt: skip
 
 
-def _하루(market: str, day: str, held: bool | None = None) -> list[dict]:
-    # 산 것 하나(수익 5) + 안 산 새 후보 풀(수익 0~9)
-    return [_결정(market, day, "buy", 5.0, 1, held)] + [
+def _하루(market: str, day: str, held: bool | None = None, sid: int | None = None) -> list[dict]:
+    # 산 것 하나(수익 5) + 안 산 새 후보 풀(수익 0~9). 산 종목은 날·시장마다 다르다 — 같은 종목 되풀이는 첫 결정만
+    # 센다(25.1784)
+    산 = sid if sid is not None else int(day.replace("-", "")) * 10 + (market == "US")
+    return [_결정(market, day, "buy", 5.0, 산, held)] + [
         _결정(market, day, "skip", float(r), 100 + r) for r in range(pp.EVIDENCE_MIN_POOL)]
 
 
@@ -103,3 +105,15 @@ def test_핵심_H_관문_잣대도_추가_매수를_뺀다() -> None:
 
     assert ce.gate_evidence(기록(True), ce.Closes(prices))["days"] == 0
     assert ce.gate_evidence(기록(False), ce.Closes(prices))["days"] > 0
+
+
+def test_같은_종목_되풀이_새_매수는_첫_결정만_초과_묶음에_든다() -> None:
+    """25.1784 (결함 루프 [권고]) — 분할 지정가가 안 차 같은 종목이 날마다 "새 매수" 로 적히면 한 종목만으로 묶음의 사흘
+    문턱이 차 챔피언 짝 차이(`excess_blocks`)에 들었다(가상 대조는 25.1706 에서 이미 첫 결정만)"""
+    결정 = []
+    for k in range(6):
+        for i in range(3):
+            결정 += _하루("KR", (_묶음_첫날(k) + timedelta(days=i)).isoformat(), sid=500 + k)
+    e = pp.selection_evidence(결정)
+    assert e["excess_blocks"] == {}  # 묶음마다 결정일 하루(종목 하나) — 문턱 아래
+    assert e["n_blocks"] == 6  # 분위 묶음은 사전 등록 정의 그대로(관문 "선정 실력")
