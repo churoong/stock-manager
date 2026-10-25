@@ -599,9 +599,16 @@ def main() -> int:
         글, 표시 = 기록.pop("alert", None), 기록.pop("marks", None) or {}
         날표시 = 기록.pop("date_marks", None) or []
         감시선없음 = not 글 and str(기록.get("off", "")).startswith(NO_LINES)
-        if 감시선없음 and not args.dry_run:  # 확인 실행은 알림·표시를 내지 않는다(25.1772)
-            글 = no_lines_alert(client, now, str(기록.get("off", "")))
-        못보냄 = unsent_text(client, now, repair=True) if not args.dry_run else None
+        # 보내기 전 DB 읽기(감시선 없음 표시·못 보낸 글)는 깨져도 **이번 글은 보낸다** — 주문 직후 DB 가 잠깐 끊기면
+        # 이 읽기가 먼저 던져 판 알림이 한 통도 안 갔다(25.1788, 결함 루프 — 25.1769 "기록이 깨져도 알림은 간다")
+        못보냄 = None
+        try:
+            if 감시선없음 and not args.dry_run:  # 확인 실행은 알림·표시를 내지 않는다(25.1772)
+                글 = no_lines_alert(client, now, str(기록.get("off", "")))
+            못보냄 = unsent_text(client, now, repair=True) if not args.dry_run else None
+        except Exception as exc:  # noqa: BLE001 — 알림이 먼저. 실패는 아래에서 실행 기록으로
+            기록["db_error"] = type(exc).__name__
+            실패 = 실패 or exc
         if 못보냄:
             글 = f"{못보냄}\n{글}" if 글 else 못보냄
         if 글:
@@ -615,23 +622,31 @@ def main() -> int:
                 if 판글 := 기록.get("sale_alert"):
                     # 판 알림은 다음 회차가 다시 만들지 못한다 — **판 알림 원문만** 머리 없이 쌓아 다음 회차가 보낸다
                     # (25.1774·25.1775 — 글 전체를 남기면 머리·표시성 문단이 회차마다 겹쳐 쌓였다)
-                    앞 = unsent_raw(client)
-                    # 날짜는 처음 못 보낸 날 그대로(머리), 문단마다 그날 날짜를 단다 — 지난 장 글과 오늘 매도가
-                    # 한 머리 아래 서로의 날짜로 읽히지 않게(25.1776·25.1777 교차검증)
-                    문단 = f"[{kst_today(now)}] {판글}"
-                    db.set_setting(client, UNSENT_KEY, {"date": 앞["date"] if 앞 else kst_today(now),
-                                                       "text": f"{앞['text']}\n{문단}" if 앞 else 문단})  # fmt: skip
-                    # 글이 남았으니 순간 거부는 "알린 것" 으로 친다 — 안 그러면 텔레그램이 끊긴 동안 같은 거부
-                    # 문단이 회차마다 쌓였다(25.1777 교차검증 [권고])
-                    mark_ids(client, now, {TRANSIENT_KEY: 표시.get(TRANSIENT_KEY, [])})
+                    try:
+                        앞 = unsent_raw(client)
+                        # 날짜는 처음 못 보낸 날 그대로(머리), 문단마다 그날 날짜를 단다 — 지난 장 글과 오늘 매도가
+                        # 한 머리 아래 서로의 날짜로 읽히지 않게(25.1776·25.1777 교차검증)
+                        문단 = f"[{kst_today(now)}] {판글}"
+                        새글 = f"{앞['text']}\n{문단}" if 앞 else 문단
+                        db.set_setting(client, UNSENT_KEY, {"date": 앞["date"] if 앞 else kst_today(now), "text": 새글})
+                        # 글이 남았으니 순간 거부는 "알린 것" 으로 친다 — 안 그러면 텔레그램이 끊긴 동안 같은 거부
+                        # 문단이 회차마다 쌓였다(25.1777 교차검증 [권고])
+                        mark_ids(client, now, {TRANSIENT_KEY: 표시.get(TRANSIENT_KEY, [])})
+                    except Exception as e2:  # noqa: BLE001 — 텔레그램·DB 가 함께 끊겼다. 다음 아침 맞추기가 줄을 본다
+                        기록["db_error"] = type(e2).__name__
+                        실패 = 실패 or e2
             else:  # 표시는 보낸 뒤에만 — 실패한 날은 다음 회차가 다시 알린다
-                if 감시선없음:
-                    mark_alerted(client, now)
-                for key in 날표시:
-                    mark_alerted(client, now, key)
-                mark_ids(client, now, 표시)
-                if 못보냄:  # 빈 칸으로 — null 로 덮으면 매 회차 "설정을 읽지 못함" 경고가 났다(25.1775)
-                    db.set_setting(client, UNSENT_KEY, {})
+                try:
+                    if 감시선없음:
+                        mark_alerted(client, now)
+                    for key in 날표시:
+                        mark_alerted(client, now, key)
+                    mark_ids(client, now, 표시)
+                    if 못보냄:  # 빈 칸으로 — null 로 덮으면 매 회차 "설정을 읽지 못함" 경고가 났다(25.1775)
+                        db.set_setting(client, UNSENT_KEY, {})
+                except Exception as exc:  # noqa: BLE001 — 보냈다. 표시를 못 적으면 다음 회차가 한 번 더 알릴 뿐
+                    기록["db_error"] = type(exc).__name__
+                    실패 = 실패 or exc
         기록.pop("sale_alert", None)  # 글은 실행 기록(step_log)에 넣지 않는다 — 종목·수량
         if 실패 is not None:
             raise 실패
@@ -639,13 +654,21 @@ def main() -> int:
         log.info("장중 감시: %s", {k: v for k, v in 기록.items() if k in ("off", "skipped", "lines", "hits", "sent")})
         return 0
     except Exception as exc:
-        if db.quota_reason(exc):
-            db.finish_batch_run(client, rid, status="skipped", error_text=db.quota_reason(exc))
-            return 0
-        db.finish_batch_run(client, rid, status="failed", error_text=f"{type(exc).__name__}: {str(exc)[:300]}")
+        # 실행 기록 닫기도 DB 라 깨질 수 있다 — 그 실패가 아래 실패 알림을 가리지 않게(25.1788)
+        try:
+            if db.quota_reason(exc):
+                db.finish_batch_run(client, rid, status="skipped", error_text=db.quota_reason(exc))
+                return 0
+            db.finish_batch_run(client, rid, status="failed", error_text=f"{type(exc).__name__}: {str(exc)[:300]}")
+        except Exception:  # noqa: BLE001 — 기록 닫기 실패는 다음 실행의 reap 이 닫는다
+            log.warning("실행 기록을 닫지 못했습니다")
         try:
             오늘 = now.astimezone(cal.market_tz("KR")).date().isoformat()
-            if not args.dry_run and db.get_setting(client, FAIL_ALERT_KEY, None) != 오늘:
+            try:
+                본날 = db.get_setting(client, FAIL_ALERT_KEY, None)
+            except Exception:  # noqa: BLE001 — 표시를 못 읽으면 보낸다(두 통이 한 통도 없는 것보다 낫다)
+                본날 = None
+            if not args.dry_run and 본날 != 오늘:
                 telegram.send(f"⚠️ KIS모의투자 장중 손절·익절 실행 실패 ({type(exc).__name__}) — 실행 기록·"
                               "Actions 로그 확인. 오늘 같은 실패는 다시 알리지 않습니다")  # fmt: skip
                 mark_alerted(client, now, FAIL_ALERT_KEY)

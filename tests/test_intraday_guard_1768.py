@@ -1082,3 +1082,29 @@ def test_같은_날_다시_돈_단계가_못_적은_감시선을_다시_적는�
         _, 넷째 = _하루(c, monkeypatch, "2026-10-15", signals=False)
     assert 넷째["accounts"]["B"]["guard_lines"] == {"error": "RuntimeError"}
     assert db.get_setting(c, ig.GUARD_KEY, None)["KR"] == 부분
+
+
+def test_매도_직후_DB가_통째로_끊겨도_판_알림은_간다(c: Client, monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1788 (결함 루프) — SENT_UPDATE 부터 모든 질의가 실패하면 `main` 이 보내기 전 DB 읽기(못 보낸 글)에서 먼저 던져
+    KIS 시장가 매도는 나갔는데 텔레그램이 한 통도 안 갔다(실패 알림까지 기록 닫기 실패에 가려짐)"""
+    보낸: list[str] = []
+    _main_준비(c, monkeypatch, 보낸)
+    s = _Sess([_h("005930", 9_250.0)])
+    monkeypatch.setattr(kv, "Session", lambda *a, **k: s)
+    진짜 = c.execute
+    끊김 = {"on": False}
+
+    def execute(sql: str, args: list[Any] | None = None) -> Any:
+        if sql == bmj.SENT_UPDATE_SQL:
+            끊김["on"] = True
+        if 끊김["on"]:
+            raise RuntimeError("DB 끊김")
+        return 진짜(sql, args)
+
+    c.execute = execute  # type: ignore[method-assign]
+    with pytest.raises(RuntimeError):
+        ig.main()
+    assert s.orders == [("sell", "005930", 10, None)]
+    assert any("⚡ KIS모의투자 장중 매도" in x for x in 보낸)  # 판 알림
+    assert any("실행 실패" in x for x in 보낸)  # 표시를 못 읽어도 실패 알림은 간다
+    db._열린_실행.clear()  # DB 가 끊겨 닫지 못한 실행 기록 — 다음 실행의 reap 이 닫는다(일부러 남김)
