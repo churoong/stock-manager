@@ -1025,3 +1025,35 @@ def test_알림이_끊긴_동안_순간_거부_문단은_한_번만_쌓인다(c:
 def test_대기_잘림_회차도_남은_글이_또_못_가면_부분() -> None:
     assert ig.run_status({"skipped": "잔고 조회가 쪽 상한에 닿아 잘림", "alert_error": "X", "unsent_pending": True}) == "partial"
     assert ig.run_status({"off": ig.WAITING, "alert_error": "X", "unsent_pending": True}) == "partial"
+
+
+def test_같은_날_다시_돈_단계가_못_적은_감시선을_다시_적는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """첫 실행의 감시선 저장이 깨졌으면 같은 날 다시 돌린 단계("이미 냄" 가지)가 다시 적는다(25.1780)"""
+    from tests.test_paper_job_1445 import _시세, _하루
+    from tests.test_paper_job_1445 import client as 픽스처
+
+    c = 픽스처.__wrapped__(monkeypatch)  # type: ignore[attr-defined]
+    monkeypatch.setattr(ig, "GUARD_ACCOUNT", "B")
+    _일정(c, "2026-10-15T09:20:00+00:00")
+    _하루(c, monkeypatch, "2026-10-14")
+    _시세(c, "2026-10-15", 10_100, 9_900)
+    진짜 = ig.save_lines
+
+    def 깨짐(*_a: Any, **_k: Any) -> None:
+        raise RuntimeError("설정 쓰기 실패")
+
+    with monkeypatch.context() as m:
+        m.setattr(ig, "save_lines", 깨짐)
+        _, 첫 = _하루(c, monkeypatch, "2026-10-15", signals=False)
+    assert 첫["accounts"]["B"]["guard_lines"] == {"error": "RuntimeError"} and not ig.lines_saved(c, date(2026, 10, 16), "B")
+    assert ig.save_lines is 진짜
+    if 첫["accounts"]["B"].get("orders") != "이미 냄":  # 이 장부는 그날 B 결정이 없을 수 있다 — 낸 날을 만든다
+        c.conn.execute(
+            "INSERT INTO paper_orders (account_id, market, stock_id, side, order_type, limit_price, quantity, currency,"
+            " decided_on, fill_session, reason, rule_version, tranche, created_at)"
+            " VALUES ('B', 'KR', 1, 'buy', 'limit', 100, 1, 'KRW', '2026-10-15', '2099-01-01', 'r', 1, 1, 't')")
+    _, 다시 = _하루(c, monkeypatch, "2026-10-15", signals=False)
+    assert 다시["accounts"]["B"]["orders"] == "이미 냄" and 다시["accounts"]["B"]["guard_lines"]["n"] == 1
+    assert ig.lines_saved(c, date(2026, 10, 16), "B")
+    _, 셋째 = _하루(c, monkeypatch, "2026-10-15", signals=False)
+    assert "guard_lines" not in 셋째["accounts"]["B"]  # 이미 적혔으면 다시 계산하지 않는다

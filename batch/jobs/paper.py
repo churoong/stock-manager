@@ -1257,6 +1257,21 @@ def _추적손절(client: Any, h: Any, 행: dict[str, Any], targets: dict | None
                          float(표["stop_pct"]), float(getattr(h, "rights_scale", 1.0) or 1.0))  # fmt: skip
 
 
+def _감시선_적기(
+    client: Any, market: str, aid: str, 규칙: str, 감시선: dict[int, dict[str, Any]], 감시오류: dict[str, int],
+) -> dict[str, Any]:
+    """KIS모의투자 장중 감시선을 적고 실행 기록 칸을 돌려준다(15.11, 25.1768) — 곁다리: 못 적으면 그날 장중 감시만
+    꺼진다(이 단계는 그대로). 한도 오류만 올린다"""
+    from batch.jobs import intraday_guard
+
+    try:
+        return intraday_guard.save_lines(client, market, cal.local_today(market), aid, 규칙, 감시선, 감시오류)
+    except Exception as exc:  # noqa: BLE001
+        if db.quota_reason(exc):
+            raise
+        return {"error": type(exc).__name__}
+
+
 def guard_line(
     client: Any, h: Any, 행: dict[str, Any], sell_rule: str, targets: dict | None, today: date, stock: dict[str, Any],
 ) -> dict[str, Any] | None:
@@ -2056,27 +2071,34 @@ def run_step(
             today=cal.local_today(market).isoformat(), halted=멈춤, frozen=frozenset(멈춘),
             ref_floor=rg.ref_floor(market, cal.local_today(market)),
         )  # fmt: skip
+        from batch.jobs import intraday_guard
+
+        # 국내만 — 장중 감시는 국내 정규장에서만 돈다(미국은 다음 단계, 25.1769)
+        감시함 = aid == intraday_guard.GUARD_ACCOUNT and market == "KR"
+
         if int(client.execute(ORDERS_EXIST_SQL, [aid, market, trade_date] * 3).scalar() or 0) > 0:
             a기록["orders"] = "이미 냄"
+            # 같은 날 다시 돌린 단계 — 첫 실행이 감시선을 못 적었으면(저장 실패) 여기서 다시 적는다. 예전엔 "이미 냄"
+            # 가지라 다시 돌려도 그날 장중 감시가 꺼진 채였다(25.1780, 25.1774 교차검증 [참고])
+            if 감시함 and not intraday_guard.lines_saved(client, cal.local_today(market), aid):
+                감시선: dict[int, dict[str, Any]] = {}
+                감시오류: dict[str, int] = {}
+                try:
+                    sell_decisions(client, market, 규칙, 계좌체결, 멈춘, stock_cache, targets,
+                                   cal.local_today(market), 보강캐시, None, 감시선, 감시오류)  # fmt: skip
+                except Exception as exc:  # noqa: BLE001 — 곁다리
+                    if db.quota_reason(exc):
+                        raise
+                    감시오류[type(exc).__name__] = 감시오류.get(type(exc).__name__, 0) + 1
+                a기록["guard_lines"] = _감시선_적기(client, market, aid, 규칙, 감시선, 감시오류)
         else:
             판정메모: dict[int, dict[str, Any]] = {}
-            from batch.jobs import intraday_guard
-
-            # 국내만 — 장중 감시는 국내 정규장에서만 돈다(미국은 다음 단계, 25.1769)
-            감시선: dict[int, dict[str, Any]] | None = (
-                {} if aid == intraday_guard.GUARD_ACCOUNT and market == "KR" else None)
-            감시오류: dict[str, int] = {}
+            감시선 = {} if 감시함 else None
+            감시오류 = {}
             매도 = sell_decisions(client, market, 규칙, 계좌체결, 멈춘, stock_cache, targets,
                                cal.local_today(market), 보강캐시, 판정메모, 감시선, 감시오류)  # fmt: skip
             if 감시선 is not None:
-                # KIS모의투자 장중 감시선(15.11, 25.1768) — 곁다리: 못 적으면 그날 장중 감시만 꺼진다(이 단계는 그대로)
-                try:
-                    a기록["guard_lines"] = intraday_guard.save_lines(client, market, cal.local_today(market), aid,
-                                                                    규칙, 감시선, 감시오류)  # fmt: skip
-                except Exception as exc:  # noqa: BLE001
-                    if db.quota_reason(exc):
-                        raise
-                    a기록["guard_lines"] = {"error": type(exc).__name__}
+                a기록["guard_lines"] = _감시선_적기(client, market, aid, 규칙, 감시선, 감시오류)
             이미팖 = {o.stock_id for o in 열린 if o.account_id == aid and o.side == "sell"}
             보유 = pp.positions(계좌체결)
             문장: list[tuple[str, list[Any]]] = []

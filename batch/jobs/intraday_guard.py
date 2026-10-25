@@ -160,6 +160,13 @@ def save_lines(
             **({"line_errors": errors} if errors else {})}
 
 
+def lines_saved(client: Any, today: date, account: str) -> bool:
+    """오늘·이 계좌의 국내 감시선 칸이 적혀 있나(선이 0 개여도 적힌 것) — 같은 날 다시 돈 단계가 다시 적을지 가른다"""
+    값 = db.get_setting(client, GUARD_KEY, None)
+    칸 = 값.get("KR") if isinstance(값, dict) else None
+    return isinstance(칸, dict) and 칸.get("as_of") == today.isoformat() and 칸.get("account") == account
+
+
 def action_today(client: Any, stock_ids: list[int], today: date) -> tuple[set[int], str | None]:
     """**오늘**이 무상·유상증자 권리락일인 종목 — 그날은 감시선을 만들지 않는다(25.1771, 25.1770 교차검증 [필수]:
     기계적 하락이 나는 바로 그날은 아침 배치가 아직 그 하락을 못 봐 `corporate_action_recent` 가 거르지 못했고, 권리락
