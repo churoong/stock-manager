@@ -959,7 +959,7 @@ function ReportPane({ a }: { a: Account }) {
         {Object.entries(t.skip_by_reason ?? {}).map(([k, v]) => (
           <li key={k}>안 낸 까닭 — {k}: {attrCellText(v)}</li>
         ))}
-        <li>진입: 체결가 대비 그날 종가 {entryCellText(t.entry)} · 안 찬 회차의 그 뒤 {attrCellText(t.missed)}</li>
+        <li>진입(체결가 대비 그날 종가): {entryCellText(t.entry)} · 안 찬 회차의 그 뒤 {attrCellText(t.missed)}</li>
         <li>청산: 판 뒤 {attrCellText(t.sold)} · 플래그를 따르지 않고 든 뒤 {attrCellText(t.held_flag)} (판 뒤가 음수면 판 것이 옳았다)</li>
         {t.blocked?.n ? <li>위험 점검이 막은 매수의 그 뒤: {attrCellText(t.blocked)} (오르면 막은 것이 비용)</li> : null}
         {t.blocked_sell?.n ? <li>위험 점검이 막은 매도의 그 뒤: {attrCellText(t.blocked_sell)} (내리면 막은 것이 비용)</li> : null}

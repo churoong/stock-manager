@@ -103,8 +103,9 @@ def test_종가로_판정된_시장가_매수는_진입에서_재지_않는다()
     assert 가격 == 103.0 and 까닭 == pp.NO_OPEN_CLOSE_NOTE and jp.is_close_judged({"close_note": 까닭})
 
 
-def test_진입_줄_전체_글은_웹과_같다() -> None:
-    """배치 `attribution_lines` 와 웹 `entryCellText` 가 같은 까닭 글(웹 시험 entryLimit1687 과 같은 입력, 25.1786)"""
+def test_진입_줄_까닭_글은_웹_시험과_같은_입력에서_같다() -> None:
+    """배치 `attribution_lines` 의 "재지 않음" 까닭 글 — 웹 시험 entryLimit1687 과 같은 입력·같은 기대 글(25.1786).
+    두 언어를 직접 견주지는 않는다(기대 글은 양쪽 시험에 따로 적혀 있다 — 한쪽을 바꾸면 다른 쪽 시험도 함께 고친다)"""
     def 줄(e: dict) -> str:
         a = {"selection": {}, "skipped": {}, "missed": {}, "sold": {}, "held_flag": {}, "entry": e}
         return next(x for x in pp.attribution_lines("C", a) if " 진입: " in x)
