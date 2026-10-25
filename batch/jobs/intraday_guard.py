@@ -161,10 +161,15 @@ def save_lines(
 
 
 def lines_saved(client: Any, today: date, account: str) -> bool:
-    """오늘·이 계좌의 국내 감시선 칸이 적혀 있나(선이 0 개여도 적힌 것) — 같은 날 다시 돈 단계가 다시 적을지 가른다"""
+    """오늘·이 계좌의 국내 감시선 칸이 적혀 있나(선이 0 개여도 적힌 것) — 같은 날 다시 돈 단계가 다시 적을지 가른다.
+    **계산 오류로 빠진 선이 있으면 안 적힌 것**으로 본다 — 순간 오류였으면 다시 돌리기로 되살아나게(25.1781,
+    25.1780 교차검증 [권고]: 모두 깨진 날 `dropped` 칸이 "적힘" 이라 다시 돌려도 계속 꺼졌다). 일정 묵음으로 뺀 날은
+    다시 해도 같아 적힌 것으로 둔다"""
     값 = db.get_setting(client, GUARD_KEY, None)
     칸 = 값.get("KR") if isinstance(값, dict) else None
-    return isinstance(칸, dict) and 칸.get("as_of") == today.isoformat() and 칸.get("account") == account
+    if not isinstance(칸, dict) or 칸.get("as_of") != today.isoformat() or 칸.get("account") != account:
+        return False
+    return not (칸.get("line_errors") or "계산 오류" in str(칸.get("dropped") or ""))
 
 
 def action_today(client: Any, stock_ids: list[int], today: date) -> tuple[set[int], str | None]:

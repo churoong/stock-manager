@@ -1047,7 +1047,7 @@ def test_같은_날_다시_돈_단계가_못_적은_감시선을_다시_적는�
         _, 첫 = _하루(c, monkeypatch, "2026-10-15", signals=False)
     assert 첫["accounts"]["B"]["guard_lines"] == {"error": "RuntimeError"} and not ig.lines_saved(c, date(2026, 10, 16), "B")
     assert ig.save_lines is 진짜
-    if 첫["accounts"]["B"].get("orders") != "이미 냄":  # 이 장부는 그날 B 결정이 없을 수 있다 — 낸 날을 만든다
+    if 첫["accounts"]["B"].get("orders") == 0:  # 이 장부는 그날 B 결정이 없다 — "이미 냄" 가지를 타게 낸 날을 만든다
         c.conn.execute(
             "INSERT INTO paper_orders (account_id, market, stock_id, side, order_type, limit_price, quantity, currency,"
             " decided_on, fill_session, reason, rule_version, tranche, created_at)"
@@ -1057,3 +1057,10 @@ def test_같은_날_다시_돈_단계가_못_적은_감시선을_다시_적는�
     assert ig.lines_saved(c, date(2026, 10, 16), "B")
     _, 셋째 = _하루(c, monkeypatch, "2026-10-15", signals=False)
     assert "guard_lines" not in 셋째["accounts"]["B"]  # 이미 적혔으면 다시 계산하지 않는다
+    assert not ig.lines_saved(c, date(2026, 10, 16), "H")  # 다른 계좌가 적은 칸은 이 계좌 것이 아니다
+    # 계산 오류로 빠진 선이 있는 칸은 "안 적힘" — 다시 돌리기로 되살린다(25.1781). 일정 묵음으로 뺀 칸은 적힌 것
+    값 = db.get_setting(c, ig.GUARD_KEY, None)
+    for 칸, 적힘 in (({"line_errors": 1}, False), ({"dropped": "감시선 계산 오류(KeyError)"}, False),
+                    ({"dropped": "기업행위 일정 묵음(2026-10-01)"}, True)):  # fmt: skip
+        db.set_setting(c, ig.GUARD_KEY, {"KR": 값["KR"] | 칸})
+        assert ig.lines_saved(c, date(2026, 10, 16), "B") is 적힘

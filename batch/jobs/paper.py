@@ -2086,11 +2086,11 @@ def run_step(
                 try:
                     sell_decisions(client, market, 규칙, 계좌체결, 멈춘, stock_cache, targets,
                                    cal.local_today(market), 보강캐시, None, 감시선, 감시오류)  # fmt: skip
-                except Exception as exc:  # noqa: BLE001 — 곁다리
+                    a기록["guard_lines"] = _감시선_적기(client, market, aid, 규칙, 감시선, 감시오류)
+                except Exception as exc:  # noqa: BLE001 — 곁다리. 판정이 깨졌으면 적지 않는다(첫 실행의 칸 그대로)
                     if db.quota_reason(exc):
                         raise
-                    감시오류[type(exc).__name__] = 감시오류.get(type(exc).__name__, 0) + 1
-                a기록["guard_lines"] = _감시선_적기(client, market, aid, 규칙, 감시선, 감시오류)
+                    a기록["guard_lines"] = {"error": type(exc).__name__}
         else:
             판정메모: dict[int, dict[str, Any]] = {}
             감시선 = {} if 감시함 else None

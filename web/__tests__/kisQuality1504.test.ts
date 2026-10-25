@@ -37,6 +37,9 @@ describe("실행 품질 추이", () => {
       "2026-10-20 기준 지난 28일 끝난 주문 25 · 체결 일치 84% · 실현율 90%(가상 체결 가운데 KIS 에서도 찬 비율) · 모름 2건(일치·실현율에서 빠짐)",
     );
     expect(qualityLine(rows[0])).toContain("체결을 견줄 주문 없음 · 거부 1건"); // 25.1617 — 닫힌 주문 건수를 가리지 않는다
+    // 장중 손절·익절 거부는 베낀 주문 거부와 갈라 보인다(25.1781)
+    expect(qualityLine({ ...rows[0], rejected: 3, guard_rejected: 1 })).toContain("거부 2건 · 장중 매도 거부 1건");
+    expect(qualityLine({ ...rows[0], rejected: 1, guard_rejected: 1 })).toContain("체결을 견줄 주문 없음 · 장중 매도 거부 1건");
     expect(qualityLine(undefined)).toContain("아직");
     expect(qualityLine({ ...rows[1], kept_pct: null })).toContain("실현율 모름");
   });

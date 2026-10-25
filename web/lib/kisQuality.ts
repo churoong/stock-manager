@@ -26,6 +26,7 @@ export const QUALITY_SQL = `SELECT as_of, account_id,
   json_extract(summary_json, '$.slip_buy.avg') AS slip_buy,
   json_extract(summary_json, '$.slip_sell.avg') AS slip_sell,
   json_extract(summary_json, '$.rejected') AS rejected,
+  json_extract(summary_json, '$.guard_rejected') AS guard_rejected,
   json_extract(summary_json, '$.unknown') AS unknown,
   json_extract(summary_json, '$.cells') AS cells
 FROM paper_broker_daily WHERE broker = ? AND as_of >= ? ORDER BY as_of`;
@@ -33,6 +34,8 @@ FROM paper_broker_daily WHERE broker = ? AND as_of >= ? ORDER BY as_of`;
 export interface QualityRow {
   as_of: string; account_id?: string | null; n: number | null; match_pct: number | null; kept_pct: number | null;
   slip_buy: number | null; slip_sell: number | null; rejected: number | null; unknown?: number | null;
+  /** 그 거부 가운데 장중 손절·익절(KIS 에서만 낸 매도) 거부 — 베낀 주문 거부와 가른다(25.1781, 배치 `compare`). 옛 줄엔 없다 */
+  guard_rejected?: number | null;
   /** 체결 칸 JSON(25.1514 전 줄에는 없다) */
   cells?: string | null;
 }
@@ -130,7 +133,11 @@ export function slipSeries(rows: QualityRow[]): Series[] {
 export function qualityLine(r: QualityRow | undefined): string {
   if (!r || !Number(r.n)) {
     // 견줄 주문이 0 이어도 배치가 모름·거부로 닫은 주문은 있다 — 미국 예약이 개장 때 전송 안 된 날이 그렇다(25.1617, KIS 웹 감사 [필수])
-    const 닫힘 = [Number(r?.unknown) > 0 ? `모름 ${r?.unknown}건` : "", Number(r?.rejected) > 0 ? `거부 ${r?.rejected}건` : ""].filter(Boolean);
+    // 거부는 베낀 주문의 거부만 — 장중 손절·익절 거부는 따로(25.1781, 데스크 근거 25.1779 와 같은 가름)
+    const 장중 = Number(r?.guard_rejected) || 0;
+    const 베낀거부 = (Number(r?.rejected) || 0) - 장중;
+    const 닫힘 = [Number(r?.unknown) > 0 ? `모름 ${r?.unknown}건` : "", 베낀거부 > 0 ? `거부 ${베낀거부}건` : "",
+      장중 > 0 ? `장중 매도 거부 ${장중}건` : ""].filter(Boolean);
     if (r && 닫힘.length) return `${r.as_of} 기준 지난 ${DIVERGE.COMPARE_DAYS}일 체결을 견줄 주문 없음 · ${닫힘.join(" · ")}(일치·실현율에서 빠짐)`;
     return "아직 끝난 베낀 주문이 없습니다 — 낸 다음 거래일의 같은 시장 배치가 체결을 맞춥니다.";
   }
