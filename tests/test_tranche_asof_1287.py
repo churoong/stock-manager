@@ -62,12 +62,19 @@ def test_다_팔고_다시_산_보유는_새_계획의_차수로() -> None:
                    " 't', 't')")  # fmt: skip
     _신호(c, "2026-10-07", "long", [95_000, 85_000, 75_000])
     _매수(c, "2026-10-08")  # 새 보유의 1차
-    assert mt.next_tranche(c, 1, date(2026, 10, 12), "2026-10-08") == (85_000.0, 2, "2026-10-07")
-    assert mt.next_tranche(c, 1, date(2026, 10, 12)) == (80_000.0, 3, "2026-10-01")  # 보유 시작일을 모르면 예전 꼴
+    assert mt.next_tranche(c, 1, date(2026, 10, 12)) == (85_000.0, 2, "2026-10-07")
 
 
-def test_감시_목록이_보유_시작일을_넘긴다() -> None:
-    import inspect
+def test_일부만_판_보유는_계획을_이어_센다() -> None:
+    """25.1791 (25.1789 교차검증 [필수]) — 열린 날을 남은 FIFO 로트의 가장 이른 날(`positions.first_buy_date`)로 잡으면
+    일부 매도로 1차 로트가 빠질 때 2차 매수일로 밀려 다른 계획의 "2차 85,000" 을 다시 권했다"""
+    c = _db()
+    _신호(c, "2026-10-01", "long", [100_000, 90_000, 80_000])
+    _매수(c, "2026-10-02")
+    _신호(c, "2026-10-04", "long", [95_000, 85_000, 75_000])
+    _매수(c, "2026-10-05")
+    c.conn.execute("INSERT INTO trades (stock_id, side, trade_date, price, quantity, currency, fx_rate, fx_rate_source,"
+                   " horizon, created_at, updated_at) VALUES (1, 'sell', '2026-10-06', 100, 1, 'KRW', 1, 'none', 'long',"
+                   " 't', 't')")  # fmt: skip  # 1주만 — 보유는 이어진다
+    assert mt.next_tranche(c, 1, date(2026, 10, 8)) == (80_000.0, 3, "2026-10-01")
 
-    assert 'next_tranche(client, int(r["stock_id"]), cal.local_today(market), r.get("first_buy_date"))' in (
-        inspect.getsource(mt.build_targets))

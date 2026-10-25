@@ -654,14 +654,19 @@ def main() -> int:
         log.info("장중 감시: %s", {k: v for k, v in 기록.items() if k in ("off", "skipped", "lines", "hits", "sent")})
         return 0
     except Exception as exc:
-        # 실행 기록 닫기도 DB 라 깨질 수 있다 — 그 실패가 아래 실패 알림을 가리지 않게(25.1788)
+        # 실행 기록 닫기도 DB 라 깨질 수 있다 — 그 실패가 아래 실패 알림을 가리지 않게(25.1788). 한도는 실패로
+        # 알리지 않는다(25.6) — 닫기가 같은 한도로 던져도 건너뜀으로 끝낸다(25.1791, 25.1788 교차검증 [참고]: 닫기
+        # 실패를 삼키자 한도 회차가 "실행 실패" 알림으로 흘렀다)
+        한도 = db.quota_reason(exc)
         try:
-            if db.quota_reason(exc):
-                db.finish_batch_run(client, rid, status="skipped", error_text=db.quota_reason(exc))
-                return 0
-            db.finish_batch_run(client, rid, status="failed", error_text=f"{type(exc).__name__}: {str(exc)[:300]}")
-        except Exception:  # noqa: BLE001 — 기록 닫기 실패는 다음 실행의 reap 이 닫는다
+            if 한도:
+                db.finish_batch_run(client, rid, status="skipped", error_text=한도)
+            else:
+                db.finish_batch_run(client, rid, status="failed", error_text=f"{type(exc).__name__}: {str(exc)[:300]}")
+        except Exception:  # noqa: BLE001 — 닫지 못한 기록은 `entry.guard` 의 `fail_open_runs`·다음 실행의 reap 이 닫는다
             log.warning("실행 기록을 닫지 못했습니다")
+        if 한도:
+            return 0
         try:
             오늘 = now.astimezone(cal.market_tz("KR")).date().isoformat()
             try:

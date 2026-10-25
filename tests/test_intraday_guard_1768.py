@@ -1108,3 +1108,22 @@ def test_매도_직후_DB가_통째로_끊겨도_판_알림은_간다(c: Client,
     assert any("⚡ KIS모의투자 장중 매도" in x for x in 보낸)  # 판 알림
     assert any("실행 실패" in x for x in 보낸)  # 표시를 못 읽어도 실패 알림은 간다
     db._열린_실행.clear()  # DB 가 끊겨 닫지 못한 실행 기록 — 다음 실행의 reap 이 닫는다(일부러 남김)
+
+
+def test_한도로_끊기면_실패_알림_없이_건너뜀(c: Client, monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1791 (25.1788 교차검증 [참고]) — 기록 닫기까지 같은 한도로 던지면 삼킨 뒤 "실행 실패" 알림으로 흘렀다(25.6 어김)"""
+    보낸: list[str] = []
+    _main_준비(c, monkeypatch, 보낸)
+    monkeypatch.setattr(kv, "Session", lambda *a, **k: _Sess([_h("005930", 9_500.0)]))
+    진짜 = c.execute
+
+    def execute(sql: str, args: list[Any] | None = None) -> Any:
+        if "batch_runs" not in sql:
+            raise RuntimeError("SQL read operations are forbidden (reads are blocked)")
+        if sql.lstrip().upper().startswith("UPDATE"):
+            raise RuntimeError("SQL read operations are forbidden (reads are blocked)")
+        return 진짜(sql, args)
+
+    c.execute = execute  # type: ignore[method-assign]
+    assert ig.main() == 0 and 보낸 == []
+    db._열린_실행.clear()
