@@ -1061,6 +1061,24 @@ def test_같은_날_다시_돈_단계가_못_적은_감시선을_다시_적는�
     # 계산 오류로 빠진 선이 있는 칸은 "안 적힘" — 다시 돌리기로 되살린다(25.1781). 일정 묵음으로 뺀 칸은 적힌 것
     값 = db.get_setting(c, ig.GUARD_KEY, None)
     for 칸, 적힘 in (({"line_errors": 1}, False), ({"dropped": "감시선 계산 오류(KeyError)"}, False),
-                    ({"dropped": "기업행위 일정 묵음(2026-10-01)"}, True)):  # fmt: skip
+                    ({"dropped": "기업행위 일정 묵음(2026-10-01)"}, True),
+                    ({"dropped": "기업행위 일정 읽기 실패(RuntimeError)"}, False)):  # fmt: skip
         db.set_setting(c, ig.GUARD_KEY, {"KR": 값["KR"] | 칸})
         assert ig.lines_saved(c, date(2026, 10, 16), "B") is 적힘
+    # 다시 적는 길에서 매도 판정이 깨지면 첫 실행이 적은 칸(일부 선·line_errors)을 덮지 않는다 — 빈 칸으로 덮으면 일부만
+    # 돌던 장중 감시가 통째로 꺼졌다(25.1781·25.1785)
+    부분 = 값["KR"] | {"line_errors": 1}
+    db.set_setting(c, ig.GUARD_KEY, {"KR": 부분})
+
+    원래판정 = jp.sell_decisions
+
+    def 판정_깨짐(*a: Any, **k: Any) -> Any:
+        if len(a) > 10 and a[9] is None and a[10] is not None:  # 다시 적는 길(결정 메모 없이 감시선만)
+            raise RuntimeError("시세 읽기 실패")
+        return 원래판정(*a, **k)
+
+    with monkeypatch.context() as m:
+        m.setattr(jp, "sell_decisions", 판정_깨짐)
+        _, 넷째 = _하루(c, monkeypatch, "2026-10-15", signals=False)
+    assert 넷째["accounts"]["B"]["guard_lines"] == {"error": "RuntimeError"}
+    assert db.get_setting(c, ig.GUARD_KEY, None)["KR"] == 부분
