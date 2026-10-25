@@ -247,7 +247,8 @@ ATTR_DECISIONS_SQL = (
 )
 #: 진입 칸의 체결도 **지금 판의 주문만**(25.1547 감사 [참고] 4 — 위 주석과 달리 판을 거르지 않아 지난 판 체결이 섞였다)
 ATTR_FILLS_SQL = (
-    "SELECT f.order_id, f.price, f.day_close, o.order_type FROM paper_fills f JOIN paper_orders o ON o.id = f.order_id"
+    "SELECT f.order_id, f.price, f.day_close, o.order_type, o.fill_basis, o.close_note"
+    " FROM paper_fills f JOIN paper_orders o ON o.id = f.order_id"
     " WHERE f.account_id = ? AND f.side = 'buy' AND f.day_close IS NOT NULL AND f.fill_date >= ?"
     " AND COALESCE(o.rule_version, 1) = ?"
 )
@@ -1030,9 +1031,13 @@ def save_attribution(client: Any, aid: str, today: str, rule_version: int = 1) -
     부터 = (date.fromisoformat(today) - timedelta(days=ATTR_WINDOW_DAYS)).isoformat()
     결정 = client.execute(ATTR_DECISIONS_SQL, [aid, 부터, rule_version]).dicts()
     체결행 = client.execute(ATTR_FILLS_SQL, [aid, 부터, rule_version]).dicts()
-    # 진입은 시장가 매수만 잰다 — 지정가는 수만(25.1687)
-    a = pp.attribution(결정, [(float(r["price"]), r["day_close"]) for r in 체결행 if r.get("order_type") != "limit"],
-                       limit_fills=sum(1 for r in 체결행 if r.get("order_type") == "limit"))
+    # 진입은 **시가에 찬** 시장가 매수만 잰다 — 지정가는 수만(25.1687). 종가로 판정된 시장가(늦은 실행 `fill_basis
+    # close`·"시가 없음 — 종가")도 수만: 체결가 = 그날 종가라 늘 정확히 0 이 섞여 평균이 0 쪽으로 묽어졌다(25.1783,
+    # 결함 루프 [권고]). 매수는 미루지 않아 `fill_basis` 가 곧 판정 기준이다(25.1621)
+    시장가 = [r for r in 체결행 if r.get("order_type") != "limit"]
+    종가판정 = [r for r in 시장가 if is_close_judged(r)]
+    a = pp.attribution(결정, [(float(r["price"]), r["day_close"]) for r in 시장가 if not is_close_judged(r)],
+                       limit_fills=len(체결행) - len(시장가), close_fills=len(종가판정))
     성적 = department_scorecard(결정)
     if 성적:
         a["departments"] = 성적
@@ -1041,6 +1046,11 @@ def save_attribution(client: Any, aid: str, today: str, rule_version: int = 1) -
     a["rule_version"] = rule_version  # 이 판의 결정만 셌다 — 화면이 "판을 올리면 처음부터" 를 말한다(25.1602)
     _쓰기(client, [(SAVE_ATTR_SQL, [json.dumps(a, ensure_ascii=False), aid, today])])
     return a
+
+
+def is_close_judged(r: dict[str, Any]) -> bool:
+    """종가로 판정된 시장가 매수 체결인가 — 늦은 실행(`fill_basis` close) 또는 시가가 빈 날("시가 없음 — 종가")"""
+    return r.get("fill_basis") == "close" or str(r.get("close_note") or "").startswith("시가 없음")
 
 
 def department_scorecard(decisions: list[dict[str, Any]]) -> list[dict[str, Any]]:

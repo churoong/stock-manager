@@ -512,7 +512,7 @@ export interface Attribution {
   skipped: AttrCell;
   skip_by_reason: Record<string, AttrCell>;
   /** 시장가 매수만 잰다 — 지정가 체결은 `limit_n` 에 수만(모형상 늘 종가 이상, 25.1687) */
-  entry: AttrCell & { limit_n?: number };
+  entry: AttrCell & { limit_n?: number; close_n?: number };
   missed: AttrCell;
   sold: AttrCell;
   held_flag: AttrCell;
@@ -553,9 +553,11 @@ export function attrCellText(c: AttrCell | undefined, unit = "%p"): string {
   return `${c.avg >= 0 ? "+" : ""}${c.avg.toFixed(unit === "%" ? 2 : 1)}${unit} (n=${c.n}${이김}${참고})`;
 }
 
-/** 진입 칸의 글 — 지정가 체결은 재지 않고 수만 적는다(배치 `attribution_lines` 와 같은 뜻, 25.1687) */
-export function entryCellText(c: (AttrCell & { limit_n?: number }) | undefined): string {
-  const 지정 = c?.limit_n ? `지정가 체결 ${c.limit_n}건은 재지 않음(모형상 늘 종가 이상)` : "";
+/** 진입 칸의 글 — 지정가 체결·종가로 판정된 시장가 체결은 재지 않고 수만 적는다(배치 `attribution_lines` 와 같은 글, 25.1687·25.1783) */
+export function entryCellText(c: (AttrCell & { limit_n?: number; close_n?: number }) | undefined): string {
+  const 안잼 = [c?.limit_n ? `지정가 체결 ${c.limit_n}건` : "", c?.close_n ? `종가로 판정된 시장가 체결 ${c.close_n}건` : ""].filter(Boolean).join(", ");
+  const 까닭 = c?.limit_n && c?.close_n ? "지정가는 모형상 늘 종가 이상, 종가 판정은 늘 0" : c?.close_n ? "체결가가 그날 종가라 늘 0" : "모형상 늘 종가 이상";
+  const 지정 = 안잼 ? `${안잼}은 재지 않음(${까닭})` : "";
   if (!c?.n) return 지정 || attrCellText(c, "%");
   return 지정 ? `${attrCellText(c, "%")}, ${지정}` : attrCellText(c, "%");
 }

@@ -67,3 +67,33 @@ def test_막은_매도_뒤_막은_매수와_추가_매수_뒤_새_매수가_묻�
                         줄("buy", "2026-09-20", 7.0, reason="x", detail={"held": False})], [])  # fmt: skip
     assert (a["blocked"]["n"], a["blocked_sell"]["n"]) == (1, 1)
     assert a["selection"]["avg"] == 7.0 and a["add_on"]["avg"] == -5.0
+
+
+def test_종가로_판정된_시장가_매수는_진입에서_재지_않는다() -> None:
+    """25.1783 (결함 루프 [권고]) — 늦은 실행·시가 없음 날의 시장가 매수는 체결가 = 그날 종가라 늘 0 이 섞여 평균이 묽어졌다
+    (시가 100·종가 103 체결 10건이면 +3.0 인데, 같은 날 종가 체결 10건을 더하면 +1.5)"""
+    from batch.jobs import paper as jp
+
+    행 = [{"price": 100.0, "day_close": 103.0, "order_type": "market", "fill_basis": "open", "close_note": "시가"}] * 10
+    행 += [{"price": 103.0, "day_close": 103.0, "order_type": "market", "fill_basis": "close", "close_note": "종가"}] * 5
+    행 += [{"price": 103.0, "day_close": 103.0, "order_type": "market", "fill_basis": "open",
+           "close_note": "시가 없음 — 종가"}] * 5  # fmt: skip
+
+    class C:
+        def execute(self, sql: str, args: list) -> object:  # noqa: ANN001
+            from types import SimpleNamespace
+
+            return SimpleNamespace(dicts=lambda: 행 if sql == jp.ATTR_FILLS_SQL else [])
+
+    import batch.jobs.paper as 모듈
+
+    원래 = 모듈._쓰기
+    모듈._쓰기 = lambda *a, **k: None  # type: ignore[assignment]
+    try:
+        a = jp.save_attribution(C(), "C", "2026-10-26")
+    finally:
+        모듈._쓰기 = 원래  # type: ignore[assignment]
+    assert a["entry"] == {"n": 10, "avg": 3.0, "close_n": 10}
+    줄 = next(x for x in pp.attribution_lines("C", a) if " 진입: " in x)
+    assert "평균 3.00% 쌌다 (n=10), 종가로 판정된 시장가 체결 10건은 재지 않음" in 줄
+    assert jp.is_close_judged({"fill_basis": "close"}) and not jp.is_close_judged({"fill_basis": "open", "close_note": "시가"})
