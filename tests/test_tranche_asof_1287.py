@@ -50,3 +50,24 @@ def test_1차가_창_밖으로_밀려도_2차를_1차로_세지_않는다() -> N
     assert mt.next_tranche(c, 1, date(2026, 9, 25))[1] == 3
     # 기준 신호(9/01)가 30일 넘게 묵었다 — 계획이 끝났다. 예전엔 9/20 을 1차로 세어 "2차" 를 다시 권했다
     assert mt.next_tranche(c, 1, date(2026, 10, 5)) == (None, None, None)
+
+
+def test_다_팔고_다시_산_보유는_새_계획의_차수로() -> None:
+    """25.1789 (결함 루프, 25.1551 [참고]) — 매도를 보지 않아 지난 보유의 매수까지 세어 계획에 없는 "3차 80,000" 을 냈다"""
+    c = _db()
+    _신호(c, "2026-10-01", "long", [100_000, 90_000, 80_000])
+    _매수(c, "2026-10-02")
+    c.conn.execute("INSERT INTO trades (stock_id, side, trade_date, price, quantity, currency, fx_rate, fx_rate_source,"
+                   " horizon, created_at, updated_at) VALUES (1, 'sell', '2026-10-06', 100, 1, 'KRW', 1, 'none', 'long',"
+                   " 't', 't')")  # fmt: skip
+    _신호(c, "2026-10-07", "long", [95_000, 85_000, 75_000])
+    _매수(c, "2026-10-08")  # 새 보유의 1차
+    assert mt.next_tranche(c, 1, date(2026, 10, 12), "2026-10-08") == (85_000.0, 2, "2026-10-07")
+    assert mt.next_tranche(c, 1, date(2026, 10, 12)) == (80_000.0, 3, "2026-10-01")  # 보유 시작일을 모르면 예전 꼴
+
+
+def test_감시_목록이_보유_시작일을_넘긴다() -> None:
+    import inspect
+
+    assert 'next_tranche(client, int(r["stock_id"]), cal.local_today(market), r.get("first_buy_date"))' in (
+        inspect.getsource(mt.build_targets))

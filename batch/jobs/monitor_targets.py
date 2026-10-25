@@ -401,7 +401,9 @@ def merge_zones(
 TRANCHE_PLAN_DAYS = 30
 
 
-def next_tranche(client: TursoClient, stock_id: int, today: date) -> tuple[float | None, int | None, str | None]:
+def next_tranche(
+    client: TursoClient, stock_id: int, today: date, first_buy_date: str | None = None,
+) -> tuple[float | None, int | None, str | None]:
     """(다음 차수 가격, 차수, 계획 기준일). 1차를 산 날의 신호 계획을 그 뒤 매수 기록 수로 이어 본다
     (docs/intraday.md 2절 tranche).
 
@@ -428,10 +430,13 @@ def next_tranche(client: TursoClient, stock_id: int, today: date) -> tuple[float
     # **신호일보다 뒤의 매수만** — 기준일 D 의 신호는 D+1 아침 배치가 낸다. D 에 산 사람은 D−1 신호의 카드를 봤다
     # (docs/infra.md 25.1287, 장중 감사 재현 — 매수 스냅샷 `SNAPSHOT_AT` 은 이미 `<`, 25.678). 예전엔 `<=` 라 10-13 에
     # 장기 카드(10-12 기준)로 산 종목이 10-13 기준 단기 신호의 계획(2차 99,000)으로 바뀌어 25.1262 가 되살아났다
+    # **지금 보유가 열린 날(`positions.first_buy_date`) 뒤의 매수만** — 30일 안 전량 매도 뒤 다시 사면 지난 보유의
+    # 매수까지 세어 계획에 없는 "3차 가격 도달" 을 냈다(25.1789, 결함 루프 — infra 25.1551 [참고] 로 알고 두었던 것.
+    # `daily.py` 의 차수 줄이 `trade_date >= p.first_buy_date` 로 같은 일을 한다)
     매수줄 = client.execute(
         "SELECT trade_date, horizon FROM trades WHERE stock_id = ? AND side = 'buy' AND trade_date > ?"
-        " ORDER BY trade_date",
-        [stock_id, min(날별)],
+        " AND trade_date >= ? ORDER BY trade_date",
+        [stock_id, min(날별), str(first_buy_date or "")[:10]],
     ).rows
     매수 = [str(r[0]) for r in 매수줄]
     if not 매수:
@@ -558,7 +563,7 @@ def build_targets(client: TursoClient, market: str, now: str) -> list[tuple]:
         평균 = float(r["avg_price"]) * (배율 or 1.0)
         t["target_price"], t["stop_price"] = holding_levels(평균, r["horizon"], targets_setting)
         # 분할 매수 계획의 다음 차수 (docs/intraday.md 2절 tranche, 25.999) — 기업행위·ETF 는 위에서 이미 건너뛰었다
-        가격, 차수, 계획일 = next_tranche(client, int(r["stock_id"]), cal.local_today(market))
+        가격, 차수, 계획일 = next_tranche(client, int(r["stock_id"]), cal.local_today(market), r.get("first_buy_date"))
         if 가격 is not None and 계획일 and 계수들:
             # **계획 뒤 권리락이면 다음 차수 가격도 같은 계수로 옮긴다** (25.1159, 감사 재현). 손절·목표(25.1140)·관심가
             # (25.1142)만 맞추고 이것이 빠져, 실질 1차 가격과 같은 시세에 "2차 가격 95,000원 도달" 이 나갔다.
