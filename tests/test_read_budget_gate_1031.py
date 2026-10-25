@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -88,11 +89,18 @@ def test_재지_못하면_들어간다(monkeypatch: pytest.MonkeyPatch, 준비) 
     assert entry.guard(lambda: 7) == 7
 
 
+def 예약값(raw: object) -> int:
+    """예약 실행에서의 값 — 손 실행 문 끄기 식(25.1794)이면 그 안의 숫자."""
+    text = str(raw or "0")
+    m = re.fullmatch(r"\$\{\{ inputs\.read_gate != 'off' && '(\d+)' \|\| '' \}\}", text)
+    return int(m.group(1)) if m else int(text)
+
+
 def test_무거운_주간_작업에만_문을_단다() -> None:
     for 이름 in 문을_지나는_것:
         data = yaml.safe_load((WORKFLOWS / 이름).read_text(encoding="utf-8"))
         envs = [job.get("env") or {} for job in data["jobs"].values()]
-        assert any(int(e.get(entry.READ_ESTIMATE_ENV, 0) or 0) > 0 for e in envs), 이름
+        assert any(예약값(e.get(entry.READ_ESTIMATE_ENV)) > 0 for e in envs), 이름
     for 이름 in 문을_달지_않는_것:
         assert entry.READ_ESTIMATE_ENV not in (WORKFLOWS / 이름).read_text(encoding="utf-8"), 이름
 
