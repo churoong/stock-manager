@@ -408,7 +408,7 @@ def evaluate(h: HoldingInput, today: date, targets: dict | None = None) -> list[
     texts: list[str] = []
     if h.op_income_latest is not None and h.op_income_prev is not None and h.op_income_prev > 0 >= h.op_income_latest:
         texts.append(f"FY{h.fiscal_year_latest} 영업이익 적자 전환")
-        reasons.append(_criterion("영업이익 적자 전환",
+        reasons.append(_criterion(FIN_LOSS_LABEL,
                                   f"FY{h.fiscal_year_latest} {_재무금액(h.op_income_latest, h.op_income_currency)}"
                                   f" (전년 {_재무금액(h.op_income_prev, h.op_income_prev_currency)})"
                                   f"{_짧은해_주석(h.op_income_period_days)}",
@@ -538,6 +538,30 @@ def unjudged(h: HoldingInput, today: date) -> set[str]:
     ) is None:
         out.add("감성급락")
     return out
+
+
+#: 재무악화 속 근거 가운데 점수와 상관없이 재무 행만으로 판정하는 것 — 점수를 못 본 날에도 판정했다(25.1790)
+FIN_LOSS_LABEL = "영업이익 적자 전환"
+
+
+def carry_criteria(h: HoldingInput, reason_code: str, criteria: list[dict]) -> list[dict]:
+    """판정 못 한 사유를 이을 때 어제 근거 가운데 **오늘 판정할 수 없었던 근거만** (docs/infra.md 25.1790, 결함 루프).
+
+    재무악화는 "점수를 못 봄" 이면 통째로 `unjudged` 에 드는데, 그 안의 적자 전환은 점수와 상관없이 재무 행으로 판정한다
+    — 오늘 흑자로 돌아 풀린 적자 전환이 "자료가 없어 이어 둠" 으로 최대 `MAX_CARRY_DAYS` 남았다. 오늘 두 해 영업이익이
+    다 있으면 적자 전환은 판정한 것이라 뺀다. 빈 목록이면 잇지 않는다(풀림)"""
+    if reason_code != "재무악화":
+        return criteria
+    판정함 = h.op_income_latest is not None and h.op_income_prev is not None
+    return [c for c in criteria if not (판정함 and c.get("label") == FIN_LOSS_LABEL)]
+
+
+def without_fin_loss(text: str) -> str:
+    """재무악화 문장에서 적자 전환 조각("FY2024 영업이익 적자 전환, ")을 뺀다 — 이어 둘 때 판정한 근거를 문장에서도
+    (25.1790)"""
+    import re
+
+    return re.sub(rf"FY\S* {FIN_LOSS_LABEL}(, )?", "", text)
 
 
 def sub_reasons(reason_code: str, criteria: list[dict]) -> set[str]:

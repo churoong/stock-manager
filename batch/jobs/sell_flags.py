@@ -654,6 +654,7 @@ def run(today: date | None = None) -> int:
         # 지금도 보유 중인 종목만 — 다 판 종목은 풀린다
         걸린 = {(f.stock_id, f.reason_code) for f in flags}
         못_본 = {h.stock_id: sf.unjudged(h, today) for h in holdings if isinstance(h, sf.HoldingInput)}
+        보유별 = {h.stock_id: h for h in holdings if isinstance(h, sf.HoldingInput)}
         이음 = 0
         for (sid, 사유), prev in previous.items():
             if (sid, 사유) in 걸린 or 사유 not in 못_본.get(sid, set()):
@@ -669,8 +670,17 @@ def run(today: date | None = None) -> int:
             if (today - date.fromisoformat(판정일)).days > MAX_CARRY_DAYS:
                 continue
             자료["carried_since"] = 판정일
-            이음 += 1
             글 = str(prev["rationale_text"] or "")
+            # 오늘 판정한 속 근거는 빼고 잇는다 — 다 판정했으면 풀림(25.1790, 결함 루프: 흑자로 돌아 풀린 적자 전환이
+            # 점수 없는 날 "자료가 없어 이어 둠" 으로 남았다)
+            어제근거 = list(자료.get("criteria") or [])
+            남김 = sf.carry_criteria(보유별[sid], 사유, 어제근거) if sid in 보유별 else 어제근거
+            if 어제근거 and not 남김:
+                continue
+            if 남김 != 어제근거:
+                자료["criteria"] = 남김
+                글 = sf.without_fin_loss(글)
+            이음 += 1
             if "오늘 판정할 자료가 없어" not in 글:
                 글 += " ※ 오늘 판정할 자료가 없어 지난 판정을 이어 둡니다"
             statements.append((
