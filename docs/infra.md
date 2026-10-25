@@ -2842,6 +2842,7 @@ SQL read operations are forbidden (reads are blocked, ...)
 | 25.1792 | 분할 차수 같은 날은 장부처럼 매수 먼저·호출부 시험·플래그 잇기 실행 시험 (25.1789~1791 교차검증) |
 | 25.1793 | 분할 차수 열린 날을 장부의 QTY_EPS·과다 매도 규칙대로·판정 문서 맞춤 (25.1789~1792 교차검증) |
 | 25.1794 | 주간 작업 손 실행에 읽기 진도 문 끄기 입력 — 한도 상수는 그대로 (사용자 10월 한시 결제) |
+| 25.1795 | 가상모의투자 경로가 실제 장부를 읽지 않는 것을 시험으로 — 사용자 물음 계기 |
 
 ### 25.1 왜 D1 인가
 
@@ -39609,3 +39610,15 @@ docs/paper.md 10.1. 시험 도구(`test_selection_evidence_1570._하루`)는 날
 **이것이 매매 전략·검증을 낫게 하나**: ① 가상모의투자·KIS모의투자의 판정 입력(유니버스·재무·성과 지표·밸류에이션 밴드)이 16일 묵어 있었다 — 손 실행 한 번으로 새로 고친다. 신호 성과는 ② 검증 기록.
 
 **되돌리기 확인**: 한 워크플로를 `inputs.read_gate == 'off' && '' || '8000000'`(위 함정)으로 바꾸면 `test_예약_실행은_늘_문을_지난다_손_실행_off_만_끈다` 가 깨지고 되돌림. 25.1031 시험(`test_무거운_주간_작업에만_문을_단다`)은 식 안의 예약 값을 읽게 고쳤다.
+
+### 25.1795 가상모의투자 경로가 실제 장부를 읽지 않는 것을 시험으로 — 사용자 물음 계기
+
+**계기**: 사용자 물음(2026-10-26) "내 계좌에 보유종목을 모의투자 매수/매도 종목 선정할때 감안하는거야?". 답은 "아니다"(2026-10-15 사용자 지시 — 가상모의투자는 `trades`·`positions`·`sell_flags` 를 읽거나 쓰지 않는다, 실제 수익률 곡선 `portfolio_values` 는 성과 비교로만). 그런데 **쓰지 않는 것**만 `test_paper_job_1445` 가 표 행 수로 지키고, **읽지 않는 것**은 코드를 grep 해서만 확인할 수 있었다 — 나중에 누가 가상모의투자 배분에 실제 보유를 끼워도 시험이 잡지 못했다.
+
+**한 것**: `tests/test_paper_no_real_reads_1795.py` — ① 가상모의투자·KIS모의투자 모듈(jobs·services 의 paper·broker_mirror·broker_stats·company·desk·intraday_guard·holding*·risk_gate·report_picks·sell_flags 규칙 함수, 가져다 쓰는 계산 모듈 signals·backtest·stop_vol·adjust·adjust_drift·fx)의 모든 문자열 상수에 `FROM|JOIN|INTO|UPDATE trades|positions|sell_flags` 가 없다 ② 실제 장부도 다루는 공용 모듈에서 빌려 쓰는 함수(`jobs/sell_flags.enrich`, `monitor_targets.action_factors`·`action_dates`·`_유상_권리락`)만 따로 본다 ③ `paper.py` 가 그 두 공용 모듈의 새 함수를 부르기 시작하면 목록에 넣으라고 깨진다. 지금 코드는 셋 다 통과 — 결함은 없었고 지키는 시험만 없었다.
+
+**이것이 매매 전략·검증을 낫게 하나**: ① 장부 정확성 — 모의 성적이 실제 보유에 물들면 실전 전환 근거(모의 성적)가 오염된다.
+
+**알고 두는 것**: 문자열 상수만 본다 — SQL 을 조각으로 이어 붙이면(`"FROM " + 표`) 못 잡는다. 지금 그런 꼴은 없다. 공용 모듈 함수가 또 다른 공용 함수를 부르는 둘째 단계는 보지 않는다(`enrich` 는 재무·유니버스·감성만 읽는다).
+
+**되돌리기 확인**: `paper.py` 에 `SELECT quantity FROM positions` 상수, `action_dates` 에 `SELECT 1 FROM trades`, `paper.py` 에 `sf_job.load_holdings(` 호출을 하나씩 넣으면 각각 ①②③ 이 깨지고 되돌림.
