@@ -15,13 +15,13 @@ const CARD = "rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-
 const 칸: Array<[string, (a: NonNullable<LabAttribution["attribution"]>) => string]> = [
   ["낸 새 후보", (a) => attrCellText(a.selection)],
   ["이미 든 종목 추가 매수", (a) => attrCellText(a.add_on)],
-  ["안 낸 새 후보", (a) => attrCellText(a.skipped)],
+  ["안 낸 새 후보 (오르면 안 낸 것이 비용)", (a) => attrCellText(a.skipped)],
   ["진입(시장가 체결가→종가)", (a) => entryCellText(a.entry)],
-  ["안 찬 회차", (a) => attrCellText(a.missed)],
-  ["판 뒤", (a) => attrCellText(a.sold)],
+  ["안 찬 회차 (오르면 놓친 기회)", (a) => attrCellText(a.missed)],
+  ["판 뒤 (음수면 판 것이 옳았다)", (a) => attrCellText(a.sold)],
   ["플래그 무시하고 든 뒤", (a) => attrCellText(a.held_flag)],
-  ["막은 매수 뒤", (a) => attrCellText(a.blocked)],
-  ["막은 매도 뒤", (a) => attrCellText(a.blocked_sell)],
+  ["막은 매수 뒤 (오르면 막은 것이 비용)", (a) => attrCellText(a.blocked)],
+  ["막은 매도 뒤 (내리면 막은 것이 비용)", (a) => attrCellText(a.blocked_sell)],
   [
     "가상 대조 분위",
     (a) => (a.virtual?.n && a.virtual.avg_pct != null ? `${a.virtual.avg_pct.toFixed(0)} (n=${a.virtual.n}${a.virtual.n < ATTRIBUTION_MIN_SAMPLE ? ", 참고" : ""})` : "표본 없음"),

@@ -545,10 +545,11 @@ export function deptScoreText(d: DeptScore): string {
 /** 배치 `ATTRIBUTION_MIN_SAMPLE` 과 같다 — 이보다 적은 칸은 "참고" */
 export const ATTRIBUTION_MIN_SAMPLE = 30;
 
-/** 한 칸의 글 — "+1.2%p (n=40, 이긴 비율 55%)", 표본이 적으면 ", 참고" */
+/** 한 칸의 글 — "+1.2%p (n=40, 지수보다 오른 비율 55%)", 표본이 적으면 ", 참고".
+ * "이긴 비율" 이라 쓰면 판 뒤·막은 매도·안 찬 회차 칸에서 규칙이 틀린 경우가 "이긴 100%" 로 읽혔다 — 주어는 칸의 종목이다(25.1804) */
 export function attrCellText(c: AttrCell | undefined, unit = "%p"): string {
   if (!c || !c.n || c.avg == null) return "표본 없음";
-  const 이김 = c.hit != null ? `, 이긴 비율 ${Math.round(c.hit)}%` : "";
+  const 이김 = c.hit != null ? `, 지수보다 오른 비율 ${Math.round(c.hit)}%` : "";
   const 참고 = c.n < ATTRIBUTION_MIN_SAMPLE ? ", 참고" : "";
   return `${c.avg >= 0 ? "+" : ""}${c.avg.toFixed(unit === "%" ? 2 : 1)}${unit} (n=${c.n}${이김}${참고})`;
 }

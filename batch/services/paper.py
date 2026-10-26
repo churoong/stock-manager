@@ -1294,7 +1294,10 @@ def attribution_lines(aid: str, a: dict[str, Any] | None) -> list[str]:
     def 칸(s: dict[str, Any]) -> str:
         if not s.get("n"):
             return "표본 없음"
-        글 = f"{s['avg']:+.1f}%p (n={s['n']}" + (f", 이긴 비율 {s['hit']:.0f}%" if s.get("hit") is not None else "")
+        # "이긴 비율" 이라 쓰면 판 뒤·막은 매도·안 찬 회차에서 규칙이 매번 틀린 경우가 "이긴 100%" 로 읽혔다 — 주어는
+        # 칸의 종목(25.1804, 결함 루프 10-26). 옳고 그름은 칸마다 붙인 방향 글로
+        비율 = f", 지수보다 오른 비율 {s['hit']:.0f}%" if s.get("hit") is not None else ""
+        글 = f"{s['avg']:+.1f}%p (n={s['n']}{비율}"
         return 글 + (", 참고" if s["n"] < ATTRIBUTION_MIN_SAMPLE else "") + ")"
 
     줄 = [f"  {aid} 선정: 주문 낸 새 후보 {칸(a['selection'])} · 안 낸 새 후보 {칸(a['skipped'])}"
@@ -1324,7 +1327,7 @@ def attribution_lines(aid: str, a: dict[str, Any] | None) -> list[str]:
         까닭 = 까닭표[(bool(e.get("limit_n")), bool(e.get("close_n")))]
         글 = f"{안잼}은 재지 않음({까닭})"
         진입 = 글 if not e.get("n") else f"{진입}, {글}"
-    줄.append(f"  {aid} 진입: {진입} · 안 찬 회차의 그 뒤 {칸(a['missed'])}")
+    줄.append(f"  {aid} 진입: {진입} · 안 찬 회차의 그 뒤 {칸(a['missed'])} — 오르면 놓친 기회")
     줄.append(f"  {aid} 청산: 판 뒤 {칸(a['sold'])} · 플래그를 따르지 않고 든 뒤 {칸(a['held_flag'])}"
              " — 판 뒤가 음수면 판 것이 옳았다")
     v = a.get("virtual") or {}
