@@ -41,6 +41,9 @@ SKIP = {
     "daily-us.yml": "위와 같다",
     "d1-catchup.yml": "D1 한도 따라잡기 예비 — 필요할 때만 뜻이 있다",
     "turso-return.yml": "Turso 복귀 예비 — 웹 감시가 주 경로",
+    # 따라잡기 몸통은 {ref} 뿐이라 loop 끔·dry_run 켬 한 번 실행이 된다 — 기다리던 사슬 실행을 밀어낼 수 있다
+    # (25.1796 교차검증)
+    "kis-guard.yml": "장중 감시 예비 — 국내 일일 배치의 guard_start·사슬이 주 경로",
 }
 
 _CRON = re.compile(r"^\s*-\s*cron:\s*[\"']([^\"']+)[\"']")

@@ -56,8 +56,8 @@ GUARD_ACCOUNT = bmj.MIRROR_ACCOUNT
 WINDOW_KST = (dtime(9, 5), dtime(15, 15))
 #: 실제 창 = 그날 개장 + 5분 ~ 마감 − 15분(달력 `session_open_utc`·`session_close_utc`) — 새해 첫 거래일 10:00 개장은
 #: 달력이 주고, 수능일은 달력에 없어 `monitor_targets.KR_CSAT_DAYS` 로 한 시간 늦춘다(25.1774, 25.1773 교차검증 [권고]:
-#: 고정 창이라 그 두 날 09:13~09:53 실행이 장 열리기 전 가격으로 판정해 시장가 매도를 낼 수 있었다). 수능일 15:53 뒤
-#: (16:03·16:13)는 예약(`0-6` 시)이 부르지 않는다 — 한 해 하루라 두고 handoff 에 적는다
+#: 고정 창이라 그 두 날 09:13~09:53 실행이 장 열리기 전 가격으로 판정해 시장가 매도를 낼 수 있었다). 반복 실행
+#: (`scripts/kis_guard_loop.py`, 25.1796)이 이 창을 그대로 따라 수능일에도 16:15 까지 본다
 OPEN_MARGIN = timedelta(minutes=5)
 CLOSE_MARGIN = timedelta(minutes=15)
 #: 일일 배치가 돌고 있으면 쉰다 — 같은 앱키의 초당 한도를 나눠 쓰면 배치 주문이 `EGW00201` 거부로 적힌다(웹 조회와 같은

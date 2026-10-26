@@ -215,6 +215,8 @@ jobs:
   # 10분마다 돈다. 배치 성패와 무관하게 깨운다 — 감시선이 없으면 감시가 "오늘 감시선 없음" 을 알린다. 휴장일이면 곧바로 끝나고,
   # 이미 돌고 있으면 그 뒤에 기다렸다가 창이 지났으면 끝난다. 쓰기 권한(actions)은 본체가 아닌 이 잡에만(25.986)
   guard_start:
+    # 일일 배치를 손으로 "보내지 않고 확인"(dry_run) 돌린 실행은 깨우지 않는다
+    if: github.event_name != 'workflow_dispatch' || inputs.dry_run != true
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

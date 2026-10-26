@@ -12,7 +12,7 @@
 DB 연결이 회차마다 새로 시작한다(감시 코드는 그대로). 이 스크립트는 언제 부를지만 정한다:
 
 - 회차 시각 = 그날 감시 창(`intraday_guard.window` — 개장 + 5분 ~ 마감 − 15분, 수능일 늦춤) 시작부터 10분 간격,
-  창 끝 포함
+  창 끝 포함(끝 눈금은 30초 앞당겨 띄운다 — `END_MARGIN`)
 - 한 회차가 길어 다음 시각을 넘기면 밀린 회차는 건너뛰고 다음 시각으로(몰아서 여러 번 돌지 않는다)
 - GitHub 잡은 6시간이 상한이라 시작부터 `BUDGET` 이 지나면 새 회차를 열지 않고 `chain=true` 를 남긴다 — 워크플로의
   다른 잡이 같은 워크플로를 다시 깨워 이어 간다(같은 동시 실행 그룹이라 앞 실행이 끝난 뒤 시작한다)
@@ -37,6 +37,9 @@ INTERVAL = timedelta(minutes=10)
 BUDGET = timedelta(minutes=330)
 #: 회차 하나의 상한 — 예전 잡 상한(8분)에서 설치 시간을 뺀 몫
 RUN_TIMEOUT = "7m"
+#: 창 끝 눈금은 이만큼 앞당겨 띄운다 — 하위 프로세스가 뜨고 import 하는 몇 초 사이 `intraday_guard.due` 의 창 끝을 넘겨
+#: "시간 밖" 으로 건너뛰었다(25.1796 교차검증 [권고] — 15:15 회차가 빠져 마지막 감시가 15:05 였다)
+END_MARGIN = timedelta(seconds=30)
 
 
 def next_slot(now: datetime, start: datetime, end: datetime, interval: timedelta = INTERVAL) -> datetime | None:
@@ -65,6 +68,12 @@ def plan(
     if slot - started > BUDGET:
         return "chain", None
     return "run", slot
+
+
+def run_at(slot: datetime, end: datetime) -> datetime:
+    """눈금 `slot` 의 회차를 실제로 띄울 시각 — 창 끝 눈금만 `END_MARGIN` 앞당긴다(눈금 자체는 그대로 세어 같은
+    눈금을 두 번 돌지 않는다)"""
+    return min(slot, end - END_MARGIN)
 
 
 def _window(now: datetime) -> tuple[datetime, datetime] | None:
@@ -118,7 +127,7 @@ def main(argv: list[str] | None = None) -> int:
             _output("chain", "true")
             break
         assert 시각 is not None
-        time.sleep(max(0.0, (시각 - datetime.now(UTC)).total_seconds()))
+        time.sleep(max(0.0, (run_at(시각, 창[1]) - datetime.now(UTC)).total_seconds()))
         회차 += 1
         마지막 = 시각
         rc = subprocess.run(명령, check=False).returncode  # noqa: S603 — 고정된 명령

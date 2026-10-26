@@ -34,6 +34,27 @@ def test_회차는_창_시작부터_10분_눈금_끝_포함() -> None:
     assert gl.next_slot(t("06:15", 1), *창) is None
 
 
+def test_창_끝_눈금은_앞당겨_띄워_감시가_시간_밖으로_건너뛰지_않는다() -> None:
+    """하위 프로세스가 뜨는 몇 초 사이 창 끝을 넘겨 15:15 회차가 "시간 밖" 이 됐다(25.1796 교차검증 [권고])"""
+    from batch.jobs import intraday_guard as ig
+
+    끝 = 창[1]
+    assert gl.run_at(끝, 끝) == 끝 - gl.END_MARGIN
+    assert gl.run_at(t("06:05"), 끝) == t("06:05")  # 다른 눈금은 그대로
+    assert ig.due(gl.run_at(끝, 끝) + timedelta(seconds=5)) is None  # 파이썬이 5초 걸려 떠도 창 안
+    assert ig.due(끝 + timedelta(seconds=5)) == "장중 감시 시간 밖"  # 앞당기지 않으면 건너뛴다
+
+
+def test_실제_달력의_감시_창() -> None:
+    def w(iso: str):  # noqa: ANN202
+        return gl._window(datetime.fromisoformat(iso).replace(tzinfo=UTC))
+
+    assert w("2026-10-25T23:35") == 창  # 08:35 KST(전날 UTC) — KST 날짜로 읽는다
+    assert w("2026-10-25T03:00") is None  # 일요일
+    assert w("2026-11-19T00:40") == (datetime(2026, 11, 19, 1, 5, tzinfo=UTC), datetime(2026, 11, 19, 7, 15, tzinfo=UTC))
+    assert w("2027-01-04T00:40")[0] == datetime(2027, 1, 4, 1, 5, tzinfo=UTC)  # 새해 첫 거래일 10:00 개장
+
+
 def test_첫_회차는_창_안이면_바로_그_뒤로는_같은_눈금을_두_번_돌지_않는다() -> None:
     시작 = t("02:07")
     assert gl.plan(t("02:07"), 시작, *창) == ("run", t("02:07"))  # 이어 받은 실행·늦게 깬 실행 — 11:15 까지 비지 않게
@@ -105,8 +126,16 @@ def test_상한이면_chain_을_남긴다(monkeypatch: pytest.MonkeyPatch, tmp_p
     assert out.read_text() == "chain=false\nchain=true\n"  # 마지막 값이 이긴다
 
 
+def _쓰기_잡(data: dict) -> set[str]:  # type: ignore[type-arg]
+    """actions 쓰기를 가진 잡 — 잡 단위 permissions 가 없으면 최상위를 물려받는다"""
+    위 = data.get("permissions") or {}
+    return {n for n, j in data["jobs"].items() if (j.get("permissions", 위) or {}).get("actions") == "write"}
+
+
 def test_워크플로_사슬과_권한() -> None:
     kg = yaml.safe_load((ROOT / ".github/workflows/kis-guard.yml").read_text(encoding="utf-8"))
+    dk = yaml.safe_load((ROOT / ".github/workflows/daily-kr.yml").read_text(encoding="utf-8"))
+    assert _쓰기_잡(kg) == {"chain"} and _쓰기_잡(dk) == {"guard_start", "keepalive"}  # 패키지 설치하는 본체는 못 쓴다
     트리거 = kg.get(True) or kg["on"]
     assert all("/" not in c["cron"] for c in 트리거["schedule"]), "10분 예약으로 돌아가지 않는다 — 예비 예약만"
     assert "actions" not in (kg.get("permissions") or {}), "패키지를 설치하는 본체에 actions 쓰기를 주지 않는다"
@@ -124,3 +153,17 @@ def test_워크플로_사슬과_권한() -> None:
     시작글 = "\n".join(str(s.get("run", "")) for s in yaml.safe_load(
         (ROOT / ".github/workflows/daily-kr.yml").read_text(encoding="utf-8"))["jobs"]["guard_start"]["steps"])
     assert '"inputs[dry_run]=false"' in 시작글  # 손 실행 기본값(true)이 아닌 실제 감시로
+    # 사슬은 dry_run 을 이어 넘긴다 — 빠지면 기본값(true)이 걸려 오후 회차가 매일 조용히 확인 실행이 된다
+    사슬글 = "\n".join(str(s.get("run", "")) for s in 사슬["steps"])
+    assert '"inputs[dry_run]=${{ inputs.dry_run == true }}"' in 사슬글
+    assert dk["jobs"]["guard_start"]["if"] == "github.event_name != 'workflow_dispatch' || inputs.dry_run != true"
+    # 운영 이슈에는 실패·손 한 번 실행만 — 반복 실행도 workflow_dispatch 로 온다
+    게시 = next(s for s in kg["jobs"]["run"]["steps"] if "publish_output" in str(s.get("run", "")))
+    assert "inputs.loop != true" in 게시["if"] and "failure()" in 게시["if"]
+
+
+def test_따라잡기는_장중_감시를_깨우지_않는다() -> None:
+    _s = importlib.util.spec_from_file_location("schedule_catchup", ROOT / "scripts" / "schedule_catchup.py")
+    sc = importlib.util.module_from_spec(_s)  # type: ignore[arg-type]
+    _s.loader.exec_module(sc)  # type: ignore[union-attr]
+    assert "kis-guard.yml" in sc.SKIP

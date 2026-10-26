@@ -6,13 +6,14 @@ name: KIS모의투자 장중 손절·익절
 # **한 잡이 장 끝까지 깨어 10분마다 돈다**(scripts/kis_guard_loop.py, docs/infra.md 25.1796). 10분 예약(`3-59/10`)은
 # 2026-10-26 첫 날 09:03~09:33 네 회차가 하나도 시작하지 않았다 — Actions 예약은 몇 시간씩 늦는다. 시작은 국내 일일 배치
 # (cron-job.org 가 08:27 에 깨운다)의 `guard_start` 잡이 이 워크플로를 깨워서, 잡 상한(6시간)에 닿으면 `chain` 잡이 스스로 다시
-# 깨워서 잇는다. 아래 예약 셋은 그 사슬이 끊긴 날의 예비다(늦게 와도 남은 장을 돈다). cron-job.org 가 repository_dispatch
-# (kis-guard)로 깨워도 같다(외부 계정 설정, 선택).
+# 깨워서 잇는다. 아래 예약 넷은 그 사슬이 끊긴 날의 예비다(늦게 와도 남은 장을 돈다). repository_dispatch(kis-guard)로
+# 깨워도 같다 — 단 10분마다 깨우면 기다리는 실행끼리 서로 밀어낼 뿐이라 걸지 않는다.
 on:
   schedule:
     - cron: "3 0 * * 1-5" # 00:03 UTC = 09:03 KST (월~금)
     - cron: "3 2 * * 1-5" # 11:03 KST
     - cron: "3 4 * * 1-5" # 13:03 KST
+    - cron: "33 5 * * 1-5" # 14:33 KST — 사슬은 보통 13:5x 에 이어지는데 그 뒤의 예비가 없었다(25.1796 교차검증)
   repository_dispatch:
     types: [kis-guard]
   workflow_dispatch:
@@ -57,6 +58,18 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      # 반복 실행은 회차마다 파이썬을 새로 띄운다 — 6시간 동안 회차마다 백엔드를 따로 고르면 도중에 Turso 복귀 표시가 생겨
+      # 한 잡 안에서 DB 가 갈릴 수 있다(25.472·25.480 — 다른 워크플로와 같게 첫 단계에서 고정)
+      - name: DB 백엔드 고정 (docs/infra.md 25.472·25.480)
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          DB_BACKEND: ${{ vars.DB_BACKEND }}
+          D1_ACCOUNT_ID: ${{ secrets.D1_ACCOUNT_ID }}
+          D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+          D1_API_TOKEN: ${{ secrets.D1_API_TOKEN }}
+        run: python -m batch.core.client --pin >> "$GITHUB_ENV"
+
       - name: 장중 감시
         id: guard
         env:
@@ -85,10 +98,11 @@ jobs:
             python scripts/kis_guard_loop.py $ARGS 2>&1 | python scripts/ops_tee.py run.log
           fi
 
-      # 실패했거나 손으로 돌린 실행만 비공개 운영 이슈로 — 10분마다 하루 40번 올리면 운영 이슈가 묻힌다. 평소 결과는
-      # 실행 기록(batch_runs)·텔레그램에 있다
+      # 실패했거나 손으로 **한 번만** 돌린 실행만 비공개 운영 이슈로 — 평소 결과는 실행 기록(batch_runs)·텔레그램에 있다.
+      # 반복 실행도 workflow_dispatch(guard_start·chain)로 오므로 loop 를 켠 실행은 빼야 날마다 6시간치 로그가 올라가지 않는다
+      # (25.1796 교차검증 [권고])
       - name: 기록을 이슈로 내보내기
-        if: always() && (failure() || github.event_name == 'workflow_dispatch')
+        if: always() && (failure() || (github.event_name == 'workflow_dispatch' && inputs.loop != true))
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OPS_REPO: ${{ secrets.OPS_REPO }}
