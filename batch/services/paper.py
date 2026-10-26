@@ -1301,13 +1301,15 @@ def attribution_lines(aid: str, a: dict[str, Any] | None) -> list[str]:
         return 글 + (", 참고" if s["n"] < ATTRIBUTION_MIN_SAMPLE else "") + ")"
 
     줄 = [f"  {aid} 선정: 주문 낸 새 후보 {칸(a['selection'])} · 안 낸 새 후보 {칸(a['skipped'])}"
-          + (f" · 이미 든 종목 추가 매수 {칸(a['add_on'])}" if (a.get("add_on") or {}).get("n") else "")]
+          + (f" · 이미 든 종목 추가 매수 {칸(a['add_on'])}" if (a.get("add_on") or {}).get("n") else "")
+          + (" — 안 낸 새 후보가 지수보다 오르면 안 낸 것이 비용" if (a.get("skipped") or {}).get("n") else "")]
     if a.get("skip_by_reason"):
-        줄.append(f"  {aid} 안 낸 까닭별: " + " · ".join(f"{k} {칸(v)}" for k, v in a["skip_by_reason"].items()))
+        줄.append(f"  {aid} 안 낸 까닭별: " + " · ".join(f"{k} {칸(v)}" for k, v in a["skip_by_reason"].items())
+                 + " — 지수보다 오르면 그 까닭으로 안 낸 것이 비용")
     if (a.get("blocked") or {}).get("n"):
-        줄.append(f"  {aid} 위험 점검이 막은 매수의 그 뒤: {칸(a['blocked'])} — 오르면 막은 것이 비용")
+        줄.append(f"  {aid} 위험 점검이 막은 매수의 그 뒤: {칸(a['blocked'])} — 지수보다 오르면 막은 것이 비용")
     if (a.get("blocked_sell") or {}).get("n"):
-        줄.append(f"  {aid} 위험 점검이 막은 매도의 그 뒤: {칸(a['blocked_sell'])} — 내리면 막은 것이 비용")
+        줄.append(f"  {aid} 위험 점검이 막은 매도의 그 뒤: {칸(a['blocked_sell'])} — 지수보다 내리면 막은 것이 비용")
     e = a.get("entry") or {}
     # 음수면 "−0.85% 쌌다" 가 아니라 "0.85% 비쌌다" — 부호가 뜻을 뒤집어 읽혔다(25.1644, 25.1630 감사 [권고])
     if not e.get("n"):
@@ -1327,9 +1329,10 @@ def attribution_lines(aid: str, a: dict[str, Any] | None) -> list[str]:
         까닭 = 까닭표[(bool(e.get("limit_n")), bool(e.get("close_n")))]
         글 = f"{안잼}은 재지 않음({까닭})"
         진입 = 글 if not e.get("n") else f"{진입}, {글}"
-    줄.append(f"  {aid} 진입: {진입} · 안 찬 회차의 그 뒤 {칸(a['missed'])} — 오르면 놓친 기회")
+    놓침 = " — 지수보다 오르면 놓친 기회" if (a.get("missed") or {}).get("n") else ""  # 표본이 없으면 방향 글도 없다
+    줄.append(f"  {aid} 진입: {진입} · 안 찬 회차의 그 뒤 {칸(a['missed'])}{놓침}")
     줄.append(f"  {aid} 청산: 판 뒤 {칸(a['sold'])} · 플래그를 따르지 않고 든 뒤 {칸(a['held_flag'])}"
-             " — 판 뒤가 음수면 판 것이 옳았다")
+             " — 판 뒤가 음수면 판 것이, 든 뒤가 양수면 든 것이 옳았다")
     v = a.get("virtual") or {}
     if v.get("n"):
         줄.append(f"  {aid} 가상 대조: 산 종목이 같은 날 무작위 {VIRTUAL_CONTROLS}종목 안 평균 {v['avg_pct']:.0f} 분위"

@@ -287,3 +287,22 @@ describe("평가 뒤 체결 (25.1602)", () => {
     expect(x.equity).toBe(1_200_000);
   });
 });
+
+describe("성과 분해 칸의 방향 글 (25.1804·25.1805)", () => {
+  it("/lab·/paper 표의 칸마다 옳고 그름의 방향 — '이긴 비율' 은 쓰지 않는다", () => {
+    const lab = readFileSync(join(process.cwd(), "components", "LabView.tsx"), "utf8");
+    for (const 글 of [
+      "안 낸 새 후보 (지수보다 오르면 안 낸 것이 비용)",
+      "안 찬 회차 (지수보다 오르면 놓친 기회)",
+      "판 뒤 (음수면 판 것이 옳았다)",
+      "플래그 무시하고 든 뒤 (양수면 든 것이 옳았다)",
+      "막은 매수 뒤 (지수보다 오르면 막은 것이 비용)",
+      "막은 매도 뒤 (지수보다 내리면 막은 것이 비용)",
+    ])
+      expect(lab).toContain(글);
+    const paper = readFileSync(join(process.cwd(), "components", "PaperView.tsx"), "utf8");
+    expect(paper).toContain("(안 낸 새 후보가 지수보다 오르면 안 낸 것이 비용)");
+    expect(paper).toContain("(지수보다 오르면 놓친 기회)");
+    expect(lab + paper).not.toContain("이긴 비율");
+  });
+});

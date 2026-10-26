@@ -954,15 +954,15 @@ function ReportPane({ a }: { a: Account }) {
       <ul className="mt-1 space-y-0.5 text-slate-700 dark:text-slate-300">
         <li>
           선정: 주문 낸 새 후보 {attrCellText(t.selection)} · 안 낸 새 후보 {attrCellText(t.skipped)}
-          {t.add_on?.n ? ` · 이미 든 종목 추가 매수 ${attrCellText(t.add_on)}` : ""}
+          {t.add_on?.n ? ` · 이미 든 종목 추가 매수 ${attrCellText(t.add_on)}` : ""} (안 낸 새 후보가 지수보다 오르면 안 낸 것이 비용)
         </li>
         {Object.entries(t.skip_by_reason ?? {}).map(([k, v]) => (
-          <li key={k}>안 낸 까닭 — {k}: {attrCellText(v)}</li>
+          <li key={k}>안 낸 까닭 — {k}: {attrCellText(v)} (지수보다 오르면 안 낸 것이 비용)</li>
         ))}
-        <li>진입(체결가 대비 그날 종가): {entryCellText(t.entry)} · 안 찬 회차의 그 뒤 {attrCellText(t.missed)} (오르면 놓친 기회)</li>
-        <li>청산: 판 뒤 {attrCellText(t.sold)} · 플래그를 따르지 않고 든 뒤 {attrCellText(t.held_flag)} (판 뒤가 음수면 판 것이 옳았다)</li>
-        {t.blocked?.n ? <li>위험 점검이 막은 매수의 그 뒤: {attrCellText(t.blocked)} (오르면 막은 것이 비용)</li> : null}
-        {t.blocked_sell?.n ? <li>위험 점검이 막은 매도의 그 뒤: {attrCellText(t.blocked_sell)} (내리면 막은 것이 비용)</li> : null}
+        <li>진입(체결가 대비 그날 종가): {entryCellText(t.entry)} · 안 찬 회차의 그 뒤 {attrCellText(t.missed)} (지수보다 오르면 놓친 기회)</li>
+        <li>청산: 판 뒤 {attrCellText(t.sold)} · 플래그를 따르지 않고 든 뒤 {attrCellText(t.held_flag)} (판 뒤가 음수면 판 것이, 든 뒤가 양수면 든 것이 옳았다)</li>
+        {t.blocked?.n ? <li>위험 점검이 막은 매수의 그 뒤: {attrCellText(t.blocked)} (지수보다 오르면 막은 것이 비용)</li> : null}
+        {t.blocked_sell?.n ? <li>위험 점검이 막은 매도의 그 뒤: {attrCellText(t.blocked_sell)} (지수보다 내리면 막은 것이 비용)</li> : null}
         {virtualText(t.virtual) ? <li>가상 대조: 산 종목이 {virtualText(t.virtual)}</li> : null}
       </ul>
     </div>

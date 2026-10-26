@@ -59,3 +59,27 @@ def test_보통_정지는_예전과_같다(client: Client, monkeypatch: pytest.M
     _시세3(c, "2026-10-19", 9_000, 9_000, volume=0)
     _하루(c, monkeypatch, "2026-10-19", signals=False)
     assert c.q("SELECT DISTINCT status, fill_session FROM paper_orders WHERE side = 'sell'") == [("open", "2026-10-20")]
+
+
+def test_시장_전체_빠짐·환율_없음_길도_주문_장으로(client: Client) -> None:  # noqa: F811
+    """25.1803 교차검증 [권고] — 네 길 가운데 이 둘은 아침 실행에선 예전 값(판정일 다음 장)과 같아 시험이 차이를 못
+    봤다. 장 끝난 뒤 손 실행처럼 주문 장이 한 장 더 뒤(`defer_to`)면 그 장으로 가야 한다"""
+    from batch.jobs import paper as job
+    from tests.test_paper_fill_1620 import 시세, 주문
+
+    c = client
+    # 시장 전체 빠짐: 10-15 국내 시세가 하나도 없고 10-16 은 있다 — 10-16 장 끝난 뒤 실행의 주문 장은 10-20
+    kr = 주문(c, side="sell", typ="market", q=1, decided="2026-10-14", session="2026-10-15", tranche=0)
+    시세(c, 1, "2026-10-16", 10_000, 10_000)
+    # 환율 없음: 미국 매도, 시세는 있고 USDKRW 가 없다
+    us = 주문(c, market="US", sid=2, side="sell", typ="market", q=1, cur="USD", decided="2026-10-15",
+             session="2026-10-16", tranche=0)  # fmt: skip
+    시세(c, 2, "2026-10-16", 100, 101, cur="USD")
+    for market in ("KR", "US"):
+        flows, _ = job._flows(c)
+        fills, _ = job._fills(c)
+        job.fill_orders(c, market, "2026-10-16", flows, fills, {}, {}, set(), "now", {}, defer_to="2026-10-20")
+    assert c.q("SELECT fill_session, close_note FROM paper_orders WHERE id = ?", [kr]) == [
+        ("2026-10-20", "그날 시세를 받지 못함 — 다음 장으로")]
+    assert c.q("SELECT fill_session, close_note FROM paper_orders WHERE id = ?", [us]) == [
+        ("2026-10-20", "쓸 수 있는 환율 없음 — 다음 장으로")]
