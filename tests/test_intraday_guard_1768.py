@@ -1127,3 +1127,25 @@ def test_한도로_끊기면_실패_알림_없이_건너뜀(c: Client, monkeypat
     c.execute = execute  # type: ignore[method-assign]
     assert ig.main() == 0 and 보낸 == []
     db._열린_실행.clear()
+
+
+def test_원장_초당_한도로_거부된_장중_매도도_다음_회차에_다시_보낸다(c: Client) -> None:
+    """`EGW00215`(모의 원장 초당 거래건수 초과, 25.1799) — 실제 `KisFailed` 문구 꼴로 run 을 지나 순간 거부가 되는지
+    (25.1800, 25.1799 교차검증 [권고]: 상수에 코드가 있는지만 보던 시험)"""
+    from batch.sources.kis import KisFailed
+
+    거부 = KisFailed("모의 주문 실패 EGW00215 원장에서 허용 가능한 초당 거래건수를 초과하였습니다.")
+    처음 = ig.run(c, 월, session=_Sess([_h("005930", 9_250.0)], fail={"005930": 거부}), clock=lambda: 월)
+    assert ig.TRANSIENT_TEXT in str(처음)
+    assert c.q("SELECT status FROM paper_broker_orders") == [("rejected",)]
+    다시 = ig.run(c, 월, session=_Sess([_h("005930", 9_200.0)]), clock=lambda: 월)
+    assert 다시["sent"] == {"retried": 1, "accepted": 1}
+
+
+def test_회차_기록에_초당_한도_다시_한_수를_남긴다() -> None:
+    class S:
+        calls, rate_retries = 3, 2
+
+    assert ig._호출(S()) == {"calls": 3, "rate_retries": 2}
+    S.rate_retries = 0
+    assert ig._호출(S()) == {"calls": 3}  # 없으면 칸도 없다(기록을 늘리지 않게)

@@ -3,6 +3,7 @@ import { execute, rowsToObjects } from "@/lib/db";
 import {
   BATCH_RUNNING_SQL,
   BATCH_RUNNING_WINDOW_MS,
+  KIS_RATE_LIMIT_CODES,
   KIS_VTS_BASE,
   LIVE_ANY_GAP_MS,
   LIVE_ANY_KEY,
@@ -98,7 +99,7 @@ export async function POST(request: Request) {
         받은.push(null);
         continue;
       }
-      if (코드) return NextResponse.json({ errors: [`KIS모의투자 조회 실패 ${코드}${코드 === "EGW00201" ? " — 초당 한도, 잠시 뒤 다시" : ""}`] }, { status: 502 });
+      if (코드) return NextResponse.json({ errors: [`KIS모의투자 조회 실패 ${코드}${KIS_RATE_LIMIT_CODES.includes(코드) ? " — 초당 한도, 잠시 뒤 다시" : ""}`] }, { status: 502 });
       받은.push(payload);
     }
     const 시각 = new Date().toISOString();

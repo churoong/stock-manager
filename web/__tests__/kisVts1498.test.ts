@@ -8,6 +8,7 @@ import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import {
   BATCH_RUNNING_SQL,
+  KIS_RATE_LIMIT_CODES,
   KIS_VTS_BASE,
   LIVE_THROTTLE_SQL,
   VTS_SAVED_ROW_SQL,
@@ -137,5 +138,14 @@ describe("막기 질의 (실제 마이그레이션 SQLite)", () => {
     run("daily_us", "running", "2026-10-16T12:27:00Z");
     expect(db.prepare(BATCH_RUNNING_SQL).all("2026-10-16T12:00:00Z")).toHaveLength(1);
     expect(db.prepare(BATCH_RUNNING_SQL).all("2026-10-16T13:30:00Z")).toHaveLength(0); // 오래된 running 은 죽은 실행
+  });
+});
+
+describe("초당 한도 안내 (25.1800)", () => {
+  it("배치와 같은 코드 — 모의 원장 EGW00215 도 '잠시 뒤 다시'", () => {
+    const 배치 = readFileSync(join(process.cwd(), "..", "batch", "sources", "kis_vts.py"), "utf8");
+    for (const 코드 of KIS_RATE_LIMIT_CODES) expect(배치).toContain(`"${코드}"`);
+    expect(KIS_RATE_LIMIT_CODES).toContain("EGW00215");
+    expect(ROUTE).toContain("KIS_RATE_LIMIT_CODES.includes(코드)");
   });
 });

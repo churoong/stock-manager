@@ -341,7 +341,7 @@ def run(
         if db.get_setting(client, LINE_ERR_KEY, None) != 오늘.isoformat():
             날표시.append(LINE_ERR_KEY)
     if getattr(sess, "balance_truncated", False):
-        return 기록 | {"skipped": "잔고 조회가 쪽 상한에 닿아 잘림", "calls": sess.calls}
+        return 기록 | {"skipped": "잔고 조회가 쪽 상한에 닿아 잘림", **_호출(sess)}
     오늘줄 = client.execute(GUARDED_TODAY_SQL, [bmj.BROKER, 오늘.isoformat(), bm.REASON_GUARD_STOP,
                                                bm.REASON_GUARD_TAKE]).dicts()  # fmt: skip
     다시 = {int(r["stock_id"]): int(r["id"]) for r in 오늘줄
@@ -358,14 +358,14 @@ def run(
     종류 = [x.kind for x in 닿음]
     기록["hits"] = {k: 종류.count(k) for k in ("stop", "trail", "target") if k in 종류}
     if dry_run:  # 확인 실행은 세기만 — 주문·알림·표시 없음(25.1772)
-        return 기록 | {"dry_run": True, "calls": sess.calls}
+        return 기록 | {"dry_run": True, **_호출(sess)}
     오류글 = (f"⚠️ KIS모의투자 장중 감시 — 오늘 감시선 계산 오류 {기록['line_errors']}건, 그 종목은 장중 손절·익절 밖"
              "(일일 배치 실행 기록 guard_lines 확인)") if 날표시 else ""  # fmt: skip
     if not 닿음:
         글 = [x for x in (suspect_text(client, 의심) if 의심 else "", 오류글) if x]
         if 글:
             기록["alert"], 기록["marks"], 기록["date_marks"] = "\n".join(글), 표시, 날표시
-        return 기록 | {"dry_run": False, "calls": sess.calls}
+        return 기록 | {"dry_run": False, **_호출(sess)}
     지금 = now.isoformat()
     상태: dict[str, int] = {}
     보낸: list[tuple[Hit, str]] = []
@@ -435,8 +435,8 @@ def run(
         기록["sale_alert"] = 글[0]  # 못 보내면 이 글만 남긴다 — 다른 문단은 표시가 안 적혀 다음 회차가 다시 만든다
     if 기록줄오류 is not None:
         # 알림을 실어 올린다 — `main` 이 알림을 보낸 뒤 실패로 닫는다
-        raise GuardRecordError(기록 | {"calls": sess.calls}) from 기록줄오류
-    return 기록 | {"calls": sess.calls}
+        raise GuardRecordError(기록 | {**_호출(sess)}) from 기록줄오류
+    return 기록 | {**_호출(sess)}
 
 
 class GuardRecordError(RuntimeError):
@@ -445,6 +445,13 @@ class GuardRecordError(RuntimeError):
     def __init__(self, 기록: dict[str, Any]) -> None:
         super().__init__("장중 매도 기록 실패")
         self.record = 기록
+
+
+def _호출(sess: Any) -> dict[str, int]:
+    """회차의 KIS 호출 수와(있으면) 초당 한도로 다시 한 수 — 같은 모의 앱키를 쓰는 다른 호출과 겹치는 일이 얼마나 잦은지
+    잰다(25.1800, 25.1799 교차검증 [참고]: 10-26 10:05 회차는 호출 1건에 원장 한도를 받았다)"""
+    다시 = int(getattr(sess, "rate_retries", 0) or 0)
+    return {"calls": sess.calls} | ({"rate_retries": 다시} if 다시 else {})
 
 
 def alerted_ids(client: Any, key: str, today: date) -> set[int]:
