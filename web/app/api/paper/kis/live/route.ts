@@ -3,6 +3,8 @@ import { execute, rowsToObjects } from "@/lib/db";
 import {
   BATCH_RUNNING_SQL,
   BATCH_RUNNING_WINDOW_MS,
+  GUARD_RUNNING_SQL,
+  GUARD_RUNNING_WINDOW_MS,
   KIS_RATE_LIMIT_CODES,
   KIS_VTS_BASE,
   LIVE_ANY_GAP_MS,
@@ -48,6 +50,9 @@ export async function POST(request: Request) {
     // 일일 배치가 도는 동안은 부르지 않는다 — 배치 주문이 초당 한도에 걸려 거부로 적힌다
     const 돌고있음 = (await execute(BATCH_RUNNING_SQL, [new Date(now.getTime() - BATCH_RUNNING_WINDOW_MS).toISOString()])).rows.length > 0;
     if (돌고있음) return NextResponse.json({ busy: "일일 배치가 KIS모의투자에 주문을 내는 중입니다 — 끝난 뒤에 다시 조회해 주세요" });
+    // 장중 감시 회차도 같다 — 겹치면 감시의 잔고 조회·장중 매도가 초당 한도로 거절된다(25.1802)
+    const 감시중 = (await execute(GUARD_RUNNING_SQL, [new Date(now.getTime() - GUARD_RUNNING_WINDOW_MS).toISOString()])).rows.length > 0;
+    if (감시중) return NextResponse.json({ busy: "장중 손절·익절 감시가 KIS모의투자를 보는 중입니다 — 몇 초 뒤 다시 조회해 주세요" });
     // 시장 상관없이 3초 — 국내·미국을 같은 초에 부르면 초당 한도에 걸린다
     const 모두 = await execute(LIVE_THROTTLE_SQL, [
       LIVE_ANY_KEY, JSON.stringify(now.toISOString()), now.toISOString(), new Date(now.getTime() - LIVE_ANY_GAP_MS).toISOString(),

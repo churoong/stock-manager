@@ -46,6 +46,11 @@ export const LIVE_THROTTLE_SQL = `INSERT INTO settings (key, value, updated_at) 
 ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at WHERE settings.updated_at < ?`;
 export const BATCH_RUNNING_SQL = `SELECT 1 FROM batch_runs WHERE job_name IN ('daily_kr', 'daily_us') AND status = 'running'
 AND started_at >= ? LIMIT 1`;
+/** 장중 손절·익절 감시 회차가 도는 중(25.1802) — 회차는 몇 초지만 그 사이 웹 조회가 겹치면 같은 모의 앱키의 초당 한도로
+ * 감시의 잔고 조회·매도가 `EGW00215` 로 거절됐다(2026-10-26 10:05 KST 회차, 25.1799). 회차 상한(7분) + 여유로 죽은 실행을 거른다 */
+export const GUARD_RUNNING_WINDOW_MS = 8 * 60_000;
+export const GUARD_RUNNING_SQL = `SELECT 1 FROM batch_runs WHERE job_name = 'intraday_guard' AND status = 'running'
+AND started_at >= ? LIMIT 1`;
 export const VTS_SAVED_ROW_SQL = "SELECT token, expires_at FROM api_tokens WHERE name = 'kis_vts'";
 
 export function throttleKey(market: VtsMarket): string {

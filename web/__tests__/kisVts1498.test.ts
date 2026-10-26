@@ -8,6 +8,7 @@ import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import {
   BATCH_RUNNING_SQL,
+  GUARD_RUNNING_SQL,
   KIS_RATE_LIMIT_CODES,
   KIS_VTS_BASE,
   LIVE_THROTTLE_SQL,
@@ -138,6 +139,16 @@ describe("막기 질의 (실제 마이그레이션 SQLite)", () => {
     run("daily_us", "running", "2026-10-16T12:27:00Z");
     expect(db.prepare(BATCH_RUNNING_SQL).all("2026-10-16T12:00:00Z")).toHaveLength(1);
     expect(db.prepare(BATCH_RUNNING_SQL).all("2026-10-16T13:30:00Z")).toHaveLength(0); // 오래된 running 은 죽은 실행
+    // 장중 감시 회차(25.1802) — 도는 중이면 웹 조회가 기다린다. 일일 배치 질의와는 따로
+    expect(db.prepare(GUARD_RUNNING_SQL).all("2026-10-16T23:00:00Z")).toHaveLength(0);
+    run("intraday_guard", "running", "2026-10-17T01:05:00Z");
+    expect(db.prepare(GUARD_RUNNING_SQL).all("2026-10-17T00:58:00Z")).toHaveLength(1);
+    expect(db.prepare(GUARD_RUNNING_SQL).all("2026-10-17T01:06:00Z")).toHaveLength(0); // 8분 넘은 running 은 죽은 회차
+    run("intraday_guard", "success", "2026-10-17T01:15:00Z");
+    expect(db.prepare(GUARD_RUNNING_SQL).all("2026-10-17T01:10:00Z")).toHaveLength(0);
+    // 막기는 KIS 를 부르기 전(3초·30초 막기 표에 적기 전)에
+    expect(ROUTE.indexOf("GUARD_RUNNING_SQL, [")).toBeGreaterThan(0);
+    expect(ROUTE.indexOf("GUARD_RUNNING_SQL, [")).toBeLessThan(ROUTE.indexOf("LIVE_ANY_KEY, JSON"));
   });
 });
 
