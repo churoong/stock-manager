@@ -102,6 +102,9 @@ class Test보통주판정:
             "Acme Corp Units",
             "Acme Corp Depositary Shares",
             "Acme 6.25% Notes due 2030",
+            # 분사 전 임시 거래(25.1809) — 야후에 시세가 없다
+            "Acme Sports Corp. - Class A Common Stock When Issued",
+            "Acme Corp - Common Stock When-Issued",
         ],
     )
     def test_보통주가_아닌_증권들을_제외한다(self, name: str) -> None:
@@ -258,3 +261,9 @@ class Test발행사_이름_1265:
 
     def test_대시가_없으면_예전처럼_통째로(self) -> None:
         assert not self._보통주("XYZ Corp 6.5% Preferred Stock", "XYZP")
+
+
+def test_이름에_issued_가_든_보통주는_그대로() -> None:
+    """when-issued 표지는 낱말 묶음으로만 — 발행사 이름의 낱말에 걸리지 않게(25.1265 와 같은 꼴, 25.1809)"""
+    assert UsSymbol("ISSU", "Issued Holdings Inc. - Common Stock", "NYSE", False, False).is_common_stock
+    assert UsSymbol("WHEN", "When Corp - Class V Common Stock", "NYSE", False, False).is_common_stock

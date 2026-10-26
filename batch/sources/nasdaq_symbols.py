@@ -91,6 +91,12 @@ NON_COMMON_MARKERS = (
     "Debenture",
     "% Note",
     "Trust Preferred",
+    # 분사·분할 전 임시 거래(when-issued) — 야후에 시세가 없어 미국 일일 배치가 날마다 헛조회했다
+    # (2026-10-26 `MSGR-V`·`MSGK-V`, docs/infra.md 25.1809). 거래소는 심볼 끝에 ".V" 를 붙이지만 V 클래스 보통주와
+    # 갈리지 않아 이름으로만 거른다
+    "When Issued",
+    "When-Issued",
+    "When Distributed",
 )
 
 #: **낱말로 찾는다** (docs/infra.md 25.528·25.536, 감사·교차검증). 글자 조각으로 찾아 " Unit" 이 "First **Unit**ed",
