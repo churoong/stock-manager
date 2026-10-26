@@ -23,7 +23,7 @@ on:
         type: boolean
         default: true
       loop:
-        description: 장 끝까지 10분마다(끄면 한 번만). 예약·사슬 실행은 늘 켬
+        description: 장 끝까지 10분마다(끄면 한 번만 — 장중에 끄고 돌리면 기다리던 사슬 실행을 밀어낸다). 예약·사슬 실행은 늘 켬
         type: boolean
         default: false
 
@@ -100,9 +100,9 @@ jobs:
 
       # 실패했거나 손으로 **한 번만** 돌린 실행만 비공개 운영 이슈로 — 평소 결과는 실행 기록(batch_runs)·텔레그램에 있다.
       # 반복 실행도 workflow_dispatch(guard_start·chain)로 오므로 loop 를 켠 실행은 빼야 날마다 6시간치 로그가 올라가지 않는다
-      # (25.1796 교차검증 [권고])
+      # (25.1796 교차검증 [권고]). 반복 실행이 취소·잡 상한으로 끝나면(cancelled) 올린다(25.1798)
       - name: 기록을 이슈로 내보내기
-        if: always() && (failure() || (github.event_name == 'workflow_dispatch' && inputs.loop != true))
+        if: always() && (failure() || cancelled() || (github.event_name == 'workflow_dispatch' && inputs.loop != true))
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OPS_REPO: ${{ secrets.OPS_REPO }}

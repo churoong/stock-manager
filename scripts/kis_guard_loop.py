@@ -76,6 +76,16 @@ def run_at(slot: datetime, end: datetime) -> datetime:
     return min(slot, end - END_MARGIN)
 
 
+def launch_at(slot: datetime, end: datetime, last_run: datetime | None) -> datetime | None:
+    """회차를 띄울 시각, 앞 회차와 너무 붙으면 None(건너뜀). 첫 회차가 창 끝 30초 안에 돌면 끝 눈금(30초 앞당김)이
+    이미 지난 시각이라 몇 초 뒤 한 번 더 돌았다(25.1797 교차검증 [참고] — 돈은 `GUARDED_TODAY` 가 막지만 잔고 조회·
+    기록이 한 번 더)"""
+    언제 = run_at(slot, end)
+    if last_run is not None and 언제 - last_run < INTERVAL / 2:
+        return None
+    return 언제
+
+
 def _window(now: datetime) -> tuple[datetime, datetime] | None:
     """오늘 감시 창(UTC) — 휴장일이면 None. 달력이 시각을 모르면 고정 창(`WINDOW_KST`)"""
     from batch.core import calendar as cal
@@ -117,7 +127,8 @@ def main(argv: list[str] | None = None) -> int:
         명령.append("--dry-run")
     실패 = 0
     회차 = 0
-    마지막: datetime | None = None
+    마지막: datetime | None = None  # 앞 회차의 눈금
+    띄운: datetime | None = None  # 앞 회차를 띄운 시각
     while True:
         할일, 시각 = plan(datetime.now(UTC), started, *창, 마지막)
         if 할일 == "done":
@@ -127,9 +138,13 @@ def main(argv: list[str] | None = None) -> int:
             _output("chain", "true")
             break
         assert 시각 is not None
-        time.sleep(max(0.0, (run_at(시각, 창[1]) - datetime.now(UTC)).total_seconds()))
-        회차 += 1
         마지막 = 시각
+        언제 = launch_at(시각, 창[1], 띄운)
+        if 언제 is None:
+            continue
+        time.sleep(max(0.0, (언제 - datetime.now(UTC)).total_seconds()))
+        회차 += 1
+        띄운 = 언제
         rc = subprocess.run(명령, check=False).returncode  # noqa: S603 — 고정된 명령
         if rc != 0:
             실패 += 1

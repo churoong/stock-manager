@@ -89,7 +89,9 @@ def _돌림(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, 창값, 시계: lis
             return 시계.pop(0) if len(시계) > 1 else 시계[0]
 
     monkeypatch.setattr(gl, "datetime", _Now)
-    monkeypatch.setattr(gl.time, "sleep", lambda s: None)
+    잠 = []
+    monkeypatch.setattr(gl.time, "sleep", 잠.append)
+    monkeypatch.setattr(gl, "_잠", 잠, raising=False)
 
     class _R:
         def __init__(self, rc: int) -> None:
@@ -159,7 +161,8 @@ def test_워크플로_사슬과_권한() -> None:
     assert dk["jobs"]["guard_start"]["if"] == "github.event_name != 'workflow_dispatch' || inputs.dry_run != true"
     # 운영 이슈에는 실패·손 한 번 실행만 — 반복 실행도 workflow_dispatch 로 온다
     게시 = next(s for s in kg["jobs"]["run"]["steps"] if "publish_output" in str(s.get("run", "")))
-    assert "inputs.loop != true" in 게시["if"] and "failure()" in 게시["if"]
+    assert 게시["if"] == ("always() && (failure() || cancelled()"
+                         " || (github.event_name == 'workflow_dispatch' && inputs.loop != true))")
 
 
 def test_따라잡기는_장중_감시를_깨우지_않는다() -> None:
@@ -167,3 +170,29 @@ def test_따라잡기는_장중_감시를_깨우지_않는다() -> None:
     sc = importlib.util.module_from_spec(_s)  # type: ignore[arg-type]
     _s.loader.exec_module(sc)  # type: ignore[union-attr]
     assert "kis-guard.yml" in sc.SKIP
+
+
+def test_main_은_끝_눈금을_앞당겨_잠든다(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """`run_at` 이 있어도 main 이 쓰지 않으면 15:15 회차가 다시 "시간 밖" 이 된다(25.1797 교차검증 [권고])"""
+    시계 = [t("06:05"), t("06:05"), t("06:05"), t("06:05", 20), t("06:05", 20), t("06:14", 35)]
+    _out, 부른 = _돌림(monkeypatch, tmp_path, 창, 시계, [])
+    assert gl.main([]) == 0 and len(부른) == 2
+    assert gl._잠 == [0.0, (t("06:15") - gl.END_MARGIN - t("06:05", 20)).total_seconds()]  # 06:14:30 까지
+
+
+def test_첫_회차가_창_끝_바로_앞이면_끝_눈금을_다시_돌지_않는다(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    시계 = [t("06:14", 40), t("06:14", 40), t("06:14", 40), t("06:14", 45), t("06:14", 50)]
+    _out, 부른 = _돌림(monkeypatch, tmp_path, 창, 시계, [])
+    assert gl.main([]) == 0 and len(부른) == 1
+    assert gl.launch_at(t("06:15"), 창[1], t("06:05")) == t("06:15") - gl.END_MARGIN  # 보통 간격은 그대로
+
+
+def test_예비_예약은_사슬이_이어지는_시각_뒤에도_있다() -> None:
+    """08:3x 에 깬 실행은 330분 뒤(13:5x KST)에 사슬로 넘긴다 — 그 뒤 끊기면 잇는 예비가 있어야 한다(25.1797)"""
+    kg = yaml.safe_load((ROOT / ".github/workflows/kis-guard.yml").read_text(encoding="utf-8"))
+    시각들 = []
+    for c in (kg.get(True) or kg["on"])["schedule"]:
+        분, 시 = c["cron"].split()[:2]
+        시각들.append(datetime(2026, 10, 26, int(시), int(분), tzinfo=UTC))
+    사슬 = datetime(2026, 10, 25, 23, 30, tzinfo=UTC) + gl.BUDGET
+    assert any(사슬 < x < 창[1] for x in 시각들)
