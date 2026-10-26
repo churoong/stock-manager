@@ -41,7 +41,8 @@ const 써도_되는_표: Record<string, Record<string, string>> = {
     api_tokens: "KIS 접근토큰 한 줄. 하루 한 번 받아 둔다 — 5분마다 받으면 발급 제한에 걸린다 (25.983)",
     settings: "Turso 복귀 표시 한 줄(`db_return_requested_at`). 10분마다 본다 (25.12)." +
       " 사용자 설정이 아니라 운영 표시라 백업에서 사유와 함께 뺀다 (25.156)." +
-      " 멈춘 장중 손절·익절 감시를 깨운 시각 한 줄(`kis_guard_kick_at`, 30분 막기 — 25.1806)",
+      " 그리고 멈춘 장중 손절·익절 감시를 깨운 시각·결과 한 줄(`kis_guard_kick_at`, 30분 막기 — 25.1806·25.1807;" +
+      " 백업에 들어가도 옛 시각이라 막기에 걸리지 않는다)",
   },
   health: {
     health_alerts: "이 경로가 하는 일 자체다 (docs/health.md 1장)",

@@ -16,6 +16,9 @@ describe("장중 감시 꺼짐", () => {
   });
 
   it("경로는 토큰만 보고 DB 를 전혀 건드리지 않는다", async () => {
+    // 장중 손절·익절 감시 깨우기(25.1807)만은 스위치와 따로 국내 평일 KST 09:20~15:10 에 한 행짜리 읽기를 한다 — 그 밖 시각으로
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-08T12:00:00Z"));
     const { GET } = await import("@/app/api/cron/intraday/route");
     const res = await GET(new Request("http://x/api/cron/intraday?market=KR", { headers: { "x-cron-secret": "s".repeat(40) } }));
     expect(res.status).toBe(200);
@@ -24,6 +27,7 @@ describe("장중 감시 꺼짐", () => {
     // 토큰이 틀리면 여전히 막는다
     const bad = await GET(new Request("http://x/api/cron/intraday?market=KR", { headers: { "x-cron-secret": "x" } }));
     expect(bad.status).toBe(401);
+    vi.useRealTimers();
   });
 
   it("화면은 빨간 멈춤이 아니라 꺼짐으로 말한다", async () => {

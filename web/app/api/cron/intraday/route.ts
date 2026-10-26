@@ -67,7 +67,8 @@ import { kickGuardIfSilent } from "@/lib/guardKick";
  *
  * **쓰기 대상은 다섯이다** — alerts(하는 일 자체) · cron_heartbeats(호출 기록) · api_usage(DART·KIS 한도
  * 카운터, 25.105·25.983) · settings 한 줄씩(Turso 복귀 표시 `watchTursoReturn()` 25.12, 장중 손절·익절 감시를 깨운 시각
- * `kickGuardIfSilent()` 25.1806) · api_tokens(KIS 접근토큰 한 줄, 25.983). 감시가 25분 넘게 멈췄으면 GitHub 에 깨우기만 보낸다.
+ * `kickGuardIfSilent()` 25.1806 — 장중 감시 스위치가 꺼져도 돈다 25.1807) · api_tokens(KIS 접근토큰 한 줄, 25.983).
+ * 감시가 25분 넘게 멈췄으면 GitHub 에 깨우기만 보낸다.
  * 점수·신호·매매·보유는 건드리지 않는다. 2026-09-26 까지 이 줄은 "읽고 alerts 만 쓴다" 였다 —
  * 25.191 이 docs/intraday.md 는 고치고 이 머리말은 놓쳤다(docs/infra.md 25.195).
  * 로그인 없이 부르는 경로라 proxy.ts 가 통과시키고, 여기서 토큰으로 스스로를 지킨다.
@@ -425,9 +426,12 @@ export async function GET(request: Request) {
   if (!tokenMatches(request.headers.get("x-cron-secret"), process.env.CRON_SECRET)) {
     return NextResponse.json({ error: "토큰이 맞지 않습니다" }, { status: 401 });
   }
-  // **꺼져 있으면 DB 를 전혀 건드리지 않는다** (docs/infra.md 25.1026 — Turso 한도). 호출 기록도 남기지 않는다
-  if (!INTRADAY_ENABLED) return NextResponse.json({ skipped: INTRADAY_OFF_NOTE });
   const market = new URL(request.url).searchParams.get("market")?.toUpperCase() as Market | undefined;
+  // KIS모의투자 장중 손절·익절 감시가 멈췄으면 깨운다(25.1806) — **장중 감시 스위치와 따로**(25.1807): 꺼진 동안에도 돈다.
+  // 평일 KST 09:20~15:10 밖이면 DB 를 읽지 않고, 안이면 한 행짜리 읽기 둘. 던지지 않는다
+  const 깨움 = market === "KR" ? await kickGuardIfSilent(new Date()) : undefined;
+  // **장중 감시가 꺼져 있으면 그 밖의 DB 는 건드리지 않는다** (docs/infra.md 25.1026 — Turso 한도). 호출 기록도 남기지 않는다
+  if (!INTRADAY_ENABLED) return NextResponse.json({ skipped: INTRADAY_OFF_NOTE, ...(깨움 ? { guard_kick: 깨움 } : {}) });
   if (market !== "KR" && market !== "US") {
     return NextResponse.json({ error: "market=KR 또는 US" }, { status: 400 });
   }
@@ -442,7 +446,7 @@ export async function GET(request: Request) {
   // 두 시장 장중(국내 09:00~15:55·미국 22:00~06:25 KST 무렵)과 조용시간 해제 호출에서만 불리므로 완전한 대체는 아니다. 세 곳이 서로를 받친다.
   // 장 밖 호출로 일찍 되돌아가는 경로보다 **앞에** 둔다 — 그래야 그때도 본다.
   if (now.getUTCMinutes() % 10 === 0) await watchTursoReturn().catch(() => undefined);
-  const result: Record<string, unknown> = { market, at: now.toISOString() };
+  const result: Record<string, unknown> = { market, at: now.toISOString(), ...(깨움 ? { guard_kick: 깨움 } : {}) };
   try {
     const settings = await readSettings();
     const quiet = inQuietHours(settings.quiet_hours, now);
@@ -471,10 +475,6 @@ export async function GET(request: Request) {
         ...secretWeakDetail(process.env.CRON_SECRET),
       });
       return NextResponse.json({ ...result, skipped });
-    }
-    // KIS모의투자 장중 손절·익절 감시가 멈췄으면 깨운다(25.1806) — 이 경로는 정시에 불린다. 실패해도 본업은 그대로
-    if (market === "KR") {
-      result.guard_kick = await kickGuardIfSilent(session, now).catch((e: unknown) => `failed:${e instanceof Error ? e.message.slice(0, 80) : "?"}`);
     }
 
     const thresholds = settings.alert_thresholds;
@@ -717,7 +717,7 @@ export async function GET(request: Request) {
       // 국내 시세를 KIS 로 몇 개 받았고 몇 개를 야후로 물었나 (25.983)
       ...(kis ? { kis } : {}),
       // 멈춘 장중 손절·익절 감시를 깨웠거나 못 깨웠으면 (25.1806)
-      ...(result.guard_kick && result.guard_kick !== "alive" && result.guard_kick !== "not_window" ? { guard_kick: result.guard_kick } : {}),
+      ...(깨움 === "kicked" || 깨움?.startsWith("failed:") ? { guard_kick: 깨움 } : {}),
       ...(staleQuotes.length ? { stale_quotes: staleQuotes } : {}),
       ...(missingQuotes.length ? { missing_quotes: missingQuotes } : {}),
       // 기업행위 첫날로 보여 가격 알림을 건너뛴 종목 (25.597). 야후 전일 종가 동작을 확인하는 단서도 된다
