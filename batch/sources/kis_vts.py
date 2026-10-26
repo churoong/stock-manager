@@ -87,6 +87,10 @@ MIN_INTERVAL = 1.0
 #: 조회(GET)가 `EGW00201` 을 받으면 이만큼 기다렸다 다시 — 공식 예제 backtester 는 61초("한도 초기화 대기") 뒤 다시
 #: (`kis_backtest/providers/kis/data.py` L12-14). 주문(POST)은 다시 보내지 않는다 — 두 번 주문 위험보다 거부 기록이 낫다
 RATE_LIMIT_CODE = "EGW00201"
+#: 모의 **원장**의 초당 거래건수 초과 — 2026-10-26 10:05 KST 장중 감시 회차의 잔고 조회가 이것을 받고 다시 하지 않아
+#: "실행 실패" 로 끝났다(앞 회차 09:58 은 정상, 25.1799). `EGW00201` 과 같은 초당 한도라 같은 대기로 다시 한다
+LEDGER_RATE_LIMIT_CODE = "EGW00215"
+RATE_LIMIT_CODES = (RATE_LIMIT_CODE, LEDGER_RATE_LIMIT_CODE)
 RATE_WAITS = (1.5, 61.0)
 #: 연속 조회(다음 쪽) 최대 — 잔고는 모의에서 한 번에 20건(inquire_balance.py L118 주석)
 MAX_PAGES = 10
@@ -416,7 +420,7 @@ class Session:
             payload = None
         if not isinstance(payload, dict):
             raise NoResponse(f"모의 HTTP {r.status_code} — JSON 아님")
-        if method == "GET" and str(payload.get("msg_cd") or "") == RATE_LIMIT_CODE and _retry < len(RATE_WAITS):
+        if method == "GET" and str(payload.get("msg_cd") or "") in RATE_LIMIT_CODES and _retry < len(RATE_WAITS):
             self.sleep(RATE_WAITS[_retry])
             self.rate_retries += 1
             return self._call(method, path, tr, params=params, body=body, tr_cont=tr_cont, _retry=_retry + 1)

@@ -85,8 +85,9 @@ GUARDED_TODAY_SQL = (
     "SELECT id, stock_id, status, message FROM paper_broker_orders WHERE broker = ? AND trade_date = ?"
     " AND side = 'sell' AND reason IN (?, ?)"
 )
-#: 다시 보내도 되는 거부 — KIS 초당 한도(`EGW00201`)·토큰 만료. 잔고·가격 제한 같은 진짜 거부는 그대로 둔다
-TRANSIENT_CODES = (kv.RATE_LIMIT_CODE, "EGW00123", "EGW00121")
+#: 다시 보내도 되는 거부 — KIS 초당 한도(`EGW00201`·원장 `EGW00215`, 25.1799)·토큰 만료. 잔고·가격 제한 같은 진짜 거부는
+#: 그대로 둔다
+TRANSIENT_CODES = (*kv.RATE_LIMIT_CODES, "EGW00123", "EGW00121")
 #: 순간 거부 알림 — 다시 보내는 것은 다음 회차에도 선에 닿아 있을 때뿐이다(25.1774, 25.1773 교차검증 [권고]:
 #: "다음 회차에 다시 보냄" 만 적어 반등한 날은 약속한 매도도 후속 알림도 없었다)
 TRANSIENT_TEXT = "거부(초당 한도·토큰) — 다음 회차에 선에 아직 닿아 있으면 다시 보냄"

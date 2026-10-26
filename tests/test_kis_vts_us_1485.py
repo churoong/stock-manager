@@ -285,3 +285,20 @@ def test_rate_limit_retries_reads_not_orders(monkeypatch: pytest.MonkeyPatch) ->
     with pytest.raises(KisFailed, match="EGW00201"):
         s.order_us("buy", "AAPL", "NASD", 1, 100.0)
     assert len(http.sent) == 1 and s.rate_retries == 0
+
+
+def test_원장_초당_한도도_조회는_다시_한다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """2026-10-26 10:05 KST 장중 감시 잔고 조회가 `EGW00215`(원장 초당 거래건수 초과)를 받고 다시 하지 않아 실행 실패(25.1799)."""
+    from batch.jobs import intraday_guard as ig
+
+    원장 = {"rt_cd": "1", "msg_cd": "EGW00215", "msg1": "원장에서 허용 가능한 초당 거래건수를 초과하였습니다."}
+    s, http = _세션(monkeypatch, [(원장, ""), ({"rt_cd": "0", "output1": [], "output2": [{}]}, "")])
+    잠 = []
+    s.sleep = 잠.append
+    s.balance()
+    assert s.rate_retries == 1 and kv.RATE_WAITS[0] in 잠
+    s, http = _세션(monkeypatch, [(원장, "")])
+    with pytest.raises(KisFailed, match="EGW00215"):
+        s.order("sell", "005930", 1, None)
+    assert len(http.sent) == 1 and s.rate_retries == 0  # 주문은 다시 보내지 않는다
+    assert any(c in "모의 주문 거부 EGW00215 원장에서 …" for c in ig.TRANSIENT_CODES)  # 장중 매도면 다음 회차에 다시
