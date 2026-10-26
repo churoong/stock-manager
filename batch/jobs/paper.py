@@ -790,13 +790,25 @@ def sticky_frozen(
 def fill_orders(
     client: Any, market: str, trade_date: str, flows: list[pp.CashFlow], fills: list[pp.Fill],
     fees: dict | None, taxes: dict | None, frozen: set[int], now: str, 기록: dict[str, Any],
-    frozen_by_account: dict[str, set[int]] | None = None,
+    frozen_by_account: dict[str, set[int]] | None = None, defer_to: str | None = None,
 ) -> list[pp.Fill]:
-    """이 시장의 미체결 주문 가운데 판정할 날이 된 것을 판정한다. 새 체결 목록을 돌려준다(장부에도 적었다)."""
+    """이 시장의 미체결 주문 가운데 판정할 날이 된 것을 판정한다. 새 체결 목록을 돌려준다(장부에도 적었다).
+
+    `defer_to` — 미루는 매도가 갈 장의 하한. 이 실행이 새로 내는 주문의 장(`run_step` 의 `다음장` — 장 끝난 뒤 손
+    실행이면 한 장 더)과 같게 준다. 없으면 판정일 다음 장"""
     전부 = client.execute(OPEN_ORDERS_SQL).dicts()
     대상 = [r for r in 전부 if r["market"] == market and str(r["fill_session"]) <= trade_date]
     if not 대상:
         return []
+    # **미루는 매도는 모두 이 장 뒤로**(25.1803, 결함 루프 10-26): 이미 지난 장(판정일 이하, 장 끝난 뒤 손 실행이면
+    # 오늘 끝난 장)으로 미루면 다음 실행이 미루기를 정할 때 이미 알던 시가로 팔고, KIS 베끼기(그 실행의 장 주문만
+    # 냄)는 그 매도를 내지 못했다. 25.1714·25.1715 가 세 길을 판정일 다음 장으로 고쳤지만 정지·하한가 길(`날` 기준)과
+    # 장 끝난 뒤 손 실행은 남아 있었다
+    미룰기본 = defer_to or cal.next_session(market, date.fromisoformat(trade_date)).isoformat()
+
+    def 미룰장(기준날: str) -> str:
+        return max(cal.next_session(market, date.fromisoformat(기준날)).isoformat(), 미룰기본)
+
     시장날: dict[str, bool] = {}
     새것: list[pp.Fill] = []
     오늘환율 = _fx(client, trade_date)
@@ -834,12 +846,10 @@ def fill_orders(
                 else:
                     # 오늘 판정일 다음 장으로 — `next_session(날)` 은 오늘보다 앞서 KIS 베끼기(그날 장 주문만 냄)가 그
                     # 매도를 내지 못했고, 이미 지난 장 시가로 팔았다(25.1715, 평가 감사 [권고] 2 — 25.1714 와 같은 꼴)
-                    _쓰기(client, [(DEFER_SQL, [cal.next_session(market, date.fromisoformat(trade_date)).isoformat(),
-                                               "그날 시세를 받지 못함 — 다음 장으로", o.id])])  # fmt: skip
+                    _쓰기(client, [(DEFER_SQL, [미룰장(trade_date), "그날 시세를 받지 못함 — 다음 장으로", o.id])])
                     기록["deferred"] = 기록.get("deferred", 0) + 1
             continue
         행 = client.execute(BAR_SQL, [o.stock_id, 날]).dicts()
-        기다림끝 = False
         if not 행:
             # 시장엔 그날 시세가 있는데 이 종목 행만 없다 — 바로 정지로 보면(매수 만료·매도 다음 장 시가) 수집 일부
             # 실패를 정지로 판정해 KIS모의투자(실제로 참)와 갈렸다(25.1713). 더 뒤 날 행이 없고 기다릴 날 안이면
@@ -851,10 +861,9 @@ def fill_orders(
             if trade_date < 기한.isoformat() and not 뒤행:
                 기록["waiting_bar"] = 기록.get("waiting_bar", 0) + 1
                 continue
-            # 기다림이 끝났는데 뒤 날 행도 없다 — 그 사이 장도 다 정지였다. 미루는 매도는 **오늘 판정일 다음 장**으로:
-            # `next_session(날)` 은 오늘보다 뒤처져 KIS 베끼기(그날 체결 장 주문만 보냄)가 그 매도를 영영 내지 못했다
-            # (25.1714, 25.1713 교차검증 [권고] 1)
-            기다림끝 = not 뒤행
+            # 기다림이 끝났거나 뒤 날 행이 있다 — 그날 정지로 본다. 미루는 매도는 **이 실행의 주문 장**으로(`미룰장`):
+            # `next_session(날)` 은 오늘보다 뒤처져 KIS 베끼기(그날 체결 장 주문만 보냄)가 그 매도를 내지 못했다
+            # (25.1714 — 기다림 끝, 25.1803 — 뒤 날 행이 있을 때도)
         bar = (pp.Bar(str(행[0]["date"]), 행[0]["open"], float(행[0]["close"]), 행[0]["volume"],
                       행[0].get("change_pct")) if 행 and 행[0]["close"] is not None else None)  # fmt: skip
         가격, 까닭 = pp.judge(o, bar)
@@ -867,8 +876,7 @@ def fill_orders(
                     가격 = float(마지막[0][0])
                     까닭 = f"정지·하한가로 {pp.HALT_LIQUIDATE_SESSIONS}거래일 미룸 — 마지막 종가로 청산"
             if 가격 is None:
-                미룰장 = cal.next_session(market, date.fromisoformat(trade_date if 기다림끝 else 날))
-                _쓰기(client, [(DEFER_SQL, [미룰장.isoformat(), f"{까닭} — 다음 장으로", o.id])])
+                _쓰기(client, [(DEFER_SQL, [미룰장(날), f"{까닭} — 다음 장으로", o.id])])
                 기록["deferred"] = 기록.get("deferred", 0) + 1
                 continue
         if 가격 is None:
@@ -891,8 +899,7 @@ def fill_orders(
                     남은매수.pop(o.id, None)
                     기록["expired"] = 기록.get("expired", 0) + 1
                 else:
-                    _쓰기(client, [(DEFER_SQL, [cal.next_session(market, date.fromisoformat(trade_date)).isoformat(),
-                                               "쓸 수 있는 환율 없음 — 다음 장으로", o.id])])  # fmt: skip
+                    _쓰기(client, [(DEFER_SQL, [미룰장(trade_date), "쓸 수 있는 환율 없음 — 다음 장으로", o.id])])
                     기록["deferred"] = 기록.get("deferred", 0) + 1
                 continue
             환율, 환율날 = fx
@@ -1948,8 +1955,12 @@ def run_step(
     def 계좌별멈춤(aid: str) -> set[int]:
         return 경계멈춤 | 계좌멈춤.get(aid, set())
 
+    # 미루는 매도의 장 = 이 실행이 새로 내는 주문의 장(아래 `다음장` — 장 끝난 뒤 손 실행이면 한 장 더, 25.1803)
+    주문장 = cal.next_session(market, date.fromisoformat(trade_date))
+    if after_close:
+        주문장 = cal.next_session(market, 주문장)
     새체결 = fill_orders(client, market, trade_date, flows, fills, fees, taxes, 경계멈춤, 지금, 기록,
-                      frozen_by_account=계좌멈춤)  # fmt: skip
+                      frozen_by_account=계좌멈춤, defer_to=주문장.isoformat())  # fmt: skip
     fills = [*fills, *새체결]
     for f in 새체결:
         fill_created[f.order_id] = 지금
