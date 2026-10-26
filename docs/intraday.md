@@ -166,7 +166,7 @@ cron-job.org  → GET /api/cron/intraday?market=KR|US  (헤더 x-cron-secret)
   정규장인지는 장중 경로가 쓰는 `lib/intraday.activeSession` 그대로 보고, 주기는 `lib/health.CRON_EXPECTED`
   에서 가져온다. 정규장인데 15분을 넘기면 노랑, 30분을 넘기면 빨강이다 — 짚으면 근거가 나온다.
   전에는 시각만 회색으로 적었다. "장중인데 오래 비어 있으면 확인한다" 를 **사람이 매번 암산**해야 했다
-- 장중 경로의 쓰기 대상은 `alerts` · 이 표 · `api_usage` · `settings` 한 줄(Turso 복귀 표시, 25.12)이다(`web/__tests__/cronWrites.test.ts` 로 고정). 뒤의 셋은 **판단 자료가 아니라 우리가 무엇을 했는지의 기록**이다 — 점수·신호·매매·보유는 못 쓴다.
+- 장중 경로의 쓰기 대상은 `alerts` · 이 표 · `api_usage` · `settings` 한 줄씩(Turso 복귀 표시 25.12, KIS모의투자 장중 손절·익절 감시를 깨운 시각 `kis_guard_kick_at` 25.1806)이다(`web/__tests__/cronWrites.test.ts` 로 고정). 뒤의 셋은 **판단 자료가 아니라 우리가 무엇을 했는지의 기록**이다 — 점수·신호·매매·보유는 못 쓴다.
   2026-09-26 까지 이 줄은 `settings` 를 빼고 "뿐이다" 였다 — 25.191 이 이 문서 머리의 같은 단정은 고치고 이 줄은 놓쳤다(docs/infra.md 25.195)
 
 ## 8. 알림 센터 필터·읽음 (2026-09-17)

@@ -55,6 +55,7 @@ import { SAFE_LEN, sendTelegram } from "@/lib/telegram";
 import { recordHeartbeat } from "@/lib/heartbeat";
 import { readSetting, type Settings as AppSettings } from "@/lib/settings";
 import { watchTursoReturn } from "@/lib/tursoWatch";
+import { kickGuardIfSilent } from "@/lib/guardKick";
 
 /**
  * 장중 모니터링 (docs/intraday.md, Step 14). cron-job.org 가 정규장 동안 5분마다 부른다.
@@ -65,7 +66,8 @@ import { watchTursoReturn } from "@/lib/tursoWatch";
  *       (같은 종목·트리거·날짜는 DB 유니크로 하루 한 번) → 조용시간이 아니면 새 알림 발송
  *
  * **쓰기 대상은 다섯이다** — alerts(하는 일 자체) · cron_heartbeats(호출 기록) · api_usage(DART·KIS 한도
- * 카운터, 25.105·25.983) · settings 한 줄(Turso 복귀 표시, `watchTursoReturn()`, 25.12) · api_tokens(KIS 접근토큰 한 줄, 25.983).
+ * 카운터, 25.105·25.983) · settings 한 줄씩(Turso 복귀 표시 `watchTursoReturn()` 25.12, 장중 손절·익절 감시를 깨운 시각
+ * `kickGuardIfSilent()` 25.1806) · api_tokens(KIS 접근토큰 한 줄, 25.983). 감시가 25분 넘게 멈췄으면 GitHub 에 깨우기만 보낸다.
  * 점수·신호·매매·보유는 건드리지 않는다. 2026-09-26 까지 이 줄은 "읽고 alerts 만 쓴다" 였다 —
  * 25.191 이 docs/intraday.md 는 고치고 이 머리말은 놓쳤다(docs/infra.md 25.195).
  * 로그인 없이 부르는 경로라 proxy.ts 가 통과시키고, 여기서 토큰으로 스스로를 지킨다.
@@ -470,6 +472,10 @@ export async function GET(request: Request) {
       });
       return NextResponse.json({ ...result, skipped });
     }
+    // KIS모의투자 장중 손절·익절 감시가 멈췄으면 깨운다(25.1806) — 이 경로는 정시에 불린다. 실패해도 본업은 그대로
+    if (market === "KR") {
+      result.guard_kick = await kickGuardIfSilent(session, now).catch((e: unknown) => `failed:${e instanceof Error ? e.message.slice(0, 80) : "?"}`);
+    }
 
     const thresholds = settings.alert_thresholds;
     const 목록 = rowsToObjects<Target & { reasons: string; dart_corp_code: string | null; built_at: string | null }>(
@@ -710,6 +716,8 @@ export async function GET(request: Request) {
       targets: byStock.size, quotes: Object.keys(quotes).length, new_alerts: newCount, sent, errors,
       // 국내 시세를 KIS 로 몇 개 받았고 몇 개를 야후로 물었나 (25.983)
       ...(kis ? { kis } : {}),
+      // 멈춘 장중 손절·익절 감시를 깨웠거나 못 깨웠으면 (25.1806)
+      ...(result.guard_kick && result.guard_kick !== "alive" && result.guard_kick !== "not_window" ? { guard_kick: result.guard_kick } : {}),
       ...(staleQuotes.length ? { stale_quotes: staleQuotes } : {}),
       ...(missingQuotes.length ? { missing_quotes: missingQuotes } : {}),
       // 기업행위 첫날로 보여 가격 알림을 건너뛴 종목 (25.597). 야후 전일 종가 동작을 확인하는 단서도 된다
