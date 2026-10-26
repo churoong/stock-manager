@@ -45,13 +45,14 @@ describe("멈춘 장중 감시 깨우기", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
   });
 
-  it("시계 거름(평일 KST 09:20~15:10)·세션 창(개장 + 25분 ~ 마감 − 25분)", () => {
+  it("시계 거름(평일 KST 09:20~16:10)·세션 창(개장 + 25분 ~ 마감 − 25분)", () => {
     expect(clockMayKick(at("00:19"))).toBe(false); // 09:19
     expect(clockMayKick(at("00:20"))).toBe(true);
-    expect(clockMayKick(at("06:10"))).toBe(true); // 15:10
-    expect(clockMayKick(at("06:11"))).toBe(false);
+    expect(clockMayKick(at("07:10"))).toBe(true); // 16:10 — 수능일 깨우기 창(~16:05)까지
+    expect(clockMayKick(at("07:11"))).toBe(false);
     expect(clockMayKick(at("03:00", "2026-10-25"))).toBe(false); // 일요일
     expect(kickWindow(장, at("00:24"))).toBe(false);
     expect(kickWindow(장, at("00:25"))).toBe(true);
@@ -72,6 +73,9 @@ describe("멈춘 장중 감시 깨우기", () => {
     expect(깨움).toHaveBeenCalledWith(GUARD_JOB);
     const 행 = d.prepare("SELECT value FROM settings WHERE key = 'kis_guard_kick_at'").get() as { value: string };
     expect(JSON.parse(행.value)).toEqual({ at: "2026-10-27T02:20:00.000Z", result: "kicked" });
+    // 하루 한 번 흔적 — 그날 날짜, 같은 날 다시 쓰지 않는다(updated_at 이 첫 호출 그대로)
+    const 흔적 = d.prepare("SELECT value, updated_at FROM settings WHERE key = 'kis_guard_seen'").get() as { value: string; updated_at: string };
+    expect(흔적).toEqual({ value: '"2026-10-27"', updated_at: "2026-10-27T02:10:00.000Z" });
     expect(await kickGuardIfSilent(at("02:25"), 깨움)).toBe("throttled"); // 러너가 뜨는 동안 또 깨우지 않는다
     expect(await kickGuardIfSilent(at("02:51"), 깨움)).toBe("kicked"); // 30분 지나도 여전히 없으면 다시
     expect(깨움).toHaveBeenCalledTimes(2);
@@ -100,10 +104,26 @@ describe("멈춘 장중 감시 깨우기", () => {
     expect(await kickGuardIfSilent(at("03:40"), vi.fn())).toBe("failed:DB 끊김");
   });
 
+  it("수능일(10:00~16:30 개장) 15:30 KST 에도 깨운다 — 시계 거름이 오후를 자르지 않는다(25.1808)", async () => {
+    const { d } = db(false);
+    d.prepare("INSERT INTO market_sessions VALUES ('KR', '2026-11-19', '2026-11-19T01:00:00Z', '2026-11-19T07:30:00Z')").run();
+    expect(await kickGuardIfSilent(new Date("2026-11-19T06:30:00Z"), async () => ({ dispatched: true }))).toBe("kicked");
+  });
+
+  it("기본 깨우기는 GitHub 호출에 상한(AbortSignal)을 건다 — 장중 경로 30초 안에서(25.1808)", async () => {
+    vi.stubEnv("GH_DISPATCH_TOKEN", "t");
+    vi.stubEnv("GH_REPO", "o/r");
+    const 보냄 = vi.fn(async (_u: string, _i?: RequestInit) => new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", 보냄);
+    db();
+    expect(await kickGuardIfSilent(at("03:00"))).toBe("kicked");
+    expect((보냄.mock.calls[0][1] as RequestInit).signal).toBeInstanceOf(AbortSignal);
+  });
+
   it("장중 감시 스위치가 꺼져 있어도 국내 장중 호출이 실제로 깨운다 — 미국 호출·밤 호출은 DB 를 읽지 않는다", async () => {
-    process.env.CRON_SECRET = "s".repeat(40);
-    process.env.GH_DISPATCH_TOKEN = "t";
-    process.env.GH_REPO = "o/r";
+    vi.stubEnv("CRON_SECRET", "s".repeat(40));
+    vi.stubEnv("GH_DISPATCH_TOKEN", "t");
+    vi.stubEnv("GH_REPO", "o/r");
     const 보냄 = vi.fn(async () => new Response(null, { status: 204 }));
     vi.stubGlobal("fetch", 보냄);
     const { INTRADAY_ENABLED } = await import("@/lib/intradaySwitch");

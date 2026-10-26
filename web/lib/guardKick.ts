@@ -8,8 +8,8 @@
  * 실행과 같은 토큰.
  *
  * **장중 감시 스위치(`INTRADAY_ENABLED`, 25.1026 — DB 소모로 끔)와 따로 돈다**(25.1807, 25.1806 교차검증 [필수]): 스위치 뒤에
- * 두면 꺼진 동안 한 번도 안 돈다. 끈 까닭이 DB 읽기라, 시계로 먼저 거른다 — 평일 KST 09:20~15:10 밖이면 DB 를 읽지 않고,
- * 안이면 색인 타는 한 행짜리 읽기 둘(오늘 장·최근 감시 기록)뿐이다. 깨울 때만 설정 한 줄을 쓴다.
+ * 두면 꺼진 동안 한 번도 안 돈다. 끈 까닭이 DB 읽기라, 시계로 먼저 거른다 — 평일 KST 09:20~16:10 밖이면 DB 를 읽지 않고,
+ * 안이면 색인 타는 한 행짜리 읽기 둘(오늘 장·최근 감시 기록)뿐이다. 쓰기는 하루 한 번 흔적 한 줄과 깨울 때 설정 한 줄.
  *
  * 깨우는 것뿐이다 — 주문은 감시가 낸다. 이미 돌고 있으면 GitHub 동시 실행 그룹 뒤에서 기다렸다가 창이 지나 끝난다(무해).
  */
@@ -27,13 +27,19 @@ export const GUARD_KICK_BEFORE_CLOSE_MS = 25 * 60_000;
 export const GUARD_KICK_GAP_MS = 30 * 60_000;
 /** GitHub 호출 상한 — 장중 경로 전체 상한(30초) 안에서 본업 시간을 남긴다(25.1807, 교차검증 [권고]) */
 export const GUARD_DISPATCH_TIMEOUT_MS = 5_000;
-/** DB 를 읽기 전 시계 거름(KST 분) — 정규장 앞뒤를 넉넉히. 수능일(10:00 개장)·새해 첫날도 아래 세션 행이 정확히 거른다 */
+/** DB 를 읽기 전 시계 거름(KST 분) — 정규장 앞뒤를 넉넉히. 끝은 수능일(10:00~16:30 개장, 깨우기 창 ~16:05)까지 덮는다
+ * (25.1808, 25.1807 교차검증 [권고] — 15:10 이면 수능일 오후가 비었다). 보통 날 15:05 뒤는 아래 세션 창이 거른다 */
 export const GUARD_CLOCK_FROM_KST_MIN = 9 * 60 + 20;
-export const GUARD_CLOCK_TO_KST_MIN = 15 * 60 + 10;
+export const GUARD_CLOCK_TO_KST_MIN = 16 * 60 + 10;
 export const GUARD_KICK_KEY = "kis_guard_kick_at";
 export const GUARD_RECENT_SQL = "SELECT 1 FROM batch_runs WHERE job_name = 'intraday_guard' AND started_at >= ? LIMIT 1";
 export const GUARD_SESSION_SQL = "SELECT open_utc, close_utc FROM market_sessions WHERE market = 'KR' AND date = ?";
-/** 깨운 결과를 같은 행에 — 장중 감시가 꺼져 호출 기록이 남지 않는 동안 운영에서 볼 유일한 흔적 */
+/** 하루 한 번 "이 경로가 그날 장중에 불려 감시를 봤다" 흔적(25.1808) — 깨울 일이 없어 막기 행이 빈 날과 경로가 아예 안
+ * 불린 날을 가른다. 값이 같으면 쓰지 않는다(그날 첫 호출 한 번만 한 줄) */
+export const GUARD_SEEN_KEY = "kis_guard_seen";
+export const GUARD_SEEN_SQL = `INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
+ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at WHERE settings.value <> excluded.value`;
+/** 깨운 결과를 같은 행에 — 장중 감시가 꺼져 호출 기록이 남지 않는 동안 운영에서 볼 흔적 */
 export const GUARD_KICK_RESULT_SQL = "UPDATE settings SET value = ? WHERE key = ?";
 
 export const GUARD_JOB: DispatchJob = {
@@ -83,6 +89,7 @@ export async function kickGuardIfSilent(
     const 세션 = (await execute(GUARD_SESSION_SQL, [kst(now).date])).rows[0];
     if (!세션) return "no_session";
     if (!kickWindow({ open_utc: String(세션[0]), close_utc: String(세션[1]) }, now)) return "not_window";
+    await execute(GUARD_SEEN_SQL, [GUARD_SEEN_KEY, JSON.stringify(kst(now).date), now.toISOString()]);
     const 최근 = await execute(GUARD_RECENT_SQL, [new Date(now.getTime() - GUARD_SILENT_MS).toISOString()]);
     if (최근.rows.length) return "alive";
     const 막기 = await execute(LIVE_THROTTLE_SQL, [

@@ -4,7 +4,7 @@
 > 경로 `web/app/api/cron/intraday/route.ts`, 화면 [알림] (`web/components/AlertCenter.tsx`).
 
 > **2026-10-08 꺼 둠** (docs/infra.md 25.1026). 사용자: "장중 감시는 일단 빼자. 디비 소모가 너무 많아. 이미 turso가 리밋에 걸렸단 메시지가 왔어".
-> `web/lib/intradaySwitch.ts` 의 `INTRADAY_ENABLED = false` — 경로는 토큰만 확인하고 DB 를 건드리지 않고 끝난다. 다시 켜려면 true 로 바꿔 배포한다.
+> `web/lib/intradaySwitch.ts` 의 `INTRADAY_ENABLED = false` — 경로는 토큰만 확인하고 DB 를 건드리지 않고 끝난다. **단 하나 예외**: 국내 평일 KST 09:20~16:10 에는 KIS모의투자 장중 손절·익절 감시 깨우기(25.1806~1808, `web/lib/guardKick.ts`)가 세션·감시 기록을 한 행씩 읽고 하루 한 번 흔적(`kis_guard_seen`)·깨울 때 막기 행(`kis_guard_kick_at`)을 쓴다. 다시 켜려면 true 로 바꿔 배포한다.
 > 꺼진 동안 매수 구간·목표가·손절·급등락·거래량·공시 장중 알림이 없고, 조용시간에 쌓인 알림(시간외·분석 완료 등)을 이 경로가 대신 보내던 것도 멈춘다.
 > 일일 배치의 "장중 감시 준비"(감시 목록, 하루 한 번)는 그대로 둔다 — 공시 수집이 그 목록을 쓴다.
 

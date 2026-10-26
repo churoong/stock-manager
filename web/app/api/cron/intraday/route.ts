@@ -428,7 +428,7 @@ export async function GET(request: Request) {
   }
   const market = new URL(request.url).searchParams.get("market")?.toUpperCase() as Market | undefined;
   // KIS모의투자 장중 손절·익절 감시가 멈췄으면 깨운다(25.1806) — **장중 감시 스위치와 따로**(25.1807): 꺼진 동안에도 돈다.
-  // 평일 KST 09:20~15:10 밖이면 DB 를 읽지 않고, 안이면 한 행짜리 읽기 둘. 던지지 않는다
+  // 평일 KST 09:20~16:10 밖이면 DB 를 읽지 않고, 안이면 한 행짜리 읽기 둘. 던지지 않는다
   const 깨움 = market === "KR" ? await kickGuardIfSilent(new Date()) : undefined;
   // **장중 감시가 꺼져 있으면 그 밖의 DB 는 건드리지 않는다** (docs/infra.md 25.1026 — Turso 한도). 호출 기록도 남기지 않는다
   if (!INTRADAY_ENABLED) return NextResponse.json({ skipped: INTRADAY_OFF_NOTE, ...(깨움 ? { guard_kick: 깨움 } : {}) });

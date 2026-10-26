@@ -823,7 +823,7 @@ KIS모의투자는 챔피언 H 하나만 베껴 왔다. 그러면 ① 챔피언 
 - **어떻게 깨우나**(25.1796): 10분 예약은 첫 날(10-26) 09:03~09:33 네 회차가 하나도 시작하지 않았다(Actions 예약 지연). 그래서
   **한 잡이 장 끝까지 깨어** 10분 눈금(창 시작부터, 끝 포함 — 끝 눈금은 30초 앞당김)마다 감시를 따로 된 프로세스로 부른다(`scripts/kis_guard_loop.py`).
   국내 일일 배치(cron-job.org 08:27)의 `guard_start` 잡이 깨우고, 잡 상한(6시간)에 닿으면 `chain` 잡이 다시 깨운다. 예비로
-  09:03·11:03·13:03·14:33 KST 예약(늦게 와도 남은 장을 돈다 — 따라잡기 `schedule_catchup` 는 깨우지 않는다; 10-26 하루 내내 한 번도 오지 않았다). **예비는 웹 장중 경로**(25.1806·25.1807): cron-job.org 가 정규장 5분마다 부르는 `/api/cron/intraday?market=KR` 이 — **장중 감시 스위치(`INTRADAY_ENABLED`, 25.1026 꺼짐)와 따로**, 평일 KST 09:20~15:10 밖이면 DB 를 읽지 않고 — 개장 + 25분 ~ 마감 − 25분에 `intraday_guard` 실행 기록이 25분 넘게 없으면 `repository_dispatch(kis-guard)` 로 깨운다(30분 막기 `kis_guard_kick_at`, 토큰 `GH_DISPATCH_TOKEN`·`GH_REPO`). 휴장일이면 곧바로 끝난다. 같은 동시 실행 그룹이라 두 잡이 함께 돌지 않는다
+  09:03·11:03·13:03·14:33 KST 예약(늦게 와도 남은 장을 돈다 — 따라잡기 `schedule_catchup` 는 깨우지 않는다; 10-26 하루 내내 한 번도 오지 않았다). **예비는 웹 장중 경로**(25.1806·25.1807): cron-job.org 가 정규장 5분마다 부르는 `/api/cron/intraday?market=KR` 이 — **장중 감시 스위치(`INTRADAY_ENABLED`, 25.1026 꺼짐)와 따로**, 평일 KST 09:20~15:10 밖이면 DB 를 읽지 않고 — 개장 + 25분 ~ 마감 − 25분에 `intraday_guard` 실행 기록이 25분 넘게 없으면 `repository_dispatch(kis-guard)` 로 깨운다(30분 막기 `kis_guard_kick_at`, 토큰 `GH_DISPATCH_TOKEN`·`GH_REPO`) `[확인필요: cron-job.org 가 이 경로를 아직 부르는가·Vercel 토큰 — 하루 한 번 흔적 kis_guard_seen(그날 날짜)이 있으면 불린 것]`. 휴장일이면 곧바로 끝난다. 같은 동시 실행 그룹이라 두 잡이 함께 돌지 않는다
 
 ## 12. 읽기·쓰기 예산 (설계 추정, 실측 아님 `[확인필요]`)
 
