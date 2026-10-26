@@ -3,11 +3,16 @@ name: KIS모의투자 장중 손절·익절
 # 국내 정규장 동안 10분마다 KIS모의투자 보유를 아침에 적어 둔 감시선(H 의 손절선·익절선)과 대 본다
 # (docs/paper.md 15.11, docs/infra.md 25.1768 — 2026-10-23 사용자 지시). 닿으면 KIS 모의에서만 시장가로 판다.
 # 시각·휴장일은 스크립트가 다시 본다(09:05~15:15 KST 밖이면 DB 를 열지 않고 끝난다).
-# 예약 실행은 지연·누락이 잦다 — cron-job.org 가 repository_dispatch(kis-guard)로 깨우면 정시성이 낫다(외부 계정 설정,
-# docs/handoff.md 사용자 결정). 매시 정각은 혼잡하므로 3분 비튼다.
+# **한 잡이 장 끝까지 깨어 10분마다 돈다**(scripts/kis_guard_loop.py, docs/infra.md 25.1796). 10분 예약(`3-59/10`)은
+# 2026-10-26 첫 날 09:03~09:33 네 회차가 하나도 시작하지 않았다 — Actions 예약은 몇 시간씩 늦는다. 시작은 국내 일일 배치
+# (cron-job.org 가 08:27 에 깨운다)의 `guard_start` 잡이 이 워크플로를 깨워서, 잡 상한(6시간)에 닿으면 `chain` 잡이 스스로 다시
+# 깨워서 잇는다. 아래 예약 셋은 그 사슬이 끊긴 날의 예비다(늦게 와도 남은 장을 돈다). cron-job.org 가 repository_dispatch
+# (kis-guard)로 깨워도 같다(외부 계정 설정, 선택).
 on:
   schedule:
-    - cron: "3-59/10 0-6 * * 1-5" # 00:03~06:53 UTC = 09:03~15:53 KST (월~금)
+    - cron: "3 0 * * 1-5" # 00:03 UTC = 09:03 KST (월~금)
+    - cron: "3 2 * * 1-5" # 11:03 KST
+    - cron: "3 4 * * 1-5" # 13:03 KST
   repository_dispatch:
     types: [kis-guard]
   workflow_dispatch:
@@ -16,12 +21,18 @@ on:
         description: 닿은 종목만 세고 주문·알림은 내지 않음
         type: boolean
         default: true
+      loop:
+        description: 장 끝까지 10분마다(끄면 한 번만). 예약·사슬 실행은 늘 켬
+        type: boolean
+        default: false
 
 permissions:
   contents: read
   issues: write
 
-# 앞 실행이 끝나기 전에 다음 예약이 오면 기다린다 — 두 실행이 같은 종목을 두 번 팔지 않게(줄 유일 색인도 막는다)
+# 앞 실행이 끝나기 전에 다음 예약이 오면 기다린다 — 두 실행이 같은 종목을 두 번 팔지 않게(줄 유일 색인도 막는다).
+# 기다리는 실행은 하나만 남는다(새로 온 것이 앞서 기다리던 것을 취소) — 손으로 한 번만 돌리는 실행(loop 끔)이 사슬의 다음
+# 실행을 밀어내면 그날 남은 장은 예비 예약이 잇는다
 concurrency:
   group: kis-guard
   cancel-in-progress: false
@@ -29,7 +40,10 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    # 반복 실행은 장 끝까지(스크립트가 330분 뒤 새 회차를 열지 않고 사슬로 넘긴다). GitHub 호스트 잡 상한은 360분
+    timeout-minutes: 350
+    outputs:
+      chain: ${{ steps.guard.outputs.chain }}
     steps:
       - uses: actions/checkout@v5
 
@@ -44,6 +58,7 @@ jobs:
           pip install -r requirements.txt
 
       - name: 장중 감시
+        id: guard
         env:
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
@@ -63,7 +78,12 @@ jobs:
           set -o pipefail
           ARGS=""
           if [ "${{ inputs.dry_run }}" = "true" ]; then ARGS="--dry-run"; fi
-          python -m batch.jobs.intraday_guard $ARGS 2>&1 | python scripts/ops_tee.py run.log
+          # 손 실행에서 loop 를 끈 것만 한 번 — 예약·repository_dispatch·사슬 실행은 inputs.loop 가 없거나 켬
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.loop }}" != "true" ]; then
+            timeout --kill-after=30s 7m python -m batch.jobs.intraday_guard $ARGS 2>&1 | python scripts/ops_tee.py run.log
+          else
+            python scripts/kis_guard_loop.py $ARGS 2>&1 | python scripts/ops_tee.py run.log
+          fi
 
       # 실패했거나 손으로 돌린 실행만 비공개 운영 이슈로 — 10분마다 하루 40번 올리면 운영 이슈가 묻힌다. 평소 결과는
       # 실행 기록(batch_runs)·텔레그램에 있다
@@ -78,3 +98,20 @@ jobs:
             --title "운영 출력 (클라우드 세션용)" \
             --file run.log \
             --note "KIS모의투자 장중 손절·익절 (${{ job.status }})"
+
+  # 잡 상한에 닿았는데 장이 남았으면 같은 워크플로를 다시 깨운다(25.1796). 쓰기 권한(actions)은 **패키지를 설치하는 본체가 아닌
+  # 잡**에만 — 일일 배치 keepalive 와 같은 원칙(25.986). gh 는 러너에 깔려 있다
+  chain:
+    needs: run
+    if: always() && needs.run.outputs.chain == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: 다음 실행 깨우기
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api -X POST "repos/${{ github.repository }}/actions/workflows/kis-guard.yml/dispatches" \
+            -f ref="${{ github.ref_name }}" -f "inputs[loop]=true" -f "inputs[dry_run]=${{ inputs.dry_run == true }}"

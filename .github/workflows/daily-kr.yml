@@ -210,6 +210,23 @@ jobs:
           path: .price-replica-enc
           key: price-replica-enc-${{ github.run_id }}-${{ github.run_attempt }}
 
+  # KIS모의투자 장중 손절·익절을 깨운다 (docs/infra.md 25.1796). 이 워크플로는 cron-job.org 가 08:27 에 정시로 깨우는데
+  # 장중 감시의 10분 예약은 몇 시간씩 늦었다(10-26 첫 날 09:03~09:33 0회). 깨운 실행은 감시 창(09:05)까지 기다렸다가 장 끝까지
+  # 10분마다 돈다. 배치 성패와 무관하게 깨운다 — 감시선이 없으면 감시가 "오늘 감시선 없음" 을 알린다. 휴장일이면 곧바로 끝나고,
+  # 이미 돌고 있으면 그 뒤에 기다렸다가 창이 지났으면 끝난다. 쓰기 권한(actions)은 본체가 아닌 이 잡에만(25.986)
+  guard_start:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: 장중 감시 깨우기
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api -X POST "repos/${{ github.repository }}/actions/workflows/kis-guard.yml/dispatches" \
+            -f ref="${{ github.ref_name }}" -f "inputs[loop]=true" -f "inputs[dry_run]=false"
+
   # 공개 저장소 60일 무활동 꺼짐 대비 (docs/infra.md 25.981·25.986). 쓰기 권한(커밋·워크플로 켜기)을 **배치 본체와 다른 잡**에만 준다 —
   # 본체는 바깥 패키지를 설치해 돌리므로 저장소에 쓸 수 있으면 안 된다. 표준 라이브러리만 쓰는 스크립트라 설치가 없다
   keepalive:
