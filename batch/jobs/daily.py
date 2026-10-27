@@ -1062,6 +1062,20 @@ def _kis_알림문(broker: dict[str, Any], label: str = "KIS모의투자") -> st
     return None
 
 
+def _주의_출력(warnings: list[str], 최대: int = 20, 길이: int = 240) -> list[str]:
+    """`partial` 로 닫는 까닭을 운영 출력에 (docs/infra.md 25.1817).
+
+    2026-10-26 미국·10-27 국내 일일 배치가 "완료 (partial)" 로 끝났는데 어느 주의 때문인지 운영 출력에 한 줄도 없었다 —
+    주의 줄은 리포트(텔레그램·웹)와 실행 기록에만 있어, 세션은 DB 를 읽어야 알았다(10월은 DB 조회 자제). 일일 배치는
+    늘 `ops_tee` 를 거쳐(`tests/test_workflows.py`) 이 출력은 비공개 운영 저장소에만 간다.
+    줄마다 길이를 자르고 줄 수에 상한
+    """
+    줄 = [f"  주의: {w[:길이]}{'…' if len(w) > 길이 else ''}" for w in warnings[:최대]]
+    if len(warnings) > 최대:
+        줄.append(f"  주의 {len(warnings) - 최대}줄 더 (실행 기록 step_log 참고)")
+    return 줄
+
+
 def _실패문(이름: str, exc: BaseException) -> str:
     """하위 작업이 예외로 끝난 것을 리포트 한 줄로. **한도는 "실패" 가 아니라 "건너뜀"** 이다 (docs/infra.md 25.666,
     교차검증) — 기록은 `skipped` 로 닫는데(25.664) 리포트는 "…실패: D1_ERROR …" 라 적어 둘이 어긋났다."""
@@ -2651,6 +2665,8 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
             return _send_failed(client, run_id, step_log, market, name, exc, dry_run)
 
         _kis와_요약()
+        for 줄 in _주의_출력(warnings):
+            print(줄)
         status = "partial" if warnings else "success"
         try:
             db.finish_batch_run(client, run_id, status=status, step_log=step_log)
