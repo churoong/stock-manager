@@ -88,5 +88,11 @@ jobs:
         if: ${{ !inputs.year }}
         run: python -m batch.jobs.kr_cashflow
 
+      # 새·재편입 종목의 배당 (docs/infra.md 25.1823). 배당은 4·5월에만 그때 유니버스를 받아, 그 뒤 편입 종목은 다음 4월까지
+      # 배당수익률이 결측이었다. 지난 배당 수집 뒤 편입된 종목만 — 화요일 재시도는 월요일 성공 뒤라 대상이 비어 바로 끝난다
+      - name: 새로 편입된 종목의 배당
+        if: ${{ !inputs.year && !cancelled() }}
+        run: python -m batch.jobs.dividends --only-missing
+
       - name: 시점 조회 확인
         run: python scripts/check_pit.py 005930

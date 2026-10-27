@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 import time
@@ -92,7 +93,41 @@ def targets(client: TursoClient) -> list[tuple[int, str]]:
     return [(int(r[0]), str(r[1])) for r in rs.rows]
 
 
-def run(latest: int | None = None, limit: int | None = None) -> int:
+#: 새·재편입 종목만 받는 실행 이름 (25.1823) — 해마다 도는 전체 실행과 가른다
+JOB_NAME_MISSING = "dividends_missing"
+#: 지난 배당 수집(전체·새 편입) 가운데 성공한 마지막 실행 시각
+LAST_RUN_SQL = (
+    "SELECT MAX(started_at) FROM batch_runs WHERE job_name IN ('dividends', 'dividends_missing') AND status = 'success'"
+)
+#: 그 시각에 알 수 있던 국내 최신 스냅샷의 편입 종목
+PREV_MEMBERS_SQL = (
+    "SELECT u.stock_id FROM universe_members u WHERE u.included = 1 AND u.snapshot_date = ("
+    "SELECT MAX(x.snapshot_date) FROM universe_members x JOIN stocks s ON s.id = x.stock_id"
+    " WHERE s.country = 'KR' AND x.snapshot_date <= ?)"
+)
+#: 배당 행이 하나라도 있는 종목 (지난 수집 기록이 없을 때만)
+HAS_ROWS_SQL = "SELECT DISTINCT stock_id FROM stock_dividends WHERE stock_id IN (SELECT value FROM json_each(?))"
+
+
+def missing_targets(client: TursoClient) -> list[tuple[int, str]]:
+    """지난 배당 수집 뒤에 새로 편입되거나 다시 편입된 국내 종목 (docs/infra.md 25.1823).
+
+    배당은 4·5월에만 그때 유니버스를 받는다(dividends.yml). 그 뒤 편입된 종목은 다음 4월까지 `stock_dividends` 행이
+    없어 배당수익률이 결측 — 밸류 팩터가 남은 3지표로 재정규화되어 같은 재무의 기존 종목과 점수가 갈렸다(감사 재현:
+    배당 6% 쌍이 장기 신호 문턱 55 를 사이에 두고 갈림). "행이 없는 종목" 으로 고르지 않는 까닭: 무배당 종목은
+    DART 가 자료를 주지 않아 행이 영영 없다 — 매주 회사당 여섯 번씩 다시 불렀을 것이다. 그래서 **지난 성공한 수집 때
+    유니버스에 없던 종목**만 고른다(받은 해는 `이미` 가 건너뛴다). 지난 수집 기록이 없으면 행이 없는 종목
+    """
+    전체 = targets(client)
+    마지막 = client.execute(LAST_RUN_SQL).rows
+    if 마지막 and 마지막[0][0]:
+        그때 = {int(r[0]) for r in client.execute(PREV_MEMBERS_SQL, [str(마지막[0][0])[:10]]).rows}
+        return [t for t in 전체 if t[0] not in 그때]
+    있음 = {int(r[0]) for r in client.execute(HAS_ROWS_SQL, [json.dumps([t[0] for t in 전체])]).rows}
+    return [t for t in 전체 if t[0] not in 있음]
+
+
+def run(latest: int | None = None, limit: int | None = None, only_missing: bool = False) -> int:
     from batch.jobs.etf import _bulk
 
     latest = latest or datetime.now(UTC).year - 1
@@ -100,8 +135,13 @@ def run(latest: int | None = None, limit: int | None = None) -> int:
     client = TursoClient()
     try:
         db.apply_migrations(client)
-        run_id = db.start_batch_run(client, job_name=JOB_NAME, market="KR", trade_date=str(latest))
-        corps = targets(client)
+        run_id = db.start_batch_run(client, job_name=JOB_NAME_MISSING if only_missing else JOB_NAME, market="KR",
+                                    trade_date=str(latest))  # fmt: skip
+        corps = missing_targets(client) if only_missing else targets(client)
+        if only_missing and not corps:
+            db.finish_batch_run(client, run_id, status="success", step_log={"companies": 0})
+            print("지난 배당 수집 뒤 새로 편입된 국내 종목이 없습니다")
+            return 0
         if limit:
             corps = corps[:limit]
         # **부르기 전에 본다** (docs/infra.md 25.388). 100사마다 세므로, 재무 수집이 이미 한도를 채운 날에도
@@ -231,9 +271,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="DART 배당 수집")
     parser.add_argument("--latest", type=int, help="최근 사업연도 (기본: 작년)")
     parser.add_argument("--limit", type=int, help="앞에서부터 몇 사만 (시험용)")
+    parser.add_argument("--only-missing", action="store_true",
+                        help="지난 배당 수집 뒤 새로 편입된 종목만 (재무 수집 뒤 매주, 25.1823)")  # fmt: skip
     args = parser.parse_args()
     logging.basicConfig(level=config.SETTINGS.log_level, format="%(asctime)s %(levelname)s %(name)s | %(message)s")
-    return run(args.latest, args.limit)
+    return run(args.latest, args.limit, only_missing=args.only_missing)
 
 
 if __name__ == "__main__":
