@@ -27,5 +27,5 @@ def test_종목_하나로_돌면_시장_분포를_두고_간다(client) -> None:
 def test_종목_실행은_주간_작업과_다른_이름으로_남긴다() -> None:
     """같은 이름이면 주간 지표가 멈춰도 '오래 안 돈 작업' 경고가 참고 분석의 성공 기록에 가려진다."""
     src = inspect.getsource(metrics_job.run)
-    assert "JOB_NAME_ONE if ticker else JOB_NAME" in src and "market_wide=ticker is None" in src
+    assert "JOB_NAME_ONE if ticker else" in src and "market_wide=ticker is None" in src
     assert metrics_job.JOB_NAME_ONE != metrics_job.JOB_NAME

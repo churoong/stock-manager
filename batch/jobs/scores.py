@@ -1052,6 +1052,16 @@ def run(market: str, as_of: str | None = None) -> int:
         attach_unrecovered_rows(client, 성과지표, as_of)
         단계.mark("unrecovered_rows")
         묵은_지표 = stale_metrics(성과지표, as_of)
+        # 지표 행이 아예 없는 유니버스 종목 (25.1819) — 묵음 검사는 행이 있는 종목만 셌다. 새 편입 종목은 유니버스
+        # 갱신 직후 `metrics --only-missing` 이 내므로 평소 0 이다. 0 이 아니면 그 단계가 못 돈 것이다
+        # (리스크 팩터 없이 재정규화)
+        지표없음 = sum(1 for r in universe if int(r["stock_id"]) not in 성과지표)
+        if 지표없음:
+            log.warning(
+                "성과 지표가 없는 유니버스 종목 %d/%d — 리스크 팩터 없이 점수를 냅니다"
+                "(유니버스 워크플로의 새 편입 지표 단계를 확인하세요)",
+                지표없음, len(universe),
+            )  # fmt: skip
         if 묵은_지표:
             log.warning("성과 지표 %d/%d종목이 %d일 넘게 묵었습니다(가장 오래된 %s) — 주간 성과 지표 작업을 확인하세요",
                         묵은_지표["count"], 묵은_지표["of"], METRICS_STALE_DAYS, 묵은_지표["oldest"])  # fmt: skip
@@ -1204,6 +1214,7 @@ def run(market: str, as_of: str | None = None) -> int:
                 **({"stale_annual": 묵은_재무} if 묵은_재무 else {}),
                 # 묵은 성과 지표 — 버리지 않고 말한다 (25.1170)
                 **({"stale_metrics": 묵은_지표} if 묵은_지표 else {}),
+                **({"missing_metrics": 지표없음} if 지표없음 else {}),  # 25.1819
                 # 범위 밖 가중치를 기본값으로 되돌렸으면 남긴다 (docs/infra.md 25.169)
                 **({"setting_warnings": 설정경고} if 설정경고 else {}),
             },

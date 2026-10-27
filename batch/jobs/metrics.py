@@ -38,6 +38,12 @@ JOB_NAME = "metrics"
 #: 종목 몇 개만 낸 실행(`--ticker`, 참고 분석 `ensure_data`)의 기록 이름 (docs/infra.md 25.1085). 주간 작업과
 #: 같은 이름이면 주간 지표가 멈춰도 "오래 안 돈 작업"(`weekly_summary`) 경고가 이 성공 기록에 가려졌다
 JOB_NAME_ONE = "metrics_one"
+#: 유니버스 갱신 직후 새·재편입 종목만 (25.1819). 주간 `metrics` 실행과 이름을 가른다 — 주간 요약의 멈춘 작업 검사
+#: (`weekly_summary.EXPECTED_DAYS["metrics"]`)가 이 작은 실행을 주간 실행으로 세면 주간 작업이 멈춰도 모른다
+JOB_NAME_MISSING = "metrics_missing"
+#: 이보다 묵은 행만 있으면 "없는 것" 으로 보고 다시 낸다(달력일) — 점수 작업의 묵음 문턱(`scores.METRICS_STALE_DAYS`)과
+#: 같은 값(시험이 묶는다). 2주 넘게 빠졌다 돌아온 재편입 종목이 몇 달 묵은 변동성·MDD 로 월요일 비중을 정하지 않게
+MISSING_STALE_DAYS = 21
 
 # 기간별로 거슬러 올라갈 달력 일수. 거래일이 아니라 달력 기준이다.
 WINDOW_DAYS = {"1Y": 366, "3Y": 1096, "5Y": 1827}
@@ -110,6 +116,33 @@ def target_stocks(
             " WHERE u.included = 1 AND s.country = ?"
             f"   AND u.snapshot_date = {db.latest_snapshot_sql()}",
             [country, country],
+        )
+        out.extend((int(r[0]), str(r[1]), str(r[2])) for r in rs.rows)
+    return out
+
+
+def missing_stocks(
+    client: TursoClient, as_of_by: dict[str, str], countries: tuple[str, ...] = ("KR", "US")
+) -> list[tuple[int, str, str]]:
+    """최신 스냅샷 편입 종목 가운데 쓸 만한 성과 지표 행이 없는 것 (docs/infra.md 25.1819).
+
+    유니버스는 일요일 밤(월 00:43 KST)에 새 스냅샷을 내고 월요일 국내·미국 일일 배치가 곧바로 그것을 쓰는데, 주간 지표
+    작업은 화요일 02:23 KST 에 돈다. 그 사이 **새로 편입된 종목은 지표 행이 없어** 리스크 팩터가 빠진 채 남은 4팩터로
+    종합 점수가 재정규화되어 순위가 오르고, 신호 비중은 변동성·MDD 를 몰라 줄지 않았다(`size_reduction` 1.0) —
+    가상모의투자 주문 금액이 같은 종목의 화요일보다 몇 배였다(결함 회차 재현: 축소 0.3125 → 1.0).
+    "행이 있다" 는 그 나라 기준일에서 `MISSING_STALE_DAYS` 안의 행이 있다는 뜻이다
+    (재편입 종목의 몇 달 묵은 행은 없음으로)
+    """
+    out: list[tuple[int, str, str]] = []
+    for country in countries:
+        한계 = (date.fromisoformat(as_of_by[country]) - timedelta(days=MISSING_STALE_DAYS)).isoformat()
+        rs = client.execute(
+            "SELECT s.id, s.ticker, s.country FROM stocks s"
+            " JOIN universe_members u ON u.stock_id = s.id"
+            " WHERE u.included = 1 AND s.country = ?"
+            f"   AND u.snapshot_date = {db.latest_snapshot_sql()}"
+            "   AND NOT EXISTS (SELECT 1 FROM performance_metrics m WHERE m.stock_id = s.id AND m.as_of_date >= ?)",
+            [country, country, 한계],
         )
         out.extend((int(r[0]), str(r[1]), str(r[2])) for r in rs.rows)
     return out
@@ -602,7 +635,9 @@ def _bulk_upsert(client: TursoClient, rows: list[tuple]) -> None:
     client.batch(statements)
 
 
-def run(windows: list[str], ticker: str | None = None, countries: tuple[str, ...] = ("KR", "US")) -> int:
+def run(
+    windows: list[str], ticker: str | None = None, countries: tuple[str, ...] = ("KR", "US"), only_missing: bool = False
+) -> int:
     client = TursoClient()
     try:
         db.apply_migrations(client)
@@ -611,11 +646,18 @@ def run(windows: list[str], ticker: str | None = None, countries: tuple[str, ...
         # 리스크 입력이 늘 한 거래일 늦었다. 점수·신호·밴드는 25.234 에서 이미 `default_as_of` 로 옮겼다
         as_of_by = {c: cal.default_as_of(c) for c in countries}
         as_of = max(as_of_by.values())
-        run_id = db.start_batch_run(
-            client, job_name=JOB_NAME_ONE if ticker else JOB_NAME, market=None, trade_date=as_of
-        )
+        이름 = JOB_NAME_ONE if ticker else (JOB_NAME_MISSING if only_missing else JOB_NAME)
+        run_id = db.start_batch_run(client, job_name=이름, market=None, trade_date=as_of)
 
-        stocks = target_stocks(client, ticker, countries)
+        if only_missing:
+            stocks = missing_stocks(client, as_of_by, countries)
+        else:
+            stocks = target_stocks(client, ticker, countries)
+        if not stocks and only_missing:
+            # 빠진 종목이 없는 것은 정상이다 — 실패로 닫지 않는다
+            db.finish_batch_run(client, run_id, status="success", step_log={"rows": 0, "missing": 0})
+            print("지표가 빠진 편입 종목이 없습니다")
+            return 0
         if not stocks:
             db.finish_batch_run(
                 client, run_id, status="failed", error_text="대상 종목이 없습니다"
@@ -624,7 +666,10 @@ def run(windows: list[str], ticker: str | None = None, countries: tuple[str, ...
             return 1
 
         print(f"대상 {len(stocks)}종목, 기간 {windows}")
-        total, counts, warnings = compute_all(client, stocks, windows, as_of, as_of_by, market_wide=ticker is None)
+        # 일부 종목만 도는 실행은 시장 전체 분포(신고가 뒤, 25.1085)를 덮어쓰지 않는다
+        total, counts, warnings = compute_all(
+            client, stocks, windows, as_of, as_of_by, market_wide=ticker is None and not only_missing
+        )
 
         db.finish_batch_run(
             client, run_id,
@@ -649,6 +694,10 @@ def main() -> int:
     parser.add_argument("--window", choices=list(WINDOW_DAYS), help="특정 기간만")
     parser.add_argument("--ticker", help="특정 종목만")
     parser.add_argument("--market", choices=["KR", "US"], help="한 나라만 (비우면 둘 다)")
+    parser.add_argument(
+        "--only-missing", action="store_true",
+        help="최신 유니버스 편입 종목 가운데 지표가 없거나 묵은 것만 (유니버스 갱신 직후, 25.1819)",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -658,7 +707,7 @@ def main() -> int:
 
     windows = [args.window] if args.window else list(WINDOW_DAYS)
     countries = (args.market,) if args.market else ("KR", "US")
-    return run(windows, args.ticker, countries)
+    return run(windows, args.ticker, countries, only_missing=args.only_missing)
 
 
 if __name__ == "__main__":
