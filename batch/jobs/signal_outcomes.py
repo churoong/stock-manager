@@ -162,15 +162,29 @@ def market_last_dates(client: TursoClient, country: str, today: str) -> dict[str
     return out
 
 
+_SAVED_COLS = (
+    "SELECT o.stock_id, o.as_of_date, o.horizon, o.entry_date, o.entry_close, o.ret_5d, o.ret_20d,"
+    " o.ret_60d, o.max_up, o.max_down, o.hit_target, o.hit_stop, o.bench_ret_20d, o.bench_ret_60d,"
+    " o.days_available FROM signal_outcomes o JOIN stocks s ON s.id = o.stock_id"
+)
+#: 창 안이지만 이번에 다시 채점하지 않고 지난 행을 그대로 두는 종목 (25.1822 — 미국 분할 재수집 대기)
+HELD_SQL = _SAVED_COLS + " WHERE s.country = ? AND o.as_of_date >= ? AND o.stock_id IN (SELECT value FROM json_each(?))"
+
+
 def load_frozen(client: TursoClient, country: str, since: str) -> list[oc.Outcome]:
     """창(`since`) 밖으로 나가 다시 계산하지 않는, 이미 저장된 성적 (25.336). 집계에 함께 넣는다."""
-    rs = client.execute(
-        "SELECT o.stock_id, o.as_of_date, o.horizon, o.entry_date, o.entry_close, o.ret_5d, o.ret_20d,"
-        " o.ret_60d, o.max_up, o.max_down, o.hit_target, o.hit_stop, o.bench_ret_20d, o.bench_ret_60d,"
-        " o.days_available FROM signal_outcomes o JOIN stocks s ON s.id = o.stock_id"
-        " WHERE s.country = ? AND o.as_of_date < ?",
-        [country, since],
-    )
+    rs = client.execute(_SAVED_COLS + " WHERE s.country = ? AND o.as_of_date < ?", [country, since])
+    return _saved(rs)
+
+
+def load_held(client: TursoClient, country: str, since: str, ids: set[int]) -> list[oc.Outcome]:
+    """창 안에서 이번에 다시 채점하지 않는 종목의 지난 성적 (25.1822). 집계·보정표에 함께 넣는다."""
+    if not ids:
+        return []
+    return _saved(client.execute(HELD_SQL, [country, since, json.dumps(sorted(ids))]))
+
+
+def _saved(rs: Any) -> list[oc.Outcome]:
     out: list[oc.Outcome] = []
     for r in rs.dicts():
         out.append(oc.Outcome(
@@ -191,16 +205,18 @@ def since_of(today: str) -> str:
 
 
 def store(
-    client: TursoClient, country: str, rows: list[tuple], stats: list[oc.Stat], now: str, since: str
+    client: TursoClient, country: str, rows: list[tuple], stats: list[oc.Stat], now: str, since: str,
+    held: set[int] | None = None,
 ) -> None:
-    """창(`since` 이후) 안의 것만 지우고 다시 넣는다. 창 밖의 굳은 성적은 남긴다 (25.336)."""
+    """창(`since` 이후) 안의 것만 지우고 다시 넣는다. 창 밖의 굳은 성적은 남긴다 (25.336).
+    `held` 종목은 창 안이어도 지우지 않는다 — 이번에 다시 채점하지 않은 종목의 지난 행 (25.1822)"""
     if any(len(r) != db.column_count(_OUT_COLS) for r in rows):
         raise ValueError("signal_outcomes 값 묶음과 열 개수가 어긋납니다")
     statements: list[tuple[str, list[Any]]] = [
         (
             "DELETE FROM signal_outcomes WHERE stock_id IN (SELECT id FROM stocks WHERE country = ?)"
-            " AND as_of_date >= ?",
-            [country, since],
+            " AND as_of_date >= ? AND stock_id NOT IN (SELECT value FROM json_each(?))",
+            [country, since, json.dumps(sorted(held or set()))],
         ),
         ("DELETE FROM signal_outcome_stats WHERE country = ?", [country]),
     ]
@@ -223,13 +239,19 @@ def store(
 
 
 def compute(
-    client: TursoClient, country: str, today: str, plan: list[pf.PlanFill] | None = None
+    client: TursoClient, country: str, today: str, plan: list[pf.PlanFill] | None = None,
+    held: set[int] | None = None,
 ) -> tuple[list[oc.Outcome], list[oc.Stat]]:
     """`plan` 을 넘기면 창 안 신호의 분할 계획 체결 성적(docs/signals.md 10.2)을 거기에 더한다.
-    굳은 성적은 계획이 없다"""
+    굳은 성적은 계획이 없다.
+
+    `held` 종목은 다시 채점하지 않고 지난 행을 집계에 넣는다 (25.1822). 미국 분할 재수집 대기 종목은 일일 배치가
+    최근 10일만 분할 반영 값으로 덮어 그 앞은 토요일 재수집까지 분할 전 값이다 — 그대로 채점하면 4:1 분할이
+    거짓 −74%·손절 도달로 저장되고 주간 사후 분석 텔레그램에 실렸다(결정 원장 25.1548·예측 성적표 25.1255 와 같은 꼴)"""
     since = since_of(today)
-    signals = load_signals(client, country, since)
-    frozen = load_frozen(client, country, since)
+    held = held or set()
+    signals = [s for s in load_signals(client, country, since) if int(s["stock_id"]) not in held]
+    frozen = load_frozen(client, country, since) + load_held(client, country, since, held)
     if not signals:
         return [], oc.summarize(frozen)
     ids = sorted({int(s["stock_id"]) for s in signals})
@@ -300,11 +322,15 @@ def run(market: str) -> int:
         run_id = db.start_batch_run(client, job_name=JOB_NAME, market=country, trade_date=today)
         try:
             계획: list[pf.PlanFill] = []
-            results, stats = compute(client, country, today, 계획)
+            # 미국 분할 재수집 대기 종목은 이번에 다시 채점하지 않는다 (25.1822). 못 읽으면 실패로 닫는다 — 거짓 손실을
+            # 저장하는 것보다 한 주 미루는 쪽이 덜 틀린다(창 안은 다음 주 실행이 다시 낸다)
+            대기 = db.split_pending_us(client, today) if country == "US" else set()
+            results, stats = compute(client, country, today, 계획, held=대기)
             now = db.now_iso()
-            store(client, country, [to_row(o, now) for o in results], stats, now, since_of(today))
+            store(client, country, [to_row(o, now) for o in results], stats, now, since_of(today), held=대기)
             # 점수 보정표 (docs/signals.md 10.1, 25.949) — 굳은 성적까지 포함해 점수와 수익을 짝짓는다
-            보정, 보정_경고 = calibrations(client, country, results + load_frozen(client, country, since_of(today)))
+            남긴 = load_frozen(client, country, since_of(today)) + load_held(client, country, since_of(today), 대기)
+            보정, 보정_경고 = calibrations(client, country, results + 남긴)
         except Exception as exc:
             if not db.quota_reason(exc):  # 한도는 `guard()` 가 skipped 로 닫는다 (docs/infra.md 25.1223)
                 db.finish_batch_run(client, run_id, status="failed", error_text=str(exc))
@@ -315,9 +341,12 @@ def run(market: str) -> int:
                       "calibration": 보정, "plan_fill": pf.summarize(계획),  # 기록 전용 (signals.md 10.2)
                       "post_touch": oc.summarize_post_touch(results),  # 기록 전용 (signals.md 10.3, 25.1408)
                       "horizon_fit": oc.horizon_fit(results),  # 기록 전용 (signals.md 10.4, 25.1441)
+                      **({"split_pending_held": len(대기)} if 대기 else {}),  # 25.1822
                       "warnings": [보정_경고] if 보정_경고 else []},
         )  # fmt: skip
         print(f"신호 성적표 {country}: 신호 {len(results)}건")
+        if 대기:
+            print(f"  분할 재수집 대기 {len(대기)}종목은 다시 채점하지 않고 지난 성적을 둠")
         for 표 in 보정:
             for 줄 in cb.render_lines(표):
                 print(f"  점수 보정 {줄}")
