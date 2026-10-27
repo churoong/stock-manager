@@ -22,6 +22,7 @@ WORKFLOWS = Path(__file__).resolve().parent.parent / ".github" / "workflows"
     "valuation-bands.yml",
     "signal-outcomes.yml",
     "earnings-calendar.yml",
+    "refresh-us-adjusted.yml",  # 25.1828 — 빠져 10월 내내 진도 문에 미뤄졌다
 )
 식 = re.compile(r"\$\{\{ inputs\.read_gate != 'off' && '(\d+)' \|\| '' \}\}")
 
