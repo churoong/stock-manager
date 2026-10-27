@@ -1043,7 +1043,11 @@ def run(market: str, as_of: str | None = None) -> int:
         if country == "US" and len(재료_못읽음) == 못읽음_전 and 배당연도:
             fill_us_no_dividend(dividends, 배당연도, financials, as_of)
         단계.mark("dividends")
-        성과지표 = load_metrics(client, country, as_of)
+        # **유니버스 종목만** (25.1816). 나라 전체를 읽으면 유니버스에서 빠진 종목의 지난 행(지표 작업은 최신
+        # 스냅샷 편입 종목만 다시 낸다)까지 묵음 경고에 세였다 — 10-27 국내 "43/980종목 묵음" 이 지표 작업이
+        # 두 번 성공한 뒤에도 남았다.
+        # 점수(`build_inputs`)는 유니버스만 돌아 값은 같고, 미회복 행 세기·지표 읽기가 빠진 종목만큼 준다
+        성과지표 = load_metrics(client, country, as_of, [int(r["stock_id"]) for r in universe])
         단계.mark("metrics")
         attach_unrecovered_rows(client, 성과지표, as_of)
         단계.mark("unrecovered_rows")
