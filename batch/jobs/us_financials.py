@@ -178,7 +178,13 @@ def run(min_turnover: float | None, limit: int | None, only_ids: list[int] | Non
         if only_ids:  # 유니버스 밖 종목 참고 분석 (docs/analysis.md 8장, 25.1018)
             ids = {s: i for s, i in ids.items() if i in set(only_ids)}
         if min_turnover:
-            keep = candidate_symbols(client, min_turnover)
+            # **유니버스 문턱 그대로 고르지 않는다** (25.1826, 결함 회차) — 후보 창(30 달력일 평균)과 유니버스 창
+            # (20 거래일)이 달라 거래대금이 막 오른 종목은 유니버스에 드는데 후보에서 빠졌다. 그러면 새 10-K 를 못 받아
+            # 지난해 보고서로 밸류·퀄리티·성장과 중기 신호(매출·영업이익 증가)를 냈다 — 가상모의투자 B·H 가 그 신호로
+            # 산다. 시총·상장일(us_shares)이 25.530 에서 둔 여유와 같게 넓힌다(SEC 는 초당 한도만, 쓰기 약 6만 행)
+            from batch.jobs.us_shares import CANDIDATE_MARGIN
+
+            keep = candidate_symbols(client, min_turnover * CANDIDATE_MARGIN)
             ids = {s: i for s, i in ids.items() if s in keep}
         if limit:
             ids = dict(sorted(ids.items())[:limit])
@@ -276,7 +282,9 @@ def run(min_turnover: float | None, limit: int | None, only_ids: list[int] | Non
             "sec_calls": sec.calls,
             "blocked": blocked,
         }
-        status = "failed" if not stats["companies"] else ("partial" if blocked or stats["failed"] else "success")
+        # **차단으로 도중에 멈추면 실패다** (25.1826, 결함 회차 — 업종 수집 25.1406 과 같은 규칙). partial·종료코드
+        # 0 이면 워크플로가 초록으로 끝나 CIK 가 큰 쪽(최근 상장·분사 회사)이 다음 달까지 빈 것을 아무도 몰랐다
+        status = "failed" if not stats["companies"] or blocked else ("partial" if stats["failed"] else "success")
         db.finish_batch_run(client, run_id, status=status, step_log=step)
 
         print(f"대상 {len(ids)}종목 / CIK {len(by_cik)} / 재무 있는 회사 {stats['companies']}")
