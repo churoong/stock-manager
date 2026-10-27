@@ -162,7 +162,7 @@ SENT_UPDATE_SQL = (
 )
 #: KIS모의투자 실현손익 (25.1694) — 체결이 있는 이 증권사 칸의 주문 전부를 날짜 순으로 다시 센다(하루 몇 줄씩 늘어남)
 REALIZED_ROWS_SQL = (
-    "SELECT id, trade_date, side, stock_id, code, filled_qty, avg_price, realized_krw, realized_fx_krw"
+    "SELECT id, trade_date, side, stock_id, code, filled_qty, avg_price, realized_krw, realized_fx_krw, reason"
     " FROM paper_broker_orders WHERE broker = ? AND filled_qty > 0"
 )
 REALIZED_SET_SQL = "UPDATE paper_broker_orders SET realized_krw = ?, realized_fx_krw = ? WHERE id = ?"

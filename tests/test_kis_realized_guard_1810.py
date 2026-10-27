@@ -1,0 +1,38 @@
+"""KIS모의투자 실현손익 — 장중 손절은 같은 날 아침 회차 매수 뒤로 센다 (docs/infra.md 25.1810, 결함 루프 2026-10-27).
+
+장중 손절(15.11)은 개장 뒤에 나가고, 손절선(< 회차 지정가)에 닿으려면 값이 그날 회차 지정가를 먼저 지난다 — 회차가
+늘 먼저 찬다. "같은 날 매도 먼저" 로 세면 평균 원가가 틀린 매도 실현손익이 되고 남은 몫의 원가가 다음 매도로 옮겨 갔다.
+"""
+
+from __future__ import annotations
+
+from batch.jobs import broker_mirror as job
+from batch.services import broker_mirror as bm
+from tests.test_broker_realized_1694 import _o
+
+
+def _r(o: dict, reason: str | None) -> dict:
+    return {**o, "reason": reason}
+
+
+def test_장중_손절은_그날_찬_회차_매수_뒤로() -> None:
+    # 10-20 10주 @10,000, 10-21 회차 5주 @9,400(09:00 찬), 10-21 장중 손절 10주 @9,200, 10-23 남은 5주 @9,800
+    줄 = [_r(_o(1, "2026-10-20", "buy", 10, 10_000), None), _r(_o(2, "2026-10-21", "buy", 5, 9_400), None),
+         _r(_o(3, "2026-10-21", "sell", 10, 9_200), bm.REASON_GUARD_STOP),
+         _r(_o(4, "2026-10-23", "sell", 5, 9_800), None)]  # fmt: skip
+    잔고 = [("2026-10-21", {"C1": 10}), ("2026-10-22", {"C1": 5}), ("2026-10-23", {"C1": 5})]
+    r = bm.realized(줄, lambda d: None, snapshots=잔고)
+    # 평균 원가 (100,000 + 47,000) / 15 = 9,800 — 장중 손절 10 × (9,200 − 9,800), 남은 5주도 9,800 이라 뒤 매도 0
+    assert r == {3: (-6_000.0, 0.0), 4: (0.0, 0.0)}  # 예전 매도 먼저면 −8,000 · +2,000
+
+
+def test_아침_베낀_매도와_장중_익절은_예전처럼_매도_먼저() -> None:
+    """아침 베낀 매도는 장 전 주문이라 같은 날 회차보다 먼저, 장중 익절은 회차와 선후를 정할 수 없어 예전 그대로"""
+    for 까닭 in (None, bm.REASON_GUARD_TAKE):
+        줄 = [_r(_o(1, "2026-10-20", "buy", 10, 10_000), None), _r(_o(2, "2026-10-21", "buy", 5, 9_400), None),
+             _r(_o(3, "2026-10-21", "sell", 10, 9_200), 까닭)]  # fmt: skip
+        assert bm.realized(줄, lambda d: None)[3] == (-8_000.0, 0.0), 까닭
+
+
+def test_실현손익_질의가_까닭을_읽는다() -> None:
+    assert ", reason" in job.REALIZED_ROWS_SQL
