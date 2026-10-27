@@ -337,8 +337,13 @@ def compute_all(
     as_of: str,
     as_of_by_country: dict[str, str] | None = None,
     market_wide: bool = True,
+    with_patterns: bool = True,
 ) -> tuple[int, dict[str, int], list[str]]:
-    """전 종목의 지표를 계산해 저장한다. 나라마다 기준일이 다르면 `as_of_by_country` 가 이긴다 (25.558)."""
+    """전 종목의 지표를 계산해 저장한다. 나라마다 기준일이 다르면 `as_of_by_country` 가 이긴다 (25.558).
+
+    `with_patterns=False` 면 가격 패턴(`price_patterns`)을 내지 않는다 (25.1821) — 새 편입 종목만 도는 실행(25.1819)이
+    그 몇 종목끼리 "함께 움직이는 종목"·지각생·업종 몫을 내 재편입 종목의 전 시장 기준 행까지 덮었고, 국내 사건 이력
+    (재무·수급 전 종목)·업종·주식수를 나라 단위로 읽어 작은 실행이 주간 실행만큼 읽었다. 패턴은 주간 실행이 낸다"""
     warnings: list[str] = []
     counts: dict[str, int] = {w: 0 for w in windows}
     rows_data: list[tuple] = []
@@ -410,7 +415,7 @@ def compute_all(
         이력 = {"drawdown": history.drawdowns(날짜들, 종가들), "tail": history.tail(날짜들, 종가들),
                 "season": history.season(날짜들, 종가들), "breakout": 신고가}  # fmt: skip
         # 재무·수급 사건과 그 뒤 (40~42장, 25.1063) — 국내만. 나라마다 한 번 몰아 읽은 이력에서
-        if country == "KR":
+        if country == "KR" and with_patterns:
             if 사건이력 is None:
                 사건이력 = load_event_inputs(client, country, 기준, warnings)
             재무, 배당, 수급, 주식수 = (사건이력[k] for k in ("fin", "div", "flows", "shares"))
@@ -433,7 +438,7 @@ def compute_all(
         끝 = list(zip(날짜들, 종가들, strict=False))[-(history.COMOVE_DAYS + 1) :]
         일수익.setdefault(country, {})[stock_id] = {
             d1: math.log(c1 / c0) for (_, c0), (d1, c1) in zip(끝, 끝[1:], strict=False) if c0 > 0 and c1 > 0}
-        if 국면표 or 하락장 or 변동 or any(이력.values()):
+        if with_patterns and (국면표 or 하락장 or 변동 or any(이력.values())):
             국면표 = {**(국면표 or {}), "stress": 하락장, "vol": 변동, **이력}
             pattern_rows.append((stock_id, 기준, 국면표, now))
         # 창 끝 검사의 "끝" 은 달력 기준일이 아니라 **그 나라 시세가 실제로 있는 마지막 날**이다 (25.710, 교차검증) —
@@ -672,7 +677,8 @@ def run(
         print(f"대상 {len(stocks)}종목, 기간 {windows}")
         # 일부 종목만 도는 실행은 시장 전체 분포(신고가 뒤, 25.1085)를 덮어쓰지 않는다
         total, counts, warnings = compute_all(
-            client, stocks, windows, as_of, as_of_by, market_wide=ticker is None and not only_missing
+            client, stocks, windows, as_of, as_of_by, market_wide=ticker is None and not only_missing,
+            with_patterns=not only_missing,
         )
 
         db.finish_batch_run(

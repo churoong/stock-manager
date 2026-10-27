@@ -640,6 +640,11 @@ def stale_metrics(metrics: dict[int, dict], as_of: str) -> dict | None:
     return {"count": len(묵음), "of": len(metrics), "oldest": min(묵음)} if 묵음 else None
 
 
+def missing_metrics(universe: list[dict[str, Any]], metrics: dict[int, dict]) -> int:
+    """성과 지표 행이 아예 없는 유니버스 종목 수 (25.1819·25.1821). 값이 빈 행(표본 부족)은 세지 않는다 — 행은 있다."""
+    return sum(1 for r in universe if int(r["stock_id"]) not in metrics)
+
+
 def attach_unrecovered_rows(client: TursoClient, metrics: dict[int, dict], as_of: str) -> None:
     """미회복 종목마다 바닥 뒤 시세 행 수를 `unrecovered_rows` 로 붙인다 (docs/infra.md 25.693, 교차검증).
 
@@ -1055,7 +1060,7 @@ def run(market: str, as_of: str | None = None) -> int:
         # 지표 행이 아예 없는 유니버스 종목 (25.1819) — 묵음 검사는 행이 있는 종목만 셌다. 새 편입 종목은 유니버스
         # 갱신 직후 `metrics --only-missing` 이 내므로 평소 0 이다. 0 이 아니면 그 단계가 못 돈 것이다
         # (리스크 팩터 없이 재정규화)
-        지표없음 = sum(1 for r in universe if int(r["stock_id"]) not in 성과지표)
+        지표없음 = missing_metrics(universe, 성과지표)
         if 지표없음:
             log.warning(
                 "성과 지표가 없는 유니버스 종목 %d/%d — 리스크 팩터 없이 점수를 냅니다"

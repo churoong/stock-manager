@@ -75,6 +75,9 @@ def test_빠진_종목만_계산하고_이름을_갈라_적고_시장_분포는_
     assert 이름 == metrics_job.JOB_NAME_MISSING != metrics_job.JOB_NAME
     남은 = json.loads(mem.conn.execute("SELECT value FROM settings WHERE key = ?", [hs.market_key("KR")]).fetchone()[0])
     assert 남은["h"]["1"]["n"] == 5000
+    # 가격 패턴은 내지 않는다(25.1821) — 그 몇 종목끼리 "함께 움직이는 종목" 을 내 전 시장 기준 행을 덮었다
+    assert mem.conn.execute("SELECT COUNT(*) FROM price_patterns").fetchone()[0] == 0
+    assert metrics_job.EVENT_FIN_SQL not in mem.질의 and metrics_job.EVENT_FLOWS_SQL not in mem.질의  # 나라 단위 사건 이력
     # 빠진 종목이 없으면 성공으로 닫는다(실패 알림이 아니다)
     mem.conn.execute("DELETE FROM universe_members WHERE stock_id IN (1, 3)")
     assert metrics_job.run(["1Y"], countries=("KR",), only_missing=True) == 0
@@ -95,5 +98,9 @@ def test_유니버스_워크플로가_갱신_뒤_빠진_지표를_낸다() -> No
 def test_점수_작업은_지표_행이_없는_유니버스_종목을_센다() -> None:
     """묵음 검사(`stale_metrics`)는 행이 있는 종목만 셌다 — 새 편입 단계가 못 돌면 아무 말이 없었다 (25.1819)"""
     글 = inspect.getsource(scores_job.run)
-    assert 'sum(1 for r in universe if int(r["stock_id"]) not in 성과지표)' in 글
+    assert "지표없음 = missing_metrics(universe, 성과지표)" in 글
+    # 동작 (25.1821, 교차검증 [권고]) — 행이 없는 종목만 센다. 값이 빈 행은 행이 있다
+    유니버스 = [{"stock_id": 1}, {"stock_id": 2}, {"stock_id": 3}]
+    assert scores_job.missing_metrics(유니버스, {2: {"mdd": None}}) == 2
+    assert scores_job.missing_metrics(유니버스, {1: {}, 2: {}, 3: {}}) == 0
     assert '{"missing_metrics": 지표없음}' in 글
