@@ -102,8 +102,9 @@ LAST_RUN_SQL = (
 #: 그 시각에 알 수 있던 국내 최신 스냅샷의 편입 종목
 PREV_MEMBERS_SQL = (
     "SELECT u.stock_id FROM universe_members u WHERE u.included = 1 AND u.snapshot_date = ("
-    "SELECT MAX(x.snapshot_date) FROM universe_members x JOIN stocks s ON s.id = x.stock_id"
-    " WHERE s.country = 'KR' AND x.snapshot_date <= ?)"
+    # 날짜 색인을 뒤에서부터 훑다 첫 행에서 멈춘다 (25.1214 — MAX + JOIN 은 그 나라 행을 전부 읽는다)
+    "SELECT x.snapshot_date FROM universe_members x CROSS JOIN stocks s ON s.id = x.stock_id"
+    " WHERE s.country = 'KR' AND x.snapshot_date <= ? ORDER BY x.snapshot_date DESC LIMIT 1)"
 )
 #: 배당 행이 하나라도 있는 종목 (지난 수집 기록이 없을 때만)
 HAS_ROWS_SQL = "SELECT DISTINCT stock_id FROM stock_dividends WHERE stock_id IN (SELECT value FROM json_each(?))"
