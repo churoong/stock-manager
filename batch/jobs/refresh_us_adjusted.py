@@ -27,11 +27,16 @@ JOB_NAME = "refresh_us_adjusted"
 LOOKBACK_DAYS = 1300  # 백필과 같은 5년. 조정 기준이 한 계열 안에서 맞으려면 전 구간을 한 번에 받아야 한다
 ROWS_PER_STOCK = 1_300  # 5년 ≈ 1,260 거래일. 예산 어림용
 BUDGET_RESERVE = 1_000_000  # 일일 배치 몫으로 남겨 두는 쓰기 행 수. 한 달 일일 배치가 약 120만 행이다 [확인필요]
-#: 한 번에 받을 종목 상한. 200종목 ≈ 26만 행, 야후 조각 2개. **들어오는 양보다 커야 한다** (25.1828) — 100 이던 때
-#: 2026-10 대기열이 3주 반 만에 574종목(주 약 160, 배당락마다 미국 종목이 들어온다)이 됐다. 그달은 읽기 진도 문이
-#: 재수집을 통째로 미뤄 순수한 유입량이다 — 주 100 으로는 문이 열려도 따라잡지 못한다 [확인필요: 11월 주간 유입 실측].
+#: 한 번에 받을 종목 상한. 200종목 ≈ 26만 행, 야후 조각 2개(`REFRESH_CHUNK`). **들어오는 양보다 커야 한다** (25.1828)
+#: — 100 이던 때 2026-10 대기열이 3주 반 만에 574종목(주 약 160, 배당락마다 미국 종목이 들어온다)이 됐다.
+#: 그달은 읽기 진도 문이 재수집을 통째로 미뤄 순수한 유입량이다 — 주 100 으로는 문이 열려도 따라잡지 못한다
+#: [확인필요: 11월 주간 유입 실측].
 #: 쓰기는 주 26만 행(월 약 110만) — 무료 1,000만 중 10월 사용 350만에 더해도 여유. 남은 쓰기 예산은 `affordable` 이 본다
 DEFAULT_MAX = 200
+#: 재수집 한 요청의 종목 수 (25.1829, 교차검증 [권고]) — 기본 조각(`yfinance_src.CHUNK_SYMBOLS` 200)이면 200종목
+#: 5년치가 한 요청이라, 그 요청이 막히면 받은 종목이 0 이 된다. 예전(100종목 = 한 요청)과 같은 크기로 나눠 한쪽이
+#: 막혀도 절반은 든다
+REFRESH_CHUNK = 100
 
 
 #: 대기열이 이보다 오래 밀리면 **말한다** (docs/infra.md 25.165).
@@ -161,8 +166,8 @@ def run(max_stocks: int = DEFAULT_MAX) -> int:
         notes: list[str] = []
         빈조각 = 0
         symbols = list(ids)
-        for start in range(0, len(symbols), yfinance_src.CHUNK_SYMBOLS):
-            group = symbols[start : start + yfinance_src.CHUNK_SYMBOLS]
+        for start in range(0, len(symbols), REFRESH_CHUNK):
+            group = symbols[start : start + REFRESH_CHUNK]
             result = yfinance_src.fetch_daily_bars(group, lookback_days=lookback, chunk_size=len(group))
             db.record_api_call(client, "yfinance", count=1)
             if not result.ok:

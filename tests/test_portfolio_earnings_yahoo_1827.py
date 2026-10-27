@@ -74,3 +74,37 @@ def test_종목_분석의_다음_실적_발표는_법정_기한_추정도_읽는
     d = json.loads(c.execute("SELECT detail_json FROM stock_verdicts").fetchone()[0])
     assert d["earnings"]["source"] == ec.SOURCE
     assert any(r.startswith("다음 실적 발표 ") and "법정 기한(늦어도)" in r for r in d["reasons"])
+
+
+def test_결산일이_이상하고_야후도_없으면_싣지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1829 (25.1827 교차검증 [권고]) — 막는 줄이 깨지면 '이름 null D-0' 줄이 보유 화면에 나갔다"""
+    m = MemClient()
+    db.apply_migrations(m)  # type: ignore[arg-type]
+    monkeypatch.setattr(job, "TursoClient", lambda: m)
+    monkeypatch.setattr(job.cal, "user_today", lambda: date(2026, 10, 27))
+    monkeypatch.setattr(job, "fiscal_year_ends", lambda c, ids: {1: ("이상한-날", None)})
+    c = m.conn
+    c.execute(
+        "INSERT INTO stocks (id, ticker, market, country, name_ko, currency, status, source, fetched_at, asset_type)"
+        " VALUES (1, 'ODD', 'KOSPI', 'KR', '이상', 'KRW', 'active', 't', 't', 'stock')"
+    )
+    c.execute(
+        "INSERT INTO prices (stock_id, date, close, currency, source, fetched_at)"
+        " VALUES (1, '2026-10-26', 1000, 'KRW', 't', 't')"
+    )
+    c.execute(
+        "INSERT INTO trades (id, stock_id, side, trade_date, price, quantity, currency, fx_rate, fx_rate_source,"
+        " fee, tax, horizon, created_at, updated_at)"
+        " VALUES (1, 1, 'buy', '2026-10-20', 1000, 1, 'KRW', 1, 'manual', 0, 0, 'long', 't', 't')"
+    )
+    assert job.run() == 0
+    assert json.loads(c.execute("SELECT upcoming_json FROM portfolio_summary").fetchone()[0]) == []
+    # 같은 종목에 야후 날짜가 있으면 야후 한 줄
+    c.execute(
+        "INSERT INTO earnings_calendar (stock_id, event_type, scheduled_date, is_confirmed, source, fetched_at)"
+        " VALUES (1, ?, '2026-11-02', 0, ?, 't')",
+        [ec.YAHOO_EVENT, ec.SOURCE_YAHOO],
+    )
+    assert job.run() == 0
+    다가옴 = json.loads(c.execute("SELECT upcoming_json FROM portfolio_summary").fetchone()[0])
+    assert [(u["deadline"], u["basis"]) for u in 다가옴] == [("2026-11-02", "yahoo_range")]
