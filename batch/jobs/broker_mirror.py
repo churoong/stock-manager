@@ -200,6 +200,37 @@ COMPARE_SQL = (
     " LEFT JOIN prices p ON p.stock_id = o.stock_id AND p.date = b.trade_date"
     " WHERE b.broker = ? AND b.trade_date >= ? AND b.trade_date < ? AND b.account_id = ?"
 )
+#: 그 거래일에 그 나라 시세가 있었나·쓸 수 있는 환율이 있었나 — 가상이 **판정 아닌 까닭으로 미룬** 매도를 가른다
+#: (25.1811). `jobs/paper.MARKET_DAY_SQL`·`_fx` 와 같은 잣대(그 모듈을 읽지 않는다 — 가상 단계가 이 모듈을 부른다)
+DEFER_MARKET_DAY_SQL = (
+    "SELECT 1 FROM prices p CROSS JOIN stocks s ON s.id = p.stock_id WHERE p.date = ? AND s.country = ? LIMIT 1"
+)
+DEFER_FX_SQL = "SELECT 1 FROM fx_rates WHERE pair = 'USDKRW' AND date <= ? AND date >= ? LIMIT 1"
+
+
+def mark_nonjudgment_defers(client: Any, rows: list[dict[str, Any]], market: str) -> int:
+    """가상이 그 거래일에 **판정하지 않고** 다음 장으로 미룬 매도 줄에 `defer_no_judgment` 를 단다
+    (25.1811, 결함 루프 10-27).
+
+    가상 단계는 그날 그 시장 시세가 통째로 없거나(못 받은 날) 미국 매도에 쓸 환율이 없으면 매도를 미룬다(`fill_orders` —
+    같은 까닭의 매수는 만료라 `NON_JUDGMENT_EXPIRY` 로 이미 빠진다, 25.1561). 미룬 매도가 다음 장에 차면 체결 까닭이 그
+    흔적을 덮어, 그날 KIS 가 정상으로 판 줄이 "KIS만 참" 으로 세져 괴리 알림이 "가상 판정이 비관" 이라 했다.
+    정지·하한가로 미룬 것(판정 까닭, 25.1553)은 그 시장 시세가 있는 날이라 표본에 남는다. 표시한 줄 수를 돌려준다"""
+    후보 = [r for r in rows if r.get("side") == "sell" and r.get("i_status") == "filled"
+          and str(r.get("i_fill_date") or "")[:10] > str(r.get("trade_date") or "")[:10]]  # fmt: skip
+    빈날: dict[str, bool] = {}
+    for r in 후보:
+        d = str(r["trade_date"])[:10]
+        if d not in 빈날:
+            시세없음 = not client.execute(DEFER_MARKET_DAY_SQL, [d, market]).rows
+            앞 = (date.fromisoformat(d) - timedelta(days=fx_svc.MAX_STALE_DAYS)).isoformat()
+            환율없음 = market == "US" and not client.execute(DEFER_FX_SQL, [d, 앞]).rows
+            빈날[d] = 시세없음 or 환율없음
+        if 빈날[d]:
+            r["defer_no_judgment"] = True
+    return sum(1 for r in 후보 if r.get("defer_no_judgment"))
+
+
 #: 체결 칸 (docs/paper.md 15.9, 25.1514) — 베끼기 시작부터 누적. 내부 주문 유형·판정 잣대·장부 슬리피지(%)를 붙인다.
 #: 증권사 주문 표의 order_type 은 미국 시장가를 limit 으로 적으므로 **내부** 주문 유형을 쓴다
 CELLS_SQL = (
@@ -618,12 +649,16 @@ def run(
     부터 = (오늘 - timedelta(days=bm.COMPARE_DAYS)).isoformat()
     # 비교·칸·성과는 **지금 베끼는 계좌의 줄만** — 도전자를 C 에서 D 로 바꾸면 C 주문이 D 의 창에 섞였다
     # (25.1517, 검토 6)
-    비교 = bm.compare(client.execute(COMPARE_SQL, [증권사, 부터, 오늘.isoformat(), 베낌]).dicts())
+    비교줄 = client.execute(COMPARE_SQL, [증권사, 부터, 오늘.isoformat(), 베낌]).dicts()
+    mark_nonjudgment_defers(client, 비교줄, market)
+    비교 = bm.compare(비교줄)
     if 장중0 & set(내부):  # 잔고 대보기에서 뺀 종목 수를 요약에도(웹·주간 요약 끝 줄, 25.1772 교차검증 [권고])
         비교["guard_held"] = len(장중0 & set(내부))
     # 체결 칸(15.9, 25.1514) — 곁다리: 실패해도 비교 요약은 그대로
     try:
-        비교 |= bm.cells(client.execute(CELLS_SQL, [증권사, 오늘.isoformat(), 베낌]).dicts())
+        칸줄 = client.execute(CELLS_SQL, [증권사, 오늘.isoformat(), 베낌]).dicts()
+        mark_nonjudgment_defers(client, 칸줄, market)
+        비교 |= bm.cells(칸줄)
     except Exception as exc:  # noqa: BLE001
         기록["cells_error"] = type(exc).__name__
     # 웹 보유내역·성과(docs/paper.md 15.7, 25.1496·25.1497). 시장 칸은 그 시장 통화(국내 원 — 현금은 총평가와
