@@ -920,6 +920,14 @@ def checks(
         out.append({"level": "high", "text": 글 if len(글) <= DIVERGE_TEXT_MAX else 글[: DIVERGE_TEXT_MAX - 1] + "…"})
     if b.get("diverge_error"):
         out.append({"level": "normal", "text": f"KIS 괴리 판정 실패({b['diverge_error']}) — 주문은 그대로 나갔습니다"})
+    # 비교 표본을 가르는 곁다리 실패(25.1815, 25.1812 교차검증 [권고]) — 실행 기록에만 있어, 그날 괴리 알림이 시세·환율
+    # 구멍으로 미룬 매도 탓인지·체결 칸이 왜 안 바뀌었는지 알 길이 없었다
+    if b.get("defer_mark_error"):
+        out.append({"level": "normal", "text": f"KIS 비교 표본 표시 실패({b['defer_mark_error']}) — 오늘 일치율·괴리에 "
+                                               "시세·환율이 없어 미룬 매도가 섞였을 수 있습니다"})
+    if b.get("cells_error"):
+        out.append({"level": "normal",
+                    "text": f"KIS 체결 칸 계산 실패({b['cells_error']}) — 오늘 체결 칸이 비거나 갱신되지 않았습니다"})
     if b.get("not_sent"):
         까닭 = ", ".join(f"{k} {v}건" for k, v in sorted(b["not_sent"].items()))
         out.append({"level": "normal", "text": f"KIS모의투자에 안 낸 주문: {까닭}"})
