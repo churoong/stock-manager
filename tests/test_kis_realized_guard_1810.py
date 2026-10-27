@@ -11,8 +11,10 @@ from batch.services import broker_mirror as bm
 from tests.test_broker_realized_1694 import _o
 
 
-def _r(o: dict, reason: str | None) -> dict:
-    return {**o, "reason": reason}
+def _r(o: dict, reason: str | None, limit: float | None = None) -> dict:
+    """매수 지정가는 따로 주지 않으면 체결가와 같다(지정가에 그대로 찬 회차)"""
+    지정 = limit if limit is not None else (o["avg_price"] if o["side"] == "buy" else None)
+    return {**o, "reason": reason, "limit_price": 지정}
 
 
 def test_장중_손절은_그날_찬_회차_매수_뒤로() -> None:
@@ -27,7 +29,7 @@ def test_장중_손절은_그날_찬_회차_매수_뒤로() -> None:
 
 
 def test_아침_손절선_아래_회차는_손절_뒤에_찬다() -> None:
-    """25.1812(25.1810 교차검증 [권고]) — 아침 손절선 9,300 아래 회차(9,250)는 새 평균의 손절선(≈9,145)보다 위라
+    """25.1812(25.1810 교차검증 [권고]) — 아침 손절선 9,300 아래 회차(9,250)는 새 평균의 손절선(≈9,068)보다 위라
     `buys_below_stop` 이 거르지 않고 베껴진다. 값이 9,290 에서 손절된 뒤 더 빠져야 9,250 회차가 찬다 — 매도 먼저"""
     줄 = [_r(_o(1, "2026-10-20", "buy", 10, 10_000), None), _r(_o(2, "2026-10-21", "buy", 5, 9_250), None),
          _r(_o(3, "2026-10-21", "sell", 10, 9_290), bm.REASON_GUARD_STOP),
@@ -37,6 +39,31 @@ def test_아침_손절선_아래_회차는_손절_뒤에_찬다() -> None:
     # 같은 값이면 회차 먼저(지정가에 닿은 뒤 손절선)
     줄[1] = _r(_o(2, "2026-10-21", "buy", 5, 9_290), None)
     assert bm.realized(줄[:3], lambda d: None)[3] == (round(10 * (9_290 - 146_450 / 15)), 0.0)
+
+
+def test_갭_하락으로_시가에_찬_회차는_반등_뒤_손절보다_먼저() -> None:
+    """25.1813(25.1812 교차검증 [권고]) — 지정가 9,400 회차가 갭 시가 9,000 에 찼고, 개장 5분 뒤 반등한 9,100 에 장중
+    손절. 체결가(9,000 < 9,100)로 가르면 손절이 먼저로 세졌다 — 지정가(9,400 ≥ 9,100)로 가른다"""
+    줄 = [_r(_o(1, "2026-10-20", "buy", 10, 10_000), None), _r(_o(2, "2026-10-21", "buy", 5, 9_000), None, limit=9_400),
+         _r(_o(3, "2026-10-21", "sell", 10, 9_100), bm.REASON_GUARD_STOP),
+         _r(_o(4, "2026-10-23", "sell", 5, 9_800), None)]  # fmt: skip
+    잔고 = [("2026-10-21", {"C1": 10}), ("2026-10-22", {"C1": 5}), ("2026-10-23", {"C1": 5})]
+    평균 = 145_000 / 15
+    assert bm.realized(줄, lambda d: None, snapshots=잔고) == {
+        3: (float(round(10 * (9_100 - 평균))), 0.0), 4: (float(round(5 * (9_800 - 평균))), 0.0)}  # −5,667 · +667
+
+
+def test_값을_모르면_매수는_앞_손절은_뒤() -> None:
+    # 지정가 없는 매수(시장가 — 시가에 찬다)는 손절보다 앞: 평균 원가 (100,000 + 47,000)/15
+    줄 = [_r(_o(1, "2026-10-20", "buy", 10, 10_000), None), {**_r(_o(2, "2026-10-21", "buy", 5, 9_400), None), "limit_price": None},
+         _r(_o(3, "2026-10-21", "sell", 10, 9_200), bm.REASON_GUARD_STOP)]  # fmt: skip
+    assert bm.realized(줄, lambda d: None)[3] == (-6_000.0, 0.0)
+    # 체결가를 모르는 손절은 뒤 — 그 손절은 모름, 앞의 매수(지정가 회차)는 그대로 원가에 든다
+    줄[1] = _r(_o(2, "2026-10-21", "buy", 5, 9_400), None)
+    줄[2] = _r(_o(3, "2026-10-21", "sell", 10, None), bm.REASON_GUARD_STOP)
+    줄.append(_r(_o(4, "2026-10-22", "sell", 5, 9_800), None))
+    r = bm.realized(줄, lambda d: None)
+    assert r[3] == (None, None) and r[4] == (0.0, 0.0)
 
 
 def test_아침_베낀_매도와_장중_익절은_예전처럼_매도_먼저() -> None:

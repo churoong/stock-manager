@@ -87,3 +87,16 @@ def test_비교와_체결_칸_둘_다에_표시를_단다() -> None:
     assert 글.count("mark_nonjudgment_defers(client, 비교줄, market)") == 1
     assert 글.count("mark_nonjudgment_defers(client, 칸줄, market)") == 1
     assert 글.index("비교 = bm.compare(비교줄)") > 글.index("mark_nonjudgment_defers(client, 비교줄, market)")
+
+
+def test_표본_밖_끝_줄은_배치와_웹이_같은_글() -> None:
+    """25.1813(25.1812 교차검증 [참고]) — 배치 주간 요약과 웹 /kis 끝 줄이 같은 글자여야 한다(웹은 paperCompany1469 가 본다)"""
+    from pathlib import Path
+
+    줄 = [_줄("2026-10-16", i_fill="2026-10-19")]
+    job.mark_nonjudgment_defers(_C(set()), 줄, "KR")
+    끝 = " · ".join(bm.compare_lines(bm.compare(줄), None, None))
+    글 = "표본 밖 1(가상의 판정 아닌 만료·시세·환율 없어 미룬 매도·장 열린 뒤 시장가)"
+    assert 글 in 끝
+    웹 = (Path(__file__).resolve().parents[1] / "web" / "lib" / "paper.ts").read_text(encoding="utf-8")
+    assert "(가상의 판정 아닌 만료·시세·환율 없어 미룬 매도·장 열린 뒤 시장가)" in 웹
