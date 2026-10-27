@@ -136,16 +136,20 @@ def missing_stocks(
     out: list[tuple[int, str, str]] = []
     for country in countries:
         한계 = (date.fromisoformat(as_of_by[country]) - timedelta(days=MISSING_STALE_DAYS)).isoformat()
-        rs = client.execute(
-            "SELECT s.id, s.ticker, s.country FROM stocks s"
-            " JOIN universe_members u ON u.stock_id = s.id"
-            " WHERE u.included = 1 AND s.country = ?"
-            f"   AND u.snapshot_date = {db.latest_snapshot_sql()}"
-            "   AND NOT EXISTS (SELECT 1 FROM performance_metrics m WHERE m.stock_id = s.id AND m.as_of_date >= ?)",
-            [country, country, 한계],
-        )
-        out.extend((int(r[0]), str(r[1]), str(r[2])) for r in rs.rows)
+        편입 = target_stocks(client, None, (country,))
+        if not 편입:
+            continue
+        # 고정 질의 — 동적 질의를 늘리지 않는다(`tests/test_sql_schema.py` 그물). (종목, 날짜) 색인을 탄다
+        있음 = {int(r[0]) for r in client.execute(RECENT_METRICS_SQL, [한계, json.dumps([s for s, _, _ in 편입])]).rows}
+        out.extend(x for x in 편입 if x[0] not in 있음)
     return out
+
+
+#: 기준일에서 `MISSING_STALE_DAYS` 안의 지표 행이 있는 종목 (25.1819)
+RECENT_METRICS_SQL = (
+    "SELECT DISTINCT stock_id FROM performance_metrics"
+    " WHERE as_of_date >= ? AND stock_id IN (SELECT value FROM json_each(?))"
+)
 
 
 def load_benchmark(client: TursoClient, country: str, since: str) -> list[calc.PricePoint]:
