@@ -25,17 +25,29 @@ def test_주의_줄을_자르고_상한을_둔다() -> None:
 
 def test_실행을_닫기_전에_주의를_찍는다() -> None:
     글 = inspect.getsource(daily)
-    끝 = 글.index('        for 줄 in _주의_출력(warnings):\n            print(줄)\n        status = "partial" if warnings')
+    끝 = 글.index('            for 줄 in _주의_출력(warnings):\n                print(줄)\n        except Exception as exc:')
+    assert 글.index('status = "partial" if warnings else "success"\n        try:\n            db.finish_batch_run') > 끝
     assert 끝 < 글.index('print(f"완료 ({status}). 종목')
 
 
 def test_일일_배치는_늘_ops_tee_를_거친다() -> None:
-    """주의 줄에는 보유 종목 수 같은 운영 값이 섞일 수 있다 — 공개 로그로 새지 않게 일일 배치를 부르는 줄은 모두 `ops_tee`"""
+    """주의 줄에는 보유 종목 수 같은 운영 값이 섞일 수 있다 — 공개 로그로 새지 않게 일일 배치를 부르는 줄은 모두 `ops_tee`.
+    모든 워크플로를 훑는다 (25.1818, 교차검증 [참고] — 다른 워크플로가 일일 배치를 부르게 되어도 잡게)"""
     줄들 = [
-        줄
-        for 이름 in ("daily-kr.yml", "daily-us.yml")
-        for 줄 in (ROOT / ".github" / "workflows" / 이름).read_text(encoding="utf-8").splitlines()
+        (p.name, 줄)
+        for p in sorted((ROOT / ".github" / "workflows").glob("*.yml"))
+        for 줄 in p.read_text(encoding="utf-8").splitlines()
         if "python -m batch.jobs.daily" in 줄 and not 줄.strip().startswith("#")
     ]
     assert len(줄들) >= 4
-    assert all("| python scripts/ops_tee.py" in 줄 for 줄 in 줄들), 줄들
+    assert all("| python scripts/ops_tee.py" in 줄 for _, 줄 in 줄들), 줄들
+
+
+def test_줄바꿈과_짝_없는_서로게이트를_한_줄로_찍는다() -> None:
+    """25.1818 (25.1817 교차검증 [권고]) — Actions stdout 은 strict utf-8 이라 짝 없는 서로게이트가 print 를 깨뜨렸다"""
+    import io
+
+    줄 = daily._주의_출력(["KIS 실패: {\"m\": \"\ud83d\"}\n실행하지 않음: 거짓"])
+    assert len(줄) == 1 and "\n" not in 줄[0] and " ⏎ 실행하지 않음" in 줄[0]
+    엄격 = io.TextIOWrapper(io.BytesIO(), encoding="utf-8", errors="strict")
+    엄격.write(줄[0])  # 깨지지 않는다

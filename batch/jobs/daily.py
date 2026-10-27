@@ -1070,7 +1070,12 @@ def _주의_출력(warnings: list[str], 최대: int = 20, 길이: int = 240) -> 
     늘 `ops_tee` 를 거쳐(`tests/test_workflows.py`) 이 출력은 비공개 운영 저장소에만 간다.
     줄마다 길이를 자르고 줄 수에 상한
     """
-    줄 = [f"  주의: {w[:길이]}{'…' if len(w) > 길이 else ''}" for w in warnings[:최대]]
+    줄 = []
+    for w in warnings[:최대]:
+        # 한 줄로·인코딩 가능한 글자로 (25.1818, 25.1817 교차검증 [권고]·[참고]) — 줄바꿈이면 둘째 줄이 머리 없이 찍혀
+        # 워크플로의 `^실행하지 않음: ` grep 에 걸릴 수 있고, 짝 없는 서로게이트는 strict stdout 에서 print 를 깨뜨린다
+        글 = str(w).replace("\n", " ⏎ ").encode("utf-8", "replace").decode("utf-8")
+        줄.append(f"  주의: {글[:길이]}{'…' if len(글) > 길이 else ''}")
     if len(warnings) > 최대:
         줄.append(f"  주의 {len(warnings) - 최대}줄 더 (실행 기록 step_log 참고)")
     return 줄
@@ -2665,8 +2670,11 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
             return _send_failed(client, run_id, step_log, market, name, exc, dry_run)
 
         _kis와_요약()
-        for 줄 in _주의_출력(warnings):
-            print(줄)
+        try:
+            for 줄 in _주의_출력(warnings):
+                print(줄)
+        except Exception as exc:  # noqa: BLE001 — 진단 출력이 리포트를 보낸 뒤 기록 닫기를 막지 않게 (25.1818)
+            log.warning("주의 줄을 출력하지 못했습니다: %s", type(exc).__name__)
         status = "partial" if warnings else "success"
         try:
             db.finish_batch_run(client, run_id, status=status, step_log=step_log)
