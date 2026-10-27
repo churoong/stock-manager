@@ -66,3 +66,24 @@ def test_체결_칸도_같다() -> None:
     job.mark_nonjudgment_defers(_C(set()), 줄, "KR")
     칸 = bm.cells(줄)
     assert all((v or {}).get("kis_only", 0) == 0 for v in (칸.get("cells") or {}).values())
+
+
+def test_가상_단계와_같은_잣대() -> None:
+    """25.1812(25.1811 교차검증 [참고]) — 시세 질의는 가상 단계와 글자까지 같고, 환율은 7일째까지 쓴다(`paper._fx`)"""
+    from batch.jobs import paper
+
+    assert job.DEFER_MARKET_DAY_SQL == paper.MARKET_DAY_SQL
+    줄 = [_줄("2026-10-16", i_fill="2026-10-19")]
+    assert job.mark_nonjudgment_defers(_C({"2026-10-16"}, {"2026-10-09"}), 줄, "US") == 0  # 정확히 7일 — 씀
+    줄 = [_줄("2026-10-16", i_fill="2026-10-19")]
+    assert job.mark_nonjudgment_defers(_C({"2026-10-16"}, {"2026-10-08"}), 줄, "US") == 1  # 8일 — 없음
+
+
+def test_비교와_체결_칸_둘_다에_표시를_단다() -> None:
+    """배선 — 두 호출을 빼도 위 시험은 통과했다(25.1811 교차검증 [권고]). 실행이 비교 줄·칸 줄 모두에 단다"""
+    import inspect
+
+    글 = inspect.getsource(job.run)
+    assert 글.count("mark_nonjudgment_defers(client, 비교줄, market)") == 1
+    assert 글.count("mark_nonjudgment_defers(client, 칸줄, market)") == 1
+    assert 글.index("비교 = bm.compare(비교줄)") > 글.index("mark_nonjudgment_defers(client, 비교줄, market)")

@@ -139,7 +139,7 @@ export function brokerLines(b: BrokerLatest | null | undefined): string[] {
   // 배치 `compare_lines` 와 같은 끝 줄 — 모름(보냈는지 모르는 주문)·정리 주문 (25.1483, 감사 [권장] 4)
   const 끝 = [] as string[];
   if (s?.rejected) 끝.push(`거부 ${s.rejected}`);
-  if (s?.excluded) 끝.push(`표본 밖 ${s.excluded}(가상의 판정 아닌 만료·장 열린 뒤 시장가)`);
+  if (s?.excluded) 끝.push(`표본 밖 ${s.excluded}(가상의 판정 아닌 만료·시세·환율 없어 미룬 매도·장 열린 뒤 시장가)`);
   if (s?.unknown) 끝.push(`모름 ${s.unknown}`);
   if (s?.cleanup) 끝.push(`정리 주문 ${s.cleanup}`);
   if (s?.guard) 끝.push(`장중 손절·익절 ${s.guard}(H 는 아침 일봉 판정 — 짝 없음)`);

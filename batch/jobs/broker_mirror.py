@@ -650,7 +650,12 @@ def run(
     # 비교·칸·성과는 **지금 베끼는 계좌의 줄만** — 도전자를 C 에서 D 로 바꾸면 C 주문이 D 의 창에 섞였다
     # (25.1517, 검토 6)
     비교줄 = client.execute(COMPARE_SQL, [증권사, 부터, 오늘.isoformat(), 베낌]).dicts()
-    mark_nonjudgment_defers(client, 비교줄, market)
+    try:  # 곁다리 표시 — 실패해도 비교는 예전처럼, 주문 보내기를 막지 않는다(25.1812, 25.1811 교차검증 [참고])
+        mark_nonjudgment_defers(client, 비교줄, market)
+    except Exception as exc:  # noqa: BLE001
+        if db.quota_reason(exc):
+            raise
+        기록["defer_mark_error"] = type(exc).__name__
     비교 = bm.compare(비교줄)
     if 장중0 & set(내부):  # 잔고 대보기에서 뺀 종목 수를 요약에도(웹·주간 요약 끝 줄, 25.1772 교차검증 [권고])
         비교["guard_held"] = len(장중0 & set(내부))
