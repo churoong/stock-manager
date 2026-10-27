@@ -548,10 +548,19 @@ def run() -> int:
         # 야후가 10-28(D-25)을
         # 주는 종목도 11-14(D-42)로 보였다 — 실적이 보유자 예상보다 먼저 나왔다
         야후 = next_yahoo_earnings(client, 보유_번호, today)
-        for sid, (fy_end, last_filed) in fiscal_year_ends(client, 보유_번호).items():
-            try:
-                kind, deadline, d_day = pf.next_filing_deadline(fy_end, today)
-            except ValueError:
+        결산 = fiscal_year_ends(client, 보유_번호)
+        # **야후 예정일만 있는 보유 종목도 싣는다** (25.1827, 결함 회차) — 예전에는 결산일(연간 재무)이 있는 종목만 돌아
+        # 새 상장 종목처럼 연간 재무가 아직 없으면 야후가 날짜를 줘도 실적 D-day 에서 통째로 빠졌다
+        for sid in sorted(set(결산) | set(야후)):
+            fy_end, last_filed = 결산.get(sid, (None, None))
+            kind = deadline = None
+            d_day = 0
+            if fy_end is not None:
+                try:
+                    kind, deadline, d_day = pf.next_filing_deadline(fy_end, today)
+                except ValueError:
+                    kind = None
+            if kind is None and sid not in 야후:
                 continue
             basis = "legal"
             if sid in 야후:

@@ -244,7 +244,9 @@ QUARTERS_SQL = (
 # 다음 실적 발표 (24장, 25.1048) — 종목마다 오늘 이후 가장 이른 실적발표 일정 하나 (SQLite 의 MIN 과 같은 행의 열)
 EARNINGS_SQL = (
     "SELECT e.stock_id, MIN(e.scheduled_date) AS d, e.is_confirmed, e.source FROM earnings_calendar e"
-    " JOIN stocks s ON s.id = e.stock_id WHERE s.country = ? AND e.event_type = '실적발표' AND e.scheduled_date >= ?"
+    # 법정 기한 추정 행('실적발표(분기)'·'실적발표(연간)')도 (25.1827) — 야후 날짜가 없는 종목(국내 다수)은 빠졌다
+    " JOIN stocks s ON s.id = e.stock_id WHERE s.country = ? AND e.event_type LIKE '실적발표%'"
+    " AND e.scheduled_date >= ?"
     " GROUP BY e.stock_id"
 )
 # 같은 점수대의 지난 신호 성적 (22장, 25.1046) — 신호 성적표 작업이 실행 기록에 남긴 점수 보정표 (한 행)
@@ -910,7 +912,9 @@ def build_market(client: TursoClient, market: str, today: date, warnings: list[s
         if sid in 실적일:
             e = 실적일[sid]
             남은 = (date.fromisoformat(str(e["d"])[:10]) - today).days
-            확정 = "확정" if e.get("is_confirmed") else "예상"
+            # 법정 기한 추정은 "예상 날짜" 가 아니라 늦어도 그날까지라는 뜻이다 (25.1827)
+            확정 = ("법정 기한(늦어도)" if str(e.get("source") or "").startswith("estimate:")
+                  else "확정" if e.get("is_confirmed") else "예상")  # fmt: skip
             # 반응 통계는 장중 알림과 **같은 문장 함수**로 (docs/infra.md 25.1394, 공시 감사). 예전에는 따로 짜서
             # 표본 하한(`MIN_N` 30)·거래정지로 못 잰 건수(25.1154)·"공시일 반응 포함" 문구(25.1013)가 모두 빠졌다 —
             # 표가 다시 만들어지는 첫 주처럼 n 이 적어도 중앙값이 근거 줄에 나갔다
