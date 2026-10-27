@@ -999,6 +999,12 @@ def _계산_저하(scores_job: str, signals_job: str, since: str) -> list[str]:
         나온것.append(f"점수: 배당·지수 등 재료 {건수}건을 읽지 못한 채 계산했습니다 (scores 배치 기록 참고)")
     if 점.get("setting_warnings"):
         나온것.append(f"점수: 범위 밖 가중치 설정 {len(점['setting_warnings'])}건을 기본값으로 계산했습니다")
+    if 점.get("missing_metrics"):
+        # 25.1820 — 새 편입 지표 단계(25.1819)가 못 돈 날. 평소 0 이라 늘 켜지지 않는다
+        나온것.append(
+            f"점수: 성과 지표가 없는 {점['missing_metrics']}종목은 리스크 팩터 없이 계산했습니다"
+            " (scores 배치 기록 참고)"
+        )
     if 신.get("checks_error"):
         나온것.append("신호: 판정표를 적지 못했습니다 — 종목 상세의 통과·탈락 근거가 어제 것일 수 있습니다")
     if 신.get("unverifiable"):

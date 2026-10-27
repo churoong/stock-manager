@@ -417,17 +417,21 @@ def run() -> int:
         trades = load_trades(client)
         receipts = load_receipts(client)
         warnings: list[str] = []
+        # **지난 매매·설정에서 오는 늘 같은 안내는 오늘 상태 뒤로** (25.1820, 결함 회차). 일일 리포트는 작업마다
+        # 앞 3줄만 싣는다(`daily._하위_경고`) — ETF 세금 칸·수수료율 미설정·과다 매도 안내가 앞자리를 차지해 오늘의
+        # 진짜 저하(환율 13일 묵음 등)가 "… 외 N건" 으로만 보였다(감사 재현). 안내는 없애지 않고 순서만 뒤로
+        안내: list[str] = []
         if client.execute(
             "SELECT COUNT(*) FROM trades t JOIN stocks s ON s.id = t.stock_id"
             " WHERE t.side = 'sell' AND t.currency = 'KRW' AND t.tax IS NULL AND s.asset_type = 'etf'"
         ).scalar():
-            warnings.append(ETF_GAIN_TAX_NOTE)  # 25.896
+            안내.append(ETF_GAIN_TAX_NOTE)  # 25.896
         rates, 설정경고 = cost_rates(
             db.get_setting(client, "fees", {}, 못읽음=warnings), db.get_setting(client, "taxes", {}, 못읽음=warnings),
             trades,
         )
         # 안 넣은 비용률 경고는 `cost_rates` 가 함께 돌려준다 (docs/infra.md 25.192)
-        warnings += 설정경고
+        안내 += 설정경고
 
         stocks = {
             int(r["id"]): r
@@ -446,7 +450,7 @@ def run() -> int:
             currency = stock_trades[0].currency
             stock_lots, open_lots, w = pf.match_fifo(stock_trades, rates.get(currency, pf.CostRates()))
             lots.extend(stock_lots)
-            warnings.extend(f"{stocks.get(sid, {}).get('ticker', sid)} {x}" for x in w)
+            안내.extend(f"{stocks.get(sid, {}).get('ticker', sid)} {x}" for x in w)
             pos = pf.position_from(sid, currency, open_lots)
             if pos is not None:
                 positions.append(pos)
@@ -658,6 +662,7 @@ def run() -> int:
                  g.median_return_pct, g.avg_holding_days, g.target_rate, g.stop_rate, g.total_pnl_krw,
                  rv.CALC_VERSION, now],
             ))  # fmt: skip
+        warnings = warnings + 안내  # 오늘 상태가 앞 (25.1820)
         # 계좌별 세후 적립 시뮬레이션 (docs/etf.md 11.7, 25.1003) — 세율은 설정에서만. 범위 밖이면 빈 칸으로 본다
         세율 = db.get_setting(client, "taxes", {})
         statements.append((
