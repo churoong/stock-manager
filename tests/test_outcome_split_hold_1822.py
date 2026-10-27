@@ -77,3 +77,5 @@ def test_실행은_미국에서_대기열을_읽어_넘긴다() -> None:
     assert 'db.split_pending_us(client, today) if country == "US" else set()' in 글
     assert "compute(client, country, today, 계획, held=대기)" in 글
     assert "since_of(today), held=대기)" in 글
+    # 점수 보정표에도 남긴 행이 든다 (25.1824, 교차검증 [권고] — 빼도 시험이 통과했다)
+    assert "load_held(client, country, since_of(today), 대기)" in 글 and "calibrations(client, country, results + 남긴)" in 글

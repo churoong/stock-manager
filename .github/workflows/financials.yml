@@ -94,5 +94,7 @@ jobs:
         if: ${{ !inputs.year && !cancelled() }}
         run: python -m batch.jobs.dividends --only-missing
 
+      # 앞의 새 편입 배당 단계가 DART 한도로 실패해도 확인은 돈다 (25.1824)
       - name: 시점 조회 확인
+        if: ${{ !cancelled() }}
         run: python scripts/check_pit.py 005930

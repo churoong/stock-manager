@@ -95,35 +95,53 @@ def targets(client: TursoClient) -> list[tuple[int, str]]:
 
 #: 새·재편입 종목만 받는 실행 이름 (25.1823) — 해마다 도는 전체 실행과 가른다
 JOB_NAME_MISSING = "dividends_missing"
-#: 지난 배당 수집(전체·새 편입) 가운데 성공한 마지막 실행 시각
+#: 기준이 되는 지난 배당 수집(전체·새 편입) — 끝까지 돈 실행(성공·일부 실패). 실행 기록에 그때 본 스냅샷과 다시 받을
+#: 회사를 남긴다 (25.1824)
 LAST_RUN_SQL = (
-    "SELECT MAX(started_at) FROM batch_runs WHERE job_name IN ('dividends', 'dividends_missing') AND status = 'success'"
+    "SELECT started_at, step_log FROM batch_runs WHERE job_name IN ('dividends', 'dividends_missing')"
+    " AND status IN ('success', 'partial') ORDER BY started_at DESC LIMIT 1"
 )
-#: 그 시각에 알 수 있던 국내 최신 스냅샷의 편입 종목
+#: 그 날짜 이하 국내 최신 스냅샷의 편입 종목
 PREV_MEMBERS_SQL = (
     "SELECT u.stock_id FROM universe_members u WHERE u.included = 1 AND u.snapshot_date = ("
     # 날짜 색인을 뒤에서부터 훑다 첫 행에서 멈춘다 (25.1214 — MAX + JOIN 은 그 나라 행을 전부 읽는다)
     "SELECT x.snapshot_date FROM universe_members x CROSS JOIN stocks s ON s.id = x.stock_id"
     " WHERE s.country = 'KR' AND x.snapshot_date <= ? ORDER BY x.snapshot_date DESC LIMIT 1)"
 )
+#: 지금 국내 최신 스냅샷 날짜 — 이번 실행이 본 유니버스로 기록에 남긴다
+LATEST_KR_SNAPSHOT_SQL = (
+    "SELECT x.snapshot_date FROM universe_members x CROSS JOIN stocks s ON s.id = x.stock_id"
+    " WHERE s.country = 'KR' ORDER BY x.snapshot_date DESC LIMIT 1"
+)
 #: 배당 행이 하나라도 있는 종목 (지난 수집 기록이 없을 때만)
 HAS_ROWS_SQL = "SELECT DISTINCT stock_id FROM stock_dividends WHERE stock_id IN (SELECT value FROM json_each(?))"
 
 
 def missing_targets(client: TursoClient) -> list[tuple[int, str]]:
-    """지난 배당 수집 뒤에 새로 편입되거나 다시 편입된 국내 종목 (docs/infra.md 25.1823).
+    """지난 배당 수집 뒤에 새로 편입되거나 다시 편입된 국내 종목 + 지난 수집이 다시 받으라고 남긴 회사
+    (docs/infra.md 25.1823·25.1824).
 
     배당은 4·5월에만 그때 유니버스를 받는다(dividends.yml). 그 뒤 편입된 종목은 다음 4월까지 `stock_dividends` 행이
     없어 배당수익률이 결측 — 밸류 팩터가 남은 3지표로 재정규화되어 같은 재무의 기존 종목과 점수가 갈렸다(감사 재현:
     배당 6% 쌍이 장기 신호 문턱 55 를 사이에 두고 갈림). "행이 없는 종목" 으로 고르지 않는 까닭: 무배당 종목은
-    DART 가 자료를 주지 않아 행이 영영 없다 — 매주 회사당 여섯 번씩 다시 불렀을 것이다. 그래서 **지난 성공한 수집 때
-    유니버스에 없던 종목**만 고른다(받은 해는 `이미` 가 건너뛴다). 지난 수집 기록이 없으면 행이 없는 종목
+    DART 가 자료를 주지 않아 행이 영영 없다 — 매주 회사당 여섯 번씩 다시 불렀을 것이다.
+
+    **기준은 지난 실행이 실제로 본 스냅샷**(실행 기록 `snapshot`)이다 (25.1824, 교차검증 [권고]). 처음엔 지난 실행
+    시각의 날짜와 스냅샷 날짜를 견줬는데, 스냅샷 날짜는 직전 거래일(금)이라 유니버스가 배당 수집 뒤에 늦게 돌면
+    그 주 편입 종목이 "이미 있던 종목" 으로 보여 다음 4월까지 다시 대상이 되지 않았다. 그 기록이 없는 옛 실행만
+    시각의 날짜로 물러난다. 일부 실패(`partial`)도 기준이 되고, 실패·미처리 회사(`retry_ids`)는 다음 실행이 다시 받는다
     """
     전체 = targets(client)
     마지막 = client.execute(LAST_RUN_SQL).rows
     if 마지막 and 마지막[0][0]:
-        그때 = {int(r[0]) for r in client.execute(PREV_MEMBERS_SQL, [str(마지막[0][0])[:10]]).rows}
-        return [t for t in 전체 if t[0] not in 그때]
+        try:
+            기록 = json.loads(마지막[0][1] or "{}") or {}
+        except ValueError:
+            기록 = {}
+        기준 = str(기록.get("snapshot") or str(마지막[0][0])[:10])
+        다시 = {int(x) for x in 기록.get("retry_ids") or []}
+        그때 = {int(r[0]) for r in client.execute(PREV_MEMBERS_SQL, [기준]).rows}
+        return [t for t in 전체 if t[0] not in 그때 or t[0] in 다시]
     있음 = {int(r[0]) for r in client.execute(HAS_ROWS_SQL, [json.dumps([t[0] for t in 전체])]).rows}
     return [t for t in 전체 if t[0] not in 있음]
 
@@ -138,9 +156,10 @@ def run(latest: int | None = None, limit: int | None = None, only_missing: bool 
         db.apply_migrations(client)
         run_id = db.start_batch_run(client, job_name=JOB_NAME_MISSING if only_missing else JOB_NAME, market="KR",
                                     trade_date=str(latest))  # fmt: skip
+        본_스냅샷 = client.execute(LATEST_KR_SNAPSHOT_SQL).scalar()  # 다음 새 편입 실행의 기준 (25.1824)
         corps = missing_targets(client) if only_missing else targets(client)
         if only_missing and not corps:
-            db.finish_batch_run(client, run_id, status="success", step_log={"companies": 0})
+            db.finish_batch_run(client, run_id, status="success", step_log={"companies": 0, "snapshot": 본_스냅샷})
             print("지난 배당 수집 뒤 새로 편입된 국내 종목이 없습니다")
             return 0
         if limit:
@@ -175,6 +194,7 @@ def run(latest: int | None = None, limit: int | None = None, only_missing: bool 
         안_센것 = 0
         연속실패 = 0
         성공 = 0
+        다시: set[int] = set()  # 실패·미처리 회사 — 다음 새 편입 실행이 다시 받는다 (25.1824)
         for index, (stock_id, corp_code) in enumerate(corps):
             for year in years:
                 if year != latest and (stock_id, year) in 이미:
@@ -186,6 +206,7 @@ def run(latest: int | None = None, limit: int | None = None, only_missing: bool 
                 안_센것 += result.attempts  # 부르지 않은 실패(키 없음·오프라인)는 세지 않는다 (25.607)
                 if not result.ok:
                     failures.append(f"{corp_code}/{year}: {result.error}")
+                    다시.add(stock_id)
                     연속실패 += 1
                     if result.limit_state == "blocked":
                         blocked = True
@@ -205,6 +226,7 @@ def run(latest: int | None = None, limit: int | None = None, only_missing: bool 
                     no_data += 1
                 rows.extend(to_row(stock_id, item, now) for item in result.data)
             if blocked:
+                다시.update(sid for sid, _ in corps[index:])  # 멈춘 곳부터는 다음 실행이 받는다 (25.1824)
                 log.warning("%s — %d/%d 사에서 멈춥니다", 멈춘까닭, index + 1, len(corps))
                 break
             # 100사마다 카운터에 올리고 **그 수를 본다.** 바깥이 020 으로 거절할 때까지
@@ -215,6 +237,7 @@ def run(latest: int | None = None, limit: int | None = None, only_missing: bool 
                 )
                 안_센것 = 0
                 if 상태 == "blocked":
+                    다시.update(sid for sid, _ in corps[index + 1 :])  # 25.1824
                     blocked = True
                     멈춘까닭 = "DART 일일 한도(우리 카운터)에 도달해 멈춥니다"
                     log.warning("DART 카운터가 한도에 닿아 %d/%d 사에서 멈춥니다", index + 1, len(corps))
@@ -238,6 +261,8 @@ def run(latest: int | None = None, limit: int | None = None, only_missing: bool 
         step: dict[str, Any] = {
             "report_years": years,
             "companies": len(corps),
+            "snapshot": 본_스냅샷,
+            "retry_ids": sorted(다시),
             "calls": calls,
             "no_data_reports": no_data,
             "failures": len(failures),
