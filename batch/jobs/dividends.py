@@ -117,6 +117,25 @@ LATEST_KR_SNAPSHOT_SQL = (
 HAS_ROWS_SQL = "SELECT DISTINCT stock_id FROM stock_dividends WHERE stock_id IN (SELECT value FROM json_each(?))"
 
 
+#: 늘 실패하는 회사를 다시 받는 상한 (25.1825, 교차검증 [권고]) — 묵은 고유번호처럼 굳은 오류면 매주 그 회사만 대상인
+#: 실행이 "전부 실패" 로 재무 워크플로를 빨갛게 닫았다. 세 번 넘게 실패하면 그만 받고 실행 기록 `given_up` 에 남긴다
+MAX_RETRY = 3
+
+
+def _지난_기록(client: TursoClient) -> tuple[str | None, dict[int, int]]:
+    """(기준 스냅샷 날짜, {다시 받을 회사: 지금까지 실패 횟수}). 기준 실행이 없으면 (None, {})."""
+    마지막 = client.execute(LAST_RUN_SQL).rows
+    if not (마지막 and 마지막[0][0]):
+        return None, {}
+    try:
+        기록 = json.loads(마지막[0][1] or "{}") or {}
+    except ValueError:
+        기록 = {}
+    횟수 = {int(k): int(v) for k, v in (기록.get("retry_counts") or {}).items()}
+    return (str(기록.get("snapshot") or str(마지막[0][0])[:10]),
+            {int(x): 횟수.get(int(x), 1) for x in 기록.get("retry_ids") or []})  # fmt: skip
+
+
 def missing_targets(client: TursoClient) -> list[tuple[int, str]]:
     """지난 배당 수집 뒤에 새로 편입되거나 다시 편입된 국내 종목 + 지난 수집이 다시 받으라고 남긴 회사
     (docs/infra.md 25.1823·25.1824).
@@ -132,14 +151,9 @@ def missing_targets(client: TursoClient) -> list[tuple[int, str]]:
     시각의 날짜로 물러난다. 일부 실패(`partial`)도 기준이 되고, 실패·미처리 회사(`retry_ids`)는 다음 실행이 다시 받는다
     """
     전체 = targets(client)
-    마지막 = client.execute(LAST_RUN_SQL).rows
-    if 마지막 and 마지막[0][0]:
-        try:
-            기록 = json.loads(마지막[0][1] or "{}") or {}
-        except ValueError:
-            기록 = {}
-        기준 = str(기록.get("snapshot") or str(마지막[0][0])[:10])
-        다시 = {int(x) for x in 기록.get("retry_ids") or []}
+    기준, 지난 = _지난_기록(client)
+    if 기준 is not None:
+        다시 = {sid for sid, n in 지난.items() if n < MAX_RETRY}
         그때 = {int(r[0]) for r in client.execute(PREV_MEMBERS_SQL, [기준]).rows}
         return [t for t in 전체 if t[0] not in 그때 or t[0] in 다시]
     있음 = {int(r[0]) for r in client.execute(HAS_ROWS_SQL, [json.dumps([t[0] for t in 전체])]).rows}
@@ -162,7 +176,10 @@ def run(latest: int | None = None, limit: int | None = None, only_missing: bool 
             db.finish_batch_run(client, run_id, status="success", step_log={"companies": 0, "snapshot": 본_스냅샷})
             print("지난 배당 수집 뒤 새로 편입된 국내 종목이 없습니다")
             return 0
+        _, 지난_횟수 = _지난_기록(client)
+        미처리: set[int] = set()  # 부르지 못한 회사 — 실패 횟수를 늘리지 않고 다음 실행이 받는다 (25.1825)
         if limit:
+            미처리.update(sid for sid, _ in corps[limit:])  # 잘린 꼬리도 (25.1825 — 시험용 limit 이 기준을 옮겼다)
             corps = corps[:limit]
         # **부르기 전에 본다** (docs/infra.md 25.388). 100사마다 세므로, 재무 수집이 이미 한도를 채운 날에도
         # 첫 확인까지 DART 를 100번 더 불렀다
@@ -194,7 +211,7 @@ def run(latest: int | None = None, limit: int | None = None, only_missing: bool 
         안_센것 = 0
         연속실패 = 0
         성공 = 0
-        다시: set[int] = set()  # 실패·미처리 회사 — 다음 새 편입 실행이 다시 받는다 (25.1824)
+        실패: set[int] = set()  # 실패한 회사 — 다음 새 편입 실행이 다시 받는다 (25.1824)
         for index, (stock_id, corp_code) in enumerate(corps):
             for year in years:
                 if year != latest and (stock_id, year) in 이미:
@@ -206,7 +223,7 @@ def run(latest: int | None = None, limit: int | None = None, only_missing: bool 
                 안_센것 += result.attempts  # 부르지 않은 실패(키 없음·오프라인)는 세지 않는다 (25.607)
                 if not result.ok:
                     failures.append(f"{corp_code}/{year}: {result.error}")
-                    다시.add(stock_id)
+                    실패.add(stock_id)
                     연속실패 += 1
                     if result.limit_state == "blocked":
                         blocked = True
@@ -226,7 +243,8 @@ def run(latest: int | None = None, limit: int | None = None, only_missing: bool 
                     no_data += 1
                 rows.extend(to_row(stock_id, item, now) for item in result.data)
             if blocked:
-                다시.update(sid for sid, _ in corps[index:])  # 멈춘 곳부터는 다음 실행이 받는다 (25.1824)
+                # 멈춘 회사는 `실패` 에, 그 뒤는 다음 실행이 (25.1824)
+                미처리.update(sid for sid, _ in corps[index + 1 :])
                 log.warning("%s — %d/%d 사에서 멈춥니다", 멈춘까닭, index + 1, len(corps))
                 break
             # 100사마다 카운터에 올리고 **그 수를 본다.** 바깥이 020 으로 거절할 때까지
@@ -237,7 +255,7 @@ def run(latest: int | None = None, limit: int | None = None, only_missing: bool 
                 )
                 안_센것 = 0
                 if 상태 == "blocked":
-                    다시.update(sid for sid, _ in corps[index + 1 :])  # 25.1824
+                    미처리.update(sid for sid, _ in corps[index + 1 :])  # 25.1824
                     blocked = True
                     멈춘까닭 = "DART 일일 한도(우리 카운터)에 도달해 멈춥니다"
                     log.warning("DART 카운터가 한도에 닿아 %d/%d 사에서 멈춥니다", index + 1, len(corps))
@@ -258,11 +276,14 @@ def run(latest: int | None = None, limit: int | None = None, only_missing: bool 
         saved = client.execute(
             "SELECT COUNT(*), COUNT(DISTINCT stock_id), SUM(cash_dividend_total > 0) FROM stock_dividends"
         ).rows[0]
+        횟수 = {sid: 지난_횟수.get(sid, 0) + (1 if sid in 실패 else 0) for sid in 실패 | 미처리}
         step: dict[str, Any] = {
             "report_years": years,
             "companies": len(corps),
             "snapshot": 본_스냅샷,
-            "retry_ids": sorted(다시),
+            "retry_ids": sorted(실패 | 미처리),
+            "retry_counts": 횟수,
+            "given_up": sorted(sid for sid, n in 횟수.items() if n >= MAX_RETRY),
             "calls": calls,
             "no_data_reports": no_data,
             "failures": len(failures),

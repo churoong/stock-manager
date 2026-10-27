@@ -139,3 +139,75 @@ def test_실행은_새_편입만_부르고_본_스냅샷과_실패를_남긴다(
     부른.clear()
     assert job.run(latest=2025, only_missing=True) == 1  # 다시 받은 4 가 또 전부 실패 — 실패로 닫는다(25.319)
     assert set(부른) == {"C4"}
+
+
+def _실행_준비(monkeypatch, 결과):  # noqa: ANN001, ANN202
+    """5월 전체 실행이 기준인 장부(새 편입 3·4)와 DART 가짜. `결과(corp)` 가 (ok, limit_state, attempts)"""
+    import json
+    from types import SimpleNamespace
+
+    m = _장부()
+    m.conn.execute(
+        "INSERT INTO batch_runs (job_name, market, status, started_at) VALUES ('dividends', 'KR', 'success', ?)",
+        ["2026-05-05T18:41:00+00:00"],
+    )
+    부른: list[str] = []
+
+    def 가짜(corp: str, year: int) -> SimpleNamespace:
+        부른.append(corp)
+        ok, 상태, 시도 = 결과(corp)
+        return SimpleNamespace(ok=ok, error=None if ok else "x", limit_state=상태, attempts=시도, data=[])
+
+    monkeypatch.setattr(job, "TursoClient", lambda: m)
+    monkeypatch.setattr(job.dd, "fetch_alot_matter", 가짜)
+    monkeypatch.setattr(job, "MIN_INTERVAL", 0)
+
+    def 기록() -> dict:
+        return json.loads(m.conn.execute("SELECT step_log FROM batch_runs ORDER BY id DESC").fetchone()[0])
+
+    return m, 부른, 기록
+
+
+def test_DART_한도로_멈추면_멈춘_회사와_뒤를_남긴다(monkeypatch) -> None:  # noqa: ANN001
+    _, _, 기록 = _실행_준비(monkeypatch, lambda c: (False, "blocked", 1))
+    job.run(latest=2025, only_missing=True)
+    log = 기록()
+    assert log["retry_ids"] == [3, 4] and log["retry_counts"] == {"3": 1, "4": 0}  # 4 는 부르지 않아 횟수 그대로
+
+
+def test_우리_카운터로_멈추면_다음_회사부터_남긴다(monkeypatch) -> None:  # noqa: ANN001
+    monkeypatch.setattr(job.db, "record_and_guard", lambda *a, **k: "blocked")
+    _, 부른, 기록 = _실행_준비(monkeypatch, lambda c: (True, "ok", 100))
+    job.run(latest=2025, only_missing=True)
+    assert set(부른) == {"C3"}
+    assert 기록()["retry_ids"] == [4]
+
+
+def test_대상이_없어도_본_스냅샷을_남긴다(monkeypatch) -> None:  # noqa: ANN001
+    m, _, 기록 = _실행_준비(monkeypatch, lambda c: (True, "ok", 1))
+    m.conn.execute("DELETE FROM universe_members WHERE stock_id IN (3, 4)")
+    assert job.run(latest=2025, only_missing=True) == 0
+    assert 기록()["snapshot"] == "2026-10-23" and 기록()["companies"] == 0
+
+
+def test_limit_으로_잘린_꼬리도_남긴다(monkeypatch) -> None:  # noqa: ANN001
+    _, 부른, 기록 = _실행_준비(monkeypatch, lambda c: (True, "ok", 1))
+    job.run(latest=2025, limit=1, only_missing=True)
+    assert set(부른) == {"C3"} and 기록()["retry_ids"] == [4]
+
+
+def test_세_번_넘게_실패한_회사는_그만_받는다() -> None:
+    m = _장부()
+    m.conn.execute(
+        "INSERT INTO batch_runs (job_name, market, status, started_at, step_log)"
+        " VALUES ('dividends_missing', 'KR', 'partial', '2026-10-25T16:40:00+00:00', ?)",
+        ['{"snapshot": "2026-10-23", "retry_ids": [3, 4], "retry_counts": {"3": 2, "4": 3}}'],
+    )
+    assert [sid for sid, _ in job.missing_targets(m)] == [3]  # type: ignore[arg-type]
+    assert job.MAX_RETRY == 3
+
+
+def test_시점_조회_확인은_앞_단계가_실패해도_돈다() -> None:
+    글 = (ROOT / ".github" / "workflows" / "financials.yml").read_text(encoding="utf-8")
+    확인 = 글.index("python scripts/check_pit.py")
+    assert "if: ${{ !cancelled() }}" in 글[글.rindex("- name:", 0, 확인) : 확인]
