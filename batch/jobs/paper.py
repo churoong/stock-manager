@@ -1217,6 +1217,16 @@ def sell_decisions(
         })  # fmt: skip
     out: dict[int, tuple[list[str], list[dict[str, Any]]]] = {}
     for 행 in 행들:
+        if sell_rule == pp.SWING_RULE:
+            # 스윙(S)은 매도 플래그·보강을 보지 않는다 — `swing_close_v1` 하나(paper.md 16.3.1, 25.1871). 보강을 타면
+            # 보유마다 질의 6~10 이고, 보강이 비면 매도가 조용히 막혔다
+            팖 = _스윙넘음(client, 행, today)
+            if 팖 is not None:
+                out[int(행["stock_id"])] = ([팖["reason_code"]], [팖])
+                if notes is not None:
+                    기준가 = 행["market_value"] / 행["quantity"] if 행["market_value"] else None
+                    notes[int(행["stock_id"])] = {"ref": (기준가, 행["price_date"]), "hold": [], "flags": [팖]}
+            continue
         # A·B 가 같은 로트를 들고 있으면 한 번만 보강한다 — 읽기를 두 번 쓰지 않는다
         열쇠 = json.dumps({k: v for k, v in 행.items() if k != "quantity"}, sort_keys=True, default=str)
         if 열쇠 not in enrich_cache:
@@ -1254,6 +1264,41 @@ def sell_decisions(
                                          행["price_date"]),
                                  "hold": sorted({f.reason_code for f in flags} - 따름), "flags": 근거}  # fmt: skip
     return out
+
+
+#: 스윙(S)의 판정 종가 — 첫 매수일(진입한 날 = 1거래일째)부터 오늘까지, 그림자 장부(`signal_outcomes.BARS_SQL`)처럼
+#: 시가·고가·저가·종가가 다 있는 날만 센다(16.3.1, 25.1871). 기한(10) 넘게는 읽지 않는다
+SWING_CLOSES_SQL = (
+    "SELECT date, close FROM prices WHERE stock_id = ? AND date >= ? AND date <= ? AND close > 0 AND open > 0"
+    " AND high > 0 AND low > 0 ORDER BY date LIMIT ?"
+)
+
+
+def _스윙넘음(client: Any, 행: dict[str, Any], today: date) -> dict[str, Any] | None:
+    """S 보유 하나의 `swing_close_v1` 판정 — 넘었으면 결정 원장·주문 근거에 남길 플래그 한 줄, 아니면 None.
+
+    진입가 = 첫 로트의 체결가(슬리피지 전 — 다음 장 시가 시장가면 그날 시가, 그림자 `simulate` 의 선 기준과 같다).
+    로트가 둘 이상이면(추가 매수는 배분 전에 거르므로 없어야 한다) 첫 로트로 판정한다 — 선은 첫 진입에서 잰다"""
+    from batch.services import shadow as sh
+
+    로트 = sorted(행.get("lots") or [])
+    if not 로트 or not 로트[0][2] or float(로트[0][2]) <= 0:
+        return None
+    진입일, _q, 진입가 = 로트[0]
+    줄 = client.execute(SWING_CLOSES_SQL, [행["stock_id"], str(진입일)[:10], today.isoformat(),
+                                         sh.SWING_CLOSE.max_sessions]).rows  # fmt: skip
+    넘음 = sh.close_exit(float(진입가), [float(r[1]) for r in 줄], sh.SWING_CLOSE)
+    if 넘음 is None:
+        return None
+    까닭, i = 넘음
+    날, 종가 = str(줄[i][0])[:10], float(줄[i][1])
+    수익 = round((종가 / float(진입가) - 1) * 100, 4)
+    글 = {"stop": f"종가가 진입가 대비 {수익:+g}% — 스윙 손절선 {sh.SWING_CLOSE.stop_pct * 100:g}% 이하",
+          "target": f"종가가 진입가 대비 {수익:+g}% — 스윙 목표선 +{sh.SWING_CLOSE.target_pct * 100:g}% 이상",
+          "time": f"{i + 1}거래일째 종가 — 스윙 기한 {sh.SWING_CLOSE.max_sessions}거래일"}[까닭]  # fmt: skip
+    return {"reason_code": pp.SWING_CODES[까닭], "level": "red", "rationale": f"{글} ({날}, {sh.SWING_CLOSE.name})",
+            "criteria": [{"name": "진입가", "value": float(진입가), "date": str(진입일)[:10]},
+                         {"name": "판정 종가", "value": 종가, "date": 날}]}  # fmt: skip
 
 
 #: 추세 익절(G)의 고점 — 첫 매수일부터 오늘까지 종가 최댓값 (보유마다 한 번, 25.1481)
@@ -2047,6 +2092,13 @@ def run_step(
     메모줄: list[str] = []  # 운용역 메모 — 회사마다 한 줄 (docs/company.md 7장, 텔레그램 길이)
     for acct in accounts:
         aid, 규칙, 판 = str(acct["id"]), str(acct["sell_rule"]), int(acct["rule_version"])
+        if 규칙 not in pp.SELL_RULES:
+            # 계좌 행이 코드보다 먼저 들어온 날(마이그레이션 순서 잘못) — `sells_for` 가 `KeyError` 로 이 단계 전체와
+            # 그 뒤 KIS 베끼기까지 멈췄다. 그 계좌 하나만 건너뛴다(paper.md 16.3.1, 25.1871). 지금 계좌에는 해당 없음
+            log.error("가상 %s 모르는 매도 규칙 %s — 그 계좌를 건너뜀", aid, 규칙)
+            계좌기록[aid] = {"error": f"모르는 매도 규칙 {규칙}"}
+            줄.append(f"⚠️ 가상 {aid} 모르는 매도 규칙({규칙}) — 오늘 이 계좌는 평가·매매하지 않았습니다")
+            continue
         기준 = 다시잰기준(기준)
         _결정판 = partial(_결정, rule_version=판)
         진입 = str(acct.get("entry_rule") or "tranche")
@@ -2258,6 +2310,11 @@ def run_step(
                                          set(pp.positions(계좌체결)), 멈춘, stock_cache, targets,
                                          cal.local_today(market), 보강캐시)  # fmt: skip
                 계좌신호 = signal_rows
+                if str(acct.get("selection") or "") == "short":
+                    # 스윙(S) — 단기 신호만, 이미 든 종목은 뺀다(추가 매수 없음 — 선이 첫 체결가 하나에서 잰다. 2부
+                    # 배분은 든 종목을 목표 비중까지 채우므로 배분 **전에** 거른다, paper.md 16.3.1, 25.1871)
+                    든것 = set(pp.positions(계좌체결))
+                    계좌신호 = [r for r in 계좌신호 if r.horizon == "short" and r.stock_id not in 든것]
                 if 즉시매도:
                     계좌신호 = [r for r in signal_rows if r.stock_id not in 즉시매도]
                     가결행 = None if 가결행 is None else [r for r in 가결행 if r.stock_id not in 즉시매도]

@@ -30,9 +30,15 @@ SELL_RULES: dict[str, frozenset[str] | None] = {
     # G 추세 익절 (docs/paper.md 2.2, 25.1481): B(core)와 매도 하나만 다르다 — 목표도달에서 팔지 않고,
     # 목표에 한 번 닿은 뒤 고점 대비 손절폭만큼 빠지면(`TRAIL_CODE`, `trend_exit`) 전량. 손절·기간초과는 B 와 같다
     "trend": frozenset({"손절", "기간초과", "추적손절"}),
+    # S 스윙 (docs/paper.md 16.3.1, 25.1871): 엔진의 매도 플래그를 쓰지 않고 `shadow.close_exit`(`swing_close_v1`)
+    # 하나로 판다. 까닭 코드가 `손절` 이면 "손절 보유의 남은 회차 거둠" 길을 타므로 이름을 따로 둔다
+    "swing_close": frozenset({"스윙손절", "스윙목표", "스윙기한"}),
 }
 #: 추세 익절(G)의 매도 사유 코드 — 매도 플래그(`sell_flags.evaluate`)가 아니라 모의 엔진이 낸다
 TRAIL_CODE = "추적손절"
+#: 스윙(S)의 매도 규칙 이름과 `close_exit` 까닭 → 사유 코드 (16.3.1, 25.1871)
+SWING_RULE = "swing_close"
+SWING_CODES = {"stop": "스윙손절", "target": "스윙목표", "time": "스윙기한"}
 
 
 def trend_exit(

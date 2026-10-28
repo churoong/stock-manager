@@ -145,3 +145,23 @@ def test_종가_판정_스윙_선과_같은_종가는_넘은_것_청산일_세�
     일정 = sh.Costs(0.0, 0.0, 0.15, 0.0, (("2026-01-01", 0.15), ("2026-12-01", 0.20)))
     t = sh.simulate(1, "d0", [B("2026-11-30", 100, 106, 99, 105), B("2026-12-01", 104, 104, 104, 104)], R, 일정, "KR")
     assert (t.exit_date, t.net) == ("2026-12-01", pytest.approx(104 * (1 - 0.002) / 100 - 1))
+
+
+def test_종가_넘음_함수는_그림자_판정과_같다() -> None:
+    """25.1871 — 스윙 계좌(paper.md 16.3.1)와 그림자가 같은 함수를 쓴다. 무작위 일봉으로 둘의 답이 같음을 묶는다"""
+    import random
+
+    rnd = random.Random(1871)
+    for _ in range(400):
+        n = rnd.randint(1, 14)
+        종가 = [round(100 * (1 + rnd.uniform(-0.06, 0.07)), 2) for _ in range(n)]
+        줄 = [B(f"d{i:02d}", 100 if i == 0 else 종가[i - 1], 110, 90, c) for i, c in enumerate(종가)]
+        t = sh.simulate(1, "d0", 줄, sh.SWING_CLOSE, 무비용, "US")
+        넘음 = sh.close_exit(100, 종가)
+        if 넘음 is None or 넘음[1] + 1 >= n:
+            assert t.status == "open"
+        else:
+            assert (t.reason, t.sessions, t.exit_date) == (f"{넘음[0]}_next_open", 넘음[1] + 2, 줄[넘음[1] + 1].date)
+    assert sh.close_exit(100, [99, 97]) == ("stop", 1) and sh.close_exit(100, [105]) == ("target", 0)
+    assert sh.close_exit(100, [100] * 10) == ("time", 9) and sh.close_exit(100, [100] * 9) is None
+    assert sh.close_exit(0, [50]) is None  # 진입 시가를 모르면 판정하지 않는다

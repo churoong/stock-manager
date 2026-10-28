@@ -98,6 +98,29 @@ def _net(entry: float, exit_: float, c: Costs, day: str | None = None) -> float:
     return round(판 / 산 - 1, 6)
 
 
+def close_exit(entry_open: float, closes: list[float], rule: Rule = SWING_CLOSE) -> tuple[str, int] | None:
+    """종가 판정 스윙의 넘음 — (`stop`·`target`·`time`, 넘은 종가의 자리). 아직 아니면 None.
+
+    `closes` 는 **진입한 날부터** 그 종목 종가(오름차순 — 진입한 날이 첫째, 1거래일째). 선은 `entry_open`(슬리피지 전
+    진입 시가) 기준. 선과 같은 종가는 넘은 것(등호 포함), 수익률을 % 여섯째 자리에서 반올림해 견준다 — 엔진 손절 판정
+    (`sell_flags` `round(…, 6) <= stop_pct`)과 같은 꼴, 부동소수 찌꺼기(96.99999…)로 경계가 갈리지 않게(25.1870).
+    그림자 `simulate` 와 가상모의투자 스윙 계좌(paper.md 16.3.1)가 **같이** 쓴다(25.1871) — 계좌 성적과 그림자 집계의
+    차이가 판정 차이가 아니게"""
+    assert rule.target_pct is not None and rule.stop_pct is not None
+    if not entry_open or entry_open <= 0:
+        return None
+    아래, 위 = round(rule.stop_pct * 100, 6), round(rule.target_pct * 100, 6)
+    for i, c in enumerate(closes[: rule.max_sessions]):
+        수익 = round((c / entry_open - 1) * 100, 6)
+        if 수익 <= 아래:
+            return "stop", i
+        if 수익 >= 위:
+            return "target", i
+        if i == rule.max_sessions - 1:
+            return "time", i
+    return None
+
+
 def simulate(stock_id: int, signal_date: str, bars: list[Bar], rule: Rule, costs: Costs, country: str,
              prev_close: float | None = None, ended: bool = False) -> Trade:  # fmt: skip
     """`bars` 는 신호 날 **뒤**의 그 종목 시세(오름차순). `prev_close` 는 신호 날 종가(상한가 시가 판정용).
@@ -126,20 +149,12 @@ def simulate(stock_id: int, signal_date: str, bars: list[Bar], rule: Rule, costs
     기준 = 첫.open  # 선은 슬리피지 전 시가에서 — 주문을 낼 때 아는 값
     목표, 손절 = 기준 * (1 + rule.target_pct), 기준 * (1 + rule.stop_pct)
     if rule.kind == "swing_close":
-        # 종가가 선을 넘은 날(또는 기한 날)의 **다음 장 시가** 시장가로 판다 — 넘은 날 다음 장이 아직 없으면 진행 중
-        # 선과 같은 종가는 넘은 것(등호 포함). 수익률을 % 여섯째 자리에서 반올림해 견준다 — 엔진 손절 판정
-        # (`sell_flags` `round(…, 6) <= stop_pct`)과 같은 꼴, 부동소수 찌꺼기(96.99999…)로 경계가 갈리지 않게(25.1870)
-        for i, bar in enumerate(bars[: rule.max_sessions]):
-            수익 = round((bar.close / 기준 - 1) * 100, 6)
-            아래, 위 = round(rule.stop_pct * 100, 6), round(rule.target_pct * 100, 6)
-            까닭 = ("stop" if 수익 <= 아래 else "target" if 수익 >= 위
-                  else "time" if i == rule.max_sessions - 1 else None)  # fmt: skip
-            if 까닭 is None:
-                continue
-            if i + 1 < len(bars):
-                다음 = bars[i + 1]
-                return 끝(다음, 다음.open * (1 - slip), f"{까닭}_next_open", i + 2)
-            break
+        # 종가가 선을 넘은 날(또는 기한 날)의 **다음 장 시가** 시장가로 판다 — 넘은 날 다음 장이 아직 없으면 진행 중.
+        # 판정은 가상모의투자 스윙 계좌와 같은 함수(`close_exit`, 25.1871)
+        넘음 = close_exit(첫.open, [b.close for b in bars], rule)
+        if 넘음 is not None and 넘음[1] + 1 < len(bars):
+            다음 = bars[넘음[1] + 1]
+            return 끝(다음, 다음.open * (1 - slip), f"{넘음[0]}_next_open", 넘음[1] + 2)
         if ended:
             return 끝(bars[-1], bars[-1].close * (1 - slip), "끊김", len(bars))
         return Trade(stock_id, signal_date, rule.name, "open", 첫.date, round(진입, 6), sessions=len(bars))
