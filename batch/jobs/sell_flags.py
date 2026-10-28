@@ -624,16 +624,41 @@ def run(today: date | None = None) -> int:
             ).dicts()
         }
         statements: list[tuple[str, list[Any]]] = [("DELETE FROM sell_flags WHERE as_of_date = ?", [day])]
+        못_본 = {h.stock_id: sf.unjudged(h, today) for h in holdings if isinstance(h, sf.HoldingInput)}
+        보유별 = {h.stock_id: h for h in holdings if isinstance(h, sf.HoldingInput)}
         for f in flags:
             prev = previous.get((f.stock_id, f.reason_code))
             확인 = prev["dismissed_at"] if prev else None
             처음 = prev["created_at"] if prev else now
+            자료_오늘: dict[str, Any] = {"criteria": f.criteria}
+            글_오늘 = f.rationale_text
+            # **오늘 판정하지 못한 속 근거는 어제 것을 잇는다** (25.1845, 결함 루프 재현). 재무악화의 적자 전환은
+            # 점수와 상관없이 서므로 점수를 못 본 날(잣대 바뀜·점수 없음·묵음)에도 플래그가 적자 전환 하나로 새로 서
+            # 아래 잇기를 타지 않았다 — 그날 행에서 "점수 하락" 이 빠져, 다음 날 점수 하락이 돌아오면 새 속 사유로 보여
+            # 확인한 플래그가 NEW 로 다시 알렸다(25.1277 이 막으려던 꼴). 잇는 끝은 통째 잇기와 같은 `carried_since`·
+            # `MAX_CARRY_DAYS`
+            if prev and f.reason_code in 못_본.get(f.stock_id, set()) and f.stock_id in 보유별:
+                try:
+                    어제자료 = json.loads(prev["rationale_data"] or "{}")
+                except (TypeError, ValueError):
+                    어제자료 = {}
+                판정일 = str((어제자료 if isinstance(어제자료, dict) else {}).get("carried_since")
+                          or prev["as_of_date"])[:10]  # fmt: skip
+                if (today - date.fromisoformat(판정일)).days <= MAX_CARRY_DAYS:
+                    오늘이름 = {c.get("label") for c in f.criteria}
+                    더함 = [c for c in sf.carry_criteria(보유별[f.stock_id], f.reason_code,
+                                                         _criteria_of(prev.get("rationale_data")))
+                            if c.get("label") not in 오늘이름]  # fmt: skip
+                    if 더함:
+                        자료_오늘 = {"criteria": list(f.criteria) + 더함, "carried_since": 판정일}
+                        글_오늘 += " ※ 일부 근거는 오늘 판정할 자료가 없어 지난 판정을 이어 둡니다"
             # 어제 근거는 아래 `_criteria_of`(리포트와 같은 읽기)로 읽는다 — 같은 이름을 하나 더 만들어 뒤의 것에
             # 덮여 늘 빈 목록이 됐고, 확인이 매 배치 풀렸다 (25.566, 교차검증)
             # **확인하지 않은 플래그도** 속 사유가 새로 생기면(시총미달 → 관리종목) NEW 를 다시 붙인다
             # (docs/infra.md 25.1234, 매도 플래그 감사). 예전에는 [확인] 을 누른 쪽만 다시 알려, 아무것도 누르지 않은
             # 사용자는 더 나빠진 줄을 옛 줄처럼 받았다
-            if prev and not sf.keeps_dismissal(f.reason_code, _criteria_of(prev.get("rationale_data")), f.criteria):
+            if prev and not sf.keeps_dismissal(f.reason_code, _criteria_of(prev.get("rationale_data")),
+                                               자료_오늘["criteria"]):  # fmt: skip
                 # 속 사유가 새로 생겼다 — 다시 알린다(25.564). **NEW 도 붙인다**: NEW 는 `created_at` 을 마지막 발송과
                 # 견주므로 처음 걸린 시각을 이어받으면 다시 실려도 NEW 가 없었다 (25.566)
                 확인 = None
@@ -641,8 +666,8 @@ def run(today: date | None = None) -> int:
             statements.append((
                 "INSERT INTO sell_flags (stock_id, as_of_date, level, reason_code, rationale_text, rationale_data,"
                 " is_active, first_seen_date, dismissed_at, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)",
-                [f.stock_id, day, f.level, f.reason_code, f.rationale_text,
-                 json.dumps({"criteria": f.criteria}, ensure_ascii=False),
+                [f.stock_id, day, f.level, f.reason_code, 글_오늘,
+                 json.dumps(자료_오늘, ensure_ascii=False),
                  prev["first_seen_date"] if prev else day, 확인,
                  # created_at 은 **처음 걸린 시각**이다 — 이어지는 동안 이어받는다 (docs/infra.md 25.501).
                  # 단, 속 사유가 새로 생겨 확인을 풀었으면 지금이다(다시 알림 = NEW, 25.566)
@@ -653,8 +678,6 @@ def run(today: date | None = None) -> int:
         # 날(감성 채점 실패·점수 없음·평가액 없음)을 "풀림" 으로 보면 다음 날 [확인] 이 사라지고 NEW 로 다시 떴다.
         # 지금도 보유 중인 종목만 — 다 판 종목은 풀린다
         걸린 = {(f.stock_id, f.reason_code) for f in flags}
-        못_본 = {h.stock_id: sf.unjudged(h, today) for h in holdings if isinstance(h, sf.HoldingInput)}
-        보유별 = {h.stock_id: h for h in holdings if isinstance(h, sf.HoldingInput)}
         이음 = 0
         for (sid, 사유), prev in previous.items():
             if (sid, 사유) in 걸린 or 사유 not in 못_본.get(sid, set()):
