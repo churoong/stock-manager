@@ -8,20 +8,27 @@
 - 재무악화(종합 점수 20점 하락): 매수 때 신호 점수 → 그 주 종합 점수
 - 점검(유니버스 제외): 그 주 첫 cutoff 의 시점 유니버스에서 빠지면
 - 감성급락: 리플레이에서는 늘 "판정 못 함"(빈 답) — 무료 과거 뉴스가 없어 영구 차이. 지어내지 않는다
-- 사면 바로 팔 후보는 사지 않고 운영과 같은 skip 줄
+- 사면 바로 팔 후보는 사지 않고 운영과 같은 skip 줄 — 든 종목은 보지 않는다(운영 `held`)
 - 끝까지(진짜 판단기·`SharedDays`)·탐색 실행 칸
+
+일치 시험(`test_replay_parity_ac_1934`)이 지나는 갈래는 영업이익 적자 전환뿐이다 — 점수 20점 하락·점검·든 종목 제외·위원회 길의
+첫 주문 점수·`SharedDays` 주간 점수·진짜 `CoreMarket.members` 는 이 파일의 손 사례·끝까지 시험이 덮는다(25.1937 — 교차검증이
+변이로 빈자리를 찾았다)
 """
 
 from __future__ import annotations
 
 import copy
+from dataclasses import replace
 from datetime import date
 from functools import cache
+from types import SimpleNamespace
 
 import pytest
 
 from batch.jobs import paper as jp
 from batch.services import backtest as bt
+from batch.services import company as co
 from batch.services import core_backtest as cb
 from batch.services import core_strategy as cs
 from batch.services import paper as pp
@@ -65,22 +72,36 @@ class 점검시장(t.가짜시장):
         return {int(u["stock_id"]) for u in self.universe} - 빠짐
 
 
+class 위원회시장(점검시장):
+    """`점검시장` + 위원회 회사(운영 A·C 헌장)가 그날 신호 종목을 모두 가결한다 — 진짜 탐색 변형 `core_a`·`core_c` 의
+    위원회 길(`committee_rows` → `buy_orders(preselected=…)` → 첫 주문 점수 → `Lot.score_at_buy`)을 손 자료로 돈다(25.1937).
+    안건·모집단은 비워 부결 skip 줄(`committee_skips`)은 없다"""
+
+    charters = {a: co.CHARTERS[a] for a in ("A", "C")}
+
+    def at(self, view: bt.PriceView, day: str) -> cb.DayView:
+        dv = super().at(view, day)
+        가결 = [SimpleNamespace(stock_id=sid) for sid in dict.fromkeys(r.stock_id for r in dv.rows)]
+        return replace(dv, approved={a: list(가결) for a in self.charters})
+
+
 def _스냅(fy: int, as_of: str, oi: float, receipt: str = "") -> dict:
     return {"as_of_date": as_of, "fiscal_year": fy, "receipt_no": receipt or f"{fy}-{as_of}", "consolidated": True,
             "values": {"operating_income": oi, "revenue": 1e12, "currency": "KRW", "period_days": 365}}  # fmt: skip
 
 
-def _돌림(variant: str, 가격: dict[int, list[float]], 신호: dict[int, list[tuple]], *, snaps=None, 점수=None, 밖=None):  # type: ignore[no-untyped-def]  # noqa: E501
+def _돌림(variant: str, 가격: dict[int, list[float]], 신호: dict[int, list[tuple]], *, snaps=None, 점수=None, 밖=None,  # type: ignore[no-untyped-def]  # noqa: E501
+          시장=점검시장):  # fmt: skip
     """`test_core_strategy_1532._돌림` 과 같은 엔진·같은 날짜(2024-01-05 부터 영업일). 날짜 열쇠는 번호(날 k)로 준다:
     `snaps` = {종목: [(사업연도, 접수일 번호, 영업이익)]}, `점수` = {cutoff 번호: {종목: 종합 점수}}, `밖` = {cutoff 번호: {종목}}.
-    접수일 번호는 날 번호 그대로 — 결정일 날[k+1] 의 cutoff 가 날[k] 다"""
+    접수일 번호는 날 번호 그대로 — 결정일 날[k+1] 의 cutoff 가 날[k] 다. `시장` = 판단기 꼴(위원회 길은 `위원회시장`)"""
     n = max(len(v) for v in 가격.values())
     날 = t._영업일("2024-01-05", n)
     prices = {sid: {날[k]: p for k, p in enumerate(v) if p is not None} for sid, v in 가격.items()}
     스냅 = {sid: [_스냅(2022, "2023-03-15", 100.0)] + [_스냅(fy, 날[k], oi) for fy, k, oi in rows]
            for sid, rows in (snaps or {}).items()}  # fmt: skip
-    m = 점검시장(t._종목들(max(가격)), {날[k]: rows for k, rows in 신호.items()}, 스냅,
-               {날[k]: v for k, v in (점수 or {}).items()}, None if 밖 is None else {날[k]: v for k, v in 밖.items()})
+    m = 시장(t._종목들(max(가격)), {날[k]: rows for k, rows in 신호.items()}, 스냅,
+             {날[k]: v for k, v in (점수 or {}).items()}, None if 밖 is None else {날[k]: v for k, v in 밖.items()})  # fmt: skip
     mp = pytest.MonkeyPatch()
     try:
         for k, v in _손변형.items():
@@ -149,6 +170,25 @@ def test_사면_바로_팔_후보는_사지_않는다_접수일이_cutoff_뒤면
     assert _매도날(s) == {날[2]: {2: ["재무악화"]}}
 
 
+@pytest.mark.parametrize("variant", ["hand_a", "hand_c"])
+def test_든_종목은_사기_전_점검에서_빼고_목표_비중까지_더_산다(variant: str) -> None:
+    """25.1937 — 운영 `prebuy_sell_flags(held=…)` 처럼 든 종목은 사기 전 점검을 보지 않는다(보유 매도 판정이 이미 봤다).
+    날[1] 에 종목 1 을 5% 산다(첫 주문 점수 80). cutoff 날[2] 에 종목 1·2 가 신호 점수 100 으로 다시 나오고 그 주 종합 점수는
+    79 — 후보로 꾸미면 100 → 79(−21) 재무악화지만, 든 종목 1 의 보유 판정은 80 → 79(−1)라 팔지 않는다.
+    든 종목 1 은 skip 줄 없이 10% 까지 더 사고(5%), 새 후보 2 만 "사면 바로 매도" skip(미끼가 실제로 걸리는 양성 대조)"""
+    s, 날, _m = _돌림(variant, {1: [100.0] * 6, 2: [100.0] * 6},
+                     {0: [(1, 5.0)], 2: [(1, 10.0, "short", 100.0), (2, 5.0, "short", 100.0)]},
+                     점수={2: {1: 79.0, 2: 79.0}})  # fmt: skip
+    로그 = {lg.day: lg for lg in s.log}
+    assert 로그[날[1]].buys == pytest.approx({1: 0.05})
+    assert 1 in 로그[날[3]].held and 로그[날[3]].sells == {}
+    즉시 = [(d["stock_id"], d["reason"]) for d in 로그[날[3]].decisions if d["reason"].startswith("사면 바로 매도")]
+    assert 즉시 == [(2, "사면 바로 매도 규칙에 걸림: 재무악화")], 즉시
+    assert 로그[날[3]].buys == pytest.approx({1: 0.05}, abs=1e-9)
+    assert (s.lots[1].score_at_buy, s.lots[1].score_at_buy_date, s.lots[1].first_buy) == (80.0, 날[0], 날[1])
+    assert _매도날(s) == {}
+
+
 def test_사기_전_점검은_운영_prebuy_sell_flags_를_부른다(monkeypatch: pytest.MonkeyPatch) -> None:
     """판단식을 다시 적지 않는다 — 운영 함수를 바꿔 끼우면 리플레이의 skip 이 따라 바뀐다."""
     불린: list[tuple] = []
@@ -171,6 +211,22 @@ def test_종합_점수_20점_하락(떨어진: float, 판다: bool) -> None:
     """매수 때 신호 점수 80 → cutoff 날[3] 주간 점수 60(정확히 −20) 이면 결정일 날[4] 에 재무악화, 60.1 이면 아니다.
     A(value) 는 재무악화를 따른다"""
     s, 날, _m = _돌림("hand_a", {1: [100.0] * 7}, {0: [(1, 10.0)]}, 점수={3: {1: 떨어진}})
+    assert _매도날(s) == ({날[4]: {1: ["재무악화"]}} if 판다 else {})
+
+
+@pytest.mark.parametrize("variant", ["core_a", "core_c"])
+@pytest.mark.parametrize(("떨어진", "판다"), [(60.0, True), (60.1, False)])
+def test_위원회_길로_산_보유도_첫_주문_점수에서_20점_하락이면_판다(variant: str, 떨어진: float, 판다: bool) -> None:
+    """25.1937 — 위 시험은 신호 상위 고르기(`selection="signal"`)만 지났다. 진짜 탐색 변형(위원회)은 가결 행을
+    `buy_orders(preselected=…)` 로 넘기고 그 첫 주문 점수가 `Lot.score_at_buy` 가 된다. 날[1] 에 가결로 산 종목 1(신호 점수 80)이
+    cutoff 날[3] 주간 점수 60(−20)이면 날[4] 에 재무악화, 60.1 이면 아니다(로트의 매수 점수·기준일은 첫 주문 것)"""
+    s, 날, _m = _돌림(variant, {1: [100.0] * 7}, {0: [(1, 10.0)]}, 점수={3: {1: 떨어진}}, 시장=위원회시장)
+    로그 = {lg.day: lg for lg in s.log}
+    assert s.v.selection == "committee" and s.prebuy
+    assert 로그[날[1]].buys == pytest.approx({1: 0.10})
+    assert {d["reason"] for d in 로그[날[1]].decisions if d["kind"] == "buy"} == {"위원회 가결"}
+    lot = s.lots.get(1) if not 판다 else None
+    assert lot is None or (lot.score_at_buy, lot.score_at_buy_date) == (80.0, 날[0])
     assert _매도날(s) == ({날[4]: {1: ["재무악화"]}} if 판다 else {})
 
 
@@ -287,18 +343,40 @@ def _정정_자료() -> tuple:
     return universe, prices, turn, snaps, idx
 
 
+#: `_끝` 이 돌린 변형이 읽은 주간 종합 점수 — {(변형, 정정, shared): {점수 cutoff: {종목: 종합 점수}}}(25.1937)
+_주간: dict[tuple, dict[str, dict[int, float | None]]] = {}
+
+
+def _주간_적기(m, 열쇠: tuple) -> None:  # type: ignore[no-untyped-def]
+    """판단기(`CoreMarket`·`SharedMarket`)의 `week_totals` 가 준 값을 점수 cutoff 마다 사본으로 적는다."""
+    원래, 기록 = m.week_totals, _주간.setdefault(열쇠, {})
+
+    def 적기(sc: str) -> dict[int, float | None]:
+        값 = 원래(sc)
+        기록[sc] = dict(값)
+        return 값
+
+    m.week_totals = 적기
+
+
 @cache
 def _끝(variant: str, 정정: bool = False, shared: str | None = None) -> tuple:
-    """진짜 판단기(`CoreMarket`)로 끝까지 — `shared` 를 주면 그 변형을 먼저 같은 `SharedDays` 로 돌린 뒤 읽개로."""
+    """진짜 판단기(`CoreMarket`)로 끝까지 — `shared` 를 주면 그 변형을 먼저 같은 `SharedDays` 로 돌린 뒤 읽개로.
+    `variant` 가 읽은 주간 종합 점수는 `_주간` 에 적는다"""
     universe, prices, turn, snaps, idx = _정정_자료() if 정정 else t._자료()
     if shared is None:
-        s = cs.make_core_strategy(variant, cb.CoreMarket(universe, snaps, idx), sessions=t.날들, costs=bt.Costs())
+        m = cb.CoreMarket(universe, snaps, idx)
+        _주간_적기(m, (variant, 정정, shared))
+        s = cs.make_core_strategy(variant, m, sessions=t.날들, costs=bt.Costs())
         r = bt.simulate(prices, t.모의, t.모의, s, bt.Costs(), turnover=turn, has_delisted=True)
         return s, r
     나눔 = cb.SharedDays(cb.CoreMarket(universe, snaps, idx))
     out = []
     for v in (shared, variant):
-        s = cs.make_core_strategy(v, 나눔.reader(), sessions=t.날들, costs=bt.Costs())
+        읽개 = 나눔.reader()
+        if v == variant:
+            _주간_적기(읽개, (variant, 정정, shared))
+        s = cs.make_core_strategy(v, 읽개, sessions=t.날들, costs=bt.Costs())
         out.append((s, bt.simulate(prices, t.모의, t.모의, s, bt.Costs(), turnover=turn, has_delisted=True)))
     return out[1]
 
@@ -331,6 +409,40 @@ def test_끝까지_정정_적자를_접수_다음_결정일에_팔고_다시_사
     assert not any(lg.buys.get(_정정_종목) for lg in s.log if lg.cutoff >= _정정_접수)
 
 
+#: 진짜 판단기의 시점 유니버스 미끼 — (변형, 종목, 빠지는 주의 첫 cutoff, 그 cutoff 의 결정일). 미끼가 없을 때 두 변형이 그
+#: 주 첫 cutoff 에 그 종목을 들고 있다(2026-10-28 실측: C 는 02-27~05-01 종목 5, A 는 06-19~08-21 종목 8)
+_밖_미끼 = {"core_c": (5, "2023-03-20", "2023-03-21"), "core_a": (8, "2023-07-10", "2023-07-11")}
+
+
+@pytest.mark.parametrize("variant", sorted(_밖_미끼))
+def test_끝까지_시점_유니버스에서_빠진_보유는_그_주_첫_결정일에_점검으로_판다(variant: str) -> None:
+    """25.1937 — 위 끝까지는 유니버스를 자르지 않는 실행(`eligible_at` 없음)이라 진짜 `CoreMarket.members` 를 지나지 않았다.
+    `eligible_at` 이 그 주 첫 cutoff 부터 든 종목을 빼면 그 cutoff 의 결정일에 "점검" 으로 판다(운영 `sell_flags` 의 유니버스
+    제외 코드). 그 전 결정은 미끼 없는 실행과 같고, 빠진 뒤로는 다시 사지 않는다(신호 모집단 밖). `SharedDays` 읽개로도 같다"""
+    sid, 부터, 판날 = _밖_미끼[variant]
+    universe, prices, turn, snaps, idx = t._자료()
+    전체 = {int(u["stock_id"]) for u in universe}
+
+    def eligible_at(cutoff: str) -> set[int]:
+        return 전체 - {sid} if cutoff >= 부터 else set(전체)
+
+    기본, _r = _끝(variant)
+    assert any(lg.cutoff == 부터 and sid in lg.held for lg in 기본.log)
+    s = cs.make_core_strategy(variant, cb.CoreMarket(universe, snaps, idx, eligible_at=eligible_at), sessions=t.날들,
+                              costs=bt.Costs())  # fmt: skip
+    bt.simulate(prices, t.모의, t.모의, s, bt.Costs(), turnover=turn, has_delisted=True)
+    def 줄(로그: list[cs.DayLog]) -> list[tuple]:
+        return [(lg.day, lg.buys, lg.sells, lg.decisions) for lg in 로그]
+
+    assert [(lg.day, lg.sells[sid]) for lg in s.log if sid in lg.sells] == [(판날, ["점검"])]
+    assert 줄([lg for lg in s.log if lg.cutoff < 부터]) == 줄([lg for lg in 기본.log if lg.cutoff < 부터])
+    assert not any(lg.buys.get(sid) for lg in s.log if lg.cutoff >= 부터)
+    나눔 = cb.SharedDays(cb.CoreMarket(universe, snaps, idx, eligible_at=eligible_at))
+    s1 = cs.make_core_strategy(variant, 나눔.reader(), sessions=t.날들, costs=bt.Costs())
+    bt.simulate(prices, t.모의, t.모의, s1, bt.Costs(), turnover=turn, has_delisted=True)
+    assert 줄(s1.log) == 줄(s.log)
+
+
 def test_나눠_읽어도_같다() -> None:
     """`SharedDays` 읽개(하루 재료에서 종합 점수가 빠진다 — 주간 점수를 따로 든다)로 돌려도 판단기를 직접 쓴 것과 같다.
     다른 변형(D)이 먼저 그 주를 적은 경우도"""
@@ -339,6 +451,21 @@ def test_나눠_읽어도_같다() -> None:
     assert r1.curve == r0.curve
     assert [(lg.day, lg.buys, lg.sells, lg.decisions) for lg in s1.log] == [
         (lg.day, lg.buys, lg.sells, lg.decisions) for lg in s0.log]
+
+
+def test_나눠_읽은_주간_종합_점수는_판단기를_직접_쓴_것과_주마다_같다() -> None:
+    """25.1937 — 위 끝까지 대조는 보유의 그 주 점수가 20점 넘게 빠지는 날이 없어, 읽개의 `week_totals` 가 빈 답을 줘도
+    (재무악화의 점수 갈래만 조용히 꺼져) 지나갔다(교차검증 변이 실측). 그래서 주마다 값 자체를 견준다: `SharedDays` 읽개가
+    준 그 주 종합 점수 = 판단기를 직접 쓴 실행의 `CoreMarket.week_totals`. 모든 주를 읽었고 값이 비지 않았나도 본다"""
+    s0, _r0 = _끝("core_c", True)
+    _끝("core_c", True, shared="core_d")
+    직접, 나눔 = _주간[("core_c", True, None)], _주간[("core_c", True, "core_d")]
+    주들 = {date.fromisoformat(lg.cutoff).isocalendar()[:2] for lg in s0.log}
+    assert len(직접) == len(주들) and sorted(나눔) == sorted(직접)
+    for sc, 값 in 직접.items():
+        assert 나눔[sc] == 값 and len(값) == 12, sc  # 합성 유니버스 12종목 모두 열쇠가 있다
+    # 점수가 실제로 든 주 — 2026-10-28 실측: 앞 21주(2022-11-14 까지)는 팩터 이력이 짧아 모두 None, 그 뒤 40주는 12종목 모두
+    assert sum(all(v is not None for v in 값.values()) for 값 in 직접.values()) >= 30
 
 
 def test_주간_점수는_지금_주_것만_준다() -> None:
@@ -352,8 +479,6 @@ def test_탐색_변형_칸은_운영_A·C_계좌와_같다() -> None:
     """A: 0070 에 'all' 로 만들고 0077 이 `value` 로(진입·top_n 은 0075 열 기본값 tranche·5). C: 0075 에 open·5 로 만들고
     0077 이 `momentum` 으로. 둘 다 헌장 계좌(위원회 — 운영 `run_step` 은 헌장이 있으면 `committee_step`)"""
     from pathlib import Path
-
-    from batch.services import company as co
 
     헌장 = Path("migrations/0077_paper_charters.sql").read_text(encoding="utf-8")
     기본 = Path("migrations/0075_paper_more_accounts.sql").read_text(encoding="utf-8")
