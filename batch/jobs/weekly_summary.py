@@ -494,6 +494,24 @@ def execution_lines(client: TursoClient, now: datetime) -> list[str]:
     return eq.lines(eq.measure(매매, 계획, 추천, 플래그, 시작.isoformat(), 끝.isoformat()))
 
 
+def shadow_lines(client: TursoClient) -> list[str]:
+    """단타·스윙 그림자 장부 절 (docs/paper.md 16.2, 25.1869) — 신호 성적표 실행이 남긴 설정 `shadow_ledger_kr/us` 를
+    읽기만 한다. 첫 집계(11-02 21:07 UTC) 전이면 빈 목록 — 절을 싣지 않는다. 기준일(`as_of`)을 함께 — 실패한 회차는
+    지난 집계를 남긴다(25.1864)"""
+    from batch.jobs import signal_outcomes as so
+
+    줄: list[str] = []
+    for 나라, 이름 in (("kr", "국내"), ("us", "미국")):
+        집계 = db.get_setting(client, f"{so.SHADOW_KEY}_{나라}", None)
+        if not isinstance(집계, dict) or not isinstance(집계.get("stats"), dict) or not 집계["stats"]:
+            continue
+        줄.append(f"  {이름} ({집계.get('as_of') or '?'} 기준)")
+        줄 += [f"    {규칙}: {so.shadow_line(값)}" for 규칙, 값 in 집계["stats"].items() if isinstance(값, dict)]
+    if not 줄:
+        return []
+    return ["단타·스윙 그림자 장부 — 단기 신호 전부를 규칙대로 가상 체결(돈·종목 수 제약 없음, 9-16 부터 누적)", *줄]
+
+
 def week_key(moment: datetime) -> str:
     """그 시각이 속한 주 — 한국 날짜로 그 시각 이하의 가장 가까운 일요일.
     요약은 일요일 아침(한국)에 지난 7일을 보낸다"""
@@ -569,6 +587,13 @@ def run(dry_run: bool = False, force: bool = False) -> int:
             모의 = [*준비, "", *모의]
         except Exception as exc:  # noqa: BLE001 — 곁다리 절이다
             모의 = [f"실전 준비도를 만들지 못했습니다 ({type(exc).__name__})", "", *모의]
+        # 단타·스윙 그림자 장부 (docs/paper.md 16.2, 25.1869) — 사용자 "단기간에 성과를 확인할 수가 없어". 곁다리
+        try:
+            그림자 = shadow_lines(client)
+            if 그림자:
+                모의 = [*모의, "", *그림자]
+        except Exception as exc:  # noqa: BLE001 — 곁다리 절이다
+            모의 = [*모의, "", f"그림자 장부 절을 만들지 못했습니다 ({type(exc).__name__})"]
         # 실제 매매의 실행 품질 (docs/paper.md 13장, 25.1452) — 월 첫 요약에만. 곁다리. **깨지지 않고 만들었을 때만**
         # 그달을 표시한다(매매가 없어 빈 절이면 "보낼 것 없음" 이라 표시 — 25.1760)
         실행 = False
