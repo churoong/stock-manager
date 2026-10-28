@@ -109,6 +109,21 @@ MUTATIONS: tuple[Mutation, ...] = (
              '        if ret <= rules["stop_pct"]:\n', '        if ret < rules["stop_pct"]:\n',
              ("tests/test_sell_flags.py", "tests/test_sell_flag_rounding_1324.py"),
              "손절선에 정확히 닿은 날 손절 플래그가 안 걸린다(가상모의투자는 규칙서대로 판다)"),
+    # KIS모의투자 장중 손절·익절 감시 (25.1838 — 25.1768 부터 장중에 실제 모의 매도를 내는데 목록에 없었다)
+    Mutation("guard_line_boundary", "batch/jobs/intraday_guard.py",
+             '    return 비 <= 0 if 쪽 == "아래" else 비 >= 0\n', '    return 비 < 0 if 쪽 == "아래" else 비 >= 0\n',
+             ("tests/test_intraday_guard_1768.py",),
+             "장중 현재가가 손절선에 정확히 닿아도 KIS모의투자 매도를 내지 않는다"),
+    Mutation("guard_qty_cap", "batch/jobs/intraday_guard.py",
+             '        수량 = min(int(h.sellable), int(선.get("qty") or h.sellable))\n',
+             '        수량 = int(h.sellable)\n',
+             ("tests/test_intraday_guard_1768.py",),
+             "장중 감시가 H 수량을 넘어 사람이 그 모의계좌에서 산 주식까지 판다"),
+    Mutation("guard_skip_rate_only", "batch/jobs/intraday_guard.py",
+             "        if any(c in str(exc) for c in kv.RATE_LIMIT_CODES) and not isinstance(exc, kv.NoResponse):\n",
+             "        if not isinstance(exc, kv.NoResponse):\n",
+             ("tests/test_guard_transient_1835.py",),
+             "토큰 무효 같은 지속 장애도 '이 회차만 쉼' 으로 삼켜 실패 알림이 안 간다"),
 )
 
 
