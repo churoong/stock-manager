@@ -487,7 +487,7 @@ def other_row_text(client: Any, xs: list[Hit]) -> str:
     이름 = _names(client, [x.stock_id for x in xs])
     줄 = [f"  · {이름.get(x.stock_id, x.code)} — {note(x)}" for x in xs]
     return "\n".join(["⚠️ KIS모의투자 장중 감시 — 오늘 아침 정리 매도 줄과 겹쳐 장중 손절·익절을 내지 못함"
-                      "(같은 날 같은 종목 매도 한 줄 제약 — 11월 색인 고침 전까지)", *줄])  # fmt: skip
+                      "(같은 날 같은 종목 매도 한 줄 제약 — 색인 고침 전까지)", *줄])  # fmt: skip
 
 
 def suspect_text(client: Any, xs: list[Hit]) -> str:
