@@ -55,6 +55,12 @@ JOB_NAME = "backtest_core"
 EXPLORE_JOB_NAME = "backtest_explore"
 #: 탐색 실행 결과에 붙는 경고 — 거르기만 하고 확정하지 않는다(funnel.md 1장, 생존편향)
 WARN_EXPLORE = "탐색 실행(전략 깔때기 0단계) — 걸러내기용, 판정·확정 아님"
+#: 회차 지정가 체결로 돈 실행에 붙는 경고 — 25.1914 (전략 깔때기 ④ 분할 지정가 체결). 기본(t 종가 전량) 실행과 체결
+#: 잣대가 달라 섞어 견주지 않는다(`--limit-fills`, 기본 꺼짐)
+WARN_LIMIT_FILLS = (
+    "회차 지정가 체결(--limit-fills) — 회차 변형의 매수는 t 종가 ≤ 지정가 인 회차만 지정가에 찼다. t 종가 전량 실행과"
+    " 섞어 견주지 않는다. 결정 단위 판정·청산 짝은 낸 매수(안 찬 회차 포함)를 센다(docs/backtest.md 10장)"
+)
 
 
 def explore_trial_floor() -> int:
@@ -137,8 +143,12 @@ def run_core(
     today: date | None = None,
     variants: tuple[str, ...] | None = None,
     explore: bool = False,
+    limit_fills: bool = False,
 ) -> int:
     """핵심 H 변형 다섯을 날마다 돌려 저장한다. 0 = 성공. `today` 는 시험이 날짜를 고정할 때만 준다.
+
+    `limit_fills` — 25.1914 (전략 깔때기 ④ 분할 지정가 체결): 회차 변형의 매수를 운영처럼 회차 지정가로(기본 꺼짐 — 끄면
+    예전과 같다). 켜면 경고(`WARN_LIMIT_FILLS`)를 붙이고 실행 기록 params 에 적는다
 
     `explore` 면 탐색 변형(`EXPLORE_VARIANTS`)을 `EXPLORE_JOB_NAME` 으로 돌린다 — 두 목록을 섞지 않는다(시도 수와
     판정이 갈린다). 탐색 실행은 결정 단위 짝 판정(H−G)·H 진단을 내지 않는다"""
@@ -221,6 +231,8 @@ def run_core(
         warnings.append(WARN_CORE)
         if explore:
             warnings.append(WARN_EXPLORE)
+        if limit_fills:
+            warnings.append(WARN_LIMIT_FILLS)
         if risk_every == "month":
             warnings.append(WARN_RISK_MONTHLY)
         if years != DEFAULT_YEARS:
@@ -244,7 +256,7 @@ def run_core(
                 log.warning("진행 상태를 적지 못했습니다")
             t1 = time.perf_counter()
             strategy = cs.make_core_strategy(variant, shared.reader(), sessions=sessions, costs=costs,
-                                             buy_fee_pct=매수수수료)  # fmt: skip
+                                             buy_fee_pct=매수수수료, limit_fills=limit_fills)  # fmt: skip
             results[variant] = bt.simulate(prices, dates, dates, strategy, costs, has_delisted=delisted,
                                            turnover=turnover, dividends_included=False)  # fmt: skip
             기록[variant] = strategy.log
@@ -344,6 +356,7 @@ def run_core(
                 "group_id": group_id, "strategies": len(results), "rebalance": REBALANCE, "rebalances": 실제_리밸런스,
                 "split_half": 반, "stocks": len(ids), "dates": len(dates), "warnings": warnings,
                 "params": {"years": years, "risk_every": risk_every, "variants": list(variants), "explore": explore,
+                           "limit_fills": limit_fills,  # 25.1914 (전략 깔때기 ④ 분할 지정가 체결)
                            "trial_floor": explore_trial_floor() if explore else jb.REGISTERED_TRIALS,
                            "trigger": os.environ.get("BACKTEST_TRIGGER") or None,
                            "sha": (os.environ.get("GITHUB_SHA") or "")[:12] or None},
@@ -376,9 +389,12 @@ def main() -> int:
     parser.add_argument("--force", action="store_true", help="읽기 예산이 모자라도 강행")
     parser.add_argument("--explore", action="store_true",
                         help="탐색 변형(EXPLORE_VARIANTS)을 backtest_explore 로 — 전략 깔때기 0단계(docs/funnel.md)")
+    parser.add_argument("--limit-fills", dest="limit_fills", action="store_true",
+                        help="회차 변형의 매수를 운영처럼 3회 분할 지정가로 체결(종가 ≤ 지정가) — 25.1914, 기본 꺼짐")
     args = parser.parse_args()
     logging.basicConfig(level=config.SETTINGS.log_level, format="%(asctime)s %(levelname)s %(name)s | %(message)s")
-    return run_core(args.market, args.years, risk_every=args.risk_every, force=args.force, explore=args.explore)
+    return run_core(args.market, args.years, risk_every=args.risk_every, force=args.force, explore=args.explore,
+                    limit_fills=args.limit_fills)
 
 
 if __name__ == "__main__":

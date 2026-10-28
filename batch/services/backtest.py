@@ -352,6 +352,41 @@ class LedgerOrders:
 
     sells: frozenset[int] = frozenset()
     buys: dict[int, float] = field(default_factory=dict)
+    #: 회차 지정가 매수 — 25.1914 (전략 깔때기 ④ 분할 지정가 체결). {종목: ((더 살 비중, 지정가), …)}. 운영 체결
+    #: 판정(`services/paper.judge`)처럼 **그날 종가 ≤ 지정가** 인 회차만 차고, 찬 회차는 **지정가에** 산다(`make_fill` —
+    #: 지정가 매수는 슬리피지 없음). 안 찬 회차는 그날로 사라진다(하루짜리 주문) — 그 몫은 현금. 비면(기본) 예전과 같다.
+    #: 비중은 **판단 때(cutoff 종가) 자본** 대비다 — 운영 주문은 수량(주)이 정해져 있어, t 에 자본이 움직여도 같은 주식
+    #: 수를 산다(`buys` 는 예전처럼 t 자본 대비). 한 종목을 `buys` 와 `limits` 에 함께 두지 않는다
+    limits: dict[int, tuple[tuple[float, float], ...]] = field(default_factory=dict)
+
+
+def fill_limits(
+    orders: LedgerOrders, close_on: Callable[[int], float | None], scale: float = 1.0
+) -> tuple[LedgerOrders, dict[int, float]]:
+    """회차 지정가를 그날 종가로 판정한다 — 25.1914 (전략 깔때기 ④ 분할 지정가 체결).
+
+    (찬 회차를 `buys` 로 합친 주문, {종목: 산 값 대비 종가 가치 = Σ w·종가/지정가 ÷ Σ w}).
+    `scale` = cutoff 자본 ÷ t 자본 — 회차 비중(cutoff 자본 대비)을 t 자본 대비 `buys` 로 바꾼다. 찬 회차는 종가 ≤ 지정가
+    (운영 `judge` 의 "종가 ≤ 회차 가격", 같을 때도 찬다). 그날 종가가 없는 종목(정지·상장폐지)은 0 으로 넣어
+    `ledger_target` 이 "살 수 없어 뺀" 목록에 적게 한다 — 운영도 정지한 날 매수 회차를 취소한다
+    """
+    겹침 = set(orders.buys) & set(orders.limits)
+    if 겹침:
+        raise ValueError(f"한 종목을 buys 와 limits 에 함께 둘 수 없습니다: {sorted(겹침)[:3]}")
+    buys = dict(orders.buys)
+    비율: dict[int, float] = {}
+    for sid, 회차들 in orders.limits.items():
+        for w, 가격 in 회차들:
+            if w < 0 or not math.isfinite(w) or not (가격 > 0 and math.isfinite(가격)):
+                raise ValueError(f"회차는 (0 이상 비중, 양의 지정가) 여야 합니다 — 종목 {sid}: {(w, 가격)}")
+        종가 = close_on(sid)
+        찬 = [(w, 가격) for w, 가격 in 회차들 if 종가 is not None and 종가 <= 가격 and w > 0]
+        낸 = sum(w for w, _ in 찬)
+        buys[sid] = 낸 * scale
+        if 낸 > 0:
+            assert 종가 is not None
+            비율[sid] = sum(w * 종가 / 가격 for w, 가격 in 찬) / 낸
+    return LedgerOrders(sells=orders.sells, buys=buys), 비율
 
 
 # 판단 함수. 리밸런스 날짜 t 와 t-1 까지의 창을 받아 {stock_id: 비중} 또는 장부 주문(`LedgerOrders`)을 돌려준다.
@@ -561,7 +596,8 @@ def simulate(
         costs: 거래비용
         has_delisted: 입력에 상장폐지 종목이 들어 있는가. 아니면 경고를 붙인다
 
-    체결은 t 종가다. 아침에 판단하고 그날 종가에 산다고 본다.
+    체결은 t 종가다. 아침에 판단하고 그날 종가에 산다고 본다. 장부 주문이 회차 지정가(`LedgerOrders.limits`)를
+    주면 그 종목만 운영처럼 t 종가 ≤ 지정가 인 회차를 지정가에 산다 — 25.1914 (전략 깔때기 ④ 분할 지정가 체결).
     가격이 끊긴 종목은 마지막 종가에 묶인 채로 남고(= 그 값에 판 것과 같다),
     다음 리밸런스에서 뺀다.
     """
@@ -639,9 +675,17 @@ def simulate(
                 if cutoff else PriceView({}, d, holding=든것, weights=지금비중)
             )  # fmt: skip
             proposed = weights_at(d, view)
+            지정가비율: dict[int, float] = {}  # 25.1914 — 찬 회차 종목의 (종가 가치 ÷ 산 값). 비면 예전 길
             if isinstance(proposed, LedgerOrders):
                 # 장부 주문 — 든 것은 그대로 두고 판 것·산 것만 바꾼다(25.1526).
                 # 정지·상장폐지 규칙은 아래 비중 꼴과 같다
+                if proposed.limits:
+                    # 회차 지정가(25.1914) — 그날 종가 ≤ 지정가 인 회차만 산다. 비중은 cutoff 자본 대비(정해진 수량)
+                    판단자본 = value_at(cutoff)[0] if cutoff else drifted_total
+                    proposed, 지정가비율 = fill_limits(
+                        proposed, lambda sid, d=d: prices.get(sid, {}).get(d),
+                        판단자본 / drifted_total if drifted_total > 0 else 1.0,
+                    )  # fmt: skip
                 target, dropped = ledger_target(
                     proposed,
                     drifted,
@@ -683,6 +727,18 @@ def simulate(
             cost = costs.rebalance_cost(회전율, sold, d)
 
             equity = drifted_total * (1 - cost)
+            if 지정가비율:
+                # 25.1914 — 찬 회차는 **지정가에** 산다(운영 `make_fill`). 산 값(비중 w)만큼 현금이 나가고 손에 든 것은
+                # 종가로 w × 종가/지정가 — 그 차이(지정가 − 종가)는 체결 순간의 손실이다. 회전·비용은 산 값으로
+                # 매겼다(운영 수수료도 지정가 × 수량에). 든 종목·현금 몫은 그대로 두고 자본을 줄인 뒤 비중을 다시 낸다
+                값 = dict(target)
+                for sid, 비 in 지정가비율.items():
+                    if sid in target:
+                        남긴 = drifted.get(sid, 0.0) if drifted.get(sid, 0.0) > 0 and sid not in proposed.sells else 0.0
+                        값[sid] = target[sid] - max(target[sid] - 남긴, 0.0) * (1 - 비)
+                남음 = 1.0 - sum(target.values()) + sum(값.values())
+                equity *= 남음
+                target = {sid: x / 남음 for sid, x in 값.items()}
             weights = target
             cash_w = max(0.0, 1.0 - sum(target.values()))
             # 묶인 종목은 오늘 체결가가 없다 — 마지막 종가를 기준으로 이어 잰다(재개일 갭이 곡선에 들어간다)

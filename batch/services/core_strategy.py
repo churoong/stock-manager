@@ -14,8 +14,9 @@
 `view.holding` 과 맞춘다 — 엔진이 못 산 것(정지·상장폐지·체결가 없음)은 버리고, 엔진이 판 것(상장폐지)은 지운다. 산 날의
 원가는 **다음 결정에서야** 그날 종가가 창에 들어와 정한다 — cutoff 뒤 가격은 읽을 길이 없다.
 
-운영과 다른 것(알고 둔다, docs/backtest.md 10장 조각 1c): 체결은 t 종가 전량(운영 3회 분할 지정가·시가 시장가) ·
-상관 축소 없음 · 정수 주·최소 주문 금액은 명목 자본(`NOTIONAL_EQUITY`)이 커서 묶이지 않는다 ·
+운영과 다른 것(알고 둔다, docs/backtest.md 10장 조각 1c): 체결은 t 종가 전량(운영 3회 분할 지정가·시가 시장가 — 회차
+변형은 `limit_fills=True` 로 켜면 회차마다 t 종가 ≤ 지정가 일 때만 지정가에 찬다, 25.1914 전략 깔때기 ④ 분할 지정가
+체결) · 상관 축소 없음 · 정수 주·최소 주문 금액은 명목 자본(`NOTIONAL_EQUITY`)이 커서 묶이지 않는다 ·
 기업행위 멈춤 없음(수정주가) · 정지 매도의 20거래일 청산 없음 · 하루 손실 관문의 수익률은 직전 cutoff 비중 × 종가 변화.
 """
 
@@ -104,6 +105,8 @@ class _Bought:
     weight: float  # 그날 자본 대비 더 산 비중
     horizon: str | None
     substitute_of: int | None
+    #: 회차 지정가 모드(25.1914 전략 깔때기 ④ 분할 지정가 체결)에서 낸 회차 ((비중, 지정가), …). 비면 t 종가 전량
+    tranches: tuple[tuple[float, float], ...] = ()
 
 
 @dataclass
@@ -125,6 +128,9 @@ class DayLog:
     target_hit: dict[int, str | None] = field(default_factory=dict)
     #: 하루 수익을 잰 비중의 합(직전 cutoff 투자 비중) — 하루 손실 관문 빈도(`loss_gate`, 25.1552)의 시장 조정
     invested: float | None = None
+    #: 회차 지정가 모드에서 낸 회차 {종목: ((비중, 지정가), …)} — 25.1914 (전략 깔때기 ④ 분할 지정가 체결). `buys` 는
+    #: 이때도 **낸** 비중(회차 합)이다 — 찬 몫은 엔진이 정하고 다음 날 장부(`lots`)·엔진 비중에 든다
+    limits: dict[int, tuple[tuple[float, float], ...]] = field(default_factory=dict)
 
 
 class _Rows:
@@ -270,6 +276,7 @@ class CoreStrategy:
         self, variant: str, market: cb.CoreMarket, *, sessions: list[str], costs: bt.Costs | None = None,
         buy_fee_pct: float | None = None,
         max_sector_pct: float = report_picks.DEFAULT_MAX_SECTOR_PCT,
+        limit_fills: bool = False,
     ) -> None:  # fmt: skip
         from batch.jobs import paper as jp
 
@@ -282,6 +289,9 @@ class CoreStrategy:
             # 운영 run_step: 위원회 회사의 상위 몇 종목은 헌장 `top_n`(`종목수 = int(헌장들[aid]["top_n"])`)
             v = replace(v, top_n=int(self.charter["top_n"]))
         self.variant, self.v = variant, v
+        #: 회차 지정가 체결 — 25.1914 (전략 깔때기 ④ 분할 지정가 체결). 회차 진입(tranche) 변형만 — 시가 일괄(R1·R2)은
+        #: 회차가 없어 켜도 예전과 같다. 끄면(기본) t 종가 전량
+        self.limit_fills = bool(limit_fills) and v.entry == "tranche"
         if self.v.sell_rule in jp.PREBUY_CHECK_RULES:
             # 사면 바로 팔 후보(재무악화·감성·점검)는 백테스트에 자료가 없다 —
             # 핵심 변형은 core·trend 라 운영도 보지 않는다(`prebuy_sell_flags`)
@@ -326,23 +336,56 @@ class CoreStrategy:
         for sid in list(self.lots):
             if sid not in held:
                 del self.lots[sid]  # 엔진이 판 것(상장폐지 — 마지막 종가)
-        for b in self._bought:
+        찬회차 = self._filled_tranches(view, held)
+        배율, 남음 = 1.0, 1.0
+        if 찬회차:
+            # 회차 지정가(25.1914 전략 깔때기 ④ 분할 지정가 체결) — 엔진은 회차 비중을 cutoff 자본 대비 정해진 수량으로
+            # 사고(`bt.fill_limits` 의 scale = cutoff 자본 ÷ 산 날 자본 = 1 ÷ (1 + 그 사이 수익)), 지정가 − 종가 만큼
+            # 자본이 준다(`남음`). 엔진의 회전 비용은 든 것·현금을 비례로 줄여 비중 비율에서 지워진다 — 새 몫이 정확하다
+            r = self._day_return(view)
+            배율 = 1.0 / (1.0 + r / 100) if r is not None else 1.0
+            남음 = 1.0 - sum(x * 배율 * (1 - px / 가격) for px, 찬 in 찬회차.values() for x, 가격 in 찬)
+        for i, b in enumerate(self._bought):
             px = _close_on(view, b.stock_id, b.day)
             if px is None or px <= 0 or b.stock_id not in held:
                 continue  # 엔진이 못 산 것(그날 체결가 없음·정지·상장폐지)
-            단가 = px * self.unit_factor
+            단가, 새 = px * self.unit_factor, b.weight
+            if b.tranches:
+                # 회차 지정가(25.1914 전략 깔때기 ④ 분할 지정가 체결) — 엔진과 같은 잣대(그날 종가 ≤ 지정가)로 찬 회차만
+                # 원가는 찬 회차의 지정가를 주식 수로 평균(운영 `make_fill` — 지정가 매수는 수수료만), 새 몫은 종가 가치
+                if i not in 찬회차:
+                    continue  # 하나도 안 찼다 — 회차는 하루짜리라 사라진다(든 로트는 그대로, 마지막 매수일도 그대로)
+                _px, 찬 = 찬회차[i]
+                단가 = sum(x for x, _ in 찬) / sum(x / 가격 for x, 가격 in 찬) * self.unit_factor
+                새 = sum(x * 배율 * px / 가격 for x, 가격 in 찬) / 남음
             lot = self.lots.get(b.stock_id)
             if lot is None:
                 self.lots[b.stock_id] = Lot(b.stock_id, b.day, b.horizon, 단가, b.substitute_of, b.day)
                 continue
             # 더 산 몫 — 주식 수 비율은 그날 종가로 잰 비중(cutoff = 산 날)에서: 옛 몫 (h − w)/h, 새 몫 w/h
             h = w.get(b.stock_id, 0.0)
-            옛 = max(h - b.weight, 0.0) / h if h > 0 else 0.0
+            옛 = max(h - 새, 0.0) / h if h > 0 else 0.0
             lot.unit_cost = 옛 * lot.unit_cost + (1 - 옛) * 단가
             lot.last_buy = b.day
             if b.substitute_of is not None:
                 lot.substitute_of = b.substitute_of
         self._bought = []
+
+    def _filled_tranches(
+        self, view: bt.PriceView, held: set[int]
+    ) -> dict[int, tuple[float, list[tuple[float, float]]]]:
+        """어제 낸 회차 가운데 엔진이 채운 것 — 25.1914 (전략 깔때기 ④ 분할 지정가 체결). {`_bought` 번호: (산 날 종가,
+        찬 회차)}. 잣대는 엔진(`bt.fill_limits`)·운영(`pp.judge`)과 같다 — 산 날 종가 ≤ 지정가. 엔진이 들지 않으면(정지·
+        상장폐지·하나도 안 참) 넣지 않는다"""
+        out: dict[int, tuple[float, list[tuple[float, float]]]] = {}
+        for i, b in enumerate(self._bought):
+            px = _close_on(view, b.stock_id, b.day) if b.tranches else None
+            if px is None or px <= 0 or b.stock_id not in held:
+                continue
+            찬 = [(x, 가격) for x, 가격 in b.tranches if px <= 가격 and x > 0]
+            if 찬:
+                out[i] = (px, 찬)
+        return out
 
     def _cooldown_start(self, cutoff: str) -> str:
         """운영 `쉼_시작` — 리포트 거래일(= cutoff)에서 `REBUY_COOLDOWN_SESSIONS − 1` 거래일 앞."""
@@ -425,6 +468,8 @@ class CoreStrategy:
         # ③ 매수 — 운영 `buy_orders` 그대로(현금은 오늘 판 돈을 넣지 않은 cutoff 현금)
         현금 = max(1.0 - sum(w.values()), 0.0)
         buys, bought = self._buys(client, view, dv, w, 현금, 손절, 최근판, today, log)
+        # 회차 지정가 모드(25.1914 전략 깔때기 ④ 분할 지정가 체결) — 회차가 있는 종목은 엔진에 회차로 넘긴다
+        회차 = {b.stock_id: b.tranches for b in bought if b.tranches}
 
         if client.misses:
             # 운영 함수가 삼킨 모르는 읽기 — 백테스트가 운영과 다른 판단을 조용히 쓰지 않게 여기서 깨진다
@@ -434,7 +479,11 @@ class CoreStrategy:
         self._bought = bought
         self._prev = (day, view.cutoff, w)
         log.buys = buys
+        log.limits = 회차
         self.log.append(log)
+        if 회차:
+            return bt.LedgerOrders(sells=frozenset(매도), buys={sid: x for sid, x in buys.items() if sid not in 회차},
+                                   limits=회차)  # fmt: skip
         return bt.LedgerOrders(sells=frozenset(매도), buys=buys)
 
     def _rows(self, dv: cb.DayView) -> tuple[list[report_picks.SignalRow], list[report_picks.SignalRow] | None]:
@@ -500,11 +549,16 @@ class CoreStrategy:
             log.decisions += committee_skips(dv, self.charter, {sid for sid, x in w.items() if x > 0})
         buys: dict[int, float] = {}
         첫주문: dict[int, dict[str, Any]] = {}
+        회차: dict[int, list[tuple[float, float]]] = {}
         for o in 주문:
             단가 = o["limit_price"] if o.get("limit_price") is not None else o["ref_price"]
             buys[o["stock_id"]] = buys.get(o["stock_id"], 0.0) + 단가 * o["quantity"] / N
             첫주문.setdefault(o["stock_id"], o)
-        bought = [_Bought(sid, log.day, x, 첫주문[sid].get("horizon"), _substitute_of(첫주문[sid]))
+            if self.limit_fills and o.get("limit_price") is not None:
+                # 회차 하나 = 운영 주문 한 줄(`jobs/paper.run_step` 이 `paper_orders` 에 적는 지정가·수량) — 25.1914
+                회차.setdefault(o["stock_id"], []).append((단가 * o["quantity"] / N, float(단가)))
+        bought = [_Bought(sid, log.day, x, 첫주문[sid].get("horizon"), _substitute_of(첫주문[sid]),
+                          tuple(회차.get(sid, ())))
                   for sid, x in sorted(buys.items())]  # fmt: skip
         return buys, bought
 
@@ -513,10 +567,13 @@ def make_core_strategy(
     variant: str, market: cb.CoreMarket, *, sessions: list[str], costs: bt.Costs | None = None,
     buy_fee_pct: float | None = None,
     max_sector_pct: float = report_picks.DEFAULT_MAX_SECTOR_PCT,
+    limit_fills: bool = False,
 ) -> CoreStrategy:  # fmt: skip
     """변형 하나의 판단 함수 — `bt.simulate(prices, dates, dates, make_core_strategy(…), costs)` 로 돌린다.
 
-    `costs` 는 엔진에 넘기는 것과 같은 값을 준다(원가의 수수료·슬리피지). 변형마다 새 `CoreMarket` 을 준다"""
+    `costs` 는 엔진에 넘기는 것과 같은 값을 준다(원가의 수수료·슬리피지). 변형마다 새 `CoreMarket` 을 준다.
+    `limit_fills` — 25.1914 (전략 깔때기 ④ 분할 지정가 체결): 회차 변형(B·G·H·D·E)의 매수를 t 종가 전량 대신 운영처럼
+    회차 지정가로 낸다(기본 꺼짐 — 11-03 판정·`run_core` 기본은 그대로)"""
     return CoreStrategy(variant, market, sessions=sessions, costs=costs, max_sector_pct=max_sector_pct,
-                        buy_fee_pct=buy_fee_pct)
+                        buy_fee_pct=buy_fee_pct, limit_fills=limit_fills)
 
