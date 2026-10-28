@@ -11,7 +11,7 @@ import {
   stressVersionNote,
 } from "@/lib/backtest";
 import { coreLines, coreNotes, type CoreRunRow } from "@/lib/coreBacktest";
-import { ALWAYS_EMPTY_NOTE, elsewhereNote, parseScoreboard, scoreLine, scoreboardHead, type ScoreboardRun } from "@/lib/scoreboard";
+import { ALWAYS_EMPTY_NOTE, parseScoreboard, scoreboardNoteFor, scoreLine, scoreboardHead, type ScoreboardRun } from "@/lib/scoreboard";
 import { readJson } from "@/lib/http";
 import { readSavedCountry, saveCountry, userTimeOf, type Country } from "@/lib/market";
 import { pct, pctClass, sizePct } from "@/lib/portfolio";
@@ -157,7 +157,7 @@ export default function BacktestView() {
       )}
 
       {data?.scoreboard ? (
-        <ScoreboardCard sb={data.scoreboard} note={elsewhereNote(runs.map((r) => r.strategy), warnings.length, data.scoreboard.fallback)} />
+        <ScoreboardCard sb={data.scoreboard} note={scoreboardNoteFor(data)} />
       ) : null}
 
       {data?.core ? <CoreCard core={data.core} /> : null}

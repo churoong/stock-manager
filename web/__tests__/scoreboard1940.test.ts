@@ -147,13 +147,36 @@ describe("판정판 안내 줄은 가리킬 곳이 있을 때만 (25.1942)", () 
     expect(elsewhereNote(["composite", "composite_no_cost"], 0, false)).not.toContain("읽기 전에");
     expect(elsewhereNote(["composite", "composite_no_cost"], 3, true)).toContain("다른 실행");
     // 25.1943 — 물러났는데 결과 표가 없으면 없음. composite 만 있고 비용 0 사본이 없는 꼴은 넓히기 변이(startsWith)를
-    // 잡는 가상의 경계다(25.1944 — only_long 묶음은 composite 도 없이 benchmark·long_q* 만 낸다). 실제 only_long 꼴도
+    // 잡는 가상의 경계다(25.1944 — only_long 묶음은 composite 도 없이 benchmark·long_q* 만 낸다)
     expect(elsewhereNote([], 0, true)).toBeNull();
     expect(elsewhereNote(["composite", "benchmark"], 0, false)).toBeNull();
+    // 실제 only_long 꼴도 없음(25.1946 — 주석을 맺고 단언 바로 위로)
     expect(elsewhereNote(["benchmark", "long_q60", "long_q70"], 0, false)).toBeNull();
     // 25.1944 — 물러난 문장은 경고·비용 0 줄을 가리키지 않는다(가리킬 곳이 있든 없든)
     for (const [s, w] of [[["composite", "composite_no_cost"], 2], [["core_h"], 0]] as const) {
       expect(elsewhereNote(s, w, true)).not.toMatch(/경고|비용 0/);
     }
+  });
+
+  it("화면 배선 — 결과 표의 전략·경고 띠 수·물러남이 그대로 안내 문장까지 간다(25.1946)", async () => {
+    const { scoreboardNoteFor } = await import("@/lib/scoreboard");
+    const 월 = [
+      { strategy: "composite", warnings_json: '["생존편향"]' },
+      { strategy: "composite_no_cost", warnings_json: "[]" },
+    ];
+    const 둘다 = scoreboardNoteFor({ runs: 월, scoreboard: { fallback: false } });
+    expect(둘다).toContain("이 결과를 읽기 전에");
+    expect(둘다).toContain("종합 점수 (비용 0)");
+    // 경고가 없으면 경고 띠를 가리키지 않는다 — 못 읽은 경고는 띠에 한 줄로 나오므로 가리킨다(`mergeWarnings`)
+    expect(scoreboardNoteFor({ runs: [{ strategy: "core_h", warnings_json: "[]" }], scoreboard: { fallback: false } })).toBeNull();
+    expect(scoreboardNoteFor({ runs: [{ strategy: "core_h", warnings_json: "{" }], scoreboard: { fallback: false } })).toContain("읽기 전에");
+    expect(scoreboardNoteFor({ runs: 월, scoreboard: { fallback: true } })).toContain("다른 실행");
+    expect(scoreboardNoteFor({ runs: 월, scoreboard: null })).toBeNull();
+    expect(scoreboardNoteFor(null)).toBeNull();
+    // 화면이 이 함수를 쓴다 — 예전처럼 인자를 직접 넘기면 이 시험이 배선을 못 본다
+    const { readFileSync } = await import("node:fs");
+    const 화면 = readFileSync("components/BacktestView.tsx", "utf-8");
+    expect(화면).toContain("note={scoreboardNoteFor(data)}");
+    expect(화면).not.toContain("elsewhereNote(");
   });
 });

@@ -7,7 +7,7 @@
  */
 
 import { z } from "zod";
-import { strategyLabel } from "@/lib/backtest";
+import { mergeWarnings, strategyLabel } from "@/lib/backtest";
 import { userTimeOf } from "@/lib/market";
 import { pct } from "@/lib/portfolio";
 
@@ -192,4 +192,21 @@ export function elsewhereNote(strategies: readonly string[], warningCount: numbe
   if (warningCount > 0) 글.push("경고(생존편향·시점 유니버스 등)는 화면 맨 위 \"이 결과를 읽기 전에\" 에");
   if (strategies.includes("composite_no_cost")) 글.push("비용 몫은 위 결과 표의 \"종합 점수 (비용 0)\" 줄과 견주어 봅니다");
   return 글.length ? `${글.join(", ")}.` : null;
+}
+
+/**
+ * 화면(`BacktestView`)이 `elsewhereNote` 에 넘기는 인자를 한 곳에서 낸다(25.1946, 25.1944 교차검증 [권고]) — 결과 표의
+ * 전략·화면 맨 위 경고 띠와 같은 `mergeWarnings` 수·판정판이 물러났는지. 예전엔 화면이 셋을 직접 넘겨, 인자를 바꿔 끼우거나
+ * 박아 넣어도 어떤 시험도 깨지지 않았다. 판정판이 없으면 null
+ */
+export function scoreboardNoteFor(
+  data: { runs?: ReadonlyArray<{ strategy: string; warnings_json: string }>; scoreboard?: { fallback: boolean } | null } | null | undefined,
+): string | null {
+  if (!data?.scoreboard) return null;
+  const runs = data.runs ?? [];
+  return elsewhereNote(
+    runs.map((r) => r.strategy),
+    mergeWarnings([...runs]).length,
+    data.scoreboard.fallback,
+  );
 }
