@@ -106,7 +106,7 @@ cd web && npm test && npm run typecheck       # 웹 테스트·타입 검사
 |---|---|---|
 | 일일 배치 (국내) | 매 거래일 08:27 KST | Actions (cron-job.org 가 깨움) |
 | 일일 배치 (미국) | 미국 정규장 1시간 전 | Actions |
-| 국내 뉴스 감성 | 매 거래일 07:40 KST | Actions |
+| 국내 뉴스 감성 | 매 거래일 03:40 KST (예약이 몇 시간 늦게 와도 08:27 전에 끝나게) | Actions |
 | 장중 모니터링 | 정규장 중 5분마다 | 웹 경로 (cron-job.org) |
 | 뉴스 수집 | 1분·1시간마다 | 웹 경로 (cron-job.org) |
 | 무응답 감시 | 1시간마다 | 웹 경로 (cron-job.org) |

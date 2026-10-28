@@ -58,7 +58,9 @@ def test_국내_채점은_모델_판을_기사_행과_실행_기록에_남긴다
     assert 기록["model_refs"]["refs/pr/1"].startswith("1234567890ab")
 
 
-def test_캐시를_읽다_실패해도_채점은_저장된다(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_캐시를_읽다_실패해도_채점은_저장된다(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     """25.1841 (25.1839 교차검증 [권고]) — `hf_cache_refs` 는 채점 뒤·저장 전에 불린다. 예외가 새면 그날 국내 채점이
     통째로 저장되지 않는다(예전 시험은 except 를 지나지 않았다)"""
     from batch.core import db
@@ -70,7 +72,9 @@ def test_캐시를_읽다_실패해도_채점은_저장된다(monkeypatch: pytes
 
     with monkeypatch.context() as m:
         m.setattr(Path, "read_text", 터짐)
-        assert job.hf_cache_refs(job.KORFINASC_MODEL, str(tmp_path)) == {}
+        with caplog.at_level("WARNING", logger="sentiment"):
+            assert job.hf_cache_refs(job.KORFINASC_MODEL, str(tmp_path)) == {}
+    assert "모델 판(HF 캐시 참조)을 읽지 못함: PermissionError" in caplog.text  # 25.1842 — 면제 사유의 경고 로그
     # 기본 경로(huggingface_hub 를 부름)도 — 못 불러오면 빈 값. 아래 실행도 이 길로 판 없이 저장한다
     monkeypatch.setitem(__import__("sys").modules, "huggingface_hub", None)
     assert job.hf_cache_refs(job.KORFINASC_MODEL) == {}

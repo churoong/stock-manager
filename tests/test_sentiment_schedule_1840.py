@@ -10,7 +10,8 @@ import re
 from pathlib import Path
 
 WF = Path(__file__).resolve().parent.parent / ".github" / "workflows"
-#: 2026-10-13~28 실측 최대 지연(10-13 22:40 예약 → 03:08 UTC 시작) + 실행 시간(설치·모델·채점 약 10분)
+#: 2026-10-13~28 표본의 최대 지연(10-13 22:40 예약 → 03:08 UTC 시작) + 실행 시간(설치·모델·채점 어림 10분). **표본 기준**
+#: 이다 — 10-08 엔 다른 예약이 약 7시간 늦거나 빠졌다(25.1015, 25.1842). 넘는 날은 handoff 확인 항목
 MAX_DELAY_MIN = 4 * 60 + 28 + 10
 
 
@@ -31,3 +32,18 @@ def test_창_끝_뒤에_돈다() -> None:
     """창은 직전 거래일 23:59:59 KST 까지 — 그 뒤(KST 자정 = 15:00 UTC 뒤)에 돌아야 그날 기사가 다 든다"""
     시, _ = _cron("sentiment-kr.yml")
     assert 시 >= 15
+
+
+def test_D1_읽기_문의_남은_작업_표도_같은_시각이다() -> None:
+    """25.1842 (25.1840 교차검증 [권고]) — 표(`LATER_TODAY`)를 22:40 으로 되돌려도 시험이 통과했다(00:05 시점만 봄)"""
+    import importlib.util
+    from datetime import UTC, datetime
+
+    길 = Path(__file__).resolve().parent.parent / "scripts" / "d1_read_gate.py"
+    spec = importlib.util.spec_from_file_location("d1_read_gate_1842", 길)
+    gate = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
+    spec.loader.exec_module(gate)  # type: ignore[union-attr]
+    감성 = next(r for r in gate.LATER_TODAY if r[0] == "국내 감성 수집")
+    assert (감성[4], 감성[5]) == _cron("sentiment-kr.yml")
+    # 18:40 과 22:40 사이(목 20:00 UTC)에는 감성이 이미 지나 남은 작업에 없다
+    assert [이름 for 이름, _ in gate.later_today(datetime(2026, 10, 15, 20, 0, tzinfo=UTC))] == ["국내 일일 배치"]

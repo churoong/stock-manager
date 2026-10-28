@@ -3,7 +3,7 @@
 1. 아직 채점하지 않은 기사(news)를 채점해 article_sentiments 에
      미국  VADER compound (−1~+1), 제목만. 가벼워 일일 배치 안에서 돈다
      국내  KorFinASC (apache-2.0, 2.24GB) P(긍정) − P(부정), "제목 </s> 종목명". 무거워 **sentiment-kr.yml 이
-           일일 배치 전(07:40 KST)에 따로** 채점한다. 일일 배치 안에서는 채점하지 않고 집계만 한다
+           일일 배치 전(03:40 KST 예약, 25.1840)에 따로** 채점한다. 일일 배치 안에서는 채점하지 않고 집계만 한다
 2. 최근 30일 기사가 있는 종목마다 집계해 sentiment_scores 에 (기준일 하루 한 줄)
 
 수집은 여기서 하지 않는다. 미국은 /api/cron/news(매시 한 종목 — 예전 주석의 "1분마다" 는 낡았다, 25.1099),
@@ -428,6 +428,8 @@ def run(market: str, as_of: str | None = None, score: bool | None = None) -> int
                 "effective_n": st.effective_n_summary(유효수)}  # 25.873 — 기록만
         db.finish_batch_run(client, run_id, status="success", step_log=step)
         print(f"{market} 기사 채점 {scored}건, 종목 {len(rows)}개 집계 (점수 있음 {with_score}, 기사 5건 미만은 NULL)")
+        if 미채점:  # 25.1842 — 아침 집계 때 채점이 끝났는지(25.1840)를 DB 조회 없이 운영 출력으로 본다
+            print(f"  창 안 미채점 기사 {sum(미채점.values())}건 — 그 몫이 커 감성을 비운 종목 {덜_채점}개")
         if 모델판:
             print("  모델 판: " + " ".join(f"{k}@{v}" for k, v in sorted(모델판.items())))  # 25.1839 — 고정할 sha 40자
         return 0
