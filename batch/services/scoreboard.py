@@ -267,6 +267,8 @@ def _row(run: dict[str, Any], r: dict[str, Any], twins: dict[str, dict[str, Any]
         why_c = "기준 전략 — 싣지 않음"
     elif mj.get("capacity_error"):
         why_c = f"수용량 계산 실패 — {mj['capacity_error']}"  # 25.1956 실패 표지 — "25.1954 전" 이 아니다
+    elif mj.get("capacity_missing"):
+        why_c = f"수용량 재지 못함 — {mj['capacity_missing']}"  # 25.1958 — 단위 없는 시장·거래대금 없음(실패가 아니다)
     elif cap is None:
         why_c = WHY_CAPACITY
     elif not cap.get("rebalances") and not cap.get("incomplete"):
@@ -275,8 +277,8 @@ def _row(run: dict[str, Any], r: dict[str, Any], twins: dict[str, dict[str, Any]
         why_c = "재지 못함 — 보유 종목의 그날 전 20일 거래대금 없음"
     put("capacity", _num((cap or {}).get("max")), why_c)
     # 하한인가(25.1956) — 재지 못한 종목이 있는 날이 있으면 max 는 하한이다. 화면이 "≥" 를 붙인다
-    put("capacity_complete", None if out["capacity"] is None else bool(cap.get("complete")),
-        "수용량 없음 — 하한 여부도 없음")
+    # 수용량이 비면 같은 까닭(25.1958 — 웹이 "수용량·수용량 하한 여부 — 까닭" 한 줄로 묶는다)
+    put("capacity_complete", None if out["capacity"] is None else bool(cap.get("complete")), why_c)
     if cap is not None:
         out["capacity_profile"] = cap  # 점검표(`_capacity_ok`)가 complete 를 본다
 
@@ -548,8 +550,8 @@ def rows(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for key, (_order, row) in best.items():
         row["runs"] = seen[key]
         out.append(row)
-    # 코호트 BH q(25.1951) — 같은 (시장, 코호트) 시도 줄들의 대조 분위 p. m = 그 묶음의 시도 줄 수
-    # (p 없는 줄도 가설로 센다)
+    # 코호트 BH q(25.1951) — 같은 (시장, 코호트) 시도 줄들의 대조 분위 p. m 은 등록 코호트 크기(`COHORT_SIZE`,
+    # 25.1956)와 그 묶음의 시도 줄 수 가운데 큰 쪽(p 없는 줄·빠진 변형도 가설로 센다)
     묶음: dict[tuple[Any, Any], list[dict[str, Any]]] = {}
     for row in out:
         if row["is_trial"] and row["cohort"] is not None:

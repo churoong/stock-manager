@@ -1658,12 +1658,12 @@ def capacity_extra(
 ) -> dict[str, Any]:
     """결과 행 `metrics_json` 에 더할 수용량(25.1954) — `{"capacity": scb.capacity_profile(…)}`. 진단 칸이라 깨지면
     실패 표지 `{"capacity_error": 까닭}`(25.1956, `monthly_excess_extra` 와 같은 원칙). 단위 금액이 없는 시장·거래대금이
-    없는 실행도 그 까닭을 표지로"""
+    없는 실행은 실패가 아니라 재료 없음이라 `{"capacity_missing": 까닭}`(25.1958)"""
     unit = scb.CAPACITY_UNIT.get(market)
     if unit is None:
-        return {"capacity_error": f"단위 금액 없는 시장({market})"}
+        return {"capacity_missing": f"단위 금액 없는 시장({market})"}
     if not turnover:
-        return {"capacity_error": "거래대금 자료 없음"}
+        return {"capacity_missing": "거래대금 자료 없음"}
     try:
         return {"capacity": scb.capacity_profile([(r.date, r.weights) for r in result.rebalances], turnover, unit)}
     except Exception as e:  # noqa: BLE001 — 진단 칸. 실패 표지를 실어 판정판이 까닭으로 적는다
@@ -2041,8 +2041,7 @@ def run(
             월초과 = None
             if strategy != "benchmark" and not strategy.endswith("_no_cost"):
                 # 수용량(25.1954)도 함께 — 같은 원칙(진단 칸, 깨지면 칸만 빠진다)
-                월초과 = {**monthly_excess_extra(result.curve, 벤치월),
-                       **capacity_extra(result, turnover, market)} or None
+                월초과 = {**monthly_excess_extra(result.curve, 벤치월), **capacity_extra(result, turnover, market)}
             store_run(client, market, strategy, result, summary, top_n, group_id, 그경고, now, 운.get(strategy),
                       extra=월초과, kept=실은_행)  # fmt: skip
             stored += 1

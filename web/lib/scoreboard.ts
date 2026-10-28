@@ -140,8 +140,10 @@ export interface ScoreLine {
  */
 function capacityText(r: Pick<ScoreRow, "capacity" | "capacity_complete" | "market">): string {
   if (r.capacity == null) return 없음;
-  const 값 = r.capacity * 100 < 0.001 ? "< 0.001%" : `${(r.capacity * 100).toFixed(3)}%`;
-  return `${r.capacity_complete === false ? "≥ " : ""}${값} / ${CAPACITY_UNIT_LABEL[r.market ?? ""] ?? "단위"}`;
+  const 단위 = CAPACITY_UNIT_LABEL[r.market ?? ""] ?? "단위";
+  // 하한이면 "≥ 값" 하나만 — 작은 값의 "< 0.001%" 와 겹치면 "≥ < 0.001%" 처럼 모순이었다(25.1958). 하한은 세 자리 그대로
+  if (r.capacity_complete === false) return `≥ ${(r.capacity * 100).toFixed(3)}% / ${단위}`;
+  return `${r.capacity * 100 < 0.001 ? "< 0.001%" : `${(r.capacity * 100).toFixed(3)}%`} / ${단위}`;
 }
 
 /** 걷는 창 칸 글(25.1947) — 창이 하나도 없으면(12개월 미만) "0/0" 대신 그렇게 적는다 */

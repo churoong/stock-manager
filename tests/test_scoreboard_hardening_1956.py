@@ -67,8 +67,13 @@ def test_유한하지_않은_값은_None_이고_점검은_모름(나쁜: Any) ->
     줄 = scb.rows([_실행("backtest_explore", {"core_d": {**좋음, "mean": 나쁜}})])[0]
     assert 줄["control_p"] is None  # p 가 NaN 이면 BH 정렬이 흐트러졌다
     for mj in ({"mdd": 나쁜}, {"split_half": {"first": {"cagr": 나쁜}, "second": {"cagr": 0.1}}}):
-        r = scb.rows([{**_실행("backtest_explore", {"core_d": None}), "results": [
-            {"strategy": "core_d", "market": "KR", "group_id": "g", "warnings_json": "[]", "metrics_json": json.dumps(mj)}]}])[0]
+        # 기준 줄(core_b, 유한한 MDD)을 함께 — 없으면 MDD 칸은 기준이 없어 늘 모름이라 단언이 헛돈다(25.1958, 교차검증 note)
+        행 = [{"strategy": "core_b", "market": "KR", "group_id": "g", "warnings_json": "[]",
+              "metrics_json": json.dumps({"mdd": -0.2})},
+             {"strategy": "core_d", "market": "KR", "group_id": "g", "warnings_json": "[]", "metrics_json": json.dumps(mj)}]
+        r = next(x for x in scb.rows([{**_실행("backtest_explore", {"core_d": None}), "results": 행}])
+                 if x["strategy"] == "core_d")  # fmt: skip
+        assert r["stage01"]["base"] == "core_b"
         st = {c["key"]: c["ok"] for c in r["stage01"]["checks"]}
         assert st["mdd_vs_base"] is None and st["half"] is None  # 걸림이 아니라 모름
         assert all(not (isinstance(v, float) and not math.isfinite(v)) for v in r.values())

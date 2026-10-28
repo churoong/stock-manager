@@ -230,6 +230,9 @@ describe("판정판 안내 줄은 가리킬 곳이 있을 때만 (25.1942)", () 
     const 하한 = Object.fromEntries(scoreLine(parseScoreboard([{ ...줄, capacity: 0.004, capacity_complete: false }]).rows[0]).cells);
     expect(하한["수용량"]).toBe("≥ 0.400% / 1억 원");
     expect(칸("US", 5e-7)).toBe("< 0.001% / 10만 달러");
+    // 25.1958 — 하한이면서 작은 값은 "≥ < 0.001%" 가 아니라 "≥ 0.000%"
+    const 작은하한 = Object.fromEntries(scoreLine(parseScoreboard([{ ...줄, market: "US", capacity: 5e-7, capacity_complete: false }]).rows[0]).cells);
+    expect(작은하한["수용량"]).toBe("≥ 0.000% / 10만 달러");
     expect(Object.fromEntries(scoreLine(parseScoreboard([{ ...줄, bh_q: 0.0002 }]).rows[0]).cells)["BH q"]).toBe("< 0.001");
   });
 });

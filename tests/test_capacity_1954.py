@@ -58,11 +58,12 @@ def test_여러_날의_최대·분위() -> None:
     assert p["median"] == pytest.approx(0.003) and p["p90"] == pytest.approx(0.005)
 
 
-def _줄(cap: dict[str, Any] | None, market: str = "KR") -> dict[str, Any]:
+def _줄(cap: dict[str, Any] | None, market: str = "KR", mj: dict[str, Any] | None = None) -> dict[str, Any]:
     run = {"job_name": "backtest_explore", "started_at": "2026-11-04T00:00:00+00:00",
            "step_log": {"params": {"sha": "x", "trial_floor": 21}, "group_id": "g"},
            "results": [{"strategy": "core_d", "market": market, "group_id": "g", "warnings_json": "[]",
-                        "metrics_json": json.dumps({"mdd": -0.2, **({"capacity": cap} if cap else {})})}]}  # fmt: skip
+                        "metrics_json": json.dumps({"mdd": -0.2, **({"capacity": cap} if cap else {}),
+                                                    **(mj or {})})}]}  # fmt: skip
     return scb.rows([run])[0]
 
 
@@ -114,5 +115,27 @@ def test_수용량이_깨져도_결과_행은_남는다(monkeypatch: pytest.Monk
     row = mem.execute("SELECT metrics_json FROM backtest_runs ORDER BY id DESC LIMIT 1").dicts()[0]
     assert "capacity" not in json.loads(row["metrics_json"])
     assert json.loads(row["metrics_json"])["capacity_error"] == "RuntimeError: 수용량 망"  # 25.1956 실패 표지
-    assert jb.capacity_extra(None, {}, "KR") == {"capacity_error": "거래대금 자료 없음"}  # type: ignore[arg-type]
-    assert jb.capacity_extra(None, {1: {}}, "JP") == {"capacity_error": "단위 금액 없는 시장(JP)"}  # type: ignore[arg-type]
+    # 25.1958 (25.1956 교차검증 [권고]) — 판정판 줄이 실패 표지를 까닭으로 적는다("25.1954 전" 이 아니다)
+    run = mem.execute("SELECT step_log FROM batch_runs WHERE job_name = ? ORDER BY id DESC LIMIT 1",
+                      [cj.JOB_NAME]).dicts()[0]  # fmt: skip
+    줄 = json.loads(run["step_log"])["scoreboard"][0]
+    assert 줄["capacity"] is None and 줄["missing"]["capacity"] == "수용량 계산 실패 — RuntimeError: 수용량 망"
+    assert 줄["missing"]["capacity_complete"] == 줄["missing"]["capacity"]  # 같은 까닭(웹이 한 줄로 묶는다)
+    # 재료 없음은 실패가 아니라 따로(25.1958)
+    assert jb.capacity_extra(None, {}, "KR") == {"capacity_missing": "거래대금 자료 없음"}  # type: ignore[arg-type]
+    assert jb.capacity_extra(None, {1: {}}, "JP") == {"capacity_missing": "단위 금액 없는 시장(JP)"}  # type: ignore[arg-type]
+    assert _줄(None, mj={"capacity_missing": "거래대금 자료 없음"})["missing"]["capacity"] == "수용량 재지 못함 — 거래대금 자료 없음"
+
+
+@pytest.mark.parametrize(("cap", "기대"), [
+    ({"max": 0.004, "complete": False, "incomplete": 2, "rebalances": 5}, False),
+    ({"max": 0.004, "complete": True, "incomplete": 0, "rebalances": 5}, True),
+    (None, None),
+])
+def test_하한_여부_칸(cap: dict[str, Any] | None, 기대: bool | None) -> None:
+    """25.1958 (25.1956 교차검증 [권고]) — `capacity_complete` 를 배치에서 잡는 시험이 없어 늘 True 로 박아도 지나갔다
+    (화면의 "≥" 하한 표시가 조용히 사라진다)"""
+    r = _줄(cap)
+    assert r["capacity_complete"] is 기대
+    if 기대 is None:
+        assert r["missing"]["capacity_complete"] == r["missing"]["capacity"] == scb.WHY_CAPACITY
