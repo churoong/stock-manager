@@ -338,8 +338,10 @@ def run(
     except KisFailed as exc:
         # **잔고 조회의 순간 한도는 이 회차만 쉰다** (25.1835) — 2026-10-28 11:25 KST 회차가 모의 원장 초당 한도
         # (EGW00215)를 1.5초·61초 다시 받기(25.1799)에도 못 넘어 "실행 실패" 알림이 갔는데, 다음 회차(11:35)는
-        # 정상이었다. 주문 전이라 아무것도 안 나갔다. 잇달아 쉬면 `main` 이 알린다(`TRANSIENT_STREAK_ALERT`)
-        if any(c in str(exc) for c in TRANSIENT_CODES) and not isinstance(exc, kv.NoResponse):
+        # 정상이었다. 주문 전이라 아무것도 안 나갔다. 잇달아 쉬면 `main` 이 알린다(`TRANSIENT_STREAK_ALERT`).
+        # **초당 한도 코드만** (25.1836, 25.1835 교차검증 [필수]) — 주문용 `TRANSIENT_CODES` 의 토큰 코드(EGW00123·
+        # EGW00121)는 캐시한 토큰이 무효가 된 지속 장애라(만료 1시간 전까지 다시 받지 않는다) 예전처럼 바로 실패·알림
+        if any(c in str(exc) for c in kv.RATE_LIMIT_CODES) and not isinstance(exc, kv.NoResponse):
             return {"lines": len(선들), "skipped": f"{TRANSIENT_SKIP} ({str(exc)[:80]})", "transient": True,
                     **_호출(sess)}  # fmt: skip
         raise
@@ -524,6 +526,9 @@ TRANSIENT_SKIP = "잔고 조회 순간 한도 — 이 회차 쉼, 다음 회차�
 #: 순간 한도로 잇달아 쉰 회차 수(그날) — 이만큼이면 그날 한 번 알린다. 회차 10분이라 3 = 30분 감시 공백 (25.1835)
 TRANSIENT_STREAK_KEY = "kis_guard_transient_streak"
 TRANSIENT_STREAK_ALERT = 3
+#: 잇단 쉼 알림의 하루 한 번 표시 — 실행 실패 알림(`FAIL_ALERT_KEY`)과 따로 (25.1836, 교차검증 [권고]). 같은 표시를 쓰면
+#: 쉼 알림("다음 회차가 다시 봅니다")이 그날 뒤의 진짜 실패 알림을 막았다
+TRANSIENT_ALERT_KEY = "kis_guard_transient_alerted"
 
 
 def transient_streak(client: Any, now: datetime, 기록: dict[str, Any]) -> str | None:
@@ -540,14 +545,15 @@ def transient_streak(client: Any, now: datetime, 기록: dict[str, Any]) -> str 
         return None
     n = 앞 + 1
     db.set_setting(client, TRANSIENT_STREAK_KEY, {"date": 오늘, "n": n})
-    if n < TRANSIENT_STREAK_ALERT or db.get_setting(client, FAIL_ALERT_KEY, None) == 오늘:
+    if n < TRANSIENT_STREAK_ALERT or db.get_setting(client, TRANSIENT_ALERT_KEY, None) == 오늘:
         return None
     return (f"⚠️ KIS모의투자 장중 손절·익절 — 잔고 조회가 KIS 초당 한도로 {n}회차({n * 10}분) 잇달아 막혀"
             " 그동안 감시하지 못했습니다. 다음 회차가 다시 봅니다. 오늘 같은 알림은 다시 보내지 않습니다")
 
 
 def run_status(기록: dict[str, Any]) -> str:
-    """실행 기록 상태 — **진짜 멈춤만** `skipped`(주간 요약이 문제로 센다): 아침 감시선 없음·잘린 잔고.
+    """실행 기록 상태 — **진짜 멈춤만** `skipped`(주간 요약이 문제로 센다): 아침 감시선 없음·잘린 잔고·잔고 조회
+    순간 한도로 쉰 회차(25.1835 — 그 회차는 감시 공백).
     일일 배치 실행 중·키 없음·멈춤 스위치·보유 없음은 정상 쉼이라 `success`(25.1769, 교차검증 [권고] — 쉼까지
     건너뜀이면 주간 요약에 매주 "건너뜀 N" 이 떠 진짜 멈춤이 묻혔다). 정리 줄과 겹쳐 못 낸 종목도 멈춤이다.
     판 뒤 알림을 못 보냈으면 `partial` — 주문은 나갔는데 사람은 모른다(25.1772)"""
@@ -659,7 +665,7 @@ def main() -> int:
             try:
                 if 끊김 := transient_streak(client, now, 기록):
                     글 = f"{글}\n{끊김}" if 글 else 끊김
-                    날표시.append(FAIL_ALERT_KEY)  # 보낸 뒤에만 적는다 — 그날 실행 실패 알림과 한 통만(25.1835)
+                    날표시.append(TRANSIENT_ALERT_KEY)  # 보낸 뒤에만 적는다(25.1772) — 실패 알림과 따로(25.1836)
             except Exception as exc:  # noqa: BLE001 — 세기가 깨져도 이 회차의 다른 글은 보낸다
                 기록["db_error"] = type(exc).__name__
                 실패 = 실패 or exc

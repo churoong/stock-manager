@@ -57,7 +57,7 @@ def test_한_번_쉼은_알리지_않고_세_회차_잇달아면_그날_한_번(
     assert 보낸 == []  # 두 회차(20분)는 다음 회차가 본다
     assert ig.main() == 0
     assert len(보낸) == 1 and "3회차(30분)" in 보낸[0]
-    assert db.get_setting(c, ig.FAIL_ALERT_KEY, None) == "2026-10-26"
+    assert db.get_setting(c, ig.TRANSIENT_ALERT_KEY, None) == "2026-10-26"
     assert ig.main() == 0 and len(보낸) == 1  # 그날 다시 알리지 않는다
     assert (
         c.conn.execute(
@@ -69,3 +69,57 @@ def test_한_번_쉼은_알리지_않고_세_회차_잇달아면_그날_한_번(
     monkeypatch.setattr(kv, "Session", lambda *a, **k: _Sess([]))
     assert ig.main() == 0
     assert db.get_setting(c, ig.TRANSIENT_STREAK_KEY, None) == {"date": "2026-10-26", "n": 0}
+
+
+def test_토큰_오류는_쉬지_않고_바로_실패다(c: Client) -> None:  # noqa: F811
+    """25.1836 (25.1835 교차검증 [필수]) — 캐시한 토큰이 무효면 그날 내내 같은 코드다. 순간 한도로 보면 조용히 쉬다
+    30분 뒤 '초당 한도' 라는 틀린 까닭으로 알렸다"""
+    from datetime import UTC, datetime
+
+    for 코드 in ("EGW00123", "EGW00121"):
+        with pytest.raises(KisFailed):
+            ig.run(
+                c,
+                datetime(2026, 10, 26, 2, 25, tzinfo=UTC),
+                session=_막힌(KisFailed(f"모의 잔고 조회 실패 {코드} 토큰")),
+            )
+    기록 = ig.run(
+        c, datetime(2026, 10, 26, 2, 25, tzinfo=UTC), session=_막힌(KisFailed("모의 잔고 조회 실패 EGW00201 초당"))
+    )
+    assert 기록["transient"] is True
+
+
+def test_잇단_쉼_알림은_실패_알림과_표시가_따로고_보낸_뒤에만_적는다(
+    c: Client,  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """25.1836 — 같은 표시를 쓰면 쉼 알림이 그날 뒤의 진짜 실패 알림을 막았다. 표시를 보내기 전에 적으면 전송이 끊긴 날
+    알림이 다시 가지 않는다(25.1772)"""
+    보낸: list[str] = []
+    _main_준비(c, monkeypatch, 보낸, 실패=True)
+    monkeypatch.setattr(kv, "Session", lambda *a, **k: _막힌(KisFailed(한도글)))
+    for _ in range(3):
+        assert ig.main() == 0
+    assert db.get_setting(c, ig.TRANSIENT_ALERT_KEY, None) is None  # 못 보냈으니 표시 없음
+    _main_준비(c, monkeypatch, 보낸)
+    monkeypatch.setattr(kv, "Session", lambda *a, **k: _막힌(KisFailed(한도글)))
+    assert ig.main() == 0 and len(보낸) == 1  # 넷째 회차가 다시 보낸다
+    assert db.get_setting(c, ig.TRANSIENT_ALERT_KEY, None) == "2026-10-26"
+    assert db.get_setting(c, ig.FAIL_ALERT_KEY, None) is None  # 실패 알림 표시는 건드리지 않는다
+    monkeypatch.setattr(kv, "Session", lambda *a, **k: _막힌(KisFailed("모의 잔고 조회 실패 EGW00123 토큰")))
+    with pytest.raises(KisFailed):
+        ig.main()
+    assert len(보낸) == 2 and "실행 실패" in 보낸[1]  # 쉼 알림 뒤의 진짜 실패도 그날 한 번 간다
+
+
+def test_전날_쉼은_세지_않고_확인_실행은_세지_않는다(c: Client, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
+    보낸: list[str] = []
+    _main_준비(c, monkeypatch, 보낸)
+    monkeypatch.setattr(kv, "Session", lambda *a, **k: _막힌(KisFailed(한도글)))
+    db.set_setting(c, ig.TRANSIENT_STREAK_KEY, {"date": "2026-10-23", "n": 2})
+    assert ig.main() == 0 and 보낸 == []
+    assert db.get_setting(c, ig.TRANSIENT_STREAK_KEY, None) == {"date": "2026-10-26", "n": 1}
+    monkeypatch.setattr("sys.argv", ["intraday_guard", "--dry-run"])
+    for _ in range(3):
+        assert ig.main() == 0
+    assert db.get_setting(c, ig.TRANSIENT_STREAK_KEY, None) == {"date": "2026-10-26", "n": 1} and 보낸 == []
