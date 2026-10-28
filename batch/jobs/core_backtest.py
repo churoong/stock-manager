@@ -308,6 +308,7 @@ def run_core(
         증거_초 = round(time.perf_counter() - t2, 1)
         반: dict[str, dict[str, Any]] = {}
         실은_행: list[dict[str, Any]] = []  # 판정판(25.1940) 재료 — `store_run` 이 실은 행 그대로
+        벤치월_계열 = jb.monthly_or_none(벤치.curve)  # 월 초과 계열의 기준 — 한 번만(25.1952)
         for variant, result in results.items():
             summary = bt.summarize(result, 벤치, risk_free_annual=무위험)
             반[variant] = split_half(result.curve)
@@ -316,9 +317,9 @@ def run_core(
                      "account": cs.variant_spec(variant).account,
                      "evidence": {k: e.get(k) for k in ("buys", "scored", "no_control", "days", "n_blocks", "mean",
                                                         "se", "lower", "gate", "after_sell")},
-                     # 월 초과 계열(25.1947) — 판정판 걷는 창의 재료. 운 판정과 같은 기준(동일가중 월 리밸런스)
-                     "monthly_excess": luck.excess_months(luck.monthly_returns(result.curve),
-                                                          luck.monthly_returns(벤치.curve))}  # fmt: skip
+                     # 월 초과 계열(25.1947) — 판정판 걷는 창의 재료. 운 판정과 같은 기준(동일가중 월 리밸런스).
+                     # 깨지면 칸만 빠진다(25.1952)
+                     **jb.monthly_excess_extra(result.curve, 벤치월_계열)}  # fmt: skip
             jb.store_run(client, market, variant, result, summary, 종목수[variant], group_id, warnings,
                          now, 운.get(variant), rebalance=REBALANCE, extra=extra, kept=실은_행)  # fmt: skip
             mt = summary.metrics

@@ -1638,6 +1638,30 @@ _RUN_COLS = (
 _RUN_COL_NAMES = tuple(c.strip() for c in _RUN_COLS.split(",") if c.strip())
 
 
+def monthly_excess_extra(curve: list[tuple[str, float]], bench_monthly: dict[str, float] | None) -> dict[str, Any]:
+    """결과 행 `metrics_json` 에 더할 월 초과 계열(25.1947) — `{"monthly_excess": [[YYYY-MM, 초과]]}`.
+
+    진단 칸이라 깨지면 빈 dict 를 낸다(25.1952, 25.1947 교차검증 [권고] — 계산이 저장 루프 안·try 밖에 있어 깨지면
+    결과 행 전부를 잃을 길이었다). 그러면 판정판 걷는 창은 `WHY_WALK` 까닭으로 빈다.
+    기준 월수익을 못 냈으면(None) 빈 dict"""
+    if bench_monthly is None:
+        return {}
+    try:
+        return {"monthly_excess": luck.excess_months(luck.monthly_returns(curve), bench_monthly)}
+    except Exception:  # noqa: BLE001 — 진단 칸. 결과 행 저장을 막지 않는다
+        log.exception("월 초과 계열 계산 실패")
+        return {}
+
+
+def monthly_or_none(curve: list[tuple[str, float]]) -> dict[str, float] | None:
+    """기준 곡선의 월수익 — 깨지면 None(`monthly_excess_extra` 가 칸을 뺀다, 25.1952)"""
+    try:
+        return luck.monthly_returns(curve)
+    except Exception:  # noqa: BLE001
+        log.exception("기준 월수익 계산 실패")
+        return None
+
+
 def scoreboard_log(
     job_name: str, started_at: str, step_log: dict[str, Any], kept: list[dict[str, Any]]
 ) -> dict[str, Any]:
@@ -2003,10 +2027,11 @@ def run(
             summary = bt.summarize(result, None if strategy == "benchmark" else bench, risk_free_annual=무위험)
             # 벤치마크에는 추세 오버레이를 곱하지 않는다 — "추세 필터 켬" 을 붙이면 비교 기준을 오해한다 (25.471)
             그경고 = [w for w in warnings if not (strategy == "benchmark" and w == WARN_TREND_ON)]
-            # 월 초과 계열(25.1947) — 판정판 걷는 창의 재료. 기준 전략 자신은 0 이라 싣지 않는다
+            # 월 초과 계열(25.1947) — 판정판 걷는 창의 재료. 기준 전략 자신은 0 이라, 비용 0 사본은 판정판이 줄로 내지
+            # 않아 싣지 않는다(25.1952)
             월초과 = None
-            if strategy != "benchmark":
-                월초과 = {"monthly_excess": luck.excess_months(luck.monthly_returns(result.curve), 벤치월)}
+            if strategy != "benchmark" and not strategy.endswith("_no_cost"):
+                월초과 = monthly_excess_extra(result.curve, 벤치월) or None
             store_run(client, market, strategy, result, summary, top_n, group_id, 그경고, now, 운.get(strategy),
                       extra=월초과, kept=실은_행)  # fmt: skip
             stored += 1

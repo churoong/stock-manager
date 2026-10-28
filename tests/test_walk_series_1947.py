@@ -49,6 +49,12 @@ def test_계열이_있으면_걷는_창을_낸다() -> None:
     ({"monthly_excess": [["2024-01", "x"]]}, "core_h", "metrics_json.monthly_excess 를 읽지 못함"),
     ({"monthly_excess": [["2024-01"]]}, "core_h", "metrics_json.monthly_excess 를 읽지 못함"),
     ({"monthly_excess": {"2024-01": 0.01}}, "core_h", scb.WHY_WALK),
+    # 25.1952 — 달 이름이 YYYY-MM 이 아니면 판정판 전체가 깨지던 것을 칸 하나로, NaN·무한은 조용히 "> 0 아님" 이던 것을
+    ({"monthly_excess": [["x", 0.01]]}, "core_h", "metrics_json.monthly_excess 를 읽지 못함"),
+    ({"monthly_excess": [[202401, 0.01]]}, "core_h", "metrics_json.monthly_excess 를 읽지 못함"),
+    ({"monthly_excess": [["2024-13", 0.01]]}, "core_h", "metrics_json.monthly_excess 를 읽지 못함"),
+    ({"monthly_excess": [["2024-01", float("nan")]]}, "core_h", "metrics_json.monthly_excess 를 읽지 못함"),
+    ({"monthly_excess": [["2024-01", float("inf")]]}, "core_h", "metrics_json.monthly_excess 를 읽지 못함"),
 ])
 def test_계열이_없거나_틀리면_까닭과_함께_빈다(mj: dict[str, Any], strategy: str, 까닭: str) -> None:
     r = _줄(mj, strategy)

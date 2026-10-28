@@ -163,6 +163,20 @@ def test_월_백테스트도_판정판_줄을_싣는다() -> None:
     assert by["composite"]["walk_total"] == scb.walk_windows(mj["monthly_excess"])["total"] >= 1
     assert by["benchmark"]["walk_total"] is None and "기준 전략" in by["benchmark"]["missing"]["walk_total"]
     assert "monthly_excess" not in json.loads(next(r for r in rows if r["strategy"] == "benchmark")["metrics_json"])
+    # 25.1952 (25.1947 교차검증 [권고]) — 계열 **값**을 저장된 두 곡선(backtest_curves)으로 따로 계산한 것과 맞춘다.
+    # 길이·자기 일관성만 보던 때는 기준을 전략 자기 곡선으로 바꿔(초과가 모두 0) 넣어도 지나갔다
+    def 곡선(name: str) -> list[tuple[str, float]]:
+        rid = next(r["id"] for r in rows if r["strategy"] == name)
+        return [(d, e) for d, e in client.execute("SELECT date, equity FROM backtest_curves WHERE run_id = ? ORDER BY date",
+                                                  [rid]).rows]  # fmt: skip
+    from batch.services import luck
+
+    따로 = luck.excess_months(luck.monthly_returns(곡선("composite")), luck.monthly_returns(곡선("benchmark")))
+    assert [m for m, _v in mj["monthly_excess"]] == [m for m, _v in 따로]
+    assert [v for _m, v in mj["monthly_excess"]] == pytest.approx([v for _m, v in 따로], abs=1e-12)
+    assert any(abs(v) > 1e-6 for _m, v in 따로)  # 헛돌지 않게 — 초과가 모두 0 이 아니다
+    # 비용 0 사본에는 싣지 않는다(판정판이 줄로 내지 않는다, 25.1952)
+    assert "monthly_excess" not in json.loads(next(r for r in rows if r["strategy"] == "composite_no_cost")["metrics_json"])
 
 
 def test_월_기본_실행은_사전_등록일부터_코호트_1() -> None:
@@ -213,3 +227,24 @@ def test_웹_작업_목록이_배치_작업_이름과_같다() -> None:
     assert m, "web/lib/scoreboard.ts 에 SCOREBOARD_JOBS 가 없다"
     배치 = (jb.JOB_NAME, cj.JOB_NAME, cj.EXPLORE_JOB_NAME, cj.LIMIT_JOB_NAME)
     assert tuple(re.findall(r'"(\w+)"', m.group(1))) == 배치
+
+
+def test_월_초과_계열이_깨져도_결과_행은_남고_칸만_빠진다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1952 (25.1947 교차검증 [권고]) — 계열 계산이 저장 루프 안·try 밖이라 깨지면 변형 결과 행 전부를 잃을 길이었다.
+    지금은 `monthly_excess_extra` 가 빈 칸을 내고 판정판 걷는 창은 까닭과 함께 빈다"""
+    from batch.services import luck
+
+    mem = _db(monkeypatch)
+
+    def 망(*_a: object, **_k: object) -> None:
+        raise RuntimeError("계열 망")
+
+    monkeypatch.setattr(luck, "excess_months", 망)
+    assert cj.run_core("KR", years=1, today=오늘, force=True, variants=("core_b",)) == 0
+    run, rows = _기록(mem, cj.JOB_NAME)
+    assert run["status"] == "success" and [r["strategy"] for r in rows] == ["core_b"]
+    assert "monthly_excess" not in json.loads(rows[0]["metrics_json"])
+    줄 = run["step_log"]["scoreboard"][0]
+    assert 줄["walk_total"] is None and 줄["missing"]["walk_total"] == scb.WHY_WALK[: scb.WHY_MAX]
+    assert jb.monthly_excess_extra([("2024-01-31", 1.0)], None) == {}
+

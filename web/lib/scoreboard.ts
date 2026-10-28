@@ -135,10 +135,19 @@ function walkText(r: Pick<ScoreRow, "walk_positive" | "walk_total">): string {
 }
 
 /** 판정판 한 줄 → 화면 글. 숫자는 꼴만 바꾼다(비율은 %, 분위 하한은 소수 한 자리, DSR 은 두 자리) */
+/**
+ * 판정판 칸이 생긴 기록 번호(25.1952, 25.1947 교차검증 [권고]) — 그 전 실행 기록 줄에는 키도 까닭도 없어 칸이 까닭 없이
+ * "없음" 으로 보였다(다음 실행 전까지는 그것이 기본 화면). 칸이 비고 배치 까닭이 없으면 이 번호로 적는다
+ */
+export const ADDED_IN: Partial<Record<(typeof SCOREBOARD_KEYS)[number], string>> = {
+  walk_positive: "25.1947", walk_total: "25.1947", stage01_verdict: "25.1950", stage01_note: "25.1950", bh_q: "25.1951",
+};
+
 export function scoreLine(r: ScoreRow): ScoreLine {
   const 까닭별 = new Map<string, string[]>();
   for (const k of SCOREBOARD_KEYS) {
-    const why = r.missing[k];
+    const 판 = ADDED_IN[k];
+    const why = r.missing[k] ?? (판 && r[k] == null ? `이 칸이 생기기(${판}) 전 실행 — 다음 실행부터 찹니다` : undefined);
     if (why === undefined || k === "strategy") continue;
     까닭별.set(why, [...(까닭별.get(why) ?? []), COL_LABEL[k] ?? k]);
   }

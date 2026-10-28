@@ -83,6 +83,17 @@ def _num(v: Any) -> float | None:
         return None
 
 
+def _month_key(v: Any) -> bool:
+    """YYYY-MM(뒤에 더 붙어도 앞 일곱 자) — 걷는 창 계열의 달 이름"""
+    k = str(v)[:7] if isinstance(v, str) else ""
+    return len(k) == 7 and k[4] == "-" and k[:4].isdigit() and k[5:].isdigit() and 1 <= int(k[5:]) <= 12
+
+
+def _finite(v: Any) -> bool:
+    x = _num(v)
+    return x is not None and math.isfinite(x)
+
+
 def _run_time(run: dict[str, Any]) -> str:
     """실행 시각 — batch_runs.started_at, 없으면 결과 행 created_at 가운데 가장 늦은 것"""
     t = run.get("started_at")
@@ -207,7 +218,7 @@ def _row(run: dict[str, Any], r: dict[str, Any], twins: dict[str, dict[str, Any]
         put("luck_pct", _num(luck.get("luck_pct")), why_l)
         put("dsr_n", dsr_n, "luck.n_trials 없음")
 
-    # 앞·뒤 반(`split_half`) / 걷는 창(아직 계열 미저장)
+    # 앞·뒤 반(`split_half`) / 걷는 창(25.1947 — 결과 행 `monthly_excess`)
     why_h = ("월 백테스트는 반 나눈 기간을 싣지 않는다(핵심 H·탐색만)" if job == JOB_MONTHLY
              else "metrics_json.split_half 없음(곡선 3일 미만)")  # fmt: skip
     for part in ("first", "second"):
@@ -220,7 +231,9 @@ def _row(run: dict[str, Any], r: dict[str, Any], twins: dict[str, dict[str, Any]
         why_w = "기준 전략 자체 — 초과가 0"
     elif not isinstance(me, list):
         why_w = WHY_WALK
-    elif not all(isinstance(x, (list, tuple)) and len(x) == 2 and _num(x[1]) is not None for x in me):
+    elif not all(isinstance(x, (list, tuple)) and len(x) == 2 and _month_key(x[0]) and _finite(x[1]) for x in me):
+        # 달 이름이 YYYY-MM 이 아니면 `walk_windows` 가 깨져 판정판 전체가 `scoreboard_error` 로 갔다 — 칸 하나만 빠지게
+        # (25.1952, 25.1947 교차검증 note). NaN·무한 초과는 창 합을 NaN 으로 만들어 "> 0 아님" 으로 조용히 셌다
         why_w, me = "metrics_json.monthly_excess 를 읽지 못함", None
     else:
         why_w = ""

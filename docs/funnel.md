@@ -59,7 +59,7 @@
 
 - **어디에**: 백테스트 실행(`backtest`·`backtest_core`·`backtest_explore`·`backtest_limit`)이 결과 행을 다 실은 뒤 그 실행 하나의 줄을 `batch_runs.step_log.scoreboard` 에
   (`jobs/backtest.scoreboard_log` — `store_run(kept=…)` 이 남긴 행을 메모리에서 `scoreboard.rows([이 실행])` 에 넣는다. Turso 다시 읽기 0). 줄마다 웹이 보이는 칸만
-  (`scoreboard.STEP_LOG_COLS` — 전략·시장·코호트·누적 시도·CAGR·초과 CAGR·MDD·DSR·N·대조 하한·관문 하한·앞/뒤 반 CAGR·개월·리밸런스·매수·묶음 둘·판 뒤 매도)과
+  (`scoreboard.STEP_LOG_COLS` — 전략·시장·코호트·누적 시도·CAGR·초과 CAGR·MDD·DSR·N·대조 하한·관문 하한·앞/뒤 반 CAGR·걷는 창 둘(25.1947)·개월·리밸런스·매수·묶음 둘·판 뒤 매도·BH q(25.1951)·0→1 점검 둘(25.1950))과
   그 칸의 `missing` 까닭(80자까지). sha·작업 이름·묶음은 같은 step_log 의 `params`·`group_id` 에 있어 줄에 되풀이하지 않는다. 걷는 창은 두 수(`walk_positive`·`walk_total`, 25.1947)만 싣고, 늘 비는 칸(수용량·서로 다른 종목·끝난 거래)은 싣지 않는다
 - **깨지면**: 실행은 성공으로 닫고 `step_log.scoreboard_error` 에 까닭(다른 진단과 같은 꼴)
 - **어디서 보나**: /backtest 의 **"판정판" 카드** — 고른 묶음을 낸 실행 기록의 줄. 그 기록에 판정판이 없으면(25.1940 전 실행·도는 중·실패·기록 깨짐 — 까닭은 단정하지 않는다) 그 시장에서 판정판이 실린 가장 최근 실행으로 물러나고 그렇다고 적는다

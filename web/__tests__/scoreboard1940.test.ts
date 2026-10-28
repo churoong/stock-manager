@@ -14,7 +14,7 @@ import {
 const 줄 = {
   strategy: "core_h", market: "KR", cohort: "1b", trials_cumulative: 17, cagr: 0.1234, excess_cagr: -0.0101, mdd: -0.2567,
   dsr: 0.9312, dsr_n: 17, control_lower: 51.04, gate_lower: null, half_first_cagr: 0.05, half_second_cagr: null,
-  walk_positive: 3, walk_total: 4, bh_q: 0.0421, months: 48, rebalances: 1000, buys: 120, control_blocks: 9, gate_blocks: 4, sells_scored: 80,
+  walk_positive: 3, walk_total: 4, bh_q: 0.0421, stage01_verdict: "모름", stage01_note: "모름: 수용량", months: 48, rebalances: 1000, buys: 120, control_blocks: 9, gate_blocks: 4, sells_scored: 80,
   missing: { gate_lower: "하한 없음 — 묶음 4개(block_bound 최소 미달)", half_second_cagr: "second 반 CAGR 표본 미달" },
 };
 
@@ -63,7 +63,13 @@ describe("판정판 글 (25.1940)", () => {
     // 까닭 없이 빈 칸(옛 기록·모양 틀림)도 "없음" 이고 빠진 까닭이라고 적는다
     const 빈 = scoreLine(parseScoreboard([{ strategy: "x", missing: { cagr: "" } }]).rows[0]);
     expect(Object.fromEntries(빈.cells).CAGR).toBe("없음");
-    expect(빈.missing).toEqual(["없음: CAGR — 까닭 기록 없음"]);
+    // 25.1952 — 나중에 생긴 칸은 생긴 판으로 까닭을 적는다
+    expect(빈.missing).toEqual([
+      "없음: CAGR — 까닭 기록 없음",
+      "없음: 걷는 창·걷는 창 수 — 이 칸이 생기기(25.1947) 전 실행 — 다음 실행부터 찹니다",
+      "없음: BH q — 이 칸이 생기기(25.1951) 전 실행 — 다음 실행부터 찹니다",
+      "없음: 0→1 점검·0→1 근거 — 이 칸이 생기기(25.1950) 전 실행 — 다음 실행부터 찹니다",
+    ]);
   });
 
   it("모양이 틀린 줄은 버리고 센다 — 화면이 죽지 않는다", () => {
@@ -195,5 +201,20 @@ describe("판정판 안내 줄은 가리킬 곳이 있을 때만 (25.1942)", () 
       missing: { stage01_verdict: "기준·무작위 대조 — 시도 아님", stage01_note: "기준·무작위 대조 — 시도 아님" } }]).rows[0]);
     expect(기준줄.stage).toBeNull();
     expect(기준줄.missing).toContain("없음: 0→1 점검·0→1 근거 — 기준·무작위 대조 — 시도 아님");
+  });
+
+  it("새 칸이 생기기 전 실행의 줄 — 키도 까닭도 없으면 생긴 판으로 까닭을 적는다(25.1952)", () => {
+    const 옛 = { ...줄 } as Record<string, unknown>;
+    for (const k of ["walk_positive", "walk_total", "bh_q", "stage01_verdict", "stage01_note"]) delete 옛[k];
+    const l = scoreLine(parseScoreboard([옛]).rows[0]);
+    expect(Object.fromEntries(l.cells)["걷는 창"]).toBe("없음");
+    expect(l.missing).toContain("없음: 걷는 창·걷는 창 수 — 이 칸이 생기기(25.1947) 전 실행 — 다음 실행부터 찹니다");
+    expect(l.missing).toContain("없음: BH q — 이 칸이 생기기(25.1951) 전 실행 — 다음 실행부터 찹니다");
+    expect(l.missing).toContain("없음: 0→1 점검·0→1 근거 — 이 칸이 생기기(25.1950) 전 실행 — 다음 실행부터 찹니다");
+    expect(l.stage).toBeNull();
+    // 배치 까닭이 있으면 그것이 먼저 — 값이 있으면 까닭 없음
+    const 새 = scoreLine(parseScoreboard([{ ...줄, bh_q: null, missing: { ...줄.missing, bh_q: "코호트 밖 — BH 묶음 없음" } }]).rows[0]);
+    expect(새.missing).toContain("없음: BH q — 코호트 밖 — BH 묶음 없음");
+    expect(새.missing.join()).not.toContain("생기기");
   });
 });
