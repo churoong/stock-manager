@@ -324,7 +324,8 @@ class 운영입력:
     시세후: Callable[[Client, str], None]  # (DB, 날) — 그날 종가를 넣은 뒤
 
 
-#: `Variant.selection` → 운영 입력. 없으면 신호 계좌 그대로
+#: `Variant.selection`(또는 변형 이름 — 이름이 먼저, 25.1934 A·C 는 위원회이면서 재무·점수 입력이 더 든다) → 운영 입력.
+#: 없으면 신호 계좌 그대로
 운영입력들: dict[str, 운영입력] = {}
 
 
@@ -334,7 +335,7 @@ def _운영(variant: str, 판: str) -> dict[str, 운영하루]:
     rp = _리플레이(variant, 판)
     spec = cs.variant_spec(variant)  # 탐색 변형(D·E)은 `VARIANTS` 밖(25.1921)
     aid = spec.account
-    입력 = 운영입력들.get(spec.selection)
+    입력 = 운영입력들.get(variant) or 운영입력들.get(spec.selection)
     c = (입력.db if 입력 else _db)(aid, 비용판[판][0])
     for d in 날들[:W]:
         _시세넣기(c, d)

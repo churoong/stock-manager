@@ -81,6 +81,27 @@ def pit_growth(snapshots: list[dict[str, Any]], cutoff: str) -> dict[str, Any] |
     return sg.annual_growth(_flat(known[latest]), _flat(전년) if 전년 else None, cutoff, latest)
 
 
+def pit_fin_rows(snapshots: list[dict[str, Any]], cutoff: str) -> list[dict[str, Any]]:
+    """운영 `jobs/sell_flags.enrich` 의 재무 읽기 한 종목 몫을 스냅샷에서 — 25.1934 (전략 깔때기 ⑤ A·C 사기 전 점검).
+
+    운영 SQL: 가장 늦은 사업연도의 기준(연결 우선)으로 연간 행을 사업연도 내림차순 둘(`fiscal_year·
+    operating_income·report_date·currency·period_days`). 여기서는 cutoff 까지 **접수된** 행만(`_known_by_year` —
+    접수일이 cutoff 뒤인 행은 없는 것, 정정은 늦게 접수된 것). 영업이익 적자 전환(`sell_flags.evaluate` 재무악화의
+    한 갈래)이 이 두 행을 본다
+    """
+    known = _known_by_year(snapshots, cutoff)
+    out: list[dict[str, Any]] = []
+    for 해 in sorted(known, reverse=True)[:2]:
+        값 = known[해]["values"]
+        out.append({"fiscal_year": 해, "operating_income": 값.get("operating_income"),
+                    "report_date": str(known[해]["as_of_date"]), "currency": 값.get("currency"),
+                    "period_days": 값.get("period_days")})  # fmt: skip
+    from batch.jobs import backtest as jb
+
+    jb._guard(cutoff, *(r["report_date"] for r in out))  # 돌려주기 직전 한 번 더(`assert_no_lookahead`)
+    return out
+
+
 def pit_latest_equity(snapshots: list[dict[str, Any]], cutoff: str, currency: str | None) -> float | None:
     """운영 `jobs/signals._latest_equity` — 알 수 있던 **가장 늦은 사업연도** 행의 자본.
 
@@ -293,6 +314,25 @@ class CoreMarket:
         self._risk_period: tuple[int, int] | None = None
         self._risk_memo: dict[int, dict[str, float | None]] = {}
         self.risk_computed = 0  # 실제로 잰 종목 수(실측·시험)
+        self._week_totals: tuple[str, dict[int, float | None]] | None = None
+
+    def week_totals(self, score_cutoff: str) -> dict[int, float | None]:
+        """그 주 팩터 점수(`_weekly_scores`)의 종합 점수 — 주간 점수를 낸 모집단(그 주 첫 cutoff 의 유니버스) 전부.
+
+        사기 전 점검 계좌(A·C)의 "지금 점수"·점수 하락(재무악화의 한 갈래)이 읽는다(25.1934). 운영 `scores` 처럼
+        유니버스 밖 종목에는 새 점수가 없다. 지금 주의 것만 — 지난 주는 이미 버렸다(다르면 `ValueError`)"""
+        if score_cutoff != self._score_cutoff:
+            raise ValueError(f"주간 점수는 {self._score_cutoff} 것뿐 — {score_cutoff} 를 물었다")
+        if self._week_totals is None or self._week_totals[0] != score_cutoff:
+            총점 = {sid: sc.total_score(fs, self.factor_weights).total if fs else None
+                  for sid, fs in sorted(self._scores.items())}  # fmt: skip
+            self._week_totals = (score_cutoff, 총점)
+        return self._week_totals[1]
+
+    def members(self, cutoff: str) -> set[int] | None:
+        """그 cutoff 의 시점 유니버스 종목 — `eligible_at` 이 없으면 None(유니버스를 자르지 않는 실행:
+        "제외" 를 모른다)."""
+        return None if self.eligible_at is None else set(self.eligible_at(cutoff))
 
     # 지수를 cutoff 로 자른다 — 국면·벤치마크·원장 성과가 모두 이 사본만 본다
     def _index_upto(self, code: str, cutoff: str) -> list[tuple[str, float]]:
@@ -574,6 +614,10 @@ class SharedDays:
         self.market = market
         self._pickle = pickle
         self._days: dict[str, tuple[str, bytes]] = {}  # cutoff → (결정일, 피클)
+        #: 점수 cutoff → 그 주 종합 점수 피클(`CoreMarket.week_totals`) — 사기 전 점검 계좌(A·C)가 읽는다(25.1934).
+        #: 하루 재료는 `total_scores` 를 비우므로(`SHARED_DROPPED`) 주마다 한 번 따로 든다(종목 수 × 주 수 —
+        #: 5년이면 수 MB)
+        self._weeks: dict[str, bytes] = {}
         self.computed = 0  # 진짜 `at` 을 부른 날 수
         self.replayed = 0  # 적힌 것을 준 날 수
 
@@ -587,6 +631,9 @@ class SharedDays:
             dv = self.market.at(view, day)
             적힌 = (day, self._pickle.dumps(_slim(dv), protocol=self._pickle.HIGHEST_PROTOCOL))
             self._days[view.cutoff] = 적힌
+            if dv.score_cutoff not in self._weeks:
+                self._weeks[dv.score_cutoff] = self._pickle.dumps(self.market.week_totals(dv.score_cutoff),
+                                                                  protocol=self._pickle.HIGHEST_PROTOCOL)  # fmt: skip
             self.computed += 1
         else:
             if 적힌[0] != day:
@@ -617,11 +664,27 @@ class SharedMarket:
         self.country, self.universe = m.country, m.universe
         self.max_weight_per_stock, self.targets = m.max_weight_per_stock, m.targets
         self.charters = m.charters  # 위원회 탐색 변형(D·E)이 헌장 top_n·회의를 읽는다(25.1904·1906)
+        # 사기 전 점검 계좌(A·C — 25.1934)가 재무 스냅샷(cutoff 로 자른다)·종합 점수 가중을 읽는다
+        self.snapshots, self.factor_weights = m.snapshots, m.factor_weights
         self._last: tuple[str, str] | None = None  # (cutoff, 결정일)
         self._dv: DayView | None = None
+        self._week: tuple[str, dict[int, float | None]] | None = None
 
     def pool(self, cutoff: str) -> list[dict[str, Any]]:
         return self.shared.market.pool(cutoff)
+
+    def members(self, cutoff: str) -> set[int] | None:
+        return self.shared.market.members(cutoff)
+
+    def week_totals(self, score_cutoff: str) -> dict[int, float | None]:
+        """`CoreMarket.week_totals` 와 같은 값 — 처음 그 주를 낸 읽개가 적은 것을 푼다(읽개마다 새로 — 고쳐도
+        남이 못 본다)."""
+        if self._week is None or self._week[0] != score_cutoff:
+            적힌 = self.shared._weeks.get(score_cutoff)
+            if 적힌 is None:
+                raise ValueError(f"주간 점수 {score_cutoff} 가 적히지 않았다 — 그 주 하루 재료를 먼저 읽는다")
+            self._week = (score_cutoff, self.shared._pickle.loads(적힌))
+        return self._week[1]
 
     def at(self, view: bt.PriceView, day: str | None = None) -> DayView:
         """`CoreMarket.at` 과 같은 약속 — 같은 cutoff·결정일이면 같은 결과, 거꾸로 가면 `ValueError`."""

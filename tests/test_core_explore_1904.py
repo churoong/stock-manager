@@ -24,9 +24,13 @@ def test_핵심_판정_변형은_그대로_다섯이다() -> None:
 
 
 def test_탐색_변형_칸은_운영_계좌와_같다() -> None:
-    """마이그레이션 0075 의 D·E 칸(매도 규칙·진입) — 상위 몇 종목은 운영처럼 헌장 `top_n` 이 정한다."""
+    """마이그레이션 0075 의 D·E 칸(매도 규칙·진입) — 상위 몇 종목은 운영처럼 헌장 `top_n` 이 정한다.
+    A·C 는 0077 이 매도 규칙을 바꿨다 — tests/test_core_prebuy_1934.py 가 본다(25.1934)"""
     글 = Path("migrations/0075_paper_more_accounts.sql").read_text(encoding="utf-8")
     for 이름, v in cs.EXPLORE_VARIANTS.items():
+        if v.account in ("A", "C"):
+            assert v.selection == "committee" and v.account in co.CHARTERS
+            continue
         줄 = 글.split(f"('{v.account}', ")[1].split("\n")[0]
         assert f"'{v.sell_rule}', 1, " in 줄 and f"'{v.entry}', " in 줄, (이름, 줄)
         assert v.selection == "committee" and v.account in co.CHARTERS
@@ -231,9 +235,9 @@ def test_탐색_실행은_따로_싣고_시도_수_하한은_누적이다(monkey
     monkeypatch.setitem(co.CHARTERS, "E", {**co.CHARTERS["E"], "top_n": 7})
     assert cj.run_core("KR", years=1, today=오늘, force=True, explore=True) == 0
     행 = mem.execute("SELECT strategy, top_n, warnings_json, metrics_json FROM backtest_runs ORDER BY id").dicts()
-    assert [r["strategy"] for r in 행] == sorted(cs.EXPLORE_VARIANTS)
+    assert [r["strategy"] for r in 행] == list(cs.EXPLORE_VARIANTS)  # 등록 순서(25.1934 A·C 가 뒤에 붙었다)
     # 위원회 변형의 저장 top_n 은 헌장 값(E 는 위에서 7 로 바꿈, D 5)
-    assert {r["strategy"]: r["top_n"] for r in 행} == {"core_d": 5, "core_e": 7}
+    assert {r["strategy"]: r["top_n"] for r in 행} == {"core_a": 5, "core_c": 5, "core_d": 5, "core_e": 7}
     # DSR 이 실제로 쓴 시도 수 하한 — 실행 기록 칸만이 아니라 판정 계산이 받은 값(25.1908)
     assert all(json.loads(r["metrics_json"])["luck"]["n_trials"] >= cj.explore_trial_floor() for r in 행)
     assert all(cj.WARN_EXPLORE in json.loads(r["warnings_json"]) for r in 행)

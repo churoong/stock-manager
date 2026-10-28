@@ -8,7 +8,9 @@
 
 **판단식을 다시 적지 않는다.** 운영 함수는 DB 클라이언트를 받으므로 `_ViewClient` 가 그 자리에 들어가
 **cutoff 로 자른 가격 창(`PriceView`)만으로** 세 가지 읽기(마지막 종가·첫 매수 뒤 고점·기업행위 창)에 답한다 —
-모르는 읽기는 오류로 멈춘다(운영이 읽기를 더하면 여기서 조용히 빈 값이 되지 않게).
+모르는 읽기는 오류로 멈춘다(운영이 읽기를 더하면 여기서 조용히 빈 값이 되지 않게). 사기 전 점검 계좌(A 가치·C 모멘텀,
+25.1934)는 `_PitClient` 가 운영 `sell_flags.enrich`·`prebuy_sell_flags` 의 읽기(재무·점수·유니버스)에도 cutoff 까지의
+자료로 답한다 — 감성은 늘 빈 답(영구 차이).
 
 **제 장부를 엔진과 맞춘다.** 첫 매수일·기간·주당 원가(수수료 포함)·고점 시작일을 전략이 들고, 날마다 `view.weights`·
 `view.holding` 과 맞춘다 — 엔진이 못 산 것(정지·상장폐지·체결가 없음)은 버리고, 엔진이 판 것(상장폐지)은 지운다. 산 날의
@@ -23,6 +25,7 @@
 from __future__ import annotations
 
 import bisect
+import json
 import math
 from dataclasses import dataclass, field, replace
 from datetime import date
@@ -59,13 +62,18 @@ VARIANTS: dict[str, Variant] = {
 }
 
 #: 탐색 변형 — 전략 깔때기 0단계(docs/funnel.md 4장, 25.1904). 핵심 H 판정(`VARIANTS` — 11-03 기본 실행·시도 수)에는
-#: 넣지 않고 탐색 실행기가 따로 돌린다. 위원회 회사(D 장기보유·E 안정)는 하루 재료(`DayView`)의 같은 안건·모집단으로
-#: 운영 `jobs/paper.committee_step` 과 같은 `co.meet` 를 다시 열어 가결 행을 미리 고름으로 넘긴다. 상위 몇 종목은
-#: 운영처럼 헌장 `top_n` 이 정한다(여기 `top_n` 은 헌장을 읽을 때 덮인다). 가치(A)·모멘텀(C)은 매도 규칙이 사기 전
-#: 점검(`PREBUY_CHECK_RULES`)이라 아직 못 돈다(funnel.md 4장 ⑤)
+#: 넣지 않고 탐색 실행기가 따로 돌린다. 위원회 회사(D 장기보유·E 안정·A 가치·C 모멘텀)는 하루 재료(`DayView`)의
+#: 같은 안건·모집단으로 운영 `jobs/paper.committee_step` 과 같은 `co.meet` 를 다시 열어 가결 행을 미리 고름으로
+#: 넘긴다. 상위 몇 종목은 운영처럼 헌장 `top_n` 이 정한다(여기 `top_n` 은 헌장을 읽을 때 덮인다).
+#: 가치(A)·모멘텀(C)은 매도 규칙이 사기 전 점검(`PREBUY_CHECK_RULES`)이라 운영 `prebuy_sell_flags`·
+#: `sell_flags.enrich` 를 시점 창(`_PitClient`)으로 부른다(25.1934, funnel.md 4장 ⑤) — 감성급락은 리플레이에서
+#: 늘 "플래그 없음"(무료 과거 뉴스 없음, 영구 차이). 칸은 운영 계좌 그대로: A = 0070 + 0077(`value`, 진입·top_n 은
+#: 0075 열 기본값 tranche·5), C = 0075(open·5) + 0077(`momentum`)
 EXPLORE_VARIANTS: dict[str, Variant] = {
     "core_d": Variant("D", "time", "tranche", 5, "committee"),
     "core_e": Variant("E", "core", "tranche", 10, "committee"),
+    "core_a": Variant("A", "value", "tranche", 5, "committee"),
+    "core_c": Variant("C", "momentum", "open", 5, "committee"),
 }
 
 
@@ -96,6 +104,10 @@ class Lot:
     unit_cost: float  # 주당 원가, 수수료(시장가는 슬리피지도) 포함 — 운영 `Position.cost / quantity`
     substitute_of: int | None = None  # 무작위 대조: 어느 신호 자리로 산 종목인가(나중 주문이 이긴다)
     last_buy: str = ""
+    #: 첫 매수 주문의 신호 점수와 그 기준일 — 운영 `Position.score_at_buy`(첫 체결의 `score_at_trade`·`snapshot_as_of`).
+    #: 사기 전 점검 계좌(A·C)의 점수 20점 하락(재무악화)이 견준다(25.1934)
+    score_at_buy: float | None = None
+    score_at_buy_date: str | None = None
 
 
 @dataclass(frozen=True)
@@ -107,6 +119,9 @@ class _Bought:
     substitute_of: int | None
     #: 회차 지정가 모드(25.1914 전략 깔때기 ④ 분할 지정가 체결)에서 낸 회차 ((비중, 지정가), …). 비면 t 종가 전량
     tranches: tuple[tuple[float, float], ...] = ()
+    #: 첫 주문의 신호 점수·기준일(운영 주문 `score`·`score_as_of`) — 새 로트의 `score_at_buy`(25.1934)
+    score: float | None = None
+    score_as_of: str | None = None
 
 
 @dataclass
@@ -172,6 +187,102 @@ class _ViewClient:
             return _Rows([])
         self.misses.append(sql[:80])
         raise LookupError(f"핵심 H 백테스트 창이 모르는 읽기 — 운영 함수가 바뀌었다: {sql[:80]}")
+
+
+class _DictRows(_Rows):
+    """열 이름이 있는 답 — 운영 `enrich` 가 `.dicts()`·`.scalar()` 로 읽는 것."""
+
+    def __init__(self, dicts: list[dict[str, Any]]) -> None:
+        super().__init__([tuple(d.values()) for d in dicts])
+        self._dicts = dicts
+
+    def dicts(self) -> list[dict[str, Any]]:
+        return [dict(d) for d in self._dicts]
+
+    def scalar(self) -> Any:
+        return self.rows[0][0] if self.rows and self.rows[0] else None
+
+
+#: 운영 `jobs/sell_flags.enrich` 의 읽기 머리 — 사기 전 점검 계좌(A·C)의 시점 창(`_PitClient`)이 답한다(25.1934).
+#: 글이 바뀌면 여기서 모르는 읽기가 되어 멈춘다(`_ViewClient` 의 원칙)
+_FIN_SQL_HEAD = ("SELECT fiscal_year, operating_income, report_date, currency, period_days FROM financials"
+                 " WHERE stock_id = ?")  # fmt: skip
+_UNI_SQL_HEAD = "SELECT u.included, u.exclude_reason, u.snapshot_date FROM universe_members u WHERE u.stock_id = ?"
+_UNI_SINCE_SQL_HEAD = "SELECT MAX(included) FROM universe_members WHERE stock_id = ? AND snapshot_date >= COALESCE("
+_SENTI_SQL_HEAD = "SELECT sentiment, delta_7d, negative_count_7d, as_of_date FROM sentiment_scores WHERE stock_id = ?"
+_SCORE_ROW_SQL_HEAD = ("SELECT weights_json, calc_version, sentiment_weight_used, total_score, factor_scores,"
+                       " sentiment_score FROM scores WHERE stock_id = ? AND as_of_date = ?")  # fmt: skip
+_RIGHTS_SQL_HEAD = "SELECT e.record_date FROM kr_corp_events e JOIN stocks s ON s.ticker = e.code"
+#: 시점 유니버스(`CoreMarket.members`)에서 빠진 종목의 제외 사유 — 운영 `universe_members.exclude_reason` 자리.
+#: 시점 판정(`pit_universe.members_at`)은 종목별 사유를 넘기지 않아 이 이름 하나로 적는다(점검 판정에는 "빠졌다" 만
+#: 쓰인다 — 사유가 결격(관리종목·거래정지 …)인지 가르는 것은 처음부터 유니버스 밖이던 보유뿐인데, 리플레이는
+#: 유니버스 안에서만 산다)
+PIT_EXCLUDED_REASON = "시점 유니버스 밖"
+
+
+class _PitClient(_ViewClient):
+    """사기 전 점검 계좌(A 가치·C 모멘텀)의 시점 창 — 25.1934 (전략 깔때기 ⑤).
+
+    운영 `prebuy_sell_flags`·`sell_flags.enrich` 를 **그대로** 부르고, 그 읽기에 cutoff 까지의 자료로만 답한다:
+    - 재무(영업이익 적자 전환): 재무 스냅샷을 접수일 ≤ cutoff 로 자른 연간 두 해(`cb.pit_fin_rows`)
+    - 지금 점수(`SCORE_NOW_SQL`)·점수 행: 그 주 종합 점수(`week_totals`, 날짜 = cutoff) · 매수일 점수 = 로트가 든
+      첫 주문 점수. 잣대(가중·판·감성 가중)는 리플레이 안에서 늘 같다 — 잣대 바뀜 갈래(`CHAIN_HISTORY_SQL` 등)는
+      읽지 않는다(읽으면 멈춤)
+    - 유니버스(점검): 그 주 첫 cutoff 의 시점 유니버스(`members(score_cutoff)` — 운영 주간 스냅샷 자리). 유니버스를
+      자르지 않는 실행(`eligible_at` 없음)은 스냅샷이 없는 것처럼 빈 답(점검 없음)
+    - **감성(감성급락)은 늘 빈 답** — 무료 과거 뉴스·감성 이력이 없다(영구 차이, docs/backtest.md 10장).
+      지어내지 않는다
+    - 유상증자 권리락 일정: 빈 답(수정주가 창 — `_ACTION_SQL_HEAD` 와 같은 판단)
+    """
+
+    def __init__(
+        self, view: bt.PriceView, *, snapshots: dict[int, list[dict[str, Any]]], totals: dict[int, float | None],
+        score_book: dict[tuple[int, str], float | None], members: Any, score_cutoff: str, snap_days: list[str],
+        weights_json: str,
+    ) -> None:  # fmt: skip
+        super().__init__(view)
+        self.snapshots, self.totals, self.score_book = snapshots, totals, score_book
+        self.members, self.score_cutoff, self.snap_days = members, score_cutoff, snap_days
+        self.weights_json = weights_json
+
+    def _score(self, sid: int, day: str | None) -> float | None:
+        if day is None:
+            return None
+        if day == self.view.cutoff:
+            return self.totals.get(sid)
+        return self.score_book.get((sid, day))
+
+    def execute(self, sql: str, params: list[Any] | tuple[Any, ...] = ()) -> _Rows:  # noqa: C901 — 읽기마다 한 갈래
+        from batch.jobs import paper as jp
+
+        if sql == jp.SCORE_NOW_SQL:
+            값 = self.totals.get(int(params[0]))
+            return _Rows([] if 값 is None else [(값, self.view.cutoff)])
+        if sql.startswith(_FIN_SQL_HEAD):
+            return _DictRows(cb.pit_fin_rows(self.snapshots.get(int(params[0]), []), self.view.cutoff))
+        if sql.startswith(_UNI_SQL_HEAD):
+            든 = self.members(self.score_cutoff)
+            if 든 is None:
+                return _DictRows([])
+            sid = int(params[0])
+            return _DictRows([{"included": int(sid in 든), "exclude_reason": None if sid in 든 else PIT_EXCLUDED_REASON,
+                               "snapshot_date": self.score_cutoff}])  # fmt: skip
+        if sql.startswith(_UNI_SINCE_SQL_HEAD):
+            # 매수일 무렵 스냅샷(그 날 이하 가장 늦은 것)부터 지금까지 한 번이라도 들었나(25.1095)
+            sid, 매수일 = int(params[0]), str(params[2])
+            앞 = [d for d in self.snap_days if d <= 매수일]
+            부터 = 앞[-1] if 앞 else ""
+            들었나 = [sid in (self.members(d) or set()) for d in self.snap_days if d >= 부터]
+            return _DictRows([{"m": (int(any(들었나)) if 들었나 else None)}])
+        if sql.startswith(_SENTI_SQL_HEAD) or sql.startswith(_RIGHTS_SQL_HEAD):
+            return _DictRows([])
+        if sql.startswith(_SCORE_ROW_SQL_HEAD):
+            값 = self._score(int(params[0]), None if params[1] is None else str(params[1]))
+            if 값 is None:
+                return _DictRows([])
+            return _DictRows([{"weights_json": self.weights_json, "calc_version": 0, "sentiment_weight_used": 0.0,
+                               "total_score": 값, "factor_scores": None, "sentiment_score": None}])  # fmt: skip
+        return super().execute(sql, params)
 
 
 def _close_on(view: bt.PriceView, sid: int, day: str) -> float | None:
@@ -292,10 +403,12 @@ class CoreStrategy:
         #: 회차 지정가 체결 — 25.1914 (전략 깔때기 ④ 분할 지정가 체결). 회차 진입(tranche) 변형만 — 시가 일괄(R1·R2)은
         #: 회차가 없어 켜도 예전과 같다. 끄면(기본) t 종가 전량
         self.limit_fills = bool(limit_fills) and v.entry == "tranche"
-        if self.v.sell_rule in jp.PREBUY_CHECK_RULES:
-            # 사면 바로 팔 후보(재무악화·감성·점검)는 백테스트에 자료가 없다 —
-            # 핵심 변형은 core·trend 라 운영도 보지 않는다(`prebuy_sell_flags`)
-            raise NotImplementedError(f"매도 규칙 {self.v.sell_rule} 은 매수 전 매도 점검이 필요하다")
+        #: 사기 전 점검 계좌(A 가치·C 모멘텀 — 운영 `PREBUY_CHECK_RULES`). 매도 판정은 운영 `sell_decisions` 처럼
+        #: `sell_flags.enrich` 보강을 거치고(재무악화·점검), 매수 전에 운영 `prebuy_sell_flags` 를 부른다 — 읽기는
+        #: 시점 창 `_PitClient`(25.1934). 그 밖의 계좌(core·trend·time)는 보유와 무관한 플래그를 따르지 않아 예전 길
+        #: 그대로다
+        self.prebuy = self.v.sell_rule in jp.PREBUY_CHECK_RULES
+        self._snap_days: list[str] = []  # 지나온 주간 점수 cutoff = 시점 유니버스 "스냅샷" 날(점검의 매수 뒤 편입 이력)
         self.market = market
         self.sessions = sorted(sessions)
         c = costs if costs is not None else bt.Costs.for_country(market.country)
@@ -321,6 +434,21 @@ class CoreStrategy:
         self._bought: list[_Bought] = []
         self._prev: tuple[str, str, dict[int, float]] | None = None  # (결정일, cutoff, cutoff 비중)
         self.log: list[DayLog] = []
+
+    def _client(self, view: bt.PriceView, dv: cb.DayView) -> _ViewClient:
+        """그날 운영 함수가 읽을 창 — 사기 전 점검 계좌면 시점 자료까지 답하는 `_PitClient`(25.1934)."""
+        if not self.prebuy:
+            return _ViewClient(view)
+        if not self._snap_days or self._snap_days[-1] != dv.score_cutoff:
+            self._snap_days.append(dv.score_cutoff)
+        무게 = getattr(self.market, "factor_weights", cb.EQUAL_WEIGHTS)
+        return _PitClient(
+            view, snapshots=self.market.snapshots, totals=self.market.week_totals(dv.score_cutoff),
+            score_book={(lot.stock_id, lot.score_at_buy_date): lot.score_at_buy for lot in self.lots.values()
+                        if lot.score_at_buy_date},
+            members=self.market.members, score_cutoff=dv.score_cutoff, snap_days=list(self._snap_days),
+            weights_json=json.dumps(무게, sort_keys=True),
+        )  # fmt: skip
 
     # ── 장부 맞추기 ──────────────────────────────────────────────────────────
 
@@ -360,7 +488,8 @@ class CoreStrategy:
                 새 = sum(x * 배율 * px / 가격 for x, 가격 in 찬) / 남음
             lot = self.lots.get(b.stock_id)
             if lot is None:
-                self.lots[b.stock_id] = Lot(b.stock_id, b.day, b.horizon, 단가, b.substitute_of, b.day)
+                self.lots[b.stock_id] = Lot(b.stock_id, b.day, b.horizon, 단가, b.substitute_of, b.day,
+                                            score_at_buy=b.score, score_at_buy_date=b.score_as_of)  # fmt: skip
                 continue
             # 더 산 몫 — 주식 수 비율은 그날 종가로 잰 비중(cutoff = 산 날)에서: 옛 몫 (h − w)/h, 새 몫 w/h
             h = w.get(b.stock_id, 0.0)
@@ -425,10 +554,37 @@ class CoreStrategy:
             horizon=lot.horizon, first_buy_date=lot.first_buy, currency="KRW", cost=행["cost"],
             market_value=행["market_value"], price_date=view.last_date(lot.stock_id), horizon_since=lot.first_buy,
         )  # fmt: skip
+        if self.prebuy:
+            hi = self._enrich(client, lot, 행, view, today)
+            if hi is None:
+                return set()
         코드들 = {f.reason_code for f in sf.evaluate(hi, today, self.market.targets)}
         if self.v.sell_rule == "trend" and jp._추적손절(client, hi, 행, self.market.targets, today):
             코드들.add(pp.TRAIL_CODE)
         return 코드들
+
+    def _enrich(
+        self, client: _ViewClient, lot: Lot, 행: dict[str, Any], view: bt.PriceView, today: date,
+    ) -> sf.HoldingInput | None:  # fmt: skip
+        """사기 전 점검 계좌의 보유 하나 — 운영 `sell_decisions` 와 같은 행으로 같은 `sell_flags.enrich` 보강(25.1934).
+
+        재무(적자 전환)·지금 점수·유니버스 제외는 `_PitClient` 가 cutoff 까지의 자료로 답한다. 감성은 늘 빈 답"""
+        from batch.jobs import paper as jp
+        from batch.jobs import sell_flags as sf_job
+
+        점수 = client.execute(jp.SCORE_NOW_SQL, [lot.stock_id]).rows
+        s = self._cache.get(lot.stock_id, {})
+        보유행 = {
+            "stock_id": lot.stock_id, "name": s.get("name", str(lot.stock_id)), "country": self.market.country,
+            "horizon": lot.horizon, "first_buy_date": lot.first_buy, "currency": s.get("currency") or "KRW",
+            "cost": 행["cost"], "market_value": 행["market_value"], "price_date": view.last_date(lot.stock_id),
+            "score_now": 점수[0][0] if 점수 else None, "score_now_date": 점수[0][1] if 점수 else None,
+            "score_at_buy": lot.score_at_buy, "score_at_buy_date": lot.score_at_buy_date,
+            "horizon_since": lot.first_buy, "lots": [(lot.first_buy, 행["quantity"], lot.unit_cost)],
+            "quantity": 행["quantity"],
+        }  # fmt: skip
+        입력, _경고 = sf_job.enrich(client, [보유행], today, dividends=False)
+        return 입력[0] if 입력 else None
 
     # ── 하루 ─────────────────────────────────────────────────────────────────
 
@@ -439,7 +595,7 @@ class CoreStrategy:
         w = {int(s): float(x) for s, x in (view.weights or {}).items() if x > 0}
         self._reconcile(view, w)
         dv = self.market.at(view, day)
-        client = _ViewClient(view)
+        client = self._client(view, dv)
         today = date.fromisoformat(day[:10])
         log = DayLog(day=day, cutoff=view.cutoff, day_return_pct=self._day_return(view), held=frozenset(w),
                      invested=sum(self._prev[2].values()) if self._prev else None)  # fmt: skip
@@ -494,6 +650,32 @@ class CoreStrategy:
             return dv.rows, committee_rows(dv, self.v.account)
         return dv.rows, None
 
+    def _prebuy(
+        self, client: _ViewClient, dv: cb.DayView, rows: list[report_picks.SignalRow],
+        미리: list[report_picks.SignalRow] | None, w: dict[int, float], today: date, log: DayLog,
+    ) -> tuple[list[report_picks.SignalRow], list[report_picks.SignalRow] | None]:  # fmt: skip
+        """사면 바로 팔 후보는 사지 않는다 — 운영 `run_step` 의 `prebuy_sell_flags` 자리 그대로(25.1480·25.1934).
+
+        후보 = 미리 고른 행(위원회 가결)이 있으면 그것, 없으면 신호 행. 걸린 종목은 두 목록에서 빼고(위원회 계좌는
+        상위 N 을 자른 뒤라 자리가 현금으로 남는다, 25.1588) 결정 원장에 운영과 같은 skip 줄. 든 종목은 운영처럼 보지
+        않는다(오늘 매도 전 보유), 기업행위 멈춤은 리플레이에 없다(빈 집합)"""
+        from batch.jobs import paper as jp
+
+        든 = {sid for sid, x in w.items() if x > 0}
+        즉시 = jp.prebuy_sell_flags(client, self.market.country, self.v.sell_rule, 미리 if 미리 is not None else rows,
+                                  든, set(), self._cache, self.market.targets, today, {})  # fmt: skip
+        if not 즉시:
+            return rows, 미리
+        for sid, 사유 in sorted(즉시.items()):
+            r0 = next(r for r in dv.rows if r.stock_id == sid)
+            log.decisions.append({"stock_id": sid, "kind": "skip",
+                                  "reason": "사면 바로 매도 규칙에 걸림: " + ",".join(사유),
+                                  "ref_close": r0.close, "ref_date": r0.close_date,
+                                  "detail": {"flags": 사유, "sell_rule": self.v.sell_rule, "horizon": r0.horizon,
+                                             "score": r0.total_score}})  # fmt: skip
+        return ([r for r in rows if r.stock_id not in 즉시],
+                None if 미리 is None else [r for r in 미리 if r.stock_id not in 즉시])
+
     def _buys(
         self, client: _ViewClient, view: bt.PriceView, dv: cb.DayView, w: dict[int, float], 현금: float,
         손절: set[int], 최근판: set[int], today: date, log: DayLog,
@@ -503,6 +685,8 @@ class CoreStrategy:
         rows, 미리 = self._rows(dv)
         if not rows:
             return {}, []
+        if self.prebuy:
+            rows, 미리 = self._prebuy(client, dv, rows, 미리, w, today, log)
         N = NOTIONAL_EQUITY
         v = pp.Valuation(
             invested_krw=N, cash_krw=현금 * N, holdings_krw=sum(w.values()) * N, equity_krw=N, pnl_krw=0.0, pnl_pct=0.0,
@@ -558,7 +742,7 @@ class CoreStrategy:
                 # 회차 하나 = 운영 주문 한 줄(`jobs/paper.run_step` 이 `paper_orders` 에 적는 지정가·수량) — 25.1914
                 회차.setdefault(o["stock_id"], []).append((단가 * o["quantity"] / N, float(단가)))
         bought = [_Bought(sid, log.day, x, 첫주문[sid].get("horizon"), _substitute_of(첫주문[sid]),
-                          tuple(회차.get(sid, ())))
+                          tuple(회차.get(sid, ())), 첫주문[sid].get("score"), 첫주문[sid].get("score_as_of"))
                   for sid, x in sorted(buys.items())]  # fmt: skip
         return buys, bought
 
