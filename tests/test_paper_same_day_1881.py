@@ -58,3 +58,45 @@ def test_체결_판정도_같은_순서() -> None:
         "T", "sell") == 2  # fmt: skip
     assert "pp.side_rank(" in inspect.getsource(job.fill_orders)
     assert pp.SAME_DAY_IDS == ("T",)
+
+
+# ── 25.1882 (25.1881 교차검증 [권고]) — 판정 순서를 글자가 아니라 동작으로 ─────────────────────────
+
+
+def test_판정_기존_계좌는_한_장_안에서_매도가_먼저() -> None:
+    """먼저 낸 매수(주문 번호 작음)와 나중 낸 매도가 같은 장 — 매도가 먼저 판정된다(그날 판 돈을 그날 매수가 쓴다)"""
+    from tests.test_paper_fill_1620 import 시세, 주문, 판정
+    from tests.test_paper_job_1445 import Client
+
+    c = Client()
+    c.conn.execute("INSERT INTO paper_cash_flows (flow_date, amount_krw, kind, created_at, request_key)"
+                   " VALUES ('2026-10-14', 1000000, 'deposit', 't', 'k')")  # fmt: skip
+    주문(c, side="buy", limit=10_000, q=4, decided="2026-10-12", session="2026-10-13")
+    시세(c, 1, "2026-10-13", 10_000, 9_900)
+    판정(c, "KR", "2026-10-13")
+    산 = 주문(c, side="buy", limit=10_000, q=2, decided="2026-10-14", session="2026-10-15", tranche=2)
+    판 = 주문(c, side="sell", typ="market", q=4, decided="2026-10-14", session="2026-10-15", tranche=0)
+    시세(c, 1, "2026-10-15", 9_900, 9_800)
+    판정(c, "KR", "2026-10-15")
+    줄 = [r[0] for r in c.q("SELECT order_id FROM paper_fills WHERE fill_date = '2026-10-15' ORDER BY id")]
+    assert 줄 == [판, 산]
+
+
+def test_판정_T_는_짝_매도가_주문_번호가_작아도_매수_뒤() -> None:
+    """같은 장에 T 의 매도(번호 작음, 종가 판정)와 매수(시가) — 둘 다 차고 하루 끝 보유 0, 매도 실현손익이 남는다"""
+    from tests.test_paper_fill_1620 import 시세, 주문, 판정
+    from tests.test_paper_job_1445 import Client
+
+    c = Client()
+    c.conn.execute("INSERT INTO paper_cash_flows (flow_date, amount_krw, kind, created_at, request_key)"
+                   " VALUES ('2026-10-14', 1000000, 'deposit', 't', 'k')")  # fmt: skip
+    c.conn.execute("INSERT INTO paper_accounts (id, name, sell_rule, rule_version, created_at, entry_rule, top_n, selection)"
+                   " VALUES ('T', 'T', 'day_close', 1, 't', 'open', 10, 'short')")  # 11월 행 — 시험이 직접  # fmt: skip
+    판 = 주문(c, aid="T", side="sell", typ="market", q=5, session="2026-10-15", basis="close", tranche=0)
+    산 = 주문(c, aid="T", side="buy", typ="market", q=5, session="2026-10-15", ref=10_000)
+    시세(c, 1, "2026-10-15", 10_000, 10_300)
+    새, _기록 = 판정(c, "KR", "2026-10-15")
+    assert c.q("SELECT order_id, price FROM paper_fills WHERE account_id = 'T' ORDER BY id") == [(산, 10_000), (판, 10_300)]
+    fills, _ = job._fills(c)
+    assert pp.positions([f for f in fills if f.account_id == "T"]) == {}
+    assert c.q("SELECT realized_krw IS NOT NULL FROM paper_fills WHERE order_id = ?", [판]) == [(1,)]

@@ -281,12 +281,16 @@ def test_사면_바로_팔_후보를_걸러도_S_거르개가_남는다(monkeypa
 
 def test_S_는_KIS_베끼기_장중_감시_대조_지주사_표_밖() -> None:
     """16.3.1 무변화 장치 ③ — 상수로 묶는다"""
+    # 모듈 값이 아니라 정의 글로 — 다른 시험이 `MIRROR_ACCOUNT` 를 바꾼 동안 장중 감시 모듈이 처음 읽히면 그 값으로 굳어
+    # 함께 돌릴 때만 거짓으로 깨졌다(25.1882, 25.1881 교차검증 [참고])
+    import inspect
     import json as _json
 
     from batch.jobs import broker_mirror, intraday_guard
     from batch.services import desk
 
-    assert broker_mirror.MIRROR_ACCOUNT == "H" and intraday_guard.GUARD_ACCOUNT == "H"
+    assert '\nMIRROR_ACCOUNT = "H"\n' in inspect.getsource(broker_mirror)
+    assert "\nGUARD_ACCOUNT = bmj.MIRROR_ACCOUNT\n" in inspect.getsource(intraday_guard)
     assert "S" not in desk.CONTROL_IDS
     c = Client(accounts=None, charters=True)
     헌장 = _json.loads(c.q("SELECT charter_json FROM paper_accounts WHERE id = 'H'")[0][0])

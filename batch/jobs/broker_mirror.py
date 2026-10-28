@@ -330,7 +330,9 @@ def guard_held(client: Any, 증권사: str, 계좌: str) -> set[int]:
 
     그 보유가 처음 열린 날(마지막으로 0 주에서 늘어난 체결일)이 장중 매도일 이하면 같은 보유다. 이 종목은 KIS 에 0 주가
     맞는 상태라 잔고 "어긋남" 에서 빼고, H 의 추가·회차 매수를 베끼지 않는다(`bm.plan(guard_held=…)`). H 가 그 보유를
-    다 팔면 빠지고, 그 뒤 새로 산 보유는 다시 베낀다. 같은 날 매도·매수 순서는 `pp.positions` 와 같다(매도 먼저)"""
+    다 팔면 빠지고, 그 뒤 새로 산 보유는 다시 베낀다. 같은 날 매도·매수 순서는 `pp.positions` 와 같다(`side_rank`)"""
+    from batch.services.paper import side_rank
+
     판날 = {int(r[0]): str(r[1]) for r in client.execute(
         GUARD_SELLS_SQL, [증권사, bm.REASON_GUARD_STOP, bm.REASON_GUARD_TAKE]).rows}  # fmt: skip
     if not 판날:
@@ -341,7 +343,8 @@ def guard_held(client: Any, 증권사: str, 계좌: str) -> set[int]:
     out: set[int] = set()
     for sid, 날 in 판날.items():
         수량, 열린날 = 0, None
-        for d, side, q in sorted(체결.get(sid, []), key=lambda x: (x[0], 0 if x[1] == "sell" else 1)):
+        # 순서 정의처는 `pp.side_rank` 하나(25.1882 — 사본을 두면 같은 날 매매 계좌가 생길 때 어긋난다)
+        for d, side, q in sorted(체결.get(sid, []), key=lambda x: (x[0], side_rank(계좌, x[1]))):
             앞 = 수량
             수량 += q if side == "buy" else -q
             if 앞 <= 0 < 수량:
