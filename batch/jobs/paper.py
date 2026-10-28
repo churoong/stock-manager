@@ -2184,6 +2184,8 @@ def run_step(
         종목수 = int(acct.get("top_n") or report_picks.TOP_STOCKS)
         무작위 = str(acct.get("selection") or "signal") == "random"
         a기록: dict[str, Any] = {"fills": sum(1 for f in 새체결 if f.account_id == aid)}
+        # 처음부터 같은 dict 를 걸어 둔다 — 계좌 단계 예외가 어디서 나도 그때까지 채운 칸(주문 수 등)이 남게(25.1924)
+        계좌기록[aid] = a기록
         멈춘 = 계좌별멈춤(aid)
         v, 검 = mark(client, aid, 오늘, flows, flow_created, fills, fill_created, a기록["fills"], 멈춘, stock_cache,
                     _열린_그림자(client, flows, shadows, str(acct.get("created_at") or "")[:10], 열림캐시,
@@ -2501,14 +2503,16 @@ def run_step(
                         ]))  # fmt: skip
             else:
                 a기록["buy"] = {"skipped": "배분하지 않는 날(신호 없음·묵음·추천 못 읽음)"}
+            # 적기 전 주문 수 — `_쓰기` 도중 예외(비원자 폴백이면 일부만 적힘)를 상황실이 가르게(25.1924)
+            a기록["orders_pending"] = sum(1 for sql, _a in 문장 if sql == INSERT_ORDER_SQL)
             _쓰기(client, 문장)
+            a기록["orders"] = a기록.pop("orders_pending")
             a기록["risk_blocked"] = 막힌수
             if 막힌모두:
                 # 관문 까닭 코드별 회차 수 — 배분 뒤 두 번째 줄이라 상한·현금·주문 수·묵음 막힘은 정상이면 0 이다. 0 이
                 # 아니면 배분과 관문이 어긋난 결함 신호(25.1629 [필수] 1 "거둔 회차 현금" 이 이 꼴이었다). 멈춤 스위치·
                 # 기업행위·하루 손실은 정상 막힘. 같은 실행 값이라 읽기 0, 그날 바로(36회차 P2 ①, 25.1635)
                 a기록["risk_blocked_by"] = rg.summary(막힌모두)["by_reason"]
-            a기록["orders"] = sum(1 for sql, _a in 문장 if sql == INSERT_ORDER_SQL)
             a기록["decisions"] = sum(1 for sql, _a in 문장 if sql == DECISION_INSERT_SQL)
         if aid in 헌장오류:
             a기록["charter_errors"] = 헌장오류[aid]
@@ -2560,9 +2564,9 @@ def run_step(
             # 주문을 적은 뒤에도 날 수 있다(25.1922, 25.1920 교차검증 [권고])
             계좌기록[aid] = {**계좌기록.get(aid, {}), "step_error": 글}
             계좌실패[aid] = 글
-            적음 = 계좌기록[aid].get("orders")
+            적음 = pp.step_error_orders(계좌기록[aid])
             줄.append(f"⚠️ 가상 {pp.account_name(aid)} 계좌 단계 실패({type(exc).__name__})"
-                     + (f" — 주문 {적음}건은 적은 뒤" if 적음 else "")
+                     + (f" — {적음}" if 적음 else "")
                      + (" — 오늘 KIS 베끼기 안 함" if aid == MIRROR_ACCOUNT
                         else " — 다른 계좌는 그대로 돌았습니다"))  # fmt: skip
     if 계좌실패:

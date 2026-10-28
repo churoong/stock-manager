@@ -54,6 +54,22 @@ def account_name(aid: str) -> str:
     return ACCOUNT_NAMES.get(str(aid), str(aid))
 
 
+def step_error_orders(rec: dict[str, Any]) -> str:
+    """계좌 단계 예외가 난 계좌 기록(`run_step` 의 accounts.<계좌>)에서 주문을 어디까지 적었나 — 리포트 ⚠️ 줄·상황실
+    공통 글(25.1924). `orders` 가 수면 적은 뒤, 글("이미 냄" — 같은 날 다시 돈 실행)이면 앞 실행이 냄, 적기 전 수
+    (`orders_pending`)만 있으면 적던 중(비원자 폴백이면 일부만 적혔을 수 있다). 모르면 빈 글"""
+    o, 낼 = rec.get("orders"), rec.get("orders_pending")
+    if isinstance(o, bool):
+        o = None
+    if isinstance(o, int) and o > 0:
+        return f"주문 {o}건은 적은 뒤"
+    if isinstance(o, str) and o:
+        return f"오늘 주문은 앞 실행이 {o}"
+    if isinstance(낼, int) and not isinstance(낼, bool) and 낼 > 0:
+        return f"주문 {낼}건을 적던 중(일부만 적혔을 수 있음)"
+    return ""
+
+
 #: 따로 재는 실험 계좌 (docs/paper.md 16.3.1, 25.1872) — 상황실 순위표 공통 구간·챔피언 후보에 넣지 않고, 결정 원장
 #: 성과 채우기는 따로 한 바퀴(기존 계좌의 하루 상한을 나눠 쓰지 않게). 정의처는 여기 하나(`desk.SEPARATE_IDS`)
 SEPARATE_IDS = ("S", "T")

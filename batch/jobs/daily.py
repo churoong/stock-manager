@@ -2479,6 +2479,9 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
                     # 보류 없이 주문·정리를 냈다
                     막힘2 = challenger_block(step_log.get("paper") or {}, step_log.get("broker") or {}, 잠금보류,
                                             _bm2.challenger_account(client))  # fmt: skip
+                    if 막힘2 and "계좌 단계 실패" in str(막힘2):
+                        # 사람에게도 보이게 — 보류 글은 broker2 기록에만 남았다(25.1924, 25.1922 교차검증 [참고])
+                        warnings.append(f"KIS모의투자 도전자: {막힘2}")
                     step_log["broker2"] = _bm2.run(client, market, datetime.now(UTC), slot=_bm2.CHALLENGER,
                                                    frozen=멈춘2, hold_send=str(막힘2) if 막힘2 else None)  # fmt: skip
                 except Exception as exc:  # noqa: BLE001 — 곁다리

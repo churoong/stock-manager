@@ -1,7 +1,7 @@
 """25.1920 — 가상모의투자 계좌 하나의 예외가 단계 전체를 멈추지 않는다 (스윙·단타 첫날 감사 [권고], handoff L2 후보).
 
 예전엔 `run_step` 의 계좌 루프에 계좌별 `try` 가 없어, 한 계좌의 예외로 뒤 계좌·결정 원장 성과 채우기·가상 대조·리포트 절과
-H 의 KIS 베끼기(`daily.py` 는 `paper.error` 면 베끼지 않는다)까지 그날 빠졌다. 지금은 그 계좌만 `error` 로 남기고 나머지는
+H 의 KIS 베끼기(`daily.py` 는 `paper.error` 면 베끼지 않는다)까지 그날 빠졌다. 지금은 그 계좌만 `step_error` 로 남기고(25.1922) 나머지는
 돈다. KIS 가 베끼는 H 가 깨지면 예전처럼 단계 실패(`error`)로 베끼기를 막는다. DB 한도는 그대로 던진다.
 """
 
@@ -40,7 +40,8 @@ def test_한_계좌가_깨져도_나머지는_돌고_그_계좌만_오류(c: Any
     assert "error" not in 기록  # C 는 KIS 가 베끼는 계좌가 아니다 — 베끼기는 막지 않는다
     assert 기록["account_errors"] == {"C": "RuntimeError: 평가 실패"}
     # `error`(건너뛴 계좌 — "오늘 평가·매매 안 함")가 아니라 `step_error`(25.1922)
-    assert 기록["accounts"]["C"] == {"step_error": "RuntimeError: 평가 실패"}
+    # 기록 dict 는 처음부터 걸려 있어 그때까지 채운 칸(체결 수)이 남는다(25.1924) — 주문은 아직 없다
+    assert 기록["accounts"]["C"] == {"fills": 0, "step_error": "RuntimeError: 평가 실패"}
     # C 뒤 계좌도 돌았다 — 예전엔 C 에서 멈춰 그 뒤가 비었다. D·E·R1·R2 는 주문을 냈고, KIS 가 베끼는 H 는 평가까지
     # 끝냈다(이 자료에선 H 의 투표 회사가 없어 사지 않는다)
     assert {"D", "E", "R1", "R2"} <= _주문계좌(c) and "C" not in _주문계좌(c)
@@ -56,7 +57,17 @@ def test_한_계좌가_깨져도_나머지는_돌고_그_계좌만_오류(c: Any
 
 def test_베끼는_계좌가_깨지면_단계_실패로_베끼기를_막는다(c: Any, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
     _깨뜨림(monkeypatch, bm.MIRROR_ACCOUNT, KeyError("x"))
+    줄들: list[list[str]] = []
+    원래 = job.run_step
+    monkeypatch.setattr(job, "run_step", lambda *a, **k: (r := 원래(*a, **k), 줄들.append(r[0]))[0])
     기록 = _하루(c, monkeypatch, "2026-10-14")
+    # 리포트 ⚠️ 줄이 KIS 베끼기를 안 한 까닭을 말한다(25.1922·25.1924)
+    assert any("계좌 단계 실패(KeyError)" in x and x.endswith("오늘 KIS 베끼기 안 함") for x in 줄들[0]), 줄들[0]
+    # 상황실은 단계 실패 줄 하나로 — 같은 사건의 계좌 줄을 겹쳐 내지 않는다(25.1924)
+    from batch.services import desk
+
+    글 = [x["text"] for x in desk.checks(halted=False, paper=기록, broker=None, recon_bad=[], warnings=0)]
+    assert sum("계좌 단계 실패" in t for t in 글) == 1, 글
     assert 기록["error"].startswith(f"가상 {bm.MIRROR_ACCOUNT} 계좌 단계 실패: KeyError")
     assert set(기록["account_errors"]) == {bm.MIRROR_ACCOUNT}
     assert {"A", "B", "R1", "R2"} <= _주문계좌(c)  # 다른 계좌는 그대로
@@ -82,3 +93,19 @@ def test_도전자_계좌만_깨진_날은_도전자_베끼기를_보류한다()
     assert daily.challenger_block(깨짐, {}, None, "A") is None
     assert daily.challenger_block({}, {}, None, "G") is None
     assert daily.challenger_block(깨짐, {}, "잠금", "G") == "잠금"
+
+
+@pytest.mark.parametrize(("rec", "글"), [
+    ({"orders": 3}, "주문 3건은 적은 뒤"),
+    ({"orders": "이미 냄"}, "오늘 주문은 앞 실행이 이미 냄"),
+    ({"orders_pending": 2}, "주문 2건을 적던 중(일부만 적혔을 수 있음)"),
+    ({"orders": 0}, ""),
+    ({}, ""),
+    ({"orders": True}, ""),
+])
+def test_주문을_어디까지_적었나_글(rec: dict, 글: str) -> None:
+    """25.1924 (25.1922 교차검증 [권고]) — `orders` 가 글("이미 냄")이면 "이미 냄건" 처럼 깨졌고, `_쓰기` 도중 예외는 주문
+    수가 없어 "끝나지 않았을 수 있음" 만 나왔다. 기록 dict 를 처음부터 걸어 두고 적기 전 수(`orders_pending`)를 남긴다"""
+    from batch.services import paper as pp
+
+    assert pp.step_error_orders(rec) == 글

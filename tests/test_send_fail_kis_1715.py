@@ -81,6 +81,19 @@ def test_가상_단계가_잠금으로_건너뛰면_KIS_는_내지_않는다(mon
     assert 부름["hold"][0] == "가상모의투자 단계를 건너뜀(잠금) — 오늘 베끼지 않음"
 
 
+def test_도전자_계좌만_깨진_날은_실행이_도전자_베끼기를_보류한다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1924 (25.1922 교차검증 [권고]) — 순수 함수 `challenger_block` 만이 아니라 `daily.run` 의 호출 자리까지. 첫째(H)는
+    그대로 내고, 도전자(C) 계좌의 가상 단계만 깨진 날 둘째는 보류 글을 받는다. 리포트 경고에도 한 줄"""
+    _준비(monkeypatch, 0)
+    부름 = _kis_desk(monkeypatch, {"accounts": {"H": {"orders": 3}, "C": {"step_error": "KeyError: 1"}},
+                                 "account_errors": {"C": "KeyError: 1"}, "frozen": [], "frozen_by_account": {}})
+    보낸: list[str] = []
+    monkeypatch.setattr(daily.telegram, "send", lambda text, *a, **k: 보낸.append(text))
+    daily.run("KR")
+    assert 부름["hold"][0] is None
+    assert 부름["hold"][1] == "가상 C 계좌 단계 실패 — 오늘 도전자 베끼기 보류"
+
+
 def test_dry_run_이_깨져도_운용요약을_덮지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
     """25.1717 (25.1715 교차검증 [참고] 3·5) — dry-run 의 기록 닫기가 깨지면 바깥 except 가 `_kis와_요약` 을 불러 확인용
     실행이 그날 운용 요약을 덮었다"""
