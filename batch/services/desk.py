@@ -1001,6 +1001,11 @@ def checks(
             out.append({"level": "high", "text": f"가상 {nm} 헌장 오류: {'; '.join(a['charter_errors'])[:120]}"})
         if a.get("error"):  # 모르는 매도 규칙으로 그 계좌를 건너뛴 날(25.1871 막이) — 텔레그램 줄에만 있었다(25.1873)
             out.append({"level": "high", "text": f"가상 {nm} {str(a['error'])[:100]} — 오늘 평가·매매 안 함"})
+        if a.get("step_error"):
+            # 계좌 단계에서 가둔 예외(25.1920·25.1922) — 다른 계좌는 돌았다. 주문을 적은 뒤에 났을 수 있다
+            적음 = a.get("orders")
+            뒤 = f"주문 {적음}건은 적은 뒤 멈춤" if 적음 else "오늘 이 계좌의 평가·매매가 끝나지 않았을 수 있음"
+            out.append({"level": "high", "text": f"가상 {nm} 계좌 단계 실패({str(a['step_error'])[:100]}) — {뒤}"})
     if p.get("frozen"):
         # `frozen` 은 경계 멈춤(모든 계좌) + 이어 멈춤(경계 전부터 든 계좌만, `action_sticky`)의 합이다 —
         # 합친 수를 "그 종목은 사고팔지 않습니다" 로 쓰면 이어 멈춤 종목을 다른 계좌가 사고팔 수 있다는 것을

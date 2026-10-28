@@ -1043,6 +1043,18 @@ def mirror_frozen(paper_log: dict[str, Any], account: str | None) -> set[int]:
     return {int(x) for x in paper_log.get("frozen") or []}
 
 
+def challenger_block(
+    paper_log: dict[str, Any], first: dict[str, Any], lock_hold: str | None, challenger: str | None
+) -> str | None:
+    """둘째(도전자) KIS모의투자가 오늘 보내지 않을 까닭 — 잠금 보류, 첫째가 못 보낸 까닭(`challenger_hold`), 그리고
+    **도전자 계좌의 가상 단계만 깨진 날**(25.1920 계좌별로 가둔 예외 — 그 계좌 장부가 덜 됐을 수 있다.
+    시험 25.1922)"""
+    막힘 = lock_hold or challenger_hold(first)
+    if not 막힘 and challenger and challenger in (paper_log.get("account_errors") or {}):
+        막힘 = f"가상 {challenger} 계좌 단계 실패 — 오늘 도전자 베끼기 보류"
+    return 막힘
+
+
 def challenger_hold(first: dict[str, Any]) -> str | None:
     """둘째(도전자) KIS모의투자 계좌가 보내지 않을 까닭 — 첫째가 보내지 못한 까닭(`send`), 첫째 단계가 예외로 끝났으면
     그 사실 (docs/paper.md 15.10, 25.1517·25.1543). 첫째가 도중에 몇 건 보낸 뒤 깨졌어도 둘째는 내지 않는다 — 주문이 덜
@@ -2465,11 +2477,8 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
                     # 잠금 보류는 직접 넘긴다(25.1717, 25.1715 교차검증 [권고] 1) — 첫째가 키 없음·베낄 계좌
                     # 없음으로 "꺼짐" 이면 첫째 기록에 `send` 가 안 남아 `challenger_hold` 가 None 이었고, 도전자는
                     # 보류 없이 주문·정리를 냈다
-                    막힘2 = 잠금보류 or challenger_hold(step_log.get("broker") or {})
-                    # 도전자 계좌의 가상 단계만 깨진 날(25.1920 — 계좌별로 가둔 예외)은 둘째도 보내지 않는다
-                    도전자 = _bm2.challenger_account(client)
-                    if not 막힘2 and 도전자 in ((step_log.get("paper") or {}).get("account_errors") or {}):
-                        막힘2 = f"가상 {도전자} 계좌 단계 실패 — 오늘 도전자 베끼기 보류"
+                    막힘2 = challenger_block(step_log.get("paper") or {}, step_log.get("broker") or {}, 잠금보류,
+                                            _bm2.challenger_account(client))  # fmt: skip
                     step_log["broker2"] = _bm2.run(client, market, datetime.now(UTC), slot=_bm2.CHALLENGER,
                                                    frozen=멈춘2, hold_send=str(막힘2) if 막힘2 else None)  # fmt: skip
                 except Exception as exc:  # noqa: BLE001 — 곁다리

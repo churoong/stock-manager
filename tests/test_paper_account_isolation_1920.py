@@ -39,9 +39,17 @@ def test_한_계좌가_깨져도_나머지는_돌고_그_계좌만_오류(c: Any
     기록 = _하루(c, monkeypatch, "2026-10-14")
     assert "error" not in 기록  # C 는 KIS 가 베끼는 계좌가 아니다 — 베끼기는 막지 않는다
     assert 기록["account_errors"] == {"C": "RuntimeError: 평가 실패"}
-    assert 기록["accounts"]["C"]["error"] == "RuntimeError: 평가 실패"
-    # C 뒤 계좌(D·E·G·H·R1·R2)도 돌았다 — 예전엔 C 에서 멈춰 그 뒤가 비었다
-    assert {"A", "B", "D", "E", "R1", "R2"} <= _주문계좌(c) and "C" not in _주문계좌(c)
+    # `error`(건너뛴 계좌 — "오늘 평가·매매 안 함")가 아니라 `step_error`(25.1922)
+    assert 기록["accounts"]["C"] == {"step_error": "RuntimeError: 평가 실패"}
+    # C 뒤 계좌도 돌았다 — 예전엔 C 에서 멈춰 그 뒤가 비었다. D·E·R1·R2 는 주문을 냈고, KIS 가 베끼는 H 는 평가까지
+    # 끝냈다(이 자료에선 H 의 투표 회사가 없어 사지 않는다)
+    assert {"D", "E", "R1", "R2"} <= _주문계좌(c) and "C" not in _주문계좌(c)
+    assert "recon_ok" in 기록["accounts"][bm.MIRROR_ACCOUNT] and "step_error" not in 기록["accounts"][bm.MIRROR_ACCOUNT]
+    # 상황실 확인할 일 — 높음 한 줄(25.1922)
+    from batch.services import desk
+
+    글 = [x["text"] for x in desk.checks(halted=False, paper=기록, broker=None, recon_bad=[], warnings=0)]
+    assert any(t.startswith("가상 ") and "계좌 단계 실패(RuntimeError: 평가 실패)" in t for t in 글), 글
     # 루프 뒤 곁다리도 돌았다
     assert "decision_outcomes" in 기록 and "frozen_by_account" in 기록
 
@@ -62,3 +70,15 @@ def test_DB_한도는_가두지_않고_던진다(c: Any, monkeypatch: pytest.Mon
     _깨뜨림(monkeypatch, "C", 한도("BLOCKED"))
     with pytest.raises(한도):
         _하루(c, monkeypatch, "2026-10-14")
+
+
+def test_도전자_계좌만_깨진_날은_도전자_베끼기를_보류한다() -> None:
+    """25.1922 (25.1920 교차검증 [권고]) — `daily.challenger_block`: 잠금·첫째 까닭이 없어도 도전자 계좌가 계좌 단계
+    실패면 보류. 다른 계좌의 실패는 도전자를 막지 않는다."""
+    from batch.jobs import daily
+
+    깨짐 = {"account_errors": {"G": "KeyError: 1"}}
+    assert daily.challenger_block(깨짐, {}, None, "G") == "가상 G 계좌 단계 실패 — 오늘 도전자 베끼기 보류"
+    assert daily.challenger_block(깨짐, {}, None, "A") is None
+    assert daily.challenger_block({}, {}, None, "G") is None
+    assert daily.challenger_block(깨짐, {}, "잠금", "G") == "잠금"

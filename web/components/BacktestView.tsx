@@ -37,7 +37,7 @@ interface Data {
   runs: BacktestRun[];
   curves: CurvePoint[];
   curve_runs: Array<{ run_id: number; strategy: string }>;
-  groups: Array<{ group_id: string; market: string; strategies: number; start_date: string; end_date: string; top_n: number; created_at: string; no_pit?: number | null; trend_on?: number | null; has_composite?: number | null; not_default?: number | null; core?: number | null; explore?: number | null }>;
+  groups: Array<{ group_id: string; market: string; strategies: number; start_date: string; end_date: string; top_n: number; created_at: string; no_pit?: number | null; trend_on?: number | null; has_composite?: number | null; not_default?: number | null; core?: number | null; explore?: number | null; limit_fills?: number | null }>;
   stress: StressRun | null;
   /** 마지막 스트레스 실행이 신호 0건이라 돌지 않았으면 그 말 (25.825) */
   stress_note?: string | null;

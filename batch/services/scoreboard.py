@@ -11,7 +11,8 @@
 
 `metrics_json`·`warnings_json`·`step_log` 는 JSON 글이어도 이미 푼 값이어도 된다.
 
-출력은 (전략 이름, 시장, 코드 sha) 마다 한 줄. 같은 열쇠의 실행이 여럿이면 가장 늦은 실행 하나를 쓰고 `runs` 에 그 수를
+출력은 (전략 이름, 시장, 코드 sha, 작업 이름, 코호트) 마다 한 줄(뒤의 둘 — 같은 sha 의 지정가·비기본 실행이 코호트
+줄을 덮지 않게, 25.1922). 같은 열쇠의 실행이 여럿이면 가장 늦은 실행 하나를 쓰고 `runs` 에 그 수를
 적는다. **저장된 값만 옮긴다**(절대 규칙 — 없는 숫자 생성 금지): 기록에 없는 칸은 None 이고 그 까닭을 `missing[칸]` 에
 적는다(None 인 칸은 모두 `missing` 에 까닭이 있다 — 시험이 대조).
 
@@ -240,12 +241,12 @@ def _row(run: dict[str, Any], r: dict[str, Any], twins: dict[str, dict[str, Any]
 
 
 def rows(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """실행 기록들 → 판정판 줄들. (전략, 시장, sha) 마다 가장 늦은 실행 하나, 정렬은 (시장, 코호트, 전략).
+    """실행 기록들 → 판정판 줄들. (전략, 시장, sha, 작업, 코호트) 마다 가장 늦은 실행 하나, 정렬은 (시장, 코호트, 전략).
 
     같은 열쇠의 실행 수는 `runs` 칸 — 같은 커밋으로 다시 돌린 실행은 새 시도가 아니라 같은 줄이다.
     """
-    best: dict[tuple[Any, str, Any], tuple[tuple[str, str], dict[str, Any]]] = {}
-    seen: dict[tuple[Any, str, Any], int] = {}
+    best: dict[tuple[Any, ...], tuple[tuple[str, str], dict[str, Any]]] = {}
+    seen: dict[tuple[Any, ...], int] = {}
     for run in runs:
         results = [r for r in run.get("results") or [] if isinstance(r, dict)]
         twins = {
@@ -257,7 +258,9 @@ def rows(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
             if str(r.get("strategy") or "").endswith(NO_COST_SUFFIX):
                 continue
             row = _row(run, r, twins)
-            key = (row["market"], row["strategy"], row["sha"])
+            # 작업 이름·코호트도 열쇠 — 같은 sha 로 돈 `backtest_limit`(코호트 밖)이 `backtest_core`(1b) 줄을, 비기본 월
+            # 실행이 기본(코호트 1) 줄을 덮었다(25.1922, 25.1919 교차검증 [권고])
+            key = (row["market"], row["strategy"], row["sha"], row["job_name"], row["cohort"])
             seen[key] = seen.get(key, 0) + 1
             order = (t, str(r.get("created_at") or ""))
             if key not in best or order > best[key][0]:

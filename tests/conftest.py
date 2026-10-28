@@ -63,6 +63,14 @@ def _전역을_남기지_않는다(request: pytest.FixtureRequest):  # noqa: ANN
 
 
 @pytest.fixture(autouse=True)
+def _저장소_공개_여부를_고정한다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """시험은 비공개로 본다(`REPO_PUBLIC=false`) — 공개 저장소의 Actions(`tests.yml`)에서는 이벤트 파일이 공개라
+    `visibility.is_public()` 이 참이 되어, 다시 던짐을 기대하는 `entry.guard` 시험 셋이 그곳에서만 깨졌다(25.1922, 25.1917
+    교차검증 [권고]). 공개 갈래를 보는 시험은 제 안에서 `REPO_PUBLIC` 을 다시 정하거나 environ 을 직접 넘긴다"""
+    monkeypatch.setenv("REPO_PUBLIC", "false")
+
+
+@pytest.fixture(autouse=True)
 def _백테스트_위험_캐시를_비운다():  # noqa: ANN201
     """백테스트 리스크 지표 캐시(25.625)는 운영에선 `run` 이 비운다. 테스트는 `run` 없이 `build_pit_inputs` 를 부르기도 해
     **앞 테스트의 값이 섞일 수 있었다**(교차검증: 길이·첫날·마지막 값이 같고 중간만 다르면 앞 값이 나왔다). 채우는 것은

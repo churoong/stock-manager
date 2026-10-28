@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
-  COST_KEYS, DEFAULT_TOP_N, ENGINE_VERSION, EXPLORE_MARK, NOT_DEFAULT_MARK, NO_PIT_MARK, SCORING_VERSION, TREND_ON_MARK, groupTags, staleVersionNote, LATEST_GROUP, LATEST_STRESS, RECENT_BATCH_RUNS, RECENT_GROUPS, RUNS_IN_GROUP, WHAT_OPTIONS,
+  COST_KEYS, DEFAULT_TOP_N, ENGINE_VERSION, EXPLORE_MARK, LIMIT_MARK, NOT_DEFAULT_MARK, NO_PIT_MARK, SCORING_VERSION, TREND_ON_MARK, groupTags, staleVersionNote, LATEST_GROUP, LATEST_STRESS, RECENT_BATCH_RUNS, RECENT_GROUPS, RUNS_IN_GROUP, WHAT_OPTIONS,
   WORKFLOW_FILE, WORKFLOW_REF, awaitingRunner, recentlyFinished, costLine, curvesSql, groupNotice, isRunning, readStressJson, stuckRunNote, mergeWarnings, metricNumber, progressText, requestBacktest,
   pickCurveRuns, runInputSchema, stocksSql, strategyKind, strategyLabel,
   type BacktestRun, type BatchRunRow,
@@ -431,10 +431,11 @@ describe("기본 묶음과 옛 판 (25.788, 백테스트 감사 #2·#3)", () => 
     넣기(d, 2, "core_h", "핵심", "2026-10-20T00:00:00Z", ["핵심 H — …"]);
     넣기(d, 3, "core_b", "핵심", "2026-10-20T00:00:00Z", ["핵심 H — …"]);
     넣기(d, 4, "core_d", "탐색", "2026-11-02T00:00:00Z", ["핵심 H — …", `${EXPLORE_MARK} — 걸러내기용, 판정·확정 아님`]);
+    넣기(d, 5, "core_h", "지정가", "2026-11-03T00:00:00Z", ["핵심 H — …", `${LIMIT_MARK} — 회차 변형의 매수는…`]);
     expect((d.prepare(LATEST_GROUP).get("KR") as { group_id: string }).group_id).toBe("본");
     const 목록 = d.prepare(RECENT_GROUPS).all("KR") as Array<Parameters<typeof groupTags>[0] & { group_id: string }>;
     expect(Object.fromEntries(목록.map((g) => [g.group_id, groupTags(g)]))).toEqual({
-      본: "", 핵심: " · 핵심 H 리플레이", 탐색: " · 탐색 — 걸러내기용, 판정 아님",
+      본: "", 핵심: " · 핵심 H 리플레이", 탐색: " · 탐색 — 걸러내기용, 판정 아님", 지정가: " · 회차 지정가 — 판정 아님",
     });
   });
 
@@ -452,6 +453,7 @@ describe("기본 묶음과 옛 판 (25.788, 백테스트 감사 #2·#3)", () => 
     expect(잡).toContain(`WARN_NOT_DEFAULT_PARAMS = "${NOT_DEFAULT_MARK}`);
     const 핵심 = readFileSync(join(process.cwd(), "..", "batch", "jobs", "core_backtest.py"), "utf-8");
     expect(핵심).toContain(`WARN_EXPLORE = "${EXPLORE_MARK}`);
+    expect(핵심).toContain(`"${LIMIT_MARK}`);
     const 기본N = readFileSync(join(process.cwd(), "..", "batch", "services", "backtest.py"), "utf-8");
     expect(기본N).toMatch(new RegExp(`^DEFAULT_TOP_N = ${DEFAULT_TOP_N}$`, "m"));
     const 엔진 = readFileSync(join(process.cwd(), "..", "batch", "services", "backtest.py"), "utf-8");

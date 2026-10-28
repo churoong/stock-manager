@@ -211,6 +211,19 @@ def test_같은_sha_는_가장_늦은_실행_하나() -> None:
     assert len([r for r in 다른 if r["strategy"] == "composite"]) == 2
 
 
+def test_같은_sha_라도_코호트_밖_실행이_코호트_줄을_덮지_않는다() -> None:
+    """25.1922 (25.1919 교차검증 [권고]) — 같은 sha 로 뒤에 돈 지정가 실행(`backtest_limit`)·비기본 월 실행이 코호트 줄을
+    덮어 1b·1 줄이 사라졌다. 열쇠에 작업 이름·코호트를 넣는다"""
+    핵심 = _핵심실행()
+    지정가 = _핵심실행()
+    지정가["job_name"], 지정가["started_at"] = "backtest_limit", "2026-11-11T01:00:00+00:00"
+    h = [r for r in sb.rows([핵심, 지정가]) if r["strategy"] == "core_h"]
+    assert sorted((r["job_name"], r["cohort"]) for r in h) == [("backtest_core", "1b"), ("backtest_limit", None)]
+    비기본 = _월실행(started="2026-12-01T17:11:00+00:00", default=False)
+    c = [r for r in sb.rows([_월실행(), 비기본]) if r["strategy"] == "composite"]
+    assert sorted(str(r["cohort"]) for r in c) == ["1", "None"]
+
+
 def test_sha_없으면_까닭() -> None:
     c = _by(sb.rows([_월실행(sha=None)]), "composite")
     assert c["sha"] is None and "params.sha 없음" in c["missing"]["sha"]

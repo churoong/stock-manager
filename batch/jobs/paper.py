@@ -2146,6 +2146,7 @@ def run_step(
     조사: dict[str, Any] = {}  # 모집단·안건 조사 자료 — 하루 실행에 한 번, 회사들이 같이 쓴다
     메모줄: list[str] = []  # 운용역 메모 — 회사마다 한 줄 (docs/company.md 7장, 텔레그램 길이)
     계좌실패: dict[str, str] = {}  # 계좌 단계 예외 — 계좌 → 글(25.1920)
+    from batch.jobs.broker_mirror import MIRROR_ACCOUNT
     def _계좌_단계(acct: dict[str, Any]) -> None:
         """계좌 하나의 평가·매도·매수 — 아래 루프가 계좌마다 예외를 가둔다(25.1920). 계좌끼리 이어 쓰는 상태(체결 판정
         기준·열린 주문·시세 캐시·무작위 유니버스)는 바깥 변수를 그대로 고친다"""
@@ -2555,15 +2556,18 @@ def run_step(
             aid = str(acct["id"])
             log.exception("가상 %s 계좌 단계 실패 — 다른 계좌는 계속", aid)
             글 = f"{type(exc).__name__}: {str(exc)[:200]}"
-            계좌기록[aid] = {**계좌기록.get(aid, {}), "error": 글}
+            # `error` 가 아니라 `step_error` — `error` 는 "오늘 평가·매매 안 함"(건너뛴 계좌)의 뜻이다. 예외는
+            # 주문을 적은 뒤에도 날 수 있다(25.1922, 25.1920 교차검증 [권고])
+            계좌기록[aid] = {**계좌기록.get(aid, {}), "step_error": 글}
             계좌실패[aid] = 글
+            적음 = 계좌기록[aid].get("orders")
             줄.append(f"⚠️ 가상 {pp.account_name(aid)} 계좌 단계 실패({type(exc).__name__})"
-                     " — 다른 계좌는 그대로 돌았습니다")  # fmt: skip
+                     + (f" — 주문 {적음}건은 적은 뒤" if 적음 else "")
+                     + (" — 오늘 KIS 베끼기 안 함" if aid == MIRROR_ACCOUNT
+                        else " — 다른 계좌는 그대로 돌았습니다"))  # fmt: skip
     if 계좌실패:
         # 관문 "운영 무사고" 는 계좌 하나의 실패도 사고로 센다(`desk.paper_step_failed`) — 예전엔 단계 전체 실패였다
         기록["account_errors"] = 계좌실패
-        from batch.jobs.broker_mirror import MIRROR_ACCOUNT
-
         if MIRROR_ACCOUNT in 계좌실패:
             # KIS 가 베끼는 계좌가 깨졌으면 예전처럼 단계 실패로 — 베끼기를 막는다(장부가 어긋난 채 주문을 내지 않게)
             기록["error"] = f"가상 {MIRROR_ACCOUNT} 계좌 단계 실패: {계좌실패[MIRROR_ACCOUNT]}"

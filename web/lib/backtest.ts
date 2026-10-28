@@ -61,6 +61,8 @@ export const NOT_DEFAULT_MARK = "기본 파라미터 아님";
  * 종합 전략이 없어 예전엔 "장기 문턱만" 으로 잘못 붙었다. 탐색 표시는 배치 `WARN_EXPLORE` 의 앞머리와 같다(`backtest.test.ts` 가 대 본다)
  */
 export const EXPLORE_MARK = "탐색 실행(전략 깔때기 0단계)";
+/** 회차 지정가 체결 실행(25.1922) — 배치 `WARN_LIMIT_FILLS` 의 앞머리. 핵심 H 와 같은 `core_*` 이름이라 표시가 없으면 사전 등록 실행과 같아 보였다 */
+export const LIMIT_MARK = "회차 지정가 체결(--limit-fills)";
 export const DEFAULT_TOP_N = 20;
 export const LATEST_GROUP = `SELECT group_id FROM backtest_runs WHERE market = ?
 GROUP BY group_id
@@ -85,7 +87,8 @@ export const RECENT_GROUPS = `SELECT group_id, market, COUNT(*) AS strategies, M
   MAX(CASE WHEN warnings_json LIKE '%${NOT_DEFAULT_MARK}%' OR top_n <> ${DEFAULT_TOP_N} THEN 1 ELSE 0 END) AS not_default,
   MAX(CASE WHEN strategy = 'composite' THEN 1 ELSE 0 END) AS has_composite,
   MAX(CASE WHEN substr(strategy, 1, 5) = 'core_' THEN 1 ELSE 0 END) AS core,
-  MAX(CASE WHEN warnings_json LIKE '%${EXPLORE_MARK}%' THEN 1 ELSE 0 END) AS explore
+  MAX(CASE WHEN warnings_json LIKE '%${EXPLORE_MARK}%' THEN 1 ELSE 0 END) AS explore,
+  MAX(CASE WHEN warnings_json LIKE '%${LIMIT_MARK}%' THEN 1 ELSE 0 END) AS limit_fills
 FROM backtest_runs WHERE market = ? GROUP BY group_id, market ORDER BY created_at DESC LIMIT 12`;
 
 /** 묶음 목록에 붙이는 표시 — 어느 것이 비교용인지 (25.788) */
@@ -96,9 +99,11 @@ export function groupTags(g: {
   not_default?: number | null;
   core?: number | null;
   explore?: number | null;
+  limit_fills?: number | null;
 }): string {
   const 표: string[] = [];
   if (g.explore) 표.push("탐색 — 걸러내기용, 판정 아님");
+  else if (g.limit_fills) 표.push("회차 지정가 — 판정 아님");
   else if (g.core) 표.push("핵심 H 리플레이");
   else if (g.has_composite === 0) 표.push("장기 문턱만");
   if (g.no_pit) 표.push("비교용 · 시점 유니버스 끔");
