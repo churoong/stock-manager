@@ -9,7 +9,8 @@
   회차만 — 원가 = 찬 회차 지정가의 주식 수 평균 × (1 + 매수 수수료), 하나도 안 차면 로트가 없다
 - 끝까지(1532 합성 자료, core_b): 지정가 모드가 전량 모드보다 덜 산다(일부만 찬 날이 있다) · 장부 = 엔진 보유 날마다 ·
   새 로트의 주식 수가 찬 회차 수량과 같다
-- 운영과 일치(1910 합성 자료, core_b — 25.1945 G·H·D·E 도, 비용 0): 운영 `run_step` 이 낸 회차를 **운영 체결 판정이 스스로** 채우게 두고(1910 의
+- 운영과 일치(1910 합성 자료, core_b — 25.1945 G·H·D·E·25.1948 A 도, 비용 0 — 25.1959 비용 판도: 엔진이 장부형 비용을 현금에서
+  내게 된 뒤(25.1957) 같은 잣대에 더 산 로트 원가만 1910 허용 ⑦): 운영 `run_step` 이 낸 회차를 **운영 체결 판정이 스스로** 채우게 두고(1910 의
   허용 ① "엔진 체결 베낌" 없이) 날마다 찬 회차·보유 수량·주당 원가가 리플레이와 같다
 """
 
@@ -301,22 +302,23 @@ def test_끝까지_지정가_모드는_덜_사고_장부가_엔진과_같다() -
 L4_변형들 = ["core_b", "core_g", "core_h", "core_d", "core_e", "core_a"]
 
 
-def _리플레이(variant: str) -> t10.리플레이:
-    """1910 리플레이를 지정가 판으로(비용 0) — 판단 직전 장부·재료·조사 자료(지주사·위원회의 운영입력이 쓴다)를 함께 남긴다."""
-    return t10._리플레이(variant, "zero", limit_fills=True)
+def _리플레이(variant: str, 판: str = "zero") -> t10.리플레이:
+    """1910 리플레이를 지정가 판으로 — 판단 직전 장부·재료·조사 자료(지주사·위원회의 운영입력이 쓴다)를 함께 남긴다.
+    `판` = 1910 비용판(25.1959 — "fees": 운영 설정 수수료·시행일 거래세, 슬리피지 0)"""
+    return t10._리플레이(variant, 판, limit_fills=True)
 
 
 @cache
-def _운영(variant: str) -> dict[str, dict]:
+def _운영(variant: str, 판: str = "zero") -> dict[str, dict]:
     """운영 `run_step` 을 리플레이 결정일마다(trade_date = cutoff). 1910 과 달리 운영이 낸 회차를 **운영 체결 판정**
     (`fill_orders` — 다음 `run_step` 첫머리)이 그날 종가로 스스로 채운다. 결정일 d 에 낸 회차는 다음 결정일의 실행이 판정한다.
     지주사·위원회는 1910 의 `운영입력들`(헌장·조사 자료·지수, 25.1921)을 그대로 넣는다.
     {체결일: {"fills": {(종목, 지정가, 수량)}, "orders": {(종목, 지정가, 수량)}, "pos": {종목: (수량, 원가)}}}"""
-    rp = _리플레이(variant)
+    rp = _리플레이(variant, 판)
     spec = cs.variant_spec(variant)
     aid = spec.account
     입력 = t10.운영입력들.get(variant) or t10.운영입력들.get(spec.selection)
-    c = (입력.db if 입력 else t10._db)(aid, {"kr_buy_pct": 0.0, "kr_sell_pct": 0.0})
+    c = (입력.db if 입력 else t10._db)(aid, t10.비용판[판][0])
     for d in t10.날들[: t10.W]:
         t10._시세넣기(c, d)
         if 입력:
@@ -328,8 +330,14 @@ def _운영(variant: str) -> dict[str, dict]:
         # 비용 0 판 — 운영 시장가 매도의 슬리피지(설정 칸 없음, 0.10%)·시행일 거래세도 0 으로(엔진 `Costs.zero` 와 같게).
         # 엔진은 비용을 회전율에 매겨 지정가 매수에도 슬리피지를 물린다(`bt.Costs.rebalance_cost`) — 비용 판의 차이는
         # 1910 허용 ⑨ 와 같은 엔진 비용 장부 몫이라 여기서는 견주지 않는다
-        mp.setattr(job, "costs_for", lambda *_a, **_k: pp.Costs(buy_fee_pct=0.0, sell_fee_pct=0.0, sell_tax_pct=0.0,
-                                                                 slippage_pct=0.0))  # fmt: skip
+        if 판 == "zero":
+            mp.setattr(job, "costs_for", lambda *_a, **_k: pp.Costs(buy_fee_pct=0.0, sell_fee_pct=0.0, sell_tax_pct=0.0,
+                                                                     slippage_pct=0.0))  # fmt: skip
+        else:
+            # 25.1959 비용 판 — 운영 설정 수수료·시행일 거래세 그대로, 슬리피지만 0(엔진 비용판 `fees` 와 같게 — 운영 시장가
+            # 매도의 슬리피지 0.10% 는 설정 칸이 없어 엔진 기본값이다)
+            원래비용 = job.costs_for
+            mp.setattr(job, "costs_for", lambda *a, **k: dc_replace(원래비용(*a, **k), slippage_pct=0.0))
         for day in t10.모의[:-1]:
             cutoff, rows = rp.재료[day]
             오늘 = date.fromisoformat(day)
@@ -371,17 +379,20 @@ ALLOW_SHARES = 2.0
 ALLOW_REL = 2e-7
 
 
+@pytest.mark.parametrize("판", ["zero", "fees"])
 @pytest.mark.parametrize("variant", L4_변형들)
-def test_운영_체결_판정과_찬_회차·보유·원가가_같다(variant: str) -> None:
-    """25.1914 (전략 깔때기 ④ 분할 지정가 체결) — 비용 0 판. 1910 의 허용 ①(엔진 체결 베낌) 없이 운영이 스스로 채운다.
+def test_운영_체결_판정과_찬_회차·보유·원가가_같다(variant: str, 판: str) -> None:
+    """25.1914 (전략 깔때기 ④ 분할 지정가 체결) — 비용 0 판, 25.1959 비용 판(운영 설정 수수료·시행일 거래세, 슬리피지 0).
+    1910 의 허용 ①(엔진 체결 베낌) 없이 운영이 스스로 채운다.
     날마다 (가) 낸 회차(종목·지정가·수량)가 같고 (나) 찬 회차가 리플레이 잣대(그날 종가 ≤ 지정가)와 같고 (다) 체결 뒤 보유
     수량이 엔진(비중 × 자본 × 명목 ÷ 종가)과 정수 주 안에서, 현금 비중이 `ALLOW_REL` 안에서 같고 (라) 다음 판단 직전 장부의
     주당 원가(더 산 로트 포함)가 운영 `pp.positions` 의 cost ÷ quantity 와 같다. 헛돌지 않게: 변형별 실측과 하한은
     `L4_하한`(25.1945 — 예전 이 자리의 696·113·70·156·61 은 B 의 값)."""
-    rp = _리플레이(variant)
+    rp = _리플레이(variant, 판)
     s, r = rp.s, rp.r
     장부 = {d: {sid: x[2] for sid, x in 장.items()} for d, 장 in rp.장부.items()}
-    live = _운영(variant)
+    더산 = {d: {sid for sid, x in 장.items() if x[3]} for d, 장 in rp.장부.items()}
+    live = _운영(variant, 판)
     prices = t10._자료()[1]
     로그 = {lg.day: lg for lg in s.log}
     자본 = dict(r.curve)
@@ -421,7 +432,10 @@ def test_운영_체결_판정과_찬_회차·보유·원가가_같다(variant: s
             if abs(엔진주식[sid] - q) > ALLOW_SHARES:
                 틀림.append(f"{day} 종목 {sid}: 엔진 {엔진주식[sid]:.1f}주 ≠ 운영 {q}주")
             다음 = 장부[t10.모의[k + 1]].get(sid)
-            if 다음 is None or abs(다음 / 원가 - 1) > ALLOW_REL:
+            # 비용 판의 더 산 로트는 1910 허용 ⑦(리플레이 원가 평균 근사, 25.1959 실측 B 2.2e-7·G 1.2e-6) — 수수료가 든
+            # 원가를 산 날 종가 비중의 주식 수 비율로 평균하는 근사. 비용 0 판·한 번 산 로트는 `ALLOW_REL`
+            원가한도 = t10.ALLOW_COST_AVERAGING_REL if 판 != "zero" and sid in 더산[t10.모의[k + 1]] else ALLOW_REL
+            if 다음 is None or abs(다음 / 원가 - 1) > 원가한도:
                 틀림.append(f"{day} 종목 {sid}: 원가 리플레이 {다음} ≠ 운영 {원가}")
     assert not 틀림, 틀림[:5]
     본 = (낸수, 찬수, 일부, 안참, 더, 견줌)
