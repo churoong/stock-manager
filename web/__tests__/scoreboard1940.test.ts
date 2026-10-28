@@ -14,7 +14,7 @@ import {
 const 줄 = {
   strategy: "core_h", market: "KR", cohort: "1b", trials_cumulative: 17, cagr: 0.1234, excess_cagr: -0.0101, mdd: -0.2567,
   dsr: 0.9312, dsr_n: 17, control_lower: 51.04, gate_lower: null, half_first_cagr: 0.05, half_second_cagr: null,
-  walk_positive: 3, walk_total: 4, bh_q: 0.0421, capacity: 0.00042, stage01_verdict: "모름", stage01_note: "재료 없음: 수용량", months: 48, rebalances: 1000, buys: 120, control_blocks: 9, gate_blocks: 4, sells_scored: 80,
+  walk_positive: 3, walk_total: 4, bh_q: 0.0421, capacity: 0.00042, capacity_complete: true, stage01_verdict: "모름", stage01_note: "재료 없음: 수용량", months: 48, rebalances: 1000, buys: 120, control_blocks: 9, gate_blocks: 4, sells_scored: 80,
   missing: { gate_lower: "하한 없음 — 묶음 4개(block_bound 최소 미달)", half_second_cagr: "second 반 CAGR 표본 미달" },
 };
 
@@ -69,6 +69,7 @@ describe("판정판 글 (25.1940)", () => {
       "없음: 걷는 창·걷는 창 수 — 이 칸이 생기기(25.1947) 전 실행 — 다음 실행부터 찹니다",
       "없음: BH q — 이 칸이 생기기(25.1951) 전 실행 — 다음 실행부터 찹니다",
       "없음: 수용량 — 이 칸이 생기기(25.1954) 전 실행 — 다음 실행부터 찹니다",
+      "없음: 수용량 하한 여부 — 이 칸이 생기기(25.1956) 전 실행 — 다음 실행부터 찹니다",
       "없음: 0→1 점검·0→1 근거 — 이 칸이 생기기(25.1950) 전 실행 — 다음 실행부터 찹니다",
     ]);
   });
@@ -225,5 +226,10 @@ describe("판정판 안내 줄은 가리킬 곳이 있을 때만 (25.1942)", () 
     expect(칸("US", 0.0123)).toBe("1.230% / 10만 달러");
     expect(칸("KR", null)).toBe("없음");
     expect(칸(null, 0.001)).toBe("0.100% / 단위");
+    // 25.1956 — 재지 못한 날이 있으면 하한(≥), 아주 작으면 "< 0.001%", BH q 도 작으면 "< 0.001"
+    const 하한 = Object.fromEntries(scoreLine(parseScoreboard([{ ...줄, capacity: 0.004, capacity_complete: false }]).rows[0]).cells);
+    expect(하한["수용량"]).toBe("≥ 0.400% / 1억 원");
+    expect(칸("US", 5e-7)).toBe("< 0.001% / 10만 달러");
+    expect(Object.fromEntries(scoreLine(parseScoreboard([{ ...줄, bh_q: 0.0002 }]).rows[0]).cells)["BH q"]).toBe("< 0.001");
   });
 });

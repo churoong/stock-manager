@@ -15,8 +15,8 @@ import { pct } from "@/lib/portfolio";
 export const SCOREBOARD_KEYS = [
   "strategy", "market", "cohort", "trials_cumulative", "cagr", "excess_cagr", "mdd", "dsr", "dsr_n",
   "control_lower", "gate_lower", "half_first_cagr", "half_second_cagr", "walk_positive", "walk_total", "months",
-  "rebalances", "buys", "control_blocks", "gate_blocks", "sells_scored", "bh_q", "capacity", "stage01_verdict",
-  "stage01_note",
+  "rebalances", "buys", "control_blocks", "gate_blocks", "sells_scored", "bh_q", "capacity", "capacity_complete",
+  "stage01_verdict", "stage01_note",
 ] as const;
 
 /** 판정판을 싣는 작업 — 배치 `jobs/backtest.JOB_NAME`·`jobs/core_backtest` 의 세 이름(`JOB_NAME`·`EXPLORE_JOB_NAME`·`LIMIT_JOB_NAME`),
@@ -67,6 +67,7 @@ const rowSchema = z.object({
   months: numOrNull,
   bh_q: numOrNull,
   capacity: numOrNull,
+  capacity_complete: z.boolean().nullable().catch(null),
   stage01_verdict: z.string().nullable().catch(null),
   stage01_note: z.string().nullable().catch(null),
   rebalances: numOrNull,
@@ -102,7 +103,7 @@ export function parseScoreboard(raw: unknown): { rows: ScoreRow[]; unreadable: n
 const COL_LABEL: Record<string, string> = {
   market: "시장", cohort: "코호트", trials_cumulative: "누적 시도", cagr: "CAGR", excess_cagr: "초과 CAGR", mdd: "MDD",
   dsr: "DSR", dsr_n: "DSR N", control_lower: "대조 하한", gate_lower: "관문 하한", half_first_cagr: "앞 반",
-  half_second_cagr: "뒤 반", walk_positive: "걷는 창", walk_total: "걷는 창 수", months: "개월", bh_q: "BH q", capacity: "수용량", stage01_verdict: "0→1 점검", stage01_note: "0→1 근거", rebalances: "리밸런스", buys: "매수", control_blocks: "대조 묶음",
+  half_second_cagr: "뒤 반", walk_positive: "걷는 창", walk_total: "걷는 창 수", months: "개월", bh_q: "BH q", capacity: "수용량", capacity_complete: "수용량 하한 여부", stage01_verdict: "0→1 점검", stage01_note: "0→1 근거", rebalances: "리밸런스", buys: "매수", control_blocks: "대조 묶음",
   gate_blocks: "관문 묶음", sells_scored: "판 뒤 매도",
 };
 
@@ -133,13 +134,22 @@ export interface ScoreLine {
   stage: string | null;
 }
 
+/**
+ * 수용량 칸 글(25.1954) — 단위 금액(국내 1억 원·미국 10만 달러)당 가장 빠듯한 종목 비율의 최대. 재지 못한 날이 있으면
+ * 하한이라 "≥"(25.1956), 아주 작으면 "< 0.001%"(10만 달러당 미국 대형주는 0.0000x%)
+ */
+function capacityText(r: Pick<ScoreRow, "capacity" | "capacity_complete" | "market">): string {
+  if (r.capacity == null) return 없음;
+  const 값 = r.capacity * 100 < 0.001 ? "< 0.001%" : `${(r.capacity * 100).toFixed(3)}%`;
+  return `${r.capacity_complete === false ? "≥ " : ""}${값} / ${CAPACITY_UNIT_LABEL[r.market ?? ""] ?? "단위"}`;
+}
+
 /** 걷는 창 칸 글(25.1947) — 창이 하나도 없으면(12개월 미만) "0/0" 대신 그렇게 적는다 */
 function walkText(r: Pick<ScoreRow, "walk_positive" | "walk_total">): string {
   if (r.walk_positive == null || r.walk_total == null) return 없음;
   return r.walk_total === 0 ? "창 없음(12개월 미만)" : `${r.walk_positive}/${r.walk_total} 창 초과 > 0`;
 }
 
-/** 판정판 한 줄 → 화면 글. 숫자는 꼴만 바꾼다(비율은 %, 분위 하한은 소수 한 자리, DSR 은 두 자리) */
 /**
  * 판정판 칸이 생긴 기록 번호(25.1952, 25.1947 교차검증 [권고]) — 그 전 실행 기록 줄에는 키도 까닭도 없어 칸이 까닭 없이
  * "없음" 으로 보였다(다음 실행 전까지는 그것이 기본 화면). 칸이 비고 배치 까닭이 없으면 이 번호로 적는다
@@ -147,8 +157,10 @@ function walkText(r: Pick<ScoreRow, "walk_positive" | "walk_total">): string {
 export const ADDED_IN: Partial<Record<(typeof SCOREBOARD_KEYS)[number], string>> = {
   walk_positive: "25.1947", walk_total: "25.1947", stage01_verdict: "25.1950", stage01_note: "25.1950", bh_q: "25.1951",
   capacity: "25.1954",
+  capacity_complete: "25.1956",
 };
 
+/** 판정판 한 줄 → 화면 글. 숫자는 꼴만 바꾼다(비율은 %, 분위 하한은 소수 한 자리, DSR 은 두 자리) */
 export function scoreLine(r: ScoreRow): ScoreLine {
   const 까닭별 = new Map<string, string[]>();
   for (const k of SCOREBOARD_KEYS) {
@@ -168,9 +180,9 @@ export function scoreLine(r: ScoreRow): ScoreLine {
       ["DSR", r.dsr == null ? 없음 : `${f2(r.dsr)}${r.dsr_n == null ? "" : ` (N ${r.dsr_n})`}`],
       ["대조 하한", f1(r.control_lower)],
       // 코호트 BH q(25.1951) — 같은 코호트 시도 줄들의 대조 분위 p 로. 세 자리
-      ["BH q", r.bh_q == null ? 없음 : r.bh_q.toFixed(3)],
+      ["BH q", r.bh_q == null ? 없음 : r.bh_q < 0.001 ? "< 0.001" : r.bh_q.toFixed(3)],
       // 수용량(25.1954) — 단위 금액(국내 1억 원·미국 10만 달러)을 들 때 가장 빠듯한 종목의 20일 평균 거래대금 대비 비율의 최대
-      ["수용량", r.capacity == null ? 없음 : `${(r.capacity * 100).toFixed(3)}% / ${CAPACITY_UNIT_LABEL[r.market ?? ""] ?? "단위"}`],
+      ["수용량", capacityText(r)],
       ["관문 하한", f1(r.gate_lower)],
       ["앞 반", p(r.half_first_cagr)],
       ["뒤 반", p(r.half_second_cagr)],
@@ -212,7 +224,7 @@ export function scoreboardHead(run: Pick<ScoreboardRun, "job_name" | "started_at
 
 /** 늘 비는 칸 — 배치 `scoreboard.WHY_*` 와 같은 뜻. 줄마다 되풀이하지 않고 한 번만 적는다 */
 export const ALWAYS_EMPTY_NOTE =
-  "서로 다른 종목·끝난 거래는 아직 기록이 없어 싣지 않습니다. 수용량은 단위 금액당 최대 비율이라 실전 목표 금액을 곱해 봅니다. '0→1 점검' 은 docs/funnel.md 3장의 첫 값(확인 전)에 대어 본 것일 뿐 — 올림은 사람이 정합니다. 1→2 이후 문턱은 적용하지 않습니다.";
+  "서로 다른 종목·끝난 거래는 아직 기록이 없어 싣지 않습니다. 수용량은 단위 금액당 최대 비율이라 (실전 목표 금액 ÷ 단위 금액)을 곱해 봅니다. '0→1 점검' 은 docs/funnel.md 3장의 첫 값(확인 전)에 대어 본 것일 뿐 — 올림은 사람이 정합니다. 1→2 이후 문턱은 적용하지 않습니다.";
 
 /**
  * 판정판이 싣지 않는 경고·비용 몫을 어디서 보나(25.1941) — **그 자리가 화면에 있을 때만** 가리킨다(25.1942). 경고 띠는

@@ -1641,40 +1641,34 @@ _RUN_COL_NAMES = tuple(c.strip() for c in _RUN_COLS.split(",") if c.strip())
 def monthly_excess_extra(curve: list[tuple[str, float]], bench_monthly: dict[str, float] | None) -> dict[str, Any]:
     """결과 행 `metrics_json` 에 더할 월 초과 계열(25.1947) — `{"monthly_excess": [[YYYY-MM, 초과]]}`.
 
-    진단 칸이라 깨지면 빈 dict 를 낸다(25.1952, 25.1947 교차검증 [권고] — 계산이 저장 루프 안·try 밖에 있어 깨지면
-    결과 행 전부를 잃을 길이었다). 그러면 판정판 걷는 창은 `WHY_WALK` 까닭으로 빈다.
-    기준 월수익을 못 냈으면(None) 빈 dict"""
+    진단 칸이라 깨져도 결과 행 저장을 막지 않는다(25.1952). 깨지면 빈 값이 아니라 **실패 표지**
+    `{"monthly_excess_error": 까닭}` 을 싣는다(25.1956 — 빈 값이면 판정판이 "25.1947 전 실행" 으로 틀리게 적었다).
+    기준 월수익이 없으면(None — 운 판정 계산이 깨진 실행) 그 표지"""
     if bench_monthly is None:
-        return {}
+        return {"monthly_excess_error": "기준 월수익 없음(운 판정 계산 실패)"}
     try:
         return {"monthly_excess": luck.excess_months(luck.monthly_returns(curve), bench_monthly)}
-    except Exception:  # noqa: BLE001 — 진단 칸. 결과 행 저장을 막지 않는다
+    except Exception as e:  # noqa: BLE001 — 진단 칸. 실패 표지를 실어 판정판이 까닭으로 적는다
         log.exception("월 초과 계열 계산 실패")
-        return {}
+        return {"monthly_excess_error": f"{type(e).__name__}: {str(e)[:80]}"}
 
 
 def capacity_extra(
     result: bt.BacktestResult, turnover: dict[int, dict[str, float]] | None, market: str
 ) -> dict[str, Any]:
     """결과 행 `metrics_json` 에 더할 수용량(25.1954) — `{"capacity": scb.capacity_profile(…)}`. 진단 칸이라 깨지면
-    빈 dict(`monthly_excess_extra` 와 같은 원칙). 단위 금액이 없는 시장이면 빈 dict"""
+    실패 표지 `{"capacity_error": 까닭}`(25.1956, `monthly_excess_extra` 와 같은 원칙). 단위 금액이 없는 시장·거래대금이
+    없는 실행도 그 까닭을 표지로"""
     unit = scb.CAPACITY_UNIT.get(market)
-    if unit is None or not turnover:
-        return {}
+    if unit is None:
+        return {"capacity_error": f"단위 금액 없는 시장({market})"}
+    if not turnover:
+        return {"capacity_error": "거래대금 자료 없음"}
     try:
         return {"capacity": scb.capacity_profile([(r.date, r.weights) for r in result.rebalances], turnover, unit)}
-    except Exception:  # noqa: BLE001 — 진단 칸. 결과 행 저장을 막지 않는다
+    except Exception as e:  # noqa: BLE001 — 진단 칸. 실패 표지를 실어 판정판이 까닭으로 적는다
         log.exception("수용량 계산 실패")
-        return {}
-
-
-def monthly_or_none(curve: list[tuple[str, float]]) -> dict[str, float] | None:
-    """기준 곡선의 월수익 — 깨지면 None(`monthly_excess_extra` 가 칸을 뺀다, 25.1952)"""
-    try:
-        return luck.monthly_returns(curve)
-    except Exception:  # noqa: BLE001
-        log.exception("기준 월수익 계산 실패")
-        return None
+        return {"capacity_error": f"{type(e).__name__}: {str(e)[:80]}"}
 
 
 def scoreboard_log(

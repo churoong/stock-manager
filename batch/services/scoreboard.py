@@ -88,12 +88,15 @@ def _parse(v: Any) -> Any:
 
 
 def _num(v: Any) -> float | None:
+    """숫자로 — 숫자가 아니거나 **유한하지 않으면**(NaN·무한) None(25.1956). NaN 이 칸에 실리면 step_log 의 JSON
+    리터럴 NaN 을 웹이 읽지 못해 판정판 전체가 사라지고, 비교는 늘 거짓이라 점검표가 "모름" 대신 "걸림" 을 냈다"""
     if isinstance(v, bool) or v is None:
         return None
     try:
-        return float(v)
+        x = float(v)
     except (TypeError, ValueError):
         return None
+    return x if math.isfinite(x) else None
 
 
 def _month_key(v: Any) -> bool:
@@ -212,7 +215,7 @@ def _row(run: dict[str, Any], r: dict[str, Any], twins: dict[str, dict[str, Any]
         put("control_lower", _num(ev.get("lower")), f"하한 없음 — 묶음 {ev.get('n_blocks')}개(block_bound 최소 미달)")
         # 한쪽 p 값(25.1951) — 하한과 같은 평균·표준오차·묶음 수로 H0: 평균 ≤ 50. 하한이 없으면(묶음 미달) 없음
         put("control_p", control_p(ev) if _num(ev.get("lower")) is not None else None,
-            f"p 없음 — 묶음 {ev.get('n_blocks')}개(block_bound 최소 미달) 또는 평균·표준오차 없음")
+            f"묶음 {ev.get('n_blocks')}개(block_bound 최소 미달) 또는 평균·표준오차 없음")
         if gate is None:
             put("gate_lower", None, "evidence.gate 없음")
         else:
@@ -242,6 +245,9 @@ def _row(run: dict[str, Any], r: dict[str, Any], twins: dict[str, dict[str, Any]
     me = mj.get("monthly_excess")
     if name == "benchmark":
         why_w = "기준 전략 자체 — 초과가 0"
+    elif mj.get("monthly_excess_error"):
+        # 25.1956 — 25.1947 뒤 실행에서 계산이 깨졌다(실패 표지). "25.1947 전 실행" 이 아니다
+        why_w, me = f"월 초과 계열 계산 실패 — {mj['monthly_excess_error']}", None
     elif not isinstance(me, list):
         why_w = WHY_WALK
     elif not all(isinstance(x, (list, tuple)) and len(x) == 2 and _month_key(x[0]) and _finite(x[1]) for x in me):
@@ -257,8 +263,20 @@ def _row(run: dict[str, Any], r: dict[str, Any], twins: dict[str, dict[str, Any]
 
     # 수용량(25.1954) — 리밸런스마다 단위 금액의 가장 빠듯한 종목 비율(`capacity_profile`) 가운데 최대
     cap = mj.get("capacity") if isinstance(mj.get("capacity"), dict) else None
-    why_c = WHY_CAPACITY if cap is None else "재지 못함 — 보유 종목 거래대금 없음"
+    if name == "benchmark":
+        why_c = "기준 전략 — 싣지 않음"
+    elif mj.get("capacity_error"):
+        why_c = f"수용량 계산 실패 — {mj['capacity_error']}"  # 25.1956 실패 표지 — "25.1954 전" 이 아니다
+    elif cap is None:
+        why_c = WHY_CAPACITY
+    elif not cap.get("rebalances") and not cap.get("incomplete"):
+        why_c = "보유 없는 실행 — 잴 날이 없다"
+    else:
+        why_c = "재지 못함 — 보유 종목의 그날 전 20일 거래대금 없음"
     put("capacity", _num((cap or {}).get("max")), why_c)
+    # 하한인가(25.1956) — 재지 못한 종목이 있는 날이 있으면 max 는 하한이다. 화면이 "≥" 를 붙인다
+    put("capacity_complete", None if out["capacity"] is None else bool(cap.get("complete")),
+        "수용량 없음 — 하한 여부도 없음")
     if cap is not None:
         out["capacity_profile"] = cap  # 점검표(`_capacity_ok`)가 complete 를 본다
 
@@ -366,8 +384,12 @@ STAGE01_MDD_SLACK = 0.05  # MDD 가 기준 B 보다 5%p 넘게 나쁘지 않음
 STAGE01_MAX_BH_Q = 0.10  # 대조 분위 p 의 코호트 BH q(거르는 단계라 FDR)
 #: 0 → 1 을 대어 볼 기준 줄 — 같은 실행의 기준 B(`core_b`), 없으면(월 실행) 동일가중 기준(`benchmark`) `[확인필요]`
 STAGE01_BASE = ("core_b", "benchmark")
-#: BH 묶음 밖 — 코호트 없는 줄(25.1951). m = 판정판에 함께 든 같은 (시장, 코호트) 시도 줄 수 `[확인필요]` — 실행 하나만
-#: 넘기면(실행 기록 칸) 그 실행의 줄 수다. 누적 코호트 m 은 실행 여럿을 모은 판정판이 생긴 뒤
+#: 코호트 → 등록 시도 수(BH 의 m, 25.1956) — 1b = 핵심 시도(H·G·B — 무작위 대조 R1·R2 는 시도 아님), 2 = 탐색 변형
+#: (`core_strategy.EXPLORE_VARIANTS`). 코호트 1(월 실행)은 결정 단위 증거가 없어 p 가 늘 없다.
+#: 시험이 jobs 상수와 대조한다
+COHORT_SIZE = {"1b": 3, "2": 4}
+#: BH 묶음 밖 — 코호트 없는 줄(25.1951). m 은 위 `COHORT_SIZE`(25.1956 — 예전엔 판정판에 든 줄 수라 일부 변형만 돈
+#: 실행이 m 을 줄였다). 실행 여럿을 모은 판정판(sha·판 단위 묶기)은 그 판정판이 생길 때 다시 정한다
 WHY_BH_NO_COHORT = "코호트 밖 — BH 묶음 없음"
 
 
@@ -437,7 +459,9 @@ def capacity_profile(rebalances: list[tuple[str, dict[int, float]]], turnover: d
     날이 없다. 비율은 금액에 비례하므로 다른 금액은 곱해서 낸다"""
     키: dict[int, list[str]] = {}
     누적: dict[int, list[float]] = {}
-    for sid, by in turnover.items():
+    # 리밸런스에 든 종목만 정렬·누적합을 만든다(25.1956 — 유니버스 전체를 전략마다 다시 정렬해 호출마다 몇 초)
+    든 = {sid for _d, w in rebalances for sid, x in w.items() if x and x > 0}
+    for sid, by in ((s, turnover[s]) for s in 든 if s in turnover):
         xs = sorted((d, float(v)) for d, v in by.items() if v is not None)
         키[sid] = [d for d, _v in xs]
         acc = [0.0]
@@ -533,13 +557,17 @@ def rows(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for row in out:
         row["bh_q"] = None
     for 줄들 in 묶음.values():
-        for row, q in zip(줄들, bh_q([x.get("control_p") for x in 줄들], m=len(줄들)), strict=True):
+        # m = 등록 코호트 크기(funnel.md 2.1 "m 은 등록할 때 고정 — 그날 줄 수로 움직이지 않게", 25.1915) — 일부 변형만
+        # 돈 실행이 m 을 줄여 덜 보수적으로 거르던 것(25.1956, 25.1951 교차검증 [권고]). 빠진 변형은 p = 1 과 같다.
+        # 등록 크기를 모르는 코호트는 그 줄 수
+        m = max(COHORT_SIZE.get(str(줄들[0]["cohort"]), 0), len(줄들))
+        for row, q in zip(줄들, bh_q([x.get("control_p") for x in 줄들], m=m), strict=True):
             row["bh_q"] = q
     for row in out:
         if row["bh_q"] is None:
             밖 = row["cohort"] is None or not row["is_trial"]
             p_why = row["missing"].get("control_p", "")
-            row["missing"]["bh_q"] = WHY_BH_NO_COHORT if 밖 else f"대조 분위 p 없음 — {p_why}"
+            row["missing"]["bh_q"] = WHY_BH_NO_COHORT if 밖 else f"대조 분위 p 없음 — {p_why}"  # p_why: 묶음 미달 등
         st = stage01(row, 기준들.get(id(row)))
         row["stage01"] = st
         if st is None:
@@ -562,8 +590,8 @@ def rows(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
 STEP_LOG_COLS = (
     "strategy", "market", "cohort", "trials_cumulative", "cagr", "excess_cagr", "mdd", "dsr", "dsr_n",
     "control_lower", "gate_lower", "half_first_cagr", "half_second_cagr", "walk_positive", "walk_total", "months",
-    "rebalances", "buys", "control_blocks", "gate_blocks", "sells_scored", "bh_q", "capacity", "stage01_verdict",
-    "stage01_note",
+    "rebalances", "buys", "control_blocks", "gate_blocks", "sells_scored", "bh_q", "capacity", "capacity_complete",
+    "stage01_verdict", "stage01_note",
 )  # fmt: skip
 #: 까닭 글 최대 길이 — step_log 크기를 묶는다(월 실행 줄 약 20개 × 빈 칸 약 10개). 넘는 까닭은 잘린다
 WHY_MAX = 80

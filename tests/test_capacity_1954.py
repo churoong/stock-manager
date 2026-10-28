@@ -85,8 +85,11 @@ def test_판정판_칸과_점검은_실전_목표가_있어야(monkeypatch: pyte
 def test_옛_실행은_까닭과_함께_빈다() -> None:
     r = _줄(None)
     assert r["capacity"] is None and r["missing"]["capacity"] == scb.WHY_CAPACITY and "capacity_profile" not in r
-    r2 = _줄({"max": None, "complete": False})
+    r2 = _줄({"max": None, "complete": False, "rebalances": 0, "incomplete": 3})
     assert r2["capacity"] is None and r2["missing"]["capacity"].startswith("재지 못함")
+    # 25.1956 — 보유가 하루도 없던 실행은 "거래대금 없음" 이 아니라 그렇게
+    r3 = _줄({"max": None, "complete": False, "rebalances": 0, "incomplete": 0})
+    assert r3["missing"]["capacity"] == "보유 없는 실행 — 잴 날이 없다"
 
 
 def test_핵심_실행이_수용량을_싣는다(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -110,4 +113,6 @@ def test_수용량이_깨져도_결과_행은_남는다(monkeypatch: pytest.Monk
     assert cj.run_core("KR", years=1, today=오늘, force=True, variants=("core_b",)) == 0
     row = mem.execute("SELECT metrics_json FROM backtest_runs ORDER BY id DESC LIMIT 1").dicts()[0]
     assert "capacity" not in json.loads(row["metrics_json"])
-    assert jb.capacity_extra(None, {}, "KR") == {} and jb.capacity_extra(None, {1: {}}, "JP") == {}  # type: ignore[arg-type]
+    assert json.loads(row["metrics_json"])["capacity_error"] == "RuntimeError: 수용량 망"  # 25.1956 실패 표지
+    assert jb.capacity_extra(None, {}, "KR") == {"capacity_error": "거래대금 자료 없음"}  # type: ignore[arg-type]
+    assert jb.capacity_extra(None, {1: {}}, "JP") == {"capacity_error": "단위 금액 없는 시장(JP)"}  # type: ignore[arg-type]

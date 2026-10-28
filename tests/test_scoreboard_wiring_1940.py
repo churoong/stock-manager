@@ -105,6 +105,33 @@ def test_핵심_실행이_판정판_줄을_싣는다(핵심: Any) -> None:
     assert all(by[v]["months"] and by[v]["rebalances"] for v in by)
 
 
+def test_핵심_실행의_월_초과_계열_값(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1956 (25.1952 교차검증 [권고]) — 핵심·탐색 경로의 계열 **값**을 따로 계산한 것과 맞춘다. 기준을 변형 자기 곡선으로
+    바꿔(초과 모두 0) 넣어도 지나가던 구멍. 실행이 넘긴 기준 월수익을 엿보고, 저장된 변형 곡선으로 다시 낸다"""
+    from batch.services import luck
+
+    mem = _db(monkeypatch)
+    본: list[dict[str, float] | None] = []
+    원래 = jb.monthly_excess_extra
+
+    def 엿봄(curve: Any, bench: Any) -> dict[str, Any]:
+        본.append(bench)
+        return 원래(curve, bench)
+
+    monkeypatch.setattr(jb, "monthly_excess_extra", 엿봄)
+    assert cj.run_core("KR", years=1, today=오늘, force=True, variants=("core_b",)) == 0
+    row = mem.execute("SELECT id, metrics_json FROM backtest_runs ORDER BY id DESC LIMIT 1").dicts()[0]
+    곡선 = [(d, e) for d, e in mem.execute("SELECT date, equity FROM backtest_curves WHERE run_id = ? ORDER BY date",
+                                          [row["id"]]).rows]  # fmt: skip
+    자기 = luck.monthly_returns(곡선)
+    assert 본 and 본[0] is not None and 본[0] != 자기  # 기준은 변형 자기 곡선이 아니다
+    따로 = luck.excess_months(자기, 본[0])
+    저장 = json.loads(row["metrics_json"])["monthly_excess"]
+    assert [m for m, _v in 저장] == [m for m, _v in 따로]
+    assert [v for _m, v in 저장] == pytest.approx([v for _m, v in 따로], abs=1e-12)
+    assert any(abs(v) > 1e-6 for _m, v in 저장)
+
+
 def test_판정판은_작다(핵심: Any) -> None:
     """step_log 크기 — 줄마다 웹이 보이는 칸과 그 까닭만. 수용량은 최대 비율 하나(25.1954 — 분위는 결과 행). 걷는 창은 두 수만
     (`walk_positive`·`walk_total`, 25.1947) — 창마다의 기간·합(`walk`)은 싣지 않는다"""
@@ -177,6 +204,12 @@ def test_월_백테스트도_판정판_줄을_싣는다() -> None:
     assert any(abs(v) > 1e-6 for _m, v in 따로)  # 헛돌지 않게 — 초과가 모두 0 이 아니다
     # 비용 0 사본에는 싣지 않는다(판정판이 줄로 내지 않는다, 25.1952)
     assert "monthly_excess" not in json.loads(next(r for r in rows if r["strategy"] == "composite_no_cost")["metrics_json"])
+    # 25.1956 (25.1954 교차검증 [권고]) — 월 실행도 수용량을 싣는다(기준·비용 0 사본은 빼고). 줄 칸 = 결과 행 최대
+    cap = mj["capacity"]
+    assert cap["unit"] == scb.CAPACITY_UNIT["KR"] and cap["rebalances"] > 0 and by["composite"]["capacity"] == cap["max"]
+    for 빠진 in ("benchmark", "composite_no_cost"):
+        assert "capacity" not in json.loads(next(r for r in rows if r["strategy"] == 빠진)["metrics_json"])
+    assert by["benchmark"]["capacity"] is None and by["benchmark"]["missing"]["capacity"] == "기준 전략 — 싣지 않음"
 
 
 def test_월_기본_실행은_사전_등록일부터_코호트_1() -> None:
@@ -254,6 +287,9 @@ def test_월_초과_계열이_깨져도_결과_행은_남고_칸만_빠진다(mo
     assert run["status"] == "success" and [r["strategy"] for r in rows] == ["core_b"]
     assert "monthly_excess" not in json.loads(rows[0]["metrics_json"])
     줄 = run["step_log"]["scoreboard"][0]
-    assert 줄["walk_total"] is None and 줄["missing"]["walk_total"] == scb.WHY_WALK[: scb.WHY_MAX]
-    assert jb.monthly_excess_extra([("2024-01-31", 1.0)], None) == {}
+    # 25.1956 (25.1952 교차검증 [권고]) — 빈 값이 아니라 실패 표지라 "25.1947 전 실행" 이 아니라 실패라고 적는다
+    assert json.loads(rows[0]["metrics_json"])["monthly_excess_error"] == "RuntimeError: 계열 망"
+    assert 줄["walk_total"] is None and 줄["missing"]["walk_total"] == "월 초과 계열 계산 실패 — RuntimeError: 계열 망"
+    assert jb.monthly_excess_extra([("2024-01-31", 1.0)], None) == {
+        "monthly_excess_error": "기준 월수익 없음(운 판정 계산 실패)"}
 

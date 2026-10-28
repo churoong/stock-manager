@@ -284,6 +284,7 @@ def run_core(
         증거: dict[str, dict[str, Any]] = {}
         짝: dict[str, dict[str, Any]] = {}
         판정 = "판정 불가(계산 실패)"
+        벤치월: dict[str, float] | None = None  # 월 초과 계열(25.1947)의 기준도 이것 — 깨지면 None(25.1956)
         try:
             벤치월 = luck.monthly_returns(벤치.curve)
             운 = luck.judge({v: luck.excess_series(luck.monthly_returns(r.curve), 벤치월) for v, r in results.items()},
@@ -308,7 +309,6 @@ def run_core(
         증거_초 = round(time.perf_counter() - t2, 1)
         반: dict[str, dict[str, Any]] = {}
         실은_행: list[dict[str, Any]] = []  # 판정판(25.1940) 재료 — `store_run` 이 실은 행 그대로
-        벤치월_계열 = jb.monthly_or_none(벤치.curve)  # 월 초과 계열의 기준 — 한 번만(25.1952)
         for variant, result in results.items():
             summary = bt.summarize(result, 벤치, risk_free_annual=무위험)
             반[variant] = split_half(result.curve)
@@ -319,7 +319,7 @@ def run_core(
                                                         "se", "lower", "gate", "after_sell")},
                      # 월 초과 계열(25.1947) — 판정판 걷는 창의 재료. 운 판정과 같은 기준(동일가중 월 리밸런스).
                      # 깨지면 칸만 빠진다(25.1952)
-                     **jb.monthly_excess_extra(result.curve, 벤치월_계열),
+                     **jb.monthly_excess_extra(result.curve, 벤치월),
                      # 수용량(25.1954) — 리밸런스마다 단위 금액의 가장 빠듯한 종목 비율. 깨지면 칸만 빠진다
                      **jb.capacity_extra(result, turnover, market)}  # fmt: skip
             jb.store_run(client, market, variant, result, summary, 종목수[variant], group_id, warnings,
