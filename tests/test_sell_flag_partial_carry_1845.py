@@ -108,3 +108,16 @@ def test_재무도_못_본_날_통째로_이어도_이은_근거_이름이_남�
 
 def test_빈_사유_채우기는_정규식_특수문자에_안전하다() -> None:
     assert sf.full_carry_text("가: . 점검", ["a\\1"]) == "가: a\\1. 점검"
+
+
+def test_넷째_날_흑자로_돌면_포함_표시를_다시_계산한다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1849 (25.1848 교차검증 [참고]) — 셋째 날 "(종합 점수 하락 포함)" 뒤 넷째 날 흑자로 빈 사유를 그 이름으로 채우면
+    이름이 두 번 찍혔다"""
+    c, job = _장부(monkeypatch)
+    _실행(monkeypatch, c, sf.HoldingInput(**기본, score_now=45.0, **점수봄), date(2026, 3, 20))
+    for 날, 재무 in ((21, 기본), (22, {**기본, "op_income_latest": None}), (23, {**기본, "op_income_latest": 5.0})):
+        _실행(monkeypatch, c, sf.HoldingInput(**재무, score_now=44.0, score_now_date=f"2026-03-{날 - 1}",
+                                              score_scale_unknown=True), date(2026, 3, 날))  # fmt: skip
+    (글,), = c.conn.execute("SELECT rationale_text FROM sell_flags WHERE is_active = 1").fetchall()
+    assert 글.count("종합 점수 하락") == 1 and "에이: 종합 점수 하락." in 글 and "포함" not in 글
+    assert 글.count("오늘 판정할 자료가 없어") == 1

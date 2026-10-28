@@ -581,12 +581,19 @@ def full_carry_text(text: str, labels: list[str]) -> str:
     못 본 날은 적자 조각이 그대로라 빈 사유 채우기를 타지 않아 "종합 점수 하락" 이 문장에서만 사라졌다)"""
     import re
 
-    m = re.search(r" ※ 일부 근거\(([^)]*)\)는 오늘 판정할 자료가 없어 지난 판정을 이어 둡니다", text)
-    이은 = [x for x in m.group(1).split(", ") if x] if m else []
-    글 = text.replace(m.group(0), "") if m else text
+    # 근거 이름에 괄호·", " 가 없다는 데 기댄다(지금 재무악화 근거는 적자 전환·점수 하락 둘뿐). 어제 통째 잇기의
+    # "(… 포함)" 표시도 떼고 다시 계산한다 — 다음 날 빈 사유를 그 이름으로 채우면 두 번 찍혔다(25.1849)
+    이은: list[str] = []
+    글 = text
+    for 꼴 in (r" ※ 일부 근거\(([^)]*)\)는 오늘 판정할 자료가 없어 지난 판정을 이어 둡니다",
+               r" ※ 오늘 판정할 자료가 없어 지난 판정을 이어 둡니다\(([^)]*) 포함\)"):  # fmt: skip
+        m = re.search(꼴, 글)
+        if m:
+            이은 += [x for x in m.group(1).split(", ") if x]
+            글 = 글.replace(m.group(0), "")
     if labels and ": ." in 글:
         글 = 글.replace(": .", ": " + ", ".join(labels) + ".", 1)
-    빠진 = [x for x in 이은 if x in labels and x not in 글]
+    빠진 = [x for x in dict.fromkeys(이은) if x in labels and x not in 글]
     if 빠진:
         글 += f" ※ 오늘 판정할 자료가 없어 지난 판정을 이어 둡니다({', '.join(빠진)} 포함)"
     return 글
