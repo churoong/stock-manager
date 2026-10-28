@@ -1228,6 +1228,17 @@ def sell_decisions(
         })  # fmt: skip
     out: dict[int, tuple[list[str], list[dict[str, Any]]]] = {}
     for 행 in 행들:
+        if sell_rule == pp.DAY_RULE:
+            # 당일 단타(T) — 보유는 그날 종가 짝 매도로 0 이 된다. 남은 보유는 짝을 잃은 것(행 빠짐·짝 거둠)이라 다음 장
+            # 시가에 판다(하루 끝 보유 0 의 안전망, 16.3.2). 짝 매도가 아직 열려 있으면(하한가로 미룸) 부르는 쪽이
+            # 열린 매도로 거른다
+            남은 = {"reason_code": pp.DAY_LEFT_CODE, "level": "red",
+                   "rationale": "당일 단타 보유가 하루를 넘김(짝 매도 없음) — 다음 장 시가에 판다 (paper.md 16.3.2)"}
+            out[int(행["stock_id"])] = ([pp.DAY_LEFT_CODE], [남은])
+            if notes is not None:
+                기준가 = 행["market_value"] / 행["quantity"] if 행["market_value"] else None
+                notes[int(행["stock_id"])] = {"ref": (기준가, 행["price_date"]), "hold": [], "flags": [남은]}
+            continue
         if sell_rule == pp.SWING_RULE:
             # 스윙(S)은 매도 플래그·보강을 보지 않는다 — `swing_close_v1` 하나(paper.md 16.3.1, 25.1871). 보강을 타면
             # 보유마다 질의 6~10 이고, 보강이 비면 매도가 조용히 막혔다
@@ -2254,6 +2265,10 @@ def run_step(
             # 함께 찼다(25.1591 감사 [권고] 1 길 B)
             최근판 = ({f.stock_id for f in 계좌체결 if f.side == "sell" and f.fill_date >= 쉼_시작} | set(매도)
                    | 이미팖)  # fmt: skip
+            if 규칙 == pp.DAY_RULE:
+                # 당일 단타(T)는 다시 사기 쉼을 두지 않는다 — 그림자처럼 신호마다 거래(같은 날 사고팔아 보유가 남지
+                # 않는다). 매도가 열린 종목만 뺀다(16.3.2, 25.1883)
+                최근판 = set(매도) | 이미팖
             if allocate and settings is not None and signal_rows:
                 # 손절이 선 보유에 더 사지 않는다 — **계좌 규칙 전의** 판정에서 (검증 [필수] 4: 규칙으로 거른 뒤의
                 # 매도에서 뽑으면 손절을 따르지 않는 D 는 늘 비어, 떨어진 보유를 목표 비중까지 날마다 더 샀다 —
@@ -2371,6 +2386,16 @@ def run_step(
                 낸종목 = {o["stock_id"] for o in 주문}
                 막힌까닭 = {c.stock_id: "위험 점검: " + "; ".join(t for _c, t in 까닭) for c, 까닭 in 막힘}
                 결정들 = b기록.pop("_decisions", None)
+                if 규칙 == pp.DAY_RULE and 주문:
+                    # 당일 단타(T)는 늦은 실행에 진입하지 않는다 — 장 열린 뒤(주문 기준 종가)면 같은 종가에 사고팔아
+                    # 비용뿐이고, 장 끝난 뒤 손 실행은 진입이 한 장 밀려 그림자와 갈린다(16.3.2, 25.1883)
+                    기준 = 다시잰기준(기준)
+                    if 기준 == "close" or after_close:
+                        늦음 = pp.DAY_LATE_PREFIX + ("장 끝난 뒤 손 실행" if after_close else "장 열린 뒤 실행")
+                        결정들 = [{**d, "kind": "skip", "reason": 늦음} if d["kind"] == "buy" else d
+                                for d in 결정들 or []]  # fmt: skip
+                        b기록["late_skip"] = len(주문)
+                        주문, 낸종목 = [], set()
                 if 결정들 is None and 가결행 and b기록.get("skipped"):
                     # 매수 단계가 일찍 끝난 날(환율 모름·장부 현금 음수) — 위원회·지주사가 고른 종목의 줄이 하나도
                     # 안 남아 그 표(`committee`·`holding`)가 원장에서 빠졌다. 고르지 않은 종목만 남아 H 가중치 표본·
@@ -2403,6 +2428,15 @@ def run_step(
                         o["reason"], o["horizon"], o["score"], o["score_as_of"],
                         json.dumps(o["rationale"], ensure_ascii=False, default=str), 판, 지금, o.get("ref_price"),
                     ]))  # fmt: skip
+                    if 규칙 == pp.DAY_RULE:
+                        # 당일 단타 짝 매도 — 같은 장 **종가** 판정 시장가(`fill_basis='close'`, 16.3.2). (계좌·시장·
+                        # 판정일·종목)으로 매수와 이어진다. 판정은 같은 장 매수 뒤(`pp.side_rank`, 25.1881)
+                        짝 = {"pair": {"side": "buy", "tranche": o["tranche"]}, "rule": "day_v1", "costs": 비용표}
+                        문장.append((INSERT_ORDER_SQL, [
+                            aid, market, o["stock_id"], "sell", "market", None, o["quantity"], o["currency"],
+                            trade_date, 다음장, "close", 0, pp.DAY_CLOSE_CODE, o["horizon"], o["score"],
+                            o["score_as_of"], json.dumps(짝, ensure_ascii=False, default=str), 판, 지금, None,
+                        ]))  # fmt: skip
             else:
                 a기록["buy"] = {"skipped": "배분하지 않는 날(신호 없음·묵음·추천 못 읽음)"}
             _쓰기(client, 문장)

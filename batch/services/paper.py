@@ -33,6 +33,9 @@ SELL_RULES: dict[str, frozenset[str] | None] = {
     # S 스윙 (docs/paper.md 16.3.1, 25.1871): 엔진의 매도 플래그를 쓰지 않고 `shadow.close_exit`(`swing_close_v1`)
     # 하나로 판다. 까닭 코드가 `손절` 이면 "손절 보유의 남은 회차 거둠" 길을 타므로 이름을 따로 둔다
     "swing_close": frozenset({"스윙손절", "스윙목표", "스윙기한"}),
+    # T 당일 단타 (docs/paper.md 16.3.2, 25.1883): 매수와 함께 쓴 종가 짝 매도(`단타종가`)로 판다. 매도 플래그는 보지
+    # 않고, 짝을 잃은 보유만 다음 장 시가에(`단타잔여`)
+    "day_close": frozenset({"단타종가", "단타잔여"}),
 }
 #: 추세 익절(G)의 매도 사유 코드 — 매도 플래그(`sell_flags.evaluate`)가 아니라 모의 엔진이 낸다
 TRAIL_CODE = "추적손절"
@@ -63,6 +66,14 @@ def fill_key(f: Fill) -> tuple[str, int, int]:
 #: 스윙(S)의 매도 규칙 이름과 `close_exit` 까닭 → 사유 코드 (16.3.1, 25.1871)
 SWING_RULE = "swing_close"
 SWING_CODES = {"stop": "스윙손절", "target": "스윙목표", "time": "스윙기한"}
+#: 당일 단타(T)의 매도 규칙 이름·사유 코드 (16.3.2, 25.1883) — `손절` 과 이름이 같으면 "손절 보유의 남은 회차 거둠"
+#: 길을 탄다
+DAY_RULE = "day_close"
+DAY_CLOSE_CODE = "단타종가"
+DAY_LEFT_CODE = "단타잔여"
+#: T 가 늦은 실행(장 열린 뒤·장 끝난 뒤)에 진입하지 않은 결정의 까닭 머리 — 같은 종가에 사고파는 비용뿐인 거래라
+#: 견줄 새 후보에서 뺀다(`NONCOMPARABLE_SKIP_PREFIXES`)
+DAY_LATE_PREFIX = "단타 진입 없음: "
 
 
 def trend_exit(
@@ -1049,7 +1060,7 @@ BUY_STEP_SKIP_PREFIX = "매수 단계 건너뜀: "
 #: 오르면, 막은 매도는 내리면 점검이 비용이라 한 평균에 섞으면 +8 과 −8 이 0 으로 지워졌다)
 BLOCKED_SELL_PREFIX = "위험 점검(매도)"
 NONCOMPARABLE_SKIP_PREFIXES = ("종목 비중 상한 도달", "보유 중 손절선 이탈", "판 뒤 ", "열린 매수 주문 있음",
-                               BUY_STEP_SKIP_PREFIX)  # fmt: skip
+                               BUY_STEP_SKIP_PREFIX, DAY_LATE_PREFIX)  # fmt: skip
 
 
 def _초과(rows: list[dict[str, Any]]) -> dict[str, Any]:
