@@ -2486,7 +2486,8 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
                         # 글 대조가 첫째 실패 글 "첫째 계좌 단계 실패" 까지 잡아 계좌 목록으로 바꿈)
                         # 글은 고정 — 막힘2 는 잠금·첫째 까닭이 먼저라 계좌 실패를 말하지 않을 수 있다(25.1927)
                         warnings.append(f"KIS모의투자 도전자: 가상 {도전자} 계좌 단계 실패 — 오늘 도전자 베끼기 보류"
-                                        + (f"({막힘2})" if 막힘2 and not str(막힘2).startswith("가상 ") else ""))
+                                        + (f" · 먼저 걸린 까닭: {막힘2}" if 막힘2 and 막힘2 != challenger_block(
+                                            {"account_errors": {도전자: ""}}, {}, None, 도전자) else ""))  # fmt: skip
                     step_log["broker2"] = _bm2.run(client, market, datetime.now(UTC), slot=_bm2.CHALLENGER,
                                                    frozen=멈춘2, hold_send=str(막힘2) if 막힘2 else None)  # fmt: skip
                 except Exception as exc:  # noqa: BLE001 — 곁다리

@@ -97,6 +97,28 @@ def test_도전자_계좌만_깨진_날은_실행이_도전자_베끼기를_보�
     assert 부름["hold"][1] == "가상 C 계좌 단계 실패 — 오늘 도전자 베끼기 보류"
     경고 = [w for 로그 in 기록들 for w in (로그.get("warnings") or [])]
     assert "KIS모의투자 도전자: 가상 C 계좌 단계 실패 — 오늘 도전자 베끼기 보류" in 경고, 경고
+    assert not any("KIS모의투자 도전자" in t for t in 보낸)  # 리포트를 보낸 뒤라 본문에는 없다
+
+
+def test_첫째_까닭이_먼저_걸려도_도전자_경고는_계좌_실패를_말한다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1928 (25.1927 교차검증 [권고]) — 첫째(H) KIS 가 깨져 보류 글이 "첫째 계좌 단계 실패…" 인 날도, 도전자 계좌가
+    깨졌으면 경고는 계좌 실패로 시작하고 먼저 걸린 까닭을 덧붙인다. 글을 예전 `{막힘2}` 로 되돌리면 깨진다"""
+    _준비(monkeypatch, 0)
+    부름 = _kis_desk(monkeypatch, {"accounts": {"H": {"orders": 3}, "C": {"step_error": "KeyError: 1"}},
+                                 "account_errors": {"C": "KeyError: 1"}, "frozen": [], "frozen_by_account": {}})
+
+    def kis(*_a, **k):  # noqa: ANN002, ANN003, ANN202
+        부름["hold"].append(k.get("hold_send"))
+        return {"error": "토큰 실패"} if k.get("slot") != broker_mirror.CHALLENGER else {"sent": {}}
+
+    monkeypatch.setattr(broker_mirror, "run", kis)
+    monkeypatch.setattr(daily.telegram, "send", lambda text, *a, **k: None)
+    기록들: list[dict] = []
+    monkeypatch.setattr(daily.db, "finish_batch_run", lambda c, rid, **k: 기록들.append(k.get("step_log") or {}))
+    daily.run("KR")
+    경고 = [w for 로그 in 기록들 for w in (로그.get("warnings") or []) if w.startswith("KIS모의투자 도전자:")]
+    assert len(경고) == 1 and 경고[0].startswith("KIS모의투자 도전자: 가상 C 계좌 단계 실패 — 오늘 도전자 베끼기 보류"
+                                             " · 먼저 걸린 까닭: 첫째 계좌 단계 실패"), 경고
 
 
 @pytest.mark.parametrize("첫째", [{"error": "토큰 실패"}, {"sent": {}}])
