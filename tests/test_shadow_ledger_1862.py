@@ -129,3 +129,65 @@ def test_시장보다_먼저_끊긴_종목은_끊김으로_닫는다() -> None:
     assert next(t for t in ts if t.rule == "swing_v1").reason == "끊김"
     ts = job.shadow_trades(신호, 줄, sh.Costs(0, 0, 0, 0), "KR", {"KOSPI": "2026-10-08"})  # 아직 끊긴 게 아니다
     assert next(t for t in ts if t.rule == "swing_v1").status == "open"
+
+
+def _둘째_종목(m: MemClient) -> None:
+    """끝까지 이어지는 같은 시장 종목 — 시장 마지막 날을 10-27 로 만든다"""
+    m.conn.execute("INSERT INTO stocks (id, ticker, market, country, currency, status, source, fetched_at)"
+                   " VALUES (2, '000660', 'KOSPI', 'KR', 'KRW', 'active', 't', 't')")  # fmt: skip
+    d = date(2026, 10, 1)
+    while d <= date(2026, 10, 27):
+        if d.weekday() < 5:
+            m.conn.execute(
+                "INSERT INTO prices (stock_id, date, open, high, low, close, adj_close, currency, source, fetched_at)"
+                " VALUES (2, ?, 50, 51, 49, 50, 50, 'KRW', 't', 't')",
+                [d.isoformat()],
+            )
+        d += timedelta(days=1)
+
+
+def test_잡_경로에서_시장보다_먼저_끊긴_종목은_끊김으로_닫는다() -> None:
+    """25.1864 (25.1863 교차검증 [권고]) — compute 가 시장 마지막 날을 넘기지 않아도 시험이 통과했다(배선)"""
+    m = _장부()
+    m.conn.execute("UPDATE prices SET high = 103, low = 99 WHERE stock_id = 1 AND date >= '2026-10-02'")  # 스윙이 열린 채
+    _둘째_종목(m)
+    그림자: list[sh.Trade] = []
+    메모: dict = {}
+    job.compute(m, "KR", "2026-10-28", shadow=(그림자, sh.Costs(0, 0, 0, 0), 메모))  # type: ignore[arg-type]
+    스윙 = next(t for t in 그림자 if t.rule == "swing_v1")
+    assert (스윙.status, 스윙.reason, 스윙.exit_date) == ("closed", "끊김", "2026-10-03")
+    assert 메모["bars_rows"] == 3  # 단기 신호 종목(1)만 읽는다
+
+
+def test_운영_비용은_매도세_일정을_싣는다() -> None:
+    """25.1864 — `shadow_costs` 가 일정을 빼도 시험이 통과했다(오늘 세율 하나로 되돌아감)"""
+    from batch.services import backtest as bt
+
+    m = _장부()
+    c = job.shadow_costs(m, "KR", "2026-10-28")  # type: ignore[arg-type]
+    assert c.tax_schedule == tuple(bt.KR_SELL_TAX_SCHEDULE)
+    db.set_setting(m, "taxes", {"kr_transaction_pct": 0.2})  # type: ignore[arg-type]
+    c2 = job.shadow_costs(m, "KR", "2026-10-28")  # type: ignore[arg-type]
+    assert c2.tax_schedule[:-1] == tuple(bt.KR_SELL_TAX_SCHEDULE[:-1]) and c2.tax_schedule[-1][1] == 0.2
+
+
+def test_실패한_회차는_지난_집계를_덮지_않고_실패라고_찍는다(monkeypatch: pytest.MonkeyPatch,
+                                                         capsys: pytest.CaptureFixture[str]) -> None:  # fmt: skip
+    m = _장부()
+    monkeypatch.setattr(job, "TursoClient", lambda: m)
+    assert job.run("KR") == 0
+    capsys.readouterr()
+    monkeypatch.setattr(job, "load_bars", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("읽기 실패")))
+    assert job.run("KR") == 0
+    assert db.get_setting(m, f"{job.SHADOW_KEY}_kr")["stats"]["day_v1"]["n"] == 1  # type: ignore[arg-type]
+    out = capsys.readouterr().out
+    assert "그림자 장부: 실패 — RuntimeError" in out and "끝난 거래 없음" not in out
+
+
+def test_끊김_경계는_14일을_넘을_때() -> None:
+    줄 = {1: [sh.Bar("2026-10-01", 99, 101, 98, 100), sh.Bar("2026-10-02", 100, 101, 98.5, 99)]}
+    신호 = [{"stock_id": 1, "as_of_date": "2026-10-01", "horizon": "short", "market": "KOSPI"}]
+    딱 = job.shadow_trades(신호, 줄, sh.Costs(0, 0, 0, 0), "KR", {"KOSPI": "2026-10-16"})  # 14일
+    넘음 = job.shadow_trades(신호, 줄, sh.Costs(0, 0, 0, 0), "KR", {"KOSPI": "2026-10-17"})  # 15일
+    assert next(t for t in 딱 if t.rule == "swing_v1").status == "open"
+    assert next(t for t in 넘음 if t.rule == "swing_v1").reason == "끊김"

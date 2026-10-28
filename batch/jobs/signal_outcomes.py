@@ -348,7 +348,7 @@ def _shadow(client: TursoClient, country: str, signals: list[dict[str, Any]], �
         shadow[2]["bars_rows"] = sum(len(v) for v in 줄.values())  # 읽기 예산 실측(paper.md 12장)
         shadow[0].extend(shadow_trades(단기, 줄, shadow[1], country, 끝날))
     except Exception as exc:  # noqa: BLE001 — 곁다리
-        log.warning("그림자 장부 실패: %s", exc)
+        log.warning("그림자 장부 실패: %s", type(exc).__name__)  # 공개 로그 — 질의·인자가 섞일 수 있어 종류만(25.1864)
         shadow[0].clear()
         shadow[2]["error"] = f"{type(exc).__name__}: {str(exc)[:200]}"
 
@@ -393,7 +393,8 @@ SHADOW_KEY = "shadow_ledger"
 
 
 def shadow_costs(client: TursoClient, country: str, today: str) -> sh.Costs:
-    """백테스트·가상모의투자와 같은 비용(설정이 있으면 설정, 없으면 기본값). 매도세는 오늘 시행 세율"""
+    """백테스트·가상모의투자와 같은 비용(설정이 있으면 설정, 없으면 기본값). 매도세는 청산일 세율(일정 —
+    25.1863), 일정이 없으면(미국) 오늘 값 하나"""
     from batch.services import backtest as bt
 
     c = bt.Costs.for_country(country, db.get_setting(client, "fees", {}), db.get_setting(client, "taxes", {}))
@@ -454,8 +455,10 @@ def run(market: str) -> int:
         )  # fmt: skip
         # 웹·주간 요약이 읽을 자리(나라마다 한 키) — 실행 기록을 닫은 **뒤**, 실패해도 넘어간다(25.1863: 앞에 두면 이
         # 쓰기 하나가 실패해 성공한 실행이 running 으로 남았다). 집계는 실행 기록 step_log.shadow 에도 있다
+        # 실패한 회차는 쓰지 않는다 — 0건 + error 로 지난 정상 집계를 덮었다(25.1864, 25.1863 교차검증 [권고])
         try:
-            db.set_setting(client, f"{SHADOW_KEY}_{country.lower()}", 그림자_집계)
+            if not 그림자_메모.get("error"):
+                db.set_setting(client, f"{SHADOW_KEY}_{country.lower()}", 그림자_집계)
         except Exception as exc:  # noqa: BLE001 — 곁다리, 경고 로그
             log.warning("그림자 장부 집계를 설정에 적지 못함: %s", exc)
         print(f"신호 성적표 {country}: 신호 {len(results)}건")
@@ -464,8 +467,11 @@ def run(market: str) -> int:
         for 표 in 보정:
             for 줄 in cb.render_lines(표):
                 print(f"  점수 보정 {줄}")
-        for 이름, 집계 in 그림자_집계["stats"].items():
-            print(f"  그림자 장부 {이름}: {shadow_line(집계)}")
+        if 그림자_메모.get("error"):  # 실패를 "거래 0건" 으로 읽히지 않게 — 공개 로그라 예외 종류만(25.1864)
+            print(f"  그림자 장부: 실패 — {str(그림자_메모['error']).split(':')[0]}")
+        else:
+            for 이름, 집계 in 그림자_집계["stats"].items():
+                print(f"  그림자 장부 {이름}: {shadow_line(집계)}")
         for s in stats:
             if s.avg_ret is not None:
                 win = f"{s.win_rate * 100:.0f}%" if s.win_rate is not None else "-"
