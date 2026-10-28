@@ -39,6 +39,21 @@ SELL_RULES: dict[str, frozenset[str] | None] = {
 }
 #: 추세 익절(G)의 매도 사유 코드 — 매도 플래그(`sell_flags.evaluate`)가 아니라 모의 엔진이 낸다
 TRAIL_CODE = "추적손절"
+#: 계좌 **화면 이름** — 사람에게 보이는 곳(리포트·텔레그램·웹)은 알파벳 대신 계좌 특성 이름을 쓴다(2026-10-28 사용자
+#: 지시 "각 가상계좌는 알파벳이 아닌 계좌특성을 이름으로 바꿔", docs/paper.md 1장, 25.1889). 내부 식별자(장부·결정 원장·
+#: KIS 베끼기의 `account_id`)는 그대로 — 바꾸면 기록 수천 행과 H 베끼기 연결이 끊기고 마이그레이션이 든다.
+#: 정의처는 여기 하나(웹 사본 `web/lib/accountNames.ts` 는 시험이 대조)
+ACCOUNT_NAMES: dict[str, str] = {
+    "A": "가치", "B": "기준", "C": "모멘텀", "D": "장기보유", "E": "안정", "G": "추세익절", "H": "지주사",
+    "R1": "무작위1", "R2": "무작위2", "S": "스윙", "T": "단타",
+}
+
+
+def account_name(aid: str) -> str:
+    """계좌 화면 이름 — 모르는 계좌는 식별자 그대로"""
+    return ACCOUNT_NAMES.get(str(aid), str(aid))
+
+
 #: 따로 재는 실험 계좌 (docs/paper.md 16.3.1, 25.1872) — 상황실 순위표 공통 구간·챔피언 후보에 넣지 않고, 결정 원장
 #: 성과 채우기는 따로 한 바퀴(기존 계좌의 하루 상한을 나눠 쓰지 않게). 정의처는 여기 하나(`desk.SEPARATE_IDS`)
 SEPARATE_IDS = ("S", "T")
