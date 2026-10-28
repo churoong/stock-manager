@@ -1203,7 +1203,7 @@ def test_전략_깔때기가_옮겨_적은_상수_1905() -> None:
 
     검사(FUNNEL, f"지금 `luck.MIN_MONTHS` {luck.MIN_MONTHS}", "리플레이 최소 개월")
     검사(FUNNEL, f"`days`({desk.GATE_MIN_POINTS}평가)", "관문 모의 기간")
-    검사(FUNNEL, f"묶음 {desk.GATE_SEL_MIN_BLOCKS})", "관문 결정 단위 묶음")
+    검사(FUNNEL, f"하한 > {desk.GATE_SEL_NULL:g}, 묶음 {desk.GATE_SEL_MIN_BLOCKS})", "관문 분위 하한·묶음 (25.1907)")
     검사(FUNNEL, f"`incidents`(무사고 {desk.GATE_INCIDENT_DAYS}일)", "관문 무사고 창")
     검사(FUNNEL, f"실현율 ≥ {desk.GATE_KEPT_PCT:.0f}%(표본 {desk.GATE_KEPT_MIN_N} 이상", "KIS 실현율")
     검사(FUNNEL, f"(지금 `REGISTERED_TRIALS` {jb.REGISTERED_TRIALS} 은 손 상수", "등록 시도 수")
