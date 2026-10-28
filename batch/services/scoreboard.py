@@ -253,6 +253,77 @@ def _row(run: dict[str, Any], r: dict[str, Any], twins: dict[str, dict[str, Any]
     return out
 
 
+#: 0 → 1 (리플레이에서 그림자로) 기준 — funnel.md 3장 "첫 값 — 보수적". 모두 `[확인필요]`(첫 값, 결과 전에 고정 —
+#: 바꾸면 새 판 등록). 판정판은 칸만 대어 본다 — 올림은 사람이(그림자 개설) 정한다
+STAGE01_MIN_MONTHS = 36  # 판정 구간 36개월 이상(`luck.MIN_MONTHS` 24 는 수백 후보에 짧다)
+STAGE01_MIN_INVESTED = 0.5  # 투자 비중
+STAGE01_MIN_HOLDINGS = 3.0  # 평균 보유 종목 수
+STAGE01_MIN_CONTROL_LOWER = 50.0  # 무작위 대조 분위 묶음 하한
+STAGE01_MIN_DSR = 0.90  # DSR(N = 누적)
+STAGE01_WALK = (3, 4)  # 걷는 창 "넷 가운데 셋" — 창이 넷 이상이고 > 0 인 창의 몫이 3/4 이상
+STAGE01_MDD_SLACK = 0.05  # MDD 가 기준 B 보다 5%p 넘게 나쁘지 않음
+#: 0 → 1 을 대어 볼 기준 줄 — 같은 실행의 기준 B(`core_b`), 없으면(월 실행) 동일가중 기준(`benchmark`) `[확인필요]`
+STAGE01_BASE = ("core_b", "benchmark")
+#: 아직 저장되지 않아 늘 모르는 기준 — 코호트 BH q(시도별 p 값 미저장)·수용량(보유 거래대금 미저장)
+WHY_BH = "코호트 BH q — 시도별 p 값 미저장"
+
+
+def stage01(row: dict[str, Any], base: dict[str, Any] | None) -> dict[str, Any] | None:
+    """판정판 한 줄 → 0 → 1 점검표 {verdict, checks: [{key, ok, now, target}], failed, unknown} (funnel.md 3장).
+
+    `ok` = True·False·None(모름 — 칸이 비었거나 재료 미저장). 하나라도 False 면 "탈락", 모두 True 면 "후보",
+    아니면 "모름". 시도 아닌 줄(`NOT_TRIALS`)은 None. 앞·뒤 반은 반 기간 CAGR > 0 으로 본다 `[확인필요]`(초과가
+    아니라 절대 — `split_half` 가 싣는 값). 한 코호트 10개 상한은 여러 줄을 보는 일이라 여기서 세지 않는다"""
+    if row.get("strategy") in NOT_TRIALS:
+        return None
+
+    def ok(v: Any, f: Any) -> bool | None:
+        return None if v is None else bool(f(v))
+
+    wp, wt = row.get("walk_positive"), row.get("walk_total")
+    hf, hs = row.get("half_first_cagr"), row.get("half_second_cagr")
+    bm = (base or {}).get("mdd")
+    mdd = row.get("mdd")
+    checks = [
+        ("months", "판정 구간", row.get("months"), f">= {STAGE01_MIN_MONTHS}개월",
+         ok(row.get("months"), lambda v: v >= STAGE01_MIN_MONTHS)),
+        ("invested_share", "투자 비중", row.get("invested_share"), f">= {STAGE01_MIN_INVESTED}",
+         ok(row.get("invested_share"), lambda v: v >= STAGE01_MIN_INVESTED)),
+        ("avg_holdings", "평균 보유", row.get("avg_holdings"), f">= {STAGE01_MIN_HOLDINGS:g}종목",
+         ok(row.get("avg_holdings"), lambda v: v >= STAGE01_MIN_HOLDINGS)),
+        ("excess_cagr", "초과 CAGR", row.get("excess_cagr"), "> 0", ok(row.get("excess_cagr"), lambda v: v > 0)),
+        ("control_lower", "대조 하한", row.get("control_lower"), f"> {STAGE01_MIN_CONTROL_LOWER:g}",
+         ok(row.get("control_lower"), lambda v: v > STAGE01_MIN_CONTROL_LOWER)),
+        ("bh_q", "코호트 BH q", None, "<= 0.10", None),
+        ("dsr", "DSR", row.get("dsr"), f">= {STAGE01_MIN_DSR}", ok(row.get("dsr"), lambda v: v >= STAGE01_MIN_DSR)),
+        ("half", "앞·뒤 반", None if hf is None or hs is None else [hf, hs], "둘 다 > 0",
+         None if hf is None or hs is None else hf > 0 and hs > 0),
+        ("walk", "걷는 창", None if wp is None or wt is None else [wp, wt],
+         f"창 {STAGE01_WALK[1]}개 이상, > 0 몫 {STAGE01_WALK[0]}/{STAGE01_WALK[1]} 이상",
+         None if wp is None or wt is None
+         else wt >= STAGE01_WALK[1] and wp * STAGE01_WALK[1] >= STAGE01_WALK[0] * wt),
+        ("mdd_vs_base", "MDD(기준 대비)", mdd, f">= 기준 MDD − {STAGE01_MDD_SLACK:g}",
+         None if mdd is None or bm is None else mdd >= bm - STAGE01_MDD_SLACK),
+        ("capacity", "수용량", None, "<= 거래대금의 1%", None),
+    ]  # fmt: skip
+    out = [{"key": k, "label": lab, "now": now, "target": tgt, "ok": o} for k, lab, now, tgt, o in checks]
+    failed = [c["label"] for c in out if c["ok"] is False]
+    unknown = [c["label"] for c in out if c["ok"] is None]
+    verdict = "탈락" if failed else ("후보" if not unknown else "모름")
+    return {"verdict": verdict, "checks": out, "failed": failed, "unknown": unknown,
+            "base": (base or {}).get("strategy")}  # fmt: skip
+
+
+def stage01_note(st: dict[str, Any]) -> str:
+    """점검표 → 한 줄 글 — "걸림: DSR·걷는 창 · 모름: 코호트 BH q·수용량" (판정판 실행 기록 칸)"""
+    parts = []
+    if st["failed"]:
+        parts.append(f"걸림: {'·'.join(st['failed'])}")
+    if st["unknown"]:
+        parts.append(f"모름: {'·'.join(st['unknown'])}")
+    return " · ".join(parts) or "모든 기준 통과"
+
+
 def rows(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """실행 기록들 → 판정판 줄들. (전략, 시장, sha, 작업, 코호트) 마다 가장 늦은 실행 하나, 정렬은 (시장, 코호트, 전략).
 
@@ -267,15 +338,25 @@ def rows(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
             if str(r.get("strategy") or "").endswith(NO_COST_SUFFIX)
         }  # fmt: skip
         t = _run_time(run)
-        for r in results:
-            if str(r.get("strategy") or "").endswith(NO_COST_SUFFIX):
-                continue
-            row = _row(run, r, twins)
+        줄들 = [_row(run, r, twins) for r in results if not str(r.get("strategy") or "").endswith(NO_COST_SUFFIX)]
+        # 0 → 1 점검표(25.1950) — 같은 실행의 기준 줄(`STAGE01_BASE` 앞쪽부터)과 견준다
+        by = {x["strategy"]: x for x in 줄들}
+        base = next((by[b] for b in STAGE01_BASE if b in by), None)
+        for row in 줄들:
+            st = stage01(row, base)
+            row["stage01"] = st
+            if st is None:
+                row["stage01_verdict"] = row["stage01_note"] = None
+                for c in ("stage01", "stage01_verdict", "stage01_note"):
+                    row["missing"][c] = "기준·무작위 대조 — 시도 아님"
+            else:
+                row["stage01_verdict"], row["stage01_note"] = st["verdict"], stage01_note(st)
+        for row in 줄들:
             # 작업 이름·코호트도 열쇠 — 같은 sha 로 돈 `backtest_limit`(코호트 밖)이 `backtest_core`(1b) 줄을, 비기본 월
             # 실행이 기본(코호트 1) 줄을 덮었다(25.1922, 25.1919 교차검증 [권고])
             key = (row["market"], row["strategy"], row["sha"], row["job_name"], row["cohort"])
             seen[key] = seen.get(key, 0) + 1
-            order = (t, str(r.get("created_at") or ""))
+            order = (t, str(row.get("created_at") or ""))
             if key not in best or order > best[key][0]:
                 best[key] = (order, row)
     out = []
@@ -294,7 +375,7 @@ def rows(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
 STEP_LOG_COLS = (
     "strategy", "market", "cohort", "trials_cumulative", "cagr", "excess_cagr", "mdd", "dsr", "dsr_n",
     "control_lower", "gate_lower", "half_first_cagr", "half_second_cagr", "walk_positive", "walk_total", "months",
-    "rebalances", "buys", "control_blocks", "gate_blocks", "sells_scored",
+    "rebalances", "buys", "control_blocks", "gate_blocks", "sells_scored", "stage01_verdict", "stage01_note",
 )  # fmt: skip
 #: 까닭 글 최대 길이 — step_log 크기를 묶는다(월 실행 줄 약 20개 × 빈 칸 약 10개). 넘는 까닭은 잘린다
 WHY_MAX = 80

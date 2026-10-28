@@ -193,6 +193,7 @@ function ScoreboardCard({ sb, note }: { sb: NonNullable<Data["scoreboard"]>; not
                 ))}
               </dl>
               <p className="mt-0.5 text-slate-500">표본: {l.sample}</p>
+              {l.stage ? <p className="mt-0.5 text-slate-600 dark:text-slate-300">{l.stage}</p> : null}
               {l.missing.length ? (
                 <ul className="mt-0.5 space-y-0.5 text-[11px] text-slate-400">
                   {l.missing.map((m) => (

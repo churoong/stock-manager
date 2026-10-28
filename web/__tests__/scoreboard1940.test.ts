@@ -186,4 +186,14 @@ describe("판정판 안내 줄은 가리킬 곳이 있을 때만 (25.1942)", () 
     expect(화면).toContain("note={scoreboardNoteFor(data)}");
     expect(화면).not.toContain("elsewhereNote(");
   });
+
+  it("0→1 점검 한 줄 — 배치가 낸 판정과 근거를 그대로, 시도 아닌 줄은 없음(25.1950)", () => {
+    const 줄1 = scoreLine(parseScoreboard([{ ...줄, stage01_verdict: "탈락", stage01_note: "걸림: DSR · 모름: 수용량" }]).rows[0]);
+    expect(줄1.stage).toBe("0→1(그림자로) 점검: 탈락 — 걸림: DSR · 모름: 수용량");
+    expect(scoreLine(parseScoreboard([{ ...줄, stage01_verdict: "모름", stage01_note: null }]).rows[0]).stage).toBe("0→1(그림자로) 점검: 모름");
+    const 기준줄 = scoreLine(parseScoreboard([{ ...줄, strategy: "benchmark", stage01_verdict: null, stage01_note: null,
+      missing: { stage01_verdict: "기준·무작위 대조 — 시도 아님", stage01_note: "기준·무작위 대조 — 시도 아님" } }]).rows[0]);
+    expect(기준줄.stage).toBeNull();
+    expect(기준줄.missing).toContain("없음: 0→1 점검·0→1 근거 — 기준·무작위 대조 — 시도 아님");
+  });
 });

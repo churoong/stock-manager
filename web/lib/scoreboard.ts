@@ -15,7 +15,7 @@ import { pct } from "@/lib/portfolio";
 export const SCOREBOARD_KEYS = [
   "strategy", "market", "cohort", "trials_cumulative", "cagr", "excess_cagr", "mdd", "dsr", "dsr_n",
   "control_lower", "gate_lower", "half_first_cagr", "half_second_cagr", "walk_positive", "walk_total", "months",
-  "rebalances", "buys", "control_blocks", "gate_blocks", "sells_scored",
+  "rebalances", "buys", "control_blocks", "gate_blocks", "sells_scored", "stage01_verdict", "stage01_note",
 ] as const;
 
 /** 판정판을 싣는 작업 — 배치 `jobs/backtest.JOB_NAME`·`jobs/core_backtest` 의 세 이름(`JOB_NAME`·`EXPLORE_JOB_NAME`·`LIMIT_JOB_NAME`),
@@ -64,6 +64,8 @@ const rowSchema = z.object({
   walk_positive: numOrNull,
   walk_total: numOrNull,
   months: numOrNull,
+  stage01_verdict: z.string().nullable().catch(null),
+  stage01_note: z.string().nullable().catch(null),
   rebalances: numOrNull,
   buys: numOrNull,
   control_blocks: numOrNull,
@@ -97,7 +99,7 @@ export function parseScoreboard(raw: unknown): { rows: ScoreRow[]; unreadable: n
 const COL_LABEL: Record<string, string> = {
   market: "시장", cohort: "코호트", trials_cumulative: "누적 시도", cagr: "CAGR", excess_cagr: "초과 CAGR", mdd: "MDD",
   dsr: "DSR", dsr_n: "DSR N", control_lower: "대조 하한", gate_lower: "관문 하한", half_first_cagr: "앞 반",
-  half_second_cagr: "뒤 반", walk_positive: "걷는 창", walk_total: "걷는 창 수", months: "개월", rebalances: "리밸런스", buys: "매수", control_blocks: "대조 묶음",
+  half_second_cagr: "뒤 반", walk_positive: "걷는 창", walk_total: "걷는 창 수", months: "개월", stage01_verdict: "0→1 점검", stage01_note: "0→1 근거", rebalances: "리밸런스", buys: "매수", control_blocks: "대조 묶음",
   gate_blocks: "관문 묶음", sells_scored: "판 뒤 매도",
 };
 
@@ -121,6 +123,8 @@ export interface ScoreLine {
   sample: string;
   /** "없음: 칸·칸 — 까닭" — 같은 까닭은 한 줄로 묶는다 */
   missing: string[];
+  /** 0→1(리플레이 → 그림자) 점검 한 줄(25.1950) — 배치가 funnel.md 3장 첫 값에 대어 본 결과. 시도 아닌 줄은 null */
+  stage: string | null;
 }
 
 /** 걷는 창 칸 글(25.1947) — 창이 하나도 없으면(12개월 미만) "0/0" 대신 그렇게 적는다 */
@@ -155,6 +159,7 @@ export function scoreLine(r: ScoreRow): ScoreLine {
     ],
     sample: `${n(r.months)}개월 · 리밸런스 ${n(r.rebalances)} · 매수 ${n(r.buys)} · 묶음 대조 ${n(r.control_blocks)}/관문 ${n(r.gate_blocks)} · 판 뒤 매도 ${n(r.sells_scored)} · 누적 시도 ${n(r.trials_cumulative)}`,
     missing: [...까닭별].map(([why, cols]) => `${없음}: ${cols.join("·")} — ${why || "까닭 기록 없음"}`),
+    stage: r.stage01_verdict == null ? null : `0→1(그림자로) 점검: ${r.stage01_verdict}${r.stage01_note ? ` — ${r.stage01_note}` : ""}`,
   };
 }
 
@@ -187,7 +192,7 @@ export function scoreboardHead(run: Pick<ScoreboardRun, "job_name" | "started_at
 
 /** 늘 비는 칸 — 배치 `scoreboard.WHY_*` 와 같은 뜻. 줄마다 되풀이하지 않고 한 번만 적는다 */
 export const ALWAYS_EMPTY_NOTE =
-  "수용량(보유 거래대금 미저장)·서로 다른 종목·끝난 거래는 아직 기록이 없어 싣지 않습니다. 올림·내림 문턱(docs/funnel.md 3장)은 적용하지 않은 칸입니다.";
+  "수용량(보유 거래대금 미저장)·서로 다른 종목·끝난 거래는 아직 기록이 없어 싣지 않습니다. '0→1 점검' 은 docs/funnel.md 3장의 첫 값(확인 전)에 대어 본 것일 뿐 — 올림은 사람이 정합니다. 1→2 이후 문턱은 적용하지 않습니다.";
 
 /**
  * 판정판이 싣지 않는 경고·비용 몫을 어디서 보나(25.1941) — **그 자리가 화면에 있을 때만** 가리킨다(25.1942). 경고 띠는
