@@ -225,3 +225,16 @@ def test_끊김_경계는_14일을_넘을_때() -> None:
     넘음 = job.shadow_trades(신호, 줄, sh.Costs(0, 0, 0, 0), "KR", {"KOSPI": "2026-10-17"})  # 15일
     assert next(t for t in 딱 if t.rule == "swing_v1").status == "open"
     assert next(t for t in 넘음 if t.rule == "swing_v1").reason == "끊김"
+
+
+
+def test_운영_비용의_수수료는_매수_매도_따로_엔진과_같다() -> None:
+    """25.1878 — 편도 평균을 양쪽에 붙여 설정이 매수 0.015·매도 0.25 면 둘 다 0.1325 였다(엔진은 25.1620 부터 따로)"""
+    from batch.jobs import paper as pj
+
+    m = _장부()
+    db.set_setting(m, "fees", {"kr_buy_pct": 0.015, "kr_sell_pct": 0.25})  # type: ignore[arg-type]
+    c = job.shadow_costs(m, "KR", "2026-10-28")  # type: ignore[arg-type]
+    엔진 = pj.costs_for("KR", {"kr_buy_pct": 0.015, "kr_sell_pct": 0.25}, {}, "2026-10-28")
+    assert (c.buy_fee_pct, c.sell_fee_pct) == (0.015, 0.25) == (엔진.buy_fee_pct, 엔진.sell_fee_pct)
+    assert c.slippage_pct == 엔진.slippage_pct and c.tax_at("2026-10-28") == 엔진.sell_tax_pct

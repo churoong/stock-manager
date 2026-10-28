@@ -394,13 +394,20 @@ SHADOW_KEY = "shadow_ledger"
 
 
 def shadow_costs(client: TursoClient, country: str, today: str) -> sh.Costs:
-    """백테스트·가상모의투자와 같은 비용(설정이 있으면 설정, 없으면 기본값). 매도세는 청산일 세율(일정 —
-    25.1863), 일정이 없으면(미국) 오늘 값 하나"""
+    """가상모의투자와 같은 비용(설정이 있으면 설정, 없으면 기본값). 매도세는 청산일 세율(일정 —
+    25.1863), 일정이 없으면(미국) 오늘 값 하나.
+
+    수수료는 **매수·매도 따로** — 가상모의투자 엔진(`jobs/paper._수수료`, 25.1620)과 같은 함수. 예전엔 백테스트의 편도
+    평균(`commission_pct`)을 양쪽에 붙여, 설정이 매수 0.015·매도 0.25 면 둘 다 0.1325 였다 — 11월 계좌(S·T) 성적과
+    그림자 집계의 차이에 비용 차이가 섞인다(25.1878, 단타 계좌 설계 검토)"""
+    from batch.jobs.paper import _수수료
     from batch.services import backtest as bt
 
-    c = bt.Costs.for_country(country, db.get_setting(client, "fees", {}), db.get_setting(client, "taxes", {}))
+    fees = db.get_setting(client, "fees", {})
+    c = bt.Costs.for_country(country, fees, db.get_setting(client, "taxes", {}))
+    매수, 매도 = _수수료(country, fees)
     # 매도세는 청산일 세율(25.1863) — 일정이 없으면(미국) 오늘 값 하나
-    return sh.Costs(c.commission_pct, c.commission_pct, c.tax_at(today), c.slippage_pct, tuple(c.tax_schedule))
+    return sh.Costs(매수, 매도, c.tax_at(today), c.slippage_pct, tuple(c.tax_schedule))
 
 
 def shadow_line(s: dict[str, Any]) -> str:
