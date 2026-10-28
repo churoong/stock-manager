@@ -172,7 +172,8 @@ def test_운영_비용은_매도세_일정을_싣는다() -> None:
 
 
 def test_실패한_회차는_지난_집계를_덮지_않고_실패라고_찍는다(monkeypatch: pytest.MonkeyPatch,
-                                                         capsys: pytest.CaptureFixture[str]) -> None:  # fmt: skip
+                                                         capsys: pytest.CaptureFixture[str],
+                                                         caplog: pytest.LogCaptureFixture) -> None:  # fmt: skip
     m = _장부()
     monkeypatch.setattr(job, "TursoClient", lambda: m)
     assert job.run("KR") == 0
@@ -182,6 +183,8 @@ def test_실패한_회차는_지난_집계를_덮지_않고_실패라고_찍는�
     assert db.get_setting(m, f"{job.SHADOW_KEY}_kr")["stats"]["day_v1"]["n"] == 1  # type: ignore[arg-type]
     out = capsys.readouterr().out
     assert "그림자 장부: 실패 — RuntimeError" in out and "끝난 거래 없음" not in out
+    # 공개 Actions 로그(ops_tee 안 거침)라 예외 본문은 찍지 않는다 — 종류만 (25.1865, 25.1864 교차검증 [권고])
+    assert "읽기 실패" not in out and "읽기 실패" not in caplog.text and "그림자 장부 실패: RuntimeError" in caplog.text
 
 
 def test_끊김_경계는_14일을_넘을_때() -> None:

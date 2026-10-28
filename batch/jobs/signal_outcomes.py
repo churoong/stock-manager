@@ -460,7 +460,7 @@ def run(market: str) -> int:
             if not 그림자_메모.get("error"):
                 db.set_setting(client, f"{SHADOW_KEY}_{country.lower()}", 그림자_집계)
         except Exception as exc:  # noqa: BLE001 — 곁다리, 경고 로그
-            log.warning("그림자 장부 집계를 설정에 적지 못함: %s", exc)
+            log.warning("그림자 장부 집계를 설정에 적지 못함: %s", type(exc).__name__)  # 공개 로그 — 종류만(25.1865)
         print(f"신호 성적표 {country}: 신호 {len(results)}건")
         if 대기:
             print(f"  분할 재수집 대기 {len(대기)}종목은 다시 채점하지 않고 지난 성적을 둠")
