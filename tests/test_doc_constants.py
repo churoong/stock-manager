@@ -1190,3 +1190,21 @@ def test_실적_발표_반응_상수_1658() -> None:
     검사(FACTORS, f"{ee.FRESH_DAYS}거래일보다 묵으면 NULL", "EAR 신선도 (12.40)")
     검사(FACTORS, f"지난 {ee.HISTORY_DAYS}거래일 EAR 의 {ee.TOP_QUANTILE * 100:g}번째 백분위", "매수 문턱 (12.40 B′)")
     검사(FACTORS, f"⌈{ee.TOP_QUANTILE:g}·n⌉ 번째", "최근 순위법 (12.40 B 계산 세부)")
+
+
+FUNNEL = 읽기("funnel.md")
+
+
+def test_전략_깔때기가_옮겨_적은_상수_1905() -> None:
+    """docs/funnel.md 가 코드 값을 옮겨 적은 자리(25.1905, 25.1903 교차검증 [권고]) — 코드가 바뀌면 문서도 함께."""
+    from batch.jobs import backtest as jb
+    from batch.services import backtest as bt
+    from batch.services import desk, luck
+
+    검사(FUNNEL, f"지금 `luck.MIN_MONTHS` {luck.MIN_MONTHS}", "리플레이 최소 개월")
+    검사(FUNNEL, f"`days`({desk.GATE_MIN_POINTS}평가)", "관문 모의 기간")
+    검사(FUNNEL, f"묶음 {desk.GATE_SEL_MIN_BLOCKS})", "관문 결정 단위 묶음")
+    검사(FUNNEL, f"`incidents`(무사고 {desk.GATE_INCIDENT_DAYS}일)", "관문 무사고 창")
+    검사(FUNNEL, f"실현율 ≥ {desk.GATE_KEPT_PCT:.0f}%(표본 {desk.GATE_KEPT_MIN_N} 이상", "KIS 실현율")
+    검사(FUNNEL, f"(지금 `REGISTERED_TRIALS` {jb.REGISTERED_TRIALS} 은 손 상수", "등록 시도 수")
+    검사(FUNNEL, f"모델 가정 {bt.Costs().slippage_pct:.2f}%", "모델 슬리피지")
