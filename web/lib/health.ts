@@ -747,6 +747,10 @@ function 최근날(표: string, 별칭: string, 열: string, 나라: "KR" | "US"
   return `SELECT ${별칭}.${열} AS v FROM ${표} ${별칭} CROSS JOIN stocks s ON s.id = ${별칭}.stock_id WHERE s.country = '${나라}' ORDER BY ${별칭}.${열} DESC LIMIT 1`;
 }
 
+/** 주간 성과 지표 작업(`batch.jobs.metrics.JOB_NAME`)이 끝까지 돈 마지막 날(KST) — 새 편입 단계(`metrics_missing`)는 빼고 */
+export const METRICS_RUN_SQL =
+  "SELECT date(MAX(finished_at), '+9 hours') AS v FROM batch_runs WHERE job_name = 'metrics' AND status IN ('success', 'partial')";
+
 export const FRESHNESS: FreshnessRow[] = [
   { key: "prices_kr", label: "국내 시세", sql: 최근날("prices", "p", "date", "KR"), every: "session" },
   { key: "prices_us", label: "미국 시세", sql: 최근날("prices", "p", "date", "US"), every: "session", restsOnD1: true },
@@ -789,8 +793,11 @@ export const FRESHNESS: FreshnessRow[] = [
   // 재무와 같은 이유로 `report_date`(회계연도) 가 아니라 **받아 온 날**로 본다
   { key: "dividends_kr", label: "배당(국내)", sql: "SELECT date(MAX(d.fetched_at), '+9 hours') AS v FROM stock_dividends d JOIN stocks s ON s.id = d.stock_id WHERE s.country = 'KR'", every: "year" },
   { key: "dividends_us", label: "배당(미국)", sql: "SELECT date(MAX(d.fetched_at), '+9 hours') AS v FROM stock_dividends d JOIN stocks s ON s.id = d.stock_id WHERE s.country = 'US'", every: "year", restsOnD1: true },
-  { key: "metrics_kr", label: "성과 지표(국내)", sql: 최근날("performance_metrics", "m", "as_of_date", "KR"), every: "week" },
-  { key: "metrics_us", label: "성과 지표(미국)", sql: 최근날("performance_metrics", "m", "as_of_date", "US"), every: "week", restsOnD1: true },
+  // 성과 지표는 **주간 작업이 마지막으로 끝난 날**로 본다 (25.1858, 결함 루프). 지표 행의 가장 늦은 날로 보면 25.1819 의
+  // 새 편입 단계(`metrics --only-missing`, 일요일 유니버스 뒤 몇 종목)가 금요일 날짜 행을 써, 주간 작업이 멈춰도 MAX 가
+  // 매주 올라가 14일 문턱이 켜지지 않았다. 주간 작업 한 번이 두 나라를 함께 계산한다(실행 기록 market 비움)
+  { key: "metrics_kr", label: "성과 지표(국내)", sql: METRICS_RUN_SQL, every: "week" },
+  { key: "metrics_us", label: "성과 지표(미국)", sql: METRICS_RUN_SQL, every: "week", restsOnD1: true },
   // 지수는 추세 필터(docs/signals.md 3.5)와 **베타**(25.65)의 재료다. 60일치가 없으면 베타가 빈다
   // **수정주가는 예약이 없다** (docs/infra.md 25.138). 사람이 `adjust-kr.yml` 을 손으로 돌린다.
   // 그래서 **마지막으로 언제 돌렸나**를 보인다 (25.924). 예전 식 "adj_close 가 있는 가장 늦은 날" 은
