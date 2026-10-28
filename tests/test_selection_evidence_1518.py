@@ -108,6 +108,25 @@ def test_champion_needs_paired_decision_evidence_with_bonferroni() -> None:
     assert rr["evidence_diff"]["alpha"] == pytest.approx(0.05 / 6) and rr["evidence_diff"]["lower"] < r["evidence_diff"]["lower"]
 
 
+def test_champion_bonferroni_counts_challengers_without_rows_1915() -> None:
+    """25.1915 — 본페로니 도전자 수는 자격 있는 계좌 수다. 평가가 1개뿐인 새 계좌(S 처럼 막 연 계좌)·판을 막 바꿔
+    지금 판 구간이 짧은 계좌는 줄이 안 나와도 n 에 든다. 대조(R1·R2)·따로 재는 실험(SEPARATE_IDS)은 빠진다"""
+    from batch.services import desk
+
+    날 = _날(61)
+    h = [(d, 1 + 0.001 * i) for i, d in enumerate(날)]
+    c = [(d, 1 + 0.002 * i) for i, d in enumerate(날)]
+    꾸준 = {"C": {"excess_blocks": {str(k): 1.0 + v for k, v in enumerate((2.0, 3.0, 4.0, 2.5, 3.5))}},
+          "H": {"excess_blocks": {str(k): 1.0 for k in range(5)}}}  # fmt: skip
+    새 = [(날[-1], 1.0)]
+    판 = {"G": 날[-2]}  # G 는 판을 막 바꿔 지금 판 평가가 하나뿐
+    따로 = desk.SEPARATE_IDS[0] if desk.SEPARATE_IDS else None
+    계열 = {"H": h, "C": c, "A": 새, "G": c, "R1": c, "R2": c} | ({따로: c} if 따로 else {})
+    rows = {x["id"]: x for x in desk.champion(계열, "H", 꾸준, 판)}
+    assert set(rows) == {"C"}  # A·G 는 평가가 모자라 줄이 없고, 대조·따로 재는 실험은 빠진다
+    assert rows["C"]["evidence_diff"]["alpha"] == pytest.approx(0.05 / 3)  # C·A·G
+
+
 # ── 관문 지수 대비 (25.1519) ─────────────────────────────────────────────────
 
 

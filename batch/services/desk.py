@@ -868,8 +868,12 @@ def champion(
     h = dict(sorted(series.get(mirror) or []))
     판 = since or {}
     out = []
+    # 본페로니 도전자 수는 **견줄 자격이 있는 계좌 수**다 — 아래에서 평가가 2개 미만이라 빠지는 계좌(새 계좌·판을 막
+    # 바꾼 계좌)까지 센다. 줄 수로 나누면 그런 계좌가 들고 날 때마다 유의수준이 흔들려 같은 자료로 후보가 섰다
+    # 사라졌다(25.1915, 25.1905 L2 후보 ①)
+    도전 = [a for a in series if a != mirror and a not in CONTROL_IDS and a not in SEPARATE_IDS]
     for a, v in sorted(series.items()):
-        if a == mirror or a in CONTROL_IDS or a in SEPARATE_IDS:  # 따로 재는 실험은 도전자 수에 넣지 않는다(25.1872)
+        if a not in 도전:  # 따로 재는 실험은 도전자 수에 넣지 않는다(25.1872)
             continue
         # **두 계좌 모두 지금 판인 구간만**(`since` = 계좌마다 지금 판의 시작 결정일, 판 이력) — 관문은 지금 판만 보는데
         # 챔피언 블록·같은 기간 수익은 판을 가리지 않아 옛 판 성적으로 후보가 섰다(25.1575, 운용 감사 [참고])
@@ -888,17 +892,18 @@ def champion(
               and 전체 is not None and 챔 is not None and 전체 > 챔)  # fmt: skip
         out.append({"id": a, "from": 날[0], "blocks": len(블록), "wins": 이김, "pct": 전체, "champion_pct": 챔,
                     "blocks_ok": 후보, "candidate": 후보})  # fmt: skip
-    _결정근거(out, mirror, evidence or {})
+    _결정근거(out, mirror, evidence or {}, len(도전))
     return sorted(out, key=lambda r: (not r["candidate"], -(r["wins"] / r["blocks"] if r["blocks"] else 0),
                                       -((r["pct"] or 0) - (r["champion_pct"] or 0))))  # fmt: skip
 
 
-def _결정근거(rows: list[dict[str, Any]], mirror: str, evidence: dict[str, dict[str, Any]]) -> None:
-    """챔피언 후보 줄마다 결정 단위 짝 차이(`evidence_diff`)를 붙이고 `candidate` 를 그것까지로 좁힌다"""
+def _결정근거(rows: list[dict[str, Any]], mirror: str, evidence: dict[str, dict[str, Any]], challengers: int) -> None:
+    """챔피언 후보 줄마다 결정 단위 짝 차이(`evidence_diff`)를 붙이고 `candidate` 를 그것까지로 좁힌다.
+    `challengers` = 본페로니로 나눌 도전자 수(줄 수가 아니라 자격 있는 계좌 수, 25.1915)"""
     from batch.services.paper import block_bound
 
     챔 = (evidence.get(mirror) or {}).get("excess_blocks") or {}
-    n = max(len(rows), 1)
+    n = max(challengers, len(rows), 1)
     for r in rows:
         내 = (evidence.get(r["id"]) or {}).get("excess_blocks") or {}
         차 = {int(k): float(내[k]) - float(챔[k]) for k in 내 if k in 챔}
