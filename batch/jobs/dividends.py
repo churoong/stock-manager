@@ -101,6 +101,13 @@ LAST_RUN_SQL = (
     "SELECT started_at, step_log FROM batch_runs WHERE job_name IN ('dividends', 'dividends_missing')"
     " AND status IN ('success', 'partial') ORDER BY started_at DESC LIMIT 1"
 )
+#: 실패 횟수는 **상태와 상관없이** 가장 최근 새 편입 실행에서 (25.1856, 결함 루프). 다시 받을 회사만 대상인 재시도가
+#: 전부 실패하면 `failed` 로 닫혀 위 기준이 되지 못해, 횟수가 늘 첫 `partial` 의 값에서 다시 시작했다 — `MAX_RETRY` 가
+#: 걸리지 않고 재무 워크플로가 화요일마다 빨갛게 닫혔다(25.1825 가 막으려던 것)
+LATEST_COUNTS_SQL = (
+    "SELECT started_at, step_log FROM batch_runs WHERE job_name = 'dividends_missing'"
+    " AND step_log LIKE '%retry_counts%' ORDER BY started_at DESC LIMIT 1"
+)
 #: 그 날짜 이하 국내 최신 스냅샷의 편입 종목
 PREV_MEMBERS_SQL = (
     "SELECT u.stock_id FROM universe_members u WHERE u.included = 1 AND u.snapshot_date = ("
@@ -132,6 +139,14 @@ def _지난_기록(client: TursoClient) -> tuple[str | None, dict[int, int]]:
     except ValueError:
         기록 = {}
     횟수 = {int(k): int(v) for k, v in (기록.get("retry_counts") or {}).items()}
+    뒤 = client.execute(LATEST_COUNTS_SQL).rows
+    if 뒤 and str(뒤[0][0] or "") > str(마지막[0][0]):  # 기준 실행보다 뒤의 실행(실패 포함)이 센 횟수를 잇는다
+        try:
+            뒤기록 = json.loads(뒤[0][1] or "{}") or {}
+        except ValueError:
+            뒤기록 = {}
+        for k, v in (뒤기록.get("retry_counts") or {}).items():
+            횟수[int(k)] = max(횟수.get(int(k), 0), int(v))
     return (str(기록.get("snapshot") or str(마지막[0][0])[:10]),
             {int(x): 횟수.get(int(x), 1) for x in 기록.get("retry_ids") or []})  # fmt: skip
 

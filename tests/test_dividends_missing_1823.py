@@ -211,3 +211,19 @@ def test_시점_조회_확인은_앞_단계가_실패해도_돈다() -> None:
     글 = (ROOT / ".github" / "workflows" / "financials.yml").read_text(encoding="utf-8")
     확인 = 글.index("python scripts/check_pit.py")
     assert "if: ${{ !cancelled() }}" in 글[글.rindex("- name:", 0, 확인) : 확인]
+
+
+def test_다시_받을_회사만_남아_늘_실패해도_세_번째에_그만_받는다(monkeypatch) -> None:  # noqa: ANN001
+    """25.1856 (결함 루프) — 다시 받을 회사만 대상인 실행은 전부 실패라 failed 로 닫혀 기준이 되지 못했다. 횟수가 늘 첫
+    partial 의 1 에서 다시 시작해 `MAX_RETRY` 가 걸리지 않고 화요일마다 빨갛게 닫혔다"""
+    import time
+
+    _, 부른, 기록 = _실행_준비(monkeypatch, lambda c: (c != "C4", "ok", 1))
+    결과 = []
+    for _ in range(4):
+        부른.clear()
+        결과.append((job.run(latest=2025, only_missing=True), set(부른), 기록()))
+        time.sleep(0.01)  # started_at 순서
+    assert [r[2].get("retry_counts") for r in 결과[:3]] == [{"4": 1}, {"4": 2}, {"4": 3}]
+    assert 결과[2][2]["given_up"] == [4]  # 세 번째 실패에서 그만 받는다
+    assert 결과[3][1] == set()  # 네 번째 실행은 C4 를 부르지 않는다
