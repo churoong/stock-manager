@@ -562,6 +562,12 @@ def run(
             return {"off": "도전자 계좌를 고르지 않음(/kis)"}
         if 베낌 == MIRROR_ACCOUNT:
             return {"off": f"도전자 {베낌} 가 챔피언과 같음"}
+        from batch.services.paper import SEPARATE_IDS
+
+        if 베낌 in SEPARATE_IDS:
+            # 따로 재는 실험 계좌(단타·스윙, docs/paper.md 16.3.1)는 베끼지 않는다 — 스윙·당일 단타 매도를 장 전 모의
+            # 주문으로 내면 규칙과 다른 경로로 찬다. 챔피언 교체 후보에서도 빠져 있다(25.1879)
+            return {"off": f"도전자 {베낌} 는 따로 재는 실험 계좌라 베끼지 않음"}
         # 첫째와 같은 모의계좌면 두 베끼기의 잔고·체결 조회가 섞여 정리 주문이 남의 종목을 판다 — 설정 실수로 알린다
         if kv.account(keys=kv.CHALLENGER) == kv.account(keys=kv.MAIN):
             return {"off": f"{slot.label} 계좌가 첫째와 같음", "missing": ["KIS_VTS2_ACCOUNT(첫째와 같은 계좌)"]}

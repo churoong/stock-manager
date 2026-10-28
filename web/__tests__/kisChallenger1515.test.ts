@@ -6,7 +6,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
-import { ACCOUNTS_SQL, CHALLENGER_KEYS, CHALLENGER_READ, CHALLENGER_UPSERT, CHAMPION, challengerOf, challengerSchema } from "@/lib/kisChallenger";
+import { ACCOUNTS_SQL, CHALLENGER_KEYS, CHALLENGER_READ, CHALLENGER_UPSERT, CHAMPION, SEPARATE_IDS, challengerOf, challengerSchema } from "@/lib/kisChallenger";
 
 const MIGRATIONS = join(process.cwd(), "..", "migrations");
 const py = readFileSync(join(process.cwd(), "..", "batch", "jobs", "broker_mirror.py"), "utf8");
@@ -25,6 +25,15 @@ describe("도전자 설정", () => {
     expect(challengerSchema.safeParse({ account: CHAMPION }).success).toBe(false);
     expect(challengerSchema.safeParse({ account: "c; DROP" }).success).toBe(false);
     expect(challengerSchema.safeParse({}).success).toBe(false);
+  });
+
+  it("따로 재는 실험 계좌(단타·스윙)는 고를 수 없다 — 정의처와 같은 목록(25.1879)", () => {
+    const 정의 = readFileSync(join(process.cwd(), "..", "batch", "services", "paper.py"), "utf8");
+    const 목록 = /^SEPARATE_IDS = \(([^)]*)\)/m.exec(정의)?.[1] ?? "";
+    expect([...목록.matchAll(/"([A-Z0-9]+)"/g)].map((m) => m[1])).toEqual([...SEPARATE_IDS]);
+    for (const a of SEPARATE_IDS) expect(challengerSchema.safeParse({ account: a }).success).toBe(false);
+    const route = readFileSync(join(process.cwd(), "app", "api", "kis", "challenger", "route.ts"), "utf8");
+    expect(route).toContain("!SEPARATE_IDS.includes(a.id)"); // 고르기 목록에서도 뺀다
   });
 
   it("쓰고 읽기 — 배치가 읽는 {account} 꼴", () => {
