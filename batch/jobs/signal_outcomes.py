@@ -381,7 +381,8 @@ def calibrations(
         scores = load_scores(client, country, since)
     except Exception as exc:  # noqa: BLE001
         말 = f"점수 보정표 — 점수를 읽지 못해 뺐다: {exc}"
-        logging.getLogger("signal_outcomes").warning(말)
+        # 공개 로그(이 워크플로는 ops_tee 를 거치지 않는다)에는 종류만 — 본문은 실행 기록 warnings(DB)에만(25.1866)
+        logging.getLogger("signal_outcomes").warning("점수 보정표 — 점수를 읽지 못해 뺐다: %s", type(exc).__name__)
         return [], 말
     # 날짜 평균을 뺀 ρ — 기록만, 판정·화면에 쓰지 않는다 (25.1359, 23회차 P2). 보정표 payload 모양은 그대로
     return [{**cb.calibrate(cb.pairs_for(outcomes, scores, w), w).as_payload(),

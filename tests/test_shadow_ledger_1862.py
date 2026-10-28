@@ -81,14 +81,28 @@ def test_그림자_장부가_실패해도_성적표는_저장된다(monkeypatch:
     assert "RuntimeError" in 기록["shadow"]["error"] and any("그림자 장부" in w for w in 기록["warnings"])
 
 
-def test_설정_쓰기가_실패해도_실행은_성공으로_닫힌다(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_설정_쓰기가_실패해도_실행은_성공으로_닫힌다(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
     m = _장부()
     monkeypatch.setattr(job, "TursoClient", lambda: m)
     진짜 = db.set_setting
-    monkeypatch.setattr(job.db, "set_setting", lambda c, k, v: (_ for _ in ()).throw(RuntimeError("x"))
+    monkeypatch.setattr(job.db, "set_setting", lambda c, k, v: (_ for _ in ()).throw(RuntimeError("설정쓰기본문"))
                         if k.startswith(job.SHADOW_KEY) else 진짜(c, k, v))  # fmt: skip
     assert job.run("KR") == 0
     assert m.conn.execute("SELECT status FROM batch_runs ORDER BY id DESC").fetchone()[0] == "success"
+    # 공개 로그 — 예외 종류만(25.1866, 25.1865 교차검증 [권고])
+    assert "설정쓰기본문" not in caplog.text and "적지 못함: RuntimeError" in caplog.text
+
+
+def test_점수_보정표_경고는_공개_로그에_종류만_실행_기록에_본문(caplog: pytest.LogCaptureFixture) -> None:
+    """25.1866 (25.1865 교차검증 [참고]) — 점수 보정표 경고가 예외 본문(질의·인자가 섞일 수 있다)을 공개 로그에 찍었다"""
+    class 깨짐:
+        def execute(self, *a, **k):  # noqa: ANN002, ANN003, ANN201
+            raise RuntimeError("보정본문")
+
+    o = [job.oc.Outcome(**{**{f: None for f in job.oc.Outcome.__dataclass_fields__}, "as_of_date": "2026-10-01"})]
+    표, 말 = job.calibrations(깨짐(), "KR", o)  # type: ignore[arg-type]
+    assert 표 == [] and 말 is not None and "보정본문" in 말  # 실행 기록 warnings(DB)에는 본문
+    assert "보정본문" not in caplog.text and "읽지 못해 뺐다: RuntimeError" in caplog.text
 
 
 def test_국내_상한가_시가는_잡_경로에서도_체결_못_함() -> None:
