@@ -121,3 +121,25 @@ def test_넷째_날_흑자로_돌면_포함_표시를_다시_계산한다(monkey
     (글,), = c.conn.execute("SELECT rationale_text FROM sell_flags WHERE is_active = 1").fetchall()
     assert 글.count("종합 점수 하락") == 1 and "에이: 종합 점수 하락." in 글 and "포함" not in 글
     assert 글.count("오늘 판정할 자료가 없어") == 1
+
+
+def test_재무를_이틀_연속_못_봐도_포함_표시가_남는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1850 (25.1849 교차검증 [권고]) — 어제 "(… 포함)" 표시를 떼고 다시 계산하는 길에서 이름 거두기를 꺼도 시험이
+    통과했다. 재무를 이틀 연속 모르면 넷째 날 문장에서 점수 하락이 사라졌다"""
+    c, job = _장부(monkeypatch)
+    _실행(monkeypatch, c, sf.HoldingInput(**기본, score_now=45.0, **점수봄), date(2026, 3, 20))
+    모름 = {**기본, "op_income_latest": None}
+    for 날, 재무 in ((21, 기본), (22, 모름), (23, 모름)):
+        _실행(monkeypatch, c, sf.HoldingInput(**재무, score_now=44.0, score_now_date=f"2026-03-{날 - 1}",
+                                              score_scale_unknown=True), date(2026, 3, 날))  # fmt: skip
+    (글,), = c.conn.execute("SELECT rationale_text FROM sell_flags WHERE is_active = 1").fetchall()
+    assert "(종합 점수 하락 포함)" in 글 and 글.count("오늘 판정할 자료가 없어") == 1
+
+
+def test_재무악화_근거_이름에_괄호와_쉼표가_없다() -> None:
+    """`full_carry_text` 가 문장의 괄호 표시에서 이름을 다시 거두는 제약(25.1849) — 근거 이름이 늘면 여기서 깨진다"""
+    h = sf.HoldingInput(**기본, score_now=45.0, **점수봄)
+    (f,) = [x for x in sf.evaluate(h, date(2026, 3, 20), {}) if x.reason_code == "재무악화"] or [None]
+    assert f is not None
+    for c in f.criteria:
+        assert not set("(),") & set(str(c.get("label"))), c
