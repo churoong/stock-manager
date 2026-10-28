@@ -462,12 +462,13 @@ def test_워크플로_핵심H_는_수동_전용_국내_120분() -> None:
     assert core["timeout-minutes"] == 120
     # 수동(workflow_dispatch)만 — 예약·웹 깨우기(repository_dispatch)로는 돌지 않는다
     assert "github.event_name == 'workflow_dispatch'" in core["if"] and "inputs.what == '핵심H'" in core["if"]
-    assert "inputs.what != '핵심H'" in 월["if"]
+    assert "inputs.what != '핵심H'" in 월["if"] and "inputs.what != '탐색'" in 월["if"]  # 탐색(25.1908)도 core 작업
     단계 = {s.get("name"): s for s in core["steps"]}
     실행줄 = 단계["핵심 H 백테스트"]["run"]
     assert "python -m batch.jobs.core_backtest --market KR" in 실행줄 and "$MARKET" not in 실행줄
     assert "steps.gate.outputs.deferred != 'true'" in 단계["핵심 H 백테스트"]["if"]
-    assert "turso_read_gate.py backtest_core" in 단계["Turso 읽기 진도 문 (docs/infra.md 25.886)"]["run"]
+    assert "'backtest_core' }}" in 단계["Turso 읽기 진도 문 (docs/infra.md 25.886)"]["run"]
+    assert "'--explore'" in 실행줄 and "inputs.what == '탐색'" in 실행줄  # 탐색 선택이면 --explore(25.1908)
     # 월 백테스트와 같은 비밀·환경·시세 사본 단계
     for 열쇠 in ("TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN", "DB_BACKEND", "D1_API_TOKEN", "PRICE_REPLICA_PATH",
                 "OFFLINE_MODE", "BACKTEST_TRIGGER"):  # fmt: skip

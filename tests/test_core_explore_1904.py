@@ -54,10 +54,116 @@ def test_위원회_변형이_가결_종목만_사고판다(variant: str) -> None
     assert any(d["reason"].startswith("위원회") or "부결" in d["reason"] or "주관" in d["reason"] for d in 안산), 안산[:3]
 
 
-def test_장기보유는_손절로_팔지_않는다() -> None:
-    """D 의 매도 규칙 `time` — 기간초과만(운영 0075). 손절이 선 날에도 들고 간다."""
-    s, *_ = _끝까지("core_d")
-    assert not any("손절" in c for lg in s.log for c in lg.sells.values())
+def _하루_재료(variant: str) -> list:
+    """끝까지 돌며 위원회 변형이 본 하루 재료(`DayView`)와 그날 보유를 모은다."""
+    본: list = []
+    원래 = cs.CoreStrategy._buys
+
+    def 엿봄(self, client, view, dv, w, *a, **k):  # type: ignore[no-untyped-def]
+        본.append((dv, {sid for sid, x in w.items() if x > 0}))
+        return 원래(self, client, view, dv, w, *a, **k)
+
+    mp = pytest.MonkeyPatch()
+    try:
+        mp.setattr(cs.CoreStrategy, "_buys", 엿봄)
+        _끝까지(variant)
+    finally:
+        mp.undo()
+    return 본
+
+
+def _운영_위원회(dv, charter: dict, held: set[int]) -> tuple[list, list[tuple]]:  # type: ignore[no-untyped-def]
+    """운영 `jobs/paper.committee_step` 을 같은 하루 재료로 — (가결 행, skip 결정 (종목, 사유, held))."""
+    import json
+
+    from batch.jobs import paper as jp
+
+    캐시 = {"agenda": dv.agenda, "population": dv.population, "dossiers_written": True}
+    행, _기록, 문장, _메모 = jp.committee_step(
+        None, market="KR", account="E", charter=charter, charters=dict(co.CHARTERS), signal_rows=dv.rows,
+        trade_date=dv.day, cache=캐시, now="t", rule_version=2, held=frozenset(held),
+    )  # fmt: skip
+    skips = [(a[3], a[5], json.loads(a[6])["held"]) for sql, a in 문장 if sql == jp.DECISION_INSERT_SQL and a[4] == "skip"]
+    return 행, skips
+
+
+def test_위원회_가결_행과_skip_은_운영_committee_step_과_같다() -> None:
+    """일치 시험(funnel.md 4장 ③의 첫 조각, 25.1908 — 25.1904 교차검증 [권고]) — 리플레이가 본 날마다 같은 하루 재료를
+    운영 `committee_step` 에 넣어 가결 행(종목·기간 순)과 skip 결정(종목·사유·held)이 같은지 본다."""
+    헌장 = dict(co.CHARTERS["E"])
+    날들 = _하루_재료("core_e")
+    assert len(날들) > 100
+    for dv, held in 날들:
+        행, skips = _운영_위원회(dv, 헌장, held)
+        리플 = [(d["stock_id"], d["reason"], d["detail"]["held"]) for d in cs.committee_skips(dv, 헌장, held)]
+        assert 리플 == skips, dv.day
+        assert [(r.stock_id, r.horizon) for r in cs.committee_rows(dv, "E")] == [(r.stock_id, r.horizon) for r in 행]
+
+
+def test_위원회_skip_갈래는_운영과_같다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """합성 자료로는 하루 가결이 한 건을 넘지 않아 "가결이나 표 순 밖" 갈래를 못 지난다 — 회의(`co.meet`)를 통제된 결과로
+    바꿔 끼워(운영·리플레이가 같은 함수를 부른다) 세 갈래를 함께 본다: ① 부결 사유 ② 가결이나 표 순 상위 N 밖
+    ③ 이미 든 종목의 held. 그리고 두 쪽이 회의에 넘긴 안건 수(헌장 `agenda` 로 자름)가 같은지."""
+    from types import SimpleNamespace
+
+    from tests.test_core_strategy_1532 import _행
+
+    # 합성 하루 재료 — 안건 다섯(헌장 agenda 4 로 잘린다), 신호 행은 그 다섯
+    dv = SimpleNamespace(day="2024-01-05", population=[], agenda=[SimpleNamespace(stock_id=s, ticker=f"{s:06d}")
+                                                                 for s in range(1, 6)],
+                         rows=[_행(s, "2024-01-05", 10_000.0) for s in range(1, 6)])  # fmt: skip
+    받은: list[int] = []
+
+    def 회의(agenda, charter, population=None):  # type: ignore[no-untyped-def]
+        받은.append(len(agenda))
+        items = [co.Item(stock_id=d.stock_id, ticker=d.ticker, opinions={}, vote=1.0 - k / 10, favor=3, issue=False,
+                         passed=k != 2, reason="가결" if k != 2 else "위원회: 표 0.1 < 문턱 1")
+                 for k, d in enumerate(agenda)]  # fmt: skip
+        return items, [i for i in items if i.passed][: int(charter["top_n"])]
+
+    monkeypatch.setattr(co, "meet", 회의)
+    헌장 = {**co.CHARTERS["E"], "top_n": 1, "agenda": 4}
+    든 = {dv.agenda[1].stock_id}
+    _행, 운영 = _운영_위원회(dv, 헌장, 든)
+    받은_운영 = list(받은)
+    리플 = [(d["stock_id"], d["reason"], d["detail"]["held"]) for d in cs.committee_skips(dv, 헌장, 든)]
+    assert 리플 == 운영 and len(운영) == 3, 운영
+    assert 받은 == 받은_운영 * 2 and 받은_운영 == [4]  # 같은 안건 수로 잘라 넘겼다
+    사유 = {r for _s, r, _h in 운영}
+    assert "위원회: 가결이나 표 순 상위 1 밖" in 사유 and "위원회: 표 0.1 < 문턱 1" in 사유
+    assert [h for s, _r, h in 운영 if s == dv.agenda[1].stock_id] == [True]
+
+
+def test_헌장_top_n_이_변형_칸을_덮는다() -> None:
+    """변형 칸의 top_n 이 헌장과 달라도 헌장 값이 쓰인다(운영 run_step 의 `종목수 = 헌장 top_n`)."""
+    from batch.services import core_backtest as cb
+    from tests.test_core_strategy_1532 import _자료
+    from tests.test_core_strategy_1532 import 날들 as 전체날
+
+    universe, _p, _t, snaps, idx = _자료()
+    mp = pytest.MonkeyPatch()
+    try:
+        mp.setitem(cs.EXPLORE_VARIANTS, "core_e", cs.Variant("E", "core", "tranche", 99, "committee"))
+        s = cs.make_core_strategy("core_e", cb.CoreMarket(universe, snaps, idx), sessions=전체날)
+    finally:
+        mp.undo()
+    assert s.v.top_n == int(co.CHARTERS["E"]["top_n"]) != 99
+
+
+def test_장기보유는_목표·손절에_팔지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """D 의 매도 규칙 `time`(운영 0075) — 기간초과만. 모의 중간부터 가격을 세 배·5분의 1 로 흔들어(1532 의 `_미끼`)
+    목표·손절이 서게 한 뒤, 같은 자료를 매도 규칙만 `core` 로 바꾼 D 가 그 사유로 판다는 것을 먼저 보고(시험이 헛돌지
+    않음), `time` D 는 그 사유로 팔지 않음을 본다(25.1908 — 25.1904 교차검증 [권고]: 예전 시험은 손절이 한 번도 서지
+    않아 아무것도 잡지 못했다)."""
+    from tests.test_core_strategy_1532 import _미끼
+
+    풀기 = lambda s: {c for lg in s.log for 사유 in lg.sells.values() for c in 사유}  # noqa: E731
+    흔든 = _미끼(모의[200])
+    time_d = _끝까지("core_d", 흔든)[0]
+    monkeypatch.setitem(cs.EXPLORE_VARIANTS, "core_d", cs.Variant("D", "core", "tranche", 5, "committee"))
+    core_d = _끝까지("core_d", 흔든)[0]
+    assert 풀기(core_d) & {"목표도달", "손절"}, 풀기(core_d)
+    assert not 풀기(time_d) & {"목표도달", "손절"}, 풀기(time_d)
 
 
 def test_가결_행은_표_순이다() -> None:
@@ -87,11 +193,15 @@ def test_탐색_실행은_따로_싣고_시도_수_하한은_누적이다(monkey
     from tests.test_core_backtest_job_1534 import _db, 오늘
 
     mem = _db(monkeypatch)
+    # 헌장 top_n 을 변형 칸과 다르게 — 저장 top_n 이 헌장 값인지 실제로 가린다(25.1908)
+    monkeypatch.setitem(co.CHARTERS, "E", {**co.CHARTERS["E"], "top_n": 7})
     assert cj.run_core("KR", years=1, today=오늘, force=True, explore=True) == 0
-    행 = mem.execute("SELECT strategy, top_n, warnings_json FROM backtest_runs ORDER BY id").dicts()
+    행 = mem.execute("SELECT strategy, top_n, warnings_json, metrics_json FROM backtest_runs ORDER BY id").dicts()
     assert [r["strategy"] for r in 행] == sorted(cs.EXPLORE_VARIANTS)
-    # 위원회 변형의 저장 top_n 은 헌장 값(E 10, D 5)
-    assert {r["strategy"]: r["top_n"] for r in 행} == {"core_d": 5, "core_e": 10}
+    # 위원회 변형의 저장 top_n 은 헌장 값(E 는 위에서 7 로 바꿈, D 5)
+    assert {r["strategy"]: r["top_n"] for r in 행} == {"core_d": 5, "core_e": 7}
+    # DSR 이 실제로 쓴 시도 수 하한 — 실행 기록 칸만이 아니라 판정 계산이 받은 값(25.1908)
+    assert all(json.loads(r["metrics_json"])["luck"]["n_trials"] >= cj.explore_trial_floor() for r in 행)
     assert all(cj.WARN_EXPLORE in json.loads(r["warnings_json"]) for r in 행)
     assert mem.execute("SELECT COUNT(*) FROM batch_runs WHERE job_name = ?", [cj.JOB_NAME]).scalar() == 0
     로그 = json.loads(mem.execute("SELECT step_log FROM batch_runs WHERE job_name = ?",
@@ -101,8 +211,11 @@ def test_탐색_실행은_따로_싣고_시도_수_하한은_누적이다(monkey
     assert 로그["verdict"].startswith("탐색 실행") and "skipped" in 로그["holding_eq"]
 
 
-def test_두_목록을_섞어_돌리지_않는다() -> None:
+def test_두_목록을_섞어_돌리지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
     from batch.jobs import core_backtest as cj
+    from tests.test_core_backtest_job_1534 import _db
+
+    _db(monkeypatch)  # 막이가 깨져도 실제 DB 로 가지 않게
 
     with pytest.raises(ValueError):
         cj.run_core("KR", variants=("core_b", "core_d"))

@@ -36,7 +36,7 @@
 - 판정 불가 후보도 p = 1 로 코호트에 넣는다(`bh_record` 와 같은 꼴)
 - **코호트 1** = 2026-11-03 매월 기본 실행(국내 17:11·미국 19:11 UTC 예약 — KST 로는 11-04 02:11·04:11)이 판정하는 전략들 — m = 그 실행이 쓴 N(= max(실행 곡선 수, `REGISTERED_TRIALS`), `luck.judge`), **시장마다 따로**, 코드는 그 실행 기록의 `params.sha`. 이 문서가 그 결과를 보기 전에 커밋됐으므로 그 판정이 깔때기의 첫 사전 등록 판정이다. 판정 원장(docs/factors.md 12.32) #1~#40 가운데 DSR 밖의 판정(IC·A/B 등)은 각자 원장 규칙대로 — 코호트 m 에 넣지 않는다
 - **코호트 1b** = 핵심 H 첫 국내 기본 실행(수동 `backtest.yml` what=핵심H, `backtest_core` 기록 — 예약으로는 돌지 않는다, docs/backtest.md 10장) — `core_h`·`core_g`·`core_b` 판정. 시도 수는 이미 `CORE_REGISTERED_TRIALS` 로 `REGISTERED_TRIALS` 안에 있다
-- **코호트 2** = 그 뒤 더한 탐색 변형(25.1904 의 `core_d`·`core_e` 부터) — 탐색 실행기가 첫 실행 전에 이름과 m 을 등록한다
+- **코호트 2** = 그 뒤 더한 탐색 변형(25.1904 의 `core_d`·`core_e` 부터) — `core_strategy.EXPLORE_VARIANTS` 에 넣은 **커밋이 등록**이다(이름·칸·날짜가 git 기록에 남는다). DSR 시도 수 하한 = `REGISTERED_TRIALS` + `len(EXPLORE_VARIANTS)`(`explore_trial_floor`), 실행 기록 `params.trial_floor` 에 남는다. 변형을 더하면 하한이 함께 오른다 — 결과를 본 뒤 변형을 빼도 하한은 내리지 않는다(뺀 변형은 이름을 지우지 말고 `[철회]` 로 남긴다 `[확인필요: 철회 표시 방식]`)
 
 ### 2.2 판정판 한 줄 (전략 이름·판·코드 sha·시장)
 
@@ -102,7 +102,7 @@
 | 미국 전 계좌 | 안 됨 | 지수·통화·분할 대기 규칙 |
 
 **만들 순서**(가치 순 — 각 한 건의 끝):
-1. ~~탐색 실행기~~ — 됨(25.1906): `python -m batch.jobs.core_backtest --market KR --explore` — `EXPLORE_VARIANTS` 를 하루 재료 하나로 나눠 돌려 `backtest_explore` 로 싣는다(웹 핵심 H 화면·판정과 가름). DSR 시도 수 하한 = 코호트 1 + 탐색 변형 수. 운영 예약에는 아직 걸지 않았다(Turso 읽기 — 10월 자제)
+1. ~~탐색 실행기~~ — 됨(25.1906·25.1908): `python -m batch.jobs.core_backtest --market KR --explore`, Actions 는 `backtest.yml` 수동 what=탐색 — `EXPLORE_VARIANTS` 를 하루 재료 하나로 나눠 돌려 `backtest_explore` 로 싣는다(웹 핵심 H 카드·판정과 가름 — `/backtest` 묶음 목록에는 다른 묶음처럼 나온다). DSR 시도 수 하한 = 코호트 1 + 탐색 변형 수. 첫 실행은 11월(Turso 읽기 — 10월 자제)
 2. ~~D·E 변형(위원회 선정)~~ — 됨(25.1904)
 3. **일치 시험** — 합성 자료(시가 = 종가, 명목 자본 1e12원)로 운영 `run_step` 을 날마다 돌린 장부와 리플레이를 4단으로 견준다: 매도 종목·사유 → 결정 원장 → 매수 비중(1e-6) → 체결 뒤 보유·현금·자본. 허용 차이는 이름 붙인 목록으로
 4. 분할 지정가 체결 모드(운영 판정 "종가 ≤ 회차 가격" 이라 종가로 재현 가능)
