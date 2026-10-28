@@ -83,6 +83,12 @@ _채우기_사유 = frozenset({"2부 배분", "최소 주문 단위 미만", "�
 #: 변형 → ⑨(다) 채우기 자리의 매수 사유 다른 이름(25.1921) — 미리 고른 계좌는 "2부 배분" 대신 `preselected_reason`
 #: (H "지주사 합의"·D·E "위원회 가결"). tests/test_replay_parity_hde_1921.py 가 넣는다. 비면(B·G) 위 셋 그대로
 채우기_사유_더: dict[str, frozenset[str]] = {}
+#: 변형 → L2 줄 쌍 거르개 (판, 결정일, 리플레이만, 운영만, 운영하루) → 견딘 종목(25.1929 허용 ⑪ 종목 상한 끝 뒤집힘 —
+#: tests/test_replay_parity_r_1929.py 가 넣고 자리를 적는다). 비면(B·G·H·D·E) 예전 그대로. ⑨(다) 보다 먼저 본다
+줄쌍_더: dict[str, Callable[[str, str, list, list, Any], set[int]]] = {}
+#: 비용 판 → (⑦ 더 산 로트 원가 상대 오차, ⑨ 보유 비중 차) L0 상한(25.1929). 없으면 ⑦·⑨ 그대로(`fees`). 슬리피지 판
+#: (`slip`, 허용 ⑫)은 tests/test_replay_parity_r_1929.py 가 넣는다 — ⑦·⑨ 를 넓히지 않으려고 판마다 둔다
+판_상한: dict[str, tuple[float, float]] = {}
 
 # ── 합성 자료 — 실제 국내 거래일(운영은 거래소 달력으로 쉼·다음 장을 센다) ─────────────────────────────────
 
@@ -249,7 +255,9 @@ def _시세넣기(c: Client, day: str) -> None:
 
 def _베끼기(c: Client, aid: str, rp: 리플레이, 판: str, k: int, cutoff: str, rows: list) -> None:
     """허용 ① — 엔진이 그날(모의[k]) 판 것·산 것을 운영 장부에 그날 종가 체결로 적는다. 비용은 엔진과 같은 수수료·세율을
-    운영 `pp.make_fill` 로(지정가 — 슬리피지 없음) — 원가 평균은 운영 `pp.positions` 가 낸다(허용 ⑦ 을 L0 에서 잰다)."""
+    운영 `pp.make_fill` 로(지정가 — 슬리피지 없음) — 원가 평균은 운영 `pp.positions` 가 낸다(허용 ⑦ 을 L0 에서 잰다).
+    25.1929: 슬리피지는 그 판 엔진 비용의 값(`zero`·`fees` 는 0 — 예전과 같다), 시가 일괄 변형(R1·R2)은 운영처럼 시장가 주문
+    으로 베낀다(시장가 매수에만 슬리피지가 붙는다 — `make_fill`. 매도는 주문 종류와 무관하게 붙는다)."""
     day = 모의[k]
     reb = rp.r.rebalances[k]
     assert reb.date == day
@@ -257,7 +265,8 @@ def _베끼기(c: Client, aid: str, rp: 리플레이, 판: str, k: int, cutoff: 
     prices = _자료()[1]
     fees, costs = 비용판[판]
     매수, 매도 = job._수수료("KR", fees)
-    비용 = pp.Costs(buy_fee_pct=매수, sell_fee_pct=매도, sell_tax_pct=costs.tax_at(day), slippage_pct=0.0)
+    비용 = pp.Costs(buy_fee_pct=매수, sell_fee_pct=매도, sell_tax_pct=costs.tax_at(day), slippage_pct=costs.slippage_pct)
+    종류 = "market" if rp.s.v.entry == "open" else "limit"
     든 = pp.positions([f for f in job._fills(c)[0] if f.account_id == aid])
     점수: dict[int, float | None] = {}
     for r in rows:
@@ -286,15 +295,16 @@ def _베끼기(c: Client, aid: str, rp: 리플레이, 판: str, k: int, cutoff: 
             체결.append(("buy", sid, 더, rp.기간[day].get(sid)))
     for side, sid, q, h in 체결:
         px = prices[sid][day]
+        지정가 = px if 종류 == "limit" else None  # 25.1929 시장가(R1·R2 시가 일괄)는 지정가 없음
         cur = c.conn.execute(
             "INSERT INTO paper_orders (account_id, market, stock_id, side, order_type, limit_price, quantity, currency,"
             " decided_on, fill_session, fill_basis, tranche, reason, horizon, score_at_order, score_as_of, rule_version,"
-            " status, closed_on, close_note, created_at) VALUES (?, 'KR', ?, ?, 'limit', ?, ?, 'KRW', ?, ?, 'close', ?,"
+            " status, closed_on, close_note, created_at) VALUES (?, 'KR', ?, ?, ?, ?, ?, 'KRW', ?, ?, 'close', ?,"
             " '엔진 체결 베낌', ?, ?, ?, 1, 'filled', ?, ?, ?)",
-            [aid, sid, side, px, q, cutoff, day, _베낌_회차[side], h, 점수.get(sid), cutoff, day,
+            [aid, sid, side, 종류, 지정가, q, cutoff, day, _베낌_회차[side], h, 점수.get(sid), cutoff, day,
              ALLOW_T_CLOSE_FULL_FILLS, f"{day}T09:00:00+00:00"],
         )  # fmt: skip
-        o = pp.Order(id=int(cur.lastrowid), account_id=aid, stock_id=sid, side=side, order_type="limit", limit_price=px,
+        o = pp.Order(id=int(cur.lastrowid), account_id=aid, stock_id=sid, side=side, order_type=종류, limit_price=지정가,
                      quantity=q, currency="KRW", fill_session=day, horizon=h, score_at_order=점수.get(sid),
                      score_as_of=cutoff)  # fmt: skip
         f = pp.make_fill(o, px, day, 1.0, 비용)
@@ -392,6 +402,7 @@ def _흔들림(rp: 리플레이, h: 운영하루, sid: int) -> float:
 def _L0(variant: str, 판: str) -> list[str]:
     """판단 직전 장부 — 보유 종목·첫 매수일·기간은 같고, 주당 원가는 한 번 산 로트 1e-9·더 산 로트 허용 ⑦ 안. 보유 비중은 허용 ⑨."""
     rp, live = _리플레이(variant, 판), _운영(variant, 판)
+    원가한도, 비중한도 = 판_상한.get(판, (ALLOW_COST_AVERAGING_REL, ALLOW_ENGINE_COST_BOOKING))
     틀림 = []
     for day, h in live.items():
         리플 = rp.장부[day]
@@ -402,10 +413,10 @@ def _L0(variant: str, 판: str) -> list[str]:
             운첫, 운기간, 운원가 = h.lots[sid]
             # 비용 0 판은 더 산 로트도 1e-6 — 허용 ⑦ 을 비용 판에만 쓴다(25.1911, 25.1910 교차검증 [권고]: 실측 3e-8 인데
             # 1e-4 로 재 원가 평균 오차가 3천 배 커도 지나갔다)
-            한도 = (ALLOW_COST_AVERAGING_REL if 판 == "fees" else 1e-6) if 더삼 else 1e-9
+            한도 = (원가한도 if 판 != "zero" else 1e-6) if 더삼 else 1e-9
             if (첫, 기간) != (운첫, 운기간) or abs(원가 / 운원가 - 1) > 한도:
                 틀림.append(f"{day} 종목 {sid}: 리플레이 {(첫, 기간, 원가)} ≠ 운영 {(운첫, 운기간, 운원가)}")
-        한도 = ALLOW_ENGINE_COST_BOOKING if 판 == "fees" else ALLOW_NOTIONAL_EQUITY
+        한도 = 비중한도 if 판 != "zero" else ALLOW_NOTIONAL_EQUITY
         for sid in set(rp.비중[day]) | set(h.weights):
             if _흔들림(rp, h, sid) > 한도:
                 틀림.append(f"{day} 종목 {sid}: 비중 리플레이 {rp.비중[day].get(sid)} ≠ 운영 {h.weights.get(sid)}")
@@ -433,7 +444,10 @@ def _L2(variant: str, 판: str) -> list[str]:
                     for d in 로그[day].decisions)  # fmt: skip
         운 = sorted(h.decisions)
         리플만, 운만 = [x for x in 리플 if x not in 운], [x for x in 운 if x not in 리플]
-        if 판 == "fees":
+        if variant in 줄쌍_더:  # 25.1929 ⑪ — 거르개가 견딘 종목의 줄 쌍만 지운다
+            더 = 줄쌍_더[variant](판, day, 리플만, 운만, h)
+            리플만, 운만 = [x for x in 리플만 if x[0] not in 더], [x for x in 운만 if x[0] not in 더]
+        if 판 != "zero":  # 25.1929: 비용 판이 둘(fees·slip) — 예전 `== "fees"` 와 B·G·H·D·E 에서 같다
             # 뒤집힌 **줄 쌍**만 견딘다(25.1911 — 예전엔 종목 단위라 같은 종목의 다른 어긋남까지 지웠다): 든 종목 채우기 자리에서
             # 리플레이 한 줄 ↔ 운영 한 줄, 그 종목 매수 금액이 보유 비중 차이(⑨ 흔들림 + ③ 정수 주) 안
             def 견딜(x: tuple, 산: dict = 로그[day].buys, h: 운영하루 = h) -> bool:
@@ -459,7 +473,7 @@ def _L3(variant: str, 판: str) -> list[str]:
     for day, h in live.items():
         리플 = 로그[day].buys
         for sid in set(리플) | set(h.buys):
-            한도 = ALLOW_NOTIONAL_EQUITY + (_흔들림(rp, h, sid) if 판 == "fees" else 0.0)
+            한도 = ALLOW_NOTIONAL_EQUITY + (_흔들림(rp, h, sid) if 판 != "zero" else 0.0)
             if abs(리플.get(sid, 0.0) - h.buys.get(sid, 0.0)) > 한도:
                 틀림.append(f"{day} 종목 {sid}: 리플레이 {리플.get(sid)} ≠ 운영 {h.buys.get(sid)}")
     return 틀림
