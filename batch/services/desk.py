@@ -740,7 +740,9 @@ def adjust_rows(leaderboard: dict[str, Any], adj: dict[str, dict[str, Any]]) -> 
     보정 폭 = band_pp. 안 잰 회전은 폭에 넣지 않는다 — 대신 화면이 `unmeasured_pct` 를 같이 보인다
     """
     out = {a: dict(v) for a, v in adj.items()}
-    줄 = [r for r in leaderboard.get("rows") or [] if not r.get("young") and r.get("window_pct") is not None]
+    # 따로 재는 S 는 제 개설일부터 잰 값이라 공통 구간 이웃과 견주지 않는다(25.1873, 25.1872 교차검증 [권고])
+    줄 = [r for r in leaderboard.get("rows") or []
+         if not r.get("young") and not r.get("separate") and r.get("window_pct") is not None]  # fmt: skip
     for r in leaderboard.get("rows") or []:
         x = out.get(r["id"])
         if x is not None:
@@ -972,6 +974,8 @@ def checks(
                 out.append({"level": "high", "text": 글})
         if a.get("charter_errors"):
             out.append({"level": "high", "text": f"가상 {aid} 헌장 오류: {'; '.join(a['charter_errors'])[:120]}"})
+        if a.get("error"):  # 모르는 매도 규칙으로 그 계좌를 건너뛴 날(25.1871 막이) — 텔레그램 줄에만 있었다(25.1873)
+            out.append({"level": "high", "text": f"가상 {aid} {str(a['error'])[:100]} — 오늘 평가·매매하지 않았습니다"})
     if p.get("frozen"):
         # `frozen` 은 경계 멈춤(모든 계좌) + 이어 멈춤(경계 전부터 든 계좌만, `action_sticky`)의 합이다 —
         # 합친 수를 "그 종목은 사고팔지 않습니다" 로 쓰면 이어 멈춤 종목을 다른 계좌가 사고팔 수 있다는 것을
@@ -1041,7 +1045,7 @@ def report_lines(
     else:
         out.append("▸ 확인할 일: 없음")
     모든 = list(board.get("rows") or [])
-    줄 = [r for r in 모든 if not r.get("young")]
+    줄 = [r for r in 모든 if not r.get("young") and not r.get("separate")]  # 공통 구간 순위 — S 는 따로(25.1873)
 
     def 칸(r: dict[str, Any]) -> str:
         v = r.get("vs_r_pp")

@@ -200,7 +200,7 @@ export default function DeskView() {
             <p className="mt-1 text-xs text-slate-500">
               공통 구간 {lb.window_start}부터의 시간가중 수익률 순 · R 대비 = 그 수익률 − 무작위 대조 R1·R2 평균
               {lb.control_pct != null ? `(${pctText(lb.control_pct)})` : "(대조 기록 없음)"} — 운인가 실력인가. 갓 연 계좌(평가 20번 전)는 아래에, 제
-              개설일부터 같은 구간 R 과 견줍니다
+              개설일부터 같은 구간 R 과 견줍니다. "따로 잼"(스윙 S)은 다른 실험이라 공통 구간·챔피언 후보 밖, 제 개설일부터입니다
             </p>
             <div className="overflow-x-auto">
               <table className="mt-2 w-full min-w-[520px] text-sm">

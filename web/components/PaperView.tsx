@@ -388,7 +388,7 @@ export function CompareCard({ data, desk }: { data: Data; desk?: DeskView | null
       {lb?.window_start ? (
         <p className="mt-1 text-xs text-slate-500">
           공통 구간 {lb.window_start}부터의 시간가중 수익률 순 · R 대비 = 그 수익률 − 무작위 대조 R1·R2 평균
-          {lb.control_pct != null ? `(${deskPct(lb.control_pct)})` : ""} — 늦게 연 계좌도 같은 잣대. "갓 엶" 계좌(평가 20번 전)는 제 개설일부터 잰 값입니다
+          {lb.control_pct != null ? `(${deskPct(lb.control_pct)})` : ""} — 늦게 연 계좌도 같은 잣대. "갓 엶" 계좌(평가 20번 전)는 제 개설일부터 잰 값입니다. "따로 잼"(스윙 S)은 공통 구간·챔피언 후보 밖, 제 개설일부터
         </p>
       ) : null}
       <div className="mt-2 overflow-x-auto">

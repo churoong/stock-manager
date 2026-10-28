@@ -187,28 +187,32 @@ DOSSIER_INSERT_SQL = (
 #: 색인의 날짜 범위를 탄다
 PENDING_5D_SQL = (
     "SELECT id, stock_id, decided_on, ref_close, ref_date, ret_5d, ret_20d, ret_60d FROM paper_decisions"
-    " WHERE ret_60d IS NULL AND outcome_note IS NULL AND market = ? {acct} AND ret_5d IS NULL"
+    " WHERE ret_60d IS NULL AND outcome_note IS NULL AND market = ?"
+    " AND (account_id IN (SELECT value FROM json_each(?))) = ? AND ret_5d IS NULL"
     "   AND decided_on > ? AND decided_on <= ? ORDER BY decided_on DESC LIMIT ?"
 )
 PENDING_20D_SQL = (
     "SELECT id, stock_id, decided_on, ref_close, ref_date, ret_5d, ret_20d, ret_60d FROM paper_decisions"
-    " WHERE ret_60d IS NULL AND outcome_note IS NULL AND market = ? {acct} AND ret_20d IS NULL"
+    " WHERE ret_60d IS NULL AND outcome_note IS NULL AND market = ?"
+    " AND (account_id IN (SELECT value FROM json_each(?))) = ? AND ret_20d IS NULL"
     "   AND decided_on > ? AND decided_on <= ? ORDER BY decided_on DESC LIMIT ?"
 )
 PENDING_60D_SQL = (
     "SELECT id, stock_id, decided_on, ref_close, ref_date, ret_5d, ret_20d, ret_60d FROM paper_decisions"
-    " WHERE ret_60d IS NULL AND outcome_note IS NULL AND market = ? {acct}"
+    " WHERE ret_60d IS NULL AND outcome_note IS NULL AND market = ?"
+    " AND (account_id IN (SELECT value FROM json_each(?))) = ?"
     "   AND decided_on > ? AND decided_on <= ? ORDER BY decided_on DESC LIMIT ?"
 )
 PENDING_OLD_SQL = (
     "SELECT id, stock_id, decided_on, ref_close, ref_date, ret_5d, ret_20d, ret_60d FROM paper_decisions"
-    " WHERE ret_60d IS NULL AND outcome_note IS NULL AND market = ? {acct} AND decided_on <= ?"
+    " WHERE ret_60d IS NULL AND outcome_note IS NULL AND market = ?"
+    " AND (account_id IN (SELECT value FROM json_each(?))) = ? AND decided_on <= ?"
     " ORDER BY decided_on LIMIT ?"
 )
-#: 위 넷의 `{acct}` — 기존 계좌 바퀴와 따로 재는 실험 계좌(S) 바퀴(25.1872). 바퀴마다 창 상한이 따로라 S 의 결정이 기존
-#: 계좌(H 회사 가중치가 읽는 `ret_20d`)의 하루 몫을 나눠 쓰지 않는다. 계좌 id 는 코드 상수라 글로 넣는다(사용자 값 아님)
-_따로 = ", ".join(f"'{a}'" for a in pp.SEPARATE_IDS)
-OUTCOME_PASSES = (f"AND account_id NOT IN ({_따로})", f"AND account_id IN ({_따로})")
+#: 위 넷의 `account_id IN json_each(?) = ?` — 기존 계좌 바퀴(0)와 따로 재는 실험 계좌(S) 바퀴(1) (25.1872). 바퀴마다 창
+#: 상한이 따로라 S 의 결정이 기존 계좌(H 회사 가중치가 읽는 `ret_20d`)의 하루 몫을 나눠 쓰지 않는다. 질의 글은 고정 —
+#: 동적으로 만들면 스키마 대조 시험(`test_sql_schema`)이 못 본다
+OUTCOME_PASSES = ((json.dumps(list(pp.SEPARATE_IDS)), 0), (json.dumps(list(pp.SEPARATE_IDS)), 1))
 #: 20 거래일 창의 구간 너비(달력일) — 28~56일 전. 그보다 묵었는데 20 이 빈 행은 시세가 끊긴 것이라 60 구간(84일)에서
 #: 다시 본다
 OUTCOME_20D_BAND_DAYS = 28
@@ -340,13 +344,14 @@ def fill_outcomes(client: Any, market: str, today: str, now: str, data_date: str
     rows: list[dict[str, Any]] = []
     본: set[Any] = set()
     가득: list[set[Any]] = []  # 상한에 닿은 구간의 경계 결정일(마지막으로 읽은 날) 행 id
-    for 바퀴, (sql, args, 상한) in ((b, q) for b in OUTCOME_PASSES for q in (
-        (PENDING_5D_SQL, [market, 기한[20], 기한[5]], OUTCOME_BATCH),
-        (PENDING_20D_SQL, [market, 이십아래, 기한[20]], OUTCOME_BATCH),
-        (PENDING_60D_SQL, [market, 포기날, 기한[60]], OUTCOME_BATCH),
-        (PENDING_OLD_SQL, [market, 포기날], OUTCOME_OLD_BATCH),
-    )):
-        got = client.execute(sql.format(acct=바퀴), [*args, 상한]).dicts()
+    대기질의 = [q for 따로, 바퀴 in OUTCOME_PASSES for q in (
+        (PENDING_5D_SQL, [market, 따로, 바퀴, 기한[20], 기한[5]], OUTCOME_BATCH),
+        (PENDING_20D_SQL, [market, 따로, 바퀴, 이십아래, 기한[20]], OUTCOME_BATCH),
+        (PENDING_60D_SQL, [market, 따로, 바퀴, 포기날, 기한[60]], OUTCOME_BATCH),
+        (PENDING_OLD_SQL, [market, 따로, 바퀴, 포기날], OUTCOME_OLD_BATCH),
+    )]  # fmt: skip
+    for sql, args, 상한 in 대기질의:
+        got = client.execute(sql, [*args, 상한]).dicts()
         if got and len(got) >= 상한:
             경계 = str(got[-1]["decided_on"])
             가득.append({r["id"] for r in got if str(r["decided_on"]) == 경계})
@@ -2320,7 +2325,8 @@ def run_step(
                     든것 = set(pp.positions(계좌체결))
                     계좌신호 = [r for r in 계좌신호 if r.horizon == "short" and r.stock_id not in 든것]
                 if 즉시매도:
-                    계좌신호 = [r for r in signal_rows if r.stock_id not in 즉시매도]
+                    # 앞 거르개(S 단기·든 종목)를 이어받는다 — signal_rows 에서 다시 만들면 지웠다(25.1873)
+                    계좌신호 = [r for r in 계좌신호 if r.stock_id not in 즉시매도]
                     가결행 = None if 가결행 is None else [r for r in 가결행 if r.stock_id not in 즉시매도]
                     a기록["prebuy_sell"] = len(즉시매도)
                     for sid, 사유 in sorted(즉시매도.items()):

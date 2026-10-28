@@ -374,7 +374,7 @@ def _보정판(
 
     try:
         칸 = _칸합침(client, 요약, 요약_us, 최근)
-        시작 = {str(r["id"]): str(r["open"] if r.get("young") else 순위.get("window_start"))
+        시작 = {str(r["id"]): str(r["open"] if r.get("young") or r.get("separate") else 순위.get("window_start"))
               for r in 순위.get("rows") or [] if r.get("open")}  # fmt: skip
         if not 시작:
             return {"fill_adjust": None, "fill_adjust_error": None}
