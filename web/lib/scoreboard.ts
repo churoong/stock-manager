@@ -179,6 +179,15 @@ export function scoreboardHead(run: Pick<ScoreboardRun, "job_name" | "started_at
 export const ALWAYS_EMPTY_NOTE =
   "걷는 창(월 초과 계열 미저장)·수용량(보유 거래대금 미저장)·서로 다른 종목·끝난 거래는 아직 기록이 없어 싣지 않습니다. 올림·내림 문턱(docs/funnel.md 3장)은 적용하지 않은 칸입니다.";
 
-/** 판정판이 싣지 않는 경고·비용 몫은 같은 화면의 다른 자리에 있다(25.1941) — 칸을 늘리지 않고 어디서 보는지만 적는다 */
-export const ELSEWHERE_NOTE =
-  "경고(생존편향·시점 유니버스 등)는 화면 맨 위 \"이 결과를 읽기 전에\" 에, 비용 몫은 위 결과 표의 \"종합 점수 (비용 0)\" 줄과 견주어 봅니다 — 둘 다 고른 묶음 기준입니다.";
+/**
+ * 판정판이 싣지 않는 경고·비용 몫을 어디서 보나(25.1941) — **그 자리가 화면에 있을 때만** 가리킨다(25.1942). 경고 띠는
+ * 경고가 있을 때만 그려지고, "종합 점수 (비용 0)" 줄은 월 실행 묶음에만 있다. 물러난 판정판(다른 실행)이면 위 표와
+ * 견주지 말라고 적는다. 가리킬 곳이 없으면 null
+ */
+export function elsewhereNote(strategies: readonly string[], warningCount: number, fallback: boolean): string | null {
+  if (fallback) return "이 판정판은 위 결과 표와 다른 실행의 것입니다 — 위 표의 경고·비용 0 줄과 바로 견주지 않습니다.";
+  const 글: string[] = [];
+  if (warningCount > 0) 글.push("경고(생존편향·시점 유니버스 등)는 화면 맨 위 \"이 결과를 읽기 전에\" 에");
+  if (strategies.includes("composite_no_cost")) 글.push("비용 몫은 위 결과 표의 \"종합 점수 (비용 0)\" 줄과 견주어 봅니다");
+  return 글.length ? `${글.join(", ")}.` : null;
+}

@@ -11,7 +11,7 @@ import {
   stressVersionNote,
 } from "@/lib/backtest";
 import { coreLines, coreNotes, type CoreRunRow } from "@/lib/coreBacktest";
-import { ALWAYS_EMPTY_NOTE, ELSEWHERE_NOTE, parseScoreboard, scoreLine, scoreboardHead, type ScoreboardRun } from "@/lib/scoreboard";
+import { ALWAYS_EMPTY_NOTE, elsewhereNote, parseScoreboard, scoreLine, scoreboardHead, type ScoreboardRun } from "@/lib/scoreboard";
 import { readJson } from "@/lib/http";
 import { readSavedCountry, saveCountry, userTimeOf, type Country } from "@/lib/market";
 import { pct, pctClass, sizePct } from "@/lib/portfolio";
@@ -156,7 +156,9 @@ export default function BacktestView() {
         </>
       )}
 
-      {data?.scoreboard ? <ScoreboardCard sb={data.scoreboard} /> : null}
+      {data?.scoreboard ? (
+        <ScoreboardCard sb={data.scoreboard} note={elsewhereNote(runs.map((r) => r.strategy), warnings.length, data.scoreboard.fallback)} />
+      ) : null}
 
       {data?.core ? <CoreCard core={data.core} /> : null}
 
@@ -166,7 +168,7 @@ export default function BacktestView() {
 }
 
 /** 판정판 (docs/funnel.md 2.2, 25.1940) — 배치가 실행 기록에 실은 줄을 꼴만 바꿔 보인다. 화면은 계산하지 않는다 */
-function ScoreboardCard({ sb }: { sb: NonNullable<Data["scoreboard"]> }) {
+function ScoreboardCard({ sb, note }: { sb: NonNullable<Data["scoreboard"]>; note: string | null }) {
   const { rows, unreadable } = parseScoreboard(sb.run.scoreboard);
   const lines = rows.map(scoreLine);
   return (
@@ -205,7 +207,7 @@ function ScoreboardCard({ sb }: { sb: NonNullable<Data["scoreboard"]> }) {
         <p className="mt-1 text-slate-500">이 실행의 판정판 줄이 없습니다.</p>
       ) : null}
       <p className="mt-1 text-slate-400">{ALWAYS_EMPTY_NOTE}</p>
-      <p className="mt-0.5 text-slate-400">{ELSEWHERE_NOTE}</p>
+      {note ? <p className="mt-0.5 text-slate-400">{note}</p> : null}
     </section>
   );
 }

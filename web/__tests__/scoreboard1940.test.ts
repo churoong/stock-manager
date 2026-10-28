@@ -134,3 +134,17 @@ describe("판정판 질의 (25.1940)", () => {
     expect((db.prepare(LATEST_SCOREBOARD).get("US") as unknown as ScoreboardRun).scoreboard).toBe("[]");
   });
 });
+
+
+describe("판정판 안내 줄은 가리킬 곳이 있을 때만 (25.1942)", () => {
+  it("월 묶음·경고 있음이면 둘 다, 핵심 묶음·경고 없음이면 없음, 물러남이면 다른 실행이라고", async () => {
+    const { elsewhereNote } = await import("@/lib/scoreboard");
+    const 둘다 = elsewhereNote(["composite", "composite_no_cost", "benchmark"], 2, false);
+    expect(둘다).toContain("이 결과를 읽기 전에");
+    expect(둘다).toContain("종합 점수 (비용 0)");
+    expect(elsewhereNote(["core_h", "core_b"], 0, false)).toBeNull();
+    expect(elsewhereNote(["core_h"], 1, false)).not.toContain("비용 0");
+    expect(elsewhereNote(["composite", "composite_no_cost"], 0, false)).not.toContain("읽기 전에");
+    expect(elsewhereNote(["composite", "composite_no_cost"], 3, true)).toContain("다른 실행");
+  });
+});
