@@ -467,8 +467,11 @@ def test_워크플로_핵심H_는_수동_전용_국내_120분() -> None:
     실행줄 = 단계["핵심 H 백테스트"]["run"]
     assert "python -m batch.jobs.core_backtest --market KR" in 실행줄 and "$MARKET" not in 실행줄
     assert "steps.gate.outputs.deferred != 'true'" in 단계["핵심 H 백테스트"]["if"]
-    assert "'backtest_core' }}" in 단계["Turso 읽기 진도 문 (docs/infra.md 25.886)"]["run"]
-    assert "'--explore'" in 실행줄 and "inputs.what == '탐색'" in 실행줄  # 탐색 선택이면 --explore(25.1908)
+    # 탐색 선택이면 --explore·backtest_explore(25.1908) — 갈래 방향까지 가리게 식 전체를 본다(25.1909, 25.1908 교차검증 [권고]:
+    # `&& '' || '--explore'` 처럼 거꾸로 써도 일부 문자열 검사는 통과했다)
+    assert "--years \"$YEARS\" ${{ inputs.what == '탐색' && '--explore' || '' }}" in 실행줄
+    assert (f"turso_read_gate.py ${{{{ inputs.what == '탐색' && '{cj.EXPLORE_JOB_NAME}' || '{cj.JOB_NAME}' }}}}"
+            in 단계["Turso 읽기 진도 문 (docs/infra.md 25.886)"]["run"])
     # 월 백테스트와 같은 비밀·환경·시세 사본 단계
     for 열쇠 in ("TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN", "DB_BACKEND", "D1_API_TOKEN", "PRICE_REPLICA_PATH",
                 "OFFLINE_MODE", "BACKTEST_TRIGGER"):  # fmt: skip

@@ -134,6 +134,40 @@ def test_위원회_skip_갈래는_운영과_같다(monkeypatch: pytest.MonkeyPat
     assert [h for s, _r, h in 운영 if s == dv.agenda[1].stock_id] == [True]
 
 
+@pytest.mark.parametrize(("top_n", "agenda"), [(2, 3), (2, 1)])
+def test_리플레이_가결_행도_자르기·상위_n_을_운영과_같이(monkeypatch: pytest.MonkeyPatch, top_n: int, agenda: int) -> None:
+    """리플레이 쪽 가결 행은 시장 판단기(`CoreMarket.at`)가 하루 재료에 넣은 `approved` 에서 온다. 합성 자료로는 하루 가결이
+    한 건을 넘지 않아 안건 자르기(헌장 `agenda`)·상위 n 이 지나지 않았다(25.1909, 25.1908 교차검증 [권고]). 회의를
+    "모두 가결, 표는 안건 순" 으로 바꿔 끼워 끝까지 돈 뒤, 날마다 리플레이 가결 행이 운영 `committee_step` 의 것과 같고
+    헌장 top_n 개인지 본다."""
+    받은: list[int] = []
+
+    def 회의(agenda, charter, population=None):  # type: ignore[no-untyped-def]
+        if charter.get("name") == co.CHARTERS["E"]["name"]:  # 다른 회사(A·C·D)의 회의는 세지 않는다
+            받은.append(len(agenda))
+        items = [co.Item(stock_id=d.stock_id, ticker=d.ticker, opinions={}, vote=2.0 - k / 100, favor=3, issue=False,
+                         passed=True, reason="가결") for k, d in enumerate(agenda)]  # fmt: skip
+        return items, items[: int(charter["top_n"])]
+
+    monkeypatch.setattr(co, "meet", 회의)
+    # (2, 3) 은 하루 가결 둘(상위 n) 갈래, (2, 1) 은 안건 자르기 갈래 — 자르지 않으면 리플레이가 둘을 가결해 운영(하나)과 갈린다
+    헌장 = {**co.CHARTERS["E"], "top_n": top_n, "agenda": agenda}
+    monkeypatch.setitem(co.CHARTERS, "E", 헌장)
+    날들 = _하루_재료("core_e")
+    둘, 넘침 = 0, 0
+    for dv, held in 날들:
+        행, _skips = _운영_위원회(dv, 헌장, held)
+        리플 = cs.committee_rows(dv, "E")
+        assert [(r.stock_id, r.horizon) for r in 리플] == [(r.stock_id, r.horizon) for r in 행], dv.day
+        둘 += len({r.stock_id for r in 리플}) == 2
+        넘침 += len(dv.agenda) > agenda
+    if agenda >= top_n:
+        assert 둘 > 0  # 하루 가결 둘(상위 n)인 날을 실제로 지났다
+    else:
+        assert 넘침 > 0  # 안건이 헌장 agenda 보다 많은 날을 실제로 지났다(자르기가 일했다)
+    assert 받은 and max(받은) <= agenda  # 회의에는 헌장 agenda 개까지만 넘겼다
+
+
 def test_헌장_top_n_이_변형_칸을_덮는다() -> None:
     """변형 칸의 top_n 이 헌장과 달라도 헌장 값이 쓰인다(운영 run_step 의 `종목수 = 헌장 top_n`)."""
     from batch.services import core_backtest as cb
