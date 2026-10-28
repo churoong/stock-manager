@@ -26,6 +26,7 @@
 from __future__ import annotations
 
 import json
+import math
 from typing import Any
 
 #: 판정판의 단계 — 백테스트 실행 기록은 모두 0 리플레이(funnel.md 1장)
@@ -181,9 +182,13 @@ def _row(run: dict[str, Any], r: dict[str, Any], twins: dict[str, dict[str, Any]
         why_ev = ("월 백테스트는 결정 원장이 없어 결정 단위 판정을 내지 않는다" if job == JOB_MONTHLY
                   else "metrics_json.evidence 없음(판정 실패 또는 25.1544 전 기록)")  # fmt: skip
         put("control_lower", None, why_ev)
+        put("control_p", None, why_ev)
         put("gate_lower", None, why_ev)
     else:
         put("control_lower", _num(ev.get("lower")), f"하한 없음 — 묶음 {ev.get('n_blocks')}개(block_bound 최소 미달)")
+        # 한쪽 p 값(25.1951) — 하한과 같은 평균·표준오차·묶음 수로 H0: 평균 ≤ 50. 하한이 없으면(묶음 미달) 없음
+        put("control_p", control_p(ev) if _num(ev.get("lower")) is not None else None,
+            f"p 없음 — 묶음 {ev.get('n_blocks')}개(block_bound 최소 미달) 또는 평균·표준오차 없음")
         if gate is None:
             put("gate_lower", None, "evidence.gate 없음")
         else:
@@ -253,6 +258,71 @@ def _row(run: dict[str, Any], r: dict[str, Any], twins: dict[str, dict[str, Any]
     return out
 
 
+def _betacf(a: float, b: float, x: float) -> float:
+    """정규화 불완전 베타의 연분수(수정 렌츠법, Numerical Recipes 6.4 `betacf`)"""
+    tiny, qab, qap, qam = 1e-300, a + b, a + 1.0, a - 1.0
+    c, d = 1.0, 1.0 - qab * x / qap
+    d = 1.0 / (d if abs(d) > tiny else tiny)
+    h = d
+    for m in range(1, 300):
+        m2 = 2 * m
+        for aa in (m * (b - m) * x / ((qam + m2) * (a + m2)), -(a + m) * (qab + m) * x / ((a + m2) * (qap + m2))):
+            d = 1.0 + aa * d
+            d = 1.0 / (d if abs(d) > tiny else tiny)
+            c = 1.0 + aa / c
+            c = c if abs(c) > tiny else tiny
+            h *= d * c
+        if abs(d * c - 1.0) < 1e-14:
+            break
+    return h
+
+
+def _betai(a: float, b: float, x: float) -> float:
+    """정규화 불완전 베타 I_x(a, b)"""
+    if x <= 0.0:
+        return 0.0
+    if x >= 1.0:
+        return 1.0
+    ln = math.lgamma(a + b) - math.lgamma(a) - math.lgamma(b) + a * math.log(x) + b * math.log(1.0 - x)
+    if x < (a + 1.0) / (a + b + 2.0):
+        return math.exp(ln) * _betacf(a, b, x) / a
+    return 1.0 - math.exp(ln) * _betacf(b, a, 1.0 - x) / b
+
+
+def t_sf(t: float, df: int) -> float:
+    """t 분포 위쪽 꼬리 P(T > t) — P(|T| > t) = I_{df/(df+t²)}(df/2, 1/2) (25.1951, scipy 없이 — 시험이 t 표와 대조)"""
+    if df < 1:
+        raise ValueError("자유도는 1 이상")
+    if math.isinf(t):
+        return 0.0 if t > 0 else 1.0
+    two = _betai(df / 2.0, 0.5, df / (df + t * t))
+    return two / 2.0 if t >= 0 else 1.0 - two / 2.0
+
+
+def control_p(ev: dict[str, Any]) -> float | None:
+    """무작위 대조 분위의 한쪽 p — H0: 평균 ≤ 50, (평균 − 50) ÷ 표준오차 를 자유도 묶음 − 1 의 t 로 (하한
+    `pp.block_bound` 와 같은 재료). 표준오차 0 이면 평균이 50 을 넘으면 0, 아니면 1. 재료가 없으면 None"""
+    m, se, n = _num(ev.get("mean")), _num(ev.get("se")), _num(ev.get("n_blocks"))
+    if m is None or se is None or n is None or n < 2:
+        return None
+    if se <= 0:
+        return 0.0 if m > 50 else 1.0
+    return t_sf((m - 50.0) / se, int(n) - 1)
+
+
+def bh_q(ps: list[float | None], m: int | None = None) -> list[float | None]:
+    """벤야미니–호흐베르크 q — p 들(None 은 건너뜀)을 m 가설(기본 = p 수)로. q_(i) = min_{j≥i} m·p_(j)/j, 1 로 자름"""
+    idx = sorted((p, i) for i, p in enumerate(ps) if p is not None)
+    m = len(idx) if m is None else m
+    out: list[float | None] = [None] * len(ps)
+    run = 1.0
+    for rank in range(len(idx), 0, -1):
+        p, i = idx[rank - 1]
+        run = min(run, m * p / rank)
+        out[i] = run
+    return out
+
+
 #: 0 → 1 (리플레이에서 그림자로) 기준 — funnel.md 3장 "첫 값 — 보수적". 모두 `[확인필요]`(첫 값, 결과 전에 고정 —
 #: 바꾸면 새 판 등록). 판정판은 칸만 대어 본다 — 올림은 사람이(그림자 개설) 정한다
 STAGE01_MIN_MONTHS = 36  # 판정 구간 36개월 이상(`luck.MIN_MONTHS` 24 는 수백 후보에 짧다)
@@ -262,10 +332,12 @@ STAGE01_MIN_CONTROL_LOWER = 50.0  # 무작위 대조 분위 묶음 하한
 STAGE01_MIN_DSR = 0.90  # DSR(N = 누적)
 STAGE01_WALK = (3, 4)  # 걷는 창 "넷 가운데 셋" — 창이 넷 이상이고 > 0 인 창의 몫이 3/4 이상
 STAGE01_MDD_SLACK = 0.05  # MDD 가 기준 B 보다 5%p 넘게 나쁘지 않음
+STAGE01_MAX_BH_Q = 0.10  # 대조 분위 p 의 코호트 BH q(거르는 단계라 FDR)
 #: 0 → 1 을 대어 볼 기준 줄 — 같은 실행의 기준 B(`core_b`), 없으면(월 실행) 동일가중 기준(`benchmark`) `[확인필요]`
 STAGE01_BASE = ("core_b", "benchmark")
-#: 아직 저장되지 않아 늘 모르는 기준 — 코호트 BH q(시도별 p 값 미저장)·수용량(보유 거래대금 미저장)
-WHY_BH = "코호트 BH q — 시도별 p 값 미저장"
+#: BH 묶음 밖 — 코호트 없는 줄(25.1951). m = 판정판에 함께 든 같은 (시장, 코호트) 시도 줄 수 `[확인필요]` — 실행 하나만
+#: 넘기면(실행 기록 칸) 그 실행의 줄 수다. 누적 코호트 m 은 실행 여럿을 모은 판정판이 생긴 뒤
+WHY_BH_NO_COHORT = "코호트 밖 — BH 묶음 없음"
 
 
 def stage01(row: dict[str, Any], base: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -294,7 +366,8 @@ def stage01(row: dict[str, Any], base: dict[str, Any] | None) -> dict[str, Any] 
         ("excess_cagr", "초과 CAGR", row.get("excess_cagr"), "> 0", ok(row.get("excess_cagr"), lambda v: v > 0)),
         ("control_lower", "대조 하한", row.get("control_lower"), f"> {STAGE01_MIN_CONTROL_LOWER:g}",
          ok(row.get("control_lower"), lambda v: v > STAGE01_MIN_CONTROL_LOWER)),
-        ("bh_q", "코호트 BH q", None, "<= 0.10", None),
+        ("bh_q", "코호트 BH q", row.get("bh_q"), f"<= {STAGE01_MAX_BH_Q}",
+         ok(row.get("bh_q"), lambda v: v <= STAGE01_MAX_BH_Q)),
         ("dsr", "DSR", row.get("dsr"), f">= {STAGE01_MIN_DSR}", ok(row.get("dsr"), lambda v: v >= STAGE01_MIN_DSR)),
         ("half", "앞·뒤 반", None if hf is None or hs is None else [hf, hs], "둘 다 > 0",
          None if hf is None or hs is None else hf > 0 and hs > 0),
@@ -331,6 +404,7 @@ def rows(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
     best: dict[tuple[Any, ...], tuple[tuple[str, str], dict[str, Any]]] = {}
     seen: dict[tuple[Any, ...], int] = {}
+    기준들: dict[int, dict[str, Any] | None] = {}
     for run in runs:
         results = [r for r in run.get("results") or [] if isinstance(r, dict)]
         twins = {
@@ -339,19 +413,11 @@ def rows(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         }  # fmt: skip
         t = _run_time(run)
         줄들 = [_row(run, r, twins) for r in results if not str(r.get("strategy") or "").endswith(NO_COST_SUFFIX)]
-        # 0 → 1 점검표(25.1950) — 같은 실행의 기준 줄(`STAGE01_BASE` 앞쪽부터)과 견준다
+        # 0 → 1 점검표(25.1950)의 MDD 기준 — 같은 실행의 기준 줄(`STAGE01_BASE` 앞쪽부터)
         by = {x["strategy"]: x for x in 줄들}
         base = next((by[b] for b in STAGE01_BASE if b in by), None)
         for row in 줄들:
-            st = stage01(row, base)
-            row["stage01"] = st
-            if st is None:
-                row["stage01_verdict"] = row["stage01_note"] = None
-                for c in ("stage01", "stage01_verdict", "stage01_note"):
-                    row["missing"][c] = "기준·무작위 대조 — 시도 아님"
-            else:
-                row["stage01_verdict"], row["stage01_note"] = st["verdict"], stage01_note(st)
-        for row in 줄들:
+            기준들[id(row)] = base
             # 작업 이름·코호트도 열쇠 — 같은 sha 로 돈 `backtest_limit`(코호트 밖)이 `backtest_core`(1b) 줄을, 비기본 월
             # 실행이 기본(코호트 1) 줄을 덮었다(25.1922, 25.1919 교차검증 [권고])
             key = (row["market"], row["strategy"], row["sha"], row["job_name"], row["cohort"])
@@ -363,6 +429,30 @@ def rows(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for key, (_order, row) in best.items():
         row["runs"] = seen[key]
         out.append(row)
+    # 코호트 BH q(25.1951) — 같은 (시장, 코호트) 시도 줄들의 대조 분위 p. m = 그 묶음의 시도 줄 수
+    # (p 없는 줄도 가설로 센다)
+    묶음: dict[tuple[Any, Any], list[dict[str, Any]]] = {}
+    for row in out:
+        if row["is_trial"] and row["cohort"] is not None:
+            묶음.setdefault((row["market"], row["cohort"]), []).append(row)
+    for row in out:
+        row["bh_q"] = None
+    for 줄들 in 묶음.values():
+        for row, q in zip(줄들, bh_q([x.get("control_p") for x in 줄들], m=len(줄들)), strict=True):
+            row["bh_q"] = q
+    for row in out:
+        if row["bh_q"] is None:
+            밖 = row["cohort"] is None or not row["is_trial"]
+            p_why = row["missing"].get("control_p", "")
+            row["missing"]["bh_q"] = WHY_BH_NO_COHORT if 밖 else f"대조 분위 p 없음 — {p_why}"
+        st = stage01(row, 기준들.get(id(row)))
+        row["stage01"] = st
+        if st is None:
+            row["stage01_verdict"] = row["stage01_note"] = None
+            for c in ("stage01", "stage01_verdict", "stage01_note"):
+                row["missing"][c] = "기준·무작위 대조 — 시도 아님"
+        else:
+            row["stage01_verdict"], row["stage01_note"] = st["verdict"], stage01_note(st)
     return sorted(out, key=lambda x: (str(x["market"]), str(x["cohort"] or "~"), x["strategy"]))
 
 
@@ -375,7 +465,7 @@ def rows(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
 STEP_LOG_COLS = (
     "strategy", "market", "cohort", "trials_cumulative", "cagr", "excess_cagr", "mdd", "dsr", "dsr_n",
     "control_lower", "gate_lower", "half_first_cagr", "half_second_cagr", "walk_positive", "walk_total", "months",
-    "rebalances", "buys", "control_blocks", "gate_blocks", "sells_scored", "stage01_verdict", "stage01_note",
+    "rebalances", "buys", "control_blocks", "gate_blocks", "sells_scored", "bh_q", "stage01_verdict", "stage01_note",
 )  # fmt: skip
 #: 까닭 글 최대 길이 — step_log 크기를 묶는다(월 실행 줄 약 20개 × 빈 칸 약 10개). 넘는 까닭은 잘린다
 WHY_MAX = 80

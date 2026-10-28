@@ -15,7 +15,7 @@ import { pct } from "@/lib/portfolio";
 export const SCOREBOARD_KEYS = [
   "strategy", "market", "cohort", "trials_cumulative", "cagr", "excess_cagr", "mdd", "dsr", "dsr_n",
   "control_lower", "gate_lower", "half_first_cagr", "half_second_cagr", "walk_positive", "walk_total", "months",
-  "rebalances", "buys", "control_blocks", "gate_blocks", "sells_scored", "stage01_verdict", "stage01_note",
+  "rebalances", "buys", "control_blocks", "gate_blocks", "sells_scored", "bh_q", "stage01_verdict", "stage01_note",
 ] as const;
 
 /** 판정판을 싣는 작업 — 배치 `jobs/backtest.JOB_NAME`·`jobs/core_backtest` 의 세 이름(`JOB_NAME`·`EXPLORE_JOB_NAME`·`LIMIT_JOB_NAME`),
@@ -64,6 +64,7 @@ const rowSchema = z.object({
   walk_positive: numOrNull,
   walk_total: numOrNull,
   months: numOrNull,
+  bh_q: numOrNull,
   stage01_verdict: z.string().nullable().catch(null),
   stage01_note: z.string().nullable().catch(null),
   rebalances: numOrNull,
@@ -99,7 +100,7 @@ export function parseScoreboard(raw: unknown): { rows: ScoreRow[]; unreadable: n
 const COL_LABEL: Record<string, string> = {
   market: "시장", cohort: "코호트", trials_cumulative: "누적 시도", cagr: "CAGR", excess_cagr: "초과 CAGR", mdd: "MDD",
   dsr: "DSR", dsr_n: "DSR N", control_lower: "대조 하한", gate_lower: "관문 하한", half_first_cagr: "앞 반",
-  half_second_cagr: "뒤 반", walk_positive: "걷는 창", walk_total: "걷는 창 수", months: "개월", stage01_verdict: "0→1 점검", stage01_note: "0→1 근거", rebalances: "리밸런스", buys: "매수", control_blocks: "대조 묶음",
+  half_second_cagr: "뒤 반", walk_positive: "걷는 창", walk_total: "걷는 창 수", months: "개월", bh_q: "BH q", stage01_verdict: "0→1 점검", stage01_note: "0→1 근거", rebalances: "리밸런스", buys: "매수", control_blocks: "대조 묶음",
   gate_blocks: "관문 묶음", sells_scored: "판 뒤 매도",
 };
 
@@ -151,6 +152,8 @@ export function scoreLine(r: ScoreRow): ScoreLine {
       ["MDD", p(r.mdd)],
       ["DSR", r.dsr == null ? 없음 : `${f2(r.dsr)}${r.dsr_n == null ? "" : ` (N ${r.dsr_n})`}`],
       ["대조 하한", f1(r.control_lower)],
+      // 코호트 BH q(25.1951) — 같은 코호트 시도 줄들의 대조 분위 p 로. 세 자리
+      ["BH q", r.bh_q == null ? 없음 : r.bh_q.toFixed(3)],
       ["관문 하한", f1(r.gate_lower)],
       ["앞 반", p(r.half_first_cagr)],
       ["뒤 반", p(r.half_second_cagr)],
