@@ -705,8 +705,10 @@ def run(today: date | None = None) -> int:
             if 남김 != 어제근거:
                 자료["criteria"] = 남김
                 글 = sf.without_fin_loss(글)
-            # 어제 일부 잇기 표시는 통째 잇기 표시로, 사유가 빈 문장(": .")은 남은 근거 이름으로 (25.1847)
-            글 = sf.full_carry_text(글, [str(c.get("label")) for c in 자료.get("criteria") or []])
+            # 어제 일부 잇기 표시는 통째 잇기 표시로, 사유가 빈 문장(": .")은 남은 근거 이름으로 (25.1847). 재무악화만 —
+            # 일부 잇기·적자 조각 빼기가 그 사유에만 있다(25.1848, 다른 사유 문장을 건드리지 않게)
+            if 사유 == "재무악화":
+                글 = sf.full_carry_text(글, [str(c.get("label")) for c in 자료.get("criteria") or []])
             이음 += 1
             if "오늘 판정할 자료가 없어" not in 글:
                 글 += " ※ 오늘 판정할 자료가 없어 지난 판정을 이어 둡니다"

@@ -575,12 +575,20 @@ def partial_carry_note(labels: list[str]) -> str:
 
 def full_carry_text(text: str, labels: list[str]) -> str:
     """통째로 이을 때의 문장 — 어제 일부 잇기 표시를 떼고, 적자 조각을 빼 사유가 빈 문장(`이름: .`)이면 남은 근거
-    이름으로 채운다 (25.1847, 25.1845 교차검증 [권고]: "에이: . 보유 이유가 …" 가 리포트에 나갈 뻔했다)"""
+    이름으로 채운다 (25.1847, 25.1845 교차검증 [권고]: "에이: . 보유 이유가 …" 가 리포트에 나갈 뻔했다).
+
+    뗀 표시에 있던 이은 근거가 여전히 근거표에 있는데 문장에 없으면 통째 잇기 표시에 이름을 남긴다 (25.1848 — 재무를
+    못 본 날은 적자 조각이 그대로라 빈 사유 채우기를 타지 않아 "종합 점수 하락" 이 문장에서만 사라졌다)"""
     import re
 
-    글 = re.sub(r" ※ 일부 근거\([^)]*\)는 오늘 판정할 자료가 없어 지난 판정을 이어 둡니다", "", text)
-    if labels and re.search(r": \.", 글):
-        글 = re.sub(r": \.", ": " + ", ".join(labels) + ".", 글, count=1)
+    m = re.search(r" ※ 일부 근거\(([^)]*)\)는 오늘 판정할 자료가 없어 지난 판정을 이어 둡니다", text)
+    이은 = [x for x in m.group(1).split(", ") if x] if m else []
+    글 = text.replace(m.group(0), "") if m else text
+    if labels and ": ." in 글:
+        글 = 글.replace(": .", ": " + ", ".join(labels) + ".", 1)
+    빠진 = [x for x in 이은 if x in labels and x not in 글]
+    if 빠진:
+        글 += f" ※ 오늘 판정할 자료가 없어 지난 판정을 이어 둡니다({', '.join(빠진)} 포함)"
     return 글
 
 

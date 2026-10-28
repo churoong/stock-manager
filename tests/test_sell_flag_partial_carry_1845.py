@@ -89,3 +89,22 @@ def test_다음_날_통째로_이어도_문장에_사유가_남는다(monkeypatc
     assert [x["label"] for x in json.loads(자료)["criteria"]] == ["종합 점수 하락"]
     assert ": ." not in 글 and "에이: 종합 점수 하락." in 글
     assert "일부 근거" not in 글 and 글.count("오늘 판정할 자료가 없어") == 1
+
+
+def test_재무도_못_본_날_통째로_이어도_이은_근거_이름이_남는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1848 (25.1847 교차검증 [권고]) — 셋째 날 영업이익도 모르면 적자 조각이 그대로라 빈 사유 채우기를 타지 않고,
+    일부 표시만 떼어 근거표의 "종합 점수 하락" 이 문장에서 사라졌다"""
+    c, job = _장부(monkeypatch)
+    _실행(monkeypatch, c, sf.HoldingInput(**기본, score_now=45.0, **점수봄), date(2026, 3, 20))
+    _실행(monkeypatch, c, sf.HoldingInput(**기본, score_now=44.0, score_now_date="2026-03-20",
+                                          score_scale_unknown=True), date(2026, 3, 21))  # fmt: skip
+    모름 = {**기본, "op_income_latest": None}
+    _실행(monkeypatch, c, sf.HoldingInput(**모름, score_now=44.0, score_now_date="2026-03-21",
+                                          score_scale_unknown=True), date(2026, 3, 22))  # fmt: skip
+    (글, 자료), = c.conn.execute("SELECT rationale_text, rationale_data FROM sell_flags WHERE is_active = 1").fetchall()
+    assert {x["label"] for x in json.loads(자료)["criteria"]} == {sf.FIN_LOSS_LABEL, "종합 점수 하락"}
+    assert "적자 전환" in 글 and "(종합 점수 하락 포함)" in 글 and 글.count("오늘 판정할 자료가 없어") == 1
+
+
+def test_빈_사유_채우기는_정규식_특수문자에_안전하다() -> None:
+    assert sf.full_carry_text("가: . 점검", ["a\\1"]) == "가: a\\1. 점검"
