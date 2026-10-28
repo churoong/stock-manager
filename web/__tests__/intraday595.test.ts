@@ -60,6 +60,11 @@ describe("관심 종목만 있는 종목의 기업행위 가드 (25.595)", () =>
     expect(recentActionKr([{ close: 50000, change_pct: null }, { close: 100000, change_pct: 0.5 }])).toBe(true);
     // 가격제한폭 안(−20%)은 등락률을 모르면 시세로 본다
     expect(recentActionKr([{ close: 80000, change_pct: null }, { close: 100000, change_pct: 0.5 }])).toBe(false);
+    // 정확히 상·하한가(±30%)는 시세다 — JS 13000/10000−1 = 0.30000000000000004 라 반올림이 없으면 기업행위로 잡혀
+    // 20거래일 동안 거래량·목표가 알림이 꺼진다. 배치 test_guard_factor_1554 와 같은 값 (25.1853)
+    expect(recentActionKr([{ close: 13000, change_pct: null }, { close: 10000, change_pct: 0 }])).toBe(false);
+    expect(recentActionKr([{ close: 7000, change_pct: null }, { close: 10000, change_pct: 0 }])).toBe(false);
+    expect(recentActionKr([{ close: 6990, change_pct: null }, { close: 10000, change_pct: 0 }])).toBe(true);
   });
 
   it("1:50 분할(종가 1/50, 등락률 0%)을 기업행위로 본다, 평범한 날은 아니다", async () => {

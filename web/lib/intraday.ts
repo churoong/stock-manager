@@ -660,7 +660,8 @@ export const KR_UNKNOWN_PCT_JUMP = 0.3;
 
 /** 최근 행(새것부터, `ACTION_GUARD_ROWS + 1` 개)에 기업행위가 있었나 — 국내. 계수는 배치 `adjust.guard_factor` 와 같다:
  * 등락률이 있으면 `factor_of`, 없으면 가격제한폭 밖일 때만 종가 비율 (25.1852 — 예전엔 등락률 빈 날을 건너뛰어 25.1554 가
- * 배치에만 들어갔다. 관심 종목만 걸린 종목이 그날 분할하면 거짓 거래량·목표가 알림) */
+ * 배치에만 들어갔다. 관심 종목만 걸린 종목이 그날 분할하면 거짓 거래량·목표가 알림). 계수 계산만 같다 — 배치
+ * `action_factors` 의 유상증자 권리락 풀기(25.1139)는 웹에 없어 그날도 막는다(알림이 빠지는 보수 쪽, 25.1853) */
 export function recentActionKr(rows: Array<{ close: number; change_pct: number | null }>): boolean {
   for (let i = 0; i + 1 < rows.length; i += 1) {
     const close = Number(rows[i].close);
