@@ -428,7 +428,7 @@ def evaluate(h: HoldingInput, today: date, targets: dict | None = None) -> list[
         # 잣대가 바뀐 보유 — 같은 잣대 구간마다 이은 하락으로 판정한다 (25.1412). 두 점수의 차는 잣대 탓 점프를 섞는다
         texts.append(f"종합 점수 {fixed(h.score_at_buy)}→{fixed(h.score_now)}점"
                      f"(같은 잣대끼리 이은 하락 {fixed(drop, 1)}점)")  # fmt: skip
-        reasons.append(_criterion("종합 점수 하락",
+        reasons.append(_criterion(SCORE_DROP_LABEL,
                                   f"매수 당시({h.score_at_buy_date}) {fixed(h.score_at_buy, 1)}"
                                   f" → {fixed(h.score_now, 1)},"
                                   f" 계산 판·가중치가 {h.score_scale_changes}번 바뀌어 같은 잣대 구간마다 이은 하락"
@@ -440,7 +440,7 @@ def evaluate(h: HoldingInput, today: date, targets: dict | None = None) -> list[
         # 기준점을 다시 잡았으면 그렇다고 적는다 (25.961) — "매수 당시" 라고 하면 거짓이다
         기준 = (f"기준 재설정({h.score_at_buy_date}, 매수 뒤 계산 판·가중치가 바뀌어 같은 잣대의 첫 점수)"
                 if h.score_rebased else f"매수 당시({h.score_at_buy_date})")  # fmt: skip
-        reasons.append(_criterion("종합 점수 하락",
+        reasons.append(_criterion(SCORE_DROP_LABEL,
                                   f"{기준} {fixed(h.score_at_buy, 1)}"
                                   f" → {fixed(h.score_now, 1)} (−{fixed(drop, 1)}){_기여_글(h.score_drop_parts)}",
                                   f"−{SCORE_DROP_POINTS:.0f}점 이상", "scores / trades 스냅샷",
@@ -542,6 +542,11 @@ def unjudged(h: HoldingInput, today: date) -> set[str]:
 
 #: 재무악화 속 근거 가운데 점수와 상관없이 재무 행만으로 판정하는 것 — 점수를 못 본 날에도 판정했다(25.1790)
 FIN_LOSS_LABEL = "영업이익 적자 전환"
+#: 재무악화의 다른 속 근거 — 이은 하락(25.1412)과 두 점수 차 두 갈래가 같은 이름(25.1851). 근거 이름에 괄호·쉼표가
+#: 없어야 `full_carry_text` 가 문장 표시에서 다시 거둘 수 있다(25.1849)
+SCORE_DROP_LABEL = "종합 점수 하락"
+#: 재무악화 근거 이름 전부 — 늘리면 여기에 더한다(시험이 괄호·쉼표를 본다)
+FIN_LABELS = (FIN_LOSS_LABEL, SCORE_DROP_LABEL)
 
 
 def carry_criteria(h: HoldingInput, reason_code: str, criteria: list[dict]) -> list[dict]:

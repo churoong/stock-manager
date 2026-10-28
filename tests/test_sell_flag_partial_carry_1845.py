@@ -137,9 +137,12 @@ def test_재무를_이틀_연속_못_봐도_포함_표시가_남는다(monkeypat
 
 
 def test_재무악화_근거_이름에_괄호와_쉼표가_없다() -> None:
-    """`full_carry_text` 가 문장의 괄호 표시에서 이름을 다시 거두는 제약(25.1849) — 근거 이름이 늘면 여기서 깨진다"""
-    h = sf.HoldingInput(**기본, score_now=45.0, **점수봄)
-    (f,) = [x for x in sf.evaluate(h, date(2026, 3, 20), {}) if x.reason_code == "재무악화"] or [None]
-    assert f is not None
-    for c in f.criteria:
-        assert not set("(),") & set(str(c.get("label"))), c
+    """`full_carry_text` 가 문장의 괄호 표시에서 이름을 다시 거두는 제약(25.1849). 두 점수 갈래(이은 하락·두 점수 차)
+    모두 `FIN_LABELS` 안의 이름만 쓰는지도 본다(25.1851, 25.1850 교차검증 [권고] — 이은 하락 갈래 이름을 바꿔도 통과했다)"""
+    for 이름 in sf.FIN_LABELS:
+        assert not set("(),") & set(이름), 이름
+    두점수 = sf.HoldingInput(**기본, score_now=45.0, **점수봄)
+    이음 = sf.HoldingInput(**기본, score_now=45.0, **점수봄, score_drop_chained=25.0, score_scale_changes=1)
+    for h in (두점수, 이음):
+        (f,) = [x for x in sf.evaluate(h, date(2026, 3, 20), {}) if x.reason_code == "재무악화"]
+        assert {str(c.get("label")) for c in f.criteria} == set(sf.FIN_LABELS)
