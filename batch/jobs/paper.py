@@ -2136,6 +2136,13 @@ def run_step(
     메모줄: list[str] = []  # 운용역 메모 — 회사마다 한 줄 (docs/company.md 7장, 텔레그램 길이)
     for acct in accounts:
         aid, 규칙, 판 = str(acct["id"]), str(acct["sell_rule"]), int(acct["rule_version"])
+        if 규칙 == pp.DAY_RULE and str(acct.get("entry_rule") or "tranche") != "open":
+            # 당일 단타(T)는 시가 일괄 진입만 — 회차 지정가면 짝 매도가 첫 회차 하나에만 붙어(유일 색인의 tranche=0)
+            # 나머지 회차가 밤을 넘기고, 지정가 회차는 종가 판정이라 같은 종가에 사고판다(16.3.2, 25.1886)
+            log.error("가상 %s 당일 단타인데 진입 방식이 %s — 그 계좌를 건너뜀", aid, acct.get("entry_rule"))
+            계좌기록[aid] = {"error": f"당일 단타인데 진입 방식 {acct.get('entry_rule')}(open 이어야 함)"}
+            줄.append(f"⚠️ 가상 {aid} 당일 단타 진입 방식이 open 이 아님 — 오늘 이 계좌는 평가·매매하지 않았습니다")
+            continue
         if 규칙 not in pp.SELL_RULES:
             # 계좌 행이 코드보다 먼저 들어온 날(마이그레이션 순서 잘못) — `sells_for` 가 `KeyError` 로 이 단계 전체와
             # 그 뒤 KIS 베끼기까지 멈췄다. 그 계좌 하나만 건너뛴다(paper.md 16.3.1, 25.1871). 지금 계좌에는 해당 없음
@@ -2414,7 +2421,9 @@ def run_step(
                     기준 = 다시잰기준(기준)
                     if 기준 == "close" or after_close:
                         늦음 = pp.DAY_LATE_PREFIX + ("장 끝난 뒤 손 실행" if after_close else "장 열린 뒤 실행")
-                        결정들 = [{**d, "kind": "skip", "reason": 늦음} if d["kind"] == "buy" else d
+                        # 관문을 지난 매수만 skip — 관문이 막은 것은 아래에서 blocked 그대로(막힌수와 원장이 맞게)
+                        결정들 = [{**d, "kind": "skip", "reason": 늦음}
+                                if d["kind"] == "buy" and d["stock_id"] in 낸종목 else d
                                 for d in 결정들 or []]  # fmt: skip
                         b기록["late_skip"] = len(주문)
                         주문, 낸종목 = [], set()
@@ -2442,7 +2451,10 @@ def run_step(
                     문장.append(_결정판(aid, market, trade_date, d["stock_id"], d["kind"], d["reason"], d["detail"],
                                     d["ref_close"], d["ref_date"], 지금))  # fmt: skip
                 a기록["buy"] = b기록
-                기준 = 다시잰기준(기준)  # 위원회·지주사·배분 동안 개장을 넘겼을 수 있다(25.1707)
+                if 규칙 != pp.DAY_RULE:
+                    # 당일 단타(T)는 위 늦은 실행 막이에서 잰 기준을 그대로 쓴다 — 여기서 다시 재 개장을 넘기면 막이를
+                    # 지난 매수가 종가 기준으로 써져 같은 종가에 사고팔았다(25.1886, 25.1883 교차검증 [참고])
+                    기준 = 다시잰기준(기준)  # 위원회·지주사·배분 동안 개장을 넘겼을 수 있다(25.1707)
                 for o in 주문:
                     문장.append((INSERT_ORDER_SQL, [
                         aid, market, o["stock_id"], "buy", "limit" if o.get("limit_price") is not None else "market",

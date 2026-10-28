@@ -112,7 +112,8 @@ def test_짝을_잃은_보유는_다음_장_시가에_판다(monkeypatch: pytest
 
 def _고름(c: Client, 표: str, r: tuple) -> tuple:
     키 = {x[0]: tuple(x[1:]) for x in c.q("SELECT id, account_id, decided_on, stock_id, side, tranche FROM paper_orders")}
-    r = r[1:]
+    if 표 != "paper_daily":  # 평가 행은 id 가 없고 첫 칸이 계좌 — 버리면 두 계좌 평가가 바뀌어도 통과했다(25.1886)
+        r = r[1:]
     if 표 == "paper_fills":
         r = (키[r[0]], *r[1:])
     if 표 == "paper_decisions":
@@ -256,3 +257,39 @@ def test_월간_복기의_손절_점검은_T_에_해당_없음() -> None:
     행 = [{"as_of": "2026-10-16", "invested_krw": 1_000, "equity_krw": 1_000, "twr_index": 1.0, "positions_json": "[]"}]
     줄 = pp.summary_lines({"T": 행}, {}, "2026-10-12", "2026-10-01", {}, {}, {}, {"T": "day_close"})
     assert any(x.startswith("  T 규칙 점검") and "해당 없음(당일 단타" in x for x in 줄)
+
+
+# ── 25.1886 (25.1883 교차검증 [권고]·[참고]) ─────────────────────────────────────────────────
+
+
+def test_T_는_장_끝난_뒤_손_실행에도_진입하지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    c = _계좌(("B",), t=True)
+    다음 = cal.next_session("KR", date(2026, 10, 14))
+    monkeypatch.setattr(cal, "local_today", lambda _m=None: 다음)
+    _, 기록 = job.run_step(c, market="KR", trade_date="2026-10-14", late=False, after_close=True,
+                          signal_rows=[_신호()], settings=설정, price_series={}, series_unknown={}, allocate=True,
+                          now=datetime.fromisoformat(f"{다음}T00:30:00+00:00"))  # fmt: skip
+    assert c.q("SELECT COUNT(*) FROM paper_orders WHERE account_id = 'T'") == [(0,)]
+    결정 = c.q("SELECT kind, reason FROM paper_decisions WHERE account_id = 'T' AND stock_id = 1")
+    assert 결정 == [("skip", pp.DAY_LATE_PREFIX + "장 끝난 뒤 손 실행")]
+    assert 결정[0][1].startswith(pp.NONCOMPARABLE_SKIP_PREFIXES)  # 견줄 새 후보에서 빠진다
+
+
+def test_T_진입_방식이_open_이_아니면_그_계좌만_건너뛴다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """회차 지정가면 짝 매도가 첫 회차에만 붙어(유일 색인 tranche=0) 나머지 회차가 밤을 넘겼다 — 칸 값 실수 막이"""
+    c = _계좌(("B",), t=True)
+    c.conn.execute("UPDATE paper_accounts SET entry_rule = 'tranche' WHERE id = 'T'")
+    줄, 기록 = _하루(c, monkeypatch, "2026-10-14")
+    assert "error" in 기록["accounts"]["T"] and c.q("SELECT COUNT(*) FROM paper_orders WHERE account_id = 'T'") == [(0,)]
+    assert any("가상 T 당일 단타 진입 방식" in x for x in 줄) and 기록["accounts"]["B"]["orders"] >= 1
+
+
+def test_웹_매도_규칙_글은_모든_매도_규칙을_덮는다() -> None:
+    """25.1886 — 배치 `SELL_RULES` 와 웹 `SELL_RULE_TEXT` 의 열쇠가 어긋나면 화면에 날 값(`day_close`)이 보였다"""
+    from pathlib import Path
+
+    글 = (Path(__file__).resolve().parent.parent / "web" / "lib" / "paper.ts").read_text(encoding="utf-8")
+    표 = 글[글.index("const SELL_RULE_TEXT"): 글.index("};", 글.index("const SELL_RULE_TEXT"))]
+    assert all(f"  {k}:" in 표 for k in pp.SELL_RULES), sorted(pp.SELL_RULES)
+    웹 = (Path(__file__).resolve().parent.parent / "web" / "lib" / "paperDecisions.ts").read_text(encoding="utf-8")
+    assert f'DAY_LATE_SKIP_PREFIX = "{pp.DAY_LATE_PREFIX}"' in 웹

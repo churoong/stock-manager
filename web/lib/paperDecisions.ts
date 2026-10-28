@@ -111,8 +111,10 @@ export function holdSide(d: Pick<DecisionRow, "kind" | "reason"> & Partial<Pick<
  * "잘 거른 것" 으로 읽혔다)
  */
 export const OPERATIONAL_SKIP_PREFIX = "매수 단계 건너뜀: ";
+/** 당일 단타(T)가 늦은 실행에 진입하지 않은 줄 — 배치 `DAY_LATE_PREFIX`(25.1886, 시험이 대조). 운영 사정이라 칠하지 않는다 */
+export const DAY_LATE_SKIP_PREFIX = "단타 진입 없음: ";
 export function operationalSkip(d: Pick<DecisionRow, "kind" | "reason">): boolean {
-  return d.kind === "skip" && d.reason.startsWith(OPERATIONAL_SKIP_PREFIX);
+  return d.kind === "skip" && (d.reason.startsWith(OPERATIONAL_SKIP_PREFIX) || d.reason.startsWith(DAY_LATE_SKIP_PREFIX));
 }
 
 export interface DecisionGroup { first: DecisionRow; last: DecisionRow; count: number }
