@@ -23,6 +23,7 @@ import {
   type Attribution,
   hasCommittee,
   type ShadowLedger,
+  showShadowCard,
   virtualText,
 } from "@/lib/paper";
 import { pageOf } from "@/lib/paging";
@@ -242,7 +243,7 @@ export default function PaperView() {
 
       <AccountTabs data={data} acct={acct} setAcct={setAcct} sub={sub} setSub={setSub} desk={desk} />
 
-      {data.shadow !== undefined ? <ShadowCard ledgers={data.shadow} /> : null}
+      {showShadowCard(data.shadow) ? <ShadowCard ledgers={data.shadow} /> : null}
 
       {data.realCompare ? (
         <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">

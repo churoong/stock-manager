@@ -612,12 +612,18 @@ export function shadowLedgers(rows: Array<{ key: string; value: string | null }>
     } catch {
       v = null;
     }
-    // 값이 객체가 아닌 규칙 줄은 뺀다 — null 한 줄이 렌더에서 화면 전체를 깨뜨렸다(주간 요약과 같은 거르개, 25.1876)
+    // 집계 객체가 아닌 규칙 줄(null·숫자·배열·n 없음)은 뺀다 — null 한 줄이 렌더에서 화면 전체를 깨뜨렸다(25.1876·25.1877)
     const stats = v?.stats && typeof v.stats === "object"
-      ? Object.entries(v.stats).filter(([, x]) => typeof x === "object" && x !== null)
+      ? Object.entries(v.stats).filter(
+          ([, x]) => typeof x === "object" && x !== null && !Array.isArray(x) && typeof (x as ShadowStat).n === "number",
+        )
       : [];
     if (!stats.length) continue;
     out.push({ market, asOf: v?.as_of ?? null, stats: stats.map(([rule, s]) => ({ rule, text: SHADOW_RULE_TEXT[rule] ?? rule, s })) });
   }
   return out;
+}
+/** 그림자 칸을 보이나 — 응답에 칸이 아예 없으면(배포 사이 옛 응답) 숨기고, `null`(읽기 실패)이면 "읽지 못함" 으로 보인다(25.1876) */
+export function showShadowCard(shadow: ShadowLedger[] | null | undefined): boolean {
+  return shadow !== undefined;
 }
