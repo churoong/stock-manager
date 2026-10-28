@@ -17,7 +17,7 @@ from batch.services import scoreboard as scb
 #: 아는 기준을 모두 넘는 줄 — 경계값 그대로
 좋은 = {"strategy": "core_d", "cohort": "2", "months": 36, "invested_share": 0.5, "avg_holdings": 3.0, "excess_cagr": 0.001,
         "control_lower": 50.1, "dsr": 0.90, "half_first_cagr": 0.01, "half_second_cagr": 0.02, "walk_positive": 3,
-        "walk_total": 4, "mdd": -0.25}  # fmt: skip
+        "walk_total": 4, "mdd": -0.25, "bh_q": 0.10}  # fmt: skip
 기준 = {"strategy": "core_b", "mdd": -0.20}
 
 
@@ -27,11 +27,11 @@ def _ok(row: dict[str, Any], key: str, base: dict[str, Any] | None = None) -> bo
     return next(c["ok"] for c in st["checks"] if c["key"] == key)
 
 
-def test_아는_기준을_다_넘어도_재료_없는_둘이_남아_모름() -> None:
+def test_아는_기준을_다_넘어도_재료_없는_수용량이_남아_모름() -> None:
     st = scb.stage01(좋은, 기준)
     assert st is not None and st["verdict"] == "모름" and st["failed"] == []
-    assert st["unknown"] == ["코호트 BH q", "수용량"] and st["base"] == "core_b"
-    assert scb.stage01_note(st) == "재료 없음: 코호트 BH q·수용량"
+    assert st["unknown"] == ["수용량"] and st["base"] == "core_b"
+    assert scb.stage01_note(st) == "재료 없음: 수용량"
 
 
 @pytest.mark.parametrize(("key", "고침", "기대"), [
@@ -51,6 +51,11 @@ def test_아는_기준을_다_넘어도_재료_없는_둘이_남아_모름() -> 
     ("mdd_vs_base", {"mdd": -0.2501}, False),  # 기준 −0.20 보다 5%p 넘게 나쁨
     ("mdd_vs_base", {"mdd": None}, None),
     ("months", {"months": None}, None),
+    # 25.1955 (25.1953 교차검증 [권고]) — BH q 경계(≤ 0.10, 등호가 빠져도 아무 시험도 깨지지 않았다)·NaN 은 모름
+    ("bh_q", {"bh_q": 0.1001}, False),
+    ("bh_q", {"bh_q": None}, None),
+    ("months", {"months": float("nan")}, None),
+    ("months", {"months": "nan"}, None),
 ])
 def test_기준마다_경계(key: str, 고침: dict[str, Any], 기대: bool | None) -> None:
     assert _ok(좋은, key) is True
@@ -60,7 +65,7 @@ def test_기준마다_경계(key: str, 고침: dict[str, Any], 기대: bool | No
 def test_하나라도_걸리면_탈락이고_글에_걸린_것과_모르는_것() -> None:
     st = scb.stage01({**좋은, "dsr": 0.5, "walk_positive": 1}, 기준)
     assert st is not None and st["verdict"] == "탈락" and st["failed"] == ["DSR", "걷는 창"]
-    assert scb.stage01_note(st) == "걸림: DSR·걷는 창 · 재료 없음: 코호트 BH q·수용량"
+    assert scb.stage01_note(st) == "걸림: DSR·걷는 창 · 재료 없음: 수용량"
 
 
 def test_기준_줄이_없으면_MDD_는_모름() -> None:

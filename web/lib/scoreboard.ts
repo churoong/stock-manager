@@ -129,7 +129,7 @@ export interface ScoreLine {
   sample: string;
   /** "없음: 칸·칸 — 까닭" — 같은 까닭은 한 줄로 묶는다 */
   missing: string[];
-  /** 0→1(리플레이 → 그림자) 점검 한 줄(25.1950) — 배치가 funnel.md 3장 첫 값에 대어 본 결과. 시도 아닌 줄은 null */
+  /** 0→1(리플레이 → 그림자) 점검 한 줄(25.1950) — 배치가 funnel.md 3장 첫 값에 대어 본 결과. 시도 아닌 줄·코호트 밖 줄은 null(까닭은 missing) */
   stage: string | null;
 }
 

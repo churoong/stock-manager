@@ -14,7 +14,7 @@ import {
 const 줄 = {
   strategy: "core_h", market: "KR", cohort: "1b", trials_cumulative: 17, cagr: 0.1234, excess_cagr: -0.0101, mdd: -0.2567,
   dsr: 0.9312, dsr_n: 17, control_lower: 51.04, gate_lower: null, half_first_cagr: 0.05, half_second_cagr: null,
-  walk_positive: 3, walk_total: 4, bh_q: 0.0421, capacity: 0.00042, stage01_verdict: "모름", stage01_note: "모름: 수용량", months: 48, rebalances: 1000, buys: 120, control_blocks: 9, gate_blocks: 4, sells_scored: 80,
+  walk_positive: 3, walk_total: 4, bh_q: 0.0421, capacity: 0.00042, stage01_verdict: "모름", stage01_note: "재료 없음: 수용량", months: 48, rebalances: 1000, buys: 120, control_blocks: 9, gate_blocks: 4, sells_scored: 80,
   missing: { gate_lower: "하한 없음 — 묶음 4개(block_bound 최소 미달)", half_second_cagr: "second 반 CAGR 표본 미달" },
 };
 
@@ -195,8 +195,8 @@ describe("판정판 안내 줄은 가리킬 곳이 있을 때만 (25.1942)", () 
   });
 
   it("0→1 점검 한 줄 — 배치가 낸 판정과 근거를 그대로, 시도 아닌 줄은 없음(25.1950)", () => {
-    const 줄1 = scoreLine(parseScoreboard([{ ...줄, stage01_verdict: "탈락", stage01_note: "걸림: DSR · 모름: 수용량" }]).rows[0]);
-    expect(줄1.stage).toBe("0→1(그림자로) 점검: 탈락 — 걸림: DSR · 모름: 수용량");
+    const 줄1 = scoreLine(parseScoreboard([{ ...줄, stage01_verdict: "탈락", stage01_note: "걸림: DSR · 재료 없음: 수용량" }]).rows[0]);
+    expect(줄1.stage).toBe("0→1(그림자로) 점검: 탈락 — 걸림: DSR · 재료 없음: 수용량");
     expect(scoreLine(parseScoreboard([{ ...줄, stage01_verdict: "모름", stage01_note: null }]).rows[0]).stage).toBe("0→1(그림자로) 점검: 모름");
     const 기준줄 = scoreLine(parseScoreboard([{ ...줄, strategy: "benchmark", stage01_verdict: null, stage01_note: null,
       missing: { stage01_verdict: "기준·무작위 대조 — 시도 아님", stage01_note: "기준·무작위 대조 — 시도 아님" } }]).rows[0]);

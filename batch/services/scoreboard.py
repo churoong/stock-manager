@@ -263,7 +263,8 @@ def _row(run: dict[str, Any], r: dict[str, Any], twins: dict[str, dict[str, Any]
         out["capacity_profile"] = cap  # 점검표(`_capacity_ok`)가 complete 를 본다
 
     # 표본(개월·28일 묶음·서로 다른 종목·끝난 거래)
-    put("months", (luck or {}).get("months"), "luck.months 없음 — 운 판정 없는 행")
+    # 숫자로 고정해 싣는다 — 점검표(`_num`)와 화면(z.number)이 같은 값을 본다(25.1955)
+    put("months", _num((luck or {}).get("months")), "luck.months 없음 — 운 판정 없는 행")
     put("rebalances", r.get("rebalances"), "rebalances 열 없음")
     no_ev = "결정 단위 증거 없음(월 백테스트 또는 판정 실패)"
     put("buys", (ev or {}).get("buys"), no_ev)
@@ -374,15 +375,16 @@ def stage01(row: dict[str, Any], base: dict[str, Any] | None) -> dict[str, Any] 
     """판정판 한 줄 → 0 → 1 점검표 {verdict, checks: [{key, ok, now, target}], failed, unknown} (funnel.md 3장).
 
     `ok` = True·False·None(모름 — 칸이 비었거나 재료 미저장). 하나라도 False 면 "탈락", 모두 True 면 "후보",
-    아니면 "모름". 시도 아닌 줄(`NOT_TRIALS`)은 None. 앞·뒤 반은 반 기간 CAGR > 0 으로 본다 `[확인필요]`(초과가
-    아니라 절대 — `split_half` 가 싣는 값). 한 코호트 10개 상한은 여러 줄을 보는 일이라 여기서 세지 않는다"""
+    아니면 "모름". 시도 아닌 줄(`NOT_TRIALS`)·코호트 밖 줄(cohort None, 25.1953)은 None. 앞·뒤 반은 반 기간
+    CAGR > 0 으로 본다 `[확인필요]`(초과가 아니라 절대 — `split_half` 가 싣는 값). 한 코호트 10개 상한은 여러 줄을
+    보는 일이라 여기서 세지 않는다"""
     if row.get("strategy") in NOT_TRIALS or row.get("cohort") is None:
         return None
 
     def ok(v: Any, f: Any) -> bool | None:
         # 숫자가 아니면(옛·손상 기록) 모름 — 비교가 TypeError 로 판정판 전체를 깨지 않게(25.1953)
         x = _num(v)
-        return None if x is None else bool(f(x))
+        return None if x is None or not math.isfinite(x) else bool(f(x))  # NaN 은 어떤 비교든 거짓 — 걸림이 아니라 모름
 
     wp, wt = row.get("walk_positive"), row.get("walk_total")
     hf, hs = row.get("half_first_cagr"), row.get("half_second_cagr")
