@@ -14,7 +14,7 @@
 L4(체결·현금)는 견주지 않는다 — 리플레이는 t 종가 전량, 운영 B·G 는 3회 분할 지정가다(docs/backtest.md 10장 "운영과 다른 것").
 그 차이를 지우려고 운영 장부에 날마다 **엔진의 체결을 그대로 베낀다**(허용 ①) — 그래야 다음 날 두 쪽이 같은 보유에서 판단한다.
 
-비용 두 판: `zero`(수수료·세금 0) 는 허용 없이 1e-6 까지 같아야 하고, `fees`(운영 설정 수수료 0.015%·시행일 거래세) 는
+비용 두 판: `zero`(수수료·세금 0) 는 허용 없이 허용 ③(`ALLOW_NOTIONAL_EQUITY` 2e-7) 안에서 같아야 하고, `fees`(운영 설정 수수료 0.015%·시행일 거래세) 는
 엔진의 비용 장부(허용 ⑨)가 낳는 보유 비중 흔들림만큼만 갈려도 된다. 허용 차이는 모두 이름 붙인 상수로 둔다 — 목록 밖 차이는
 결함이다(`xfail(strict=True)` 로 적고 보고한다).
 """
@@ -366,7 +366,7 @@ def _L1(variant: str, 판: str) -> list[str]:
 
 
 #: `fees` 판에서 줄 쌍을 견딘 날 — 시험이 그 횟수를 단언한다(25.1911)
-견딘날: dict[tuple[str, str], int] = {}
+견딘날: dict[tuple[str, str], frozenset[int]] = {}
 
 
 def _L2(variant: str, 판: str) -> list[str]:
@@ -391,7 +391,7 @@ def _L2(variant: str, 판: str) -> list[str]:
             쌍 = {sid for sid in 쌍 if sum(x[0] == sid for x in 리플만) == 1 and sum(x[0] == sid for x in 운만) == 1}
             리플만 = [x for x in 리플만 if x[0] not in 쌍]
             운만 = [x for x in 운만 if x[0] not in 쌍]
-            견딘날[(variant, day)] = len(쌍)
+            견딘날[(variant, day)] = frozenset(쌍)  # 종목까지 남긴다(25.1913 보충)
         if 리플만 or 운만 or len(리플) != len(운):
             틀림.append(f"{day}: 리플레이만 {리플만} · 운영만 {운만} (리플레이 {len(리플)}줄, 운영 {len(운)}줄)")
     return 틀림
@@ -446,7 +446,7 @@ def test_합성_창이_견줄_거리를_지난다() -> None:
 @pytest.mark.parametrize("variant", ["core_b", "core_g"])
 def test_비용_0_이면_장부·매도·결정·매수_비중이_허용_없이_같다(variant: str) -> None:
     """25.1910 (전략 깔때기 ③ 일치 시험 — 매도·결정 원장·매수 비중) — 수수료·세금 0 판. 엔진 체결을 베낀 운영 장부(허용 ①)에서
-    `run_step` 이 날마다 낸 매도(L1)·결정 원장(L2)·매수 비중(L3)이 리플레이와 1e-6 까지 같다. 판단 직전 장부(L0)도 같다."""
+    `run_step` 이 날마다 낸 매도(L1)·결정 원장(L2)·매수 비중(L3)이 리플레이와 허용 ③(2e-7) 안에서 같다. 판단 직전 장부(L0)도 같다."""
     for 단 in (_L0, _L1, _L2, _L3):
         틀림 = 단(variant, "zero")
         assert not 틀림, (단.__name__, 틀림[:5])
@@ -475,13 +475,13 @@ def test_결정_원장이_같다(variant: str) -> None:
     상한에 붙어 있었고(B 2.6e-8·G 1.5e-8 모자람 → "최소 주문 단위 미만"), 운영은 ⑨ 만큼 아래·위에 있었다"""
     assert not _L2(variant, "fees"), _L2(variant, "fees")[:5]
     # 견딘 날은 계좌마다 하루 한 종목 — 2026-10-28 실측 B·G 각 하루(종목 22). 늘면 새 원인을 본다(25.1911·1912)
-    날 = {d: n for (v, d), n in 견딘날.items() if v == variant and n}
-    # 개수만이 아니라 **어느 날**인지까지 — 다른 날·다른 종목의 뒤집힘이 들어오면 새 원인이다(25.1913)
-    assert set(날) <= {"core_b": {"2024-05-30"}, "core_g": {"2024-06-13"}}[variant] and all(n == 1 for n in 날.values()), 날
+    본 = {(d, sid) for (v, d), 쌍 in 견딘날.items() if v == variant for sid in 쌍}
+    # 개수만이 아니라 **어느 날·어느 종목**인지까지 — 다른 날·다른 종목의 뒤집힘이 들어오면 새 원인이다(25.1913 보충)
+    assert 본 <= {"core_b": {("2024-05-30", 22)}, "core_g": {("2024-06-13", 22)}}[variant], 본
 
 
 @pytest.mark.parametrize("variant", ["core_b", "core_g"])
 def test_매수_비중이_같다(variant: str) -> None:
-    """25.1910 (전략 깔때기 ③ 일치 시험 — 매도·결정 원장·매수 비중) — L3. 새로 사는 종목은 1e-6, 든 종목을 채우는 더 사기는 그
+    """25.1910 (전략 깔때기 ③ 일치 시험 — 매도·결정 원장·매수 비중) — L3. 새로 사는 종목은 허용 ③(2e-7), 든 종목을 채우는 더 사기는 그
     종목 보유 비중 차이(허용 ⑨(나))까지 — 차이가 다른 데서 오면 깨진다."""
     assert not _L3(variant, "fees"), _L3(variant, "fees")[:5]
