@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
-  COST_KEYS, DEFAULT_TOP_N, ENGINE_VERSION, NOT_DEFAULT_MARK, NO_PIT_MARK, SCORING_VERSION, TREND_ON_MARK, groupTags, staleVersionNote, LATEST_GROUP, LATEST_STRESS, RECENT_BATCH_RUNS, RECENT_GROUPS, RUNS_IN_GROUP, WHAT_OPTIONS,
+  COST_KEYS, DEFAULT_TOP_N, ENGINE_VERSION, EXPLORE_MARK, NOT_DEFAULT_MARK, NO_PIT_MARK, SCORING_VERSION, TREND_ON_MARK, groupTags, staleVersionNote, LATEST_GROUP, LATEST_STRESS, RECENT_BATCH_RUNS, RECENT_GROUPS, RUNS_IN_GROUP, WHAT_OPTIONS,
   WORKFLOW_FILE, WORKFLOW_REF, awaitingRunner, recentlyFinished, costLine, curvesSql, groupNotice, isRunning, readStressJson, stuckRunNote, mergeWarnings, metricNumber, progressText, requestBacktest,
   pickCurveRuns, runInputSchema, stocksSql, strategyKind, strategyLabel,
   type BacktestRun, type BatchRunRow,
@@ -425,6 +425,19 @@ describe("기본 묶음과 옛 판 (25.788, 백테스트 감사 #2·#3)", () => 
     });
   });
 
+  it("핵심 H·탐색 묶음은 '장기 문턱만' 이 아니라 제 이름이 붙고 대표가 되지 않는다 (25.1916)", () => {
+    const d = 새_db();
+    넣기(d, 1, "composite", "본", "2026-09-17T00:00:00Z", []);
+    넣기(d, 2, "core_h", "핵심", "2026-10-20T00:00:00Z", ["핵심 H — …"]);
+    넣기(d, 3, "core_b", "핵심", "2026-10-20T00:00:00Z", ["핵심 H — …"]);
+    넣기(d, 4, "core_d", "탐색", "2026-11-02T00:00:00Z", ["핵심 H — …", `${EXPLORE_MARK} — 걸러내기용, 판정·확정 아님`]);
+    expect((d.prepare(LATEST_GROUP).get("KR") as { group_id: string }).group_id).toBe("본");
+    const 목록 = d.prepare(RECENT_GROUPS).all("KR") as Array<Parameters<typeof groupTags>[0] & { group_id: string }>;
+    expect(Object.fromEntries(목록.map((g) => [g.group_id, groupTags(g)]))).toEqual({
+      본: "", 핵심: " · 핵심 H 리플레이", 탐색: " · 탐색 — 걸러내기용, 판정 아님",
+    });
+  });
+
   it("규칙 판단용 묶음이 없으면 가장 최근 묶음", () => {
     const d = 새_db();
     넣기(d, 1, "composite", "끔", "2026-09-18T00:00:00Z", [`${NO_PIT_MARK}.`]);
@@ -437,6 +450,8 @@ describe("기본 묶음과 옛 판 (25.788, 백테스트 감사 #2·#3)", () => 
     expect(잡).toContain(`WARN_NO_HISTORICAL_UNIVERSE = "${NO_PIT_MARK}`);
     expect(잡).toContain(`WARN_TREND_ON = "${TREND_ON_MARK}`);
     expect(잡).toContain(`WARN_NOT_DEFAULT_PARAMS = "${NOT_DEFAULT_MARK}`);
+    const 핵심 = readFileSync(join(process.cwd(), "..", "batch", "jobs", "core_backtest.py"), "utf-8");
+    expect(핵심).toContain(`WARN_EXPLORE = "${EXPLORE_MARK}`);
     const 기본N = readFileSync(join(process.cwd(), "..", "batch", "services", "backtest.py"), "utf-8");
     expect(기본N).toMatch(new RegExp(`^DEFAULT_TOP_N = ${DEFAULT_TOP_N}$`, "m"));
     const 엔진 = readFileSync(join(process.cwd(), "..", "batch", "services", "backtest.py"), "utf-8");
