@@ -2972,6 +2972,7 @@ SQL read operations are forbidden (reads are blocked, ...)
 | 25.1922 | 25.1915~1920 교차검증 반영 — 계좌 단계 실패 표시·도전자 보류 시험·guard 시험 고정·판정판 열쇠 |
 | 25.1923 | 25.1922 conftest 픽스처가 monkeypatch 정리 순서를 바꿔 전역 남김 검사 5건이 깨짐 — os.environ 직접으로 |
 | 25.1924 | 25.1921·1922 교차검증 반영 — 주문을 어디까지 적었나 표시·도전자 보류 호출 시험·상황실 겹침 |
+| 25.1925 | .env.example 에 REPO_PUBLIC — 25.1923 conftest 가 읽기 시작해 예시 대조 시험이 깨짐 |
 
 ### 25.1 왜 D1 인가
 
@@ -41945,3 +41946,14 @@ docs/loops.md L4 문을 "18개 중 잡힘 18" 로.
 **되돌리기 확인**
 - `step_error_orders` 의 글 갈래는 매개 시험 여섯이 지킨다.
 - `daily.run` 호출을 예전 식(`잠금보류 or challenger_hold(...)`)으로 되돌리면 `test_도전자_계좌만_깨진_날은_실행이_도전자_베끼기를_보류한다` 가 깨진다(아래 실측).
+
+### 25.1925 .env.example 에 REPO_PUBLIC — 25.1923 conftest 가 읽기 시작해 예시 대조 시험이 깨짐
+
+**계기**: 25.1923 푸시 뒤 전체 검사(gate, a3cf229)가 rc=1 이었다. 깨진 것은 `test_env_example::test_코드가_읽는_이름이_예시에_있다` 하나다. "코드가 읽는데 .env.example 에 없는 환경변수: REPO_PUBLIC(tests/conftest.py)".
+- 25.1923 이 conftest 픽스처를 `os.environ.get("REPO_PUBLIC")` 로 바꾸면서, 이 이름이 코드가 읽는 환경변수 목록에 처음 잡혔다. 그 전엔 `visibility.is_public` 이 `env.get` 으로 읽어 잡히지 않았다.
+- 전체 검사에서만 났다. 25.1923 은 깨졌던 다섯 파일만 다시 돌리고 푸시했다. 25.1923 의 교훈("conftest 변경은 전체 pytest 뒤에 푸시")을 그 커밋에서 바로 어겼다.
+
+**고친 것**: `.env.example` 에 `REPO_PUBLIC=`(빈 값)과 설명 세 줄을 더했다. CLAUDE.md "로컬 개발용 .env.example 을 항상 최신으로" 에 맞다.
+- 이 값은 사람이 강제로 정하는 선택값(true/false)이다. 비우면 Actions 이벤트 파일로 판정하고, 로컬은 비공개로 본다. 그래서 플랫폼이 주는 값 목록이 아니라 예시 칸에 넣었다.
+
+**되돌리기 확인**: 이 줄이 없으면 위 시험이 깨진다. gate a3cf229 가 실측했다.
