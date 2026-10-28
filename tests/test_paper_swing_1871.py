@@ -289,8 +289,8 @@ def test_S_는_KIS_베끼기_장중_감시_대조_지주사_표_밖() -> None:
     assert broker_mirror.MIRROR_ACCOUNT == "H" and intraday_guard.GUARD_ACCOUNT == "H"
     assert "S" not in desk.CONTROL_IDS
     c = Client(accounts=None, charters=True)
-    헌장 = c.q("SELECT charter_json FROM paper_accounts WHERE id = 'H'")[0][0]
-    assert "S" not in _json.dumps(_json.loads(헌장), ensure_ascii=False).replace("SP500", "")  # 투표 회사 목록에 없다
+    헌장 = _json.loads(c.q("SELECT charter_json FROM paper_accounts WHERE id = 'H'")[0][0])
+    assert 헌장["voters"] and "S" not in 헌장["voters"]  # 투표 회사 목록에 없다(25.1874 — 글자 찾기 대신 파싱)
 
 
 def test_월간_복기의_손절_점검은_S_에_해당_없음() -> None:
@@ -298,6 +298,7 @@ def test_월간_복기의_손절_점검은_S_에_해당_없음() -> None:
     줄 = pp.summary_lines({"B": 행, "S": 행}, {}, "2026-10-12", "2026-10-01", {}, {}, {}, {"S": "swing_close"})
     s줄 = next(x for x in 줄 if x.startswith("  S 규칙 점검"))
     assert "해당 없음(스윙 규칙" in s줄 and "손절선 아래로 들고 간 날" not in s줄
+    assert f"{sh.SWING_CLOSE.stop_pct * 100:g}% 이하" in s줄  # 규칙 정의처의 값(25.1874)
     assert any(x.startswith("  B 규칙 점검") and "손절선 아래로 들고 간 날 0" in x for x in 줄)
 
 
@@ -312,4 +313,33 @@ def test_KIS_보정_이웃_견줌과_운용_보고_순위에서_S_를_뺀다() -
     out = desk.adjust_rows(표, 보정)
     assert out["R1"]["close_call"] is False and out["S"]["close_call"] is False  # 다른 구간끼리 견주지 않는다
     줄 = desk.report_lines({}, 표, "H")
-    assert not any("S" in x and "1.10%" in x for x in 줄)
+    assert any(x.strip().startswith("1.") and "B" in x for x in 줄)  # 순위 줄이 실제로 나온다
+    import re
+
+    assert not any(re.match(r"^\s*\d+\. S\b", x) for x in 줄)  # S 는 순위 줄("  3. S +1.10%")에 없다
+
+
+
+def test_KIS_보정_구간은_S_의_개설일부터(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1874 (25.1873 교차검증 [권고]) — S 의 순위 값은 개설일부터인데 보정 구간 시작이 공통 구간이면 어긋난다"""
+    from batch.jobs import desk as desk_job
+    from batch.services import desk
+
+    받은: dict = {}
+    monkeypatch.setattr(desk_job, "_칸합침", lambda *a, **k: {})
+    monkeypatch.setattr(desk, "fill_adjust", lambda **k: 받은.update(k["starts"]) or {})
+
+    class C:
+        def execute(self, sql, args=None):  # noqa: ANN001, ANN201
+            class R:
+                rows: list = []
+
+                def dicts(self):  # noqa: ANN202
+                    return []
+            return R()
+
+    순위 = {"window_start": "2026-09-01", "rows": [
+        {"id": "B", "open": "2026-09-01", "young": False, "separate": False, "window_pct": 1.0},
+        {"id": "S", "open": "2026-11-04", "young": False, "separate": True, "window_pct": 2.0}]}  # fmt: skip
+    desk_job._보정판(C(), 순위, {}, {}, "H", {}, {}, "2026-11-20")
+    assert 받은 == {"B": "2026-09-01", "S": "2026-11-04"}
