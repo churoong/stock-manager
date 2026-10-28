@@ -112,8 +112,9 @@ function tone(v: number | null | undefined): string {
  *  G·H 가 R 의 회색을 가져갔다(25.1604, 웹 화면 감사 [권고] 5) */
 export const ACCOUNT_COLOR: Record<string, string> = {
   A: "#dc2626", B: "#7c3aed", C: "#ea580c", D: "#16a34a", E: "#2563eb", G: "#ca8a04", H: "#db2777", R1: "#9ca3af", R2: "#cbd5e1",
+  S: "#0d9488", T: "#4f46e5", // 스윙·단타(25.1892) — 예비 색 차례에 맡기면 계좌가 늘 때 색이 바뀐다
 };
-const SPARE_COLORS = ["#0d9488", "#4f46e5", "#a16207"];
+const SPARE_COLORS = ["#a16207", "#be123c", "#065f46"]; // S·T 가 앞 두 색을 가져가 겹치지 않게 바꿈(25.1892)
 
 /** 같은 돈 흐름이라 평가 ÷ 입금으로 견준다 — 모든 계좌·KOSPI·S&P500 이 같은 날 같은 금액을 받았다 (docs/paper.md 4장) */
 function chartSeries(history: HistoryRow[], ids: string[]): Series[] {

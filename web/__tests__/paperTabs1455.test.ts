@@ -3,6 +3,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { ACCOUNT_COLOR, AccountTabs, type Data, type SubTab } from "@/components/PaperView";
+import { ACCOUNT_NAMES } from "@/lib/accountNames";
 import { accountView } from "@/lib/paper";
 
 const 평가 = (aid: string, realized: number, unrealized: number) => ({
@@ -101,5 +102,7 @@ describe("보유 손익 표시·그래프 색 (25.1604)", () => {
     expect(new Set(색).size).toBe(색.length);
     expect(ACCOUNT_COLOR.R1).toBe("#9ca3af");
     expect(ACCOUNT_COLOR.G).not.toBe(ACCOUNT_COLOR.R1);
+    // 이름이 있는 계좌는 모두 고정 색 — S·T 가 예비 색 차례에 맡겨져 있었다(25.1892)
+    for (const id of Object.keys(ACCOUNT_NAMES)) expect(ACCOUNT_COLOR[id], id).toBeTruthy();
   });
 });

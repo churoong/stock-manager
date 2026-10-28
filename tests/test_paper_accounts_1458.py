@@ -138,9 +138,11 @@ def _시세(c: Client, sid: int, day: str, open_: float, close: float) -> None:
     )
 
 
-def _하루(c: Client, monkeypatch: pytest.MonkeyPatch, trade_date: str, signals: bool = True) -> dict:
+def _하루(c: Client, monkeypatch: pytest.MonkeyPatch, trade_date: str, signals: bool = True, 시계: str | None = None) -> dict:
     다음 = cal.next_session("KR", date.fromisoformat(trade_date))
-    monkeypatch.setattr(cal, "local_today", lambda _m=None: 다음)
+    # `시계` — 실행 시계의 국내 날짜를 따로 줄 때(늦게 온 예비 실행, 25.1892)
+    오늘 = date.fromisoformat(시계) if 시계 else 다음
+    monkeypatch.setattr(cal, "local_today", lambda _m=None: 오늘)
     return job.run_step(
         c, market="KR", trade_date=trade_date, late=False, signal_rows=[_신호()] if signals else [], settings=설정,
         price_series={}, series_unknown={}, allocate=signals, now=datetime.fromisoformat(f"{다음}T00:30:00+00:00"),
@@ -203,11 +205,16 @@ def test_open_entry_fills_at_open_and_random_mapping_is_stable(c: Client, monkey
     assert c.q("SELECT COUNT(*), SUM(recon_ok) FROM paper_daily WHERE as_of = '2026-10-16'") == [(9, 9)]
 
 
-@pytest.mark.parametrize(("개설", "열림"), [("2026-10-15", True), ("2026-10-16", False)])
+@pytest.mark.parametrize(
+    ("개설", "열림", "시계"),
+    [("2026-10-15", True, None), ("2026-10-16", False, None),
+     # 늦게 온 실행 — 시계는 이미 개설일(10-16)인데 주문은 10-15 장에 낸다. 잣대가 주문 장이라 막는다(25.1892)
+     ("2026-10-16", False, "2026-10-16")],
+)  # fmt: skip
 def test_accounts_trade_from_their_open_date(
-    c: Client, monkeypatch: pytest.MonkeyPatch, 개설: str, 열림: bool
+    c: Client, monkeypatch: pytest.MonkeyPatch, 개설: str, 열림: bool, 시계: str | None
 ) -> None:
-    """개설일이 실행일(국내 날짜)에 닿으면 연다 — 같은 날 포함, 막는 것은 개설 **전**뿐(25.1891).
+    """주문을 내는 장(`다음장`)이 개설일에 닿으면 연다 — 같은 날 포함, 막는 것은 개설 **전** 장뿐(25.1891·25.1892).
 
     하한(`OPEN_GUARD_FROM`)을 시험 날짜로 내려 경계를 잰다 — 실행일은 10-14 다음 거래일 10-15.
     개설일이 하한보다 앞이면(10-15 이전) 장치 밖이라 열린다 — 아래 둘은 하한 안에서 같은 날·다음 날.
@@ -219,7 +226,7 @@ def test_accounts_trade_from_their_open_date(
     # G·H(개설 10-16)는 하한을 내리면 같이 막히니 이 시험에선 앞당긴다 — S·T 만 잰다
     c.conn.execute("UPDATE paper_accounts SET created_at = '2026-10-14T00:00:00+00:00' WHERE id IN ('G', 'H')")
     c.conn.execute("UPDATE paper_accounts SET created_at = ? WHERE id IN ('S', 'T')", [f"{개설}T00:00:00+00:00"])
-    기록 = _하루(c, monkeypatch, "2026-10-14")
+    기록 = _하루(c, monkeypatch, "2026-10-14", 시계=시계)
     매수 = dict(c.q("SELECT account_id, COUNT(*) FROM paper_orders WHERE account_id IN ('S', 'T') AND side = 'buy'"
                   " GROUP BY account_id"))  # fmt: skip
     if 열림:
