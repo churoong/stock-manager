@@ -37,7 +37,7 @@ def _장부() -> MemClient:
     return m
 
 
-def test_단기_신호만_두_규칙으로_가상_체결한다() -> None:
+def test_단기_신호만_규칙마다_가상_체결한다() -> None:
     m = _장부()
     그림자: list[sh.Trade] = []
     job.compute(m, "KR", "2026-10-28", shadow=(그림자, sh.Costs(0, 0, 0, 0), {}))  # type: ignore[arg-type]

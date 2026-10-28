@@ -127,8 +127,12 @@ def simulate(stock_id: int, signal_date: str, bars: list[Bar], rule: Rule, costs
     목표, 손절 = 기준 * (1 + rule.target_pct), 기준 * (1 + rule.stop_pct)
     if rule.kind == "swing_close":
         # 종가가 선을 넘은 날(또는 기한 날)의 **다음 장 시가** 시장가로 판다 — 넘은 날 다음 장이 아직 없으면 진행 중
+        # 선과 같은 종가는 넘은 것(등호 포함). 수익률을 % 여섯째 자리에서 반올림해 견준다 — 엔진 손절 판정
+        # (`sell_flags` `round(…, 6) <= stop_pct`)과 같은 꼴, 부동소수 찌꺼기(96.99999…)로 경계가 갈리지 않게(25.1870)
         for i, bar in enumerate(bars[: rule.max_sessions]):
-            까닭 = ("stop" if bar.close <= 손절 else "target" if bar.close >= 목표
+            수익 = round((bar.close / 기준 - 1) * 100, 6)
+            아래, 위 = round(rule.stop_pct * 100, 6), round(rule.target_pct * 100, 6)
+            까닭 = ("stop" if 수익 <= 아래 else "target" if 수익 >= 위
                   else "time" if i == rule.max_sessions - 1 else None)  # fmt: skip
             if 까닭 is None:
                 continue

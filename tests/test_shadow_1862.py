@@ -66,7 +66,7 @@ def test_집계() -> None:
     assert sh.summarize([], "day_v1").n == 0
 
 
-def test_규칙은_한_벌만_사전_등록() -> None:
+def test_값은_한_벌_판정_꼴만_다르다() -> None:
     assert [r.name for r in sh.RULES] == ["day_v1", "swing_v1", "swing_close_v1"]
     assert (sh.SWING.target_pct, sh.SWING.stop_pct, sh.SWING.max_sessions) == (0.05, -0.03, 10)
     # 종가 판정 스윙은 판 1 과 같은 값 — 판정 꼴만 다르다(25.1867)
@@ -132,3 +132,16 @@ def test_종가_판정_스윙도_끊기면_마지막_종가로_닫는다() -> No
     assert sh.simulate(1, "d0", 줄, sh.SWING_CLOSE, 무비용, "KR").status == "open"
     끊 = sh.simulate(1, "d0", 줄, sh.SWING_CLOSE, 무비용, "KR", ended=True)
     assert (끊.reason, 끊.exit_price, 끊.exit_date) == ("끊김", 96.5, "d2")
+
+
+def test_종가_판정_스윙_선과_같은_종가는_넘은_것_청산일_세율은_파는_장() -> None:
+    """25.1870 (25.1867 교차검증 [권고]·[참고]) — 등호 경계와 다음 장 청산의 세율을 묶는 시험이 없었다"""
+    R = sh.SWING_CLOSE
+    for 시가, 종가, 까닭 in ((100, 97, "stop_next_open"), (100, 105, "target_next_open"), (0.7, 0.679, "stop_next_open")):
+        t = sh.simulate(1, "d0", [B("d1", 시가, 시가, 종가, 종가), B("d2", 종가, 종가, 종가, 종가)], R, 무비용, "KR")
+        assert t.reason == 까닭, (시가, 종가)  # 0.7 × 0.97 = 0.679 — 부동소수로 0.67899… 가 돼도 손절
+    assert sh.simulate(1, "d0", [B("d1", 100, 100, 97.01, 97.01), B("d2", 97, 97, 97, 97)], R, 무비용, "KR").status == "open"
+    # 넘은 날(11-30)이 아니라 파는 장(12-01)의 세율 — 연말 넘김 거래
+    일정 = sh.Costs(0.0, 0.0, 0.15, 0.0, (("2026-01-01", 0.15), ("2026-12-01", 0.20)))
+    t = sh.simulate(1, "d0", [B("2026-11-30", 100, 106, 99, 105), B("2026-12-01", 104, 104, 104, 104)], R, 일정, "KR")
+    assert (t.exit_date, t.net) == ("2026-12-01", pytest.approx(104 * (1 - 0.002) / 100 - 1))
