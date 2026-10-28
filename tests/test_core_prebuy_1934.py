@@ -443,6 +443,32 @@ def test_끝까지_시점_유니버스에서_빠진_보유는_그_주_첫_결정
     assert 줄(s1.log) == 줄(s.log)
 
 
+#: 주 중간에 빠지는 미끼(25.1938) — (변형, 종목, 빠지는 날(수요일), 그 다음 주 첫 cutoff, 그 결정일). 점검은 **그 주 첫
+#: cutoff 의 유니버스**(운영 주간 스냅샷 자리)를 읽으므로, 주 중간에 빠져도 그 주 안에는 팔지 않고 다음 주 첫 cutoff 의
+#: 결정일에 판다. 진짜 `pit_eligible` 은 거래대금·시총 하한을 날마다 적용해 주 중간에도 바뀐다
+_주중_미끼 = {"core_c": (5, "2023-03-22", "2023-03-27", "2023-03-28"), "core_a": (8, "2023-07-12", "2023-07-17", "2023-07-18")}
+
+
+@pytest.mark.parametrize("variant", sorted(_주중_미끼))
+def test_주_중간에_빠지면_다음_주_첫_결정일에_판다(variant: str) -> None:
+    """25.1938 (25.1937 교차검증 [권고]) — `_PitClient` 가 `members(score_cutoff)` 대신 그날 cutoff 의 유니버스를 읽어도
+    (변이 M5) 위 시험은 월요일에 빠지는 미끼라 지나갔다. 수요일에 빠지면 그 주는 들고, 다음 주 첫 결정일에 "점검" 으로 판다"""
+    sid, 부터, 다음주, 판날 = _주중_미끼[variant]
+    universe, prices, turn, snaps, idx = t._자료()
+    전체 = {int(u["stock_id"]) for u in universe}
+
+    def eligible_at(cutoff: str) -> set[int]:
+        return 전체 - {sid} if cutoff >= 부터 else set(전체)
+
+    기본, _r = _끝(variant)
+    assert any(lg.cutoff == 다음주 and sid in lg.held for lg in 기본.log)  # 미끼 없이 그때까지 든다
+    s = cs.make_core_strategy(variant, cb.CoreMarket(universe, snaps, idx, eligible_at=eligible_at), sessions=t.날들,
+                              costs=bt.Costs())  # fmt: skip
+    bt.simulate(prices, t.모의, t.모의, s, bt.Costs(), turnover=turn, has_delisted=True)
+    assert [(lg.day, lg.sells[sid]) for lg in s.log if sid in lg.sells] == [(판날, ["점검"])]
+    assert all(sid in lg.held for lg in s.log if 부터 <= lg.cutoff < 다음주)  # 주 중간에는 팔지 않는다
+
+
 def test_나눠_읽어도_같다() -> None:
     """`SharedDays` 읽개(하루 재료에서 종합 점수가 빠진다 — 주간 점수를 따로 든다)로 돌려도 판단기를 직접 쓴 것과 같다.
     다른 변형(D)이 먼저 그 주를 적은 경우도"""
