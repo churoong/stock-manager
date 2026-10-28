@@ -398,7 +398,7 @@ def shadow_costs(client: TursoClient, country: str, today: str) -> sh.Costs:
     25.1863), 일정이 없으면(미국) 오늘 값 하나.
 
     수수료는 **매수·매도 따로** — 가상모의투자 엔진(`jobs/paper._수수료`, 25.1620)과 같은 함수. 예전엔 백테스트의 편도
-    평균(`commission_pct`)을 양쪽에 붙여, 설정이 매수 0.015·매도 0.25 면 둘 다 0.1325 였다 — 11월 계좌(S·T) 성적과
+    평균(`commission_pct`)을 양쪽에 붙여, 설정이 매수 0.015·매도 0.25 면 둘 다 0.1325 였다 — 단타·스윙 계좌(S·T) 성적과
     그림자 집계의 차이에 비용 차이가 섞인다(25.1878, 단타 계좌 설계 검토)"""
     from batch.jobs.paper import _수수료
     from batch.services import backtest as bt
