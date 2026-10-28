@@ -1009,6 +1009,13 @@ def checks(
             out.append({"level": "high", "text": f"가상 {nm} 헌장 오류: {'; '.join(a['charter_errors'])[:120]}"})
         if a.get("error"):  # 모르는 매도 규칙으로 그 계좌를 건너뛴 날(25.1871 막이) — 텔레그램 줄에만 있었다(25.1873)
             out.append({"level": "high", "text": f"가상 {nm} {str(a['error'])[:100]} — 오늘 평가·매매 안 함"})
+        if a.get("substitute_overlap_hit"):
+            # 무작위 대조의 옛 자리 신호가 다시 나와 뽑기가 운영·문서 규칙과 갈렸을 수 있는 날(25.1929 찾은 것,
+            # 25.1931) — R 판 올림을 앞당길지 볼 자리. 장부 상태(`substitute_overlap`)만으로는 내지 않는다
+            # (해 없는 날도 켜진다)
+            닿음 = a["substitute_overlap_hit"]
+            out.append({"level": "normal",
+                        "text": f"가상 {nm} 옛 대체 자리 신호가 다시 나옴 {닿음} — R 판 올림 앞당김 검토(handoff)"})
         if a.get("step_error") and not str(p.get("error") or "").startswith(f"가상 {aid} 계좌 단계 실패"):
             # 계좌 단계에서 가둔 예외(25.1920·25.1922) — 다른 계좌는 돌았다. 주문을 적은 뒤에 났을 수 있다.
             # KIS 가 베끼는 계좌면 위 단계 실패 줄이 같은 사건을 이미 말한다(25.1924)

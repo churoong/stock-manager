@@ -274,6 +274,14 @@ def test_운영_든_대체_장부가_옛_보유_자리를_남긴다() -> None:
         assert min(d for d, *_ in 더) == "2024-04-09" and len(갈림) == len({d for d, *_ in 더}), 갈림
         # 그날들에 옛 자리 신호가 없었다 — 그래서 뽑기가 같았다
         assert not [d for d, _k, _c in 더 if _k in {r.stock_id for r in rp.재료[d][1]}]
+        # 25.1931 — run_step 감지 호출 자리: 장부 상태(`substitute_overlap`)는 R2 에 51일(2024-04-09~08-29) 켜지고, 뽑기가
+        # 기울 수 있는 날(`_hit` — 옛 자리 신호가 나온 날)은 0. R1 은 둘 다 없다(위 `continue`)
+        live = t._운영(variant, "zero")
+        상태 = {d: h.record.get("substitute_overlap") for d, h in live.items() if h.record.get("substitute_overlap")}
+        assert len(상태) == 51 and min(상태) == "2024-04-09" and max(상태) == "2024-08-29", (len(상태), min(상태))
+        assert {str(v) for v in 상태.values()} == {"{'23': [8, 27]}"}
+        assert not [d for d, h in live.items() if h.record.get("substitute_overlap_hit")]
+    assert not [d for d, h in t._운영("core_r1", "zero").items() if h.record.get("substitute_overlap")]
 
 
 @pytest.mark.xfail(
@@ -310,3 +318,30 @@ def test_든_대체_겹침_감지() -> None:
     assert job.substitute_overlap({8: 1, 27: 1, 3: 2}) == {"1": [8, 27]}
     assert job.substitute_overlap({8: 1, 27: 2}) == {}
     assert job.substitute_overlap({}) == {}
+
+
+def test_옛_자리_신호가_나온_날만_닿음() -> None:
+    """25.1931 (25.1930 교차검증 [권고]) — 장부 상태는 그 종목을 드는 동안 날마다 켜져, "보이면 R 판 올림을 앞당긴다" 문턱이
+    해 없는 날에도 걸렸다. 지금 회차의 자리(가장 나중 매수의 `substitute_of`) 신호는 정상이라 빼고, **옛 자리** 신호가 나온
+    날만 `_hit` 이다. 손 사례 DB(종목 1: 자리 8 → 판 → 자리 27)로 지금 회차의 자리를 읽는다"""
+    겹침 = {"1": [8, 27]}
+    assert job.substitute_overlap_hits(겹침, {1: 27}, {8, 99}) == {"1": [8]}
+    assert job.substitute_overlap_hits(겹침, {1: 27}, {27, 99}) == {}
+    assert job.substitute_overlap_hits(겹침, {}, {27}) == {"1": [27]}  # 지금 회차를 모르면 넓게
+    c = Client(accounts=("R2",))
+    for oid, side, 자리, 날 in ((1, "buy", 8, "2024-01-29"), (2, "sell", None, "2024-02-15"), (3, "buy", 27, "2024-04-08")):
+        근거 = json.dumps({"signal": {"criteria": [{"substitute_of": 자리}]}}) if 자리 is not None else None
+        c.conn.execute(
+            "INSERT INTO paper_orders (id, account_id, market, stock_id, side, order_type, limit_price, quantity, currency,"
+            " decided_on, fill_session, tranche, reason, rule_version, status, created_at, rationale_json) VALUES (?, 'R2',"
+            " 'KR', 1, ?, 'market', NULL, 1, 'KRW', ?, ?, ?, 't', 1, 'filled', 't', ?)",
+            [oid, side, 날, 날, 1 if side == "buy" else 0, 근거])  # fmt: skip
+    assert job.current_substitute_slots(c, "R2", {1}) == {1: 27}
+    assert job.substitute_overlap(job.held_substitutes(c, "R2", {1})) == {"1": [8, 27]}
+    from batch.services import desk
+
+    p = {"accounts": {"R2": {"substitute_overlap": {"1": [8, 27]}}}}
+    assert not [x for x in desk.checks(halted=False, paper=p, broker=None, recon_bad=[], warnings=0) if "옛 대체" in x["text"]]
+    p["accounts"]["R2"]["substitute_overlap_hit"] = {"1": [8]}
+    assert [x["level"] for x in desk.checks(halted=False, paper=p, broker=None, recon_bad=[], warnings=0)
+            if "옛 대체 자리 신호" in x["text"]] == ["normal"]

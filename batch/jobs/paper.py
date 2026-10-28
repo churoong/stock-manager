@@ -1606,6 +1606,38 @@ SUBSTITUTE_ORDERS_SQL = (
 )
 
 
+def current_substitute_slots(client: Any, account: str, stocks: set[int]) -> dict[int, int]:
+    """{종목: 지금 회차의 자리} — 그 종목의 **가장 나중** 찬 매수 주문의 `substitute_of`(25.1931, 감지 전용 — 고르기는
+    `held_substitutes` 그대로). 같은 질의를 읽지만 종목마다 마지막 하나만 남긴다"""
+    out: dict[int, int] = {}
+    for r in client.execute(SUBSTITUTE_ORDERS_SQL, [account]).dicts():
+        sid = int(r["stock_id"])
+        if sid not in stocks:
+            continue
+        try:
+            근거 = json.loads(r["rationale_json"] or "{}")
+            자리 = next((c.get("substitute_of") for c in 근거.get("signal", {}).get("criteria") or []
+                        if isinstance(c, dict) and c.get("substitute_of") is not None), None)  # fmt: skip
+        except (ValueError, AttributeError):
+            continue
+        if 자리 is not None:
+            out[sid] = int(자리)
+    return out
+
+
+def substitute_overlap_hits(
+    overlap: dict[str, list[int]], current: dict[int, int], signal_ids: set[int]
+) -> dict[str, list[int]]:
+    """겹친 자리 가운데 **지금 회차가 아닌 옛 자리**의 신호가 그날 나온 것 — 뽑기가 실제로 기울 수 있는 날(25.1931).
+    지금 회차의 자리 신호는 정상(든 종목을 그 자리로 잇는다)이라 빼고 센다"""
+    out: dict[str, list[int]] = {}
+    for s, ks in overlap.items():
+        옛 = [k for k in ks if k != current.get(int(s)) and k in signal_ids]
+        if 옛:
+            out[s] = 옛
+    return out
+
+
 def substitute_overlap(held: dict[int, int]) -> dict[str, list[int]]:
     """든 대체 장부(`held_substitutes` — 신호 자리 → 든 대체 종목)에서 **한 종목이 두 자리 이상**인 것 — {종목: [자리]}.
     25.1929 찾은 것(팔았다 다시 산 종목의 옛 자리까지 잇는다)의 감지만(25.1930). 고르기 지문 밖이라 R 판과 무관하다"""
@@ -2352,11 +2384,19 @@ def run_step(
                     든대체 = held_substitutes(client, aid, set(pp.positions(계좌체결)))
                     겹친대체 = substitute_overlap(든대체)
                     if 겹친대체:
-                        # 감지만(25.1930) — 팔았다 다시 산 종목이 옛 자리까지 이어져 한 종목이 두 자리 이상이다
-                        # (25.1929 찾은 것). 고르기 논리(`held_substitutes`, 25.1700 지문)는 R 판 올림 때 고친다 —
-                        # 그 전까지 기운 날이 실행 기록에 남게
+                        # 감지만(25.1930) — 팔았다 다시 산 종목이 옛 자리까지 이어져 한 종목이 두 자리 이상인 **장부
+                        # 상태**(25.1929 찾은 것). 상태는 그 종목을 들고 있는 동안 날마다 켜진다 — 해가 없는 날도.
+                        # 뽑기가 실제로 기울 수 있는 날은 **지금 회차가 아닌 옛 자리**의 신호가 그날 나온 날뿐이다
+                        # (`_hit`, 25.1931). 경고는 그날만. 고르기 논리(`held_substitutes`, 25.1700 지문)는 R 판
+                        # 올림 때 고친다
                         a기록["substitute_overlap"] = 겹친대체
-                        log.warning("가상 %s 든 대체 종목이 두 자리 이상: %s", aid, a기록["substitute_overlap"])
+                        닿음 = substitute_overlap_hits(
+                            겹친대체, current_substitute_slots(client, aid, {int(s) for s in 겹친대체}),
+                            {int(r.stock_id) for r in signal_rows})  # fmt: skip
+                        if 닿음:
+                            a기록["substitute_overlap_hit"] = 닿음
+                            log.warning("가상 %s 든 대체 종목이 두 자리 이상이고 그 자리 신호가 오늘 나옴: %s",
+                                        aid, 닿음)  # fmt: skip
                     바꾸기 = partial(random_substitute, client, account=aid, market=market, pool=유니버스,
                                     held=든대체,
                                     cooldown=최근판, stock_cache=stock_cache, today=cal.local_today(market),
