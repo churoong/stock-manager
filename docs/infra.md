@@ -2953,6 +2953,7 @@ SQL read operations are forbidden (reads are blocked, ...)
 | 25.1903 | 전략 깔때기 설계·사전 등록(docs/funnel.md) — 리플레이로 넓게, 앞으로의 구간으로 확인, 시도 등록부·판정판·졸업 기준 (사용자 지시) |
 | 25.1904 | 리플레이 탐색 변형 — 장기보유 D·안정 E(위원회 가결 미리 고름), 핵심 판정 변형 밖 (전략 깔때기 ②) |
 | 25.1905 | 전략 깔때기 문서 보강 — 코호트 1·2, 관문 칸 이름, KIS 두 자리, 옮긴 상수 시험 (25.1903 교차검증 [권고]) |
+| 25.1906 | 탐색 실행 모드 — core_backtest --explore, backtest_explore 로 따로, DSR 하한은 누적 시도 (전략 깔때기 ①) |
 
 ### 25.1 왜 D1 인가
 
@@ -41370,3 +41371,31 @@ docs/loops.md L4 문을 "18개 중 잡힘 18" 로.
 **25.1903 기록 바로잡음**: "`test_doc_links` 가 새 문서의 절 참조를 본다" 는 틀렸다. 그때 funnel.md 의 참조에는 `docs/` 가 없어 시험이 하나도 보지 않았다. 이 건부터 본다.
 
 **되돌리기 확인**: funnel.md 의 `REGISTERED_TRIALS` 값을 18 로 바꾸면 새 상수 시험이 깨진다.
+
+### 25.1906 탐색 실행 모드 — core_backtest --explore, backtest_explore 로 따로, DSR 하한은 누적 시도 (전략 깔때기 ①)
+
+**계기**: 전략 깔때기 ①(docs/funnel.md 4장) — 탐색 변형을 5년 리플레이로 돌릴 길. 엔진 조사 에이전트는 새 파일을 권했다. 그런데 `run_core` 의 읽기·워밍업·하루 재료 공유·저장·DSR·결정 단위 증거가 그대로 맞아 그 위에 **모드 하나**로 얹었다(같은 읽기를 두 벌 두지 않는다).
+
+**한 것**
+- `batch/jobs/core_backtest.py run_core(..., explore=True)`·`--explore`: `core_strategy.EXPLORE_VARIANTS`(지금 `core_d`·`core_e`)를 돌린다.
+  - `job_name = backtest_explore`. 웹 핵심 H 화면(`coreBacktest.ts` 는 `backtest_core` 만 읽음)과 핵심 H 판정이 섞이지 않는다.
+  - 경고 `WARN_EXPLORE`("걸러내기용, 판정·확정 아님")를 붙인다.
+  - DSR 시도 수 하한은 `explore_trial_floor()` = `REGISTERED_TRIALS` + 탐색 변형 수다. 등록부 누적이다(funnel.md 2.1 — 코드에 변형을 넣은 커밋이 등록).
+  - H 전용 진단(가중 대조·청산 대조·손실 관문)과 H−G 짝 판정은 내지 않는다.
+  - 실행 기록 `params` 에 `explore`·`trial_floor` 을 남긴다.
+- 핵심·탐색 두 목록을 섞어 돌리면 `ValueError` 다. 시도 수와 판정이 갈린다.
+- `core_strategy.variant_spec(name)`: 두 목록에서 칸을 찾는다.
+- 저장 `top_n` 은 전략이 덮은 값이다(위원회 변형은 헌장 — D 5·E 10).
+- `SharedMarket.charters`: 하루 재료를 나눠 읽는 판단기도 헌장을 넘긴다. 위원회 변형이 나눠 읽기로 돌 때 `AttributeError` 가 났다(새 시험이 잡음).
+
+**하지 않은 것**: 운영 예약(backtest.yml)에 걸지 않았다. 국내 한 벌 적재는 Turso 읽기 약 180만 행이다(사본이 없으면). 10월 Turso 자제(비용 규칙) 때문에 11월에 예약하거나 손 실행한다. handoff 에 적었다.
+
+**왜 지금**(모의투자 효용): ② 전략 검증 — 운영 회사 D·E 의 규칙을 5년 시점 자료로 처음 걸러 볼 수 있다. 앞으로 더할 변형도 같은 길로 간다.
+
+**시험**: `tests/test_core_explore_1904.py`
+- `test_탐색_실행은_따로_싣고_시도_수_하한은_누적이다`: 메모리 DB 로 끝까지 돈다. 행 이름·헌장 top_n·경고·`backtest_core` 0행·`trial_floor`·판정 문구·H 진단 건너뜀을 본다.
+- `test_두_목록을_섞어_돌리지_않는다`
+
+기존 1534·1532 시험도 통과한다.
+
+**되돌리기 확인**: `job_name` 을 `JOB_NAME` 으로 되돌리면 탐색 실행 시험이 깨진다.

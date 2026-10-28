@@ -72,3 +72,39 @@ def test_가결_행은_표_순이다() -> None:
     고른 = cs.committee_rows(dv, "E")  # type: ignore[arg-type]
     assert [(r.stock_id, r.horizon) for r in 고른] == [(2, "mid"), (1, "short"), (1, "long")]
     assert cs.committee_rows(dv, "D") == []  # type: ignore[arg-type]
+
+
+# ── 탐색 실행(전략 깔때기 ①, 25.1906) ─────────────────────────────────────────
+
+
+def test_탐색_실행은_따로_싣고_시도_수_하한은_누적이다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`--explore` 는 `backtest_explore` 로 — 웹 핵심 H 화면(`backtest_core`)·판정과 섞이지 않는다.
+    DSR 시도 수 하한 = 코호트 1(`REGISTERED_TRIALS`) + 탐색 변형 수(funnel.md 2.1). H 진단·짝 판정은 내지 않는다."""
+    import json
+
+    from batch.jobs import backtest as jb
+    from batch.jobs import core_backtest as cj
+    from tests.test_core_backtest_job_1534 import _db, 오늘
+
+    mem = _db(monkeypatch)
+    assert cj.run_core("KR", years=1, today=오늘, force=True, explore=True) == 0
+    행 = mem.execute("SELECT strategy, top_n, warnings_json FROM backtest_runs ORDER BY id").dicts()
+    assert [r["strategy"] for r in 행] == sorted(cs.EXPLORE_VARIANTS)
+    # 위원회 변형의 저장 top_n 은 헌장 값(E 10, D 5)
+    assert {r["strategy"]: r["top_n"] for r in 행} == {"core_d": 5, "core_e": 10}
+    assert all(cj.WARN_EXPLORE in json.loads(r["warnings_json"]) for r in 행)
+    assert mem.execute("SELECT COUNT(*) FROM batch_runs WHERE job_name = ?", [cj.JOB_NAME]).scalar() == 0
+    로그 = json.loads(mem.execute("SELECT step_log FROM batch_runs WHERE job_name = ?",
+                                 [cj.EXPLORE_JOB_NAME]).scalar())  # fmt: skip
+    assert 로그["params"]["explore"] is True
+    assert 로그["params"]["trial_floor"] == jb.REGISTERED_TRIALS + len(cs.EXPLORE_VARIANTS) == cj.explore_trial_floor()
+    assert 로그["verdict"].startswith("탐색 실행") and "skipped" in 로그["holding_eq"]
+
+
+def test_두_목록을_섞어_돌리지_않는다() -> None:
+    from batch.jobs import core_backtest as cj
+
+    with pytest.raises(ValueError):
+        cj.run_core("KR", variants=("core_b", "core_d"))
+    with pytest.raises(ValueError):
+        cj.run_core("KR", variants=("core_h",), explore=True)

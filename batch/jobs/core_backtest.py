@@ -50,6 +50,16 @@ log = logging.getLogger("core_backtest")
 #: `batch_runs.job_name` — 월 백테스트(`backtest`)와 가른다. 기법 발굴 루프의 판정은 `backtest` 의 기본 실행만 센다
 #: (docs/factors.md 12장 머리) — 핵심 H 실행이 그 판정 칸을 밀어내지 않게
 JOB_NAME = "backtest_core"
+#: 전략 깔때기 0단계 탐색 실행(docs/funnel.md 4장 ①, 25.1906) — 핵심 H 실행(웹 `coreBacktest.ts` 가 `backtest_core` 만
+#: 읽는다)·월 백테스트 판정과 가른다. 변형은 `core_strategy.EXPLORE_VARIANTS`(코호트 2 — 코드에 넣은 커밋이 등록)
+EXPLORE_JOB_NAME = "backtest_explore"
+#: 탐색 실행 결과에 붙는 경고 — 거르기만 하고 확정하지 않는다(funnel.md 1장, 생존편향)
+WARN_EXPLORE = "탐색 실행(전략 깔때기 0단계) — 걸러내기용, 판정·확정 아님"
+
+
+def explore_trial_floor() -> int:
+    """탐색 실행의 DSR 시도 수 하한 — 등록부 누적(funnel.md 2.1): 코호트 1(`REGISTERED_TRIALS`) + 탐색 변형 수."""
+    return jb.REGISTERED_TRIALS + len(cs.EXPLORE_VARIANTS)
 #: `backtest_runs.rebalance` — 장부형 전략은 날마다 판단한다(월 백테스트는 "monthly")
 REBALANCE = "daily"
 #: 기본 연수 — 월 백테스트와 같다(자료 약 5년, docs/backtest.md 10장 자료 깊이)
@@ -125,10 +135,19 @@ def run_core(
     risk_every: str = DEFAULT_RISK_EVERY,
     force: bool = False,
     today: date | None = None,
-    variants: tuple[str, ...] = tuple(cs.VARIANTS),
+    variants: tuple[str, ...] | None = None,
+    explore: bool = False,
 ) -> int:
-    """핵심 H 변형 다섯을 날마다 돌려 저장한다. 0 = 성공. `today` 는 시험이 날짜를 고정할 때만 준다."""
+    """핵심 H 변형 다섯을 날마다 돌려 저장한다. 0 = 성공. `today` 는 시험이 날짜를 고정할 때만 준다.
+
+    `explore` 면 탐색 변형(`EXPLORE_VARIANTS`)을 `EXPLORE_JOB_NAME` 으로 돌린다 — 두 목록을 섞지 않는다(시도 수와
+    판정이 갈린다). 탐색 실행은 결정 단위 짝 판정(H−G)·H 진단을 내지 않는다"""
     market = market.upper()
+    목록 = cs.EXPLORE_VARIANTS if explore else cs.VARIANTS
+    variants = tuple(목록) if variants is None else variants
+    if not variants or any(v not in 목록 for v in variants):
+        raise ValueError(f"{'탐색' if explore else '핵심'} 실행 변형은 {sorted(목록)} 가운데서 — {variants}")
+    job_name = EXPLORE_JOB_NAME if explore else JOB_NAME
     if market != "KR":
         # 미국은 지수·통화·분할 대기 규칙을 아직 안 맞췄다(`CoreMarket` 이 막는다) — 시작 전에 크게 멈춘다.
         # 명령줄은 KR 만 받고 워크플로도 KR 만 넘기므로 예약 실행이 여기서 조용히 끝날 일은 없다
@@ -142,7 +161,7 @@ def run_core(
         now = db.now_iso()
         today = today or datetime.now(UTC).date()
         since = jb.start_of_backtest(today, years)
-        batch_id = db.start_batch_run(client, job_name=JOB_NAME, market=market, trade_date=today.isoformat())
+        batch_id = db.start_batch_run(client, job_name=job_name, market=market, trade_date=today.isoformat())
 
         universe, warnings = jb.load_universe(client, country)
         if not universe:
@@ -200,6 +219,8 @@ def run_core(
         eligible_at, pit_cache, pit_reasons = pit_eligible(universe, prices, turnover, 시장_맵)
         warnings.append(jb.WARN_PIT_UNIVERSE)
         warnings.append(WARN_CORE)
+        if explore:
+            warnings.append(WARN_EXPLORE)
         if risk_every == "month":
             warnings.append(WARN_RISK_MONTHLY)
         if years != DEFAULT_YEARS:
@@ -215,6 +236,7 @@ def run_core(
         results: dict[str, bt.BacktestResult] = {}
         기록: dict[str, list[cs.DayLog]] = {}  # 변형 → 하루 기록(결정 단위 판정, 조각 1e)
         시간: dict[str, float] = {}
+        종목수: dict[str, int] = {}
         for i, variant in enumerate(variants):
             try:
                 db.note_progress(client, batch_id, {"done": i, "total": len(variants) + 1, "current": variant})
@@ -226,13 +248,14 @@ def run_core(
             results[variant] = bt.simulate(prices, dates, dates, strategy, costs, has_delisted=delisted,
                                            turnover=turnover, dividends_included=False)  # fmt: skip
             기록[variant] = strategy.log
+            종목수[variant] = strategy.v.top_n  # 위원회 변형은 헌장 top_n(전략이 덮은 값)
             시간[variant] = round(time.perf_counter() - t1, 1)
             print(f"  {variant:8s} 최종 {results[variant].curve[-1][1]:.3f}  ({시간[variant]:.0f}초)", flush=True)
 
         # 초과 CAGR·이긴 달의 기준 — 월 백테스트와 같은 유니버스 동일가중(월 리밸런스). 다섯 행만 싣는다
         벤치 = bt.simulate(
             prices, dates, bt.month_starts(dates),
-            jb.make_strategy("benchmark", universe, snapshots, cs.VARIANTS[variants[0]].top_n, {}, [], eligible_at),
+            jb.make_strategy("benchmark", universe, snapshots, cs.variant_spec(variants[0]).top_n, {}, [], eligible_at),
             costs, has_delisted=delisted, turnover=turnover,
         )  # fmt: skip
         무위험 = jb.risk_free_with_warning(client, country, warnings)
@@ -248,15 +271,18 @@ def run_core(
         try:
             벤치월 = luck.monthly_returns(벤치.curve)
             운 = luck.judge({v: luck.excess_series(luck.monthly_returns(r.curve), 벤치월) for v, r in results.items()},
-                           n_floor=jb.REGISTERED_TRIALS)  # fmt: skip
+                           n_floor=explore_trial_floor() if explore else jb.REGISTERED_TRIALS)  # fmt: skip
             # 결정 단위 — 무작위 대조 분위(가상모의투자 가상 대조와 같은 함수)·관문과 같은 잣대·판 뒤(읽기 0)
             종가 = ce.Closes(prices)
             코스피 = indexes.get(cb.BENCH_INDEX) or {}
             for v in results:
                 증거[v] = ce.evidence(기록[v], 종가, eligible_at, 코스피) | {
                     "gate": ce.gate_evidence(기록[v], 종가), "after_sell": ce.after_sell(기록[v], 종가, 코스피)}
-            짝 = ce.pairs(증거)
-            판정 = ce.verdict(증거, 짝.get("core_h-core_g"))
+            if explore:
+                판정 = "탐색 실행 — 짝 판정 없음(funnel.md 1장 0단계는 거르기만)"
+            else:
+                짝 = ce.pairs(증거)
+                판정 = ce.verdict(증거, 짝.get("core_h-core_g"))
         except Exception as e:  # noqa: BLE001
             log.exception("핵심 H 운 판정·결정 단위 판정 실패")
             warnings.append(f"운 판정·결정 단위 판정 실패: {type(e).__name__}: {str(e)[:120]}")
@@ -267,10 +293,10 @@ def run_core(
             반[variant] = split_half(result.curve)
             e = 증거.get(variant) or {}
             extra = {"split_half": 반[variant], "benchmark": BENCHMARK_NOTE, "risk_every": risk_every,
-                     "account": cs.VARIANTS[variant].account,
+                     "account": cs.variant_spec(variant).account,
                      "evidence": {k: e.get(k) for k in ("buys", "scored", "no_control", "days", "n_blocks", "mean",
                                                         "se", "lower", "gate", "after_sell")}}  # fmt: skip
-            jb.store_run(client, market, variant, result, summary, cs.VARIANTS[variant].top_n, group_id, warnings,
+            jb.store_run(client, market, variant, result, summary, 종목수[variant], group_id, warnings,
                          now, 운.get(variant), rebalance=REBALANCE, extra=extra)  # fmt: skip
             mt = summary.metrics
             앞, 뒤 = 반[variant].get("first", {}), 반[variant].get("second", {})
@@ -282,14 +308,16 @@ def run_core(
 
         # H 가중 대 동일가중 대조(25.1538, 31회차 P1) — 나눠 읽은 하루 재료와 메모리 원장으로, 읽기 0. 진단이 깨져도
         # 변형 결과는 이미 저장됐으니 실행을 죽이지 않고 기록에 남긴다
-        try:
-            eq_days = [(dv.day, *heq.day_sets(dv, market_.top_n)) for dv in shared.views()]
-            성과 = {(r.decided_on, r.stock_id): r.ret_20d - r.bench_20d for r in market_.ledger.rows
-                    if r.ret_20d is not None and r.bench_20d is not None}  # fmt: skip
-            holding_eq: dict[str, Any] = heq.summarize(eq_days, 성과)
-        except Exception as e:  # noqa: BLE001
-            log.exception("H 가중 대조 진단 실패")
-            holding_eq = {"error": str(e)[:200]}
+        holding_eq: dict[str, Any] = {"skipped": "탐색 실행 — H 진단 없음"}
+        if not explore:
+            try:
+                eq_days = [(dv.day, *heq.day_sets(dv, market_.top_n)) for dv in shared.views()]
+                성과 = {(r.decided_on, r.stock_id): r.ret_20d - r.bench_20d for r in market_.ledger.rows
+                        if r.ret_20d is not None and r.bench_20d is not None}  # fmt: skip
+                holding_eq = heq.summarize(eq_days, 성과)
+            except Exception as e:  # noqa: BLE001
+                log.exception("H 가중 대조 진단 실패")
+                holding_eq = {"error": str(e)[:200]}
         print(f"  H 가중 대 동일가중: {holding_eq}")
         # 같은 로트 청산 대조·하루 손실 관문 빈도(25.1552, 32회차 P1·P4) — core_h 하루 기록·종가·지수로, 읽기 0.
         # 깨져도 실행을 죽이지 않는다
@@ -315,7 +343,8 @@ def run_core(
             step_log={
                 "group_id": group_id, "strategies": len(results), "rebalance": REBALANCE, "rebalances": 실제_리밸런스,
                 "split_half": 반, "stocks": len(ids), "dates": len(dates), "warnings": warnings,
-                "params": {"years": years, "risk_every": risk_every, "variants": list(variants),
+                "params": {"years": years, "risk_every": risk_every, "variants": list(variants), "explore": explore,
+                           "trial_floor": explore_trial_floor() if explore else jb.REGISTERED_TRIALS,
                            "trigger": os.environ.get("BACKTEST_TRIGGER") or None,
                            "sha": (os.environ.get("GITHUB_SHA") or "")[:12] or None},
                 # 실측 — 시간 한도 120분 안인지 다음 실행 전에 본다(25.1534)
@@ -345,9 +374,11 @@ def main() -> int:
     parser.add_argument("--risk-every", dest="risk_every", choices=list(cb.RISK_EVERY), default=DEFAULT_RISK_EVERY,
                         help="팩터 점수 리스크 지표 주기 — week(기본, 예전 주기와 같은 값) · month(한도가 모자랄 때)")
     parser.add_argument("--force", action="store_true", help="읽기 예산이 모자라도 강행")
+    parser.add_argument("--explore", action="store_true",
+                        help="탐색 변형(EXPLORE_VARIANTS)을 backtest_explore 로 — 전략 깔때기 0단계(docs/funnel.md)")
     args = parser.parse_args()
     logging.basicConfig(level=config.SETTINGS.log_level, format="%(asctime)s %(levelname)s %(name)s | %(message)s")
-    return run_core(args.market, args.years, risk_every=args.risk_every, force=args.force)
+    return run_core(args.market, args.years, risk_every=args.risk_every, force=args.force, explore=args.explore)
 
 
 if __name__ == "__main__":

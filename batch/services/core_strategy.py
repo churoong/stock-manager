@@ -67,6 +67,19 @@ EXPLORE_VARIANTS: dict[str, Variant] = {
     "core_e": Variant("E", "core", "tranche", 10, "committee"),
 }
 
+
+
+def variant_spec(name: str) -> Variant:
+    """변형 이름 → 칸(핵심 판정 `VARIANTS` 또는 탐색 `EXPLORE_VARIANTS`).
+
+    위원회 변형의 `top_n` 은 헌장이 덮기 전 값이다
+    """
+    v = VARIANTS.get(name) or EXPLORE_VARIANTS.get(name)
+    if v is None:
+        raise ValueError(f"모르는 변형 {name} — {sorted({*VARIANTS, *EXPLORE_VARIANTS})}")
+    return v
+
+
 #: 비중(자본 1)을 운영 함수가 먹는 원화 금액으로 바꾸는 명목 자본. 크게 잡아 정수 주 내림이 비중에 1e-6 아래로만
 #: 남는다 — 운영의 정수 주·최소 주문 금액(작은 계좌에서 비싼 종목을 못 사는 일)은 재현하지 않는다(알고 둔 차이)
 NOTIONAL_EQUITY = 1e12
@@ -260,9 +273,7 @@ class CoreStrategy:
     ) -> None:  # fmt: skip
         from batch.jobs import paper as jp
 
-        v = VARIANTS.get(variant) or EXPLORE_VARIANTS.get(variant)
-        if v is None:
-            raise ValueError(f"모르는 변형 {variant} — {sorted({*VARIANTS, *EXPLORE_VARIANTS})}")
+        v = variant_spec(variant)
         self.charter: dict[str, Any] | None = None
         if v.selection == "committee":
             if v.account not in market.charters:

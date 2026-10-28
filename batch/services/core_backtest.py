@@ -616,6 +616,7 @@ class SharedMarket:
         m = shared.market
         self.country, self.universe = m.country, m.universe
         self.max_weight_per_stock, self.targets = m.max_weight_per_stock, m.targets
+        self.charters = m.charters  # 위원회 탐색 변형(D·E)이 헌장 top_n·회의를 읽는다(25.1904·1906)
         self._last: tuple[str, str] | None = None  # (cutoff, 결정일)
         self._dv: DayView | None = None
 
