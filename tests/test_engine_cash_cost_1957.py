@@ -94,3 +94,15 @@ def test_매도_대금과_거래세도_현금에서() -> None:
     자본 = dict(r.curve)[날[2]]
     assert 자본 == pytest.approx(0.9992) and 셋.weights[1] * 자본 == pytest.approx(0.4)
 
+
+def test_현금이_조금_있지만_비용보다_적은_날() -> None:
+    """25.1962 (25.1961 교차검증 [권고]) — Σ목표 0.9995(현금 0.0005 > 0) 인데 비용 0.0009995(회전율 0.49975 × 0.002)가 더 크다 →
+    대체 길. 남음 = 1 − 0.9995 + 0.5995 + 0.4 × 49/50 = 0.992 — 남은 현금 0.0005 가 든다(Σ목표 = 1 인 시험은 이 항이 0 이라
+    `1 − Σ목표` 를 빼도 지나갔다). 자본 = (1 − 0.0009995) × 0.992"""
+    r = _돌림({1: bt.LedgerOrders(buys={1: 0.5995}, limits={2: ((0.4, 50.0),)})},
+              {1: [100.0, 100.0, 100.0, 100.0], 2: [50.0, 49.0, 49.0, 49.0]})  # fmt: skip
+    reb = r.rebalances[1]
+    assert reb.cost == pytest.approx(0.0009995)
+    assert dict(r.curve)[날[1]] == pytest.approx((1 - 0.0009995) * 0.992)
+    assert reb.weights[1] == pytest.approx(0.5995 / 0.992) and reb.weights[2] == pytest.approx(0.392 / 0.992)
+
