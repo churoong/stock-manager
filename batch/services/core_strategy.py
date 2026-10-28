@@ -208,7 +208,9 @@ class _DictRows(_Rows):
 _FIN_SQL_HEAD = ("SELECT fiscal_year, operating_income, report_date, currency, period_days FROM financials"
                  " WHERE stock_id = ?")  # fmt: skip
 _UNI_SQL_HEAD = "SELECT u.included, u.exclude_reason, u.snapshot_date FROM universe_members u WHERE u.stock_id = ?"
-_UNI_SINCE_SQL_HEAD = "SELECT MAX(included) FROM universe_members WHERE stock_id = ? AND snapshot_date >= COALESCE("
+#: 운영 글은 "… AND snapshot_date >= COALESCE(" 로 이어진다 — 괄호가 열린 조각이면 SQL 그물(`test_sql_schema`)이 못 보는
+#: 질의로 세어(25.1935) 완결된 앞머리까지만 맞춘다(같은 표에서 MAX(included) 를 읽는 운영 질의는 이것 하나)
+_UNI_SINCE_SQL_HEAD = "SELECT MAX(included) FROM universe_members WHERE stock_id = ?"
 _SENTI_SQL_HEAD = "SELECT sentiment, delta_7d, negative_count_7d, as_of_date FROM sentiment_scores WHERE stock_id = ?"
 _SCORE_ROW_SQL_HEAD = ("SELECT weights_json, calc_version, sentiment_weight_used, total_score, factor_scores,"
                        " sentiment_score FROM scores WHERE stock_id = ? AND as_of_date = ?")  # fmt: skip
