@@ -2082,7 +2082,7 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
             scheduled_for=예약,
         )
         지연 = (
-            int((datetime.now(UTC) - datetime.fromisoformat(예약)).total_seconds()) if 예약 else None
+            max(0, int((datetime.now(UTC) - datetime.fromisoformat(예약)).total_seconds())) if 예약 else None  # 25.1857
         )
 
         step_log: dict[str, Any] = {"decision": decision.reason}

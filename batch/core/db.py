@@ -454,7 +454,9 @@ def start_batch_run(
     if scheduled_for:
         try:
             planned = datetime.fromisoformat(scheduled_for)
-            delay = int((datetime.now(UTC) - planned).total_seconds())
+            # 예약보다 일찍 온 실행은 지연 0 (25.1857, 결함 루프) — 겨울엔 미국 첫 cron(12:27 UTC)이 예약(08:27 ET =
+            # 13:27 UTC)보다 한 시간 일러, Actions 가 조금 늦게 와 정식 실행이 되면 "지연 -32분" 이 적히고 보였다
+            delay = max(0, int((datetime.now(UTC) - planned).total_seconds()))
         except ValueError:
             delay = None
 
