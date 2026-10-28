@@ -341,7 +341,12 @@ def test_옛_자리_신호가_나온_날만_닿음() -> None:
     from batch.services import desk
 
     p = {"accounts": {"R2": {"substitute_overlap": {"1": [8, 27]}}}}
-    assert not [x for x in desk.checks(halted=False, paper=p, broker=None, recon_bad=[], warnings=0) if "옛 대체" in x["text"]]
+    # 장부 상태만 있는 날은 상황실이 아무 줄도 더하지 않는다 — 문구에 묶이지 않게 빈 기록과 견준다(25.1933: 예전 거르기
+    # 글 "옛 대체" 가 25.1932 문구에 없어 이 단언이 헛돌았다)
+    def 할일(paper: dict) -> list:
+        return desk.checks(halted=False, paper=paper, broker=None, recon_bad=[], warnings=0)
+
+    assert 할일(p) == 할일({"accounts": {"R2": {}}})
     p["accounts"]["R2"]["substitute_overlap_hit"] = {"1": [8]}
     assert [x["level"] for x in desk.checks(halted=False, paper=p, broker=None, recon_bad=[], warnings=0)
             if "옛 자리 신호" in x["text"]] == ["normal"]

@@ -1015,7 +1015,8 @@ def checks(
             # (해 없는 날도 켜진다)
             # 내부 번호를 싣지 않는다 — 사람이 못 읽는다(25.1932). 자리·종목은 실행 기록에 있다
             n = sum(len(v) for v in (a["substitute_overlap_hit"] or {}).values())
-            글 = f"가상 {nm} 무작위 대체의 옛 자리 신호가 다시 나옴({n}건) — 무작위 규칙 판 올림 앞당김 검토"
+            # 25.1933 — "무작위" 가 세 번 겹치던 글을 줄임
+            글 = f"가상 {nm} 대체 종목의 옛 자리 신호가 다시 나옴({n}건) — 규칙 판 올림 앞당김 검토"
             out.append({"level": "normal", "text": 글})
         if a.get("step_error") and not str(p.get("error") or "").startswith(f"가상 {aid} 계좌 단계 실패"):
             # 계좌 단계에서 가둔 예외(25.1920·25.1922) — 다른 계좌는 돌았다. 주문을 적은 뒤에 났을 수 있다.
