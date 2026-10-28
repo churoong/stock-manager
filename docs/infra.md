@@ -2886,6 +2886,7 @@ SQL read operations are forbidden (reads are blocked, ...)
 | 25.1836 | 25.1835 교차검증 [필수] — 토큰 오류까지 순간 한도로 쉬었다·쉼 알림이 실패 알림 표시를 썼다 |
 | 25.1837 | 25.1836 교차검증 [필수] — 새 하루 한 번 표시 이름이 종목별 순간 거부 표시와 같아 서로 덮었다 |
 | 25.1838 | 돌연변이 점검 목록에 KIS모의투자 장중 감시가 없었다 — 셋을 더함 |
+| 25.1839 | 국내 감성 모델 판이 고정도 기록도 없었다 — 받은 판을 기사 행·실행 기록에 |
 
 ### 25.1 왜 D1 인가
 
@@ -40311,3 +40312,17 @@ docs/loops.md L4 문을 "18개 중 잡힘 18" 로.
 **되돌리기 확인**: 세 돌연변이 각각이 위 시험을 깨뜨림(`--only` 로 셋 다 "잡힘 1"). 목록 원문이 파일에 한 번씩 있는지는 `test_mutation_catalog_1743.py` 가 본다(통과).
 
 **남긴 것**: 이 파일의 목록은 HEAD 부터 `ruff format` 꼴이 아니다(줄 맞춤 목록 — 전체 검사는 `ruff check` 만 본다). 그대로 둔다.
+
+### 25.1839 국내 감성 모델 판이 고정도 기록도 없었다 — 받은 판을 기사 행·실행 기록에
+
+**계기**: 오늘(10-28) 국내 뉴스 감성 채점 운영 출력(HF 요청 로그)을 읽다 봤다 — `AutoTokenizer/AutoModelForSequenceClassification.from_pretrained("amphora/KorFinASC-XLM-RoBERTa")` 가 **리비전을 고정하지 않는다**. 로그 순서: `main` 의 config·tokenizer(커밋 `abf064de8f46…` 로 풀림) → `main` 에 `model.safetensors` 없음(404) → 토론 목록·`refs/pr/1` → **변환 봇 PR `refs/pr/1` 의 `model.safetensors`** 를 받아 가중치로 씀. transformers 5.17 `auto_conversion` 이 PR 작성자가 `SFconvertbot` 인지 보긴 하지만, 저장소 주인이 `main` 을 바꾸거나 PR 이 바뀌면 **감성 점수가 소리 없이 달라지고 어느 판으로 매겼는지 기록이 없다**. 기사 행 `method_version` 은 "모델 이름 + transformers 판" 뿐이었다.
+
+**왜 바로 고정하지 않나**: `revision=<main sha>` 로 고정하면 transformers 5.17 은 `revision == "main"` 일 때만 자동 변환 PR 을 찾으므로(`modeling_utils.py` 690행, 휠 소스로 확인) `use_safetensors` 기본 경로에서 "model.safetensors 가 없다" 로 **로드가 실패**한다. PR 커밋 sha 로 고정하면 되지만 그 sha 를 여기서 알 수 없다(HF 는 이 환경에서 프록시 403, 10월엔 손 실행 자제).
+
+**고친 것**: `sentiment.hf_cache_refs(repo)` — HF 캐시의 `refs/` 파일(그 실행이 풀어 쓴 참조 → 커밋 sha)을 읽는다. 국내 채점 기사 행 `method_version` 에 `main@<12자> refs/pr/1@<12자>` 를 붙이고, 실행 기록 `step_log.model_refs`, 운영 출력 "모델 판" 줄로 남긴다. 못 읽으면 빈 값(채점은 막지 않는다). 국내는 `현재판` 이 빈 값이라 이 글이 바뀌어도 이미 매긴 기사를 다시 매기지 않는다(미국 VADER 만 판이 바뀌면 다시 매김). docs/sentiment.md 1장 "모델 판" 행.
+
+**이것이 매매 전략·검증을 낫게 하나**: ② 검증 — 감성 축은 종합 점수에 10% 로 들어가 신호·가상모의투자 결정의 재료다. 점수가 모델 교체로 달라진 날을 기록에서 가를 수 있어야 성과 분해가 "전략이 바뀐 것" 과 "재료가 바뀐 것" 을 섞지 않는다. 데이터 행마다 출처를 남긴다는 CLAUDE.md 규칙의 감성 쪽 빈칸.
+
+**되돌리기 확인**: `method_version` 에서 `refs_text(모델판)` 을 빼면 `test_국내_채점은_모델_판을_기사_행과_실행_기록에_남긴다` 가 깨지고 되돌림.
+
+**남긴 것** `[확인필요]`: 10-29 01:4x UTC 국내 감성 채점 운영 출력의 "모델 판" 에서 `refs/pr/1` sha 를 읽어 두 `from_pretrained` 에 `revision=<그 sha>` 로 고정(handoff). torch 는 CPU 인덱스에서 판 고정 없이 설치된다(워크플로) — 수치 차이는 작아 그대로 둔다.

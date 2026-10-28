@@ -205,6 +205,33 @@ def korfinasc_scorer(batch_size: int = 32):
     return score
 
 
+def hf_cache_refs(repo: str, cache: str | None = None) -> dict[str, str]:
+    """HF 캐시에 적힌 그 모델 저장소의 참조 → 커밋 sha (docs/infra.md 25.1839). 못 읽으면 빈 dict.
+
+    `from_pretrained` 는 리비전을 고정하지 않아 **그날 `main`** 의 설정·토크나이저와, `main` 에 safetensors 가 없어
+    transformers 가 찾아 쓰는 **변환 봇 PR(`refs/pr/N`)** 의 가중치를 받는다(2026-10-28 운영 로그). 저장소 주인이 모델을
+    바꾸면 감성 점수가 소리 없이 달라진다 — 어느 판으로 매겼는지 기사 행·실행 기록에 남긴다. 고정은 PR 커밋 sha 를 안
+    뒤에 한다(`main` sha 로 고정하면 자동 변환이 돌지 않아 로드가 실패한다 — transformers 5.17 `revision == "main"`).
+    """
+    try:
+        from pathlib import Path
+
+        if cache is None:
+            from huggingface_hub import constants
+
+            cache = str(constants.HF_HUB_CACHE)
+        뿌리 = Path(cache) / ("models--" + repo.replace("/", "--")) / "refs"
+        return {p.relative_to(뿌리).as_posix(): p.read_text(encoding="utf-8").strip()[:40]
+                for p in sorted(뿌리.rglob("*")) if p.is_file()}  # fmt: skip
+    except Exception:  # noqa: BLE001 — 기록용이라 채점을 막지 않는다
+        return {}
+
+
+def refs_text(refs: dict[str, str]) -> str:
+    """`main@abf064de8f46 refs/pr/1@…` — 기사 행 `method_version` 에 붙는 짧은 꼴(sha 앞 12자)"""
+    return " ".join(f"{k}@{v[:12]}" for k, v in sorted(refs.items()))
+
+
 def aspect_target(title: str, name: str, aliases: list[str]) -> str:
     """국내 채점 모델(KorFinASC)에 넘길 **대상 이름** — 제목에 실제로 나온 이름 (docs/infra.md 25.938, 감사).
 
@@ -286,6 +313,7 @@ def run(market: str, as_of: str | None = None, score: bool | None = None) -> int
         ).dicts() if score else []
         scored = 0
         못_매김 = 0
+        모델판: dict[str, str] = {}
         if pending:
             from importlib.metadata import version
 
@@ -299,7 +327,11 @@ def run(market: str, as_of: str | None = None, score: bool | None = None) -> int
                     (str(r["title"]), aspect_target(str(r["title"]), str(r["name"]), 별칭.get(int(r["stock_id"]), [])))
                     for r in pending
                 ])
-                method_version = f"{KORFINASC_MODEL} transformers {version('transformers')}"
+                # 받은 모델 판을 남긴다(25.1839) — 국내는 `현재판` 이 빈 값이라 이 글이 바뀌어도 다시 매기지 않는다
+                모델판 = hf_cache_refs(KORFINASC_MODEL)
+                method_version = " ".join(
+                    x for x in (KORFINASC_MODEL, refs_text(모델판), f"transformers {version('transformers')}") if x
+                )
             statements: list[tuple[str, list[Any]]] = []
             for row, (value, parts) in zip(pending, results, strict=True):
                 # **NaN·inf 는 점수가 아니다** (docs/infra.md 25.1097, 감사 재현) — `max(-1, min(1, nan))` 이 +1.0 이라
@@ -388,9 +420,12 @@ def run(market: str, as_of: str | None = None, score: bool | None = None) -> int
         step = {"scored": scored, "stocks": len(rows), "with_score": with_score, "as_of": as_of,
                 "unscored_articles": sum(미채점.values()), "dropped_for_unscored": 덜_채점,  # 25.834
                 "non_finite_scores": 못_매김,  # 25.1097
+                "model_refs": 모델판,  # 25.1839 — 국내 채점 모델의 받은 판(HF 캐시 참조)
                 "effective_n": st.effective_n_summary(유효수)}  # 25.873 — 기록만
         db.finish_batch_run(client, run_id, status="success", step_log=step)
         print(f"{market} 기사 채점 {scored}건, 종목 {len(rows)}개 집계 (점수 있음 {with_score}, 기사 5건 미만은 NULL)")
+        if 모델판:
+            print("  모델 판: " + " ".join(f"{k}@{v}" for k, v in sorted(모델판.items())))  # 25.1839 — 고정할 sha 40자
         return 0
     finally:
         client.close()
