@@ -1,4 +1,4 @@
-// 스윙 계좌 S 의 화면 글 (docs/paper.md 16.3.1, docs/infra.md 25.1872) — 계좌 행은 11월 마이그레이션, 글은 먼저
+// 스윙 계좌 S 의 화면 글 (docs/paper.md 16.3.1, docs/infra.md 25.1872) — 계좌 행은 0092(2026-10-29 개설), 글은 먼저 들어갔다
 import { describe, expect, it } from "vitest";
 
 import { ruleText } from "@/lib/paper";

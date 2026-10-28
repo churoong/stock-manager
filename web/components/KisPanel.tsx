@@ -112,7 +112,7 @@ function LiveExecutions({ live }: { live: LiveView }) {
 /**
  * 배치가 적은 KIS 주문 기록 — 20건씩 쪽으로(2026-10-23 사용자 지시 "거래내역 탭이 점점 길어져", 25.1767). 주문 시각은 배치가 KIS 에
  * 보낸 시각(`sent_at`, 한국 시각)이다. **체결 시각은 아직 없다** — KIS 일별 체결 조회는 주문 단위 합계라 체결 시각 칸이 있는지
- * `[확인필요]`이고, 저장하려면 마이그레이션이 필요해 11월에 한다(docs/paper.md 15.7)
+ * `[확인필요]`이고, 저장하려면 마이그레이션이 필요하다(docs/paper.md 15.7 — 10월 금지는 25.1896 에 지워 이제 막는 까닭이 아니다)
  */
 function KisTrades({ orders, cur }: { orders: KisOrder[]; cur: "KRW" | "USD" }) {
   const [page, setPage] = useState(0);

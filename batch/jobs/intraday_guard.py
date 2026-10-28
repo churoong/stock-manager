@@ -105,7 +105,7 @@ RETRY_MINE_SQL = "SELECT id FROM paper_broker_orders WHERE id = ? AND status = '
 SUSPECT_KEY = "kis_guard_suspect_alerted"
 #: 같은 날 아침 정리 매도 줄과 겹쳐 장중 매도를 못 낸 종목(25.1772, 25.1771 교차검증 [필수]) — 부분 유일 색인
 #: `idx_paper_broker_cleanup`(broker, trade_date, stock_id, side; 증권사 주문 id 없음)이 둘째 줄을 막는다.
-#: 색인에 사유를 넣는 마이그레이션(11월)까지는 막지 못하고 알린다
+#: 색인에 사유를 넣는 마이그레이션(아직 안 함 — 10월 금지는 25.1896 에 지움)까지는 막지 못하고 알린다
 OTHER_ROW_KEY = "kis_guard_other_row_alerted"
 #: 순간 거부(초당 한도·토큰)를 알린 종목 — 다시 보내는 동안 10분마다 같은 거부 알림이 가지 않게(25.1772)
 TRANSIENT_KEY = "kis_guard_transient_alerted"
