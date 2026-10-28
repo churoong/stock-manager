@@ -37,3 +37,10 @@ def test_모의_입금_장부는_복구가_건너뛴_행을_크게_알린다() -
     assert "paper_cash_flows" in restore_backup.사람이_넣은_표
     글 = restore_backup.건너뜀_알림({"paper_cash_flows": 3}, {"paper_cash_flows": 2})
     assert 글.startswith("⚠") and "paper_cash_flows" in 글
+
+
+def test_다시_만들_수_없는_표도_건너뛰면_크게_알린다() -> None:
+    """25.1834 (25.1832·25.1833 교차검증 [참고]) — 판 이력·KIS 장부의 번호 충돌이 한 줄로만 지나갔다"""
+    글 = restore_backup.건너뜀_알림({"paper_rule_versions": 2}, {"paper_rule_versions": 1})
+    assert 글.startswith("⚠") and "paper_rule_versions" in 글
+    assert not restore_backup.건너뜀_알림({"paper_fills": 2}, {"paper_fills": 1}).startswith("⚠")

@@ -134,6 +134,10 @@ def test_새_편입_뒤_단계는_진도_문을_다시_보지_않는다() -> Non
         # 진도선만 빼고 월 상한은 남긴다 (25.1832, 교차검증 [필수] — 문을 통째로 끄면 상한까지 꺼졌다)
         assert str(단계.get("env", {}).get(entry.READ_NO_PACE_ENV)) == "1", (파일, 명령)
         assert 글["jobs"]["run"]["env"][entry.READ_ESTIMATE_ENV], 파일
+        if 파일 == "financials.yml":  # 잡의 추정치를 그대로 물려받는다 — 비우면 월 상한까지 꺼진다(25.1832 [필수], 25.1834)
+            assert entry.READ_ESTIMATE_ENV not in 단계.get("env", {}), (파일, 명령)
+        else:
+            assert 단계["env"][entry.READ_ESTIMATE_ENV], (파일, 명령)
     # 새 편입 지표는 최악(전체 재계산)을 주간 지표와 같은 추정치로 상한 검사한다 (25.1833)
     유니버스 = yaml.safe_load((WORKFLOWS / "universe.yml").read_text(encoding="utf-8"))
     지표 = yaml.safe_load((WORKFLOWS / "metrics.yml").read_text(encoding="utf-8"))
