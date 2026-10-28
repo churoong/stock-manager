@@ -78,7 +78,9 @@ def test_채점하고_종목별로_집계한다(monkeypatch: pytest.MonkeyPatch)
     assert 빈날 == (None, 0, None)
 
 
-def test_국내는_일일_배치에서_채점하지_않고_집계만(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_국내는_일일_배치에서_채점하지_않고_집계만(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """국내 모델은 무거워 sentiment-kr.yml 이 따로 채점한다. 일일 배치(score=None)는 채점된 것만 집계한다."""
     from batch.core import db
 
@@ -110,9 +112,13 @@ def test_국내는_일일_배치에서_채점하지_않고_집계만(monkeypatch
     assert job.run("KR", "2026-09-17") == 0
     row = c.execute("SELECT sentiment, article_count, method FROM sentiment_scores").fetchone()
     assert row[0] == pytest.approx(90.0) and row[1] == 5 and row[2] == "korfinasc"
+    # 25.1843 — 미채점 1/6 은 문턱(20%) 아래라 값은 내고, 출력 줄은 건수를 그대로 말한다
+    assert "창 안 미채점 기사 1건 — 그 몫이 커 감성을 비운 종목 0개" in capsys.readouterr().out
 
 
-def test_채점_안_된_기사가_많으면_값을_내지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_채점_안_된_기사가_많으면_값을_내지_않는다(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """국내 채점이 멈춘 날 옛 기사로만 낸 값이 오늘 감성이 됐다 (docs/infra.md 25.834, 감사)."""
     from batch.core import db
 
@@ -146,6 +152,8 @@ def test_채점_안_된_기사가_많으면_값을_내지_않는다(monkeypatch:
     assert row[0] is None and row[1] == 5 and row[2] is None and row[3] is None
     log = c.execute("SELECT step_log FROM batch_runs ORDER BY id DESC LIMIT 1").fetchone()[0]
     assert '"dropped_for_unscored": 1' in log
+    # 운영 출력 줄 — 25.1840 이 듣는지 DB 조회 없이 본다(25.1843, 25.1842 교차검증 [권고])
+    assert "창 안 미채점 기사 3건 — 그 몫이 커 감성을 비운 종목 1개" in capsys.readouterr().out
     # 다른 방식(method)으로 채점된 기사는 국내 방식으로는 미채점이다
     c.execute("INSERT INTO article_sentiments (news_id, score, method, created_at) VALUES (20, 0.1, 'vader', 't')")
     assert job.run("KR", "2026-09-17") == 0

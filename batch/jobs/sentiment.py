@@ -293,8 +293,9 @@ def run(market: str, as_of: str | None = None, score: bool | None = None) -> int
     client = TursoClient()
     try:
         db.apply_migrations(client)
-        # 직전 거래일 (docs/infra.md 25.234·25.237). UTC 오늘이면 월요일 07:40 KST 의 sentiment-kr 이 **일요일** 행을
-        # 써서, 아침 배치(기준 금요일)가 덮지 못하는 행이 남았고 스크리너·매도 플래그는 그것을 가장 새 감성으로 읽었다
+        # 직전 거래일 (docs/infra.md 25.234·25.237). UTC 오늘이면 월요일 아침(지금 03:40 KST = 일 18:40 UTC, 25.1840)
+        # sentiment-kr 이 **일요일** 행을 써서, 아침 배치(기준 금요일)가 덮지 못하는 행이 남았고 스크리너·매도
+        # 플래그는 그것을 가장 새 감성으로 읽었다
         as_of = as_of or cal.default_as_of(market)
         run_id = db.start_batch_run(
             client, job_name=JOB_NAME if score else AGGREGATE_JOB_NAME, market=market, trade_date=as_of

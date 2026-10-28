@@ -44,6 +44,6 @@ def test_D1_읽기_문의_남은_작업_표도_같은_시각이다() -> None:
     gate = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
     spec.loader.exec_module(gate)  # type: ignore[union-attr]
     감성 = next(r for r in gate.LATER_TODAY if r[0] == "국내 감성 수집")
-    assert (감성[4], 감성[5]) == _cron("sentiment-kr.yml")
+    assert (감성[4], 감성[5]) == _cron("sentiment-kr.yml") and 감성[1] == (6, 0, 1, 2, 3)  # 일~목 UTC(월=0)
     # 18:40 과 22:40 사이(목 20:00 UTC)에는 감성이 이미 지나 남은 작업에 없다
     assert [이름 for 이름, _ in gate.later_today(datetime(2026, 10, 15, 20, 0, tzinfo=UTC))] == ["국내 일일 배치"]

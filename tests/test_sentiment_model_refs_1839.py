@@ -31,7 +31,9 @@ def test_캐시_참조를_읽고_없으면_빈_값(tmp_path: Path) -> None:
     assert job.hf_cache_refs(job.KORFINASC_MODEL, str(tmp_path / "없음")) == {}
 
 
-def test_국내_채점은_모델_판을_기사_행과_실행_기록에_남긴다(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_국내_채점은_모델_판을_기사_행과_실행_기록에_남긴다(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     from batch.core import db
 
     _캐시(tmp_path)
@@ -56,6 +58,9 @@ def test_국내_채점은_모델_판을_기사_행과_실행_기록에_남긴다
     assert 판 == (f"{job.KORFINASC_MODEL} main@abf064de8f46 refs/pr/1@1234567890ab transformers 5.17.0")
     기록 = json.loads(c.execute("SELECT step_log FROM batch_runs ORDER BY id DESC").fetchone()[0])
     assert 기록["model_refs"]["refs/pr/1"].startswith("1234567890ab")
+    출력 = capsys.readouterr().out
+    assert "모델 판: main@abf064de8f467cc872c78c5b845f179d787da6be refs/pr/1@" in 출력  # 고정할 sha 40자
+    assert "창 안 미채점" not in 출력  # 25.1843 — 다 채점된 날엔 미채점 줄이 없다
 
 
 def test_캐시를_읽다_실패해도_채점은_저장된다(
