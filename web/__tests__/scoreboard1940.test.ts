@@ -146,8 +146,14 @@ describe("판정판 안내 줄은 가리킬 곳이 있을 때만 (25.1942)", () 
     expect(elsewhereNote(["core_h"], 1, false)).not.toContain("비용 0");
     expect(elsewhereNote(["composite", "composite_no_cost"], 0, false)).not.toContain("읽기 전에");
     expect(elsewhereNote(["composite", "composite_no_cost"], 3, true)).toContain("다른 실행");
-    // 25.1943 — 물러났는데 결과 표가 없으면 없음, composite 만 있고 비용 0 사본이 없는 묶음(장기 문턱 비교)은 비용 문장 없음
+    // 25.1943 — 물러났는데 결과 표가 없으면 없음. composite 만 있고 비용 0 사본이 없는 꼴은 넓히기 변이(startsWith)를
+    // 잡는 가상의 경계다(25.1944 — only_long 묶음은 composite 도 없이 benchmark·long_q* 만 낸다). 실제 only_long 꼴도
     expect(elsewhereNote([], 0, true)).toBeNull();
     expect(elsewhereNote(["composite", "benchmark"], 0, false)).toBeNull();
+    expect(elsewhereNote(["benchmark", "long_q60", "long_q70"], 0, false)).toBeNull();
+    // 25.1944 — 물러난 문장은 경고·비용 0 줄을 가리키지 않는다(가리킬 곳이 있든 없든)
+    for (const [s, w] of [[["composite", "composite_no_cost"], 2], [["core_h"], 0]] as const) {
+      expect(elsewhereNote(s, w, true)).not.toMatch(/경고|비용 0/);
+    }
   });
 });

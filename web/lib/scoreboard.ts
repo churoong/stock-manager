@@ -182,7 +182,8 @@ export const ALWAYS_EMPTY_NOTE =
 /**
  * 판정판이 싣지 않는 경고·비용 몫을 어디서 보나(25.1941) — **그 자리가 화면에 있을 때만** 가리킨다(25.1942). 경고 띠는
  * 경고가 있을 때만 그려지고, "종합 점수 (비용 0)" 줄은 월 실행 묶음에만 있다. 물러난 판정판(다른 실행)이면 위 표와
- * 견주지 말라고 적는다. 가리킬 곳이 없으면 null
+ * 견주지 말라고 적는다(경고·비용 0 줄은 가리키지 않는다 — 다른 실행이라). 물러났어도 결과 표(전략)가 없으면 null(25.1943).
+ * 가리킬 곳이 없으면 null
  */
 export function elsewhereNote(strategies: readonly string[], warningCount: number, fallback: boolean): string | null {
   // 물러났으면 위 결과와 다른 실행 — 결과 표가 없으면(묶음 없음) 가리킬 곳이 없다(25.1943)
