@@ -689,6 +689,9 @@ def test_분할_매수_다음_차수는_신호_뒤_매수_횟수로_이어_본�
     assert job.next_tranche(mem, 1, today) == (None, None, None)  # type: ignore[arg-type]
     매수(2, "2026-09-11")
     assert job.next_tranche(mem, 1, today) == (95.0, 2, "2026-09-10")  # type: ignore[arg-type]
+    # 1차를 같은 날 두 체결로 나눠 적어도 한 차수다 (25.1844, 결함 루프 — 줄 수로 세어 "3차 90" 을 냈다)
+    매수(20, "2026-09-11")
+    assert job.next_tranche(mem, 1, today) == (95.0, 2, "2026-09-10")  # type: ignore[arg-type]
     매수(3, "2026-09-12")
     assert job.next_tranche(mem, 1, today) == (90.0, 3, "2026-09-10")  # type: ignore[arg-type]
     매수(4, "2026-09-13")

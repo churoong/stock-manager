@@ -467,7 +467,10 @@ def next_tranche(client: TursoClient, stock_id: int, today: date) -> tuple[float
     # 장기 2차(84,100)보다 16% 위에서 더 사게 했다. 매매 기록의 기간(`trades.horizon`)이 그날 계획에 없으면 예전 순서
     첫_기간 = str(매수줄[0][1]) if 매수줄[0][1] else None
     계획 = json.loads((기간별[기준일].get(첫_기간) if 첫_기간 else None) or 날별[기준일] or "[]")
-    산 = len(매수)
+    # **서로 다른 매수일 수**로 센다 (25.1844, 결함 루프) — 한 차수를 여러 체결로 나눠 두 줄로 입력하면 줄 수로 세어
+    # 2차를 건너뛰고 계획에 없는 "3차 (계획 3/3)" 를 알렸다. 한계: 같은 날 두 차수를 다 사면 하나로 덜 세고(다음 차수를
+    # 한 번 더 알림 — 보수 쪽), 한 차수를 여러 날에 걸쳐 사면 더 센다
+    산 = len({d[:10] for d in 매수})
     if 산 < 1 or 산 >= len(계획):
         return None, None, None
     다음 = 계획[산]
