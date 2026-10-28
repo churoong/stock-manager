@@ -78,6 +78,8 @@ const SELL_RULE_TEXT: Record<string, string> = {
   value: "손절·목표도달·재무악화·점검",
   momentum: "손절·기간초과·재무악화·점검·감성급락(목표에서 안 팖)",
   trend: "손절·기간초과 + 목표에 닿은 뒤 고점 대비 손절폭 하락 시(목표에서 안 팖)",
+  // 스윙 S (docs/paper.md 16.3.1, infra 25.1872) — 매도 플래그를 보지 않는다
+  swing_close: "종가가 진입 시가 대비 −3% 이하·+5% 이상이거나 10거래일째면 다음 장 시가(매도 플래그 무시)",
 };
 /** 투자위원회 헌장이 있는 계좌인가 — 지주사(H, selection weighted)의 charter_json 은 투표 회사 지문이라 위원회가 아니다 (25.1482) */
 export function hasCommittee(a: { charter_json?: string | null; selection?: string | null }): boolean {
@@ -96,7 +98,9 @@ export function ruleText(a: AccountRule): string {
     ? `${헌장.name ?? "투자사"} 위원회 가결(안건 ${헌장.agenda ?? "?"}개 중 최대 ${헌장.top_n ?? a.top_n ?? 5}종목)`
     : a.selection === "random"
       ? "무작위 대조(같은 자리·비중)"
-      : `점수 상위 ${a.top_n ?? 5}종목`;
+      : a.selection === "short"
+        ? `단기 신호만 점수 상위 ${a.top_n ?? 5}종목(든 종목은 더 사지 않음)`
+        : `점수 상위 ${a.top_n ?? 5}종목`;
   const 진입 = a.entry_rule === "open" ? "다음 장 시가에 한 번에" : "3회 분할 지정가";
   return `매수: ${고르기} · ${진입} — 매도: ${SELL_RULE_TEXT[a.sell_rule] ?? a.sell_rule}`;
 }

@@ -417,6 +417,7 @@ export function CompareCard({ data, desk }: { data: Data; desk?: DeskView | null
                   <td className="py-1 font-semibold">
                     {a.id}
                     {r?.young ? <span className="block text-[10px] font-normal text-amber-700 dark:text-amber-400">갓 엶 · {r.open}부터</span> : null}
+                    {r?.separate ? <span className="block text-[10px] font-normal text-sky-700 dark:text-sky-400">따로 잼 · {r.open}부터</span> : null}
                   </td>
                   <td className={`text-right ${tone(r?.window_pct)}`}>{deskPct(r?.window_pct)}</td>
                   <td className={`text-right ${tone(r?.vs_r_pp)}`}>{ppText(r?.vs_r_pp)}</td>

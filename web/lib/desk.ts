@@ -18,6 +18,8 @@ export interface DeskRow {
   since_open_pct: number; window_pct: number | null; vs_r_pp: number | null;
   /** 갓 연 계좌 — 제 개설일부터 잰 수익률·같은 구간 R (25.1503). 그 전 요약에는 없다 */
   young?: boolean;
+  /** 따로 재는 실험 계좌(스윙 S) — 공통 구간 밖, 제 개설일부터(25.1872). 그 전 요약에는 없다 */
+  separate?: boolean;
 }
 export interface DeskLeaderboard { window_start: string | null; control_pct?: number | null; rows: DeskRow[] }
 /** 판 이력 한 줄 (docs/desk.md 3장) — 그 판 첫 결정일 종가부터 다음 판 첫 결정일 종가까지(to 가 null 이면 지금 판, from '' 이면 계좌의 처음부터) */

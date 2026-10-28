@@ -36,6 +36,9 @@ SELL_RULES: dict[str, frozenset[str] | None] = {
 }
 #: 추세 익절(G)의 매도 사유 코드 — 매도 플래그(`sell_flags.evaluate`)가 아니라 모의 엔진이 낸다
 TRAIL_CODE = "추적손절"
+#: 따로 재는 실험 계좌 (docs/paper.md 16.3.1, 25.1872) — 상황실 순위표 공통 구간·챔피언 후보에 넣지 않고, 결정 원장
+#: 성과 채우기는 따로 한 바퀴(기존 계좌의 하루 상한을 나눠 쓰지 않게). 정의처는 여기 하나(`desk.SEPARATE_IDS`)
+SEPARATE_IDS = ("S",)
 #: 스윙(S)의 매도 규칙 이름과 `close_exit` 까닭 → 사유 코드 (16.3.1, 25.1871)
 SWING_RULE = "swing_close"
 SWING_CODES = {"stop": "스윙손절", "target": "스윙목표", "time": "스윙기한"}

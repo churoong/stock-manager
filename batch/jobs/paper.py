@@ -187,24 +187,28 @@ DOSSIER_INSERT_SQL = (
 #: 색인의 날짜 범위를 탄다
 PENDING_5D_SQL = (
     "SELECT id, stock_id, decided_on, ref_close, ref_date, ret_5d, ret_20d, ret_60d FROM paper_decisions"
-    " WHERE ret_60d IS NULL AND outcome_note IS NULL AND market = ? AND ret_5d IS NULL"
+    " WHERE ret_60d IS NULL AND outcome_note IS NULL AND market = ? {acct} AND ret_5d IS NULL"
     "   AND decided_on > ? AND decided_on <= ? ORDER BY decided_on DESC LIMIT ?"
 )
 PENDING_20D_SQL = (
     "SELECT id, stock_id, decided_on, ref_close, ref_date, ret_5d, ret_20d, ret_60d FROM paper_decisions"
-    " WHERE ret_60d IS NULL AND outcome_note IS NULL AND market = ? AND ret_20d IS NULL"
+    " WHERE ret_60d IS NULL AND outcome_note IS NULL AND market = ? {acct} AND ret_20d IS NULL"
     "   AND decided_on > ? AND decided_on <= ? ORDER BY decided_on DESC LIMIT ?"
 )
 PENDING_60D_SQL = (
     "SELECT id, stock_id, decided_on, ref_close, ref_date, ret_5d, ret_20d, ret_60d FROM paper_decisions"
-    " WHERE ret_60d IS NULL AND outcome_note IS NULL AND market = ?"
+    " WHERE ret_60d IS NULL AND outcome_note IS NULL AND market = ? {acct}"
     "   AND decided_on > ? AND decided_on <= ? ORDER BY decided_on DESC LIMIT ?"
 )
 PENDING_OLD_SQL = (
     "SELECT id, stock_id, decided_on, ref_close, ref_date, ret_5d, ret_20d, ret_60d FROM paper_decisions"
-    " WHERE ret_60d IS NULL AND outcome_note IS NULL AND market = ? AND decided_on <= ?"
+    " WHERE ret_60d IS NULL AND outcome_note IS NULL AND market = ? {acct} AND decided_on <= ?"
     " ORDER BY decided_on LIMIT ?"
 )
+#: 위 넷의 `{acct}` — 기존 계좌 바퀴와 따로 재는 실험 계좌(S) 바퀴(25.1872). 바퀴마다 창 상한이 따로라 S 의 결정이 기존
+#: 계좌(H 회사 가중치가 읽는 `ret_20d`)의 하루 몫을 나눠 쓰지 않는다. 계좌 id 는 코드 상수라 글로 넣는다(사용자 값 아님)
+_따로 = ", ".join(f"'{a}'" for a in pp.SEPARATE_IDS)
+OUTCOME_PASSES = (f"AND account_id NOT IN ({_따로})", f"AND account_id IN ({_따로})")
 #: 20 거래일 창의 구간 너비(달력일) — 28~56일 전. 그보다 묵었는데 20 이 빈 행은 시세가 끊긴 것이라 60 구간(84일)에서
 #: 다시 본다
 OUTCOME_20D_BAND_DAYS = 28
@@ -336,13 +340,13 @@ def fill_outcomes(client: Any, market: str, today: str, now: str, data_date: str
     rows: list[dict[str, Any]] = []
     본: set[Any] = set()
     가득: list[set[Any]] = []  # 상한에 닿은 구간의 경계 결정일(마지막으로 읽은 날) 행 id
-    for sql, args, 상한 in (
+    for 바퀴, (sql, args, 상한) in ((b, q) for b in OUTCOME_PASSES for q in (
         (PENDING_5D_SQL, [market, 기한[20], 기한[5]], OUTCOME_BATCH),
         (PENDING_20D_SQL, [market, 이십아래, 기한[20]], OUTCOME_BATCH),
         (PENDING_60D_SQL, [market, 포기날, 기한[60]], OUTCOME_BATCH),
         (PENDING_OLD_SQL, [market, 포기날], OUTCOME_OLD_BATCH),
-    ):
-        got = client.execute(sql, [*args, 상한]).dicts()
+    )):
+        got = client.execute(sql.format(acct=바퀴), [*args, 상한]).dicts()
         if got and len(got) >= 상한:
             경계 = str(got[-1]["decided_on"])
             가득.append({r["id"] for r in got if str(r["decided_on"]) == 경계})

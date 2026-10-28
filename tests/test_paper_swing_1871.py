@@ -159,3 +159,45 @@ def test_모르는_매도_규칙의_계좌는_그_계좌만_건너뛴다(monkeyp
     기록 = _하루(c, monkeypatch, "2026-10-14")
     assert 기록["accounts"]["Z"] == {"error": "모르는 매도 규칙 zzz"}
     assert 기록["accounts"]["B"]["orders"] >= 1
+
+
+def test_S_의_결정은_기존_계좌의_성과_채우기_몫을_나눠_쓰지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1872 (16.3.1 무변화 장치 ①) — 시장마다 창 하나에 하루 `OUTCOME_BATCH` 인 대기열을 S 가 나누면 밀린 날 H 회사
+    가중치가 읽는 `ret_20d` 가 늦었다. 바퀴를 둘로 — 상한을 2 로 줄이고 S 결정 3·B 결정 2 를 쌓아 본다"""
+    c = _계좌(("B",), s=True)
+    monkeypatch.setattr(job, "OUTCOME_BATCH", 2)
+    for aid, sid in (("S", 1), ("S", 3), ("S", 2), ("B", 1), ("B", 3)):
+        c.conn.execute(job.DECISION_INSERT_SQL, [aid, "KR", "2026-10-01", sid, "buy", "r", None, 10_000.0,
+                                                 "2026-10-01", "t", 1])  # fmt: skip
+    본: list[str] = []
+    원래 = c.execute
+
+    def 엿봄(sql, args=None):  # noqa: ANN001, ANN202
+        if "FROM paper_decisions" in sql and "ret_5d IS NULL" in sql and "outcome_note IS NULL" in sql:
+            for r in 원래(sql, args).rows:
+                본.append(c.conn.execute("SELECT account_id FROM paper_decisions WHERE id = ?", [r[0]]).fetchone()[0])
+        return 원래(sql, args)
+
+    monkeypatch.setattr(c, "execute", 엿봄)
+    job.fill_outcomes(c, "KR", "2026-10-28", "t", "2026-10-27")
+    assert 본.count("B") == 2  # S 가 셋이어도 B 의 두 줄은 모두 읽힌다(상한 2 를 S 와 나누지 않는다)
+    assert 본.count("S") == 2  # S 는 제 바퀴 상한 안에서
+
+
+def test_상황실은_S_를_공통_구간과_챔피언_후보에서_따로_둔다() -> None:
+    """25.1872 (16.3.1 무변화 장치 ②) — S 가 열리는 날 A~G 의 순위표 공통 구간 시작이 S 개설일로 밀리고, 챔피언 후보의
+    유의수준(α/도전자 수)이 S 하나만큼 빡빡해졌다"""
+    from batch.services import desk
+
+    날 = [f"2026-{m:02d}-{d:02d}" for m in (9, 10, 11) for d in range(1, 29)]
+    계열 = {a: [(d, 1 + i * 0.001) for i, d in enumerate(날)] for a in ("B", "H", "R1")}
+    계열["S"] = [(d, 1 + i * 0.002) for i, d in enumerate(날[40:])]  # 늦게 열고 20 평가를 넘김
+    표 = desk.leaderboard(계열)
+    assert 표["window_start"] == 날[0]  # S 개설일로 밀리지 않는다
+    s줄 = next(r for r in 표["rows"] if r["id"] == "S")
+    assert s줄["separate"] and not s줄["young"] and 표["rows"][-1]["id"] == "S"
+    assert s줄["window_pct"] == pytest.approx((계열["S"][-1][1] / 계열["S"][0][1] - 1) * 100)
+    assert all(not r["separate"] for r in 표["rows"] if r["id"] != "S")
+    assert [r["id"] for r in desk.champion(계열, "H")] == ["B"]  # S 는 도전자 수에 들지 않는다
+    assert desk.SEPARATE_IDS == pp.SEPARATE_IDS
+    assert desk.prereg("S", 1) is not None and desk.KIND["S"]

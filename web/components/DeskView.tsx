@@ -223,6 +223,7 @@ export default function DeskView() {
                       <td className="text-xs">
                         {r.kind}
                         {r.young ? <span className="ml-1 text-amber-700 dark:text-amber-400">갓 엶 · {r.open}부터</span> : null}
+                        {r.separate ? <span className="ml-1 text-sky-700 dark:text-sky-400">따로 잼 · {r.open}부터</span> : null}
                       </td>
                       <td className={`text-right ${tone(r.window_pct)}`}>{pctText(r.window_pct)}</td>
                       <td className={`text-right ${tone(r.vs_r_pp)}`}>{ppText(r.vs_r_pp)}</td>

@@ -12,11 +12,16 @@ from __future__ import annotations
 from typing import Any
 
 from batch.notify import formatter
+from batch.services.paper import SEPARATE_IDS as _SEPARATE_IDS
 
 #: 계좌 종류 — 화면 글. 모르는 계좌는 이름만 (docs/paper.md 1장, docs/company.md)
 KIND = {"A": "회사", "C": "회사", "D": "회사", "E": "회사", "B": "기준(점수 상위)", "G": "추세 익절",
-        "H": "지주사(KIS가 베낌)", "R1": "무작위 대조", "R2": "무작위 대조"}  # fmt: skip
+        "H": "지주사(KIS가 베낌)", "R1": "무작위 대조", "R2": "무작위 대조", "S": "스윙(단기 신호)"}  # fmt: skip
 CONTROL_IDS = ("R1", "R2")
+#: 따로 재는 실험 계좌 — 순위표 공통 구간의 시작과 챔피언 교체 후보(본페로니 도전자 수)에 넣지 않는다. 스윙 S 는 단기
+#: 신호를 며칠씩 사고파는 다른 실험이라(docs/paper.md 16.3.1, 25.1872), 열리는 날 A~G 의 공통 구간·후보 문턱이 바뀌지
+#: 않게. 순위표에는 제 개설일부터의 수익으로 맨 뒤에 따로 보인다. 정의처는 `services/paper.SEPARATE_IDS`
+SEPARATE_IDS = _SEPARATE_IDS
 #: 이만큼 평가가 쌓여야 공통 구간에 든다 — 약 한 달(거래일). 그 전에는 "갓 연 계좌" 로 따로 잰다 (25.1503)
 MIN_WINDOW_POINTS = 20
 
@@ -32,7 +37,8 @@ def leaderboard(series: dict[str, list[tuple[str, float]]], names: dict[str, str
     살 = {a: sorted(v) for a, v in series.items() if v}
     if not 살:
         return {"window_start": None, "rows": []}
-    자리 = {a for a, v in 살.items() if len(v) >= MIN_WINDOW_POINTS} or set(살)
+    본 = {a for a in 살 if a not in SEPARATE_IDS} or set(살)
+    자리 = {a for a in 본 if len(살[a]) >= MIN_WINDOW_POINTS} or 본
     시작 = max(살[a][0][0] for a in 자리)
 
     def 대조(start: str) -> float | None:
@@ -42,13 +48,15 @@ def leaderboard(series: dict[str, list[tuple[str, float]]], names: dict[str, str
     기준선 = 대조(시작)
     줄 = []
     for a, v in 살.items():
-        어림 = a not in 자리
-        pct = _구간(v, v[0][0] if 어림 else 시작, None)
-        선 = 대조(v[0][0]) if 어림 else 기준선
+        따로 = a in SEPARATE_IDS and a not in 자리
+        어림 = a not in 자리 and not 따로
+        pct = _구간(v, v[0][0] if 어림 or 따로 else 시작, None)
+        선 = 대조(v[0][0]) if 어림 or 따로 else 기준선
         줄.append({"id": a, "name": (names or {}).get(a) or a, "kind": KIND.get(a, ""), "open": v[0][0],
                   "last": v[-1][0], "since_open_pct": (v[-1][1] - 1) * 100, "window_pct": pct, "young": 어림,
+                  "separate": 따로,
                   "vs_r_pp": None if 선 is None or pct is None or a in CONTROL_IDS else pct - 선})  # fmt: skip
-    줄.sort(key=lambda r: (r["young"], r["window_pct"] is None, -(r["window_pct"] or 0.0), r["id"]))
+    줄.sort(key=lambda r: (r["separate"], r["young"], r["window_pct"] is None, -(r["window_pct"] or 0.0), r["id"]))
     return {"window_start": 시작, "control_pct": 기준선, "rows": 줄}
 
 
@@ -161,6 +169,13 @@ PREREG: dict[tuple[str, int], dict[str, Any]] = {
                 "metric": "대조 — 판정 없음", "retro": True},
     ("R2", 1): {"hypothesis": "대조 — 가설 없음(R1 과 다른 씨앗의 무작위)", "metric": "대조 — 판정 없음",
                 "retro": True},
+    # 스윙 S (docs/paper.md 16.3.1, 25.1872) — 계좌 행(11월 마이그레이션)보다 **먼저**, 결과가 하나도 없을 때 적는다
+    ("S", 1): {"hypothesis": "단기 신호를 다음 장 시가에 사서 종가 기준 +5%·−3%·10거래일(swing_close_v1)로 팔면"
+               " 비용 뒤 거래당 평균 수익이 0 보다 크다 — 그림자 장부의 같은 규칙과 거래 단위로 견준다",
+               "metric": "끝난 거래 수(≥ 30)·비용 뒤 평균·승률·손익비 · 같은 기간 그림자 swing_close_v1 과의 차이 ·"
+                         " R 대비(같은 기간)",
+               "judge": "끝난 거래 30건 뒤 처음 본다 — 비용 뒤 평균 > 0 이고 그림자와의 차이가 비용·제약으로 설명되면"
+                        " 유지, 아니면 엔진·장부부터 본다. 판정은 사용자"},
 }
 #: 사전 등록 판의 공통 지표·판정 — 판마다 다르면 줄에 `metric`·`judge` 를 따로 적는다
 PREREG_METRIC = "결정 단위 선정 하한 > 50(28일 묶음 6개 뒤) · 관문 구간 지수 대비 > 0 · R 대비 > 0"
@@ -837,7 +852,7 @@ def champion(
     판 = since or {}
     out = []
     for a, v in sorted(series.items()):
-        if a == mirror or a in CONTROL_IDS:
+        if a == mirror or a in CONTROL_IDS or a in SEPARATE_IDS:  # 따로 재는 실험은 도전자 수에 넣지 않는다(25.1872)
             continue
         # **두 계좌 모두 지금 판인 구간만**(`since` = 계좌마다 지금 판의 시작 결정일, 판 이력) — 관문은 지금 판만 보는데
         # 챔피언 블록·같은 기간 수익은 판을 가리지 않아 옛 판 성적으로 후보가 섰다(25.1575, 운용 감사 [참고])
