@@ -21,6 +21,7 @@ from batch.core import calendar as cal
 from batch.core import db
 from batch.jobs import broker_mirror as bmj
 from batch.services import desk
+from batch.services import paper as pp
 
 #: 관문 R 대비 옆 원가·묵은 평가 비중(25.1709) — H·R1·R2 의 지금 판 구간 줄만(보유 칸을 읽는다)
 VALUATION_SQL = (
@@ -374,8 +375,10 @@ def _보정판(
 
     try:
         칸 = _칸합침(client, 요약, 요약_us, 최근)
+        # 당일 단타(T)는 KIS 체결 보정에서 뺀다 — 하루 회전 약 200% 에 H 가 잰 칸(장 전 시장가·장 열린 뒤 종가)을 곱하면
+        # 종가 매도 짝의 체결과 뜻이 다르다(paper.md 16.3.2, 25.1885)
         시작 = {str(r["id"]): str(r["open"] if r.get("young") or r.get("separate") else 순위.get("window_start"))
-              for r in 순위.get("rows") or [] if r.get("open")}  # fmt: skip
+              for r in 순위.get("rows") or [] if r.get("open") and str(r["id"]) not in pp.SAME_DAY_IDS}  # fmt: skip
         if not 시작:
             return {"fill_adjust": None, "fill_adjust_error": None}
         총액줄 = client.execute(KIS_TOTALS_SQL, [bmj.BROKER, h, bmj.TOTAL_BASIS]).dicts()

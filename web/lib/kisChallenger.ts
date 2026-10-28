@@ -14,7 +14,7 @@ export const CHALLENGER_KEYS = { KR: "kis_vts2", US: "kis_vts2_us" } as const;
 export const CHAMPION = "H";
 export const CHALLENGER_SETTING_KEY = "kis_challenger";
 /** 따로 재는 실험 계좌(단타·스윙) — 도전자로 고를 수 없다. 정의처 `batch/services/paper.SEPARATE_IDS`(시험이 대조, 25.1879) */
-export const SEPARATE_IDS: readonly string[] = ["S"];
+export const SEPARATE_IDS: readonly string[] = ["S", "T"];
 
 export const CHALLENGER_READ = `SELECT value FROM settings WHERE key = '${CHALLENGER_SETTING_KEY}'`;
 export const CHALLENGER_UPSERT = `INSERT INTO settings (key, value, updated_at) VALUES ('${CHALLENGER_SETTING_KEY}', ?, ?)

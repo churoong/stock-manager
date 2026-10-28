@@ -80,6 +80,8 @@ const SELL_RULE_TEXT: Record<string, string> = {
   trend: "손절·기간초과 + 목표에 닿은 뒤 고점 대비 손절폭 하락 시(목표에서 안 팖)",
   // 스윙 S (docs/paper.md 16.3.1, infra 25.1872) — 매도 플래그를 보지 않는다
   swing_close: "종가가 진입 시가 대비 −3% 이하·+5% 이상이거나 10거래일째면 다음 장 시가(매도 플래그 무시)",
+  // 당일 단타 T (docs/paper.md 16.3.2, infra 25.1885)
+  day_close: "산 그날 종가에 판다(매도 플래그 무시 · 하한가 종가면 다음 장 시가)",
 };
 /** 투자위원회 헌장이 있는 계좌인가 — 지주사(H, selection weighted)의 charter_json 은 투표 회사 지문이라 위원회가 아니다 (25.1482) */
 export function hasCommittee(a: { charter_json?: string | null; selection?: string | null }): boolean {
@@ -590,7 +592,7 @@ export function haltOn(raw: unknown): boolean {
 export const SHADOW_READ = "SELECT key, value FROM settings WHERE key IN ('shadow_ledger_kr', 'shadow_ledger_us')";
 /** 규칙 이름 → 화면 글. 정의처는 batch/services/shadow.py `RULES` (판이 바뀌면 이름이 바뀐다 — 모르는 이름은 그대로) */
 export const SHADOW_RULE_TEXT: Record<string, string> = {
-  day_v1: "당일 단타 — 다음 장 시가에 사서 그날 종가",
+  day_v1: "당일 단타 — 다음 장 시가에 사서 그날 종가 · 11월 당일 단타 계좌 T 의 규칙",
   swing_v1: "스윙(장중 닿음) — +5%·−3%·10거래일",
   swing_close_v1: "스윙(종가 판정) — 같은 선을 종가로, 다음 장 시가 · 11월 스윙 계좌 S 의 규칙",
 };

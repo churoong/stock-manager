@@ -210,3 +210,49 @@ def test_종가가_하한가면_짝_매도를_다음_장으로_미룬다(monkeyp
     _하루(c, monkeypatch, "2026-10-16", signals=False)
     assert c.q("SELECT price, fill_date FROM paper_fills WHERE account_id = 'T' AND side = 'sell'") == [
         (6_800, "2026-10-16")]
+
+
+# ── 25.1885 — 상황실·웹·월간 복기 ────────────────────────────────────────────────────────────
+
+
+def test_T_는_따로_재고_사전_등록과_화면_글이_있다() -> None:
+    from batch.services import desk
+
+    assert "T" in pp.SEPARATE_IDS and desk.KIND["T"] and desk.prereg("T", 1) is not None
+    날 = [f"2026-{m:02d}-{d:02d}" for m in (9, 10, 11) for d in range(1, 29)]
+    계열 = {a: [(d, 1 + i * 0.001) for i, d in enumerate(날)] for a in ("B", "H", "R1")}
+    계열["T"] = [(d, 1 + i * 0.003) for i, d in enumerate(날[40:])]
+    표 = desk.leaderboard(계열)
+    assert 표["window_start"] == 날[0] and next(r for r in 표["rows"] if r["id"] == "T")["separate"]
+    assert [r["id"] for r in desk.champion(계열, "H")] == ["B"]
+
+
+def test_KIS_체결_보정에서_T_를_뺀다(monkeypatch: pytest.MonkeyPatch) -> None:
+    from batch.jobs import desk as desk_job
+    from batch.services import desk
+
+    받은: dict = {}
+    monkeypatch.setattr(desk_job, "_칸합침", lambda *a, **k: {})
+    monkeypatch.setattr(desk, "fill_adjust", lambda **k: 받은.update(k["starts"]) or {})
+
+    class C:
+        def execute(self, sql, args=None):  # noqa: ANN001, ANN201
+            class R:
+                rows: list = []
+
+                def dicts(self):  # noqa: ANN202
+                    return []
+            return R()
+
+    순위 = {"window_start": "2026-09-01", "rows": [
+        {"id": "B", "open": "2026-09-01", "young": False, "separate": False, "window_pct": 1.0},
+        {"id": "S", "open": "2026-11-04", "young": False, "separate": True, "window_pct": 2.0},
+        {"id": "T", "open": "2026-11-05", "young": False, "separate": True, "window_pct": 3.0}]}  # fmt: skip
+    desk_job._보정판(C(), 순위, {}, {}, "H", {}, {}, "2026-11-20")
+    assert 받은 == {"B": "2026-09-01", "S": "2026-11-04"}  # T 는 회전 × KIS 칸 보정을 하지 않는다
+
+
+def test_월간_복기의_손절_점검은_T_에_해당_없음() -> None:
+    행 = [{"as_of": "2026-10-16", "invested_krw": 1_000, "equity_krw": 1_000, "twr_index": 1.0, "positions_json": "[]"}]
+    줄 = pp.summary_lines({"T": 행}, {}, "2026-10-12", "2026-10-01", {}, {}, {}, {"T": "day_close"})
+    assert any(x.startswith("  T 규칙 점검") and "해당 없음(당일 단타" in x for x in 줄)
