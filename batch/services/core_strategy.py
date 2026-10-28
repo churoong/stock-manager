@@ -758,8 +758,8 @@ def make_core_strategy(
     """변형 하나의 판단 함수 — `bt.simulate(prices, dates, dates, make_core_strategy(…), costs)` 로 돌린다.
 
     `costs` 는 엔진에 넘기는 것과 같은 값을 준다(원가의 수수료·슬리피지). 변형마다 새 `CoreMarket` 을 준다.
-    `limit_fills` — 25.1914 (전략 깔때기 ④ 분할 지정가 체결): 회차 변형(B·G·H·D·E)의 매수를 t 종가 전량 대신 운영처럼
-    회차 지정가로 낸다(기본 꺼짐 — 11-03 판정·`run_core` 기본은 그대로)"""
+    `limit_fills` — 25.1914 (전략 깔때기 ④ 분할 지정가 체결): 회차 변형(B·G·H·D·E·A — entry=tranche)의 매수를
+    t 종가 전량 대신 운영처럼 회차 지정가로 낸다(기본 꺼짐 — 11-03 판정·`run_core` 기본은 그대로)"""
     return CoreStrategy(variant, market, sessions=sessions, costs=costs, max_sector_pct=max_sector_pct,
                         buy_fee_pct=buy_fee_pct, limit_fills=limit_fills)
 
