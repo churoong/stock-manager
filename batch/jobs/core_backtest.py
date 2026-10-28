@@ -53,6 +53,10 @@ JOB_NAME = "backtest_core"
 #: 전략 깔때기 0단계 탐색 실행(docs/funnel.md 4장 ①, 25.1906) — 핵심 H 실행(웹 `coreBacktest.ts` 가 `backtest_core` 만
 #: 읽는다)·월 백테스트 판정과 가른다. 변형은 `core_strategy.EXPLORE_VARIANTS`(코호트 2 — 코드에 넣은 커밋이 등록)
 EXPLORE_JOB_NAME = "backtest_explore"
+#: 회차 지정가 체결 실행(`--limit-fills`) — 기본 실행(`JOB_NAME`)과 가른다(25.1918, 25.1914 교차검증 [권고]).
+#: 같은 이름이면 웹 핵심 H 카드가 마지막 `backtest_core` 로 이 실행을 읽어 사전 등록 판정처럼 보였다. 결정 원장
+#: (`DayLog.buys`)이 안 찬 회차까지 낸 비중이라 짝 판정도 내지 않는다
+LIMIT_JOB_NAME = "backtest_limit"
 #: 탐색 실행 결과에 붙는 경고 — 거르기만 하고 확정하지 않는다(funnel.md 1장, 생존편향)
 WARN_EXPLORE = "탐색 실행(전략 깔때기 0단계) — 걸러내기용, 판정·확정 아님"
 #: 회차 지정가 체결로 돈 실행에 붙는 경고 — 25.1914 (전략 깔때기 ④ 분할 지정가 체결). 기본(t 종가 전량) 실행과 체결
@@ -157,7 +161,7 @@ def run_core(
     variants = tuple(목록) if variants is None else variants
     if not variants or any(v not in 목록 for v in variants):
         raise ValueError(f"{'탐색' if explore else '핵심'} 실행 변형은 {sorted(목록)} 가운데서 — {variants}")
-    job_name = EXPLORE_JOB_NAME if explore else JOB_NAME
+    job_name = EXPLORE_JOB_NAME if explore else LIMIT_JOB_NAME if limit_fills else JOB_NAME
     if market != "KR":
         # 미국은 지수·통화·분할 대기 규칙을 아직 안 맞췄다(`CoreMarket` 이 막는다) — 시작 전에 크게 멈춘다.
         # 명령줄은 KR 만 받고 워크플로도 KR 만 넘기므로 예약 실행이 여기서 조용히 끝날 일은 없다
@@ -292,6 +296,9 @@ def run_core(
                     "gate": ce.gate_evidence(기록[v], 종가), "after_sell": ce.after_sell(기록[v], 종가, 코스피)}
             if explore:
                 판정 = "탐색 실행 — 짝 판정 없음(funnel.md 1장 0단계는 거르기만)"
+            elif limit_fills:
+                # 결정 단위 증거는 낸 매수(안 찬 회차 포함)를 센다 — 판정·짝에 쓰지 않는다(25.1918)
+                판정 = "회차 지정가 실행 — 짝 판정 없음(결정 원장이 안 찬 회차까지 센다, 25.1914)"
             else:
                 짝 = ce.pairs(증거)
                 판정 = ce.verdict(증거, 짝.get("core_h-core_g"))

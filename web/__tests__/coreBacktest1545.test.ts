@@ -40,6 +40,10 @@ describe("핵심 H 결과 글 (25.1545)", () => {
     expect(n[2]).toContain("가중 대 동일가중: 판정 불가 — 고른 종목이 갈린 날 12일(1.0%)");
     expect(n[3]).toBe("걸린 시간: 읽기 300.0초 · 변형 1900.0초 · 판정 40.0초");
     expect(coreNotes({ ...step, params: { years: 1, risk_every: "week" } })[0]).toContain("기본 실행(5년·리스크 주마다)이 아니라 참고만");
+    // 탐색·회차 지정가 실행은 5년·주마다여도 기본 실행이 아니다 (25.1918)
+    for (const 표 of [{ explore: true }, { limit_fills: true }]) {
+      expect(coreNotes({ ...step, params: { years: 5, risk_every: "week", ...표 } })[0]).toContain("참고만");
+    }
     expect(coreNotes({ holding_eq: { error: "ValueError x" } })).toEqual(["가중 대 동일가중: 진단 오류 — ValueError x"]);
   });
 

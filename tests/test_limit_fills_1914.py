@@ -163,10 +163,11 @@ def _전략(variant: str, 가격: list[float | None], *, limit_fills: bool = Tru
     return s, r, 날들
 
 
-@pytest.mark.parametrize(("종가1", "찬수"), [(101.0, 0), (99.0, 1), (97.0, 2), (95.0, 3)])
+@pytest.mark.parametrize(("종가1", "찬수"), [(101.0, 0), (100.0, 1), (99.0, 1), (97.0, 2), (96.0, 3), (95.0, 3)])
 def test_전략_장부는_찬_회차의_지정가가_원가다(종가1: float, 찬수: int) -> None:
     """25.1914 (전략 깔때기 ④ 분할 지정가 체결) — cutoff 종가 100 → 회차 100·98·96(40/30/30 의 10%). 산 날 종가 101·99·97·95
-    에 0·1·2·3 회차가 찬다. 로트 원가 = 찬 회차 지정가의 주식 수 평균(운영 `pp.positions` 의 cost ÷ quantity), 하나도 안
+    에 0·1·2·3 회차가 찬다 — 종가 = 지정가(100·96)도 찬다(운영 `judge` "종가 ≤ 회차 가격", 25.1918 — 국내 1회차 = cutoff
+    종가라 보합인 날이 이 경우다. 엔진·전략 한쪽만 `<` 면 장부와 엔진 보유가 갈린다). 로트 원가 = 찬 회차 지정가의 주식 수 평균(운영 `pp.positions` 의 cost ÷ quantity), 하나도 안
     차면 로트가 없고 엔진도 들지 않는다. 다음 날 엔진 비중으로 잰 주식 수 = 찬 회차 수량 합."""
     s, r, 날들 = _전략("core_b", [100.0, 종가1, 종가1, 종가1])
     lg = t32._날별(s)[날들[1]]
@@ -360,8 +361,9 @@ def _운영() -> dict[str, dict]:
 #: 정수 주 — 운영은 회차마다 수량을 내림(`size_buys`), 리플레이 비중은 명목 자본(1e12)의 실수. 2026-10-28 실측 최대
 #: 낸 회차 1.13주·보유 1.42주(696 회차, 148 거래일) — 1910 허용 ③ 과 같은 뿌리
 ALLOW_SHARES = 2.0
-#: 주당 원가·현금 비중 — 2026-10-28 실측 최대 3.7e-8·4.5e-8(정수 주 내림이 비중에 남는 자리, 1910 허용 ③)
-ALLOW_REL = 1e-6
+#: 주당 원가·현금 비중 — 2026-10-28 실측 최대 3.7e-8·4.5e-8(정수 주 내림이 비중에 남는 자리, 1910 허용 ③). 1910 허용 ③
+#: 과 같은 2e-7(실측 약 4.4배, 25.1918 — 처음 1e-6 은 실측 22배라 25.1913 의 잣대와 어긋났다)
+ALLOW_REL = 2e-7
 
 
 def test_운영_체결_판정과_찬_회차·보유·원가가_같다() -> None:
@@ -444,5 +446,8 @@ def test_run_core_는_기본_꺼짐이고_켜면_경고와_params_를_남긴다(
     assert 받은 == [limit_fills]
     (r,) = t34._행들(mem)
     assert (cj.WARN_LIMIT_FILLS in json.loads(r["warnings_json"])) is limit_fills
-    로그 = json.loads(mem.execute("SELECT step_log FROM batch_runs WHERE job_name = ?", [cj.JOB_NAME]).dicts()[0]["step_log"])
+    # 회차 지정가 실행은 잡 이름을 가르고 짝 판정을 내지 않는다(25.1918) — 웹 핵심 H 카드가 기본 실행으로 읽지 않게
+    잡 = cj.LIMIT_JOB_NAME if limit_fills else cj.JOB_NAME
+    로그 = json.loads(mem.execute("SELECT step_log FROM batch_runs WHERE job_name = ?", [잡]).dicts()[0]["step_log"])
     assert 로그["params"]["limit_fills"] is limit_fills
+    assert ("짝 판정 없음" in 로그["verdict"]) is limit_fills

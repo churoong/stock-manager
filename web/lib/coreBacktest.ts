@@ -102,7 +102,8 @@ export function coreNotes(stepLog: unknown): string[] {
   const out: string[] = [];
   const params = obj(s.params);
   const years = num(params.years);
-  const 기본 = years === 5 && params.risk_every === "week";
+  // 탐색·회차 지정가 실행은 기본 실행이 아니다(25.1918 — 잡 이름도 따로라 여기 오지 않지만 지키는 글로 둔다)
+  const 기본 = years === 5 && params.risk_every === "week" && params.explore !== true && params.limit_fills !== true;
   if (typeof s.verdict === "string") {
     out.push(`판정: ${s.verdict}${기본 ? "" : " — 기본 실행(5년·리스크 주마다)이 아니라 참고만"} (사전 등록 — 첫 국내 기본 실행 하나로만 본다)`);
   }
