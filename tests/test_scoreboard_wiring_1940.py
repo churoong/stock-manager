@@ -4,7 +4,8 @@
 - 실린 줄 = DB 에 남은 실행 기록(batch_runs + backtest_runs)을 `scoreboard.rows` 에 넣고 `step_log_rows` 로 줄인 것과 같다
   (실행이 Turso 를 다시 읽지 않고 메모리의 행으로 낸 값이 저장된 행으로 낸 값과 같다)
 - 판정판이 깨져도 실행은 성공으로 닫히고 `scoreboard_error` 에 까닭이 남는다
-- 웹 `lib/scoreboard.ts` 의 칸 목록이 배치 `STEP_LOG_COLS` 와 같다
+- 웹 `lib/scoreboard.ts` 의 칸 목록이 배치 `STEP_LOG_COLS` 와, 작업 목록이 배치 작업 이름 상수와 같다
+- 월 기본 파라미터 실행이 2026-11-03 부터 코호트 1 이 된다 — 실행 기록의 params 가 판정판까지 간다(25.1941)
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ from typing import Any
 
 import pytest
 
+from batch.core import db
 from batch.jobs import backtest as jb
 from batch.jobs import core_backtest as cj
 from batch.services import core_strategy as cs
@@ -153,6 +155,28 @@ def test_월_백테스트도_판정판_줄을_싣는다() -> None:
     assert by["composite"]["cagr"] == mj["cagr"]
 
 
+def test_월_기본_실행은_사전_등록일부터_코호트_1() -> None:
+    """월 실행(`backtest`)을 기본 파라미터(인자 없이 — `params.default` 참)로 2026-11-03 에 돌리면 composite 가 코호트 1 (25.1941).
+
+    `scoreboard_log` 에 실행 기록의 params 가 가지 않으면(빈 step_log) 기본 실행인지 몰라 코호트 밖이 된다 — 그것을 잡는다"""
+    from tests.test_backtest_run_harness import _준비
+
+    with pytest.MonkeyPatch.context() as mp:
+        client = _준비(mp)
+        mp.setattr(db, "now_iso", lambda: "2026-11-03T17:11:00+00:00")
+        assert jb.run("KR") == 0
+        run, rows = _기록(client, jb.JOB_NAME)
+    assert run["step_log"]["params"]["default"] is True and run["started_at"] == "2026-11-03T17:11:00+00:00"
+    줄들 = run["step_log"]["scoreboard"]
+    assert 줄들 == _다시(run, rows)
+    by = {r["strategy"]: r for r in 줄들}
+    assert by["composite"]["cohort"] == "1" and "cohort" not in by["composite"]["missing"]
+    # 이 실행의 전략 수(10)는 등록 전략 수 하한보다 적어 누적 시도 = 하한
+    assert by["composite"]["trials_cumulative"] == jb.REGISTERED_TRIALS
+    assert all(r["cohort"] == "1" for n, r in by.items() if n != "benchmark")
+    assert by["benchmark"]["cohort"] is None and "시도 아님" in by["benchmark"]["missing"]["cohort"]
+
+
 def test_step_log_rows_는_칸만_고르고_긴_까닭은_자른다() -> None:
     """값은 그대로(반올림 없음), 보이지 않는 칸과 그 까닭은 빠지고, 까닭은 `WHY_MAX` 자까지"""
     긴 = "가" * (scb.WHY_MAX + 40)
@@ -170,3 +194,12 @@ def test_웹_칸_목록이_배치와_같다() -> None:
     m = re.search(r"SCOREBOARD_KEYS = \[(.*?)\] as const", 글, re.S)
     assert m, "web/lib/scoreboard.ts 에 SCOREBOARD_KEYS 가 없다"
     assert tuple(re.findall(r'"(\w+)"', m.group(1))) == scb.STEP_LOG_COLS
+
+
+def test_웹_작업_목록이_배치_작업_이름과_같다() -> None:
+    """웹 `SCOREBOARD_JOBS` 가 배치 작업 이름 상수와 어긋나면 그 작업의 판정판이 화면에 안 뜬다(질의 `job_name IN`, 25.1941)"""
+    글 = (뿌리 / "web" / "lib" / "scoreboard.ts").read_text(encoding="utf-8")
+    m = re.search(r"SCOREBOARD_JOBS = \[(.*?)\] as const", 글, re.S)
+    assert m, "web/lib/scoreboard.ts 에 SCOREBOARD_JOBS 가 없다"
+    배치 = (jb.JOB_NAME, cj.JOB_NAME, cj.EXPLORE_JOB_NAME, cj.LIMIT_JOB_NAME)
+    assert tuple(re.findall(r'"(\w+)"', m.group(1))) == 배치

@@ -18,7 +18,8 @@ export const SCOREBOARD_KEYS = [
   "control_blocks", "gate_blocks", "sells_scored",
 ] as const;
 
-/** 판정판을 싣는 작업 — 배치 `jobs/backtest.JOB_NAME`·`jobs/core_backtest` 의 세 이름 */
+/** 판정판을 싣는 작업 — 배치 `jobs/backtest.JOB_NAME`·`jobs/core_backtest` 의 세 이름(`JOB_NAME`·`EXPLORE_JOB_NAME`·`LIMIT_JOB_NAME`),
+ * 모두 네 이름. `tests/test_scoreboard_wiring_1940.py` 가 배치 상수와 대조한다(25.1941) */
 export const SCOREBOARD_JOBS = ["backtest", "backtest_core", "backtest_explore", "backtest_limit"] as const;
 const JOBS_SQL = SCOREBOARD_JOBS.map((j) => `'${j}'`).join(", ");
 
@@ -31,7 +32,7 @@ export const SCOREBOARD_OF_GROUP = `SELECT job_name, started_at, ${칸("$.scoreb
 FROM batch_runs WHERE job_name IN (${JOBS_SQL}) AND market = ? AND ${칸("$.group_id")} = ?
 ORDER BY started_at DESC, id DESC LIMIT 1`;
 
-/** 그 시장에서 판정판이 실린 가장 최근 실행 — 고른 묶음의 기록에 판정판이 없을 때(25.1940 전 실행) 대신 보인다 */
+/** 그 시장에서 판정판이 실린 가장 최근 실행 — 고른 묶음의 기록에 판정판이 없을 때(`pickScoreboard`) 대신 보인다 */
 export const LATEST_SCOREBOARD = `SELECT job_name, started_at, ${칸("$.scoreboard")} AS scoreboard,
   ${칸("$.scoreboard_error")} AS scoreboard_error
 FROM batch_runs WHERE job_name IN (${JOBS_SQL}) AND market = ? AND ${칸("$.scoreboard")} IS NOT NULL
@@ -147,14 +148,37 @@ export function scoreLine(r: ScoreRow): ScoreLine {
   };
 }
 
-/** 실행 기록 머리 한 줄 — 어느 실행의 판정판인가 */
+/** 이 실행 기록이 판정판 자리를 채우는가 — 줄이 실렸거나(빈 배열 포함) 판정판이 깨진 까닭이 남았다 */
+export function hasScoreboard(run: ScoreboardRun | undefined): run is ScoreboardRun {
+  return run != null && (run.scoreboard != null || run.scoreboard_error != null);
+}
+
+/**
+ * 어느 판정판을 보일까 (25.1941) — 고른 묶음을 낸 실행 기록(`SCOREBOARD_OF_GROUP`)에 판정판이 있으면(`scoreboard_error` 만
+ * 있어도) 그것, 없으면 그 시장의 가장 최근 판정판(`LATEST_SCOREBOARD`, fallback), 그것도 없으면 null.
+ * 고른 묶음 쪽이 차면 `최근` 은 보지 않는다 — 길은 `hasScoreboard(그묶음)` 이 거짓일 때만 그 질의를 돌린다
+ */
+export function pickScoreboard(
+  그묶음: ScoreboardRun | undefined,
+  최근: ScoreboardRun | undefined,
+): { run: ScoreboardRun; fallback: boolean } | null {
+  if (hasScoreboard(그묶음)) return { run: 그묶음, fallback: false };
+  return 최근 ? { run: 최근, fallback: true } : null;
+}
+
+/** 실행 기록 머리 한 줄 — 어느 실행의 판정판인가.
+ * 물러났을 때는 까닭을 단정하지 않는다 — 고른 묶음 기록에 판정판이 없는 까닭은 25.1940 전 실행만이 아니다(25.1941) */
 export function scoreboardHead(run: Pick<ScoreboardRun, "job_name" | "started_at">, fallback: boolean): string {
   const 작업 = JOB_LABEL[run.job_name] ?? run.job_name;
   return fallback
-    ? `고른 묶음의 실행 기록에는 판정판이 없습니다(25.1940 전 실행) — 가장 최근 판정판(${작업}, ${userTimeOf(run.started_at)} KST)을 보입니다`
+    ? `고른 묶음의 실행 기록에서 판정판을 찾지 못해 가장 최근 판정판(${작업}, ${userTimeOf(run.started_at)} KST)을 보입니다 — 25.1940 전 실행·도는 중·실패·기록 깨짐 가운데 하나`
     : `${작업} 실행 (${userTimeOf(run.started_at)} KST)`;
 }
 
 /** 늘 비는 칸 — 배치 `scoreboard.WHY_*` 와 같은 뜻. 줄마다 되풀이하지 않고 한 번만 적는다 */
 export const ALWAYS_EMPTY_NOTE =
   "걷는 창(월 초과 계열 미저장)·수용량(보유 거래대금 미저장)·서로 다른 종목·끝난 거래는 아직 기록이 없어 싣지 않습니다. 올림·내림 문턱(docs/funnel.md 3장)은 적용하지 않은 칸입니다.";
+
+/** 판정판이 싣지 않는 경고·비용 몫은 같은 화면의 다른 자리에 있다(25.1941) — 칸을 늘리지 않고 어디서 보는지만 적는다 */
+export const ELSEWHERE_NOTE =
+  "경고(생존편향·시점 유니버스 등)는 화면 맨 위 \"이 결과를 읽기 전에\" 에, 비용 몫은 위 결과 표의 \"종합 점수 (비용 0)\" 줄과 견주어 봅니다 — 둘 다 고른 묶음 기준입니다.";

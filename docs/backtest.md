@@ -520,7 +520,7 @@ PBR 이 20% 분위(손절 분위) **아래**면 매수 구간이 뒤집혀 신�
 - **판정판**(2026-10-28, 기록 25.1940 — docs/funnel.md 2.2). 월 백테스트(`backtest`)·핵심 H(`backtest_core`)·탐색(`backtest_explore`)·
   회차 지정가(`backtest_limit`) 실행이 끝날 때 그 실행의 판정판 줄을 `step_log.scoreboard` 에 싣는다 — `store_run` 이 실은 행(메모리, Turso 다시 읽기 0)을
   `scoreboard.rows` → `step_log_rows`(웹이 보이는 칸 `STEP_LOG_COLS` + 그 칸의 `missing` 까닭, 80자까지). 판정판이 깨지면 실행은 성공으로 닫고
-  `step_log.scoreboard_error` 에 까닭. 화면은 /backtest 의 "판정판" 카드 — 고른 묶음을 낸 실행 기록의 줄, 그 기록에 없으면(25.1940 전 실행) 그 시장의 가장 최근 판정판
+  `step_log.scoreboard_error` 에 까닭. 화면은 /backtest 의 "판정판" 카드 — 고른 묶음을 낸 실행 기록의 줄, 그 기록에 없으면(25.1940 전 실행·도는 중·실패·기록 깨짐 가운데 하나 — 단정하지 않는다, 25.1941) 그 시장의 가장 최근 판정판
 
 ## 예약 실행 (2026-10-04, docs/infra.md 25.942)
 

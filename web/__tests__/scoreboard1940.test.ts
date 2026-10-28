@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
-  LATEST_SCOREBOARD, SCOREBOARD_OF_GROUP, parseScoreboard, scoreLine, scoreboardHead, type ScoreboardRun,
+  LATEST_SCOREBOARD, SCOREBOARD_OF_GROUP, parseScoreboard, pickScoreboard, scoreLine, scoreboardHead, type ScoreboardRun,
 } from "@/lib/scoreboard";
 
 const 줄 = {
@@ -72,7 +72,27 @@ describe("판정판 글 (25.1940)", () => {
   it("머리 줄 — 고른 묶음 것이 아니면 그렇다고 적는다", () => {
     const run = { job_name: "backtest_explore", started_at: "2026-11-03T08:00:00+00:00" };
     expect(scoreboardHead(run, false)).toBe("탐색 실행 (2026-11-03 17:00 KST)");
-    expect(scoreboardHead(run, true)).toContain("25.1940 전 실행");
+    // 물러난 까닭을 단정하지 않는다 — 25.1940 전 실행만이 아니라 도는 중·실패·기록 깨짐도 같은 길이다(25.1941)
+    const 머리 = scoreboardHead(run, true);
+    expect(머리).toContain("판정판을 찾지 못해 가장 최근 판정판(탐색, 2026-11-03 17:00 KST)");
+    expect(머리).toContain("25.1940 전 실행·도는 중·실패·기록 깨짐 가운데 하나");
+    expect(머리).not.toContain("(25.1940 전 실행)");
+  });
+
+  it("어느 판정판을 보이나 — 고른 묶음 것, 실패 까닭만 있어도 그것, 없으면 최근으로 물러나고, 둘 다 없으면 없음 (25.1941)", () => {
+    const 칸 = (o: Partial<ScoreboardRun>): ScoreboardRun =>
+      ({ job_name: "backtest", started_at: "2026-11-03T08:00:00Z", scoreboard: null, scoreboard_error: null, ...o });
+    const 묶음 = 칸({ job_name: "backtest_core", scoreboard: "[]" });
+    const 실패 = 칸({ job_name: "backtest_explore", scoreboard_error: "RuntimeError: 망" });
+    const 옛 = 칸({});
+    const 최근 = 칸({ started_at: "2026-11-04T08:00:00Z", scoreboard: JSON.stringify([줄]) });
+    // 빈 배열도 "실린" 판정판이다 — 최근으로 물러나지 않는다
+    expect(pickScoreboard(묶음, 최근)).toEqual({ run: 묶음, fallback: false });
+    expect(pickScoreboard(실패, 최근)).toEqual({ run: 실패, fallback: false });
+    expect(pickScoreboard(옛, 최근)).toEqual({ run: 최근, fallback: true });
+    expect(pickScoreboard(undefined, 최근)).toEqual({ run: 최근, fallback: true });
+    expect(pickScoreboard(undefined, undefined)).toBeNull();
+    expect(pickScoreboard(옛, undefined)).toBeNull();
   });
 });
 

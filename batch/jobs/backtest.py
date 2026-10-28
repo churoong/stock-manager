@@ -1684,10 +1684,11 @@ def store_run(
     if len(row) != db.column_count(_RUN_COLS):
         raise ValueError("backtest_runs 값 묶음과 열 개수가 어긋납니다")
 
-    if kept is not None:
-        kept.append(dict(zip(_RUN_COL_NAMES, row, strict=True)))
     placeholders = ", ".join(["?"] * len(row))
     rs = client.execute(f"INSERT INTO backtest_runs ({_RUN_COLS}) VALUES ({placeholders})", list(row))
+    # 실린 뒤에만 남긴다 — INSERT 가 깨진 행이 판정판에 실리지 않게(25.1941)
+    if kept is not None:
+        kept.append(dict(zip(_RUN_COL_NAMES, row, strict=True)))
     run_id = rs.last_insert_rowid
     if run_id is None:
         # 그 실행·그 전략의 행으로 좁힌다 — 핵심 H 와 월 백테스트가 나란히 돌면(25.1662) 표 전체의 MAX 는 상대 실행의
