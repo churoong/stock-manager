@@ -22,6 +22,8 @@ from __future__ import annotations
 import importlib.util
 import logging
 import os
+import sys
+import traceback
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -126,6 +128,18 @@ def paused_on_d1() -> str | None:
     )
 
 
+def redacted_failure(exc: BaseException) -> str:
+    """예외의 종류와 위치만 — 본문(메시지)·지역 변수는 뺀다(25.1917). 원인 사슬(`__cause__`·`__context__`)도 종류만"""
+    줄 = [f"실패: {type(exc).__name__} — 본문은 공개 로그에 찍지 않는다(비공개 DB 실행 기록 error_text)"]
+    for fs in traceback.extract_tb(exc.__traceback__):
+        줄.append(f"  {Path(fs.filename).name}:{fs.lineno} {fs.name}")
+    원인, 본 = exc.__cause__ or exc.__context__, 0
+    while 원인 is not None and 본 < 5:
+        줄.append(f"  ← 원인 {type(원인).__name__}")
+        원인, 본 = 원인.__cause__ or 원인.__context__, 본 + 1
+    return "\n".join(줄)
+
+
 def guard(main: Callable[[], int]) -> int:
     """main 을 돌리고, DB 한도 오류면 사유를 찍고 0(건너뜀)으로 끝낸다. 다른 오류는 그대로 올린다."""
     pause = paused_on_d1()
@@ -147,6 +161,15 @@ def guard(main: Callable[[], int]) -> int:
             # **실패 사유가 DB 어디에도 안 남았다** — 화면은 "건너뜀" 이라고 말한다.
             # 닫는 글자는 `failed` 다. 건너뜀과 실패는 다른 사실이다.
             db.fail_open_runs(str(exc))
+            from batch.core.visibility import is_public
+
+            if is_public():
+                # 공개 저장소면 예외 **본문**을 로그에 찍지 않는다(25.1917, 25.1868 [참고]). traceback 메시지에
+                # 종목명·금액·질의 인자가 섞일 수 있는데, ops_tee 를 거치지 않는 워크플로는 그대로 공개 로그에
+                # 남았다. 종류와 위치(파일:줄 함수 — 코드는 어차피 공개)만 찍는다. 본문은 위 줄이 비공개 DB 실행
+                # 기록(`error_text`)에 남겼다. 종료코드는 다시 던질 때와 같은 1 이다
+                print(redacted_failure(exc), file=sys.stderr)
+                return 1
             raise
         log.warning("DB 한도로 건너뜀: %s", exc)
         # 이미 열어 둔 batch_runs 행을 `running` 인 채로 두면 운영 이력이 거짓말을 한다
