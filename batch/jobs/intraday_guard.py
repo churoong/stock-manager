@@ -333,7 +333,16 @@ def run(
             return {"off": f"{NO_LINES} — {칸['dropped']}"}
         return {"lines": 0}
     sess = session or kv.Session(client, now, keys=kv.MAIN)
-    보유, _합 = sess.balance()
+    try:
+        보유, _합 = sess.balance()
+    except KisFailed as exc:
+        # **잔고 조회의 순간 한도는 이 회차만 쉰다** (25.1835) — 2026-10-28 11:25 KST 회차가 모의 원장 초당 한도
+        # (EGW00215)를 1.5초·61초 다시 받기(25.1799)에도 못 넘어 "실행 실패" 알림이 갔는데, 다음 회차(11:35)는
+        # 정상이었다. 주문 전이라 아무것도 안 나갔다. 잇달아 쉬면 `main` 이 알린다(`TRANSIENT_STREAK_ALERT`)
+        if any(c in str(exc) for c in TRANSIENT_CODES) and not isinstance(exc, kv.NoResponse):
+            return {"lines": len(선들), "skipped": f"{TRANSIENT_SKIP} ({str(exc)[:80]})", "transient": True,
+                    **_호출(sess)}  # fmt: skip
+        raise
     기록: dict[str, Any] = {"lines": len(선들), "holdings": len(보유)}
     날표시: list[str] = []  # 보낸 뒤 `main` 이 오늘 날짜를 적는 하루 한 번 표시
     if 칸.get("line_errors"):
@@ -510,6 +519,33 @@ def alert_text(client: Any, sent: list[tuple[Hit, str]]) -> str:
 NO_LINES = "오늘 감시선 없음"
 
 
+#: 잔고 조회가 순간 한도로 막혀 쉰 회차의 까닭 (25.1835)
+TRANSIENT_SKIP = "잔고 조회 순간 한도 — 이 회차 쉼, 다음 회차가 본다"
+#: 순간 한도로 잇달아 쉰 회차 수(그날) — 이만큼이면 그날 한 번 알린다. 회차 10분이라 3 = 30분 감시 공백 (25.1835)
+TRANSIENT_STREAK_KEY = "kis_guard_transient_streak"
+TRANSIENT_STREAK_ALERT = 3
+
+
+def transient_streak(client: Any, now: datetime, 기록: dict[str, Any]) -> str | None:
+    """순간 한도로 쉰 회차를 그날 잇달아 센다. 문턱에 닿은 날 처음 한 번 알릴 글, 아니면 None (25.1835).
+
+    한 번 쉼은 알리지 않는다(다음 회차가 10분 뒤 본다) — 30분 넘게 이어지면 감시가 사실상 멈춘 것이라 알린다.
+    정상 회차는 세던 수를 비운다(값이 있을 때만 쓴다)"""
+    오늘 = kst_today(now)
+    값 = db.get_setting(client, TRANSIENT_STREAK_KEY, None)
+    앞 = int(값.get("n", 0)) if isinstance(값, dict) and 값.get("date") == 오늘 else 0
+    if not 기록.get("transient"):
+        if 앞:
+            db.set_setting(client, TRANSIENT_STREAK_KEY, {"date": 오늘, "n": 0})
+        return None
+    n = 앞 + 1
+    db.set_setting(client, TRANSIENT_STREAK_KEY, {"date": 오늘, "n": n})
+    if n < TRANSIENT_STREAK_ALERT or db.get_setting(client, FAIL_ALERT_KEY, None) == 오늘:
+        return None
+    return (f"⚠️ KIS모의투자 장중 손절·익절 — 잔고 조회가 KIS 초당 한도로 {n}회차({n * 10}분) 잇달아 막혀"
+            " 그동안 감시하지 못했습니다. 다음 회차가 다시 봅니다. 오늘 같은 알림은 다시 보내지 않습니다")
+
+
 def run_status(기록: dict[str, Any]) -> str:
     """실행 기록 상태 — **진짜 멈춤만** `skipped`(주간 요약이 문제로 센다): 아침 감시선 없음·잘린 잔고.
     일일 배치 실행 중·키 없음·멈춤 스위치·보유 없음은 정상 쉼이라 `success`(25.1769, 교차검증 [권고] — 쉼까지
@@ -518,7 +554,9 @@ def run_status(기록: dict[str, Any]) -> str:
     # 남은 판 알림이 또 못 갔다 — 감시선 없음·잘림 회차라도 부분(25.1777)
     if 기록.get("alert_error") and 기록.get("unsent_pending"):
         return "partial"
-    if str(기록.get("off", "")).startswith(NO_LINES) or "잘림" in str(기록.get("skipped", "")):  # 대기·실행 중은 정상
+    # 대기·실행 중은 정상. 순간 한도로 쉰 회차는 감시 공백이라 건너뜀(25.1835)
+    if (str(기록.get("off", "")).startswith(NO_LINES) or "잘림" in str(기록.get("skipped", ""))
+            or 기록.get("transient")):  # fmt: skip
         return "skipped"
     # 판 뒤 알림 실패가 먼저 — 계산 오류·정리 줄 겹침이 있는 날에도 "주문은 나갔는데 사람은 모름" 이 묻히지 않게
     # (25.1775)
@@ -617,6 +655,14 @@ def main() -> int:
         except Exception as exc:  # noqa: BLE001 — 알림이 먼저. 실패는 아래에서 실행 기록으로
             기록["db_error"] = type(exc).__name__
             실패 = 실패 or exc
+        if not args.dry_run:
+            try:
+                if 끊김 := transient_streak(client, now, 기록):
+                    글 = f"{글}\n{끊김}" if 글 else 끊김
+                    날표시.append(FAIL_ALERT_KEY)  # 보낸 뒤에만 적는다 — 그날 실행 실패 알림과 한 통만(25.1835)
+            except Exception as exc:  # noqa: BLE001 — 세기가 깨져도 이 회차의 다른 글은 보낸다
+                기록["db_error"] = type(exc).__name__
+                실패 = 실패 or exc
         if 못보냄:
             글 = f"{못보냄}\n{글}" if 글 else 못보냄
         if 글:
