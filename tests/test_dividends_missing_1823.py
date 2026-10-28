@@ -227,3 +227,34 @@ def test_다시_받을_회사만_남아_늘_실패해도_세_번째에_그만_�
     assert [r[2].get("retry_counts") for r in 결과[:3]] == [{"4": 1}, {"4": 2}, {"4": 3}]
     assert 결과[2][2]["given_up"] == [4]  # 세 번째 실패에서 그만 받는다
     assert 결과[3][1] == set()  # 네 번째 실행은 C4 를 부르지 않는다
+
+
+def test_새_편입이_늘_실패해도_세_번째에_그만_받고_되살아나지_않는다(monkeypatch) -> None:  # noqa: ANN001
+    """25.1859 (25.1856 교차검증 [권고]) — 기준(5월 전체) 뒤 새로 편입돼 늘 실패하는 회사는 기준의 다시 받을 목록에 없어
+    횟수가 늘 1 이었고(새 편입이라 매번 대상), 그만 받은 회사는 다음 기록에서 빠져 되살아났다"""
+    import time
+
+    _, 부른, 기록 = _실행_준비(monkeypatch, lambda c: (False, "ok", 1))  # 새 편입 3·4 모두 늘 실패
+    결과 = []
+    for _ in range(5):
+        부른.clear()
+        결과.append((job.run(latest=2025, only_missing=True), set(부른), 기록()))
+        time.sleep(0.01)
+    assert [r[2].get("retry_counts") for r in 결과[:3]] == [{"3": 1, "4": 1}, {"3": 2, "4": 2}, {"3": 3, "4": 3}]
+    assert 결과[2][2]["given_up"] == [3, 4]
+    assert 결과[3][1] == set() and 결과[4][1] == set()  # 그 뒤로는 부르지 않는다(빨간 실행 없음)
+    assert 결과[3][0] == 0 and 결과[4][0] == 0
+
+
+def test_그만_받은_회사의_횟수는_다음_기록에도_남는다(monkeypatch) -> None:  # noqa: ANN001
+    """25.1859 — 그만 받은 회사가 다음 실행의 `retry_counts` 에서 빠지면 그다음 실행에서 횟수 1 로 되살아났다"""
+    m, 부른, 기록 = _실행_준비(monkeypatch, lambda c: (False, "ok", 1))
+    m.conn.execute(
+        "INSERT INTO batch_runs (job_name, market, status, started_at, step_log)"
+        " VALUES ('dividends_missing', 'KR', 'partial', '2026-10-26T16:40:00+00:00', ?)",
+        ['{"snapshot": "2026-10-23", "retry_ids": [3], "retry_counts": {"3": 1, "4": 3}, "given_up": [4]}'],
+    )
+    job.run(latest=2025, only_missing=True)
+    assert set(부른) == {"C3"}  # 그만 받은 4 는 부르지 않는다
+    log = 기록()
+    assert log["retry_counts"] == {"3": 2, "4": 3} and log["given_up"] == [4]

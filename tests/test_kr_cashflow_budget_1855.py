@@ -52,3 +52,17 @@ def test_새_편입_배당이_영업현금흐름보다_먼저_돈다() -> None:
     assert 배당 < 현금
     조건 = 글["jobs"]["run"]["steps"][현금]["if"]
     assert "steps.collect.outcome == 'success'" in 조건 and "!cancelled()" in 조건
+
+
+def test_호출_상한으로_멈추면_시간_예산_표시가_없다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1859 (25.1855 교차검증 [참고]) — 두 멈춤 까닭을 가른다(운영 출력으로 회차당 시간을 잴 때 쓴다)"""
+    mem = _db()
+    mem.conn.execute(
+        "INSERT INTO financial_snapshots (stock_id, as_of_date, receipt_no, fiscal_year, report_code, consolidated,"
+        " payload, source, fetched_at) VALUES (1, '2025-03-10', '20250310000100', 2024, '11011', 1, '{}', 't', 't')"
+    )
+    monkeypatch.setattr(job, "TursoClient", lambda: mem)
+    monkeypatch.setattr(dart, "fetch_full_statement", lambda *a, **k: FetchResult(ok=True, source=dart.SOURCE, data=행))
+    assert job.run(date(2026, 11, 9), max_calls=1, clock=lambda: 0.0) == 0
+    기록 = json.loads(mem.conn.execute("SELECT step_log FROM batch_runs ORDER BY id DESC").fetchone()[0])
+    assert 기록["calls"] == 1 and 기록["remaining"] == 1 and 기록["time_budget_hit"] is False

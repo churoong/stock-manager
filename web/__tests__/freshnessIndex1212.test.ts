@@ -27,20 +27,23 @@ describe("신선도 질의 (25.1212)", () => {
 
   it("성과 지표는 새 편입 단계의 행이 아니라 주간 작업의 마지막 실행으로 본다 (25.1858)", () => {
     const d = db();
-    d.exec(`INSERT INTO batch_runs (job_name, market, started_at, finished_at, status)
-      VALUES ('metrics', NULL, '2026-10-05T17:30:00Z', '2026-10-05T17:42:00Z', 'success'),
-             ('metrics_missing', NULL, '2026-10-25T16:00:00Z', '2026-10-25T16:05:00Z', 'success'),
-             ('metrics', NULL, '2026-10-19T17:30:00Z', '2026-10-19T17:40:00Z', 'failed');`);
+    d.exec(`INSERT INTO batch_runs (job_name, market, trade_date, started_at, finished_at, status)
+      VALUES ('metrics', NULL, '2026-10-02', '2026-10-05T17:30:00Z', '2026-10-05T17:42:00Z', 'success'),
+             ('metrics_missing', NULL, '2026-10-23', '2026-10-25T16:00:00Z', '2026-10-25T16:05:00Z', 'success'),
+             ('metrics', NULL, '2026-10-16', '2026-10-19T17:30:00Z', '2026-10-19T17:40:00Z', 'failed');
+      INSERT INTO performance_metrics (stock_id, as_of_date, window, data_points, calc_version, created_at)
+      VALUES (1, '2026-10-02', '1Y', 250, 1, 't'), (1, '2026-10-16', '1Y', 250, 1, 't'), (1, '2026-10-23', '1Y', 250, 1, 't'),
+             (2, '2026-10-23', '1Y', 250, 1, 't');`);
     const 값 = (key: string) => (d.prepare(FRESHNESS.find((f) => f.key === key)!.sql).all() as Array<{ v: string }>)[0]?.v ?? null;
-    expect(값("metrics_kr")).toBe("2026-10-06"); // 17:42 UTC = 다음 날 KST, 새 편입·실패는 빼고
-    expect(값("metrics_us")).toBe("2026-10-06");
+    expect(값("metrics_kr")).toBe("2026-10-02"); // 새 편입(10-23)·실패한 주간(10-16) 날은 건너뛴다
+    expect(값("metrics_us")).toBeNull(); // 미국은 새 편입 행뿐 — 주간 작업이 낸 날이 없다
   });
 
   it("날짜 색인이 있는 표의 나라별 칸은 종목 쪽부터 돌지 않는다", () => {
     const d = db();
     d.exec("ANALYZE"); // 통계가 있으면 예전 MAX 질의는 종목 쪽부터 돌았다
     const 바꾼 = FRESHNESS.filter((f) => f.sql.includes("CROSS JOIN stocks s"));
-    expect(바꾼.length).toBe(14); // 성과 지표 둘은 주간 작업 실행 기준(25.1858)
+    expect(바꾼.length).toBe(16);
     for (const f of 바꾼) {
       const 계획 = (d.prepare("EXPLAIN QUERY PLAN " + f.sql).all() as Array<{ detail: string }>).map((r) => r.detail);
       expect(계획[0], f.key).not.toMatch(/^(SCAN|SEARCH) s\b/);

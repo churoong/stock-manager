@@ -147,8 +147,9 @@ def _지난_기록(client: TursoClient) -> tuple[str | None, dict[int, int]]:
             뒤기록 = {}
         for k, v in (뒤기록.get("retry_counts") or {}).items():
             횟수[int(k)] = max(횟수.get(int(k), 0), int(v))
-    return (str(기록.get("snapshot") or str(마지막[0][0])[:10]),
-            {int(x): 횟수.get(int(x), 1) for x in 기록.get("retry_ids") or []})  # fmt: skip
+    # 기준의 다시 받을 회사 + 횟수를 센 모든 회사(뒤 실행의 새 편입 실패·그만 받은 회사 포함, 25.1859)
+    대상 = {int(x) for x in 기록.get("retry_ids") or []} | set(횟수)
+    return (str(기록.get("snapshot") or str(마지막[0][0])[:10]), {x: 횟수.get(x, 1) for x in 대상})
 
 
 def missing_targets(client: TursoClient) -> list[tuple[int, str]]:
@@ -169,8 +170,10 @@ def missing_targets(client: TursoClient) -> list[tuple[int, str]]:
     기준, 지난 = _지난_기록(client)
     if 기준 is not None:
         다시 = {sid for sid, n in 지난.items() if n < MAX_RETRY}
+        # 그만 받은 회사는 새 편입이어도 부르지 않는다 (25.1859 — 기준 뒤 새로 편입돼 늘 실패하는 회사가 매번 대상)
+        그만 = {sid for sid, n in 지난.items() if n >= MAX_RETRY}
         그때 = {int(r[0]) for r in client.execute(PREV_MEMBERS_SQL, [기준]).rows}
-        return [t for t in 전체 if t[0] not in 그때 or t[0] in 다시]
+        return [t for t in 전체 if (t[0] not in 그때 or t[0] in 다시) and t[0] not in 그만]
     있음 = {int(r[0]) for r in client.execute(HAS_ROWS_SQL, [json.dumps([t[0] for t in 전체])]).rows}
     return [t for t in 전체 if t[0] not in 있음]
 
@@ -292,6 +295,8 @@ def run(latest: int | None = None, limit: int | None = None, only_missing: bool 
             "SELECT COUNT(*), COUNT(DISTINCT stock_id), SUM(cash_dividend_total > 0) FROM stock_dividends"
         ).rows[0]
         횟수 = {sid: 지난_횟수.get(sid, 0) + (1 if sid in 실패 else 0) for sid in 실패 | 미처리}
+        # 그만 받은 회사의 횟수를 기록에 남긴다 — 빠지면 다음 실행에서 되살아나 세 실행마다 다시 불렸다(25.1859)
+        횟수 |= {sid: n for sid, n in 지난_횟수.items() if n >= MAX_RETRY and sid not in 횟수}
         step: dict[str, Any] = {
             "report_years": years,
             "companies": len(corps),
