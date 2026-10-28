@@ -108,6 +108,19 @@ def test_점수_보정표_경고는_공개_로그에_종류만_실행_기록에_
     assert "보정본문" not in caplog.text and "읽지 못해 뺐다: RuntimeError" in caplog.text
 
 
+def test_점수_보정표_경고_본문은_실행_경로로_실행_기록에_든다(monkeypatch: pytest.MonkeyPatch,
+                                                         caplog: pytest.LogCaptureFixture) -> None:  # fmt: skip
+    """25.1868 (25.1866 교차검증 [권고]) — 직접 부르는 시험만 있어, run 이 그 말을 warnings 에 싣는지는 묶이지 않았다"""
+    m = _장부()
+    monkeypatch.setattr(job, "TursoClient", lambda: m)
+    monkeypatch.setattr(job, "load_scores", lambda *a: (_ for _ in ()).throw(RuntimeError("보정본문" + "x" * 300)))
+    assert job.run("KR") == 0
+    기록 = json.loads(m.conn.execute("SELECT step_log FROM batch_runs ORDER BY id DESC").fetchone()[0])
+    말 = [w for w in 기록["warnings"] if w.startswith("점수 보정표")]
+    assert len(말) == 1 and "보정본문" in 말[0] and len(말[0]) < 250  # 본문은 DB 에 — 200자로 자른다
+    assert "보정본문" not in caplog.text
+
+
 def test_국내_상한가_시가는_잡_경로에서도_체결_못_함() -> None:
     m = _장부()
     m.conn.execute("UPDATE prices SET open = 130, high = 130, low = 130, close = 130, adj_close = 130"

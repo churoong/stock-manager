@@ -380,7 +380,7 @@ def calibrations(
     try:
         scores = load_scores(client, country, since)
     except Exception as exc:  # noqa: BLE001
-        말 = f"점수 보정표 — 점수를 읽지 못해 뺐다: {exc}"
+        말 = f"점수 보정표 — 점수를 읽지 못해 뺐다: {str(exc)[:200]}"  # 그림자 장부 오류와 같이 자른다(25.1868)
         # 공개 로그(이 워크플로는 ops_tee 를 거치지 않는다)에는 종류만 — 본문은 실행 기록 warnings(DB)에만(25.1866)
         logging.getLogger("signal_outcomes").warning("점수 보정표 — 점수를 읽지 못해 뺐다: %s", type(exc).__name__)
         return [], 말
