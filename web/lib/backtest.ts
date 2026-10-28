@@ -220,9 +220,26 @@ const STRATEGY_LABEL: Record<string, string> = {
   high52: "52주 고점 근접 — 시장 안 백분위 상위 (후보)",
 };
 
+/**
+ * 계좌형 리플레이 변형(25.1936) — 핵심 H 실행(`backtest_core`)·탐색 실행(`backtest_explore`)·지정가 실행의 `core_*` 행.
+ * 이름표가 없어 `core_a` 처럼 날 이름이 찍히고 "성과요인" 꼬리표가 붙었다. 배치 `core_strategy.VARIANTS`·`EXPLORE_VARIANTS`
+ * 와 같아야 한다(`backtest.test.ts` 가 파이썬 파일을 읽어 대 본다). 핵심 다섯은 `coreBacktest.CORE_LABEL` 과 같은 글
+ */
+export const REPLAY_LABEL: Record<string, string> = {
+  core_h: "핵심 H (합의)",
+  core_g: "G (B 상위 5 + 추적 매도)",
+  core_b: "B (상위 5 + 기본 매도)",
+  core_r1: "R1 (무작위 대조)",
+  core_r2: "R2 (무작위 대조)",
+  core_d: "D 장기보유 (탐색)",
+  core_e: "E 안정 (탐색)",
+  core_a: "A 가치 (탐색)",
+  core_c: "C 모멘텀 (탐색)",
+};
+
 /** long_q55 처럼 문턱이 붙는 전략은 규칙으로 읽는다 (docs/backtest.md 7장) */
 export function strategyLabel(strategy: string): string {
-  const known = STRATEGY_LABEL[strategy];
+  const known = STRATEGY_LABEL[strategy] ?? REPLAY_LABEL[strategy];
   if (known) return known;
   const long = /^long_q(\d+)$/.exec(strategy);
   if (long) return `장기 신호 문턱 ${long[1]}`;
@@ -233,9 +250,11 @@ export function strategyLabel(strategy: string): string {
 /** 발굴 루프로 넣은 **후보** 전략 — batch/jobs/backtest.CANDIDATE_STRATEGIES 와 같아야 한다 (docs/infra.md 25.443) */
 export const CANDIDATE_STRATEGIES = ["momentum_sector", "ic_weighted", "shrink_missing", "high52"] as const;
 
-export function strategyKind(strategy: string): "main" | "factor" | "long" | "candidate" {
+export function strategyKind(strategy: string): "main" | "factor" | "long" | "candidate" | "replay" {
   if (strategy === "benchmark" || strategy.startsWith("composite"))
     return "main";
+  // 계좌형 리플레이는 성과요인분석이 아니다(25.1936)
+  if (strategy.startsWith("core_")) return "replay";
   if (/^long_q\d+$/.test(strategy)) return "long";
   // 후보는 성과요인분석이 아니다 — 예전에는 "성과요인" 표가 붙어 팩터 묶음에 섞였다 (25.443, 교차검증)
   if ((CANDIDATE_STRATEGIES as readonly string[]).includes(strategy)) return "candidate";

@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
-  COST_KEYS, DEFAULT_TOP_N, ENGINE_VERSION, EXPLORE_MARK, LIMIT_MARK, NOT_DEFAULT_MARK, NO_PIT_MARK, SCORING_VERSION, TREND_ON_MARK, groupTags, staleVersionNote, LATEST_GROUP, LATEST_STRESS, RECENT_BATCH_RUNS, RECENT_GROUPS, RUNS_IN_GROUP, WHAT_OPTIONS,
+  COST_KEYS, DEFAULT_TOP_N, ENGINE_VERSION, EXPLORE_MARK, REPLAY_LABEL, strategyKind as 갈래, strategyLabel as 이름표, LIMIT_MARK, NOT_DEFAULT_MARK, NO_PIT_MARK, SCORING_VERSION, TREND_ON_MARK, groupTags, staleVersionNote, LATEST_GROUP, LATEST_STRESS, RECENT_BATCH_RUNS, RECENT_GROUPS, RUNS_IN_GROUP, WHAT_OPTIONS,
   WORKFLOW_FILE, WORKFLOW_REF, awaitingRunner, recentlyFinished, costLine, curvesSql, groupNotice, isRunning, readStressJson, stuckRunNote, mergeWarnings, metricNumber, progressText, requestBacktest,
   pickCurveRuns, runInputSchema, stocksSql, strategyKind, strategyLabel,
   type BacktestRun, type BatchRunRow,
@@ -471,5 +471,24 @@ describe("기본 묶음과 옛 판 (25.788, 백테스트 감사 #2·#3)", () => 
     expect(staleVersionNote({ calc_version: ENGINE_VERSION, scoring_calc_version: SCORING_VERSION, market: "US" })).toBeNull();
     expect(staleVersionNote({ calc_version: 2, scoring_calc_version: SCORING_VERSION, market: "KR" })).toContain("엔진 2");
     expect(staleVersionNote({ calc_version: 1, scoring_calc_version: SCORING_VERSION, market: "US" })).toContain("엔진 1");
+  });
+});
+
+
+describe("계좌형 리플레이 이름표 (25.1936)", () => {
+  it("배치 VARIANTS·EXPLORE_VARIANTS 의 이름이 모두 이름표를 갖고 성과요인으로 묶이지 않는다", () => {
+    const 파이썬 = readFileSync(join(process.cwd(), "..", "batch", "services", "core_strategy.py"), "utf-8");
+    const 이름들 = [...파이썬.matchAll(/^\s+"(core_[a-z0-9]+)": Variant\(/gm)].map((m) => m[1]);
+    expect(이름들.length).toBeGreaterThanOrEqual(9);
+    expect([...이름들].sort()).toEqual(Object.keys(REPLAY_LABEL).sort());
+    for (const n of 이름들) {
+      expect(이름표(n)).not.toBe(n);
+      expect(갈래(n)).toBe("replay");
+    }
+  });
+
+  it("핵심 다섯은 coreBacktest 의 이름표와 같은 글", async () => {
+    const { CORE_LABEL } = await import("@/lib/coreBacktest");
+    for (const [k, v] of Object.entries(CORE_LABEL)) expect(REPLAY_LABEL[k]).toBe(v);
   });
 });

@@ -403,7 +403,7 @@ function RunHeader({
 }
 
 function ResultTable({ runs, bench }: { runs: BacktestRun[]; bench: BacktestRun | null }) {
-  const order = { main: 0, long: 1, factor: 2, candidate: 3 };
+  const order = { main: 0, replay: 1, long: 2, factor: 3, candidate: 4 };
   const sorted = [...runs].sort((a, b) => order[strategyKind(a.strategy)] - order[strategyKind(b.strategy)]);
   return (
     <>

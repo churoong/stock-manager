@@ -2983,6 +2983,7 @@ SQL read operations are forbidden (reads are blocked, ...)
 | 25.1933 | R 겹침 상황실 음성 단언이 문구 바꿈 뒤 헛돌던 것 — 빈 기록과 견주기 (25.1932 교차검증) |
 | 25.1934 | 가치 A·모멘텀 C 리플레이 — 사기 전 점검을 시점 자료로(재무 적자 전환·점수 하락·점검), 감성은 영구 차이 |
 | 25.1935 | A·C 리플레이 SQL 앞머리가 괄호 열린 조각이라 SQL 그물 상한을 넘김 — 완결된 앞머리로 |
+| 25.1936 | /backtest 표 — 계좌형 리플레이 변형(core_*) 이름표·'성과요인' 꼬리표 바로잡음 |
 
 ### 25.1 왜 D1 인가
 
@@ -42200,3 +42201,25 @@ docs/loops.md L4 문을 "18개 중 잡힘 18" 로.
 **고친 것**: 앞머리를 완결된 질의 "SELECT MAX(included) FROM universe_members WHERE stock_id = ?" 까지만 맞춘다. 같은 표에서 `MAX(included)` 를 읽는 운영 질의는 이것 하나다(grep). 그래서 알아보는 힘은 같다. 까닭은 주석에 적었다. 상한은 올리지 않았다.
 
 **되돌리기 확인**: 예전 앞머리로는 위 시험이 깨진다(gate 37d6c75 실측). 고친 뒤 `test_sql_schema`·`test_core_prebuy_1934`·`test_replay_parity_ac_1934` 가 지나간다.
+
+### 25.1936 /backtest 표 — 계좌형 리플레이 변형(core_*) 이름표·'성과요인' 꼬리표 바로잡음
+
+**계기**: 25.1934 교차검증 [참고]. 탐색 실행(`backtest_explore`) 묶음의 `core_a`·`core_c`(그리고 이미 있던 `core_d`·`core_e`) 행이 /backtest 표에서 문제였다.
+- 이름표가 없어 날 이름(`core_a`)으로 찍혔다.
+- `strategyKind` 가 "factor" 로 떨어져 "성과요인" 꼬리표가 붙었다. 계좌형 리플레이는 성과요인분석(팩터 하나짜리 전략)이 아니다.
+- 우선순위 ③(화면)이지만 11월 첫 탐색 실행 결과를 읽을 화면이라 고쳤다.
+
+**고친 것**
+- `web/lib/backtest.ts`:
+  - `REPLAY_LABEL` 을 더했다. 핵심 다섯은 `coreBacktest.CORE_LABEL` 과 같은 글이고, 탐색 넷은 "A 가치 (탐색)" 처럼 적는다.
+  - `strategyLabel` 이 이 이름표를 읽는다.
+  - `strategyKind` 에 "replay" 갈래(`core_*`)를 더했다.
+- `web/components/BacktestView.tsx`: 표 순서에 replay 를 기준 바로 뒤로 넣었다.
+
+**시험**(`web/__tests__/backtest.test.ts` "계좌형 리플레이 이름표 (25.1936)")
+- 배치 `core_strategy.py` 의 `VARIANTS`·`EXPLORE_VARIANTS` 이름(정규식으로 읽음, 9개 이상)이 `REPLAY_LABEL` 열쇠와 같은지 본다.
+- 모두 이름표를 갖고 "replay" 로 묶이는지 본다.
+- 핵심 다섯이 `CORE_LABEL` 과 같은 글인지 본다.
+- tsc 0, 웹 vitest 전부 0.
+
+**되돌리기 확인**: replay 갈래를 끄면 첫 시험이 깨진다.
