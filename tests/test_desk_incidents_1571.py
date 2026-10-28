@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from batch.core import db
 from batch.jobs import desk as jd
+from batch.services import desk
 from tests.test_portfolio_job import MemClient
 
 
@@ -113,12 +114,16 @@ def test_실행_기록_질의는_깨진_step_log_에도_돈다() -> None:
     db.apply_migrations(mem)  # type: ignore[arg-type]
     for i, (log, st) in enumerate((("not json", "success"), ('{"paper": {"error": "x"}}', "partial"), (None, "success"),
                                    ('{"paper": {"skipped": "입금 없음", "accounts": {"H": {"buy": {"skipped": "y"}}}}}',
-                                    "success"))):  # fmt: skip
+                                    "success"),
+                                   ('{"paper": {"account_errors": {"S": "KeyError: 1"}}}', "partial"))):  # fmt: skip
         mem.conn.execute(
             "INSERT INTO batch_runs (job_name, trade_date, status, started_at, step_log) VALUES (?, ?, ?, ?, ?)",
             ["daily_kr", f"2026-10-1{i}", st, f"2026-10-1{i}T00:00:00+00:00", log])
-    줄 = [dict(zip(("job_name", "trade_date", "status", "paper_error", "paper_skipped"), r, strict=True))
+    줄 = [dict(zip(("job_name", "trade_date", "status", "paper_error", "paper_skipped", "paper_account_errors"), r,
+                   strict=True))
           for r in mem.conn.execute(jd.BATCH_RUNS_SQL, ["daily_kr", "daily_us", "2026-01-01"]).fetchall()]
     줄.sort(key=lambda r: r["trade_date"])  # 질의에 순서가 없다
-    assert [r["paper_error"] for r in 줄] == [None, "x", None, None]
-    assert [r["paper_skipped"] for r in 줄] == [None, None, None, "입금 없음"]  # 매수 단계 `buy.skipped` 와 섞이지 않음
+    assert [r["paper_error"] for r in 줄] == [None, "x", None, None, None]
+    assert [r["paper_skipped"] for r in 줄] == [None, None, None, "입금 없음", None]  # 매수 단계 `buy.skipped` 와 섞이지 않음
+    # 계좌 하나만 깨진 날도 사고(25.1920) — 단계 전체는 끝까지 돌아 paper.error 는 없다
+    assert [desk.paper_step_failed(r) for r in 줄] == [False, True, False, False, True]

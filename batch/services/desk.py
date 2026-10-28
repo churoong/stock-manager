@@ -360,6 +360,9 @@ def paper_step_failed(row: dict[str, Any]) -> bool:
     (기능 전 옛 행·dry-run)은 모름 — 사고로 세지 않는다"""
     if row.get("paper_error") is not None:  # 빈 글 예외(`StopIteration()` 등)도 — 교차검증 [필수]
         return True
+    # 계좌 하나만 깨진 날도 사고다(25.1920 — 계좌별로 가둔 예외, 단계 전체는 끝까지 돌았다)
+    if row.get("paper_account_errors") not in (None, "", "{}"):
+        return True
     건너뜀 = row.get("paper_skipped")
     return bool(건너뜀) and str(건너뜀) not in PAPER_SKIP_OK
 

@@ -95,7 +95,8 @@ BATCH_DELAY_SQL = (
 BATCH_RUNS_SQL = (
     "SELECT job_name, trade_date, status,"
     " CASE WHEN json_valid(step_log) THEN json_extract(step_log, '$.paper.error') END AS paper_error,"
-    " CASE WHEN json_valid(step_log) THEN json_extract(step_log, '$.paper.skipped') END AS paper_skipped"
+    " CASE WHEN json_valid(step_log) THEN json_extract(step_log, '$.paper.skipped') END AS paper_skipped,"
+    " CASE WHEN json_valid(step_log) THEN json_extract(step_log, '$.paper.account_errors') END AS paper_account_errors"
     " FROM batch_runs WHERE job_name IN (?, ?) AND started_at >= ?"
 )
 NAMES_SQL = "SELECT id, name, rule_version FROM paper_accounts"

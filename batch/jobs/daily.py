@@ -2466,6 +2466,10 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
                     # 없음으로 "꺼짐" 이면 첫째 기록에 `send` 가 안 남아 `challenger_hold` 가 None 이었고, 도전자는
                     # 보류 없이 주문·정리를 냈다
                     막힘2 = 잠금보류 or challenger_hold(step_log.get("broker") or {})
+                    # 도전자 계좌의 가상 단계만 깨진 날(25.1920 — 계좌별로 가둔 예외)은 둘째도 보내지 않는다
+                    도전자 = _bm2.challenger_account(client)
+                    if not 막힘2 and 도전자 in ((step_log.get("paper") or {}).get("account_errors") or {}):
+                        막힘2 = f"가상 {도전자} 계좌 단계 실패 — 오늘 도전자 베끼기 보류"
                     step_log["broker2"] = _bm2.run(client, market, datetime.now(UTC), slot=_bm2.CHALLENGER,
                                                    frozen=멈춘2, hold_send=str(막힘2) if 막힘2 else None)  # fmt: skip
                 except Exception as exc:  # noqa: BLE001 — 곁다리

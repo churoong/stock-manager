@@ -2145,7 +2145,11 @@ def run_step(
             헌장오류[str(acct["id"])] = ["헌장이 비었음(charter_json 없음)"]
     조사: dict[str, Any] = {}  # 모집단·안건 조사 자료 — 하루 실행에 한 번, 회사들이 같이 쓴다
     메모줄: list[str] = []  # 운용역 메모 — 회사마다 한 줄 (docs/company.md 7장, 텔레그램 길이)
-    for acct in accounts:
+    계좌실패: dict[str, str] = {}  # 계좌 단계 예외 — 계좌 → 글(25.1920)
+    def _계좌_단계(acct: dict[str, Any]) -> None:
+        """계좌 하나의 평가·매도·매수 — 아래 루프가 계좌마다 예외를 가둔다(25.1920). 계좌끼리 이어 쓰는 상태(체결 판정
+        기준·열린 주문·시세 캐시·무작위 유니버스)는 바깥 변수를 그대로 고친다"""
+        nonlocal 기준, 열린, price_series, 유니버스
         aid, 규칙, 판 = str(acct["id"]), str(acct["sell_rule"]), int(acct["rule_version"])
         개설 = str(acct.get("created_at") or "")[:10]
         if 개설 >= OPEN_GUARD_FROM and (다음장 < 개설 or 오늘 < 개설):
@@ -2157,7 +2161,7 @@ def run_step(
             # 다음장이 한 장 밀려 개설 전날 실행이 통과하고, 평가 행이 개설 전 날짜(as_of=오늘)로 적혔다
             # (25.1894, 25.1892 교차검증 [권고])
             계좌기록[aid] = {"not_open_until": 개설}
-            continue
+            return
         계이름 = pp.account_name(aid)  # 화면 이름(25.1893) — 사람에게 보이는 줄에만
         if 규칙 == pp.DAY_RULE and str(acct.get("entry_rule") or "tranche") != "open":
             # 당일 단타(T)는 시가 일괄 진입만 — 회차 지정가면 짝 매도가 첫 회차 하나에만 붙어(유일 색인의 tranche=0)
@@ -2165,14 +2169,14 @@ def run_step(
             log.error("가상 %s 당일 단타인데 진입 방식이 %s — 그 계좌를 건너뜀", aid, acct.get("entry_rule"))
             계좌기록[aid] = {"error": f"당일 단타인데 진입 방식 {acct.get('entry_rule')}(open 이어야 함)"}
             줄.append(f"⚠️ 가상 {계이름} 당일 단타 진입 방식이 open 이 아님 — 오늘 이 계좌는 평가·매매하지 않았습니다")
-            continue
+            return
         if 규칙 not in pp.SELL_RULES:
             # 계좌 행이 코드보다 먼저 들어온 날(마이그레이션 순서 잘못) — `sells_for` 가 `KeyError` 로 이 단계 전체와
             # 그 뒤 KIS 베끼기까지 멈췄다. 그 계좌 하나만 건너뛴다(paper.md 16.3.1, 25.1871). 지금 계좌에는 해당 없음
             log.error("가상 %s 모르는 매도 규칙 %s — 그 계좌를 건너뜀", aid, 규칙)
             계좌기록[aid] = {"error": f"모르는 매도 규칙 {규칙}"}
             줄.append(f"⚠️ 가상 {계이름} 모르는 매도 규칙({규칙}) — 오늘 이 계좌는 평가·매매하지 않았습니다")
-            continue
+            return
         기준 = 다시잰기준(기준)
         _결정판 = partial(_결정, rule_version=판)
         진입 = str(acct.get("entry_rule") or "tranche")
@@ -2539,6 +2543,30 @@ def run_step(
                  + f" · 체결 {a기록['fills']}건")  # fmt: skip
         if not 검["recon_ok"]:
             줄.append(f"⚠️ 가상 {계이름} 장부 검산 어긋남 — {검['recon_note']}")
+    for acct in accounts:
+        try:
+            _계좌_단계(acct)
+        except Exception as exc:
+            # **계좌 하나의 예외가 단계 전체를 멈추지 않게**(25.1920, 스윙·단타 첫날 감사 [권고]) — 예전엔 S·T(id 순서상
+            # 맨 뒤)의 예외 하나로 결정 원장 성과 채우기·가상 대조·리포트 절과 **H 의 KIS 베끼기**까지 그날 빠졌다.
+            # DB 한도는 다시 던진다(`entry.guard` 가 건너뜀으로). 그 계좌의 이미 적은 주문은 그대로다(예전과 같다)
+            if db.quota_reason(exc) is not None:
+                raise
+            aid = str(acct["id"])
+            log.exception("가상 %s 계좌 단계 실패 — 다른 계좌는 계속", aid)
+            글 = f"{type(exc).__name__}: {str(exc)[:200]}"
+            계좌기록[aid] = {**계좌기록.get(aid, {}), "error": 글}
+            계좌실패[aid] = 글
+            줄.append(f"⚠️ 가상 {pp.account_name(aid)} 계좌 단계 실패({type(exc).__name__})"
+                     " — 다른 계좌는 그대로 돌았습니다")  # fmt: skip
+    if 계좌실패:
+        # 관문 "운영 무사고" 는 계좌 하나의 실패도 사고로 센다(`desk.paper_step_failed`) — 예전엔 단계 전체 실패였다
+        기록["account_errors"] = 계좌실패
+        from batch.jobs.broker_mirror import MIRROR_ACCOUNT
+
+        if MIRROR_ACCOUNT in 계좌실패:
+            # KIS 가 베끼는 계좌가 깨졌으면 예전처럼 단계 실패로 — 베끼기를 막는다(장부가 어긋난 채 주문을 내지 않게)
+            기록["error"] = f"가상 {MIRROR_ACCOUNT} 계좌 단계 실패: {계좌실패[MIRROR_ACCOUNT]}"
     기록["accounts"] = 계좌기록
     기록["frozen"] = sorted(frozen)
     # 계좌마다의 멈춤 — KIS모의투자 베끼기는 베끼는 계좌(H·도전자)의 것을 쓴다(25.1550 반박 [권고] 3: 전체 멈춤을
