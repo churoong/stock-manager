@@ -158,8 +158,12 @@ def test_seven_accounts_order_by_their_own_rules(c: Client, monkeypatch: pytest.
     기록 = _하루(c, monkeypatch, "2026-10-14")
     # G·H 는 25.1481·25.1482, S·T 는 25.1890(0092)
     assert sorted(기록["accounts"]) == ["A", "B", "C", "D", "E", "G", "H", "R1", "R2", "S", "T"]
+    # S·T 는 개설일(10-29) 전이라 평가·매매하지 않는다(25.1891) — 기록만 남는다
+    for aid in ("S", "T"):
+        assert 기록["accounts"][aid] == {"not_open_until": "2026-10-29"}, aid
+    assert c.q("SELECT COUNT(*) FROM paper_orders WHERE account_id IN ('S', 'T')") == [(0,)]
     # E 만 상위 10 — 나머지는 5 (같은 select_top 에 계좌의 수)
-    assert sorted(n들) == [5, 5, 5, 5, 5, 5, 5, 10, 10, 10]  # E·S·T 는 상위 10
+    assert sorted(n들) == [5, 5, 5, 5, 5, 5, 5, 10]
     주문 = c.q("SELECT account_id, stock_id, order_type, limit_price, ref_price, quantity, tranche, reason"
                " FROM paper_orders ORDER BY account_id, tranche")  # fmt: skip
     by: dict[str, list[tuple]] = {}
@@ -195,8 +199,37 @@ def test_open_entry_fills_at_open_and_random_mapping_is_stable(c: Client, monkey
     # 둘째 날도 같은 신호 종목 → 같은 대체 종목 (날짜가 아니라 신호 종목에 묶인 씨앗)
     assert 기록["accounts"]["R1"]["random"] == {"1": _대체("R1")}
     assert {r[0] for r in c.q("SELECT DISTINCT stock_id FROM paper_orders WHERE account_id = 'R1'")} == {_대체("R1")}
-    # 장부 검산은 모든 계좌(S·T 포함, 25.1890)
-    assert c.q("SELECT COUNT(*), SUM(recon_ok) FROM paper_daily WHERE as_of = '2026-10-16'") == [(11, 11)]
+    # 장부 검산은 연 계좌 모두 — 개설 전인 S·T 는 장부 줄이 없다(25.1891)
+    assert c.q("SELECT COUNT(*), SUM(recon_ok) FROM paper_daily WHERE as_of = '2026-10-16'") == [(9, 9)]
+
+
+@pytest.mark.parametrize(("개설", "열림"), [("2026-10-15", True), ("2026-10-16", False)])
+def test_accounts_trade_from_their_open_date(
+    c: Client, monkeypatch: pytest.MonkeyPatch, 개설: str, 열림: bool
+) -> None:
+    """개설일이 실행일(국내 날짜)에 닿으면 연다 — 같은 날 포함, 막는 것은 개설 **전**뿐(25.1891).
+
+    하한(`OPEN_GUARD_FROM`)을 시험 날짜로 내려 경계를 잰다 — 실행일은 10-14 다음 거래일 10-15.
+    개설일이 하한보다 앞이면(10-15 이전) 장치 밖이라 열린다 — 아래 둘은 하한 안에서 같은 날·다음 날.
+    """
+    n들: list[int] = []
+    원래 = report_picks.select_top
+    monkeypatch.setattr(report_picks, "select_top", lambda rows, n=5: (n들.append(n), 원래(rows, n))[1])
+    monkeypatch.setattr(job, "OPEN_GUARD_FROM", "2026-10-15")
+    # G·H(개설 10-16)는 하한을 내리면 같이 막히니 이 시험에선 앞당긴다 — S·T 만 잰다
+    c.conn.execute("UPDATE paper_accounts SET created_at = '2026-10-14T00:00:00+00:00' WHERE id IN ('G', 'H')")
+    c.conn.execute("UPDATE paper_accounts SET created_at = ? WHERE id IN ('S', 'T')", [f"{개설}T00:00:00+00:00"])
+    기록 = _하루(c, monkeypatch, "2026-10-14")
+    매수 = dict(c.q("SELECT account_id, COUNT(*) FROM paper_orders WHERE account_id IN ('S', 'T') AND side = 'buy'"
+                  " GROUP BY account_id"))  # fmt: skip
+    if 열림:
+        assert sorted(n들) == [5, 5, 5, 5, 5, 5, 5, 10, 10, 10]  # E·S·T 는 상위 10
+        assert 매수 == {"S": 1, "T": 1}
+        assert all("not_open_until" not in 기록["accounts"][a] for a in ("S", "T"))
+    else:
+        assert sorted(n들) == [5, 5, 5, 5, 5, 5, 5, 10]
+        assert 매수 == {}
+        assert 기록["accounts"]["S"] == 기록["accounts"]["T"] == {"not_open_until": "2026-10-16"}
 
 
 def test_d_holds_through_stop_loss(c: Client, monkeypatch: pytest.MonkeyPatch) -> None:

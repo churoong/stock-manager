@@ -42,6 +42,9 @@ from batch.services import stop_vol as sv
 
 log = logging.getLogger(__name__)
 
+# 개설일 전 매매 막기(25.1891)를 적용하는 개설일 하한 — 그 전 계좌(A~E·R 10-15, G·H 10-16)는 운영에서 이미 열렸고,
+# 시험은 그 개설일보다 앞선 날(10-14 등)로 그 계좌들을 돌린다. S·T(10-29)부터 적용
+OPEN_GUARD_FROM = "2026-10-29"
 ACCOUNTS_SQL = (
     "SELECT id, sell_rule, rule_version, entry_rule, top_n, selection, charter_json, charter_since, created_at"
     " FROM paper_accounts ORDER BY id"
@@ -2140,6 +2143,12 @@ def run_step(
     메모줄: list[str] = []  # 운용역 메모 — 회사마다 한 줄 (docs/company.md 7장, 텔레그램 길이)
     for acct in accounts:
         aid, 규칙, 판 = str(acct["id"]), str(acct["sell_rule"]), int(acct["rule_version"])
+        개설 = str(acct.get("created_at") or "")[:10]
+        if 개설 >= OPEN_GUARD_FROM and 개설 > 오늘:
+            # 개설일 전의 계좌는 평가·매매하지 않는다 — 마이그레이션은 푸시 뒤 **처음 도는** 일일 배치(미국일 수 있다)가
+            # 적용해, 10-29 개설로 적은 S·T 가 하루 앞 미국 장부터 매매할 뻔했다(25.1891, 25.1890 교차검증 [권고])
+            계좌기록[aid] = {"not_open_until": 개설}
+            continue
         if 규칙 == pp.DAY_RULE and str(acct.get("entry_rule") or "tranche") != "open":
             # 당일 단타(T)는 시가 일괄 진입만 — 회차 지정가면 짝 매도가 첫 회차 하나에만 붙어(유일 색인의 tranche=0)
             # 나머지 회차가 밤을 넘기고, 지정가 회차는 종가 판정이라 같은 종가에 사고판다(16.3.2, 25.1886)
