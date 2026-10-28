@@ -42,18 +42,26 @@
 
 | 칸 | 계산(있는 것 / 새로) |
 |---|---|
-| 단계·코호트·누적 시도 번호 | 새로 — 등록부 |
-| 비용 반영 CAGR·초과 CAGR·비용 몫 | `bt.summarize` |
-| 무작위 대조 분위 묶음 하한 | `core_evidence.evidence`, 운영 `pp.selection_evidence().control` |
-| 결정 단위 분위 하한 | `pp.selection_evidence`·`block_bound`, 핵심 H `gate_evidence` |
-| DSR(N = 누적, V = 코호트) | `luck.judge(n_floor=…)` — 시도마다 월 초과수익 계열을 남겨야 함(새로) |
-| 앞·뒤 반 / 걷는 창(12개월 창마다 초과 부호) | `split_half` / 새로(순수 함수) |
-| MDD·투자 비중·평균 보유 수·회전율 | `bt.summarize` |
-| 수용량(목표 금액 ÷ 보유 종목 20일 평균 거래대금) | 새로 |
-| 표본(개월·28일 묶음·서로 다른 종목·끝난 거래) | 위 함수들 |
-| 경고(생존편향·시점 유니버스) | `store_run` 경고 |
+| 단계·코호트·누적 시도 번호 | 새로 — 등록부. **판정판 칸 됨(25.1919)**: 단계 0, 코호트는 작업 이름으로(`backtest` 기본 실행·11-03 부터 → 1, `backtest_core` → 1b, `backtest_explore` → 2, 기준·R1·R2 는 시도 아님), 누적 = `params.trial_floor`(없으면 `luck.n_trials`). 시도마다의 등록 번호는 등록부가 생겨야 |
+| 비용 반영 CAGR·초과 CAGR·비용 몫 | `bt.summarize` — **판정판 칸 됨(25.1919)**. 비용 몫 = (비용 0 CAGR − 비용 반영 CAGR) ÷ 비용 0 CAGR, 같은 실행의 `*_no_cost` 짝이 있을 때만(지금 composite 하나) |
+| 무작위 대조 분위 묶음 하한 | `core_evidence.evidence`, 운영 `pp.selection_evidence().control` — **판정판 칸 됨(25.1919)**: `metrics_json.evidence.lower`(핵심 H·탐색만) |
+| 결정 단위 분위 하한 | `pp.selection_evidence`·`block_bound`, 핵심 H `gate_evidence` — **판정판 칸 됨(25.1919)**: `metrics_json.evidence.gate.lower`(핵심 H·탐색만) |
+| DSR(N = 누적, V = 코호트) | `luck.judge(n_floor=…)` — 시도마다 월 초과수익 계열을 남겨야 함(새로). **판정판 칸 됨(25.1919)**: 저장된 `metrics_json.luck`(dsr·우연 %·N) — V 는 그 실행의 곡선들, 코호트 V 는 계열 저장 뒤 |
+| 앞·뒤 반 / 걷는 창(12개월 창마다 초과 부호) | `split_half` / 새로(순수 함수) — **됨(25.1919)**: 앞·뒤 반은 `metrics_json.split_half`(핵심 H·탐색만), 걷는 창은 `scoreboard.walk_windows`(아래 식) — 월 초과 계열이 저장되기 전까지 판정판 칸은 비어 있다 |
+| MDD·투자 비중·평균 보유 수·회전율 | `bt.summarize` — **판정판 칸 됨(25.1919)**: `metrics_json.mdd`·`invested_share`·`avg_holdings`, `turnover_avg` 열 |
+| 수용량(목표 금액 ÷ 보유 종목 20일 평균 거래대금) | 새로 — **함수 됨(25.1919)**: `scoreboard.capacity`(아래 식). 실행 기록에 보유 내역·거래대금이 없어 판정판 칸은 비어 있다 |
+| 표본(개월·28일 묶음·서로 다른 종목·끝난 거래) | 위 함수들 — **판정판 칸 됨(25.1919)**: 개월(`luck.months`)·리밸런스 수·첫 매수 수·묶음 수(대조·관문)·판 뒤 매도 수. 서로 다른 종목·끝난 거래는 저장되지 않아 빈다 |
+| 경고(생존편향·시점 유니버스) | `store_run` 경고 — **판정판 칸 됨(25.1919)**: `warnings_json` 그대로 + 생존편향 여부·시점/오늘 유니버스 |
 
-판정판은 기존 실행 기록(`metrics_json`·`step_log`)을 읽기만 하는 순수 모듈(`batch/services/scoreboard.py`, 새로)이다. 웹은 계산하지 않는다.
+판정판은 기존 실행 기록(`metrics_json`·`step_log`)을 읽기만 하는 순수 모듈(`batch/services/scoreboard.py`, **됨 25.1919** — 작업·웹 연결은 다음 단계)이다. 웹은 계산하지 않는다.
+
+판정판 모듈(25.1919)의 약속:
+
+- 입력 = 실행 기록(`batch_runs` 의 `job_name`·`started_at`·`step_log` + 그 실행의 `backtest_runs` 행들). 출력 = (전략, 시장, `params.sha`) 마다 한 줄 — 같은 열쇠는 가장 늦은 실행 하나, 실행 수는 `runs`
+- **저장된 값만 옮긴다.** 기록에 없는 칸은 None 이고 `missing[칸]` 에 까닭을 적는다. 비용 0 사본(`*_no_cost`)은 줄로 내지 않고 짝의 비용 몫에만 쓴다. 3장 문턱은 적용하지 않는다(칸만)
+- 월 백테스트(코호트 1) 줄에는 결정 단위·무작위 대조 하한·앞·뒤 반이 없다(월 실행이 싣지 않는다) — 핵심 H·탐색 줄에만 있다
+- **걷는 창** `walk_windows(월 초과, window=12)`: 월 초과(전략 − 기준, `luck.excess_series` 와 같은 뜻)를 달 순으로 놓고 **가장 늦은 달부터 거꾸로** 겹치지 않는 12개월 창으로 자른다(남는 가장 이른 달은 버리고 `dropped`). 창 초과 = 그 창 월 초과의 산술 합, 부호 +1·−1·0. `positive`/`total` 이 3장 "넷 가운데 셋" 의 재료. 빠진 달은 `gaps` 로 센다
+- **수용량** `capacity(목표 금액, 종목별 20일 평균 거래대금, 비중)`: 종목 i 비율 r_i = 목표 × w_i ÷ 거래대금_i(소수 — 0.01 = 1%). `max` = max r_i, `weighted` = Σ w_i·r_i ÷ Σ w_i(잰 종목만). 거래대금이 없는 종목은 `missing` 에 두고 빼므로 그때 `max` 는 하한(`complete` False)
 
 ## 3. 단계별 올림·내림 기준 (첫 값 — 보수적)
 

@@ -774,7 +774,7 @@ class Test밸류_분모:
     "divergence", "tax_sim", "verdict", "forecast_track", "patterns", "insights", "history",
     "event_history", "simulation", "candidate_factors", "cb_overhang", "buy_thesis", "plan_fill", "target_units", "paper", "risk_gate", "execution_quality", "company",
     "broker_mirror", "holding", "desk", "core_backtest", "core_strategy", "holding_eq", "stop_vol", "core_evidence",
-    "exit_pair", "loss_gate", "high52", "earnings_events",
+    "exit_pair", "loss_gate", "high52", "earnings_events", "scoreboard",
 )  # fmt: skip
 
 #: 아직 그물 밖인 모듈과 **왜 아직인지**. 하나씩 줄여 간다
@@ -1208,3 +1208,12 @@ def test_전략_깔때기가_옮겨_적은_상수_1905() -> None:
     검사(FUNNEL, f"실현율 ≥ {desk.GATE_KEPT_PCT:.0f}%(표본 {desk.GATE_KEPT_MIN_N} 이상", "KIS 실현율")
     검사(FUNNEL, f"(지금 `REGISTERED_TRIALS` {jb.REGISTERED_TRIALS} 은 손 상수", "등록 시도 수")
     검사(FUNNEL, f"모델 가정 {bt.Costs().slippage_pct:.2f}%", "모델 슬리피지")
+
+
+def test_판정판이_옮겨_적은_상수_1919() -> None:
+    """판정판(`services/scoreboard`, docs/funnel.md 2.2, 기록 25.1919) — 단계·걷는 창 길이·코호트 1 시작일."""
+    from batch.services import scoreboard as sb
+
+    검사(FUNNEL, f"**판정판 칸 됨(25.1919)**: 단계 {sb.STAGE_REPLAY},", "판정판 단계 (STAGE_REPLAY)")
+    검사(FUNNEL, f"`walk_windows(월 초과, window={sb.WALK_WINDOW_MONTHS})`", "걷는 창 길이 (WALK_WINDOW_MONTHS)")
+    검사(FUNNEL, f"**코호트 1** = {sb.COHORT1_FROM} 매월 기본 실행", "코호트 1 시작일 (COHORT1_FROM)")
