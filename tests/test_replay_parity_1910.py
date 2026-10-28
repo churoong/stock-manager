@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import math
 import random
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from dataclasses import replace as dc_replace
 from datetime import date, datetime
@@ -79,6 +80,9 @@ ALLOW_DAYVIEW_APPROXIMATIONS = "같은 신호 행을 양쪽에 먹임"
 ALLOW_ENGINE_COST_BOOKING = 2.5e-4
 #: ⑨(다) 에서 뒤집혀도 되는 결정 사유 — 든 종목을 목표 비중까지 채우는 자리의 세 결과
 _채우기_사유 = frozenset({"2부 배분", "최소 주문 단위 미만", "종목 비중 상한 도달"})
+#: 변형 → ⑨(다) 채우기 자리의 매수 사유 다른 이름(25.1921) — 미리 고른 계좌는 "2부 배분" 대신 `preselected_reason`
+#: (H "지주사 합의"·D·E "위원회 가결"). tests/test_replay_parity_hde_1921.py 가 넣는다. 비면(B·G) 위 셋 그대로
+채우기_사유_더: dict[str, frozenset[str]] = {}
 
 # ── 합성 자료 — 실제 국내 거래일(운영은 거래소 달력으로 쉼·다음 장을 센다) ─────────────────────────────────
 
@@ -144,6 +148,10 @@ class 리플레이:
     기간: dict[str, dict[int, str | None]]  # 결정일 → 그날 산 종목의 첫 주문 기간(전략 `_Bought.horizon`)
     비중: dict[str, dict[int, float]]  # 결정일 → 판단 직전 비중(cutoff 종가)
     장부: dict[str, dict[int, tuple[str, str | None, float, bool]]]  # 결정일 → 종목 → (첫 매수일, 기간, 주당 원가, 더 삼)
+    #: cutoff → 종목 → 하루 재료가 신호 사이징·조사 자료에 쓴 성과 지표(`CoreMarket._risk`) — 운영 `performance_metrics`
+    #: 자리에 같은 값을 넣는다(허용 ⑧, 25.1921 지주사·위원회 조사 자료)
+    위험: dict[str, dict[int, dict[str, float | None]]] = field(default_factory=dict)
+    하루: dict[str, cb.DayView] = field(default_factory=dict)  # 결정일 → 하루 재료 통째(지주사 가중치 대조, 25.1921)
 
 
 @cache
@@ -153,14 +161,25 @@ def _리플레이(variant: str, 판: str) -> 리플레이:
     s = cs.make_core_strategy(variant, cb.CoreMarket(universe, snaps, idx), sessions=날들, costs=costs,
                               buy_fee_pct=job._수수료("KR", fees)[0])  # fmt: skip
     재료: dict[str, tuple[str, list]] = {}
+    하루: dict[str, cb.DayView] = {}
     원래 = s.market.at
 
     def 엿봄(view: bt.PriceView, day: str | None = None) -> cb.DayView:
         dv = 원래(view, day)
         재료[dv.day] = (dv.cutoff, list(dv.rows))
+        하루[dv.day] = dv
         return dv
 
     s.market.at = 엿봄  # type: ignore[method-assign]
+    위험: dict[str, dict[int, dict]] = {}
+    원래위험 = s.market._risk
+
+    def 위험엿봄(view: bt.PriceView, sid: int, bench: list) -> dict:
+        r = 원래위험(view, sid, bench)
+        위험.setdefault(view.cutoff, {})[sid] = r
+        return r
+
+    s.market._risk = 위험엿봄  # type: ignore[method-assign]
     주문: dict[str, bt.LedgerOrders] = {}
     기간: dict[str, dict[int, str | None]] = {}
     비중: dict[str, dict[int, float]] = {}
@@ -176,7 +195,7 @@ def _리플레이(variant: str, 판: str) -> 리플레이:
         return o
 
     r = bt.simulate(prices, 모의, 모의, 판단, costs, turnover=turn, has_delisted=True)
-    return 리플레이(s, r, 재료, 주문, 기간, 비중, 장부)
+    return 리플레이(s, r, 재료, 주문, 기간, 비중, 장부, 위험, 하루)
 
 
 # ── 운영 ─────────────────────────────────────────────────────────────────────
@@ -195,8 +214,9 @@ class 운영하루:
     record: dict[str, Any] = field(default_factory=dict)
 
 
-def _db(aid: str, fees: dict) -> Client:
-    c = Client(accounts=(aid,))
+def _db(aid: str, fees: dict, c: Client | None = None) -> Client:
+    """그 계좌 하나만 둔 운영 DB — `c` 를 주면 그 DB 에 종목·비용 설정·입금을 넣는다(25.1921 지주사·위원회)."""
+    c = c if c is not None else Client(accounts=(aid,))
     c.conn.execute("DELETE FROM stocks")
     for u in _자료()[0]:
         c.conn.execute(
@@ -219,6 +239,12 @@ def _시세넣기(c: Client, day: str) -> None:
             c.conn.execute(
                 "INSERT INTO prices (stock_id, date, open, high, low, close, volume, currency, source, fetched_at)"
                 " VALUES (?, ?, ?, ?, ?, ?, 1000, 'KRW', 't', 't')", [sid, day, px, px, px, px])  # fmt: skip
+
+
+#: 25.1921 허용 ⑩ — 계좌 → 0주로 베껴도 되는 모자람(보유 비중) 상한. 비면(B·G) 예전처럼 멈춘다
+베낌_0주_상한: dict[str, float] = {}
+#: 실제로 0주로 베낀 자리 (계좌, 비용 판, 결정일, 종목) → 모자란 비중 — 시험이 어느 날·종목인지 단언한다
+베낌_0주: dict[tuple[str, str, str, int], float] = {}
 
 
 def _베끼기(c: Client, aid: str, rp: 리플레이, 판: str, k: int, cutoff: str, rows: list) -> None:
@@ -249,6 +275,12 @@ def _베끼기(c: Client, aid: str, rp: 리플레이, 판: str, k: int, cutoff: 
         # 엔진 자본으로 잰 수량이 운영 보유보다 작으면(비용 판의 자본 차이 — ⑨) 매도로 베끼지 않는다 — 그 날을 이름 붙여
         # 멈춘다(25.1912 바로잡음: 25.1911 은 이것을 "엔진 축소" 라 했지만 `bt.ledger_target` 은 오늘 산 종목을 보유 아래로 줄이지
         # 않는다 — 배<1 의 매수 몫 축소는 베끼기로 그대로 옮겨진다. 이 창의 최소 "더" 는 6주)
+        if 더 < 0 and aid in 베낌_0주_상한:
+            # 25.1921 허용 ⑩(tests/test_replay_parity_hde_1921.py) — 그 계좌에만, 상한 안이면 0주로 베끼고 자리를 남긴다
+            모자람 = -더 * prices[sid][day] / (자본 * NOTIONAL)
+            if 모자람 <= 베낌_0주_상한[aid]:
+                베낌_0주[(aid, 판, day, sid)] = 모자람
+                continue
         assert 더 >= 0, f"{day}: 엔진 자본으로 잰 수량이 운영 보유보다 작다(⑨) — 베끼지 못함, 종목 {sid} {더}주"  # 25.1913: -1 견딤 없앰
         if 더 > 0:
             체결.append(("buy", sid, 더, rp.기간[day].get(sid)))
@@ -272,14 +304,32 @@ def _베끼기(c: Client, aid: str, rp: 리플레이, 판: str, k: int, cutoff: 
         ])  # fmt: skip
 
 
+@dataclass(frozen=True)
+class 운영입력:
+    """선정 방식마다 운영이 `run_step` 앞에 가졌을 입력(25.1921) — 신호 계좌(B·G)는 없음(`_db`·`_시세넣기` 만).
+    지주사·위원회(H·D·E)는 tests/test_replay_parity_hde_1921.py 가 채운다(헌장·조사 자료·지수)."""
+
+    db: Callable[[str, dict], Client]  # (계좌, 비용 설정) → DB
+    판단전: Callable[[Client, 리플레이, str, str], None]  # (DB, 리플레이, 결정일, cutoff) — 그날 run_step 바로 앞
+    시세후: Callable[[Client, str], None]  # (DB, 날) — 그날 종가를 넣은 뒤
+
+
+#: `Variant.selection` → 운영 입력. 없으면 신호 계좌 그대로
+운영입력들: dict[str, 운영입력] = {}
+
+
 @cache
 def _운영(variant: str, 판: str) -> dict[str, 운영하루]:
     """운영 `run_step` 을 리플레이의 결정일마다 — 그날 cutoff 를 trade_date 로, 그날을 국내 오늘로."""
     rp = _리플레이(variant, 판)
-    aid = cs.VARIANTS[variant].account
-    c = _db(aid, 비용판[판][0])
+    spec = cs.variant_spec(variant)  # 탐색 변형(D·E)은 `VARIANTS` 밖(25.1921)
+    aid = spec.account
+    입력 = 운영입력들.get(spec.selection)
+    c = (입력.db if 입력 else _db)(aid, 비용판[판][0])
     for d in 날들[:W]:
         _시세넣기(c, d)
+        if 입력:
+            입력.시세후(c, d)
     mp = pytest.MonkeyPatch()
     out: dict[str, 운영하루] = {}
     try:
@@ -291,6 +341,8 @@ def _운영(variant: str, 판: str) -> dict[str, 운영하루]:
             h = 운영하루(day=day, cutoff=cutoff)
             든 = pp.positions([f for f in job._fills(c)[0] if f.account_id == aid])
             h.lots = {sid: (p.first_buy_date, p.horizon, p.cost / p.quantity) for sid, p in 든.items()}
+            if 입력:
+                입력.판단전(c, rp, day, cutoff)
             _줄, 기록 = job.run_step(
                 c, market="KR", trade_date=cutoff, late=False, signal_rows=rows, settings=설정,
                 price_series=dict(ALLOW_NO_CORRELATION_SHRINK), series_unknown={}, allocate=True,
@@ -317,6 +369,8 @@ def _운영(variant: str, 판: str) -> dict[str, 운영하루]:
             c.conn.execute("UPDATE paper_orders SET status = 'expired', close_note = ? WHERE status = 'open'",
                            [ALLOW_T_CLOSE_FULL_FILLS])  # fmt: skip
             _시세넣기(c, day)
+            if 입력:
+                입력.시세후(c, day)
             _베끼기(c, aid, rp, 판, k, cutoff, rows)
     finally:
         mp.undo()
@@ -383,7 +437,7 @@ def _L2(variant: str, 판: str) -> list[str]:
             # 뒤집힌 **줄 쌍**만 견딘다(25.1911 — 예전엔 종목 단위라 같은 종목의 다른 어긋남까지 지웠다): 든 종목 채우기 자리에서
             # 리플레이 한 줄 ↔ 운영 한 줄, 그 종목 매수 금액이 보유 비중 차이(⑨ 흔들림 + ③ 정수 주) 안
             def 견딜(x: tuple, 산: dict = 로그[day].buys, h: 운영하루 = h) -> bool:
-                return (x[3] is True and x[2] in _채우기_사유
+                return (x[3] is True and x[2] in _채우기_사유 | 채우기_사유_더.get(variant, frozenset())
                         and max(산.get(x[0], 0.0), h.buys.get(x[0], 0.0))
                         <= _흔들림(rp, h, x[0]) + ALLOW_NOTIONAL_EQUITY)  # fmt: skip
 
