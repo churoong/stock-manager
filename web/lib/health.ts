@@ -747,11 +747,13 @@ function 최근날(표: string, 별칭: string, 열: string, 나라: "KR" | "US"
   return `SELECT ${별칭}.${열} AS v FROM ${표} ${별칭} CROSS JOIN stocks s ON s.id = ${별칭}.stock_id WHERE s.country = '${나라}' ORDER BY ${별칭}.${열} DESC LIMIT 1`;
 }
 
-/** 그 나라 성과 지표 가운데 **주간 작업(`batch.jobs.metrics.JOB_NAME`)이 끝까지 돈 실행의 기준일** 행의 가장 늦은 날 (25.1858).
- * 새 편입 단계(`metrics_missing`)만 쓴 날은 건너뛴다. 나라별 행을 보므로 한 나라만 돈 손 실행이 다른 나라 칸을 초록으로
- * 만들지 않는다. 날짜 색인을 뒤에서부터 훑다 그런 날의 첫 행에서 멈춘다(25.1212 와 같은 모양) */
+/** 그 나라 성과 지표 가운데 **주간 작업(`batch.jobs.metrics.JOB_NAME`)이 끝까지 돈 실행이 낸 날** 행의 가장 늦은 날 (25.1858·25.1860).
+ * 새 편입 단계(`metrics_missing`)만 쓴 날은 건너뛴다. 실행 기록 `trade_date` 는 나라별 기준일 가운데 큰 값(예약 월 17:23 UTC —
+ * 국내 월요일)이고 미국 행은 그 직전 거래일(금, 미국 금요일 휴장이면 목)이라 **기준일 6일 전 ~ 기준일** 안의 행을 그 실행이
+ * 낸 것으로 본다(25.1860 — 같은 날만 보면 미국 칸이 영영 비었다, 교차검증 [필수]). 다음 주 일요일 새 편입 행(금)은 그 주
+ * 주간 실행보다 뒤라 들지 않는다. 날짜 색인을 뒤에서부터 훑다 그런 날의 첫 행에서 멈춘다(25.1212 와 같은 모양) */
 function 지표날(나라: "KR" | "US"): string {
-  return `SELECT m.as_of_date AS v FROM performance_metrics m CROSS JOIN stocks s ON s.id = m.stock_id WHERE s.country = '${나라}' AND m.as_of_date IN (SELECT r.trade_date FROM batch_runs r WHERE r.job_name = 'metrics' AND r.status IN ('success', 'partial')) ORDER BY m.as_of_date DESC LIMIT 1`;
+  return `SELECT m.as_of_date AS v FROM performance_metrics m CROSS JOIN stocks s ON s.id = m.stock_id WHERE s.country = '${나라}' AND EXISTS (SELECT 1 FROM batch_runs r WHERE r.job_name = 'metrics' AND r.status IN ('success', 'partial') AND m.as_of_date BETWEEN date(r.trade_date, '-6 day') AND r.trade_date) ORDER BY m.as_of_date DESC LIMIT 1`;
 }
 
 export const FRESHNESS: FreshnessRow[] = [

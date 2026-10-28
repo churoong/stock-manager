@@ -684,7 +684,8 @@ def run(
         db.finish_batch_run(
             client, run_id,
             status="partial" if warnings else "success",
-            step_log={"rows": total, "computed": counts, "warnings": warnings},
+            # 나라별 기준일도 남긴다 — 실행 기록 trade_date 는 그 가운데 큰 값(국내 월), 미국 행은 금(25.1860)
+            step_log={"rows": total, "computed": counts, "warnings": warnings, "as_of_by": as_of_by},
         )
 
         print(f"저장 {total}행")

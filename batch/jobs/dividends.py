@@ -296,7 +296,9 @@ def run(latest: int | None = None, limit: int | None = None, only_missing: bool 
         ).rows[0]
         횟수 = {sid: 지난_횟수.get(sid, 0) + (1 if sid in 실패 else 0) for sid in 실패 | 미처리}
         # 그만 받은 회사의 횟수를 기록에 남긴다 — 빠지면 다음 실행에서 되살아나 세 실행마다 다시 불렸다(25.1859)
-        횟수 |= {sid: n for sid, n in 지난_횟수.items() if n >= MAX_RETRY and sid not in 횟수}
+        # 해마다 도는 전체 수집은 남기지 않는다 — 그 회사를 다시 받았으니 일시 장애로 그만 받은 표시를 푼다(25.1860)
+        if only_missing:
+            횟수 |= {sid: n for sid, n in 지난_횟수.items() if n >= MAX_RETRY and sid not in 횟수}
         step: dict[str, Any] = {
             "report_years": years,
             "companies": len(corps),

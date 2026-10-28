@@ -27,16 +27,19 @@ describe("신선도 질의 (25.1212)", () => {
 
   it("성과 지표는 새 편입 단계의 행이 아니라 주간 작업의 마지막 실행으로 본다 (25.1858)", () => {
     const d = db();
+    // 실제 일정(월 17:23 UTC): 주간 실행 기록 trade_date = 국내 월요일, 미국 행은 직전 금요일 (25.1860)
     d.exec(`INSERT INTO batch_runs (job_name, market, trade_date, started_at, finished_at, status)
-      VALUES ('metrics', NULL, '2026-10-02', '2026-10-05T17:30:00Z', '2026-10-05T17:42:00Z', 'success'),
-             ('metrics_missing', NULL, '2026-10-23', '2026-10-25T16:00:00Z', '2026-10-25T16:05:00Z', 'success'),
-             ('metrics', NULL, '2026-10-16', '2026-10-19T17:30:00Z', '2026-10-19T17:40:00Z', 'failed');
+      VALUES ('metrics', NULL, '2026-10-05', '2026-10-05T17:30:00Z', '2026-10-05T17:42:00Z', 'success'),
+             ('metrics', NULL, '2026-10-19', '2026-10-19T17:30:00Z', '2026-10-19T17:40:00Z', 'failed'),
+             ('metrics_missing', NULL, '2026-10-23', '2026-10-25T16:00:00Z', '2026-10-25T16:05:00Z', 'success');
       INSERT INTO performance_metrics (stock_id, as_of_date, window, data_points, calc_version, created_at)
-      VALUES (1, '2026-10-02', '1Y', 250, 1, 't'), (1, '2026-10-16', '1Y', 250, 1, 't'), (1, '2026-10-23', '1Y', 250, 1, 't'),
-             (2, '2026-10-23', '1Y', 250, 1, 't');`);
+      VALUES (1, '2026-10-05', '1Y', 250, 1, 't'), (2, '2026-10-02', '1Y', 250, 1, 't'),
+             (1, '2026-10-19', '1Y', 250, 1, 't'), (2, '2026-10-16', '1Y', 250, 1, 't'),
+             (1, '2026-10-23', '1Y', 250, 1, 't'), (2, '2026-10-23', '1Y', 250, 1, 't');`);
     const 값 = (key: string) => (d.prepare(FRESHNESS.find((f) => f.key === key)!.sql).all() as Array<{ v: string }>)[0]?.v ?? null;
-    expect(값("metrics_kr")).toBe("2026-10-02"); // 새 편입(10-23)·실패한 주간(10-16) 날은 건너뛴다
-    expect(값("metrics_us")).toBeNull(); // 미국은 새 편입 행뿐 — 주간 작업이 낸 날이 없다
+    // 새 편입(10-23)·실패한 주간(10-19 실행) 날은 건너뛰고 마지막 성공 주간(10-05 실행)이 낸 날
+    expect(값("metrics_kr")).toBe("2026-10-05");
+    expect(값("metrics_us")).toBe("2026-10-02"); // 미국은 그 실행의 직전 금요일 행
   });
 
   it("날짜 색인이 있는 표의 나라별 칸은 종목 쪽부터 돌지 않는다", () => {

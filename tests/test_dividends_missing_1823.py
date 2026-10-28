@@ -258,3 +258,16 @@ def test_그만_받은_회사의_횟수는_다음_기록에도_남는다(monkeyp
     assert set(부른) == {"C3"}  # 그만 받은 4 는 부르지 않는다
     log = 기록()
     assert log["retry_counts"] == {"3": 2, "4": 3} and log["given_up"] == [4]
+
+
+def test_해마다_도는_전체_수집은_그만_받은_표시를_푼다(monkeypatch) -> None:  # noqa: ANN001
+    """25.1860 (25.1859 교차검증 [참고]) — 그만 받은 회사의 횟수가 전체 수집에서 그 회사를 받아도 영구히 남아, 일시 장애로
+    그만 받은 새 편입 종목이 나중에 다시 편입돼도 새 편입 실행에서 계속 빠졌다"""
+    m, 부른, 기록 = _실행_준비(monkeypatch, lambda c: (True, "ok", 1))
+    m.conn.execute(
+        "INSERT INTO batch_runs (job_name, market, status, started_at, step_log)"
+        " VALUES ('dividends_missing', 'KR', 'partial', '2026-10-26T16:40:00+00:00', ?)",
+        ['{"snapshot": "2026-10-23", "retry_ids": [], "retry_counts": {"4": 3}, "given_up": [4]}'],
+    )
+    job.run(latest=2025)  # 전체 수집
+    assert "C4" in 부른 and 기록()["given_up"] == [] and 기록()["retry_counts"] == {}
