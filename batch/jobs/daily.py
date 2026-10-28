@@ -2477,10 +2477,13 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
                     # 잠금 보류는 직접 넘긴다(25.1717, 25.1715 교차검증 [권고] 1) — 첫째가 키 없음·베낄 계좌
                     # 없음으로 "꺼짐" 이면 첫째 기록에 `send` 가 안 남아 `challenger_hold` 가 None 이었고, 도전자는
                     # 보류 없이 주문·정리를 냈다
+                    도전자 = _bm2.challenger_account(client)
                     막힘2 = challenger_block(step_log.get("paper") or {}, step_log.get("broker") or {}, 잠금보류,
-                                            _bm2.challenger_account(client))  # fmt: skip
-                    if 막힘2 and "계좌 단계 실패" in str(막힘2):
-                        # 사람에게도 보이게 — 보류 글은 broker2 기록에만 남았다(25.1924, 25.1922 교차검증 [참고])
+                                            도전자)  # fmt: skip
+                    if 도전자 and 도전자 in ((step_log.get("paper") or {}).get("account_errors") or {}):
+                        # 사람에게도 보이게 — 보류 글은 broker2 기록에만 남았다(25.1924). 리포트를 보낸 **뒤**라
+                        # 텔레그램 본문에는 없고 실행 기록 warnings·운영 출력 "주의:"·상황실 경고 수에 남는다(25.1926 —
+                        # 글 대조가 첫째 실패 글 "첫째 계좌 단계 실패" 까지 잡아 계좌 목록으로 바꿈)
                         warnings.append(f"KIS모의투자 도전자: {막힘2}")
                     step_log["broker2"] = _bm2.run(client, market, datetime.now(UTC), slot=_bm2.CHALLENGER,
                                                    frozen=멈춘2, hold_send=str(막힘2) if 막힘2 else None)  # fmt: skip

@@ -83,15 +83,20 @@ def test_가상_단계가_잠금으로_건너뛰면_KIS_는_내지_않는다(mon
 
 def test_도전자_계좌만_깨진_날은_실행이_도전자_베끼기를_보류한다(monkeypatch: pytest.MonkeyPatch) -> None:
     """25.1924 (25.1922 교차검증 [권고]) — 순수 함수 `challenger_block` 만이 아니라 `daily.run` 의 호출 자리까지. 첫째(H)는
-    그대로 내고, 도전자(C) 계좌의 가상 단계만 깨진 날 둘째는 보류 글을 받는다. 리포트 경고에도 한 줄"""
+    그대로 내고, 도전자(C) 계좌의 가상 단계만 깨진 날 둘째는 보류 글을 받는다. 실행 기록 warnings 에도 한 줄 — 리포트를
+    보낸 뒤라 텔레그램 본문에는 없다(25.1926 바로잡음)"""
     _준비(monkeypatch, 0)
     부름 = _kis_desk(monkeypatch, {"accounts": {"H": {"orders": 3}, "C": {"step_error": "KeyError: 1"}},
                                  "account_errors": {"C": "KeyError: 1"}, "frozen": [], "frozen_by_account": {}})
     보낸: list[str] = []
     monkeypatch.setattr(daily.telegram, "send", lambda text, *a, **k: 보낸.append(text))
+    기록들: list[dict] = []
+    monkeypatch.setattr(daily.db, "finish_batch_run", lambda c, rid, **k: 기록들.append(k.get("step_log") or {}))
     daily.run("KR")
     assert 부름["hold"][0] is None
     assert 부름["hold"][1] == "가상 C 계좌 단계 실패 — 오늘 도전자 베끼기 보류"
+    경고 = [w for 로그 in 기록들 for w in (로그.get("warnings") or [])]
+    assert "KIS모의투자 도전자: 가상 C 계좌 단계 실패 — 오늘 도전자 베끼기 보류" in 경고, 경고
 
 
 def test_dry_run_이_깨져도_운용요약을_덮지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:

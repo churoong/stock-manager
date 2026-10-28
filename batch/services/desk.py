@@ -940,8 +940,15 @@ def checks(
         out.append({"level": "high", "text": "멈춤 스위치가 켜져 있어 가상·KIS모의투자 모두 새 주문을 내지 않습니다"})
     p = paper or {}
     if p.get("error"):
+        # KIS 가 베끼는 계좌의 계좌 단계 실패면 그 계좌 줄을 아래에서 겹쳐 내지 않는다 — 대신 주문을 어디까지 적었나를
+        # 여기 붙인다(가상 장부엔 있는데 KIS 엔 안 베낀 주문 — 다음 날 괴리의 까닭, 25.1926)
+        적은곳 = ""
+        for aid, a in (p.get("accounts") or {}).items():
+            if isinstance(a, dict) and str(p["error"]).startswith(f"가상 {aid} 계좌 단계 실패"):
+                적은곳 = _step_error_orders(a)
         out.append({"level": "high",
-                    "text": f"가상모의투자 단계 실패: {str(p['error'])[:120]} — 그날 KIS 베끼기도 하지 않았습니다"})
+                    "text": f"가상모의투자 단계 실패: {str(p['error'])[:120]}" + (f" — {적은곳}" if 적은곳 else "")
+                    + " — 그날 KIS 베끼기도 하지 않았습니다"})
     b = broker or {}
     if b.get("missing"):
         out.append({"level": "high",
@@ -1006,7 +1013,8 @@ def checks(
             # 계좌 단계에서 가둔 예외(25.1920·25.1922) — 다른 계좌는 돌았다. 주문을 적은 뒤에 났을 수 있다.
             # KIS 가 베끼는 계좌면 위 단계 실패 줄이 같은 사건을 이미 말한다(25.1924)
             적음 = _step_error_orders(a)
-            뒤 = f"{적음} 멈춤" if 적음 else "오늘 이 계좌의 평가·매매가 끝나지 않았을 수 있음"
+            # "… 이미 냄 멈춤" 처럼 깨지지 않게 글을 그대로(25.1926)
+            뒤 = 적음 or "오늘 이 계좌의 평가·매매가 끝나지 않았을 수 있음"
             out.append({"level": "high", "text": f"가상 {nm} 계좌 단계 실패({str(a['step_error'])[:100]}) — {뒤}"})
     if p.get("frozen"):
         # `frozen` 은 경계 멈춤(모든 계좌) + 이어 멈춤(경계 전부터 든 계좌만, `action_sticky`)의 합이다 —

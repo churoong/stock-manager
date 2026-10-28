@@ -109,3 +109,37 @@ def test_주문을_어디까지_적었나_글(rec: dict, 글: str) -> None:
     from batch.services import paper as pp
 
     assert pp.step_error_orders(rec) == 글
+
+
+def test_주문을_적던_중_깨지면_적기_전_수가_남는다(c: Any, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
+    """25.1926 (25.1924 교차검증 [권고]) — `_쓰기` 도중 예외(비원자 폴백이면 일부만 적힘)를 run_step 으로. C 의 주문 문장을
+    적는 순간 깨뜨리면 accounts.C 에 `orders_pending` 이 남고, 리포트 ⚠️ 줄이 "적던 중" 을 말한다"""
+    원래 = job._쓰기
+
+    def 쓰기(client: Any, 문장: list) -> None:
+        if any(sql == job.INSERT_ORDER_SQL and a and a[0] == "C" for sql, a in 문장):
+            raise RuntimeError("쓰기 실패")
+        원래(client, 문장)
+
+    monkeypatch.setattr(job, "_쓰기", 쓰기)
+    줄들: list[list[str]] = []
+    원래단계 = job.run_step
+    monkeypatch.setattr(job, "run_step", lambda *a, **k: (r := 원래단계(*a, **k), 줄들.append(r[0]))[0])
+    기록 = _하루(c, monkeypatch, "2026-10-14")
+    c기록 = 기록["accounts"]["C"]
+    assert c기록["step_error"] == "RuntimeError: 쓰기 실패" and c기록.get("orders_pending", 0) >= 1 and "orders" not in c기록
+    assert any("계좌 단계 실패(RuntimeError)" in x and "적던 중" in x for x in 줄들[0]), 줄들[0]
+
+
+def test_베끼는_계좌의_단계_실패_줄에_주문_적은_곳을_붙인다() -> None:
+    """25.1926 — H 계좌 줄을 겹쳐 내지 않으면서 잃던 "주문 N건은 적은 뒤" 를 단계 실패 줄에 붙인다(가상엔 있는데 KIS 엔
+    안 베낀 주문 — 다음 날 괴리의 까닭). "이미 냄" 글은 "멈춤" 없이 그대로"""
+    from batch.services import desk
+
+    H = bm.MIRROR_ACCOUNT
+    p = {"error": f"가상 {H} 계좌 단계 실패: KeyError: x",
+         "accounts": {H: {"orders": 3, "step_error": "KeyError: x"}, "C": {"orders": "이미 냄", "step_error": "E: y"}}}
+    글 = [x["text"] for x in desk.checks(halted=False, paper=p, broker=None, recon_bad=[], warnings=0)]
+    assert any(t.startswith("가상모의투자 단계 실패:") and "주문 3건은 적은 뒤 — 그날 KIS 베끼기도" in t for t in 글), 글
+    assert sum("계좌 단계 실패(" in t for t in 글) == 1  # C 줄만
+    assert any(t.endswith("— 오늘 주문은 앞 실행이 이미 냄") for t in 글), 글
