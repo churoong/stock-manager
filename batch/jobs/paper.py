@@ -827,7 +827,9 @@ def fill_orders(
     # 장의 주문을 한 실행에서 판정할 때(어제 시세가 늦은 아침) 뒤 장 매도가 앞 장 매수보다 먼저 처리돼
     # 거래별 실현손익이 평균 원가 장부(`pp.realized`)와 어긋나고 앞 장 매수의 현금 검사에 뒤 장 매도 대금이 들어갔다
     # (25.1620, 체결 판정 감사 [필수] 2 — `pp.positions` 정렬과 맞춤)
-    for r in sorted(대상, key=lambda x: (str(x["fill_session"]), x["side"] != "sell", int(x["id"]))):
+    # 한 장 안에서 매도 먼저(그날 판 돈을 그날 매수가 쓴다), 같은 날 매매 계좌(T)의 짝 매도만 매수 뒤(25.1881)
+    for r in sorted(대상, key=lambda x: (str(x["fill_session"]), pp.side_rank(str(x["account_id"]), str(x["side"])),
+                                          int(x["id"]))):  # fmt: skip
         o = _order(r)
         날 = o.fill_session
         if any(f.order_id == o.id for f in fills):

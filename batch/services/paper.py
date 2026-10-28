@@ -39,6 +39,27 @@ TRAIL_CODE = "추적손절"
 #: 따로 재는 실험 계좌 (docs/paper.md 16.3.1, 25.1872) — 상황실 순위표 공통 구간·챔피언 후보에 넣지 않고, 결정 원장
 #: 성과 채우기는 따로 한 바퀴(기존 계좌의 하루 상한을 나눠 쓰지 않게). 정의처는 여기 하나(`desk.SEPARATE_IDS`)
 SEPARATE_IDS = ("S",)
+#: 같은 날 사고파는 계좌 — 당일 단타 T (docs/paper.md 16.3.2, 25.1881). 한 날 안의 체결·판정 순서에서 이 계좌의 매도만
+#: 그날 매수 **뒤**로 간다(`side_rank`). 행은 11월에 들어온다 — 이 정렬이 먼저 main 에 있어야 한다
+SAME_DAY_IDS: tuple[str, ...] = ("T",)
+
+
+def side_rank(account_id: str, side: str) -> int:
+    """한 날 안의 순서 — 매도 0 · 매수 1, **같은 날 매매 계좌의 매도는 2**(그날 산 것을 그날 판다).
+
+    다른 계좌는 예전(매도 먼저 — 그날 판 돈과 자리를 그날 매수가 쓴다)과 바이트 그대로다. 같은 날 사고파는 T 의 체결을
+    예전 순서로 다시 읽으면 매도가 매수보다 먼저 와 `positions` 가 "보유 없는 매도" 로 던지고, 그 호출이 계좌별 보호
+    밖이라 단계 전체와 그 뒤 KIS 베끼기가 멈췄다(16.3.2 설계 검토)"""
+    if side != "sell":
+        return 1
+    return 2 if account_id in SAME_DAY_IDS else 0
+
+
+def fill_key(f: Fill) -> tuple[str, int, int]:
+    """체결 장부를 다시 읽는 순서 — 체결일, `side_rank`, 주문 번호. `positions`·`realized` 가 같이 쓴다"""
+    return (f.fill_date, side_rank(f.account_id, f.side), f.order_id)
+
+
 #: 스윙(S)의 매도 규칙 이름과 `close_exit` 까닭 → 사유 코드 (16.3.1, 25.1871)
 SWING_RULE = "swing_close"
 SWING_CODES = {"stop": "스윙손절", "target": "스윙목표", "time": "스윙기한"}
@@ -417,7 +438,7 @@ def positions(fills: list[Fill]) -> dict[int, Position]:
     다 팔면 지운다 — 다시 사면 첫 매수일·기간·점수 기준점이 새로 잡힌다(실제 보유의 25.286 과 같은 뜻)
     """
     out: dict[int, Position] = {}
-    for f in sorted(fills, key=lambda x: (x.fill_date, 0 if x.side == "sell" else 1, x.order_id)):
+    for f in sorted(fills, key=fill_key):
         p = out.get(f.stock_id)
         if f.side == "buy":
             if p is None:
@@ -452,7 +473,7 @@ def realized(fills: list[Fill]) -> list[dict[str, Any]]:
     """
     보유: dict[int, tuple[int, float, float]] = {}  # 수량, 원화 원가, 현지 통화 원가
     out: list[dict[str, Any]] = []
-    for f in sorted(fills, key=lambda x: (x.fill_date, 0 if x.side == "sell" else 1, x.order_id)):
+    for f in sorted(fills, key=fill_key):
         q, c, 현 = 보유.get(f.stock_id, (0, 0.0, 0.0))
         환율 = f.fx_rate if f.currency != "KRW" and f.fx_rate else 1.0
         if f.side == "buy":
