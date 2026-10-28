@@ -44,7 +44,7 @@ export interface Watch {
  * 날짜와 비교하면 성공한 날에도 매일 무응답 알림이 간다.
  *
  * 그래서 **끝난 시각**으로 본다. 12시간이면 국내(개장 33분 전 시작)와 미국(1시간 전),
- * 국내 감성(개장 80분 전)을 모두 덮으면서 전날 실행(약 24시간 전)과는 겹치지 않는다.
+ * 국내 감성(개장 5시간 20분 전 예약 — 늦게 와도 그 뒤)을 모두 덮으면서 전날 실행(약 24시간 전)과는 겹치지 않는다.
  */
 export const SUCCESS_WINDOW_HOURS = 12;
 
@@ -52,7 +52,7 @@ export const WATCHES: Watch[] = [
   { job: "daily_kr", market: "KR", label: "국내 일일 배치", dueOffsetMinutes: 20, where: "GitHub Actions → 일일 배치 (국내)", schedule: "매 거래일 08:27 KST (cron-job.org → daily-kr.yml), 실패·건너뜀이면 09:35 KST 예비 실행", retryNote: "09:35 KST 에 예비 실행이 한 번 더 시도합니다 — 그 뒤에도 없으면 손으로 확인하세요" },
   // 재시도 안내는 실패 알림(`cal.next_scheduled_hint`)과 같게 — 14:27 UTC(23:27 KST) 예비 (25.1678·25.1683)
   { job: "daily_us", market: "US", label: "미국 일일 배치", dueOffsetMinutes: 0, where: "GitHub Actions → 일일 배치 (미국)", schedule: "미국 정규장 1시간 전 (08:27 ET, daily-us.yml), 실패·건너뜀이면 23:27 KST 예비 실행", retryNote: "23:27 KST(개장 무렵)에 예비 실행이 한 번 더 시도합니다 — 그 뒤에도 없으면 손으로 확인하세요" },
-  { job: "sentiment", market: "KR", label: "국내 뉴스 감성 채점", dueOffsetMinutes: -30, where: "GitHub Actions → 국내 뉴스 감성", schedule: "매 거래일 07:40 KST (sentiment-kr.yml)" },
+  { job: "sentiment", market: "KR", label: "국내 뉴스 감성 채점", dueOffsetMinutes: -30, where: "GitHub Actions → 국내 뉴스 감성", schedule: "매 거래일 03:40 KST (sentiment-kr.yml — Actions 예약이 몇 시간 늦게 와도 08:27 전에 끝나게)" },
 ];
 
 export interface Session {
@@ -159,7 +159,7 @@ export function countsForToday(last: LastSuccess | null, session: Session): bool
   if (last.finished_at < successWindowFrom(session)) return false;
   // **그 시장의 오늘 날짜에 끝났어야 한다** (docs/infra.md 25.376). 12시간 창의 시작은 국내 개장 09:00 − 12h =
   // **전날 21:00 KST** 라, 전날 밤 22:00 에 /status 에서 손으로 다시 돌린 성공이 "오늘 성공" 으로 세졌다 —
-  // 다음 날 08:27 예약이 안 불려도 알림 0건이었다. 예약 배치(국내 07:40·08:27 KST, 미국 08:27 ET)는 모두 현지 자정 뒤다
+  // 다음 날 08:27 예약이 안 불려도 알림 0건이었다. 예약 배치(국내 03:40·08:27 KST, 미국 08:27 ET)는 모두 현지 자정 뒤다
   const t = Date.parse(last.finished_at);
   return Number.isNaN(t) ? true : localDate(session.market as "KR" | "US", new Date(t)) === session.date;
 }

@@ -87,7 +87,7 @@ def test_주_월_작업도_몫에_든다_25_852() -> None:
     루트_wf = 루트 / ".github" / "workflows"
     for 파일, 예약 in (("backup.yml", '"13 16 * * 0"'), ("backup.yml", '"47 16 1 * *"'), ("backup.yml", '"47 16 8 * *"'), ("valuation-bands.yml", '"53 17 * * 1"'),
                      ("signal-outcomes.yml", '"7 21 * * 1"'), ("earnings-calendar.yml", '"53 15 * * 1"'),
-                     ("daily-kr.yml", '"27 23 * * 0-4"'), ("sentiment-kr.yml", '"40 22 * * 0-4"'),
+                     ("daily-kr.yml", '"27 23 * * 0-4"'), ("sentiment-kr.yml", '"40 18 * * 0-4"'),
                      ("etf.yml", '"19 17 2 * *"'), ("sectors.yml", '"43 18 3 * *"'), ("accumulation.yml", '"17 19 6 * *"'),
                      ("dividends.yml", '"41 18 5 4,5 *"')):  # fmt: skip
         assert 예약 in (루트_wf / 파일).read_text(encoding="utf-8"), (파일, 예약)

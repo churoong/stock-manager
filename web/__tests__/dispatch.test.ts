@@ -32,11 +32,11 @@ describe("배치 목록", () => {
 
   it("감시 대상마다 예약 시각 글이 있고 워크플로 cron 과 맞는다", () => {
     for (const w of WATCHES) expect(w.schedule.length).toBeGreaterThan(5);
-    // 국내 08:27 KST = 23:27 UTC (daily-kr.yml), 감성 07:40 KST = 22:40 UTC
+    // 국내 08:27 KST = 23:27 UTC (daily-kr.yml), 감성 03:40 KST = 18:40 UTC (25.1840)
     expect(readFileSync(join(WF, "daily-kr.yml"), "utf-8")).toContain('cron: "27 23 * * 0-4"');
     expect(WATCHES.find((w) => w.job === "daily_kr")?.schedule).toContain("08:27");
-    expect(readFileSync(join(WF, "sentiment-kr.yml"), "utf-8")).toContain('cron: "40 22 * * 0-4"');
-    expect(WATCHES.find((w) => w.job === "sentiment")?.schedule).toContain("07:40");
+    expect(readFileSync(join(WF, "sentiment-kr.yml"), "utf-8")).toContain('cron: "40 18 * * 0-4"');
+    expect(WATCHES.find((w) => w.job === "sentiment")?.schedule).toContain("03:40");
   });
 });
 
