@@ -52,12 +52,18 @@ RULES = (DAY, SWING)
 
 @dataclass(frozen=True)
 class Costs:
-    """편도 %. 매수 수수료·매도 수수료·매도세·슬리피지(시장가에만)."""
+    """편도 %. 매수 수수료·매도 수수료·매도세·슬리피지(시장가에만). `tax_schedule` 이 있으면 **청산일**의 세율
+    ((시행일, %) 오름차순 — 백테스트 `Costs.tax_schedule` 과 같은 꼴, 25.1863)."""
 
     buy_fee_pct: float
     sell_fee_pct: float
     sell_tax_pct: float
     slippage_pct: float
+    tax_schedule: tuple[tuple[str, float], ...] = ()
+
+    def tax_at(self, day: str | None) -> float:
+        세율 = [r for d, r in self.tax_schedule if day is not None and d <= day]
+        return 세율[-1] if 세율 else self.sell_tax_pct
 
 
 @dataclass(frozen=True)
@@ -70,23 +76,30 @@ class Trade:
     entry_price: float | None = None
     exit_date: str | None = None
     exit_price: float | None = None
-    reason: str | None = None  # close · target · target_gap · stop · stop_gap · time · 상한가 시가 · 시세 없음
+    #: close · target · target_gap · stop · stop_gap · time · 끊김 · (체결 못 함) 상한가 시가 · 시세 없음 · 시세 끊김
+    reason: str | None = None
     sessions: int = 0
     gross: float | None = None
     net: float | None = None  # 비용 뒤 수익률
 
 
-def _net(entry: float, exit_: float, c: Costs) -> float:
+def _net(entry: float, exit_: float, c: Costs, day: str | None = None) -> float:
     """비용 뒤 수익률. 매수 금액 = 진입가 × (1 + 매수 수수료), 매도 대금 = 청산가 × (1 − 매도 수수료 − 세)."""
     산 = entry * (1 + c.buy_fee_pct / 100)
-    판 = exit_ * (1 - (c.sell_fee_pct + c.sell_tax_pct) / 100)
+    판 = exit_ * (1 - (c.sell_fee_pct + c.tax_at(day)) / 100)
     return round(판 / 산 - 1, 6)
 
 
 def simulate(stock_id: int, signal_date: str, bars: list[Bar], rule: Rule, costs: Costs, country: str,
-             prev_close: float | None = None) -> Trade:  # fmt: skip
-    """`bars` 는 신호 날 **뒤**의 그 종목 시세(오름차순). `prev_close` 는 신호 날 종가(상한가 시가 판정용)."""
+             prev_close: float | None = None, ended: bool = False) -> Trade:  # fmt: skip
+    """`bars` 는 신호 날 **뒤**의 그 종목 시세(오름차순). `prev_close` 는 신호 날 종가(상한가 시가 판정용).
+
+    `ended` — 그 종목 계열이 시장보다 먼저 끝났다(상장폐지·장기 정지). 청산 전에 시세가 끊기면 **마지막 종가로 닫는다**
+    (`끊김`, 25.1863 교차검증 [권고]) — 열린 채 두면 끝난 거래 집계에서 빠져, 떨어진 뒤 끊기는 종목일수록 빠지는
+    생존편향이 생긴다(신호 성적표 25.696 과 같은 꼴)"""
     if not bars or not bars[0].open or bars[0].open <= 0:
+        if not bars and ended:
+            return Trade(stock_id, signal_date, rule.name, "no_entry", reason="시세 끊김")
         return Trade(stock_id, signal_date, rule.name, "no_entry" if bars else "open",
                      reason="시세 없음" if bars else None)  # fmt: skip
     첫 = bars[0]
@@ -97,7 +110,7 @@ def simulate(stock_id: int, signal_date: str, bars: list[Bar], rule: Rule, costs
 
     def 끝(bar: Bar, 값: float, 까닭: str, n: int) -> Trade:
         return Trade(stock_id, signal_date, rule.name, "closed", 첫.date, round(진입, 6), bar.date, round(값, 6),
-                     까닭, n, round(값 / 진입 - 1, 6), _net(진입, 값, costs))  # fmt: skip
+                     까닭, n, round(값 / 진입 - 1, 6), _net(진입, 값, costs, bar.date))  # fmt: skip
 
     if rule.kind == "day":
         return 끝(첫, 첫.close * (1 - slip), "close", 1)
@@ -115,6 +128,8 @@ def simulate(stock_id: int, signal_date: str, bars: list[Bar], rule: Rule, costs
             return 끝(bar, 목표, "target", i + 1)
         if i == rule.max_sessions - 1:
             return 끝(bar, bar.close * (1 - slip), "time", i + 1)
+    if ended:
+        return 끝(bars[-1], bars[-1].close * (1 - slip), "끊김", len(bars))
     return Trade(stock_id, signal_date, rule.name, "open", 첫.date, round(진입, 6), sessions=len(bars))
 
 
@@ -129,6 +144,9 @@ class Stat:
     median_net: float | None = None
     profit_factor: float | None = None  # 이긴 합 ÷ 진 합(절댓값). 진 것이 없으면 None
     avg_sessions: float | None = None
+    #: 끝난 거래의 서로 다른 종목 수 — 단기 신호는 조건이 이어지는 동안 날마다 다시 나와 같은 종목의 거의 같은 거래가
+    #: 겹친다. 거래 수(n)는 독립 표본보다 크다 (25.1863)
+    stocks: int = 0
     reasons: dict[str, int] = field(default_factory=dict)
 
     def as_dict(self) -> dict:
@@ -151,6 +169,7 @@ def summarize(trades: list[Trade], rule: str) -> Stat:
     s.median_net = round(statistics.median(nets), 6)
     s.profit_factor = round(sum(이김) / -sum(짐), 4) if 짐 else None
     s.avg_sessions = round(sum(t.sessions for t in 끝남) / len(끝남), 2)
+    s.stocks = len({t.stock_id for t in 끝남})
     for t in 끝남:
         s.reasons[str(t.reason)] = s.reasons.get(str(t.reason), 0) + 1
     return s

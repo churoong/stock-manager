@@ -69,3 +69,36 @@ def test_집계() -> None:
 def test_규칙은_한_벌만_사전_등록() -> None:
     assert [r.name for r in sh.RULES] == ["day_v1", "swing_v1"]
     assert (sh.SWING.target_pct, sh.SWING.stop_pct, sh.SWING.max_sessions) == (0.05, -0.03, 10)
+
+
+def test_비용_있는_스윙_손절_기한과_선_기준은_슬리피지_전_시가() -> None:
+    """25.1863 (25.1862 교차검증 [권고]) — 스윙 시험이 무비용뿐이라 손절·기한의 슬리피지와 선 기준이 묶이지 않았다"""
+    s = 비용.slippage_pct / 100
+    손절 = sh.simulate(1, "d0", [B("d1", 100, 101, 96.5, 98)], sh.SWING, 비용, "KR")
+    assert 손절.exit_price == pytest.approx(97 * (1 - s)) and 손절.entry_price == pytest.approx(100 * (1 + s))
+    기한 = sh.simulate(1, "d0", [B(f"d{i}", 100, 101, 99, 100.5) for i in range(1, 12)], sh.SWING, 비용, "KR")
+    assert 기한.exit_price == pytest.approx(100.5 * (1 - s))
+    # 선 기준은 시가 100 — 고가 104.95 는 목표(105) 아래, 고가 105.0 은 목표. 진입가(100.1) 기준이면 105.105 라 갈린다
+    assert sh.simulate(1, "d0", [B("d1", 100, 105.0, 99, 104)], sh.SWING, 비용, "KR").reason == "target"
+
+
+def test_시세가_끊기면_마지막_종가로_닫는다() -> None:
+    """25.1863 (25.1862 교차검증 [권고]) — 진입 뒤 상장폐지·장기 정지면 영영 진행 중으로 남아 떨어진 뒤 끊기는 종목이 빠졌다"""
+    줄 = [B("d1", 100, 101, 98.5, 99), B("d2", 99, 99, 97.5, 98)]
+    assert sh.simulate(1, "d0", 줄, sh.SWING, 무비용, "KR").status == "open"
+    끊 = sh.simulate(1, "d0", 줄, sh.SWING, 무비용, "KR", ended=True)
+    assert (끊.status, 끊.reason, 끊.exit_price, 끊.exit_date) == ("closed", "끊김", 98.0, "d2")
+    assert sh.simulate(1, "d0", [], sh.DAY, 무비용, "KR", ended=True).reason == "시세 끊김"
+
+
+def test_매도세는_청산일_세율() -> None:
+    일정 = sh.Costs(0.0, 0.0, 0.15, 0.0, (("2026-01-01", 0.15), ("2026-12-01", 0.20)))
+    앞 = sh.simulate(1, "d0", [B("2026-11-02", 100, 101, 99, 100)], sh.DAY, 일정, "KR")
+    뒤 = sh.simulate(1, "d0", [B("2026-12-02", 100, 101, 99, 100)], sh.DAY, 일정, "KR")
+    assert 앞.net == pytest.approx(-0.0015) and 뒤.net == pytest.approx(-0.0020)
+
+
+def test_집계는_종목_수도_센다() -> None:
+    ts = [sh.Trade(1, "d1", "day_v1", "closed", net=0.01, sessions=1), sh.Trade(1, "d2", "day_v1", "closed", net=0.01,
+          sessions=1), sh.Trade(2, "d1", "day_v1", "closed", net=-0.01, sessions=1)]  # fmt: skip
+    assert sh.summarize(ts, "day_v1").stocks == 2

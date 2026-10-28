@@ -105,13 +105,16 @@ def load_closes(
     return out
 
 
-#: 그림자 장부(docs/paper.md 16장, 25.1862)의 하루 시세. 시가·고가·저가는 시세 사본(`price_replica.PRICE_COLS`)에 없어
-#: Turso 로 간다 — 단기 신호 종목·가장 이른 신호 날부터만이라 위 종가 읽기보다 훨씬 작다
+#: 그림자 장부(docs/paper.md 16장, 25.1862)의 하루 시세. 시가·고가·저가는 시세 사본(`price_replica.PRICE_COLS`)에 없다 —
+#: 사본으로 보내진 질의가 열 없음 오류로 Turso 로 물러난다(`ReplicaClient` 의 폴백). 단기 신호 종목·가장 이른 신호
+#: 날부터만이라 위 종가 읽기보다 작다. 0 이하 수정주가 거르개는 `load_closes` 와 같다(25.1863)
 BARS_SQL = (
     "SELECT p.stock_id, p.date, p.open, p.high, p.low, p.close, p.adj_close, s.country"
     " FROM prices p JOIN stocks s ON s.id = p.stock_id WHERE p.stock_id IN (SELECT value FROM json_each(?))"
-    " AND p.date >= ? AND p.close > 0 ORDER BY p.stock_id, p.date"
+    " AND p.date >= ? AND p.close > 0 AND COALESCE(p.adj_close, p.close) > 0 ORDER BY p.stock_id, p.date"
 )
+#: 그 종목 마지막 시세가 시장 마지막 날보다 이만큼(달력일) 넘게 앞이면 계열이 끝났다고 본다 — 스윙 기한 10거래일 ≈ 14일
+SHADOW_ENDED_DAYS = 14
 
 
 def load_bars(client: TursoClient, stock_ids: list[int], since: str) -> dict[int, list[sh.Bar]]:
@@ -132,19 +135,27 @@ def load_bars(client: TursoClient, stock_ids: list[int], since: str) -> dict[int
     return out
 
 
-def shadow_trades(signals: list[dict[str, Any]], bars: dict[int, list[sh.Bar]], costs: sh.Costs,
-                  country: str) -> list[sh.Trade]:  # fmt: skip
-    """**단기 신호마다** 단타·스윙 규칙으로 가상 체결 (25.1862). 돈·종목 수 제약 없이 모두 — 계좌보다 표본이 크다."""
+def shadow_trades(signals: list[dict[str, Any]], bars: dict[int, list[sh.Bar]], costs: sh.Costs, country: str,
+                  market_last: dict[str, str] | None = None) -> list[sh.Trade]:  # fmt: skip
+    """넘긴 신호마다 단타·스윙 규칙으로 가상 체결 (25.1862). 돈·종목 수 제약 없이 모두 — 계좌보다 표본이 크다.
+    단기 신호로 거르는 것은 부르는 쪽(`compute`) 한 곳이다(25.1863 — 두 곳에 겹쳐 하나를 빼도 시험이 못 잡았다).
+    `market_last`(시장 → 대부분의 종목이 들어온 마지막 날)가 그 종목 마지막 시세보다 `SHADOW_ENDED_DAYS` 넘게
+    뒤면 끊김"""
+    from datetime import date as _date
+
     out: list[sh.Trade] = []
     for sig in signals:
-        if str(sig.get("horizon")) != "short":
-            continue
         sid, d = int(sig["stock_id"]), str(sig["as_of_date"])
         줄 = bars.get(sid, [])
         뒤 = [b for b in 줄 if b.date > d]
         앞 = [b for b in 줄 if b.date <= d]
+        시장끝 = (market_last or {}).get(str(sig.get("market"))) or (market_last or {}).get(country)
+        종목끝 = 줄[-1].date if 줄 else d
+        끊김 = bool(시장끝) and (
+            _date.fromisoformat(str(시장끝)) - _date.fromisoformat(종목끝)
+        ).days > SHADOW_ENDED_DAYS
         for rule in sh.RULES:
-            out.append(sh.simulate(sid, d, 뒤, rule, costs, country, 앞[-1].close if 앞 else None))
+            out.append(sh.simulate(sid, d, 뒤, rule, costs, country, 앞[-1].close if 앞 else None, ended=끊김))
     return out
 
 
@@ -284,7 +295,7 @@ def store(
 
 def compute(
     client: TursoClient, country: str, today: str, plan: list[pf.PlanFill] | None = None,
-    held: set[int] | None = None, shadow: tuple[list[sh.Trade], sh.Costs] | None = None,
+    held: set[int] | None = None, shadow: tuple[list[sh.Trade], sh.Costs, dict[str, Any]] | None = None,
 ) -> tuple[list[oc.Outcome], list[oc.Stat]]:
     """`plan` 을 넘기면 창 안 신호의 분할 계획 체결 성적(docs/signals.md 10.2)을 거기에 더한다.
     굳은 성적은 계획이 없다.
@@ -298,12 +309,6 @@ def compute(
     frozen = load_frozen(client, country, since) + load_held(client, country, since, held)
     if not signals:
         return [], oc.summarize(frozen)
-    # 그림자 장부 (25.1862) — 같은 신호 목록으로. 분할 재수집 대기(held)는 위에서 이미 뺐다
-    if shadow is not None:
-        단기 = [s for s in signals if str(s.get("horizon")) == "short"]
-        if 단기:
-            줄 = load_bars(client, sorted({int(s["stock_id"]) for s in 단기}), min(str(s["as_of_date"]) for s in 단기))
-            shadow[0].extend(shadow_trades(단기, 줄, shadow[1], country))
     ids = sorted({int(s["stock_id"]) for s in signals})
     raw: dict[int, dict[str, float]] = {}
     closes = load_closes(client, ids, since, raw)
@@ -325,7 +330,27 @@ def compute(
         )
         if plan is not None and (f := pf.evaluate(sig, results[-1], closes.get(sid, []), raw.get(sid))) is not None:
             plan.append(f)
+    if shadow is not None:
+        _shadow(client, country, signals, 끝날, shadow)
     return results, oc.summarize(results + frozen)
+
+
+def _shadow(client: TursoClient, country: str, signals: list[dict[str, Any]], 끝날: dict[str, str],
+            shadow: tuple[list[sh.Trade], sh.Costs, dict[str, Any]]) -> None:  # fmt: skip
+    """그림자 장부 (25.1862) — 같은 신호 목록(분할 재수집 대기는 이미 뺐다)의 **단기 신호만**. 기록 전용 곁다리라
+    실패해도 본 성적표를 막지 않는다 (25.1863, 25.1862 교차검증 [필수] — 시세 읽기 예외가 성적표 저장 전에 실행을
+    failed 로 닫았다). 까닭은 `shadow[2]['error']` 에 남는다"""
+    try:
+        단기 = [s for s in signals if str(s.get("horizon")) == "short"]
+        if not 단기:
+            return
+        줄 = load_bars(client, sorted({int(s["stock_id"]) for s in 단기}), min(str(s["as_of_date"]) for s in 단기))
+        shadow[2]["bars_rows"] = sum(len(v) for v in 줄.values())  # 읽기 예산 실측(paper.md 12장)
+        shadow[0].extend(shadow_trades(단기, 줄, shadow[1], country, 끝날))
+    except Exception as exc:  # noqa: BLE001 — 곁다리
+        log.warning("그림자 장부 실패: %s", exc)
+        shadow[0].clear()
+        shadow[2]["error"] = f"{type(exc).__name__}: {str(exc)[:200]}"
 
 
 def load_scores(client: TursoClient, country: str, since: str) -> dict[tuple[int, str], float]:
@@ -372,7 +397,8 @@ def shadow_costs(client: TursoClient, country: str, today: str) -> sh.Costs:
     from batch.services import backtest as bt
 
     c = bt.Costs.for_country(country, db.get_setting(client, "fees", {}), db.get_setting(client, "taxes", {}))
-    return sh.Costs(c.commission_pct, c.commission_pct, c.tax_at(today), c.slippage_pct)
+    # 매도세는 청산일 세율(25.1863) — 일정이 없으면(미국) 오늘 값 하나
+    return sh.Costs(c.commission_pct, c.commission_pct, c.tax_at(today), c.slippage_pct, tuple(c.tax_schedule))
 
 
 def shadow_line(s: dict[str, Any]) -> str:
@@ -380,7 +406,8 @@ def shadow_line(s: dict[str, Any]) -> str:
     if not s.get("n"):
         return f"끝난 거래 없음 (진행 {s.get('open', 0)}, 체결 못 함 {s.get('no_entry', 0)})"
     pf_ = s.get("profit_factor")
-    return (f"끝 {s['n']}건 · 승률 {s['win_rate'] * 100:.0f}% · 비용 뒤 평균 {s['avg_net'] * 100:+.2f}%"
+    return (f"끝 {s['n']}건({s.get('stocks', 0)}종목) · 승률 {s['win_rate'] * 100:.0f}%"
+            f" · 비용 뒤 평균 {s['avg_net'] * 100:+.2f}%"
             f" · 중앙 {s['median_net'] * 100:+.2f}% · 손익비 {'-' if pf_ is None else f'{pf_:.2f}'}"
             f" · 평균 {s['avg_sessions']}거래일 · 진행 {s['open']} · 체결 못 함 {s['no_entry']}")  # fmt: skip
 
@@ -395,11 +422,12 @@ def run(market: str) -> int:
         try:
             계획: list[pf.PlanFill] = []
             그림자: list[sh.Trade] = []
+            그림자_메모: dict[str, Any] = {}
             비용 = shadow_costs(client, country, today)
             # 미국 분할 재수집 대기 종목은 이번에 다시 채점하지 않는다 (25.1822). 못 읽으면 실패로 닫는다 — 거짓 손실을
             # 저장하는 것보다 한 주 미루는 쪽이 덜 틀린다(창 안은 다음 주 실행이 다시 낸다)
             대기 = db.split_pending_us(client, today) if country == "US" else set()
-            results, stats = compute(client, country, today, 계획, held=대기, shadow=(그림자, 비용))
+            results, stats = compute(client, country, today, 계획, held=대기, shadow=(그림자, 비용, 그림자_메모))
             now = db.now_iso()
             store(client, country, [to_row(o, now) for o in results], stats, now, since_of(today), held=대기)
             # 점수 보정표 (docs/signals.md 10.1, 25.949) — 굳은 성적까지 포함해 점수와 수익을 짝짓는다
@@ -410,9 +438,10 @@ def run(market: str) -> int:
                 db.finish_batch_run(client, run_id, status="failed", error_text=str(exc))
             raise
         그림자_집계 = {"rules": {r.name: r.__dict__ for r in sh.RULES}, "costs": 비용.__dict__, "as_of": today,
-                      "stats": {r.name: sh.summarize(그림자, r.name).as_dict() for r in sh.RULES}}  # fmt: skip
-        # 웹·주간 요약이 읽을 자리 — 실행 기록보다 찾기 쉽다(나라마다 한 키)
-        db.set_setting(client, f"{SHADOW_KEY}_{country.lower()}", 그림자_집계)
+                      "stats": {r.name: sh.summarize(그림자, r.name).as_dict() for r in sh.RULES},
+                      **그림자_메모}  # fmt: skip
+        그림자_경고 = f"그림자 장부 — {그림자_메모['error']}" if 그림자_메모.get("error") else None
+        경고 = [w for w in (보정_경고, 그림자_경고) if w]
         db.finish_batch_run(
             client, run_id, status="success",
             step_log={"signals": len(results), "stats": [(s.horizon, s.window, s.n) for s in stats],
@@ -421,8 +450,14 @@ def run(market: str) -> int:
                       "horizon_fit": oc.horizon_fit(results),  # 기록 전용 (signals.md 10.4, 25.1441)
                       **({"split_pending_held": len(대기)} if 대기 else {}),  # 25.1822
                       "shadow": 그림자_집계,  # 그림자 장부 (25.1862)
-                      "warnings": [보정_경고] if 보정_경고 else []},
+                      "warnings": 경고},
         )  # fmt: skip
+        # 웹·주간 요약이 읽을 자리(나라마다 한 키) — 실행 기록을 닫은 **뒤**, 실패해도 넘어간다(25.1863: 앞에 두면 이
+        # 쓰기 하나가 실패해 성공한 실행이 running 으로 남았다). 집계는 실행 기록 step_log.shadow 에도 있다
+        try:
+            db.set_setting(client, f"{SHADOW_KEY}_{country.lower()}", 그림자_집계)
+        except Exception as exc:  # noqa: BLE001 — 곁다리, 경고 로그
+            log.warning("그림자 장부 집계를 설정에 적지 못함: %s", exc)
         print(f"신호 성적표 {country}: 신호 {len(results)}건")
         if 대기:
             print(f"  분할 재수집 대기 {len(대기)}종목은 다시 채점하지 않고 지난 성적을 둠")
