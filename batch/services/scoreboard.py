@@ -17,7 +17,8 @@
 적는다(None 인 칸은 모두 `missing` 에 까닭이 있다 — 시험이 대조).
 
 - `*_no_cost` 행(비용 0 사본)은 줄로 내지 않는다 — 같은 실행 같은 이름 짝의 비용 몫을 내는 데만 쓴다
-- 올림·내림 문턱(funnel.md 3장)은 여기서 적용하지 않는다 — 칸만 낸다
+- 올림·내림 문턱(funnel.md 3장)은 0 → 1 첫 값만 `stage01` 이 대어 본다(25.1950 — 코호트 줄만). 1 → 2 이후 문턱은
+  적용하지 않는다
 - DB·네트워크 없음. 표준 라이브러리만 쓴다(시험이 import 를 대조)
 
 새 순수 함수 둘(funnel.md 2.2 "새로"): `walk_windows`(걷는 창 — 12개월 창마다 초과 부호), `capacity`(수용량).
@@ -359,11 +360,13 @@ def stage01(row: dict[str, Any], base: dict[str, Any] | None) -> dict[str, Any] 
     `ok` = True·False·None(모름 — 칸이 비었거나 재료 미저장). 하나라도 False 면 "탈락", 모두 True 면 "후보",
     아니면 "모름". 시도 아닌 줄(`NOT_TRIALS`)은 None. 앞·뒤 반은 반 기간 CAGR > 0 으로 본다 `[확인필요]`(초과가
     아니라 절대 — `split_half` 가 싣는 값). 한 코호트 10개 상한은 여러 줄을 보는 일이라 여기서 세지 않는다"""
-    if row.get("strategy") in NOT_TRIALS:
+    if row.get("strategy") in NOT_TRIALS or row.get("cohort") is None:
         return None
 
     def ok(v: Any, f: Any) -> bool | None:
-        return None if v is None else bool(f(v))
+        # 숫자가 아니면(옛·손상 기록) 모름 — 비교가 TypeError 로 판정판 전체를 깨지 않게(25.1953)
+        x = _num(v)
+        return None if x is None else bool(f(x))
 
     wp, wt = row.get("walk_positive"), row.get("walk_total")
     hf, hs = row.get("half_first_cagr"), row.get("half_second_cagr")
@@ -382,7 +385,7 @@ def stage01(row: dict[str, Any], base: dict[str, Any] | None) -> dict[str, Any] 
         ("bh_q", "코호트 BH q", row.get("bh_q"), f"<= {STAGE01_MAX_BH_Q}",
          ok(row.get("bh_q"), lambda v: v <= STAGE01_MAX_BH_Q)),
         ("dsr", "DSR", row.get("dsr"), f">= {STAGE01_MIN_DSR}", ok(row.get("dsr"), lambda v: v >= STAGE01_MIN_DSR)),
-        ("half", "앞·뒤 반", None if hf is None or hs is None else [hf, hs], "둘 다 > 0",
+        ("half", "앞뒤 반", None if hf is None or hs is None else [hf, hs], "둘 다 > 0",
          None if hf is None or hs is None else hf > 0 and hs > 0),
         ("walk", "걷는 창", None if wp is None or wt is None else [wp, wt],
          f"창 {STAGE01_WALK[1]}개 이상, > 0 몫 {STAGE01_WALK[0]}/{STAGE01_WALK[1]} 이상",
@@ -393,20 +396,24 @@ def stage01(row: dict[str, Any], base: dict[str, Any] | None) -> dict[str, Any] 
         ("capacity", "수용량", None, "<= 거래대금의 1%", None),
     ]  # fmt: skip
     out = [{"key": k, "label": lab, "now": now, "target": tgt, "ok": o} for k, lab, now, tgt, o in checks]
-    failed = [c["label"] for c in out if c["ok"] is False]
-    unknown = [c["label"] for c in out if c["ok"] is None]
-    verdict = "탈락" if failed else ("후보" if not unknown else "모름")
-    return {"verdict": verdict, "checks": out, "failed": failed, "unknown": unknown,
-            "base": (base or {}).get("strategy")}  # fmt: skip
+    return {**stage01_verdict(out), "checks": out, "base": (base or {}).get("strategy")}
+
+
+def stage01_verdict(checks: list[dict[str, Any]]) -> dict[str, Any]:
+    """점검 칸들 → {verdict, failed, unknown} — 하나라도 False 면 "탈락", 모두 True 면 "후보", 아니면 "모름"."""
+    failed = [c["label"] for c in checks if c["ok"] is False]
+    unknown = [c["label"] for c in checks if c["ok"] is None]
+    return {"verdict": "탈락" if failed else ("후보" if not unknown else "모름"), "failed": failed, "unknown": unknown}
 
 
 def stage01_note(st: dict[str, Any]) -> str:
-    """점검표 → 한 줄 글 — "걸림: DSR·걷는 창 · 모름: 코호트 BH q·수용량" (판정판 실행 기록 칸)"""
+    """점검표 → 한 줄 글 — "걸림: DSR·걷는 창 · 재료 없음: 수용량" (판정판 실행 기록 칸). 판정 "모름" 과 겹쳐 읽히지
+    않게 모르는 칸은 "재료 없음" 으로 적는다(25.1953)"""
     parts = []
     if st["failed"]:
         parts.append(f"걸림: {'·'.join(st['failed'])}")
     if st["unknown"]:
-        parts.append(f"모름: {'·'.join(st['unknown'])}")
+        parts.append(f"재료 없음: {'·'.join(st['unknown'])}")
     return " · ".join(parts) or "모든 기준 통과"
 
 
@@ -462,8 +469,9 @@ def rows(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         row["stage01"] = st
         if st is None:
             row["stage01_verdict"] = row["stage01_note"] = None
+            why = "기준·무작위 대조 — 시도 아님" if not row["is_trial"] else "코호트 밖 — 0→1 점검 안 함"
             for c in ("stage01", "stage01_verdict", "stage01_note"):
-                row["missing"][c] = "기준·무작위 대조 — 시도 아님"
+                row["missing"][c] = why
         else:
             row["stage01_verdict"], row["stage01_note"] = st["verdict"], stage01_note(st)
     return sorted(out, key=lambda x: (str(x["market"]), str(x["cohort"] or "~"), x["strategy"]))

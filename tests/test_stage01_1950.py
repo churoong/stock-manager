@@ -15,7 +15,7 @@ import pytest
 from batch.services import scoreboard as scb
 
 #: 아는 기준을 모두 넘는 줄 — 경계값 그대로
-좋은 = {"strategy": "core_d", "months": 36, "invested_share": 0.5, "avg_holdings": 3.0, "excess_cagr": 0.001,
+좋은 = {"strategy": "core_d", "cohort": "2", "months": 36, "invested_share": 0.5, "avg_holdings": 3.0, "excess_cagr": 0.001,
         "control_lower": 50.1, "dsr": 0.90, "half_first_cagr": 0.01, "half_second_cagr": 0.02, "walk_positive": 3,
         "walk_total": 4, "mdd": -0.25}  # fmt: skip
 기준 = {"strategy": "core_b", "mdd": -0.20}
@@ -31,7 +31,7 @@ def test_아는_기준을_다_넘어도_재료_없는_둘이_남아_모름() -> 
     st = scb.stage01(좋은, 기준)
     assert st is not None and st["verdict"] == "모름" and st["failed"] == []
     assert st["unknown"] == ["코호트 BH q", "수용량"] and st["base"] == "core_b"
-    assert scb.stage01_note(st) == "모름: 코호트 BH q·수용량"
+    assert scb.stage01_note(st) == "재료 없음: 코호트 BH q·수용량"
 
 
 @pytest.mark.parametrize(("key", "고침", "기대"), [
@@ -60,7 +60,7 @@ def test_기준마다_경계(key: str, 고침: dict[str, Any], 기대: bool | No
 def test_하나라도_걸리면_탈락이고_글에_걸린_것과_모르는_것() -> None:
     st = scb.stage01({**좋은, "dsr": 0.5, "walk_positive": 1}, 기준)
     assert st is not None and st["verdict"] == "탈락" and st["failed"] == ["DSR", "걷는 창"]
-    assert scb.stage01_note(st) == "걸림: DSR·걷는 창 · 모름: 코호트 BH q·수용량"
+    assert scb.stage01_note(st) == "걸림: DSR·걷는 창 · 재료 없음: 코호트 BH q·수용량"
 
 
 def test_기준_줄이_없으면_MDD_는_모름() -> None:
@@ -93,3 +93,39 @@ def test_rows_는_같은_실행의_기준_B_와_없으면_benchmark_와_견준�
     assert 월["composite"]["stage01"]["base"] == "benchmark"
     assert "MDD(기준 대비)" not in 월["composite"]["stage01"]["failed"]
     assert 월["benchmark"]["stage01_verdict"] is None
+
+
+def test_모두_통과면_후보이고_글은_모든_기준_통과() -> None:
+    """25.1953 (25.1950 교차검증 [권고]) — "후보" 갈래를 잡는 시험이 없어 지워도 지나갔다. 수용량이 늘 모름이라 줄로는
+    닿지 않아 판정 함수를 직접 본다"""
+    칸 = [{"label": "가", "ok": True}, {"label": "나", "ok": True}]
+    v = scb.stage01_verdict(칸)
+    assert v == {"verdict": "후보", "failed": [], "unknown": []}
+    assert scb.stage01_note({**v, "checks": 칸}) == "모든 기준 통과"
+    assert scb.stage01_verdict([*칸, {"label": "다", "ok": None}])["verdict"] == "모름"
+    assert scb.stage01_verdict([*칸, {"label": "다", "ok": None}, {"label": "라", "ok": False}])["verdict"] == "탈락"
+
+
+def test_코호트_밖_줄은_점검하지_않는다() -> None:
+    """25.1953 (25.1950 교차검증 [권고]) — 지정가·비기본 월·등록 전 실행 줄에 "0→1 점검: 탈락" 이 떠 0→1 문 앞에 선
+    것처럼 보였다. 코호트 밖은 None 과 까닭"""
+    assert scb.stage01({**좋은, "cohort": None}, 기준) is None
+    줄 = {r["strategy"]: r for r in scb.rows([_실행("backtest_limit", ["core_b", "core_h"],
+                                                  {"core_b": -0.2, "core_h": -0.3})])}  # fmt: skip
+    for c in ("stage01", "stage01_verdict", "stage01_note"):
+        assert 줄["core_h"][c] is None and 줄["core_h"]["missing"][c] == "코호트 밖 — 0→1 점검 안 함"
+
+
+def test_숫자가_아닌_칸은_모름() -> None:
+    """25.1953 (25.1950 교차검증 note) — `months` 는 `_num` 을 거치지 않고 실려 문자열이면 비교가 TypeError 로 판정판
+    전체를 `scoreboard_error` 로 바꿨다"""
+    assert _ok({**좋은, "months": "x"}, "months") is None
+    assert _ok({**좋은, "months": "40"}, "months") is True  # 숫자 글은 숫자로
+
+
+def test_기준_줄은_core_b_가_먼저() -> None:
+    """25.1953 (25.1950 교차검증 note) — 둘 다 있는 실행이면 core_b"""
+    줄 = {r["strategy"]: r for r in scb.rows([_실행("backtest_core", ["benchmark", "core_b", "core_h"],
+                                                  {"benchmark": -0.5, "core_b": -0.2, "core_h": -0.3})])}  # fmt: skip
+    assert 줄["core_h"]["stage01"]["base"] == "core_b"
+

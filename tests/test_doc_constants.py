@@ -1219,3 +1219,19 @@ def test_판정판이_옮겨_적은_상수_1919() -> None:
     검사(FUNNEL, f"**코호트 1** = {sb.COHORT1_FROM} 매월 기본 실행", "코호트 1 시작일 (COHORT1_FROM)")
     # 25.1940 — 실행 기록에 싣는 까닭 글 길이
     검사(FUNNEL, f"그 칸의 `missing` 까닭({sb.WHY_MAX}자까지)", "판정판 까닭 길이 (WHY_MAX)")
+
+
+def test_판정판_0에서_1_점검표_상수_1950() -> None:
+    """0 → 1 점검표(`scoreboard.stage01`, docs/funnel.md 3장, 기록 25.1950·25.1951) — 첫 값이 문서와 같다.
+    25.1953: 25.1950 이 상수를 더하고 여기 잇지 않아 `test_문서와_대조하지_않는_상수가_없다[scoreboard]` 가 깨졌다"""
+    from batch.services import scoreboard as sb
+
+    검사(FUNNEL, f"판정 구간 {sb.STAGE01_MIN_MONTHS}개월 이상", "0→1 판정 구간 (STAGE01_MIN_MONTHS)")
+    검사(FUNNEL, f"투자 비중 ≥ {sb.STAGE01_MIN_INVESTED}", "0→1 투자 비중 (STAGE01_MIN_INVESTED)")
+    검사(FUNNEL, f"평균 보유 ≥ {sb.STAGE01_MIN_HOLDINGS:g}종목", "0→1 평균 보유 (STAGE01_MIN_HOLDINGS)")
+    검사(FUNNEL, f"무작위 대조 분위 하한 > {sb.STAGE01_MIN_CONTROL_LOWER:g}", "0→1 대조 하한 (STAGE01_MIN_CONTROL_LOWER)")
+    검사(FUNNEL, f"코호트 BH q ≤ {sb.STAGE01_MAX_BH_Q:.2f}", "0→1 BH q (STAGE01_MAX_BH_Q)")
+    검사(FUNNEL, f"DSR ≥ {sb.STAGE01_MIN_DSR:.2f}(N = 누적)", "0→1 DSR (STAGE01_MIN_DSR)")
+    검사(FUNNEL, f"기준 전략(B)보다 {sb.STAGE01_MDD_SLACK * 100:g}%p 넘게 나쁘지 않음", "0→1 MDD 여유 (STAGE01_MDD_SLACK)")
+    검사(FUNNEL, f"걷는 창은 창 {sb.STAGE01_WALK[1]}개 이상이고 > 0 창의 몫 ≥ {sb.STAGE01_WALK[0]}/{sb.STAGE01_WALK[1]}",
+         "0→1 걷는 창 (STAGE01_WALK)")  # fmt: skip

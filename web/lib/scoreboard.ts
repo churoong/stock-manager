@@ -3,7 +3,7 @@
  *
  * 읽는 것: 백테스트 실행 기록 한 줄(`batch_runs.step_log`)의 `scoreboard`(배치 `scoreboard.step_log_rows` 가 낸 줄들)와
  * `scoreboard_error`(판정판이 깨진 실행). 화면은 **계산하지 않는다** — 값은 그대로 꼴만 바꾸고(%·소수 자리), 빈 칸은
- * 배치가 적은 까닭(`missing`)을 "없음: 까닭" 으로 붙인다. 3장 올림·내림 문턱은 여기서도 적용하지 않는다(칸만).
+ * 배치가 적은 까닭(`missing`)을 "없음: 까닭" 으로 붙인다. 화면은 3장 문턱을 적용하지 않는다 — 0→1 첫 값 점검은 배치(`stage01`, 25.1950)가 낸 글을 그대로 보인다.
  */
 
 import { z } from "zod";
@@ -166,7 +166,7 @@ export function scoreLine(r: ScoreRow): ScoreLine {
       ["관문 하한", f1(r.gate_lower)],
       ["앞 반", p(r.half_first_cagr)],
       ["뒤 반", p(r.half_second_cagr)],
-      // 걷는 창(25.1947) — 겹치지 않는 12개월 창 가운데 초과 합 > 0 인 창 수 / 창 수. 3장 문턱("넷 가운데 셋")은 적용하지 않는다
+      // 걷는 창(25.1947) — 겹치지 않는 12개월 창 가운데 초과 합 > 0 인 창 수 / 창 수. 3장 문턱("넷 가운데 셋")은 배치 0→1 점검이 본다
       ["걷는 창", walkText(r)],
     ],
     sample: `${n(r.months)}개월 · 리밸런스 ${n(r.rebalances)} · 매수 ${n(r.buys)} · 묶음 대조 ${n(r.control_blocks)}/관문 ${n(r.gate_blocks)} · 판 뒤 매도 ${n(r.sells_scored)} · 누적 시도 ${n(r.trials_cumulative)}`,
