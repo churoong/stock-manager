@@ -115,7 +115,7 @@ def test_cancellable_rules() -> None:
     assert pp.cancellable(흐름, 2, {"A": 9e9}) == "이미 취소한 입금입니다"
     assert pp.cancellable(흐름, 3, {"A": 9e9}) == "취소 행은 다시 취소할 수 없습니다"
     assert pp.cancellable(흐름, 9, {"A": 9e9}) == "없는 입금입니다"
-    assert "계좌 B" in str(pp.cancellable(흐름, 1, {"A": 2_000_000, "B": 10}))
+    assert "계좌: 기준" in str(pp.cancellable(흐름, 1, {"A": 2_000_000, "B": 10}))
     assert pp.cancellable(흐름, 1, {"A": 1_000_000, "B": 1_000_000}) is None
 
 
@@ -227,7 +227,7 @@ def test_compare_real_uses_the_same_window() -> None:
     assert c["real_pct"] == pytest.approx(10.0)
     assert c["paper_pct"] == {"A": pytest.approx(0.0), "B": pytest.approx(0.0)}  # 모의는 10-20 이하 마지막 = 10-15
     줄 = pp.compare_line(c)
-    assert 줄 is not None and "실제 +10.0%" in 줄 and "A +0.0%" in 줄 and "보유분만" in 줄
+    assert 줄 is not None and "실제 +10.0%" in 줄 and "가치 +0.0%" in 줄 and "보유분만" in 줄
     assert pp.compare_real(모의, []) is None and pp.compare_real({}, 실제) is None
     assert pp.compare_line(None) is None
 

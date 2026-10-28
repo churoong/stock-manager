@@ -39,7 +39,7 @@ def test_attribution_virtual_uses_episode_first_buy() -> None:
                         매수(3, "2026-10-01", None)], [])  # fmt: skip
     assert a["virtual"] == {"n": 2, "avg_pct": 60.0, "top_half": 50.0}
     줄 = pp.attribution_lines("C", a)
-    assert any(x.startswith("  C 가상 대조: 산 종목이 같은 날 무작위 20종목 안 평균 60 분위 · 위쪽 절반 50% (n=2, 참고)")
+    assert any(x.startswith("  모멘텀 가상 대조: 산 종목이 같은 날 무작위 20종목 안 평균 60 분위 · 위쪽 절반 50% (n=2, 참고)")
                for x in 줄)  # fmt: skip
 
 

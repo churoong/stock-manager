@@ -100,5 +100,5 @@ def test_주간_요약이_기록_시각을_쓴다(monkeypatch: pytest.MonkeyPatc
         시세(c, 3, td, 5000)
         돌림(c, td, kst, f"{td}T23:40:00+00:00")
     전체 = job.summary_section(c, datetime(2026, 11, 8, 1, tzinfo=UTC))
-    i = next(k for k, x in enumerate(전체) if x.startswith("  A 평가 "))  # 계좌마다 두 줄(25.1727)
+    i = next(k for k, x in enumerate(전체) if x.startswith("  가치 평가 "))  # 계좌마다 두 줄(25.1727)
     assert "이번 주 체결 매수 1·" in 전체[i + 1], 전체

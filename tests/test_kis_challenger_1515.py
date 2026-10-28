@@ -47,14 +47,14 @@ def test_off_states(c: Client, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa
     _켬(c, monkeypatch, None)
     assert _run(c, _Sess()) == {"off": "도전자 계좌를 고르지 않음(/kis)"}
     db.set_setting(c, "kis_challenger", {"account": "A", "at": "t"})
-    assert _run(c, _Sess()) == {"off": "도전자 A 가 챔피언과 같음"}
+    assert _run(c, _Sess()) == {"off": "도전자(가치)가 챔피언과 같음"}
     db.set_setting(c, "kis_challenger", {"account": "Z", "at": "t"})
     assert _run(c, _Sess()) == {"off": "베낄 계좌 Z 없음"}
     # 따로 재는 실험 계좌(스윙 S)는 베끼지 않는다 — 계좌 행이 있어도(25.1879)
     c.conn.execute("INSERT INTO paper_accounts (id, name, sell_rule, rule_version, created_at, entry_rule, top_n, selection)"
                    " VALUES ('S', 'S', 'swing_close', 1, 't', 'open', 10, 'short')")  # fmt: skip
     db.set_setting(c, "kis_challenger", {"account": "S", "at": "t"})
-    assert _run(c, _Sess()) == {"off": "도전자 S 는 따로 재는 실험 계좌라 베끼지 않음"}
+    assert _run(c, _Sess()) == {"off": "도전자(스윙)는 따로 재는 실험 계좌라 베끼지 않음"}
     # 첫째와 같은 모의 계좌번호 — 잔고가 섞인다. 설정 실수로 알린다
     db.set_setting(c, "kis_challenger", {"account": "B", "at": "t"})
     monkeypatch.setenv("KIS_VTS2_ACCOUNT", "12345678")
@@ -169,7 +169,7 @@ def test_weekly_summary_includes_challenger(c: Client, monkeypatch: pytest.Monke
     s = _Sess(executions=[kv.Execution("20261016", "N1", "005930", "buy", 3, 3, 9_800.0, 0, False)])
     _run(c, s, "2026-10-19")
     줄 = job.summary_lines(c)
-    assert any(x.startswith("[KIS모의투자 — 도전자 B 주문 베끼기") for x in 줄), 줄
+    assert any(x.startswith("[KIS모의투자 — 도전자 기준 주문 베끼기") for x in 줄), 줄
 
 
 def test_desk_challenger_cells_freshness_and_measured_first() -> None:

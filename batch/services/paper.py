@@ -368,7 +368,7 @@ def cancellable(flows: list[CashFlow], flow_id: int, available_by_account: dict[
         return "이미 취소한 입금입니다"
     모자람 = sorted(a for a, c in available_by_account.items() if c < 원래.amount_krw)
     if 모자람:
-        return f"그 돈으로 이미 사서 현금이 모자랍니다 (계좌 {', '.join(모자람)})"
+        return f"그 돈으로 이미 사서 현금이 모자랍니다 (계좌: {', '.join(account_name(a) for a in 모자람)})"
     return None
 
 
@@ -799,11 +799,13 @@ def summary_lines(
     if 주된 is None or (주된수 < 2 and len(지수값) > 1):
         주된 = None
     else:
-        누구 = "" if 주된수 == len(지수값) else f" ({'·'.join(a for a in sorted(지수값) if 지수값[a] == 주된)})"
+        주된계좌 = "·".join(account_name(a) for a in sorted(지수값) if 지수값[a] == 주된)
+        누구 = "" if 주된수 == len(지수값) else f" ({주된계좌})"
         씩 = "씩" if len(지수값) > 1 else ""  # 계좌가 하나면 "씩" 이 어색하다(25.1747)
         out.append(f"  입금 {주된[0]}{씩} · 같은 돈 KOSPI {주된[1]} · S&P500 {주된[2]}{누구}")
     끝값: dict[str, float] = {}
     for aid in sorted(daily):
+        nm = account_name(aid)  # 화면 이름(25.1893) — 사전 열쇠는 식별자 그대로
         행들 = daily[aid]
         if not 행들:
             continue
@@ -824,7 +826,7 @@ def summary_lines(
         보유 = json.loads(끝.get("positions_json") or "[]")
         날짜 = sorted({str(p.get("price_date")) for p in 보유 if p.get("price_date")})
         누적 = (float(끝["twr_index"]) - 1) * 100
-        out.append(f"  {aid} 평가 {won_short(총액)} · 입금 대비 {_퍼센트(손익)} · 시간가중 이번 주 {_퍼센트(주간)}"
+        out.append(f"  {nm} 평가 {won_short(총액)} · 입금 대비 {_퍼센트(손익)} · 시간가중 이번 주 {_퍼센트(주간)}"
                    f" · 누적 {_퍼센트(누적)}")  # fmt: skip
         매수, 매도 = sum(f.side == "buy" for f in 이번주), sum(f.side == "sell" for f in 이번주)
         out.append(
@@ -843,7 +845,8 @@ def summary_lines(
             비중[aid] = 보유합 / float(행들[-1]["equity_krw"]) * 100
     for 앞, 뒤, 무엇 in PAIRS:
         if 앞 in 끝값 and 뒤 in 끝값:
-            덧 = (f"; 투자 비중 {앞} {비중[앞]:.0f}% · {뒤} {비중[뒤]:.0f}%"
+            가, 나 = account_name(앞), account_name(뒤)  # 화면 이름(25.1893)
+            덧 = (f"; 투자 비중 {가} {비중[앞]:.0f}% · {나} {비중[뒤]:.0f}%"
                   if 비중.get(앞) is not None and 비중.get(뒤) is not None else "")  # fmt: skip
             시작들 = {(starts or {}).get(앞), (starts or {}).get(뒤)}
             if len(시작들) > 1 and None not in 시작들:
@@ -853,9 +856,9 @@ def summary_lines(
                 끝지수 = {a: float(daily[a][-1]["twr_index"] or 0) for a in (앞, 뒤)}
                 if all(기.values()):
                     차 = (끝지수[앞] / 기[앞] - 끝지수[뒤] / 기[뒤]) * 100  # type: ignore[operator]
-                    out.append(f"  {앞}−{뒤}: 시간가중 {차:+.1f}%p ({공통}부터 공통 구간 — {무엇}{덧})")
+                    out.append(f"  {가}−{나}: 시간가중 {차:+.1f}%p ({공통}부터 공통 구간 — {무엇}{덧})")
                 continue
-            out.append(f"  {앞}−{뒤}: {끝값[앞] - 끝값[뒤]:+,.0f}원 ({무엇}{덧})")
+            out.append(f"  {가}−{나}: {끝값[앞] - 끝값[뒤]:+,.0f}원 ({무엇}{덧})")
     if month_start is None:
         return out
     # 그달 = 그달 행들에 장부로 든 것 — [그달 앞 마지막 행 날, 그달 마지막 행 날). 체결일로 자르면 그달 마지막 장의
@@ -865,6 +868,7 @@ def summary_lines(
     다음달 = f"{y + m // 12:04d}-{m % 12 + 1:02d}-01"
     out.append(f"[가상모의투자 월간 복기] {month_start} 부터 {다음달} 전까지")
     for aid in sorted(daily):
+        nm = account_name(aid)  # 화면 이름(25.1893) — 사전 열쇠는 식별자 그대로
         앞행 = next((r for r in reversed(daily[aid]) if str(r["as_of"]) < month_start), None)
         끝행 = next((r for r in reversed(daily[aid]) if str(r["as_of"]) < 다음달), None)
         든것 = 장부에_든(fills.get(aid, []), 앞행["as_of"] if 앞행 else month_start,
@@ -877,10 +881,10 @@ def summary_lines(
             나쁜 = sorted(실현, key=lambda r: r["pnl_krw"])[:3]
             def 글(r: dict[str, Any]) -> str:
                 return f"{names.get(r['stock_id'], r['stock_id'])} {r['pnl_krw']:+,.0f}원"
-            out.append(f"  {aid} 이익 셋: " + (", ".join(글(r) for r in 좋은 if r["pnl_krw"] > 0) or "없음"))
-            out.append(f"  {aid} 손실 셋: " + (", ".join(글(r) for r in 나쁜 if r["pnl_krw"] < 0) or "없음"))
+            out.append(f"  {nm} 이익 셋: " + (", ".join(글(r) for r in 좋은 if r["pnl_krw"] > 0) or "없음"))
+            out.append(f"  {nm} 손실 셋: " + (", ".join(글(r) for r in 나쁜 if r["pnl_krw"] < 0) or "없음"))
         else:
-            out.append(f"  {aid}: 그달 판 종목 없음")
+            out.append(f"  {nm}: 그달 판 종목 없음")
         종목넘음, 섹터넘음, 손절넘김 = set(), set(), set()
         for r in daily[aid]:
             if not month_start <= str(r["as_of"]) < 다음달 or not float(r["equity_krw"]):
@@ -914,7 +918,7 @@ def summary_lines(
                     " 다음 장 시가 매도)")  # 값은 규칙 정의처에서(25.1874)
         else:
             손절글 = f"손절선 아래로 들고 간 날 {len(손절넘김)}{덧}"
-        out.append(f"  {aid} 규칙 점검: 종목 상한 넘은 날 {len(종목넘음)} · 섹터 상한 넘은 날 {len(섹터넘음)}"
+        out.append(f"  {nm} 규칙 점검: 종목 상한 넘은 날 {len(종목넘음)} · 섹터 상한 넘은 날 {len(섹터넘음)}"
                    f" · {손절글}")
     return out
 
@@ -1009,7 +1013,7 @@ def compare_line(c: dict[str, Any] | None) -> str | None:
     if not c:
         return None
     늦음 = c.get("paper_start") or {}
-    모의 = " · ".join(f"{aid} {_퍼센트(v)}" + (f"({늦음[aid]}부터)" if aid in 늦음 else "")
+    모의 = " · ".join(f"{account_name(aid)} {_퍼센트(v)}" + (f"({늦음[aid]}부터)" if aid in 늦음 else "")
                      for aid, v in c["paper_pct"].items())  # fmt: skip
     return "\n".join([
         f"실제 투자와 비교 ({c['start']}~{c['end']}, 시간가중)", f"  실제 {_퍼센트(c['real_pct'])}", f"  가상 {모의}",
@@ -1356,6 +1360,7 @@ def selection_evidence(decisions: list[dict[str, Any]]) -> dict[str, Any]:
 
 def attribution_lines(aid: str, a: dict[str, Any] | None) -> list[str]:
     """주간 요약·리포트용 몇 줄. 표본이 `ATTRIBUTION_MIN_SAMPLE` 보다 적은 칸에는 "참고" 를 붙인다."""
+    nm = account_name(aid)  # 화면 이름(25.1893)
     if not a:
         return []
 
@@ -1368,16 +1373,16 @@ def attribution_lines(aid: str, a: dict[str, Any] | None) -> list[str]:
         글 = f"{s['avg']:+.1f}%p (n={s['n']}{비율}"
         return 글 + (", 참고" if s["n"] < ATTRIBUTION_MIN_SAMPLE else "") + ")"
 
-    줄 = [f"  {aid} 선정: 주문 낸 새 후보 {칸(a['selection'])} · 안 낸 새 후보 {칸(a['skipped'])}"
+    줄 = [f"  {nm} 선정: 주문 낸 새 후보 {칸(a['selection'])} · 안 낸 새 후보 {칸(a['skipped'])}"
           + (f" · 이미 든 종목 추가 매수 {칸(a['add_on'])}" if (a.get("add_on") or {}).get("n") else "")
           + (" — 안 낸 새 후보가 지수보다 오르면 안 낸 것이 비용" if (a.get("skipped") or {}).get("n") else "")]
     if a.get("skip_by_reason"):
-        줄.append(f"  {aid} 안 낸 까닭별: " + " · ".join(f"{k} {칸(v)}" for k, v in a["skip_by_reason"].items())
+        줄.append(f"  {nm} 안 낸 까닭별: " + " · ".join(f"{k} {칸(v)}" for k, v in a["skip_by_reason"].items())
                  + " — 지수보다 오르면 그 까닭으로 안 낸 것이 비용")
     if (a.get("blocked") or {}).get("n"):
-        줄.append(f"  {aid} 위험 점검이 막은 매수의 그 뒤: {칸(a['blocked'])} — 지수보다 오르면 막은 것이 비용")
+        줄.append(f"  {nm} 위험 점검이 막은 매수의 그 뒤: {칸(a['blocked'])} — 지수보다 오르면 막은 것이 비용")
     if (a.get("blocked_sell") or {}).get("n"):
-        줄.append(f"  {aid} 위험 점검이 막은 매도의 그 뒤: {칸(a['blocked_sell'])} — 지수보다 내리면 막은 것이 비용")
+        줄.append(f"  {nm} 위험 점검이 막은 매도의 그 뒤: {칸(a['blocked_sell'])} — 지수보다 내리면 막은 것이 비용")
     e = a.get("entry") or {}
     # 음수면 "−0.85% 쌌다" 가 아니라 "0.85% 비쌌다" — 부호가 뜻을 뒤집어 읽혔다(25.1644, 25.1630 감사 [권고])
     if not e.get("n"):
@@ -1398,12 +1403,12 @@ def attribution_lines(aid: str, a: dict[str, Any] | None) -> list[str]:
         글 = f"{안잼}은 재지 않음({까닭})"
         진입 = 글 if not e.get("n") else f"{진입}, {글}"
     놓침 = " — 지수보다 오르면 놓친 기회" if (a.get("missed") or {}).get("n") else ""  # 표본이 없으면 방향 글도 없다
-    줄.append(f"  {aid} 진입: {진입} · 안 찬 회차의 그 뒤 {칸(a['missed'])}{놓침}")
-    줄.append(f"  {aid} 청산: 판 뒤 {칸(a['sold'])} · 플래그를 따르지 않고 든 뒤 {칸(a['held_flag'])}"
+    줄.append(f"  {nm} 진입: {진입} · 안 찬 회차의 그 뒤 {칸(a['missed'])}{놓침}")
+    줄.append(f"  {nm} 청산: 판 뒤 {칸(a['sold'])} · 플래그를 따르지 않고 든 뒤 {칸(a['held_flag'])}"
              " — 판 뒤가 음수면 판 것이, 든 뒤가 양수면 든 것이 옳았다")
     v = a.get("virtual") or {}
     if v.get("n"):
-        줄.append(f"  {aid} 가상 대조: 산 종목이 같은 날 무작위 {VIRTUAL_CONTROLS}종목 안 평균 {v['avg_pct']:.0f} 분위"
+        줄.append(f"  {nm} 가상 대조: 산 종목이 같은 날 무작위 {VIRTUAL_CONTROLS}종목 안 평균 {v['avg_pct']:.0f} 분위"
                  f" · 위쪽 절반 {v['top_half']:.0f}% (n={v['n']}"
                  + (", 참고" if v["n"] < ATTRIBUTION_MIN_SAMPLE else "") + ") — 무작위면 50")  # fmt: skip
     return 줄

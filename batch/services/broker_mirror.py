@@ -16,6 +16,7 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Any
 
+from batch.services.paper import account_name
 from batch.services.signals import to_tick
 
 #: 하루에 증권사 모의로 내는 주문 상한 — 내부 B 의 최대(매수 5종목 × 3회차 + 매도 몇)보다 넉넉하고,
@@ -28,7 +29,7 @@ REASON_CLEANUP = "정리"
 REASON_GUARD_STOP = "장중손절"
 REASON_GUARD_TAKE = "장중익절"
 GUARD_REASONS = frozenset({REASON_GUARD_STOP, REASON_GUARD_TAKE})
-GUARD_HELD_SKIP = "장중 매도 뒤 H 가 같은 보유를 듦 — 매수 베끼지 않음"
+GUARD_HELD_SKIP = "장중 매도 뒤 지주사가 같은 보유를 듦 — 매수 베끼지 않음"
 STOP_FLOOR_SKIP = "장중 손절선 이하 회차 — 베끼지 않음"
 #: 주문가능 수량이 모자라 정리를 일부만 낸 까닭(25.1607)
 PARTIAL_CLEANUP = "증권사 주문가능 수량 모자람 — 일부만 정리"
@@ -677,7 +678,7 @@ def compare_lines(
     if not s or not (s.get("n") or s.get("unknown") or s.get("cleanup") or s.get("guard") or s.get("rejected")
                      or s.get("excluded") or s.get("guard_held")):  # fmt: skip
         return []
-    out = [f"[KIS모의투자 — {account} 주문 베끼기, 지난 {s['days']}일]"]
+    out = [f"[KIS모의투자 — {account_name(account)} 주문 베끼기, 지난 {s['days']}일]"]
     if s.get("n"):
         out.append(f"  주문 {s['n']} · 체결 일치 {s['match_pct']:.0f}% (둘 다 참 {s['both']}"
                    f" · 가상만 참 {s['internal_only']} · KIS만 참 {s['kis_only']} · 둘 다 안 참 {s['neither']})"
@@ -703,9 +704,9 @@ def compare_lines(
     if s.get("cleanup"):
         끝.append(f"정리 주문 {s['cleanup']}")
     if s.get("guard"):
-        끝.append(f"장중 손절·익절 {s['guard']}(H 는 아침 일봉 판정 — 짝 없음)")
+        끝.append(f"장중 손절·익절 {s['guard']}(지주사는 아침 일봉 판정 — 짝 없음)")
     if s.get("guard_held"):  # 잔고 대보기에서 뺀 종목 — "어긋난 종목 0" 이 거짓말로 읽히지 않게(25.1772)
-        끝.append(f"장중 매도 뒤 H 만 든 종목 {s['guard_held']}(잔고 대보기에서 뺌)")
+        끝.append(f"장중 매도 뒤 지주사만 든 종목 {s['guard_held']}(잔고 대보기에서 뺌)")
     if diff_count is not None:
         끝.append(f"잔고가 어긋난 종목 {diff_count}" + (f" ({as_of})" if as_of else ""))
     if 끝:

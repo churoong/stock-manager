@@ -620,7 +620,7 @@ def test_장중판_보유_같은_날_매도_먼저와_모름_줄(c: Client) -> N
 
 def test_요약_끝_줄에_장중_매도_뒤_H_만_든_종목() -> None:
     줄 = bm.compare_lines(bm.compare([]) | {"guard_held": 2}, None, None)
-    assert 줄 and "장중 매도 뒤 H 만 든 종목 2" in 줄[-1]
+    assert 줄 and "장중 매도 뒤 지주사만 든 종목 2" in 줄[-1]
 
 
 def test_감시선은_국내만_계산한다() -> None:

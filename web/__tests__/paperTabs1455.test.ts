@@ -51,8 +51,8 @@ describe("모의 계좌 탭", () => {
     expect(html).toContain("9,985원");
     expect(html).toContain("실현손익 (판 것, 비용 반영 · 해외는 환차 포함)");
     expect(html).toContain("-5,000원");
-    expect(html).toContain("모의 A");
-    expect(html).toContain("가상 B");
+    expect(html).toContain("가치 · 규칙서 판");
+    expect(html).toContain(">기준<");
   });
 
   it("보유내역 — 평균단가·현재가·평가손익·비중·첫 매수", () => {
@@ -102,7 +102,7 @@ describe("보유 손익 표시·그래프 색 (25.1604)", () => {
     expect(new Set(색).size).toBe(색.length);
     expect(ACCOUNT_COLOR.R1).toBe("#9ca3af");
     expect(ACCOUNT_COLOR.G).not.toBe(ACCOUNT_COLOR.R1);
-    // 이름이 있는 계좌는 모두 고정 색 — S·T 가 예비 색 차례에 맡겨져 있었다(25.1892)
+    // 이름이 있는 계좌는 모두 고정 색 — S·T 가 예비 색 차례에 맡겨져 있었다(25.1893)
     for (const id of Object.keys(ACCOUNT_NAMES)) expect(ACCOUNT_COLOR[id], id).toBeTruthy();
   });
 });

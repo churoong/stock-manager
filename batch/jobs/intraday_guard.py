@@ -510,10 +510,10 @@ def _names(client: Any, ids: list[int]) -> dict[int, str]:
 def alert_text(client: Any, sent: list[tuple[Hit, str]]) -> str:
     """텔레그램 한 통 — 종목 이름·선·현재가·수량·결과. 비공개 대화방으로만 간다(공개 로그에는 찍지 않는다)"""
     이름 = _names(client, [x.stock_id for x, _ in sent])
-    줄 = ["⚡ KIS모의투자 장중 매도 (H 의 손절·익절선을 장중에)"]
+    줄 = ["⚡ KIS모의투자 장중 매도 (지주사의 손절·익절선을 장중에)"]
     for x, 결과 in sent:
         줄.append(f"  · {이름.get(x.stock_id, x.code)} {x.quantity:,}주 시장가 — {note(x)} → {결과}")
-    줄.append("  가상모의투자 H 는 아침 일봉 판정 그대로입니다(docs/paper.md 15.11)")
+    줄.append("  가상모의투자 지주사는 아침 일봉 판정 그대로입니다(docs/paper.md 15.11)")
     return "\n".join(줄)
 
 

@@ -466,7 +466,7 @@ def test_compare_counts_match_and_signed_slippage() -> None:
     assert s["slip_buy"] == {"n": 1, "avg": pytest.approx(1.0)} and s["slip_sell"] == {"n": 1, "avg": pytest.approx(1.0)}
     assert s["reject_reasons"] == {"APBK0919": 1}
     줄 = bm.compare_lines(s, 2, "2026-10-19")
-    assert 줄[0] == "[KIS모의투자 — H 주문 베끼기, 지난 28일]"
+    assert 줄[0] == "[KIS모의투자 — 지주사 주문 베끼기, 지난 28일]"
     assert "체결 일치 50% (둘 다 참 2 · 가상만 참 1 · KIS만 참 2 · 둘 다 안 참 1)" in 줄[1]
     assert 줄[2] == "  가격(+ 면 가상모의투자가 낙관): 매수 +1.00% (n=1) · 매도 +1.00% (n=1)"
     assert 줄[-1] == "  거부 1 · 모름 1 · 정리 주문 1 · 잔고가 어긋난 종목 2 (2026-10-19)"
@@ -520,7 +520,7 @@ def test_daily_summary_stored_and_weekly_reads_it(c: Client) -> None:
     s = json.loads(c.q("SELECT summary_json FROM paper_broker_daily WHERE as_of = '2026-10-19'")[0][0])
     assert (s["kis_only"], s["neither"]) == (1, 1)
     줄 = job.summary_lines(c)
-    assert 줄[0] == "[KIS모의투자 — B 주문 베끼기, 지난 28일]" and "잔고가 어긋난 종목 0 (2026-10-19)" in 줄[-1]
+    assert 줄[0] == "[KIS모의투자 — 기준 주문 베끼기, 지난 28일]" and "잔고가 어긋난 종목 0 (2026-10-19)" in 줄[-1]
     # 주간 요약은 가상모의투자 평가 행이 없으면 통째로 비고(입금 전), 있으면 이 절을 붙인다 — 붙이는 줄은 summary_section 끝
     assert paper_job.summary_section(c, datetime(2026, 10, 25, tzinfo=UTC)) == []
 

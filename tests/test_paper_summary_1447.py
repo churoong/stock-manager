@@ -38,9 +38,9 @@ def test_weekly_lines_compare_same_money_benchmarks_and_twins() -> None:
     # 계좌마다 두 줄, 공통 평가일은 머리에(25.1727 — 리포트 가독성)
     assert 줄[0] == "[가상모의투자] 2026-10-09 평가"
     # 두 계좌의 같은 돈 지수가 달라 머리에 모으지 않고 계좌 줄에(25.1742)
-    assert 줄[1] == "  A 평가 105만원 · 입금 대비 +5.0% · 시간가중 이번 주 +5.0% · 누적 +5.0%"
+    assert 줄[1] == "  가치 평가 105만원 · 입금 대비 +5.0% · 시간가중 이번 주 +5.0% · 누적 +5.0%"
     assert 줄[2] == "     이번 주 체결 매수 1·매도 0 · 입금 100만원 · 같은 돈 KOSPI +2.0% · S&P500 —"
-    assert 줄[5].startswith("  A−B: +20,000원")
+    assert 줄[5].startswith("  가치−기준: +20,000원")
     assert not any("월간" in x for x in 줄)
 
 
@@ -55,7 +55,7 @@ def test_monthly_review_best_worst_and_rule_checks() -> None:
     줄 = pp.summary_lines(daily, {"A": fills}, "2026-09-26", "2026-09-01", {1: "가", 2: "나"}, {2: "전자"}, 한도)
     본문 = "\n".join(줄)
     assert "[가상모의투자 월간 복기] 2026-09-01 부터" in 본문
-    assert "A 이익 셋: 가 +" in 본문 and "A 손실 셋: 나 −" not in 본문 and "A 손실 셋: 나 -" in 본문
+    assert "가치 이익 셋: 가 +" in 본문 and "가치 손실 셋: 나 −" not in 본문 and "가치 손실 셋: 나 -" in 본문
     assert "종목 상한 넘은 날 1 · 섹터 상한 넘은 날 0 · 손절선 아래로 들고 간 날 1" in 본문
 
 
@@ -95,7 +95,7 @@ def test_summary_section_reads_real_schema(monkeypatch: pytest.MonkeyPatch) -> N
     _시세(c, "2026-10-15", 10_100, 9_900)
     _하루(c, monkeypatch, "2026-10-15", signals=False)
     줄 = job.summary_section(c, datetime(2026, 10, 18, 0, 0, tzinfo=UTC))
-    assert 줄[0].startswith("[가상모의투자]") and any(x.startswith("  A 평가 ") for x in 줄)
+    assert 줄[0].startswith("[가상모의투자]") and any(x.startswith("  가치 평가 ") for x in 줄)
     assert any("이번 주 체결 매수 1·매도 0" in x for x in 줄)
     assert not any("월간" in x for x in 줄)
     월 = job.summary_section(c, datetime(2026, 11, 1, 0, 0, tzinfo=UTC))
@@ -131,10 +131,10 @@ def test_입금과_같은_돈_지수는_여럿이_같으면_머리에_한_번_25
              _행(a, "2026-10-09", 1_000_000, 1_000_000, 1.0, kospi=1_020_000 if a != "H" else 1_010_000)]
          for a in ("A", "B", "H")}  # fmt: skip
     줄 = pp.summary_lines(행, {}, "2026-10-03", None, {}, {}, 한도)
-    assert 줄[1] == "  입금 100만원씩 · 같은 돈 KOSPI +2.0% · S&P500 — (A·B)"
+    assert 줄[1] == "  입금 100만원씩 · 같은 돈 KOSPI +2.0% · S&P500 — (가치·기준)"
     둘째 = {x.split()[0]: y for x, y in zip(줄, 줄[1:], strict=False) if x.startswith("  ") and " 평가 " in x}
-    assert 둘째["A"] == "     이번 주 체결 매수 0·매도 0"
-    assert 둘째["H"] == "     이번 주 체결 매수 0·매도 0 · 입금 100만원 · 같은 돈 KOSPI +1.0% · S&P500 —"
+    assert 둘째["가치"] == "     이번 주 체결 매수 0·매도 0"
+    assert 둘째["지주사"] == "     이번 주 체결 매수 0·매도 0 · 입금 100만원 · 같은 돈 KOSPI +1.0% · S&P500 —"
     assert pp._범위(["2026-10-22"]) == "2026-10-22" and pp._범위(["2026-10-21", "2026-10-22"]) == "2026-10-21~2026-10-22"
 
 

@@ -256,7 +256,7 @@ def test_KIS_체결_보정에서_T_를_뺀다(monkeypatch: pytest.MonkeyPatch) -
 def test_월간_복기의_손절_점검은_T_에_해당_없음() -> None:
     행 = [{"as_of": "2026-10-16", "invested_krw": 1_000, "equity_krw": 1_000, "twr_index": 1.0, "positions_json": "[]"}]
     줄 = pp.summary_lines({"T": 행}, {}, "2026-10-12", "2026-10-01", {}, {}, {}, {"T": "day_close"})
-    assert any(x.startswith("  T 규칙 점검") and "해당 없음(당일 단타" in x for x in 줄)
+    assert any(x.startswith("  단타 규칙 점검") and "해당 없음(당일 단타" in x for x in 줄)
 
 
 # ── 25.1886 (25.1883 교차검증 [권고]·[참고]) ─────────────────────────────────────────────────
@@ -281,7 +281,7 @@ def test_T_진입_방식이_open_이_아니면_그_계좌만_건너뛴다(monkey
     c.conn.execute("UPDATE paper_accounts SET entry_rule = 'tranche' WHERE id = 'T'")
     줄, 기록 = _하루(c, monkeypatch, "2026-10-14")
     assert "error" in 기록["accounts"]["T"] and c.q("SELECT COUNT(*) FROM paper_orders WHERE account_id = 'T'") == [(0,)]
-    assert any("가상 T 당일 단타 진입 방식" in x for x in 줄) and 기록["accounts"]["B"]["orders"] >= 1
+    assert any("가상 단타 당일 단타 진입 방식" in x for x in 줄) and 기록["accounts"]["B"]["orders"] >= 1
 
 
 def test_웹_매도_규칙_글은_모든_매도_규칙을_덮는다() -> None:

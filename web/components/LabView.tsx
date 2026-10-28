@@ -6,6 +6,7 @@ import EquityChart from "@/components/EquityChart";
 import { bodyOf, readJson } from "@/lib/http";
 import { JOURNEY_LIMIT, journeyCut, journeyEvents, weightSeries, type HoldingPoint, type JourneyRaw, type LabAttribution } from "@/lib/lab";
 import { ATTRIBUTION_MIN_SAMPLE, attrCellText, entryCellText } from "@/lib/paper";
+import { accountName } from "@/lib/accountNames";
 
 /**
  * 연구실 (docs/desk.md 5장, docs/infra.md 25.1506) — 전략을 고치려고 보는 자료. 값은 배치가 적은 그대로다.
@@ -104,7 +105,7 @@ function Journey() {
                 <li key={i} className="py-1">
                   <span className="text-xs text-slate-500">
                     {e.day} · {e.step}
-                    {e.account ? ` · ${e.account}` : ""}
+                    {e.account ? ` · ${accountName(e.account)}` : ""}
                   </span>{" "}
                   {e.text}
                 </li>
@@ -164,7 +165,7 @@ export default function LabView() {
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                   {data.attribution.map((a) => (
                     <tr key={a.id}>
-                      <td className="py-1 pr-2 font-semibold">{a.id}</td>
+                      <td className="py-1 pr-2 font-semibold">{accountName(a.id)}</td>
                       {칸.map(([k, f]) => (
                         <td key={k} className="pr-2">
                           {a.attribution ? f(a.attribution) : "-"}
@@ -182,9 +183,9 @@ export default function LabView() {
       </section>
 
       <section className={CARD}>
-        <h2 className="text-base font-semibold">지주사(H) 회사 가중치</h2>
+        <h2 className="text-base font-semibold">지주사 회사 가중치</h2>
         <p className="mt-1 text-xs text-slate-500">
-          H 는 회사들(A·C·D·E·B)의 추천을 그 회사의 최근 성적으로 가중해 합칩니다(docs/company.md 10장). 표본이 적을수록 1 에 가깝게 눌립니다. 날마다 운용 요약에 적힌 값 — 운용 요약
+          지주사는 회사들(가치·모멘텀·장기보유·안정·기준)의 추천을 그 회사의 최근 성적으로 가중해 합칩니다(docs/company.md 10장). 표본이 적을수록 1 에 가깝게 눌립니다. 날마다 운용 요약에 적힌 값 — 운용 요약
           최근 120줄(배치가 돈 날).
         </p>
         {data && !data.holding.length ? <p className="mt-2 text-sm text-slate-500">아직 지주사 기록이 없습니다 — 일일 배치가 운용 요약에 적은 날부터 보입니다.</p> : null}
@@ -204,8 +205,8 @@ export default function LabView() {
                     </p>
                   ) : (
                     <p className="text-xs text-slate-600 dark:text-slate-400">
-                      {날} 실행: {Object.entries(끝.memo.weights ?? {}).map(([c, w]) => `${c} ${Number(w).toFixed(2)}`).join(" · ")}
-                      {끝.memo.samples ? ` · 표본 ${Object.entries(끝.memo.samples).map(([c, n]) => `${c} ${n}`).join(" · ")}` : ""} · 추천 {끝.memo.recommended ?? "-"} · 두 곳 이상{" "}
+                      {날} 실행: {Object.entries(끝.memo.weights ?? {}).map(([c, w]) => `${accountName(c)} ${Number(w).toFixed(2)}`).join(" · ")}
+                      {끝.memo.samples ? ` · 표본 ${Object.entries(끝.memo.samples).map(([c, n]) => `${accountName(c)} ${n}`).join(" · ")}` : ""} · 추천 {끝.memo.recommended ?? "-"} · 두 곳 이상{" "}
                       {끝.memo.eligible ?? "-"} · 고름 {끝.memo.chosen ?? "-"}
                     </p>
                   )}

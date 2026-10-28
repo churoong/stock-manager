@@ -8,6 +8,7 @@
 
 import { apartDigits } from "@/lib/apart";
 import { amountText, statusText } from "@/lib/kisPaper";
+import { accountName } from "@/lib/accountNames";
 
 /** 최근 두 날 — 시장마다 가장 최근 칸을 고르려고. 기본키 역순이라 두 행만 읽는다 */
 export const DESK_LATEST = "SELECT as_of, summary_json, updated_at FROM paper_desk ORDER BY as_of DESC LIMIT 2";
@@ -225,7 +226,7 @@ export function orderLine(o: DeskOrder): string {
 /** {계좌: 건수} → "A 2 · C 1" (계좌 이름순) */
 export function countsText(c: Record<string, number> | null | undefined): string {
   const 줄 = Object.entries(c ?? {}).filter(([, n]) => n > 0).sort(([a], [b]) => a.localeCompare(b));
-  return 줄.length ? 줄.map(([a, n]) => `${a} ${n}`).join(" · ") : "없음";
+  return 줄.length ? 줄.map(([a, n]) => `${accountName(a)} ${n}`).join(" · ") : "없음";
 }
 
 /** KIS모의투자에 낸 주문의 상태별 건수 — "접수 3 · 거부 1" */
@@ -276,7 +277,7 @@ export function rowsById(lb: DeskLeaderboard | null | undefined): Map<string, De
 /** H 의 원가·묵은 평가 비중이 문턱을 넘었을 때만 붙는 까닭(25.1709·1711) — R 대비·지수 대비 칸이 같이 쓴다 */
 export function valuationGapText(v: ValuationGap | null | undefined): string {
   if (!v?.over || v.h_pct == null) return "";
-  return ` · H 원가·묵은 평가 ${v.h_pct.toFixed(2)}%(R ${v.r_pct == null ? "-" : v.r_pct.toFixed(2)}%) — ${v.limit}% 넘어 믿기 어려움`;
+  return ` · 지주사 원가·묵은 평가 ${v.h_pct.toFixed(2)}%(무작위 ${v.r_pct == null ? "-" : v.r_pct.toFixed(2)}%) — ${v.limit}% 넘어 믿기 어려움`;
 }
 
 /** 관문 칸의 지금 값 글 — 칸마다 단위가 다르다 */
@@ -292,7 +293,7 @@ export function gateNowText(i: GateItem): string {
       // 노출 맞춘 R 대비(참고, 25.1702) — 하락장엔 현금만으로, 상승장엔 덜 들어가 지는 몫을 뺀 값
       const m = i.exposure_matched;
       const 참고 = m && m.vs_r != null
-        ? ` (참고: 노출 맞춘 R 대비 ${ppText(m.vs_r, 0)} — 평균 투자 비중 H ${m.h_exposure_pct.toFixed(0)}% · R ${m.r_exposure_pct.toFixed(0)}%)`
+        ? ` (참고: 노출 맞춘 R 대비 ${ppText(m.vs_r, 0)} — 평균 투자 비중 지주사 ${m.h_exposure_pct.toFixed(0)}% · 무작위 ${m.r_exposure_pct.toFixed(0)}%)`
         : "";
       return `${ppText(i.now, 0)} / 0 초과${참고}${valuationGapText(i.valuation_gap)}`;
     }
@@ -322,7 +323,7 @@ export function gateNowText(i: GateItem): string {
 
 /** 챔피언 교체 후보 한 줄 — "C · 블록 3개 중 3개 이김 · 같은 기간 +12.00% (챔피언 +6.00%) · 2026-01-01부터" */
 export function championText(r: ChampionRow, mirror: string): string {
-  return `${r.id} · 블록 ${r.blocks}개 중 ${r.wins}개 이김 · 같은 기간 ${pctText(r.pct)} (${mirror} ${pctText(r.champion_pct)}) · ${r.from}부터${evidenceText(r)}`;
+  return `${accountName(r.id)} · 블록 ${r.blocks}개 중 ${r.wins}개 이김 · 같은 기간 ${pctText(r.pct)} (${accountName(mirror)} ${pctText(r.champion_pct)}) · ${r.from}부터${evidenceText(r)}`;
 }
 
 /** 결정 단위 짝 차이 — " · 결정 단위 +1.20%p(하한 −0.40, 묶음 5)" 또는 " · 결정 단위 근거 부족(묶음 2)". 25.1518 전 요약이면 빈 글 */
@@ -355,5 +356,5 @@ export function adjustText(x: FillAdjustRow | undefined | null): { main: string;
 export function adjustCheckText(c: FillAdjustCheck | null | undefined, mirror: string): string | null {
   if (!c) return null;
   const 섞임 = c.pre_link ? ` · 연결 전 보유 ${c.pre_link}종목이 섞여 실측이 흔들림(판정에서 뺌)` : "";
-  return `${c.from ?? "?"}~${c.to ?? "?"} KIS 실측 손익 차이 ${ppText(c.actual_pp)} (${mirror} 평가 대비) · 칸으로 설명한 몫 ${ppText(c.explained_pp)} ±${c.band_pp.toFixed(2)} · 안 잰 회전 ${c.unmeasured_pct.toFixed(0)}%${섞임}`;
+  return `${c.from ?? "?"}~${c.to ?? "?"} KIS 실측 손익 차이 ${ppText(c.actual_pp)} (${accountName(mirror)} 평가 대비) · 칸으로 설명한 몫 ${ppText(c.explained_pp)} ±${c.band_pp.toFixed(2)} · 안 잰 회전 ${c.unmeasured_pct.toFixed(0)}%${섞임}`;
 }

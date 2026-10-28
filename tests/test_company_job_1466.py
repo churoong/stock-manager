@@ -77,7 +77,7 @@ def test_company_buys_only_what_committee_passed(c: Client, monkeypatch: pytest.
     assert json.loads(산것[0][0])["committee"]["vote"] == pytest.approx(2.0) and 산것[0][1] == 2
     assert c.q("SELECT DISTINCT rule_version FROM paper_decisions WHERE account_id = 'B'") == [(1,)]
     # 운용역 메모 — 회의 수 한 줄 + "가장 높은 표" 들여 쓴 한 줄(25.1721, 리포트 가독성)
-    i = next(k for k, x in enumerate(줄) if x.startswith("🏛 A 가치투자사 위원회:"))
+    i = next(k for k, x in enumerate(줄) if x.startswith("🏛 가치투자사 위원회:"))
     assert "가장 높은 표" not in 줄[i] and 줄[i + 1].startswith("   가장 높은 표 ")
     assert 기록["accounts"]["A"]["committee"]["approved"] == 1
 
@@ -123,7 +123,7 @@ def test_committee_failure_stops_only_that_company(c: Client, monkeypatch: pytes
     assert c.q("SELECT COUNT(*) FROM paper_orders WHERE account_id = 'A'") == [(0,)]
     assert {r[0] for r in c.q("SELECT DISTINCT stock_id FROM paper_orders WHERE account_id = 'B'")} == {1, 3}
     assert 기록["accounts"]["A"]["committee"]["error"].startswith("조사 자료")
-    assert any(x.startswith("⚠️ 가상 A 투자위원회를 열지 못함") for x in 줄)
+    assert any(x.startswith("⚠️ 가상 가치 투자위원회를 열지 못함") for x in 줄)
 
 
 def test_charter_migration_matches_code() -> None:

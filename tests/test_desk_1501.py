@@ -43,12 +43,12 @@ def test_checks_order_and_text() -> None:
     높음 = [x["text"] for x in c if x["level"] == "high"]
     assert [x["level"] for x in c[: len(높음)]] == ["high"] * len(높음)  # 높음이 먼저
     글 = " / ".join(x["text"] for x in c)
-    assert "멈춤 스위치" in 글 and "KIS_VTS_APP_SECRET" in 글 and "장부 검산 어긋남: 계좌 B" in 글 and "거부 2건" in 글
+    assert "멈춤 스위치" in 글 and "KIS_VTS_APP_SECRET" in 글 and "장부 검산 어긋남: 계좌 기준" in 글 and "거부 2건" in 글
     assert "KIS모의투자에 보내지 않음: 장 끝난 뒤 — 보내지 않음 — 베낄 주문 3건이 남았습니다" in 높음
     assert "KIS모의투자에 안 낸 주문: 코드 없음 1건" in 글
-    assert "가상 A 투자위원회를 열지 못함 — 오늘 사지 않았습니다: 부서 실패" in 높음
-    assert "가상 H 지주사가 고르지 못함 — 오늘 사지 않았습니다: 표 모자람" in 높음 and "가상 C 헌장 오류: 가중 합 0" in 높음
-    assert "가상 B" not in 글  # 위원회가 열린 계좌는 없다
+    assert "가상 가치 투자위원회를 열지 못함 — 오늘 사지 않았습니다: 부서 실패" in 높음
+    assert "가상 지주사 고르지 못함 — 오늘 사지 않았습니다: 표 모자람" in 높음 and "가상 모멘텀 헌장 오류: 가중 합 0" in 높음
+    assert "가상 기준" not in 글  # 위원회가 열린 계좌는 없다
     assert "이 실행의 경고 10줄 — 시스템 상태 화면에서" in 글 and "경고0" not in 글  # 줄 자체는 싣지 않는다
     # 쉬는 날은 안 보낸 것이 정상, 베낄 주문이 없으면 보통
     assert desk.checks(halted=False, paper=None, broker={"send": "오늘은 장이 없다"}, recon_bad=[], warnings=0) == []
@@ -110,7 +110,7 @@ def test_write_merges_both_markets(monkeypatch: pytest.MonkeyPatch) -> None:
     assert kr["orders_by_account"] == {"B": 1}
     assert kr["holding"] == {"weights": {"A": 1.1}}  # 베끼는 계좌의 지주사 기록 — 연구실 가중치 추이(25.1506)
     assert s["markets"]["US"]["holding"] is None
-    assert any("장부 검산 어긋남: 계좌 R1" in x["text"] for x in kr["checks"])
+    assert any("장부 검산 어긋남: 계좌 무작위1" in x["text"] for x in kr["checks"])
     assert [r["id"] for r in s["leaderboard"]["rows"]][0] in ("B", "R1")
     # 판 이력 표를 처음 채운다 — 계좌마다 지금 판, since '' (계좌의 처음부터). B 는 1.0 → 1.02 = +2%, R1 은 0%
     b = s["rule_history"]["B"]

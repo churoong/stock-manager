@@ -240,7 +240,7 @@ def test_weekly_reads_both_markets(c: Client) -> None:
                        " fetched_at, summary_json) VALUES (?, ?, 'B', '[]', '{}', 'kis_vts', 't', ?)",
                        [증권사, 날, json.dumps(s)])  # fmt: skip
     줄 = job.summary_lines(c)
-    assert 줄[0].startswith("[KIS모의투자 — B 주문 베끼기") and any(x.startswith("[KIS모의투자 — B 미국 주문 베끼기")
+    assert 줄[0].startswith("[KIS모의투자 — 기준 주문 베끼기") and any(x.startswith("[KIS모의투자 — 기준 미국 주문 베끼기")
                                                                    for x in 줄)  # fmt: skip
 
 

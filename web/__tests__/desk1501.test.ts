@@ -89,7 +89,7 @@ describe("글", () => {
     const o = { side: "buy", name: "삼성전자", ticker: "005930", quantity: 3, order_type: "limit", limit_price: 9800, tranche: 2, currency: "KRW", reason: "r" };
     expect(orderLine(o)).toBe("매수 삼성전자 3주 · 지정가 9,800원 · 2차");
     expect(orderLine({ ...o, order_type: "market", limit_price: null, tranche: 1 })).toBe("매수 삼성전자 3주 · 시장가");
-    expect(countsText({ H: 2, A: 1, B: 0 })).toBe("A 1 · H 2");
+    expect(countsText({ H: 2, A: 1, B: 0 })).toBe("가치 1 · 지주사 2");
     expect(countsText({})).toBe("없음");
   });
 

@@ -198,7 +198,7 @@ def _기초_평가(
         if r.get("recon_ok") == 0:
             검산틀린날.add(str(r["as_of"]))
     계좌들 = client.execute(NAMES_SQL).dicts()
-    이름 = {str(r["id"]): str(r["name"] or r["id"]) for r in 계좌들}
+    이름 = {str(r["id"]): pp.account_name(str(r["id"])) for r in 계좌들}  # 화면 이름(25.1893 — DB 이름은 "가상 A (…)")
     return 계열, 검산틀린날, 계좌들, desk.leaderboard(계열, 이름), 평가, 손익, 그림자, 현금
 
 
@@ -268,7 +268,7 @@ def report_head(
         # 셋 다 비면 연결하지 않은 것(정상), 일부만이면 설정 실수 (25.1492)
         상태 = "꺼짐(" + ("키 없음" if len(kv.missing()) >= 3 else "키 일부만 있음 — 설정 확인") + ")"
     elif h not in {str(r["id"]) for r in 계좌들}:
-        상태 = f"꺼짐(베낄 계좌 {h} 없음)"
+        상태 = f"꺼짐(베낄 계좌 {pp.account_name(h)} 없음)"
     elif after_close:
         상태 = "장 끝난 뒤 실행이라 오늘은 내지 않습니다"
     elif 막힘 := bmj.send_block(market, now):

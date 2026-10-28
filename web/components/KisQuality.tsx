@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import EquityChart from "@/components/EquityChart";
 import { bodyOf, readJson } from "@/lib/http";
 import { CELL_MIN_DAYS, DIVERGE, cellRows, excessText, qualityLine, qualitySeries, slipSeries, type QualityRow } from "@/lib/kisQuality";
+import { accountName } from "@/lib/accountNames";
 
 /**
  * KIS모의투자 실행 품질 (docs/paper.md 15.8, docs/infra.md 25.1504) — 가상 체결 판정이 얼마나 낙관적인가.
@@ -35,7 +36,7 @@ export default function KisQuality() {
     <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
       <h2 className="text-base font-semibold">실행 품질 — 가상 성적이 실제로 얼마나 나오나</h2>
       <p className="mt-1 text-xs text-slate-500">
-        H 의 주문을 KIS모의투자에 그대로 내고, 가상모의투자의 체결 판정과 견줍니다. <b>실현율</b> = 가상이 찼다고 한 주문 가운데 KIS 에서도 찬 비율 — 100% 면 가상
+        지주사의 주문을 KIS모의투자에 그대로 내고, 가상모의투자의 체결 판정과 견줍니다. <b>실현율</b> = 가상이 찼다고 한 주문 가운데 KIS 에서도 찬 비율 — 100% 면 가상
         성적을 그대로 믿어도 되고, 낮을수록 실전에서는 덜 나옵니다. 가격 차이는 불리한 쪽이 +(가상이 낙관). 일치율이 {DIVERGE.MATCH_PCT}% 아래로·실현율이 {DIVERGE.KEPT_PCT}% 아래로 내려가거나
         가격 차이가 +{DIVERGE.SLIP_PCT}% 를 넘으면(표본 {DIVERGE.MIN_N} 이상) 텔레그램으로 알립니다 — 돌아올 때까지 한 번만. 문턱은 첫 값이라 한 달 쌓이면 다시 정합니다.
       </p>
@@ -52,7 +53,7 @@ export default function KisQuality() {
               <div key={m} className="mt-3">
                 <h3 className="text-sm font-medium">
                   {label}
-                  {m.endsWith("2") && rows[rows.length - 1]?.account_id ? ` — ${rows[rows.length - 1]?.account_id} 를 베낌` : ""}
+                  {m.endsWith("2") && rows[rows.length - 1]?.account_id ? ` — ${accountName(rows[rows.length - 1]?.account_id)} 주문을 베낌` : ""}
                 </h3>
                 <p className="text-sm">{qualityLine(rows[rows.length - 1])}</p>
                 {/* 계열 하나라도 두 점이면 그린다 — 첫 계열만 보면 매수가 한 점일 때 매도 그래프도 숨었다(검토 10) */}

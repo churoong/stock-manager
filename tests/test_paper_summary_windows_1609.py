@@ -13,7 +13,7 @@ from tests.test_paper_summary_1447 import _체결, _행, 한도
 
 def _이번주(줄: list[str]) -> str:
     # 계좌마다 두 줄 — 체결은 둘째 줄(25.1727)
-    i = next(k for k, x in enumerate(줄) if x.startswith("  A 평가 "))
+    i = next(k for k, x in enumerate(줄) if x.startswith("  가치 평가 "))
     return 줄[i + 1].split("이번 주 체결 ")[1].split(" (")[0]
 
 
@@ -38,11 +38,11 @@ def test_월말_마지막_장_매도는_다음_복기에_한_번_다음_달_첫�
     줄 = pp.summary_lines({"A": [행[d] for d in ("2026-09-30", "2026-10-15", "2026-10-30", "2026-11-02", "2026-11-04")]},
                          {"A": fills}, "2026-10-29", "2026-10-01", {1: "가"}, {}, 한도)  # fmt: skip
     assert "[가상모의투자 월간 복기] 2026-10-01 부터 2026-11-01 전까지" in 줄
-    assert "  A: 그달 판 종목 없음" in 줄
+    assert "  가치: 그달 판 종목 없음" in 줄
     # 11월 복기 — 10-30 매도(11-02 행에 듦)와 11-03 매도 둘 다. 예전엔 10-30 이 체결일로 잘려 영영 빠졌다
     줄 = pp.summary_lines({"A": [행[d] for d in ("2026-10-30", "2026-11-02", "2026-11-04", "2026-11-30", "2026-12-01")]},
                          {"A": fills}, "2026-11-24", "2026-11-01", {1: "가"}, {}, 한도)  # fmt: skip
-    이익 = next(x for x in 줄 if x.startswith("  A 이익 셋"))
+    이익 = next(x for x in 줄 if x.startswith("  가치 이익 셋"))
     assert 이익.count("가 +") == 2
 
 

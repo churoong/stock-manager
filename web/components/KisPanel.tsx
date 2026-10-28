@@ -311,7 +311,7 @@ export default function KisPanel() {
   const v = data?.[market];
   return (
     <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
-      <h2 className="text-base font-semibold">KIS모의투자 — H(지주사) 주문 베끼기</h2>
+      <h2 className="text-base font-semibold">KIS모의투자 — 지주사 주문 베끼기</h2>
       {whole ? (
         <div className="mt-1 text-sm">
           {whole.account_krw?.total_krw != null ? (

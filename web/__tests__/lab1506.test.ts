@@ -112,7 +112,7 @@ describe("성과 분해·지주사 가중치", () => {
       ["KR", "2026-10-19T23:40:00Z"],
     ]);
     const s = weightSeries(p, "KR");
-    expect(s.map((x) => x.label)).toEqual(["A 가중치", "C 가중치"]);
+    expect(s.map((x) => x.label)).toEqual(["가치 가중치", "모멘텀 가중치"]);
     expect(s[0].points).toEqual([
       { date: "2026-10-16", value: 1.0 },
       { date: "2026-10-20", value: 1.2 },

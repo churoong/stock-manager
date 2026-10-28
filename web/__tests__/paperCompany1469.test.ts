@@ -118,12 +118,12 @@ describe("투자위원회 탭", () => {
       days: 28, n: 0, match_pct: null, both: 0, internal_only: 0, kis_only: 0, neither: 0, partial: 0, rejected: 0, unknown: 0, cleanup: 0,
       guard: 2, slip_buy: { n: 0, avg: null }, slip_sell: { n: 0, avg: null }, reject_reasons: {} } });
     expect(장중만[0]).toContain("체결을 견줄 주문은 아직 없습니다");
-    expect(장중만.at(-1)).toBe("장중 손절·익절 2(H 는 아침 일봉 판정 — 짝 없음) · 잔고가 어긋난 종목 0 (2026-10-27 기준)");
+    expect(장중만.at(-1)).toBe("장중 손절·익절 2(지주사는 아침 일봉 판정 — 짝 없음) · 잔고가 어긋난 종목 0 (2026-10-27 기준)");
     // 잔고 대보기에서 뺀 "장중 매도 뒤 H 만 든 종목" — "어긋난 종목 0" 이 거짓말로 읽히지 않게(25.1772, 배치와 같은 글)
     const 뺌 = brokerLines({ as_of: "2026-10-27", diff: {}, summary: {
       days: 28, n: 0, match_pct: null, both: 0, internal_only: 0, kis_only: 0, neither: 0, partial: 0, rejected: 0, unknown: 0, cleanup: 0,
       guard_held: 1, slip_buy: { n: 0, avg: null }, slip_sell: { n: 0, avg: null }, reject_reasons: {} } });
-    expect(뺌.at(-1)).toBe("장중 매도 뒤 H 만 든 종목 1(잔고 대보기에서 뺌) · 잔고가 어긋난 종목 0 (2026-10-27 기준)");
+    expect(뺌.at(-1)).toBe("장중 매도 뒤 지주사만 든 종목 1(잔고 대보기에서 뺌) · 잔고가 어긋난 종목 0 (2026-10-27 기준)");
   });
 
   it("가상 대조 — 무작위 20종목 안 분위, 표본 없으면 숨김 (25.1476)", () => {

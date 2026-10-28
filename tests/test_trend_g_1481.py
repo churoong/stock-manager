@@ -61,7 +61,7 @@ def test_pair_line_uses_common_window_for_late_account() -> None:
     줄 = pp.summary_lines(daily, {}, "2026-10-20", None, {}, {}, 한도, None,
                           {"B": "2026-10-16", "G": "2026-10-19"}, {("B", "2026-10-19"): 1.05, ("G", "2026-10-19"): 1.0})
     # G 는 10-19 부터 +2%, B 는 같은 구간 1.10/1.05 − 1 = +4.76% → −2.8%p (원화 차이 −80,000원이 아니라)
-    assert any(x.startswith("  G−B: 시간가중 -2.8%p (2026-10-19부터 공통 구간") for x in 줄), 줄
+    assert any(x.startswith("  추세익절−기준: 시간가중 -2.8%p (2026-10-19부터 공통 구간") for x in 줄), 줄
     # 같은 날 시작한 짝은 그대로 원화 차이
     assert not any("원화" in x for x in 줄)
 
@@ -72,4 +72,4 @@ def test_compare_real_window_not_pushed_by_late_account() -> None:
                         실제)  # fmt: skip
     assert c["start"] == "2026-10-16" and c["paper_start"] == {"G": "2026-10-19"}
     assert c["paper_pct"]["B"] == pytest.approx(2.0)
-    assert "G +1.0%(2026-10-19부터)" in pp.compare_line(c)
+    assert "추세익절 +1.0%(2026-10-19부터)" in pp.compare_line(c)

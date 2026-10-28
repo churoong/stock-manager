@@ -26,6 +26,7 @@ import {
   showShadowCard,
   virtualText,
 } from "@/lib/paper";
+import { accountName } from "@/lib/accountNames";
 import { pageOf } from "@/lib/paging";
 import { KIND_TEXT, afterText, beatBench, groupDecisions, holdSide, operationalSkip, type DecisionRow } from "@/lib/paperDecisions";
 import { money, won } from "@/lib/portfolio";
@@ -126,7 +127,7 @@ function chartSeries(history: HistoryRow[], ids: string[]): Series[] {
       return v == null ? [] : [{ date: h.as_of, value: Number(v) / Number(h.invested_krw) }];
     });
   return [
-    ...ids.map((aid, i) => ({ label: aid, color: ACCOUNT_COLOR[aid] ?? SPARE_COLORS[i % SPARE_COLORS.length], points: ratio(by(aid), (h) => h.equity_krw) })),
+    ...ids.map((aid, i) => ({ label: accountName(aid), color: ACCOUNT_COLOR[aid] ?? SPARE_COLORS[i % SPARE_COLORS.length], points: ratio(by(aid), (h) => h.equity_krw) })),
     { label: "KOSPI", color: "#64748b", points: ratio(첫, (h) => h.kospi_krw) },
     { label: "S&P500", color: "#0891b2", points: ratio(첫, (h) => h.sp500_krw) },
   ];
@@ -258,7 +259,7 @@ export default function PaperView() {
                 <b className={tone(data.realCompare.realPct)}>{pctText(data.realCompare.realPct)}</b>
                 {Object.entries(data.realCompare.paperPct ?? {}).map(([aid, v]) => (
                   <span key={aid}>
-                    {" "}· 가상 {aid} <b className={tone(v)}>{pctText(v)}</b>
+                    {" "}· 가상 {accountName(aid)} <b className={tone(v)}>{pctText(v)}</b>
                     {data.realCompare?.paperStart?.[aid] ? ` (${data.realCompare.paperStart[aid]}부터)` : ""}
                   </span>
                 ))}
@@ -273,7 +274,7 @@ export default function PaperView() {
 
       {/* KIS모의투자는 제 화면으로 옮겼다 (docs/desk.md 4장, 25.1504) */}
       <section className="rounded-xl border border-slate-200 bg-white p-4 text-sm dark:border-slate-800 dark:bg-slate-900">
-        H 의 주문을 KIS모의투자에 그대로 낸 결과·실행 품질은{" "}
+        지주사의 주문을 KIS모의투자에 그대로 낸 결과·실행 품질은{" "}
         <Link href="/kis" className="underline">
           KIS모의투자 화면
         </Link>
@@ -447,8 +448,8 @@ export function CompareCard({ data, desk }: { data: Data; desk?: DeskView | null
       </p>
       {lb?.window_start ? (
         <p className="mt-1 text-xs text-slate-500">
-          공통 구간 {lb.window_start}부터의 시간가중 수익률 순 · R 대비 = 그 수익률 − 무작위 대조 R1·R2 평균
-          {lb.control_pct != null ? `(${deskPct(lb.control_pct)})` : ""} — 늦게 연 계좌도 같은 잣대. "갓 엶" 계좌(평가 20번 전)는 제 개설일부터 잰 값입니다. "따로 잼"(스윙 S)은 공통 구간·챔피언 후보 밖, 제 개설일부터
+          공통 구간 {lb.window_start}부터의 시간가중 수익률 순 · R 대비 = 그 수익률 − 무작위 대조(무작위1·2) 평균
+          {lb.control_pct != null ? `(${deskPct(lb.control_pct)})` : ""} — 늦게 연 계좌도 같은 잣대. "갓 엶" 계좌(평가 20번 전)는 제 개설일부터 잰 값입니다. "따로 잼"(스윙·단타)은 공통 구간·챔피언 후보 밖, 제 개설일부터
         </p>
       ) : null}
       <div className="mt-2 overflow-x-auto">
@@ -475,7 +476,7 @@ export function CompareCard({ data, desk }: { data: Data; desk?: DeskView | null
               return (
                 <tr key={a.id}>
                   <td className="py-1 font-semibold">
-                    {a.id}
+                    {accountName(a.id)}
                     {r?.young ? <span className="block text-[10px] font-normal text-amber-700 dark:text-amber-400">갓 엶 · {r.open}부터</span> : null}
                     {r?.separate ? <span className="block text-[10px] font-normal text-sky-700 dark:text-sky-400">따로 잼 · {r.open}부터</span> : null}
                   </td>
@@ -506,7 +507,7 @@ export function CompareCard({ data, desk }: { data: Data; desk?: DeskView | null
       ) : null}
       {desk?.champion?.length ? (
         <div className="mt-3 rounded-lg border border-slate-200 p-2 text-xs dark:border-slate-800">
-          <p className="font-medium">챔피언 교체 후보 — 지금 챔피언 {desk.mirror_account ?? "H"}(KIS 가 베낌)를 꾸준히 앞서는 전략</p>
+          <p className="font-medium">챔피언 교체 후보 — 지금 챔피언 {accountName(desk.mirror_account ?? "H")}(KIS 가 베낌)를 꾸준히 앞서는 전략</p>
           {desk.champion.some((r) => r.candidate) ? (
             <ul className="mt-1 space-y-0.5 text-emerald-700 dark:text-emerald-400">
               {desk.champion.filter((r) => r.candidate).map((r) => (
@@ -531,9 +532,9 @@ export function CompareCard({ data, desk }: { data: Data; desk?: DeskView | null
       <p className="mt-2 text-xs text-slate-500">
         짝마다 규칙 하나만 다릅니다 —{" "}
         {PAIRS.filter(([x, y]) => 있음.has(x) && 있음.has(y))
-          .map(([x, y, 무엇]) => `${x}−${y}: ${무엇}`)
+          .map(([x, y, 무엇]) => `${accountName(x)}−${accountName(y)}: ${무엇}`)
           .join(" · ")}
-        . 몇 달 차이는 대부분 운입니다(R1·R2 가 그 크기를 보여 줍니다).
+        . 몇 달 차이는 대부분 운입니다(무작위1·2 가 그 크기를 보여 줍니다).
       </p>
     </section>
   );
@@ -562,7 +563,7 @@ export function AccountTabs({ data, acct, setAcct, sub, setSub, desk }: {
             onClick={() => setAcct(x.id)}
             className={`min-w-[7rem] flex-1 shrink-0 rounded-lg border px-3 py-2 text-left text-sm ${x.id === a.id ? "border-slate-900 bg-slate-900 text-white dark:border-slate-100 dark:bg-slate-100 dark:text-slate-900" : "border-slate-300 dark:border-slate-700"}`}
           >
-            <span className="block font-semibold">가상 {x.id}</span>
+            <span className="block font-semibold">{accountName(x.id)}</span>
             <span className="block truncate text-xs opacity-80">
               {won(x.view.equity)} · {pctText(x.view.pnlPct)}
             </span>
@@ -570,7 +571,7 @@ export function AccountTabs({ data, acct, setAcct, sub, setSub, desk }: {
         ))}
       </div>
       <p className="mt-2 text-xs text-slate-500">
-        {a.name} · 규칙서 판 {a.rule_version} · {ruleText(a)}
+        {accountName(a.id)} · 규칙서 판 {a.rule_version} · {ruleText(a)}
       </p>
       <div className="mt-3 flex gap-1 overflow-x-auto border-b border-slate-200 text-sm dark:border-slate-800" role="tablist" aria-label="계좌 화면">
         {SUB_TABS.filter(([k]) => k !== "committee" || hasCommittee(a)).map(([k, label]) => (

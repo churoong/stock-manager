@@ -23,7 +23,7 @@ describe("관문 R 대비 — 노출 맞춘 참고 (25.1702)", () => {
     expect(gateNowText(칸)).toBe("+3.13%p / 0 초과");
     expect(
       gateNowText({ ...칸, exposure_matched: { vs_r: -0.2, r_pct: 1, h_exposure_pct: 70.4, r_exposure_pct: 99.6, skipped_days: 0 } }),
-    ).toBe("+3.13%p / 0 초과 (참고: 노출 맞춘 R 대비 -0.20%p — 평균 투자 비중 H 70% · R 100%)");
+    ).toBe("+3.13%p / 0 초과 (참고: 노출 맞춘 R 대비 -0.20%p — 평균 투자 비중 지주사 70% · 무작위 100%)");
     expect(gateNowText({ ...칸, exposure_matched: null })).toBe("+3.13%p / 0 초과");
   });
 });
@@ -32,11 +32,11 @@ describe("관문 R 대비·지수 대비 — H 원가·묵은 평가 (25.1709·1
   it("H 가 문턱을 넘었을 때만 까닭을 붙인다", () => {
     const 칸 = { key: "vs_r", label: "", now: 1, target: 0, ok: false };
     expect(gateNowText({ ...칸, valuation_gap: { h_pct: 5.04, r_pct: 1.2, limit: 5, over: true } })).toBe(
-      "+1.00%p / 0 초과 · H 원가·묵은 평가 5.04%(R 1.20%) — 5% 넘어 믿기 어려움",
+      "+1.00%p / 0 초과 · 지주사 원가·묵은 평가 5.04%(무작위 1.20%) — 5% 넘어 믿기 어려움",
     );
     expect(gateNowText({ ...칸, valuation_gap: { h_pct: 1, r_pct: 9, limit: 5, over: false } })).toBe("+1.00%p / 0 초과");
     expect(
       gateNowText({ key: "vs_index", label: "", now: 2, target: 0, ok: false, index_pct: 1, valuation_gap: { h_pct: 6, r_pct: null, limit: 5, over: true } }),
-    ).toBe("+2.00%p (지수 반반 +1.00%) / 0 초과 · H 원가·묵은 평가 6.00%(R -%) — 5% 넘어 믿기 어려움");
+    ).toBe("+2.00%p (지수 반반 +1.00%) / 0 초과 · 지주사 원가·묵은 평가 6.00%(무작위 -%) — 5% 넘어 믿기 어려움");
   });
 });

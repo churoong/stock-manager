@@ -63,7 +63,7 @@ describe("KIS 체결 보정 (전략 순위)", () => {
     expect(adjustText(보정({ fills: 0, adj_pp: 0, band_pp: 0, pi_pp: 0, adjusted_pct: 1 })).sub).toBe("체결 없음");
     expect(adjustText(undefined)).toEqual({ main: "-", sub: "" });
     expect(adjustCheckText({ from: "2026-10-16", to: "2026-11-20", actual_pp: -0.1, explained_pp: -0.07, band_pp: 0.02, unmeasured_pct: 3 }, "H")).toBe(
-      "2026-10-16~2026-11-20 KIS 실측 손익 차이 -0.10%p (H 평가 대비) · 칸으로 설명한 몫 -0.07%p ±0.02 · 안 잰 회전 3%",
+      "2026-10-16~2026-11-20 KIS 실측 손익 차이 -0.10%p (지주사 평가 대비) · 칸으로 설명한 몫 -0.07%p ±0.02 · 안 잰 회전 3%",
     );
     expect(adjustCheckText(null, "H")).toBeNull();
   });

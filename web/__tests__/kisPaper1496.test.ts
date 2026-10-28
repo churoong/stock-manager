@@ -66,7 +66,7 @@ describe("KIS모의투자 글", () => {
     const 줄 = perfLines(p);
     expect(줄[0]).toContain("손익 +50,000원 (+5.00%)");
     expect(줄[0]).toContain("최대 낙폭 -1.50%");
-    expect(줄[1]).toContain("H 손익 −12,000원 (-0.40%)");
+    expect(줄[1]).toContain("지주사 손익 −12,000원 (-0.40%)");
     expect(perfLines(null)[0]).toContain("아직 계좌 총액 기록이 없습니다");
   });
   it("추이 그래프는 시작 총액 1.0 기준 배수, 총액 없는 날은 뺀다", () => {

@@ -23,6 +23,7 @@ import {
   type DeskView as Desk,
 } from "@/lib/desk";
 import { amountText, perfLines, statusText } from "@/lib/kisPaper";
+import { accountName } from "@/lib/accountNames";
 
 /**
  * 운용 상황실 — 첫 화면 (docs/desk.md 2장, docs/infra.md 25.1501).
@@ -79,7 +80,7 @@ export function MarketCard({ m, k, mirror }: { m: DeskMarket & { as_of: string }
       <h2 className="font-semibold">
         {MARKET_LABEL[k]} <span className="text-xs font-normal text-slate-500">실행 {when(m.run_at)} · 판정 {m.trade_date} · 다음 장 {m.session_date}</span>
       </h2>
-      <p className="mt-2 text-sm font-medium">{mirror} 체결 (판정한 날 {m.trade_date})</p>
+      <p className="mt-2 text-sm font-medium">{accountName(mirror)} 체결 (판정한 날 {m.trade_date})</p>
       {fills.length ? (
         <ul className="mt-1 space-y-0.5 text-sm">
           {fills.map((f, i) => (
@@ -92,7 +93,7 @@ export function MarketCard({ m, k, mirror }: { m: DeskMarket & { as_of: string }
       ) : (
         <p className="mt-1 text-sm text-slate-500">없음</p>
       )}
-      <p className="mt-3 text-sm font-medium">{mirror} 이 {m.session_date} 장에 낼 주문</p>
+      <p className="mt-3 text-sm font-medium">{accountName(mirror)} 계좌가 {m.session_date} 장에 낼 주문</p>
       {orders.length ? (
         <ul className="mt-1 space-y-1 text-sm">
           {orders.map((o, i) => (
@@ -109,7 +110,7 @@ export function MarketCard({ m, k, mirror }: { m: DeskMarket & { as_of: string }
       <p className="mt-3 text-xs text-slate-500">
         모든 계좌 체결 {countsText(m.fills_by_account)} · 다음 장 주문 {countsText(m.orders_by_account)}
       </p>
-      <p className="mt-3 text-sm font-medium">KIS모의투자 ({mirror} 베낌)</p>
+      <p className="mt-3 text-sm font-medium">KIS모의투자 ({accountName(mirror)} 베낌)</p>
       {off ? (
         <p className="mt-1 text-sm text-amber-700 dark:text-amber-400">보내지 않음 — {off}</p>
       ) : (
@@ -198,9 +199,9 @@ export default function DeskView() {
         {lb?.rows?.length ? (
           <>
             <p className="mt-1 text-xs text-slate-500">
-              공통 구간 {lb.window_start}부터의 시간가중 수익률 순 · R 대비 = 그 수익률 − 무작위 대조 R1·R2 평균
+              공통 구간 {lb.window_start}부터의 시간가중 수익률 순 · R 대비 = 그 수익률 − 무작위 대조(무작위1·2) 평균
               {lb.control_pct != null ? `(${pctText(lb.control_pct)})` : "(대조 기록 없음)"} — 운인가 실력인가. 갓 연 계좌(평가 20번 전)는 아래에, 제
-              개설일부터 같은 구간 R 과 견줍니다. "따로 잼"(스윙 S)은 다른 실험이라 공통 구간·챔피언 후보 밖, 제 개설일부터입니다
+              개설일부터 같은 구간 R 과 견줍니다. "따로 잼"(스윙·단타)은 다른 실험이라 공통 구간·챔피언 후보 밖, 제 개설일부터입니다
             </p>
             <div className="overflow-x-auto">
               <table className="mt-2 w-full min-w-[520px] text-sm">
@@ -218,7 +219,7 @@ export default function DeskView() {
                   {lb.rows.map((r) => (
                     <tr key={r.id} className={`border-t border-slate-100 dark:border-slate-800 ${r.id === mirror ? "bg-amber-50 dark:bg-amber-950/30" : ""}`}>
                       <td className="py-1">
-                        <b>{r.id}</b> {r.name !== r.id ? <span className="text-xs text-slate-500">{r.name}</span> : null}
+                        <b>{accountName(r.id)}</b>
                       </td>
                       <td className="text-xs">
                         {r.kind}
@@ -252,7 +253,7 @@ export default function DeskView() {
             </span>
           </h2>
           <p className="mt-1 text-xs text-slate-500">
-            잣대는 KIS 가 베끼는 계좌 {desk.gate.account}
+            잣대는 KIS 가 베끼는 계좌 {accountName(desk.gate.account)}
             {desk.gate.version != null ? `의 지금 판 ${desk.gate.version}` : ""}
             {desk.gate.from ? ` · ${desk.gate.from}부터(관문 자기 구간)` : ""}. 읽기 전용입니다 — 넘어도 실전 주문은 열리지 않습니다. 문턱은 첫 값(docs/desk.md 6장).
           </p>
@@ -291,7 +292,7 @@ export default function DeskView() {
               <tbody>
                 {desk.risk.map((r) => (
                   <tr key={r.id} className="border-t border-slate-100 align-top dark:border-slate-800">
-                    <td className="py-1 font-semibold">{r.id}</td>
+                    <td className="py-1 font-semibold">{accountName(r.id)}</td>
                     <td className="text-right">{r.exposure_pct == null ? "-" : `${r.exposure_pct.toFixed(0)}%`}</td>
                     <td className={`text-right ${tone(r.dd_pct)}`}>{pctText(r.dd_pct)}</td>
                     <td className="pl-2 text-xs">

@@ -177,12 +177,12 @@ describe("현금·예약·취소", () => {
     expect(cancelBlock(undefined, {})).toBe("없는 입금입니다");
     expect(cancelBlock({ ...입금, kind: "cancel" }, {})).toBe("취소 행은 다시 취소할 수 없습니다");
     expect(cancelBlock({ ...입금, cancelled: 1 }, {})).toBe("이미 취소한 입금입니다");
-    expect(cancelBlock(입금, { A: 600_000, B: 400_000 })).toContain("계좌 B");
-    expect(cancelBlock(입금, { A: 600_000, B: null })).toContain("계좌 B");
+    expect(cancelBlock(입금, { A: 600_000, B: 400_000 })).toContain("계좌: 기준");
+    expect(cancelBlock(입금, { A: 600_000, B: null })).toContain("계좌: 기준");
     // 예약을 모르는 계좌는 "현금이 모자랍니다" 가 아니라 환율 까닭으로 (25.1764)
-    expect(cancelBlock(입금, { A: 600_000, B: null })).toMatch(/^달러 미체결 매수의 예약을 셀 환율이 없습니다 .*\(계좌 B\)$/);
+    expect(cancelBlock(입금, { A: 600_000, B: null })).toMatch(/^달러 미체결 매수의 예약을 셀 환율이 없습니다 .*\(계좌: 기준\)$/);
     expect(cancelBlock(입금, { A: 400_000, B: null })).toBe(
-      `그 돈으로 이미 사서 현금이 모자랍니다 (계좌 A) · 달러 미체결 매수의 예약을 셀 환율이 없습니다 — USDKRW 가 없거나 ${FX_MAX_AGE_DAYS}일 넘게 묵음, 환율 수집 확인 (계좌 B)`,
+      `그 돈으로 이미 사서 현금이 모자랍니다 (계좌: 가치) · 달러 미체결 매수의 예약을 셀 환율이 없습니다 — USDKRW 가 없거나 ${FX_MAX_AGE_DAYS}일 넘게 묵음, 환율 수집 확인 (계좌: 기준)`,
     );
     expect(cancelBlock(입금, { A: 500_000, B: 500_000 })).toBeNull();
   });

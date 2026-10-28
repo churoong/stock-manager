@@ -81,7 +81,7 @@ def test_판_2_회사의_헌장이_깨지면_판_1_로_사지_않는다(monkeypa
     assert 기록["accounts"]["A"]["committee"]["error"].startswith("헌장 검사 실패")
     # 까닭은 ⚠️ 메모 줄 하나로만(25.1559 — 머리 줄에도 붙어 두 번 나갔다)
     assert sum("헌장 검사 실패" in x for x in 줄) == 1
-    assert any(x.startswith("⚠️ 가상 A 투자위원회를 열지 못함 — 헌장 검사 실패") for x in 줄)
+    assert any(x.startswith("⚠️ 가상 가치 투자위원회를 열지 못함 — 헌장 검사 실패") for x in 줄)
 
 
 def test_판_3_회사의_헌장이_비면_판_1_로_사지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:

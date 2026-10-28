@@ -30,6 +30,7 @@ from batch.core import calendar as cal
 from batch.core import db
 from batch.services import broker_mirror as bm
 from batch.services import fx as fx_svc
+from batch.services.paper import account_name
 from batch.sources import kis_vts as kv
 from batch.sources.kis import KisFailed
 
@@ -564,18 +565,18 @@ def run(
         if not 베낌:
             return {"off": "도전자 계좌를 고르지 않음(/kis)"}
         if 베낌 == MIRROR_ACCOUNT:
-            return {"off": f"도전자 {베낌} 가 챔피언과 같음"}
+            return {"off": f"도전자({account_name(베낌)})가 챔피언과 같음"}
         from batch.services.paper import SEPARATE_IDS
 
         if 베낌 in SEPARATE_IDS:
             # 따로 재는 실험 계좌(단타·스윙, docs/paper.md 16.3.1)는 베끼지 않는다 — 스윙·당일 단타 매도를 장 전 모의
             # 주문으로 내면 규칙과 다른 경로로 찬다. 챔피언 교체 후보에서도 빠져 있다(25.1879)
-            return {"off": f"도전자 {베낌} 는 따로 재는 실험 계좌라 베끼지 않음"}
+            return {"off": f"도전자({account_name(베낌)})는 따로 재는 실험 계좌라 베끼지 않음"}
         # 첫째와 같은 모의계좌면 두 베끼기의 잔고·체결 조회가 섞여 정리 주문이 남의 종목을 판다 — 설정 실수로 알린다
         if kv.account(keys=kv.CHALLENGER) == kv.account(keys=kv.MAIN):
             return {"off": f"{slot.label} 계좌가 첫째와 같음", "missing": ["KIS_VTS2_ACCOUNT(첫째와 같은 계좌)"]}
     if not client.execute(ACCOUNT_SQL, [베낌]).rows:
-        return {"off": f"베낄 계좌 {베낌} 없음"}
+        return {"off": f"베낄 계좌 {account_name(베낌)} 없음"}
     미국 = market == "US"
     증권사 = slot.broker_us if 미국 else slot.broker
     지금 = now.isoformat()
@@ -848,14 +849,15 @@ def summary_lines(client: Any) -> list[str]:
     """
     out: list[str] = []
     # 둘째(도전자, 25.1515) 줄도 — 거부·모름·어긋남을 볼 곳이 텔레그램 실패 알림뿐이었다(25.1517, 검토 7)
-    for 증권사, 이름 in ((BROKER, MIRROR_ACCOUNT), (BROKER_US, f"{MIRROR_ACCOUNT} 미국"),
+    챔 = account_name(MIRROR_ACCOUNT)  # 화면 이름(25.1893)
+    for 증권사, 이름 in ((BROKER, 챔), (BROKER_US, f"{챔} 미국"),
                        (CHALLENGER.broker, "도전자"), (CHALLENGER.broker_us, "도전자 미국")):  # fmt: skip
         rows = client.execute(LATEST_DAILY_SQL, [증권사]).dicts()
         if not rows or not rows[0].get("summary_json"):
             continue
         r = rows[0]
         if 이름.startswith("도전자") and r.get("account_id"):
-            이름 = f"도전자 {r['account_id']}" + (" 미국" if 이름.endswith("미국") else "")
+            이름 = f"도전자 {account_name(str(r['account_id']))}" + (" 미국" if 이름.endswith("미국") else "")
         out += bm.compare_lines(json.loads(r["summary_json"]), len(json.loads(r.get("diff_json") or "{}")),
                                 str(r["as_of"]), 이름)  # fmt: skip
     return out

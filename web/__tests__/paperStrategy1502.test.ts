@@ -122,12 +122,12 @@ describe("전략 순위·판 이력 화면", () => {
     const html = renderToStaticMarkup(createElement(CompareCard, { data, desk }));
     expect(html).toContain("전략 순위");
     expect(html).toContain("공통 구간 2026-10-16부터");
-    expect(html.indexOf(">B<")).toBeLessThan(html.indexOf(">R1<"));
-    expect(html.indexOf(">R1<")).toBeLessThan(html.indexOf(">A<"));
+    expect(html.indexOf(">기준<")).toBeLessThan(html.indexOf(">무작위1<"));
+    expect(html.indexOf(">무작위1<")).toBeLessThan(html.indexOf(">가치<"));
     expect(html).toContain("+2.50%p");
     // 요약을 못 읽으면 계좌 순, 칸은 "-"
     const 없이 = renderToStaticMarkup(createElement(CompareCard, { data }));
-    expect(없이.indexOf(">A<")).toBeLessThan(없이.indexOf(">B<"));
+    expect(없이.indexOf(">가치<")).toBeLessThan(없이.indexOf(">기준<"));
   });
 
   it("판 이력 탭 — 판마다 구간·주문 수·시간가중·같은 기간 R", () => {

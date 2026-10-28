@@ -42,11 +42,11 @@ describe("챔피언 교체 후보 (전략 화면)", () => {
 
   it("후보가 있으면 초록 줄, 없으면 가장 가까운 것", () => {
     const desk: DeskView = { ...EMPTY_DESK, mirror_account: "H", champion: [줄(true)] };
-    expect(renderToStaticMarkup(createElement(CompareCard, { data, desk }))).toContain("C · 블록 3개 중 3개 이김 · 같은 기간 +12.00% (H +6.00%) · 2026-01-01부터");
+    expect(renderToStaticMarkup(createElement(CompareCard, { data, desk }))).toContain("모멘텀 · 블록 3개 중 3개 이김 · 같은 기간 +12.00% (지주사 +6.00%) · 2026-01-01부터");
     const 없음 = renderToStaticMarkup(createElement(CompareCard, { data, desk: { ...desk, champion: [줄(false)] } }));
-    expect(없음).toContain("아직 없음 — 가장 가까운 C · 블록 3개 중 1개 이김");
+    expect(없음).toContain("아직 없음 — 가장 가까운 모멘텀 · 블록 3개 중 1개 이김");
     expect(없음).toContain("교체는 사용자 결정");
-    expect(championText(줄(true), "H")).toBe("C · 블록 3개 중 3개 이김 · 같은 기간 +12.00% (H +6.00%) · 2026-01-01부터");
+    expect(championText(줄(true), "H")).toBe("모멘텀 · 블록 3개 중 3개 이김 · 같은 기간 +12.00% (지주사 +6.00%) · 2026-01-01부터");
   });
 });
 

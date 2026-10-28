@@ -150,9 +150,9 @@ export function perfLines(p: KisPerf | null): string[] {
       const kis = p.kis_cmp_pnl_krw != null
         ? `KIS ${won(p.kis_cmp_pnl_krw)}${p.fx_cash_krw != null ? `(쉬는 해외 현금 환율 몫 ${won(p.fx_cash_krw)} 뺌)` : ""}`
         : `KIS ${p.kis_pnl_krw != null ? won(p.kis_pnl_krw) : "-"}(환율 모름 — 해외 현금 환율 몫이 섞임)`;
-      out.push(`견주기 ${p.h_from} → ${p.h_to}: ${kis} · 가상모의투자 H ${won(p.h_pnl_krw)}${p.h_return_pct != null ? ` (${pct(p.h_return_pct)})` : ""} — 같은 주문을 베끼므로 손익 금액으로 견줍니다(끝은 미국 배치까지 끝난 날)`);
+      out.push(`견주기 ${p.h_from} → ${p.h_to}: ${kis} · 가상모의투자 지주사 ${won(p.h_pnl_krw)}${p.h_return_pct != null ? ` (${pct(p.h_return_pct)})` : ""} — 같은 주문을 베끼므로 손익 금액으로 견줍니다(끝은 미국 배치까지 끝난 날)`);
     } else out.push("견주기: 아직 없습니다 — KIS 총액이 이틀 넘게 쌓이고 그 사이 미국 배치가 끝난 날이 있어야 같은 창으로 견줍니다.");
   } else if (p.h_pnl_krw != null)
-    out.push(`같은 기간 가상모의투자 H 손익 ${won(p.h_pnl_krw)}${p.h_return_pct != null ? ` (${pct(p.h_return_pct)})` : ""} — 같은 주문을 베끼므로 손익 금액으로 견줍니다(모의 예수금이 H 입금액보다 커 % 는 KIS 쪽이 늘 작습니다)`);
+    out.push(`같은 기간 가상모의투자 지주사 손익 ${won(p.h_pnl_krw)}${p.h_return_pct != null ? ` (${pct(p.h_return_pct)})` : ""} — 같은 주문을 베끼므로 손익 금액으로 견줍니다(모의 예수금이 지주사 입금액보다 커 % 는 KIS 쪽이 늘 작습니다)`);
   return out;
 }

@@ -47,7 +47,7 @@ def test_실제_투자_비교는_여러_줄이고_가상모의투자라고_쓴�
                           "paper_pct": {"A": -0.3, "B": -0.6}, "paper_start": {}})  # fmt: skip
     줄 = str(글).split("\n")
     assert 줄[0] == "실제 투자와 비교 (2026-10-16~2026-10-21, 시간가중)"
-    assert 줄[1] == "  실제 +0.3%" and 줄[2] == "  가상 A -0.3% · B -0.6%"
+    assert 줄[1] == "  실제 +0.3%" and 줄[2] == "  가상 가치 -0.3% · 기준 -0.6%"
     assert "가상모의투자는" in 줄[3] and "모의는" not in 글
 
 
@@ -87,4 +87,4 @@ def test_시장가가_섞이면_그_수량을_밝히고_챔피언만이면_말�
           "fills_by_account": {}, "orders_by_account": {}}  # fmt: skip
     줄 = desk.report_lines(칸, {"window_start": "2026-10-16", "rows": [
         {"id": "H", "window_pct": 1.0, "vs_r_pp": None, "young": True}]}, "H")  # fmt: skip
-    assert "  H(KIS) +1.00% — 갓 엶, 개설 후" in 줄
+    assert "  지주사(KIS) +1.00% — 갓 엶, 개설 후" in 줄

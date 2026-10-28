@@ -20,7 +20,7 @@ describe("결정 단위 선정 증거", () => {
     const r = { id: "C", from: "2026-01-01", blocks: 3, wins: 3, pct: 12, champion_pct: 6, candidate: true, blocks_ok: true };
     expect(evidenceText({ ...r, evidence_diff: { n_blocks: 5, mean: 1.2, lower: -0.4, alpha: 0.01 } })).toBe(" · 결정 단위 +1.20%p(하한 -0.40, 묶음 5)");
     expect(evidenceText({ ...r, evidence_diff: { n_blocks: 2, alpha: 0.01 } })).toBe(" · 결정 단위 근거 부족(묶음 2)");
-    expect(championText(r, "H")).toBe("C · 블록 3개 중 3개 이김 · 같은 기간 +12.00% (H +6.00%) · 2026-01-01부터");
+    expect(championText(r, "H")).toBe("모멘텀 · 블록 3개 중 3개 이김 · 같은 기간 +12.00% (지주사 +6.00%) · 2026-01-01부터");
   });
 });
 

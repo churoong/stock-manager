@@ -8,6 +8,7 @@
 import type { Series } from "@/components/EquityChart";
 import { amountText, statusText } from "@/lib/kisPaper";
 import type { Attribution } from "@/lib/paper";
+import { accountName } from "@/lib/accountNames";
 
 /** 계좌마다 한 번 — 바깥이 평가 행 전체를 훑고 행마다 하위 질의를 돌면 읽는 양이 계좌 행 수의 제곱까지 컸다(25.1630 교차검증 [권고] 3) */
 export const LAB_ATTRIBUTION_SQL = `SELECT d.account_id, d.as_of, d.attribution_json, a.name
@@ -62,7 +63,7 @@ export function weightSeries(points: HoldingPoint[], market: "KR" | "US"): Serie
       회사.set(c, 줄);
     }
   }
-  return [...회사.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([c, points]) => ({ label: `${c} 가중치`, color: 회사색[c] ?? "#9ca3af", points }));
+  return [...회사.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([c, points]) => ({ label: `${accountName(c)} 가중치`, color: 회사색[c] ?? "#9ca3af", points }));
 }
 
 // ── 종목 여정 ─────────────────────────────────────────────

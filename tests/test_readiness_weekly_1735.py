@@ -22,7 +22,7 @@ def _관문() -> dict:
 
 def test_관문_항목마다_지금_목표_남은_거리() -> None:
     줄 = desk.readiness_lines(_관문(), desk.readiness(runs=None, kis=[]))
-    assert 줄[0].startswith("🧭 실전 준비도 — 1단계 관문(모의 성적·무사고) 통과 1/8 · H 판 2, ")
+    assert 줄[0].startswith("🧭 실전 준비도 — 1단계 관문(모의 성적·무사고) 통과 1/8 · 지주사 판 2, ")
     assert "  ⬜ 모의 기간: 3 / 126회 (123회 남음)" in 줄
     assert "  ⬜ R(무작위) 대비: -0.30%p (목표 > 0)" in 줄
     assert "  ✅ 운영 무사고: 사고 0일 (최근 60일, 목표 0)" in 줄

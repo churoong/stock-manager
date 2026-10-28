@@ -13,11 +13,17 @@ from typing import Any
 
 from batch.notify import formatter
 from batch.services.paper import SEPARATE_IDS as _SEPARATE_IDS
+from batch.services.paper import account_name as _account_name
 
 #: 계좌 종류 — 화면 글. 모르는 계좌는 이름만 (docs/paper.md 1장, docs/company.md)
 KIND = {"A": "회사", "C": "회사", "D": "회사", "E": "회사", "B": "기준(점수 상위)", "G": "추세 익절",
         "H": "지주사(KIS가 베낌)", "R1": "무작위 대조", "R2": "무작위 대조", "S": "스윙(단기 신호)",
         "T": "당일 단타(단기 신호)"}  # fmt: skip
+def _이름(aid: object) -> str:
+    """계좌 화면 이름(25.1893) — 사람에게 보이는 글에만. 식별자는 그대로 열쇠로 쓴다"""
+    return _account_name(str(aid)) if aid is not None else ""
+
+
 CONTROL_IDS = ("R1", "R2")
 #: 따로 재는 실험 계좌 — 순위표 공통 구간의 시작과 챔피언 교체 후보(본페로니 도전자 수)에 넣지 않는다. 스윙 S 는 단기
 #: 신호를 며칠씩 사고파는 다른 실험이라(docs/paper.md 16.3.1, 25.1872), 열리는 날 A~G 의 공통 구간·후보 문턱이 바뀌지
@@ -970,19 +976,21 @@ def checks(
     if b.get("diff"):
         out.append({"level": "normal", "text": f"KIS 잔고와 가상 장부가 어긋난 종목 {b['diff']}개"})
     if recon_bad:
-        out.append({"level": "high", "text": f"장부 검산 어긋남: 계좌 {', '.join(sorted(recon_bad))}"})
+        틀림 = ", ".join(_이름(a) for a in sorted(recon_bad))
+        out.append({"level": "high", "text": f"장부 검산 어긋남: 계좌 {틀림}"})
     # 계좌 하나만 그날 못 산 것 — 위원회·지주사 실패, 헌장 오류 (25.1503, 검토 6)
     for aid, a in sorted((p.get("accounts") or {}).items()):
         if not isinstance(a, dict):
             continue
-        for 칸, 이름 in (("committee", "투자위원회를 열지 못함"), ("holding", "지주사가 고르지 못함")):
+        nm = _이름(aid)
+        for 칸, 이름 in (("committee", "투자위원회를 열지 못함"), ("holding", "고르지 못함")):
             if isinstance(a.get(칸), dict) and a[칸].get("error"):
-                글 = f"가상 {aid} {이름} — 오늘 사지 않았습니다: {str(a[칸]['error'])[:100]}"
+                글 = f"가상 {nm} {이름} — 오늘 사지 않았습니다: {str(a[칸]['error'])[:100]}"
                 out.append({"level": "high", "text": 글})
         if a.get("charter_errors"):
-            out.append({"level": "high", "text": f"가상 {aid} 헌장 오류: {'; '.join(a['charter_errors'])[:120]}"})
+            out.append({"level": "high", "text": f"가상 {nm} 헌장 오류: {'; '.join(a['charter_errors'])[:120]}"})
         if a.get("error"):  # 모르는 매도 규칙으로 그 계좌를 건너뛴 날(25.1871 막이) — 텔레그램 줄에만 있었다(25.1873)
-            out.append({"level": "high", "text": f"가상 {aid} {str(a['error'])[:100]} — 오늘 평가·매매하지 않았습니다"})
+            out.append({"level": "high", "text": f"가상 {nm} {str(a['error'])[:100]} — 오늘 평가·매매 안 함"})
     if p.get("frozen"):
         # `frozen` 은 경계 멈춤(모든 계좌) + 이어 멈춤(경계 전부터 든 계좌만, `action_sticky`)의 합이다 —
         # 합친 수를 "그 종목은 사고팔지 않습니다" 로 쓰면 이어 멈춤 종목을 다른 계좌가 사고팔 수 있다는 것을
@@ -1064,12 +1072,12 @@ def report_lines(
     챔 = next((r for r in 모든 if r["id"] == mirror and r.get("window_pct") is not None), None)
     if 위 or 챔:
         out.append(f"▸ 순위 (공통 구간 {board.get('window_start')}부터)")
-        out += [f"  {k + 1}. {r['id']} {칸(r)}" for k, r in enumerate(위)]
+        out += [f"  {k + 1}. {_이름(r['id'])} {칸(r)}" for k, r in enumerate(위)]
         if 챔 and 챔 not in 위:
             # 위 계좌가 없으면 "…" 를 붙이지 않는다(25.1723 — 빠진 계좌가 있는 것처럼 읽혔다)
-            out.append(f"  {'… ' if 위 else ''}{mirror}(KIS) {칸(챔)}")
+            out.append(f"  {'… ' if 위 else ''}{_이름(mirror)}(KIS) {칸(챔)}")
     체결 = section.get("fills_h") or []
-    out.append(f"▸ {mirror} 체결 (판정 {section.get('trade_date')})" + ("" if 체결 else ": 없음"))
+    out.append(f"▸ {_이름(mirror)} 체결 (판정 {section.get('trade_date')})" + ("" if 체결 else ": 없음"))
     out += [f"  {_SIDE.get(f['side'], f['side'])} {formatter.short_name(f['name'], f.get('ticker'), f['currency'])}"
             f" {int(f['quantity']):,}주 @ {_돈(f['price'], f['currency'])}" for f in 체결]  # fmt: skip
     주문 = section.get("orders_h") or []
@@ -1077,7 +1085,7 @@ def report_lines(
     장들 = sorted({str(o.get("fill_session")) for o in 주문 if o.get("fill_session")})
     장 = 장들[0] if len(장들) == 1 else section.get("session_date")
     묶음 = order_groups(주문)
-    out.append(f"▸ {mirror} 다음 장 주문 ({장})" + ("" if 묶음 else ": 없음"))
+    out.append(f"▸ {_이름(mirror)} 다음 장 주문 ({장})" + ("" if 묶음 else ": 없음"))
     out += ["  " + g for g in 묶음[:REPORT_MAX_ORDERS]]
     if len(묶음) > REPORT_MAX_ORDERS:
         out.append(f"  … 외 {len(묶음) - REPORT_MAX_ORDERS}종목")  # 종목·방향 묶음 수
@@ -1175,7 +1183,7 @@ def readiness_lines(gate: dict[str, Any] | None, ready: list[dict[str, Any]] | N
     통과 = sum(1 for i in items if i.get("ok"))
     판 = gate.get("version")
     머리 = (f"🧭 실전 준비도 — 1단계 관문(모의 성적·무사고) 통과 {통과}/{len(items)}"
-          f" · {gate.get('account')}{'' if 판 is None else f' 판 {판}'}"
+          f" · {_이름(gate.get('account'))}{'' if 판 is None else f' 판 {판}'}"
           + (f", {gate.get('from')}부터" if gate.get("from") else ""))  # fmt: skip
     out = [머리]
     for i in items:

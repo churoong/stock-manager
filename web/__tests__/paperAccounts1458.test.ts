@@ -72,9 +72,9 @@ describe("모의 계좌 7개", () => {
 
   it("계좌 비교 — 일곱 계좌와 짝의 뜻", () => {
     const html = renderToStaticMarkup(createElement(CompareCard, { data }));
-    for (const id of ["A", "B", "C", "D", "E", "R1", "R2"]) expect(html).toContain(`>${id}<`);
-    expect(html).toContain("A−B: 가치투자사 대 기준");
-    expect(html).toContain("B−R1: 기준 대 무작위");
+    for (const nm of ["가치", "기준", "모멘텀", "장기보유", "안정", "무작위1", "무작위2"]) expect(html).toContain(`>${nm}<`);
+    expect(html).toContain("가치−기준: 가치투자사 대 기준");
+    expect(html).toContain("기준−무작위1: 기준 대 무작위");
     expect(html).toContain("기간초과만(손절·목표 무시)");
   });
 
@@ -82,7 +82,7 @@ describe("모의 계좌 7개", () => {
     const html = renderToStaticMarkup(
       createElement(AccountTabs, { data, acct: "R1", setAcct: () => {}, sub: "orders", setSub: () => {} }),
     );
-    for (const id of ["A", "B", "C", "D", "E", "R1", "R2"]) expect(html).toContain(`가상 ${id}`);
+    for (const nm of ["가치", "기준", "모멘텀", "장기보유", "안정", "무작위1", "무작위2"]) expect(html).toContain(`>${nm}<`);
     expect(html).toContain("매수 시가 일괄 (기준가 200,000원 · 무작위 대조)");
     // 체결 0건이 고장처럼 보이지 않게 — 판정은 다음 배치가 일봉으로 (2026-10-16 사용자 질문)
     expect(html).toContain("가상모의투자는 장중에 체결하지 않습니다");

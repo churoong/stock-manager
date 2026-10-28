@@ -10,6 +10,7 @@ import { z } from "zod";
 import { localDate } from "@/lib/market";
 import { apartDigits } from "@/lib/apart";
 import { DIVERGE } from "@/lib/kisQuality";
+import { accountName } from "@/lib/accountNames";
 
 /** 입금 한 번의 범위(원) — `batch/services/paper.py` 와 같은 값 (docs/paper.md 5장) */
 export const DEPOSIT_MIN_KRW = 10_000;
@@ -124,7 +125,7 @@ export interface BrokerLatest { as_of: string; diff: Record<string, [number, num
 /** 비교 요약을 사람이 읽는 줄로 — 배치(`services/broker_mirror.compare_lines`)와 같은 글("어긋난 까닭" 은 주간 요약에만,
  *  25.1736). 값은 배치가 낸 그대로 */
 export function brokerLines(b: BrokerLatest | null | undefined): string[] {
-  if (!b) return ["아직 이 시장의 KIS모의투자 기록이 없습니다 — 그 시장 일일 배치가 처음 돌면 H(지주사)의 주문을 베껴 내고 잔고를 적습니다 (docs/paper.md 15장)."];
+  if (!b) return ["아직 이 시장의 KIS모의투자 기록이 없습니다 — 그 시장 일일 배치가 처음 돌면 지주사의 주문을 베껴 내고 잔고를 적습니다 (docs/paper.md 15장)."];
   const s = b.summary;
   const out: string[] = [];
   if (s?.n) {
@@ -148,8 +149,8 @@ export function brokerLines(b: BrokerLatest | null | undefined): string[] {
   if (s?.excluded) 끝.push(`표본 밖 ${s.excluded}(가상의 판정 아닌 만료·시세·환율 없어 미룬 매도·장 열린 뒤 시장가)`);
   if (s?.unknown) 끝.push(`모름 ${s.unknown}`);
   if (s?.cleanup) 끝.push(`정리 주문 ${s.cleanup}`);
-  if (s?.guard) 끝.push(`장중 손절·익절 ${s.guard}(H 는 아침 일봉 판정 — 짝 없음)`);
-  if (s?.guard_held) 끝.push(`장중 매도 뒤 H 만 든 종목 ${s.guard_held}(잔고 대보기에서 뺌)`);
+  if (s?.guard) 끝.push(`장중 손절·익절 ${s.guard}(지주사는 아침 일봉 판정 — 짝 없음)`);
+  if (s?.guard_held) 끝.push(`장중 매도 뒤 지주사만 든 종목 ${s.guard_held}(잔고 대보기에서 뺌)`);
   끝.push(`잔고가 어긋난 종목 ${Object.keys(b.diff ?? {}).length} (${b.as_of} 기준)`);
   out.push(끝.join(" · "));
   return out;
@@ -355,9 +356,9 @@ export function cancelBlock(
     .map(([k]) => k)
     .sort();
   const 까닭 = [
-    ...(모자람.length ? [`그 돈으로 이미 사서 현금이 모자랍니다 (계좌 ${모자람.join(", ")})`] : []),
+    ...(모자람.length ? [`그 돈으로 이미 사서 현금이 모자랍니다 (계좌: ${모자람.map(accountName).join(", ")})`] : []),
     ...(모름.length
-      ? [`달러 미체결 매수의 예약을 셀 환율이 없습니다 — USDKRW 가 없거나 ${FX_MAX_AGE_DAYS}일 넘게 묵음, 환율 수집 확인 (계좌 ${모름.join(", ")})`]
+      ? [`달러 미체결 매수의 예약을 셀 환율이 없습니다 — USDKRW 가 없거나 ${FX_MAX_AGE_DAYS}일 넘게 묵음, 환율 수집 확인 (계좌: ${모름.map(accountName).join(", ")})`]
       : []),
   ];
   return 까닭.length ? 까닭.join(" · ") : null;
@@ -592,9 +593,9 @@ export function haltOn(raw: unknown): boolean {
 export const SHADOW_READ = "SELECT key, value FROM settings WHERE key IN ('shadow_ledger_kr', 'shadow_ledger_us')";
 /** 규칙 이름 → 화면 글. 정의처는 batch/services/shadow.py `RULES` (판이 바뀌면 이름이 바뀐다 — 모르는 이름은 그대로) */
 export const SHADOW_RULE_TEXT: Record<string, string> = {
-  day_v1: "당일 단타 — 다음 장 시가에 사서 그날 종가 · 11월 당일 단타 계좌 T 의 규칙",
+  day_v1: "당일 단타 — 다음 장 시가에 사서 그날 종가 · 단타 계좌의 규칙",
   swing_v1: "스윙(장중 닿음) — +5%·−3%·10거래일",
-  swing_close_v1: "스윙(종가 판정) — 같은 선을 종가로, 다음 장 시가 · 11월 스윙 계좌 S 의 규칙",
+  swing_close_v1: "스윙(종가 판정) — 같은 선을 종가로, 다음 장 시가 · 스윙 계좌의 규칙",
 };
 export interface ShadowStat {
   n: number; open: number; no_entry: number; stocks?: number;

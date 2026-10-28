@@ -1859,13 +1859,15 @@ def holding_step(
     voters: dict[str, str] = dict(config.get("voters") or {})
     if not voters:
         # 비면 B 혼자 투표해 늘 "두 곳 이상 0" — 오류 없이 영영 안 산다(25.1484 검증 [참고] 5)
-        return [], {}, [], {"error": "H 의 투표 회사 목록(charter_json.voters)이 비었거나 읽지 못함"}
+        return [], {}, [], {"error": "지주사의 투표 회사 목록(charter_json.voters)이 비었거나 읽지 못함"}
     없음 = sorted(c for c in voters if c not in charters)
     if 없음:
-        return [], {}, [], {"error": "투표 회사 헌장을 읽지 못함(헌장 오류·없음): " + ",".join(없음)}
+        글 = ",".join(pp.account_name(c) for c in 없음)
+        return [], {}, [], {"error": "투표 회사 헌장을 읽지 못함(헌장 오류·없음): " + 글}
     바뀜 = sorted(c for c, h in voters.items() if co.charter_hash(charters[c]) != h)
     if 바뀜:
-        return [], {}, [], {"error": "투표 회사 헌장이 H 에 적힌 지문과 다름(판을 올려야): " + ",".join(바뀜)}
+        글 = ",".join(pp.account_name(c) for c in 바뀜)
+        return [], {}, [], {"error": "투표 회사 헌장이 지주사에 적힌 지문과 다름(판을 올려야): " + 글}
     as_of = _조사_준비(client, market, signal_rows, charters, cache, trade_date)
     표: dict[str, dict[int, float]] = {}
     # **그날 회의록이 있으면 그 표를 쓴다** (25.1732, 위원회·H 감사 [권고] 2 — 교차검증이 (b) 를 골랐다). A~E 가
@@ -2153,19 +2155,20 @@ def run_step(
             # 25.1891 교차검증 [권고])
             계좌기록[aid] = {"not_open_until": 개설}
             continue
+        계이름 = pp.account_name(aid)  # 화면 이름(25.1893) — 사람에게 보이는 줄에만
         if 규칙 == pp.DAY_RULE and str(acct.get("entry_rule") or "tranche") != "open":
             # 당일 단타(T)는 시가 일괄 진입만 — 회차 지정가면 짝 매도가 첫 회차 하나에만 붙어(유일 색인의 tranche=0)
             # 나머지 회차가 밤을 넘기고, 지정가 회차는 종가 판정이라 같은 종가에 사고판다(16.3.2, 25.1886)
             log.error("가상 %s 당일 단타인데 진입 방식이 %s — 그 계좌를 건너뜀", aid, acct.get("entry_rule"))
             계좌기록[aid] = {"error": f"당일 단타인데 진입 방식 {acct.get('entry_rule')}(open 이어야 함)"}
-            줄.append(f"⚠️ 가상 {aid} 당일 단타 진입 방식이 open 이 아님 — 오늘 이 계좌는 평가·매매하지 않았습니다")
+            줄.append(f"⚠️ 가상 {계이름} 당일 단타 진입 방식이 open 이 아님 — 오늘 이 계좌는 평가·매매하지 않았습니다")
             continue
         if 규칙 not in pp.SELL_RULES:
             # 계좌 행이 코드보다 먼저 들어온 날(마이그레이션 순서 잘못) — `sells_for` 가 `KeyError` 로 이 단계 전체와
             # 그 뒤 KIS 베끼기까지 멈췄다. 그 계좌 하나만 건너뛴다(paper.md 16.3.1, 25.1871). 지금 계좌에는 해당 없음
             log.error("가상 %s 모르는 매도 규칙 %s — 그 계좌를 건너뜀", aid, 규칙)
             계좌기록[aid] = {"error": f"모르는 매도 규칙 {규칙}"}
-            줄.append(f"⚠️ 가상 {aid} 모르는 매도 규칙({규칙}) — 오늘 이 계좌는 평가·매매하지 않았습니다")
+            줄.append(f"⚠️ 가상 {계이름} 모르는 매도 규칙({규칙}) — 오늘 이 계좌는 평가·매매하지 않았습니다")
             continue
         기준 = 다시잰기준(기준)
         _결정판 = partial(_결정, rule_version=판)
@@ -2507,32 +2510,32 @@ def run_step(
             if "memo" in 위:
                 # 회의 수와 "가장 높은 표" 를 두 줄로(25.1721, 리포트 가독성)
                 앞, 뒤 = (str(위["memo"]).split(". 가장 높은 표 ", 1) + [""])[:2]
-                메모줄.append(f"🏛 {aid} {앞}")
+                메모줄.append(f"🏛 {앞}")  # 메모가 회사 이름으로 시작한다(가치투자사 위원회 …, 25.1893)
                 if 뒤:
                     메모줄.append(f"   가장 높은 표 {뒤}")
             else:
-                메모줄.append(f"⚠️ 가상 {aid} 투자위원회를 열지 못함 — {위.get('error')}")
+                메모줄.append(f"⚠️ 가상 {계이름} 투자위원회를 열지 못함 — {위.get('error')}")
         if isinstance(a기록.get("holding"), dict):
             지 = a기록["holding"]
-            가중글 = " · ".join(f"{c} {w:g}" for c, w in sorted((지.get("weights") or {}).items()))
+            가중글 = " · ".join(f"{pp.account_name(c)} {w:g}" for c, w in sorted((지.get("weights") or {}).items()))
             # 두 줄 — 고른 과정 / 회사별 가중치(25.1742 — 한 줄에 "가중 A 1 · B 1 …" 까지 붙어 무엇의 수인지 흐렸다)
             if "error" not in 지:
-                메모줄.append(f"🏢 {aid} 지주사: 회사들 추천 {지['recommended']}종목 · 두 곳 이상 추천 {지['eligible']}"
+                메모줄.append(f"🏢 {계이름}: 회사들 추천 {지['recommended']}종목 · 두 곳 이상 추천 {지['eligible']}"
                            f" · 고름 {지['chosen']}")  # fmt: skip
                 if 가중글:
                     메모줄.append(f"   회사별 가중치 {가중글}")
             else:
-                메모줄.append(f"⚠️ 가상 {aid} 지주사가 고르지 못함 — {지.get('error')}")
+                메모줄.append(f"⚠️ 가상 {계이름} 고르지 못함 — {지.get('error')}")
         손익률 = f"{v.pnl_pct:+.1f}%" if v.pnl_pct is not None else "—"
         시간가중 = f"{(검['twr'] - 1) * 100:+.1f}%"
         # 계좌마다 한 줄, 억·만 원(25.1721, 리포트 가독성 — 예전엔 아홉 계좌가 " · " 로 한 문단이었다). 시간가중은
         # 손익과 다를 때만(입금이 끼면 달라진다). "이번 실행" — 아침 실행이 판정하는 체결은 전 거래일 장의 것(25.1643)
         # "입금 대비" — 순위(공통 구간)·실제 비교(시간가중)와 다른 수라 무엇의 대비인지 적는다(25.1739)
-        줄.append(f"  {aid} {formatter.won_short(v.equity_krw)} · 입금 대비 {손익률}"
+        줄.append(f"  {계이름} {formatter.won_short(v.equity_krw)} · 입금 대비 {손익률}"
                  + (f"(시간가중 {시간가중})" if 시간가중 != 손익률 else "")
                  + f" · 체결 {a기록['fills']}건")  # fmt: skip
         if not 검["recon_ok"]:
-            줄.append(f"⚠️ 가상 {aid} 장부 검산 어긋남 — {검['recon_note']}")
+            줄.append(f"⚠️ 가상 {계이름} 장부 검산 어긋남 — {검['recon_note']}")
     기록["accounts"] = 계좌기록
     기록["frozen"] = sorted(frozen)
     # 계좌마다의 멈춤 — KIS모의투자 베끼기는 베끼는 계좌(H·도전자)의 것을 쓴다(25.1550 반박 [권고] 3: 전체 멈춤을
