@@ -319,7 +319,9 @@ def run_core(
                                                         "se", "lower", "gate", "after_sell")},
                      # 월 초과 계열(25.1947) — 판정판 걷는 창의 재료. 운 판정과 같은 기준(동일가중 월 리밸런스).
                      # 깨지면 칸만 빠진다(25.1952)
-                     **jb.monthly_excess_extra(result.curve, 벤치월_계열)}  # fmt: skip
+                     **jb.monthly_excess_extra(result.curve, 벤치월_계열),
+                     # 수용량(25.1954) — 리밸런스마다 단위 금액의 가장 빠듯한 종목 비율. 깨지면 칸만 빠진다
+                     **jb.capacity_extra(result, turnover, market)}  # fmt: skip
             jb.store_run(client, market, variant, result, summary, 종목수[variant], group_id, warnings,
                          now, 운.get(variant), rebalance=REBALANCE, extra=extra, kept=실은_행)  # fmt: skip
             mt = summary.metrics

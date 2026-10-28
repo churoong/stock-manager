@@ -21,11 +21,13 @@
   적용하지 않는다
 - DB·네트워크 없음. 표준 라이브러리만 쓴다(시험이 import 를 대조)
 
-새 순수 함수 둘(funnel.md 2.2 "새로"): `walk_windows`(걷는 창 — 12개월 창마다 초과 부호), `capacity`(수용량).
+새 순수 함수 둘(funnel.md 2.2 "새로"): `walk_windows`(걷는 창 — 12개월 창마다 초과 부호), `capacity`(수용량 —
+25.1954 부터 `capacity_profile` 이 리밸런스마다 내어 결과 행에 싣는다).
 """
 
 from __future__ import annotations
 
+import bisect
 import json
 import math
 from typing import Any
@@ -58,7 +60,17 @@ WALK_WINDOW_MONTHS = 12
 
 #: 아직 저장되지 않아 늘 비는 칸의 까닭
 WHY_WALK = "월 초과수익 계열 미저장 — 25.1947 전 실행(결과 행 metrics_json.monthly_excess 없음)"
-WHY_CAPACITY = "목표 금액·보유 종목 20일 평균 거래대금 미저장 — 실행 기록에 보유 내역이 없다"
+WHY_CAPACITY = "수용량 미저장 — 25.1954 전 실행(결과 행 metrics_json.capacity 없음)"
+#: 수용량 단위 금액(25.1954) — 시장 통화로. 비율은 금액에 비례하므로 실전 목표 T 의 비율 = T ÷ 단위 × 실은 값.
+#: 미국은 10만 달러(약 1.4억 원) — 시장 통화 거래대금과 같은 통화라 환율이 끼지 않는다
+CAPACITY_UNIT = {"KR": 1e8, "US": 1e5}
+CAPACITY_UNIT_LABEL = {"KR": "1억 원", "US": "10만 달러"}
+#: 20일 평균 거래대금 — 그날 **전** 20 거래일(판단이 본 창, point-in-time). 20일이 안 찬 종목은 재지 못한 종목
+CAPACITY_ADV_DAYS = 20
+#: 0 → 1 수용량 기준 — 실전 규모에서 거래대금의 1% 이하(funnel.md 3장 `[확인필요]`). 실전 목표 금액(시장 → 금액)은
+#: 사용자만 아는 값이라 정해지기 전까지 비어 있다(점검 칸 모름, docs/handoff.md 사용자 결정)
+STAGE01_MAX_CAPACITY = 0.01
+STAGE01_TARGET: dict[str, float] = {}
 WHY_DISTINCT = "서로 다른 종목 수 미저장 — 증거의 buys 는 첫 매수 수(같은 종목 되풀이 포함)"
 WHY_CLOSED = "끝난 거래 수 미저장 — 판 뒤(after_sell)의 sells 는 20 거래일이 찬 매도 수다"
 
@@ -243,8 +255,12 @@ def _row(run: dict[str, Any], r: dict[str, Any], twins: dict[str, dict[str, Any]
     put("walk_positive", (w or {}).get("positive"), why_w)
     put("walk_total", (w or {}).get("total"), why_w)
 
-    # 수용량 — 아직 재료 미저장
-    put("capacity", None, WHY_CAPACITY)
+    # 수용량(25.1954) — 리밸런스마다 단위 금액의 가장 빠듯한 종목 비율(`capacity_profile`) 가운데 최대
+    cap = mj.get("capacity") if isinstance(mj.get("capacity"), dict) else None
+    why_c = WHY_CAPACITY if cap is None else "재지 못함 — 보유 종목 거래대금 없음"
+    put("capacity", _num((cap or {}).get("max")), why_c)
+    if cap is not None:
+        out["capacity_profile"] = cap  # 점검표(`_capacity_ok`)가 complete 를 본다
 
     # 표본(개월·28일 묶음·서로 다른 종목·끝난 거래)
     put("months", (luck or {}).get("months"), "luck.months 없음 — 운 판정 없는 행")
@@ -393,10 +409,67 @@ def stage01(row: dict[str, Any], base: dict[str, Any] | None) -> dict[str, Any] 
          else wt >= STAGE01_WALK[1] and wp * STAGE01_WALK[1] >= STAGE01_WALK[0] * wt),
         ("mdd_vs_base", "MDD(기준 대비)", mdd, f">= 기준 MDD − {STAGE01_MDD_SLACK:g}",
          None if mdd is None or bm is None else mdd >= bm - STAGE01_MDD_SLACK),
-        ("capacity", "수용량", None, "<= 거래대금의 1%", None),
+        ("capacity", "수용량", row.get("capacity"), f"실전 목표에서 <= 거래대금의 {STAGE01_MAX_CAPACITY:.0%}",
+         _capacity_ok(row)),
     ]  # fmt: skip
     out = [{"key": k, "label": lab, "now": now, "target": tgt, "ok": o} for k, lab, now, tgt, o in checks]
     return {**stage01_verdict(out), "checks": out, "base": (base or {}).get("strategy")}
+
+
+def _capacity_ok(row: dict[str, Any]) -> bool | None:
+    """실전 목표(`STAGE01_TARGET[시장]`)의 최대 비율 ≤ 1% — 목표가 정해지기 전(사용자 결정)이나 재지 못했으면 모름"""
+    target, unit, cap = STAGE01_TARGET.get(str(row.get("market"))), CAPACITY_UNIT.get(str(row.get("market"))), _num(
+        row.get("capacity"))
+    if target is None or unit is None or cap is None or not (row.get("capacity_profile") or {}).get("complete", False):
+        return None
+    return target / unit * cap <= STAGE01_MAX_CAPACITY
+
+
+def capacity_profile(rebalances: list[tuple[str, dict[int, float]]], turnover: dict[int, dict[str, float]],
+                     unit: float, days: int = CAPACITY_ADV_DAYS) -> dict[str, Any]:  # fmt: skip
+    """리밸런스마다(그날 체결 뒤 비중) 단위 금액 `unit` 의 `capacity` 최대 비율 → {unit, days, rebalances, max,
+    max_day, max_stock, p90, median, incomplete, complete} (25.1954, funnel.md 2.2·3장).
+
+    20일 평균 거래대금 = 그 종목의 그날 **전** `days` 개 거래대금 평균(판단이 본 창 — 그날 값은 쓰지 않는다). 그만큼 안
+    찬 종목은 재지 못한 종목(`capacity.missing`) — 그날 최대는 하한이 되고 `incomplete` 에 센다. `complete` = 재지 못한
+    날이 없다. 비율은 금액에 비례하므로 다른 금액은 곱해서 낸다"""
+    키: dict[int, list[str]] = {}
+    누적: dict[int, list[float]] = {}
+    for sid, by in turnover.items():
+        xs = sorted((d, float(v)) for d, v in by.items() if v is not None)
+        키[sid] = [d for d, _v in xs]
+        acc = [0.0]
+        for _d, v in xs:
+            acc.append(acc[-1] + v)
+        누적[sid] = acc
+
+    def adv(sid: int, d: str) -> float | None:
+        if sid not in 키:
+            return None
+        k = bisect.bisect_left(키[sid], d)
+        return (누적[sid][k] - 누적[sid][k - days]) / days if k >= days else None
+
+    날: list[tuple[float, str, int]] = []
+    모자람 = 0
+    for d, w in rebalances:
+        held = {sid: x for sid, x in w.items() if x and x > 0}
+        if not held:
+            continue
+        c = capacity(unit, {sid: a for sid in held if (a := adv(sid, d)) is not None}, held)
+        모자람 += bool(c["missing"])
+        if c["max"] is not None:
+            날.append((c["max"], d, c["max_stock"]))
+    if not 날:
+        return {"unit": unit, "days": days, "rebalances": 0, "max": None, "max_day": None, "max_stock": None,
+                "p90": None, "median": None, "incomplete": 모자람, "complete": False}  # fmt: skip
+    xs = sorted(x for x, _d, _s in 날)
+    top = max(날)
+
+    def 분위(q: float) -> float:
+        return xs[min(len(xs) - 1, int(q * (len(xs) - 1) + 0.5))]
+
+    return {"unit": unit, "days": days, "rebalances": len(날), "max": top[0], "max_day": top[1], "max_stock": top[2],
+            "p90": 분위(0.9), "median": 분위(0.5), "incomplete": 모자람, "complete": 모자람 == 0}  # fmt: skip
 
 
 def stage01_verdict(checks: list[dict[str, Any]]) -> dict[str, Any]:
@@ -481,12 +554,14 @@ def rows(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
 #: sha·작업 이름·묶음은 같은 step_log 의 `params`·`group_id` 에 이미 있어 줄마다 되풀이하지 않는다.
 #: `runs` 는 늘 1 이라 뺀다.
 #: 걷는 창은 창 수·초과 > 0 창 수 두 칸으로 싣는다(25.1947 — 창마다의 기간·합은 결과 행의 계열로 다시 낼 수 있다).
-#: 늘 비는 칸(수용량·서로 다른 종목·끝난 거래)은 뺀다 — 까닭은 이 모듈의 `WHY_*` 그대로이고 웹이 한 줄로 적는다.
+#: 수용량은 단위 금액당 최대 비율 하나만(25.1954 — 분위·그날·종목은 결과 행 `metrics_json.capacity`).
+#: 늘 비는 칸(서로 다른 종목·끝난 거래)은 뺀다 — 까닭은 이 모듈의 `WHY_*` 그대로이고 웹이 한 줄로 적는다.
 #: 웹 `lib/scoreboard.ts` 의 `SCOREBOARD_KEYS` 와 같아야 한다(시험이 대조)
 STEP_LOG_COLS = (
     "strategy", "market", "cohort", "trials_cumulative", "cagr", "excess_cagr", "mdd", "dsr", "dsr_n",
     "control_lower", "gate_lower", "half_first_cagr", "half_second_cagr", "walk_positive", "walk_total", "months",
-    "rebalances", "buys", "control_blocks", "gate_blocks", "sells_scored", "bh_q", "stage01_verdict", "stage01_note",
+    "rebalances", "buys", "control_blocks", "gate_blocks", "sells_scored", "bh_q", "capacity", "stage01_verdict",
+    "stage01_note",
 )  # fmt: skip
 #: 까닭 글 최대 길이 — step_log 크기를 묶는다(월 실행 줄 약 20개 × 빈 칸 약 10개). 넘는 까닭은 잘린다
 WHY_MAX = 80

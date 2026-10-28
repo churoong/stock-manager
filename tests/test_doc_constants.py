@@ -1235,3 +1235,6 @@ def test_판정판_0에서_1_점검표_상수_1950() -> None:
     검사(FUNNEL, f"기준 전략(B)보다 {sb.STAGE01_MDD_SLACK * 100:g}%p 넘게 나쁘지 않음", "0→1 MDD 여유 (STAGE01_MDD_SLACK)")
     검사(FUNNEL, f"걷는 창은 창 {sb.STAGE01_WALK[1]}개 이상이고 > 0 창의 몫 ≥ {sb.STAGE01_WALK[0]}/{sb.STAGE01_WALK[1]}",
          "0→1 걷는 창 (STAGE01_WALK)")  # fmt: skip
+    # 25.1954 — 수용량
+    검사(FUNNEL, f"수용량 — 실전 규모에서 거래대금의 {sb.STAGE01_MAX_CAPACITY:.0%} 이하", "0→1 수용량 (STAGE01_MAX_CAPACITY)")
+    검사(FUNNEL, f"그날 **전 {sb.CAPACITY_ADV_DAYS} 거래일** 평균", "수용량 거래대금 창 (CAPACITY_ADV_DAYS)")

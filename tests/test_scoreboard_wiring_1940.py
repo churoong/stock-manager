@@ -106,13 +106,13 @@ def test_핵심_실행이_판정판_줄을_싣는다(핵심: Any) -> None:
 
 
 def test_판정판은_작다(핵심: Any) -> None:
-    """step_log 크기 — 줄마다 웹이 보이는 칸과 그 까닭만. 수용량처럼 늘 비는 칸은 싣지 않는다. 걷는 창은 두 수만
+    """step_log 크기 — 줄마다 웹이 보이는 칸과 그 까닭만. 수용량은 최대 비율 하나(25.1954 — 분위는 결과 행). 걷는 창은 두 수만
     (`walk_positive`·`walk_total`, 25.1947) — 창마다의 기간·합(`walk`)은 싣지 않는다"""
     run, _rows = _기록(핵심, cj.JOB_NAME)
     줄들 = run["step_log"]["scoreboard"]
     크기 = len(json.dumps(줄들, ensure_ascii=False).encode())
     assert 크기 < 1500 * len(줄들), 크기
-    assert not {"walk", "capacity", "warnings", "sha", "job_name", "group_id"} & set(줄들[0])
+    assert not {"walk", "capacity_profile", "warnings", "sha", "job_name", "group_id"} & set(줄들[0])
 
 
 def test_탐색_실행은_코호트_2_와_탐색_하한(탐색: Any) -> None:
@@ -218,6 +218,15 @@ def test_웹_칸_목록이_배치와_같다() -> None:
     m = re.search(r"SCOREBOARD_KEYS = \[(.*?)\] as const", 글, re.S)
     assert m, "web/lib/scoreboard.ts 에 SCOREBOARD_KEYS 가 없다"
     assert tuple(re.findall(r'"(\w+)"', m.group(1))) == scb.STEP_LOG_COLS
+
+
+def test_웹_수용량_단위가_배치와_같다() -> None:
+    """25.1954 — 화면이 비율 옆에 적는 단위 금액 글이 배치 `CAPACITY_UNIT_LABEL` 과 같다(단위가 어긋나면 비율을 잘못 곱한다)"""
+    글 = (뿌리 / "web" / "lib" / "scoreboard.ts").read_text(encoding="utf-8")
+    m = re.search(r"CAPACITY_UNIT_LABEL: Record<string, string> = \{(.*?)\}", 글, re.S)
+    assert m, "web/lib/scoreboard.ts 에 CAPACITY_UNIT_LABEL 이 없다"
+    assert dict(re.findall(r'(\w+): "([^"]+)"', m.group(1))) == scb.CAPACITY_UNIT_LABEL
+    assert set(scb.CAPACITY_UNIT) == set(scb.CAPACITY_UNIT_LABEL)
 
 
 def test_웹_작업_목록이_배치_작업_이름과_같다() -> None:

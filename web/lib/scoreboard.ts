@@ -15,7 +15,8 @@ import { pct } from "@/lib/portfolio";
 export const SCOREBOARD_KEYS = [
   "strategy", "market", "cohort", "trials_cumulative", "cagr", "excess_cagr", "mdd", "dsr", "dsr_n",
   "control_lower", "gate_lower", "half_first_cagr", "half_second_cagr", "walk_positive", "walk_total", "months",
-  "rebalances", "buys", "control_blocks", "gate_blocks", "sells_scored", "bh_q", "stage01_verdict", "stage01_note",
+  "rebalances", "buys", "control_blocks", "gate_blocks", "sells_scored", "bh_q", "capacity", "stage01_verdict",
+  "stage01_note",
 ] as const;
 
 /** 판정판을 싣는 작업 — 배치 `jobs/backtest.JOB_NAME`·`jobs/core_backtest` 의 세 이름(`JOB_NAME`·`EXPLORE_JOB_NAME`·`LIMIT_JOB_NAME`),
@@ -65,6 +66,7 @@ const rowSchema = z.object({
   walk_total: numOrNull,
   months: numOrNull,
   bh_q: numOrNull,
+  capacity: numOrNull,
   stage01_verdict: z.string().nullable().catch(null),
   stage01_note: z.string().nullable().catch(null),
   rebalances: numOrNull,
@@ -100,9 +102,12 @@ export function parseScoreboard(raw: unknown): { rows: ScoreRow[]; unreadable: n
 const COL_LABEL: Record<string, string> = {
   market: "시장", cohort: "코호트", trials_cumulative: "누적 시도", cagr: "CAGR", excess_cagr: "초과 CAGR", mdd: "MDD",
   dsr: "DSR", dsr_n: "DSR N", control_lower: "대조 하한", gate_lower: "관문 하한", half_first_cagr: "앞 반",
-  half_second_cagr: "뒤 반", walk_positive: "걷는 창", walk_total: "걷는 창 수", months: "개월", bh_q: "BH q", stage01_verdict: "0→1 점검", stage01_note: "0→1 근거", rebalances: "리밸런스", buys: "매수", control_blocks: "대조 묶음",
+  half_second_cagr: "뒤 반", walk_positive: "걷는 창", walk_total: "걷는 창 수", months: "개월", bh_q: "BH q", capacity: "수용량", stage01_verdict: "0→1 점검", stage01_note: "0→1 근거", rebalances: "리밸런스", buys: "매수", control_blocks: "대조 묶음",
   gate_blocks: "관문 묶음", sells_scored: "판 뒤 매도",
 };
+
+/** 수용량 단위 금액 — 배치 `scoreboard.CAPACITY_UNIT_LABEL` 과 같다(`tests/test_scoreboard_wiring_1940.py` 가 대조) */
+export const CAPACITY_UNIT_LABEL: Record<string, string> = { KR: "1억 원", US: "10만 달러" };
 
 export const JOB_LABEL: Record<string, string> = {
   backtest: "월 백테스트", backtest_core: "핵심 H", backtest_explore: "탐색", backtest_limit: "회차 지정가",
@@ -141,6 +146,7 @@ function walkText(r: Pick<ScoreRow, "walk_positive" | "walk_total">): string {
  */
 export const ADDED_IN: Partial<Record<(typeof SCOREBOARD_KEYS)[number], string>> = {
   walk_positive: "25.1947", walk_total: "25.1947", stage01_verdict: "25.1950", stage01_note: "25.1950", bh_q: "25.1951",
+  capacity: "25.1954",
 };
 
 export function scoreLine(r: ScoreRow): ScoreLine {
@@ -163,6 +169,8 @@ export function scoreLine(r: ScoreRow): ScoreLine {
       ["대조 하한", f1(r.control_lower)],
       // 코호트 BH q(25.1951) — 같은 코호트 시도 줄들의 대조 분위 p 로. 세 자리
       ["BH q", r.bh_q == null ? 없음 : r.bh_q.toFixed(3)],
+      // 수용량(25.1954) — 단위 금액(국내 1억 원·미국 10만 달러)을 들 때 가장 빠듯한 종목의 20일 평균 거래대금 대비 비율의 최대
+      ["수용량", r.capacity == null ? 없음 : `${(r.capacity * 100).toFixed(3)}% / ${CAPACITY_UNIT_LABEL[r.market ?? ""] ?? "단위"}`],
       ["관문 하한", f1(r.gate_lower)],
       ["앞 반", p(r.half_first_cagr)],
       ["뒤 반", p(r.half_second_cagr)],
@@ -204,7 +212,7 @@ export function scoreboardHead(run: Pick<ScoreboardRun, "job_name" | "started_at
 
 /** 늘 비는 칸 — 배치 `scoreboard.WHY_*` 와 같은 뜻. 줄마다 되풀이하지 않고 한 번만 적는다 */
 export const ALWAYS_EMPTY_NOTE =
-  "수용량(보유 거래대금 미저장)·서로 다른 종목·끝난 거래는 아직 기록이 없어 싣지 않습니다. '0→1 점검' 은 docs/funnel.md 3장의 첫 값(확인 전)에 대어 본 것일 뿐 — 올림은 사람이 정합니다. 1→2 이후 문턱은 적용하지 않습니다.";
+  "서로 다른 종목·끝난 거래는 아직 기록이 없어 싣지 않습니다. 수용량은 단위 금액당 최대 비율이라 실전 목표 금액을 곱해 봅니다. '0→1 점검' 은 docs/funnel.md 3장의 첫 값(확인 전)에 대어 본 것일 뿐 — 올림은 사람이 정합니다. 1→2 이후 문턱은 적용하지 않습니다.";
 
 /**
  * 판정판이 싣지 않는 경고·비용 몫을 어디서 보나(25.1941) — **그 자리가 화면에 있을 때만** 가리킨다(25.1942). 경고 띠는

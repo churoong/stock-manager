@@ -1653,6 +1653,21 @@ def monthly_excess_extra(curve: list[tuple[str, float]], bench_monthly: dict[str
         return {}
 
 
+def capacity_extra(
+    result: bt.BacktestResult, turnover: dict[int, dict[str, float]] | None, market: str
+) -> dict[str, Any]:
+    """결과 행 `metrics_json` 에 더할 수용량(25.1954) — `{"capacity": scb.capacity_profile(…)}`. 진단 칸이라 깨지면
+    빈 dict(`monthly_excess_extra` 와 같은 원칙). 단위 금액이 없는 시장이면 빈 dict"""
+    unit = scb.CAPACITY_UNIT.get(market)
+    if unit is None or not turnover:
+        return {}
+    try:
+        return {"capacity": scb.capacity_profile([(r.date, r.weights) for r in result.rebalances], turnover, unit)}
+    except Exception:  # noqa: BLE001 — 진단 칸. 결과 행 저장을 막지 않는다
+        log.exception("수용량 계산 실패")
+        return {}
+
+
 def monthly_or_none(curve: list[tuple[str, float]]) -> dict[str, float] | None:
     """기준 곡선의 월수익 — 깨지면 None(`monthly_excess_extra` 가 칸을 뺀다, 25.1952)"""
     try:
@@ -2031,7 +2046,9 @@ def run(
             # 않아 싣지 않는다(25.1952)
             월초과 = None
             if strategy != "benchmark" and not strategy.endswith("_no_cost"):
-                월초과 = monthly_excess_extra(result.curve, 벤치월) or None
+                # 수용량(25.1954)도 함께 — 같은 원칙(진단 칸, 깨지면 칸만 빠진다)
+                월초과 = {**monthly_excess_extra(result.curve, 벤치월),
+                       **capacity_extra(result, turnover, market)} or None
             store_run(client, market, strategy, result, summary, top_n, group_id, 그경고, now, 운.get(strategy),
                       extra=월초과, kept=실은_행)  # fmt: skip
             stored += 1
