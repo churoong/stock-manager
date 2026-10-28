@@ -2484,7 +2484,9 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
                         # 사람에게도 보이게 — 보류 글은 broker2 기록에만 남았다(25.1924). 리포트를 보낸 **뒤**라
                         # 텔레그램 본문에는 없고 실행 기록 warnings·운영 출력 "주의:"·상황실 경고 수에 남는다(25.1926 —
                         # 글 대조가 첫째 실패 글 "첫째 계좌 단계 실패" 까지 잡아 계좌 목록으로 바꿈)
-                        warnings.append(f"KIS모의투자 도전자: {막힘2}")
+                        # 글은 고정 — 막힘2 는 잠금·첫째 까닭이 먼저라 계좌 실패를 말하지 않을 수 있다(25.1927)
+                        warnings.append(f"KIS모의투자 도전자: 가상 {도전자} 계좌 단계 실패 — 오늘 도전자 베끼기 보류"
+                                        + (f"({막힘2})" if 막힘2 and not str(막힘2).startswith("가상 ") else ""))
                     step_log["broker2"] = _bm2.run(client, market, datetime.now(UTC), slot=_bm2.CHALLENGER,
                                                    frozen=멈춘2, hold_send=str(막힘2) if 막힘2 else None)  # fmt: skip
                 except Exception as exc:  # noqa: BLE001 — 곁다리

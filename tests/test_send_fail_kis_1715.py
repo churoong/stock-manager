@@ -99,6 +99,27 @@ def test_도전자_계좌만_깨진_날은_실행이_도전자_베끼기를_보�
     assert "KIS모의투자 도전자: 가상 C 계좌 단계 실패 — 오늘 도전자 베끼기 보류" in 경고, 경고
 
 
+@pytest.mark.parametrize("첫째", [{"error": "토큰 실패"}, {"sent": {}}])
+def test_도전자_계좌가_멀쩡하면_도전자_경고가_없다(monkeypatch: pytest.MonkeyPatch, 첫째: dict) -> None:
+    """25.1927 (25.1926 교차검증 [권고]) — 음성 시험. 첫째(H) KIS 가 깨진 날("첫째 계좌 단계 실패" 보류 글)이나 정상인 날엔
+    `KIS모의투자 도전자:` 경고가 없다. 예전 글 대조(`"계좌 단계 실패" in 막힘2`)·`if 막힘2:` 로 되돌리면 첫째가 깨진 날
+    이 시험이 깨진다"""
+    _준비(monkeypatch, 0)
+    부름 = _kis_desk(monkeypatch)
+
+    def kis(*_a, **k):  # noqa: ANN002, ANN003, ANN202
+        부름["hold"].append(k.get("hold_send"))
+        return 첫째 if k.get("slot") != broker_mirror.CHALLENGER else {"sent": {}}
+
+    monkeypatch.setattr(broker_mirror, "run", kis)
+    monkeypatch.setattr(daily.telegram, "send", lambda text, *a, **k: None)
+    기록들: list[dict] = []
+    monkeypatch.setattr(daily.db, "finish_batch_run", lambda c, rid, **k: 기록들.append(k.get("step_log") or {}))
+    daily.run("KR")
+    경고 = [w for 로그 in 기록들 for w in (로그.get("warnings") or [])]
+    assert not [w for w in 경고 if w.startswith("KIS모의투자 도전자:")], 경고
+
+
 def test_dry_run_이_깨져도_운용요약을_덮지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
     """25.1717 (25.1715 교차검증 [참고] 3·5) — dry-run 의 기록 닫기가 깨지면 바깥 except 가 `_kis와_요약` 을 불러 확인용
     실행이 그날 운용 요약을 덮었다"""

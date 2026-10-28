@@ -68,6 +68,8 @@ def test_베끼는_계좌가_깨지면_단계_실패로_베끼기를_막는다(c
 
     글 = [x["text"] for x in desk.checks(halted=False, paper=기록, broker=None, recon_bad=[], warnings=0)]
     assert sum("계좌 단계 실패" in t for t in 글) == 1, 글
+    # run_step 의 실제 error 글 꼴과 상황실 대조가 이어져 있는지(25.1927) — 남은 한 줄이 단계 실패 줄이다
+    assert [t for t in 글 if "계좌 단계 실패" in t][0].startswith("가상모의투자 단계 실패:"), 글
     assert 기록["error"].startswith(f"가상 {bm.MIRROR_ACCOUNT} 계좌 단계 실패: KeyError")
     assert set(기록["account_errors"]) == {bm.MIRROR_ACCOUNT}
     assert {"A", "B", "R1", "R2"} <= _주문계좌(c)  # 다른 계좌는 그대로
