@@ -245,6 +245,9 @@ def _베끼기(c: Client, aid: str, rp: 리플레이, 판: str, k: int, cutoff: 
             assert sid in 든, f"{day}: 엔진이 운영 장부 모르는 {sid} 를 든다"
             continue
         더 = round(w * 자본 * NOTIONAL / prices[sid][day]) - (든[sid].quantity if sid in 든 else 0)
+        # 엔진이 오늘 산 종목의 비중을 운영 보유보다 줄였다면(backtest.md 10장 "엔진이 줄인다") 베끼지 않고 크게 멈춘다 — 조용히
+        # 넘기면 그 차이가 ⑨ 흔들림 상한 안에 묻힌다(25.1911, 25.1910 교차검증 [참고]). 이 창에서는 생기지 않는다
+        assert 더 >= -1, f"{day}: 베끼지 못한 엔진 축소 — 종목 {sid} {더}주"
         if 더 > 0:
             체결.append(("buy", sid, 더, rp.기간[day].get(sid)))
     for side, sid, q, h in 체결:
@@ -341,7 +344,9 @@ def _L0(variant: str, 판: str) -> list[str]:
             continue
         for sid, (첫, 기간, 원가, 더삼) in 리플.items():
             운첫, 운기간, 운원가 = h.lots[sid]
-            한도 = ALLOW_COST_AVERAGING_REL if 더삼 else 1e-9
+            # 비용 0 판은 더 산 로트도 1e-6 — 허용 ⑦ 을 비용 판에만 쓴다(25.1911, 25.1910 교차검증 [권고]: 실측 3e-8 인데
+            # 1e-4 로 재 원가 평균 오차가 3천 배 커도 지나갔다)
+            한도 = (ALLOW_COST_AVERAGING_REL if 판 == "fees" else 1e-6) if 더삼 else 1e-9
             if (첫, 기간) != (운첫, 운기간) or abs(원가 / 운원가 - 1) > 한도:
                 틀림.append(f"{day} 종목 {sid}: 리플레이 {(첫, 기간, 원가)} ≠ 운영 {(운첫, 운기간, 운원가)}")
         한도 = ALLOW_ENGINE_COST_BOOKING if 판 == "fees" else ALLOW_NOTIONAL_EQUITY
@@ -358,6 +363,10 @@ def _L1(variant: str, 판: str) -> list[str]:
     return [f"{day}: 리플레이 {로그[day].sells} ≠ 운영 {h.sells}" for day, h in live.items() if 로그[day].sells != h.sells]
 
 
+#: `fees` 판에서 줄 쌍을 견딘 날 — 시험이 그 횟수를 단언한다(25.1911)
+견딘날: dict[tuple[str, str], int] = {}
+
+
 def _L2(variant: str, 판: str) -> list[str]:
     """결정 원장(buy·skip·blocked)의 (종목, kind, 사유, held). `fees` 판은 허용 ⑨(다) 의 채우기 뒤집힘만 견딘다."""
     rp, live = _리플레이(variant, 판), _운영(variant, 판)
@@ -369,11 +378,18 @@ def _L2(variant: str, 판: str) -> list[str]:
         운 = sorted(h.decisions)
         리플만, 운만 = [x for x in 리플 if x not in 운], [x for x in 운 if x not in 리플]
         if 판 == "fees":
-            견딤 = {x[0] for x in 리플만 + 운만 if x[3] is True and x[2] in _채우기_사유
-                  and max(로그[day].buys.get(x[0], 0.0), h.buys.get(x[0], 0.0))
-                  <= _흔들림(rp, h, x[0]) + ALLOW_NOTIONAL_EQUITY}  # fmt: skip
-            리플만 = [x for x in 리플만 if x[0] not in 견딤]
-            운만 = [x for x in 운만 if x[0] not in 견딤]
+            # 뒤집힌 **줄 쌍**만 견딘다(25.1911 — 예전엔 종목 단위라 같은 종목의 다른 어긋남까지 지웠다): 든 종목 채우기 자리에서
+            # 리플레이 한 줄 ↔ 운영 한 줄, 그 종목 매수 금액이 보유 비중 차이(⑨ 흔들림 + ③ 정수 주) 안
+            def 견딜(x: tuple, 산: dict = 로그[day].buys, h: 운영하루 = h) -> bool:
+                return (x[3] is True and x[2] in _채우기_사유
+                        and max(산.get(x[0], 0.0), h.buys.get(x[0], 0.0))
+                        <= _흔들림(rp, h, x[0]) + ALLOW_NOTIONAL_EQUITY)  # fmt: skip
+
+            쌍 = {x[0] for x in 리플만 if 견딜(x)} & {x[0] for x in 운만 if 견딜(x)}
+            쌍 = {sid for sid in 쌍 if sum(x[0] == sid for x in 리플만) == 1 and sum(x[0] == sid for x in 운만) == 1}
+            리플만 = [x for x in 리플만 if x[0] not in 쌍]
+            운만 = [x for x in 운만 if x[0] not in 쌍]
+            견딘날[(variant, day)] = len(쌍)
         if 리플만 or 운만 or len(리플) != len(운):
             틀림.append(f"{day}: 리플레이만 {리플만} · 운영만 {운만} (리플레이 {len(리플)}줄, 운영 {len(운)}줄)")
     return 틀림
@@ -406,7 +422,11 @@ def _관문(variant: str, 판: str) -> float:
 
 def test_합성_창이_견줄_거리를_지난다() -> None:
     """25.1910 (전략 깔때기 ③ 일치 시험 — 매도·결정 원장·매수 비중) — 시험이 헛돌지 않게: 창 안에서 두 계좌가 사고 팔고,
-    매도 사유·skip 사유·더 사기(든 종목 목표까지 채우기)·하루 손실 관문 수익이 실제로 나온다. 실제 거래일 축이다."""
+    매도 사유·skip 사유·더 사기(든 종목 목표까지 채우기)·하루 손실 관문 수익이 실제로 나온다. 실제 거래일 축이다.
+
+    **지나지 않는 갈래**(25.1911, 25.1910 교차검증 [권고] — 남은 일, docs/funnel.md 4장 ③): 투자 비중이 B 0.51·G 0.60 까지라
+    현금 모자람·섹터 상한·위험 점검 blocked·하루 손실 관문 막힘이 한 번도 나오지 않는다. 그래서 리플레이 현금 식(오늘 판 돈
+    미포함)이 운영과 같은지는 이 시험이 잡지 못한다(1532 의 손 사례만 잡는다)"""
     assert all(cal.is_session("KR", date.fromisoformat(d)) for d in 날들)
     for variant, 사유들 in (("core_b", {"목표도달", "손절"}), ("core_g", {pp.TRAIL_CODE, "기간초과", "손절"})):
         rp = _리플레이(variant, "fees")
@@ -444,8 +464,15 @@ def test_매도_종목과_사유가_같다(variant: str) -> None:
 def test_결정_원장이_같다(variant: str) -> None:
     """25.1910 (전략 깔때기 ③ 일치 시험 — 매도·결정 원장·매수 비중) — L2. 견디는 것은 허용 ⑨(다) 하나: 든 종목의 목표까지 남은
     몫이 엔진 비용 장부의 보유 비중 흔들림보다 작은 날, 한쪽은 아주 작게 더 사고 다른 쪽은 "최소 주문 단위 미만"·"종목 비중 상한
-    도달" 로 건너뛴다(B 2024-05-30 종목 22, G 2024-06-13 종목 22)."""
+    도달" 로 건너뛴다(B 2024-05-30 종목 22, G 2024-06-13 종목 22).
+
+    바로잡음(25.1911, 25.1910 교차검증 [권고]): 위 두 예의 실제 원인은 ⑨ 가 아니라 종목 상한 10% 경계의 정수 주 내림(③,
+    1e-7 자리 — B 는 운영 보유 비중이 리플레이보다 6.6e-7 **작다**)이다. 같은 경계 뒤집힘은 비용 0 판에서도 날 수 있는 꼴이라
+    견딤 조건은 "⑨ 흔들림 + ③" 이다. 이 창의 ⑨(1e-4)는 결정을 뒤집지 않았다"""
     assert not _L2(variant, "fees"), _L2(variant, "fees")[:5]
+    # 견딘 날은 많아야 하루 한 종목 — 2026-10-28 실측 B·G 각 하루(종목 22). 늘면 새 원인을 본다(25.1911)
+    날 = {d: n for (v, d), n in 견딘날.items() if v == variant and n}
+    assert len(날) <= 2 and all(n == 1 for n in 날.values()), 날
 
 
 @pytest.mark.parametrize("variant", ["core_b", "core_g"])
