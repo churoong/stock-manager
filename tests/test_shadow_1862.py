@@ -165,3 +165,13 @@ def test_종가_넘음_함수는_그림자_판정과_같다() -> None:
     assert sh.close_exit(100, [99, 97]) == ("stop", 1) and sh.close_exit(100, [105]) == ("target", 0)
     assert sh.close_exit(100, [100] * 10) == ("time", 9) and sh.close_exit(100, [100] * 9) is None
     assert sh.close_exit(0, [50]) is None  # 진입 시가를 모르면 판정하지 않는다
+
+
+
+def test_그림자의_상한가_시가는_공용_함수와_같은_문턱() -> None:
+    """25.1887 (25.1886 교차검증 [참고]) — 엔진 T 와 같은 `limit_up_open` 을 쓰는지 값으로 묶는다(+29.7% 는 안 삼, +29.4% 는 삼)"""
+    assert sh.simulate(1, "d0", [B("d1", 12_970, 12_970, 12_500, 12_500)], sh.DAY, 무비용, "KR", prev_close=10_000).status == (
+        "no_entry")
+    assert sh.simulate(1, "d0", [B("d1", 12_940, 12_970, 12_500, 12_500)], sh.DAY, 무비용, "KR", prev_close=10_000).status == (
+        "closed")
+    assert sh.limit_up_open(12_970, 10_000, "KR") and not sh.limit_up_open(12_970, 10_000, "US")

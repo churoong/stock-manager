@@ -53,7 +53,7 @@ FILLS_SQL = (
 )
 OPEN_ORDERS_SQL = (
     "SELECT id, account_id, market, stock_id, side, order_type, limit_price, quantity, currency, fill_session,"
-    " fill_basis, deferrals, horizon, score_at_order, score_as_of, ref_price, rule_version FROM paper_orders"
+    " fill_basis, deferrals, horizon, score_at_order, score_as_of, ref_price, rule_version, reason FROM paper_orders"
     " WHERE status = 'open'"
     " ORDER BY id"
 )
@@ -840,7 +840,11 @@ def fill_orders(
             남은매수.pop(o.id, None)
             _쓰기(client, [(FILLED_SQL, [trade_date, "체결 행 있음 — 상태만 맞춤", o.id])])
             continue
-        if o.side == "sell" and o.account_id in pp.SAME_DAY_IDS and o.basis == "close" and not o.deferrals:
+        # 짝은 **사유**(`단타종가`)로 알아본다 — 종가 판정·안 미룸만 보면 늦은 실행이 낸 안전망 매도(`단타잔여`, 그것도
+        # 종가 판정)를 짝으로 오인해 "짝 매수 안 참" 으로 거둬, 짝 잃은 보유가 하루 더 밤을 넘겼다(25.1887, 25.1886
+        # 교차검증 [필수])
+        if (o.side == "sell" and o.account_id in pp.SAME_DAY_IDS and r.get("reason") == pp.DAY_CLOSE_CODE
+                and not o.deferrals):  # fmt: skip
             # 당일 단타(T) 짝 매도 — 같은 장 짝 매수가 안 찼으면 미루지 않고 거둔다(16.3.2, 25.1884). 미루면 시세 없는
             # 날 다음 장으로 갔다가 "팔 보유가 모자람" 으로야 닫혔다. 짝 매수가 아직 시세를 기다리면 함께 기다린다
             산 = any(f.account_id == o.account_id and f.stock_id == o.stock_id and f.side == "buy" and f.fill_date == 날

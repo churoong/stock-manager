@@ -293,3 +293,49 @@ def test_웹_매도_규칙_글은_모든_매도_규칙을_덮는다() -> None:
     assert all(f"  {k}:" in 표 for k in pp.SELL_RULES), sorted(pp.SELL_RULES)
     웹 = (Path(__file__).resolve().parent.parent / "web" / "lib" / "paperDecisions.ts").read_text(encoding="utf-8")
     assert f'DAY_LATE_SKIP_PREFIX = "{pp.DAY_LATE_PREFIX}"' in 웹
+
+
+# ── 25.1887 (25.1886 교차검증 [필수]·[권고]) ─────────────────────────────────────────────────
+
+
+def test_늦은_실행이_낸_안전망_매도는_짝으로_오인하지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """[필수] 짝을 종가 판정·안 미룸으로만 알아보면, 장 열린 뒤 실행이 낸 `단타잔여`(종가 판정)를 "짝 매수 안 참" 으로
+    거둬 보유가 하루 더 밤을 넘겼다 — 사유로 알아본다"""
+    c = _계좌(("B",), t=True)
+    _하루(c, monkeypatch, "2026-10-14")
+    c.conn.execute("DELETE FROM paper_orders WHERE account_id = 'T' AND side = 'sell'")  # 짝 행이 빠진 날
+    _시세(c, "2026-10-15", 10_000, 10_300)
+    _시세3(c, "2026-10-15", 10_000)
+    _하루(c, monkeypatch, "2026-10-15", signals=False, late=True)  # 장 열린 뒤 — 안전망 매도가 종가 판정
+    assert c.q("SELECT reason, fill_basis FROM paper_orders WHERE account_id = 'T' AND side = 'sell'") == [
+        (pp.DAY_LEFT_CODE, "close")]
+    _시세(c, "2026-10-16", 10_200, 10_400)
+    _하루(c, monkeypatch, "2026-10-16", signals=False)
+    assert c.q("SELECT price, fill_date FROM paper_fills WHERE account_id = 'T' AND side = 'sell'") == [
+        (10_400, "2026-10-16")]
+
+
+def test_늦은_실행_날_관문이_막은_매수는_blocked_로_남는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1886 '관문 막힘 보존' — 막힌 것까지 skip 으로 덮으면 막힌수와 원장이 어긋났다. 단기 신호 둘 가운데 관문이 하나만
+    막게 하고(나머지는 지나 늦은 실행 skip), 막힌 것은 blocked 로 남는지 본다"""
+    import dataclasses as dc
+
+    from batch.services import risk_gate as rg
+
+    진짜 = rg.gate
+
+    def 하나만(후보, 문맥):  # noqa: ANN001, ANN202
+        통과, 막힘 = 진짜(후보, 문맥)
+        return [c for c in 통과 if c.stock_id != 3], 막힘 + [(c, [("x", "시험 막힘")]) for c in 통과 if c.stock_id == 3]
+
+    monkeypatch.setattr(job.rg, "gate", 하나만)
+    c = _계좌(("B",), t=True)
+    다음 = cal.next_session("KR", date(2026, 10, 14))
+    monkeypatch.setattr(cal, "local_today", lambda _m=None: 다음)
+    둘째 = dc.replace(_신호(), stock_id=3, ticker="000660", name="종목3")
+    _, 기록 = job.run_step(c, market="KR", trade_date="2026-10-14", late=True, signal_rows=[_신호(), 둘째], settings=설정,
+                          price_series={}, series_unknown={}, allocate=True,
+                          now=datetime.fromisoformat(f"{다음}T00:30:00+00:00"))  # fmt: skip
+    결정 = dict(c.q("SELECT stock_id, kind FROM paper_decisions WHERE account_id = 'T'"))
+    assert 결정 == {1: "skip", 3: "blocked"}
+    assert 기록["accounts"]["T"]["risk_blocked"] == 1
