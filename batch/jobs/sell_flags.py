@@ -651,7 +651,9 @@ def run(today: date | None = None) -> int:
                             if c.get("label") not in 오늘이름]  # fmt: skip
                     if 더함:
                         자료_오늘 = {"criteria": list(f.criteria) + 더함, "carried_since": 판정일}
-                        글_오늘 += " ※ 일부 근거는 오늘 판정할 자료가 없어 지난 판정을 이어 둡니다"
+                        # 문장에도 이은 근거 이름을 — 근거표만 늘면 문장과 어긋나고, 다음 날 통째로 이으며 적자 조각을
+                        # 빼면 사유 없는 문장이 됐다(25.1847, 25.1845 교차검증 [권고])
+                        글_오늘 += sf.partial_carry_note([str(c.get("label")) for c in 더함])
             # 어제 근거는 아래 `_criteria_of`(리포트와 같은 읽기)로 읽는다 — 같은 이름을 하나 더 만들어 뒤의 것에
             # 덮여 늘 빈 목록이 됐고, 확인이 매 배치 풀렸다 (25.566, 교차검증)
             # **확인하지 않은 플래그도** 속 사유가 새로 생기면(시총미달 → 관리종목) NEW 를 다시 붙인다
@@ -703,6 +705,8 @@ def run(today: date | None = None) -> int:
             if 남김 != 어제근거:
                 자료["criteria"] = 남김
                 글 = sf.without_fin_loss(글)
+            # 어제 일부 잇기 표시는 통째 잇기 표시로, 사유가 빈 문장(": .")은 남은 근거 이름으로 (25.1847)
+            글 = sf.full_carry_text(글, [str(c.get("label")) for c in 자료.get("criteria") or []])
             이음 += 1
             if "오늘 판정할 자료가 없어" not in 글:
                 글 += " ※ 오늘 판정할 자료가 없어 지난 판정을 이어 둡니다"

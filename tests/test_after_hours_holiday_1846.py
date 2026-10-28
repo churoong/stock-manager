@@ -63,4 +63,5 @@ def test_마지막_시간외가_하루보다_오래면_보지_않는다(monkeypa
 
 
 def test_바깥에서_오늘_장_여부로_거르지_않는다() -> None:
-    assert '_after_hours(client, qc, today, failed) if cal.is_session("KR", today)' not in inspect.getsource(job.run)
+    # 줄바꿈해 되살려도 잡히게 — run 에 오늘 장 여부 검사가 아예 없다(25.1847, 25.1846 교차검증 [권고])
+    assert "is_session" not in inspect.getsource(job.run)

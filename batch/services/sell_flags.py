@@ -564,6 +564,26 @@ def without_fin_loss(text: str) -> str:
     return re.sub(rf"FY\S* {FIN_LOSS_LABEL}(, )?", "", text)
 
 
+#: 일부 잇기(25.1845)의 문장 표시 — 이은 근거 이름을 괄호에 담는다
+_PARTIAL_NOTE = " ※ 일부 근거({})는 오늘 판정할 자료가 없어 지난 판정을 이어 둡니다"
+
+
+def partial_carry_note(labels: list[str]) -> str:
+    """오늘 판정한 근거에 어제 근거를 덧붙일 때 문장 끝 표시 (25.1847)"""
+    return _PARTIAL_NOTE.format(", ".join(labels))
+
+
+def full_carry_text(text: str, labels: list[str]) -> str:
+    """통째로 이을 때의 문장 — 어제 일부 잇기 표시를 떼고, 적자 조각을 빼 사유가 빈 문장(`이름: .`)이면 남은 근거
+    이름으로 채운다 (25.1847, 25.1845 교차검증 [권고]: "에이: . 보유 이유가 …" 가 리포트에 나갈 뻔했다)"""
+    import re
+
+    글 = re.sub(r" ※ 일부 근거\([^)]*\)는 오늘 판정할 자료가 없어 지난 판정을 이어 둡니다", "", text)
+    if labels and re.search(r": \.", 글):
+        글 = re.sub(r": \.", ": " + ", ".join(labels) + ".", 글, count=1)
+    return 글
+
+
 def sub_reasons(reason_code: str, criteria: list[dict]) -> set[str]:
     """한 플래그의 **속 사유** (docs/infra.md 25.564, 감사 재현).
 

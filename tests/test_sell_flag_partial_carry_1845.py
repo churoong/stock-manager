@@ -51,7 +51,7 @@ def test_잣대가_바뀐_날을_끼어도_확인이_이어진다(monkeypatch: p
         "SELECT rationale_data, rationale_text, dismissed_at FROM sell_flags WHERE is_active = 1").fetchall()
     자료 = json.loads(자료)
     assert {x["label"] for x in 자료["criteria"]} == {sf.FIN_LOSS_LABEL, "종합 점수 하락"}  # 점수 하락을 이었다
-    assert 자료["carried_since"] == "2026-03-20" and "일부 근거는 오늘 판정할 자료가 없어" in 글
+    assert 자료["carried_since"] == "2026-03-20" and "일부 근거(종합 점수 하락)는 오늘 판정할 자료가 없어" in 글
     assert 확인 == "2026-03-20T01:00:00+00:00"
     # 3일차: 점수를 다시 판정, 하락 그대로 — 예전엔 여기서 확인이 풀리고 NEW 였다
     monkeypatch.setattr(job.db, "now_iso", lambda: "2026-03-21T23:27:00+00:00")
@@ -71,3 +71,21 @@ def test_잇는_끝이_지나면_오늘_근거만(monkeypatch: pytest.MonkeyPatc
     _실행(monkeypatch, c, sf.HoldingInput(**기본), 늦은날)  # 점수 없음
     (자료,), = c.conn.execute("SELECT rationale_data FROM sell_flags WHERE is_active = 1").fetchall()
     assert [x["label"] for x in json.loads(자료)["criteria"]] == [sf.FIN_LOSS_LABEL]
+
+
+def test_다음_날_통째로_이어도_문장에_사유가_남는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1847 (25.1845 교차검증 [권고]) — 일부 잇기가 근거표에만 점수 하락을 붙여, 다음 날 흑자로 돌고 점수도 못 본 날
+    통째 잇기가 적자 조각을 빼면 "에이: . 보유 이유가 …" 처럼 사유 없는 문장이 리포트에 나갈 뻔했다"""
+    c, job = _장부(monkeypatch)
+    _실행(monkeypatch, c, sf.HoldingInput(**기본, score_now=45.0, **점수봄), date(2026, 3, 20))
+    _실행(monkeypatch, c, sf.HoldingInput(**기본, score_now=44.0, score_now_date="2026-03-20",
+                                          score_scale_unknown=True), date(2026, 3, 21))  # fmt: skip
+    (글,), = c.conn.execute("SELECT rationale_text FROM sell_flags WHERE is_active = 1").fetchall()
+    assert "※ 일부 근거(종합 점수 하락)는 오늘 판정할 자료가 없어" in 글
+    흑자 = {**기본, "op_income_latest": 5.0}
+    _실행(monkeypatch, c, sf.HoldingInput(**흑자, score_now=44.0, score_now_date="2026-03-21",
+                                          score_scale_unknown=True), date(2026, 3, 22))  # fmt: skip
+    (글, 자료), = c.conn.execute("SELECT rationale_text, rationale_data FROM sell_flags WHERE is_active = 1").fetchall()
+    assert [x["label"] for x in json.loads(자료)["criteria"]] == ["종합 점수 하락"]
+    assert ": ." not in 글 and "에이: 종합 점수 하락." in 글
+    assert "일부 근거" not in 글 and 글.count("오늘 판정할 자료가 없어") == 1

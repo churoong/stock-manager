@@ -425,7 +425,7 @@ def run(limit: int | None = None) -> int:
         for i in range(0, len(statements), 500):
             client.batch(statements[i : i + 500])
         # 보유 종목 시간외 단일가 (docs/intraday.md 1.2, 25.992) — 곁다리. 실패해도 수집 결과는 그대로 남긴다
-        # 휴장 여부는 안에서 본다 — 바깥에서 `is_session(오늘)` 로 거르면 금요일 실행이 GitHub 지연으로 토요일 01:25 KST
+        # 휴장 여부는 안에서 본다 — 바깥에서 오늘이 장인지로 거르면 금요일 실행이 GitHub 지연으로 토요일 01:25 KST
         # 에 돌 때 금요일 시간외 알림이 통째로 빠졌다(25.1846, 결함 루프 [참고] — 안의 `session_day`(25.1012)와 어긋남)
         시간외 = _after_hours(client, qc, today, failed)
         db.record_api_call(client, "kis_openapi", count=qc.calls + int(issued))
