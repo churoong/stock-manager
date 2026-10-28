@@ -344,4 +344,17 @@ def test_옛_자리_신호가_나온_날만_닿음() -> None:
     assert not [x for x in desk.checks(halted=False, paper=p, broker=None, recon_bad=[], warnings=0) if "옛 대체" in x["text"]]
     p["accounts"]["R2"]["substitute_overlap_hit"] = {"1": [8]}
     assert [x["level"] for x in desk.checks(halted=False, paper=p, broker=None, recon_bad=[], warnings=0)
-            if "옛 대체 자리 신호" in x["text"]] == ["normal"]
+            if "옛 자리 신호" in x["text"]] == ["normal"]
+    # run_step 이 부르는 감지 함수 그대로(25.1932 — 양성 경로): 옛 자리 8 신호가 나온 날 `_hit`, 지금 회차 27 이면 없음
+    def 행(sid: int) -> Any:
+        return type("행", (), {"stock_id": sid})()
+
+    기록: dict = {}
+    job.record_substitute_overlap(c, "R2", job.held_substitutes(c, "R2", {1}), [행(8), 행(99)], 기록)
+    assert 기록 == {"substitute_overlap": {"1": [8, 27]}, "substitute_overlap_hit": {"1": [8]}}
+    글 = [x["text"] for x in desk.checks(halted=False, paper={"accounts": {"R2": 기록}}, broker=None, recon_bad=[],
+                                        warnings=0) if "옛 자리 신호" in x["text"]]  # fmt: skip
+    assert 글 and "(1건)" in 글[0] and "{" not in 글[0], 글  # 내부 번호를 싣지 않는다
+    기록 = {}
+    job.record_substitute_overlap(c, "R2", job.held_substitutes(c, "R2", {1}), [행(27)], 기록)
+    assert 기록 == {"substitute_overlap": {"1": [8, 27]}}

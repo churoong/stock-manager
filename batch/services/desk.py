@@ -1013,9 +1013,10 @@ def checks(
             # 무작위 대조의 옛 자리 신호가 다시 나와 뽑기가 운영·문서 규칙과 갈렸을 수 있는 날(25.1929 찾은 것,
             # 25.1931) — R 판 올림을 앞당길지 볼 자리. 장부 상태(`substitute_overlap`)만으로는 내지 않는다
             # (해 없는 날도 켜진다)
-            닿음 = a["substitute_overlap_hit"]
-            out.append({"level": "normal",
-                        "text": f"가상 {nm} 옛 대체 자리 신호가 다시 나옴 {닿음} — R 판 올림 앞당김 검토(handoff)"})
+            # 내부 번호를 싣지 않는다 — 사람이 못 읽는다(25.1932). 자리·종목은 실행 기록에 있다
+            n = sum(len(v) for v in (a["substitute_overlap_hit"] or {}).values())
+            글 = f"가상 {nm} 무작위 대체의 옛 자리 신호가 다시 나옴({n}건) — 무작위 규칙 판 올림 앞당김 검토"
+            out.append({"level": "normal", "text": 글})
         if a.get("step_error") and not str(p.get("error") or "").startswith(f"가상 {aid} 계좌 단계 실패"):
             # 계좌 단계에서 가둔 예외(25.1920·25.1922) — 다른 계좌는 돌았다. 주문을 적은 뒤에 났을 수 있다.
             # KIS 가 베끼는 계좌면 위 단계 실패 줄이 같은 사건을 이미 말한다(25.1924)
