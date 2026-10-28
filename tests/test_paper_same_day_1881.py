@@ -91,7 +91,7 @@ def test_판정_T_는_짝_매도가_주문_번호가_작아도_매수_뒤() -> N
     c.conn.execute("INSERT INTO paper_cash_flows (flow_date, amount_krw, kind, created_at, request_key)"
                    " VALUES ('2026-10-14', 1000000, 'deposit', 't', 'k')")  # fmt: skip
     c.conn.execute("INSERT INTO paper_accounts (id, name, sell_rule, rule_version, created_at, entry_rule, top_n, selection)"
-                   " VALUES ('T', 'T', 'day_close', 1, 't', 'open', 10, 'short')")  # 11월 행 — 시험이 직접  # fmt: skip
+                   " VALUES ('T', 'T', 'day_close', 1, 't', 'open', 10, 'short')")  # 계좌 행 — 시험이 직접  # fmt: skip
     판 = 주문(c, aid="T", side="sell", typ="market", q=5, session="2026-10-15", basis="close", tranche=0)
     산 = 주문(c, aid="T", side="buy", typ="market", q=5, session="2026-10-15", ref=10_000)
     시세(c, 1, "2026-10-15", 10_000, 10_300)

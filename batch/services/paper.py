@@ -58,7 +58,7 @@ def account_name(aid: str) -> str:
 #: 성과 채우기는 따로 한 바퀴(기존 계좌의 하루 상한을 나눠 쓰지 않게). 정의처는 여기 하나(`desk.SEPARATE_IDS`)
 SEPARATE_IDS = ("S", "T")
 #: 같은 날 사고파는 계좌 — 당일 단타 T (docs/paper.md 16.3.2, 25.1881). 한 날 안의 체결·판정 순서에서 이 계좌의 매도만
-#: 그날 매수 **뒤**로 간다(`side_rank`). 행은 11월에 들어온다 — 이 정렬이 먼저 main 에 있어야 한다
+#: 그날 매수 **뒤**로 간다(`side_rank`). 행은 0092(2026-10-29 개설) — 이 정렬이 행보다 먼저 main 에 들어갔다
 SAME_DAY_IDS: tuple[str, ...] = ("T",)
 
 
