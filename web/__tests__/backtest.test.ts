@@ -471,6 +471,11 @@ describe("기본 묶음과 옛 판 (25.788, 백테스트 감사 #2·#3)", () => 
     expect(staleVersionNote({ calc_version: ENGINE_VERSION, scoring_calc_version: SCORING_VERSION, market: "US" })).toBeNull();
     expect(staleVersionNote({ calc_version: 2, scoring_calc_version: SCORING_VERSION, market: "KR" })).toContain("엔진 2");
     expect(staleVersionNote({ calc_version: 1, scoring_calc_version: SCORING_VERSION, market: "US" })).toContain("엔진 1");
+    // 7판(25.1957)은 장부형(core_*) 비용만 바꿨다 — 월 백테스트 6판은 낡지 않았고, 핵심 6판·전략 모름은 낡았다
+    expect(staleVersionNote({ calc_version: 6, scoring_calc_version: SCORING_VERSION, market: "KR", strategy: "composite" })).toBeNull();
+    expect(staleVersionNote({ calc_version: 6, scoring_calc_version: SCORING_VERSION, market: "KR", strategy: "core_h" })).toContain("엔진 6 → 지금 7");
+    expect(staleVersionNote({ calc_version: 6, scoring_calc_version: SCORING_VERSION, market: "KR" })).toContain("엔진 6");
+    expect(staleVersionNote({ calc_version: 5, scoring_calc_version: SCORING_VERSION, market: "KR", strategy: "composite" })).toContain("엔진 5");
   });
 });
 

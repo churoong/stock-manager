@@ -25,6 +25,7 @@ from functools import cache
 import pytest
 
 from batch.services import core_backtest as cb
+from batch.services import core_strategy as cs
 from batch.sources import dart
 from tests import test_replay_parity_1910 as t
 from tests import test_replay_parity_hde_1921 as hde
@@ -120,3 +121,16 @@ def test_비용_0_이면_장부·매도·결정·매수_비중이_허용_없이_
         틀림 = 단(variant, "zero")
         assert not 틀림, (단.__name__, 틀림[:5])
     assert t._관문(variant, "zero") <= 1e-4
+
+@pytest.mark.parametrize("variant", 변형들)
+def test_비용_판도_1910_상한_안에서_같다(variant: str) -> None:
+    """25.1957 (깔때기 ③ 남은 칸 — A·C 비용 판) — 운영 설정 수수료·시행일 거래세 판. 엔진이 장부형 전략의 비용을 현금에서 낸
+    뒤 새 허용 없이 1910 상한(⑦ 5e-6·⑨ 2e-7·⑥ 0.05)으로 L0~L3 과 회의 단이 같다. 2026-10-28 실측 보유 비중 차 최대 A 1.4e-8·
+    C 1.9e-8, 원가 상대차 A 1.2e-9·C 1.6e-7, 관문 A 0.015·C 0.022%p. ⑨(다) 뒤집힘·0주 베낌 없음"""
+    for 단 in (t._L0, t._L1, t._L2, t._L3, hde._회의_대조):
+        틀림 = 단(variant, "fees")
+        assert not 틀림, (단.__name__, 틀림[:5])
+    assert t._관문(variant, "fees") <= t.ALLOW_GATE_RETURN_PCTP
+    assert {(d, sid) for (v, d), 쌍 in t.견딘날.items() if v == variant for sid in 쌍} == set()
+    assert not [k for k in t.베낌_0주 if k[0] == cs.variant_spec(variant).account and k[1] == "fees"]
+

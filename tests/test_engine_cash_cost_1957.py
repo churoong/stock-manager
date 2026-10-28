@@ -1,0 +1,70 @@
+"""25.1957 — 엔진이 장부형 전략(운영 계좌 재현)의 거래비용을 **현금에서** 낸다.
+
+예전엔 `equity = drifted_total × (1 − cost)` 로 자본 전체에 비례해 빼 든 종목 수량까지 비용만큼 줄었다. 운영 가상모의투자는
+체결 금액에 붙는 수수료·세금·슬리피지를 현금에서만 낸다(`pp.make_fill`). 그 차이가 일치 시험 허용 ⑨(보유 비중 차 최대
+1.25e-4)와 ⑨(다) 결정 뒤집힘의 뿌리였다. 지금은 손으로 센다:
+
+- 장부형 · 현금이 비용보다 많다: 든 종목 값 = 목표 비중 × 그날 자본(비용 전) 그대로, 현금 = (1 − Σ목표 − 비용) × 자본
+- 장부형 · 현금이 모자란다(거의 다 투자): 예전처럼 자본 전체에
+- 비중형(월 백테스트 — dict 를 내는 판단 함수): 예전 그대로
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from batch.services import backtest as bt
+from tests import test_core_strategy_1532 as t32
+
+날 = t32._영업일("2024-01-02", 4)
+비용 = bt.Costs(commission_pct=0.1, tax_sell_pct=0.0, slippage_pct=0.0)  # 편도 0.1% — 손으로 세기 쉽게
+
+
+def _돌림(판단: dict[int, object], 종가: dict[int, list[float]]) -> bt.BacktestResult:
+    prices = {sid: {날[k]: p for k, p in enumerate(xs)} for sid, xs in 종가.items()}
+    return bt.simulate(prices, 날, 날, lambda d, _v: 판단.get(날.index(d), bt.LedgerOrders()), 비용, has_delisted=True)
+
+
+def test_장부형은_비용을_현금에서_낸다() -> None:
+    """둘째 날 종목 1 을 비중 0.5 로 산다 — 회전율 0.25, 비용 = 0.25 × 2 × 0.001 = 0.0005. 종목 값은 0.5 그대로(주식 수 0.5 ÷ 100),
+    현금 0.5 − 0.0005, 자본 0.9995. 셋째 날 종가 110 → 자본 = 0.5 × 1.1 + 0.4995"""
+    r = _돌림({1: bt.LedgerOrders(buys={1: 0.5})}, {1: [100.0, 100.0, 110.0, 110.0]})
+    reb = r.rebalances[1]
+    assert reb.cost == pytest.approx(0.0005)
+    assert reb.weights[1] == pytest.approx(0.5 / 0.9995)
+    자본 = dict(r.curve)
+    assert 자본[날[1]] == pytest.approx(0.9995)
+    assert 자본[날[2]] == pytest.approx(0.5 * 1.1 + 0.4995)
+
+
+def test_든_종목은_비용으로_줄지_않는다() -> None:
+    """종목 1 을 든 채 종목 2 를 산다 — 예전 엔진은 종목 1 의 주식 수까지 (1 − 비용) 만큼 줄였다. 지금은 종목 1 값 그대로"""
+    r = _돌림({1: bt.LedgerOrders(buys={1: 0.4}), 2: bt.LedgerOrders(buys={2: 0.3})},
+              {1: [100.0, 100.0, 100.0, 100.0], 2: [50.0, 50.0, 50.0, 50.0]})  # fmt: skip
+    자본 = dict(r.curve)
+    전 = 자본[날[1]]  # 0.9996 (첫 매수 비용 0.4 × 0.001)
+    셋 = r.rebalances[2]
+    # 종목 1 값 = 0.4 (1 − ε) 비중 × 전 — 비용 0.0003 은 현금에서만
+    assert 셋.cost == pytest.approx(0.0003)
+    assert 셋.weights[1] * 자본[날[2]] == pytest.approx(r.rebalances[1].weights[1] * 전)
+    assert 자본[날[2]] == pytest.approx(전 * (1 - 0.0003))
+
+
+def test_현금이_모자라면_예전처럼_자본_전체에() -> None:
+    """비중 1.0 을 사면 현금 0 < 비용 — 자본 전체에 비례로(예전 식): 자본 1 − 0.001 × 0.5 × 2 / 2 …"""
+    r = _돌림({1: bt.LedgerOrders(buys={1: 1.0})}, {1: [100.0, 100.0, 100.0, 100.0]})
+    reb = r.rebalances[1]
+    assert reb.cost == pytest.approx(0.001)  # 회전율 0.5 × 0.002
+    assert reb.weights[1] == pytest.approx(1.0) and dict(r.curve)[날[1]] == pytest.approx(1 - 0.001)
+
+
+def test_비중형은_예전_그대로() -> None:
+    """dict 를 내는 판단 함수(월 백테스트) — 비중 0.5 를 사도 자본 전체에 비례(비중은 목표 그대로 0.5)"""
+    prices = {1: {d: 100.0 for d in 날}}
+    r = bt.simulate(prices, 날, [날[1]], lambda d, _v: {1: 0.5}, 비용, has_delisted=True)
+    reb = r.rebalances[0]
+    assert reb.weights[1] == pytest.approx(0.5) and dict(r.curve)[날[1]] == pytest.approx(1 - reb.cost)
+
+
+def test_엔진_판은_7() -> None:
+    assert bt.CALC_VERSION == 7

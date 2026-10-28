@@ -117,24 +117,30 @@ export function groupTags(g: {
  * (`backtest.test.ts` 가 파이썬 쪽을 읽어 대 본다). 결과의 판이 이보다 낮으면 **옛 규칙으로 낸 결과**라고 띠를 붙인다
  * (docs/infra.md 25.788, 백테스트 감사 #3 — 화면이 판 번호만 찍고 견주지 않아 09-17 결과가 지금 결과처럼 보였다)
  */
-export const ENGINE_VERSION = 6; // 5: 표시통화가 다른 재무를 견주지 않는다 (25.919) · 6: 리스크 3Y 창(미국, 25.1318)·시작일을 달 첫날로(모든 시장, 25.1320)
+export const ENGINE_VERSION = 7; // 5: 표시통화가 다른 재무를 견주지 않는다 (25.919) · 6: 리스크 3Y 창(미국, 25.1318)·시작일을 달 첫날로(모든 시장, 25.1320) · 7: 장부형 전략의 비용을 현금에서 (25.1957)
 export const SCORING_VERSION = 11; // 9: 밸류 분모 시점 정합 (25.954) · 10: 옮기는 조건 고침 (25.960) · 11: 자본잠식 사후 최악 (25.1175)
 
 /** 엔진 판이 결과를 바꾼 시장 — 3판(25.783)은 국내 거래세만 바꿨다(25.789). 표에 없는 판(4: 마지막 날 평가만, 25.795)은 모든 시장 */
 const 엔진_판_시장: Record<number, string[]> = { 3: ["KR"] };
+/** 엔진 판이 결과를 바꾼 전략 — 7판(25.1957)은 장부형 전략(핵심 H·탐색·지정가 — `core_*`)의 비용 배분만 바꿨다. 월 백테스트의
+ * 비중형 전략은 같은 결과라 낡지 않았다. 표에 없는 판은 모든 전략, 전략을 모르면 낡은 쪽으로 */
+const 엔진_판_전략: Record<number, (strategy: string) => boolean> = { 7: (s) => s.startsWith("core_") };
 
-function 엔진이_낡았나(calc: number, market: string | undefined): boolean {
+function 엔진이_낡았나(calc: number, market: string | undefined, strategy: string | undefined): boolean {
   for (let v = calc + 1; v <= ENGINE_VERSION; v++) {
     const 시장 = 엔진_판_시장[v];
-    if (!시장 || !market || 시장.includes(market)) return true;
+    const 전략 = 엔진_판_전략[v];
+    if ((!시장 || !market || 시장.includes(market)) && (!전략 || strategy === undefined || 전략(strategy))) return true;
   }
   return false;
 }
 
-export function staleVersionNote(run: { calc_version: number | null; scoring_calc_version: number | null; market?: string } | undefined): string | null {
+export function staleVersionNote(
+  run: { calc_version: number | null; scoring_calc_version: number | null; market?: string; strategy?: string } | undefined,
+): string | null {
   if (!run) return null;
   const 낡음: string[] = [];
-  if (run.calc_version !== null && 엔진이_낡았나(run.calc_version, run.market)) 낡음.push(`엔진 ${run.calc_version} → 지금 ${ENGINE_VERSION}`);
+  if (run.calc_version !== null && 엔진이_낡았나(run.calc_version, run.market, run.strategy)) 낡음.push(`엔진 ${run.calc_version} → 지금 ${ENGINE_VERSION}`);
   if (run.scoring_calc_version === null) 낡음.push(`점수 판 기록 없음 → 지금 ${SCORING_VERSION}`);
   else if (run.scoring_calc_version < SCORING_VERSION) 낡음.push(`점수 ${run.scoring_calc_version} → 지금 ${SCORING_VERSION}`);
   return 낡음.length

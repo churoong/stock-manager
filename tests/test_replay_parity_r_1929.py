@@ -24,10 +24,10 @@
      "종목 비중 상한 도달". 둘 다 사지 않고 사유만 다르다. 허용 ③(정수 주)의 결정 자리 — B·G 창에서는 목표가 상한 아래라
      나오지 않았다. 잣대: 같은 종목 줄 한 쌍, 둘 다 skip·held, 사유가 그 둘, 그날 양쪽 매수 없음, 두 비중 모두 상한 ± 1e-8
      (1주 1.1~1.6e-8 아래), 두 비중 차 ≤ 허용 ③. 어느 날·종목인지 단언한다
-  ⑫ `ALLOW_MARKET_SLIPPAGE_*` — 슬리피지 판(`slip`: 운영 설정 수수료 + 엔진 기본 슬리피지 0.10%). R 은 사고(시가 일괄)
-     팔(시장가) 때 모두 슬리피지를 낸다 — 운영은 체결 현금에서, 엔진은 회전율 비용으로 자본 전체에 비례로(⑨ 와 같은 기제,
-     크기만 크다). 보유 비중 차·더 산 로트 원가 근사·관문 수익률 차가 ⑨·⑦·⑥ 상한을 넘어(실측 아래) 판마다 따로 둔다.
-     결정(L1·L2·L3)은 ⑨(다) 그대로의 잣대로 같다
+  ⑫ `ALLOW_MARKET_SLIPPAGE_GATE_PCTP` — 슬리피지 판(`slip`: 운영 설정 수수료 + 엔진 기본 슬리피지 0.10%). R 은 사고(시가
+     일괄) 팔(시장가) 때 모두 슬리피지를 낸다. 25.1929 에는 엔진이 그 비용을 자본 전체에 비례로 빼(⑨ 와 같은 기제) 보유 비중·
+     원가·관문 셋이 ⑨·⑦·⑥ 을 넘었다. **25.1957 엔진이 비용을 현금에서 낸 뒤 장부 둘은 1910 상한 안** — 관문 수익률 차만 남는다.
+     결정(L1·L2·L3)은 같다(⑨(다) 뒤집힘 없음)
   ⑨(다) 의 매수 사유 이름 — R 의 채우기 자리 매수 사유는 "무작위 대조"(1921 의 "지주사 합의"·"위원회 가결" 과 같은 자리)
 
 **찾은 것(고치지 않음 — 25.1700 R 고르기 규칙 지문, R 판 고정)**: 운영 `jobs/paper.held_substitutes` 는 **지금 든 종목의 찬
@@ -61,17 +61,17 @@ _상한끝_사유 = frozenset({"최소 주문 단위 미만", "종목 비중 상
 #: ⑪ 을 쓴 자리 (변형, 판, 결정일, 종목) → (리플레이 비중 − 상한, 운영 비중 − 상한) — 시험이 어느 날·종목인지 단언한다
 상한끝: dict[tuple[str, str, str, int], tuple[float, float]] = {}
 
-#: ⑫ 슬리피지 판의 상한 — 2026-10-28 실측(150 거래일)의 약 두 배. 보유 비중 차 최대 R1 2.60e-4·R2 3.38e-4(⑨ 2.5e-4 넘음),
-#: 더 산 로트 원가 상대차 최대 R1 1.02e-4·R2 7.9e-5(⑦ 1e-4 넘음), 관문 수익률 차 최대 R1 0.033·R2 0.063%p(⑥ 0.05 넘음)
-ALLOW_MARKET_SLIPPAGE_BOOKING = 7e-4
-ALLOW_MARKET_SLIPPAGE_AVERAGING_REL = 2.5e-4
+#: ⑫ 슬리피지 판의 상한 — 예전(2026-10-28 실측의 약 두 배) 보유 비중 차 7e-4·원가 상대차 2.5e-4·관문 0.13%p 였다.
+#: **25.1957 — 엔진이 장부형 전략의 비용(슬리피지 포함)을 현금에서 낸 뒤** 보유 비중 차 최대 R1 7.0e-9·R2 8.6e-9, 원가 상대차
+#: R1 2.1e-6·R2 2.6e-6 으로 1910 의 ⑨(2e-7)·⑦(5e-6) 안이다 — 판_상한 을 등록하지 않는다(1910 상한 그대로). 남은 것은 관문
+#: 수익률 차(엔진은 "직전 비중 × 종가 변화", 운영은 그날 체결 비용이 든 시간가중 — 비용 배분과 무관): 실측 R1 0.033·R2 0.063%p
+#: (⑥ 0.05 넘음)의 약 두 배
 ALLOW_MARKET_SLIPPAGE_GATE_PCTP = 0.13
 
 #: 슬리피지 판 — 운영 설정 수수료(1910 `fees` 와 같음) + 엔진 기본 슬리피지(`bt.Costs.slippage_pct` 0.10%, 운영 `costs_for` 와
 #: 같은 값). 베끼기는 R 의 시장가 매수·매도에 그 슬리피지를 `make_fill` 로 붙인다
 _비용 = {"kr_buy_pct": 0.015, "kr_sell_pct": 0.015}
 t.비용판.setdefault("slip", (_비용, bt.Costs.for_country("KR", _비용, {})))
-t.판_상한.setdefault("slip", (ALLOW_MARKET_SLIPPAGE_AVERAGING_REL, ALLOW_MARKET_SLIPPAGE_BOOKING))
 
 #: id(리플레이) → 결정일 → 운영 `held_substitutes`(그날 run_step 바로 앞) — 리플레이는 (변형, 판)마다 하나다
 운영든대체: dict[tuple[int, str], dict[int, int]] = {}
@@ -208,13 +208,10 @@ def test_비용_0_이면_장부·매도·결정·매수_비중이_허용_없이_
     assert all(r < 0 < o for (v, 판, _d, _s), (r, o) in 상한끝.items() if v == variant and 판 == "zero")
 
 
-#: 비용 판마다 ⑨(다) 채우기 뒤집힘을 견딘 자리 — 2026-10-28 실측. 같음(==) 으로 단언한다(사라져도 알아채게, 25.1918)
-#: 모두 든 종목을 상한(10%)까지 채우는 자리 — 비용 0 판 ⑪ 자리(R1 08-28 종목 6·R2 05-30 종목 19)도 비용 판에서는 ⑨ 크기라 ⑨(다)
-_견딘_자리 = {
-    ("core_r1", "fees"): {("2024-08-28", 6)},
-    ("core_r2", "fees"): {("2024-03-04", 19), ("2024-06-17", 19)},
-    ("core_r1", "slip"): {("2024-03-04", 4), ("2024-05-30", 4), ("2024-08-28", 6)},
-    ("core_r2", "slip"): {("2024-03-04", 19), ("2024-05-30", 19), ("2024-06-17", 19)},
+#: 비용 판마다 ⑨(다) 채우기 뒤집힘을 견딘 자리 — 2026-10-28 실측은 R1 fees 1·R2 fees 2·R1 slip 3·R2 slip 3 자리였다(든 종목을
+#: 상한까지 채우는 자리). **25.1957 엔진이 비용을 현금에서 낸 뒤 모두 사라졌다** — 빈 집합을 같음(==) 으로 단언한다
+_견딘_자리: dict[tuple[str, str], set[tuple[str, int]]] = {
+    ("core_r1", "fees"): set(), ("core_r2", "fees"): set(), ("core_r1", "slip"): set(), ("core_r2", "slip"): set(),
 }
 
 
@@ -231,14 +228,15 @@ def test_비용_판도_이름_붙은_허용_안에서_같다(variant: str, 판: 
             본 = {(d, sid) for (v, d), 쌍 in t.견딘날.items() if v == variant for sid in 쌍}
     assert 본 == _견딘_자리[(variant, 판)], 본
     assert t._관문(variant, 판) <= (t.ALLOW_GATE_RETURN_PCTP if 판 == "fees" else ALLOW_MARKET_SLIPPAGE_GATE_PCTP)
-    assert not [
-        k for k in 상한끝 if k[0] == variant and k[1] == 판
-    ]  # ⑪ 은 비용 판에서 쓰이지 않았다(⑨(다) 가 먼저 크다)
+    # ⑪(상한 끝 뒤집힘)은 비용 판에서 쓰이지 않는다 — 25.1957 뒤 비용 판의 보유가 비용 0 판처럼 ③ 크기로 같아도, 그 자리의
+    # 반올림 방향이 비용 0 판과 달라 상한을 넘지 않는다(실측). 쓰이면 알아채게 남긴다
+    assert not [k for k in 상한끝 if k[0] == variant and k[1] == 판]
 
 
-def test_슬리피지_판은_1910_상한을_넘는다() -> None:
-    """25.1929 ⑫ 가 따로 있어야 하는 까닭 — 슬리피지 판의 실측이 1910 상한을 넘는다(⑫ 를 지우고 ⑦·⑨ 로 재면 L0 이 깨진다).
-    `fees` 판은 1910 상한 안이다(⑫ 는 슬리피지 몫만)."""
+def test_슬리피지_판도_1910_장부_상한_안이고_관문만_넘는다() -> None:
+    """25.1957 (예전 `test_슬리피지_판은_1910_상한을_넘는다`, 25.1929 ⑫) — 엔진이 장부형 전략의 비용을 현금에서 낸 뒤 슬리피지
+    판의 보유 비중 차·원가 상대차가 1910 의 ⑨·⑦ 안이다(⑫ 의 장부 몫이 없어졌다). 관문 수익률 차만 ⑥ 을 넘어 ⑫ 로 남는다.
+    예전 엔진(자본 전체에 비례로 뺌)으로 되돌리면 이 시험이 깨진다(되돌리기 확인)"""
 
     def 최대(variant: str, 판: str) -> tuple[float, float]:
         rp, live = t._리플레이(variant, 판), t._운영(variant, 판)
@@ -246,12 +244,12 @@ def test_슬리피지_판은_1910_상한을_넘는다() -> None:
         원가 = max(abs(x[2] / h.lots[s][2] - 1) for d, h in live.items() for s, x in rp.장부[d].items() if x[3])
         return 흔들림, 원가
 
-    s1, s2 = 최대("core_r1", "slip"), 최대("core_r2", "slip")
-    assert max(s1[0], s2[0]) > t.ALLOW_ENGINE_COST_BOOKING and max(s1[1], s2[1]) > t.ALLOW_COST_AVERAGING_REL
-    assert max(t._관문(v, "slip") for v in 변형들) > t.ALLOW_GATE_RETURN_PCTP
     for v in 변형들:
-        f = 최대(v, "fees")
-        assert f[0] <= t.ALLOW_ENGINE_COST_BOOKING and f[1] <= t.ALLOW_COST_AVERAGING_REL, (v, f)
+        for 판 in ("fees", "slip"):
+            f = 최대(v, 판)
+            assert f[0] <= t.ALLOW_ENGINE_COST_BOOKING and f[1] <= t.ALLOW_COST_AVERAGING_REL, (v, 판, f)
+    assert "slip" not in t.판_상한
+    assert t.ALLOW_GATE_RETURN_PCTP < max(t._관문(v, "slip") for v in 변형들) <= ALLOW_MARKET_SLIPPAGE_GATE_PCTP
 
 
 def test_운영_든_대체_장부가_옛_보유_자리를_남긴다() -> None:

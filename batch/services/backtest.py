@@ -29,7 +29,9 @@ from batch.services import metrics as m
 # 4: 마지막 날은 리밸런스하지 않는다 (docs/infra.md 25.792·25.795) — 끝 날이 월초였던 결과의 회전·비용·횟수가 바뀐다
 # 5: 표시통화가 다른 재무를 시총과 나누거나 해끼리 견주지 않는다 (2026-10-03, docs/infra.md 25.919 — 11회차 1)
 # 6: 리스크 지표 3Y 창 앞을 자르지 않는다(미국, 25.1318) · 시작일을 다음 달 첫날로(모든 시장, 25.1320) — 2026-10-13
-CALC_VERSION = 6
+# 7: 장부형 전략(핵심 H·탐색·지정가 — 운영 계좌 재현)의 거래비용을 자본 전체가 아니라 현금에서 뺀다(25.1957). 비중형(월
+#    백테스트)은 결과가 같지만 판은 엔진 하나라 함께 오른다 — 2026-10-28
+CALC_VERSION = 7
 
 # 기본 종목 수. 과거에 맞춰 고르면 과최적화이므로 문서에 적고 고정한다.
 DEFAULT_TOP_N = 20
@@ -676,7 +678,8 @@ def simulate(
             )  # fmt: skip
             proposed = weights_at(d, view)
             지정가비율: dict[int, float] = {}  # 25.1914 — 찬 회차 종목의 (종가 가치 ÷ 산 값). 비면 예전 길
-            if isinstance(proposed, LedgerOrders):
+            장부형 = isinstance(proposed, LedgerOrders)
+            if 장부형:
                 # 장부 주문 — 든 것은 그대로 두고 판 것·산 것만 바꾼다(25.1526).
                 # 정지·상장폐지 규칙은 아래 비중 꼴과 같다
                 if proposed.limits:
@@ -726,8 +729,24 @@ def simulate(
             sold = sum(max(drifted.get(k, 0.0) - target.get(k, 0.0), 0.0) for k in keys)
             cost = costs.rebalance_cost(회전율, sold, d)
 
+            # 장부형(운영 계좌 재현) — 비용은 **현금에서** 낸다(25.1957, 운영 `pp.make_fill` 처럼 체결 금액에 붙는
+            # 수수료·세금·슬리피지가 현금을 줄인다). 예전엔 자본 전체에 곱해 든 종목 수량까지 비용만큼 줄었다(일치 시험
+            # 허용 ⑨ 의 뿌리). 현금이 비용보다 적으면(거의 다 투자) 예전처럼 자본 전체에. 비중형(월 백테스트)은 그대로다
+            현금비용 = 장부형 and 1.0 - sum(target.values()) - cost >= 0
             equity = drifted_total * (1 - cost)
-            if 지정가비율:
+            if 현금비용:
+                든값 = dict(target)
+                if 지정가비율:
+                    # 25.1914 의 지정가 몫 — 찬 회차는 지정가에 사서 종가로 잰다(산 값 w → w × 종가/지정가)
+                    for sid, 비 in 지정가비율.items():
+                        if sid in target:
+                            든비 = drifted.get(sid, 0.0)
+                            남긴 = 든비 if 든비 > 0 and sid not in proposed.sells else 0.0
+                            든값[sid] = target[sid] - max(target[sid] - 남긴, 0.0) * (1 - 비)
+                전체 = sum(든값.values()) + (1.0 - sum(target.values()) - cost)
+                equity = drifted_total * 전체
+                target = {sid: x / 전체 for sid, x in 든값.items()}
+            elif 지정가비율:
                 # 25.1914 — 찬 회차는 **지정가에** 산다(운영 `make_fill`). 산 값(비중 w)만큼 현금이 나가고 손에 든 것은
                 # 종가로 w × 종가/지정가 — 그 차이(지정가 − 종가)는 체결 순간의 손실이다. 회전·비용은 산 값으로
                 # 매겼다(운영 수수료도 지정가 × 수량에). 든 종목·현금 몫은 그대로 두고 자본을 줄인 뒤 비중을 다시 낸다
