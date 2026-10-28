@@ -612,7 +612,10 @@ export function shadowLedgers(rows: Array<{ key: string; value: string | null }>
     } catch {
       v = null;
     }
-    const stats = v?.stats && typeof v.stats === "object" ? Object.entries(v.stats) : [];
+    // 값이 객체가 아닌 규칙 줄은 뺀다 — null 한 줄이 렌더에서 화면 전체를 깨뜨렸다(주간 요약과 같은 거르개, 25.1876)
+    const stats = v?.stats && typeof v.stats === "object"
+      ? Object.entries(v.stats).filter(([, x]) => typeof x === "object" && x !== null)
+      : [];
     if (!stats.length) continue;
     out.push({ market, asOf: v?.as_of ?? null, stats: stats.map(([rule, s]) => ({ rule, text: SHADOW_RULE_TEXT[rule] ?? rule, s })) });
   }

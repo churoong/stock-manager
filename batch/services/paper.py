@@ -860,7 +860,8 @@ def summary_lines(
             # 틀린 수가 나온다(25.1873, 25.1871 교차검증 [권고])
             from batch.services.shadow import SWING_CLOSE
 
-            손절글 = (f"손절선 점검 해당 없음(스윙 규칙 — 종가가 진입 시가 대비 {SWING_CLOSE.stop_pct * 100:g}% 이하면"
+            아래 = f"{SWING_CLOSE.stop_pct * 100:g}".replace("-", "−")  # 다른 글과 같은 마이너스 기호(25.1876)
+            손절글 = (f"손절선 점검 해당 없음(스윙 규칙 — 종가가 진입 시가 대비 {아래}% 이하면"
                     " 다음 장 시가 매도)")  # 값은 규칙 정의처에서(25.1874)
         else:
             손절글 = f"손절선 아래로 들고 간 날 {len(손절넘김)}{덧}"

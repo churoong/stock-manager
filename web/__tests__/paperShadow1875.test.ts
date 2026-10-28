@@ -33,6 +33,16 @@ describe("그림자 장부 읽기", () => {
     expect(out[0].stats.map((x) => x.text)).toEqual([SHADOW_RULE_TEXT.day_v1, SHADOW_RULE_TEXT.swing_close_v1, "swing_v9"]);
     expect(out[0].stats[0].s.n).toBe(2);
   });
+  it("값이 객체가 아닌 규칙 줄은 뺀다 — 화면이 깨지지 않는다(25.1876)", () => {
+    const v = JSON.stringify({ as_of: "2026-11-02", stats: { day_v1: null, swing_v1: 3, swing_close_v1: JSON.parse(집계("x")).stats.day_v1 } });
+    const out = shadowLedgers([{ key: "shadow_ledger_kr", value: v }]);
+    expect(out[0].stats.map((x) => x.rule)).toEqual(["swing_close_v1"]);
+    expect(() => renderToStaticMarkup(createElement(ShadowCard, { ledgers: out }))).not.toThrow();
+  });
+  it("API 응답에 shadow 칸이 실린다(25.1876 — 빠지면 화면이 '읽지 못함' 으로만 보였다)", () => {
+    const route = readFileSync(join(process.cwd(), "app", "api", "paper", "route.ts"), "utf8");
+    expect(route).toMatch(/NextResponse\.json\(\{\s*halted,\s*shadow,/);
+  });
   it("없거나 깨진 값·빈 집계는 뺀다 — 화면은 '아직 없음'", () => {
     expect(shadowLedgers([])).toEqual([]);
     expect(shadowLedgers([{ key: "shadow_ledger_kr", value: "{깨짐" }, { key: "shadow_ledger_us", value: JSON.stringify({ stats: {} }) }])).toEqual([]);
