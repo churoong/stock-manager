@@ -527,8 +527,9 @@ TRANSIENT_SKIP = "잔고 조회 순간 한도 — 이 회차 쉼, 다음 회차�
 TRANSIENT_STREAK_KEY = "kis_guard_transient_streak"
 TRANSIENT_STREAK_ALERT = 3
 #: 잇단 쉼 알림의 하루 한 번 표시 — 실행 실패 알림(`FAIL_ALERT_KEY`)과 따로 (25.1836, 교차검증 [권고]). 같은 표시를 쓰면
-#: 쉼 알림("다음 회차가 다시 봅니다")이 그날 뒤의 진짜 실패 알림을 막았다
-TRANSIENT_ALERT_KEY = "kis_guard_transient_alerted"
+#: 쉼 알림("다음 회차가 다시 봅니다")이 그날 뒤의 진짜 실패 알림을 막았다. 종목별 순간 거부 표시(`TRANSIENT_KEY`)와도
+#: 다른 이름이다(25.1837 — 처음 고른 이름이 그것과 같아 서로 덮었다)
+TRANSIENT_ALERT_KEY = "kis_guard_transient_streak_alerted"
 
 
 def transient_streak(client: Any, now: datetime, 기록: dict[str, Any]) -> str | None:

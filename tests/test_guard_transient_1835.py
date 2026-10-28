@@ -123,3 +123,20 @@ def test_전날_쉼은_세지_않고_확인_실행은_세지_않는다(c: Client
     for _ in range(3):
         assert ig.main() == 0
     assert db.get_setting(c, ig.TRANSIENT_STREAK_KEY, None) == {"date": "2026-10-26", "n": 1} and 보낸 == []
+
+
+def test_설정_표시_이름은_모두_다르다() -> None:
+    """25.1837 (25.1836 교차검증 [필수]) — 잇단 쉼 표시를 종목별 순간 거부 표시와 같은 이름으로 만들어 서로 덮었다"""
+    이름들 = {k: v for k, v in vars(ig).items() if k.endswith("_KEY") and isinstance(v, str)}
+    assert len(이름들) >= 8
+    assert len(set(이름들.values())) == len(이름들), 이름들
+
+
+def test_어제_표시는_오늘_잇단_쉼_알림을_막지_않는다(c: Client, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
+    보낸: list[str] = []
+    _main_준비(c, monkeypatch, 보낸)
+    monkeypatch.setattr(kv, "Session", lambda *a, **k: _막힌(KisFailed(한도글)))
+    db.set_setting(c, ig.TRANSIENT_ALERT_KEY, "2026-10-23")
+    for _ in range(3):
+        assert ig.main() == 0
+    assert len(보낸) == 1
