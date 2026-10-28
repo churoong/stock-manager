@@ -67,8 +67,10 @@ def test_집계() -> None:
 
 
 def test_규칙은_한_벌만_사전_등록() -> None:
-    assert [r.name for r in sh.RULES] == ["day_v1", "swing_v1"]
+    assert [r.name for r in sh.RULES] == ["day_v1", "swing_v1", "swing_close_v1"]
     assert (sh.SWING.target_pct, sh.SWING.stop_pct, sh.SWING.max_sessions) == (0.05, -0.03, 10)
+    # 종가 판정 스윙은 판 1 과 같은 값 — 판정 꼴만 다르다(25.1867)
+    assert (sh.SWING_CLOSE.target_pct, sh.SWING_CLOSE.stop_pct, sh.SWING_CLOSE.max_sessions) == (0.05, -0.03, 10)
 
 
 def test_비용_있는_스윙_손절_기한과_선_기준은_슬리피지_전_시가() -> None:
@@ -102,3 +104,31 @@ def test_집계는_종목_수도_센다() -> None:
     ts = [sh.Trade(1, "d1", "day_v1", "closed", net=0.01, sessions=1), sh.Trade(1, "d2", "day_v1", "closed", net=0.01,
           sessions=1), sh.Trade(2, "d1", "day_v1", "closed", net=-0.01, sessions=1)]  # fmt: skip
     assert sh.summarize(ts, "day_v1").stocks == 2
+
+
+def test_종가_판정_스윙은_넘은_날_다음_장_시가에_판다() -> None:
+    """25.1867 — 가상모의투자 엔진(일봉 시가·종가, 장 전 시장가 매도)이 돌릴 수 있는 꼴"""
+    R = sh.SWING_CLOSE
+    # 장중 고가가 목표(105)에 닿아도 종가가 아래면 팔지 않는다 — swing_v1 과 갈리는 자리
+    닿기만 = sh.simulate(1, "d0", [B("d1", 100, 106, 99, 104), B("d2", 104, 104, 103, 103.5)], R, 무비용, "KR")
+    assert 닿기만.status == "open" and sh.simulate(1, "d0", [B("d1", 100, 106, 99, 104)], sh.SWING, 무비용, "KR").reason == "target"
+    목표 = sh.simulate(1, "d0", [B("d1", 100, 106, 99, 105.5), B("d2", 103, 104, 102, 103)], R, 무비용, "KR")
+    assert (목표.reason, 목표.exit_date, 목표.exit_price, 목표.sessions) == ("target_next_open", "d2", 103.0, 2)
+    손절 = sh.simulate(1, "d0", [B("d1", 100, 101, 96, 96.9), B("d2", 94, 95, 93, 94)], R, 무비용, "KR")
+    assert (손절.reason, 손절.exit_price, 손절.net) == ("stop_next_open", 94.0, pytest.approx(-0.06))
+    # 같은 날 종가가 손절선 위·목표 아래면 아무것도 아니다 — 저가가 손절에 닿아도
+    assert sh.simulate(1, "d0", [B("d1", 100, 101, 95, 99), B("d2", 99, 99, 98, 98)], R, 무비용, "KR").status == "open"
+    줄 = [B(f"d{i}", 100, 101, 99, 100.5) for i in range(1, 13)]
+    기한 = sh.simulate(1, "d0", 줄, R, 무비용, "KR")
+    assert (기한.reason, 기한.exit_date, 기한.sessions) == ("time_next_open", "d11", 11)  # 10번째 종가에 정해 11번째 시가
+    assert sh.simulate(1, "d0", 줄[:10], R, 무비용, "KR").status == "open"  # 정했지만 다음 장이 아직 없다
+    s = 비용.slippage_pct / 100
+    비용목표 = sh.simulate(1, "d0", [B("d1", 100, 106, 99, 105.5), B("d2", 103, 104, 102, 103)], R, 비용, "KR")
+    assert 비용목표.exit_price == pytest.approx(103 * (1 - s))  # 시장가 매도 — 슬리피지 불리하게
+
+
+def test_종가_판정_스윙도_끊기면_마지막_종가로_닫는다() -> None:
+    줄 = [B("d1", 100, 101, 98.5, 99), B("d2", 99, 99, 96, 96.5)]  # d2 종가가 손절선 아래인데 다음 장이 없다
+    assert sh.simulate(1, "d0", 줄, sh.SWING_CLOSE, 무비용, "KR").status == "open"
+    끊 = sh.simulate(1, "d0", 줄, sh.SWING_CLOSE, 무비용, "KR", ended=True)
+    assert (끊.reason, 끊.exit_price, 끊.exit_date) == ("끊김", 96.5, "d2")

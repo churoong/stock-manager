@@ -8,6 +8,10 @@
 - **당일 단타(`DAY`)**: 신호 다음 장 시가에 사서 그날 종가에 판다. 일봉 두 값으로 끝나 판정이 갈릴 데가 없다
 - **스윙(`SWING`)**: 다음 장 시가에 사서 목표(+5%)·손절(−3%)·기한(10거래일) 가운데 먼저 닿는 것. 장중 순서를 모르는 날
   (같은 날 고가가 목표, 저가가 손절에 닿음)은 **손절로 본다**(보수 쪽). 다음 날 시가가 선을 건너뛰면 시가로 판다
+- **종가 판정 스윙(`SWING_CLOSE`)**: 같은 선·기한을 **종가로만** 보고, 넘은 날의 **다음 장 시가**에 판다(25.1867).
+  가상모의투자 체결 엔진은 일봉의 시가·종가만 보고(고가·저가 없음) 매도는 배치가 장 전에 낸 시장가가 다음 장 시가에
+  찬다 — 11월 스윙 계좌가 실제로 돌릴 수 있는 꼴은 이것이다. 그림자 장부가 그 계좌 성적의 예고가 되도록 첫 집계
+  (11-02) **전에** 함께 등록한다. `swing_v1`(장중 닿음)은 장중 감시선(분봉·KIS) 꼴의 상한 참고로 둔다
 
 값(목표·손절·기한)은 **한 벌만 사전 등록**한다 — 여러 벌을 돌려 좋은 것을 고르면 과최적화다.
 근거 없는 첫 값 `[확인필요]`.
@@ -38,7 +42,7 @@ class Bar:
 @dataclass(frozen=True)
 class Rule:
     name: str
-    kind: str  # "day" | "swing"
+    kind: str  # "day" | "swing" | "swing_close"
     target_pct: float | None = None
     stop_pct: float | None = None
     max_sessions: int = 1
@@ -47,7 +51,9 @@ class Rule:
 #: 사전 등록 판 1 (2026-10-28). 바꾸면 이름(판)을 바꾼다 — 섞어 집계하지 않는다
 DAY = Rule("day_v1", "day")
 SWING = Rule("swing_v1", "swing", target_pct=0.05, stop_pct=-0.03, max_sessions=10)
-RULES = (DAY, SWING)
+#: 판 1 과 같은 값 — 판정 꼴만 다르다(종가로 보고 다음 장 시가에 판다, 25.1867)
+SWING_CLOSE = Rule("swing_close_v1", "swing_close", target_pct=0.05, stop_pct=-0.03, max_sessions=10)
+RULES = (DAY, SWING, SWING_CLOSE)
 
 
 @dataclass(frozen=True)
@@ -76,7 +82,9 @@ class Trade:
     entry_price: float | None = None
     exit_date: str | None = None
     exit_price: float | None = None
-    #: close · target · target_gap · stop · stop_gap · time · 끊김 · (체결 못 함) 상한가 시가 · 시세 없음 · 시세 끊김
+    #: close · target · target_gap · stop · stop_gap · time · 끊김 ·
+    #: (종가 판정 스윙) target_next_open · stop_next_open · time_next_open ·
+    #: (체결 못 함) 상한가 시가 · 시세 없음 · 시세 끊김
     reason: str | None = None
     sessions: int = 0
     gross: float | None = None
@@ -117,6 +125,20 @@ def simulate(stock_id: int, signal_date: str, bars: list[Bar], rule: Rule, costs
     assert rule.target_pct is not None and rule.stop_pct is not None
     기준 = 첫.open  # 선은 슬리피지 전 시가에서 — 주문을 낼 때 아는 값
     목표, 손절 = 기준 * (1 + rule.target_pct), 기준 * (1 + rule.stop_pct)
+    if rule.kind == "swing_close":
+        # 종가가 선을 넘은 날(또는 기한 날)의 **다음 장 시가** 시장가로 판다 — 넘은 날 다음 장이 아직 없으면 진행 중
+        for i, bar in enumerate(bars[: rule.max_sessions]):
+            까닭 = ("stop" if bar.close <= 손절 else "target" if bar.close >= 목표
+                  else "time" if i == rule.max_sessions - 1 else None)  # fmt: skip
+            if 까닭 is None:
+                continue
+            if i + 1 < len(bars):
+                다음 = bars[i + 1]
+                return 끝(다음, 다음.open * (1 - slip), f"{까닭}_next_open", i + 2)
+            break
+        if ended:
+            return 끝(bars[-1], bars[-1].close * (1 - slip), "끊김", len(bars))
+        return Trade(stock_id, signal_date, rule.name, "open", 첫.date, round(진입, 6), sessions=len(bars))
     for i, bar in enumerate(bars[: rule.max_sessions]):
         if i > 0 and bar.open <= 손절:
             return 끝(bar, bar.open * (1 - slip), "stop_gap", i + 1)  # 시가가 손절선 아래 — 시가 시장가

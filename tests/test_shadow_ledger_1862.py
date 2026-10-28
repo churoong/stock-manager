@@ -41,7 +41,9 @@ def test_단기_신호만_두_규칙으로_가상_체결한다() -> None:
     m = _장부()
     그림자: list[sh.Trade] = []
     job.compute(m, "KR", "2026-10-28", shadow=(그림자, sh.Costs(0, 0, 0, 0), {}))  # type: ignore[arg-type]
+    # 종가 판정 스윙(25.1867)은 고가가 목표에 닿아도 종가(104)가 아래라 아직 진행 중
     assert sorted((t.rule, t.status, t.reason) for t in 그림자) == [("day_v1", "closed", "close"),
+                                                                    ("swing_close_v1", "open", None),
                                                                     ("swing_v1", "closed", "target")]  # fmt: skip
     단타 = next(t for t in 그림자 if t.rule == "day_v1")
     assert (단타.entry_date, 단타.entry_price, 단타.exit_price, 단타.net) == ("2026-10-02", 100.0, 104.0, pytest.approx(0.04))
@@ -58,6 +60,7 @@ def test_실행이_집계를_설정과_실행_기록에_남기고_출력한다(m
     assert 기록["shadow"]["stats"]["swing_v1"]["n"] == 1
     out = capsys.readouterr().out
     assert "그림자 장부 day_v1: 끝 1건(1종목) · 승률 100%" in out and "그림자 장부 swing_v1:" in out
+    assert 집계["stats"]["swing_close_v1"]["open"] == 1 and "그림자 장부 swing_close_v1:" in out  # 25.1867
 
 
 def test_분할_계수를_시가_고가_저가에도_곱한다() -> None:
@@ -112,7 +115,8 @@ def test_국내_상한가_시가는_잡_경로에서도_체결_못_함() -> None
     그림자: list[sh.Trade] = []
     job.compute(m, "KR", "2026-10-28", shadow=(그림자, sh.Costs(0, 0, 0, 0), {}))  # type: ignore[arg-type]
     assert {(t.rule, t.status, t.reason) for t in 그림자} == {("day_v1", "no_entry", "상한가 시가"),
-                                                            ("swing_v1", "no_entry", "상한가 시가")}  # fmt: skip
+                                                            ("swing_v1", "no_entry", "상한가 시가"),
+                                                            ("swing_close_v1", "no_entry", "상한가 시가")}  # fmt: skip
 
 
 def test_분할_재수집_대기_종목은_빼고_중기_신호는_넣지_않는다() -> None:
@@ -123,7 +127,7 @@ def test_분할_재수집_대기_종목은_빼고_중기_신호는_넣지_않는
     # 중기 신호를 직접 넘기면 들어간다 — 단기 거르개는 compute 한 곳(25.1863)
     줄 = job.load_bars(m, [1], "2026-10-01")  # type: ignore[arg-type]
     중기 = [{"stock_id": 1, "as_of_date": "2026-10-01", "horizon": "mid", "market": "KOSPI"}]
-    assert len(job.shadow_trades(중기, 줄, sh.Costs(0, 0, 0, 0), "KR")) == 2
+    assert len(job.shadow_trades(중기, 줄, sh.Costs(0, 0, 0, 0), "KR")) == len(sh.RULES)
 
 
 def test_시가가_빈_날은_빼고_다음_날로_넘어간다() -> None:
