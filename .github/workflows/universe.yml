@@ -111,4 +111,7 @@ jobs:
         # 문을 통째로 끄면(예전 25.1831) 월말 핵심 작업 몫을 지키는 상한까지 꺼져 교차검증 [필수] 로 되돌렸다
         env:
           TURSO_READ_NO_PACE: "1"
+          # 최악은 주간 지표만 한 전체 재계산(주간 지표가 3주 넘게 미뤄지면 `missing_stocks` 가 유니버스 전부를 고른다) —
+          # 상한 검사를 유니버스 잡의 100만이 아니라 주간 지표(metrics.yml)와 같은 값으로 본다 (25.1833, 교차검증 [권고])
+          TURSO_READ_ESTIMATE: ${{ inputs.read_gate != 'off' && '8000000' || '' }}
         run: python -m batch.jobs.metrics --only-missing
