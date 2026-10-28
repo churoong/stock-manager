@@ -48,7 +48,8 @@ class _DB:
 def _돌림(monkeypatch: pytest.MonkeyPatch, db: _DB, 새연결: _DB) -> tuple[list, dict, dict]:
     보냄: list = []
     monkeypatch.setattr(telegram, "send", lambda t, *a, **k: 보냄.append(t) or [1])
-    monkeypatch.setattr(ah, "session_day", lambda now: date(2026, 10, 12))
+    # 지금(KST)의 날짜 — 25.1846 이 하루보다 오래된 시간외를 거른다(예전 고정 10-12 는 그 뒤 날짜엔 걸렸다)
+    monkeypatch.setattr(ah, "session_day", lambda now: now.astimezone(ah.KST).date())
     monkeypatch.setattr(ah, "quiet_state", lambda raw, now: (False, False))
     monkeypatch.setattr(ah, "spike_pct", lambda raw: 5.0)
     monkeypatch.setattr(ah, "hits", lambda 보유, 시세, 문턱: [{"stock_id": 1, "message": "가 +7%", "data": {}}])

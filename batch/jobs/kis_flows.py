@@ -200,6 +200,10 @@ def _after_hours(client: TursoClient, qc: kis.QuoteClient, today, failed: dict[s
     day = ah.session_day(지금)
     if day is None:
         return {"holdings": len(보유), "skipped": "시간외 단일가 진행 중(16:00~18:00)"}
+    # 그 거래일이 KST 어제보다 오래면 보지 않는다 (25.1846) — 휴장일 실행이 며칠 전 시간외를 뒤늦게 알리지 않게.
+    # 금요일 실행이 자정을 넘겨 토요일 새벽에 돌면 어제(금) 것이라 본다(예전 바깥 `is_session(오늘)` 이 건너뛰었다)
+    if (지금.astimezone(ah.KST).date() - day).days > 1:
+        return {"holdings": len(보유), "skipped": f"휴장일 — 마지막 시간외({day.isoformat()})가 하루보다 오래됨"}
     조용, 해제뒤 = ah.quiet_state(
         client.execute("SELECT value FROM settings WHERE key = 'quiet_hours'").scalar(), 지금
     )
@@ -421,7 +425,9 @@ def run(limit: int | None = None) -> int:
         for i in range(0, len(statements), 500):
             client.batch(statements[i : i + 500])
         # 보유 종목 시간외 단일가 (docs/intraday.md 1.2, 25.992) — 곁다리. 실패해도 수집 결과는 그대로 남긴다
-        시간외 = _after_hours(client, qc, today, failed) if cal.is_session("KR", today) else {"skipped": "휴장일"}
+        # 휴장 여부는 안에서 본다 — 바깥에서 `is_session(오늘)` 로 거르면 금요일 실행이 GitHub 지연으로 토요일 01:25 KST
+        # 에 돌 때 금요일 시간외 알림이 통째로 빠졌다(25.1846, 결함 루프 [참고] — 안의 `session_day`(25.1012)와 어긋남)
+        시간외 = _after_hours(client, qc, today, failed)
         db.record_api_call(client, "kis_openapi", count=qc.calls + int(issued))
         step = {"stocks": len(stocks), "rows": len(statements), "opinions": len(의견행), "events": len(행사행),
                 "opinion_since": 의견창.isoformat(), "after_hours": 시간외, "calls": qc.calls, "failed": len(failed),
