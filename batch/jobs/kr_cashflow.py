@@ -27,6 +27,8 @@ import argparse
 import json
 import logging
 import sys
+import time
+from collections.abc import Callable
 from datetime import date
 
 from batch.core import calendar as cal
@@ -43,6 +45,11 @@ JOB_NAME = "kr_cashflow"
 START_ON = date(2026, 11, 4)
 #: 한 실행의 DART 호출 상한 — 일 한도 2만의 4분의 1. 나머지는 주간 재무 수집·공시가 쓴다
 MAX_CALLS_PER_RUN = 5000
+#: 한 실행의 시간 예산(초) — 넘으면 남은 행은 다음 실행으로 넘기고 성공으로 닫는다 (25.1855, 결함 루프). 재무 잡 상한
+#: 60분(financials.yml)에서 수집(10-26 실측 약 20분)·새 편입 배당·확인 몫을 뺀 값. 회차마다 전체 재무제표 한 번(미국
+#: 러너 → DART) + Turso 왕복 넷이라 0.6~1초 어림 `[확인필요: 실측]` — 예산 없이는 5000회가 50~80분이라 잡이 시간
+#: 초과로 끊기고 같은 잡 뒤 단계가 돌지 못했다(실행 기록은 running 으로 남아 6시간 뒤 skipped)
+BUDGET_SECONDS = 20 * 60
 #: 채우기를 마친 날(사용자 날짜) — 백테스트가 이 기록이 있을 때만 국내 영업현금흐름을 쓴다
 DONE_KEY = "kr_cfo_fill_done"
 
@@ -73,7 +80,8 @@ def matched_value(snapshot_receipt: str, payload: dict, parsed: dict) -> tuple[i
     return int(parsed["operating_cash_flow"]), "채움"
 
 
-def run(today: date | None = None, max_calls: int = MAX_CALLS_PER_RUN) -> int:
+def run(today: date | None = None, max_calls: int = MAX_CALLS_PER_RUN, budget_seconds: float = BUDGET_SECONDS,
+        clock: Callable[[], float] = time.monotonic) -> int:  # fmt: skip
     today = today or cal.user_today()
     if today < START_ON:
         print(f"국내 영업현금흐름: {START_ON} 전이라 돌지 않습니다"
@@ -83,13 +91,16 @@ def run(today: date | None = None, max_calls: int = MAX_CALLS_PER_RUN) -> int:
     run_id = db.start_batch_run(client, job_name=JOB_NAME, market="KR", trade_date=today.isoformat())
     셈: dict[str, int] = {}
     호출 = 0
+    시작 = clock()
+    시간끝 = False
     try:
         rows = client.execute(TODO_SQL, [dart.ANNUAL_REPORT_CODE]).dicts()
         남음 = 0
         for r in rows:
             if sectors.is_financial(r.get("sector_code")):
                 continue
-            if 호출 >= max_calls:
+            if 호출 >= max_calls or 시간끝 or clock() - 시작 > budget_seconds:
+                시간끝 = 시간끝 or 호출 < max_calls  # 호출 상한이 아니라 시간으로 멈췄다
                 남음 += 1
                 continue
             if db.record_and_guard(client, "dart_opendart", limit_value=dart.DAILY_LIMIT) == "blocked":
@@ -113,8 +124,10 @@ def run(today: date | None = None, max_calls: int = MAX_CALLS_PER_RUN) -> int:
         if 끝 and not db.get_setting(client, DONE_KEY):
             db.set_setting(client, DONE_KEY, today.isoformat())
         db.finish_batch_run(client, run_id, status="success",
-                            step_log={"calls": 호출, "outcomes": 셈, "remaining": 남음, "done": 끝})  # fmt: skip
-        print(f"국내 영업현금흐름: 호출 {호출}, {셈}, 남음 {남음}{' — 채우기 끝' if 끝 else ''}")
+                            step_log={"calls": 호출, "outcomes": 셈, "remaining": 남음, "done": 끝,
+                                      "time_budget_hit": 시간끝})  # fmt: skip
+        print(f"국내 영업현금흐름: 호출 {호출}, {셈}, 남음 {남음}{' (시간 예산에서 멈춤)' if 시간끝 else ''}"
+              f"{' — 채우기 끝' if 끝 else ''}")
         return 0
     except Exception as exc:
         db.finish_batch_run(client, run_id, status="failed", error_text=str(exc)[:500])
