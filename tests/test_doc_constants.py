@@ -1217,3 +1217,5 @@ def test_판정판이_옮겨_적은_상수_1919() -> None:
     검사(FUNNEL, f"**판정판 칸 됨(25.1919)**: 단계 {sb.STAGE_REPLAY},", "판정판 단계 (STAGE_REPLAY)")
     검사(FUNNEL, f"`walk_windows(월 초과, window={sb.WALK_WINDOW_MONTHS})`", "걷는 창 길이 (WALK_WINDOW_MONTHS)")
     검사(FUNNEL, f"**코호트 1** = {sb.COHORT1_FROM} 매월 기본 실행", "코호트 1 시작일 (COHORT1_FROM)")
+    # 25.1940 — 실행 기록에 싣는 까닭 글 길이
+    검사(FUNNEL, f"그 칸의 `missing` 까닭({sb.WHY_MAX}자까지)", "판정판 까닭 길이 (WHY_MAX)")

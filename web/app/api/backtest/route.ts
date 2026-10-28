@@ -6,6 +6,7 @@ import {
   type BacktestRun, type BatchRunRow, type CurvePoint, type StressRun,
 } from "@/lib/backtest";
 import { LATEST_CORE_RUN, type CoreRunRow } from "@/lib/coreBacktest";
+import { LATEST_SCOREBOARD, SCOREBOARD_OF_GROUP, type ScoreboardRun } from "@/lib/scoreboard";
 
 /**
  * 백테스트·스트레스 결과 조회 (docs/backtest.md, docs/stress.md).
@@ -80,9 +81,25 @@ export async function GET(request: Request) {
       }
     }
 
+    // 판정판(docs/funnel.md 2.2, 25.1940) — 고른 묶음을 낸 실행 기록의 `step_log.scoreboard`. 그 기록에 없으면(25.1940 전 실행)
+    // 그 시장에서 판정판이 실린 가장 최근 실행으로 물러나고 그렇다고 적는다. 실패해도 나머지 화면은 그대로
+    let scoreboard: { run: ScoreboardRun; fallback: boolean } | null = null;
+    try {
+      const 그묶음 = groupId ? rowsToObjects<ScoreboardRun>(await execute(SCOREBOARD_OF_GROUP, [market, groupId]))[0] : undefined;
+      if (그묶음 && (그묶음.scoreboard != null || 그묶음.scoreboard_error != null)) {
+        scoreboard = { run: 그묶음, fallback: false };
+      } else {
+        const 최근 = rowsToObjects<ScoreboardRun>(await execute(LATEST_SCOREBOARD, [market]))[0];
+        scoreboard = 최근 ? { run: 최근, fallback: true } : null;
+      }
+    } catch {
+      scoreboard = null;
+    }
+
     return NextResponse.json({
       market,
       core,
+      scoreboard,
       group_id: groupId,
       runs,
       curves,

@@ -1,0 +1,160 @@
+/**
+ * 전략 깔때기 판정판 (docs/funnel.md 2.2, 기록 25.1940) — 배치가 실행 기록에 실은 줄을 글로만 만든다.
+ *
+ * 읽는 것: 백테스트 실행 기록 한 줄(`batch_runs.step_log`)의 `scoreboard`(배치 `scoreboard.step_log_rows` 가 낸 줄들)와
+ * `scoreboard_error`(판정판이 깨진 실행). 화면은 **계산하지 않는다** — 값은 그대로 꼴만 바꾸고(%·소수 자리), 빈 칸은
+ * 배치가 적은 까닭(`missing`)을 "없음: 까닭" 으로 붙인다. 3장 올림·내림 문턱은 여기서도 적용하지 않는다(칸만).
+ */
+
+import { z } from "zod";
+import { strategyLabel } from "@/lib/backtest";
+import { userTimeOf } from "@/lib/market";
+import { pct } from "@/lib/portfolio";
+
+/** 판정판 줄의 칸 — 배치 `services/scoreboard.STEP_LOG_COLS` 와 같아야 한다(`tests/test_scoreboard_wiring_1940.py` 가 대조) */
+export const SCOREBOARD_KEYS = [
+  "strategy", "market", "cohort", "trials_cumulative", "cagr", "excess_cagr", "mdd", "dsr", "dsr_n",
+  "control_lower", "gate_lower", "half_first_cagr", "half_second_cagr", "months", "rebalances", "buys",
+  "control_blocks", "gate_blocks", "sells_scored",
+] as const;
+
+/** 판정판을 싣는 작업 — 배치 `jobs/backtest.JOB_NAME`·`jobs/core_backtest` 의 세 이름 */
+export const SCOREBOARD_JOBS = ["backtest", "backtest_core", "backtest_explore", "backtest_limit"] as const;
+const JOBS_SQL = SCOREBOARD_JOBS.map((j) => `'${j}'`).join(", ");
+
+/** step_log 이 JSON 이 아닌 옛 행에서 json_extract 가 질의를 죽이지 않게 CASE 로 막는다(CASE 는 앞 조건이 거짓이면 뒤를 안 푼다) */
+const 칸 = (path: string) => `CASE WHEN json_valid(step_log) THEN json_extract(step_log, '${path}') END`;
+
+/** 고른 묶음(group_id)을 낸 실행 기록의 판정판 — step_log 전체 대신 두 칸만 가져온다 */
+export const SCOREBOARD_OF_GROUP = `SELECT job_name, started_at, ${칸("$.scoreboard")} AS scoreboard,
+  ${칸("$.scoreboard_error")} AS scoreboard_error
+FROM batch_runs WHERE job_name IN (${JOBS_SQL}) AND market = ? AND ${칸("$.group_id")} = ?
+ORDER BY started_at DESC, id DESC LIMIT 1`;
+
+/** 그 시장에서 판정판이 실린 가장 최근 실행 — 고른 묶음의 기록에 판정판이 없을 때(25.1940 전 실행) 대신 보인다 */
+export const LATEST_SCOREBOARD = `SELECT job_name, started_at, ${칸("$.scoreboard")} AS scoreboard,
+  ${칸("$.scoreboard_error")} AS scoreboard_error
+FROM batch_runs WHERE job_name IN (${JOBS_SQL}) AND market = ? AND ${칸("$.scoreboard")} IS NOT NULL
+ORDER BY started_at DESC, id DESC LIMIT 1`;
+
+export interface ScoreboardRun {
+  job_name: string;
+  started_at: string;
+  /** json_extract 가 돌려준 JSON 글(배열) */
+  scoreboard: string | null;
+  scoreboard_error: string | null;
+}
+
+const numOrNull = z.number().nullable().catch(null);
+const rowSchema = z.object({
+  strategy: z.string(),
+  market: z.string().nullable().catch(null),
+  cohort: z.string().nullable().catch(null),
+  trials_cumulative: numOrNull,
+  cagr: numOrNull,
+  excess_cagr: numOrNull,
+  mdd: numOrNull,
+  dsr: numOrNull,
+  dsr_n: numOrNull,
+  control_lower: numOrNull,
+  gate_lower: numOrNull,
+  half_first_cagr: numOrNull,
+  half_second_cagr: numOrNull,
+  months: numOrNull,
+  rebalances: numOrNull,
+  buys: numOrNull,
+  control_blocks: numOrNull,
+  gate_blocks: numOrNull,
+  sells_scored: numOrNull,
+  missing: z.record(z.string(), z.string()).catch({}),
+});
+export type ScoreRow = z.infer<typeof rowSchema>;
+
+/** 판정판 글(JSON 배열) → 줄들. 모양이 틀린 줄은 버리고 그 수를 센다 — 깨진 줄 하나가 화면을 죽이지 않게 */
+export function parseScoreboard(raw: unknown): { rows: ScoreRow[]; unreadable: number } {
+  let v: unknown = raw;
+  if (typeof raw === "string") {
+    try {
+      v = JSON.parse(raw);
+    } catch {
+      return { rows: [], unreadable: 1 };
+    }
+  }
+  if (!Array.isArray(v)) return { rows: [], unreadable: v == null ? 0 : 1 };
+  const rows: ScoreRow[] = [];
+  let unreadable = 0;
+  for (const x of v) {
+    const p = rowSchema.safeParse(x);
+    if (p.success) rows.push(p.data);
+    else unreadable += 1;
+  }
+  return { rows, unreadable };
+}
+
+const COL_LABEL: Record<string, string> = {
+  market: "시장", cohort: "코호트", trials_cumulative: "누적 시도", cagr: "CAGR", excess_cagr: "초과 CAGR", mdd: "MDD",
+  dsr: "DSR", dsr_n: "DSR N", control_lower: "대조 하한", gate_lower: "관문 하한", half_first_cagr: "앞 반",
+  half_second_cagr: "뒤 반", months: "개월", rebalances: "리밸런스", buys: "매수", control_blocks: "대조 묶음",
+  gate_blocks: "관문 묶음", sells_scored: "판 뒤 매도",
+};
+
+export const JOB_LABEL: Record<string, string> = {
+  backtest: "월 백테스트", backtest_core: "핵심 H", backtest_explore: "탐색", backtest_limit: "회차 지정가",
+};
+
+const 없음 = "없음";
+const f1 = (v: number | null) => (v == null ? 없음 : v.toFixed(1));
+const f2 = (v: number | null) => (v == null ? 없음 : v.toFixed(2));
+const p = (v: number | null) => (v == null ? 없음 : pct(v));
+const n = (v: number | null) => (v == null ? 없음 : String(v));
+
+export interface ScoreLine {
+  strategy: string;
+  label: string;
+  /** 코호트 글 — 없으면 "코호트 밖" (까닭은 missing 줄에) */
+  cohort: string;
+  cells: Array<[string, string]>;
+  /** 표본 한 줄 */
+  sample: string;
+  /** "없음: 칸·칸 — 까닭" — 같은 까닭은 한 줄로 묶는다 */
+  missing: string[];
+}
+
+/** 판정판 한 줄 → 화면 글. 숫자는 꼴만 바꾼다(비율은 %, 분위 하한은 소수 한 자리, DSR 은 두 자리) */
+export function scoreLine(r: ScoreRow): ScoreLine {
+  const 까닭별 = new Map<string, string[]>();
+  for (const k of SCOREBOARD_KEYS) {
+    const why = r.missing[k];
+    if (why === undefined || k === "strategy") continue;
+    까닭별.set(why, [...(까닭별.get(why) ?? []), COL_LABEL[k] ?? k]);
+  }
+  return {
+    strategy: r.strategy,
+    label: strategyLabel(r.strategy),
+    cohort: r.cohort == null ? "코호트 밖" : `코호트 ${r.cohort}`,
+    cells: [
+      ["CAGR", p(r.cagr)],
+      ["초과 CAGR", p(r.excess_cagr)],
+      ["MDD", p(r.mdd)],
+      ["DSR", r.dsr == null ? 없음 : `${f2(r.dsr)}${r.dsr_n == null ? "" : ` (N ${r.dsr_n})`}`],
+      ["대조 하한", f1(r.control_lower)],
+      ["관문 하한", f1(r.gate_lower)],
+      ["앞 반", p(r.half_first_cagr)],
+      ["뒤 반", p(r.half_second_cagr)],
+    ],
+    sample: `${n(r.months)}개월 · 리밸런스 ${n(r.rebalances)} · 매수 ${n(r.buys)} · 묶음 대조 ${n(r.control_blocks)}/관문 ${n(r.gate_blocks)} · 판 뒤 매도 ${n(r.sells_scored)} · 누적 시도 ${n(r.trials_cumulative)}`,
+    missing: [...까닭별].map(([why, cols]) => `${없음}: ${cols.join("·")} — ${why || "까닭 기록 없음"}`),
+  };
+}
+
+/** 실행 기록 머리 한 줄 — 어느 실행의 판정판인가 */
+export function scoreboardHead(run: Pick<ScoreboardRun, "job_name" | "started_at">, fallback: boolean): string {
+  const 작업 = JOB_LABEL[run.job_name] ?? run.job_name;
+  return fallback
+    ? `고른 묶음의 실행 기록에는 판정판이 없습니다(25.1940 전 실행) — 가장 최근 판정판(${작업}, ${userTimeOf(run.started_at)} KST)을 보입니다`
+    : `${작업} 실행 (${userTimeOf(run.started_at)} KST)`;
+}
+
+/** 늘 비는 칸 — 배치 `scoreboard.WHY_*` 와 같은 뜻. 줄마다 되풀이하지 않고 한 번만 적는다 */
+export const ALWAYS_EMPTY_NOTE =
+  "걷는 창(월 초과 계열 미저장)·수용량(보유 거래대금 미저장)·서로 다른 종목·끝난 거래는 아직 기록이 없어 싣지 않습니다. 올림·내림 문턱(docs/funnel.md 3장)은 적용하지 않은 칸입니다.";

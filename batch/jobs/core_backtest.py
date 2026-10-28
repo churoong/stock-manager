@@ -307,6 +307,7 @@ def run_core(
             warnings.append(f"운 판정·결정 단위 판정 실패: {type(e).__name__}: {str(e)[:120]}")
         증거_초 = round(time.perf_counter() - t2, 1)
         반: dict[str, dict[str, Any]] = {}
+        실은_행: list[dict[str, Any]] = []  # 판정판(25.1940) 재료 — `store_run` 이 실은 행 그대로
         for variant, result in results.items():
             summary = bt.summarize(result, 벤치, risk_free_annual=무위험)
             반[variant] = split_half(result.curve)
@@ -316,7 +317,7 @@ def run_core(
                      "evidence": {k: e.get(k) for k in ("buys", "scored", "no_control", "days", "n_blocks", "mean",
                                                         "se", "lower", "gate", "after_sell")}}  # fmt: skip
             jb.store_run(client, market, variant, result, summary, 종목수[variant], group_id, warnings,
-                         now, 운.get(variant), rebalance=REBALANCE, extra=extra)  # fmt: skip
+                         now, 운.get(variant), rebalance=REBALANCE, extra=extra, kept=실은_행)  # fmt: skip
             mt = summary.metrics
             앞, 뒤 = 반[variant].get("first", {}), 반[variant].get("second", {})
             print(f"  요약 {variant:8s} CAGR {jb._pct(mt.cagr)}  MDD {jb._pct(mt.mdd)}  샤프 {jb._fmt(mt.sharpe)}"
@@ -357,9 +358,7 @@ def run_core(
         print(f"  하루 손실 관문 빈도: {loss_gate}")
 
         실제_리밸런스 = sum(1 for d in dates if d != dates[-1] or len(dates) == 1)
-        db.finish_batch_run(
-            client, batch_id, status="success",
-            step_log={
+        step_log = {
                 "group_id": group_id, "strategies": len(results), "rebalance": REBALANCE, "rebalances": 실제_리밸런스,
                 "split_half": 반, "stocks": len(ids), "dates": len(dates), "warnings": warnings,
                 "params": {"years": years, "risk_every": risk_every, "variants": list(variants), "explore": explore,
@@ -375,8 +374,11 @@ def run_core(
                 "holding_eq": holding_eq, "exit_pair": exit_pair, "loss_gate": loss_gate,
                 # 결정 단위 판정(조각 1e) — 변형마다 묶음 값까지, 짝(H−G·G−B) 차이
                 "evidence": 증거, "pairs": 짝, "verdict": 판정,
-            },
-        )  # fmt: skip
+            }  # fmt: skip
+        # 판정판(docs/funnel.md 2.2, 25.1940) — 이 실행의 줄을 실행 기록에(웹 /backtest "판정판").
+        # 읽기 0, 깨져도 성공으로 닫는다
+        step_log.update(jb.scoreboard_log(job_name, now, step_log, 실은_행))
+        db.finish_batch_run(client, batch_id, status="success", step_log=step_log)
         print(f"저장 {len(results)}개 변형, 리밸런스 {실제_리밸런스}회(날마다), 그룹 {group_id}")
         for w in sorted(set(warnings)):
             print(f"  경고: {w}")

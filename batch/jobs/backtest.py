@@ -58,6 +58,7 @@ from batch.services import luck, sectors, trend
 from batch.services import metrics as m
 from batch.services import pit_universe as pit
 from batch.services import quarterly_earnings as qe
+from batch.services import scoreboard as scb
 from batch.services import scoring as sc
 from batch.services import sector_momentum as secmom
 from batch.services import share_issuance as si
@@ -1634,6 +1635,23 @@ _RUN_COLS = (
     " final_equity, turnover_avg, excess_cagr, win_rate, metrics_json, warnings_json,"
     " group_id, calc_version, scoring_calc_version, created_at"
 )
+_RUN_COL_NAMES = tuple(c.strip() for c in _RUN_COLS.split(",") if c.strip())
+
+
+def scoreboard_log(
+    job_name: str, started_at: str, step_log: dict[str, Any], kept: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """이 실행의 판정판 줄(docs/funnel.md 2.2, 25.1940) — `step_log` 에 더할 칸.
+
+    실행 기록 하나(`job_name`·`started_at`·지금 `step_log`·`store_run` 이 `kept` 에 남긴 행)를 `scoreboard.rows` 에 넣고
+    웹이 보이는 칸만(`scoreboard.step_log_rows`) `{"scoreboard": [...]}` 로 낸다. DB 를 다시 읽지 않는다.
+    진단이라 깨져도 실행을 죽이지 않는다 — `{"scoreboard_error": 까닭}` 을 적는다(다른 진단과 같은 꼴)"""
+    try:
+        record = {"job_name": job_name, "started_at": started_at, "step_log": step_log, "results": kept}
+        return {"scoreboard": scb.step_log_rows(scb.rows([record]))}
+    except Exception as e:  # noqa: BLE001 — 판정판은 기록 전용. 결과 행은 이미 저장됐다
+        log.exception("판정판 계산 실패")
+        return {"scoreboard_error": f"{type(e).__name__}: {str(e)[:200]}"}
 
 
 def store_run(
@@ -1642,9 +1660,12 @@ def store_run(
     운판정: dict | None = None,
     rebalance: str = "monthly",
     extra: dict[str, Any] | None = None,
+    kept: list[dict[str, Any]] | None = None,
 ) -> int:
     """결과 한 행과 곡선을 싣는다. `rebalance` = 리밸런스 주기 열(핵심 H 는 "daily", 25.1534),
-    `extra` = `metrics_json` 에 더 싣는 칸(핵심 H 의 반 나눈 기간 등). 둘 다 안 주면 예전 그대로다."""
+    `extra` = `metrics_json` 에 더 싣는 칸(핵심 H 의 반 나눈 기간 등). 둘 다 안 주면 예전 그대로다.
+    `kept` 를 주면 실은 행을 열 이름 → 값으로 덧붙인다 — 판정판(25.1940)이 Turso 를 다시 읽지 않고
+    이 실행의 줄을 낸다"""
     노출 = exposure_fields(result)
     노출말 = exposure_warning(strategy, 노출)
     row = (
@@ -1663,6 +1684,8 @@ def store_run(
     if len(row) != db.column_count(_RUN_COLS):
         raise ValueError("backtest_runs 값 묶음과 열 개수가 어긋납니다")
 
+    if kept is not None:
+        kept.append(dict(zip(_RUN_COL_NAMES, row, strict=True)))
     placeholders = ", ".join(["?"] * len(row))
     rs = client.execute(f"INSERT INTO backtest_runs ({_RUN_COLS}) VALUES ({placeholders})", list(row))
     run_id = rs.last_insert_rowid
@@ -1974,11 +1997,13 @@ def run(
             for name, r in results.items() if name != "benchmark" and not name.endswith("_no_cost")
         }, n_floor=REGISTERED_TRIALS)  # fmt: skip
         stored = 0
+        실은_행: list[dict[str, Any]] = []  # 판정판(25.1940) 재료 — 실은 행 그대로
         for strategy, result in results.items():
             summary = bt.summarize(result, None if strategy == "benchmark" else bench, risk_free_annual=무위험)
             # 벤치마크에는 추세 오버레이를 곱하지 않는다 — "추세 필터 켬" 을 붙이면 비교 기준을 오해한다 (25.471)
             그경고 = [w for w in warnings if not (strategy == "benchmark" and w == WARN_TREND_ON)]
-            store_run(client, market, strategy, result, summary, top_n, group_id, 그경고, now, 운.get(strategy))
+            store_run(client, market, strategy, result, summary, top_n, group_id, 그경고, now, 운.get(strategy),
+                      kept=실은_행)  # fmt: skip
             stored += 1
             mt = summary.metrics
             print(
@@ -1988,10 +2013,8 @@ def run(
             )
 
         실제_리밸런스 = sum(1 for d in rebalance_dates if d != dates[-1] or len(dates) == 1)
-        db.finish_batch_run(
-            client, batch_id, status="success",
-            # 마지막 날은 평가만 한다(25.792) — 결과 행의 `rebalances` 와 같은 수를 적는다 (25.795, 교차검증)
-            step_log={"group_id": group_id, "strategies": stored, "rebalances": 실제_리밸런스,
+        # 마지막 날은 평가만 한다(25.792) — 결과 행의 `rebalances` 와 같은 수를 적는다 (25.795, 교차검증)
+        step_log = {"group_id": group_id, "strategies": stored, "rebalances": 실제_리밸런스,
                       "factor_ic": ic_summary,
                       # 37회차 A (factors.md 12.40, 원장 #35·#36) — 공통 구간 판정과 중복 진단. 기록 전용
                       **({"high52_judge": {**_high52_judge(results, h52_trace.get("full_from"), 무위험),
@@ -2010,8 +2033,10 @@ def run(
                       "pit_universe": {"on": pit_universe, "sizes": _pit_sizes(eligible_cache),
                                        "excluded": pit_reasons},
                       "trend_filter": {"on": trend_filter, "bear_factor": trend_settings["bear_factor"],
-                                       "index_days": {k: len(v) for k, v in index_series.items()}}},
-        )
+                                       "index_days": {k: len(v) for k, v in index_series.items()}}}  # fmt: skip
+        # 판정판(docs/funnel.md 2.2, 25.1940) — 이 실행의 줄을 실행 기록에. 깨져도 실행은 성공으로 닫는다
+        step_log.update(scoreboard_log(JOB_NAME, now, step_log, 실은_행))
+        db.finish_batch_run(client, batch_id, status="success", step_log=step_log)
         print(f"저장 {stored}개 전략, 리밸런스 {실제_리밸런스}회, 그룹 {group_id}")
         for w in sorted(set(warnings + results.get('composite', bench).warnings)):
             print(f"  경고: {w}")

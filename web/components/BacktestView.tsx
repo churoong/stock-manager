@@ -11,6 +11,7 @@ import {
   stressVersionNote,
 } from "@/lib/backtest";
 import { coreLines, coreNotes, type CoreRunRow } from "@/lib/coreBacktest";
+import { ALWAYS_EMPTY_NOTE, parseScoreboard, scoreLine, scoreboardHead, type ScoreboardRun } from "@/lib/scoreboard";
 import { readJson } from "@/lib/http";
 import { readSavedCountry, saveCountry, userTimeOf, type Country } from "@/lib/market";
 import { pct, pctClass, sizePct } from "@/lib/portfolio";
@@ -33,6 +34,8 @@ interface Data {
   market: string;
   /** 핵심 H 다년 백테스트(국내, 25.1545) — 마지막 실행 기록과 그 묶음 행 */
   core?: { run: { status: string; started_at: string; finished_at: string | null; step_log: string | null; error_text: string | null }; runs: CoreRunRow[] } | null;
+  /** 판정판(docs/funnel.md 2.2, 25.1940) — 고른 묶음 실행 기록의 `step_log.scoreboard`, 없으면 가장 최근 것(fallback) */
+  scoreboard?: { run: ScoreboardRun; fallback: boolean } | null;
   group_id: string | null;
   runs: BacktestRun[];
   curves: CurvePoint[];
@@ -153,10 +156,56 @@ export default function BacktestView() {
         </>
       )}
 
+      {data?.scoreboard ? <ScoreboardCard sb={data.scoreboard} /> : null}
+
       {data?.core ? <CoreCard core={data.core} /> : null}
 
       <Stress data={data} />
     </div>
+  );
+}
+
+/** 판정판 (docs/funnel.md 2.2, 25.1940) — 배치가 실행 기록에 실은 줄을 꼴만 바꿔 보인다. 화면은 계산하지 않는다 */
+function ScoreboardCard({ sb }: { sb: NonNullable<Data["scoreboard"]> }) {
+  const { rows, unreadable } = parseScoreboard(sb.run.scoreboard);
+  const lines = rows.map(scoreLine);
+  return (
+    <section className="mb-4 mt-4 rounded-xl border border-slate-200 px-3 py-2 text-xs dark:border-slate-800">
+      <h3 className="text-sm font-semibold">판정판</h3>
+      <p className={`mt-0.5 ${sb.fallback ? "text-amber-700 dark:text-amber-300" : "text-slate-500"}`}>{scoreboardHead(sb.run, sb.fallback)}</p>
+      {sb.run.scoreboard_error ? <p className="mt-1 text-rose-700 dark:text-rose-300">판정판 계산 실패 — {sb.run.scoreboard_error}</p> : null}
+      {unreadable ? <p className="mt-1 text-amber-700 dark:text-amber-300">읽지 못한 줄 {unreadable}개 — 그 줄은 빠졌습니다</p> : null}
+      {lines.length ? (
+        <ul className="mt-2 flex flex-col gap-2">
+          {lines.map((l) => (
+            <li key={l.strategy} className="rounded-lg border border-slate-100 px-2 py-1.5 dark:border-slate-800">
+              <p className="font-medium">
+                {l.label} <span className="font-normal text-slate-500">· {l.cohort}</span>
+              </p>
+              <dl className="mt-0.5 grid grid-cols-2 gap-x-3 gap-y-0.5 sm:grid-cols-4">
+                {l.cells.map(([k, v]) => (
+                  <div key={k} className="flex justify-between gap-1">
+                    <dt className="text-slate-400">{k}</dt>
+                    <dd className={`tabular-nums ${v === "없음" ? "text-slate-400" : ""}`}>{v}</dd>
+                  </div>
+                ))}
+              </dl>
+              <p className="mt-0.5 text-slate-500">표본: {l.sample}</p>
+              {l.missing.length ? (
+                <ul className="mt-0.5 space-y-0.5 text-[11px] text-slate-400">
+                  {l.missing.map((m) => (
+                    <li key={m}>{m}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : !sb.run.scoreboard_error ? (
+        <p className="mt-1 text-slate-500">이 실행의 판정판 줄이 없습니다.</p>
+      ) : null}
+      <p className="mt-1 text-slate-400">{ALWAYS_EMPTY_NOTE}</p>
+    </section>
   );
 }
 

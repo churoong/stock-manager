@@ -272,6 +272,32 @@ def rows(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(out, key=lambda x: (str(x["market"]), str(x["cohort"] or "~"), x["strategy"]))
 
 
+#: 실행 기록(`step_log["scoreboard"]`)에 싣는 칸 — 웹 /backtest "판정판" 이 보이는 칸만(25.1940). 실행 하나의 줄이라
+#: sha·작업 이름·묶음은 같은 step_log 의 `params`·`group_id` 에 이미 있어 줄마다 되풀이하지 않는다.
+#: `runs` 는 늘 1 이라 뺀다.
+#: 늘 비는 칸(걷는 창·수용량·서로 다른 종목·끝난 거래)도 뺀다 — 까닭은 이 모듈의 `WHY_*` 그대로이고 웹이 한 줄로 적는다.
+#: 웹 `lib/scoreboard.ts` 의 `SCOREBOARD_KEYS` 와 같아야 한다(시험이 대조)
+STEP_LOG_COLS = (
+    "strategy", "market", "cohort", "trials_cumulative", "cagr", "excess_cagr", "mdd", "dsr", "dsr_n",
+    "control_lower", "gate_lower", "half_first_cagr", "half_second_cagr", "months", "rebalances", "buys",
+    "control_blocks", "gate_blocks", "sells_scored",
+)  # fmt: skip
+#: 까닭 글 최대 길이 — step_log 크기를 묶는다(월 실행 줄 약 20개 × 빈 칸 약 10개). 넘는 까닭은 잘린다
+WHY_MAX = 80
+
+
+def step_log_rows(rows_: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """`rows` 의 줄을 실행 기록에 실을 꼴로 — `STEP_LOG_COLS` 칸 + 그 칸의 `missing` 까닭(`WHY_MAX` 자까지).
+    값은 바꾸지 않는다(반올림도 없음)"""
+    out = []
+    for r in rows_:
+        why = r.get("missing") or {}
+        줄 = {c: r.get(c) for c in STEP_LOG_COLS}
+        줄["missing"] = {c: str(why[c])[:WHY_MAX] for c in STEP_LOG_COLS if c in why}
+        out.append(줄)
+    return out
+
+
 def walk_windows(monthly_excess: list[tuple[str, float]], window: int = WALK_WINDOW_MONTHS) -> dict[str, Any]:
     """걷는 창 — 월 초과수익 계열을 **겹치지 않는** `window` 개월 창으로 잘라 창마다 초과 부호 (funnel.md 2.2·3장).
 

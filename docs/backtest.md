@@ -517,6 +517,10 @@ PBR 이 20% 분위(손절 분위) **아래**면 매수 구간이 뒤집혀 신�
   웹은 계산하지 않는다는 규칙 때문이다. 그 전 실행의 행은 NULL 이라 차트가 비고 "다시 돌리면 나온다" 고 알린다
 - **진행 표시.** 전략 하나가 끝날 때마다 `batch_runs.step_log` 에 `{"progress": {done, total, current}}` 를
   적는다(`db.note_progress`). 화면은 실행 중일 때 "3/8 · momentum" 처럼 보여 준다. 끝나면 `finish_batch_run` 이 덮어쓴다
+- **판정판**(2026-10-28, 기록 25.1940 — docs/funnel.md 2.2). 월 백테스트(`backtest`)·핵심 H(`backtest_core`)·탐색(`backtest_explore`)·
+  회차 지정가(`backtest_limit`) 실행이 끝날 때 그 실행의 판정판 줄을 `step_log.scoreboard` 에 싣는다 — `store_run` 이 실은 행(메모리, Turso 다시 읽기 0)을
+  `scoreboard.rows` → `step_log_rows`(웹이 보이는 칸 `STEP_LOG_COLS` + 그 칸의 `missing` 까닭, 80자까지). 판정판이 깨지면 실행은 성공으로 닫고
+  `step_log.scoreboard_error` 에 까닭. 화면은 /backtest 의 "판정판" 카드 — 고른 묶음을 낸 실행 기록의 줄, 그 기록에 없으면(25.1940 전 실행) 그 시장의 가장 최근 판정판
 
 ## 예약 실행 (2026-10-04, docs/infra.md 25.942)
 
@@ -695,7 +699,7 @@ Turso 월 읽기 진도 문(추정 500만 행)을 지나야 돈다 — 미뤄지
        국면 배수는 설정(`trend.load_settings`). 변형 다섯을 `bt.simulate` 로 돌려 `store_run(…, rebalance="daily", extra=…)` 로 싣는다 — 같은 `group_id`, `top_n` 5, 리밸런스 열 "daily"
        (`store_run` 은 `rebalance`·`extra` 를 주지 않으면 예전 그대로 "monthly"). `metrics_json` 에 `split_half`·`risk_every`·`account`·`benchmark`, 경고는 생존편향·배당 없음(엔진)·시점 유니버스·
        무위험수익률 없음·기본 연수 아님·"핵심 H — …"(`WARN_CORE`)·month 면 `WARN_RISK_MONTHLY`. `batch_runs.job_name` = `backtest_core`(월 백테스트의 판정 칸 `backtest` 를 밀어내지 않게) —
-       step_log 에 묶음·반 나눈 기간·`timing`(읽기 초·변형별 초·낸 날·나눠 준 날·리스크 잰 수)·시점 유니버스 크기
+       step_log 에 묶음·반 나눈 기간·`timing`(읽기 초·변형별 초·낸 날·나눠 준 날·리스크 잰 수)·시점 유니버스 크기·판정판 줄 `scoreboard`(25.1940, 8.4)
      - **반 나눈 기간**(`split_half`): 곡선을 날 수로 반 — 가운데 날은 두 반에 모두 든다(앞 반의 끝 = 뒤 반의 시작). 앞·뒤 반마다 시작·끝·날 수·CAGR·MDD(docs/metrics.md 식)
      - **어긋남(1d)**: 초과 CAGR·이긴 달의 기준은 월 백테스트와 같은 유니버스 동일가중(월 리밸런스) — 다섯 행만 싣고 기준은 저장하지 않는다 · 노출(`invested_share`)은 리밸런스(= 날) 단위라
        노출 경고 글의 "투자한 달" 은 "투자한 날" 로 읽는다 · 화면: 국내 탭 아래 **"핵심 H 다년 백테스트" 카드**(25.1545 — 마지막 핵심 H 실행 기록 한 줄 + 그 묶음 다섯 행: 판정·H−G 짝·가중 대 동일가중·변형별 CAGR·MDD·초과·우연일 확률·무작위 대조 분위·관문 잣대·판 뒤·걸린 시간, 기본 실행이 아니면 "참고만"). 대표 묶음 표는 늘 종합 전략이 있는 월 백테스트다(웹 `LATEST_GROUP`) — 묶음 목록에는 상위 5(기본 아님)로 보인다
