@@ -314,6 +314,18 @@ def test_시점_창은_운영_enrich_의_읽기마다_답한다() -> None:
     assert {f.reason_code for f in sf.evaluate(h, date(2024, 1, 8))} == {"재무악화", "점검"}
 
 
+@pytest.mark.parametrize("variant", ["hand_a", "hand_c"])
+def test_처음부터_유니버스_밖이던_보유는_점검으로_팔지_않는다(variant: str) -> None:
+    """25.1939 (25.1938 교차검증 [권고]) — 매수 뒤 편입 이력(25.1095 "처음부터 유니버스 밖이던 보유는 점검 아님")의 **거짓**
+    쪽. 리플레이는 매수 모집단을 그날 cutoff 의 일별 유니버스로, 점검을 그 주 첫 cutoff 스냅샷으로 읽어(운영은 둘 다 주간
+    스냅샷) 주 중간에 들어온 후보가 실경로에서 늘 이 갈래를 탄다. 편입 이력 답을 늘 1 로 바꿔도(변이) 다른 시험은 지나갔다.
+    스냅샷(날 0)에 밖이던 종목 1 을 사도 점검으로 팔지 않는다"""
+    s, 날, _m = _돌림(variant, {1: [100.0] * 7}, {0: [(1, 10.0)]}, 밖={0: {1}})
+    assert any(lg.buys.get(1) for lg in s.log), [(lg.day, lg.buys, lg.decisions) for lg in s.log]
+    assert not any("점검" in (lg.sells.get(1) or []) for lg in s.log)
+    assert not any("사면 바로 매도" in str(d.get("reason")) for lg in s.log for d in lg.decisions)
+
+
 # ── 재무 시점 고르기 ────────────────────────────────────────────────────────────
 
 
