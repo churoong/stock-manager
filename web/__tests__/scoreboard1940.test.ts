@@ -146,5 +146,8 @@ describe("판정판 안내 줄은 가리킬 곳이 있을 때만 (25.1942)", () 
     expect(elsewhereNote(["core_h"], 1, false)).not.toContain("비용 0");
     expect(elsewhereNote(["composite", "composite_no_cost"], 0, false)).not.toContain("읽기 전에");
     expect(elsewhereNote(["composite", "composite_no_cost"], 3, true)).toContain("다른 실행");
+    // 25.1943 — 물러났는데 결과 표가 없으면 없음, composite 만 있고 비용 0 사본이 없는 묶음(장기 문턱 비교)은 비용 문장 없음
+    expect(elsewhereNote([], 0, true)).toBeNull();
+    expect(elsewhereNote(["composite", "benchmark"], 0, false)).toBeNull();
   });
 });

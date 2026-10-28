@@ -185,7 +185,8 @@ export const ALWAYS_EMPTY_NOTE =
  * 견주지 말라고 적는다. 가리킬 곳이 없으면 null
  */
 export function elsewhereNote(strategies: readonly string[], warningCount: number, fallback: boolean): string | null {
-  if (fallback) return "이 판정판은 위 결과 표와 다른 실행의 것입니다 — 위 표의 경고·비용 0 줄과 바로 견주지 않습니다.";
+  // 물러났으면 위 결과와 다른 실행 — 결과 표가 없으면(묶음 없음) 가리킬 곳이 없다(25.1943)
+  if (fallback) return strategies.length ? "이 판정판은 위 결과와 다른 실행의 것입니다 — 바로 견주지 않습니다." : null;
   const 글: string[] = [];
   if (warningCount > 0) 글.push("경고(생존편향·시점 유니버스 등)는 화면 맨 위 \"이 결과를 읽기 전에\" 에");
   if (strategies.includes("composite_no_cost")) 글.push("비용 몫은 위 결과 표의 \"종합 점수 (비용 0)\" 줄과 견주어 봅니다");
