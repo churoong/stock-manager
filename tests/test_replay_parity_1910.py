@@ -161,11 +161,12 @@ class 리플레이:
 
 
 @cache
-def _리플레이(variant: str, 판: str) -> 리플레이:
+def _리플레이(variant: str, 판: str, limit_fills: bool = False) -> 리플레이:
+    """`limit_fills` — 25.1945: 회차를 지정가로 채우는 판(tests/test_limit_fills_1914.py 의 L4 대조가 쓴다)."""
     universe, prices, turn, snaps, idx = _자료()
     fees, costs = 비용판[판]
     s = cs.make_core_strategy(variant, cb.CoreMarket(universe, snaps, idx), sessions=날들, costs=costs,
-                              buy_fee_pct=job._수수료("KR", fees)[0])  # fmt: skip
+                              buy_fee_pct=job._수수료("KR", fees)[0], limit_fills=limit_fills)  # fmt: skip
     재료: dict[str, tuple[str, list]] = {}
     하루: dict[str, cb.DayView] = {}
     원래 = s.market.at

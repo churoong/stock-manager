@@ -9,7 +9,7 @@
   회차만 — 원가 = 찬 회차 지정가의 주식 수 평균 × (1 + 매수 수수료), 하나도 안 차면 로트가 없다
 - 끝까지(1532 합성 자료, core_b): 지정가 모드가 전량 모드보다 덜 산다(일부만 찬 날이 있다) · 장부 = 엔진 보유 날마다 ·
   새 로트의 주식 수가 찬 회차 수량과 같다
-- 운영과 일치(1910 합성 자료, core_b, 비용 0): 운영 `run_step` 이 낸 회차를 **운영 체결 판정이 스스로** 채우게 두고(1910 의
+- 운영과 일치(1910 합성 자료, core_b — 25.1945 G·H·D·E 도, 비용 0): 운영 `run_step` 이 낸 회차를 **운영 체결 판정이 스스로** 채우게 두고(1910 의
   허용 ① "엔진 체결 베낌" 없이) 날마다 찬 회차·보유 수량·주당 원가가 리플레이와 같다
 """
 
@@ -31,6 +31,7 @@ from batch.services import core_strategy as cs
 from batch.services import paper as pp
 from tests import test_core_strategy_1532 as t32
 from tests import test_replay_parity_1910 as t10
+from tests import test_replay_parity_hde_1921  # noqa: F401 — 지주사·위원회 운영입력 등록(25.1945)
 from tests.test_paper_job_1445 import 설정
 
 # ── 엔진: 손으로 세는 회차 ───────────────────────────────────────────────────
@@ -290,41 +291,31 @@ def test_끝까지_지정가_모드는_덜_사고_장부가_엔진과_같다() -
 # ── 운영과 일치: 1910 합성 자료, 운영 체결 판정이 스스로 채운다 ───────────────────────
 
 
-@cache
-def _리플레이() -> tuple:
-    universe, prices, turn, snaps, idx = t10._자료()
-    s = cs.make_core_strategy("core_b", cb.CoreMarket(universe, snaps, idx), sessions=t10.날들, costs=bt.Costs.zero(),
-                              buy_fee_pct=0.0, limit_fills=True)  # fmt: skip
-    재료: dict[str, tuple[str, list]] = {}
-    장부: dict[str, dict[int, float]] = {}
-    원래 = s.market.at
+#: 25.1945 — 회차 변형 다섯(B·G 신호 계좌, H 지주사, D·E 위원회). A·C 는 사기 전 점검 규칙이라 회차 체결 뒤 매도 판정이
+#: 운영 `sell_flags` 자리를 더 탄다 — 그 입력(25.1934)은 비용 0 L0~L3 에서만 맞춰 두었다
+L4_변형들 = ["core_b", "core_g", "core_h", "core_d", "core_e"]
 
-    def 엿봄(view: bt.PriceView, day: str | None = None) -> cb.DayView:
-        dv = 원래(view, day)
-        재료[dv.day] = (dv.cutoff, list(dv.rows))
-        return dv
 
-    s.market.at = 엿봄  # type: ignore[method-assign]
-
-    def 판단(day: str, view: bt.PriceView) -> bt.LedgerOrders:
-        o = s(day, view)
-        장부[day] = {sid: lot.unit_cost for sid, lot in s.lots.items()}  # 판단 직전 장부(맞춘 뒤)
-        return o
-
-    r = bt.simulate(prices, t10.모의, t10.모의, 판단, bt.Costs.zero(), turnover=turn, has_delisted=True)
-    return s, r, 재료, 장부
+def _리플레이(variant: str) -> t10.리플레이:
+    """1910 리플레이를 지정가 판으로(비용 0) — 판단 직전 장부·재료·조사 자료(지주사·위원회의 운영입력이 쓴다)를 함께 남긴다."""
+    return t10._리플레이(variant, "zero", limit_fills=True)
 
 
 @cache
-def _운영() -> dict[str, dict]:
+def _운영(variant: str) -> dict[str, dict]:
     """운영 `run_step` 을 리플레이 결정일마다(trade_date = cutoff). 1910 과 달리 운영이 낸 회차를 **운영 체결 판정**
     (`fill_orders` — 다음 `run_step` 첫머리)이 그날 종가로 스스로 채운다. 결정일 d 에 낸 회차는 다음 결정일의 실행이 판정한다.
+    지주사·위원회는 1910 의 `운영입력들`(헌장·조사 자료·지수, 25.1921)을 그대로 넣는다.
     {체결일: {"fills": {(종목, 지정가, 수량)}, "orders": {(종목, 지정가, 수량)}, "pos": {종목: (수량, 원가)}}}"""
-    s, r, 재료, _장부 = _리플레이()
-    aid = cs.VARIANTS["core_b"].account
-    c = t10._db(aid, {"kr_buy_pct": 0.0, "kr_sell_pct": 0.0})
+    rp = _리플레이(variant)
+    spec = cs.variant_spec(variant)
+    aid = spec.account
+    입력 = t10.운영입력들.get(variant) or t10.운영입력들.get(spec.selection)
+    c = (입력.db if 입력 else t10._db)(aid, {"kr_buy_pct": 0.0, "kr_sell_pct": 0.0})
     for d in t10.날들[: t10.W]:
         t10._시세넣기(c, d)
+        if 입력:
+            입력.시세후(c, d)
     mp = pytest.MonkeyPatch()
     out: dict[str, dict] = {}
     try:
@@ -335,11 +326,13 @@ def _운영() -> dict[str, dict]:
         mp.setattr(job, "costs_for", lambda *_a, **_k: pp.Costs(buy_fee_pct=0.0, sell_fee_pct=0.0, sell_tax_pct=0.0,
                                                                  slippage_pct=0.0))  # fmt: skip
         for day in t10.모의[:-1]:
-            cutoff, rows = 재료[day]
+            cutoff, rows = rp.재료[day]
             오늘 = date.fromisoformat(day)
             mp.setattr(cal, "local_today", lambda _m=None, _d=오늘: _d)
+            if 입력:
+                입력.판단전(c, rp, day, cutoff)
             job.run_step(c, market="KR", trade_date=cutoff, late=False, signal_rows=rows, settings=설정,
-                         price_series={}, series_unknown={}, allocate=True,
+                         price_series=dict(t10.ALLOW_NO_CORRELATION_SHRINK), series_unknown={}, allocate=True,
                          now=datetime.fromisoformat(f"{day}T00:30:00+00:00"))  # fmt: skip
             out[day] = {"orders": set(c.q(
                 "SELECT stock_id, limit_price, quantity FROM paper_orders WHERE account_id = ? AND decided_on = ?"
@@ -353,11 +346,18 @@ def _운영() -> dict[str, dict]:
                 out[cutoff]["pos"] = {sid: (p.quantity, p.cost / p.quantity) for sid, p in pp.positions(체결).items()}
                 out[cutoff]["cash"] = pp.cash(job._flows(c)[0], 체결)
             t10._시세넣기(c, day)
+            if 입력:
+                입력.시세후(c, day)
     finally:
         mp.undo()
     return out
 
 
+#: 헛돌지 않게 — (낸 회차, 찬 회차, 일부만 찬 종목-날, 하나도 안 찬 종목-날, 찬 더 사기, 견준 보유) 하한. 2026-10-28 실측
+#: B (696, 113, 70, 156, 61, 522)·G (573, 94, 60, 127, 54, 547)·H (96, 8, 4, 27, 0, 169)·D (39, 2, 2, 11, 0, 147)·E (75, 7, 3, 21, 0, 106)
+#: 의 약 8할. 지주사·위원회는 고르는 종목이 적고(하루 0~2) 창 안에 찬 더 사기가 없다 — 더 사기의 원가 평균은 B·G 가 본다
+L4_하한 = {"core_b": (550, 90, 55, 125, 49, 420), "core_g": (460, 75, 48, 100, 43, 440), "core_h": (75, 5, 3, 20, 0, 130),
+         "core_d": (30, 1, 1, 8, 0, 110), "core_e": (60, 5, 2, 15, 0, 80)}  # fmt: skip
 #: 정수 주 — 운영은 회차마다 수량을 내림(`size_buys`), 리플레이 비중은 명목 자본(1e12)의 실수. 2026-10-28 실측 최대
 #: 낸 회차 1.13주·보유 1.42주(696 회차, 148 거래일) — 1910 허용 ③ 과 같은 뿌리
 ALLOW_SHARES = 2.0
@@ -366,14 +366,17 @@ ALLOW_SHARES = 2.0
 ALLOW_REL = 2e-7
 
 
-def test_운영_체결_판정과_찬_회차·보유·원가가_같다() -> None:
+@pytest.mark.parametrize("variant", L4_변형들)
+def test_운영_체결_판정과_찬_회차·보유·원가가_같다(variant: str) -> None:
     """25.1914 (전략 깔때기 ④ 분할 지정가 체결) — 비용 0 판. 1910 의 허용 ①(엔진 체결 베낌) 없이 운영이 스스로 채운다.
     날마다 (가) 낸 회차(종목·지정가·수량)가 같고 (나) 찬 회차가 리플레이 잣대(그날 종가 ≤ 지정가)와 같고 (다) 체결 뒤 보유
     수량이 엔진(비중 × 자본 × 명목 ÷ 종가)과 정수 주 안에서, 현금 비중이 `ALLOW_REL` 안에서 같고 (라) 다음 판단 직전 장부의
     주당 원가(더 산 로트 포함)가 운영 `pp.positions` 의 cost ÷ quantity 와 같다. 헛돌지 않게: 2026-10-28 실측 낸 회차 696 ·
     찬 113 · 일부만 찬 종목-날 70 · 하나도 안 찬 156 · 찬 더 사기 61."""
-    s, r, _재료, 장부 = _리플레이()
-    live = _운영()
+    rp = _리플레이(variant)
+    s, r = rp.s, rp.r
+    장부 = {d: {sid: x[2] for sid, x in 장.items()} for d, 장 in rp.장부.items()}
+    live = _운영(variant)
     prices = t10._자료()[1]
     로그 = {lg.day: lg for lg in s.log}
     자본 = dict(r.curve)
@@ -416,8 +419,8 @@ def test_운영_체결_판정과_찬_회차·보유·원가가_같다() -> None:
             if 다음 is None or abs(다음 / 원가 - 1) > ALLOW_REL:
                 틀림.append(f"{day} 종목 {sid}: 원가 리플레이 {다음} ≠ 운영 {원가}")
     assert not 틀림, 틀림[:5]
-    assert 낸수 >= 500 and 0 < 찬수 < 낸수 / 2 and 일부 >= 30 and 안참 >= 50 and 더 >= 30 and 견줌 >= 300, (
-        낸수, 찬수, 일부, 안참, 더, 견줌)
+    본 = (낸수, 찬수, 일부, 안참, 더, 견줌)
+    assert all(x >= y for x, y in zip(본, L4_하한[variant], strict=True)) and 찬수 < 낸수 / 2, (variant, 본)
 
 
 # ── 실행기: `--limit-fills` 는 기본 꺼짐, 켜면 경고·params ──────────────────────────
