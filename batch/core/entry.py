@@ -49,6 +49,9 @@ NOTHING_DONE = "실행하지 않음: "
 #: 지나야 시작한다
 #: (docs/infra.md 25.1031). 주간·월간 작업처럼 **며칠 미뤄도 되는** 작업에만 단다 — 일일 배치에는 달지 않는다
 READ_ESTIMATE_ENV = "TURSO_READ_ESTIMATE"
+#: 이 값이 "1" 이면 진도선은 보지 않고 월 상한(월말까지 핵심 작업 몫을 남기는 선)만 본다 (25.1831) — 연 2회 배당처럼
+#: **며칠 미루면 한 해가 밀리는** 작업용. 진도 문의 전제("며칠 미뤄도 된다")가 맞지 않는다
+READ_NO_PACE_ENV = "TURSO_READ_NO_PACE"
 
 
 def _load_gate():  # noqa: ANN202 — scripts/ 는 패키지가 아니라 파일로 읽는다(시험과 같은 방식)
@@ -94,7 +97,8 @@ def deferred_by_read_budget(job: str) -> str | None:
     try:
         남음 = db.remaining_read_budget_or_none(client)
         used = None if 남음 is None else db.TURSO_MONTHLY_READ_LIMIT - 남음
-        ok, text = gate.decide(used, estimate, datetime.now(UTC))
+        ok, text = gate.decide(used, estimate, datetime.now(UTC),
+                               pace=os.environ.get(READ_NO_PACE_ENV, "").strip() != "1")  # fmt: skip
         if ok:
             return None
         gate.record_skip(client, job, text)

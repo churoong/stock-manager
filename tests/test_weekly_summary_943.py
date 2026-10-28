@@ -96,9 +96,6 @@ _모듈 = re.compile(r"python -m batch\.jobs\.([a-z_]+)")
     "turso-return.yml": "Turso 가 풀릴 때까지 아무것도 안 하는 것이 정상이다(25.12)",
     "backfill-kr.yml": "구멍이 없으면 안 돌아도 정상이다 — 주기가 없다",
     "backfill-us.yml": "위와 같다",
-    "refresh-us-adjusted.yml": "대기열이 비면 안 돈다 — 주기가 없다",
-    "us-shares.yml": "미국 유니버스의 재료. 분기마다라 7일 창의 요약에 넣을 뜻이 없다(handoff 4.1)",
-    "disclosures-us.yml": "D1 운영 중 쉰다(25.14). 신선도는 /status 가 본다",
     "insider-kr.yml": "근거표 참고 행뿐이라 점수·신호를 바꾸지 않는다",
     "weekly-summary.yml": "이 요약 자신이다",
     "restore-drill.yml": "분기 1회 리허설 — 7일 창의 요약에 넣을 뜻이 없다. /status 신선도 칸이 본다 (25.946)",
@@ -231,3 +228,18 @@ def test_쓰기_사용량은_못_읽으면_None() -> None:
             raise RuntimeError("down")
 
     assert db_.remaining_write_budget_or_none(막힘()) is None
+
+
+#: 읽기 진도 문이 달렸는데도 주기 표에서 빼는 것 — 미뤄져도 점수·신호·모의투자에 닿지 않는 것만 (25.1831)
+문_달려도_빼는_것 = {"insider-kr.yml"}
+
+
+def test_진도_문이_달린_예약_작업은_주기_표에서_뺄_수_없다() -> None:
+    """25.1831 — 진도 문은 실행을 '성공'(미룸)으로 닫아 워크플로가 초록이다. 주기 표에 없으면 한 달 미뤄져도 아무 말이
+    없다(25.1828 미국 수정주가 재수집 574종목)"""
+    걸림 = [
+        파일 for 파일 in 표에_없는_이유
+        if 파일 not in 문_달려도_빼는_것
+        and "TURSO_READ_ESTIMATE" in (뿌리 / ".github/workflows" / 파일).read_text(encoding="utf-8")
+    ]  # fmt: skip
+    assert not 걸림, 걸림

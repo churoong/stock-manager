@@ -62,6 +62,9 @@ EXPECTED_DAYS: dict[str, int] = {
     "broker_stats": 10,  # 금요일만 기록을 연다 (25.995)
     "metrics": 10, "universe": 10, "valuation_bands": 10, "signal_outcomes": 10, "earnings_calendar": 10,
     "backup": 10,  # 주 1회
+    # 매주 예약인데 "주기가 없다·분기마다·D1 에서 쉰다" 는 낡은 사유로 빠져 있었다 (25.1831, 결함 회차). 셋 다 읽기
+    # 진도 문이 달려 10월 내내 미뤄졌는데 여기 없어 아무 말이 없었다 — 미국 수정주가 재수집은 574종목이 밀렸다(25.1828)
+    "refresh_us_adjusted": 10, "us_shares": 10, "disclosures_us": 10,
     # 국내 재무는 **주 1회**(월요일, 화요일 재시도)다 — 월 1회 칸에 있어 다섯 번 내리 빠져도 41일째에야 말했다
     # (docs/infra.md 25.1285, 재무 감사 재현). 새 사업보고서가 점수에 늦게 드는 것을 한 달 넘게 몰랐다
     "financials": 10,

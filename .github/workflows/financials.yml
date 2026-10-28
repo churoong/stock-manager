@@ -92,6 +92,9 @@ jobs:
       # 배당수익률이 결측이었다. 지난 배당 수집 뒤 편입된 종목만 — 화요일 재시도는 월요일 성공 뒤라 대상이 비어 바로 끝난다
       - name: 새로 편입된 종목의 배당
         if: ${{ !inputs.year && !cancelled() }}
+        # 앞 단계가 진도 문을 지났으면 반드시 돈다 — 단계마다 문을 다시 보면 앞 단계가 읽은 만큼 이 단계만 미뤄졌다 (25.1831)
+        env:
+          TURSO_READ_ESTIMATE: ""
         run: python -m batch.jobs.dividends --only-missing
 
       # 앞의 새 편입 배당 단계가 DART 한도로 실패해도 확인은 돈다 (25.1824)

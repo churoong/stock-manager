@@ -29,9 +29,10 @@ WORKFLOWS = Path(__file__).resolve().parent.parent / ".github" / "workflows"
 
 class _가짜문:
     def __init__(self, ok: bool) -> None:
-        self.ok, self.미룬것 = ok, []
+        self.ok, self.미룬것, self.진도 = ok, [], []
 
-    def decide(self, used, estimate, now):  # noqa: ANN001, ANN201
+    def decide(self, used, estimate, now, *, pace=True):  # noqa: ANN001, ANN201
+        self.진도.append(pace)
         return self.ok, f"used={used} est={estimate}"
 
     def record_skip(self, client, job, text):  # noqa: ANN001, ANN201
@@ -108,3 +109,25 @@ def test_무거운_주간_작업에만_문을_단다() -> None:
 def test_실제_문_스크립트를_읽는다() -> None:
     g = entry._load_gate()
     assert callable(g.decide) and callable(g.record_skip)
+
+
+def test_연_2회_배당은_진도선_없이_월_상한만_본다(monkeypatch: pytest.MonkeyPatch, 준비) -> None:  # noqa: ANN001
+    """25.1831 — 4·5월 5일 두 번뿐인 배당이 진도에 미뤄지면 그해 새 배당을 이듬해 4월까지 몰랐다"""
+    g = 준비(True)
+    monkeypatch.setenv(entry.READ_ESTIMATE_ENV, "300000")
+    monkeypatch.delenv(entry.READ_NO_PACE_ENV, raising=False)
+    assert entry.deferred_by_read_budget("metrics") is None
+    monkeypatch.setenv(entry.READ_NO_PACE_ENV, "1")
+    assert entry.deferred_by_read_budget("dividends") is None
+    assert g.진도 == [True, False]
+    글 = yaml.safe_load((WORKFLOWS / "dividends.yml").read_text(encoding="utf-8"))
+    assert str(글["jobs"]["run"]["env"][entry.READ_NO_PACE_ENV]) == "1"
+
+
+def test_새_편입_뒤_단계는_진도_문을_다시_보지_않는다() -> None:
+    """25.1831 — 유니버스·재무가 문을 지난 뒤 같은 워크플로의 새 편입 지표·배당이 앞 단계가 읽은 만큼 미뤄지면 25.1819·
+    25.1823 이 고친 결측이 되돌아온다"""
+    for 파일, 명령 in (("universe.yml", "metrics --only-missing"), ("financials.yml", "dividends --only-missing")):
+        글 = yaml.safe_load((WORKFLOWS / 파일).read_text(encoding="utf-8"))
+        단계 = next(s for s in 글["jobs"]["run"]["steps"] if 명령 in str(s.get("run", "")))
+        assert 단계.get("env", {}).get(entry.READ_ESTIMATE_ENV) == "", 파일

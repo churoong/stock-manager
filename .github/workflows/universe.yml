@@ -107,4 +107,7 @@ jobs:
       # 행이 없어 월요일 점수가 리스크 팩터 없이 재정규화되고 신호 비중이 줄지 않았다. 유니버스 단계가 한 나라 실패해도 돈다
       - name: 새로 편입된 종목의 성과 지표
         if: ${{ !cancelled() }}
+        # 앞 단계가 진도 문을 지났으면 반드시 돈다 — 단계마다 문을 다시 보면 앞 단계가 읽은 만큼 이 단계만 미뤄졌다 (25.1831)
+        env:
+          TURSO_READ_ESTIMATE: ""
         run: python -m batch.jobs.metrics --only-missing
