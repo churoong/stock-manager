@@ -23,6 +23,9 @@ def test_감시_계수_손계산() -> None:
     assert adj.guard_factor(10_000, 5_000, None) == pytest.approx(0.5)
     assert adj.guard_factor(1_000, 10_000, None) == pytest.approx(10.0)  # 10:1 병합
     assert adj.guard_factor(0, 5_000, None) == 1.0
+    # 계수 범위(MIN·MAX) 밖은 자료 이상 — 기업행위로 보지 않는다(25.1854, 25.1853 교차검증 [참고]: 범위 검사를 지워도 통과했다)
+    assert adj.guard_factor(10_000, 3_000_000, None) == 1.0  # 300배
+    assert adj.guard_factor(1_000_000, 4_000, None) == 1.0  # 1/250
     # 수정주가 계열은 그대로 — 모르면 조정하지 않는다
     assert adj.factor_of(10_000, 5_000, None) == 1.0
 

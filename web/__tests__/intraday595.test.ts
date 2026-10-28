@@ -65,6 +65,8 @@ describe("관심 종목만 있는 종목의 기업행위 가드 (25.595)", () =>
     expect(recentActionKr([{ close: 13000, change_pct: null }, { close: 10000, change_pct: 0 }])).toBe(false);
     expect(recentActionKr([{ close: 7000, change_pct: null }, { close: 10000, change_pct: 0 }])).toBe(false);
     expect(recentActionKr([{ close: 6990, change_pct: null }, { close: 10000, change_pct: 0 }])).toBe(true);
+    // 계수 범위(0.005~200) 밖은 자료 이상 — 배치 guard_factor 도 1.0 (25.1854)
+    expect(recentActionKr([{ close: 3_000_000, change_pct: null }, { close: 10_000, change_pct: 0 }])).toBe(false);
   });
 
   it("1:50 분할(종가 1/50, 등락률 0%)을 기업행위로 본다, 평범한 날은 아니다", async () => {
