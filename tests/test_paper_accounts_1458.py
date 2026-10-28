@@ -138,14 +138,19 @@ def _시세(c: Client, sid: int, day: str, open_: float, close: float) -> None:
     )
 
 
-def _하루(c: Client, monkeypatch: pytest.MonkeyPatch, trade_date: str, signals: bool = True, 시계: str | None = None) -> dict:
+def _하루(
+    c: Client, monkeypatch: pytest.MonkeyPatch, trade_date: str, signals: bool = True, 시계: str | None = None,
+    after_close: bool = False,
+) -> dict:  # fmt: skip
     다음 = cal.next_session("KR", date.fromisoformat(trade_date))
-    # `시계` — 실행 시계의 국내 날짜를 따로 줄 때(늦게 온 예비 실행, 25.1892)
+    # `시계` — 실행 시계의 국내 날짜를 따로 줄 때(늦게 온 예비 실행 25.1892, 장 끝난 뒤 손 실행 25.1894).
+    # `now` 는 기록 시각·기준 다시재기 생략에만 쓰여 판정과 무관하다
     오늘 = date.fromisoformat(시계) if 시계 else 다음
     monkeypatch.setattr(cal, "local_today", lambda _m=None: 오늘)
     return job.run_step(
-        c, market="KR", trade_date=trade_date, late=False, signal_rows=[_신호()] if signals else [], settings=설정,
-        price_series={}, series_unknown={}, allocate=signals, now=datetime.fromisoformat(f"{다음}T00:30:00+00:00"),
+        c, market="KR", trade_date=trade_date, late=after_close, signal_rows=[_신호()] if signals else [],
+        settings=설정, price_series={}, series_unknown={}, allocate=signals, after_close=after_close,
+        now=datetime.fromisoformat(f"{다음}T00:30:00+00:00"),
     )[1]  # fmt: skip
 
 
@@ -209,7 +214,10 @@ def test_open_entry_fills_at_open_and_random_mapping_is_stable(c: Client, monkey
     ("개설", "열림", "시계"),
     [("2026-10-15", True, None), ("2026-10-16", False, None),
      # 늦게 온 실행 — 시계는 이미 개설일(10-16)인데 주문은 10-15 장에 낸다. 잣대가 주문 장이라 막는다(25.1892)
-     ("2026-10-16", False, "2026-10-16")],
+     ("2026-10-16", False, "2026-10-16"),
+     # 장 끝난 뒤 손 실행 — 주문 장은 한 장 밀려 개설일(10-16)이지만 시계는 개설 전날(10-15). 평가 행이 개설 전
+     # 날짜로 적히지 않게 막는다(25.1894)
+     ("2026-10-16", False, "after_close")],
 )  # fmt: skip
 def test_accounts_trade_from_their_open_date(
     c: Client, monkeypatch: pytest.MonkeyPatch, 개설: str, 열림: bool, 시계: str | None
@@ -226,7 +234,11 @@ def test_accounts_trade_from_their_open_date(
     # G·H(개설 10-16)는 하한을 내리면 같이 막히니 이 시험에선 앞당긴다 — S·T 만 잰다
     c.conn.execute("UPDATE paper_accounts SET created_at = '2026-10-14T00:00:00+00:00' WHERE id IN ('G', 'H')")
     c.conn.execute("UPDATE paper_accounts SET created_at = ? WHERE id IN ('S', 'T')", [f"{개설}T00:00:00+00:00"])
-    기록 = _하루(c, monkeypatch, "2026-10-14", 시계=시계)
+    if 시계 == "after_close":
+        기록 = _하루(c, monkeypatch, "2026-10-14", 시계="2026-10-15", after_close=True)
+        assert c.q("SELECT COUNT(*) FROM paper_daily WHERE account_id IN ('S', 'T')") == [(0,)]
+    else:
+        기록 = _하루(c, monkeypatch, "2026-10-14", 시계=시계)
     매수 = dict(c.q("SELECT account_id, COUNT(*) FROM paper_orders WHERE account_id IN ('S', 'T') AND side = 'buy'"
                   " GROUP BY account_id"))  # fmt: skip
     if 열림:

@@ -2,7 +2,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { ACCOUNT_COLOR, AccountTabs, type Data, type SubTab } from "@/components/PaperView";
+import { ACCOUNT_COLOR, AccountTabs, SPARE_COLORS, type Data, type SubTab } from "@/components/PaperView";
 import { ACCOUNT_NAMES } from "@/lib/accountNames";
 import { accountView } from "@/lib/paper";
 
@@ -104,5 +104,7 @@ describe("보유 손익 표시·그래프 색 (25.1604)", () => {
     expect(ACCOUNT_COLOR.G).not.toBe(ACCOUNT_COLOR.R1);
     // 이름이 있는 계좌는 모두 고정 색 — S·T 가 예비 색 차례에 맡겨져 있었다(25.1893)
     for (const id of Object.keys(ACCOUNT_NAMES)) expect(ACCOUNT_COLOR[id], id).toBeTruthy();
+    // 예비 색은 고정 색과 겹치지 않는다(25.1894, 25.1892 교차검증 [참고])
+    expect(SPARE_COLORS.filter((x) => 색.includes(x))).toEqual([]);
   });
 });
