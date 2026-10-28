@@ -208,6 +208,9 @@ def korfinasc_scorer(batch_size: int = 32):
 def hf_cache_refs(repo: str, cache: str | None = None) -> dict[str, str]:
     """HF 캐시에 적힌 그 모델 저장소의 참조 → 커밋 sha (docs/infra.md 25.1839). 못 읽으면 빈 dict.
 
+    **캐시에 있는 참조 전부**다 — 워크플로의 HF 캐시 열쇠가 고정이라 처음 저장한 스냅숏이 복원되고, 이번 실행이
+    풀지 않은 옛 참조(예: 닫힌 PR)도 남는다(25.1841, 25.1839 교차검증 [권고]). 고정 전에 PR 참조가 하나뿐인지 본다.
+
     `from_pretrained` 는 리비전을 고정하지 않아 **그날 `main`** 의 설정·토크나이저와, `main` 에 safetensors 가 없어
     transformers 가 찾아 쓰는 **변환 봇 PR(`refs/pr/N`)** 의 가중치를 받는다(2026-10-28 운영 로그). 저장소 주인이 모델을
     바꾸면 감성 점수가 소리 없이 달라진다 — 어느 판으로 매겼는지 기사 행·실행 기록에 남긴다. 고정은 PR 커밋 sha 를 안
@@ -223,7 +226,8 @@ def hf_cache_refs(repo: str, cache: str | None = None) -> dict[str, str]:
         뿌리 = Path(cache) / ("models--" + repo.replace("/", "--")) / "refs"
         return {p.relative_to(뿌리).as_posix(): p.read_text(encoding="utf-8").strip()[:40]
                 for p in sorted(뿌리.rglob("*")) if p.is_file()}  # fmt: skip
-    except Exception:  # noqa: BLE001 — 기록용이라 채점을 막지 않는다
+    except Exception as exc:  # noqa: BLE001 — 기록용이라 채점을 막지 않는다(채점 뒤·저장 전에 불린다, 25.1841)
+        log.warning("모델 판(HF 캐시 참조)을 읽지 못함: %s", type(exc).__name__)
         return {}
 
 
