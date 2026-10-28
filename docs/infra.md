@@ -2970,6 +2970,7 @@ SQL read operations are forbidden (reads are blocked, ...)
 | 25.1920 | 가상모의투자 계좌 하나의 예외를 그 계좌에 가둔다 — 나머지 계좌·H 의 KIS 베끼기는 그대로 |
 | 25.1921 | 지주사 H·위원회 D·E 리플레이↔운영 일치 시험 — 142건 어긋남은 시험 틀의 헌장 빠짐 |
 | 25.1922 | 25.1915~1920 교차검증 반영 — 계좌 단계 실패 표시·도전자 보류 시험·guard 시험 고정·판정판 열쇠 |
+| 25.1923 | 25.1922 conftest 픽스처가 monkeypatch 정리 순서를 바꿔 전역 남김 검사 5건이 깨짐 — os.environ 직접으로 |
 
 ### 25.1 왜 D1 인가
 
@@ -41901,3 +41902,19 @@ docs/loops.md L4 문을 "18개 중 잡힘 18" 로.
 **되돌리기 확인**
 - `challenger_block` 의 계좌 실패 갈래를 지우면 `test_도전자_계좌만_깨진_날은_도전자_베끼기를_보류한다` 가 깨진다.
 - 판정판 열쇠를 예전으로 돌리면 `test_같은_sha_라도_코호트_밖_실행이_코호트_줄을_덮지_않는다` 가 깨진다(아래 실측).
+
+### 25.1923 25.1922 conftest 픽스처가 monkeypatch 정리 순서를 바꿔 전역 남김 검사 5건이 깨짐 — os.environ 직접으로
+
+**계기**: 25.1922 푸시 뒤 전체 검사(gate, 5acdd54)가 rc=1 이었다. pytest 오류 5건이 났다: `test_price_replica` 1건, `test_turso_return` 4건. 모두 conftest 의 "테스트가 전역 상태를 남겼다"(`db._열린_실행`·`client._resolved`) 였다.
+- 대상 파일만 골라 돌렸을 때는 지나가서 푸시 전에는 못 봤다. 전체 순서에서만 났다.
+
+**원인**: 25.1922 가 conftest 에 더한 autouse 픽스처 `_저장소_공개_여부를_고정한다` 가 `monkeypatch` 를 받았다.
+- autouse 가 `monkeypatch` 를 먼저 끌어오면, 시험 안에서 `monkeypatch` 로 바꾼 전역(`db._열린_실행`·`client._resolved`)의 되돌림이 전역 남김 검사(`_전역을_남기지_않는다`)의 마무리보다 **뒤로** 밀린다.
+- 그래서 정상 시험이 "남겼다" 로 잡혔다.
+- 운영 코드와는 무관하다. 시험 틀만의 문제다.
+
+**고친 것**: 픽스처가 `monkeypatch` 를 쓰지 않고 `os.environ` 을 직접 바꾸고 되돌린다. 그 까닭은 docstring 에 적었다.
+
+**되돌리기 확인**: 깨졌던 5건과 guard·공개 시험(`test_stale_runs`·`test_entry`·`test_guard_public_1917`·`test_public_repo_978`·`test_scores_job`)을 함께 돌려 지나간다. 깨진 모양은 고치기 전 gate(5acdd54)가 실측했다.
+
+**교훈**: conftest(시험 전체에 닿는 변경)는 대상 파일만 돌려서는 안 된다. 전체 pytest 를 돌린 뒤에 푸시한다.

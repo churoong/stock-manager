@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 import pytest
@@ -63,11 +64,19 @@ def _전역을_남기지_않는다(request: pytest.FixtureRequest):  # noqa: ANN
 
 
 @pytest.fixture(autouse=True)
-def _저장소_공개_여부를_고정한다(monkeypatch: pytest.MonkeyPatch) -> None:
+def _저장소_공개_여부를_고정한다():  # noqa: ANN201
     """시험은 비공개로 본다(`REPO_PUBLIC=false`) — 공개 저장소의 Actions(`tests.yml`)에서는 이벤트 파일이 공개라
     `visibility.is_public()` 이 참이 되어, 다시 던짐을 기대하는 `entry.guard` 시험 셋이 그곳에서만 깨졌다(25.1922, 25.1917
-    교차검증 [권고]). 공개 갈래를 보는 시험은 제 안에서 `REPO_PUBLIC` 을 다시 정하거나 environ 을 직접 넘긴다"""
-    monkeypatch.setenv("REPO_PUBLIC", "false")
+    교차검증 [권고]). 공개 갈래를 보는 시험은 제 안에서 `REPO_PUBLIC` 을 다시 정하거나 environ 을 직접 넘긴다.
+    `monkeypatch` 를 쓰지 않는다 — autouse 가 끌어오면 시험 안 monkeypatch 의 되돌림이 전역 남김 검사 뒤로 밀려
+    `db._열린_실행`·`client._resolved` 를 남긴 것으로 잡혔다(25.1923)"""
+    옛 = os.environ.get("REPO_PUBLIC")
+    os.environ["REPO_PUBLIC"] = "false"
+    yield
+    if 옛 is None:
+        os.environ.pop("REPO_PUBLIC", None)
+    else:
+        os.environ["REPO_PUBLIC"] = 옛
 
 
 @pytest.fixture(autouse=True)
