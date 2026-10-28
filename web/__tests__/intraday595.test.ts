@@ -48,6 +48,18 @@ describe("관심 종목만 있는 종목의 기업행위 가드 (25.595)", () =>
     expect(adj).toMatch(new RegExp(`^MIN_FACTOR = ${m.ADJUST_MIN_FACTOR}$`, "m"));
     expect(adj).toMatch(/^MAX_FACTOR = 200\.0$/m);
     expect(mt).toMatch(new RegExp(`^ACTION_GUARD_ROWS = ${m.ACTION_GUARD_ROWS}$`, "m"));
+    // 등락률 빈 날 문턱 = 배치 adjust.KR_UNKNOWN_PCT_JUMP = markets.KR_DAILY_LIMIT (25.1852)
+    const mk = readFileSync(join(process.cwd(), "..", "batch", "core", "markets.py"), "utf-8");
+    expect(adj).toMatch(/^KR_UNKNOWN_PCT_JUMP = markets\.KR_DAILY_LIMIT/m);
+    expect(Number(/^KR_DAILY_LIMIT = ([\d.]+)$/m.exec(mk)?.[1])).toBe(m.KR_UNKNOWN_PCT_JUMP);
+  });
+
+  it("등락률이 빈 날도 가격제한폭 밖이면 기업행위로 본다 — 배치 guard_factor 와 같다 (25.1852)", async () => {
+    const { recentActionKr } = await import("@/lib/intraday");
+    // 배치 실측: guard_factor(100000, 50000, None) = 0.5 → is_action
+    expect(recentActionKr([{ close: 50000, change_pct: null }, { close: 100000, change_pct: 0.5 }])).toBe(true);
+    // 가격제한폭 안(−20%)은 등락률을 모르면 시세로 본다
+    expect(recentActionKr([{ close: 80000, change_pct: null }, { close: 100000, change_pct: 0.5 }])).toBe(false);
   });
 
   it("1:50 분할(종가 1/50, 등락률 0%)을 기업행위로 본다, 평범한 날은 아니다", async () => {

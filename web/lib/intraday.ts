@@ -654,17 +654,29 @@ export const ADJUST_ACTION_TOLERANCE = 0.02;
 export const ADJUST_MIN_FACTOR = 0.005;
 export const ADJUST_MAX_FACTOR = 200.0;
 export const ACTION_GUARD_ROWS = 20;
+/** 등락률이 빈 날(야후 대체 출처)의 문턱 — 하루 움직임이 국내 가격제한폭 밖이면 종가 비율을 계수로 본다.
+ * 배치 `adjust.KR_UNKNOWN_PCT_JUMP`(= `markets.KR_DAILY_LIMIT`)와 같다 (25.1852) */
+export const KR_UNKNOWN_PCT_JUMP = 0.3;
 
-/** 최근 행(새것부터, `ACTION_GUARD_ROWS + 1` 개)에 기업행위가 있었나 — 국내 */
+/** 최근 행(새것부터, `ACTION_GUARD_ROWS + 1` 개)에 기업행위가 있었나 — 국내. 계수는 배치 `adjust.guard_factor` 와 같다:
+ * 등락률이 있으면 `factor_of`, 없으면 가격제한폭 밖일 때만 종가 비율 (25.1852 — 예전엔 등락률 빈 날을 건너뛰어 25.1554 가
+ * 배치에만 들어갔다. 관심 종목만 걸린 종목이 그날 분할하면 거짓 거래량·목표가 알림) */
 export function recentActionKr(rows: Array<{ close: number; change_pct: number | null }>): boolean {
   for (let i = 0; i + 1 < rows.length; i += 1) {
     const close = Number(rows[i].close);
     const prev = Number(rows[i + 1].close);
     const pct = rows[i].change_pct;
-    if (pct === null || pct === undefined || !(prev > 0) || !(close > 0)) continue;
-    const ratio = 1 + Number(pct) / 100;
-    if (ratio <= 0) continue;
-    const factor = close / prev / ratio;
+    if (!(prev > 0) || !(close > 0)) continue;
+    let factor: number;
+    if (pct === null || pct === undefined) {
+      const 비 = close / prev;
+      if (Math.round(Math.abs(비 - 1) * 1e6) / 1e6 <= KR_UNKNOWN_PCT_JUMP) continue;
+      factor = 비;
+    } else {
+      const ratio = 1 + Number(pct) / 100;
+      if (ratio <= 0) continue;
+      factor = close / prev / ratio;
+    }
     if (factor < ADJUST_MIN_FACTOR || factor > ADJUST_MAX_FACTOR) continue;
     if (Math.abs(factor - 1) > ADJUST_ACTION_TOLERANCE) return true;
   }
