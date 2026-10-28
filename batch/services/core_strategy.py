@@ -23,12 +23,13 @@ from __future__ import annotations
 
 import bisect
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 from functools import partial
 from typing import Any
 
 from batch.services import backtest as bt
+from batch.services import company as co
 from batch.services import core_backtest as cb
 from batch.services import paper as pp
 from batch.services import report_picks
@@ -44,7 +45,7 @@ class Variant:
     sell_rule: str  # `pp.SELL_RULES` 열쇠
     entry: str  # tranche(3회 분할 지정가) · open(시가 일괄)
     top_n: int
-    selection: str  # signal · random · weighted(지주사 H)
+    selection: str  # signal · random · weighted(지주사 H) · committee(위원회 회사 — 탐색 변형, 25.1904)
 
 
 #: 핵심 변형 다섯 — 짝 차이가 운영과 같은 뜻(H−G 선정, G−B 매도, B−R 선정 대 무작위)
@@ -54,6 +55,16 @@ VARIANTS: dict[str, Variant] = {
     "core_b": Variant("B", "core", "tranche", 5, "signal"),
     "core_r1": Variant("R1", "core", "open", 5, "random"),
     "core_r2": Variant("R2", "core", "open", 5, "random"),
+}
+
+#: 탐색 변형 — 전략 깔때기 0단계(docs/funnel.md 4장, 25.1904). 핵심 H 판정(`VARIANTS` — 11-03 기본 실행·시도 수)에는
+#: 넣지 않고 탐색 실행기가 따로 돌린다. 위원회 회사(D 장기보유·E 안정)는 하루 재료(`DayView`)의 같은 안건·모집단으로
+#: 운영 `jobs/paper.committee_step` 과 같은 `co.meet` 를 다시 열어 가결 행을 미리 고름으로 넘긴다. 상위 몇 종목은
+#: 운영처럼 헌장 `top_n` 이 정한다(여기 `top_n` 은 헌장을 읽을 때 덮인다). 가치(A)·모멘텀(C)은 매도 규칙이 사기 전
+#: 점검(`PREBUY_CHECK_RULES`)이라 아직 못 돈다(funnel.md 4장 ⑤)
+EXPLORE_VARIANTS: dict[str, Variant] = {
+    "core_d": Variant("D", "time", "tranche", 5, "committee"),
+    "core_e": Variant("E", "core", "tranche", 10, "committee"),
 }
 
 #: 비중(자본 1)을 운영 함수가 먹는 원화 금액으로 바꾸는 명목 자본. 크게 잡아 정수 주 내림이 비중에 1e-6 아래로만
@@ -189,6 +200,51 @@ def holding_skips(dv: cb.DayView, top_n: int, held: set[int]) -> list[dict[str, 
     return out
 
 
+def _meet(dv: cb.DayView, charter: dict[str, Any]) -> tuple[list[co.Item], list[co.Item]]:
+    """그 회사의 회의 — 운영 `committee_step` 처럼 하루 안건의 앞 `agenda` 개와 그날 모집단으로.
+
+    `DayView` 가 표를 낼 때와 같은 호출이다
+    """
+    return co.meet(dv.agenda[: int(charter["agenda"])], charter, dv.population)
+
+
+def committee_rows(dv: cb.DayView, account: str) -> list[report_picks.SignalRow]:
+    """위원회 회사가 가결한 종목의 신호 행 — 표 순, 한 종목 안에서는 기간 순(운영 `committee_step` 의 `가결행`).
+
+    `DayView.approved` 는 시장 판단기가 H 의 표를 낼 때 같은 `co.meet` 로 이미 냈다 — 다시 열지 않는다
+    """
+    행들: dict[int, list[report_picks.SignalRow]] = {}
+    for r in report_picks.with_criteria(dv.rows):
+        행들.setdefault(r.stock_id, []).append(r)
+    순서 = report_picks._기간_순
+    return [r for i in dv.approved.get(account, []) for r in sorted(행들.get(i.stock_id, []),
+                                                                    key=lambda r: 순서.get(r.horizon, 9))]  # fmt: skip
+
+
+def committee_skips(dv: cb.DayView, charter: dict[str, Any], held: set[int]) -> list[dict[str, Any]]:
+    """위원회가 부결했거나 가결이나 표 순 밖인 안건의 skip 결정 — 운영 `committee_step` 과 같은 사유.
+
+    결정 단위 잣대(`selection_evidence`)의 "안 산 새 후보" 풀이 운영 회사와 같게(`holding_skips` 와 같은 까닭, 25.1634).
+    신호 행이 있는 종목만
+    """
+    items, approved = _meet(dv, charter)
+    가결 = {i.stock_id for i in approved}
+    행: dict[int, report_picks.SignalRow] = {}
+    for r in report_picks.with_criteria(dv.rows):
+        행.setdefault(r.stock_id, r)
+    out: list[dict[str, Any]] = []
+    for i in items:
+        if i.stock_id in 가결 or i.stock_id not in 행:
+            continue
+        r0 = 행[i.stock_id]
+        까닭 = i.reason if not i.passed else f"위원회: 가결이나 표 순 상위 {int(charter['top_n'])} 밖"
+        out.append({"stock_id": i.stock_id, "kind": "skip", "reason": 까닭, "ref_close": r0.close,
+                    "ref_date": r0.close_date,
+                    "detail": {"horizon": r0.horizon, "score": r0.total_score,
+                               "held": i.stock_id in held}})  # fmt: skip
+    return out
+
+
 class CoreStrategy:
     """변형 하나의 장부형 판단 함수(`bt.WeightsAt`). 시장 판단기(`CoreMarket`)는 변형마다 따로 —
     cutoff 가 순차여야 한다.
@@ -204,9 +260,17 @@ class CoreStrategy:
     ) -> None:  # fmt: skip
         from batch.jobs import paper as jp
 
-        if variant not in VARIANTS:
-            raise ValueError(f"모르는 변형 {variant} — {sorted(VARIANTS)}")
-        self.variant, self.v = variant, VARIANTS[variant]
+        v = VARIANTS.get(variant) or EXPLORE_VARIANTS.get(variant)
+        if v is None:
+            raise ValueError(f"모르는 변형 {variant} — {sorted({*VARIANTS, *EXPLORE_VARIANTS})}")
+        self.charter: dict[str, Any] | None = None
+        if v.selection == "committee":
+            if v.account not in market.charters:
+                raise ValueError(f"변형 {variant} 의 회사 {v.account} 헌장이 시장 판단기에 없다 — voters 에 넣는다")
+            self.charter = market.charters[v.account]
+            # 운영 run_step: 위원회 회사의 상위 몇 종목은 헌장 `top_n`(`종목수 = int(헌장들[aid]["top_n"])`)
+            v = replace(v, top_n=int(self.charter["top_n"]))
+        self.variant, self.v = variant, v
         if self.v.sell_rule in jp.PREBUY_CHECK_RULES:
             # 사면 바로 팔 후보(재무악화·감성·점검)는 백테스트에 자료가 없다 —
             # 핵심 변형은 core·trend 라 운영도 보지 않는다(`prebuy_sell_flags`)
@@ -366,6 +430,8 @@ class CoreStrategy:
         """(신호 행, 미리 고른 행) — H 는 지주사 합의(`pick_rows`), 나머지는 `buy_orders` 가 점수 상위를 고른다."""
         if self.v.selection == "weighted":
             return dv.rows, list(dv.pick_rows)
+        if self.v.selection == "committee":
+            return dv.rows, committee_rows(dv, self.v.account)
         return dv.rows, None
 
     def _buys(
@@ -396,7 +462,8 @@ class CoreStrategy:
             client, market=self.market.country, account=self.v.account, account_fills=[], valuation=v, open_buys=[],
             signal_rows=rows, settings=self.settings, price_series={}, series_unknown={}, fx_rate=None,
             stop_ids=손절, sold_recently=최근판, stock_cache=self._cache, top_n=self.v.top_n, entry=self.v.entry,
-            substitute=바꾸기, preselected=미리, preselected_reason="지주사 합의",
+            substitute=바꾸기, preselected=미리,
+            preselected_reason="지주사 합의" if self.v.selection == "weighted" else "위원회 가결",
         )  # fmt: skip
         # ④ 사전 위험 점검 — 운영 `run_step` 과 같은 후보·같은 문맥(보유는 오늘 매도 전, 업종은 후보까지)
         후보 = [rg.Candidate(o["stock_id"], "buy", o["cost_krw"], o["ref_date"], i, o["cash_krw"])
@@ -418,6 +485,8 @@ class CoreStrategy:
             log.decisions.append(d)
         if self.v.selection == "weighted":
             log.decisions += holding_skips(dv, self.v.top_n, {sid for sid, x in w.items() if x > 0})
+        if self.v.selection == "committee" and self.charter is not None:
+            log.decisions += committee_skips(dv, self.charter, {sid for sid, x in w.items() if x > 0})
         buys: dict[int, float] = {}
         첫주문: dict[int, dict[str, Any]] = {}
         for o in 주문:
