@@ -240,6 +240,7 @@ def test_진도_문이_달린_예약_작업은_주기_표에서_뺄_수_없다()
     걸림 = [
         파일 for 파일 in 표에_없는_이유
         if 파일 not in 문_달려도_빼는_것
-        and "TURSO_READ_ESTIMATE" in (뿌리 / ".github/workflows" / 파일).read_text(encoding="utf-8")
+        and any(문 in (뿌리 / ".github/workflows" / 파일).read_text(encoding="utf-8")
+                for 문 in ("TURSO_READ_ESTIMATE", "turso_read_gate"))  # CLI 로 문을 보는 워크플로도 (25.1832)
     ]  # fmt: skip
     assert not 걸림, 걸림

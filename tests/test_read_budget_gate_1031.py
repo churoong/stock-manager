@@ -127,7 +127,11 @@ def test_연_2회_배당은_진도선_없이_월_상한만_본다(monkeypatch: p
 def test_새_편입_뒤_단계는_진도_문을_다시_보지_않는다() -> None:
     """25.1831 — 유니버스·재무가 문을 지난 뒤 같은 워크플로의 새 편입 지표·배당이 앞 단계가 읽은 만큼 미뤄지면 25.1819·
     25.1823 이 고친 결측이 되돌아온다"""
-    for 파일, 명령 in (("universe.yml", "metrics --only-missing"), ("financials.yml", "dividends --only-missing")):
+    for 파일, 명령 in (("universe.yml", "metrics --only-missing"), ("financials.yml", "dividends --only-missing"),
+                     ("financials.yml", "kr_cashflow")):  # fmt: skip
         글 = yaml.safe_load((WORKFLOWS / 파일).read_text(encoding="utf-8"))
         단계 = next(s for s in 글["jobs"]["run"]["steps"] if 명령 in str(s.get("run", "")))
-        assert 단계.get("env", {}).get(entry.READ_ESTIMATE_ENV) == "", 파일
+        # 진도선만 빼고 월 상한은 남긴다 (25.1832, 교차검증 [필수] — 문을 통째로 끄면 상한까지 꺼졌다)
+        assert str(단계.get("env", {}).get(entry.READ_NO_PACE_ENV)) == "1", (파일, 명령)
+        assert entry.READ_ESTIMATE_ENV not in 단계.get("env", {}), (파일, 명령)  # 잡의 추정치를 그대로 물려받는다
+        assert 글["jobs"]["run"]["env"][entry.READ_ESTIMATE_ENV], 파일

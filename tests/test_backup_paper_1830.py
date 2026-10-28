@@ -23,7 +23,7 @@ import restore_backup  # noqa: E402
 def _모의표() -> set[str]:
     표 = set()
     for p in sorted((ROOT / "migrations").glob("*.sql")):
-        표 |= set(re.findall(r"CREATE TABLE IF NOT EXISTS (paper_\w+)", p.read_text(encoding="utf-8")))
+        표 |= set(re.findall(r"CREATE TABLE (?:IF NOT EXISTS )?(paper_\w+)", p.read_text(encoding="utf-8")))
     return 표 - 임시표
 
 
