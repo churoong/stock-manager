@@ -51,7 +51,7 @@ def test_든_종목은_비용으로_줄지_않는다() -> None:
 
 
 def test_현금이_모자라면_예전처럼_자본_전체에() -> None:
-    """비중 1.0 을 사면 현금 0 < 비용 — 자본 전체에 비례로(예전 식): 자본 1 − 0.001 × 0.5 × 2 / 2 …"""
+    """비중 1.0 을 사면 현금 0 < 비용 — 자본 전체에 비례로(예전 식): 비용 = 회전율 0.5 × (0.001 × 2) = 0.001, 자본 0.999"""
     r = _돌림({1: bt.LedgerOrders(buys={1: 1.0})}, {1: [100.0, 100.0, 100.0, 100.0]})
     reb = r.rebalances[1]
     assert reb.cost == pytest.approx(0.001)  # 회전율 0.5 × 0.002
@@ -68,3 +68,29 @@ def test_비중형은_예전_그대로() -> None:
 
 def test_엔진_판은_7() -> None:
     assert bt.CALC_VERSION == 7
+
+
+def test_현금이_모자란_날의_지정가_몫도_예전_식() -> None:
+    """25.1961 (25.1957 교차검증 [권고]) — 대체 길의 지정가 갈래(`elif 지정가비율`)를 손으로. 둘째 날 종목 1 을 0.6(종가),
+    종목 2 를 지정가 50 회차 0.4 로 산다(종가 49 — 찬다). Σ목표 1.0 이라 현금 0 < 비용 0.001(회전율 0.5 × 0.002) → 예전 식:
+    종목 2 몫 = 0.4 × 49/50 = 0.392, 남음 = 1 − 1.0 + 0.6 + 0.392 = 0.992, 자본 = 0.999 × 0.992, 비중 = 값 ÷ 0.992"""
+    r = _돌림({1: bt.LedgerOrders(buys={1: 0.6}, limits={2: ((0.4, 50.0),)})},
+              {1: [100.0, 100.0, 100.0, 100.0], 2: [50.0, 49.0, 49.0, 49.0]})  # fmt: skip
+    reb = r.rebalances[1]
+    assert reb.cost == pytest.approx(0.001)
+    assert dict(r.curve)[날[1]] == pytest.approx(0.999 * 0.992)
+    assert reb.weights[1] == pytest.approx(0.6 / 0.992) and reb.weights[2] == pytest.approx(0.392 / 0.992)
+
+
+def test_매도_대금과_거래세도_현금에서() -> None:
+    """25.1961 (25.1957 교차검증 note) — 매도 쪽 손 계산. 수수료 0·거래세 0.2%. 둘째 날 종목 1·2 를 0.4 씩, 셋째 날 종목 2
+    전량 매도: 세금 = 0.4 × 0.002 = 0.0008 은 현금에서만 — 종목 1 값 0.4 그대로, 자본 0.9992"""
+    세금 = bt.Costs(commission_pct=0.0, tax_sell_pct=0.2, slippage_pct=0.0)
+    prices = {1: {d: 100.0 for d in 날}, 2: {d: 50.0 for d in 날}}
+    판단 = {1: bt.LedgerOrders(buys={1: 0.4, 2: 0.4}), 2: bt.LedgerOrders(sells=frozenset({2}))}
+    r = bt.simulate(prices, 날, 날, lambda d, _v: 판단.get(날.index(d), bt.LedgerOrders()), 세금, has_delisted=True)
+    셋 = r.rebalances[2]
+    assert 셋.cost == pytest.approx(0.0008) and 2 not in 셋.weights
+    자본 = dict(r.curve)[날[2]]
+    assert 자본 == pytest.approx(0.9992) and 셋.weights[1] * 자본 == pytest.approx(0.4)
+
