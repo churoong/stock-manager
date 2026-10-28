@@ -14,7 +14,7 @@
 L4(체결·현금)는 견주지 않는다 — 리플레이는 t 종가 전량, 운영 B·G 는 3회 분할 지정가다(docs/backtest.md 10장 "운영과 다른 것").
 그 차이를 지우려고 운영 장부에 날마다 **엔진의 체결을 그대로 베낀다**(허용 ①) — 그래야 다음 날 두 쪽이 같은 보유에서 판단한다.
 
-비용 두 판: `zero`(수수료·세금 0) 는 허용 없이 허용 ③(`ALLOW_NOTIONAL_EQUITY` 2e-7) 안에서 같아야 하고, `fees`(운영 설정 수수료 0.015%·시행일 거래세) 는
+비용 판(이 파일은 둘, 25.1929 의 `slip` 은 R 시험이 더함): `zero`(수수료·세금 0) 는 허용 없이 허용 ③(`ALLOW_NOTIONAL_EQUITY` 2e-7) 안에서 같아야 하고, `fees`(운영 설정 수수료 0.015%·시행일 거래세) 는
 엔진의 비용 장부(허용 ⑨)가 낳는 보유 비중 흔들림만큼만 갈려도 된다. 허용 차이는 모두 이름 붙인 상수로 둔다 — 목록 밖 차이는
 결함이다(`xfail(strict=True)` 로 적고 보고한다).
 """
@@ -99,7 +99,7 @@ _달력 = cal.exchange_calendar("KR").sessions_in_range("2023-01-02", "2024-12-3
 날들 = [d.date().isoformat() for d in _달력][: W + S]
 모의 = 날들[W:]
 NOTIONAL = cs.NOTIONAL_EQUITY
-#: 비용 두 판 — 운영 설정 `fees`(매수·매도 편도), 엔진 `bt.Costs`(슬리피지 0: 지정가 매수는 운영도 슬리피지 없음, 베낀 매도도 0)
+#: 비용 판 — 이 파일은 둘(25.1929 R 시험이 `slip` 을 더한다) — 운영 설정 `fees`(매수·매도 편도), 엔진 `bt.Costs`(슬리피지 0: 지정가 매수는 운영도 슬리피지 없음, 베낀 매도도 0)
 비용판 = {
     "fees": ({"kr_buy_pct": 0.015, "kr_sell_pct": 0.015},
              dc_replace(bt.Costs.for_country("KR", {"kr_buy_pct": 0.015, "kr_sell_pct": 0.015}, {}), slippage_pct=0.0)),
@@ -430,12 +430,12 @@ def _L1(variant: str, 판: str) -> list[str]:
     return [f"{day}: 리플레이 {로그[day].sells} ≠ 운영 {h.sells}" for day, h in live.items() if 로그[day].sells != h.sells]
 
 
-#: `fees` 판에서 줄 쌍을 견딘 날 — 시험이 그 횟수를 단언한다(25.1911)
+#: 비용 판(`fees`·`slip`)에서 줄 쌍을 견딘 날 — 시험이 그 횟수를 단언한다(25.1911)
 견딘날: dict[tuple[str, str], frozenset[int]] = {}
 
 
 def _L2(variant: str, 판: str) -> list[str]:
-    """결정 원장(buy·skip·blocked)의 (종목, kind, 사유, held). `fees` 판은 허용 ⑨(다) 의 채우기 뒤집힘만 견딘다."""
+    """결정 원장(buy·skip·blocked)의 (종목, kind, 사유, held). 비용 판(`fees`·`slip`)은 허용 ⑨(다) 의 채우기 뒤집힘만 견딘다(⑪ 은 등록한 변형만)."""
     rp, live = _리플레이(variant, 판), _운영(variant, 판)
     로그 = _날별(rp)
     틀림 = []
@@ -466,7 +466,7 @@ def _L2(variant: str, 판: str) -> list[str]:
 
 
 def _L3(variant: str, 판: str) -> list[str]:
-    """매수 비중 — 종목마다 |리플레이 − 운영| ≤ 허용 ③ (+ `fees` 판은 그 종목 보유 비중 차이, 허용 ⑨(나))."""
+    """매수 비중 — 종목마다 |리플레이 − 운영| ≤ 허용 ③ (+ 비용 판(`fees`·`slip`)은 그 종목 보유 비중 차이, 허용 ⑨(나))."""
     rp, live = _리플레이(variant, 판), _운영(variant, 판)
     로그 = _날별(rp)
     틀림 = []

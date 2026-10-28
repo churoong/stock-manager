@@ -278,13 +278,15 @@ def test_운영_든_대체_장부가_옛_보유_자리를_남긴다() -> None:
 
 @pytest.mark.xfail(
     strict=True,
+    raises=AssertionError,  # 25.1930 — 다른 예외(예전엔 외래키 IntegrityError)로는 xfail 이 지나가지 못하게
     reason="25.1929 찾은 것 — 운영 held_substitutes 가 옛 보유 회차의 자리를 잇는다(고치지 않음: "
     "25.1700 R 고르기 규칙 지문·R 판 고정, docs/infra.md 25.1929)",
 )
 def test_든_대체_종목은_지금_보유_회차의_자리만_잇는다() -> None:
-    """손 사례 — 종목 5 를 자리 8 로 샀다 팔고, 자리 27 로 다시 샀다. 지금 든 5 는 자리 27 의 대체다(리플레이 `Lot.substitute_of`).
-    운영은 {8: 5, 27: 5} — 자리 8 신호가 다시 오면 5 를 자리 8 로도 이어, 한 종목이 두 자리 돈을 받는다(25.1458 재검증 [필수] 1
-    이 막으려던 "그 자리만 돈이 두 배")."""
+    """손 사례 — 종목 1 을 자리 8 로 샀다 팔고, 자리 27 로 다시 샀다. 지금 든 1 은 자리 27 의 대체다(리플레이 `Lot.substitute_of`).
+    운영은 {8: 1, 27: 1} — 자리 8 신호가 다시 오면 1 을 자리 8 로도 잇는다. 종목 상한(10%) 때문에 그 종목을 상한 위로 사지는
+    않는다(`build_portfolio` 가 종목별로 묶는다). 실제 피해는 자리 8 이 새 무작위 종목을 뽑지 못하는 것 — R 의 투자 종목 수·
+    속도가 줄어 H 관문 "R 대비" 기준선이 기운다(25.1930 바로잡음 — 처음엔 "두 자리 돈" 이라 적었다 `[확인필요: 실행으로]`)."""
     c = Client(accounts=("R2",))
 
     def 주문(oid: int, side: str, 자리: int | None, 날: str) -> None:
@@ -292,10 +294,19 @@ def test_든_대체_종목은_지금_보유_회차의_자리만_잇는다() -> N
         c.conn.execute(
             "INSERT INTO paper_orders (id, account_id, market, stock_id, side, order_type, limit_price, quantity, currency,"
             " decided_on, fill_session, tranche, reason, rule_version, status, created_at, rationale_json) VALUES (?, 'R2',"
-            " 'KR', 5, ?, 'market', NULL, 1, 'KRW', ?, ?, ?, 't', 1, 'filled', 't', ?)",
+            " 'KR', 1, ?, 'market', NULL, 1, 'KRW', ?, ?, ?, 't', 1, 'filled', 't', ?)",
             [oid, side, 날, 날, 1 if side == "buy" else 0, 근거])  # fmt: skip
 
     주문(1, "buy", 8, "2024-01-29")
     주문(2, "sell", None, "2024-02-15")
     주문(3, "buy", 27, "2024-04-08")
-    assert job.held_substitutes(c, "R2", {5}) == {27: 5}
+    # 종목 1 — 시험 Client 의 stocks 표에 있는 종목(25.1930: 예전 5 는 외래키로 깨져 결함이 아닌 까닭으로 xfail 했다)
+    assert job.held_substitutes(c, "R2", {1}) == {27: 1}
+
+
+def test_든_대체_겹침_감지() -> None:
+    """25.1930 (25.1929 교차검증 [권고]) — 고르기 논리(지문)는 R 판 올림 때 고치고, 그 전까지 한 종목이 두 자리 이상인 날을
+    실행 기록(`accounts.<R>.substitute_overlap`)·경고 로그에 남긴다. 위 손 사례의 운영 결과 {8: 1, 27: 1} 이 잡힌다"""
+    assert job.substitute_overlap({8: 1, 27: 1, 3: 2}) == {"1": [8, 27]}
+    assert job.substitute_overlap({8: 1, 27: 2}) == {}
+    assert job.substitute_overlap({}) == {}

@@ -1606,6 +1606,15 @@ SUBSTITUTE_ORDERS_SQL = (
 )
 
 
+def substitute_overlap(held: dict[int, int]) -> dict[str, list[int]]:
+    """든 대체 장부(`held_substitutes` — 신호 자리 → 든 대체 종목)에서 **한 종목이 두 자리 이상**인 것 — {종목: [자리]}.
+    25.1929 찾은 것(팔았다 다시 산 종목의 옛 자리까지 잇는다)의 감지만(25.1930). 고르기 지문 밖이라 R 판과 무관하다"""
+    자리: dict[int, list[int]] = {}
+    for k, v in held.items():
+        자리.setdefault(v, []).append(k)
+    return {str(v): sorted(ks) for v, ks in sorted(자리.items()) if len(ks) > 1}
+
+
 def held_substitutes(client: Any, account: str, holding: set[int]) -> dict[int, int]:
     """{신호 종목: 그 자리로 사서 지금 든 종목} — 무작위 대조가 든 종목을 잇게 (25.1458 재검증 [필수] 1).
 
@@ -2340,8 +2349,16 @@ def run_step(
                 if 무작위:
                     if 유니버스 is None:
                         유니버스 = [int(r[0]) for r in client.execute(UNIVERSE_SQL, [market, market]).rows]
+                    든대체 = held_substitutes(client, aid, set(pp.positions(계좌체결)))
+                    겹친대체 = substitute_overlap(든대체)
+                    if 겹친대체:
+                        # 감지만(25.1930) — 팔았다 다시 산 종목이 옛 자리까지 이어져 한 종목이 두 자리 이상이다
+                        # (25.1929 찾은 것). 고르기 논리(`held_substitutes`, 25.1700 지문)는 R 판 올림 때 고친다 —
+                        # 그 전까지 기운 날이 실행 기록에 남게
+                        a기록["substitute_overlap"] = 겹친대체
+                        log.warning("가상 %s 든 대체 종목이 두 자리 이상: %s", aid, a기록["substitute_overlap"])
                     바꾸기 = partial(random_substitute, client, account=aid, market=market, pool=유니버스,
-                                    held=held_substitutes(client, aid, set(pp.positions(계좌체결))),
+                                    held=든대체,
                                     cooldown=최근판, stock_cache=stock_cache, today=cal.local_today(market),
                                     기록=a기록)  # fmt: skip
                 가결행: list[report_picks.SignalRow] | None = None
