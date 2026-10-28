@@ -69,3 +69,12 @@ def test_요약_본문에_실리고_깨져도_요약은_나간다(monkeypatch: p
     monkeypatch.setattr(ws, "shadow_lines", 깨짐)
     assert ws.run(force=True) == 0
     assert "그림자 장부 절을 만들지 못했습니다 (RuntimeError)" in 보낸[-1] and "그림자본문" not in 보낸[-1]
+
+
+def test_웹_규칙_글은_사전_등록_규칙을_모두_덮는다() -> None:
+    """25.1875 — 웹 그림자 장부 칸(`web/lib/paper.ts` `SHADOW_RULE_TEXT`)이 규칙 정의처(`shadow.RULES`)와 어긋나지 않게"""
+    from pathlib import Path
+
+    글 = (Path(__file__).resolve().parent.parent / "web" / "lib" / "paper.ts").read_text(encoding="utf-8")
+    표 = 글[글.index("SHADOW_RULE_TEXT"): 글.index("};", 글.index("SHADOW_RULE_TEXT"))]
+    assert all(f"  {r.name}:" in 표 for r in sh.RULES), [r.name for r in sh.RULES]

@@ -22,6 +22,7 @@ import {
   type AccountView,
   type Attribution,
   hasCommittee,
+  type ShadowLedger,
   virtualText,
 } from "@/lib/paper";
 import { pageOf } from "@/lib/paging";
@@ -70,7 +71,7 @@ interface RealCompareView { start?: string; end?: string; realPct?: number; pape
 /** 투자위원회 회의록 한 장 (docs/company.md 3·5장) — 배치가 적은 그대로 */
 interface MeetingRow { account_id: string; market: string; decided_on: string; charter_hash: string; minutes_json: string }
 interface DossierRow { market: string; as_of: string; stock_id: number; dossier_json: string }
-export interface Data { halted: boolean; realCompare: RealCompareView | null; invested: number; accounts: Account[]; flows: Flow[]; fills: FillRow[]; orders: OrderRow[]; history: HistoryRow[]; meetings?: MeetingRow[]; dossiers?: DossierRow[] }
+export interface Data { shadow?: ShadowLedger[] | null; halted: boolean; realCompare: RealCompareView | null; invested: number; accounts: Account[]; flows: Flow[]; fills: FillRow[]; orders: OrderRow[]; history: HistoryRow[]; meetings?: MeetingRow[]; dossiers?: DossierRow[] }
 
 /** 매매 일지의 근거는 **주문 때 얼린 것**이라 오래될수록 묵는 값이 아니다 — 기준일을 노랗게 칠하지 않는다 */
 const JOURNAL_NEVER_STALE_DAYS = 100_000;
@@ -241,6 +242,8 @@ export default function PaperView() {
 
       <AccountTabs data={data} acct={acct} setAcct={setAcct} sub={sub} setSub={setSub} desk={desk} />
 
+      <ShadowCard ledgers={data.shadow} />
+
       {data.realCompare ? (
         <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
           <h2 className="text-base font-semibold">실제 투자와 비교</h2>
@@ -351,6 +354,61 @@ export default function PaperView() {
 }
 
 const CARD = "rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900";
+
+/** 단타·스윙 그림자 장부 (docs/paper.md 16.2, 25.1875) — 단기 신호 전부를 규칙대로 가상 체결한 누적 집계. 읽기만 */
+export function ShadowCard({ ledgers }: { ledgers: ShadowLedger[] | null | undefined }) {
+  const 퍼 = (v: number | null | undefined) => (v == null ? "—" : `${v >= 0 ? "+" : ""}${(v * 100).toFixed(2)}%`);
+  return (
+    <section className={CARD}>
+      <h2 className="text-base font-semibold">단타·스윙 그림자 장부</h2>
+      <p className="mt-1 text-xs text-slate-500">
+        2026-09-16 부터 나온 단기 신호 전부를 돈·종목 수 제약 없이 규칙대로 가상 체결한 누적 성적(비용 뒤)입니다. 주 1회(화 06:07 KST)
+        갱신. 같은 종목이 날마다 다시 신호를 내 거래가 겹치므로 거래 수보다 종목 수를 함께 봅니다. 계좌가 아니라 규칙의 표본입니다
+      </p>
+      {ledgers == null ? (
+        <p className="mt-2 text-sm text-amber-600">그림자 장부를 읽지 못했습니다</p>
+      ) : ledgers.length === 0 ? (
+        <p className="mt-2 text-sm text-slate-500">아직 집계가 없습니다 — 첫 집계는 2026-11-03(화) 06:07 KST 신호 성적표 실행 뒤입니다</p>
+      ) : (
+        ledgers.map((l) => (
+          <div key={l.market} className="mt-3 overflow-x-auto">
+            <p className="text-sm font-semibold">
+              {l.market === "KR" ? "국내" : "미국"} <span className="text-xs font-normal text-slate-500">{l.asOf ?? "?"} 기준</span>
+            </p>
+            <table className="mt-1 w-full min-w-[640px] text-xs">
+              <thead className="text-slate-500">
+                <tr>
+                  <th className="text-left font-normal">규칙</th>
+                  <th className="text-right font-normal">끝난 거래(종목)</th>
+                  <th className="text-right font-normal">승률</th>
+                  <th className="text-right font-normal">비용 뒤 평균</th>
+                  <th className="text-right font-normal">중앙</th>
+                  <th className="text-right font-normal">손익비</th>
+                  <th className="text-right font-normal">평균 보유</th>
+                  <th className="text-right font-normal">진행 · 체결 못 함</th>
+                </tr>
+              </thead>
+              <tbody>
+                {l.stats.map(({ rule, text, s }) => (
+                  <tr key={rule} className="border-t border-slate-100 dark:border-slate-800">
+                    <td className="py-1">{text} <span className="text-slate-400">{rule}</span></td>
+                    <td className="text-right">{s.n}({s.stocks ?? "?"})</td>
+                    <td className="text-right">{s.win_rate == null ? "—" : `${Math.round(s.win_rate * 100)}%`}</td>
+                    <td className={`text-right ${tone(s.avg_net)}`}>{퍼(s.avg_net)}</td>
+                    <td className={`text-right ${tone(s.median_net)}`}>{퍼(s.median_net)}</td>
+                    <td className="text-right">{s.profit_factor == null ? "—" : s.profit_factor.toFixed(2)}</td>
+                    <td className="text-right">{s.avg_sessions == null ? "—" : `${s.avg_sessions}거래일`}</td>
+                    <td className="text-right">{s.open} · {s.no_entry}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ))
+      )}
+    </section>
+  );
+}
 
 /**
  * 계좌 비교 (25.1458, 2026-10-15 사용자 지시 "두개의 모의투자자로는 부족할거 같다") — 일곱 계좌를 한 표에.

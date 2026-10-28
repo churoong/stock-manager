@@ -584,3 +584,37 @@ export function haltOn(raw: unknown): boolean {
     return false;
   }
 }
+
+// ── 단타·스윙 그림자 장부 (docs/paper.md 16.2, infra 25.1875) ─────────────────────────────────────
+/** 신호 성적표 실행(주 1회)이 남긴 나라별 집계 — 읽기만. 첫 집계(2026-11-03 06:07 KST) 전에는 행이 없다 */
+export const SHADOW_READ = "SELECT key, value FROM settings WHERE key IN ('shadow_ledger_kr', 'shadow_ledger_us')";
+/** 규칙 이름 → 화면 글. 정의처는 batch/services/shadow.py `RULES` (판이 바뀌면 이름이 바뀐다 — 모르는 이름은 그대로) */
+export const SHADOW_RULE_TEXT: Record<string, string> = {
+  day_v1: "당일 단타 — 다음 장 시가에 사서 그날 종가",
+  swing_v1: "스윙(장중 닿음) — +5%·−3%·10거래일",
+  swing_close_v1: "스윙(종가 판정) — 같은 선을 종가로, 다음 장 시가 · 11월 스윙 계좌 S 의 규칙",
+};
+export interface ShadowStat {
+  n: number; open: number; no_entry: number; stocks?: number;
+  win_rate: number | null; avg_net: number | null; median_net: number | null;
+  profit_factor: number | null; avg_sessions: number | null; reasons?: Record<string, number>;
+}
+export interface ShadowLedger { market: "KR" | "US"; asOf: string | null; stats: Array<{ rule: string; text: string; s: ShadowStat }> }
+/** 설정 행 → 나라별 집계. 깨진 JSON·빈 집계는 뺀다(화면은 "아직 없음") */
+export function shadowLedgers(rows: Array<{ key: string; value: string | null }>): ShadowLedger[] {
+  const out: ShadowLedger[] = [];
+  for (const [key, market] of [["shadow_ledger_kr", "KR"], ["shadow_ledger_us", "US"]] as const) {
+    const r = rows.find((x) => x.key === key);
+    if (!r?.value) continue;
+    let v: { as_of?: string; stats?: Record<string, ShadowStat> } | null = null;
+    try {
+      v = JSON.parse(r.value);
+    } catch {
+      v = null;
+    }
+    const stats = v?.stats && typeof v.stats === "object" ? Object.entries(v.stats) : [];
+    if (!stats.length) continue;
+    out.push({ market, asOf: v?.as_of ?? null, stats: stats.map(([rule, s]) => ({ rule, text: SHADOW_RULE_TEXT[rule] ?? rule, s })) });
+  }
+  return out;
+}

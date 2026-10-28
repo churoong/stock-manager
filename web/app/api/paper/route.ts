@@ -20,7 +20,9 @@ import {
   PAPER_STOCK_NAMES,
   PAPER_TWR,
   HALT_READ,
+  SHADOW_READ,
   haltOn,
+  shadowLedgers,
   REAL_LOOKBACK_DAYS,
   REAL_TWR,
   accountView,
@@ -130,8 +132,16 @@ export async function GET() {
     } catch {
       halted = false; // 못 읽으면 꺼진 것으로 보인다 — 배치는 제 읽기로 판정한다
     }
+    // 단타·스윙 그림자 장부 (25.1875) — 곁다리. 못 읽으면 칸만 빠진다
+    let shadow: ReturnType<typeof shadowLedgers> | null = null;
+    try {
+      shadow = shadowLedgers(rowsToObjects<{ key: string; value: string | null }>(await execute(SHADOW_READ)));
+    } catch {
+      shadow = null;
+    }
     return NextResponse.json({
       halted,
+      shadow,
       realCompare,
       meetings,
       dossiers,
