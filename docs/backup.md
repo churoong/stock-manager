@@ -29,7 +29,7 @@ Turso 무료 플랜에는 **자동 백업이 없다.** 그리고 이 DB 에는 �
 `screener_presets` `stock_aliases`),
 **지나간 시점이라 되받을 수 없는 것**(`financial_snapshots` `news` `article_sentiments`
 `sentiment_scores` `universe_members`), **운영 이력**(`batch_runs` `alerts` `health_alerts`),
-**모의 투자 계좌**(`paper_*` 여섯 — 입금 장부는 사람 입력, 주문·체결·평가·결정 원장은 그날 결정의 기록이라 다시 못 만든다, docs/paper.md, infra 25.1447·25.1449),
+**모의 투자 계좌**(`paper_*` 열둘 — 계좌·입금 장부(사람 입력)·주문·체결·평가·결정 원장·회의록·조사 자료, 그리고 KIS모의투자 장부(`paper_broker_orders`·`paper_broker_daily`)·판 이력(`paper_rule_versions`)·운용 요약(`paper_desk`). 그날 결정·관측의 기록이라 다시 못 만든다, docs/paper.md, infra 25.1447·25.1449·25.1830. 마이그레이션의 `paper_*` 표가 모두 들었는지 `tests/test_backup_paper_1830.py` 가 본다),
 그리고 스키마 버전(`schema_migrations`).
 
 > **2026-09-22**: `screener_presets` 가 빠져 있었다(docs/infra.md 25.118).

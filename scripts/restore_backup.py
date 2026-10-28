@@ -528,7 +528,9 @@ def run(
 
 
 #: 건너뛴 행이 있으면 크게 알리는 표 — 사람이 넣은 것. 나머지 표는 다시 돌릴 때 이미 있는 행을 건너뛰는 것이 정상이다
-사람이_넣은_표 = ("trades", "dividend_receipts", "settings", "watchlist", "screener_presets", "stock_aliases")
+#: 가상모의투자 입금 장부도 사람 입력이다 (25.1830 — 25.1136 때 목록을 만든 뒤 모의 계좌가 생겼다)
+사람이_넣은_표 = ("trades", "dividend_receipts", "settings", "watchlist", "screener_presets", "stock_aliases",
+             "paper_cash_flows")  # fmt: skip
 
 
 def 건너뜀_알림(보냄: dict[str, int], 들어감: dict[str, int]) -> str:

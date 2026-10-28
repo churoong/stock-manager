@@ -89,6 +89,14 @@ ESSENTIAL_TABLES = [
     "paper_decisions",
     "paper_meetings",  # 모의 투자사 회의록 (docs/company.md 5장)
     "paper_dossiers",
+    # **KIS모의투자 장부·판 이력·운용 요약** (25.1830, 결함 회차). 넷 다 빠져 있었다 — 필수 백업으로 되살리면
+    # KIS 주문번호·접수·체결·실현손익(실전 전환 근거인 체결 차이)과 연결일이 사라져 장부 맞추기가 H 보유 전부를
+    # "연결 전" 으로 보고 괴리를 숨기고, 정리 주문이 멈췄다. 판 시작일(`since`)은 그날 관측이라 다시 못 만든다
+    # — 비면 관문·챔피언 판정이 옛 판 성적을 섞는다. 운용 요약 줄은 판정 때 그 날짜 줄을 다시 읽는다(25.1710)
+    "paper_rule_versions",
+    "paper_broker_orders",
+    "paper_broker_daily",
+    "paper_desk",
     "schema_migrations",
 ]
 
