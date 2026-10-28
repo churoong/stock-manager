@@ -144,3 +144,69 @@ def test_T_가_있어도_다른_계좌의_행은_같다(monkeypatch: pytest.Monk
             assert c.q("SELECT COUNT(*) FROM paper_fills WHERE account_id = 'T'")[0][0] >= 2
     for x in 표들:
         assert 결과[0][x] == 결과[1][x], x
+
+
+# ── 25.1884 — 짝이 어긋나는 날 ───────────────────────────────────────────────────────────────
+
+
+def _둘째날(c: Client, monkeypatch: pytest.MonkeyPatch, o: float | None, cl: float, chg: float | None = None,
+          bar1: bool = True) -> dict:  # fmt: skip
+    from tests.test_paper_fill_1620 import 시세
+
+    _하루(c, monkeypatch, "2026-10-14")
+    if bar1:
+        c.conn.execute(
+            "INSERT INTO prices (stock_id, date, open, high, low, close, volume, currency, source, fetched_at,"
+            " change_pct) VALUES (1, '2026-10-15', ?, ?, ?, ?, 1000, 'KRW', 't', 't', ?)",
+            [o, max(o or cl, cl), min(o or cl, cl), cl, chg],
+        )
+    시세(c, 3, "2026-10-15", 10_000, 10_000)
+    _, 기록 = _하루(c, monkeypatch, "2026-10-15", signals=False)
+    return 기록
+
+
+def _상태(c: Client) -> list[tuple]:
+    return c.q("SELECT side, status, close_note FROM paper_orders WHERE account_id = 'T' ORDER BY side")
+
+
+def test_상한가_시가면_사지_않고_짝도_거둔다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """신호 날 종가 10,000 → 시가 12,970(+29.7%) — 엔진의 가격제한폭(±30% 호가 끝)엔 안 걸리지만 그림자와 같은 판정"""
+    c = _계좌(("B",), t=True)
+    _둘째날(c, monkeypatch, 12_970, 12_500)
+    상태 = _상태(c)
+    assert 상태[0][:2] == ("buy", "expired") and "상한가 시가" in 상태[0][2] and "단타 진입 안 함" in 상태[0][2]
+    assert 상태[1] == ("sell", "expired", "단타 짝 매수 안 참")
+    assert c.q("SELECT COUNT(*) FROM paper_fills WHERE account_id = 'T'") == [(0,)]
+    assert c.q("SELECT kind FROM paper_decisions WHERE account_id = 'T' AND kind = 'missed'") == [("missed",)]
+    # 다른 계좌(B, 지정가 회차)는 이 판정을 타지 않는다 — 상한가 매수 판정은 엔진 그대로
+    assert all("단타" not in str(n) for (n,) in c.q("SELECT close_note FROM paper_orders WHERE account_id = 'B'"))
+
+
+def test_시가가_비면_0분_거래를_하지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    c = _계좌(("B",), t=True)
+    _둘째날(c, monkeypatch, None, 10_200)
+    assert _상태(c) == [("buy", "expired", "시가 없음 — 단타 진입 안 함"), ("sell", "expired", "단타 짝 매수 안 참")]
+
+
+def test_짝_매수가_시세를_기다리면_짝_매도도_기다린다(monkeypatch: pytest.MonkeyPatch) -> None:
+    c = _계좌(("B",), t=True)
+    기록 = _둘째날(c, monkeypatch, None, 0, bar1=False)  # 시장엔 10-15 시세가 있는데 종목 1 행만 늦다
+    assert [s for _side, s, _n in _상태(c)] == ["open", "open"] and 기록.get("waiting_pair") == 1
+    _시세(c, "2026-10-15", 10_000, 10_300)  # 늦게 온 행
+    _하루(c, monkeypatch, "2026-10-16", signals=False)
+    assert c.q("SELECT side, price, fill_date FROM paper_fills WHERE account_id = 'T' ORDER BY id") == [
+        ("buy", 10_000, "2026-10-15"), ("sell", 10_300, "2026-10-15")]
+
+
+def test_종가가_하한가면_짝_매도를_다음_장으로_미룬다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """그림자와 다른 유일한 밤샘 — 하한가 종가엔 시장가 매도가 안 찬다(엔진 25.1553)"""
+    c = _계좌(("B",), t=True)
+    _둘째날(c, monkeypatch, 10_000, 7_000, chg=-30.0)
+    assert c.q("SELECT side, price FROM paper_fills WHERE account_id = 'T'") == [("buy", 10_000)]
+    assert c.q("SELECT status, fill_session, deferrals FROM paper_orders WHERE account_id = 'T' AND side = 'sell'") == [
+        ("open", "2026-10-16", 1)]
+    # 미룬 짝 매도는 다음 장 시가로 판정한다(개장 전에 있던 주문) — 짝 매수 확인은 미루기 전 한 번만
+    _시세(c, "2026-10-16", 6_800, 7_100)
+    _하루(c, monkeypatch, "2026-10-16", signals=False)
+    assert c.q("SELECT price, fill_date FROM paper_fills WHERE account_id = 'T' AND side = 'sell'") == [
+        (6_800, "2026-10-16")]

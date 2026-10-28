@@ -28,6 +28,13 @@ from dataclasses import dataclass, field
 KR_LIMIT_UP_OPEN = 0.295
 
 
+def limit_up_open(open_: float | None, prev_close: float | None, country: str) -> bool:
+    """국내 시가가 전일(신호 날) 종가 대비 `KR_LIMIT_UP_OPEN` 이상 — 상한가 시가라 사지 않는다. 그림자와 당일 단타
+    계좌 T 가 같이 쓴다(25.1884 — 엔진의 가격제한폭 판정 `limit_locked` 은 호가 반올림한 ±30% 끝이라 +29.5~30% 시가에서
+    갈렸다)"""
+    return bool(country == "KR" and prev_close and open_ and open_ / prev_close - 1 >= KR_LIMIT_UP_OPEN)
+
+
 @dataclass(frozen=True)
 class Bar:
     """분할만 반영한 하루 시세(배당 미포함 — 신호 성적표와 같은 계열)."""
@@ -134,7 +141,7 @@ def simulate(stock_id: int, signal_date: str, bars: list[Bar], rule: Rule, costs
         return Trade(stock_id, signal_date, rule.name, "no_entry" if bars else "open",
                      reason="시세 없음" if bars else None)  # fmt: skip
     첫 = bars[0]
-    if country == "KR" and prev_close and 첫.open / prev_close - 1 >= KR_LIMIT_UP_OPEN:
+    if limit_up_open(첫.open, prev_close, country):
         return Trade(stock_id, signal_date, rule.name, "no_entry", entry_date=첫.date, reason="상한가 시가")
     slip = costs.slippage_pct / 100
     진입 = 첫.open * (1 + slip)  # 시가 시장가 매수 — 슬리피지 불리하게
