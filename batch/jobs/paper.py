@@ -1951,7 +1951,8 @@ def committee_step(
                                                                             default=str), now])
                  for d in cache["agenda"]]  # fmt: skip
         cache["dossiers_written"] = True
-    메모 = co.memo(str(charter.get("name") or account), items, approved)
+    # 헌장 이름이 없으면 화면 이름으로 — 🏛 줄이 메모 첫머리(회사 이름)만 싣는다(25.1899, 25.1893 교차검증 [참고])
+    메모 = co.memo(str(charter.get("name") or pp.account_name(account)), items, approved)
     지문 = co.charter_hash(charter)
     # 회의록에 조사 자료 기준일을 함께 — 화면이 근거(시장의 최신 조사 자료)가 이 회의의 것인지 가른다(25.1582).
     # 회의 날(`trade_date`)과 조사 기준일은 보통 하루 다르다

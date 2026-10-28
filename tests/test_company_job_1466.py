@@ -227,3 +227,14 @@ def test_review_lines_threshold_and_order() -> None:
     # 문턱 — 4.9%p 는 빼고 6%p 는 싣는다(셋 안에 들어도)
     줄 = co.review_lines([], 결정들[:1] + 결정들[3:4], {}, {"A": {"name": "가치투자사"}})
     assert [x.split(" ")[4].rstrip(":") for x in 줄 if x.startswith("  A 2026-09-20")] == ["4"]
+
+
+def test_헌장_이름이_없으면_메모는_화면_이름으로(c: Client, monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1899 (25.1893 교차검증 [참고]) — 🏛 줄은 메모 첫머리(회사 이름)만 싣는다. 헌장에 이름이 없으면 예전엔 계좌 id
+    ("A 위원회:")가 그대로 나가 다른 줄의 화면 이름과 어긋났다."""
+    ch = json.loads(c.q("SELECT charter_json FROM paper_accounts WHERE id = 'A'")[0][0])
+    ch.pop("name", None)
+    c.conn.execute("UPDATE paper_accounts SET charter_json = ? WHERE id = 'A'", [json.dumps(ch)])
+    줄, 기록 = _하루(c, monkeypatch, "2026-10-14")
+    assert 기록["accounts"]["A"]["committee"]["memo"].startswith("가치 위원회:"), 기록["accounts"]["A"]["committee"]
+    assert any(x.startswith("🏛 가치 위원회:") for x in 줄)

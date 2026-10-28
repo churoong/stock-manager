@@ -19,6 +19,8 @@ from batch.services.paper import account_name as _account_name
 KIND = {"A": "회사", "C": "회사", "D": "회사", "E": "회사", "B": "기준(점수 상위)", "G": "추세 익절",
         "H": "지주사(KIS가 베낌)", "R1": "무작위 대조", "R2": "무작위 대조", "S": "스윙(단기 신호)",
         "T": "당일 단타(단기 신호)"}  # fmt: skip
+
+
 def _이름(aid: object) -> str:
     """계좌 화면 이름(25.1893) — 사람에게 보이는 글에만. 식별자는 그대로 열쇠로 쓴다"""
     return _account_name(str(aid)) if aid is not None else ""
