@@ -18,6 +18,7 @@ from __future__ import annotations
 import math
 import statistics
 from statistics import NormalDist
+from typing import Any
 
 EULER_GAMMA = 0.5772156649
 #: 이보다 짧으면 판정하지 않는다(월 수) — 왜도·첨도가 의미 없다
@@ -36,6 +37,13 @@ def monthly_returns(curve: list[tuple[str, float]]) -> dict[str, float]:
 
 def excess_series(strategy: dict[str, float], bench: dict[str, float]) -> list[float]:
     return [strategy[m] - bench[m] for m in sorted(strategy) if m in bench]
+
+
+def excess_months(strategy: dict[str, float], bench: dict[str, float]) -> list[list[Any]]:
+    """[[YYYY-MM, 초과]] — `excess_series` 와 같은 값에 달 이름을 붙인다(반올림 없음). 결과 행 `metrics_json` 의
+    `monthly_excess` 로 실려 판정판 걷는 창(`scoreboard.walk_windows`)·코호트 DSR 의 재료가 된다
+    (25.1947, funnel.md 2.2)"""
+    return [[m, strategy[m] - bench[m]] for m in sorted(strategy) if m in bench]
 
 
 def moments(xs: list[float]) -> tuple[float, float, float] | None:

@@ -46,8 +46,8 @@
 | 비용 반영 CAGR·초과 CAGR·비용 몫 | `bt.summarize` — **판정판 칸 됨(25.1919)**. 비용 몫 = (비용 0 CAGR − 비용 반영 CAGR) ÷ 비용 0 CAGR, 같은 실행의 `*_no_cost` 짝이 있을 때만(지금 composite 하나) |
 | 무작위 대조 분위 묶음 하한 | `core_evidence.evidence`, 운영 `pp.selection_evidence().control` — **판정판 칸 됨(25.1919)**: `metrics_json.evidence.lower`(핵심 H·탐색만) |
 | 결정 단위 분위 하한 | `pp.selection_evidence`·`block_bound`, 핵심 H `gate_evidence` — **판정판 칸 됨(25.1919)**: `metrics_json.evidence.gate.lower`(핵심 H·탐색만) |
-| DSR(N = 누적, V = 코호트) | `luck.judge(n_floor=…)` — 시도마다 월 초과수익 계열을 남겨야 함(새로). **판정판 칸 됨(25.1919)**: 저장된 `metrics_json.luck`(dsr·우연 %·N) — V 는 그 실행의 곡선들, 코호트 V 는 계열 저장 뒤 |
-| 앞·뒤 반 / 걷는 창(12개월 창마다 초과 부호) | `split_half` / 새로(순수 함수) — **됨(25.1919)**: 앞·뒤 반은 `metrics_json.split_half`(핵심 H·탐색만), 걷는 창은 `scoreboard.walk_windows`(아래 식) — 월 초과 계열이 저장되기 전까지 판정판 칸은 비어 있다 |
+| DSR(N = 누적, V = 코호트) | `luck.judge(n_floor=…)` — **월 초과 계열 저장 됨(25.1947 — 결과 행 `metrics_json.monthly_excess`, 기준 전략 빼고)**. **판정판 칸 됨(25.1919)**: 저장된 `metrics_json.luck`(dsr·우연 %·N) — V 는 그 실행의 곡선들, 코호트 V(실행 여럿의 계열을 모음)는 남음 |
+| 앞·뒤 반 / 걷는 창(12개월 창마다 초과 부호) | `split_half` / 새로(순수 함수) — **됨(25.1919)**: 앞·뒤 반은 `metrics_json.split_half`(핵심 H·탐색만), 걷는 창은 `scoreboard.walk_windows`(아래 식) — **판정판 칸 됨(25.1947)**: 결과 행의 `monthly_excess` 로 `walk_positive`/`walk_total`(25.1947 전 실행은 까닭과 함께 빈다) |
 | MDD·투자 비중·평균 보유 수·회전율 | `bt.summarize` — **판정판 칸 됨(25.1919)**: `metrics_json.mdd`·`invested_share`·`avg_holdings`, `turnover_avg` 열 |
 | 수용량(목표 금액 ÷ 보유 종목 20일 평균 거래대금) | 새로 — **함수 됨(25.1919)**: `scoreboard.capacity`(아래 식). 실행 기록에 보유 내역·거래대금이 없어 판정판 칸은 비어 있다 |
 | 표본(개월·28일 묶음·서로 다른 종목·끝난 거래) | 위 함수들 — **판정판 칸 됨(25.1919)**: 개월(`luck.months`)·리밸런스 수·첫 매수 수·묶음 수(대조·관문)·판 뒤 매도 수. 서로 다른 종목·끝난 거래는 저장되지 않아 빈다 |
@@ -60,12 +60,12 @@
 - **어디에**: 백테스트 실행(`backtest`·`backtest_core`·`backtest_explore`·`backtest_limit`)이 결과 행을 다 실은 뒤 그 실행 하나의 줄을 `batch_runs.step_log.scoreboard` 에
   (`jobs/backtest.scoreboard_log` — `store_run(kept=…)` 이 남긴 행을 메모리에서 `scoreboard.rows([이 실행])` 에 넣는다. Turso 다시 읽기 0). 줄마다 웹이 보이는 칸만
   (`scoreboard.STEP_LOG_COLS` — 전략·시장·코호트·누적 시도·CAGR·초과 CAGR·MDD·DSR·N·대조 하한·관문 하한·앞/뒤 반 CAGR·개월·리밸런스·매수·묶음 둘·판 뒤 매도)과
-  그 칸의 `missing` 까닭(80자까지). sha·작업 이름·묶음은 같은 step_log 의 `params`·`group_id` 에 있어 줄에 되풀이하지 않는다. 늘 비는 칸(걷는 창·수용량·서로 다른 종목·끝난 거래)은 싣지 않는다
+  그 칸의 `missing` 까닭(80자까지). sha·작업 이름·묶음은 같은 step_log 의 `params`·`group_id` 에 있어 줄에 되풀이하지 않는다. 걷는 창은 두 수(`walk_positive`·`walk_total`, 25.1947)만 싣고, 늘 비는 칸(수용량·서로 다른 종목·끝난 거래)은 싣지 않는다
 - **깨지면**: 실행은 성공으로 닫고 `step_log.scoreboard_error` 에 까닭(다른 진단과 같은 꼴)
 - **어디서 보나**: /backtest 의 **"판정판" 카드** — 고른 묶음을 낸 실행 기록의 줄. 그 기록에 판정판이 없으면(25.1940 전 실행·도는 중·실패·기록 깨짐 — 까닭은 단정하지 않는다) 그 시장에서 판정판이 실린 가장 최근 실행으로 물러나고 그렇다고 적는다
   (`pickScoreboard`, 25.1941). 경고·비용 몫은 싣지 않고, 같은 화면에 그 자리(경고 띠·"종합 점수 (비용 0)" 줄 — 비용 0 사본은 장기 문턱 비교(only_long)를 뺀 월 실행에만)가 있을 때만 그곳을 가리킨다 — 물러난 판정판이면 위 결과와 다른 실행이라고 적고, 결과 표가 없으면 줄을 내지 않는다(`elsewhereNote`, 25.1942·25.1943).
   값은 꼴만 바꾸고(%·소수 자리), 빈 칸은 "없음: 칸 — 까닭" 으로 적는다(`web/lib/scoreboard.ts`)
-- **아직 아닌 것**: 실행 여럿을 모은 판정판(같은 sha 의 가장 늦은 실행 — `rows(runs)` 의 열쇠 묶기)은 화면이 실행 하나씩만 보여 아직 쓰지 않는다 · 3장 문턱 적용 · 걷는 창·수용량 칸(재료 미저장)
+- **아직 아닌 것**: 실행 여럿을 모은 판정판(같은 sha 의 가장 늦은 실행 — `rows(runs)` 의 열쇠 묶기)은 화면이 실행 하나씩만 보여 아직 쓰지 않는다 · 3장 문턱 적용 · 수용량 칸(재료 미저장)
 
 판정판 모듈(25.1919)의 약속:
 

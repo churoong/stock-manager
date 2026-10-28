@@ -55,7 +55,7 @@ TODAY_UNIVERSE_PREFIX = "과거 유니버스 스냅샷 없음"
 WALK_WINDOW_MONTHS = 12
 
 #: 아직 저장되지 않아 늘 비는 칸의 까닭
-WHY_WALK = "월 초과수익 계열 미저장 — 시도마다 계열을 남기는 일은 다음 단계(funnel.md 2.2 DSR 줄 '새로')"
+WHY_WALK = "월 초과수익 계열 미저장 — 25.1947 전 실행(결과 행 metrics_json.monthly_excess 없음)"
 WHY_CAPACITY = "목표 금액·보유 종목 20일 평균 거래대금 미저장 — 실행 기록에 보유 내역이 없다"
 WHY_DISTINCT = "서로 다른 종목 수 미저장 — 증거의 buys 는 첫 매수 수(같은 종목 되풀이 포함)"
 WHY_CLOSED = "끝난 거래 수 미저장 — 판 뒤(after_sell)의 sells 는 20 거래일이 찬 매도 수다"
@@ -209,7 +209,20 @@ def _row(run: dict[str, Any], r: dict[str, Any], twins: dict[str, dict[str, Any]
         p = (half or {}).get(part) if isinstance((half or {}).get(part), dict) else None
         put(f"half_{part}_cagr", _num((p or {}).get("cagr")), why_h if p is None else f"{part} 반 CAGR 표본 미달")
         put(f"half_{part}_mdd", _num((p or {}).get("mdd")), why_h if p is None else f"{part} 반 MDD 표본 미달")
-    put("walk", None, WHY_WALK)
+    # 걷는 창(25.1947) — 결과 행에 실린 월 초과 계열(`metrics_json.monthly_excess`)을 `walk_windows` 로
+    me = mj.get("monthly_excess")
+    if name == "benchmark":
+        why_w = "기준 전략 자체 — 초과가 0"
+    elif not isinstance(me, list):
+        why_w = WHY_WALK
+    elif not all(isinstance(x, (list, tuple)) and len(x) == 2 and _num(x[1]) is not None for x in me):
+        why_w, me = "metrics_json.monthly_excess 를 읽지 못함", None
+    else:
+        why_w = ""
+    w = walk_windows([(str(k), float(v)) for k, v in me]) if why_w == "" and isinstance(me, list) else None
+    put("walk", w, why_w)
+    put("walk_positive", (w or {}).get("positive"), why_w)
+    put("walk_total", (w or {}).get("total"), why_w)
 
     # 수용량 — 아직 재료 미저장
     put("capacity", None, WHY_CAPACITY)
@@ -275,12 +288,13 @@ def rows(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
 #: 실행 기록(`step_log["scoreboard"]`)에 싣는 칸 — 웹 /backtest "판정판" 이 보이는 칸만(25.1940). 실행 하나의 줄이라
 #: sha·작업 이름·묶음은 같은 step_log 의 `params`·`group_id` 에 이미 있어 줄마다 되풀이하지 않는다.
 #: `runs` 는 늘 1 이라 뺀다.
-#: 늘 비는 칸(걷는 창·수용량·서로 다른 종목·끝난 거래)도 뺀다 — 까닭은 이 모듈의 `WHY_*` 그대로이고 웹이 한 줄로 적는다.
+#: 걷는 창은 창 수·초과 > 0 창 수 두 칸으로 싣는다(25.1947 — 창마다의 기간·합은 결과 행의 계열로 다시 낼 수 있다).
+#: 늘 비는 칸(수용량·서로 다른 종목·끝난 거래)은 뺀다 — 까닭은 이 모듈의 `WHY_*` 그대로이고 웹이 한 줄로 적는다.
 #: 웹 `lib/scoreboard.ts` 의 `SCOREBOARD_KEYS` 와 같아야 한다(시험이 대조)
 STEP_LOG_COLS = (
     "strategy", "market", "cohort", "trials_cumulative", "cagr", "excess_cagr", "mdd", "dsr", "dsr_n",
-    "control_lower", "gate_lower", "half_first_cagr", "half_second_cagr", "months", "rebalances", "buys",
-    "control_blocks", "gate_blocks", "sells_scored",
+    "control_lower", "gate_lower", "half_first_cagr", "half_second_cagr", "walk_positive", "walk_total", "months",
+    "rebalances", "buys", "control_blocks", "gate_blocks", "sells_scored",
 )  # fmt: skip
 #: 까닭 글 최대 길이 — step_log 크기를 묶는다(월 실행 줄 약 20개 × 빈 칸 약 10개). 넘는 까닭은 잘린다
 WHY_MAX = 80

@@ -2003,8 +2003,12 @@ def run(
             summary = bt.summarize(result, None if strategy == "benchmark" else bench, risk_free_annual=무위험)
             # 벤치마크에는 추세 오버레이를 곱하지 않는다 — "추세 필터 켬" 을 붙이면 비교 기준을 오해한다 (25.471)
             그경고 = [w for w in warnings if not (strategy == "benchmark" and w == WARN_TREND_ON)]
+            # 월 초과 계열(25.1947) — 판정판 걷는 창의 재료. 기준 전략 자신은 0 이라 싣지 않는다
+            월초과 = None
+            if strategy != "benchmark":
+                월초과 = {"monthly_excess": luck.excess_months(luck.monthly_returns(result.curve), 벤치월)}
             store_run(client, market, strategy, result, summary, top_n, group_id, 그경고, now, 운.get(strategy),
-                      kept=실은_행)  # fmt: skip
+                      extra=월초과, kept=실은_행)  # fmt: skip
             stored += 1
             mt = summary.metrics
             print(

@@ -94,6 +94,10 @@ def test_핵심_실행이_판정판_줄을_싣는다(핵심: Any) -> None:
         assert 줄["half_first_cagr"] == mj["split_half"]["first"]["cagr"]
         assert 줄["half_second_cagr"] == mj["split_half"]["second"]["cagr"]
         assert 줄["sells_scored"] == mj["evidence"]["after_sell"]["sells"]
+        # 25.1947 — 월 초과 계열이 결과 행에 실리고(운 판정과 같은 계열 — 달 수가 luck.months 와 같다) 걷는 창이 그것으로
+        assert len(mj["monthly_excess"]) == 줄["months"]
+        w = scb.walk_windows(mj["monthly_excess"])
+        assert (줄["walk_positive"], 줄["walk_total"]) == (w["positive"], w["total"])
         # 1년이라 운 판정은 "판정 안 함" — DSR 은 비고 그 문장이 까닭
         assert 줄["dsr"] is None and "판정 안 함" in 줄["missing"]["dsr"] and 줄["dsr_n"] == jb.REGISTERED_TRIALS
     # 헛돌지 않게 — 값이 찬 칸이 있다(합성 1년은 CAGR 창이 짧아 비고 까닭이 남는다)
@@ -102,7 +106,8 @@ def test_핵심_실행이_판정판_줄을_싣는다(핵심: Any) -> None:
 
 
 def test_판정판은_작다(핵심: Any) -> None:
-    """step_log 크기 — 줄마다 웹이 보이는 칸과 그 까닭만. 걷는 창·수용량처럼 늘 비는 칸은 싣지 않는다"""
+    """step_log 크기 — 줄마다 웹이 보이는 칸과 그 까닭만. 수용량처럼 늘 비는 칸은 싣지 않는다. 걷는 창은 두 수만
+    (`walk_positive`·`walk_total`, 25.1947) — 창마다의 기간·합(`walk`)은 싣지 않는다"""
     run, _rows = _기록(핵심, cj.JOB_NAME)
     줄들 = run["step_log"]["scoreboard"]
     크기 = len(json.dumps(줄들, ensure_ascii=False).encode())
@@ -153,6 +158,11 @@ def test_월_백테스트도_판정판_줄을_싣는다() -> None:
     assert by["composite"]["half_first_cagr"] is None and "반 나눈" in by["composite"]["missing"]["half_first_cagr"]
     mj = json.loads(next(r for r in rows if r["strategy"] == "composite")["metrics_json"])
     assert by["composite"]["cagr"] == mj["cagr"]
+    # 25.1947 — 월 초과 계열·걷는 창(2년이면 창 둘까지). 기준 전략은 싣지 않고 까닭
+    assert len(mj["monthly_excess"]) == by["composite"]["months"] >= 12
+    assert by["composite"]["walk_total"] == scb.walk_windows(mj["monthly_excess"])["total"] >= 1
+    assert by["benchmark"]["walk_total"] is None and "기준 전략" in by["benchmark"]["missing"]["walk_total"]
+    assert "monthly_excess" not in json.loads(next(r for r in rows if r["strategy"] == "benchmark")["metrics_json"])
 
 
 def test_월_기본_실행은_사전_등록일부터_코호트_1() -> None:

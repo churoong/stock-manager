@@ -315,7 +315,10 @@ def run_core(
             extra = {"split_half": 반[variant], "benchmark": BENCHMARK_NOTE, "risk_every": risk_every,
                      "account": cs.variant_spec(variant).account,
                      "evidence": {k: e.get(k) for k in ("buys", "scored", "no_control", "days", "n_blocks", "mean",
-                                                        "se", "lower", "gate", "after_sell")}}  # fmt: skip
+                                                        "se", "lower", "gate", "after_sell")},
+                     # 월 초과 계열(25.1947) — 판정판 걷는 창의 재료. 운 판정과 같은 기준(동일가중 월 리밸런스)
+                     "monthly_excess": luck.excess_months(luck.monthly_returns(result.curve),
+                                                          luck.monthly_returns(벤치.curve))}  # fmt: skip
             jb.store_run(client, market, variant, result, summary, 종목수[variant], group_id, warnings,
                          now, 운.get(variant), rebalance=REBALANCE, extra=extra, kept=실은_행)  # fmt: skip
             mt = summary.metrics

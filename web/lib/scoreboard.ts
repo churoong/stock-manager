@@ -14,8 +14,8 @@ import { pct } from "@/lib/portfolio";
 /** 판정판 줄의 칸 — 배치 `services/scoreboard.STEP_LOG_COLS` 와 같아야 한다(`tests/test_scoreboard_wiring_1940.py` 가 대조) */
 export const SCOREBOARD_KEYS = [
   "strategy", "market", "cohort", "trials_cumulative", "cagr", "excess_cagr", "mdd", "dsr", "dsr_n",
-  "control_lower", "gate_lower", "half_first_cagr", "half_second_cagr", "months", "rebalances", "buys",
-  "control_blocks", "gate_blocks", "sells_scored",
+  "control_lower", "gate_lower", "half_first_cagr", "half_second_cagr", "walk_positive", "walk_total", "months",
+  "rebalances", "buys", "control_blocks", "gate_blocks", "sells_scored",
 ] as const;
 
 /** 판정판을 싣는 작업 — 배치 `jobs/backtest.JOB_NAME`·`jobs/core_backtest` 의 세 이름(`JOB_NAME`·`EXPLORE_JOB_NAME`·`LIMIT_JOB_NAME`),
@@ -61,6 +61,8 @@ const rowSchema = z.object({
   gate_lower: numOrNull,
   half_first_cagr: numOrNull,
   half_second_cagr: numOrNull,
+  walk_positive: numOrNull,
+  walk_total: numOrNull,
   months: numOrNull,
   rebalances: numOrNull,
   buys: numOrNull,
@@ -95,7 +97,7 @@ export function parseScoreboard(raw: unknown): { rows: ScoreRow[]; unreadable: n
 const COL_LABEL: Record<string, string> = {
   market: "시장", cohort: "코호트", trials_cumulative: "누적 시도", cagr: "CAGR", excess_cagr: "초과 CAGR", mdd: "MDD",
   dsr: "DSR", dsr_n: "DSR N", control_lower: "대조 하한", gate_lower: "관문 하한", half_first_cagr: "앞 반",
-  half_second_cagr: "뒤 반", months: "개월", rebalances: "리밸런스", buys: "매수", control_blocks: "대조 묶음",
+  half_second_cagr: "뒤 반", walk_positive: "걷는 창", walk_total: "걷는 창 수", months: "개월", rebalances: "리밸런스", buys: "매수", control_blocks: "대조 묶음",
   gate_blocks: "관문 묶음", sells_scored: "판 뒤 매도",
 };
 
@@ -121,6 +123,12 @@ export interface ScoreLine {
   missing: string[];
 }
 
+/** 걷는 창 칸 글(25.1947) — 창이 하나도 없으면(12개월 미만) "0/0" 대신 그렇게 적는다 */
+function walkText(r: Pick<ScoreRow, "walk_positive" | "walk_total">): string {
+  if (r.walk_positive == null || r.walk_total == null) return 없음;
+  return r.walk_total === 0 ? "창 없음(12개월 미만)" : `${r.walk_positive}/${r.walk_total} 창 초과 > 0`;
+}
+
 /** 판정판 한 줄 → 화면 글. 숫자는 꼴만 바꾼다(비율은 %, 분위 하한은 소수 한 자리, DSR 은 두 자리) */
 export function scoreLine(r: ScoreRow): ScoreLine {
   const 까닭별 = new Map<string, string[]>();
@@ -142,6 +150,8 @@ export function scoreLine(r: ScoreRow): ScoreLine {
       ["관문 하한", f1(r.gate_lower)],
       ["앞 반", p(r.half_first_cagr)],
       ["뒤 반", p(r.half_second_cagr)],
+      // 걷는 창(25.1947) — 겹치지 않는 12개월 창 가운데 초과 합 > 0 인 창 수 / 창 수. 3장 문턱("넷 가운데 셋")은 적용하지 않는다
+      ["걷는 창", walkText(r)],
     ],
     sample: `${n(r.months)}개월 · 리밸런스 ${n(r.rebalances)} · 매수 ${n(r.buys)} · 묶음 대조 ${n(r.control_blocks)}/관문 ${n(r.gate_blocks)} · 판 뒤 매도 ${n(r.sells_scored)} · 누적 시도 ${n(r.trials_cumulative)}`,
     missing: [...까닭별].map(([why, cols]) => `${없음}: ${cols.join("·")} — ${why || "까닭 기록 없음"}`),
@@ -177,7 +187,7 @@ export function scoreboardHead(run: Pick<ScoreboardRun, "job_name" | "started_at
 
 /** 늘 비는 칸 — 배치 `scoreboard.WHY_*` 와 같은 뜻. 줄마다 되풀이하지 않고 한 번만 적는다 */
 export const ALWAYS_EMPTY_NOTE =
-  "걷는 창(월 초과 계열 미저장)·수용량(보유 거래대금 미저장)·서로 다른 종목·끝난 거래는 아직 기록이 없어 싣지 않습니다. 올림·내림 문턱(docs/funnel.md 3장)은 적용하지 않은 칸입니다.";
+  "수용량(보유 거래대금 미저장)·서로 다른 종목·끝난 거래는 아직 기록이 없어 싣지 않습니다. 올림·내림 문턱(docs/funnel.md 3장)은 적용하지 않은 칸입니다.";
 
 /**
  * 판정판이 싣지 않는 경고·비용 몫을 어디서 보나(25.1941) — **그 자리가 화면에 있을 때만** 가리킨다(25.1942). 경고 띠는

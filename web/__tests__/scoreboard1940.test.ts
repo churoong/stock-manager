@@ -14,7 +14,7 @@ import {
 const 줄 = {
   strategy: "core_h", market: "KR", cohort: "1b", trials_cumulative: 17, cagr: 0.1234, excess_cagr: -0.0101, mdd: -0.2567,
   dsr: 0.9312, dsr_n: 17, control_lower: 51.04, gate_lower: null, half_first_cagr: 0.05, half_second_cagr: null,
-  months: 48, rebalances: 1000, buys: 120, control_blocks: 9, gate_blocks: 4, sells_scored: 80,
+  walk_positive: 3, walk_total: 4, months: 48, rebalances: 1000, buys: 120, control_blocks: 9, gate_blocks: 4, sells_scored: 80,
   missing: { gate_lower: "하한 없음 — 묶음 4개(block_bound 최소 미달)", half_second_cagr: "second 반 CAGR 표본 미달" },
 };
 
@@ -25,8 +25,15 @@ describe("판정판 글 (25.1940)", () => {
     expect(l.cohort).toBe("코호트 1b");
     expect(Object.fromEntries(l.cells)).toEqual({
       CAGR: "+12.3%", "초과 CAGR": "-1.0%", MDD: "-25.7%", DSR: "0.93 (N 17)", "대조 하한": "51.0", "관문 하한": "없음",
-      "앞 반": "+5.0%", "뒤 반": "없음",
+      "앞 반": "+5.0%", "뒤 반": "없음", "걷는 창": "3/4 창 초과 > 0",
     });
+    // 25.1947 — 창이 없으면(12개월 미만) 0/0 이 아니라 그렇게, 한쪽이라도 비면 없음
+    const 창 = (walk_positive: number | null, walk_total: number | null) =>
+      Object.fromEntries(scoreLine(parseScoreboard([{ ...줄, walk_positive, walk_total }]).rows[0]).cells)["걷는 창"];
+    expect(창(0, 0)).toBe("창 없음(12개월 미만)");
+    expect(창(0, 4)).toBe("0/4 창 초과 > 0");
+    expect(창(null, 4)).toBe("없음");
+    expect(창(3, null)).toBe("없음");
     expect(l.sample).toBe("48개월 · 리밸런스 1000 · 매수 120 · 묶음 대조 9/관문 4 · 판 뒤 매도 80 · 누적 시도 17");
   });
 
