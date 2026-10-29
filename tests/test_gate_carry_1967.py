@@ -207,3 +207,21 @@ def test_그날_줄_다시_읽기도_깨지면_올리고_그날_줄을_덮지_�
                   session_date="2026-10-19", step_log={}, warnings=[])  # fmt: skip
     줄 = json.loads(c.conn.execute("SELECT summary_json FROM paper_desk WHERE as_of = '2026-10-17'").fetchone()[0])
     assert 줄["gate"] == 앞
+
+
+def test_판오류와_관문_계산이_함께_깨지면_두_까닭(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1976 (25.1974 교차검증 [권고]) — 판오류 갈래도 관문 계산 예외의 까닭(위험판이 빈 까닭)을 덮지 않는다. 계산 까닭은
+    40자로 줄여 주간 요약 80자 안에 갈래 머리가 들게"""
+    c = Client(accounts=None)
+    monkeypatch.setattr(job.bmj, "MIRROR_ACCOUNT", "B")
+    monkeypatch.setattr(job, "_판이력", lambda *_a, **_k: ({}, "OperationalError: 표 없음"))
+
+    def 깨짐(*a: Any, **k: Any) -> dict[str, Any]:
+        raise RuntimeError("관문 계산 실패 " + "가" * 200)
+
+    monkeypatch.setattr(job.desk, "gate", 깨짐)
+    out = job.write(c, "KR", datetime(2026, 10, 16, 23, 40, tzinfo=UTC), trade_date="2026-10-16",
+                    session_date="2026-10-19", step_log={}, warnings=[])  # fmt: skip
+    글 = out["gate_error"]
+    assert 글.startswith("관문 계산 실패 — RuntimeError") and "판 이력을 읽지 못해" in 글
+    assert "판 이력을" in 글[: len("관문 계산 실패 — ") + 40 + len(" · ") + 5]
