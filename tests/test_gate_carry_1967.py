@@ -129,9 +129,38 @@ def test_앞_관문_읽기가_깨지면_관문만_비우고_요약은_적는다(
     monkeypatch.setattr(job, "DESK_UPTO_SQL", "SELECT no_such_fn(summary_json) FROM paper_desk WHERE as_of <= ?")
     out = job.write(c, "KR", datetime(2026, 10, 16, 23, 40, tzinfo=UTC), trade_date="2026-10-16",
                     session_date="2026-10-19", step_log={}, warnings=[])  # fmt: skip
-    assert "앞 관문(판정 시점 기록)을 읽지 못해" in out["gate_error"]
+    assert "판정 시점 기록을 못 읽어 관문 안 냄" in out["gate_error"]
     줄 = json.loads(c.conn.execute("SELECT summary_json FROM paper_desk WHERE as_of = '2026-10-17'").fetchone()[0])
     assert 줄["gate"] is None and 줄["gate_carry"] is None and "leaderboard" in 줄 and "champion" in 줄
     # 다음 실행(원래 SQL)은 10-16 의 기록을 잇는다
     monkeypatch.undo()
     assert _본(monkeypatch, c) == [앞]
+
+
+def test_앞_관문_읽기가_깨져도_오늘_줄의_판정_기록은_남긴다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1973 (25.1971 교차검증 [필수]) — 같은 as_of 의 앞 실행(국내)이 오늘 줄에 126 판정을 적은 뒤 둘째 실행(미국)의
+    이어받기 읽기가 깨지면, 예전엔 merge 가 관문·`gate_carry` 를 None 으로 덮어 그 판정이 사라졌고 다음 실행은 어제 줄을
+    이어받아 126 을 다시 판정했다. 이제 오늘 줄의 판정 기록을 `gate_carry` 로 남긴다"""
+    c = Client(accounts=None)
+    _줄(c, "2026-10-14", {"gate": {"account": "B", "version": None, "looks": []}, "markets": {}})
+    _줄(c, "2026-10-17", {"gate": 앞, "markets": {}})  # 오늘(as_of 10-17) 앞 실행의 판정
+    monkeypatch.setattr(job.bmj, "MIRROR_ACCOUNT", "B")
+    monkeypatch.setattr(job, "DESK_UPTO_SQL", "SELECT no_such_fn(summary_json) FROM paper_desk WHERE as_of <= ?")
+    out = job.write(c, "US", datetime(2026, 10, 16, 23, 40, tzinfo=UTC), trade_date="2026-10-16",
+                    session_date="2026-10-19", step_log={}, warnings=[])  # fmt: skip
+    assert "판정 시점 기록을 못 읽어 관문 안 냄" in out["gate_error"]
+    줄 = json.loads(c.conn.execute("SELECT summary_json FROM paper_desk WHERE as_of = '2026-10-17'").fetchone()[0])
+    assert 줄["gate"] is None and 줄["gate_carry"] == 앞
+    monkeypatch.undo()
+    assert _본(monkeypatch, c) == [앞]
+
+
+def test_앞_관문_읽기가_한도로_깨지면_올린다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1973 — Turso 한도 오류는 삼키지 않는다(이 파일의 다른 곁다리와 같게)"""
+    c = Client(accounts=None)
+    monkeypatch.setattr(job.bmj, "MIRROR_ACCOUNT", "B")
+    monkeypatch.setattr(job.db, "quota_reason", lambda exc: "한도")
+    monkeypatch.setattr(job, "DESK_UPTO_SQL", "SELECT no_such_fn(summary_json) FROM paper_desk WHERE as_of <= ?")
+    with pytest.raises(Exception, match="no_such_fn"):
+        job.write(c, "KR", datetime(2026, 10, 16, 23, 40, tzinfo=UTC), trade_date="2026-10-16",
+                  session_date="2026-10-19", step_log={}, warnings=[])  # fmt: skip

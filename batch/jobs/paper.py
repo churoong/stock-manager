@@ -669,7 +669,7 @@ def _order(r: dict[str, Any]) -> pp.Order:
         order_type=str(r["order_type"]), limit_price=r["limit_price"], quantity=int(r["quantity"]),
         currency=str(r["currency"]), fill_session=str(r["fill_session"]), horizon=r["horizon"],
         score_at_order=r["score_at_order"], score_as_of=r["score_as_of"], fill_basis=str(r["fill_basis"] or "open"),
-        ref_price=r.get("ref_price"), deferrals=int(r.get("deferrals") or 0),
+        ref_price=r.get("ref_price"), deferrals=int(r.get("deferrals") or 0), reason=r.get("reason"),
     )  # fmt: skip
 
 
