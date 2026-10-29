@@ -48,7 +48,7 @@ def test_오늘_볼_것은_제목_바로_아래_대표_종목은_머리에_없�
 
 def test_일일_배치는_대표_종목을_운용_보고_뒤_끝에_붙인다() -> None:
     src = inspect.getsource(daily)
-    assert "rows_in_head=False" in src and "todo=formatter.todo_line(sell_flag_rows, currency, cal.user_today().isoformat())" in src
+    assert "rows_in_head=False" in src and "todo=formatter.todo_line(sell_flag_rows, currency, 플래그_오늘)" in src
     # 운용 보고(with_head)를 끼운 뒤, 늦은 경고 앞
     assert src.index("formatter.with_head(message, 머리)") < src.index("formatter.watched_block(rows, decision.trade_date)")
     assert src.index("formatter.watched_block(rows, decision.trade_date)") < src.index(

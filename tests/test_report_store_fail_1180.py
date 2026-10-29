@@ -55,7 +55,7 @@ def _준비(monkeypatch: pytest.MonkeyPatch, 실패수: int) -> tuple[list, list
     m(daily.trend, "load_settings", lambda c: {"warnings": []})
     m(daily, "report_regimes", lambda c, mk, s, d: ({}, "시장 국면: 테스트"))
     m(daily, "load_holdings", lambda c, cur, fx, w: [])
-    m(daily, "_sell_flags_for_report", lambda c, country, w=None: [])
+    m(daily, "_sell_flags_for_report", lambda c, country, w=None, 오늘=None: [])
     m(daily, "load_price_series", lambda c, ids, d, w=None, values=None: {})
     m(daily, "_other_report_reserved", lambda *a, **k: (0.0, None))
     m(daily, "_shake_weights", lambda c: (None, 0.0))

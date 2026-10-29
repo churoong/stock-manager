@@ -1527,13 +1527,16 @@ def _last_report_sent_at(client: TursoClient, country: str) -> str | None:
     return str(rows[0][0]) if rows else None
 
 
-def _sell_flags_for_report(client: TursoClient, country: str, warnings: list[str] | None = None) -> list[dict]:
+def _sell_flags_for_report(
+    client: TursoClient, country: str, warnings: list[str] | None = None, 오늘: str | None = None,
+) -> list[dict]:
     from batch.jobs import sell_flags
 
     try:
         # `sell_flags.run` 이 찍은 `first_seen_date` 와 **같은 달력**이어야 "새로 걸림" 이 맞는다
-        # (docs/infra.md 25.125). 둘이 UTC 였을 때는 배치가 자정 UTC(09:00 KST)를 넘기면 어긋났다
-        오늘 = cal.user_today().isoformat()
+        # (docs/infra.md 25.125). 둘이 UTC 였을 때는 배치가 자정 UTC(09:00 KST)를 넘기면 어긋났다.
+        # 부르는 쪽이 같은 오늘을 첫 화면 줄에도 쓴다(25.1989)
+        오늘 = 오늘 or cal.user_today().isoformat()
         return sell_flags.active_flags_for_report(client, country, 오늘, _last_report_sent_at(client, country))
     except Exception as exc:  # noqa: BLE001 — 표가 아직 없으면 플래그 없이 보낸다
         log.exception("매도 플래그 읽기 실패")
@@ -2243,7 +2246,10 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
         # 추천을 못 읽은 날은 2부가 없다 — 보유를 읽으면 "여력 계산에 넣지 못했습니다" 같은 2부 경고만 남는다 (25.822,
         # 교차검증)
         holdings = load_holdings(client, currency, fx_rate, warnings) if 추천_오류 is None else []
-        sell_flag_rows = _sell_flags_for_report(client, "KR" if market == "KR" else "US", warnings)
+        # 매도 플래그 읽기와 첫 화면 "오늘 볼 것" 줄의 판정일 비교가 **같은 오늘**을 쓴다 — 따로 읽으면 두 호출 사이에
+        # 자정(KST)을 넘길 때 오늘 판정에 "오늘 판정 아님" 이 붙었다(25.1989, 25.1987 교차검증 [참고])
+        플래그_오늘 = cal.user_today().isoformat()
+        sell_flag_rows = _sell_flags_for_report(client, "KR" if market == "KR" else "US", warnings, 플래그_오늘)
         if 추천_오류 is not None:
             # 추천 없이 — 1부·2부 글은 빼고 매도 플래그만 싣는다(표시와 알림만, 자동 매도 없음).
             # 2부 배분이 없으니 보유도 넘기지 않는다
@@ -2278,7 +2284,7 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
             delay_seconds=지연,
             composed_at=datetime.now(UTC),
             # 첫 화면엔 볼 일과 운용 보고·추천 — 대표 종목 시세는 끝으로(25.1738, 사용자 "아직 수정안한거야?")
-            todo=formatter.todo_line(sell_flag_rows, currency, cal.user_today().isoformat()),
+            todo=formatter.todo_line(sell_flag_rows, currency, 플래그_오늘),
             rows_in_head=False,
         )
         step_log["correlation"] = {"stocks": len(corr_series), "holdings": len(holdings)}

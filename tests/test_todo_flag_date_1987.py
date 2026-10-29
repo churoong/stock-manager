@@ -26,3 +26,14 @@ def test_어제_판정이면_날짜를_적는다() -> None:
 def test_오늘을_모르면_예전대로() -> None:
     줄 = formatter.todo_line([_f("2026-10-28")], "KRW")
     assert 줄 is not None and "판정일" not in 줄
+
+
+def test_플래그_읽기와_첫_화면이_같은_오늘을_쓴다() -> None:
+    """25.1989 (25.1987 교차검증 [참고]) — daily 가 오늘을 한 번 잡아 두 곳에 넘긴다"""
+    import inspect
+
+    from batch.jobs import daily
+
+    src = inspect.getsource(daily)
+    assert "_sell_flags_for_report(client, \"KR\" if market == \"KR\" else \"US\", warnings, 플래그_오늘)" in src
+    assert "todo=formatter.todo_line(sell_flag_rows, currency, 플래그_오늘)" in src
