@@ -94,15 +94,19 @@ def test_운영_꼴_시장마다_오늘_응답의_id(monkeypatch: pytest.MonkeyP
         불린.append((market, 날))
         if 날 == "20261028":
             code = {"KOSPI": "005930", "KOSDAQ": "035720"}[market]
+            # 마스터에 아직 없는 코드(신규 상장 등 — 일별 응답에 늘 섞여 온다)는 걸러야 한다. 빠지면 KeyError 로 국내
+            # 일일 배치가 멈춘다(25.1986, 25.1985 교차검증 [권고])
             return FetchResult(ok=True, source="krx", data=[KrxDailyRow(
-                bas_dd=날, isu_cd=code, isu_nm=code, mkt_nm=market, close=100.0, change=0.0, change_pct=0.0,
-                open=100.0, high=100.0, low=100.0, volume=1, value=100, market_cap=1, listed_shares=1)])
+                bas_dd=날, isu_cd=c2, isu_nm=c2, mkt_nm=market, close=100.0, change=0.0, change_pct=0.0,
+                open=100.0, high=100.0, low=100.0, volume=1, value=100, market_cap=1, listed_shares=1)
+                for c2 in (code, "999999")])
         return FetchResult(ok=False, error="x")
 
     monkeypatch.setattr(krx, "fetch_daily", 받기)
     monkeypatch.setattr(daily, "_collect_index_prices", lambda client: [])
     monkeypatch.setattr(daily, "_detect_kr_actions", lambda *a, **k: [])
-    monkeypatch.setattr(daily, "_store_kr_etf_day", lambda *a, **k: [], raising=False)
+    monkeypatch.setattr(daily, "_store_kr_etf_day", lambda *a, **k: [])
+    monkeypatch.setattr(daily, "_kis_calendar_check", lambda *a, **k: [])  # KIS 키가 있는 환경에서도 밖으로 안 나가게
     daily.collect_kr_prices(c, "2026-10-28")  # type: ignore[arg-type]
     assert ("KOSDAQ", "20261026") in 불린 and ("KOSPI", "20261026") not in 불린
     assert ("KOSPI", "20261027") in 불린 and ("KOSDAQ", "20261027") in 불린
