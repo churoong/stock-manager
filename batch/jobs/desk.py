@@ -362,7 +362,11 @@ def write(
           **관문판,
           "kis_account": {"as_of": kis[0]["as_of"] if kis else None, "account_krw": 요약.get("account_krw"),
                           "perf": 요약.get("perf")},
-          **_보정판(client, 순위, 평가, 손익, h, 요약, 요약_us, as_of, 최근)}  # fmt: skip
+          # 체결 칸 보정은 최근 줄만(25.1983, 결함 루프 10-29) — 도전자 칸·관문 실현율과 같은 잣대. 베끼기를 끄거나 키를
+          # 빼면 첫째 계좌의 마지막 칸이 영영 모든 계좌 보정에 남았다. KIS 계좌 카드는 as_of 를 함께 보여 그대로
+          **_보정판(client, 순위, 평가, 손익, h, *(x if rows and str(rows[0]["as_of"]) >= 최근 else {}
+                                                for rows, x in ((kis, 요약), (kis_us, 요약_us))),
+                    as_of, 최근)}  # fmt: skip
     앞 = client.execute(DESK_READ_SQL, [as_of]).rows
     그날 = _json(앞[0][0]) if 앞 else None
     if 그날 is None:
