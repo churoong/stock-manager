@@ -296,7 +296,8 @@ def report_head(
     지난칸 = (지난줄.get("markets") or {}).get(market)
     지난kis = list(지난칸.get("kis_orders") or []) if isinstance(지난칸, dict) else None
     # 실전 관문 진도(25.1991) — 운용 요약 마지막 줄의 관문. 관문을 비운 날은 줄을 뺀다(까닭은 웹 상황실)
-    return desk.report_lines(칸, 순위, h, prev_kis=지난kis, kis_state=상태, gate=지난줄.get("gate"))
+    return desk.report_lines(칸, 순위, h, prev_kis=지난kis, kis_state=상태, gate=지난줄.get("gate"),
+                             gate_error=지난줄.get("gate_error"))  # fmt: skip
 
 
 def write(

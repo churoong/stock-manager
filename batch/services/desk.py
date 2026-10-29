@@ -1123,30 +1123,37 @@ def _돈(v: Any, currency: str) -> str:
     return f"{round(x):,}원" if currency != "USD" else f"{'-' if x < 0 else ''}${abs(x):,.2f}"
 
 
-def gate_line(gate: dict[str, Any] | None) -> str | None:
+def gate_line(gate: dict[str, Any] | None, gate_error: str | None = None) -> str | None:
     """운용 보고의 **실전 관문 진도** 한 줄 (25.1991, 2026-10-29 사용자 "텔레그램으로 보내주는 메시지를 우리 목표에
     맞게") — 목표(로보어드바이저, 실전 전환은 단계 관문)에서 먼저 볼 것: KIS 가 베끼는 계좌가 1단계 관문의 어디쯤인가.
-    값은 운용 요약 마지막 줄이 적은 그대로(새로 셈하지 않는다). 관문이 없으면(못 셈·옛 줄) None"""
+    값은 운용 요약 마지막 줄이 적은 그대로(새로 셈하지 않는다) — 하루 늦을 수 있다.
+    판정 시점 결과(126 통과·못 넘음)를 붙인다 — 넘은 숫자만 보이면 통과에 가까운 것처럼 읽혔다(25.1992, 주간 요약
+    `gate_looks_line` 과 같은 말). 관문을 비운 날(`gate_error`)은 "세지 못함" 한 줄, 관문도 까닭도 없으면 None"""
     if not isinstance(gate, dict) or not isinstance(gate.get("items"), list):
+        if gate_error:
+            return f"▸ 실전 관문: 세지 못함 — {gate_error.split(GATE_CALC_ERROR_SEP)[0][:60]} (자세히: 웹 운용 화면)"
         return None
     items = [i for i in gate["items"] if isinstance(i, dict)]
     날수 = next((i.get("now") for i in items if i.get("key") == "days"), None)
     충족 = sum(1 for i in items if i.get("ok"))
     판 = gate.get("version")
-    머리 = f"▸ 실전 관문 {gate.get('stage', 1)}단계 ({_이름(gate.get('account'))}{'' if 판 is None else f' 판 {판}'})"
-    진도 = f"모의 {날수 if 날수 is not None else '?'}/{GATE_MIN_POINTS}평가 · 칸 {충족}/{len(items)} 충족"
+    계좌 = _이름(gate.get("account")) or "?"
+    머리 = f"▸ 실전 관문 {gate.get('stage', 1)}단계 ({계좌}{'' if 판 is None else f' 판 {판}'})"
+    조각 = [f"모의 {날수 if 날수 is not None else '?'}/{GATE_MIN_POINTS}평가", f"칸 {충족}/{len(items)} 충족"]
+    looks = [x for x in gate.get("looks") or [] if isinstance(x, dict)]
+    조각 += [f"{x.get('n')} {'통과' if x.get('passed') else '못 넘음'}" for x in looks]
     if gate.get("passed"):
-        끝 = "통과(다음 단계는 사용자 결정)"
+        조각.append("다음 단계는 사용자 결정")
     elif gate.get("next_look"):
-        끝 = f"다음 판정 {gate['next_look']}평가"
-    else:
-        끝 = "판정 시점 끝 — 새 판 등록 전엔 통과 없음" if gate.get("looks") else ""
-    return f"{머리}: {진도}" + (f" · {끝}" if 끝 else "")
+        조각.append(f"다음 판정 {gate['next_look']}평가")
+    elif looks:
+        조각.append("판정 시점 끝 — 새 판 등록 전엔 통과 없음")
+    return f"{머리}: " + " · ".join(조각)
 
 
 def report_lines(
     section: dict[str, Any], board: dict[str, Any], mirror: str, *, prev_kis: list[dict[str, Any]] | None = None,
-    kis_state: str | None = None, gate: dict[str, Any] | None = None,
+    kis_state: str | None = None, gate: dict[str, Any] | None = None, gate_error: str | None = None,
 ) -> list[str]:
     """아침(미국은 밤) 리포트 머리의 **운용 보고** 몇 줄 — 종목 추천은 그 아래 재료로(CLAUDE.md "시스템의 중심").
 
@@ -1169,7 +1176,7 @@ def report_lines(
     else:
         out.append("▸ 확인할 일: 없음")
     # 실전 관문 진도 — 확인할 일 바로 아래(25.1991). 운용 요약 마지막 줄의 관문이라 하루 늦을 수 있다
-    관문줄 = gate_line(gate)
+    관문줄 = gate_line(gate, gate_error)
     if 관문줄:
         out.append(관문줄)
     모든 = list(board.get("rows") or [])

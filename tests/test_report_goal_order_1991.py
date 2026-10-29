@@ -28,10 +28,19 @@ def _관문(**k: object) -> dict:
 
 def test_관문_진도_줄() -> None:
     assert desk.gate_line(_관문()) == "▸ 실전 관문 1단계 (지주사 판 2): 모의 9/126평가 · 칸 2/3 충족 · 다음 판정 126평가"
-    assert desk.gate_line(_관문(passed=True)).endswith("· 통과(다음 단계는 사용자 결정)")  # type: ignore[union-attr]
-    끝 = desk.gate_line(_관문(next_look=None, looks=[{"n": 126}]))
-    assert 끝 is not None and 끝.endswith("· 판정 시점 끝 — 새 판 등록 전엔 통과 없음")
-    assert desk.gate_line(None) is None and desk.gate_line({"items": None}) is None  # 관문을 비운 날·옛 줄
+    # 판정 시점 결과를 붙인다(25.1992) — 넘은 숫자만 보이면 통과에 가까운 것처럼 읽혔다
+    못 = desk.gate_line(_관문(looks=[{"n": 126, "passed": False}], next_look=189))
+    assert 못 is not None and 못.endswith("· 126 못 넘음 · 다음 판정 189평가")
+    통과 = desk.gate_line(_관문(passed=True, looks=[{"n": 126, "passed": True}], next_look=189))
+    assert 통과 is not None and 통과.endswith("· 126 통과 · 다음 단계는 사용자 결정")
+    끝 = desk.gate_line(_관문(next_look=None, looks=[{"n": 126}, {"n": 189}, {"n": 252}]))
+    assert 끝 is not None and 끝.endswith("· 252 못 넘음 · 판정 시점 끝 — 새 판 등록 전엔 통과 없음")
+    assert desk.gate_line(None) is None and desk.gate_line({"items": None}) is None  # 관문도 까닭도 없는 옛 줄
+    # 관문을 비운 날은 소리 없이 빠지지 않고 "세지 못함"(25.1992) — 계산 실패 꼬리는 뗀다
+    assert desk.gate_line(None, "판 이력을 읽지 못해 관문을 내지 않음 — X" + desk.GATE_CALC_ERROR_SEP + "Y") == (
+        "▸ 실전 관문: 세지 못함 — 판 이력을 읽지 못해 관문을 내지 않음 — X (자세히: 웹 운용 화면)")
+    assert desk.gate_line({"items": [{"key": "vs_r", "ok": True}]}) == (
+        "▸ 실전 관문 1단계 (?): 모의 ?/126평가 · 칸 1/1 충족")  # days 칸이 없으면 ? — 지어내지 않는다
 
 
 def test_운용_보고에_관문_줄은_확인할_일_바로_아래() -> None:
@@ -70,6 +79,37 @@ def test_빠진_종목은_같은_까닭끼리_한_줄() -> None:
         Excluded(ticker="A", name="가", reason="투자 여력 부족", detail="남은 0원"),
         Excluded(ticker="B", name="나", reason="투자 여력 부족", detail="남은 0원"),
         Excluded(ticker="C", name="다", reason="종목 비중 상한 도달", detail="보유 7.4%"),
+        Excluded(ticker="D", name="라", reason="종목 비중 상한 도달", detail="보유 9.1%"),  # 사유 같고 수치 다름(25.1992)
     ])  # fmt: skip
     글 = rs.render_portfolio(view, [])
     assert "  투자 여력 부족 (남은 0원): 가 · 나" in 글 and "  다 — 종목 비중 상한 도달 (보유 7.4%)" in 글
+    assert "  라 — 종목 비중 상한 도달 (보유 9.1%)" in 글  # 다른 종목의 수치로 바뀌지 않는다
+
+
+
+def test_가상모의투자_단계가_깨져도_전략_재료는_나간다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1992 (25.1991 교차검증 [권고]) — 재료 붙이기가 단계 try 안으로 들어가면 단계가 깨진 날 1부·2부가 통째로
+    빠진다. 하네스(DB 없음)에서는 가상모의투자 단계가 예외로 끝난다"""
+    from batch.jobs import daily
+    from tests.test_report_store_fail_1180 import _준비
+
+    보낸, _저장, _알림 = _준비(monkeypatch, 0)
+    assert daily.run("KR") == 0
+    (글,) = 보낸
+    assert daily.RECOMMEND_HEAD in 글 and "1부 개별 종목" in 글 and "가상모의투자 계좌" in 글
+
+
+def test_가상모의투자_절이_전략_재료보다_앞에_나간다(monkeypatch: pytest.MonkeyPatch) -> None:
+    from batch.jobs import daily
+    from batch.jobs import desk as desk_job
+    from batch.jobs import paper as paper_job
+    from tests.test_report_store_fail_1180 import _준비
+
+    보낸, _저장, _알림 = _준비(monkeypatch, 0)
+    monkeypatch.setattr(paper_job, "run_step_locked",
+                        lambda *a, **k: (["🧪 가상모의투자 (평가)", "  기준 10억원"], {"accounts": {}}))  # fmt: skip
+    monkeypatch.setattr(desk_job, "report_head", lambda *a, **k: ["📊 운용 보고", "▸ 확인할 일: 없음"])
+    monkeypatch.setattr(daily, "_notify_failure", lambda *a, **k: False)  # KIS 알림 길 — 이 시험 몫이 아니다
+    assert daily.run("KR") == 0
+    글 = 보낸[0]
+    assert 글.index("📊 운용 보고") < 글.index("🧪 가상모의투자") < 글.index(daily.RECOMMEND_HEAD) < 글.index("1부 개별 종목")
