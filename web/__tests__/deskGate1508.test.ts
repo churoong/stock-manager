@@ -9,7 +9,7 @@ import { ReadinessList } from "@/components/DeskView";
 import { CompareCard, type Data } from "@/components/PaperView";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { DESK_RULES, EMPTY_DESK, GATE_CALC_ERROR_HEAD, GATE_CARRY_ERROR_HEAD, championText, gateNowText, pickDesk, type DeskView } from "@/lib/desk";
+import { DESK_RULES, EMPTY_DESK, GATE_CALC_ERROR_SEP, GATE_CARRY_ERROR_HEAD, championEmptiedBy, championText, gateNowText, pickDesk, type DeskView } from "@/lib/desk";
 import { accountView } from "@/lib/paper";
 
 describe("관문 칸 글", () => {
@@ -48,11 +48,24 @@ describe("챔피언 교체 후보 (전략 화면)", () => {
     expect(판오류).toContain("챔피언 교체 후보를 내지 않음");
     // 관문 계산도 깨진 날(챔피언을 비움)은 머리가 다르다 — 띄운다
     // 25.1977 — 갈래 머리가 앞, 계산 까닭은 뒤에 전문으로
-    const 둘 = renderToStaticMarkup(createElement(CompareCard, { data, desk: { ...desk, gate_error: `${GATE_CARRY_ERROR_HEAD} — y · ${GATE_CALC_ERROR_HEAD} — RuntimeError: x` } }));
+    const 둘 = renderToStaticMarkup(createElement(CompareCard, { data, desk: { ...desk, gate_error: `${GATE_CARRY_ERROR_HEAD} — y${GATE_CALC_ERROR_SEP}RuntimeError: x` } }));
     expect(둘).toContain("챔피언 교체 후보를 내지 않음");
     const py = readFileSync(join(process.cwd(), "..", "batch", "jobs", "desk.py"), "utf8");
     expect(/^GATE_CARRY_ERROR_HEAD = "(.+)"$/m.exec(py)?.[1]).toBe(GATE_CARRY_ERROR_HEAD);
-    expect(/^GATE_CALC_ERROR_HEAD = "(.+)"$/m.exec(py)?.[1]).toBe(GATE_CALC_ERROR_HEAD);
+    const svc = readFileSync(join(process.cwd(), "..", "batch", "services", "desk.py"), "utf8");
+    expect(/^GATE_CALC_ERROR_SEP = "(.+)"$/m.exec(svc)?.[1]).toBe(GATE_CALC_ERROR_SEP);
+    // 배치가 잇는 꼴이 그 상수를 쓴다(구분을 글자로 따로 들지 않게, 25.1978)
+    expect(py).toContain("{desk.GATE_CALC_ERROR_SEP}");
+  });
+
+  it("championEmptiedBy 표 (25.1978)", () => {
+    expect(championEmptiedBy(null)).toBe(false);
+    expect(championEmptiedBy("")).toBe(false);
+    expect(championEmptiedBy("RuntimeError: x")).toBe(true); // 관문 계산만 깨짐 — 챔피언 빔
+    expect(championEmptiedBy("판 이력을 읽지 못해 관문을 내지 않음 — x")).toBe(true);
+    expect(championEmptiedBy(`${GATE_CARRY_ERROR_HEAD} — x`)).toBe(false);
+    expect(championEmptiedBy(`${GATE_CARRY_ERROR_HEAD} — x${GATE_CALC_ERROR_SEP}RuntimeError: y`)).toBe(true);
+    expect(championEmptiedBy(`관문 계산 실패 — RuntimeError: y · ${GATE_CARRY_ERROR_HEAD} — x`)).toBe(true); // 25.1974~1976 옛 꼴
   });
 
   it("후보가 있으면 초록 줄, 없으면 가장 가까운 것", () => {

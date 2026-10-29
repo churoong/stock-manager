@@ -1270,6 +1270,11 @@ def gate_looks_line(gate: dict[str, Any] | None) -> str | None:
     return "판정 시점(126·189·252평가에만 판정): " + (" · ".join(칸) + " · " if 칸 else "") + 꼬리
 
 
+#: 관문을 비운 갈래(판오류·앞오류)에 관문 계산 실패가 겹친 날 `gate_error` 에 잇는 구분 — 뒤에 계산 까닭 전문
+#: (`jobs/desk._까닭_잇기`, 25.1977). 웹 `lib/desk.ts` 의 같은 이름과 같아야 한다(시험이 대조, 25.1978)
+GATE_CALC_ERROR_SEP = " · 관문 계산 실패 — "
+
+
 def readiness_lines(gate: dict[str, Any] | None, ready: list[dict[str, Any]] | None, gate_error: str | None = None
                     ) -> list[str]:  # fmt: skip
     """주간 요약의 **실전 준비도** 한 장 — 1단계 관문 항목마다 지금 값·목표·남은 거리, 실전 준비 목록 상태 수,
@@ -1279,7 +1284,10 @@ def readiness_lines(gate: dict[str, Any] | None, ready: list[dict[str, Any]] | N
     실전으로 갈 수 있나" 를 한눈에 보기 어려웠다(아이디어 ④)
     """
     if not gate:
-        return ["🧭 실전 준비도 — 관문을 세지 못했습니다" + (f" ({gate_error[:80]})" if gate_error else "")]
+        # 갈래 글을 80자로 자른다 — 관문 계산 실패가 겹친 날은 잘릴 계산 까닭 대신 한 마디를 붙인다(25.1978)
+        글 = (gate_error or "").split(GATE_CALC_ERROR_SEP)[0][:80]
+        겹침 = " · 관문 계산도 실패" if gate_error and GATE_CALC_ERROR_SEP in gate_error else ""
+        return ["🧭 실전 준비도 — 관문을 세지 못했습니다" + (f" ({글}{겹침})" if gate_error else "")]
     items = list(gate.get("items") or [])
     충족 = sum(1 for i in items if i.get("ok"))
     판 = gate.get("version")

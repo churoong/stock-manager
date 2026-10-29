@@ -273,7 +273,7 @@ export default function DeskView() {
 
       {desk.gate_error ? (
         <section className={CARD}>
-          <p className="text-sm text-red-600 dark:text-red-400">실전 전환 관문 등 일부를 내지 않음 — {desk.gate_error}</p>
+          <p className="break-words text-sm text-red-600 dark:text-red-400">실전 전환 관문 등 일부를 내지 않음 — {desk.gate_error}</p>
         </section>
       ) : null}
 

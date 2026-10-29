@@ -163,11 +163,9 @@ DESK_UPTO_SQL = (
     " END ORDER BY as_of DESC LIMIT 1"
 )
 #: 이어받기 읽기가 깨진 날의 `gate_error` 머리 — 이 갈래는 챔피언을 비우지 않으므로 웹 전략 화면이 "챔피언 교체 후보를
-#: 내지 않음" 을 띄우지 않게 가른다(25.1975). 웹 `lib/desk.ts` 의 같은 이름과 같아야 한다(시험이 대조)
+#: 내지 않음" 을 띄우지 않게 가른다(25.1975 — 관문 계산 실패가 겹친 날은 예외, `desk.GATE_CALC_ERROR_SEP`).
+#: 웹 `lib/desk.ts` 의 같은 이름과 같아야 한다(시험이 대조)
 GATE_CARRY_ERROR_HEAD = "판정 시점 기록을 못 읽어 관문 안 냄"
-#: 관문을 비운 갈래에 관문 계산 실패가 겹친 날 덧붙이는 까닭의 머리(` · ` 뒤) — 그날은 챔피언·위험판도 빈다(25.1977).
-#: 웹 `lib/desk.ts` 의 같은 이름과 같아야 한다
-GATE_CALC_ERROR_HEAD = "관문 계산 실패"
 DESK_UPSERT_SQL = (
     "INSERT INTO paper_desk (as_of, summary_json, updated_at) VALUES (?, ?, ?)"
     " ON CONFLICT (as_of) DO UPDATE SET summary_json = excluded.summary_json, updated_at = excluded.updated_at"
@@ -356,7 +354,8 @@ def write(
     elif 앞오류:
         # 앞 기록을 모르면 판정 시점을 이어받지 못한다 — 관문만 비우고(오늘 줄에 이미 있던 판정 기록은 `gate_carry` 로,
         # 다음 실행이 기록 있는 줄을 다시 찾는다) 위험판·챔피언·사전 등록 값은 둔다(판정 시점과 무관).
-        # 주간 요약은 gate_error 를 80자로 자른다 — 머리를 짧게(25.1973). 관문 계산도 깨졌으면 그 까닭을 앞에(25.1974)
+        # 주간 요약은 gate_error 를 80자로 자른다 — 머리를 짧게(25.1973). 관문 계산도 깨졌으면 그 까닭을 뒤에 전문으로
+        # (25.1974·25.1977)
         관문오류 = _까닭_잇기(관문오류, f"{GATE_CARRY_ERROR_HEAD} — {앞오류}")
         관문판 = {**관문판, "gate": None, "gate_error": 관문오류, "gate_carry": 그날관문}
     공통 = {"leaderboard": 순위, "rule_history": 판이력, "mirror_account": h, "updated_at": 지금, "last_market": market,
@@ -522,8 +521,8 @@ def _까닭_잇기(관문오류: str | None, 글: str) -> str:
     """관문을 비운 갈래(판오류·앞오류)의 `gate_error` — 같은 실행에 관문 계산도 깨졌으면(위험판·챔피언·준비 목록이 빈
     까닭) 그 까닭을 **뒤에 전문으로** 잇는다(25.1974 앞오류, 25.1976 판오류도). 갈래 머리가 앞이라 주간 요약의 80자
     자르기에도 남고, 저장 본문·웹·실행 기록에는 계산 까닭이 다 남는다(25.1977 — 25.1976 은 40자로 잘라 저장했다).
-    웹 전략 화면은 `GATE_CALC_ERROR_HEAD` 가 있으면 챔피언이 빈 까닭으로 띄운다"""
-    return f"{글} · {GATE_CALC_ERROR_HEAD} — {관문오류}" if 관문오류 else 글
+    웹 전략 화면은 `desk.GATE_CALC_ERROR_SEP` 가 있으면 챔피언이 빈 까닭으로 띄운다"""
+    return f"{글}{desk.GATE_CALC_ERROR_SEP}{관문오류}" if 관문오류 else 글
 
 
 def _앞관문(줄: dict[str, Any]) -> dict[str, Any] | None:

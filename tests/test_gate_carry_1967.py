@@ -194,7 +194,7 @@ def test_관문_계산과_앞_읽기가_함께_깨지면_두_까닭(monkeypatch:
                     session_date="2026-10-19", step_log={}, warnings=[])  # fmt: skip
     # 25.1977 — 갈래 머리가 앞, 계산 까닭은 뒤에 전문
     assert out["gate_error"].startswith(job.GATE_CARRY_ERROR_HEAD)
-    assert f" · {job.GATE_CALC_ERROR_HEAD} — RuntimeError: 관문 계산 실패" in out["gate_error"]
+    assert f"{job.desk.GATE_CALC_ERROR_SEP}RuntimeError: 관문 계산 실패" in out["gate_error"]
 
 
 def test_그날_줄_다시_읽기도_깨지면_올리고_그날_줄을_덮지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -227,8 +227,9 @@ def test_판오류와_관문_계산이_함께_깨지면_두_까닭(monkeypatch: 
     글 = out["gate_error"]
     # 25.1977 — 갈래 머리가 앞이라 주간 요약 80자 자르기에 남고, 계산 까닭은 전문으로 저장된다
     # 계산 까닭은 `_관문판` 이 남긴 그대로(예외 이름 + 120자) — 더 자르지 않는다
-    assert 글.startswith("판 이력을 읽지 못해") and 글.split(f" · {job.GATE_CALC_ERROR_HEAD} — ")[1] == (
+    assert 글.startswith("판 이력을 읽지 못해") and 글.split(job.desk.GATE_CALC_ERROR_SEP)[1] == (
         "RuntimeError: " + ("관문 계산 실패 " + "가" * 200)[:120])
     from batch.services import desk as desk_svc
 
-    assert "판 이력을 읽지 못해 관문을 내지 않음" in desk_svc.readiness_lines(None, [], 글)[0]
+    주간 = desk_svc.readiness_lines(None, [], 글)[0]
+    assert "판 이력을 읽지 못해 관문을 내지 않음" in 주간 and 주간.endswith(" · 관문 계산도 실패)")  # 25.1978
