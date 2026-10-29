@@ -325,7 +325,7 @@ export function gateNowText(i: GateItem): string {
       return `${i.now}일(검산 어긋난 날 ${i.detail?.recon_bad_days ?? "-"} · 배치 사고 날 ${i.detail?.batch_failed ?? "-"}) / 0`;
     case "selection":
     case "control":
-      // 결정 단위 선정·가상 대조 — 한쪽 95% 하한 분위(무작위면 50), 평균·묶음 수 (25.1518·25.1697)
+      // 결정 단위 선정·가상 대조 — 한쪽 하한 분위(판정 시점 Pocock 문턱 25.1963, 무작위면 50), 평균·묶음 수 (25.1518·25.1697)
       return `하한 ${i.now.toFixed(apartDigits(i.now, i.target ?? 50, 1))}분위(평균 ${i.mean == null ? "-" : i.mean.toFixed(1)}, 28일 묶음 ${i.n ?? 0}) / ${i.target ?? 50} 초과`;
     case "kis":
       // 소수 첫째 자리 — 89.6 이 "90% / 90% 이상" 으로 보이는데 미충족이면 헷갈린다(25.1511 검토 4)

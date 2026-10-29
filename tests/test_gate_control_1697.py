@@ -67,12 +67,15 @@ def test_gate_control_item_is_and() -> None:
     지수 = [(날[0], 1000.0, 1000.0, 1000.0), (날[-1], 1000.0, 1000.0, 1000.0)]
 
     def 관문(ctl: dict[str, Any] | None) -> dict[str, Any]:
-        ev = {"lower": 55.0, "n_blocks": 6, **({"control": ctl} if ctl is not None else {})}
+        # 25.1963 뒤로 하한은 평균·표준오차에서 Pocock 문턱으로 — 60 − t(0.9779, 5) × 2 ≈ 54.5
+        ev = {"mean": 60.0, "se": 2.0, "lower": 55.0, "n_blocks": 6, **({"control": ctl} if ctl is not None else {})}
         return desk.gate({"H": h, "R1": r, "R2": r}, "H", recon_bad_days=0, batch_failed=0,
                          kis={"kept_pct": 95.0, "n": 200}, evidence=ev, index=지수)  # fmt: skip
 
-    assert 관문({"lower": 51.0, "n_blocks": 6})["passed"]
-    for ctl in ({"lower": 50.0, "n_blocks": 9}, {"lower": 60.0, "n_blocks": 5}, {"n_blocks": 3, "mean": 70.0}, None):
+    assert 관문({"mean": 60.0, "se": 2.0, "lower": 55.0, "n_blocks": 6})["passed"]
+    # 52 − t(0.9779, 8) × 2 ≈ 47.3 · 묶음 5 · 표준오차 없음 · 증거 없음 · 95% 하한만 있고 평균·표준오차 없음
+    for ctl in ({"mean": 52.0, "se": 2.0, "lower": 50.0, "n_blocks": 9}, {"mean": 70.0, "se": 2.0, "n_blocks": 5},
+                {"n_blocks": 3, "mean": 70.0}, None, {"lower": 51.0, "n_blocks": 6}):  # fmt: skip
         g = 관문(ctl)
         칸 = {i["key"]: i for i in g["items"]}
         assert not g["passed"] and not 칸["control"]["ok"], ctl

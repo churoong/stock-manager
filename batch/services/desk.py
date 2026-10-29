@@ -212,7 +212,8 @@ def prereg_status(
     (25.1710, 결정 원장 감사 [권고] 7 — 25.1691 에 남긴 것). 관문은 H 만 계산해 A·B·C·D·E·G 판을 판정할 값이 날마다
     남지 않았다 — 나중에 "묶음 6 에 처음 닿은 날" 의 값을 그대로 읽으려면 그날 값을 그날 적어 둬야 한다(날마다
     다시 셈하면 날마다 들여다보는 꼴). 운용 요약 줄(`paper_desk`, 하루 한 줄)에 실린다 — 읽기 0.
-    `versions` = {계좌: (지금 판, 판 시작 결정일)}. 대조(R1·R2)는 뺀다. 관문과 같은 식(`gate` 의 칸)이라 잣대가 같다
+    `versions` = {계좌: (지금 판, 판 시작 결정일)}. 대조(R1·R2)는 뺀다. 관문과 같은 식(`gate` 의 칸)이라 잣대가 같다 —
+    다만 하한(`lower`)은 사전 등록한 한쪽 95% 하한(칸의 `lower_95`)이다. 칸의 `now` 는 H 관문의 Pocock 하한(25.1966)
     """
     out: dict[str, dict[str, Any]] = {}
     for a, (판, 시작) in sorted(versions.items()):
@@ -222,7 +223,7 @@ def prereg_status(
                  evidence=evidence.get(a), index=index.get(a))  # fmt: skip
         칸 = {i["key"]: i for i in g["items"]}
         out[a] = {"version": 판, "from": g["from"], "points": 칸["days"]["now"], "n_blocks": 칸["selection"]["n"],
-                  "lower": 칸["selection"]["now"], "vs_index": 칸["vs_index"]["now"],
+                  "lower": 칸["selection"]["lower_95"], "vs_index": 칸["vs_index"]["now"],
                   "vs_r": 칸["vs_r"]["now"]}  # fmt: skip
     return out
 
