@@ -161,3 +161,16 @@ def test_넘긴_전략_재료_머리_뒤에_빈_줄을_되살린다() -> None:
     # 다음 조각이 이미 빈 줄로 시작하면 하나만
     결과 = tg._carry_headers([f"🧪 가상모의투자\n\n{daily.RECOMMEND_HEAD}", "\n시장 국면 (…)"])
     assert 결과[1].split("\n")[:3] == [daily.RECOMMEND_HEAD, "", "시장 국면 (…)"]
+
+
+def test_세지_못함은_실제_판오류_글에서_예외_이름을_자르지_않는다() -> None:
+    """25.1996 (25.1994 교차검증 [참고]) — 예전 [:60] 은 실제 판글에서 'OperationalErr' 로 잘랐다"""
+    from batch.services import desk
+
+    판글 = "판 이력을 읽지 못해 관문을 내지 않음(판을 섞지 않게, 챔피언 후보도 비움) — OperationalError: database is locked"
+    assert desk.gate_line(None, 판글 + desk.GATE_CALC_ERROR_SEP + "ValueError: y") == (
+        "▸ 실전 관문: 세지 못함 — 판 이력을 읽지 못해 관문을 내지 않음(판을 섞지 않게, 챔피언 후보도 비움) — OperationalError"
+        " (자세히: 웹 운용 화면)")
+    # 관문 계산 실패만 난 날(구분자 없는 'Type: msg')은 그 글 그대로(80자까지)
+    assert desk.gate_line(None, "ZeroDivisionError: division by zero") == (
+        "▸ 실전 관문: 세지 못함 — ZeroDivisionError: division by zero (자세히: 웹 운용 화면)")

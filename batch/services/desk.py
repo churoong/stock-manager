@@ -1132,7 +1132,11 @@ def gate_line(gate: dict[str, Any] | None, gate_error: str | None = None) -> str
     못함" 한 줄, 관문도 까닭도 없으면 None"""
     if not isinstance(gate, dict) or not isinstance(gate.get("items"), list):
         if gate_error:
-            return f"▸ 실전 관문: 세지 못함 — {gate_error.split(GATE_CALC_ERROR_SEP)[0][:60]} (자세히: 웹 운용 화면)"
+            # 까닭 머리와 예외 이름만 — 60자로 자르면 실제 판오류 글에서 예외 이름이 잘렸다("… — OperationalErr",
+            # 25.1996, 25.1994 교차검증 [참고]). 예외 본문은 웹 운용 화면에
+            머리, _, 꼬리 = gate_error.split(GATE_CALC_ERROR_SEP)[0].partition(" — ")
+            글 = 머리[:80] + (f" — {꼬리.split(':')[0][:40]}" if 꼬리 else "")
+            return f"▸ 실전 관문: 세지 못함 — {글} (자세히: 웹 운용 화면)"
         return None
     items = [i for i in gate["items"] if isinstance(i, dict)]
     날수 = next((i.get("now") for i in items if i.get("key") == "days"), None)
