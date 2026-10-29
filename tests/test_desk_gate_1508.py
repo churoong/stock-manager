@@ -9,6 +9,7 @@ import pytest
 
 from batch.jobs import desk as job
 from batch.services import desk
+from batch.services import paper as pp
 from tests.test_paper_job_1445 import Client
 
 
@@ -38,7 +39,9 @@ def test_gate_items_and_pass() -> None:
     r = [(d, 1 + (0.01 if i % 2 else -0.01)) for i, d in enumerate(날)]  # 제자리 출렁
     series = {"H": h, "R1": r, "R2": r}
     # 결정 단위 하한도(25.1518), 가상 대조 하한도(25.1697) 넘어야 통과
-    증거 = {"lower": 55.0, "n_blocks": 6, "mean": 62.0, "control": {"lower": 53.0, "n_blocks": 6, "mean": 60.0}}
+    # 25.1963 — 하한은 Pocock 문턱으로 다시 낸다(평균·표준오차·묶음). 95% 하한(`lower`)은 참고
+    증거 = {"lower": 55.0, "n_blocks": 6, "mean": 62.0, "se": 2.0,
+            "control": {"lower": 53.0, "n_blocks": 6, "mean": 60.0, "se": 2.0}}  # fmt: skip
     # 지수 그림자 — 같은 기간 반반 지수 +2% (H 는 약 +13%)
     지수 = [(날[0], 1000.0, 1000.0, 1000.0), (날[-1], 1020.0, 1020.0, 1000.0)]
     g = desk.gate(series, "H", recon_bad_days=0, batch_failed=0, kis={"kept_pct": 92.0, "n": 120}, evidence=증거,
@@ -46,7 +49,8 @@ def test_gate_items_and_pass() -> None:
     칸 = {i["key"]: i for i in g["items"]}
     assert 칸["days"]["now"] == 130 and 칸["days"]["ok"]
     assert 칸["vs_r"]["ok"] and 칸["vs_index"]["ok"] and 칸["ratio"]["ok"] and 칸["incidents"]["ok"] and 칸["kis"]["ok"] and 칸["selection"]["ok"]
-    assert 칸["control"]["ok"] and 칸["control"]["now"] == 53.0
+    대조하한 = 60.0 - pp.t_quantile(1 - desk.GATE_POCOCK_ALPHA, 5) * 2.0
+    assert 칸["control"]["ok"] and 칸["control"]["now"] == pytest.approx(대조하한) and 칸["control"]["lower_95"] == 53.0
     assert g["passed"] and g["account"] == "H" and g["next"].startswith("2단계 손 매매")
     # 하나라도 아니면 통과 아님 — 표본 모자란 실현율·사고 하루·기간 모자람
     assert not desk.gate(series, "H", recon_bad_days=0, batch_failed=0, kis={"kept_pct": 99.0, "n": 99})["passed"]
@@ -62,7 +66,8 @@ def test_gate_own_window_and_current_version() -> None:
     날 = _날(160)
     h = [(d, 1 + 0.001 * i + (0.002 if i % 2 else 0)) for i, d in enumerate(날)]
     r = [(d, 1 + (0.01 if i % 2 else -0.01)) for i, d in enumerate(날)]
-    증거 = {"lower": 55.0, "n_blocks": 6, "control": {"lower": 53.0, "n_blocks": 6}}
+    증거 = {"lower": 55.0, "n_blocks": 6, "mean": 62.0, "se": 2.0,
+            "control": {"lower": 53.0, "n_blocks": 6, "mean": 60.0, "se": 2.0}}  # fmt: skip
     지수 = [(날[0], 1000.0, 1000.0, 1000.0), (날[-1], 1000.0, 1000.0, 1000.0)]
     전 = desk.gate({"H": h, "R1": r, "R2": r}, "H", recon_bad_days=0, batch_failed=0, kis={"kept_pct": 95.0, "n": 200},
                   evidence=증거, index=지수)  # fmt: skip

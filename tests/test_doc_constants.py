@@ -1045,6 +1045,10 @@ class Test이웃_모듈들:
         """운용 첫 화면 요약 (docs/desk.md 2장, docs/infra.md 25.1501)."""
         검사(DESK, f"평가가 {dk.MIN_WINDOW_POINTS}번 쌓이기 전", "갓 연 계좌 문턱 (25.1503)")
         검사(DESK, f"평가가 {dk.GATE_MIN_POINTS}번(`GATE_MIN_POINTS`", "관문 모의 기간 (25.1508)")
+        # 25.1963 — 판정 시점·Pocock 문턱
+        검사(DESK, f"`GATE_POCOCK_ALPHA` {dk.GATE_POCOCK_ALPHA}", "관문 Pocock 문턱 (25.1963)")
+        검사(DESK, "`GATE_LOOKS` = " + "·".join(str(x) for x in dk.GATE_LOOKS) + " 평가", "관문 판정 시점 (25.1963)")
+        assert dk.GATE_LOOKS[0] == dk.GATE_MIN_POINTS
         검사(DESK, f"수익률이 {dk.GATE_RATIO_MIN_N}개(`GATE_RATIO_MIN_N`)", "관문 위험조정 표본 (25.1508)")
         검사(DESK, f"최근 {dk.GATE_INCIDENT_DAYS}일(`GATE_INCIDENT_DAYS`)", "관문 무사고 창 (25.1508)")
         검사(DESK, f"{dk.GATE_KEPT_PCT:g}%(`GATE_KEPT_PCT`) 이상, 표본 {dk.GATE_KEPT_MIN_N}(`GATE_KEPT_MIN_N`)", "관문 KIS 실현율 (25.1508)")

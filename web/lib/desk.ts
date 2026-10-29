@@ -57,7 +57,21 @@ export interface GateItem { key: string; label: string; now: number | null; targ
 export interface ValuationGap { h_pct: number | null; r_pct: number | null; limit: number; over: boolean }
 /** 관문 R 대비 옆 참고 칸 — 노출을 H 에 맞춘 R (25.1702). 통과 판정에 들지 않는다 */
 export interface ExposureMatched { vs_r?: number; r_pct: number; h_exposure_pct: number; r_exposure_pct: number; skipped_days: number }
-export interface Gate { stage: number; account: string; version?: number | null; from?: string | null; items: GateItem[]; passed: boolean; next: string }
+/** 관문 판정 시점 한 번(25.1963) — 평가 횟수가 `n` 에 닿은 날(`at` 은 실제 횟수)의 판정 */
+export interface GateLook { n: number; at: number; date: string | null; passed: boolean; failed: string[] }
+export interface Gate {
+  stage: number; account: string; version?: number | null; from?: string | null; items: GateItem[]; passed: boolean; next: string;
+  /** 판정 시점 기록·다음 시점(25.1963) — 옛 운용 요약에는 없다 */
+  looks?: GateLook[]; next_look?: number | null;
+}
+
+/** 판정 시점 한 줄(25.1963, 배치 `desk.gate_looks_line` 과 같은 글) — 옛 관문(기록 없음)은 null */
+export function gateLooksText(g: Pick<Gate, "looks" | "next_look" | "passed">): string | null {
+  if (g.looks === undefined) return null;
+  const 칸 = g.looks.map((x) => `${x.n} ${x.passed ? "통과" : "못 넘음"}`);
+  const 꼬리 = g.next_look ? `다음 ${g.next_look}평가` : `판정 시점 끝${g.passed ? "" : " — 새 판 등록 전엔 통과 없음"}`;
+  return `판정 시점(126·189·252평가에만 판정): ${칸.length ? `${칸.join(" · ")} · ` : ""}${꼬리}`;
+}
 
 /**
  * 화면 글에 쓰는 문턱 — `batch/services/desk.py` 의 상수와 같은 값(테스트가 대조, 25.1511 검토 8).

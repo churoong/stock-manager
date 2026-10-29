@@ -15,6 +15,7 @@ import {
   notSentText,
   orderLine,
   pctText,
+  gateLooksText,
   ppText,
   READINESS_TEXT,
   type DeskMarket,
@@ -252,6 +253,7 @@ export default function DeskView() {
               {desk.gate.passed ? "통과(다음 단계는 사용자 결정)" : `${desk.gate.items.filter((i) => i.ok).length}/${desk.gate.items.length} 충족`}
             </span>
           </h2>
+          {gateLooksText(desk.gate) ? <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">{gateLooksText(desk.gate)}</p> : null}
           <p className="mt-1 text-xs text-slate-500">
             잣대는 KIS 가 베끼는 계좌 {accountName(desk.gate.account)}
             {desk.gate.version != null ? `의 지금 판 ${desk.gate.version}` : ""}

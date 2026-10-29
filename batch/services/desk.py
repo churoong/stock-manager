@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 from batch.notify import formatter
+from batch.services import paper as pp
 from batch.services.paper import SEPARATE_IDS as _SEPARATE_IDS
 from batch.services.paper import account_name as _account_name
 from batch.services.paper import step_error_orders as _step_error_orders
@@ -251,6 +252,13 @@ CHAMPION_WIN_SHARE = 0.67
 GATE_SEL_MIN_BLOCKS = 6
 #: 무작위로 골랐을 때의 분위 — 관문은 한쪽 하한이 이것을 넘어야 한다
 GATE_SEL_NULL = 50.0
+#: 판정 시점 — 지금 판의 평가 횟수가 이것에 닿은 날에만 통과를 판정한다(25.1963, docs/funnel.md 3장 "2 → 3" — 날마다
+#: 다시 보는 순차 검정의 거짓 통과 부풀림을 막는다). 첫 시점은 `GATE_MIN_POINTS` 와 같다(시험이 대조)
+GATE_LOOKS = (126, 189, 252)
+#: 판정 시점마다 결정 단위 하한(선정·가상 대조)에 쓰는 한쪽 유의수준 — Pocock 문턱, 판정 셋에 전체 약 5%
+#: (funnel.md 3장 "한 번 약 2.2%" `[확인필요]` — 같은 간격 셋의 Pocock 양쪽 0.05 의 명목 값 0.0221. 판정 간격이 2:3:4 라
+#: 같은 간격 가정과 조금 다르다 — 한쪽으로 쓰면 보수적)
+GATE_POCOCK_ALPHA = 0.0221
 #: 챔피언 교체 — 짝지은 묶음 차이의 최소 공통 묶음 수, 유의수준(여러 도전자를 견주므로 본페로니로 나눈다)
 CHAMPION_EVIDENCE_MIN_BLOCKS = 4
 CHAMPION_ALPHA = 0.05
@@ -485,9 +493,15 @@ def gate(
     cash: list[tuple[str, float, float]] | None = None,
     control_cash: dict[str, list[tuple[str, float, float]]] | None = None,
     valuation: dict[str, list[tuple[str, float]]] | None = None,
+    prev: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """실전 전환 1단계 관문 진도 — {stage, account, version, from, items: [{key, label, now, target, ok}], passed,
-    next}.
+    next, looks, next_look}.
+
+    **판정 시점 고정**(25.1963): 통과(`passed`)는 지금 판의 평가 횟수가 `GATE_LOOKS` 에 닿은 날의 판정(`looks`)으로만
+    정한다 — 그 사이 날의 `items` 는 진도일 뿐이다. 판정은 그날 모든 칸이 맞으면 통과이고, 결정 단위 하한은 Pocock 문턱
+    (`GATE_POCOCK_ALPHA`)으로 잰다. 앞선 판정은 `prev`(직전 운용 요약의 관문)에서 같은 계좌·같은 판일 때만 이어받는다 —
+    판을 올리면 처음부터(새 사전 등록). 한 번 통과하면 그 판에서는 통과로 남는다(다음 단계는 사용자 결정).
 
     1단계 = 모의 성적·운영 무사고(CLAUDE.md). 잣대는 KIS 가 베끼는 계좌(`mirror`, 지금 H)의 **지금 판** —
     실전에 옮길 전략이다. `since` = 지금 판을 처음 본 결정일(판 이력, '' = 처음부터) — 그 뒤 평가만 센다
@@ -537,9 +551,10 @@ def gate(
                "return_pct": eq_pct, "avg_cash_pct": 현금비중}  # fmt: skip
     kept, kn = (kis or {}).get("kept_pct"), int((kis or {}).get("n") or 0)
     ev = evidence or {}
-    하한, 묶음수 = ev.get("lower"), int(ev.get("n_blocks") or 0)
     가상 = ev.get("control") or {}
-    대조하한, 대조묶음수 = 가상.get("lower"), int(가상.get("n_blocks") or 0)
+    # 결정 단위 하한은 Pocock 문턱으로(25.1963) — 증거의 95% 하한(`lower`)은 참고로 싣는다
+    하한, 묶음수 = pocock_lower(ev), int(ev.get("n_blocks") or 0)
+    대조하한, 대조묶음수 = pocock_lower(가상), int(가상.get("n_blocks") or 0)
     판글 = f"지금 판{'' if version is None else f' {version}'}"
     items = [
         {"key": "days", "label": f"모의 기간({판글}의 평가 횟수)", "now": len(v), "target": GATE_MIN_POINTS,
@@ -561,20 +576,49 @@ def gate(
          "target": GATE_KEPT_PCT, "n": kn, "path_pct": (kis or {}).get("path_pct"), "path_n": (kis or {}).get("path_n"),
          "ok": kept is not None and kn >= GATE_KEPT_MIN_N and float(kept) >= GATE_KEPT_PCT},
         {"key": "selection",
-         "label": f"결정 단위 선정 — 같은 날 새 후보 안 분위의 한쪽 95% 하한(28일 묶음 {GATE_SEL_MIN_BLOCKS}개 이상)",
-         "now": 하한, "target": GATE_SEL_NULL, "n": 묶음수, "mean": ev.get("mean"),
+         "label": (f"결정 단위 선정 — 같은 날 새 후보 안 분위의 한쪽 하한(Pocock α {GATE_POCOCK_ALPHA:.2%}, 28일 묶음"
+                   f" {GATE_SEL_MIN_BLOCKS}개 이상)"),
+         "now": 하한, "target": GATE_SEL_NULL, "n": 묶음수, "mean": ev.get("mean"), "lower_95": ev.get("lower"),
          "ok": 하한 is not None and 묶음수 >= GATE_SEL_MIN_BLOCKS and float(하한) > GATE_SEL_NULL},
         # 가상 대조(25.1697, H·R 감사 [필수]) — R 대비가 규칙 차이(진입·매도·투자 속도)를 재는 것을 받친다.
         # AND 로만 더함
         {"key": "control",
-         "label": ("가상 대조 — 주문 낸 새 종목이 같은 날 무작위 20종목 안 분위의 한쪽 95% 하한"
-                   f"(28일 묶음 {GATE_SEL_MIN_BLOCKS}개 이상)"),
+         "label": ("가상 대조 — 주문 낸 새 종목이 같은 날 무작위 20종목 안 분위의 한쪽 하한"
+                   f"(Pocock α {GATE_POCOCK_ALPHA:.2%}, 28일 묶음 {GATE_SEL_MIN_BLOCKS}개 이상)"),
          "now": 대조하한, "target": GATE_SEL_NULL, "n": 대조묶음수, "mean": 가상.get("mean"),
+         "lower_95": 가상.get("lower"),
          "ok": 대조하한 is not None and 대조묶음수 >= GATE_SEL_MIN_BLOCKS and float(대조하한) > GATE_SEL_NULL},
     ]  # fmt: skip
     다음 = "2단계 손 매매 준수율·슬리피지 → 3단계 소액 승인형 → 4단계 한도 내 자동 — 단계마다 사용자 결정"
+    looks = gate_looks(prev, mirror, version, len(v), v[-1][0] if v else None, items)
+    한 = {x["n"] for x in looks}
     return {"stage": 1, "account": mirror, "version": version, "from": 시작, "items": items,
-            "passed": all(i["ok"] for i in items), "next": 다음}  # fmt: skip
+            "passed": any(x["passed"] for x in looks), "next": 다음, "looks": looks,
+            "next_look": next((L for L in GATE_LOOKS if L not in 한), None)}  # fmt: skip
+
+
+def pocock_lower(ev: dict[str, Any]) -> float | None:
+    """결정 단위 증거(`pp.block_bound` 꼴 — mean·se·n_blocks)의 한쪽 하한을 Pocock 문턱(`GATE_POCOCK_ALPHA`)으로
+    (25.1963). 묶음이 `pp.EVIDENCE_MIN_BLOCKS` 보다 적거나(95% 하한도 없는 자리) 재료가 없으면 None"""
+    m, se, n = ev.get("mean"), ev.get("se"), int(ev.get("n_blocks") or 0)
+    if m is None or se is None or n < pp.EVIDENCE_MIN_BLOCKS:
+        return None
+    return float(m) - pp.t_quantile(1 - GATE_POCOCK_ALPHA, n - 1) * float(se)
+
+
+def gate_looks(prev: dict[str, Any] | None, mirror: str, version: int | None, n: int, day: str | None,
+               items: list[dict[str, Any]]) -> list[dict[str, Any]]:  # fmt: skip
+    """판정 시점 기록(25.1963) — 앞선 관문(`prev`)이 같은 계좌·같은 판이면 그 `looks` 를 이어받고, 평가 횟수 `n` 이 닿은
+    아직 판정 안 한 시점마다 오늘 칸으로 판정을 더한다(운용 요약이 그 시점 날을 건너뛰었으면 닿은 첫날 — `at` 에 실제
+    횟수). 통과 = 그날 모든 칸이 맞음, `failed` = 안 맞은 칸"""
+    같은판 = bool(prev) and prev.get("account") == mirror and prev.get("version") == version
+    looks = [dict(x) for x in ((prev or {}).get("looks") or []) if isinstance(x, dict)] if 같은판 else []
+    한 = {x.get("n") for x in looks}
+    for L in GATE_LOOKS:
+        if n >= L and L not in 한:
+            looks.append({"n": L, "at": n, "date": day, "passed": all(i["ok"] for i in items),
+                          "failed": [i["key"] for i in items if not i["ok"]]})  # fmt: skip
+    return looks
 
 
 #: 실전 준비 목록 (docs/paper.md 14장, 25.1513) — 배치 늦음을 세는 창(달력일)과 "늦음" 문턱(초)
@@ -1203,6 +1247,19 @@ def _준비_값(i: dict[str, Any]) -> str:
     return str(now)
 
 
+def gate_looks_line(gate: dict[str, Any] | None) -> str | None:
+    """관문 판정 시점 한 줄(25.1963) — "…: 126 못 넘음 · 다음 189평가". 판정 시점 기록이 없는 옛 관문은 None.
+    웹 `gateLooksText` 와 같은 글"""
+    if not gate or "looks" not in gate:
+        return None
+    looks = gate.get("looks") or []
+    칸 = [f"{x.get('n')} {'통과' if x.get('passed') else '못 넘음'}" for x in looks]
+    다음 = gate.get("next_look")
+    끝 = "판정 시점 끝" + ("" if gate.get("passed") else " — 새 판 등록 전엔 통과 없음")
+    꼬리 = f"다음 {다음}평가" if 다음 else 끝
+    return "판정 시점(126·189·252평가에만 판정): " + (" · ".join(칸) + " · " if 칸 else "") + 꼬리
+
+
 def readiness_lines(gate: dict[str, Any] | None, ready: list[dict[str, Any]] | None, gate_error: str | None = None
                     ) -> list[str]:  # fmt: skip
     """주간 요약의 **실전 준비도** 한 장 — 1단계 관문 항목마다 지금 값·목표·남은 거리, 실전 준비 목록 상태 수,
@@ -1223,6 +1280,9 @@ def readiness_lines(gate: dict[str, Any] | None, ready: list[dict[str, Any]] | N
     for i in items:
         이름 = _준비_이름.get(str(i.get("key")), str(i.get("label")))
         out.append(f"  {'✅' if i.get('ok') else '⬜'} {이름}: {_준비_값(i)}")
+    판정줄 = gate_looks_line(gate)
+    if 판정줄:
+        out.append(f"  {판정줄}")
     if ready:
         셈: dict[str, int] = {}
         for r in ready:
