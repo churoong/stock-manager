@@ -403,7 +403,9 @@ def _carry_headers(chunks: list[str]) -> list[str]:
             끝 = len(줄들)
             while 끝 > 1 and not 줄들[끝 - 1].strip():
                 끝 -= 1
-            if 끝 <= 1 or not _절_머리.match(줄들[끝 - 1].strip()):
+            # 전략 재료 머리(📋, 25.1991)도 넘긴다 — 조각이 그 머리로 끝나면 둘째 메시지가 머리 없이 시장 국면부터
+            # 시작했다(25.1994, 25.1992 교차검증 [참고])
+            if 끝 <= 1 or not (_절_머리.match(줄들[끝 - 1].strip()) or 줄들[끝 - 1].startswith("📋 ")):
                 break
             넘김.insert(0, 줄들[끝 - 1])
             del 줄들[끝 - 1:]

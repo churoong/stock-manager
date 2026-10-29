@@ -138,3 +138,14 @@ def test_전략_재료_머리에서_나뉘면_2부_이어서를_붙이지_않는
 
     결과 = tg._carry_headers(["2부 포트폴리오\n종목1  1,000,000원 (3.3%)", f"{daily.RECOMMEND_HEAD}\n\n시장 국면 (…)"])
     assert 결과[1].split("\n")[0] == daily.RECOMMEND_HEAD
+
+
+
+def test_조각_끝의_전략_재료_머리는_다음_조각으로() -> None:
+    """25.1994 (25.1992 교차검증 [참고]) — 외톨이 머리를 다음 조각으로 넘긴다(1부·기간 머리와 같게)"""
+    from batch.jobs import daily
+    from batch.notify import telegram as tg
+
+    결과 = tg._carry_headers([f"🧪 가상모의투자\n  기준 10억원\n\n{daily.RECOMMEND_HEAD}\n", "시장 국면 (…)\n1부 개별 종목"])
+    assert not 결과[0].rstrip().endswith(daily.RECOMMEND_HEAD)
+    assert 결과[1].split("\n")[0] == daily.RECOMMEND_HEAD
