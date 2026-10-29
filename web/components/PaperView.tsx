@@ -6,7 +6,7 @@ import PaperRealized from "@/components/PaperRealized";
 import Pager from "@/components/Pager";
 import EquityChart, { type Series } from "@/components/EquityChart";
 import Link from "next/link";
-import { DESK_RULES, MARKET_LABEL, adjustCheckText, adjustText, championText, pctText as deskPct, ppText, preregText, ruleSpanText, rowsById, type DeskView, type RuleSpan } from "@/lib/desk";
+import { DESK_RULES, GATE_CARRY_ERROR_HEAD, MARKET_LABEL, adjustCheckText, adjustText, championText, pctText as deskPct, ppText, preregText, ruleSpanText, rowsById, type DeskView, type RuleSpan } from "@/lib/desk";
 import { bodyOf, readJson } from "@/lib/http";
 import {
   DEPOSIT_MAX_KRW,
@@ -527,7 +527,8 @@ export function CompareCard({ data, desk }: { data: Data; desk?: DeskView | null
             거의 늘 후보가 나왔습니다. 교체는 사용자 결정 — 후보가 나와도 바꾸지 않습니다.
           </p>
         </div>
-      ) : desk?.gate_error ? (
+      ) : desk?.gate_error && !desk.gate_error.startsWith(GATE_CARRY_ERROR_HEAD) ? (
+        // 이어받기 읽기만 깨진 날은 챔피언을 비우지 않는다 — 빈 챔피언(줄 없음)을 오류 탓으로 읽지 않게(25.1975)
         <p className="mt-3 text-xs text-amber-700 dark:text-amber-400">챔피언 교체 후보를 내지 않음 — {desk.gate_error}</p>
       ) : null}
       <p className="mt-2 text-xs text-slate-500">

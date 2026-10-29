@@ -162,6 +162,9 @@ DESK_UPTO_SQL = (
     " json_type(summary_json, '$.gate.looks') = 'array' OR json_type(summary_json, '$.gate_carry.looks') = 'array'"
     " END ORDER BY as_of DESC LIMIT 1"
 )
+#: 이어받기 읽기가 깨진 날의 `gate_error` 머리 — 이 갈래는 챔피언을 비우지 않으므로 웹 전략 화면이 "챔피언 교체 후보를
+#: 내지 않음" 을 띄우지 않게 가른다(25.1975). 웹 `lib/desk.ts` 의 같은 이름과 같아야 한다(시험이 대조)
+GATE_CARRY_ERROR_HEAD = "판정 시점 기록을 못 읽어 관문 안 냄"
 DESK_UPSERT_SQL = (
     "INSERT INTO paper_desk (as_of, summary_json, updated_at) VALUES (?, ?, ?)"
     " ON CONFLICT (as_of) DO UPDATE SET summary_json = excluded.summary_json, updated_at = excluded.updated_at"
@@ -351,7 +354,7 @@ def write(
         # 다음 실행이 기록 있는 줄을 다시 찾는다) 위험판·챔피언·사전 등록 값은 둔다(판정 시점과 무관).
         # 주간 요약은 gate_error 를 80자로 자른다 — 머리를 짧게(25.1973). 관문 계산도 깨졌으면 그 까닭을 앞에(25.1974 —
         # 위험판·챔피언이 빈 까닭이 사라졌다)
-        앞글 = f"판정 시점 기록을 못 읽어 관문 안 냄 — {앞오류}"
+        앞글 = f"{GATE_CARRY_ERROR_HEAD} — {앞오류}"
         관문오류 = f"관문 계산 실패 — {관문오류} · {앞글}" if 관문오류 else 앞글
         관문판 = {**관문판, "gate": None, "gate_error": 관문오류, "gate_carry": 그날관문}
     공통 = {"leaderboard": 순위, "rule_history": 판이력, "mirror_account": h, "updated_at": 지금, "last_market": market,

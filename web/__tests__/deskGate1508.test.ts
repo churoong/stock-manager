@@ -9,7 +9,7 @@ import { ReadinessList } from "@/components/DeskView";
 import { CompareCard, type Data } from "@/components/PaperView";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { DESK_RULES, EMPTY_DESK, championText, gateNowText, pickDesk, type DeskView } from "@/lib/desk";
+import { DESK_RULES, EMPTY_DESK, GATE_CARRY_ERROR_HEAD, championText, gateNowText, pickDesk, type DeskView } from "@/lib/desk";
 import { accountView } from "@/lib/paper";
 
 describe("관문 칸 글", () => {
@@ -39,6 +39,19 @@ describe("챔피언 교체 후보 (전략 화면)", () => {
   const 계좌 = (id: string) => ({ id, name: id, sell_rule: "core", rule_version: 1, unknown: [], attribution: null, positions: [], view: accountView(id, 1, 1, 0, 평가(id)) });
   const data = { halted: false, realCompare: null, invested: 1, flows: [], history: [], fills: [], orders: [], accounts: [계좌("C"), 계좌("H")] } as unknown as Data;
   const 줄 = (candidate: boolean) => ({ id: "C", from: "2026-01-01", blocks: 3, wins: candidate ? 3 : 1, pct: 12, champion_pct: 6, candidate });
+
+  it("이어받기 읽기만 깨진 날은 챔피언을 비운 것으로 적지 않는다 (25.1975)", () => {
+    const desk: DeskView = { ...EMPTY_DESK, mirror_account: "H", champion: [] };
+    const 앞오류 = renderToStaticMarkup(createElement(CompareCard, { data, desk: { ...desk, gate_error: `${GATE_CARRY_ERROR_HEAD} — OperationalError: x` } }));
+    expect(앞오류).not.toContain("챔피언 교체 후보를 내지 않음");
+    const 판오류 = renderToStaticMarkup(createElement(CompareCard, { data, desk: { ...desk, gate_error: "판 이력을 읽지 못해 관문을 내지 않음 — x" } }));
+    expect(판오류).toContain("챔피언 교체 후보를 내지 않음");
+    // 관문 계산도 깨진 날(챔피언을 비움)은 머리가 다르다 — 띄운다
+    const 둘 = renderToStaticMarkup(createElement(CompareCard, { data, desk: { ...desk, gate_error: `관문 계산 실패 — RuntimeError: x · ${GATE_CARRY_ERROR_HEAD} — y` } }));
+    expect(둘).toContain("챔피언 교체 후보를 내지 않음");
+    const py = readFileSync(join(process.cwd(), "..", "batch", "jobs", "desk.py"), "utf8");
+    expect(/^GATE_CARRY_ERROR_HEAD = "(.+)"$/m.exec(py)?.[1]).toBe(GATE_CARRY_ERROR_HEAD);
+  });
 
   it("후보가 있으면 초록 줄, 없으면 가장 가까운 것", () => {
     const desk: DeskView = { ...EMPTY_DESK, mirror_account: "H", champion: [줄(true)] };
