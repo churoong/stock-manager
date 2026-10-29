@@ -164,13 +164,22 @@ def test_넘긴_전략_재료_머리_뒤에_빈_줄을_되살린다() -> None:
 
 
 def test_세지_못함은_실제_판오류_글에서_예외_이름을_자르지_않는다() -> None:
-    """25.1996 (25.1994 교차검증 [참고]) — 예전 [:60] 은 실제 판글에서 'OperationalErr' 로 잘랐다"""
+    """25.1996·25.1997 — 예전 [:60] 은 실제 판글에서 'OperationalErr' 로 잘랐다. 글은 만드는 쪽(jobs.desk 머리 상수·
+    `예외글`·`_까닭_잇기`)으로 만든다 — 손으로 베낀 글은 그쪽이 바뀌어도 지났다(25.1996 교차검증 [권고])"""
+    from batch.jobs import desk as jdesk
     from batch.services import desk
 
-    판글 = "판 이력을 읽지 못해 관문을 내지 않음(판을 섞지 않게, 챔피언 후보도 비움) — OperationalError: database is locked"
-    assert desk.gate_line(None, 판글 + desk.GATE_CALC_ERROR_SEP + "ValueError: y") == (
-        "▸ 실전 관문: 세지 못함 — 판 이력을 읽지 못해 관문을 내지 않음(판을 섞지 않게, 챔피언 후보도 비움) — OperationalError"
-        " (자세히: 웹 운용 화면)")
-    # 관문 계산 실패만 난 날(구분자 없는 'Type: msg')은 그 글 그대로(80자까지)
-    assert desk.gate_line(None, "ZeroDivisionError: division by zero") == (
-        "▸ 실전 관문: 세지 못함 — ZeroDivisionError: division by zero (자세히: 웹 운용 화면)")
+    class OperationalError(Exception):
+        pass
+
+    db오류 = jdesk.예외글(OperationalError("database is locked — 다시: 나중"))
+    계산 = jdesk.예외글(ValueError("판 없음 — 계좌 H: 비었다"))
+    꼬리 = " (자세히: 웹 운용 화면)"
+    # 판오류(+계산 실패 꼬리) — 머리와 예외 이름만
+    판글 = jdesk._까닭_잇기(계산, f"{jdesk.GATE_VERSION_ERROR_HEAD} — {db오류}")
+    assert desk.gate_line(None, 판글) == f"▸ 실전 관문: 세지 못함 — {jdesk.GATE_VERSION_ERROR_HEAD} — OperationalError{꼬리}"
+    # 앞오류
+    앞글 = jdesk._까닭_잇기(None, f"{jdesk.GATE_CARRY_ERROR_HEAD} — {db오류}")
+    assert desk.gate_line(None, 앞글) == f"▸ 실전 관문: 세지 못함 — {jdesk.GATE_CARRY_ERROR_HEAD} — OperationalError{꼬리}"
+    # 관문 계산 실패만 난 날 — 본문에 " — " 가 있어도 'Type: msg' 그대로(25.1997)
+    assert desk.gate_line(None, 계산) == f"▸ 실전 관문: 세지 못함 — ValueError: 판 없음 — 계좌 H: 비었다{꼬리}"

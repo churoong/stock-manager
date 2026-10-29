@@ -166,6 +166,9 @@ DESK_UPTO_SQL = (
 #: 내지 않음" 을 띄우지 않게 가른다(25.1975 — 관문 계산 실패가 겹친 날은 예외, `desk.GATE_CALC_ERROR_SEP`).
 #: 웹 `lib/desk.ts` 의 같은 이름과 같아야 한다(시험이 대조)
 GATE_CARRY_ERROR_HEAD = "판정 시점 기록을 못 읽어 관문 안 냄"
+#: 판 이력을 못 읽은 날의 `gate_error` 머리 — 텔레그램 운용 보고의 "세지 못함" 줄이 이 머리와 예외 이름을 싣는다
+#: (25.1997 — 시험이 이 상수와 `예외글` 로 실제 꼴을 만든다, 25.1996 교차검증 [권고])
+GATE_VERSION_ERROR_HEAD = "판 이력을 읽지 못해 관문을 내지 않음(판을 섞지 않게, 챔피언 후보도 비움)"
 DESK_UPSERT_SQL = (
     "INSERT INTO paper_desk (as_of, summary_json, updated_at) VALUES (?, ?, ?)"
     " ON CONFLICT (as_of) DO UPDATE SET summary_json = excluded.summary_json, updated_at = excluded.updated_at"
@@ -333,7 +336,7 @@ def write(
     except Exception as exc:  # noqa: BLE001 — 까닭은 gate_error 로 화면에
         if db.quota_reason(exc):
             raise
-        앞관문, 앞오류 = None, f"{type(exc).__name__}: {str(exc)[:120]}"
+        앞관문, 앞오류 = None, 예외글(exc)
         # 같은 as_of 의 앞 실행(국내 뒤 미국·재실행)이 오늘 적은 판정 기록은 merge 가 덮기 전에 `gate_carry` 로 남긴다 —
         # JSON 함수 없는 SELECT 로(25.1973, 25.1971 교차검증 [필수]). 이것마저 깨지면 올린다 — 그날 줄을 덮지 않게
         그날줄 = client.execute(DESK_READ_SQL, [as_of]).rows
@@ -351,7 +354,7 @@ def write(
         # 챔피언 후보도 비운다 — 판 시작을 모르면 옛 판 성적까지 섞어 블록 규칙을 넘었다(25.1610, 운용 요약 감사
         # [필수] 3 — 예전 주석 "판과 무관" 은 25.1575 가 챔피언을 지금 판 구간으로 좁힌 뒤로 틀렸다).
         # 위험판은 판과 무관해 둔다
-        판글 = f"판 이력을 읽지 못해 관문을 내지 않음(판을 섞지 않게, 챔피언 후보도 비움) — {판오류}"
+        판글 = f"{GATE_VERSION_ERROR_HEAD} — {판오류}"
         관문오류 = _까닭_잇기(관문오류, 판글)
         관문판 = {**관문판, "gate": None, "champion": [], "prereg_status": {}, "gate_error": 관문오류,
                 "gate_carry": 앞관문 or 그날관문}  # fmt: skip
@@ -448,7 +451,7 @@ def _보정판(
         return {"fill_adjust": {"rows": desk.adjust_rows(순위, 보정), "h_check": 대봄, "min_days": bm.CELL_MIN_DAYS},
                 "fill_adjust_error": None}  # fmt: skip
     except Exception as exc:  # noqa: BLE001 — 곁다리 안의 곁다리
-        return {"fill_adjust": None, "fill_adjust_error": f"{type(exc).__name__}: {str(exc)[:120]}"}
+        return {"fill_adjust": None, "fill_adjust_error": 예외글(exc)}
 
 
 def _마지막(v: list[tuple[str, float]], d: str) -> float | None:
@@ -523,6 +526,11 @@ def _멈춘평가(client: Any, h: str, since: str) -> dict[str, list[tuple[str, 
         if db.quota_reason(exc):
             raise
         return None
+
+
+def 예외글(exc: BaseException) -> str:
+    """곁다리 실패의 까닭 글 — "예외이름: 본문(120자)". `gate_error` 의 예외 꼴은 모두 이것이다(25.1997)"""
+    return f"{type(exc).__name__}: {str(exc)[:120]}"
 
 
 def _까닭_잇기(관문오류: str | None, 글: str) -> str:
@@ -602,14 +610,14 @@ def _관문판(
             판들 = {a: (int(v), 판시작.get(a, "")) for a, v in (판버전 or {}).items()}
             사전: dict[str, Any] = desk.prereg_status(계열, 판들, 증거, 그림자 or {})
         except Exception as exc:  # noqa: BLE001
-            사전 = {"error": f"{type(exc).__name__}: {str(exc)[:120]}"}
+            사전 = {"error": 예외글(exc)}
         판 = {"gate": 관문, "risk": desk.risk_board(latest, 계열, 손절), "prereg_status": 사전,
              "champion": desk.champion(계열, h, 증거, 판시작),
              "readiness": desk.readiness(runs=늦음[0] if 늦음 else None, kis=kis요약), "gate_error": None,
              "gate_carry": None}  # fmt: skip
         return 판, None
     except Exception as exc:  # noqa: BLE001 — 곁다리 안의 곁다리
-        글 = f"{type(exc).__name__}: {str(exc)[:120]}"
+        글 = 예외글(exc)
         return {"gate": None, "risk": [], "champion": [], "readiness": [], "prereg_status": {}, "gate_error": 글,
                 "gate_carry": 앞관문}, 글  # fmt: skip
 
@@ -643,7 +651,7 @@ def _판이력(
                 for r in client.execute(RULES_SQL).dicts()}  # fmt: skip
         return desk.rule_history(알던 + 새, 계열, 주문수), None
     except Exception as exc:  # noqa: BLE001 — 곁다리 안의 곁다리
-        return {}, f"{type(exc).__name__}: {str(exc)[:120]}"
+        return {}, 예외글(exc)
 
 
 def _json(text: Any) -> dict[str, Any] | None:

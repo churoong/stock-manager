@@ -9,6 +9,7 @@ R 대비 = 공통 구간 수익률 − 무작위 대조 R1·R2 평균(%p): 무�
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from batch.notify import formatter
@@ -1123,6 +1124,10 @@ def _돈(v: Any, currency: str) -> str:
     return f"{round(x):,}원" if currency != "USD" else f"{'-' if x < 0 else ''}${abs(x):,.2f}"
 
 
+#: `jobs/desk.예외글` 의 꼴("예외이름: 본문") — 갈래 머리 없이 관문 계산만 깨진 날의 `gate_error` (25.1997)
+_예외꼴 = re.compile(r"[A-Za-z_][\w.]*: ")
+
+
 def gate_line(gate: dict[str, Any] | None, gate_error: str | None = None) -> str | None:
     """운용 보고의 **실전 관문 진도** 한 줄 (25.1991, 2026-10-29 사용자 "텔레그램으로 보내주는 메시지를 우리 목표에
     맞게") — 목표(로보어드바이저, 실전 전환은 단계 관문)에서 먼저 볼 것: KIS 가 베끼는 계좌가 1단계 관문의 어디쯤인가.
@@ -1134,8 +1139,10 @@ def gate_line(gate: dict[str, Any] | None, gate_error: str | None = None) -> str
         if gate_error:
             # 까닭 머리와 예외 이름만 — 60자로 자르면 실제 판오류 글에서 예외 이름이 잘렸다("… — OperationalErr",
             # 25.1996, 25.1994 교차검증 [참고]). 예외 본문은 웹 운용 화면에
-            머리, _, 꼬리 = gate_error.split(GATE_CALC_ERROR_SEP)[0].partition(" — ")
-            글 = 머리[:80] + (f" — {꼬리.split(':')[0][:40]}" if 꼬리 else "")
+            # 관문 계산 실패만 난 날은 'Type: msg' 그대로 — 본문의 " — " 에서 나누면 뒤가 ':' 앞에서 잘렸다(25.1997)
+            첫 = gate_error.split(GATE_CALC_ERROR_SEP)[0]
+            머리, _, 꼬리 = ("", "", "") if _예외꼴.match(첫) else 첫.partition(" — ")
+            글 = 첫[:80] if not 머리 else 머리[:80] + (f" — {꼬리.split(':')[0][:40]}" if 꼬리 else "")
             return f"▸ 실전 관문: 세지 못함 — {글} (자세히: 웹 운용 화면)"
         return None
     items = [i for i in gate["items"] if isinstance(i, dict)]
