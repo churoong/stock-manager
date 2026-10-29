@@ -1281,9 +1281,12 @@ def readiness_lines(gate: dict[str, Any] | None, ready: list[dict[str, Any]] | N
     if not gate:
         return ["🧭 실전 준비도 — 관문을 세지 못했습니다" + (f" ({gate_error[:80]})" if gate_error else "")]
     items = list(gate.get("items") or [])
-    통과 = sum(1 for i in items if i.get("ok"))
+    충족 = sum(1 for i in items if i.get("ok"))
     판 = gate.get("version")
-    머리 = (f"🧭 실전 준비도 — 1단계 관문(모의 성적·무사고) 통과 {통과}/{len(items)}"
+    # 통과는 판정 시점의 판정(`passed`)으로만 — 칸 수가 다 차도 판정 시점이 아니면 통과가 아니다(25.1968, 25.1963
+    # 교차검증 [권고] — 예전 "통과 9/9" 는 칸 수였다). 웹 상황실 관문 카드와 같은 말
+    상태 = "통과(다음 단계는 사용자 결정)" if gate.get("passed") else f"{충족}/{len(items)} 충족"
+    머리 = (f"🧭 실전 준비도 — 1단계 관문(모의 성적·무사고) {상태}"
           f" · {_이름(gate.get('account'))}{'' if 판 is None else f' 판 {판}'}"
           + (f", {gate.get('from')}부터" if gate.get("from") else ""))  # fmt: skip
     out = [머리]
