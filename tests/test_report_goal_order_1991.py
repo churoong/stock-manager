@@ -113,3 +113,28 @@ def test_가상모의투자_절이_전략_재료보다_앞에_나간다(monkeypa
     assert daily.run("KR") == 0
     글 = 보낸[0]
     assert 글.index("📊 운용 보고") < 글.index("🧪 가상모의투자") < 글.index(daily.RECOMMEND_HEAD) < 글.index("1부 개별 종목")
+
+
+
+def test_운용_보고는_관문을_비운_날_세지_못함을_싣는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1993 (25.1992 교차검증 [권고]) — `report_head` 가 운용 요약 마지막 줄의 `gate_error` 를 넘기는 배선. 함수만
+    시험하면 배선이 빠져 관문 줄이 소리 없이 사라져도 몰랐다"""
+    c = Client(accounts=None)
+    monkeypatch.setattr(job.bmj, "MIRROR_ACCOUNT", "B")
+    글 = "판 이력을 읽지 못해 관문을 내지 않음 — OperationalError" + desk.GATE_CALC_ERROR_SEP + "X꼬리"
+    c.conn.execute("INSERT INTO paper_desk (as_of, summary_json, updated_at) VALUES ('2026-10-16', ?, 't')",
+                   [json.dumps({"gate": None, "gate_error": 글, "markets": {}})])  # fmt: skip
+    줄 = job.report_head(c, "KR", datetime(2026, 10, 18, 23, 40, tzinfo=UTC), trade_date="2026-10-16",
+                        session_date="2026-10-19", step_log={"paper": {"accounts": {}}}, warnings=[])  # fmt: skip
+    관문 = [x for x in 줄 if x.startswith("▸ 실전 관문")]
+    assert len(관문) == 1 and 관문[0].startswith("▸ 실전 관문: 세지 못함 — 판 이력을 읽지 못해") and "X꼬리" not in 관문[0]
+
+
+def test_전략_재료_머리에서_나뉘면_2부_이어서를_붙이지_않는다() -> None:
+    """25.1993 (25.1992 교차검증 [권고]) — `_끝_절` 의 "📋 " 는 🧪 절이 없는 날(가상모의투자 단계가 줄을 안 낸 날)
+    "2부 포트폴리오 (이어서)" 가 전략 재료 머리 위에 붙는 것을 막는 유일한 장치다"""
+    from batch.jobs import daily
+    from batch.notify import telegram as tg
+
+    결과 = tg._carry_headers(["2부 포트폴리오\n종목1  1,000,000원 (3.3%)", f"{daily.RECOMMEND_HEAD}\n\n시장 국면 (…)"])
+    assert 결과[1].split("\n")[0] == daily.RECOMMEND_HEAD

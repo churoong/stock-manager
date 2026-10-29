@@ -1128,7 +1128,8 @@ def gate_line(gate: dict[str, Any] | None, gate_error: str | None = None) -> str
     맞게") — 목표(로보어드바이저, 실전 전환은 단계 관문)에서 먼저 볼 것: KIS 가 베끼는 계좌가 1단계 관문의 어디쯤인가.
     값은 운용 요약 마지막 줄이 적은 그대로(새로 셈하지 않는다) — 하루 늦을 수 있다.
     판정 시점 결과(126 통과·못 넘음)를 붙인다 — 넘은 숫자만 보이면 통과에 가까운 것처럼 읽혔다(25.1992, 주간 요약
-    `gate_looks_line` 과 같은 말). 관문을 비운 날(`gate_error`)은 "세지 못함" 한 줄, 관문도 까닭도 없으면 None"""
+    `gate_looks_line` 과 같은 말). 관문을 비운 날(`gate_error` — 판오류·앞오류·관문 계산 실패만 난 날도)은 "세지
+    못함" 한 줄, 관문도 까닭도 없으면 None"""
     if not isinstance(gate, dict) or not isinstance(gate.get("items"), list):
         if gate_error:
             return f"▸ 실전 관문: 세지 못함 — {gate_error.split(GATE_CALC_ERROR_SEP)[0][:60]} (자세히: 웹 운용 화면)"
