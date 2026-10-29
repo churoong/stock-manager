@@ -233,3 +233,13 @@ def test_판오류와_관문_계산이_함께_깨지면_두_까닭(monkeypatch: 
 
     주간 = desk_svc.readiness_lines(None, [], 글)[0]
     assert "판 이력을 읽지 못해 관문을 내지 않음" in 주간 and 주간.endswith(" · 관문 계산도 실패)")  # 25.1978
+
+
+def test_주간_요약은_구분_앞만_자르고_계산_실패는_한_번() -> None:
+    """25.1979 (25.1978 교차검증 [권고]) — 갈래 글이 짧은 겹침 날(앞오류 + 관문 계산 실패)에 80자로만 자르면 계산 까닭과
+    꼬리가 함께 나와 "관문 계산" 이 두 번 적혔다. 구분 앞만 자르고 꼬리 한 마디"""
+    from batch.services import desk as desk_svc
+
+    글 = f"{job.GATE_CARRY_ERROR_HEAD} — OperationalError: x{desk_svc.GATE_CALC_ERROR_SEP}RuntimeError: boom"
+    줄 = desk_svc.readiness_lines(None, [], 글)[0]
+    assert 줄 == f"🧭 실전 준비도 — 관문을 세지 못했습니다 ({job.GATE_CARRY_ERROR_HEAD} — OperationalError: x · 관문 계산도 실패)"
