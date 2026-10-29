@@ -315,9 +315,14 @@ def write(
     최근 = (now - timedelta(days=desk.KIS_RECENT_DAYS)).astimezone(cal.market_tz("KR")).date().isoformat()
     kis요약 = [x for rows, x in ((kis, 요약), (kis_us, 요약_us)) if rows and str(rows[0]["as_of"]) >= 최근]
     지금판 = (판이력.get(h) or [{}])[-1]
-    # 관문 판정 시점 기록을 이어받는다(25.1963) — 오늘 이하 가장 늦은 운용 요약의 관문
-    앞줄 = client.execute(DESK_UPTO_SQL, [as_of]).rows
-    앞관문 = _앞관문((_json(앞줄[0][0]) if 앞줄 else None) or {})
+    # 관문 판정 시점 기록을 이어받는다(25.1963) — 오늘 이하 가장 늦은 운용 요약의 관문. 읽기가 깨지면(JSON 함수·연결)
+    # 운용 요약 전체를 잃지 않고 관문만 비운다 — 앞 기록 없이 판정하면 지난 시점을 다시 판정한다(25.1971)
+    앞오류: str | None = None
+    try:
+        앞줄 = client.execute(DESK_UPTO_SQL, [as_of]).rows
+        앞관문 = _앞관문((_json(앞줄[0][0]) if 앞줄 else None) or {})
+    except Exception as exc:  # noqa: BLE001 — 까닭은 gate_error 로 화면에
+        앞관문, 앞오류 = None, f"{type(exc).__name__}: {str(exc)[:120]}"
     관문판, 관문오류 = _관문판(client, now, 계열, h, 검산틀린날, kis요약, since=str(지금판.get("from") or ""),
                          version=지금판.get("version"), index=그림자.get(h), cash=현금.get(h),
                          control_cash={r: 현금.get(r) or [] for r in desk.CONTROL_IDS},
@@ -334,6 +339,11 @@ def write(
         관문오류 = f"판 이력을 읽지 못해 관문을 내지 않음(판을 섞지 않게, 챔피언 후보도 비움) — {판오류}"
         관문판 = {**관문판, "gate": None, "champion": [], "prereg_status": {}, "gate_error": 관문오류,
                 "gate_carry": 앞관문}  # fmt: skip
+    elif 앞오류:
+        # 앞 기록을 모르면 판정 시점을 이어받지 못한다 — 관문만 비우고(다음 실행이 기록 있는 줄을 다시 찾는다) 위험판·
+        # 챔피언·사전 등록 값은 둔다(판정 시점과 무관)
+        관문오류 = f"앞 관문(판정 시점 기록)을 읽지 못해 관문을 내지 않음(지난 시점을 다시 판정하지 않게) — {앞오류}"
+        관문판 = {**관문판, "gate": None, "gate_error": 관문오류, "gate_carry": None}
     공통 = {"leaderboard": 순위, "rule_history": 판이력, "mirror_account": h, "updated_at": 지금, "last_market": market,
           **관문판,
           "kis_account": {"as_of": kis[0]["as_of"] if kis else None, "account_krw": 요약.get("account_krw"),
