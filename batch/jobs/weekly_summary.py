@@ -620,6 +620,8 @@ def run(dry_run: bool = False, force: bool = False) -> int:
                 sent = len(exc.sent_ids)
                 일부 = f"{exc.total}조각 가운데 {sent}조각만 보냄 — {exc}"
             except telegram.TelegramUncertainError as exc:
+                # 첫 조각이 모름이어도 뒤 조각은 확실히 갔을 수 있다 — 그 수를 남긴다(25.1984)
+                sent = len(getattr(exc, "sent_ids", None) or [])
                 일부 = f"발송 여부 모름(응답 없음) — {exc}"
             if 일부:
                 뒤경고.append(일부)

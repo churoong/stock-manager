@@ -27,6 +27,8 @@ def _줄(c: Client, broker: str, as_of: str) -> None:
 @pytest.mark.parametrize(("국내", "미국", "기대"), [
     ("2026-10-16", "2026-09-01", (True, False)),  # 미국 베끼기를 끈 지 오래 — 미국 칸은 안 쓴다
     ("2026-09-01", "2026-10-16", (False, True)),
+    # 경계 — 최근 = 10-16 23:40 UTC − 7일의 KST 날짜 10-10. 그날 줄은 쓰고 하루 앞은 뺀다(25.1984)
+    ("2026-10-10", "2026-10-09", (True, False)),
 ])  # fmt: skip
 def test_오래된_첫째_줄_칸은_보정에_안_쓴다(monkeypatch: pytest.MonkeyPatch, 국내: str, 미국: str,
                                     기대: tuple[bool, bool]) -> None:  # fmt: skip

@@ -51,13 +51,18 @@ def test_일부만_갔거나_모르면_partial_이고_다시_보내지_않는다
         보냄.append(t)
         if 오류 == "일부":
             raise ws.telegram.TelegramPartialError("2조각 가운데 1조각만 보냈습니다", [11], 2)
-        raise ws.telegram.TelegramUncertainError("응답 시간 초과")
+        모름 = ws.telegram.TelegramUncertainError("첫 조각 응답 시간 초과 — 2·3번째는 보냄")
+        모름.sent_ids = [12, 13]  # type: ignore[attr-defined]  # `_모름으로` 처럼 확실히 간 뒤 조각
+        raise 모름
 
     monkeypatch.setattr(ws.telegram, "send", 깨진_보냄)
     assert ws.run() == 0
     줄 = mem.conn.execute("SELECT status, step_log FROM batch_runs WHERE job_name = 'weekly_summary'").fetchall()
     assert [r[0] for r in 줄] == ["partial"]
     assert ("1조각만 보냄" if 오류 == "일부" else "발송 여부 모름") in 줄[0][1]
+    import json
+
+    assert json.loads(줄[0][1])["sent_chunks"] == (1 if 오류 == "일부" else 2)
     assert 적음 == []  # 사후 분석·월간·실행 품질 진척을 적지 않는다
     assert ws.run() == 0  # 재실행·따라잡기
     assert len(보냄) == 1
