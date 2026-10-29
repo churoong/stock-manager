@@ -129,7 +129,7 @@ def test_앞_관문_읽기가_깨지면_관문만_비우고_요약은_적는다(
     monkeypatch.setattr(job, "DESK_UPTO_SQL", "SELECT no_such_fn(summary_json) FROM paper_desk WHERE as_of <= ?")
     out = job.write(c, "KR", datetime(2026, 10, 16, 23, 40, tzinfo=UTC), trade_date="2026-10-16",
                     session_date="2026-10-19", step_log={}, warnings=[])  # fmt: skip
-    assert "판정 시점 기록을 못 읽어 관문 안 냄" in out["gate_error"]
+    assert out["gate_error"].startswith(job.GATE_CARRY_ERROR_HEAD)
     줄 = json.loads(c.conn.execute("SELECT summary_json FROM paper_desk WHERE as_of = '2026-10-17'").fetchone()[0])
     assert 줄["gate"] is None and 줄["gate_carry"] is None and "leaderboard" in 줄 and "champion" in 줄
     # 다음 실행(원래 SQL)은 10-16 의 기록을 잇는다
@@ -148,7 +148,7 @@ def test_앞_관문_읽기가_깨져도_오늘_줄의_판정_기록은_남긴다
     monkeypatch.setattr(job, "DESK_UPTO_SQL", "SELECT no_such_fn(summary_json) FROM paper_desk WHERE as_of <= ?")
     out = job.write(c, "US", datetime(2026, 10, 16, 23, 40, tzinfo=UTC), trade_date="2026-10-16",
                     session_date="2026-10-19", step_log={}, warnings=[])  # fmt: skip
-    assert "판정 시점 기록을 못 읽어 관문 안 냄" in out["gate_error"]
+    assert out["gate_error"].startswith(job.GATE_CARRY_ERROR_HEAD)
     줄 = json.loads(c.conn.execute("SELECT summary_json FROM paper_desk WHERE as_of = '2026-10-17'").fetchone()[0])
     assert 줄["gate"] is None and 줄["gate_carry"] == 앞
     monkeypatch.undo()
@@ -192,7 +192,9 @@ def test_관문_계산과_앞_읽기가_함께_깨지면_두_까닭(monkeypatch:
     monkeypatch.setattr(job, "DESK_UPTO_SQL", "SELECT no_such_fn(summary_json) FROM paper_desk WHERE as_of <= ?")
     out = job.write(c, "KR", datetime(2026, 10, 16, 23, 40, tzinfo=UTC), trade_date="2026-10-16",
                     session_date="2026-10-19", step_log={}, warnings=[])  # fmt: skip
-    assert out["gate_error"].startswith("관문 계산 실패 — RuntimeError") and "판정 시점 기록을 못 읽어" in out["gate_error"]
+    # 25.1977 — 갈래 머리가 앞, 계산 까닭은 뒤에 전문
+    assert out["gate_error"].startswith(job.GATE_CARRY_ERROR_HEAD)
+    assert f" · {job.GATE_CALC_ERROR_HEAD} — RuntimeError: 관문 계산 실패" in out["gate_error"]
 
 
 def test_그날_줄_다시_읽기도_깨지면_올리고_그날_줄을_덮지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -223,5 +225,10 @@ def test_판오류와_관문_계산이_함께_깨지면_두_까닭(monkeypatch: 
     out = job.write(c, "KR", datetime(2026, 10, 16, 23, 40, tzinfo=UTC), trade_date="2026-10-16",
                     session_date="2026-10-19", step_log={}, warnings=[])  # fmt: skip
     글 = out["gate_error"]
-    assert 글.startswith("관문 계산 실패 — RuntimeError") and "판 이력을 읽지 못해" in 글
-    assert "판 이력을" in 글[: len("관문 계산 실패 — ") + 40 + len(" · ") + 5]
+    # 25.1977 — 갈래 머리가 앞이라 주간 요약 80자 자르기에 남고, 계산 까닭은 전문으로 저장된다
+    # 계산 까닭은 `_관문판` 이 남긴 그대로(예외 이름 + 120자) — 더 자르지 않는다
+    assert 글.startswith("판 이력을 읽지 못해") and 글.split(f" · {job.GATE_CALC_ERROR_HEAD} — ")[1] == (
+        "RuntimeError: " + ("관문 계산 실패 " + "가" * 200)[:120])
+    from batch.services import desk as desk_svc
+
+    assert "판 이력을 읽지 못해 관문을 내지 않음" in desk_svc.readiness_lines(None, [], 글)[0]

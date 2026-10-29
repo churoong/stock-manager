@@ -165,6 +165,9 @@ DESK_UPTO_SQL = (
 #: 이어받기 읽기가 깨진 날의 `gate_error` 머리 — 이 갈래는 챔피언을 비우지 않으므로 웹 전략 화면이 "챔피언 교체 후보를
 #: 내지 않음" 을 띄우지 않게 가른다(25.1975). 웹 `lib/desk.ts` 의 같은 이름과 같아야 한다(시험이 대조)
 GATE_CARRY_ERROR_HEAD = "판정 시점 기록을 못 읽어 관문 안 냄"
+#: 관문을 비운 갈래에 관문 계산 실패가 겹친 날 덧붙이는 까닭의 머리(` · ` 뒤) — 그날은 챔피언·위험판도 빈다(25.1977).
+#: 웹 `lib/desk.ts` 의 같은 이름과 같아야 한다
+GATE_CALC_ERROR_HEAD = "관문 계산 실패"
 DESK_UPSERT_SQL = (
     "INSERT INTO paper_desk (as_of, summary_json, updated_at) VALUES (?, ?, ?)"
     " ON CONFLICT (as_of) DO UPDATE SET summary_json = excluded.summary_json, updated_at = excluded.updated_at"
@@ -517,9 +520,10 @@ def _멈춘평가(client: Any, h: str, since: str) -> dict[str, list[tuple[str, 
 
 def _까닭_잇기(관문오류: str | None, 글: str) -> str:
     """관문을 비운 갈래(판오류·앞오류)의 `gate_error` — 같은 실행에 관문 계산도 깨졌으면(위험판·챔피언·준비 목록이 빈
-    까닭) 그 까닭을 앞에 잇는다(25.1974 앞오류, 25.1976 판오류도). 주간 요약은 80자로 자르므로 계산 까닭은 40자로
-    줄여 갈래 머리가 잘리지 않게"""
-    return f"관문 계산 실패 — {관문오류[:40]} · {글}" if 관문오류 else 글
+    까닭) 그 까닭을 **뒤에 전문으로** 잇는다(25.1974 앞오류, 25.1976 판오류도). 갈래 머리가 앞이라 주간 요약의 80자
+    자르기에도 남고, 저장 본문·웹·실행 기록에는 계산 까닭이 다 남는다(25.1977 — 25.1976 은 40자로 잘라 저장했다).
+    웹 전략 화면은 `GATE_CALC_ERROR_HEAD` 가 있으면 챔피언이 빈 까닭으로 띄운다"""
+    return f"{글} · {GATE_CALC_ERROR_HEAD} — {관문오류}" if 관문오류 else 글
 
 
 def _앞관문(줄: dict[str, Any]) -> dict[str, Any] | None:

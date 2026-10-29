@@ -74,14 +74,21 @@ export function gateLooksText(g: Pick<Gate, "looks" | "next_look" | "passed">): 
 }
 
 /**
- * 화면 글에 쓰는 문턱 — `batch/services/desk.py` 의 상수와 같은 값(테스트가 대조, 25.1511 검토 8).
- * 상수를 바꾸면 화면 글만 낡지 않게
- */
-/**
  * 관문 이어받기 읽기가 깨진 날의 `gate_error` 머리 — 배치 `jobs/desk.GATE_CARRY_ERROR_HEAD` 와 같다(시험이 대조, 25.1975).
  * 이 갈래는 챔피언을 비우지 않으므로 챔피언이 빈 까닭으로 보이지 않는다
  */
 export const GATE_CARRY_ERROR_HEAD = "판정 시점 기록을 못 읽어 관문 안 냄";
+/** 관문을 비운 갈래에 관문 계산 실패가 겹친 날 ` · ` 뒤에 붙는 까닭의 머리 — 그날은 챔피언도 빈다(배치 `jobs/desk`, 25.1977) */
+export const GATE_CALC_ERROR_HEAD = "관문 계산 실패";
+/** 그날 `gate_error` 가 챔피언을 비운 까닭인가 — 이어받기 읽기만 깨진 날은 아니다(25.1975·25.1977) */
+export function championEmptiedBy(gateError: string | null | undefined): boolean {
+  if (!gateError) return false;
+  return !gateError.startsWith(GATE_CARRY_ERROR_HEAD) || gateError.includes(` · ${GATE_CALC_ERROR_HEAD} — `);
+}
+/**
+ * 화면 글에 쓰는 문턱 — `batch/services/desk.py` 의 상수와 같은 값(테스트가 대조, 25.1511 검토 8).
+ * 상수를 바꾸면 화면 글만 낡지 않게
+ */
 export const DESK_RULES = {
   RISK_NEAR_STOP_PP: 2, CHAMPION_BLOCK: 20, CHAMPION_MIN_BLOCKS: 3, CHAMPION_WIN_SHARE: 0.67,
   GATE_SEL_MIN_BLOCKS: 6, CHAMPION_EVIDENCE_MIN_BLOCKS: 4, CHAMPION_ALPHA: 0.05,
