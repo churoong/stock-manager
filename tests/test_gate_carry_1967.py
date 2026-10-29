@@ -164,3 +164,46 @@ def test_앞_관문_읽기가_한도로_깨지면_올린다(monkeypatch: pytest.
     with pytest.raises(Exception, match="no_such_fn"):
         job.write(c, "KR", datetime(2026, 10, 16, 23, 40, tzinfo=UTC), trade_date="2026-10-16",
                   session_date="2026-10-19", step_log={}, warnings=[])  # fmt: skip
+
+
+def test_판오류와_앞오류가_함께_나도_오늘_줄의_판정을_남긴다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1974 (25.1973 교차검증 [권고]) — 판 이력·이어받기 읽기가 같은 실행에서 함께 깨지면 앞관문은 None 이다. 판오류
+    갈래가 `앞관문 or 그날관문` 으로 오늘 앞 실행의 판정을 남겨야 한다"""
+    c = Client(accounts=None)
+    _줄(c, "2026-10-17", {"gate": 앞, "markets": {}})
+    monkeypatch.setattr(job.bmj, "MIRROR_ACCOUNT", "B")
+    monkeypatch.setattr(job, "_판이력", lambda *_a, **_k: ({}, "OperationalError: 표 없음"))
+    monkeypatch.setattr(job, "DESK_UPTO_SQL", "SELECT no_such_fn(summary_json) FROM paper_desk WHERE as_of <= ?")
+    job.write(c, "US", datetime(2026, 10, 16, 23, 40, tzinfo=UTC), trade_date="2026-10-16", session_date="2026-10-19",
+              step_log={}, warnings=[])  # fmt: skip
+    줄 = json.loads(c.conn.execute("SELECT summary_json FROM paper_desk WHERE as_of = '2026-10-17'").fetchone()[0])
+    assert 줄["gate"] is None and 줄["gate_carry"] == 앞 and 줄["gate_error"].startswith("판 이력을 읽지 못해")
+
+
+def test_관문_계산과_앞_읽기가_함께_깨지면_두_까닭(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1974 — 관문 계산 예외의 까닭(위험판·챔피언이 빈 까닭)이 앞오류 글에 덮이지 않는다"""
+    c = Client(accounts=None)
+    monkeypatch.setattr(job.bmj, "MIRROR_ACCOUNT", "B")
+
+    def 깨짐(*a: Any, **k: Any) -> dict[str, Any]:
+        raise RuntimeError("관문 계산 실패")
+
+    monkeypatch.setattr(job.desk, "gate", 깨짐)
+    monkeypatch.setattr(job, "DESK_UPTO_SQL", "SELECT no_such_fn(summary_json) FROM paper_desk WHERE as_of <= ?")
+    out = job.write(c, "KR", datetime(2026, 10, 16, 23, 40, tzinfo=UTC), trade_date="2026-10-16",
+                    session_date="2026-10-19", step_log={}, warnings=[])  # fmt: skip
+    assert out["gate_error"].startswith("관문 계산 실패 — RuntimeError") and "판정 시점 기록을 못 읽어" in out["gate_error"]
+
+
+def test_그날_줄_다시_읽기도_깨지면_올리고_그날_줄을_덮지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1974 (25.1973 교차검증 [참고]) — 이어받기 SELECT 와 그날 줄 다시 읽기가 모두 깨지면 write 가 예외를 올린다"""
+    c = Client(accounts=None)
+    _줄(c, "2026-10-17", {"gate": 앞, "markets": {}})
+    monkeypatch.setattr(job.bmj, "MIRROR_ACCOUNT", "B")
+    monkeypatch.setattr(job, "DESK_UPTO_SQL", "SELECT no_such_fn(summary_json) FROM paper_desk WHERE as_of <= ?")
+    monkeypatch.setattr(job, "DESK_READ_SQL", "SELECT no_such_fn2(summary_json) FROM paper_desk WHERE as_of = ?")
+    with pytest.raises(Exception, match="no_such_fn2"):
+        job.write(c, "KR", datetime(2026, 10, 16, 23, 40, tzinfo=UTC), trade_date="2026-10-16",
+                  session_date="2026-10-19", step_log={}, warnings=[])  # fmt: skip
+    줄 = json.loads(c.conn.execute("SELECT summary_json FROM paper_desk WHERE as_of = '2026-10-17'").fetchone()[0])
+    assert 줄["gate"] == 앞
