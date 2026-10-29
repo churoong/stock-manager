@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import pytest
@@ -31,7 +32,8 @@ def test_백필은_일부만_막힌_조각_뒤에_멈춘다(monkeypatch: pytest.
     assert backfill_us.run(lookback=10, start=0, count=None, chunk=2) == 1
     assert len(불린) == 1
     step = mem.conn.execute("SELECT status, step_log FROM batch_runs WHERE job_name = ?", [backfill_us.JOB_NAME]).fetchone()
-    assert step[0] == "partial" and '"blocked": true' in step[1]
+    # 글자 꼴이 아니라 값으로 — 실행 기록은 붙는 칸(prices_touched)에 따라 SQLite 가 공백 없이 다시 쓴다(25.1988)
+    assert step[0] == "partial" and json.loads(step[1])["blocked"] is True
 
 
 class Test업종:
