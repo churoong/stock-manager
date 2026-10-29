@@ -209,7 +209,7 @@ _할일_이름 = {"red": "🔴손절", "green": "🟢목표 도달", "yellow": "
 TODO_MAX_NAMES = 3
 
 
-def todo_line(flags: list[dict[str, Any]], currency: str = "KRW") -> str | None:
+def todo_line(flags: list[dict[str, Any]], currency: str = "KRW", today: str | None = None) -> str | None:
     """제목 바로 아래 **오늘 볼 것** 한 줄 — 보유 매도 플래그를 손절·목표 도달·점검으로 묶어 종목 이름과 (25.1738).
 
     2026-10-23 사용자 "오늘 아침에 온 리포트보면 여전히 내용이 가독성이 떨어지는데" — 실물로 찍어 보니 손절 플래그가
@@ -233,7 +233,12 @@ def todo_line(flags: list[dict[str, Any]], currency: str = "KRW") -> str | None:
         조각.append(f"{_할일_이름[level]} {len(xs)}({보임})")
     if not 조각:
         return None
-    return "🔔 보유 매도 플래그: " + " · ".join(조각) + (f" — 새로 걸림 {len(새로)}" if 새로 else "")
+    # **판정일이 오늘이 아니면 적는다** (25.1987, 결함 루프 10-29 [참고]) — 그날 매도 플래그 판정이 실패하면 어제 판정
+    # (MAX(as_of_date))이 실리는데, 플래그 절 머리에만 판정일이 있고(25.492) 첫 화면 이 줄엔 없어 오늘 손절로 읽혔다
+    날들 = sorted({str(f["as_of_date"]) for f in flags if f.get("as_of_date")})
+    지난 = [d for d in 날들 if today and d != today]
+    꼬리 = f" (판정일 {', '.join(d[5:] for d in 날들)} — 오늘 판정 아님)" if 지난 else ""
+    return "🔔 보유 매도 플래그: " + " · ".join(조각) + (f" — 새로 걸림 {len(새로)}" if 새로 else "") + 꼬리
 
 
 #: 이번 재실행 본문을 웹에 저장하지 않았다는 표시 (daily 모름 경로, 25.574·25.575)

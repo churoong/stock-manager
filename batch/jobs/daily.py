@@ -2278,7 +2278,7 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
             delay_seconds=지연,
             composed_at=datetime.now(UTC),
             # 첫 화면엔 볼 일과 운용 보고·추천 — 대표 종목 시세는 끝으로(25.1738, 사용자 "아직 수정안한거야?")
-            todo=formatter.todo_line(sell_flag_rows, currency),
+            todo=formatter.todo_line(sell_flag_rows, currency, cal.user_today().isoformat()),
             rows_in_head=False,
         )
         step_log["correlation"] = {"stocks": len(corr_series), "holdings": len(holdings)}
