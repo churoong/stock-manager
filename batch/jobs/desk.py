@@ -168,6 +168,7 @@ DESK_UPTO_SQL = (
 GATE_CARRY_ERROR_HEAD = "판정 시점 기록을 못 읽어 관문 안 냄"
 #: 판 이력을 못 읽은 날의 `gate_error` 머리 — 텔레그램 운용 보고의 "세지 못함" 줄이 이 머리와 예외 이름을 싣는다
 #: (25.1997 — 시험이 이 상수와 `예외글` 로 실제 꼴을 만든다, 25.1996 교차검증 [권고])
+#: 갈래 머리는 영문으로 시작하지 않는다 — 텔레그램 줄이 예외 꼴(`services/desk._예외꼴`)로 보고 나누지 않는다(25.1998)
 GATE_VERSION_ERROR_HEAD = "판 이력을 읽지 못해 관문을 내지 않음(판을 섞지 않게, 챔피언 후보도 비움)"
 DESK_UPSERT_SQL = (
     "INSERT INTO paper_desk (as_of, summary_json, updated_at) VALUES (?, ?, ?)"

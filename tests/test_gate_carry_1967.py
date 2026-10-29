@@ -195,6 +195,9 @@ def test_관문_계산과_앞_읽기가_함께_깨지면_두_까닭(monkeypatch:
     # 25.1977 — 갈래 머리가 앞, 계산 까닭은 뒤에 전문
     assert out["gate_error"].startswith(job.GATE_CARRY_ERROR_HEAD)
     assert f"{job.desk.GATE_CALC_ERROR_SEP}RuntimeError: 관문 계산 실패" in out["gate_error"]
+    # 25.1998 (25.1997 교차검증 [권고]) — write() 가 이은 글 그대로 텔레그램 줄: 머리 — 예외 이름(구분자가 바뀌면 깨진다)
+    assert desk.gate_line(None, out["gate_error"]) == (
+        f"▸ 실전 관문: 세지 못함 — {job.GATE_CARRY_ERROR_HEAD} — OperationalError (자세히: 웹 운용 화면)")
 
 
 def test_그날_줄_다시_읽기도_깨지면_올리고_그날_줄을_덮지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -213,7 +216,7 @@ def test_그날_줄_다시_읽기도_깨지면_올리고_그날_줄을_덮지_�
 
 def test_판오류와_관문_계산이_함께_깨지면_두_까닭(monkeypatch: pytest.MonkeyPatch) -> None:
     """25.1976 (25.1974 교차검증 [권고]) — 판오류 갈래도 관문 계산 예외의 까닭(위험판이 빈 까닭)을 덮지 않는다. 계산 까닭은
-    40자로 줄여 주간 요약 80자 안에 갈래 머리가 들게"""
+    전문으로 뒤에 잇는다(25.1977 — 갈래 머리가 앞이라 주간 요약 80자 안에 든다)"""
     c = Client(accounts=None)
     monkeypatch.setattr(job.bmj, "MIRROR_ACCOUNT", "B")
     monkeypatch.setattr(job, "_판이력", lambda *_a, **_k: ({}, "OperationalError: 표 없음"))
@@ -233,6 +236,9 @@ def test_판오류와_관문_계산이_함께_깨지면_두_까닭(monkeypatch: 
 
     주간 = desk_svc.readiness_lines(None, [], 글)[0]
     assert "판 이력을 읽지 못해 관문을 내지 않음" in 주간 and 주간.endswith(" · 관문 계산도 실패)")  # 25.1978
+    # 25.1998 (25.1997 교차검증 [권고]) — write() 가 이은 판글 그대로 텔레그램 줄
+    assert desk_svc.gate_line(None, 글) == (
+        f"▸ 실전 관문: 세지 못함 — {job.GATE_VERSION_ERROR_HEAD} — OperationalError (자세히: 웹 운용 화면)")
 
 
 def test_주간_요약은_구분_앞만_자르고_계산_실패는_한_번() -> None:
