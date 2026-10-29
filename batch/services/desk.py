@@ -259,7 +259,8 @@ GATE_LOOKS = (126, 189, 252)
 #: (funnel.md 3장 "한 번 약 2.2%" `[확인필요]` — 같은 간격 셋의 Pocock 양쪽 0.05 의 명목 값 0.0221. 판정 간격이 2:3:4 라
 #: 같은 간격 가정과 조금 다르다 — 한쪽으로 쓰면 보수적)
 GATE_POCOCK_ALPHA = 0.0221
-#: 챔피언 교체 — 짝지은 묶음 차이의 최소 공통 묶음 수, 유의수준(여러 도전자를 견주므로 본페로니로 나눈다)
+#: 챔피언 교체 — 짝지은 묶음 차이의 최소 공통 묶음 수, 유의수준(여러 도전자를 견주므로 본페로니로 나눈다 — 나눈 값이
+#: `GATE_POCOCK_ALPHA` 보다 느슨하면 그것으로, 25.1965 `champion_alpha`)
 CHAMPION_EVIDENCE_MIN_BLOCKS = 4
 CHAMPION_ALPHA = 0.05
 
@@ -945,19 +946,27 @@ def champion(
                                       -((r["pct"] or 0) - (r["champion_pct"] or 0))))  # fmt: skip
 
 
+def champion_alpha(challengers: int) -> float:
+    """챔피언 결정 단위 하한의 한쪽 유의수준 — 본페로니(`CHAMPION_ALPHA` ÷ 도전자 수)와 관문 Pocock 문턱
+    (`GATE_POCOCK_ALPHA`) 가운데 더 보수적인(작은) 값(25.1965, docs/desk.md 6장 "더 보수적으로만"). 후보도 날마다 다시
+    보므로 도전자가 하나·둘이라 본페로니가 느슨할 때 관문 한 번 문턱보다 느슨하지 않게 막는다"""
+    return min(CHAMPION_ALPHA / max(challengers, 1), GATE_POCOCK_ALPHA)
+
+
 def _결정근거(rows: list[dict[str, Any]], mirror: str, evidence: dict[str, dict[str, Any]], challengers: int) -> None:
     """챔피언 후보 줄마다 결정 단위 짝 차이(`evidence_diff`)를 붙이고 `candidate` 를 그것까지로 좁힌다.
-    `challengers` = 본페로니로 나눌 도전자 수(줄 수가 아니라 자격 있는 계좌 수, 25.1915)"""
+    `challengers` = 본페로니로 나눌 도전자 수(줄 수가 아니라 자격 있는 계좌 수, 25.1915), 유의수준은 `champion_alpha`"""
     from batch.services.paper import block_bound
 
     챔 = (evidence.get(mirror) or {}).get("excess_blocks") or {}
     n = max(challengers, len(rows), 1)
+    alpha = champion_alpha(n)
     for r in rows:
         내 = (evidence.get(r["id"]) or {}).get("excess_blocks") or {}
         차 = {int(k): float(내[k]) - float(챔[k]) for k in 내 if k in 챔}
-        b = block_bound(차, CHAMPION_ALPHA / n) if len(차) >= CHAMPION_EVIDENCE_MIN_BLOCKS else {"n_blocks": len(차)}
+        b = block_bound(차, alpha) if len(차) >= CHAMPION_EVIDENCE_MIN_BLOCKS else {"n_blocks": len(차)}
         r["evidence_diff"] = {"n_blocks": b.get("n_blocks"), "mean": b.get("mean"), "lower": b.get("lower"),
-                              "alpha": CHAMPION_ALPHA / n}  # fmt: skip
+                              "alpha": alpha}  # fmt: skip
         r["candidate"] = bool(r["blocks_ok"] and b.get("lower") is not None and float(b["lower"]) > 0)
 
 

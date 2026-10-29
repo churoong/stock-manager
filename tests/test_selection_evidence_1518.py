@@ -80,9 +80,12 @@ def test_gate_selection_item() -> None:
         g = desk.gate(s, "H", recon_bad_days=0, batch_failed=0, kis={"kept_pct": 95.0, "n": 200}, evidence=ev)
         return {i["key"]: i for i in g["items"]}["selection"]
 
-    assert 칸({"lower": 51.0, "n_blocks": 6})["ok"]
-    assert not 칸({"lower": 51.0, "n_blocks": 5})["ok"]  # 반년 묶음이 안 됨
-    assert not 칸({"lower": 49.0, "n_blocks": 9})["ok"]  # 평균이 50 위여도 하한이 50 아래면 운일 수 있다
+    # 25.1963 뒤로 하한은 증거의 평균·표준오차에서 Pocock 문턱으로 다시 낸다(`lower` 는 95% 참고값) — 60 − t(0.9779, 5) × 2 ≈ 54.5
+    assert 칸({"mean": 60.0, "se": 2.0, "lower": 51.0, "n_blocks": 6})["ok"]
+    assert not 칸({"mean": 60.0, "se": 2.0, "lower": 51.0, "n_blocks": 5})["ok"]  # 반년 묶음이 안 됨
+    # 평균이 50 위여도 하한이 50 아래면 운일 수 있다 — 52 − t(0.9779, 8) × 2 ≈ 47.3
+    assert not 칸({"mean": 52.0, "se": 2.0, "lower": 49.0, "n_blocks": 9})["ok"]
+    assert not 칸({"lower": 51.0, "n_blocks": 6})["ok"]  # 평균·표준오차가 없으면 하한을 못 낸다
     assert not 칸(None)["ok"] and 칸(None)["now"] is None
 
 

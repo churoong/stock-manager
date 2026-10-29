@@ -80,6 +80,7 @@ export function gateLooksText(g: Pick<Gate, "looks" | "next_look" | "passed">): 
 export const DESK_RULES = {
   RISK_NEAR_STOP_PP: 2, CHAMPION_BLOCK: 20, CHAMPION_MIN_BLOCKS: 3, CHAMPION_WIN_SHARE: 0.67,
   GATE_SEL_MIN_BLOCKS: 6, CHAMPION_EVIDENCE_MIN_BLOCKS: 4, CHAMPION_ALPHA: 0.05,
+  GATE_POCOCK_ALPHA: 0.0221,
 } as const;
 export interface RiskRow {
   id: string; exposure_pct: number | null; positions: number; top_weight_pct: number | null; top_name: string | null;

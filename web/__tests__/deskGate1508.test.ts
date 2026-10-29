@@ -61,6 +61,7 @@ describe("화면 글의 문턱은 배치 상수와 같다 (25.1511)", () => {
     expect(값("GATE_SEL_MIN_BLOCKS")).toBe(DESK_RULES.GATE_SEL_MIN_BLOCKS);
     expect(값("CHAMPION_EVIDENCE_MIN_BLOCKS")).toBe(DESK_RULES.CHAMPION_EVIDENCE_MIN_BLOCKS);
     expect(값("CHAMPION_ALPHA")).toBe(DESK_RULES.CHAMPION_ALPHA);
+    expect(값("GATE_POCOCK_ALPHA")).toBe(DESK_RULES.GATE_POCOCK_ALPHA);
   });
 });
 
