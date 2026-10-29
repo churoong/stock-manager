@@ -234,7 +234,9 @@ def collect_kr_prices(
         stored_total += stored
         받은행.extend(result.data)
         # 앞서 야후로 대신 받은 날을 거래소 값으로 바꾼다 (docs/infra.md 25.513, 교차검증)
-        warnings.extend(_heal_yahoo_days(client, market_name, trade_date, ids))
+        # 이 시장 종목 id 는 오늘 받은 응답에서 — `ids` 는 두 시장을 합친 국내 주식 전부다(25.1985)
+        시장ids = [ids[r.isu_cd] for r in result.data if r.isu_cd in ids]
+        warnings.extend(_heal_yahoo_days(client, market_name, trade_date, ids, 시장ids))
 
     # **추천·보유 ETF 의 종가** (docs/infra.md 25.896). 이은 ETF 가 있을 때만 한 번 부른다(하루 전 ETF 가 한 호출에
     # 온다)
@@ -692,9 +694,9 @@ MISSING_MARKET_DAYS_SQL = (
 #: 뽑고 같은 시장 야후 행이나 다른 국내 시장 행을 근거로 삼아, **국내 두 시장이 다 빈 날**(아침 실행 둘이 모두 한 줄도
 #: 저장 못 함 — 09-08 에 실제로 있었다)은 어디에도 안 걸려 영영 다시 받지 않았다(25.574 가 알고 둔 구멍). 그날 주문은
 #: 가상모의투자에서 "시세 못 받음" 으로 만료되는데 KIS모의투자에서는 이미 체결돼 다음 날 정리 매도가 나갔다.
-#: 날짜 후보는 거래소 달력에서. 종목 목록은 부르는 쪽이 이미 든 그 시장 id 를 넘긴다 — 시장으로 고르는 부분 질의는
-#: 부를 때마다 `stocks` 전체를 훑었다(25.1984, 25.1981 교차검증 [참고] — 국내 실행 한 번에 14번). 날마다
-#: (stock_id, date) 색인을 짚고 첫 행에서 멈춘다
+#: 날짜 후보는 거래소 달력에서. 종목 목록은 그 시장의 오늘 거래소 응답에서 뽑은 id(`collect_kr_prices`, 25.1985 —
+#: 25.1984 는 두 시장을 합친 id 였다) — 시장으로 고르는 부분 질의는 부를 때마다 `stocks` 전체를 훑었다(25.1984). 날마다
+#: (stock_id, date) 색인을 짚는다 — 행이 있는 날은 첫 행에서 멈추고, 빈 날은 id 수만큼 짚어 0행이다
 KR_MARKET_DAY_ROW_SQL = "SELECT 1 FROM prices WHERE date = ? AND stock_id IN (SELECT value FROM json_each(?)) LIMIT 1"
 
 #: 시세를 한 번도 못 받은 채 주간 유니버스 스냅샷에 이만큼 실렸으면 "못 받음" 을 경고로 세지 않는다
@@ -745,7 +747,8 @@ def _drop_never_priced(client: TursoClient, note: str, symbols: list[str], bars:
 
 
 def _빈_거래일(client: TursoClient, 시작: str, 끝: str, ids: list[int]) -> list[str]:
-    """[시작, 끝) 의 국내 거래일 가운데 그 시장 종목(`ids`) 행이 한 줄도 없는 날 (25.1981, `KR_MARKET_DAY_ROW_SQL`)"""
+    """[시작, 끝) 의 국내 거래일 가운데 `ids` 종목 행이 한 줄도 없는 날 (25.1981, `KR_MARKET_DAY_ROW_SQL`).
+    운영은 그 시장 오늘 응답의 id 를 넘겨 "이 시장이 빈 날" 을 고른다(25.1985)"""
     from datetime import date as _date
 
     if not ids:
@@ -760,7 +763,9 @@ def _빈_거래일(client: TursoClient, 시작: str, 끝: str, ids: list[int]) -
     return out
 
 
-def _heal_yahoo_days(client: TursoClient, market: str, trade_date: str, ids: dict[str, int]) -> list[str]:
+def _heal_yahoo_days(
+    client: TursoClient, market: str, trade_date: str, ids: dict[str, int], 시장ids: list[int] | None = None,
+) -> list[str]:
     """최근 `HEAL_DAYS` 안에 야후로 대신 받은 날을 거래소 값으로 바꾼다 (docs/infra.md 25.513, 교차검증).
 
     야후 행은 거래대금이 비어 단기 신호의 60일 거래대금 평균이 60거래일 동안 막혔고, 등락률이 비어 그날 분할을
@@ -791,7 +796,10 @@ def _heal_yahoo_days(client: TursoClient, market: str, trade_date: str, ids: dic
     out: list[str] = []
     # 두 시장이 다 빈 날은 따로 찾는다 — 깨져도 위 후보로는 되받는다(25.1984, 25.1981 교차검증 [참고])
     try:
-        날들 = sorted(set(날들) | set(_빈_거래일(client, 시작, trade_date, list(ids.values()))))
+        # `시장ids` 가 없으면(옛 호출) 두 시장을 합친 id — 그때는 두 시장이 다 빈 날만 고르고, 한 시장만 빈 날은
+        # `MISSING_MARKET_DAYS_SQL` 몫이다(25.1985)
+        날들 = sorted(set(날들) | set(_빈_거래일(client, 시작, trade_date,
+                                             시장ids if 시장ids is not None else list(ids.values()))))  # fmt: skip
     except Exception as exc:  # noqa: BLE001 — 경고로 남기고 다음 배치가 다시 본다
         out.append(f"{market} 시세가 통째로 빈 날을 찾지 못했습니다: {type(exc).__name__}: {str(exc)[:80]}")
     잇단실패 = 0
