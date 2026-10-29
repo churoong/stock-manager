@@ -153,8 +153,14 @@ RULES_SQL = (
 DESK_READ_SQL = "SELECT summary_json FROM paper_desk WHERE as_of = ?"
 DESK_PREV_SQL = "SELECT summary_json FROM paper_desk WHERE as_of < ? ORDER BY as_of DESC LIMIT 1"
 DESK_LAST_SQL = "SELECT summary_json FROM paper_desk ORDER BY as_of DESC LIMIT 1"
-#: 오늘 이하 가장 늦은 운용 요약 — 관문 판정 시점 기록(`gate.looks`)을 이어받는다(25.1963)
-DESK_UPTO_SQL = "SELECT summary_json FROM paper_desk WHERE as_of <= ? ORDER BY as_of DESC LIMIT 1"
+#: 오늘 이하에서 판정 시점 기록(`gate.looks`, 관문을 비운 줄은 `gate_carry.looks`)이 있는 가장 늦은 운용 요약 —
+#: 관문을 이어받는다(25.1963). 관문을 비운 실행(판오류·관문오류) 한 줄이 끼어도 기록이 끊기지 않게(25.1967,
+#: 25.1963 교차검증 [필수]). 깨진 JSON 줄은 `json_valid` 로 건너뛴다(CASE 는 앞 조건이 거짓이면 뒤를 셈하지 않는다)
+DESK_UPTO_SQL = (
+    "SELECT summary_json FROM paper_desk WHERE as_of <= ? AND CASE WHEN json_valid(summary_json) THEN"
+    " COALESCE(json_extract(summary_json, '$.gate.looks'), json_extract(summary_json, '$.gate_carry.looks')) END"
+    " IS NOT NULL ORDER BY as_of DESC LIMIT 1"
+)
 DESK_UPSERT_SQL = (
     "INSERT INTO paper_desk (as_of, summary_json, updated_at) VALUES (?, ?, ?)"
     " ON CONFLICT (as_of) DO UPDATE SET summary_json = excluded.summary_json, updated_at = excluded.updated_at"
@@ -310,14 +316,14 @@ def write(
     지금판 = (판이력.get(h) or [{}])[-1]
     # 관문 판정 시점 기록을 이어받는다(25.1963) — 오늘 이하 가장 늦은 운용 요약의 관문
     앞줄 = client.execute(DESK_UPTO_SQL, [as_of]).rows
-    앞관문 = ((_json(앞줄[0][0]) if 앞줄 else None) or {}).get("gate")
+    앞관문 = _앞관문((_json(앞줄[0][0]) if 앞줄 else None) or {})
     관문판, 관문오류 = _관문판(client, now, 계열, h, 검산틀린날, kis요약, since=str(지금판.get("from") or ""),
                          version=지금판.get("version"), index=그림자.get(h), cash=현금.get(h),
                          control_cash={r: 현금.get(r) or [] for r in desk.CONTROL_IDS},
                          valuation=_멈춘평가(client, h, str(지금판.get("from") or "")),
                          판시작={a: str((줄 or [{}])[-1].get("from") or "") for a, 줄 in 판이력.items()},
                          판버전={a: int((줄 or [{}])[-1].get("version") or 1) for a, 줄 in 판이력.items()},
-                         그림자=그림자, 앞관문=앞관문 if isinstance(앞관문, dict) else None)  # fmt: skip
+                         그림자=그림자, 앞관문=앞관문)  # fmt: skip
     if 판오류:
         # 판 이력을 못 읽으면 "지금 판" 의 시작을 모른다 — since='' 로 관문을 내면 모든 판의 평가를 지금 판으로
         # 섞어 셌다(25.1573, 운용 감사 [참고]). 관문을 비우고 까닭을 화면(gate_error)에 올린다.
@@ -325,7 +331,8 @@ def write(
         # [필수] 3 — 예전 주석 "판과 무관" 은 25.1575 가 챔피언을 지금 판 구간으로 좁힌 뒤로 틀렸다).
         # 위험판은 판과 무관해 둔다
         관문오류 = f"판 이력을 읽지 못해 관문을 내지 않음(판을 섞지 않게, 챔피언 후보도 비움) — {판오류}"
-        관문판 = {**관문판, "gate": None, "champion": [], "prereg_status": {}, "gate_error": 관문오류}
+        관문판 = {**관문판, "gate": None, "champion": [], "prereg_status": {}, "gate_error": 관문오류,
+                "gate_carry": 앞관문}  # fmt: skip
     공통 = {"leaderboard": 순위, "rule_history": 판이력, "mirror_account": h, "updated_at": 지금, "last_market": market,
           **관문판,
           "kis_account": {"as_of": kis[0]["as_of"] if kis else None, "account_krw": 요약.get("account_krw"),
@@ -485,6 +492,16 @@ def _멈춘평가(client: Any, h: str, since: str) -> dict[str, list[tuple[str, 
         return None
 
 
+def _앞관문(줄: dict[str, Any]) -> dict[str, Any] | None:
+    """이어받을 관문 — 그 줄의 관문에 판정 시점 기록이 있으면 그것, 관문을 비운 줄이면 그 실행이 받았던 관문
+    (`gate_carry`, 25.1967). 둘 다 없으면 None(처음부터)"""
+    for 키 in ("gate", "gate_carry"):
+        g = 줄.get(키)
+        if isinstance(g, dict) and isinstance(g.get("looks"), list):
+            return g
+    return None
+
+
 def _관문판(
     client: Any, now: datetime, 계열: dict[str, list[tuple[str, float]]], h: str, 검산틀린날: set[str],
     kis요약: list[dict[str, Any]], *, since: str, version: int | None,
@@ -547,11 +564,13 @@ def _관문판(
             사전 = {"error": f"{type(exc).__name__}: {str(exc)[:120]}"}
         판 = {"gate": 관문, "risk": desk.risk_board(latest, 계열, 손절), "prereg_status": 사전,
              "champion": desk.champion(계열, h, 증거, 판시작),
-             "readiness": desk.readiness(runs=늦음[0] if 늦음 else None, kis=kis요약), "gate_error": None}  # fmt: skip
+             "readiness": desk.readiness(runs=늦음[0] if 늦음 else None, kis=kis요약), "gate_error": None,
+             "gate_carry": None}  # fmt: skip
         return 판, None
     except Exception as exc:  # noqa: BLE001 — 곁다리 안의 곁다리
         글 = f"{type(exc).__name__}: {str(exc)[:120]}"
-        return {"gate": None, "risk": [], "champion": [], "readiness": [], "prereg_status": {}, "gate_error": 글}, 글
+        return {"gate": None, "risk": [], "champion": [], "readiness": [], "prereg_status": {}, "gate_error": 글,
+                "gate_carry": 앞관문}, 글  # fmt: skip
 
 
 def _this_version_evidence(row: dict[str, Any]) -> dict[str, Any]:

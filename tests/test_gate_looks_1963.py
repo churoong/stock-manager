@@ -72,7 +72,10 @@ def test_판이_바뀌면_처음부터() -> None:
     g = _관문(130, version=1)
     새판 = _관문(130, prev=g, version=2, 좋음=False)
     assert [x["n"] for x in 새판["looks"]] == [126] and not 새판["passed"]
-    assert _관문(130, prev={**g, "account": "B"}, 좋음=False)["passed"] is False  # 다른 계좌도 이어받지 않는다
+    # 다른 계좌도 이어받지 않는다 — 판은 같게(둘 다 None) 두어 계좌 비교만 잰다(25.1967, 교차검증 [권고])
+    같은판 = _관문(130)
+    assert _관문(130, prev=같은판, 좋음=False)["passed"] is True
+    assert _관문(130, prev={**같은판, "account": "B"}, 좋음=False)["passed"] is False
 
 
 def test_여러_시점을_건너뛰었으면_닿은_날_모두_판정() -> None:
