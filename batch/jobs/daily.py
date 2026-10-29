@@ -688,6 +688,16 @@ MISSING_MARKET_DAYS_SQL = (
 )
 
 
+#: **거래일인데 이 국내 시장 행이 한 줄도 없는가** (25.1981, 결함 루프 10-29). 위 두 질의는 날짜 후보를 prices 에서
+#: 뽑고 같은 시장 야후 행이나 다른 국내 시장 행을 근거로 삼아, **국내 두 시장이 다 빈 날**(아침 실행 둘이 모두 한 줄도
+#: 저장 못 함 — 09-08 에 실제로 있었다)은 어디에도 안 걸려 영영 다시 받지 않았다(25.574 가 알고 둔 구멍). 그날 주문은
+#: 가상모의투자에서 "시세 못 받음" 으로 만료되는데 KIS모의투자에서는 이미 체결돼 다음 날 정리 매도가 나갔다.
+#: 날짜 후보는 거래소 달력에서, 날마다 날짜 색인으로 한 행만 본다(있으면 곧 멈춤)
+KR_MARKET_DAY_ROW_SQL = (
+    "SELECT 1 FROM prices WHERE date = ?"
+    " AND stock_id IN (SELECT id FROM stocks WHERE country = 'KR' AND market = ?) LIMIT 1"
+)
+
 #: 시세를 한 번도 못 받은 채 주간 유니버스 스냅샷에 이만큼 실렸으면 "못 받음" 을 경고로 세지 않는다
 #: (docs/infra.md 25.922). `stocks.fetched_at` 은 주간 마스터 갱신이 덮어 써 나이를 잴 수 없다 —
 #: 스냅샷 수가 "적어도 그만큼 주를 지났다" 를 말한다
@@ -735,6 +745,19 @@ def _drop_never_priced(client: TursoClient, note: str, symbols: list[str], bars:
     return "; ".join(줄들)
 
 
+def _빈_거래일(client: TursoClient, market: str, 시작: str, 끝: str) -> list[str]:
+    """[시작, 끝) 의 국내 거래일 가운데 이 시장 행이 한 줄도 없는 날 (25.1981, `KR_MARKET_DAY_ROW_SQL`)"""
+    from datetime import date as _date
+
+    out: list[str] = []
+    d = _date.fromisoformat(시작)
+    while d.isoformat() < 끝:
+        if cal.is_session("KR", d) and not client.execute(KR_MARKET_DAY_ROW_SQL, [d.isoformat(), market]).rows:
+            out.append(d.isoformat())
+        d += timedelta(days=1)
+    return out
+
+
 def _heal_yahoo_days(client: TursoClient, market: str, trade_date: str, ids: dict[str, int]) -> list[str]:
     """최근 `HEAL_DAYS` 안에 야후로 대신 받은 날을 거래소 값으로 바꾼다 (docs/infra.md 25.513, 교차검증).
 
@@ -760,7 +783,7 @@ def _heal_yahoo_days(client: TursoClient, market: str, trade_date: str, ids: dic
             str(r[0]) for r in client.execute(
                 MISSING_MARKET_DAYS_SQL, [시작, trade_date, trade_date, market, market]
             ).rows
-        })  # fmt: skip
+        } | set(_빈_거래일(client, market, 시작, trade_date)))  # fmt: skip
     except Exception as exc:  # noqa: BLE001 — 바꾸지 못해도 오늘 시세는 저장됐다
         return [f"{market} 야후로 받은 날을 찾지 못했습니다: {exc}"]
     out: list[str] = []
