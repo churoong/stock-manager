@@ -553,6 +553,9 @@ class Rebalance:
     turnover: float
     cost: float
     dropped: list[int] = field(default_factory=list)  # 가격이 끊겨 뺀 종목
+    #: 장부형 전략의 비용 길(25.1969) — "cash"(현금에서, 25.1957) · "fallback"(현금 < 비용이라 자본 전체에 — 운영과
+    #: 다른 길, backtest.md 3장). 비중형은 None
+    cost_path: str | None = None
 
 
 @dataclass
@@ -763,7 +766,8 @@ def simulate(
             # 묶인 종목은 오늘 체결가가 없다 — 마지막 종가를 기준으로 이어 잰다(재개일 갭이 곡선에 들어간다)
             entry = {sid: (prices[sid][d] if d in prices.get(sid, {}) else carry(sid, d)) for sid in target}
             rebalances.append(
-                Rebalance(date=d, weights=dict(target), turnover=회전율, cost=cost, dropped=dropped)
+                Rebalance(date=d, weights=dict(target), turnover=회전율, cost=cost, dropped=dropped,
+                          cost_path=("cash" if 현금비용 else "fallback") if 장부형 else None)
             )
             curve.append((d, equity))
             continue
@@ -783,6 +787,18 @@ def simulate(
 # ----------------------------------------------------------------------
 # 결과 요약
 # ----------------------------------------------------------------------
+
+
+def cost_paths(result: BacktestResult) -> dict[str, object] | None:
+    """장부형 실행의 비용 길 빈도(25.1969, docs/backtest.md 3장) — 대체 길(현금 < 비용, 자본 전체에 비례)은 운영
+    가상모의투자와 다른 길이라 얼마나 자주·얼마만큼 탔는지 결과에 남긴다. 비중형(길이 없음)이면 None.
+    `fallback_cost` = 대체 길 날의 비용 합(자본 비율) — 그날 든 종목 몫이 운영보다 더 깎인 크기의 위 끝"""
+    길 = [r for r in result.rebalances if r.cost_path is not None]
+    if not 길:
+        return None
+    대체 = [r for r in 길 if r.cost_path == "fallback"]
+    return {"cash": len(길) - len(대체), "fallback": len(대체), "fallback_cost": sum(r.cost for r in 대체),
+            "fallback_first": 대체[0].date if 대체 else None}  # fmt: skip
 
 
 @dataclass

@@ -321,7 +321,9 @@ def run_core(
                      # 깨지면 칸만 빠진다(25.1952)
                      **jb.monthly_excess_extra(result.curve, 벤치월),
                      # 수용량(25.1954) — 리밸런스마다 단위 금액의 가장 빠듯한 종목 비율. 깨지면 칸만 빠진다
-                     **jb.capacity_extra(result, turnover, market)}  # fmt: skip
+                     **jb.capacity_extra(result, turnover, market),
+                     # 비용 길 빈도(25.1969) — 대체 길(현금 < 비용)이 운영과 다른 길이라 몇 번 탔나
+                     "cost_path": bt.cost_paths(result)}  # fmt: skip
             jb.store_run(client, market, variant, result, summary, 종목수[variant], group_id, warnings,
                          now, 운.get(variant), rebalance=REBALANCE, extra=extra, kept=실은_행)  # fmt: skip
             mt = summary.metrics
