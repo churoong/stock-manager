@@ -156,10 +156,11 @@ DESK_LAST_SQL = "SELECT summary_json FROM paper_desk ORDER BY as_of DESC LIMIT 1
 #: 오늘 이하에서 판정 시점 기록(`gate.looks`, 관문을 비운 줄은 `gate_carry.looks`)이 있는 가장 늦은 운용 요약 —
 #: 관문을 이어받는다(25.1963). 관문을 비운 실행(판오류·관문오류) 한 줄이 끼어도 기록이 끊기지 않게(25.1967,
 #: 25.1963 교차검증 [필수]). 깨진 JSON 줄은 `json_valid` 로 건너뛴다(CASE 는 앞 조건이 거짓이면 뒤를 셈하지 않는다)
+#: 기록은 배열일 때만 — `_앞관문` 과 같은 규칙(25.1970, 배열이 아닌 줄을 골라 처음부터 판정하지 않게)
 DESK_UPTO_SQL = (
     "SELECT summary_json FROM paper_desk WHERE as_of <= ? AND CASE WHEN json_valid(summary_json) THEN"
-    " COALESCE(json_extract(summary_json, '$.gate.looks'), json_extract(summary_json, '$.gate_carry.looks')) END"
-    " IS NOT NULL ORDER BY as_of DESC LIMIT 1"
+    " json_type(summary_json, '$.gate.looks') = 'array' OR json_type(summary_json, '$.gate_carry.looks') = 'array'"
+    " END ORDER BY as_of DESC LIMIT 1"
 )
 DESK_UPSERT_SQL = (
     "INSERT INTO paper_desk (as_of, summary_json, updated_at) VALUES (?, ?, ?)"

@@ -89,3 +89,32 @@ def test_앞관문_고르기() -> None:
     assert job._앞관문({"gate": None, "gate_carry": 앞}) == 앞
     assert job._앞관문({"gate": {"account": "B"}}) is None  # 판정 시점 기록 없는 옛 관문
     assert job._앞관문({}) is None
+
+
+def test_판_이력을_못_읽은_실행도_받았던_관문을_남긴다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1970 (25.1967 교차검증 [권고]) — 판오류 갈래. 그날 `_관문판` 은 성공해 그 결과의 `gate_carry` 는 None 이므로
+    판오류 갈래가 받았던 관문으로 덮지 않으면 같은 날 앞 실행이 오늘 내린 판정이 사라진다"""
+    c = Client(accounts=None)
+    _줄(c, "2026-10-17", {"gate": 앞, "markets": {}})  # 같은 날(as_of 10-17) 앞 실행이 적은 관문
+    monkeypatch.setattr(job.bmj, "MIRROR_ACCOUNT", "B")
+    monkeypatch.setattr(job, "_판이력", lambda *_a, **_k: ({}, "OperationalError: 표 없음"))
+    job.write(c, "KR", datetime(2026, 10, 16, 23, 40, tzinfo=UTC), trade_date="2026-10-16", session_date="2026-10-19",
+              step_log={}, warnings=[])  # fmt: skip
+    줄 = json.loads(c.conn.execute("SELECT summary_json FROM paper_desk WHERE as_of = '2026-10-17'").fetchone()[0])
+    assert 줄["gate"] is None and 줄["gate_carry"] == 앞 and job._앞관문(줄) == 앞
+
+
+def test_좋은_실행은_gate_carry_를_비운다(monkeypatch: pytest.MonkeyPatch) -> None:
+    c = Client(accounts=None)
+    _줄(c, "2026-10-17", {"gate": None, "gate_carry": 앞, "markets": {}})
+    _본(monkeypatch, c)
+    줄 = json.loads(c.conn.execute("SELECT summary_json FROM paper_desk WHERE as_of = '2026-10-17'").fetchone()[0])
+    assert isinstance(줄["gate"], dict) and 줄["gate_carry"] is None
+
+
+def test_looks_가_배열이_아닌_줄은_건너뛴다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1970 (25.1967 교차검증 [참고]) — SQL 고르기와 `_앞관문` 의 규칙을 같게(배열만)"""
+    c = Client(accounts=None)
+    _줄(c, "2026-10-14", {"gate": 앞, "markets": {}})
+    _줄(c, "2026-10-16", {"gate": {"account": "B", "looks": "깨짐"}, "markets": {}})
+    assert _본(monkeypatch, c) == [앞]
