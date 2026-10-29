@@ -111,3 +111,18 @@ def test_주간_요약_준비도에_판정_시점_한_줄() -> None:
     assert desk.gate_looks_line({"items": [], "passed": False}) is None  # 판정 시점 기록 없는 옛 관문
     assert desk.gate_looks_line({**_관문(260, 좋음=False)}) == (
         "판정 시점(126·189·252평가에만 판정): 126 못 넘음 · 189 못 넘음 · 252 못 넘음 · 판정 시점 끝 — 새 판 등록 전엔 통과 없음")
+
+
+def test_판정_시점_날_재료_없음은_못_넘음() -> None:
+    """25.1972 (25.1968 교차검증 [권고]) — 판정 시점(126) 날 결정 단위 증거가 비었으면(성과 분해 실패 등) 그 칸은
+    모름이고 판정은 못 넘음이다(desk.md 6장 — 보수적 쪽, 시점 하나를 태운다)"""
+    날 = _날(130)
+    h = [(d, 1 + 0.001 * i + (0.002 if i % 2 else 0)) for i, d in enumerate(날)]
+    r = [(d, 1 + (0.01 if i % 2 else -0.01)) for i, d in enumerate(날)]
+    지수 = [(날[0], 1000.0, 1000.0, 1000.0), (날[-1], 1000.0, 1000.0, 1000.0)]
+    g = desk.gate({"H": h, "R1": r, "R2": r}, "H", recon_bad_days=0, batch_failed=0,
+                  kis={"kept_pct": 95.0, "n": 200}, evidence=None, index=지수)  # fmt: skip
+    칸 = {i["key"]: i for i in g["items"]}
+    assert 칸["selection"]["now"] is None and 칸["control"]["now"] is None
+    assert g["looks"][0]["n"] == 126 and not g["looks"][0]["passed"] and not g["passed"]
+    assert {"selection", "control"} <= set(g["looks"][0]["failed"])

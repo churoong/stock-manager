@@ -435,7 +435,10 @@ def judge(order: Order, bar: Bar | None) -> tuple[float | None, str]:
         # (25.1640, 10-22 운영 점검). 그보다 작은 값의 글은 예전과 같다
         return None, f"종가 {bar.close:.10g} > 회차 가격 {order.limit_price:.10g}"
     if order.basis == "close":
-        가격, 까닭 = bar.close, "장 열린 뒤 낸 주문 — 종가"
+        # 당일 단타(T)의 종가 매도는 장 열기 전에 매수와 함께 낸 짝 매도다 — "장 열린 뒤 낸 주문" 이 아니다(25.1972,
+        # 첫 매매 점검 [참고]). 늦은 실행 날은 T 주문을 내지 않으므로 T 의 종가 잣대 매도는 짝 매도뿐이다
+        짝 = order.account_id in SAME_DAY_IDS
+        가격, 까닭 = bar.close, ("단타 짝 매도 — 종가" if 짝 else "장 열린 뒤 낸 주문 — 종가")
     elif bar.open is not None and bar.open > 0:
         가격, 까닭 = bar.open, "시가"
     else:

@@ -352,6 +352,10 @@ def test_run_core_반_나눈_기간과_실행_기록(실행: tuple[MemClient, in
         # 조각 1e (25.1542) — 운 판정·결정 단위 판정이 실린다(1년이라 운 판정은 "판정 안 함")
         assert mj["luck"]["n_trials"] == jb.REGISTERED_TRIALS and "판정 안 함" in mj["luck"]["verdict"]
         assert {"buys", "scored", "no_control", "days", "n_blocks", "mean", "lower", "gate", "after_sell"} <= set(mj["evidence"])
+        # 비용 길 빈도(25.1969·25.1972) — 장부형 변형마다 결과 행에, 리밸런스마다 한 길
+        cp = mj["cost_path"]
+        assert set(cp) == {"cash", "fallback", "fallback_cost", "fallback_first"}
+        assert cp["cash"] + cp["fallback"] == r["rebalances"] and cp["fallback_cost"] >= 0
     run = mem.execute("SELECT * FROM batch_runs WHERE job_name = ?", [cj.JOB_NAME]).dicts()
     assert len(run) == 1 and run[0]["status"] == "success" and run[0]["market"] == "KR"
     로그 = json.loads(run[0]["step_log"])

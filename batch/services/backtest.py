@@ -767,7 +767,9 @@ def simulate(
             entry = {sid: (prices[sid][d] if d in prices.get(sid, {}) else carry(sid, d)) for sid in target}
             rebalances.append(
                 Rebalance(date=d, weights=dict(target), turnover=회전율, cost=cost, dropped=dropped,
-                          cost_path=("cash" if 현금비용 else "fallback") if 장부형 else None)
+                          # 비용 0 인 날은 길이 같다 — 다 투자한 채 매매 없는 날 Σ목표가 부동소수로 1 을 1e-16 넘어
+                          # 대체 길로 세던 것(25.1972, 25.1969 교차검증 [권고]). 엔진 분기는 그대로(값 같음)
+                          cost_path=("fallback" if not 현금비용 and cost > 0 else "cash") if 장부형 else None)
             )
             curve.append((d, equity))
             continue
