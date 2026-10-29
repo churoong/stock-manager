@@ -37,3 +37,19 @@ def test_플래그_읽기와_첫_화면이_같은_오늘을_쓴다() -> None:
     src = inspect.getsource(daily)
     assert "_sell_flags_for_report(client, \"KR\" if market == \"KR\" else \"US\", warnings, 플래그_오늘)" in src
     assert "todo=formatter.todo_line(sell_flag_rows, currency, 플래그_오늘)" in src
+
+
+def test_플래그_읽기가_넘긴_오늘을_쓴다(monkeypatch) -> None:  # noqa: ANN001
+    """25.1990 (25.1989 교차검증 [권고]) — 소스 글자만 보면 `_sell_flags_for_report` 가 인자를 무시해도 지났다"""
+    from batch.core import calendar as cal
+    from batch.jobs import daily, sell_flags
+
+    본: list[str] = []
+    monkeypatch.setattr(sell_flags, "active_flags_for_report", lambda c, country, as_of, last=None: 본.append(as_of) or [])
+    monkeypatch.setattr(daily, "_last_report_sent_at", lambda c, country: None)
+    import datetime as _dt
+
+    monkeypatch.setattr(cal, "user_today", lambda: _dt.date(2026, 10, 30))  # 다른 날 — 넘긴 값을 써야 한다
+    assert daily._sell_flags_for_report(object(), "KR", [], "2026-10-29") == []
+    assert daily._sell_flags_for_report(object(), "KR", []) == []
+    assert 본 == ["2026-10-29", "2026-10-30"]  # 안 넘기면 예전대로 읽는다

@@ -2246,8 +2246,9 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
         # 추천을 못 읽은 날은 2부가 없다 — 보유를 읽으면 "여력 계산에 넣지 못했습니다" 같은 2부 경고만 남는다 (25.822,
         # 교차검증)
         holdings = load_holdings(client, currency, fx_rate, warnings) if 추천_오류 is None else []
-        # 매도 플래그 읽기와 첫 화면 "오늘 볼 것" 줄의 판정일 비교가 **같은 오늘**을 쓴다 — 따로 읽으면 두 호출 사이에
-        # 자정(KST)을 넘길 때 오늘 판정에 "오늘 판정 아님" 이 붙었다(25.1989, 25.1987 교차검증 [참고])
+        # 매도 플래그 읽기(NEW 대체 판정의 오늘)와 첫 화면 "오늘 볼 것" 줄의 비교일이 **같은 오늘**을 쓴다(25.1989).
+        # "오늘 판정 아님" 꼬리는 DB 의 판정일(앞선 `sell_flags.run` 이 찍음)과 이 오늘을 견주므로, 그 둘 사이에 KST
+        # 자정을 넘기는 경우는 남는다 — 안전 쪽 오류(꼬리가 하나 더 붙음), 미국 배치가 1.5시간 넘게 늦을 때만(25.1990)
         플래그_오늘 = cal.user_today().isoformat()
         sell_flag_rows = _sell_flags_for_report(client, "KR" if market == "KR" else "US", warnings, 플래그_오늘)
         if 추천_오류 is not None:
