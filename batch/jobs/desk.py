@@ -292,9 +292,11 @@ def report_head(
     else:
         상태 = "이 주문을 접수 시간에 그대로 냅니다"
     지난 = client.execute(DESK_LAST_SQL).rows
-    지난칸 = (((_json(지난[0][0]) if 지난 else None) or {}).get("markets") or {}).get(market)
+    지난줄 = (_json(지난[0][0]) if 지난 else None) or {}
+    지난칸 = (지난줄.get("markets") or {}).get(market)
     지난kis = list(지난칸.get("kis_orders") or []) if isinstance(지난칸, dict) else None
-    return desk.report_lines(칸, 순위, h, prev_kis=지난kis, kis_state=상태)
+    # 실전 관문 진도(25.1991) — 운용 요약 마지막 줄의 관문. 관문을 비운 날은 줄을 뺀다(까닭은 웹 상황실)
+    return desk.report_lines(칸, 순위, h, prev_kis=지난kis, kis_state=상태, gate=지난줄.get("gate"))
 
 
 def write(

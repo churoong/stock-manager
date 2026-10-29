@@ -1527,6 +1527,11 @@ def _last_report_sent_at(client: TursoClient, country: str) -> str | None:
     return str(rows[0][0]) if rows else None
 
 
+#: 추천·신호 절의 머리 (25.1991) — 목표(로보어드바이저)에서 이 절은 가상모의투자 계좌들이 주문을 고르는 **후보**다.
+#: 사용자 실제 계좌 매매는 사용자가 판단한다(CLAUDE.md "시스템의 중심")
+RECOMMEND_HEAD = "📋 전략 재료·내 계좌 — 신호·추천(가상모의투자가 고르는 후보) · 2부 배분 · 매도 플래그"
+
+
 def _sell_flags_for_report(
     client: TursoClient, country: str, warnings: list[str] | None = None, 오늘: str | None = None,
 ) -> list[dict]:
@@ -2373,8 +2378,13 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
             composed = dc_replace(
                 composed, text="\n".join(report_sections.render_sell_flags(sell_flag_rows)) if sell_flag_rows else ""
             )
+        # **순서는 목표대로**(25.1991, 2026-10-29 사용자 "텔레그램으로 보내주는 메시지를 우리 목표에 맞게 내용을
+        # 바꿔줘") — 시스템의 중심은 가상모의투자·KIS모의투자(CLAUDE.md)이고 추천·신호는 그 전략의 재료다. 운용 보고
+        # (머리) 뒤에 가상모의투자 절(계좌별 평가·실제 비교·위원회·지주사)을 먼저, 추천·일정·공시·엇갈림은
+        # "전략 재료" 로 그 뒤에
+        재료: list[str] = []
         if composed.text:
-            message += "\n\n" + composed.text
+            재료.append(composed.text)
         # 보유·추천 종목의 기업행위 일정 (docs/reports.md 3.7, 25.989) — 가격이 튀기 **전에** 안다.
         # 못 읽으면 절만 빠진다. 보유이면서 추천이면 "보유" 로 적는다(뒤가 이긴다)
         if market == "KR" and 추천_오류 is None:
@@ -2389,18 +2399,18 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
             )  # fmt: skip
             step_log["pick_dividend"] = 추천배당  # 28회차 P6 (25.1420) — 2027-04-30 까지 amount_known 0 이면 접는다
             if 일정:
-                message += "\n\n" + "\n".join(일정)
+                재료.append("\n".join(일정))
                 step_log["corp_events"] = len(일정) - 1
             # 신호 기준일 뒤에 접수된 공시 — 사실 줄만 (docs/reports.md 3.7a, 28회차 P2, 25.1428)
             뒤공시기록: dict[str, int] = {}
             뒤공시 = _post_close_lines(client, 상위, warnings, 뒤공시기록)
             if 뒤공시:
-                message += "\n\n" + "\n".join(뒤공시)
+                재료.append("\n".join(뒤공시))
             step_log["part1_post_close"] = 뒤공시기록
             # 추천인데 외국인·기관이 팔고 증권사가 목표가를 내리는 종목 (docs/reports.md 3.9, 25.1001) — 참고만
             엇갈림 = _divergence_lines(client, decision.trade_date, 상위, warnings)
             if 엇갈림:
-                message += "\n\n" + "\n".join(엇갈림)
+                재료.append("\n".join(엇갈림))
                 step_log["divergence"] = len(엇갈림) - 1
 
         # 미국 1부 종목의 기준일 뒤 SEC 공시 사실 줄, 8-K 중대 항목은 기록만 (reports.md 3.7a, 28회차 P2·P3, 25.1429)
@@ -2410,7 +2420,7 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
             줄 = _sec_post_close_lines(client, report_picks.select_top(report_picks.with_criteria(signal_rows)),
                                     cal.local_today("US"), warnings, 미국뒤, 미국중대)  # fmt: skip
             if 줄:
-                message += "\n\n" + "\n".join(줄)
+                재료.append("\n".join(줄))
             step_log["part1_post_close"] = 미국뒤
             if 미국중대:
                 step_log["us_8k_items"] = 미국중대
@@ -2452,6 +2462,10 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
                 log.exception("가상모의투자 단계 실패")
                 warnings.append(_실패문("가상모의투자 계좌", exc))
                 step_log["paper"] = {"error": str(exc)[:300]}
+
+        if 재료:
+            # 추천을 못 읽은 날은 매도 플래그만이라 머리를 붙이지 않는다
+            message += "\n\n" + (RECOMMEND_HEAD + "\n\n" if 추천_오류 is None else "") + "\n\n".join(재료)
 
         # KIS모의투자 베끼기·운용 요약 — 리포트 발송 뒤에 돌지만 **발송이 실패해도 돈다**(25.1715, 일일 배치 감사
         # [필수] 1). 예전엔 발송 예외가 `_send_failed` 로 바로 끝나, 가상 H 는 그날 주문을 적었는데 KIS 베끼기·운용

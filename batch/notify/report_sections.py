@@ -407,12 +407,19 @@ def render_portfolio(portfolio: PortfolioView, picks: list[StockPick]) -> str:
     if portfolio.excluded:
         lines.append("")
         lines.append("배분에서 빠진 종목")
+        # **같은 까닭(사유·자세히가 같은 것)은 한 줄로** (25.1991, 2026-10-29 사용자 "목표에 맞게") — 여력이 0원인 날
+        # 다섯 종목이 "투자 여력 부족 (남은 0원)" 을 한 줄씩 되풀이했다. 종목마다의 까닭은 그대로 남는다(CLAUDE.md
+        # "1부에 있는데 2부에 없으면 사유를 반드시 적는다"). 까닭이 하나뿐인 종목은 예전 꼴
+        묶음: dict[tuple[str, str], list[str]] = {}
         for item in portfolio.excluded:
             통화 = next((p.currency for p in picks if p.ticker == item.ticker), portfolio.budget_currency or "KRW")
-            line = f"  {_이름(item.name, item.ticker, 통화)} — {item.reason}"
-            if item.detail:
-                line += f" ({item.detail})"
-            lines.append(line)
+            묶음.setdefault((item.reason, item.detail or ""), []).append(_이름(item.name, item.ticker, 통화))
+        for (사유, 자세히), 이름들 in 묶음.items():
+            꼬리 = f" ({자세히})" if 자세히 else ""
+            if len(이름들) == 1:
+                lines.append(f"  {이름들[0]} — {사유}{꼬리}")
+            else:
+                lines.append(f"  {사유}{꼬리}: {' · '.join(이름들)}")
 
     if portfolio.sector_concentration:
         lines.append("")
