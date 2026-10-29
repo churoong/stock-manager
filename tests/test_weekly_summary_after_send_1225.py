@@ -37,3 +37,27 @@ def test_보낸_뒤_기록_실패는_partial_이고_다시_보내지_않는다(m
     assert 상태 == [("partial",)]
     assert ws.run() == 0  # 따라잡기·재실행
     assert len(보냄) == 1
+
+
+
+@pytest.mark.parametrize("오류", ["일부", "모름"])
+def test_일부만_갔거나_모르면_partial_이고_다시_보내지_않는다(monkeypatch: pytest.MonkeyPatch, 오류: str) -> None:
+    """25.1982 (결함 루프 10-29) — 예전엔 `failed` 로 닫혀 재실행이 요약 전체를 한 번 더 보냈다. 진척 표시는 적지 않는다"""
+    mem, 보냄 = _준비(monkeypatch)
+    적음: list = []
+    monkeypatch.setattr(ws.db, "set_setting", lambda c, k, v: 적음.append(k))
+
+    def 깨진_보냄(t, *a, **k):  # noqa: ANN001, ANN002, ANN003, ANN202
+        보냄.append(t)
+        if 오류 == "일부":
+            raise ws.telegram.TelegramPartialError("2조각 가운데 1조각만 보냈습니다", [11], 2)
+        raise ws.telegram.TelegramUncertainError("응답 시간 초과")
+
+    monkeypatch.setattr(ws.telegram, "send", 깨진_보냄)
+    assert ws.run() == 0
+    줄 = mem.conn.execute("SELECT status, step_log FROM batch_runs WHERE job_name = 'weekly_summary'").fetchall()
+    assert [r[0] for r in 줄] == ["partial"]
+    assert ("1조각만 보냄" if 오류 == "일부" else "발송 여부 모름") in 줄[0][1]
+    assert 적음 == []  # 사후 분석·월간·실행 품질 진척을 적지 않는다
+    assert ws.run() == 0  # 재실행·따라잡기
+    assert len(보냄) == 1

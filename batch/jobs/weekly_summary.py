@@ -608,8 +608,22 @@ def run(dry_run: bool = False, force: bool = False) -> int:
         print(text)
         sent = 0
         뒤경고: list[str] = []
+        일부: str | None = None
         if not dry_run:
-            sent = len(telegram.send(text))
+            # **일부만 갔거나 발송 여부를 모르면 "보낸 것으로 본다"** (25.1982, 결함 루프 10-29 — 일일 배치
+            # 25.414·25.493 과 같게). 예전엔 바깥 except 로 떨어져 `failed` 로 닫혀, 다시 보내지 않는 검사(성공·partial
+            # 만 봄)를 지나 재실행이 요약 전체를 한 번 더 보냈다. 진척 표시(사후 분석·월간·실행 품질)는 적지 않는다 —
+            # 그 절이 못 간 뒤 조각에 있었을 수 있어 다음 주에 다시 싣는 쪽이 보수적이다
+            try:
+                sent = len(telegram.send(text))
+            except telegram.TelegramPartialError as exc:
+                sent = len(exc.sent_ids)
+                일부 = f"{exc.total}조각 가운데 {sent}조각만 보냄 — {exc}"
+            except telegram.TelegramUncertainError as exc:
+                일부 = f"발송 여부 모름(응답 없음) — {exc}"
+            if 일부:
+                뒤경고.append(일부)
+        if not dry_run and not 일부:
             # 보낸 뒤에만 넘긴다 — 찍기만 하는 실행이 다음 주 보고를 먹지 않게
             if 본_끝:
                 # **보낸 뒤의 실패는 실행을 실패로 만들지 않는다** (docs/infra.md 25.1225). 예전에는 여기서 올라가
