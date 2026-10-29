@@ -149,3 +149,15 @@ def test_조각_끝의_전략_재료_머리는_다음_조각으로() -> None:
     결과 = tg._carry_headers([f"🧪 가상모의투자\n  기준 10억원\n\n{daily.RECOMMEND_HEAD}\n", "시장 국면 (…)\n1부 개별 종목"])
     assert not 결과[0].rstrip().endswith(daily.RECOMMEND_HEAD)
     assert 결과[1].split("\n")[0] == daily.RECOMMEND_HEAD
+
+
+def test_넘긴_전략_재료_머리_뒤에_빈_줄을_되살린다() -> None:
+    """25.1995 (25.1994 교차검증 [참고]) — 경계에서 빈 줄을 잃어도 머리와 시장 국면 사이에 빈 줄 하나"""
+    from batch.jobs import daily
+    from batch.notify import telegram as tg
+
+    결과 = tg._carry_headers([f"🧪 가상모의투자\n  기준 10억원\n\n{daily.RECOMMEND_HEAD}", "시장 국면 (…)\n1부 개별 종목"])
+    assert 결과[1].split("\n")[:3] == [daily.RECOMMEND_HEAD, "", "시장 국면 (…)"]
+    # 다음 조각이 이미 빈 줄로 시작하면 하나만
+    결과 = tg._carry_headers([f"🧪 가상모의투자\n\n{daily.RECOMMEND_HEAD}", "\n시장 국면 (…)"])
+    assert 결과[1].split("\n")[:3] == [daily.RECOMMEND_HEAD, "", "시장 국면 (…)"]

@@ -395,7 +395,11 @@ def _carry_headers(chunks: list[str]) -> list[str]:
     지금_머리: str | None = None
     넘김: list[str] = []
     for i, chunk in enumerate(chunks):
-        줄들 = 넘김 + chunk.split("\n")
+        이번 = chunk.split("\n")
+        # 전략 재료 머리 뒤의 빈 줄을 나누기가 경계에서 버리면 머리와 시장 국면이 붙었다(25.1995)
+        if 넘김 and 넘김[-1].startswith("📋 ") and 이번 and 이번[0].strip():
+            이번 = ["", *이번]
+        줄들 = 넘김 + 이번
         넘김 = []
         # 끝의 빈 줄은 건너 보고 머리를 찾는다 (25.1186) — 조각이 "1부 개별 종목\n" 으로 끝나면 마지막 줄이 빈 줄이라
         # 외톨이 머리를 못 보고 첫 조각 끝에 남겼다
