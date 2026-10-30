@@ -132,3 +132,40 @@ def test_스크립트는_예전_사본을_진도_문을_거쳐서만_새로_만�
     monkeypatch.setattr(mod, "_gate_allows_build", lambda r: 문(r, True))
     assert mod.main() == 0 and 물음 == [1, 1]
     assert rep.has_ohl(sqlite3.connect(str(path)))
+
+
+def test_백테스트_로더는_시가를_같은_수정_계열로_읽고_안_물으면_시가_열을_찾지_않는다(tmp_path: Path) -> None:
+    """깔때기 ⑥ 둘째 단(25.2029) — `opens` 를 주면 원 시가 × 수정종가 ÷ 원 종가. 안 주면 질의에 `open` 이 없어
+    예전 사본(시가 열 없음)에서도 시세 읽기가 사본에 남는다(Turso 로 물러나지 않는다)."""
+    from batch.jobs import backtest
+
+    원격 = _원격()
+    _시가(원격)
+    원격.execute("UPDATE prices SET adj_close = close / 2 WHERE stock_id = 3")  # 수정 계수 0.5
+    원격.execute("UPDATE prices SET open = NULL WHERE stock_id = 4 AND date = '2026-08-02'")
+    ids = [3, 4]
+    시가: dict = {}
+    가격, _ = backtest.load_prices_and_turnover(원격, ids, "2026-08-01", opens=시가)
+    원 = dict(((r[0], r[1]), (r[2], r[3])) for r in 원격.execute("SELECT stock_id, date, open, close FROM prices").rows)
+    for sid in ids:
+        for day, px in 가격[sid].items():
+            o, cl = 원[(sid, day)]
+            if o is None:
+                assert day not in 시가[sid]
+            else:
+                assert abs(시가[sid][day] - o * px / cl) < 1e-9
+    assert abs(시가[3]["2026-08-01"] - (100.0 + 3 - 1) * 0.5) < 1e-9 and "2026-08-02" not in 시가[4]
+
+    # 예전 사본 — 시가를 안 물으면 사본에서, 물으면 Turso 로(값은 같다)
+    path = tmp_path / "old.db"
+    예전 = _예전_사본(path)
+    예전.executemany(rep._UPSERT_OLD, [tuple(r[:7]) for r in 원격.execute(rep._PULL_NEW, [0, 10**6]).rows])
+    예전.commit()
+    클라 = rep.ReplicaClient(원격, 예전)
+    assert backtest.load_prices_and_turnover(클라, ids, "2026-08-01") == backtest.load_prices_and_turnover(
+        원격, ids, "2026-08-01"
+    )
+    assert 클라.local_queries == 1
+    시가2: dict = {}
+    backtest.load_prices_and_turnover(클라, ids, "2026-08-01", opens=시가2)
+    assert 시가2 == 시가 and 클라.local_queries == 1

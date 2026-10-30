@@ -1367,9 +1367,15 @@ def load_prices_and_turnover(
     with_turnover: bool = True,
     levels: dict[int, dict[str, float]] | None = None,
     factors: dict[int, dict[str, float]] | None = None,
+    opens: dict[int, dict[str, float]] | None = None,
 ) -> tuple[dict[int, dict[str, float]], dict[int, dict[str, float]]]:
     """가격과 거래대금을 **한 번에** 읽는다. `factors` 를 주면 그날 수정 계수(수정종가 ÷ 원 종가)도 같은 행에서 모은다
     (15회차 목표가 분산도가 원값 목표가를 수정주가 기준에 옮길 때, 12.17).
+
+    `opens` 를 주면 그날 **시가를 같은 수정 계열**(원 시가 × 수정종가 ÷ 원 종가)로 모은다 — 깔때기 ⑥(docs/funnel.md
+    4장, 25.2028): 다음 장 시가 체결 리플레이가 종가 계열과 같은 잣대로 시가를 쓴다. 시가가 비었거나 0 이하인 날은
+    넣지 않는다(체결 쪽이 그날을 "시가 모름" 으로 다룬다). 주지 않으면 질의에 `open` 을 넣지 않는다 — 예전 시세
+    사본(시가 열 없음, 25.2027)에서 모든 시세 읽기가 Turso 로 물러나지 않게
 
     같은 행에서 둘 다 나오므로 따로 읽으면 같은 5년치를 두 번 가져오게 된다.
     수익률은 수정주가(adj_close)를 쓴다.
@@ -1397,8 +1403,9 @@ def load_prices_and_turnover(
         # **0 이하 종가는 읽지 않는다** (docs/infra.md 25.1101, 감사 재현). 들어오는 문(25.203)만 막아 이미 있는 행은
         # 남을 수 있다 — 엔진이 0 을 진짜 가격으로 써 리밸런스 날 걸린 종목 몫이 영구히 0 이 되고,
         # 한 종목 100% 면 자본 0 뒤 `metrics.compute` 가 CAGR +3688% 를 냈다
+        열 = "stock_id, date, adj_close, close, volume, value" + (", open" if opens is not None else "")
         rs = client.execute(
-            "SELECT stock_id, date, adj_close, close, volume, value FROM prices"
+            f"SELECT {열} FROM prices"
             f" WHERE stock_id IN ({placeholders}) AND date >= ? AND close IS NOT NULL AND close > 0"
             "   AND (adj_close IS NULL OR adj_close > 0)",
             [*ids, since],
@@ -1421,6 +1428,8 @@ def load_prices_and_turnover(
             prices.setdefault(stock_id, {})[day] = float(row["px"])
             if factors is not None and row["close"]:
                 factors.setdefault(stock_id, {})[day] = float(row["px"]) / float(row["close"])
+            if opens is not None and row.get("open") is not None and float(row["open"]) > 0:
+                opens.setdefault(stock_id, {})[day] = float(row["open"]) * float(row["px"]) / float(row["close"])
             if levels is not None and row["close"] is not None:
                 # 가격 수준(분할만 조정된 원 종가). 시총·PBR 이 쓴다 (docs/infra.md 25.275)
                 levels.setdefault(stock_id, {})[day] = float(row["close"])
