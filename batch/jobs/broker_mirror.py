@@ -98,6 +98,12 @@ BOUGHT_TODAY_SQL = (
     "SELECT stock_id, SUM(quantity) FROM paper_broker_orders WHERE broker = ? AND trade_date = ? AND side = 'buy'"
     " AND status <> 'rejected' GROUP BY stock_id"
 )
+#: 맞추기 창 안에서 이미 닫힌 줄이 가진 체결 번호 — 번호 없는 줄이 그 체결을 다시 잡지 않게(25.2026, 25.2016 [참고] ③)
+CLAIMED_SQL = (
+    "SELECT trade_date, broker_order_no FROM paper_broker_orders"
+    " WHERE broker = ? AND trade_date >= ? AND trade_date < ? AND status NOT IN ('sending', 'accepted')"
+    " AND broker_order_no IS NOT NULL"
+)
 OLD_SQL = (
     "UPDATE paper_broker_orders SET status = 'unknown', message = '3개월 지나 맞추지 못함', fetched_at = ?"
     " WHERE broker = ? AND status IN ('sending', 'accepted') AND trade_date < ?"
@@ -604,7 +610,9 @@ def run(
         시작 = min(str(r["trade_date"]) for r in 남은).replace("-", "")
         끝 = (오늘 - timedelta(days=1)).strftime("%Y%m%d")
         체결, 다받음 = (sess.executions_us if 미국 else sess.executions)(시작, 끝)
-        결과 = bm.reconcile(남은, 체결, complete=다받음, missing=bm.MISSING_US if 미국 else bm.MISSING)
+        닫힘 = client.execute(CLAIMED_SQL, [증권사, min(str(r["trade_date"]) for r in 남은), 오늘.isoformat()]).rows
+        결과 = bm.reconcile(남은, 체결, complete=다받음, missing=bm.MISSING_US if 미국 else bm.MISSING,
+                            claimed=[(d, n) for d, n in 닫힘])  # fmt: skip
         client.batch([(RECON_SQL, [o.status, o.order_no, o.filled, o.avg_price, o.message, 지금, o.row_id])
                       for o in 결과])  # fmt: skip
         기록["reconciled"] = dict(Counter(o.status for o in 결과))

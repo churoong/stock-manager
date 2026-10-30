@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
@@ -276,14 +277,18 @@ MISSING_US = "체결 조회에 없음 — 예약이 개장 때 전송되지 않�
 
 def reconcile(
     rows: list[dict[str, Any]], executions: list[Any], complete: bool = True, missing: str = MISSING,
+    claimed: Iterable[tuple[str, Any]] = (),
 ) -> list[Outcome]:
     """어제까지 낸 증권사 주문(`sending`·`accepted`) → 체결 조회 결과로 마감. 하루짜리라 지난 거래일 주문은 끝났다.
 
     주문번호가 있으면 (주문일, 번호)로 찾는다. 응답을 못 받아 번호가 없는 줄(`sending`)은 같은 날·종목·방향·수량의
     남은 체결 줄을 하나 잡는다 — 못 찾으면 `unknown`(보냈는지 모른다). 체결 조회를 다 못 받았으면(`complete=False`,
     쪽 상한) 못 찾은 줄은 닫지 않고 다음 날 다시 본다
+
+    `claimed` — 이미 닫힌 줄이 가진 (주문일 YYYYMMDD 또는 YYYY-MM-DD, 번호). 번호 없는 줄은 이것을 잡지 않는다(25.2026):
+    잘린 맞추기(`complete=False`) 다음 날 남은 번호 없는 줄이, 전날 다른 줄이 이미 잡은 체결을 다시 잡던 것을 막는다
     """
-    쓴: set[tuple[str, str]] = set()
+    쓴: set[tuple[str, str]] = {(str(d).replace("-", ""), _번호(n)) for d, n in claimed if n}
     by_no = {(e.order_date, _번호(e.order_no)): e for e in executions}
     out: list[Outcome] = []
     for r in sorted(rows, key=lambda x: (x.get("broker_order_no") is None, int(x["id"]))):
