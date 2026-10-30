@@ -3050,6 +3050,7 @@ SQL read operations are forbidden (reads are blocked, ...)
 | 25.2000 | 스윙 매도 근거를 웹 근거표 꼴로, 되돌림 표시, 시험이 인자를 묶음 (25.1999 교차검증 [권고]) |
 | 25.2001 | 스윙 근거 참고 행은 '참고', 옛 꼴 기록도 웹에서 읽음, 진입일=락일 방어 (25.2000 교차검증 [권고]) |
 | 25.2002 | 거래내역 근거 — 배열 아님 막이, TradesPane 연결 시험 (25.2001 교차검증 [권고]) |
+| 25.2003 | 거래내역 근거 — 부르는 쪽 flags 막이를 시험으로 (25.2002 교차검증 [권고]) |
 
 ### 25.1 왜 D1 인가
 
@@ -43778,3 +43779,19 @@ libSQL 은 SQLite JSON1(`json_valid`·`json_type`)을 담고 있고 `json_valid`
 **시험**: 웹 `tradeCriteria2001`(배열 아님·덜 찬 근거표 꼴 → 뺌), `paging1767`(TradesPane 연결·깨진 근거).
 
 **되돌리기 확인**: `PaperView` 의 `tradeCriteria(` 를 항등 함수로 바꾸면 paging1767 새 시험이 깨진다. `Array.isArray` 막이를 빼면 tradeCriteria2001 이 깨진다.
+
+### 25.2003 거래내역 근거 — 부르는 쪽 flags 막이를 시험으로 (25.2002 교차검증 [권고])
+
+**계기**: 25.2002 교차검증(L3, `a42c50f..056c0c1`)은 [필수] 0건이었고 [권고] 1건을 남겼다. 같은 지적이 렌즈 셋에서 모두 나왔다. 25.2002 는 부르는 쪽(`PaperView` 거래내역)도 `flags` 와 그 원소의 `criteria` 가 배열일 때만 모으게 고쳤다고 적었다. 그런데 새 시험의 깨진 체결은 `signal.criteria` 가 문자열이라 `??` 가 거기서 멈췄고, flags 갈래는 평가되지 않았다. worktree 에서 이 막이를 옛 식(`근거?.flags?.flatMap(x => x.criteria ?? []) ?? []`)으로 되돌려도 시험 10개가 다 통과했다. 그 상태에서 signal 이 없고 flags 가 문자열인 기록 한 건이 있으면 `TypeError: flatMap is not a function` 으로 TradesPane 이 통째로 죽는다. 지금 배치는 늘 리스트를 쓰므로 실제로 터진 일은 없다.
+
+**고친 것**: `paging1767` 의 TradesPane 시험에 signal 없는 체결 둘을 더했다. 하나는 `{flags: "깨짐"}`, 다른 하나는 `{flags: [null, {criteria: "x"}]}` 이다. 화면이 죽지 않고 그 행 이름이 찍히는지 단언한다. handoff 머리말의 웹 시험 수를 실측(056c0c1 전체 검사, 2,502)으로 맞췄다([참고]).
+
+**25.2002 되돌리기 확인 보충([참고])**: 네 열쇠 검사를 label 하나로 되돌리면 tradeCriteria2001(반쪽 행)이 깨진다. 교차검증이 확인했다.
+
+**남긴 [참고]**:
+- `tradeCriteria` 의 네 열쇠 검사는 `parseCriteria`·`CRITERION_REQUIRED_KEYS` 의 손 사본이다. 지금 셋은 같다. 계약 시험(`test_criteria_contract`)이 recommend.ts 하나만 대조하는 것과 같은 갈래로 둔다(25.2001 남긴 [참고]).
+- 렌더의 `Array.isArray(기준) &&` 는 이제 늘 참이다. 해는 없다.
+
+**시험**: `paging1767` 의 `거래내역 근거는 tradeCriteria 를 거친다` 시험이다(체결 넷).
+
+**되돌리기 확인**: 부르는 쪽 flags 막이를 옛 식으로 되돌리면 이 시험이 깨진다(TypeError). 원복 뒤 8개 통과.

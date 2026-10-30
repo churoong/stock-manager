@@ -95,10 +95,15 @@ describe("거래내역 칸이 쪽으로 나뉜다", () => {
     const html = renderToStaticMarkup(createElement(TradesPane, { fills: [
       하나(1, JSON.stringify({ flags: [{ criteria: [{ name: "진입가", value: 10000, date: "2026-10-29" }] }] })),
       하나(2, JSON.stringify({ signal: { criteria: "깨짐" }, flags: "깨짐" })),
+      // signal 없이 flags 만 깨진 기록 — 부르는 쪽 flags 막이가 받는다(25.2003, 25.2002 교차검증 [권고])
+      하나(3, JSON.stringify({ flags: "깨짐" })),
+      하나(4, JSON.stringify({ flags: [null, { criteria: "x" }] })),
     ] as FillRow[] }));
     expect(html).toContain("진입가");
     expect(html).toContain("10,000");
     expect(html).toContain("옛 기록 꼴");
     expect(html).toContain("스윙2");
+    expect(html).toContain("스윙3");
+    expect(html).toContain("스윙4");
   });
 });
