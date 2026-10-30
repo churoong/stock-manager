@@ -223,7 +223,8 @@ def test_가결_행은_표_순이다() -> None:
 
 def test_탐색_실행은_따로_싣고_시도_수_하한은_누적이다(monkeypatch: pytest.MonkeyPatch) -> None:
     """`--explore` 는 `backtest_explore` 로 — 웹 핵심 H 화면(`backtest_core`)·판정과 섞이지 않는다.
-    DSR 시도 수 하한 = 코호트 1(`REGISTERED_TRIALS`) + 탐색 변형 수(funnel.md 2.1). H 진단·짝 판정은 내지 않는다."""
+    DSR 시도 수 하한 = 코호트 1(`REGISTERED_TRIALS`) + 탐색 변형 수 + S·T 둘(funnel.md 2.1 — `--st` 없이도 늘, 25.2051).
+    H 진단·짝 판정은 내지 않는다."""
     import json
 
     from batch.jobs import backtest as jb
