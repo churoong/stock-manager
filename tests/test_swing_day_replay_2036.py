@@ -88,3 +88,22 @@ def test_S_매도가_정지로_막히면_미루고_다시_거래되는_날_판�
                              stock_cache=캐시, settings=설정, deposit=10_000_000.0)  # fmt: skip
     assert r.log[2]["deferred"] == 1
     assert [(f.fill_date, f.price) for f in r.fills if f.side == "sell"] == [(날[4], 945.0)]
+
+
+def test_정지가_길면_미룬_횟수로_마지막_종가에_청산한다() -> None:
+    """미룬 매도를 들고 가야 미룬 횟수가 쌓여 `HALT_LIQUIDATE_SESSIONS` 째에 마지막 종가로 청산한다 — 날마다 넘음을 다시
+    내면(미룬 매도를 버리면) 횟수가 0 으로 돌아가 정지가 풀릴 때까지 못 판다(25.2036 되돌리기 ③)."""
+    긴날 = _영업일("2026-03-02", 30)
+    종가 = dict(zip(긴날, [1000.0, 1000.0, 940.0] + [940.0] * 27, strict=True))
+    시가 = dict(zip(긴날, [1000.0, 1000.0, 950.0] + [945.0] * 27, strict=True))
+    for d in 긴날[3:28]:  # 날[3]~[27] 정지(행 없음)
+        del 종가[d], 시가[d]
+
+    def rows_at(view, d):  # noqa: ANN001
+        return [_행(1, view.cutoff, 종가[view.cutoff])] if view.cutoff == 긴날[0] else []
+
+    r = sdr.simulate_account("S", rows_at=rows_at, prices={1: 종가}, opens={1: 시가}, dates=긴날,
+                             costs_at=lambda _d: 비용0, stock_cache=캐시, settings=설정, deposit=10_000_000.0)  # fmt: skip
+    판 = [f for f in r.fills if f.side == "sell"]
+    # 날[3] 첫 미룸(횟수 1) … 20번째 시도 날[22] 에 마지막 종가(날[2] 940)로
+    assert [(f.fill_date, f.price) for f in 판] == [(긴날[3 + pp.HALT_LIQUIDATE_SESSIONS - 1], 940.0)]
