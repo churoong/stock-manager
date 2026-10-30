@@ -1266,7 +1266,7 @@ def sell_decisions(
                    "rationale": "당일 단타 보유가 하루를 넘김(짝 매도 없음) — 다음 장 시가에 판다 (paper.md 16.3.2)",
                    # 근거표 행 하나 — 예전엔 근거 열쇠가 없어 웹 거래내역에 아무것도 안 보였다(25.2009)
                    "criteria": [sf._criterion(
-                       "하루 넘긴 보유", f"{행['quantity']:g}주 (첫 매수 {행['first_buy_date']})",
+                       "하루 넘긴 보유", f"{_주수(행['quantity'])}주 (첫 매수 {행['first_buy_date']})",
                        "당일 단타는 하루 끝 보유 0주", "가상모의투자 체결",
                        str(행.get("price_date") or today.isoformat())[:10])]}  # fmt: skip
             out[int(행["stock_id"])] = ([pp.DAY_LEFT_CODE], [남은])
@@ -1392,6 +1392,11 @@ def _스윙넘음(client: Any, 행: dict[str, Any], today: date) -> dict[str, An
             "criteria": 근거}
 
 
+def _주수(q: float) -> str:
+    """근거표의 주식 수 — 정수면 천 단위 쉼표, 소수면 그대로(`:g` 는 100만 주부터 지수 표기였다, 25.2012)"""
+    return f"{float(q):,.0f}" if float(q).is_integer() else f"{float(q):,}"
+
+
 #: 추세 익절(G)의 고점 — 첫 매수일부터 오늘까지 종가 최댓값 (보유마다 한 번, 25.1481)
 PEAK_SQL = "SELECT MAX(close) FROM prices WHERE stock_id = ? AND date >= ? AND date <= ? AND close > 0"
 
@@ -1422,7 +1427,12 @@ def _추적손절(client: Any, h: Any, 행: dict[str, Any], targets: dict | None
     return [
         {**sf._criterion("원가(주당)", _값(원가) + (f" × 권리락 {맞춤:g}" if 맞춤 != 1.0 else ""),
                          "수수료 포함 매수 원가", "가상모의투자 체결", str(행["first_buy_date"])[:10]), "passed": None},
-        sf._criterion("고점 종가", f"{_값(float(봉))} (원가 대비 {(float(봉) / 원가 - 1) * 100:+.2f}%)",
+        # 권리락이면 고점에도 계수를 곱한 값을 보인다 — 지금 종가의 % 가 그 값 대비라 한 표 안에서 맞춰 볼 수 있게
+        # (25.2012, 25.2009 교차검증 [권고]). 기준일은 마지막 종가 날 — 고점 난 날은 따로 읽지 않는다(재현 엔진의
+        # 시점 창이 아는 질의 `PEAK_SQL` 그대로)
+        sf._criterion("고점 종가(첫 매수 뒤 최고)",
+                      _값(float(봉)) + (f" × 권리락 {맞춤:g} = {_값(float(봉) * 맞춤)}" if 맞춤 != 1.0 else "")
+                      + f" (원가 대비 {(float(봉) / 원가 - 1) * 100:+.2f}%)",
                       f"목표 +{float(표['target_pct']):g}% 에 닿았나", "prices", 날),
         sf._criterion("지금 종가", f"{_값(지금)} (고점 대비 {(지금 / (float(봉) * 맞춤) - 1) * 100:+.2f}%)",
                       f"고점 대비 {float(표['stop_pct']):g}% 이하", "prices", 날),

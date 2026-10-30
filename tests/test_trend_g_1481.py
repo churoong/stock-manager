@@ -45,7 +45,7 @@ def test_sell_decisions_trend_uses_peak_since_first_buy(monkeypatch: pytest.Monk
     assert out[1][0] == [pp.TRAIL_CODE]
     # 추적손절 근거는 근거표 행으로(25.2009 — 예전엔 빈 목록이라 웹에 판정 근거가 없었다)
     추적 = next(f for f in out[1][1] if f["reason_code"] == pp.TRAIL_CODE)
-    assert [c["label"] for c in 추적["criteria"]] == ["원가(주당)", "고점 종가", "지금 종가"]
+    assert [c["label"] for c in 추적["criteria"]] == ["원가(주당)", "고점 종가(첫 매수 뒤 최고)", "지금 종가"]
     assert [c["passed"] for c in 추적["criteria"]] == [None, True, True]
     assert 추적["criteria"][1]["display"].startswith("11,500원") and "목표 +10%" in 추적["criteria"][1]["threshold"]
     assert 추적["criteria"][2]["display"] == "10,600원 (고점 대비 -7.83%)"
@@ -79,3 +79,32 @@ def test_compare_real_window_not_pushed_by_late_account() -> None:
     assert c["start"] == "2026-10-16" and c["paper_start"] == {"G": "2026-10-19"}
     assert c["paper_pct"]["B"] == pytest.approx(2.0)
     assert "추세익절 +1.0%(2026-10-19부터)" in pp.compare_line(c)
+
+
+def test_추적손절_근거는_권리락이면_맞춘_고점을_보이고_통화를_지킨다() -> None:
+    """25.2012 (25.2009 교차검증 [권고]) — 권리락이면 '지금 종가' % 는 고점 × 계수 대비다. 고점 행에도 그 값을 보여 한 표
+    안에서 손으로 맞춰 본다. 미국 보유는 달러로"""
+    from types import SimpleNamespace
+
+    class C:
+        def execute(self, sql, args=None):  # noqa: ANN001, ANN201
+            assert sql == job.PEAK_SQL
+            return SimpleNamespace(rows=[(130.0,)])
+
+    h = SimpleNamespace(stock_id=2, horizon="short", rights_scale=0.8)
+    행 = {"quantity": 1.0, "market_value": 90.0, "cost": 100.0, "first_buy_date": "2026-10-01", "currency": "USD",
+         "price_date": "2026-10-13"}
+    근거 = job._추적손절(C(), h, 행, None, date(2026, 10, 13))
+    assert 근거 is not None
+    고점, 지금 = 근거[1]["display"], 근거[2]["display"]
+    assert 고점 == "130.00 USD × 권리락 0.8 = 104.00 USD (원가 대비 +30.00%)"
+    assert 지금 == "90.00 USD (고점 대비 -13.46%)"  # 90 / 104 − 1
+    assert 근거[0]["display"] == "100.00 USD × 권리락 0.8"
+    # 계수가 1 이면 꼬리가 없다
+    assert "권리락" not in job._추적손절(C(), SimpleNamespace(stock_id=2, horizon="short", rights_scale=1.0),
+                                       {**행, "market_value": 115.0}, None, date(2026, 10, 13))[1]["display"]
+
+
+def test_주수_표기는_지수로_넘어가지_않는다() -> None:
+    assert job._주수(1_234_567.0) == "1,234,567" and job._주수(10.0) == "10" and job._주수(2.5) == "2.5"
+
