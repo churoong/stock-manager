@@ -637,11 +637,15 @@ export function showShadowCard(shadow: ShadowLedger[] | null | undefined): boole
  * 저장됐다(10-29 개설 뒤의 첫 매도 주문들). 그대로 넘기면 근거표가 이름·값 빈 칸으로 그렸다(25.2001, 25.2000 교차검증
  * [참고]). 옛 꼴은 "참고" 행으로 옮기고, 근거표 꼴은 그대로 둔다
  */
-export function tradeCriteria(rows: unknown[]): Criterion[] {
+export function tradeCriteria(rows: unknown): Criterion[] {
+  // 배열이 아니면 빈 목록 — 깨진 기록 한 건이 거래내역 칸 전체를 렌더 중에 죽이지 않게(25.2002, 25.2001 교차검증 [권고];
+  // 예전엔 부르는 쪽 `Array.isArray` 가 막았다)
+  if (!Array.isArray(rows)) return [];
   return rows.flatMap((r) => {
     if (!r || typeof r !== "object") return [];
     const o = r as Record<string, unknown>;
-    if (typeof o.label === "string") return [o as unknown as Criterion];
+    // 근거표 꼴은 네 열쇠가 다 문자열일 때만(`parseCriteria` 계약과 같게, 25.2002)
+    if ([o.label, o.display, o.threshold, o.source].every((x) => typeof x === "string")) return [o as unknown as Criterion];
     if (typeof o.name === "string") {
       const v = o.value;
       return [{

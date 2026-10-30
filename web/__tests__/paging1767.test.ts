@@ -86,4 +86,19 @@ describe("거래내역 칸이 쪽으로 나뉜다", () => {
     const 꽉 = Array.from({ length: 300 }, (_, i) => ({ ...체결[0], id: i })) as FillRow[];
     expect(renderToStaticMarkup(createElement(TradesPane, { fills: 꽉 }))).toContain("최근 300건만 보입니다");
   });
+
+  it("거래내역 근거는 tradeCriteria 를 거친다 — 옛 스윙 꼴도 칸이 찬다, 깨진 근거는 화면을 죽이지 않는다(25.2002)", () => {
+    const 하나 = (id: number, rationale_json: string) => ({
+      id, account_id: "S", ticker: "T", name: `스윙${id}`, side: "sell", fill_date: "2026-10-30", price: 100, quantity: 1, currency: "KRW",
+      fx_rate: 1, fee: 0, tax: 0, slippage: 0, cash_krw: 100, realized_krw: 0, reason: "스윙손절", decided_on: "2026-10-29", rationale_json,
+    });
+    const html = renderToStaticMarkup(createElement(TradesPane, { fills: [
+      하나(1, JSON.stringify({ flags: [{ criteria: [{ name: "진입가", value: 10000, date: "2026-10-29" }] }] })),
+      하나(2, JSON.stringify({ signal: { criteria: "깨짐" }, flags: "깨짐" })),
+    ] as FillRow[] }));
+    expect(html).toContain("진입가");
+    expect(html).toContain("10,000");
+    expect(html).toContain("옛 기록 꼴");
+    expect(html).toContain("스윙2");
+  });
 });

@@ -12,4 +12,10 @@ describe("tradeCriteria", () => {
     ]);
     expect(rows.every((r) => r.label && r.display)).toBe(true);
   });
+
+  it("배열이 아니거나 근거표 꼴이 덜 찬 행은 뺀다 — 깨진 기록이 화면을 죽이지 않게(25.2002)", () => {
+    expect(tradeCriteria({})).toEqual([]);
+    expect(tradeCriteria("x")).toEqual([]);
+    expect(tradeCriteria([{ label: "반쪽", display: "1" }])).toEqual([]);
+  });
 });
