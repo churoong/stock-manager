@@ -25,6 +25,7 @@ from pathlib import Path
 import pytest
 
 from batch.jobs import desk as dj
+from batch.jobs import paper as pp_job
 from batch.services import adjust as adj
 from batch.services import broker_mirror as bm
 from batch.services import buyback as bb
@@ -462,7 +463,8 @@ class Test핵심_H_조각_1b:
         검사(BACKTEST, f'voters=("{'","'.join(cbt.VOTERS)}")', "투표 회사")
         assert set(cbt.EQUAL_WEIGHTS.values()) == {20.0}
         검사(BACKTEST, "5팩터 균등(`EQUAL_WEIGHTS`)", "종합 점수 가중")
-        검사(BACKTEST, f"지수는 늘 {cbt.BENCH_INDEX}", "원장 지수")
+        assert cbt.BENCH_INDEX == pp_job.BENCH_INDEX  # 운영 결정 원장 지수와 같다(25.2056)
+        검사(BACKTEST, f"지수는 나라별 {cbt.BENCH_INDEX['KR']}·{cbt.BENCH_INDEX['US']}", "원장 지수")
         from batch.services import holding_eq as heq
 
         검사(BACKTEST, f"묶음 < {heq.EQ_MIN_BLOCKS} 또는 서로 다른 짝 < {heq.EQ_MIN_PAIRS}", "가중 대조 판정 가능 (25.1538)")

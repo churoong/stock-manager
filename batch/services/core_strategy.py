@@ -394,6 +394,11 @@ class CoreStrategy:
         from batch.jobs import paper as jp
 
         v = variant_spec(variant)
+        if market.country != "KR":
+            # 시장 판단기는 미국을 받지만(25.2056) 이 판단 함수는 `buy_orders` 에 환율 없이(`fx_rate=None`) 넘겨
+            # 운영이 달러 종목을 "환율 없음" 으로 거른다 — 돌리면 아무것도 사지 않은 곡선이 조용히 나온다.
+            # 달러 장부(⑧-3) 전까지 막는다
+            raise NotImplementedError("장부형 리플레이는 아직 국내(KR)만 — 미국 달러 장부는 깔때기 ⑧-3")
         self.charter: dict[str, Any] | None = None
         if v.selection == "committee":
             if v.account not in market.charters:

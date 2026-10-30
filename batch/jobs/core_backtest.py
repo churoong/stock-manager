@@ -339,7 +339,7 @@ def run_core(
                            n_floor=explore_trial_floor() if explore else jb.REGISTERED_TRIALS)  # fmt: skip
             # 결정 단위 — 무작위 대조 분위(가상모의투자 가상 대조와 같은 함수)·관문과 같은 잣대·판 뒤(읽기 0)
             종가 = ce.Closes(prices)
-            코스피 = indexes.get(cb.BENCH_INDEX) or {}
+            코스피 = indexes.get(cb.BENCH_INDEX[country]) or {}
             for v in 기록:  # S·T 리플레이(25.2044)는 결정 원장 꼴(DayLog)이 아니라 결정 단위 증거를 내지 않는다
                 증거[v] = ce.evidence(기록[v], 종가, eligible_at, 코스피) | {
                     "gate": ce.gate_evidence(기록[v], 종가), "after_sell": ce.after_sell(기록[v], 종가, 코스피)}
@@ -402,12 +402,12 @@ def run_core(
         loss_gate: dict[str, Any] = {}
         if "core_h" in 기록:
             try:
-                exit_pair = xp.summarize(기록["core_h"], ce.Closes(prices), indexes.get(cb.BENCH_INDEX) or {})
+                exit_pair = xp.summarize(기록["core_h"], ce.Closes(prices), indexes.get(cb.BENCH_INDEX[country]) or {})
             except Exception as e:  # noqa: BLE001
                 log.exception("같은 로트 청산 대조 진단 실패")
                 exit_pair = {"error": str(e)[:200]}
             try:
-                loss_gate = lg.frequency(기록["core_h"], indexes.get(cb.BENCH_INDEX) or {})
+                loss_gate = lg.frequency(기록["core_h"], indexes.get(cb.BENCH_INDEX[country]) or {})
             except Exception as e:  # noqa: BLE001
                 log.exception("하루 손실 관문 빈도 진단 실패")
                 loss_gate = {"error": str(e)[:200]}

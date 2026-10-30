@@ -392,8 +392,8 @@ def test_cutoff_순서() -> None:
         m.at(v1, 날[802])
     with pytest.raises(ValueError, match="앞"):
         cb.CoreMarket(u, s, ix).at(v1, 날[799])
-    with pytest.raises(NotImplementedError):
-        cb.CoreMarket(u, s, ix, country="US")
+    with pytest.raises(ValueError, match="KR·US"):
+        cb.CoreMarket(u, s, ix, country="JP")
     # 결정일도 앞으로만 — 같은 결정일에 cutoff 만 바꾸면 그날 원장 줄이 두 번 쌓였다(25.1531, 반박 검증)
     m2 = cb.CoreMarket(u, s, ix)
     m2.at(v0, 날[801])
@@ -505,3 +505,47 @@ def test_자본_통화() -> None:
     # 현재 PBR 의 자본은 가장 늦은 해가 다른 통화면 모름 — 옛 해로 내려가지 않는다(운영 `_latest_equity`)
     assert cb.pit_latest_equity(행, "2024-12-31", "KRW") is None
     assert cb.pit_latest_equity(행, "2024-03-14", "KRW") == 100.0
+
+
+def test_미국_시장_판단기는_SP500_과_국외_조사_자료로(monkeypatch: pytest.MonkeyPatch) -> None:
+    """깔때기 ⑧-2(25.2056) — 같은 합성 자료를 미국으로 바꿔 달면 원장 성과·사이징 베타·국면이 SP500 을 읽고(KOSPI 는 묻지
+    않음), 위원회 조사 자료가 국외(`domestic=False` — 증권사·수급·공시는 "미국 종목 … 모으지 않는다")다. 장부형 판단
+    함수는 달러 장부(⑧-3) 전까지 미국을 막는다"""
+    from batch.services import company as co
+    from batch.services import core_strategy as cs
+
+    u, p, t, s, dv, ix = _복사()
+    u = [dict(r, market="NASDAQ", currency="USD") for r in u]
+    for r in s.values():
+        for x in r:
+            x["values"]["currency"] = "USD"
+    미국지수 = {"SP500": ix["KOSPI"]}
+    물은: list[str] = []
+    원 = cb.CoreMarket._index_upto
+
+    def 엿봄(self: cb.CoreMarket, code: str, cutoff: str) -> list[tuple[str, float]]:
+        물은.append(code)
+        return 원(self, code, cutoff)
+
+    monkeypatch.setattr(cb.CoreMarket, "_index_upto", 엿봄)
+    국내여부: list[bool] = []
+    원_meet = co.meet
+
+    def meet(agenda: list, ch: dict, population: list) -> tuple:
+        국내여부.extend(d.domestic for d in [*agenda, *population])
+        return 원_meet(agenda, ch, population)
+
+    monkeypatch.setattr(co, "meet", meet)
+    m = cb.CoreMarket(u, s, 미국지수, dividends_by_stock=dv, country="US")
+    pre = (bt.SortedSeries(p), bt.SortedSeries(t), bt.SortedSeries(None))
+    dvs = [m.at(bt.PriceView(p, 전체날[k - 1], turnover=t, presorted=pre), 전체날[k]) for k in 구간[:5]]
+    assert "SP500" in 물은 and "KOSPI" not in 물은 and "KOSDAQ" not in 물은, sorted(set(물은))
+    assert any(d.rows for d in dvs), "신호가 하나도 없다 — 시험이 미국 길을 지나지 않는다"
+    assert 국내여부 and not any(국내여부)
+    with pytest.raises(NotImplementedError, match="⑧-3"):
+        cs.CoreStrategy("core_h", m, sessions=날)
+    from batch.services import swing_day_replay as sdr
+
+    with pytest.raises(NotImplementedError, match="⑧-4"):
+        sdr.simulate_account("S", rows_at=lambda _v, _d: [], prices=p, opens=p, dates=날[:3], costs_at=lambda _d: None,
+                             stock_cache={}, settings={}, market="US")  # type: ignore[arg-type]

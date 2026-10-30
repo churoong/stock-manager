@@ -604,7 +604,7 @@ Turso 월 읽기 진도 문(추정 500만 행)을 지나야 돈다 — 미뤄지
        H 고름과 그 줄·B 상위 5) · `HoldingLedger.add/discard(decided_on, stock_id)/records(view, bench, day)` · `pit_growth`·`pit_latest_equity`.
        운영과 같은 정의를 쓰려고 중기 성장률 규칙을 `jobs/signals.load_growth` 에서 `signals.annual_growth(current, previous, as_of, latest)` 로 옮겼다(운영 동작 그대로 —
        `_growth` 는 `scoring.growth_rate`), `jobs/backtest.pit_equities` 에 `currency=`(다른 통화 자본을 뺀다, 주지 않으면 예전 그대로)를 더했다
-     - 순서: cutoff 는 **줄지 않게만** 부른다(거꾸로면 `ValueError`, 같은 cutoff 는 같은 결과 — 결정일이 다르면 `ValueError`). 국내만(미국은 `NotImplementedError` — 지수·통화·분할 대기 규칙을 아직 안 맞춤)
+     - 순서: cutoff 는 **줄지 않게만** 부른다(거꾸로면 `ValueError`, 같은 cutoff 는 같은 결과 — 결정일이 다르면 `ValueError`). 나라는 KR·US(그 밖은 `ValueError`) — 미국은 지수가 나라별(25.2056, 깔때기 ⑧-2)이지만 장부형 판단 함수 `CoreStrategy` 가 아직 `NotImplementedError`(달러 장부 ⑧-3 전), 실행기도 국내만
      - 자료 규칙(미래를 볼 것이 없다): 가격·거래대금·가격 수준은 `PriceView` 만. 재무 스냅샷·배당·지수는 미래까지 통째로 받고 **쓰는 자리마다 자른다** — 재무는 접수일(정정은 늦게
        접수된 것, 같은 날이면 접수번호)·기준(연결·별도)은 cutoff 에 알던 가장 늦은 해로, 지수는 날짜로. 시험이 미끼(가격·새 사업연도·정정·배당·지수)를 cutoff 뒤에 붙여 50 거래일 판단이
        한 칸도 안 바뀜을, 같은 미끼를 cutoff 이하로 옮기면 바뀜(양성 대조)을 함께 본다
@@ -614,7 +614,7 @@ Turso 월 읽기 진도 문(추정 500만 행)을 지나야 돈다 — 미뤄지
        운영 `_latest_equity`). 국면은 `trend.regime_from_closes`+`factor_for`(KOSPI·KOSDAQ). 판정은 성과 지표를 보지 않으므로 신호가 걸린 종목만 `risk_from_prices` 로 MDD·변동성을 내 사이징·리스크관리부에 쓴다
      - 조사 자료·표: `jobs/company.population_dossiers`·`load_dossiers`·`agenda_rows` 를 따라 — 증권사 의견 `[]`·수급 0일·감성 None·공시 사건 `[]`·**`gov_covered=False`**(True 면 "사건 없음 — 중립" 이 되어
        자료 없음과 다르다). A·C·D·E 는 `co.meet`(안건은 헌장 크기만큼, 모집단은 그날 신호 종목 전체) → `hold.strength`, B 는 `select_top(with_criteria(rows), 5)` 각 1.0 — `jobs/paper.holding_step` 그대로
-     - 원장: 그날 추천받은 종목 전부를 넣는다(고른 것 `pick`, 못 고른 것 `skip`, 둘 다 표). 성과(% , 지수는 늘 KOSPI — `pp.outcomes`)는 **20번째 뒤 종가가 cutoff 앞 그리고 cutoff − 결정일 ≥ 28일**(cutoff 날 종가는 운영이 다음 실행 끝에야 채운다 — 25.1531)
+     - 원장: 그날 추천받은 종목 전부를 넣는다(고른 것 `pick`, 못 고른 것 `skip`, 둘 다 표). 성과(% , 지수는 나라별 KOSPI·SP500 — `BENCH_INDEX`, 운영 `jobs/paper.BENCH_INDEX` 와 같다 — `pp.outcomes`)는 **20번째 뒤 종가가 cutoff 앞 그리고 cutoff − 결정일 ≥ 28일**(cutoff 날 종가는 운영이 다음 실행 끝에야 채운다 — 25.1531)
        (`pp.ATTRIBUTION_HORIZON`·`pp.HORIZON_CALENDAR_DAYS[20]`, 운영 `due_horizons`)일 때만 보이고, 결정일 앞 365일(`hold.HOLDING_WINDOW_DAYS`) 행만 `hold.weights` 로 → `hold.rank(tiebreak=종합 점수)` →
        두 곳 이상 추천한 종목 상위 5. `at` 은 cutoff 와 결정일 모두 앞으로만 간다(같은 결정일을 두 번 부르면 원장이 두 번 쌓인다, 25.1531). `discard(decided_on, stock_id)` 는 1c 가 표가 붙지 않는 운영 결정(사면 바로 매도 skip 등)을 지울 때 쓴다
      - 운영과 다른 것(알고 둔다): 종합 점수에 감성 없음(운영 10%) · 팩터 점수 주 1회(운영 날마다) · 성과 지표를 신호 종목만 cutoff 창에서 그 자리 계산(운영 `performance_metrics` 행, 창 이름은 남기지 않는다) ·

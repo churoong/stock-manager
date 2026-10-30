@@ -90,6 +90,10 @@ def simulate_account(
 
     if account not in ACCOUNTS:
         raise ValueError(f"리플레이 계좌는 S·T — {account}")
+    if market != "KR":
+        # 주문 통화를 "KRW" 로 박아(국내 가격제한·상한가 시가 막기가 달러 종목에도 걸린다) 환율 없이 사이징한다 —
+        # 통화·`fx_at`(깔때기 ⑧-4) 전까지 막는다(25.2056)
+        raise NotImplementedError("S·T 리플레이는 아직 국내(KR)만 — 미국 통화는 깔때기 ⑧-4")
     규칙 = ACCOUNTS[account]
     dates = sorted(dates)
     flows = [pp.CashFlow(1, dates[0], float(deposit), "deposit")]

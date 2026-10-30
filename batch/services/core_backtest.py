@@ -39,8 +39,9 @@ from batch.services import signals as sg
 VOTERS: tuple[str, ...] = ("A", "C", "D", "E")
 #: 종합 점수 가중 — 백테스트 `run` 과 같은 5팩터 균등. 운영은 설정값 + 감성 10% (docs/backtest.md 10장 어긋남)
 EQUAL_WEIGHTS: dict[str, float] = dict.fromkeys(sc.FACTORS, 20.0)
-#: 결정 원장 성과의 시장 지수 — 운영 `jobs/paper.BENCH_INDEX["KR"]` (결정 시장이 국내면 늘 KOSPI)
-BENCH_INDEX = "KOSPI"
+#: 결정 원장 성과·사이징 베타의 시장 지수 — 운영 `jobs/paper.BENCH_INDEX` 와 같은 나라별 값(25.2056, 깔때기 ⑧-2 —
+#: 예전엔 국내만이라 "KOSPI" 하나였다)
+BENCH_INDEX = {"KR": "KOSPI", "US": "SP500"}
 #: 팩터 점수 리스크 지표를 다시 재는 주기(`CoreMarket(risk_every=)`, 25.1534). 실행(`jobs/core_backtest`) 기본은 "week"
 RISK_EVERY: tuple[str, ...] = ("week", "month")
 
@@ -280,11 +281,11 @@ class CoreMarket:
     ) -> None:
         if risk_every is not None and risk_every not in RISK_EVERY:
             raise ValueError(f"risk_every 는 {RISK_EVERY} 가운데 하나(또는 None) — {risk_every}")
-        if country != "KR":
-            # 미국은 broker·flows·governance 가 원래 "자료 없음" 이라 Dossier 는 같지만,
-            # 지수(SP500)·통화(USD 사이징·환율)·분할 재수집 대기 규칙을 아직 맞추지 않았다 —
-            # 맞추기 전에 돌려 "국내와 같은 판" 으로 읽히지 않게 막는다
-            raise NotImplementedError("핵심 H 백테스트는 아직 국내(KR)만 — 미국은 docs/backtest.md 10장 다음 조각")
+        if country not in BENCH_INDEX:
+            raise ValueError(f"시장 판단기는 KR·US — {country}")
+        # 미국(25.2056, 깔때기 ⑧-2): 지수는 나라별(`BENCH_INDEX`·`trend.COUNTRY_INDEXES`·`metrics.BENCHMARK`),
+        # 조사 자료의 국내 칸(`domestic`)은 나라로. 통화(달러 사이징·환율)는 장부형 판단 함수(`CoreStrategy`, ⑧-3)가
+        # 아직 막는다
         self.country = country
         self.universe = sorted((dict(r) for r in universe), key=lambda r: int(r["stock_id"]))
         self.snapshots = snapshots_by_stock
@@ -438,7 +439,7 @@ class CoreMarket:
         cutoff = view.cutoff
         self._weekly_scores(view)
         pool = self.pool(cutoff)
-        코스피 = self._index_upto(BENCH_INDEX, cutoff)
+        벤치 = self._index_upto(BENCH_INDEX[self.country], cutoff)
 
         # 1 국면 — 운영 `trend.regimes_for_country` 와 같은 지수, 같은 판정
         regimes = {code: trend.regime_from_closes(code, self._index_upto(code, cutoff), cutoff)
@@ -496,7 +497,7 @@ class CoreMarket:
         for sid, inp in inputs.items():
             if not sg.evaluate(inp):
                 continue
-            위험[sid] = self._risk(view, sid, 코스피)
+            위험[sid] = self._risk(view, sid, 벤치)
             inp.volatility_ann, inp.mdd = 위험[sid]["volatility_ann"], 위험[sid]["mdd"]
             inp.cagr, inp.sharpe, inp.metrics_date = 위험[sid]["cagr"], 위험[sid]["sharpe"], cutoff
             지수 = trend.index_for_market(inp.market) or ""
@@ -516,7 +517,8 @@ class CoreMarket:
             return {k: r.factor_scores.get(k) for k in ("value", "quality", "growth", "momentum")}
 
         population = [co.Dossier(
-            stock_id=sid, ticker=r.ticker, as_of=cutoff, total_score=r.total_score, domestic=True, broker_upsides=[],
+            stock_id=sid, ticker=r.ticker, as_of=cutoff, total_score=r.total_score, domestic=self.country == "KR",
+            broker_upsides=[],
             factors=_factors(r), mdd=위험[sid]["mdd"], volatility=위험[sid]["volatility_ann"], perf_as_of=cutoff,
         ) for sid, r in sorted(한종목.items())]  # fmt: skip
         크기 = max(int(c["agenda"]) for c in self.charters.values())
@@ -530,7 +532,7 @@ class CoreMarket:
                 # 공시는 **덮지 않음**(gov_covered False)이어야 "사건 없음 — 중립" 이 아니라
                 # "자료 없음" 이 된다 (docs/backtest.md 10장)
                 broker_upsides=[], flow_sum=None, turnover_20d=None, flow_days=0, flow_date=None, gov_events=[],
-                cb_pct=None, domestic=True, sentiment=None, sentiment_error=None, gov_covered=False,
+                cb_pct=None, domestic=self.country == "KR", sentiment=None, sentiment_error=None, gov_covered=False,
                 mdd=위험[r.stock_id]["mdd"], volatility=위험[r.stock_id]["volatility_ann"], perf_window=None,
                 perf_as_of=cutoff, regime=g.state if g else None, regime_index=idx, regime_date=g.date if g else None,
             ))  # fmt: skip
@@ -551,7 +553,7 @@ class CoreMarket:
         b_top = list(dict.fromkeys(r.stock_id for r in b_rows))
 
         # 6 회사 가중치(원장 — cutoff 이하로 찬 성과만) → 합의 순위
-        가중, 성적 = hold.weights(self.ledger.records(view, 코스피, day), sorted(표))
+        가중, 성적 = hold.weights(self.ledger.records(view, 벤치, day), sorted(표))
         점수순 = {sid: float(rs[0].total_score or 0) for sid, rs in 행들.items()}
         순위 = hold.rank(표, 가중, 점수순)
         고른 = [x["stock_id"] for x in 순위 if x["eligible"] and x["stock_id"] in 행들][: self.top_n]
