@@ -872,7 +872,9 @@ def _손절_해당없음(account: str, n_positions: int) -> tuple[str, bool] | N
     경고로 알린다 — 위험판이 보여야 할 바로 그 비정상 보유를 숨겼다(25.2023, 25.2022 교차검증 [권고])"""
     if account in pp.SAME_DAY_IDS:
         if n_positions:
-            return f"하루 넘긴 단타 보유 {n_positions}종목 — 다음 장 시가 매도(단타잔여·미룬 짝 매도)", True
+            # 매도 시점은 못박지 않는다 — 대개 다음 장 시가지만, 늦은 실행의 안전망은 종가, 하한가·정지면 또 미루고
+            # 정지가 길면 마지막 종가 청산(25.2024, 25.2023 교차검증 [권고])
+            return f"하루 넘긴 단타 보유 {n_positions}종목 — 매도 대기(단타잔여·하한가·정지로 미룬 짝 매도)", True
         return "해당 없음 — 당일 단타(하루 끝 보유 0주)", False
     if account in pp.SEPARATE_IDS:
         from batch.services import shadow as sh

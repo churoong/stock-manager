@@ -122,7 +122,9 @@ def test_위험판은_스윙_단타를_기간_손절선으로_재지_않는다()
     assert "−3%" in rows["S"]["near_stop_note"] and "near_stop_warn" not in rows["S"]  # 마이너스 기호(25.2023)
     # T 에 하룻밤 넘긴 보유가 남았으면 "보유 0주" 가 아니라 경고(25.2023, 25.2022 교차검증 [권고])
     assert rows["T"]["near_stop"] == [] and rows["T"]["near_stop_note"].startswith("하루 넘긴 단타 보유 1종목")
-    assert rows["T"]["near_stop_warn"] is True
+    assert rows["T"]["near_stop_warn"] is True and "매도 대기" in rows["T"]["near_stop_note"]
+    둘 = desk.risk_board({"T": {"equity": 1_000_000, "holdings": 80_000, "positions": 포지션 * 2}}, {}, {"short": -7.0})[0]
+    assert 둘["near_stop_note"].startswith("하루 넘긴 단타 보유 2종목") and 둘["positions"] == 2  # 수가 '(N종목)' 칸과 같다
     빈 = desk.risk_board({"T": {"equity": 1_000_000, "holdings": 0, "positions": []}}, {}, {"short": -7.0})[0]
     assert 빈["near_stop_note"].startswith("해당 없음 — 당일 단타") and "near_stop_warn" not in 빈
 

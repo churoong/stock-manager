@@ -11,6 +11,6 @@ describe("nearStopText", () => {
     });
     expect(nearStopText({ near_stop: [] })).toEqual({ text: "없음", muted: true });
     // 25.2023 — 단타에 하룻밤 넘긴 보유가 남은 날은 경고(회색 아님)
-    expect(nearStopText({ near_stop: [], near_stop_note: "하루 넘긴 단타 보유 1종목 — 다음 장 시가 매도(단타잔여·미룬 짝 매도)", near_stop_warn: true }).muted).toBe(false);
+    expect(nearStopText({ near_stop: [], near_stop_note: "하루 넘긴 단타 보유 1종목 — 매도 대기(단타잔여·하한가·정지로 미룬 짝 매도)", near_stop_warn: true }).muted).toBe(false);
   });
 });
