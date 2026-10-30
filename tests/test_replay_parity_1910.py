@@ -99,15 +99,21 @@ _채우기_사유 = frozenset({"2부 배분", "최소 주문 단위 미만", "�
 #: 워밍업 260 거래일 — 모멘텀·위험 지표가 1년 창을 채워야 신호가 난다(130 이면 모의 100일 내내 신호 0). 모의 150 거래일·30종목:
 #: B 는 매수 73·매도 16(목표도달·손절), G 는 매수 66·매도 11(추적손절·기간초과·손절)
 W, S, N = 260, 150, 30
-_달력 = cal.exchange_calendar("KR").sessions_in_range("2023-01-02", "2024-12-30")
+#: 시장 — 25.2059(깔때기 ⑧-3b): tests/test_replay_parity_us_2059.py 가 이 파일을 "US" 로 바꿔 한 벌 더 싣는다(달력·통화·
+#: 시장 구분·지수·수수료 칸·운영 `run_step(market=…)`). 국내 시험과 이 파일을 가져다 쓰는 일치 시험들은 그대로 국내다
+시장 = "KR"
+통화 = {"KR": "KRW", "US": "USD"}[시장]
+_구분 = {"KR": ("KOSPI", "KOSDAQ"), "US": ("NASDAQ", "NYSE")}[시장]
+_앞 = 시장.lower()
+_달력 = cal.exchange_calendar(시장).sessions_in_range("2023-01-02", "2024-12-30")
 날들 = [d.date().isoformat() for d in _달력][: W + S]
 모의 = 날들[W:]
 NOTIONAL = cs.NOTIONAL_EQUITY
 #: 비용 판 — 이 파일은 둘(25.1929 R 시험이 `slip` 을 더한다) — 운영 설정 `fees`(매수·매도 편도), 엔진 `bt.Costs`(슬리피지 0: 지정가 매수는 운영도 슬리피지 없음, 베낀 매도도 0)
 비용판 = {
-    "fees": ({"kr_buy_pct": 0.015, "kr_sell_pct": 0.015},
-             dc_replace(bt.Costs.for_country("KR", {"kr_buy_pct": 0.015, "kr_sell_pct": 0.015}, {}), slippage_pct=0.0)),
-    "zero": ({"kr_buy_pct": 0.0, "kr_sell_pct": 0.0}, bt.Costs.zero()),
+    "fees": ({f"{_앞}_buy_pct": 0.015, f"{_앞}_sell_pct": 0.015},
+             dc_replace(bt.Costs.for_country(시장, {f"{_앞}_buy_pct": 0.015, f"{_앞}_sell_pct": 0.015}, {}), slippage_pct=0.0)),
+    "zero": ({f"{_앞}_buy_pct": 0.0, f"{_앞}_sell_pct": 0.0}, bt.Costs.zero()),
 }  # fmt: skip
 #: 베낀 체결의 주문 회차 — 운영이 같은 결정일에 낸 회차(매수 1~3·매도 0)와 유일 제약이 겹치지 않게
 _베낌_회차 = {"buy": 91, "sell": 90}
@@ -119,8 +125,8 @@ def _자료() -> tuple:
     rng = random.Random(11)
     universe, prices, turn, snaps = [], {}, {}, {}
     for i in range(1, N + 1):
-        universe.append({"stock_id": i, "ticker": f"{i:06d}", "name": f"종목{i}", "market": "KOSPI" if i % 3 else "KOSDAQ",
-                         "sector": ["반도체", "은행", "화학", "유통"][i % 4], "currency": "KRW", "listed_shares": 10_000_000})  # fmt: skip
+        universe.append({"stock_id": i, "ticker": f"{i:06d}", "name": f"종목{i}", "market": _구분[0] if i % 3 else _구분[1],
+                         "sector": ["반도체", "은행", "화학", "유통"][i % 4], "currency": 통화, "listed_shares": 10_000_000})  # fmt: skip
         p, drift, vol = 10_000.0, rng.uniform(-0.0005, 0.0015), rng.uniform(0.01, 0.03)
         prices[i], turn[i] = {}, {}
         for k, d in enumerate(날들):
@@ -136,13 +142,15 @@ def _자료() -> tuple:
                              "consolidated": True, "values": {
                                  "revenue": rev, "operating_income": oi, "net_income": oi * 0.7,
                                  "total_equity": rev * rng.uniform(0.3, 1.5), "total_assets": rev * 2,
-                                 "total_liabilities": rev * 0.8, "currency": "KRW"}})  # fmt: skip
+                                 "total_liabilities": rev * 0.8, "currency": 통화}})  # fmt: skip
     idx: dict[str, dict[str, float]] = {"KOSPI": {}, "KOSDAQ": {}}
     a, b = 2500.0, 800.0
     for d in 날들:
         a *= math.exp(0.0003 + 0.01 * rng.gauss(0, 1))
         b *= math.exp(0.0002 + 0.012 * rng.gauss(0, 1))
         idx["KOSPI"][d], idx["KOSDAQ"][d] = a, b
+    if 시장 == "US":  # 미국 국면·벤치마크 지수는 SP500 하나 — 같은 난수 길(국내 KOSPI 값)을 쓴다
+        idx = {"SP500": idx["KOSPI"]}
     return universe, prices, turn, snaps, idx
 
 
@@ -169,8 +177,8 @@ def _리플레이(variant: str, 판: str, limit_fills: bool = False) -> 리플�
     """`limit_fills` — 25.1945: 회차를 지정가로 채우는 판(tests/test_limit_fills_1914.py 의 L4 대조가 쓴다)."""
     universe, prices, turn, snaps, idx = _자료()
     fees, costs = 비용판[판]
-    s = cs.make_core_strategy(variant, cb.CoreMarket(universe, snaps, idx), sessions=날들, costs=costs,
-                              buy_fee_pct=job._수수료("KR", fees)[0], limit_fills=limit_fills)  # fmt: skip
+    s = cs.make_core_strategy(variant, cb.CoreMarket(universe, snaps, idx, country=시장), sessions=날들, costs=costs,
+                              buy_fee_pct=job._수수료(시장, fees)[0], limit_fills=limit_fills)  # fmt: skip
     재료: dict[str, tuple[str, list]] = {}
     하루: dict[str, cb.DayView] = {}
     원래 = s.market.at
@@ -232,9 +240,14 @@ def _db(aid: str, fees: dict, c: Client | None = None) -> Client:
     for u in _자료()[0]:
         c.conn.execute(
             "INSERT INTO stocks (id, ticker, market, country, name_ko, sector, currency, status, source, fetched_at,"
-            " asset_type) VALUES (?, ?, ?, 'KR', ?, ?, 'KRW', 'active', 't', 't', 'stock')",
-            [u["stock_id"], u["ticker"], u["market"], u["name"], u["sector"]],
+            " asset_type) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', 't', 't', 'stock')",
+            [u["stock_id"], u["ticker"], u["market"], 시장, u["name"], u["sector"], 통화],
         )
+    if 시장 == "US":
+        # 환율 1.0 — 리플레이의 시장 통화 장부(25.2058)와 같은 단위. 운영 `_fx` 는 묵은 환율을 거르므로 날마다 한 행
+        for d in 날들:
+            c.conn.execute("INSERT OR REPLACE INTO fx_rates (pair, date, rate, source, fetched_at)"
+                           " VALUES ('USDKRW', ?, 1.0, 't', 't')", [d])  # fmt: skip
     c.conn.execute("INSERT INTO settings (key, value, updated_at) VALUES ('fees', ?, 't')", [json.dumps(fees)])
     c.conn.execute(
         "INSERT INTO paper_cash_flows (flow_date, amount_krw, kind, created_at, request_key)"
@@ -249,7 +262,7 @@ def _시세넣기(c: Client, day: str) -> None:
             px = by[day]
             c.conn.execute(
                 "INSERT INTO prices (stock_id, date, open, high, low, close, volume, currency, source, fetched_at)"
-                " VALUES (?, ?, ?, ?, ?, ?, 1000, 'KRW', 't', 't')", [sid, day, px, px, px, px])  # fmt: skip
+                " VALUES (?, ?, ?, ?, ?, ?, 1000, ?, 't', 't')", [sid, day, px, px, px, px, 통화])  # fmt: skip
 
 
 #: 25.1921 허용 ⑩ — 계좌 → 0주로 베껴도 되는 모자람(보유 비중) 상한. 비면(B·G) 예전처럼 멈춘다
@@ -269,7 +282,7 @@ def _베끼기(c: Client, aid: str, rp: 리플레이, 판: str, k: int, cutoff: 
     자본 = dict(rp.r.curve)[day]
     prices = _자료()[1]
     fees, costs = 비용판[판]
-    매수, 매도 = job._수수료("KR", fees)
+    매수, 매도 = job._수수료(시장, fees)
     비용 = pp.Costs(buy_fee_pct=매수, sell_fee_pct=매도, sell_tax_pct=costs.tax_at(day), slippage_pct=costs.slippage_pct)
     종류 = "market" if rp.s.v.entry == "open" else "limit"
     든 = pp.positions([f for f in job._fills(c)[0] if f.account_id == aid])
@@ -304,17 +317,17 @@ def _베끼기(c: Client, aid: str, rp: 리플레이, 판: str, k: int, cutoff: 
         cur = c.conn.execute(
             "INSERT INTO paper_orders (account_id, market, stock_id, side, order_type, limit_price, quantity, currency,"
             " decided_on, fill_session, fill_basis, tranche, reason, horizon, score_at_order, score_as_of, rule_version,"
-            " status, closed_on, close_note, created_at) VALUES (?, 'KR', ?, ?, ?, ?, ?, 'KRW', ?, ?, 'close', ?,"
+            " status, closed_on, close_note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'close', ?,"
             " '엔진 체결 베낌', ?, ?, ?, 1, 'filled', ?, ?, ?)",
-            [aid, sid, side, 종류, 지정가, q, cutoff, day, _베낌_회차[side], h, 점수.get(sid), cutoff, day,
+            [aid, 시장, sid, side, 종류, 지정가, q, 통화, cutoff, day, _베낌_회차[side], h, 점수.get(sid), cutoff, day,
              ALLOW_T_CLOSE_FULL_FILLS, f"{day}T09:00:00+00:00"],
         )  # fmt: skip
         o = pp.Order(id=int(cur.lastrowid), account_id=aid, stock_id=sid, side=side, order_type=종류, limit_price=지정가,
-                     quantity=q, currency="KRW", fill_session=day, horizon=h, score_at_order=점수.get(sid),
+                     quantity=q, currency=통화, fill_session=day, horizon=h, score_at_order=점수.get(sid),
                      score_as_of=cutoff)  # fmt: skip
         f = pp.make_fill(o, px, day, 1.0, 비용)
         c.conn.execute(job.INSERT_FILL_SQL, [
-            f.order_id, aid, sid, side, day, px, q, "KRW", 1.0, None, f.fee, f.tax, f.slippage, f.cash_krw, h,
+            f.order_id, aid, sid, side, day, px, q, 통화, 1.0, day if 시장 == "US" else None, f.fee, f.tax, f.slippage, f.cash_krw, h,
             f.score_at_trade, f.snapshot_as_of, f"{day}T09:00:00+00:00", px, None, 0.0 if side == "sell" else None,
         ])  # fmt: skip
 
@@ -360,7 +373,7 @@ def _운영(variant: str, 판: str) -> dict[str, 운영하루]:
             if 입력:
                 입력.판단전(c, rp, day, cutoff)
             _줄, 기록 = job.run_step(
-                c, market="KR", trade_date=cutoff, late=False, signal_rows=rows, settings=설정,
+                c, market=시장, trade_date=cutoff, late=False, signal_rows=rows, settings=설정,
                 price_series=dict(ALLOW_NO_CORRELATION_SHRINK), series_unknown={}, allocate=True,
                 now=datetime.fromisoformat(f"{day}T00:30:00+00:00"),
             )  # fmt: skip
@@ -503,7 +516,7 @@ def test_합성_창이_견줄_거리를_지난다() -> None:
     **지나지 않는 갈래**(25.1911, 25.1910 교차검증 [권고] — 남은 일, docs/funnel.md 4장 ③): 투자 비중이 B 0.51·G 0.60 까지라
     현금 모자람·섹터 상한·위험 점검 blocked·하루 손실 관문 막힘이 한 번도 나오지 않는다. 그래서 리플레이 현금 식(오늘 판 돈
     미포함)이 운영과 같은지는 이 시험이 잡지 못한다(1532 의 손 사례만 잡는다)"""
-    assert all(cal.is_session("KR", date.fromisoformat(d)) for d in 날들)
+    assert all(cal.is_session(시장, date.fromisoformat(d)) for d in 날들)
     for variant, 사유들 in (("core_b", {"목표도달", "손절"}), ("core_g", {pp.TRAIL_CODE, "기간초과", "손절"})):
         rp = _리플레이(variant, "fees")
         assert sum(len(o.buys) for o in rp.주문.values()) >= 50 and sum(len(o.sells) for o in rp.주문.values()) >= 10
