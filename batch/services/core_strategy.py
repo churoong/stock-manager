@@ -32,11 +32,11 @@ from datetime import date
 from functools import partial
 from typing import Any
 
+from batch.services import adjust_drift, report_picks
 from batch.services import backtest as bt
 from batch.services import company as co
 from batch.services import core_backtest as cb
 from batch.services import paper as pp
-from batch.services import report_picks
 from batch.services import risk_gate as rg
 from batch.services import sell_flags as sf
 
@@ -158,9 +158,16 @@ class _Rows:
             raise LookupError("핵심 H 백테스트 창은 dict 읽기를 모른다 — 운영 함수가 바뀌었다")
         return []
 
+    def scalar(self) -> Any:
+        return self.rows[0][0] if self.rows else None
+
 
 #: `jobs/monitor_targets.action_factors` 의 국내 읽기 머리 — 수정주가 창에는 기업행위 점프가 없다고 보고 빈 답을 준다
 _ACTION_SQL_HEAD = "SELECT close, change_pct, date FROM prices WHERE stock_id = ?"
+#: 같은 함수의 **미국** 읽기 — 분할 감지 기록 설정(`adjust_drift.SPLIT_LOG_KEY`). 같은 허용(수정주가 창 — 기업행위 멈춤
+#: 없음)으로 "기록 없음" 을 준다(25.2062). 예전엔 모르는 읽기라 무작위 대체(R1·R2)의 `frozen_ids` 가 미국 모든 후보를
+#: "멈춤" 으로 삼켜 실행이 멈췄다(국내는 닿지 않음)
+_SETTING_SQL = "SELECT value FROM settings WHERE key = ?"
 
 
 class _ViewClient:
@@ -184,6 +191,8 @@ class _ViewClient:
             값 = [c for d, c in self.view.closes(sid) if 부터 <= d <= 까지 and c > 0]
             return _Rows([(max(값) if 값 else None,)])
         if sql.startswith(_ACTION_SQL_HEAD):
+            return _Rows([])
+        if sql == _SETTING_SQL and list(params) == [adjust_drift.SPLIT_LOG_KEY]:
             return _Rows([])
         self.misses.append(sql[:80])
         raise LookupError(f"핵심 H 백테스트 창이 모르는 읽기 — 운영 함수가 바뀌었다: {sql[:80]}")

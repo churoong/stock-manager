@@ -604,7 +604,7 @@ Turso 월 읽기 진도 문(추정 500만 행)을 지나야 돈다 — 미뤄지
        H 고름과 그 줄·B 상위 5) · `HoldingLedger.add/discard(decided_on, stock_id)/records(view, bench, day)` · `pit_growth`·`pit_latest_equity`.
        운영과 같은 정의를 쓰려고 중기 성장률 규칙을 `jobs/signals.load_growth` 에서 `signals.annual_growth(current, previous, as_of, latest)` 로 옮겼다(운영 동작 그대로 —
        `_growth` 는 `scoring.growth_rate`), `jobs/backtest.pit_equities` 에 `currency=`(다른 통화 자본을 뺀다, 주지 않으면 예전 그대로)를 더했다
-     - 순서: cutoff 는 **줄지 않게만** 부른다(거꾸로면 `ValueError`, 같은 cutoff 는 같은 결과 — 결정일이 다르면 `ValueError`). 나라는 KR·US(그 밖은 `ValueError`) — 미국은 지수가 나라별(25.2056, 깔때기 ⑧-2)이지만 장부형 판단 함수 `CoreStrategy` 가 아직 `NotImplementedError`(달러 장부 ⑧-3 전), 실행기도 국내만
+     - 순서: cutoff 는 **줄지 않게만** 부른다(거꾸로면 `ValueError`, 같은 cutoff 는 같은 결과 — 결정일이 다르면 `ValueError`). 나라는 KR·US(그 밖은 `ValueError`) — 미국은 지수가 나라별(25.2056, 깔때기 ⑧-2), 장부형 판단 함수는 시장 통화 장부(25.2058), 실행기도 미국을 돈다(25.2062 — 명령줄 `--market US`, 워크플로는 아직 국내만)
      - 자료 규칙(미래를 볼 것이 없다): 가격·거래대금·가격 수준은 `PriceView` 만. 재무 스냅샷·배당·지수는 미래까지 통째로 받고 **쓰는 자리마다 자른다** — 재무는 접수일(정정은 늦게
        접수된 것, 같은 날이면 접수번호)·기준(연결·별도)은 cutoff 에 알던 가장 늦은 해로, 지수는 날짜로. 시험이 미끼(가격·새 사업연도·정정·배당·지수)를 cutoff 뒤에 붙여 50 거래일 판단이
        한 칸도 안 바뀜을, 같은 미끼를 cutoff 이하로 옮기면 바뀜(양성 대조)을 함께 본다

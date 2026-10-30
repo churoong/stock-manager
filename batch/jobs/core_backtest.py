@@ -75,6 +75,8 @@ WARN_ST = ("S·T 계좌형 리플레이(st_s·st_t) — 운영 S·T 규칙을 �
            "실행 기록(DB) st.open_coverage 를 함께 본다")  # fmt: skip
 #: 시가 덮개가 이보다 낮으면 S·T 줄에 따로 경고(25.2045) — 시가 빈 날이 많으면 T 는 거의 거래하지 않고 S 는 갇힌다
 ST_MIN_OPEN_COVERAGE = 0.9
+#: 미국 분할 재수집 대기 종목을 뺀 실행(25.2062) — 뺀 수를 붙인다
+WARN_SPLIT_PENDING = "미국 분할 재수집 대기 종목을 유니버스에서 뺌(수정종가가 분할 앞뒤로 어긋남 — infra 25.553)"
 
 
 def explore_trial_floor() -> int:
@@ -190,13 +192,13 @@ def run_core(
         # H 메모리 원장에 하루를 더 쌓는다 — 탐색 실행은 그 원장을 읽는 H 진단을 내지 않아 닿지 않는다(25.2045)
         raise ValueError("S·T 리플레이(st)는 탐색 실행(explore)에서만")
     job_name = EXPLORE_JOB_NAME if explore else LIMIT_JOB_NAME if limit_fills else JOB_NAME
-    if market != "KR":
-        # 미국은 지수·통화·분할 대기 규칙을 아직 안 맞췄다(`CoreMarket` 이 막는다) — 시작 전에 크게 멈춘다.
-        # 명령줄은 KR 만 받고 워크플로도 KR 만 넘기므로 예약 실행이 여기서 조용히 끝날 일은 없다
-        raise NotImplementedError("핵심 H 백테스트는 아직 국내(KR)만 돈다 — docs/backtest.md 10장")
+    if market not in ("KR", "US"):
+        raise ValueError(f"핵심 H 백테스트 시장은 KR·US — {market}")
+    # 미국(25.2062, 깔때기 ⑧-5): 나라별 지수·부서(25.2056)·시장 통화 장부(25.2058·25.2061)·미국 시점 유니버스
+    # (25.2055)를 여기서 잇는다. 워크플로(`backtest.yml`)는 아직 국내만 넘긴다 — 미국 실행은 명령줄로
     if risk_every not in cb.RISK_EVERY:
         raise ValueError(f"risk_every 는 {cb.RISK_EVERY} 가운데 하나 — {risk_every}")
-    country = "KR"
+    country = market
     client = TursoClient()
     try:
         db.apply_migrations(client)
@@ -206,6 +208,13 @@ def run_core(
         batch_id = db.start_batch_run(client, job_name=job_name, market=market, trade_date=today.isoformat())
 
         universe, warnings = jb.load_universe(client, country)
+        if country == "US":
+            # 분할 재수집 대기 종목은 수정종가가 분할 앞뒤로 어긋나 있다(운영은 그 종목 성과 채우기·밴드를 건너뛴다,
+            # 25.553·25.1548) — 리플레이는 그 종목을 통째로 빼고 경고(5년 곡선에 가짜 −50%·+100% 를 넣지 않게)
+            보류 = db.split_pending_us(client)
+            if 보류:
+                universe = [r for r in universe if int(r["stock_id"]) not in 보류]
+                warnings.append(f"{WARN_SPLIT_PENDING}: {len(보류)}종목")
         if not universe:
             db.finish_batch_run(client, batch_id, status="failed", error_text="유니버스가 비어 있습니다")
             print("유니버스가 비어 있습니다")
@@ -235,7 +244,10 @@ def run_core(
         t0 = time.perf_counter()
         # S·T 리플레이는 시가를 종가와 같은 수정 계열로 함께 읽는다(25.2029) — 안 하면 질의에 `open` 이 없다
         opens: dict[int, dict[str, float]] | None = {} if st else None
-        prices, turnover = jb.load_prices_and_turnover(client, ids, 워밍업, opens=opens)
+        # 미국은 가격 수준을 따로 — 수정종가는 미래 배당만큼 낮아 시총 하한·밴드(PBR)가 틀린다(25.275, 월 백테스트와
+        # 같다). 국내 수정주가는 분할만 조정이라 같다
+        levels: dict[int, dict[str, float]] | None = {} if country == "US" else None
+        prices, turnover = jb.load_prices_and_turnover(client, ids, 워밍업, opens=opens, levels=levels)
         snapshots = jb.load_snapshots(client, country)
         pit_divs = jb.load_pit_dividends(client, country)
         # 국면(200일선)이 워밍업 첫날부터 서게 지수는 더 앞(400일)부터
@@ -260,7 +272,8 @@ def run_core(
         from batch.jobs import paper as jp
 
         매수수수료 = jp._수수료(country, 수수료설정)[0]
-        eligible_at, pit_cache, pit_reasons = pit_eligible(universe, prices, turnover, 시장_맵)
+        eligible_at, pit_cache, pit_reasons = pit_eligible(universe, prices, turnover, 시장_맵, country=country,
+                                                           levels=levels)  # fmt: skip
         warnings.append(jb.WARN_PIT_UNIVERSE)
         warnings.append(WARN_CORE)
         if explore:
@@ -290,8 +303,11 @@ def run_core(
             t1 = time.perf_counter()
             strategy = cs.make_core_strategy(variant, shared.reader(), sessions=sessions, costs=costs,
                                              buy_fee_pct=매수수수료, limit_fills=limit_fills)  # fmt: skip
+            # 미국 수정종가는 배당 포함 총수익(25.244) — 결과 경고가 그것을 말한다(`WARN_TOTAL_RETURN`).
+            # 원천징수 15% 는 없다
             results[variant] = bt.simulate(prices, dates, dates, strategy, costs, has_delisted=delisted,
-                                           turnover=turnover, dividends_included=False)  # fmt: skip
+                                           turnover=turnover, dividends_included=country == "US",
+                                           levels=levels)  # fmt: skip
             기록[variant] = strategy.log
             종목수[variant] = strategy.v.top_n  # 위원회 변형은 헌장 top_n(전략이 덮은 값)
             시간[variant] = round(time.perf_counter() - t1, 1)
@@ -516,7 +532,7 @@ def _run_st(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="핵심 H 다년 백테스트 (docs/backtest.md 10장)")
-    parser.add_argument("--market", default="KR", choices=["KR", "kr"])
+    parser.add_argument("--market", default="KR", choices=["KR", "kr", "US", "us"])
     parser.add_argument("--years", type=int, default=DEFAULT_YEARS)
     parser.add_argument("--risk-every", dest="risk_every", choices=list(cb.RISK_EVERY), default=DEFAULT_RISK_EVERY,
                         help="팩터 점수 리스크 지표 주기 — week(기본, 예전 주기와 같은 값) · month(한도가 모자랄 때)")

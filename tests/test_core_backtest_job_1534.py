@@ -398,9 +398,10 @@ def test_run_core_가중_대_동일가중_진단을_싣는다(실행: tuple[MemC
     assert eq["verdict"] in ("undecidable", "keep", "equal", "none")
 
 
-def test_run_core_는_국내만() -> None:
-    with pytest.raises(NotImplementedError):
-        cj.run_core("US")
+def test_run_core_는_국내와_미국만() -> None:
+    """미국은 25.2062 부터 돈다(tests/test_core_us_runner_2062.py) — 그 밖 시장은 시작 전에 멈춘다"""
+    with pytest.raises(ValueError, match="KR·US"):
+        cj.run_core("JP")
 
 
 def test_run_core_month_는_경고를_단다(monkeypatch: pytest.MonkeyPatch) -> None:

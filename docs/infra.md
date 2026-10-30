@@ -3109,6 +3109,7 @@ SQL read operations are forbidden (reads are blocked, ...)
 | 25.2059 | 깔때기 ⑧-3b — 미국 리플레이↔운영 일치 시험(B·G) |
 | 25.2060 | 25.2055~2057 교차검증 앞으로 고침 — 국내 유니버스 시험·기록 문구 |
 | 25.2061 | 깔때기 ⑧-4 — S·T 리플레이 시장 통화 장부와 미국 일치 시험 |
+| 25.2062 | 깔때기 ⑧-5 — 리플레이 실행기 미국 실행(가격 수준·분할 대기·배당 포함) |
 
 ### 25.1 왜 D1 인가
 
@@ -44867,3 +44868,23 @@ S 도 날들[13] 종가 하락으로 손절 한 번이 더 생긴다 — 체결 
 **시험**: `test_replay_parity_st_us_2061` 11건 + 국내 `test_replay_parity_st_2037` 11건. `test_core_backtest_1529` 의 미국 판단기 시험은 S·T 리플레이가 미국을 받고 KR·US 밖(JP)에서 `ValueError` 인지로.
 
 **되돌리기 확인**(mktemp worktree, 스크립트 — 미국 11건 가운데 깨진 수): ① 주문 통화를 늘 "KRW" → 9 ② 예약 환율 None(예전) → 2(빠듯한 판 — 예약 길) ③ 사이징 `fx_rate=None` → 11 ④ 운영 환율을 첫날 한 행만 → 10.
+
+### 25.2062 깔때기 ⑧-5 — 리플레이 실행기 미국 실행(가격 수준·분할 대기·배당 포함)
+
+**무엇**: 깔때기 ⑧ 순서 ⑤ — 리플레이 실행기 `core_backtest.run_core` 가 미국을 돈다(명령줄 `--market US`). 월 백테스트 `run` 의 미국 갈래를 그대로 옮겼다:
+
+- 시장 KR·US(그 밖 `ValueError`), `country = market`.
+- 가격 수준 `levels` 를 함께 읽어(`load_prices_and_turnover(levels=…)`) 시점 유니버스(`pit_eligible(country, levels)` — 25.2055)와 밴드 PBR(`PriceView.level_closes`)이 쓴다. 수정종가는 미래 배당만큼 낮다(25.275).
+- **분할 재수집 대기 종목**(`db.split_pending_us` — 대기열의 분할 꼴)은 유니버스에서 빼고 경고 `WARN_SPLIT_PENDING`(뺀 수). 수정종가가 분할 앞뒤로 어긋나 5년 곡선에 가짜 급락·급등을 넣지 않게.
+- 엔진 `dividends_included = (US)` — 미국 수정종가는 배당 포함 총수익이라 결과 경고가 `WARN_TOTAL_RETURN`(원천징수 15% 없음 — 이름 붙은 차이).
+- S·T 는 `market=country` 로 이미 넘기고 있었다(25.2061 에서 미국을 받음).
+
+**찾은 결함(미국에서만)**: 무작위 대체 R1·R2 의 `random_substitute` → 운영 `frozen_ids` → `monitor_targets.action_factors` 가 미국 종목이면 설정 `us_split_detections`(분할 감지 기록)를 읽는다. 리플레이 창 `_ViewClient` 는 국내 기업행위 읽기에만 빈 답(허용 ④ — 수정주가 창엔 기업행위 멈춤 없음)을 주고 이 설정 읽기는 몰라, 미국 후보가 모두 "기업행위 경계를 읽지 못해 멈춤" 으로 삼켜졌고 그날 판단 뒤 `LookupError` 로 실행이 멈췄다. 같은 허용으로 그 키 하나만 "기록 없음" 을 준다(`_SETTING_SQL` + `adjust_drift.SPLIT_LOG_KEY`, `_Rows.scalar`). 다른 설정 읽기는 그대로 모르는 읽기로 깨진다.
+
+**아직 아닌 것**: Actions `backtest.yml` 의 핵심·탐색 단계는 여전히 `--market KR` — 미국 실행을 예약·수동 버튼에 붙이는 것과 미국 읽기 예산(유니버스 수 × 5년)은 다음 건. 미국 B·G 외 계좌(H·D·E·A·C·R)의 운영 일치 시험도 남았다.
+
+**모의투자에 어떻게 쓰이나**: ② 전략 검증 — 미국 가상모의투자 규칙(B·G·H·R·S·T)을 5년 리플레이로 거르는 실행기. 지금 미국 판의 근거는 모의 기록뿐이다.
+
+**시험**: `tests/test_core_us_runner_2062.py`(새) — 메모리 DB 에 미국 12종목(NASDAQ·NYSE, 달러, 수정종가 = 가격 수준 × 0.9)·SP500·분할 대기 1종목: 핵심 다섯 행이 시장 US, 배당 포함 경고·분할 대기 경고(1종목), 모든 변형이 사고(투자 비중·회전 > 0), 시점 유니버스가 미국 갈래(`country`·`levels`)로 불리고 대기 종목은 어느 날에도 들지 않는다. 탐색 + S·T 도 미국으로. `test_core_backtest_job_1534::test_run_core_는_국내와_미국만`(JP 에서 `ValueError`).
+
+**되돌리기 확인**(mktemp worktree, 스크립트): ① 창의 미국 설정 읽기 답을 끔 → 두 시험 모두 깨진다(`LookupError`) ② 분할 대기를 빼지 않음 → 첫 시험 ③ 배당 포함을 끔 → 첫 시험 ④ 가격 수준을 읽지 않음 → 두 시험(시점 유니버스가 `ValueError` 로 멈춤 — 25.2055 의 "조용히 수정종가로 재지 않는다" 가 실제로 막았다).
