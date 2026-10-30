@@ -102,7 +102,8 @@ def test_미국_실행이_다섯_행을_시장_US_로_싣는다(실행: tuple[Me
         assert bt.WARN_TOTAL_RETURN in 경고 and bt.WARN_NO_DIVIDENDS not in 경고
         assert any(w.startswith(cj.WARN_SPLIT_PENDING) and w.endswith("1종목") for w in 경고), 경고
         # 목록(25.2059~2065)에 없는 R1·R2 만 단서(25.2063)
-        assert (cj.WARN_US_UNVERIFIED in 경고) == (r["strategy"] not in cj.US_PARITY_VERIFIED), r["strategy"]
+        assert (cj.WARN_US_UNVERIFIED in 경고) == (r["strategy"] in cj.R_VARIANTS), r["strategy"]
+        assert cj.WARN_US_UNVERIFIED_OTHER not in 경고
     # 모든 변형이 산다(달러 장부 — 환율 거름이 다시 걸리면 투자 비중이 0). R1·R2 는 무작위 대체의 기업행위 읽기를 지난다
     # (25.2062 — 예전엔 미국 분할 감지 설정 읽기가 창에 없어 실행이 멈췄다)
     assert all(json.loads(r["metrics_json"])["invested_share"] > 0 and r["turnover_avg"] > 0 for r in 행들)
@@ -131,7 +132,7 @@ def test_미국_탐색_S_T_도_돈다(monkeypatch: pytest.MonkeyPatch) -> None:
     # 미국 S·T 도 배당 포함 총수익(25.2066) — 같은 묶음의 탐색 변형과 같은 경고
     assert all(bt.WARN_TOTAL_RETURN in w and bt.WARN_NO_DIVIDENDS not in w for w in 경고.values()), 경고
     # 탐색 D·E·A·C 는 25.2064·2065 가 묶었다 — 행마다 단서 유무가 목록과 같다(탐색 실행엔 단서 줄이 없다)
-    assert all((cj.WARN_US_UNVERIFIED in w) == (v not in cj.US_PARITY_VERIFIED) for v, w in 경고.items()), 경고.keys()
+    assert all((cj.WARN_US_UNVERIFIED in w) == (v in cj.R_VARIANTS) for v, w in 경고.items()), 경고.keys()
 
 
 def test_미국_지정가_판은_회차_핵심_변형에_따로_단서(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -178,7 +179,7 @@ def test_미국_지정가_핵심_실행의_합친_경고가_서로_어긋나지_
     # 뜻으로도(25.2070, 교차검증 [권고]: 구절만 보면 "B·G·H 등은 일치 확인됨" 같은 바꿔 쓴 모순을 놓쳤다) — 미국 R 단서는
     # R 밖 계좌 이름을 말하지 않고, "확인됨"·"검증됨" 같은 긍정 판정을 담지 않는다
     for 글자 in ("B·", "G·", "H·", "확인됨", "검증됨", "됨("):
-        assert 글자 not in cj.WARN_US_UNVERIFIED, 글자
+        assert 글자 not in cj.WARN_US_UNVERIFIED and 글자 not in cj.WARN_US_UNVERIFIED_OTHER, 글자
 
 
 def test_R_변형_목록은_무작위_대조_계좌와_같다() -> None:
@@ -192,3 +193,14 @@ def test_미검증_목록과_R_목록이_전체_변형을_나눈다() -> None:
 
     전체 = set(cs.VARIANTS) | set(cs.EXPLORE_VARIANTS) | set(cj.ST_VARIANTS)
     assert 전체 - cj.US_PARITY_VERIFIED == cj.R_VARIANTS
+
+
+def test_R_아닌_미검증_변형엔_범용_단서(monkeypatch: pytest.MonkeyPatch) -> None:
+    """R 이 아닌 미국 미검증 변형 줄 — 지금은 없어 B 를 목록에서 잠시 빼 그 갈래를 지난다(25.2071, 25.2070 교차검증
+    [권고]: 조건을 `in R_VARIANTS` 로 좁힌 것을 묶는 시험이 없었다)"""
+    mem = _db(monkeypatch)
+    monkeypatch.setattr(cj, "US_PARITY_VERIFIED", cj.US_PARITY_VERIFIED - {"core_b"})
+    assert cj.run_core("US", years=1, today=오늘, force=True, variants=("core_b",)) == 0
+    (r,) = mem.execute("SELECT warnings_json FROM backtest_runs").dicts()
+    경고 = json.loads(r["warnings_json"])
+    assert cj.WARN_US_UNVERIFIED_OTHER in 경고 and cj.WARN_US_UNVERIFIED not in 경고, 경고
