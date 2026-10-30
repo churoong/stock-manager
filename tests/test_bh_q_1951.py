@@ -73,7 +73,7 @@ def test_bh_q_손계산() -> None:
 
 def _실행(job: str, 증거: dict[str, dict[str, Any] | None]) -> dict[str, Any]:
     return {"job_name": job, "started_at": "2026-11-04T00:00:00+00:00",
-            "step_log": {"params": {"sha": "x", "trial_floor": 21}, "group_id": "g"},
+            "step_log": {"params": {"sha": "x", "trial_floor": 21, "years": 5, "risk_every": "week"}, "group_id": "g"},
             "results": [{"strategy": n, "market": "KR", "group_id": "g", "warnings_json": "[]",
                          "metrics_json": json.dumps({"mdd": -0.2, **({"evidence": e} if e else {})})}
                         for n, e in 증거.items()]}  # fmt: skip

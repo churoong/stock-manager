@@ -81,8 +81,10 @@ def test_핵심_실행이_판정판_줄을_싣는다(핵심: Any) -> None:
             assert (줄[c] is None) == (c in 줄["missing"]), (줄["strategy"], c)
         assert all(0 < len(w) <= scb.WHY_MAX for w in 줄["missing"].values())
         assert 줄["market"] == "KR" and 줄["trials_cumulative"] == jb.REGISTERED_TRIALS
-    # 코호트 — 핵심 H 는 1b, 무작위 대조는 시도 아님(까닭)
-    assert by["core_h"]["cohort"] == "1b" and by["core_b"]["cohort"] == "1b"
+    # 코호트 — 이 실행은 시험 속도 때문에 기간 1년(기본 아님)이라 판정 코호트 밖(25.2019 — 예전엔 작업 이름만 보고 1b).
+    # 기본 실행의 1b 는 test_scoreboard_1919 의 코호트 시험이 본다. 무작위 대조는 시도 아님(까닭)
+    assert by["core_h"]["cohort"] is None and "기본 파라미터 실행 아님" in by["core_h"]["missing"]["cohort"]
+    assert by["core_b"]["cohort"] is None
     assert by["core_r1"]["cohort"] is None and "시도 아님" in by["core_r1"]["missing"]["cohort"]
     # 저장된 값 그대로 — 행의 metrics_json·열과 같다
     for r in rows:
@@ -148,7 +150,8 @@ def test_탐색_실행은_코호트_2_와_탐색_하한(탐색: Any) -> None:
     assert 줄들 == _다시(run, rows)
     assert sorted(r["strategy"] for r in 줄들) == ["core_d", "core_e"]
     for 줄 in 줄들:
-        assert 줄["cohort"] == "2" and 줄["trials_cumulative"] == cj.explore_trial_floor()
+        # 기간 1년 실행이라 코호트 밖(25.2019) — 탐색 하한은 그대로 싣는다
+        assert 줄["cohort"] is None and 줄["trials_cumulative"] == cj.explore_trial_floor()
 
 
 def test_판정판이_깨져도_실행은_성공이고_까닭을_남긴다(monkeypatch: pytest.MonkeyPatch) -> None:

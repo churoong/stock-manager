@@ -59,7 +59,8 @@ def _핵심실행(job: str = "backtest_core", floor: int = 17, sha: str = "fff00
     이름 = "core_h" if job == "backtest_core" else "core_d"
     return {
         "job_name": job, "started_at": "2026-11-10T01:00:00+00:00",
-        "step_log": {"params": {"trial_floor": floor, "sha": sha, "explore": job != "backtest_core"}},
+        "step_log": {"params": {"trial_floor": floor, "sha": sha, "explore": job != "backtest_core", "years": 5,
+                                "risk_every": "week", "limit_fills": False}},
         "results": [
             _행(이름, {"cagr": 0.08, "mdd": -0.22, "invested_share": 0.7, "avg_holdings": 4.2, "luck": luck_h,
                        "split_half": half, "evidence": _EV_H}, excess=0.01, turnover=0.05),
@@ -173,6 +174,23 @@ def test_코호트_밖() -> None:
     c, why = sb.cohort("paper", "composite", {}, "2026-11-03")
     assert c is None and "코호트 밖 작업" in str(why)
     assert sb.cohort("backtest_core", "core_r2", {}, "2026-11-10")[0] is None
+    # 25.2019 (결함 루프) — 기본이 아닌 핵심·탐색 실행과, 판정 창(3~7일) 밖 월 실행은 코호트 밖
+    기본 = {"years": 5, "risk_every": "week", "limit_fills": False}
+    assert sb.cohort("backtest_core", "core_h", 기본, "2026-11-10T00:00:00+00:00") == ("1b", None)
+    assert sb.cohort("backtest_core", "core_h", {**기본, "years": 4}, "2026-11-10T00:00:00+00:00")[0] is None
+    assert sb.cohort("backtest_explore", "core_d", {**기본, "years": 7}, "2026-11-10")[0] is None
+    assert sb.cohort("backtest_core", "core_h", {**기본, "risk_every": "month"}, "2026-11-10")[0] is None
+    assert sb.cohort("backtest_core", "core_h", {**기본, "limit_fills": True}, "2026-11-10")[0] is None
+    assert sb.cohort("backtest_core", "core_h", {}, "2026-11-10")[0] is None  # 파라미터를 모르면 밖
+    assert sb.cohort("backtest", "composite", {"default": True}, "2026-11-07T19:11:00+00:00") == ("1", None)
+    c, why = sb.cohort("backtest", "composite", {"default": True}, "2026-11-20T09:00:00+00:00")
+    assert c is None and "3~7일" in why
+
+
+def test_코호트_기본_파라미터는_핵심_실행기와_같다() -> None:
+    from batch.jobs import core_backtest as cbj
+
+    assert (sb.CORE_DEFAULT_YEARS, sb.CORE_DEFAULT_RISK_EVERY) == (cbj.DEFAULT_YEARS, cbj.DEFAULT_RISK_EVERY)
 
 
 def test_코호트_실행_시각은_started_at_없으면_결과_행() -> None:
@@ -202,7 +220,7 @@ def test_작업_이름과_시도_목록이_정의처와_같다() -> None:
 # 열쇠 (전략, 시장, sha) — 가장 늦은 실행 하나
 # ---------------------------------------------------------------------------
 def test_같은_sha_는_가장_늦은_실행_하나() -> None:
-    늦은 = _월실행(started="2026-12-01T17:11:00+00:00")
+    늦은 = _월실행(started="2026-12-03T17:11:00+00:00")  # 판정 창(3~7일) 안 — 25.2019
     늦은["results"][0] = _행("composite", {"cagr": 0.2, "mdd": -0.1}, excess=0.05)
     rows = sb.rows([늦은, _월실행()])  # 순서와 무관
     c = _by(rows, "composite")
@@ -251,7 +269,8 @@ def test_store_run_이_쓴_행을_그대로_읽는다() -> None:
                         "evidence": {"buys": 3, "n_blocks": 2, "lower": None, "gate": {"n_blocks": 1, "lower": None}}})  # fmt: skip
     행들 = mem.execute("SELECT * FROM backtest_runs").dicts()
     (b,) = sb.rows([{"job_name": "backtest_core", "started_at": "2026-11-10T00:00:00",
-                     "step_log": json.dumps({"params": {"trial_floor": 17, "sha": "s"}}), "results": 행들}])  # fmt: skip
+                     "step_log": json.dumps({"params": {"trial_floor": 17, "sha": "s", "years": 5, "risk_every": "week"}}),
+                     "results": 행들}])  # fmt: skip
     assert b["cohort"] == "1b" and b["cagr"] == s.metrics.cagr and b["mdd"] == s.metrics.mdd
     assert b["invested_share"] == jb.exposure_fields(r)["invested_share"]
     assert b["avg_holdings"] == 2.0 and b["dsr"] == 0.5 and b["half_second_cagr"] == 0.03

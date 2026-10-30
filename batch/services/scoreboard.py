@@ -42,6 +42,13 @@ JOB_EXPLORE = "backtest_explore"
 COHORT_BY_JOB = {JOB_MONTHLY: "1", JOB_CORE: "1b", JOB_EXPLORE: "2"}
 #: 코호트 1 = 2026-11-03 매월 기본 실행부터(사전 등록 — funnel.md 머리). 그 전 월 실행은 코호트 밖
 COHORT1_FROM = "2026-11-03"
+#: 핵심·탐색 실행(1b·2)의 기본 파라미터 — `jobs/core_backtest.DEFAULT_YEARS`·`DEFAULT_RISK_EVERY` 와 같아야 한다(시험이
+#: 대조). 기본이 아닌 손 실행(연수·리스크 주기·분할 지정가 체결)은 판정 코호트 밖(25.2019 결함 루프)
+CORE_DEFAULT_YEARS = 5
+CORE_DEFAULT_RISK_EVERY = "week"
+#: 코호트 1(월 판정 실행) — 그 달 3~7일 실행만(docs/factors.md 12장 머리). 결과를 본 뒤 손으로 돌린 기본 실행이 판정처럼
+#: 찍히지 않게(25.2019). 그 달의 **첫** 실행인지는 실행 하나만 보는 판정판이 가리지 못한다
+COHORT1_DAYS = ("03", "04", "05", "06", "07")
 
 #: 시도가 아닌 줄 — 기준(벤치마크)·무작위 대조(R1·R2, `jobs/backtest.CORE_REGISTERED_TRIALS` 머리 "시도가 아니다").
 #: 시험이 `core_strategy.VARIANTS` 와 대조한다
@@ -121,9 +128,10 @@ def _run_time(run: dict[str, Any]) -> str:
 def cohort(job_name: str | None, strategy: str, params: dict[str, Any], run_time: str) -> tuple[str | None, str | None]:
     """(코호트, None) 또는 (None, 까닭) — funnel.md 2.1.
 
-    - `backtest` 기본 파라미터 실행(`params.default`)으로 2026-11-03 부터 → "1"
-    - `backtest_core` → "1b"(핵심 H·G·B — 시도 수는 `CORE_REGISTERED_TRIALS` 로 이미 하한 안)
-    - `backtest_explore` → "2"(탐색 변형, 시도 수 하한 `params.trial_floor`)
+    - `backtest` 기본 파라미터 실행(`params.default`)으로 2026-11-03 부터, 그 달 3~7일 → "1"
+    - `backtest_core` 기본 파라미터(기간 5년·주간 리스크·분할 지정가 아님) → "1b"(핵심 H·G·B — 시도 수는
+      `CORE_REGISTERED_TRIALS` 로 이미 하한 안)
+    - `backtest_explore` 같은 기본 파라미터 → "2"(탐색 변형, 시도 수 하한 `params.trial_floor`)
     - 기준·무작위 대조(`NOT_TRIALS`)는 시도가 아니라 코호트 없음
     """
     if strategy in NOT_TRIALS:
@@ -136,6 +144,12 @@ def cohort(job_name: str | None, strategy: str, params: dict[str, Any], run_time
             return None, "기본 파라미터 실행 아님 — 판정 코호트 밖(docs/factors.md 12장 머리)"
         if not run_time or run_time[:10] < COHORT1_FROM:
             return None, f"사전 등록({COHORT1_FROM}) 전 실행 — 코호트 밖"
+        if run_time[8:10] not in COHORT1_DAYS:
+            return None, "판정 창(그 달 3~7일) 밖 실행 — 코호트 밖(docs/factors.md 12장 머리)"
+    elif (params.get("years") != CORE_DEFAULT_YEARS or params.get("risk_every") != CORE_DEFAULT_RISK_EVERY
+          or params.get("limit_fills")):
+        # 핵심·탐색은 작업 이름만으로 코호트를 줬다 — 기간 4년 손 실행도 "1b" 로 찍혀 0→1 점검을 받았다(25.2019)
+        return None, "기본 파라미터 실행 아님(기간·리스크 주기·분할 지정가) — 판정 코호트 밖(funnel.md 2.1)"
     return c, None
 
 

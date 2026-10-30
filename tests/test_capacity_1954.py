@@ -60,7 +60,7 @@ def test_여러_날의_최대·분위() -> None:
 
 def _줄(cap: dict[str, Any] | None, market: str = "KR", mj: dict[str, Any] | None = None) -> dict[str, Any]:
     run = {"job_name": "backtest_explore", "started_at": "2026-11-04T00:00:00+00:00",
-           "step_log": {"params": {"sha": "x", "trial_floor": 21}, "group_id": "g"},
+           "step_log": {"params": {"sha": "x", "trial_floor": 21, "years": 5, "risk_every": "week"}, "group_id": "g"},
            "results": [{"strategy": "core_d", "market": market, "group_id": "g", "warnings_json": "[]",
                         "metrics_json": json.dumps({"mdd": -0.2, **({"capacity": cap} if cap else {}),
                                                     **(mj or {})})}]}  # fmt: skip

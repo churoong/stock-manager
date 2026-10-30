@@ -42,7 +42,7 @@
 
 | 칸 | 계산(있는 것 / 새로) |
 |---|---|
-| 단계·코호트·누적 시도 번호 | 새로 — 등록부. **판정판 칸 됨(25.1919)**: 단계 0, 코호트는 작업 이름으로(`backtest` 기본 실행·11-03 부터 → 1, `backtest_core` → 1b, `backtest_explore` → 2, 기준·R1·R2 는 시도 아님), 누적 = `params.trial_floor`(없으면 `luck.n_trials`). 시도마다의 등록 번호는 등록부가 생겨야 |
+| 단계·코호트·누적 시도 번호 | 새로 — 등록부. **판정판 칸 됨(25.1919)**: 단계 0, 코호트는 작업 이름과 파라미터로(`backtest` 기본 실행·11-03 부터·그 달 3~7일 → 1, `backtest_core` 기본 파라미터(기간 5년·주간 리스크·분할 지정가 아님) → 1b, `backtest_explore` 같은 기본 파라미터 → 2, 기준·R1·R2 는 시도 아님 — 25.2019 전엔 1b·2 가 파라미터를 보지 않았다. 그 달 **첫** 실행인지는 실행 하나만 보는 판정판이 가리지 못한다), 누적 = `params.trial_floor`(없으면 `luck.n_trials`). 시도마다의 등록 번호는 등록부가 생겨야 |
 | 비용 반영 CAGR·초과 CAGR·비용 몫 | `bt.summarize` — **판정판 칸 됨(25.1919)**. 비용 몫 = (비용 0 CAGR − 비용 반영 CAGR) ÷ 비용 0 CAGR, 같은 실행의 `*_no_cost` 짝이 있을 때만(지금 composite 하나) |
 | 무작위 대조 분위 묶음 하한 | `core_evidence.evidence`, 운영 `pp.selection_evidence().control` — **판정판 칸 됨(25.1919)**: `metrics_json.evidence.lower`(핵심 H·탐색만) |
 | 결정 단위 분위 하한 | `pp.selection_evidence`·`block_bound`, 핵심 H `gate_evidence` — **판정판 칸 됨(25.1919)**: `metrics_json.evidence.gate.lower`(핵심 H·탐색만) |

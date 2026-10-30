@@ -30,7 +30,8 @@ def test_코호트_크기는_jobs_상수와_같다() -> None:
 
 def _실행(job: str, 증거: dict[str, dict[str, Any] | None], market: str = "KR", **mj: Any) -> dict[str, Any]:
     return {"job_name": job, "started_at": "2026-11-04T00:00:00+00:00",
-            "step_log": {"params": {"sha": "x", "trial_floor": 21}, "group_id": f"g{market}"},
+            "step_log": {"params": {"sha": "x", "trial_floor": 21, "years": 5, "risk_every": "week"},
+                         "group_id": f"g{market}"},
             "results": [{"strategy": n, "market": market, "group_id": f"g{market}", "warnings_json": "[]",
                          "metrics_json": json.dumps({"mdd": -0.2, **mj, **({"evidence": e} if e else {})})}
                         for n, e in 증거.items()]}  # fmt: skip

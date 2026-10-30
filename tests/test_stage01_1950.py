@@ -79,7 +79,7 @@ def test_시도_아닌_줄은_점검표_없음() -> None:
 
 def _실행(job: str, 이름들: list[str], mdd: dict[str, float]) -> dict[str, Any]:
     return {"job_name": job, "started_at": "2026-11-04T00:00:00+00:00",
-            "step_log": {"params": {"sha": "x", "default": True}, "group_id": "g"},
+            "step_log": {"params": {"sha": "x", "default": True, "years": 5, "risk_every": "week"}, "group_id": "g"},
             "results": [{"strategy": n, "market": "KR", "group_id": "g", "warnings_json": "[]",
                          "metrics_json": json.dumps({"mdd": mdd[n]})} for n in 이름들]}  # fmt: skip
 
