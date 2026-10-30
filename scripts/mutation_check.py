@@ -135,9 +135,9 @@ MUTATIONS: tuple[Mutation, ...] = (
              "        if 수익 > 위:\n",
              ("tests/test_shadow_1862.py",),
              "스윙 목표선과 같은 종가(+5.00%)를 넘지 않은 것으로 보고 들고 간다(25.2006)"),
-    Mutation("swing_rights_revert", "batch/jobs/paper.py",
-             "    되돌린 = [float(r[1]) / _되돌림(str(r[0])[:10]) for r in 줄]\n",
-             "    되돌린 = [float(r[1]) for r in 줄]\n",
+    Mutation("swing_rights_revert", "batch/services/shadow.py",
+             "    되돌린 = [float(c) / rights_back(entry_date, d, list(factors)) for d, c in closes]\n",
+             "    되돌린 = [float(c) for d, c in closes]\n",
              ("tests/test_paper_swing_1871.py",),
              "유상증자 권리락 날의 기계적 하락을 원시 종가로 견줘 거짓 스윙손절을 낸다(25.1999)"),
 )

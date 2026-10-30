@@ -1338,8 +1338,6 @@ def _스윙넘음(client: Any, 행: dict[str, Any], today: date) -> dict[str, An
 
     진입가 = 첫 로트의 체결가(슬리피지 전 — 다음 장 시가 시장가면 그날 시가, 그림자 `simulate` 의 선 기준과 같다).
     로트가 둘 이상이면(추가 매수는 배분 전에 거르므로 없어야 한다) 첫 로트로 판정한다 — 선은 첫 진입에서 잰다"""
-    import math
-
     from batch.jobs import monitor_targets as mt
     from batch.services import shadow as sh
 
@@ -1351,21 +1349,16 @@ def _스윙넘음(client: Any, 행: dict[str, Any], today: date) -> dict[str, An
                                          sh.SWING_CLOSE.max_sessions]).rows  # fmt: skip
     # 유상증자 권리락은 그날까지 지난 계수로 종가를 되돌려 견준다 — 그림자(수정주가: 락일 앞 값에 계수)와 같은 비율.
     # 원시 종가로 견주면 권리락 날의 기계적 하락이 거짓 "스윙손절" 이 됐다(25.1999, 결함 루프). 진입가 전체에 곱하면
-    # 락일 **앞** 종가가 낮아진 진입가와 견주어져 거짓 목표가 난다 — 그래서 날마다. 분할·병합은 멈춤(frozen)이 막는다
+    # 락일 **앞** 종가가 낮아진 진입가와 견주어져 거짓 목표가 난다 — 그래서 날마다. 분할·병합은 멈춤(frozen)이 막는다.
+    # 판정은 순수 함수 `sh.swing_exit`(25.2030 — S 리플레이와 같이 쓴다)
     계수들 = [] if 행.get("country") == "US" else mt.rights_factors_since(client, int(행["stock_id"]), str(진입일)[:10])
-
-    def _되돌림(날: str) -> float:
-        # 진입일 = 락일은 이미 떨어진 값에 샀다 — `rights_factors_since` 가 거르지만 여기서도 막는다(25.2001)
-        return math.prod(f for 락, f in 계수들 if str(진입일)[:10] < 락 <= 날)
-
-    되돌린 = [float(r[1]) / _되돌림(str(r[0])[:10]) for r in 줄]
-    넘음 = sh.close_exit(float(진입가), 되돌린, sh.SWING_CLOSE)
+    넘음 = sh.swing_exit(str(진입일)[:10], float(진입가), [(str(r[0])[:10], float(r[1])) for r in 줄], 계수들)
     if 넘음 is None:
         return None
-    까닭, i = 넘음
+    까닭, i, 되돌린종가, 계수 = 넘음
     날, 종가 = str(줄[i][0])[:10], float(줄[i][1])
-    수익 = round((되돌린[i] / float(진입가) - 1) * 100, 4)
-    계수 = round(_되돌림(날), 6)
+    수익 = round((되돌린종가 / float(진입가) - 1) * 100, 4)
+    계수 = round(계수, 6)
     되돌림글 = f" (권리락 되돌림 ×{계수:g})" if 계수 != 1 else ""
     글 = {"stop": f"종가가 진입가 대비 {수익:+g}%{되돌림글} — 스윙 손절선 {sh.SWING_CLOSE.stop_pct * 100:g}% 이하",
           "target": f"종가가 진입가 대비 {수익:+g}%{되돌림글} — 스윙 목표선 +{sh.SWING_CLOSE.target_pct * 100:g}% 이상",
@@ -1385,7 +1378,7 @@ def _스윙넘음(client: Any, 행: dict[str, Any], today: date) -> dict[str, An
                            str(진입일)[:10]), "passed": None},
           sf._criterion("판정 종가", f"{_값(종가)} ({i + 1}거래일째)", 선, "prices", 날)]
     if 계수 != 1:
-        되돌림 = f"×{계수:g} → 되돌린 종가 {_값(되돌린[i])} (진입가 대비 {수익:+g}%)"
+        되돌림 = f"×{계수:g} → 되돌린 종가 {_값(되돌린종가)} (진입가 대비 {수익:+g}%)"
         근거.append({**sf._criterion("권리락 되돌림", 되돌림, "유상증자 권리락만 — 그림자 수정주가와 같은 비율",
                                     "prices·kr_corp_events", 날), "passed": None})  # fmt: skip
     return {"reason_code": pp.SWING_CODES[까닭], "level": "red", "rationale": f"{글} ({날}, {sh.SWING_CLOSE.name})",

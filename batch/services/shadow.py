@@ -20,6 +20,7 @@
 
 from __future__ import annotations
 
+import math
 import statistics
 from dataclasses import dataclass, field
 
@@ -126,6 +127,30 @@ def close_exit(entry_open: float, closes: list[float], rule: Rule = SWING_CLOSE)
         if i == rule.max_sessions - 1:
             return "time", i
     return None
+
+
+def rights_back(entry_date: str, day: str, factors: list[tuple[str, float]]) -> float:
+    """진입 뒤 그날까지 지난 유상증자 권리락 계수의 곱 — 원시 종가를 이것으로 나누면 진입가와 같은 잣대(25.1999).
+    진입일 = 락일은 이미 떨어진 값에 샀으므로 세지 않는다(`진입일 < 락 ≤ 그날`, 25.2001)."""
+    return math.prod(f for 락, f in factors if entry_date[:10] < 락 <= day[:10])
+
+
+def swing_exit(
+    entry_date: str, entry_price: float, closes: list[tuple[str, float]], factors: list[tuple[str, float]] = (),
+    rule: Rule = SWING_CLOSE,
+) -> tuple[str, int, float, float] | None:  # fmt: skip
+    """S 보유 로트 하나의 넘음 — (까닭, 넘은 종가의 자리, 되돌린 종가, 그날 계수). 아직 아니면 None.
+
+    `closes` = 진입한 날부터 (날짜, 원시 종가) 오름차순. 날마다 `rights_back` 으로 되돌린 종가를 `close_exit` 에
+    넣는다 — 가상모의투자 S(`jobs/paper._스윙넘음`, DB 를 읽어 이것을 부른다)와 S 리플레이(깔때기 ⑦, docs/funnel.md
+    4장)가 같이 쓴다 (25.2030). 리플레이는 수정 계열이라 `factors` 를 비운다(이름 붙은 차이 — 수정주가가 이미
+    같은 비율을 반영)"""
+    되돌린 = [float(c) / rights_back(entry_date, d, list(factors)) for d, c in closes]
+    넘음 = close_exit(float(entry_price), 되돌린, rule)
+    if 넘음 is None:
+        return None
+    까닭, i = 넘음
+    return 까닭, i, 되돌린[i], rights_back(entry_date, closes[i][0], list(factors))
 
 
 def simulate(stock_id: int, signal_date: str, bars: list[Bar], rule: Rule, costs: Costs, country: str,
