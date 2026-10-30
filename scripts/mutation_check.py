@@ -124,6 +124,17 @@ MUTATIONS: tuple[Mutation, ...] = (
              "        if not isinstance(exc, kv.NoResponse):\n",
              ("tests/test_guard_transient_1835.py",),
              "토큰 무효 같은 지속 장애도 '이 회차만 쉼' 으로 삼켜 실패 알림이 안 간다"),
+    # 스윙 S(10-29 개설) — 판정 경계와 권리락 되돌림(25.2004)
+    Mutation("swing_stop_boundary", "batch/services/shadow.py",
+             "        if 수익 <= 아래:\n",
+             "        if 수익 < 아래:\n",
+             ("tests/test_shadow_1862.py",),
+             "스윙 손절선과 같은 종가(−3.00%)를 넘지 않은 것으로 보고 들고 간다"),
+    Mutation("swing_rights_revert", "batch/jobs/paper.py",
+             "    되돌린 = [float(r[1]) / _되돌림(str(r[0])[:10]) for r in 줄]\n",
+             "    되돌린 = [float(r[1]) for r in 줄]\n",
+             ("tests/test_paper_swing_1871.py",),
+             "유상증자 권리락 날의 기계적 하락을 원시 종가로 견줘 거짓 스윙손절을 낸다(25.1999)"),
 )
 
 
