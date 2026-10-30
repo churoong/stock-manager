@@ -344,3 +344,48 @@ def test_늦은_실행_날_관문이_막은_매수는_blocked_로_남는다(monk
     결정 = dict(c.q("SELECT stock_id, kind FROM paper_decisions WHERE account_id = 'T'"))
     assert 결정 == {1: "skip", 3: "blocked"}
     assert 기록["accounts"]["T"]["risk_blocked"] == 1
+
+
+def _주문(**kw) -> pp.Order:
+    기본 = {"id": 1, "account_id": "T", "stock_id": 7, "side": "buy", "order_type": "market", "limit_price": None,
+            "quantity": 10, "currency": "KRW", "fill_session": "2026-10-30", "ref_price": 10_000.0}  # fmt: skip
+    return pp.Order(**(기본 | kw))
+
+
+def _체결(**kw) -> pp.Fill:
+    기본 = {"order_id": 1, "account_id": "T", "stock_id": 7, "side": "buy", "fill_date": "2026-10-30", "price": 1.0,
+            "quantity": 10, "currency": "KRW", "fx_rate": 1.0, "fee": 0.0, "tax": 0.0, "slippage": 0.0,
+            "cash_krw": -10.0}  # fmt: skip
+    return pp.Fill(**(기본 | kw))
+
+
+def test_단타_진입_막기_순수_함수(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`pp.day_entry`(25.2031 — 가상모의투자 체결 판정과 S·T 리플레이가 같이 쓴다)."""
+    o = _주문()
+    보통 = pp.Bar("2026-10-30", 10_100.0, 10_300.0, 1000)
+    assert pp.day_entry(o, *pp.judge(o, 보통), 보통) == (10_100.0, "시가")
+    시가없음 = pp.Bar("2026-10-30", None, 10_300.0, 1000)
+    assert pp.day_entry(o, *pp.judge(o, 시가없음), 시가없음) == (None, "시가 없음 — 단타 진입 안 함")
+    상한 = pp.Bar("2026-10-30", 12_990.0, 12_000.0, 1000)  # 신호 날 종가 10,000 대비 +29.9%
+    가격, 까닭 = pp.day_entry(o, *pp.judge(o, 상한), 상한)
+    assert 가격 is None and 까닭.startswith("상한가 시가")
+    # T 가 아니거나 매도·안 찬 판정은 그대로
+    assert pp.day_entry(_주문(account_id="S"), 10_300.0, pp.NO_OPEN_CLOSE_NOTE, 시가없음) == (
+        10_300.0, pp.NO_OPEN_CLOSE_NOTE)  # fmt: skip
+    assert pp.day_entry(_주문(side="sell"), 10_300.0, pp.NO_OPEN_CLOSE_NOTE, 시가없음)[0] == 10_300.0
+    assert pp.day_entry(o, None, "정지", None) == (None, "정지")
+
+
+def test_단타_짝_매도_상태_순수_함수() -> None:
+    """`pp.pair_sell_state`(25.2031) — 짝 매수가 찼으면 None, 기다리면 wait, 안 찼으면 expire."""
+    짝 = _주문(id=2, side="sell", fill_basis="close", reason=pp.DAY_CLOSE_CODE)
+    assert pp.pair_sell_state(짝, pp.DAY_CLOSE_CODE, [_체결()], []) is None
+    assert pp.pair_sell_state(짝, pp.DAY_CLOSE_CODE, [], [_주문()]) == "wait"
+    assert pp.pair_sell_state(짝, pp.DAY_CLOSE_CODE, [], []) == "expire"
+    # 다른 날 체결·다른 종목 매수는 짝이 아니다
+    assert pp.pair_sell_state(짝, pp.DAY_CLOSE_CODE, [_체결(fill_date="2026-10-29"), _체결(stock_id=8)], []) == "expire"
+    # 짝이 아닌 것 — 안전망 매도(단타잔여)·미룬 매도·S 계좌
+    assert pp.pair_sell_state(짝, "단타잔여", [], []) is None
+    assert pp.pair_sell_state(_주문(id=2, side="sell", reason=pp.DAY_CLOSE_CODE, deferrals=1), pp.DAY_CLOSE_CODE,
+                              [], []) is None  # fmt: skip
+    assert pp.pair_sell_state(_주문(id=2, side="sell", account_id="S"), pp.DAY_CLOSE_CODE, [], []) is None

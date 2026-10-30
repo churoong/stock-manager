@@ -451,6 +451,39 @@ def judge(order: Order, bar: Bar | None) -> tuple[float | None, str]:
     return 가격, 까닭
 
 
+def day_entry(order: Order, price: float | None, why: str, bar: Bar | None) -> tuple[float | None, str]:
+    """당일 단타(T) 매수의 진입 막기 — `judge` 뒤에 건다(16.3.2, 25.1884). 그림자 `day_v1` 과 같은 진입 조건.
+
+    시가가 비어 종가로 찰 판정이면 같은 종가에 사고파는 0분 거래라 사지 않고, 상한가 시가는 그림자와 같은 함수
+    (`shadow.limit_up_open`, 신호 날 종가 = 주문의 `ref_price` 대비). T 매수가 아니거나 안 찬 판정이면 그대로 돌려준다.
+    가상모의투자(`jobs/paper.fill_orders`)와 S·T 리플레이(깔때기 ⑦)가 같이 쓴다(25.2031)"""
+    from batch.services import shadow as sh
+
+    if price is None or order.side != "buy" or order.account_id not in SAME_DAY_IDS:
+        return price, why
+    if why == NO_OPEN_CLOSE_NOTE:
+        return None, "시가 없음 — 단타 진입 안 함"
+    if bar is not None and sh.limit_up_open(bar.open, order.ref_price, "KR" if order.currency == "KRW" else "US"):
+        return None, f"상한가 시가(신호 날 종가 +{sh.KR_LIMIT_UP_OPEN * 100:g}% 이상) — 단타 진입 안 함"
+    return price, why
+
+
+def pair_sell_state(order: Order, reason: str | None, fills: list[Fill], open_buys: list[Order]) -> str | None:
+    """당일 단타(T) 짝 매도의 처리 — None(짝 아님·짝 매수 찼음 → 보통 판정), "wait"(짝 매수가 아직 시세를 기다림 —
+    함께 기다린다), "expire"(짝 매수가 안 참 → 미루지 않고 거둔다). 짝은 **사유**(`DAY_CLOSE_CODE`)와 안 미룸으로
+    알아본다 — 늦은 실행의 안전망 매도(`단타잔여`)를 짝으로 오인하지 않게(25.1887). 25.1884·25.2031"""
+    if order.side != "sell" or order.account_id not in SAME_DAY_IDS or reason != DAY_CLOSE_CODE or order.deferrals:
+        return None
+    날 = order.fill_session
+    if any(f.account_id == order.account_id and f.stock_id == order.stock_id and f.side == "buy" and f.fill_date == 날
+           for f in fills):  # fmt: skip
+        return None
+    if any(x.account_id == order.account_id and x.stock_id == order.stock_id and x.fill_session == 날
+           for x in open_buys):  # fmt: skip
+        return "wait"
+    return "expire"
+
+
 def make_fill(order: Order, price: float, fill_date: str, fx_rate: float, costs: Costs) -> Fill:
     """체결 한 건의 비용과 현금 영향.
 

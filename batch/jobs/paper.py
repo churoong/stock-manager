@@ -847,20 +847,17 @@ def fill_orders(
         # 짝은 **사유**(`단타종가`)로 알아본다 — 종가 판정·안 미룸만 보면 늦은 실행이 낸 안전망 매도(`단타잔여`, 그것도
         # 종가 판정)를 짝으로 오인해 "짝 매수 안 참" 으로 거둬, 짝 잃은 보유가 하루 더 밤을 넘겼다(25.1887, 25.1886
         # 교차검증 [필수])
-        if (o.side == "sell" and o.account_id in pp.SAME_DAY_IDS and r.get("reason") == pp.DAY_CLOSE_CODE
-                and not o.deferrals):  # fmt: skip
-            # 당일 단타(T) 짝 매도 — 같은 장 짝 매수가 안 찼으면 미루지 않고 거둔다(16.3.2, 25.1884). 미루면 시세 없는
-            # 날 다음 장으로 갔다가 "팔 보유가 모자람" 으로야 닫혔다. 짝 매수가 아직 시세를 기다리면 함께 기다린다
-            산 = any(f.account_id == o.account_id and f.stock_id == o.stock_id and f.side == "buy" and f.fill_date == 날
-                    for f in [*fills, *새것])  # fmt: skip
-            if not 산:
-                if any(x.account_id == o.account_id and x.stock_id == o.stock_id and x.fill_session == 날
-                       for x in 남은매수.values()):  # fmt: skip
-                    기록["waiting_pair"] = 기록.get("waiting_pair", 0) + 1
-                    continue
-                _쓰기(client, [(EXPIRE_SQL, [trade_date, "단타 짝 매수 안 참", o.id])])
-                기록["expired"] = 기록.get("expired", 0) + 1
-                continue
+        # 당일 단타(T) 짝 매도 — 같은 장 짝 매수가 안 찼으면 미루지 않고 거둔다(16.3.2, 25.1884). 미루면 시세 없는
+        # 날 다음 장으로 갔다가 "팔 보유가 모자람" 으로야 닫혔다. 짝 매수가 아직 시세를 기다리면 함께 기다린다.
+        # 짝은 **사유**(`단타종가`)로 알아본다(25.1887). 판정은 순수 함수(`pp.pair_sell_state`, 25.2031)
+        짝상태 = pp.pair_sell_state(o, r.get("reason"), [*fills, *새것], list(남은매수.values()))
+        if 짝상태 == "wait":
+            기록["waiting_pair"] = 기록.get("waiting_pair", 0) + 1
+            continue
+        if 짝상태 == "expire":
+            _쓰기(client, [(EXPIRE_SQL, [trade_date, "단타 짝 매수 안 참", o.id])])
+            기록["expired"] = 기록.get("expired", 0) + 1
+            continue
         if 날 not in 시장날:
             시장날[날] = bool(client.execute(MARKET_DAY_SQL, [날, market]).rows)
         if o.stock_id in frozen or o.stock_id in (frozen_by_account or {}).get(o.account_id, set()):
@@ -899,15 +896,8 @@ def fill_orders(
         bar = (pp.Bar(str(행[0]["date"]), 행[0]["open"], float(행[0]["close"]), 행[0]["volume"],
                       행[0].get("change_pct")) if 행 and 행[0]["close"] is not None else None)  # fmt: skip
         가격, 까닭 = pp.judge(o, bar)
-        if 가격 is not None and o.side == "buy" and o.account_id in pp.SAME_DAY_IDS:
-            # 당일 단타(T) 매수 — 그림자 `day_v1` 과 같은 진입 조건(16.3.2, 25.1884). 시가가 비어 종가로 찰 판정이면
-            # 같은 종가에 사고파는 0분 거래라 사지 않고, 상한가 시가 판정은 그림자와 같은 함수
-            from batch.services import shadow as sh
-
-            if 까닭 == pp.NO_OPEN_CLOSE_NOTE:
-                가격, 까닭 = None, "시가 없음 — 단타 진입 안 함"
-            elif bar is not None and sh.limit_up_open(bar.open, o.ref_price, "KR" if o.currency == "KRW" else "US"):
-                가격, 까닭 = None, f"상한가 시가(신호 날 종가 +{sh.KR_LIMIT_UP_OPEN * 100:g}% 이상) — 단타 진입 안 함"
+        # 당일 단타(T) 매수 — 그림자 `day_v1` 과 같은 진입 조건(16.3.2, 25.1884): 시가 없음·상한가 시가면 사지 않는다
+        가격, 까닭 = pp.day_entry(o, 가격, 까닭, bar)
         그날종가 = bar.close if bar is not None else None  # 진입 이득을 잴 체결일 종가 (25.1450)
         # 하한가로 갇힌 시장가 매도도 정지처럼 다음 장으로 미룬다(25.1553) — 취소하면 그 보유가 매도 없이 남는다
         if 가격 is None and o.side == "sell" and (pp.halted(bar) or 까닭.endswith(pp.LOCKED_SELL)):
