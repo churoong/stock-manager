@@ -65,3 +65,17 @@ def test_열_이름이_바뀐_DB_는_통과로_삼키지_않는다() -> None:
     with pytest.raises(sqlite3.OperationalError, match="no such column"):
         근거표_어긋남(conn)
     assert 근거표_어긋남(sqlite3.connect(":memory:")) == []
+
+
+def test_고정물이_yield_뒤에_그물_점검을_실제로_부른다() -> None:
+    """25.2008 (25.2007 교차검증 [권고]) — 고정물이 `그물_점검()` 을 부르지 않거나 yield 뒤에 바로 return 하면 그물은
+    꺼지는데 위 시험들은 지났다. 고정물의 원래 생성기를 직접 돌려, 어긋난 근거를 둔 채 yield 를 넘기면 깨지는지 본다"""
+    원래 = conftest._주문_근거는_근거표_꼴이다.__wrapped__
+    생성기 = 원래()
+    next(생성기)  # 시험 몸통 자리
+    c = Client(accounts=("B",))
+    _주문(c, 1, {"flags": [{"criteria": [{"name": "진입가", "value": 1, "date": "2026-10-29"}]}]})
+    with pytest.raises(AssertionError, match="주문 1 flags"):
+        next(생성기)  # 고정물이 그물_점검 을 부르지 않으면 StopIteration 으로 끝나 이 단언이 깨진다
+    assert not sys.modules[conftest.그물_모듈].만든_client
+
