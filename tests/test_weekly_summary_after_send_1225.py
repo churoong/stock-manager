@@ -66,3 +66,20 @@ def test_일부만_갔거나_모르면_partial_이고_다시_보내지_않는다
     assert 적음 == []  # 사후 분석·월간·실행 품질 진척을 적지 않는다
     assert ws.run() == 0  # 재실행·따라잡기
     assert len(보냄) == 1
+
+
+def test_사후_분석이_깨진_주는_보고_기록을_넘기지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.2018 (결함 루프 10-30) — `load_losses` 는 첫 질의 직후 새 보고 기록을 넣는다. 손실별 질의가 깨져도 발송이
+    성공하면 그 기록이 적혀, 그 주 손실이 다음 주부터 읽히지 않고 영영 빠졌다"""
+    mem, 보냄 = _준비(monkeypatch)
+    적음: list = []
+    monkeypatch.setattr(ws.db, "set_setting", lambda c, k, v: 적음.append(k))
+
+    def 깨짐(c, now, through, 끝):  # noqa: ANN001, ANN202
+        끝.append({"KR": "2026-09-22", "US": "2026-09-15"})  # 첫 질의 뒤 기록을 넣은 다음
+        raise RuntimeError("시세 질의 시간 초과")  # 손실별 질의에서 깨짐
+
+    monkeypatch.setattr(ws, "load_losses", 깨짐)
+    assert ws.run() == 0
+    assert "지난 추천 사후 분석을 못 했습니다" in 보냄[0]
+    assert ws.POSTMORTEM_THROUGH_KEY not in 적음

@@ -563,6 +563,9 @@ def run(dry_run: bool = False, force: bool = False) -> int:
             사후 = postmortem.render(총, 손실, 손실수)
         except Exception as exc:  # noqa: BLE001 — 곁다리 절이다
             사후 = [f"지난 추천 사후 분석을 못 했습니다 ({type(exc).__name__})"]
+            # 진척도 남기지 않는다 — `load_losses` 는 첫 질의 직후 새 보고 기록을 넣으므로, 손실별 질의·그리기가 깨진
+            # 주에도 발송이 성공하면 기록이 넘어가 그 주 손실이 영영 보고되지 않았다(25.2018 결함 루프)
+            본_끝.clear()
         # 모의 투자 계좌 (docs/paper.md 6장, 25.1447) — 곁다리 절. 못 읽으면 그렇다고 한 줄
         월간 = False
         try:
