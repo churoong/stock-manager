@@ -895,21 +895,18 @@ def fill_orders(
             # (25.1714 — 기다림 끝, 25.1803 — 뒤 날 행이 있을 때도)
         bar = (pp.Bar(str(행[0]["date"]), 행[0]["open"], float(행[0]["close"]), 행[0]["volume"],
                       행[0].get("change_pct")) if 행 and 행[0]["close"] is not None else None)  # fmt: skip
-        가격, 까닭 = pp.judge(o, bar)
-        # 당일 단타(T) 매수 — 그림자 `day_v1` 과 같은 진입 조건(16.3.2, 25.1884): 시가 없음·상한가 시가면 사지 않는다
-        가격, 까닭 = pp.day_entry(o, 가격, 까닭, bar)
-        그날종가 = bar.close if bar is not None else None  # 진입 이득을 잴 체결일 종가 (25.1450)
+        # 판정은 순수 함수(`pp.judge_order` — judge → 당일 단타 진입 막기 → 정지·하한가 매도 미룸·청산, 25.2034).
         # 하한가로 갇힌 시장가 매도도 정지처럼 다음 장으로 미룬다(25.1553) — 취소하면 그 보유가 매도 없이 남는다
-        if 가격 is None and o.side == "sell" and (pp.halted(bar) or 까닭.endswith(pp.LOCKED_SELL)):
-            if int(r["deferrals"] or 0) + 1 >= pp.HALT_LIQUIDATE_SESSIONS:
-                마지막 = client.execute(LAST_CLOSE_SQL, [o.stock_id, 날]).rows
-                if 마지막:
-                    가격 = float(마지막[0][0])
-                    까닭 = f"정지·하한가로 {pp.HALT_LIQUIDATE_SESSIONS}거래일 미룸 — 마지막 종가로 청산"
-            if 가격 is None:
-                _쓰기(client, [(DEFER_SQL, [미룰장(날), f"{까닭} — 다음 장으로", o.id])])
-                기록["deferred"] = 기록.get("deferred", 0) + 1
-                continue
+        def _마지막(sid: int = o.stock_id, 날: str = 날) -> float | None:
+            줄 = client.execute(LAST_CLOSE_SQL, [sid, 날]).rows
+            return float(줄[0][0]) if 줄 else None
+
+        판정, 가격, 까닭 = pp.judge_order(o, bar, _마지막)
+        그날종가 = bar.close if bar is not None else None  # 진입 이득을 잴 체결일 종가 (25.1450)
+        if 판정 == "defer":
+            _쓰기(client, [(DEFER_SQL, [미룰장(날), f"{까닭} — 다음 장으로", o.id])])
+            기록["deferred"] = 기록.get("deferred", 0) + 1
+            continue
         if 가격 is None:
             문장 = [(EXPIRE_SQL, [trade_date, 까닭, o.id])]
             if o.side == "buy" and bar is not None and not pp.halted(bar):
@@ -935,32 +932,31 @@ def fill_orders(
                 continue
             환율, 환율날 = fx
         체결 = pp.make_fill(o, 가격, 날, 환율, costs_for(market, fees, taxes, 날))
+        계좌체결 = [f for f in [*fills, *새것] if f.account_id == o.account_id]
+        다른예약 = 0.0
         if o.side == "buy":
-            계좌체결 = [f for f in [*fills, *새것] if f.account_id == o.account_id]
             남은매수.pop(o.id, None)
             # 뒤 장 매수의 예약은 빼지 않는다 — 장 순서로 판정하니 뒤 장 매도 대금이 안 들어오는데 뒤 장 매수 예약만
             # 빼면 앞 장 매수가 현금 부족으로 취소됐다(25.1621, 25.1620 반박 [필수] 2)
+            # 다른 달러 예약의 환율을 모르면(None) 예약을 빼지 않고 빚만 막는다 — 주문 때 이미 현금 안에서 냈다
             다른예약 = pp.reserved_krw([x for x in 남은매수.values() if x.account_id == o.account_id
                                     and x.fill_session <= o.fill_session],
-                                   {"USD": 오늘환율[0] if 오늘환율 else None})  # fmt: skip
-            # 다른 달러 예약의 환율을 모르면(None) 예약을 빼지 않고 빚만 막는다 — 주문 때 이미 현금 안에서 냈다
-            if pp.cash(flows, 계좌체결) + 체결.cash_krw - (다른예약 or 0.0) < 0:
-                _쓰기(client, [(EXPIRE_SQL, [trade_date, "현금 부족 (다른 미체결 매수 예약 포함)", o.id])])
-                기록["expired"] = 기록.get("expired", 0) + 1
-                continue
+                                   {"USD": 오늘환율[0] if 오늘환율 else None}) or 0.0  # fmt: skip
+        # 장부 점검(현금·보유)은 순수 함수(`pp.settle_check`, 25.2034 — 리플레이와 같이)
+        안됨 = pp.settle_check(o, 체결, 계좌체결, flows, 다른예약)
+        if 안됨:
+            _쓰기(client, [(EXPIRE_SQL, [trade_date, 안됨, o.id])])
+            기록["expired"] = 기록.get("expired", 0) + 1
+            continue
         실현 = 환차 = None
         if o.side == "sell":
-            보유 = pp.positions([f for f in [*fills, *새것] if f.account_id == o.account_id]).get(o.stock_id)
+            보유 = pp.positions(계좌체결).get(o.stock_id)
             if 보유 is not None and 보유.quantity > 0:
                 # 매도의 실현손익(원) — 평균 원가 기준, 화면의 거래내역 (25.1455)
                 실현 = _원(체결.cash_krw - 보유.cost_krw * o.quantity / 보유.quantity)
                 # 그 가운데 환차 몫 (25.1693, CLAUDE.md "해외 종목은 환차손익을 주가 손익과 분리") — 같은 평균 원가 장부
                 환차 = next((r["fx_krw"] for r in pp.realized(
                     [f for f in [*fills, *새것, 체결] if f.account_id == o.account_id]) if r["order_id"] == o.id), None)
-            if 보유 is None or 보유.quantity < o.quantity:
-                _쓰기(client, [(EXPIRE_SQL, [trade_date, "팔 보유가 모자람", o.id])])
-                기록["expired"] = 기록.get("expired", 0) + 1
-                continue
         _쓰기(client, [
             (INSERT_FILL_SQL, [체결.order_id, 체결.account_id, 체결.stock_id, 체결.side, 체결.fill_date, 체결.price,
                                체결.quantity, 체결.currency, 체결.fx_rate, 환율날, 체결.fee, 체결.tax, 체결.slippage,

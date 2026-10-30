@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import math
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -482,6 +483,44 @@ def pair_sell_state(order: Order, reason: str | None, fills: list[Fill], open_bu
            for x in open_buys):  # fmt: skip
         return "wait"
     return "expire"
+
+
+def judge_order(
+    order: Order, bar: Bar | None, last_close: Callable[[], float | None],
+) -> tuple[str, float | None, str]:  # fmt: skip
+    """주문 하나의 그날 판정 — ("fill" | "defer" | "expire", 체결가(슬리피지 전), 까닭).
+
+    `judge` → 당일 단타 진입 막기(`day_entry`) → 정지·하한가 시장가 매도는 미룬다(25.1553), 미룬 지
+    `HALT_LIQUIDATE_SESSIONS` 째면 마지막 종가로 청산(`last_close` — 그날 앞 마지막 종가, 없으면 미룸) → 그 밖에
+    안 찼으면 만료. 가상모의투자 체결 판정(`jobs/paper.fill_orders` — DB 쓰기·환율·시세 기다림은 그쪽)과 S·T
+    리플레이(깔때기 ⑦)가 같이 쓴다(25.2034)"""
+    가격, 까닭 = judge(order, bar)
+    가격, 까닭 = day_entry(order, 가격, 까닭, bar)
+    if 가격 is None and order.side == "sell" and (halted(bar) or 까닭.endswith(LOCKED_SELL)):
+        if order.deferrals + 1 >= HALT_LIQUIDATE_SESSIONS:
+            마지막 = last_close()
+            if 마지막 is not None:
+                return "fill", float(마지막), f"정지·하한가로 {HALT_LIQUIDATE_SESSIONS}거래일 미룸 — 마지막 종가로 청산"
+        return "defer", None, 까닭
+    if 가격 is None:
+        return "expire", None, 까닭
+    return "fill", 가격, 까닭
+
+
+def settle_check(
+    order: Order, fill: Fill, account_fills: list[Fill], flows: list[CashFlow], reserved_krw: float,
+) -> str | None:  # fmt: skip
+    """체결 직전 장부 점검 — 안 되면 만료 까닭, 되면 None. 매수: 현금(입금 + 그 계좌 체결) + 이 체결 − 다른 미체결
+    매수 예약 < 0 이면 "현금 부족", 매도: 그 계좌 보유가 주문 수량보다 적으면 "팔 보유가 모자람".
+    `fill_orders` 와 S·T 리플레이가 같이 쓴다(25.2034)"""
+    if order.side == "buy":
+        if cash(flows, account_fills) + fill.cash_krw - reserved_krw < 0:
+            return "현금 부족 (다른 미체결 매수 예약 포함)"
+        return None
+    보유 = positions(account_fills).get(order.stock_id)
+    if 보유 is None or 보유.quantity < order.quantity:
+        return "팔 보유가 모자람"
+    return None
 
 
 def rest_set(rule: str, fills: list[Fill], rest_start: str, selling: set[int], open_sells: set[int]) -> set[int]:

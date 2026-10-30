@@ -404,3 +404,33 @@ def test_쉼_집합과_스윙_후보_순수_함수() -> None:
 
     행 = [SimpleNamespace(stock_id=s, horizon=h) for s, h in ((1, "short"), (2, "mid"), (3, "short"), (4, "short"))]
     assert [r.stock_id for r in pp.short_candidates(행, {3})] == [1, 4]
+
+
+def test_주문_판정과_장부_점검_순수_함수() -> None:
+    """`pp.judge_order`·`pp.settle_check`(25.2034 — 가상모의투자 fill_orders 와 S·T 리플레이가 같이 쓴다)."""
+    매도 = _주문(id=3, account_id="S", side="sell")
+    정지 = pp.Bar("2026-10-30", 0.0, 10_000.0, 0)
+    assert pp.judge_order(매도, 정지, lambda: 9_000.0)[0] == "defer"
+    # 미룬 지 HALT_LIQUIDATE_SESSIONS 째 — 마지막 종가로 청산, 마지막 종가를 모르면 계속 미룸
+    오래 = _주문(id=3, account_id="S", side="sell", deferrals=pp.HALT_LIQUIDATE_SESSIONS - 1)
+    판정, 가격, 까닭 = pp.judge_order(오래, 정지, lambda: 9_000.0)
+    assert (판정, 가격) == ("fill", 9_000.0) and "마지막 종가로 청산" in 까닭
+    assert pp.judge_order(오래, 정지, lambda: None)[0] == "defer"
+    # 하한가 시장가 매도(전일 대비 −30%)도 미룸
+    하한 = pp.Bar("2026-10-30", 7_000.0, 7_000.0, 100, -30.0)
+    assert pp.judge_order(매도, 하한, lambda: None)[0] == "defer"
+    # 매수는 안 차면 만료, T 상한가 시가는 만료(day_entry)
+    assert pp.judge_order(_주문(), 정지, lambda: None)[0] == "expire"
+    assert pp.judge_order(_주문(), pp.Bar("2026-10-30", 12_990.0, 12_000.0, 1000), lambda: None)[0] == "expire"
+    assert pp.judge_order(_주문(), pp.Bar("2026-10-30", 10_100.0, 10_300.0, 1000), lambda: None) == (
+        "fill", 10_100.0, "시가")  # fmt: skip
+
+    입금 = [pp.CashFlow(1, "2026-10-29", 100_000.0, "deposit")]
+    산것 = _체결(cash_krw=-90_000.0)
+    assert pp.settle_check(_주문(), _체결(cash_krw=-10_000.0), [산것], 입금, 0.0) is None
+    assert pp.settle_check(_주문(), _체결(cash_krw=-10_000.0), [산것], 입금, 1.0) == "현금 부족 (다른 미체결 매수 예약 포함)"
+    팔기 = _주문(id=2, side="sell", quantity=10)
+    assert pp.settle_check(팔기, _체결(side="sell"), [산것], 입금, 0.0) is None
+    assert pp.settle_check(_주문(id=2, side="sell", quantity=11), _체결(side="sell"), [산것], 입금, 0.0) == (
+        "팔 보유가 모자람")  # fmt: skip
+    assert pp.settle_check(_주문(id=2, side="sell", stock_id=8), _체결(side="sell"), [산것], 입금, 0.0) == "팔 보유가 모자람"
