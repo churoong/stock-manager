@@ -1394,7 +1394,7 @@ def _스윙넘음(client: Any, 행: dict[str, Any], today: date) -> dict[str, An
 
 def _주수(q: float) -> str:
     """근거표의 주식 수 — 정수면 천 단위 쉼표, 소수면 그대로(`:g` 는 100만 주부터 지수 표기였다, 25.2012)"""
-    return f"{float(q):,.0f}" if float(q).is_integer() else f"{float(q):,}"
+    return f"{float(q):,.0f}" if float(q).is_integer() else f"{float(q):,.6g}"  # 소수는 부동소수 찌꺼기 없이(25.2013)
 
 
 #: 추세 익절(G)의 고점 — 첫 매수일부터 오늘까지 종가 최댓값 (보유마다 한 번, 25.1481)

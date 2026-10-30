@@ -1202,3 +1202,18 @@ def test_다른_감시_실행이_먼저_적은_종목은_멈춤도_알림도_아
     assert s.orders == [] and r["sent"] == {"skipped_other_run": 1} and "alert" not in r
     assert ig.run_status(r) != "skipped"
 
+
+def test_다른_종목의_장중_줄은_정리_줄_겹침을_가리지_않는다(c: Client) -> None:
+    """25.2013 (25.2011 교차검증 [참고]) — 새 갈래는 **같은 종목** 장중 줄만 본다. 다른 종목에 장중 줄이 있어도, 0093 적용
+    전 색인에서 정리 줄에 막힌 이 종목은 예전처럼 멈춤·알림이다"""
+    c.conn.execute("DROP INDEX IF EXISTS idx_paper_broker_cleanup_kind")
+    c.conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_paper_broker_cleanup ON paper_broker_orders (broker, trade_date,"
+                   " stock_id, side) WHERE paper_order_id IS NULL")  # fmt: skip
+    _정리줄(c)
+    c.conn.execute("INSERT INTO paper_broker_orders (broker, paper_order_id, account_id, market, stock_id, code, side,"
+                   " order_type, quantity, trade_date, reason, status, source, created_at) VALUES ('kis_vts', NULL, 'H',"
+                   " 'KR', 3, '000660', 'sell', 'market', 1, '2026-10-26', ?, 'accepted', 'kis_vts', 't')",
+                   [bm.REASON_GUARD_STOP])  # fmt: skip
+    r = ig.run(c, 월, session=_Sess([_h("005930", 9_250.0)]), clock=lambda: 월)
+    assert r["sent"] == {"skipped_other_row": 1} and "정리 매도 줄과 겹쳐" in r["alert"]
+
