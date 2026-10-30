@@ -863,14 +863,22 @@ def h_check(
             "band_pp": h_adj["band_pp"], "unmeasured_pct": h_adj["unmeasured_pct"], "pre_link": pre_link}  # fmt: skip
 
 
-def _손절_해당없음(account: str) -> str | None:
-    """위험판 '손절 가까움' 을 기간 손절선으로 재지 않는 계좌의 글(25.2022) — 스윙 S·당일 단타 T"""
+def _손절_해당없음(account: str, n_positions: int) -> tuple[str, bool] | None:
+    """위험판 '손절 가까움' 을 기간 손절선으로 재지 않는 계좌의 (글, 경고인가)(25.2022) — 스윙 S·당일 단타 T.
+
+    계좌 ID 로 가른다(`pp.SAME_DAY_IDS`·`SEPARATE_IDS`) — 이 자리엔 계좌 매도 규칙이 없다. 주간 요약(25.1873)은 매도
+    규칙 이름으로 가른다. 스윙이 아닌 실험 계좌를 SEPARATE_IDS 에 더하면 여기도 고친다(25.2023).
+    T 에 보유가 남았으면(짝을 잃은 보유 `단타잔여`·하한가로 미룬 짝 매도 — 하룻밤 넘김) "보유 0주" 가 아니라 그 보유를
+    경고로 알린다 — 위험판이 보여야 할 바로 그 비정상 보유를 숨겼다(25.2023, 25.2022 교차검증 [권고])"""
     if account in pp.SAME_DAY_IDS:
-        return "해당 없음 — 당일 단타(하루 끝 보유 0주)"
+        if n_positions:
+            return f"하루 넘긴 단타 보유 {n_positions}종목 — 다음 장 시가 매도(단타잔여·미룬 짝 매도)", True
+        return "해당 없음 — 당일 단타(하루 끝 보유 0주)", False
     if account in pp.SEPARATE_IDS:
         from batch.services import shadow as sh
 
-        return f"해당 없음 — 스윙은 진입 시가 대비 종가 {sh.SWING_CLOSE.stop_pct * 100:g}%(다음 장 시가 매도)"
+        선 = f"{sh.SWING_CLOSE.stop_pct * 100:g}".replace("-", "−")  # 다른 글과 같은 마이너스 기호(25.1876)
+        return f"해당 없음 — 스윙은 진입 시가 대비 종가 {선}%(다음 장 시가 매도)", False
     return None
 
 
@@ -896,7 +904,7 @@ def risk_board(
         # 스윙·단타는 기간 손절선을 쓰지 않는다 — 스윙은 진입 시가 대비 종가, 단타는 하루 끝 0주. 기간 선(단기 −7%,
         # 원가 기준)으로 재면 스윙 손절선(−3%) 앞 보유가 "없음" 이고 이미 판 보유만 다른 선으로 떴다(25.2022 결함 루프 —
         # 주간 요약은 25.1873 이 같은 처리)
-        주석 = _손절_해당없음(a)
+        주석 = _손절_해당없음(a, len(종목))
         for q in 종목 if 주석 is None else []:
             기간 = str(q.get("horizon") or "")
             선 = stops.get(기간 if 기간 in stops else "long")
@@ -911,7 +919,8 @@ def risk_board(
         out.append({"id": a, "exposure_pct": 보유 / 자산 * 100 if 자산 > 0 else None, "positions": len(종목),
                     "top_weight_pct": float(큰.get("weight_pct") or 0) if 큰 else None,
                     "top_name": (큰.get("name") or 큰.get("ticker")) if 큰 else None, "near_stop": 가까움,
-                    **({"near_stop_note": 주석} if 주석 else {}),
+                    **({"near_stop_note": 주석[0]} if 주석 else {}),
+                    **({"near_stop_warn": True} if 주석 and 주석[1] else {}),
                     "dd_pct": (v[-1][1] / 고점 - 1) * 100 if v and 고점 else None})  # fmt: skip
     return out
 

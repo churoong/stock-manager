@@ -102,6 +102,8 @@ export interface RiskRow {
   near_stop: Array<{ name: string | null; unrealized_pct: number; stop_pct: number }>; dd_pct: number | null;
   /** 기간 손절선으로 재지 않는 계좌(스윙·단타)의 까닭 — 있으면 "없음" 대신 이 글(25.2022) */
   near_stop_note?: string;
+  /** 그 글이 경고인가 — 단타에 하룻밤 넘긴 보유가 남은 날(25.2023) */
+  near_stop_warn?: boolean;
 }
 /** 실전 준비 목록 한 항목 (docs/paper.md 14장, 25.1513) — 상태는 배치 코드의 표, 근거는 기록에서 */
 export interface ReadinessItem { key: string; label: string; status: "done" | "partial" | "rehearsal" | "todo" | "user"; note: string; evidence: string | null }
@@ -395,10 +397,10 @@ export function adjustCheckText(c: FillAdjustCheck | null | undefined, mirror: s
  * 위험판 "손절 가까움" 칸의 글 — 가까운 보유가 있으면 "이름 수익%(선 x%)", 없으면 기간 손절선으로 재지 않는 계좌(스윙·단타)의
  * 까닭(`near_stop_note`, 25.2022), 그것도 없으면 "없음". 비었을 때 회색으로 그릴지(`muted`)도 함께
  */
-export function nearStopText(r: Pick<RiskRow, "near_stop" | "near_stop_note">): { text: string; muted: boolean } {
+export function nearStopText(r: Pick<RiskRow, "near_stop" | "near_stop_note" | "near_stop_warn">): { text: string; muted: boolean } {
   if (r.near_stop.length) {
     return { text: r.near_stop.map((x) => `${x.name ?? "?"} ${x.unrealized_pct.toFixed(1)}%(선 ${x.stop_pct}%)`).join(" · "), muted: false };
   }
-  return { text: r.near_stop_note ?? "없음", muted: true };
+  return { text: r.near_stop_note ?? "없음", muted: !r.near_stop_warn };
 }
 

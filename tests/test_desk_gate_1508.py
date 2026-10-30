@@ -119,8 +119,23 @@ def test_위험판은_스윙_단타를_기간_손절선으로_재지_않는다()
     rows = {r["id"]: r for r in desk.risk_board(latest, {}, {"short": -7.0, "mid": -15.0, "long": -25.0})}
     assert [x["name"] for x in rows["A"]["near_stop"]] == ["병"]  # 기간 선을 쓰는 계좌는 그대로
     assert rows["S"]["near_stop"] == [] and rows["S"]["near_stop_note"].startswith("해당 없음 — 스윙")
-    assert "-3%" in rows["S"]["near_stop_note"]
-    assert rows["T"]["near_stop"] == [] and rows["T"]["near_stop_note"].startswith("해당 없음 — 당일 단타")
+    assert "−3%" in rows["S"]["near_stop_note"] and "near_stop_warn" not in rows["S"]  # 마이너스 기호(25.2023)
+    # T 에 하룻밤 넘긴 보유가 남았으면 "보유 0주" 가 아니라 경고(25.2023, 25.2022 교차검증 [권고])
+    assert rows["T"]["near_stop"] == [] and rows["T"]["near_stop_note"].startswith("하루 넘긴 단타 보유 1종목")
+    assert rows["T"]["near_stop_warn"] is True
+    빈 = desk.risk_board({"T": {"equity": 1_000_000, "holdings": 0, "positions": []}}, {}, {"short": -7.0})[0]
+    assert 빈["near_stop_note"].startswith("해당 없음 — 당일 단타") and "near_stop_warn" not in 빈
+
+
+def test_위험판_스윙_글은_규칙_값을_따라간다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.2023 — 글의 % 를 박지 않는다(25.1876 과 같은 꼴)"""
+    import dataclasses
+
+    from batch.services import shadow as sh
+
+    monkeypatch.setattr(sh, "SWING_CLOSE", dataclasses.replace(sh.SWING_CLOSE, stop_pct=-0.04))
+    글 = desk.risk_board({"S": {"equity": 1, "holdings": 0, "positions": []}}, {}, {"short": -7.0})[0]["near_stop_note"]
+    assert "−4%" in 글
 
 
 def test_champion_blocks_by_hand() -> None:
