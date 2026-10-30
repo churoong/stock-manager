@@ -294,14 +294,17 @@ def reconcile(
     for r in sorted(rows, key=lambda x: (x.get("broker_order_no") is None, int(x["id"]))):
         날 = str(r["trade_date"]).replace("-", "")
         e = by_no.get((날, _번호(r["broker_order_no"]))) if r.get("broker_order_no") else None
+        가져감: str | None = None
         if e is None and not r.get("broker_order_no"):
-            e = next((x for x in executions if (x.order_date, _번호(x.order_no)) not in 쓴 and x.order_date == 날
-                      and x.code == r["code"] and x.side == r["side"] and x.quantity == int(r["quantity"])
-                      and _단가_맞음(x, r)),
-                     None)  # fmt: skip
+            같은꼴 = [x for x in executions if x.order_date == 날 and x.code == r["code"] and x.side == r["side"]
+                     and x.quantity == int(r["quantity"]) and _단가_맞음(x, r)]  # fmt: skip
+            e = next((x for x in 같은꼴 if (x.order_date, _번호(x.order_no)) not in 쓴), None)
+            if e is None and 같은꼴:
+                # 같은 꼴 체결은 있었지만 다른 줄 몫이다 — "체결이 없었다" 와 가르게 글을 단다(25.2026 교차검증 [참고])
+                가져감 = f"{missing} — 같은 꼴 체결(번호 {같은꼴[0].order_no})은 다른 줄이 이미 가져감"
         if e is None:
             if complete:
-                out.append(Outcome(int(r["id"]), "unknown", r.get("broker_order_no"), 0, None, missing))
+                out.append(Outcome(int(r["id"]), "unknown", r.get("broker_order_no"), 0, None, 가져감 or missing))
             continue
         쓴.add((e.order_date, _번호(e.order_no)))
         if e.filled <= 0 and e.rejected > 0:
