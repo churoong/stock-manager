@@ -374,6 +374,9 @@ def test_단타_진입_막기_순수_함수(monkeypatch: pytest.MonkeyPatch) -> 
         10_300.0, pp.NO_OPEN_CLOSE_NOTE)  # fmt: skip
     assert pp.day_entry(_주문(side="sell"), 10_300.0, pp.NO_OPEN_CLOSE_NOTE, 시가없음)[0] == 10_300.0
     assert pp.day_entry(o, None, "정지", None) == (None, "정지")
+    # 미국(달러) 주문은 상한가 시가 막기가 없다 — 국내만(가격제한폭)(25.2035)
+    assert pp.day_entry(_주문(currency="USD", ref_price=100.0), 140.0, "시가", pp.Bar("2026-10-30", 140.0, 141.0, 1)) == (
+        140.0, "시가")  # fmt: skip
 
 
 def test_단타_짝_매도_상태_순수_함수() -> None:
@@ -389,6 +392,12 @@ def test_단타_짝_매도_상태_순수_함수() -> None:
     assert pp.pair_sell_state(_주문(id=2, side="sell", reason=pp.DAY_CLOSE_CODE, deferrals=1), pp.DAY_CLOSE_CODE,
                               [], []) is None  # fmt: skip
     assert pp.pair_sell_state(_주문(id=2, side="sell", account_id="S"), pp.DAY_CLOSE_CODE, [], []) is None
+    # 맞춤 조건 넷(25.2035, 25.2031 교차검증 [권고] — ⑦-5 일치 시험이 같은 함수를 써 퇴행을 못 잡는다): 다른 종목·다른
+    # 계좌의 남은 매수는 기다릴 까닭이 아니고, 다른 계좌의 매수 체결·같은 종목의 매도 체결은 짝 매수가 아니다
+    assert pp.pair_sell_state(짝, pp.DAY_CLOSE_CODE, [], [_주문(stock_id=8)]) == "expire"
+    assert pp.pair_sell_state(짝, pp.DAY_CLOSE_CODE, [], [_주문(account_id="S")]) == "expire"
+    assert pp.pair_sell_state(짝, pp.DAY_CLOSE_CODE, [_체결(account_id="S")], []) == "expire"
+    assert pp.pair_sell_state(짝, pp.DAY_CLOSE_CODE, [_체결(side="sell")], []) == "expire"
 
 
 def test_쉼_집합과_스윙_후보_순수_함수() -> None:

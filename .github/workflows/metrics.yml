@@ -95,7 +95,11 @@ jobs:
       - name: 시세 사본 맞추기
         id: replica
         # 비었으면 Turso 월 읽기 진도가 허락할 때 처음부터 만든다(약 760만 행, 한 번). 못 맞추면 작업이 Turso 에서 읽는다
-        # --ohl-rebuild: 예전 사본(시가 열 없음)의 한 번 새로 만들기는 이 작업(60분)만 한다(25.2032)
+        # --ohl-rebuild: 예전 사본(시가 열 없음)의 한 번 새로 만들기는 이 작업(60분)만 한다(25.2032).
+        # 다시 받기(약 2,100만 행)가 길어져도 지표 계산을 지키게 단계 상한을 두고 넘으면 넘어간다(25.2035) — 잘려도
+        # DROP 앞에 usable=0 을 적어 두어(25.2032) 빈 사본이 쓰이지 않고 계산은 Turso 에서 읽는다, 캐시에도 안 넣는다
+        timeout-minutes: 35
+        continue-on-error: true
         run: python scripts/price_replica.py sync --path .price-replica/prices.db --ohl-rebuild
 
       - name: 시세 사본 암호화

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import math
 import statistics
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 #: 국내 시가가 전일 종가 대비 이만큼 이상이면 상한가 시가로 보고 사지 않는다(시장가 매수가 줄을 선다 —
@@ -136,7 +137,7 @@ def rights_back(entry_date: str, day: str, factors: list[tuple[str, float]]) -> 
 
 
 def swing_exit(
-    entry_date: str, entry_price: float, closes: list[tuple[str, float]], factors: list[tuple[str, float]] = (),
+    entry_date: str, entry_price: float, closes: list[tuple[str, float]], factors: Sequence[tuple[str, float]] = (),
     rule: Rule = SWING_CLOSE,
 ) -> tuple[str, int, float, float] | None:  # fmt: skip
     """S 보유 로트 하나의 넘음 — (까닭, 넘은 종가의 자리, 되돌린 종가, 그날 계수). 아직 아니면 None.
