@@ -79,6 +79,52 @@ def _저장소_공개_여부를_고정한다():  # noqa: ANN201
         os.environ["REPO_PUBLIC"] = 옛
 
 
+def 근거표_어긋남(conn: _sqlite3.Connection) -> list[str]:
+    """가상모의투자 주문 근거(`rationale_json` 의 `signal.criteria`·`flags[].criteria`) 가운데 웹 근거표 꼴이 아닌 것.
+
+    25.1871 의 스윙 매도 근거는 `{name, value, date}` 꼴이라 웹 거래내역이 빈 칸으로 그렸는데, 근거표 계약 시험의
+    AST 훑기(네 열쇠 딕셔너리)는 다른 꼴을 못 봐 25.2000 까지 아무 시험도 깨지지 않았다 — 실행으로 잡는다(25.2005)"""
+    import json
+
+    from batch.services import criteria as _crit
+
+    try:
+        행들 = conn.execute("SELECT id, rationale_json FROM paper_orders WHERE rationale_json IS NOT NULL").fetchall()
+    except _sqlite3.Error:
+        return []
+    out: list[str] = []
+    for oid, 글 in 행들:
+        try:
+            근거 = json.loads(글)
+        except ValueError:
+            continue
+        if not isinstance(근거, dict):
+            continue
+        목록 = [("signal", (근거.get("signal") or {}).get("criteria") if isinstance(근거.get("signal"), dict) else None)]
+        목록 += [(f"flags[{i}]", f.get("criteria")) for i, f in enumerate(근거.get("flags") or []) if isinstance(f, dict)]
+        for 자리, 기준 in 목록:
+            if 기준 is None:
+                continue
+            if not isinstance(기준, list) or not all(isinstance(r, dict) and _crit.displayable(r) for r in 기준):
+                out.append(f"주문 {oid} {자리}: {str(기준)[:120]}")
+    return out
+
+
+@pytest.fixture(autouse=True)
+def _주문_근거는_근거표_꼴이다():  # noqa: ANN201
+    """가상모의투자 가짜 DB 를 쓴 시험이 끝나면 그 DB 의 주문 근거가 모두 근거표 꼴(label·display·threshold·source
+    문자열)인지 본다 — 계좌 규칙이 새 근거를 지어도 웹에서 빈 칸이 되지 않게(25.2005)"""
+    import sys
+
+    yield
+    모듈 = sys.modules.get("tests.test_paper_job_1445")
+    if 모듈 is None:
+        return
+    어긋남 = [x for c in list(모듈.만든_client) for x in 근거표_어긋남(c.conn)]
+    모듈.만든_client.clear()
+    assert not 어긋남, "주문 근거가 웹 근거표 꼴이 아니다(25.2005):\n" + "\n".join(어긋남[:5])
+
+
 @pytest.fixture(autouse=True)
 def _시세_손댐_기록을_비운다():  # noqa: ANN201
     """`db._가격_손댐`(고친 시세 범위, 25.888)은 실행을 닫을 때 그 실행 기록에 붙고, 열린 실행이 없을 때만 비워진다.

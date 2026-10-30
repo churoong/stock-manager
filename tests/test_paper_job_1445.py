@@ -19,6 +19,10 @@ from batch.services import report_picks
 
 ROOT = Path(__file__).resolve().parent.parent
 
+#: 이 시험에서 만든 가짜 DB — conftest 가 시험 끝에 주문 근거가 근거표 꼴인지 보고 비운다(25.2005). 약한 참조로 두면
+#: 시험 함수가 끝나는 순간 지역 변수와 함께 사라져 아무것도 보지 못했다
+만든_client: list[Client] = []
+
 
 class _Res:
     def __init__(self, cur: sqlite3.Cursor) -> None:
@@ -35,6 +39,7 @@ class _Res:
 class Client:
     def __init__(self, accounts: tuple[str, ...] | None = ("A", "B"), charters: bool = False) -> None:
         self.conn = sqlite3.connect(":memory:")
+        만든_client.append(self)
         for path in sorted((ROOT / "migrations").glob("*.sql")):
             self.conn.executescript(path.read_text(encoding="utf-8"))
         if not charters:

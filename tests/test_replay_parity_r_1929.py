@@ -77,6 +77,15 @@ t.비용판.setdefault("slip", (_비용, bt.Costs.for_country("KR", _비용, {})
 운영든대체: dict[tuple[int, str], dict[int, int]] = {}
 
 
+def _대체근거(자리: int) -> dict:
+    """운영 무작위 대조 매수 근거와 같은 꼴(`sell_flags._criterion` + `substitute_of`, jobs/paper.py) — 손으로 줄인 꼴은
+    conftest 의 근거표 꼴 점검에 걸린다(25.2005)"""
+    from batch.services import sell_flags as sf
+
+    return {**sf._criterion("무작위 대조", f"원래 자리 {자리}", "추천이 아니라 대조 실험", "paper", "2026-01-01"),
+            "substitute_of": 자리}
+
+
 def _db_무작위(aid: str, fees: dict) -> Client:
     """1910 DB + 무작위 대조의 모집단(`universe_members` 편입 개별주 — 운영 `UNIVERSE_SQL`)."""
     c = t._db(aid, fees)
@@ -296,7 +305,7 @@ def test_든_대체_종목은_지금_보유_회차의_자리만_잇는다() -> N
     c = Client(accounts=("R2",))
 
     def 주문(oid: int, side: str, 자리: int | None, 날: str) -> None:
-        근거 = json.dumps({"signal": {"criteria": [{"substitute_of": 자리}]}}) if 자리 is not None else None
+        근거 = json.dumps({"signal": {"criteria": [_대체근거(자리)]}}) if 자리 is not None else None
         c.conn.execute(
             "INSERT INTO paper_orders (id, account_id, market, stock_id, side, order_type, limit_price, quantity, currency,"
             " decided_on, fill_session, tranche, reason, rule_version, status, created_at, rationale_json) VALUES (?, 'R2',"
@@ -328,7 +337,7 @@ def test_옛_자리_신호가_나온_날만_닿음() -> None:
     assert job.substitute_overlap_hits(겹침, {}, {27}) == {"1": [27]}  # 지금 회차를 모르면 넓게
     c = Client(accounts=("R2",))
     for oid, side, 자리, 날 in ((1, "buy", 8, "2024-01-29"), (2, "sell", None, "2024-02-15"), (3, "buy", 27, "2024-04-08")):
-        근거 = json.dumps({"signal": {"criteria": [{"substitute_of": 자리}]}}) if 자리 is not None else None
+        근거 = json.dumps({"signal": {"criteria": [_대체근거(자리)]}}) if 자리 is not None else None
         c.conn.execute(
             "INSERT INTO paper_orders (id, account_id, market, stock_id, side, order_type, limit_price, quantity, currency,"
             " decided_on, fill_session, tranche, reason, rule_version, status, created_at, rationale_json) VALUES (?, 'R2',"
