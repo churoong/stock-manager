@@ -170,6 +170,12 @@ _ACTION_SQL_HEAD = "SELECT close, change_pct, date FROM prices WHERE stock_id = 
 _SETTING_SQL = "SELECT value FROM settings WHERE key = ?"
 
 
+def _시장통화(country: str) -> str:
+    """유니버스 행에 통화가 비었을 때의 기본 — 시장에서(25.2063, 25.2058 교차검증 note: 예전 늘 "KRW" 는
+    미국에서 틀렸다)"""
+    return "USD" if country == "US" else "KRW"
+
+
 class _ViewClient:
     """운영 `jobs/paper` 함수가 DB 대신 읽는 창 — cutoff 로 자른 `PriceView` 만 답한다(미래를 볼 것이 없다)."""
 
@@ -434,7 +440,8 @@ class CoreStrategy:
         self._cache = {
             int(r["stock_id"]): {
                 "id": int(r["stock_id"]), "ticker": str(r["ticker"]), "name": str(r.get("name") or r["ticker"]),
-                "sector": r.get("sector") or None, "country": market.country, "currency": r.get("currency") or "KRW",
+                "sector": r.get("sector") or None, "country": market.country,
+                "currency": r.get("currency") or _시장통화(market.country),
                 "asset_type": r.get("asset_type") or "stock",
             }
             for r in market.universe
@@ -563,7 +570,8 @@ class CoreStrategy:
         hi = sf.HoldingInput(
             stock_id=lot.stock_id, name=self._cache.get(lot.stock_id, {}).get("name", str(lot.stock_id)),
             horizon=lot.horizon, first_buy_date=lot.first_buy,
-            currency=self._cache.get(lot.stock_id, {}).get("currency") or "KRW", cost=행["cost"],
+            currency=self._cache.get(lot.stock_id, {}).get("currency") or _시장통화(self.market.country),
+            cost=행["cost"],
             market_value=행["market_value"], price_date=view.last_date(lot.stock_id), horizon_since=lot.first_buy,
         )  # fmt: skip
         if self.prebuy:
@@ -588,7 +596,8 @@ class CoreStrategy:
         s = self._cache.get(lot.stock_id, {})
         보유행 = {
             "stock_id": lot.stock_id, "name": s.get("name", str(lot.stock_id)), "country": self.market.country,
-            "horizon": lot.horizon, "first_buy_date": lot.first_buy, "currency": s.get("currency") or "KRW",
+            "horizon": lot.horizon, "first_buy_date": lot.first_buy,
+            "currency": s.get("currency") or _시장통화(self.market.country),
             "cost": 행["cost"], "market_value": 행["market_value"], "price_date": view.last_date(lot.stock_id),
             "score_now": 점수[0][0] if 점수 else None, "score_now_date": 점수[0][1] if 점수 else None,
             "score_at_buy": lot.score_at_buy, "score_at_buy_date": lot.score_at_buy_date,

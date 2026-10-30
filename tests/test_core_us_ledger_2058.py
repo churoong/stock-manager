@@ -50,3 +50,13 @@ def test_미국_달러_장부는_국내와_같은_결정을_낸다(variant: str)
     assert _결정(us) == _결정(kr)
     # 곡선은 호가 단위 차이(회차 지정가 반올림 → 주당 금액)만큼만 — 실측 최대 7.7e-9(B)·7.0e-9(G), 그 백 배쯤
     assert max(abs(a[1] - b[1]) for a, b in zip(kr_r.curve, us_r.curve, strict=True)) < 1e-6
+
+
+def test_통화가_빈_미국_종목은_달러로_본다() -> None:
+    """유니버스 행에 통화가 비면 시장에서(25.2063, 25.2058 교차검증 note — 예전엔 늘 원화)"""
+    universe, _p, _t, snaps, idx = _달기("US")
+    u = [{k: v for k, v in r.items() if k != "currency"} for r in universe]
+    s = cs.make_core_strategy("core_b", cb.CoreMarket(u, snaps, idx, country="US"), sessions=날들)
+    assert {c["currency"] for c in s._cache.values()} == {"USD"}
+    kr = cs.make_core_strategy("core_b", cb.CoreMarket(u, snaps, {"KOSPI": idx["SP500"]}), sessions=날들)
+    assert {c["currency"] for c in kr._cache.values()} == {"KRW"}

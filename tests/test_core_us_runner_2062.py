@@ -96,6 +96,8 @@ def test_미국_실행이_다섯_행을_시장_US_로_싣는다(실행: tuple[Me
         경고 = json.loads(r["warnings_json"])
         assert bt.WARN_TOTAL_RETURN in 경고 and bt.WARN_NO_DIVIDENDS not in 경고
         assert any(w.startswith(cj.WARN_SPLIT_PENDING) and w.endswith("1종목") for w in 경고), 경고
+        # 운영과 일치 시험이 없는 변형만 단서(25.2063) — B·G 는 25.2059 가 묶었다
+        assert (cj.WARN_US_UNVERIFIED in 경고) == (r["strategy"] not in cj.US_PARITY_VERIFIED), r["strategy"]
     # 모든 변형이 산다(달러 장부 — 환율 거름이 다시 걸리면 투자 비중이 0). R1·R2 는 무작위 대체의 기업행위 읽기를 지난다
     # (25.2062 — 예전엔 미국 분할 감지 설정 읽기가 창에 없어 실행이 멈췄다)
     assert all(json.loads(r["metrics_json"])["invested_share"] > 0 and r["turnover_avg"] > 0 for r in 행들)
@@ -105,8 +107,18 @@ def test_미국_실행이_다섯_행을_시장_US_로_싣는다(실행: tuple[Me
     assert 엿본["cache"] and all(보류 not in ids for ids in 엿본["cache"].values())
 
 
+def test_미국_일치_시험_목록은_시험_파일과_같다() -> None:
+    """단서를 떼는 변형 목록은 미국 일치 시험이 실제로 있는 것만(25.2063) — B·G 는 tests/test_replay_parity_us_2059.py,
+    S·T 는 tests/test_replay_parity_st_us_2061.py. 넓히려면 그 변형의 미국 일치 시험을 먼저 더하고 여기를 고친다"""
+    assert {"core_b", "core_g", "st_s", "st_t"} == cj.US_PARITY_VERIFIED
+
+
 def test_미국_탐색_S_T_도_돈다(monkeypatch: pytest.MonkeyPatch) -> None:
     mem = _db(monkeypatch)
     assert cj.run_core("US", years=1, today=오늘, force=True, explore=True, st=True) == 0
     행 = {r["strategy"]: r for r in mem.execute("SELECT strategy, market FROM backtest_runs").dicts()}
     assert set(cj.ST_VARIANTS) <= set(행) and {r["market"] for r in 행.values()} == {"US"}
+    경고 = {r["strategy"]: json.loads(r["warnings_json"]) for r in mem.execute(
+        "SELECT strategy, warnings_json FROM backtest_runs").dicts()}  # fmt: skip
+    assert all(cj.WARN_US_UNVERIFIED not in 경고[v] for v in cj.ST_VARIANTS)  # S·T 는 25.2061 이 묶었다
+    assert all(cj.WARN_US_UNVERIFIED in w for v, w in 경고.items() if v not in cj.ST_VARIANTS)
