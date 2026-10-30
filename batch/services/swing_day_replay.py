@@ -90,10 +90,13 @@ def simulate_account(
 
     if account not in ACCOUNTS:
         raise ValueError(f"리플레이 계좌는 S·T — {account}")
-    if market != "KR":
-        # 주문 통화를 "KRW" 로 박아(국내 가격제한·상한가 시가 막기가 달러 종목에도 걸린다) 환율 없이 사이징한다 —
-        # 통화·`fx_at`(깔때기 ⑧-4) 전까지 막는다(25.2056)
-        raise NotImplementedError("S·T 리플레이는 아직 국내(KR)만 — 미국 통화는 깔때기 ⑧-4")
+    if market not in ("KR", "US"):
+        raise ValueError(f"S·T 리플레이 시장은 KR·US — {market}")
+    # 주문 통화는 시장으로(운영 `buy_orders` 와 같다) — 국내 가격제한·상한가 시가 막기(`pp.limit_locked`·
+    # `shadow.limit_up_open`)는 원화 주문에만 걸린다. 장부는 **시장 통화**(환율 1.0 — 25.2061, 깔때기 ⑧-4: 핵심 리플레이
+    # 25.2058 과 같다). 예전엔 "KRW" 로 박고 환율 없이 사이징해 미국을 막았다(25.2056)
+    통화 = "KRW" if market == "KR" else "USD"
+    환율 = {"USD": 1.0}
     규칙 = ACCOUNTS[account]
     dates = sorted(dates)
     flows = [pp.CashFlow(1, dates[0], float(deposit), "deposit")]
@@ -141,7 +144,7 @@ def simulate_account(
                     까닭코드 = pp.SWING_CODES[넘음[0]]
             if 까닭코드:
                 번호 += 1
-                주문.append((pp.Order(번호, account, sid, "sell", "market", None, int(p.quantity), "KRW", d,
+                주문.append((pp.Order(번호, account, sid, "sell", "market", None, int(p.quantity), 통화, d,
                                       reason=까닭코드), 까닭코드))  # fmt: skip
                 파는것.add(sid)
 
@@ -163,7 +166,7 @@ def simulate_account(
             client = _ViewClient(view)
             낸, _b = jp.buy_orders(
                 client, market=market, account=account, account_fills=fills, valuation=v, open_buys=[],
-                signal_rows=행, settings=settings, price_series={}, series_unknown={}, fx_rate=None,
+                signal_rows=행, settings=settings, price_series={}, series_unknown={}, fx_rate=1.0,
                 stop_ids=set(), sold_recently=쉼, stock_cache=stock_cache, top_n=TOP_N, entry="open",
             )  # fmt: skip
             # 견줄 어제 평가가 없으면 하루 수익 모름(None) — 운영 첫 평가와 같다(`prev_twr` 없음). 예전엔 0.0 이라
@@ -190,12 +193,12 @@ def simulate_account(
             for c in 통과:
                 o = 낸[c.key]
                 번호 += 1
-                주문.append((pp.Order(번호, account, o["stock_id"], "buy", "market", None, int(o["quantity"]), "KRW", d,
+                주문.append((pp.Order(번호, account, o["stock_id"], "buy", "market", None, int(o["quantity"]), 통화, d,
                                       horizon=o.get("horizon"), ref_price=o.get("ref_price")), None))  # fmt: skip
                 if 규칙 == pp.DAY_RULE:
                     번호 += 1
                     주문.append((pp.Order(번호, account, o["stock_id"], "sell", "market", None, int(o["quantity"]),
-                                          "KRW", d, fill_basis="close", reason=pp.DAY_CLOSE_CODE),
+                                          통화, d, fill_basis="close", reason=pp.DAY_CLOSE_CODE),
                                  pp.DAY_CLOSE_CODE))  # fmt: skip
 
         # ③ 체결 — 운영 fill_orders 와 같은 순서·판정
@@ -227,7 +230,8 @@ def simulate_account(
             예약 = 0.0
             if o.side == "buy":
                 남은매수.pop(o.id, None)
-                예약 = pp.reserved_krw(list(남은매수.values()), {"USD": None}) or 0.0
+                # 예전 `{"USD": None}` 은 달러 주문이면 None → `or 0.0` 으로 예약이 조용히 0 이 됐다(국내는 닿지 않음)
+                예약 = pp.reserved_krw(list(남은매수.values()), 환율) or 0.0
             안됨 = pp.settle_check(o, 체결, fills, flows, 예약)
             if 안됨:
                 기록["expired"][안됨] = 기록["expired"].get(안됨, 0) + 1

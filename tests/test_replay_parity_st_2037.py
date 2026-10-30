@@ -25,7 +25,12 @@ from batch.services import swing_day_replay as sdr
 from tests.test_core_strategy_1532 import _행
 from tests.test_paper_day_1883 import _계좌
 
-_달력 = cal.exchange_calendar("KR").sessions_in_range("2026-03-02", "2026-04-30")
+#: 시장 — 25.2061(깔때기 ⑧-4): tests/test_replay_parity_st_us_2061.py 가 이 파일을 "US" 로 바꿔 한 벌 더 싣는다(달력·통화·
+#: 시장 구분·운영 `run_step(market=…)`·환율 1.0 행). 미국엔 가격제한이 없어 상한가 시가·하한가 잠김 길은 국내만 지난다
+시장 = "KR"
+통화 = {"KR": "KRW", "US": "USD"}[시장]
+_구분 = {"KR": "KOSPI", "US": "NASDAQ"}[시장]
+_달력 = cal.exchange_calendar(시장).sessions_in_range("2026-03-02", "2026-04-30")
 날들 = [d.date().isoformat() for d in _달력][:18]
 설정 = {"max_weight_per_sector": 30.0, "max_weight_per_stock": 10.0, "min_order_amount": 0}
 입금 = 10_000_000.0
@@ -77,7 +82,7 @@ def _행들(cutoff: str, weight: float = 10.0) -> list[report_picks.SignalRow]:
     for sid in 신호.get(cutoff, []):
         기준 = 묵은.get((cutoff, sid), cutoff)
         out.append(dataclasses.replace(_행(sid, cutoff, _종가(sid, 기준), weight=weight, sector="전자"),
-                                       close_date=기준))  # fmt: skip
+                                       close_date=기준, market=_구분, currency=통화))  # fmt: skip
     return out
 
 
@@ -105,26 +110,30 @@ def _운영(account: str, monkeypatch: pytest.MonkeyPatch, 설정: dict = 설정
     for sid in (1, 2, 3):
         if not c.q("SELECT 1 FROM stocks WHERE id = ?", [sid]):
             c.conn.execute("INSERT INTO stocks (id, ticker, market, country, name_ko, sector, currency, status, source,"
-                           " fetched_at, asset_type) VALUES (?, ?, 'KOSPI', 'KR', ?, '전자', 'KRW', 'active', 't', 't',"
-                           " 'stock')", [sid, f"{sid:06d}", f"종목{sid}"])  # fmt: skip
+                           " fetched_at, asset_type) VALUES (?, ?, ?, ?, ?, '전자', ?, 'active', 't', 't',"
+                           " 'stock')", [sid, f"{sid:06d}", _구분, 시장, f"종목{sid}", 통화])  # fmt: skip
     # 바탕 고정 자료의 2 는 미국(AAPL) — 국내 종목으로 맞춘다(운영 매도 판정은 그 시장 종목만 본다)
-    c.conn.execute("UPDATE stocks SET sector = '전자', ticker = printf('%06d', id), country = 'KR', market = 'KOSPI',"
-                   " currency = 'KRW', asset_type = 'stock' WHERE id IN (1, 2, 3)")
+    c.conn.execute("UPDATE stocks SET sector = '전자', ticker = printf('%06d', id), country = ?, market = ?,"
+                   " currency = ?, asset_type = 'stock' WHERE id IN (1, 2, 3)", [시장, _구분, 통화])
+    if 시장 == "US":  # 환율 1.0 — 리플레이의 시장 통화 장부와 같은 단위(운영 `_fx` 는 묵은 환율을 거른다)
+        for d in 날들:
+            c.conn.execute("INSERT OR REPLACE INTO fx_rates (pair, date, rate, source, fetched_at)"
+                           " VALUES ('USDKRW', ?, 1.0, 't', 't')", [d])  # fmt: skip
     현금: dict[str, float] = {}
     for i, d in enumerate(날들):
         for sid, 줄 in _자료().items():
             o, cl, v = 줄[i]
             c.conn.execute(
                 "INSERT INTO prices (stock_id, date, open, high, low, close, volume, change_pct, currency, source,"
-                " fetched_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'KRW', 't', 't')",
-                [sid, d, o, max(o, cl), min(o, cl), cl, v, (cl / 줄[i - 1][1] - 1) * 100 if i else None],
+                " fetched_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 't', 't')",
+                [sid, d, o, max(o, cl), min(o, cl), cl, v, (cl / 줄[i - 1][1] - 1) * 100 if i else None, 통화],
             )  # fmt: skip
         if i == len(날들) - 1:
             break
         다음 = 날들[i + 1]
         오늘 = date.fromisoformat(다음)
         monkeypatch.setattr(cal, "local_today", lambda _m=None, _d=오늘: _d)
-        job.run_step(c, market="KR", trade_date=d, late=False, signal_rows=_행들(d, 설정.get("_weight", 10.0)), settings=설정, price_series={},
+        job.run_step(c, market=시장, trade_date=d, late=False, signal_rows=_행들(d, 설정.get("_weight", 10.0)), settings=설정, price_series={},
                      series_unknown={}, allocate=True, now=datetime.fromisoformat(f"{다음}T00:00:00+00:00"))  # fmt: skip
         체결 = [f for f in job._fills(c)[0] if f.account_id == account]
         현금[d] = pp.cash([pp.CashFlow(1, 날들[0], 입금, "deposit")], 체결)
@@ -140,11 +149,11 @@ def _리플레이(account: str, 설정: dict = 설정) -> sdr.STResult:
     prices = {sid: {d: 줄[i][1] for i, d in enumerate(날들)} for sid, 줄 in _자료().items()}
     opens = {sid: {d: 줄[i][0] for i, d in enumerate(날들)} for sid, 줄 in _자료().items()}
     turnover = {sid: {d: float(줄[i][2]) * 줄[i][1] for i, d in enumerate(날들)} for sid, 줄 in _자료().items()}
-    캐시 = {sid: {"id": sid, "ticker": f"{sid:06d}", "name": f"종목{sid}", "sector": "전자", "country": "KR",
-                  "currency": "KRW", "asset_type": "stock"} for sid in (1, 2, 3)}  # fmt: skip
+    캐시 = {sid: {"id": sid, "ticker": f"{sid:06d}", "name": f"종목{sid}", "sector": "전자", "country": 시장,
+                  "currency": 통화, "asset_type": "stock"} for sid in (1, 2, 3)}  # fmt: skip
     return sdr.simulate_account(account, rows_at=lambda view, _d: _행들(view.cutoff, 설정.get("_weight", 10.0)), prices=prices, opens=opens,
-                                dates=날들, costs_at=lambda d: job.costs_for("KR", None, None, d), stock_cache=캐시,
-                                settings=설정, deposit=입금, turnover=turnover)  # fmt: skip
+                                dates=날들, costs_at=lambda d: job.costs_for(시장, None, None, d), stock_cache=캐시,
+                                settings=설정, deposit=입금, turnover=turnover, market=시장)  # fmt: skip
 
 
 def _꼴(fills: list[pp.Fill]) -> list[tuple]:

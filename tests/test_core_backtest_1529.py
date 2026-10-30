@@ -510,7 +510,7 @@ def test_자본_통화() -> None:
 def test_미국_시장_판단기는_SP500_과_국외_조사_자료로(monkeypatch: pytest.MonkeyPatch) -> None:
     """깔때기 ⑧-2(25.2056) — 같은 합성 자료를 미국으로 바꿔 달면 원장 성과·사이징 베타·국면이 SP500 을 읽고(KOSPI 는 묻지
     않음), 위원회 조사 자료가 국외(`domestic=False` — 증권사·수급·공시는 "미국 종목 … 모으지 않는다")다. 장부형 판단
-    함수는 25.2058 부터 받고, S·T 리플레이는 통화(⑧-4) 전까지 막는다"""
+    함수(25.2058)와 S·T 리플레이(25.2061)도 미국을 받는다"""
     from batch.services import company as co
     from batch.services import core_strategy as cs
 
@@ -546,6 +546,7 @@ def test_미국_시장_판단기는_SP500_과_국외_조사_자료로(monkeypatc
     assert cs.CoreStrategy("core_h", m, sessions=날).market.country == "US"
     from batch.services import swing_day_replay as sdr
 
-    with pytest.raises(NotImplementedError, match="⑧-4"):
+    # S·T 리플레이도 25.2061 부터 미국을 받는다(tests/test_replay_parity_st_us_2061.py) — KR·US 밖만 막는다
+    with pytest.raises(ValueError, match="KR·US"):
         sdr.simulate_account("S", rows_at=lambda _v, _d: [], prices=p, opens=p, dates=날[:3], costs_at=lambda _d: None,
-                             stock_cache={}, settings={}, market="US")  # type: ignore[arg-type]
+                             stock_cache={}, settings={}, market="JP")  # type: ignore[arg-type]
