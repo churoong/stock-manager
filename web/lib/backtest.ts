@@ -241,6 +241,9 @@ export const REPLAY_LABEL: Record<string, string> = {
   core_e: "E 안정 (탐색)",
   core_a: "A 가치 (탐색)",
   core_c: "C 모멘텀 (탐색)",
+  // S·T 계좌형 리플레이(깔때기 ⑦-6, 25.2044) — 배치 `core_backtest.ST_VARIANTS`, 탐색 실행 `--st` 에서만
+  st_s: "S 스윙 (탐색)",
+  st_t: "T 당일 단타 (탐색)",
 };
 
 /** long_q55 처럼 문턱이 붙는 전략은 규칙으로 읽는다 (docs/backtest.md 7장) */
@@ -260,7 +263,7 @@ export function strategyKind(strategy: string): "main" | "factor" | "long" | "ca
   if (strategy === "benchmark" || strategy.startsWith("composite"))
     return "main";
   // 계좌형 리플레이는 성과요인분석이 아니다(25.1936)
-  if (strategy.startsWith("core_")) return "replay";
+  if (strategy.startsWith("core_") || strategy.startsWith("st_")) return "replay";
   if (/^long_q\d+$/.test(strategy)) return "long";
   // 후보는 성과요인분석이 아니다 — 예전에는 "성과요인" 표가 붙어 팩터 묶음에 섞였다 (25.443, 교차검증)
   if ((CANDIDATE_STRATEGIES as readonly string[]).includes(strategy)) return "candidate";

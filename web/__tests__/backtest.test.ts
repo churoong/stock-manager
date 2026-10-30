@@ -224,7 +224,8 @@ describe("실행 요청", () => {
     const 줄 = /options: \[(.*)\]/.exec(workflow.split("what:")[1] ?? "")?.[1] ?? "";
     const 워크플로 = 줄.split(",").map((x) => x.trim());
     // `탐색`(전략 깔때기 탐색 변형, 25.1908)도 같은 `core` 작업의 수동 전용 — 같은 까닭으로 뺀다
-    const 수동전용 = ["핵심H", "탐색"];
+    // `탐색단기`(탐색 + S·T 리플레이, 25.2044)도 같다
+    const 수동전용 = ["핵심H", "탐색", "탐색단기"];
     expect(워크플로.filter((x) => !수동전용.includes(x))).toEqual([...WHAT_OPTIONS]);
     for (const x of 수동전용) {
       expect(워크플로).toContain(x);
@@ -485,6 +486,12 @@ describe("계좌형 리플레이 이름표 (25.1936)", () => {
     const 파이썬 = readFileSync(join(process.cwd(), "..", "batch", "services", "core_strategy.py"), "utf-8");
     const 이름들 = [...파이썬.matchAll(/^\s+"(core_[a-z0-9]+)": Variant\(/gm)].map((m) => m[1]);
     expect(이름들.length).toBeGreaterThanOrEqual(9);
+    // S·T 계좌형 리플레이(25.2044) — `core_backtest.ST_VARIANTS`
+    const 실행기 = readFileSync(join(process.cwd(), "..", "batch", "jobs", "core_backtest.py"), "utf-8");
+    const st = /ST_VARIANTS: tuple\[str, \.\.\.\] = \(([^)]*)\)/.exec(실행기)?.[1] ?? "";
+    const st이름 = [...st.matchAll(/"([a-z_]+)"/g)].map((m) => m[1]);
+    expect(st이름).toEqual(["st_s", "st_t"]);
+    이름들.push(...st이름);
     expect([...이름들].sort()).toEqual(Object.keys(REPLAY_LABEL).sort());
     for (const n of 이름들) {
       expect(이름표(n)).not.toBe(n);

@@ -40,7 +40,7 @@ from batch.services import core_strategy as cs
 from batch.services import exit_pair as xp
 from batch.services import holding_eq as heq
 from batch.services import loss_gate as lg
-from batch.services import luck, trend
+from batch.services import luck, report_picks, trend
 from batch.services import metrics as m
 from batch.services import pit_universe as pit
 from batch.services import universe as uni
@@ -67,9 +67,16 @@ WARN_LIMIT_FILLS = (
 )
 
 
-def explore_trial_floor() -> int:
+#: S·T 계좌형 리플레이(깔때기 ⑦-6, 25.2044) — 탐색 실행(`--explore --st`)에서만. 이름은 실행 행의 `strategy`
+ST_VARIANTS: tuple[str, ...] = ("st_s", "st_t")
+WARN_ST = ("S·T 계좌형 리플레이(st_s·st_t) — 운영 S·T 규칙을 주식 수·현금 장부로 과거에 돌린 값(docs/funnel.md 4장 ⑦, "
+           "swing_day_replay 머리의 이름 붙은 차이 ①~⑤). 시가가 빈 옛 행은 종가로 판정돼 T 를 흐린다 — 실행 기록 "
+           "st.open_coverage 를 함께 본다")  # fmt: skip
+
+
+def explore_trial_floor(st: bool = False) -> int:
     """탐색 실행의 DSR 시도 수 하한 — 등록부 누적(funnel.md 2.1): 코호트 1(`REGISTERED_TRIALS`) + 탐색 변형 수."""
-    return jb.REGISTERED_TRIALS + len(cs.EXPLORE_VARIANTS)
+    return jb.REGISTERED_TRIALS + len(cs.EXPLORE_VARIANTS) + (len(ST_VARIANTS) if st else 0)
 #: `backtest_runs.rebalance` — 장부형 전략은 날마다 판단한다(월 백테스트는 "monthly")
 REBALANCE = "daily"
 #: 기본 연수 — 월 백테스트와 같다(자료 약 5년, docs/backtest.md 10장 자료 깊이)
@@ -148,6 +155,7 @@ def run_core(
     variants: tuple[str, ...] | None = None,
     explore: bool = False,
     limit_fills: bool = False,
+    st: bool = False,
 ) -> int:
     """핵심 H 변형 다섯을 날마다 돌려 저장한다. 0 = 성공. `today` 는 시험이 날짜를 고정할 때만 준다.
 
@@ -161,6 +169,9 @@ def run_core(
     variants = tuple(목록) if variants is None else variants
     if not variants or any(v not in 목록 for v in variants):
         raise ValueError(f"{'탐색' if explore else '핵심'} 실행 변형은 {sorted(목록)} 가운데서 — {variants}")
+    if st and not explore:
+        # S·T 리플레이는 거르기용 탐색 코호트에만 — 핵심 판정(코호트 1)의 시도 수를 바꾸지 않는다(funnel.md 2.1)
+        raise ValueError("S·T 리플레이(st)는 탐색 실행(explore)에서만")
     job_name = EXPLORE_JOB_NAME if explore else LIMIT_JOB_NAME if limit_fills else JOB_NAME
     if market != "KR":
         # 미국은 지수·통화·분할 대기 규칙을 아직 안 맞췄다(`CoreMarket` 이 막는다) — 시작 전에 크게 멈춘다.
@@ -205,7 +216,9 @@ def run_core(
         워밍업 = (date.fromisoformat(since) - timedelta(days=jb.WARMUP_CALENDAR_DAYS)).isoformat()
         ids = [int(r["stock_id"]) for r in universe]
         t0 = time.perf_counter()
-        prices, turnover = jb.load_prices_and_turnover(client, ids, 워밍업)
+        # S·T 리플레이는 시가를 종가와 같은 수정 계열로 함께 읽는다(25.2029) — 안 하면 질의에 `open` 이 없다
+        opens: dict[int, dict[str, float]] | None = {} if st else None
+        prices, turnover = jb.load_prices_and_turnover(client, ids, 워밍업, opens=opens)
         snapshots = jb.load_snapshots(client, country)
         pit_divs = jb.load_pit_dividends(client, country)
         # 국면(200일선)이 워밍업 첫날부터 서게 지수는 더 앞(400일)부터
@@ -237,6 +250,8 @@ def run_core(
             warnings.append(WARN_EXPLORE)
         if limit_fills:
             warnings.append(WARN_LIMIT_FILLS)
+        if st:
+            warnings.append(WARN_ST)
         if risk_every == "month":
             warnings.append(WARN_RISK_MONTHLY)
         if years != DEFAULT_YEARS:
@@ -268,6 +283,11 @@ def run_core(
             시간[variant] = round(time.perf_counter() - t1, 1)
             print(f"  {variant:8s} 최종 {results[variant].curve[-1][1]:.3f}  ({시간[variant]:.0f}초)", flush=True)
 
+        st_log: dict[str, Any] = {}
+        if st:
+            st_log = _run_st(shared, prices, opens or {}, dates, turnover, country, 수수료설정,
+                             db.get_setting(client, "taxes", {}), costs, results, 종목수, 시간)  # fmt: skip
+
         # 초과 CAGR·이긴 달의 기준 — 월 백테스트와 같은 유니버스 동일가중(월 리밸런스). 다섯 행만 싣는다
         벤치 = bt.simulate(
             prices, dates, bt.month_starts(dates),
@@ -288,11 +308,11 @@ def run_core(
         try:
             벤치월 = luck.monthly_returns(벤치.curve)
             운 = luck.judge({v: luck.excess_series(luck.monthly_returns(r.curve), 벤치월) for v, r in results.items()},
-                           n_floor=explore_trial_floor() if explore else jb.REGISTERED_TRIALS)  # fmt: skip
+                           n_floor=explore_trial_floor(st) if explore else jb.REGISTERED_TRIALS)  # fmt: skip
             # 결정 단위 — 무작위 대조 분위(가상모의투자 가상 대조와 같은 함수)·관문과 같은 잣대·판 뒤(읽기 0)
             종가 = ce.Closes(prices)
             코스피 = indexes.get(cb.BENCH_INDEX) or {}
-            for v in results:
+            for v in 기록:  # S·T 리플레이(25.2044)는 결정 원장 꼴(DayLog)이 아니라 결정 단위 증거를 내지 않는다
                 증거[v] = ce.evidence(기록[v], 종가, eligible_at, 코스피) | {
                     "gate": ce.gate_evidence(기록[v], 종가), "after_sell": ce.after_sell(기록[v], 종가, 코스피)}
             if explore:
@@ -314,7 +334,8 @@ def run_core(
             반[variant] = split_half(result.curve)
             e = 증거.get(variant) or {}
             extra = {"split_half": 반[variant], "benchmark": BENCHMARK_NOTE, "risk_every": risk_every,
-                     "account": cs.variant_spec(variant).account,
+                     "account": ({"st_s": "S", "st_t": "T"}[variant] if variant in ST_VARIANTS
+                                 else cs.variant_spec(variant).account),
                      "evidence": {k: e.get(k) for k in ("buys", "scored", "no_control", "days", "n_blocks", "mean",
                                                         "se", "lower", "gate", "after_sell")},
                      # 월 초과 계열(25.1947) — 판정판 걷는 창의 재료. 운 판정과 같은 기준(동일가중 월 리밸런스).
@@ -371,7 +392,7 @@ def run_core(
                 "split_half": 반, "stocks": len(ids), "dates": len(dates), "warnings": warnings,
                 "params": {"years": years, "risk_every": risk_every, "variants": list(variants), "explore": explore,
                            "limit_fills": limit_fills,  # 25.1914 (전략 깔때기 ④ 분할 지정가 체결)
-                           "trial_floor": explore_trial_floor() if explore else jb.REGISTERED_TRIALS,
+                           "trial_floor": explore_trial_floor(st) if explore else jb.REGISTERED_TRIALS, "st": st,
                            "trigger": os.environ.get("BACKTEST_TRIGGER") or None,
                            "sha": (os.environ.get("GITHUB_SHA") or "")[:12] or None},
                 # 실측 — 시간 한도 120분 안인지 다음 실행 전에 본다(25.1534)
@@ -382,6 +403,7 @@ def run_core(
                 "holding_eq": holding_eq, "exit_pair": exit_pair, "loss_gate": loss_gate,
                 # 결정 단위 판정(조각 1e) — 변형마다 묶음 값까지, 짝(H−G·G−B) 차이
                 "evidence": 증거, "pairs": 짝, "verdict": 판정,
+                **({"st": st_log} if st else {}),
             }  # fmt: skip
         # 판정판(docs/funnel.md 2.2, 25.1940) — 이 실행의 줄을 실행 기록에(웹 /backtest "판정판").
         # 읽기 0, 깨져도 성공으로 닫는다
@@ -397,6 +419,54 @@ def run_core(
         client.close()
 
 
+def _run_st(
+    shared: cb.SharedDays, prices: dict[int, dict[str, float]], opens: dict[int, dict[str, float]], dates: list[str],
+    turnover: dict[int, dict[str, float]], country: str, fees: dict, taxes: dict, costs: bt.Costs,
+    results: dict[str, bt.BacktestResult], 종목수: dict[str, int], 시간: dict[str, float],
+) -> dict[str, Any]:  # fmt: skip
+    """S·T 계좌형 리플레이 둘(깔때기 ⑦-6, 25.2044) — 핵심 변형과 같은 하루 재료(`SharedDays`)의 단기 신호 행으로
+    `swing_day_replay.simulate_account` 를 돌려 `results` 에 판정판 꼴(`BacktestResult`)로 더한다. 기록: 시가 덮개
+    (유니버스·기간의 종가 행 가운데 시가가 있는 몫 — 시가가 빈 옛 행은 `judge` 가 종가로 물러나 T 를 흐린다)·체결 수·
+    날마다 기록의 합(만료 까닭·관문 코드·매도 까닭)."""
+    from batch.jobs import paper as jp
+    from batch.services import swing_day_replay as sdr
+
+    종가행 = sum(1 for by in prices.values() for d in by if d >= dates[0])
+    시가행 = sum(1 for sid, by in opens.items() for d in by if d >= dates[0] and d in prices.get(sid, {}))
+    캐시 = {
+        int(r["stock_id"]): {"id": int(r["stock_id"]), "ticker": str(r["ticker"]),
+                             "name": str(r.get("name") or r["ticker"]),
+                             "sector": r.get("sector") or None, "country": country,
+                             "currency": r.get("currency") or "KRW", "asset_type": r.get("asset_type") or "stock"}
+        for r in shared.market.universe
+    }  # fmt: skip
+    설정 = {"max_weight_per_stock": float(shared.market.max_weight_per_stock),
+            "max_weight_per_sector": float(report_picks.DEFAULT_MAX_SECTOR_PCT), "min_order_amount": 0.0}  # fmt: skip
+    out: dict[str, Any] = {"open_coverage": round(시가행 / 종가행, 4) if 종가행 else None, "accounts": {}}
+    for 계좌, 이름 in (("S", "st_s"), ("T", "st_t")):
+        t1 = time.perf_counter()
+        읽개 = shared.reader()
+        r = sdr.simulate_account(
+            계좌, rows_at=lambda view, d, rd=읽개: rd.at(view, d).rows, prices=prices, opens=opens, dates=dates,
+            costs_at=lambda d: jp.costs_for(country, fees, taxes, d), stock_cache=캐시, settings=설정,
+            turnover=turnover, market=country,
+        )  # fmt: skip
+        results[이름] = bt.BacktestResult(curve=r.curve, rebalances=[], costs=costs,
+                                          warnings=[bt.WARN_NO_DIVIDENDS])  # fmt: skip
+        종목수[이름] = sdr.TOP_N
+        시간[이름] = round(time.perf_counter() - t1, 1)
+        합: dict[str, Any] = {"fills": len(r.fills), "buys": 0, "sells": 0, "deferred": 0}
+        for g in r.log:
+            for k in ("buys", "sells", "deferred"):
+                합[k] += g.get(k, 0)
+            for k in ("expired", "blocked_by", "sold"):
+                for 까닭, n in (g.get(k) or {}).items():
+                    합.setdefault(k, {})[까닭] = 합.get(k, {}).get(까닭, 0) + n
+        out["accounts"][계좌] = 합
+        print(f"  {이름:8s} 최종 {r.curve[-1][1]:.3f}  ({시간[이름]:.0f}초, 체결 {len(r.fills)})", flush=True)
+    return out
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="핵심 H 다년 백테스트 (docs/backtest.md 10장)")
     parser.add_argument("--market", default="KR", choices=["KR", "kr"])
@@ -408,10 +478,12 @@ def main() -> int:
                         help="탐색 변형(EXPLORE_VARIANTS)을 backtest_explore 로 — 전략 깔때기 0단계(docs/funnel.md)")
     parser.add_argument("--limit-fills", dest="limit_fills", action="store_true",
                         help="회차 변형의 매수를 운영처럼 3회 분할 지정가로 체결(종가 ≤ 지정가) — 25.1914, 기본 꺼짐")
+    parser.add_argument("--st", action="store_true",
+                        help="탐색 실행에 S·T 계좌형 리플레이(st_s·st_t)를 더한다 — 깔때기 ⑦-6(25.2044), --explore 와")
     args = parser.parse_args()
     logging.basicConfig(level=config.SETTINGS.log_level, format="%(asctime)s %(levelname)s %(name)s | %(message)s")
     return run_core(args.market, args.years, risk_every=args.risk_every, force=args.force, explore=args.explore,
-                    limit_fills=args.limit_fills)
+                    limit_fills=args.limit_fills, st=args.st)
 
 
 if __name__ == "__main__":

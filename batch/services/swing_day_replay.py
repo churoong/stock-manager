@@ -91,6 +91,8 @@ def simulate_account(
     미룬: list[pp.Order] = []  # 정지·하한가로 미룬 매도(다음 날 다시)
     번호 = 0
     out = STResult(account, [], fills)
+    # 날마다 창을 다시 정렬하지 않게 한 번 정렬(엔진 `simulate` 와 같다, 25.1522) — 5년 실행기(25.2044)
+    미리 = (bt.SortedSeries(prices), bt.SortedSeries(turnover), bt.SortedSeries(None))
 
     def 값(d: str) -> float:
         보유 = pp.positions(fills)
@@ -137,7 +139,7 @@ def simulate_account(
         # 쉼이 한 장 짧아 운영보다 하루 일찍 다시 샀다(25.2039, 25.2036 교차검증 [필수])
         쉼_시작 = dates[max(0, i - pp.REBUY_COOLDOWN_SESSIONS)]
         쉼 = pp.rest_set(규칙, fills, 쉼_시작, 파는것, set())
-        view = bt.PriceView(prices, cutoff, turnover, holding=frozenset(보유))
+        view = bt.PriceView(prices, cutoff, turnover, holding=frozenset(보유), presorted=미리)
         행 = pp.short_candidates(rows_at(view, d), set(보유))
         if 행:
             현금 = pp.cash(flows, fills)
