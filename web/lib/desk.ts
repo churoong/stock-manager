@@ -100,6 +100,8 @@ export const DESK_RULES = {
 export interface RiskRow {
   id: string; exposure_pct: number | null; positions: number; top_weight_pct: number | null; top_name: string | null;
   near_stop: Array<{ name: string | null; unrealized_pct: number; stop_pct: number }>; dd_pct: number | null;
+  /** 기간 손절선으로 재지 않는 계좌(스윙·단타)의 까닭 — 있으면 "없음" 대신 이 글(25.2022) */
+  near_stop_note?: string;
 }
 /** 실전 준비 목록 한 항목 (docs/paper.md 14장, 25.1513) — 상태는 배치 코드의 표, 근거는 기록에서 */
 export interface ReadinessItem { key: string; label: string; status: "done" | "partial" | "rehearsal" | "todo" | "user"; note: string; evidence: string | null }
@@ -388,3 +390,15 @@ export function adjustCheckText(c: FillAdjustCheck | null | undefined, mirror: s
   const 섞임 = c.pre_link ? ` · 연결 전 보유 ${c.pre_link}종목이 섞여 실측이 흔들림(판정에서 뺌)` : "";
   return `${c.from ?? "?"}~${c.to ?? "?"} KIS 실측 손익 차이 ${ppText(c.actual_pp)} (${accountName(mirror)} 평가 대비) · 칸으로 설명한 몫 ${ppText(c.explained_pp)} ±${c.band_pp.toFixed(2)} · 안 잰 회전 ${c.unmeasured_pct.toFixed(0)}%${섞임}`;
 }
+
+/**
+ * 위험판 "손절 가까움" 칸의 글 — 가까운 보유가 있으면 "이름 수익%(선 x%)", 없으면 기간 손절선으로 재지 않는 계좌(스윙·단타)의
+ * 까닭(`near_stop_note`, 25.2022), 그것도 없으면 "없음". 비었을 때 회색으로 그릴지(`muted`)도 함께
+ */
+export function nearStopText(r: Pick<RiskRow, "near_stop" | "near_stop_note">): { text: string; muted: boolean } {
+  if (r.near_stop.length) {
+    return { text: r.near_stop.map((x) => `${x.name ?? "?"} ${x.unrealized_pct.toFixed(1)}%(선 ${x.stop_pct}%)`).join(" · "), muted: false };
+  }
+  return { text: r.near_stop_note ?? "없음", muted: true };
+}
+

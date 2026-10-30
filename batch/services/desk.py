@@ -863,6 +863,17 @@ def h_check(
             "band_pp": h_adj["band_pp"], "unmeasured_pct": h_adj["unmeasured_pct"], "pre_link": pre_link}  # fmt: skip
 
 
+def _손절_해당없음(account: str) -> str | None:
+    """위험판 '손절 가까움' 을 기간 손절선으로 재지 않는 계좌의 글(25.2022) — 스윙 S·당일 단타 T"""
+    if account in pp.SAME_DAY_IDS:
+        return "해당 없음 — 당일 단타(하루 끝 보유 0주)"
+    if account in pp.SEPARATE_IDS:
+        from batch.services import shadow as sh
+
+        return f"해당 없음 — 스윙은 진입 시가 대비 종가 {sh.SWING_CLOSE.stop_pct * 100:g}%(다음 장 시가 매도)"
+    return None
+
+
 def risk_board(
     latest: dict[str, dict[str, Any]], series: dict[str, list[tuple[str, float]]], stops: dict[str, float],
 ) -> list[dict[str, Any]]:
@@ -882,7 +893,11 @@ def risk_board(
         종목 = [q for q in x.get("positions") or [] if isinstance(q, dict)]
         큰 = max(종목, key=lambda q: float(q.get("weight_pct") or 0), default=None)
         가까움 = []
-        for q in 종목:
+        # 스윙·단타는 기간 손절선을 쓰지 않는다 — 스윙은 진입 시가 대비 종가, 단타는 하루 끝 0주. 기간 선(단기 −7%,
+        # 원가 기준)으로 재면 스윙 손절선(−3%) 앞 보유가 "없음" 이고 이미 판 보유만 다른 선으로 떴다(25.2022 결함 루프 —
+        # 주간 요약은 25.1873 이 같은 처리)
+        주석 = _손절_해당없음(a)
+        for q in 종목 if 주석 is None else []:
             기간 = str(q.get("horizon") or "")
             선 = stops.get(기간 if 기간 in stops else "long")
             avg, close = q.get("avg_price"), q.get("close")
@@ -896,6 +911,7 @@ def risk_board(
         out.append({"id": a, "exposure_pct": 보유 / 자산 * 100 if 자산 > 0 else None, "positions": len(종목),
                     "top_weight_pct": float(큰.get("weight_pct") or 0) if 큰 else None,
                     "top_name": (큰.get("name") or 큰.get("ticker")) if 큰 else None, "near_stop": 가까움,
+                    **({"near_stop_note": 주석} if 주석 else {}),
                     "dd_pct": (v[-1][1] / 고점 - 1) * 100 if v and 고점 else None})  # fmt: skip
     return out
 

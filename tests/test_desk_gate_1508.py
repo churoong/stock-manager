@@ -108,6 +108,19 @@ def test_risk_board_by_hand() -> None:
     assert a["near_stop"][2]["unrealized_pct"] == pytest.approx(-6.0)
     assert a["dd_pct"] == pytest.approx((0.9 / 1.2 - 1) * 100)
     assert rows["B"]["exposure_pct"] is None and rows["B"]["dd_pct"] is None and rows["B"]["top_name"] is None
+    assert "near_stop_note" not in a  # 기간 손절선을 쓰는 계좌엔 글이 없다
+
+
+def test_위험판은_스윙_단타를_기간_손절선으로_재지_않는다() -> None:
+    """25.2022 (결함 루프) — 스윙 S 보유를 단기 −7%(원가)로 재면 스윙 손절선(진입 시가 −3%) 앞 보유가 "없음" 이고 이미
+    판 보유만 다른 선으로 떴다. S·T 는 손절 가까움을 비우고 그 까닭을 싣는다"""
+    포지션 = [{"name": "병", "horizon": "short", "avg_price": 10_020.0, "close": 9_480.0, "weight_pct": 5.0}]  # −5.4%
+    latest = {k: {"equity": 1_000_000, "holdings": 50_000, "positions": 포지션} for k in ("A", "S", "T")}
+    rows = {r["id"]: r for r in desk.risk_board(latest, {}, {"short": -7.0, "mid": -15.0, "long": -25.0})}
+    assert [x["name"] for x in rows["A"]["near_stop"]] == ["병"]  # 기간 선을 쓰는 계좌는 그대로
+    assert rows["S"]["near_stop"] == [] and rows["S"]["near_stop_note"].startswith("해당 없음 — 스윙")
+    assert "-3%" in rows["S"]["near_stop_note"]
+    assert rows["T"]["near_stop"] == [] and rows["T"]["near_stop_note"].startswith("해당 없음 — 당일 단타")
 
 
 def test_champion_blocks_by_hand() -> None:

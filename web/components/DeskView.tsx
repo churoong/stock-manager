@@ -12,6 +12,7 @@ import {
   gateNowText,
   kisOffText,
   kisStatusText,
+  nearStopText,
   notSentText,
   orderLine,
   pctText,
@@ -301,7 +302,10 @@ export default function DeskView() {
                       {r.top_name ? `${r.top_name} ${r.top_weight_pct?.toFixed(1)}%` : "-"} <span className="text-slate-400">({r.positions}종목)</span>
                     </td>
                     <td className="pl-2 text-xs text-amber-700 dark:text-amber-400">
-                      {r.near_stop.length ? r.near_stop.map((x) => `${x.name ?? "?"} ${x.unrealized_pct.toFixed(1)}%(선 ${x.stop_pct}%)`).join(" · ") : <span className="text-slate-400">없음</span>}
+                      {(() => {
+                        const 칸 = nearStopText(r);
+                        return 칸.muted ? <span className="text-slate-400">{칸.text}</span> : 칸.text;
+                      })()}
                     </td>
                   </tr>
                 ))}
@@ -310,7 +314,7 @@ export default function DeskView() {
           </div>
           <p className="mt-1 text-xs text-slate-500">
             노출 = 보유 평가 ÷ 평가 총액, 낙폭 = 시간가중 지수의 지난 고점 대비, 손절 가까움 = 종목 통화로 종가 ÷ 평균단가가 기간 손절선까지 {DESK_RULES.RISK_NEAR_STOP_PP}%p 안(매도
-            플래그와 같은 잣대 · 손절을 쓰지 않는 계좌도 같은 선으로).
+            플래그와 같은 잣대 · 손절을 쓰지 않는 계좌도 같은 선으로 — 스윙·단타는 제 규칙이 따로라 해당 없음).
           </p>
         </section>
       ) : null}
