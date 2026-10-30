@@ -71,8 +71,8 @@ def _판단전(c, rp: t.리플레이, day: str, cutoff: str) -> None:  # type: i
             c.conn.execute(
                 "INSERT OR REPLACE INTO financials (stock_id, fiscal_year, report_code, period_type, consolidated,"
                 " report_date, receipt_no, currency, unit, revenue, operating_income, net_income, total_equity,"
-                " source, fetched_at, period_days) VALUES (?, ?, ?, 'A', 1, ?, ?, 'KRW', 'KRW', ?, ?, ?, ?, 't', 't',"
-                " 365)", [sid, fy, dart.ANNUAL_REPORT_CODE, r["as_of_date"], r["receipt_no"], v["revenue"],
+                " source, fetched_at, period_days) VALUES (?, ?, ?, 'A', 1, ?, ?, ?, ?, ?, ?, ?, ?, 't', 't',"
+                " 365)", [sid, fy, dart.ANNUAL_REPORT_CODE, r["as_of_date"], r["receipt_no"], t.통화, t.통화, v["revenue"],
                           v["operating_income"], v["net_income"], v["total_equity"]])  # fmt: skip
     dv = rp.하루[day]
     무게 = json.dumps(cb.EQUAL_WEIGHTS, sort_keys=True)

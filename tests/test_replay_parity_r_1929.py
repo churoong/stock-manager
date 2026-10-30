@@ -70,8 +70,8 @@ ALLOW_MARKET_SLIPPAGE_GATE_PCTP = 0.13
 
 #: 슬리피지 판 — 운영 설정 수수료(1910 `fees` 와 같음) + 엔진 기본 슬리피지(`bt.Costs.slippage_pct` 0.10%, 운영 `costs_for` 와
 #: 같은 값). 베끼기는 R 의 시장가 매수·매도에 그 슬리피지를 `make_fill` 로 붙인다
-_비용 = {"kr_buy_pct": 0.015, "kr_sell_pct": 0.015}
-t.비용판.setdefault("slip", (_비용, bt.Costs.for_country("KR", _비용, {})))
+_비용 = {f"{t._앞}_buy_pct": 0.015, f"{t._앞}_sell_pct": 0.015}  # 시장은 1910 틀의 `시장` 줄(25.2065 — 미국 판이 다시 싣는다)
+t.비용판.setdefault("slip", (_비용, bt.Costs.for_country(t.시장, _비용, {})))
 
 #: id(리플레이) → 결정일 → 운영 `held_substitutes`(그날 run_step 바로 앞) — 리플레이는 (변형, 판)마다 하나다
 운영든대체: dict[tuple[int, str], dict[int, int]] = {}
@@ -92,7 +92,7 @@ def _db_무작위(aid: str, fees: dict) -> Client:
     for u in t._자료()[0]:
         c.conn.execute(
             "INSERT INTO universe_members (snapshot_date, stock_id, included, currency, created_at)"
-            " VALUES (?, ?, 1, 'KRW', 't')", [_스냅샷, u["stock_id"]])  # fmt: skip
+            " VALUES (?, ?, 1, ?, 't')", [_스냅샷, u["stock_id"], t.통화])  # fmt: skip
     return c
 
 

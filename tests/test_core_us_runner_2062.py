@@ -109,9 +109,9 @@ def test_미국_실행이_다섯_행을_시장_US_로_싣는다(실행: tuple[Me
 
 def test_미국_일치_시험_목록은_시험_파일과_같다() -> None:
     """단서를 떼는 변형 목록은 미국 일치 시험이 실제로 있는 것만(25.2063) — B·G 는 tests/test_replay_parity_us_2059.py,
-    S·T 는 tests/test_replay_parity_st_us_2061.py, H·D·E 는 tests/test_replay_parity_hde_us_2064.py. 넓히려면 그 변형의
-    미국 일치 시험을 먼저 더하고 여기를 고친다"""
-    assert {"core_b", "core_g", "core_h", "core_d", "core_e", "st_s", "st_t"} == cj.US_PARITY_VERIFIED
+    S·T 는 tests/test_replay_parity_st_us_2061.py, H·D·E 는 tests/test_replay_parity_hde_us_2064.py, A·C 는
+    tests/test_replay_parity_ac_us_2065.py. 넓히려면 그 변형의 미국 일치 시험을 먼저 더하고 여기를 고친다"""
+    assert {"core_b", "core_g", "core_h", "core_d", "core_e", "core_a", "core_c", "st_s", "st_t"} == cj.US_PARITY_VERIFIED
 
 
 def test_미국_탐색_S_T_도_돈다(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -122,6 +122,5 @@ def test_미국_탐색_S_T_도_돈다(monkeypatch: pytest.MonkeyPatch) -> None:
     경고 = {r["strategy"]: json.loads(r["warnings_json"]) for r in mem.execute(
         "SELECT strategy, warnings_json FROM backtest_runs").dicts()}  # fmt: skip
     assert all(cj.WARN_US_UNVERIFIED not in 경고[v] for v in cj.ST_VARIANTS)  # S·T 는 25.2061 이 묶었다
-    # 탐색 D·E 는 25.2064 가 묶었고 A·C 는 아직 — 행마다 단서 유무가 목록과 같다
+    # 탐색 D·E·A·C 는 25.2064·2065 가 묶었다 — 행마다 단서 유무가 목록과 같다(탐색 실행엔 단서 줄이 없다)
     assert all((cj.WARN_US_UNVERIFIED in w) == (v not in cj.US_PARITY_VERIFIED) for v, w in 경고.items()), 경고.keys()
-    assert {"core_a", "core_c"} <= {v for v, w in 경고.items() if cj.WARN_US_UNVERIFIED in w}
