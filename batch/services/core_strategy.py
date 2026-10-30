@@ -394,11 +394,6 @@ class CoreStrategy:
         from batch.jobs import paper as jp
 
         v = variant_spec(variant)
-        if market.country != "KR":
-            # 시장 판단기는 미국을 받지만(25.2056) 이 판단 함수는 `buy_orders` 에 환율 없이(`fx_rate=None`) 넘겨
-            # 운영이 달러 종목을 "환율 없음" 으로 거른다 — 돌리면 아무것도 사지 않은 곡선이 조용히 나온다.
-            # 달러 장부(⑧-3) 전까지 막는다
-            raise NotImplementedError("장부형 리플레이는 아직 국내(KR)만 — 미국 달러 장부는 깔때기 ⑧-3")
         self.charter: dict[str, Any] | None = None
         if v.selection == "committee":
             if v.account not in market.charters:
@@ -558,7 +553,8 @@ class CoreStrategy:
              "first_buy_date": lot.first_buy}  # fmt: skip
         hi = sf.HoldingInput(
             stock_id=lot.stock_id, name=self._cache.get(lot.stock_id, {}).get("name", str(lot.stock_id)),
-            horizon=lot.horizon, first_buy_date=lot.first_buy, currency="KRW", cost=행["cost"],
+            horizon=lot.horizon, first_buy_date=lot.first_buy,
+            currency=self._cache.get(lot.stock_id, {}).get("currency") or "KRW", cost=행["cost"],
             market_value=행["market_value"], price_date=view.last_date(lot.stock_id), horizon_since=lot.first_buy,
         )  # fmt: skip
         if self.prebuy:
@@ -711,7 +707,11 @@ class CoreStrategy:
                             held=든대체)  # fmt: skip
         주문, b기록 = jp.buy_orders(
             client, market=self.market.country, account=self.v.account, account_fills=[], valuation=v, open_buys=[],
-            signal_rows=rows, settings=self.settings, price_series={}, series_unknown={}, fx_rate=None,
+            # 환율 1.0 — **시장 통화 장부**(25.2058, 깔때기 ⑧-3): 미국은 명목 자본·현금·평가를 달러로 센다.
+            # 운영 `buy_orders` 는 달러 종목을 자본 ÷ 환율로 사이징하므로 1.0 이면 같은 단위. 국내는 환율을 보지
+            # 않는다(원화). 예전 `None` 은 운영이 달러 종목을 "환율 없음" 으로 걸러 미국에서 아무것도 사지 않았다.
+            # 국내·미국 한 원화 현금(운영 계좌 하나)은 시장별 장부라 다르다 — 이름 붙은 차이(funnel.md 4장 7)
+            signal_rows=rows, settings=self.settings, price_series={}, series_unknown={}, fx_rate=1.0,
             stop_ids=손절, sold_recently=최근판, stock_cache=self._cache, top_n=self.v.top_n, entry=self.v.entry,
             substitute=바꾸기, preselected=미리,
             preselected_reason="지주사 합의" if self.v.selection == "weighted" else "위원회 가결",

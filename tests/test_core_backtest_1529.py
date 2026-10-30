@@ -510,7 +510,7 @@ def test_자본_통화() -> None:
 def test_미국_시장_판단기는_SP500_과_국외_조사_자료로(monkeypatch: pytest.MonkeyPatch) -> None:
     """깔때기 ⑧-2(25.2056) — 같은 합성 자료를 미국으로 바꿔 달면 원장 성과·사이징 베타·국면이 SP500 을 읽고(KOSPI 는 묻지
     않음), 위원회 조사 자료가 국외(`domestic=False` — 증권사·수급·공시는 "미국 종목 … 모으지 않는다")다. 장부형 판단
-    함수는 달러 장부(⑧-3) 전까지 미국을 막는다"""
+    함수는 25.2058 부터 받고, S·T 리플레이는 통화(⑧-4) 전까지 막는다"""
     from batch.services import company as co
     from batch.services import core_strategy as cs
 
@@ -542,8 +542,8 @@ def test_미국_시장_판단기는_SP500_과_국외_조사_자료로(monkeypatc
     assert "SP500" in 물은 and "KOSPI" not in 물은 and "KOSDAQ" not in 물은, sorted(set(물은))
     assert any(d.rows for d in dvs), "신호가 하나도 없다 — 시험이 미국 길을 지나지 않는다"
     assert 국내여부 and not any(국내여부)
-    with pytest.raises(NotImplementedError, match="⑧-3"):
-        cs.CoreStrategy("core_h", m, sessions=날)
+    # 장부형 판단 함수는 25.2058 부터 시장 통화 장부로 미국을 받는다(tests/test_core_us_ledger_2058.py)
+    assert cs.CoreStrategy("core_h", m, sessions=날).market.country == "US"
     from batch.services import swing_day_replay as sdr
 
     with pytest.raises(NotImplementedError, match="⑧-4"):
