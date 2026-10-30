@@ -1,0 +1,90 @@
+"""S·T 계좌형 리플레이 (깔때기 ⑦-4, 25.2036) — 손으로 따라갈 수 있는 작은 자료로 체결·현금·까닭을 본다.
+
+비용 0(`pp.Costs(0, 0, 0, 0)`)이라 체결가·수량·현금이 손 계산과 같아야 한다. 운영 `run_step` 과의 일치 시험은 ⑦-5.
+"""
+
+from __future__ import annotations
+
+from batch.services import paper as pp
+from batch.services import swing_day_replay as sdr
+from tests.test_core_strategy_1532 import _영업일, _행
+
+날 = _영업일("2026-03-02", 14)
+캐시 = {sid: {"id": sid, "ticker": f"{sid:06d}", "name": f"종목{sid}", "sector": None, "country": "KR",
+              "currency": "KRW", "asset_type": "stock"} for sid in (1, 2)}  # fmt: skip
+설정 = {"max_weight_per_stock": 10.0, "max_weight_per_sector": 30.0, "min_order_amount": 0.0}
+비용0 = pp.Costs(0.0, 0.0, 0.0, 0.0)
+
+
+def _돌림(account: str, 종가: dict[int, list[float]], 시가: dict[int, list[float]], 신호날: dict[str, list[int]],
+          **kw) -> sdr.STResult:  # fmt: skip
+    prices = {sid: dict(zip(날, v, strict=True)) for sid, v in 종가.items()}
+    opens = {sid: dict(zip(날, v, strict=True)) for sid, v in 시가.items()}
+
+    def rows_at(view, d):  # noqa: ANN001 — 시점 창: cutoff 종가로 신호 행
+        return [_행(sid, view.cutoff, prices[sid][view.cutoff]) for sid in 신호날.get(view.cutoff, [])]
+
+    return sdr.simulate_account(account, rows_at=rows_at, prices=prices, opens=opens, dates=날,
+                                costs_at=lambda _d: 비용0, stock_cache=캐시, settings=설정, deposit=10_000_000.0,
+                                **kw)  # fmt: skip
+
+
+def test_S_는_다음_장_시가에_사고_종가_목표를_넘은_다음_장_시가에_판다() -> None:
+    # 종목 1: 날[0] 신호 → 날[1] 시가 1,000 에 산다. 날[3] 종가 1,050(+5%) → 날[4] 시가 1,060 에 판다
+    종가 = {1: [1000, 1010, 1020, 1050, 1070] + [1070] * 9}
+    시가 = {1: [1000, 1000, 1015, 1030, 1060] + [1070] * 9}
+    r = _돌림("S", 종가, 시가, {날[0]: [1]})
+    산, 판 = [f for f in r.fills if f.side == "buy"], [f for f in r.fills if f.side == "sell"]
+    # 비중 상한 10% × 1,000만 = 100만 → 1,000원에 1,000주 이하(배분이 정한 수량)
+    assert len(산) == 1 and 산[0].fill_date == 날[1] and 산[0].price == 1000.0 and 산[0].quantity > 0
+    assert len(판) == 1 and 판[0].fill_date == 날[4] and 판[0].price == 1060.0 and 판[0].quantity == 산[0].quantity
+    # 비용 0 — 현금 = 입금 + 수량 × (1,060 − 1,000)
+    assert abs(r.curve[-1][1] * 10_000_000 - (10_000_000 + 산[0].quantity * 60)) < 1e-6
+    # 판 뒤 쉼(5거래일) — 날[4]·[5] 에 신호가 또 나도 다시 안 산다
+    r2 = _돌림("S", 종가, 시가, {날[0]: [1], 날[4]: [1], 날[5]: [1]})
+    assert [f.fill_date for f in r2.fills if f.side == "buy"] == [날[1]]
+
+
+def test_S_는_손절_종가_다음_장_시가에_판다() -> None:
+    종가 = {1: [1000, 1000, 960] + [960] * 11}  # 날[2] 종가 −4% → 날[3] 시가
+    시가 = {1: [1000, 1000, 990, 955] + [960] * 10}
+    r = _돌림("S", 종가, 시가, {날[0]: [1]})
+    판 = [f for f in r.fills if f.side == "sell"]
+    assert [(f.fill_date, f.price) for f in 판] == [(날[3], 955.0)]
+
+
+def test_T_는_시가에_사고_같은_장_종가에_판다_하루_끝_보유_0() -> None:
+    종가 = {1: [1000, 1030, 1000] + [1000] * 11}
+    시가 = {1: [1000, 1010, 1000] + [1000] * 11}
+    r = _돌림("T", 종가, 시가, {날[0]: [1]})
+    assert [(f.side, f.fill_date, f.price) for f in r.fills] == [("buy", 날[1], 1010.0), ("sell", 날[1], 1030.0)]
+    assert pp.positions(r.fills) == {}
+    q = r.fills[0].quantity
+    assert abs(r.curve[-1][1] * 10_000_000 - (10_000_000 + q * 20)) < 1e-6
+
+
+def test_T_는_상한가_시가면_안_사고_짝_매도도_거둔다() -> None:
+    종가 = {1: [1000, 1300] + [1300] * 12}
+    시가 = {1: [1000, 1299] + [1300] * 12}  # 신호 날 종가 1,000 대비 +29.9%
+    r = _돌림("T", 종가, 시가, {날[0]: [1]})
+    assert r.fills == []
+    첫날 = r.log[0]["expired"]
+    assert any(k.startswith("상한가 시가") for k in 첫날) and 첫날["단타 짝 매수 안 참"] == 1
+
+
+def test_S_매도가_정지로_막히면_미루고_다시_거래되는_날_판다() -> None:
+    종가 = {1: [1000, 1000, 940] + [940] * 11}  # 날[2] 손절 → 날[3] 매도인데 날[3] 행이 없다(정지)
+    시가 = {1: [1000, 1000, 950] + [945] * 11}
+    r0 = {1: dict(zip(날, 종가[1], strict=True))}
+    del r0[1][날[3]]
+    o0 = {1: dict(zip(날, 시가[1], strict=True))}
+    del o0[1][날[3]]
+    rows = {날[0]: [1]}
+
+    def rows_at(view, d):  # noqa: ANN001
+        return [_행(sid, view.cutoff, r0[sid][view.cutoff]) for sid in rows.get(view.cutoff, [])]
+
+    r = sdr.simulate_account("S", rows_at=rows_at, prices=r0, opens=o0, dates=날, costs_at=lambda _d: 비용0,
+                             stock_cache=캐시, settings=설정, deposit=10_000_000.0)  # fmt: skip
+    assert r.log[2]["deferred"] == 1
+    assert [(f.fill_date, f.price) for f in r.fills if f.side == "sell"] == [(날[4], 945.0)]
