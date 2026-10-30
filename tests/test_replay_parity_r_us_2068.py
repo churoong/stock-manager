@@ -38,3 +38,7 @@ def test_미국_R2_도_같은_갈래로_06_05_에_갈린다() -> None:
     assert r_us.운영든대체[(id(rp), "2024-06-05")].get(12) == 6
     live = t._운영("core_r2", "zero")
     assert live["2024-06-05"].record.get("substitute_overlap_hit"), live["2024-06-05"].record.get("substitute_overlap")
+    # 그날로 묶는 단언(25.2070, 교차검증 note — 위 둘은 05-30~06-04 에도 참이다): 운영은 옛 자리 12 의 신호를 이미 든 6 으로
+    # 잇고, 리플레이는 새 종목 22 로 바꾼다
+    assert (live["2024-06-05"].record.get("random") or {}).get("12") == 6, live["2024-06-05"].record.get("random")
+    assert (t._날별(rp)["2024-06-05"].random.get("random") or {}).get("12") == 22, t._날별(rp)["2024-06-05"].random

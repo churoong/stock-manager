@@ -175,7 +175,20 @@ def test_미국_지정가_핵심_실행의_합친_경고가_서로_어긋나지_
     assert cj.WARN_US_LIMIT_UNVERIFIED not in 경고["core_r1"]
     합친 = " ".join(w for ws in 경고.values() for w in ws)
     assert "일치 시험이 된 변형은" not in 합친 and "모든 변형" not in 합친
+    # 뜻으로도(25.2070, 교차검증 [권고]: 구절만 보면 "B·G·H 등은 일치 확인됨" 같은 바꿔 쓴 모순을 놓쳤다) — 미국 R 단서는
+    # R 밖 계좌 이름을 말하지 않고, "확인됨"·"검증됨" 같은 긍정 판정을 담지 않는다
+    for 글자 in ("B·", "G·", "H·", "확인됨", "검증됨", "됨("):
+        assert 글자 not in cj.WARN_US_UNVERIFIED, 글자
 
 
 def test_R_변형_목록은_무작위_대조_계좌와_같다() -> None:
     assert {"core_r1", "core_r2"} == cj.R_VARIANTS  # cs.VARIANTS 의 selection == "random" 에서(25.2069)
+
+
+def test_미검증_목록과_R_목록이_전체_변형을_나눈다() -> None:
+    """미국 단서 문구가 R 이름을 박았으므로, 검증 목록 밖은 정확히 R 이어야 한다(25.2070). 새 변형을 더하면 이 시험이
+    깨져 그 변형의 미국 일치 시험이나 범용 단서(`WARN_US_UNVERIFIED_OTHER`)를 생각하게 한다"""
+    from batch.services import core_strategy as cs
+
+    전체 = set(cs.VARIANTS) | set(cs.EXPLORE_VARIANTS) | set(cj.ST_VARIANTS)
+    assert 전체 - cj.US_PARITY_VERIFIED == cj.R_VARIANTS

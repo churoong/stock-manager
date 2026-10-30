@@ -85,6 +85,8 @@ US_PARITY_VERIFIED: frozenset[str] = frozenset(
 # 거꾸로 읽혔다(25.2069, 25.2068 교차검증 [권고])
 WARN_US_UNVERIFIED = ("미국 무작위 대조 R1·R2 — 운영 미국 판과 갈릴 수 있다(옛 보유 자리 신호가 나오는 자료에서 — "
                       "합성 미국 자료에선 갈림, 25.2067). 걸러내기에도 참고로만")
+#: R 이 아닌 미국 미검증 변형 줄(25.2070, 25.2069 교차검증 [권고]) — 지금은 없다(목록 못박음 시험)
+WARN_US_UNVERIFIED_OTHER = "미국 리플레이 — 이 변형은 운영 미국 판과 일치 시험이 없다. 걸러내기에도 참고로만(25.2070)"
 #: 무작위 대조 R 줄(시장 무관, 25.2068) — 운영 `held_substitutes` 가 옛 보유 자리를 잇는 차이(25.1929, R 판 올림 때
 #: 고침)
 R_VARIANTS: frozenset[str] = frozenset(k for k, v in cs.VARIANTS.items() if v.selection == "random")
@@ -416,8 +418,11 @@ def run_core(
             행경고 = list(warnings)
             if country == "US" and limit_fills and 회차:
                 행경고.append(WARN_US_LIMIT_UNVERIFIED)
-            elif country == "US" and variant not in US_PARITY_VERIFIED:
+            elif country == "US" and variant in R_VARIANTS:
                 행경고.append(WARN_US_UNVERIFIED)
+            elif country == "US" and variant not in US_PARITY_VERIFIED:
+                # R 이 아닌 미검증 변형(앞으로 더해질 것) — R 이름을 박은 문구가 엉뚱하게 붙지 않게(25.2070)
+                행경고.append(WARN_US_UNVERIFIED_OTHER)
             # 무작위 대조 R 은 시장과 상관없이 — 운영 `held_substitutes` 가 옛 보유 자리를 잇는 25.1929 의 차이가
             # 옛 자리 신호가 다시 나오는 자료에서 뽑기를 바꾼다(국내 합성 자료에선 우연히 안 나왔을 뿐, 25.2068)
             if variant in R_VARIANTS:
