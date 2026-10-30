@@ -103,9 +103,9 @@ RETRY_MINE_SQL = "SELECT id FROM paper_broker_orders WHERE id = ? AND status = '
 #: `main` 이 적는다(25.1772 — 먼저 적으면 전송이 실패한 날 다시 안 간다)
 #: 기업행위 의심으로 팔지 않은 종목(25.1771)
 SUSPECT_KEY = "kis_guard_suspect_alerted"
-#: 같은 날 같은 종목 매도 줄과 겹쳐 장중 매도를 못 낸 종목(25.1772, 25.1771 교차검증 [필수]). 0093(25.2010)이 색인을
-#: 정리·장중 갈래로 나눠 아침 정리 매도와는 더 겹치지 않는다 — 남는 것은 0093 적용 전 실행과, 다른 감시 실행이 같은
-#: 종목 장중 줄을 먼저 적은 경우뿐이다. 그때는 막지 못하고 알린다
+#: 같은 날 아침 정리 매도 줄과 겹쳐 장중 매도를 못 낸 종목(25.1772, 25.1771 교차검증 [필수]). 0093(25.2010)이 색인을
+#: 정리·장중 갈래로 나눠 0093 적용 뒤엔 생기지 않는다 — 적용 전 실행만 막지 못하고 알린다. 다른 감시 실행이 같은 종목
+#: 장중 줄을 먼저 적은 경우는 `skipped_other_run`(그 실행이 보냄, 25.2011)
 OTHER_ROW_KEY = "kis_guard_other_row_alerted"
 #: 순간 거부(초당 한도·토큰)를 알린 종목 — 다시 보내는 동안 10분마다 같은 거부 알림이 가지 않게(25.1772)
 TRANSIENT_KEY = "kis_guard_transient_alerted"
@@ -399,8 +399,13 @@ def run(
                 ])  # fmt: skip
                 mine = client.execute(bmj.MINE_SQL, [bmj.BROKER, 오늘.isoformat(), x.stock_id, "sell", -1, 지금]).rows
                 if not mine:
-                    # 같은 날 같은 갈래 줄이 유일 색인을 차지했다(0093 적용 전엔 아침 정리 매도도) — 멈춤으로 남기고
-                    # 종목마다 하루 한 번 알린다
+                    if any(int(r["stock_id"]) == x.stock_id for r in client.execute(GUARDED_TODAY_SQL, [
+                            bmj.BROKER, 오늘.isoformat(), bm.REASON_GUARD_STOP, bm.REASON_GUARD_TAKE]).dicts()):
+                        # 다른 감시 실행이 같은 종목 장중 줄을 먼저 적었다 — 그 실행이 보낸다. 멈춤·알림이 아니다
+                        # (25.2011, 25.2010 교차검증 [권고]: "내지 못함" 으로 알리면 이미 판 것을 반대로 읽었다)
+                        상태["skipped_other_run"] = 상태.get("skipped_other_run", 0) + 1
+                        continue
+                    # 0093 적용 전 색인 — 아침 정리 매도 줄이 차지했다. 멈춤으로 남기고 종목마다 하루 한 번 알린다
                     상태["skipped_other_row"] = 상태.get("skipped_other_row", 0) + 1
                     겹침.append(x)
                     continue
@@ -484,11 +489,11 @@ def mark_ids(client: Any, now: datetime, marks: dict[str, list[int]]) -> None:
 
 
 def other_row_text(client: Any, xs: list[Hit]) -> str:
-    """같은 날 같은 종목 매도 줄과 겹쳐 장중 매도를 못 낸 종목(25.1772 · 25.2010)"""
+    """같은 날 아침 정리 매도 줄과 겹쳐 장중 매도를 못 낸 종목 — 0093 적용 전 실행만(25.1772 · 25.2010)"""
     이름 = _names(client, [x.stock_id for x in xs])
     줄 = [f"  · {이름.get(x.stock_id, x.code)} — {note(x)}" for x in xs]
-    return "\n".join(["⚠️ KIS모의투자 장중 감시 — 같은 날 같은 종목 매도 줄과 겹쳐 장중 손절·익절을 내지 못함"
-                      "(아침 정리 매도 — 색인 0093 적용 전, 또는 다른 감시 실행이 먼저 적음)", *줄])  # fmt: skip
+    return "\n".join(["⚠️ KIS모의투자 장중 감시 — 오늘 아침 정리 매도 줄과 겹쳐 장중 손절·익절을 내지 못함"
+                      "(색인 0093 적용 전 — 다음 배치가 적용하면 사라진다)", *줄])  # fmt: skip
 
 
 def suspect_text(client: Any, xs: list[Hit]) -> str:

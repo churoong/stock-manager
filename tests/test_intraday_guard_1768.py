@@ -434,6 +434,14 @@ def test_아침_정리_매도가_있어도_장중_손절을_낸다(c: Client) ->
     # 장중 갈래는 여전히 종목·날마다 한 줄 — 같은 날 다시 닿아도 두 번 팔지 않는다
     ig.run(c, 월, session=s, clock=lambda: 월)
     assert len(s.orders) == 1
+    # 색인만으로도 장중 갈래는 한 줄 — 장중손절 줄이 있는 종목에 장중익절 줄을 넣어도 들어가지 않는다(25.2011, 25.2010
+    # 교차검증 [권고]: 위 단언은 GUARDED_TODAY 가 먼저 빼서 색인까지 가지 않았다. 색인을 `reason` 그대로로 바꾸면 깨진다)
+    c.conn.execute("INSERT OR IGNORE INTO paper_broker_orders (broker, paper_order_id, account_id, market, stock_id, code,"
+                   " side, order_type, quantity, trade_date, reason, status, source, created_at) VALUES ('kis_vts', NULL,"
+                   " 'H', 'KR', 1, '005930', 'sell', 'market', 1, '2026-10-26', ?, 'sending', 'kis_vts', 't')",
+                   [bm.REASON_GUARD_TAKE])  # fmt: skip
+    assert c.q("SELECT COUNT(*) FROM paper_broker_orders WHERE stock_id = 1 AND reason IN (?, ?)",
+               [bm.REASON_GUARD_STOP, bm.REASON_GUARD_TAKE]) == [(1,)]
     # 정리 갈래도 여전히 종목·날마다 한 줄
     c.conn.execute("INSERT OR IGNORE INTO paper_broker_orders (broker, paper_order_id, account_id, market, stock_id, code,"
                    " side, order_type, quantity, trade_date, reason, status, source, created_at) VALUES ('kis_vts', NULL,"
@@ -445,14 +453,15 @@ def test_아침_정리_매도가_있어도_장중_손절을_낸다(c: Client) ->
 def test_정리_줄과_겹쳐_못_내면_멈춤으로_남기고_알린다(c: Client) -> None:
     """25.1771 교차검증 [필수] — 예전엔 `skipped_other_row` 로 세기만 하고 success 로 닫혀 그날 내내 조용히 안 나갔다.
     0093 적용 전 색인(정리·장중을 한 칸으로)으로 되돌려 그 갈래를 본다(25.2010 — 적용 전 실행에도 이 알림은 남는다)"""
-    c.conn.execute("DROP INDEX idx_paper_broker_cleanup_kind")
-    c.conn.execute("CREATE UNIQUE INDEX idx_paper_broker_cleanup ON paper_broker_orders (broker, trade_date, stock_id,"
-                   " side) WHERE paper_order_id IS NULL")  # fmt: skip
+    c.conn.execute("DROP INDEX IF EXISTS idx_paper_broker_cleanup_kind")
+    c.conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_paper_broker_cleanup ON paper_broker_orders (broker, trade_date,"
+                   " stock_id, side) WHERE paper_order_id IS NULL")  # fmt: skip
     _정리줄(c)
     s = _Sess([_h("005930", 9_250.0)])
     r = ig.run(c, 월, session=s, clock=lambda: 월)
     assert s.orders == [] and r["sent"] == {"skipped_other_row": 1}
-    assert ig.run_status(r) == "skipped" and "매도 줄과 겹쳐" in r["alert"] and "종목1" in r["alert"]
+    assert ig.run_status(r) == "skipped" and "정리 매도 줄과 겹쳐" in r["alert"] and "종목1" in r["alert"]
+    assert "0093 적용 전" in r["alert"]  # 원인을 적는다(25.2011)
     assert r["marks"] == {ig.OTHER_ROW_KEY: [1]}
     ig.mark_ids(c, 월, r["marks"])
     다음 = ig.run(c, 월, session=s, clock=lambda: 월)
@@ -1174,3 +1183,22 @@ def test_회차_기록에_초당_한도_다시_한_수를_남긴다() -> None:
     assert ig._호출(S()) == {"calls": 3, "rate_retries": 2}
     S.rate_retries = 0
     assert ig._호출(S()) == {"calls": 3}  # 없으면 칸도 없다(기록을 늘리지 않게)
+
+
+def test_다른_감시_실행이_먼저_적은_종목은_멈춤도_알림도_아니다(c: Client) -> None:
+    """25.2011 (25.2010 교차검증 [권고]) — INSERT 뒤 내 줄이 없는데 같은 종목 장중 줄이 이미 있으면 다른 실행이 보낸
+    것이다. 예전엔 "내지 못함" 알림·`skipped` 로 남겨 이미 판 것을 반대로 읽었다"""
+    s = _Sess([_h("005930", 9_250.0)])
+    진짜 = c.execute
+
+    def execute(sql: str, args: list[Any] | None = None) -> Any:
+        if sql == bmj.INSERT_SQL:  # 내 INSERT 직전에 다른 실행이 같은 종목 장중 줄을 적었다
+            진짜(bmj.INSERT_SQL, [bmj.BROKER, None, "H", "KR", 1, "005930", "sell", "market", None, 1, "2026-10-26",
+                                bm.REASON_GUARD_TAKE, "kis_vts", "다른실행"])  # fmt: skip
+        return 진짜(sql, args)
+
+    c.execute = execute  # type: ignore[method-assign]
+    r = ig.run(c, 월, session=s, clock=lambda: 월)
+    assert s.orders == [] and r["sent"] == {"skipped_other_run": 1} and "alert" not in r
+    assert ig.run_status(r) != "skipped"
+
