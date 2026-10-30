@@ -36,8 +36,10 @@ def test_그물은_옛_꼴만_잡고_근거표_꼴은_지난다(request: pytest.
     _주문(c, 1, {"flags": [{"criteria": [새]}], "signal": {"criteria": [새]}})
     _주문(c, 2, {"flags": [{"criteria": [{"name": "진입가", "value": 10000, "date": "2026-10-29"}]}]})
     _주문(c, 3, {"signal": {"criteria": "깨짐"}})
+    # 매도 플래그의 빈 근거·열쇠 없음도 어긋남(25.2009 — G 추적손절·T 하루 넘김이 그랬다)
+    _주문(c, 4, {"flags": [{"reason_code": "추적손절", "criteria": []}, {"reason_code": "단타잔여"}]})
     어긋남 = 근거표_어긋남(c.conn)
-    assert [x.split(":")[0] for x in 어긋남] == ["주문 2 flags[0]", "주문 3 signal"]
+    assert [x.split(":")[0] for x in 어긋남] == ["주문 2 flags[0]", "주문 3 signal", "주문 4 flags[0]", "주문 4 flags[1]"]
     # 고정물의 몸통(`그물_점검`)이 그 어긋남으로 실제로 깨지고 목록을 비운다(25.2007 — 몸통이 일찍 끝나도 잡게)
     with pytest.raises(AssertionError, match="주문 2 flags"):
         conftest.그물_점검()

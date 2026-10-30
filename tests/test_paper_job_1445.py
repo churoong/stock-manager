@@ -364,7 +364,7 @@ def test_decision_ledger_records_what_was_not_done(client: Client, monkeypatch: 
     안찬 = c.q("SELECT account_id, decided_on, ref_close FROM paper_decisions WHERE kind = 'missed' ORDER BY 1")
     assert 안찬 == [("A", "2026-10-15", 9_900), ("B", "2026-10-15", 9_900)]  # 2·3회차는 한 줄로
     # 감성급락만 선 날 — A 는 팔고, B 는 규칙상 들고 간다(그 결과를 잰다)
-    monkeypatch.setattr(sf, "evaluate", lambda h, _t, _r=None: [sf.Flag(h.stock_id, "yellow", "감성급락", "x", [])])
+    monkeypatch.setattr(sf, "evaluate", lambda h, _t, _r=None: [sf.Flag(h.stock_id, "yellow", "감성급락", "x", [sf._criterion("감성", "-50", "t", "t", None)])])
     _시세(c, "2026-10-16", 9_900, 9_950)
     _하루(c, monkeypatch, "2026-10-16", signals=False)
     판정 = c.q("SELECT account_id, kind, reason FROM paper_decisions WHERE decided_on = '2026-10-16' ORDER BY 1")

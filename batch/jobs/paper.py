@@ -1263,7 +1263,12 @@ def sell_decisions(
             # 시가에 판다(하루 끝 보유 0 의 안전망, 16.3.2). 짝 매도가 아직 열려 있으면(하한가로 미룸) 부르는 쪽이
             # 열린 매도로 거른다
             남은 = {"reason_code": pp.DAY_LEFT_CODE, "level": "red",
-                   "rationale": "당일 단타 보유가 하루를 넘김(짝 매도 없음) — 다음 장 시가에 판다 (paper.md 16.3.2)"}
+                   "rationale": "당일 단타 보유가 하루를 넘김(짝 매도 없음) — 다음 장 시가에 판다 (paper.md 16.3.2)",
+                   # 근거표 행 하나 — 예전엔 근거 열쇠가 없어 웹 거래내역에 아무것도 안 보였다(25.2009)
+                   "criteria": [sf._criterion(
+                       "하루 넘긴 보유", f"{행['quantity']:g}주 (첫 매수 {행['first_buy_date']})",
+                       "당일 단타는 하루 끝 보유 0주", "가상모의투자 체결",
+                       str(행.get("price_date") or today.isoformat())[:10])]}  # fmt: skip
             out[int(행["stock_id"])] = ([pp.DAY_LEFT_CODE], [남은])
             if notes is not None:
                 기준가 = 행["market_value"] / 행["quantity"] if 행["market_value"] else None
@@ -1301,10 +1306,12 @@ def sell_decisions(
                     line_errors[type(exc).__name__] = line_errors.get(type(exc).__name__, 0) + 1
             if 선:
                 lines[h.stock_id] = 선
-        if sell_rule == "trend" and _추적손절(client, h, 행, targets, today):
+        추적 = _추적손절(client, h, 행, targets, today) if sell_rule == "trend" else None
+        if 추적 is not None:
             코드들.add(pp.TRAIL_CODE)
             글 = "목표에 닿은 뒤 고점 대비 손절폭만큼 빠짐 (추세 익절, docs/paper.md 2.2)"
-            flags = [*flags, sf.Flag(stock_id=h.stock_id, reason_code=pp.TRAIL_CODE, level="red", rationale_text=글)]
+            flags = [*flags, sf.Flag(stock_id=h.stock_id, reason_code=pp.TRAIL_CODE, level="red", rationale_text=글,
+                                     criteria=추적)]
         팔것 = pp.sells_for(sell_rule, {h.stock_id: 코드들})
         근거 = [{"reason_code": f.reason_code, "level": f.level, "rationale": f.rationale_text,
                 "criteria": f.criteria} for f in flags]  # fmt: skip
@@ -1389,18 +1396,37 @@ def _스윙넘음(client: Any, 행: dict[str, Any], today: date) -> dict[str, An
 PEAK_SQL = "SELECT MAX(close) FROM prices WHERE stock_id = ? AND date >= ? AND date <= ? AND close > 0"
 
 
-def _추적손절(client: Any, h: Any, 행: dict[str, Any], targets: dict | None, today: date) -> bool:
-    """G 의 추적 손절 판정 — 고점은 따로 읽는다(`enrich` 는 시세 이력을 읽지 않는다).
+def _추적손절(client: Any, h: Any, 행: dict[str, Any], targets: dict | None, today: date) -> list[dict] | None:
+    """G 의 추적 손절 판정 — 넘었으면 근거표 행(원가·고점·지금 종가), 아니면 None. 고점은 따로 읽는다(`enrich` 는 시세
+    이력을 읽지 않는다).
 
-    목표·손절은 `evaluate` 와 같은 표에서
+    목표·손절은 `evaluate` 와 같은 표에서. 예전엔 참·거짓만 돌려 플래그가 근거 행 없이(`criteria=[]`) 나가 웹 거래내역에
+    판정 근거가 하나도 안 보였다(25.2009 — 근거표 그물을 빈 목록까지 넓혀 본 탐침에서 드러남)
     """
     if not 행.get("quantity") or not 행.get("market_value"):
-        return False
+        return None
     고점 = client.execute(PEAK_SQL, [h.stock_id, 행["first_buy_date"], today.isoformat()]).rows
     표 = sg.rules_for(h.horizon, targets)
-    return pp.trend_exit(float(행["cost"]) / float(행["quantity"]), 고점[0][0] if 고점 else None,
-                         float(행["market_value"]) / float(행["quantity"]), float(표["target_pct"]),
-                         float(표["stop_pct"]), float(getattr(h, "rights_scale", 1.0) or 1.0))  # fmt: skip
+    원가, 지금 = float(행["cost"]) / float(행["quantity"]), float(행["market_value"]) / float(행["quantity"])
+    배 = float(getattr(h, "rights_scale", 1.0) or 1.0)
+    봉 = 고점[0][0] if 고점 else None
+    if not pp.trend_exit(원가, 봉, 지금, float(표["target_pct"]), float(표["stop_pct"]), 배):
+        return None
+    통화 = str(행.get("currency") or "KRW")
+
+    def _값(v: float) -> str:
+        return f"{v:,.0f}원" if 통화 == "KRW" else f"{v:,.2f} {통화}"
+
+    맞춤 = 배 if 배 != 1.0 and 배 > 0 else 1.0  # `trend_exit` 와 같은 잣대 — 권리락이면 원가·고점에 계수
+    날 = str(행.get("price_date") or today.isoformat())[:10]
+    return [
+        {**sf._criterion("원가(주당)", _값(원가) + (f" × 권리락 {맞춤:g}" if 맞춤 != 1.0 else ""),
+                         "수수료 포함 매수 원가", "가상모의투자 체결", str(행["first_buy_date"])[:10]), "passed": None},
+        sf._criterion("고점 종가", f"{_값(float(봉))} (원가 대비 {(float(봉) / 원가 - 1) * 100:+.2f}%)",
+                      f"목표 +{float(표['target_pct']):g}% 에 닿았나", "prices", 날),
+        sf._criterion("지금 종가", f"{_값(지금)} (고점 대비 {(지금 / (float(봉) * 맞춤) - 1) * 100:+.2f}%)",
+                      f"고점 대비 {float(표['stop_pct']):g}% 이하", "prices", 날),
+    ]
 
 
 def _감시선_적기(

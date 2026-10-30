@@ -257,7 +257,7 @@ def test_d_holds_through_stop_loss(c: Client, monkeypatch: pytest.MonkeyPatch) -
     for sid in (1, 3):
         _시세(c, sid, "2026-10-15", 10_000, 9_900)
     _하루(c, monkeypatch, "2026-10-15", signals=False)
-    monkeypatch.setattr(sf, "evaluate", lambda h, _t, _r=None: [sf.Flag(h.stock_id, "red", "손절", "x", [])])
+    monkeypatch.setattr(sf, "evaluate", lambda h, _t, _r=None: [sf.Flag(h.stock_id, "red", "손절", "x", [sf._criterion("손절선", "-20%", "≤ -7%", "t", None)])])
     for sid in (1, 3):
         _시세(c, sid, "2026-10-16", 8_000, 8_000)
     _하루(c, monkeypatch, "2026-10-16")

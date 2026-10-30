@@ -105,7 +105,10 @@ def 근거표_어긋남(conn: _sqlite3.Connection) -> list[str]:
         if not isinstance(근거, dict):
             continue
         목록 = [("signal", (근거.get("signal") or {}).get("criteria") if isinstance(근거.get("signal"), dict) else None)]
-        목록 += [(f"flags[{i}]", f.get("criteria")) for i, f in enumerate(근거.get("flags") or []) if isinstance(f, dict)]
+        # 매도 플래그는 근거가 **비지 않아야** 한다 — 빈 목록·열쇠 없음이면 웹 거래내역에 판정 근거가 하나도 안 보인다
+        # (25.2009: G 추적손절·T 하루 넘김). 매수 신호(`signal`)는 시험 가짜 신호가 근거 없이 만들어져 꼴만 본다
+        목록 += [(f"flags[{i}]", f.get("criteria") or "비었음") for i, f in enumerate(근거.get("flags") or [])
+                 if isinstance(f, dict)]  # fmt: skip
         for 자리, 기준 in 목록:
             if 기준 is None:
                 continue

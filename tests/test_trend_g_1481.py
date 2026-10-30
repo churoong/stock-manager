@@ -43,6 +43,12 @@ def test_sell_decisions_trend_uses_peak_since_first_buy(monkeypatch: pytest.Monk
     out = job.sell_decisions(c, "KR", "trend", 체결, set(), {}, None, date(2026, 10, 13), {}, 메모)
     # 고점 11,500 ≥ 11,000(목표) → 11,500 × 0.93 = 10,695 아래인 10,600 → 판다. B(core) 라면 목표도달로 이미 팔았을 것
     assert out[1][0] == [pp.TRAIL_CODE]
+    # 추적손절 근거는 근거표 행으로(25.2009 — 예전엔 빈 목록이라 웹에 판정 근거가 없었다)
+    추적 = next(f for f in out[1][1] if f["reason_code"] == pp.TRAIL_CODE)
+    assert [c["label"] for c in 추적["criteria"]] == ["원가(주당)", "고점 종가", "지금 종가"]
+    assert [c["passed"] for c in 추적["criteria"]] == [None, True, True]
+    assert 추적["criteria"][1]["display"].startswith("11,500원") and "목표 +10%" in 추적["criteria"][1]["threshold"]
+    assert 추적["criteria"][2]["display"] == "10,600원 (고점 대비 -7.83%)"
     c2 = Client()
     체결 = _보유(c2, [("2026-10-01", 10_000), ("2026-10-05", 11_500), ("2026-10-12", 11_200)])
     assert job.sell_decisions(c2, "KR", "trend", 체결, set(), {}, None, date(2026, 10, 13), {}) == {}
