@@ -90,7 +90,8 @@ def 근거표_어긋남(conn: _sqlite3.Connection) -> list[str]:
 
     try:
         행들 = conn.execute("SELECT id, rationale_json FROM paper_orders WHERE rationale_json IS NOT NULL").fetchall()
-    except _sqlite3.Error:
+    except _sqlite3.OperationalError:
+        # 표가 없는 DB 만 — 닫힌 연결(ProgrammingError)까지 삼키면 점검이 조용히 "통과" 가 된다(25.2006)
         return []
     out: list[str] = []
     for oid, 글 in 행들:
