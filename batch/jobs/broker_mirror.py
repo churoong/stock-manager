@@ -82,13 +82,17 @@ OPEN_ORDERS_SQL = (
     "SELECT id, stock_id, side, order_type, limit_price, quantity FROM paper_orders"
     " WHERE account_id = ? AND market = ? AND status = 'open' AND fill_session = ? ORDER BY id"
 )
-SENT_SQL = "SELECT paper_order_id, stock_id FROM paper_broker_orders WHERE broker = ? AND trade_date = ?"
+SENT_SQL = "SELECT paper_order_id, stock_id, reason FROM paper_broker_orders WHERE broker = ? AND trade_date = ?"
 PENDING_SQL = (
     "SELECT id, code, side, quantity, trade_date, broker_order_no, limit_price FROM paper_broker_orders"
     " WHERE broker = ? AND status IN ('sending', 'accepted') AND trade_date < ?"
 )
 #: 오늘 이 증권사 칸에 이미 적은 줄 수(거부 포함) — 하루 주문 상한을 실행이 아니라 하루로 센다(25.1567)
-SENT_TODAY_SQL = "SELECT COUNT(*) FROM paper_broker_orders WHERE broker = ? AND trade_date = ?"
+#: 장중 손절·익절 줄은 세지 않는다 — 규칙서 15.11 "장중 매도는 하루 주문 상한 밖"(25.2016, 결함 루프 [참고]: 같은 날
+#: 다시 돈 베끼기가 장중 줄 몫만큼 H 주문을 "하루 주문 상한" 으로 덜 냈다)
+SENT_TODAY_SQL = (
+    "SELECT COUNT(*) FROM paper_broker_orders WHERE broker = ? AND trade_date = ? AND reason NOT IN (?, ?)"
+)
 #: 오늘 이미 낸 베낀 매수(거부 아닌 것) — 같은 날 다시 돌 때 정리가 오늘 산 것을 팔지 않게 (검증 [필수] 1)
 BOUGHT_TODAY_SQL = (
     "SELECT stock_id, SUM(quantity) FROM paper_broker_orders WHERE broker = ? AND trade_date = ? AND side = 'buy'"
@@ -324,6 +328,13 @@ def _오늘_손절선(client: Any, 오늘: Any, 계좌: str) -> dict[int, dict[s
     if not isinstance(칸, dict) or 칸.get("as_of") != str(오늘) or 칸.get("account") != 계좌:
         return {}
     return {int(sid): v for sid, v in (칸.get("lines") or {}).items() if v.get("stop") is not None}
+
+
+def 오늘_정리함(보냄: list[dict[str, Any]]) -> set[int]:
+    """오늘 이미 정리 주문을 낸 종목 — **정리 사유 줄만**(25.2016). 장중 손절·익절 줄까지 세면 0093 이 나눈 두 갈래를
+    job 이 다시 합쳐, 같은 날 다시 돈 베끼기가 장중 매도한 종목의 KIS 에만 남은 몫을 정리하지 않았다(결함 루프 [참고]).
+    정리 기준은 다음 아침과 같은 H 수량이다(25.1770 의 선택)"""
+    return {int(r["stock_id"]) for r in 보냄 if r["paper_order_id"] is None and r.get("reason") == bm.REASON_CLEANUP}
 
 
 def guard_held(client: Any, 증권사: str, 계좌: str) -> set[int]:
@@ -754,7 +765,7 @@ def run(
     주문들 = client.execute(OPEN_ORDERS_SQL, [베낌, market, 오늘.isoformat()]).dicts()
     보냄 = client.execute(SENT_SQL, [증권사, 오늘.isoformat()]).dicts()
     이미 = {int(r["paper_order_id"]) for r in 보냄 if r["paper_order_id"] is not None}
-    정리함 = {int(r["stock_id"]) for r in 보냄 if r["paper_order_id"] is None}
+    정리함 = 오늘_정리함(보냄)
     # 오늘 정리한 종목은 **같은 티커의 모든 행**으로 — 같은 날 다시 돌 때 이긴 행이 바뀌면(오늘 새 행을 처음 삼) 앞
     # 실행이 옛 행으로 낸 정리를 못 보고 새 행으로 한 번 더 정리했다(25.1616, 25.1615 교차검증 [필수] 1)
     정리함 |= {i for ids in 코드표.values() if 정리함 & set(ids) for i in ids}
@@ -765,7 +776,7 @@ def run(
     코드 = {sid: t for sid, (t, _m) in 종목.items() if not 미국 or 거래소.get(sid)}
     종가 = _closes(client, set(코드), 오늘.isoformat()) if 미국 else None
     오늘산 = {int(r[0]): int(r[1] or 0) for r in client.execute(BOUGHT_TODAY_SQL, [증권사, 오늘.isoformat()]).rows}
-    낸수 = client.execute(SENT_TODAY_SQL, [증권사, 오늘.isoformat()]).rows
+    낸수 = client.execute(SENT_TODAY_SQL, [증권사, 오늘.isoformat(), bm.REASON_GUARD_STOP, bm.REASON_GUARD_TAKE]).rows
     # 판정 대기 매수는 정리 계산에서 내부 보유로 친다(25.1715) — 찼으면 곧 장부에 들고, 안 찼으면 다음 날 정리
     대기 = {int(r["stock_id"]): int(r["q"] or 0)
            for r in client.execute(PENDING_BUY_QTY_SQL, [베낌, market, 오늘.isoformat()]).dicts()}  # fmt: skip
