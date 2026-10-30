@@ -8,7 +8,10 @@ from __future__ import annotations
 import json
 import sys
 
+import pytest
+
 from batch.services import sell_flags as sf
+from tests import conftest
 from tests.conftest import 근거표_어긋남
 from tests.test_paper_job_1445 import Client
 
@@ -22,10 +25,12 @@ def _주문(c: Client, oid: int, 근거: dict) -> None:
     )
 
 
-def test_그물은_옛_꼴만_잡고_근거표_꼴은_지난다() -> None:
+def test_그물은_옛_꼴만_잡고_근거표_꼴은_지난다(request: pytest.FixtureRequest) -> None:
+    # 그물이 켜져 있다 — 고정물이 이 시험에도 붙고(autouse), 고정물이 보는 모듈이 Client 의 모듈이다(25.2007)
+    assert "_주문_근거는_근거표_꼴이다" in request.fixturenames
+    assert Client.__module__ == conftest.그물_모듈
     c = Client(accounts=("B",))
-    assert "tests.test_paper_job_1445" in sys.modules
-    모듈 = sys.modules["tests.test_paper_job_1445"]
+    모듈 = sys.modules[conftest.그물_모듈]
     assert any(x is c for x in 모듈.만든_client)  # 고정물이 볼 목록에 올랐다
     새 = sf._criterion("판정 종가", "8,700원", "손절 -3%", "prices", "2026-10-31")
     _주문(c, 1, {"flags": [{"criteria": [새]}], "signal": {"criteria": [새]}})
@@ -33,18 +38,30 @@ def test_그물은_옛_꼴만_잡고_근거표_꼴은_지난다() -> None:
     _주문(c, 3, {"signal": {"criteria": "깨짐"}})
     어긋남 = 근거표_어긋남(c.conn)
     assert [x.split(":")[0] for x in 어긋남] == ["주문 2 flags[0]", "주문 3 signal"]
-    # 이 시험의 일부러 넣은 어긋남이 고정물을 깨지 않게 지운다
-    c.conn.execute("DELETE FROM paper_orders")
-    assert 근거표_어긋남(c.conn) == []
+    # 고정물의 몸통(`그물_점검`)이 그 어긋남으로 실제로 깨지고 목록을 비운다(25.2007 — 몸통이 일찍 끝나도 잡게)
+    with pytest.raises(AssertionError, match="주문 2 flags"):
+        conftest.그물_점검()
+    assert not 모듈.만든_client
 
 
 def test_닫힌_연결은_통과로_삼키지_않는다() -> None:
     import sqlite3
 
-    import pytest
-
     c = Client(accounts=("B",))
     c.conn.close()
-    with pytest.raises(sqlite3.ProgrammingError):
-        근거표_어긋남(c.conn)
-    sys.modules["tests.test_paper_job_1445"].만든_client.remove(c)  # 고정물이 닫힌 DB 를 다시 읽지 않게
+    try:
+        with pytest.raises(sqlite3.ProgrammingError):
+            근거표_어긋남(c.conn)
+    finally:
+        sys.modules[conftest.그물_모듈].만든_client.remove(c)  # 고정물이 닫힌 DB 를 다시 읽지 않게
+
+
+def test_열_이름이_바뀐_DB_는_통과로_삼키지_않는다() -> None:
+    """표가 없는 DB 만 빈 답 — 열 이름이 바뀌면(no such column) 드러낸다(25.2007)"""
+    import sqlite3
+
+    conn = sqlite3.connect(":memory:")
+    conn.execute("CREATE TABLE paper_orders (id INTEGER)")
+    with pytest.raises(sqlite3.OperationalError, match="no such column"):
+        근거표_어긋남(conn)
+    assert 근거표_어긋남(sqlite3.connect(":memory:")) == []

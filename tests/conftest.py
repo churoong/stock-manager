@@ -90,9 +90,12 @@ def 근거표_어긋남(conn: _sqlite3.Connection) -> list[str]:
 
     try:
         행들 = conn.execute("SELECT id, rationale_json FROM paper_orders WHERE rationale_json IS NOT NULL").fetchall()
-    except _sqlite3.OperationalError:
-        # 표가 없는 DB 만 — 닫힌 연결(ProgrammingError)까지 삼키면 점검이 조용히 "통과" 가 된다(25.2006)
-        return []
+    except _sqlite3.OperationalError as exc:
+        # 표가 없는 DB 만 — 닫힌 연결(ProgrammingError)·열 이름 바뀜(no such column)까지 삼키면 점검이 조용히 "통과" 가
+        # 된다(25.2006·25.2007)
+        if "no such table" in str(exc):
+            return []
+        raise
     out: list[str] = []
     for oid, 글 in 행들:
         try:
@@ -111,19 +114,29 @@ def 근거표_어긋남(conn: _sqlite3.Connection) -> list[str]:
     return out
 
 
-@pytest.fixture(autouse=True)
-def _주문_근거는_근거표_꼴이다():  # noqa: ANN201
-    """가상모의투자 가짜 DB 를 쓴 시험이 끝나면 그 DB 의 주문 근거가 모두 근거표 꼴(label·display·threshold·source
-    문자열)인지 본다 — 계좌 규칙이 새 근거를 지어도 웹에서 빈 칸이 되지 않게(25.2005)"""
+#: 근거표 그물이 보는 가짜 DB 의 모듈 — 고정물과 그물 시험(test_criteria_net_2006)이 같은 이름을 쓴다(25.2007: 문자열을
+#: 따로 두면 파일 이름을 바꿀 때 import 는 고치고 이 문자열만 놓쳐 그물이 소리 없이 꺼졌다)
+그물_모듈 = "tests.test_paper_job_1445"
+
+
+def 그물_점검() -> None:
+    """그 모듈 가짜 DB 마다 주문 근거가 근거표 꼴인지 보고 목록을 비운다 — 어긋나면 AssertionError (25.2005·25.2007)"""
     import sys
 
-    yield
-    모듈 = sys.modules.get("tests.test_paper_job_1445")
-    if 모듈 is None:
+    모듈 = sys.modules.get(그물_모듈)
+    if 모듈 is None:  # 이 시험이 가짜 DB 모듈을 들이지 않았다 — 볼 DB 가 없다
         return
     어긋남 = [x for c in list(모듈.만든_client) for x in 근거표_어긋남(c.conn)]
     모듈.만든_client.clear()
     assert not 어긋남, "주문 근거가 웹 근거표 꼴이 아니다(25.2005):\n" + "\n".join(어긋남[:5])
+
+
+@pytest.fixture(autouse=True)
+def _주문_근거는_근거표_꼴이다():  # noqa: ANN201
+    """가상모의투자 가짜 DB 를 쓴 시험이 끝나면 그 DB 의 주문 근거가 모두 근거표 꼴(label·display·threshold·source
+    문자열)인지 본다 — 계좌 규칙이 새 근거를 지어도 웹에서 빈 칸이 되지 않게(25.2005). 몸통은 `그물_점검`"""
+    yield
+    그물_점검()
 
 
 @pytest.fixture(autouse=True)
