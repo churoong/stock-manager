@@ -434,12 +434,14 @@ def compare(rows: list[dict[str, Any]]) -> dict[str, Any]:
             칸["cleanup"] += 1
             continue
         if r.get("reason") in GUARD_REASONS:
-            칸["guard"] += 1
             if r.get("status") == "rejected" and str(r.get("message") or "").startswith(GUARD_UNSENT_ORDER_MARK):
                 # 우리 DB 기록이 깨져 보내지 않고 닫은 줄 — KIS 거부가 아니다. 거부·까닭에 섞지 않고 따로 센다(25.2017,
-                # 25.2015 교차검증 [참고]: 주간 요약에 "거부 1 · GUARD_UNSENT …" 로 찍혔다)
+                # 25.2015 교차검증 [참고]: 주간 요약에 "거부 1 · GUARD_UNSENT …" 로 찍혔다). 낸 장중 매도(`guard`)에도
+                # 넣지 않는다 — 넣으면 "장중 손절·익절 N" 에 KIS 에 간 적 없는 줄이 판 것처럼 섞였다(25.2020)
                 칸["guard_unsent"] += 1
-            elif r.get("status") == "rejected":
+                continue
+            칸["guard"] += 1
+            if r.get("status") == "rejected":
                 # 장중 매도 거부도 거부로 센다 — 하한가·VI 로 되풀이되면 주간 요약 까닭에 보여야 한다(25.1769)
                 칸["rejected"] += 1
                 칸["guard_rejected"] += 1  # 베낀 주문 거부와 가르게 — 데스크 실전 준비 근거가 뺀다(25.1779)
@@ -684,7 +686,7 @@ def compare_lines(
     """주간 요약 몇 줄. 끝난 베낀 주문이 없으면 빈 목록. 거부·표본 밖은 체결 견줌(n)과 따로 끝 줄에 — 거부만 있는 주에
     "주문 없음" 으로 보이던 것(25.1564, 25.1561 반박 [권고] A)"""
     if not s or not (s.get("n") or s.get("unknown") or s.get("cleanup") or s.get("guard") or s.get("rejected")
-                     or s.get("excluded") or s.get("guard_held")):  # fmt: skip
+                     or s.get("excluded") or s.get("guard_held") or s.get("guard_unsent")):  # fmt: skip
         return []
     out = [f"[KIS모의투자 — {account_name(account)} 주문 베끼기, 지난 {s['days']}일]"]
     if s.get("n"):
@@ -713,6 +715,8 @@ def compare_lines(
         끝.append(f"정리 주문 {s['cleanup']}")
     if s.get("guard"):
         끝.append(f"장중 손절·익절 {s['guard']}(지주사는 아침 일봉 판정 — 짝 없음)")
+    if s.get("guard_unsent"):  # 웹 `brokerLines` 와 같은 글(25.2020)
+        끝.append(f"장중 손절·익절 못 냄 {s['guard_unsent']}(우리 기록 확인 실패 — KIS 에 안 감)")
     if s.get("guard_held"):  # 잔고 대보기에서 뺀 종목 — "어긋난 종목 0" 이 거짓말로 읽히지 않게(25.1772)
         끝.append(f"장중 매도 뒤 지주사만 든 종목 {s['guard_held']}(잔고 대보기에서 뺌)")
     if diff_count is not None:

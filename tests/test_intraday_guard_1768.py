@@ -1286,3 +1286,10 @@ def test_보내지_않은_장중_줄은_KIS_거부로_세지_않는다() -> None
                     {"reason": bm.REASON_GUARD_STOP, "status": "rejected", "message": "장중 현재가 9,250 · APBK0919 하한가"}])
     assert r["rejected"] == 1 and r["guard_rejected"] == 1 and r["guard_unsent"] == 1
     assert r["reject_reasons"] == {"APBK0919": 1}
+    # 낸 장중 매도(guard)에도 넣지 않고, 주간 요약에 따로 보인다(25.2020 — 예전엔 셈만 하고 어디에도 안 보였다)
+    assert r["guard"] == 1
+    끝 = bm.compare_lines(r, 0, "2026-10-30")[-1]
+    assert "장중 손절·익절 1(" in 끝 and "장중 손절·익절 못 냄 1(우리 기록 확인 실패 — KIS 에 안 감)" in 끝
+    # 보내지 않은 줄만 있는 주에도 요약이 빠지지 않는다
+    assert bm.compare_lines(bm.compare([{"reason": bm.REASON_GUARD_STOP, "status": "rejected",
+                                         "message": f"{bm.GUARD_UNSENT_ORDER_MARK} — x"}]), 0, "2026-10-30")
