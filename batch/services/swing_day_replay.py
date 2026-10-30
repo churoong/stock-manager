@@ -13,8 +13,9 @@
 가격은 **수정 계열**(로더 `opens` 와 종가가 같은 계수 — 25.2029)이라 권리락 계수는 비운다(이름 붙은 차이 ①).
 이름 붙은 차이(일치 시험 ⑦-5 에서 묶는다):
 ① 권리락 계수 빔(수정 계열이 같은 비율을 반영) ② 시세 기다림·시장 시세 없는 날·기업행위 멈춤·환율 없음(운영 DB 둘레)
-은 없다 — 그날 행이 없으면 정지로 본다 ③ 거래량은 거래대금(`turnover`)이 0 인지로만 본다 ④ 늦은 실행·장 끝난 뒤 손
-실행 없음(늘 장 전 결정) ⑤ S 판정 종가는 시가가 있는 날만(운영 `SWING_CLOSES_SQL` 의 시가·고가·저가 > 0 근사)
+은 없다 — 그날 행이 없으면 정지로 본다(등락은 그 앞 행 있는 날 종가로 재 하한가 잠김을 판정한다, 25.2039)
+③ 거래량은 거래대금(`turnover`)이 0 인지로만 본다 ④ 늦은 실행·장 끝난 뒤 손 실행 없음(늘 장 전 결정)
+⑤ S 판정 종가는 시가가 있는 날만(운영 `SWING_CLOSES_SQL` 의 시가·고가·저가 > 0 근사)
 """
 
 from __future__ import annotations
@@ -50,7 +51,10 @@ def _bar(sid: int, d: str, prev: str | None, prices: dict[int, dict[str, float]]
     if 종가 is None:
         return None  # 그날 행 없음 — 정지로 본다(이름 붙은 차이 ②)
     대금 = (turnover or {}).get(sid, {}).get(d)
-    전 = prices.get(sid, {}).get(prev) if prev else None
+    # 전일 종가 = 그날 앞 **마지막으로 행이 있는 날** — cutoff 날 행이 빠진 정지 뒤 첫날에도 등락을 내 하한가 잠김을
+    # 판정한다(운영은 DB change_pct, 25.2039 — 예전엔 None 이라 잠긴 시가에 팔았다)
+    앞 = [k for k in prices.get(sid, {}) if k < d]
+    전 = prices[sid][max(앞)] if 앞 else None
     등락 = (종가 / 전 - 1) * 100 if 전 else None
     return pp.Bar(d, opens.get(sid, {}).get(d), 종가, 대금, 등락)
 
@@ -127,7 +131,9 @@ def simulate_account(
                 파는것.add(sid)
 
         # ② 매수 — 운영 run_step 과 같은 거름·배분·관문
-        쉼_시작 = dates[max(0, i - (pp.REBUY_COOLDOWN_SESSIONS - 1))]
+        # 운영 run_step 과 같이 **판단일(cutoff = dates[i-1])** 에서 4장 앞 — 예전 dates[i-4] 는 체결일 기준이라
+        # 쉼이 한 장 짧아 운영보다 하루 일찍 다시 샀다(25.2039, 25.2036 교차검증 [필수])
+        쉼_시작 = dates[max(0, i - pp.REBUY_COOLDOWN_SESSIONS)]
         쉼 = pp.rest_set(규칙, fills, 쉼_시작, 파는것, set())
         view = bt.PriceView(prices, cutoff, turnover, holding=frozenset(보유))
         행 = pp.short_candidates(rows_at(view, d), set(보유))
@@ -156,7 +162,9 @@ def simulate_account(
                 max_stock_pct=settings["max_weight_per_stock"], max_sector_pct=settings["max_weight_per_sector"],
                 today=d, ref_floor=rg.ref_floor(market, date.fromisoformat(d)),
             )  # fmt: skip
-            통과, _막힘 = rg.gate(후보, 문맥)
+            통과, 막힘 = rg.gate(후보, 문맥)
+            if 막힘:
+                기록["blocked"] = 기록.get("blocked", 0) + len(막힘)
             for c in 통과:
                 o = 낸[c.key]
                 번호 += 1
@@ -178,7 +186,8 @@ def simulate_account(
             bar = _bar(o.stock_id, d, cutoff, prices, opens, turnover)
 
             def _마지막(sid: int = o.stock_id, 오늘: str = d) -> float | None:
-                앞 = [k for k in prices.get(sid, {}) if k < 오늘]
+                # 운영 `LAST_CLOSE_SQL`(date <= 그날)과 같이 그날 행까지 — 하한가에 잠긴 날은 그날 종가로(25.2039)
+                앞 = [k for k in prices.get(sid, {}) if k <= 오늘]
                 return prices[sid][max(앞)] if 앞 else None
 
             판정, 가격, 까닭 = pp.judge_order(o, bar, _마지막)
@@ -205,6 +214,7 @@ def simulate_account(
                 진입.setdefault(o.stock_id, (d, float(가격)))
             else:
                 기록["sells"] += 1
+                기록.setdefault("sold", {})[o.reason or ""] = 기록.get("sold", {}).get(o.reason or "", 0) + 1
                 if o.stock_id not in pp.positions(fills):
                     진입.pop(o.stock_id, None)
         out.log.append(기록)

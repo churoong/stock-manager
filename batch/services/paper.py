@@ -491,9 +491,10 @@ def judge_order(
     """주문 하나의 그날 판정 — ("fill" | "defer" | "expire", 체결가(슬리피지 전), 까닭).
 
     `judge` → 당일 단타 진입 막기(`day_entry`) → 정지·하한가 시장가 매도는 미룬다(25.1553), 미룬 지
-    `HALT_LIQUIDATE_SESSIONS` 째면 마지막 종가로 청산(`last_close` — 그날 앞 마지막 종가, 없으면 미룸) → 그 밖에
-    안 찼으면 만료. 가상모의투자 체결 판정(`jobs/paper.fill_orders` — DB 쓰기·환율·시세 기다림은 그쪽)과 S·T
-    리플레이(깔때기 ⑦)가 같이 쓴다(25.2034)"""
+    `HALT_LIQUIDATE_SESSIONS` 째면 마지막 종가로 청산(`last_close` — **그날까지**(그날 행 포함) 마지막 종가,
+    운영 `LAST_CLOSE_SQL` `date <= 날`. 없으면 미룸) → 그 밖에 안 찼으면 만료.
+    가상모의투자 체결 판정(`jobs/paper.fill_orders` — DB 쓰기·환율·시세 기다림은 그쪽)과
+    S·T 리플레이(깔때기 ⑦)가 같이 쓴다(25.2034)"""
     가격, 까닭 = judge(order, bar)
     가격, 까닭 = day_entry(order, 가격, 까닭, bar)
     if 가격 is None and order.side == "sell" and (halted(bar) or 까닭.endswith(LOCKED_SELL)):

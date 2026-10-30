@@ -791,7 +791,7 @@ class Test밸류_분모:
     "review": "`MIN_SAMPLE` 은 이미 이 파일이 다른 검사에서 묶고 있다",
     "pit": "시점 조회라 판정 문턱이 없다. 미래 참조 금지는 docs/backtest.md 1.1 이 적는다",
     "swing_day_replay": "S·T 계좌형 리플레이(25.2036) — 문턱을 따로 두지 않고 운영 순수 함수(`swing_exit`·`judge_order`·"
-    "`settle_check`·`buy_orders`)와 0092 칸(top 10)을 그대로 쓴다. 운영과 같음은 일치 시험(25.2037)이 묶는다",
+    "`settle_check`·`buy_orders`)를 그대로 쓰고 top 10 은 0092 칸과 같은 값으로 둔다. 운영과 같음은 일치 시험(25.2037)이 묶는다",
     "factor_ab": "지표 교체 A/B 기록(25.903). 기준은 docs/factors.md 12.12 가 글로 적고 `rule_met` 테스트가 묶는다."
     " `MIN_PAIR_STOCKS` 는 `factor_ic.MIN_STOCKS` 를 그대로 쓴다",
     "pit_universe": "창·하한을 `services/universe` 와 같은 값으로 두고 docs/backtest.md 1.3 이 적는다",

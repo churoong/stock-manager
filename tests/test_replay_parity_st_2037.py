@@ -4,7 +4,7 @@
 - 운영: 날마다 그날 시세를 넣고 `jobs/paper.run_step`(그 안에서 지난 장 주문을 `fill_orders` 로 판정 — 운영 장부가
   스스로 찬다. 1910 의 "엔진 체결 베끼기" 허용 ① 이 없다)
 - 리플레이: `services/swing_day_replay.simulate_account`
-를 돌려 **체결 하나하나**(날·종목·방향·가격·수량·현금)와 하루 끝 현금이 같은지 본다. 비용 판은 운영 기본 비용
+를 돌려 **체결 하나하나**(날·종목·방향·가격·수량·현금 영향)와 날마다 현금이 같은지 본다. 비용 판은 운영 기본 비용
 (`jobs/paper.costs_for` — 설정이 비면 백테스트 기본값). 허용(이름 붙은 차이) 없이 같아야 한다 — 이 자료는 모듈 머리의
 차이 ①~⑤ 가 닿지 않게 짰다(권리락 없음, 정지는 거래량 0 행, 늘 장 전 결정, 시가가 모든 날 있음).
 """
@@ -37,20 +37,25 @@ def _자료() -> dict[int, list[tuple[float, float, int]]]:
         (1351.0, 1360.0, 1000)] * (n - 5)  # fmt: skip
     s3 = [(500.0, 500.0, 1000), (500.0, 505.0, 1000), (655.0, 650.0, 1000)] + [(650.0, 640.0, 1000)] * 3 + [
         (640.0, 640.0, 0)] + [(645.0, 646.0, 1000)] * (n - 7)  # fmt: skip
+    # 날들[11] 종목 1 시가 갭 상승(+25%, 상한가 시가 막기 29.5% 아래) — 빠듯한 판(신호 비중 50%)에서 먼저 판정되는 1 이 예상보다 비싸 차, 같은 장
+    # 2 의 예약을 빼면 현금이 모자라 만료되는 길(25.2039)
+    s1[11] = (1341.0, s1[11][1], 1000)
     return {1: s1, 2: s2, 3: s3}
 
 
 #: 신호 행 — 판단일(cutoff)마다 단기 신호 종목
-신호: dict[str, list[int]] = {날들[0]: [1, 2], 날들[1]: [3], 날들[2]: [3], 날들[4]: [1, 3], 날들[8]: [2, 3],
-                              날들[10]: [1, 2, 3]}  # fmt: skip
+#: 날들[9]·[10] 의 2 는 판 뒤 쉼 경계(S 가 2 를 날들[5] 에 판다 — cutoff 날들[9] 는 쉼 안, 날들[10] 은 밖, 25.2039),
+#: 날들[5] 의 3 은 T 가 거래량 0 정지 날(날들[6]) 에 사려다 만료되는 길
+신호: dict[str, list[int]] = {날들[0]: [1, 2], 날들[1]: [3], 날들[2]: [3], 날들[4]: [1, 3], 날들[5]: [3],
+                              날들[8]: [2, 3], 날들[9]: [2], 날들[10]: [1, 2, 3]}  # fmt: skip
 
 
 def _종가(sid: int, d: str) -> float:
     return _자료()[sid][날들.index(d)][1]
 
 
-def _행들(cutoff: str) -> list[report_picks.SignalRow]:
-    return [_행(sid, cutoff, _종가(sid, cutoff), sector="전자") for sid in 신호.get(cutoff, [])]
+def _행들(cutoff: str, weight: float = 10.0) -> list[report_picks.SignalRow]:
+    return [_행(sid, cutoff, _종가(sid, cutoff), weight=weight, sector="전자") for sid in 신호.get(cutoff, [])]
 
 
 @pytest.fixture(autouse=True)
@@ -60,7 +65,7 @@ def _고정(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(job, "frozen_ids", lambda *_a, **_k: set())
 
 
-def _운영(account: str, monkeypatch: pytest.MonkeyPatch) -> tuple[list[pp.Fill], dict[str, float]]:
+def _운영(account: str, monkeypatch: pytest.MonkeyPatch, 설정: dict = 설정) -> tuple[list[pp.Fill], dict[str, float]]:
     c = _계좌(("B",), t=account == "T", s=account == "S")
     c.conn.execute("UPDATE paper_cash_flows SET amount_krw = ?, flow_date = ?, created_at = ?",
                    [int(입금), 날들[0], f"{날들[0]}T00:00:00+00:00"])
@@ -89,20 +94,20 @@ def _운영(account: str, monkeypatch: pytest.MonkeyPatch) -> tuple[list[pp.Fill
         다음 = 날들[i + 1]
         오늘 = date.fromisoformat(다음)
         monkeypatch.setattr(cal, "local_today", lambda _m=None, _d=오늘: _d)
-        job.run_step(c, market="KR", trade_date=d, late=False, signal_rows=_행들(d), settings=설정, price_series={},
+        job.run_step(c, market="KR", trade_date=d, late=False, signal_rows=_행들(d, 설정.get("_weight", 10.0)), settings=설정, price_series={},
                      series_unknown={}, allocate=True, now=datetime.fromisoformat(f"{다음}T00:00:00+00:00"))  # fmt: skip
         체결 = [f for f in job._fills(c)[0] if f.account_id == account]
-        현금[d] = pp.cash(job._fills(c)[1] if False else [pp.CashFlow(1, 날들[0], 입금, "deposit")], 체결)
+        현금[d] = pp.cash([pp.CashFlow(1, 날들[0], 입금, "deposit")], 체결)
     return [f for f in job._fills(c)[0] if f.account_id == account], 현금
 
 
-def _리플레이(account: str) -> sdr.STResult:
+def _리플레이(account: str, 설정: dict = 설정) -> sdr.STResult:
     prices = {sid: {d: 줄[i][1] for i, d in enumerate(날들)} for sid, 줄 in _자료().items()}
     opens = {sid: {d: 줄[i][0] for i, d in enumerate(날들)} for sid, 줄 in _자료().items()}
     turnover = {sid: {d: float(줄[i][2]) * 줄[i][1] for i, d in enumerate(날들)} for sid, 줄 in _자료().items()}
     캐시 = {sid: {"id": sid, "ticker": f"{sid:06d}", "name": f"종목{sid}", "sector": "전자", "country": "KR",
                   "currency": "KRW", "asset_type": "stock"} for sid in (1, 2, 3)}  # fmt: skip
-    return sdr.simulate_account(account, rows_at=lambda view, _d: _행들(view.cutoff), prices=prices, opens=opens,
+    return sdr.simulate_account(account, rows_at=lambda view, _d: _행들(view.cutoff, 설정.get("_weight", 10.0)), prices=prices, opens=opens,
                                 dates=날들, costs_at=lambda d: job.costs_for("KR", None, None, d), stock_cache=캐시,
                                 settings=설정, deposit=입금, turnover=turnover)  # fmt: skip
 
@@ -111,24 +116,41 @@ def _꼴(fills: list[pp.Fill]) -> list[tuple]:
     return sorted((f.fill_date, f.stock_id, f.side, round(f.price, 6), f.quantity, round(f.cash_krw, 4)) for f in fills)
 
 
+@pytest.mark.parametrize("판", ["보통", "빠듯"])
 @pytest.mark.parametrize("account", ["S", "T"])
-def test_체결_하나하나가_운영과_같다(account: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    운영, _현금 = _운영(account, monkeypatch)
+def test_체결_하나하나가_운영과_같다(account: str, 판: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    설정판 = 설정 if 판 == "보통" else 빠듯
+    운영, 현금 = _운영(account, monkeypatch, 설정판)
     # 마지막 날 체결은 운영이 그날 run_step 을 안 돌려 판정되지 않는다 — 리플레이도 마지막 날 앞까지만 견준다
     끝 = 날들[-1]
-    rp = [f for f in _리플레이(account).fills if f.fill_date < 끝]
+    r = _리플레이(account, 설정판)
+    rp = [f for f in r.fills if f.fill_date < 끝]
     assert 운영, "운영이 아무것도 안 샀다 — 자료가 견줄 거리를 못 지난다"
     assert _꼴(rp) == _꼴(운영)
+    # 날마다 현금(그날 판단 뒤 = 그날까지의 체결) — 운영은 날 d 의 run_step 이 d 장 주문을 판정한 뒤
+    for d, x in 현금.items():
+        assert abs(pp.cash([pp.CashFlow(1, 날들[0], 입금, "deposit")], [f for f in r.fills if f.fill_date <= d]) - x) < 1e-6, d
 
 
-def test_자료가_견줄_거리를_지난다(monkeypatch: pytest.MonkeyPatch) -> None:
-    """S 는 목표·손절·하한가 미룸, T 는 상한가 시가 안 삼·종가 짝 매도를 실제로 지난다."""
+#: 현금이 빠듯한 판(25.2039, 25.2037 교차검증 [권고]) — 종목 상한을 크게 둬 한 신호가 현금 대부분을 쓰게 해, 같은 장
+#: 다른 매수 예약 때문에 만료되는 길과 관문 막힘을 지나게 한다
+빠듯 = {"max_weight_per_sector": 100.0, "max_weight_per_stock": 60.0, "min_order_amount": 0, "_weight": 50.0}
+
+
+def test_자료가_견줄_거리를_지난다() -> None:
+    """S 는 목표·손절·하한가 미룸·쉼 경계, T 는 상한가 시가 안 삼·종가 짝 매도·정지 날 만료, 빠듯한 판은 예약·관문 —
+    리플레이가 실제로 그 길을 지나는지(25.2039: 예전 단언은 `사유 is not None` 처럼 늘 참인 것이 섞였다)."""
     s = _리플레이("S")
-    사유 = {k for g in s.log for k in g["expired"]}
+    판것 = {k for g in s.log for k in g.get("sold", {})}
+    assert {pp.SWING_CODES["target"], pp.SWING_CODES["stop"]} <= 판것, 판것
     assert sum(g["deferred"] for g in s.log) >= 1  # 하한가 잠김 매도 미룸
-    판 = [f for f in s.fills if f.side == "sell"]
-    assert len(판) >= 2
+    산날 = [f.fill_date for f in s.fills if f.side == "buy" and f.stock_id == 2]
+    assert 날들[10] not in 산날 and 날들[11] in 산날  # 쉼 경계 — cutoff 날들[9] 막힘, 날들[10] 삼(체결은 다음 장)
     t = _리플레이("T")
     t사유 = {k for g in t.log for k in g["expired"]}
     assert any(k.startswith("상한가 시가") for k in t사유) and "단타 짝 매수 안 참" in t사유
-    assert any(f.side == "sell" for f in t.fills) and 사유 is not None
+    assert any(k.startswith("정지") for k in t사유), t사유
+    assert pp.DAY_CLOSE_CODE in {k for g in t.log for k in g.get("sold", {})}
+    빠 = [g for a in ("S", "T") for g in _리플레이(a, 빠듯).log]
+    빠사유 = {k for g in 빠 for k in g["expired"]}
+    assert "현금 부족 (다른 미체결 매수 예약 포함)" in 빠사유 or sum(g.get("blocked", 0) for g in 빠) >= 1, 빠사유

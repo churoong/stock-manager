@@ -107,3 +107,32 @@ def test_정지가_길면_미룬_횟수로_마지막_종가에_청산한다() ->
     판 = [f for f in r.fills if f.side == "sell"]
     # 날[3] 첫 미룸(횟수 1) … 20번째 시도 날[22] 에 마지막 종가(날[2] 940)로
     assert [(f.fill_date, f.price) for f in 판] == [(긴날[3 + pp.HALT_LIQUIDATE_SESSIONS - 1], 940.0)]
+
+
+def test_판_뒤_쉼은_판단일_기준_5거래일이다() -> None:
+    """운영 run_step 과 같이 쉼 시작 = 판단일(cutoff)에서 4장 앞(25.2039, 교차검증 [필수]): 날[4] 에 팔면 cutoff 날[8]
+    (판 날 + 4장)은 막히고 cutoff 날[9](판 날 + 5장)에 사서 날[10] 에 찬다. 예전 체결일 기준은 날[8] 에 샀다."""
+    종가 = {1: [1000, 1010, 1020, 1050, 1070] + [1070] * 9}
+    시가 = {1: [1000, 1000, 1015, 1030, 1060] + [1070] * 9}
+    r = _돌림("S", 종가, 시가, {날[0]: [1], 날[8]: [1], 날[9]: [1]})
+    assert [f.fill_date for f in r.fills if f.side == "sell"][0] == 날[4]
+    assert [f.fill_date for f in r.fills if f.side == "buy"] == [날[1], 날[10]]
+
+
+def test_정지_청산은_그날까지의_마지막_종가다() -> None:
+    """운영 `LAST_CLOSE_SQL`(date <= 그날)과 같이 그날 행의 종가까지 본다(25.2039, 교차검증 [권고]) — 청산 날 행의 종가가
+    앞날과 다르면 그날 값."""
+    긴날 = _영업일("2026-03-02", 30)
+    종가 = dict(zip(긴날, [1000.0, 1000.0, 940.0] + [930.0] * 27, strict=True))
+    시가 = dict(zip(긴날, [1000.0, 1000.0, 950.0] + [930.0] * 27, strict=True))
+    청산날 = 긴날[3 + pp.HALT_LIQUIDATE_SESSIONS - 1]
+    종가[청산날] = 920.0
+    대금 = {1: {d: (0.0 if 긴날[3] <= d < 긴날[28] else 1e6) for d in 긴날}}  # 날[3]~[27] 거래량 0 정지
+
+    def rows_at(view, d):  # noqa: ANN001
+        return [_행(1, view.cutoff, 종가[view.cutoff])] if view.cutoff == 긴날[0] else []
+
+    r = sdr.simulate_account("S", rows_at=rows_at, prices={1: 종가}, opens={1: 시가}, dates=긴날,
+                             costs_at=lambda _d: 비용0, stock_cache=캐시, settings=설정, deposit=10_000_000.0,
+                             turnover=대금)  # fmt: skip
+    assert [(f.fill_date, f.price) for f in r.fills if f.side == "sell"] == [(청산날, 920.0)]

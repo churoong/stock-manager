@@ -49,17 +49,18 @@ def _상태(c: Client, oid: int) -> tuple:
     return tuple(c.q("SELECT status, close_note FROM paper_orders WHERE id = ?", [oid])[0])
 
 
-def test_정지로_오래_미룬_매도는_그날_앞_마지막_종가로_청산한다() -> None:
+def test_정지로_오래_미룬_매도는_그날까지의_마지막_종가로_청산한다() -> None:
     c = Client()
     _보유(c, 10, "B", 1, 5, 10_000.0)
     _시세(c, 1, "2026-10-15", 9_100, 9_000)
-    _시세(c, 1, "2026-10-16", 9_000, 9_000, volume=0)  # 정지
+    _시세(c, 1, "2026-10-16", 8_800, 8_800, volume=0)  # 정지 — 그날 행 종가가 앞날과 달라 어느 종가인지 묶는다(25.2039)
     _시세(c, 3, "2026-10-16", 100, 100)  # 시장엔 그날 시세가 있다
     _주문(c, 11, "B", 1, "sell", 5, "2026-10-16", deferrals=pp.HALT_LIQUIDATE_SESSIONS - 1)
     _판정(c, "2026-10-16")
     상태, 글 = _상태(c, 11)
     assert 상태 == "filled" and "마지막 종가로 청산" in 글
-    assert c.q("SELECT price FROM paper_fills WHERE order_id = 11") == [(9_000.0,)]
+    # 운영 `LAST_CLOSE_SQL` 은 그날 행까지(date <= 날) — 리플레이도 같다(25.2039)
+    assert c.q("SELECT price FROM paper_fills WHERE order_id = 11") == [(8_800.0,)]
 
 
 def test_다른_계좌가_든_종목은_팔지_못한다() -> None:
