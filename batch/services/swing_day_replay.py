@@ -162,12 +162,15 @@ def simulate_account(
                 signal_rows=행, settings=settings, price_series={}, series_unknown={}, fx_rate=None,
                 stop_ids=set(), sold_recently=쉼, stock_cache=stock_cache, top_n=TOP_N, entry="open",
             )  # fmt: skip
-            어제 = out.curve[-1][1] if out.curve else 1.0
-            그제 = out.curve[-2][1] if len(out.curve) > 1 else 어제
+            # 견줄 어제 평가가 없으면 하루 수익 모름(None) — 운영 첫 평가와 같다(`prev_twr` 없음). 예전엔 0.0 이라
+            # 관문 결과는 같지만 문맥이 갈렸다(25.2053 — 관문 문맥 일치 시험이 찾음)
+            어제 = out.curve[-1][1] if out.curve else None
+            그제 = out.curve[-2][1] if len(out.curve) > 1 else None
             후보 = [rg.Candidate(o["stock_id"], "buy", o["cost_krw"], o["ref_date"], k, o["cash_krw"])
                     for k, o in enumerate(낸)]  # fmt: skip
             문맥 = rg.Context(
-                equity_krw=자본, day_return_pct=(어제 / 그제 - 1) * 100 if 그제 else None, cash_available_krw=현금,
+                equity_krw=자본, day_return_pct=(어제 / 그제 - 1) * 100 if 어제 and 그제 else None,
+                cash_available_krw=현금,
                 holding_krw={r["stock_id"]: r["value_krw"] for r in 평가행},
                 sector_of={sid: stock_cache.get(sid, {}).get("sector") for sid in {*보유, *(c.stock_id for c in 후보)}},
                 max_stock_pct=settings["max_weight_per_stock"], max_sector_pct=settings["max_weight_per_sector"],

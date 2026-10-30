@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import dataclasses
 from datetime import date, datetime
+from typing import Any
 
 import pytest
 
@@ -221,3 +222,52 @@ def test_중간_입금_손실_날도_관문은_입금을_뺀_수익으로_막는
     _운영("T", monkeypatch, 중간입금=(날들[12], 입금 * 0.03))
     rp = {g["day"]: g.get("blocked", 0) for g in _리플레이("T").log if g.get("blocked")}
     assert 막힘_기록["T"] == rp and rp.get(날들[12]) == 2, (막힘_기록["T"], rp)
+
+
+def _관문_엿보기(monkeypatch: pytest.MonkeyPatch, account: str) -> dict[str, tuple]:
+    """매수 후보가 있는 `rg.gate` 호출마다 (문맥, 후보) 를 체결 장 날(`ctx.today`)로 모은다. 운영은 계좌마다 `mark` 뒤에
+    관문을 부르므로 직전 `mark` 의 계좌로 가린다(B 계좌 호출을 뺀다)"""
+    from batch.services import risk_gate as rg
+
+    본 = {"계좌": account}
+    모음: dict[str, tuple] = {}
+    원_gate, 원_mark = rg.gate, job.mark
+
+    def gate(후보: list, ctx: Any) -> Any:
+        if 본["계좌"] == account and any(c.side == "buy" for c in 후보):
+            모음[ctx.today] = (ctx, sorted((c.stock_id, round(c.cost_krw, 6), c.ref_date, round(c.cash_krw or 0, 6))
+                                           for c in 후보))  # fmt: skip
+        return 원_gate(후보, ctx)
+
+    def mark(client: Any, aid: str, *a: Any, **k: Any) -> Any:
+        본["계좌"] = aid
+        return 원_mark(client, aid, *a, **k)
+
+    monkeypatch.setattr(rg, "gate", gate)
+    monkeypatch.setattr(job, "mark", mark)
+    return 모음
+
+
+@pytest.mark.parametrize("판", ["보통", "빠듯"])
+@pytest.mark.parametrize("account", ["S", "T"])
+def test_관문_문맥이_날마다_운영과_같다(account: str, 판: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """관문 입력 전부(자본·하루 수익·쓸 수 있는 현금·종목별 보유 평가·업종·상한·날·묵음 바닥)와 후보가 매수 관문을 부른
+    날마다 운영과 같다(25.2053). 체결 일치 시험은 관문이 **막을 때만** 입력을 본다 — 종목·업종 상한과 현금 칸은 배분
+    (`buy_orders`)이 먼저 지켜 관문까지 잘 오지 않아, 리플레이가 보유 평가·업종·현금 칸을 틀리게 넣어도 지났다."""
+    설정판 = 설정 if 판 == "보통" else 빠듯
+    운영 = _관문_엿보기(monkeypatch, account)
+    _운영(account, monkeypatch, 설정판)
+    운영 = dict(운영)
+    rp = _관문_엿보기(monkeypatch, account)
+    _리플레이(account, 설정판)
+    끝 = 날들[-1]  # 운영은 마지막 장 결정을 돌리지 않는다
+    rp = {d: x for d, x in rp.items() if d < 끝}
+    assert 운영 and set(rp) == set(운영), (sorted(rp), sorted(운영))
+    for d in 운영:
+        (o, o후보), (r, r후보) = 운영[d], rp[d]
+        assert r후보 == o후보, d
+        for 칸 in ("today", "ref_floor", "max_stock_pct", "max_sector_pct", "halted", "frozen"):
+            assert getattr(r, 칸) == getattr(o, 칸), (d, 칸)
+        for 칸 in ("equity_krw", "day_return_pct", "cash_available_krw"):
+            assert getattr(r, 칸) == pytest.approx(getattr(o, 칸), rel=1e-9, abs=1e-6), (d, 칸)
+        assert r.holding_krw == pytest.approx(o.holding_krw, rel=1e-9) and r.sector_of == o.sector_of, d
