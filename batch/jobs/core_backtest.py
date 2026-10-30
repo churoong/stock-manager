@@ -76,12 +76,17 @@ WARN_ST = ("S·T 계좌형 리플레이(st_s·st_t) — 운영 S·T 규칙을 �
 #: 시가 덮개가 이보다 낮으면 S·T 줄에 따로 경고(25.2045) — 시가 빈 날이 많으면 T 는 거의 거래하지 않고 S 는 갇힌다
 ST_MIN_OPEN_COVERAGE = 0.9
 #: 미국 실행(25.2063, 25.2058~2060 교차검증 [권고]) — 운영과 일치 시험이 된 것은 B·G(25.2059)·S·T(25.2061)·
-#: H·D·E(25.2064)·A·C(25.2065)다. 나머지(무작위 대조 R1·R2 — 25.2065 에서 갈림, 조사 중)의 미국 결과는 걸러내기에도 그
+#: H·D·E(25.2064)·A·C(25.2065)다. 나머지(무작위 대조 R1·R2 — 운영 `held_substitutes` 가 옛 보유 자리를 잇는 25.1929 의
+#: 알려진 차이가 미국 자료에선 실제 뽑기를 바꾼다, 25.2067)의 미국 결과는 걸러내기에도 그
 #: 단서를 단다. 워크플로(`backtest.yml`)는 일치 시험이 다 될 때까지 국내만 넘긴다
 US_PARITY_VERIFIED: frozenset[str] = frozenset(
     {"core_b", "core_g", "core_h", "core_d", "core_e", "core_a", "core_c", "st_s", "st_t"})  # fmt: skip
 WARN_US_UNVERIFIED = ("미국 리플레이 — 운영과 일치 시험이 된 변형은 B·G·H·D·E·A·C·S·T(25.2059~2065). 무작위 대조 "
-                      "R1·R2 의 미국 결과는 운영 미국 판과 견준 적이 없다(25.2065 에서 갈림) — 걸러내기에도 참고로만")
+                      "R1·R2 의 미국 결과는 운영 미국 판과 갈린다(25.1929 옛 자리 잇기, 25.2067) — "
+                      "걸러내기에도 참고로만")
+#: 미국 분할 지정가 체결 판(`--limit-fills`, 25.2067 — 25.2066 교차검증 [권고]) — 미국 일치 시험은 이 판을 다루지 않아
+#: 위 목록과 상관없이 모든 핵심 변형이 미검증이다. 위 문구("B·G·… 는 됨")를 붙이면 합친 경고 띠에서 거꾸로 읽혔다
+WARN_US_LIMIT_UNVERIFIED = "미국 분할 지정가 체결 판 — 운영과 일치 시험 없음, 모든 변형 결과를 참고로만(25.2067)"
 #: 미국 분할 재수집 대기 종목을 뺀 실행(25.2062) — 뺀 수를 붙인다
 WARN_SPLIT_PENDING = "미국 분할 재수집 대기 종목을 유니버스에서 뺌(수정종가가 분할 앞뒤로 어긋남 — infra 25.553)"
 
@@ -397,9 +402,14 @@ def run_core(
                      # 비용 길 빈도(25.1969) — 대체 길(현금 < 비용)이 운영과 다른 길이라 몇 번 탔나
                      "cost_path": bt.cost_paths(result)}  # fmt: skip
             # 미국에서 일치 시험이 없는 변형 줄에만 단서(25.2063)
-            # 분할 지정가 체결 판(`limit_fills`)은 미국 일치 시험이 다루지 않는다(25.2066, 교차검증 note)
-            미검 = country == "US" and (variant not in US_PARITY_VERIFIED or limit_fills)
-            행경고 = [*warnings, WARN_US_UNVERIFIED] if 미검 else warnings
+            # 분할 지정가 체결 판(`limit_fills`)은 미국 일치 시험이 다루지 않는다 — 따로 문구(25.2066·25.2067).
+            # S·T 는 지정가 판을 쓰지 않아 목록대로 본다
+            if country == "US" and limit_fills and variant not in ST_VARIANTS:
+                행경고 = [*warnings, WARN_US_LIMIT_UNVERIFIED]
+            elif country == "US" and variant not in US_PARITY_VERIFIED:
+                행경고 = [*warnings, WARN_US_UNVERIFIED]
+            else:
+                행경고 = warnings
             jb.store_run(client, market, variant, result, summary, 종목수[variant], group_id, 행경고,
                          now, 운.get(variant), rebalance=REBALANCE, extra=extra, kept=실은_행)  # fmt: skip
             mt = summary.metrics

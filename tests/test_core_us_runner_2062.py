@@ -101,7 +101,7 @@ def test_미국_실행이_다섯_행을_시장_US_로_싣는다(실행: tuple[Me
         경고 = json.loads(r["warnings_json"])
         assert bt.WARN_TOTAL_RETURN in 경고 and bt.WARN_NO_DIVIDENDS not in 경고
         assert any(w.startswith(cj.WARN_SPLIT_PENDING) and w.endswith("1종목") for w in 경고), 경고
-        # 운영과 일치 시험이 없는 변형만 단서(25.2063) — B·G 는 25.2059 가 묶었다
+        # 목록(25.2059~2065)에 없는 R1·R2 만 단서(25.2063)
         assert (cj.WARN_US_UNVERIFIED in 경고) == (r["strategy"] not in cj.US_PARITY_VERIFIED), r["strategy"]
     # 모든 변형이 산다(달러 장부 — 환율 거름이 다시 걸리면 투자 비중이 0). R1·R2 는 무작위 대체의 기업행위 읽기를 지난다
     # (25.2062 — 예전엔 미국 분할 감지 설정 읽기가 창에 없어 실행이 멈췄다)
@@ -132,3 +132,13 @@ def test_미국_탐색_S_T_도_돈다(monkeypatch: pytest.MonkeyPatch) -> None:
     assert all(bt.WARN_TOTAL_RETURN in w and bt.WARN_NO_DIVIDENDS not in w for w in 경고.values()), 경고
     # 탐색 D·E·A·C 는 25.2064·2065 가 묶었다 — 행마다 단서 유무가 목록과 같다(탐색 실행엔 단서 줄이 없다)
     assert all((cj.WARN_US_UNVERIFIED in w) == (v not in cj.US_PARITY_VERIFIED) for v, w in 경고.items()), 경고.keys()
+
+
+def test_미국_지정가_판은_모든_핵심_변형에_따로_단서(monkeypatch: pytest.MonkeyPatch) -> None:
+    """미국 분할 지정가 체결 판은 일치 시험이 없다 — 목록 안 변형(B)에도 따로 문구(25.2067, 25.2066 교차검증 [권고]:
+    예전 `WARN_US_UNVERIFIED` 는 "B·G 는 됨" 이라 합친 띠에서 거꾸로 읽혔고, 그 갈래를 묶는 시험도 없었다)"""
+    mem = _db(monkeypatch)
+    assert cj.run_core("US", years=1, today=오늘, force=True, limit_fills=True, variants=("core_b",)) == 0
+    (r,) = mem.execute("SELECT warnings_json FROM backtest_runs").dicts()
+    경고 = json.loads(r["warnings_json"])
+    assert cj.WARN_US_LIMIT_UNVERIFIED in 경고 and cj.WARN_US_UNVERIFIED not in 경고, 경고
