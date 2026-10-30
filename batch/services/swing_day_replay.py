@@ -173,7 +173,7 @@ def simulate_account(
             후보 = [rg.Candidate(o["stock_id"], "buy", o["cost_krw"], o["ref_date"], k, o["cash_krw"])
                     for k, o in enumerate(낸)]  # fmt: skip
             문맥 = rg.Context(
-                equity_krw=자본, day_return_pct=(어제 / 그제 - 1) * 100 if 어제 and 그제 else None,
+                equity_krw=자본, day_return_pct=(어제 / 그제 - 1) * 100 if 어제 is not None and 그제 else None,
                 cash_available_krw=현금,
                 holding_krw={r["stock_id"]: r["value_krw"] for r in 평가행},
                 sector_of={sid: stock_cache.get(sid, {}).get("sector") for sid in {*보유, *(c.stock_id for c in 후보)}},
