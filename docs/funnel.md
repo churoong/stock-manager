@@ -36,7 +36,7 @@
 - 판정 불가 후보도 p = 1 로 코호트에 넣는다(`bh_record` 와 같은 꼴)
 - **코호트 1** = 2026-11-03 매월 기본 실행(국내 17:11·미국 19:11 UTC 예약 — KST 로는 11-04 02:11·04:11)이 판정하는 전략들 — m = 그 실행이 쓴 N(= max(실행 곡선 수, `REGISTERED_TRIALS`), `luck.judge`), **시장마다 따로**, 코드는 그 실행 기록의 `params.sha`. 이 문서가 그 결과를 보기 전에 커밋됐으므로 그 판정이 깔때기의 첫 사전 등록 판정이다. 판정 원장(docs/factors.md 12.32) #1~#40 가운데 DSR 밖의 판정(IC·A/B 등)은 각자 원장 규칙대로 — 코호트 m 에 넣지 않는다
 - **코호트 1b** = 핵심 H 첫 국내 기본 실행(수동 `backtest.yml` what=핵심H, `backtest_core` 기록 — 예약으로는 돌지 않는다, docs/backtest.md 10장) — `core_h`·`core_g`·`core_b` 판정. 시도 수는 이미 `CORE_REGISTERED_TRIALS` 로 `REGISTERED_TRIALS` 안에 있다
-- **코호트 2** = 그 뒤 더한 탐색 변형(25.1904 의 `core_d`·`core_e` 부터, 25.1934 `core_a`·`core_c`) — `core_strategy.EXPLORE_VARIANTS` 에 넣은 **커밋이 등록**이다(이름·칸·날짜가 git 기록에 남는다). DSR 시도 수 하한 = `REGISTERED_TRIALS` + `len(EXPLORE_VARIANTS)`(`explore_trial_floor`), 실행 기록 `params.trial_floor` 에 남는다. 변형을 더하면 하한이 함께 오른다 — 결과를 본 뒤 변형을 빼도 하한은 내리지 않는다(뺀 변형은 이름을 지우지 말고 `[철회]` 로 남긴다 `[확인필요: 철회 표시 방식]`)
+- **코호트 2** = 그 뒤 더한 탐색 변형(25.1904 의 `core_d`·`core_e` 부터, 25.1934 `core_a`·`core_c`, **25.2044 S·T 계좌형 리플레이 `st_s`·`st_t`** — `core_backtest.ST_VARIANTS`, 탐색 실행 `--st` 에서만 돌지만 코호트 크기(BH m)는 늘 6 으로 고정, 25.2050) — `core_strategy.EXPLORE_VARIANTS` 에 넣은 **커밋이 등록**이다(이름·칸·날짜가 git 기록에 남는다). DSR 시도 수 하한 = `REGISTERED_TRIALS` + `len(EXPLORE_VARIANTS)`(`explore_trial_floor`), 실행 기록 `params.trial_floor` 에 남는다. 변형을 더하면 하한이 함께 오른다 — 결과를 본 뒤 변형을 빼도 하한은 내리지 않는다(뺀 변형은 이름을 지우지 말고 `[철회]` 로 남긴다 `[확인필요: 철회 표시 방식]`)
 
 ### 2.2 판정판 한 줄 (전략 이름·판·코드 sha·시장)
 

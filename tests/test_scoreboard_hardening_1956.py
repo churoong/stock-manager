@@ -25,7 +25,10 @@ from batch.services import scoreboard as scb
 
 def test_코호트_크기는_jobs_상수와_같다() -> None:
     assert scb.COHORT_SIZE["1b"] == len([v for v in cs.VARIANTS if v not in scb.NOT_TRIALS])
-    assert scb.COHORT_SIZE["2"] == len(cs.EXPLORE_VARIANTS)
+    # S·T 계좌형 리플레이 둘도 코호트 2 등록(25.2050 — 25.2044 의 `ST_VARIANTS`)
+    from batch.jobs import core_backtest as cj
+
+    assert scb.COHORT_SIZE["2"] == len(cs.EXPLORE_VARIANTS) + len(cj.ST_VARIANTS)
 
 
 def _실행(job: str, 증거: dict[str, dict[str, Any] | None], market: str = "KR", **mj: Any) -> dict[str, Any]:
@@ -49,9 +52,11 @@ def test_시장마다_따로_묶는다() -> None:
     줄 = scb.rows([_실행("backtest_explore", {"core_d": 좋음, "core_e": 좋음}, "KR"),
                    _실행("backtest_explore", {"core_d": 좋음}, "US")])  # fmt: skip
     p = 줄[0]["control_p"]
-    # 시장마다 m = 4, 같은 p 들 — 묶음이 섞이면 KR 의 정렬 순위가 바뀐다(KR 둘: q = 4p/2, US 하나: q = 4p)
+    # 시장마다 m = 코호트 2 크기(6 — 25.2050), 같은 p 들 — 묶음이 섞이면 KR 의 정렬 순위가 바뀐다
+    # (KR 둘: q = mp/2, US 하나: q = mp)
+    m = scb.COHORT_SIZE["2"]
     by = {(r["market"], r["strategy"]): r["bh_q"] for r in 줄}
-    assert by[("KR", "core_d")] == pytest.approx(4 * p / 2) and by[("US", "core_d")] == pytest.approx(4 * p)
+    assert by[("KR", "core_d")] == pytest.approx(m * p / 2) and by[("US", "core_d")] == pytest.approx(m * p)
 
 
 def test_하한_없는_줄은_p_도_없다() -> None:

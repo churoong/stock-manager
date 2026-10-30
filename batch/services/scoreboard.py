@@ -402,9 +402,10 @@ STAGE01_MAX_BH_Q = 0.10  # 대조 분위 p 의 코호트 BH q(거르는 단계�
 #: 0 → 1 을 대어 볼 기준 줄 — 같은 실행의 기준 B(`core_b`), 없으면(월 실행) 동일가중 기준(`benchmark`) `[확인필요]`
 STAGE01_BASE = ("core_b", "benchmark")
 #: 코호트 → 등록 시도 수(BH 의 m, 25.1956) — 1b = 핵심 시도(H·G·B — 무작위 대조 R1·R2 는 시도 아님), 2 = 탐색 변형
-#: (`core_strategy.EXPLORE_VARIANTS`). 코호트 1(월 실행)은 결정 단위 증거가 없어 p 가 늘 없다.
-#: 시험이 jobs 상수와 대조한다
-COHORT_SIZE = {"1b": 3, "2": 4}
+#: (`core_strategy.EXPLORE_VARIANTS`) + S·T 계좌형 리플레이(`core_backtest.ST_VARIANTS`, 25.2044 에 넣은 커밋이 등록 —
+#: 25.2050). `--st` 없이 돈 실행에도 m 은 6 그대로(funnel.md 2.1 "m 은 등록할 때 고정" — 빠진 줄은 p = 1 과 같아
+#: 보수적). 코호트 1(월 실행)은 결정 단위 증거가 없어 p 가 늘 없다. 시험이 jobs 상수와 대조한다
+COHORT_SIZE = {"1b": 3, "2": 6}
 #: BH 묶음 밖 — 코호트 없는 줄(25.1951). m 은 위 `COHORT_SIZE`(25.1956 — 예전엔 판정판에 든 줄 수라 일부 변형만 돈
 #: 실행이 m 을 줄였다). 실행 여럿을 모은 판정판(sha·판 단위 묶기)은 그 판정판이 생길 때 다시 정한다
 WHY_BH_NO_COHORT = "코호트 밖 — BH 묶음 없음"
