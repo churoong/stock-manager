@@ -134,6 +134,11 @@ def test_판정은_그림자와_같은_함수() -> None:
         def execute(self, sql, args=None):  # noqa: ANN001, ANN201
             class R:
                 rows = [("2026-10-15", 10_000.0), ("2026-10-16", 10_500.0)]
+
+            class 빈:
+                rows: list = []
+            if "kr_corp_events" in sql:  # 권리락 일정(25.1999) — 이 종목엔 없다
+                return 빈()
             assert sql == job.SWING_CLOSES_SQL and args[-1] == sh.SWING_CLOSE.max_sessions
             return R()
 
@@ -356,3 +361,45 @@ def test_월간_S_문구는_규칙_값을_따라간다(monkeypatch: pytest.Monke
     행 = [{"as_of": "2026-10-16", "invested_krw": 1_000, "equity_krw": 1_000, "twr_index": 1.0, "positions_json": "[]"}]
     줄 = pp.summary_lines({"S": 행}, {}, "2026-10-12", "2026-10-01", {}, {}, {}, {"S": "swing_close"})
     assert any("−4% 이하" in x for x in 줄)
+
+
+def test_S_판정은_유상증자_권리락을_그림자처럼_되돌려_견준다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.1999 (결함 루프) — 원시 종가로 견주면 권리락 날의 기계적 하락(계수 0.911)이 거짓 "스윙손절" 이었다.
+    그림자(수정주가 — 락일 앞 값에 계수)와 같은 비율로: 락일부터의 종가만 계수로 되돌린다. 진입가 전체에 곱하면 락일
+    **앞** 종가(+4.5%)가 낮아진 진입가와 견주어져 거짓 목표(+14.7%)가 난다"""
+    from batch.jobs import monitor_targets as mt
+
+    f = 0.911
+    monkeypatch.setattr(mt, "rights_factors_since", lambda _c, _sid, _since: [("2026-10-30", f)])
+
+    def 판정(종가들: list[tuple[str, float]]) -> dict | None:
+        class C:
+            def execute(self, sql, args=None):  # noqa: ANN001, ANN201
+                class R:
+                    rows = 종가들
+                assert sql == job.SWING_CLOSES_SQL
+                return R()
+
+        return job._스윙넘음(C(), {"stock_id": 1, "country": "KR", "lots": [("2026-10-29", 10.0, 10_000.0)]},
+                            date(2026, 11, 2))  # fmt: skip
+
+    # 락일 앞 +4.5%, 락일 원시 −5%(되돌리면 +4.3%) — 들고 간다
+    assert 판정([("2026-10-29", 10_450.0), ("2026-10-30", 9_500.0)]) is None
+    # 그림자 수정주가 계열과 같은 판정(진입 시가·락일 앞 종가에 계수)
+    assert sh.close_exit(10_000.0 * f, [10_450.0 * f, 9_500.0]) is None
+    # 락일 뒤 진짜 하락(8,700 → 되돌려 9,550, −4.5%)은 손절 — 근거에 계수를 적는다
+    팖 = 판정([("2026-10-29", 10_000.0), ("2026-10-30", 9_500.0), ("2026-10-31", 8_700.0)])
+    assert 팖 is not None and 팖["reason_code"] == "스윙손절" and "-4.5" in 팖["rationale"]
+    assert sh.close_exit(10_000.0 * f, [10_000.0 * f, 9_500.0, 8_700.0]) == ("stop", 2)
+    assert {"name": "권리락 계수", "value": f, "date": "2026-10-31"} in 팖["criteria"]
+    # 미국은 권리락 일정을 읽지 않는다
+    monkeypatch.setattr(mt, "rights_factors_since", lambda *_a: (_ for _ in ()).throw(AssertionError("읽음")))
+
+    class U:
+        def execute(self, sql, args=None):  # noqa: ANN001, ANN201
+            class R:
+                rows = [("2026-10-29", 100.0)]
+            return R()
+
+    assert job._스윙넘음(U(), {"stock_id": 2, "country": "US", "lots": [("2026-10-29", 1.0, 100.0)]},
+                        date(2026, 10, 29)) is None  # fmt: skip

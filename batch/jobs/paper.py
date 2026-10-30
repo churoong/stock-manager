@@ -1331,6 +1331,9 @@ def _스윙넘음(client: Any, 행: dict[str, Any], today: date) -> dict[str, An
 
     진입가 = 첫 로트의 체결가(슬리피지 전 — 다음 장 시가 시장가면 그날 시가, 그림자 `simulate` 의 선 기준과 같다).
     로트가 둘 이상이면(추가 매수는 배분 전에 거르므로 없어야 한다) 첫 로트로 판정한다 — 선은 첫 진입에서 잰다"""
+    import math
+
+    from batch.jobs import monitor_targets as mt
     from batch.services import shadow as sh
 
     로트 = sorted(행.get("lots") or [])
@@ -1339,18 +1342,29 @@ def _스윙넘음(client: Any, 행: dict[str, Any], today: date) -> dict[str, An
     진입일, _q, 진입가 = 로트[0]
     줄 = client.execute(SWING_CLOSES_SQL, [행["stock_id"], str(진입일)[:10], today.isoformat(),
                                          sh.SWING_CLOSE.max_sessions]).rows  # fmt: skip
-    넘음 = sh.close_exit(float(진입가), [float(r[1]) for r in 줄], sh.SWING_CLOSE)
+    # 유상증자 권리락은 그날까지 지난 계수로 종가를 되돌려 견준다 — 그림자(수정주가: 락일 앞 값에 계수)와 같은 비율.
+    # 원시 종가로 견주면 권리락 날의 기계적 하락이 거짓 "스윙손절" 이 됐다(25.1999, 결함 루프). 진입가 전체에 곱하면
+    # 락일 **앞** 종가가 낮아진 진입가와 견주어져 거짓 목표가 난다 — 그래서 날마다. 분할·병합은 멈춤(frozen)이 막는다
+    계수들 = [] if 행.get("country") == "US" else mt.rights_factors_since(client, int(행["stock_id"]), str(진입일)[:10])
+
+    def _되돌림(날: str) -> float:
+        return math.prod(f for 락, f in 계수들 if 락 <= 날)
+
+    되돌린 = [float(r[1]) / _되돌림(str(r[0])[:10]) for r in 줄]
+    넘음 = sh.close_exit(float(진입가), 되돌린, sh.SWING_CLOSE)
     if 넘음 is None:
         return None
     까닭, i = 넘음
     날, 종가 = str(줄[i][0])[:10], float(줄[i][1])
-    수익 = round((종가 / float(진입가) - 1) * 100, 4)
+    수익 = round((되돌린[i] / float(진입가) - 1) * 100, 4)
     글 = {"stop": f"종가가 진입가 대비 {수익:+g}% — 스윙 손절선 {sh.SWING_CLOSE.stop_pct * 100:g}% 이하",
           "target": f"종가가 진입가 대비 {수익:+g}% — 스윙 목표선 +{sh.SWING_CLOSE.target_pct * 100:g}% 이상",
           "time": f"{i + 1}거래일째 종가 — 스윙 기한 {sh.SWING_CLOSE.max_sessions}거래일"}[까닭]  # fmt: skip
     return {"reason_code": pp.SWING_CODES[까닭], "level": "red", "rationale": f"{글} ({날}, {sh.SWING_CLOSE.name})",
             "criteria": [{"name": "진입가", "value": float(진입가), "date": str(진입일)[:10]},
-                         {"name": "판정 종가", "value": 종가, "date": 날}]}  # fmt: skip
+                         {"name": "판정 종가", "value": 종가, "date": 날},
+                         *([{"name": "권리락 계수", "value": round(_되돌림(날), 6), "date": 날}]
+                           if _되돌림(날) != 1 else [])]}  # fmt: skip
 
 
 #: 추세 익절(G)의 고점 — 첫 매수일부터 오늘까지 종가 최댓값 (보유마다 한 번, 25.1481)
