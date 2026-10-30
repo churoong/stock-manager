@@ -185,6 +185,11 @@ def test_코호트_밖() -> None:
     assert sb.cohort("backtest", "composite", {"default": True}, "2026-11-07T19:11:00+00:00") == ("1", None)
     c, why = sb.cohort("backtest", "composite", {"default": True}, "2026-11-20T09:00:00+00:00")
     assert c is None and "3~7일" in why
+    # 창의 두 경계(UTC 날짜) — 위쪽을 "08" 까지 넓혀도 지나던 것(25.2021, 25.2019 교차검증 [권고])
+    assert sb.cohort("backtest", "composite", {"default": True}, "2026-12-03T00:00:00+00:00") == ("1", None)
+    assert sb.cohort("backtest", "composite", {"default": True}, "2026-12-07T23:59:00+00:00") == ("1", None)
+    assert sb.cohort("backtest", "composite", {"default": True}, "2026-12-08T00:00:00+00:00")[0] is None
+    assert sb.cohort("backtest", "composite", {"default": True}, "2026-12-02T23:59:00+00:00")[0] is None
 
 
 def test_코호트_기본_파라미터는_핵심_실행기와_같다() -> None:

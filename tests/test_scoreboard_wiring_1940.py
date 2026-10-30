@@ -85,6 +85,11 @@ def test_핵심_실행이_판정판_줄을_싣는다(핵심: Any) -> None:
     # 기본 실행의 1b 는 test_scoreboard_1919 의 코호트 시험이 본다. 무작위 대조는 시도 아님(까닭)
     assert by["core_h"]["cohort"] is None and "기본 파라미터 실행 아님" in by["core_h"]["missing"]["cohort"]
     assert by["core_b"]["cohort"] is None
+    # 코호트 거름이 읽는 열쇠를 실행기가 실제로 싣는다 — 이름이 바뀌면 모든 핵심·탐색 실행이 조용히 코호트 밖으로
+    # 빠지는데 위 단언은 같은 까닭으로 지난다(25.2021, 25.2019 교차검증 [권고])
+    params = run["step_log"]["params"]
+    assert params["years"] == 1 and params["risk_every"] == scb.CORE_DEFAULT_RISK_EVERY and params["limit_fills"] is False
+    assert scb.cohort(cj.JOB_NAME, "core_h", {**params, "years": scb.CORE_DEFAULT_YEARS}, run["started_at"])[0] == "1b"
     assert by["core_r1"]["cohort"] is None and "시도 아님" in by["core_r1"]["missing"]["cohort"]
     # 저장된 값 그대로 — 행의 metrics_json·열과 같다
     for r in rows:
