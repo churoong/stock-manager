@@ -2437,12 +2437,9 @@ def run_step(
                                     종가, 날, 지금))  # fmt: skip
             # 미뤄진 열린 매도(하한가·정지)도 판 것으로 — 빠지면 다음 배치가 같은 종목을 다시 사 같은 장에 매도와 매수가
             # 함께 찼다(25.1591 감사 [권고] 1 길 B)
-            최근판 = ({f.stock_id for f in 계좌체결 if f.side == "sell" and f.fill_date >= 쉼_시작} | set(매도)
-                   | 이미팖)  # fmt: skip
-            if 규칙 == pp.DAY_RULE:
-                # 당일 단타(T)는 다시 사기 쉼을 두지 않는다 — 그림자처럼 신호마다 거래(같은 날 사고팔아 보유가 남지
-                # 않는다). 매도가 열린 종목만 뺀다(16.3.2, 25.1883)
-                최근판 = set(매도) | 이미팖
+            # 당일 단타(T)는 다시 사기 쉼을 두지 않는다 — 그림자처럼 신호마다 거래(같은 날 사고팔아 보유가 남지
+            # 않는다). 매도가 열린 종목만 뺀다(16.3.2, 25.1883). 순수 함수 `pp.rest_set`(25.2033 — 리플레이와 같이)
+            최근판 = pp.rest_set(규칙, 계좌체결, 쉼_시작, set(매도), 이미팖)
             if allocate and settings is not None and signal_rows:
                 # 손절이 선 보유에 더 사지 않는다 — **계좌 규칙 전의** 판정에서 (검증 [필수] 4: 규칙으로 거른 뒤의
                 # 매도에서 뽑으면 손절을 따르지 않는 D 는 늘 비어, 떨어진 보유를 목표 비중까지 날마다 더 샀다 —
@@ -2515,8 +2512,7 @@ def run_step(
                 if str(acct.get("selection") or "") == "short":
                     # 스윙(S) — 단기 신호만, 이미 든 종목은 뺀다(추가 매수 없음 — 선이 첫 체결가 하나에서 잰다. 2부
                     # 배분은 든 종목을 목표 비중까지 채우므로 배분 **전에** 거른다, paper.md 16.3.1, 25.1871)
-                    든것 = set(pp.positions(계좌체결))
-                    계좌신호 = [r for r in 계좌신호 if r.horizon == "short" and r.stock_id not in 든것]
+                    계좌신호 = pp.short_candidates(계좌신호, set(pp.positions(계좌체결)))
                 if 즉시매도:
                     # 앞 거르개(S 단기·든 종목)를 이어받는다 — signal_rows 에서 다시 만들면 지웠다(25.1873)
                     계좌신호 = [r for r in 계좌신호 if r.stock_id not in 즉시매도]

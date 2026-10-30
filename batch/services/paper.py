@@ -484,6 +484,24 @@ def pair_sell_state(order: Order, reason: str | None, fills: list[Fill], open_bu
     return "expire"
 
 
+def rest_set(rule: str, fills: list[Fill], rest_start: str, selling: set[int], open_sells: set[int]) -> set[int]:
+    """다시 사지 않을 종목 — 판 뒤 쉼(`REBUY_COOLDOWN_SESSIONS` 거래일, `rest_start` 이후 매도 체결) + 오늘 파는 것 +
+    매도가 열린 것(미뤄진 하한가·정지 매도도 판 것으로 — 25.1591). 당일 단타(T, `DAY_RULE`)는 쉼을 두지 않는다 —
+    그림자처럼 신호마다 거래(16.3.2, 25.1883), 파는·열린 매도만 뺀다. `fills` 는 그 계좌 체결.
+    가상모의투자(`jobs/paper.run_step`)와 S·T 리플레이(깔때기 ⑦)가 같이 쓴다(25.2033)"""
+    if rule == DAY_RULE:
+        return set(selling) | set(open_sells)
+    판 = {f.stock_id for f in fills if f.side == "sell" and f.fill_date >= rest_start}
+    return 판 | set(selling) | set(open_sells)
+
+
+def short_candidates(rows: list[Any], held: set[int]) -> list[Any]:
+    """스윙(S) 매수 후보 — 단기 신호(`horizon == "short"`)만, 이미 든 종목은 뺀다(추가 매수 없음 — 선이 첫 체결가
+    하나에서 잰다. 2부 배분은 든 종목을 목표 비중까지 채우므로 배분 **전에** 거른다, paper.md 16.3.1, 25.1871).
+    순서는 그대로. 25.2033"""
+    return [r for r in rows if r.horizon == "short" and r.stock_id not in held]
+
+
 def make_fill(order: Order, price: float, fill_date: str, fx_rate: float, costs: Costs) -> Fill:
     """체결 한 건의 비용과 현금 영향.
 

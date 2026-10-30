@@ -389,3 +389,18 @@ def test_단타_짝_매도_상태_순수_함수() -> None:
     assert pp.pair_sell_state(_주문(id=2, side="sell", reason=pp.DAY_CLOSE_CODE, deferrals=1), pp.DAY_CLOSE_CODE,
                               [], []) is None  # fmt: skip
     assert pp.pair_sell_state(_주문(id=2, side="sell", account_id="S"), pp.DAY_CLOSE_CODE, [], []) is None
+
+
+def test_쉼_집합과_스윙_후보_순수_함수() -> None:
+    """`pp.rest_set`·`pp.short_candidates`(25.2033 — 가상모의투자 run_step 과 S·T 리플레이가 같이 쓴다)."""
+    체결 = [_체결(stock_id=1, side="sell", fill_date="2026-10-26"), _체결(stock_id=2, side="sell", fill_date="2026-10-23"),
+            _체결(stock_id=3, side="buy", fill_date="2026-10-29")]  # fmt: skip
+    # 쉼 시작(10-26) 이후 판 1 + 오늘 파는 4 + 매도 열린 5. 쉼 앞에 판 2·산 3 은 아니다
+    assert pp.rest_set("swing_close", 체결, "2026-10-26", {4}, {5}) == {1, 4, 5}
+    # 당일 단타는 쉼 없음 — 파는·열린 매도만
+    assert pp.rest_set(pp.DAY_RULE, 체결, "2026-10-26", {4}, {5}) == {4, 5}
+
+    from types import SimpleNamespace
+
+    행 = [SimpleNamespace(stock_id=s, horizon=h) for s, h in ((1, "short"), (2, "mid"), (3, "short"), (4, "short"))]
+    assert [r.stock_id for r in pp.short_candidates(행, {3})] == [1, 4]
