@@ -301,7 +301,9 @@ def reconcile(
             e = next((x for x in 같은꼴 if (x.order_date, _번호(x.order_no)) not in 쓴), None)
             if e is None and 같은꼴:
                 # 같은 꼴 체결은 있었지만 다른 줄 몫이다 — "체결이 없었다" 와 가르게 글을 단다(25.2026 교차검증 [참고])
-                가져감 = f"{missing} — 같은 꼴 체결(번호 {같은꼴[0].order_no})은 다른 줄이 이미 가져감"
+                # 앞머리는 추정 없는 `MISSING` — 미국 `MISSING_US`("예약이 전송되지 않은 것으로 봄")와
+                # "같은 꼴 체결이 있었다" 가 한 줄에서 어긋나게 읽혔다(25.2032, 25.2028 교차검증 [권고])
+                가져감 = f"{MISSING} — 같은 꼴 체결(번호 {같은꼴[0].order_no})은 다른 줄이 이미 가져감"
         if e is None:
             if complete:
                 out.append(Outcome(int(r["id"]), "unknown", r.get("broker_order_no"), 0, None, 가져감 or missing))

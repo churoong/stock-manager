@@ -124,8 +124,12 @@ def test_스크립트는_예전_사본을_진도_문을_거쳐서만_새로_만�
     monkeypatch.setattr(mod, "_gate_allows_build", 문)
     monkeypatch.setattr("sys.argv", ["x", "sync", "--path", str(path), "--no-build"])
     assert mod.main() == 0 and 물음 == []
-    # 진도 문이 막으면 예전 열 그대로
+    # --ohl-rebuild 없는 작업(신호 성적표·밴드)은 묻지도 않는다 — 다시 만들기는 지표 작업 하나만(25.2032)
     monkeypatch.setattr("sys.argv", ["x", "sync", "--path", str(path)])
+    assert mod.main() == 0 and 물음 == []
+    assert not rep.has_ohl(sqlite3.connect(str(path)))
+    # 진도 문이 막으면 예전 열 그대로
+    monkeypatch.setattr("sys.argv", ["x", "sync", "--path", str(path), "--ohl-rebuild"])
     assert mod.main() == 0 and 물음 == [1]
     assert not rep.has_ohl(sqlite3.connect(str(path)))
     # 진도 문이 열면 새 열로
@@ -155,6 +159,18 @@ def test_백테스트_로더는_시가를_같은_수정_계열로_읽고_안_물
             else:
                 assert abs(시가[sid][day] - o * px / cl) < 1e-9
     assert abs(시가[3]["2026-08-01"] - (100.0 + 3 - 1) * 0.5) < 1e-9 and "2026-08-02" not in 시가[4]
+    # 시가 0(거래정지일 등) 은 넣지 않는다, 수정종가가 빈 날은 직전 계수로 메운 값(`adj.fill_adjusted`)으로 옮긴다
+    # (25.2032, 25.2029 교차검증 [권고] — 원 adj_close 를 쓰면 25.1101 의 분할 전 구간 원값 섞임과 같은 꼴)
+    원격2 = _원격()
+    _시가(원격2)
+    원격2.execute("UPDATE prices SET adj_close = close / 2 WHERE stock_id = 3")
+    원격2.execute("UPDATE prices SET open = 0 WHERE stock_id = 4 AND date = '2026-08-03'")
+    원격2.execute("UPDATE prices SET adj_close = NULL WHERE stock_id = 3 AND date = '2026-08-05'")
+    시가3: dict = {}
+    backtest.load_prices_and_turnover(원격2, ids, "2026-08-01", opens=시가3)
+    assert "2026-08-03" not in 시가3[4] and "2026-08-03" in 시가3[3]
+    원시가 = 원격2.execute("SELECT open FROM prices WHERE stock_id = 3 AND date = '2026-08-05'").rows[0][0]
+    assert abs(시가3[3]["2026-08-05"] - 원시가 * 0.5) < 1e-9
 
     # 예전 사본 — 시가를 안 물으면 사본에서, 물으면 Turso 로(값은 같다)
     path = tmp_path / "old.db"
@@ -169,3 +185,59 @@ def test_백테스트_로더는_시가를_같은_수정_계열로_읽고_안_물
     시가2: dict = {}
     backtest.load_prices_and_turnover(클라, ids, "2026-08-01", opens=시가2)
     assert 시가2 == 시가 and 클라.local_queries == 1
+
+
+def test_새_사본은_고친_시가도_범위_다시_받기로_따라간다(tmp_path: Path) -> None:
+    """있던 행의 시가·고가·저가가 Turso 에서 바뀌면(다시 받기·수정 — 범위가 `prices_touched` 에 적힌다) 사본도 따라간다.
+    표본 지문은 시가를 보지 않으므로 이 길이 유일한 맞춤이다(25.2032, 25.2027 교차검증 [권고])."""
+    원격 = _원격()
+    _시가(원격)
+    사본 = rep.open_replica(tmp_path / "p.db")
+    rep.sync(원격, 사본, backend="turso", allow_build=True, now=지금)
+    원격.execute("UPDATE prices SET open = open + 7, high = high + 8, low = low - 9 WHERE stock_id = 3"
+                 " AND date >= '2026-08-10'")  # fmt: skip
+    원격.execute("INSERT INTO prices (stock_id, date, close, adj_close, volume, value, open, high, low, currency, source,"
+                 " fetched_at) VALUES (4, '2026-09-30', 500, 500, 1, 1, 499, 502, 497, 'KRW', 't', 't')")  # fmt: skip
+    결과 = rep.sync(원격, 사본, backend="turso", allow_build=False, now=지금, pending={"stocks": {"3": "2026-08-10"}})
+    assert 결과["usable"] and 결과["repulled"] > 0
+    q = "SELECT stock_id, date, close, adj_close, open, high, low FROM prices ORDER BY stock_id, date"
+    assert 원격.execute(q).rows == [tuple(r) for r in 사본.execute(q).fetchall()]
+
+
+def test_사본_질의의_열은_열_목록과_같다() -> None:
+    """받는 질의·넣는 문장의 열이 `PRICE_COLS`(새)·`OLD_COLS`(예전)와 같은 순서 — 행 튜플을 그대로 넣는다(25.2032)."""
+    import re as _re
+
+    def 열(sql: str) -> tuple[str, ...]:
+        m = _re.search(r"SELECT (.+?) FROM", sql) or _re.search(r"INSERT INTO prices \((.+?)\)", sql)
+        assert m
+        return tuple(x.strip() for x in m.group(1).split(","))
+
+    for sql in (rep._PULL_NEW, rep._PULL_RANGE, rep._UPSERT):
+        assert 열(sql) == rep.PRICE_COLS, sql
+    for sql in (rep._PULL_NEW_OLD, rep._PULL_RANGE_OLD, rep._UPSERT_OLD):
+        assert 열(sql) == rep.OLD_COLS, sql
+
+
+def test_예전_사본을_다시_만들다_끊겨도_빈_표가_쓸_수_있는_사본으로_읽히지_않는다(tmp_path: Path, monkeypatch) -> None:
+    """DROP 앞에 usable=0 을 적는다(25.2032, 25.2027 교차검증 [참고])."""
+    import pytest as _pytest
+
+    원격 = _원격()
+    path = tmp_path / "old.db"
+    예전 = _예전_사본(path)
+    예전.executemany(rep._UPSERT_OLD, [tuple(r[:7]) for r in 원격.execute(rep._PULL_NEW, [0, 10**6]).rows])
+    예전.executemany("INSERT INTO meta VALUES (?, ?)", [("backend", "turso"), ("max_id", "0"), ("usable", "1"),
+                                                       ("synced_at", 지금.isoformat())])  # fmt: skip
+    예전.commit()
+    예전.close()
+    사본 = rep.open_replica(path)
+
+    def 끊김(*_a, **_k):
+        raise RuntimeError("다시 받다 끊김")
+
+    monkeypatch.setattr(rep, "_pull_new", 끊김)
+    with _pytest.raises(RuntimeError):
+        rep.sync(원격, 사본, backend="turso", allow_build=True, now=지금)
+    사본.close()
+    assert rep.usable_replica(path, now=지금) is None

@@ -269,6 +269,9 @@ def sync(remote, conn: sqlite3.Connection, *, backend: str, allow_build: bool, n
         if 비었나 or allow_build:
             # 예전 사본(시가 열 없음, 25.2027) — 처음부터 만들어도 되는 실행이면 지우고 새 열로 만든다. 열 더하기
             # (ALTER) 는 지난 행의 시가를 비워 둬 '사본에서 시가 NULL' 이 Turso 와 다른 값이 된다 — 그래서 다시 받는다
+            # 먼저 "못 씀" 을 적어 둔다 — 다시 받다 끊겨도(강제 종료 뒤 같은 파일을 다시 열어도) 빈 표가 맞춘 지
+            # 12시간 안의 "쓸 수 있는 사본" 으로 읽히지 않게(WIDE_RANGE 비우기 갈래와 같은 꼴, 25.2032)
+            _set_meta(conn, usable=0, max_id=0)
             conn.execute("DROP TABLE prices")
             conn.commit()
             open_replica_tables(conn)

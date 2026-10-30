@@ -76,6 +76,10 @@ def main() -> int:
     parser.add_argument("--path", required=True)
     parser.add_argument("--no-build", action="store_true", help="사본이 비었으면 만들지 않는다")
     parser.add_argument(
+        "--ohl-rebuild", action="store_true",
+        help="예전 사본(시가 열 없음)을 진도 문을 거쳐 새로 만든다 — 시간 여유가 큰 작업 하나에만(25.2032)",
+    )
+    parser.add_argument(
         "--fresh-minutes", type=int, default=0,
         help="이 분 안에 맞춘 쓸 수 있는 사본이면 Turso 에 붙지 않고 그대로 넣는다(0: 늘 맞춘다)",
     )
@@ -96,8 +100,11 @@ def main() -> int:
     try:
         allow = False
         비었나 = conn.execute("SELECT 1 FROM prices LIMIT 1").fetchone() is None
-        # 예전 사본(시가·고가·저가 열 없음, 25.2027)도 새로 만들기와 같은 비용이라 같은 진도 문을 거친다
-        if not args.no_build and (비었나 or not rep.has_ohl(conn)) and 종류 == "turso":
+        # 예전 사본(시가·고가·저가 열 없음, 25.2027)도 새로 만들기와 같은 비용이라 같은 진도 문을 거친다.
+        # 그 다시 만들기는 `--ohl-rebuild` 를 준 작업 하나(지표 — 60분)만 한다(25.2032): 15분 작업(신호 성적표)은
+        # 2,100만 행 다시 받기를 끝내지 못하고 잘려 캐시에 못 넣으면 다음 작업이 또 읽고, 같은 밤 두 작업
+        # (지표·밴드)이 겹치면 두 번 만든다
+        if not args.no_build and (비었나 or (args.ohl_rebuild and not rep.has_ohl(conn))) and 종류 == "turso":
             allow, 글 = _gate_allows_build(remote)
             print(f"[시세 사본] {'처음 만들기' if 비었나 else '시가 열 더해 새로 만들기'} — {글}")
         읽기_전 = remote.reads.total

@@ -1351,6 +1351,11 @@ def pit_series(
     return out
 
 
+#: 리플레이 시세 읽기의 열 — 시가는 묻는 리플레이만(25.2029: 예전 사본에서 `open` 질의는 Turso 로 물러난다)
+PRICE_READ_COLS = "stock_id, date, adj_close, close, volume, value"
+PRICE_READ_COLS_OPEN = "stock_id, date, adj_close, close, volume, value, open"
+
+
 def load_prices(
     client: TursoClient, stock_ids: list[int], since: str, chunk: int = 100
 ) -> dict[int, dict[str, float]]:
@@ -1373,7 +1378,7 @@ def load_prices_and_turnover(
     (15회차 목표가 분산도가 원값 목표가를 수정주가 기준에 옮길 때, 12.17).
 
     `opens` 를 주면 그날 **시가를 같은 수정 계열**(원 시가 × 수정종가 ÷ 원 종가)로 모은다 — 깔때기 ⑥(docs/funnel.md
-    4장, 25.2028): 다음 장 시가 체결 리플레이가 종가 계열과 같은 잣대로 시가를 쓴다. 시가가 비었거나 0 이하인 날은
+    4장, 25.2029): 다음 장 시가 체결 리플레이가 종가 계열과 같은 잣대로 시가를 쓴다. 시가가 비었거나 0 이하인 날은
     넣지 않는다(체결 쪽이 그날을 "시가 모름" 으로 다룬다). 주지 않으면 질의에 `open` 을 넣지 않는다 — 예전 시세
     사본(시가 열 없음, 25.2027)에서 모든 시세 읽기가 Turso 로 물러나지 않게
 
@@ -1403,7 +1408,7 @@ def load_prices_and_turnover(
         # **0 이하 종가는 읽지 않는다** (docs/infra.md 25.1101, 감사 재현). 들어오는 문(25.203)만 막아 이미 있는 행은
         # 남을 수 있다 — 엔진이 0 을 진짜 가격으로 써 리밸런스 날 걸린 종목 몫이 영구히 0 이 되고,
         # 한 종목 100% 면 자본 0 뒤 `metrics.compute` 가 CAGR +3688% 를 냈다
-        열 = "stock_id, date, adj_close, close, volume, value" + (", open" if opens is not None else "")
+        열 = PRICE_READ_COLS_OPEN if opens is not None else PRICE_READ_COLS
         rs = client.execute(
             f"SELECT {열} FROM prices"
             f" WHERE stock_id IN ({placeholders}) AND date >= ? AND close IS NOT NULL AND close > 0"

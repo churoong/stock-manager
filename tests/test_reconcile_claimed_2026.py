@@ -113,5 +113,5 @@ def test_미국_배치도_전날_닫힌_정리_줄의_체결을_베낀_매도에
     기록 = job.run(uc, "US", us._kst("21:27", "2026-10-19"), session=다음, clock=lambda: us._kst("21:27", "2026-10-19"))
     assert 기록["reconciled"] == {"unknown": 1}
     assert uc.q("SELECT status, message FROM paper_broker_orders WHERE paper_order_id = 204") == [
-        ("unknown", bm.MISSING_US + " — 같은 꼴 체결(번호 5501)은 다른 줄이 이미 가져감")
+        ("unknown", bm.MISSING + " — 같은 꼴 체결(번호 5501)은 다른 줄이 이미 가져감")
     ]
