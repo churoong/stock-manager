@@ -41,7 +41,8 @@ class STResult:
     account: str
     curve: list[tuple[str, float]]  # (날, 자본 ÷ 입금)
     fills: list[pp.Fill]
-    #: 날마다 {day, buys, sells, expired: {까닭: 수}, deferred, blocked(관문 막힘 수), sold: {매도 사유 코드: 수}}
+    #: 날마다 {day, buys, sells, expired: {까닭: 수}, deferred, blocked(관문 막힘 수), blocked_by: {관문 코드: 수},
+    #: sold: {매도 사유 코드: 수}}
     #: — 일치 시험·보고용
     log: list[dict[str, Any]] = field(default_factory=list)
 
@@ -166,6 +167,10 @@ def simulate_account(
             통과, 막힘 = rg.gate(후보, 문맥)
             if 막힘:
                 기록["blocked"] = 기록.get("blocked", 0) + len(막힘)
+                # 관문 까닭 코드별(종목마다 첫 코드 — 운영 `rg.summary` 의 by_reason 과 같은 잣대가 아니라 시험·보고용)
+                for _c, 까닭 in 막힘:
+                    코드 = 까닭[0][0] if 까닭 else "?"
+                    기록.setdefault("blocked_by", {})[코드] = 기록.get("blocked_by", {}).get(코드, 0) + 1
             for c in 통과:
                 o = 낸[c.key]
                 번호 += 1
