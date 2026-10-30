@@ -47,9 +47,11 @@ class STResult:
     #: sold: {매도 사유 코드: 수}}
     #: — 일치 시험·보고용
     log: list[dict[str, Any]] = field(default_factory=list)
-    #: 날마다 (날, {종목: 평가 ÷ 자본}) — 하루 끝 보유 비중. 판정판의 노출·수용량 칸(`bt.Rebalance`)을
-    #: 실제 값으로(25.2045)
+    #: 날마다 (날, {종목: max(하루 끝 평가, 그날 산 금액) ÷ 자본}) — 판정판의 노출·수용량 칸(`bt.Rebalance`)을
+    #: 실제 값으로(25.2045·25.2046 — T 는 장중 보유)
     weights: list[tuple[str, dict[int, float]]] = field(default_factory=list)
+    #: 날마다 (날, 회전) — (그날 산 금액 + 판 금액) ÷ 2 ÷ 자본(25.2046)
+    turnover: list[tuple[str, float]] = field(default_factory=list)
 
 
 def _bar(sid: int, d: str, prices: dict[int, dict[str, float]], opens: dict[int, dict[str, float]],
@@ -190,6 +192,8 @@ def simulate_account(
                                  pp.DAY_CLOSE_CODE))  # fmt: skip
 
         # ③ 체결 — 운영 fill_orders 와 같은 순서·판정
+        산금액: dict[int, float] = {}
+        판금액 = 0.0
         남은매수 = {o.id: o for o, _r in 주문 if o.side == "buy"}
         for o, 사유 in sorted(주문, key=lambda x: (pp.side_rank(account, x[0].side), x[0].id)):
             짝 = pp.pair_sell_state(o, 사유, fills, list(남은매수.values()))
@@ -222,6 +226,12 @@ def simulate_account(
                 기록["expired"][안됨] = 기록["expired"].get(안됨, 0) + 1
                 continue
             fills.append(체결)
+            # 그날 체결 금액(슬리피지 전 가격 × 수량) — 노출·회전 칸(25.2046)
+            금액 = float(가격) * o.quantity
+            if o.side == "buy":
+                산금액[o.stock_id] = 산금액.get(o.stock_id, 0.0) + 금액
+            else:
+                판금액 += 금액
             if o.side == "buy":
                 기록["buys"] += 1
                 진입.setdefault(o.stock_id, (d, float(가격)))
@@ -233,5 +243,14 @@ def simulate_account(
         out.log.append(기록)
         자본, 몫 = 값(d)
         out.curve.append((d, 자본 / deposit))
-        out.weights.append((d, {sid: x / 자본 for sid, x in 몫.items() if x > 0} if 자본 > 0 else {}))
+        # 노출 = 종목마다 max(하루 끝 평가, 그날 산 금액) ÷ 자본 — 당일 단타 T 는 하루 끝 보유가 늘 0 이라
+        # 하루 끝 평가만 쓰면 "투자한 달 0%" 가 됐다(25.2046). 회전 = (그날 산 금액 + 판 금액) ÷ 2 ÷ 자본 —
+        # 엔진처럼 값 움직임(drift)은 빼고 T 의 장중 왕복은 넣는다
+        if 자본 > 0:
+            w = {sid: max(몫.get(sid, 0.0), 산금액.get(sid, 0.0)) / 자본 for sid in set(몫) | set(산금액)}
+            out.weights.append((d, {sid: x for sid, x in w.items() if x > 0}))
+            out.turnover.append((d, (sum(산금액.values()) + 판금액) / 2 / 자본))
+        else:
+            out.weights.append((d, {}))
+            out.turnover.append((d, 0.0))
     return out

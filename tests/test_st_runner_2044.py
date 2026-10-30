@@ -65,6 +65,12 @@ def test_시가가_있으면_S_T_가_실제로_사고팔고_노출이_실린다(
     assert 지표["invested_share"] > 0 and 지표["avg_holdings"] > 0
     경고 = json.loads(행["st_s"]["warnings_json"])
     assert not any("투자한 달 0%" in w for w in 경고) and not any("시가 덮개" in w for w in 경고)
+    # T 는 하루 끝 보유가 0 이어도 장중 보유가 노출로 잡힌다(25.2046 — 예전엔 st_t 만 "투자한 달 0%")
+    t지표 = json.loads(행["st_t"]["metrics_json"])
+    assert t지표["invested_share"] > 0 and t지표["avg_holdings"] > 0
+    assert not any(w.startswith("st_t: 투자한 달 0%") for w in json.loads(행["st_t"]["warnings_json"]))
+    # 비중이 금액이 아니라 자본 대비 몫인지(돌연변이 `x / 자본` → `x` 가 지나던 자리)
+    assert 0 < 지표["avg_holdings"] < 50
 
 
 def test_시가가_없으면_S_T_줄에_덮개_경고를_붙인다(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -91,3 +97,25 @@ def test_S_T_리플레이가_깨져도_탐색_변형은_싣는다(monkeypatch: p
     로그 = json.loads(mem.execute("SELECT step_log FROM batch_runs WHERE job_name = ?",
                                  [cj.EXPLORE_JOB_NAME]).scalar())  # fmt: skip
     assert "RuntimeError" in 로그["st"]["error"]
+
+
+
+def test_S_뒤_T_에서_깨져도_덮개와_S_합이_남는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """기록을 인자로 넘겨 채우므로 부분 실패에도 이미 잰 값이 남는다(25.2046)."""
+    from batch.services import swing_day_replay as sdr
+    from tests.test_core_backtest_job_1534 import _db, 오늘
+
+    mem = _db(monkeypatch)
+    원래 = sdr.simulate_account
+
+    def T만_깨짐(account, **kw):  # noqa: ANN001, ANN003
+        if account == "T":
+            raise RuntimeError("시험 — T 만 깨뜨림")
+        return 원래(account, **kw)
+
+    monkeypatch.setattr(sdr, "simulate_account", T만_깨짐)
+    assert cj.run_core("KR", years=1, today=오늘, force=True, explore=True, st=True) == 0
+    로그 = json.loads(mem.execute("SELECT step_log FROM batch_runs WHERE job_name = ?",
+                                 [cj.EXPLORE_JOB_NAME]).scalar())  # fmt: skip
+    assert "RuntimeError" in 로그["st"]["error"] and 로그["st"]["open_coverage"] == 0.0 and "S" in 로그["st"]["accounts"]
+    assert "st_s" in [r[0] for r in mem.execute("SELECT strategy FROM backtest_runs").rows]

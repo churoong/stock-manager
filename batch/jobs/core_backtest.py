@@ -287,15 +287,16 @@ def run_core(
 
         st_log: dict[str, Any] = {}
         if st:
-            # 깨져도 이미 낸 탐색 변형은 싣는다(25.2045 — H 진단과 같은 "곁다리가 실행을 죽이지 않는다")
+            # 깨져도 이미 낸 탐색 변형은 싣는다(25.2045 — H 진단과 같은 "곁다리가 실행을 죽이지 않는다"). 기록은 인자로
+            # 넘겨 채우므로 S 뒤 T 에서 깨져도 덮개·S 합이 남는다(25.2046)
             try:
-                st_log = _run_st(shared, prices, opens or {}, dates, turnover, country, 수수료설정,
-                                 db.get_setting(client, "taxes", {}), costs, results, 종목수, 시간,
-                                 progress=lambda 이름, k: _진행(client, batch_id, len(variants) + k, len(variants) + 3,
-                                                                이름))  # fmt: skip
+                _run_st(shared, prices, opens or {}, dates, turnover, country, 수수료설정,
+                        db.get_setting(client, "taxes", {}), costs, results, 종목수, 시간,
+                        progress=lambda 이름, k: _진행(client, batch_id, len(variants) + k, len(variants) + 3, 이름),
+                        log=st_log)  # fmt: skip
             except Exception as e:  # noqa: BLE001
                 log.exception("S·T 리플레이 실패")
-                st_log = {"error": f"{type(e).__name__}: {str(e)[:200]}"}
+                st_log["error"] = f"{type(e).__name__}: {str(e)[:200]}"
                 warnings.append(f"S·T 리플레이 실패: {type(e).__name__}: {str(e)[:120]}")
             cov = st_log.get("open_coverage")
             if cov is not None and cov < ST_MIN_OPEN_COVERAGE:
@@ -446,10 +447,12 @@ def _run_st(
     turnover: dict[int, dict[str, float]], country: str, fees: dict, taxes: dict, costs: bt.Costs,
     results: dict[str, bt.BacktestResult], 종목수: dict[str, int], 시간: dict[str, float],
     progress: Any = None,
+    log: dict[str, Any] | None = None,
 ) -> dict[str, Any]:  # fmt: skip
     """S·T 계좌형 리플레이 둘(깔때기 ⑦-6, 25.2044) — 핵심 변형과 같은 하루 재료(`SharedDays`)의 단기 신호 행으로
     `swing_day_replay.simulate_account` 를 돌려 `results` 에 판정판 꼴(`BacktestResult`)로 더한다. 기록: 시가 덮개
-    (유니버스·기간의 종가 행 가운데 시가가 있는 몫 — 시가가 빈 옛 행은 `judge` 가 종가로 물러나 T 를 흐린다)·체결 수·
+    (유니버스·기간의 종가 행 가운데 시가가 있는 몫 — 시가가 빈 날은 T 가 사지 않고 S 는 넘음 판정이 그날을 세지 않아
+    매도가 늦거나 없다)·체결 수·
     날마다 기록의 합(만료 까닭·관문 코드·매도 까닭)."""
     from batch.jobs import paper as jp
     from batch.services import swing_day_replay as sdr
@@ -465,7 +468,8 @@ def _run_st(
     }  # fmt: skip
     설정 = {"max_weight_per_stock": float(shared.market.max_weight_per_stock),
             "max_weight_per_sector": float(report_picks.DEFAULT_MAX_SECTOR_PCT), "min_order_amount": 0.0}  # fmt: skip
-    out: dict[str, Any] = {"open_coverage": round(시가행 / 종가행, 4) if 종가행 else None, "accounts": {}}
+    out: dict[str, Any] = log if log is not None else {}
+    out.update({"open_coverage": round(시가행 / 종가행, 4) if 종가행 else None, "accounts": {}})
     for k, (계좌, 이름) in enumerate((("S", "st_s"), ("T", "st_t"))):
         if progress:
             progress(이름, k)
@@ -476,16 +480,12 @@ def _run_st(
             costs_at=lambda d: jp.costs_for(country, fees, taxes, d), stock_cache=캐시, settings=설정,
             turnover=turnover, market=country,
         )  # fmt: skip
-        # 날마다 하루 끝 보유 비중을 리밸런스 꼴로 — 판정판의 노출(투자한 달·평균 보유)·수용량이 실제 값이 되게(25.2045,
-        # 예전 `rebalances=[]` 는 "투자한 달 0%" 거짓 경고와 0 칸을 실었다). 회전은 이웃한 날 비중 차의 절반(장중 왕복인
-        # T 의 회전은 못 잰다 — 근사), 비용은 체결에 이미 들어 있어 0
-        리밸런스: list[bt.Rebalance] = []
-        앞: dict[int, float] = {}
-        for 날, w in r.weights:
-            키 = set(w) | set(앞)
-            리밸런스.append(bt.Rebalance(날, dict(w), sum(abs(w.get(x, 0.0) - 앞.get(x, 0.0)) for x in 키) / 2, 0.0,
-                                         cost_path="cash"))  # fmt: skip
-            앞 = w
+        # 날마다 보유 비중을 리밸런스 꼴로 — 판정판의 노출(투자한 달·평균 보유)·수용량이 실제 값이 되게(25.2045,
+        # 예전 `rebalances=[]` 는 "투자한 달 0%" 거짓 경고와 0 칸을 실었다). 비중은 max(하루 끝 평가, 그날 산 금액)
+        # (T 는 장중 보유), 회전은 그날 체결 금액 기준(값 움직임 빼고 T 왕복 넣음, 25.2046).
+        # 비용은 체결에 이미 들어 있어 0, 비용 길은 없다(None — 장부형 엔진의 현금·대체 길이 아니다)
+        회전 = dict(r.turnover)
+        리밸런스 = [bt.Rebalance(날, dict(w), 회전.get(날, 0.0), 0.0) for 날, w in r.weights]
         results[이름] = bt.BacktestResult(curve=r.curve, rebalances=리밸런스, costs=costs,
                                           warnings=[bt.WARN_NO_DIVIDENDS])  # fmt: skip
         종목수[이름] = sdr.TOP_N

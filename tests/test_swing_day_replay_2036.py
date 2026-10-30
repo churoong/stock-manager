@@ -40,6 +40,12 @@ def test_S_는_다음_장_시가에_사고_종가_목표를_넘은_다음_장_�
     assert len(판) == 1 and 판[0].fill_date == 날[4] and 판[0].price == 1060.0 and 판[0].quantity == 산[0].quantity
     # 비용 0 — 현금 = 입금 + 수량 × (1,060 − 1,000)
     assert abs(r.curve[-1][1] * 10_000_000 - (10_000_000 + 산[0].quantity * 60)) < 1e-6
+    # 노출(25.2046) — 산 날은 max(평가 1,010 × q, 산 금액 1,000 × q) ÷ 자본, 들고 가는 날은 평가 ÷ 자본, 모든 날 합 ≤ 1
+    q = 산[0].quantity
+    w = dict(r.weights)
+    assert abs(w[날[1]][1] - 1010 * q / (10_000_000 + 10 * q)) < 1e-12
+    assert abs(w[날[2]][1] - 1020 * q / (10_000_000 + 20 * q)) < 1e-12
+    assert all(sum(x.values()) <= 1 + 1e-12 for x in w.values())
     # 판 뒤 쉼(5거래일) — 날[4]·[5] 에 신호가 또 나도 다시 안 산다
     r2 = _돌림("S", 종가, 시가, {날[0]: [1], 날[4]: [1], 날[5]: [1]})
     assert [f.fill_date for f in r2.fills if f.side == "buy"] == [날[1]]
@@ -61,6 +67,12 @@ def test_T_는_시가에_사고_같은_장_종가에_판다_하루_끝_보유_0(
     assert pp.positions(r.fills) == {}
     q = r.fills[0].quantity
     assert abs(r.curve[-1][1] * 10_000_000 - (10_000_000 + q * 20)) < 1e-6
+    # 노출·회전(25.2046) — 하루 끝 보유는 0 이지만 그날 산 금액(1,010 × q)이 노출, 회전은 (산 + 판) ÷ 2 ÷ 자본
+    자본1 = 10_000_000 + q * 20
+    w = dict(r.weights)[날[1]]
+    assert abs(w[1] - 1010 * q / 자본1) < 1e-12 and sum(w.values()) <= 1
+    assert abs(dict(r.turnover)[날[1]] - (1010 * q + 1030 * q) / 2 / 자본1) < 1e-12
+    assert dict(r.weights)[날[2]] == {} and dict(r.turnover)[날[2]] == 0.0
 
 
 def test_T_는_상한가_시가면_안_사고_짝_매도도_거둔다() -> None:
