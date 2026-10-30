@@ -48,6 +48,15 @@ def test_일부_변형만_돈_실행도_m_은_등록_크기() -> None:
     assert 줄["bh_q"] == pytest.approx(min(1.0, scb.COHORT_SIZE["2"] * 줄["control_p"]))
 
 
+def test_st_줄이_끼어도_탐색_변형_q_는_같다() -> None:
+    """25.2050 의 목적 — `--st` 를 붙인 실행(st_s·st_t 줄, 대조 분위 p 없음)과 안 붙인 실행에서 같은 탐색 변형의 BH q 가
+    같다(25.2051, 25.2050 교차검증 note: 상수 대조로만 간접 묶였다)"""
+    def q(증거: dict) -> float:
+        return next(r["bh_q"] for r in scb.rows([_실행("backtest_explore", 증거)]) if r["strategy"] == "core_d")
+
+    assert q({"core_d": 좋음}) == q({"core_d": 좋음, "st_s": None, "st_t": None}) is not None
+
+
 def test_시장마다_따로_묶는다() -> None:
     줄 = scb.rows([_실행("backtest_explore", {"core_d": 좋음, "core_e": 좋음}, "KR"),
                    _실행("backtest_explore", {"core_d": 좋음}, "US")])  # fmt: skip

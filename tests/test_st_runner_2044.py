@@ -27,11 +27,11 @@ def test_탐색_실행에_S_T_리플레이를_더한다(monkeypatch: pytest.Monk
     assert all(r["top_n"] == 10 for r in st.values())
     assert {json.loads(r["metrics_json"])["account"] for r in st.values()} == {"S", "T"}
     assert all(cj.WARN_ST in json.loads(r["warnings_json"]) for r in 행)
-    assert all(json.loads(r["metrics_json"])["luck"]["n_trials"] >= cj.explore_trial_floor(True) for r in 행)
-    assert cj.explore_trial_floor(True) == jb.REGISTERED_TRIALS + len(cs.EXPLORE_VARIANTS) + 2
+    assert all(json.loads(r["metrics_json"])["luck"]["n_trials"] >= cj.explore_trial_floor() for r in 행)
+    assert cj.explore_trial_floor() == jb.REGISTERED_TRIALS + len(cs.EXPLORE_VARIANTS) + 2
     로그 = json.loads(mem.execute("SELECT step_log FROM batch_runs WHERE job_name = ?",
                                  [cj.EXPLORE_JOB_NAME]).scalar())  # fmt: skip
-    assert 로그["params"]["st"] is True and 로그["params"]["trial_floor"] == cj.explore_trial_floor(True)
+    assert 로그["params"]["st"] is True and 로그["params"]["trial_floor"] == cj.explore_trial_floor()
     assert set(로그["st"]["accounts"]) == {"S", "T"} and "open_coverage" in 로그["st"]
     # 결정 단위 증거는 핵심·탐색 변형만(S·T 는 DayLog 가 아니다)
     assert set(로그["evidence"]) <= set(cs.EXPLORE_VARIANTS)

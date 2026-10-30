@@ -245,7 +245,9 @@ def test_탐색_실행은_따로_싣고_시도_수_하한은_누적이다(monkey
     로그 = json.loads(mem.execute("SELECT step_log FROM batch_runs WHERE job_name = ?",
                                  [cj.EXPLORE_JOB_NAME]).scalar())  # fmt: skip
     assert 로그["params"]["explore"] is True
-    assert 로그["params"]["trial_floor"] == jb.REGISTERED_TRIALS + len(cs.EXPLORE_VARIANTS) == cj.explore_trial_floor()
+    # S·T 둘도 늘 센다(25.2051 — `--st` 없이 돈 실행도 하한이 같다)
+    assert 로그["params"]["trial_floor"] == jb.REGISTERED_TRIALS + len(cs.EXPLORE_VARIANTS) + len(cj.ST_VARIANTS)
+    assert 로그["params"]["trial_floor"] == cj.explore_trial_floor()
     assert 로그["verdict"].startswith("탐색 실행") and "skipped" in 로그["holding_eq"]
 
 

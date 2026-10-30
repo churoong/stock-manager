@@ -77,9 +77,12 @@ WARN_ST = ("S·T 계좌형 리플레이(st_s·st_t) — 운영 S·T 규칙을 �
 ST_MIN_OPEN_COVERAGE = 0.9
 
 
-def explore_trial_floor(st: bool = False) -> int:
-    """탐색 실행의 DSR 시도 수 하한 — 등록부 누적(funnel.md 2.1): 코호트 1(`REGISTERED_TRIALS`) + 탐색 변형 수."""
-    return jb.REGISTERED_TRIALS + len(cs.EXPLORE_VARIANTS) + (len(ST_VARIANTS) if st else 0)
+def explore_trial_floor() -> int:
+    """탐색 실행의 DSR 시도 수 하한 — 등록부 누적(funnel.md 2.1): 코호트 1(`REGISTERED_TRIALS`) + 탐색 변형 수 +
+    S·T 리플레이 수. S·T 는 `--st` 실행에서만 돌지만 하한은 **늘** 더한다(25.2051, 25.2050 교차검증 [권고]:
+    BH m 은 등록 크기로 고정했는데 하한만 실행 구성대로라 같은 sha 의 DSR N 이 `--st` 유무로 갈렸다 —
+    등록할 때 고정, 보수적인 쪽)"""
+    return jb.REGISTERED_TRIALS + len(cs.EXPLORE_VARIANTS) + len(ST_VARIANTS)
 #: `backtest_runs.rebalance` — 장부형 전략은 날마다 판단한다(월 백테스트는 "monthly")
 REBALANCE = "daily"
 #: 기본 연수 — 월 백테스트와 같다(자료 약 5년, docs/backtest.md 10장 자료 깊이)
@@ -324,7 +327,7 @@ def run_core(
         try:
             벤치월 = luck.monthly_returns(벤치.curve)
             운 = luck.judge({v: luck.excess_series(luck.monthly_returns(r.curve), 벤치월) for v, r in results.items()},
-                           n_floor=explore_trial_floor(st) if explore else jb.REGISTERED_TRIALS)  # fmt: skip
+                           n_floor=explore_trial_floor() if explore else jb.REGISTERED_TRIALS)  # fmt: skip
             # 결정 단위 — 무작위 대조 분위(가상모의투자 가상 대조와 같은 함수)·관문과 같은 잣대·판 뒤(읽기 0)
             종가 = ce.Closes(prices)
             코스피 = indexes.get(cb.BENCH_INDEX) or {}
@@ -408,7 +411,7 @@ def run_core(
                 "split_half": 반, "stocks": len(ids), "dates": len(dates), "warnings": warnings,
                 "params": {"years": years, "risk_every": risk_every, "variants": list(variants), "explore": explore,
                            "limit_fills": limit_fills,  # 25.1914 (전략 깔때기 ④ 분할 지정가 체결)
-                           "trial_floor": explore_trial_floor(st) if explore else jb.REGISTERED_TRIALS, "st": st,
+                           "trial_floor": explore_trial_floor() if explore else jb.REGISTERED_TRIALS, "st": st,
                            "trigger": os.environ.get("BACKTEST_TRIGGER") or None,
                            "sha": (os.environ.get("GITHUB_SHA") or "")[:12] or None},
                 # 실측 — 시간 한도 120분 안인지 다음 실행 전에 본다(25.1534)

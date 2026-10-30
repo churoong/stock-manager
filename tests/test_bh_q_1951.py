@@ -86,9 +86,11 @@ def test_rows_는_같은_코호트_줄들로_BH_를_내고_점검표가_쓴다()
                                                   {"core_d": 좋음, "core_e": 애매, "core_a": None})])}  # fmt: skip
     pd, pe = scb.t_sf(4.0, 12), scb.t_sf(2.0 / 1.5, 12)
     assert 줄["core_d"]["control_p"] == pytest.approx(pd) and 줄["core_e"]["control_p"] == pytest.approx(pe)
-    # m = 4 — 등록 코호트 2 크기(25.1956, 줄은 셋이지만 빠진 core_c 도 가설). 정렬 p 둘: d 1등, e 2등
-    assert 줄["core_d"]["bh_q"] == pytest.approx(min(4 * pd, 4 * pe / 2))
-    assert 줄["core_e"]["bh_q"] == pytest.approx(4 * pe / 2)
+    # m = 등록 코호트 2 크기(25.1956 — 줄은 셋이지만 빠진 core_c·st_s·st_t 도 가설, 25.2050 부터 6). 상수를 따른다
+    # (25.2051, 25.2050 교차검증 [필수]: 4 를 손으로 적어 상수를 바꾸자 깨졌다). 정렬 p 둘: d 1등, e 2등
+    m = scb.COHORT_SIZE["2"]
+    assert 줄["core_d"]["bh_q"] == pytest.approx(min(m * pd, m * pe / 2))
+    assert 줄["core_e"]["bh_q"] == pytest.approx(m * pe / 2)
     assert 줄["core_a"]["bh_q"] is None and 줄["core_a"]["missing"]["bh_q"].startswith("대조 분위 p 없음")
     bh = {r["strategy"]: next(c for c in r["stage01"]["checks"] if c["key"] == "bh_q") for r in 줄.values()}
     assert bh["core_d"]["ok"] is True and bh["core_e"]["ok"] is False and bh["core_a"]["ok"] is None
