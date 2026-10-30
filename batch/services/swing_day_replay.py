@@ -48,9 +48,9 @@ class STResult:
     #: — 일치 시험·보고용
     log: list[dict[str, Any]] = field(default_factory=list)
     #: 날마다 (날, {종목: max(하루 끝 평가, 그날 산 금액) ÷ 자본}) — 판정판의 노출·수용량 칸(`bt.Rebalance`)을
-    #: 실제 값으로(25.2045·25.2046 — T 는 장중 보유)
+    #: 실제 값으로(25.2045·25.2047 — T 는 장중 보유)
     weights: list[tuple[str, dict[int, float]]] = field(default_factory=list)
-    #: 날마다 (날, 회전) — (그날 산 금액 + 판 금액) ÷ 2 ÷ 자본(25.2046)
+    #: 날마다 (날, 회전) — (그날 산 금액 + 판 금액) ÷ 2 ÷ 자본(25.2047)
     turnover: list[tuple[str, float]] = field(default_factory=list)
 
 
@@ -226,7 +226,7 @@ def simulate_account(
                 기록["expired"][안됨] = 기록["expired"].get(안됨, 0) + 1
                 continue
             fills.append(체결)
-            # 그날 체결 금액(슬리피지 전 가격 × 수량) — 노출·회전 칸(25.2046)
+            # 그날 체결 금액(슬리피지 전 가격 × 수량) — 노출·회전 칸(25.2047)
             금액 = float(가격) * o.quantity
             if o.side == "buy":
                 산금액[o.stock_id] = 산금액.get(o.stock_id, 0.0) + 금액
@@ -244,7 +244,7 @@ def simulate_account(
         자본, 몫 = 값(d)
         out.curve.append((d, 자본 / deposit))
         # 노출 = 종목마다 max(하루 끝 평가, 그날 산 금액) ÷ 자본 — 당일 단타 T 는 하루 끝 보유가 늘 0 이라
-        # 하루 끝 평가만 쓰면 "투자한 달 0%" 가 됐다(25.2046). 회전 = (그날 산 금액 + 판 금액) ÷ 2 ÷ 자본 —
+        # 하루 끝 평가만 쓰면 "투자한 달 0%" 가 됐다(25.2047). 회전 = (그날 산 금액 + 판 금액) ÷ 2 ÷ 자본 —
         # 엔진처럼 값 움직임(drift)은 빼고 T 의 장중 왕복은 넣는다
         if 자본 > 0:
             w = {sid: max(몫.get(sid, 0.0), 산금액.get(sid, 0.0)) / 자본 for sid in set(몫) | set(산금액)}

@@ -288,7 +288,7 @@ def run_core(
         st_log: dict[str, Any] = {}
         if st:
             # 깨져도 이미 낸 탐색 변형은 싣는다(25.2045 — H 진단과 같은 "곁다리가 실행을 죽이지 않는다"). 기록은 인자로
-            # 넘겨 채우므로 S 뒤 T 에서 깨져도 덮개·S 합이 남는다(25.2046)
+            # 넘겨 채우므로 S 뒤 T 에서 깨져도 덮개·S 합이 남는다(25.2047)
             try:
                 _run_st(shared, prices, opens or {}, dates, turnover, country, 수수료설정,
                         db.get_setting(client, "taxes", {}), costs, results, 종목수, 시간,
@@ -482,7 +482,7 @@ def _run_st(
         )  # fmt: skip
         # 날마다 보유 비중을 리밸런스 꼴로 — 판정판의 노출(투자한 달·평균 보유)·수용량이 실제 값이 되게(25.2045,
         # 예전 `rebalances=[]` 는 "투자한 달 0%" 거짓 경고와 0 칸을 실었다). 비중은 max(하루 끝 평가, 그날 산 금액)
-        # (T 는 장중 보유), 회전은 그날 체결 금액 기준(값 움직임 빼고 T 왕복 넣음, 25.2046).
+        # (T 는 장중 보유), 회전은 그날 체결 금액 기준(값 움직임 빼고 T 왕복 넣음, 25.2047).
         # 비용은 체결에 이미 들어 있어 0, 비용 길은 없다(None — 장부형 엔진의 현금·대체 길이 아니다)
         회전 = dict(r.turnover)
         리밸런스 = [bt.Rebalance(날, dict(w), 회전.get(날, 0.0), 0.0) for 날, w in r.weights]

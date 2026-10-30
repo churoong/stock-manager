@@ -478,7 +478,8 @@ def test_워크플로_핵심H_는_수동_전용_국내_120분() -> None:
             " ${{ inputs.what == '탐색단기' && '--st' || '' }}") in 실행줄
     assert (f"turso_read_gate.py ${{{{ (inputs.what == '탐색' || inputs.what == '탐색단기') && '{cj.EXPLORE_JOB_NAME}'"
             f" || '{cj.JOB_NAME}' }}}}" in 단계["Turso 읽기 진도 문 (docs/infra.md 25.886)"]["run"])
-    assert "inputs.what != '탐색단기'" in 월["if"]
+    # 월 작업 조건은 식 전체로(25.2048 — `||` 로 잘못 써도 조각 검사는 지나 월 백테스트가 함께 돌 수 있었다)
+    assert 월["if"] == "${{ inputs.what != '핵심H' && inputs.what != '탐색' && inputs.what != '탐색단기' }}"
     # 월 백테스트와 같은 비밀·환경·시세 사본 단계
     for 열쇠 in ("TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN", "DB_BACKEND", "D1_API_TOKEN", "PRICE_REPLICA_PATH",
                 "OFFLINE_MODE", "BACKTEST_TRIGGER"):  # fmt: skip

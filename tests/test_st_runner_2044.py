@@ -65,12 +65,17 @@ def test_시가가_있으면_S_T_가_실제로_사고팔고_노출이_실린다(
     assert 지표["invested_share"] > 0 and 지표["avg_holdings"] > 0
     경고 = json.loads(행["st_s"]["warnings_json"])
     assert not any("투자한 달 0%" in w for w in 경고) and not any("시가 덮개" in w for w in 경고)
-    # T 는 하루 끝 보유가 0 이어도 장중 보유가 노출로 잡힌다(25.2046 — 예전엔 st_t 만 "투자한 달 0%")
+    # T 는 하루 끝 보유가 0 이어도 장중 보유가 노출로 잡힌다(25.2047 — 예전엔 st_t 만 "투자한 달 0%")
     t지표 = json.loads(행["st_t"]["metrics_json"])
     assert t지표["invested_share"] > 0 and t지표["avg_holdings"] > 0
     assert not any(w.startswith("st_t: 투자한 달 0%") for w in json.loads(행["st_t"]["warnings_json"]))
-    # 비중이 금액이 아니라 자본 대비 몫인지(돌연변이 `x / 자본` → `x` 가 지나던 자리)
-    assert 0 < 지표["avg_holdings"] < 50
+    # 회전이 판정판 줄까지 실린다 — 리플레이의 체결 금액 회전(25.2047)이 `Rebalance.turnover` → `turnover_avg`
+    # (25.2048, 교차검증 [권고]: 이 연결을 0 으로 바꿔도 시험이 지났다). T 는 날마다 사고팔아 회전이 0 보다 크다
+    회전 = {r[0]: r[1] for r in mem.execute("SELECT strategy, turnover_avg FROM backtest_runs").rows}
+    assert 회전["st_t"] and 회전["st_t"] > 0 and 회전["st_s"] is not None
+    # 비용 길은 없다(비용은 체결에 이미 — 25.2047)
+    assert 지표.get("cost_path") is None and t지표.get("cost_path") is None
+    # 비중 **값**(평가 ÷ 자본)은 평균 보유(종목 수)로는 못 잡는다 — 2036 손 시험이 날별 비중을 손 계산 값으로 묶는다
 
 
 def test_시가가_없으면_S_T_줄에_덮개_경고를_붙인다(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -101,7 +106,7 @@ def test_S_T_리플레이가_깨져도_탐색_변형은_싣는다(monkeypatch: p
 
 
 def test_S_뒤_T_에서_깨져도_덮개와_S_합이_남는다(monkeypatch: pytest.MonkeyPatch) -> None:
-    """기록을 인자로 넘겨 채우므로 부분 실패에도 이미 잰 값이 남는다(25.2046)."""
+    """기록을 인자로 넘겨 채우므로 부분 실패에도 이미 잰 값이 남는다(25.2047)."""
     from batch.services import swing_day_replay as sdr
     from tests.test_core_backtest_job_1534 import _db, 오늘
 
