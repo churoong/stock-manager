@@ -123,14 +123,23 @@ def split_half(curve: list[tuple[str, float]]) -> dict[str, Any]:
 
 def pit_eligible(
     universe: list[dict[str, Any]], prices: dict[int, dict[str, float]], turnover: dict[int, dict[str, float]],
-    market_of: dict[int, str],
+    market_of: dict[int, str], *, country: str = "KR", levels: dict[int, dict[str, float]] | None = None,
 ) -> tuple[jb.EligibleAt, dict[str, set[int]], dict[str, int]]:
-    """국내 시점 유니버스 판정 — 월 백테스트 `run` 과 같은 하한·같은 20일 창·같은 이력 가장자리 (docs/backtest.md 1.3).
+    """시점 유니버스 판정 — 월 백테스트 `run` 과 같은 하한·같은 20일 창·같은 이력 가장자리 (docs/backtest.md 1.3).
 
-    (판정 함수, cutoff → 종목 캐시, 제외 사유 수). `run` 은 바꾸지 않으려고 같은 조립을 여기 둔다"""
-    base = uni.UniverseFilters.korea()
-    stocks = jb.pit_stocks(universe, observed=False)  # 국내 listed_date 는 거래소가 준 실제 상장일
-    series = jb.pit_series(prices, turnover)  # 국내 수정주가는 분할만 조정 — 가격 수준과 같다(25.275)
+    (판정 함수, cutoff → 종목 캐시, 제외 사유 수). `run` 은 바꾸지 않으려고 같은 조립을 여기 둔다.
+    미국(25.2055, 깔때기 ⑧-1)은 `run` 의 미국 갈래를 그대로 — 하한 `usa()`, `listed_date` 는 관측 첫 거래일
+    (`observed=True`, 25.403), 시총 하한은 **가격 수준** `levels`(수정종가는 미래 배당만큼 낮다, 25.275)"""
+    if country not in ("KR", "US"):
+        raise ValueError(f"시점 유니버스는 KR·US — {country}")
+    if country == "US" and levels is None:
+        # 수정종가로 시총을 재면 배당 많은 종목이 하한 아래로 빠진다 — 조용히 넘어가지 않는다
+        raise ValueError("미국 시점 유니버스는 가격 수준(levels)이 있어야 한다 — docs/infra.md 25.275")
+    base = uni.UniverseFilters.korea() if country == "KR" else uni.UniverseFilters.usa()
+    # 국내 listed_date 는 거래소가 준 실제 상장일, 미국은 관측 첫 거래일(us_shares)
+    stocks = jb.pit_stocks(universe, observed=country == "US")
+    # 국내 수정주가는 분할만 조정 — 가격 수준과 같다(25.275)
+    series = jb.pit_series(levels if country == "US" else prices, turnover)
     filters = pit.Filters(
         min_market_cap=base.min_market_cap, min_avg_turnover_20d=base.min_avg_turnover_20d,
         min_listed_days=base.min_listed_days, history_starts=jb.history_starts(stocks, series),

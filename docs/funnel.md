@@ -150,7 +150,7 @@
    | 시점 유니버스 | 월 실행은 `UniverseFilters.usa()`·`observed=True`·`levels` | 실행기가 `korea()`·수정 시총 박음 | 월 실행 갈래를 옮긴다 |
    | 회사 부서 | `domestic = country=="KR"` | `domestic=True` 박음 | 나라로 — 투표 결과가 바뀌는지 `[확인필요]` |
    | 감성(VADER) | 미국 H | 없음 | **영구 차이**(backtest.md 10장) |
-   **순서**(한 건씩): ① 실행기의 미국 자료 길(시점 유니버스·`levels`·분할 대기 빼기·배당 경고) ② `CoreMarket` 나라별 벤치마크·`domestic`·가드 풀기
+   **순서**(한 건씩): ① 실행기의 미국 자료 길(시점 유니버스 **됨 25.2055 — `pit_eligible(country="US", levels=…)`**·`levels` 읽기·분할 대기 빼기·배당 경고 — 남은 셋은 실행기 가드를 푸는 ⑤ 와 함께) ② `CoreMarket` 나라별 벤치마크·`domestic`·가드 풀기
    ③ `CoreStrategy` 달러 장부(환율 1.0·캐시 통화) + 운영과 미국 합성 자료 일치 시험(`fx_rates` 1.0 행) ④ S·T 리플레이 통화·`fx_at` + 미국 일치 시험
    ⑤ 실행기·명령줄·`backtest.yml`·읽기 예산(약 6,000종목 `[확인필요]`)·문서 ⑥ (선택) 원화 보기 — 환율 범위 로더가 없다(`fx_rates` 를
    읽는 백테스트 로더 없음, 원화 환산을 하려면 새로). 자료 깊이: 미국 시세 2021-07~, SP500 2018-10~(backtest.md 10장).
