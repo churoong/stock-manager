@@ -397,7 +397,8 @@ def run_core(
                      # 비용 길 빈도(25.1969) — 대체 길(현금 < 비용)이 운영과 다른 길이라 몇 번 탔나
                      "cost_path": bt.cost_paths(result)}  # fmt: skip
             # 미국에서 일치 시험이 없는 변형 줄에만 단서(25.2063)
-            미검 = country == "US" and variant not in US_PARITY_VERIFIED
+            # 분할 지정가 체결 판(`limit_fills`)은 미국 일치 시험이 다루지 않는다(25.2066, 교차검증 note)
+            미검 = country == "US" and (variant not in US_PARITY_VERIFIED or limit_fills)
             행경고 = [*warnings, WARN_US_UNVERIFIED] if 미검 else warnings
             jb.store_run(client, market, variant, result, summary, 종목수[variant], group_id, 행경고,
                          now, 운.get(variant), rebalance=REBALANCE, extra=extra, kept=실은_행)  # fmt: skip
@@ -501,7 +502,8 @@ def _run_st(
         int(r["stock_id"]): {"id": int(r["stock_id"]), "ticker": str(r["ticker"]),
                              "name": str(r.get("name") or r["ticker"]),
                              "sector": r.get("sector") or None, "country": country,
-                             "currency": r.get("currency") or "KRW", "asset_type": r.get("asset_type") or "stock"}
+                             "currency": r.get("currency") or cs._시장통화(country),
+                             "asset_type": r.get("asset_type") or "stock"}
         for r in shared.market.universe
     }  # fmt: skip
     설정 = {"max_weight_per_stock": float(shared.market.max_weight_per_stock),
@@ -524,8 +526,10 @@ def _run_st(
         # 비용은 체결에 이미 들어 있어 0, 비용 길은 없다(None — 장부형 엔진의 현금·대체 길이 아니다)
         회전 = dict(r.turnover)
         리밸런스 = [bt.Rebalance(날, dict(w), 회전.get(날, 0.0), 0.0) for 날, w in r.weights]
-        results[이름] = bt.BacktestResult(curve=r.curve, rebalances=리밸런스, costs=costs,
-                                          warnings=[bt.WARN_NO_DIVIDENDS])  # fmt: skip
+        # 미국 수정종가는 배당 포함 총수익 — 엔진 변형과 같은 규칙(25.2066, 25.2063 교차검증 [권고]: 예전엔 늘
+        # "배당 없음" 이라 같은 묶음에서 갈렸다)
+        배당 = bt.WARN_TOTAL_RETURN if country == "US" else bt.WARN_NO_DIVIDENDS
+        results[이름] = bt.BacktestResult(curve=r.curve, rebalances=리밸런스, costs=costs, warnings=[배당])
         종목수[이름] = sdr.TOP_N
         시간[이름] = round(time.perf_counter() - t1, 1)
         합: dict[str, Any] = {"fills": len(r.fills), "buys": 0, "sells": 0, "deferred": 0}

@@ -24,6 +24,8 @@ from tests.test_portfolio_job import MemClient
 
 #: 분할 재수집 대기(대기열 `ratio_before = ratio_after` — 분할 꼴) 종목
 보류 = 5
+#: 배당만 어긋난 대기열 종목 — 빼지 않는다
+배당꼴 = 7
 
 
 def _db(monkeypatch: pytest.MonkeyPatch) -> MemClient:
@@ -63,6 +65,9 @@ def _db(monkeypatch: pytest.MonkeyPatch) -> MemClient:
                   [d, a])  # fmt: skip
     c.execute("INSERT INTO adjust_refresh_queue (stock_id, detected_at, sample_date, ratio_before, ratio_after)"
               " VALUES (?, '2025-03-01T00:00:00+00:00', '2025-02-28', 0.5, 0.5)", [보류])  # fmt: skip
+    # 반대편 대조(25.2066, 교차검증 note) — 배당만 어긋난 꼴(비가 다름)은 분할이 아니라 빼지 않는다
+    c.execute("INSERT INTO adjust_refresh_queue (stock_id, detected_at, sample_date, ratio_before, ratio_after)"
+              " VALUES (?, '2025-03-01T00:00:00+00:00', '2025-02-28', 0.98, 0.97)", [배당꼴])  # fmt: skip
     return mem
 
 
@@ -105,9 +110,10 @@ def test_미국_실행이_다섯_행을_시장_US_로_싣는다(실행: tuple[Me
     assert 엿본["country"] == "US" and 엿본["levels"] and all(
         set(x) for x in 엿본["levels"].values())  # fmt: skip
     assert 엿본["cache"] and all(보류 not in ids for ids in 엿본["cache"].values())
+    assert any(배당꼴 in ids for ids in 엿본["cache"].values())
 
 
-def test_미국_일치_시험_목록은_시험_파일과_같다() -> None:
+def test_미국_일치_시험_목록_못박음() -> None:
     """단서를 떼는 변형 목록은 미국 일치 시험이 실제로 있는 것만(25.2063) — B·G 는 tests/test_replay_parity_us_2059.py,
     S·T 는 tests/test_replay_parity_st_us_2061.py, H·D·E 는 tests/test_replay_parity_hde_us_2064.py, A·C 는
     tests/test_replay_parity_ac_us_2065.py. 넓히려면 그 변형의 미국 일치 시험을 먼저 더하고 여기를 고친다"""
@@ -122,5 +128,7 @@ def test_미국_탐색_S_T_도_돈다(monkeypatch: pytest.MonkeyPatch) -> None:
     경고 = {r["strategy"]: json.loads(r["warnings_json"]) for r in mem.execute(
         "SELECT strategy, warnings_json FROM backtest_runs").dicts()}  # fmt: skip
     assert all(cj.WARN_US_UNVERIFIED not in 경고[v] for v in cj.ST_VARIANTS)  # S·T 는 25.2061 이 묶었다
+    # 미국 S·T 도 배당 포함 총수익(25.2066) — 같은 묶음의 탐색 변형과 같은 경고
+    assert all(bt.WARN_TOTAL_RETURN in w and bt.WARN_NO_DIVIDENDS not in w for w in 경고.values()), 경고
     # 탐색 D·E·A·C 는 25.2064·2065 가 묶었다 — 행마다 단서 유무가 목록과 같다(탐색 실행엔 단서 줄이 없다)
     assert all((cj.WARN_US_UNVERIFIED in w) == (v not in cj.US_PARITY_VERIFIED) for v, w in 경고.items()), 경고.keys()
