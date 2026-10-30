@@ -398,6 +398,8 @@ def test_단타_짝_매도_상태_순수_함수() -> None:
     assert pp.pair_sell_state(짝, pp.DAY_CLOSE_CODE, [], [_주문(account_id="S")]) == "expire"
     assert pp.pair_sell_state(짝, pp.DAY_CLOSE_CODE, [_체결(account_id="S")], []) == "expire"
     assert pp.pair_sell_state(짝, pp.DAY_CLOSE_CODE, [_체결(side="sell")], []) == "expire"
+    # 다른 장의 같은 종목 열린 매수도 기다릴 까닭이 아니다(25.2038, 25.2035 교차검증 [참고] — 하루 늦던 길)
+    assert pp.pair_sell_state(짝, pp.DAY_CLOSE_CODE, [], [_주문(fill_session="2026-10-31")]) == "expire"
 
 
 def test_쉼_집합과_스윙_후보_순수_함수() -> None:
