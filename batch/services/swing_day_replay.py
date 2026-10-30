@@ -16,6 +16,8 @@
 은 없다 — 그날 행이 없으면 정지로 본다(등락은 그 앞 행 있는 날 종가로 재 하한가 잠김을 판정한다, 25.2039)
 ③ 거래량은 거래대금(`turnover`)이 0 인지로만 본다 ④ 늦은 실행·장 끝난 뒤 손 실행 없음(늘 장 전 결정)
 ⑤ S 판정 종가는 시가가 있는 날만(운영 `SWING_CLOSES_SQL` 의 시가·고가·저가 > 0 근사)
+⑥ 입금 규모(기본 10억)·최소 주문 0·종목·업종 상한은 시장 판단기·2부 기본값 — 운영 사용자 설정을 읽지 않는다
+(실행기 25.2044)
 """
 
 from __future__ import annotations
@@ -45,6 +47,9 @@ class STResult:
     #: sold: {매도 사유 코드: 수}}
     #: — 일치 시험·보고용
     log: list[dict[str, Any]] = field(default_factory=list)
+    #: 날마다 (날, {종목: 평가 ÷ 자본}) — 하루 끝 보유 비중. 판정판의 노출·수용량 칸(`bt.Rebalance`)을
+    #: 실제 값으로(25.2045)
+    weights: list[tuple[str, dict[int, float]]] = field(default_factory=list)
 
 
 def _bar(sid: int, d: str, prices: dict[int, dict[str, float]], opens: dict[int, dict[str, float]],
@@ -94,14 +99,14 @@ def simulate_account(
     # 날마다 창을 다시 정렬하지 않게 한 번 정렬(엔진 `simulate` 와 같다, 25.1522) — 5년 실행기(25.2044)
     미리 = (bt.SortedSeries(prices), bt.SortedSeries(turnover), bt.SortedSeries(None))
 
-    def 값(d: str) -> float:
+    def 값(d: str) -> tuple[float, dict[int, float]]:
         보유 = pp.positions(fills)
-        평가 = 0.0
+        몫: dict[int, float] = {}
         for sid, p in 보유.items():
             줄 = prices.get(sid, {})
             앞 = [k for k in 줄 if k <= d]
-            평가 += p.quantity * (줄[max(앞)] if 앞 else 0.0)
-        return pp.cash(flows, fills) + 평가
+            몫[sid] = p.quantity * (줄[max(앞)] if 앞 else 0.0)
+        return pp.cash(flows, fills) + sum(몫.values()), 몫
 
     for i, d in enumerate(dates):
         if i == 0:
@@ -226,5 +231,7 @@ def simulate_account(
                 if o.stock_id not in pp.positions(fills):
                     진입.pop(o.stock_id, None)
         out.log.append(기록)
-        out.curve.append((d, 값(d) / deposit))
+        자본, 몫 = 값(d)
+        out.curve.append((d, 자본 / deposit))
+        out.weights.append((d, {sid: x / 자본 for sid, x in 몫.items() if x > 0} if 자본 > 0 else {}))
     return out

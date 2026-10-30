@@ -37,6 +37,57 @@ def test_탐색_실행에_S_T_리플레이를_더한다(monkeypatch: pytest.Monk
     assert set(로그["evidence"]) <= set(cs.EXPLORE_VARIANTS)
 
 
-def test_핵심_실행에는_붙일_수_없다() -> None:
+def test_핵심_실행에는_붙일_수_없다(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tests.test_core_backtest_job_1534 import _db
+
+    _db(monkeypatch)  # 막이가 풀려도 실제 DB 로 가지 않게(25.2045)
     with pytest.raises(ValueError, match="탐색 실행"):
         cj.run_core("KR", st=True)
+
+
+def test_시가가_있으면_S_T_가_실제로_사고팔고_노출이_실린다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """합성 DB 에 시가(≠ 종가)를 채운 판(25.2045, 25.2044 교차검증 [권고]) — 시가 덮개 100%, T 가 체결하고 S 가 스윙 까닭으로
+    판다. 판정판 노출 칸이 실제 값(예전 `rebalances=[]` 는 "투자한 달 0%" 거짓 경고)이고 낮은 덮개 경고는 없다."""
+    from tests.test_core_backtest_job_1534 import _db, 오늘
+
+    mem = _db(monkeypatch)
+    mem.conn.execute("UPDATE prices SET open = ROUND(close * 0.995, 2)")
+    assert cj.run_core("KR", years=1, today=오늘, force=True, explore=True, st=True) == 0
+    로그 = json.loads(mem.execute("SELECT step_log FROM batch_runs WHERE job_name = ?",
+                                 [cj.EXPLORE_JOB_NAME]).scalar())  # fmt: skip
+    st = 로그["st"]
+    assert st["open_coverage"] == 1.0
+    assert st["accounts"]["T"]["fills"] > 0 and "단타종가" in st["accounts"]["T"]["sold"]
+    assert st["accounts"]["S"]["sells"] >= 1 and set(st["accounts"]["S"]["sold"]) <= {"스윙손절", "스윙목표", "스윙기한"}
+    행 = {r["strategy"]: r for r in mem.execute("SELECT strategy, metrics_json, warnings_json FROM backtest_runs"
+                                               ).dicts()}  # fmt: skip
+    지표 = json.loads(행["st_s"]["metrics_json"])
+    assert 지표["invested_share"] > 0 and 지표["avg_holdings"] > 0
+    경고 = json.loads(행["st_s"]["warnings_json"])
+    assert not any("투자한 달 0%" in w for w in 경고) and not any("시가 덮개" in w for w in 경고)
+
+
+def test_시가가_없으면_S_T_줄에_덮개_경고를_붙인다(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tests.test_core_backtest_job_1534 import _db, 오늘
+
+    mem = _db(monkeypatch)
+    assert cj.run_core("KR", years=1, today=오늘, force=True, explore=True, st=True) == 0
+    경고 = json.loads(mem.execute("SELECT warnings_json FROM backtest_runs WHERE strategy = 'st_t'").scalar())
+    assert any(w.startswith("S·T 시가 덮개 0.0%") for w in 경고)
+
+
+def test_S_T_리플레이가_깨져도_탐색_변형은_싣는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    from batch.services import swing_day_replay as sdr
+    from tests.test_core_backtest_job_1534 import _db, 오늘
+
+    mem = _db(monkeypatch)
+
+    def 깨짐(*_a, **_k):
+        raise RuntimeError("시험 — 일부러 깨뜨림")
+
+    monkeypatch.setattr(sdr, "simulate_account", 깨짐)
+    assert cj.run_core("KR", years=1, today=오늘, force=True, explore=True, st=True) == 0
+    assert [r[0] for r in mem.execute("SELECT strategy FROM backtest_runs ORDER BY id").rows] == list(cs.EXPLORE_VARIANTS)
+    로그 = json.loads(mem.execute("SELECT step_log FROM batch_runs WHERE job_name = ?",
+                                 [cj.EXPLORE_JOB_NAME]).scalar())  # fmt: skip
+    assert "RuntimeError" in 로그["st"]["error"]
