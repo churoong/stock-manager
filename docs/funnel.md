@@ -147,7 +147,7 @@
    | 가격제한(국내 ±30%) | `pp.limit_locked`·`shadow.limit_up_open` 은 KRW 만 | 통화가 맞으면 저절로 | 위 통화 고침으로 |
    | 비용 | `costs_for`(미국 세금 0·수수료) | 실행기가 `country="KR"` 박음 | 나라 인자 |
    | 배당 | 가상모의투자는 종가·배당 없음 | 미국 수정종가는 배당 재투자(원천징수 15% 없음) | 점수는 수정, 체결·평가는 원 종가(`levels`) `[확인필요]` |
-   | 시점 유니버스 | 월 실행은 `UniverseFilters.usa()`·`observed=True`·`levels` | 실행기가 `korea()`·수정 시총 박음 | 월 실행 갈래를 옮긴다 |
+   | 시점 유니버스 | 월 실행은 `UniverseFilters.usa()`·`observed=True`·`levels` | **`pit_eligible(country=, levels=)` 됨(25.2055)** — 실행기 호출(`run_core`)은 아직 국내 기본값 | ⑤ 에서 `levels` 를 읽어 `country`·`levels` 를 넘긴다(빠뜨리면 미국이 국내 하한으로 판정 — 기본값이 KR) |
    | 회사 부서 | `domestic = country=="KR"` | **됨(25.2056)** — 나라로 | 미국은 증권사·수급·공시가 기권(운영과 같음) |
    | 감성(VADER) | 미국 H | 없음 | **영구 차이**(backtest.md 10장) |
    **순서**(한 건씩): ① 실행기의 미국 자료 길(시점 유니버스 **됨 25.2055 — `pit_eligible(country="US", levels=…)`**·`levels` 읽기·분할 대기 빼기·배당 경고 — 남은 셋은 실행기 가드를 푸는 ⑤ 와 함께) ② `CoreMarket` 나라별 벤치마크·`domestic`·가드 풀기(**됨 25.2056** — 막기는 `CoreStrategy`·S·T 리플레이로 옮김)

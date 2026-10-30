@@ -44,7 +44,18 @@ def test_미국은_가격_수준이_없으면_멈춘다() -> None:
         cj.pit_eligible(유니버스, prices, turnover, 시장, country="JP", levels=levels)
 
 
-def test_국내_기본값은_그대로다() -> None:
-    """국내(기본) — 같은 자료를 원화로 보면 1,000억 하한 아래라 아무도 들지 않는다(국내 갈래가 미국 하한을 쓰지 않는다)"""
-    eligible_at, _c, _r = cj.pit_eligible(유니버스, prices, turnover, 시장)
+def test_국내_기본값은_국내_하한과_실제_상장일로_고른다() -> None:
+    """국내(기본) 갈래를 실제로 가르는 자료(25.2060, 25.2055 교차검증 [권고] — 예전 시험은 두 까닭이 함께 걸려 늘 빈 집합이라
+    국내가 `usa()`·`observed=True` 로 바뀌어도 지났다).
+
+    1 — 상장일 빔(관측 첫 거래일 = 이력 시작 날들[0] — 이력 가장자리를 만든다), 원화 시총 500억(국내 하한 1,000억 아래,
+    미국 하한 10억 위) → 국내에선 "시총 하한 미만".
+    2 — 상장일이 날들[0] 이고 시총 넉넉 → 국내 상장일은 거래소가 준 **실제** 상장일이라 "상장 1년 미만"
+    (관측 첫 거래일로 보면 이력 가장자리에 붙어 빼지 않았을 것)"""
+    u = [{"stock_id": 1, "listed_date": None, "listed_shares": 10_000_000},
+         {"stock_id": 2, "listed_date": 날들[0], "listed_shares": 10_000_000}]  # fmt: skip
+    원화 = {1: dict.fromkeys(날들, 5_000.0), 2: dict.fromkeys(날들, 200_000.0)}
+    대금 = {sid: dict.fromkeys(날들, 1e10) for sid in (1, 2)}
+    eligible_at, _c, 까닭 = cj.pit_eligible(u, 원화, 대금, dict.fromkeys((1, 2), "KR"))
     assert eligible_at(날들[120]) == set()
+    assert 까닭 == {"시총 하한 미만": 1, "상장 1년 미만": 1}, 까닭
