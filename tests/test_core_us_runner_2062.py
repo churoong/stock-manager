@@ -134,7 +134,7 @@ def test_미국_탐색_S_T_도_돈다(monkeypatch: pytest.MonkeyPatch) -> None:
     assert all((cj.WARN_US_UNVERIFIED in w) == (v not in cj.US_PARITY_VERIFIED) for v, w in 경고.items()), 경고.keys()
 
 
-def test_미국_지정가_판은_모든_핵심_변형에_따로_단서(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_미국_지정가_판은_회차_핵심_변형에_따로_단서(monkeypatch: pytest.MonkeyPatch) -> None:
     """미국 분할 지정가 체결 판은 일치 시험이 없다 — 목록 안 변형(B)에도 따로 문구(25.2067, 25.2066 교차검증 [권고]:
     예전 `WARN_US_UNVERIFIED` 는 "B·G 는 됨" 이라 합친 띠에서 거꾸로 읽혔고, 그 갈래를 묶는 시험도 없었다)"""
     mem = _db(monkeypatch)
@@ -160,3 +160,22 @@ def test_R_줄엔_시장과_상관없이_옛_자리_단서(실행: tuple[MemClie
     mem, _rc, _엿본 = 실행
     for r in mem.execute("SELECT strategy, warnings_json FROM backtest_runs").dicts():
         assert (cj.WARN_R_OLD_SLOT in json.loads(r["warnings_json"])) == (r["strategy"] in cj.R_VARIANTS), r["strategy"]
+
+
+def test_미국_지정가_핵심_실행의_합친_경고가_서로_어긋나지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """미국 지정가 핵심(탐색 아님) 실행 — B 는 지정가 단서만, R1 은 미국 R 단서·옛 자리 단서(지정가 단서 없음 — 시가 일괄).
+    웹은 묶음 경고를 한 띠로 합쳐 보이므로, 합친 글에 "검증된 변형" 나열이 없어야 지정가 단서와 거꾸로 읽히지 않는다
+    (25.2069, 25.2068 교차검증 [권고]: R 줄의 예전 문구 "일치 시험이 된 변형은 B·G·H…" 가 다시 모순을 냈다)"""
+    mem = _db(monkeypatch)
+    assert cj.run_core("US", years=1, today=오늘, force=True, limit_fills=True, variants=("core_b", "core_r1")) == 0
+    경고 = {r["strategy"]: json.loads(r["warnings_json"]) for r in mem.execute(
+        "SELECT strategy, warnings_json FROM backtest_runs").dicts()}  # fmt: skip
+    assert cj.WARN_US_LIMIT_UNVERIFIED in 경고["core_b"] and cj.WARN_US_UNVERIFIED not in 경고["core_b"]
+    assert {cj.WARN_US_UNVERIFIED, cj.WARN_R_OLD_SLOT} <= set(경고["core_r1"])
+    assert cj.WARN_US_LIMIT_UNVERIFIED not in 경고["core_r1"]
+    합친 = " ".join(w for ws in 경고.values() for w in ws)
+    assert "일치 시험이 된 변형은" not in 합친 and "모든 변형" not in 합친
+
+
+def test_R_변형_목록은_무작위_대조_계좌와_같다() -> None:
+    assert {"core_r1", "core_r2"} == cj.R_VARIANTS  # cs.VARIANTS 의 selection == "random" 에서(25.2069)
