@@ -59,6 +59,11 @@ def test_T_는_단기_신호를_시가에_사고_같은_장_종가에_파는_짝
     assert [r[:7] for r in 주문] == [(1, "buy", "market", "2026-10-15", "open", 1, "2부 배분"),
                                      (1, "sell", "market", "2026-10-15", "close", 0, "단타종가")]  # fmt: skip
     assert json.loads(주문[1][7])["rule"] == "day_v1"
+    # 웹 거래내역 근거표 한 줄 — 규칙으로 파는 주문이라 참고 행(25.2014)
+    짝근거 = json.loads(주문[1][7])["flags"][0]
+    assert 짝근거["reason_code"] == "단타종가" and [c["label"] for c in 짝근거["criteria"]] == ["짝 매수"]
+    assert 짝근거["criteria"][0]["display"].startswith("회차 1 · ") and 짝근거["criteria"][0]["passed"] is None
+    assert 짝근거["criteria"][0]["as_of"] == "2026-10-15"
     # 수량이 같다 — 산 만큼 판다
     assert len({q for (q,) in c.q("SELECT quantity FROM paper_orders WHERE account_id = 'T'")}) == 1
 

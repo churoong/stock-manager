@@ -2629,7 +2629,15 @@ def run_step(
                     if 규칙 == pp.DAY_RULE:
                         # 당일 단타 짝 매도 — 같은 장 **종가** 판정 시장가(`fill_basis='close'`, 16.3.2). (계좌·시장·
                         # 판정일·종목)으로 매수와 이어진다. 판정은 같은 장 매수 뒤(`pp.side_rank`, 25.1881)
-                        짝 = {"pair": {"side": "buy", "tranche": o["tranche"]}, "rule": "day_v1", "costs": 비용표}
+                        # 웹 거래내역 근거표 한 줄 — 판정이 아니라 규칙으로 파는 주문이라 "참고"(25.2014: 예전엔
+                        # flags 가 없어 짝 매도 체결에 근거가 하나도 안 보였다)
+                        짝글 = f"회차 {o['tranche']} · {_주수(o['quantity'])}주 (같은 장 시가)"
+                        짝행 = {**sf._criterion("짝 매수", 짝글, "당일 단타 — 하루 끝 보유 0주", "가상모의투자 주문",
+                                              다음장), "passed": None}  # fmt: skip
+                        짝 = {"pair": {"side": "buy", "tranche": o["tranche"]}, "rule": "day_v1", "costs": 비용표,
+                              "flags": [{"reason_code": pp.DAY_CLOSE_CODE, "level": "red",
+                                         "rationale": "당일 단타 — 같은 장 종가에 판다 (paper.md 16.3.2)",
+                                         "criteria": [짝행]}]}  # fmt: skip
                         문장.append((INSERT_ORDER_SQL, [
                             aid, market, o["stock_id"], "sell", "market", None, o["quantity"], o["currency"],
                             trade_date, 다음장, "close", 0, pp.DAY_CLOSE_CODE, o["horizon"], o["score"],
