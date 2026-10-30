@@ -142,3 +142,21 @@ def test_미국_지정가_판은_모든_핵심_변형에_따로_단서(monkeypat
     (r,) = mem.execute("SELECT warnings_json FROM backtest_runs").dicts()
     경고 = json.loads(r["warnings_json"])
     assert cj.WARN_US_LIMIT_UNVERIFIED in 경고 and cj.WARN_US_UNVERIFIED not in 경고, 경고
+
+
+def test_미국_지정가_판_단서는_회차_변형에만(monkeypatch: pytest.MonkeyPatch) -> None:
+    """지정가는 회차 진입 변형에만 켜진다 — 탐색+S·T+지정가 미국 실행에서 S·T·시가 일괄 C 행엔 지정가 단서가 없고 회차
+    D·E·A 행엔 있다(25.2068, 25.2067 교차검증 [권고]: S·T 를 빼는 조건을 묶는 시험이 없었다)"""
+    mem = _db(monkeypatch)
+    assert cj.run_core("US", years=1, today=오늘, force=True, explore=True, st=True, limit_fills=True) == 0
+    경고 = {r["strategy"]: json.loads(r["warnings_json"]) for r in mem.execute(
+        "SELECT strategy, warnings_json FROM backtest_runs").dicts()}  # fmt: skip
+    지정 = {v for v, w in 경고.items() if cj.WARN_US_LIMIT_UNVERIFIED in w}
+    assert 지정 == {"core_d", "core_e", "core_a"}, 지정
+
+
+def test_R_줄엔_시장과_상관없이_옛_자리_단서(실행: tuple[MemClient, int, dict]) -> None:
+    """25.1929 옛 자리 잇기는 자료에 따라 국내에서도 갈린다 — R1·R2 줄에만 `WARN_R_OLD_SLOT`(25.2068)"""
+    mem, _rc, _엿본 = 실행
+    for r in mem.execute("SELECT strategy, warnings_json FROM backtest_runs").dicts():
+        assert (cj.WARN_R_OLD_SLOT in json.loads(r["warnings_json"])) == (r["strategy"] in cj.R_VARIANTS), r["strategy"]

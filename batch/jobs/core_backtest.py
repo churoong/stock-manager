@@ -77,13 +77,17 @@ WARN_ST = ("S·T 계좌형 리플레이(st_s·st_t) — 운영 S·T 규칙을 �
 ST_MIN_OPEN_COVERAGE = 0.9
 #: 미국 실행(25.2063, 25.2058~2060 교차검증 [권고]) — 운영과 일치 시험이 된 것은 B·G(25.2059)·S·T(25.2061)·
 #: H·D·E(25.2064)·A·C(25.2065)다. 나머지(무작위 대조 R1·R2 — 운영 `held_substitutes` 가 옛 보유 자리를 잇는 25.1929 의
-#: 알려진 차이가 미국 자료에선 실제 뽑기를 바꾼다, 25.2067)의 미국 결과는 걸러내기에도 그
-#: 단서를 단다. 워크플로(`backtest.yml`)는 일치 시험이 다 될 때까지 국내만 넘긴다
+#: 알려진 차이가 옛 자리 신호가 나오는 자료에선 뽑기를 바꾼다 — 미국 합성 자료가 그렇다, 25.2067)의 미국 결과는
+#: 걸러내기에도 그 단서를 단다. 워크플로(`backtest.yml`)는 일치 시험이 다 될 때까지 국내만 넘긴다
 US_PARITY_VERIFIED: frozenset[str] = frozenset(
     {"core_b", "core_g", "core_h", "core_d", "core_e", "core_a", "core_c", "st_s", "st_t"})  # fmt: skip
-WARN_US_UNVERIFIED = ("미국 리플레이 — 운영과 일치 시험이 된 변형은 B·G·H·D·E·A·C·S·T(25.2059~2065). 무작위 대조 "
-                      "R1·R2 의 미국 결과는 운영 미국 판과 갈린다(25.1929 옛 자리 잇기, 25.2067) — "
-                      "걸러내기에도 참고로만")
+WARN_US_UNVERIFIED = ("미국 리플레이 — 운영과 일치 시험이 된 변형은 B·G·H·D·E·A·C·S·T(25.2059~2065). 이 줄(무작위 "
+                      "대조 R1·R2)의 미국 결과는 운영 미국 판과 갈린다(25.2067) — 걸러내기에도 참고로만")
+#: 무작위 대조 R 줄(시장 무관, 25.2068) — 운영 `held_substitutes` 가 옛 보유 자리를 잇는 차이(25.1929, R 판 올림 때
+#: 고침)
+R_VARIANTS: frozenset[str] = frozenset({"core_r1", "core_r2"})
+WARN_R_OLD_SLOT = ("무작위 대조 — 운영 R 은 든 대체 종목의 옛 보유 자리를 함께 잇는다(25.1929). 옛 자리 신호가 "
+                   "다시 나오는 날엔 리플레이와 다른 종목을 고른다(자료에 따라 다름 — 25.2067)")
 #: 미국 분할 지정가 체결 판(`--limit-fills`, 25.2067 — 25.2066 교차검증 [권고]) — 미국 일치 시험은 이 판을 다루지 않아
 #: 위 목록과 상관없이 모든 핵심 변형이 미검증이다. 위 문구("B·G·… 는 됨")를 붙이면 합친 경고 띠에서 거꾸로 읽혔다
 WARN_US_LIMIT_UNVERIFIED = "미국 분할 지정가 체결 판 — 운영과 일치 시험 없음, 모든 변형 결과를 참고로만(25.2067)"
@@ -403,13 +407,18 @@ def run_core(
                      "cost_path": bt.cost_paths(result)}  # fmt: skip
             # 미국에서 일치 시험이 없는 변형 줄에만 단서(25.2063)
             # 분할 지정가 체결 판(`limit_fills`)은 미국 일치 시험이 다루지 않는다 — 따로 문구(25.2066·25.2067).
-            # S·T 는 지정가 판을 쓰지 않아 목록대로 본다
-            if country == "US" and limit_fills and variant not in ST_VARIANTS:
-                행경고 = [*warnings, WARN_US_LIMIT_UNVERIFIED]
+            # 지정가는 회차 진입 변형에만 켜진다(`CoreStrategy.limit_fills`) — S·T·시가 일괄(C·R1·R2)은 그 판에서도
+            # 결과가 같아 목록대로 본다(25.2068)
+            회차 = variant not in ST_VARIANTS and cs.variant_spec(variant).entry == "tranche"
+            행경고 = list(warnings)
+            if country == "US" and limit_fills and 회차:
+                행경고.append(WARN_US_LIMIT_UNVERIFIED)
             elif country == "US" and variant not in US_PARITY_VERIFIED:
-                행경고 = [*warnings, WARN_US_UNVERIFIED]
-            else:
-                행경고 = warnings
+                행경고.append(WARN_US_UNVERIFIED)
+            # 무작위 대조 R 은 시장과 상관없이 — 운영 `held_substitutes` 가 옛 보유 자리를 잇는 25.1929 의 차이가
+            # 옛 자리 신호가 다시 나오는 자료에서 뽑기를 바꾼다(국내 합성 자료에선 우연히 안 나왔을 뿐, 25.2068)
+            if variant in R_VARIANTS:
+                행경고.append(WARN_R_OLD_SLOT)
             jb.store_run(client, market, variant, result, summary, 종목수[variant], group_id, 행경고,
                          now, 운.get(variant), rebalance=REBALANCE, extra=extra, kept=실은_행)  # fmt: skip
             mt = summary.metrics
