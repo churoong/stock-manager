@@ -95,9 +95,11 @@ def main() -> int:
     conn = rep.open_replica(args.path)
     try:
         allow = False
-        if not args.no_build and conn.execute("SELECT 1 FROM prices LIMIT 1").fetchone() is None and 종류 == "turso":
+        비었나 = conn.execute("SELECT 1 FROM prices LIMIT 1").fetchone() is None
+        # 예전 사본(시가·고가·저가 열 없음, 25.2027)도 새로 만들기와 같은 비용이라 같은 진도 문을 거친다
+        if not args.no_build and (비었나 or not rep.has_ohl(conn)) and 종류 == "turso":
             allow, 글 = _gate_allows_build(remote)
-            print(f"[시세 사본] 처음 만들기 — {글}")
+            print(f"[시세 사본] {'처음 만들기' if 비었나 else '시가 열 더해 새로 만들기'} — {글}")
         읽기_전 = remote.reads.total
         report = rep.sync(remote, conn, backend=종류, allow_build=allow)
         report["rows_read"] = remote.reads.total - 읽기_전

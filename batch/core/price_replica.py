@@ -41,7 +41,11 @@ REPLICA_ENV = "PRICE_REPLICA_PATH"
 
 #: 사본에 두는 시세 열 — 과거 시세를 읽는 작업들이 쓰는 것만(지표·밴드·성과·백테스트·스트레스). 없는 열을 찾는 질의는
 #: 로컬에서 실패하고 Turso 로 간다
-PRICE_COLS = ("id", "stock_id", "date", "close", "adj_close", "volume", "value")
+#: 시가·고가·저가(`OHL_COLS`)는 25.2027 에 더했다 — 그림자 장부(`signal_outcomes.load_bars`)와 깔때기 ⑥(리플레이 시가
+#: 체결, docs/funnel.md 4장)이 읽는다. 예전 사본(열 일곱)은 처음부터 만들어도 되는 실행(`allow_build`)에서 지우고 새로
+#: 만든다. 그 전까지는 예전 열만 맞추고, 시가를 찾는 질의는 열 없음 오류로 Turso 로 간다(지금과 같다)
+OHL_COLS = ("open", "high", "low")
+PRICE_COLS = ("id", "stock_id", "date", "close", "adj_close", "volume", "value", *OHL_COLS)
 
 #: 한 번에 받을 행 수. Turso 응답 크기를 넘지 않게 [확인필요: 응답 한도 — 2만 행 × 7열은 수 MB]
 PAGE_ROWS = 20_000
@@ -87,13 +91,17 @@ def is_write(sql: str) -> bool:
 def open_replica(path: str | Path) -> sqlite3.Connection:
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path))
+    open_replica_tables(conn)
+    return conn
+
+
+def open_replica_tables(conn: sqlite3.Connection) -> None:
     conn.executescript(
         "CREATE TABLE IF NOT EXISTS prices (id INTEGER, stock_id INTEGER NOT NULL, date TEXT NOT NULL, close REAL,"
-        " adj_close REAL, volume INTEGER, value INTEGER, UNIQUE (stock_id, date));"
+        " adj_close REAL, volume INTEGER, value INTEGER, open REAL, high REAL, low REAL, UNIQUE (stock_id, date));"
         "CREATE INDEX IF NOT EXISTS idx_prices_id ON prices (id);"
         "CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);"
     )
-    return conn
 
 
 def _meta(conn: sqlite3.Connection) -> dict[str, str]:
@@ -104,21 +112,45 @@ def _set_meta(conn: sqlite3.Connection, **values: Any) -> None:
     conn.executemany("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", [(k, str(v)) for k, v in values.items()])
 
 
+#: 예전 사본(시가 열 없음)을 맞출 때 쓰는 열 — 25.2027 전 `PRICE_COLS`
+OLD_COLS = PRICE_COLS[: -len(OHL_COLS)]
+
+
+#: Turso 에서 받는 질의 — 열은 `PRICE_COLS` 와 같은 순서(`tests/test_price_replica.py` 가 묶는다).
+#: 질의가 고정 문자열이라 스키마 대조(`test_sql_schema`)가 본다 — 새 사본·예전 사본 두 벌
 _UPSERT = (
+    "INSERT INTO prices (id, stock_id, date, close, adj_close, volume, value, open, high, low)"
+    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (stock_id, date) DO UPDATE SET id = excluded.id,"
+    " close = excluded.close, adj_close = excluded.adj_close, volume = excluded.volume, value = excluded.value,"
+    " open = excluded.open, high = excluded.high, low = excluded.low"
+)
+_PULL_NEW = (
+    "SELECT id, stock_id, date, close, adj_close, volume, value, open, high, low FROM prices"
+    " WHERE id > ? ORDER BY id LIMIT ?"
+)
+#: 종목 목록은 JSON 하나로 넘긴다. `IN (SELECT value FROM json_each(?))` 도 (stock_id, date) 색인을 탄다
+_PULL_RANGE = (
+    "SELECT id, stock_id, date, close, adj_close, volume, value, open, high, low FROM prices"
+    " WHERE stock_id IN (SELECT value FROM json_each(?)) AND date >= ?"
+)
+_UPSERT_OLD = (
     "INSERT INTO prices (id, stock_id, date, close, adj_close, volume, value) VALUES (?, ?, ?, ?, ?, ?, ?)"
     " ON CONFLICT (stock_id, date) DO UPDATE SET id = excluded.id, close = excluded.close,"
     " adj_close = excluded.adj_close, volume = excluded.volume, value = excluded.value"
 )
-#: Turso 에서 받는 질의 — 열은 `PRICE_COLS` 와 같은 순서(`tests/test_price_replica.py` 가 묶는다)
-_PULL_NEW = (
+_PULL_NEW_OLD = (
     "SELECT id, stock_id, date, close, adj_close, volume, value FROM prices WHERE id > ? ORDER BY id LIMIT ?"
 )
-#: 종목 목록은 JSON 하나로 넘긴다 — 질의가 고정 문자열이라 스키마 대조(`test_sql_schema`)가 본다.
-#: `IN (SELECT value FROM json_each(?))` 도 (stock_id, date) 색인을 탄다
-_PULL_RANGE = (
+_PULL_RANGE_OLD = (
     "SELECT id, stock_id, date, close, adj_close, volume, value FROM prices"
     " WHERE stock_id IN (SELECT value FROM json_each(?)) AND date >= ?"
 )
+
+
+def has_ohl(conn: sqlite3.Connection) -> bool:
+    """사본 시세 표에 시가·고가·저가 열이 있는가(25.2027 뒤에 만든 사본)."""
+    열 = {r[1] for r in conn.execute("PRAGMA table_info(prices)").fetchall()}
+    return set(OHL_COLS) <= 열
 #: 정수로 바꿔 더한다 — 실수 합은 더하는 순서에 따라 끝자리가 달라 같은 자료도 어긋나 보인다
 _FINGERPRINT = (
     "SELECT COUNT(*), SUM(CAST(ROUND(close * 10000) AS INTEGER)),"
@@ -127,7 +159,7 @@ _FINGERPRINT = (
 
 
 def _upsert(conn: sqlite3.Connection, rows: list[tuple]) -> None:
-    conn.executemany(_UPSERT, rows)
+    conn.executemany(_UPSERT if has_ohl(conn) else _UPSERT_OLD, rows)
 
 
 def _copy_stocks(remote, conn: sqlite3.Connection) -> int:
@@ -143,7 +175,7 @@ def _copy_stocks(remote, conn: sqlite3.Connection) -> int:
 def _pull_new(remote, conn: sqlite3.Connection, after_id: int) -> int:
     n = 0
     while True:
-        rs = remote.execute(_PULL_NEW, [after_id, PAGE_ROWS])
+        rs = remote.execute(_PULL_NEW if has_ohl(conn) else _PULL_NEW_OLD, [after_id, PAGE_ROWS])
         if not rs.rows:
             return n
         _upsert(conn, rs.rows)
@@ -157,7 +189,7 @@ def _pull_range(remote, conn: sqlite3.Connection, stock_ids: list[int], since: s
     n = 0
     for start in range(0, len(stock_ids), STOCK_CHUNK):
         ids = stock_ids[start : start + STOCK_CHUNK]
-        rs = remote.execute(_PULL_RANGE, [json.dumps(ids), since])
+        rs = remote.execute(_PULL_RANGE if has_ohl(conn) else _PULL_RANGE_OLD, [json.dumps(ids), since])
         _upsert(conn, rs.rows)
         n += len(rs.rows)
     return n
@@ -233,6 +265,17 @@ def sync(remote, conn: sqlite3.Connection, *, backend: str, allow_build: bool, n
     if not 비었나 and meta.get("backend") != "turso":
         conn.execute("DELETE FROM prices")
         비었나 = True
+    if not has_ohl(conn):
+        if 비었나 or allow_build:
+            # 예전 사본(시가 열 없음, 25.2027) — 처음부터 만들어도 되는 실행이면 지우고 새 열로 만든다. 열 더하기
+            # (ALTER) 는 지난 행의 시가를 비워 둬 '사본에서 시가 NULL' 이 Turso 와 다른 값이 된다 — 그래서 다시 받는다
+            conn.execute("DROP TABLE prices")
+            conn.commit()
+            open_replica_tables(conn)
+            report["ohl_rebuild"] = not 비었나
+            비었나 = True
+        else:
+            report["ohl_pending"] = True  # 예전 열만 맞춘다 — 시가 질의는 Turso 로(지금과 같다)
     if 비었나 and not allow_build:
         _set_meta(conn, usable=0)
         conn.commit()

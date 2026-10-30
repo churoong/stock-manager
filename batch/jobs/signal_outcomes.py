@@ -105,9 +105,10 @@ def load_closes(
     return out
 
 
-#: 그림자 장부(docs/paper.md 16장, 25.1862)의 하루 시세. 시가·고가·저가는 시세 사본(`price_replica.PRICE_COLS`)에 없다 —
-#: 사본으로 보내진 질의가 열 없음 오류로 Turso 로 물러난다(`ReplicaClient` 의 폴백). 단기 신호 종목·가장 이른 신호
-#: 날부터만이라 위 종가 읽기보다 작다. 0 이하 수정주가 거르개는 `load_closes` 와 같다(25.1863)
+#: 그림자 장부(docs/paper.md 16장, 25.1862)의 하루 시세. 시가·고가·저가는 25.2027 부터 시세 사본
+#: (`price_replica.OHL_COLS`)에 있다 — 예전 사본(열 일곱)이면 열 없음 오류로 Turso 로 물러난다(`ReplicaClient` 의 폴백).
+#: 단기 신호 종목·가장 이른 신호 날부터만이라 위 종가 읽기보다 작다.
+#: 0 이하 수정주가 거르개는 `load_closes` 와 같다(25.1863)
 BARS_SQL = (
     "SELECT p.stock_id, p.date, p.open, p.high, p.low, p.close, p.adj_close, s.country"
     " FROM prices p JOIN stocks s ON s.id = p.stock_id WHERE p.stock_id IN (SELECT value FROM json_each(?))"
