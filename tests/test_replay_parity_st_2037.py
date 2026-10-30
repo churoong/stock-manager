@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from datetime import date, datetime
 
 import pytest
@@ -47,15 +48,25 @@ def _자료() -> dict[int, list[tuple[float, float, int]]]:
 #: 날들[9]·[10] 의 2 는 판 뒤 쉼 경계(S 가 2 를 날들[5] 에 판다 — cutoff 날들[9] 는 쉼 안, 날들[10] 은 밖, 25.2039),
 #: 날들[5] 의 3 은 T 가 거래량 0 정지 날(날들[6]) 에 사려다 만료되는 길
 신호: dict[str, list[int]] = {날들[0]: [1, 2], 날들[1]: [3], 날들[2]: [3], 날들[4]: [1, 3], 날들[5]: [3],
-                              날들[8]: [2, 3], 날들[9]: [2], 날들[10]: [1, 2, 3]}  # fmt: skip
+                              날들[8]: [2, 3], 날들[9]: [2], 날들[10]: [1, 2, 3], 날들[12]: [2]}  # fmt: skip
 
 
 def _종가(sid: int, d: str) -> float:
     return _자료()[sid][날들.index(d)][1]
 
 
+#: 묵은 신호 행 — (판단일, 종목) → 기준 종가 날. 관문의 묵음 막힘(`rg.STALE_PRICE_SESSIONS`)을 운영과 같은 길로
+#: 지나게 한다(25.2040, 25.2039 교차검증 [권고]: 관문 연결은 그때까지 아무 시험도 지나지 않았다)
+묵은: dict[tuple[str, int], str] = {(날들[12], 2): 날들[3]}
+
+
 def _행들(cutoff: str, weight: float = 10.0) -> list[report_picks.SignalRow]:
-    return [_행(sid, cutoff, _종가(sid, cutoff), weight=weight, sector="전자") for sid in 신호.get(cutoff, [])]
+    out = []
+    for sid in 신호.get(cutoff, []):
+        기준 = 묵은.get((cutoff, sid), cutoff)
+        out.append(dataclasses.replace(_행(sid, cutoff, _종가(sid, 기준), weight=weight, sector="전자"),
+                                       close_date=기준))  # fmt: skip
+    return out
 
 
 @pytest.fixture(autouse=True)
@@ -63,6 +74,9 @@ def _고정(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(report_picks, "with_criteria", lambda rows: rows)
     monkeypatch.setattr(report_picks, "select_top", lambda rows, _n=5: rows)
     monkeypatch.setattr(job, "frozen_ids", lambda *_a, **_k: set())
+
+
+막힘_기록: dict[str, dict[str, int]] = {}
 
 
 def _운영(account: str, monkeypatch: pytest.MonkeyPatch, 설정: dict = 설정) -> tuple[list[pp.Fill], dict[str, float]]:
@@ -98,6 +112,11 @@ def _운영(account: str, monkeypatch: pytest.MonkeyPatch, 설정: dict = 설정
                      series_unknown={}, allocate=True, now=datetime.fromisoformat(f"{다음}T00:00:00+00:00"))  # fmt: skip
         체결 = [f for f in job._fills(c)[0] if f.account_id == account]
         현금[d] = pp.cash([pp.CashFlow(1, 날들[0], 입금, "deposit")], 체결)
+    # 운영 관문 막힘 — 결정 원장 blocked 를 체결 장(판단일 다음 장)으로(리플레이 기록과 같은 날 축)
+    막힘_기록[account] = {}
+    for 판단일, n in c.q("SELECT decided_on, COUNT(*) FROM paper_decisions WHERE account_id = ? AND kind = 'blocked'"
+                         " GROUP BY decided_on", [account]):  # fmt: skip
+        막힘_기록[account][날들[날들.index(판단일) + 1]] = n
     return [f for f in job._fills(c)[0] if f.account_id == account], 현금
 
 
@@ -151,6 +170,18 @@ def test_자료가_견줄_거리를_지난다() -> None:
     assert any(k.startswith("상한가 시가") for k in t사유) and "단타 짝 매수 안 참" in t사유
     assert any(k.startswith("정지") for k in t사유), t사유
     assert pp.DAY_CLOSE_CODE in {k for g in t.log for k in g.get("sold", {})}
-    빠 = [g for a in ("S", "T") for g in _리플레이(a, 빠듯).log]
-    빠사유 = {k for g in 빠 for k in g["expired"]}
-    assert "현금 부족 (다른 미체결 매수 예약 포함)" in 빠사유 or sum(g.get("blocked", 0) for g in 빠) >= 1, 빠사유
+    # 관문 묵음 막힘(묵은 신호 행) — T 가 실제로 지난다(25.2040). 운영도 같은 날 결정 원장에 blocked 를 남긴다
+    # (`test_관문_막힘이_운영과_같다`)
+    assert sum(g.get("blocked", 0) for g in t.log) >= 1
+    # 같은 장 예약 현금 부족은 빠듯한 판 T 가 지난다 — 이 글은 예약이 0 이어도 같은 고정 문구라 **길이 있음** 만 본다.
+    # 예약 연결 자체는 `test_체결_하나하나가_운영과_같다[T-빠듯]` 이 묶는다(예약을 0 으로 바꾸면 체결이 갈린다)
+    빠 = _리플레이("T", 빠듯).log
+    assert "현금 부족 (다른 미체결 매수 예약 포함)" in {k for g in 빠 for k in g["expired"]}
+
+
+def test_관문_막힘이_운영과_같다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """리플레이 T 의 관문 막힘(날마다 수)이 운영 결정 원장의 blocked 와 같다(25.2040)."""
+    _운영("T", monkeypatch)
+    운영막힘 = 막힘_기록["T"]
+    rp = {g["day"]: g.get("blocked", 0) for g in _리플레이("T").log if g.get("blocked")}
+    assert 운영막힘 and rp == 운영막힘

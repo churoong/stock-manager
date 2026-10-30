@@ -136,3 +136,19 @@ def test_정지_청산은_그날까지의_마지막_종가다() -> None:
                              costs_at=lambda _d: 비용0, stock_cache=캐시, settings=설정, deposit=10_000_000.0,
                              turnover=대금)  # fmt: skip
     assert [(f.fill_date, f.price) for f in r.fills if f.side == "sell"] == [(청산날, 920.0)]
+
+
+def test_판단일_행이_빠진_정지_뒤_첫날_하한가_시가면_매도를_미룬다() -> None:
+    """등락은 그날 앞 **행이 있는 마지막 날** 종가로 잰다(25.2039·25.2040) — 판단일(날[3]) 행이 빠진 정지 뒤 첫날(날[4])
+    시가가 그 앞 행(날[2] 940) 대비 −30% 하한가면 잠겨 미룬다. 예전엔 판단일 행이 없어 등락이 None 이라 그 값에 팔았다."""
+    종가 = dict(zip(날, [1000.0, 1000.0, 940.0, 0.0, 658.0] + [700.0] * 9, strict=True))
+    시가 = dict(zip(날, [1000.0, 1000.0, 950.0, 0.0, 658.0] + [700.0] * 9, strict=True))
+    del 종가[날[3]], 시가[날[3]]  # 날[3] 행 없음(정지) — 날[2] 손절 → 날[3] 매도 미룸 → 날[4] 하한가 잠김 → 날[5] 팜
+
+    def rows_at(view, d):  # noqa: ANN001
+        return [_행(1, view.cutoff, 종가[view.cutoff])] if view.cutoff == 날[0] else []
+
+    r = sdr.simulate_account("S", rows_at=rows_at, prices={1: 종가}, opens={1: 시가}, dates=날, costs_at=lambda _d: 비용0,
+                             stock_cache=캐시, settings=설정, deposit=10_000_000.0)  # fmt: skip
+    assert r.log[2]["deferred"] == 1 and r.log[3]["deferred"] == 1  # 날[3] 정지, 날[4] 하한가
+    assert [(f.fill_date, f.price) for f in r.fills if f.side == "sell"] == [(날[5], 700.0)]

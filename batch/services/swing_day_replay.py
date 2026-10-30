@@ -41,11 +41,12 @@ class STResult:
     account: str
     curve: list[tuple[str, float]]  # (날, 자본 ÷ 입금)
     fills: list[pp.Fill]
-    #: 날마다 {buys, sells, expired: {까닭: 수}, deferred} — 일치 시험·보고용
+    #: 날마다 {day, buys, sells, expired: {까닭: 수}, deferred, blocked(관문 막힘 수), sold: {매도 사유 코드: 수}}
+    #: — 일치 시험·보고용
     log: list[dict[str, Any]] = field(default_factory=list)
 
 
-def _bar(sid: int, d: str, prev: str | None, prices: dict[int, dict[str, float]], opens: dict[int, dict[str, float]],
+def _bar(sid: int, d: str, prices: dict[int, dict[str, float]], opens: dict[int, dict[str, float]],
          turnover: dict[int, dict[str, float]] | None) -> pp.Bar | None:  # fmt: skip
     종가 = prices.get(sid, {}).get(d)
     if 종가 is None:
@@ -183,7 +184,7 @@ def simulate_account(
             if 짝 is not None:  # "expire" — 리플레이는 시세를 기다리지 않아 "wait" 이 없다
                 기록["expired"]["단타 짝 매수 안 참"] = 기록["expired"].get("단타 짝 매수 안 참", 0) + 1
                 continue
-            bar = _bar(o.stock_id, d, cutoff, prices, opens, turnover)
+            bar = _bar(o.stock_id, d, prices, opens, turnover)
 
             def _마지막(sid: int = o.stock_id, 오늘: str = d) -> float | None:
                 # 운영 `LAST_CLOSE_SQL`(date <= 그날)과 같이 그날 행까지 — 하한가에 잠긴 날은 그날 종가로(25.2039)
