@@ -413,7 +413,7 @@ def test_배치가_실패했거나_건너뛰어도_11시_전엔_기다림(c: Cli
 
 
 def _정리줄(c: Client, sid: int = 1, code: str = "005930") -> None:
-    """같은 날 아침 베끼기가 낸 정리 매도(증권사 주문 id 없음) — 유일 색인 `idx_paper_broker_cleanup` 을 차지한다"""
+    """같은 날 아침 베끼기가 낸 정리 매도(증권사 주문 id 없음) — 0093 전엔 유일 색인 `idx_paper_broker_cleanup` 을 차지했다"""
     c.conn.execute(
         "INSERT INTO paper_broker_orders (broker, paper_order_id, account_id, market, stock_id, code, side, order_type,"
         " quantity, trade_date, reason, status, source, created_at) VALUES ('kis_vts', NULL, 'H', 'KR', ?, ?, 'sell',"
@@ -421,13 +421,38 @@ def _정리줄(c: Client, sid: int = 1, code: str = "005930") -> None:
         [sid, code, bm.REASON_CLEANUP])  # fmt: skip
 
 
+def test_아침_정리_매도가_있어도_장중_손절을_낸다(c: Client) -> None:
+    """25.2010 — 0093 이 색인을 정리·장중 갈래로 나눴다. 2026-10-30 실제로 아침 정리 매도가 있는 종목이 장중 손절선 아래로
+    내려갔는데 줄을 못 적어 KIS 에 손절을 내지 못했다. 이제 정리 줄과 함께 장중 줄을 적고 보낸다"""
+    _정리줄(c)
+    s = _Sess([_h("005930", 9_250.0)])
+    r = ig.run(c, 월, session=s, clock=lambda: 월)
+    assert len(s.orders) == 1 and r["sent"] == {"accepted": 1} and "겹쳐" not in r.get("alert", "")
+    줄 = c.q("SELECT reason, status FROM paper_broker_orders WHERE stock_id = 1 AND trade_date = '2026-10-26'"
+             " ORDER BY id")  # fmt: skip
+    assert 줄 == [(bm.REASON_CLEANUP, "accepted"), (bm.REASON_GUARD_STOP, "accepted")]
+    # 장중 갈래는 여전히 종목·날마다 한 줄 — 같은 날 다시 닿아도 두 번 팔지 않는다
+    ig.run(c, 월, session=s, clock=lambda: 월)
+    assert len(s.orders) == 1
+    # 정리 갈래도 여전히 종목·날마다 한 줄
+    c.conn.execute("INSERT OR IGNORE INTO paper_broker_orders (broker, paper_order_id, account_id, market, stock_id, code,"
+                   " side, order_type, quantity, trade_date, reason, status, source, created_at) VALUES ('kis_vts', NULL,"
+                   " 'H', 'KR', 1, '005930', 'sell', 'market', 1, '2026-10-26', ?, 'sending', 'kis_vts', 't')",
+                   [bm.REASON_CLEANUP])  # fmt: skip
+    assert c.q("SELECT COUNT(*) FROM paper_broker_orders WHERE reason = ?", [bm.REASON_CLEANUP]) == [(1,)]
+
+
 def test_정리_줄과_겹쳐_못_내면_멈춤으로_남기고_알린다(c: Client) -> None:
-    """25.1771 교차검증 [필수] — 예전엔 `skipped_other_row` 로 세기만 하고 success 로 닫혀 그날 내내 조용히 안 나갔다"""
+    """25.1771 교차검증 [필수] — 예전엔 `skipped_other_row` 로 세기만 하고 success 로 닫혀 그날 내내 조용히 안 나갔다.
+    0093 적용 전 색인(정리·장중을 한 칸으로)으로 되돌려 그 갈래를 본다(25.2010 — 적용 전 실행에도 이 알림은 남는다)"""
+    c.conn.execute("DROP INDEX idx_paper_broker_cleanup_kind")
+    c.conn.execute("CREATE UNIQUE INDEX idx_paper_broker_cleanup ON paper_broker_orders (broker, trade_date, stock_id,"
+                   " side) WHERE paper_order_id IS NULL")  # fmt: skip
     _정리줄(c)
     s = _Sess([_h("005930", 9_250.0)])
     r = ig.run(c, 월, session=s, clock=lambda: 월)
     assert s.orders == [] and r["sent"] == {"skipped_other_row": 1}
-    assert ig.run_status(r) == "skipped" and "정리 매도 줄과 겹쳐" in r["alert"] and "종목1" in r["alert"]
+    assert ig.run_status(r) == "skipped" and "매도 줄과 겹쳐" in r["alert"] and "종목1" in r["alert"]
     assert r["marks"] == {ig.OTHER_ROW_KEY: [1]}
     ig.mark_ids(c, 월, r["marks"])
     다음 = ig.run(c, 월, session=s, clock=lambda: 월)
