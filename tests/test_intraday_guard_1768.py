@@ -1247,9 +1247,42 @@ def test_보내기_전_기록_확인이_깨지면_줄을_닫고_다음_회차가
         ig.run(c, 둘째, session=s, clock=lambda: 둘째)
     assert s.orders == []
     assert c.q("SELECT status, substr(message, 1, 12) FROM paper_broker_orders WHERE stock_id = 1") == [
-        ("rejected", ig.UNSENT_MARK)]
+        ("rejected", ig.UNSENT_ORDER_MARK)]
     셋째 = 월 + timedelta(minutes=20)
     s3 = _Sess([_h("005930", 9_000.0)])  # 여전히 손절선 아래
     r = ig.run(c, 셋째, session=s3, clock=lambda: 셋째)
     assert len(s3.orders) == 1 and r["sent"] == {"retried": 1, "accepted": 1}
     assert c.q("SELECT COUNT(*), MAX(status) FROM paper_broker_orders WHERE stock_id = 1") == [(1, "accepted")]
+
+
+def test_보내지_않음_닫기는_다른_실행의_줄을_건드리지_않는다(c: Client) -> None:
+    """25.2017 (25.2015 교차검증 [권고]) — 닫기 조건 `created_at = 이 실행 시각` 이 빠지면 다른 실행이 적고 보내는 중인
+    줄을 rejected+GUARD_UNSENT 로 닫아, 다음 회차가 같은 줄을 다시 보내 KIS 에 두 번 판다"""
+    진짜, 깸 = c.execute, {"n": 0}
+
+    def execute(sql: str, args: list[Any] | None = None) -> Any:
+        if sql == bmj.INSERT_SQL:  # 내 INSERT 직전에 다른 실행이 같은 종목 줄을 적었다(보내는 중)
+            진짜(bmj.INSERT_SQL, [bmj.BROKER, None, "H", "KR", 1, "005930", "sell", "market", None, 10, "2026-10-26",
+                                bm.REASON_GUARD_STOP, "kis_vts", "다른실행"])  # fmt: skip
+        if sql == bmj.MINE_SQL and not 깸["n"]:
+            깸["n"] += 1
+            raise RuntimeError("Turso 잠깐 끊김")
+        return 진짜(sql, args)
+
+    c.execute = execute  # type: ignore[method-assign]
+    s = _Sess([_h("005930", 9_250.0)])
+    with pytest.raises(ig.GuardRecordError):
+        ig.run(c, 월, session=s, clock=lambda: 월)
+    assert s.orders == []
+    assert c.q("SELECT status, message, created_at FROM paper_broker_orders WHERE stock_id = 1") == [
+        ("sending", None, "다른실행")]
+
+
+def test_보내지_않은_장중_줄은_KIS_거부로_세지_않는다() -> None:
+    """25.2017 (25.2015 교차검증 [참고]) — GUARD_UNSENT 로 닫고 반등해 다시 안 보낸 줄은 KIS 에 간 적이 없다. 예전엔
+    거부·장중 거부·까닭(주간 요약·데스크)에 섞였다"""
+    r = bm.compare([{"reason": bm.REASON_GUARD_STOP, "status": "rejected",
+                     "message": f"{bm.GUARD_UNSENT_ORDER_MARK} — 보내지 않음(기록 확인 실패: RuntimeError)"},
+                    {"reason": bm.REASON_GUARD_STOP, "status": "rejected", "message": "장중 현재가 9,250 · APBK0919 하한가"}])
+    assert r["rejected"] == 1 and r["guard_rejected"] == 1 and r["guard_unsent"] == 1
+    assert r["reject_reasons"] == {"APBK0919": 1}

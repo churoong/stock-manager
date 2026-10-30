@@ -641,3 +641,41 @@ def test_다른_계좌의_판정_대기_매수는_정리를_막지_않는다(c: 
     기록 = job.run(c, "KR", _at("08:40", "2026-10-19"), session=다음, sleep=lambda _x: None,
                  clock=lambda: _at("08:40", "2026-10-19"))  # fmt: skip
     assert 다음.orders == [("sell", "005930", 3, None)] and "pending_fill_buys" not in 기록
+
+
+def _장중줄(c: Client, sid: int, code: str, day: str) -> None:
+    c.conn.execute(
+        "INSERT INTO paper_broker_orders (broker, paper_order_id, account_id, market, stock_id, code, side, order_type,"
+        " quantity, trade_date, reason, status, source, created_at) VALUES ('kis_vts', NULL, 'B', 'KR', ?, ?, 'sell',"
+        " 'market', 1, ?, ?, 'accepted', 'kis_vts', '장중')",
+        [sid, code, day, bm.REASON_GUARD_STOP],
+    )
+
+
+def test_장중_매도만_한_종목도_같은_날_다시_돈_베끼기가_정리한다(c: Client) -> None:
+    """25.2016·25.2017 (교차검증 [권고]) — 실행 경로에서 `오늘_정리함` 을 쓰는지. 예전 식(내부 주문 없는 줄 전부)이면 장중
+    줄 하나 때문에 그 종목의 KIS 에만 남은 몫을 정리하지 않았다"""
+    s = _Sess()
+    job.run(c, "KR", _at("08:40"), session=s, sleep=lambda _x: None, clock=lambda: _at("08:40"))
+    c.conn.execute("UPDATE paper_orders SET status = 'expired' WHERE side = 'buy'")
+    _장중줄(c, 1, "005930", "2026-10-19")  # 같은 날 앞서 장중 감시가 판 줄
+    다음 = _Sess(holdings=[kv.Holding("005930", 3, 3, 9_800.0)],
+               executions=[kv.Execution("20261016", "N1", "005930", "buy", 3, 3, 9_800.0, 0, False),
+                           kv.Execution("20261016", "N2", "005930", "buy", 2, 0, None, 0, False)])  # fmt: skip
+    기록 = job.run(c, "KR", _at("08:40", "2026-10-19"), session=다음, sleep=lambda _x: None,
+                 clock=lambda: _at("08:40", "2026-10-19"))  # fmt: skip
+    assert 다음.orders == [("sell", "005930", 3, None)] and 기록["planned"]["cleanup"] == 1
+
+
+def test_장중_줄은_하루_주문_상한에_세지_않는다(c: Client) -> None:
+    """25.2016·25.2017 (교차검증 [권고]) — 실행 경로의 하루 상한 셈. 장중 줄 38 개가 있어도 H 주문 3 건을 다 낸다
+    (장중 줄을 세면 40 − 38 = 2 건만 냈다)"""
+    for i in range(38):
+        sid = 100 + i
+        c.conn.execute("INSERT INTO stocks (id, ticker, market, country, name_ko, sector, currency, status, source,"
+                       " fetched_at, asset_type) VALUES (?, ?, 'M', 'KR', 'x', '전자', 'KRW', 'active', 't', 't', 'stock')",
+                       [sid, f"9{i:05d}"])  # fmt: skip
+        _장중줄(c, sid, f"9{i:05d}", "2026-10-16")
+    s = _Sess(holdings=[kv.Holding("000660", 2, 2, 20_000.0)])
+    기록 = job.run(c, "KR", _at("08:40"), session=s, sleep=lambda _x: None, clock=lambda: _at("08:40"))
+    assert len(s.orders) == 3 and 기록["sent"] == {"accepted": 3}

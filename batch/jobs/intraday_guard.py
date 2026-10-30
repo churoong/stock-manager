@@ -92,11 +92,11 @@ TRANSIENT_CODES = (*kv.RATE_LIMIT_CODES, "EGW00123", "EGW00121")
 #: 보내기 **전에** 기록 확인이 깨져 이 실행이 닫은 줄의 표지 — 주문은 안 나갔다. 다음 회차가 순간 거부처럼 같은 줄로
 #: 다시 보낸다(25.2015 결함 루프: 예전엔 줄이 `sending` 으로 남아 그날 남은 회차가 "이미 팜" 으로 보고 손절을 다시
 #: 내지 않았고, 다음 아침 `unknown` 이 되어 guard_held 가 H 추가 매수 베끼기까지 막았다)
-UNSENT_MARK = "GUARD_UNSENT"
+UNSENT_ORDER_MARK = bm.GUARD_UNSENT_ORDER_MARK  # 정의처는 services — 집계가 KIS 거부와 가른다(25.2017)
 #: 그 닫기 — 이 실행이 적은(또는 되찾은) 줄만(`created_at` = 이 실행 시각 — INSERT 도 RETRY 도 그 도장을 찍는다). 이
 #: 닫기는 그 종목을 보내기 **전** 예외에서만 부른다. `sent_at` 은 조건에 넣지 않는다 — 다시 보내기 줄은 첫 시도의
 #: 보낸 시각이 남아 있어 그 조건이면 닫히지 않았다(25.2015 시험이 잡음)
-UNSENT_SQL = (
+UNSENT_ORDER_SQL = (
     "UPDATE paper_broker_orders SET status = 'rejected', message = ? WHERE broker = ? AND trade_date = ?"
     " AND stock_id = ? AND side = 'sell' AND reason IN (?, ?) AND status = 'sending' AND created_at = ?"
 )
@@ -369,7 +369,7 @@ def run(
                                                bm.REASON_GUARD_TAKE]).dicts()  # fmt: skip
     다시 = {int(r["stock_id"]): int(r["id"]) for r in 오늘줄
             if r["status"] == "rejected"
-            and any(c in str(r["message"] or "") for c in (*TRANSIENT_CODES, UNSENT_MARK))}  # fmt: skip
+            and any(c in str(r["message"] or "") for c in (*TRANSIENT_CODES, UNSENT_ORDER_MARK))}  # fmt: skip
     이미 = {int(r["stock_id"]) for r in 오늘줄} - set(다시)
     닿음 = [x for x in hits(보유, 선들) if x.stock_id not in 이미]
     의심 = [x for x in 닿음 if x.kind == "suspect"]
@@ -428,9 +428,9 @@ def run(
             # 보내기 전이다 — 이 실행이 적은 줄이 남았으면 "보내지 않음" 으로 닫아 다음 회차가 다시 보내게 한다
             # (25.2015). 닫기마저 깨지면(DB 가 계속 끊김) 예전처럼 `sending` 으로 남는다 — 실행 실패 알림이 간다
             with contextlib.suppress(Exception):
-                client.execute(UNSENT_SQL, [f"{UNSENT_MARK} — 보내지 않음(기록 확인 실패: {type(exc).__name__})",
-                                            bmj.BROKER, 오늘.isoformat(), x.stock_id, bm.REASON_GUARD_STOP,
-                                            bm.REASON_GUARD_TAKE, 지금])  # fmt: skip
+                닫는글 = f"{UNSENT_ORDER_MARK} — 보내지 않음(기록 확인 실패: {type(exc).__name__})"
+                client.execute(UNSENT_ORDER_SQL, [닫는글, bmj.BROKER, 오늘.isoformat(), x.stock_id,
+                                                  bm.REASON_GUARD_STOP, bm.REASON_GUARD_TAKE, 지금])  # fmt: skip
             break
         보낸시각 = clock().isoformat()
         try:

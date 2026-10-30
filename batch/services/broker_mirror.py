@@ -28,6 +28,9 @@ REASON_CLEANUP = "정리"
 #: 짝(가상 판정)이 없어 따로 센다
 REASON_GUARD_STOP = "장중손절"
 REASON_GUARD_TAKE = "장중익절"
+#: 장중 감시가 보내기 **전에** 기록 확인이 깨져 닫은 줄의 표지(message 머리) — 주문은 KIS 에 가지 않았다(25.2015).
+#: 다음 회차가 같은 줄로 다시 보낸다. 집계는 KIS 거부와 가른다(25.2017)
+GUARD_UNSENT_ORDER_MARK = "GUARD_UNSENT"
 GUARD_REASONS = frozenset({REASON_GUARD_STOP, REASON_GUARD_TAKE})
 GUARD_HELD_SKIP = "장중 매도 뒤 지주사가 같은 보유를 듦 — 매수 베끼지 않음"
 STOP_FLOOR_SKIP = "장중 손절선 이하 회차 — 베끼지 않음"
@@ -432,7 +435,11 @@ def compare(rows: list[dict[str, Any]]) -> dict[str, Any]:
             continue
         if r.get("reason") in GUARD_REASONS:
             칸["guard"] += 1
-            if r.get("status") == "rejected":
+            if r.get("status") == "rejected" and str(r.get("message") or "").startswith(GUARD_UNSENT_ORDER_MARK):
+                # 우리 DB 기록이 깨져 보내지 않고 닫은 줄 — KIS 거부가 아니다. 거부·까닭에 섞지 않고 따로 센다(25.2017,
+                # 25.2015 교차검증 [참고]: 주간 요약에 "거부 1 · GUARD_UNSENT …" 로 찍혔다)
+                칸["guard_unsent"] += 1
+            elif r.get("status") == "rejected":
                 # 장중 매도 거부도 거부로 센다 — 하한가·VI 로 되풀이되면 주간 요약 까닭에 보여야 한다(25.1769)
                 칸["rejected"] += 1
                 칸["guard_rejected"] += 1  # 베낀 주문 거부와 가르게 — 데스크 실전 준비 근거가 뺀다(25.1779)
@@ -484,6 +491,7 @@ def compare(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "reject_reasons": dict(까닭.most_common(COMPARE_TOP_REASONS)),
         "mismatch_causes": dict(어긋남.most_common()),
         **({"guard_rejected": 칸["guard_rejected"]} if 칸["guard_rejected"] else {}),
+        **({"guard_unsent": 칸["guard_unsent"]} if 칸["guard_unsent"] else {}),  # KIS 에 안 간 장중 줄(25.2017)
     }  # fmt: skip
 
 
