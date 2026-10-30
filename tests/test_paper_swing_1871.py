@@ -404,6 +404,13 @@ def test_S_판정은_유상증자_권리락을_그림자처럼_되돌려_견준�
     assert all(c["display"] and c["threshold"] and c["source"] and c["as_of"] for c in 팖["criteria"])
     assert 팖["criteria"][2]["display"].startswith("×0.911 → 되돌린 종가 9,550원")
     assert 팖["criteria"][1]["display"] == "8,700원 (3거래일째)" and 팖["criteria"][1]["as_of"] == "2026-10-31"
+    # 진입가 행은 진입일·진입가 그대로, 판정은 "판정 종가" 행 하나(진입가·되돌림은 참고) — 25.2001
+    assert 팖["criteria"][0] == {"label": "진입가", "display": "10,000원", "threshold": "첫 매수 체결가(슬리피지 전)",
+                                 "source": "가상모의투자 체결", "as_of": "2026-10-29", "passed": None}
+    assert [c["passed"] for c in 팖["criteria"]] == [None, True, None]
+    # 진입일 = 락일이면 되돌리지 않는다(이미 떨어진 값에 샀다) — 가짜가 거르지 않아도 막는다(25.2001)
+    monkeypatch.setattr(mt, "rights_factors_since", lambda *_a: [("2026-10-29", f)])
+    assert 판정([("2026-10-29", 10_000.0), ("2026-10-30", 10_200.0)]) is None
     # 미국은 권리락 일정을 읽지 않는다
     monkeypatch.setattr(mt, "rights_factors_since", lambda *_a: (_ for _ in ()).throw(AssertionError("읽음")))
 
@@ -415,3 +422,14 @@ def test_S_판정은_유상증자_권리락을_그림자처럼_되돌려_견준�
 
     assert job._스윙넘음(U(), {"stock_id": 2, "country": "US", "lots": [("2026-10-29", 1.0, 100.0)]},
                         date(2026, 10, 29)) is None  # fmt: skip
+
+    # 미국 보유 근거는 달러로 찍는다(원으로 찍으면 "100원") — 25.2001
+    class U2:
+        def execute(self, sql, args=None):  # noqa: ANN001, ANN201
+            class R:
+                rows = [("2026-10-29", 106.0)]
+            return R()
+
+    팖 = job._스윙넘음(U2(), {"stock_id": 2, "country": "US", "currency": "USD", "lots": [("2026-10-29", 1.0, 100.0)]},
+                      date(2026, 10, 29))  # fmt: skip
+    assert 팖 is not None and [c["display"] for c in 팖["criteria"]] == ["100.00 USD", "106.00 USD (1거래일째)"]

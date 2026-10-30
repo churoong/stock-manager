@@ -11,6 +11,7 @@ import { localDate } from "@/lib/market";
 import { apartDigits } from "@/lib/apart";
 import { DIVERGE } from "@/lib/kisQuality";
 import { accountName } from "@/lib/accountNames";
+import type { Criterion } from "@/lib/recommend";
 
 /** 입금 한 번의 범위(원) — `batch/services/paper.py` 와 같은 값 (docs/paper.md 5장) */
 export const DEPOSIT_MIN_KRW = 10_000;
@@ -629,4 +630,29 @@ export function shadowLedgers(rows: Array<{ key: string; value: string | null }>
 /** 그림자 칸을 보이나 — 응답에 칸이 아예 없으면(배포 사이 옛 응답) 숨기고, `null`(읽기 실패)이면 "읽지 못함" 으로 보인다(25.1876) */
 export function showShadowCard(shadow: ShadowLedger[] | null | undefined): boolean {
   return shadow !== undefined;
+}
+
+/**
+ * 거래내역 근거 행을 근거표 꼴(`Criterion`)로 — 스윙(S) 매도 근거는 25.1871~25.1999 동안 `{name, value, date}` 꼴로
+ * 저장됐다(10-29 개설 뒤의 첫 매도 주문들). 그대로 넘기면 근거표가 이름·값 빈 칸으로 그렸다(25.2001, 25.2000 교차검증
+ * [참고]). 옛 꼴은 "참고" 행으로 옮기고, 근거표 꼴은 그대로 둔다
+ */
+export function tradeCriteria(rows: unknown[]): Criterion[] {
+  return rows.flatMap((r) => {
+    if (!r || typeof r !== "object") return [];
+    const o = r as Record<string, unknown>;
+    if (typeof o.label === "string") return [o as unknown as Criterion];
+    if (typeof o.name === "string") {
+      const v = o.value;
+      return [{
+        label: o.name,
+        display: typeof v === "number" ? v.toLocaleString("ko-KR") : String(v ?? "-"),
+        threshold: "-",
+        source: "가상모의투자 (옛 기록 꼴)",
+        as_of: typeof o.date === "string" ? o.date : null,
+        passed: null,
+      }];
+    }
+    return [];
+  });
 }

@@ -19,6 +19,7 @@ import {
   deptScoreText,
   ruleText,
   stanceText,
+  tradeCriteria,
   type AccountView,
   type Attribution,
   hasCommittee,
@@ -718,7 +719,7 @@ export function TradesPane({ fills }: { fills: FillRow[] }) {
             return null;
           }
         })();
-        const 기준 = 근거?.signal?.criteria ?? 근거?.flags?.flatMap((x: { criteria?: unknown[] }) => x.criteria ?? []) ?? [];
+        const 기준 = tradeCriteria(근거?.signal?.criteria ?? 근거?.flags?.flatMap((x: { criteria?: unknown[] }) => x.criteria ?? []) ?? []);
         return (
           <li key={f.id} className="py-2">
             <details>
