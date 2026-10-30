@@ -1217,3 +1217,39 @@ def test_다른_종목의_장중_줄은_정리_줄_겹침을_가리지_않는다
     r = ig.run(c, 월, session=_Sess([_h("005930", 9_250.0)]), clock=lambda: 월)
     assert r["sent"] == {"skipped_other_row": 1} and "정리 매도 줄과 겹쳐" in r["alert"]
 
+
+
+@pytest.mark.parametrize("깨질", ["mine", "retry_mine"])
+def test_보내기_전_기록_확인이_깨지면_줄을_닫고_다음_회차가_다시_보낸다(c: Client, 깨질: str) -> None:
+    """25.2015 (결함 루프) — 줄을 적은 뒤 '내 줄' 확인 읽기가 깨지면 주문은 안 나갔는데 줄이 `sending` 으로 남아, 그날
+    남은 회차가 "이미 팜" 으로 보고 손절을 다시 내지 않았다(다음 아침엔 `unknown` → guard_held 가 H 추가 매수 베끼기까지
+    막음). 이제 그 줄을 "보내지 않음" 으로 닫고 다음 회차가 같은 줄로 다시 보낸다. 다시 보내기 갈래(RETRY_MINE)도 같다"""
+    from datetime import timedelta
+
+    from batch.sources.kis import KisFailed
+
+    if 깨질 == "retry_mine":  # 앞 회차가 순간 거부로 rejected 줄을 남겼다
+        ig.run(c, 월, session=_Sess([_h("005930", 9_250.0)], fail={"005930": KisFailed("EGW00201 초당")}),
+               clock=lambda: 월)  # fmt: skip
+    대상 = bmj.MINE_SQL if 깨질 == "mine" else ig.RETRY_MINE_SQL
+    진짜, 깸 = c.execute, {"n": 0}
+
+    def execute(sql: str, args: list[Any] | None = None) -> Any:
+        if sql == 대상 and not 깸["n"]:
+            깸["n"] += 1
+            raise RuntimeError("Turso 잠깐 끊김")
+        return 진짜(sql, args)
+
+    c.execute = execute  # type: ignore[method-assign]
+    둘째 = 월 + timedelta(minutes=10)
+    s = _Sess([_h("005930", 9_250.0)])
+    with pytest.raises(ig.GuardRecordError):
+        ig.run(c, 둘째, session=s, clock=lambda: 둘째)
+    assert s.orders == []
+    assert c.q("SELECT status, substr(message, 1, 12) FROM paper_broker_orders WHERE stock_id = 1") == [
+        ("rejected", ig.UNSENT_MARK)]
+    셋째 = 월 + timedelta(minutes=20)
+    s3 = _Sess([_h("005930", 9_000.0)])  # 여전히 손절선 아래
+    r = ig.run(c, 셋째, session=s3, clock=lambda: 셋째)
+    assert len(s3.orders) == 1 and r["sent"] == {"retried": 1, "accepted": 1}
+    assert c.q("SELECT COUNT(*), MAX(status) FROM paper_broker_orders WHERE stock_id = 1") == [(1, "accepted")]
