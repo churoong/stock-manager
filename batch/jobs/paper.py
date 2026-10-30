@@ -1357,14 +1357,28 @@ def _스윙넘음(client: Any, 행: dict[str, Any], today: date) -> dict[str, An
     까닭, i = 넘음
     날, 종가 = str(줄[i][0])[:10], float(줄[i][1])
     수익 = round((되돌린[i] / float(진입가) - 1) * 100, 4)
-    글 = {"stop": f"종가가 진입가 대비 {수익:+g}% — 스윙 손절선 {sh.SWING_CLOSE.stop_pct * 100:g}% 이하",
-          "target": f"종가가 진입가 대비 {수익:+g}% — 스윙 목표선 +{sh.SWING_CLOSE.target_pct * 100:g}% 이상",
+    계수 = round(_되돌림(날), 6)
+    되돌림글 = f" (권리락 되돌림 ×{계수:g})" if 계수 != 1 else ""
+    글 = {"stop": f"종가가 진입가 대비 {수익:+g}%{되돌림글} — 스윙 손절선 {sh.SWING_CLOSE.stop_pct * 100:g}% 이하",
+          "target": f"종가가 진입가 대비 {수익:+g}%{되돌림글} — 스윙 목표선 +{sh.SWING_CLOSE.target_pct * 100:g}% 이상",
           "time": f"{i + 1}거래일째 종가 — 스윙 기한 {sh.SWING_CLOSE.max_sessions}거래일"}[까닭]  # fmt: skip
+    통화 = str(행.get("currency") or ("USD" if 행.get("country") == "US" else "KRW"))
+
+    def _값(v: float) -> str:
+        return f"{v:,.0f}원" if 통화 == "KRW" else f"{v:,.2f} {통화}"
+
+    # 근거표 꼴(`sell_flags._criterion` — label·display·threshold·source·as_of)로 — 예전 {name, value, date} 는 웹
+    # 거래내역 근거표가 빈 칸으로 그렸다(25.2000, 25.1999 교차검증 [권고]; 꼴 어긋남은 25.1871 부터)
+    선 = (f"손절 {sh.SWING_CLOSE.stop_pct * 100:g}% · 목표 +{sh.SWING_CLOSE.target_pct * 100:g}% · "
+         f"기한 {sh.SWING_CLOSE.max_sessions}거래일 (진입가 대비 종가)")
+    근거 = [sf._criterion("진입가", _값(float(진입가)), "첫 매수 체결가(슬리피지 전)", "가상모의투자 체결",
+                        str(진입일)[:10]),
+          sf._criterion("판정 종가", f"{_값(종가)} ({i + 1}거래일째)", 선, "prices", 날)]
+    if 계수 != 1:
+        근거.append(sf._criterion("권리락 되돌림", f"×{계수:g} → 되돌린 종가 {_값(되돌린[i])} (진입가 대비 {수익:+g}%)",
+                                 "유상증자 권리락만 — 그림자 수정주가와 같은 비율", "prices·kr_corp_events", 날))
     return {"reason_code": pp.SWING_CODES[까닭], "level": "red", "rationale": f"{글} ({날}, {sh.SWING_CLOSE.name})",
-            "criteria": [{"name": "진입가", "value": float(진입가), "date": str(진입일)[:10]},
-                         {"name": "판정 종가", "value": 종가, "date": 날},
-                         *([{"name": "권리락 계수", "value": round(_되돌림(날), 6), "date": 날}]
-                           if _되돌림(날) != 1 else [])]}  # fmt: skip
+            "criteria": 근거}
 
 
 #: 추세 익절(G)의 고점 — 첫 매수일부터 오늘까지 종가 최댓값 (보유마다 한 번, 25.1481)

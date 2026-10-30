@@ -145,6 +145,8 @@ def test_판정은_그림자와_같은_함수() -> None:
     행 = {"stock_id": 1, "lots": [("2026-10-15", 4.0, 10_000.0)]}
     팖 = job._스윙넘음(C(), 행, date(2026, 10, 19))
     assert 팖 is not None and 팖["reason_code"] == pp.SWING_CODES["target"] == "스윙목표"
+    # 권리락이 없으면 되돌림 근거·꼬리가 없다(25.2000)
+    assert [c["label"] for c in 팖["criteria"]] == ["진입가", "판정 종가"] and "되돌림" not in 팖["rationale"]
     assert job._스윙넘음(C(), {"stock_id": 1, "lots": []}, date(2026, 10, 19)) is None
 
 
@@ -370,7 +372,11 @@ def test_S_판정은_유상증자_권리락을_그림자처럼_되돌려_견준�
     from batch.jobs import monitor_targets as mt
 
     f = 0.911
-    monkeypatch.setattr(mt, "rights_factors_since", lambda _c, _sid, _since: [("2026-10-30", f)])
+    받음: list[tuple] = []
+    # 넘기는 종목·진입일까지 묶는다 — since 를 오늘로 바꾸면 운영에선 늘 빈 목록이라 결함이 되돌아온다(25.2000,
+    # 25.1999 교차검증 [권고])
+    monkeypatch.setattr(mt, "rights_factors_since",
+                        lambda _c, sid, since: 받음.append((sid, since)) or [("2026-10-30", f)])  # fmt: skip
 
     def 판정(종가들: list[tuple[str, float]]) -> dict | None:
         class C:
@@ -385,13 +391,19 @@ def test_S_판정은_유상증자_권리락을_그림자처럼_되돌려_견준�
 
     # 락일 앞 +4.5%, 락일 원시 −5%(되돌리면 +4.3%) — 들고 간다
     assert 판정([("2026-10-29", 10_450.0), ("2026-10-30", 9_500.0)]) is None
+    assert 받음 == [(1, "2026-10-29")]
     # 그림자 수정주가 계열과 같은 판정(진입 시가·락일 앞 종가에 계수)
     assert sh.close_exit(10_000.0 * f, [10_450.0 * f, 9_500.0]) is None
     # 락일 뒤 진짜 하락(8,700 → 되돌려 9,550, −4.5%)은 손절 — 근거에 계수를 적는다
     팖 = 판정([("2026-10-29", 10_000.0), ("2026-10-30", 9_500.0), ("2026-10-31", 8_700.0)])
     assert 팖 is not None and 팖["reason_code"] == "스윙손절" and "-4.5" in 팖["rationale"]
+    assert "(권리락 되돌림 ×0.911)" in 팖["rationale"]  # 원시 판정 종가 ÷ 진입가(−13%)와 다른 까닭
     assert sh.close_exit(10_000.0 * f, [10_000.0 * f, 9_500.0, 8_700.0]) == ("stop", 2)
-    assert {"name": "권리락 계수", "value": f, "date": "2026-10-31"} in 팖["criteria"]
+    # 근거는 웹 근거표 꼴(label·display·threshold·source·as_of — 25.2000, 예전 꼴은 빈 칸으로 그려졌다)
+    assert [c["label"] for c in 팖["criteria"]] == ["진입가", "판정 종가", "권리락 되돌림"]
+    assert all(c["display"] and c["threshold"] and c["source"] and c["as_of"] for c in 팖["criteria"])
+    assert 팖["criteria"][2]["display"].startswith("×0.911 → 되돌린 종가 9,550원")
+    assert 팖["criteria"][1]["display"] == "8,700원 (3거래일째)" and 팖["criteria"][1]["as_of"] == "2026-10-31"
     # 미국은 권리락 일정을 읽지 않는다
     monkeypatch.setattr(mt, "rights_factors_since", lambda *_a: (_ for _ in ()).throw(AssertionError("읽음")))
 
