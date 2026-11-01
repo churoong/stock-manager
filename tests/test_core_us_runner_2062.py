@@ -205,3 +205,25 @@ def test_R_아닌_미검증_변형엔_범용_단서(monkeypatch: pytest.MonkeyPa
     (r,) = mem.execute("SELECT warnings_json FROM backtest_runs").dicts()
     경고 = json.loads(r["warnings_json"])
     assert cj.WARN_US_UNVERIFIED_OTHER in 경고 and cj.WARN_US_UNVERIFIED not in 경고, 경고
+
+
+def test_미국_밴드_PBR_은_가격_수준을_읽는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.2062 의 "가격 수준을 밴드 PBR(`PriceView.level_closes`)이 쓴다" 를 묶는다(25.2074, 25.2066 기록 — 예전엔 시험 자료의
+    수정/수준 비가 늘 같아 띠와 지금 PBR 이 같이 줄어 신호가 같았고, 엔진에 `levels` 를 안 넘겨도 다 지났다). 밴드를 잴 때
+    읽는 값이 원 종가(가격 수준)이지 수정종가(× 0.9)가 아닌지 본다"""
+    mem = _db(monkeypatch)
+    원종가 = {(int(sid), d): float(c) for sid, d, c in mem.conn.execute("SELECT stock_id, date, close FROM prices")}
+    본: list[tuple[int, str, float]] = []
+    원 = bt.PriceView.level_closes
+
+    def 엿봄(self: bt.PriceView, sid: int) -> list[tuple[str, float]]:
+        out = 원(self, sid)
+        if out:
+            d, c = out[-1]
+            본.append((sid, d, c))
+        return out
+
+    monkeypatch.setattr(bt.PriceView, "level_closes", 엿봄)
+    assert cj.run_core("US", years=1, today=오늘, force=True, variants=("core_b",)) == 0
+    assert 본, "밴드를 한 번도 재지 않았다 — 시험이 헛돈다"
+    assert all(c == pytest.approx(원종가[(sid, d)]) for sid, d, c in 본[:50]), 본[:3]
