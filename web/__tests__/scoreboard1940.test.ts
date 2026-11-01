@@ -37,6 +37,14 @@ describe("판정판 글 (25.1940)", () => {
     expect(l.sample).toBe("48개월 · 리밸런스 1000 · 매수 120 · 묶음 대조 9/관문 4 · 판 뒤 매도 80 · 누적 시도 17");
   });
 
+  it("미국 미검증 줄은 이름 옆에 꼬리표 — 옛 실행(칸 없음)은 붙지 않고 빈 칸 까닭에도 안 뜬다 (25.2077)", () => {
+    expect(scoreLine(parseScoreboard([{ ...줄, us_unverified: true }]).rows[0]).label).toBe("핵심 H (합의) · 미국 미검증(참고로만)");
+    const 옛 = scoreLine(parseScoreboard([줄]).rows[0]);
+    expect(옛.label).toBe("핵심 H (합의)");
+    expect(옛.missing.join(" ")).not.toContain("us_unverified");
+    expect(scoreLine(parseScoreboard([{ ...줄, us_unverified: false }]).rows[0]).label).toBe("핵심 H (합의)");
+  });
+
   it("빈 칸은 '없음: 칸 — 까닭' 으로, 같은 까닭은 한 줄로 묶는다", () => {
     expect(scoreLine(parseScoreboard([줄]).rows[0]).missing).toEqual([
       "없음: 관문 하한 — 하한 없음 — 묶음 4개(block_bound 최소 미달)",

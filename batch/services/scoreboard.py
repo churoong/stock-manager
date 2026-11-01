@@ -60,6 +60,11 @@ NO_COST_SUFFIX = "_no_cost"
 #: 경고 글로 가르는 표시 — 정의처는 `services/backtest.WARN_SURVIVORSHIP`·`jobs/backtest.WARN_PIT_UNIVERSE`·
 #: `WARN_NO_HISTORICAL_UNIVERSE`. jobs 를 import 하면 DB 모듈이 따라 들어와 머리글만 적는다(시험이 대조)
 SURVIVORSHIP_PREFIX = "생존편향"
+#: 미국 리플레이 미검증 단서의 머리(25.2077) — `jobs/core_backtest.WARN_US_UNVERIFIED`·`WARN_US_UNVERIFIED_OTHER`·
+#: `WARN_US_LIMIT_UNVERIFIED`(시험이 대조). 웹은 묶음 경고를 한 띠로 합쳐 보여, 어느 줄의 단서인지 판정판 줄 칸으로
+#: 싣는다
+US_UNVERIFIED_PREFIXES: tuple[str, ...] = (
+    "미국 무작위 대조 R1·R2 —", "미국 리플레이 — 이 변형은", "미국 분할 지정가 체결 판 —")  # fmt: skip
 PIT_PREFIX = "시점 유니버스:"
 TODAY_UNIVERSE_PREFIX = "과거 유니버스 스냅샷 없음"
 
@@ -313,6 +318,8 @@ def _row(run: dict[str, Any], r: dict[str, Any], twins: dict[str, dict[str, Any]
     ws = [str(w) for w in warns] if isinstance(warns, list) else []
     out["warnings"] = ws
     out["survivorship"] = any(w.startswith(SURVIVORSHIP_PREFIX) for w in ws)
+    # 미국 리플레이에서 운영과 일치 시험이 없는 줄(25.2077) — 웹 판정판이 그 줄 이름 옆에 꼬리표
+    out["us_unverified"] = any(w.startswith(US_UNVERIFIED_PREFIXES) for w in ws)
     if any(w.startswith(PIT_PREFIX) for w in ws):
         put("universe", "pit", "")
     elif any(w.startswith(TODAY_UNIVERSE_PREFIX) for w in ws):
@@ -609,7 +616,7 @@ STEP_LOG_COLS = (
     "strategy", "market", "cohort", "trials_cumulative", "cagr", "excess_cagr", "mdd", "dsr", "dsr_n",
     "control_lower", "gate_lower", "half_first_cagr", "half_second_cagr", "walk_positive", "walk_total", "months",
     "rebalances", "buys", "control_blocks", "gate_blocks", "sells_scored", "bh_q", "capacity", "capacity_complete",
-    "stage01_verdict", "stage01_note",
+    "stage01_verdict", "stage01_note", "us_unverified",
 )  # fmt: skip
 #: 까닭 글 최대 길이 — step_log 크기를 묶는다(월 실행 줄 약 20개 × 빈 칸 약 10개). 넘는 까닭은 잘린다
 WHY_MAX = 80

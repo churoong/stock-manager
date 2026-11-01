@@ -16,7 +16,7 @@ export const SCOREBOARD_KEYS = [
   "strategy", "market", "cohort", "trials_cumulative", "cagr", "excess_cagr", "mdd", "dsr", "dsr_n",
   "control_lower", "gate_lower", "half_first_cagr", "half_second_cagr", "walk_positive", "walk_total", "months",
   "rebalances", "buys", "control_blocks", "gate_blocks", "sells_scored", "bh_q", "capacity", "capacity_complete",
-  "stage01_verdict", "stage01_note",
+  "stage01_verdict", "stage01_note", "us_unverified",
 ] as const;
 
 /** 판정판을 싣는 작업 — 배치 `jobs/backtest.JOB_NAME`·`jobs/core_backtest` 의 세 이름(`JOB_NAME`·`EXPLORE_JOB_NAME`·`LIMIT_JOB_NAME`),
@@ -70,6 +70,8 @@ const rowSchema = z.object({
   capacity_complete: z.boolean().nullable().catch(null),
   stage01_verdict: z.string().nullable().catch(null),
   stage01_note: z.string().nullable().catch(null),
+  /** 미국 리플레이에서 운영과 일치 시험이 없는 줄(25.2077) — 옛 실행엔 칸이 없다(null) */
+  us_unverified: z.boolean().nullable().catch(null),
   rebalances: numOrNull,
   buys: numOrNull,
   control_blocks: numOrNull,
@@ -173,7 +175,8 @@ export function scoreLine(r: ScoreRow): ScoreLine {
   }
   return {
     strategy: r.strategy,
-    label: strategyLabel(r.strategy),
+    // 미국 미검증 줄(25.2077) — 묶음 경고 띠만으로는 어느 줄의 단서인지 안 보였다
+    label: r.us_unverified ? `${strategyLabel(r.strategy)} · 미국 미검증(참고로만)` : strategyLabel(r.strategy),
     cohort: r.cohort == null ? "코호트 밖" : `코호트 ${r.cohort}`,
     cells: [
       ["CAGR", p(r.cagr)],
