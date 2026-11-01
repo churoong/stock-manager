@@ -58,3 +58,16 @@ def test_미국_사기_전_점검_계좌가_같다(variant: str, 판: str) -> No
         틀림 = 단(variant, 판)
         assert not 틀림, (단.__name__, 틀림[:5])
     assert t._관문(variant, 판) <= (1e-4 if 판 == "zero" else t.ALLOW_GATE_RETURN_PCTP)
+
+
+def test_미국_C_슬리피지_판도_같다() -> None:
+    """C(모멘텀, 시가 일괄 진입 — 시장가 매수에 슬리피지)의 미국 슬리피지 판(25.2075, 25.2068·2069 기록 — 교차검증이 한 번
+    돌려 일치를 봤지만 시험으로 묶지 않았다). 비용 판은 R 틀(1929)의 `slip` 과 같다(설정 수수료 + 엔진 기본 슬리피지). R2 의
+    슬리피지 판 원가 차(02-14, 원인 [확인필요])가 시가 일괄 진입 전체의 것이 아님을 묶는다"""
+    from batch.services import backtest as bt
+
+    비용 = {f"{t._앞}_buy_pct": 0.015, f"{t._앞}_sell_pct": 0.015}
+    t.비용판.setdefault("slip", (비용, bt.Costs.for_country(t.시장, 비용, {})))
+    for 단 in (t._L0, t._L1, t._L2, t._L3, hde_us.hde._회의_대조):
+        틀림 = 단("core_c", "slip")
+        assert not 틀림, (단.__name__, 틀림[:5])
