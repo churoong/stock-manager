@@ -133,6 +133,7 @@ def test_미국_탐색_S_T_도_돈다(monkeypatch: pytest.MonkeyPatch) -> None:
     assert all(bt.WARN_TOTAL_RETURN in w and bt.WARN_NO_DIVIDENDS not in w for w in 경고.values()), 경고
     # 탐색 D·E·A·C 는 25.2064·2065 가 묶었다 — 행마다 단서 유무가 목록과 같다(탐색 실행엔 단서 줄이 없다)
     assert all((cj.WARN_US_UNVERIFIED in w) == (v in cj.R_VARIANTS) for v, w in 경고.items()), 경고.keys()
+    assert all(cj.WARN_US_UNVERIFIED_OTHER not in w for w in 경고.values())
 
 
 def test_미국_지정가_판은_회차_핵심_변형에_따로_단서(monkeypatch: pytest.MonkeyPatch) -> None:

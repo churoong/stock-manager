@@ -411,13 +411,15 @@ def test_run_core_국내_R_줄에도_옛_자리_단서_미국_단서는_없다(�
         경고 = json.loads(r["warnings_json"])
         assert (cj.WARN_R_OLD_SLOT in 경고) == (r["strategy"] in cj.R_VARIANTS), r["strategy"]
         assert cj.WARN_US_UNVERIFIED not in 경고 and cj.WARN_US_LIMIT_UNVERIFIED not in 경고
+        assert cj.WARN_US_UNVERIFIED_OTHER not in 경고  # 범용 미국 단서도 국내엔 없다(25.2072)
 
 
 def test_run_core_국내_지정가_판엔_미국_단서가_없다(monkeypatch: pytest.MonkeyPatch) -> None:
     mem = _db(monkeypatch)
     assert cj.run_core("KR", years=1, today=오늘, force=True, limit_fills=True, variants=("core_b",)) == 0
     (r,) = _행들(mem)
-    assert cj.WARN_US_LIMIT_UNVERIFIED not in json.loads(r["warnings_json"])
+    경고 = json.loads(r["warnings_json"])
+    assert cj.WARN_US_LIMIT_UNVERIFIED not in 경고 and cj.WARN_US_UNVERIFIED_OTHER not in 경고
 
 
 def test_run_core_month_는_경고를_단다(monkeypatch: pytest.MonkeyPatch) -> None:
