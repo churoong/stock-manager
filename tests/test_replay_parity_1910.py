@@ -102,6 +102,9 @@ W, S, N = 260, 150, 30
 #: 시장 — 25.2059(깔때기 ⑧-3b): tests/test_replay_parity_us_2059.py 가 이 파일을 "US" 로 바꿔 한 벌 더 싣는다(달력·통화·
 #: 시장 구분·지수·수수료 칸·운영 `run_step(market=…)`). 국내 시험과 이 파일을 가져다 쓰는 일치 시험들은 그대로 국내다
 시장 = "KR"
+#: 운영 DB 의 USDKRW — 25.2073: tests/test_replay_parity_us_fx_2073.py 가 미국 판을 1,300 으로 한 벌 더 싣는다(운영 원화
+#: 장부의 ÷환율·×환율 방향을 묶는다 — 1.0 이면 뒤집혀도 같다). 국내는 쓰지 않는다
+환율 = 1.0
 통화 = {"KR": "KRW", "US": "USD"}[시장]
 _구분 = {"KR": ("KOSPI", "KOSDAQ"), "US": ("NASDAQ", "NYSE")}[시장]
 _앞 = 시장.lower()
@@ -247,11 +250,11 @@ def _db(aid: str, fees: dict, c: Client | None = None) -> Client:
         # 환율 1.0 — 리플레이의 시장 통화 장부(25.2058)와 같은 단위. 운영 `_fx` 는 묵은 환율을 거르므로 날마다 한 행
         for d in 날들:
             c.conn.execute("INSERT OR REPLACE INTO fx_rates (pair, date, rate, source, fetched_at)"
-                           " VALUES ('USDKRW', ?, 1.0, 't', 't')", [d])  # fmt: skip
+                           " VALUES ('USDKRW', ?, ?, 't', 't')", [d, 환율])  # fmt: skip
     c.conn.execute("INSERT INTO settings (key, value, updated_at) VALUES ('fees', ?, 't')", [json.dumps(fees)])
     c.conn.execute(
         "INSERT INTO paper_cash_flows (flow_date, amount_krw, kind, created_at, request_key)"
-        " VALUES (?, ?, 'deposit', '2000-01-01T00:00:00+00:00', 'parity')", [날들[0], int(NOTIONAL)])  # fmt: skip
+        " VALUES (?, ?, 'deposit', '2000-01-01T00:00:00+00:00', 'parity')", [날들[0], int(NOTIONAL * (환율 if 시장 == "US" else 1.0))])  # fmt: skip
     return c
 
 
@@ -325,9 +328,10 @@ def _베끼기(c: Client, aid: str, rp: 리플레이, 판: str, k: int, cutoff: 
         o = pp.Order(id=int(cur.lastrowid), account_id=aid, stock_id=sid, side=side, order_type=종류, limit_price=지정가,
                      quantity=q, currency=통화, fill_session=day, horizon=h, score_at_order=점수.get(sid),
                      score_as_of=cutoff)  # fmt: skip
-        f = pp.make_fill(o, px, day, 1.0, 비용)
+        fx = 환율 if 시장 == "US" else 1.0
+        f = pp.make_fill(o, px, day, fx, 비용)
         c.conn.execute(job.INSERT_FILL_SQL, [
-            f.order_id, aid, sid, side, day, px, q, 통화, 1.0, day if 시장 == "US" else None, f.fee, f.tax, f.slippage, f.cash_krw, h,
+            f.order_id, aid, sid, side, day, px, q, 통화, fx, day if 시장 == "US" else None, f.fee, f.tax, f.slippage, f.cash_krw, h,
             f.score_at_trade, f.snapshot_as_of, f"{day}T09:00:00+00:00", px, None, 0.0 if side == "sell" else None,
         ])  # fmt: skip
 
@@ -391,7 +395,8 @@ def _운영(variant: str, 판: str) -> dict[str, 운영하루]:
             for sid, 단가, q in c.q("SELECT stock_id, COALESCE(limit_price, ref_price), quantity FROM paper_orders"
                                    " WHERE account_id = ? AND decided_on = ? AND side = 'buy' AND tranche < 90",
                                    [aid, cutoff]):  # fmt: skip
-                h.buys[sid] = h.buys.get(sid, 0.0) + 단가 * q / 자본
+                # 단가는 종목 통화, 평가 총액은 원화 — 미국은 환율을 곱한다(25.2073)
+                h.buys[sid] = h.buys.get(sid, 0.0) + 단가 * q * (환율 if 시장 == "US" else 1.0) / 자본
             h.gate_pct = (h.record.get("gate_day") or {}).get("gate")
             out[day] = h
             # 허용 ① — 운영이 낸 주문은 체결 판정에 넘기지 않고 엔진 체결을 베낀다
