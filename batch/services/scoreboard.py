@@ -553,8 +553,8 @@ def stage01_verdict(checks: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def stage01_note(st: dict[str, Any]) -> str:
-    """점검표 → 한 줄 글 — "걸림: DSR·걷는 창 · 재료 없음: 수용량" (판정판 실행 기록 칸). 판정 "모름" 과 겹쳐 읽히지
-    않게 모르는 칸은 "재료 없음" 으로 적는다(25.1953)"""
+    """점검표 → 한 줄 글 — "걸림: DSR(낮은 쪽)·걷는 창 · 재료 없음: 수용량" (판정판 실행 기록 칸). 판정 "모름" 과
+    겹쳐 읽히지 않게 모르는 칸은 "재료 없음" 으로 적는다(25.1953)"""
     parts = []
     if st["failed"]:
         parts.append(f"걸림: {'·'.join(st['failed'])}")
