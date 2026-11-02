@@ -13,7 +13,7 @@ import { pct } from "@/lib/portfolio";
 
 /** 판정판 줄의 칸 — 배치 `services/scoreboard.STEP_LOG_COLS` 와 같아야 한다(`tests/test_scoreboard_wiring_1940.py` 가 대조) */
 export const SCOREBOARD_KEYS = [
-  "strategy", "market", "cohort", "trials_cumulative", "cagr", "excess_cagr", "mdd", "dsr", "dsr_n",
+  "strategy", "market", "cohort", "trials_cumulative", "cagr", "excess_cagr", "mdd", "dsr", "dsr_n", "dsr_cohort",
   "control_lower", "gate_lower", "half_first_cagr", "half_second_cagr", "walk_positive", "walk_total", "months",
   "rebalances", "buys", "control_blocks", "gate_blocks", "sells_scored", "bh_q", "capacity", "capacity_complete",
   "stage01_verdict", "stage01_note", "us_unverified",
@@ -58,6 +58,7 @@ const rowSchema = z.object({
   mdd: numOrNull,
   dsr: numOrNull,
   dsr_n: numOrNull,
+  dsr_cohort: numOrNull,
   control_lower: numOrNull,
   gate_lower: numOrNull,
   half_first_cagr: numOrNull,
@@ -104,7 +105,7 @@ export function parseScoreboard(raw: unknown): { rows: ScoreRow[]; unreadable: n
 
 const COL_LABEL: Record<string, string> = {
   market: "시장", cohort: "코호트", trials_cumulative: "누적 시도", cagr: "CAGR", excess_cagr: "초과 CAGR", mdd: "MDD",
-  dsr: "DSR", dsr_n: "DSR N", control_lower: "대조 하한", gate_lower: "관문 하한", half_first_cagr: "앞 반",
+  dsr: "DSR", dsr_n: "DSR N", dsr_cohort: "DSR(코호트 V)", control_lower: "대조 하한", gate_lower: "관문 하한", half_first_cagr: "앞 반",
   half_second_cagr: "뒤 반", walk_positive: "걷는 창", walk_total: "걷는 창 수", months: "개월", bh_q: "BH q", capacity: "수용량", capacity_complete: "수용량 하한 여부", stage01_verdict: "0→1 점검", stage01_note: "0→1 근거", rebalances: "리밸런스", buys: "매수", control_blocks: "대조 묶음",
   gate_blocks: "관문 묶음", sells_scored: "판 뒤 매도",
 };
@@ -162,6 +163,7 @@ export const ADDED_IN: Partial<Record<(typeof SCOREBOARD_KEYS)[number], string>>
   walk_positive: "25.1947", walk_total: "25.1947", stage01_verdict: "25.1950", stage01_note: "25.1950", bh_q: "25.1951",
   capacity: "25.1954",
   capacity_complete: "25.1956",
+  dsr_cohort: "25.2093",
 };
 
 /** 판정판 한 줄 → 화면 글. 숫자는 꼴만 바꾼다(비율은 %, 분위 하한은 소수 한 자리, DSR 은 두 자리) */
@@ -183,6 +185,8 @@ export function scoreLine(r: ScoreRow): ScoreLine {
       ["초과 CAGR", p(r.excess_cagr)],
       ["MDD", p(r.mdd)],
       ["DSR", r.dsr == null ? 없음 : `${f2(r.dsr)}${r.dsr_n == null ? "" : ` (N ${r.dsr_n})`}`],
+      // 코호트 V DSR(25.2093) — funnel.md 2.2 등록 정의(V = 같은 코호트 시도 줄들의 월 초과 샤프 분산). 0→1 점검은 두 DSR 가운데 낮은 쪽
+      ["DSR(코호트 V)", f2(r.dsr_cohort)],
       ["대조 하한", f1(r.control_lower)],
       // 코호트 BH q(25.1951) — 같은 코호트 시도 줄들의 대조 분위 p 로. 세 자리
       ["BH q", r.bh_q == null ? 없음 : r.bh_q < 0.001 ? "< 0.001" : r.bh_q.toFixed(3)],

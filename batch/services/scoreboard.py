@@ -30,7 +30,10 @@ from __future__ import annotations
 import bisect
 import json
 import math
+import statistics
 from typing import Any
+
+from batch.services import luck
 
 #: 판정판의 단계 — 백테스트 실행 기록은 모두 0 리플레이(funnel.md 1장)
 STAGE_REPLAY = 0
@@ -279,6 +282,9 @@ def _row(run: dict[str, Any], r: dict[str, Any], twins: dict[str, dict[str, Any]
     else:
         why_w = ""
     w = walk_windows([(str(k), float(v)) for k, v in me]) if why_w == "" and isinstance(me, list) else None
+    # 코호트 V DSR(25.2093)의 재료 — 달 순 월 초과 값. `rows()` 가 쓰고 내보내기 전에 지운다(실행 기록 칸 아님)
+    out["_excess"] = [float(v) for _k, v in sorted((str(k)[:7], v) for k, v in me)] if w is not None else None
+    out["_excess_why"] = why_w
     put("walk", w, why_w)
     put("walk_positive", (w or {}).get("positive"), why_w)
     put("walk_total", (w or {}).get("total"), why_w)
@@ -451,7 +457,10 @@ def stage01(row: dict[str, Any], base: dict[str, Any] | None) -> dict[str, Any] 
          ok(row.get("control_lower"), lambda v: v > STAGE01_MIN_CONTROL_LOWER)),
         ("bh_q", "코호트 BH q", row.get("bh_q"), f"<= {STAGE01_MAX_BH_Q}",
          ok(row.get("bh_q"), lambda v: v <= STAGE01_MAX_BH_Q)),
-        ("dsr", "DSR", row.get("dsr"), f">= {STAGE01_MIN_DSR}", ok(row.get("dsr"), lambda v: v >= STAGE01_MIN_DSR)),
+        # DSR — 실행 V(`dsr`)·코호트 V(`dsr_cohort`, 25.2093 — 등록 정의) 가운데 **낮은 쪽**. 코호트 V 를 못 낸 줄은
+        # 실행 V 만(예전과 같다) — 둘 중 하나라도 문턱 밑이면 걸림(보수적)
+        ("dsr", "DSR", _낮은(row.get("dsr"), row.get("dsr_cohort")), f">= {STAGE01_MIN_DSR}",
+         ok(_낮은(row.get("dsr"), row.get("dsr_cohort")), lambda v: v >= STAGE01_MIN_DSR)),
         ("half", "앞뒤 반", None if hf is None or hs is None else [hf, hs], "둘 다 > 0",
          None if hf is None or hs is None else hf > 0 and hs > 0),
         ("walk", "걷는 창", None if wp is None or wt is None else [wp, wt],
@@ -470,6 +479,12 @@ def stage01(row: dict[str, Any], base: dict[str, Any] | None) -> dict[str, Any] 
         checks.append(("us_parity", US_PARITY_LABEL, "미검증", "운영 미국 판과 일치 시험으로 묶임", None))
     out = [{"key": k, "label": lab, "now": now, "target": tgt, "ok": o} for k, lab, now, tgt, o in checks]
     return {**stage01_verdict(out), "checks": out, "base": (base or {}).get("strategy")}
+
+
+def _낮은(*xs: Any) -> float | None:
+    """숫자인 것 가운데 가장 작은 값 — 없으면 None(25.2093)"""
+    vals = [x for x in (_num(v) for v in xs) if x is not None and math.isfinite(x)]
+    return min(vals) if vals else None
 
 
 def _capacity_ok(row: dict[str, Any]) -> bool | None:
@@ -595,6 +610,7 @@ def rows(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         m = max(COHORT_SIZE.get(str(줄들[0]["cohort"]), 0), len(줄들))
         for row, q in zip(줄들, bh_q([x.get("control_p") for x in 줄들], m=m), strict=True):
             row["bh_q"] = q
+    _cohort_dsr(out, 묶음)
     for row in out:
         if row["bh_q"] is None:
             밖 = row["cohort"] is None or not row["is_trial"]
@@ -609,7 +625,58 @@ def rows(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 row["missing"][c] = why
         else:
             row["stage01_verdict"], row["stage01_note"] = st["verdict"], stage01_note(st)
+    for row in out:
+        row.pop("_excess", None)
+        row.pop("_excess_why", None)
     return sorted(out, key=lambda x: (str(x["market"]), str(x["cohort"] or "~"), x["strategy"]))
+
+
+#: 코호트 V DSR 의 까닭 글(25.2093)
+WHY_DSR_COHORT_OUT = "코호트 밖·시도 아님 — 코호트 V 없음"
+WHY_DSR_COHORT_FEW = "코호트 V — 월 초과 계열이 있는 같은 코호트 시도 줄이 둘 미만"
+
+
+def _cohort_dsr(out: list[dict[str, Any]], 묶음: dict[tuple[Any, Any], list[dict[str, Any]]]) -> None:
+    """DSR 의 V 를 **코호트**에서(25.2093, funnel.md 2.2 "DSR(N = 누적, V = 코호트)" — 예전 `dsr` 칸은 그 실행의
+    곡선들로 낸 V 라 등록 정의와 달랐다). 같은 (시장, 코호트) 시도 줄들의 월 초과 계열
+    (`metrics_json.monthly_excess`, 25.1947)로
+    월 초과 샤프를 내고 그 분산을 V 로, N 은 그 줄의 누적 시도(`dsr_n` — `luck.judge` 의 N 그대로), 문턱·PSR 식은
+    `luck` 그대로. 계열이 있는 줄이 둘 미만이면 V 를 못 낸다(모름) — 실행 하나 V 로 물러나지 않는다(0→1 점검은
+    `dsr`·`dsr_cohort` 가운데 낮은 쪽을 본다 — `stage01`)"""
+    for row in out:
+        row["dsr_cohort"] = None
+    for 줄들 in 묶음.values():
+        재료 = []
+        for row in 줄들:
+            xs = row.get("_excess")
+            mm = luck.moments(xs) if xs else None
+            if mm is not None:
+                재료.append((row, xs, mm))
+        if len(재료) < 2:
+            for row in 줄들:
+                row["missing"]["dsr_cohort"] = WHY_DSR_COHORT_FEW
+            continue
+        v = statistics.pvariance([mm[0] for _r, _x, mm in 재료])
+        든 = {id(r) for r, _x, _m in 재료}
+        for row in 줄들:
+            if id(row) not in 든:
+                why = row.get("_excess_why") or "월 초과 계열 표본 3개 미만이거나 변동 0"
+                row["missing"]["dsr_cohort"] = f"이 줄 계열 없음 — {why}"
+        for row, xs, (sr, skew, kurt) in 재료:
+            n = row.get("dsr_n") if isinstance(row.get("dsr_n"), int) else None
+            if n is None:
+                row["missing"]["dsr_cohort"] = "누적 시도 N 없음(luck.n_trials)"
+                continue
+            if len(xs) < luck.MIN_MONTHS:
+                row["missing"]["dsr_cohort"] = f"월 {len(xs)}개 < {luck.MIN_MONTHS}"
+                continue
+            d = luck.psr(sr, luck.expected_max_sr(n, v), len(xs), skew, kurt)
+            row["dsr_cohort"] = None if math.isnan(d) else round(d, 4)
+            if row["dsr_cohort"] is None:
+                row["missing"]["dsr_cohort"] = "PSR 정의 안 됨(분모 ≤ 0)"
+    for row in out:
+        if row["dsr_cohort"] is None and "dsr_cohort" not in row["missing"]:
+            row["missing"]["dsr_cohort"] = WHY_DSR_COHORT_OUT
 
 
 #: 실행 기록(`step_log["scoreboard"]`)에 싣는 칸 — 웹 /backtest "판정판" 이 보이는 칸만(25.1940). 실행 하나의 줄이라
@@ -620,7 +687,7 @@ def rows(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
 #: 늘 비는 칸(서로 다른 종목·끝난 거래)은 뺀다 — 까닭은 이 모듈의 `WHY_*` 그대로이고 웹이 한 줄로 적는다.
 #: 웹 `lib/scoreboard.ts` 의 `SCOREBOARD_KEYS` 와 같아야 한다(시험이 대조)
 STEP_LOG_COLS = (
-    "strategy", "market", "cohort", "trials_cumulative", "cagr", "excess_cagr", "mdd", "dsr", "dsr_n",
+    "strategy", "market", "cohort", "trials_cumulative", "cagr", "excess_cagr", "mdd", "dsr", "dsr_n", "dsr_cohort",
     "control_lower", "gate_lower", "half_first_cagr", "half_second_cagr", "walk_positive", "walk_total", "months",
     "rebalances", "buys", "control_blocks", "gate_blocks", "sells_scored", "bh_q", "capacity", "capacity_complete",
     "stage01_verdict", "stage01_note", "us_unverified",

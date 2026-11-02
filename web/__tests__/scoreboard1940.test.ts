@@ -13,7 +13,7 @@ import {
 
 const 줄 = {
   strategy: "core_h", market: "KR", cohort: "1b", trials_cumulative: 17, cagr: 0.1234, excess_cagr: -0.0101, mdd: -0.2567,
-  dsr: 0.9312, dsr_n: 17, control_lower: 51.04, gate_lower: null, half_first_cagr: 0.05, half_second_cagr: null,
+  dsr: 0.9312, dsr_n: 17, dsr_cohort: 0.8876, control_lower: 51.04, gate_lower: null, half_first_cagr: 0.05, half_second_cagr: null,
   walk_positive: 3, walk_total: 4, bh_q: 0.0421, capacity: 0.00042, capacity_complete: true, stage01_verdict: "모름", stage01_note: "재료 없음: 수용량", months: 48, rebalances: 1000, buys: 120, control_blocks: 9, gate_blocks: 4, sells_scored: 80,
   missing: { gate_lower: "하한 없음 — 묶음 4개(block_bound 최소 미달)", half_second_cagr: "second 반 CAGR 표본 미달" },
 };
@@ -24,7 +24,7 @@ describe("판정판 글 (25.1940)", () => {
     expect(l.label).toBe("핵심 H (합의)");
     expect(l.cohort).toBe("코호트 1b");
     expect(Object.fromEntries(l.cells)).toEqual({
-      CAGR: "+12.3%", "초과 CAGR": "-1.0%", MDD: "-25.7%", DSR: "0.93 (N 17)", "대조 하한": "51.0", "BH q": "0.042", "수용량": "0.042% / 1억 원", "관문 하한": "없음",
+      CAGR: "+12.3%", "초과 CAGR": "-1.0%", MDD: "-25.7%", DSR: "0.93 (N 17)", "DSR(코호트 V)": "0.89", "대조 하한": "51.0", "BH q": "0.042", "수용량": "0.042% / 1억 원", "관문 하한": "없음",
       "앞 반": "+5.0%", "뒤 반": "없음", "걷는 창": "3/4 창 초과 > 0",
     });
     // 25.1947 — 창이 없으면(12개월 미만) 0/0 이 아니라 그렇게, 한쪽이라도 비면 없음
@@ -74,6 +74,7 @@ describe("판정판 글 (25.1940)", () => {
     // 25.1952 — 나중에 생긴 칸은 생긴 판으로 까닭을 적는다
     expect(빈.missing).toEqual([
       "없음: CAGR — 까닭 기록 없음",
+      "없음: DSR(코호트 V) — 이 칸이 생기기(25.2093) 전 실행 — 다음 실행부터 찹니다",
       "없음: 걷는 창·걷는 창 수 — 이 칸이 생기기(25.1947) 전 실행 — 다음 실행부터 찹니다",
       "없음: BH q — 이 칸이 생기기(25.1951) 전 실행 — 다음 실행부터 찹니다",
       "없음: 수용량 — 이 칸이 생기기(25.1954) 전 실행 — 다음 실행부터 찹니다",
@@ -215,12 +216,13 @@ describe("판정판 안내 줄은 가리킬 곳이 있을 때만 (25.1942)", () 
 
   it("새 칸이 생기기 전 실행의 줄 — 키도 까닭도 없으면 생긴 판으로 까닭을 적는다(25.1952)", () => {
     const 옛 = { ...줄 } as Record<string, unknown>;
-    for (const k of ["walk_positive", "walk_total", "bh_q", "stage01_verdict", "stage01_note"]) delete 옛[k];
+    for (const k of ["walk_positive", "walk_total", "bh_q", "stage01_verdict", "stage01_note", "dsr_cohort"]) delete 옛[k];
     const l = scoreLine(parseScoreboard([옛]).rows[0]);
     expect(Object.fromEntries(l.cells)["걷는 창"]).toBe("없음");
     expect(l.missing).toContain("없음: 걷는 창·걷는 창 수 — 이 칸이 생기기(25.1947) 전 실행 — 다음 실행부터 찹니다");
     expect(l.missing).toContain("없음: BH q — 이 칸이 생기기(25.1951) 전 실행 — 다음 실행부터 찹니다");
     expect(l.missing).toContain("없음: 0→1 점검·0→1 근거 — 이 칸이 생기기(25.1950) 전 실행 — 다음 실행부터 찹니다");
+    expect(l.missing).toContain("없음: DSR(코호트 V) — 이 칸이 생기기(25.2093) 전 실행 — 다음 실행부터 찹니다");
     expect(l.stage).toBeNull();
     // 배치 까닭이 있으면 그것이 먼저 — 값이 있으면 까닭 없음
     const 새 = scoreLine(parseScoreboard([{ ...줄, bh_q: null, missing: { ...줄.missing, bh_q: "코호트 밖 — BH 묶음 없음" } }]).rows[0]);

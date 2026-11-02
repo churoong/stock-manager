@@ -343,8 +343,9 @@ def test_입출력_import_없음() -> None:
             mods |= {a.name for a in node.names}
         elif isinstance(node, ast.ImportFrom):
             mods.add(node.module or "")
-    # math 는 25.1951(t 꼬리·BH — lgamma·log), bisect 는 25.1954(수용량 20일 창) — 입출력 없는 계산 모듈
-    assert mods <= {"__future__", "bisect", "json", "math", "typing"}, mods
+    # math 는 25.1951(t 꼬리·BH — lgamma·log), bisect 는 25.1954(수용량 20일 창), statistics·batch.services(`luck` —
+    # 코호트 V DSR, 25.2093) — 입출력 없는 계산 모듈. `luck` 이 끌고 오는 것은 아래 새 프로세스 검사가 본다
+    assert mods <= {"__future__", "bisect", "json", "math", "statistics", "typing", "batch.services"}, mods
     # 불러온 뒤에도 DB·HTTP 모듈이 따라 들어오지 않는다(새 프로세스)
     code = ("import sys, batch.services.scoreboard; "
             "print(sorted(m for m in ('batch.core.db', 'batch.core.client', 'requests', 'httpx') if m in sys.modules))")
