@@ -573,11 +573,16 @@ def stage01_verdict(checks: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _날값(v: Any) -> str:
-    """판정에 쓴 값 그대로(유효 6자리) — 화면 칸의 반올림(f2·pct)과 달리 문턱 언저리를 가른다(25.2104)"""
+    """판정에 쓴 값 그대로 — 화면 칸의 반올림(f2·pct)과 달리 문턱 언저리를 가른다(25.2104). 고정 소수 12자리에서 끝 0 을
+    뗀다(25.2108, 25.2104 교차검증 note — 유효 6자리는 작은 값을 "-4e-05" 로, 문턱에서 5e-7 안쪽 값을 문턱과 같은 글로
+    찍었다)"""
     if isinstance(v, list | tuple):
         return "/".join(_날값(x) for x in v)
     x = _num(v)
-    return str(v) if x is None else f"{x:.6g}"
+    if x is None or not math.isfinite(x):
+        return str(v)
+    글 = f"{x:.12f}".rstrip("0").rstrip(".")
+    return "0" if 글 in ("", "-0") else 글
 
 
 def stage01_note(st: dict[str, Any]) -> str:

@@ -21,7 +21,7 @@ from tests.test_stage01_1950 import 기준, 좋은
         # 화면 f2 로 "0.90" — 문턱 0.90 을 넘은 듯 보인다
         ({"dsr": 0.8996}, {"dsr": 0.9}, "DSR(낮은 쪽) 0.8996(>= 0.9)"),
         # pct 로 둘 다 "0.0%"
-        ({"excess_cagr": -0.00004}, {"excess_cagr": 0.00004}, "초과 CAGR -4e-05(> 0)"),
+        ({"excess_cagr": -0.00004}, {"excess_cagr": 0.00004}, "초과 CAGR -0.00004(> 0)"),
         # pct 로 둘 다 "-25.0%" — 기준 MDD −0.20, 허용 5%p
         ({"mdd": -0.2504}, {"mdd": -0.2496}, "MDD(기준 대비) -0.2504(>= 기준 MDD -0.2 − 0.05)"),
         # f1 로 둘 다 "50.0"
@@ -47,3 +47,10 @@ def test_기준_MDD_가_없으면_문턱_글에_숫자_없이() -> None:
     assert st is not None
     칸 = next(c for c in st["checks"] if c["key"] == "mdd_vs_base")
     assert 칸["target"] == ">= 기준 MDD − 0.05" and 칸["ok"] is None
+
+
+@pytest.mark.parametrize(("값", "글"), [(0.8999996, "0.8999996"), (-0.00004, "-0.00004"), (50.0, "50"), (1e-13, "0"),
+                                       (-1e-13, "0"), ([3, 5], "3/5"), (None, "None")])
+def test_날값_글은_지수_없이_문턱_언저리까지(값: Any, 글: str) -> None:
+    """25.2108 — 유효 6자리였을 때 0.8999996 은 "0.9" 로 문턱과 같아 보였다"""
+    assert scb._날값(값) == 글
