@@ -60,6 +60,8 @@ NO_COST_SUFFIX = "_no_cost"
 #: 경고 글로 가르는 표시 — 정의처는 `services/backtest.WARN_SURVIVORSHIP`·`jobs/backtest.WARN_PIT_UNIVERSE`·
 #: `WARN_NO_HISTORICAL_UNIVERSE`. jobs 를 import 하면 DB 모듈이 따라 들어와 머리글만 적는다(시험이 대조)
 SURVIVORSHIP_PREFIX = "생존편향"
+#: 0→1 점검의 미국 미검증 칸 이름(25.2083) — 점검 글 "재료 없음: 미국 운영 일치 미검증"
+US_PARITY_LABEL = "미국 운영 일치 미검증"
 #: 미국 리플레이 미검증 단서의 머리(25.2077) — `jobs/core_backtest.WARN_US_UNVERIFIED`·`WARN_US_UNVERIFIED_OTHER`·
 #: `WARN_US_LIMIT_UNVERIFIED`(시험이 대조). 웹은 묶음 경고를 한 띠로 합쳐 보여, 어느 줄의 단서인지 판정판 줄 칸으로
 #: 싣는다
@@ -461,6 +463,11 @@ def stage01(row: dict[str, Any], base: dict[str, Any] | None) -> dict[str, Any] 
         ("capacity", "수용량", row.get("capacity"), f"실전 목표에서 <= 거래대금의 {STAGE01_MAX_CAPACITY:.0%}",
          _capacity_ok(row)),
     ]  # fmt: skip
+    if row.get("us_unverified"):
+        # 미국 리플레이가 운영 미국 판과 일치로 묶이지 않은 줄(25.2077 꼬리표) — 다른 칸이 다 통과해도 "후보" 가
+        # 되지 않게 모름으로(25.2083, 25.2077 교차검증 note: 이름 옆엔 "참고로만" 인데 0→1 점검 글은 "통과" 가 찍힐 수
+        # 있었다)
+        checks.append(("us_parity", US_PARITY_LABEL, True, "운영 미국 판과 일치 시험으로 묶임", None))
     out = [{"key": k, "label": lab, "now": now, "target": tgt, "ok": o} for k, lab, now, tgt, o in checks]
     return {**stage01_verdict(out), "checks": out, "base": (base or {}).get("strategy")}
 

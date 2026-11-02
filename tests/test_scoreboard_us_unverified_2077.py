@@ -35,3 +35,19 @@ def test_줄마다_미국_미검증_칸() -> None:
                                                               "core_g": False}  # fmt: skip
     실림 = {r["strategy"]: r for r in scb.step_log_rows(list(줄.values()))}
     assert 실림["core_r1"]["us_unverified"] is True and 실림["core_b"]["us_unverified"] is False
+
+
+def test_미국_미검증_줄은_0_1_점검이_후보가_되지_않는다(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """25.2083 (25.2077 교차검증 note) — 이름 옆엔 "미국 미검증(참고로만)" 인데 0→1 점검은 그 칸을 보지 않아, 다른 칸이
+    다 통과하면 "후보" 가 찍힐 수 있었다. 미검증 줄에만 "미국 운영 일치 미검증" 칸을 모름으로 더한다(국내·검증 줄은 그대로)"""
+    monkeypatch.setattr(scb, "_capacity_ok", lambda _r: True)  # 수용량 목표(사용자 결정) 전이라 늘 모름 — 이 시험만
+    다_통과 = {"strategy": "core_d", "cohort": "2", "market": "US", "months": 60.0, "invested_share": 0.9,
+             "avg_holdings": 10.0, "excess_cagr": 0.05, "control_lower": 60.0, "bh_q": 0.01, "dsr": 0.99,
+             "half_first_cagr": 0.1, "half_second_cagr": 0.1, "walk_positive": 40, "walk_total": 49, "mdd": -0.1}  # fmt: skip
+    기준 = {"strategy": "core_b", "mdd": -0.1}
+    assert scb.stage01({**다_통과, "us_unverified": False}, 기준)["verdict"] == "후보"
+    st = scb.stage01({**다_통과, "us_unverified": True}, 기준)
+    assert st["verdict"] == "모름" and st["unknown"] == [scb.US_PARITY_LABEL]
+    assert scb.stage01_note(st) == f"재료 없음: {scb.US_PARITY_LABEL}"
+    # 옛 실행(칸 없음 — None)은 예전대로
+    assert "us_parity" not in {c["key"] for c in scb.stage01({**다_통과, "us_unverified": None}, 기준)["checks"]}
