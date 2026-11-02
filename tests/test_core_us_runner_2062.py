@@ -19,6 +19,7 @@ from batch.jobs import backtest as jb
 from batch.jobs import core_backtest as cj
 from batch.services import backtest as bt
 from batch.services import core_strategy as cs
+from batch.services import signals as sg
 from tests.test_core_backtest_job_1534 import N, _영업일, 오늘
 from tests.test_portfolio_job import MemClient
 
@@ -224,6 +225,31 @@ def test_미국_밴드_PBR_은_가격_수준을_읽는다(monkeypatch: pytest.Mo
         return out
 
     monkeypatch.setattr(bt.PriceView, "level_closes", 엿봄)
+    # 지금 PBR 쪽(`band_close`)도 — 띠만 보면 `band_close` 를 수정종가로 바꿔도(지금 PBR 만 10% 낮게) 지났다(25.2083,
+    # 25.2074 교차검증 [권고]). 신호 입력의 `band_close` 가 그날 원 종가인지, `pbr_now` 가 그 값으로 잰 것인지 본다
+    입력: list[tuple[int, float | None, float | None, object]] = []
+    원입력 = sg.SignalInput
+
+    def 엿입력(*a: object, **k: object) -> object:
+        x = 원입력(*a, **k)
+        입력.append((int(k["stock_id"]), k.get("band_close"), k.get("pbr_now"), k.get("band")))  # type: ignore[arg-type]
+        return x
+
+    monkeypatch.setattr(sg, "SignalInput", 엿입력)
+    # 이 합성 자료는 장기 후보 문턱(품질·가치 55)을 넘는 종목이 없고 이력이 짧아(표본 하한 250일) 밴드 경로에 닿지 않는다 —
+    # 시험 안에서만 모두 장기 후보로, 하한은 1 로(25.2083 — 25.2074 의 띠 대조는 `jobs/backtest` 쪽 읽기였다)
+    from batch.jobs import signals as signals_job
+
+    monkeypatch.setattr(signals_job, "needs_band", lambda _fs: True)
+    원밴드 = sg.build_band
+    monkeypatch.setattr(sg, "build_band", lambda series, min_sample=1: 원밴드(series, 1))
     assert cj.run_core("US", years=1, today=오늘, force=True, variants=("core_b",)) == 0
     assert 본, "밴드를 한 번도 재지 않았다 — 시험이 헛돈다"
     assert all(c == pytest.approx(원종가[(sid, d)]) for sid, d, c in 본[:50]), 본[:3]
+    밴드든 = [(sid, bc, pn) for sid, bc, pn, band in 입력 if band is not None]
+    assert 밴드든, "밴드가 선 신호 입력이 없다 — 시험이 헛돈다"
+    원종가값 = {(sid, c) for (sid, _d), c in 원종가.items()}
+    for sid, bc, pn in 밴드든[:50]:
+        assert bc is not None and (sid, bc) in 원종가값, (sid, bc)  # 원 종가 가운데 하나(수정종가 × 0.9 아님)
+        assert pn is not None and pn > 0
+    # 같은 종목·같은 자본이면 pbr_now ∝ band_close — 수정종가로 바꾸면 비는 같아도 위 원 종가 대조가 깨진다

@@ -9,7 +9,7 @@
 - 열린 달러 매수는 원화로 센 뒤 ÷ 환율로 달러 보유처럼 섹터 상한에 들어간다
 
 `buy_orders` 의 `남은예약 / 환율`(보유 목록에 못 넣은 예약)은 이 시험 밖이다 — `reserved_by_stock` 이 매수 주문을 모두 종목별로
-세므로 남은 몫은 반올림 1원 안이다(이름 붙은 죽은 갈래). `rationale.reserved` 는 기록 칸뿐이다.
+세므로 남은 몫은 반올림 차(주문 수 × 0.5원 이하)다(이름 붙은 죽은 갈래). `rationale.reserved` 는 기록 칸뿐이다.
 """
 
 from __future__ import annotations
@@ -108,3 +108,18 @@ def test_열린_달러_매수는_원화로_센_뒤_달러_보유처럼_섹터_�
     else:
         assert 결정[3]["reason"] == "섹터 상한 도달" and 주문 == []
         assert 결정[3]["detail"]["note"].startswith("기술 이미 1.0% + 이 종목 10.0%"), 결정[3]["detail"]["note"]
+
+
+def test_열린_달러_매수가_묶은_현금은_새_매수에_쓰지_않는다() -> None:
+    """25.2082 (25.2078 교차검증 [권고]) — 현금 = 열린 매수 예약(종목 9, 100달러 × 100주 ≈ 1,352만 원) + 1,000달러어치 원화.
+    새 주문의 현금 검사 금액 합은 (현금 − 예약) 안이다. `size_buys` 에 넘기는 `cash_krw − 예약` 의 예약 빼기가 빠지면 묶인
+    현금을 한 번 더 써 다음 날 체결 단계의 빚 막기가 회차를 '현금 부족' 으로 취소한다(장부·결정 원장이 실제 배분과 갈림)"""
+    열린 = pp.Order(id=9, account_id="B", stock_id=9, side="buy", order_type="limit", limit_price=100.0, quantity=100,
+                   currency="USD", fill_session="2026-10-15")  # fmt: skip
+    예약 = pp.reserved_krw([열린], {"USD": 환율})
+    assert 예약 == pytest.approx(100.0 * 100 * 여유 * 환율, abs=1.0)
+    v = _평가(1.3e9, 예약 + 1_000 * 환율)
+    주문, 기록 = _사기(v, [_신호()], open_buys=[열린], sids=(1, 9))
+    쓴 = sum(o["cash_krw"] for o in 주문)
+    assert 0 < 쓴 <= v.cash_krw - 예약 + 1e-6, (쓴, 기록)
+    assert 쓴 + 96.0 * 환율 * 여유 > v.cash_krw - 예약  # 남김 없이 — 예약 밖 현금은 다 썼다
