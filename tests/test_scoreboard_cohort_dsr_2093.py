@@ -90,3 +90,24 @@ def test_시도_아닌_줄은_코호트_V_밖() -> None:
     # R1 계열은 V 에 들지 않는다 — 시도 둘의 V 로 낸 값과 같다
     기대 = _기대({"core_d": _계열(1), "core_e": _계열(2)}, 6)
     assert rows["core_d"]["dsr_cohort"] == pytest.approx(기대["core_d"])
+
+
+def test_짧은_계열·계열_없음·N_없음의_까닭() -> None:
+    """25.2096 (25.2093 교차검증 [권고]) — 시험 밖이던 갈래 셋. 20개월 줄은 V 에는 들고(`luck.judge` 와 같게) 판정은 모름,
+    계열 없는 줄은 그 까닭, 누적 시도 N 이 없는 줄은 실행 줄 수로 물러나지 않고 모름(등록 정의 N = 누적)"""
+    짧은 = _계열(4, n=20)
+    줄 = {"core_d": {"monthly_excess": _계열(1), "luck": {"dsr": 0.9, "n_trials": 6, "months": 40}},
+         "core_e": {"monthly_excess": _계열(2), "luck": {"dsr": 0.9, "n_trials": 6, "months": 40}},
+         "core_a": {"monthly_excess": 짧은, "luck": {"dsr": 0.9, "n_trials": 6, "months": 20}},
+         "core_c": {"luck": {"dsr": 0.9, "n_trials": 6, "months": 40}},  # 계열 없음(25.1947 전)
+         "core_g2": {"monthly_excess": _계열(3)}}  # luck 없음 — N 모름
+    rows = {r["strategy"]: r for r in scb.rows([_실행(줄)])}
+    assert rows["core_a"]["dsr_cohort"] is None
+    assert rows["core_a"]["missing"]["dsr_cohort"] == f"월 20개 < {luck.MIN_MONTHS}"
+    assert rows["core_c"]["dsr_cohort"] is None
+    assert rows["core_c"]["missing"]["dsr_cohort"].startswith("이 줄 계열 없음 — ")
+    assert rows["core_g2"]["dsr_cohort"] is None
+    assert rows["core_g2"]["missing"]["dsr_cohort"] == "누적 시도 N 없음(luck.n_trials)"
+    # V 에는 계열 있는 시도 줄 넷(짧은 줄·N 없는 줄 포함)이 든다 — `luck.judge` 가 MIN_MONTHS 미만 계열도 V 에 넣는 것과 같게
+    기대 = _기대({"core_d": _계열(1), "core_e": _계열(2), "core_a": 짧은, "core_g2": _계열(3)}, 6)
+    assert rows["core_d"]["dsr_cohort"] == pytest.approx(기대["core_d"])

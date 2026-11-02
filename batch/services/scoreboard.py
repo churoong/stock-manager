@@ -459,7 +459,7 @@ def stage01(row: dict[str, Any], base: dict[str, Any] | None) -> dict[str, Any] 
          ok(row.get("bh_q"), lambda v: v <= STAGE01_MAX_BH_Q)),
         # DSR — 실행 V(`dsr`)·코호트 V(`dsr_cohort`, 25.2093 — 등록 정의) 가운데 **낮은 쪽**. 코호트 V 를 못 낸 줄은
         # 실행 V 만(예전과 같다) — 둘 중 하나라도 문턱 밑이면 걸림(보수적)
-        ("dsr", "DSR", _낮은(row.get("dsr"), row.get("dsr_cohort")), f">= {STAGE01_MIN_DSR}",
+        ("dsr", "DSR(낮은 쪽)", _낮은(row.get("dsr"), row.get("dsr_cohort")), f">= {STAGE01_MIN_DSR}",
          ok(_낮은(row.get("dsr"), row.get("dsr_cohort")), lambda v: v >= STAGE01_MIN_DSR)),
         ("half", "앞뒤 반", None if hf is None or hs is None else [hf, hs], "둘 다 > 0",
          None if hf is None or hs is None else hf > 0 and hs > 0),
@@ -638,7 +638,10 @@ WHY_DSR_COHORT_FEW = "코호트 V — 월 초과 계열이 있는 같은 코호�
 
 def _cohort_dsr(out: list[dict[str, Any]], 묶음: dict[tuple[Any, Any], list[dict[str, Any]]]) -> None:
     """DSR 의 V 를 **코호트**에서(25.2093, funnel.md 2.2 "DSR(N = 누적, V = 코호트)" — 예전 `dsr` 칸은 그 실행의
-    곡선들로 낸 V 라 등록 정의와 달랐다). 같은 (시장, 코호트) 시도 줄들의 월 초과 계열
+    곡선들로 낸 V 라 등록 정의와 달랐다). **운영은 실행 하나만 넣는다**(`jobs/backtest.scoreboard_log` 의
+    `rows([record])`) — 그래서 지금의 V 는 그 실행 안 같은 코호트 시도 줄들(비시도 기준·대조를 뺀 것)이고, 실행 여럿을
+    모으는 것은 그런 판정판이 생길 때 남는다(25.2096, 25.2093 교차검증 [권고]). 같은 (시장, 코호트) 시도 줄들의
+    월 초과 계열
     (`metrics_json.monthly_excess`, 25.1947)로
     월 초과 샤프를 내고 그 분산을 V 로, N 은 그 줄의 누적 시도(`dsr_n` — `luck.judge` 의 N 그대로), 문턱·PSR 식은
     `luck` 그대로. 계열이 있는 줄이 둘 미만이면 V 를 못 낸다(모름) — 실행 하나 V 로 물러나지 않는다(0→1 점검은
