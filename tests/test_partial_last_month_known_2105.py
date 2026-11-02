@@ -35,3 +35,5 @@ def test_11월_3일_실행의_끝_달은_하루짜리_11월이다() -> None:
     assert len(계열) == 60
     창 = scb.walk_windows([(m, v) for m, v in 계열])
     assert (창["total"], 창["dropped"]) == (5, 0)  # 끝 달을 빼면 (4, 11) — 0→1 의 3/4 가 다른 창 묶음으로 판정된다
+    뺀 = scb.walk_windows([(m, v) for m, v in 계열[:-1]])
+    assert (뺀["total"], 뺀["dropped"]) == (4, 11)  # 판정판의 경계 규칙(25.2107)이 이 값으로 다시 판정한다

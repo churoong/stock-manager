@@ -60,6 +60,7 @@ NOT_TRIALS = frozenset({"benchmark", "core_r1", "core_r2"})
 #: S·T 계좌형 리플레이 변형(`jobs.core_backtest.ST_VARIANTS` — jobs 를 import 하지 않아 이름만, 시험이 대조)
 ST_REPLAY = frozenset({"st_s", "st_t"})
 WHY_EV_ST = "S·T 리플레이는 결정 원장 꼴이 아니라 결정 단위 증거를 내지 않는다(25.2044)"
+WHY_EV_FAILED = "결정 단위 증거 칸이 모두 비었다 — 판정 실패(실행 경고 참고)"
 #: 비용 0 사본 꼬리 — `jobs/backtest` 의 `composite_no_cost`
 NO_COST_SUFFIX = "_no_cost"
 
@@ -179,8 +180,8 @@ def _row(run: dict[str, Any], r: dict[str, Any], twins: dict[str, dict[str, Any]
     ev = mj.get("evidence") if isinstance(mj.get("evidence"), dict) else None
     # 칸은 있는데 값이 모두 빈 증거(25.2106) — 핵심 실행은 증거 없는 변형에도 `{k: None}` 을 싣는다(S·T 리플레이,
     # 판정 실패). 그 꼴을 "묶음 None개(block_bound 최소 미달)" 로 적지 않게 없음으로 본다
-    빈증거 = ev is not None and all(v is None for v in ev.values())
-    if 빈증거:
+    빈증거 = bool(ev) and all(v is None for v in ev.values())  # 빈 dict({}) 는 옛 기록 꼴 — 예전 까닭(25.2107)
+    if 빈증거 or ev == {}:  # 빈 dict 도 칸 없음과 같다 — "묶음 None개" 로 적지 않게(25.2107)
         ev = None
     gate = (ev or {}).get("gate") if isinstance((ev or {}).get("gate"), dict) else None
     sell = (ev or {}).get("after_sell") if isinstance((ev or {}).get("after_sell"), dict) else None
@@ -240,11 +241,11 @@ def _row(run: dict[str, Any], r: dict[str, Any], twins: dict[str, dict[str, Any]
 
     # 무작위 대조 분위 묶음 하한(`core_evidence.evidence`)·결정 단위 분위 하한(`gate_evidence`
     # = `pp.selection_evidence`)
+    why_ev = ("월 백테스트는 결정 원장이 없어 결정 단위 판정을 내지 않는다" if job == JOB_MONTHLY
+              else WHY_EV_ST if 빈증거 and name in ST_REPLAY
+              else WHY_EV_FAILED if 빈증거
+              else "metrics_json.evidence 없음(판정 실패 또는 25.1544 전 기록)")  # fmt: skip
     if ev is None:
-        why_ev = ("월 백테스트는 결정 원장이 없어 결정 단위 판정을 내지 않는다" if job == JOB_MONTHLY
-                  else WHY_EV_ST if 빈증거 and name in ST_REPLAY
-                  else "결정 단위 증거 칸이 모두 비었다 — 판정 실패(실행 경고 참고)" if 빈증거
-                  else "metrics_json.evidence 없음(판정 실패 또는 25.1544 전 기록)")  # fmt: skip
         put("control_lower", None, why_ev)
         put("control_p", None, why_ev)
         put("gate_lower", None, why_ev)
@@ -296,6 +297,9 @@ def _row(run: dict[str, Any], r: dict[str, Any], twins: dict[str, dict[str, Any]
     w = walk_windows([(str(k), float(v)) for k, v in me]) if why_w == "" and isinstance(me, list) else None
     # 코호트 V DSR(25.2093)의 재료 — 달 순 월 초과 값. `rows()` 가 쓰고 내보내기 전에 지운다(실행 기록 칸 아님)
     out["_excess"] = [float(v) for _k, v in sorted((str(k)[:7], v) for k, v in me)] if w is not None else None
+    # 끝 달 경계(25.2107) 재료 — 달 이름과 실행한 달. 끝 달이 실행한 달이면 부분 달이다(25.2105)
+    out["_excess_months"] = sorted(str(k)[:7] for k, _v in me) if w is not None else None
+    out["_run_month"] = _run_time(run)[:7]
     out["_excess_why"] = why_w
     put("walk", w, why_w)
     put("walk_positive", (w or {}).get("positive"), why_w)
@@ -326,7 +330,9 @@ def _row(run: dict[str, Any], r: dict[str, Any], twins: dict[str, dict[str, Any]
     # 숫자로 고정해 싣는다 — 점검표(`_num`)와 화면(z.number)이 같은 값을 본다(25.1955)
     put("months", _num((luck or {}).get("months")), "luck.months 없음 — 운 판정 없는 행")
     put("rebalances", r.get("rebalances"), "rebalances 열 없음")
-    no_ev = "결정 단위 증거 없음(월 백테스트 또는 판정 실패)"
+    # 빈 증거면 대조 하한 칸과 같은 까닭(25.2107, 25.2106 교차검증 [권고] — S·T 한 줄에 "내지 않는다" 와 "판정 실패" 가
+    # 함께 찍혔다)
+    no_ev = why_ev if 빈증거 else "결정 단위 증거 없음(월 백테스트 또는 판정 실패)"
     put("buys", (ev or {}).get("buys"), no_ev)
     put("control_blocks", (ev or {}).get("n_blocks"), no_ev)
     put("gate_blocks", (gate or {}).get("n_blocks"), no_ev)
@@ -639,12 +645,21 @@ def rows(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         for row, q in zip(줄들, bh_q([x.get("control_p") for x in 줄들], m=m), strict=True):
             row["bh_q"] = q
     _cohort_dsr(out, 묶음)
+    뺀 = _partial_month_rows(out, 묶음)
     for row in out:
         if row["bh_q"] is None:
             밖 = row["cohort"] is None or not row["is_trial"]
             p_why = row["missing"].get("control_p", "")
             row["missing"]["bh_q"] = WHY_BH_NO_COHORT if 밖 else f"대조 분위 p 없음 — {p_why}"  # p_why: 묶음 미달 등
         st = stage01(row, 기준들.get(id(row)))
+        경계 = None
+        if st is not None and id(row) in 뺀:
+            # 25.2105 사전 등록(11-03 결과 전) — 끝 달을 뺀 계열로 다시 낸 판정이 다르면 "모름"(경계).
+            # 어느 쪽이 통과든 같다
+            st2 = stage01(뺀[id(row)], 기준들.get(id(row)))
+            if st2 is not None and st2["verdict"] != st["verdict"]:
+                경계 = f"경계 — 끝 달 {row['_excess_months'][-1]}(부분 달)을 빼면 {st2['verdict']}(25.2105)"
+                st = {**st, "verdict": "모름", "partial_month": st2["verdict"]}
         row["stage01"] = st
         if st is None:
             row["stage01_verdict"] = row["stage01_note"] = None
@@ -652,11 +667,49 @@ def rows(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
             for c in ("stage01", "stage01_verdict", "stage01_note"):
                 row["missing"][c] = why
         else:
-            row["stage01_verdict"], row["stage01_note"] = st["verdict"], stage01_note(st)
+            글 = stage01_note(st)
+            row["stage01_verdict"], row["stage01_note"] = st["verdict"], (f"{경계} · {글}" if 경계 else 글)
     for row in out:
-        row.pop("_excess", None)
-        row.pop("_excess_why", None)
+        for k in ("_excess", "_excess_why", "_excess_months", "_run_month"):
+            row.pop(k, None)
     return sorted(out, key=lambda x: (str(x["market"]), str(x["cohort"] or "~"), x["strategy"]))
+
+
+def _partial_month_rows(
+    out: list[dict[str, Any]], 묶음: dict[tuple[Any, Any], list[dict[str, Any]]]
+) -> dict[int, dict]:
+    """끝 달이 **실행한 달**(부분 달)인 줄 → 그 달을 뺀 계열로 다시 낸 점검 재료 줄 (25.2107, 25.2105 사전 등록 —
+    funnel.md 3장 0→1 "끝 달 부분 관측").
+
+    예약 판정 실행(매월 3~7일)의 곡선은 그달 1~5거래일에서 끝나 월 계열 마지막 "달" 이 부분 달이다(backtest.md 9장
+    "월말 자산끼리" 와 어긋남 — 엔진은 11-03 판정 실행 뒤 판을 올려 고친다). 엔진을 건드리지 않고 판정판에서:
+    - 걷는 창 = 끝 달을 뺀 계열의 `walk_windows`
+    - DSR = 끝 달을 뺀 계열들로 다시 낸 코호트 V DSR(`_cohort_dsr` 그대로 — 같은 코호트 줄 모두 뺀 계열로). 실행 V
+      (`dsr`, 엔진이 곡선으로 낸 값)는 여기서 다시 낼 수 없어 뺀다. 코호트 V 를 못 내면 원래 두 칸을 그대로 둔다
+      (더 알 것이 없다 — 모름으로 몰지 않는다)
+    엔진을 고친 뒤 실행은 끝 달이 실행한 달이 아니라 빈 결과다."""
+
+    def 부분(row: dict[str, Any]) -> bool:
+        ms = row.get("_excess_months")
+        return bool(ms) and bool(row.get("_excess")) and ms[-1] == row.get("_run_month")
+
+    if not any(부분(r) for r in out):
+        return {}
+    사본 = {id(r): {**r, "missing": {}, "_excess": r["_excess"][:-1] if 부분(r) else r.get("_excess")} for r in out}
+    _cohort_dsr(list(사본.values()), {k: [사본[id(r)] for r in v] for k, v in 묶음.items()})
+    뺀: dict[int, dict] = {}
+    for r in out:
+        if not 부분(r):
+            continue
+        c = 사본[id(r)]
+        w = walk_windows(list(zip(r["_excess_months"][:-1], r["_excess"][:-1], strict=True)))
+        c["walk_positive"], c["walk_total"] = w["positive"], w["total"]
+        if c["dsr_cohort"] is not None:
+            c["dsr"] = None
+        else:
+            c["dsr"], c["dsr_cohort"] = r.get("dsr"), r.get("dsr_cohort")
+        뺀[id(r)] = c
+    return 뺀
 
 
 #: 코호트 V DSR 의 까닭 글(25.2093)
