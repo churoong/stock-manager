@@ -425,7 +425,9 @@ def test_운영_체결_판정과_찬_회차·보유·원가가_같다(variant: s
         if set(엔진주식) != set(h["pos"]):
             틀림.append(f"{day} 보유: 엔진 {sorted(엔진주식)} ≠ 운영 {sorted(h['pos'])}")
             continue
-        평가 = h["cash"] + sum(q * prices[sid][day] for sid, (q, _c) in h["pos"].items())
+        # 운영 현금은 원화, 보유 평가는 종목 통화 — 미국 판은 × 환율(25.2087, 국내·환율 1.0 판은 그대로)
+        환 = t10.환율 if t10.시장 == "US" else 1.0
+        평가 = h["cash"] + sum(q * prices[sid][day] * 환 for sid, (q, _c) in h["pos"].items())
         if abs(h["cash"] / 평가 - (1 - sum(reb.weights.values()))) > ALLOW_REL:
             틀림.append(f"{day} 현금 비중: 엔진 {1 - sum(reb.weights.values())} ≠ 운영 {h['cash'] / 평가}")
         for sid, (q, 원가) in h["pos"].items():
