@@ -49,5 +49,5 @@ def test_미국_미검증_줄은_0_1_점검이_후보가_되지_않는다(monkey
     st = scb.stage01({**다_통과, "us_unverified": True}, 기준)
     assert st["verdict"] == "모름" and st["unknown"] == [scb.US_PARITY_LABEL]
     assert scb.stage01_note(st) == f"재료 없음: {scb.US_PARITY_LABEL}"
-    # 옛 실행(칸 없음 — None)은 예전대로
+    # 칸이 None 인 dict 를 직접 넘길 때(웹 step_log 의 옛 실행 null 과 같은 꼴 — `rows()` 경로는 늘 bool)는 예전대로
     assert "us_parity" not in {c["key"] for c in scb.stage01({**다_통과, "us_unverified": None}, 기준)["checks"]}

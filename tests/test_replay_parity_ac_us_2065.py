@@ -69,7 +69,7 @@ def test_미국_C_슬리피지_판도_같다() -> None:
 
     비용 = {f"{t._앞}_buy_pct": 0.015, f"{t._앞}_sell_pct": 0.015}
     t.비용판.setdefault("slip", (비용, bt.Costs.for_country(t.시장, 비용, {})))
-    # 다른 모듈이 같은 열쇠에 다른 비용을 먼저 넣었으면 그 값을 쓰게 된다 — 같은지 본다(25.2083, 교차검증 note)
+    # 다른 모듈이 같은 열쇠에 다른 비용을 먼저 넣었으면 그 값을 쓰게 된다 — 같은지 본다(25.2082, 교차검증 note)
     assert t.비용판["slip"][0] == 비용 and t.비용판["slip"][1] == bt.Costs.for_country(t.시장, 비용, {})
     for 단 in (t._L0, t._L1, t._L2, t._L3, hde_us.hde._회의_대조):
         틀림 = 단("core_c", "slip")

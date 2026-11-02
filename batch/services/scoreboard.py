@@ -467,7 +467,7 @@ def stage01(row: dict[str, Any], base: dict[str, Any] | None) -> dict[str, Any] 
         # 미국 리플레이가 운영 미국 판과 일치로 묶이지 않은 줄(25.2077 꼬리표) — 다른 칸이 다 통과해도 "후보" 가
         # 되지 않게 모름으로(25.2083, 25.2077 교차검증 note: 이름 옆엔 "참고로만" 인데 0→1 점검 글은 "통과" 가 찍힐 수
         # 있었다)
-        checks.append(("us_parity", US_PARITY_LABEL, True, "운영 미국 판과 일치 시험으로 묶임", None))
+        checks.append(("us_parity", US_PARITY_LABEL, "미검증", "운영 미국 판과 일치 시험으로 묶임", None))
     out = [{"key": k, "label": lab, "now": now, "target": tgt, "ok": o} for k, lab, now, tgt, o in checks]
     return {**stage01_verdict(out), "checks": out, "base": (base or {}).get("strategy")}
 

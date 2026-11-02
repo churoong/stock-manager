@@ -11,7 +11,8 @@ const pkg = JSON.parse(readFileSync(join(__dirname, "..", "package.json"), "utf8
 
 describe("package.json 명령 (25.2080)", () => {
   it("next 하위 명령은 Next 16 에 있는 것만 쓴다 — `next lint` 없음", () => {
-    expect(Number(pkg.dependencies.next.split(".")[0])).toBeGreaterThanOrEqual(16);
+    // 범위 표기(^16·~16)로 바뀌어도 읽히게 앞 기호를 뗀다(25.2085, 교차검증 note)
+    expect(Number(pkg.dependencies.next.replace(/^[^\d]*/, "").split(".")[0])).toBeGreaterThanOrEqual(16);
     for (const [name, cmd] of Object.entries(pkg.scripts)) {
       const m = cmd.match(/^next\s+(\S+)/);
       if (m) expect(["dev", "build", "start"], name).toContain(m[1]);

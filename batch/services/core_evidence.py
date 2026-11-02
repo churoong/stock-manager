@@ -11,7 +11,8 @@ CAGR 하나로는 수년이어도 운과 실력을 가르기 어렵다 — 결�
    같은 날 **안 산 새 후보** 가운데 몇 분위. 하루 기록의 운영 결정 원장 모양(`DayLog.decisions`)을 그대로 넘긴다
 
 - 기준일 = 결정의 cutoff(그 결정이 본 마지막 종가 날) — 운영 결정 원장의 기준 종가(신호 행 종가)와 같은 뜻
-- 매수(1) = `DayLog.buys` 가운데 **새로 산 것**(판단 직전 보유 `DayLog.held` 가 아닌 것 — 25.1544 [권고] 4:
+- 매수(1) = `exit_pair.filled_buys`(회차 지정가 판은 찬 것만 — 25.2081, 그 밖은 `DayLog.buys`) 가운데
+  **새로 산 것**(판단 직전 보유 `DayLog.held` 가 아닌 것 — 25.1544 [권고] 4:
   상한까지 채우는
   추가 매수가 섞였다)의 에피소드 첫 매수(같은 종목 `pp.ATTRIBUTION_EPISODE_DAYS` 안 되풀이는 처음만)
 - 묶음: 28일(`pp._묶음`). 핵심 H 는 매수가 드물어 운영의 "묶음 안 사흘 이상"(`pp.EVIDENCE_BLOCK_MIN_DAYS`)을 쓰면
@@ -75,8 +76,8 @@ def _upto(days: list[str], vals: list[float], d: str) -> float | None:
 
 
 def first_buys(logs: list[Any]) -> list[tuple[str, int]]:
-    """(기준일 cutoff, 종목) — 새로 산 것(판단 직전 보유가 아닌 것)의 에피소드 첫 매수만. 하루 기록(`DayLog`)의 `buys`
-    열쇠를 날 순으로"""
+    """(기준일 cutoff, 종목) — 새로 산 것(판단 직전 보유가 아닌 것)의 에피소드 첫 매수만. 하루 기록(`DayLog`)의
+    실제로 산 종목(`exit_pair.filled_buys` — 회차 지정가 판은 찬 것만, 25.2081)을 날 순으로"""
     마지막: dict[int, date] = {}
     out: list[tuple[str, int]] = []
     for log in sorted(logs, key=lambda x: x.day):

@@ -18,6 +18,7 @@ from batch.core import db
 from batch.jobs import backtest as jb
 from batch.jobs import core_backtest as cj
 from batch.services import backtest as bt
+from batch.services import core_backtest as cb
 from batch.services import core_strategy as cs
 from batch.services import signals as sg
 from tests.test_core_backtest_job_1534 import N, _영업일, 오늘
@@ -234,19 +235,30 @@ def test_미국_밴드_PBR_은_가격_수준을_읽는다(monkeypatch: pytest.Mo
         return out
 
     monkeypatch.setattr(bt.PriceView, "level_closes", 엿봄)
-    # 지금 PBR 쪽(`band_close`)도 — 띠만 보면 `band_close` 를 수정종가로 바꿔도(지금 PBR 만 10% 낮게) 지났다(25.2083,
-    # 25.2074 교차검증 [권고]). 신호 입력의 `band_close` 가 그날 원 종가인지, `pbr_now` 가 그 값으로 잰 것인지 본다
-    입력: list[tuple[int, float | None, float | None, object]] = []
+    # 지금 PBR 쪽(`band_close`·`pbr_now`)도 — 띠만 보면 `band_close` 를 수정종가로 바꿔도(지금 PBR 만 10% 낮게) 지났다
+    # (25.2082, 25.2074 교차검증 [권고]). 25.2085(25.2082 교차검증 [권고]): 예전 단언은 "원 종가 가운데 하나"·"pn > 0" 뿐이라
+    # 하루 전 종가나 수정종가로 잰 pbr_now 도 지났다 — 그날(`price_date`) 원 종가와, 그 값 ÷ 주당 자본을 직접 본다
+    입력: list[tuple[int, str, float | None, float | None, object, float | None, object]] = []
     원입력 = sg.SignalInput
+    자본들: list[float | None] = []
+    원자본 = cb.pit_latest_equity
+
+    def 엿자본(*a: object, **k: object) -> float | None:
+        x = 원자본(*a, **k)  # type: ignore[arg-type]
+        자본들.append(x)
+        return x
 
     def 엿입력(*a: object, **k: object) -> object:
         x = 원입력(*a, **k)
-        입력.append((int(k["stock_id"]), k.get("band_close"), k.get("pbr_now"), k.get("band")))  # type: ignore[arg-type]
+        자본 = 자본들[-1] if k.get("band") is not None and 자본들 else None
+        입력.append((int(k["stock_id"]), str(k["price_date"]), k.get("band_close"), k.get("pbr_now"), k.get("band"),
+                     자본, k.get("listed_shares")))  # type: ignore[arg-type]  # fmt: skip
         return x
 
     monkeypatch.setattr(sg, "SignalInput", 엿입력)
+    monkeypatch.setattr(cb, "pit_latest_equity", 엿자본)
     # 이 합성 자료는 장기 후보 문턱(품질·가치 55)을 넘는 종목이 없고 이력이 짧아(표본 하한 250일) 밴드 경로에 닿지 않는다 —
-    # 시험 안에서만 모두 장기 후보로, 하한은 1 로(25.2083 — 25.2074 의 띠 대조는 `jobs/backtest` 쪽 읽기였다)
+    # 시험 안에서만 모두 장기 후보로, 하한은 1 로(25.2082 — 25.2074 의 띠 대조는 `jobs/backtest` 쪽 읽기였다)
     from batch.jobs import signals as signals_job
 
     monkeypatch.setattr(signals_job, "needs_band", lambda _fs: True)
@@ -255,10 +267,12 @@ def test_미국_밴드_PBR_은_가격_수준을_읽는다(monkeypatch: pytest.Mo
     assert cj.run_core("US", years=1, today=오늘, force=True, variants=("core_b",)) == 0
     assert 본, "밴드를 한 번도 재지 않았다 — 시험이 헛돈다"
     assert all(c == pytest.approx(원종가[(sid, d)]) for sid, d, c in 본[:50]), 본[:3]
-    밴드든 = [(sid, bc, pn) for sid, bc, pn, band in 입력 if band is not None]
+    밴드든 = [x for x in 입력 if x[4] is not None]
     assert 밴드든, "밴드가 선 신호 입력이 없다 — 시험이 헛돈다"
-    원종가값 = {(sid, c) for (sid, _d), c in 원종가.items()}
-    for sid, bc, pn in 밴드든[:50]:
-        assert bc is not None and (sid, bc) in 원종가값, (sid, bc)  # 원 종가 가운데 하나(수정종가 × 0.9 아님)
-        assert pn is not None and pn > 0
-    # 같은 종목·같은 자본이면 pbr_now ∝ band_close — 수정종가로 바꾸면 비는 같아도 위 원 종가 대조가 깨진다
+    잰 = 0
+    for sid, d, bc, pn, _band, 자본, 주식수 in 밴드든[:50]:
+        assert bc == pytest.approx(원종가[(sid, d)]), (sid, d, bc)  # 그날 원 종가(하루 전·수정종가 × 0.9 아님)
+        if 자본 and 자본 > 0 and 주식수:
+            assert pn == pytest.approx(bc / (자본 / 주식수)), (sid, d, pn)
+            잰 += 1
+    assert 잰, "지금 PBR 을 한 번도 견주지 못했다 — 시험이 헛돈다"
