@@ -283,6 +283,10 @@ def test_미국_밴드_PBR_은_가격_수준을_읽는다(monkeypatch: pytest.Mo
     assert 밴드든, "밴드가 선 신호 입력이 없다 — 시험이 헛돈다"
     잰 = 0
     assert any(x[0] == 1 and x[7] == "CAD" for x in 밴드든), "다른 통화 종목의 밴드가 서지 않았다 — 시험이 헛돈다"
+    assert any(x[0] != 1 for x in 밴드든), "USD 종목 밴드가 서지 않았다 — 시험이 헛돈다"
+    # 모든 신호 입력의 통화(밴드가 안 선 것까지) — 통화 원천을 상수로 바꾸면 밴드가 다 사라져도 여기서 깨진다(25.2094,
+    # 25.2092 교차검증 [권고]: 밴드든 안에서만 보면 원천을 "CAD" 로 박아도 종목 1 만 남아 지났다)
+    assert all(x[7] == 기대통화[x[0]] for x in 입력), [x[:2] + x[7:] for x in 입력 if x[7] != 기대통화[x[0]]][:3]
     for sid, d, bc, pn, _band, 부름, 주식수, 통화 in 밴드든:
         assert bc == pytest.approx(원종가[(sid, d)]), (sid, d, bc)  # 그날 원 종가(하루 전·수정종가 × 0.9 아님)
         assert 통화 == 기대통화[sid], (sid, 통화)
