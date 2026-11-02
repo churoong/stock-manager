@@ -65,7 +65,9 @@ def test_기준마다_경계(key: str, 고침: dict[str, Any], 기대: bool | No
 def test_하나라도_걸리면_탈락이고_글에_걸린_것과_모르는_것() -> None:
     st = scb.stage01({**좋은, "dsr": 0.5, "walk_positive": 1}, 기준)
     assert st is not None and st["verdict"] == "탈락" and st["failed"] == ["DSR(낮은 쪽)", "걷는 창"]
-    assert scb.stage01_note(st) == "걸림: DSR(낮은 쪽)·걷는 창 · 재료 없음: 수용량"
+    # 걸린 칸에는 판정에 쓴 날값과 문턱(25.2104)
+    assert scb.stage01_note(st) == ("걸림: DSR(낮은 쪽) 0.5(>= 0.9)·걷는 창 1/4(창 4개 이상, > 0 몫 3/4 이상)"
+                                    " · 재료 없음: 수용량")  # fmt: skip
 
 
 def test_기준_줄이_없으면_MDD_는_모름() -> None:

@@ -467,7 +467,9 @@ def stage01(row: dict[str, Any], base: dict[str, Any] | None) -> dict[str, Any] 
          f"창 {STAGE01_WALK[1]}개 이상, > 0 몫 {STAGE01_WALK[0]}/{STAGE01_WALK[1]} 이상",
          None if wp is None or wt is None
          else wt >= STAGE01_WALK[1] and wp * STAGE01_WALK[1] >= STAGE01_WALK[0] * wt),
-        ("mdd_vs_base", "MDD(기준 대비)", mdd, f">= 기준 MDD − {STAGE01_MDD_SLACK:g}",
+        # 기준 MDD 의 값을 글에 싣는다(25.2104) — 걸린 칸 글이 문턱 숫자를 보이게
+        ("mdd_vs_base", "MDD(기준 대비)", mdd,
+         f">= 기준 MDD{'' if _num(bm) is None else f' {_num(bm):.6g}'} − {STAGE01_MDD_SLACK:g}",
          None if mdd is None or bm is None else mdd >= bm - STAGE01_MDD_SLACK),
         ("capacity", "수용량", row.get("capacity"), f"실전 목표에서 <= 거래대금의 {STAGE01_MAX_CAPACITY:.0%}",
          _capacity_ok(row)),
@@ -552,12 +554,26 @@ def stage01_verdict(checks: list[dict[str, Any]]) -> dict[str, Any]:
     return {"verdict": "탈락" if failed else ("후보" if not unknown else "모름"), "failed": failed, "unknown": unknown}
 
 
+def _날값(v: Any) -> str:
+    """판정에 쓴 값 그대로(유효 6자리) — 화면 칸의 반올림(f2·pct)과 달리 문턱 언저리를 가른다(25.2104)"""
+    if isinstance(v, list | tuple):
+        return "/".join(_날값(x) for x in v)
+    x = _num(v)
+    return str(v) if x is None else f"{x:.6g}"
+
+
 def stage01_note(st: dict[str, Any]) -> str:
-    """점검표 → 한 줄 글 — "걸림: DSR(낮은 쪽)·걷는 창 · 재료 없음: 수용량" (판정판 실행 기록 칸). 판정 "모름" 과
-    겹쳐 읽히지 않게 모르는 칸은 "재료 없음" 으로 적는다(25.1953)"""
+    """점검표 → 한 줄 글 — "걸림: DSR(낮은 쪽) 0.8996(>= 0.9)·걷는 창 2/5(…) · 재료 없음: 수용량" (판정판 실행 기록 칸).
+    판정 "모름" 과 겹쳐 읽히지 않게 모르는 칸은 "재료 없음" 으로 적는다(25.1953).
+
+    걸린 칸에는 판정에 쓴 날값과 문턱을 붙인다(25.2104, 11-02 결함 회차 [권고]) — 화면 칸은 반올림해 보여(DSR 0.8996 →
+    "0.90", 초과 CAGR ±0.00004 → 둘 다 "0.0%", MDD −0.2496·−0.2504 → 둘 다 "-25.0%", 대조 하한 50.04·50.0 → 둘 다
+    "50.0", BH q 0.1004 → "0.100") 문턱 언저리 줄이 통과 줄과 같아 보였다. 판정은 반올림하지 않은 값으로 한다"""
     parts = []
     if st["failed"]:
-        parts.append(f"걸림: {'·'.join(st['failed'])}")
+        걸린 = {c["label"]: c for c in st.get("checks") or [] if c["ok"] is False}
+        글 = [f"{lab} {_날값(걸린[lab]['now'])}({걸린[lab]['target']})" if lab in 걸린 else lab for lab in st["failed"]]
+        parts.append(f"걸림: {'·'.join(글)}")
     if st["unknown"]:
         parts.append(f"재료 없음: {'·'.join(st['unknown'])}")
     return " · ".join(parts) or "모든 기준 통과"
