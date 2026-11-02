@@ -146,6 +146,10 @@ class DayLog:
     #: 회차 지정가 모드에서 낸 회차 {종목: ((비중, 지정가), …)} — 25.1914 (전략 깔때기 ④ 분할 지정가 체결). `buys` 는
     #: 이때도 **낸** 비중(회차 합)이다 — 찬 몫은 엔진이 정하고 다음 날 장부(`lots`)·엔진 비중에 든다
     limits: dict[int, tuple[tuple[float, float], ...]] = field(default_factory=dict)
+    #: 회차 지정가 모드에서 낸 회차 가운데 **엔진이 한 회차라도 채운** 종목 — 다음 날 `_reconcile` 이 적는다(25.2081).
+    #: 결정 단위 판정·청산 짝은 `exit_pair.filled_buys` 로 이것만 산 것으로 센다. 마지막 날(다음 판단 없음)은
+    #: 비어 있다 — 모름은 안 셈
+    filled_limits: frozenset[int] = frozenset()
 
 
 class _Rows:
@@ -483,6 +487,10 @@ class CoreStrategy:
             if sid not in held:
                 del self.lots[sid]  # 엔진이 판 것(상장폐지 — 마지막 종가)
         찬회차 = self._filled_tranches(view, held)
+        if self.log and self.log[-1].limits:
+            # 어제 낸 회차 가운데 찬 종목을 어제 기록에 — 결정 단위 판정·청산 짝이 안 찬 회차를 산 것으로
+            # 세지 않게(25.2081)
+            self.log[-1].filled_limits = frozenset(self._bought[i].stock_id for i in 찬회차)
         배율, 남음 = 1.0, 1.0
         if 찬회차:
             # 회차 지정가(25.1914 전략 깔때기 ④ 분할 지정가 체결) — 엔진은 회차 비중을 cutoff 자본 대비 정해진 수량으로

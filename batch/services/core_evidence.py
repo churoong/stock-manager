@@ -31,6 +31,7 @@ from datetime import date
 from typing import Any
 
 from batch.services import desk
+from batch.services import exit_pair as xp
 from batch.services import paper as pp
 
 #: 짝 비교 — (앞 − 뒤) 매수 성과. H−G = 합의 선정의 몫(둘은 매도 규칙이 같다). G−B 는 매도 규칙만 달라 매수 성과 차이가
@@ -81,7 +82,7 @@ def first_buys(logs: list[Any]) -> list[tuple[str, int]]:
     for log in sorted(logs, key=lambda x: x.day):
         d = date.fromisoformat(str(log.day)[:10])
         든 = getattr(log, "held", frozenset())
-        for sid in sorted(log.buys):
+        for sid in sorted(xp.filled_buys(log)):  # 회차 지정가 판은 찬 것만(25.2081)
             if sid in 든:
                 continue  # 추가 매수 — 새 선정 결정이 아니다
             if sid in 마지막 and (d - 마지막[sid]).days < pp.ATTRIBUTION_EPISODE_DAYS:

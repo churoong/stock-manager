@@ -44,6 +44,17 @@ EXIT_PAIR_DECIDE_HORIZON = "short"
 EXIT_PAIR_TAIL_DAYS = 14
 
 
+def filled_buys(log: Any) -> list[int]:
+    """그날 **실제로 산** 종목(`buys` 순서) — 25.2081 (전략 깔때기 ④, 25.1918 기록 "`DayLog.buys` 는 낸 비중").
+
+    회차 지정가로 낸 종목(`limits`)은 엔진이 한 회차라도 채운 것(`filled_limits`)만. 그 밖은 `buys` 그대로 — t 종가 전량
+    매수의 "체결가 없어 엔진이 못 산 것" 은 예전처럼 부르는 쪽(청산 짝의 `vanished`)이 다룬다. `limits`·`filled_limits`
+    가 없는 옛 기록 꼴도 받는다"""
+    낸 = getattr(log, "limits", None) or {}
+    찬 = getattr(log, "filled_limits", frozenset())
+    return [sid for sid in log.buys if sid not in 낸 or sid in 찬]
+
+
 def _first_close(rows: list[tuple[str, float]], day: str) -> tuple[str, float] | None:
     """그날 또는 그 뒤 첫 종가 — 엔진이 체결가 없는 날의 매도를 미루는 것과 같다. 그 뒤 종가가 없으면(상장폐지·자료 끝
     정지) 그날 이하 마지막 종가 — 엔진이 상장폐지 종목을 마지막 종가로 판 것과 같다(25.1556 [권고] 3: 빼면 그날 크게
@@ -93,7 +104,7 @@ def episodes(logs: list[Any]) -> tuple[list[dict[str, Any]], dict[str, int]]:
             ep = 열림.get(sid)
             if ep is not None and ep["xt"] is None and log.sells[sid] != ["미룬 매도"]:
                 ep["xt"] = log.day
-        for sid in log.buys:
+        for sid in filled_buys(log):  # 회차 지정가 판은 찬 것만(25.2081)
             if sid in log.held:
                 ep = 열림.get(sid)
                 if ep is not None and ep["xc"] is None:
