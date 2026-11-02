@@ -3127,6 +3127,7 @@ SQL read operations are forbidden (reads are blocked, ...)
 | 25.2077 | 판정판 줄 미국 미검증 꼬리표 |
 | 25.2078 | 미국 매수 현금·위험 점검 금액의 환율 방향 손 사례 시험 |
 | 25.2079 | 미국 H·D·E·A·C 일치 시험 고정 환율 1,300 판 |
+| 25.2080 | 웹 package.json 의 죽은 lint 명령 지움 |
 
 ### 25.1 왜 D1 인가
 
@@ -45143,3 +45144,13 @@ S 도 날들[13] 종가 하락으로 손절 한 번이 더 생긴다 — 체결 
 **시험**: `test_replay_parity_hdeac_us_fx_2079`(새, 11건 — 실림 1 + 5계좌 × 2판). 2073·2064 와 한 실행에 함께 돌려 26건 통과(모듈끼리 간섭 없음).
 
 **되돌리기 확인**(mktemp worktree, 스크립트 — H·A 비용 0 판): 운영 `buy_orders` 의 `총액 = equity_krw / 환율` 에서 나누지 않음 → 둘 다 깨진다. 보유 평가 `value=x / 환율` 에서 나누지 않음 → 둘 다 깨진다.
+
+### 25.2080 웹 package.json 의 죽은 lint 명령 지움
+
+**무엇**: 웹 `package.json` 의 `"lint": "next lint"` 가 죽은 명령이었다. Next 16(지금 16.3.5)은 `next lint` 를 없애 `npm run lint` 가 "lint" 를 프로젝트 폴더로 읽고 "no such directory" 로 실패한다. 웹에는 eslint 패키지도 설정도 없다(코드 스타일은 prettier, 타입은 `npm run typecheck`). 전체 검사(tsc·vitest)도 린트를 돌리지 않는다. 25.2077 작업 중 eslint 가 안내 문구만 찍어 알아챘다 — 죽은 명령이 검사가 있는 것처럼 보이게 하므로 지운다. eslint 를 새로 들이는 것은 하지 않는다(새 의존성·규칙 정하기가 이 건의 범위 밖, 지금 검사는 tsc·vitest).
+
+**모의투자에 어떻게 쓰이나**: 직접은 아니다(③ 화면 쪽 도구). 웹 변경의 검사 목록을 실제로 도는 것만 남겨, "린트 통과" 로 잘못 읽히는 일을 없앤다.
+
+**시험**: `web/__tests__/package_scripts2080.test.ts`(새) — next 하위 명령은 dev·build·start 만, `typecheck` 는 `tsc --noEmit`.
+
+**되돌리기 확인**: `package.json` 을 옛 것(`lint` 줄 있음)으로 되돌림 → 새 시험이 깨진다.

@@ -6,7 +6,6 @@
     "dev": "next dev --port 4310",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
