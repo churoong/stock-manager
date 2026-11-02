@@ -269,9 +269,10 @@ def test_미국_밴드_PBR_은_가격_수준을_읽는다(monkeypatch: pytest.Mo
     monkeypatch.setattr(signals_job, "needs_band", lambda _fs: True)
     원밴드 = sg.build_band
     monkeypatch.setattr(sg, "build_band", lambda series, min_sample=1: 원밴드(series, 1))
-    # 종목 1 은 다른 통화(CAD — 행·재무 통화 모두)로: 부른 통화가 그 행의 통화인지 — 호출 자리가 "USD" 를 박아 넣으면
-    # 그 종목 자본이 '다른 통화' 로 모름이 되어 깨진다(25.2091, 25.2090 교차검증 [권고]: 1529 `test_자본_통화` 는 함수만
-    # 묶고 호출 자리의 통화 전달은 아무 시험도 보지 않았다)
+    # 종목 1 은 다른 통화(CAD — 행·재무 통화 모두)로: 부른 통화가 시험이 정한 그 종목 통화(`기대통화`)인지 — 호출 자리가
+    # "USD" 를 박아 넣으면 부른 인자 단언에서 깨진다(25.2091, 25.2090 교차검증 [권고]: 1529 `test_자본_통화` 는 함수만
+    # 묶고 호출 자리의 통화 전달은 아무 시험도 보지 않았다). 기대값은 대상 코드 밖에서 정한다(25.2092, 교차검증 note)
+    기대통화 = {sid: "CAD" if sid == 1 else "USD" for sid in range(1, N + 1)}
     mem.conn.execute("UPDATE stocks SET currency = 'CAD' WHERE id = 1")
     mem.conn.execute("UPDATE universe_members SET currency = 'CAD' WHERE stock_id = 1")
     mem.conn.execute("UPDATE financial_snapshots SET payload = json_set(payload, '$.currency', 'CAD') WHERE stock_id = 1")
@@ -284,7 +285,8 @@ def test_미국_밴드_PBR_은_가격_수준을_읽는다(monkeypatch: pytest.Mo
     assert any(x[0] == 1 and x[7] == "CAD" for x in 밴드든), "다른 통화 종목의 밴드가 서지 않았다 — 시험이 헛돈다"
     for sid, d, bc, pn, _band, 부름, 주식수, 통화 in 밴드든:
         assert bc == pytest.approx(원종가[(sid, d)]), (sid, d, bc)  # 그날 원 종가(하루 전·수정종가 × 0.9 아님)
-        assert 부름 is not None and 부름[1:] == (d, 통화), (sid, d, 부름, 통화)  # 그날 기준일·그 행 통화로 고른 자본
+        assert 통화 == 기대통화[sid], (sid, 통화)
+        assert 부름 is not None and 부름[1:] == (d, 기대통화[sid]), (sid, d, 부름)  # 그날 기준일·그 종목 통화로 고른 자본
         자본 = 부름[0]
         if 자본 and 자본 > 0 and 주식수:
             assert pn == pytest.approx(bc / (자본 / 주식수)), (sid, d, pn)
