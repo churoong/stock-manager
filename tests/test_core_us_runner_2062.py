@@ -238,15 +238,16 @@ def test_미국_밴드_PBR_은_가격_수준을_읽는다(monkeypatch: pytest.Mo
     # 지금 PBR 쪽(`band_close`·`pbr_now`)도 — 띠만 보면 `band_close` 를 수정종가로 바꿔도(지금 PBR 만 10% 낮게) 지났다
     # (25.2082, 25.2074 교차검증 [권고]). 25.2085(25.2082 교차검증 [권고]): 예전 단언은 "원 종가 가운데 하나"·"pn > 0" 뿐이라
     # 하루 전 종가나 수정종가로 잰 pbr_now 도 지났다 — 그날(`price_date`) 원 종가와, 그 값 ÷ 주당 자본을 직접 본다.
-    # 자본은 대상 코드가 고른 값을 엿본 것이라 순환 — 자본 고르기(기준일·통화)는 이 시험 밖이다(25.2086)
-    입력: list[tuple[int, str, float | None, float | None, object, float | None, object]] = []
+    # 자본은 대상 코드가 고른 값을 엿본 것이라 값으로는 순환(25.2086) — 고르기는 부른 인자로 묶는다: 그날 기준일·종목 통화
+    # (25.2088 — 함수 자체의 "기준일 앞 사업연도·다른 통화는 모름" 은 `test_core_backtest_1529` 가 묶는다)
+    입력: list[tuple[int, str, float | None, float | None, object, tuple | None, object]] = []
     원입력 = sg.SignalInput
-    자본들: list[float | None] = []
+    자본들: list[tuple[float | None, str, str | None]] = []
     원자본 = cb.pit_latest_equity
 
-    def 엿자본(*a: object, **k: object) -> float | None:
-        x = 원자본(*a, **k)  # type: ignore[arg-type]
-        자본들.append(x)
+    def 엿자본(snaps: list, cutoff: str, currency: str | None) -> float | None:
+        x = 원자본(snaps, cutoff, currency)
+        자본들.append((x, cutoff, currency))
         return x
 
     def 엿입력(*a: object, **k: object) -> object:
@@ -271,8 +272,10 @@ def test_미국_밴드_PBR_은_가격_수준을_읽는다(monkeypatch: pytest.Mo
     밴드든 = [x for x in 입력 if x[4] is not None]
     assert 밴드든, "밴드가 선 신호 입력이 없다 — 시험이 헛돈다"
     잰 = 0
-    for sid, d, bc, pn, _band, 자본, 주식수 in 밴드든[:50]:
+    for sid, d, bc, pn, _band, 부름, 주식수 in 밴드든[:50]:
         assert bc == pytest.approx(원종가[(sid, d)]), (sid, d, bc)  # 그날 원 종가(하루 전·수정종가 × 0.9 아님)
+        assert 부름 is not None and 부름[1:] == (d, "USD"), (sid, d, 부름)  # 그날 기준일·종목 통화로 고른 자본
+        자본 = 부름[0]
         if 자본 and 자본 > 0 and 주식수:
             assert pn == pytest.approx(bc / (자본 / 주식수)), (sid, d, pn)
             잰 += 1
