@@ -2889,10 +2889,14 @@ TWR_AT_SQL = "SELECT twr_index FROM paper_daily WHERE account_id = ? AND as_of <
 WEEK_MEETINGS_SQL = "SELECT account_id, market, decided_on, minutes_json FROM paper_meetings WHERE decided_on >= ?"
 #: 예전엔 결정일 창 28~35일 전만 읽어, 20번째 장 종가가 그 창이 지난 뒤에 차는 결정(국내·미국 금요일 결정 전부, 휴장
 #: 낀 주 대부분 — 2026-01~08 시뮬 국내 72/162·미국 59/165 결정일)이 어느 주에도 안 실렸다(25.2099, 결함 루프 11-02
-#: [권고]). 이제 결정일은 넓게(63~28일 전) 두고 **성과가 지난 7일 안에 찬**(`outcome_at`) 행만 — 60일 칸은 84 달력일
-#: 뒤에야 다시 쓰므로 이 창 안의 `outcome_at` 은 곧 20일 칸(또는 지수 기다림 뒤 `bench_20d`)이 찬 시각이고, 한 결정은
-#: 한 주에 한 번 실린다
-REVIEW_LOOKBACK_DAYS = 63
+#: [권고]). 이제 결정일은 넓게(70~28일 전) 두고 **성과가 지난 7일 안에 찬**(`outcome_at`) 행만 — 60일 칸은 84 달력일
+#: 뒤에야 다시 쓰므로 이 창 안의 `outcome_at` 은 곧 20일 칸이 찬 시각이고(지수를 기다리면 ret·bench 가 함께 늦게 찬다.
+#: 지수를 끝내 못 받은 행은 `bench_20d` 가 비어 싣지 않는다), 한 결정은 한 주에 한 번 실린다.
+#: 70 = 20일 대기열이 읽는 가장 늦은 결정(기한[20]−28 — 휴장이 끼면 결정 뒤 약 56~63일, 시세가 밀린 행) + 7일 여유,
+#: 84 보다 작아야 "한 번" 이 지켜진다(25.2100, 25.2099 교차검증 [권고]·note — 처음 63 은 밀린 행 일부를 놓쳤다).
+#: 경계는 KST 날짜 문자열과 UTC `outcome_at` 의 사전순 비교 — 요약 예약(토 22:41 UTC)이 국내 월요일 배치(일 23:27
+#: UTC)보다 먼저 돈다는 전제다. 주말 손 실행·크게 늦은 요약에서만 하루 겹치거나 빈다
+REVIEW_LOOKBACK_DAYS = 70
 REVIEW_DECISIONS_SQL = (
     "SELECT account_id, stock_id, decided_on, kind, reason, ret_20d, bench_20d, detail_json FROM paper_decisions"
     " WHERE decided_on >= ? AND decided_on < ? AND ret_20d IS NOT NULL AND bench_20d IS NOT NULL"

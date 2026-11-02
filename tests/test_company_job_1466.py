@@ -257,10 +257,14 @@ def test_weekly_review_shows_each_decision_once_when_its_20d_fills(c: Client, mo
     # 요약 일요일마다 — 성과가 찬(11-16) 다음 일요일 11-22 한 번만
     assert [d for d in (date(2026, 11, 15), date(2026, 11, 22), date(2026, 11, 29), date(2026, 12, 6)) if 실림(d)] == [
         date(2026, 11, 22)]
-    # 지수 기다림 — ret_20d 는 찼지만 bench_20d 가 비었으면 싣지 않고, 차서 outcome_at 이 다시 써진 주에 한 번
-    c.conn.execute("UPDATE paper_decisions SET bench_20d = NULL, outcome_at = '2026-11-16T00:10:00+00:00'"
+    # 60일 칸이 찬 주(결정 뒤 84 달력일 넘어 — outcome_at 이 다시 써짐)에 같은 결정이 또 실리지 않는다 — 결정일 창이
+    # 84일보다 짧아야 지켜진다(25.2100, 25.2099 교차검증 [권고]: 창을 넓혀도 깨지는 시험이 없었다)
+    c.conn.execute("UPDATE paper_decisions SET ret_60d = 20, bench_60d = 4, outcome_at = '2027-01-09T00:10:00+00:00'"
                    " WHERE account_id = 'A' AND stock_id = 3")  # fmt: skip
+    assert not 실림(date(2027, 1, 10))  # 결정 뒤 86일 — 60일 칸이 가장 이르게 다시 쓰는 주
+    # 지수를 끝내 못 받은 행(ret_20d 는 찼지만 bench_20d 빔 — 실제로는 `BENCH_WAIT_DAYS` 를 넘겨 포기된 때)은 싣지 않는다.
+    # 기다리는 동안은 ret·bench 가 함께 비어 있다가 함께 차므로(`fill_outcomes`) 반만 찬 채 실리는 길은 없다 — 이 줄은
+    # 질의의 `bench_20d IS NOT NULL` 겹 장치를 본다(`review_lines` 도 건너뛴다)
+    c.conn.execute("UPDATE paper_decisions SET bench_20d = NULL, ret_60d = NULL, bench_60d = NULL,"
+                   " outcome_at = '2026-11-16T00:10:00+00:00' WHERE account_id = 'A' AND stock_id = 3")  # fmt: skip
     assert not 실림(date(2026, 11, 22))
-    c.conn.execute("UPDATE paper_decisions SET bench_20d = 3, outcome_at = '2026-11-24T00:10:00+00:00'"
-                   " WHERE account_id = 'A' AND stock_id = 3")  # fmt: skip
-    assert [d for d in (date(2026, 11, 22), date(2026, 11, 29), date(2026, 12, 6)) if 실림(d)] == [date(2026, 11, 29)]
