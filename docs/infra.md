@@ -45367,7 +45367,7 @@ note: handoff 머리 갱신 날짜를 11-02 로 고쳤다. 보유 주식 수 허
 
 **모의투자에 어떻게 쓰이나**: 운영 무사고 — 시험 셋이 깨진 채 다음 묶음의 푸시 관문을 막지 않게 한다.
 
-**시험**: `test_stage01_1950`·`test_scoreboard*`·`test_doc_constants`·웹 `scoreboard1940` 통과. 전체 검사는 이 커밋으로 다시 돈다.
+**시험**: `test_stage01_1950`·`test_scoreboard*`·`test_doc_constants`·웹 `scoreboard1940` 통과. 전체 검사는 이 커밋으로 다시 돈다. [교차검증 [권고] 정정 — 판정판을 import·대조하는 시험 전부는 grep 으로 찾은 10개 파일이다: `test_bh_q_1951`·`test_capacity_1954`·`test_doc_constants`·`test_scoreboard_1919`·`test_scoreboard_cohort_dsr_2093`·`test_scoreboard_hardening_1956`·`test_scoreboard_us_unverified_2077`·`test_scoreboard_wiring_1940`·`test_stage01_1950`·`test_walk_series_1947`(교차검증이 83a9015 에서 모두 통과 확인). 웹 `scoreboard1940` 은 고정 글을 그대로 넘기는지만 보므로 칸 이름 규칙을 지키지 않는다. 6c320bf 에서 25.2093 절에도 괄호 정정을 달았다. 전체 검사 rc 는 끝난 뒤 handoff 머리에 적는다.]
 
 **되돌리기 확인**: 칸 이름을 "DSR" 로 되돌리면 `test_stage01_1950` 이 깨진다(9331493 에서 반대 방향으로 깨졌던 바로 그 시험).
 
