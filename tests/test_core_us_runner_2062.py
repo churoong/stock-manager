@@ -237,7 +237,8 @@ def test_미국_밴드_PBR_은_가격_수준을_읽는다(monkeypatch: pytest.Mo
     monkeypatch.setattr(bt.PriceView, "level_closes", 엿봄)
     # 지금 PBR 쪽(`band_close`·`pbr_now`)도 — 띠만 보면 `band_close` 를 수정종가로 바꿔도(지금 PBR 만 10% 낮게) 지났다
     # (25.2082, 25.2074 교차검증 [권고]). 25.2085(25.2082 교차검증 [권고]): 예전 단언은 "원 종가 가운데 하나"·"pn > 0" 뿐이라
-    # 하루 전 종가나 수정종가로 잰 pbr_now 도 지났다 — 그날(`price_date`) 원 종가와, 그 값 ÷ 주당 자본을 직접 본다
+    # 하루 전 종가나 수정종가로 잰 pbr_now 도 지났다 — 그날(`price_date`) 원 종가와, 그 값 ÷ 주당 자본을 직접 본다.
+    # 자본은 대상 코드가 고른 값을 엿본 것이라 순환 — 자본 고르기(기준일·통화)는 이 시험 밖이다(25.2086)
     입력: list[tuple[int, str, float | None, float | None, object, float | None, object]] = []
     원입력 = sg.SignalInput
     자본들: list[float | None] = []
