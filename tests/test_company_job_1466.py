@@ -190,8 +190,8 @@ def test_weekly_committee_review(c: Client, monkeypatch: pytest.MonkeyPatch) -> 
     _하루(c, monkeypatch, "2026-10-14")
     # 부결한 3 이 20 거래일 뒤 지수보다 +12%p — 찬성한 소수(퀀트)가 옳았다고 친다
     상세 = {"committee": {"opinions": {"research": [-1, 1.0], "quant": [1, 0.5]}, "minority": ["quant"]}}
-    c.conn.execute("UPDATE paper_decisions SET ret_20d = 15, bench_20d = 3, detail_json = ? WHERE account_id = 'A'"
-                   " AND stock_id = 3", [json.dumps(상세)])  # fmt: skip
+    c.conn.execute("UPDATE paper_decisions SET ret_20d = 15, bench_20d = 3, outcome_at = '2026-11-10T23:40:00+00:00',"
+                   " detail_json = ? WHERE account_id = 'A' AND stock_id = 3", [json.dumps(상세)])  # fmt: skip
     줄 = job.committee_review(c, date(2026, 11, 12), {})
     assert 줄[0] == "[가상모의투자 투자사 — 투자위원회]"
     assert any(x.startswith("  A 가치투자사: 회의 0") for x in 줄)  # 11-12 기준 이번 주 회의는 없다
@@ -238,3 +238,29 @@ def test_헌장_이름이_없으면_메모는_화면_이름으로(c: Client, mon
     줄, 기록 = _하루(c, monkeypatch, "2026-10-14")
     assert 기록["accounts"]["A"]["committee"]["memo"].startswith("가치 위원회:"), 기록["accounts"]["A"]["committee"]
     assert any(x.startswith("🏛 가치 위원회:") for x in 줄)
+
+
+def test_weekly_review_shows_each_decision_once_when_its_20d_fills(c: Client, monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.2099 (결함 루프 11-02 [권고]) — 예전 결정일 창(28~35일 전)은 20번째 장 종가가 그 창이 지난 뒤에 차는 결정을
+    영영 뺐다. 금요일 10-16 결정의 20일 성과는 11-16(월) 실행에서야 차 11-15(일) 요약엔 아직 없고, 11-22(일) 요약에선 결정일이
+    37일 전이라 예전 창 밖이었다. 이제 성과가 지난 7일 안에 찬 행을 결정일 63일 안에서 한 번 싣는다. 지수 기다림으로
+    `bench_20d` 가 늦게 찬 행은 그 주에 한 번 — 앞 주에 반만 찬 채로 실리지 않는다"""
+    _하루(c, monkeypatch, "2026-10-14")
+    상세 = {"committee": {"opinions": {"research": [-1, 1.0], "quant": [1, 0.5]}, "minority": ["quant"]}}
+    c.conn.execute("UPDATE paper_decisions SET decided_on = '2026-10-16', ret_20d = 15, bench_20d = 3,"
+                   " outcome_at = '2026-11-16T00:10:00+00:00', detail_json = ? WHERE account_id = 'A' AND stock_id = 3",
+                   [json.dumps(상세)])  # fmt: skip
+
+    def 실림(today: date) -> bool:
+        return any("종목3" in x and "소수의견" in x for x in job.committee_review(c, today, {}))
+
+    # 요약 일요일마다 — 성과가 찬(11-16) 다음 일요일 11-22 한 번만
+    assert [d for d in (date(2026, 11, 15), date(2026, 11, 22), date(2026, 11, 29), date(2026, 12, 6)) if 실림(d)] == [
+        date(2026, 11, 22)]
+    # 지수 기다림 — ret_20d 는 찼지만 bench_20d 가 비었으면 싣지 않고, 차서 outcome_at 이 다시 써진 주에 한 번
+    c.conn.execute("UPDATE paper_decisions SET bench_20d = NULL, outcome_at = '2026-11-16T00:10:00+00:00'"
+                   " WHERE account_id = 'A' AND stock_id = 3")  # fmt: skip
+    assert not 실림(date(2026, 11, 22))
+    c.conn.execute("UPDATE paper_decisions SET bench_20d = 3, outcome_at = '2026-11-24T00:10:00+00:00'"
+                   " WHERE account_id = 'A' AND stock_id = 3")  # fmt: skip
+    assert [d for d in (date(2026, 11, 22), date(2026, 11, 29), date(2026, 12, 6)) if 실림(d)] == [date(2026, 11, 29)]

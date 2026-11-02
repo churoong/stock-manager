@@ -2885,11 +2885,18 @@ def summary_section(client: Any, now: datetime) -> list[str]:
 #: 계좌마다 첫 평가일과 그날 이하 마지막 시간가중 지수 — 늦게 연 계좌의 짝 비교 (25.1481)
 FIRST_DAILY_SQL = "SELECT account_id, MIN(as_of) FROM paper_daily GROUP BY account_id"
 TWR_AT_SQL = "SELECT twr_index FROM paper_daily WHERE account_id = ? AND as_of <= ? ORDER BY as_of DESC LIMIT 1"
-#: 이번 주 회의록 · 20 거래일 성과가 이번 주쯤 찬 결정(결정일이 28~35일 전 — 20 거래일 ≈ 28 달력일) (25.1473)
+#: 이번 주 회의록 · 20 거래일 성과가 **이번 주에 찬** 결정 (25.1473, 25.2099)
 WEEK_MEETINGS_SQL = "SELECT account_id, market, decided_on, minutes_json FROM paper_meetings WHERE decided_on >= ?"
+#: 예전엔 결정일 창 28~35일 전만 읽어, 20번째 장 종가가 그 창이 지난 뒤에 차는 결정(국내·미국 금요일 결정 전부, 휴장
+#: 낀 주 대부분 — 2026-01~08 시뮬 국내 72/162·미국 59/165 결정일)이 어느 주에도 안 실렸다(25.2099, 결함 루프 11-02
+#: [권고]). 이제 결정일은 넓게(63~28일 전) 두고 **성과가 지난 7일 안에 찬**(`outcome_at`) 행만 — 60일 칸은 84 달력일
+#: 뒤에야 다시 쓰므로 이 창 안의 `outcome_at` 은 곧 20일 칸(또는 지수 기다림 뒤 `bench_20d`)이 찬 시각이고, 한 결정은
+#: 한 주에 한 번 실린다
+REVIEW_LOOKBACK_DAYS = 63
 REVIEW_DECISIONS_SQL = (
     "SELECT account_id, stock_id, decided_on, kind, reason, ret_20d, bench_20d, detail_json FROM paper_decisions"
-    " WHERE decided_on >= ? AND decided_on < ? AND ret_20d IS NOT NULL AND detail_json LIKE '%committee%'"
+    " WHERE decided_on >= ? AND decided_on < ? AND ret_20d IS NOT NULL AND bench_20d IS NOT NULL"
+    " AND outcome_at >= ? AND outcome_at < ? AND detail_json LIKE '%committee%'"
 )
 
 
@@ -2908,7 +2915,9 @@ def committee_review(client: Any, today: date, stock_cache: dict[int, dict[str, 
     if not 헌장:
         return []
     회의 = client.execute(WEEK_MEETINGS_SQL, [(today - timedelta(days=7)).isoformat()]).dicts()
-    결정 = client.execute(REVIEW_DECISIONS_SQL, [(today - timedelta(days=35)).isoformat(),
-                                                (today - timedelta(days=28)).isoformat()]).dicts()  # fmt: skip
+    결정 = client.execute(REVIEW_DECISIONS_SQL, [(today - timedelta(days=REVIEW_LOOKBACK_DAYS)).isoformat(),
+                                                (today - timedelta(days=28)).isoformat(),
+                                                (today - timedelta(days=7)).isoformat(),
+                                                (today + timedelta(days=1)).isoformat()]).dicts()  # fmt: skip
     이름 = {int(d["stock_id"]): str(_stock(client, int(d["stock_id"]), stock_cache).get("name")) for d in 결정}
     return co.review_lines(회의, 결정, 이름, 헌장)
