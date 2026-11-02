@@ -968,6 +968,7 @@ class Test이웃_모듈들:
         """모의 투자사 판 2 부서 판단식 (docs/company.md 2·3장, docs/infra.md 25.1461)."""
         검사(COMPANY, f"찬성 `pct ≥ {co.PCT_FOR}`,\n반대 `pct ≤ {co.PCT_AGAINST}`", "점수 부서 백분위 문턱")
         검사(COMPANY, f"최근 {co.BROKER_DAYS}일 증권사 의견", "증권사 의견 창")
+        검사(COMPANY, f"결정일 {pp_job.REVIEW_LOOKBACK_DAYS}~28일 전", "위원회 복기 결정일 창 (25.2102)")
         검사(COMPANY, f"목표가 있는 의견 {co.BROKER_MIN_N}건 미만이면 자료 없음", "증권사 표본 하한")
         검사(COMPANY, f"최근 {co.FLOW_DAYS}거래일 외국인·기관", "수급 창")
         검사(COMPANY, f"`F ≥ +{co.FLOW_FOR:g}` 찬성, `F ≤ −{co.FLOW_FOR:g}` 반대, 확신 `min(1, |F| / {co.FLOW_SPAN:g})`", "수급 문턱")

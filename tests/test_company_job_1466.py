@@ -260,12 +260,13 @@ def test_weekly_review_shows_each_decision_once_when_its_20d_fills(c: Client, mo
         date(2026, 11, 22)]
     # 60일 칸이 찬 주(결정 뒤 84 달력일 넘어 — outcome_at 이 다시 써짐)에 같은 결정이 또 실리지 않는다 — 결정일 창이
     # 84일보다 짧아야 지켜진다(25.2100, 25.2099 교차검증 [권고]: 창을 넓혀도 깨지는 시험이 없었다)
-    # 가장 이른 다시 씀 — KST 결정 뒤 84일(01-08 금)의 국내 배치는 UTC 로 01-07 23:27, 그 뒤 일요일 01-10 은 결정 뒤 86일.
-    # 창이 83 이상이면 깨진다(25.2101 — 예전 줄은 01-09 로 86일째만 봐 84·85 창이 지났다)
+    # 60일 칸 다시 씀 뒤 요약(결정 뒤 86일) — 이 동작 줄은 창 86 이상만 잡는다(창은 요약일과 결정일을 견주므로
+    # outcome_at 의 시각은 바뀌어도 같다). 83~85 는 아래 상수 단언이 잡는다(25.2102 정정 — 25.2101 은 상수 단언이 깨진
+    # 것을 동작 시험이 깨진 것처럼 적었다)
     c.conn.execute("UPDATE paper_decisions SET ret_60d = 20, bench_60d = 4, outcome_at = '2027-01-07T23:27:00+00:00'"
                    " WHERE account_id = 'A' AND stock_id = 3")  # fmt: skip
     assert not 실림(date(2027, 1, 10))
-    assert job.REVIEW_LOOKBACK_DAYS < 83  # 위 경계 — KST 84일째 다시 씀이 UTC 로 83일째
+    assert job.REVIEW_LOOKBACK_DAYS < 83  # 보수적 위 경계 — 실제 한 번 원칙의 상한은 87(시뮬, 25.2102)
     # 아래 경계 — 설·추석 연휴로 밀린 20일 칸: 결정 9-11(금), 20일 칸이 11-16(월, 결정 뒤 66일)에 차면 11-22(일, 72일)
     # 요약에 실린다. 창이 71 이하면 깨진다(25.2101 — 예전 63·70 이 놓친 꼴)
     c.conn.execute("UPDATE paper_decisions SET decided_on = '2026-09-11', ret_60d = NULL, bench_60d = NULL,"
