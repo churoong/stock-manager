@@ -57,6 +57,9 @@ COHORT1_DAYS = ("03", "04", "05", "06", "07")
 #: 시도가 아닌 줄 — 기준(벤치마크)·무작위 대조(R1·R2, `jobs/backtest.CORE_REGISTERED_TRIALS` 머리 "시도가 아니다").
 #: 시험이 `core_strategy.VARIANTS` 와 대조한다
 NOT_TRIALS = frozenset({"benchmark", "core_r1", "core_r2"})
+#: S·T 계좌형 리플레이 변형(`jobs.core_backtest.ST_VARIANTS` — jobs 를 import 하지 않아 이름만, 시험이 대조)
+ST_REPLAY = frozenset({"st_s", "st_t"})
+WHY_EV_ST = "S·T 리플레이는 결정 원장 꼴이 아니라 결정 단위 증거를 내지 않는다(25.2044)"
 #: 비용 0 사본 꼬리 — `jobs/backtest` 의 `composite_no_cost`
 NO_COST_SUFFIX = "_no_cost"
 
@@ -174,6 +177,11 @@ def _row(run: dict[str, Any], r: dict[str, Any], twins: dict[str, dict[str, Any]
     job = run.get("job_name")
     luck = mj.get("luck") if isinstance(mj.get("luck"), dict) else None
     ev = mj.get("evidence") if isinstance(mj.get("evidence"), dict) else None
+    # 칸은 있는데 값이 모두 빈 증거(25.2106) — 핵심 실행은 증거 없는 변형에도 `{k: None}` 을 싣는다(S·T 리플레이,
+    # 판정 실패). 그 꼴을 "묶음 None개(block_bound 최소 미달)" 로 적지 않게 없음으로 본다
+    빈증거 = ev is not None and all(v is None for v in ev.values())
+    if 빈증거:
+        ev = None
     gate = (ev or {}).get("gate") if isinstance((ev or {}).get("gate"), dict) else None
     sell = (ev or {}).get("after_sell") if isinstance((ev or {}).get("after_sell"), dict) else None
     half = mj.get("split_half") if isinstance(mj.get("split_half"), dict) else None
@@ -199,8 +207,10 @@ def _row(run: dict[str, Any], r: dict[str, Any], twins: dict[str, dict[str, Any]
     out["is_trial"] = name not in NOT_TRIALS
     dsr_n = (luck or {}).get("n_trials")
     floor = params.get("trial_floor")
+    # 기준·무작위 대조 줄은 운 판정에 들지 않아 `luck` 이 없다 — 실행에 운 판정이 있었어도(25.2106)
     put("trials_cumulative", floor if floor is not None else dsr_n,
-        "params.trial_floor·luck.n_trials 둘 다 없음 — 운 판정 없는 실행")  # fmt: skip
+        "기준·무작위 대조 — 시도 아님" if not out["is_trial"]
+        else "params.trial_floor·luck.n_trials 둘 다 없음 — 운 판정 없는 실행")  # fmt: skip
 
     # 비용 반영 CAGR·초과 CAGR·비용 몫 (`bt.summarize` 가 낸 값 — `metrics_json.cagr`·`excess_cagr` 열)
     cagr = _num(mj.get("cagr"))
@@ -232,6 +242,8 @@ def _row(run: dict[str, Any], r: dict[str, Any], twins: dict[str, dict[str, Any]
     # = `pp.selection_evidence`)
     if ev is None:
         why_ev = ("월 백테스트는 결정 원장이 없어 결정 단위 판정을 내지 않는다" if job == JOB_MONTHLY
+                  else WHY_EV_ST if 빈증거 and name in ST_REPLAY
+                  else "결정 단위 증거 칸이 모두 비었다 — 판정 실패(실행 경고 참고)" if 빈증거
                   else "metrics_json.evidence 없음(판정 실패 또는 25.1544 전 기록)")  # fmt: skip
         put("control_lower", None, why_ev)
         put("control_p", None, why_ev)
