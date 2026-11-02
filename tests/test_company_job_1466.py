@@ -243,8 +243,9 @@ def test_헌장_이름이_없으면_메모는_화면_이름으로(c: Client, mon
 def test_weekly_review_shows_each_decision_once_when_its_20d_fills(c: Client, monkeypatch: pytest.MonkeyPatch) -> None:
     """25.2099 (결함 루프 11-02 [권고]) — 예전 결정일 창(28~35일 전)은 20번째 장 종가가 그 창이 지난 뒤에 차는 결정을
     영영 뺐다. 금요일 10-16 결정의 20일 성과는 11-16(월) 실행에서야 차 11-15(일) 요약엔 아직 없고, 11-22(일) 요약에선 결정일이
-    37일 전이라 예전 창 밖이었다. 이제 성과가 지난 7일 안에 찬 행을 결정일 63일 안에서 한 번 싣는다. 지수 기다림으로
-    `bench_20d` 가 늦게 찬 행은 그 주에 한 번 — 앞 주에 반만 찬 채로 실리지 않는다"""
+    37일 전이라 예전 창 밖이었다. 이제 성과가 지난 7일 안에 찬 행을 결정일 창(`REVIEW_LOOKBACK_DAYS` 80, 25.2101) 안에서
+    한 번 싣는다. 창 양쪽 경계: 60일 칸을 다시 쓴 주(결정 뒤 83일째 UTC)엔 또 실리지 않고, 연휴로 밀린 20일 칸(결정 뒤
+    72일째 요약)은 실린다"""
     _하루(c, monkeypatch, "2026-10-14")
     상세 = {"committee": {"opinions": {"research": [-1, 1.0], "quant": [1, 0.5]}, "minority": ["quant"]}}
     c.conn.execute("UPDATE paper_decisions SET decided_on = '2026-10-16', ret_20d = 15, bench_20d = 3,"
@@ -259,12 +260,20 @@ def test_weekly_review_shows_each_decision_once_when_its_20d_fills(c: Client, mo
         date(2026, 11, 22)]
     # 60일 칸이 찬 주(결정 뒤 84 달력일 넘어 — outcome_at 이 다시 써짐)에 같은 결정이 또 실리지 않는다 — 결정일 창이
     # 84일보다 짧아야 지켜진다(25.2100, 25.2099 교차검증 [권고]: 창을 넓혀도 깨지는 시험이 없었다)
-    c.conn.execute("UPDATE paper_decisions SET ret_60d = 20, bench_60d = 4, outcome_at = '2027-01-09T00:10:00+00:00'"
+    # 가장 이른 다시 씀 — KST 결정 뒤 84일(01-08 금)의 국내 배치는 UTC 로 01-07 23:27, 그 뒤 일요일 01-10 은 결정 뒤 86일.
+    # 창이 83 이상이면 깨진다(25.2101 — 예전 줄은 01-09 로 86일째만 봐 84·85 창이 지났다)
+    c.conn.execute("UPDATE paper_decisions SET ret_60d = 20, bench_60d = 4, outcome_at = '2027-01-07T23:27:00+00:00'"
                    " WHERE account_id = 'A' AND stock_id = 3")  # fmt: skip
-    assert not 실림(date(2027, 1, 10))  # 결정 뒤 86일 — 60일 칸이 가장 이르게 다시 쓰는 주
-    # 지수를 끝내 못 받은 행(ret_20d 는 찼지만 bench_20d 빔 — 실제로는 `BENCH_WAIT_DAYS` 를 넘겨 포기된 때)은 싣지 않는다.
-    # 기다리는 동안은 ret·bench 가 함께 비어 있다가 함께 차므로(`fill_outcomes`) 반만 찬 채 실리는 길은 없다 — 이 줄은
-    # 질의의 `bench_20d IS NOT NULL` 겹 장치를 본다(`review_lines` 도 건너뛴다)
+    assert not 실림(date(2027, 1, 10))
+    assert job.REVIEW_LOOKBACK_DAYS < 83  # 위 경계 — KST 84일째 다시 씀이 UTC 로 83일째
+    # 아래 경계 — 설·추석 연휴로 밀린 20일 칸: 결정 9-11(금), 20일 칸이 11-16(월, 결정 뒤 66일)에 차면 11-22(일, 72일)
+    # 요약에 실린다. 창이 71 이하면 깨진다(25.2101 — 예전 63·70 이 놓친 꼴)
+    c.conn.execute("UPDATE paper_decisions SET decided_on = '2026-09-11', ret_60d = NULL, bench_60d = NULL,"
+                   " outcome_at = '2026-11-15T23:27:00+00:00' WHERE account_id = 'A' AND stock_id = 3")  # fmt: skip
+    assert 실림(date(2026, 11, 22))
+    c.conn.execute("UPDATE paper_decisions SET decided_on = '2026-10-16' WHERE account_id = 'A' AND stock_id = 3")
+    # 지수 행이 그날·기준일 이하에 아예 없어 bench_20d 가 빈 행은 싣지 않는다(기다림이 끝나면 묵은 지수로 채우므로 그때뿐).
+    # 질의의 `bench_20d IS NOT NULL` 과 `review_lines` 가 둘 다 거르는 겹 장치라 이 줄은 둘을 가르지 못한다
     c.conn.execute("UPDATE paper_decisions SET bench_20d = NULL, ret_60d = NULL, bench_60d = NULL,"
                    " outcome_at = '2026-11-16T00:10:00+00:00' WHERE account_id = 'A' AND stock_id = 3")  # fmt: skip
     assert not 실림(date(2026, 11, 22))
