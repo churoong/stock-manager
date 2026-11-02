@@ -46,7 +46,7 @@ def test_끝_달을_빼면_판정이_바뀌는_줄은_모름_경계() -> None:
     (c,) = [r for r in scb.rows([_월실행({"composite": _앞_두_창_음()})]) if r["strategy"] == "composite"]
     assert c["cohort"] == "1" and (c["walk_positive"], c["walk_total"]) == (3, 5)  # 원래 칸 값은 그대로
     assert c["stage01_verdict"] == "모름"
-    assert c["stage01_note"].startswith("경계 — 끝 달 2026-11(부분 달)을 빼면 모름(25.2105) · 걸림: 걷는 창 3/5")
+    assert c["stage01_note"].startswith("경계 — 원래 탈락, 끝 달 2026-11(부분 달)을 빼면 모름(25.2105) · 걸림: 걷는 창 3/5")
     assert c["stage01"]["partial_month"] == "모름"
 
 
@@ -78,6 +78,56 @@ def test_코호트_V_는_모든_줄의_끝_달을_뺀_계열로() -> None:
     for r in 줄들:
         if id(r) in 뺀:
             c = 뺀[id(r)]
-            assert c["dsr_cohort"] == pytest.approx(기대[r["strategy"]]) and c["dsr"] is None
+            assert c["dsr_cohort"] == pytest.approx(기대[r["strategy"]])
+            assert c["dsr"] == r["dsr"] == 0.99  # 실행 V 는 다시 낼 수 없어 원래 값(25.2109)
             assert (c["walk_positive"], c["walk_total"]) != (None, None) and c["walk_total"] == 4
             assert r["walk_total"] == 5  # 원래 줄은 건드리지 않는다
+
+
+def _양(seed: int, 달: list[str]) -> list[list[Any]]:
+    """늘 양인 월 초과(창 모두 > 0) — 줄마다 값이 달라 코호트 V 가 0 이 아니다"""
+    return [[m, 0.01 + 0.002 * ((k * seed) % 3)] for k, m in enumerate(달)]
+
+
+def test_실행_V_로만_걸린_줄은_경계가_아니다() -> None:
+    """25.2109 (25.2107 교차검증 [권고]) — 뺀 사본에서 실행 V 를 버리면 실행 V 로만 걸린 줄이 끝 달과 무관하게 "모름(경계)"
+    가 됐다. 실행 V 는 원래 값 그대로 — 갈림은 다시 낼 수 있는 재료(걷는 창·코호트 V)에서만"""
+    run = _월실행({k: _양(i, _달들()) for i, k in ((1, "composite"), (2, "value"), (3, "momentum"))})
+    for r in run["results"]:
+        if r["strategy"] != "benchmark":
+            mj = json.loads(r["metrics_json"])
+            mj["luck"]["dsr"] = 0.1
+            r["metrics_json"] = json.dumps(mj)
+    for c in (x for x in scb.rows([run]) if x["is_trial"]):
+        assert (c["walk_positive"], c["walk_total"]) == (5, 5)
+        assert c["stage01_verdict"] == "탈락" and c["stage01_note"].startswith("걸림: DSR(낮은 쪽) 0.1(>= 0.9)"), c
+        assert "partial_month" not in c["stage01"]
+
+
+def test_원래_후보인데_끝_달을_빼면_탈락이면_모름(monkeypatch: pytest.MonkeyPatch) -> None:
+    """'어느 쪽이 통과든 같다' 의 올리는 방향(25.2109, 25.2107 교차검증 [권고] — 시험이 탈락→모름만 봤다). 수용량 목표가
+    정해지기 전이라 실제 줄은 후보가 되지 못해, 점검표를 걷는 창 수로만 가르게 바꿔 갈래를 본다"""
+    원래 = scb.stage01
+
+    def 가짜(row: dict[str, Any], base: dict[str, Any] | None) -> dict[str, Any] | None:
+        st = 원래(row, base)
+        if st is None:
+            return None
+        return {**st, "verdict": "후보" if row.get("walk_total") == 5 else "탈락", "failed": [], "unknown": []}
+
+    monkeypatch.setattr(scb, "stage01", 가짜)
+    (c,) = [r for r in scb.rows([_월실행({"composite": [[m, 0.01] for m in _달들()]})]) if r["strategy"] == "composite"]
+    assert c["stage01_verdict"] == "모름"
+    assert c["stage01_note"] == "경계 — 원래 후보, 끝 달 2026-11(부분 달)을 빼면 탈락(25.2105) · 모든 기준 통과"
+
+
+def test_뺀_계열로_코호트_V_를_못_내면_원래_값() -> None:
+    """24개월 계열 둘 — 원래는 코호트 V DSR 이 나오고(MIN_MONTHS 24), 끝 달을 빼면 23개월이라 못 낸다 → 원래 값 그대로"""
+    달 = _달들(n=24)
+    run = _월실행({"composite": _양(1, 달), "value": _양(2, 달)})
+    줄들 = [scb._row(run, r, {}) for r in run["results"]]
+    묶음 = {("KR", "1"): [r for r in 줄들 if r["is_trial"]]}
+    scb._cohort_dsr(줄들, 묶음)
+    뺀 = scb._partial_month_rows(줄들, 묶음)
+    for r in 묶음[("KR", "1")]:
+        assert r["dsr_cohort"] is not None and 뺀[id(r)]["dsr_cohort"] == r["dsr_cohort"]

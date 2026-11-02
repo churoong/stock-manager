@@ -181,7 +181,7 @@ def _row(run: dict[str, Any], r: dict[str, Any], twins: dict[str, dict[str, Any]
     # 칸은 있는데 값이 모두 빈 증거(25.2106) — 핵심 실행은 증거 없는 변형에도 `{k: None}` 을 싣는다(S·T 리플레이,
     # 판정 실패). 그 꼴을 "묶음 None개(block_bound 최소 미달)" 로 적지 않게 없음으로 본다
     빈증거 = bool(ev) and all(v is None for v in ev.values())  # 빈 dict({}) 는 옛 기록 꼴 — 예전 까닭(25.2107)
-    if 빈증거 or ev == {}:  # 빈 dict 도 칸 없음과 같다 — "묶음 None개" 로 적지 않게(25.2107)
+    if 빈증거 or ev == {}:  # 빈 dict 는 판정 실패가 아니라 옛 기록(칸 없음) 까닭으로(25.2107)
         ev = None
     gate = (ev or {}).get("gate") if isinstance((ev or {}).get("gate"), dict) else None
     sell = (ev or {}).get("after_sell") if isinstance((ev or {}).get("after_sell"), dict) else None
@@ -663,7 +663,8 @@ def rows(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
             # 어느 쪽이 통과든 같다
             st2 = stage01(뺀[id(row)], 기준들.get(id(row)))
             if st2 is not None and st2["verdict"] != st["verdict"]:
-                경계 = f"경계 — 끝 달 {row['_excess_months'][-1]}(부분 달)을 빼면 {st2['verdict']}(25.2105)"
+                경계 = (f"경계 — 원래 {st['verdict']}, 끝 달 {row['_excess_months'][-1]}(부분 달)을 빼면"
+                      f" {st2['verdict']}(25.2105)")  # 원래 판정을 함께 — 후보였으면 "모든 기준 통과" 와 나란히 읽힌다
                 st = {**st, "verdict": "모름", "partial_month": st2["verdict"]}
         row["stage01"] = st
         if st is None:
@@ -689,9 +690,14 @@ def _partial_month_rows(
     예약 판정 실행(매월 3~7일)의 곡선은 그달 1~5거래일에서 끝나 월 계열 마지막 "달" 이 부분 달이다(backtest.md 9장
     "월말 자산끼리" 와 어긋남 — 엔진은 11-03 판정 실행 뒤 판을 올려 고친다). 엔진을 건드리지 않고 판정판에서:
     - 걷는 창 = 끝 달을 뺀 계열의 `walk_windows`
-    - DSR = 끝 달을 뺀 계열들로 다시 낸 코호트 V DSR(`_cohort_dsr` 그대로 — 같은 코호트 줄 모두 뺀 계열로). 실행 V
-      (`dsr`, 엔진이 곡선으로 낸 값)는 여기서 다시 낼 수 없어 뺀다. 코호트 V 를 못 내면 원래 두 칸을 그대로 둔다
-      (더 알 것이 없다 — 모름으로 몰지 않는다)
+    - DSR = 끝 달을 뺀 계열들로 다시 낸 코호트 V DSR(`_cohort_dsr` 그대로 — 같은 코호트 줄 모두 뺀 계열로)과 실행 V
+      (`dsr`, 엔진이 곡선으로 낸 값 — 여기서 다시 낼 수 없어 원래 값 그대로, 25.2109) 가운데 낮은 쪽. 코호트 V 를 못
+      내면 원래 코호트 V 그대로(더 알 것이 없다 — 모름으로 몰지 않는다). 그래서 갈림은 다시 낼 수 있는 재료(걷는
+      창·코호트 V)에서만 생긴다
+    - 판정 구간(`months` = `luck.months`)은 다시 내지 않는다 — 사전 등록이 DSR·걷는 창만 다시 보게 했다(알고 둔 차이:
+      36개월 문턱에 딱 걸린 줄)
+    - 실행한 달 = `started_at`(UTC)의 달 — 달 첫날 09:00 KST 전 손 실행은 앞 달로 잡혀 꽉 찬 끝 달을 부분 달로 볼 수
+      있다(모름 쪽이라 올리지 않는다, 알고 둔 차이. 예약 판정 실행은 3일 17:11·19:11 UTC 라 닿지 않는다)
     엔진을 고친 뒤 실행은 끝 달이 실행한 달이 아니라 빈 결과다."""
 
     def 부분(row: dict[str, Any]) -> bool:
@@ -709,10 +715,11 @@ def _partial_month_rows(
         c = 사본[id(r)]
         w = walk_windows(list(zip(r["_excess_months"][:-1], r["_excess"][:-1], strict=True)))
         c["walk_positive"], c["walk_total"] = w["positive"], w["total"]
-        if c["dsr_cohort"] is not None:
-            c["dsr"] = None
-        else:
-            c["dsr"], c["dsr_cohort"] = r.get("dsr"), r.get("dsr_cohort")
+        # 실행 V(`dsr`)는 곡선이 있어야 다시 낼 수 있어 **원래 값 그대로** 둔다(낮은 쪽 규칙 유지 — 25.2109, 25.2107
+        # 교차검증 [권고]: 빼면 실행 V 로만 걸린 줄이 끝 달과 무관하게 "경계" 가 됐다). 코호트 V 를 못 내면 원래 값
+        c["dsr"] = r.get("dsr")
+        if c["dsr_cohort"] is None:
+            c["dsr_cohort"] = r.get("dsr_cohort")
         뺀[id(r)] = c
     return 뺀
 
