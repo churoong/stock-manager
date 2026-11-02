@@ -644,7 +644,7 @@ def test_실패_알림의_다음_예정이_같은_날_예비_실행을_말한다
 
 def test_마지막_예비_실행의_실패는_다시_시도를_약속하지_않는다() -> None:
     """09:35 예비 실행 자신이 실패해도 "09:35 예비 실행이 한 번 더 시도합니다" 가 붙었다 (25.1366, 배치 실패 감사)."""
-    from datetime import UTC, datetime
+    from datetime import UTC, datetime, timedelta
 
     from batch.core import calendar as cal
 
@@ -656,6 +656,11 @@ def test_마지막_예비_실행의_실패는_다시_시도를_약속하지_않�
     for 시각, 시장 in ((예비, "KR"), (datetime(2026, 11, 2, 14, 40, tzinfo=UTC), "US")):
         글 = cal.next_scheduled_hint(시장, 시각)
         assert "오늘은 더 시도하지 않습니다" not in 글 and "더 돌 수는 있으나" in 글, 글
+    # 정각 경계(25.2112, 25.2111 교차검증 note — `>=` 를 `>` 로 바꿔도 지났다)와 글 속 시각 = 상수
+    for 시장, 정각, 표기 in (("KR", datetime(2026, 11, 2, 0, 35, tzinfo=UTC), "09:35 KST"),
+                           ("US", datetime(2026, 11, 2, 14, 27, tzinfo=UTC), "14:27 UTC")):  # fmt: skip
+        assert "약속하지 않습니다" in cal.next_scheduled_hint(시장, 정각) and 표기 in cal.next_scheduled_hint(시장, 정각)
+        assert "약속하지 않습니다" not in cal.next_scheduled_hint(시장, 정각 - timedelta(minutes=1))
     # 겨울 본 실행(13:27 UTC)의 실패는 14:27 UTC 예비를 약속한다 (25.1678 — 예전엔 "오늘은 더 시도하지 않습니다")
     for 날 in (datetime(2026, 11, 2, 13, 40, tzinfo=UTC), datetime(2026, 10, 14, 13, 28, tzinfo=UTC)):
         assert "23:27 KST" in cal.next_scheduled_hint("US", 날)
