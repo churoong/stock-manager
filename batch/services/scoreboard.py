@@ -487,7 +487,7 @@ def stage01(row: dict[str, Any], base: dict[str, Any] | None) -> dict[str, Any] 
          else wt >= STAGE01_WALK[1] and wp * STAGE01_WALK[1] >= STAGE01_WALK[0] * wt),
         # 기준 MDD 의 값을 글에 싣는다(25.2104) — 걸린 칸 글이 문턱 숫자를 보이게
         ("mdd_vs_base", "MDD(기준 대비)", mdd,
-         f">= 기준 MDD{'' if _num(bm) is None else f' {_num(bm):.6g}'} − {STAGE01_MDD_SLACK:g}",
+         f">= 기준 MDD{'' if _num(bm) is None else f' {_날값(bm)}'} − {STAGE01_MDD_SLACK:g}",  # 날값 꼴(25.2110)
          None if mdd is None or bm is None else mdd >= bm - STAGE01_MDD_SLACK),
         ("capacity", "수용량", row.get("capacity"), f"실전 목표에서 <= 거래대금의 {STAGE01_MAX_CAPACITY:.0%}",
          _capacity_ok(row)),

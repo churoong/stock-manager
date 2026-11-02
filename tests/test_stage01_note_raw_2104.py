@@ -38,6 +38,16 @@ def test_문턱_언저리_걸린_칸은_날값으로_갈린다(고침: dict[str,
     assert 지남 is not None and 지남["failed"] == [] and scb.stage01_note(지남) == "재료 없음: 수용량"
 
 
+def test_MDD_문턱_글의_기준값도_날값으로() -> None:
+    """25.2110 (25.2108 교차검증 [권고]) — 기준 MDD 가 `:.6g` 로 찍혀 -0.1999997 이 "-0.2" 로 보였다. 실제 문턱은
+    -0.2499997 이라 MDD -0.2499998 은 걸림인데 글은 통과처럼 읽혔다. 작은 기준값은 지수 표기도 났다"""
+    st = scb.stage01({**좋은, "mdd": -0.2499998}, {**기준, "mdd": -0.1999997})
+    assert st is not None and st["verdict"] == "탈락"
+    assert "MDD(기준 대비) -0.2499998(>= 기준 MDD -0.1999997 − 0.05)" in scb.stage01_note(st)
+    칸 = next(c for c in scb.stage01({**좋은, "mdd": -0.9}, {**기준, "mdd": -0.00004})["checks"] if c["key"] == "mdd_vs_base")
+    assert 칸["target"] == ">= 기준 MDD -0.00004 − 0.05"
+
+
 def test_점검표가_없는_옛_꼴이면_이름만() -> None:
     assert scb.stage01_note({"failed": ["DSR(낮은 쪽)"], "unknown": []}) == "걸림: DSR(낮은 쪽)"
 

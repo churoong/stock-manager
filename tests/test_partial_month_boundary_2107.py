@@ -131,3 +131,23 @@ def test_뺀_계열로_코호트_V_를_못_내면_원래_값() -> None:
     뺀 = scb._partial_month_rows(줄들, 묶음)
     for r in 묶음[("KR", "1")]:
         assert r["dsr_cohort"] is not None and 뺀[id(r)]["dsr_cohort"] == r["dsr_cohort"]
+
+
+def test_코호트_V_가_끝_달로_갈리면_rows_가_경계로(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.2110 (25.2109 교차검증 [권고]) — rows() 가 뺀 줄의 코호트 V 를 점검표에 넘기는 연결. 코호트 V 를 계열 길이로만
+    정하게 바꿔(원래 60개월 0.95, 뺀 59개월 0.5) 걷는 창·실행 V 는 양쪽 다 통과인 채 코호트 V 로만 갈리게 한다"""
+    원래 = scb._cohort_dsr
+
+    def 가짜(out: list[dict[str, Any]], 묶음: dict[Any, list[dict[str, Any]]]) -> None:
+        원래(out, 묶음)
+        for 줄들 in 묶음.values():
+            for row in 줄들:
+                if row.get("_excess"):
+                    row["dsr_cohort"] = 0.95 if len(row["_excess"]) == 60 else 0.5
+
+    monkeypatch.setattr(scb, "_cohort_dsr", 가짜)
+    run = _월실행({k: _양(i, _달들()) for i, k in ((1, "composite"), (2, "value"))})
+    for c in (x for x in scb.rows([run]) if x["is_trial"]):
+        assert c["dsr_cohort"] == 0.95 and (c["walk_positive"], c["walk_total"]) == (5, 5)
+        assert c["stage01_verdict"] == "모름"
+        assert c["stage01_note"].startswith("경계 — 원래 모름, 끝 달 2026-11(부분 달)을 빼면 탈락(25.2105)"), c
