@@ -247,7 +247,7 @@ def _db(aid: str, fees: dict, c: Client | None = None) -> Client:
             [u["stock_id"], u["ticker"], u["market"], 시장, u["name"], u["sector"], 통화],
         )
     if 시장 == "US":
-        # 환율 1.0 — 리플레이의 시장 통화 장부(25.2058)와 같은 단위. 운영 `_fx` 는 묵은 환율을 거르므로 날마다 한 행
+        # 환율(모듈 줄, 기본 1.0 — 2073 은 1,300). 리플레이는 시장 통화 장부(25.2058). 운영 `_fx` 는 묵은 환율을 거르므로 날마다 한 행
         for d in 날들:
             c.conn.execute("INSERT OR REPLACE INTO fx_rates (pair, date, rate, source, fetched_at)"
                            " VALUES ('USDKRW', ?, ?, 't', 't')", [d, 환율])  # fmt: skip
