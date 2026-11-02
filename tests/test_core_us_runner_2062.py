@@ -253,6 +253,10 @@ def test_미국_밴드_PBR_은_가격_수준을_읽는다(monkeypatch: pytest.Mo
     def 엿입력(*a: object, **k: object) -> object:
         x = 원입력(*a, **k)
         자본 = 자본들[-1] if k.get("band") is not None and 자본들 else None
+        # 짝을 지은 뒤 비운다 — 대상 코드가 어떤 종목에서 부름을 건너뛰면 앞 종목의 부름이 짝이 되지 않게(25.2090,
+        # 교차검증 note). 통화는 합성 자료가 모두 USD 라 글자 "USD" 로 견준다 — 행 통화 대신 "USD" 를 박아도 지나는
+        # 것은 이 자료의 한계(국내 판은 1529 의 `test_자본_통화` 가 KRW·USD 를 가른다)
+        자본들.clear()
         입력.append((int(k["stock_id"]), str(k["price_date"]), k.get("band_close"), k.get("pbr_now"), k.get("band"),
                      자본, k.get("listed_shares")))  # type: ignore[arg-type]  # fmt: skip
         return x
