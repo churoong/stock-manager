@@ -137,20 +137,27 @@ def test_미국_탐색_S_T_도_돈다(monkeypatch: pytest.MonkeyPatch) -> None:
     assert all(cj.WARN_US_UNVERIFIED_OTHER not in w for w in 경고.values())
 
 
-def test_미국_지정가_판은_회차_핵심_변형에_따로_단서(monkeypatch: pytest.MonkeyPatch) -> None:
-    """미국 분할 지정가 체결 판은 일치 시험이 없다 — 목록 안 변형(B)에도 따로 문구(25.2067, 25.2066 교차검증 [권고]:
-    예전 `WARN_US_UNVERIFIED` 는 "B·G 는 됨" 이라 합친 띠에서 거꾸로 읽혔고, 그 갈래를 묶는 시험도 없었다)"""
+@pytest.mark.parametrize("묶임", [True, False])
+def test_미국_지정가_판은_묶이지_않은_회차_변형에만_단서(monkeypatch: pytest.MonkeyPatch, 묶임: bool) -> None:
+    """미국 분할 지정가 체결 판 — 운영 일치로 묶이지 않은 회차 변형 줄에만 따로 문구(25.2067, 25.2066 교차검증 [권고]:
+    예전 `WARN_US_UNVERIFIED` 는 "B·G 는 됨" 이라 합친 띠에서 거꾸로 읽혔다). 25.2084 부터 B·G·H·D·E·A 는 묶였다 —
+    목록에서 B 를 잠시 빼 묶이지 않은 갈래도 지난다"""
     mem = _db(monkeypatch)
+    if not 묶임:
+        monkeypatch.setattr(cj, "US_LIMIT_PARITY_VERIFIED", cj.US_LIMIT_PARITY_VERIFIED - {"core_b"})
     assert cj.run_core("US", years=1, today=오늘, force=True, limit_fills=True, variants=("core_b",)) == 0
     (r,) = mem.execute("SELECT warnings_json FROM backtest_runs").dicts()
     경고 = json.loads(r["warnings_json"])
-    assert cj.WARN_US_LIMIT_UNVERIFIED in 경고 and cj.WARN_US_UNVERIFIED not in 경고, 경고
+    assert (cj.WARN_US_LIMIT_UNVERIFIED in 경고) is not 묶임 and cj.WARN_US_UNVERIFIED not in 경고, 경고
+    assert cj.WARN_US_UNVERIFIED_OTHER not in 경고
 
 
 def test_미국_지정가_판_단서는_회차_변형에만(monkeypatch: pytest.MonkeyPatch) -> None:
     """지정가는 회차 진입 변형에만 켜진다 — 탐색+S·T+지정가 미국 실행에서 S·T·시가 일괄 C 행엔 지정가 단서가 없고 회차
-    D·E·A 행엔 있다(25.2068, 25.2067 교차검증 [권고]: S·T 를 빼는 조건을 묶는 시험이 없었다)"""
+    D·E·A 행엔 있다(25.2068, 25.2067 교차검증 [권고]: S·T 를 빼는 조건을 묶는 시험이 없었다). 25.2084 부터 회차 변형은
+    모두 묶였다 — 묶인 목록을 비워 그 조건을 지난다"""
     mem = _db(monkeypatch)
+    monkeypatch.setattr(cj, "US_LIMIT_PARITY_VERIFIED", frozenset())
     assert cj.run_core("US", years=1, today=오늘, force=True, explore=True, st=True, limit_fills=True) == 0
     경고 = {r["strategy"]: json.loads(r["warnings_json"]) for r in mem.execute(
         "SELECT strategy, warnings_json FROM backtest_runs").dicts()}  # fmt: skip
@@ -168,8 +175,10 @@ def test_R_줄엔_시장과_상관없이_옛_자리_단서(실행: tuple[MemClie
 def test_미국_지정가_핵심_실행의_합친_경고가_서로_어긋나지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
     """미국 지정가 핵심(탐색 아님) 실행 — B 는 지정가 단서만, R1 은 미국 R 단서·옛 자리 단서(지정가 단서 없음 — 시가 일괄).
     웹은 묶음 경고를 한 띠로 합쳐 보이므로, 합친 글에 "검증된 변형" 나열이 없어야 지정가 단서와 거꾸로 읽히지 않는다
-    (25.2069, 25.2068 교차검증 [권고]: R 줄의 예전 문구 "일치 시험이 된 변형은 B·G·H…" 가 다시 모순을 냈다)"""
+    (25.2069, 25.2068 교차검증 [권고]: R 줄의 예전 문구 "일치 시험이 된 변형은 B·G·H…" 가 다시 모순을 냈다).
+    25.2084 부터 B 는 묶였다 — 묶인 목록을 비워 지정가 단서가 붙는 갈래를 지난다"""
     mem = _db(monkeypatch)
+    monkeypatch.setattr(cj, "US_LIMIT_PARITY_VERIFIED", frozenset())
     assert cj.run_core("US", years=1, today=오늘, force=True, limit_fills=True, variants=("core_b", "core_r1")) == 0
     경고 = {r["strategy"]: json.loads(r["warnings_json"]) for r in mem.execute(
         "SELECT strategy, warnings_json FROM backtest_runs").dicts()}  # fmt: skip

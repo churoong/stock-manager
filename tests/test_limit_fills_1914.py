@@ -344,7 +344,7 @@ def _운영(variant: str, 판: str = "zero") -> dict[str, dict]:
             mp.setattr(cal, "local_today", lambda _m=None, _d=오늘: _d)
             if 입력:
                 입력.판단전(c, rp, day, cutoff)
-            job.run_step(c, market="KR", trade_date=cutoff, late=False, signal_rows=rows, settings=설정,
+            job.run_step(c, market=t10.시장, trade_date=cutoff, late=False, signal_rows=rows, settings=설정,
                          price_series=dict(t10.ALLOW_NO_CORRELATION_SHRINK), series_unknown={}, allocate=True,
                          now=datetime.fromisoformat(f"{day}T00:30:00+00:00"))  # fmt: skip
             out[day] = {"orders": set(c.q(

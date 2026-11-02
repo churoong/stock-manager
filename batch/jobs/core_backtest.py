@@ -93,10 +93,14 @@ WARN_US_UNVERIFIED_OTHER = "미국 리플레이 — 이 변형은 운영 미국 
 R_VARIANTS: frozenset[str] = frozenset(k for k, v in cs.VARIANTS.items() if v.selection == "random")
 WARN_R_OLD_SLOT = ("무작위 대조 — 운영 R 은 든 대체 종목의 옛 보유 자리를 함께 잇는다(25.1929). 옛 자리 신호가 "
                    "다시 나오는 날엔 리플레이와 다른 종목을 고른다(자료에 따라 다름 — 25.2067)")
-#: 미국 분할 지정가 체결 판(`--limit-fills`, 25.2067 — 25.2066 교차검증 [권고]) — 미국 일치 시험은 이 판을 다루지
-#: 않는다. 지정가는 회차 진입 변형에만 켜지므로(25.2068) 단서도 그 줄에만
-WARN_US_LIMIT_UNVERIFIED = ("미국 분할 지정가 체결 판 — 회차 진입 변형(B·G·H·D·E·A)의 지정가 체결 결과는 운영과 "
-                            "일치 시험 없음, 참고로만(25.2067·25.2069)")
+#: 미국 분할 지정가 체결 판(`--limit-fills`, 25.2067 — 25.2066 교차검증 [권고]) — 운영 일치 시험으로 묶이지 않은
+#: 회차 진입 변형 줄에만 단서(지정가는 회차 진입 변형에만 켜진다, 25.2068).
+#: 묶인 변형은 `US_LIMIT_PARITY_VERIFIED`(25.2084)
+WARN_US_LIMIT_UNVERIFIED = ("미국 분할 지정가 체결 판 — 이 회차 진입 변형의 지정가 체결 결과는 운영과 일치 시험 없음, "
+                            "참고로만(25.2067·25.2084)")
+#: 미국 분할 지정가 판이 운영 일치 시험으로 묶인 회차 진입 변형(25.2084 — `tests/test_limit_fills_us_2084.py`, 1914 L4
+#: 틀을 미국 틀에 실어 6계좌 × 비용 0·비용 판). 넓히려면 그 시험을 먼저 더한다
+US_LIMIT_PARITY_VERIFIED: frozenset[str] = frozenset({"core_b", "core_g", "core_h", "core_d", "core_e", "core_a"})
 #: 미국 분할 재수집 대기 종목을 뺀 실행(25.2062) — 뺀 수를 붙인다
 WARN_SPLIT_PENDING = "미국 분할 재수집 대기 종목을 유니버스에서 뺌(수정종가가 분할 앞뒤로 어긋남 — infra 25.553)"
 
@@ -412,12 +416,13 @@ def run_core(
                      # 비용 길 빈도(25.1969) — 대체 길(현금 < 비용)이 운영과 다른 길이라 몇 번 탔나
                      "cost_path": bt.cost_paths(result)}  # fmt: skip
             # 미국에서 일치 시험이 없는 변형 줄에만 단서(25.2063)
-            # 분할 지정가 체결 판(`limit_fills`)은 미국 일치 시험이 다루지 않는다 — 따로 문구(25.2066·25.2067).
+            # 분할 지정가 체결 판(`limit_fills`)은 운영 일치로 묶이지 않은 회차 변형에만 따로 문구(25.2066·25.2067 —
+            # 묶인 변형은 25.2084 `US_LIMIT_PARITY_VERIFIED`).
             # 지정가는 회차 진입 변형에만 켜진다(`CoreStrategy.limit_fills`) — S·T·시가 일괄(C·R1·R2)은 그 판에서도
             # 결과가 같아 목록대로 본다(25.2068)
             회차 = variant not in ST_VARIANTS and cs.variant_spec(variant).entry == "tranche"
             행경고 = list(warnings)
-            if country == "US" and limit_fills and 회차:
+            if country == "US" and limit_fills and 회차 and variant not in US_LIMIT_PARITY_VERIFIED:
                 행경고.append(WARN_US_LIMIT_UNVERIFIED)
             elif country == "US" and variant in R_VARIANTS:
                 행경고.append(WARN_US_UNVERIFIED)
