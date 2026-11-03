@@ -361,3 +361,36 @@ def test_잔고_줄의_시각은_잔고를_읽은_때다(c: Client) -> None:
     행 = [dict(zip(("as_of", "fetched_at", "holdings_json"), r, strict=True)) for r in 줄.fetchall()]
     assert datetime.fromisoformat(행[0]["fetched_at"]) == _kst("22:31")
     assert job._개장전_잔고(행, "US") == []  # 개장 뒤 읽은 줄은 기준점이 아니다
+
+
+def test_오늘_예약이_잔고에_들었나는_잔고를_읽은_시각으로(c: Client) -> None:
+    """25.2126 (25.2125 교차검증 [권고]) — 잔고는 개장(22:30 KST) 전 22:29 에 읽었고, 그 뒤 실현손익 다시 세기 등에 시간이
+    걸려 시계가 22:31 이 됐다. 잔고엔 오늘 예약(AAPL 3)이 아직 없으므로 빼면 안 된다 — 판정을 그 뒤 `clock()` 으로 하면
+    "KIS 10 − 3 = 7 vs H 10" 거짓 어긋남이 났다"""
+    c.conn.execute("INSERT INTO paper_orders (id, account_id, market, stock_id, side, order_type, quantity, currency,"
+                   " decided_on, fill_session, reason, rule_version, status, created_at)"
+                   " VALUES (300, 'B', 'US', 2, 'buy', 'market', 10, 'USD', '2026-10-13', '2026-10-14', 'r', 1,"
+                   " 'filled', 't')")  # fmt: skip
+    c.conn.execute("INSERT INTO paper_fills (order_id, account_id, stock_id, side, fill_date, price, quantity, currency,"
+                   " fx_rate, fee, tax, slippage, cash_krw, created_at)"
+                   " VALUES (300, 'B', 2, 'buy', '2026-10-14', 190, 10, 'USD', 1300, 0, 0, 0, -2470000, 't')")  # fmt: skip
+    s = _UsSess(holdings=[kv.Holding("AAPL", 10, 10, 190.0)])
+    job.run(c, "US", _kst("21:27"), session=s, clock=lambda: _kst("21:27"))  # 오늘 예약 AAPL 3 을 낸다
+
+    class _경계(_UsSess):
+        읽음 = 0
+
+        def balance_us(self) -> tuple[list[kv.Holding], dict[str, float | None]]:
+            self.읽음 = 1
+            return super().balance_us()
+
+    다시 = _경계(holdings=[kv.Holding("AAPL", 10, 10, 190.0)])
+
+    def 시계() -> datetime:
+        if not 다시.읽음:
+            return _kst("22:19")
+        다시.읽음 += 1
+        return _kst("22:29" if 다시.읽음 == 2 else "22:31")  # 읽은 직후 한 번은 22:29, 그 뒤는 개장 뒤
+
+    job.run(c, "US", _kst("22:19"), session=다시, clock=시계)
+    assert c.q("SELECT diff_json FROM paper_broker_daily WHERE broker = 'kis_vts_us'") == [("{}",)]
