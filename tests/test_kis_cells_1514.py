@@ -188,9 +188,10 @@ def test_desk_write_puts_fill_adjust(monkeypatch: pytest.MonkeyPatch, 환: tuple
         c.conn.execute("INSERT INTO paper_broker_daily (broker, as_of, account_id, holdings_json, cash_krw, total_krw,"
                        " diff_json, source, fetched_at, summary_json) VALUES ('kis_vts', ?, 'B', '[]', 0, 0,"
                        " '{}', 'kis_vts', 't', ?)", [d, json.dumps(칸 | {"account_krw": 원화})])  # fmt: skip
-    # 10-16 밤 미국 배치가 끝났다(그날 평가 행을 미국 종가로 덮음) — 대보기 끝이 될 수 있다
-    c.conn.execute("INSERT INTO batch_runs (job_name, market, started_at, status) VALUES ('daily_us', 'US',"
-                   " '2026-10-16T13:30:00+00:00', 'success')")  # fmt: skip
+    # 10-15·10-16 밤 미국 배치가 끝났다(그날 평가 행을 미국 종가로 덮음) — 대보기 시작·끝이 될 수 있다(시작도 25.2119)
+    for d in ("2026-10-15", "2026-10-16"):
+        c.conn.execute("INSERT INTO batch_runs (job_name, market, started_at, status) VALUES ('daily_us', 'US',"
+                       " ?, 'success')", [f"{d}T13:30:00+00:00"])  # fmt: skip
     job.write(c, "KR", datetime(2026, 10, 16, 23, 40, tzinfo=UTC), trade_date="2026-10-16", session_date="2026-10-19",
               step_log={}, warnings=[])  # fmt: skip
     s = json.loads(c.q("SELECT summary_json FROM paper_desk")[0][0])
@@ -231,8 +232,13 @@ def test_h_window_ends_before_today() -> None:
     assert desk.h_window(v, "2026-10-16") is None
     assert desk.h_window([], "2026-10-19") is None
     # 끝날은 그날 미국 배치가 덮어쓴 날만(25.1517 검토 4) — 10-17 이 미국 휴장이면 끝이 없다
-    assert desk.h_window(v, "2026-10-20", {"2026-10-19"}) == (["2026-10-15", "2026-10-17"], "2026-10-19")
+    assert desk.h_window(v, "2026-10-20", {"2026-10-15", "2026-10-17", "2026-10-19"}) == (
+        ["2026-10-15", "2026-10-17"], "2026-10-19")
     assert desk.h_window(v, "2026-10-19", {"2026-10-15"}) is None
+    # 시작도 그날 미국 배치가 덮어쓴 날만(25.2119 — 25.2118 교차검증 [권고]) — 10-17 미국 실패면 시작 후보에서 빠지고,
+    # 미국이 끝난 시작날이 없으면 대보기 없음
+    assert desk.h_window(v, "2026-10-20", {"2026-10-15", "2026-10-19"}) == (["2026-10-15"], "2026-10-19")
+    assert desk.h_window(v, "2026-10-20", {"2026-10-19"}) is None
 
 
 def test_fill_adjust_end_split_guard_and_late_limit_buy() -> None:

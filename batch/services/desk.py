@@ -832,13 +832,15 @@ def h_window(
 
     KIS 총액은 국내 아침 배치가 적는다(국내·미국 모두 전 장 종가). 가상 평가 행은 그날 미국 저녁 배치가 덮어써야
     국내·미국이 같은 장 종가가 된다 — 오늘 행은 아침에는 아직 미국이 하루 늦다(25.1516, 검토 1). 미국 휴장·미국 배치
-    실패로 덮이지 않은 날도 끝이 될 수 없다(`us_ok` = 미국 일일 배치가 끝난 한국 날짜, 25.1517 검토 4)
+    실패로 덮이지 않은 날도 끝이 될 수 없다(`us_ok` = 미국 일일 배치가 끝난 한국 날짜, 25.1517 검토 4). **시작도 같다**
+    (25.2119, 25.2118 교차검증 [권고]) — 시작날 H 평가가 미국 종가로 덮이지 않았으면 KIS 총액과 견줄 때 시작 쪽에서 미국
+    하루치 변동만큼 어긋난다
     """
     날 = sorted(d for d, v in kis_totals if v is not None and float(v) > 0)
     끝 = [d for d in 날 if d < today and (us_ok is None or d in us_ok)]
     if not 끝:
         return None
-    시작 = [d for d in 날 if d < 끝[-1]]
+    시작 = [d for d in 날 if d < 끝[-1] and (us_ok is None or d in us_ok)]
     return (시작, 끝[-1]) if 시작 else None
 
 

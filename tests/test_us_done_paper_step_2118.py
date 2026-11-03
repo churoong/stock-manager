@@ -67,3 +67,10 @@ def test_같은_날_정상_재실행이_있으면_그날은_든다() -> None:
 
 def test_건너뜀_허용_글은_관문과_같다() -> None:
     assert sd.PAPER_SKIP_OK == ("입금 없음",) and "'입금 없음'" in bmj.US_DONE_SQL
+
+
+def test_운용_화면_대보기도_같은_질의를_쓴다() -> None:
+    """25.2119 (25.2118 교차검증 note) — `jobs/desk` 의 h_check 끝날·시작날도 같은 거름을 받는다(별칭이 끊기면 이 시험이 잡는다)"""
+    from batch.jobs import desk as desk_job
+
+    assert desk_job.US_DONE_SQL is bmj.US_DONE_SQL
