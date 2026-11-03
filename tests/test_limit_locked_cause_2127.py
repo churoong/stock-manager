@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import itertools
 from typing import Any
 
 import pytest
@@ -64,18 +65,17 @@ def test_가상_judge_와_격자로_같다() -> None:
     for 기준 in (1_003, 2_005, 9_990, 49_950, 199_500, 512_000):
         상, 하 = pp.kr_price_limits(기준)
         for 종가 in (하, 하 + pp._tick(하), 상 - pp._tick(상), 상, 기준):
-            등락 = round((종가 / 기준 - 1) * 100, 2)
-            for 시가 in (None, 0, 하, 상, 기준):
-                for 거래량 in (1000, 0, None):
-                    for 쪽 in ("buy", "sell"):
-                        for 바탕 in ("open", "close"):
-                            o = pp.Order(1, "B", 1, 쪽, "market", None, 1, "KRW", "2026-10-16", fill_basis=바탕)
-                            _, 까닭 = pp.judge(o, pp.Bar("2026-10-16", 시가, 종가, 거래량, 등락))
-                            가상 = 까닭.endswith(상한가매수 if 쪽 == "buy" else pp.LOCKED_SELL)
-                            끝수 += 가상
-                            줄 = _줄(side=쪽, p_open=시가, p_close=종가, p_change=등락, i_fill_basis=바탕, p_volume=거래량)
-                            if bm._가격제한_끝(줄) != 가상:
-                                갈림.append((기준, 종가, 시가, 거래량, 쪽, 바탕, 까닭))
+            # 등락률 없음(대체 출처)·제한폭 밖(정리매매)도 judge 와 맞댄다(25.2129 교차검증 [참고])
+            등락들 = (round((종가 / 기준 - 1) * 100, 2), None, -65.0)
+            축 = itertools.product(등락들, (None, 0, 하, 상, 기준), (1000, 0, None), ("buy", "sell"), ("open", "close"))
+            for 등락, 시가, 거래량, 쪽, 바탕 in 축:
+                o = pp.Order(1, "B", 1, 쪽, "market", None, 1, "KRW", "2026-10-16", fill_basis=바탕)
+                _, 까닭 = pp.judge(o, pp.Bar("2026-10-16", 시가, 종가, 거래량, 등락))
+                가상 = 까닭.endswith(상한가매수 if 쪽 == "buy" else pp.LOCKED_SELL)
+                끝수 += 가상
+                줄 = _줄(side=쪽, p_open=시가, p_close=종가, p_change=등락, i_fill_basis=바탕, p_volume=거래량)
+                if bm._가격제한_끝(줄) != 가상:
+                    갈림.append((기준, 종가, 등락, 시가, 거래량, 쪽, 바탕, 까닭))
     assert not 갈림, 갈림[:5]
     assert 끝수 > 100  # 격자가 끝인 날을 실제로 많이 지난다
 
