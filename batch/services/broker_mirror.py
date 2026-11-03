@@ -393,16 +393,18 @@ def _값(v: Any) -> float:
 def _가격제한_끝(r: dict[str, Any]) -> bool:
     """국내 시장가가 그날 가격제한 끝(매수는 상한가 이상·매도는 하한가 이하)에서 판정됐나 — 가상 `paper.limit_locked` 와
     같은 잣대(`kr_price_limits`, 25.2114). 가상은 그날 안 찼다고 보는데 KIS 모의가 찬 줄을 "설명 안 됨" 이 아니라 따로
-    센다(25.2127, 11-03 결함 회차 [참고] ③). 판정 가격은 시가(장 열린 뒤 낸 주문 `fill_basis='close'` 는 종가).
-    재료가 없거나 등락률이 제한폭 밖(정리매매 등)이면 아니다"""
+    센다(25.2127, 11-03 결함 회차 [참고] ③). 판정 가격은 가상 `judge` 와 같게 시가, 시가가 없으면 종가
+    (`NO_OPEN_CLOSE_NOTE`), 장 열린 뒤 낸 주문(`fill_basis='close'`)은 종가 — 이 갈래는 `compare` 에선 `_판정밖` 이
+    먼저 표본 밖으로 빼 닿지 않는다(방어용, 25.2128). 시가 ≤ 0 은 가상이 정지(`halted`)로 보므로 아니다. 재료가 없거나
+    등락률이 제한폭 밖(정리매매 등)이면 아니다"""
     if r.get("b_market") != "KR" or r.get("p_change") is None or r.get("p_close") is None:
         return False
     등락 = _값(r["p_change"])
     if 등락 <= -100 or abs(등락) > KR_PRICE_LIMIT * 100 + 0.5:
         return False
-    가격 = r.get("p_close") if r.get("i_fill_basis") == "close" else r.get("p_open")
-    if 가격 is None or _값(r["p_close"]) <= 0:
+    if _값(r["p_close"]) <= 0 or (r.get("p_open") is not None and _값(r["p_open"]) <= 0):
         return False
+    가격 = r.get("p_close") if r.get("i_fill_basis") == "close" or r.get("p_open") is None else r.get("p_open")
     상한, 하한 = kr_price_limits(_값(r["p_close"]) / (1 + 등락 / 100))
     return _값(가격) >= 상한 if str(r.get("side")) == "buy" else _값(가격) <= 하한
 
@@ -698,10 +700,10 @@ def diverge(now: dict[str, Any] | None, keys: list[str], market: str) -> str | N
         방향 = ("가상만 참이 더 많음 — 가상 체결 판정이 낙관, 가상 성적을 그만큼 덜 믿어야 합니다" if 내만 > kis견줌
               else "KIS만 참이 더 많음 — 가상 체결 판정이 비관, 가상 성적이 실제보다 낮게 나옵니다" if kis견줌 > 내만
               else "가상만 참과 KIS만 참이 같음")  # fmt: skip
-        if 제한끝:
-            방향 += f"(KIS만 참 가운데 가격제한 끝 {제한끝}건은 방향에서 뺌)"
+        # 보이는 숫자와 결론이 같은 기준이게 뺀 수를 숫자 칸에 함께 적는다(25.2128, 25.2127 교차검증 [권고])
+        kis칸 = f"{kis만}(가격제한 끝 {제한끝}건 빼면 {kis견줌})" if 제한끝 else f"{kis만}"
         일치 = _값글(now.get("match_pct"), DIVERGE_MATCH_PCT, True)
-        글.append(f"체결 일치 {일치}." + (f" 가상만 참 {내만} · KIS만 참 {kis만}: {방향}"
+        글.append(f"체결 일치 {일치}." + (f" 가상만 참 {내만} · KIS만 참 {kis칸}: {방향}"
                                           if now.get("match_pct") is not None else ""))  # fmt: skip
     if "kept" in keys:
         실현 = _값글(now.get("kept_pct"), DIVERGE_KEPT_PCT, True)
