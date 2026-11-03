@@ -53,8 +53,8 @@ def _돌림(c: Client, day: str, total: float, cash: str, fx: str) -> dict:  # n
     return json.loads(c.q("SELECT summary_json FROM paper_broker_daily WHERE as_of = ?", [day])[0][0])
 
 
-@pytest.mark.parametrize("시작미국", [True, False])
-def test_작업은_같은_창으로_환율_몫을_빼고_견준다(c: Client, 시작미국: bool) -> None:  # noqa: F811
+@pytest.mark.parametrize("시작미국", [True, False, "가상실패"])
+def test_작업은_같은_창으로_환율_몫을_빼고_견준다(c: Client, 시작미국: bool | str) -> None:  # noqa: F811
     # H(이 시험은 B 를 베낀다) — 10-15 (1.0, 1000), 10-16 (1.01, 4000) · 10-15·10-16 밤 미국 배치가 끝났다.
     # 시작날(10-15) 미국 실행이 없으면 견주기 창이 없다(25.2119 — 시작도 미국 종가로 덮인 날만, 작업 경로)
     for d, twr, pnl in (("2026-10-15", 1.0, 1000.0), ("2026-10-16", 1.01, 4000.0), ("2026-10-19", 1.05, 99_000.0)):
@@ -62,15 +62,19 @@ def test_작업은_같은_창으로_환율_몫을_빼고_견준다(c: Client, �
                        " pnl_krw, twr_index, positions_json, recon_ok, updated_at)"
                        " VALUES ('B', ?, 1, 1, 0, 1, ?, ?, '[]', 1, 't')", [d, pnl, twr])  # fmt: skip
     for d in ("2026-10-15", "2026-10-16") if 시작미국 else ("2026-10-16",):
-        c.conn.execute("INSERT INTO batch_runs (job_name, market, started_at, status) VALUES ('daily_us', 'US',"
-                       " ?, 'success')", [f"{d}T13:30:00+00:00"])  # fmt: skip
+        # "가상실패" — 시작날 미국 실행은 있으나 가상 단계가 예외로 끝난 partial(25.2121 — 실행 행 없음만 보면 시작 쪽이
+        # 다른 질의로 바뀌어도 몰랐다). US_DONE_SQL 을 거쳐 시작 후보에서 빠져야 한다
+        실패 = 시작미국 == "가상실패" and d == "2026-10-15"
+        c.conn.execute("INSERT INTO batch_runs (job_name, market, started_at, status, step_log) VALUES ('daily_us', 'US',"
+                       " ?, ?, ?)", [f"{d}T13:30:00+00:00", "partial" if 실패 else "success",
+                                     '{"paper": {"error": "x"}}' if 실패 else None])  # fmt: skip
     _돌림(c, "2026-10-15", 1_000_000.0, "100000", "1000")
     _돌림(c, "2026-10-16", 1_003_000.0, "102000", "1020")
     s = _돌림(c, "2026-10-19", 1_010_000.0, "103000", "1030")
     p = s["perf"]
     # 성과(계좌 그대로)는 10-15 ~ 10-19 — 1,100,000 → 1,113,000
     assert p["start"] == "2026-10-15" and p["pnl_krw"] == pytest.approx(13_000.0)
-    if not 시작미국:
+    if 시작미국 is not True:
         assert (p["h_from"], p["h_to"]) == (None, None)
         return
     # 견주기는 10-15 ~ 10-16(오늘 아침 H 행은 미국이 한 장 늦다 — 끝에 쓰지 않는다): KIS 1,100,000 → 1,105,000,

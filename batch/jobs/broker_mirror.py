@@ -276,7 +276,9 @@ TOTALS_SQL = (
 #: 와 같은 잣대 — 시험이 대조). `paper` 칸이 없는 옛 행·깨진 `step_log` 는 예전처럼 센다(모름 — 관문과 같다)
 US_DONE_SQL = (
     "SELECT DISTINCT date(started_at, '+9 hours') AS d FROM batch_runs WHERE job_name = ?"
-    " AND status IN ('success', 'partial') AND started_at >= ?"
+    # 아래 경계는 한국 날짜끼리(25.2121 — `started_at >= 'YYYY-MM-DD'` 는 UTC 시각을 한국 날짜와 견줘, 그 날짜
+    # 00~09 시 KST 에 시작한 실행이 빠졌다. 시작날도 거르게 된 25.2119 뒤로 시작 후보에 닿는다)
+    " AND status IN ('success', 'partial') AND date(started_at, '+9 hours') >= ?"
     " AND NOT (json_valid(step_log) AND ("
     "json_extract(step_log, '$.paper.error') IS NOT NULL"
     " OR COALESCE(json_extract(step_log, '$.paper.account_errors'), '{}') NOT IN ('', '{}')"

@@ -65,6 +65,14 @@ def test_같은_날_정상_재실행이_있으면_그날은_든다() -> None:
     assert _끝난날(c) == {"2026-11-03"}
 
 
+def test_아래_경계는_한국_날짜끼리() -> None:
+    """25.2121 — 11-03 00:30 KST(= 11-02 15:30Z)에 시작한 늦은 실행은 한국 날짜 11-03 이다. 아래 경계 '2026-11-03' 과
+    UTC 시각 문자열을 견주면 빠졌다"""
+    c = Client()
+    _실행(c, "2026-11-02T15:30:00+00:00", "success", {"paper": {}})
+    assert {r[0] for r in c.conn.execute(bmj.US_DONE_SQL, ["daily_us", "2026-11-03"]).fetchall()} == {"2026-11-03"}
+
+
 def test_건너뜀_허용_글은_관문과_같다() -> None:
     assert sd.PAPER_SKIP_OK == ("입금 없음",) and "'입금 없음'" in bmj.US_DONE_SQL
 

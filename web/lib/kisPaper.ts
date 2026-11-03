@@ -38,7 +38,7 @@ export interface KisAccount { currency: "KRW" | "USD"; cash: number | null; hold
 export interface KisPerf {
   start: string; start_total: number; last: string; last_total: number; pnl_krw: number; return_pct: number; mdd_pct: number; days: number;
   h_pnl_krw: number | null; h_return_pct: number | null;
-  /** 25.1543 — H 견주기의 창(오늘보다 앞선·미국 배치가 끝난 날까지)과 KIS 쪽 손익(원래·쉬는 해외 현금 환율 몫 뺀 것) */
+  /** 25.1543 — H 견주기의 창(오늘보다 앞선 날까지 — 시작·끝 모두 미국 배치가 가상 단계까지 끝난 날(25.2118·2119))과 KIS 쪽 손익(원래·쉬는 해외 현금 환율 몫 뺀 것) */
   h_from?: string | null; h_to?: string | null; kis_pnl_krw?: number | null; kis_cmp_pnl_krw?: number | null; fx_cash_krw?: number | null;
 }
 /** `basis` 2(25.1527) = 국내 총평가 `kr_total` + 해외 총자산 `assets_krw`. 없으면 예전 식(25.1497 — 미국 몫이 빠졌다) */
