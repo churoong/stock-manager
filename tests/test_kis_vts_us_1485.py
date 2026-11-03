@@ -219,6 +219,40 @@ def test_us_job_sends_reservations_and_keeps_kr_apart(c: Client) -> None:
                                                                    (203, "unfilled", "5502", 0, None)]  # fmt: skip
 
 
+def test_us_같은_날_다시_돌아도_오늘_예약을_잔고에서_빼지_않는다(c: Client) -> None:
+    """25.2122 (11-03 결함 회차 [참고] ①) — KIS·H 모두 AAPL 10주, 오늘 H 가 3주 더 사는 예약을 냈다. 같은 날 개장 전에
+    다시 돌면 KIS 잔고는 아직 10주다(예약은 개장 뒤 찬다). 예전엔 10 − 오늘 예약 3 = 7 을 H 10 과 견줘 거짓 어긋남을 적었다"""
+    c.conn.execute("INSERT INTO paper_orders (id, account_id, market, stock_id, side, order_type, quantity, currency,"
+                   " decided_on, fill_session, reason, rule_version, status, created_at)"
+                   " VALUES (300, 'B', 'US', 2, 'buy', 'market', 10, 'USD', '2026-10-13', '2026-10-14', 'r', 1,"
+                   " 'filled', 't')")  # fmt: skip
+    c.conn.execute("INSERT INTO paper_fills (order_id, account_id, stock_id, side, fill_date, price, quantity, currency,"
+                   " fx_rate, fee, tax, slippage, cash_krw, created_at)"
+                   " VALUES (300, 'B', 2, 'buy', '2026-10-14', 190, 10, 'USD', 1300, 0, 0, 0, -2470000, 't')")  # fmt: skip
+    s = _UsSess(holdings=[kv.Holding("AAPL", 10, 10, 190.0)])
+    job.run(c, "US", _kst("21:27"), session=s, clock=lambda: _kst("21:27"))
+    assert ("buy", "AAPL", "NASD", 3, 200.0) in s.orders
+    job.run(c, "US", _kst("21:40"), session=s, clock=lambda: _kst("21:40"))
+    assert c.q("SELECT diff_json FROM paper_broker_daily WHERE broker = 'kis_vts_us'") == [("{}",)]
+
+
+def test_us_정리_계산에도_오늘_예약을_빼지_않는다(c: Client, monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.2122 — 같은 날 다시 돌 때 정리 수량(`plan` 의 남음 = 보유 − 내부 − bought_today)이 아직 안 찬 미국 예약만큼
+    줄지 않게, 미국 실행은 `bought_today` 를 비워 넘긴다(국내는 그대로 — 시가에 찬 오늘 매수가 잔고에 있다)"""
+    받음: list[dict] = []
+    원래 = job.bm.plan
+
+    def 가로챔(*a: Any, **k: Any) -> Any:
+        받음.append(k.get("bought_today") or {})
+        return 원래(*a, **k)
+
+    monkeypatch.setattr(job.bm, "plan", 가로챔)
+    s = _UsSess()
+    job.run(c, "US", _kst("21:27"), session=s, clock=lambda: _kst("21:27"))
+    job.run(c, "US", _kst("21:40"), session=s, clock=lambda: _kst("21:40"))
+    assert len(s.orders) == 2 and 받음 == [{}, {}]  # 둘째 실행 때 오늘 예약(AAPL 3·IBM 1)이 있어도 비운다
+
+
 def test_us_window(c: Client) -> None:
     # 09:30 KST 는 미국 현지로 전날 저녁 — 그날 개장이 지났으니 "마감 뒤"
     for 시각, 까닭 in (("22:25", "예약 접수 마감 뒤 — 보내지 않음"), ("09:30", "예약 접수 마감 뒤 — 보내지 않음"),

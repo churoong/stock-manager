@@ -669,7 +669,9 @@ def run(
             for sid, v in bm.split_holding(h.quantity, h.sellable, 코드표[h.code], 몫, 파는행).items()}  # fmt: skip
     # 어긋남은 **베낀 적 있는 종목**과 증권사 보유만 — 키를 넣기 전에 산 가상 보유는 "연결 전 보유" 로
     # 따로 센다(감사 [권장] 3). 오늘 매수 수량을 뺀다(감사 [권장] 2)
-    증권수 = {k: v[0] - 오늘산0.get(k, 0) for k, v in 증권.items()}
+    # 미국은 빼지 않는다(25.2122, 11-03 결함 회차 [참고] ① — 몫 계산과 같은 잣대): 예약은 개장 전이라 아직 KIS 잔고에
+    # 없다. 빼면 같은 날 다시 돈 실행이 "KIS 10 − 오늘 예약 3 = 7 vs H 10" 거짓 어긋남을 적었다
+    증권수 = {k: v[0] - (0 if 미국 else 오늘산0.get(k, 0)) for k, v in 증권.items()}
     # "연결 전 보유" = **베끼기를 시작한 날 전에 이미 들고 있던** 가상 종목(25.1564). 예전 "산 적 있는 종목(거부 제외)"
     # 은 연결 뒤 거부된 매수가 숨었고(25.1561), 고친 "베끼려 한 적 있는 종목(거부 포함)" 은 연결 전부터 든 종목의
     # 거부된 2·3회차가 그 종목 전체를 영구 어긋남으로 만들었다(25.1561 반박 [권고] B). 날로 가르면 둘 다 없다 —
@@ -794,7 +796,10 @@ def run(
     거래소 = {sid: kv.US_EXCHANGE.get(m) for sid, (_t, m) in 종목.items()}
     코드 = {sid: t for sid, (t, _m) in 종목.items() if not 미국 or 거래소.get(sid)}
     종가 = _closes(client, set(코드), 오늘.isoformat()) if 미국 else None
-    오늘산 = {int(r[0]): int(r[1] or 0) for r in client.execute(BOUGHT_TODAY_SQL, [증권사, 오늘.isoformat()]).rows}
+    # 미국 예약은 아직 잔고에 없어 정리 계산에서 빼지 않는다(25.2122 — 빼면 첫 실행이 상한·마감에 잘려 못 낸 정리가
+    # 같은 날 다시 돌 때 오늘 예약 매수만큼 줄었다)
+    오늘산 = ({} if 미국 else
+            {int(r[0]): int(r[1] or 0) for r in client.execute(BOUGHT_TODAY_SQL, [증권사, 오늘.isoformat()]).rows})
     낸수 = client.execute(SENT_TODAY_SQL, [증권사, 오늘.isoformat(), bm.REASON_GUARD_STOP, bm.REASON_GUARD_TAKE]).rows
     # 판정 대기 매수는 정리 계산에서 내부 보유로 친다(25.1715) — 찼으면 곧 장부에 들고, 안 찼으면 다음 날 정리
     대기 = {int(r["stock_id"]): int(r["q"] or 0)
