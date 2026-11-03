@@ -158,7 +158,8 @@ def test_cells_sql_books_slippage_pct() -> None:
 
 
 @pytest.mark.parametrize("환", [None, (2_000_000.0, 1000.0, 2_040_000.0, 1020.0)])
-def test_desk_write_puts_fill_adjust(monkeypatch: pytest.MonkeyPatch, 환: tuple | None) -> None:
+@pytest.mark.parametrize("시작미국", [True, False])
+def test_desk_write_puts_fill_adjust(monkeypatch: pytest.MonkeyPatch, 환: tuple | None, 시작미국: bool) -> None:
     """B(챔피언으로 둠) 10-15 체결 100만(평가 1,000만 → 회전 10%) × 넘음 0.5 = 0.05%p.
     대보기: 운용 요약 날짜 10-17 — 끝은 그 앞 KIS 줄 10-16. KIS 손익 9,000 − B 손익 10,000 → −0.01%p.
     `환` = (10-15 해외 현금, 환율, 10-16 해외 현금, 환율) — 쉬는 해외 현금 200만원어치가 환율 +2% 로 +40,000 이면
@@ -189,7 +190,7 @@ def test_desk_write_puts_fill_adjust(monkeypatch: pytest.MonkeyPatch, 환: tuple
                        " diff_json, source, fetched_at, summary_json) VALUES ('kis_vts', ?, 'B', '[]', 0, 0,"
                        " '{}', 'kis_vts', 't', ?)", [d, json.dumps(칸 | {"account_krw": 원화})])  # fmt: skip
     # 10-15·10-16 밤 미국 배치가 끝났다(그날 평가 행을 미국 종가로 덮음) — 대보기 시작·끝이 될 수 있다(시작도 25.2119)
-    for d in ("2026-10-15", "2026-10-16"):
+    for d in ("2026-10-15", "2026-10-16") if 시작미국 else ("2026-10-16",):
         c.conn.execute("INSERT INTO batch_runs (job_name, market, started_at, status) VALUES ('daily_us', 'US',"
                        " ?, 'success')", [f"{d}T13:30:00+00:00"])  # fmt: skip
     job.write(c, "KR", datetime(2026, 10, 16, 23, 40, tzinfo=UTC), trade_date="2026-10-16", session_date="2026-10-19",
@@ -200,6 +201,9 @@ def test_desk_write_puts_fill_adjust(monkeypatch: pytest.MonkeyPatch, 환: tuple
     assert b["measured_pct"] == pytest.approx(10.0) and b["adjusted_pct"] == pytest.approx(1.0 - 0.05)
     assert s["fill_adjust"]["rows"]["A"]["fills"] == 0
     h = s["fill_adjust"]["h_check"]
+    if not 시작미국:  # 시작날 미국 실행이 없으면 대보기 없음(25.2119, 운용 화면 작업 경로)
+        assert h is None and s["fill_adjust_error"] is None
+        return
     assert (h["from"], h["to"], h["pre_link"]) == ("2026-10-15", "2026-10-16", 0)
     assert h["actual_pp"] == pytest.approx(-0.01) and h["explained_pp"] == pytest.approx(-0.05)
     assert h["fx_mixed"] is (환 is None) and h["fx_cash_krw"] == (pytest.approx(40_000.0) if 환 else None)

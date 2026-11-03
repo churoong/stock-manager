@@ -53,20 +53,26 @@ def _돌림(c: Client, day: str, total: float, cash: str, fx: str) -> dict:  # n
     return json.loads(c.q("SELECT summary_json FROM paper_broker_daily WHERE as_of = ?", [day])[0][0])
 
 
-def test_작업은_같은_창으로_환율_몫을_빼고_견준다(c: Client) -> None:  # noqa: F811
-    # H(이 시험은 B 를 베낀다) — 10-15 (1.0, 1000), 10-16 (1.01, 4000) · 10-16 밤 미국 배치가 끝났다
+@pytest.mark.parametrize("시작미국", [True, False])
+def test_작업은_같은_창으로_환율_몫을_빼고_견준다(c: Client, 시작미국: bool) -> None:  # noqa: F811
+    # H(이 시험은 B 를 베낀다) — 10-15 (1.0, 1000), 10-16 (1.01, 4000) · 10-15·10-16 밤 미국 배치가 끝났다.
+    # 시작날(10-15) 미국 실행이 없으면 견주기 창이 없다(25.2119 — 시작도 미국 종가로 덮인 날만, 작업 경로)
     for d, twr, pnl in (("2026-10-15", 1.0, 1000.0), ("2026-10-16", 1.01, 4000.0), ("2026-10-19", 1.05, 99_000.0)):
         c.conn.execute("INSERT INTO paper_daily (account_id, as_of, invested_krw, cash_krw, holdings_krw, equity_krw,"
                        " pnl_krw, twr_index, positions_json, recon_ok, updated_at)"
                        " VALUES ('B', ?, 1, 1, 0, 1, ?, ?, '[]', 1, 't')", [d, pnl, twr])  # fmt: skip
-    c.conn.execute("INSERT INTO batch_runs (job_name, market, started_at, status) VALUES ('daily_us', 'US',"
-                   " '2026-10-16T13:30:00+00:00', 'success')")  # fmt: skip
+    for d in ("2026-10-15", "2026-10-16") if 시작미국 else ("2026-10-16",):
+        c.conn.execute("INSERT INTO batch_runs (job_name, market, started_at, status) VALUES ('daily_us', 'US',"
+                       " ?, 'success')", [f"{d}T13:30:00+00:00"])  # fmt: skip
     _돌림(c, "2026-10-15", 1_000_000.0, "100000", "1000")
     _돌림(c, "2026-10-16", 1_003_000.0, "102000", "1020")
     s = _돌림(c, "2026-10-19", 1_010_000.0, "103000", "1030")
     p = s["perf"]
     # 성과(계좌 그대로)는 10-15 ~ 10-19 — 1,100,000 → 1,113,000
     assert p["start"] == "2026-10-15" and p["pnl_krw"] == pytest.approx(13_000.0)
+    if not 시작미국:
+        assert (p["h_from"], p["h_to"]) == (None, None)
+        return
     # 견주기는 10-15 ~ 10-16(오늘 아침 H 행은 미국이 한 장 늦다 — 끝에 쓰지 않는다): KIS 1,100,000 → 1,105,000,
     # 쉬는 현금 환율 몫 +2,000 → +3,000 · H +3,000 (10-19 행 99,000 은 쓰지 않는다)
     assert (p["h_from"], p["h_to"]) == ("2026-10-15", "2026-10-16")
