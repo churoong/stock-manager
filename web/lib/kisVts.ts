@@ -39,8 +39,9 @@ export const LIVE_CALL_GAP_MS = 1_000;
 export const LIVE_TIMEOUT_MS = 8_000;
 /** 초당 한도 거부 — 배치 `kis_vts.RATE_LIMIT_CODES` 와 같다(`EGW00215` 는 모의 원장 쪽, 25.1799). 잠시 뒤 다시 하면 풀린다 */
 export const KIS_RATE_LIMIT_CODES: readonly string[] = ["EGW00201", "EGW00215"];
-/** 이보다 오래된 `running` 은 죽은 실행으로 본다(배치 시간 제한 30분 + 여유) */
-export const BATCH_RUNNING_WINDOW_MS = 45 * 60_000;
+/** 이보다 오래된 `running` 은 죽은 실행으로 본다 — 가장 큰 배치 프로세스 한도(미국 45분, 25.2113) + 5분. 파이썬 시험
+ * (`test_timeout_alert_1386`)이 워크플로의 `timeout Nm` 과 대조한다 */
+export const BATCH_RUNNING_WINDOW_MS = 50 * 60_000;
 
 export const LIVE_THROTTLE_SQL = `INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
 ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at WHERE settings.updated_at < ?`;

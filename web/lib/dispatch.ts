@@ -23,7 +23,7 @@ export interface DispatchJob {
 
 export const JOBS: DispatchJob[] = [
   { key: "daily_kr", label: "국내 일일 배치", event: "daily-kr", payload: { force: true }, note: "시세 → 점수·신호 → 리포트 발송. 3~5분" },
-  { key: "daily_us", label: "미국 일일 배치", event: "daily-us", payload: { force: true }, note: "전종목 시세라 15분 남짓. 장중에 돌리면 진행 중 가격은 저장하지 않는다" },
+  { key: "daily_us", label: "미국 일일 배치", event: "daily-us", payload: { force: true }, note: "전종목 시세라 30분 안팎(한도 45분). 장중에 돌리면 진행 중 가격은 저장하지 않는다" },
   { key: "scores", label: "점수 (국내·미국)", event: "scores", note: "유니버스 전 종목 팩터 점수. 1분" },
   { key: "signals", label: "매수 신호 (국내·미국)", event: "signals", note: "점수가 있어야 한다. 1분" },
   { key: "metrics", label: "성과 지표", event: "metrics", note: "CAGR·MDD·샤프. 몇 분" },

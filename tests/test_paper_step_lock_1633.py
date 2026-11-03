@@ -194,7 +194,8 @@ def test_잠금_기한은_배치_프로세스_한도보다_길고_기다림은_�
         m = re.search(r"timeout --kill-after=\d+s (\d+)m python -m batch\.jobs\.daily", (뿌리 / 이름).read_text())
         assert m, 이름
         한도[이름] = int(m.group(1))
-    assert timedelta(minutes=max(한도.values())) < job.STEP_LOCK_TTL
+    # 큰 쪽 + 5분(25.2115 — `<` 만 보면 46분도 지났다. kill-after 30초와 단계 들어가기 전 시간을 덮는 여유)
+    assert timedelta(minutes=max(한도.values()) + 5) <= job.STEP_LOCK_TTL
     assert timedelta(minutes=min(한도.values())) / 4 >= job.STEP_LOCK_WAIT
 
 

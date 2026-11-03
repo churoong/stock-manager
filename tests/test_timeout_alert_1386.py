@@ -98,9 +98,20 @@ def test_미국_주_실행은_한도_안에_KIS_예약_마감_전에_끝난다()
     from batch.jobs import broker_mirror as bm
 
     분 = timedelta(minutes=_배치_분("daily-us.yml"))
+    준비 = timedelta(minutes=5)  # 25.2115 (25.2113 교차검증 note) — 실제 시작은 예약보다 2~3분 늦다
     for 날 in (date(2026, 11, 3), date(2027, 3, 15), date(2027, 7, 13)):  # 겨울·여름 첫 주·한여름
         예약 = cal.scheduled_for("US", 날)
         개장 = cal.session_open_utc("US", 날)
         assert 예약 is not None and 개장 is not None, 날
-        시작 = datetime.fromisoformat(예약)
+        시작 = datetime.fromisoformat(예약) + 준비  # 파이썬은 dispatch 큐·checkout·설치·사본 풀기 뒤에 시작한다
         assert 시작 + 분 <= 개장 - bm.US_RESV_CUTOFF, (날, 시작, 개장)
+
+
+def test_웹_KIS_조회의_배치_도는_중_창은_가장_큰_한도_더하기_5분() -> None:
+    """25.2115 (25.2113 교차검증 [권고]) — 웹 KIS모의투자 열 때 조회(`web/lib/kisVts.ts` `BATCH_RUNNING_WINDOW_MS`)가 45분으로
+    남아 미국 한도 45분과 같아졌다(여유 0). 창이 한도보다 짧으면 오래 도는 배치 끝무렵에 웹 조회가 끼어 같은 앱키
+    초당 한도로 배치 주문이 거부된다(25.1499·1799 꼴). 한도를 또 올릴 때 이 값이 함께 움직이게 묶는다"""
+    글 = (뿌리 / "web" / "lib" / "kisVts.ts").read_text(encoding="utf-8")
+    m = re.search(r"BATCH_RUNNING_WINDOW_MS = (\d+) \* 60_000", 글)
+    assert m
+    assert int(m.group(1)) >= max(_배치_분("daily-kr.yml"), _배치_분("daily-us.yml")) + 5
