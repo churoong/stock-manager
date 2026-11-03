@@ -365,6 +365,15 @@ class ReplicaClient:
     def __getattr__(self, name: str) -> Any:
         return getattr(self._remote, name)
 
+    # `with TursoClient() as c:` 를 받는다 — `__enter__`·`__exit__` 같은 특수 메서드는 `__getattr__` 로 넘어가지 않는다
+    # (파이썬은 특수 메서드를 형에서 찾는다). 예전엔 사본이 열린 점수·신호 창 안의 `with` 가 TypeError 를 내 리포트 경고
+    # 둘(신호 건너뜀·계산 저하)을 못 읽고 배치가 partial 로 끝났다(25.2130 — 11-03 미국, 사본이 10-25 뒤 처음 쓰인 날)
+    def __enter__(self) -> ReplicaClient:
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.close()
+
     def _routable(self, sql: str) -> bool:
         if self.dirty:
             return False

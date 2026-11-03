@@ -262,3 +262,40 @@ def test_과거_시세를_읽는_작업들이_사본에서_같은_값을_읽는�
         사본_클라 = rep.ReplicaClient(원격, 사본)
         assert 읽기(사본_클라) == 읽기(원격), 이름
         assert 사본_클라.local_queries > 0, f"{이름} 의 시세 읽기가 사본으로 가지 않았다"
+
+
+class Test_with_문:
+    """25.2130 — 사본 클라이언트도 `with TursoClient() as c:` 를 받는다. 특수 메서드는 `__getattr__` 로 넘어가지 않아
+    11-03 미국 배치(사본이 10-25 뒤 처음 쓰인 날)에서 리포트 경고 둘이 TypeError 로 빠지고 배치가 partial 로 끝났다."""
+
+    def test_with_로_열고_닫으면_사본과_원격을_닫는다(self, 사본) -> None:
+        원격 = _원격()
+        rep.sync(원격, 사본, backend="turso", allow_build=True, now=지금)
+        닫힘: list[str] = []
+        원격.close = lambda: 닫힘.append("원격")  # type: ignore[method-assign]
+        with rep.ReplicaClient(원격, 사본) as c:
+            rs = c.execute("SELECT close FROM prices WHERE stock_id = 1 LIMIT 1")
+            assert rs.rows and c.local_queries == 1
+        assert 닫힘 == ["원격"]
+        with pytest.raises(Exception, match="closed"):
+            사본.execute("SELECT 1")
+
+    def test_모든_클라이언트가_with_를_받는다(self) -> None:
+        """DB 클라이언트 셋(Turso·D1·사본) 모두 — 부르는 쪽은 어느 것이 올지 모른다(`core/client.TursoClient`)"""
+        from batch.core.d1 import D1Client
+        from batch.core.turso import TursoClient as Turso
+
+        for 형 in (Turso, D1Client, rep.ReplicaClient):
+            assert hasattr(형, "__enter__") and hasattr(형, "__exit__"), 형
+
+
+def test_점수_신호_창_안의_with_가_사본에서도_돈다(사본, monkeypatch: pytest.MonkeyPatch) -> None:
+    """리포트 경고 함수(`daily._건너뛴_까닭`·`_계산_저하`)가 사본 창 안에서 `with TursoClient()` 로 읽는다 — 사본 클라이언트가
+    와도 읽기 실패 글 대신 제대로 된 답(None·빈 목록)을 낸다(25.2130)"""
+    from batch.jobs import daily
+
+    원격 = _원격()
+    rep.sync(원격, 사본, backend="turso", allow_build=True, now=지금)
+    monkeypatch.setattr(daily, "TursoClient", lambda: rep.ReplicaClient(원격, 사본))
+    assert daily._건너뛴_까닭("signals", "2026-01-01") is None
+    assert daily._계산_저하("scores", "signals", "2026-01-01") == []
