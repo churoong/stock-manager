@@ -241,8 +241,13 @@ def limit_locked(order: Order, bar: Bar, price: float) -> bool:
 
     상한가로 열면(또는 장 열린 뒤 낸 주문이 상한가로 닫으면) 사려는 쪽이 넘쳐 시장가 매수가 찼다고 볼 수 없다 — 예전에는
     그 값에 다 찬 것으로 적어 C·R(시가 일괄)이 실제로는 못 샀을 종목을 샀다(25.1549 감사). 하한가 매도도 같다.
-    기준가 = 종가 ÷ (1 + 등락률), 상한가는 기준가 × 1.3 을 호가 단위로 내림·하한가는 × 0.7 을 올림(거래소 방식).
-    등락률은 소수 둘째 자리라 기준가가 조금 어긋나 끝 바로 한 단위 안쪽도 끝으로 볼 수 있다(보수 쪽 — 덜 산다).
+    기준가 = 종가 ÷ (1 + 등락률) 을 그 호가 단위로 반올림(등락률이 소수 둘째 자리라 되살린 기준가가 조금 어긋난다 —
+    전날 종가는 호가 단위 위에 있다). 가격제한폭 = 기준가 × 30% 를 **기준가의 호가 단위 미만 절사**, 상한가 = 기준가 +
+    폭을 그 가격의 호가 단위로 내림, 하한가 = 기준가 − 폭을 올림(거래소 방식, 25.2114). 예전 식(기준가×0.7 을 하한가의
+    호가 단위로 올림)은 폭을 절사하지 않아 하한가를 낮게 잡았다: 기준가 2,005 원이면 실제 하한가 1,405 원(폭 600) 대신
+    1,404 원 — 그날 1,405 원으로 갇힌 시장가 매도를 찬 것으로 적었다(운영 DB 1년 하한가 근처 종가 27건 가운데 두 식이
+    갈린 5건 모두 거래소식이 실제 종가, 11-03 db-status L 줄). 새 식의 상한가는 예전 이하·하한가는 예전 이상 — 더 보수
+    쪽(덜 사고 덜 판다)
     등락률이 없으면(대체 출처) 모른다 — 예전처럼 찬다. 미국은 가격제한이 없다
     """
     if order.currency != "KRW" or order.order_type != "market" or bar.change_pct is None:
@@ -253,14 +258,19 @@ def limit_locked(order: Order, bar: Bar, price: float) -> bool:
         # 등락률이 제한폭 밖이면 그날은 가격제한이 없는 날이다(정리매매·기준가 재설정) — 끝이 없다(25.1560,
         # 25.1553 반박 [권고]: 정리매매 매도를 하한가로 보고 20거래일 미뤘다)
         return False
-    기준 = bar.close / (1 + bar.change_pct / 100)
-    if order.side == "buy":
-        끝 = 기준 * (1 + KR_PRICE_LIMIT)
-        단위 = _tick(끝)
-        return price >= math.floor(round(끝 / 단위, 6)) * 단위
-    끝 = 기준 * (1 - KR_PRICE_LIMIT)
-    단위 = _tick(끝)
-    return price <= math.ceil(round(끝 / 단위, 6)) * 단위
+    상한, 하한 = kr_price_limits(bar.close / (1 + bar.change_pct / 100))
+    return price >= 상한 if order.side == "buy" else price <= 하한
+
+
+def kr_price_limits(base: float) -> tuple[float, float]:
+    """국내 기준가 → (상한가, 하한가) — 거래소 방식(25.2114, `limit_locked` 설명). `base` 는 되살린 기준가(호가 단위로
+    반올림한다)"""
+    단위 = _tick(base)
+    기준 = round(base / 단위) * 단위
+    단위 = _tick(기준)
+    폭 = math.floor(round(기준 * KR_PRICE_LIMIT / 단위, 6)) * 단위
+    위, 아래 = 기준 + 폭, 기준 - 폭
+    return (math.floor(round(위 / _tick(위), 6)) * _tick(위), math.ceil(round(아래 / _tick(아래), 6)) * _tick(아래))
 
 
 def _tick(price: float) -> float:
