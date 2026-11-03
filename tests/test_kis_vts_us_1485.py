@@ -234,6 +234,12 @@ def test_us_같은_날_다시_돌아도_오늘_예약을_잔고에서_빼지_않
     assert ("buy", "AAPL", "NASD", 3, 200.0) in s.orders
     job.run(c, "US", _kst("21:40"), session=s, clock=lambda: _kst("21:40"))
     assert c.q("SELECT diff_json FROM paper_broker_daily WHERE broker = 'kis_vts_us'") == [("{}",)]
+    # 개장(22:30 KST 서머타임) 뒤 다시 돌면 예약이 찼다 — KIS 13 에서 오늘 예약 3 을 뺀 10 이 H 10 과 맞는다(25.2123)
+    뒤 = _UsSess(holdings=[kv.Holding("AAPL", 13, 13, 192.0)])
+    job.run(c, "US", _kst("23:40"), session=뒤, clock=lambda: _kst("23:40"))
+    assert 뒤.orders == []  # 예약 마감 뒤라 아무것도 내지 않는다
+    줄 = c.q("SELECT diff_json, holdings_json FROM paper_broker_daily WHERE broker = 'kis_vts_us'")
+    assert len(줄) == 1 and 줄[0][0] == "{}" and '"qty": 13' in 줄[0][1], 줄  # 개장 뒤 실행이 그 줄을 덮어썼다
 
 
 def test_us_정리_계산에도_오늘_예약을_빼지_않는다(c: Client, monkeypatch: pytest.MonkeyPatch) -> None:
