@@ -210,3 +210,14 @@ def test_놓기가_실패해도_원래_예외가_올라간다(monkeypatch: pytes
     monkeypatch.setattr(db, "lease_release", 깨짐)
     with pytest.raises(RuntimeError, match="단계 실패"), job.step_lock(c, "KR"):
         raise RuntimeError("단계 실패")
+
+
+def test_웹_입금_취소_거절_글의_기다림은_잠금_기한과_같다() -> None:
+    """25.2113 — 잠금 기한을 35→50분으로 올리며 웹 409 글("길어야 N분")이 옛 숫자로 남으면 사용자가 일찍 다시 눌러 또 막힌다"""
+    import re
+    from pathlib import Path
+
+    글 = (Path(__file__).resolve().parent.parent / "web" / "app" / "api" / "paper" / "deposits" / "[id]" / "cancel"
+          / "route.ts").read_text(encoding="utf-8")  # fmt: skip
+    분 = re.findall(r"길어야 (\d+)분", 글)
+    assert 분 and set(분) == {str(int(job.STEP_LOCK_TTL.total_seconds() // 60))}, 분

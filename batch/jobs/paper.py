@@ -565,9 +565,10 @@ def _쓰기(client: Any, statements: list[tuple[str, list[Any]]]) -> None:
 #: until})을 조건부 UPDATE 로 잡는다 — 마이그레이션 없이, 한 시장 한 실행에 읽기·쓰기 몇 번
 STEP_LOCK_KEY = "paper_step_lock"
 #: 임대 기한 — 끊긴 실행(Actions `timeout` 의 SIGTERM·러너 죽음)이 놓지 못해도 이만큼 뒤 풀린다. 배치 프로세스 한도
-#: (`daily-kr.yml` 15분·`daily-us.yml` 30분)보다 길어야 살아 있는 실행의 잠금을 빼앗지 않는다 — 큰 쪽 + 5분.
+#: (`daily-kr.yml` 15분·`daily-us.yml` 45분 — 25.2113 에 30분에서 올림)보다 길어야 살아 있는 실행의 잠금을 빼앗지 않는다
+#: — 큰 쪽 + 5분.
 #: 같은 시장이 남긴 잠금은 기한 전에도 넘겨받는다(같은 시장은 Actions 동시 실행 그룹이 이미 차례로 돌린다)
-STEP_LOCK_TTL = timedelta(minutes=35)
+STEP_LOCK_TTL = timedelta(minutes=50)
 #: 다른 시장 단계가 끝나길 기다리는 최대 — 넘으면 이번 실행은 이 단계를 건너뛰고 경고, 리포트는 보낸다. 프로세스 한도
 #: (국내 15분) 안에서 리포트까지 갈 시간을 남겨야 한다(25.1633 교차검증 [필수] 1 — 처음 30분은 한도보다 길어 리포트째
 #: 사라질 수 있었다)

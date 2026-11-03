@@ -71,3 +71,36 @@ def test_워크플로가_시간_제한을_배치_단계에서_건다(이름: str
     # 알림 단계가 이슈 내보내기보다 앞서야 그 출력이 운영 기록에 실린다
     이름들 = [s.get("name", "") for s in 잡["steps"]]
     assert 이름들.index(알림[0]["name"]) < next(i for i, n in enumerate(이름들) if n.startswith("기록을 이슈로"))
+
+
+def _배치_분(이름: str) -> int:
+    글 = (뿌리 / ".github" / "workflows" / 이름).read_text(encoding="utf-8")
+    m = re.search(r"timeout --kill-after=\d+s (\d+)m python -m batch\.jobs\.daily", 글)
+    assert m, 이름
+    return int(m.group(1))
+
+
+@pytest.mark.parametrize("이름", ["daily-kr.yml", "daily-us.yml"])
+def test_시간_초과_알림의_분은_배치_한도와_같다(이름: str) -> None:
+    """25.2113 — 미국 한도를 30→45 로 올리며 알림 인자(`--notify-timeout N`)가 옛 숫자로 남으면 "30분 안에 끝나지 않아" 로
+    틀린 글이 나간다"""
+    글 = (뿌리 / ".github" / "workflows" / 이름).read_text(encoding="utf-8")
+    assert re.findall(r"--notify-timeout (\d+)", 글) == [str(_배치_분(이름))]
+
+
+def test_미국_주_실행은_한도_안에_KIS_예약_마감_전에_끝난다() -> None:
+    """25.2113 (11-02 미국 일일 배치가 30분 한도로 죽음 — 10월 내내 26~29분) — 한도를 늘리되, 주 실행(겨울 13:27Z·여름
+    12:27Z, `cal.scheduled_for`) 시작 + 배치 한도가 KIS 미국 예약 접수 마감(개장 − `US_RESV_CUTOFF`)보다 앞서야 늦게
+    끝난 실행의 KIS 단계가 '마감 뒤' 로 통째 빠지지 않는다(보내는 도중에도 다시 보지만, 한도 자체가 마감을 넘기면 안 된다)"""
+    from datetime import date, datetime, timedelta
+
+    from batch.core import calendar as cal
+    from batch.jobs import broker_mirror as bm
+
+    분 = timedelta(minutes=_배치_분("daily-us.yml"))
+    for 날 in (date(2026, 11, 3), date(2027, 3, 15), date(2027, 7, 13)):  # 겨울·여름 첫 주·한여름
+        예약 = cal.scheduled_for("US", 날)
+        개장 = cal.session_open_utc("US", 날)
+        assert 예약 is not None and 개장 is not None, 날
+        시작 = datetime.fromisoformat(예약)
+        assert 시작 + 분 <= 개장 - bm.US_RESV_CUTOFF, (날, 시작, 개장)

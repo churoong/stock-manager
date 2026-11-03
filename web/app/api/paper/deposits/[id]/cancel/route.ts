@@ -43,7 +43,7 @@ export async function POST(request: Request, { params }: Params) {
     const 지금 = new Date().toISOString();
     // 배치 단계가 도는 동안은 받지 않는다 — 넣는 문장도 같은 조건을 다시 본다(25.1666)
     if (rowsToObjects(await execute(PAPER_STEP_LOCK_HELD, [지금])).length)
-      return NextResponse.json({ errors: ["가상모의투자 배치가 지금 도는 중입니다 — 끝난 뒤(길어야 35분) 다시 눌러 주세요"] }, { status: 409 });
+      return NextResponse.json({ errors: ["가상모의투자 배치가 지금 도는 중입니다 — 끝난 뒤(길어야 50분) 다시 눌러 주세요"] }, { status: 409 });
     const 판 = rowsToObjects<{ n: number; s: number; f: number; o: number }>(await execute(PAPER_LEDGER_VERSION))[0];
     const [flow, cash, buys, fx] = await Promise.all([
       execute(FLOW_BY_ID, [id]),
@@ -74,7 +74,7 @@ export async function POST(request: Request, { params }: Params) {
         // 잠금을 본 뒤 넣기 전에 배치 단계가 시작됐을 수 있다 — 까닭을 맞게 말한다(25.1668)
         const 도는중 = rowsToObjects(await execute(PAPER_STEP_LOCK_HELD, [new Date().toISOString()])).length > 0;
         const 글 = 도는중
-          ? "가상모의투자 배치가 지금 도는 중입니다 — 끝난 뒤(길어야 35분) 다시 눌러 주세요"
+          ? "가상모의투자 배치가 지금 도는 중입니다 — 끝난 뒤(길어야 50분) 다시 눌러 주세요"
           : "그 사이 다른 입금·취소·체결이 들어왔습니다 — 다시 눌러 주세요";
         return NextResponse.json({ errors: [글] }, { status: 409 });
       }
