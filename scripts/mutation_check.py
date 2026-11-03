@@ -57,6 +57,11 @@ MUTATIONS: tuple[Mutation, ...] = (
              "    if True:\n        return False\n",
              ("tests/test_paper_limit_locked_1553.py",),
              "상한가 시장가 매수·하한가 시장가 매도를 찬 것으로 본다(25.1549)"),
+    Mutation("kr_limit_width_trunc", "batch/services/paper.py",
+             "    폭 = math.floor(round(기준 * KR_PRICE_LIMIT / 단위, 6)) * 단위\n",
+             "    폭 = 기준 * KR_PRICE_LIMIT\n",
+             ("tests/test_kr_price_limits_2114.py",),
+             "가격제한폭을 절사하지 않아 하한가를 낮게 잡고 갇힌 시장가 매도를 찬 것으로 본다(25.2114)"),
     Mutation("fill_limit_buy_slippage", "batch/services/paper.py",
              '    slip = 0.0 if order.side == "buy" and order.order_type != "market" else'
              " gross * costs.slippage_pct / 100\n",

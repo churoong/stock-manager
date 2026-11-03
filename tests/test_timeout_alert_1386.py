@@ -114,4 +114,12 @@ def test_웹_KIS_조회의_배치_도는_중_창은_가장_큰_한도_더하기_
     글 = (뿌리 / "web" / "lib" / "kisVts.ts").read_text(encoding="utf-8")
     m = re.search(r"BATCH_RUNNING_WINDOW_MS = (\d+) \* 60_000", 글)
     assert m
-    assert int(m.group(1)) >= max(_배치_분("daily-kr.yml"), _배치_분("daily-us.yml")) + 5
+    가장 = max(_배치_분("daily-kr.yml"), _배치_분("daily-us.yml"))
+    assert int(m.group(1)) >= 가장 + 5
+    # 장중 손절 감시의 같은 막기(25.2116 — 웹만 올리고 이 짝은 45분에 남아 여유 0 이었다)
+    from batch.jobs import intraday_guard
+
+    assert 가장 + 5 <= intraday_guard.BATCH_RUNNING_MINUTES
+    # 손 실행 화면 안내의 한도 숫자(25.2116 note)
+    안내 = (뿌리 / "web" / "lib" / "dispatch.ts").read_text(encoding="utf-8")
+    assert f"한도 {_배치_분('daily-us.yml')}분" in 안내

@@ -868,10 +868,16 @@ def test_다_판_종목은_다시_받기_대상이_아니다() -> None:
     assert ("005930",) not in c.q(kf.HELD_KR_TICKERS)
 
 
-def test_묵은_실행_중_기록은_45분_뒤엔_막지_않는다(c: Client) -> None:
-    c.conn.execute("INSERT INTO batch_runs (job_name, market, trade_date, trigger_source, started_at, status)"
-                   " VALUES ('daily_kr', 'KR', '2026-10-26', 'cron', '2026-10-26T00:44:00+00:00', 'running')")  # 46분 전
-    assert "skipped" not in ig.run(c, 월, session=_Sess([_h("005930", 9_500.0)]), clock=lambda: 월)
+def test_묵은_실행_중_기록은_창_뒤엔_막지_않는다(c: Client) -> None:
+    """창(`BATCH_RUNNING_MINUTES`, 25.2116 에 45→50분) 1분 뒤 시작한 running 은 죽은 실행 — 막지 않는다. 창 1분 안쪽은 막는다"""
+    from datetime import timedelta
+
+    for 분, 막음 in ((ig.BATCH_RUNNING_MINUTES + 1, False), (ig.BATCH_RUNNING_MINUTES - 1, True)):
+        c.conn.execute("DELETE FROM batch_runs")
+        시작 = (월 - timedelta(minutes=분)).isoformat()
+        c.conn.execute("INSERT INTO batch_runs (job_name, market, trade_date, trigger_source, started_at, status)"
+                       " VALUES ('daily_kr', 'KR', '2026-10-26', 'cron', ?, 'running')", [시작])  # fmt: skip
+        assert ("skipped" in ig.run(c, 월, session=_Sess([_h("005930", 9_500.0)]), clock=lambda: 월)) is 막음, 분
 
 
 def test_main_은_계산_오류_알림을_하루_한_번(c: Client, monkeypatch: pytest.MonkeyPatch) -> None:

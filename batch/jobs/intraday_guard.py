@@ -62,8 +62,9 @@ WINDOW_KST = (dtime(9, 5), dtime(15, 15))
 OPEN_MARGIN = timedelta(minutes=5)
 CLOSE_MARGIN = timedelta(minutes=15)
 #: 일일 배치가 돌고 있으면 쉰다 — 같은 앱키의 초당 한도를 나눠 쓰면 배치 주문이 `EGW00201` 거부로 적힌다(웹 조회와 같은
-#: 막기, `web/lib/kisVts.BATCH_RUNNING_WINDOW_MS`)
-BATCH_RUNNING_MINUTES = 45
+#: 막기, `web/lib/kisVts.BATCH_RUNNING_WINDOW_MS`). 가장 큰 배치 프로세스 한도(미국 45분, 25.2113) + 5분 — 시험
+#: (`test_timeout_alert_1386`)이 워크플로의 `timeout Nm` 과 대조한다(25.2116)
+BATCH_RUNNING_MINUTES = 50
 BATCH_RUNNING_SQL = (
     "SELECT 1 FROM batch_runs WHERE job_name IN ('daily_kr', 'daily_us') AND status = 'running' AND started_at >= ?"
     " LIMIT 1"
