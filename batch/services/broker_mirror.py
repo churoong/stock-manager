@@ -17,7 +17,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
-from batch.services.paper import account_name
+from batch.services.paper import KR_PRICE_LIMIT, account_name, kr_price_limits
 from batch.services.signals import to_tick
 
 #: 하루에 증권사 모의로 내는 주문 상한 — 내부 B 의 최대(매수 5종목 × 3회차 + 매도 몇)보다 넉넉하고,
@@ -372,6 +372,8 @@ MISMATCH_CAUSES = {
     "through_unfilled": "지정가 아래로 내려왔는데 KIS 안 참(접수·시각·수량 — 가상만 참)",
     "market_unfilled": "시장가가 KIS 에서 안 참(접수·정지 — 가상만 참)",
     "gap_beyond_limit": "시장가 대신 낸 지정가(종가 ±10%)에 일봉이 못 미침(갭 — 가상만 참)",
+    # KIS 모의가 갇힌 시장가를 체결로 주는지는 [확인필요] — 모의 체결이 호가 대기열을 무시한 낙관일 수 있다
+    "limit_locked": "가격제한 끝(상·하한가)이라 가상은 안 찼다고 봄 — KIS 모의는 참(KIS만 참)",
     "bar_suspect": "일봉이 지정가와 너무 멀어 분할 의심(가르지 않음)",
     "unexplained": "일봉으로 설명 안 됨",
     "no_bar": "그날 일봉 없음",
@@ -386,6 +388,23 @@ def _값(v: Any) -> float:
     """미국 일봉은 yfinance 값을 반올림 없이 저장한다(`123.44999694824219`) — 0.01 단위 지정가와 같다/작다를 날값으로
     견주면 딱 닿은 것이 다른 까닭으로 갔다(25.1737, 25.1736 교차검증 [권고] 1). 소수 넷째 자리에서 맞춘다"""
     return round(float(v), 4)
+
+
+def _가격제한_끝(r: dict[str, Any]) -> bool:
+    """국내 시장가가 그날 가격제한 끝(매수는 상한가 이상·매도는 하한가 이하)에서 판정됐나 — 가상 `paper.limit_locked` 와
+    같은 잣대(`kr_price_limits`, 25.2114). 가상은 그날 안 찼다고 보는데 KIS 모의가 찬 줄을 "설명 안 됨" 이 아니라 따로
+    센다(25.2127, 11-03 결함 회차 [참고] ③). 판정 가격은 시가(장 열린 뒤 낸 주문 `fill_basis='close'` 는 종가).
+    재료가 없거나 등락률이 제한폭 밖(정리매매 등)이면 아니다"""
+    if r.get("b_market") != "KR" or r.get("p_change") is None or r.get("p_close") is None:
+        return False
+    등락 = _값(r["p_change"])
+    if 등락 <= -100 or abs(등락) > KR_PRICE_LIMIT * 100 + 0.5:
+        return False
+    가격 = r.get("p_close") if r.get("i_fill_basis") == "close" else r.get("p_open")
+    if 가격 is None or _값(r["p_close"]) <= 0:
+        return False
+    상한, 하한 = kr_price_limits(_값(r["p_close"]) / (1 + 등락 / 100))
+    return _값(가격) >= 상한 if str(r.get("side")) == "buy" else _값(가격) <= 하한
 
 
 def mismatch_cause(r: dict[str, Any], internal: bool) -> str:
@@ -411,6 +430,8 @@ def mismatch_cause(r: dict[str, Any], internal: bool) -> str:
         if 재료 and ((side == "sell" and _값(r["p_high"]) < _값(보낸))
                    or (side == "buy" and _값(r["p_low"]) > _값(보낸))):  # fmt: skip
             return "gap_beyond_limit"
+        if not internal and _가격제한_끝(r):
+            return "limit_locked"
         return "market_unfilled" if internal else "unexplained"
     if r.get("p_low") is None or r.get("p_close") is None:
         return "no_bar"
@@ -668,11 +689,17 @@ def diverge(now: dict[str, Any] | None, keys: list[str], market: str) -> str | N
         return None
     이름 = "국내가" if market == "KR" else "미국이"
     내만, kis만 = int(now.get("internal_only") or 0), int(now.get("kis_only") or 0)
+    # 가격제한 끝에 갇힌 시장가가 KIS 모의에서만 찬 몫은 방향 판단에서 뺀다(25.2127) — 모의 체결이 대기열을 무시한
+    # 낙관일 수 있어 "가상 판정이 비관" 의 근거가 되지 않는다
+    제한끝 = int((now.get("mismatch_causes") or {}).get("limit_locked") or 0)
+    kis견줌 = kis만 - 제한끝
     글: list[str] = []
     if "match" in keys:
-        방향 = ("가상만 참이 더 많음 — 가상 체결 판정이 낙관, 가상 성적을 그만큼 덜 믿어야 합니다" if 내만 > kis만
-              else "KIS만 참이 더 많음 — 가상 체결 판정이 비관, 가상 성적이 실제보다 낮게 나옵니다" if kis만 > 내만
+        방향 = ("가상만 참이 더 많음 — 가상 체결 판정이 낙관, 가상 성적을 그만큼 덜 믿어야 합니다" if 내만 > kis견줌
+              else "KIS만 참이 더 많음 — 가상 체결 판정이 비관, 가상 성적이 실제보다 낮게 나옵니다" if kis견줌 > 내만
               else "가상만 참과 KIS만 참이 같음")  # fmt: skip
+        if 제한끝:
+            방향 += f"(KIS만 참 가운데 가격제한 끝 {제한끝}건은 방향에서 뺌)"
         일치 = _값글(now.get("match_pct"), DIVERGE_MATCH_PCT, True)
         글.append(f"체결 일치 {일치}." + (f" 가상만 참 {내만} · KIS만 참 {kis만}: {방향}"
                                           if now.get("match_pct") is not None else ""))  # fmt: skip

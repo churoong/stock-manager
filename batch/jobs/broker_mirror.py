@@ -206,7 +206,9 @@ COMPARE_SQL = (
     " f.price AS i_price, f.fill_date AS i_fill_date,"
     # 어긋난 까닭을 가르는 재료(25.1736, 아이디어 ⑤) — 내부 지정가·KIS 에 보낸 지정가와 그 거래일 일봉
     # (`UNIQUE(stock_id, date)` 한 행씩). 미국 시장가는 KIS 에 종가 ±10% 지정가로 나가 고가도 읽는다(25.1737)
-    " o.limit_price AS i_limit, b.limit_price AS b_limit, p.low AS p_low, p.high AS p_high, p.close AS p_close"
+    " o.limit_price AS i_limit, b.limit_price AS b_limit, p.low AS p_low, p.high AS p_high, p.close AS p_close,"
+    # 국내 가격제한 끝(25.2127) — 시가·등락률로 그날 상·하한가를 되살려 "KIS만 참" 의 까닭을 가른다
+    " p.open AS p_open, p.change_pct AS p_change, b.market AS b_market"
     " FROM paper_broker_orders b"
     " LEFT JOIN paper_orders o ON o.id = b.paper_order_id LEFT JOIN paper_fills f ON f.order_id = b.paper_order_id"
     " LEFT JOIN prices p ON p.stock_id = o.stock_id AND p.date = b.trade_date"
