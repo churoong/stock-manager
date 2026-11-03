@@ -268,10 +268,19 @@ TOTALS_SQL = (
 )
 #: 미국 일일 배치가 끝난 한국 날짜 — 그날 가상 평가 행을 미국 종가로 덮었다(25.1517).
 #: H 견주기의 끝 후보(25.1516·25.1543).
-#: 운용 화면 대보기(`jobs/desk`)도 이것을 쓴다
+#: 운용 화면 대보기(`jobs/desk`)도 이것을 쓴다.
+#: **가상모의투자 단계가 끝까지 돈 실행만**(25.2118, 11-03 결함 회차 [권고]) — 단계가 예외(`paper.error`)·계좌 예외
+#: (`paper.account_errors`)·입금 없음 밖의 건너뜀(`paper.skipped` — 다른 시장 잠금)으로 끝나도 실행은 `partial` 이라
+#: 예전엔 "끝난 날" 로 셌다. 그날 H 평가 행은 미국 종가로 덮이지 않아(아침 국내 실행 값 — 미국 보유는 한 장 앞 종가)
+#: h_compare·h_check 가 미국 하루치 변동만큼 어긋났다. 관문 쪽은 25.1636 이 같은 구멍을 막았다(`desk.paper_step_failed`
+#: 와 같은 잣대 — 시험이 대조). `paper` 칸이 없는 옛 행·깨진 `step_log` 는 예전처럼 센다(모름 — 관문과 같다)
 US_DONE_SQL = (
     "SELECT DISTINCT date(started_at, '+9 hours') AS d FROM batch_runs WHERE job_name = ?"
     " AND status IN ('success', 'partial') AND started_at >= ?"
+    " AND NOT (json_valid(step_log) AND ("
+    "json_extract(step_log, '$.paper.error') IS NOT NULL"
+    " OR COALESCE(json_extract(step_log, '$.paper.account_errors'), '{}') NOT IN ('', '{}')"
+    " OR COALESCE(json_extract(step_log, '$.paper.skipped'), '입금 없음') NOT IN ('', '입금 없음')))"
 )
 #: 계좌 전체 원화 총액의 기준 (docs/paper.md 15.7, docs/infra.md 25.1527). 1(25.1497~25.1526) = 국내 총평가 + 미국
 #: 보유 외화평가 합·달러 예수금 × 고시환율 — 모의 계좌에서 틀렸다: 체결기준현재잔고 보유 줄은 수량·평가가 모두 0 이고,
