@@ -122,4 +122,5 @@ def test_웹_KIS_조회의_배치_도는_중_창은_가장_큰_한도_더하기_
     assert 가장 + 5 <= intraday_guard.BATCH_RUNNING_MINUTES
     # 손 실행 화면 안내의 한도 숫자(25.2116 note)
     안내 = (뿌리 / "web" / "lib" / "dispatch.ts").read_text(encoding="utf-8")
-    assert f"한도 {_배치_분('daily-us.yml')}분" in 안내
+    미국줄 = next(줄 for 줄 in 안내.splitlines() if 'key: "daily_us"' in 줄)  # 그 작업 줄만(25.2117)
+    assert f"한도 {_배치_분('daily-us.yml')}분" in 미국줄
