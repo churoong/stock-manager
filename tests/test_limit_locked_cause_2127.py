@@ -53,30 +53,31 @@ def test_괴리_알림_방향에서_가격제한_끝은_뺀다() -> None:
     assert 없음 is not None and "KIS만 참이 더 많음" in 없음
 
 
-def test_가상_limit_locked_와_격자로_같다() -> None:
-    """판정 가격·끝 잣대가 가상 `paper.limit_locked`(+ `judge` 의 가격 고르기)와 같다 — 기준가·등락률·시가 격자(25.2128,
-    25.2127 교차검증 [참고]: 시가 없음·시가 0 에서 갈렸다)"""
+def test_가상_judge_와_격자로_같다() -> None:
+    """가격제한 끝 판정이 가상 `paper.judge`(정지·판정 가격 고르기·`limit_locked` 까지 한 번에)와 같다 — 기준가·등락률·시가·
+    거래량 격자. 가상 값은 `judge` 를 직접 불러 그 까닭 끝(상한가 매수·`LOCKED_SELL`)으로 정한다 — 시험 안에 가격 고르기를
+    베껴 두면 가상 쪽이 바뀌어도 못 잡는다(25.2129, 25.2128 교차검증 [권고]). 시가 없음·시가 0 은 25.2128 에서 갈렸다"""
     from batch.services import paper as pp
 
-    갈림 = []
+    상한가매수 = "상한가 — 시장가 매수가 찼다고 보지 않는다"
+    갈림, 끝수 = [], 0
     for 기준 in (1_003, 2_005, 9_990, 49_950, 199_500, 512_000):
         상, 하 = pp.kr_price_limits(기준)
         for 종가 in (하, 하 + pp._tick(하), 상 - pp._tick(상), 상, 기준):
             등락 = round((종가 / 기준 - 1) * 100, 2)
             for 시가 in (None, 0, 하, 상, 기준):
-                for 쪽 in ("buy", "sell"):
-                    for 바탕 in ("open", "close"):
-                        bar = pp.Bar("2026-10-16", 시가, 종가, 1000, 등락)
-                        if pp.halted(bar):
-                            가상 = False
-                        else:
-                            가격 = 종가 if 바탕 == "close" or 시가 is None else 시가
+                for 거래량 in (1000, 0, None):
+                    for 쪽 in ("buy", "sell"):
+                        for 바탕 in ("open", "close"):
                             o = pp.Order(1, "B", 1, 쪽, "market", None, 1, "KRW", "2026-10-16", fill_basis=바탕)
-                            가상 = pp.limit_locked(o, bar, 가격)
-                        줄 = _줄(side=쪽, p_open=시가, p_close=종가, p_change=등락, i_fill_basis=바탕)
-                        if bm._가격제한_끝(줄) != 가상:
-                            갈림.append((기준, 종가, 시가, 쪽, 바탕, 가상))
+                            _, 까닭 = pp.judge(o, pp.Bar("2026-10-16", 시가, 종가, 거래량, 등락))
+                            가상 = 까닭.endswith(상한가매수 if 쪽 == "buy" else pp.LOCKED_SELL)
+                            끝수 += 가상
+                            줄 = _줄(side=쪽, p_open=시가, p_close=종가, p_change=등락, i_fill_basis=바탕, p_volume=거래량)
+                            if bm._가격제한_끝(줄) != 가상:
+                                갈림.append((기준, 종가, 시가, 거래량, 쪽, 바탕, 까닭))
     assert not 갈림, 갈림[:5]
+    assert 끝수 > 100  # 격자가 끝인 날을 실제로 많이 지난다
 
 
 def test_비교_질의가_가격제한_재료를_싣는다() -> None:
@@ -90,12 +91,16 @@ def test_비교_질의가_가격제한_재료를_싣는다() -> None:
     c.conn.execute("INSERT INTO paper_cash_flows (flow_date, amount_krw, kind, created_at, request_key)"
                    " VALUES ('2026-10-13', 1000000, 'deposit', 't', 'k1')")  # fmt: skip
     m = 주문(c, aid="B", side="buy", typ="market", q=10, decided="2026-10-15", session="2026-10-16", ref=2_005)
-    시세(c, 1, "2026-10-16", 2_605, 2_605, chg=29.93)  # 상한가 시가 — 가상은 시장가 매수가 찼다고 보지 않는다
+    # 상한가 시가·종가는 끝 안쪽 — 시가 칸(`p_open`)이 빠져 종가로 판정하면 끝이 아니라 "설명 안 됨" 으로 간다(25.2129,
+    # 25.2128 교차검증 [권고]: 시가·종가가 같은 끝이면 시가 칸 하나가 빠져도 시험이 통과했다)
+    시세(c, 1, "2026-10-16", 2_605, 2_500, chg=24.69)
     판정(c, "KR", "2026-10-16")
     assert c.q("SELECT status FROM paper_orders WHERE id = ?", [m]) == [("expired",)]
     c.conn.execute("INSERT INTO paper_broker_orders (broker, paper_order_id, account_id, market, stock_id, code,"
                    " side, order_type, quantity, trade_date, reason, status, source, created_at, filled_qty,"
                    " avg_price) VALUES ('kis_vts', ?, 'B', 'KR', 1, '005930', 'buy', 'market', 10, '2026-10-16', '베낌',"
                    " 'filled', 'kis_vts', 't', 10, 2605)", [m])  # fmt: skip
-    비교 = bm.compare(c.execute(jbm.COMPARE_SQL, ["kis_vts", "2026-10-01", "2026-10-31", "B"]).dicts())
+    줄 = c.execute(jbm.COMPARE_SQL, ["kis_vts", "2026-10-01", "2026-10-31", "B"]).dicts()
+    assert {"p_open", "p_change", "b_market", "p_volume"} <= set(줄[0]), 줄[0]  # 거래량은 정지 날 빼기(25.2129)
+    비교 = bm.compare(줄)
     assert 비교["kis_only"] == 1 and 비교["mismatch_causes"] == {"limit_locked": 1}, 비교

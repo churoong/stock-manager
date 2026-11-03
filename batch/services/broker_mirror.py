@@ -395,14 +395,15 @@ def _가격제한_끝(r: dict[str, Any]) -> bool:
     같은 잣대(`kr_price_limits`, 25.2114). 가상은 그날 안 찼다고 보는데 KIS 모의가 찬 줄을 "설명 안 됨" 이 아니라 따로
     센다(25.2127, 11-03 결함 회차 [참고] ③). 판정 가격은 가상 `judge` 와 같게 시가, 시가가 없으면 종가
     (`NO_OPEN_CLOSE_NOTE`), 장 열린 뒤 낸 주문(`fill_basis='close'`)은 종가 — 이 갈래는 `compare` 에선 `_판정밖` 이
-    먼저 표본 밖으로 빼 닿지 않는다(방어용, 25.2128). 시가 ≤ 0 은 가상이 정지(`halted`)로 보므로 아니다. 재료가 없거나
-    등락률이 제한폭 밖(정리매매 등)이면 아니다"""
+    먼저 표본 밖으로 빼 닿지 않는다(방어용, 25.2128). 시가 ≤ 0·거래량 ≤ 0 은 가상이 정지(`halted`)로 보므로 아니다
+    (거래량 25.2129). 재료가 없거나 등락률이 제한폭 밖(정리매매 등)이면 아니다"""
     if r.get("b_market") != "KR" or r.get("p_change") is None or r.get("p_close") is None:
         return False
     등락 = _값(r["p_change"])
     if 등락 <= -100 or abs(등락) > KR_PRICE_LIMIT * 100 + 0.5:
         return False
-    if _값(r["p_close"]) <= 0 or (r.get("p_open") is not None and _값(r["p_open"]) <= 0):
+    if (_값(r["p_close"]) <= 0 or (r.get("p_open") is not None and _값(r["p_open"]) <= 0)
+            or (r.get("p_volume") is not None and _값(r["p_volume"]) <= 0)):  # fmt: skip
         return False
     가격 = r.get("p_close") if r.get("i_fill_basis") == "close" or r.get("p_open") is None else r.get("p_open")
     상한, 하한 = kr_price_limits(_값(r["p_close"]) / (1 + 등락 / 100))
