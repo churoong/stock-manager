@@ -46096,3 +46096,9 @@ broker_mirror·kis·mismatch·diverge 를 쓰는 시험 파일 전부 통과.
 - 배치 단계 34.2분(13:27:32~14:01:44Z). 일봉 31조각 19.6분, 조각마다 약 36초.
 - 사본 맞추기 `usable: True`. 사본 넣어 두기까지 14:01:55Z(잡 55분 안).
 - 30분 한도였으면 또 죽었다. 여유는 약 11분.
+
+**교차검증**(be5e03d..6b89a26, [필수] 0, [참고] 반영):
+- 앞 시험은 `daily.TursoClient` 를 갈아 끼워 운영 길(`PRICE_REPLICA_PATH` → `core/client.TursoClient()` → `usable_replica` → 사본 클라이언트)을 지나지 않았고, 빈 기록만 봤다. 그래서 팩토리 길로 사본이 오는 상태에서 신호 건너뜀·감성 못 읽음 기록을 실제 경고 글로 내는 시험을 더했다. `__enter__`·`__exit__` 를 빼면 깨진다.
+- 잡 전체에 사본을 두는 워크플로 넷(backtest·metrics·signal-outcomes·valuation-bands)의 작업(backtest·stress·core_backtest·metrics·signal_outcomes·valuation_bands)에는 `with TursoClient()` 가 없어 영향이 없었다(grep 으로 확인). 11-03 판정 실행도 무관하다.
+- 11-03 미국 실행에서 점수·신호가 실제로 덜 된 채 계산됐는지(scores·signals `step_log` 의 `sentiment_read_error`·`input_read_errors`·`unverifiable`·`checks_error`)는 리포트가 말하지 못했다. 다음 db-status 묶음에서 본다 `[확인필요]`.
+- 그대로 둔 것: `__getattr__` 로 원격에 곧장 넘어가는 `batch_atomic` 은 `dirty` 를 세우지 않는다. 지금 창 안에는 시세·종목을 쓰는 길이 없다.

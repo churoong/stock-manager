@@ -299,3 +299,32 @@ def test_점수_신호_창_안의_with_가_사본에서도_돈다(사본, monkey
     monkeypatch.setattr(daily, "TursoClient", lambda: rep.ReplicaClient(원격, 사본))
     assert daily._건너뛴_까닭("signals", "2026-01-01") is None
     assert daily._계산_저하("scores", "signals", "2026-01-01") == []
+
+
+def test_팩토리_길로_사본이_와도_리포트_경고가_실제_글을_낸다(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """운영 길 그대로 — `PRICE_REPLICA_PATH` 를 두면 `core/client.TursoClient()` 가 `usable_replica` 를 거쳐 사본 클라이언트를
+    돌려준다. 그 상태에서 신호 건너뜀·계산 저하 기록을 리포트 경고 글로 낸다(25.2130 교차검증 [참고] — 앞 시험은
+    `daily.TursoClient` 를 갈아 끼워 팩토리 길을 지나지 않고, 빈 기록만 봤다)"""
+    import json
+
+    from batch.core import client as cl
+    from batch.core import turso
+    from batch.jobs import daily
+
+    경로 = tmp_path / "prices.db"
+    원격 = _원격()
+    rep.sync(원격, rep.open_replica(경로), backend="turso", allow_build=True, now=datetime.now(UTC))
+    for job, 상태, 기록 in (("signals", "skipped", {"reason": "기준일 종가 없는 종목이 많음"}),
+                          ("scores", "success", {"sentiment_read_error": "x"})):  # fmt: skip
+        원격.execute("INSERT INTO batch_runs (job_name, started_at, status, step_log) VALUES (?, '2026-11-03T13:50', ?, ?)",
+                     [job, 상태, json.dumps(기록, ensure_ascii=False)])  # fmt: skip
+    원격.close = lambda: None  # type: ignore[method-assign]  # with 가 닫아도 다음 호출이 같은 가짜 원격을 쓴다
+    monkeypatch.setattr(cl, "resolved_backend", lambda: cl.TURSO)
+    monkeypatch.setattr(turso, "TursoClient", lambda *a, **k: 원격)
+    monkeypatch.setenv(rep.REPLICA_ENV, str(경로))
+    with cl.TursoClient() as c:
+        assert isinstance(c, rep.ReplicaClient)
+    assert daily._건너뛴_까닭("signals", "2026-11-03") == (
+        "신호를 계산하지 않았습니다 — 기준일 종가 없는 종목이 많음. 앞서 계산된 신호를 그대로 씁니다(기준일은 추천 머리에)"
+    )
+    assert any("감성 점수를 읽지 못해" in w for w in daily._계산_저하("scores", "signals", "2026-11-03"))
