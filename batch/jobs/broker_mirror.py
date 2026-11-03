@@ -631,6 +631,11 @@ def run(
             기록["reconcile_truncated"] = True
     # 2. 잔고 — 내부 장부와 대 본다
     보유, 합 = sess.balance_us() if 미국 else sess.balance()
+    # 잔고를 **읽은** 시각(25.2125, 11-03 결함 회차 [참고] ②) — 줄의 `fetched_at` 과 `오늘산듦` 을 이 시각으로 가른다.
+    # 예전엔 단계 시작 시각(`now`)을 적어, 개장 직전에 시작해 맞추기(체결 조회 여러 쪽·초당 한도 61초 기다림)를 거쳐
+    # 개장 뒤 읽은 잔고가 "개장 전 기준점"(`_개장전_잔고`)으로 들어갔다 — 그날 체결이 섞인 수량이 기준점이 되어 다음 날
+    # 그 종목 실현손익이 다음 기준점까지 모름이었다
+    잔고시각 = clock()
     # 2a. 실현손익 (25.1694, 2026-10-22 사용자 지시) — 맞춘 체결로 다시 센다. 잔고를 읽은 뒤 — 기록 끝 수량이 KIS 잔고와
     # 다른 종목은 원가를 모른다(25.1698). 곁다리: 실패해도 맞추기·주문은 그대로
     try:
@@ -663,7 +668,7 @@ def run(
     # [권고]: 시장으로만 가르면 개장 뒤 다시 돈 미국 실행이 이미 찬 예약을 몰라 KIS 13 vs H 10 거짓 어긋남을 적었다 —
     # 고치기 전엔 맞던 경우). 지정가 예약이 개장 뒤에도 안 찼으면 남는데, 국내 시가 매수와 같은 가정이고 다음 날 풀린다
     개장 = cal.session_open_utc("US", 오늘) if 미국 else None
-    오늘산듦 = not 미국 or (개장 is not None and clock() >= 개장)
+    오늘산듦 = not 미국 or (개장 is not None and 잔고시각 >= 개장)
     몫 = {sid: min(max(n, 0), 내부.get(sid, 0) + (오늘산0.get(sid, 0) if 오늘산듦 else 0))
          for sid, n in 순보유.items()}  # fmt: skip
     # 주문가능은 오늘 베낄 매도가 걸린 행부터(25.1615, 같은 교차검증 [권고] 1 — 이긴 행부터 고정하면 옛 행 매도가
@@ -736,7 +741,8 @@ def run(
              "price": h.price, "value": h.value, "pnl": h.pnl} for h in 보유]  # fmt: skip
     client.execute(DAILY_SQL, [
         증권사, 오늘.isoformat(), 베낌, None if 미국 else 합.get("cash"), None if 미국 else 합.get("total"),
-        json.dumps(보유칸), json.dumps({str(k): list(v) for k, v in 어긋남.items()}), slot.keys.source, 지금,
+        json.dumps(보유칸), json.dumps({str(k): list(v) for k, v in 어긋남.items()}), slot.keys.source,
+        잔고시각.isoformat(),
         json.dumps(비교 | {"account": 계좌, "account_krw": 원화계좌, "perf": 성과}
                    | ({"balance_truncated": True} if getattr(sess, "balance_truncated", False) else {}),
                    ensure_ascii=False),

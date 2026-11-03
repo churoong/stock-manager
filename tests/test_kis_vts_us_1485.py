@@ -342,3 +342,22 @@ def test_원장_초당_한도도_조회는_다시_한다(monkeypatch: pytest.Mon
         s.order("sell", "005930", 1, None)
     assert len(http.sent) == 1 and s.rate_retries == 0  # 주문은 다시 보내지 않는다
     assert any(c in "모의 주문 거부 EGW00215 원장에서 …" for c in ig.TRANSIENT_CODES)  # 장중 매도면 다음 회차에 다시
+
+
+def test_잔고_줄의_시각은_잔고를_읽은_때다(c: Client) -> None:
+    """25.2125 (11-03 결함 회차 [참고] ②) — 개장(22:30 KST) 직전 22:19 에 시작해 맞추기를 거쳐 22:31 에 잔고를 읽은 실행.
+    예전엔 줄의 `fetched_at` 이 단계 시작 22:19 라 그날 체결이 섞인 잔고가 실현손익의 "개장 전 기준점" 으로 들어갔다"""
+
+    class _늦게읽음(_UsSess):
+        읽음 = False
+
+        def balance_us(self) -> tuple[list[kv.Holding], dict[str, float | None]]:
+            self.읽음 = True
+            return super().balance_us()
+
+    s = _늦게읽음(holdings=[kv.Holding("AAPL", 3, 3, 200.0)])
+    job.run(c, "US", _kst("22:19"), session=s, clock=lambda: _kst("22:31" if s.읽음 else "22:19"))
+    줄 = c.conn.execute("SELECT as_of, fetched_at, holdings_json FROM paper_broker_daily WHERE broker = 'kis_vts_us'")
+    행 = [dict(zip(("as_of", "fetched_at", "holdings_json"), r, strict=True)) for r in 줄.fetchall()]
+    assert datetime.fromisoformat(행[0]["fetched_at"]) == _kst("22:31")
+    assert job._개장전_잔고(행, "US") == []  # 개장 뒤 읽은 줄은 기준점이 아니다
