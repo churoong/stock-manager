@@ -59,3 +59,21 @@ def test_국내_같은_날_다시_돌면_옛_행_오늘_매수를_정리하지_�
     job.run(c, "KR", kr._at("09:35"), session=다시, sleep=lambda _x: None, clock=lambda: kr._at("09:35"))
     assert 다시.orders == []
     assert json.loads(c.q("SELECT diff_json FROM paper_broker_daily ORDER BY rowid DESC LIMIT 1")[0][0]) == {}
+
+
+def test_미국_개장_뒤_다시_돌면_옛_행_오늘_예약이_그_행에_붙는다(c: Client) -> None:  # noqa: F811
+    """25.2124 (25.2123 교차검증 [권고] — 몫 계산의 시각 잣대를 지키는 시험이 없었다). 옛 행 30: H·KIS 3주, 새 행 2:
+    H·KIS 2주. 오늘 H 가 옛 행으로 3주 예약을 냈고, 개장(22:30 KST) 뒤 다시 돌 때 KIS 는 8주다. 그 3주는 옛 행 몫이다 —
+    시각 잣대가 없으면(25.2122 꼴) 옛 행 몫이 3 에 묶여 남는 5 가 새 행으로 넘어가 거짓 어긋남(새 행 5 vs H 2)이 났다"""
+    from tests.test_kis_ids_1614 import _base
+    from tests.test_kis_vts_us_1485 import _kst, _UsSess
+
+    _base(c)
+    c.conn.execute("INSERT INTO paper_orders (id, account_id, market, stock_id, side, order_type, limit_price, quantity,"
+                   " currency, decided_on, fill_session, reason, rule_version, tranche, created_at) VALUES (320, 'B',"
+                   " 'US', 30, 'buy', 'limit', 200, 3, 'USD', '2026-10-15', '2026-10-16', 'r', 1, 2, 't')")  # fmt: skip
+    _bo(c, 30, "buy", "accepted", None, 3, "2026-10-16", 320)
+    s = _UsSess(holdings=[kv.Holding("AAPL", 8, 8, 200.0)])
+    job.run(c, "US", _kst("23:40"), session=s, clock=lambda: _kst("23:40"))
+    assert s.orders == []  # 예약 마감 뒤
+    assert json.loads(c.q("SELECT diff_json FROM paper_broker_daily")[0][0]) == {}
