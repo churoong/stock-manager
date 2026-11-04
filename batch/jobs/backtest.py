@@ -1844,7 +1844,7 @@ def run(
             워밍업_일 = max(0, min(WARMUP_CALENDAR_DAYS, 앞선_일))
         estimate = len(universe) * (years * TRADING_DAYS_PER_YEAR + 워밍업_일 * 252 // 365)
         ok, text = db.check_read_budget(client, estimate, "백테스트")
-        print(text)
+        print(db.read_budget_public("백테스트", ok))  # 숫자는 공개 로그에 찍지 않는다(25.2131)
         if not ok and not force:
             db.finish_batch_run(client, batch_id, status="skipped", error_text=text)
             print("이번 달 읽기 예산이 모자랍니다. --force 로 넘길 수 있지만 계정이 막힐 수 있습니다")

@@ -259,7 +259,7 @@ def run_core(
         ok, text = db.check_read_budget(
             client, len(universe) * (years * jb.TRADING_DAYS_PER_YEAR + 워밍업_일 * 252 // 365), "핵심 H 백테스트"
         )
-        print(text)
+        print(db.read_budget_public("핵심 H 백테스트", ok))  # 숫자는 공개 로그에 찍지 않는다(25.2131)
         if not ok and not force:
             db.finish_batch_run(client, batch_id, status="skipped", error_text=text)
             return 1

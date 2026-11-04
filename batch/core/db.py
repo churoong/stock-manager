@@ -1204,6 +1204,15 @@ def check_read_budget(client: TursoClient, estimate: int, label: str) -> tuple[b
     return (estimate <= remaining, text)
 
 
+def read_budget_public(label: str, ok: bool) -> str:
+    """읽기 예산 문의 **공개 로그용** 한 줄 — 남은 양·예상치 숫자를 싣지 않는다(25.2131, 25.2106 [참고] ②).
+
+    `check_read_budget` 의 글("이번 달 남은 읽기 N행")은 운영 출력이라 공개 저장소 Actions 로그에 찍지 않는다(25.1307 은
+    진도 문만 가렸다). 숫자는 건너뛸 때 `batch_runs.error_text`(비공개 DB)에 남는다
+    """
+    return f"{label}: 읽기 예산 {'통과' if ok else '부족'} (남은 양은 공개 로그에 찍지 않습니다 — 25.2131)"
+
+
 def evaluate_limit_state(
     call_count: int, limit_value: int | None, warn_at_pct: int = 80
 ) -> str:

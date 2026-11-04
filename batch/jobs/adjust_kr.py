@@ -212,7 +212,7 @@ def run(ticker: str | None = None, force: bool = False) -> int:
 
         # 전 종목의 가격을 통째로 훑는 작업이다. 시작 전에 읽기 예산을 본다 (docs/infra.md 24절)
         ok, text = db.check_read_budget(client, len(stock_ids) * ROWS_PER_STOCK, "국내 수정주가")
-        print(text)
+        print(db.read_budget_public("국내 수정주가", ok))  # 숫자는 공개 로그에 찍지 않는다(25.2131)
         if not ok and not force:
             db.finish_batch_run(client, run_id, status="skipped", error_text=text)
             print("이번 달 읽기 예산이 모자랍니다. --force 로 넘길 수 있지만 계정이 막힐 수 있습니다")

@@ -3178,6 +3178,7 @@ SQL read operations are forbidden (reads are blocked, ...)
 | 25.2128 | 25.2127 교차검증 권고 — 괴리 알림 숫자·결론 같은 기준, 비교 질의 재료 시험, 가상 잣대 맞춤 |
 | 25.2129 | 25.2128 교차검증 권고 — 시가만 끝인 통합 시험·가상 judge 직접 격자·거래량 0 정지 |
 | 25.2130 | 시세 사본 클라이언트가 with 를 못 받아 리포트 경고 둘이 빠지고 배치 partial — 11-03 미국(사본 첫 사용) |
+| 25.2131 | 읽기 예산 문의 남은 양을 공개 로그에 찍던 것 — 백테스트·핵심 백테스트·국내 수정주가 |
 
 ### 25.1 왜 D1 인가
 
@@ -46102,3 +46103,31 @@ broker_mirror·kis·mismatch·diverge 를 쓰는 시험 파일 전부 통과.
 - 잡 전체에 사본을 두는 워크플로 넷(backtest·metrics·signal-outcomes·valuation-bands)의 작업(backtest·stress·core_backtest·metrics·signal_outcomes·valuation_bands)에는 `with TursoClient()` 가 없어 영향이 없었다(grep 으로 확인). 11-03 판정 실행도 무관하다.
 - 11-03 미국 실행에서 점수·신호가 실제로 덜 된 채 계산됐는지(scores·signals `step_log` 의 `sentiment_read_error`·`input_read_errors`·`unverifiable`·`checks_error`)는 리포트가 말하지 못했다. 다음 db-status 묶음에서 본다 `[확인필요]`.
 - 그대로 둔 것: `__getattr__` 로 원격에 곧장 넘어가는 `batch_atomic` 은 `dirty` 를 세우지 않는다. 지금 창 안에는 시세·종목을 쓰는 길이 없다.
+
+### 25.2131 읽기 예산 문의 남은 양을 공개 로그에 찍던 것 — 백테스트·핵심 백테스트·국내 수정주가
+
+**무엇**: 11-02 결함 회차 [참고] ②(25.2106, 판정 실행 경로라 11-03 판정 실행 뒤로 미룬 것)를 고쳤다.
+
+세 작업이 읽기 예산 문의 글을 공개 저장소 Actions 로그에 그대로 `print` 했다.
+- 대상: 백테스트(`jobs/backtest`), 핵심 백테스트(`jobs/core_backtest`), 국내 수정주가(`jobs/adjust_kr`).
+- 찍힌 글: `db.check_read_budget` 이 돌려준 "이번 달 남은 읽기 N행·예상 M행".
+- 이 작업들이 도는 워크플로 단계에는 `ops_tee` 가 없다. 25.1307 은 진도 문(`turso_read_gate`)만 가렸다.
+- 운영 출력은 공개 로그에 찍지 않는다(CLAUDE.md 절대 규칙 — 공개 저장소).
+
+고침:
+- 새 함수 `db.read_budget_public(label, ok)` 를 두었다. 공개 로그에는 이 함수가 내는 "읽기 예산 통과/부족" 한 줄만 찍는다.
+- 숫자는 건너뛸 때 `batch_runs.error_text`(비공개 DB)에 예전처럼 남는다.
+- 판정·건너뛰기 동작은 그대로다.
+
+**실제로 아팠나**: 개인 보유·금액은 아니다. 남은 읽기 양과 예상치(운영 상태)만 공개 로그에 남았다. 11-03 판정 실행 두 번(22:16Z·23:57Z 예약 실행)도 이 줄을 찍었다.
+
+**모의투자에 어떻게 쓰이나**: 운영 출력 비공개 규칙(무사고) — 검증 실행이 공개 로그에 운영 상태를 흘리지 않는다.
+
+**시험**: `tests/test_read_budget_public_2131.py` 를 새로 만들었다.
+- 공개 한 줄에 숫자가 없는지 본다.
+- `check_read_budget` 을 부르는 작업 파일 모두가 돌려받은 글을 `print` 하지 않는지 본다. 부르는 파일을 찾아서 보므로 새로 부르는 곳도 걸린다.
+읽기 예산·백테스트 실행 시험 파일 전부 통과.
+
+**되돌리기 확인**:
+- 핵심 백테스트를 `print(text)` 로 되돌리면 정적 시험이 깨진다.
+- 공개 한 줄에 숫자를 넣으면 숫자 시험이 깨진다.
