@@ -122,7 +122,8 @@ describe("기업행위 첫날 의심 (docs/infra.md 25.597)", () => {
     const 글 = readFileSync("app/api/cron/intraday/route.ts", "utf8");
     // 25.1551 부터 KIS 시세면 기준가 가드도 켠다. 25.1725 부터 배치의 기업행위 첫날 표시도 — 시세 출처와 무관하게
     expect(글).toContain("(quote.source !== KIS_SOURCE && actionDayToday(target.reasons, session.date)) ||");
-    expect(글).toContain("actionSuspect(market, quote.price, target.prev_close, quote.previous_close, quote.source === KIS_SOURCE)");
+    // 묵은 목록이면 견줄 전일 종가를 prices 최신 종가로(25.2135)
+    expect(글).toContain("actionSuspect(market, quote.price, actionBaseClose(target.prev_close, 최신종가.get(target.stock_id), 이번장), quote.previous_close, quote.source === KIS_SOURCE)");
   });
 });
 
