@@ -374,6 +374,7 @@ def run_core(
         증거: dict[str, dict[str, Any]] = {}
         짝: dict[str, dict[str, Any]] = {}
         판정 = "판정 불가(계산 실패)"
+        운_실패: str | None = None  # 운 판정이 깨지면 줄마다 실패 표지(25.2132) — 빈 칸을 옛 기록 탓으로 읽지 않게
         벤치월: dict[str, float] | None = None  # 월 초과 계열(25.1947)의 기준도 이것 — 깨지면 None(25.1956)
         try:
             벤치월 = luck.monthly_returns(벤치.curve)
@@ -395,6 +396,8 @@ def run_core(
                 판정 = ce.verdict(증거, 짝.get("core_h-core_g"))
         except Exception as e:  # noqa: BLE001
             log.exception("핵심 H 운 판정·결정 단위 판정 실패")
+            if not 운:
+                운_실패 = f"{type(e).__name__}: {str(e)[:80]}"
             warnings.append(f"운 판정·결정 단위 판정 실패: {type(e).__name__}: {str(e)[:120]}")
         증거_초 = round(time.perf_counter() - t2, 1)
         반: dict[str, dict[str, Any]] = {}
@@ -414,7 +417,10 @@ def run_core(
                      # 수용량(25.1954) — 리밸런스마다 단위 금액의 가장 빠듯한 종목 비율. 깨지면 칸만 빠진다
                      **jb.capacity_extra(result, turnover, market),
                      # 비용 길 빈도(25.1969) — 대체 길(현금 < 비용)이 운영과 다른 길이라 몇 번 탔나
-                     "cost_path": bt.cost_paths(result)}  # fmt: skip
+                     "cost_path": bt.cost_paths(result),
+                     # 운 판정 실패 표지(25.2132, 25.1956 `monthly_excess_error` 와 같은 원칙) — 판정판이
+                     # "luck 없음(25.997 전 기록)" 이 아니라 실패라고 적는다
+                     **({"luck_error": 운_실패} if 운_실패 and variant not in 운 else {})}  # fmt: skip
             # 미국에서 일치 시험이 없는 변형 줄에만 단서(25.2063)
             # 분할 지정가 체결 판(`limit_fills`)은 운영 일치로 묶이지 않은 회차 변형에만 따로 문구(25.2066·25.2067 —
             # 묶인 변형은 25.2084 `US_LIMIT_PARITY_VERIFIED`).

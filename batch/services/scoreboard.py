@@ -262,7 +262,10 @@ def _row(run: dict[str, Any], r: dict[str, Any], twins: dict[str, dict[str, Any]
 
     # DSR (N = 누적, `luck.judge`) — 판정 안 한 행은 그 문장이 까닭
     if luck is None:
-        why_l = "기준 전략은 운 판정에 넣지 않는다" if name == "benchmark" else "metrics_json.luck 없음(25.997 전 기록)"
+        why_l = ("기준 전략은 운 판정에 넣지 않는다" if name == "benchmark"
+                 # 25.2132 — 실행 중 운 판정이 깨졌다(실패 표지). "25.997 전 기록" 이 아니다
+                 else f"운 판정 계산 실패 — {mj['luck_error']}" if mj.get("luck_error")
+                 else "metrics_json.luck 없음(25.997 전 기록)")  # fmt: skip
         put("dsr", None, why_l)
         put("luck_pct", None, why_l)
         put("dsr_n", None, why_l)
