@@ -65,7 +65,7 @@ const REFUTE = {
 phase('Audit')
 const 감사 = await parallel(영역.map((a, i) => () =>
   역할('stock-defect-auditor', `맡은 영역: ${a}\n돈·장부·주문·알림을 틀리게 하는 실제 결함을 재현과 함께 찾으세요. docs/infra.md 25.x 에 이미 있는 것은 빼세요.`,
-    { schema: FINDINGS, label: `audit:${i + 1}`, phase: 'Audit' })))
+    { schema: FINDINGS, label: `내부감사실:${i + 1}`, phase: 'Audit' })))
 const 무게 = { must: 0, should: 1, note: 2 }
 // 영역을 넘어 같은 자리를 둘이 낸 것은 하나로 — 반박 전에 전체가 필요해 여기는 장벽이 맞다
 const 본 = new Set()
@@ -79,7 +79,7 @@ const 죽은영역 = 영역.filter((_, i) => !감사[i])
 if (죽은영역.length) log(`감사 ${죽은영역.length}곳이 결과 없이 끝남 — 그 영역은 "결함 0" 이 아니다`)
 const 판정 = await parallel(고른.map((f, i) => () =>
   역할('stock-refuter', `다음 결함 주장을 반박하세요.\n제목: ${f.title}\n자리: ${f.where}\n주장한 재현: ${f.repro}\n주장한 고칠 방향: ${f.fix || ''}`,
-    { schema: REFUTE, label: `refute:${i + 1}`, phase: 'Refute' })
+    { schema: REFUTE, label: `심사팀:${i + 1}`, phase: 'Refute' })
     .then((v) => ({ ...f, refute: v }))))
 // 반박이 죽은 결함은 버리지 않는다 — `unrefuted` 로(소리 없는 자르기 금지, 25.1752 교차검증 [권고])
 const 판정됨 = 고른.map((f, i) => 판정[i] || { ...f, refute: null })

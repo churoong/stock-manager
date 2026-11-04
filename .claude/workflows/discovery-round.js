@@ -61,7 +61,7 @@ const VERDICT = {
 phase('Discover')
 const 발굴 = await 역할('stock-discoverer', 
   `발굴 루프 ${회차}회차. 초점: ${초점}. docs/factors.md 12장 지난 회차 표와 겹치지 않는 후보를 최대 ${최대}개 내세요.`,
-  { schema: CANDIDATES, label: 'discover', phase: 'Discover' },
+  { schema: CANDIDATES, label: '연구개발실', phase: 'Discover' },
 )
 // 발굴이 죽은 것과 후보 0 을 가른다 — 죽었는데 "발굴 결과 없음" 으로 적히면 안 된다(25.1752)
 if (!발굴) return { round: 회차, error: '발굴 에이전트 결과 없음 — 다시 돌린다', results: [] }
@@ -75,9 +75,9 @@ const 결과 = await pipeline(
   후보,
   (c) => parallel([
     () => 역할('stock-verifier-data', `발굴 루프 ${회차}회차 후보를 검증 A 로 반박하세요.\n후보 ${c.id} ${c.name} (${c.kind}): ${c.summary}`,
-      { schema: VERDICT, label: `A:${c.id}`, phase: 'Verify' }),
+      { schema: VERDICT, label: `데이터검증팀:${c.id}`, phase: 'Verify' }),
     () => 역할('stock-verifier-stats', `발굴 루프 ${회차}회차 후보를 검증 B 로 반박하세요.\n후보 ${c.id} ${c.name} (${c.kind}): ${c.summary}`,
-      { schema: VERDICT, label: `B:${c.id}`, phase: 'Verify' }),
+      { schema: VERDICT, label: `계량검증팀:${c.id}`, phase: 'Verify' }),
   ]),
   ([a, b], c) => {
     const 둘 = [a, b].filter(Boolean)

@@ -51,7 +51,7 @@ const RESULT = {
 phase('Verify')
 const 결과 = await parallel(렌즈.map((l, i) => () =>
   역할('stock-cross-verifier', `커밋 범위 ${범위} 를 교차검증하세요. 렌즈: ${l}. 첫 판단을 must(=[필수] 수)에 넣으세요.`,
-    { schema: RESULT, label: `xv:${i + 1}`, phase: 'Verify' })))
+    { schema: RESULT, label: `품질보증실:${i + 1}`, phase: 'Verify' })))
 const 살아 = 결과.filter(Boolean)
 // 렌즈 하나라도 결과가 없으면 통과로 치지 않는다 — 위험 커밋 푸시 문
 const 필수 = 살아.reduce((s, r) => s + (r.must || 0), 0)

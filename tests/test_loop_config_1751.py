@@ -128,46 +128,60 @@ def _돌림(이름: str, cfg: dict, args: dict | None = None) -> dict:
 
 def test_교차검증_렌즈_하나가_죽으면_통과로_치지_않는다() -> None:
     좋음 = {"must": 0, "items": []}
-    assert _돌림("cross-verify", {"xv:1": 좋음, "xv:2": 좋음, "xv:3": 좋음})["r"]["must"] == 0
-    assert _돌림("cross-verify", {"xv:1": 좋음, "xv:2": {"must": 2, "items": []}, "xv:3": 좋음})["r"]["must"] == 2
-    죽음 = _돌림("cross-verify", {"xv:1": 좋음, "xv:2": None, "xv:3": 좋음})["r"]
+    assert _돌림("cross-verify", {"품질보증실:1": 좋음, "품질보증실:2": 좋음, "품질보증실:3": 좋음})["r"]["must"] == 0
+    assert _돌림("cross-verify", {"품질보증실:1": 좋음, "품질보증실:2": {"must": 2, "items": []}, "품질보증실:3": 좋음})["r"]["must"] == 2
+    죽음 = _돌림("cross-verify", {"품질보증실:1": 좋음, "품질보증실:2": None, "품질보증실:3": 좋음})["r"]
     assert 죽음["must"] is None and 죽음["missingLenses"] == 1
 
 
 def test_발굴_보수적_합침과_동결_규칙() -> None:
     후보 = {"candidates": [{"id": "P1", "name": "가", "kind": "ic", "summary": "x"}]}
     def 판(a: str, b: str, 지시: bool = False) -> str:  # noqa: E306
-        r = _돌림("discovery-round", {"discover": 후보, "A:P1": {"verdict": a, "reasons": ""},
-                                      "B:P1": {"verdict": b, "reasons": ""}}, {"userDirected": 지시})  # fmt: skip
+        r = _돌림("discovery-round", {"연구개발실": 후보, "데이터검증팀:P1": {"verdict": a, "reasons": ""},
+                                      "계량검증팀:P1": {"verdict": b, "reasons": ""}}, {"userDirected": 지시})  # fmt: skip
         return r["r"]["results"][0]["verdict"]
     assert 판("pass", "fail") == "fail" and 판("pass", "pass") == "pass" and 판("conditional", "pass") == "hold"
     assert 판("conditional", "conditional", 지시=True) == "conditional"  # 사용자 지시분만 조건부가 산다
     # 검증 하나가 죽으면 보류, 발굴이 죽으면 "후보 0" 이 아니라 error
-    assert _돌림("discovery-round", {"discover": 후보, "A:P1": {"verdict": "pass", "reasons": ""}})["r"]["results"][0][
+    assert _돌림("discovery-round", {"연구개발실": 후보, "데이터검증팀:P1": {"verdict": "pass", "reasons": ""}})["r"]["results"][0][
         "verdict"] == "hold"
-    assert "error" in _돌림("discovery-round", {"discover": None})["r"]
+    assert "error" in _돌림("discovery-round", {"연구개발실": None})["r"]
 
 
 def test_결함_루프는_죽은_감사와_반박을_버리지_않는다() -> None:
     결함 = {"findings": [{"title": "t", "severity": "must", "where": "a.py:1", "repro": "r"}], "scope": "s"}
     없음 = {"findings": [], "scope": "s"}
-    r = _돌림("defect-round", {"audit:1": 결함, "audit:2": 없음}, {"areas": ["가", "나"]})["r"]
+    r = _돌림("defect-round", {"내부감사실:1": 결함, "내부감사실:2": 없음}, {"areas": ["가", "나"]})["r"]
     assert r["unrefuted"] and not r["clean"]  # 반박이 죽었다(null)
-    r = _돌림("defect-round", {"audit:1": 결함, "audit:2": 없음, "refute:1": "__throw"}, {"areas": ["가", "나"]})["r"]
+    r = _돌림("defect-round", {"내부감사실:1": 결함, "내부감사실:2": 없음, "심사팀:1": "__throw"}, {"areas": ["가", "나"]})["r"]
     assert [f["title"] for f in r["unrefuted"]] == ["t"] and not r["clean"]  # 반박이 예외로 죽어도 결함이 남는다
-    r = _돌림("defect-round", {"audit:1": 없음, "audit:2": None}, {"areas": ["가", "나"]})["r"]
+    r = _돌림("defect-round", {"내부감사실:1": 없음, "내부감사실:2": None}, {"areas": ["가", "나"]})["r"]
     assert r["failedAreas"] == ["나"] and not r["clean"]  # 감사가 죽은 영역은 "결함 0" 이 아니다
-    r = _돌림("defect-round", {"audit:1": 결함, "audit:2": 없음,
-                               "refute:1": {"real": "false", "evidence": ""}}, {"areas": ["가", "나"]})["r"]  # fmt: skip
+    r = _돌림("defect-round", {"내부감사실:1": 결함, "내부감사실:2": 없음,
+                               "심사팀:1": {"real": "false", "evidence": ""}}, {"areas": ["가", "나"]})["r"]  # fmt: skip
     assert r["clean"] and r["refuted"] == ["t"]
 
 
 def test_등록_안_된_역할은_정의_파일로_한_번만() -> None:
-    r = _돌림("cross-verify", {"__unregistered": True, "xv:1": {"must": 0, "items": []},
-                               "xv:2": {"must": 0, "items": []}, "xv:3": {"must": 0, "items": []}})  # fmt: skip
+    r = _돌림("cross-verify", {"__unregistered": True, "품질보증실:1": {"must": 0, "items": []},
+                               "품질보증실:2": {"must": 0, "items": []}, "품질보증실:3": {"must": 0, "items": []}})  # fmt: skip
     assert r["r"]["must"] == 0
     대체 = [x for x in r["불린"] if x["agentType"] == "general-purpose"]
     assert len(대체) == 3 and all(x["label"].endswith("*") for x in 대체)
     # 등록돼 있는데 null(죽음)이면 다시 부르지 않는다 — 예산이 두 배가 되지 않게
-    r = _돌림("cross-verify", {"xv:1": None, "xv:2": None, "xv:3": None})
+    r = _돌림("cross-verify", {"품질보증실:1": None, "품질보증실:2": None, "품질보증실:3": None})
     assert len(r["불린"]) == 3
+
+
+def test_에이전트_부서명() -> None:
+    """역할마다 회사 부서명(`department:`)이 있고, 서로 다르며, docs/loops.md 표에 실리고, 가상모의투자 H 지주사의 부서
+    (docs/company.md)와 겹치지 않는다 (25.2139 — 2026-11-04 사용자 지시 "각 에이전트를 회사 부서명으로 바꿔줘")"""
+    부서 = {f.stem: _머리(f).get("department") for f in sorted(에이전트.glob("*.md"))}
+    assert all(부서.values()), f"부서명 없는 역할: {[k for k, v in 부서.items() if not v]}"
+    assert len(set(부서.values())) == len(부서), "부서명이 겹친다"
+    문서 = 루프문서.read_text(encoding="utf-8")
+    for 이름, d in 부서.items():
+        assert re.search(rf"\| `{re.escape(이름)}` \| \*\*{re.escape(d)}\*\* \|", 문서), f"loops.md 표에 {이름}·{d} 없음"
+    지주사 = set(re.findall(r"\*\*([가-힣]+부)\*\*", (뿌리 / "docs" / "company.md").read_text(encoding="utf-8")))
+    assert 지주사, "company.md 부서 정규식이 빗나갔다"
+    assert not set(부서.values()) & 지주사
