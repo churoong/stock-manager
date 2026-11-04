@@ -14,7 +14,7 @@ import pytest
 from batch.core import db
 from batch.jobs import portfolio as pf_job
 from batch.jobs import sell_flags as job
-from tests.test_sell_flag_scale_1405 import W, _C
+from tests.test_sell_flag_scale_1405 import _C, W
 
 
 def _준비(monkeypatch: pytest.MonkeyPatch) -> _C:

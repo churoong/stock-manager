@@ -199,7 +199,8 @@ def _after_hours(client: TursoClient, qc: kis.QuoteClient, today, failed: dict[s
     지금 = datetime.now(UTC)
     day = ah.session_day(지금)
     if day is None:
-        return {"holdings": len(보유), "skipped": "시간외 단일가 진행 중(16:00~18:00)"}
+        열림, 닫힘 = ah.session_window(지금.astimezone(ah.KST).date())  # 수능일은 한 시간 늦다(25.2134)
+        return {"holdings": len(보유), "skipped": f"시간외 단일가 진행 중({열림:%H:%M}~{닫힘:%H:%M})"}
     # 그 거래일이 KST 어제보다 오래면 보지 않는다 (25.1846) — 휴장일 실행이 며칠 전 시간외를 뒤늦게 알리지 않게.
     # 금요일 실행이 자정을 넘겨 토요일 새벽에 돌면 어제(금) 것이라 본다(예전 바깥 `is_session(오늘)` 이 건너뛰었다)
     if (지금.astimezone(ah.KST).date() - day).days > 1:

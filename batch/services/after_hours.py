@@ -56,16 +56,32 @@ DEFAULT_QUIET = {"enabled": True, "start": "00:00", "end": "07:00", "deliver_on_
 QUIET_SKIPPED = "quiet-skipped"  # 웹 장중 경로의 같은 이름과 같다
 
 
+def session_window(d: date) -> tuple[time, time]:
+    """그 거래일 시간외 단일가의 (시작, 끝) KST. **수능일은 한 시간 늦춘다**(25.2134, 11-04 결함 회차 [권고]).
+
+    수능일은 정규장이 10:00~16:30 으로 한 시간 늦고(`monitor_targets.KR_CSAT_DAYS`, 25.350) 장 뒤 시간외도 따라 늦어
+    약 17:00~19:00 이다 `[확인필요: 거래소 공지 시각]`. 예전엔 16:00~18:00 고정이라 18:17 예약 실행이 진행 중인 중간
+    시세를 그날 알림으로 적고, 하루 한 번 자리(alerts UNIQUE)를 차지해 19:00 마감 값은 다시 알리지 못했다"""
+    from batch.jobs import monitor_targets as mt  # 늦은 가져오기 — 서비스가 작업 모듈을 위에서 읽지 않게
+
+    if d.isoformat() in mt.KR_CSAT_DAYS:
+        밀림 = datetime.combine(d, OPEN_KST) + mt.CSAT_SHIFT, datetime.combine(d, CLOSE_KST) + mt.CSAT_SHIFT
+        return 밀림[0].time(), 밀림[1].time()
+    return OPEN_KST, CLOSE_KST
+
+
 def session_day(now_utc: datetime) -> date | None:
-    """이 시각에 **마감된** 가장 최근 시간외 단일가의 거래일 (25.1012). 진행 중(16:00~18:00 KST)이면 None.
+    """이 시각에 **마감된** 가장 최근 시간외 단일가의 거래일 (25.1012). 진행 중(평소 16:00~18:00 KST, 수능일 한 시간
+    늦게 — `session_window`)이면 None.
 
     GitHub 예약이 7시간 늦게(01:25 KST) 돌아 `user_today()` 로 다음 날 날짜를 붙였다 — 시세는 전 거래일 것이다."""
     kst = now_utc.astimezone(KST)
     d = kst.date()
     if cal.is_session("KR", d):
-        if OPEN_KST <= kst.time() < CLOSE_KST:
+        열림, 닫힘 = session_window(d)
+        if 열림 <= kst.time() < 닫힘:
             return None
-        if kst.time() >= CLOSE_KST:
+        if kst.time() >= 닫힘:
             return d
     return cal.previous_session("KR", d)
 
