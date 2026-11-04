@@ -30,10 +30,14 @@ log = logging.getLogger("sell_flags")
 JOB_NAME = "sell_flags"
 #: 잣대가 바뀐 보유의 새 기준점을 찾을 때 한 번에 읽는 점수 행 수와 최대 쪽 수 (25.961·25.1092). 20×19 = 380행은
 #: 거래일 1년 반 남짓 — 그보다 오래전에 바꾼 잣대 뒤 첫 점수까지 못 닿으면 "같은 잣대의 점수가 없음" 으로 말한다
-#: 같은 잣대 구간마다 하락을 이을 점수 이력 (25.1412) — 매수일 뒤~지금, 같은 날은 판 내림차순. 잣대가 바뀐 보유만 읽는다
+#: 같은 잣대 구간마다 하락을 이을 점수 이력 (25.1412) — 매수일(포함)~지금, 같은 날은 판 내림차순. 잣대가 바뀐 보유만
+#: 읽는다. **매수일 행도 읽는다**(25.2133, 11-04 결함 회차) — 예전 `>` 는 매수일을 새 판으로 다시 낸 행을 버려, 매수일에
+#: 새 판으로 갈아타지 못하고 매수일~첫 새 판 점수 사이 하락을 영영 놓쳤다(25.1412 의 처방 "전 거래일을 새 판으로 다시
+#: 낸다" 가 그 전 거래일이 매수일이면 듣지 않았다). 매수일의 시작 행과 같은 잣대 행은 하락 0 으로 지나가고 그날 더 높은
+#: 판으로 갈아탄다
 CHAIN_HISTORY_SQL = (
     "SELECT as_of_date, calc_version, weights_json, sentiment_weight_used, total_score FROM scores"
-    " WHERE stock_id = ? AND as_of_date > ? AND as_of_date <= ? AND total_score IS NOT NULL"
+    " WHERE stock_id = ? AND as_of_date >= ? AND as_of_date <= ? AND total_score IS NOT NULL"
     " ORDER BY as_of_date, calc_version DESC LIMIT 2000"
 )
 BASELINE_PAGE = 20
@@ -231,7 +235,8 @@ def enrich(
                 후보들 = client.execute(
                     "SELECT as_of_date, total_score, weights_json, sentiment_weight_used, factor_scores,"
                     " sentiment_score FROM scores"
-                    " WHERE stock_id = ? AND as_of_date > ? AND as_of_date < ? AND calc_version = ?"
+                    # 매수일 행도 기준점 후보(25.2133 — 매수일을 새 판으로 다시 낸 행)
+                    " WHERE stock_id = ? AND as_of_date >= ? AND as_of_date < ? AND calc_version = ?"
                     "   AND total_score IS NOT NULL ORDER BY as_of_date LIMIT ? OFFSET ?",
                     [sid, r["score_at_buy_date"], r["score_now_date"], int(지금잣대["calc_version"]),
                      BASELINE_PAGE, 쪽 * BASELINE_PAGE],
