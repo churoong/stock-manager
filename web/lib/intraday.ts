@@ -737,15 +737,23 @@ export function actionSuspect(
  * 종가를 쓴다. 25.2135 는 최신 종가를 그대로 써, 묵은 사이 분할·권리락이 끼면 최신 종가(행위 뒤) = 기준가라 가드를 지나
  * **행위 전 평균단가의 손절·목표로 거짓 "손절선 터치"** 를 냈다(25.2135 교차검증 [필수] 1). 그래서:
  * - 목록 값을 행에서 못 찾으면(창보다 오래 묵음) 잇지 못하므로 목록 값 그대로(예전 동작 — 빠지는 쪽)
- * - 목록 값의 행부터 최신 행 사이에 기업행위(`recentActionKr`)가 있으면 목록 값 그대로(예전처럼 의심으로 걸린다)
- * - 아니면 최신 종가. 이번 장 목록이거나 행이 없으면 목록 값 그대로
+ * - 같은 종가가 여러 행이면 **가장 오래된 행**을 목록 날로 본다 — 확인 구간이 넓어지는 보수 쪽(25.2138)
+ * - 그 행 뒤 행 가운데 **등락률이 빈 행**(야후 대체 출처)이 있으면 목록 값 그대로(25.2138, 교차검증 [필수] 2) — 등락률이
+ *   없으면 `recentActionKr` 가 ±30% 밖만 기업행위로 봐 권리락·작은 무상증자를 놓치고 거짓 손절이 났다
+ * - 그 사이 기업행위(`recentActionKr`)가 있으면 목록 값 그대로(예전처럼 의심으로 걸린다)
+ * - 아니면 최신 종가. 이번 장 목록이거나 행이 없으면 목록 값 그대로. **잇기가 확실할 때만 바꾸므로 25.2135 이전보다 나빠지는
+ *   경우는 없다** — 불확실하면 모두 예전 값이다
  */
 export function actionBaseClose(
   listPrevClose: number | null, rows: Array<{ close: number; change_pct: number | null }> | null | undefined, listFresh: boolean,
 ): number | null {
   if (listFresh || !rows || !rows.length || !(listPrevClose !== null && listPrevClose > 0)) return listPrevClose;
-  const k = rows.findIndex((r) => Number(r.close) > 0 && Math.abs(Number(r.close) / listPrevClose - 1) < 1e-9);
+  let k = -1;
+  rows.forEach((r, i) => {
+    if (Number(r.close) > 0 && Math.abs(Number(r.close) / listPrevClose - 1) < 1e-9) k = i; // 가장 오래된 같은 종가
+  });
   if (k < 0) return listPrevClose;
+  if (rows.slice(0, k).some((r) => r.change_pct === null || r.change_pct === undefined)) return listPrevClose;
   if (recentActionKr(rows.slice(0, k + 1))) return listPrevClose;
   const 최신 = Number(rows[0].close);
   return 최신 > 0 ? 최신 : listPrevClose;

@@ -44,5 +44,6 @@ def test_결정_단위만_깨지면_운_판정은_그대로_표지_없음(monkey
 def test_판정판은_실패라고_적는다() -> None:
     (줄,) = scb.rows([_실행("core_backtest", {"core_h": None}, luck_error="RuntimeError: 망")])
     assert 줄["dsr"] is None and 줄["missing"]["dsr"] == "운 판정 계산 실패 — RuntimeError: 망", 줄["missing"]["dsr"]
+    assert 줄["missing"]["months"] == 줄["missing"]["dsr"]  # 같은 까닭으로 묶인다(25.2136)
     (옛,) = scb.rows([_실행("core_backtest", {"core_h": None})])
     assert 옛["missing"]["dsr"] == "metrics_json.luck 없음(25.997 전 기록)"

@@ -29,10 +29,32 @@ describe("묵은 목록의 기준가 가드 (25.2135·25.2137)", () => {
   });
 
   it("묵은 사이 권리락(계수 0.9)이 끼면 목록 값 그대로", () => {
-    // 권리락 첫날: 종가 9,000 이 기준가 9,000 그대로(등락률 0) — 종가 비 0.9 와 어긋남
+    // 권리락 첫날: 종가 9,000 이 기준가 9,000 그대로(등락률 0) — 종가 비 0.9 와 어긋남. 오늘 기준가 = 어제 종가 8,950
     const rows = [{ close: 8_950, change_pct: -0.56 }, { close: 9_000, change_pct: 0 }, { close: 10_000, change_pct: 0 }];
     expect(actionBaseClose(10_000, rows, false)).toBe(10_000);
-    expect(actionSuspect("KR", 8_950, actionBaseClose(10_000, rows, false), 9_000, true)).toBe(true);
+    expect(actionSuspect("KR", 8_900, actionBaseClose(10_000, rows, false), 8_950, true)).toBe(true);
+  });
+
+  it("그 사이 등락률이 빈 행(야후 대체)이 있으면 목록 값 그대로 — 기업행위를 가를 수 없다 (25.2138 [필수])", () => {
+    const rows = [{ close: 8_950, change_pct: null }, { close: 10_000, change_pct: 0 }];
+    expect(actionBaseClose(10_000, rows, false)).toBe(10_000);
+    expect(actionSuspect("KR", 8_900, actionBaseClose(10_000, rows, false), 8_950, true)).toBe(true);
+    // 목록 날 행 자신의 등락률(그 전날 대비)은 보지 않는다
+    expect(actionBaseClose(10_000, [{ close: 9_600, change_pct: -4 }, { close: 10_000, change_pct: null }], false)).toBe(9_600);
+  });
+
+  it("같은 종가가 여러 행이면 가장 오래된 행부터 본다 — 권리락 뒤 우연히 옛 종가로 돌아와도 놓치지 않는다 (25.2138)", () => {
+    // 새것부터: 9,900 · 10,000(회복) · 9,000(권리락 첫날, 등락 0) · 10,000(목록 날). 새것부터 첫 10,000 을 목록 날로 보면
+    // 9,900 을 돌려 권리락을 놓친다
+    const rows = [{ close: 9_900, change_pct: -1 }, { close: 10_000, change_pct: 11.11 }, { close: 9_000, change_pct: 0 },
+      { close: 10_000, change_pct: 0 }];
+    expect(actionBaseClose(10_000, rows, false)).toBe(10_000);
+  });
+
+  it("묵은 목록에서도 오늘 기업행위 첫날은 잡는다", () => {
+    const 기준 = actionBaseClose(10_500, 행(10_000, 10_200, 10_500), false);
+    expect(기준).toBe(10_000);
+    expect(actionSuspect("KR", 7_100, 기준, 7_140, true)).toBe(true);
   });
 
   it("목록 값을 행에서 못 찾거나(창보다 오래 묵음) 행이 없으면 목록 값 그대로, 이번 장 목록도 그대로", () => {
@@ -48,5 +70,8 @@ describe("묵은 목록의 기준가 가드 (25.2135·25.2137)", () => {
     expect(route).toContain("if (!이번장 && market === \"KR\" && targets.length)");
     expect(route).toContain("actionBaseClose(target.prev_close, 최근행.get(target.stock_id), 이번장)");
     expect(route).toContain("묵은 목록 기준가 행을 읽지 못했다");
+    // 종목별 색인 질의 — 최근 행부터(DESC) 21행(25.2138 교차검증: ASC 로 바꿔도 통과했다)
+    expect(route).toContain("SELECT close, change_pct FROM prices WHERE stock_id = ? AND close IS NOT NULL AND close > 0 ORDER BY date DESC LIMIT ?");
+    expect(route).toContain("args: [t.stock_id, ACTION_GUARD_ROWS + 1]");
   });
 });
