@@ -730,15 +730,25 @@ export function actionSuspect(
 }
 
 /**
- * 기업행위 첫날 가드(`actionSuspect`)가 견줄 **DB 전일 종가** (docs/infra.md 25.2135, 11-04 결함 회차 [권고]).
+ * 기업행위 첫날 가드(`actionSuspect`)가 견줄 **DB 전일 종가** (docs/infra.md 25.2135·25.2137).
  * 감시 목록의 `prev_close` 는 배치가 목록을 만들 때 찍은 값이라, 목록이 묵으면(배치가 멈췄거나 포트폴리오 재계산이 끝나지 않아
  * 어제 목록을 그대로 둔 날, 25.648) 그 뒤 움직임만큼 KIS 기준가와 어긋나 2% 기준가 규칙(25.1551)이 **보유 손절을 날마다 지웠다**.
- * 묵은 목록이면 호출 때 읽은 prices 최신 종가를 쓴다. 이번 장 목록이거나 최신 종가를 모르면 목록 값 그대로.
- * prices 까지 묵었으면(배치 전체가 멈춤) 여전히 빠질 수 있다 — 권리락 첫날 거짓 손절과 맞바꾼 것(25.1551)이고 호출 기록 `action_suspect` 에 남는다
+ * 묵은 목록이면 prices 최근 행(새것부터, `ACTION_GUARD_ROWS + 1` 개)을 보고 **목록을 만든 뒤 기업행위가 없었을 때만** 최신
+ * 종가를 쓴다. 25.2135 는 최신 종가를 그대로 써, 묵은 사이 분할·권리락이 끼면 최신 종가(행위 뒤) = 기준가라 가드를 지나
+ * **행위 전 평균단가의 손절·목표로 거짓 "손절선 터치"** 를 냈다(25.2135 교차검증 [필수] 1). 그래서:
+ * - 목록 값을 행에서 못 찾으면(창보다 오래 묵음) 잇지 못하므로 목록 값 그대로(예전 동작 — 빠지는 쪽)
+ * - 목록 값의 행부터 최신 행 사이에 기업행위(`recentActionKr`)가 있으면 목록 값 그대로(예전처럼 의심으로 걸린다)
+ * - 아니면 최신 종가. 이번 장 목록이거나 행이 없으면 목록 값 그대로
  */
-export function actionBaseClose(listPrevClose: number | null, latestDbClose: number | null | undefined, listFresh: boolean): number | null {
-  if (listFresh) return listPrevClose;
-  return latestDbClose !== null && latestDbClose !== undefined && latestDbClose > 0 ? latestDbClose : listPrevClose;
+export function actionBaseClose(
+  listPrevClose: number | null, rows: Array<{ close: number; change_pct: number | null }> | null | undefined, listFresh: boolean,
+): number | null {
+  if (listFresh || !rows || !rows.length || !(listPrevClose !== null && listPrevClose > 0)) return listPrevClose;
+  const k = rows.findIndex((r) => Number(r.close) > 0 && Math.abs(Number(r.close) / listPrevClose - 1) < 1e-9);
+  if (k < 0) return listPrevClose;
+  if (recentActionKr(rows.slice(0, k + 1))) return listPrevClose;
+  const 최신 = Number(rows[0].close);
+  return 최신 > 0 ? 최신 : listPrevClose;
 }
 
 /**

@@ -495,20 +495,21 @@ export async function GET(request: Request) {
       const 풀린 = { ...t, reasons: parseReasons(t.reasons) }; // 깨진 행 하나가 호출 전체를 죽이지 않게 (25.1137)
       return 이번장 ? 풀린 : withoutSignalLevels(풀린);
     });
-    // **묵은 목록이면 기업행위 첫날 가드가 견줄 전일 종가를 prices 에서 다시 읽는다** (25.2135) — 목록의 `prev_close` 는 만든 날
-    // 값이라 그 뒤 움직임만큼 KIS 기준가와 어긋나 보유 손절을 날마다 지웠다. 묵은 날만 한 질의(이번 장 목록이면 읽지 않는다)
-    const 최신종가 = new Map<number, number>();
+    // **묵은 목록이면 기업행위 첫날 가드가 견줄 전일 종가를 prices 최근 행에서 다시 잡는다** (25.2135·25.2137) — 목록의 `prev_close`
+    // 는 만든 날 값이라 그 뒤 움직임만큼 KIS 기준가와 어긋나 보유 손절을 날마다 지웠다. 목록을 만든 뒤 기업행위가 끼었으면 목록 값을
+    // 그대로 둔다(`actionBaseClose`). 묵은 날만 읽는다 — 종목마다 색인으로 최근 `ACTION_GUARD_ROWS + 1` 행(관심 종목 가드와 같은 질의).
+    // 읽기가 깨지면 목록 값으로 물러난다(호출 전체를 죽이지 않는다)
+    const 최근행 = new Map<number, Array<{ close: number; change_pct: number | null }>>();
     if (!이번장 && market === "KR" && targets.length) {
-      const ids = targets.map((t) => t.stock_id);
-      const 종가행 = rowsToObjects<{ stock_id: number; close: number }>(
-        await execute(
-          `SELECT p.stock_id, p.close FROM prices p JOIN (SELECT stock_id, MAX(date) AS d FROM prices
-             WHERE stock_id IN (${ids.map(() => "?").join(",")}) AND close IS NOT NULL AND close > 0 GROUP BY stock_id) m
-             ON m.stock_id = p.stock_id AND m.d = p.date`,
-          ids,
-        ),
-      );
-      for (const r of 종가행) 최신종가.set(Number(r.stock_id), Number(r.close));
+      try {
+        const 결과 = await batch(targets.map((t) => ({
+          sql: "SELECT close, change_pct FROM prices WHERE stock_id = ? AND close IS NOT NULL AND close > 0 ORDER BY date DESC LIMIT ?",
+          args: [t.stock_id, ACTION_GUARD_ROWS + 1],
+        })));
+        targets.forEach((t, i) => 최근행.set(t.stock_id, rowsToObjects<{ close: number; change_pct: number | null }>(결과[i])));
+      } catch (e) {
+        console.error("묵은 목록 기준가 행을 읽지 못했다 — 목록 값으로 본다 (25.2137)", e);
+      }
     }
     // 상장폐지된 관심 종목은 감시하지 않는다 — 지난 장 시세만 와 판정 0건이 될 수 있다 (25.814, 감사). 유니버스에서 빠진(excluded) 종목은
     // 사용자가 일부러 걸어 둔 것이라 그대로 본다. 거래정지(상태는 active)는 이 조건으로 거르지 못한다 [확인필요: 운영에서 판정 0건으로 빨개지는지]
@@ -614,7 +615,7 @@ export async function GET(request: Request) {
         // 배치의 권리락일 표시는 **KIS 시세가 아닐 때만** — KIS 날은 기준가 가드가 정확하고, 일정 표는 철회된 옛 행을 못 가려
         // 정상인 날 진짜 손절까지 뺐다(25.1725 교차검증 [필수] 1)
         (quote.source !== KIS_SOURCE && actionDayToday(target.reasons, session.date)) ||
-        actionSuspect(market, quote.price, actionBaseClose(target.prev_close, 최신종가.get(target.stock_id), 이번장), quote.previous_close, quote.source === KIS_SOURCE)
+        actionSuspect(market, quote.price, actionBaseClose(target.prev_close, 최근행.get(target.stock_id), 이번장), quote.previous_close, quote.source === KIS_SOURCE)
       ) {
         actionSuspects.push(target.yahoo_symbol);
         const 뺄것 = dropOnActionSuspect(market);
