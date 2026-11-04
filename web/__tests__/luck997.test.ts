@@ -20,3 +20,10 @@ describe("우연일 확률", () => {
     expect(luckText({ cagr: 0.1 }).cell).toBe("-");
   });
 });
+
+describe("운 판정 실패 표지 (25.2136)", () => {
+  it("luck 이 없고 luck_error 가 있으면 계산 실패로 보인다 — 옛 기록의 '-' 와 가른다", () => {
+    expect(luckText({ luck_error: "RuntimeError: 망" })).toEqual({ cell: "계산 실패", title: "운 판정 계산 실패 — RuntimeError: 망" });
+    expect(luckText({})).toEqual({ cell: "-", title: null });
+  });
+});

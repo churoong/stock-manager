@@ -331,7 +331,10 @@ def _row(run: dict[str, Any], r: dict[str, Any], twins: dict[str, dict[str, Any]
 
     # 표본(개월·28일 묶음·서로 다른 종목·끝난 거래)
     # 숫자로 고정해 싣는다 — 점검표(`_num`)와 화면(z.number)이 같은 값을 본다(25.1955)
-    put("months", _num((luck or {}).get("months")), "luck.months 없음 — 운 판정 없는 행")
+    put("months", _num((luck or {}).get("months")),
+        # 같은 까닭으로 묶이게(25.2136)
+        f"운 판정 계산 실패 — {mj['luck_error']}" if luck is None and mj.get("luck_error")
+        else "luck.months 없음 — 운 판정 없는 행")  # fmt: skip
     put("rebalances", r.get("rebalances"), "rebalances 열 없음")
     # 빈 증거면 대조 하한 칸과 같은 까닭(25.2107, 25.2106 교차검증 [권고] — S·T 한 줄에 "내지 않는다" 와 "판정 실패" 가
     # 함께 찍혔다)

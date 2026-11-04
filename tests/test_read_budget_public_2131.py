@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_공개_한_줄에는_숫자가_없다(ok: bool) -> None:
     글 = db.read_budget_public("백테스트", ok)
     assert ("통과" if ok else "부족") in 글
-    assert not re.search(r"\d{3}", 글.replace("25.2131", "")), 글
+    assert not re.search(r"\d", 글.replace("25.2131", "")), 글  # 숫자 하나도 없다(25.2136 — 예전엔 세 자리만 봤다)
 
 
 def test_예산_문을_쓰는_작업은_그_글을_찍지_않는다() -> None:

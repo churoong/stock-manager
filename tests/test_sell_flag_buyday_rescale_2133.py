@@ -64,3 +64,17 @@ def test_매수일에_판이_하나면_예전과_같다(monkeypatch: pytest.Monk
     monkeypatch.setattr(job.db, "now_iso", lambda: "2026-10-15T23:27:00+00:00")
     job.run(date(2026, 10, 16))  # 72→48(판 10) 24점 + 47→46(판 11) 1점 = 25점
     assert c.conn.execute("SELECT reason_code FROM sell_flags WHERE is_active = 1").fetchall() == [("재무악화",)]
+
+
+def test_물러나는_기준점도_매수일_새_판_행을_본다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """이음이 안 되는 꼴(가운데 날이 다른 판뿐)에서 25.961 기준점 찾기가 매수일의 지금 판 행을 기준점으로 쓴다
+    (25.2136, 25.2133 교차검증 [권고] — 기준점 질의의 `>=` 를 잡는 시험이 없었다)"""
+    c = _준비(monkeypatch)
+    _점수(c, "2026-07-01", 65.0, 12)  # 매수일을 지금 판(12)으로 다시 냄
+    _점수(c, "2026-07-01", 70.0, 11)
+    _점수(c, "2026-07-01", 72.0, 10)  # 매매 점수의 판
+    _점수(c, "2026-09-01", 60.0, 11)  # 가운데 날은 판 11 뿐 — 지금 판으로 잇지 못한다
+    _점수(c, "2026-10-14", 44.0, 12)  # 지금 판 12: 기준점(매수일 판 12, 65) 대비 21점 하락
+    monkeypatch.setattr(job.db, "now_iso", lambda: "2026-10-14T23:27:00+00:00")
+    job.run(date(2026, 10, 15))
+    assert c.conn.execute("SELECT reason_code FROM sell_flags WHERE is_active = 1").fetchall() == [("재무악화",)]

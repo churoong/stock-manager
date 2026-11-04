@@ -217,8 +217,8 @@ def enrich(
         # 리포트 9종목 전부). 매수일 이후·지금 점수 전의 점수 가운데 **지금과 같은 잣대**(판·팩터 가중치·센티먼트
         # 가중치)인 가장 이른 행을 기준점으로 쓴다
         기준점: dict[str, Any] | None = None
-        # **같은 잣대 구간마다 하락을 이어 더한다** (docs/infra.md 25.1412, 매도 플래그 감사) — 매수일 뒤~지금 점수 이력
-        # 한 질의. 잇지 못하면(이력이 비거나 지금 날이 없음) 아래 예전 기준점 방식으로 물러난다
+        # **같은 잣대 구간마다 하락을 이어 더한다** (docs/infra.md 25.1412, 매도 플래그 감사) — 매수일(포함,
+        # 25.2133)~지금 점수 이력 한 질의. 잇지 못하면(이력이 비거나 지금 날이 없음) 아래 예전 기준점 방식으로 물러난다
         이음: tuple[float, int] | None = None
         if 잣대가_바뀜 and 잣대[0] and r["score_at_buy_date"] and r["score_now_date"]:
             이력 = client.execute(CHAIN_HISTORY_SQL, [sid, r["score_at_buy_date"], r["score_now_date"]]).dicts()

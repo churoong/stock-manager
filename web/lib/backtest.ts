@@ -714,6 +714,8 @@ export function exposureText(m: unknown): { invested: string; holdings: string; 
 export function luckText(m: unknown): { cell: string; title: string | null } {
   const o = (m && typeof m === "object" ? m : {}) as Record<string, unknown>;
   const l = (o.luck && typeof o.luck === "object" ? o.luck : null) as Record<string, unknown> | null;
+  // 실행 중 운 판정이 깨진 줄(실패 표지 `luck_error`, 25.2132·25.2136) — 옛 기록·기준 전략의 "-" 와 가른다
+  if (!l && typeof o.luck_error === "string") return { cell: "계산 실패", title: `운 판정 계산 실패 — ${o.luck_error}` };
   if (!l) return { cell: "-", title: null };
   if (typeof l.luck_pct !== "number") return { cell: "판정 안 함", title: typeof l.verdict === "string" ? l.verdict : null };
   const num = (k: string) => (typeof l[k] === "number" ? (l[k] as number) : NaN);
