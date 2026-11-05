@@ -56,7 +56,9 @@ def test_일일_배치는_빈_사본이면_사본만_맞추기를_깨운다(파�
     # 지표가 이미 돌거나 기다리면 깨우지 않는다 — 기다리던 주간 계산을 취소하지 않게(25.2155)
     assert "for st in queued waiting pending" in 글 and "in_progress" not in 글  # 도는 중은 세지 않는다(25.2156)
     [단계] = [s for s in 깨움["steps"] if "dispatches" in s.get("run", "")]
-    for 바쁨, 깨움됨 in ((0, True), (1, False), ("실패", True)):
+    # 본문실패 = HTTP 오류처럼 JSON 본문을 찍고 비정상 종료(25.2157) · 첫실패 = 첫 조회만 실패, 둘째는 기다리는 실행 1
+    for 바쁨, 깨움됨 in ((0, True), (1, False), ("실패", True), ("본문실패", True), ("첫실패", False),
+                         ("첫숫자아님", False)):  # fmt: skip
         assert _깨움_돌려보기(단계["run"], 바쁨) is 깨움됨, (파일, 바쁨)
     assert not any(s.get("uses", "").startswith("actions/setup-python") for s in 깨움["steps"])  # 설치 없음
 
@@ -64,13 +66,22 @@ def test_일일_배치는_빈_사본이면_사본만_맞추기를_깨운다(파�
 def _깨움_돌려보기(run: str, 바쁨: int | str) -> bool:
     """깨움 단계를 bash 로 실제로 돌린다 — `gh` 는 가짜 함수(조회는 바쁨 수, 실패면 비정상 종료), dispatch 를 불렀나"""
     import subprocess
+    import tempfile
 
-    가짜 = (
-        'gh() { if [ "$1" = "api" ] && [ "$2" = "-X" ]; then echo DISPATCHED; return 0; fi; '
-        + ('return 1; }' if 바쁨 == "실패" else f'echo {바쁨}; }}')
-    )
-    r = subprocess.run(["bash", "-e", "-c", 가짜 + "\n" + run], capture_output=True, text=True,
-                       env={"REPO": "o/r", "PATH": "/usr/bin:/bin"}, check=False)  # fmt: skip
+    표시 = str(Path(tempfile.mkdtemp()) / "seen")
+
+    응답 = {
+        "실패": "return 1;",
+        "본문실패": 'echo \'{"message":"API rate limit exceeded"}\'; return 1;',
+        # 성공했는데 숫자가 아닌 응답(첫 조회) — 산술이 깨져 루프를 버리고 둘째(기다림 1)를 보지 않은 채 깨우면 안 된다
+        "첫숫자아님": 'if [ ! -e "$SEEN" ]; then : > "$SEEN"; echo "1 2"; return 0; fi; echo 1;',
+        # 명령 치환은 하위 셸이라 변수로는 셀 수 없다 — 파일로 첫 부름을 표시한다
+        "첫실패": 'if [ ! -e "$SEEN" ]; then : > "$SEEN"; echo \'{"message":"x"}\'; return 1; fi; echo 1;',
+    }.get(str(바쁨), f"echo {바쁨};")
+    가짜 = 'gh() { if [ "$1" = "api" ] && [ "$2" = "-X" ]; then echo DISPATCHED; return 0; fi; ' + 응답 + " }"
+    # Actions 기본 셸 꼴(-eo pipefail)
+    r = subprocess.run(["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", 가짜 + "\n" + run], capture_output=True, text=True,
+                       env={"REPO": "o/r", "PATH": "/usr/bin:/bin", "SEEN": 표시}, check=False)  # fmt: skip
     assert r.returncode == 0, r.stderr
     return "DISPATCHED" in r.stdout
 

@@ -260,8 +260,10 @@ jobs:
         run: |
           busy=0
           for st in queued waiting pending; do
-            n=$(gh api "repos/$REPO/actions/workflows/metrics.yml/runs?status=$st&per_page=1" --jq .total_count || echo 0)
-            busy=$((busy + ${n:-0}))
+            # 숫자만 받는다 — HTTP 오류면 gh 가 응답 JSON 을 그대로 찍어 산술이 깨졌다(25.2157, 교차검증 [권고])
+            n=$(gh api "repos/$REPO/actions/workflows/metrics.yml/runs?status=$st&per_page=1" --jq .total_count 2>/dev/null) || n=0
+            case "$n" in ''|*[!0-9]*) n=0 ;; esac
+            busy=$((busy + n))
           done
           if [ "$busy" -gt 0 ]; then echo "지표 실행이 이미 기다린다 — 깨우지 않는다"; exit 0; fi
           gh api -X POST "repos/$REPO/actions/workflows/metrics.yml/dispatches" -f ref=main -f "inputs[replica_only]=true"
