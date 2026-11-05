@@ -54,8 +54,25 @@ def test_일일_배치는_빈_사본이면_사본만_맞추기를_깨운다(파�
     글 = " ".join(s.get("run", "") for s in 깨움["steps"])
     assert "workflows/metrics.yml/dispatches" in 글 and "inputs[replica_only]=true" in 글
     # 지표가 이미 돌거나 기다리면 깨우지 않는다 — 기다리던 주간 계산을 취소하지 않게(25.2155)
-    assert "status=$st" in 글 and "in_progress queued" in 글 and 'if [ "$busy" -gt 0 ]' in 글
+    assert "for st in queued waiting pending" in 글 and "in_progress" not in 글  # 도는 중은 세지 않는다(25.2156)
+    [단계] = [s for s in 깨움["steps"] if "dispatches" in s.get("run", "")]
+    for 바쁨, 깨움됨 in ((0, True), (1, False), ("실패", True)):
+        assert _깨움_돌려보기(단계["run"], 바쁨) is 깨움됨, (파일, 바쁨)
     assert not any(s.get("uses", "").startswith("actions/setup-python") for s in 깨움["steps"])  # 설치 없음
+
+
+def _깨움_돌려보기(run: str, 바쁨: int | str) -> bool:
+    """깨움 단계를 bash 로 실제로 돌린다 — `gh` 는 가짜 함수(조회는 바쁨 수, 실패면 비정상 종료), dispatch 를 불렀나"""
+    import subprocess
+
+    가짜 = (
+        'gh() { if [ "$1" = "api" ] && [ "$2" = "-X" ]; then echo DISPATCHED; return 0; fi; '
+        + ('return 1; }' if 바쁨 == "실패" else f'echo {바쁨}; }}')
+    )
+    r = subprocess.run(["bash", "-e", "-c", 가짜 + "\n" + run], capture_output=True, text=True,
+                       env={"REPO": "o/r", "PATH": "/usr/bin:/bin"}, check=False)  # fmt: skip
+    assert r.returncode == 0, r.stderr
+    return "DISPATCHED" in r.stdout
 
 
 def test_지표_워크플로의_사본만_입력은_계산을_건너뛴다() -> None:
@@ -134,3 +151,31 @@ def test_신호_성적표처럼_작은_작업은_비운_뒤_다시_만들지_않
     monkeypatch.setenv("GITHUB_OUTPUT", str(out))
     monkeypatch.setattr("sys.argv", ["x", "sync", "--path", str(path)])
     assert mod.main() == 0 and 물음 == [] and _출력(out)["empty"] == "true"
+
+
+def test_진도_문이_막으면_비운_채_끝내고_캐시에_넣지_않는다(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.2156 (25.2155 교차검증 [권고]) — 비운 뒤 만들기가 진도 문(월 읽기 한도)을 정말 묻는지. 건너뛰게 바꿔도 통과했다"""
+    import json
+    import sqlite3
+    from datetime import UTC, datetime
+
+    원격 = _원격()
+    원격.reads = type("R", (), {"total": 0})()
+    원격.close = lambda: None
+    path = _사본_있음(tmp_path, 원격)
+    원격.execute("INSERT INTO batch_runs (job_name, market, trigger_source, started_at, finished_at, status, step_log)"
+                 " VALUES ('daily_us', 'US', 'schedule', ?, ?, 'success', ?)",
+                 [datetime.now(UTC).isoformat(), datetime.now(UTC).isoformat(),
+                  json.dumps({"prices_touched": {"all": True, "min_date": "2020-01-01", "stocks": {}}})])  # fmt: skip
+    mod = _스크립트()
+    monkeypatch.setattr(mod.backend, "resolved_backend", lambda: "turso")
+    monkeypatch.setattr(mod.backend, "TursoClient", lambda use_replica=False: 원격)
+    물음: list[int] = []
+    monkeypatch.setattr(mod, "_gate_allows_build", lambda _r: (물음.append(1), (False, "한도"))[1])
+    out = tmp_path / "out.txt"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(out))
+    monkeypatch.setattr("sys.argv", ["x", "sync", "--path", str(path), "--ohl-rebuild"])
+    assert mod.main() == 0 and 물음 == [1]
+    출력 = _출력(out)
+    assert 출력["empty"] == "true" and 출력["changed"] == "false"
+    assert dict(sqlite3.connect(str(path)).execute("SELECT key, value FROM meta").fetchall())["usable"] == "0"

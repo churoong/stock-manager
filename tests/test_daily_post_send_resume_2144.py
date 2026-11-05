@@ -179,7 +179,10 @@ def test_두_알림은_같은_안내를_쓰고_손_실행이_리포트를_다시
 
     kr = daily.timeout_text(15, "KR")
     assert "판정 날짜가 오늘 거래일인지" in kr and "리포트를 한 번 더 보내고" in kr and "확인할 일을 보세요" not in kr
-    assert "주문 마감(15:20) 뒤면 KIS모의투자 베끼기는 다시 내지 않습니다" in kr  # 25.2153·25.2155
+    from batch.jobs import broker_mirror as bmj
+
+    # 마감 시각은 상수와 묶는다 — 상수를 바꾸면 안내가 조용히 틀리지 않게(25.2156, 25.2155 교차검증 [권고])
+    assert f"주문 마감({bmj.ORDER_CLOSE_KST:%H:%M}) 뒤면 KIS모의투자 베끼기는 다시 내지 않습니다" in kr
     for m in ("KR", "US"):
         assert formatter.RESUME_HINT[m] in daily.timeout_text(15, m)
         assert formatter.RESUME_HINT[m] in formatter.failure_alert(market=m, job_name="d", error_text="x",
