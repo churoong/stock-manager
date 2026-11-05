@@ -246,6 +246,7 @@ jobs:
       actions: write
     steps:
       - name: 시세 사본 처음 만들기 깨우기
+        shell: bash  # -eo pipefail — 시험이 같은 셸로 돌린다(25.2158)
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -258,7 +259,8 @@ jobs:
           busy=0
           for st in queued waiting pending; do
             # 숫자만 받는다 — HTTP 오류면 gh 가 응답 JSON 을 그대로 찍어 산술이 깨졌다(25.2157, 교차검증 [권고])
-            n=$(gh api "repos/$REPO/actions/workflows/metrics.yml/runs?status=$st&per_page=1" --jq .total_count 2>/dev/null) || n=0
+            n=$(gh api "repos/$REPO/actions/workflows/metrics.yml/runs?status=$st&per_page=1" --jq .total_count) \
+              || { echo "조회 실패($st) — 0 으로 본다"; n=0; }
             case "$n" in ''|*[!0-9]*) n=0 ;; esac
             busy=$((busy + n))
           done

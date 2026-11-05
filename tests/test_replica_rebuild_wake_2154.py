@@ -58,7 +58,7 @@ def test_일일_배치는_빈_사본이면_사본만_맞추기를_깨운다(파�
     [단계] = [s for s in 깨움["steps"] if "dispatches" in s.get("run", "")]
     # 본문실패 = HTTP 오류처럼 JSON 본문을 찍고 비정상 종료(25.2157) · 첫실패 = 첫 조회만 실패, 둘째는 기다리는 실행 1
     for 바쁨, 깨움됨 in ((0, True), (1, False), ("실패", True), ("본문실패", True), ("첫실패", False),
-                         ("첫숫자아님", False)):  # fmt: skip
+                         ("첫숫자아님", False), ("첫빈응답", False)):  # fmt: skip
         assert _깨움_돌려보기(단계["run"], 바쁨) is 깨움됨, (파일, 바쁨)
     assert not any(s.get("uses", "").startswith("actions/setup-python") for s in 깨움["steps"])  # 설치 없음
 
@@ -68,13 +68,18 @@ def _깨움_돌려보기(run: str, 바쁨: int | str) -> bool:
     import subprocess
     import tempfile
 
-    표시 = str(Path(tempfile.mkdtemp()) / "seen")
+    with tempfile.TemporaryDirectory() as 곳:  # 지우지 않으면 실행마다 빈 디렉터리가 남았다(25.2158)
+        return _돌려보기_안(run, 바쁨, str(Path(곳) / "seen"), subprocess)
+
+
+def _돌려보기_안(run: str, 바쁨: int | str, 표시: str, subprocess) -> bool:  # noqa: ANN001
 
     응답 = {
         "실패": "return 1;",
         "본문실패": 'echo \'{"message":"API rate limit exceeded"}\'; return 1;',
         # 성공했는데 숫자가 아닌 응답(첫 조회) — 산술이 깨져 루프를 버리고 둘째(기다림 1)를 보지 않은 채 깨우면 안 된다
         "첫숫자아님": 'if [ ! -e "$SEEN" ]; then : > "$SEEN"; echo "1 2"; return 0; fi; echo 1;',
+        "첫빈응답": 'if [ ! -e "$SEEN" ]; then : > "$SEEN"; return 0; fi; echo 1;',  # 성공했는데 빈 출력(25.2158)
         # 명령 치환은 하위 셸이라 변수로는 셀 수 없다 — 파일로 첫 부름을 표시한다
         "첫실패": 'if [ ! -e "$SEEN" ]; then : > "$SEEN"; echo \'{"message":"x"}\'; return 1; fi; echo 1;',
     }.get(str(바쁨), f"echo {바쁨};")
