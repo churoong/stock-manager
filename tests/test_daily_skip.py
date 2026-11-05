@@ -278,7 +278,7 @@ def test_수집_뒤_단계가_깨져도_실패로_닫고_알린다(client: MemCl
 
     monkeypatch.setattr(daily, "refresh_recommendations", 깨진다)
     알림: list[str] = []
-    monkeypatch.setattr(daily, "_notify_failure", lambda _c, _m, _n, 사유, dry_run: 알림.append(사유))
+    monkeypatch.setattr(daily, "_notify_failure", lambda _c, _m, _n, 사유, dry_run, **_k: 알림.append(사유))
 
     with pytest.raises(RuntimeError):
         daily.run("KR")
@@ -304,7 +304,7 @@ def test_발송이_실패하면_실패로_닫고_알린다(client: MemClient, mo
     """partial 로 닫으면 성공으로 세어 재시도·무응답 감시가 모두 조용했다 (docs/infra.md 25.370)."""
     run_id = daily.db.start_batch_run(client, job_name="daily_kr", market="KR", trade_date="2026-09-25")  # type: ignore[arg-type]
     알림: list[str] = []
-    monkeypatch.setattr(daily, "_notify_failure", lambda _c, _m, _n, 사유, dry_run: 알림.append(사유))
+    monkeypatch.setattr(daily, "_notify_failure", lambda _c, _m, _n, 사유, dry_run, **_k: 알림.append(사유))
     assert daily._send_failed(client, run_id, {}, "KR", "daily_kr", RuntimeError("chat not found"), False) == 1  # type: ignore[arg-type]
     status, error_text = client.conn.execute("SELECT status, error_text FROM batch_runs WHERE id = ?", [run_id]).fetchone()
     assert status == "failed" and "chat not found" in error_text

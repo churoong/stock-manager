@@ -2194,7 +2194,8 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
             if 용량경고:
                 warnings.append(용량경고)
             # 장 시작 전 창을 놓친 늦은 실행이면 맨 앞에 말한다 (2026-10-01 사용자 결정, 25.845)
-            if decision.late_minutes is not None:
+            # 이어 도는 실행은 리포트를 만들지 않는다 — 리포트는 먼저 제때 갔다(25.2146, 25.2144 교차검증 [권고])
+            if decision.late_minutes is not None and not 발송끝남:
                 언제 = (f"개장 {-decision.late_minutes}분 뒤" if decision.late_minutes <= 0
                        else f"개장 {decision.late_minutes}분 전")  # fmt: skip
                 warnings.insert(0, f"⚠️ {언제}에 만든 늦은 리포트입니다 — 장 시작 전 예약이 늦거나 실패했습니다")
@@ -2206,7 +2207,7 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
             db.finish_batch_run(
                 client, run_id, status="failed", step_log=step_log, error_text=str(exc)
             )
-            _notify_failure(client, market, name, str(exc), dry_run=dry_run)
+            _notify_failure(client, market, name, str(exc), dry_run=dry_run, title=_실패제목(발송끝남))
             print(f"실패: {exc}")
             return 1
 
@@ -2820,7 +2821,8 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
         뒤처리 = locals().get("_kis와_요약")
         try:
             db.fail_open_runs(str(exc))
-            _notify_failure(client, market, name, str(exc), dry_run=dry_run)
+            _notify_failure(client, market, name, str(exc), dry_run=dry_run,
+                            title=_실패제목(bool(locals().get("발송끝남"))))  # fmt: skip
         finally:
             if 뒤처리 is not None:
                 try:
@@ -3533,13 +3535,26 @@ def main() -> int:
 
 #: 리포트를 이미 보낸 날 발송 뒤 단계만 이어 돈 실행의 `step_log.sent` (25.2144)
 ALREADY_SENT_NOTE = "이미 보냄 — 발송 뒤 단계만 이어 돔"
+#: 이어 도는 실행이 깨졌을 때 실패 알림 제목 — 기본 "배치 실패" 는 오늘 리포트가 없는 것처럼 읽혔다(25.2146, 25.568 과
+#: 같은 꼴). 사용자는 이미 오늘 리포트와 시간 초과 알림을 받았다
+RESUME_FAIL_TITLE = "발송 뒤 단계 이어 돌기 실패 — 오늘 리포트는 이미 보냈습니다"
+
+
+def _실패제목(이어돎: bool) -> str:
+    return RESUME_FAIL_TITLE if 이어돎 else "배치 실패"
 
 
 class _이미보냄(Exception):  # noqa: N818 — 흐름 표지(오류가 아니다)
     """그날 리포트를 이미 보낸 실행이 발송 블록을 건너뛰는 표지 (25.2144)"""
 
 
-def timeout_text(minutes: int) -> str:
+_TIMEOUT_KR_NOTE = ("리포트 뒤 KIS모의투자 베끼기·운용 요약이 빠졌을 수 있습니다 — 그날 남은 예비 실행이 있으면"
+                    " 이어 돌고, 없으면 운용 화면의 확인할 일을 보세요. ")
+_TIMEOUT_US_NOTE = ("리포트 뒤 운용 요약이 빠졌을 수 있습니다 — 그날 남은 예비 실행이 있으면 이어 돌지만, 예약 마감"
+                    " 뒤면 KIS모의투자 베끼기는 다시 내지 않습니다. ")
+
+
+def timeout_text(minutes: int, market: str | None = None) -> str:
     """시간 제한으로 강제 종료된 실행의 실패 사유 (docs/infra.md 25.1386).
 
     **리포트를 안 보냈다고 단정하지 않는다** — 발송 뒤 뒷단계(포트폴리오·사본 맞추기)에서 시간이 다 될 수도
@@ -3547,9 +3562,12 @@ def timeout_text(minutes: int) -> str:
     return (
         f"{minutes}분 시간 제한에 걸려 강제 종료됐습니다. 이 실행이 리포트를 보냈는지는 알 수 없습니다 — "
         "오늘 리포트를 이미 받았다면 그것이 오늘 리포트입니다. "
-        # 발송 뒤 단계에서 죽었을 수도 있다(25.2144) — 다음 예비 실행이 이어 받는다
-        "리포트 뒤 KIS모의투자 베끼기·운용 요약이 빠졌을 수 있습니다(다음 예비 실행이 이어 돕니다). "
-        f"실행 기록은 '실행 중'으로 남았다가 {db.STALE_RUN_HOURS}시간 뒤 정리됩니다"
+        # 발송 뒤 단계에서 죽었을 수도 있다(25.2144). **이어 받는다고 약속하지 않는다**(25.2146, 25.2144 교차검증
+        # [권고])
+        # — 그날 마지막 예비(국내 09:35·미국 14:27 UTC)가 죽었으면 다음이 없고, 미국 예비는 대개 예약 마감 뒤라 KIS 는
+        # 다시 내지 않는다
+        + (_TIMEOUT_US_NOTE if market == "US" else _TIMEOUT_KR_NOTE)
+        + f"실행 기록은 '실행 중'으로 남았다가 {db.STALE_RUN_HOURS}시간 뒤 정리됩니다"
     )
 
 
@@ -3563,7 +3581,7 @@ def notify_timeout(market: str, minutes: int, dry_run: bool) -> None:
         client: TursoClient | None = TursoClient()
     except Exception:  # noqa: BLE001 — 실패 알림을 보내는 길이다. 연결 실패가 알림을 막으면 안 된다
         client = None
-    _notify_failure(client, market, job_name(market), timeout_text(minutes), dry_run)  # type: ignore[arg-type]
+    _notify_failure(client, market, job_name(market), timeout_text(minutes, market), dry_run)  # type: ignore[arg-type]
 
 
 def _notify_quota(market: str, reason: str, dry_run: bool) -> None:
