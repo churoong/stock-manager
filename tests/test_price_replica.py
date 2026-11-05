@@ -453,6 +453,7 @@ def test_정리하는_쪽은_죽은_실행이_적은_범위를_덮지_않는다(
     db.persist_prices_touched(원격)  # type: ignore[arg-type]
     원격.execute("UPDATE batch_runs SET started_at = '2026-01-01T00:00:00+00:00' WHERE id = ?", [죽음])  # 오래전에 죽음
     monkeypatch.setattr(db, "_열린_실행", [])  # 죽은 프로세스 — 닫지 않았다
+    monkeypatch.setattr(db, "_읽기_시작", {})
     monkeypatch.setattr(db, "_가격_손댐", {3: "2026-09-01"})  # 새 프로세스가 이미 쓴 것
     db.start_batch_run(원격, job_name="daily_kr", market="KR", trade_date=None)  # type: ignore[arg-type]  # 정리
     글 = json.loads(원격.execute("SELECT step_log FROM batch_runs WHERE id = ?", [죽음]).rows[0][0])
@@ -472,3 +473,35 @@ def test_작업_상한은_워크플로_상한과_같다() -> None:
     for f in 뿌리.glob("*.yml"):
         for m in re.findall(r"timeout-minutes:\s*(\d+)", f.read_text(encoding="utf-8")):
             assert int(m) <= rep.ACTIONS_MAX_MINUTES, f.name
+
+
+def test_실패로_닫아도_내_실행에는_범위를_적는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.2153 (25.2152 교차검증 [권고], 재현) — 실패로 닫는 길은 `_열린_실행` 에서 먼저 빼므로 "내 실행" 판정에 걸려
+    note 뒤 `fail_open_runs` 면 표지만 남았다(25.888 의 '실패로 닫아도 적는다' 가 빠짐)"""
+    monkeypatch.setattr(db, "_열린_실행", [])
+    monkeypatch.setattr(db, "_읽기_시작", {})
+    monkeypatch.setattr(db, "_가격_손댐", {})
+    monkeypatch.setattr(db, "_마지막_적은_손댐", [None])
+    원격 = _원격()
+    번호 = db.start_batch_run(원격, job_name="daily_kr", market="KR", trade_date=None)  # type: ignore[arg-type]
+    db.note_prices_touched([(5, "2026-08-03")])  # 쓰기 앞 기록 없이 — 앞으로 생길 셋째 쓰기 길
+    db.fail_open_runs("boom")
+    글 = json.loads(원격.execute("SELECT step_log FROM batch_runs WHERE id = ?", [번호]).rows[0][0])
+    assert 글[db.PRICES_TOUCHED_KEY]["stocks"] == {"5": "2026-08-03"}
+
+
+def test_새로_연_시세_작업_실행도_같은_범위를_받는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.2153 (25.2152 ④ 시험, 교차검증 [권고]) — 같은 요약 거르기를 풀지 않으면 뒤에 연 실행 B 는 표지만 쥔다"""
+    monkeypatch.setattr(db, "_열린_실행", [])
+    monkeypatch.setattr(db, "_읽기_시작", {})
+    monkeypatch.setattr(db, "_가격_손댐", {})
+    monkeypatch.setattr(db, "_마지막_적은_손댐", [None])
+    원격 = _원격()
+    db.start_batch_run(원격, job_name="daily_kr", market="KR", trade_date=None)  # type: ignore[arg-type]
+    db.note_prices_touched([(3, "2026-09-01")])
+    db.persist_prices_touched(원격)  # type: ignore[arg-type]
+    둘 = db.start_batch_run(원격, job_name="adjust_kr", market="KR", trade_date=None)  # type: ignore[arg-type]
+    db.note_prices_touched([(3, "2026-09-01")])
+    db.persist_prices_touched(원격)  # type: ignore[arg-type]
+    글 = json.loads(원격.execute("SELECT step_log FROM batch_runs WHERE id = ?", [둘]).rows[0][0])
+    assert db.PRICES_TOUCHED_KEY in 글

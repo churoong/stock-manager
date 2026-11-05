@@ -604,8 +604,11 @@ def finish_batch_run(
     )
     # **실패로 닫아도** 고친 시세 범위는 적는다 (25.888) — 쓰다 죽은 실행이 남긴 행도 사본이 다시 받아야 한다
     # **이 프로세스가 연 실행에만** (25.2152, 25.2150 교차검증 [권고]) — 정리(`reap_stale_runs`)하는 남의 기록에 적으면
-    # 죽은 실행이 쓰기 전에 적어 둔 제 범위(25.2150)를 이 프로세스의 범위로 덮어 그 종목을 사본이 다시 받지 않는다
-    손댐 = prices_touched_summary() if any(번호 == run_id for _c, 번호 in _열린_실행) else None
+    # 죽은 실행이 쓰기 전에 적어 둔 제 범위(25.2150)를 이 프로세스의 범위로 덮어 그 종목을 사본이 다시 받지 않는다.
+    # "내 실행" 은 `_읽기_시작`(이 프로세스의 `start_batch_run` 만 채움)으로 본다 — `_열린_실행` 으로 보면 실패로
+    # 닫는 세 길(`close_current_run`·`fail_open_runs`·`fail_runs_opened_after` — 먼저 pop 한다)에서도 걸러져
+    # 25.888 의 약속이 빠졌다(25.2153, 25.2152 교차검증 [권고])
+    손댐 = prices_touched_summary() if 시작 is not None else None
     if 손댐 is not None:
         client.execute(
             "UPDATE batch_runs SET step_log = CASE WHEN step_log IS NULL THEN json_object(?, json(?))"

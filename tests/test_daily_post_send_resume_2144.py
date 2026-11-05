@@ -178,7 +178,8 @@ def test_두_알림은_같은_안내를_쓰고_손_실행이_리포트를_다시
     from batch.notify import formatter
 
     kr = daily.timeout_text(15, "KR")
-    assert "판정 날짜가 오늘 거래일인지" in kr and "리포트를 한 번 더 보냅니다" in kr and "확인할 일을 보세요" not in kr
+    assert "판정 날짜가 오늘 거래일인지" in kr and "리포트를 한 번 더 보내고" in kr and "확인할 일을 보세요" not in kr
+    assert "장이 끝난 뒤면 KIS모의투자 베끼기는 다시 내지 않습니다" in kr  # 25.2153
     for m in ("KR", "US"):
         assert formatter.RESUME_HINT[m] in daily.timeout_text(15, m)
         assert formatter.RESUME_HINT[m] in formatter.failure_alert(market=m, job_name="d", error_text="x",
