@@ -134,18 +134,80 @@ def test_교차검증_렌즈_하나가_죽으면_통과로_치지_않는다() ->
     assert 죽음["must"] is None and 죽음["missingLenses"] == 1
 
 
+def _후보(*ids: str, q: str = "Q1") -> dict:
+    return {"candidates": [{"id": i, "name": i, "question": q, "kind": "account", "summary": "x"} for i in ids]}
+
+
+_통과 = {"verdict": "pass", "reasons": ""}
+_질문 = {"questions": [{"id": "Q1", "question": "손절 뒤 반등을 놓치나", "teams": ["selection", "trading", "portfolio"]}]}
+
+
 def test_발굴_보수적_합침과_동결_규칙() -> None:
-    후보 = {"candidates": [{"id": "P1", "name": "가", "kind": "ic", "summary": "x"}]}
+    후보 = _후보("P1")
     def 판(a: str, b: str, 지시: bool = False) -> str:  # noqa: E306
-        r = _돌림("discovery-round", {"연구개발실": 후보, "데이터검증팀:P1": {"verdict": a, "reasons": ""},
+        r = _돌림("discovery-round", {"연구기획팀": _질문, "종목선정팀": 후보, "데이터검증팀:P1": {"verdict": a, "reasons": ""},
                                       "계량검증팀:P1": {"verdict": b, "reasons": ""}}, {"userDirected": 지시})  # fmt: skip
         return r["r"]["results"][0]["verdict"]
     assert 판("pass", "fail") == "fail" and 판("pass", "pass") == "pass" and 판("conditional", "pass") == "hold"
     assert 판("conditional", "conditional", 지시=True) == "conditional"  # 사용자 지시분만 조건부가 산다
-    # 검증 하나가 죽으면 보류, 발굴이 죽으면 "후보 0" 이 아니라 error
-    assert _돌림("discovery-round", {"연구개발실": 후보, "데이터검증팀:P1": {"verdict": "pass", "reasons": ""}})["r"]["results"][0][
+    # 검증 하나가 죽으면 보류, 후보 팀이 모두 죽고 예비도 죽으면 "후보 0" 이 아니라 error
+    assert _돌림("discovery-round", {"연구기획팀": _질문, "종목선정팀": 후보, "데이터검증팀:P1": _통과})["r"]["results"][0][
         "verdict"] == "hold"
-    assert "error" in _돌림("discovery-round", {"연구개발실": None})["r"]
+    assert "error" in _돌림("discovery-round", {"연구기획팀": _질문})["r"]
+
+
+def test_연구개발본부_단계_순서_판정_기획_후보_설계_검증() -> None:
+    """25.2140 — 성과판정 → 연구기획(질문) → 질문 받은 팀만 → 실험설계 → 검증. 교훈이 기획 지시문에, 명세가 검증 지시문에 실린다"""
+    cfg = {"성과판정팀": {"judgments": [{"id": "38-P2", "verdict": "drop", "reason": "DSR", "lesson": "국면 의존"}]},
+           "연구기획팀": {"questions": [{"id": "Q1", "question": "하락장 관문", "teams": ["portfolio"]}]},
+           "포트폴리오·위험팀": _후보("portfolio-1"),
+           "실험설계팀": {"specs": [{"id": "portfolio-1", "prereg": "등록문", "stage": "리플레이", "variant": "v1"}]},
+           "데이터검증팀:portfolio-1": _통과, "계량검증팀:portfolio-1": _통과}  # fmt: skip
+    out = _돌림("discovery-round", cfg)
+    r, 불린 = out["r"], [x["label"] for x in out["불린"]]
+    assert 불린[:2] == ["성과판정팀", "연구기획팀"]  # 판정이 먼저, 기획이 그 교훈으로
+    assert "종목선정팀" not in 불린 and "매매규칙팀" not in 불린 and "데이터팀" not in 불린  # 질문 없는 팀은 부르지 않는다
+    assert 불린.index("실험설계팀") < 불린.index("데이터검증팀:portfolio-1")
+    assert r["results"][0]["verdict"] == "pass" and r["results"][0]["spec"]["prereg"] == "등록문"
+    assert r["judgments"][0]["verdict"] == "drop" and r["teams"] == ["포트폴리오·위험팀"]
+
+
+def test_질문이_없으면_후보를_내지_않고_기획이_죽으면_모든_팀이_영역에서() -> None:
+    r = _돌림("discovery-round", {"연구기획팀": {"questions": []}})["r"]
+    assert r["results"] == [] and "질문 없음" in r["note"]
+    out = _돌림("discovery-round", {"종목선정팀": _후보("selection-1")})
+    assert out["r"]["plannerMissing"] and len(out["r"]["teams"]) == 4
+
+
+def test_상한보다_많으면_기획이_거르고_고른_것만_검증한다() -> None:
+    cfg = {"연구기획팀": _질문, "종목선정팀": _후보("selection-1", "selection-2"), "매매규칙팀": _후보("trading-1"),
+           "포트폴리오·위험팀": _후보("portfolio-1"),
+           "연구기획팀:거름": {"selected": ["portfolio-1", "selection-1", "없는-9"], "dropped": [{"id": "trading-1", "why": "보류"}],
+                          "merged": [{"into": "selection-1", "from": "selection-2", "why": "같음"}]}}  # fmt: skip
+    for c in ("portfolio-1", "selection-1"):
+        cfg[f"데이터검증팀:{c}"] = _통과
+        cfg[f"계량검증팀:{c}"] = _통과
+    out = _돌림("discovery-round", cfg)
+    r, 불린 = out["r"], [x["label"] for x in out["불린"]]
+    assert [x["id"] for x in r["results"]] == ["portfolio-1", "selection-1"]  # 기획 순서, 모르는 id 는 버림
+    assert r["skipped"] == [] and "데이터검증팀:trading-1" not in 불린  # 거른 것은 다음 회차로도 넘기지 않는다
+    assert r["designMissing"] and all(x["verdict"] == "pass" for x in r["results"])  # 설계가 죽어도 검증은 돈다
+
+
+def test_거름이_죽으면_팀_순서대로_셋까지_나머지는_다음_회차() -> None:
+    cfg = {"연구기획팀": _질문, "종목선정팀": _후보("selection-1", "selection-2"), "매매규칙팀": _후보("trading-1"),
+           "포트폴리오·위험팀": _후보("portfolio-1", "portfolio-2")}  # fmt: skip
+    r = _돌림("discovery-round", cfg, {"max": 9})["r"]  # 상한은 3 을 넘기지 않는다
+    assert [x["id"] for x in r["results"]] == ["selection-1", "selection-2", "trading-1"] and r["triage"] == {"fallback": "팀 순서"}
+    assert [x["id"] for x in r["skipped"]] == ["portfolio-1", "portfolio-2"]
+    assert all(x["verdict"] == "hold" for x in r["results"])  # 검증이 없으면 보류
+
+
+def test_팀마다_질문_수의_두_배까지_사용자_질문은_그대로() -> None:
+    q = [{"id": "U1", "question": "사용자 질문", "teams": ["data"]}]
+    out = _돌림("discovery-round", {"데이터팀": _후보("data-1", "data-2", "data-3", q="U1")}, {"questions": q, "max": 3})
+    assert [x["id"] for x in out["r"]["results"]] == ["data-1", "data-2"]
+    assert "연구기획팀" not in [x["label"] for x in out["불린"]]  # 넘긴 질문이 있으면 기획을 부르지 않는다
 
 
 def test_결함_루프는_죽은_감사와_반박을_버리지_않는다() -> None:
