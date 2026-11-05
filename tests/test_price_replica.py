@@ -414,3 +414,61 @@ def test_처음부터_만들면_만든_시각을_적고_정리된_예전_기록�
     _정리(원격, 번호, 지금 + timedelta(hours=10))  # 다음 날 다음 실행이 정리
     r = rep.sync(원격, 사본, backend="turso", allow_build=False, now=지금 + timedelta(hours=11))
     assert r["usable"] and not r.get("cleared")
+
+
+def test_수정주가_고침도_쓰기_전에_범위를_적는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.2152 (25.2150 교차검증 [권고]) — `adjust_kr` 의 쓰기 앞 기록 줄을 지워도 모든 시험이 통과했다. 옛 행(id 그대로)의
+    수정종가를 고치는 길이라 이어 맞추기가 결코 따라잡지 못한다"""
+    from batch.jobs import adjust_kr
+    from tests.test_zero_close_split_1251 import _db
+
+    monkeypatch.setattr(db, "_열린_실행", [])
+    monkeypatch.setattr(db, "_가격_손댐", {})
+    monkeypatch.setattr(db, "_마지막_적은_손댐", [None])
+    c = _db([("2021-05-03", 50000, 0.0), ("2021-05-04", 0, 0.0), ("2021-05-06", 5100, 2.0), ("2021-05-07", 5100, 0.0)])
+    번호 = db.start_batch_run(c, job_name="adjust_kr", market="KR", trade_date=None)  # type: ignore[arg-type]
+    본: list[object] = []
+    원래 = c.batch
+
+    def batch(statements):  # noqa: ANN001, ANN202
+        if any("UPDATE prices" in st[0] for st in statements):
+            글 = c.conn.execute("SELECT step_log FROM batch_runs WHERE id = ?", [번호]).fetchone()[0]
+            본.append(json.loads(글).get(db.PRICES_TOUCHED_KEY))
+        return 원래(statements)
+
+    monkeypatch.setattr(c, "batch", batch)
+    adjust_kr.adjust_stocks(c, [1])  # type: ignore[arg-type]
+    assert 본 and all(x and x["min_date"] <= "2021-05-03" for x in 본)
+
+
+def test_정리하는_쪽은_죽은_실행이_적은_범위를_덮지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.2152 (25.2150 교차검증 [권고], 재현) — 시세를 쓴 프로세스가 시세 작업 실행을 열며 죽은 기록을 정리하면 제 범위로
+    덮어 죽은 실행의 종목이 사라졌다"""
+    monkeypatch.setattr(db, "_열린_실행", [])
+    monkeypatch.setattr(db, "_가격_손댐", {})
+    monkeypatch.setattr(db, "_마지막_적은_손댐", [None])
+    원격 = _원격()
+    죽음 = db.start_batch_run(원격, job_name="daily_kr", market="KR", trade_date=None)  # type: ignore[arg-type]
+    db.note_prices_touched([(1, "2026-08-02")])
+    db.persist_prices_touched(원격)  # type: ignore[arg-type]
+    원격.execute("UPDATE batch_runs SET started_at = '2026-01-01T00:00:00+00:00' WHERE id = ?", [죽음])  # 오래전에 죽음
+    monkeypatch.setattr(db, "_열린_실행", [])  # 죽은 프로세스 — 닫지 않았다
+    monkeypatch.setattr(db, "_가격_손댐", {3: "2026-09-01"})  # 새 프로세스가 이미 쓴 것
+    db.start_batch_run(원격, job_name="daily_kr", market="KR", trade_date=None)  # type: ignore[arg-type]  # 정리
+    글 = json.loads(원격.execute("SELECT step_log FROM batch_runs WHERE id = ?", [죽음]).rows[0][0])
+    assert 글[db.PRICES_TOUCHED_KEY]["stocks"] == {"1": "2026-08-02"}
+
+
+def test_작업_상한은_워크플로_상한과_같다() -> None:
+    """25.2152 (25.2150 교차검증 [권고]) — `JOB_MAX_MINUTES` 는 yml 의 작업 `timeout-minutes` 를 옮겨 적은 값이다. yml 을
+    올리고 이 값을 두면 만든 뒤에도 썼을 수 있는 예전 기록을 '모르는 것 없음' 으로 본다"""
+    import re
+    from pathlib import Path
+
+    뿌리 = Path(__file__).resolve().parents[1] / ".github" / "workflows"
+    for job, 파일 in (("daily_kr", "daily-kr.yml"), ("daily_us", "daily-us.yml")):
+        상한 = max(int(m) for m in re.findall(r"timeout-minutes:\s*(\d+)", (뿌리 / 파일).read_text(encoding="utf-8")))
+        assert rep.JOB_MAX_MINUTES[job] >= 상한, (job, 상한)
+    for f in 뿌리.glob("*.yml"):
+        for m in re.findall(r"timeout-minutes:\s*(\d+)", f.read_text(encoding="utf-8")):
+            assert int(m) <= rep.ACTIONS_MAX_MINUTES, f.name

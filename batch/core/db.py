@@ -480,6 +480,9 @@ def start_batch_run(
         run_id = int(rs.scalar())
     _열린_실행.append((client, run_id))
     _읽기_시작[run_id] = ReadCounter.process_total
+    if job_name in PRICE_WRITER_JOBS:
+        # 새로 연 시세 작업 실행도 다음 쓰기 앞 기록을 받게 — 같은 요약 거르기를 푼다(25.2152, 교차검증 [참고])
+        _마지막_적은_손댐[0] = None
     return run_id
 
 
@@ -600,7 +603,9 @@ def finish_batch_run(
         ],
     )
     # **실패로 닫아도** 고친 시세 범위는 적는다 (25.888) — 쓰다 죽은 실행이 남긴 행도 사본이 다시 받아야 한다
-    손댐 = prices_touched_summary()
+    # **이 프로세스가 연 실행에만** (25.2152, 25.2150 교차검증 [권고]) — 정리(`reap_stale_runs`)하는 남의 기록에 적으면
+    # 죽은 실행이 쓰기 전에 적어 둔 제 범위(25.2150)를 이 프로세스의 범위로 덮어 그 종목을 사본이 다시 받지 않는다
+    손댐 = prices_touched_summary() if any(번호 == run_id for _c, 번호 in _열린_실행) else None
     if 손댐 is not None:
         client.execute(
             "UPDATE batch_runs SET step_log = CASE WHEN step_log IS NULL THEN json_object(?, json(?))"
