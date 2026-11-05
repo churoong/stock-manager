@@ -249,7 +249,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-        run: gh api -X POST "repos/$REPO/actions/workflows/metrics.yml/dispatches" -f ref=main -f "inputs[replica_only]=true"
+        # 지표 실행이 이미 돌거나 기다리면 깨우지 않는다 — 동시 실행 묶음(metrics)은 기다리는 실행을 하나만 두어, 새 깨움이
+        # 기다리던 주간 계산을 취소할 수 있다(25.2155, 25.2154 교차검증 [참고]). main 고정 — 운영 사본은 main 의 지표만
+        # 만든다(손으로 다른 가지에서 돌린 배치도 main 의 사본을 쓴다)
+        run: |
+          busy=0
+          for st in in_progress queued waiting pending; do
+            n=$(gh api "repos/$REPO/actions/workflows/metrics.yml/runs?status=$st&per_page=1" --jq .total_count)
+            busy=$((busy + n))
+          done
+          if [ "$busy" -gt 0 ]; then echo "지표 실행이 이미 돌거나 기다린다 — 깨우지 않는다"; exit 0; fi
+          gh api -X POST "repos/$REPO/actions/workflows/metrics.yml/dispatches" -f ref=main -f "inputs[replica_only]=true"
 
   keepalive:
     runs-on: ubuntu-latest

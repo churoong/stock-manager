@@ -110,6 +110,14 @@ def main() -> int:
             print(f"[시세 사본] {'처음 만들기' if 비었나 else '시가 열 더해 새로 만들기'} — {글}")
         읽기_전 = remote.reads.total
         report = rep.sync(remote, conn, backend=종류, allow_build=allow)
+        # 큰 다시 만들기를 맡은 작업(`--ohl-rebuild` — 지표 60분)만 — 15분 작업(신호 성적표)은 잘린다(25.2032)
+        if report.get("cleared") and args.ohl_rebuild and not args.no_build and 종류 == "turso":
+            # **비운 그 자리에서 처음부터 만든다** (25.2155, 25.2154 교차검증 [필수]). 비우기는 사본이 있을 때만 일어나
+            # 맞추기 전 판정(`비었나`)으로는 진도 문을 묻지 않았다 — 깨운 지표 실행이 캐시의 옛 사본을 꺼내 비우기만
+            # 하고 끝나 그날 다시 만들지 못했다(11-05 05:59Z 손 실행이 바로 그 꼴). 이제 빈 파일로 한 번 더 맞춘다
+            allow, 글 = _gate_allows_build(remote)
+            print(f"[시세 사본] 비운 뒤 처음 만들기 — {글}")
+            report = {**rep.sync(remote, conn, backend=종류, allow_build=allow), "cleared_first": True}
         report["rows_read"] = remote.reads.total - 읽기_전
         print("[시세 사본] " + json.dumps(report, ensure_ascii=False))
         _output("changed", "true" if "stocks" in report else "false")  # 맞추기를 실제로 했으면 새로 넣는다

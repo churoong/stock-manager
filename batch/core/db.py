@@ -586,7 +586,9 @@ def finish_batch_run(
     # **이 실행이 읽은 행 수를 함께 적는다** (docs/infra.md 25.885). Turso 월 읽기 한도의 어디에 얼마가 드는지 몰라
     # 줄일 곳을 고를 수 없었다. 이 프로세스가 연 실행만 잰다(남의 실행을 정리하는 `reap_stale_runs` 는 모른다 — 적지
     # 않는다)
-    시작 = _읽기_시작.pop(run_id, None)
+    # 꺼내지 않고 읽는다 — 끝에서 꺼낸다. `_닫기` 가 닫힌 클라이언트로 실패한 뒤 새 클라이언트로 다시 부르면 이미
+    # 꺼낸 뒤라 "내 실행" 이 아니게 되어 범위를 적지 않았다(25.2155, 25.2153 교차검증 [권고])
+    시작 = _읽기_시작.get(run_id)
     # step_log 을 줄 때만 더한다. 안 주는 닫기(실패 정리 `_닫기`·`fail_open_runs`)는 있던 것을 **그대로** 둔다(25.668) —
     # 성공한 실행은 거의 모두 step_log 을 주므로 순위를 매기기엔 충분하다
     if step_log and 시작 is not None:
@@ -615,6 +617,7 @@ def finish_batch_run(
             " WHEN json_valid(step_log) THEN json_set(step_log, ?, json(?)) ELSE step_log END WHERE id = ?",
             [PRICES_TOUCHED_KEY, json.dumps(손댐), f"$.{PRICES_TOUCHED_KEY}", json.dumps(손댐), run_id],
         )
+    _읽기_시작.pop(run_id, None)
     for i, (_c, 번호) in enumerate(_열린_실행):
         if 번호 == run_id:
             del _열린_실행[i]

@@ -505,3 +505,25 @@ def test_새로_연_시세_작업_실행도_같은_범위를_받는다(monkeypat
     db.persist_prices_touched(원격)  # type: ignore[arg-type]
     글 = json.loads(원격.execute("SELECT step_log FROM batch_runs WHERE id = ?", [둘]).rows[0][0])
     assert db.PRICES_TOUCHED_KEY in 글
+
+
+def test_닫기를_새_클라이언트로_다시_해도_범위를_적는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.2155 (25.2153 교차검증 [권고], 재현) — `_읽기_시작` 을 첫 UPDATE 앞에서 꺼내, 닫힌 클라이언트로 실패한 뒤
+    `_닫기` 가 새 클라이언트로 다시 부르면 "내 실행" 이 아니게 되어 범위를 적지 않았다"""
+    monkeypatch.setattr(db, "_열린_실행", [])
+    monkeypatch.setattr(db, "_읽기_시작", {})
+    monkeypatch.setattr(db, "_가격_손댐", {})
+    monkeypatch.setattr(db, "_마지막_적은_손댐", [None])
+    원격 = _원격()
+    번호 = db.start_batch_run(원격, job_name="daily_kr", market="KR", trade_date=None)  # type: ignore[arg-type]
+    db.note_prices_touched([(5, "2026-08-03")])
+
+    class 닫힘:
+        def execute(self, *_a, **_k):  # noqa: ANN002, ANN003, ANN202
+            raise RuntimeError("closed")
+
+    with pytest.raises(RuntimeError):
+        db.finish_batch_run(닫힘(), 번호, status="failed", error_text="boom")  # type: ignore[arg-type]
+    db.finish_batch_run(원격, 번호, status="failed", error_text="boom")  # type: ignore[arg-type]
+    글 = json.loads(원격.execute("SELECT step_log FROM batch_runs WHERE id = ?", [번호]).rows[0][0])
+    assert 글[db.PRICES_TOUCHED_KEY]["stocks"] == {"5": "2026-08-03"}
