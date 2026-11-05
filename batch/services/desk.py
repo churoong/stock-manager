@@ -53,21 +53,29 @@ def leaderboard(series: dict[str, list[tuple[str, float]]], names: dict[str, str
     자리 = {a for a in 본 if len(살[a]) >= MIN_WINDOW_POINTS} or 본
     시작 = max(살[a][0][0] for a in 자리)
 
-    def 대조(start: str) -> float | None:
-        값 = [x for r in CONTROL_IDS if (x := _구간(살.get(r) or [], start, None)) is not None]
+    def 대조(start: str, end: str | None = None) -> float | None:
+        값 = [x for r in CONTROL_IDS if (x := _구간(살.get(r) or [], start, end)) is not None]
         return sum(값) / len(값) if 값 else None
+
+    # R 대비는 **같은 끝 날**로 잰다(25.2143, 11-05 결함 회차 [권고]) — 대조 R 하나의 평가가 멈추면 그 R 은 멈춘
+    # 날까지, 계좌는 지금까지의 수익이 견줘져 오르는 장에서 실력 없이 R 대비가 섰다. 끝 = 계좌·평가가 있는 대조 R 의
+    # 마지막 날 가운데 가장 이른 날
+    대조끝 = [살[r][-1][0] for r in CONTROL_IDS if 살.get(r)]
 
     기준선 = 대조(시작)
     줄 = []
     for a, v in 살.items():
         따로 = a in SEPARATE_IDS and a not in 자리
         어림 = a not in 자리 and not 따로
-        pct = _구간(v, v[0][0] if 어림 or 따로 else 시작, None)
-        선 = 대조(v[0][0]) if 어림 or 따로 else 기준선
+        구간시작 = v[0][0] if 어림 or 따로 else 시작
+        pct = _구간(v, 구간시작, None)
+        끝 = min([v[-1][0], *대조끝]) if 대조끝 else None
+        선 = 대조(구간시작, 끝)
+        맞춘pct = _구간(v, 구간시작, 끝)
         줄.append({"id": a, "name": (names or {}).get(a) or a, "kind": KIND.get(a, ""), "open": v[0][0],
                   "last": v[-1][0], "since_open_pct": (v[-1][1] - 1) * 100, "window_pct": pct, "young": 어림,
                   "separate": 따로,
-                  "vs_r_pp": None if 선 is None or pct is None or a in CONTROL_IDS else pct - 선})  # fmt: skip
+                  "vs_r_pp": None if 선 is None or 맞춘pct is None or a in CONTROL_IDS else 맞춘pct - 선})  # fmt: skip
     줄.sort(key=lambda r: (r["separate"], r["young"], r["window_pct"] is None, -(r["window_pct"] or 0.0), r["id"]))
     return {"window_start": 시작, "control_pct": 기준선, "rows": 줄}
 
@@ -350,11 +358,11 @@ def cash_equivalent_return(
     return (sum(곱.values()) / len(곱) - 1) * 100, 100 * sum(비중들) / len(비중들)
 
 
-def risk_ratio(v: list[tuple[str, float]], start: str | None = None) -> float | None:
+def risk_ratio(v: list[tuple[str, float]], start: str | None = None, end: str | None = None) -> float | None:
     """변동성 대비 수익 — `start` 이후 평가 사이 수익률의 평균 ÷ 표본표준편차. 같은 기간의 계좌끼리 견주는 값이라
     무위험 수익률은 빼지 않는다(빼도 둘 다 같은 만큼 빠진다 — 변동성이 다르면 정확히 같지는 않다 `[확인필요]`).
     수익률이 `GATE_RATIO_MIN_N` 개보다 적으면 None"""
-    xs = _수익률들([p for p in v if start is None or p[0] >= start])
+    xs = _수익률들([p for p in v if (start is None or p[0] >= start) and (end is None or p[0] <= end)])
     if len(xs) < GATE_RATIO_MIN_N:
         return None
     m = sum(xs) / len(xs)
@@ -548,8 +556,15 @@ def gate(
     첫들 = [x[0][0] for x in [v] + [sorted(series.get(r) or []) for r in CONTROL_IDS] if x]
     시작 = max(첫들) if v and 첫들 else None
     pct = _구간(전체, 시작, None) if 시작 else None
-    대조수익 = [x for r in CONTROL_IDS if 시작 and (x := _구간(sorted(series.get(r) or []), 시작, None)) is not None]
-    vs_r = pct - sum(대조수익) / len(대조수익) if pct is not None and 대조수익 else None
+    # R 대비·변동성 대비는 **같은 끝 날**로(25.2143) — 끝 = H·평가가 있는 R1·R2 의 마지막 날 가운데 가장 이른 날.
+    # 예전엔 계열마다 제 마지막 값까지 재, 평가가 멈춘 R 의 짧은 구간과 H 의 긴 구간을 견줬다(오르는 장에서 실력
+    # 없이 통과)
+    끝들 = [s[-1][0] for s in [전체] + [sorted(series.get(r) or []) for r in CONTROL_IDS] if s]
+    끝 = min(끝들) if 시작 and 끝들 else None
+    r_pct = _구간(전체, 시작, 끝) if 시작 else None
+    대조수익 = [x for r in CONTROL_IDS
+            if 시작 and (x := _구간(sorted(series.get(r) or []), 시작, 끝)) is not None]  # fmt: skip
+    vs_r = r_pct - sum(대조수익) / len(대조수익) if r_pct is not None and 대조수익 else None
     # 참고 — 노출을 H 에 맞춘 R(25.1702). 통과 판정에 넣지 않는다
     맞춤 = (exposure_matched_r(series, {mirror: cash or [], **(control_cash or {})}, mirror, 시작)
           if 시작 and cash and control_cash else None)  # fmt: skip
@@ -570,9 +585,9 @@ def gate(
         # R 쪽까지 막으면 R1 의 이어 멈춤 종목 하나로 H 관문이 판 끝까지 닫혔다(풀 길이 판 올림·장부 고침뿐). R 은
         # 참고로 싣는다. 같은 H 수익을 쓰는 지수 대비 칸도 같이 막는다
         멈춘평가["over"] = 멈춘평가["h_pct"] is not None and 멈춘평가["h_pct"] > GATE_VALUATION_GAP_PCT
-    대조 = [x for r in CONTROL_IDS if 시작 and (x := risk_ratio(sorted(series.get(r) or []), 시작)) is not None]
+    대조 = [x for r in CONTROL_IDS if 시작 and (x := risk_ratio(sorted(series.get(r) or []), 시작, 끝)) is not None]
     대조비 = sum(대조) / len(대조) if 대조 else None
-    내비 = risk_ratio(전체, 시작) if 시작 else None
+    내비 = risk_ratio(전체, 시작, 끝) if 시작 else None
     지수, 쓴지수 = index_return(index or [], 시작) if 시작 else (None, [])
     vs_idx = pct - 지수 if pct is not None and 지수 is not None else None
     # 참고 — 쉬는 현금이 지수를 냈다면(25.1540). 통과 판정에 넣지 않는다(31회차 검증 A 1)
