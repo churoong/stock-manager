@@ -587,11 +587,18 @@ def build_targets(client: TursoClient, market: str, now: str) -> list[tuple]:
         t["target_price"], t["stop_price"] = holding_levels(평균, r["horizon"], targets_setting)
         # 분할 매수 계획의 다음 차수 (docs/intraday.md 2절 tranche, 25.999) — 기업행위·ETF 는 위에서 이미 건너뛰었다
         가격, 차수, 계획일 = next_tranche(client, int(r["stock_id"]), cal.local_today(market))
-        if 가격 is not None and 계획일 and 계수들:
+        if 가격 is not None and 계획일:
             # **계획 뒤 권리락이면 다음 차수 가격도 같은 계수로 옮긴다** (25.1159, 감사 재현). 손절·목표(25.1140)·관심가
             # (25.1142)만 맞추고 이것이 빠져, 실질 1차 가격과 같은 시세에 "2차 가격 95,000원 도달" 이 나갔다.
             # 계획일 **뒤** 계수만 — 그날이나 그 뒤에 낸 계획은 이미 권리락 뒤 시세로 낸 것이다
-            가격 *= math.prod(f for 날, f in 계수들 if 날 > 계획일)
+            # 20거래일 창(`계수들`)만 보면 계획을 이어 보는 30달력일(`TRANCHE_PLAN_DAYS`)의 끝 하루이틀에 권리락이
+            # 창 밖으로 빠져 옛 단위 가격으로 거짓 "2차 도달" 이 났다(25.2148, 11-04 결함 회차 [참고]). 보유 원가처럼
+            # 일정 기반 `rights_factors_since` 를 함께 — 같은 날은 한 번만(일정 쪽 값).
+            # 일정이 없는 기간은 창 계수가 메운다
+            맞춤 = {날: f for 날, f in 계수들 if 날 > 계획일}
+            if market == "KR":
+                맞춤.update(dict(rights_factors_since(client, int(r["stock_id"]), 계획일)))
+            가격 *= math.prod(맞춤.values())
         t["tranche"] = (가격, 차수, 계획일)
 
     # **신호를 마지막으로 계산한 날** — 아침 리포트와 같은 잣대 (docs/infra.md 25.407, 25.337).

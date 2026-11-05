@@ -80,3 +80,25 @@ def test_권리락_뒤에_낸_계획은_옮기지_않는다(monkeypatch: pytest.
     mem.conn.execute("UPDATE trades SET trade_date = '2026-09-16'")
     [행] = job.build_targets(mem, "KR", "2026-10-12T00:00:00+00:00")  # type: ignore[arg-type]
     assert 행[14] == 95000.0
+
+
+def test_권리락이_20거래일_창을_벗어나도_계획_끝까지_다음_차수_가격을_옮긴다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.2148 (11-04 결함 회차 [참고]) — 계획은 30달력일 이어 보는데 창 계수(`action_factors`)는 20거래일뿐이라,
+    계획 끝 하루이틀에 권리락이 창 밖으로 빠지면 옛 단위 2차 가격 95,000 으로 거짓 "2차 도달" 이 났다."""
+    monkeypatch.setattr(job.cal, "local_today", lambda market: date(2026, 10, 10))  # 9/11 계획의 29일째
+    mem = _준비()
+    일정 = job.rights_factors_since(mem, 1, "2026-09-11")  # type: ignore[arg-type]
+    assert [d for d, _f in 일정] == ["2026-09-15"]
+    monkeypatch.setattr(job, "action_factors", lambda *a, **k: [])  # 권리락이 20거래일 창 밖
+    [행] = job.build_targets(mem, "KR", "2026-10-12T00:00:00+00:00")  # type: ignore[arg-type]
+    assert 행[15] == 2 and abs(행[14] - 95000 * 일정[0][1]) < 1e-6
+
+
+def test_창과_일정이_같은_날을_두_번_곱하지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(job.cal, "local_today", lambda market: date(2026, 9, 20))
+    mem = _준비()
+    [(날, f)] = job.rights_factors_since(mem, 1, "2026-09-11")  # type: ignore[arg-type]
+    [(창날, _창f)] = job.action_factors(mem, 1, "KR")  # type: ignore[arg-type]
+    assert 날 == 창날
+    [행] = job.build_targets(mem, "KR", "2026-10-12T00:00:00+00:00")  # type: ignore[arg-type]
+    assert abs(행[14] - 95000 * f) < 1e-6
