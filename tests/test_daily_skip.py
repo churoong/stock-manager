@@ -627,6 +627,9 @@ def test_이미_성공한_날의_예비_실행은_할_일_없음_표식을_찍�
     assert any(줄.startswith(daily.NOTHING_DONE) for 줄 in capsys.readouterr().out.splitlines())
     monkeypatch.setattr(daily.db, "has_successful_run", lambda *a, **k: False)
     monkeypatch.setattr(daily.reports, "sent_exists", lambda *a, **k: True)
+    from batch.jobs import desk as desk_job
+
+    monkeypatch.setattr(desk_job, "post_send_done", lambda *a, **k: True)  # 발송 뒤 단계까지 끝난 날(25.2144)
     assert daily.run("KR") == 0
     assert any(줄.startswith(daily.NOTHING_DONE) for 줄 in capsys.readouterr().out.splitlines())
 

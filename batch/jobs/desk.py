@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections import Counter
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
@@ -102,6 +103,24 @@ BATCH_RUNS_SQL = (
     " FROM batch_runs WHERE job_name IN (?, ?) AND started_at >= ?"
 )
 NAMES_SQL = "SELECT id, name, rule_version FROM paper_accounts"
+#: 그 시장·거래일의 운용 요약 칸이 적혔나 — 일일 배치가 리포트를 보낸 **뒤** 단계(KIS모의투자 베끼기 → 운용 요약)가
+#: 끝났다는 표지(25.2144). 운용 요약 줄은 한국 날짜(as_of)로 하루 한 줄·시장마다 `markets.<시장>.trade_date`.
+#: 자정을 넘긴 실행도 잡게 이틀을 본다(색인 as_of)
+POST_SEND_DONE_SQL = (
+    "SELECT 1 FROM paper_desk WHERE as_of >= ? AND CASE WHEN json_valid(summary_json)"
+    " THEN json_extract(summary_json, '$.markets.' || ? || '.trade_date') END = ? LIMIT 1"
+)
+
+
+def post_send_done(client: Any, market: str, trade_date: str, now: datetime) -> bool:
+    """그 시장·거래일의 발송 뒤 단계가 끝났나(운용 요약 칸이 있나). 못 읽으면 True — 예전처럼 건너뛴다(보수 쪽:
+    다시 돌다 KIS 주문이 겹칠 일은 막혀 있지만, 읽기가 깨지는 날 배치를 통째 다시 돌리지 않는다)"""
+    from_ = (now - timedelta(days=1)).astimezone(cal.market_tz("KR")).date().isoformat()
+    try:
+        return bool(client.execute(POST_SEND_DONE_SQL, [from_, market, trade_date]).rows)
+    except Exception as exc:  # noqa: BLE001
+        logging.getLogger("desk").warning("발송 뒤 단계가 끝났는지 읽지 못했다 — 예전처럼 건너뛴다: %s", exc)
+        return True
 
 
 def _expected_trade_dates(market: str, since: str, now: datetime) -> list[str]:

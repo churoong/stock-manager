@@ -2123,12 +2123,23 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
         # 닫으면(한도·시간 초과)
         # 성공 기록이 없어 예비 예약(국내 09:35·미국 12:27/13:27/14:27 UTC)이 리포트 전체를 한 번 더 보냈다. 수동
         # 실행(force)은 사람이 원한 것이라 막지 않는다
+        발송끝남 = False
         if not force and reports.sent_exists(client, market, decision.trade_date):
-            print(
-                f"{NOTHING_DONE}{decision.trade_date} 거래일 리포트는 이미 보냈습니다"
-                f"(실행 기록은 못 닫혔을 수 있습니다). 중복 발송을 건너뜁니다"
-            )
-            return 0
+            from batch.jobs import desk as desk_job
+
+            # **발송 뒤 단계가 끝났는지 본다**(25.2144, 11-05 결함 회차 [권고]) — 25.1475 가 KIS모의투자 베끼기를 발송
+            # 뒤로 옮긴 뒤로, 발송 뒤 그 단계에서 실행이 죽으면(시간 제한·러너 종료) 예비 실행이 여기서 빠져 그날 베끼기
+            # (첫째·도전자)와 운용 요약이 끝내 돌지 않았다. 운용 요약 칸이 없으면 **발송만 건너뛰고** 이어 돈다 — 가상
+            # 단계는 `ORDERS_EXIST` 로, KIS 는 `이미`·`정리함` 으로 겹치지 않는다
+            if desk_job.post_send_done(client, market, decision.trade_date, datetime.now(UTC)):
+                print(
+                    f"{NOTHING_DONE}{decision.trade_date} 거래일 리포트는 이미 보냈습니다"
+                    f"(실행 기록은 못 닫혔을 수 있습니다). 중복 발송을 건너뜁니다"
+                )
+                return 0
+            print(f"{decision.trade_date} 거래일 리포트는 이미 보냈지만 KIS모의투자 베끼기·운용 요약이 끝나지"
+                  " 않았습니다 — 발송 없이 이어 돕니다")  # fmt: skip
+            발송끝남 = True
 
         # 예약 시각을 넘겨야 지연이 남는다 (docs/infra.md 25.327). 수동 실행(force)은 예약이 아니라 넘기지 않는다
         예약 = None if force else cal.scheduled_for(market, date.fromisoformat(decision.session_date))
@@ -2663,6 +2674,8 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
             return f" — {formatter.WEB_SAVE_FAILED_MARK}"
 
         try:
+            if 발송끝남:
+                raise _이미보냄  # 발송·저장을 건너뛰고 아래 발송 뒤 단계로(25.2144)
             message_ids = telegram.send(message)
             step_log["sent"] = True
             step_log["message_ids"] = message_ids
@@ -2685,6 +2698,8 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
                                     dry_run=dry_run, title="리포트 저장 실패")
             if report_id is not None:
                 _발송시각_적기(client, report_id, message_ids, warnings)
+        except _이미보냄:
+            step_log["sent"] = ALREADY_SENT_NOTE
         except telegram.TelegramPartialError as exc:
             # **앞 조각은 이미 갔다** (docs/infra.md 25.414). 실패로 닫으면 다음 예약이 전체를 다시 보내 앞 조각이
             # 두 번 간다. 보낸 것으로 적고, 뒷부분이 빠졌다고 경고·알림으로 말한다 — 전체는 웹 리포트에 있다
@@ -3516,6 +3531,14 @@ def main() -> int:
         return 1
 
 
+#: 리포트를 이미 보낸 날 발송 뒤 단계만 이어 돈 실행의 `step_log.sent` (25.2144)
+ALREADY_SENT_NOTE = "이미 보냄 — 발송 뒤 단계만 이어 돔"
+
+
+class _이미보냄(Exception):  # noqa: N818 — 흐름 표지(오류가 아니다)
+    """그날 리포트를 이미 보낸 실행이 발송 블록을 건너뛰는 표지 (25.2144)"""
+
+
 def timeout_text(minutes: int) -> str:
     """시간 제한으로 강제 종료된 실행의 실패 사유 (docs/infra.md 25.1386).
 
@@ -3524,6 +3547,8 @@ def timeout_text(minutes: int) -> str:
     return (
         f"{minutes}분 시간 제한에 걸려 강제 종료됐습니다. 이 실행이 리포트를 보냈는지는 알 수 없습니다 — "
         "오늘 리포트를 이미 받았다면 그것이 오늘 리포트입니다. "
+        # 발송 뒤 단계에서 죽었을 수도 있다(25.2144) — 다음 예비 실행이 이어 받는다
+        "리포트 뒤 KIS모의투자 베끼기·운용 요약이 빠졌을 수 있습니다(다음 예비 실행이 이어 돕니다). "
         f"실행 기록은 '실행 중'으로 남았다가 {db.STALE_RUN_HOURS}시간 뒤 정리됩니다"
     )
 
