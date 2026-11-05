@@ -247,6 +247,17 @@ NOT_SAVED_MARK = "이번 재실행 본문은 웹에 저장하지 않았습니다
 #: 리포트를 보세요" 가
 #: 거짓이다 — 웹에는 그날 리포트가 없다
 WEB_SAVE_FAILED_MARK = "리포트를 웹에 저장하지 못했습니다"
+#: 리포트를 보낸 뒤 발송 뒤 단계(KIS모의투자 베끼기 → 운용 요약)만 이어 돈 실행이 깨졌다(25.2146).
+#: 실행은 `failed` 로 닫혔다 — 아래 "배치는 끝났고" 줄(성공으로 닫힌 발송 문제, 25.504)을 싣지 않고
+#: 무엇이 빠졌는지·다음 예정을 싣는다(25.2149, 25.2146 교차검증 [필수])
+RESUME_FAIL_TITLE = "발송 뒤 단계 이어 돌기 실패 — 오늘 리포트는 이미 보냈습니다"
+_RESUME_FAIL_NOTE = {
+    "KR": "리포트는 먼저 보냈습니다. KIS모의투자 베끼기·운용 요약은 끝나지 않았을 수 있습니다"
+          " — 그날 남은 예비 실행이 있으면 다시 이어 돌고, 없으면 운용 화면의 판정 날짜가 오늘 거래일인지 보고"
+          " 손 실행하세요.",
+    "US": "리포트는 먼저 보냈습니다. 운용 요약은 끝나지 않았을 수 있습니다"
+          " — 그날 남은 예비 실행이 있으면 다시 이어 돌지만, 예약 마감 뒤면 KIS모의투자 베끼기는 다시 내지 않습니다.",
+}
 
 
 def failure_alert(
@@ -278,6 +289,11 @@ def failure_alert(
         f"  {error_text[:500]}" + (" … (잘림, 배치 기록 참고)" if len(error_text) > 500 else ""),
     ]
 
+    if title == RESUME_FAIL_TITLE:
+        # 마지막 성공 줄은 싣지 않는다 — 오늘 리포트는 이미 갔다. 다음 예정은 싣는다(이어 받을 실행이 있는지)
+        lines += ["", _RESUME_FAIL_NOTE.get(market.upper(), _RESUME_FAIL_NOTE["KR"]), "",
+                  f"다음 예정 {cal.next_scheduled_hint(market)}"]  # fmt: skip
+        return "\n".join(lines)
     if title != "배치 실패":
         if not report_note:
             # KIS모의투자 알림처럼 리포트 발송과 상관없는 알림 —

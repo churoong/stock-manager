@@ -2695,9 +2695,9 @@ def run_step(
             기록["error"] = f"가상 {MIRROR_ACCOUNT} 계좌 단계 실패: {계좌실패[MIRROR_ACCOUNT]}"
     기록["accounts"] = 계좌기록
     # 예외로 끝나지 않고 가둔 계좌 실패(건너뜀·위원회·지주사) — 관문 "운영 무사고" 가 사고로 센다(25.2142)
-    건너뜀들 = desk.account_skips(계좌기록)
-    if 건너뜀들:
-        기록["account_skips"] = 건너뜀들
+    # 빈 날도 `{}` 로 싣는다 — 칸이 비면 관문 질의가 옛 행으로 보고 계좌 기록 전체를 읽었다
+    # (25.2149, 25.2146 교차검증 [참고])
+    기록["account_skips"] = desk.account_skips(계좌기록)
     기록["frozen"] = sorted(frozen)
     # 계좌마다의 멈춤 — KIS모의투자 베끼기는 베끼는 계좌(H·도전자)의 것을 쓴다(25.1550 반박 [권고] 3: 전체 멈춤을
     # 쓰면 다른

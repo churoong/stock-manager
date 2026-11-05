@@ -100,7 +100,8 @@ BATCH_RUNS_SQL = (
     " CASE WHEN json_valid(step_log) THEN json_extract(step_log, '$.paper.account_errors') END AS paper_account_errors,"
     # 계좌 건너뜀·위원회·지주사 실패(25.2142 — `desk.account_skips`)
     " CASE WHEN json_valid(step_log) THEN json_extract(step_log, '$.paper.account_skips') END AS paper_account_skips,"
-    # 그 칸이 없는 25.2142 전 행은 계좌 기록을 읽어 다시 모은다(25.2145) — 칸이 있는 행은 읽지 않는다(행 크기)
+    # 그 칸이 없는 행(25.2142 전, 25.2142~2148 의 빈 날)은 계좌 기록을 읽어 다시 모은다(25.2145) — 칸이 있는 행은 읽지
+    # 않는다(행 크기). 25.2149 부터 빈 날도 `{}` 로 실려 새 행은 읽지 않는다
     " CASE WHEN json_valid(step_log) AND json_extract(step_log, '$.paper.account_skips') IS NULL"
     " THEN json_extract(step_log, '$.paper.accounts') END AS paper_accounts"
     " FROM batch_runs WHERE job_name IN (?, ?) AND started_at >= ?"

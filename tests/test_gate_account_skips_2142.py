@@ -55,7 +55,15 @@ def test_가상_단계가_계좌_실패를_한_칸에_모은다() -> None:
     from pathlib import Path
 
     글 = (Path(__file__).resolve().parents[1] / "batch" / "jobs" / "paper.py").read_text(encoding="utf-8")
-    assert '건너뜀들 = desk.account_skips(계좌기록)' in 글 and '기록["account_skips"] = 건너뜀들' in 글
+    # 빈 날도 `{}` 로 — 조건 없이 계좌 루프 바로 뒤 들여쓰기(25.2149)
+    assert '\n    기록["account_skips"] = desk.account_skips(계좌기록)\n' in 글
+
+
+def test_빈_칸이_실린_새_행은_계좌_기록을_읽지_않고_무사고다() -> None:
+    """25.2149 (25.2146 교차검증 [참고]) — 빈 날 칸을 비우면 관문 질의가 옛 행으로 보고 계좌 기록 전체를 날마다 읽었다"""
+    (새,) = _읽기([{"paper": {"accounts": {"H": {"fills": 2}}, "account_skips": {}}}])
+    assert 새["paper_account_skips"] == "{}" and 새["paper_accounts"] is None
+    assert not desk.paper_step_failed(새) and desk.batch_incident_days([새], {"daily_kr": ["2026-10-10"]}) == 0
 
 
 def test_칸이_없는_옛_행도_계좌_기록에서_다시_모은다() -> None:
