@@ -37,6 +37,9 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
+    # 시세 사본이 빈 채 끝났나 — 아래 `replica_rebuild` 잡이 처음 만들기를 깨운다(docs/infra.md 25.2154)
+    outputs:
+      replica_empty: ${{ steps.replica.outputs.empty }}
     # 배치 단계는 `timeout 15m` 으로 따로 끊는다 — 잡 시간 제한에 걸리면 뒤 단계(시간 초과 알림)가 돌지 않을 수 있어
     # 여유 5분을 둔다 (docs/infra.md 25.1386)
     timeout-minutes: 20
@@ -231,6 +234,23 @@ jobs:
 
   # 공개 저장소 60일 무활동 꺼짐 대비 (docs/infra.md 25.981·25.986). 쓰기 권한(커밋·워크플로 켜기)을 **배치 본체와 다른 잡**에만 준다 —
   # 본체는 바깥 패키지를 설치해 돌리므로 저장소에 쓸 수 있으면 안 된다. 표준 라이브러리만 쓰는 스크립트라 설치가 없다
+  # **비워진 시세 사본을 바로 다시 만들게 깨운다** (docs/infra.md 25.2154). 11-04 정리된 기록 하나로 사본이 비워지자
+  # 처음 만들기는 주간 작업(화 02:23 KST)까지 미뤄졌고, 그 사이 국내 배치가 Turso 에서 읽다 15분 상한에 두 번 걸렸다.
+  # 지표 워크플로의 "사본만" 손 실행을 깨운다 — 진도 문은 그쪽이 본다. 쓰기 권한(actions)은 배치 본체와 다른 잡에만(위 keepalive 와 같은 까닭)
+  replica_rebuild:
+    needs: run
+    if: ${{ always() && needs.run.outputs.replica_empty == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: 시세 사본 처음 만들기 깨우기
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: gh api -X POST "repos/$REPO/actions/workflows/metrics.yml/dispatches" -f ref=main -f "inputs[replica_only]=true"
+
   keepalive:
     runs-on: ubuntu-latest
     timeout-minutes: 5

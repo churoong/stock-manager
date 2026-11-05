@@ -27,6 +27,11 @@ on:
         type: choice
         options: ["", "KR", "US"]
         default: ""
+      replica_only:
+        # 일일 배치가 시세 사본이 빈 채 끝나면 이것으로 깨운다(docs/infra.md 25.2154) — 지표는 계산하지 않는다
+        description: 시세 사본만 맞추기(비었으면 진도 문을 거쳐 처음 만들기)
+        type: boolean
+        default: false
 
 concurrency:
   group: metrics
@@ -118,6 +123,7 @@ jobs:
           key: price-replica-enc-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: 계산
+        if: ${{ !inputs.replica_only }}
         run: |
           ARGS=""
           if [ -n "${{ inputs.window }}" ]; then ARGS="$ARGS --window ${{ inputs.window }}"; fi

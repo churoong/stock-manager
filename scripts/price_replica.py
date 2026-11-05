@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import importlib.util
 import json
 import logging
@@ -121,6 +122,11 @@ def main() -> int:
             print(f"[시세 사본] 쓰지 않음 표시도 못 했다: {inner}")
         _output("changed", "false")
     finally:
+        # **비었나** — 일일 배치가 비우면(넓은 다시 받기·정리된 기록, 25.907·25.2150) 처음 만들기는 주간 작업까지 미뤄져
+        # 그 사이 일일 배치가 Turso 에서 읽다 시간 상한에 걸렸다(11-05 국내 두 번). 워크플로가 이 값으로 처음 만들기를
+        # 바로 깨운다(25.2154)
+        with contextlib.suppress(Exception):
+            _output("empty", "true" if conn.execute("SELECT 1 FROM prices LIMIT 1").fetchone() is None else "false")
         conn.close()
         remote.close()
     return 0

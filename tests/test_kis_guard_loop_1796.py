@@ -137,7 +137,8 @@ def _쓰기_잡(data: dict) -> set[str]:  # type: ignore[type-arg]
 def test_워크플로_사슬과_권한() -> None:
     kg = yaml.safe_load((ROOT / ".github/workflows/kis-guard.yml").read_text(encoding="utf-8"))
     dk = yaml.safe_load((ROOT / ".github/workflows/daily-kr.yml").read_text(encoding="utf-8"))
-    assert _쓰기_잡(kg) == {"chain"} and _쓰기_잡(dk) == {"guard_start", "keepalive"}  # 패키지 설치하는 본체는 못 쓴다
+    # 패키지 설치하는 본체는 못 쓴다 — replica_rebuild 는 빈 시세 사본 처음 만들기 깨우기(25.2154, 설치 없음)
+    assert _쓰기_잡(kg) == {"chain"} and _쓰기_잡(dk) == {"guard_start", "keepalive", "replica_rebuild"}
     트리거 = kg.get(True) or kg["on"]
     assert all("/" not in c["cron"] for c in 트리거["schedule"]), "10분 예약으로 돌아가지 않는다 — 예비 예약만"
     assert "actions" not in (kg.get("permissions") or {}), "패키지를 설치하는 본체에 actions 쓰기를 주지 않는다"
