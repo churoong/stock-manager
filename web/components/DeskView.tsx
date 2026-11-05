@@ -18,6 +18,7 @@ import {
   pctText,
   gateLooksText,
   ppText,
+  vsRToText,
   READINESS_TEXT,
   type DeskMarket,
   type ReadinessItem,
@@ -229,7 +230,10 @@ export default function DeskView() {
                         {r.separate ? <span className="ml-1 text-sky-700 dark:text-sky-400">따로 잼 · {r.open}부터</span> : null}
                       </td>
                       <td className={`text-right ${tone(r.window_pct)}`}>{pctText(r.window_pct)}</td>
-                      <td className={`text-right ${tone(r.vs_r_pp)}`}>{ppText(r.vs_r_pp)}</td>
+                      <td className={`text-right ${tone(r.vs_r_pp)}`}>
+                        {ppText(r.vs_r_pp)}
+                        {vsRToText(r) ? <span className="block text-[10px] text-slate-500">{vsRToText(r)}</span> : null}
+                      </td>
                       <td className={`text-right ${tone(r.since_open_pct)}`}>{pctText(r.since_open_pct)}</td>
                       <td className="text-right text-xs text-slate-500">{r.open}</td>
                     </tr>

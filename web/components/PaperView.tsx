@@ -6,7 +6,7 @@ import PaperRealized from "@/components/PaperRealized";
 import Pager from "@/components/Pager";
 import EquityChart, { type Series } from "@/components/EquityChart";
 import Link from "next/link";
-import { DESK_RULES, MARKET_LABEL, adjustCheckText, adjustText, championEmptiedBy, championText, pctText as deskPct, ppText, preregText, ruleSpanText, rowsById, type DeskView, type RuleSpan } from "@/lib/desk";
+import { DESK_RULES, MARKET_LABEL, adjustCheckText, adjustText, championEmptiedBy, championText, pctText as deskPct, ppText, preregText, ruleSpanText, rowsById, vsRToText, type DeskView, type RuleSpan } from "@/lib/desk";
 import { bodyOf, readJson } from "@/lib/http";
 import {
   DEPOSIT_MAX_KRW,
@@ -483,7 +483,10 @@ export function CompareCard({ data, desk }: { data: Data; desk?: DeskView | null
                     {r?.separate ? <span className="block text-[10px] font-normal text-sky-700 dark:text-sky-400">따로 잼 · {r.open}부터</span> : null}
                   </td>
                   <td className={`text-right ${tone(r?.window_pct)}`}>{deskPct(r?.window_pct)}</td>
-                  <td className={`text-right ${tone(r?.vs_r_pp)}`}>{ppText(r?.vs_r_pp)}</td>
+                  <td className={`text-right ${tone(r?.vs_r_pp)}`}>
+                    {ppText(r?.vs_r_pp)}
+                    {vsRToText(r) ? <span className="block text-[10px] text-slate-500">{vsRToText(r)}</span> : null}
+                  </td>
                   {desk?.fill_adjust ? <AdjustCell x={desk.fill_adjust.rows[a.id]} /> : null}
                   <td className={`text-right ${tone(a.view.twrPct)}`}>{pctText(a.view.twrPct)}</td>
                   <td className={`text-right ${tone(a.view.pnlPct)}`}>{pctText(a.view.pnlPct)}</td>

@@ -1325,7 +1325,9 @@ def report_lines(
 
     def 칸(r: dict[str, Any]) -> str:
         v = r.get("vs_r_pp")
-        return (f"{r['window_pct']:+.2f}%" + (f" (R 대비 {v:+.2f}%p)" if v is not None else "")
+        # 대조 R 기록이 먼저 멈췄으면 R 대비는 그날까지 잰 값이다 — 끝을 같이 적는다(25.2145 `vs_r_to`, 25.2147)
+        끝 = f", {r['vs_r_to']}까지" if v is not None and r.get("vs_r_to") else ""
+        return (f"{r['window_pct']:+.2f}%" + (f" (R 대비 {v:+.2f}%p{끝})" if v is not None else "")
                 + (" — 갓 엶, 개설 후" if r.get("young") else ""))  # fmt: skip
 
     위 = [r for r in 줄 if r.get("window_pct") is not None][:REPORT_TOP_ACCOUNTS]

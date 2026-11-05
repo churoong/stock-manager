@@ -17,6 +17,8 @@ export type DeskMarketKey = "KR" | "US";
 export interface DeskRow {
   id: string; name: string; kind: string; open: string; last: string;
   since_open_pct: number; window_pct: number | null; vs_r_pp: number | null;
+  /** R 대비를 잰 끝 — 대조 R 기록이 계좌보다 먼저 멈췄을 때만(25.2145). 없으면 계좌의 마지막 날까지 */
+  vs_r_to?: string | null;
   /** 갓 연 계좌 — 제 개설일부터 잰 수익률·같은 구간 R (25.1503). 그 전 요약에는 없다 */
   young?: boolean;
   /** 따로 재는 실험 계좌(스윙 S) — 공통 구간 밖, 제 개설일부터(25.1872). 그 전 요약에는 없다 */
@@ -52,7 +54,9 @@ export interface DeskKisAccount {
   perf: import("@/lib/kisPaper").KisPerf | null;
 }
 /** 실전 전환 1단계 관문 (docs/desk.md 6장, 25.1508) — 읽기 전용. 넘어도 아무것도 열리지 않는다 */
-export interface GateItem { key: string; label: string; now: number | null; target: number | null; ok: boolean; n?: number; mean?: number | null; index_pct?: number | null; index_used?: string[]; detail?: Record<string, number>; path_pct?: number | null; path_n?: number | null; exposure_matched?: ExposureMatched | null; valuation_gap?: ValuationGap | null }
+export interface GateItem { key: string; label: string; now: number | null; target: number | null; ok: boolean; n?: number; mean?: number | null; index_pct?: number | null; index_used?: string[]; detail?: Record<string, number>; path_pct?: number | null; path_n?: number | null; exposure_matched?: ExposureMatched | null; valuation_gap?: ValuationGap | null;
+  /** 관문 R 대비를 잰 끝 — 대조 R 기록이 먼저 멈췄을 때만(25.2145) */
+  to?: string | null }
 /** 관문 R 대비 옆 — 원가·묵은 평가 비중(관문 구간 평균 %). 문턱을 넘으면 R 대비 불통 (25.1709) */
 export interface ValuationGap { h_pct: number | null; r_pct: number | null; limit: number; over: boolean }
 /** 관문 R 대비 옆 참고 칸 — 노출을 H 에 맞춘 R (25.1702). 통과 판정에 들지 않는다 */
@@ -303,6 +307,11 @@ export function preregText(r: RuleSpan): string | null {
   return `가설: ${r.prereg.hypothesis} · 판정: ${r.prereg.metric}${r.prereg.retro ? " (장치 전에 연 판 — 나중에 적음)" : ""}`;
 }
 
+/** 순위표 R 대비 칸 밑 작은 글 — 대조 R 기록이 먼저 멈춰 그날까지 잰 값일 때만(25.2147) */
+export function vsRToText(r: Pick<DeskRow, "vs_r_pp" | "vs_r_to"> | null | undefined): string | null {
+  return r?.vs_r_pp != null && r.vs_r_to ? `${r.vs_r_to}까지` : null;
+}
+
 /** 순위표 줄을 계좌 id 로 — 계좌 비교 표에 공통 구간·R 대비 칸을 붙일 때 */
 export function rowsById(lb: DeskLeaderboard | null | undefined): Map<string, DeskRow> {
   return new Map((lb?.rows ?? []).map((r) => [r.id, r]));
@@ -329,7 +338,9 @@ export function gateNowText(i: GateItem): string {
       const 참고 = m && m.vs_r != null
         ? ` (참고: 노출 맞춘 R 대비 ${ppText(m.vs_r, 0)} — 평균 투자 비중 지주사 ${m.h_exposure_pct.toFixed(0)}% · 무작위 ${m.r_exposure_pct.toFixed(0)}%)`
         : "";
-      return `${ppText(i.now, 0)} / 0 초과${참고}${valuationGapText(i.valuation_gap)}`;
+      // 대조 R 기록이 먼저 멈췄으면 그날까지 잰 값이다(25.2145·25.2147) — 지금까지로 읽히지 않게
+      const 끝 = i.to ? ` (대조 기록이 ${i.to}까지라 그날까지 잼)` : "";
+      return `${ppText(i.now, 0)} / 0 초과${끝}${참고}${valuationGapText(i.valuation_gap)}`;
     }
     case "vs_index":
       // 같은 돈을 KOSPI·S&P500 반반에 넣었다면(25.1519) — 지수 쪽 수익률을 같이
