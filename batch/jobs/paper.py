@@ -31,10 +31,10 @@ from batch.core import settings_range as sr
 from batch.notify import formatter
 from batch.services import backtest as bt
 from batch.services import company as co
+from batch.services import desk, report_picks
 from batch.services import fx as fx_svc
 from batch.services import holding as hold
 from batch.services import paper as pp
-from batch.services import report_picks
 from batch.services import risk_gate as rg
 from batch.services import sell_flags as sf
 from batch.services import signals as sg
@@ -2694,6 +2694,10 @@ def run_step(
             # KIS 가 베끼는 계좌가 깨졌으면 예전처럼 단계 실패로 — 베끼기를 막는다(장부가 어긋난 채 주문을 내지 않게)
             기록["error"] = f"가상 {MIRROR_ACCOUNT} 계좌 단계 실패: {계좌실패[MIRROR_ACCOUNT]}"
     기록["accounts"] = 계좌기록
+    # 예외로 끝나지 않고 가둔 계좌 실패(건너뜀·위원회·지주사) — 관문 "운영 무사고" 가 사고로 센다(25.2142)
+    건너뜀들 = desk.account_skips(계좌기록)
+    if 건너뜀들:
+        기록["account_skips"] = 건너뜀들
     기록["frozen"] = sorted(frozen)
     # 계좌마다의 멈춤 — KIS모의투자 베끼기는 베끼는 계좌(H·도전자)의 것을 쓴다(25.1550 반박 [권고] 3: 전체 멈춤을
     # 쓰면 다른

@@ -366,6 +366,31 @@ def risk_ratio(v: list[tuple[str, float]], start: str | None = None) -> float | 
 PAPER_SKIP_OK = ("입금 없음",)
 
 
+def account_skips(accounts: dict[str, Any]) -> dict[str, str]:
+    """계좌 기록(`step_log.paper.accounts`)에서 **그날 계좌가 제 일을 못 한** 까닭을 모은다
+    (25.2142, 11-05 결함 회차 [필수]).
+
+    `account_errors`(계좌 단계 예외, 25.1920)는 따로 있다. 여기는 예외로 끝나지 않고 가둔 것:
+    - `error` — 계좌를 통째로 건너뜀(모르는 매도 규칙·단타 진입 방식 오류, 25.1871·25.1886). 개설 전
+      (`not_open_until`)은 정상이다
+    - `committee.error` — 투자위원회를 못 열어 그날 사지 않음(예외·헌장 검사 실패)
+    - `holding.error` — 지주사(H) 단계가 깨져 그날 사지 않음(예외·설정 오류 — `holding_step` 의 error 는 모두 설정 오류)
+    예전엔 셋 다 `partial` 로만 끝나 관문 "운영 무사고" 가 사고로 세지 않았다 — H 가 날마다 사지 못해도 무사고였다.
+    매수 단계의 정상 쉼(`buy.skipped` "배분하지 않는 날")은 넣지 않는다"""
+    out: dict[str, str] = {}
+    for aid, rec in (accounts or {}).items():
+        if not isinstance(rec, dict):
+            continue
+        글 = [str(rec["error"])] if rec.get("error") else []
+        for 칸 in ("committee", "holding"):
+            v = rec.get(칸)
+            if isinstance(v, dict) and v.get("error"):
+                글.append(f"{칸}: {v['error']}")
+        if 글:
+            out[str(aid)] = "; ".join(글)[:200]
+    return out
+
+
 def paper_step_failed(row: dict[str, Any]) -> bool:
     """그 실행의 가상모의투자 단계가 끝까지 돌지 못했나 — `step_log.paper.error`(예외) 또는 입금 없음 밖의 `skipped`
     (다른 시장 잠금 등). 실행은 `partial` 로 끝나 예전엔 무사고로 셌다(25.1636, 36회차 P3). `paper` 칸이 없는 실행
@@ -374,6 +399,9 @@ def paper_step_failed(row: dict[str, Any]) -> bool:
         return True
     # 계좌 하나만 깨진 날도 사고다(25.1920 — 계좌별로 가둔 예외, 단계 전체는 끝까지 돌았다)
     if row.get("paper_account_errors") not in (None, "", "{}"):
+        return True
+    # 계좌가 건너뛰어졌거나 위원회·지주사가 깨져 그날 사지 못한 날도 사고다(25.2142 — `account_skips`)
+    if row.get("paper_account_skips") not in (None, "", "{}"):
         return True
     건너뜀 = row.get("paper_skipped")
     return bool(건너뜀) and str(건너뜀) not in PAPER_SKIP_OK

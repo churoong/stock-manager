@@ -96,7 +96,9 @@ BATCH_RUNS_SQL = (
     "SELECT job_name, trade_date, status,"
     " CASE WHEN json_valid(step_log) THEN json_extract(step_log, '$.paper.error') END AS paper_error,"
     " CASE WHEN json_valid(step_log) THEN json_extract(step_log, '$.paper.skipped') END AS paper_skipped,"
-    " CASE WHEN json_valid(step_log) THEN json_extract(step_log, '$.paper.account_errors') END AS paper_account_errors"
+    " CASE WHEN json_valid(step_log) THEN json_extract(step_log, '$.paper.account_errors') END AS paper_account_errors,"
+    # 계좌 건너뜀·위원회·지주사 실패(25.2142 — `desk.account_skips`)
+    " CASE WHEN json_valid(step_log) THEN json_extract(step_log, '$.paper.account_skips') END AS paper_account_skips"
     " FROM batch_runs WHERE job_name IN (?, ?) AND started_at >= ?"
 )
 NAMES_SQL = "SELECT id, name, rule_version FROM paper_accounts"

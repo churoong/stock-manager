@@ -171,6 +171,8 @@ def test_모르는_매도_규칙의_계좌는_그_계좌만_건너뛴다(monkeyp
                           price_series={}, series_unknown={}, allocate=True,
                           now=datetime.fromisoformat(f"{다음}T00:30:00+00:00"))  # fmt: skip
     assert 기록["accounts"]["Z"] == {"error": "모르는 매도 규칙 zzz"}
+    # 관문 "운영 무사고" 가 사고로 세도록 한 칸에 모인다(25.2142)
+    assert 기록["account_skips"] == {"Z": "모르는 매도 규칙 zzz"}
     assert 기록["accounts"]["B"]["orders"] >= 1
     # 리포트 경고 줄과 상황실 확인할 일에도(25.1873 — 텔레그램 줄만 있고 상황실엔 안 보였다)
     assert "⚠️ 가상 Z 모르는 매도 규칙(zzz) — 오늘 이 계좌는 평가·매매하지 않았습니다" in 줄
