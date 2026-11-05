@@ -463,9 +463,11 @@ def start_batch_run(
     넣음 = client.execute(
         "INSERT INTO batch_runs"
         " (job_name, market, trade_date, trigger_source, scheduled_for, started_at,"
-        "  status, delay_seconds)"
-        " VALUES (?, ?, ?, ?, ?, ?, 'running', ?)",
-        [job_name, market, trade_date, trigger, scheduled_for, now_iso(), delay],
+        "  status, delay_seconds, step_log)"
+        " VALUES (?, ?, ?, ?, ?, ?, 'running', ?, ?)",
+        [job_name, market, trade_date, trigger, scheduled_for, now_iso(), delay,
+         # 시세를 쓰는 작업은 쓰기 앞 기록 표지를 달고 연다(25.2150) — 정리된 기록이 범위를 갖고 있다는 뜻
+         json.dumps({PRICES_TOUCHED_WAL_KEY: 1}) if job_name in PRICE_WRITER_JOBS else None],  # fmt: skip
     )
     # 넣은 행 번호를 응답에서 받는다 (docs/infra.md 25.869). 예전 `SELECT MAX(id) … WHERE job_name = ?` 는 실행마다 그
     # 작업의
@@ -492,6 +494,14 @@ _가격_손댐: dict[int, str] = {}
 
 #: 실행 기록에 적는 열쇠와, 종목을 하나하나 적는 상한. 넘으면 "전 종목, 이 날짜부터" 로 줄인다(일일 배치는 수천 종목)
 PRICES_TOUCHED_KEY = "prices_touched"
+#: 시세를 쓰는 작업 — 시세 사본이 고친 범위를 따라간다(`core/price_replica`, 25.907)
+PRICE_WRITER_JOBS = ("daily_kr", "daily_us", "backfill_kr", "backfill_us", "adjust_kr", "refresh_us_adjusted")
+#: **쓰기 앞 기록 표지** (25.2150). 이 작업들의 실행 기록은 처음부터 이 표지를 달고, 시세를 쓰기 **전에** 고칠 범위
+#: (`prices_touched`)를 열린 실행 기록에 적는다(`persist_prices_touched`). 그래서 강제 종료로 끝맺지 못해도 정리된
+#: 기록에 범위가 남는다 — 예전엔 범위를 몰라 시세 사본을 통째로 비웠다
+#: (11-05 국내 배치가 Turso 에서 읽다 시간 상한에 두 번)
+PRICES_TOUCHED_WAL_KEY = "prices_touched_wal"
+_마지막_적은_손댐: list[Any] = [None]
 PRICES_TOUCHED_MAX_STOCKS = 300
 
 
@@ -519,6 +529,21 @@ def note_prices_touched(pairs: Iterable[tuple[Any, Any]]) -> None:
         종목, 날 = int(sid), str(day)[:10]
         if 날 < _가격_손댐.get(종목, "9999"):
             _가격_손댐[종목] = 날
+
+
+def persist_prices_touched(client: TursoClient) -> None:
+    """지금까지 고친(고칠) 시세 범위를 열린 실행 기록 모두에 **바로** 적는다 — 시세를 쓰기 전에 부른다(25.2150).
+    같은 요약이면 다시 적지 않는다. 적지 못하면 예외를 올린다 — 기록 없이 시세를 쓰지 않는다"""
+    손댐 = prices_touched_summary()
+    if 손댐 is None or 손댐 == _마지막_적은_손댐[0]:
+        return
+    for c, run_id in _열린_실행:
+        (c or client).execute(
+            "UPDATE batch_runs SET step_log = CASE WHEN step_log IS NULL THEN json_object(?, json(?))"
+            " WHEN json_valid(step_log) THEN json_set(step_log, ?, json(?)) ELSE step_log END WHERE id = ?",
+            [PRICES_TOUCHED_KEY, json.dumps(손댐), f"$.{PRICES_TOUCHED_KEY}", json.dumps(손댐), run_id],
+        )
+    _마지막_적은_손댐[0] = 손댐
 
 
 def prices_touched_summary() -> dict[str, Any] | None:
@@ -588,6 +613,7 @@ def finish_batch_run(
             break
     if not _열린_실행:
         _가격_손댐.clear()
+        _마지막_적은_손댐[0] = None
 
 
 def set_run_trade_date(client: TursoClient, run_id: int, trade_date: str) -> None:
@@ -1410,6 +1436,7 @@ def bulk_upsert_prices(
         return 0
 
     note_prices_touched((row[0], row[1]) for row in rows)  # 시세 사본이 다시 받을 범위 (25.888)
+    persist_prices_touched(client)  # 쓰기 **전에** 실행 기록에 (25.2150)
     statements: list[tuple[str, list]] = []
     for start in range(0, len(rows), chunk_rows):
         chunk = rows[start : start + chunk_rows]

@@ -66,7 +66,15 @@ TOUCH_MARGIN = timedelta(minutes=30)
 WIDE_RANGE_DAYS = 60
 #: 시세를 고치는 작업들. 이 작업의 실행이 강제 종료·쓰기 한도로 끝맺지 못하면(다음 실행이 정리,
 #: `db.reap_stale_runs`) 고친 범위 기록(`prices_touched`)이 남지 않는다 — 범위를 모르므로 "전부" 로 본다 (25.907, 감사)
-PRICE_WRITER_JOBS = ("daily_kr", "daily_us", "backfill_kr", "backfill_us", "adjust_kr", "refresh_us_adjusted")
+PRICE_WRITER_JOBS = db.PRICE_WRITER_JOBS
+#: 끝맺지 못한 실행이 **시세를 쓸 수 있었던 가장 긴 시간** — Actions 작업 시간 상한(`timeout-minutes`, 25.2150).
+#: 그 실행이 깨운 작업(`trigger_source` 가 `schedule`·`dispatch`)은 상한이 지나면 러너가 죽인다. 사본을 그 뒤에
+#: **처음부터 만들었으면**(`built_at`) 그 실행이 쓴 것은 모두 사본에 들어 있다 — 정리된 기록 하나로 사본을 다시 비우지
+#: 않는다(11-04 13:27Z 미국 실행이 45분에 죽고 19:56Z 에 정리되자 사본이 비워져 11-05 국내 배치가 Turso 에서 읽다 15분
+#: 상한에 두 번 걸렸다). 값은 .github/workflows 의 작업 상한: daily-kr.yml 20, daily-us.yml 55. 나머지는 Actions
+#: 최대 360분. 로컬 손 실행(`manual`)은 상한이 없어 예전처럼 "전부" 로 본다
+JOB_MAX_MINUTES = {"daily_kr": 20, "daily_us": 55}
+ACTIONS_MAX_MINUTES = 360
 #: `db.reap_stale_runs` 가 남기는 오류 문구의 앞부분
 REAPED_PREFIX = "끝맺지 못한 기록"
 
@@ -202,8 +210,31 @@ def _day(text: str) -> date:
         return date(1, 1, 1)  # "0000-00-00" — 처음부터
 
 
-def touched_ranges(remote, since_iso: str) -> tuple[str | None, dict[int, str]]:
-    """그 뒤로 끝난 실행들이 고친 시세 범위. (전 종목을 다시 받을 가장 이른 날, 종목별 가장 이른 날)."""
+def _범위_모름(row: Any, built_at: str | None) -> bool:
+    """정리된(끝맺지 못한) 실행 하나가 사본이 모르는 시세를 고쳤을 수 있나 (25.2150).
+
+    - 쓰기 앞 기록(`prices_touched_wal`)이 있는 실행은 시세를 쓰기 **전에** 고칠 범위를 실행 기록에 적었다 — 그 범위는
+      `prices_touched` 로 위에서 읽고, 없으면 쓰지 않은 것이다
+    - Actions 가 깨운 실행이 작업 상한(`JOB_MAX_MINUTES`) + 여유 안에 끝났을 것이고, 사본을 그 뒤에 처음부터
+      만들었으면(`built_at`) 모르는 것이 없다
+    - 그 밖(예전 코드의 실행·로컬 손 실행·시각을 못 읽음)은 모른다"""
+    job, started, trigger, wal = (list(row) + [None] * 4)[:4]
+    if wal not in (None, "", 0, "0"):
+        return False
+    if not built_at or trigger not in ("schedule", "dispatch"):
+        return True
+    try:
+        끝 = datetime.fromisoformat(str(started)) + timedelta(
+            minutes=JOB_MAX_MINUTES.get(str(job), ACTIONS_MAX_MINUTES)) + TOUCH_MARGIN  # fmt: skip
+        return 끝 > datetime.fromisoformat(built_at)
+    except (TypeError, ValueError):
+        return True
+
+
+def touched_ranges(remote, since_iso: str, built_at: str | None = None) -> tuple[str | None, dict[int, str]]:
+    """그 뒤로 끝난 실행들이 고친 시세 범위. (전 종목을 다시 받을 가장 이른 날, 종목별 가장 이른 날).
+
+    `built_at` = 이 사본을 처음부터 만든 시각(meta) — 정리된 실행이 그 전에 죽었으면 범위를 모른다고 보지 않는다"""
     rs = remote.execute(
         "SELECT step_log FROM batch_runs WHERE finished_at >= ? AND step_log LIKE ?",
         [since_iso, f'%"{db.PRICES_TOUCHED_KEY}"%'],
@@ -211,11 +242,14 @@ def touched_ranges(remote, since_iso: str) -> tuple[str | None, dict[int, str]]:
     전체: str | None = None
     종목별: dict[int, str] = {}
     끝맺지_못함 = remote.execute(
-        "SELECT COUNT(*) FROM batch_runs WHERE finished_at >= ? AND error_text LIKE ?"
+        # 고정 문자열 — 표지 열쇠는 `db.PRICES_TOUCHED_WAL_KEY`, 작업 여섯은 `PRICE_WRITER_JOBS`(시험이 묶는다)
+        "SELECT job_name, started_at, trigger_source,"
+        " CASE WHEN json_valid(step_log) THEN json_extract(step_log, '$.prices_touched_wal') END"
+        " FROM batch_runs WHERE finished_at >= ? AND error_text LIKE ?"
         " AND job_name IN (?, ?, ?, ?, ?, ?)",
         [since_iso, f"{REAPED_PREFIX}%", *PRICE_WRITER_JOBS],
     )
-    if 끝맺지_못함.rows and int(끝맺지_못함.rows[0][0] or 0):
+    if any(_범위_모름(r, built_at) for r in 끝맺지_못함.rows):
         전체 = "0000-00-00"  # 어디를 고쳤는지 모른다
     for (raw,) in rs.rows:
         try:
@@ -288,13 +322,15 @@ def sync(remote, conn: sqlite3.Connection, *, backend: str, allow_build: bool, n
     report["stocks"] = _copy_stocks(remote, conn)
     if 비었나:
         report["built"] = _pull_new(remote, conn, 0)
+        # 처음부터 만든 시각 — 이보다 앞서 죽은 실행이 쓴 시세는 모두 들어 있다(`_범위_모름`, 25.2150)
+        _set_meta(conn, built_at=시작)
     else:
         report["new"] = _pull_new(remote, conn, int(meta.get("max_id") or 0))
         지난 = datetime.fromisoformat(meta["synced_at"]) - TOUCH_MARGIN if meta.get("synced_at") else None
         if 지난 is None:
             전체, 종목별 = "0000-00-00", {}
         else:
-            전체, 종목별 = touched_ranges(remote, 지난.isoformat())
+            전체, 종목별 = touched_ranges(remote, 지난.isoformat(), meta.get("built_at"))
         if pending:
             if pending.get("all"):
                 전체 = min(전체 or "9999", str(pending.get("min_date") or "0000-00-00"))

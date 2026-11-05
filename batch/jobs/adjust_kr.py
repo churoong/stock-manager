@@ -160,6 +160,7 @@ def adjust_stocks(client: TursoClient, stock_ids: list[int]) -> dict[str, Any]:
                 for day, value in rows_to_write(days, adjusted, stored_by_stock.get(stock_id, {}))
             ]
             db.note_prices_touched((stock_id, args[2]) for _sql, args in statements)  # 시세 사본 (25.888)
+            db.persist_prices_touched(client)  # 쓰기 **전에** 실행 기록에 (25.2150)
             for chunk_start in range(0, len(statements), UPDATE_CHUNK):
                 client.batch(statements[chunk_start : chunk_start + UPDATE_CHUNK])
             updated += len(statements)

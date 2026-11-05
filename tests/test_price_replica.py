@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -135,8 +136,9 @@ def test_끝맺지_못한_시세_작업은_범위를_모르므로_전부로_본�
     rep.sync(원격, 사본, backend="turso", allow_build=True, now=지금)
     원격.execute("UPDATE prices SET adj_close = 1.0 WHERE stock_id = 1 AND date = '2026-08-25'")  # 기록 없이 고침
     번호 = db.start_batch_run(원격, job_name="daily_kr", market="KR", trade_date=None)  # type: ignore[arg-type]
+    # 25.2150 전 코드의 실행 — 쓰기 앞 기록 표지가 없다
     원격.execute(
-        "UPDATE batch_runs SET status = 'skipped', error_text = ?, finished_at = ? WHERE id = ?",
+        "UPDATE batch_runs SET status = 'skipped', error_text = ?, finished_at = ?, step_log = NULL WHERE id = ?",
         [f"{rep.REAPED_PREFIX}. 6시간 뒤 정리했다", (지금 + timedelta(minutes=5)).isoformat(), 번호],
     )
     전체, _ = rep.touched_ranges(원격, 지금.isoformat())
@@ -328,3 +330,87 @@ def test_팩토리_길로_사본이_와도_리포트_경고가_실제_글을_낸
         "신호를 계산하지 않았습니다 — 기준일 종가 없는 종목이 많음. 앞서 계산된 신호를 그대로 씁니다(기준일은 추천 머리에)"
     )
     assert any("감성 점수를 읽지 못해" in w for w in daily._계산_저하("scores", "signals", "2026-11-03"))
+
+
+# ── 25.2150 쓰기 앞 기록·처음 만든 시각 — 정리된 기록 하나로 사본을 통째로 비우지 않는다 ──────────────────────────────
+
+
+def _정리(원격, 번호: int, 언제: datetime) -> None:  # noqa: ANN001
+    원격.execute("UPDATE batch_runs SET status = 'skipped', error_text = ?, finished_at = ? WHERE id = ?",
+                 [f"{rep.REAPED_PREFIX}. 6시간 뒤 정리했다", 언제.isoformat(), 번호])  # fmt: skip
+
+
+def test_시세_작업은_표지를_달고_열고_쓰기_전에_범위를_적는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(db, "_열린_실행", [])
+    monkeypatch.setattr(db, "_가격_손댐", {})
+    monkeypatch.setattr(db, "_마지막_적은_손댐", [None])
+    원격 = _원격()
+    다른 = db.start_batch_run(원격, job_name="scores", market="KR", trade_date=None)  # type: ignore[arg-type]
+    assert 원격.execute("SELECT step_log FROM batch_runs WHERE id = ?", [다른]).rows[0][0] is None
+    번호 = db.start_batch_run(원격, job_name="daily_kr", market="KR", trade_date=None)  # type: ignore[arg-type]
+    assert json.loads(원격.execute("SELECT step_log FROM batch_runs WHERE id = ?", [번호]).rows[0][0]) == {
+        db.PRICES_TOUCHED_WAL_KEY: 1}
+    쓴것: list[str | None] = []
+    원래execute, 원래batch = 원격.execute, 원격.batch
+
+    def 범위():  # noqa: ANN202 — 시세를 쓰는 순간 실행 기록에 범위가 이미 있어야 한다
+        글 = 원래execute("SELECT step_log FROM batch_runs WHERE id = ?", [번호]).rows[0][0]
+        return json.loads(글).get(db.PRICES_TOUCHED_KEY, {}).get("min_date")
+
+    def execute(sql, args=None):  # noqa: ANN001, ANN202
+        if "INSERT INTO prices" in sql:
+            쓴것.append(범위())
+        return 원래execute(sql, args) if args is not None else 원래execute(sql)
+
+    def batch(statements):  # noqa: ANN001, ANN202
+        if any("INSERT INTO prices" in st[0] for st in statements):
+            쓴것.append(범위())
+        return 원래batch(statements)
+
+    monkeypatch.setattr(원격, "execute", execute)
+    monkeypatch.setattr(원격, "batch", batch)
+    db.bulk_upsert_prices(원격, [(3, "2026-09-01", 9.0, 9.0, 9.0, 9.0, 9.0, 1, 1, "KRW", "t", "t", 0.0)])  # type: ignore[arg-type]
+    assert 쓴것 and all(d == "2026-09-01" for d in 쓴것)
+
+
+def test_표지가_있는_정리된_기록은_적힌_범위만_다시_받는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(db, "_열린_실행", [])
+    원격 = _원격()
+    번호 = db.start_batch_run(원격, job_name="daily_us", market="US", trade_date=None)  # type: ignore[arg-type]
+    _정리(원격, 번호, 지금 + timedelta(minutes=5))
+    assert rep.touched_ranges(원격, 지금.isoformat()) == (None, {})  # 쓰기 전에 죽음 — 쓴 것 없음
+    원격.execute("UPDATE batch_runs SET step_log = json_set(step_log, '$.prices_touched', json(?)) WHERE id = ?",
+                 [json.dumps({"all": False, "min_date": "2026-09-01", "stocks": {"3": "2026-09-01"}}), 번호])  # fmt: skip
+    assert rep.touched_ranges(원격, 지금.isoformat()) == (None, {3: "2026-09-01"})
+
+
+@pytest.mark.parametrize(("job", "trigger", "시작_분전", "모름"), [
+    ("daily_kr", "schedule", 60, False),   # 시작 60분 뒤 처음부터 만듦 — 상한 20 + 여유 30 = 50분 안에 죽었다
+    ("daily_kr", "schedule", 40, True),    # 상한 + 여유 안 — 만든 뒤에도 썼을 수 있다
+    ("daily_us", "dispatch", 60, True),    # 미국 상한 55 + 30
+    ("daily_us", "dispatch", 90, False),
+    ("adjust_kr", "schedule", 300, True),  # 나머지는 Actions 최대 360분
+    ("daily_kr", "manual", 600, True),     # 로컬 손 실행은 상한이 없다
+])  # fmt: skip
+def test_예전_기록은_처음부터_만든_뒤에_죽을_수_없었으면_비우지_않는다(job: str, trigger: str, 시작_분전: int, 모름: bool) -> None:
+    만든때 = 지금.isoformat()
+    줄 = (job, (지금 - timedelta(minutes=시작_분전)).isoformat(), trigger, None)
+    assert rep._범위_모름(줄, 만든때) is 모름
+    assert rep._범위_모름(줄, None) is True  # 처음부터 만든 시각을 모르면 예전처럼
+    assert rep._범위_모름((job, 줄[1], trigger, 1), None) is False  # 표지가 있으면 적힌 범위를 믿는다
+
+
+def test_처음부터_만들면_만든_시각을_적고_정리된_예전_기록에_다시_비우지_않는다(사본, monkeypatch: pytest.MonkeyPatch) -> None:
+    """11-05 재현 — 11-04 미국 실행이 죽어 정리되자 사본이 비워지고, 다시 만든 뒤에도 그 전에 죽은 국내 실행 둘이 다음 날
+    정리되며 또 비울 뻔했다"""
+    monkeypatch.setattr(rep, "VERIFY_SAMPLE", 0)
+    monkeypatch.setattr(db, "_열린_실행", [])
+    원격 = _원격()
+    번호 = db.start_batch_run(원격, job_name="daily_kr", market="KR", trade_date=None)  # type: ignore[arg-type]
+    원격.execute("UPDATE batch_runs SET step_log = NULL, trigger_source = 'schedule', started_at = ? WHERE id = ?",
+                 [(지금 - timedelta(hours=3)).isoformat(), 번호])  # fmt: skip
+    r = rep.sync(원격, 사본, backend="turso", allow_build=True, now=지금)
+    assert r["usable"] and rep._meta(사본)["built_at"] == 지금.isoformat()
+    _정리(원격, 번호, 지금 + timedelta(hours=10))  # 다음 날 다음 실행이 정리
+    r = rep.sync(원격, 사본, backend="turso", allow_build=False, now=지금 + timedelta(hours=11))
+    assert r["usable"] and not r.get("cleared")
