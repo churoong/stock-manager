@@ -85,7 +85,7 @@ _가짜 = r"""
 const 응답 = __CFG__;
 const 불린 = [];
 async function agent(prompt, opts) {
-  불린.push({ label: opts.label, agentType: opts.agentType });
+  불린.push({ label: opts.label, agentType: opts.agentType, prompt });
   if (응답.__unregistered && String(opts.agentType || '').startsWith('stock-')) throw new Error('agent type not found');
   const k = Object.keys(응답).find((x) => !x.startsWith('__') && String(opts.label).replace(/\*$/, '') === x);
   if (k === undefined) return null;
@@ -170,6 +170,17 @@ def test_연구개발본부_단계_순서_판정_기획_후보_설계_검증() -
     assert 불린.index("실험설계팀") < 불린.index("데이터검증팀:portfolio-1")
     assert r["results"][0]["verdict"] == "pass" and r["results"][0]["spec"]["prereg"] == "등록문"
     assert r["judgments"][0]["verdict"] == "drop" and r["teams"] == ["포트폴리오·위험팀"]
+    글 = {x["label"]: x["prompt"] for x in out["불린"]}
+    assert "국면 의존" in 글["연구기획팀"]  # 성과판정 교훈이 기획 지시문에(25.2141)
+    assert "등록문" in 글["데이터검증팀:portfolio-1"] and "등록문" in 글["계량검증팀:portfolio-1"]  # 명세가 검증 지시문에
+    assert "하락장 관문" in 글["포트폴리오·위험팀"]  # 질문이 팀 지시문에
+
+
+def test_성과_기록_요약이_판정과_기획에_간다() -> None:
+    cfg = {"연구기획팀": {"questions": []}}
+    out = _돌림("discovery-round", cfg, {"evidence": "H 손절 뒤 반등 놓침 꼴"})
+    글 = {x["label"]: x["prompt"] for x in out["불린"]}
+    assert "H 손절 뒤 반등 놓침 꼴" in 글["성과판정팀"] and "H 손절 뒤 반등 놓침 꼴" in 글["연구기획팀"]
 
 
 def test_질문이_없으면_후보를_내지_않고_기획이_죽으면_모든_팀이_영역에서() -> None:
@@ -207,7 +218,36 @@ def test_팀마다_질문_수의_두_배까지_사용자_질문은_그대로() -
     q = [{"id": "U1", "question": "사용자 질문", "teams": ["data"]}]
     out = _돌림("discovery-round", {"데이터팀": _후보("data-1", "data-2", "data-3", q="U1")}, {"questions": q, "max": 3})
     assert [x["id"] for x in out["r"]["results"]] == ["data-1", "data-2"]
+    assert [x["id"] for x in out["r"]["skipped"]] == ["data-3"]  # 팀 상한에 걸린 것도 버리지 않는다(25.2141)
     assert "연구기획팀" not in [x["label"] for x in out["불린"]]  # 넘긴 질문이 있으면 기획을 부르지 않는다
+
+
+def test_질문은_셋까지_넘친_것은_남긴다() -> None:
+    qs = [{"id": f"Q{i}", "question": "q", "teams": ["data"]} for i in range(1, 5)]
+    r = _돌림("discovery-round", {"연구기획팀": {"questions": qs}})["r"]
+    assert [q["id"] for q in r["questions"]] == ["Q1", "Q2", "Q3"] and [q["id"] for q in r["questionsTrimmed"]] == ["Q4"]
+
+
+def test_예비가_후보를_내면_검증에_오르고_상한_밖은_남긴다() -> None:
+    """25.2141 — 예비 성공 길이 시험되지 않았다(버려도 통과). 예비 후보는 상한 3 까지라 거름이 붙지 않는다"""
+    out = _돌림("discovery-round", {"연구기획팀": _질문, "연구개발본부": _후보("r-1", "r-2", "r-3", "r-4")})
+    r, 불린 = out["r"], [x["label"] for x in out["불린"]]
+    assert [x["id"] for x in r["results"]] == ["r-1", "r-2", "r-3"] and all(x["team"] == "연구개발본부" for x in r["results"])
+    assert [x["id"] for x in r["skipped"]] == ["r-4"] and "연구기획팀:거름" not in 불린
+
+
+def test_팀을_고르면_다른_팀은_부르지_않고_상한_안이면_거름도_없다() -> None:
+    q = {"questions": [{"id": "Q1", "question": "q", "teams": ["selection", "data"]}]}
+    out = _돌림("discovery-round", {"연구기획팀": q, "데이터팀": _후보("data-1")}, {"teams": ["data"]})
+    불린 = [x["label"] for x in out["불린"]]
+    assert "종목선정팀" not in 불린 and "데이터팀" in 불린 and "연구기획팀:거름" not in 불린
+    assert out["r"]["teams"] == ["데이터팀"]
+
+
+def test_두_팀이_같은_id_를_내도_한_번씩만_검증한다() -> None:
+    cfg = {"연구기획팀": _질문, "종목선정팀": _후보("X"), "매매규칙팀": _후보("X")}
+    ids = [x["id"] for x in _돌림("discovery-round", cfg)["r"]["results"]]
+    assert ids == ["X", "trading:X"]
 
 
 def test_결함_루프는_죽은_감사와_반박을_버리지_않는다() -> None:

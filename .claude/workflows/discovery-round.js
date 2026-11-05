@@ -130,14 +130,19 @@ if (!질문) {
     `할 일 A — 발굴 루프 ${회차}회차 질문 2~3개를 정하세요. 맡길 수 있는 팀: ${쓸팀.map((t) => `${t.key}(${t.부서})`).join(', ')}.\n` +
     `성과판정팀 교훈:\n${교훈 || '(없음)'}\n` + (증거 ? `성과 기록 요약(주 세션):\n${증거}` : '성과 기록 요약: (없음 — 문서에서 뽑으세요)'),
     { schema: QUESTIONS, label: '연구기획팀', phase: 'Plan' })
-  질문 = ((기획 && 기획.questions) || []).slice(0, 3)
+  질문 = (기획 && 기획.questions) || []
   기획죽음 = !기획
 }
+// 질문은 셋까지 — 넘친 질문은 결과의 questionsTrimmed 로(소리 없는 자르기 금지, loops.md 0장, 25.2141)
+const 잘린질문 = 질문.slice(3)
+질문 = 질문.slice(0, 3)
+if (잘린질문.length) log(`질문 ${잘린질문.length}개를 셋 넘어 뺐다 — 결과의 questionsTrimmed`)
 // 기획이 죽었으면 모든 팀이 영역에서 1~2개(공통 규칙의 "질문이 없으면") — 질문 0 이면 그 회차는 후보를 내지 않는다
 const 팀질문 = (t) => 질문.filter((q) => (q.teams || []).includes(t.key))
 const 부를팀 = 기획죽음 ? 쓸팀 : 쓸팀.filter((t) => 팀질문(t).length)
 if (!기획죽음 && !부를팀.length) {
-  return { round: 회차, judgments: 판정들, judgeMissing: !판정, questions: 질문, results: [], note: '이번 회차 질문 없음 — 후보를 내지 않았다' }
+  return { round: 회차, judgments: 판정들, judgeMissing: !판정, questions: 질문, questionsTrimmed: 잘린질문, teams: [], deadTeams: [],
+    results: [], skipped: [], note: '이번 회차 질문 없음 — 후보를 내지 않았다' }
 }
 
 // ② 후보 — 질문을 받은 팀만
@@ -152,11 +157,20 @@ const 팀결과 = await parallel(부를팀.map((t) => () => {
 }))
 const 죽은팀 = 부를팀.filter((t, i) => !팀결과[i]).map((t) => t.부서)
 let 모음 = []
+const 팀넘침 = [] // 팀 상한에 걸린 후보 — 버리지 않고 skipped 로(25.2141)
+const 넣기 = (c, team) => {
+  // 두 팀이 같은 id 를 내면 뒤의 것에 팀 열쇠를 붙인다 — 같은 후보가 두 번 검증에 오르지 않게(25.2141)
+  const id = 모음.some((x) => x.id === c.id) ? `${team.key}:${c.id}` : c.id
+  모음.push({ ...c, id, team: team.부서 })
+}
 부를팀.forEach((t, i) => {
-  // 팀마다 질문 수 × 2 까지(질문 없으면 2) — 넘치면 자른다
+  // 팀마다 질문 수 × 2 까지(질문 없으면 2)
   const 상한 = Math.max(팀질문(t).length, 1) * 2
-  for (const c of ((팀결과[i] && 팀결과[i].candidates) || []).slice(0, 상한)) 모음.push({ ...c, team: t.부서 })
+  const 낸것 = (팀결과[i] && 팀결과[i].candidates) || []
+  for (const c of 낸것.slice(0, 상한)) 넣기(c, t)
+  for (const c of 낸것.slice(상한)) 팀넘침.push({ ...c, team: t.부서, why: `팀 상한 ${상한}` })
 })
+if (팀넘침.length) log(`팀 상한에 걸린 후보 ${팀넘침.length}개 — 결과의 skipped`)
 if (죽은팀.length) log(`결과 없는 팀: ${죽은팀.join('·')} — 결과의 deadTeams`)
 // 팀이 모두 죽은 것과 후보 0 을 가른다(25.1752). 모두 죽었으면 통합 발굴(예비)을 한 번
 if (죽은팀.length === 부를팀.length) {
@@ -164,10 +178,13 @@ if (죽은팀.length === 부를팀.length) {
     `발굴 루프 ${회차}회차(팀 결과 없음 — 통합 예비). docs/factors.md 12장 지난 회차 표와 겹치지 않는 후보를 최대 ${최대}개 내세요.` +
     (질문.length ? `\n질문:\n${질문.map((q) => `- ${q.id}: ${q.question}`).join('\n')}` : ''),
     { schema: CANDIDATES, label: '연구개발본부', phase: 'Discover' })
-  if (!예비) return { round: 회차, error: '후보 팀·통합 예비 모두 결과 없음 — 다시 돌린다', deadTeams: 죽은팀, questions: 질문, results: [] }
-  모음 = (예비.candidates || []).map((c) => ({ ...c, team: '연구개발본부' }))
+  if (!예비) return { round: 회차, error: '후보 팀·통합 예비 모두 결과 없음 — 다시 돌린다', deadTeams: 죽은팀, questions: 질문, questionsTrimmed: 잘린질문, results: [], skipped: 팀넘침 }
+  // 예비는 검증 상한까지만 — 넘친 것은 skipped(거름을 붙이지 않아 예산이 늘지 않는다, 25.2141)
+  const 예비후보 = 예비.candidates || []
+  모음 = 예비후보.slice(0, 최대).map((c) => ({ ...c, team: '연구개발본부' }))
+  for (const c of 예비후보.slice(최대)) 팀넘침.push({ ...c, team: '연구개발본부', why: `예비 상한 ${최대}` })
 }
-if (!모음.length) return { round: 회차, judgments: 판정들, questions: 질문, results: [], deadTeams: 죽은팀, note: '발굴 결과 없음(후보 0)' }
+if (!모음.length) return { round: 회차, judgments: 판정들, questions: 질문, questionsTrimmed: 잘린질문, results: [], deadTeams: 죽은팀, skipped: 팀넘침, note: '발굴 결과 없음(후보 0)' }
 
 // 걸러 고르기 — 상한보다 많을 때만. 죽거나 아는 후보가 없으면 팀 순서(선정 → 매매 → 포트폴리오·위험 → 데이터)대로
 phase('Triage')
@@ -219,5 +236,5 @@ return {
   round: 회차, userDirected: 지시분, judgments: 판정들, judgeMissing: !판정, questions: 질문, plannerMissing: 기획죽음,
   teams: 부를팀.map((t) => t.부서), deadTeams: 죽은팀,
   triage: 모음.length <= 최대 ? { none: '상한 안' } : 거름없음 ? { fallback: '팀 순서' } : { merged: 거름.merged || [], dropped: 거름.dropped || [] },
-  designMissing: !설계, results: 결과.filter(Boolean), skipped: 넘침,
+  questionsTrimmed: 잘린질문, designMissing: !설계, results: 결과.filter(Boolean), skipped: [...넘침, ...팀넘침],
 }
