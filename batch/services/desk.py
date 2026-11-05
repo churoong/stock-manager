@@ -9,6 +9,7 @@ R 대비 = 공통 구간 수익률 − 무작위 대조 R1·R2 평균(%p): 무�
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -57,11 +58,8 @@ def leaderboard(series: dict[str, list[tuple[str, float]]], names: dict[str, str
         값 = [x for r in CONTROL_IDS if (x := _구간(살.get(r) or [], start, end)) is not None]
         return sum(값) / len(값) if 값 else None
 
-    # R 대비는 **같은 끝 날**로 잰다(25.2143, 11-05 결함 회차 [권고]) — 대조 R 하나의 평가가 멈추면 그 R 은 멈춘
-    # 날까지, 계좌는 지금까지의 수익이 견줘져 오르는 장에서 실력 없이 R 대비가 섰다. 끝 = 계좌·평가가 있는 대조 R 의
-    # 마지막 날 가운데 가장 이른 날
-    대조끝 = [살[r][-1][0] for r in CONTROL_IDS if 살.get(r)]
-
+    # R 대비는 **R 마다 함께 평가된 마지막 날까지**(25.2143·25.2145 `vs_r_pairs`) — 대조 R 하나의 평가가 멈추면 그 R 은
+    # 멈춘 날까지, 계좌는 지금까지의 수익이 견줘져 오르는 장에서 실력 없이 R 대비가 섰다
     기준선 = 대조(시작)
     줄 = []
     for a, v in 살.items():
@@ -69,13 +67,11 @@ def leaderboard(series: dict[str, list[tuple[str, float]]], names: dict[str, str
         어림 = a not in 자리 and not 따로
         구간시작 = v[0][0] if 어림 or 따로 else 시작
         pct = _구간(v, 구간시작, None)
-        끝 = min([v[-1][0], *대조끝]) if 대조끝 else None
-        선 = 대조(구간시작, 끝)
-        맞춘pct = _구간(v, 구간시작, 끝)
+        차, 차끝 = (None, None) if a in CONTROL_IDS else vs_r_pairs(v, 살, 구간시작)
         줄.append({"id": a, "name": (names or {}).get(a) or a, "kind": KIND.get(a, ""), "open": v[0][0],
                   "last": v[-1][0], "since_open_pct": (v[-1][1] - 1) * 100, "window_pct": pct, "young": 어림,
                   "separate": 따로,
-                  "vs_r_pp": None if 선 is None or 맞춘pct is None or a in CONTROL_IDS else 맞춘pct - 선})  # fmt: skip
+                  "vs_r_pp": 차, "vs_r_to": 차끝 if 차끝 and 차끝 < v[-1][0] else None})  # fmt: skip
     줄.sort(key=lambda r: (r["separate"], r["young"], r["window_pct"] is None, -(r["window_pct"] or 0.0), r["id"]))
     return {"window_start": 시작, "control_pct": 기준선, "rows": 줄}
 
@@ -86,6 +82,37 @@ def _구간(v: list[tuple[str, float]], start: str, end: str | None) -> float | 
     기준 = 앞[-1] if 앞 else (v[0][1] if v else None)
     뒤 = [t for d, t in v if end is None or d <= end]
     return (뒤[-1] / 기준 - 1) * 100 if 기준 and 뒤 else None
+
+
+def r_pairs(mine: list[tuple[str, float]], series: dict[str, list[tuple[str, float]]],
+            start: str) -> list[tuple[str, str]]:
+    """대조 R 마다 짝지은 끝 날 — [(R, 끝)], 끝 = min(내 마지막 날, 그 R 의 마지막 날) (25.2143·25.2145).
+
+    R 대비는 R 마다 **그 R 과 내가 함께 평가된 마지막 날까지** 잰 차의 평균이다. 공통 끝 하나(가장 이른 날)를 쓰면
+    R 하나가 멈춘 날에 R 대비가 얼어붙고(그 뒤 내가 크게 뒤져도 통과로 남음), 끝이 시작보다 이르면 거꾸로 잰 쓰레기
+    값이 나왔다(25.2143 교차검증 [권고] — 내리는 장에서 +2.1%p). 끝이 시작 이하인 R 은 뺀다(함께 평가된 구간이 없다)"""
+    if not mine:
+        return []
+    out = []
+    for r in CONTROL_IDS:
+        v = sorted(series.get(r) or [])
+        if v and (끝 := min(mine[-1][0], v[-1][0])) > start:
+            out.append((r, 끝))
+    return out
+
+
+def vs_r_pairs(mine: list[tuple[str, float]], series: dict[str, list[tuple[str, float]]],
+               start: str) -> tuple[float | None, str | None]:
+    """(R 대비 %p, 가장 이른 끝 날) — `r_pairs` 의 짝마다 (내 수익 − 그 R 수익) 의 평균. 짝이 없으면 (None, None).
+    끝 날은 화면이 "…까지" 를 적는 데 쓴다(내 마지막 날보다 이르면)"""
+    차 = []
+    for r, 끝 in r_pairs(mine, series, start):
+        내, 남 = _구간(mine, start, 끝), _구간(sorted(series.get(r) or []), start, 끝)
+        if 내 is not None and 남 is not None:
+            차.append((내 - 남, 끝))
+    if not 차:
+        return None, None
+    return sum(x for x, _ in 차) / len(차), min(e for _, e in 차)
 
 
 def new_versions(
@@ -143,10 +170,24 @@ def rule_history(
             첫날 = 내것[0][0] if 내것 else None
             대조 = [x for r in CONTROL_IDS if (x := _판구간(sorted(series.get(r) or []), since, 끝, 첫날)) is not None]
             기준선 = sum(대조) / len(대조) if 대조 else None
+            if 끝 is None and 내것 and a not in CONTROL_IDS:
+                # 지금 판은 R 마다 함께 평가된 마지막 날까지 짝지어 잰다(25.2145 — 관문·순위표와 같은 잣대). 지난 판은
+                # 다음 판 시작이 끝이라 이미 같은 끝이다
+                차 = []
+                for r in CONTROL_IDS:
+                    rv = sorted(series.get(r) or [])
+                    if rv:
+                        e = min(내것[-1][0], rv[-1][0])
+                        m = _판구간([p for p in 내것 if p[0] <= e], since, None)
+                        o = _판구간([p for p in rv if p[0] <= e], since, None, 첫날)
+                        if m is not None and o is not None and e > (since or 첫날 or ""):
+                            차.append(m - o)
+                짝차 = sum(차) / len(차) if 차 else None
+            else:
+                짝차 = None if pct is None or 기준선 is None or a in CONTROL_IDS else pct - 기준선
             out[a].append({"version": ver, "from": since, "to": 끝, "prereg": prereg(a, ver),
                            "orders": None if orders is None else orders.get((a, ver), 0), "pct": pct,
-                           "control_pct": 기준선, "vs_r_pp": None if pct is None or 기준선 is None or a in CONTROL_IDS
-                           else pct - 기준선})  # fmt: skip
+                           "control_pct": 기준선, "vs_r_pp": 짝차})  # fmt: skip
     return out
 
 
@@ -399,6 +440,20 @@ def account_skips(accounts: dict[str, Any]) -> dict[str, str]:
     return out
 
 
+def _계좌건너뜀(row: dict[str, Any]) -> bool:
+    """그 실행에 계좌 건너뜀·위원회·지주사 실패가 있었나 — 칸(`paper_account_skips`)이 없는 25.2142 전 행은 계좌 기록
+    (`paper_accounts`)에서 다시 모은다(25.2145, 25.2142 교차검증 [권고] — 예전 행은 60일 동안 무사고로 읽혔다)"""
+    if row.get("paper_account_skips") not in (None, "", "{}"):
+        return True
+    계좌 = row.get("paper_accounts")
+    if isinstance(계좌, str):
+        try:
+            계좌 = json.loads(계좌)
+        except ValueError:
+            return False
+    return isinstance(계좌, dict) and bool(account_skips(계좌))
+
+
 def paper_step_failed(row: dict[str, Any]) -> bool:
     """그 실행의 가상모의투자 단계가 끝까지 돌지 못했나 — `step_log.paper.error`(예외) 또는 입금 없음 밖의 `skipped`
     (다른 시장 잠금 등). 실행은 `partial` 로 끝나 예전엔 무사고로 셌다(25.1636, 36회차 P3). `paper` 칸이 없는 실행
@@ -409,7 +464,7 @@ def paper_step_failed(row: dict[str, Any]) -> bool:
     if row.get("paper_account_errors") not in (None, "", "{}"):
         return True
     # 계좌가 건너뛰어졌거나 위원회·지주사가 깨져 그날 사지 못한 날도 사고다(25.2142 — `account_skips`)
-    if row.get("paper_account_skips") not in (None, "", "{}"):
+    if _계좌건너뜀(row):
         return True
     건너뜀 = row.get("paper_skipped")
     return bool(건너뜀) and str(건너뜀) not in PAPER_SKIP_OK
@@ -428,6 +483,10 @@ def batch_incident_days(rows: list[dict[str, Any]], expected: dict[str, list[str
         if r.get("status") in ("success", "partial") and not paper_step_failed(r):
             성공.add(k)
         elif r.get("status") == "failed":
+            실패.add(k)
+        # 계좌 건너뜀·위원회·지주사 실패는 같은 날 다시 돈 실행이 끝까지 돌아도 사고다(25.2145, 25.2142 교차검증
+        # [참고]) — 다시 돈 실행은 그 계좌가 `ORDERS_EXIST`("이미 냄")로 가서 지주사·위원회를 다시 돌지 않아 칸이 비었다
+        if _계좌건너뜀(r):
             실패.add(k)
     return sum(1 for job, 날들 in expected.items() for d in set(날들) if (job, d) not in 성공 or (job, d) in 실패)
 
@@ -556,15 +615,11 @@ def gate(
     첫들 = [x[0][0] for x in [v] + [sorted(series.get(r) or []) for r in CONTROL_IDS] if x]
     시작 = max(첫들) if v and 첫들 else None
     pct = _구간(전체, 시작, None) if 시작 else None
-    # R 대비·변동성 대비는 **같은 끝 날**로(25.2143) — 끝 = H·평가가 있는 R1·R2 의 마지막 날 가운데 가장 이른 날.
-    # 예전엔 계열마다 제 마지막 값까지 재, 평가가 멈춘 R 의 짧은 구간과 H 의 긴 구간을 견줬다(오르는 장에서 실력
-    # 없이 통과)
-    끝들 = [s[-1][0] for s in [전체] + [sorted(series.get(r) or []) for r in CONTROL_IDS] if s]
-    끝 = min(끝들) if 시작 and 끝들 else None
-    r_pct = _구간(전체, 시작, 끝) if 시작 else None
-    대조수익 = [x for r in CONTROL_IDS
-            if 시작 and (x := _구간(sorted(series.get(r) or []), 시작, 끝)) is not None]  # fmt: skip
-    vs_r = r_pct - sum(대조수익) / len(대조수익) if r_pct is not None and 대조수익 else None
+    # R 대비·변동성 대비는 **R 마다 함께 평가된 마지막 날까지**(25.2143·25.2145 `r_pairs`). 예전엔 계열마다 제 마지막
+    # 값까지 재, 평가가 멈춘 R 의 짧은 구간과 H 의 긴 구간을 견줬다(오르는 장에서 실력 없이 통과). 25.2143 의 공통 끝
+    # 하나는 멈춘 R 에 얼어붙고 끝 < 시작이면 거꾸로 쟀다
+    짝 = r_pairs(전체, series, 시작) if 시작 else []
+    vs_r, vs_r_to = vs_r_pairs(전체, series, 시작) if 시작 else (None, None)
     # 참고 — 노출을 H 에 맞춘 R(25.1702). 통과 판정에 넣지 않는다
     맞춤 = (exposure_matched_r(series, {mirror: cash or [], **(control_cash or {})}, mirror, 시작)
           if 시작 and cash and control_cash else None)  # fmt: skip
@@ -585,9 +640,10 @@ def gate(
         # R 쪽까지 막으면 R1 의 이어 멈춤 종목 하나로 H 관문이 판 끝까지 닫혔다(풀 길이 판 올림·장부 고침뿐). R 은
         # 참고로 싣는다. 같은 H 수익을 쓰는 지수 대비 칸도 같이 막는다
         멈춘평가["over"] = 멈춘평가["h_pct"] is not None and 멈춘평가["h_pct"] > GATE_VALUATION_GAP_PCT
-    대조 = [x for r in CONTROL_IDS if 시작 and (x := risk_ratio(sorted(series.get(r) or []), 시작, 끝)) is not None]
-    대조비 = sum(대조) / len(대조) if 대조 else None
-    내비 = risk_ratio(전체, 시작, 끝) if 시작 else None
+    비짝 = [(m, o) for r, 끝 in 짝 if (m := risk_ratio(전체, 시작, 끝)) is not None
+          and (o := risk_ratio(sorted(series.get(r) or []), 시작, 끝)) is not None]  # fmt: skip
+    대조비 = sum(o for _, o in 비짝) / len(비짝) if 비짝 else None
+    내비 = sum(m for m, _ in 비짝) / len(비짝) if 비짝 else None
     지수, 쓴지수 = index_return(index or [], 시작) if 시작 else (None, [])
     vs_idx = pct - 지수 if pct is not None and 지수 is not None else None
     # 참고 — 쉬는 현금이 지수를 냈다면(25.1540). 통과 판정에 넣지 않는다(31회차 검증 A 1)
@@ -606,6 +662,7 @@ def gate(
         {"key": "days", "label": f"모의 기간({판글}의 평가 횟수)", "now": len(v), "target": GATE_MIN_POINTS,
          "ok": len(v) >= GATE_MIN_POINTS},
         {"key": "vs_r", "label": "관문 구간 R 대비(%p)", "now": vs_r, "target": 0, "exposure_matched": 맞춤,
+         "to": vs_r_to if vs_r_to and 전체 and vs_r_to < 전체[-1][0] else None,
          "valuation_gap": 멈춘평가,
          "ok": vs_r is not None and vs_r > 0 and not (멈춘평가 or {}).get("over")},
         {"key": "vs_index", "label": "관문 구간 지수 대비(%p) — 같은 돈을 KOSPI·S&P500 반반에 넣었다면",

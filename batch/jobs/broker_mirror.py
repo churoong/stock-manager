@@ -276,7 +276,9 @@ TOTALS_SQL = (
 #: (`paper.account_errors`)·입금 없음 밖의 건너뜀(`paper.skipped` — 다른 시장 잠금)으로 끝나도 실행은 `partial` 이라
 #: 예전엔 "끝난 날" 로 셌다. 그날 H 평가 행은 미국 종가로 덮이지 않아(아침 국내 실행 값 — 미국 보유는 한 장 앞 종가)
 #: h_compare·h_check 가 미국 하루치 변동만큼 어긋났다. 관문 쪽은 25.1636 이 같은 구멍을 막았다(`desk.paper_step_failed`
-#: 와 같은 잣대 — 시험이 대조). `paper` 칸이 없는 옛 행·깨진 `step_log` 는 예전처럼 센다(모름 — 관문과 같다)
+#: 와 같은 잣대 — 시험이 대조). `paper` 칸이 없는 옛 행·깨진 `step_log` 는 예전처럼 센다(모름 — 관문과 같다).
+#: 관문의 `account_skips`(계좌 건너뜀·위원회·지주사 실패, 25.2142)는 **넣지 않는다** — 그날 H 가 사지 않았으면 KIS 도
+#: 베끼지 않아 대보기가 어긋나지 않는다
 US_DONE_SQL = (
     "SELECT DISTINCT date(started_at, '+9 hours') AS d FROM batch_runs WHERE job_name = ?"
     # 아래 경계는 한국 날짜끼리(25.2121 — `started_at >= 'YYYY-MM-DD'` 는 UTC 시각을 한국 날짜와 견줘, 그 날짜

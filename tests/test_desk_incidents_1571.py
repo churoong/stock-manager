@@ -120,7 +120,7 @@ def test_실행_기록_질의는_깨진_step_log_에도_돈다() -> None:
             "INSERT INTO batch_runs (job_name, trade_date, status, started_at, step_log) VALUES (?, ?, ?, ?, ?)",
             ["daily_kr", f"2026-10-1{i}", st, f"2026-10-1{i}T00:00:00+00:00", log])
     줄 = [dict(zip(("job_name", "trade_date", "status", "paper_error", "paper_skipped", "paper_account_errors",
-                    "paper_account_skips"), r, strict=True))
+                    "paper_account_skips", "paper_accounts"), r, strict=True))
           for r in mem.conn.execute(jd.BATCH_RUNS_SQL, ["daily_kr", "daily_us", "2026-01-01"]).fetchall()]
     줄.sort(key=lambda r: r["trade_date"])  # 질의에 순서가 없다
     assert [r["paper_error"] for r in 줄] == [None, "x", None, None, None]

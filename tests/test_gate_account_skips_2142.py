@@ -15,7 +15,8 @@ from batch.jobs import desk as jd
 from batch.services import desk
 from tests.test_portfolio_job import MemClient
 
-_칸 = ("job_name", "trade_date", "status", "paper_error", "paper_skipped", "paper_account_errors", "paper_account_skips")
+_칸 = ("job_name", "trade_date", "status", "paper_error", "paper_skipped", "paper_account_errors", "paper_account_skips",
+      "paper_accounts")
 
 
 def _읽기(logs: list[dict]) -> list[dict]:
@@ -55,3 +56,20 @@ def test_가상_단계가_계좌_실패를_한_칸에_모은다() -> None:
 
     글 = (Path(__file__).resolve().parents[1] / "batch" / "jobs" / "paper.py").read_text(encoding="utf-8")
     assert '건너뜀들 = desk.account_skips(계좌기록)' in 글 and '기록["account_skips"] = 건너뜀들' in 글
+
+
+def test_칸이_없는_옛_행도_계좌_기록에서_다시_모은다() -> None:
+    """25.2145 — 25.2142 전 실행은 `account_skips` 칸이 없어 60일 동안 무사고로 읽혔다"""
+    (옛,) = _읽기([{"paper": {"accounts": {"H": {"holding": {"error": "KeyError: 'weights'"}}}}}])
+    assert 옛["paper_account_skips"] is None and 옛["paper_accounts"]
+    assert desk.paper_step_failed(옛) and desk.batch_incident_days([옛], {"daily_kr": ["2026-10-10"]}) == 1
+    (정상,) = _읽기([{"paper": {"accounts": {"H": {"fills": 2}}}}])
+    assert not desk.paper_step_failed(정상)
+
+
+def test_같은_날_다시_돈_실행이_끝까지_돌아도_계좌_실패는_사고() -> None:
+    """25.2145 — 다시 돈 실행은 그 계좌가 '이미 냄' 으로 가 지주사 칸이 비어 그날이 무사고가 됐다"""
+    줄 = [{"job_name": "daily_kr", "trade_date": "2026-10-10", "status": "partial",
+           "paper_account_skips": '{"H": "holding: x"}'},
+          {"job_name": "daily_kr", "trade_date": "2026-10-10", "status": "success"}]  # fmt: skip
+    assert desk.batch_incident_days(줄, {"daily_kr": ["2026-10-10"]}) == 1
