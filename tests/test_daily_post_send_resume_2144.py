@@ -78,6 +78,7 @@ def test_이어_돌_때는_발송_블록을_건너뛰고_발송_뒤_단계는_�
     assert 잡음 < 글.index("        _kis와_요약()\n        try:\n            for 줄 in _주의_출력", 잡음)
     assert "KIS모의투자 베끼기·운용 요약이 빠졌을 수 있습니다" in daily.timeout_text(15, "KR")
 
+
 def test_이어_돌기는_보내지도_저장하지도_않고_KIS_와_운용요약만_돈다(monkeypatch: pytest.MonkeyPatch) -> None:
     """25.2146 — 실제 run 으로(25.2144 교차검증 [권고]: 정적 시험은 `발송끝남 = True` 를 지워 리포트가 다시 나가도 통과했다)"""
     from tests.test_report_store_fail_1180 import _준비
@@ -169,3 +170,16 @@ def test_이어_돌다_추천_단계에서_깨져도_실패_알림_제목이_이
     with pytest.raises(RuntimeError):
         daily.run("KR")
     assert 알림 == [daily.RESUME_FAIL_TITLE]
+
+
+def test_두_알림은_같은_안내를_쓰고_손_실행이_리포트를_다시_보낸다고_말한다() -> None:
+    """25.2151 (25.2149 교차검증 [권고]·[참고]) — 손 실행 `force` 는 기본 참이라 리포트가 한 번 더 간다. 시간 초과 안내는
+    시험이 없어 옛 '확인할 일을 보세요' 로 되돌려도 통과했다"""
+    from batch.notify import formatter
+
+    kr = daily.timeout_text(15, "KR")
+    assert "판정 날짜가 오늘 거래일인지" in kr and "리포트를 한 번 더 보냅니다" in kr and "확인할 일을 보세요" not in kr
+    for m in ("KR", "US"):
+        assert formatter.RESUME_HINT[m] in daily.timeout_text(15, m)
+        assert formatter.RESUME_HINT[m] in formatter.failure_alert(market=m, job_name="d", error_text="x",
+                                                                   last_success=None, title=daily.RESUME_FAIL_TITLE)

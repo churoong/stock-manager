@@ -3550,10 +3550,8 @@ class _이미보냄(Exception):  # noqa: N818 — 흐름 표지(오류가 아니
 
 # "확인할 일" 은 운용 요약이 적는 칸이라 요약이 빠진 날엔 오늘 몫이 없다 — 판정 날짜를 가리킨다
 # (25.2149, 25.2146 교차검증 [권고])
-_TIMEOUT_KR_NOTE = ("리포트 뒤 KIS모의투자 베끼기·운용 요약이 빠졌을 수 있습니다 — 그날 남은 예비 실행이 있으면"
-                    " 이어 돌고, 없으면 운용 화면의 판정 날짜가 오늘 거래일인지 보고 손 실행하세요. ")
-_TIMEOUT_US_NOTE = ("리포트 뒤 운용 요약이 빠졌을 수 있습니다 — 그날 남은 예비 실행이 있으면 이어 돌지만, 예약 마감"
-                    " 뒤면 KIS모의투자 베끼기는 다시 내지 않습니다. ")
+_TIMEOUT_KR_NOTE = "리포트 뒤 KIS모의투자 베끼기·운용 요약이 빠졌을 수 있습니다 — " + formatter.RESUME_HINT["KR"] + " "
+_TIMEOUT_US_NOTE = "리포트 뒤 운용 요약이 빠졌을 수 있습니다 — " + formatter.RESUME_HINT["US"] + " "
 
 
 def timeout_text(minutes: int, market: str | None = None) -> str:
