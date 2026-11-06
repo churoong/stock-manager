@@ -15,6 +15,7 @@ from typing import Any
 
 from batch.notify import formatter
 from batch.services import paper as pp
+from batch.services.etf_tactical import warning as _etf_warning
 from batch.services.paper import SEPARATE_IDS as _SEPARATE_IDS
 from batch.services.paper import account_name as _account_name
 from batch.services.paper import step_error_orders as _step_error_orders
@@ -1211,6 +1212,9 @@ def checks(
             out.append({"level": "high", "text": f"가상 {nm} 헌장 오류: {'; '.join(a['charter_errors'])[:120]}"})
         if a.get("error"):  # 모르는 매도 규칙으로 그 계좌를 건너뛴 날(25.1871 막이) — 텔레그램 줄에만 있었다(25.1873)
             out.append({"level": "high", "text": f"가상 {nm} {str(a['error'])[:100]} — 오늘 평가·매매 안 함"})
+        if (경고 := _etf_warning(a)) is not None:
+            # ETF 전술 X·Y 의 멈춤·못 산 날 — 리포트 끝 ⚠️ 줄과 같은 술어(25.2170, 25.2168 교차검증 [권고])
+            out.append({"level": 경고[0], "text": f"가상 {nm} {경고[1]}"})
         if a.get("substitute_overlap_hit"):
             # 무작위 대조의 옛 자리 신호가 다시 나와 뽑기가 운영·문서 규칙과 갈렸을 수 있는 날(25.1929 찾은 것,
             # 25.1931) — R 판 올림을 앞당길지 볼 자리. 장부 상태(`substitute_overlap`)만으로는 내지 않는다

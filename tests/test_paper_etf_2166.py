@@ -15,9 +15,9 @@ import pytest
 from batch.core import calendar as cal
 from batch.jobs import paper as job
 from batch.jobs import paper_etf
+from batch.services import desk, report_picks
 from batch.services import etf_tactical as et
 from batch.services import paper as pp
-from batch.services import report_picks
 from tests.test_paper_job_1445 import Client, _신호, 설정
 
 KODEX200, INVERSE, SPY, SH = 10, 11, 12, 13
@@ -154,7 +154,8 @@ def test_ETF_가_종목표에_없으면_사지_않고_까닭을_남긴다() -> N
     _지수(c, "KOSPI", "2026-10-14")
     c.conn.execute("UPDATE etfs SET stock_id = NULL WHERE name = 'KODEX 200'")
     p = paper_etf.plan(c, "X", "KR", "2026-10-14", {}, set())
-    assert p["buy_role"] is None and "tactical_missing" in p["skip"]
+    assert p["buy_role"] is None and p["tactical_missing"] == ["long"]
+    assert p["skip"] == "지수 ETF가 종목표에 이어지지 않음 — 이름 대조 확인"  # 사람 글엔 코드 이름 없이(25.2170)
 
 
 def test_buy_order_는_평가_총액_곱하기_비중을_시장가_한_줄로() -> None:
@@ -365,10 +366,12 @@ def test_주문_근거는_웹_거래내역이_읽는_자리와_ETF_비용(monkey
 def test_국면은_사라는데_못_산_날은_리포트와_결정_원장에(monkeypatch: pytest.MonkeyPatch) -> None:
     c = _계좌()
     _지수(c, "KOSPI", "2026-10-14")  # KODEX 200 시세 없음
-    줄, _ = _하루(c, monkeypatch, "2026-10-14", signals=False)
+    줄, 기록 = _하루(c, monkeypatch, "2026-10-14", signals=False)
     assert "⚠️ 가상 국내ETF 사지 못함 — ETF 시세 없음(이은 날부터 쌓인다)" in 줄
     assert c.q("SELECT kind, reason, stock_id FROM paper_decisions WHERE account_id = 'X'") == [
         ("skip", "ETF 전술: ETF 시세 없음(이은 날부터 쌓인다)", KODEX200)]
+    할일 = desk.checks(halted=False, paper=기록, broker=None, recon_bad=[], warnings=0)
+    assert {"level": "normal", "text": "가상 국내ETF 사지 못함 — ETF 시세 없음(이은 날부터 쌓인다)"} in 할일
 
 
 def test_든_ETF_의_연결이_끊기면_팔지_않고_멈춤을_알린다(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -383,4 +386,62 @@ def test_든_ETF_의_연결이_끊기면_팔지_않고_멈춤을_알린다(monke
     _지수값(c, "KOSPI", "2026-10-16", 331.0)
     줄, 기록 = _하루(c, monkeypatch, "2026-10-16", signals=False)
     assert c.q("SELECT COUNT(*) FROM paper_orders WHERE account_id = 'X' AND side = 'sell'") == [(0,)]
-    assert 기록["accounts"]["X"]["etf"]["action"] == "hold" and any(x.startswith("⚠️ 가상 국내ETF 멈춤 — 든 ETF") for x in 줄)
+    assert 기록["accounts"]["X"]["etf"]["action"] == "hold"
+    assert "⚠️ 가상 국내ETF 멈춤 — 든 지수 ETF의 종목표 연결이 끊김 — 이름 대조 확인" in 줄
+    # 상황실 '확인할 일' 도 같은 술어(25.2170)
+    할일 = desk.checks(halted=False, paper=기록, broker=None, recon_bad=[], warnings=0)
+    assert {"level": "high", "text": "가상 국내ETF 멈춤 — 든 지수 ETF의 종목표 연결이 끊김 — 이름 대조 확인"} in 할일
+
+    # 연결이 끊긴 채 국면이 바뀌면 그래도 판다 — 25.2168 은 늘 들고 가 하락 국면에도 98% 를 들었다(25.2170)
+    _지수값(c, "KOSPI", "2026-10-19", 150.0)
+    _시세(c, KODEX200, "2026-10-16", 30_000, 30_000)
+    줄, 기록 = _하루(c, monkeypatch, "2026-10-19", signals=False)
+    assert c.q("SELECT stock_id, quantity, reason FROM paper_orders WHERE account_id = 'X' AND side = 'sell'") == [
+        (KODEX200, 32, paper_etf.SWITCH_CODE)]
+    assert 기록["accounts"]["X"]["etf"]["action"] == "sell" and not [x for x in 줄 if "국내ETF 멈춤" in x]
+    assert 기록["accounts"]["X"]["etf"]["skip"] is None  # 파는 날은 멈춤이 아니다 — 실행 기록에도 남기지 않는다
+
+
+def test_인버스_연결만_끊겨도_상승_국면이면_지수_ETF_를_산다(monkeypatch: pytest.MonkeyPatch) -> None:
+    c = _계좌()
+    _지수(c, "KOSPI", "2026-10-14")
+    _시세(c, KODEX200, "2026-10-14", 30_000, 30_000)
+    c.conn.execute("UPDATE etfs SET stock_id = NULL WHERE name = 'KODEX 인버스'")
+    줄, 기록 = _하루(c, monkeypatch, "2026-10-14", signals=False)
+    assert [r[:2] for r in _주문(c)] == [(KODEX200, "buy")] and not [x for x in 줄 if "국내ETF" in x and "⚠️" in x]
+    assert 기록["accounts"]["X"]["etf"]["action"] == "buy"
+
+
+def test_경고는_나야_할_날에만(monkeypatch: pytest.MonkeyPatch) -> None:
+    """다른 시장 실행·같은 국면·갈아타 파는 날·같은 날 다시 돈 실행(이미 열린 매수)엔 ⚠️ 도 결정 원장 skip 도 없다"""
+    c = _계좌(etf=("X", "Y"))
+    _지수(c, "KOSPI", "2026-10-14")
+    _지수(c, "SP500", "2026-10-14")
+    _시세(c, KODEX200, "2026-10-14", 30_000, 30_000)
+
+    def 경고(줄: list[str]) -> list[str]:
+        return [x for x in 줄 if x.startswith("⚠️") and ("ETF 사" in x or "ETF 멈" in x)]
+
+    줄, 기록 = _하루(c, monkeypatch, "2026-10-14", signals=False)  # 국내 실행 — Y 는 판단하지 않는다
+    assert 경고(줄) == [] and 기록["accounts"]["Y"]["etf"]["skip"] == "이 계좌의 시장이 아님"
+    줄, _ = _하루(c, monkeypatch, "2026-10-14", signals=False)  # 같은 날 다시 — 매수가 이미 열려 있다
+    assert 경고(줄) == [] and len(_주문(c)) == 1
+    _지수값(c, "KOSPI", "2026-10-15", 330.0)
+    _시세(c, KODEX200, "2026-10-15", 30_000, 30_000)
+    줄, _ = _하루(c, monkeypatch, "2026-10-15", signals=False)  # 같은 국면 — 그대로
+    assert 경고(줄) == []
+    _지수값(c, "KOSPI", "2026-10-16", 150.0)
+    줄, 기록 = _하루(c, monkeypatch, "2026-10-16", signals=False)  # 갈아타 파는 날
+    assert 경고(줄) == [] and 기록["accounts"]["X"]["etf"]["action"] == "sell"
+    assert c.q("SELECT COUNT(*) FROM paper_decisions WHERE account_id IN ('X', 'Y') AND kind = 'skip'") == [(0,)]
+    assert all("ETF" not in x["text"] for x in desk.checks(halted=False, paper=기록, broker=None, recon_bad=[],
+                                                          warnings=0))  # fmt: skip
+
+
+def test_경고_술어() -> None:
+    assert et.warning({"etf": {"action": None, "skip": "이 계좌의 시장이 아님"}}) is None
+    assert et.warning({"etf": {"action": "buy"}, "buy": {"skipped": et.ALREADY_OPEN}}) is None
+    assert et.warning({"etf": {"action": "sell", "skip": None}, "buy": {"skipped": "살 것 없음"}}) is None
+    assert et.warning({"etf": {"action": "buy"}, "buy": {"skipped": "환율 없음"}}) == ("normal", "사지 못함 — 환율 없음")
+    assert et.warning({"etf": {"action": "hold", "skip": "끊김"}}) == ("high", "멈춤 — 끊김")
+    assert et.warning({"etf": {"action": "hold", "skip": None}}) is None

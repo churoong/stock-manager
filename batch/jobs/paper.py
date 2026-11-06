@@ -40,6 +40,7 @@ from batch.services import risk_gate as rg
 from batch.services import sell_flags as sf
 from batch.services import signals as sg
 from batch.services import stop_vol as sv
+from batch.services.etf_tactical import warning as et_warning
 
 log = logging.getLogger(__name__)
 
@@ -2382,8 +2383,6 @@ def run_step(
                 국면 = 전술계획.get("regime")
                 a기록["etf"] = {"regime": getattr(국면, "state", None), "index_as_of": getattr(국면, "as_of", None),
                                "action": 전술계획.get("action"), "skip": 전술계획.get("skip")}  # fmt: skip
-                if 전술계획.get("action") == "hold" and 전술계획.get("skip"):
-                    줄.append(f"⚠️ 가상 {계이름} 멈춤 — {전술계획['skip']}")  # 연결 끊긴 보유(25.2168)
             else:
                 매도 = sell_decisions(client, market, 규칙, 계좌체결, 멈춘, stock_cache, targets,
                                    cal.local_today(market), 보강캐시, 판정메모, 감시선, 감시오류)  # fmt: skip
@@ -2509,15 +2508,11 @@ def run_step(
                                     {"etf": o["rationale"]["criteria"]}, o["ref_price"], o["ref_date"],
                                     지금))  # fmt: skip
                 a기록["buy"] = b기록
-                못삼 = b기록.get("skipped")
-                if 전술계획.get("action") == "buy" and 못삼 and not 못삼.startswith("같은 ETF"):
-                    # 국면은 사라고 하는데 못 산 날 — step_log 에만 두면 계좌가 현금으로 멈춘 것을 아무도 모른다
-                    # (이름 대조 실패·시세 없음·환율 없음, 25.2168, 25.2166 교차검증 [권고])
-                    줄.append(f"⚠️ 가상 {계이름} 사지 못함 — {b기록['skipped']}")
-                    목표 = (전술계획.get("ids") or {}).get(전술계획.get("buy_role") or "")
-                    if 목표 is not None:
-                        문장.append(_결정판(aid, market, trade_date, int(목표), "skip", f"ETF 전술: {b기록['skipped']}",
-                                        {"etf": paper_etf.criteria(전술계획["regime"])}, None, None, 지금))  # fmt: skip
+                목표 = (전술계획.get("ids") or {}).get(전술계획.get("buy_role") or "")
+                if (경고 := et_warning(a기록)) and 경고[1].startswith("사지 못함") and 목표 is not None:
+                    # 국면은 사라는데 못 산 날 — 결정 원장에도(25.2168). 기준 종가는 비워 성과 분해에 들지 않는다
+                    문장.append(_결정판(aid, market, trade_date, int(목표), "skip", f"ETF 전술: {b기록['skipped']}",
+                                    {"etf": paper_etf.criteria(전술계획["regime"])}, None, None, 지금))  # fmt: skip
             elif allocate and settings is not None and signal_rows:
                 # 손절이 선 보유에 더 사지 않는다 — **계좌 규칙 전의** 판정에서 (검증 [필수] 4: 규칙으로 거른 뒤의
                 # 매도에서 뽑으면 손절을 따르지 않는 D 는 늘 비어, 떨어진 보유를 목표 비중까지 날마다 더 샀다 —
@@ -2747,6 +2742,9 @@ def run_step(
                  + f" · 체결 {a기록['fills']}건")  # fmt: skip
         if not 검["recon_ok"]:
             줄.append(f"⚠️ 가상 {계이름} 장부 검산 어긋남 — {검['recon_note']}")
+        if (경고 := et_warning(a기록)) is not None:
+            # ETF 전술의 멈춤·못 산 날 — 상황실 '확인할 일' 과 같은 술어(25.2170)
+            줄.append(f"⚠️ 가상 {계이름} {경고[1]}")
     for acct in accounts:
         try:
             _계좌_단계(acct)

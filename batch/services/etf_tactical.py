@@ -31,6 +31,25 @@ INVERSE_WEIGHT = 0.5
 UP, DOWN, MIXED, UNKNOWN = "up", "down", "mixed", "unknown"
 LABEL = {UP: "상승", DOWN: "하락", MIXED: "엇갈림", UNKNOWN: "모름"}
 ACCOUNTS_ROLE_LABEL = {"long": "지수 ETF", "inverse": "인버스"}
+#: 같은 ETF 매수가 이미 열린 날의 건너뜀 글 — 같은 날 다시 돈 실행이 낸다. 경고가 아니다(`warning`)
+ALREADY_OPEN = "같은 ETF 매수가 이미 열려 있음"
+
+
+def warning(rec: dict) -> tuple[str, str] | None:
+    """ETF 전술 계좌 실행 기록(`step_log.paper.accounts.X`) → (수준 high·normal, 글) 또는 None.
+
+    리포트의 ⚠️ 줄(`jobs/paper`)과 운용 요약 '확인할 일'(`desk.checks`)이 **같은 술어**를 쓴다 — 하나만 고치면
+    텔레그램 끝에는 경고가 있는데 머리·상황실은 "확인할 일: 없음" 이 됐다(25.2170, 25.1873 과 같은 꼴).
+    - 멈춤: 판단은 했는데(`action` hold) 건너뛴 까닭이 있다 — 든 ETF 의 종목표 연결이 끊긴 날
+    - 사지 못함: 국면은 사라는데(`action` buy) 매수가 건너뛰어졌다(시세·환율·연결·1주) — 이미 열린 매수는 뺀다
+    계좌의 시장이 아닌 실행(`action` 없음)·파는 날·같은 국면은 None"""
+    e = rec.get("etf") or {}
+    if e.get("action") == "hold" and e.get("skip"):
+        return "high", f"멈춤 — {e['skip']}"
+    못삼 = (rec.get("buy") or {}).get("skipped")
+    if e.get("action") == "buy" and 못삼 and 못삼 != ALREADY_OPEN:
+        return "normal", f"사지 못함 — {못삼}"
+    return None
 
 #: 계좌마다 판정 지수(`index_prices.index_code`)와 두 ETF 의 몫. ETF 종목은 `etf_link.TACTICAL_ETFS` 가 잇는다
 #: 국내는 이름으로(코드를 박지 않는다), 미국은 티커로

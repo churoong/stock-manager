@@ -67,13 +67,23 @@ def plan(client: Any, aid: str, market: str, trade_date: str, positions: dict[in
     든 = [sid for sid, p in positions.items() if p.quantity > 0]
     모르는 = [sid for sid in 든 if sid not in 몫of]
     held = 몫of[든[0]] if len(든) == 1 and not 모르는 else (None if not 든 else "?")
+    끊긴 = [몫 for 몫, sid in ids.items() if sid is None]
     out: dict[str, Any] = {"regime": r, "want": want, "held": held, "ids": ids, "sells": {}, "buy_role": None}
-    if 모르는 and any(v is None for v in ids.values()):
-        # 든 ETF 의 종목표 연결이 끊긴 날(이름이 바뀌어 대조 실패 등) — 모르는 보유로 보고 팔면 국면이 그대로여도
-        # 정리 매도가 나간다. 팔지 않고 까닭만 남긴다(25.2168, 25.2166 교차검증 [참고])
-        out["action"] = "hold"
-        out["skip"] = "든 ETF 의 종목표 연결이 끊김 — 팔지 않음(etf_link tactical_missing)"
-        return out
+    if 끊긴:
+        out["tactical_missing"] = 끊긴  # 실행 기록에만 — 사람이 읽는 글엔 코드 이름을 싣지 않는다(25.2170)
+    든sid: int | None = None  # 연결이 끊긴 몫으로 본 보유의 실제 종목
+    if 모르는 and 끊긴:
+        if len(든) == 1 and len(끊긴) == 1:
+            # 든 ETF 하나의 종목표 연결이 끊긴 날(이름이 바뀌어 대조 실패 등) — 그 보유를 끊긴 몫으로 보고 규칙대로
+            # 간다: 국면이 그대로면 들고 가고(멈춤 알림), 바뀌면 판다. 25.2168 은 늘 들고 가 하락 국면에도 98% 를
+            # 들 수 있었다(25.2170, 25.2168 교차검증 [권고]) — 그 전엔 국면이 그대로여도 정리 매도가 나갔다
+            held = out["held"] = 끊긴[0]
+            든sid = 든[0]
+            out["skip"] = f"든 {et.ACCOUNTS_ROLE_LABEL[held]}의 종목표 연결이 끊김 — 이름 대조 확인"
+        else:
+            out["action"] = "hold"
+            out["skip"] = "든 ETF 의 종목표 연결이 끊김 — 팔지 않음, 이름 대조 확인"
+            return out
     if held == "?":
         # 몫이 둘이거나 모르는 ETF 를 든 날 — 엔진이 만든 꼴이 아니다. 모두 판다(그다음 실행에 목표를 산다)
         파는 = [sid for sid in 든 if sid not in open_sells]
@@ -82,13 +92,16 @@ def plan(client: Any, aid: str, market: str, trade_date: str, positions: dict[in
         return out
     할일, 몫 = et.step(held, want)
     out["action"] = 할일
+    if 할일 != "hold":
+        out.pop("skip", None)  # 끊긴 몫의 보유를 파는 날 — 멈춤이 아니다(알림은 사는 날 '사지 못함' 으로)
     if 할일 == "sell":
-        sid = ids[몫]  # type: ignore[index]
+        sid = 든sid if 든sid is not None else ids[몫]  # type: ignore[index]
         if sid is not None and sid not in open_sells:
-            out["sells"] = {sid: ([SWITCH_CODE], [_근거(r, f"{et.LABEL[r.state]} 국면 → {몫} 정리", sid)])}
+            글 = f"{et.LABEL[r.state]} 국면 → {et.ACCOUNTS_ROLE_LABEL[몫 or 'long']} 정리"
+            out["sells"] = {sid: ([SWITCH_CODE], [_근거(r, 글, sid)])}
     elif 할일 == "buy":
         if ids.get(몫) is None:  # type: ignore[arg-type]
-            out["skip"] = f"{몫} ETF 가 종목표에 이어지지 않음(etf_link tactical_missing)"
+            out["skip"] = f"{et.ACCOUNTS_ROLE_LABEL[몫 or 'long']}가 종목표에 이어지지 않음 — 이름 대조 확인"
         else:
             out["buy_role"] = 몫
     return out
@@ -136,7 +149,7 @@ def buy_order(client: Any, p: dict[str, Any], *, market: str, valuation: pp.Valu
     if not 환율:
         return [], {"skipped": "환율 없음"}
     if any(o.stock_id == sid for o in open_buys):
-        return [], {"skipped": "같은 ETF 매수가 이미 열려 있음"}
+        return [], {"skipped": et.ALREADY_OPEN}
     예약 = pp.reserved_krw(open_buys, {"USD": fx_rate})
     if 예약 is None:
         return [], {"skipped": "미체결 달러 주문의 환율 모름"}
