@@ -12,6 +12,31 @@ import { accountName } from "@/lib/accountNames";
 
 /** 최근 두 날 — 시장마다 가장 최근 칸을 고르려고. 기본키 역순이라 두 행만 읽는다 */
 export const DESK_LATEST = "SELECT as_of, summary_json, updated_at FROM paper_desk ORDER BY as_of DESC LIMIT 2";
+/** 계좌 표 — 순위표에 아직 없는 계좌(개설 전·첫 평가 전)를 운용 화면에 보이려고 읽는다(25.2175). 열셋 남짓 행 */
+export const DESK_ACCOUNTS = "SELECT id, created_at FROM paper_accounts ORDER BY id";
+/** 순위표 밖 계좌 한 줄 — `opens` 는 개설일(YYYY-MM-DD), `before` 는 오늘(KST)이 개설일 전인가 */
+export interface PendingAccount { id: string; opens: string | null; before: boolean }
+/**
+ * 순위표(배치 운용 요약 `leaderboard`)에 없는 계좌. 순위표는 평가 기록(`paper_daily`)이 있는 계좌만 담는다
+ * (batch/services/desk.leaderboard) — 새로 연 계좌는 첫 평가 전까지 운용 화면에서 아예 안 보였다(2026-11-06 국내ETF·미국ETF,
+ * 25.2175). 그 계좌를 "개설 전 · 날짜부터" / "첫 평가 전" 으로 아래에 붙인다. 순서는 계좌 id
+ */
+export function pendingAccounts(
+  lb: DeskLeaderboard | null | undefined, accounts: Array<{ id: string; created_at?: string | null }>, today: string,
+): PendingAccount[] {
+  const 있음 = new Set((lb?.rows ?? []).map((r) => r.id));
+  return accounts
+    .filter((a) => !있음.has(a.id))
+    .map((a) => {
+      const opens = a.created_at ? String(a.created_at).slice(0, 10) : null;
+      return { id: a.id, opens, before: opens != null && today < opens };
+    });
+}
+/** 순위표 밖 계좌의 전략 칸 글 */
+export function pendingText(p: PendingAccount): string {
+  if (p.before && p.opens) return `개설 전 · ${p.opens}부터`;
+  return p.opens ? `첫 평가 전 · ${p.opens} 개설` : "첫 평가 전";
+}
 
 export type DeskMarketKey = "KR" | "US";
 export interface DeskRow {

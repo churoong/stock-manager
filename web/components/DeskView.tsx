@@ -18,6 +18,8 @@ import {
   pctText,
   gateLooksText,
   ppText,
+  pendingAccounts,
+  pendingText,
   vsRToText,
   READINESS_TEXT,
   type DeskMarket,
@@ -27,6 +29,7 @@ import {
 } from "@/lib/desk";
 import { amountText, perfLines, statusText } from "@/lib/kisPaper";
 import { accountName } from "@/lib/accountNames";
+import { kstToday } from "@/lib/paper";
 
 /**
  * 운용 상황실 — 첫 화면 (docs/desk.md 2장, docs/infra.md 25.1501).
@@ -139,18 +142,20 @@ export function MarketCard({ m, k, mirror }: { m: DeskMarket & { as_of: string }
 
 export default function DeskView() {
   const [desk, setDesk] = useState<Desk | null>(null);
+  const [accounts, setAccounts] = useState<Array<{ id: string; created_at: string | null }>>([]);
   const [ready, setReady] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     void (async () => {
-      const r = await readJson<{ ready: boolean; desk: Desk }>("/api/desk");
-      const body = bodyOf<{ ready: boolean; desk: Desk }>(r);
+      const r = await readJson<{ ready: boolean; desk: Desk; accounts?: Array<{ id: string; created_at: string | null }> }>("/api/desk");
+      const body = bodyOf<{ ready: boolean; desk: Desk; accounts?: Array<{ id: string; created_at: string | null }> }>(r);
       if (!r.ok || body.errors?.length) setError(body.errors?.join(" · ") || r.error || "운용 요약을 읽지 못했습니다");
       else if (!body.desk) setError("운용 요약을 읽지 못했습니다(응답 꼴이 다름 — 새로 고침해 주세요)");
       else {
         setReady(body.ready !== false);
         setDesk(body.desk);
+        setAccounts(Array.isArray(body.accounts) ? body.accounts : []);
       }
     })();
   }, []);
@@ -169,6 +174,8 @@ export default function DeskView() {
 
   const checks = allChecks(desk.markets, desk.as_of);
   const lb = desk.leaderboard;
+  // 순위표 밖 계좌(개설 전·첫 평가 전) — 아래에 붙인다(25.2175)
+  const 밖 = pendingAccounts(lb, accounts, kstToday());
   const mirror = desk.mirror_account ?? "H";
   const kis = desk.kis_account;
   return (
@@ -238,12 +245,27 @@ export default function DeskView() {
                       <td className="text-right text-xs text-slate-500">{r.open}</td>
                     </tr>
                   ))}
+                  {밖.map((p) => (
+                    <tr key={p.id} className="border-t border-slate-100 text-slate-500 dark:border-slate-800">
+                      <td className="py-1">
+                        <b>{accountName(p.id)}</b>
+                      </td>
+                      <td className="text-xs text-sky-700 dark:text-sky-400">{pendingText(p)}</td>
+                      <td className="text-right">—</td>
+                      <td className="text-right">—</td>
+                      <td className="text-right">—</td>
+                      <td className="text-right text-xs">{p.opens ?? "—"}</td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
           </>
         ) : (
-          <p className="mt-2 text-sm text-slate-500">아직 평가 기록이 있는 계좌가 없습니다</p>
+          <p className="mt-2 text-sm text-slate-500">
+            아직 평가 기록이 있는 계좌가 없습니다
+            {밖.length ? ` — ${밖.map((p) => `${accountName(p.id)}(${pendingText(p)})`).join(", ")}` : ""}
+          </p>
         )}
         <p className="mt-2 text-sm">
           <Link href="/paper" className="underline">계좌별 자세히 →</Link>
