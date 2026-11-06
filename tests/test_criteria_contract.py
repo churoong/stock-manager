@@ -40,7 +40,8 @@ from pathlib import Path
 
 import pytest
 
-from batch.services import accumulation, etf, etf_satellite, insider, sell_flags, signals, verdict
+from batch.jobs import paper_etf
+from batch.services import accumulation, etf, etf_satellite, etf_tactical, insider, sell_flags, signals, verdict
 from batch.services import criteria as criteria_svc
 
 웹_소스 = Path(__file__).resolve().parent.parent / "web" / "lib" / "recommend.ts"
@@ -90,6 +91,8 @@ def 웹의_거르개(행: dict, 요구: set[str]) -> bool:
         ),
         listed_shares=1_000_000,
     )[0],
+    # ETF 전술 X·Y 의 지수 국면 근거(docs/paper.md 17장, 25.2166) — 직접 딕셔너리를 짓는다
+    "ETF 전술 국면": lambda: paper_etf.criteria(etf_tactical.Regime("up", "2026-11-06", 110.0, 100.0, 0.02))[0],
 }
 
 
@@ -102,6 +105,7 @@ def 웹의_거르개(행: dict, 요구: set[str]) -> bool:
     "batch/services/sell_flags.py::_criterion",
     "batch/services/insider.py::criteria_rows",
     "batch/services/verdict.py::_row",
+    "batch/jobs/paper_etf.py::criteria",
 }
 
 

@@ -32,6 +32,9 @@ US_ETF_SQL = "SELECT id FROM stocks WHERE country = 'US' AND ticker = ? AND asse
 LAST_CLOSE_SQL = (
     "SELECT close, date FROM prices WHERE stock_id = ? AND date <= ? AND close > 0 ORDER BY date DESC LIMIT 1"
 )
+#: ETF 전술 계좌의 종목·업종 상한(%) — 상한 없음. 지수 ETF 한 종목을 평가 총액의 98% 까지 든다(17.1). 종목 계좌의
+#: 기본 상한(`settings_range.DEFAULT_MAX_*`)을 다시 적은 것이 아니라 다른 값이다
+CAP_PCT = 100.0
 #: 판정에 읽는 지수 행 — 200일선 + 넉넉히(휴장·빠진 날)
 INDEX_ROWS = et.SMA_DAYS + 40
 

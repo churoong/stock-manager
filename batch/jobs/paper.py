@@ -2486,7 +2486,7 @@ def run_step(
                 # ETF 는 그 안에서 이미 나뉘어 있다 — 종목 하나 10%·업종 30% 상한은 종목 계좌의 것(paper.md 17.1).
                 # 현금·하루 손실·멈춤 스위치·주문 수 막이는 다른 계좌와 같다
                 문맥 = dc_replace(문맥, **_관문_열린칸(client, aid, v, 열린, fx, stock_cache),
-                                max_stock_pct=100.0, max_sector_pct=100.0)  # fmt: skip
+                                max_stock_pct=paper_etf.CAP_PCT, max_sector_pct=paper_etf.CAP_PCT)  # fmt: skip
                 통과, 막힘 = rg.gate(후보, 문맥)
                 막힌수 += len(막힘)
                 막힌모두 += 막힘
