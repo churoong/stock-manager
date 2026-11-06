@@ -29,6 +29,8 @@ export interface DeskLeaderboard { window_start: string | null; control_pct?: nu
 export interface RuleSpan {
   version: number; from: string; to: string | null; orders: number | null;
   pct: number | null; control_pct: number | null; vs_r_pp: number | null;
+  /** 지금 판 R 대비를 잰 끝 — 대조 R 기록이 먼저 멈췄을 때만(25.2159). 없으면 계좌의 마지막 날까지 */
+  vs_r_to?: string | null;
   /** 판 사전 등록(25.1520) — null = 등록 없이 연 판, 없음 = 그 전 요약 */
   prereg?: { hypothesis: string; metric: string; retro?: boolean } | null;
 }
@@ -294,7 +296,9 @@ export function notSentText(step: Record<string, unknown> | null | undefined): s
 /** 판 이력 한 줄 글 — "판 2 · 2026-10-16~지금 · 주문 34건 · 시간가중 +1.20% (같은 기간 R 평균 +0.40%, R 대비 +0.80%p)" */
 export function ruleSpanText(r: RuleSpan): string {
   const 끝 = r.to ? `~${r.to}` : "~지금";
-  const 대조 = r.control_pct != null ? ` (같은 기간 R 평균 ${pctText(r.control_pct)}${r.vs_r_pp != null ? `, R 대비 ${ppText(r.vs_r_pp)}` : ""})` : "";
+  // R 대비가 대조 R 기록이 멈춘 날까지 잰 값이면 끝을 적는다(25.2159 — 순위표·관문 칸과 같게, 25.2147)
+  const R끝 = r.vs_r_pp != null && r.vs_r_to ? `, ${r.vs_r_to}까지` : "";
+  const 대조 = r.control_pct != null ? ` (같은 기간 R 평균 ${pctText(r.control_pct)}${r.vs_r_pp != null ? `, R 대비 ${ppText(r.vs_r_pp)}${R끝}` : ""})` : "";
   // from '' = 계좌의 처음부터, 주문 수 null = 셀 수 없었음 (25.1505)
   const 주문 = r.orders == null ? "" : ` · 주문 ${r.orders.toLocaleString("ko-KR")}건`;
   return `판 ${r.version} · ${r.from || "처음"}${끝}${주문} · 시간가중 ${pctText(r.pct)}${대조}`;

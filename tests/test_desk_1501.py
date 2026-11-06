@@ -116,7 +116,7 @@ def test_write_merges_both_markets(monkeypatch: pytest.MonkeyPatch) -> None:
     b = s["rule_history"]["B"]
     assert [{k: v for k, v in x.items() if k != "prereg"} for x in b] == [
         {"version": 1, "from": "", "to": None, "orders": 1, "pct": pytest.approx(2.0),
-         "control_pct": pytest.approx(0.0), "vs_r_pp": pytest.approx(2.0)}]  # fmt: skip
+         "control_pct": pytest.approx(0.0), "vs_r_pp": pytest.approx(2.0), "vs_r_to": None}]  # fmt: skip
     assert b[0]["prereg"]["hypothesis"].startswith("기준")  # 판 사전 등록(25.1520)
     assert {"A", "B", "H", "R1"} <= s["rule_history"].keys()  # 주문이 없어도 판은 있다
     # 판을 올리면 그 실행의 판정일이 새 판의 since

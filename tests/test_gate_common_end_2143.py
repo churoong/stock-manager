@@ -77,3 +77,11 @@ def test_순위표_R_대비도_짝지어_재고_끝_날을_적는다() -> None:
 def test_판_이력_지금_판도_짝지어_잰다() -> None:
     hist = desk.rule_history([("H", 2, "")], _재현())
     assert abs(hist["H"][0]["vs_r_pp"]) < 1e-9, hist["H"][0]["vs_r_pp"]  # 예전엔 +11.08%p
+
+
+def test_판_이력_지금_판은_R_대비를_잰_끝을_싣는다() -> None:
+    """25.2159 (25.2147 교차검증 [참고]) — 순위표·관문 칸은 "…까지" 를 적는데 판 이력 줄만 끝이 없었다"""
+    h = desk.rule_history([("H", 2, "")], _재현())["H"][0]
+    assert h["vs_r_to"] == _재현()["R2"][-1][0]
+    # 대조가 끝까지 평가되면 끝을 싣지 않는다
+    assert desk.rule_history([("H", 2, "")], _재현(멈춤=150))["H"][0]["vs_r_to"] is None

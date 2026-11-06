@@ -173,7 +173,7 @@ def rule_history(
             if 끝 is None and 내것 and a not in CONTROL_IDS:
                 # 지금 판은 R 마다 함께 평가된 마지막 날까지 짝지어 잰다(25.2145 — 관문·순위표와 같은 잣대). 지난 판은
                 # 다음 판 시작이 끝이라 이미 같은 끝이다
-                차 = []
+                차, 끝들 = [], []
                 for r in CONTROL_IDS:
                     rv = sorted(series.get(r) or [])
                     if rv:
@@ -182,12 +182,16 @@ def rule_history(
                         o = _판구간([p for p in rv if p[0] <= e], since, None, 첫날)
                         if m is not None and o is not None and e > (since or 첫날 or ""):
                             차.append(m - o)
+                            끝들.append(e)
                 짝차 = sum(차) / len(차) if 차 else None
+                # 가장 이른 짝 끝이 내 마지막 날보다 이르면 싣는다 — 순위표 `vs_r_to` 와 같은 꼴(25.2159)
+                짝끝 = min(끝들) if 끝들 and min(끝들) < 내것[-1][0] else None
             else:
                 짝차 = None if pct is None or 기준선 is None or a in CONTROL_IDS else pct - 기준선
+                짝끝 = None
             out[a].append({"version": ver, "from": since, "to": 끝, "prereg": prereg(a, ver),
                            "orders": None if orders is None else orders.get((a, ver), 0), "pct": pct,
-                           "control_pct": 기준선, "vs_r_pp": 짝차})  # fmt: skip
+                           "control_pct": 기준선, "vs_r_pp": 짝차, "vs_r_to": 짝끝})  # fmt: skip
     return out
 
 
