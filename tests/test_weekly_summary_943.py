@@ -244,3 +244,11 @@ def test_진도_문이_달린_예약_작업은_주기_표에서_뺄_수_없다()
                 for 문 in ("TURSO_READ_ESTIMATE", "turso_read_gate"))  # CLI 로 문을 보는 워크플로도 (25.1832)
     ]  # fmt: skip
     assert not 걸림, 걸림
+
+
+def test_같은_워크플로의_둘째_모듈도_표에_있다() -> None:
+    """25.2160 (11-06 결함 회차 [참고]) — 워크플로 안 모듈 하나만 표에 있으면 통과하는 그물이 stress·etf_tilt·kr_cashflow
+    를 놓쳤다. 셋 다 제 이름으로 실행 기록을 연다"""
+    for 이름, 파일 in (("stress", "backtest.yml"), ("etf_tilt", "etf.yml"), ("kr_cashflow", "financials.yml")):
+        assert f"batch.jobs.{이름}" in (뿌리 / ".github/workflows" / 파일).read_text(encoding="utf-8")
+        assert 이름 in ws.EXPECTED_DAYS, 이름

@@ -74,6 +74,10 @@ EXPECTED_DAYS: dict[str, int] = {
     "dividends": 370,
     "us_financials": 40, "sectors": 40, "accumulation": 40, "etf": 40, "etf_satellite": 40,  # 월 1회
     "backtest": 40,  # 매달 3일 (25.942)
+    # 같은 워크플로의 둘째 모듈이라 그물(워크플로 안 모듈 하나라도 표에 있으면 통과)을 빠져나갔다(25.2160, 11-06 결함
+    # 회차 [참고]). 스트레스는 backtest.yml(매달 3일), ETF 기울기는 etf.yml(매달 2일), 국내 현금흐름은 financials.yml
+    # (주 1회 — 수집 단계가 성공해야 돈다, 발생액 IC·백테스트 판정 재료)
+    "stress": 40, "etf_tilt": 40, "kr_cashflow": 10,
 }  # fmt: skip
 
 _기업행위 = re.compile(r"기업행위로 보이는 종목 \d+개: (.+?)\.")
@@ -281,7 +285,7 @@ def sector_avg(
 def _나라별(through: str | dict | None) -> dict[str, str]:
     """보고 기록을 나라별로 (25.1269). 예전 기록(문자열 하나)은 두 나라에 같이 쓴다"""
     if isinstance(through, dict):
-        return {str(k): str(v) for k, v in through.items() if v}
+        return {str(k): str(v) for k, v in through.items() if v and k in ("KR", "US")}
     return {"KR": through, "US": through} if through else {}
 
 
@@ -298,6 +302,9 @@ def load_losses(
     09-08~09-11 이 빠졌다."""
     한계 = (now - timedelta(days=POSTMORTEM_BACKSTOP_DAYS)).date().isoformat()
     앞 = _나라별(through)
+    # 기록 뒤에서 이미 보고한 (종목, 진입일) — 기록을 덜 익은 진입일 앞에 묶어 두므로 그 뒤 보고한 줄을
+    # 다시 세지 않게(25.2160)
+    본것 = {str(x) for x in (through.get("seen") or [])} if isinstance(through, dict) else set()
     rows = client.execute(
         "SELECT o.stock_id, COALESCE(s.name_ko, s.name_en, s.ticker), o.horizon, o.entry_date, o.ret_20d,"
         " o.bench_ret_20d, s.sector, s.country FROM signal_outcomes o JOIN stocks s ON s.id = o.stock_id"
@@ -306,11 +313,35 @@ def load_losses(
         " WHERE o.entry_date > CASE s.country WHEN 'KR' THEN ? ELSE ? END AND o.ret_20d IS NOT NULL",
         [max(앞.get("KR", ""), 한계), max(앞.get("US", ""), 한계)],
     ).rows
+    rows = [r for r in rows if f"{int(r[0])}:{str(r[3])}" not in 본것]
     if 끝 is not None and rows:
-        새 = dict(앞)
+        새: dict = dict(앞)
         for r in rows:
             나라 = "KR" if str(r[7]) == "KR" else "US"
             새[나라] = max(새.get(나라, ""), str(r[3]))
+        # **덜 익은 진입일 앞에서 멈춘다** (25.2160, 11-06 결함 루프 확인 [권고]). 성적은 종목 자기 시세 행으로 20일을
+        # 세어(`outcomes.evaluate`) 거래정지로 행이 빠진 종목은 늦게 익는다. 기록을 "익은 가장 늦은 진입일" 로 넘기면
+        # 그 앞의 덜 익은 진입일은 익어도 `entry_date > 기록` 에 걸려 텔레그램 사후 분석에 영영 안 나왔다 — 정지가 끼기
+        # 쉬운 종목(투자경고·분할 정지)이 바로 크게 잃은 종목이다. 백스톱(45일) 안의 덜 익은 진입일만 본다
+        덜익음 = client.execute(
+            "SELECT s.country, MIN(o.entry_date) FROM signal_outcomes o JOIN stocks s ON s.id = o.stock_id"
+            " WHERE o.entry_date > CASE s.country WHEN 'KR' THEN ? ELSE ? END AND o.ret_20d IS NULL"
+            " AND o.entry_close IS NOT NULL GROUP BY s.country",
+            [max(앞.get("KR", ""), 한계), max(앞.get("US", ""), 한계)],
+        ).rows
+        for 나라값, 첫날 in 덜익음:
+            나라 = "KR" if str(나라값) == "KR" else "US"
+            if 첫날 and 새.get(나라, "") >= str(첫날):
+                전날 = (date.fromisoformat(str(첫날)[:10]) - timedelta(days=1)).isoformat()
+                새[나라] = max(앞.get(나라, ""), 전날)
+        # 기록 뒤에 남는 보고한 줄 — 다음 주에 다시 세지 않는다
+        나라별 = {f"{int(r[0])}:{str(r[3])}": ("KR" if str(r[7]) == "KR" else "US", str(r[3])) for r in rows}
+        남김 = sorted(k for k, (나라, d) in 나라별.items() if d > 새.get(나라, ""))
+        # 예전에 남긴 것은 나라를 모르니 두 기록 가운데 이른 쪽 뒤·백스톱 안만 다시 남긴다
+        # (넉넉한 쪽 — 다시 세지 않는 것이 목적)
+        남김 += sorted(k for k in 본것 if k.split(":", 1)[-1] > max(한계, min(새.get("KR", ""), 새.get("US", ""))))
+        if 남김:
+            새["seen"] = sorted(set(남김))
         끝.append(새)
     # **한 종목·한 진입일은 한 번만 센다** (docs/infra.md 25.1271, 리포트 감사 재현). 같은 날 단기·중기·장기 신호가
     # 함께 나면 진입가·20거래일 수익이 같은 줄이 기간마다 와서, 손실·원인 집계가 세 배가 되고 예 세 자리가 같은 종목으로

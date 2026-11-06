@@ -247,3 +247,34 @@ def test_같은_종목_같은_진입일은_기간이_여럿이어도_한_번() -
                     [f"a{k}", hz])  # fmt: skip
     총, 손실수, 손실 = ws.load_losses(C(), datetime(2026, 10, 11, tzinfo=UTC))
     assert (총, 손실수, len(손실)) == (1, 1, 1) and 손실[0].horizon == "short·mid·long"
+
+
+def test_늦게_익는_정지_종목의_손실도_다음_주에_한_번_나온다() -> None:
+    """25.2160 (11-06 결함 루프 확인 [권고], 재현) — 기록을 '익은 가장 늦은 진입일' 로 넘겨, 거래정지로 시세 행이 빠져
+    늦게 익는 앞 진입일의 손실이 영영 보고되지 않았다"""
+    from batch.core.turso import ResultSet
+    from tests.test_sql_schema import 스키마올리기
+
+    con: sqlite3.Connection = 스키마올리기()
+
+    class C:
+        def execute(self, sql, args=None):  # noqa: ANN001, ANN202
+            cur = con.execute(sql, args or [])
+            return ResultSet(columns=[d[0] for d in cur.description or []], rows=[tuple(r) for r in cur.fetchall()])
+
+    for sid in (1, 2):
+        con.execute("INSERT INTO stocks (id, ticker, market, country, currency, status, source, fetched_at)"
+                    " VALUES (?, ?, 'KOSPI', 'KR', 'KRW', 'active', 't', 't')", [sid, f"T{sid}"])  # fmt: skip
+    # A(1) 10-01 진입 — 창 안 정지로 아직 안 익음 · B(2) 10-02 진입 −5% 로 익음
+    for k, (sid, d, r) in enumerate(((1, "2026-10-01", None), (2, "2026-10-02", -0.05))):
+        con.execute("INSERT INTO signal_outcomes (stock_id, as_of_date, horizon, entry_date, entry_close, ret_20d,"
+                    " days_available, computed_at) VALUES (?, ?, 'short', ?, 100, ?, 20, 't')", [sid, f"a{k}", d, r])  # fmt: skip
+    주1: list[dict] = []
+    assert ws.load_losses(C(), datetime(2026, 11, 1, tzinfo=UTC), {"KR": "2026-09-30"}, 주1)[:2] == (1, 1)
+    assert 주1 == [{"KR": "2026-09-30", "seen": ["2:2026-10-02"]}]  # A 앞에서 멈추고 B 는 보고한 것으로
+    con.execute("UPDATE signal_outcomes SET ret_20d = -0.30 WHERE stock_id = 1")  # A 가 3거래일 늦게 익음
+    주2: list[dict] = []
+    총, 손실수, [x] = ws.load_losses(C(), datetime(2026, 11, 8, tzinfo=UTC), 주1[0], 주2)
+    assert (총, 손실수) == (1, 1) and x.ret == -0.30  # A 만 — B 를 다시 세지 않는다
+    assert 주2 == [{"KR": "2026-10-01", "seen": ["2:2026-10-02"]}]
+    assert ws.load_losses(C(), datetime(2026, 11, 15, tzinfo=UTC), 주2[0])[:2] == (0, 0)
