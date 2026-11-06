@@ -115,6 +115,7 @@ function tone(v: number | null | undefined): string {
 export const ACCOUNT_COLOR: Record<string, string> = {
   A: "#dc2626", B: "#7c3aed", C: "#ea580c", D: "#16a34a", E: "#2563eb", G: "#ca8a04", H: "#db2777", R1: "#9ca3af", R2: "#cbd5e1",
   S: "#0d9488", T: "#4f46e5", // 스윙·단타(25.1892) — 예비 색 차례에 맡기면 계좌가 늘 때 색이 바뀐다
+  X: "#0891b2", Y: "#9f1239", // ETF 전술 국내·미국(25.2168)
 };
 // 예비 색 — 고정 색과 색상이 떨어진 것(라임·자홍·갈색). S·T 가 예전 앞 두 색을 가져가 겹치지 않게 바꿈(25.1892·25.1894)
 export const SPARE_COLORS = ["#65a30d", "#a21caf", "#78350f"];

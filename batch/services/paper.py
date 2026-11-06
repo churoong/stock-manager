@@ -106,6 +106,8 @@ SWING_CODES = {"stop": "스윙손절", "target": "스윙목표", "time": "스윙
 DAY_RULE = "day_close"
 DAY_CLOSE_CODE = "단타종가"
 DAY_LEFT_CODE = "단타잔여"
+#: ETF 전술(X·Y)의 매도 규칙 이름 (17장, 25.2166) — 정의처는 `jobs/paper_etf.SELL_RULE`(같은 값)
+ETF_SWITCH_RULE = "etf_switch"
 #: T 가 늦은 실행(장 열린 뒤·장 끝난 뒤)에 진입하지 않은 결정의 까닭 머리 — 같은 종가에 사고파는 비용뿐인 거래라
 #: 견줄 새 후보에서 뺀다(`NONCOMPARABLE_SKIP_PREFIXES`)
 DAY_LATE_PREFIX = "단타 진입 없음: "
@@ -1044,6 +1046,12 @@ def summary_lines(
             아래 = f"{SWING_CLOSE.stop_pct * 100:g}".replace("-", "−")  # 다른 글과 같은 마이너스 기호(25.1876)
             손절글 = (f"손절선 점검 해당 없음(스윙 규칙 — 종가가 진입 시가 대비 {아래}% 이하면"
                     " 다음 장 시가 매도)")  # 값은 규칙 정의처에서(25.1874)
+        elif (sell_rules or {}).get(aid) == ETF_SWITCH_RULE:
+            # ETF 전술(X·Y)은 지수 ETF 한 종목을 평가 총액의 98% 까지 든다 — 종목·섹터 상한(설정 10%·30%)으로 세면
+            # 평가일마다 "넘음" 이 찍혀 결함처럼 읽혔다(25.2168, 25.2166 교차검증 [권고]). 엔진도 상한 100%(17.1)
+            out.append(f"  {nm} 규칙 점검: 해당 없음(ETF 전술 — 종목·섹터 상한 100%, 손절 대신 지수 국면이 바뀐 날"
+                       " 갈아탐, paper.md 17.1)")
+            continue
         else:
             손절글 = f"손절선 아래로 들고 간 날 {len(손절넘김)}{덧}"
         out.append(f"  {nm} 규칙 점검: 종목 상한 넘은 날 {len(종목넘음)} · 섹터 상한 넘은 날 {len(섹터넘음)}"

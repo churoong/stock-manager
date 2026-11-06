@@ -32,6 +32,7 @@ describe("도전자 설정", () => {
     const 목록 = /^SEPARATE_IDS = \(([^)]*)\)/m.exec(정의)?.[1] ?? "";
     expect([...목록.matchAll(/"([A-Z0-9]+)"/g)].map((m) => m[1])).toEqual([...SEPARATE_IDS]);
     for (const a of SEPARATE_IDS) expect(challengerSchema.safeParse({ account: a }).success).toBe(false);
+    expect(SEPARATE_IDS).toEqual(expect.arrayContaining(["S", "T", "X", "Y"])); // ETF 전술 X·Y 도(25.2168)
     const route = readFileSync(join(process.cwd(), "app", "api", "kis", "challenger", "route.ts"), "utf8");
     expect(route).toContain("!SEPARATE_IDS.includes(a.id)"); // 고르기 목록에서도 뺀다
   });

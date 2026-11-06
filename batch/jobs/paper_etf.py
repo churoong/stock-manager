@@ -18,7 +18,7 @@ from batch.services import etf_tactical as et
 from batch.services import paper as pp
 
 SELECTION = "etf_tactical"
-SELL_RULE = "etf_switch"
+SELL_RULE = pp.ETF_SWITCH_RULE
 #: 매도 까닭 코드 — `pp.SELL_RULES["etf_switch"]` 와 같다
 SWITCH_CODE = "국면전환"
 
@@ -65,6 +65,12 @@ def plan(client: Any, aid: str, market: str, trade_date: str, positions: dict[in
     모르는 = [sid for sid in 든 if sid not in 몫of]
     held = 몫of[든[0]] if len(든) == 1 and not 모르는 else (None if not 든 else "?")
     out: dict[str, Any] = {"regime": r, "want": want, "held": held, "ids": ids, "sells": {}, "buy_role": None}
+    if 모르는 and any(v is None for v in ids.values()):
+        # 든 ETF 의 종목표 연결이 끊긴 날(이름이 바뀌어 대조 실패 등) — 모르는 보유로 보고 팔면 국면이 그대로여도
+        # 정리 매도가 나간다. 팔지 않고 까닭만 남긴다(25.2168, 25.2166 교차검증 [참고])
+        out["action"] = "hold"
+        out["skip"] = "든 ETF 의 종목표 연결이 끊김 — 팔지 않음(etf_link tactical_missing)"
+        return out
     if held == "?":
         # 몫이 둘이거나 모르는 ETF 를 든 날 — 엔진이 만든 꼴이 아니다. 모두 판다(그다음 실행에 목표를 산다)
         파는 = [sid for sid in 든 if sid not in open_sells]
@@ -150,6 +156,10 @@ def buy_order(client: Any, p: dict[str, Any], *, market: str, valuation: pp.Valu
         "stock_id": sid, "limit_price": None, "quantity": 수량, "currency": 통화, "tranche": 0,
         "reason": f"{et.RULE}: {r.label} 국면 → {et.ACCOUNTS_ROLE_LABEL[몫]} {비중 * 100:.0f}%",
         "horizon": "long", "score": None, "score_as_of": None,
-        "rationale": {"rule": et.RULE, "regime": r.state, "role": 몫, "weight": 비중, "criteria": criteria(r)},
-        "ref_price": 종가, "cost_krw": 수량 * 주당현금, "ref_date": 날, "cash_krw": 현금,
+        # 근거표는 `signal.criteria` 에도 — 웹 거래내역(TradesPane)은 그 자리와 `flags[].criteria` 만 읽는다(25.2168)
+        "rationale": {"rule": et.RULE, "regime": r.state, "role": 몫, "weight": 비중, "criteria": criteria(r),
+                      "signal": {"criteria": criteria(r)}},
+        # 관문의 현금 검사도 이 값으로(`cash_krw`) — 쓸 현금 전체를 넘기면 검사가 늘 통과해 크기 결함을 못 막았다
+        # (25.2168, 25.2166 교차검증 [권고]). 예약 잣대의 시가 틈 여유 10% 대신 98% 의 2% 가 틈 여유다(17.1)
+        "ref_price": 종가, "cost_krw": 수량 * 주당현금, "ref_date": 날, "cash_krw": 수량 * 주당현금,
     }], {"regime": r.state, "role": 몫, "quantity": 수량}  # fmt: skip

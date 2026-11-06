@@ -2371,6 +2371,9 @@ def run_step(
             감시오류 = {}
             전술 = paper_etf.is_etf_account(acct)
             전술계획: dict[str, Any] = {}
+            # 국내 ETF 매도는 거래세 0(체결 길 `fill_orders` 와 같게 — 근거의 예상 비용이 체결과 달라 보이지 않게,
+            # 25.2168)
+            ETF비용표 = {**비용표, "sell_tax_pct": 0.0} if market == "KR" else 비용표
             if 전술:
                 # ETF 전술 X·Y(docs/paper.md 17장) — 매도 플래그를 보지 않고 지수 국면이 바뀐 날 전량 매도(`국면전환`)
                 전술계획 = paper_etf.plan(client, aid, market, trade_date, pp.positions(계좌체결),
@@ -2379,6 +2382,8 @@ def run_step(
                 국면 = 전술계획.get("regime")
                 a기록["etf"] = {"regime": getattr(국면, "state", None), "index_as_of": getattr(국면, "as_of", None),
                                "action": 전술계획.get("action"), "skip": 전술계획.get("skip")}  # fmt: skip
+                if 전술계획.get("action") == "hold" and 전술계획.get("skip"):
+                    줄.append(f"⚠️ 가상 {계이름} 멈춤 — {전술계획['skip']}")  # 연결 끊긴 보유(25.2168)
             else:
                 매도 = sell_decisions(client, market, 규칙, 계좌체결, 멈춘, stock_cache, targets,
                                    cal.local_today(market), 보강캐시, 판정메모, 감시선, 감시오류)  # fmt: skip
@@ -2403,8 +2408,8 @@ def run_step(
                 문장.append((INSERT_ORDER_SQL, [
                     aid, market, sid, "sell", "market", None, 보유[sid].quantity, 보유[sid].currency, trade_date,
                     다음장, 기준, 0, ",".join(사유), None, None, None,
-                    json.dumps({"flags": 근거, "sell_rule": 규칙, "costs": 비용표}, ensure_ascii=False,
-                               default=str), 판, 지금, None,
+                    json.dumps({"flags": 근거, "sell_rule": 규칙, "costs": ETF비용표 if 전술 else 비용표},
+                               ensure_ascii=False, default=str), 판, 지금, None,
                 ]))  # fmt: skip
             a기록["sells"] = len(문장)  # 이 자리까지는 매도 주문만 있다
             # 전량 매도를 내는 종목의 남은 매수 회차는 거둔다 — 매도는 그때 보유 수량만 팔아, 같은 장에 남은 회차가
@@ -2491,7 +2496,8 @@ def run_step(
                     문장.append((INSERT_ORDER_SQL, [
                         aid, market, o["stock_id"], "buy", "market", None, o["quantity"], o["currency"], trade_date,
                         다음장, 기준, 0, o["reason"], o["horizon"], None, None,
-                        json.dumps(o["rationale"], ensure_ascii=False, default=str), 판, 지금, o["ref_price"],
+                        json.dumps({**o["rationale"], "costs": ETF비용표}, ensure_ascii=False, default=str), 판, 지금,
+                        o["ref_price"],
                     ]))  # fmt: skip
                     문장.append(_결정판(aid, market, trade_date, o["stock_id"], "buy", o["reason"],
                                     {"etf": o["rationale"]["criteria"], "weight": o["rationale"]["weight"]},
@@ -2503,6 +2509,15 @@ def run_step(
                                     {"etf": o["rationale"]["criteria"]}, o["ref_price"], o["ref_date"],
                                     지금))  # fmt: skip
                 a기록["buy"] = b기록
+                못삼 = b기록.get("skipped")
+                if 전술계획.get("action") == "buy" and 못삼 and not 못삼.startswith("같은 ETF"):
+                    # 국면은 사라고 하는데 못 산 날 — step_log 에만 두면 계좌가 현금으로 멈춘 것을 아무도 모른다
+                    # (이름 대조 실패·시세 없음·환율 없음, 25.2168, 25.2166 교차검증 [권고])
+                    줄.append(f"⚠️ 가상 {계이름} 사지 못함 — {b기록['skipped']}")
+                    목표 = (전술계획.get("ids") or {}).get(전술계획.get("buy_role") or "")
+                    if 목표 is not None:
+                        문장.append(_결정판(aid, market, trade_date, int(목표), "skip", f"ETF 전술: {b기록['skipped']}",
+                                        {"etf": paper_etf.criteria(전술계획["regime"])}, None, None, 지금))  # fmt: skip
             elif allocate and settings is not None and signal_rows:
                 # 손절이 선 보유에 더 사지 않는다 — **계좌 규칙 전의** 판정에서 (검증 [필수] 4: 규칙으로 거른 뒤의
                 # 매도에서 뽑으면 손절을 따르지 않는 D 는 늘 비어, 떨어진 보유를 목표 비중까지 날마다 더 샀다 —

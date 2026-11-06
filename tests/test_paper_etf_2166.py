@@ -176,6 +176,8 @@ def test_buy_order_는_평가_총액_곱하기_비중을_시장가_한_줄로() 
     assert 주문[0]["quantity"] == 9
     # 관문에 넘기는 값 — 예약과 같은 수수료 여유
     assert 주문[0]["cost_krw"] == pytest.approx(9 * 30_000 * (1 + pp.FEE_BUFFER))
+    # 관문 현금 검사도 같은 값 — 쓸 현금 전체를 넘기면 검사가 늘 통과했다(25.2168)
+    assert 주문[0]["cash_krw"] == 주문[0]["cost_krw"]
     # 같은 ETF 매수가 이미 열려 있으면 내지 않는다
     열림 = pp.Order(id=9, account_id="X", stock_id=KODEX200, side="buy", order_type="market", limit_price=None,
                     quantity=3, currency="KRW", fill_session="2026-10-15", ref_price=30_000.0)  # fmt: skip
@@ -312,3 +314,73 @@ def test_시가가_여유보다_뛰면_그날_매수는_취소되고_다음_실�
     assert 상태 == [("expired", 32, "2026-10-15"), ("open", int(1_000_000 * et.LONG_WEIGHT // 32_000), "2026-10-16")]
     # 현금은 음수가 되지 않았다
     assert c.q("SELECT MIN(cash_krw) >= 0 FROM paper_daily WHERE account_id = 'X'") == [(1,)]
+
+
+# ── 25.2168 (25.2166 교차검증 권고) ──────────────────────────────────────────
+
+
+def test_ETF_계좌는_따로_재는_실험_계좌다() -> None:
+    """빠지면 순위표 공통 구간·KIS 도전자 후보에 들어가 KIS모의투자가 ETF 주문을 베낄 수 있다"""
+    assert {"X", "Y"} <= set(pp.SEPARATE_IDS)
+    assert pp.ETF_SWITCH_RULE == paper_etf.SELL_RULE and paper_etf.SELL_RULE in pp.SELL_RULES
+
+
+def test_월간_복기의_규칙_점검은_ETF_전술에_해당_없음() -> None:
+    행 = [{"as_of": "2026-10-16", "invested_krw": 1_000, "equity_krw": 1_000, "twr_index": 1.0,
+           "positions_json": '[{"stock_id": 10, "value_krw": 980, "horizon": "long"}]'}]  # fmt: skip
+    줄 = pp.summary_lines({"X": 행}, {}, "2026-10-12", "2026-10-01", {}, {}, {"max_stock_pct": 10.0}, {"X": "etf_switch"})
+    점검 = [x for x in 줄 if "규칙 점검" in x]
+    assert len(점검) == 1 and "해당 없음(ETF 전술" in 점검[0] and "상한 넘은 날" not in 점검[0]
+
+
+def test_멈춤_스위치면_ETF_매수도_막히고_결정_원장에_남는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    c = _계좌()
+    _지수(c, "KOSPI", "2026-10-14")
+    _시세(c, KODEX200, "2026-10-14", 30_000, 30_000)
+    c.conn.execute("INSERT INTO settings (key, value, updated_at) VALUES ('paper_halt', '{\"on\": true}', 't')")
+    _, 기록 = _하루(c, monkeypatch, "2026-10-14", signals=False)
+    assert _주문(c) == [] and 기록["accounts"]["X"]["risk_blocked"] == 1
+    assert c.q("SELECT kind, reason, stock_id FROM paper_decisions WHERE account_id = 'X'") == [
+        ("blocked", "위험 점검: 멈춤 스위치가 켜져 있음", KODEX200)]
+
+
+def test_주문_근거는_웹_거래내역이_읽는_자리와_ETF_비용(monkeypatch: pytest.MonkeyPatch) -> None:
+    c = _계좌()
+    _지수(c, "KOSPI", "2026-10-14")
+    _시세(c, KODEX200, "2026-10-14", 30_000, 30_000)
+    _하루(c, monkeypatch, "2026-10-14", signals=False)
+    근거 = json.loads(c.q("SELECT rationale_json FROM paper_orders WHERE account_id = 'X'")[0][0])
+    # 웹 TradesPane 은 signal.criteria·flags[].criteria 만 읽는다
+    assert [r["label"] for r in 근거["signal"]["criteria"]] == ["지수 종가 대 200일선", "20거래일 수익", "국면"]
+    assert 근거["costs"]["sell_tax_pct"] == 0.0  # 국내 ETF — 체결 길과 같은 비용
+    _지수값(c, "KOSPI", "2026-10-15", 150.0)
+    _시세(c, KODEX200, "2026-10-15", 30_000, 30_000)
+    _하루(c, monkeypatch, "2026-10-15", signals=False)
+    매도 = json.loads(c.q("SELECT rationale_json FROM paper_orders WHERE account_id = 'X' AND side = 'sell'")[0][0])
+    assert 매도["costs"]["sell_tax_pct"] == 0.0 and 매도["flags"][0]["reason_code"] == paper_etf.SWITCH_CODE
+    # 다른 계좌(종목) 매도세는 그대로 — 비용표를 바꾸지 않았다
+    assert job.cost_snapshot("KR", None, None, "2026-10-16")["sell_tax_pct"] > 0
+
+
+def test_국면은_사라는데_못_산_날은_리포트와_결정_원장에(monkeypatch: pytest.MonkeyPatch) -> None:
+    c = _계좌()
+    _지수(c, "KOSPI", "2026-10-14")  # KODEX 200 시세 없음
+    줄, _ = _하루(c, monkeypatch, "2026-10-14", signals=False)
+    assert "⚠️ 가상 국내ETF 사지 못함 — ETF 시세 없음(이은 날부터 쌓인다)" in 줄
+    assert c.q("SELECT kind, reason, stock_id FROM paper_decisions WHERE account_id = 'X'") == [
+        ("skip", "ETF 전술: ETF 시세 없음(이은 날부터 쌓인다)", KODEX200)]
+
+
+def test_든_ETF_의_연결이_끊기면_팔지_않고_멈춤을_알린다(monkeypatch: pytest.MonkeyPatch) -> None:
+    c = _계좌()
+    _지수(c, "KOSPI", "2026-10-14")
+    _시세(c, KODEX200, "2026-10-14", 30_000, 30_000)
+    _하루(c, monkeypatch, "2026-10-14", signals=False)
+    _지수값(c, "KOSPI", "2026-10-15", 330.0)
+    _시세(c, KODEX200, "2026-10-15", 30_000, 30_000)
+    _하루(c, monkeypatch, "2026-10-15", signals=False)  # 32주 찼다
+    c.conn.execute("UPDATE etfs SET stock_id = NULL WHERE name = 'KODEX 200'")  # 이름 대조가 끊긴 날
+    _지수값(c, "KOSPI", "2026-10-16", 331.0)
+    줄, 기록 = _하루(c, monkeypatch, "2026-10-16", signals=False)
+    assert c.q("SELECT COUNT(*) FROM paper_orders WHERE account_id = 'X' AND side = 'sell'") == [(0,)]
+    assert 기록["accounts"]["X"]["etf"]["action"] == "hold" and any(x.startswith("⚠️ 가상 국내ETF 멈춤 — 든 ETF") for x in 줄)
