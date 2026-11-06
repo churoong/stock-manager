@@ -110,8 +110,14 @@ def criteria(r: et.Regime) -> list[dict[str, Any]]:
 
 def buy_order(client: Any, p: dict[str, Any], *, market: str, valuation: pp.Valuation, open_buys: list[pp.Order],
               fx_rate: float | None, trade_date: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:  # fmt: skip
-    """목표 ETF 의 시가 시장가 매수 한 줄 — 평가 총액 × 목표 비중, 쓸 수 있는 현금 안에서.
-    값을 모르는 시장가는 다른 계좌와 같이 기준가 × (1 + `OPEN_BUY_BUFFER`) 로 잰다(2.1.1)"""
+    """목표 ETF 의 시가 시장가 매수 한 줄.
+
+    수량 = ⌊min(평가 총액 × 목표 비중 ÷ 기준가, 쓸 현금 ÷ 기준가의 수수료·환율 여유)⌋ — **기준가로 나눈다**(종목
+    시가 일괄 C 의 `size_buys` 와 같은 잣대). 시가 틈 여유 10%(`OPEN_BUY_BUFFER`)로 나누면 98% 가 아니라 약 89% 만
+    들어 사전 등록 비중(17.1 — 2% 가 수수료·시가 틈 여유)과 리플레이가 어긋났다(25.2166 자기 점검).
+    시가가 기준가보다 약 2% 넘게 뛰면 체결 때 현금 검사(`pp.settle_check`)가 이 주문을 "현금 부족" 으로 취소한다 —
+    국면이 그대로면 다음 실행이 다시 낸다. 그동안 웹의 예약(기준가 × 1.1)은 현금을 넘어 보일 수 있다(그 밤 입금
+    취소는 막힌다)"""
     몫 = p.get("buy_role")
     if 몫 is None:
         return [], {"skipped": p.get("skip") or "살 것 없음"}
@@ -133,9 +139,10 @@ def buy_order(client: Any, p: dict[str, Any], *, market: str, valuation: pp.Valu
         return [], {"skipped": "ETF 시세 없음(이은 날부터 쌓인다)"}
     종가, 날 = float(시세[0][0]), str(시세[0][1])[:10]
     비중 = et.target(p["regime"].state)[몫]
-    목표 = min(valuation.equity_krw * 비중, 현금)
-    주당 = 종가 * 환율 * (1 + pp.OPEN_BUY_BUFFER)
-    수량 = math.floor(목표 / 주당) if 주당 > 0 else 0
+    주당 = 종가 * 환율  # 원
+    # 쓸 현금 잣대 — 예약과 같은 수수료 여유, 달러는 환율 여유까지(`pp.reserved_krw`)
+    주당현금 = 주당 * (1 + pp.FEE_BUFFER) * (1 + pp.FX_BUFFER if 통화 != "KRW" else 1.0)
+    수량 = math.floor(min(valuation.equity_krw * 비중 / 주당, 현금 / 주당현금)) if 주당 > 0 else 0
     if 수량 < 1:
         return [], {"skipped": "1주도 못 삼"}
     r = p["regime"]
@@ -144,5 +151,5 @@ def buy_order(client: Any, p: dict[str, Any], *, market: str, valuation: pp.Valu
         "reason": f"{et.RULE}: {r.label} 국면 → {et.ACCOUNTS_ROLE_LABEL[몫]} {비중 * 100:.0f}%",
         "horizon": "long", "score": None, "score_as_of": None,
         "rationale": {"rule": et.RULE, "regime": r.state, "role": 몫, "weight": 비중, "criteria": criteria(r)},
-        "ref_price": 종가, "cost_krw": 수량 * 주당, "ref_date": 날, "cash_krw": 현금,
+        "ref_price": 종가, "cost_krw": 수량 * 주당현금, "ref_date": 날, "cash_krw": 현금,
     }], {"regime": r.state, "role": 몫, "quantity": 수량}  # fmt: skip

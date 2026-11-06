@@ -165,18 +165,35 @@ def test_buy_order_는_평가_총액_곱하기_비중을_시장가_한_줄로() 
     v = _평가(1_000_000)
     주문, 기록 = paper_etf.buy_order(c, p, market="KR", valuation=v, open_buys=[], fx_rate=None,
                                    trade_date="2026-10-15")  # fmt: skip
-    수량 = int(1_000_000 * et.LONG_WEIGHT // (30_000 * (1 + pp.OPEN_BUY_BUFFER)))
+    수량 = 1_000_000 * et.LONG_WEIGHT // 30_000  # 기준가로 — 시가 틈 여유 10% 로 나누지 않는다(98% 그대로)
+    assert 수량 == 32
     assert [(o["stock_id"], o["quantity"], o["limit_price"], o["tranche"]) for o in 주문] == [(KODEX200, 수량, None, 0)]
     assert 기록 == {"regime": "up", "role": "long", "quantity": 수량}
     # 예약을 뺀 쓸 현금이 비중보다 작으면 현금까지만
-    v2 = _평가(400_000)
+    v2 = _평가(300_000)
     주문, _ = paper_etf.buy_order(c, p, market="KR", valuation=v2, open_buys=[], fx_rate=None, trade_date="2026-10-15")
-    assert 주문[0]["quantity"] == int(400_000 // (30_000 * (1 + pp.OPEN_BUY_BUFFER)))
+    # 30만 ÷ (3만 × 1.01) = 9.9 → 9주 (수수료 여유를 빼면 10주 — 예약이 현금을 넘는다)
+    assert 주문[0]["quantity"] == 9
+    # 관문에 넘기는 값 — 예약과 같은 수수료 여유
+    assert 주문[0]["cost_krw"] == pytest.approx(9 * 30_000 * (1 + pp.FEE_BUFFER))
     # 같은 ETF 매수가 이미 열려 있으면 내지 않는다
     열림 = pp.Order(id=9, account_id="X", stock_id=KODEX200, side="buy", order_type="market", limit_price=None,
                     quantity=3, currency="KRW", fill_session="2026-10-15", ref_price=30_000.0)  # fmt: skip
     assert paper_etf.buy_order(c, p, market="KR", valuation=v, open_buys=[열림], fx_rate=None,
                                trade_date="2026-10-15")[0] == []  # fmt: skip
+
+
+def test_buy_order_달러는_환율_여유까지_현금_상한() -> None:
+    c = _계좌(etf=("Y",))
+    _지수(c, "SP500", "2026-10-14")
+    _시세(c, SPY, "2026-10-14", 100, 100, "USD")
+    p = paper_etf.plan(c, "Y", "US", "2026-10-14", {}, set())
+    주문, _ = paper_etf.buy_order(c, p, market="US", valuation=_평가(1_000_000), open_buys=[], fx_rate=1_400.0,
+                                trade_date="2026-10-15")  # fmt: skip
+    # 98% ÷ 14만 = 7.0 이지만 현금 100만 ÷ (14만 × 1.01 × 1.03) = 6.87 → 6주
+    assert (주문[0]["quantity"], 주문[0]["currency"]) == (6, "USD")
+    assert 주문[0]["cost_krw"] == pytest.approx(6 * 140_000 * (1 + pp.FEE_BUFFER) * (1 + pp.FX_BUFFER))
+    assert 주문[0]["cost_krw"] <= 1_000_000
 
 
 # ── 하루 단계 ────────────────────────────────────────────────────────────────
@@ -188,7 +205,7 @@ def test_X_는_오르면_사고_그대로_두고_내리면_팔고_다음_실행�
     _시세(c, KODEX200, "2026-10-14", 30_000, 30_000)
     _시세(c, INVERSE, "2026-10-14", 5_000, 5_000)
     _, 기록 = _하루(c, monkeypatch, "2026-10-14")
-    수량 = int(1_000_000 * et.LONG_WEIGHT // (30_000 * (1 + pp.OPEN_BUY_BUFFER)))
+    수량 = int(1_000_000 * et.LONG_WEIGHT // 30_000)
     assert _주문(c) == [(KODEX200, "buy", "market", 수량, f"{et.RULE}: 상승 국면 → 지수 ETF 98%", "2026-10-15", 0)]
     assert 기록["accounts"]["X"]["etf"]["regime"] == "up" and 기록["accounts"]["X"]["buy"]["quantity"] == 수량
     근거 = json.loads(c.q("SELECT rationale_json FROM paper_orders WHERE account_id = 'X'")[0][0])
@@ -225,7 +242,7 @@ def test_X_는_오르면_사고_그대로_두고_내리면_팔고_다음_실행�
     # 국내 ETF 매도는 증권거래세 0 — 수수료만(25.2166). 같은 날 종목 매도면 세금이 붙는다(아래 시험)
     assert c.q("SELECT fee > 0, tax FROM paper_fills WHERE account_id = 'X' AND side = 'sell'") == [(1, 0.0)]
     현금 = c.q("SELECT cash_krw, equity_krw FROM paper_daily WHERE account_id = 'X' ORDER BY as_of DESC LIMIT 1")[0]
-    인버스 = int(min(현금[1] * et.INVERSE_WEIGHT, 현금[0]) // (5_200 * (1 + pp.OPEN_BUY_BUFFER)))
+    인버스 = int(min(현금[1] * et.INVERSE_WEIGHT / 5_200, 현금[0] / (5_200 * (1 + pp.FEE_BUFFER))))
     assert _주문(c)[2:] == [(INVERSE, "buy", "market", 인버스, f"{et.RULE}: 하락 국면 → 인버스 50%", "2026-10-20", 0)]
     assert 기록["accounts"]["X"]["recon_ok"] is True
 
@@ -237,8 +254,9 @@ def test_Y_는_미국_실행에서만_SPY_를_달러로_산다(monkeypatch: pyte
     _, 기록 = _하루(c, monkeypatch, "2026-10-14", market="KR")
     assert _주문(c, "Y") == [] and 기록["accounts"]["Y"]["etf"]["skip"] == "이 계좌의 시장이 아님"
     _, 기록 = _하루(c, monkeypatch, "2026-10-14", market="US", signals=False)
-    주당 = 500 * 1_400 * (1 + pp.OPEN_BUY_BUFFER)
-    assert _주문(c, "Y") == [(SPY, "buy", "market", int(1_000_000 * et.LONG_WEIGHT // 주당),
+    주당 = 500 * 1_400
+    수량 = int(min(1_000_000 * et.LONG_WEIGHT / 주당, 1_000_000 / (주당 * (1 + pp.FEE_BUFFER) * (1 + pp.FX_BUFFER))))
+    assert _주문(c, "Y") == [(SPY, "buy", "market", 수량,
                              f"{et.RULE}: 상승 국면 → 지수 ETF 98%", "2026-10-15", 0)]  # fmt: skip
     assert c.q("SELECT currency FROM paper_orders WHERE account_id = 'Y'") == [("USD",)]
     # X 는 국내 지수가 없어 모름 → 현금(아무것도 안 함)
@@ -278,3 +296,19 @@ def test_국내_ETF_매도만_거래세가_없다() -> None:
     job.fill_orders(c, "KR", "2026-10-16", job._flows(c)[0], job._fills(c)[0], None, None, set(), "t", {})
     세금 = dict(c.q("SELECT stock_id, tax FROM paper_fills WHERE side = 'sell'"))
     assert 세금[KODEX200] == 0.0 and 세금[1] > 0
+
+
+def test_시가가_여유보다_뛰면_그날_매수는_취소되고_다음_실행이_다시_낸다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """98% 를 기준가로 사므로 시가 틈 여유는 약 2% — 넘게 뛰면 체결 때 현금 검사가 취소한다(빚 없음, 25.2166)"""
+    c = _계좌()
+    _지수(c, "KOSPI", "2026-10-14")
+    _시세(c, KODEX200, "2026-10-14", 30_000, 30_000)
+    _하루(c, monkeypatch, "2026-10-14", signals=False)
+    _지수값(c, "KOSPI", "2026-10-15", 331.0)
+    _시세(c, KODEX200, "2026-10-15", 32_000, 32_000)  # +6.7% 갭 — 32주 × 32,000 > 100만
+    _하루(c, monkeypatch, "2026-10-15", signals=False)
+    assert c.q("SELECT COUNT(*) FROM paper_fills WHERE account_id = 'X'") == [(0,)]
+    상태 = c.q("SELECT status, quantity, fill_session FROM paper_orders WHERE account_id = 'X' ORDER BY id")
+    assert 상태 == [("expired", 32, "2026-10-15"), ("open", int(1_000_000 * et.LONG_WEIGHT // 32_000), "2026-10-16")]
+    # 현금은 음수가 되지 않았다
+    assert c.q("SELECT MIN(cash_krw) >= 0 FROM paper_daily WHERE account_id = 'X'") == [(1,)]
