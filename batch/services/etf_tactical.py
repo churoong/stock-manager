@@ -30,6 +30,7 @@ INVERSE_WEIGHT = 0.5
 
 UP, DOWN, MIXED, UNKNOWN = "up", "down", "mixed", "unknown"
 LABEL = {UP: "상승", DOWN: "하락", MIXED: "엇갈림", UNKNOWN: "모름"}
+ACCOUNTS_ROLE_LABEL = {"long": "지수 ETF", "inverse": "인버스"}
 
 #: 계좌마다 판정 지수(`index_prices.index_code`)와 두 ETF 의 몫. ETF 종목은 `etf_link.TACTICAL_ETFS` 가 잇는다
 #: 국내는 이름으로(코드를 박지 않는다), 미국은 티커로

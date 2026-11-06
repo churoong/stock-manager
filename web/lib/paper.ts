@@ -84,6 +84,8 @@ const SELL_RULE_TEXT: Record<string, string> = {
   swing_close: "종가가 진입 시가 대비 −3% 이하·+5% 이상이거나 10거래일째면 다음 장 시가(매도 플래그 무시)",
   // 당일 단타 T (docs/paper.md 16.3.2, infra 25.1885)
   day_close: "산 그날 종가에 판다(매도 플래그 무시 · 하한가 종가면 다음 장 시가)",
+  // ETF 전술 X·Y (docs/paper.md 17장, infra 25.2166)
+  etf_switch: "지수 국면이 바뀐 날 정리(매도 플래그 무시) — 판 돈으로 다음 실행에 새 국면 ETF",
 };
 /** 투자위원회 헌장이 있는 계좌인가 — 지주사(H, selection weighted)의 charter_json 은 투표 회사 지문이라 위원회가 아니다 (25.1482) */
 export function hasCommittee(a: { charter_json?: string | null; selection?: string | null }): boolean {
@@ -104,7 +106,9 @@ export function ruleText(a: AccountRule): string {
       ? "무작위 대조(같은 자리·비중)"
       : a.selection === "short"
         ? `단기 신호만 점수 상위 ${a.top_n ?? 5}종목(든 종목은 더 사지 않음)`
-        : `점수 상위 ${a.top_n ?? 5}종목`;
+        : a.selection === "etf_tactical"
+          ? "ETF 전술 — 지수 200일선·20거래일 수익으로 상승이면 지수 ETF 98%, 하락이면 인버스 50%, 엇갈리면 현금"
+          : `점수 상위 ${a.top_n ?? 5}종목`;
   const 진입 = a.entry_rule === "open" ? "다음 장 시가에 한 번에" : "3회 분할 지정가";
   return `매수: ${고르기} · ${진입} — 매도: ${SELL_RULE_TEXT[a.sell_rule] ?? a.sell_rule}`;
 }

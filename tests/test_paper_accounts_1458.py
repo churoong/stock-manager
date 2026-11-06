@@ -163,12 +163,14 @@ def test_seven_accounts_order_by_their_own_rules(c: Client, monkeypatch: pytest.
     원래 = report_picks.select_top
     monkeypatch.setattr(report_picks, "select_top", lambda rows, n=5: (n들.append(n), 원래(rows, n))[1])
     기록 = _하루(c, monkeypatch, "2026-10-14")
-    # G·H 는 25.1481·25.1482, S·T 는 25.1890(0092)
-    assert sorted(기록["accounts"]) == ["A", "B", "C", "D", "E", "G", "H", "R1", "R2", "S", "T"]
-    # S·T 는 개설일(10-29) 전이라 평가·매매하지 않는다(25.1891) — 기록만 남는다
+    # G·H 는 25.1481·25.1482, S·T 는 25.1890(0092), X·Y 는 25.2166(0094)
+    assert sorted(기록["accounts"]) == ["A", "B", "C", "D", "E", "G", "H", "R1", "R2", "S", "T", "X", "Y"]
+    # S·T·X·Y 는 개설일 전이라 평가·매매하지 않는다(25.1891) — 기록만 남는다
     for aid in ("S", "T"):
         assert 기록["accounts"][aid] == {"not_open_until": "2026-10-29"}, aid
-    assert c.q("SELECT COUNT(*) FROM paper_orders WHERE account_id IN ('S', 'T')") == [(0,)]
+    for aid in ("X", "Y"):
+        assert 기록["accounts"][aid] == {"not_open_until": "2026-11-09"}, aid
+    assert c.q("SELECT COUNT(*) FROM paper_orders WHERE account_id IN ('S', 'T', 'X', 'Y')") == [(0,)]
     # E 만 상위 10 — 나머지는 5 (같은 select_top 에 계좌의 수)
     assert sorted(n들) == [5, 5, 5, 5, 5, 5, 5, 10]
     주문 = c.q("SELECT account_id, stock_id, order_type, limit_price, ref_price, quantity, tranche, reason"
@@ -311,7 +313,8 @@ def test_accounts_rules_come_from_columns_not_names(c: Client) -> None:
                  ("E", "core", "tranche", 10, "signal"), ("G", "trend", "tranche", 5, "signal"),
                  ("H", "trend", "tranche", 5, "weighted"), ("R1", "core", "open", 5, "random"),
                  ("R2", "core", "open", 5, "random"), ("S", "swing_close", "open", 10, "short"),
-                 ("T", "day_close", "open", 10, "short")]  # fmt: skip
+                 ("T", "day_close", "open", 10, "short"), ("X", "etf_switch", "open", 1, "etf_tactical"),
+                 ("Y", "etf_switch", "open", 1, "etf_tactical")]  # fmt: skip
     assert set(r[1] for r in 행) <= set(pp.SELL_RULES)
 
 

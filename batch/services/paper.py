@@ -37,6 +37,9 @@ SELL_RULES: dict[str, frozenset[str] | None] = {
     # T 당일 단타 (docs/paper.md 16.3.2, 25.1883): 매수와 함께 쓴 종가 짝 매도(`단타종가`)로 판다. 매도 플래그는 보지
     # 않고, 짝을 잃은 보유만 다음 장 시가에(`단타잔여`)
     "day_close": frozenset({"단타종가", "단타잔여"}),
+    # X·Y ETF 전술 (docs/paper.md 17장, 2026-11-06 사용자 지시): 매도 플래그를 보지 않고 국면이 바뀐 날 `jobs/paper_etf`
+    # 가 낸 전량 매도(`국면전환`) 하나로 판다
+    "etf_switch": frozenset({"국면전환"}),
 }
 #: 추세 익절(G)의 매도 사유 코드 — 매도 플래그(`sell_flags.evaluate`)가 아니라 모의 엔진이 낸다
 TRAIL_CODE = "추적손절"
@@ -46,7 +49,7 @@ TRAIL_CODE = "추적손절"
 #: 정의처는 여기 하나(웹 사본 `web/lib/accountNames.ts` 는 시험이 대조)
 ACCOUNT_NAMES: dict[str, str] = {
     "A": "가치", "B": "기준", "C": "모멘텀", "D": "장기보유", "E": "안정", "G": "추세익절", "H": "지주사",
-    "R1": "무작위1", "R2": "무작위2", "S": "스윙", "T": "단타",
+    "R1": "무작위1", "R2": "무작위2", "S": "스윙", "T": "단타", "X": "국내ETF", "Y": "미국ETF",
 }
 
 
@@ -73,7 +76,7 @@ def step_error_orders(rec: dict[str, Any]) -> str:
 
 #: 따로 재는 실험 계좌 (docs/paper.md 16.3.1, 25.1872) — 상황실 순위표 공통 구간·챔피언 후보에 넣지 않고, 결정 원장
 #: 성과 채우기는 따로 한 바퀴(기존 계좌의 하루 상한을 나눠 쓰지 않게). 정의처는 여기 하나(`desk.SEPARATE_IDS`)
-SEPARATE_IDS = ("S", "T")
+SEPARATE_IDS = ("S", "T", "X", "Y")  # X·Y ETF 전술(paper.md 17장) — 종목 계좌와 잣대가 다르다
 #: 같은 날 사고파는 계좌 — 당일 단타 T (docs/paper.md 16.3.2, 25.1881). 한 날 안의 체결·판정 순서에서 이 계좌의 매도만
 #: 그날 매수 **뒤**로 간다(`side_rank`). 행은 0092(2026-10-29 개설) — 이 정렬이 행보다 먼저 main 에 들어갔다
 SAME_DAY_IDS: tuple[str, ...] = ("T",)

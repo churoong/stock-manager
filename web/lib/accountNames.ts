@@ -15,6 +15,8 @@ export const ACCOUNT_NAMES: Readonly<Record<string, string>> = {
   R2: "무작위2",
   S: "스윙",
   T: "단타",
+  X: "국내ETF",
+  Y: "미국ETF",
 };
 
 /** 계좌 화면 이름 — 모르는 계좌는 식별자 그대로 */

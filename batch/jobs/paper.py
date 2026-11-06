@@ -28,6 +28,7 @@ from typing import Any
 from batch.core import calendar as cal
 from batch.core import db
 from batch.core import settings_range as sr
+from batch.jobs import paper_etf
 from batch.notify import formatter
 from batch.services import backtest as bt
 from batch.services import company as co
@@ -819,6 +820,7 @@ def fill_orders(
     # 냄)는 그 매도를 내지 못했다. 25.1714·25.1715 가 세 길을 판정일 다음 장으로 고쳤지만 정지·하한가 길(`날` 기준)과
     # 장 끝난 뒤 손 실행은 남아 있었다
     미룰기본 = defer_to or cal.next_session(market, date.fromisoformat(trade_date)).isoformat()
+    종목캐시: dict[int, dict[str, Any]] = {}
 
     def 미룰장(기준날: str) -> str:
         return max(cal.next_session(market, date.fromisoformat(기준날)).isoformat(), 미룰기본)
@@ -932,7 +934,13 @@ def fill_orders(
                     기록["deferred"] = 기록.get("deferred", 0) + 1
                 continue
             환율, 환율날 = fx
-        체결 = pp.make_fill(o, 가격, 날, 환율, costs_for(market, fees, taxes, 날))
+        비용 = costs_for(market, fees, taxes, 날)
+        if market == "KR" and o.side == "sell" and _stock(client, o.stock_id, 종목캐시).get("asset_type") == "etf":
+            # 국내 상장 ETF 매도는 증권거래세가 없다 — 종목 매도세를 붙이면 ETF 전술 X 가 갈아탈 때마다 더 물었다
+            # (docs/paper.md 17.1 비용 칸, 25.2166). 매매차익 배당소득세(인버스 등 기타 ETF)는 다른 계좌의
+            # 양도세처럼 넣지 않는다
+            비용 = dc_replace(비용, sell_tax_pct=0.0)
+        체결 = pp.make_fill(o, 가격, 날, 환율, 비용)
         계좌체결 = [f for f in [*fills, *새것] if f.account_id == o.account_id]
         다른예약 = 0.0
         if o.side == "buy":
@@ -2361,8 +2369,19 @@ def run_step(
             판정메모: dict[int, dict[str, Any]] = {}
             감시선 = {} if 감시함 else None
             감시오류 = {}
-            매도 = sell_decisions(client, market, 규칙, 계좌체결, 멈춘, stock_cache, targets,
-                               cal.local_today(market), 보강캐시, 판정메모, 감시선, 감시오류)  # fmt: skip
+            전술 = paper_etf.is_etf_account(acct)
+            전술계획: dict[str, Any] = {}
+            if 전술:
+                # ETF 전술 X·Y(docs/paper.md 17장) — 매도 플래그를 보지 않고 지수 국면이 바뀐 날 전량 매도(`국면전환`)
+                전술계획 = paper_etf.plan(client, aid, market, trade_date, pp.positions(계좌체결),
+                                         {o.stock_id for o in 열린 if o.account_id == aid and o.side == "sell"})
+                매도 = dict(전술계획.get("sells") or {})
+                국면 = 전술계획.get("regime")
+                a기록["etf"] = {"regime": getattr(국면, "state", None), "index_as_of": getattr(국면, "as_of", None),
+                               "action": 전술계획.get("action"), "skip": 전술계획.get("skip")}  # fmt: skip
+            else:
+                매도 = sell_decisions(client, market, 규칙, 계좌체결, 멈춘, stock_cache, targets,
+                                   cal.local_today(market), 보강캐시, 판정메모, 감시선, 감시오류)  # fmt: skip
             if 감시선 is not None:
                 a기록["guard_lines"] = _감시선_적기(client, market, aid, 규칙, 감시선, 감시오류)
             이미팖 = {o.stock_id for o in 열린 if o.account_id == aid and o.side == "sell"}
@@ -2414,6 +2433,18 @@ def run_step(
                 # 같은 실행의 매수 배분이 거둔 회차를 열린 것으로 보지 않게(현금 예약·같은 종목 두 벌 막이 까닭)
                 거둔id = {o.id for o in 거둠}
                 열린 = [o for o in 열린 if o.id not in 거둔id]
+            if 전술:
+                # ETF 전술의 판 것도 결정 원장에(그 판정 근거 — 지수·200일선·20일 수익)
+                for sid, (사유, 근거) in sorted(매도.items()):
+                    if sid in 이미팖 or sid not in 보유:
+                        continue
+                    종가행 = client.execute(LAST_CLOSE_SQL, [sid, cal.local_today(market).isoformat()]).rows
+                    문장.append(_결정판(aid, market, trade_date, sid, "blocked" if sid in 막힌매도id else "sell",
+                                    ",".join(사유) if sid not in 막힌매도id else f"{pp.BLOCKED_SELL_PREFIX}: "
+                                    + "; ".join(t for _c, t in 막힌매도id[sid]),
+                                    {"etf": 근거[0].get("criteria"), "sell_rule": 규칙},
+                                    float(종가행[0][0]) if 종가행 else None,
+                                    str(종가행[0][1]) if 종가행 else None, 지금))  # fmt: skip
             # 결정 원장 (25.1449) — 판 것과, 플래그가 섰는데 계좌 규칙이 따르지 않아 들고 간 것(B 의 황색)
             for sid, 메모 in sorted(판정메모.items()):
                 종가, 날 = 메모["ref"]
@@ -2437,7 +2468,42 @@ def run_step(
             # 당일 단타(T)는 다시 사기 쉼을 두지 않는다 — 그림자처럼 신호마다 거래(같은 날 사고팔아 보유가 남지
             # 않는다). 매도가 열린 종목만 뺀다(16.3.2, 25.1883). 순수 함수 `pp.rest_set`(25.2033 — 리플레이와 같이)
             최근판 = pp.rest_set(규칙, 계좌체결, 쉼_시작, set(매도), 이미팖)
-            if allocate and settings is not None and signal_rows:
+            if 전술 and allocate:
+                # ETF 전술 매수 — 목표 ETF 한 줄(평가 총액 × 비중, 쓸 현금 안). 갈아타는 날은 팔기만 하고
+                # 다음 실행에 산다
+                주문, b기록 = paper_etf.buy_order(
+                    client, 전술계획, market=market, valuation=v,
+                    open_buys=[o for o in 열린 if o.account_id == aid and o.side == "buy"],
+                    fx_rate=fx[0] if fx else None, trade_date=cal.local_today(market).isoformat(),
+                )  # fmt: skip
+                후보 = [rg.Candidate(o["stock_id"], "buy", o["cost_krw"], o["ref_date"], i, o["cash_krw"])
+                        for i, o in enumerate(주문)]  # fmt: skip
+                # ETF 는 그 안에서 이미 나뉘어 있다 — 종목 하나 10%·업종 30% 상한은 종목 계좌의 것(paper.md 17.1).
+                # 현금·하루 손실·멈춤 스위치·주문 수 막이는 다른 계좌와 같다
+                문맥 = dc_replace(문맥, **_관문_열린칸(client, aid, v, 열린, fx, stock_cache),
+                                max_stock_pct=100.0, max_sector_pct=100.0)  # fmt: skip
+                통과, 막힘 = rg.gate(후보, 문맥)
+                막힌수 += len(막힘)
+                막힌모두 += 막힘
+                기준 = 다시잰기준(기준)
+                for c in 통과:
+                    o = 주문[c.key]
+                    문장.append((INSERT_ORDER_SQL, [
+                        aid, market, o["stock_id"], "buy", "market", None, o["quantity"], o["currency"], trade_date,
+                        다음장, 기준, 0, o["reason"], o["horizon"], None, None,
+                        json.dumps(o["rationale"], ensure_ascii=False, default=str), 판, 지금, o["ref_price"],
+                    ]))  # fmt: skip
+                    문장.append(_결정판(aid, market, trade_date, o["stock_id"], "buy", o["reason"],
+                                    {"etf": o["rationale"]["criteria"], "weight": o["rationale"]["weight"]},
+                                    o["ref_price"], o["ref_date"], 지금))  # fmt: skip
+                for c, 까닭 in 막힘:
+                    o = 주문[c.key]
+                    문장.append(_결정판(aid, market, trade_date, o["stock_id"], "blocked",
+                                    "위험 점검: " + "; ".join(t for _c, t in 까닭),
+                                    {"etf": o["rationale"]["criteria"]}, o["ref_price"], o["ref_date"],
+                                    지금))  # fmt: skip
+                a기록["buy"] = b기록
+            elif allocate and settings is not None and signal_rows:
                 # 손절이 선 보유에 더 사지 않는다 — **계좌 규칙 전의** 판정에서 (검증 [필수] 4: 규칙으로 거른 뒤의
                 # 매도에서 뽑으면 손절을 따르지 않는 D 는 늘 비어, 떨어진 보유를 목표 비중까지 날마다 더 샀다 —
                 # B−D 에 물타기가 섞였다)

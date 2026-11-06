@@ -22,7 +22,7 @@ from batch.services.paper import step_error_orders as _step_error_orders
 #: 계좌 종류 — 화면 글. 모르는 계좌는 이름만 (docs/paper.md 1장, docs/company.md)
 KIND = {"A": "회사", "C": "회사", "D": "회사", "E": "회사", "B": "기준(점수 상위)", "G": "추세 익절",
         "H": "지주사(KIS가 베낌)", "R1": "무작위 대조", "R2": "무작위 대조", "S": "스윙(단기 신호)",
-        "T": "당일 단타(단기 신호)"}  # fmt: skip
+        "T": "당일 단타(단기 신호)", "X": "ETF 전술(국내 지수)", "Y": "ETF 전술(미국 지수)"}  # fmt: skip
 
 
 def _이름(aid: object) -> str:
@@ -247,6 +247,14 @@ PREREG: dict[tuple[str, int], dict[str, Any]] = {
                "metric": "끝난 거래 수(≥ 30)·비용 뒤 평균·승률·손익비 · 같은 기간 그림자 day_v1 과의 차이(짝마다)",
                "judge": "끝난 거래 30건 뒤 처음 본다 — 비용 뒤 평균 > 0 이고 그림자와의 차이가 비용·제약·하한가"
                         " 밤샘으로 설명되면 유지, 아니면 엔진·장부부터 본다. 판정은 사용자"},
+    # ETF 전술 계좌 둘 (docs/paper.md 17장, 2026-11-06 사용자 지시) — 같은 규칙을 두 시장에서 따로 판정
+    **{(aid, 1): {"hypothesis": f"지수 국면({지수})에 따라 지수 ETF·인버스·현금을 오가면(etf_tactical_v1)"
+                                f" 같은 기간 그 지수 ETF({보유})를 그대로 들고 있을 때보다 최대 낙폭이 작고"
+                                " 시간가중 수익은 크게 뒤지지 않는다",
+                  "metric": f"개설 뒤 MDD·시간가중 수익 대 같은 기간 {보유} 그대로 보유(같은 장부 시세)",
+                  "judge": "126번째 평가에서 한 번 — MDD ≤ 0.7 × 보유 MDD 그리고 수익 ≥ 보유 − 5%p 면 판 1 통과."
+                           " 개설 전 지수 대리 리플레이(25.2165)는 두 시장 모두 수익 기준 미달 — 참고. 판정은 사용자"}
+       for aid, 지수, 보유 in (("X", "KOSPI", "KODEX 200"), ("Y", "S&P 500", "SPY"))},
 }
 #: 사전 등록 판의 공통 지표·판정 — 판마다 다르면 줄에 `metric`·`judge` 를 따로 적는다
 PREREG_METRIC = "결정 단위 선정 하한 > 50(28일 묶음 6개 뒤) · 관문 구간 지수 대비 > 0 · R 대비 > 0"
@@ -985,6 +993,9 @@ def _손절_해당없음(account: str, n_positions: int) -> tuple[str, bool] | N
             # 정지가 길면 마지막 종가 청산(25.2024, 25.2023 교차검증 [권고])
             return f"하루 넘긴 단타 보유 {n_positions}종목 — 매도 대기(단타잔여·하한가·정지로 미룬 짝 매도)", True
         return "해당 없음 — 당일 단타(하루 끝 보유 0주)", False
+    if account in ("X", "Y"):
+        # ETF 전술(paper.md 17장) — 손절선이 없다. 국면이 바뀐 날 전량 갈아탄다(25.2166)
+        return "해당 없음 — ETF 전술은 손절 없이 지수 국면이 바뀐 날 갈아탐", False
     if account in pp.SEPARATE_IDS:
         from batch.services import shadow as sh
 
