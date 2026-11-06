@@ -39,8 +39,8 @@ def test_통과_ETF_만_잇고_두_번_돌려도_같다() -> None:
     _etf(c, 1, "069500", "KR")
     _etf(c, 2, "091160", "KR", satellite=True)
     _etf(c, 3, "229200", "KR", passed=0)
-    assert etf_link.link(c, "KR") == {"new": 2, "converted": 0, "already": 0}
-    assert etf_link.link(c, "KR") == {"new": 0, "converted": 0, "already": 2}
+    assert etf_link.link(c, "KR") == {"new": 2, "converted": 0, "already": 0, "tactical_missing": 2}
+    assert etf_link.link(c, "KR") == {"new": 0, "converted": 0, "already": 2, "tactical_missing": 2}
     rows = c.execute(
         "SELECT ticker, market, asset_type, currency, yahoo_symbol FROM stocks WHERE asset_type = 'etf' ORDER BY ticker"
     ).rows
@@ -67,7 +67,7 @@ def test_옛_계산_판에서만_통과한_ETF_는_잇지_않는다() -> None:
                 " rationale_data, calc_version, created_at) VALUES (?, '2026-10-02', '배당', '배당', ?, 't', '{}', 2, 't')",
                 [eid, 통과],
             )
-    assert etf_link.link(c, "KR") == {"new": 0, "converted": 0, "already": 0}
+    assert etf_link.link(c, "KR") == {"new": 0, "converted": 0, "already": 0, "tactical_missing": 2}
 
 
 def test_미국은_같은_티커의_예전_줄을_ETF_로_바꿔_쓴다() -> None:
@@ -142,3 +142,22 @@ def test_국내_수정주가는_이은_ETF_를_조정하지_않는다() -> None:
     )
     assert etf_id not in adjust_kr.load_stock_ids(c, None)  # type: ignore[arg-type]
     assert adjust_kr.load_stock_ids(c, "069500") == [etf_id]  # 손으로 고르면 한다  # type: ignore[arg-type]
+
+
+def test_ETF_전술_계좌의_네_ETF_는_판정_없이도_잇는다() -> None:
+    """docs/paper.md 17장(2026-11-06 사용자 지시) — 인버스는 추천 판정에서 빠지므로 판정 통과로는 영영 잇지 못한다.
+    국내는 이름, 미국은 티커로 찾는다. 판정 통과로 이미 이은 것은 한 번만"""
+    c = _sqlite_client()
+    for eid, sym, 나라, 이름 in ((11, "069500", "KR", "KODEX 200"), (12, "114800", "KR", "KODEX 인버스"),
+                               (13, "SPY", "US", "SPDR S&P 500"), (14, "SH", "US", "ProShares Short S&P500"),
+                               (15, "999999", "KR", "KODEX 200선물인버스2X")):  # fmt: skip
+        c.execute("INSERT INTO etfs (id, symbol, country, name, exchange, yahoo_symbol, status, source, fetched_at)"
+                  " VALUES (?, ?, ?, ?, 'X', ?, 'active', 't', 't')", [eid, sym, 나라, 이름, sym])  # fmt: skip
+    assert etf_link.link(c, "KR") == {"new": 2, "converted": 0, "already": 0, "tactical_missing": 0}
+    assert etf_link.link(c, "US") == {"new": 2, "converted": 0, "already": 0, "tactical_missing": 0}
+    이은 = {r[0] for r in c.execute("SELECT ticker FROM stocks WHERE asset_type = 'etf'").rows}
+    assert 이은 == {"069500", "114800", "SPY", "SH"}  # 레버리지 인버스는 잇지 않는다
+    # 판정도 통과한 KODEX 200 — 두 번 세지 않는다
+    c.execute("INSERT INTO etf_picks (etf_id, as_of_date, passed, rationale_text, rationale_data, calc_version,"
+              " created_at) VALUES (11, '2026-10-02', 1, 't', '{}', 1, 't')")
+    assert etf_link.link(c, "KR") == {"new": 0, "converted": 0, "already": 2, "tactical_missing": 0}

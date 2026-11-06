@@ -60,6 +60,28 @@ PASSED_ETFS = (
 #: 위 질의의 물음표 수 — 모두 나라 코드다
 PASSED_ETFS_ARGS = PASSED_ETFS.count("?")
 
+#: **ETF 전술 가상계좌가 사고파는 대표지수 ETF 와 그 인버스** (docs/paper.md 17장, 2026-11-06 사용자 지시
+#: "지수 예측을 통한 대표지수ETF(ex. kodex 200, kodex 200 인버스) 를 매수매도하는 ETF 계좌" → "계좌는 두개를 만들거야.
+#: 국내ETF, 미국ETF"). 추천 판정과 상관없이 늘 잇는다 — 인버스는 추천 탭에서 빠지므로(CLAUDE.md, docs/etf.md)
+#: 판정 통과로는 영영 잇지 못한다. 국내는 거래소 ETF 목록의 **이름**으로 찾는다(코드를 박지 않는다 — 069500·114800
+#: 으로 알고 있으나 `[확인필요]`), 미국은 티커
+TACTICAL_ETFS: dict[str, dict[str, tuple[str, ...]]] = {
+    "KR": {"names": ("KODEX 200", "KODEX 인버스"), "symbols": ()},
+    "US": {"names": (), "symbols": ("SPY", "SH")},
+}
+TACTICAL_SQL = (
+    "SELECT id, symbol, country, name, exchange, yahoo_symbol, stock_id FROM etfs"
+    " WHERE country = ? AND status = 'active' AND (name IN (?, ?) OR symbol IN (?, ?))"
+)
+
+
+def tactical_args(country: str) -> list[str]:
+    """`TACTICAL_SQL` 인자 — 이름 둘·티커 둘 자리를 빈 글로 채운다(빈 글은 어떤 행과도 같지 않다)"""
+    t = TACTICAL_ETFS[country]
+    이름 = (list(t["names"]) + ["", ""])[:2]
+    티커 = (list(t["symbols"]) + ["", ""])[:2]
+    return [country, *이름, *티커]
+
 CURRENCY = {"KR": "KRW", "US": "USD"}
 
 
@@ -74,6 +96,11 @@ def link(client: TursoClient, country: str) -> dict[str, int]:
     수."""
     country = country.upper()
     rows = client.execute(PASSED_ETFS, [country] * PASSED_ETFS_ARGS).dicts()
+    # ETF 전술 계좌의 네 ETF 도 함께(위 `TACTICAL_ETFS`) — 이미 판정 통과로 들어온 것은 한 번만
+    전술 = client.execute(TACTICAL_SQL, tactical_args(country)).dicts() if country in TACTICAL_ETFS else []
+    본 = {int(r["id"]) for r in rows}
+    rows = list(rows) + [r for r in 전술 if int(r["id"]) not in 본]
+    찾을 = len(TACTICAL_ETFS.get(country, {}).get("names", ())) + len(TACTICAL_ETFS.get(country, {}).get("symbols", ()))
     새로 = 바꿈 = 이미 = 0
     now = db.now_iso()
     for etf in rows:
@@ -107,7 +134,8 @@ def link(client: TursoClient, country: str) -> dict[str, int]:
             ).scalar())  # fmt: skip
             새로 += 1
         client.execute("UPDATE etfs SET stock_id = ? WHERE id = ?", [stock_id, int(etf["id"])])
-    return {"new": 새로, "converted": 바꿈, "already": 이미}
+    # 목록에서 못 찾은 전술 ETF 수 — 0 이 아니면 그 계좌는 살 것이 없다(이름이 바뀌었거나 목록에 없음)
+    return {"new": 새로, "converted": 바꿈, "already": 이미, "tactical_missing": 찾을 - len(전술)}
 
 
 def main() -> int:
