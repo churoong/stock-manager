@@ -80,12 +80,12 @@ def _시세(c: Client, sid: int, day: str, open_: float, close: float, cur: str 
 
 
 def _하루(c: Client, monkeypatch: pytest.MonkeyPatch, trade_date: str, market: str = "KR",
-         signals: bool = True) -> tuple[list[str], dict]:  # fmt: skip
+         signals: bool = True, allocate: bool = True) -> tuple[list[str], dict]:  # fmt: skip
     다음 = cal.next_session(market, date.fromisoformat(trade_date))
     monkeypatch.setattr(cal, "local_today", lambda _m=None: 다음)
     return job.run_step(
         c, market=market, trade_date=trade_date, late=False, signal_rows=[_신호()] if signals else [],
-        settings=설정, price_series={}, series_unknown={}, allocate=True,
+        settings=설정, price_series={}, series_unknown={}, allocate=allocate,
         now=datetime.fromisoformat(f"{다음}T00:30:00+00:00"),
     )  # fmt: skip
 
@@ -387,6 +387,7 @@ def test_든_ETF_의_연결이_끊기면_팔지_않고_멈춤을_알린다(monke
     줄, 기록 = _하루(c, monkeypatch, "2026-10-16", signals=False)
     assert c.q("SELECT COUNT(*) FROM paper_orders WHERE account_id = 'X' AND side = 'sell'") == [(0,)]
     assert 기록["accounts"]["X"]["etf"]["action"] == "hold"
+    assert 기록["accounts"]["X"]["etf"]["tactical_missing"] == ["long"]  # 끊긴 몫은 실행 기록에(25.2171)
     assert "⚠️ 가상 국내ETF 멈춤 — 든 지수 ETF의 종목표 연결이 끊김 — 이름 대조 확인" in 줄
     # 상황실 '확인할 일' 도 같은 술어(25.2170)
     할일 = desk.checks(halted=False, paper=기록, broker=None, recon_bad=[], warnings=0)
@@ -398,6 +399,8 @@ def test_든_ETF_의_연결이_끊기면_팔지_않고_멈춤을_알린다(monke
     줄, 기록 = _하루(c, monkeypatch, "2026-10-19", signals=False)
     assert c.q("SELECT stock_id, quantity, reason FROM paper_orders WHERE account_id = 'X' AND side = 'sell'") == [
         (KODEX200, 32, paper_etf.SWITCH_CODE)]
+    매도근거 = json.loads(c.q("SELECT rationale_json FROM paper_orders WHERE account_id = 'X' AND side = 'sell'")[0][0])
+    assert "하락 국면 → 지수 ETF 정리" in 매도근거["flags"][0]["rationale"]  # 사람 글 — long·inverse 아님
     assert 기록["accounts"]["X"]["etf"]["action"] == "sell" and not [x for x in 줄 if "국내ETF 멈춤" in x]
     assert 기록["accounts"]["X"]["etf"]["skip"] is None  # 파는 날은 멈춤이 아니다 — 실행 기록에도 남기지 않는다
 
@@ -445,3 +448,59 @@ def test_경고_술어() -> None:
     assert et.warning({"etf": {"action": "buy"}, "buy": {"skipped": "환율 없음"}}) == ("normal", "사지 못함 — 환율 없음")
     assert et.warning({"etf": {"action": "hold", "skip": "끊김"}}) == ("high", "멈춤 — 끊김")
     assert et.warning({"etf": {"action": "hold", "skip": None}}) is None
+
+
+
+# ── 25.2171 (25.2170 교차검증 권고) ──────────────────────────────────────────
+
+
+def _든(*sids: int) -> dict[int, pp.Position]:
+    return {s: pp.Position(s, "KRW", 10, 300_000.0) for s in sids}
+
+
+def test_연결된_보유는_다른_몫이_끊겨도_그대로_판정한다() -> None:
+    """지수 ETF 를 든 채 인버스 연결만 끊긴 날 — 보유를 인버스로 읽으면 상승 국면에 전량 매도가 나간다"""
+    c = _계좌()
+    _지수(c, "KOSPI", "2026-10-14")
+    c.conn.execute("UPDATE etfs SET stock_id = NULL WHERE name = 'KODEX 인버스'")
+    p = paper_etf.plan(c, "X", "KR", "2026-10-14", _든(KODEX200), set())
+    assert (p["held"], p["action"], p["sells"], p.get("skip")) == ("long", "hold", {}, None)
+    assert p["tactical_missing"] == ["inverse"] and et.warning({"etf": p}) is None
+
+
+def test_보유_여럿이거나_두_몫이_다_끊기면_팔지_않고_멈춘다() -> None:
+    c = _계좌()
+    _지수(c, "KOSPI", "2026-10-14")
+    c.conn.execute("UPDATE etfs SET stock_id = NULL WHERE name = 'KODEX 200'")
+    # 보유 둘(모르는 것 하나 + 연결된 인버스) — 엔진이 만든 꼴이 아니지만 연결이 끊긴 날은 정리하지 않는다
+    p = paper_etf.plan(c, "X", "KR", "2026-10-14", _든(KODEX200, INVERSE), set())
+    assert (p["action"], p["sells"]) == ("hold", {})
+    assert p["skip"] == "든 ETF 의 종목표 연결이 끊김 — 팔지 않음, 이름 대조 확인"
+    # 보유 하나, 두 몫이 다 끊김 — 어느 몫인지 모른다
+    c.conn.execute("UPDATE etfs SET stock_id = NULL WHERE name = 'KODEX 인버스'")
+    p = paper_etf.plan(c, "X", "KR", "2026-10-14", _든(INVERSE), set())
+    assert (p["action"], p["sells"], p["tactical_missing"]) == ("hold", {}, ["long", "inverse"])
+    assert p["held"] == "?" and p["skip"] == "든 ETF 의 종목표 연결이 끊김 — 팔지 않음, 이름 대조 확인"
+    # 하락 국면이어도 팔지 않는다 — 끊긴[0](지수 ETF)으로 읽으면 인버스 보유를 판다
+    _지수값(c, "KOSPI", "2026-10-15", 150.0)
+    assert paper_etf.plan(c, "X", "KR", "2026-10-15", _든(INVERSE), set())["sells"] == {}
+
+
+def test_주식_신호가_묵은_날에도_ETF_는_판정대로_산다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`allocate` 거짓(신호 묵음·추천 못 읽음) — 종목 계좌는 배분하지 않고, ETF 전술은 지수로 판정해 산다(25.2171)"""
+    c = _계좌()
+    _지수(c, "KOSPI", "2026-10-14")
+    _시세(c, KODEX200, "2026-10-14", 30_000, 30_000)
+    줄, 기록 = _하루(c, monkeypatch, "2026-10-14", allocate=False)
+    assert [r[:2] for r in _주문(c)] == [(KODEX200, "buy")]
+    assert c.q("SELECT COUNT(*) FROM paper_orders WHERE account_id = 'B'") == [(0,)]
+    assert not [x for x in 줄 if "국내ETF 사지 못함" in x]
+
+
+def test_국면_근거는_모름_날도_웹_근거표_꼴() -> None:
+    from batch.services import criteria as crit
+
+    for r in (et.Regime("up", "2026-11-06", 110.0, 100.0, 0.02), et.Regime("unknown", None, None, None, None),
+              et.Regime("unknown", "2026-10-01", 100.0, None, None)):  # fmt: skip
+        줄 = paper_etf.criteria(r)
+        assert 줄 and all(crit.displayable(x) for x in 줄), 줄

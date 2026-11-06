@@ -2382,7 +2382,8 @@ def run_step(
                 매도 = dict(전술계획.get("sells") or {})
                 국면 = 전술계획.get("regime")
                 a기록["etf"] = {"regime": getattr(국면, "state", None), "index_as_of": getattr(국면, "as_of", None),
-                               "action": 전술계획.get("action"), "skip": 전술계획.get("skip")}  # fmt: skip
+                               "action": 전술계획.get("action"), "skip": 전술계획.get("skip"),
+                               "tactical_missing": 전술계획.get("tactical_missing")}  # fmt: skip
             else:
                 매도 = sell_decisions(client, market, 규칙, 계좌체결, 멈춘, stock_cache, targets,
                                    cal.local_today(market), 보강캐시, 판정메모, 감시선, 감시오류)  # fmt: skip
@@ -2472,9 +2473,11 @@ def run_step(
             # 당일 단타(T)는 다시 사기 쉼을 두지 않는다 — 그림자처럼 신호마다 거래(같은 날 사고팔아 보유가 남지
             # 않는다). 매도가 열린 종목만 뺀다(16.3.2, 25.1883). 순수 함수 `pp.rest_set`(25.2033 — 리플레이와 같이)
             최근판 = pp.rest_set(규칙, 계좌체결, 쉼_시작, set(매도), 이미팖)
-            if 전술 and allocate:
+            if 전술:
                 # ETF 전술 매수 — 목표 ETF 한 줄(평가 총액 × 비중, 쓸 현금 안). 갈아타는 날은 팔기만 하고
-                # 다음 실행에 산다
+                # 다음 실행에 산다. `allocate`(주식 신호가 묵었거나 추천을 못 읽은 날 거짓)에 묶지 않는다 — 판정은
+                # 지수·ETF 시세로 하고 신호를 쓰지 않는다(17.1). 묶으면 그날 "사지 못함 — 배분하지 않는 날" 이 났다
+                # (25.2171, 25.2170 교차검증 [권고]). 환율 없는 날은 `buy_order` 가 "환율 없음" 으로 건너뛴다
                 주문, b기록 = paper_etf.buy_order(
                     client, 전술계획, market=market, valuation=v,
                     open_buys=[o for o in 열린 if o.account_id == aid and o.side == "buy"],
