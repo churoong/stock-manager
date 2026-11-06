@@ -252,3 +252,14 @@ def test_같은_워크플로의_둘째_모듈도_표에_있다() -> None:
     for 이름, 파일 in (("stress", "backtest.yml"), ("etf_tilt", "etf.yml"), ("kr_cashflow", "financials.yml")):
         assert f"batch.jobs.{이름}" in (뿌리 / ".github/workflows" / 파일).read_text(encoding="utf-8")
         assert 이름 in ws.EXPECTED_DAYS, 이름
+
+
+def test_첫_예정_실행_전에는_돈_기록_없음을_싣지_않는다() -> None:
+    """25.2161 (25.2160 교차검증 [필수] 둘) — 국내 현금흐름은 11-08 16:17 UTC 가 첫 실행이라 11-08 07:41 KST 주간 요약이
+    'kr_cashflow: 돈 기록 없음' 거짓 경보를 맨 앞에 실을 뻔했다"""
+    from datetime import UTC, datetime
+
+    다른 = {j: "2026-11-05T00:00:00+00:00" for j in ws.EXPECTED_DAYS if j != "kr_cashflow"}
+    assert ws.stale_jobs(다른, datetime(2026, 11, 7, 22, 41, tzinfo=UTC)) == []
+    # 첫 예정 + 기대 주기(10일)가 지나도 없으면 싣는다
+    assert ("kr_cashflow", None) in ws.stale_jobs(다른, datetime(2026, 11, 20, tzinfo=UTC))

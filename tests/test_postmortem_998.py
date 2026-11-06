@@ -278,3 +278,39 @@ def test_늦게_익는_정지_종목의_손실도_다음_주에_한_번_나온�
     assert (총, 손실수) == (1, 1) and x.ret == -0.30  # A 만 — B 를 다시 세지 않는다
     assert 주2 == [{"KR": "2026-10-01", "seen": ["2:2026-10-02"]}]
     assert ws.load_losses(C(), datetime(2026, 11, 15, tzinfo=UTC), 주2[0])[:2] == (0, 0)
+
+
+def test_기록이_묶이면_45일이_지나_익은_긴_정지_손실도_나오고_미국도_같다() -> None:
+    """25.2161 (25.2160 교차검증 [권고]·[참고], 재현) — 아래 경계에 45일 백스톱이 늘 걸려, 진입 뒤 45일 안에 익지 않은 긴
+    분할 정지 손실은 기록을 묶어도 끝내 안 나왔다. 미국 쪽·남김이 빈 주를 거친 seen 도 본다"""
+    from batch.core.turso import ResultSet
+    from tests.test_sql_schema import 스키마올리기
+
+    con: sqlite3.Connection = 스키마올리기()
+
+    class C:
+        def execute(self, sql, args=None):  # noqa: ANN001, ANN202
+            cur = con.execute(sql, args or [])
+            return ResultSet(columns=[d[0] for d in cur.description or []], rows=[tuple(r) for r in cur.fetchall()])
+
+    for sid, 나라 in ((1, "US"), (2, "US"), (3, "US")):
+        con.execute("INSERT INTO stocks (id, ticker, market, country, currency, status, source, fetched_at)"
+                    " VALUES (?, ?, 'X', ?, 'USD', 'active', 't', 't')", [sid, f"T{sid}", 나라])  # fmt: skip
+    줄 = ((1, "2026-10-01", None), (2, "2026-10-02", -0.05))
+    for k, (sid, d, r) in enumerate(줄):
+        con.execute("INSERT INTO signal_outcomes (stock_id, as_of_date, horizon, entry_date, entry_close, ret_20d,"
+                    " days_available, computed_at) VALUES (?, ?, 'short', ?, 100, ?, 20, 't')", [sid, f"a{k}", d, r])  # fmt: skip
+    기록: object = {"US": "2026-09-30"}
+    주: list[dict] = []
+    assert ws.load_losses(C(), datetime(2026, 11, 1, tzinfo=UTC), 기록, 주)[:2] == (1, 1)
+    assert 주[0] == {"US": "2026-09-30", "seen": ["2:2026-10-02"]}
+    # 11-08: 새로 익은 것 C(10-20) 하나 — 남김이 빈 주도 seen 이 목록으로 남는다
+    con.execute("INSERT INTO signal_outcomes (stock_id, as_of_date, horizon, entry_date, entry_close, ret_20d,"
+                " days_available, computed_at) VALUES (3, 'c', 'short', '2026-10-20', 100, 0.02, 20, 't')")
+    주2: list[dict] = []
+    assert ws.load_losses(C(), datetime(2026, 11, 8, tzinfo=UTC), 주[0], 주2)[:2] == (1, 0)
+    assert 주2[0]["US"] == "2026-09-30" and isinstance(주2[0]["seen"], list) and "2:2026-10-02" in 주2[0]["seen"]
+    # 11-22: A(10-01) 가 긴 정지 끝에 −40% 로 익었다 — 진입 뒤 52일, 45일 백스톱 밖이지만 기록이 묶여 있어 나온다
+    con.execute("UPDATE signal_outcomes SET ret_20d = -0.40 WHERE stock_id = 1")
+    총, 손실수, [x] = ws.load_losses(C(), datetime(2026, 11, 22, tzinfo=UTC), 주2[0])
+    assert (총, 손실수) == (1, 1) and x.ret == -0.40

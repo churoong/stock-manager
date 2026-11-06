@@ -207,12 +207,21 @@ def _외(전체: int) -> list[str]:
     return [f"  … 외 {전체 - MAX_LINES}개 (웹 /status)"] if 전체 > MAX_LINES else []
 
 
+#: **첫 예정 실행** — 이 시각 + 기대 주기 전에는 "한 번도 돈 적 없음" 을 싣지 않는다(25.2161, 25.2160 교차검증 [필수]).
+#: 국내 현금흐름은 `START_ON`(11-04) 전엔 실행 기록을 열지 않고, 첫 예약은 financials.yml 의 11-08 16:17 UTC 회차다 —
+#: 11-08 07:41 KST 주간 요약이 "kr_cashflow: 돈 기록 없음" 거짓 경보를 맨 앞에 실을 뻔했다(25.1824 와 같은 꼴)
+FIRST_DUE: dict[str, str] = {"kr_cashflow": "2026-11-08T16:17:00+00:00"}
+
+
 def stale_jobs(last_success: dict[str, str], now: datetime) -> list[tuple[str, int | None]]:
     """기대 주기를 넘긴 작업. (이름, 며칠 전) — 한 번도 돈 적(성공·부분)이 없으면 None."""
     out: list[tuple[str, int | None]] = []
     for job, limit in EXPECTED_DAYS.items():
         last = last_success.get(job)
         if last is None:
+            첫 = FIRST_DUE.get(job)
+            if 첫 and now < datetime.fromisoformat(첫) + timedelta(days=limit):
+                continue  # 아직 돌 때가 안 됐다
             out.append((job, None))
             continue
         try:
@@ -249,6 +258,10 @@ def reads_line(used: int | None, limit: int, now: datetime, label: str = "Turso 
 POSTMORTEM_THROUGH_KEY = "postmortem_through"
 #: 기록이 없거나 오래 묵었을 때 거슬러 볼 한계(달력일). 첫 실행이 몇 달치를 한꺼번에 내지 않게 막는다
 POSTMORTEM_BACKSTOP_DAYS = 45
+#: 보고 기록이 있을 때 아래 경계로 그대로 믿는 기간 — 덜 익은 진입일에 묶인 기록이 이보다 묵으면 다시
+#: 백스톱으로(25.2161).
+#: 긴 분할 정지(10거래일 안팎)가 끼어도 D+41 보고 + 정지만큼 늦게 익는 손실을 담는다 — 추정, 실측 없음 `[확인필요]`
+POSTMORTEM_PINNED_DAYS = 90
 #: 사후 분석에서 따져 볼 손실의 상한 — 손실 하나마다 시세를 몇 줄씩 읽는다
 POSTMORTEM_MAX = 30
 
@@ -302,6 +315,11 @@ def load_losses(
     09-08~09-11 이 빠졌다."""
     한계 = (now - timedelta(days=POSTMORTEM_BACKSTOP_DAYS)).date().isoformat()
     앞 = _나라별(through)
+    # **기록이 있으면 90일까지는 기록 그대로 아래 경계로** (25.2161, 25.2160 교차검증 [권고]). 45일 백스톱이 늘 걸려,
+    # 덜 익은 진입일에 기록을 묶어도 진입 뒤 45일 안에 익지 않는 손실(긴 분할 정지 — 평시에도 보고까지 약 D+41)은
+    # 덜익음 질의와 손실 질의에서 함께 빠져 끝내 안 나왔다. 백스톱은 기록이 없거나 90일보다 묵었을 때만
+    묵음 = (now - timedelta(days=POSTMORTEM_PINNED_DAYS)).date().isoformat()
+    아래 = {나라: (앞[나라] if 앞.get(나라, "") >= 묵음 else max(앞.get(나라, ""), 한계)) for 나라 in ("KR", "US")}
     # 기록 뒤에서 이미 보고한 (종목, 진입일) — 기록을 덜 익은 진입일 앞에 묶어 두므로 그 뒤 보고한 줄을
     # 다시 세지 않게(25.2160)
     본것 = {str(x) for x in (through.get("seen") or [])} if isinstance(through, dict) else set()
@@ -311,7 +329,7 @@ def load_losses(
         # `days_available >= 20` 을 걸지 않는다 (25.1149) — 성적표는 상장폐지·거래정지로 끊긴 신호의 `ret_20d` 를
         # 마지막 종가로 채운다(25.696). 그 조건은 `ret_20d IS NOT NULL` 과 겹치고 **끊긴 손실만** 걸러 냈다(생존편향)
         " WHERE o.entry_date > CASE s.country WHEN 'KR' THEN ? ELSE ? END AND o.ret_20d IS NOT NULL",
-        [max(앞.get("KR", ""), 한계), max(앞.get("US", ""), 한계)],
+        [아래["KR"], 아래["US"]],
     ).rows
     rows = [r for r in rows if f"{int(r[0])}:{str(r[3])}" not in 본것]
     if 끝 is not None and rows:
@@ -327,7 +345,7 @@ def load_losses(
             "SELECT s.country, MIN(o.entry_date) FROM signal_outcomes o JOIN stocks s ON s.id = o.stock_id"
             " WHERE o.entry_date > CASE s.country WHEN 'KR' THEN ? ELSE ? END AND o.ret_20d IS NULL"
             " AND o.entry_close IS NOT NULL GROUP BY s.country",
-            [max(앞.get("KR", ""), 한계), max(앞.get("US", ""), 한계)],
+            [아래["KR"], 아래["US"]],
         ).rows
         for 나라값, 첫날 in 덜익음:
             나라 = "KR" if str(나라값) == "KR" else "US"
@@ -339,7 +357,7 @@ def load_losses(
         남김 = sorted(k for k, (나라, d) in 나라별.items() if d > 새.get(나라, ""))
         # 예전에 남긴 것은 나라를 모르니 두 기록 가운데 이른 쪽 뒤·백스톱 안만 다시 남긴다
         # (넉넉한 쪽 — 다시 세지 않는 것이 목적)
-        남김 += sorted(k for k in 본것 if k.split(":", 1)[-1] > max(한계, min(새.get("KR", ""), 새.get("US", ""))))
+        남김 += sorted(k for k in 본것 if k.split(":", 1)[-1] > max(묵음, min(새.get("KR", ""), 새.get("US", ""))))
         if 남김:
             새["seen"] = sorted(set(남김))
         끝.append(새)
