@@ -146,10 +146,11 @@ def buy_order(client: Any, p: dict[str, Any], *, market: str, valuation: pp.Valu
     sid = int(p["ids"][몫])
     통화 = "KRW" if market == "KR" else "USD"
     환율 = 1.0 if 통화 == "KRW" else fx_rate
-    if not 환율:
-        return [], {"skipped": "환율 없음"}
+    # 이미 열린 매수를 먼저 — 같은 날 다시 돈 실행에서 그사이 환율이 묵었다고 "사지 못함" 이 나지 않게(25.2173)
     if any(o.stock_id == sid for o in open_buys):
         return [], {"skipped": et.ALREADY_OPEN}
+    if not 환율:
+        return [], {"skipped": "환율 없음"}
     예약 = pp.reserved_krw(open_buys, {"USD": fx_rate})
     if 예약 is None:
         return [], {"skipped": "미체결 달러 주문의 환율 모름"}
@@ -160,6 +161,10 @@ def buy_order(client: Any, p: dict[str, Any], *, market: str, valuation: pp.Valu
     if not 시세:
         return [], {"skipped": "ETF 시세 없음(이은 날부터 쌓인다)"}
     종가, 날 = float(시세[0][0]), str(시세[0][1])[:10]
+    if (지수날 := p["regime"].as_of) and 날 < str(지수날)[:10]:
+        # ETF 종가가 판정에 쓴 지수 날짜보다 앞섬 — 같은 장 값이어야 한다(둘 다 그날 일일 수집). 앞서면 ETF 수집이
+        # 빠진 날이라 묵은 값으로 수량을 내지 않는다(25.2173). 위험 점검의 묵음 막이(5거래일)보다 좁은 이 계좌의 잣대
+        return [], {"skipped": f"ETF 시세 묵음(종가 {날}, 지수 {str(지수날)[:10]})"}
     비중 = et.target(p["regime"].state)[몫]
     주당 = 종가 * 환율  # 원
     # 쓸 현금 잣대 — 예약과 같은 수수료 여유, 달러는 환율 여유까지(`pp.reserved_krw`)

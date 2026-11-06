@@ -531,3 +531,53 @@ def test_국면_근거는_모름_날도_웹_근거표_꼴() -> None:
               et.Regime("unknown", "2026-10-01", 100.0, None, None)):  # fmt: skip
         줄 = paper_etf.criteria(r)
         assert 줄 and all(crit.displayable(x) for x in 줄), 줄
+
+
+
+# ── 25.2173 (25.2172 교차검증 참고 셋) ───────────────────────────────────────
+
+
+def test_ETF_종가가_지수_날짜보다_묵으면_사지_않고_알린다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """위험 점검의 묵음 막이(5거래일) 안쪽이라도 — ETF 와 지수는 같은 장 값이어야 한다"""
+    c = _계좌()
+    _지수(c, "KOSPI", "2026-10-14")
+    _시세(c, KODEX200, "2026-10-13", 30_000, 30_000)  # 하루 묵음(10-14 ETF 수집이 빠진 날)
+    p = paper_etf.plan(c, "X", "KR", "2026-10-14", {}, set())
+    assert paper_etf.buy_order(c, p, market="KR", valuation=_평가(1_000_000), open_buys=[], fx_rate=None,
+                               trade_date="2026-10-15") == ([], {"skipped": "ETF 시세 묵음(종가 2026-10-13, 지수 2026-10-14)"})  # fmt: skip
+    줄, 기록 = _하루(c, monkeypatch, "2026-10-14", signals=False)
+    assert _주문(c) == [] and "⚠️ 가상 국내ETF 사지 못함 — ETF 시세 묵음(종가 2026-10-13, 지수 2026-10-14)" in 줄
+    # 같은 날 값이면 산다 — 경계
+    _시세(c, KODEX200, "2026-10-14", 30_000, 30_000)
+    주문, _ = paper_etf.buy_order(c, p, market="KR", valuation=_평가(1_000_000), open_buys=[], fx_rate=None,
+                                trade_date="2026-10-15")  # fmt: skip
+    assert [(o["stock_id"], o["ref_date"]) for o in 주문] == [(KODEX200, "2026-10-14")]
+
+
+def test_이미_열린_매수가_환율_없음보다_먼저() -> None:
+    """같은 날 다시 돈 미국 실행 — 앞 실행이 매수를 냈고 뒤 실행에만 환율이 묵으면 경고가 아니라 이미 냄"""
+    c = _계좌(etf=("Y",))
+    _지수(c, "SP500", "2026-10-14")
+    _시세(c, SPY, "2026-10-14", 500, 500, "USD")
+    p = paper_etf.plan(c, "Y", "US", "2026-10-14", {}, set())
+    열림 = pp.Order(id=9, account_id="Y", stock_id=SPY, side="buy", order_type="market", limit_price=None,
+                    quantity=1, currency="USD", fill_session="2026-10-15", ref_price=500.0)  # fmt: skip
+    주문, 기록 = paper_etf.buy_order(c, p, market="US", valuation=_평가(1_000_000), open_buys=[열림], fx_rate=None,
+                                   trade_date="2026-10-15")  # fmt: skip
+    assert (주문, 기록) == ([], {"skipped": et.ALREADY_OPEN})
+    assert et.warning({"etf": {"action": "buy"}, "buy": 기록}) is None
+
+
+def test_보유_없이_두_몫이_다_끊기면_사지_못함(monkeypatch: pytest.MonkeyPatch) -> None:
+    """멈춤(high)은 든 보유가 있을 때만 — 보유가 없으면 사야 할 몫을 못 사는 날(normal)"""
+    c = _계좌()
+    _지수(c, "KOSPI", "2026-10-14")
+    c.conn.execute("UPDATE etfs SET stock_id = NULL")
+    p = paper_etf.plan(c, "X", "KR", "2026-10-14", {}, set())
+    assert (p["action"], p["buy_role"], p["sells"]) == ("buy", None, {})
+    assert p["skip"] == "지수 ETF가 종목표에 이어지지 않음 — 이름 대조 확인"
+    assert p["tactical_missing"] == ["long", "inverse"]
+    줄, 기록 = _하루(c, monkeypatch, "2026-10-14", signals=False)
+    assert et.warning(기록["accounts"]["X"]) == ("normal", "사지 못함 — 지수 ETF가 종목표에 이어지지 않음 — 이름 대조 확인")
+    assert "⚠️ 가상 국내ETF 사지 못함 — 지수 ETF가 종목표에 이어지지 않음 — 이름 대조 확인" in 줄
+    assert not [x for x in 줄 if "멈춤" in x]
