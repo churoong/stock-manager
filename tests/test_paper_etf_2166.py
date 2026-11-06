@@ -80,12 +80,12 @@ def _시세(c: Client, sid: int, day: str, open_: float, close: float, cur: str 
 
 
 def _하루(c: Client, monkeypatch: pytest.MonkeyPatch, trade_date: str, market: str = "KR",
-         signals: bool = True, allocate: bool = True) -> tuple[list[str], dict]:  # fmt: skip
+         signals: bool = True, allocate: bool = True, settings: dict | None = 설정) -> tuple[list[str], dict]:  # fmt: skip
     다음 = cal.next_session(market, date.fromisoformat(trade_date))
     monkeypatch.setattr(cal, "local_today", lambda _m=None: 다음)
     return job.run_step(
         c, market=market, trade_date=trade_date, late=False, signal_rows=[_신호()] if signals else [],
-        settings=설정, price_series={}, series_unknown={}, allocate=allocate,
+        settings=settings, price_series={}, series_unknown={}, allocate=allocate,
         now=datetime.fromisoformat(f"{다음}T00:30:00+00:00"),
     )  # fmt: skip
 
@@ -466,6 +466,12 @@ def test_연결된_보유는_다른_몫이_끊겨도_그대로_판정한다() ->
     p = paper_etf.plan(c, "X", "KR", "2026-10-14", _든(KODEX200), set())
     assert (p["held"], p["action"], p["sells"], p.get("skip")) == ("long", "hold", {}, None)
     assert p["tactical_missing"] == ["inverse"] and et.warning({"etf": p}) is None
+    # 하락으로 바뀐 날 — 연결된 지수 ETF 는 평소대로 판다(멈춤 아님). 다음 실행의 인버스는 '사지 못함'
+    _지수값(c, "KOSPI", "2026-10-15", 150.0)
+    p = paper_etf.plan(c, "X", "KR", "2026-10-15", _든(KODEX200), set())
+    assert (p["action"], list(p["sells"]), p.get("skip")) == ("sell", [KODEX200], None)
+    p = paper_etf.plan(c, "X", "KR", "2026-10-15", {}, set())
+    assert (p["action"], p["buy_role"], p["skip"]) == ("buy", None, "인버스가 종목표에 이어지지 않음 — 이름 대조 확인")
 
 
 def test_보유_여럿이거나_두_몫이_다_끊기면_팔지_않고_멈춘다() -> None:
@@ -495,6 +501,27 @@ def test_주식_신호가_묵은_날에도_ETF_는_판정대로_산다(monkeypat
     assert [r[:2] for r in _주문(c)] == [(KODEX200, "buy")]
     assert c.q("SELECT COUNT(*) FROM paper_orders WHERE account_id = 'B'") == [(0,)]
     assert not [x for x in 줄 if "국내ETF 사지 못함" in x]
+    # 추천을 못 읽은 날 운영이 넘기는 꼴(settings None·신호 없음, daily.py `추천_오류`)도 같다
+    c2 = _계좌()
+    _지수(c2, "KOSPI", "2026-10-14")
+    _시세(c2, KODEX200, "2026-10-14", 30_000, 30_000)
+    줄, _ = _하루(c2, monkeypatch, "2026-10-14", signals=False, allocate=False, settings=None)
+    assert [r[:2] for r in _주문(c2)] == [(KODEX200, "buy")]
+    assert c2.q("SELECT COUNT(*) FROM paper_orders WHERE account_id = 'B'") == [(0,)]
+
+
+def test_미국_ETF_는_환율이_없으면_사지_않고_알린다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`allocate` 에서 뗀 뒤(25.2171) 달러 계좌를 지키는 막이는 `buy_order` 의 '환율 없음' 하나다(25.2172)"""
+    c = _계좌(etf=("Y",))
+    c.conn.execute("DELETE FROM fx_rates")
+    _지수(c, "SP500", "2026-10-14")
+    _시세(c, SPY, "2026-10-14", 500, 500, "USD")
+    p = paper_etf.plan(c, "Y", "US", "2026-10-14", {}, set())
+    assert paper_etf.buy_order(c, p, market="US", valuation=_평가(1_000_000), open_buys=[], fx_rate=None,
+                               trade_date="2026-10-15") == ([], {"skipped": "환율 없음"})  # fmt: skip
+    줄, 기록 = _하루(c, monkeypatch, "2026-10-14", market="US", signals=False, allocate=False)
+    assert _주문(c, "Y") == [] and 기록["accounts"]["Y"]["buy"] == {"skipped": "환율 없음"}
+    assert "⚠️ 가상 미국ETF 사지 못함 — 환율 없음" in 줄 and "step_error" not in 기록["accounts"]["Y"]
 
 
 def test_국면_근거는_모름_날도_웹_근거표_꼴() -> None:
