@@ -261,5 +261,7 @@ def test_첫_예정_실행_전에는_돈_기록_없음을_싣지_않는다() -> 
 
     다른 = {j: "2026-11-05T00:00:00+00:00" for j in ws.EXPECTED_DAYS if j != "kr_cashflow"}
     assert ws.stale_jobs(다른, datetime(2026, 11, 7, 22, 41, tzinfo=UTC)) == []
+    # 첫 예정 뒤라도 기대 주기 안(11-12)이면 아직 싣지 않는다 — 첫 회차와 재시도가 실패할 여유(25.2162)
+    assert all(j != "kr_cashflow" for j, _ in ws.stale_jobs(다른, datetime(2026, 11, 12, tzinfo=UTC)))
     # 첫 예정 + 기대 주기(10일)가 지나도 없으면 싣는다
     assert ("kr_cashflow", None) in ws.stale_jobs(다른, datetime(2026, 11, 20, tzinfo=UTC))

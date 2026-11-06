@@ -310,7 +310,19 @@ def test_기록이_묶이면_45일이_지나_익은_긴_정지_손실도_나오�
     주2: list[dict] = []
     assert ws.load_losses(C(), datetime(2026, 11, 8, tzinfo=UTC), 주[0], 주2)[:2] == (1, 0)
     assert 주2[0]["US"] == "2026-09-30" and isinstance(주2[0]["seen"], list) and "2:2026-10-02" in 주2[0]["seen"]
+    # 11-15: 새로 익은 D(10-27, −3%) — 덜익음 질의도 묶인 기록 뒤를 봐야 A(10-01, 진입 뒤 45일 밖) 앞에서 멈춘다(25.2162)
+    con.execute("INSERT INTO stocks (id, ticker, market, country, currency, status, source, fetched_at)"
+                " VALUES (4, 'T4', 'X', 'US', 'USD', 'active', 't', 't')")
+    con.execute("INSERT INTO signal_outcomes (stock_id, as_of_date, horizon, entry_date, entry_close, ret_20d,"
+                " days_available, computed_at) VALUES (4, 'd', 'short', '2026-10-27', 100, -0.03, 20, 't')")
+    주3: list[dict] = []
+    assert ws.load_losses(C(), datetime(2026, 11, 15, tzinfo=UTC), 주2[0], 주3)[:2] == (1, 1)
+    assert 주3[0]["US"] == "2026-09-30"
     # 11-22: A(10-01) 가 긴 정지 끝에 −40% 로 익었다 — 진입 뒤 52일, 45일 백스톱 밖이지만 기록이 묶여 있어 나온다
     con.execute("UPDATE signal_outcomes SET ret_20d = -0.40 WHERE stock_id = 1")
-    총, 손실수, [x] = ws.load_losses(C(), datetime(2026, 11, 22, tzinfo=UTC), 주2[0])
+    주4: list[dict] = []
+    총, 손실수, [x] = ws.load_losses(C(), datetime(2026, 11, 22, tzinfo=UTC), 주3[0], 주4)
     assert (총, 손실수) == (1, 1) and x.ret == -0.40
+    # 11-29: B(10-02, 11-01 에 보고)는 45일 백스톱보다 이르지만 seen 가지치기가 90일 경계라 다시 세지 않는다(25.2162)
+    assert "2:2026-10-02" in 주4[0]["seen"]
+    assert ws.load_losses(C(), datetime(2026, 11, 29, tzinfo=UTC), 주4[0])[:2] == (0, 0)

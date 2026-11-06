@@ -256,7 +256,9 @@ def reads_line(used: int | None, limit: int, now: datetime, label: str = "Turso 
 #: 일요일 기준 20거래일 성적이 나와 있는 진입일은 대개 창 **앞**이었다 — 2026 달력 모의 154 진입일 가운데
 #: 13일만 보고됐다
 POSTMORTEM_THROUGH_KEY = "postmortem_through"
-#: 기록이 없거나 오래 묵었을 때 거슬러 볼 한계(달력일). 첫 실행이 몇 달치를 한꺼번에 내지 않게 막는다
+#: 기록이 없거나 90일(`POSTMORTEM_PINNED_DAYS`)보다 묵었을 때 거슬러 볼 한계(달력일). 첫 실행이 몇 달치를
+#: 한꺼번에 내지 않게 막는다. 기록이 45~90일 묵었으면(덜 익은 진입일에 묶였거나 요약이 몇 주 못 나갔을 때) 기록
+#: 그대로 — 되살아난 첫 요약이 그 사이를 센다(손실 상세는 `POSTMORTEM_MAX` 로 잘린다, 25.2162)
 POSTMORTEM_BACKSTOP_DAYS = 45
 #: 보고 기록이 있을 때 아래 경계로 그대로 믿는 기간 — 덜 익은 진입일에 묶인 기록이 이보다 묵으면 다시
 #: 백스톱으로(25.2161).
@@ -340,7 +342,8 @@ def load_losses(
         # **덜 익은 진입일 앞에서 멈춘다** (25.2160, 11-06 결함 루프 확인 [권고]). 성적은 종목 자기 시세 행으로 20일을
         # 세어(`outcomes.evaluate`) 거래정지로 행이 빠진 종목은 늦게 익는다. 기록을 "익은 가장 늦은 진입일" 로 넘기면
         # 그 앞의 덜 익은 진입일은 익어도 `entry_date > 기록` 에 걸려 텔레그램 사후 분석에 영영 안 나왔다 — 정지가 끼기
-        # 쉬운 종목(투자경고·분할 정지)이 바로 크게 잃은 종목이다. 백스톱(45일) 안의 덜 익은 진입일만 본다
+        # 쉬운 종목(투자경고·분할 정지)이 바로 크게 잃은 종목이다. 아래 경계(`아래` — 기록이 90일 안이면 기록 뒤,
+        # 아니면 45일 백스톱 안)의 덜 익은 진입일만 본다
         덜익음 = client.execute(
             "SELECT s.country, MIN(o.entry_date) FROM signal_outcomes o JOIN stocks s ON s.id = o.stock_id"
             " WHERE o.entry_date > CASE s.country WHEN 'KR' THEN ? ELSE ? END AND o.ret_20d IS NULL"
@@ -355,7 +358,7 @@ def load_losses(
         # 기록 뒤에 남는 보고한 줄 — 다음 주에 다시 세지 않는다
         나라별 = {f"{int(r[0])}:{str(r[3])}": ("KR" if str(r[7]) == "KR" else "US", str(r[3])) for r in rows}
         남김 = sorted(k for k, (나라, d) in 나라별.items() if d > 새.get(나라, ""))
-        # 예전에 남긴 것은 나라를 모르니 두 기록 가운데 이른 쪽 뒤·백스톱 안만 다시 남긴다
+        # 예전에 남긴 것은 나라를 모르니 두 기록 가운데 이른 쪽 뒤·90일(`묵음`) 안만 다시 남긴다
         # (넉넉한 쪽 — 다시 세지 않는 것이 목적)
         남김 += sorted(k for k in 본것 if k.split(":", 1)[-1] > max(묵음, min(새.get("KR", ""), 새.get("US", ""))))
         if 남김:
