@@ -533,7 +533,6 @@ def test_국면_근거는_모름_날도_웹_근거표_꼴() -> None:
         assert 줄 and all(crit.displayable(x) for x in 줄), 줄
 
 
-
 # ── 25.2173 (25.2172 교차검증 참고 셋) ───────────────────────────────────────
 
 
@@ -552,6 +551,26 @@ def test_ETF_종가가_지수_날짜보다_묵으면_사지_않고_알린다(mon
     주문, _ = paper_etf.buy_order(c, p, market="KR", valuation=_평가(1_000_000), open_buys=[], fx_rate=None,
                                 trade_date="2026-10-15")  # fmt: skip
     assert [(o["stock_id"], o["ref_date"]) for o in 주문] == [(KODEX200, "2026-10-14")]
+    # 묵음으로 건너뛴 날도 결정 원장에 skip 이 남는다(25.2168 길)
+    assert c.q("SELECT kind, reason FROM paper_decisions WHERE account_id = 'X'") == [
+        ("skip", "ETF 전술: ETF 시세 묵음(종가 2026-10-13, 지수 2026-10-14)")]
+
+
+def test_지수가_늦은_날은_ETF_가_뒤여도_산다() -> None:
+    """막이는 한쪽만 — 지수 수집이 늦어 지수 날짜가 T-1, ETF 종가가 T 인 날은 산다(`!=` 로 바꾸면 거짓 경고)"""
+    c = _계좌(etf=("X", "Y"))
+    _지수(c, "KOSPI", "2026-10-13")
+    _시세(c, KODEX200, "2026-10-14", 30_000, 30_000)
+    p = paper_etf.plan(c, "X", "KR", "2026-10-14", {}, set())
+    주문, _ = paper_etf.buy_order(c, p, market="KR", valuation=_평가(1_000_000), open_buys=[], fx_rate=None,
+                                trade_date="2026-10-15")  # fmt: skip
+    assert [(o["stock_id"], o["ref_date"]) for o in 주문] == [(KODEX200, "2026-10-14")]
+    # 미국 Y 도 같은 잣대 — SPY 가 지수보다 앞서면 묵음
+    _지수(c, "SP500", "2026-10-14")
+    _시세(c, SPY, "2026-10-13", 500, 500, "USD")
+    p = paper_etf.plan(c, "Y", "US", "2026-10-14", {}, set())
+    assert paper_etf.buy_order(c, p, market="US", valuation=_평가(1_000_000), open_buys=[], fx_rate=1_400.0,
+                               trade_date="2026-10-15")[1] == {"skipped": "ETF 시세 묵음(종가 2026-10-13, 지수 2026-10-14)"}  # fmt: skip
 
 
 def test_이미_열린_매수가_환율_없음보다_먼저() -> None:
