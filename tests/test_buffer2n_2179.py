@@ -50,6 +50,13 @@ def test_든_것이_n_을_넘으면_순위대로_n_개() -> None:
     assert set(b2n.pick(점수, {1, 2, 3, 4, 5}, 3)) == {1, 2, 3}
 
 
+def test_든_것이_n_을_넘으면_번호가_아니라_순위로_자른다() -> None:
+    """엔진 보유(정지로 못 판 종목 포함, 25.2183)는 n 을 넘을 수 있다 — 남김 정렬 키가 순위인지 묶는다(25.2184,
+    교차검증 [참고]: 순위 = 번호인 자료로는 정렬 키를 번호로 바꿔도 통과했다)"""
+    점수 = {5: 9.0, 1: 8.0, 4: 7.0, 2: 6.0, 3: 5.0}
+    assert set(b2n.pick(점수, {1, 2, 3, 4, 5}, 3)) == {5, 1, 4}
+
+
 def test_n_이_0_이하면_거절() -> None:
     with pytest.raises(ValueError):
         b2n.pick({1: 1.0}, set(), 0)
@@ -129,6 +136,14 @@ def test_뒤_반_월_초과가_음이면_탈락() -> None:
     assert out["halves"][0] > 0 > out["halves"][1]
 
 
+def test_앞_반_월_초과가_음이면_탈락() -> None:
+    """앞·뒤 반 **모두** 양이어야 한다 — 뒤 반만 보는 돌연변이를 막는다(25.2184, 교차검증 [권고])"""
+    월 = [0.008] * 20 + [0.015] * 20  # 앞 반은 composite(1.0%)보다 낮고 뒤 반은 높다
+    out = _판정((0.12, 0.8, -0.30), (0.10, 0.7, -0.30), 버월=월)
+    assert out["verdict"] == "탈락" and "앞·뒤 반 월 초과가 모두 양이 아님" in out["why"]
+    assert out["halves"][0] < 0 < out["halves"][1]
+
+
 def test_회전율이_낮지_않으면_구현_의심으로_판정_불가() -> None:
     out = _판정((0.12, 0.8, -0.30), (0.10, 0.7, -0.30), 버회전=0.5)
     assert out["verdict"] == "판정 불가" and "구현 의심" in out["why"]
@@ -204,3 +219,42 @@ def test_전략_함수는_지난_리밸런스에_고른_종목을_버퍼로_남�
     assert set(둘) == {1, 2}
     c첫, c둘 = 돌림("composite")
     assert set(c첫) == {1, 2} and set(c둘) == {4, 5}  # composite 는 갈아탄다
+
+
+def test_전략_함수는_composite_와_같은_종합_순위로_고른다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """12.41 "composite 와 같은 순위" — 팩터마다 점수가 달라 어느 팩터 하나로 줄 세워도 종합과 다른 자료로 묶는다
+    (25.2184, 교차검증 [권고]: 다섯 팩터가 같은 값이면 팩터 하나로 세우는 돌연변이가 통과했다).
+    종합 상위 둘 = {1, 2}, 팩터마다 상위 둘은 {3,1}·{4,1}·{3,2}·{4,2}·{3,1}"""
+    from batch.services import scoring as sc
+
+    팩터점수 = {
+        "value": {1: 70.0, 2: 69.0, 3: 100.0, 4: 0.0},
+        "quality": {1: 70.0, 2: 69.0, 3: 0.0, 4: 100.0},
+        "growth": {1: 69.0, 2: 70.0, 3: 100.0, 4: 0.0},
+        "momentum": {1: 69.0, 2: 70.0, 3: 0.0, 4: 100.0},
+        "risk": {1: 70.0, 2: 69.0, 3: 100.0, 4: 0.0},
+    }
+
+    def 입력(universe, *_a, **_k):  # noqa: ANN001, ANN202
+        return [sc.StockInput(stock_id=r["stock_id"], market="KOSPI") for r in universe]
+
+    def 점수(inputs, *_a, **_k):  # noqa: ANN001, ANN202
+        return [sc.FactorResult(stock_id=i.stock_id, factor=f, zscore=0.0, score=팩터점수[f][i.stock_id],
+                                peer_group="g", peer_size=4, missing_fields=[], raw={})
+                for i in inputs for f in 팩터점수]  # fmt: skip
+
+    monkeypatch.setattr(job, "build_pit_inputs", 입력)
+    monkeypatch.setattr(job.sc, "score_factors", 점수)
+
+    class 창:
+        cutoff = "2024-01-30"
+        holding = frozenset()
+
+        def stocks(self) -> list[int]:
+            return [1, 2, 3, 4]
+
+    가중 = {f: 20.0 for f in 팩터점수}
+    고름 = {전략: set(job.make_strategy(전략, [{"stock_id": i} for i in range(1, 5)], {}, 2, 가중, [])(
+        "2024-01-31", 창()))  # type: ignore[arg-type]
+        for 전략 in ("buffer_2n", "composite")}  # fmt: skip
+    assert 고름["buffer_2n"] == 고름["composite"] == {1, 2}

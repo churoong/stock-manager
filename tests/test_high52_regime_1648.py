@@ -119,7 +119,8 @@ def _계획(sql: str) -> list[str]:
 
 def test_곡선_표는_실행_번호로만_찾는다() -> None:
     """28회차 꼴이 `JOIN runs` 로 곡선 표 전체를 세 번 훑었다(382,500행 표에서 114만 회, 25.1655 교차검증)."""
-    for 파일 in ("round28_short_regime.sql", "round37_high52_regime.sql"):
+    for 파일 in ("round28_short_regime.sql", "round37_high52_regime.sql", "round38_buffer2n_regime.sql",
+                 "round42_judge_1103.sql"):  # 38회차·42회차도(25.2184, 교차검증 [참고])
         계획 = _계획((DIAG / 파일).read_text(encoding="utf-8"))
         훑기 = [p for p in 계획 if p.startswith("SCAN c") or "SCAN backtest_curves" in p]
         assert not 훑기, (파일, 계획)

@@ -32,7 +32,7 @@
 
 - 깔때기에 들어가는 모든 변형은 **돌리기 전에** 등록부에 한 줄씩 적는다(이름·판·명세 지문·등록일·코호트). 추가만 하고 지우지 않는다
 - **코호트** = 한 번에 등록한 묶음. 코호트 크기 m 은 **등록할 때 고정**한다(그날 줄 수로 움직이지 않게 — 챔피언 본페로니 `desk.py` 의 n 도 그날 도전자 줄 수에서 자격 있는 계좌 수로 고쳤다, 25.1915)
-- DSR 의 시도 수 N = **등록부 누적 수**(지금 `REGISTERED_TRIALS` 18 은 손 상수(25.2179 — 38회차 `buffer_2n` 이 더해 17 → 18) — 등록부로 잇는 일은 2단계 구현에서, 그때 이 값에 묶인 시험 `test_luck_997`·`test_high52_1646`·`test_doc_constants`(backtest.md 문구)·`test_core_backtest_job_1534` 를 함께 고친다)
+- DSR 의 시도 수 N = **등록부 누적 수**(지금 `REGISTERED_TRIALS` 18 은 손 상수(25.2179 — 38회차 `buffer_2n` 이 더해 17 → 18) — 등록부로 잇는 일은 2단계 구현에서, 그때 이 값에 묶인 시험 `test_luck_997`·`test_high52_1646`·`test_buffer2n_2179`·`test_buffer2n_holding_2183`(backtest.md·`luck.judge` 설명의 이 실행 수)·`test_doc_constants`(backtest.md 문구)·`test_core_backtest_job_1534` 를 함께 고친다)
 - 판정 불가 후보도 p = 1 로 코호트에 넣는다(`bh_record` 와 같은 꼴)
 - **코호트 1** = 2026-11-03 매월 기본 실행(국내 17:11·미국 19:11 UTC 예약 — KST 로는 11-04 02:11·04:11)이 판정하는 전략들 — m = 그 실행이 쓴 N(= max(실행 곡선 수, `REGISTERED_TRIALS`), `luck.judge`), **시장마다 따로**, 코드는 그 실행 기록의 `params.sha`. 이 문서가 그 결과를 보기 전에 커밋됐으므로 그 판정이 깔때기의 첫 사전 등록 판정이다. 판정 원장(docs/factors.md 12.32) #1~#40 가운데 DSR 밖의 판정(IC·A/B 등)은 각자 원장 규칙대로 — 코호트 m 에 넣지 않는다. `buffer_2n`(25.2179 커밋이 등록)은 2026-12-03 부터 월 기본 실행 줄로 코호트 1 에 실린다(25.2183 — 그 실행의 m 은 그 실행의 N)
 - **코호트 1b** = 핵심 H 첫 국내 기본 실행(수동 `backtest.yml` what=핵심H, `backtest_core` 기록 — 예약으로는 돌지 않는다, docs/backtest.md 10장) — `core_h`·`core_g`·`core_b` 판정. 시도 수는 이미 `CORE_REGISTERED_TRIALS` 로 `REGISTERED_TRIALS` 안에 있다

@@ -313,6 +313,14 @@ def test_추세_필터는_약세_달의_비중을_배수만큼_줄이고_벤치�
     assert step_log["trend_filter"]["on"] is True and step_log["trend_filter"]["index_days"]["SP500"] > 200
 
 
+def test_추세_필터_실행에는_판정_기록을_남기지_않는다(실행A: 엿봄) -> None:
+    """37회차 high52_judge·38회차 buffer_2n_judge 는 기본 실행(추세 필터 끔) 판정이다 — 필터 켠 실행에는 키가 없다
+    (25.2184, 교차검증 [참고]: `and not trend_filter` 를 빼도 모든 시험이 통과했다)"""
+    _, step_log = _마지막_실행(실행A.client)
+    assert step_log["trend_filter"]["on"] is True
+    assert "buffer_2n_judge" not in step_log and "high52_judge" not in step_log and "high52_overlap" not in step_log
+
+
 def test_추세_필터_켬_경고는_필터를_안_쓴_벤치마크_결과에_붙지_않는다(실행A: 엿봄) -> None:
     _, step_log = _마지막_실행(실행A.client)
     (경고,) = 실행A.client.행들(

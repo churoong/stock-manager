@@ -26,12 +26,12 @@ def _db() -> sqlite3.Connection:
 
 
 def _실행(k: sqlite3.Connection, 번호: int, 그룹: str, 판정: str | None, 거래일: str, 기본: bool = True,
-         버퍼: float = 0.03, 시장: str = "KR") -> None:  # fmt: skip
+         버퍼: float = 0.03, 시장: str = "KR", 상태: str = "success") -> None:  # fmt: skip
     로그 = {"group_id": 그룹, "params": {"default": 기본}}
     if 판정 is not None:
         로그["buffer_2n_judge"] = {"verdict": 판정}
     k.execute("INSERT INTO batch_runs (job_name, market, status, trade_date, started_at, step_log) VALUES"
-              " ('backtest', ?, 'success', ?, ?, ?)", [시장, 거래일, 거래일 + "T17:11:00", json.dumps(로그)])  # fmt: skip
+              " ('backtest', ?, ?, ?, ?, ?)", [시장, 상태, 거래일, 거래일 + "T17:11:00", json.dumps(로그)])  # fmt: skip
     for j, (전략, r) in enumerate((("buffer_2n", 버퍼), ("composite", 0.01), ("momentum", 0.5)), 1):
         rid = 번호 * 10 + j
         k.execute("INSERT INTO backtest_runs VALUES (?, ?, ?, ?, 20, ?)", [rid, 시장, 전략, 그룹, 거래일])
@@ -47,12 +47,16 @@ def _행(k: sqlite3.Connection) -> dict:
 
 def test_판정_실행의_첫_통과_탈락만_둘째_달부터_composite_대비() -> None:
     k = _db()
-    _실행(k, 1, "dec", "판정 불가", "2026-12-03")  # 판정 불가 → 다음 달로
-    _실행(k, 5, "dec_late", "통과", "2026-12-04")  # 같은 달 두 번째 실행 — 판정 실행이 아니다
-    _실행(k, 6, "dec_hand", "통과", "2026-12-20")  # 3~7일 밖 손 실행
-    _실행(k, 4, "nd", "통과", "2027-01-05", 기본=False)  # 기본 실행이 아니면 아니다(그 달 첫 실행도 아님)
+    # 미끼마다 버퍼 수익을 달리 둔다 — 고르기 조건 하나를 빼면 다른 실행이 'first' 가 되어 평균이 바뀐다(25.2184,
+    # 교차검증 [권고]: 모두 같은 곡선이면 어느 실행을 골라도 행이 같아 고르기 돌연변이 넷이 통과했다)
+    _실행(k, 9, "dec_early", "통과", "2026-12-02", 버퍼=0.10)  # 3~7일 밖(그 달 가장 이른 실행)
+    _실행(k, 1, "dec", "판정 불가", "2026-12-03", 버퍼=0.05)  # 판정 불가 → 다음 달로
+    _실행(k, 5, "dec_late", "통과", "2026-12-04", 버퍼=0.06)  # 같은 달 두 번째 실행 — 판정 실행이 아니다
+    _실행(k, 6, "dec_hand", "통과", "2026-12-20", 버퍼=0.07)  # 3~7일 밖 손 실행
+    _실행(k, 7, "fail", "통과", "2027-01-03", 버퍼=0.11, 상태="failure")  # 실패 실행(그 달 가장 이름)
+    _실행(k, 4, "nd", "통과", "2027-01-03", 기본=False, 버퍼=0.08)  # 기본 실행이 아니면 아니다(그 달 가장 이름)
     _실행(k, 2, "jan", "통과", "2027-01-04")
-    _실행(k, 3, "feb", "탈락", "2027-02-03")  # 그 뒤 판정 실행은 'first' 가 아니다
+    _실행(k, 3, "feb", "탈락", "2027-02-03", 버퍼=0.09)  # 그 뒤 판정 실행은 'first' 가 아니다
     rows = _행(k)
     # 여섯 점 → 월수익 다섯(9·10·11월·2025-03·04). 9·10월 부분 허용, 11월·3월 금지, 4월 재개
     assert rows[("first", "buffer_2n", "0_전체")] == (5, 0.02, 5)
