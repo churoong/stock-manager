@@ -308,6 +308,14 @@ def test_실행_기록의_팩터_IC_에_모든_이름과_판정이_있다(실행
     판 = step_log["high52_judge"]
     assert 판["verdict"] in ("통과", "탈락", "판정 불가") and "ties_cut" in 판
     assert {"vs_momentum_score", "vs_momentum_12_1", "n", "open_account"} <= set(step_log["high52_overlap"])
+    # 38회차 P1′ (factors.md 12.41, 원장 #41, 25.2179) — 실제 실행이 composite 대비 판정을 남긴다(2년 합성이라 리밸런스
+    # 36 미만 → 판정 불가)
+    버 = step_log["buffer_2n_judge"]
+    assert 버["verdict"] == "판정 불가" and 버["why"].startswith("리밸런스 ") and 버["rebalances"] > 1
+    assert set(버["metrics"]) == {"buffer_2n", "composite"}
+    # 버퍼는 회전을 줄인다 — 같은 순위·같은 날에서 회전율이 composite 보다 크지 않다(사전 등록 "낮지 않으면 구현 의심")
+    회전 = {k: v["turnover"] for k, v in 버["metrics"].items()}
+    assert 회전["buffer_2n"] is not None and 회전["buffer_2n"] <= 회전["composite"], 회전
 
 
 def test_진행_칸은_단계마다_하나씩_늘고_전체를_넘지_않는다(실행: tuple[가짜클라이언트, int]) -> None:

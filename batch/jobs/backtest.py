@@ -44,6 +44,7 @@ from batch.core.entry import guard
 from batch.jobs import metrics as metrics_job
 from batch.services import adjust as adj
 from batch.services import backtest as bt
+from batch.services import buffer2n as b2n
 from batch.services import buyback as bb
 from batch.services import candidate_factors as cf
 from batch.services import dilution as dil
@@ -86,12 +87,14 @@ WARN_NOT_DEFAULT_PARAMS = "기본 파라미터 아님 (비교용, 규칙 판단�
 RISK_LOOKBACK_DAYS = 800
 
 STRATEGIES = ("composite", "value", "quality", "growth", "momentum", "risk", "benchmark", "momentum_sector",
-              "ic_weighted", "shrink_missing", "high52")  # fmt: skip
+              "ic_weighted", "shrink_missing", "high52", "buffer_2n")  # fmt: skip
 #: 발굴 루프로 넣은 **후보** 전략 (docs/factors.md 12장). 실제 추천에는 켜는 기준을 넘기 전까지 쓰지 않는다.
 #: `ic_weighted`·`shrink_missing` 은 2026-10-09 사용자 지시분(12.17 S1·S2). 이름을 `composite` 로 시작하지 않는다 —
 #: 웹 `strategyKind` 가 그런 이름을 대표 전략으로 묶는다
 #: `high52` 는 2026-10-22 사용자 지시분(37회차 A, 12.40 — 판정은 `step_log.high52_judge`)
-CANDIDATE_STRATEGIES = ("momentum_sector", "ic_weighted", "shrink_missing", "high52")
+#: `buffer_2n` 은 2026-10-23 사용자 지시분(38회차 P1′, 12.41 — 판정은 `step_log.buffer_2n_judge`, 코드 25.2179). 이 줄이
+#: 들어간 커밋에서 시도 수 17 → 18(사전 등록 — 11-03 판정 실행 뒤·12-03 전)
+CANDIDATE_STRATEGIES = ("momentum_sector", "ic_weighted", "shrink_missing", "high52", "buffer_2n")
 
 # 장기 신호 백테스트 (docs/backtest.md 7장)
 LONG_HOLD_DAYS = 365  # 장기 = 1년 이상 (CLAUDE.md 투자 기간). 들어간 뒤 1년은 신호가 꺼져도 들고 있다
@@ -304,9 +307,12 @@ def make_strategy(
     지난: list[tuple[str, dict[int, dict[str, float | None]], dict[int, str]]] = []
     ic_hist: dict[str, list[float | None]] = {f: [] for f in weights}
     끝낸 = 0
+    # 38회차 P1′ buffer_2n (12.41) — 지난 리밸런스에 고른 종목. 그 뒤 시세가 끊긴 종목은 든 것으로 보지 않는다
+    # (엔진이 뺀다)
+    버퍼_든: set[int] = set()
 
     def decide(t: str, view: bt.PriceView) -> dict[int, float]:
-        nonlocal risk_gap_noted, sector_noted, 끝낸
+        nonlocal risk_gap_noted, sector_noted, 끝낸, 버퍼_든
         # **빈 창은 캐시하지 않는다** (25.1209, 백테스트 감사).
         # 첫 리밸런스 앞에 시세가 없으면 엔진이 cutoff = 체결일인 빈 창을 넘기는데, 그날이 월말이면
         # 다음 리밸런스의 cutoff 도 같은 날이라 열 전략이 함께 쓰는 캐시에서 빈 결과를 꺼내
@@ -365,6 +371,13 @@ def make_strategy(
             scores = {
                 sid: sc.total_score(fs, weights).total for sid, fs in by_stock.items()
             }
+        elif strategy == "buffer_2n":
+            # 38회차 P1′ (12.41, 25.2179) — `composite` 와 같은 순위로, 든 종목은 순위 2N 안이면 남기고
+            # 빈자리를 순위대로
+            종합 = {sid: sc.total_score(fs, weights).total for sid, fs in by_stock.items()}
+            고름 = b2n.pick(종합, {sid for sid in 버퍼_든 if view.last_close(sid)}, top_n)
+            버퍼_든 = set(고름)
+            return 고름
         elif strategy == "high52":
             # 37회차 A (12.40) — 근접도 하나로, 시장 안 백분위 상위 N. 국내는 252일 창 안 ±30% 밖 날이 있으면 뺀다
             값 = {i.stock_id: h52.proximity([c for _d, c in view.closes(i.stock_id)], i.market in KR_MARKETS)
@@ -2077,6 +2090,9 @@ def run(
                                                                 h52_trace.get("vs_score", []),
                                                                 h52_trace.get("vs_12_1", []))}
                          if "high52" in results and not trend_filter else {}),
+                      # 38회차 P1′ (factors.md 12.41, 원장 #41, 25.2179) — composite 대비 판정. 기록 전용
+                      **({"buffer_2n_judge": _buffer_judge(results, 무위험)}
+                         if b2n.NAME in results and b2n.BASE in results and not trend_filter else {}),
                       # 지표 교체 A/B (10회차, docs/factors.md 12.12) — 판정 키가 아니다. 기본 파라미터 실행만 센다
                       **({"factor_ab": ab.log()} if ab.ics else {}),
                       # 깨운 주체·커밋은 기록 칸만 (29회차 P1, 25.1437) — `default` 정의는 그대로
@@ -2107,6 +2123,16 @@ def _high52_judge(results: dict[str, bt.BacktestResult], start: str | None, risk
     except Exception as exc:  # noqa: BLE001 — 기록 전용 판정. 실패를 그대로 적고 다른 기록은 살린다
         log.exception("high52 판정 계산 실패")
         return {"start": start, "verdict": "판정 불가", "why": f"계산 실패: {type(exc).__name__}"}
+
+
+def _buffer_judge(results: dict[str, bt.BacktestResult], risk_free: float | None) -> dict[str, Any]:
+    """38회차 P1′ 판정(`b2n.judge`) — 계산이 예외로 죽어도 실행은 성공으로 닫고 "판정 불가(계산 실패)" 로 남긴다
+    (`_high52_judge` 와 같은 까닭 — 그달 판정 실행 하나가 원장 모든 행의 판정과 함께 사라지지 않게)."""
+    try:
+        return b2n.judge(results, risk_free)
+    except Exception as exc:  # noqa: BLE001 — 기록 전용 판정. 실패를 그대로 적고 다른 기록은 살린다
+        log.exception("buffer_2n 판정 계산 실패")
+        return {"verdict": "판정 불가", "why": f"계산 실패: {type(exc).__name__}"}
 
 
 def _pit_sizes(cache: dict[str, set[int]]) -> dict[str, int]:

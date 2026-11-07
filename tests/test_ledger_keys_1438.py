@@ -40,6 +40,7 @@ def test_원장_키가_코드에_있다() -> None:
     "holding_eq": ("jobs/core_backtest.py",), "stop_z": ("services/stop_vol.py",), "cash_eq": ("services/desk.py",),
     "exit_pair": ("jobs/core_backtest.py",), "loss_gate": ("jobs/core_backtest.py",),
     "high52_judge": ("jobs/backtest.py",), "high52_overlap": ("jobs/backtest.py",),
+    "buffer_2n_judge": ("jobs/backtest.py",),
 }
 
 

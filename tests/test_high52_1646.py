@@ -172,7 +172,8 @@ def test_전략은_기준일까지만_보고_처음_다_채운_날과_진단을_
 
 def test_등록된_후보이고_시도_수에_든다() -> None:
     assert "high52" in job.STRATEGIES and "high52" in job.CANDIDATE_STRATEGIES
-    assert job.REGISTERED_TRIALS == 17
+    # 17 → 18: 38회차 P1′ `buffer_2n` 코드가 `STRATEGIES` 에 들어간 커밋(25.2179, factors.md 12.41 사전 등록)
+    assert job.REGISTERED_TRIALS == 18
 
 
 # --- 25.1650 교차검증 [권고] ---------------------------------------------------------------------------------

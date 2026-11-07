@@ -72,7 +72,8 @@ def test_시도_수_하한은_더_보수적으로만() -> None:
     셋 = luck.judge(묶음)
     하한 = luck.judge(묶음, n_floor=bt_job.REGISTERED_TRIALS)
     for k in 묶음:
-        assert 하한[k]["n_trials"] == bt_job.REGISTERED_TRIALS == 17 and 하한[k]["n_trials_run"] == 3
+        # 17 → 18: 38회차 `buffer_2n` 이 `STRATEGIES` 에 든 커밋(25.2179)
+        assert 하한[k]["n_trials"] == bt_job.REGISTERED_TRIALS == 18 and 하한[k]["n_trials_run"] == 3
         assert 하한[k]["sr_star"] >= 셋[k]["sr_star"]
         assert 하한[k]["luck_pct"] >= 셋[k]["luck_pct"]
     assert "이 실행 3개" in luck.line(하한["s0"])
