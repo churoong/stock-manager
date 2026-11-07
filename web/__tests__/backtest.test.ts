@@ -504,3 +504,20 @@ describe("계좌형 리플레이 이름표 (25.1936)", () => {
     for (const [k, v] of Object.entries(CORE_LABEL)) expect(REPLAY_LABEL[k]).toBe(v);
   });
 });
+
+
+describe("월 백테스트 전략 이름표 (25.2183)", () => {
+  it("배치 STRATEGIES 의 이름이 모두 이름표를 갖고, 후보는 후보 갈래다", () => {
+    // 25.1936 과 같은 꼴 — 새 전략(buffer_2n, 25.2179) 이름표 줄을 지워도 깨지는 시험이 없었다(교차검증 [권고])
+    const 파이썬 = readFileSync(join(process.cwd(), "..", "batch", "jobs", "backtest.py"), "utf-8");
+    const 줄 = /^STRATEGIES = \(([^)]*)\)/m.exec(파이썬)?.[1] ?? "";
+    const 이름들 = [...줄.matchAll(/"([a-z0-9_]+)"/g)].map((m) => m[1]);
+    expect(이름들.length).toBeGreaterThanOrEqual(12);
+    expect(이름들).toContain("buffer_2n");
+    for (const n of [...이름들, "composite_no_cost"]) expect(이름표(n)).not.toBe(n);
+    const 후보줄 = /^CANDIDATE_STRATEGIES = \(([^)]*)\)/m.exec(파이썬)?.[1] ?? "";
+    const 후보 = [...후보줄.matchAll(/"([a-z0-9_]+)"/g)].map((m) => m[1]);
+    expect(후보).toContain("buffer_2n");
+    for (const n of 후보) expect(갈래(n)).toBe("candidate");
+  });
+});

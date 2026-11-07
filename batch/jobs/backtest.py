@@ -302,14 +302,14 @@ def make_strategy(
         return benchmark
 
     risk_gap_noted = False
-    # 업종 모멘텀(1회차 D) — 리밸런스마다 업종 평균이 잡힌 종목 비율(25.2183 — 평균으로 경고)
+    # 업종 모멘텀(1회차 D) — 리밸런스마다 업종 평균이 잡힌 종목 비율(25.2182 — 평균으로 경고)
     업종_비율: list[float] = []
     # S1 IC 가중 (12.17) — 지난 리밸런스의 (날, 팩터 점수, 시장)과 끝난 기간의 팩터 IC
     지난: list[tuple[str, dict[int, dict[str, float | None]], dict[int, str]]] = []
     ic_hist: dict[str, list[float | None]] = {f: [] for f in weights}
     끝낸 = 0
-    # 38회차 P1′ buffer_2n (12.41) — 지난 리밸런스에 고른 종목. 그 뒤 시세가 끊긴 종목은 든 것으로 보지 않는다
-    # (엔진이 뺀다)
+    # 38회차 P1′ buffer_2n (12.41) — 지난 리밸런스에 고른 종목. **엔진 밖에서 만든 창**(`view.holding` 이 None)에서만
+    # 든 종목 대신 쓴다 — 엔진 창은 실제로 든 종목(`view.holding`)을 본다(25.2183)
     버퍼_든: set[int] = set()
 
     def decide(t: str, view: bt.PriceView) -> dict[int, float]:
@@ -376,7 +376,11 @@ def make_strategy(
             # 38회차 P1′ (12.41, 25.2179) — `composite` 와 같은 순위로, 든 종목은 순위 2N 안이면 남기고
             # 빈자리를 순위대로
             종합 = {sid: sc.total_score(fs, weights).total for sid, fs in by_stock.items()}
-            고름 = b2n.pick(종합, {sid for sid in 버퍼_든 if view.last_close(sid)}, top_n)
+            # "든 종목" = 엔진이 지금 실제로 든 것(`view.holding`, 25.1231) — 그날 체결가가 없어 못 산 종목은 든 것이
+            # 아니고, 정지로 못 판 종목은 든 것이다. 지난번 고른 목록으로 세면 못 산 종목에 버퍼를 줬다(25.2183,
+            # 25.2179 교차검증 [권고]). 엔진 밖 창(None)에서만 고른 목록으로 물러난다
+            든것 = getattr(view, "holding", None)
+            고름 = b2n.pick(종합, set(든것) if 든것 is not None else 버퍼_든, top_n)
             버퍼_든 = set(고름)
             return 고름
         elif strategy == "high52":
@@ -409,7 +413,7 @@ def make_strategy(
             top = secmom.top_half_sectors(means)
             # **업종 평균이 잡힌 종목이 60% 미만이면 비교는 판정 불가다** (25.443, 교차검증). 업종 채움이 낮으면
             # 거의 전부 통과해 `momentum` 과 같은 종목을 고르고, 두 전략의 차이는 잡음이 된다.
-            # 비율은 **모든 리밸런스 평균**으로 잰다(12장 머리 표본 규칙, 25.2183) — 리밸런스마다 지금까지의 평균으로
+            # 비율은 **모든 리밸런스 평균**으로 잰다(12장 머리 표본 규칙, 25.2182) — 리밸런스마다 지금까지의 평균으로
             # 경고를 다시 써서, 실행이 끝나면 전 구간 평균의 경고 하나만 남는다
             업종_비율.append(secmom.coverage(inputs, means))
             warnings[:] = [w for w in warnings if not w.startswith(secmom.WARN_PREFIX)]
