@@ -20,9 +20,12 @@ from batch.services.scoring import MIN_PEER_SIZE
 
 METRIC = "momentum_12_1"
 
-#: 업종 평균이 잡힌 종목 비율이 판정 문턱(`factor_ic.MIN_COVERAGE`) 아래일 때 결과에 붙이는 경고 (25.443)
+#: 업종 평균이 잡힌 종목 비율의 **모든 리밸런스 평균**이 판정 문턱(`factor_ic.MIN_COVERAGE`) 아래일 때 결과에 붙이는
+#: 경고 (25.443 → 25.2183). 머리 `WARN_PREFIX` 는 바꾸지 않는다 — 판정 질의(`scripts/diag/round42_judge_1103.sql`)가
+#: 이 머리로 경고를 찾는다
+WARN_PREFIX = "업종 모멘텀: 업종 평균이 잡힌 종목이"
 WARN_LOW_COVERAGE = (
-    "업종 모멘텀: 업종 평균이 잡힌 종목이 {pct:.0f}%({t}) — 60% 미만이라 조건이 거의 전부 통과한다."
+    WARN_PREFIX + " 리밸런스 {n}번 평균 {pct:.0f}% — 60% 미만이라 조건이 거의 전부 통과한다."
     " momentum 과의 비교는 **판정 불가**다(업종 채움이 오르면 다시 잰다)"
 )
 
@@ -83,3 +86,16 @@ def coverage(inputs: Iterable[_Input], means: dict[tuple[str, str], float]) -> f
     if not items:
         return 0.0
     return sum(1 for i in items if (i.market, i.sector or "") in means) / len(items)
+
+
+def coverage_warning(ratios: list[float], minimum: float) -> str | None:
+    """리밸런스마다 잰 `coverage` 의 **평균**이 `minimum` 아래면 경고 글, 아니면 None (25.2183).
+
+    12장 머리 표본 규칙("표본 비율은 모든 리밸런스의 평균")과 같다 — 낮은 달(첫 리밸런스의 12-1 워밍업 등)도 그 비율
+    그대로 평균에 든다. 예전(25.443)엔 리밸런스 **하나라도** 60% 아래면 경고했다. 첫 리밸런스는 12-1 값이 아직
+    없어 늘 0% 라, 5년 창 시작이 시세 첫날 + 1년을 넘기 전까지 매달 판정 불가였다. 잰 리밸런스가 없으면 가를 수
+    없어 경고한다"""
+    if not ratios:
+        return WARN_LOW_COVERAGE.format(n=0, pct=0.0)
+    평균 = sum(ratios) / len(ratios)
+    return WARN_LOW_COVERAGE.format(n=len(ratios), pct=평균 * 100) if 평균 < minimum else None

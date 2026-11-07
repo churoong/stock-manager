@@ -302,7 +302,8 @@ def make_strategy(
         return benchmark
 
     risk_gap_noted = False
-    sector_noted = False
+    # 업종 모멘텀(1회차 D) — 리밸런스마다 업종 평균이 잡힌 종목 비율(25.2183 — 평균으로 경고)
+    업종_비율: list[float] = []
     # S1 IC 가중 (12.17) — 지난 리밸런스의 (날, 팩터 점수, 시장)과 끝난 기간의 팩터 IC
     지난: list[tuple[str, dict[int, dict[str, float | None]], dict[int, str]]] = []
     ic_hist: dict[str, list[float | None]] = {f: [] for f in weights}
@@ -312,7 +313,7 @@ def make_strategy(
     버퍼_든: set[int] = set()
 
     def decide(t: str, view: bt.PriceView) -> dict[int, float]:
-        nonlocal risk_gap_noted, sector_noted, 끝낸, 버퍼_든
+        nonlocal risk_gap_noted, 끝낸, 버퍼_든
         # **빈 창은 캐시하지 않는다** (25.1209, 백테스트 감사).
         # 첫 리밸런스 앞에 시세가 없으면 엔진이 cutoff = 체결일인 빈 창을 넘기는데, 그날이 월말이면
         # 다음 리밸런스의 cutoff 도 같은 날이라 열 전략이 함께 쓰는 캐시에서 빈 결과를 꺼내
@@ -407,11 +408,13 @@ def make_strategy(
             means = secmom.sector_means(inputs)
             top = secmom.top_half_sectors(means)
             # **업종 평균이 잡힌 종목이 60% 미만이면 비교는 판정 불가다** (25.443, 교차검증). 업종 채움이 낮으면
-            # 거의 전부 통과해 `momentum` 과 같은 종목을 고르고, 두 전략의 차이는 잡음이 된다
-            비율 = secmom.coverage(inputs, means)
-            if not sector_noted and 비율 < fic.MIN_COVERAGE:
-                warnings.append(secmom.WARN_LOW_COVERAGE.format(pct=비율 * 100, t=t))
-                sector_noted = True
+            # 거의 전부 통과해 `momentum` 과 같은 종목을 고르고, 두 전략의 차이는 잡음이 된다.
+            # 비율은 **모든 리밸런스 평균**으로 잰다(12장 머리 표본 규칙, 25.2183) — 리밸런스마다 지금까지의 평균으로
+            # 경고를 다시 써서, 실행이 끝나면 전 구간 평균의 경고 하나만 남는다
+            업종_비율.append(secmom.coverage(inputs, means))
+            warnings[:] = [w for w in warnings if not w.startswith(secmom.WARN_PREFIX)]
+            if (말 := secmom.coverage_warning(업종_비율, fic.MIN_COVERAGE)) is not None:
+                warnings.append(말)
             통과 = {i.stock_id for i in inputs if secmom.passes(i, means, top)}
             scores = {sid: fs.get("momentum") for sid, fs in by_stock.items() if sid in 통과}
         else:
