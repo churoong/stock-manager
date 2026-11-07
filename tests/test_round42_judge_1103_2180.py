@@ -190,3 +190,19 @@ def test_db_status_가_받는_읽기_전용_질의다() -> None:
     assert is_read_only(SQL)
     본문 = "\n".join(줄 for 줄 in SQL.splitlines() if not 줄.lstrip().startswith("--"))
     assert is_read_only(본문)
+
+
+def test_12월_사본은_달만_바꾼_질의다() -> None:
+    """미국 ic_weighted(11-03 모름)의 첫 판정을 12-03 판정 실행에서 같은 셈으로 낸다 — 값 보기 전에 커밋한 사본이
+    11월 질의와 몸이 같고 대상 달 한 곳만 다르다(docs/infra.md 25.2185)"""
+    from scripts.db_status import is_read_only
+
+    def 몸(글: str) -> list[str]:
+        return [줄 for 줄 in 글.split("\n") if not 줄.lstrip().startswith("--")]
+
+    십이월 = (Path(__file__).resolve().parent.parent / "scripts/diag/round42_judge_1203.sql").read_text(encoding="utf-8")
+    앞, 뒤 = 몸(SQL), 몸(십이월)
+    다른 = [(a, b) for a, b in zip(앞, 뒤, strict=True) if a != b]
+    assert 다른 == [(a, a.replace("= '2026-11'", "= '2026-12'")) for a, _b in 다른] and len(다른) == 1
+    assert "substr(b.trade_date, 1, 7) = '2026-12'" in 다른[0][1]
+    assert is_read_only(십이월)
