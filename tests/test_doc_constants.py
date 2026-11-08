@@ -804,6 +804,8 @@ class Test밸류_분모:
     "insider": "근거표의 참고 행이라 점수·신호를 바꾸지 않는다",
     "buffer2n": "38회차 P1′ 사전 등록 값(2N·리밸런스 36·MDD 2%p)은 docs/factors.md 12.41 이 적고 `test_buffer2n_2179` 가"
     " 손으로 묶는다(25.2179)",
+    "buffer_erc": "43회차 e3 사전 등록 값(창 126·하한 60·30%·상한 10%·1e-8·10,000)은 docs/factors.md 12.46 이 적고"
+    " `test_buffer_erc_2189` 가 손으로 묶는다(25.2189)",
     "etf_tactical": "ETF 전술 계좌 판 1 값(200일선·20일·98%·50%)은 docs/paper.md 17.1 이 표로 적고 `test_etf_tactical_2165`"
     " 가 손으로 묶는다(25.2165)",
     "shadow": "단타·스윙 규칙 값은 `Rule` 객체 안에 있고 docs/paper.md 16.1 이 % 로 적는다 — 값은 `test_shadow_1862`"
