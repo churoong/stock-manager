@@ -297,3 +297,24 @@ def test_거래대금_60_행_미만이거나_종가가_비면_모름() -> None:
     빈[-5] = None  # type: ignore[call-overload]
     g = sm.signal_features(빈, [1.0] * 60, 50.0, bear=False)
     assert g["sigma20"] is None and g["close_ma20"] is None and g["regime_bear"] == 0.0
+
+
+def test_고유도는_학습_사건끼리만_센다() -> None:
+    """12.46 보충 — 특징이 빠진 사건·학습 밖 사건이 같은 종목 안에서 겹쳐도 학습 사건 가중을 깎지 않는다(25.2196)"""
+    빠짐 = sm.MetaEvent(1, "2024-01-02", 0, 9, 1, 0.02, {"momentum": 1.0})  # 특징 빠짐, [0,9] 겹침
+    늦음 = _ev(1, 0, 95, y=1)  # 청산이 늦어 학습 밖, [0,95] 겹침
+    evs = [_ev(1, 0, 9, y=1), 빠짐, 늦음, _ev(2, 0, 9, y=0)]
+    fit = sm.fit_at(evs, 30)
+    assert fit.train == (0, 3) and fit.n_missing == 1
+    assert fit.tau == pytest.approx(0.5)  # 겹침을 세면 종목 1 가중이 ½ 이하라 τ < 0.5
+
+
+def test_수렴하지_못하면_converged_는_거짓(monkeypatch: pytest.MonkeyPatch) -> None:
+    """12.46 보충 — 이 깃발 하나가 그 나라 판정 불가 문을 연다(25.2196)"""
+    monkeypatch.setattr(sm, "MAX_ITER", 1)
+    monkeypatch.setattr(sm, "GRAD_TOL", 0.0)
+    rng = np.random.default_rng(3)
+    x = rng.normal(size=(60, 5))
+    y = (x[:, 0] + rng.normal(size=60) > 0).astype(float)
+    m = sm.fit_logistic(x, y, np.ones(60))
+    assert m.converged is False

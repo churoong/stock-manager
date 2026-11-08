@@ -180,3 +180,5 @@ def test_원장_집계_질의는_읽기만이고_큰_표를_통째로_훑지_않
     # batch_runs 는 job_name 만이 아니라 **날짜 하한**까지 색인으로 묶는다(job_name 만이면 그 작업 이력 전부를 읽는다)
     b_읽기 = [p for p in 계획 if p.startswith("SEARCH b ")]
     assert b_읽기 and all("trade_date>" in p or "started_at>" in p for p in b_읽기), b_읽기
+    r_읽기 = [p for p in 계획 if p.startswith("SEARCH r ")]
+    assert r_읽기 and all("trade_date>" in p or "trade_date=" in p for p in r_읽기), r_읽기  # 리포트 표도 날짜 하한·한 날(25.2196)

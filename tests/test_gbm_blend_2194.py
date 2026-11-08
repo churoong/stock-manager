@@ -197,6 +197,7 @@ def test_지문은_구성마다_바뀌고_초모수_순서와_무관() -> None:
 
 
 def test_같은_입력_두_번은_같은_모델_문자열() -> None:
+    pytest.importorskip("lightgbm")  # requirements-backtest.txt 가 생기기 전 — 깔린 환경에서만(25.2196)
     secs = [_section(i) for i in range(21)]
     p1, m1 = _predict(20, secs)
     p2, m2 = _predict(20, secs)
@@ -206,6 +207,7 @@ def test_같은_입력_두_번은_같은_모델_문자열() -> None:
 
 
 def test_미래_미끼_r_1_r_2_를_바꿔도_예측이_같다() -> None:
+    pytest.importorskip("lightgbm")  # requirements-backtest.txt 가 생기기 전 — 깔린 환경에서만(25.2196)
     r = 20
     secs = [_section(i) for i in range(r + 1)]
     p0, m0 = _predict(r, secs)
@@ -225,6 +227,7 @@ def test_미래_미끼_r_1_r_2_를_바꿔도_예측이_같다() -> None:
 
 
 def test_TreeSHAP_기여_합은_예측과_같다() -> None:
+    pytest.importorskip("lightgbm")  # requirements-backtest.txt 가 생기기 전 — 깔린 환경에서만(25.2196)
     secs = [_section(i) for i in range(21)]
     pred, model = _predict(20, secs)
     c = gb.shap_contrib(model, secs[20].x)
@@ -251,6 +254,7 @@ def test_적합_실패는_전용_예외로() -> None:
 
 
 def test_lightgbm_내부_예외도_전용_예외로(monkeypatch: pytest.MonkeyPatch) -> None:
+    pytest.importorskip("lightgbm")  # requirements-backtest.txt 가 생기기 전 — 깔린 환경에서만(25.2196)
     import lightgbm
 
     def boom(*a: object, **k: object) -> None:
@@ -263,6 +267,7 @@ def test_lightgbm_내부_예외도_전용_예외로(monkeypatch: pytest.MonkeyPa
 
 
 def test_lightgbm_판이_다르면_실패(monkeypatch: pytest.MonkeyPatch) -> None:
+    pytest.importorskip("lightgbm")  # requirements-backtest.txt 가 생기기 전 — 깔린 환경에서만(25.2196)
     import lightgbm
 
     monkeypatch.setattr(lightgbm, "__version__", "4.5.0")

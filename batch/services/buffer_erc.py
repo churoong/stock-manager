@@ -167,6 +167,7 @@ def weights(picked: Sequence[int], axis: Sequence[str], closes: Mapping[int, Map
     if len(대상) < 2:
         tr.to_equal = sorted(set(tr.to_equal) | set(대상))
         return {s: eq for s in picked}
+    tr.to_equal = sorted(set(tr.to_equal))  # 기록 순서를 stock_id 순으로(평평 갈래가 섞여도, 25.2196)
     tr.erc_n = len(대상)
     tr.common_days = len(공통)
     r = np.array([[수익[s][i] for s in 대상] for i in 공통], dtype=float)
