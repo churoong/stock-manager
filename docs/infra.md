@@ -3240,6 +3240,7 @@ SQL read operations are forbidden (reads are blocked, ...)
 | 25.2191 | 42회차 판정·사전 등록 — momentum_vs·판정판 기록 칸+core_m·생존편향 단계표, 지금 시도 0 (factors.md 12.45) |
 | 25.2192 | 43회차 e2 st_meta 계산 모듈 — 평균 고유도·로지스틱·τ·청산일 자르기·구조 문·AUC, 꺼진 채 (12.46 보충) |
 | 25.2193 | 원장 일일 기록 집계 질의 — 동결 해제로 열린 #6·#7·#10·#11·#12·#13·#16·#18 + 11월 판정 실행 소요(handoff ⑤) |
+| 25.2194 | 43회차 e1 gbm_blend 계산 모듈 — 초모수·r−3 학습 단면·백분위 섞기·실패 가두기·TreeSHAP, 특징 43 고정, 꺼진 채 |
 
 ### 25.1 왜 D1 인가
 
@@ -48030,3 +48031,48 @@ desk 를 쓰는 시험 파일 전부 통과.
 **되돌리기 확인**:
 - 날짜 하한 뺌 → 새 시험이 깨진다(처음엔 '통째 훑기' 만 봐서 살아남아 하한 단언을 더함)
 - 쓰기 문장 붙임 → 깨진다
+
+### 25.2194 43회차 e1 gbm_blend 계산 모듈 — 초모수·r−3 학습 단면·백분위 섞기·실패 가두기·TreeSHAP, 특징 43 고정, 꺼진 채
+
+**무엇**: 43회차 e1 `gbm_blend` 의 계산 모듈 `batch/services/gbm_blend.py`(꺼진 채 — `STRATEGIES` 에 잇지 않음, lightgbm 은 쓰는 함수 안에서만 import). factors.md 12.46 e1 사전 등록(25.2188) 그대로다.
+- 상수
+  - `PARAMS`: 회귀 L2, 잎 15, 깊이 4, 0.05, `bagging_freq` 1, row_wise, 1스레드, seed 0, deterministic
+  - 그 밖: `NUM_BOOST_ROUND` 200, `LIGHTGBM_VERSION` "4.6.0", `TIMEOUT_SECONDS` 1,800, 학습 단면 s ≤ r−3, `MIN_TRAIN_SECTIONS` 18, `MIN_OOS_REBALANCES` = `buffer2n.JUDGE_MIN_REBALANCES`, 상위 20, 0.5/0.5
+- 함수
+  - 백분위·학습 단면: `percentile_by_group`(시장 구분 안 평균 순위 ÷ 값 있는 수, 결측 NaN), `train_sections`·`is_oos`(빈 단면·라벨 없는 단면은 세지 않음), `stack_train`
+  - 적합·기여: `params_for`(`min_data_in_leaf` = max(100, ⌈1% 행⌉)), `fit_predict`(실패는 전용 예외 `GbmFailure` — composite 로 물러나지 않음, lightgbm 판이 4.6.0 이 아니어도 실패), `check_budget`, `shap_contrib`(TreeSHAP)
+  - 섞기·지문: `blend_scores`·`blend_pick`(composite 점수와 GBM 예측이 모두 있는 종목 안 두 백분위 반반, 동점 composite → stock_id), `fingerprint`
+- **특징 목록 `FEATURES` 43개를 글자로 고정했다** — 등록 커밋(03a3e34) 때 규칙(`FACTOR_METRICS` 하위 지표 31 + 루프·사용자·진단 IC 이름 − 셋 − 의견 재료 `tp_dispersion` − `gbm_pred`, 통제형 셋 접음)의 결과. 뉴스 감성을 쓰는 IC 이름은 없었다.
+
+**알고 둔 것 — 에코 교체 가지와의 이음**: 등록 때 main 의 `FACTOR_METRICS` 모멘텀 여섯째는 `momentum_vol_adjusted` 다. 그래서 `FEATURES` 에 그것이 들고 `momentum_echo` 는 없다. 에코 교체(25.2187, 가지 `echo-switch-2187`)가 main 에 들어가면 `feature_names()` 가 바뀌어 고정 시험 `feature_names() == FEATURES` 가 깨진다.
+- 그때 **`FEATURES` 는 그대로 둔다**(12.46 '뒤에 생기는 이름은 들어가지 않는다' — 등록된 목록이 판이다).
+- 시험만 '등록 때 규칙 = 고정 목록' 으로 바꾼다.
+- `momentum_vol_adjusted` 는 25.2187 뒤에도 진단값으로 계산되어 재료가 끊기지 않는다(handoff).
+
+**왜 지금·모의투자에 어떻게 쓰이나**: 사전 등록이 허락한 '꺼진 채 먼저' 다. 잇는 일은 2026-12 판정 실행 뒤다. 그 일은 셋이다.
+- LOOP·USER 원값을 factor_ics 에서 순수 함수로 떼어 기준일 캐시로 나누기
+- `requirements-backtest.txt`·`backtest.yml` 설치, 국면 SQL, 시도 수
+- 이용 조건 기록(lightgbm MIT·scipy BSD)을 먼저
+
+통과하면 선정 엔진 후보다(계좌는 0→1·u3 뒤 따로).
+
+**시험**: `tests/test_gbm_blend_2194.py` 22개, 약 2.7초.
+- 상수, `min_data_in_leaf` 경계, 특징 고정·뺀 이름·접은 이름
+- 백분위 손 계산(동점·NaN·구분별)
+- r−3 경계·빈 단면 17/18
+- 반반 점수·동점 순서·상위 20, 지문 일곱 요소
+- 같은 입력 두 번 = 같은 모델 sha
+- **미래 미끼**(r−1·r−2 단면을 바꿔도 예측·선정 같음, r−3 을 바꾸면 달라짐)
+- TreeSHAP 합 = 예측(1e-9)
+- 실패 가두기 여섯 갈래·1,800초
+- lightgbm 을 막아도 import 됨
+
+**되돌리기 확인**: 일곱 모두 이름 붙은 시험이 깨진다.
+- r−3 → r−2
+- 18 → 17
+- 0.5 → 0.6
+- 동점 composite 뺌
+- stock_id 큰 순
+- 백분위 분모를 구분 전체로
+- `bagging_freq` 0
+- (덤) 예외 잡기를 좁힘 → `lightgbm_내부_예외도_전용_예외로`
