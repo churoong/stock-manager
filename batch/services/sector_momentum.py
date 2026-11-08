@@ -12,6 +12,7 @@ Moskowitz & Grinblatt (1999) "Do Industries Explain Momentum?".
 
 from __future__ import annotations
 
+import math
 from collections import defaultdict
 from collections.abc import Iterable
 from typing import Protocol
@@ -25,8 +26,8 @@ METRIC = "momentum_12_1"
 #: 이 머리로 경고를 찾는다
 WARN_PREFIX = "업종 모멘텀: 업종 평균이 잡힌 종목이"
 WARN_LOW_COVERAGE = (
-    WARN_PREFIX + " 리밸런스 {n}번 평균 {pct:.0f}% — 60% 미만이라 조건이 거의 전부 통과한다."
-    " momentum 과의 비교는 **판정 불가**다(업종 채움이 오르면 다시 잰다)"
+    WARN_PREFIX + " 리밸런스 {n}번 평균 {pct}% — {minimum}% 미만이라 조건이 거의 전부 통과한다."
+    " momentum 과의 비교는 판정 불가다(업종 채움이 오르면 다시 잰다)"
 )
 
 
@@ -95,7 +96,11 @@ def coverage_warning(ratios: list[float], minimum: float) -> str | None:
     그대로 평균에 든다. 예전(25.443)엔 리밸런스 **하나라도** 60% 아래면 경고했다. 첫 리밸런스는 12-1 값이 아직
     없어 늘 0% 라, 5년 창 시작이 시세 첫날 + 1년을 넘기 전까지 매달 판정 불가였다. 잰 리밸런스가 없으면 가를 수
     없어 경고한다"""
+    문턱 = f"{minimum * 100:g}"
     if not ratios:
-        return WARN_LOW_COVERAGE.format(n=0, pct=0.0)
+        return WARN_LOW_COVERAGE.format(n=0, pct=0, minimum=문턱)
     평균 = sum(ratios) / len(ratios)
-    return WARN_LOW_COVERAGE.format(n=len(ratios), pct=평균 * 100) if 평균 < minimum else None
+    # 퍼센트는 **내림** — 0.596 이 "60% — 60% 미만" 으로 읽히지 않게(25.2186, 교차검증 [참고]). 웹 경고 띠는 글을 꾸밈
+    # 없이 찍어 별표를 뺐다
+    return (WARN_LOW_COVERAGE.format(n=len(ratios), pct=math.floor(평균 * 100), minimum=문턱)
+            if 평균 < minimum else None)  # fmt: skip

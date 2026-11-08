@@ -75,3 +75,10 @@ def test_판정_질의가_찾는_경고_머리와_같다() -> None:
     sql = (Path(__file__).resolve().parent.parent / "scripts/diag/round42_judge_1103.sql").read_text(encoding="utf-8")
     assert f"LIKE '%{sm.WARN_PREFIX}%'" in sql
     assert sm.WARN_LOW_COVERAGE.startswith(sm.WARN_PREFIX)
+
+
+def test_경고_퍼센트는_내림이고_문턱은_인자에서() -> None:
+    """0.596 이 "60% — 60% 미만" 으로 읽히지 않게 내림, "60%" 는 손 글자가 아니라 문턱 인자에서(25.2186)"""
+    말 = sm.coverage_warning([0.596], 0.6)
+    assert 말 is not None and "평균 59% — 60% 미만" in 말 and "**" not in 말
+    assert "50% 미만" in (sm.coverage_warning([0.4], 0.5) or "")

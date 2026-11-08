@@ -39,8 +39,8 @@ def ranked(scores: dict[int, float | None]) -> list[int]:
 
 def pick(scores: dict[int, float | None], held: Iterable[int], n: int = bt.DEFAULT_TOP_N) -> dict[int, float]:
     """이번 리밸런스의 동일가중 비중 — 든 종목(`held`) 가운데 순위 `BUFFER_MULT × n` 안인 것을 남기고, 빈자리를
-    순위대로 채워 n 종목. 점수가 없어진 든 종목은 순위 밖으로 보고 판다. 남긴 것이 n 을 넘을 일은 없지만
-    (든 수 ≤ n) 넘으면 순위대로 n 개"""
+    순위대로 채워 n 종목. 점수가 없어진 든 종목은 순위 밖으로 보고 판다. 든 것(엔진 보유 — 정지로 못 판 종목 포함,
+    25.2183)은 n 을 넘을 수 있고, 그때는 순위대로 n 개"""
     if n <= 0:
         raise ValueError("n 은 1 이상이어야 합니다")
     순위 = ranked(scores)
