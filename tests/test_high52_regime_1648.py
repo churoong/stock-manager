@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import time
 from datetime import date, timedelta
@@ -120,7 +121,7 @@ def _계획(sql: str) -> list[str]:
 def test_곡선_표는_실행_번호로만_찾는다() -> None:
     """28회차 꼴이 `JOIN runs` 로 곡선 표 전체를 세 번 훑었다(382,500행 표에서 114만 회, 25.1655 교차검증)."""
     for 파일 in ("round28_short_regime.sql", "round37_high52_regime.sql", "round38_buffer2n_regime.sql",
-                 "round42_judge_1103.sql", "round42_judge_1203.sql"):  # 38·42회차도(25.2184·2185)
+                 "round42_judge_1103.sql", "round42_judge_1203.sql", "ledger_daily_1108.sql"):  # 38·42회차·원장 집계도(25.2184·2185·2193)
         계획 = _계획((DIAG / 파일).read_text(encoding="utf-8"))
         훑기 = [p for p in 계획 if p.startswith("SCAN c") or "SCAN backtest_curves" in p]
         assert not 훑기, (파일, 계획)
@@ -161,3 +162,21 @@ def test_2028_04_판정_불가여도_시작이_있으면_다시_본다() -> None
     _실행(k, 2, "dec", "2023-09-01", "통과", "2026-12-03")
     _실행(k, 7, "apr28", "2023-08-01", "판정 불가", "2028-04-04", 높음=0.0)  # 예: 무위험수익률 없음
     assert _행(k)[("2028-04", "high52", "0_전체")][0] == 5
+
+
+def test_원장_집계_질의는_읽기만이고_큰_표를_통째로_훑지_않는다() -> None:
+    """handoff ⑤ — 동결 해제로 열린 원장 행 일일 기록 집계(25.2193). batch_runs·리포트 표는 날짜 하한 색인으로만"""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("db_status", Path(__file__).resolve().parent.parent / "scripts/db_status.py")
+    m = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
+    spec.loader.exec_module(m)  # type: ignore[union-attr]
+    sql = (DIAG / "ledger_daily_1108.sql").read_text(encoding="utf-8")
+    assert m.is_read_only(sql)
+    계획 = _계획(sql)
+    # 계획은 별칭으로 찍힌다 — b = batch_runs, r = daily_reports, i = report_items (질의 안 별칭 그대로)
+    통째 = [p for p in 계획 if re.match(r"SCAN (b|r|i|batch_runs|daily_reports|report_items|prices)(\s|$)", p)]
+    assert not 통째, 계획
+    # batch_runs 는 job_name 만이 아니라 **날짜 하한**까지 색인으로 묶는다(job_name 만이면 그 작업 이력 전부를 읽는다)
+    b_읽기 = [p for p in 계획 if p.startswith("SEARCH b ")]
+    assert b_읽기 and all("trade_date>" in p or "started_at>" in p for p in b_읽기), b_읽기
