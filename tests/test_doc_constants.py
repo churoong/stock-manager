@@ -806,6 +806,8 @@ class Test밸류_분모:
     " 손으로 묶는다(25.2179)",
     "buffer_erc": "43회차 e3 사전 등록 값(창 126·하한 60·30%·상한 10%·1e-8·10,000)은 docs/factors.md 12.46 이 적고"
     " `test_buffer_erc_2189` 가 손으로 묶는다(25.2189)",
+    "st_meta": "43회차 e2 사전 등록 값(L2 1·정화 엠바고 12·13번째 달·100·50·6·α 0.05/3·특징 다섯)은 docs/factors.md 12.46 이 적고"
+    " `test_st_meta_2192` 가 손으로 묶는다(25.2192)",
     "etf_tactical": "ETF 전술 계좌 판 1 값(200일선·20일·98%·50%)은 docs/paper.md 17.1 이 표로 적고 `test_etf_tactical_2165`"
     " 가 손으로 묶는다(25.2165)",
     "shadow": "단타·스윙 규칙 값은 `Rule` 객체 안에 있고 docs/paper.md 16.1 이 % 로 적는다 — 값은 `test_shadow_1862`"
