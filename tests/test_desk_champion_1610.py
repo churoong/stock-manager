@@ -25,7 +25,9 @@ def _db() -> Client:
                            " VALUES (?, ?, 1000, 1000, 0, 1000, 0, ?, '[]', 1, 't')", [aid, d, t])  # fmt: skip
     c.conn.execute("UPDATE paper_accounts SET rule_version = 3 WHERE id = 'C'")
     c.conn.executemany("INSERT INTO paper_rule_versions (account_id, rule_version, since, noted_at) VALUES (?, ?, ?, 't')",
-                       [("C", 1, ""), ("C", 3, 날[99]), ("H", 2, "")])  # fmt: skip
+                       [("C", 1, ""), ("C", 3, 날[99]), ("H", 3, "")])  # fmt: skip
+    # H 는 지금 판(0095 가 2 → 3, 25.2187)이 처음부터 — 판 이력에 지금 판 행이 없으면 운용 요약이 그날을 새 판 시작으로
+    # 적어 맞춘 구간이 비고 C 줄이 빠진다
     return c
 
 

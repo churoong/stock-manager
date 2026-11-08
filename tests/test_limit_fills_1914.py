@@ -286,10 +286,11 @@ def test_끝까지_지정가_모드는_덜_사고_장부가_엔진과_같다() -
                 새로트 += 1
     assert 낸수 > 찬수 > 0 and 일부 >= 5 and 안참 >= 5 and 새로트 >= 5, (낸수, 찬수, 일부, 안참, 새로트)
     assert 산비중 < sum(sum(lg.buys.values()) for lg in 전량.log)
-    # 1532 의 하루 정지(종목 2, 모의 247) — 그날 낸 회차 셋이 하나도 안 차고 엔진은 "살 수 없어 뺀" 목록에 적는다
-    정지날 = next(lg for lg in s.log if lg.day == t32.모의[247])
+    # 1532 의 하루 정지(종목 2, 모의 241 — 점수 판 12 로 자리를 다시 놓음, 25.2187. 예전 247) — 그날 낸 회차 셋이 하나도
+    # 안 차고 엔진은 "살 수 없어 뺀" 목록에 적는다
+    정지날 = next(lg for lg in s.log if lg.day == t32.모의[241])
     assert len(정지날.limits[2]) == 3 and 2 not in 정지날.held
-    assert r.rebalances[247].dropped == [2] and 2 not in r.rebalances[247].weights
+    assert r.rebalances[241].dropped == [2] and 2 not in r.rebalances[241].weights
 
 
 # ── 운영과 일치: 1910 합성 자료, 운영 체결 판정이 스스로 채운다 ───────────────────────

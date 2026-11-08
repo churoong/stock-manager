@@ -407,7 +407,9 @@ W, S, N = 130, 300, 12
 전체 = _영업일("2022-01-03", W + S + 10)
 날들 = 전체[: W + S]
 모의 = 날들[W:]
-정지, 폐지 = ((6, 233, 237), (2, 247, 248)), (12, 250)  # (종목, 모의 시작 번호, 끝 번호) — `_자료` 가 지운다
+# (종목, 모의 시작 번호, 끝 번호) — `_자료` 가 지운다. 점수 판 12(에코 모멘텀, 25.2187)로 합성 자료의 점수·고름이 바뀌어
+# 예전 자리(6: 모의 233~236 정지, 2: 모의 247 하루 정지)가 더는 손절·새 매수 날이 아니었다 — 같은 갈래를 지나게 다시 놓았다
+정지, 폐지 = ((2, 255, 259), (2, 241, 242)), (12, 250)
 
 
 @cache
@@ -439,8 +441,8 @@ def _자료() -> tuple:
         a *= math.exp(0.0003 + 0.01 * rng.gauss(0, 1))
         b *= math.exp(0.0002 + 0.012 * rng.gauss(0, 1))
         idx["KOSPI"][d], idx["KOSDAQ"][d] = a, b
-    # 거래정지와 상장폐지 — 난수를 다 뽑은 뒤 지워 그 전 길은 그대로다. 6 은 B·G 가 손절을 내는 날(모의 233)부터 나흘 정지,
-    # 12 는 B·G·H·R1 이 들고 있는 모의 250 부터 시세가 끊긴다
+    # 거래정지와 상장폐지 — 난수를 다 뽑은 뒤 지워 그 전 길은 그대로다. 2 는 B·G·H 가 새로 사는 날(모의 241) 하루 정지,
+    # B·G·H 가 손절을 내는 날(모의 255)부터 나흘 정지. 12 는 B·R1 이 들고 있는 모의 250 부터 시세가 끊긴다(25.2187)
     for sid, 빼기 in [*((sid, 모의[a:b]) for sid, a, b in 정지), (폐지[0], 모의[폐지[1] :])]:
         for d in 빼기:
             del prices[sid][d], turn[sid][d]
@@ -511,19 +513,19 @@ def test_다섯_변형이_돌고_사고판다(variant: str) -> None:
 
 def test_끝까지_정지와_상장폐지를_엔진과_맞춘다() -> None:
     """`_자료` 의 정지·상장폐지가 실제로 장부 맞추기를 거친다(셈은 `_끝까지` 가 가격 자료로 설명한 것만 센다).
-    6 은 모의 233 에 손절을 내고 정지(233~236) 동안 다시 내다가 재개일 237 에 판다 — 판 날은 237.
+    2 는 모의 255 에 손절을 내고 정지(255~258) 동안 다시 내다가 재개일 259 에 판다 — 판 날은 259.
     12 는 모의 250 부터 시세가 없다 — 매도를 낸 적 없이 엔진이 마지막 종가로 팔고 장부에서 지운다.
-    2 는 모의 247 하루 정지 — 그날 낸 매수를 엔진이 못 산다."""
+    2 는 모의 241 하루 정지 — 그날 낸 새 매수를 엔진이 못 산다(점수 판 12 로 자리를 다시 놓음, 25.2187)."""
     s, r, _o, 셈 = _기본("core_b")
     assert 셈["정지로 미룸"] == 4 and 셈["상장폐지"] == 1 and 셈["못 산 매수"] == 1 and 셈["매도 체결"] >= 5, 셈
     assert _기본("core_g")[3]["정지로 미룸"] == 4 and _기본("core_h")[3]["못 산 매수"] == 1
     로그 = _날별(s)
-    assert all(로그[모의[k]].sells.get(6) == ["손절"] for k in range(233, 238))
-    assert r.rebalances[236].date == 모의[236] and 6 in r.rebalances[236].weights
-    assert 6 not in r.rebalances[237].weights and s.sold[6] == 모의[237]
+    assert all(로그[모의[k]].sells.get(2) == ["손절"] for k in range(255, 260))
+    assert r.rebalances[258].date == 모의[258] and 2 in r.rebalances[258].weights
+    assert 2 not in r.rebalances[259].weights and s.sold[2] == 모의[259]
     assert 12 in r.rebalances[249].weights and 12 not in r.rebalances[250].weights
     assert not any(12 in 로그[d].sells for d in 모의[240:-1]) and 12 not in s.lots
-    assert 2 in 로그[모의[247]].buys and 2 not in r.rebalances[247].weights
+    assert 2 in 로그[모의[241]].buys and 2 not in r.rebalances[241].weights and 2 not in r.rebalances[240].weights
 
 
 def test_G_와_B_는_매도만_다르다() -> None:

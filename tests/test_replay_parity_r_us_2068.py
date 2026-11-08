@@ -8,14 +8,24 @@
 
 from __future__ import annotations
 
+import pytest
+
 from tests import test_replay_parity_ac_us_2065 as acu
 
 r_us = acu._싣기("test_replay_parity_r_1929.py", "tests._parity_r_us_2068")
 t = acu.t
 
 
+def _목표끝(variant: str, 판: str) -> dict:
+    """⑪ 목표 끝 뒤집힘(25.1929, 25.2187 에 목표 끝으로 넓힘)을 쓴 자리 — (결정일, 종목) → (리플레이 − 끝, 운영 − 끝)"""
+    return {(d, sid): x for (v, 판_, d, sid), x in r_us.상한끝.items() if v == variant and 판_ == 판}
+
+
 def test_미국_R1_은_옛_자리_신호_날에_다른_대체_종목을_고른다() -> None:
     틀림 = t._L2("core_r1", "zero")
+    # 점수 판 12(25.2187)로 합성 자료의 점수가 바뀌어 02-23 에 신호 목표 5% 끝의 ⑪ 이 난다(종목 21, 앞 결정일에 양쪽이 삼) —
+    # 주 단위 잣대 확인함(1주 8.4e-9: 리플레이 끝 −6.4e-10, 운영 끝 +5.3e-10). 그 자리만 견딘다
+    assert _목표끝("core_r1", "zero") == {("2024-02-23", 21): pytest.approx((-6.3706e-10, 5.27975e-10), rel=1e-4)}
     assert 틀림 and 틀림[0].startswith("2024-08-15:"), 틀림[:1]
     assert "(9, 'buy', '무작위 대조'" in 틀림[0] and "(14, 'skip', '종목 비중 상한 도달'" in 틀림[0], 틀림[0]
     rp = t._리플레이("core_r1", "zero")
@@ -32,6 +42,8 @@ def test_미국_R2_도_같은_갈래로_06_05_에_갈린다() -> None:
     02-14 원가 차(상대 약 8e-6)는 든 대체 장부가 처음 갈리는 03-20 보다 앞서 **이 갈래가 아니다** — 원인은 더 산 로트의 원가 평균
     근사 ⑦(25.2076)"""
     틀림 = t._L2("core_r2", "zero")
+    # 25.2187 — 02-23 종목 6 의 ⑪ 목표 끝(1주 1.28e-8: 리플레이 −3.3e-9, 운영 +2.5e-10) 만 견딘다
+    assert _목표끝("core_r2", "zero") == {("2024-02-23", 6): pytest.approx((-3.28499e-09, 2.52451e-10), rel=1e-4)}
     assert 틀림 and 틀림[0].startswith("2024-06-05:") and "(22, 'buy', '무작위 대조'" in 틀림[0], 틀림[:1]
     # 같은 갈래인 근거(25.2069, 교차검증 note — 날짜만으론 못 묶는다: 장부 12→6 은 05-17 부터(첫 등장 03-20), `_hit` 은
     # 05-31~06-04 에도 켜졌지만 자리가 차 뽑지
@@ -67,3 +79,12 @@ def test_미국_R2_슬리피지_판_원가_차는_더_산_로트의_원가_평�
     # 이 아래쪽 경계(⑦ 보다 큼)는 지운다 — 결함 신호가 아니다(25.2082, 교차검증 note)
     assert t.ALLOW_COST_AVERAGING_REL < 더 <= 2e-5, 더
     assert rp.장부["2024-02-14"][1][3] is True  # 02-14 종목 1 은 더 산 로트
+
+
+@pytest.mark.parametrize("판", ["fees", "slip"])
+@pytest.mark.parametrize("variant", ["core_r1", "core_r2"])
+def test_미국_R_비용_판엔_목표_끝_뒤집힘이_없다(variant: str, 판: str) -> None:
+    """25.2187 — ⑪ 목표 끝은 비용 0 판의 두 자리뿐. 비용·슬리피지 판의 첫 L2 갈림은 비용 0 판과 같은 옛 자리 갈래다"""
+    틀림 = t._L2(variant, 판)
+    assert _목표끝(variant, 판) == {}
+    assert 틀림 and 틀림[0][:10] == {"core_r1": "2024-08-15", "core_r2": "2024-06-05"}[variant], 틀림[:1]
