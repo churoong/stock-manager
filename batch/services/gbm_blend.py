@@ -97,6 +97,10 @@ class GbmFailure(RuntimeError):
     """GBM 단계 실패 — 그 실행의 `gbm_blend` 만 '판정 불가(실행 실패)'. composite 로 물러나지 않는다(12.46)"""
 
 
+#: 점수 판 12 에서 바뀐 이름 → 등록 때(판 11) 이름. 판이 또 바뀌면 여기에 더한다(목록 `FEATURES` 는 그대로)
+REGISTERED_AT_V11 = {"momentum_echo": "momentum_vol_adjusted"}
+
+
 def feature_names() -> tuple[str, ...]:
     """12.46 의 기계적 규칙: ① `scoring.FACTOR_METRICS` 하위 지표 ∪ ② (LOOP ∪ USER ∪ DIAG IC 이름) − 이름으로 뺀 셋 −
     감성·의견 재료 − `gbm_pred`, 통제형은 원값으로 접음. 정렬·중복 제거.
@@ -105,7 +109,9 @@ def feature_names() -> tuple[str, ...]:
     from batch.jobs import backtest as job
     from batch.services import scoring as sc
 
-    지표 = {m.name for ms in sc.FACTOR_METRICS.values() for m in ms}
+    # 등록 커밋(03a3e34) 때 `FACTOR_METRICS` 는 점수 판 11 이었다 — 판 12(25.2187)가 모멘텀 여섯째를 에코로 바꿨어도
+    # 등록된 목록이 판이다(12.46 '뒤에 생기는 이름은 들어가지 않는다'). 옛 지표는 진단값으로 계속 계산된다(25.2197)
+    지표 = {REGISTERED_AT_V11.get(m.name, m.name) for ms in sc.FACTOR_METRICS.values() for m in ms}
     뺌 = set(EXCLUDED_NAMED) | set(EXCLUDED_SENTIMENT_OPINION) | {SELF_NAME}
     ic = {FOLD.get(n, n) for n in (*job.LOOP_IC_NAMES, *job.USER_IC_NAMES, *job.DIAG_IC_NAMES)} - 뺌
     return tuple(sorted(지표 | ic))

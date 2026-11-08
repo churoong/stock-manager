@@ -18,12 +18,18 @@
 시가 일괄 진입 = 합성 자료의 시가 = 종가라 비용 0 판에서 "시가 대신 t 종가"(funnel.md 4장 표 R "근사") 차이는 없다.
 
 새 허용(1910 의 ①~⑨·1921 의 ⑩ 은 그대로, 넓히지 않는다):
-  ⑪ `ALLOW_CAP_EDGE_FLIP` — 종목 상한 끝 뒤집힘(비용 0 판에도 나온다). R 의 대체 행은 신호 비중을 물려받는데 신호 비중
-     10% = 종목 상한이라, 산 날 정수 주 내림으로 상한보다 1주 못 미치게(3.4e-10) 들고, 베끼기(허용 ①)의 정수 주 반올림이
-     운영 보유를 상한 위(+6e-10~1.4e-9)로 올린다 → 다음 날 리플레이 skip "최소 주문 단위 미만"(남은 몫 < 1주) ↔ 운영 skip
-     "종목 비중 상한 도달". 둘 다 사지 않고 사유만 다르다. 허용 ③(정수 주)의 결정 자리 — B·G 창에서는 목표가 상한 아래라
-     나오지 않았다. 잣대: 같은 종목 줄 한 쌍, 둘 다 skip·held, 사유가 그 둘, 그날 양쪽 매수 없음, 두 비중 모두 상한 ± 1e-8
-     (1주 1.1~1.6e-8 아래), 두 비중 차 ≤ 허용 ③. 어느 날·종목인지 단언한다
+  ⑪ `ALLOW_CAP_EDGE_FLIP` — 목표 끝 뒤집힘(비용 0 판에도 나온다). 끝 = min(그 자리 신호 목표 비중, 종목 상한). R 의 대체 행은
+     그 자리 신호 비중을 물려받는다. 리플레이 전략의 주문은 **정수 주**(명목 자본 N·cutoff 종가 틀)지만 엔진은 그것을 **비중**으로
+     받아 t 자본·t 종가로 들어 **소수 주**를 들고, 베끼기(허용 ①)가 그 소수 주를 **가장 가까운 정수로 반올림**해 운영 장부에
+     적는다 → 끝에서 산 다음 날 리플레이 비중은 끝 바로 아래(남은 몫 < 1주 — skip "최소 주문 단위 미만"), 운영은 끝 이상(skip
+     "종목 비중 상한 도달" — 목표 이상 보유도 같은 사유 코드). 둘 다 사지 않고 사유만 다르다. 허용 ③(정수 주)의 결정 자리.
+     (25.1929 처음엔 신호 비중 10% = 종목 상한인 자리만, 그리고 "정수 주 내림" 이라 적었다 — 25.2187 점수 판 12 에서 미국 R1·R2
+     2024-02-23 에 신호 목표 5% 끝으로 나와 기제를 바로잡고 목표 끝으로 넓혔다. 원인 재현·바닥 내림 대안 기각은 교차검증.)
+     잣대(모두): 같은 종목 줄 한 쌍, 둘 다 skip·held, 사유가 그 둘, 그날 양쪽 그 종목 매수 없음, **앞 결정일에 양쪽 모두 그 종목을
+     삼**, 끝의 목표 = 그날 그 자리(`random` 대체 표를 거꾸로 찾음) 신호 행의 `suggested_weight_pct`(운영 `best` — 금액 큰 것, 같으면
+     짧은 기간) — 못 찾거나 ≤ 0 이면 견디지 않고 멈춘다, 상관 축소 없음(②) 단언, 1주 = cutoff 종가 ÷ cutoff 자본(명목)으로
+     운영 0 ≤ 운영 − 끝 ≤ 0.5주 · 리플레이 0 < 끝 − 리플레이 < 1주 · 두 비중 차 ≤ 0.5주 + 1e-12, 그리고 두 비중 모두 끝 ± 1e-8·
+     차 ≤ 허용 ③(예전 잣대도 그대로). 어느 날·종목인지 판마다 같음(==)으로 단언한다
   ⑫ `ALLOW_MARKET_SLIPPAGE_GATE_PCTP` — 슬리피지 판(`slip`: 운영 설정 수수료 + 엔진 기본 슬리피지 0.10%). R 은 사고(시가
      일괄) 팔(시장가) 때 모두 슬리피지를 낸다. 25.1929 에는 엔진이 그 비용을 자본 전체에 비례로 빼(⑨ 와 같은 기제) 보유 비중·
      원가·관문 셋이 ⑨·⑦·⑥ 을 넘었다. **25.1957 엔진이 비용을 현금에서 낸 뒤 장부 둘은 1910 상한 안** — 관문 수익률 차만 남는다.
@@ -48,17 +54,19 @@ from batch.jobs import paper as job
 from batch.services import backtest as bt
 from batch.services import core_strategy as cs
 from batch.services import paper as pp
+from batch.services import report_picks
 from tests import test_replay_parity_1910 as t
 from tests.test_paper_job_1445 import Client, 설정
 
 #: 무작위 대조 모집단 스냅샷 날짜 — 워밍업 첫날(운영 `UNIVERSE_SQL` 은 가장 늦은 스냅샷 하나만 읽는다)
 _스냅샷 = t.날들[0]
 
-#: ⑪ 종목 상한 끝 뒤집힘 — 두 쪽 보유 비중이 종목 상한에서 이 안. 2026-10-28 실측 리플레이 −3.5e-10·운영 +1.45e-9 (R1
-#: 2024-08-28 종목 6, R2 2024-05-30 종목 19). 상한은 1주(1.1~1.6e-8)보다 작게 — 1주 넘게 떨어진 자리의 뒤집힘은 다른 원인이다
+#: ⑪ 목표 끝 뒤집힘 — 두 쪽 보유 비중이 끝(min(신호 목표, 종목 상한))에서 이 안(주 단위 잣대 위에 더 거는 상한).
+#: 2026-10-28 실측 리플레이 −3.5e-10·운영 +1.45e-9 (상한 끝, 국내 R1 2024-08-28 종목 6·R2 2024-05-30 종목 19 — 점수 판 12
+#: 에선 나오지 않음). 25.2187 미국 목표 5% 끝: R1 2024-02-23 종목 21 −6.4e-10·+5.3e-10, R2 같은 날 종목 6 −3.3e-9·+2.5e-10
 ALLOW_CAP_EDGE_FLIP = 1e-8
 _상한끝_사유 = frozenset({"최소 주문 단위 미만", "종목 비중 상한 도달"})
-#: ⑪ 을 쓴 자리 (변형, 판, 결정일, 종목) → (리플레이 비중 − 상한, 운영 비중 − 상한) — 시험이 어느 날·종목인지 단언한다
+#: ⑪ 을 쓴 자리 (변형, 판, 결정일, 종목) → (리플레이 비중 − 끝, 운영 비중 − 끝) — 시험이 어느 날·종목인지 단언한다
 상한끝: dict[tuple[str, str, str, int], tuple[float, float]] = {}
 
 #: ⑫ 슬리피지 판의 상한 — 예전(2026-10-28 실측의 약 두 배) 보유 비중 차 7e-4·원가 상대차 2.5e-4·관문 0.13%p 였다.
@@ -113,12 +121,32 @@ def _없음(_c: Client, _day: str) -> None:
     return None
 
 
+def _자리_목표(rp: t.리플레이, day: str, sid: int) -> float:
+    """⑪ 끝의 목표 — 그날 `sid` 가 대체한 자리(`random` 대체 표를 거꾸로)의 신호 행 비중(운영 `build_portfolio` 의 `best`:
+    금액 큰 것, 같으면 짧은 기간). 못 찾거나 ≤ 0 이면 견디지 않고 멈춘다(25.2187 교차검증)"""
+    바꿈 = t._날별(rp)[day].random.get("random") or {}
+    자리 = [int(k) for k, c in 바꿈.items() if c == sid]
+    assert len(자리) == 1, f"⑪ {day} 종목 {sid}: 대체한 자리를 못 찾음 {바꿈}"
+    행 = [r for r in rp.재료[day][1] if r.stock_id == 자리[0] and r.suggested_amount is not None]
+    if not 행:  # 합성 신호 행은 금액이 없을 수 있다 — 운영과 같은 순서 열쇠로 고른다(금액 0)
+        행 = [r for r in rp.재료[day][1] if r.stock_id == 자리[0]]
+    assert 행, f"⑪ {day} 종목 {sid}: 자리 {자리[0]} 의 신호 행이 없음"
+    best = max(행, key=lambda r: (r.suggested_amount or 0, -report_picks._기간_순.get(r.horizon, 9)))
+    목표 = float(best.suggested_weight_pct or 0) / 100
+    assert 목표 > 0, f"⑪ {day} 종목 {sid}: 자리 {자리[0]} 의 신호 비중 {best.suggested_weight_pct}"
+    return 목표
+
+
 def _상한끝(variant: str) -> Any:
-    """⑪ 거르개 — 1910 `_L2` 가 ⑨(다) 앞에 부른다(`t.줄쌍_더`)."""
+    """⑪ 거르개 — 1910 `_L2` 가 ⑨(다) 앞에 부른다(`t.줄쌍_더`). 잣대는 위 머리말 ⑪."""
 
     def 거르개(판: str, day: str, 리플만: list, 운만: list, h: t.운영하루) -> set[int]:
-        rp = t._리플레이(variant, 판)
-        산 = t._날별(rp)[day].buys
+        assert t.ALLOW_NO_CORRELATION_SHRINK == {}  # 끝의 목표에 상관 배수가 없다(② — 운영에 price_series={})
+        rp, live = t._리플레이(variant, 판), t._운영(variant, 판)
+        로그 = t._날별(rp)
+        산 = 로그[day].buys
+        날 = list(live)
+        앞날 = 날[날.index(day) - 1] if 날.index(day) > 0 else None
         상한 = 설정["max_weight_per_stock"] / 100
         견딘: set[int] = set()
         for sid in {x[0] for x in 리플만} & {x[0] for x in 운만}:
@@ -131,11 +159,18 @@ def _상한끝(variant: str) -> Any:
                 continue
             if sid in 산 or sid in h.buys:
                 continue
+            # 앞 결정일에 양쪽 모두 그 종목을 샀다 — 산 날의 소수 주·반올림이 드러나는 다음 날만
+            if 앞날 is None or sid not in 로그[앞날].buys or sid not in live[앞날].buys:
+                continue
+            끝 = min(_자리_목표(rp, day, sid), 상한)  # 그 결정일 자체의 자리·신호 행
+            cutoff = rp.재료[day][0]
+            한주 = t._자료()[1][sid][cutoff] / (dict(rp.r.curve)[cutoff] * t.NOTIONAL)
             wr, wl = rp.비중[day].get(sid, 0.0), h.weights.get(sid, 0.0)
-            if (abs(wr - 상한) <= ALLOW_CAP_EDGE_FLIP and abs(wl - 상한) <= ALLOW_CAP_EDGE_FLIP
+            if (0 <= wl - 끝 <= 0.5 * 한주 and 0 < 끝 - wr < 한주 and abs(wr - wl) <= 0.5 * 한주 + 1e-12
+                    and abs(wr - 끝) <= ALLOW_CAP_EDGE_FLIP and abs(wl - 끝) <= ALLOW_CAP_EDGE_FLIP
                     and abs(wr - wl) <= t.ALLOW_NOTIONAL_EQUITY):  # fmt: skip
                 견딘.add(sid)
-                상한끝[(variant, 판, day, sid)] = (wr - 상한, wl - 상한)
+                상한끝[(variant, 판, day, sid)] = (wr - 끝, wl - 끝)
         return 견딘
 
     return 거르개
@@ -204,7 +239,8 @@ def test_합성_창이_무작위_대조_갈래를_지난다() -> None:
 @pytest.mark.parametrize("variant", 변형들)
 def test_비용_0_이면_장부·매도·결정·매수_비중이_허용_없이_같다(variant: str) -> None:
     """25.1929 — 수수료·세금·슬리피지 0 판. L0~L3 과 그 아래 무작위 대체(대체 종목·빈 자리 까닭)가 날마다 허용 ③(2e-7)
-    안에서 같다 — 시가 일괄 진입의 "시가 대신 t 종가" 는 합성 자료(시가 = 종가)라 차이가 없다. 견딘 것은 ⑪ 한 자리뿐."""
+    안에서 같다 — 시가 일괄 진입의 "시가 대신 t 종가" 는 합성 자료(시가 = 종가)라 차이가 없다. ⑪ 은 쓰이지 않는다
+    (점수 판 12, 25.2187 — 그 전엔 한 자리씩)."""
     for 단 in (t._L0, t._L1, t._L2, t._L3, _무작위_대조):
         틀림 = 단(variant, "zero")
         assert not 틀림, (단.__name__, 틀림[:5])
@@ -212,9 +248,12 @@ def test_비용_0_이면_장부·매도·결정·매수_비중이_허용_없이_
     aid = cs.variant_spec(variant).account
     assert not [k for k in t.베낌_0주 if k[0] == aid]  # ⑩ 은 R 에 쓰지 않는다(상한 등록 없음 — 나오면 1910 처럼 멈춘다)
     본 = {(d, sid) for (v, 판, d, sid) in 상한끝 if v == variant and 판 == "zero"}
-    assert 본 == {"core_r1": {("2024-08-28", 6)}, "core_r2": {("2024-05-30", 19)}}[variant], 본
-    # 리플레이는 상한 바로 아래(1주 못 미침), 운영은 베끼기 반올림으로 상한 바로 위
-    assert all(r < 0 < o for (v, 판, _d, _s), (r, o) in 상한끝.items() if v == variant and 판 == "zero")
+    # 점수 판 12(25.2187)로 합성 자료의 점수가 바뀌어 ⑪ 을 쓰는 날이 없어졌다 — 기준 확인함. 예전 두 자리(R1 2024-08-28
+    # 종목 6·R2 2024-05-30 종목 19)는 그대로 상한 끝이지만 운영 보유도 상한 아래(실측 −2.09e-9·−2.34e-9, 리플레이 −3.3e-10·
+    # −3.5e-10)라 두 쪽 모두 "최소 주문 단위 미만" 으로 같다. 빈 집합을 같음(==)으로 — 다시 쓰이면 알아챈다
+    assert 본 == {"core_r1": set(), "core_r2": set()}[variant], 본
+    # 리플레이는 끝 바로 아래(1주 못 미침 — 엔진의 소수 주), 운영은 베끼기 반올림으로 끝 이상
+    assert all(r < 0 <= o for (v, 판, _d, _s), (r, o) in 상한끝.items() if v == variant and 판 == "zero")
 
 
 #: 비용 판마다 ⑨(다) 채우기 뒤집힘을 견딘 자리 — 2026-10-28 실측은 R1 fees 1·R2 fees 2·R1 slip 3·R2 slip 3 자리였다(든 종목을

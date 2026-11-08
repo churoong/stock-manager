@@ -92,8 +92,9 @@ def test_write_merges_both_markets(monkeypatch: pytest.MonkeyPatch) -> None:
     c.conn.execute(
         "INSERT INTO paper_orders (id, account_id, market, stock_id, side, order_type, limit_price, quantity, currency,"
         " decided_on, fill_session, reason, rule_version, tranche, created_at)"
-        " VALUES (1, 'B', 'KR', 1, 'buy', 'limit', 9800, 3, 'KRW', '2026-10-15', '2026-10-16', '2부 배분 — 점수 상위', 1, 1, 't')"
+        " VALUES (1, 'B', 'KR', 1, 'buy', 'limit', 9800, 3, 'KRW', '2026-10-15', '2026-10-16', '2부 배분 — 점수 상위', 2, 1, 't')"
     )  # fmt: skip
+    # 주문의 판 2 = B 지금 판(0095 가 1 → 2, 25.2187) — 판 이력의 주문 수는 (계좌, 판)으로 센다
     지금 = datetime(2026, 10, 15, 23, 40, tzinfo=UTC)  # 10-16 08:40 KST
     기록 = job.write(c, "KR", 지금, trade_date="2026-10-15", session_date="2026-10-16",
                    step_log={"broker": {"sent": {"accepted": 1}}, "paper": {"accounts": {"R1": {"recon_ok": False},
@@ -113,18 +114,19 @@ def test_write_merges_both_markets(monkeypatch: pytest.MonkeyPatch) -> None:
     assert any("장부 검산 어긋남: 계좌 무작위1" in x["text"] for x in kr["checks"])
     assert [r["id"] for r in s["leaderboard"]["rows"]][0] in ("B", "R1")
     # 판 이력 표를 처음 채운다 — 계좌마다 지금 판, since '' (계좌의 처음부터). B 는 1.0 → 1.02 = +2%, R1 은 0%
+    # B 지금 판은 2 — 0095(점수 판 12, 25.2187)가 1 → 2 로 올렸다
     b = s["rule_history"]["B"]
     assert [{k: v for k, v in x.items() if k != "prereg"} for x in b] == [
-        {"version": 1, "from": "", "to": None, "orders": 1, "pct": pytest.approx(2.0),
+        {"version": 2, "from": "", "to": None, "orders": 1, "pct": pytest.approx(2.0),
          "control_pct": pytest.approx(0.0), "vs_r_pp": pytest.approx(2.0), "vs_r_to": None}]  # fmt: skip
     assert b[0]["prereg"]["hypothesis"].startswith("기준")  # 판 사전 등록(25.1520)
     assert {"A", "B", "H", "R1"} <= s["rule_history"].keys()  # 주문이 없어도 판은 있다
-    # 판을 올리면 그 실행의 판정일이 새 판의 since
-    c.conn.execute("UPDATE paper_accounts SET rule_version = 2 WHERE id = 'B'")
+    # 판을 올리면 그 실행의 판정일이 새 판의 since — 지금 판 2(0095, 25.2187)에서 3 으로
+    c.conn.execute("UPDATE paper_accounts SET rule_version = 3 WHERE id = 'B'")
     job.write(c, "KR", datetime(2026, 10, 18, 23, 40, tzinfo=UTC), trade_date="2026-10-16", session_date="2026-10-19",
               step_log={}, warnings=[])  # fmt: skip
     assert c.q("SELECT rule_version, since FROM paper_rule_versions WHERE account_id = 'B' ORDER BY rule_version") == [
-        (1, ""), (2, "2026-10-16")]
+        (2, ""), (3, "2026-10-16")]
 
 
 def test_rule_history_spans_by_hand() -> None:

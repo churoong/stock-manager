@@ -791,7 +791,7 @@ def build_inputs(
 
         # 모멘텀·계열 지표. 백테스트(jobs/backtest.build_pit_inputs)와 **같은 함수**를 부르고
         # **같은 계열**을 넘긴다. 예전에는 모멘텀만 날짜로 기준점을 잡아, 같은 실행 안에서
-        # `momentum_12_1` 과 `momentum_vol_adjusted` 의 12-1 이 갈렸다 (docs/infra.md 25.100)
+        # `momentum_12_1` 과 (그때 점수에 들던) `momentum_vol_adjusted` 의 12-1 이 갈렸다 (docs/infra.md 25.100)
         dates_series, closes_series, values_series = series.get(stock_id, ([], [], []))
         # **미국 분할 재수집 대기 종목은 가격 계열을 모른다로 둔다** (docs/infra.md 25.1311, 19회차 A2). 일일 수집은
         # 최근 열흘쯤만 분할 반영 값으로 다시 쓰고 그 앞은 토요일 재수집까지 분할 전이라, 4:1 분할이면 계열 한가운데
@@ -847,6 +847,8 @@ def build_inputs(
                     else {"window": metric_row.get("window"), "as_of_date": metric_row.get("as_of_date")}
                 ),
                 market_cap_note=cap_note,
+                # 에코 모멘텀의 두 가격 행 — 근거표 (docs/factors.md 3.4, infra 25.2187). 같은 계열이라 읽기 0
+                momentum_points=sc.momentum_points_note(dates_series, closes_series),
             )
         )
     return inputs

@@ -69,6 +69,8 @@ def test_min_data_in_leaf_는_100_과_학습_행_1퍼센트_올림_중_큰_값()
 def test_특징_목록은_등록_커밋에_고정된_튜플과_같다() -> None:
     """뒤에 생기는 IC 이름이 조용히 들어가면 여기서 깨진다(12.46 — 들이면 새 판·새 시도)"""
     assert gb.feature_names() == gb.FEATURES
+    # 점수 판 12(25.2187) 뒤에도 등록 목록 그대로 — 옛 지표가 남고 에코는 들지 않는다(25.2197)
+    assert "momentum_vol_adjusted" in gb.FEATURES and "momentum_echo" not in gb.FEATURES
     assert len(gb.FEATURES) == 43 and list(gb.FEATURES) == sorted(set(gb.FEATURES))
 
 
