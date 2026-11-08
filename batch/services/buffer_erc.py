@@ -151,7 +151,15 @@ def weights(picked: Sequence[int], axis: Sequence[str], closes: Mapping[int, Map
     while len(대상) >= 2:
         공통 = [i for i in range(len(창) - 1) if all(수익[s][i] is not None for s in 대상)]
         if len(공통) >= MIN_POINTS:
-            break
+            # 공통 날 수익이 모두 같은 종목(분산 0 — 정지 중 같은 종가가 되풀이되는 시세)은 상관이 정의되지 않아
+            # 수축 강도·ERC 가 NaN 으로 무너진다 → '60 미만' 과 같은 갈래로 1/n 몫(12.46 보충, 25.2190 교차검증)
+            평평 = [s for s in 대상 if np.ptp([수익[s][i] for i in 공통]) == 0]
+            if not 평평:
+                break
+            for s in 평평:
+                대상.remove(s)
+                tr.to_equal.append(s)
+            continue
         # 유효 수익이 가장 적은 종목부터(같으면 stock_id 큰 쪽부터) 1/n 몫으로
         뺌 = min(대상, key=lambda s: (sum(x is not None for x in 수익[s]), -s))
         대상.remove(뺌)
@@ -166,6 +174,8 @@ def weights(picked: Sequence[int], axis: Sequence[str], closes: Mapping[int, Map
     w, ok, tr.sweeps = erc_weights(cov)
     tr.converged = ok
     if not ok:
+        tr.to_equal = sorted(picked)  # 기록: 리밸런스 전체가 1/n — ERC 를 한 것처럼 남기지 않는다
+        tr.erc_n = 0
         return {s: eq for s in picked}
     몫 = eq * len(대상)
     out = {s: eq for s in picked if s not in 대상}

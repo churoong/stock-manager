@@ -131,6 +131,59 @@ def test_유효_수익이_같으면_stock_id_큰_쪽부터_뺀다() -> None:
     assert tr.to_equal == [3] and tr.erc_n == 2 and tr.common_days == 76
 
 
+def test_스무_종목에서_1_n_몫을_먼저_떼고_상한_넘는_몫은_1_n_종목도_받는다() -> None:
+    """n > 10 이라 상한(10%)이 1/n(5%)보다 커서 비중 단언이 공허하지 않다(25.2190 교차검증)"""
+    축 = _축()
+    고름 = list(range(1, 21))
+    시세 = {s: _시세(축, 0.005 + 0.002 * s, s) for s in 고름}
+    시세[20] = _시세(축, 0.045, 20, 빔=set(range(0, 80)))  # 유효 수익 < 60 → 1/n 몫
+    tr = be.ErcTrace()
+    w = be.weights(고름, 축, 시세, kr=False, trace=tr)
+    assert tr.to_equal == [20] and tr.erc_n == 19
+    assert sum(w.values()) == pytest.approx(1.0)  # 1/n 몫을 떼지 않으면 1.05 (레버리지)
+    assert max(w.values()) == pytest.approx(be.CAP)  # 저변동 종목이 상한에 걸린다
+    assert w[20] > 1 / 20 + 1e-6  # 넘는 몫을 1/n 몫 종목도 비례로 받는다(12.46 '모든 종목')
+
+
+def test_하한_60_은_포함이고_59_는_1_n() -> None:
+    축 = _축(127)
+    시세 = {1: _시세(축, 0.01, 1), 2: _시세(축, 0.01, 2, 빔=set(range(0, 66))),
+            3: _시세(축, 0.01, 3, 빔=set(range(0, 67)))}  # fmt: skip
+    # 2 는 유효 수익 60(공통 날도 60), 3 은 59
+    tr = be.ErcTrace()
+    be.weights([1, 2, 3], 축, 시세, kr=False, trace=tr)
+    assert tr.to_equal == [3] and tr.erc_n == 2 and tr.common_days == 60
+
+
+def test_수축_강도는_0_과_1_사이로_자른다() -> None:
+    x = np.random.default_rng(0).normal(size=(6, 4))  # 날 6 — 자르기 전 κ̂/T ≈ 1.46
+    _, d = be.ledoit_wolf_cc(x)
+    assert d == 1.0
+
+
+def test_공통_날_수익이_평평한_종목은_1_n_몫이고_나머지는_수렴한다() -> None:
+    축 = _축()
+    고름 = list(range(1, 14))
+    시세 = {s: _시세(축, 0.005 + 0.002 * s, s) for s in 고름}
+    시세[13] = {d: 50.0 for d in 축}  # 정지 중 같은 종가 되풀이
+    tr = be.ErcTrace()
+    with np.errstate(all="raise"):
+        w = be.weights(고름, 축, 시세, kr=True, trace=tr)
+    assert tr.to_equal == [13] and tr.converged is True and tr.erc_n == 12
+    assert sum(w.values()) == pytest.approx(1.0) and w[13] >= 1 / 13 - 1e-12
+
+
+def test_수렴_실패_기록은_ERC_를_한_것처럼_남기지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(be, "MAX_SWEEPS", 1)
+    monkeypatch.setattr(be, "TOL", 0.0)
+    축 = _축()
+    고름 = list(range(1, 21))
+    시세 = {s: _시세(축, 0.003 * s, s) for s in 고름}
+    tr = be.ErcTrace()
+    be.weights(고름, 축, 시세, kr=False, trace=tr)
+    assert tr.converged is False and tr.erc_n == 0 and tr.to_equal == 고름
+
+
 def test_ERC_대상이_둘_미만이면_모두_1_n() -> None:
     축 = _축()
     시세 = {1: _시세(축, 0.01, 1), 2: _시세(축, 0.01, 2, 빔=set(range(0, 100)))}
