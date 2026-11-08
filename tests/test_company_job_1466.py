@@ -59,7 +59,7 @@ def test_company_buys_only_what_committee_passed(c: Client, monkeypatch: pytest.
     # A(가치투자사): 리서치·퀀트 찬성(신호 두 종목 안 100 백분위) → 1 가결. 3 은 둘 다 반대 → 부결
     assert {r[0] for r in c.q("SELECT DISTINCT stock_id FROM paper_orders WHERE account_id = 'A'")} == {1}
     assert {r[0] for r in c.q("SELECT DISTINCT reason FROM paper_orders WHERE account_id = 'A'")} == {"위원회 가결"}
-    # B(헌장 없음)는 판 1 그대로 두 종목 다
+    # B(헌장 없음)는 위원회 없이 두 종목 다
     assert {r[0] for r in c.q("SELECT DISTINCT stock_id FROM paper_orders WHERE account_id = 'B'")} == {1, 3}
     # 회의록 한 장 · 조사 자료(시장·날짜·종목마다 한 번) · 부결 결정(판 번호와 위원회 기록)
     회의 = c.q("SELECT account_id, minutes_json FROM paper_meetings")
@@ -75,7 +75,8 @@ def test_company_buys_only_what_committee_passed(c: Client, monkeypatch: pytest.
     assert json.loads(부결[0][3])["committee"]["opinions"]["sentiment"][2].startswith("자료 없음")
     산것 = c.q("SELECT detail_json, rule_version FROM paper_decisions WHERE account_id = 'A' AND stock_id = 1")
     assert json.loads(산것[0][0])["committee"]["vote"] == pytest.approx(2.0) and 산것[0][1] == 2
-    assert c.q("SELECT DISTINCT rule_version FROM paper_decisions WHERE account_id = 'B'") == [(1,)]
+    # B 는 0095(점수 판 12, 25.2187)로 판 2
+    assert c.q("SELECT DISTINCT rule_version FROM paper_decisions WHERE account_id = 'B'") == [(2,)]
     # 운용역 메모 — 회의 수 한 줄 + "가장 높은 표" 들여 쓴 한 줄(25.1721, 리포트 가독성)
     i = next(k for k, x in enumerate(줄) if x.startswith("🏛 가치투자사 위원회:"))
     assert "가장 높은 표" not in 줄[i] and 줄[i + 1].startswith("   가장 높은 표 ")
@@ -134,11 +135,13 @@ def test_charter_migration_matches_code() -> None:
     c = Client(accounts=None, charters=True)
     행 = {r[0]: r[1:] for r in c.q("SELECT id, charter_json, charter_since, rule_version, sell_rule FROM paper_accounts")}
     for aid, ch in co.CHARTERS.items():
-        # 판 3 — 0088 이 공시부 덮개 결함 수정으로 올렸다(25.1576). 헌장 값·헌장 시작일은 그대로
-        assert json.loads(행[aid][0]) == ch and 행[aid][1:] == ("2026-10-16", 3, ch["sell_rule"]), aid
+        # 판 4 — 0088 이 공시부 덮개 결함 수정으로 3(25.1576), 0095 가 점수 판 12(에코 모멘텀)로 4(25.2187).
+        # 헌장 값·헌장 시작일은 그대로
+        assert json.loads(행[aid][0]) == ch and 행[aid][1:] == ("2026-10-16", 4, ch["sell_rule"]), aid
         assert co.charter_errors(ch) == [] and ch["sell_rule"] in pp.SELL_RULES
-    for aid in ("B", "R1", "R2"):
-        assert 행[aid][0] is None and 행[aid][2] == 1, aid
+    # B 는 0095 로 판 2(점수 판 12), 무작위 대조 R 은 규칙이 그대로라 판 1(0088 선례)
+    for aid, 판 in (("B", 2), ("R1", 1), ("R2", 1)):
+        assert 행[aid][0] is None and 행[aid][2] == 판, aid
 
 
 def test_news_targets_follow_rules_that_sell_on_sentiment() -> None:

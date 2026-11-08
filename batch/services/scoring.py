@@ -46,7 +46,10 @@ from batch.services import metrics as mt
 # 10: 옮기는 조건을 "시총 날짜 == 스냅샷" 에서 "시총 날짜 ≤ 스냅샷, 14일 안" 으로 — 미국이 실제로 옮겨진다 (25.960)
 # 11: 자본잠식(자본 < 0)이면 부채비율은 집단 최악, ROE 는 적자일 때만 최악 — 사후 배정이라 다른 종목 z 는 그대로
 #     (docs/factors.md 3.2, infra 25.1175). 예전엔 두 지표가 빠져 잠식 종목의 퀄리티가 오히려 높았다
-CALC_VERSION = 11
+# 12: 모멘텀 여섯째 지표를 변동성 조정 모멘텀 → 에코 모멘텀 P(c−126)/P(c−273) − 1
+#     (docs/factors.md 3.4·12.12, infra 25.2187 — 사전 등록 A/B 를 11-03 판정 실행에서 두 나라 모두 넘음).
+#     점수를 읽는 가상모의투자 계좌는 같은 커밋에서 판을 올렸다(0095)
+CALC_VERSION = 12
 
 FACTORS = ("value", "quality", "growth", "momentum", "risk")
 
@@ -162,7 +165,10 @@ FACTOR_METRICS: dict[str, tuple[Metric, ...]] = {
         # 2026-09-17 추가 (docs/factors.md 10.1)
         Metric("high_52w_proximity"),  # 52주 고점 대비 종가. George & Hwang 2004
         Metric("momentum_consistency"),  # 꾸준함. Da, Gurun & Warachka 2014 의 단순화
-        Metric("momentum_vol_adjusted"),  # 12-1 / 연환산 변동성. Barroso & Santa-Clara 2015
+        # 2026-11-07 교체(점수 판 12, docs/factors.md 3.4·12.12, infra 25.2187) — 예전 여섯째는 변동성 조정 모멘텀
+        # `momentum_vol_adjusted`(12-1 ÷ 연환산 σ)였다. 12-1 과 순위 상관 0.985·0.968 이라 12-1 을 두 번 셌다.
+        # 그 지표는 `price_series_metrics` 가 진단값으로 계속 내지만 점수·`raw_json` 에는 들지 않는다
+        Metric("momentum_echo"),  # P(c−126)/P(c−273) − 1. Novy-Marx 2012 의 12-7 을 한 달 건너뛰기 관례로
     ),
     "risk": (
         Metric("mdd_abs", higher_is_better=False),
@@ -186,6 +192,9 @@ FACTOR_METRICS: dict[str, tuple[Metric, ...]] = {
 
 def _swap(factor: str, old: str, new: str | None) -> tuple[Metric, ...]:
     """`factor` 구성에서 `old` 를 `new` 로 바꾼(None 이면 뺀) 지표 묶음."""
+    if old not in {m.name for m in FACTOR_METRICS[factor]}:
+        # 바꿀 지표가 구성에 없으면 B 가 A 와 똑같아진다 — 조용히 넘기지 않는다(25.2187, 손댈 곳 조사)
+        raise ValueError(f"{factor} 구성에 {old} 가 없습니다")
     out: list[Metric] = []
     for m in FACTOR_METRICS[factor]:
         if m.name != old:
@@ -198,8 +207,8 @@ def _swap(factor: str, old: str, new: str | None) -> tuple[Metric, ...]:
 #: **지표 교체 A/B** (docs/factors.md 12.12, 10회차). 이름 → (바뀌는 팩터, 바꾼 구성). 백테스트 한 실행 안에서 현행(A)과
 #: 나란히 그 팩터의 IC 를 내 진단 키에 남긴다 — `IC_NAMES`·`verdict` 가 아니다. 운영 점수는 바꾸지 않는다
 AB_VARIANTS: dict[str, tuple[str, tuple[Metric, ...]]] = {
-    "momentum_echo": ("momentum", _swap("momentum", "momentum_vol_adjusted", "momentum_echo")),
-    "momentum_drop_vol_adj": ("momentum", _swap("momentum", "momentum_vol_adjusted", None)),
+    # 모멘텀 두 갈래(momentum_echo·momentum_drop_vol_adj)는 11-03 판정으로 끝났다 — 에코가 운영 구성에
+    # 들어갔다(점수 판 12, infra 25.2187). 판 11 실행 기록(`step_log.factor_ab`)에만 남는다
     "growth_oi_assets": ("growth", _swap("growth", "operating_income_growth", "oi_change_assets")),
     # 12회차 (docs/factors.md 12.14) — 퀄리티 ROA 를 영업이익/총자산으로, 리스크에서 잔차 변동성 빼기
     "quality_op_assets": ("quality", _swap("quality", "roa", "op_assets")),
@@ -557,9 +566,8 @@ def momentum_from_points(
         "momentum_12_1": _growth_between(p_21, p_273),
         "momentum_6m": _growth_between(p_now, p_126),
         "momentum_3m": _growth_between(p_now, p_63),
-        # 에코 모멘텀 — **점수에 넣지 않는 A/B 진단 지표** (docs/factors.md 12.12, 10회차 1).
-        # Novy-Marx 2012 의 12-7 을 이 저장소 12-1 관례(한 달 건너뛰기)로: 126 → 273 거래일.
-        # `FACTOR_METRICS` 에 없어 `raw_json` 에도 실리지 않는다
+        # 에코 모멘텀 (docs/factors.md 3.4·12.12). Novy-Marx 2012 의 12-7 을 이 저장소 12-1 관례(한 달 건너뛰기)로:
+        # 126 → 273 거래일. 점수 판 12 부터 모멘텀 여섯째 지표다(infra 25.2187 — 그 전엔 A/B 진단만)
         "momentum_echo": _growth_between(p_126, p_273),
     }
 
@@ -581,6 +589,23 @@ def momentum_metrics(closes: list[float]) -> dict[str, float | None]:
         at(MOMENTUM_6M_DAYS),
         at(MOMENTUM_SKIP_DAYS + MOMENTUM_12M_DAYS),
     )
+
+
+
+def momentum_points_note(dates: list[str], closes: list[float]) -> dict[str, Any] | None:
+    """에코 모멘텀을 낸 두 기준점(c−126·c−273)의 날짜·종가 — 근거표용 (docs/factors.md 3.4, infra 25.2187).
+
+    `momentum_metrics` 와 **같은 오프셋**(종목 자신의 거래일을 뒤에서 센다)이라 이 두 행으로 에코 값을 손으로 다시 낼 수
+    있다. 계열이 모자라 에코가 None 이면 None"""
+    먼 = MOMENTUM_SKIP_DAYS + MOMENTUM_12M_DAYS
+    if len(closes) <= 먼 or len(dates) != len(closes):
+        return None
+    return {
+        "p126": {"date": str(dates[-1 - MOMENTUM_6M_DAYS]), "close": float(closes[-1 - MOMENTUM_6M_DAYS])},
+        "p273": {"date": str(dates[-1 - 먼]), "close": float(closes[-1 - 먼])},
+        "as_of": str(dates[-1]),
+        "series": "점수 계열 — 종목 자신의 거래일을 뒤에서 센 수정종가(prices)",
+    }
 
 
 # 조회해야 하는 기준점의 거래일 수. 적재 쪽이 이 목록으로 날짜를 고른다.
@@ -1274,6 +1299,9 @@ class StockInput:
     #: 밸류 분모(시가총액)를 **어느 날 값에서 어떻게 옮겼는지** (docs/factors.md 3.1 "분모 시점 규칙", infra 25.954).
     #: `scale_market_cap` 의 기록 그대로. 밸류 팩터의 `raw_json` 에 `MARKET_CAP_KEY` 로 실린다
     market_cap_note: dict[str, Any] | None = None
+    #: 에코 모멘텀의 두 기준점(c−126·c−273)의 날짜·종가 — 모멘텀 팩터의 `raw_json` 에 `MOMENTUM_POINTS_KEY` 로 실린다
+    #: (근거표 — 25.903 "교체가 채택될 때 만든다", infra 25.2187). `momentum_points_note` 가 만든다
+    momentum_points: dict[str, Any] | None = None
 
 
 #: 리스크 팩터의 `raw_json` 에 **어느 창·기준일의 성과 지표를 썼는지** 남기는 키 (docs/infra.md 25.383).
@@ -1292,6 +1320,12 @@ UNRECOVERED_KEY = "_unrecovered_rows"
 #: infra 25.954). 값은 `scale_market_cap` 의 기록 — {cap, cap_date, snapshot_date, factor, scaled, reason, source}.
 #: 웹 `lib/stockDetail.MARKET_CAP_KEY` 와 같은 글자여야 한다
 MARKET_CAP_KEY = "_market_cap"
+
+#: 모멘텀 팩터의 `raw_json` 에 **에코 모멘텀을 낸 두 가격 행**을 남기는 키 (docs/factors.md 3.4, infra 25.2187).
+#: 값은 {"p126": {date, close}, "p273": {date, close}, "as_of": 기준일, "series": 계열 설명}. 점수 계열은
+#: 종목 자신의 행을 뒤에서 센 수정종가라 웹이 `prices` 를 다시 세면 같은 행을 못 찾는다 — 배치가 쓴 행을 그대로 남긴다.
+#: 웹 `lib/stockDetail.MOMENTUM_POINTS_KEY` 와 같은 글자여야 한다
+MOMENTUM_POINTS_KEY = "_momentum_points"
 
 #: 시총 배수가 이 띠 밖이면 옮기지 않는다 (docs/factors.md 3.1). 한 주 안에 두 배·절반이 된 종목은 기업행위(분할·병합)일
 #: 가능성이 더 크다 — 옮기지 않는 쪽이 지금(스냅샷 값 그대로)과 같아 더 나빠지지 않는다
@@ -1626,6 +1660,9 @@ def score_factors(
                 # 밸류 분모를 어느 날 값에서 어떻게 옮겼는지 (docs/factors.md 3.1, 25.954) — 근거표가 펼친다
                 if factor == "value" and stock.market_cap_note:
                     raw_values[MARKET_CAP_KEY] = stock.market_cap_note
+                # 에코 모멘텀의 두 가격 행 (docs/factors.md 3.4, 25.2187) — 근거표가 펼친다
+                if factor == "momentum" and stock.momentum_points:
+                    raw_values[MOMENTUM_POINTS_KEY] = stock.momentum_points
                 results.append(
                     FactorResult(
                         stock_id=stock.stock_id,

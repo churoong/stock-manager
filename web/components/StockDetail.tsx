@@ -39,6 +39,7 @@ import {
   substitutedNote,
   capitalImpairedNote,
   priceRiskNote,
+  momentumEchoNote,
   QUARTER_LABEL,
   REPORT_LABEL,
   staleSentimentNote,
@@ -577,6 +578,7 @@ function ScoreBlock({ score, factors, currency }: { score: NonNullable<Overview[
                     {f ? (substitutedNote(f.raw) ? ` · 치환: ${substitutedNote(f.raw)}` : "") : ""}
                     {key === "quality" && f && capitalImpairedNote(f.raw) ? ` · ${capitalImpairedNote(f.raw)}` : ""}
                     {key === "risk" && f && priceRiskNote(f.raw, currency) ? ` · ${priceRiskNote(f.raw, currency)}` : ""}
+                    {key === "momentum" && f && momentumEchoNote(f.raw) ? ` · ${momentumEchoNote(f.raw)}` : ""}
                     {key === "risk" && f && riskSourceNote(f.raw) ? ` · ${riskSourceNote(f.raw)}` : ""}
                   </td>
                 </tr>

@@ -643,7 +643,10 @@ export const METRIC_LABELS: Record<string, string> = {
   momentum_3m: "3개월 모멘텀",
   high_52w_proximity: "52주 고점 근접도",
   momentum_consistency: "모멘텀 꾸준함",
+  // 점수 판 11 까지 모멘텀 여섯째 — 옛 행의 빠짐·치환을 읽으려고 이름은 남긴다(25.2187)
   momentum_vol_adjusted: "변동성 조정 모멘텀",
+  // 점수 판 12 부터(docs/factors.md 3.4, infra 25.2187) — 273 거래일 전부터 126 거래일 전까지의 수익률
+  momentum_echo: "에코 모멘텀(273→126 거래일 전)",
   mdd_abs: "MDD",
   volatility_ann: "연환산 변동성",
   sharpe: "샤프",
@@ -709,6 +712,28 @@ export function priceRiskNote(raw: Record<string, unknown>, currency?: string): 
   if (isNum(raw?.max_daily_return)) 줄.push(`최대 일간 상승 ${formatPct(raw.max_daily_return)}`);
   if (isNum(raw?.idio_volatility)) 줄.push(`잔차 변동성 ${formatPct(raw.idio_volatility)}`);
   return 줄.join(" · ");
+}
+
+/**
+ * 모멘텀 팩터 `raw_json` 안의 **에코 모멘텀을 낸 두 가격 행** (docs/factors.md 3.4, docs/infra.md 25.2187 — 점수 판 12).
+ * 파이썬 `services/scoring.MOMENTUM_POINTS_KEY` 와 같은 글자여야 한다 — `web/__tests__/momentumEcho2187.test.ts` 가 대 본다.
+ */
+export const MOMENTUM_POINTS_KEY = "_momentum_points";
+
+/** 근거표의 "에코 모멘텀" 한 줄 — 두 기준점의 날짜·수정종가와 값. 키가 없으면(판 11 행·계열 부족) 빈 문자열 — 지어내지 않는다 */
+export function momentumEchoNote(raw: Record<string, unknown> | null | undefined): string {
+  const n = raw?.[MOMENTUM_POINTS_KEY];
+  if (!n || typeof n !== "object") return "";
+  const r = n as Record<string, unknown>;
+  const 점 = (k: string): { date: string; close: number } | null => {
+    const p = r[k] as Record<string, unknown> | undefined;
+    return p && typeof p.date === "string" && typeof p.close === "number" ? { date: p.date, close: p.close } : null;
+  };
+  const 앞 = 점("p273");
+  const 뒤 = 점("p126");
+  if (!앞 || !뒤) return "";
+  const 값 = isNum(raw?.momentum_echo) ? formatPct(raw.momentum_echo as number) : "-";
+  return `에코 ${값} = ${뒤.date} 수정종가 ${formatNum(뒤.close, 2)} ÷ ${앞.date} 수정종가 ${formatNum(앞.close, 2)} − 1`;
 }
 
 /** 퀄리티 팩터의 자본잠식 표시 (docs/factors.md 3.2, 25.1175). 표식이 없으면 빈 문자열 */

@@ -29,15 +29,23 @@ def test_에코_모멘텀은_126_에서_273_거래일() -> None:
     assert sc.momentum_metrics(closes[1:])["momentum_echo"] is None  # 273 거래일 전 종가가 없으면 None
 
 
-def test_운영_점수_구성은_그대로다() -> None:
-    """A/B 지표는 점수에도 `raw_json` 에도 들어가지 않는다 — 백테스트가 효용을 보이기 전에는 운영을 바꾸지 않는다."""
+def test_운영_점수_구성() -> None:
+    """판정 전 A/B 지표는 점수에도 `raw_json` 에도 들어가지 않는다. 에코는 11-03 사전 등록 판정(두 나라 통과)으로
+    점수 판 12 부터 운영 구성의 여섯째다(docs/infra.md 25.2187) — 갈래는 지웠다"""
     names = {m.name for ms in sc.FACTOR_METRICS.values() for m in ms}
-    assert "momentum_echo" not in names and "oi_change_assets" not in names
-    assert "momentum_vol_adjusted" in names and "operating_income_growth" in names
+    assert "oi_change_assets" not in names and "operating_income_growth" in names
+    assert [m.name for m in sc.FACTOR_METRICS["momentum"]][-1] == "momentum_echo"
+    assert "momentum_vol_adjusted" not in names and len(sc.FACTOR_METRICS["momentum"]) == 6
+    assert sc.CALC_VERSION == 12
     구성 = {k: [m.name for m in v[1]] for k, v in sc.AB_VARIANTS.items()}
-    assert 구성["momentum_echo"][-1] == "momentum_echo" and len(구성["momentum_echo"]) == 6
-    assert "momentum_vol_adjusted" not in 구성["momentum_drop_vol_adj"] and len(구성["momentum_drop_vol_adj"]) == 5
+    assert "momentum_echo" not in 구성 and "momentum_drop_vol_adj" not in 구성
     assert 구성["growth_oi_assets"] == ["revenue_growth", "oi_change_assets", "revenue_cagr_3y"]
+
+
+def test_바꿀_지표가_구성에_없으면_갈래를_만들지_않는다() -> None:
+    """없는 이름을 조용히 넘기면 B 가 A 와 똑같아진다(25.2187)"""
+    with pytest.raises(ValueError):
+        sc._swap("momentum", "momentum_vol_adjusted", "momentum_echo")
 
 
 def _period(k: int, n: int = 40) -> tuple[list[sc.StockInput], dict, dict, dict]:
