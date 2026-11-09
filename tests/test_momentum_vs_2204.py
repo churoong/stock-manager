@@ -141,6 +141,22 @@ def test_국내_30퍼센트_넘는_종목_날은_뺀다_정확히_30은_남긴�
     assert mvs.daily_mean_returns([1], s, 축, kr=True) == pytest.approx([0.0, 0.30])
 
 
+def test_종가_0_은_없는_값으로_본다() -> None:
+    # 축 d0..d3. 종목 1: 100,110,0,50 / 종목 2: 50,50,55,55
+    s = {
+        1: [(_날(0), 100.0), (_날(1), 110.0), (_날(2), 0.0), (_날(3), 50.0)],
+        2: [(_날(0), 50.0), (_날(1), 50.0), (_날(2), 55.0), (_날(3), 55.0)],
+    }
+    축 = mvs.date_axis(s, _날(3))
+    # d1: (0.10 + 0) / 2 / d2: 종목1 그날 0(b ≤ 0) 빠짐 → 0.10 / d3: 종목1 전날 0(a ≤ 0) 빠짐 → 0
+    assert mvs.daily_mean_returns([1, 2], s, 축, kr=False) == pytest.approx([0.05, 0.10, 0.0])
+
+
+def test_σ_B_관측만_모자라도_e_1() -> None:
+    assert mvs.exposure(0.04, 100, 0.01, 59, 60) == (1.0, "관측 부족(S 100·B 59 < 60)")
+    assert mvs.exposure(0.04, 100, 0.01, 60, 60) == (0.25, None)
+
+
 def test_미국_분할_대기_종목은_σ_에서_빼고_비중은_그대로() -> None:
     s = {1: _흔들림(130, 0.01), 2: _흔들림(130, 0.08), 3: _흔들림(130, 0.004)}
     w, tr = mvs.scale({1: 0.5, 2: 0.5}, s, [2, 3], _날(129), kr=False, min_points=60, split_pending={2})
@@ -274,6 +290,38 @@ def test_빈칸_무위험수익률_α_못냄_계산실패는_판정_불가() -> 
 
     j = mvs.judge(_곡선(vs), _곡선(X), rebalances=40, risk_free_annual=0.03, trade_date=끝, summarize=boom)
     assert j["verdict"] == "판정 불가" and j["why"].startswith("계산 실패")
+
+
+def test_앞_반이_음이면_뒤_반이_양이어도_탈락() -> None:
+    ex = [-0.001] * 20 + [0.003] * 20  # 앞 반 −0.1%p, 뒤 반 +0.3%p — 평균 초과는 양
+    j = _판정([x + e for x, e in zip(X, ex, strict=True)])
+    for s in ("full", "ex_partial"):
+        앞, 뒤 = j["series"][s]["halves"]
+        assert 앞 < 0 < 뒤 and j["series"][s]["spanning"]["alpha"] > 0
+    full = j["series"]["full"]["halves"]
+    assert full == [pytest.approx(-0.001), pytest.approx(0.003)]
+    assert j["series_verdict"] == {"full": "탈락", "ex_partial": "탈락"}
+    assert j["verdict"] == "탈락" and any("앞·뒤 반" in w for w in j["why"])
+
+
+def test_앞_반은_내림_n_나누기_2_달() -> None:
+    """5달 초과 [1,2,3,4,5]%p — 앞 ⌊5/2⌋ = 2달 평균 1.5%p, 뒤 3달 4%p ((n+1)//2 면 2%p·4.5%p)"""
+    mom = [0.01, -0.02, 0.03, 0.0, 0.02]
+    vs = [x + e for x, e in zip(mom, [0.01, 0.02, 0.03, 0.04, 0.05], strict=True)]
+    j = mvs.judge(_곡선(vs), _곡선(mom), rebalances=40, risk_free_annual=0.03, trade_date="2030-01-01",
+                  summarize=_지표(좋음, 짝))  # fmt: skip
+    for s in ("full", "ex_partial"):
+        assert j["series"][s]["months"] == 5
+        assert j["series"][s]["halves"] == [pytest.approx(0.015), pytest.approx(0.04)]
+
+
+def test_반_평균이_없으면_판정_불가() -> None:
+    """한 달뿐 — 앞 반(⌊1/2⌋ = 0달)이 비어 halves 에 None. α 보다 먼저 '지표 빈칸' 으로 판정 불가"""
+    j = mvs.judge(_곡선([0.02]), _곡선([0.01]), rebalances=40, risk_free_annual=0.03, trade_date="2030-01-01",
+                  summarize=_지표(좋음, 짝))  # fmt: skip
+    assert j["series"]["full"]["halves"] == [None, pytest.approx(0.01)]
+    assert j["verdict"] == "판정 불가"
+    assert "full.halves" in j["why"] and "ex_partial.halves" in j["why"]
 
 
 def test_실제_지표_함수로도_돈다() -> None:

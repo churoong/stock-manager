@@ -99,6 +99,17 @@ def test_기록_꼴_day_cutoff_held_buys() -> None:
     assert logs[2].held == frozenset({1, 3}) and logs[2].buys == (4, 5)  # 3 은 이어 듦
 
 
+def test_판단_기준일_없는_리밸런스는_기록_없이_held_만_넘긴다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """가운데 리밸런스(b)의 decision_cutoff 가 None — 기록은 a·c 둘, c 의 held 는 a 가 아니라 b 의 weights"""
+    a, b, c = _월초(엔진날)[:3]
+    원래 = bt.decision_cutoff
+    monkeypatch.setattr(bt, "decision_cutoff", lambda ds, ps, t: None if t == b else 원래(ds, ps, t))
+    rs = [_리밸(a, {1: 1.0}), _리밸(b, {2: 0.5, 3: 0.5}), _리밸(c, {3: 0.5, 4: 0.5})]
+    logs = me.month_logs(rs, 엔진날, PRICES)
+    assert len(logs) == 2 and [x.day for x in logs] == [a, c]
+    assert logs[1].held == frozenset({2, 3}) and logs[1].buys == (4,)
+
+
 def test_체결가_없어_뺀_종목은_사지_않은_것() -> None:
     a = _월초(엔진날)[0]
     logs = me.month_logs([_리밸(a, {1: 0.5, 2: 0.5}, dropped=[2])], 엔진날, PRICES)

@@ -245,6 +245,57 @@ def test_전략_점수_경로가_이_모듈을_import_하지_않는다() -> None
     assert 걸림 == []
 
 
+def test_사라진_뒤의_달에는_정지_보유로_이어_들지_않는다() -> None:
+    """세계를 12월까지 늘린다 — H 는 11-11 에 사라졌고 12월 cutoff(11-30)엔 행이 없다. 11월 (a) 무리였어도
+    last_obs(11-11) ≤ cutoff 라 '정지 중 보유' 가 아니다(사라진 계열을 끝없이 끌고 가지 않는다)"""
+    days = bdays("2021-09-01", "2021-12-31")
+    anchor = stock("000010", days, 1000.0)
+
+    def h_val(d):
+        return VAL if d < "2021-10-15" else 0
+
+    H = stock("000020", [d for d in days if d <= "2021-11-11"], 1000.0, value=h_val)
+    r = sg.compute(world(anchor, H), snapshot={"000010"})
+    assert "000020" in r.members["2021-11"]["a"]  # 11월은 정지 중 보유
+    assert r.members["2021-12"]["a"] == {"000010"}
+    assert r.diagnostics["carried_halted_by_month"] == {"2021-10": 0, "2021-11": 1, "2021-12": 0}
+
+
+def test_cutoff_에_행이_없는_정지도_이어_든다() -> None:
+    """10월 (a) 무리 G 가 11월 cutoff(10-29) 앞뒤로 행이 없다(10-25~11-05 정지 '행 없음' 꼴) — 뒤에 행이 있으니 그대로 둔다"""
+    G = stock("000070", [d for d in DAYS if not "2021-10-25" <= d <= "2021-11-05"], 1000.0)
+    r = sg.compute(world(ANCHOR, G), snapshot=set())
+    assert "000070" in r.members["2021-10"]["a"]
+    assert "2021-10-29" not in sg.build_world(world(G)).rows["000070"]
+    assert r.members["2021-11"]["a"] == {"000010", "000070"}
+    assert r.diagnostics["carried_halted_by_month"] == {"2021-10": 0, "2021-11": 1}
+
+
+def test_폐지_창_경계는_마지막_20번째_관측까지() -> None:
+    """마지막에서 20번째 관측(창 첫날)은 원 종가 비율, 21번째(창 바로 밖)는 FLUC_RT.
+    D 는 11-19 에 사라진다 — 21번째 = 10-22(1000→1100, FLUC 0), 20번째 = 10-25(1100→1210, FLUC 0)"""
+    ds = [d for d in DAYS if d <= "2021-11-19"]
+    assert (ds[-21], ds[-20]) == ("2021-10-22", "2021-10-25")
+
+    def d_close(d):
+        return 1000.0 if d < "2021-10-22" else (1100.0 if d < "2021-10-25" else 1210.0)
+
+    D = stock("000080", ds, d_close, fluc=0.0)
+    r = sg.compute(world(ANCHOR, D), snapshot=set())
+    assert r.diagnostics["diverged_pairs"] == 1  # 10-25 하나 — 10-22 는 창 밖이라 갈려도 세지 않는다
+    # 10월 D = 10-22 FLUC 0 · 10-25 원 비율 1210/1100 − 1 = +10% → (0 + 0.10) / 2
+    assert r.series["a"]["2021-10"] == pytest.approx(0.10 / 2)
+    assert r.series["a"]["2021-11"] == pytest.approx(0.0)
+
+
+def test_한_달이라도_계열_값이_없으면_gap_은_모름() -> None:
+    """두 달 줄에서 a 의 한 달이 None — 있는 달만으로 CAGR 을 내면 안 된다"""
+    series = {"a": {"2021-10": 0.01, "2021-11": None}, "b2": {"2021-10": 0.02, "2021-11": 0.03}}
+    g = sg.gap(series, ["2021-10", "2021-11"])
+    assert g.months == ("2021-10", "2021-11")
+    assert g.gap is None
+
+
 def test_cagr_monthly() -> None:
     assert sg.cagr_monthly([0.01] * 12) == pytest.approx(1.01**12 - 1)
     assert sg.cagr_monthly([]) is None and sg.cagr_monthly([-1.0]) is None
