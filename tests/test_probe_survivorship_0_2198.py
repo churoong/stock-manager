@@ -452,3 +452,34 @@ def test_워크플로는_손으로만_돌고_결과는_비공개로() -> None:
     올림 = [s for s in job["steps"] if "publish_output.py" in str(s.get("run", ""))]
     assert len(올림) == 1 and "always()" in str(올림[0].get("if", ""))
     assert data["permissions"]["issues"] == "write"
+
+
+def test_main_의_KRX_상한도_재시도를_센다(capsys: pytest.CaptureFixture[str]) -> None:
+    """main 이 Budget 에 per_call = krx.MAX_RETRY 를 잇는지(25.2201 교차검증) — 늘 3번씩 나가도 100 을 넘지 않는다"""
+    k = 가짜KRX(attempts=3)
+    probe.main([], deps(k))
+    out = capsys.readouterr().out
+    n = sum(3 for _ in k.부름)
+    assert n <= probe.KRX_MAX_CALLS and len(k.부름) > 0, (n, out[-400:])
+
+
+def test_DART_한도_거절_020_이면_멈춘다(capsys: pytest.CaptureFixture[str]) -> None:
+    class 막힘(가짜HTTP):
+        def __call__(self, url: str, params: dict, timeout: int) -> Any:
+            self.부름.append((url, params))
+
+            class R:
+                def json(self) -> dict:
+                    return {"status": "020", "message": "한도"}
+
+            return R()
+
+    h = 막힘()
+    probe.main([], deps(http=h))
+    out = capsys.readouterr().out
+    assert len(h.부름) == 1 and "DART 020" in out
+
+
+def test_UTC_로_7일이면_KST_8일_새벽이어도_판정_창() -> None:
+    now = datetime(2026, 11, 7, 20, tzinfo=UTC)  # KST 11-08 05:00
+    assert probe.window_refusal(now, us_open=lambda d: None) == "판정 실행 창(그 달 3~7일)"

@@ -714,3 +714,15 @@ def test_총액이_비고_주당배당만_있으면_모름이다() -> None:
     # 그해 10-K 가 있어도 0 으로 다시 채우지 않는다(연도가 이미 그해다)
     assert job.fill_us_no_dividend(out, 연도, {1: {2025: {"report_date": "2026-02-19"}}}, "2026-03-02") == 0
     assert 1 not in out
+
+
+def test_점수_작업은_에코_근거표_두_가격_행을_넘긴다() -> None:
+    """운영 연결(25.2187 → 25.2201 교차검증) — 빠지면 factors.raw_json 의 `_momentum_points` 가 말없이 사라진다"""
+    날 = _날짜(300)
+    계열 = [100.0 + i for i in range(300)]
+    inp = job.build_inputs([universe_row(1)], {}, {}, series={1: (날, 계열, [])})[0]
+    mp = inp.momentum_points
+    assert mp is not None and mp["p126"]["date"] == 날[-127] and mp["p273"]["date"] == 날[-274]
+    assert mp["p273"]["close"] == 계열[-274] and mp["as_of"] == 날[-1]
+    짧음 = job.build_inputs([universe_row(1)], {}, {}, series={1: (_날짜(200), [100.0] * 200, [])})[0]
+    assert 짧음.momentum_points is None

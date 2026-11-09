@@ -600,6 +600,8 @@ def momentum_points_note(dates: list[str], closes: list[float]) -> dict[str, Any
     먼 = MOMENTUM_SKIP_DAYS + MOMENTUM_12M_DAYS
     if len(closes) <= 먼 or len(dates) != len(closes):
         return None
+    if not (closes[-1 - 먼] > 0 and closes[-1 - MOMENTUM_6M_DAYS] > 0):  # 에코가 None 이면 근거 행도 없음(25.2201)
+        return None
     return {
         "p126": {"date": str(dates[-1 - MOMENTUM_6M_DAYS]), "close": float(closes[-1 - MOMENTUM_6M_DAYS])},
         "p273": {"date": str(dates[-1 - 먼]), "close": float(closes[-1 - 먼])},

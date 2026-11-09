@@ -53,3 +53,19 @@ def test_모멘텀_raw_json_에_에코와_두_가격_행이_실린다() -> None:
 def test_저장된_원값에서_다시_낼_때_예약_키를_지표로_읽지_않는다() -> None:
     """`inputs_from_stored` 는 `_` 로 시작하는 키를 건너뛴다(25.2187 손댈 곳 조사) — 예약 키가 지표로 섞이지 않는다"""
     assert sc.MOMENTUM_POINTS_KEY.startswith("_")
+
+
+def test_시작_종가가_0_이하면_근거_행도_없다() -> None:
+    """에코가 None 인데 '에코 - = …' 이 찍히지 않게(25.2201 교차검증 [참고])"""
+    dates = [f"d{i:04d}" for i in range(300)]
+    closes = [100.0] * 300
+    closes[-274] = 0.0
+    assert sc.momentum_points_note(dates, closes) is None
+
+
+def test_저장값에서_다시_낼_때_예약_키는_지표로_들지_않는다() -> None:
+    """25.2201 교차검증 [참고] — 시험 이름이 약속하는 규칙(`inputs_from_stored` 가 `_` 키를 건너뜀)을 실제로 본다"""
+    rows = [{"stock_id": 1, "market": "KOSPI", "sector": None, "factor": "momentum",
+             "raw": {"momentum_echo": 0.1, sc.MOMENTUM_POINTS_KEY: {"p126": {"date": "d", "close": 1.0}}}}]  # fmt: skip
+    got = sc.inputs_from_stored(rows)
+    assert got is not None and sc.MOMENTUM_POINTS_KEY not in got[0].metrics and got[0].metrics["momentum_echo"] == 0.1
