@@ -828,6 +828,19 @@ def fill_orders(
 
     시장날: dict[str, bool] = {}
     새것: list[pp.Fill] = []
+
+    def 시세못받음(o: pp.Order) -> None:
+        # 그날 시세를 못 받은 날 — 정지가 아니다. 매수는 취소, 매도는 다음 장으로
+        if o.side == "buy":
+            _쓰기(client, [(EXPIRE_SQL, [trade_date, "그날 시세를 받지 못해 판정 못 함", o.id])])
+            남은매수.pop(o.id, None)
+            기록["expired"] = 기록.get("expired", 0) + 1
+        else:
+            # 오늘 판정일 다음 장으로 — `next_session(날)` 은 오늘보다 앞서 KIS 베끼기(그날 장 주문만 냄)가 그
+            # 매도를 내지 못했고, 이미 지난 장 시가로 팔았다(25.1715, 평가 감사 [권고] 2 — 25.1714 와 같은 꼴)
+            _쓰기(client, [(DEFER_SQL, [미룰장(trade_date), "그날 시세를 받지 못함 — 다음 장으로", o.id])])
+            기록["deferred"] = 기록.get("deferred", 0) + 1
+
     오늘환율 = _fx(client, trade_date)
     # 다른 시장의 미체결 매수도 현금을 묶고 있다 — 체결 검사에서 함께 뺀다 (25.1447, 교차검증 권장)
     남은매수 = {int(r["id"]): _order(r) for r in 전부 if r["side"] == "buy"}
@@ -871,16 +884,8 @@ def fill_orders(
             continue
         if not 시장날[날]:
             if 날 < trade_date:
-                # 그 시장 전체에 그날 시세가 없다 — 정지가 아니라 못 받은 날. 매수는 취소, 매도는 다음 장으로
-                if o.side == "buy":
-                    _쓰기(client, [(EXPIRE_SQL, [trade_date, "그날 시세를 받지 못해 판정 못 함", o.id])])
-                    남은매수.pop(o.id, None)
-                    기록["expired"] = 기록.get("expired", 0) + 1
-                else:
-                    # 오늘 판정일 다음 장으로 — `next_session(날)` 은 오늘보다 앞서 KIS 베끼기(그날 장 주문만 냄)가 그
-                    # 매도를 내지 못했고, 이미 지난 장 시가로 팔았다(25.1715, 평가 감사 [권고] 2 — 25.1714 와 같은 꼴)
-                    _쓰기(client, [(DEFER_SQL, [미룰장(trade_date), "그날 시세를 받지 못함 — 다음 장으로", o.id])])
-                    기록["deferred"] = 기록.get("deferred", 0) + 1
+                # 그 시장 전체에 그날 시세가 없다 — 정지가 아니라 못 받은 날
+                시세못받음(o)
             continue
         행 = client.execute(BAR_SQL, [o.stock_id, 날]).dicts()
         if not 행:
@@ -893,6 +898,15 @@ def fill_orders(
             뒤행 = bool(client.execute(LATER_BAR_SQL, [o.stock_id, 날]).rows)
             if trade_date < 기한.isoformat() and not 뒤행:
                 기록["waiting_bar"] = 기록.get("waiting_bar", 0) + 1
+                continue
+            if market == "KR" and _stock(client, o.stock_id, 종목캐시).get("asset_type") == "etf":
+                # 국내 ETF 는 그날 시세를 `daily._store_kr_etf_day` 한 번만 받고 다시 받는 길이 없다 — 뒤 날 행이 있다고
+                # 그날을 정지로 보면 수집 실패가 정지 판정(매도 미룸·매수 정지 만료)이 됐다(25.2216). 기다림을 다 채우고
+                # 그래도 없으면 시장 전체를 못 받은 날처럼 닫는다
+                if trade_date < 기한.isoformat():
+                    기록["waiting_bar"] = 기록.get("waiting_bar", 0) + 1
+                else:
+                    시세못받음(o)
                 continue
             # 기다림이 끝났거나 뒤 날 행이 있다 — 그날 정지로 본다. 미루는 매도는 **이 실행의 주문 장**으로(`미룰장`):
             # `next_session(날)` 은 오늘보다 뒤처져 KIS 베끼기(그날 체결 장 주문만 보냄)가 그 매도를 내지 못했다

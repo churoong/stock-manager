@@ -583,7 +583,10 @@ def _store_kr_etf_day(client: TursoClient, bas_dd: str, trade_date: str) -> list
     result = krx.fetch_etf_daily(bas_dd)
     db.record_api_call(client, "krx_openapi", count=result.attempts, limit_value=krx.DAILY_LIMIT, warn_at_pct=80)
     if not result.ok or not result.data:
-        return [f"ETF 종가 수집 실패: {result.error or '빈 응답'} — 다음 실행이 받습니다"]
+        return [(
+            f"ETF 종가 수집 실패: {result.error or '빈 응답'} — 이날 ETF 시세는 다시 받지 않습니다."
+            " 열린 ETF 주문은 기다렸다가 시세 못 받음으로 닫힙니다"
+        )]
     now = db.now_iso()
     rows = [
         (ids[row.isu_cd], trade_date, row.open, row.high, row.low, row.close, None,
