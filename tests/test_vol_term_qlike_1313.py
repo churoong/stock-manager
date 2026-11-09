@@ -74,3 +74,22 @@ def test_사본_스키마로_돈다(tmp_path: Path) -> None:
     out = q.run(str(tmp_path / "r.sqlite"), None)
     assert out["switch"] is False and all(c["dates"] == 0 for c in out["cells"].values())
     sqlite3.connect(str(tmp_path / "r.sqlite")).close()
+
+
+def test_워크플로는_손으로만_사본에서만_비공개로_돈다() -> None:
+    """원장 #3 일회성 실행 길(25.2198) — Turso 를 읽지 않고(맞추기 없음), 결과는 ops_tee 로 비공개 이슈에만"""
+    from pathlib import Path
+
+    import yaml
+
+    p = Path(__file__).resolve().parent.parent / ".github/workflows/qlike.yml"
+    wf = yaml.safe_load(p.read_text(encoding="utf-8"))
+    on = wf.get("on", wf.get(True))
+    assert set(on) == {"workflow_dispatch"}
+    job = wf["jobs"]["run"]
+    assert job["timeout-minutes"] <= 60
+    글 = p.read_text(encoding="utf-8")
+    assert "price_replica.py sync" not in 글 and "turso_read_gate" not in 글
+    검증 = next(s for s in job["steps"] if s.get("name") == "검증")["run"]
+    실행 = [줄 for 줄 in 검증.splitlines() if "vol_term_qlike.py" in 줄]
+    assert len(실행) == 1 and 실행[0].rstrip().endswith("| python scripts/ops_tee.py qlike.txt") and "pipefail" in 검증

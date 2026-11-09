@@ -1,0 +1,65 @@
+name: 변동성 기간 QLIKE (원장 #3 — 일회성)
+
+# 19회차 A3 — 보유 기간 변동성 σ(t) 대 3년 변동성 L 의 QLIKE 검증(docs/factors.md 12.21, infra 25.1313·25.2198).
+# 판정 규칙은 scripts/vol_term_qlike.py 머리에 사전 등록되어 있다 — 이 워크플로는 그것을 한 번 돌릴 뿐이다.
+# 손으로만 돌린다. 시세는 **암호화한 시세 사본에서만** 읽는다(Turso 읽기 0 — 맞추기를 하지 않는다). DB 쓰기 없음.
+# 결과는 집계만이고 공개 로그에 찍지 않고 비공개 운영 이슈로 보낸다(ops_tee).
+on:
+  workflow_dispatch:
+    inputs:
+      end:
+        description: 표본 끝날 YYYY-MM-DD (비우면 사본 마지막 날)
+        type: string
+        default: ""
+
+concurrency:
+  group: qlike
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+
+      - name: 시세 사본 꺼내기 (암호화본만, docs/infra.md 25.1249)
+        uses: actions/cache/restore@v4
+        with:
+          path: .price-replica-enc
+          key: price-replica-enc-${{ github.run_id }}
+          restore-keys: price-replica-enc-
+
+      - name: 시세 사본 풀기
+        env:
+          BACKUP_KEY: ${{ secrets.BACKUP_KEY }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: bash scripts/replica_crypt.sh decrypt
+
+      - name: 검증
+        env:
+          END: ${{ inputs.end }}
+        run: |
+          set -o pipefail
+          if [ ! -f .price-replica/prices.db ]; then
+            echo "[QLIKE] 시세 사본이 없습니다 — Turso 에서 읽지 않고 멈춥니다" | python scripts/ops_tee.py qlike.txt
+            exit 1
+          fi
+          python scripts/vol_term_qlike.py .price-replica/prices.db ${END:+--end "$END"} 2>&1 | python scripts/ops_tee.py qlike.txt
+
+      - name: 결과를 이슈로 내보내기
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPS_REPO: ${{ secrets.OPS_REPO }}
+          OPS_TOKEN: ${{ secrets.OPS_TOKEN }}
+        run: |
+          python scripts/publish_output.py \
+            --title "운영 출력 (클라우드 세션용)" \
+            --file qlike.txt \
+            --note "변동성 기간 QLIKE (원장 #3)"
