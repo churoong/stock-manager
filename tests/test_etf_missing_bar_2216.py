@@ -109,3 +109,40 @@ def test_ETF_수집_실패_경고는_다시_받는다고_하지_않는다(monkey
     [경고] = daily._store_kr_etf_day(_C(), "20261019", "2026-10-19")  # type: ignore[arg-type]
     assert "다음 실행이 받습니다" not in 경고
     assert "다시 받지 않습니다" in 경고 and "시세 못 받음" in 경고
+
+
+def test_ETF_매도_뒤_행도_없이_기다림이_끝나면_못받음으로(client: Client, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
+    """순수한 빠짐(뒤 날 행도 없음) — 기다림 끝에 정지 메모 없이 못 받은 날로 닫는다(25.2217 교차검증)"""
+    c = client
+    _매도_만들기(c, monkeypatch)
+    _종류(c, "etf")
+    for d in ("2026-10-19", "2026-10-20", "2026-10-21"):
+        _시세(c, d, 10_000, 10_000)  # 3번 행은 끝내 없다
+        _하루(c, monkeypatch, d, signals=False)
+    [(s, f, n, 메모)] = set(_매도(c))
+    assert (s, f, n) == ("open", "2026-10-22", 1) and 메모 == "그날 시세를 받지 못함 — 다음 장으로"
+
+
+def test_ETF_매도_20번째_미룸이면_마지막_종가로_청산(client: Client, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
+    """시세가 끝내 안 오는 ETF(폐지·비활성)도 매도가 영영 열린 채 남지 않는다 — 예전 정지 길의 청산(25.2217)"""
+    c = client
+    _매도_만들기(c, monkeypatch)
+    _종류(c, "etf")
+    c.conn.execute("UPDATE paper_orders SET deferrals = 19 WHERE side = 'sell'")
+    for d in ("2026-10-19", "2026-10-20", "2026-10-21"):
+        _시세(c, d, 10_000, 10_000)
+        _하루(c, monkeypatch, d, signals=False)
+    상태 = c.q("SELECT DISTINCT status, close_note FROM paper_orders WHERE side = 'sell'")
+    assert 상태 and all(s == "filled" and "마지막 종가로 청산" in (n or "") for s, n in 상태), 상태
+
+
+def test_거래량_0_행으로_실린_ETF_정지는_예전_정지_길(client: Client, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
+    """행이 있으면(진짜 정지 — 거래량 0) 새 분기를 타지 않는다: 정지 미룸 그대로"""
+    c = client
+    _매도_만들기(c, monkeypatch)
+    _종류(c, "etf")
+    _시세(c, "2026-10-19", 10_000, 10_000)
+    _시세3(c, "2026-10-19", 9_000, 9_000, volume=0)
+    _하루(c, monkeypatch, "2026-10-19", signals=False)
+    매도 = _매도(c)
+    assert 매도 and all(s == "open" and d == 1 and "정지" in (n or "") for s, _f, d, n in 매도), 매도

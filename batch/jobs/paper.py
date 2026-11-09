@@ -905,9 +905,12 @@ def fill_orders(
                 # 그래도 없으면 시장 전체를 못 받은 날처럼 닫는다
                 if trade_date < 기한.isoformat():
                     기록["waiting_bar"] = 기록.get("waiting_bar", 0) + 1
-                else:
+                    continue
+                if not (o.side == "sell" and o.deferrals + 1 >= pp.HALT_LIQUIDATE_SESSIONS):
                     시세못받음(o)
-                continue
+                    continue
+                # 20번째 미룸이면 정지 청산 길(마지막 종가)로 넘긴다 — 시세가 끝내 안 오는 ETF(폐지·비활성) 매도가 영영
+                # 열린 채 장부에 가두지 않게(25.2217, 교차검증 [권고] — 예전 정지 길의 청산을 잃지 않는다)
             # 기다림이 끝났거나 뒤 날 행이 있다 — 그날 정지로 본다. 미루는 매도는 **이 실행의 주문 장**으로(`미룰장`):
             # `next_session(날)` 은 오늘보다 뒤처져 KIS 베끼기(그날 체결 장 주문만 보냄)가 그 매도를 내지 못했다
             # (25.1714 — 기다림 끝, 25.1803 — 뒤 날 행이 있을 때도)
