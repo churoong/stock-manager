@@ -483,3 +483,17 @@ def test_DART_한도_거절_020_이면_멈춘다(capsys: pytest.CaptureFixture[s
 def test_UTC_로_7일이면_KST_8일_새벽이어도_판정_창() -> None:
     now = datetime(2026, 11, 7, 20, tzinfo=UTC)  # KST 11-08 05:00
     assert probe.window_refusal(now, us_open=lambda d: None) == "판정 실행 창(그 달 3~7일)"
+
+
+def test_카운터_읽기가_깨지면_부르지_않는다(capsys: pytest.CaptureFixture[str]) -> None:
+    """한도를 모르는 채 부르지 않는다(25.2207 — 전엔 읽기 예외를 삼키고 그대로 불렀다)"""
+
+    class 읽기깨짐(가짜카운터):
+        def execute(self, sql: str, params: list | tuple = ()) -> RS:
+            if sql.startswith("SELECT call_count FROM"):
+                raise RuntimeError("읽기 실패")
+            return super().execute(sql, params)
+
+    k, h = 가짜KRX(), 가짜HTTP()
+    probe.main([], deps(k, 읽기깨짐(), h))
+    assert k.부름 == [] and h.부름 == []

@@ -479,8 +479,8 @@ def headroom(client: Any, api_name: str, cap: int, limit: int) -> tuple[str | No
             [api_name, datetime.now(UTC).strftime("%Y-%m-%d")],
         )
         rows = rs.dicts()
-    except Exception:  # noqa: BLE001
-        return None, None
+    except Exception:  # noqa: BLE001 — 카운터를 못 읽으면 한도를 모르니 부르지 않는다(보수적, 25.2207)
+        return "카운터를 읽지 못함 — 한도를 모르면 부르지 않는다", None
     지금 = int(rows[0].get("call_count") or 0) if rows else 0
     if 지금 + cap >= limit:
         return "상한을 더하면 하루 한도 100% 에 닿는다", None
