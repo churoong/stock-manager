@@ -243,3 +243,35 @@ def test_워크플로는_손으로만_돌고_ops_tee_로_보낸다() -> None:
     내보냄 = [s for s in job["steps"] if "publish_output.py" in str(s.get("run", ""))]
     assert len(내보냄) == 1 and "always()" in str(내보냄[0]["if"]) and "etf-v2-holdout.txt" in 내보냄[0]["run"]
     assert "TURSO" not in 글 and "D1_" not in 글 and "price-replica" not in 글
+
+
+def test_업종이_2000_01_안에서도_지수보다_늦으면_판정_불가() -> None:
+    """앞 검사('2000-01 에서 시작')를 지나도 지수 첫 행보다 며칠 늦으면 막는다(25.2215 교차검증)"""
+    자료 = dict(_자료)
+    자료["XLE"] = [(d, c) for d, c in _자료["XLE"] if d >= "2000-01-10"]
+    rc, 줄 = _돌림(자료)
+    assert rc == 1 and any("XLE 첫 행 2000-01-10 이 지수 첫 행" in x for x in 줄)
+
+
+def test_끝_공백_8일이면_판정_불가_7일이면_된다() -> None:
+    rows = [(d, 1.0) for d in _평일("2000-01-03", "2003-04-23")]
+    with pytest.raises(h.NoVerdict):
+        h.window(rows, "^KS11", "2003-05-01")  # 마지막 행 04-23 → 8일
+    h.window(rows + [("2003-04-24", 1.0)], "^KS11", "2003-05-01")  # 7일
+
+
+def test_테마는_짝_Y_가_자기_문을_넘어야_연다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """12.48 — trading-2 Y 가 자기 문을 못 넘으면 테마도 열지 않는다(25.2215 교차검증 [권고])"""
+    본래 = h.market_gate
+
+    def 실패시킴(rows, m, first):  # noqa: ANN001, ANN202
+        g = 본래(rows, m, first)
+        if m == "Y":
+            g["gate"] = dict(g["gate"], **{"pass": False})
+        return g
+
+    monkeypatch.setattr(h, "market_gate", 실패시킴)
+    _rc, 줄 = _돌림()
+    i = 줄.index("Y 테마 — etf_theme_v1 문 ①")
+    테마 = " ".join(줄[i : i + 4])
+    assert "열지 않음" in 테마 or "못 넘어" in 테마, 테마
