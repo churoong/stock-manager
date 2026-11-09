@@ -1,0 +1,50 @@
+name: u3 생존편향 ⓪ 자료 탐침
+
+# 42회차 u3 생존편향 ⓪ — 한국거래소 일별매매정보·DART 를 읽기만 불러 자료 꼴을 본다 (docs/factors.md 12.45 "u3 생존편향 사전 등록").
+# 손으로만 돌린다. 호출 상한 KRX ≤ 100·DART ≤ 100. Turso 는 api_usage 카운터만(시세·stocks·batch_runs 쓰기 0).
+# 판정 실행 창(그 달 3~7일)·일일 배치 시각에는 스크립트가 스스로 부르지 않는다.
+# 결과는 비공개 운영 저장소 이슈로만(공개 로그엔 줄 수만 — 숫자 0).
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+      TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+      # DB 백엔드 전환 (docs/infra.md 25절). 비어 있으면 Turso 를 쓴다
+      DB_BACKEND: ${{ vars.DB_BACKEND }}
+      D1_ACCOUNT_ID: ${{ secrets.D1_ACCOUNT_ID }}
+      D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+      D1_API_TOKEN: ${{ secrets.D1_API_TOKEN }}
+      OFFLINE_MODE: "0"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: 탐침
+        env:
+          KRX_API_KEY: ${{ secrets.KRX_API_KEY }}
+          DART_API_KEY: ${{ secrets.DART_API_KEY }}
+        run: |
+          set -o pipefail
+          python scripts/probe_survivorship_0.py 2>&1 | python scripts/ops_tee.py survivorship-0.txt
+      - name: 결과를 비공개 이슈로
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPS_REPO: ${{ secrets.OPS_REPO }}
+          OPS_TOKEN: ${{ secrets.OPS_TOKEN }}
+        run: python scripts/publish_output.py --title "운영 출력 (클라우드 세션용)" --file survivorship-0.txt --note "u3 생존편향 ⓪ 자료 탐침"

@@ -80,6 +80,8 @@ IRRELEVANT_ON_D1 = {
     "probe-kis-status.yml": "KIS 종목 상태 대조 탐침 (infra 25.1328) — 유니버스 한 번 읽고 토큰 캐시만 쓴다",
     "probe-kis-vts.yml": "KIS모의투자 시험 주문 (infra 25.1491) — 모의 토큰 줄만 쓴다",
     "probe-krx-shares.yml": "스펙 확인용 probe",
+    "qlike.yml": "원장 #3 QLIKE 일회성 (25.2198) — 암호화 시세 사본만 읽고 DB 를 읽지 않는다",
+    "probe-survivorship.yml": "u3 생존편향 ⓪ 자료 탐침 (factors 12.45) — api_usage 카운터만 읽고 쓴다",
     "korfinasc-bench.yml": "벤치마크. 손으로만 돌린다",
     # 백엔드를 다루는 일 자체 (D1 에서도 돌아야 한다)
     "migrate.yml": "스키마를 올리는 일. 어느 백엔드든 필요하다",
