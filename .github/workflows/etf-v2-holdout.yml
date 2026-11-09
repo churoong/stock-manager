@@ -1,0 +1,59 @@
+name: ETF 판 2 홀드아웃 문 (45회차 (나) — 일회성)
+
+# docs/factors.md 12.48 (나) `etf_tactical_v2`·`etf_theme_v1` 의 사전 등록 홀드아웃 문을 **한 번** 돌린다.
+# 판정 규칙·구간·문은 12.48 이 단일 정의처다 — scripts/etf_v2_holdout.py 는 그것을 부를 뿐이다.
+# 손으로만 돌린다. 야후 지수·ETF 일봉만 받는다(Turso·D1·시세 사본 읽기 0, DB 쓰기 0, 받은 자료는 저장하지 않음).
+# 출력은 지수 수준 집계뿐이지만 운영 출력 관례대로 공개 로그에 찍지 않고 비공개 운영 이슈로 보낸다(ops_tee).
+on:
+  workflow_dispatch:
+    inputs:
+      kr_first:
+        description: 운영 index_prices ^KS11 첫 행 YYYY-MM-DD (비우면 2019-05-01 — 문서의 달 1일)
+        type: string
+        default: ""
+      us_first:
+        description: 운영 index_prices ^GSPC 첫 행 YYYY-MM-DD (비우면 2019-08-01 — 문서의 달 1일)
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  issues: write # 결과를 이슈 코멘트로 내보낸다 (docs/infra.md 25.17)
+
+concurrency:
+  group: etf-v2-holdout
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      OFFLINE_MODE: "0"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+
+      - name: 홀드아웃 문
+        env:
+          KR_FIRST: ${{ inputs.kr_first }}
+          US_FIRST: ${{ inputs.us_first }}
+        run: |
+          set -o pipefail
+          python scripts/etf_v2_holdout.py ${KR_FIRST:+--kr-first "$KR_FIRST"} ${US_FIRST:+--us-first "$US_FIRST"} 2>&1 | python scripts/ops_tee.py etf-v2-holdout.txt
+
+      - name: 결과를 이슈로 내보내기
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPS_REPO: ${{ secrets.OPS_REPO }}
+          OPS_TOKEN: ${{ secrets.OPS_TOKEN }}
+        run: |
+          python scripts/publish_output.py \
+            --title "운영 출력 (클라우드 세션용)" \
+            --file etf-v2-holdout.txt \
+            --note "ETF 판 2 홀드아웃 문 (factors 12.48 (나))"
