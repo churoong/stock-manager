@@ -468,3 +468,51 @@ def test_운영_경로는_판2_테마를_부르지_않는다() -> None:
             if p.stem not in ("etf_tactical_v2", "etf_theme")
             and any(x in p.read_text(encoding="utf-8") for x in ("etf_tactical_v2", "etf_theme"))]  # fmt: skip
     assert 걸림 == []
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# 손 계산 보강(변이 시험)
+# ---------------------------------------------------------------------------------------------------------------------
+def test_보유는_지수가_아니라_지수_ETF_몫_시세로() -> None:
+    s = [("2024-01-01", 100.0), ("2024-01-02", 100.0), ("2024-01-03", 100.0)]  # 지수는 그대로
+    긴 = [("2024-01-01", 50.0), ("2024-01-02", 40.0), ("2024-01-03", 60.0)]  # ETF 몫: −20%, +50%
+    r = v2.replay(s, _가짜_국면({}), cost=0.0, start="2024-01-02", long_series=긴)
+    assert r["hold_pct"] == pytest.approx((60 / 50 - 1) * 100)  # 20%
+    assert r["hold_mdd_pct"] == pytest.approx((40 / 50 - 1) * 100)  # −20%
+    assert [x for _d, x in r["hold_equity"]] == pytest.approx([1.0, 0.8, 1.2])
+    assert r["up_days"] == 1  # 상승장 날도 ETF 몫 기준(지수는 0)
+
+
+def test_테마_하락_구간은_SH_시세를_쓴다() -> None:
+    # 월말 13개(2023-01 ~ 2024-01): 끝 9 < 최근 10개 평균 9.9, 12개월 수익 9/12 − 1 < 0 → 하락 → SH 50%
+    idx = _월말([12.0] + [10.0] * 11 + [9.0]) + [("2024-02-01", 9.0), ("2024-02-02", 8.1)]
+    sh = [("2024-01-28", 50.0), ("2024-02-01", 50.0), ("2024-02-02", 52.0)]
+    assert v2.common_start(idx) == "2024-02-01"
+    assert v2.regime_v2(idx[:13], "2024-02-01").state == v2.DOWN
+    a = th.replay(idx, {}, idx, sh_series=sh, cost=0.0)
+    # 02-01: SH 삼(그날 지수 0, SH 0) · 02-02: 지수 −10% 인데 SH +4% → 0.5 × 0.04
+    assert a["days"] == 2
+    값 = [x for _d, x in a["equity"]]
+    assert 값[2] / 값[1] - 1 == pytest.approx(0.5 * (52 / 50 - 1))
+    assert a["twr_pct"] == pytest.approx(0.5 * 0.04 * 100)
+    짝 = v2.replay(idx, cost=0.0, inverse_series=sh)
+    assert a["twr_pct"] == pytest.approx(짝["twr_pct"])
+
+
+def test_앞_달_전체가_빠지면_이번_달_행이_가까워도_모름() -> None:
+    s = _월말([float(i) for i in range(1, 11)])  # 2023-01 ~ 2023-10 월말
+    s += [("2023-12-01", 10.0)]  # 11월이 통째로 없다, 12월 행은 as_of 4일 전
+    r = v2.regime_v2(s, "2023-12-05")
+    assert r.last_row == "2023-12-01" and r.state == v2.UNKNOWN and "이어지지" in (r.reason or "")
+    assert not v2._consecutive(v2.month_ends(s, "2023-12-05"), v2.MA_MONTHS, "2023-12-05")
+
+
+def test_수익_0_인_날은_상승장_아니고_정확히_7일_빈_구간은_묵음_아님() -> None:
+    s = [("2024-01-01", 100.0), ("2024-01-02", 110.0), ("2024-01-09", 110.0), ("2024-01-10", 121.0)]
+    r = v2.replay(s, _가짜_국면({}), cost=0.0, start="2024-01-02")
+    # 01-02 +10% · 01-09 0%(7일 빈 구간) · 01-10 +10%
+    assert r["days"] == 3 and r["up_days"] == 2 and r["up_cash_share"] == 1.0
+    assert r["stale_gaps"] == 0
+    # 8일이면 묵음 하나
+    s8 = [("2024-01-01", 100.0), ("2024-01-02", 110.0), ("2024-01-10", 110.0)]
+    assert v2.replay(s8, _가짜_국면({}), cost=0.0, start="2024-01-02")["stale_gaps"] == 1

@@ -470,7 +470,7 @@ def window_refusal(now: datetime, us_open: Callable[[date], datetime | None] | N
 
 def headroom(client: Any, api_name: str, cap: int, limit: int) -> tuple[str | None, str | None]:
     """(멈출 까닭, 경고). 오늘 카운터가 이미 100% 거나 이 탐침의 상한을 더하면 100% 에 닿으면 멈춘다, 80% 면 경고만
-    (CLAUDE.md "80% 도달 시 경고, 100%에서 중단"). 못 읽으면 둘 다 None(`usage_blocked_today` 와 같게)."""
+    (CLAUDE.md "80% 도달 시 경고, 100%에서 중단"). 카운터를 못 읽으면 멈출 까닭을 돌려주고 부르지 않는다(25.2207)."""
     if db.usage_blocked_today(client, api_name):
         return "오늘 카운터 100%", None
     try:

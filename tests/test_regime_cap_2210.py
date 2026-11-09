@@ -354,3 +354,58 @@ def test_등록_상수는_정의처와_같다():
     for 조각 in ("⌊q × (1 − 0.5)⌋", "MDD_Z1 ≥ 0.7 × MDD_B", "B − 5%p", "합해 2개 이상", "EXPOSURE_MIN` 0.05",
                  "'국면감축'", "'되채움'", "감축 대금은 예약 현금이다", "[확인필요: 0070 tranche 값 범위]"):
         assert 조각 in 절, 조각
+
+
+# ---------------------------------------------------------------- 손 계산 보강(변이 시험)
+
+
+def test_직전_월말_판정일은_그달_첫_지수_행_아침이다():
+    # 9-30(화) 뒤 10월 첫 행이 10-08 — 8일 늦다. 직전 월말(9-30)은 판정일 10-08 아침 기준 8일 묵음 → 모름 → 전환 없음.
+    # 판정일을 지금 월말(10-31)로 잡으면 마지막 행 10-30 이 가까워 9-30 강세가 되고 강세→약세 전환이 잘못 난다
+    s = [x for x in _계열(바꿈={"2025-10-31": 90.0}) if not ("2025-10-01" <= x[0] < "2025-10-08")]
+    assert ("2025-10-08", 100.0) in s and ("2025-10-07", 100.0) not in s
+    prev, cur = rc.month_end_pair("KOSPI", s, "2025-11-03")
+    assert (cur.state, cur.date) == ("bear", "2025-10-31")
+    assert prev.state == "unknown" and "8일" in (prev.note or "")
+    assert rc.transition(prev, cur) is None
+    # 대조: 그 월말을 지금 월말 날로 판정했다면 강세 — 두 판정일이 실제로 갈린다
+    assert rc.month_end_regime("KOSPI", s, "2025-10-31").state == "bull"
+
+
+def test_예약_현금은_앞_종목이_쓴_만큼_줄어든다():
+    # 같은 지수 둘: 단가 10,000 × 1.10 × 1.01 = 11,110. 예약 40,000 → 1번 3주 33,330, 남은 6,670 < 11,110 → 2번 0주
+    감축 = {1: {"index_code": "KOSPI", "date": "2025-11-03", "quantity": 3},
+            2: {"index_code": "KOSPI", "date": "2025-11-03", "quantity": 2}}
+    보유 = {1: _pos(1, 4), 2: _pos(2, 3)}
+    주문, 빠짐 = rc.refill_plan(보유, 감축, {"KOSPI"}, {1: 10_000.0, 2: 10_000.0}, 40_000.0, 1.0, tranche=9)
+    assert [(o["stock_id"], o["quantity"]) for o in 주문] == [(1, 3)]
+    assert 빠짐 == [{"stock_id": 2, "wanted": 2, "quantity": 0, "short": 2, "why": "예약 현금 부족"}]
+    합 = sum(o["quantity"] * o["ref_price"] * 1.10 * 1.01 for o in 주문)
+    assert 합 == pytest.approx(33_330.0) and 합 <= 40_000.0
+
+
+def test_달러_되채움은_환율_여유를_더한다():
+    # 기준가 $100, 환율 1,300, 예약 590,000원 → $453.846. 단가 = 100 × 1.10 × 1.01 × 1.03 = $114.433
+    # → 453.846 // 114.433 = 3주 (환율 여유를 빼면 단가 $111.1 → 4주)
+    t = {1: {"index_code": "SP500", "date": "2025-11-03", "quantity": 5}}
+    보유 = {1: pp.Position(stock_id=1, currency="USD", quantity=5, cost=500.0, first_buy_date="2025-03-03")}
+    주문, 빠짐 = rc.refill_plan(보유, t, {"SP500"}, {1: 100.0}, 590_000.0, 1300.0, tranche=9, currency="USD")
+    assert pp.FX_BUFFER == 0.03
+    assert 590_000.0 / 1300.0 // (100 * 1.10 * 1.01 * 1.03) == 3 and 590_000.0 / 1300.0 // (100 * 1.10 * 1.01) == 4
+    assert 주문[0]["quantity"] == 3
+    assert 빠짐 == [{"stock_id": 1, "wanted": 5, "quantity": 3, "short": 2, "why": "예약 현금 부족"}]
+
+
+def test_되채움_비용이_예약보다_크면_그_지수_예약은_0():
+    # 100 − 150 → 0 (음수 예약 없음). 다른 지수 예약은 그대로
+    예약 = rc.reserve_after({"KOSPI": 100.0, "SP500": 7.0}, refilled={"KOSPI": 150.0})
+    assert 예약.get("KOSPI", 0.0) == 0.0 and 예약 == {"SP500": 7.0}
+    assert rc.signal_cash(1_000.0, 예약) == 993.0
+
+
+def test_운영_경로는_regime_cap_을_부르지_않는다():
+    """꺼진 채 — 등록 커밋(12월 판정 실행 뒤) 전까지 batch/ 아래 어디도 import 하지 않는다"""
+    뿌리 = Path(__file__).resolve().parents[1]
+    걸림 = [p.relative_to(뿌리).as_posix() for p in (뿌리 / "batch").rglob("*.py")
+            if p.stem != "regime_cap" and "regime_cap" in p.read_text(encoding="utf-8")]  # fmt: skip
+    assert 걸림 == []
