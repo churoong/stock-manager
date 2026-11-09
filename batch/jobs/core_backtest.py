@@ -41,7 +41,7 @@ from batch.services import exit_pair as xp
 from batch.services import holding_eq as heq
 from batch.services import loss_gate as lg
 from batch.services import luck, report_picks, trend
-from batch.services import metrics as m
+from batch.services import monthly_evidence as me
 from batch.services import pit_universe as pit
 from batch.services import universe as uni
 
@@ -133,20 +133,9 @@ WARN_RISK_MONTHLY = (
 BENCHMARK_NOTE = "유니버스 동일가중 월 리밸런스(월 백테스트 benchmark 와 같은 판단 함수, 저장 안 함)"
 
 
-def split_half(curve: list[tuple[str, float]]) -> dict[str, Any]:
-    """곡선을 날 수로 반 나눠 앞·뒤 반의 CAGR·MDD (docs/backtest.md 10장 "기간을 반으로 나눈 결과를 함께 싣는다").
-
-    가운데 날은 두 반에 모두 든다(앞 반의 끝 = 뒤 반의 시작 — 뒤 반 수익이 그날 자본에서 시작한다).
-    식은 docs/metrics.md 그대로(`metrics.cagr`·`max_drawdown`). 곡선이 셋보다 짧으면 비운다"""
-    if len(curve) < 3:
-        return {}
-    가운데 = len(curve) // 2
-    out: dict[str, Any] = {}
-    for 이름, 조각 in (("first", curve[: 가운데 + 1]), ("second", curve[가운데:])):
-        점 = [m.PricePoint(date=date.fromisoformat(d), close=v) for d, v in 조각]
-        out[이름] = {"start": 조각[0][0], "end": 조각[-1][0], "days": len(조각),
-                    "cagr": m.cagr(점), "mdd": m.max_drawdown(점).mdd}  # fmt: skip
-    return out
+#: 반 나눈 기간 — 식은 `services.monthly_evidence.split_half` 로 옮겼다(docs/factors.md 12.45 (b), 순환 import 피함).
+#: 이 이름은 그 함수 자체를 가리킨다(같은 객체 — 출력이 비트까지 같다, tests/test_monthly_evidence_2205.py)
+split_half = me.split_half
 
 
 def pit_eligible(

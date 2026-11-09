@@ -3252,6 +3252,7 @@ SQL read operations are forbidden (reads are blocked, ...)
 | 25.2202 | u3 ⓪ 탐침 결과 — 폐지 종목 과거 행 있음·MKTCAP=종가×그날 LIST_SHRS 100%·우선주는 코드 규칙으로 고정·① 은 약 136분 |
 | 25.2203 | u3 ① gap 계산 모듈 — 시점 유니버스·정지 보유·무리 b1/b2·분위·깎아 읽기, 꺼진 채 (12.45 보충) |
 | 25.2204 | 42회차 u1 momentum_vs 계산 모듈 — 노출 e = min(1, σ_B/σ_S)·두 계열 판정·스패닝 α, 꺼진 채 (12.45 보충) |
+| 25.2205 | 42회차 u2 꺼진 조각 — 월 evidence 기록 꼴(ce.evidence 그대로, 시장 씨앗)·split_half services 로(비트 같음)·코호트 m |
 
 ### 25.1 왜 D1 인가
 
@@ -48478,3 +48479,50 @@ desk 를 쓰는 시험 파일 전부 통과.
 - 하한 35
 - 창 127
 - 부분 달 안 뺌
+
+### 25.2205 42회차 u2 꺼진 조각 — 월 evidence 기록 꼴(ce.evidence 그대로, 시장 씨앗)·split_half services 로(비트 같음)·코호트 m
+
+**무엇**: 42회차 u2 의 꺼진 조각 셋을 `batch/services/monthly_evidence.py` 에 넣었다(12.45 (a)(b)(c)). 판정판·결과 행에 잇는 일은 12월 판정 실행 뒤다.
+- (a) `month_logs`·`evidence`: 월 엔진 `result.rebalances` 를 기록 꼴로 바꾼다.
+  - day = t, cutoff = `bt.decision_cutoff`, held = 직전 w > 0, buys = 이번 w > 0 · `dropped` 밖 − held
+  - 그 꼴로 `ce.evidence(..., market=market)` 를 그대로 부른다 — 씨앗은 'virtual|KR|'·'virtual|US|' 이고, 기본값 KR 에 기대지 않는다
+  - 돌려주는 것: `{"evidence": {..., "version": 1}}`. 깨지면 `{"evidence_error": …}`(던지지 않음)
+- (b) `split_half`: `core_backtest.split_half` 본문을 글자 그대로 services 로 옮겼다. `core_backtest` 에는 별칭만 남겼다(jobs↔jobs 순환 import 를 피함).
+- (c) `cohort_m`: m = max(줄들 `luck.n_trials` 최댓값, 줄 수). N 이 하나도 없으면 None 이다(BH q 없음 — 줄 수로 떨어지지 않는다, 검증 B).
+- 12.45 에 **보충**을 적었다(결과 보기 전).
+  - 기준일이 없는 리밸런스는 기록을 내지 않는다
+  - 시장 밖은 오류
+  - N 으로 치지 않는 값
+
+**옮김이 비트까지 같다는 증거**:
+- 옮기기 전후로 곡선 12개(길이 0~777, 평평한 것 포함)의 JSON 출력이 `cmp` 로 같았다.
+- 시험이 옛 본문 사본과 `==`·`repr` 로 견준다.
+- `cj.split_half is me.split_half` 다.
+- 기존 core_backtest 시험 묶음(342)이 통과했다.
+
+**왜 지금·모의투자에 어떻게 쓰이나**: 12.45 일정('칸 모듈 꺼진 채 → 12월 판정 실행 뒤 이음, 첫 값 2027-01')에 따랐다. 이으면 월 백테스트 줄을 가상모의투자와 같은 무작위 대조 잣대(`ce.evidence`)로 읽어, 판정판 0→1 점검의 대조 하한·BH q 칸이 찬다.
+
+**알고 둔 것**:
+- `core_backtest.py:387` 의 미국 핵심 리플레이가 `ce.evidence` 를 market 없이 부르는 씨앗 결함은 손대지 않았다. 12.45 대로 잇는 시점에 따로 25.x 로 고친다(핵심 미국 결과가 바뀐다 — handoff).
+- `scoreboard.COHORT_SIZE` 의 "1" 고침·`test_bh_q_1951` 은 잇는 커밋 몫이다.
+
+**시험**: `tests/test_monthly_evidence_2205.py` 30개.
+- 기록 꼴: 워밍업 cutoff, 0 비중·dropped 는 매수 아님, 이어 든·비중만 바꾼 종목 빠짐
+- `ce.first_buys`·손 계산(28일 에피소드)과 같음, `ce.evidence(market=)` 직접 부름과 같음, version 1
+- 미국 씨앗·대조 20, KR 과 갈림, 1일 묶음, 20거래일 창, 끝 20일 매수 점수 없음
+- 오류 세 갈래, 빈 실행
+- `split_half` 옛 식과 같음·가운데 날
+- `cohort_m` 갈래
+
+**되돌리기 확인**: 열하나 모두 잡힌다.
+- held 안 뺌
+- `w >= 0`
+- market 뺌(KR 기본값)
+- version 2
+- except 좁힘
+- 앞 반 +1 뺌
+- 줄 수 뺌
+- N 없을 때 줄 수로
+- dropped 안 뺌
+- 시장 검사 뺌
+- 창 19
