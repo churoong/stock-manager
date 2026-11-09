@@ -808,6 +808,8 @@ class Test밸류_분모:
     " `test_buffer_erc_2189` 가 손으로 묶는다(25.2189)",
     "survivorship_gap": "42회차 u3 ① gap 계산(꺼진 채) — 문턱은 `UniverseFilters.korea`·`pit_universe` 에서 빌리고 docs/factors.md 12.45 가"
     " 정의, `test_survivorship_gap_2203` 이 손으로 묶는다(25.2203)",
+    "momentum_vs": "42회차 u1 사전 등록 값(126·60·0.30·0.02·36)은 docs/factors.md 12.45 가 적고 `test_momentum_vs_2204` 가"
+    " 손으로 묶는다(25.2204)",
     "st_meta": "43회차 e2 사전 등록 값(L2 1·정화 엠바고 12·13번째 달·100·50·6·α 0.05/3·특징 다섯)은 docs/factors.md 12.46 이 적고"
     " `test_st_meta_2192` 가 손으로 묶는다(25.2192)",
     "gbm_blend": "43회차 e1 사전 등록 값(초모수·200회·r−3·18·1,800초·0.5·특징 목록 고정)은 docs/factors.md 12.46 이 적고"
