@@ -96,7 +96,7 @@ def test_표본_밖_끝_줄은_배치와_웹이_같은_글() -> None:
     줄 = [_줄("2026-10-16", i_fill="2026-10-19")]
     job.mark_nonjudgment_defers(_C(set()), 줄, "KR")
     끝 = " · ".join(bm.compare_lines(bm.compare(줄), None, None))
-    글 = "표본 밖 1(가상의 판정 아닌 만료·시세·환율 없어 미룬 매도·장 열린 뒤 시장가)"
+    글 = "표본 밖 1(가상의 판정 아닌 만료·시세·환율 없어 미룬 매도·장 열린 뒤 시장가·일봉 없음)"  # 일봉 없음(25.2222)
     assert 글 in 끝
     웹 = (Path(__file__).resolve().parents[1] / "web" / "lib" / "paper.ts").read_text(encoding="utf-8")
-    assert "(가상의 판정 아닌 만료·시세·환율 없어 미룬 매도·장 열린 뒤 시장가)" in 웹
+    assert f'EXCLUDED_WHY = "{bm.EXCLUDED_WHY}"' in 웹  # 괄호 글은 상수로(25.2222)

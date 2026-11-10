@@ -125,12 +125,24 @@ export interface BrokerSummary {
   guard_held?: number;
   /** 우리 기록 확인이 깨져 KIS 에 보내지 않고 닫은 장중 줄(25.2015) — 낸 장중 매도·거부와 따로(25.2020) */
   guard_unsent?: number;
+  /** 표본 밖 가운데 이름 붙여 센 것(배치 `EXCLUDED_NAMED`, 25.2220) — 있을 때만 온다 */
+  excluded_late_send?: number;
+  excluded_no_bar?: number;
   slip_buy: { n: number; avg: number | null }; slip_sell: { n: number; avg: number | null };
   reject_reasons: Record<string, number>;
 }
 export interface BrokerLatest { as_of: string; diff: Record<string, [number, number]>; summary: BrokerSummary | null }
 /** 비교 요약을 사람이 읽는 줄로 — 배치(`services/broker_mirror.compare_lines`)와 같은 글("어긋난 까닭" 은 주간 요약에만,
  *  25.1736). 값은 배치가 낸 그대로 */
+/** 표본 밖 끝 줄 괄호의 까닭 목록 — 배치 `services/broker_mirror.EXCLUDED_WHY` 와 같은 글(25.2222) */
+export const EXCLUDED_WHY = "가상의 판정 아닌 만료·시세·환율 없어 미룬 매도·장 열린 뒤 시장가·일봉 없음";
+/** 배치 `EXCLUDED_NAMED` 와 같은 열쇠·이름·순서(25.2220) */
+export const EXCLUDED_NAMED = [["late_send", "개장 뒤 보낸 국내 시장가"], ["no_bar", "일봉 없음"]] as const;
+/** 표본 밖 괄호 안 — 이름 붙여 센 것이 있으면 수를 붙인다. 배치 `excluded_detail` 과 같은 글(25.2222) */
+export function excludedDetail(s: BrokerSummary): string {
+  const 센 = EXCLUDED_NAMED.filter(([k]) => s[`excluded_${k}`]).map(([k, 이름]) => `${이름} ${s[`excluded_${k}`]}`);
+  return EXCLUDED_WHY + (센.length ? ` — ${센.join(" · ")}` : "");
+}
 export function brokerLines(b: BrokerLatest | null | undefined): string[] {
   if (!b) return ["아직 이 시장의 KIS모의투자 기록이 없습니다 — 그 시장 일일 배치가 처음 돌면 지주사의 주문을 베껴 내고 잔고를 적습니다 (docs/paper.md 15장)."];
   const s = b.summary;
@@ -153,7 +165,7 @@ export function brokerLines(b: BrokerLatest | null | undefined): string[] {
   // 배치 `compare_lines` 와 같은 끝 줄 — 모름(보냈는지 모르는 주문)·정리 주문 (25.1483, 감사 [권장] 4)
   const 끝 = [] as string[];
   if (s?.rejected) 끝.push(`거부 ${s.rejected}`);
-  if (s?.excluded) 끝.push(`표본 밖 ${s.excluded}(가상의 판정 아닌 만료·시세·환율 없어 미룬 매도·장 열린 뒤 시장가)`);
+  if (s?.excluded) 끝.push(`표본 밖 ${s.excluded}(${excludedDetail(s)})`);
   if (s?.unknown) 끝.push(`모름 ${s.unknown}`);
   if (s?.cleanup) 끝.push(`정리 주문 ${s.cleanup}`);
   if (s?.guard) 끝.push(`장중 손절·익절 ${s.guard}(지주사는 아침 일봉 판정 — 짝 없음)`);

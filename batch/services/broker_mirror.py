@@ -768,6 +768,18 @@ def diverge(now: dict[str, Any] | None, keys: list[str], market: str) -> str | N
     return f"KIS모의투자 {이름} 가상모의투자와 벌어졌습니다({기간}): " + " · ".join(글)
 
 
+#: 표본 밖 끝 줄 괄호의 까닭 목록 — 웹 `brokerLines`(web/lib/paper.ts `EXCLUDED_WHY`)와 같은 글(25.2222)
+EXCLUDED_WHY = "가상의 판정 아닌 만료·시세·환율 없어 미룬 매도·장 열린 뒤 시장가·일봉 없음"
+
+
+def excluded_detail(s: dict[str, Any]) -> str:
+    """표본 밖 끝 줄의 괄호 안 — 까닭 목록 뒤에 이름 붙여 센 것(`EXCLUDED_NAMED`, 25.2220)이 있으면 그 수를 붙인다.
+    전엔 `excluded_<열쇠>` 를 내고도 읽는 줄이 없어 "일봉 없음" 이 까닭 목록에조차 없었다(25.2222 — 25.2220 교차검증
+    [권고]). 괄호 안에 둬 끝 줄의 ` · ` 이음과 헷갈리지 않게. 웹 `excludedDetail` 과 같은 글"""
+    센 = [f"{이름} {s[f'excluded_{k}']}" for k, 이름 in EXCLUDED_NAMED.items() if s.get(f"excluded_{k}")]
+    return EXCLUDED_WHY + (" — " + " · ".join(센) if 센 else "")
+
+
 def compare_lines(
     s: dict[str, Any] | None, diff_count: int | None, as_of: str | None, account: str = "H",
 ) -> list[str]:
@@ -796,7 +808,7 @@ def compare_lines(
     if s.get("rejected"):
         끝.append(f"거부 {s['rejected']}")
     if s.get("excluded"):
-        끝.append(f"표본 밖 {s['excluded']}(가상의 판정 아닌 만료·시세·환율 없어 미룬 매도·장 열린 뒤 시장가)")
+        끝.append(f"표본 밖 {s['excluded']}({excluded_detail(s)})")
     if s.get("unknown"):
         끝.append(f"모름 {s['unknown']}")
     if s.get("cleanup"):
