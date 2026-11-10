@@ -763,7 +763,10 @@ def run(
         if db.quota_reason(exc):
             raise
         기록["defer_mark_error"] = type(exc).__name__
-    mark_late_sends(비교줄)
+    try:  # 같은 곁다리 — 달력이 예외를 내도 비교·주문 보내기는 돈다(25.2221, 25.2220 교차검증 [권고])
+        mark_late_sends(비교줄)
+    except Exception as exc:  # noqa: BLE001
+        기록["late_mark_error"] = type(exc).__name__
     비교 = bm.compare(비교줄)
     if 장중0 & set(내부):  # 잔고 대보기에서 뺀 종목 수를 요약에도(웹·주간 요약 끝 줄, 25.1772 교차검증 [권고])
         비교["guard_held"] = len(장중0 & set(내부))
