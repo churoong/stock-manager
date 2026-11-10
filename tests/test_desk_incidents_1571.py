@@ -37,7 +37,7 @@ def test_성과_분해_대조_대기_최신_평가_질의는_표를_훑지_않�
     mem = MemClient()
     db.apply_migrations(mem)  # type: ignore[arg-type]
     for sql, args in ((jd.LATEST_SQL, []), (jp.ATTR_DECISIONS_SQL, ["H", "2026-01-01", 1]),
-                      (jp.PENDING_CONTROL_SQL, ["KR", 50])):  # fmt: skip
+                      (jp.PENDING_CONTROL_SQL, ["KR", "[\"X\",\"Y\"]", 50])):  # fmt: skip
         계획 = [r[-1] for r in mem.conn.execute("EXPLAIN QUERY PLAN " + sql, args).fetchall()]
         assert not any(x.startswith(("SCAN paper_decisions", "SCAN d")) for x in 계획), 계획
         assert not any("TEMP B-TREE" in x for x in 계획), 계획

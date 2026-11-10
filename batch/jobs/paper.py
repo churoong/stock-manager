@@ -33,6 +33,7 @@ from batch.notify import formatter
 from batch.services import backtest as bt
 from batch.services import company as co
 from batch.services import desk, report_picks
+from batch.services import etf_tactical as et_svc
 from batch.services import fx as fx_svc
 from batch.services import holding as hold
 from batch.services import paper as pp
@@ -441,8 +442,12 @@ def fill_outcomes(client: Any, market: str, today: str, now: str, data_date: str
 PENDING_CONTROL_SQL = (
     "SELECT id, stock_id, decided_on, ref_date, ret_20d FROM paper_decisions"
     " WHERE market = ? AND kind = 'buy' AND ret_20d IS NOT NULL AND control_n IS NULL AND ref_date IS NOT NULL"
+    " AND account_id NOT IN (SELECT value FROM json_each(?))"
     " ORDER BY decided_on LIMIT ?"
 )
+#: 가상 대조(무작위 20종목 분위)를 채우지 않는 계좌 — ETF 전술 X·Y 는 지수·인버스 ETF 를 사서 개별주 대조 분위가
+#: '선정 실력' 이 아니다(오른 장엔 지수가 중간, 내린 장엔 인버스가 위 — 읽는 사람을 오도, 25.2218 결함 루프 [참고])
+NO_CONTROL_IDS: tuple[str, ...] = tuple(sorted(et_svc.ACCOUNTS))
 #: 결정일 이전 가장 최근 유니버스 스냅숏 날짜 — (snapshot_date, included) 색인의 최댓값 찾기라 한 번에 닿는다.
 #: 시장마다 스냅숏 날이 다를 수 있어 그 시장 종목이 없으면 하나 더 앞으로 간다(`_대조_모집단`)
 SNAPSHOT_AT_SQL = "SELECT MAX(snapshot_date) FROM universe_members WHERE snapshot_date <= ?"
@@ -507,7 +512,7 @@ OUTCOME_LEAD_DAYS = 10
 
 def fill_controls(client: Any, market: str) -> dict[str, int]:
     """매수마다 가상 대조 분위를 채운다 (docs/company.md 6장, 25.1476). 결정 원장의 성과가 찬 매수만, 한 번."""
-    rows = client.execute(PENDING_CONTROL_SQL, [market, CONTROL_BATCH]).dicts()
+    rows = client.execute(PENDING_CONTROL_SQL, [market, json.dumps(list(NO_CONTROL_IDS)), CONTROL_BATCH]).dicts()
     # 분할 재수집 대기(미국) 대조 종목은 성과를 모름으로 — 단위가 섞인다(25.1548)
     대기 = db.split_pending_us(client) if market == "US" and rows else set()
     모집단캐시: dict[str, list[int]] = {}
