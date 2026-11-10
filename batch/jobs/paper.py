@@ -920,7 +920,9 @@ def fill_orders(
             # `next_session(날)` 은 오늘보다 뒤처져 KIS 베끼기(그날 체결 장 주문만 보냄)가 그 매도를 내지 못했다
             # (25.1714 — 기다림 끝, 25.1803 — 뒤 날 행이 있을 때도)
         bar = (pp.Bar(str(행[0]["date"]), 행[0]["open"], float(행[0]["close"]), 행[0]["volume"],
-                      행[0].get("change_pct")) if 행 and 행[0]["close"] is not None else None)  # fmt: skip
+                      행[0].get("change_pct"),
+                      etf=market == "KR" and _stock(client, o.stock_id, 종목캐시).get("asset_type") == "etf")
+               if 행 and 행[0]["close"] is not None else None)  # fmt: skip
         # 판정은 순수 함수(`pp.judge_order` — judge → 당일 단타 진입 막기 → 정지·하한가 매도 미룸·청산, 25.2034).
         # 하한가로 갇힌 시장가 매도도 정지처럼 다음 장으로 미룬다(25.1553) — 취소하면 그 보유가 매도 없이 남는다
         def _마지막(sid: int = o.stock_id, 날: str = 날) -> float | None:

@@ -228,6 +228,8 @@ class Bar:
     close: float
     volume: float | None = None
     change_pct: float | None = None  # 그날 등락률(%) — 국내 가격제한폭의 기준가를 되살린다(`limit_locked`, 25.1553)
+    #: 국내 ETF 행인가 — 가격제한 끝을 ETF 호가 단위로 잰다(`kr_price_limits`, 25.2219). 판정 갈래는 바꾸지 않는다
+    etf: bool = False
 
 
 #: 국내 하루 가격제한폭(±30%, 2015-06-15 부터) — 시장가 주문의 체결 시점 가격이 그 끝이면 찼다고 보지 않는다(25.1553).
@@ -265,25 +267,36 @@ def limit_locked(order: Order, bar: Bar, price: float) -> bool:
         # 등락률이 제한폭 밖이면 그날은 가격제한이 없는 날이다(정리매매·기준가 재설정) — 끝이 없다(25.1560,
         # 25.1553 반박 [권고]: 정리매매 매도를 하한가로 보고 20거래일 미뤘다)
         return False
-    상한, 하한 = kr_price_limits(bar.close / (1 + bar.change_pct / 100))
+    상한, 하한 = kr_price_limits(bar.close / (1 + bar.change_pct / 100), etf=bar.etf)
     return price >= 상한 if order.side == "buy" else price <= 하한
 
 
-def kr_price_limits(base: float) -> tuple[float, float]:
+def kr_price_limits(base: float, etf: bool = False) -> tuple[float, float]:
     """국내 기준가 → (상한가, 하한가) — 거래소 방식(25.2114, `limit_locked` 설명). `base` 는 되살린 기준가(호가 단위로
-    반올림한다)"""
-    단위 = _tick(base)
+    반올림한다). `etf` 면 ETF 호가 단위(`KR_ETF_TICKS`) — 주식 표로 재면 2만원 이상 ETF 의 끝이 10·50·100원 단위로
+    잘려 실제 끝(5원 단위)과 어긋났다(25.2219, 11-09 결함 회차 [참고] ①)"""
+    t = _etf_tick if etf else _tick
+    단위 = t(base)
     기준 = round(base / 단위) * 단위
-    단위 = _tick(기준)
+    단위 = t(기준)
     폭 = math.floor(round(기준 * KR_PRICE_LIMIT / 단위, 6)) * 단위
     위, 아래 = 기준 + 폭, 기준 - 폭
-    return (math.floor(round(위 / _tick(위), 6)) * _tick(위), math.ceil(round(아래 / _tick(아래), 6)) * _tick(아래))
+    return (math.floor(round(위 / t(위), 6)) * t(위), math.ceil(round(아래 / t(아래), 6)) * t(아래))
 
 
 def _tick(price: float) -> float:
     from batch.services.signals import tick_size
 
     return tick_size(price, "KRW") or 1.0
+
+
+#: 국내 ETF 호가 단위 (이 가격 미만, 단위) — 2,000원 미만 1원, 그 위 5원 [확인필요: 거래소 공지와 연 1회 대조,
+#: 주식 표 `signals.KR_TICKS` 와 같이]
+KR_ETF_TICKS: tuple[tuple[float, float], ...] = ((2_000, 1), (float("inf"), 5))
+
+
+def _etf_tick(price: float) -> float:
+    return next(단위 for 한계, 단위 in KR_ETF_TICKS if price < 한계)
 
 
 @dataclass(frozen=True)
