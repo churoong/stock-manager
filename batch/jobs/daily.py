@@ -564,39 +564,86 @@ def _collect_fx() -> list[str]:
             client.close()
 
 
+#: 빠진 국내 ETF 날을 다시 받는 거리(거래일) — 가상모의투자가 그 행을 기다리는 장 수
+#: (`jobs/paper.MISSING_BAR_WAIT_SESSIONS`)와 같다(시험이 묶는다). 기다림 안에 메워지면 열린 ETF 주문이
+#: "시세 못 받음" 이 아니라 그 행으로 판정된다(25.2223)
+KR_ETF_HEAL_SESSIONS = 2
+_ETF_IDS_SQL = "SELECT ticker, id FROM stocks WHERE country = 'KR' AND asset_type = 'etf' AND status = 'active'"
+
+
 def _store_kr_etf_day(client: TursoClient, bas_dd: str, trade_date: str) -> list[str]:
     """`stocks` 에 이은 국내 ETF(`asset_type = 'etf'`)의 그날 시세를 한국거래소 ETF 일별에서 받아 저장한다 (25.896).
 
     이은 ETF 가 없으면 부르지 않는다. 실패는 경고로 남기고 배치를 멈추지 않는다 — 주식 시세는 이미 저장됐다.
-    수정주가는 비운다(분할·병합이 드물고, 있어도 `adjust_kr` 이 등락률로 되살린다).
+    수정주가는 비운다(분할·병합이 드물고, 있어도 `adjust_kr` 이 등락률로 되살린다). 그다음 지난
+    `KR_ETF_HEAL_SESSIONS` 거래일 가운데 이은 ETF 행이 빠진 날을 다시 받는다(`_heal_kr_etf_days`, 25.2223).
     """
-    from batch.sources import krx
-
-    rs = client.execute(
-        "SELECT ticker, id FROM stocks WHERE country = 'KR' AND asset_type = 'etf' AND status = 'active'"
-    )
-    ids = {str(r[0]): int(r[1]) for r in rs.rows}
+    ids = {str(r[0]): int(r[1]) for r in client.execute(_ETF_IDS_SQL).rows}
     if not ids:
         return []
     if db.usage_blocked_today(client, "krx_openapi"):
         return ["거래소 일일 호출 한도에 도달해 ETF 종가를 받지 않았습니다"]
+    경고 = _fetch_kr_etf(client, bas_dd, trade_date, ids, overwrite=True)
+    return 경고 + _heal_kr_etf_days(client, trade_date, ids)
+
+
+def _fetch_kr_etf(client: TursoClient, bas_dd: str, day: str, ids: dict[str, int], *, overwrite: bool) -> list[str]:
+    """한 날의 국내 ETF 일별을 받아 `ids` 의 행을 저장한다. `overwrite=False` 면 있는 행은 덮지 않는다(다시 받기)"""
+    from batch.sources import krx
+
     result = krx.fetch_etf_daily(bas_dd)
     db.record_api_call(client, "krx_openapi", count=result.attempts, limit_value=krx.DAILY_LIMIT, warn_at_pct=80)
     if not result.ok or not result.data:
         return [(
-            f"ETF 종가 수집 실패: {result.error or '빈 응답'} — 이날 ETF 시세는 다시 받지 않습니다."
-            " 열린 ETF 주문은 기다렸다가 시세 못 받음으로 닫힙니다"
+            f"ETF 종가 수집 실패({day}): {result.error or '빈 응답'} — 다음 {KR_ETF_HEAL_SESSIONS}거래일 동안"
+            " 다시 받습니다. 그래도 없으면 열린 ETF 주문은 시세 못 받음으로 닫힙니다"
         )]
+    있음: set[int] = set()
+    if not overwrite:
+        있음 = {int(r[0]) for r in client.execute(
+            "SELECT stock_id FROM prices WHERE date = ? AND stock_id IN (SELECT value FROM json_each(?))",
+            [day, json.dumps(sorted(ids.values()))]).rows}  # fmt: skip
     now = db.now_iso()
     rows = [
-        (ids[row.isu_cd], trade_date, row.open, row.high, row.low, row.close, None,
+        (ids[row.isu_cd], day, row.open, row.high, row.low, row.close, None,
          row.volume, row.value, "KRW", result.source, now, row.change_pct)
         for row in result.data
-        if row.isu_cd in ids and row.close is not None
+        if row.isu_cd in ids and row.close is not None and ids[row.isu_cd] not in 있음
     ]  # fmt: skip
-    db.bulk_upsert_prices(client, rows)
+    if rows:
+        db.bulk_upsert_prices(client, rows)
+    if not overwrite:
+        return [f"빠졌던 국내 ETF {len(rows)}개의 {day} 종가를 다시 받았습니다"] if rows else []
     빠짐 = len(ids) - len(rows)
-    return [f"이은 국내 ETF {빠짐}개의 {trade_date} 종가가 응답에 없습니다"] if 빠짐 else []
+    return [f"이은 국내 ETF {빠짐}개의 {day} 종가가 응답에 없습니다"] if 빠짐 else []
+
+
+def _heal_kr_etf_days(client: TursoClient, trade_date: str, ids: dict[str, int]) -> list[str]:
+    """지난 `KR_ETF_HEAL_SESSIONS` 거래일 가운데 이은 ETF 행이 하나라도 빠진 날을 다시 받는다(25.2223).
+
+    예전엔 그 실행의 날 하나만 받고 다시 받는 길이 없어, 한 번 실패한 날은 열린 ETF 주문이 기다림 끝에 "시세 못
+    받음" 으로 닫혔다(25.2216 의 남은 길 (가)). 그날 국내 주식 행이 있는 날만(시장이 열렸고 우리가 받은 날) 본다.
+    빠진 날마다 한 번 부른다 — 하루 최대 `KR_ETF_HEAL_SESSIONS` 호출"""
+    경고: list[str] = []
+    d = date.fromisoformat(trade_date)
+    for _ in range(KR_ETF_HEAL_SESSIONS):
+        d = cal.previous_session("KR", d)
+        day = d.isoformat()
+        n = client.execute(
+            "SELECT COUNT(*) FROM prices WHERE date = ? AND stock_id IN (SELECT value FROM json_each(?))",
+            [day, json.dumps(sorted(ids.values()))]).scalar()  # fmt: skip
+        if int(n or 0) >= len(ids):
+            continue
+        시장 = client.execute(
+            "SELECT 1 FROM prices p JOIN stocks s ON s.id = p.stock_id"
+            " WHERE p.date = ? AND s.country = 'KR' AND s.asset_type = 'stock' LIMIT 1", [day]).rows  # fmt: skip
+        if not 시장:
+            continue
+        if db.usage_blocked_today(client, "krx_openapi"):
+            경고.append("거래소 일일 호출 한도에 도달해 빠진 ETF 날을 다시 받지 않았습니다")
+            break
+        경고 += _fetch_kr_etf(client, day.replace("-", ""), day, ids, overwrite=False)
+    return 경고
 
 
 def _kr_stock_ids(client: TursoClient) -> dict[str, int]:

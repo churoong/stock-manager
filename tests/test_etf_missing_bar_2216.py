@@ -106,9 +106,11 @@ def test_ETF_수집_실패_경고는_다시_받는다고_하지_않는다(monkey
     monkeypatch.setattr(daily.db, "usage_blocked_today", lambda *_a, **_k: False)
     monkeypatch.setattr(daily.db, "record_api_call", lambda *_a, **_k: None)
     monkeypatch.setattr(krx, "fetch_etf_daily", lambda _d: _R())
+    monkeypatch.setattr(daily, "_heal_kr_etf_days", lambda *_a: [])
     [경고] = daily._store_kr_etf_day(_C(), "20261019", "2026-10-19")  # type: ignore[arg-type]
     assert "다음 실행이 받습니다" not in 경고
-    assert "다시 받지 않습니다" in 경고 and "시세 못 받음" in 경고
+    # 25.2223 부터 기다림 거리 안에서 다시 받는다 — 그래도 없으면 시세 못 받음
+    assert f"다음 {daily.KR_ETF_HEAL_SESSIONS}거래일 동안 다시 받습니다" in 경고 and "시세 못 받음" in 경고
 
 
 def test_ETF_매도_뒤_행도_없이_기다림이_끝나면_못받음으로(client: Client, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
