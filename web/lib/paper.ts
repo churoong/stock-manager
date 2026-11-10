@@ -132,8 +132,6 @@ export interface BrokerSummary {
   reject_reasons: Record<string, number>;
 }
 export interface BrokerLatest { as_of: string; diff: Record<string, [number, number]>; summary: BrokerSummary | null }
-/** 비교 요약을 사람이 읽는 줄로 — 배치(`services/broker_mirror.compare_lines`)와 같은 글("어긋난 까닭" 은 주간 요약에만,
- *  25.1736). 값은 배치가 낸 그대로 */
 /** 표본 밖 끝 줄 괄호의 까닭 목록 — 배치 `services/broker_mirror.EXCLUDED_WHY` 와 같은 글(25.2222) */
 export const EXCLUDED_WHY = "가상의 판정 아닌 만료·시세·환율 없어 미룬 매도·장 열린 뒤 시장가·일봉 없음";
 /** 배치 `EXCLUDED_NAMED` 와 같은 열쇠·이름·순서(25.2220) */
@@ -143,6 +141,8 @@ export function excludedDetail(s: BrokerSummary): string {
   const 센 = EXCLUDED_NAMED.filter(([k]) => s[`excluded_${k}`]).map(([k, 이름]) => `${이름} ${s[`excluded_${k}`]}`);
   return EXCLUDED_WHY + (센.length ? ` — ${센.join(" · ")}` : "");
 }
+/** 비교 요약을 사람이 읽는 줄로 — 배치(`services/broker_mirror.compare_lines`)와 같은 글("어긋난 까닭" 은 주간 요약에만,
+ *  25.1736). 값은 배치가 낸 그대로 */
 export function brokerLines(b: BrokerLatest | null | undefined): string[] {
   if (!b) return ["아직 이 시장의 KIS모의투자 기록이 없습니다 — 그 시장 일일 배치가 처음 돌면 지주사의 주문을 베껴 내고 잔고를 적습니다 (docs/paper.md 15장)."];
   const s = b.summary;

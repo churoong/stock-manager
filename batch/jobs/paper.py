@@ -905,10 +905,9 @@ def fill_orders(
                 기록["waiting_bar"] = 기록.get("waiting_bar", 0) + 1
                 continue
             if market == "KR" and _stock(client, o.stock_id, 종목캐시).get("asset_type") == "etf":
-                # 국내 ETF 시세는 `daily._store_kr_etf_day` 가 기다림 거리 안에서만 다시 받는다(25.2223) — 뒤 날 행이
-                # 있다고
-                # 그날을 정지로 보면 수집 실패가 정지 판정(매도 미룸·매수 정지 만료)이 됐다(25.2216). 기다림을 다 채우고
-                # 그래도 없으면 시장 전체를 못 받은 날처럼 닫는다
+                # 국내 ETF 시세는 `daily._store_kr_etf_day` 가 기다림 거리 안에서만 다시 받는다(25.2223). 뒤 날
+                # 행이 있다고 그날을 정지로 보면 수집 실패가 정지 판정(매도 미룸·매수 정지 만료)이 됐다(25.2216).
+                # 기다림을 다 채우고 그래도 없으면 시장 전체를 못 받은 날처럼 닫는다
                 if trade_date < 기한.isoformat():
                     기록["waiting_bar"] = 기록.get("waiting_bar", 0) + 1
                     continue

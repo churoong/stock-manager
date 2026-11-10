@@ -568,6 +568,9 @@ def _collect_fx() -> list[str]:
 #: (`jobs/paper.MISSING_BAR_WAIT_SESSIONS`)와 같다(시험이 묶는다). 기다림 안에 메워지면 열린 ETF 주문이
 #: "시세 못 받음" 이 아니라 그 행으로 판정된다(25.2223)
 KR_ETF_HEAL_SESSIONS = 2
+#: 빠졌다고 볼 ETF 의 앞쪽 창(달력일) — 그 안에 행이 있던 ETF 만 다시 받는다. 한 주(연휴 하나를 넘는 길이) — 추정값,
+#: 결과를 보고 고르지 않았다 [확인필요: 운영에서 헛호출 수를 보고]
+KR_ETF_HEAL_LOOKAROUND_DAYS = 7
 _ETF_IDS_SQL = "SELECT ticker, id FROM stocks WHERE country = 'KR' AND asset_type = 'etf' AND status = 'active'"
 
 
@@ -584,7 +587,12 @@ def _store_kr_etf_day(client: TursoClient, bas_dd: str, trade_date: str) -> list
     if db.usage_blocked_today(client, "krx_openapi"):
         return ["거래소 일일 호출 한도에 도달해 ETF 종가를 받지 않았습니다"]
     경고 = _fetch_kr_etf(client, bas_dd, trade_date, ids, overwrite=True)
-    return 경고 + _heal_kr_etf_days(client, trade_date, ids)
+    try:  # 곁다리 — 다시 받기의 DB·달력 예외가 오늘 받은 시세와 국내 수집 단계를 멈추지 않게(25.2224)
+        return 경고 + _heal_kr_etf_days(client, trade_date, ids)
+    except Exception as exc:
+        if db.quota_reason(exc):
+            raise
+        return [*경고, f"빠진 국내 ETF 날 다시 받기 실패({type(exc).__name__}) — 오늘 시세는 저장됐습니다"]
 
 
 def _fetch_kr_etf(client: TursoClient, bas_dd: str, day: str, ids: dict[str, int], *, overwrite: bool) -> list[str]:
@@ -594,6 +602,8 @@ def _fetch_kr_etf(client: TursoClient, bas_dd: str, day: str, ids: dict[str, int
     result = krx.fetch_etf_daily(bas_dd)
     db.record_api_call(client, "krx_openapi", count=result.attempts, limit_value=krx.DAILY_LIMIT, warn_at_pct=80)
     if not result.ok or not result.data:
+        if not overwrite:  # 다시 받기의 실패 — 남은 기회는 부르는 쪽이 안다(25.2224)
+            return [f"빠진 국내 ETF {day} 다시 받기 실패: {result.error or '빈 응답'}"]
         return [(
             f"ETF 종가 수집 실패({day}): {result.error or '빈 응답'} — 다음 {KR_ETF_HEAL_SESSIONS}거래일 동안"
             " 다시 받습니다. 그래도 없으면 열린 ETF 주문은 시세 못 받음으로 닫힙니다"
@@ -613,7 +623,10 @@ def _fetch_kr_etf(client: TursoClient, bas_dd: str, day: str, ids: dict[str, int
     if rows:
         db.bulk_upsert_prices(client, rows)
     if not overwrite:
-        return [f"빠졌던 국내 ETF {len(rows)}개의 {day} 종가를 다시 받았습니다"] if rows else []
+        # 메운 것은 경고가 아니다 — 경고는 실행을 '부분 성공' 으로 만든다(25.1, 25.2224). 로그에만
+        if rows:
+            log.info("빠졌던 국내 ETF %d개의 %s 종가를 다시 받았습니다", len(rows), day)
+        return []
     빠짐 = len(ids) - len(rows)
     return [f"이은 국내 ETF {빠짐}개의 {day} 종가가 응답에 없습니다"] if 빠짐 else []
 
@@ -626,13 +639,19 @@ def _heal_kr_etf_days(client: TursoClient, trade_date: str, ids: dict[str, int])
     빠진 날마다 한 번 부른다 — 하루 최대 `KR_ETF_HEAL_SESSIONS` 호출"""
     경고: list[str] = []
     d = date.fromisoformat(trade_date)
-    for _ in range(KR_ETF_HEAL_SESSIONS):
+    for k in range(KR_ETF_HEAL_SESSIONS):
         d = cal.previous_session("KR", d)
         day = d.isoformat()
-        n = client.execute(
-            "SELECT COUNT(*) FROM prices WHERE date = ? AND stock_id IN (SELECT value FROM json_each(?))",
-            [day, json.dumps(sorted(ids.values()))]).scalar()  # fmt: skip
-        if int(n or 0) >= len(ids):
+        # 빠진 ETF = 그날 행은 없고 그 앞뒤 `KR_ETF_HEAL_LOOKAROUND_DAYS` 달력일 안에 행이 있는 것 — 응답에 늘 없는
+        # ETF(티커 어긋남·한 번도 받은 적 없음)로 날마다 헛호출하지 않고, 폐지됐는데 active 로 남은 ETF 도 그 창이
+        # 지나면 멈춘다(25.2224, 25.2223 교차검증 [권고]). 오늘 수집이 실패한 날도 앞 날 행으로 잡힌다
+        빠짐 = int(client.execute(
+            "SELECT COUNT(DISTINCT p.stock_id) FROM prices p WHERE p.date >= ? AND p.date <= ? AND p.date <> ?"
+            " AND p.stock_id IN (SELECT value FROM json_each(?))"
+            " AND NOT EXISTS (SELECT 1 FROM prices q WHERE q.stock_id = p.stock_id AND q.date = ?)",
+            [(d - timedelta(days=KR_ETF_HEAL_LOOKAROUND_DAYS)).isoformat(), trade_date, day,
+             json.dumps(sorted(ids.values())), day]).scalar() or 0)  # fmt: skip
+        if not 빠짐:
             continue
         시장 = client.execute(
             "SELECT 1 FROM prices p JOIN stocks s ON s.id = p.stock_id"
@@ -642,7 +661,9 @@ def _heal_kr_etf_days(client: TursoClient, trade_date: str, ids: dict[str, int])
         if db.usage_blocked_today(client, "krx_openapi"):
             경고.append("거래소 일일 호출 한도에 도달해 빠진 ETF 날을 다시 받지 않았습니다")
             break
-        경고 += _fetch_kr_etf(client, day.replace("-", ""), day, ids, overwrite=False)
+        실패 = _fetch_kr_etf(client, day.replace("-", ""), day, ids, overwrite=False)
+        남은 = KR_ETF_HEAL_SESSIONS - 1 - k  # 이 날을 다시 받을 남은 실행 수
+        경고 += [f"{w} — {'다음 실행이 한 번 더 받습니다' if 남은 else '더 받지 않습니다'}" for w in 실패]
     return 경고
 
 

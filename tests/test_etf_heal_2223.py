@@ -17,12 +17,15 @@ from tests.test_paper_job_1445 import Client
 ETF, ETF2 = 10, 11
 
 
-def _c() -> Client:
+def _c(앞행: bool = True) -> Client:
+    """`앞행` — 10-15 에 두 ETF 행(받아 오던 ETF). 25.2224 부터 앞뒤 창에 행이 있던 ETF 만 빠졌다고 본다"""
     c = Client()
     for sid, t in ((ETF, "069500"), (ETF2, "114800")):
         c.conn.execute("INSERT INTO stocks (id, ticker, market, country, name_ko, sector, currency, status, source,"
                        " fetched_at, asset_type) VALUES (?, ?, 'M', 'KR', ?, 'ETF', 'KRW', 'active', 't', 't', 'etf')",
                        [sid, t, t])  # fmt: skip
+        if 앞행:
+            _행(c, sid, "2026-10-15")
     return c
 
 
@@ -68,7 +71,7 @@ def test_지난_날_빠진_ETF_행을_다시_받고_있는_행은_덮지_않는�
     assert 불린 == ["20261020", "20261019", "20261016"]
     assert _종가(c, ETF, "2026-10-16") == [(100.0,)]  # 있던 행은 그대로
     assert _종가(c, ETF2, "2026-10-16") == [(200.0,)] and _종가(c, ETF, "2026-10-19") == [(200.0,)]
-    assert any("다시 받았습니다" in w for w in 경고)
+    assert 경고 == []  # 메운 것은 경고가 아니다(25.2224 — 경고는 실행을 부분 성공으로 만든다)
 
 
 def test_다_있거나_시장이_닫힌_날은_부르지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -90,3 +93,48 @@ def test_오늘_실패해도_지난_날은_다시_받고_경고는_다시_받는
     경고 = daily._store_kr_etf_day(c, "20261020", "2026-10-20")
     assert "20261019" in 불린 and _종가(c, ETF, "2026-10-19") == [(200.0,)]
     assert any("다시 받습니다" in w and "시세 못 받음" in w for w in 경고)
+
+
+def test_한_번도_받은_적_없는_ETF_로는_헛호출하지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """응답에 늘 없는 ETF(티커 어긋남) — 앞뒤 창에 행이 없으면 빠진 날로 보지 않는다(25.2224)"""
+    c = _c(앞행=False)
+    for d in ("2026-10-16", "2026-10-19"):
+        _행(c, 1, d)
+    불린: list[str] = []
+    monkeypatch.setattr(krx, "fetch_etf_daily", lambda b: (불린.append(b), _응답([], 실패={b})(b))[1])
+    daily._store_kr_etf_day(c, "20261020", "2026-10-20")
+    assert 불린 == ["20261020"]
+
+
+def test_한도가_차면_다시_받지_않고_말한다(monkeypatch: pytest.MonkeyPatch) -> None:
+    c = _c()
+    _행(c, 1, "2026-10-19")
+    불린: list[str] = []
+    monkeypatch.setattr(krx, "fetch_etf_daily", _응답(불린))
+    차단 = iter([False, True])  # 오늘 받기 전엔 열림, 다시 받기 전엔 참
+    monkeypatch.setattr(daily.db, "usage_blocked_today", lambda *_a, **_k: next(차단))
+    경고 = daily._store_kr_etf_day(c, "20261020", "2026-10-20")
+    assert 불린 == ["20261020"] and any("한도" in w and "다시 받지 않았습니다" in w for w in 경고)
+
+
+def test_다시_받기_예외는_경고로_내리고_오늘_시세는_남긴다(monkeypatch: pytest.MonkeyPatch) -> None:
+    c = _c()
+    monkeypatch.setattr(krx, "fetch_etf_daily", _응답([]))
+
+    def 터짐(*_a: object) -> None:
+        raise RuntimeError("달력")
+
+    monkeypatch.setattr(daily.cal, "previous_session", 터짐)
+    경고 = daily._store_kr_etf_day(c, "20261020", "2026-10-20")
+    assert any("다시 받기 실패(RuntimeError)" in w for w in 경고)
+    assert _종가(c, ETF, "2026-10-20") == [(200.0,)]
+
+
+def test_지난_날_다시_받기_실패는_남은_기회를_말한다(monkeypatch: pytest.MonkeyPatch) -> None:
+    c = _c()
+    for d in ("2026-10-16", "2026-10-19"):
+        _행(c, 1, d)
+    monkeypatch.setattr(krx, "fetch_etf_daily", _응답([], 실패={"20261019", "20261016"}))
+    경고 = daily._store_kr_etf_day(c, "20261020", "2026-10-20")
+    assert any("2026-10-19 다시 받기 실패" in w and "한 번 더" in w for w in 경고)
+    assert any("2026-10-16 다시 받기 실패" in w and "더 받지 않습니다" in w for w in 경고)
