@@ -7,9 +7,8 @@ from __future__ import annotations
 
 import pytest
 
-from tests.test_paper_job_1445 import client  # noqa: F401 — 픽스처
-
 from batch.services import paper as pp
+from tests.test_paper_job_1445 import client  # noqa: F401 — 픽스처
 
 
 def test_ETF_끝은_5원_단위() -> None:

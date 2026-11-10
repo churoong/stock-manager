@@ -34,7 +34,7 @@ def test_닿은_보유_손절이_먼저() -> None:
           "C": (3, {"code": "C", "target": 110.0}), "D": (4, {"code": "D", "stop": 93.0, "trail": 95.0})}  # fmt: skip
     hit = {x.code: (x.kind, x.reason) for x in ig.hits(
         [_h("A", 93.0), _h("B", 119.9), _h("C", 110.0), _h("D", 92.0), _h("E", 1.0)], 선)}  # fmt: skip
-    assert hit == {"A": ("stop", bm.REASON_GUARD_STOP), "B": ("trail", bm.REASON_GUARD_TAKE),
+    assert hit == {"A": ("stop", bm.REASON_GUARD_STOP), "B": ("trail", bm.REASON_GUARD_TRAIL),
                    "C": ("target", bm.REASON_GUARD_TAKE), "D": ("stop", bm.REASON_GUARD_STOP)}  # fmt: skip
     # 선 바로 위(판정식처럼 소수 여섯째 자리 — 1e-6 위는 안 닿음)·현재가 없음·팔 수량 0 은 보지 않는다(25.1769)
     assert ig.hits([_h("A", 93.0 * 1.000002), _h("A", None), _h("A", 50.0, sellable=0), _h("C", 110.0 * 0.999998)],
@@ -124,7 +124,7 @@ def test_장중_익절도_낸다(c: Client) -> None:
     r = ig.run(c, 월, session=s, clock=lambda: 월)
     assert r["hits"] == {"trail": 1} and s.orders == [("sell", "000660", 10, None)]
     assert c.q("SELECT reason, message FROM paper_broker_orders") == [
-        ("장중익절", "장중 현재가 89,000 ≤ 익절선(고점 대비) 90,000")]
+        ("장중익절(고점)", "장중 현재가 89,000 ≤ 익절선(고점 대비) 90,000")]  # 25.2220 — 목표가 익절과 사유를 가른다
     assert "익절선" in r["alert"]
 
 

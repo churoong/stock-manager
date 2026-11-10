@@ -85,7 +85,7 @@ WAITING = "아침 국내 일일 배치 대기 — 끝나면 감시선이 생긴�
 #: 내내 손절이 안 나갔다(25.1769, 25.1768 교차검증 [권고])
 GUARDED_TODAY_SQL = (
     "SELECT id, stock_id, status, message FROM paper_broker_orders WHERE broker = ? AND trade_date = ?"
-    " AND side = 'sell' AND reason IN (?, ?)"
+    " AND side = 'sell' AND reason IN (?, ?, ?)"
 )
 #: 다시 보내도 되는 거부 — KIS 초당 한도(`EGW00201`·원장 `EGW00215`, 25.1799)·토큰 만료. 잔고·가격 제한 같은 진짜 거부는
 #: 그대로 둔다
@@ -99,7 +99,7 @@ UNSENT_ORDER_MARK = bm.GUARD_UNSENT_ORDER_MARK  # 정의처는 services — 집�
 #: 보낸 시각이 남아 있어 그 조건이면 닫히지 않았다(25.2015 시험이 잡음)
 UNSENT_ORDER_SQL = (
     "UPDATE paper_broker_orders SET status = 'rejected', message = ? WHERE broker = ? AND trade_date = ?"
-    " AND stock_id = ? AND side = 'sell' AND reason IN (?, ?) AND status = 'sending' AND created_at = ?"
+    " AND stock_id = ? AND side = 'sell' AND reason IN (?, ?, ?) AND status = 'sending' AND created_at = ?"
 )
 #: 순간 거부 알림 — 다시 보내는 것은 다음 회차에도 선에 닿아 있을 때뿐이다(25.1774, 25.1773 교차검증 [권고]:
 #: "다음 회차에 다시 보냄" 만 적어 반등한 날은 약속한 매도도 후속 알림도 없었다)
@@ -145,7 +145,7 @@ class Hit:
     price: float
     line: float
     kind: str  # stop · trail · target
-    reason: str  # bm.REASON_GUARD_STOP · bm.REASON_GUARD_TAKE
+    reason: str  # bm.REASON_GUARD_STOP · bm.REASON_GUARD_TAKE(목표가) · bm.REASON_GUARD_TRAIL(고점 대비)
 
 
 KIND_TEXT = {"stop": "손절선", "trail": "익절선(고점 대비)", "target": "목표가", "suspect": "기준 종가"}
@@ -294,7 +294,7 @@ def hits(holdings: list[kv.Holding], lines: dict[str, tuple[int, dict[str, Any]]
         if _닿음(p, 선.get("stop"), "아래"):
             out.append(Hit(sid, h.code, 수량, p, float(선["stop"]), "stop", bm.REASON_GUARD_STOP))
         elif _닿음(p, 선.get("trail"), "아래"):
-            out.append(Hit(sid, h.code, 수량, p, float(선["trail"]), "trail", bm.REASON_GUARD_TAKE))
+            out.append(Hit(sid, h.code, 수량, p, float(선["trail"]), "trail", bm.REASON_GUARD_TRAIL))
         elif _닿음(p, 선.get("target"), "위"):
             out.append(Hit(sid, h.code, 수량, p, float(선["target"]), "target", bm.REASON_GUARD_TAKE))
     return out
@@ -366,8 +366,7 @@ def run(
             날표시.append(LINE_ERR_KEY)
     if getattr(sess, "balance_truncated", False):
         return 기록 | {"skipped": "잔고 조회가 쪽 상한에 닿아 잘림", **_호출(sess)}
-    오늘줄 = client.execute(GUARDED_TODAY_SQL, [bmj.BROKER, 오늘.isoformat(), bm.REASON_GUARD_STOP,
-                                               bm.REASON_GUARD_TAKE]).dicts()  # fmt: skip
+    오늘줄 = client.execute(GUARDED_TODAY_SQL, [bmj.BROKER, 오늘.isoformat(), *bm.GUARD_REASON_LIST]).dicts()
     다시 = {int(r["stock_id"]): int(r["id"]) for r in 오늘줄
             if r["status"] == "rejected"
             and any(c in str(r["message"] or "") for c in (*TRANSIENT_CODES, UNSENT_ORDER_MARK))}  # fmt: skip
@@ -414,7 +413,7 @@ def run(
                 mine = client.execute(bmj.MINE_SQL, [bmj.BROKER, 오늘.isoformat(), x.stock_id, "sell", -1, 지금]).rows
                 if not mine:
                     if any(int(r["stock_id"]) == x.stock_id for r in client.execute(GUARDED_TODAY_SQL, [
-                            bmj.BROKER, 오늘.isoformat(), bm.REASON_GUARD_STOP, bm.REASON_GUARD_TAKE]).dicts()):
+                            bmj.BROKER, 오늘.isoformat(), *bm.GUARD_REASON_LIST]).dicts()):
                         # 다른 감시 실행이 같은 종목 장중 줄을 먼저 적었다 — 그 실행이 보낸다. 멈춤·알림이 아니다
                         # (25.2011, 25.2010 교차검증 [권고]: "내지 못함" 으로 알리면 이미 판 것을 반대로 읽었다)
                         상태["skipped_other_run"] = 상태.get("skipped_other_run", 0) + 1
@@ -431,7 +430,7 @@ def run(
             with contextlib.suppress(Exception):
                 닫는글 = f"{UNSENT_ORDER_MARK} — 보내지 않음(기록 확인 실패: {type(exc).__name__})"
                 client.execute(UNSENT_ORDER_SQL, [닫는글, bmj.BROKER, 오늘.isoformat(), x.stock_id,
-                                                  bm.REASON_GUARD_STOP, bm.REASON_GUARD_TAKE, 지금])  # fmt: skip
+                                                  *bm.GUARD_REASON_LIST, 지금])  # fmt: skip
             break
         보낸시각 = clock().isoformat()
         try:

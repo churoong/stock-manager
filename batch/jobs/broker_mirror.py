@@ -91,7 +91,7 @@ PENDING_SQL = (
 #: 장중 손절·익절 줄은 세지 않는다 — 규칙서 15.11 "장중 매도는 하루 주문 상한 밖"(25.2016, 결함 루프 [참고]: 같은 날
 #: 다시 돈 베끼기가 장중 줄 몫만큼 H 주문을 "하루 주문 상한" 으로 덜 냈다)
 SENT_TODAY_SQL = (
-    "SELECT COUNT(*) FROM paper_broker_orders WHERE broker = ? AND trade_date = ? AND reason NOT IN (?, ?)"
+    "SELECT COUNT(*) FROM paper_broker_orders WHERE broker = ? AND trade_date = ? AND reason NOT IN (?, ?, ?)"
 )
 #: 오늘 이미 낸 베낀 매수(거부 아닌 것) — 같은 날 다시 돌 때 정리가 오늘 산 것을 팔지 않게 (검증 [필수] 1)
 BOUGHT_TODAY_SQL = (
@@ -148,7 +148,8 @@ ACCOUNT_SQL = "SELECT id FROM paper_accounts WHERE id = ?"
 #: (하한가)·거부 줄은 KIS 가 아직 들고 있다(25.1769, 25.1768 교차검증 [참고]). 국내 `unknown` 은 실제로 찼을 수 있다
 #: (`BOUGHT_SQL` 잣대)
 GUARD_SELLS_SQL = (
-    "SELECT stock_id, MAX(trade_date) FROM paper_broker_orders WHERE broker = ? AND side = 'sell' AND reason IN (?, ?)"
+    "SELECT stock_id, MAX(trade_date) FROM paper_broker_orders WHERE broker = ? AND side = 'sell'"
+    " AND reason IN (?, ?, ?)"
     " AND (filled_qty > 0 OR status IN ('sending', 'accepted') OR (status = 'unknown' AND market = 'KR'))"
     " GROUP BY stock_id"
 )
@@ -209,7 +210,9 @@ COMPARE_SQL = (
     " o.limit_price AS i_limit, b.limit_price AS b_limit, p.low AS p_low, p.high AS p_high, p.close AS p_close,"
     # 국내 가격제한 끝(25.2127) — 시가·등락률로 그날 상·하한가를 되살려 "KIS만 참" 의 까닭을 가른다. 거래량은 가상
     # `halted`(거래량 0 = 정지) 와 같게 정지한 날을 가격제한 끝에서 빼려고(25.2129)
-    " p.open AS p_open, p.change_pct AS p_change, b.market AS b_market, p.volume AS p_volume"
+    " p.open AS p_open, p.change_pct AS p_change, b.market AS b_market, p.volume AS p_volume,"
+    # 보낸 시각 — 개장 전에 만든 국내 시장가를 개장 뒤에 보낸 줄을 표본에서 뺀다(`mark_late_sends`, 25.2220)
+    " b.sent_at"
     " FROM paper_broker_orders b"
     " LEFT JOIN paper_orders o ON o.id = b.paper_order_id LEFT JOIN paper_fills f ON f.order_id = b.paper_order_id"
     " LEFT JOIN prices p ON p.stock_id = o.stock_id AND p.date = b.trade_date"
@@ -246,15 +249,61 @@ def mark_nonjudgment_defers(client: Any, rows: list[dict[str, Any]], market: str
     return sum(1 for r in 후보 if r.get("defer_no_judgment"))
 
 
+def kr_open_utc(day: date) -> datetime | None:
+    """국내 그 거래일 정규장 시작(UTC) — 수능일은 달력이 모르는 한 시간 늦춤을 더한다(`intraday_guard.window` 와 같은
+    잣대, 25.1774). 달력이 모르면 None"""
+    from batch.jobs import monitor_targets as mt
+
+    열림 = cal.session_open_utc("KR", day)
+    if 열림 is not None and day.isoformat() in mt.KR_CSAT_DAYS and 열림.astimezone(UTC).hour == 0:
+        열림 += mt.CSAT_SHIFT
+    return 열림
+
+
+def mark_late_sends(rows: list[dict[str, Any]]) -> int:
+    """개장 전에 만든 국내 시장가(매도·시가 일괄 매수)를 **그날 개장 뒤에** KIS 로 보낸 줄에 `late_open_send` 를 단다
+    (25.2220, 11-10 결함 회차 [권고]).
+
+    리포트를 보낸 뒤 KIS 단계에서 죽은 날 09:35 예비 실행이 이어 돌면(25.2144) 08:27 에 `fill_basis='open'` 으로 만든
+    주문이 그대로 나간다 — 가상은 시가로, KIS 는 장중가로 판정해 같은 잣대가 아니다. 예전엔 `fill_basis` 만 보아
+    slip·일치율·체결 칸 excess(desk 8장 보정)에 정상 표본으로 들어갔다. 장 열린 뒤 **만든** 주문(`fill_basis='close'`)은
+    25.1561 이 이미 뺀다. 지정가 매수는 판정이 같아 표시하지 않는다. 보낸 시각이 없거나 읽을 수 없으면(옛 줄) 표시하지
+    않는다. 표시한 줄 수를 돌려준다"""
+    열림: dict[str, datetime | None] = {}
+    n = 0
+    for r in rows:
+        if r.get("b_market") != "KR" or r.get("i_order_type") != "market" or not r.get("sent_at"):
+            continue
+        try:
+            보냄 = datetime.fromisoformat(str(r["sent_at"]))
+        except ValueError:
+            continue
+        if 보냄.tzinfo is None:
+            보냄 = 보냄.replace(tzinfo=UTC)  # 줄의 sent_at 은 UTC(0078)
+        d = str(r.get("trade_date") or "")[:10]
+        if d not in 열림:
+            try:
+                열림[d] = kr_open_utc(date.fromisoformat(d))
+            except ValueError:
+                열림[d] = None
+        if 열림[d] is not None and 보냄 >= 열림[d]:
+            r["late_open_send"] = True
+            n += 1
+    return n
+
+
 #: 체결 칸 (docs/paper.md 15.9, 25.1514) — 베끼기 시작부터 누적. 내부 주문 유형·판정 잣대·장부 슬리피지(%)를 붙인다.
 #: 증권사 주문 표의 order_type 은 미국 시장가를 limit 으로 적으므로 **내부** 주문 유형을 쓴다
 CELLS_SQL = (
     "SELECT b.trade_date, b.side, b.status, b.filled_qty, b.avg_price, b.reason, o.status AS i_status,"
     " o.close_note AS i_note,"
     " o.order_type AS i_order_type, o.fill_basis AS i_fill_basis, f.price AS i_price, f.fill_date AS i_fill_date,"
-    " CASE WHEN f.price > 0 AND f.quantity > 0 THEN f.slippage / (f.price * f.quantity) * 100 END AS i_slip_pct"
+    " CASE WHEN f.price > 0 AND f.quantity > 0 THEN f.slippage / (f.price * f.quantity) * 100 END AS i_slip_pct,"
+    # 비교와 같은 표본 잣대(25.2220) — 개장 뒤 보낸 국내 시장가(`sent_at`·`b_market`)·그날 일봉 없음(`p_close`)
+    " b.sent_at, b.market AS b_market, p.close AS p_close"
     " FROM paper_broker_orders b LEFT JOIN paper_orders o ON o.id = b.paper_order_id"
     " LEFT JOIN paper_fills f ON f.order_id = b.paper_order_id"
+    " LEFT JOIN prices p ON p.stock_id = o.stock_id AND p.date = b.trade_date"
     " WHERE b.broker = ? AND b.trade_date < ? AND b.account_id = ?"
 )
 #: 성과 계열 — 국내 배치가 적는 **계좌 전체 원화 총액**(`summary_json.account_krw.total_krw`, 25.1497).
@@ -368,7 +417,7 @@ def guard_held(client: Any, 증권사: str, 계좌: str) -> set[int]:
     from batch.services.paper import side_rank
 
     판날 = {int(r[0]): str(r[1]) for r in client.execute(
-        GUARD_SELLS_SQL, [증권사, bm.REASON_GUARD_STOP, bm.REASON_GUARD_TAKE]).rows}  # fmt: skip
+        GUARD_SELLS_SQL, [증권사, *bm.GUARD_REASON_LIST]).rows}  # fmt: skip
     if not 판날:
         return set()
     체결: dict[int, list[tuple[str, str, int]]] = {}
@@ -714,6 +763,7 @@ def run(
         if db.quota_reason(exc):
             raise
         기록["defer_mark_error"] = type(exc).__name__
+    mark_late_sends(비교줄)
     비교 = bm.compare(비교줄)
     if 장중0 & set(내부):  # 잔고 대보기에서 뺀 종목 수를 요약에도(웹·주간 요약 끝 줄, 25.1772 교차검증 [권고])
         비교["guard_held"] = len(장중0 & set(내부))
@@ -721,6 +771,7 @@ def run(
     try:
         칸줄 = client.execute(CELLS_SQL, [증권사, 오늘.isoformat(), 베낌]).dicts()
         mark_nonjudgment_defers(client, 칸줄, market)
+        mark_late_sends(칸줄)
         비교 |= bm.cells(칸줄)
     except Exception as exc:  # noqa: BLE001
         기록["cells_error"] = type(exc).__name__
@@ -816,7 +867,7 @@ def run(
     # 같은 날 다시 돌 때 오늘 예약 매수만큼 줄었다)
     오늘산 = ({} if 미국 else
             {int(r[0]): int(r[1] or 0) for r in client.execute(BOUGHT_TODAY_SQL, [증권사, 오늘.isoformat()]).rows})
-    낸수 = client.execute(SENT_TODAY_SQL, [증권사, 오늘.isoformat(), bm.REASON_GUARD_STOP, bm.REASON_GUARD_TAKE]).rows
+    낸수 = client.execute(SENT_TODAY_SQL, [증권사, 오늘.isoformat(), *bm.GUARD_REASON_LIST]).rows
     # 판정 대기 매수는 정리 계산에서 내부 보유로 친다(25.1715) — 찼으면 곧 장부에 들고, 안 찼으면 다음 날 정리
     대기 = {int(r["stock_id"]): int(r["q"] or 0)
            for r in client.execute(PENDING_BUY_QTY_SQL, [베낌, market, 오늘.isoformat()]).dicts()}  # fmt: skip

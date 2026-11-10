@@ -511,6 +511,9 @@ def test_daily_summary_stored_and_weekly_reads_it(c: Client) -> None:
 
     job.run(c, "KR", _at("08:40"), session=_Sess(), sleep=lambda _x: None, clock=lambda: _at("08:40"))
     c.conn.execute("UPDATE paper_orders SET status = 'expired' WHERE id IN (101, 103)")
+    # 그날 일봉 — 없으면 KIS만 참 줄이 "일봉 없음" 으로 표본 밖이 된다(25.2220)
+    c.conn.execute("INSERT INTO prices (stock_id, date, open, high, low, close, volume, currency, source, fetched_at)"
+                   " VALUES (1, '2026-10-16', 9900, 9950, 9700, 9850, 1000, 'KRW', 't', 't')")  # fmt: skip
     다음 = _Sess(executions=[kv.Execution("20261016", "N1", "005930", "buy", 3, 3, 9_790.0, 0, False),
                             kv.Execution("20261016", "N2", "005930", "buy", 2, 0, None, 0, False)])  # fmt: skip
     기록 = job.run(c, "KR", _at("08:40", "2026-10-19"), session=다음, sleep=lambda _x: None,

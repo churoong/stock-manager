@@ -19,14 +19,17 @@ def test_어긋난_주문을_일봉으로_가른다() -> None:
         _줄("unfilled", 0, "filled", 9_900, 9_950),     # 지정가 아래로 내려왔는데 KIS 안 참
         _줄("unfilled", 0, "filled", 10_000, 10_000),   # 딱 닿음 — 대기 순서
         _줄("filled", 10, "expired", 9_950, 10_100),    # 장중 닿았는데 종가는 위 — 가상 보수
-        _줄("filled", 10, "expired", None, None),       # 일봉 없음
+        _줄("filled", 10, "expired", None, None),       # 일봉 없음 — KIS 가 찼으니 시세 결손, 표본 밖(25.2220)
         _줄("filled", 10, "filled", 9_900, 9_950),      # 둘 다 참 — 까닭 없음
         _줄("unfilled", 0, "filled", 9_000, 9_000, limit=None, order_type="market", side="sell"),  # 시장가 미체결
     ]
     s = bm.compare(rows)
-    assert (s["internal_only"], s["kis_only"], s["both"]) == (3, 2, 1)
-    assert s["mismatch_causes"] == {"through_unfilled": 1, "exact_touch": 1, "intraday_touch": 1, "no_bar": 1,
+    assert (s["internal_only"], s["kis_only"], s["both"]) == (3, 1, 1)
+    assert s["mismatch_causes"] == {"through_unfilled": 1, "exact_touch": 1, "intraday_touch": 1,
                                     "market_unfilled": 1}  # fmt: skip
+    assert (s["excluded"], s["excluded_no_bar"]) == (1, 1)
+    # 까닭 함수는 그대로 일봉 없음으로 가른다
+    assert bm.mismatch_cause(rows[3], False) == "no_bar"
     줄 = bm.compare_lines(s, 0, "2026-10-21")
     i = 줄.index("  어긋난 까닭:")
     assert any("장중엔 지정가에 닿았는데 종가는 위" in x for x in 줄[i + 1:])

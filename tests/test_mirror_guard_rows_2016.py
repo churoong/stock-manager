@@ -24,7 +24,8 @@ def test_하루_주문_상한은_장중_줄을_세지_않는다() -> None:
     _줄(c, 1, bm.REASON_CLEANUP)
     _줄(c, 1, bm.REASON_GUARD_STOP)
     _줄(c, 3, bm.REASON_GUARD_TAKE)
-    수 = c.q(bmj.SENT_TODAY_SQL, [bmj.BROKER, "2026-10-30", bm.REASON_GUARD_STOP, bm.REASON_GUARD_TAKE])
+    _줄(c, 2, bm.REASON_GUARD_TRAIL)  # 고점 대비 익절(25.2220)
+    수 = c.q(bmj.SENT_TODAY_SQL, [bmj.BROKER, "2026-10-30", *bm.GUARD_REASON_LIST])
     assert 수 == [(1,)]  # 정리 줄 하나만
 
 

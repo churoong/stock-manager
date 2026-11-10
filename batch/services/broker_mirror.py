@@ -29,10 +29,16 @@ REASON_CLEANUP = "정리"
 #: 짝(가상 판정)이 없어 따로 센다
 REASON_GUARD_STOP = "장중손절"
 REASON_GUARD_TAKE = "장중익절"
+#: 장중 감시의 **고점 대비 익절**(trail — 현재가 ≤ 익절선, 값이 내려와서 나가는 매도, 25.2220). 예전엔 목표가 익절과
+#: 같은 `장중익절` 이라 실현손익 순서(`realized`)가 손절과 같은 "값 높은 것부터" 로 보낼 수 없었다. 25.2220 앞에 적은
+#: trail 줄은 `장중익절` 그대로다(목표가처럼 센다 — 고치지 않는다)
+REASON_GUARD_TRAIL = "장중익절(고점)"
 #: 장중 감시가 보내기 **전에** 기록 확인이 깨져 닫은 줄의 표지(message 머리) — 주문은 KIS 에 가지 않았다(25.2015).
 #: 다음 회차가 같은 줄로 다시 보낸다. 집계는 KIS 거부와 가른다(25.2017)
 GUARD_UNSENT_ORDER_MARK = "GUARD_UNSENT"
-GUARD_REASONS = frozenset({REASON_GUARD_STOP, REASON_GUARD_TAKE})
+#: 장중 매도 사유 — SQL 의 `reason IN (?, ?, ?)` 자리 순서(`jobs/intraday_guard`·`jobs/broker_mirror`)
+GUARD_REASON_LIST = (REASON_GUARD_STOP, REASON_GUARD_TAKE, REASON_GUARD_TRAIL)
+GUARD_REASONS = frozenset(GUARD_REASON_LIST)
 GUARD_HELD_SKIP = "장중 매도 뒤 지주사가 같은 보유를 듦 — 매수 베끼지 않음"
 STOP_FLOOR_SKIP = "장중 손절선 이하 회차 — 베끼지 않음"
 #: 주문가능 수량이 모자라 정리를 일부만 낸 까닭(25.1607)
@@ -345,15 +351,48 @@ NON_JUDGMENT_EXPIRY = (
 )  # fmt: skip
 
 
-def _판정밖(r: dict[str, Any]) -> bool:
-    """체결 판정과 무관한 줄 — 가상의 판정 아닌 만료이거나 KIS 거부(주문 경로 실패 — 따로 센다), 또는 장 열린 뒤 낸
-    시장가(가상은 종가 판정 — KIS 는 장중 체결이라 같은 잣대가 아니다. 체결 칸이 이미 빼던 것을 비교도, 25.1561)"""
+#: 표본 밖 가운데 따로 이름 붙여 세는 까닭(25.2220) — `compare` 의 `excluded_<열쇠>`. 합은 `excluded` 에도 든다
+EXCLUDED_NAMED = {
+    "late_send": "개장 뒤 보낸 국내 시장가",
+    "no_bar": "일봉 없음",
+}
+
+
+def _일봉없음(r: dict[str, Any]) -> bool:
+    """KIS 는 찼는데 가상은 그날 안 찼고 그날 일봉 행이 없는 줄(25.2220) — 가상은 행이 없어 정지로 봤지만
+    (`paper.halted`) KIS 가 찼다는 것 자체가 정지가 아니라는 증거라 체결 규칙 차이가 아니라 시세 결손이다. 넣으면
+    "KIS만 참" 으로 세져 괴리 알림이 "가상 판정이 비관" 으로 방향을 거꾸로 말했다. 일봉 칸(`p_close`)을 읽은 줄만
+    가른다 — 열쇠가 없으면(일봉을 붙이지 않은 호출) 모름이라 표본에 둔다. 진짜 정지(KIS 도 안 참)·가상만 참은 그대로
+    남는다"""
+    if "p_close" not in r or r["p_close"] is not None:
+        return False
+    kis = r.get("status") in ("filled", "partial") and int(r.get("filled_qty") or 0) > 0
+    내부 = r.get("i_status") == "filled" and str(r.get("i_fill_date") or "")[:10] == str(r.get("trade_date") or "")[:10]
+    return kis and not 내부
+
+
+def _판정밖_까닭(r: dict[str, Any]) -> str | None:
+    """`_판정밖` 의 까닭 — 이름 붙여 세는 것(`EXCLUDED_NAMED` 열쇠)이면 그 열쇠, 나머지는 "other", 표본이면 None"""
     if r.get("status") == "rejected" or r.get("defer_no_judgment"):
         # 미룸 표시(25.1811) — 가상이 그 거래일에 판정하지 않고(시세·환율 없음) 미룬 매도. `jobs/broker_mirror` 가 단다
-        return True
+        return "other"
     if r.get("i_fill_basis") == "close" and not (r.get("side") == "buy" and r.get("i_order_type") != "market"):
-        return True
-    return r.get("i_status") == "expired" and str(r.get("i_note") or "").startswith(NON_JUDGMENT_EXPIRY)
+        return "other"
+    if r.get("late_open_send") and r.get("i_order_type") == "market":
+        # 개장 전에 만든(`fill_basis='open'`) 국내 시장가를 개장 뒤에 보냈다(25.2220 — 이어 돌기·늦은 실행, 25.2144).
+        # 가상은 시가로 판정하고 KIS 는 장중가에 차 같은 잣대가 아니다. 표시는 `jobs/broker_mirror.mark_late_sends`
+        # 가 단다. 지정가 매수는 판정이 같아 남는다
+        return "late_send"
+    if r.get("i_status") == "expired" and str(r.get("i_note") or "").startswith(NON_JUDGMENT_EXPIRY):
+        return "other"
+    return "no_bar" if _일봉없음(r) else None
+
+
+def _판정밖(r: dict[str, Any]) -> bool:
+    """체결 판정과 무관한 줄 — 가상의 판정 아닌 만료이거나 KIS 거부(주문 경로 실패 — 따로 센다), 또는 장 열린 뒤 낸
+    시장가(가상은 종가 판정 — KIS 는 장중 체결이라 같은 잣대가 아니다. 체결 칸이 이미 빼던 것을 비교도, 25.1561),
+    개장 전에 만들어 개장 뒤 보낸 국내 시장가·일봉 없는 날 KIS 만 찬 줄(25.2220)"""
+    return _판정밖_까닭(r) is not None
 
 
 def _까닭(message: str | None) -> str:
@@ -419,6 +458,10 @@ def mismatch_cause(r: dict[str, Any], internal: bool) -> str:
     side = str(r.get("side"))
     보낸 = r.get("b_limit")
     if r.get("i_order_type") == "market" or r.get("i_limit") is None:
+        if r.get("p_close") is None:
+            # 그날 일봉이 없으면 시장가도 가를 재료가 없다 — 예전엔 지정가 갈래의 일봉 검사 앞에서 돌아가 "설명 안 됨"
+            # 으로 셌다(25.2220, 11-10 결함 회차 [권고])
+            return "no_bar"
         # 미국 시장가(매도·시가 일괄 매수)는 KIS 에 종가 ±10% 지정가로 나간다(`plan` 의 대신가) — 그날 고가·저가가
         # 그 값에 못 미쳤으면 접수 문제가 아니라 갭이다
         재료 = internal and 보낸 is not None and r.get("p_low") is not None and r.get("p_high") is not None
@@ -498,8 +541,11 @@ def compare(rows: list[dict[str, Any]]) -> dict[str, Any]:
             칸["rejected"] += 1
             까닭[_까닭(r.get("message"))] += 1
             continue
-        if _판정밖(r):
+        밖 = _판정밖_까닭(r)
+        if 밖 is not None:
             칸["excluded"] += 1
+            if 밖 in EXCLUDED_NAMED:
+                칸[f"excluded_{밖}"] += 1
             continue
         칸["n"] += 1
         kis = r["status"] in ("filled", "partial") and int(r.get("filled_qty") or 0) > 0
@@ -528,6 +574,8 @@ def compare(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "mismatch_causes": dict(어긋남.most_common()),
         **({"guard_rejected": 칸["guard_rejected"]} if 칸["guard_rejected"] else {}),
         **({"guard_unsent": 칸["guard_unsent"]} if 칸["guard_unsent"] else {}),  # KIS 에 안 간 장중 줄(25.2017)
+        # 표본 밖 가운데 이름 붙인 까닭(25.2220) — 있을 때만
+        **{f"excluded_{k}": 칸[f"excluded_{k}"] for k in EXCLUDED_NAMED if 칸[f"excluded_{k}"]},
     }  # fmt: skip
 
 
@@ -852,9 +900,10 @@ def realized(
 
     - **티커(`code`)로 묶는다**(25.1698) — KIS 잔고는 티커 하나에 평균 원가 하나다
     - 같은 날은 매도 먼저(가상모의투자 `paper.realized` 와 같은 순서 — 주문은 장 전에 한꺼번에), 다만 매도가 그때
-      기록 보유보다 많으면 같은 날 매수를 먼저 넣는다(개장 뒤 다시 돌아 산 날 판 것). **장중 손절**(`reason` 장중손절)과
-      그날 매수는 값 높은 것부터 — 매수는 지정가·손절은 체결가, 지정가보다 싸게 찬 매수(시가 단일가)는 맨 앞
-      (25.1810·25.1812·25.1813·25.1814). 일봉·주문값으로 순서를 추정한다 — 마감·VI 단일가 체결은 틀릴 수 있다
+      기록 보유보다 많으면 같은 날 매수를 먼저 넣는다(개장 뒤 다시 돌아 산 날 판 것). **장중 손절**(`reason` 장중손절)·
+      **고점 대비 익절**(장중익절(고점))과 그날 매수는 값 높은 것부터 — 매수는 지정가·매도는 체결가. 지정가보다 싸게 찬
+      매수(시가 단일가)·시장가 매수는 장중 매도(목표가 익절 포함) 앞(25.1810·25.1812·25.1813·25.1814·25.2220).
+      일봉·주문값으로 순서를 추정한다 — 마감·VI 단일가 체결은 틀릴 수 있다
       `[확인필요: 체결 시각 — 탐침 25.1767 로 시각 정렬]`
     - 평균 원가는 **매수로만** 바뀐다(매도는 수량만 줄인다). 그래서 KIS 가 기록보다 **많이** 든 것(기록 밖 매수 —
       `unknown` 으로 닫은 매수가 실제로 참·손 매수·기록 전 보유)은 원가를 흐리고, **적게** 든 것(기록 밖 매도)은
@@ -955,23 +1004,29 @@ def realized(
         # 는 앞 경우를, 25.1810 의 "손절은 늘 매수 뒤" 는 뒤 경우를, 25.1812 의 "체결가로" 는 갭 하락 뒤 반등한 날을
         # 틀렸다. 지정가 없는 매수(시장가 — 시가에 찬다)·지정가보다 싸게 찬 매수(시가 단일가, 25.1814)·값 모르는
         # 매수는 앞, 값 모르는 손절은 뒤, 같은 값이면 회차
-        # 먼저. 장중 **익절**(목표가·고점 대비)은 선후를 정할 수 없어 예전처럼 매도 먼저
+        # 먼저. 장중 **목표가 익절**은 회차 지정가와 선후를 정할 수 없어 예전처럼 매도 먼저. 장중 **고점 대비 익절**
+        # (trail — 현재가 ≤ 익절선, 값이 내려와서 나간다)은 손절과 같은 갈래(25.2220, 11-10 결함 회차 [권고]). 시가
+        # 단일가에 찬 매수(지정가보다 싸게 참)·지정가 없는 시장가 매수는 장중 매도의 종류와 상관없이 그 앞 — 09:00 에
+        # 차고, 장중 감시는 개장 5분 뒤에 연다(예전엔 목표가·고점 대비 익절이 이 매수보다 앞에 서 평균 원가가 틀렸다)
         # `[확인필요: 체결 시각 — 탐침 25.1767]`
         def 수(v: Any) -> float | None:
             return float(v) if v is not None and float(v) > 0 else None
 
         def 순서(x: dict[str, Any]) -> tuple[int, float, int, int]:
-            if x["side"] == "sell" and x.get("reason") != REASON_GUARD_STOP:
-                return (0, 0.0, 0, int(x["id"]))
+            # 0 아침 베낀 매도 · 1 시가 단일가·시장가 매수 · 2 장중 목표가 익절 · 3 손절·고점 대비 익절과 나머지 매수
+            if x["side"] == "sell" and x.get("reason") not in (REASON_GUARD_STOP, REASON_GUARD_TRAIL):
+                return (2 if x.get("reason") == REASON_GUARD_TAKE else 0, 0.0, 0, int(x["id"]))
             if x["side"] == "sell":
                 값 = 수(x.get("avg_price"))
-                return (1, -값 if 값 is not None else float("inf"), 1, int(x["id"]))
+                return (3, -값 if 값 is not None else float("inf"), 1, int(x["id"]))
             값, 체결 = 수(x.get("limit_price")), 수(x.get("avg_price"))
-            if 값 is not None and 체결 is not None and 체결 < 값:
-                # 장 전에 낸 지정가 매수가 지정가보다 싸게 찼다 = 시가 단일가 체결 — 개장 5분 뒤 시작하는 장중 손절보다
-                # 늘 먼저(25.1814, 25.1813 교차검증 [권고]: 갭이 회차 지정가 아래로 열린 뒤 반등해 손절된 날)
-                return (1, float("-inf"), 0, int(x["id"]))
-            return (1, -값 if 값 is not None else float("-inf"), 0, int(x["id"]))
+            if 값 is None or (체결 is not None and 체결 < 값):
+                # 지정가 없는 매수(시장가 — 시가에 찬다)·장 전에 낸 지정가 매수가 지정가보다 싸게 찼다 = 시가 단일가
+                # 체결 —
+                # 개장 5분 뒤 시작하는 장중 매도보다 늘 먼저(25.1814, 25.1813 교차검증 [권고]: 갭이 회차 지정가 아래로
+                # 열린 뒤 반등해 손절된 날 · 25.2220: 목표가·고점 대비 익절도)
+                return (1, 0.0, 0, int(x["id"]))
+            return (3, -값, 0, int(x["id"]))
 
         줄 = sorted(날들.get(날, []), key=순서)
         넣음: set[int] = set()
