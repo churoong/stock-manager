@@ -115,8 +115,8 @@ ALERT_UPSERT = (
     "INSERT INTO alerts (stock_id, market, trade_date, trigger_type, message, data, created_at, sent_at)"
     " VALUES (?, ?, ?, 'analysis', ?, ?, ?, ?) ON CONFLICT (stock_id, trigger_type, trade_date) DO UPDATE SET"
     " message = excluded.message, data = excluded.data, created_at = excluded.created_at, sent_at = excluded.sent_at,"
-    # 같은 날 다시 낸 분석은 새 문구다 — 안 읽음으로 되돌린다(웹 `alertWrite` 와 같은 규칙, 25.797·25.2225). 예전엔
-    # 읽은 옛 행 위에 새 결과를 써도 알림 센터 '안 읽음' 수·필터에서 빠졌다
+    # 같은 날 다시 낸 분석은 새 결과다 — 다시 쓸 때마다 안 읽음으로 되돌린다(25.2225). 웹 `alertWrite` 는 조용시간에
+    # 미룬 행을 되살릴 때만 되돌린다(25.797) — 범위가 다르다. 예전엔 읽은 옛 행에 새 결과를 써도 '안 읽음' 에서 빠졌다
     " is_read = 0"
 )
 
