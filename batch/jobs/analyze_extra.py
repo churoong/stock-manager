@@ -114,7 +114,10 @@ REQUEST_UPDATE = "UPDATE analysis_requests SET status = ?, finished_at = ?, note
 ALERT_UPSERT = (
     "INSERT INTO alerts (stock_id, market, trade_date, trigger_type, message, data, created_at, sent_at)"
     " VALUES (?, ?, ?, 'analysis', ?, ?, ?, ?) ON CONFLICT (stock_id, trigger_type, trade_date) DO UPDATE SET"
-    " message = excluded.message, data = excluded.data, created_at = excluded.created_at, sent_at = excluded.sent_at"
+    " message = excluded.message, data = excluded.data, created_at = excluded.created_at, sent_at = excluded.sent_at,"
+    # 같은 날 다시 낸 분석은 새 문구다 — 안 읽음으로 되돌린다(웹 `alertWrite` 와 같은 규칙, 25.797·25.2225). 예전엔
+    # 읽은 옛 행 위에 새 결과를 써도 알림 센터 '안 읽음' 수·필터에서 빠졌다
+    " is_read = 0"
 )
 
 
