@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import inspect
+import re
 
 import pytest
 
@@ -49,3 +50,30 @@ def test_까닭_글이_buy_orders_와_같다() -> None:
     src = inspect.getsource(job.buy_orders)
     for 까닭 in pp.BUY_FAULT_SKIPS:
         assert f'{{"skipped": "{까닭}"}}' in src, 까닭
+
+
+def test_같은_까닭은_한_줄로_모은다() -> None:
+    """미국 실행 환율 없음 — 배분 계좌가 모두 같은 날 멈춘다. 계좌마다 줄을 세우면 텔레그램 세 줄이 밀렸다(25.2227)"""
+    p = {"accounts": {aid: {"buy": {"skipped": "환율 없음"}} for aid in ("A", "B", "C", "D", "E", "G", "H")}}
+    p["accounts"]["X"] = {"etf": {"regime": "up"}, "buy": {"skipped": "환율 없음"}}  # ETF 는 빠진다
+    줄 = [x for x in desk.checks(halted=False, paper=p, broker=None, recon_bad=[], warnings=0)
+         if "매수 단계 건너뜀" in x["text"]]  # fmt: skip
+    assert len(줄) == 1 and 줄[0]["level"] == "normal"
+    assert desk._이름("X") not in 줄[0]["text"] and desk._이름("H") in 줄[0]["text"]
+
+
+def test_buy_orders_의_글자_까닭은_모두_상수에_있다() -> None:
+    """반대 방향 — 새 이른 반환 글이 생기고 상수에 안 넣으면 조용히 정상 쉼이 된다(25.2227)"""
+    src = inspect.getsource(job.buy_orders)
+    글들 = set(re.findall(r'return \[\], \{"skipped": "([^"]+)"\}', src))
+    assert 글들 == set(pp.BUY_FAULT_SKIPS)
+
+
+def test_같은_날_다시_돌아_샀어도_사고로_남는다() -> None:
+    """보수 쪽 — 25.2145 의 '다시 돌아도 사고' 가 매수 이상 끝남에도 붙는다(25.2227 에 적음)"""
+    계좌 = {"H": {"buy": {"skipped": "환율 없음"}}}
+    줄들 = _읽기([{"paper": {"accounts": 계좌, "account_skips": desk.account_skips(계좌)}},
+                {"paper": {"accounts": {"H": {"buy": {"orders": 2}}}, "account_skips": {}}}])
+    for r in 줄들:
+        r["trade_date"] = "2026-10-10"
+    assert desk.batch_incident_days(줄들, {"daily_kr": ["2026-10-10"]}) == 1
