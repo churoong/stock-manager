@@ -464,7 +464,10 @@ def account_skips(accounts: dict[str, Any]) -> dict[str, str]:
     - `committee.error` — 투자위원회를 못 열어 그날 사지 않음(예외·헌장 검사 실패)
     - `holding.error` — 지주사(H) 단계가 깨져 그날 사지 않음(예외·설정 오류 — `holding_step` 의 error 는 모두 설정 오류)
     예전엔 셋 다 `partial` 로만 끝나 관문 "운영 무사고" 가 사고로 세지 않았다 — H 가 날마다 사지 못해도 무사고였다.
-    매수 단계의 정상 쉼(`buy.skipped` "배분하지 않는 날")은 넣지 않는다"""
+    - `buy.skipped` 가 이상 까닭(`pp.BUY_FAULT_SKIPS` — 환율 없음·미체결 달러 환율 모름·장부 현금 음수, 25.2226)
+      — 예전엔 buy 칸을 아예 보지 않아 H 가 장부 현금 음수로 사지 못해도 무사고였다
+    매수 단계의 정상 쉼(`buy.skipped` "배분하지 않는 날")과 후보별 건너뜀(목록 꼴)은 넣지 않는다. ETF 전술 계좌(`etf`
+    칸)는 따로 경고가 있다(`etf_tactical.warning`)"""
     out: dict[str, str] = {}
     for aid, rec in (accounts or {}).items():
         if not isinstance(rec, dict):
@@ -474,9 +477,20 @@ def account_skips(accounts: dict[str, Any]) -> dict[str, str]:
             v = rec.get(칸)
             if isinstance(v, dict) and v.get("error"):
                 글.append(f"{칸}: {v['error']}")
+        if (까닭 := _buy_fault(rec)) is not None:
+            글.append(f"buy: {까닭}")
         if 글:
             out[str(aid)] = "; ".join(글)[:200]
     return out
+
+
+def _buy_fault(rec: dict[str, Any]) -> str | None:
+    """계좌 기록의 매수 단계가 이상으로 일찍 끝난 까닭(`pp.BUY_FAULT_SKIPS`) — 아니면 None.
+    ETF 전술 계좌는 제 경고가 있다"""
+    b = rec.get("buy")
+    if "etf" in rec or not isinstance(b, dict) or not isinstance(b.get("skipped"), str):
+        return None
+    return b["skipped"] if b["skipped"] in pp.BUY_FAULT_SKIPS else None
 
 
 def _계좌건너뜀(row: dict[str, Any]) -> bool:
@@ -1241,6 +1255,9 @@ def checks(
             out.append({"level": "high", "text": f"가상 {nm} 헌장 오류: {'; '.join(a['charter_errors'])[:120]}"})
         if a.get("error"):  # 모르는 매도 규칙으로 그 계좌를 건너뛴 날(25.1871 막이) — 텔레그램 줄에만 있었다(25.1873)
             out.append({"level": "high", "text": f"가상 {nm} {str(a['error'])[:100]} — 오늘 평가·매매 안 함"})
+        if (까닭 := _buy_fault(a)) is not None:  # 매수 단계 이상 끝남(25.2226)
+            글 = f"가상 {nm} 매수 단계 건너뜀: {까닭} — 오늘 사지 않았습니다"
+            out.append({"level": pp.BUY_FAULT_SKIPS[까닭], "text": 글})
         if (경고 := _etf_warning(a)) is not None:
             # ETF 전술 X·Y 의 멈춤·못 산 날 — 리포트 끝 ⚠️ 줄과 같은 술어(25.2170, 25.2168 교차검증 [권고])
             out.append({"level": 경고[0], "text": f"가상 {nm} {경고[1]}"})

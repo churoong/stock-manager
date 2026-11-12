@@ -232,6 +232,15 @@ class Bar:
     etf: bool = False
 
 
+#: 매수 단계가 **이상으로** 일찍 끝난 까닭(`jobs/paper.buy_orders`) — 정상 쉼("배분하지 않는 날")과 달리 운용 점검·관문
+#: 무사고가 사고로 센다(25.2226, 11-12 결함 회차 [권고]). 앞은 까닭 글, 뒤는 점검 줄 수준
+BUY_FAULT_SKIPS: dict[str, str] = {
+    "환율 없음": "normal",
+    "미체결 달러 주문의 환율 모름": "normal",
+    "장부 현금이 음수": "high",
+}
+
+
 #: 국내 하루 가격제한폭(±30%, 2015-06-15 부터) — 시장가 주문의 체결 시점 가격이 그 끝이면 찼다고 보지 않는다(25.1553).
 #: 정의처는 `core/markets.KR_DAILY_LIMIT` 하나(25.1753·25.1755, 중복 규칙 감사 ⑦)
 KR_PRICE_LIMIT = markets.KR_DAILY_LIMIT

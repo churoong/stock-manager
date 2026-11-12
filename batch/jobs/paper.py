@@ -1818,7 +1818,7 @@ def buy_orders(
     """
     통화 = "KRW" if market == "KR" else "USD"
     환율 = 1.0 if 통화 == "KRW" else fx_rate
-    if not 환율:
+    if not 환율:  # 까닭 글은 `pp.BUY_FAULT_SKIPS` 와 같다(운용 점검이 사고로 센다, 25.2226)
         return [], {"skipped": "환율 없음"}
     예약 = pp.reserved_krw(open_buys, {"USD": fx_rate})
     if 예약 is None:
