@@ -137,3 +137,31 @@ describe("1분 안의 진짜 두 번째 체결을 확인하고 저장하면 들�
     expect(tradeInputSchema.safeParse(기본).success).toBe(true);
   });
 });
+
+describe("seen_at 은 가장 새 같은 행이고, 끼어든 행의 409 에도 실린다 (25.2229, 25.2228 교차검증 [권고])", () => {
+  it("RECENT_SAME_TRADE 는 가장 새 행을 돌려주고 셋째 체결의 확인 저장이 들어간다", async () => {
+    const { CONFIRM_REPEAT_WINDOW_MS, RECENT_SAME_TRADE, insertLowerBound } = await import("@/lib/portfolio");
+    const T0 = "2026-10-10T01:00:00.000Z";
+    const T10 = "2026-10-10T01:00:10.000Z";
+    expect(넣기(T0, insertLowerBound(Date.parse(T0), 10 * 60_000))).toBe(1);
+    expect(넣기(T10, insertLowerBound(Date.parse(T10), CONFIRM_REPEAT_WINDOW_MS, T0))).toBe(1);
+    const 본 = db.prepare(RECENT_SAME_TRADE).get(1, "buy", "2026-10-08", 70000, 10, "2026-10-10T00:00:00.000Z") as {
+      created_at: string;
+    };
+    expect(본.created_at).toBe(T10); // ASC 면 T0 — 셋째 확인이 둘째 행에 막혀 거짓 '들어갔습니다' 로 돌아간다
+    const T20 = "2026-10-10T01:00:20.000Z";
+    expect(넣기(T20, insertLowerBound(Date.parse(T20), CONFIRM_REPEAT_WINDOW_MS, 본.created_at))).toBe(1);
+  });
+
+  it("배당 질의도 가장 새 행부터", async () => {
+    const { RECENT_SAME_DIVIDEND } = await import("@/lib/portfolio");
+    expect(RECENT_SAME_DIVIDEND).toMatch(/ORDER BY created_at DESC LIMIT 1/);
+  });
+
+  it("확인과 쓰기 사이에 끼어든 행의 409 도 seen_at 을 싣는다 — 매매·배당 둘 다", () => {
+    for (const 경로 of ["trades", "dividends"]) {
+      const 원문 = readFileSync(join(process.cwd(), "app", "api", 경로, "route.ts"), "utf-8");
+      expect(원문, 경로).toContain("seen_at: 끼어든.created_at");
+    }
+  });
+});
