@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import FlagCriteria from "@/components/FlagCriteria";
 import { bodyOf, readJson } from "@/lib/http";
-import { confirmNeeded, confirmPrompt, CONFIRM_CANCEL, type ConfirmKind } from "@/lib/confirm";
+import { confirmNeeded, confirmPrompt, confirmSeenAt, CONFIRM_CANCEL, type ConfirmKind } from "@/lib/confirm";
 import { costText, dividendBody, readAmount, unreadableAmount, estimateWithholding, recalcPending, money, pct, pctSuffix, LIST_LIMIT, lookthroughLines, type Lookthrough, pnlClass, pctClass, qtyText, reviewPctDigits, signedInt, signedWon, taxFieldLabel, tradeBody, withholdingRate, won } from "@/lib/portfolio";
 type DividendTaxes = { kr_dividend_pct?: number | null; us_dividend_pct?: number | null };
 
@@ -538,7 +538,8 @@ export function TradeForm({
   const num = readAmount; // 쉼표를 빼고 읽는다. 못 읽으면 NaN — 보내기 전에 막는다 (25.642)
 
   // `confirmed` 는 사용자가 확인 창에서 "그래도 저장" 한 종류들 — 서버가 묻는 것 하나에 답하고 모아서 다시 보낸다 (25.945)
-  const submit = async (confirmed: ReadonlySet<ConfirmKind> = new Set()) => {
+  // `seenAt` — 중복 409 가 본 앞 행 시각. "그래도 저장" 에 `confirm_after` 로 되돌려 보낸다 (docs/infra.md 25.2228)
+  const submit = async (confirmed: ReadonlySet<ConfirmKind> = new Set(), seenAt?: string) => {
     if (!stock) return setErr("종목을 고르세요");
     // **보이는 칸만** 본다 — 숨은 환율·세금 칸의 옛 글이 저장을 막지 않게 (25.265 원칙, 25.645 교차검증)
     const 못읽음 = unreadableAmount({
@@ -555,7 +556,7 @@ export function TradeForm({
       // 보이는 칸만 싣는다 (docs/infra.md 25.265)
       body: JSON.stringify(tradeBody({
         stockId: stock.id, currency: stock.currency, side, date, price: num(price), quantity: num(qty),
-        fx: num(fx), fee: num(fee), tax: num(tax), horizon, memo, confirmed,
+        fx: num(fx), fee: num(fee), tax: num(tax), horizon, memo, confirmed, seenAt,
       })),
     });
     const j = bodyOf<Saved & Record<string, unknown>>(r);
@@ -563,7 +564,7 @@ export function TradeForm({
     // 서버가 "그래도 저장할까요?" 를 묻는다 — 같은 매매 두 번(25.785), 체결가가 종가와 100배(25.789). 확인 루프는 하나다 (25.945)
     const 물음 = r.ok ? null : confirmNeeded(j, confirmed);
     if (물음) {
-      if (confirm(confirmPrompt(물음, j.errors))) return submit(new Set([...confirmed, 물음]));
+      if (confirm(confirmPrompt(물음, j.errors))) return submit(new Set([...confirmed, 물음]), confirmSeenAt(j, 물음, seenAt));
       // 중복을 취소하면 **목록만 다시 읽는다** (25.789·25.790, 교차검증) — 첫 저장이 실패처럼 보였을 때는 목록이 옛것이라 "목록을 확인"
       // 할 수 없었다. `onChanged` 는 "저장했습니다" 띠까지 띄워 방금 취소한 요청이 저장된 것으로 읽혔다
       if (물음 === "duplicate") onReload?.();
@@ -728,7 +729,7 @@ function Dividends({ dividends, taxes, taxesUnread, onChanged }: { dividends: Di
     // 세전 칸 입력은 세전바뀜 이 맡는다 — 여기서는 종목·세율이 바뀔 때만 다시 채운다
   }, [stock?.currency, 세율]);
 
-  const submit = async (confirmed: ReadonlySet<ConfirmKind> = new Set()): Promise<void> => {
+  const submit = async (confirmed: ReadonlySet<ConfirmKind> = new Set(), seenAt?: string): Promise<void> => {
     if (!stock) return setErr("종목을 고르세요");
     const 못읽음 = unreadableAmount({ "세전 금액": gross, 세금: tax, "받은 주식 수": qty, ...(stock.currency !== "KRW" ? { 환율: fx } : {}) });
     if (못읽음) return setErr(못읽음);
@@ -737,7 +738,7 @@ function Dividends({ dividends, taxes, taxesUnread, onChanged }: { dividends: Di
     const r = await readJson("/api/dividends", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(dividendBody({ stockId: stock.id, currency: stock.currency, date, gross: num(gross), tax: num(tax), fx: num(fx), quantity: num(qty), confirmed })),
+      body: JSON.stringify(dividendBody({ stockId: stock.id, currency: stock.currency, date, gross: num(gross), tax: num(tax), fx: num(fx), quantity: num(qty), confirmed, seenAt })),
     });
     const j = bodyOf<Saved & Record<string, unknown>>(r);
     setBusy(false);
@@ -745,7 +746,7 @@ function Dividends({ dividends, taxes, taxesUnread, onChanged }: { dividends: Di
     // 취소면 저장하지 않았다고만 말한다 — `onChanged` 는 "저장했습니다" 띠를 띄운다(25.790)
     const 물음 = r.ok ? null : confirmNeeded(j, confirmed);
     if (물음) {
-      if (confirm(confirmPrompt(물음, j.errors))) return submit(new Set([...confirmed, 물음]));
+      if (confirm(confirmPrompt(물음, j.errors))) return submit(new Set([...confirmed, 물음]), confirmSeenAt(j, 물음, seenAt));
       return setErr(j.errors?.join(", ") ?? CONFIRM_CANCEL[물음]);
     }
     if (!r.ok) return setErr(j.errors?.join(", ") ?? "저장 실패");

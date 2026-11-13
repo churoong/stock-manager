@@ -62,6 +62,8 @@ export const tradeInputSchema = z.object({
   memo: z.string().max(200).nullable().optional(),
   /** 방금 같은 매매가 저장됐다는 409 를 본 뒤 **그래도 저장**을 고른 요청 (docs/infra.md 25.785) */
   confirm_duplicate: z.boolean().optional(),
+  /** 중복 409 가 본 앞 행의 created_at(`seen_at`) — 그 행은 이 확인의 재전송이 아니다 (docs/infra.md 25.2228) */
+  confirm_after: z.iso.datetime().optional(),
   /** 체결가가 종가와 100배 넘게 달라 409 를 본 뒤 **그래도 저장** (역분할 100:1 넘는 종목의 옛 매매, docs/infra.md 25.789) */
   confirm_price: z.boolean().optional(),
 }).superRefine((v, ctx) => {
@@ -140,6 +142,8 @@ export const dividendInputSchema = z.object({
   memo: z.string().max(200).nullable().optional(),
   /** 방금 같은 배당이 있다는 확인을 보고도 저장한다 (25.829) */
   confirm_duplicate: z.boolean().optional(),
+  /** 중복 409 가 본 앞 행의 created_at(`seen_at`) — 매매와 같다 (docs/infra.md 25.2228) */
+  confirm_after: z.iso.datetime().optional(),
   /** 넣은 원금보다 큰 배당이라는 확인을 보고도 저장한다 — 기록 전부터 든 주식의 배당일 수 있다 (25.934) */
   confirm_size: z.boolean().optional(),
 });
@@ -193,6 +197,8 @@ export function tradeBody(f: {
   horizon: "short" | "mid" | "long"; memo: string;
   /** 사용자가 확인 창에서 "그래도 저장" 한 종류들 (docs/infra.md 25.945, `lib/confirm`) */
   confirmed?: ReadonlySet<ConfirmKind>;
+  /** 중복 409 의 `seen_at` — `confirm_after` 로 되돌려 보낸다 (25.2228) */
+  seenAt?: string;
 }) {
   return {
     stock_id: f.stockId, side: f.side, trade_date: f.date, price: f.price, quantity: f.quantity,
@@ -200,7 +206,7 @@ export function tradeBody(f: {
     fee: f.fee,
     tax: f.side === "sell" ? f.tax : null,
     horizon: f.horizon, memo: f.memo || null,
-    ...confirmFlags(f.confirmed ?? new Set()),
+    ...confirmFlags(f.confirmed ?? new Set(), f.seenAt),
   };
 }
 
@@ -210,11 +216,13 @@ export function dividendBody(f: {
   /** 배당을 받은 주식 수(선택). 기록한 매수보다 많으면 기록한 몫만 시간가중 수익률에 넣는다 (docs/infra.md 25.1261) */
   quantity?: number | null;
   confirmed?: ReadonlySet<ConfirmKind>;
+  /** 중복 409 의 `seen_at` (25.2228) */
+  seenAt?: string;
 }) {
   return {
     stock_id: f.stockId, pay_date: f.date, gross_amount: f.gross, tax: f.tax ?? 0, quantity: f.quantity ?? null,
     fx_rate: f.currency !== "KRW" ? f.fx : null,
-    ...confirmFlags(f.confirmed ?? new Set()),
+    ...confirmFlags(f.confirmed ?? new Set(), f.seenAt),
   };
 }
 
@@ -684,6 +692,29 @@ export const DUPLICATE_WINDOW_MS = 10 * 60_000;
  * 같은 매매를 1분 안에 일부러 세 번 넣는 일은 없다고 봤다
  */
 export const CONFIRM_REPEAT_WINDOW_MS = 60_000;
+
+/** `confirm_after` 없는 확인 저장이 0행일 때 — 저장된 것처럼 읽히지 않게 (25.2228) */
+export const CONFIRM_UNSAVED_TRADE =
+  "1분 안의 같은 매매와 구별할 수 없어 저장하지 않았습니다 — 목록을 확인하고, 두 번째 체결이 맞으면 1분 뒤 다시 저장해 주세요";
+export const CONFIRM_UNSAVED_DIVIDEND =
+  "1분 안의 같은 배당과 구별할 수 없어 저장하지 않았습니다 — 목록을 확인하고, 두 번째 배당이 맞으면 1분 뒤 다시 저장해 주세요";
+
+/**
+ * 한 문장 쓰기(`*_INSERT_UNLESS_RECENT`)의 `created_at >= ?` 아래 경계 (docs/infra.md 25.2228, 결함 회차 [권고]).
+ *
+ * "그래도 저장" 은 1분 창(`CONFIRM_REPEAT_WINDOW_MS`)만 쓰는데, 그 창은 **409 가 물었던 앞 행 자신**도 덮었다 — 1분 안에
+ * 같은 체결을 정말 두 번 넣으면 확인 저장이 0행이 되고 "확인하고 저장한 같은 매매가 방금 들어갔습니다" 로 저장된 것처럼 읽혔다.
+ * 이제 화면이 409 의 `seen_at` 을 `confirm_after` 로 되돌려 보내고, 경계는 max(지금 − 창, confirm_after + 1ms) — 앞 행은 비켜 가고
+ * 그 확인 요청의 재전송(앞 행보다 뒤에 들어간 행)은 여전히 막는다. 경계는 지금을 넘지 않는다(시계가 어긋나 미래 값이 와도 재전송 막음을 끄지 않게).
+ * created_at 은 모두 `toISOString()`(길이 24 고정·UTC·'Z') 이라 글자 순서 = 시간 순서다. 경계도 같은 꼴로 다시 만든다.
+ * `confirm_after` 가 없으면(배포 사이의 옛 화면·확인 아닌 저장) 예전 그대로 지금 − 창
+ */
+export function insertLowerBound(nowMs: number, windowMs: number, confirmAfter?: string | null): string {
+  let 경계 = nowMs - windowMs;
+  const 앞 = confirmAfter ? Date.parse(confirmAfter) : NaN;
+  if (Number.isFinite(앞)) 경계 = Math.min(Math.max(경계, 앞 + 1), nowMs);
+  return new Date(경계).toISOString();
+}
 
 export const TRADE_INSERT = `INSERT INTO trades (stock_id, side, trade_date, price, quantity, currency, fx_rate, fx_rate_source,
   fee, tax, horizon, memo, snapshot_as_of, score_at_trade, signal_type_at_trade, sentiment_at_trade,

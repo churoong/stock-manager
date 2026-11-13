@@ -5,6 +5,8 @@ import {
   BUY_COST_UNTIL,
   CONFIRM_REPEAT_WINDOW_MS,
   DIVIDEND_INSERT_UNLESS_RECENT,
+  insertLowerBound,
+  CONFIRM_UNSAVED_DIVIDEND,
   DIVIDENDS_LIST,
   DUPLICATE_WINDOW_MS,
   RECENT_SAME_DIVIDEND,
@@ -63,10 +65,13 @@ export async function POST(request: Request) {
     // 방금 같은 배당이 있으면 한 번 묻는다 — 저장 응답이 끊긴 뒤 다시 누른 것일 수 있다 (25.829)
     if (!input.confirm_duplicate) {
       const 이후 = new Date(Date.now() - DUPLICATE_WINDOW_MS).toISOString();
-      const 같은 = (await execute(RECENT_SAME_DIVIDEND, [input.stock_id, input.pay_date, input.gross_amount, input.tax, 이후])).rows[0];
+      const 같은 = rowsToObjects<{ created_at: string }>(
+        await execute(RECENT_SAME_DIVIDEND, [input.stock_id, input.pay_date, input.gross_amount, input.tax, 이후]),
+      )[0];
       if (같은) {
         return NextResponse.json(
-          { errors: ["방금 같은 배당(종목·지급일·세전·세금)을 저장했습니다 — 한 번 더 저장할까요?"], duplicate: true, confirm_needed: "duplicate" },
+          // `seen_at` — 화면이 "그래도 저장" 에 `confirm_after` 로 되돌려 보낸다 (docs/infra.md 25.2228)
+          { errors: ["방금 같은 배당(종목·지급일·세전·세금)을 저장했습니다 — 한 번 더 저장할까요?"], duplicate: true, confirm_needed: "duplicate", seen_at: 같은.created_at },
           { status: 409 },
         );
       }
@@ -124,15 +129,26 @@ export async function POST(request: Request) {
     ];
     // 위 확인과 이 쓰기 사이에 같은 요청이 먼저 쓰였으면 넣지 않는다 (25.1127, 매매 25.1112 와 같은 모양).
     // 확인하고 저장한 요청도 1분 안의 재전송은 막는다 (25.1356) — 예전엔 장치 없는 `DIVIDEND_INSERT` 라 두 번 가면 두 행이었다
-    const 이후 = new Date(Date.now() - (input.confirm_duplicate ? CONFIRM_REPEAT_WINDOW_MS : DUPLICATE_WINDOW_MS)).toISOString();
+    // 확인 저장의 아래 경계는 409 가 본 앞 행(`confirm_after`) 바로 뒤 (25.2228, 매매와 같다)
+    const 이후 = input.confirm_duplicate
+      ? insertLowerBound(Date.now(), CONFIRM_REPEAT_WINDOW_MS, input.confirm_after)
+      : insertLowerBound(Date.now(), DUPLICATE_WINDOW_MS);
     const rs = await execute(DIVIDEND_INSERT_UNLESS_RECENT, [
       ...값들, input.stock_id, input.pay_date, input.gross_amount, input.tax, 이후,
     ]);
     if (rs.affectedRows === 0) {
+      // 확인 저장이면 다시 묻지 않는다. `confirm_after` 없는 확인(배포 사이 옛 화면)은 앞 행과 재전송을 구별할 수 없어
+      // 저장된 것처럼 말하지 않는다 (25.2228)
+      if (input.confirm_duplicate) {
+        const 말 = input.confirm_after ? "확인하고 저장한 같은 배당이 방금(1분 안) 들어갔습니다 — 목록을 확인해 주세요" : CONFIRM_UNSAVED_DIVIDEND;
+        return NextResponse.json({ errors: [말], duplicate: true }, { status: 409 });
+      }
+      // 확인과 쓰기 사이에 끼어든 같은 행 — 그 시각도 실어 "그래도 저장" 이 그 행에 막히지 않게 (25.2228)
+      const 끼어든 = rowsToObjects<{ created_at: string }>(
+        await execute(RECENT_SAME_DIVIDEND, [input.stock_id, input.pay_date, input.gross_amount, input.tax, 이후]),
+      )[0];
       return NextResponse.json(
-        input.confirm_duplicate
-          ? { errors: ["확인하고 저장한 같은 배당이 방금(1분 안) 들어갔습니다 — 목록을 확인해 주세요"], duplicate: true }
-          : { errors: ["같은 배당이 방금 저장됐습니다 — 응답이 늦어 다시 누른 것이면 목록을 확인해 주세요"], duplicate: true, confirm_needed: "duplicate" },
+        { errors: ["같은 배당이 방금 저장됐습니다 — 응답이 늦어 다시 누른 것이면 목록을 확인해 주세요"], duplicate: true, confirm_needed: "duplicate", ...(끼어든 ? { seen_at: 끼어든.created_at } : {}) },
         { status: 409 },
       );
     }

@@ -12,6 +12,8 @@ import {
   weekendNote,
   usLocalDateNote,
   TRADE_INSERT_UNLESS_RECENT,
+  insertLowerBound,
+  CONFIRM_UNSAVED_TRADE,
   TRADE_PRICE_BASIS,
   TRADES_LIST,
   capList,
@@ -95,6 +97,8 @@ export async function POST(request: Request) {
             errors: [`${userTimeOf(같은것.created_at)}(한국 시각)에 같은 매매(${input.trade_date} ${input.side === "buy" ? "매수" : "매도"} ${qtyText(input.quantity)}주 × ${input.price.toLocaleString()})가 이미 저장됐습니다 — 응답이 늦어 다시 누른 것이면 목록을 확인해 주세요`],
             duplicate: true,
             confirm_needed: "duplicate", // 화면의 확인 루프 하나가 읽는 이름 (25.945). 옛 깃발도 남긴다
+            // 본 앞 행의 시각 — 화면이 "그래도 저장" 에 `confirm_after` 로 되돌려 보낸다 (docs/infra.md 25.2228)
+            seen_at: 같은것.created_at,
           },
           { status: 409 },
         );
@@ -151,24 +155,32 @@ export async function POST(request: Request) {
     ];
     // 위 확인과 이 쓰기 사이에 같은 요청이 먼저 쓰였으면 넣지 않는다 (25.1112) — 확인과 쓰기를 한 문장으로.
     // 확인하고 저장한 요청도 1분 안의 재전송은 막는다 (25.1356) — 예전엔 장치 없는 `TRADE_INSERT` 라 두 번 가면 두 행이었다
-    const 창 = input.confirm_duplicate ? CONFIRM_REPEAT_WINDOW_MS : DUPLICATE_WINDOW_MS;
-    const 이후 = new Date(Date.now() - 창).toISOString();
+    // 확인 저장의 아래 경계는 409 가 본 앞 행(`confirm_after`) 바로 뒤 — 그 앞 행이 확인한 두 번째 체결을 막지 않게 (25.2228)
+    const 이후 = input.confirm_duplicate
+      ? insertLowerBound(Date.now(), CONFIRM_REPEAT_WINDOW_MS, input.confirm_after)
+      : insertLowerBound(Date.now(), DUPLICATE_WINDOW_MS);
     const rs = await execute(TRADE_INSERT_UNLESS_RECENT, [
       ...값들, input.stock_id, input.side, input.trade_date, input.price, input.quantity, 이후,
     ]);
     if (rs.affectedRows === 0) {
       if (input.confirm_duplicate) {
-        // 다시 묻지 않는다 — 확인한 저장은 이미 들어갔다
+        // 다시 묻지 않는다. `confirm_after` 가 있으면 막은 행은 앞 행보다 뒤에 들어간 것 — 이 확인 저장의 재전송이다.
+        // 없으면(배포 사이 옛 화면) 앞 행과 재전송을 구별할 수 없다 — 저장된 것처럼 읽히지 않게 말한다 (25.2228)
         return NextResponse.json(
-          { errors: ["확인하고 저장한 같은 매매가 방금(1분 안) 들어갔습니다 — 목록을 확인해 주세요"], duplicate: true },
+          { errors: [input.confirm_after ? "확인하고 저장한 같은 매매가 방금(1분 안) 들어갔습니다 — 목록을 확인해 주세요" : CONFIRM_UNSAVED_TRADE], duplicate: true },
           { status: 409 },
         );
       }
+      // 확인과 쓰기 사이에 끼어든 같은 행 — 그 시각도 실어 "그래도 저장" 이 그 행에 막히지 않게 (25.2228)
+      const 끼어든 = rowsToObjects<{ created_at: string }>(
+        await execute(RECENT_SAME_TRADE, [input.stock_id, input.side, input.trade_date, input.price, input.quantity, 이후]),
+      )[0];
       return NextResponse.json(
         {
           errors: ["같은 매매가 방금 저장됐습니다 — 응답이 늦어 다시 누른 것이면 목록을 확인해 주세요"],
           duplicate: true,
           confirm_needed: "duplicate",
+          ...(끼어든 ? { seen_at: 끼어든.created_at } : {}),
         },
         { status: 409 },
       );

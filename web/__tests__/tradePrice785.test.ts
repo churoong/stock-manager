@@ -120,7 +120,7 @@ describe("저장 재시도 중복 (25.785, 매매 입력 감사 #3)", () => {
     expect(경로).toContain("duplicate: true");
     expect(경로.indexOf("RECENT_SAME_TRADE, [")).toBeLessThan(경로.indexOf("await execute(TRADE_INSERT"));
     const 화면 = readFileSync("components/PortfolioView.tsx", "utf-8");
-    expect(화면).toContain("return submit(new Set([...confirmed, 물음]));"); // 확인 루프 하나 (25.945)
+    expect(화면).toContain("return submit(new Set([...confirmed, 물음]), confirmSeenAt(j, 물음, seenAt));"); // 확인 루프 하나 (25.945)
     // 25.789 (교차검증): 매도 재시도도 중복 확인에 먼저 닿는다, 취소면 목록을 다시 읽는다, 100배 넘는 체결가는 묻고 저장할 수 있다
     expect(경로.indexOf("RECENT_SAME_TRADE, [")).toBeLessThan(경로.indexOf("TRADES_FOR_HELD, ["));
     expect(화면).toContain("onReload?.();"); // 목록만 — "저장했습니다" 띠 없이 (25.790). 25.894 부터 폼은 TradeForm, 목록 다시 읽기는 고를 수 있다

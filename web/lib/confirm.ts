@@ -56,10 +56,27 @@ export function confirmNeeded(body: Record<string, unknown>, confirmed: Readonly
   return null;
 }
 
-/** 확인한 종류들을 요청 본문에 다는 깃발로. 확인한 것만 싣는다 — 안 한 것을 `false` 로 보내지 않는다 */
-export function confirmFlags(confirmed: ReadonlySet<ConfirmKind>): Partial<Record<(typeof CONFIRM_FLAG)[ConfirmKind], true>> {
-  const out: Partial<Record<(typeof CONFIRM_FLAG)[ConfirmKind], true>> = {};
+/**
+ * 중복 409 가 본 **앞 행의 시각**(`seen_at`, docs/infra.md 25.2228). "그래도 저장" 에 `confirm_after` 로 되돌려 보내야
+ * 서버가 그 앞 행을 "확인 요청의 재전송" 으로 오인하지 않는다 — 예전엔 1분 안의 진짜 두 번째 체결이 0행이 되고도 저장된 것처럼 읽혔다.
+ * 중복이 아닌 물음이면 이전 값을 그대로 둔다(확인 루프가 여러 번 돌아도 처음 본 시각을 잃지 않게)
+ */
+export function confirmSeenAt(body: Record<string, unknown>, kind: ConfirmKind, prev?: string): string | undefined {
+  if (kind === "duplicate" && typeof body.seen_at === "string" && body.seen_at) return body.seen_at;
+  return prev;
+}
+
+/**
+ * 확인한 종류들을 요청 본문에 다는 깃발로. 확인한 것만 싣는다 — 안 한 것을 `false` 로 보내지 않는다.
+ * 중복을 확인했고 서버가 본 앞 행 시각을 알면 `confirm_after` 로 함께 싣는다 (25.2228)
+ */
+export function confirmFlags(
+  confirmed: ReadonlySet<ConfirmKind>,
+  seenAt?: string,
+): Partial<Record<(typeof CONFIRM_FLAG)[ConfirmKind], true>> & { confirm_after?: string } {
+  const out: Partial<Record<(typeof CONFIRM_FLAG)[ConfirmKind], true>> & { confirm_after?: string } = {};
   for (const kind of confirmed) out[CONFIRM_FLAG[kind]] = true;
+  if (confirmed.has("duplicate") && seenAt) out.confirm_after = seenAt;
   return out;
 }
 
