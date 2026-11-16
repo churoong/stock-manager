@@ -85,6 +85,10 @@ LAST_MARKET_DAY_SQL = (
 LAST_CLOSE_SQL = (
     "SELECT close, date FROM prices WHERE stock_id = ? AND date <= ? AND close > 0 ORDER BY date DESC LIMIT 1"
 )
+#: 그날보다 앞 거래일 종가 — 국내 ETF 가격제한 기준가(25.2233)
+PREV_CLOSE_SQL = (
+    "SELECT close FROM prices WHERE stock_id = ? AND date < ? AND close > 0 ORDER BY date DESC LIMIT 1"
+)
 FX_SQL = "SELECT rate, date FROM fx_rates WHERE pair = 'USDKRW' AND date <= ? ORDER BY date DESC LIMIT 1"
 INDEX_FROM_SQL = "SELECT close, date FROM index_prices WHERE index_code = ? AND date >= ? ORDER BY date LIMIT 1"
 INDEX_NOW_SQL = "SELECT close, date FROM index_prices WHERE index_code = ? ORDER BY date DESC LIMIT 1"
@@ -919,9 +923,14 @@ def fill_orders(
             # 기다림이 끝났거나 뒤 날 행이 있다 — 그날 정지로 본다. 미루는 매도는 **이 실행의 주문 장**으로(`미룰장`):
             # `next_session(날)` 은 오늘보다 뒤처져 KIS 베끼기(그날 체결 장 주문만 보냄)가 그 매도를 내지 못했다
             # (25.1714 — 기다림 끝, 25.1803 — 뒤 날 행이 있을 때도)
+        국내etf = market == "KR" and _stock(client, o.stock_id, 종목캐시).get("asset_type") == "etf"
+        앞종가 = None
+        if 국내etf and 행 and 행[0]["close"] is not None:
+            # 가격제한 기준가(앞 거래일 종가) — ETF 5원 호가에서는 등락률로 되살린 값만으로 끝을 가를 수 없다(25.2233)
+            앞 = client.execute(PREV_CLOSE_SQL, [o.stock_id, str(행[0]["date"])[:10]]).rows
+            앞종가 = float(앞[0][0]) if 앞 else None
         bar = (pp.Bar(str(행[0]["date"]), 행[0]["open"], float(행[0]["close"]), 행[0]["volume"],
-                      행[0].get("change_pct"),
-                      etf=market == "KR" and _stock(client, o.stock_id, 종목캐시).get("asset_type") == "etf")
+                      행[0].get("change_pct"), etf=국내etf, prev_close=앞종가)
                if 행 and 행[0]["close"] is not None else None)  # fmt: skip
         # 판정은 순수 함수(`pp.judge_order` — judge → 당일 단타 진입 막기 → 정지·하한가 매도 미룸·청산, 25.2034).
         # 하한가로 갇힌 시장가 매도도 정지처럼 다음 장으로 미룬다(25.1553) — 취소하면 그 보유가 매도 없이 남는다

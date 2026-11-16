@@ -230,6 +230,8 @@ class Bar:
     change_pct: float | None = None  # 그날 등락률(%) — 국내 가격제한폭의 기준가를 되살린다(`limit_locked`, 25.1553)
     #: 국내 ETF 행인가 — 가격제한 끝을 ETF 호가 단위로 잰다(`kr_price_limits`, 25.2219). 판정 갈래는 바꾸지 않는다
     etf: bool = False
+    #: 국내 ETF 의 앞 거래일 종가 — 되살린 기준가 오차 범위 안이면 그것을 기준가로 쓴다(25.2233). 없으면 None
+    prev_close: float | None = None
 
 
 #: 매수 단계가 **이상으로** 일찍 끝난 까닭(`jobs/paper.buy_orders`) — 정상 쉼("배분하지 않는 날")과 달리 운용 점검·관문
@@ -276,8 +278,29 @@ def limit_locked(order: Order, bar: Bar, price: float) -> bool:
         # 등락률이 제한폭 밖이면 그날은 가격제한이 없는 날이다(정리매매·기준가 재설정) — 끝이 없다(25.1560,
         # 25.1553 반박 [권고]: 정리매매 매도를 하한가로 보고 20거래일 미뤘다)
         return False
-    상한, 하한 = kr_price_limits(bar.close / (1 + bar.change_pct / 100), etf=bar.etf)
-    return price >= 상한 if order.side == "buy" else price <= 하한
+    기준 = bar.close / (1 + bar.change_pct / 100)
+    if not bar.etf:
+        상한, 하한 = kr_price_limits(기준, etf=False)
+        return price >= 상한 if order.side == "buy" else price <= 하한
+    # ETF 는 2,000원 이상이 모두 5원 호가라, 소수 둘째 자리 등락률로 되살린 기준가 오차(기준가 × 0.005/(100+r))가
+    # 기준가 약 3.75만원부터 반 호가(2.5원)를 넘어 끝을 한 호가 옆으로 봤다 — KODEX 200 가격대에서 하한가 시장가
+    # 매도를 찬 것으로 적었다(25.2233, 11-16 결함 회차). 오차 범위 안의 호가 기준가 후보마다 끝을 내고 하나라도
+    # 닿으면 갇힌 것으로 본다(보수 쪽 — 주식 갈래는 그대로)
+    오차 = 기준 * 0.005 / (100 + bar.change_pct)
+    단위 = _etf_tick(기준)
+    # 오차 범위 **안의** 호가 기준가만 — 이웃 호가까지 넣으면 끝 한 호가 안쪽 값도 갇힌 것으로 봤다(교차 확인: 안쪽
+    # 79,202건 가운데 9할). 범위 안에 호가가 없으면(오차가 반 호가보다 작은 가격대) 가장 가까운 호가 하나 — 예전 길
+    아래칸, 위칸 = math.ceil((기준 - 오차) / 단위 - 1e-9), math.floor((기준 + 오차) / 단위 + 1e-9)
+    후보 = [k for k in range(아래칸, 위칸 + 1) if k > 0]
+    if bar.prev_close and abs(bar.prev_close - 기준) <= 오차 + 단위 / 2:
+        # 앞 거래일 종가가 되살린 기준가와 맞으면 그것이 기준가다 — 등락률만으로는 이웃 호가 기준가와 가를 수 없는
+        # 가격대(오차가 반 호가를 넘는 곳)에서 끝 한 호가 안쪽 값을 갇힌 것으로 보지 않게
+        끝들 = [kr_price_limits(bar.prev_close, etf=True)]
+    else:
+        끝들 = [kr_price_limits(k * 단위, etf=True) for k in 후보] or [kr_price_limits(기준, etf=True)]
+    if order.side == "buy":
+        return any(price >= 위 for 위, _ in 끝들)
+    return any(price <= 아래 for _, 아래 in 끝들)
 
 
 def kr_price_limits(base: float, etf: bool = False) -> tuple[float, float]:
