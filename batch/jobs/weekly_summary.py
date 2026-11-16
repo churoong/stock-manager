@@ -53,7 +53,11 @@ MAX_LINES = 8
 #: 값은 워크플로 cron 의 주기에 여유(휴장·한 번 건너뜀)를 더한 것이다. 주기가 바뀌면 여기도 바꾼다 —
 #: `tests/test_weekly_summary_943.py` 가 예약 워크플로의 작업 이름이 여기 있는지 본다
 EXPECTED_DAYS: dict[str, int] = {
-    "daily_kr": 4, "daily_us": 4, "sentiment": 4, "monitor_targets": 4, "index_prices": 4,
+    # `index_prices` 는 넣지 않는다 — 일일 배치가 시세 뒤에 안에서 부르고(`daily._collect_index_prices`)
+    # 실행 기록을 따로 남기지 않는다. 워크플로(index-prices.yml)는 손으로만 돈다. 넣으면 늘 "마지막 실행 N일 전"
+    # 거짓 경보였다(25.2230 — 11-15 주간 요약 "43일 전"). 지수가 묵으면 ETF 전술 국면이 '모름'(7일)·시장 국면
+    # '미판정' 으로 따로 드러난다
+    "daily_kr": 4, "daily_us": 4, "sentiment": 4, "monitor_targets": 4,
     "portfolio": 4, "sell_flags": 4, "scores": 4, "signals": 4,  # 거래일마다. 연휴(최장 11일)는 오탐이 될 수 있다
     "kis_flows": 4,  # 거래일마다 (25.987). KIS 가 30일만 주므로 길게 멈추면 그 구간은 영영 빈다
     # KIS모의투자 장중 손절·익절(25.1768) — 평일 장중 10분마다. 나흘 넘게 기록이 없으면 예약이 멈춘 것

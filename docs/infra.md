@@ -3277,6 +3277,7 @@ SQL read operations are forbidden (reads are blocked, ...)
 | 25.2227 | 25.2226 교차검증 — 매수 이상 끝남 점검 줄을 까닭별 한 줄로·다시 돌아도 사고 문서화·소급 범위·양방향 시험 |
 | 25.2228 | 1분 안의 진짜 같은 매매·배당을 '그래도 저장' 해도 저장되지 않으면서 '들어갔습니다' 라고 하던 것 (결함 루프 11-13) |
 | 25.2229 | 25.2228 교차검증 — seen_at 정렬(가장 새 행)·끼어든 행 갈래를 시험으로, 알고 받아들인 틈 기록 |
+| 25.2230 | 주간 요약 '오래 안 돈 작업' 의 index_prices 거짓 경보 — 일일 배치 안에서 도는 지수 수집을 따로 세던 것 |
 
 ### 25.1 왜 D1 인가
 
@@ -49226,3 +49227,17 @@ desk 를 쓰는 시험 파일 전부 통과.
 **시험**: `web/__tests__/tradeDuplicate1112.test.ts` 에 셋을 더했다. 웹 2,548 통과·tsc 통과.
 
 **되돌리기 확인**: `RECENT_SAME_TRADE` 를 ASC 로 바꾸면 정렬 시험이 깨진다.
+
+### 25.2230 주간 요약 '오래 안 돈 작업' 의 index_prices 거짓 경보 — 일일 배치 안에서 도는 지수 수집을 따로 세던 것
+
+**무엇**: 11-15 주간 운영 요약의 '기대 주기를 넘긴 예약 작업' 에 "index_prices: 마지막 실행 43일 전 (기대 4일 안)" 이 떴다. 거짓 경보다.
+- 까닭: 지수 일봉은 일일 배치가 시세 뒤에 안에서 받는다(`daily._collect_index_prices`). 그 부름은 `batch_runs` 에 `index_prices` 행을 남기지 않는다. 워크플로(index-prices.yml)는 과거치 채우기용 손 실행뿐이다(예약 없음).
+- 그래서 기대 주기 표(`weekly_summary.EXPECTED_DAYS`)에 있는 한 늘 경보였다. 실제 지수는 매일 들어온다 — 11-09·11-10 ETF 전술 국면이 그날 지수로 판정됐다(실행 기록 `etf.index_as_of`).
+- **고친 것**: 표에서 뺐다. 지수가 실제로 묵으면 ETF 전술 국면 '모름'(7일)·시장 국면 '미판정' 과 일일 배치의 지수 수집 실패 경고로 드러난다.
+- **같은 요약의 다른 줄**: "sectors: 마지막 실행 42일 전 (기대 40일 안)". 11-03 예약 실행은 워크플로 성공(conclusion success)인데 `batch_runs` 의 마지막 success·partial 은 42일 전이다. DART 한도 찬 날의 `skipped`(sectors.py:71)나 `ran_within` 건너뜀일 수 있다 — 그러면 월 1회 업종 갱신이 한 달 빠진 것이다. [확인필요: 다음 db-status 묶음에 `SELECT market, started_at, status, error_text FROM batch_runs WHERE job_name='sectors' ORDER BY started_at DESC LIMIT 4`] — handoff 에 적었다.
+
+**실제로 아팠나**: 돈·장부와 무관하다. 다만 주간 요약 '확인할 일' 에 늘 같은 거짓 줄이 서 있어, 진짜 멈춘 작업 줄이 묻힐 참이었다(우선순위 ① 알림).
+
+**시험**: `tests/test_weekly_index_prices_2230.py`(2) — 표에 없다, 일일 배치 안에서 부르고 워크플로는 손 실행뿐. 기존 주간 요약 시험 통과.
+
+**되돌리기 확인**: 표에 다시 넣으면 첫 시험이 깨진다.
