@@ -111,3 +111,21 @@ def test_배치가_ETF_앞_종가를_넘긴다(client, monkeypatch: pytest.Monke
                    " fetched_at) VALUES (3, '2026-10-19', 28020, 28020, 28020, 28020, 1000, -29.99, 'KRW', 't', 't')")
     _하루(c, monkeypatch, "2026-10-19", signals=False)
     assert {s for (s,) in c.q("SELECT status FROM paper_orders WHERE side = 'sell'")} == {"filled"}
+
+
+def test_앞_장_행이_빠지면_오래된_종가를_기준가로_믿지_않는다(client, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
+    """기준가 37,510원 하한가 26,260원(등락률 −29.99). 앞 장(10-16) 행이 빠지고 그 전 종가가 이웃 호가 37,505원이면,
+    그것을 기준가로 믿을 때 하한가를 놓쳤다 — 앞 거래일 행일 때만 쓰고 아니면 후보 길(보수)(25.2234)"""
+    from tests.test_etf_missing_bar_2216 import _매도_만들기, _종류
+    from tests.test_paper_job_1445 import _시세, _하루
+
+    c = client
+    _매도_만들기(c, monkeypatch)
+    _종류(c, "etf")
+    c.conn.execute("DELETE FROM prices WHERE stock_id = 3 AND date = '2026-10-16'")
+    c.conn.execute("UPDATE prices SET close = 37505 WHERE stock_id = 3 AND date = '2026-10-15'")
+    _시세(c, "2026-10-19", 10_000, 10_000)
+    c.conn.execute("INSERT INTO prices (stock_id, date, open, high, low, close, volume, change_pct, currency, source,"
+                   " fetched_at) VALUES (3, '2026-10-19', 26260, 26260, 26260, 26260, 1000, -29.99, 'KRW', 't', 't')")
+    _하루(c, monkeypatch, "2026-10-19", signals=False)
+    assert {s for (s,) in c.q("SELECT status FROM paper_orders WHERE side = 'sell'")} == {"open"}

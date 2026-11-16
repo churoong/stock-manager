@@ -87,7 +87,7 @@ LAST_CLOSE_SQL = (
 )
 #: 그날보다 앞 거래일 종가 — 국내 ETF 가격제한 기준가(25.2233)
 PREV_CLOSE_SQL = (
-    "SELECT close FROM prices WHERE stock_id = ? AND date < ? AND close > 0 ORDER BY date DESC LIMIT 1"
+    "SELECT close, date FROM prices WHERE stock_id = ? AND date < ? AND close > 0 ORDER BY date DESC LIMIT 1"
 )
 FX_SQL = "SELECT rate, date FROM fx_rates WHERE pair = 'USDKRW' AND date <= ? ORDER BY date DESC LIMIT 1"
 INDEX_FROM_SQL = "SELECT close, date FROM index_prices WHERE index_code = ? AND date >= ? ORDER BY date LIMIT 1"
@@ -927,8 +927,12 @@ def fill_orders(
         앞종가 = None
         if 국내etf and 행 and 행[0]["close"] is not None:
             # 가격제한 기준가(앞 거래일 종가) — ETF 5원 호가에서는 등락률로 되살린 값만으로 끝을 가를 수 없다(25.2233)
-            앞 = client.execute(PREV_CLOSE_SQL, [o.stock_id, str(행[0]["date"])[:10]]).rows
-            앞종가 = float(앞[0][0]) if 앞 else None
+            그날 = str(행[0]["date"])[:10]
+            앞 = client.execute(PREV_CLOSE_SQL, [o.stock_id, 그날]).rows
+            # **앞 거래일** 행일 때만 — 앞 장 행이 빠져(25.2216·2223 수집 실패) 더 오래된 종가가 오면 그것이 이웃
+            # 호가일 때 허용폭 안이라 틀린 기준가를 믿었다(25.2234, 25.2233 교차검증 [권고]). 아니면 후보 길(보수)
+            앞종가 = (float(앞[0][0]) if 앞 and str(앞[0][1])[:10]
+                      == cal.previous_session("KR", date.fromisoformat(그날)).isoformat() else None)  # fmt: skip
         bar = (pp.Bar(str(행[0]["date"]), 행[0]["open"], float(행[0]["close"]), 행[0]["volume"],
                       행[0].get("change_pct"), etf=국내etf, prev_close=앞종가)
                if 행 and 행[0]["close"] is not None else None)  # fmt: skip
