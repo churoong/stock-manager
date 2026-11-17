@@ -482,7 +482,8 @@ def _us_window(now: datetime, day: Any) -> str | None:
 
 
 
-def _개장전_잔고(rows: list[dict[str, Any]], market: str) -> list[tuple[str, dict[str, int]]]:
+def _개장전_잔고(rows: list[dict[str, Any]], market: str, avgs: dict[str, dict[str, float]] | None = None,
+              ) -> list[tuple[str, dict[str, int]]]:
     """`paper_broker_daily` 줄 → [(그날, {코드: 수량})] — **그날 개장 전에** 읽은 것만(25.1701). 개장 뒤 다시 돈 실행이
     덮어쓴 줄은 그날 체결이 섞여 "그날 앞 체결까지" 와 견줄 수 없어 뺀다. 장이 없는 날 줄은 그대로 쓴다.
     보유 칸은 지금 꼴 [{code, qty, …}] 과 예전 꼴 [[종목 id 또는 코드, 수량, 평균가]](0078) — 코드가 없는 칸이 있으면
@@ -506,18 +507,23 @@ def _개장전_잔고(rows: list[dict[str, Any]], market: str) -> list[tuple[str
         except (TypeError, ValueError, AttributeError):
             pass
         잔: dict[str, int] = {}
+        평균: dict[str, float] = {}  # KIS 평균단가(지금 꼴 칸만) — 병합·감자 가르기(25.2235)
         온전 = isinstance(보유, list)
         for h in 보유 if isinstance(보유, list) else []:
             code, qty = ((h.get("code"), h.get("qty")) if isinstance(h, dict)
                          else (h[0], h[1]) if isinstance(h, list) and len(h) >= 2 else (None, None))  # fmt: skip
             if isinstance(code, str) and code and qty is not None:
                 잔[code] = 잔.get(code, 0) + int(qty)
+                if isinstance(h, dict) and isinstance(h.get("avg"), int | float) and h["avg"] > 0:
+                    평균[code] = float(h["avg"])
             else:
                 온전 = False
         # 코드를 모르는 칸이 하나라도 있으면 그 줄을 기준점으로 쓰지 않는다 — 1a9dff1(10-16) 전 줄은 첫 칸이 종목 id 라
         # 그 티커가 KIS 0 으로 읽혀 기록을 0 으로 맞췄다(25.1704, 25.1701 교차검증 [참고] 1)
         if 온전:
             out.append((날, 잔))
+            if avgs is not None:
+                avgs[날] = 평균
     return out
 
 
@@ -541,8 +547,9 @@ def update_realized(client: Any, 증권사: str, market: str, balance: dict[str,
         return 표[k][1]
 
     첫날 = min(str(r["trade_date"])[:10] for r in rows)
-    스냅 = _개장전_잔고(client.execute(REALIZED_SNAPSHOT_SQL, [증권사, 첫날]).dicts(), market)
-    값 = bm.realized([{**r, "market": market} for r in rows], 환율, balance, 스냅)
+    스냅평균: dict[str, dict[str, float]] = {}
+    스냅 = _개장전_잔고(client.execute(REALIZED_SNAPSHOT_SQL, [증권사, 첫날]).dicts(), market, 스냅평균)
+    값 = bm.realized([{**r, "market": market} for r in rows], 환율, balance, 스냅, 스냅평균)
     지금값 = {int(r["id"]): (r["realized_krw"], r["realized_fx_krw"]) for r in rows}
     문장 = [(REALIZED_SET_SQL, [v[0], v[1], i]) for i, v in 값.items() if 지금값.get(i) != v]
     if 문장:

@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import math
 from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -900,6 +901,7 @@ def perf(
 def realized(
     rows: list[dict[str, Any]], fx_on: Any, balance: dict[str, int] | None = None,
     snapshots: list[tuple[str, dict[str, int]]] | None = None,
+    snapshot_avgs: dict[str, dict[str, float]] | None = None,
 ) -> dict[int, tuple[float | None, float | None]]:
     """KIS모의투자 매도마다 실현손익(원)과 그 가운데 환차 몫 — **우리 주문 기록**(체결 수량·평균 체결가)의 평균 원가
     (docs/paper.md 15.7.1, 25.1694, 2026-10-22 사용자 지시 "모의투자에 실현손익이나 기간실현손익").
@@ -973,7 +975,16 @@ def realized(
         out[i] = (float(손익), float(round(현지원가 * 환율 - 원화원가)) if 미국 else 0.0)
         보유[k] = (남, 현 - 현지원가, 원 - 원화원가, False)
 
-    def 잔고와(잔: dict[str, int], 끝: bool) -> None:
+    def 병합같음(k: str, q0: int, 현: float, kis: int, 평균: dict[str, float]) -> bool:
+        """KIS 수량이 줄었는데 KIS 평균단가가 그 비율만큼 뛰었으면 병합·감자(역분할)다 — 기록 밖 매도면 평균단가는
+        그대로다(25.2235, 11-17 결함 회차). 경계 = max(1.2, √(q0/kis)) 배 — 비율 2 면 1.41 배, 기록 밖 소량 매도의
+        평균단가 반올림 차이는 넘지 않는다. KIS 평균단가가 없으면(옛 꼴 칸) 모른다 — 예전처럼 줄인다"""
+        a = 평균.get(k)
+        if not a or q0 <= 0 or 현 <= 0 or kis <= 0:
+            return False
+        return a / (현 / q0) > max(1.2, math.sqrt(q0 / kis))
+
+    def 잔고와(잔: dict[str, int], 끝: bool, 평균: dict[str, float] | None = None) -> None:
         # 기록에 한 번이라도 나오는 티커 전부 — 첫 매수 전에 KIS 가 이미 든 것(기록 전 보유)도 원가를 흐린다
         for k in 기록코드:
             q, kis = 보유.get(k, (0,))[0], int(잔.get(k, 0))
@@ -990,7 +1001,9 @@ def realized(
                 # 다음 매수와 가중 평균되어 원가가 어긋난다. 직전 기준점 뒤 이 티커 매수가 없었으면 어긋남은 매도뿐 —
                 # 기록 수량을 KIS 로 줄이고 원가를 같은 비율로(평균 원가법에선 정확). 매수가 있었으면 그 매수가 유령
                 # (기록은 찼는데 KIS 는 안 참)이거나 이미 섞였을 수 있어 오염
-                if k in 산뒤:
+                if k in 산뒤 or (not 끝 and 병합같음(k, *보유[k][:2], kis, 평균 or {})):
+                    # 병합·감자면 총원가는 그대로인데 같은 비율로 깎으면 거짓 이익이 섰다(1:10 병합 뒤 매도 +90만 원,
+                    # 25.2235) — 오염으로 두어 KIS 가 0 이 될 때까지 모름
                     오염.add(k)
                     모름표시(k)
                 elif not 끝:
@@ -1007,7 +1020,7 @@ def realized(
     스냅 = {str(d)[:10]: v for d, v in (snapshots or [])}
     for 날 in sorted(set(날들) | set(스냅)):
         if 날 in 스냅:
-            잔고와(스냅[날], False)
+            잔고와(스냅[날], False, (snapshot_avgs or {}).get(날))
         # 같은 날 순서: 아침 베낀 매도 먼저(장 전 주문), 그 뒤 매수와 **장중 손절**은 **값 높은 것부터** — 매수는
         # **지정가**, 손절은 체결가(25.1810·25.1812·25.1813, 결함 루프 10-27). 장중 손절은 개장 5분 뒤부터 아침
         # 손절선 아래에서 시장가로 나간다. 지정가가 손절 체결가 이상인 회차는 그보다 먼저 찬다 — 값이 내려오며
