@@ -47,6 +47,7 @@ import {
   withinOpenGrace,
   freshDisclosures,
   quoteOrder,
+  rightsAfterAddGuard,
 } from "@/lib/intraday";
 import { ALERT_UPSERT } from "@/lib/alertWrite";
 import { DART_API_NAME, DART_DAILY_LIMIT, addUsage, isBlocked, readUsage } from "@/lib/apiUsage";
@@ -517,7 +518,7 @@ export async function GET(request: Request) {
       await execute(
         `SELECT w.stock_id, s.yahoo_symbol, COALESCE(s.name_ko, s.name_en, s.ticker) AS name, s.currency, w.target_buy_price,
                 (SELECT COUNT(*) FROM kr_corp_events e WHERE e.code = s.ticker AND e.kind = 'rights'
-                  AND e.record_date > substr(w.added_at, 1, 10) AND e.record_date <= date('now', '+3 days')) AS rights_after_add,
+                  AND e.record_date > date(w.added_at, '+9 hours') AND e.record_date <= date('now', '+3 days')) AS rights_after_add,
                 (SELECT close FROM prices WHERE stock_id = w.stock_id AND close IS NOT NULL ORDER BY date DESC LIMIT 1) AS prev_close,
                 (SELECT CASE WHEN COUNT(*) = 20 AND MIN(date) >= date(MAX(date), '-45 days') THEN AVG(volume) END
                    FROM (SELECT volume, date FROM prices WHERE stock_id = w.stock_id AND volume > 0
@@ -568,7 +569,9 @@ export async function GET(request: Request) {
     // 관심에 넣은 뒤 유상증자 권리락이 있었던 국내 종목 — 20거래일 가드(`recentActionKr`·배치 `rights_ex`)가 풀린 뒤에도
     // 권리락 전 단위로 적은 목표가가 기계적 하락으로 "도달" 하지 않게 계속 막는다(보수 쪽 — 저장값은 그대로,
     // 25.2237, 11-18 결함 회차). 목표가를 다시 적은 날 칸이 없어 넣은 날(`added_at`)로 본다
-    const 권리락뒤 = market === "KR" ? watch.filter((w) => Number(w.rights_after_add ?? 0) > 0).map((w) => w.stock_id) : [];
+    const 권리락뒤 = rightsAfterAddGuard(watch, market);
+    // 막은 관심 목표가를 호출 기록에 남긴다 — 조용히 영구로 막히면 알림 누락이 어디서도 안 보였다(25.2238, 25.2237 교차검증)
+    const 권리락뒤목표가 = watch.filter((w) => 권리락뒤.includes(w.stock_id) && w.target_buy_price !== null).map((w) => w.yahoo_symbol);
     const 가드된 = new Set<number>([
       ...관심가드,
       ...권리락뒤,
@@ -747,6 +750,7 @@ export async function GET(request: Request) {
       // 기업행위 첫날로 보여 가격 알림을 건너뛴 종목 (25.597). 야후 전일 종가 동작을 확인하는 단서도 된다
       ...(actionSuspects.length ? { action_suspect: actionSuspects } : {}),
       ...(staleWatchPrices.length ? { stale_watch_price: staleWatchPrices } : {}),
+      ...(권리락뒤목표가.length ? { rights_guarded_watch: 권리락뒤목표가 } : {}),
       // 범위 밖 설정을 기본값으로 되돌렸으면 남긴다 (docs/infra.md 25.172)
       ...(settings.warnings.length ? { setting_warnings: settings.warnings } : {}),
       // **비밀이 짧으면 남긴다** (25.727, 감사) — 약하면 누구나 이 경로를 반복 호출해 DART 일일 한도(20,000)를 태울 수 있다.

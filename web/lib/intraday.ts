@@ -819,4 +819,11 @@ export function kisCalendarSuspect(raw: string | null | undefined, day: string):
  * (docs/infra.md 25.2237). `w`·`s` 는 watchlist·stocks 별칭. 경로(cron/intraday)는 보간하지 않고 이 글을 그대로 박는다(appSql 규칙) — 시험이 같은지 본다
  */
 export const WATCH_RIGHTS_AFTER_ADD_SQL = `(SELECT COUNT(*) FROM kr_corp_events e WHERE e.code = s.ticker AND e.kind = 'rights'
-                  AND e.record_date > substr(w.added_at, 1, 10) AND e.record_date <= date('now', '+3 days'))`;
+                  AND e.record_date > date(w.added_at, '+9 hours') AND e.record_date <= date('now', '+3 days'))`;
+
+/**
+ * 넣은 날 뒤 권리락이 있었던 **국내** 관심 종목 id — 그 관심 목표가를 막는다(25.2237·25.2238). 미국·0·없음은 막지 않는다
+ */
+export function rightsAfterAddGuard(watch: { stock_id: number; rights_after_add?: number | null }[], market: Market): number[] {
+  return market === "KR" ? watch.filter((w) => Number(w.rights_after_add ?? 0) > 0).map((w) => w.stock_id) : [];
+}

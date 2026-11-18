@@ -2,7 +2,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
-import { WATCH_RIGHTS_AFTER_ADD_SQL } from "@/lib/intraday";
+import { WATCH_RIGHTS_AFTER_ADD_SQL, rightsAfterAddGuard } from "@/lib/intraday";
 
 /**
  * 관심 목표가 — 넣은 날 뒤 유상증자 권리락이 있었으면 20거래일 가드가 풀린 뒤에도 막는다 (docs/infra.md 25.2237).
@@ -47,5 +47,22 @@ describe("넣은 날 뒤 권리락 수", () => {
     const 원문 = readFileSync(join(process.cwd(), "app", "api", "cron", "intraday", "route.ts"), "utf-8");
     expect(원문).toContain(`${WATCH_RIGHTS_AFTER_ADD_SQL} AS rights_after_add`); // 보간 대신 같은 글을 박아 둔다(appSql 규칙)
     expect(원문).toMatch(/const 가드된 = new Set<number>\(\[\s*\.\.\.관심가드,\s*\.\.\.권리락뒤,/);
+    expect(원문).toContain("const 권리락뒤 = rightsAfterAddGuard(watch, market);");
+    expect(원문).toContain("rights_guarded_watch: 권리락뒤목표가");
+  });
+});
+
+describe("거르기 (25.2238)", () => {
+  it("국내·1 이상만 막고 0·null·미국은 막지 않는다", () => {
+    const w = [{ stock_id: 1, rights_after_add: 1 }, { stock_id: 2, rights_after_add: 0 }, { stock_id: 3, rights_after_add: null }, { stock_id: 4 }];
+    expect(rightsAfterAddGuard(w, "KR")).toEqual([1]);
+    expect(rightsAfterAddGuard(w, "US")).toEqual([]);
+  });
+
+  it("넣은 날은 한국 날짜로 — UTC 전날 밤(KST 아침)에 넣고 그날이 기준일이면 넣기 전으로 본다", () => {
+    const d = db();
+    d.exec("INSERT INTO watchlist (stock_id, target_buy_price, alert_enabled, added_at) VALUES (1, 50000, 1, '2026-10-04T23:30:00.000Z')");
+    d.exec("INSERT INTO kr_corp_events (code, kind, record_date, source, fetched_at) VALUES ('000001', 'rights', '2026-10-05', 't', 't')");
+    expect(셈(d)).toBe(0);
   });
 });
