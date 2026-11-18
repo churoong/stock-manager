@@ -282,7 +282,9 @@ def test_관문_문맥이_날마다_운영과_같다(account: str, 판: str, mon
         for 칸 in ("today", "ref_floor", "max_stock_pct", "max_sector_pct", "halted", "frozen"):
             assert getattr(r, 칸) == getattr(o, 칸), (d, 칸)
         for 칸 in ("equity_krw", "day_return_pct", "cash_available_krw"):
-            assert getattr(r, 칸) == pytest.approx(getattr(o, 칸), rel=1e-9, abs=1e-6), (d, 칸)
+            # pytest 9.2 부터 approx(None) 이 TypeError — 두 쪽 None(그날 하루 수익 모름)은 같다고 본다
+
+            assert (getattr(r, 칸) is None and getattr(o, 칸) is None) or getattr(r, 칸) == pytest.approx(getattr(o, 칸), rel=1e-9, abs=1e-6), (d, 칸)
         assert r.holding_krw == pytest.approx(o.holding_krw, rel=1e-9) and r.sector_of == o.sector_of, d
     if (account, 판) == ("S", "보통"):
         # 보유 평가·현금 칸을 묶는 판은 이것뿐이다(T 는 하루 끝 보유가 늘 0) — 자료를 고쳐 관문 날 보유가 사라지면
