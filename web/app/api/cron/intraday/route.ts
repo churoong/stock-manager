@@ -513,9 +513,11 @@ export async function GET(request: Request) {
     }
     // 상장폐지된 관심 종목은 감시하지 않는다 — 지난 장 시세만 와 판정 0건이 될 수 있다 (25.814, 감사). 유니버스에서 빠진(excluded) 종목은
     // 사용자가 일부러 걸어 둔 것이라 그대로 본다. 거래정지(상태는 active)는 이 조건으로 거르지 못한다 [확인필요: 운영에서 판정 0건으로 빨개지는지]
-    const watch = rowsToObjects<Target & { target_buy_price: number | null }>(
+    const watch = rowsToObjects<Target & { target_buy_price: number | null; rights_after_add?: number | null }>(
       await execute(
         `SELECT w.stock_id, s.yahoo_symbol, COALESCE(s.name_ko, s.name_en, s.ticker) AS name, s.currency, w.target_buy_price,
+                (SELECT COUNT(*) FROM kr_corp_events e WHERE e.code = s.ticker AND e.kind = 'rights'
+                  AND e.record_date > substr(w.added_at, 1, 10) AND e.record_date <= date('now', '+3 days')) AS rights_after_add,
                 (SELECT close FROM prices WHERE stock_id = w.stock_id AND close IS NOT NULL ORDER BY date DESC LIMIT 1) AS prev_close,
                 (SELECT CASE WHEN COUNT(*) = 20 AND MIN(date) >= date(MAX(date), '-45 days') THEN AVG(volume) END
                    FROM (SELECT volume, date FROM prices WHERE stock_id = w.stock_id AND volume > 0
@@ -563,8 +565,13 @@ export async function GET(request: Request) {
     // 가드가 걸린 종목은 **관심 목표 매수가도** 쓰지 않는다 (25.598, 교차검증) — 분할 전에 적은 90,000원이 1:50 분할 뒤 2,000원과 견줘져
     // 사용자가 고칠 때까지 매일 "목표 매수가 도달" 이 나갔다. 관심만 있는 종목은 위 가드가 거래량을 비운 것으로, 보유·추천과 겹친 종목은
     // 배치 사유 `action_guard` 로 안다
+    // 관심에 넣은 뒤 유상증자 권리락이 있었던 국내 종목 — 20거래일 가드(`recentActionKr`·배치 `rights_ex`)가 풀린 뒤에도
+    // 권리락 전 단위로 적은 목표가가 기계적 하락으로 "도달" 하지 않게 계속 막는다(보수 쪽 — 저장값은 그대로,
+    // 25.2237, 11-18 결함 회차). 목표가를 다시 적은 날 칸이 없어 넣은 날(`added_at`)로 본다
+    const 권리락뒤 = market === "KR" ? watch.filter((w) => Number(w.rights_after_add ?? 0) > 0).map((w) => w.stock_id) : [];
     const 가드된 = new Set<number>([
       ...관심가드,
+      ...권리락뒤,
       // 유상증자 권리락 뒤(`rights_ex`, 25.1142)도 — 권리락 전에 적은 관심 목표가가 기계적 하락으로 "도달" 하지 않게
       ...targets.filter((t) => t.reasons.includes("action_guard") || t.reasons.includes("rights_ex")).map((t) => t.stock_id),
     ]);
