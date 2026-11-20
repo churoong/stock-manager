@@ -67,11 +67,21 @@ def challenger_account(client: Any) -> str | None:
     a = v.get("account") if isinstance(v, dict) else None
     return str(a) if a else None
 #: 장전 동시호가 접수 시작(08:30 KST) 전이면 이만큼까지만 기다린다. 더 이르면 보내지 않는다
-#: — 모의 접수 시작 시각은 공식 자료에서 못 찾았다 `[확인필요]`
+#: — 모의 접수 시작 시각은 공식 자료에서 못 찾았다 `[확인필요]`. 늦게 여는 날은 아래 `ORDER_LEAD` 로 늦춘다(25.2240)
 ORDER_OPEN_KST = dtime(8, 30)
 WAIT_MAX = timedelta(minutes=10)
-#: 종가 동시호가(15:20) 뒤에는 보내지 않는다 — 하루짜리 주문이 체결 기회 없이 끝난다
+#: 국내 접수 시작 = max(08:30, 그날 개장 − 30분) (25.2240). 2026-11-19 수능일(10:00 개장) 08:38 KST 에 낸 모의 주문이
+#: 모두 "40570000 모의투자 장시작전 입니다" 로 거부됐고, 09:00 개장일엔 08:30~08:38 에 낸 주문이 받아진다 — 모의는
+#: 개장 30분 전부터 받는 것으로 본다(실측 두 점, 정확한 경계는 `[확인필요]`). 다음 해당 날: 2027-01-04(새해 첫 거래일)
+ORDER_LEAD = timedelta(minutes=30)
+#: 종가 동시호가(15:20) 뒤에는 보내지 않는다 — 하루짜리 주문이 체결 기회 없이 끝난다. 마감이 늦은 날(수능일 16:30)은
+#: 그날 마감 − 10분(25.2240). 15:20 보다 앞당기지는 않는다
 ORDER_CLOSE_KST = dtime(15, 20)
+ORDER_CLOSE_LEAD = timedelta(minutes=10)
+#: 국내 접수 시작 전이라 보내지 않은 까닭 — 실행 기록 `step_log.broker.send` 에 남고, 일일 배치 예비 실행이 이 글로
+#: "앞 실행이 접수 시간 전이라 못 냈다" 를 알아 발송 뒤 단계를 이어 돈다(`pre_open_resume`, 25.2240). 글을 바꾸면 옛
+#: 실행 기록과 어긋나니 바꾸지 않는다
+PRE_OPEN_BLOCK = "접수 시작 전 — 보내지 않음"
 #: 미국 예약주문 접수 시간(KST) — 10:00 부터 정규장 시작 10분 전까지(23:20, 서머타임 22:20), 16:30~16:45 정산 시간 제외
 #: (공식 예제 order_resv.py 주석). 마감은 캘린더의 개장 시각에서 빼서 서머타임·반일장을 따른다
 US_RESV_OPEN_KST = dtime(10, 0)
@@ -258,6 +268,64 @@ def kr_open_utc(day: date) -> datetime | None:
     if 열림 is not None and day.isoformat() in mt.KR_CSAT_DAYS and 열림.astimezone(UTC).hour == 0:
         열림 += mt.CSAT_SHIFT
     return 열림
+
+
+def kr_close_utc(day: date) -> datetime | None:
+    """국내 그 거래일 정규장 마감(UTC) — 수능일은 개장처럼 한 시간 늦춘다(16:30, `after_hours` 25.350 과 같은 잣대).
+    달력이 이미 늦춘 해(개장이 01:00 UTC)면 더하지 않는다. 달력이 모르면 None (25.2240)"""
+    from batch.jobs import monitor_targets as mt
+
+    닫힘 = cal.session_close_utc("KR", day)
+    열림 = cal.session_open_utc("KR", day)
+    if (닫힘 is not None and 열림 is not None and day.isoformat() in mt.KR_CSAT_DAYS
+            and 열림.astimezone(UTC).hour == 0):  # fmt: skip
+        닫힘 += mt.CSAT_SHIFT
+    return 닫힘
+
+
+def kr_order_window(day: date) -> tuple[datetime, datetime]:
+    """국내 KIS 모의 주문을 받는 창(KST) — (접수 시작, 보내기 마감) (25.2240).
+
+    시작 = max(08:30, 개장 − `ORDER_LEAD`), 마감 = max(15:20, 마감 − `ORDER_CLOSE_LEAD`). 예전엔 08:30·15:20 고정이라
+    10:00 개장일(수능일·새해 첫 거래일)에도 08:38 에 내 모두 "장시작전" 으로 거부됐다(2026-11-19)"""
+    tz = cal.market_tz("KR")
+    시작 = datetime.combine(day, ORDER_OPEN_KST, tzinfo=tz)
+    끝 = datetime.combine(day, ORDER_CLOSE_KST, tzinfo=tz)
+    열림, 닫힘 = kr_open_utc(day), kr_close_utc(day)
+    if 열림 is not None:
+        시작 = max(시작, (열림 - ORDER_LEAD).astimezone(tz))
+    if 닫힘 is not None:
+        끝 = max(끝, (닫힘 - ORDER_CLOSE_LEAD).astimezone(tz))
+    return 시작, 끝
+
+
+#: 그 거래일 일일 배치의 **마지막** KIS 단계 기록의 `send` 까닭 — 실행 기록 `step_log.broker` 가 있는 행 중 가장 늦은 것
+#: (25.2240). 깨진 `step_log` 한 행이 판정을 오류로 만들지 않게 `json_valid` 로 가른다(25.1633 의 교훈)
+LAST_BROKER_SEND_SQL = (
+    "SELECT json_extract(step_log, '$.broker.send') FROM batch_runs"
+    " WHERE job_name = ? AND trade_date = ? AND json_valid(step_log) AND json_type(step_log, '$.broker') = 'object'"
+    " ORDER BY started_at DESC, id DESC LIMIT 1"
+)
+
+
+def pre_open_resume(client: Any, job_name: str, market: str, trade_date: str, now: datetime) -> bool:
+    """예비 실행이 발송 뒤 단계(KIS 베끼기 → 운용 요약)를 이어 돌아야 하나 — 늦게 여는 날 앞 실행의 KIS 단계가 접수
+    시작 전(`PRE_OPEN_BLOCK`)으로 막혔고 지금은 보낼 수 있을 때 (25.2240).
+
+    08:27 실행은 10:00 개장일에 접수 시작(09:30)까지 한 시간을 기다릴 수 없어(단계 시간 제한 15분) 막히고, 그날은
+    리포트·운용 요약이 다 끝나 09:35 예비 실행이 `has_successful_run`·`post_send_done` 으로 곧바로 빠졌다 — 그날 KIS
+    주문이 끝내 안 나갔다. 마지막 KIS 기록만 본다: 이어 돈 실행이 보내면 그 기록이 마지막이 되어 다시 이어 돌지 않는다.
+    겹쳐 내기는 KIS 단계의 `이미`·`정리함` 이 막는다. 못 읽으면 False(예전처럼 빠진다)"""
+    if market != "KR" or send_block(market, now) is not None:
+        return False
+    try:
+        rows = client.execute(LAST_BROKER_SEND_SQL, [job_name, trade_date]).rows
+    except Exception as exc:  # noqa: BLE001 — 읽기가 깨지면 예전처럼 빠진다
+        import logging
+
+        logging.getLogger("broker_mirror").warning("앞 실행 KIS 기록을 읽지 못했다 — 이어 돌지 않는다: %s", exc)
+        return False
+    return bool(rows) and rows[0][0] == PRE_OPEN_BLOCK
 
 
 def mark_late_sends(rows: list[dict[str, Any]]) -> int:
@@ -562,7 +630,8 @@ def send_block(market: str, now: datetime) -> str | None:
 
     `run` 의 보내기 문과 리포트 머리 운용 보고(`desk.report_head`)가 **같은 판정**을 쓴다(25.1631 — 운용 보고가
     멈춤·키·장 끝난 뒤만 보고 "그대로 냅니다" 라 했는데 실제 단계는 예약 마감 뒤·접수 시작 전으로 보내지 않은 날이
-    있었다). 국내 접수 시작 전 `WAIT_MAX` 안이면 기다려 내므로 None
+    있었다). 국내 접수 시작 전 `WAIT_MAX` 안이면 기다려 내므로 None. 국내 창은 그날 개장·마감을 따른다
+    (`kr_order_window`, 25.2240)
     """
     현지 = now.astimezone(cal.market_tz(market))
     오늘 = 현지.date()
@@ -570,12 +639,11 @@ def send_block(market: str, now: datetime) -> str | None:
         return "오늘은 장이 없다"
     if market == "US":
         return _us_window(now, 오늘)
-    if 현지.time() >= ORDER_CLOSE_KST:
+    시작, 끝 = kr_order_window(오늘)
+    if 현지 >= 끝:
         return "장 끝난 뒤 — 보내지 않음"
-    if 현지.time() < ORDER_OPEN_KST and (
-        datetime.combine(오늘, ORDER_OPEN_KST, tzinfo=현지.tzinfo) - 현지 > WAIT_MAX
-    ):
-        return "접수 시작 전 — 보내지 않음"
+    if 현지 < 시작 and 시작 - 현지 > WAIT_MAX:
+        return PRE_OPEN_BLOCK
     return None
 
 
@@ -856,8 +924,9 @@ def run(
     if 막힘:
         기록["send"] = 막힘
         return 기록 | {"calls": sess.calls}
-    if not 미국 and 현지.time() < ORDER_OPEN_KST:
-        sleep((datetime.combine(오늘, ORDER_OPEN_KST, tzinfo=현지.tzinfo) - 현지).total_seconds() + 5)
+    if not 미국 and 현지 < (접수 := kr_order_window(오늘)[0]):
+        # 그날 접수 시작까지(`send_block` 과 같은 창, 25.2240 — 10:00 개장일은 09:30)
+        sleep((접수 - 현지).total_seconds() + 5)
     멈춤값 = db.get_setting(client, "paper_halt", None)
     멈춤 = bool(멈춤값.get("on")) if isinstance(멈춤값, dict) else bool(멈춤값)
     주문들 = client.execute(OPEN_ORDERS_SQL, [베낌, market, 오늘.isoformat()]).dicts()

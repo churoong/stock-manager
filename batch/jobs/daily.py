@@ -2183,7 +2183,20 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
             log.info("마이그레이션 적용: %s", ", ".join(applied))
 
 
-        if not force and db.has_successful_run(client, name, decision.trade_date):
+        # **늦게 여는 날 KIS 베끼기를 예비 실행이 이어 낸다** (25.2240). 10:00 개장일(수능일·새해 첫 거래일)은 접수가
+        # 09:30 부터라 08:27 실행의 KIS 단계가 "접수 시작 전" 으로 막히고, 그 실행은 성공·운용 요약까지 끝나 09:35 예비
+        # 실행이 아래 두 검사로 곧바로 빠졌다 — 그날 KIS 주문이 끝내 안 나갔다. 앞 실행의 마지막 KIS 기록이 그 까닭이고
+        # 지금 보낼 수 있으면 발송 없이 발송 뒤 단계만 이어 돈다(25.2144 와 같은 길). 겹쳐 내기는 KIS `이미`·`정리함` 이
+        # 막는다
+        이어냄 = False
+        if not force and market == "KR":
+            from batch.jobs import broker_mirror as _bm_resume
+
+            이어냄 = _bm_resume.pre_open_resume(client, name, market, decision.trade_date, datetime.now(UTC))
+        if 이어냄:
+            print(f"{decision.trade_date} 거래일 앞 실행의 KIS모의투자 베끼기가 접수 시작 전이라 막혔습니다 — 발송 없이"
+                  " 발송 뒤 단계를 이어 돕니다")  # fmt: skip
+        if not force and not 이어냄 and db.has_successful_run(client, name, decision.trade_date):
             # **할 일 없는 실행 표식을 붙인다** (docs/infra.md 25.913, 감사). 예비 예약(국내 09:35·미국 겹치는 시각)이
             # 평일마다
             # 여기서 끝나는데 표식이 없어 워크플로가 이슈 #1 에 코멘트를 달고(아침 실제 실행 기록을 밀어냄, 25.84)
@@ -2194,7 +2207,8 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
         # 닫으면(한도·시간 초과)
         # 성공 기록이 없어 예비 예약(국내 09:35·미국 12:27/13:27/14:27 UTC)이 리포트 전체를 한 번 더 보냈다. 수동
         # 실행(force)은 사람이 원한 것이라 막지 않는다
-        발송끝남 = False
+        # 이어 낼 때는 리포트를 다시 보내지 않는다 — 앞 실행이 KIS 단계(발송 뒤)까지 갔다(25.2240)
+        발송끝남 = 이어냄
         if not force and reports.sent_exists(client, market, decision.trade_date):
             from batch.jobs import desk as desk_job
 
@@ -2202,14 +2216,15 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
             # 뒤로 옮긴 뒤로, 발송 뒤 그 단계에서 실행이 죽으면(시간 제한·러너 종료) 예비 실행이 여기서 빠져 그날 베끼기
             # (첫째·도전자)와 운용 요약이 끝내 돌지 않았다. 운용 요약 칸이 없으면 **발송만 건너뛰고** 이어 돈다 — 가상
             # 단계는 `ORDERS_EXIST` 로, KIS 는 `이미`·`정리함` 으로 겹치지 않는다
-            if desk_job.post_send_done(client, market, decision.trade_date, datetime.now(UTC)):
+            if not 이어냄 and desk_job.post_send_done(client, market, decision.trade_date, datetime.now(UTC)):
                 print(
                     f"{NOTHING_DONE}{decision.trade_date} 거래일 리포트는 이미 보냈습니다"
                     f"(실행 기록은 못 닫혔을 수 있습니다). 중복 발송을 건너뜁니다"
                 )
                 return 0
-            print(f"{decision.trade_date} 거래일 리포트는 이미 보냈지만 KIS모의투자 베끼기·운용 요약이 끝나지"
-                  " 않았습니다 — 발송 없이 이어 돕니다")  # fmt: skip
+            if not 이어냄:
+                print(f"{decision.trade_date} 거래일 리포트는 이미 보냈지만 KIS모의투자 베끼기·운용 요약이 끝나지"
+                      " 않았습니다 — 발송 없이 이어 돕니다")  # fmt: skip
             발송끝남 = True
 
         # 예약 시각을 넘겨야 지연이 남는다 (docs/infra.md 25.327). 수동 실행(force)은 예약이 아니라 넘기지 않는다

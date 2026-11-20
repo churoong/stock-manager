@@ -5,6 +5,13 @@ name: 업종 채우기
 on:
   schedule:
     - cron: "43 18 3 * *" # 매월 3일 18:43 UTC = 4일 03:43 KST
+    # **다시 시도** (docs/infra.md 25.2241). 2026-11-03 3일 예약이 읽기 진도 문에 미뤄졌다 — 이번 달 74,462,936행 + 예상
+    # 300,000행이 허용선(진도선) 74,759,259행을 약 3.7천 행 넘었다. 허용선은 달의 한도가 아니라 **진도**(3일 23:39 면 지난 몫
+    # 10% + 여유 5% ≈ 7,476만)다. 1일 전체 백업·2일 ETF·3일 17:11 국내 백테스트(진도 안 봄)가 몰린 직후라 진도선에 붙어 있었다.
+    # 진도선은 하루 약 1,667만 행씩 오르므로 같은 달 뒤에 다시 하면 들어간다. 예전에는 다시 시도가 없어 업종이 다음 달까지 묵었다.
+    # 세 예약 모두 `--skip-if-done-this-month` 로 이번 달 이미 돈 시장은 건너뛴다
+    - cron: "43 18 10 * *" # 매월 10일 18:43 UTC = 11일 03:43 KST (다시 시도, 진도 문 그대로)
+    - cron: "43 18 17 * *" # 매월 17일 18:43 UTC = 18일 03:43 KST (마지막 다시 시도 — 진도선은 보지 않고 월 상한만, 25.1442 방식)
   workflow_dispatch:
     inputs:
       market:
@@ -14,6 +21,10 @@ on:
         default: ""
       limit:
         description: 앞에서부터 몇 개만 (시험용, 비우면 전부)
+        type: string
+        default: ""
+      missed_schedule:
+        description: 빠진 예약 따라잡기가 채운다 — 그 예약의 cron (사람은 비워 둔다, docs/infra.md 25.1305·25.2241)
         type: string
         default: ""
 
@@ -38,6 +49,11 @@ jobs:
       OFFLINE_MODE: "0"
       # Turso 월 읽기 진도 문 (docs/infra.md 25.1031) — 이번 달이 진도를 앞서면 이 작업을 미룬다. 값은 예상 읽기 행 수 [확인필요: 실측]
       TURSO_READ_ESTIMATE: "300000"
+      # 17일 마지막 다시 시도만 진도선을 보지 않는다 (25.2241) — 3일·10일이 다 미뤄진 달에도 월 상한 안이면 돈다.
+      # 30만 행은 월 한도(5억)의 0.06% 다. 백업 8일 예비(25.1442)와 같은 길
+      TURSO_READ_NO_PACE: ${{ (github.event.schedule || inputs.missed_schedule) == '43 18 17 * *' && '1' || '' }}
+      # 예약(또는 따라잡기가 깨운 예약)이면 이번 달 이미 돈 시장은 건너뛴다. 사람이 손으로 돌리면 늘 돈다
+      SCHED: ${{ github.event.schedule || inputs.missed_schedule }}
       LOG_LEVEL: INFO
     steps:
       - uses: actions/checkout@v5
@@ -59,6 +75,7 @@ jobs:
         run: |
           LIMIT=""
           if [ -n "${{ inputs.limit }}" ]; then LIMIT="--limit ${{ inputs.limit }}"; fi
+          if [ -n "$SCHED" ]; then LIMIT="$LIMIT --skip-if-done-this-month"; fi  # 다시 시도 예약 (25.2241)
           if [ -n "${{ inputs.market }}" ]; then
             python -m batch.jobs.sectors --market ${{ inputs.market }} $LIMIT
           else

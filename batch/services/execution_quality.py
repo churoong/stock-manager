@@ -45,8 +45,11 @@ def measure(
     1차 가격이 가장 높다(매수 구간 상단) — 1차 이하로 샀으면 주문표 안이다
     """
     def 가까운(rows: list[dict[str, Any]], sid: int, 날: date) -> dict[str, Any] | None:
+        # 리포트 거래일(D, 전일 데이터)의 주문표는 D 다음 장 아침에야 나온다 — 같은 날(0일) 매수는 아직 본 적 없는
+        # 리포트라 잇지 않는다(25.2242, 11-20 결함 회차: 예전 0 이상이라 D 장중 매수가 다음 아침에 나올 리포트의
+        # 1차 가격에 묶여 1차 대비·준수 건수가 틀렸다)
         후보 = [r for r in rows
-              if int(r["stock_id"]) == sid and 0 <= (날 - _날(r["report_date"])).days <= PLAN_LOOKBACK_DAYS]
+              if int(r["stock_id"]) == sid and 1 <= (날 - _날(r["report_date"])).days <= PLAN_LOOKBACK_DAYS]
         return max(후보, key=lambda r: str(r["report_date"])) if 후보 else None
 
     안, 차이, 계획밖, 일부만 = 0, [], 0, 0

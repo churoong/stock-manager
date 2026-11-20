@@ -206,6 +206,19 @@ def run(market: str, limit: int | None = None) -> int:
         client.close()
 
 
+def done_this_month(client: TursoClient, market: str, now: datetime | None = None) -> bool:
+    """이 시장의 업종 수집이 이번 달(UTC 달력 달) 안에 success·partial 로 끝났나 (docs/infra.md 25.2241).
+
+    월 1회 작업의 **다시 시도 예약**(10일·17일)이 쓴다. 3일 예약이 읽기 진도 문에 미뤄지면(2026-11-03, 허용선에
+    약 3.7천 행 모자라 두 시장 다 `skipped`) 예전에는 다음 달 3일까지 다시 시도가 없었다 — 업종이 두 달 묵었다.
+    "이번 달" 은 진도 문(`scripts/turso_read_gate.month_progress`)·`api_usage` 의 달과 같은 UTC 달력 달이다.
+    `ran_within` 을 다시 쓴다 — partial 도 "돌았다" 로 센다(25.611: 도중에 멈춘 것은 failed 로 닫혀 세지 않는다).
+    못 읽으면 False — 한 번 더 도는 쪽이 한 달 비우는 쪽보다 낫다"""
+    now = now or datetime.now(UTC)
+    월초 = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    return db.ran_within(client, JOB_NAME, (now - 월초).total_seconds() / 86_400, market)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="업종 채우기")
     parser.add_argument("--market", choices=["KR", "US"], required=True)
@@ -214,12 +227,21 @@ def main() -> int:
         "--skip-if-ran-within", dest="skip_days", type=float,
         help="최근 이 일수 안에 성공했으면 건너뛴다 (D1 따라잡기, docs/infra.md 25.8)",
     )  # fmt: skip
+    parser.add_argument(
+        "--skip-if-done-this-month", dest="skip_month", action="store_true",
+        help="이번 달(UTC) 이미 성공했으면 건너뛴다 — 예약 실행·다시 시도 예약용 (docs/infra.md 25.2241)",
+    )  # fmt: skip
     args = parser.parse_args()
     logging.basicConfig(level=config.SETTINGS.log_level, format="%(asctime)s %(levelname)s %(name)s | %(message)s")
     if args.skip_days is not None:
         with TursoClient() as client:
             if db.ran_within(client, JOB_NAME, args.skip_days, args.market):
                 print(f"최근 {args.skip_days:g}일 안에 돌았습니다. 건너뜁니다")
+                return 0
+    if args.skip_month:
+        with TursoClient() as client:
+            if done_this_month(client, args.market):
+                print(f"{args.market} 업종은 이번 달 이미 돌았습니다. 건너뜁니다 (25.2241)")
                 return 0
     return run(args.market, args.limit)
 

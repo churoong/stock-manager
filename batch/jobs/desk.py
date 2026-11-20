@@ -314,7 +314,13 @@ def report_head(
         상태 = f"꺼짐(베낄 계좌 {pp.account_name(h)} 없음)"
     elif after_close:
         상태 = "장 끝난 뒤 실행이라 오늘은 내지 않습니다"
-    elif 막힘 := bmj.send_block(market, now):
+    elif (막힘 := bmj.send_block(market, now)) == bmj.PRE_OPEN_BLOCK and market == "KR" and (
+        (접수 := bmj.kr_order_window(now.astimezone(cal.market_tz("KR")).date())[0]).time() > bmj.ORDER_OPEN_KST
+    ):
+        # 늦게 여는 날(10:00 개장) — 이 실행은 못 내지만 접수 시작 뒤 예비 실행이 이어 낸다(25.2240,
+        # `broker_mirror.pre_open_resume`). "오늘은 내지 않습니다" 는 거짓이 된다
+        상태 = f"개장이 늦은 날이라 접수 시작({접수:%H:%M}) 뒤 예비 실행이 냅니다"
+    elif 막힘:
         # KIS 단계와 같은 판정(25.1631) — 예약 마감 뒤·접수 시작 전이면 "냅니다" 가 거짓이었다. 리포트를 보낸 몇 분 뒤
         # 단계가 돌므로 경계 몇 분은 어긋날 수 있다 — 그날 실제 결과는 다음 운용 보고의 "지난 실행" 이 말한다
         상태 = f"오늘은 내지 않습니다 — {막힘.split(' — ')[0].removeprefix('오늘은 ')}"
