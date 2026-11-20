@@ -189,6 +189,13 @@ def test_이어_낼_때_발송_기록이_없으면_리포트를_보내고_KIS도
     assert 보낸 != [] and len(부름["kis"]) == 2
 
 
+def test_이어_낼_때_앞_실행이_성공했으면_발송_기록이_없어도_다시_보내지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """발송 여부 모름(25.493)·발송 시각 못 적음으로 `sent_at` 이 빈 성공 실행 — 다시 보내지 않고 KIS 만 잇는다 (25.2244)"""
+    보낸, _저장, 부름 = _예비(monkeypatch, True, 보냄=False)  # has_successful_run 은 참 그대로
+    assert daily.run("KR") == 0
+    assert 보낸 == [] and len(부름["kis"]) == 2
+
+
 def test_예비_실행은_막히지_않은_날엔_예전처럼_빠진다(monkeypatch: pytest.MonkeyPatch) -> None:
     보낸, _저장, 부름 = _예비(monkeypatch, False)
     assert daily.run("KR") == 0

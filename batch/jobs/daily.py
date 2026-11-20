@@ -2194,8 +2194,8 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
 
             이어냄 = _bm_resume.pre_open_resume(client, name, market, decision.trade_date, datetime.now(UTC))
         if 이어냄:
-            print(f"{decision.trade_date} 거래일 앞 실행의 KIS모의투자 베끼기가 접수 시작 전이라 막혔습니다 — 발송 없이"
-                  " 발송 뒤 단계를 이어 돕니다")  # fmt: skip
+            print(f"{decision.trade_date} 거래일 앞 실행의 KIS모의투자 베끼기가 접수 시작 전이라 막혔습니다 — KIS"
+                  " 베끼기·운용 요약을 이어 돕니다")  # fmt: skip
         if not force and not 이어냄 and db.has_successful_run(client, name, decision.trade_date):
             # **할 일 없는 실행 표식을 붙인다** (docs/infra.md 25.913, 감사). 예비 예약(국내 09:35·미국 겹치는 시각)이
             # 평일마다
@@ -2209,8 +2209,14 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
         # 실행(force)은 사람이 원한 것이라 막지 않는다
         # 이어 낼 때도 발송 여부는 `sent_exists` 로만 가른다 (25.2243, 교차검증 [필수]) — 25.2240 은 `발송끝남 = 이어냄`
         # 이라 08:27 발송이 실패한 10:00 개장일(실패 경로도 KIS 단계를 돌아 PRE_OPEN_BLOCK 이 남는다)에 09:35 예비
-        # 실행이 리포트를 다시 보내지 않고 '이미 보냄' 으로 적었다. 겹친 KIS 주문은 `이미`·`정리함` 이 막는다
-        발송끝남 = False
+        # 실행이 리포트를 다시 보내지 않고 '이미 보냄' 으로 적었다. 겹친 KIS 주문은 `이미`·`정리함` 이 막는다.
+        # 다만 앞 실행이 **성공**(success·partial)했으면 보낸 것으로 친다 (25.2244, 교차검증 [필수]) — 발송 여부 모름
+        # (25.493 '다시 보내지 않음')·발송 시각 못 적음(SENT_AT_LOST)·웹 저장 실패는 보내고도 `sent_at` 이 비어,
+        # `sent_exists` 만 보면 리포트를 한 번 더 보냈다. 실패(failed)한 실행만 다시 보낸다
+        발송끝남 = 이어냄 and db.has_successful_run(client, name, decision.trade_date)
+        if 이어냄:
+            print("앞 실행이 성공했으니 리포트는 다시 보내지 않습니다" if 발송끝남
+                  else "앞 실행이 실패해 리포트를 보낸 뒤 KIS 베끼기를 이어 냅니다")  # fmt: skip
         if not force and reports.sent_exists(client, market, decision.trade_date):
             from batch.jobs import desk as desk_job
 
