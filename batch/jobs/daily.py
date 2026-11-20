@@ -2207,8 +2207,10 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
         # 닫으면(한도·시간 초과)
         # 성공 기록이 없어 예비 예약(국내 09:35·미국 12:27/13:27/14:27 UTC)이 리포트 전체를 한 번 더 보냈다. 수동
         # 실행(force)은 사람이 원한 것이라 막지 않는다
-        # 이어 낼 때는 리포트를 다시 보내지 않는다 — 앞 실행이 KIS 단계(발송 뒤)까지 갔다(25.2240)
-        발송끝남 = 이어냄
+        # 이어 낼 때도 발송 여부는 `sent_exists` 로만 가른다 (25.2243, 교차검증 [필수]) — 25.2240 은 `발송끝남 = 이어냄`
+        # 이라 08:27 발송이 실패한 10:00 개장일(실패 경로도 KIS 단계를 돌아 PRE_OPEN_BLOCK 이 남는다)에 09:35 예비
+        # 실행이 리포트를 다시 보내지 않고 '이미 보냄' 으로 적었다. 겹친 KIS 주문은 `이미`·`정리함` 이 막는다
+        발송끝남 = False
         if not force and reports.sent_exists(client, market, decision.trade_date):
             from batch.jobs import desk as desk_job
 

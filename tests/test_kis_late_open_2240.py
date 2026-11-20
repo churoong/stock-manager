@@ -131,6 +131,19 @@ def test_이어_낼지는_마지막_KIS_기록이_접수_시작_전이고_지금
     assert 이어("10:35") is False
 
 
+def test_첫째가_꺼진_날_도전자만_막혀도_이어_돈다() -> None:
+    """25.2243 (교차검증 [권고]) — 첫째 계좌가 꺼져 `broker.send` 가 없어도 도전자 기록을 본다"""
+    mem = MemClient()
+    db.apply_migrations(mem)  # type: ignore[arg-type]
+    _run(mem, "2026-11-18T23:27:00+00:00", {"broker": {"missing": ["KIS_VTS_APP_KEY"]},
+                                            "broker2": {"send": bmj.PRE_OPEN_BLOCK}})  # fmt: skip
+    assert bmj.pre_open_resume(mem, "daily_kr", "KR", "2026-11-18", _at("09:35", 수능)) is True
+    mem2 = MemClient()
+    db.apply_migrations(mem2)  # type: ignore[arg-type]
+    _run(mem2, "2026-11-18T23:27:00+00:00", {"broker2": {"send": bmj.PRE_OPEN_BLOCK}})
+    assert bmj.pre_open_resume(mem2, "daily_kr", "KR", "2026-11-18", _at("09:35", 수능)) is True
+
+
 def test_다른_까닭으로_막힌_날은_이어_돌지_않는다() -> None:
     mem = MemClient()
     db.apply_migrations(mem)  # type: ignore[arg-type]
@@ -167,12 +180,13 @@ def test_예비_실행은_접수_전에_막힌_날_발송_없이_KIS_베끼기�
     assert len(부름["kis"]) == 2 and 부름["desk"] == [1]  # 첫째·도전자 베끼기와 운용 요약
 
 
-def test_이어_낼_때는_발송_기록이_없어도_리포트를_다시_보내지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
-    """앞 실행이 KIS 단계(발송 뒤)까지 갔다 — 발송이 실패해 `sent_exists` 가 거짓이어도 다시 보내지 않는다(웹 저장은
-    처음 보내는 날처럼 발송 앞에서 한다 — 같은 날 본문을 다시 적을 뿐이다)"""
+def test_이어_낼_때_발송_기록이_없으면_리포트를_보내고_KIS도_이어_낸다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """08:27 발송이 실패한 10:00 개장일 — 실패 경로도 KIS 단계를 돌아 PRE_OPEN_BLOCK 이 남는다. 09:35 예비 실행은
+    리포트를 보내고 KIS 를 이어 낸다 (25.2243, 교차검증 [필수] — 25.2240 은 거꾸로 굳혔다)"""
     보낸, _저장, 부름 = _예비(monkeypatch, True, 보냄=False)
+    monkeypatch.setattr(daily.db, "has_successful_run", lambda *a, **k: False)
     assert daily.run("KR") == 0
-    assert 보낸 == [] and len(부름["kis"]) == 2
+    assert 보낸 != [] and len(부름["kis"]) == 2
 
 
 def test_예비_실행은_막히지_않은_날엔_예전처럼_빠진다(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -301,9 +301,12 @@ def kr_order_window(day: date) -> tuple[datetime, datetime]:
 
 #: 그 거래일 일일 배치의 **마지막** KIS 단계 기록의 `send` 까닭 — 실행 기록 `step_log.broker` 가 있는 행 중 가장 늦은 것
 #: (25.2240). 깨진 `step_log` 한 행이 판정을 오류로 만들지 않게 `json_valid` 로 가른다(25.1633 의 교훈)
+#: 첫째(`broker`)·도전자(`broker2`) 둘 다 본다 — 첫째가 꺼진 날(키·베낄 계좌 없음) 도전자만 막혀도 이어 돈다(25.2243,
+#: 교차검증 [권고])
 LAST_BROKER_SEND_SQL = (
-    "SELECT json_extract(step_log, '$.broker.send') FROM batch_runs"
-    " WHERE job_name = ? AND trade_date = ? AND json_valid(step_log) AND json_type(step_log, '$.broker') = 'object'"
+    "SELECT json_extract(step_log, '$.broker.send'), json_extract(step_log, '$.broker2.send') FROM batch_runs"
+    " WHERE job_name = ? AND trade_date = ? AND json_valid(step_log)"
+    " AND (json_type(step_log, '$.broker') = 'object' OR json_type(step_log, '$.broker2') = 'object')"
     " ORDER BY started_at DESC, id DESC LIMIT 1"
 )
 
@@ -325,7 +328,7 @@ def pre_open_resume(client: Any, job_name: str, market: str, trade_date: str, no
 
         logging.getLogger("broker_mirror").warning("앞 실행 KIS 기록을 읽지 못했다 — 이어 돌지 않는다: %s", exc)
         return False
-    return bool(rows) and rows[0][0] == PRE_OPEN_BLOCK
+    return bool(rows) and PRE_OPEN_BLOCK in tuple(rows[0])
 
 
 def mark_late_sends(rows: list[dict[str, Any]]) -> int:
