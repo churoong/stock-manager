@@ -2207,7 +2207,8 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
         # 닫으면(한도·시간 초과)
         # 성공 기록이 없어 예비 예약(국내 09:35·미국 12:27/13:27/14:27 UTC)이 리포트 전체를 한 번 더 보냈다. 수동
         # 실행(force)은 사람이 원한 것이라 막지 않는다
-        # 이어 낼 때도 발송 여부는 `sent_exists` 로만 가른다 (25.2243, 교차검증 [필수]) — 25.2240 은 `발송끝남 = 이어냄`
+        # 이어 낼 때는 발송 기록(`sent_exists`)이 없고 앞 실행이 실패했을 때만 다시 보낸다 (25.2243→2244, 교차검증
+        # [필수]) — 25.2240 은 `발송끝남 = 이어냄`
         # 이라 08:27 발송이 실패한 10:00 개장일(실패 경로도 KIS 단계를 돌아 PRE_OPEN_BLOCK 이 남는다)에 09:35 예비
         # 실행이 리포트를 다시 보내지 않고 '이미 보냄' 으로 적었다. 겹친 KIS 주문은 `이미`·`정리함` 이 막는다.
         # 다만 앞 실행이 **성공**(success·partial)했으면 보낸 것으로 친다 (25.2244, 교차검증 [필수]) — 발송 여부 모름
@@ -2215,8 +2216,8 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
         # `sent_exists` 만 보면 리포트를 한 번 더 보냈다. 실패(failed)한 실행만 다시 보낸다
         발송끝남 = 이어냄 and db.has_successful_run(client, name, decision.trade_date)
         if 이어냄:
-            print("앞 실행이 성공했으니 리포트는 다시 보내지 않습니다" if 발송끝남
-                  else "앞 실행이 실패해 리포트를 보낸 뒤 KIS 베끼기를 이어 냅니다")  # fmt: skip
+            print("앞 실행이 성공했으니 리포트는 다시 보내지도 덮지도 않습니다" if 발송끝남
+                  else "앞 실행이 실패했습니다 — 발송 기록이 없으면 리포트를 보낸 뒤 KIS 를 이어 냅니다")  # fmt: skip
         if not force and reports.sent_exists(client, market, decision.trade_date):
             from batch.jobs import desk as desk_job
 
@@ -2747,7 +2748,9 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
         # 보였다 — 발송 시각도 잃어 다음 리포트에 이미 보여 준 매도 플래그 NEW 가 다시 붙었다. 처음 보내는 날은 예전처럼
         # 먼저 저장한다(발송이 실패해도 "만들었지만 못 보냈다" 가 보이게, docs/reports.md)
         보낸_것_있음 = reports.sent_exists(client, market, decision.trade_date)
-        if not 보낸_것_있음:
+        # 이어 낼 때 앞 실행이 성공했으면(발송끝남) 아침 본문을 덮지 않는다 — 사용자가 받은 본문·발송 모름 표시·추천
+        # 이력이 09:35 판으로 바뀌었다 (25.2245, 교차검증 [필수])
+        if not 보낸_것_있음 and not 발송끝남:
             # **처음 저장이 실패하면 한 번 더, 그래도 못 하면 본문에 적고 보낸 뒤 알린다** (25.1180, 리포트 감사 재현).
             # 예전엔 경고 목록에만 넣어(본문은 이미 다 만들었다) 텔레그램은 정상처럼 갔고 알림 0 건·실행 기록
             # partial — 예비 실행도 성공으로 보고 다시 저장하지 않았다. 웹에 그날 리포트가 없고, 같은 날 다른 시장 2부가
