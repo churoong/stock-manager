@@ -183,10 +183,11 @@ def test_예비_실행은_접수_전에_막힌_날_발송_없이_KIS_베끼기�
 def test_이어_낼_때_발송_기록이_없으면_리포트를_보내고_KIS도_이어_낸다(monkeypatch: pytest.MonkeyPatch) -> None:
     """08:27 발송이 실패한 10:00 개장일 — 실패 경로도 KIS 단계를 돌아 PRE_OPEN_BLOCK 이 남는다. 09:35 예비 실행은
     리포트를 보내고 KIS 를 이어 낸다 (25.2243, 교차검증 [필수] — 25.2240 은 거꾸로 굳혔다)"""
-    보낸, _저장, 부름 = _예비(monkeypatch, True, 보냄=False)
+    보낸, 저장, 부름 = _예비(monkeypatch, True, 보냄=False)
     monkeypatch.setattr(daily.db, "has_successful_run", lambda *a, **k: False)
     assert daily.run("KR") == 0
     assert 보낸 != [] and len(부름["kis"]) == 2
+    assert len(저장) == 1  # 실패한 앞 실행 — 웹에도 처음 저장한다 (25.2246)
 
 
 def test_이어_낼_때_앞_실행이_성공했으면_발송_기록이_없어도_다시_보내지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:

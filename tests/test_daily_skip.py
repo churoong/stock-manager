@@ -425,7 +425,8 @@ def test_이미_보낸_리포트는_새_것을_보낸_뒤에_덮는다() -> None
     src = inspect.getsource(daily.run)
     보냄 = src.index("message_ids = telegram.send(message)")
     # 25.1180 뒤로 처음 저장은 한 번 더 시도한다(`_저장() or _저장()`)
-    assert src.index("if not 보낸_것_있음:") < src.index("report_id = _저장() or _저장()") < 보냄
+    # 25.2245 뒤로 이어 낼 때 앞 실행이 성공했으면(발송끝남) 처음 저장도 건너뛴다
+    assert src.index("if not 보낸_것_있음 and not 발송끝남:") < src.index("report_id = _저장() or _저장()") < 보냄
     assert "if 보낸_것_있음:\n                report_id = _저장()" in src[보냄:보냄 + 1500]
 
 
