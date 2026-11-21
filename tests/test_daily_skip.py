@@ -425,8 +425,9 @@ def test_이미_보낸_리포트는_새_것을_보낸_뒤에_덮는다() -> None
     src = inspect.getsource(daily.run)
     보냄 = src.index("message_ids = telegram.send(message)")
     # 25.1180 뒤로 처음 저장은 한 번 더 시도한다(`_저장() or _저장()`)
-    # 25.2245 뒤로 이어 낼 때 앞 실행이 성공했으면(발송끝남) 처음 저장도 건너뛴다
-    assert src.index("if not 보낸_것_있음 and not 발송끝남:") < src.index("report_id = _저장() or _저장()") < 보냄
+    # 순서만 묶는다 — 처음 저장 조건(25.2245 의 `발송끝남` 등)은 tests/test_kis_late_open_2240.py 행동 시험이 묶는다
+    # (25.2247: 조건 글자를 찾아 뜻이 같은 고침에도 깨졌다)
+    assert src.index("보낸_것_있음 = reports.sent_exists(") < src.index("report_id = _저장() or _저장()") < 보냄
     assert "if 보낸_것_있음:\n                report_id = _저장()" in src[보냄:보냄 + 1500]
 
 

@@ -198,6 +198,14 @@ def test_이어_낼_때_앞_실행이_성공했으면_발송_기록이_없어도
     assert 저장 == []  # 아침 본문을 09:35 판으로 덮지 않는다 (25.2245)
 
 
+def test_이어_낼_때_앞_실행이_실패했어도_보낸_기록이_있으면_다시_보내지도_덮지도_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """08:27 이 발송·발송 시각까지 적고 그 뒤 failed 로 닫힌 날 — `sent_exists` 길이 발송끝남을 참으로 둔다 (25.2247)"""
+    보낸, 저장, 부름 = _예비(monkeypatch, True, 보냄=True)
+    monkeypatch.setattr(daily.db, "has_successful_run", lambda *a, **k: False)
+    assert daily.run("KR") == 0
+    assert 보낸 == [] and 저장 == [] and len(부름["kis"]) == 2
+
+
 def test_손_실행은_이어_낼_날이라도_성공한_날_리포트를_보낸다(monkeypatch: pytest.MonkeyPatch) -> None:
     """force 는 이어냄을 보지 않는다 — `이어냄 and` 를 빼면 손 재실행이 '이미 보냄' 으로 빠졌다 (25.2245)"""
     보낸, _저장, _부름 = _예비(monkeypatch, True, 보냄=False)
