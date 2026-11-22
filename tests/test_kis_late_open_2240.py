@@ -203,7 +203,7 @@ def test_이어_낼_때_앞_실행이_실패했어도_보낸_기록이_있으면
     보낸, 저장, 부름 = _예비(monkeypatch, True, 보냄=True)
     monkeypatch.setattr(daily.db, "has_successful_run", lambda *a, **k: False)
     assert daily.run("KR") == 0
-    assert 보낸 == [] and 저장 == [] and len(부름["kis"]) == 2
+    assert 보낸 == [] and 저장 == [] and len(부름["kis"]) == 2 and 부름["desk"] == [1]
 
 
 def test_손_실행은_이어_낼_날이라도_성공한_날_리포트를_보낸다(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -238,3 +238,40 @@ def test_운용_보고는_늦게_여는_날_예비_실행이_낸다고_말한다
     assert 머리(_at("08:28", 새해)).endswith("접수 시작(09:30) 뒤 예비 실행이 냅니다")
     # 보통날 07:50 손 실행은 예전 글 그대로
     assert 머리(_at("07:50", 보통)) == "▸ KIS모의투자: 오늘은 내지 않습니다 — 접수 시작 전"
+
+
+# ── 손 재실행은 이미 보낸 날 발송 뒤에만 덮는다 (25.567 의 `not 보낸_것_있음` 절반, 25.2248) ──────────────
+
+
+def _손_재실행(monkeypatch: pytest.MonkeyPatch) -> tuple[list, list]:
+    from tests.test_report_store_fail_1180 import _준비
+    from tests.test_send_fail_kis_1715 import _kis_desk
+
+    _보낸, 저장, _ = _준비(monkeypatch, 0)
+    _kis_desk(monkeypatch)
+    monkeypatch.setattr(daily.reports, "sent_exists", lambda *a, **k: True)  # 아침에 이미 보냈다
+    monkeypatch.setattr(bmj, "pre_open_resume", lambda *a, **k: False)
+    순서: list = []
+    옛저장 = daily.reports.store_report
+    monkeypatch.setattr(daily.reports, "store_report", lambda c, **k: (순서.append("저장"), 옛저장(c, **k))[1])
+    return 저장, 순서
+
+
+def test_손_재실행은_이미_보낸_날_새_리포트를_보낸_뒤에_덮는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    저장, 순서 = _손_재실행(monkeypatch)
+    monkeypatch.setattr(daily.telegram, "send", lambda text, *a, **k: (순서.append("발송"), [1])[1])
+    assert daily.run("KR", force=True) == 0
+    assert 순서 == ["발송", "저장"] and len(저장) == 1
+
+
+def test_손_재실행_발송이_실패하면_아침_행을_덮지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    from batch.notify import telegram
+
+    저장, _순서 = _손_재실행(monkeypatch)
+
+    def 실패(*_a: object, **_k: object) -> None:
+        raise telegram.TelegramError("429 retry_after 3600")
+
+    monkeypatch.setattr(daily.telegram, "send", 실패)
+    daily.run("KR", force=True)
+    assert 저장 == []  # 받은 본문·발송 시각이 웹 이력에 남는다
