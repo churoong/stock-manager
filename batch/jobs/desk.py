@@ -314,12 +314,13 @@ def report_head(
         상태 = f"꺼짐(베낄 계좌 {pp.account_name(h)} 없음)"
     elif after_close:
         상태 = "장 끝난 뒤 실행이라 오늘은 내지 않습니다"
-    elif (막힘 := bmj.send_block(market, now)) == bmj.PRE_OPEN_BLOCK and market == "KR" and (
-        (접수 := bmj.kr_order_window(now.astimezone(cal.market_tz("KR")).date())[0]).time() > bmj.ORDER_OPEN_KST
-    ):
-        # 늦게 여는 날(10:00 개장) — 이 실행은 못 내지만 접수 시작 뒤 예비 실행이 이어 낸다(25.2240,
-        # `broker_mirror.pre_open_resume`). "오늘은 내지 않습니다" 는 거짓이 된다
-        상태 = f"개장이 늦은 날이라 접수 시작({접수:%H:%M}) 뒤 예비 실행이 냅니다"
+    elif (막힘 := bmj.send_block(market, now)) == bmj.PRE_OPEN_BLOCK and market == "KR":
+        # 접수 시작 전 — 이 실행은 못 내지만 접수 시작 뒤 다음 실행이 이어 낸다(25.2240, `pre_open_resume`).
+        # 늦게 여는 날(10:00 개장)은 09:35 예비 실행이, 보통날 08:20 전 손 실행은 08:27 예약 실행이 잇는다 — 둘 다
+        # "오늘은 내지 않습니다" 는 거짓이 된다 (보통날 갈래 25.2249, 교차검증 [권고])
+        접수 = bmj.kr_order_window(now.astimezone(cal.market_tz("KR")).date())[0]
+        상태 = (f"개장이 늦은 날이라 접수 시작({접수:%H:%M}) 뒤 예비 실행이 냅니다" if 접수.time() > bmj.ORDER_OPEN_KST
+                else f"접수 시작({접수:%H:%M}) 전이라 다음 예약 실행이 이어 냅니다")  # fmt: skip
     elif 막힘:
         # KIS 단계와 같은 판정(25.1631) — 예약 마감 뒤·접수 시작 전이면 "냅니다" 가 거짓이었다. 리포트를 보낸 몇 분 뒤
         # 단계가 돌므로 경계 몇 분은 어긋날 수 있다 — 그날 실제 결과는 다음 운용 보고의 "지난 실행" 이 말한다

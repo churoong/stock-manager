@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, date, datetime
+from datetime import time as dtime
 
 import pytest
 
+from batch.core import calendar as cal
 from batch.core import db
 from batch.jobs import broker_mirror as bmj
 from batch.jobs import daily
@@ -169,7 +171,9 @@ def _예비(monkeypatch: pytest.MonkeyPatch, 이어: bool, 보냄: bool = True) 
     monkeypatch.setattr(daily.db, "has_successful_run", lambda *a, **k: True)
     monkeypatch.setattr(daily.reports, "sent_exists", lambda *a, **k: 보냄)
     monkeypatch.setattr(desk_job, "post_send_done", lambda *a, **k: True)
-    monkeypatch.setattr(bmj, "pre_open_resume", lambda *a, **k: 이어)
+    인자: list = []
+    monkeypatch.setattr(bmj, "pre_open_resume", lambda *a, **k: (인자.append(a[1:4]), 이어)[1])
+    부름["resume_args"] = 인자
     return 보낸, 저장, 부름
 
 
@@ -213,6 +217,14 @@ def test_손_실행은_이어_낼_날이라도_성공한_날_리포트를_보낸
     assert 보낸 != []
 
 
+def test_이어_낼지는_이_배치_이름과_리포트_거래일로_묻는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """LAST_BROKER_SEND_SQL 이 찾는 열(job_name·trade_date)과 같은 값을 넘긴다 — 시장 코드나 session_date 를 넘기면 행을
+    못 찾아 이어 내기가 조용히 꺼진다 (25.2249, 교차검증 [권고])"""
+    _보낸, _저장, 부름 = _예비(monkeypatch, True)
+    daily.run("KR")
+    assert 부름["resume_args"] == [("daily_kr", "KR", "2026-10-08")]  # _준비 의 trade_date(session_date 는 10-09)
+
+
 def test_예비_실행은_막히지_않은_날엔_예전처럼_빠진다(monkeypatch: pytest.MonkeyPatch) -> None:
     보낸, _저장, 부름 = _예비(monkeypatch, False)
     assert daily.run("KR") == 0
@@ -236,8 +248,8 @@ def test_운용_보고는_늦게_여는_날_예비_실행이_낸다고_말한다
 
     assert 머리(_at("08:28", 수능)) == "▸ KIS모의투자: 개장이 늦은 날이라 접수 시작(09:30) 뒤 예비 실행이 냅니다"
     assert 머리(_at("08:28", 새해)).endswith("접수 시작(09:30) 뒤 예비 실행이 냅니다")
-    # 보통날 07:50 손 실행은 예전 글 그대로
-    assert 머리(_at("07:50", 보통)) == "▸ KIS모의투자: 오늘은 내지 않습니다 — 접수 시작 전"
+    # 보통날 07:50 손 실행도 08:27 예약 실행이 이어 낸다 (25.2249 — 예전 "오늘은 내지 않습니다" 는 거짓이었다)
+    assert 머리(_at("07:50", 보통)) == "▸ KIS모의투자: 접수 시작(08:30) 전이라 다음 예약 실행이 이어 냅니다"
 
 
 # ── 손 재실행은 이미 보낸 날 발송 뒤에만 덮는다 (25.567 의 `not 보낸_것_있음` 절반, 25.2248) ──────────────
@@ -275,3 +287,29 @@ def test_손_재실행_발송이_실패하면_아침_행을_덮지_않는다(mon
     monkeypatch.setattr(daily.telegram, "send", 실패)
     daily.run("KR", force=True)
     assert 저장 == []  # 받은 본문·발송 시각이 웹 이력에 남는다
+
+
+def test_달력이_이미_수능_늦춤을_알면_두_번_늦추지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """exchange_calendars 가 수능일을 10:00·16:30 으로 주는 해 — 한 시간 더 늦추면 보내기 마감이 17:20 이 된다 (25.2249)"""
+    from datetime import date as _d
+
+    tz = cal.market_tz("KR")
+    monkeypatch.setattr(cal, "session_open_utc", lambda m, d: datetime.combine(d, dtime(10, 0), tzinfo=tz).astimezone(UTC))
+    monkeypatch.setattr(cal, "session_close_utc",
+                        lambda m, d: datetime.combine(d, dtime(16, 30), tzinfo=tz).astimezone(UTC))  # fmt: skip
+    날 = _d.fromisoformat(수능)
+    assert bmj.kr_close_utc(날).astimezone(tz).time() == dtime(16, 30)
+    시작, 끝 = bmj.kr_order_window(날)
+    assert (시작.time(), 끝.time()) == (dtime(9, 30), dtime(16, 20))
+
+
+def test_올해_수능일이_9월부터는_목록에_있다() -> None:
+    """수능일은 달력이 모른다 — 목록에 없으면 그해 KIS 주문이 08:38 에 나가 "장시작전" 으로 모두 거부된다(2026-11-19,
+    25.2240). 9월이면 그해 수능일이 공고돼 있으니 `monitor_targets.KR_CSAT_DAYS` 에 더할 것 (25.2249)"""
+    from datetime import date as _d
+
+    from batch.jobs import monitor_targets as mt
+
+    오늘 = _d.today()
+    if 오늘.month >= 9:
+        assert any(d.startswith(f"{오늘.year}-") for d in mt.KR_CSAT_DAYS), f"{오늘.year} 수능일을 KR_CSAT_DAYS 에 더하세요"
