@@ -318,7 +318,8 @@ def pre_open_resume(client: Any, job_name: str, market: str, trade_date: str, no
     08:27 실행은 10:00 개장일에 접수 시작(09:30)까지 한 시간을 기다릴 수 없어(단계 시간 제한 15분) 막히고, 그날은
     리포트·운용 요약이 다 끝나 09:35 예비 실행이 `has_successful_run`·`post_send_done` 으로 곧바로 빠졌다 — 그날 KIS
     주문이 끝내 안 나갔다. 마지막 KIS 기록만 본다: 이어 돈 실행이 보내면 그 기록이 마지막이 되어 다시 이어 돌지 않는다.
-    겹쳐 내기는 KIS 단계의 `이미`·`정리함` 이 막는다. 못 읽으면 False(예전처럼 빠진다)"""
+    겹쳐 내기는 KIS 단계의 `이미`·`정리함` 이 막는다. 못 읽으면 False(예전처럼 빠진다). 날의 종류는 가리지 않는다 —
+    보통날 08:20 전 손 실행이 막혔으면 08:27 예약 실행이 같은 길로 잇는다(25.2249·2250)"""
     if market != "KR" or send_block(market, now) is not None:
         return False
     try:

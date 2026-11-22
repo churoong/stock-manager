@@ -146,6 +146,16 @@ def test_첫째가_꺼진_날_도전자만_막혀도_이어_돈다() -> None:
     assert bmj.pre_open_resume(mem2, "daily_kr", "KR", "2026-11-18", _at("09:35", 수능)) is True
 
 
+def test_보통날_이른_손_실행이_막히면_08시27분_예약_실행이_이어_낸다() -> None:
+    """운용 보고 '이 실행이나 다음 예약 실행이 냅니다'(25.2249) 의 근거 — 보통날도 같은 길이다 (25.2250)"""
+    mem = MemClient()
+    db.apply_migrations(mem)  # type: ignore[arg-type]
+    _run(mem, "2026-11-19T22:50:00+00:00", {"broker": {"send": bmj.PRE_OPEN_BLOCK}})  # 보통날 07:50 손 실행
+    assert bmj.pre_open_resume(mem, "daily_kr", "KR", "2026-11-18", _at("08:27", 보통)) is True
+    assert bmj.pre_open_resume(mem, "daily_kr", "KR", "2026-11-18", _at("08:19", 보통)) is False  # 아직 막힘
+    assert bmj.pre_open_resume(mem, "daily_kr", "KR", "2026-11-18", _at("09:35", 보통)) is True
+
+
 def test_다른_까닭으로_막힌_날은_이어_돌지_않는다() -> None:
     mem = MemClient()
     db.apply_migrations(mem)  # type: ignore[arg-type]
@@ -172,7 +182,7 @@ def _예비(monkeypatch: pytest.MonkeyPatch, 이어: bool, 보냄: bool = True) 
     monkeypatch.setattr(daily.reports, "sent_exists", lambda *a, **k: 보냄)
     monkeypatch.setattr(desk_job, "post_send_done", lambda *a, **k: True)
     인자: list = []
-    monkeypatch.setattr(bmj, "pre_open_resume", lambda *a, **k: (인자.append(a[1:4]), 이어)[1])
+    monkeypatch.setattr(bmj, "pre_open_resume", lambda *a, **k: (인자.append(a[1:4]), 부름.setdefault("now", []).append(a[4]), 이어)[2])
     부름["resume_args"] = 인자
     return 보낸, 저장, 부름
 
@@ -223,6 +233,7 @@ def test_이어_낼지는_이_배치_이름과_리포트_거래일로_묻는다(
     _보낸, _저장, 부름 = _예비(monkeypatch, True)
     daily.run("KR")
     assert 부름["resume_args"] == [("daily_kr", "KR", "2026-10-08")]  # _준비 의 trade_date(session_date 는 10-09)
+    assert all(t.tzinfo is not None for t in 부름["now"])  # 지금 시각은 시간대가 붙은 값
 
 
 def test_예비_실행은_막히지_않은_날엔_예전처럼_빠진다(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -249,7 +260,7 @@ def test_운용_보고는_늦게_여는_날_예비_실행이_낸다고_말한다
     assert 머리(_at("08:28", 수능)) == "▸ KIS모의투자: 개장이 늦은 날이라 접수 시작(09:30) 뒤 예비 실행이 냅니다"
     assert 머리(_at("08:28", 새해)).endswith("접수 시작(09:30) 뒤 예비 실행이 냅니다")
     # 보통날 07:50 손 실행도 08:27 예약 실행이 이어 낸다 (25.2249 — 예전 "오늘은 내지 않습니다" 는 거짓이었다)
-    assert 머리(_at("07:50", 보통)) == "▸ KIS모의투자: 접수 시작(08:30) 전이라 다음 예약 실행이 이어 냅니다"
+    assert 머리(_at("07:50", 보통)) == "▸ KIS모의투자: 접수 시작(08:30) 뒤 이 실행이나 다음 예약 실행이 냅니다"
 
 
 # ── 손 재실행은 이미 보낸 날 발송 뒤에만 덮는다 (25.567 의 `not 보낸_것_있음` 절반, 25.2248) ──────────────
