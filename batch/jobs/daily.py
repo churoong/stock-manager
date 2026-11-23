@@ -3655,7 +3655,8 @@ def timeout_text(minutes: int, market: str | None = None) -> str:
     """시간 제한으로 강제 종료된 실행의 실패 사유 (docs/infra.md 25.1386).
 
     **리포트를 안 보냈다고 단정하지 않는다** — 발송 뒤 뒷단계(포트폴리오·사본 맞추기)에서 시간이 다 될 수도
-    있다(25.568 과 같은 이유). 기록 행은 프로세스가 죽어 닫히지 않으므로 `reap_stale_runs` 의 시간을 함께 적는다"""
+    있다(25.568 과 같은 이유). 기록 행은 알림 단계가 알림 뒤에 실패로 닫는다 — 못 닫으면 `reap_stale_runs` 의 시간
+    뒤 정리된다(25.2253)"""
     return (
         f"{minutes}분 시간 제한에 걸려 강제 종료됐습니다. 이 실행이 리포트를 보냈는지는 알 수 없습니다 — "
         "오늘 리포트를 이미 받았다면 그것이 오늘 리포트입니다. "
@@ -3664,7 +3665,9 @@ def timeout_text(minutes: int, market: str | None = None) -> str:
         # — 그날 마지막 예비(국내 09:35·미국 14:27 UTC)가 죽었으면 다음이 없고, 미국 예비는 대개 예약 마감 뒤라 KIS 는
         # 다시 내지 않는다
         + (_TIMEOUT_US_NOTE if market == "US" else _TIMEOUT_KR_NOTE)
-        + f"실행 기록은 '실행 중'으로 남았다가 {db.STALE_RUN_HOURS}시간 뒤 정리됩니다"
+        # 이 알림 **뒤에** 기록을 실패로 닫는다(25.2253) — 닫았다고 단정하지 않는다(못 닫으면 정리에 맡긴다)
+        + f"실행 기록은 이 알림 뒤 실패로 닫습니다(못 닫으면 {db.STALE_RUN_HOURS}시간 뒤 정리 — "
+        "관문은 둘 다 사고로 셉니다)"
     )
 
 
@@ -3679,11 +3682,11 @@ def notify_timeout(market: str, minutes: int, dry_run: bool) -> None:
     except Exception:  # noqa: BLE001 — 실패 알림을 보내는 길이다. 연결 실패가 알림을 막으면 안 된다
         client = None
     글 = timeout_text(minutes, market)
-    # 죽은 실행의 기록을 실패로 닫는다 — 관문 "운영 무사고" 가 강제 종료도 사고로 세게 (25.2253)
-    if client is not None and not dry_run and db.fail_timed_out_runs(client, job_name(market), minutes, 글):
-        글 = 글.replace(f"실행 기록은 '실행 중'으로 남았다가 {db.STALE_RUN_HOURS}시간 뒤 정리됩니다",
-                      "실행 기록은 실패로 닫았습니다")  # fmt: skip
     _notify_failure(client, market, job_name(market), 글, dry_run)  # type: ignore[arg-type]
+    # **알림 뒤에** 죽은 실행의 기록을 실패로 닫는다 — 관문 "운영 무사고" 가 강제 종료도 사고로 세게(25.2253). 앞에
+    # 두면 Turso 가 느린 날(그래서 죽은 날) 닫기의 재시도가 남은 잡 시간을 먹어 알림을 잃었다(25.2253 교차검증 [필수])
+    if client is not None and not dry_run:
+        db.fail_timed_out_runs(client, job_name(market), minutes, 글)
 
 
 def _notify_quota(market: str, reason: str, dry_run: bool) -> None:

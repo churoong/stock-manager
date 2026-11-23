@@ -31,12 +31,12 @@ def _상태(mem: MemClient) -> list[tuple[str, str | None]]:
 
 def test_정리된_끝맺지_못한_행은_예비가_성공해도_사고다() -> None:
     기대 = {"daily_kr": ["2026-11-20"]}
-    정리 = f"끝맺지 못한 기록. {db.STALE_RUN_HOURS}시간 뒤 정리했다"
     mem = MemClient()
     db.apply_migrations(mem)  # type: ignore[arg-type]
-    지금 = datetime(2026, 11, 22, 23, 27, tzinfo=UTC)
-    _행(mem, 지금, "skipped", 정리)  # 08:27 강제 종료 → 6시간 뒤 정리
-    _행(mem, 지금 + timedelta(hours=1, minutes=8), "success")  # 09:35 예비 성공
+    지금 = datetime.now(UTC) - timedelta(hours=db.STALE_RUN_HOURS + 1)
+    _행(mem, 지금, "running")  # 강제 종료로 열린 채 남은 행
+    _행(mem, 지금 + timedelta(hours=1, minutes=8), "success")  # 예비 성공
+    assert db.reap_stale_runs(mem, "daily_kr") == 1  # type: ignore[arg-type]  # 실제 정리 문구로 닫는다
     줄 = mem.execute(jd.BATCH_RUNS_SQL, ["daily_kr", "daily_us", "2026-11-01"]).dicts()
     assert desk.batch_incident_days(줄, 기대) == 1
 
@@ -47,7 +47,7 @@ def test_한도로_건너뛴_행은_예비가_성공하면_예전처럼_사고�
     mem = MemClient()
     db.apply_migrations(mem)  # type: ignore[arg-type]
     지금 = datetime(2026, 11, 22, 23, 27, tzinfo=UTC)
-    _행(mem, 지금, "skipped", "Turso 월 읽기 한도 — 건너뜀")
+    _행(mem, 지금, "skipped", "DB 한도로 건너뜀: 월 읽기 한도")  # entry.guard 의 문구
     _행(mem, 지금 + timedelta(hours=1), "success")
     줄 = mem.execute(jd.BATCH_RUNS_SQL, ["daily_kr", "daily_us", "2026-11-01"]).dicts()
     assert desk.batch_incident_days(줄, 기대) == 0
@@ -65,17 +65,33 @@ def test_시간_초과로_죽은_실행의_열린_행만_실패로_닫는다() -
     assert _상태(mem)[1][1] == "15분 시간 제한"
 
 
-def test_시간_초과_알림은_기록을_실패로_닫고_그렇게_말한다(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_시간_초과_알림을_먼저_보내고_그_뒤에_기록을_실패로_닫는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """닫기가 먼저면 Turso 가 느린 날 재시도가 남은 잡 시간을 먹어 알림을 잃는다 (25.2253 교차검증 [필수])"""
     mem = MemClient()
     db.apply_migrations(mem)  # type: ignore[arg-type]
     _행(mem, datetime.now(UTC) - timedelta(minutes=16), "running")
     monkeypatch.setattr(daily, "TursoClient", lambda: mem)
+    순서: list[str] = []
+    monkeypatch.setattr(daily, "_notify_failure", lambda c, m, n, 글, dry_run, **k: 순서.append("알림:" + 글))
+    옛닫기 = db.fail_timed_out_runs
+    monkeypatch.setattr(db, "fail_timed_out_runs", lambda *a, **k: (순서.append("닫기"), 옛닫기(*a, **k))[1])
+    daily.notify_timeout("KR", 15, dry_run=False)
+    assert [x.split(":")[0] for x in 순서] == ["알림", "닫기"]
+    assert [s for s, _ in _상태(mem)] == ["failed"]
+    # 알림·저장 본문이 같은 말 — 닫았다고 단정하지 않는다
+    assert "이 알림 뒤 실패로 닫습니다" in 순서[0] and "이 알림 뒤 실패로 닫습니다" in (_상태(mem)[0][1] or "")
+
+
+def test_닫기가_깨져도_알림은_나간다(monkeypatch: pytest.MonkeyPatch) -> None:
+    class 느림:
+        def execute(self, *a: object, **k: object) -> None:
+            raise TimeoutError("Read timed out")
+
+    monkeypatch.setattr(daily, "TursoClient", lambda: 느림())
     알림: list[str] = []
     monkeypatch.setattr(daily, "_notify_failure", lambda c, m, n, 글, dry_run, **k: 알림.append(글))
     daily.notify_timeout("KR", 15, dry_run=False)
-    assert [s for s, _ in _상태(mem)] == ["failed"]
-    assert len(알림) == 1 and "실행 기록은 실패로 닫았습니다" in 알림[0]
-    assert "시간 뒤 정리됩니다" not in 알림[0]
+    assert len(알림) == 1
 
 
 def test_dry_run_이면_기록을_건드리지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:

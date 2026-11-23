@@ -288,6 +288,9 @@ def apply_migrations(client: TursoClient) -> list[str]:
 #: 60분(d1-catchup)이라 그 6배로 넉넉히 잡는다. 같은 작업이 정말로 나란히 도는 일은 없다
 #: (워크플로마다 concurrency 그룹이 있다)
 STALE_RUN_HOURS = 6
+#: `reap_stale_runs` 가 남기는 오류 문구의 앞부분 — 관문 사고 세기(`desk.BATCH_RUNS_SQL`)·시세 사본(`price_replica`)이
+#: 이 앞부분으로 정리 행을 가른다(25.2253 교차검증 — 손으로 적은 사본 문자열이 어긋나면 말없이 꺼진다)
+REAPED_PREFIX = "끝맺지 못한 기록"
 
 #: 이 프로세스가 열어 둔 실행들. 죽을 때 닫으려고 둔다 (batch/core/entry.guard).
 #:
@@ -319,7 +322,7 @@ def reap_stale_runs(client: TursoClient, job_name: str) -> int:
         ids = [int(row[0]) for row in rs.rows]
         for run_id in ids:
             finish_batch_run(
-                client, run_id, status="skipped", error_text=f"끝맺지 못한 기록. {STALE_RUN_HOURS}시간 뒤 정리했다"
+                client, run_id, status="skipped", error_text=f"{REAPED_PREFIX}. {STALE_RUN_HOURS}시간 뒤 정리했다"
             )
         return len(ids)
     except Exception:  # noqa: BLE001 — 정리가 본 작업을 막으면 안 된다
@@ -332,8 +335,10 @@ def fail_timed_out_runs(client: TursoClient, job_name: str, minutes: int, error_
     죽은 프로세스는 제 행을 닫지 못해 `running` 으로 남았다가 `reap_stale_runs` 가 `skipped` 로 닫았다 — 관문
     "운영 무사고"(`desk.batch_incident_days`)가 같은 시간 초과라도 파이썬 예외면 사고로, 강제 종료면 아니게 셌다
     (11-23 Turso 시간 초과, 48회차 교차검증 [권고]). 시간 제한 + 여유 10분 안에 시작한 그 작업의 열린 행만 닫는다 —
-    같은 동시 실행 그룹이라 다른 실행의 행이 섞이지 않는다. 실패하면 0(알림이 먼저다 — 그때는 정리된 행을 사고로
-    세는 쪽이 받친다)"""
+    같은 동시 실행 그룹이라 다른 실행의 행이 섞이지 않는다. 실패하면 0 — 부르는 쪽은 **알림을 보낸 뒤에** 부른다
+    (Turso 가 느린 날 닫기가 남은 잡 시간을 먹어 알림을 잃지 않게, 25.2253 교차검증 [필수]). 못 닫으면 정리된 행을
+    사고로 세는 쪽이 받친다. 바깥 행만 닫는다 — 안쪽 작업(sentiment·scores 등) 행은 관문 밖이라 정리에 맡긴다
+    (25.1386 의 '이 단계에서 닫지 않는다' 를 바깥 행에 한해 뒤집음)"""
     since = (datetime.now(UTC) - timedelta(minutes=minutes + 10)).isoformat()
     try:
         ids = [int(r[0]) for r in client.execute(

@@ -75,8 +75,8 @@ PRICE_WRITER_JOBS = db.PRICE_WRITER_JOBS
 #: 최대 360분. 로컬 손 실행(`manual`)은 상한이 없어 예전처럼 "전부" 로 본다
 JOB_MAX_MINUTES = {"daily_kr": 20, "daily_us": 55}
 ACTIONS_MAX_MINUTES = 360
-#: `db.reap_stale_runs` 가 남기는 오류 문구의 앞부분
-REAPED_PREFIX = "끝맺지 못한 기록"
+#: `db.reap_stale_runs` 가 남기는 오류 문구의 앞부분 — 단일 정의처는 `db.REAPED_PREFIX`(25.2253)
+REAPED_PREFIX = db.REAPED_PREFIX
 
 ROUTABLE_TABLES = frozenset({"prices", "stocks"})
 #: 표가 아니라 SQLite 표 값 함수 — 고른 종목 번호 목록을 펼친다. 사본에서도 같다 (docs/infra.md 25.1033)
