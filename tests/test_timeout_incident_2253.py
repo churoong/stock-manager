@@ -82,16 +82,58 @@ def test_시간_초과_알림을_먼저_보내고_그_뒤에_기록을_실패로
     assert "이 알림 뒤 실패로 닫습니다" in 순서[0] and "이 알림 뒤 실패로 닫습니다" in (_상태(mem)[0][1] or "")
 
 
-def test_닫기가_깨져도_알림은_나간다(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_시간_초과_알림_단계는_Turso_를_짧게_재시도_없이_쓴다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """텔레그램 전의 마지막 성공 읽기·뒤의 닫기가 60초 × 재시도 셋에 매달리면 남은 잡 시간 안에 알림을 잃었다
+    (25.2255, 25.2254 교차검증 [필수]) — 알림 전에 짧은 상한이 켜져 있어야 한다"""
+    켬: list[float] = []
+    순서: list[str] = []
+
     class 느림:
+        def set_quick(self, t: float) -> None:
+            켬.append(t)
+            순서.append("짧게")
+
         def execute(self, *a: object, **k: object) -> None:
+            순서.append("db")
             raise TimeoutError("Read timed out")
 
     monkeypatch.setattr(daily, "TursoClient", lambda: 느림())
+    monkeypatch.setattr(daily.telegram, "send", lambda text, *a, **k: 순서.append("tg") or [1])
+    daily.notify_timeout("KR", 15, dry_run=False)  # 실제 `_notify_failure` 를 탄다
+    assert 켬 == [daily.TIMEOUT_DB_REQUEST_S] and 순서[0] == "짧게" and "tg" in 순서
+    assert daily.TIMEOUT_DB_REQUEST_S <= 10
+
+
+def test_짧은_상한이면_한_번만_보내고_그_제한을_쓴다(monkeypatch: pytest.MonkeyPatch) -> None:
+    import requests
+
+    from batch.core import turso
+
+    c = turso.TursoClient("libsql://x.example", "t")
+    보냄: list[float] = []
+
+    def post(url: str, json: object, timeout: float) -> None:
+        보냄.append(timeout)
+        raise requests.ConnectionError("Read timed out")
+
+    monkeypatch.setattr(c._session, "post", post)
+    monkeypatch.setattr(turso.time, "sleep", lambda s: 보냄.append(-s))
+    c.set_quick(8.0)
+    with pytest.raises(turso.TursoError):
+        c._post_with_retry({})
+    assert 보냄 == [8.0]  # 재시도·기다림 없음
+
+
+def test_닫을_행이_없으면_닫았다고_말하지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """행을 열기 전에 죽은 실행 — 알림 글은 '기록이 있으면' 으로만 말한다 (25.2255)"""
+    mem = MemClient()
+    db.apply_migrations(mem)  # type: ignore[arg-type]
+    monkeypatch.setattr(daily, "TursoClient", lambda: mem)
     알림: list[str] = []
     monkeypatch.setattr(daily, "_notify_failure", lambda c, m, n, 글, dry_run, **k: 알림.append(글))
     daily.notify_timeout("KR", 15, dry_run=False)
-    assert len(알림) == 1
+    assert "실행 기록이 있으면 이 알림 뒤 실패로 닫습니다" in 알림[0]
+    assert _상태(mem) == []
 
 
 def test_dry_run_이면_기록을_건드리지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:

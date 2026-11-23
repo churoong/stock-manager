@@ -190,6 +190,13 @@ class TursoClient:
         self.writes = WriteCounter()
         self.reads = ReadCounter()
         self._recording = False  # 카운터를 적는 동안 그 쓰기·읽기를 또 세지 않게
+        # 짧은 상한 — `set_quick` 이 켠다(시간 초과 알림 단계, 25.2255). None 이면 모듈 값(TIMEOUT·RETRY_DELAYS)
+        self._quick_timeout: float | None = None
+
+    def set_quick(self, timeout: float) -> None:
+        """요청마다 `timeout` 초, 재시도 없이 — 남은 잡 시간이 짧은 길(시간 초과 알림 단계)이 60초 × 재시도 셋에
+        매달리지 않게 (25.2255, 25.2254 교차검증 [필수])"""
+        self._quick_timeout = timeout
 
     def _가림(self, text: str) -> str:
         """오류 글에서 DB 호스트를 가린다 (docs/infra.md 25.1218). requests 오류는 `host='….turso.io'` 를 싣는데
@@ -244,10 +251,12 @@ class TursoClient:
 
     def _post_with_retry(self, payload: dict) -> requests.Response:
         """일시적 실패(연결·타임아웃·5xx·429)만 다시 보낸다. 401 같은 설정 오류는 바로 올린다."""
-        attempts = len(RETRY_DELAYS) + 1
+        빠름 = self._quick_timeout is not None
+        attempts = 1 if 빠름 else len(RETRY_DELAYS) + 1
+        제한 = self._quick_timeout if 빠름 else TIMEOUT
         for attempt in range(1, attempts + 1):
             try:
-                resp = self._session.post(self._endpoint, json=payload, timeout=TIMEOUT)
+                resp = self._session.post(self._endpoint, json=payload, timeout=제한)
             except requests.RequestException as exc:
                 if attempt == attempts:
                     # `from None` — 원래 오류를 사슬에 남기면 traceback 이 가리지 않은 호스트를 찍는다 (25.1221)
