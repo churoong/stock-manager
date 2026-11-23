@@ -3678,7 +3678,12 @@ def notify_timeout(market: str, minutes: int, dry_run: bool) -> None:
         client: TursoClient | None = TursoClient()
     except Exception:  # noqa: BLE001 — 실패 알림을 보내는 길이다. 연결 실패가 알림을 막으면 안 된다
         client = None
-    _notify_failure(client, market, job_name(market), timeout_text(minutes, market), dry_run)  # type: ignore[arg-type]
+    글 = timeout_text(minutes, market)
+    # 죽은 실행의 기록을 실패로 닫는다 — 관문 "운영 무사고" 가 강제 종료도 사고로 세게 (25.2253)
+    if client is not None and not dry_run and db.fail_timed_out_runs(client, job_name(market), minutes, 글):
+        글 = 글.replace(f"실행 기록은 '실행 중'으로 남았다가 {db.STALE_RUN_HOURS}시간 뒤 정리됩니다",
+                      "실행 기록은 실패로 닫았습니다")  # fmt: skip
+    _notify_failure(client, market, job_name(market), 글, dry_run)  # type: ignore[arg-type]
 
 
 def _notify_quota(market: str, reason: str, dry_run: bool) -> None:

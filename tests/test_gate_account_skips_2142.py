@@ -16,7 +16,7 @@ from batch.services import desk
 from tests.test_portfolio_job import MemClient
 
 _칸 = ("job_name", "trade_date", "status", "paper_error", "paper_skipped", "paper_account_errors", "paper_account_skips",
-      "paper_accounts")
+      "paper_accounts", "reaped")
 
 
 def _읽기(logs: list[dict]) -> list[dict]:

@@ -326,6 +326,27 @@ def reap_stale_runs(client: TursoClient, job_name: str) -> int:
         return 0
 
 
+def fail_timed_out_runs(client: TursoClient, job_name: str, minutes: int, error_text: str) -> int:
+    """워크플로 시간 제한(`timeout`)이 죽인 실행의 `running` 기록을 **실패로** 닫는다. 닫은 개수 (25.2253).
+
+    죽은 프로세스는 제 행을 닫지 못해 `running` 으로 남았다가 `reap_stale_runs` 가 `skipped` 로 닫았다 — 관문
+    "운영 무사고"(`desk.batch_incident_days`)가 같은 시간 초과라도 파이썬 예외면 사고로, 강제 종료면 아니게 셌다
+    (11-23 Turso 시간 초과, 48회차 교차검증 [권고]). 시간 제한 + 여유 10분 안에 시작한 그 작업의 열린 행만 닫는다 —
+    같은 동시 실행 그룹이라 다른 실행의 행이 섞이지 않는다. 실패하면 0(알림이 먼저다 — 그때는 정리된 행을 사고로
+    세는 쪽이 받친다)"""
+    since = (datetime.now(UTC) - timedelta(minutes=minutes + 10)).isoformat()
+    try:
+        ids = [int(r[0]) for r in client.execute(
+            "SELECT id FROM batch_runs WHERE job_name = ? AND status = 'running' AND started_at >= ?",
+            [job_name, since],
+        ).rows]  # fmt: skip
+        for run_id in ids:
+            finish_batch_run(client, run_id, status="failed", error_text=error_text[:1000])
+        return len(ids)
+    except Exception:  # noqa: BLE001 — 기록 정리가 실패 알림을 막으면 안 된다
+        return 0
+
+
 def _닫기(client: TursoClient, run_id: int, status: str, error_text: str | None) -> None:
     """한 기록을 닫는다. 저장해 둔 클라이언트가 안 되면 **새로 열어** 한 번 더 해 본다.
 

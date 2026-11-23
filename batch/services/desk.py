@@ -538,7 +538,9 @@ def batch_incident_days(rows: list[dict[str, Any]], expected: dict[str, list[str
         k = (str(r.get("job_name")), str(r.get("trade_date") or "")[:10])
         if r.get("status") in ("success", "partial") and not paper_step_failed(r):
             성공.add(k)
-        elif r.get("status") == "failed":
+        elif r.get("status") == "failed" or r.get("reaped"):
+            # 끝맺지 못해 정리된 행 — 시간 제한 강제 종료·한도로 죽은 실행. 같은 시간 초과라도 파이썬 예외면 `failed`
+            # 라 사고였는데 강제 종료면 `skipped` 로 정리돼 사고가 아니었다(25.2253, 48회차 교차검증 [권고])
             실패.add(k)
         # 계좌 건너뜀·위원회·지주사 실패는 같은 날 다시 돈 실행이 끝까지 돌아도 사고다(25.2145, 25.2142 교차검증
         # [참고]) — 다시 돈 실행은 그 계좌가 `ORDERS_EXIST`("이미 냄")로 가서 지주사·위원회를 다시 돌지 않아 칸이 비었다
