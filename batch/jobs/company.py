@@ -258,7 +258,7 @@ def load_dossiers(client: Any, rows: list[report_picks.SignalRow], country: str,
 #: 사업보고서 스냅샷 — 기준일까지 접수된 것만. 통화는 같은 사업연도 원장에서 잇는다
 #: (스냅샷 payload 에 통화가 없다, 25.919)
 MASTER_SNAP_SQL = (
-    "SELECT f.stock_id, f.as_of_date, f.fiscal_year, f.consolidated, f.payload, fin.currency AS cur"
+    "SELECT f.stock_id, f.as_of_date, f.receipt_no, f.fiscal_year, f.consolidated, f.payload, fin.currency AS cur"
     " FROM financial_snapshots f LEFT JOIN financials fin ON fin.stock_id = f.stock_id"
     "  AND fin.fiscal_year = f.fiscal_year AND fin.report_code = f.report_code AND fin.consolidated = f.consolidated"
     " WHERE f.report_code = '11011' AND f.as_of_date <= ? AND f.stock_id IN (SELECT value FROM json_each(?))"
@@ -270,7 +270,7 @@ MASTER_FACTOR_SQL = (
 )
 #: 배당 — 접수일이 기준일 이하이고 NULL 이 아닌 것
 MASTER_DIV_SQL = (
-    "SELECT stock_id, fiscal_year, as_of_date, cash_dividend_total FROM stock_dividends"
+    "SELECT stock_id, fiscal_year, as_of_date, receipt_no, cash_dividend_total FROM stock_dividends"
     " WHERE as_of_date IS NOT NULL AND as_of_date <= ? AND cash_dividend_total IS NOT NULL"
     " AND stock_id IN (SELECT value FROM json_each(?))"
 )
@@ -292,13 +292,16 @@ def _pit_annual(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """한 종목 스냅샷 → 기준(연결·별도) 하나로 고른 연간 줄.
 
     `backtest.pit_basis_rows` 와 같은 규칙: 가장 늦은 사업연도에 연결이 있으면 연결.
-    같은 사업연도는 가장 늦은 접수 하나. 사업연도 오름차순"""
+    같은 사업연도는 가장 늦은 접수 하나 — 접수일, 같으면 접수번호(`backtest._공시_순`, 25.1291: 같은 날 원공시와
+    정정이 함께 접수되면 저장 순서가 이겼다, 25.2263). 사업연도 오름차순"""
+    from batch.jobs.backtest import _공시_순
+
     if not rows:
         return []
     끝해 = max(int(r["fiscal_year"]) for r in rows)
     연결 = 1 if any(int(r["fiscal_year"]) == 끝해 and int(r["consolidated"] or 0) == 1 for r in rows) else 0
     고름: dict[int, dict[str, Any]] = {}
-    for r in sorted(rows, key=lambda r: str(r["as_of_date"])):
+    for r in sorted(rows, key=_공시_순):
         if int(r["consolidated"] or 0) == 연결:
             고름[int(r["fiscal_year"])] = r
     return [고름[k] for k in sorted(고름)]
@@ -307,6 +310,7 @@ def _pit_annual(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def master_facts(client: Any, ids: list[int], country: str, as_of: str) -> dict[int, dict[str, Any]]:
     """거장 부서 자료 — {종목: Dossier.masters} (docs/company.md 12.1). 기준일 `as_of` 까지 알 수 있던 값만"""
     from batch.core import db
+    from batch.jobs.backtest import _공시_순
     from batch.services import sectors
     from batch.services.scoring import MARKET_CAP_KEY
 
@@ -329,12 +333,12 @@ def master_facts(client: Any, ids: list[int], country: str, as_of: str) -> dict[
         except (TypeError, ValueError):
             v = {}
         원값.setdefault(k[0], {})[k[1]] = v if isinstance(v, dict) else {}
-    배당: dict[int, dict[int, tuple[str, bool]]] = {}
+    배당: dict[int, dict[int, tuple[tuple[str, str], bool]]] = {}
     for r in client.execute(MASTER_DIV_SQL, [as_of, 묶음]).dicts():
         표 = 배당.setdefault(int(r["stock_id"]), {})
-        fy, 날 = int(r["fiscal_year"]), str(r["as_of_date"])
-        if fy not in 표 or 날 >= 표[fy][0]:
-            표[fy] = (날, float(r["cash_dividend_total"]) > 0)
+        fy, 순 = int(r["fiscal_year"]), _공시_순(r)  # 같은 사업연도는 가장 늦은 접수(같은 날이면 접수번호)
+        if fy not in 표 or 순 >= 표[fy][0]:
+            표[fy] = (순, float(r["cash_dividend_total"]) > 0)
     베타: dict[int, tuple[int, str, float]] = {}
     for r in client.execute(MASTER_BETA_SQL, [as_of, 묶음]).dicts():
         sid, 순 = int(r["stock_id"]), (1 if r["window"] == "3Y" else 0)

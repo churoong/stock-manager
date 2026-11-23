@@ -1987,6 +1987,11 @@ def buy_orders(
                  "_decisions": 결정}  # fmt: skip
 
 
+def uses_masters(charter: dict[str, Any]) -> bool:
+    """가중 > 0 인 거장 부서가 있는 헌장인가 — `company.opinions` 의 가중 집합과 같은 식 (25.2263)"""
+    return any(k in co.MASTER_DEPARTMENTS and float(v or 0) > 0 for k, v in (charter.get("weights") or {}).items())
+
+
 def _조사_준비(
     client: Any, market: str, signal_rows: list[report_picks.SignalRow], charters: dict[str, dict[str, Any]],
     cache: dict[str, Any], trade_date: str,
@@ -1997,14 +2002,19 @@ def _조사_준비(
     as_of = max((r.as_of_date for r in signal_rows if r.as_of_date), default=trade_date)
     if "agenda" not in cache:
         크기 = max(int(c["agenda"]) for c in charters.values())
-        cache["population"] = cjob.population_dossiers(client, signal_rows, market, as_of)
-        cache["agenda"] = cjob.load_dossiers(client, cjob.agenda_rows(signal_rows, 크기), market, as_of)
-        # 거장 부서(docs/company.md 12장)를 쓰는 헌장이 있는 날만 거장 자료를 읽어 붙인다 — 없으면 읽기 0
-        if any(set(c.get("weights") or {}) & set(co.MASTER_DEPARTMENTS) for c in charters.values()):
-            ids = sorted({d.stock_id for d in [*cache["population"], *cache["agenda"]]})
-            사실 = cjob.master_facts(client, ids, market, as_of)
-            cache["population"] = cjob.with_masters(cache["population"], 사실)
-            cache["agenda"] = cjob.with_masters(cache["agenda"], 사실)
+        모집단 = cjob.population_dossiers(client, signal_rows, market, as_of)
+        안건 = cjob.load_dossiers(client, cjob.agenda_rows(signal_rows, 크기), market, as_of)
+        # 거장 부서(docs/company.md 12장)를 쓰는 헌장이 있는 날만 거장 자료를 읽어 붙인다 — 없으면 읽기 0.
+        # 거장 자료 읽기가 실패해도 A~E 는 그날 그대로 회의한다 — 거장 헌장 계좌만 `committee_step` 이 막는다
+        # (25.2263, 25.2261 교차검증 [권고]). 캐시는 다 지은 뒤 한 번에 넣는다
+        if any(uses_masters(c) for c in charters.values()):
+            try:
+                사실 = cjob.master_facts(client, sorted({d.stock_id for d in [*모집단, *안건]}), market, as_of)
+                모집단, 안건 = cjob.with_masters(모집단, 사실), cjob.with_masters(안건, 사실)
+            except Exception as e:  # noqa: BLE001 — 거장 헌장 계좌만 막고 기록한다
+                cache["masters_error"] = f"{type(e).__name__}: {e}"
+                log.warning("거장 자료 읽기 실패 — 거장 헌장 계좌는 오늘 회의하지 않는다: %s", cache["masters_error"])
+        cache["population"], cache["agenda"] = 모집단, 안건
     return as_of
 
 
@@ -2115,6 +2125,9 @@ def committee_step(
     from batch.jobs import company as cjob
 
     as_of = _조사_준비(client, market, signal_rows, charters, cache, trade_date)
+    if cache.get("masters_error") and uses_masters(charter):
+        # 거장 자료 없이 열면 거장 부서가 모두 '자료 없음' 인 회의록을 조용히 쓴다 — 위원회 실패로 그날 사지 않는다
+        raise RuntimeError(f"거장 자료 읽기 실패: {cache['masters_error']}")
     문장: list[tuple[str, list[Any]]] = []
     items, approved = co.meet(cache["agenda"][: int(charter["agenda"])], charter, cache["population"])
     if not cache.get("dossiers_written"):

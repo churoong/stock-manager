@@ -206,3 +206,140 @@ def test_문서_12_3_이_코드_문턱을_적는다() -> None:
                  f"≥ {ms.ONEIL_HIGH52:g}", f"백분위 ≥ {ms.ONEIL_RS:g}", f"`p ≤ {ms.LYNCH_CHECK_FOR:g}`",
                  f"`p ≥ {ms.LYNCH_CHECK_AGAINST:g}`"):  # fmt: skip
         assert 글자 in 절, 글자
+
+
+# ── 25.2263 교차검증 [권고] 보강 ─────────────────────────────────────────────────
+
+
+def test_버핏부_ROE_문턱_경계가_입장을_바꾼다() -> None:
+    """ROE 만 문턱 언저리로 두고 나머지 다섯은 고정 — 문턱을 옮기면 깨진다 (25.2261 교차검증 [권고])"""
+    def 회사(sid: int, ni: float, 해수: int = 5) -> co.Dossier:
+        return _d(sid, annual=_연간(*((2026 - 해수 + k, ni) for k in range(해수)), ocf=ni + 100),
+                  raw={"profit_stability": 1, "debt_ratio": 0.3, "ep": 0.08}, beta=0.8)  # fmt: skip
+
+    딱, 모자람 = 회사(1, 1000 * ms.BUFFETT_ROE), 회사(2, 1000 * ms.BUFFETT_ROE - 1)
+    o = ms.buffett([딱, 모자람], [딱, 모자람])
+    assert (o[1].stance, o[1].conviction) == (1, 1.0)
+    assert o[2].conviction == pytest.approx(round(abs(5 / 6 - 0.5) / 0.5, 6))  # ① 하나만 불충족
+    # 관측된 해가 문턱 해 수보다 적으면 ① 은 판정 불가 — ROE 10% 여도 불충족이 아니라 빠져 판정 가능 5 중 5(확신 1)
+    둘 = 회사(3, 100, 해수=ms.BUFFETT_MIN_YEARS - 1)
+    assert (ms.buffett([둘], [둘])[3].stance, ms.buffett([둘], [둘])[3].conviction) == (1, 1.0)
+    assert ms.buffett([회사(4, 100)], [회사(4, 100)])[4].conviction < 1.0  # 해가 차면 ① 불충족
+
+
+def test_그린블랫부는_유틸리티도_뺀다() -> None:
+    d = _d(1, annual=_연간((2025, 100), oi=400.0), raw={"cap": 1000.0}, utility=True)
+    assert ms.greenblatt_parts(d) == (None, None)
+    assert ms.greenblatt_parts(replace(d, masters={**d.masters, "utility": False})) != (None, None)  # type: ignore[dict-item]
+
+
+def test_미국_업종_코드로_유틸리티를_가른다() -> None:
+    mem = MemClient()
+    db.apply_migrations(mem)  # type: ignore[arg-type]
+    for sid, 코드 in ((1, "SIC 4911"), (2, "SIC 3571")):
+        mem.conn.execute("INSERT INTO stocks (id, ticker, market, country, currency, source, fetched_at, sector_code)"
+                         " VALUES (?, ?, 'NYSE', 'US', 'USD', 't', 't', ?)", [sid, f"U{sid}", 코드])  # fmt: skip
+    사실 = cjob.master_facts(mem, [1, 2], "US", "2026-11-20")  # type: ignore[arg-type]
+    assert (사실[1]["utility"], 사실[2]["utility"]) == (True, False)
+
+
+def test_같은_날_정정_공시는_접수번호로_고른다() -> None:
+    """정정을 먼저 저장해도 접수번호가 큰 정정을 고른다(`backtest._공시_순`, 25.1291) — 배당도 같다"""
+    mem = MemClient()
+    db.apply_migrations(mem)  # type: ignore[arg-type]
+    c = mem.conn
+    c.execute("INSERT INTO stocks (id, ticker, market, country, currency, source, fetched_at)"
+              " VALUES (1, '000001', 'KOSPI', 'KR', 'KRW', 't', 't')")  # fmt: skip
+    for 접수번호, ni in (("20250310000200", 200), ("20250310000100", 100)):  # 정정 먼저 저장
+        c.execute("INSERT INTO financial_snapshots (stock_id, as_of_date, receipt_no, fiscal_year, report_code,"
+                  " consolidated, payload, source, fetched_at) VALUES (1, '2025-03-10', ?, 2024, '11011', 1, ?, 't', 't')",
+                  [접수번호, json.dumps({"net_income": ni})])  # fmt: skip
+    for 접수번호, 보고, 금액 in (("20250310000200", 2024, 0), ("20250310000100", 2025, 10)):  # 어느 읽기 순서로도 원공시가 뒤
+        c.execute("INSERT INTO stock_dividends (stock_id, fiscal_year, report_year, receipt_no, as_of_date,"
+                  " cash_dividend_total, source, fetched_at) VALUES (1, 2024, ?, ?, '2025-03-10', ?, 't', 't')",
+                  [보고, 접수번호, 금액])  # fmt: skip
+    사실 = cjob.master_facts(mem, [1], "KR", "2026-11-20")[1]  # type: ignore[arg-type]
+    assert [r["ni"] for r in 사실["annual"]] == [200]
+    assert 사실["div"] == {2024: False}
+
+
+def test_팩터_원값은_그날_가장_높은_판을_읽는다() -> None:
+    """12.1 덧붙임(25.2263) — 신호(`daily.load_signal_rows`)도 그날 가장 높은 점수 판을 읽는다"""
+    mem = MemClient()
+    db.apply_migrations(mem)  # type: ignore[arg-type]
+    mem.conn.execute("INSERT INTO stocks (id, ticker, market, country, currency, source, fetched_at)"
+                     " VALUES (1, '000001', 'KOSPI', 'KR', 'KRW', 't', 't')")  # fmt: skip
+    for 판, ep in ((12, 0.2), (11, 0.1)):
+        mem.conn.execute("INSERT INTO factors (stock_id, as_of_date, factor, raw_json, peer_group, peer_size,"
+                         " calc_version, created_at) VALUES (1, '2026-11-20', 'value', ?, 'm', 10, ?, 't')",
+                         [json.dumps({"ep": ep}), 판])  # fmt: skip
+    assert cjob.master_facts(mem, [1], "KR", "2026-11-20")[1]["raw"]["ep"] == 0.2  # type: ignore[arg-type]
+
+
+#: docs/company.md 12.4 표 — 사전 등록 값(손으로 옮김). 0096 마이그레이션 시험도 이 값을 쓴다
+헌장_12_4 = {
+    "ZM": ({"buffett": 1, "lynch": 1, "graham": 1, "greenblatt": 1, "oneil_earn": 0.5, "oneil_price": 0.5,
+            "governance": 1, "risk": 0.5}, "buffett", ["governance", "risk"], -0.6, 1.0, 30, 5, "core"),
+    "ZN": ({"graham_price": 2, "graham_fin": 2, "governance": 1}, "graham_price", ["governance"], None, 2.0, 50, 5,
+           "core"),
+    "ZL": ({"lynch": 2, "lynch_check": 2, "governance": 1}, "lynch", ["governance"], None, 2.0, 50, 5, "core"),
+}  # fmt: skip
+
+
+def test_거장_헌장은_사전_등록_12_4_와_같다() -> None:
+    for aid, (가중, 주관, 거부, mdd, 문턱, 안건, top_n, 매도) in 헌장_12_4.items():
+        ch = ms.CHARTERS[aid]
+        assert (ch["weights"], ch["lead"], ch["veto"], ch["max_mdd"], ch["threshold"], ch["agenda"], ch["top_n"],
+                ch["sell_rule"]) == (가중, 주관, 거부, mdd, 문턱, 안건, top_n, 매도), aid  # fmt: skip
+    assert list(ms.CHARTERS) == list(헌장_12_4)
+
+
+# ── 조사 준비 (jobs/paper._조사_준비) ───────────────────────────────────────────────
+
+
+def _준비(monkeypatch: pytest.MonkeyPatch, charters: dict, 실패: bool = False) -> tuple[dict, list]:
+    from batch.jobs import paper as jp
+
+    불림: list = []
+    d = co.Dossier(stock_id=1, ticker="T1", as_of="2026-11-20")
+    monkeypatch.setattr(cjob, "population_dossiers", lambda *a: [d])
+    monkeypatch.setattr(cjob, "agenda_rows", lambda rows, n: rows)
+    monkeypatch.setattr(cjob, "load_dossiers", lambda *a: [d])
+
+    def 사실(*a: object) -> dict:
+        불림.append(a[1])
+        if 실패:
+            raise TimeoutError("Read timed out")
+        return {1: {"annual": [], "raw": {}}}
+
+    monkeypatch.setattr(cjob, "master_facts", 사실)
+    cache: dict = {}
+    jp._조사_준비(object(), "KR", [], charters, cache, "2026-11-20")
+    return cache, 불림
+
+
+def test_거장_헌장이_없으면_거장_자료를_읽지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    cache, 불림 = _준비(monkeypatch, dict(co.CHARTERS))
+    assert 불림 == [] and cache["agenda"][0].masters is None
+    assert "masters" not in cjob.dossier_json(cache["agenda"][0])
+    # 가중 0 인 거장 키만 있으면 읽지 않는다(`opinions` 와 같은 식)
+    cache, 불림 = _준비(monkeypatch, {"A": {**co.CHARTERS["A"], "weights": {**co.CHARTERS["A"]["weights"], "buffett": 0}}})
+    assert 불림 == []
+
+
+def test_거장_헌장이_끼면_모집단과_안건_둘_다에_붙인다(monkeypatch: pytest.MonkeyPatch) -> None:
+    cache, 불림 = _준비(monkeypatch, {**co.CHARTERS, **ms.CHARTERS})
+    assert 불림 == [[1]] and cache["agenda"][0].masters == cache["population"][0].masters == {"annual": [], "raw": {}}
+
+
+def test_거장_자료_읽기가_실패하면_거장_계좌만_막는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """실패해도 캐시는 다 채워진다(A~E 는 그날 회의) — 거장 헌장 계좌는 위원회 실패 (25.2263)"""
+    from batch.jobs import paper as jp
+
+    cache, _ = _준비(monkeypatch, {**co.CHARTERS, **ms.CHARTERS}, 실패=True)
+    assert "agenda" in cache and "population" in cache and "TimeoutError" in cache["masters_error"]
+    assert cache["agenda"][0].masters is None
+    assert jp.uses_masters(ms.CHARTERS["ZM"]) and not any(jp.uses_masters(c) for c in co.CHARTERS.values())
+    with pytest.raises(RuntimeError, match="거장 자료 읽기 실패"):
+        jp.committee_step(object(), market="KR", account="ZM", charter=ms.CHARTERS["ZM"], charters={}, signal_rows=[],
+                          trade_date="2026-11-20", cache=cache, now="t", rule_version=1)  # fmt: skip
