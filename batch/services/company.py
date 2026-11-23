@@ -490,7 +490,9 @@ def memo(company: str, items: list[Item], approved: list[Item]) -> str:
     쟁점 = [i for i in items if i.issue]
     # 가결은 표결 통과 수, 집행은 그 가운데 상위 top_n — 예전엔 집행 수를 "가결" 로 적어 합이 안건 수와 안
     # 맞았다(25.1631)
-    글 = (f"{company} 위원회: 안건 {len(items)} · 가결 {len(items) - len(부결)}(집행 {len(approved)})"
+    # 이름이 이미 '위원회' 로 끝나면(거장 위원회 ZM) 겹쳐 붙이지 않는다(25.2268, 25.2267 교차검증 [권고])
+    머리 = company if company.endswith("위원회") else f"{company} 위원회"
+    글 = (f"{머리}: 안건 {len(items)} · 가결 {len(items) - len(부결)}(집행 {len(approved)})"
           f" · 부결 {len(부결) - len(거부)}"
           f" · 거부 {len(거부)} · 쟁점 {len(쟁점)}")
     if approved:

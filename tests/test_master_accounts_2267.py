@@ -113,8 +113,15 @@ def test_거장_계좌가_열려도_A_부터_Y_까지_그대로다(monkeypatch: 
 
 
 def test_개설일_전에는_평가도_매매도_하지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """조사 준비에도 넣지 않는다 — 열리기 전부터 안건이 커지고 거장 자료를 읽었다(25.2268)"""
+    from batch.jobs import company as cjob
+
     c = _새(monkeypatch)
+    읽음: list[object] = []
+    monkeypatch.setattr(cjob, "master_facts", lambda *a: 읽음.append(a) or {})
     기록 = _하루(c, monkeypatch, "2026-10-14")
+    assert 읽음 == [] and not any("masters" in json.loads(r[0]) for r in c.q("SELECT dossier_json FROM paper_dossiers"))
+    assert c.q("SELECT COUNT(*) FROM paper_dossiers") == [(1,)]  # 안건 크기도 그대로(신호 1종목)
     for aid in ("ZL", "ZM"):
         assert 기록["accounts"][aid] == {"not_open_until": "2026-11-24"}, aid
     assert c.q("SELECT COUNT(*) FROM paper_orders WHERE account_id LIKE 'Z%'") == [(0,)]
@@ -125,10 +132,74 @@ def test_지주사는_거장_자료_실패면_거장_투표_회사를_다시_열
     """지금 H 투표 회사(A·C·D·E)엔 거장 부서가 없어 닿지 않는다 — 나중에 들어와도 '자료 없음' 표가 섞이지 않게(25.2267)"""
     from datetime import date
 
+    class 기록:
+        def __init__(self) -> None:
+            self.읽음: list[str] = []
+
+        def execute(self, sql: str, *a: object) -> object:
+            self.읽음.append(sql)
+            raise AssertionError("막은 뒤엔 읽지 않는다")
+
+    cl = 기록()
     ch = {"ZM": ms.CHARTERS["ZM"]}
     out = job.holding_step(
-        object(), market="KR", account="H", config={"voters": {"ZM": co.charter_hash(ch["ZM"])}}, charters=ch,
+        cl, market="KR", account="H", config={"voters": {"ZM": co.charter_hash(ch["ZM"])}}, charters=ch,
         signal_rows=[], trade_date="2026-11-24", cache={"agenda": [], "population": [], "masters_error": "x"},
         now="t", rule_version=3, today=date(2026, 11, 24), top_n=5,
     )  # fmt: skip
     assert out[3]["error"].startswith("거장 자료 읽기 실패로 투표 회사 회의를 열 수 없음") and "거장위원회" in out[3]["error"]
+    assert cl.읽음 == []
+
+
+# ── 25.2268 (25.2267 교차검증 [권고]) ───────────────────────────────────────────
+
+
+def test_판_1_헌장_계좌도_헌장이_틀리면_사지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """판만 보면(판 ≥ 2) 판 1 로 여는 거장 계좌가 헌장 오류인 날 위원회 없이 점수 상위(B 와 같은 주문)로 샀다"""
+    c = _새(monkeypatch)
+    틀림 = {**ms.CHARTERS["ZM"], "lead": "nobody"}
+    c.conn.execute("UPDATE paper_accounts SET created_at = '2026-10-14T00:00:00+00:00', charter_json = ? WHERE id = 'ZM'",
+                   [json.dumps(틀림, ensure_ascii=False)])  # fmt: skip
+    기록 = _하루(c, monkeypatch, "2026-10-14")
+    assert c.q("SELECT COUNT(*) FROM paper_orders WHERE account_id = 'ZM'") == [(0,)]
+    assert c.q("SELECT COUNT(*) FROM paper_orders WHERE account_id = 'B'") != [(0,)]  # 같은 날 B 는 샀다
+    assert 기록["accounts"]["ZM"]["committee"]["error"].startswith("헌장 검사 실패")
+
+
+def test_위원회_메모는_이름이_위원회로_끝나면_겹쳐_붙이지_않는다() -> None:
+    assert co.memo("거장 위원회", [], []).startswith("거장 위원회: 안건 0")
+    assert co.memo("가치투자사", [], []).startswith("가치투자사 위원회: 안건 0")
+    웹 = (Path(__file__).resolve().parent.parent / "web" / "lib" / "paper.ts").read_text(encoding="utf-8")
+    assert 'n.endsWith("위원회") ? n : `${n} 위원회`' in 웹 and "${위원회이름(헌장.name)} 가결" in 웹
+
+
+def test_안건이_커져도_앞_회사는_제_안건_크기만_본다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ZL(안건 50)이 열리면 조사 준비가 50 을 읽는다 — A(20)는 그 앞 20 만 본다(12.8). 뒤 30 에 A 가 좋아할 종목을 둔다"""
+    from dataclasses import replace as rp
+
+    from tests.test_paper_job_1445 import _신호
+
+    def 회사(i: int, 좋음: bool) -> co.Dossier:
+        return co.Dossier(
+            stock_id=i, ticker=f"T{i:02d}", as_of="2026-10-14", total_score=(95 if 좋음 else 40) + i / 100,
+            factors={"value": 95 if 좋음 else 20, "quality": 95 if 좋음 else 20, "growth": 60,
+                     "momentum": 70 if 좋음 else 30},
+            volatility=0.15 if 좋음 else 0.4, mdd=-0.05 if 좋음 else -0.5, regime="bull",
+            sentiment=20.0 if 좋음 else -10.0, flow_sum=1e9 if 좋음 else -1e9, turnover_20d=1.0, flow_days=5,
+            flow_date="2026-10-14", gov_covered=True,
+            broker_upsides=[("2026-10-01", "b", 0.3), ("2026-10-02", "c", 0.3), ("2026-10-03", "d", 0.3)] if 좋음 else [],
+        )  # fmt: skip
+
+    pop = [회사(i, i > 20) for i in range(1, 51)]  # 앞 20 은 A 가 사지 않을 종목, 뒤 30 은 살 종목
+    행 = [rp(_신호(), stock_id=i, ticker=f"T{i:02d}") for i in range(1, 51)]
+    monkeypatch.setattr(report_picks, "with_criteria", lambda rows: rows)
+
+    def 회의(cache_agenda: list[co.Dossier]) -> list[int]:
+        cache = {"agenda": cache_agenda, "population": pop, "dossiers_written": True}
+        가결행, *_ = job.committee_step(
+            object(), market="KR", account="A", charter=co.CHARTERS["A"], charters={"A": co.CHARTERS["A"]},
+            signal_rows=행, trade_date="2026-10-14", cache=cache, now="t", rule_version=4)  # fmt: skip
+        return [r.stock_id for r in 가결행]
+
+    assert 회의(pop) == 회의(pop[:20])
+    assert co.meet(pop, co.CHARTERS["A"], pop)[1] != co.meet(pop[:20], co.CHARTERS["A"], pop)[1]  # 자르지 않으면 다르다

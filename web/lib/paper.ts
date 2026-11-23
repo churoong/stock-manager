@@ -64,6 +64,12 @@ export async function withLegacy<T>(run: (sql: string) => Promise<T>, sql: strin
   }
 }
 
+/** 위원회 머리 이름 — 헌장 이름이 이미 '위원회' 로 끝나면(거장 위원회 ZM) 겹쳐 붙이지 않는다(배치 `company.memo` 와 같다, 25.2268) */
+export function 위원회이름(name: string | null | undefined): string {
+  const n = name ?? "투자사";
+  return n.endsWith("위원회") ? n : `${n} 위원회`;
+}
+
 /** 계좌 규칙 칸 (migrations/0075, docs/paper.md 1장) — 화면은 칸을 글로 옮길 뿐 계좌 이름을 보지 않는다 */
 export interface AccountRule {
   sell_rule: string;
@@ -101,7 +107,7 @@ export function ruleText(a: AccountRule): string {
   const 고르기 = a.selection === "weighted"
     ? `지주사 — 회사 추천을 성적 가중치로 합친 점수, 두 곳 이상 추천한 종목 상위 ${a.top_n ?? 5}`
     : 헌장
-    ? `${헌장.name ?? "투자사"} 위원회 가결(안건 ${헌장.agenda ?? "?"}개 중 최대 ${헌장.top_n ?? a.top_n ?? 5}종목)`
+    ? `${위원회이름(헌장.name)} 가결(안건 ${헌장.agenda ?? "?"}개 중 최대 ${헌장.top_n ?? a.top_n ?? 5}종목)`
     : a.selection === "random"
       ? "무작위 대조(같은 자리·비중)"
       : a.selection === "short"

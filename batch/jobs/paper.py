@@ -2001,6 +2001,8 @@ def _조사_준비(
 
     as_of = max((r.as_of_date for r in signal_rows if r.as_of_date), default=trade_date)
     if "agenda" not in cache:
+        # 부르는 쪽(run_step)이 개설 전 거장 헌장을 뺀 모음을 주면 그것으로 잰다(25.2268) — 없거나 비면 받은 헌장
+        charters = cache.get("research_charters") or charters
         크기 = max(int(c["agenda"]) for c in charters.values())
         모집단 = cjob.population_dossiers(client, signal_rows, market, as_of)
         안건 = cjob.load_dossiers(client, cjob.agenda_rows(signal_rows, 크기), market, as_of)
@@ -2316,6 +2318,13 @@ def run_step(
     # 틀리면 그 계좌는 판 1 그대로(기록에 까닭)
     헌장들: dict[str, dict[str, Any]] = {}
     헌장오류: dict[str, list[str]] = {}
+    계좌표 = {str(a["id"]): a for a in accounts}
+
+    def _개설전(acct: dict[str, Any]) -> bool:
+        """개설일 전의 계좌인가 — 아래 개설일 막이와 같은 잣대(25.1891·25.1892·25.1894)"""
+        개설 = str(acct.get("created_at") or "")[:10]
+        return 개설 >= OPEN_GUARD_FROM and (다음장 < 개설 or 오늘 < 개설)
+
     지주설정: dict[str, dict[str, Any]] = {}
     for acct in accounts:
         try:
@@ -2337,7 +2346,11 @@ def run_step(
             # 오류에도 안 들어, 판 3 회사가 위원회 없이 판 1(점수 상위)로 사고 판 3 표시를 붙였다(25.1720, 배분 감사
             # [참고] 3)
             헌장오류[str(acct["id"])] = ["헌장이 비었음(charter_json 없음)"]
-    조사: dict[str, Any] = {}  # 모집단·안건 조사 자료 — 하루 실행에 한 번, 회사들이 같이 쓴다
+    # 모집단·안건 조사 자료 — 하루 실행에 한 번, 회사들이 같이 쓴다. 개설일 전 **거장** 헌장은 조사 준비의 안건 크기·
+    # 거장 자료 판단에 넣지 않는다 — 넣으면 열리기 전부터 안건이 커지고 거장 자료를 읽었다(25.2268, 25.2267 교차검증
+    # [참고]). 헌장 모음 자체는 그대로 — 개설 전 계좌의 헌장도 지주사 투표 회사로 읽힌다(대조 재료 25.1921 이 기댄다)
+    조사: dict[str, Any] = {"research_charters": {
+        a: ch for a, ch in 헌장들.items() if not (_개설전(계좌표[a]) and uses_masters(ch))}}
     메모줄: list[str] = []  # 운용역 메모 — 회사마다 한 줄 (docs/company.md 7장, 텔레그램 길이)
     계좌실패: dict[str, str] = {}  # 계좌 단계 예외 — 계좌 → 글(25.1920)
     from batch.jobs.broker_mirror import MIRROR_ACCOUNT
@@ -2347,7 +2360,7 @@ def run_step(
         nonlocal 기준, 열린, price_series, 유니버스
         aid, 규칙, 판 = str(acct["id"]), str(acct["sell_rule"]), int(acct["rule_version"])
         개설 = str(acct.get("created_at") or "")[:10]
-        if 개설 >= OPEN_GUARD_FROM and (다음장 < 개설 or 오늘 < 개설):
+        if _개설전(acct):
             # 개설일 전의 계좌는 평가·매매하지 않는다 — 마이그레이션은 푸시 뒤 **처음 도는** 일일 배치(미국일 수 있다)가
             # 적용해, 10-29 개설로 적은 S·T 가 하루 앞 미국 장부터 매매할 뻔했다(25.1891, 25.1890 교차검증 [권고]).
             # 잣대는 이 실행이 주문을 내는 장(`다음장`)이다 — 실행 시계의 국내 날짜(`오늘`)로 재면 미국 예비 실행이
@@ -2626,7 +2639,9 @@ def run_step(
                     문장 += 회의문장
                     a기록["committee"] = 메모
                     종목수 = int(헌장들[aid]["top_n"])
-                elif aid in 헌장오류 and 판 >= 2:
+                elif aid in 헌장오류 and (판 >= 2 or acct.get("charter_since")):
+                    # 판 1 부터 헌장으로 여는 계좌(거장 ZM·ZL, 0096)도 같다 — 판만 보면 헌장 오류인 날 위원회 없이
+                    # 점수 상위로 조용히 샀다(25.2268, 25.2267 교차검증 [권고])
                     # 헌장이 있는 판(2~) 회사의 헌장이 검사에 걸리면 위원회 없이 판 1(점수 상위)로 사면서 판 2 표시를
                     # 붙였다(25.1549 감사 [권고] 2) — 위원회가 못 열린 날과 같이 사지 않고 까닭만 남긴다
                     가결행 = []

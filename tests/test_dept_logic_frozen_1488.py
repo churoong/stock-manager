@@ -22,10 +22,11 @@ from pathlib import Path
 #: 2026-10-20 25.1576 갱신 — company.py 는 주간 복기의 부결 판정만(판단 그대로, 절차 1), holding.py 는 기준 평균을 표본
 #: 가중으로(판단 바뀜, 절차 2 — 0088 에서 H 판 2·A·C·D·E 판 3)
 #: 2026-10-21 25.1631 갱신 — company.py 운용역 메모 글만("가결 n(집행 m)", 판단 그대로, 절차 1)
+#: 2026-11-23 25.2268 갱신 — company.py 운용역 메모 머리만(이름이 "위원회" 로 끝나면 겹쳐 붙이지 않음, 판단 그대로 — 절차 1)
 #: 2026-11-23 25.2261 갱신 — company.py 에 거장 부서 키·이름·갈래(거장 헌장에만 닿음, A·C·D·E 판단 그대로 — 절차 1,
 #: `test_masters_2261.test_거장_자료가_붙어도_A_C_D_E_의견은_그대로다`), masters.py 새로 덮음(거장 판 1, docs/company.md 12.8)
 고정 = {
-    "batch/services/company.py": "f7eea7a51547",
+    "batch/services/company.py": "ebcb077b548c",
     "batch/services/holding.py": "2f3a2bd5e7fe",
     "batch/services/masters.py": "dcd871839f54",
 }

@@ -149,6 +149,12 @@ def test_ZL_의_늘_가결은_열지_않음이_아니라_고침_대상이다() -
         assert (판 == ["(b) 늘 가결" + m.retune_mark("ZL", ch["ZL"])]) is (z == "ZL")
         assert any(x.startswith("(b) 늘 가결") for x in 판)
     assert m.RETUNE_B == {"ZL": 2.6} and "threshold 2.6 " in m.retune_mark("ZL", ch["ZL"])
+    # 표시는 고칠 값에서 만든다 — 값을 바꾸면 표시도 바뀐다(날글자 2.6 이면 깨진다, 25.2268)
+    고친값 = {**m.RETUNE_B, "ZL": 2.7}
+    m.RETUNE_B.clear()
+    m.RETUNE_B.update(고친값)
+    assert "threshold 2.7 " in m.retune_mark("ZL", ch["ZL"])
+    m.RETUNE_B["ZL"] = 2.6
     # 고친 헌장으로 다시 돌린 두 번째 재생에서도 (b) 면 표시 없이 걸림(열지 않음) — 고침은 한 번뿐
     고침 = m._charters(True, retune=True)
     assert 고침["ZL"]["threshold"] == 2.6 and 고침["ZN"] is ms.CHARTERS["ZN"] and ms.CHARTERS["ZL"]["threshold"] == 2.0
@@ -207,3 +213,27 @@ def test_수익_봉인이면_성적표_행을_만들지_않고_찍지도_않는�
     monkeypatch.setattr(sys, "argv", ["x", "--days", "1"])
     m.main()
     assert "부서 성적표" in capsys.readouterr().out
+
+
+def test_retune_은_main_에서_재생까지_간다(monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+
+    from batch.core import client as cl
+
+    m = _m()
+    받음: list[dict] = []
+    monkeypatch.setattr(m, "replay", lambda c, mk, d, e, charters, scorecard: (받음.append(charters), ([], set(), []))[1])
+
+    class 가짜:
+        def __enter__(self) -> object:
+            return self
+
+        def __exit__(self, *a: object) -> None:
+            return None
+
+    monkeypatch.setattr(cl, "TursoClient", 가짜)
+    monkeypatch.setattr(sys, "argv", ["x", "--masters", "--retune", "--no-scorecard", "--days", "1"])
+    m.main()
+    monkeypatch.setattr(sys, "argv", ["x", "--masters", "--no-scorecard", "--days", "1"])
+    m.main()
+    assert [c["ZL"]["threshold"] for c in 받음] == [2.6, 2.0]
