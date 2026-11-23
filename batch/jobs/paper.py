@@ -905,14 +905,17 @@ def fill_orders(
             for _ in range(MISSING_BAR_WAIT_SESSIONS):
                 기한 = cal.next_session(market, 기한)
             뒤행 = bool(client.execute(LATER_BAR_SQL, [o.stock_id, 날]).rows)
-            if trade_date < 기한.isoformat() and not 뒤행:
+            # 기다림은 **첫 판정에만**(미룬 적 없는 주문) — 미룰 때마다 새 장에 다시 걸려 끊긴 종목(상장폐지·행 없는
+            # 정지)의 청산이 20거래일이 아니라 약 60거래일 뒤에 났다(25.2257, 11-23 결함 회차 [권고])
+            처음 = o.deferrals == 0
+            if trade_date < 기한.isoformat() and not 뒤행 and 처음:
                 기록["waiting_bar"] = 기록.get("waiting_bar", 0) + 1
                 continue
             if market == "KR" and _stock(client, o.stock_id, 종목캐시).get("asset_type") == "etf":
                 # 국내 ETF 시세는 `daily._store_kr_etf_day` 가 기다림 거리 안에서만 다시 받는다(25.2223). 뒤 날
                 # 행이 있다고 그날을 정지로 보면 수집 실패가 정지 판정(매도 미룸·매수 정지 만료)이 됐다(25.2216).
                 # 기다림을 다 채우고 그래도 없으면 시장 전체를 못 받은 날처럼 닫는다
-                if trade_date < 기한.isoformat():
+                if trade_date < 기한.isoformat() and 처음:
                     기록["waiting_bar"] = 기록.get("waiting_bar", 0) + 1
                     continue
                 if not (o.side == "sell" and o.deferrals + 1 >= pp.HALT_LIQUIDATE_SESSIONS):

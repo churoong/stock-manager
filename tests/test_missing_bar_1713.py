@@ -133,3 +133,26 @@ def test_종가_0_행은_정지() -> None:
 
     assert pp.halted(pp.Bar("2026-10-15", None, 0.0, None))
     assert not pp.halted(pp.Bar("2026-10-15", None, 100.0, None))
+
+
+def test_끊긴_종목_청산까지_장수는_약_20거래일(client: Client, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
+    """25.2257 (11-23 결함 회차 [권고]) — 행이 끊긴 종목(상장폐지·행 없는 정지)의 매도가 미룰 때마다 2거래일 기다림에
+    다시 걸려 청산이 약 60번째 실행에서 났다. 기다림은 첫 판정에만 — 첫 기다림 2장 + 미룸 20번 ≈ 22번째 실행"""
+    c = client
+    _3번_주문(c, monkeypatch)
+    _시세(c, "2026-10-15", 10_000, 10_000)
+    _시세3(c, "2026-10-15", 10_100, 9_900)
+    _하루(c, monkeypatch, "2026-10-15", signals=False)
+    _시세(c, "2026-10-16", 10_000, 10_000)
+    _시세3(c, "2026-10-16", 9_100, 9_000)  # −9% 손절 → 10-19 매도, 3번 행은 그 뒤로 없다
+    _하루(c, monkeypatch, "2026-10-16", signals=False)
+    날 = date(2026, 10, 19)
+    번 = 0
+    while 번 < 40:
+        번 += 1
+        _시세(c, 날.isoformat(), 10_000, 10_000)
+        _하루(c, monkeypatch, 날.isoformat(), signals=False)
+        if c.q("SELECT COUNT(*) FROM paper_fills WHERE stock_id = 3 AND side = 'sell'")[0][0]:
+            break
+        날 = cal.next_session("KR", 날)
+    assert 20 <= 번 <= 24, f"{번}번째 실행에서야 청산(또는 40번 안에 없음)"
