@@ -23,7 +23,8 @@ from batch.services.paper import step_error_orders as _step_error_orders
 #: 계좌 종류 — 화면 글. 모르는 계좌는 이름만 (docs/paper.md 1장, docs/company.md)
 KIND = {"A": "회사", "C": "회사", "D": "회사", "E": "회사", "B": "기준(점수 상위)", "G": "추세 익절",
         "H": "지주사(KIS가 베낌)", "R1": "무작위 대조", "R2": "무작위 대조", "S": "스윙(단기 신호)",
-        "T": "당일 단타(단기 신호)", "X": "ETF 전술(국내 지수)", "Y": "ETF 전술(미국 지수)"}  # fmt: skip
+        "T": "당일 단타(단기 신호)", "X": "ETF 전술(국내 지수)", "Y": "ETF 전술(미국 지수)",
+        "ZL": "거장 단독(린치 — PEG·재무 점검)", "ZM": "거장 위원회(버핏·린치·그레이엄·그린블랫·오닐)"}  # fmt: skip
 
 
 def _이름(aid: object) -> str:
@@ -282,6 +283,17 @@ PREREG: dict[tuple[str, int], dict[str, Any]] = {
                   "judge": "126번째 평가에서 한 번 — MDD ≤ 0.7 × 보유 MDD 그리고 수익 ≥ 보유 − 5%p 면 판 1 통과."
                            " 개설 전 지수 대리 리플레이(25.2165)는 두 시장 모두 수익 기준 미달 — 참고. 판정은 사용자"}
        for aid, 지수, 보유 in (("X", "KOSPI", "KODEX 200"), ("Y", "S&P 500", "SPY"))},
+    # 거장 계좌 (docs/company.md 12.7, 25.2267, 0096) — 계좌 행과 같은 커밋, 결과가 하나도 없을 때 적는다.
+    # 코호트 "거장 2026-11" m = 5 — ZN 은 12.6 거름에서 열지 않아 p = 1(25.2266), Z3·Z4 는 다음 묶음에서 연다
+    **{(aid, 1): {"hypothesis": f"{가설} — 거장 책 규칙(docs/company.md 12장)으로 고른 종목이 같은 날 안 산 새 후보보다"
+                                " 더 오른다",
+                  "metric": "결정 단위 선정 하한 > 50(28일 묶음 ≥ 6) — 기록: B·R 대비·지수 대비·가상 대조·"
+                            "거장 부서 성적표",
+                  "judge": "126·189·252번째 평가에서(Pocock α 0.0221) 코호트 거장 2026-11 m = 5 Holm — 하한 > 50"
+                           " 이면 판 1 통과, 묶음 < 6 이면 그 시점 판정 불가, 252평가까지 못 넘으면 판 1 실패"
+                           "(신규 매수 멈춤). 판정은 사용자"}
+       for aid, 가설 in (("ZM", "거장 위원회(버핏·린치·그레이엄·그린블랫·오닐 부서의 회의)"),
+                         ("ZL", "린치 계좌(린치 비율 ≥ 2 와 재무 점검 두 반쪽)"))},
 }
 #: 사전 등록 판의 공통 지표·판정 — 판마다 다르면 줄에 `metric`·`judge` 를 따로 적는다
 PREREG_METRIC = "결정 단위 선정 하한 > 50(28일 묶음 6개 뒤) · 관문 구간 지수 대비 > 0 · R 대비 > 0"
@@ -1039,6 +1051,8 @@ def _손절_해당없음(account: str, n_positions: int) -> tuple[str, bool] | N
     if account in ("X", "Y"):
         # ETF 전술(paper.md 17장) — 손절선이 없다. 국면이 바뀐 날 전량 갈아탄다(25.2166)
         return "해당 없음 — ETF 전술은 손절 없이 지수 국면이 바뀐 날 갈아탐", False
+    if account in pp.MASTER_IDS:
+        return None  # 거장 계좌는 core 매도 규칙의 손절선을 그대로 잰다(25.2267)
     if account in pp.SEPARATE_IDS:
         from batch.services import shadow as sh
 

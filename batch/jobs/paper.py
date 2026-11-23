@@ -2054,6 +2054,12 @@ def holding_step(
         글 = ",".join(pp.account_name(c) for c in 바뀜)
         return [], {}, [], {"error": "투표 회사 헌장이 지주사에 적힌 지문과 다름(판을 올려야): " + 글}
     as_of = _조사_준비(client, market, signal_rows, charters, cache, trade_date)
+    거장실패 = sorted(c for c in voters if cache.get("masters_error") and uses_masters(charters[c]))
+    if 거장실패:
+        # 거장 헌장 투표 회사를 거장 자료 없이 다시 열면 '자료 없음' 표가 조용히 섞인다 — committee_step 과 같이 막는다
+        # (25.2267, 25.2263 교차검증 [참고]). 지금 투표 회사(A·C·D·E)는 거장 부서가 없어 닿지 않는다
+        return [], {}, [], {"error": "거장 자료 읽기 실패로 투표 회사 회의를 열 수 없음: "
+                            + ",".join(pp.account_name(c) for c in 거장실패)}
     표: dict[str, dict[int, float]] = {}
     # **그날 회의록이 있으면 그 표를 쓴다** (25.1732, 위원회·H 감사 [권고] 2 — 교차검증이 (b) 를 골랐다). A~E 가
     # 회의록을 쓴 뒤 H 만 실패한 날 다시 돌면 H 혼자 자료를 다시 읽어 회의를 열어, 그 사이 정정된 수급 등으로 H 의 표가
