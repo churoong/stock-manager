@@ -60,8 +60,12 @@ def test_시간_초과로_죽은_실행의_열린_행만_실패로_닫는다() -
     _행(mem, 지금 - timedelta(hours=3), "running")  # 창 밖(옛 열린 행) — reap 몫
     _행(mem, 지금 - timedelta(minutes=16), "running")  # 방금 죽은 실행
     _행(mem, 지금 - timedelta(minutes=10), "success")
+    # 안쪽 작업·다른 시장의 열린 행은 닫지 않는다(관문 밖 — 정리에 맡김, 25.2255)
+    for 이름 in ("sentiment", "daily_us"):
+        mem.conn.execute("INSERT INTO batch_runs (job_name, market, trade_date, started_at, status)"
+                         " VALUES (?, 'KR', '2026-11-20', ?, 'running')", [이름, (지금 - timedelta(minutes=14)).isoformat()])  # fmt: skip
     assert db.fail_timed_out_runs(mem, "daily_kr", 15, "15분 시간 제한") == 1  # type: ignore[arg-type]
-    assert [s for s, _ in _상태(mem)] == ["running", "failed", "success"]
+    assert [s for s, _ in _상태(mem)] == ["running", "failed", "success", "running", "running"]
     assert _상태(mem)[1][1] == "15분 시간 제한"
 
 
