@@ -186,3 +186,29 @@ def test_정지로_미룬_매도도_새로_빠진_행은_기다린다(client: Cl
     _하루(c, monkeypatch, "2026-10-21", signals=False)
     assert c.q("SELECT DISTINCT fill_date, price FROM paper_fills WHERE stock_id = 3 AND side = 'sell'") == [
         ("2026-10-20", 8_800)]
+
+
+def test_정지로_미룬_ETF_매도도_새로_빠진_행은_뒤_행이_있어도_기다린다(client: Client, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
+    """25.2259 (25.2258 교차검증 [권고]) — 국내 ETF 분기는 뒤 날 행이 있어도 기다림 거리 안이면 메움(25.2223)을
+    기다린다. 거래량 0 정지로 미룬 ETF 매도도 앞 장에 행이 있었으면 새로 빠진 행이라 기다려 메워진 시가로 찬다"""
+    c = client
+    _3번_주문(c, monkeypatch)
+    _시세(c, "2026-10-15", 10_000, 10_000)
+    _시세3(c, "2026-10-15", 10_100, 9_900)
+    _하루(c, monkeypatch, "2026-10-15", signals=False)
+    _시세(c, "2026-10-16", 10_000, 10_000)
+    _시세3(c, "2026-10-16", 9_100, 9_000)  # −9% 손절 → 10-19 매도
+    _하루(c, monkeypatch, "2026-10-16", signals=False)
+    c.conn.execute("UPDATE stocks SET asset_type = 'etf' WHERE id = 3")
+    _시세(c, "2026-10-19", 10_000, 10_000)
+    _시세3(c, "2026-10-19", 9_000, 9_000, volume=0)  # 거래 정지 → 미룸
+    _하루(c, monkeypatch, "2026-10-19", signals=False)
+    _시세(c, "2026-10-20", 10_000, 10_000)  # 3번 행만 빠짐
+    _시세(c, "2026-10-21", 10_000, 10_000)
+    _시세3(c, "2026-10-21", 8_000, 8_000)  # 뒤 날 행은 먼저 들어왔다
+    _하루(c, monkeypatch, "2026-10-20", signals=False)
+    assert c.q("SELECT COUNT(*) FROM paper_fills WHERE stock_id = 3 AND side = 'sell'")[0][0] == 0
+    _시세3(c, "2026-10-20", 8_800, 8_700)  # 메워짐
+    _하루(c, monkeypatch, "2026-10-21", signals=False)
+    assert c.q("SELECT DISTINCT fill_date, price FROM paper_fills WHERE stock_id = 3 AND side = 'sell'") == [
+        ("2026-10-20", 8_800)]
