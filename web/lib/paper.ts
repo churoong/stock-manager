@@ -197,6 +197,16 @@ export const DEPT_LABEL: Record<string, string> = {
   sentiment: "뉴스·감성부",
   risk: "리스크관리부",
   macro: "시장전략부",
+  // 거장 부서 (docs/company.md 12장, 25.2261)
+  buffett: "버핏부(가치·해자)",
+  lynch: "린치부(PEG·성장)",
+  lynch_check: "린치부(재무 점검)",
+  graham: "그레이엄부(방어적 투자자)",
+  graham_price: "그레이엄부(가격·안전마진)",
+  graham_fin: "그레이엄부(재무·이력)",
+  greenblatt: "그린블랫부(마법공식)",
+  oneil_earn: "오닐부(실적 A)",
+  oneil_price: "오닐부(주가 N·L)",
 };
 /**
  * 부서 입장 한 칸 — [입장, 확신, (메모)] → 글. 메모가 "자료 없음" 으로 시작할 때만 "–" — 배치 `_없음` 이 그렇게 적는다.

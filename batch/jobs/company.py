@@ -253,6 +253,139 @@ def load_dossiers(client: Any, rows: list[report_picks.SignalRow], country: str,
     return out
 
 
+# ── 거장 부서 자료 (docs/company.md 12.1, 25.2261) ───────────────────────────────────────────────
+
+#: 사업보고서 스냅샷 — 기준일까지 접수된 것만. 통화는 같은 사업연도 원장에서 잇는다
+#: (스냅샷 payload 에 통화가 없다, 25.919)
+MASTER_SNAP_SQL = (
+    "SELECT f.stock_id, f.as_of_date, f.fiscal_year, f.consolidated, f.payload, fin.currency AS cur"
+    " FROM financial_snapshots f LEFT JOIN financials fin ON fin.stock_id = f.stock_id"
+    "  AND fin.fiscal_year = f.fiscal_year AND fin.report_code = f.report_code AND fin.consolidated = f.consolidated"
+    " WHERE f.report_code = '11011' AND f.as_of_date <= ? AND f.stock_id IN (SELECT value FROM json_each(?))"
+)
+#: 그날 점수가 쓴 팩터 원값 — (종목, 팩터)마다 그날 가장 높은 계산 판
+MASTER_FACTOR_SQL = (
+    "SELECT stock_id, factor, raw_json, calc_version FROM factors WHERE as_of_date = ?"
+    " AND factor IN ('value', 'quality', 'momentum') AND stock_id IN (SELECT value FROM json_each(?))"
+)
+#: 배당 — 접수일이 기준일 이하이고 NULL 이 아닌 것
+MASTER_DIV_SQL = (
+    "SELECT stock_id, fiscal_year, as_of_date, cash_dividend_total FROM stock_dividends"
+    " WHERE as_of_date IS NOT NULL AND as_of_date <= ? AND cash_dividend_total IS NOT NULL"
+    " AND stock_id IN (SELECT value FROM json_each(?))"
+)
+#: 베타 — 기준일 이하 가장 늦은 행, 3Y 먼저
+MASTER_BETA_SQL = (
+    "SELECT stock_id, window, as_of_date, beta FROM performance_metrics WHERE as_of_date <= ? AND beta IS NOT NULL"
+    " AND window IN ('3Y', '1Y') AND stock_id IN (SELECT value FROM json_each(?))"
+)
+MASTER_STOCK_SQL = "SELECT id, currency, sector_code FROM stocks WHERE id IN (SELECT value FROM json_each(?))"
+#: 국내 영업현금흐름 채우기를 마친 날(`jobs/kr_cashflow.DONE_KEY`) — 없으면 국내 영업현금흐름을 쓰지 않는다
+#: (반쯤 찬 표본)
+KR_CFO_DONE_KEY = "kr_cfo_fill_done"
+#: 유틸리티(전기·가스·수도) 중분류 — 그린블랫부가 금융과 함께 뺀다 (12.1)
+UTILITY_KSIC = frozenset({"35"})
+UTILITY_SIC = frozenset({"49"})
+
+
+def _pit_annual(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """한 종목 스냅샷 → 기준(연결·별도) 하나로 고른 연간 줄.
+
+    `backtest.pit_basis_rows` 와 같은 규칙: 가장 늦은 사업연도에 연결이 있으면 연결.
+    같은 사업연도는 가장 늦은 접수 하나. 사업연도 오름차순"""
+    if not rows:
+        return []
+    끝해 = max(int(r["fiscal_year"]) for r in rows)
+    연결 = 1 if any(int(r["fiscal_year"]) == 끝해 and int(r["consolidated"] or 0) == 1 for r in rows) else 0
+    고름: dict[int, dict[str, Any]] = {}
+    for r in sorted(rows, key=lambda r: str(r["as_of_date"])):
+        if int(r["consolidated"] or 0) == 연결:
+            고름[int(r["fiscal_year"])] = r
+    return [고름[k] for k in sorted(고름)]
+
+
+def master_facts(client: Any, ids: list[int], country: str, as_of: str) -> dict[int, dict[str, Any]]:
+    """거장 부서 자료 — {종목: Dossier.masters} (docs/company.md 12.1). 기준일 `as_of` 까지 알 수 있던 값만"""
+    from batch.core import db
+    from batch.services import sectors
+    from batch.services.scoring import MARKET_CAP_KEY
+
+    if not ids:
+        return {}
+    묶음 = _ids(ids)
+    국내ocf = country != "KR" or bool(db.get_setting(client, KR_CFO_DONE_KEY))
+    스냅: dict[int, list[dict[str, Any]]] = {}
+    for r in client.execute(MASTER_SNAP_SQL, [as_of, 묶음]).dicts():
+        스냅.setdefault(int(r["stock_id"]), []).append(r)
+    원값: dict[int, dict[str, Any]] = {}
+    판: dict[tuple[int, str], int] = {}
+    for r in client.execute(MASTER_FACTOR_SQL, [as_of, 묶음]).dicts():
+        k = (int(r["stock_id"]), str(r["factor"]))
+        if int(r["calc_version"] or 0) < 판.get(k, -1):
+            continue
+        판[k] = int(r["calc_version"] or 0)
+        try:
+            v = json.loads(r["raw_json"] or "{}")
+        except (TypeError, ValueError):
+            v = {}
+        원값.setdefault(k[0], {})[k[1]] = v if isinstance(v, dict) else {}
+    배당: dict[int, dict[int, tuple[str, bool]]] = {}
+    for r in client.execute(MASTER_DIV_SQL, [as_of, 묶음]).dicts():
+        표 = 배당.setdefault(int(r["stock_id"]), {})
+        fy, 날 = int(r["fiscal_year"]), str(r["as_of_date"])
+        if fy not in 표 or 날 >= 표[fy][0]:
+            표[fy] = (날, float(r["cash_dividend_total"]) > 0)
+    베타: dict[int, tuple[int, str, float]] = {}
+    for r in client.execute(MASTER_BETA_SQL, [as_of, 묶음]).dicts():
+        sid, 순 = int(r["stock_id"]), (1 if r["window"] == "3Y" else 0)
+        후보 = (순, str(r["as_of_date"]), float(r["beta"]))
+        if sid not in 베타 or 후보[:2] > 베타[sid][:2]:
+            베타[sid] = 후보
+    종목 = {int(r["id"]): r for r in client.execute(MASTER_STOCK_SQL, [묶음]).dicts()}
+    out: dict[int, dict[str, Any]] = {}
+    for sid in sorted(set(ids)):
+        연간 = []
+        for r in _pit_annual(스냅.get(sid, [])):
+            try:
+                p = json.loads(r["payload"] or "{}")
+            except (TypeError, ValueError):
+                p = {}
+            연간.append({"fy": int(r["fiscal_year"]), "ni": p.get("net_income"), "eq": p.get("total_equity"),
+                       "ta": p.get("total_assets"), "ca": p.get("current_assets"), "cl": p.get("current_liabilities"),
+                       "ncl": p.get("noncurrent_liabilities"), "oi": p.get("operating_income"),
+                       "ocf": p.get("operating_cash_flow") if 국내ocf else None,
+                       "cur": p.get("currency") or r.get("cur"), "as_of": str(r["as_of_date"])})  # fmt: skip
+        밸류, 퀄, 모멘 = (원값.get(sid, {}).get(k, {}) for k in ("value", "quality", "momentum"))
+        시총 = 밸류.get(MARKET_CAP_KEY) or {}
+        cap = 시총.get("cap") if isinstance(시총, dict) else None
+        if isinstance(cap, int | float) and 시총.get("scaled") and isinstance(시총.get("factor"), int | float):
+            cap = float(cap) * float(시총["factor"])
+        st = 종목.get(sid) or {}
+        코드 = str(st.get("sector_code") or "")
+        scheme, _, raw = 코드.partition(" ")
+        중 = sectors.middle_code(raw)
+        out[sid] = {
+            "annual": 연간,
+            "raw": {"ep": 밸류.get("ep"), "bp": 밸류.get("bp"), "dy": 밸류.get("dividend_yield"), "cap": cap,
+                    "roe": 퀄.get("roe"), "debt_ratio": 퀄.get("debt_ratio"),
+                    "profit_stability": 퀄.get("profit_stability"), "current_ratio": 퀄.get("current_ratio"),
+                    "high52": 모멘.get("high_52w_proximity"), "mom12_1": 모멘.get("momentum_12_1")},
+            "div": {fy: v for fy, (_날, v) in 배당.get(sid, {}).items()},
+            "beta": 베타[sid][2] if sid in 베타 else None, "beta_as_of": 베타[sid][1] if sid in 베타 else None,
+            "financial": sectors.is_financial(코드),
+            "utility": None if 중 is None else (중 in UTILITY_SIC if scheme == "SIC" else 중 in UTILITY_KSIC),
+            "price_currency": st.get("currency"),
+        }  # fmt: skip
+    return out
+
+
+def with_masters(dossiers: list[co.Dossier], facts: dict[int, dict[str, Any]]) -> list[co.Dossier]:
+    """조사 자료에 거장 자료를 붙인 새 목록 (자료가 없는 종목은 빈 dict — '자료 없음' 이 된다)"""
+    from dataclasses import replace
+
+    return [replace(d, masters=facts.get(d.stock_id) or {}) for d in dossiers]
+
+
 def dossier_json(d: co.Dossier) -> dict[str, Any]:
     """`paper_dossiers` 한 행 — 회사가 달라도 같은 원자료 (docs/company.md 5장).
 
@@ -269,7 +402,14 @@ def dossier_json(d: co.Dossier) -> dict[str, Any]:
         "sentiment": d.sentiment, "sentiment_date": d.sentiment_date,
         "risk": {"mdd": d.mdd, "volatility": d.volatility, "window": d.perf_window, "as_of": d.perf_as_of},
         "regime": {"state": d.regime, "index": d.regime_index, "date": d.regime_date},
+        # 거장 자료는 거장 헌장이 있는 날만 — 비면 싣지 않아 A~E 의 조사 자료 행이 그대로다 (docs/company.md 12.8)
+        **({"masters": _masters_json(d.masters)} if d.masters else {}),
     }  # fmt: skip
+
+
+def _masters_json(m: dict[str, Any]) -> dict[str, Any]:
+    """조사 자료 행에 싣는 거장 자료 — 근거표가 가리킬 원값(연간은 최근 5 사업연도만)"""
+    return {**m, "annual": list(m.get("annual") or [])[-5:]}
 
 
 #: 소급 성적표의 뒤 성과 — 기준일 뒤 시세(종목·지수). 창은 기준일 뒤 `FORWARD_LOOKAHEAD_DAYS` 달력일

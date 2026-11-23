@@ -17,10 +17,18 @@ from typing import Any
 from batch.services.sell_flags import _criterion
 
 #: 부서 — 표결하는 부서만. 트레이딩부·운용역은 표결하지 않는다 (docs/company.md 2장)
-DEPARTMENTS: tuple[str, ...] = ("research", "quant", "broker", "flows", "governance", "sentiment", "risk", "macro")
+#: 거장 부서 (docs/company.md 12장 — 판단식은 `services/masters.py`, 이름은 `masters.LABELS` 와 같다. 시험이 대조한다)
+MASTER_DEPARTMENTS: tuple[str, ...] = ("buffett", "lynch", "lynch_check", "graham", "graham_price", "graham_fin",
+                                       "greenblatt", "oneil_earn", "oneil_price")  # fmt: skip
+DEPARTMENTS: tuple[str, ...] = ("research", "quant", "broker", "flows", "governance", "sentiment", "risk", "macro",
+                                *MASTER_DEPARTMENTS)  # fmt: skip
 DEPT_LABEL = {
     "research": "리서치부", "quant": "퀀트부", "broker": "증권사리서치부", "flows": "수급부",
     "governance": "공시·지배구조부", "sentiment": "뉴스·감성부", "risk": "리스크관리부", "macro": "시장전략부",
+    "buffett": "버핏부(가치·해자)", "lynch": "린치부(PEG·성장)", "lynch_check": "린치부(재무 점검)",
+    "graham": "그레이엄부(방어적 투자자)", "graham_price": "그레이엄부(가격·안전마진)",
+    "graham_fin": "그레이엄부(재무·이력)",
+    "greenblatt": "그린블랫부(마법공식)", "oneil_earn": "오닐부(실적 A)", "oneil_price": "오닐부(주가 N·L)",
 }  # fmt: skip
 
 #: 점수 부서(리서치·퀀트·리스크)는 그날 그 시장 신호 종목 안의 백분위로 — 찬성·반대 문턱 (docs/company.md 2장)
@@ -82,6 +90,8 @@ class Dossier:
     regime: str | None = None  # bull · bear · unknown
     regime_index: str | None = None
     regime_date: str | None = None
+    #: 거장 부서 자료 (docs/company.md 12.1 — `jobs/company.master_facts`). 거장 헌장이 없는 날은 None
+    masters: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -356,6 +366,12 @@ def opinions(
         for 부서, f in 한종목.items():
             if 부서 in 가중:
                 표[d.stock_id][부서] = f(d)
+    거장 = 가중 & set(MASTER_DEPARTMENTS)
+    if 거장:  # 거장 헌장만 — A·C·D·E 는 이 갈래에 닿지 않는다 (12.8)
+        from batch.services import masters
+
+        for sid, 의견 in masters.opinions(dossiers, list(모집단 or dossiers), 거장).items():
+            표[sid].update(의견)
     return 표
 
 

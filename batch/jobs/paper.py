@@ -1999,6 +1999,12 @@ def _조사_준비(
         크기 = max(int(c["agenda"]) for c in charters.values())
         cache["population"] = cjob.population_dossiers(client, signal_rows, market, as_of)
         cache["agenda"] = cjob.load_dossiers(client, cjob.agenda_rows(signal_rows, 크기), market, as_of)
+        # 거장 부서(docs/company.md 12장)를 쓰는 헌장이 있는 날만 거장 자료를 읽어 붙인다 — 없으면 읽기 0
+        if any(set(c.get("weights") or {}) & set(co.MASTER_DEPARTMENTS) for c in charters.values()):
+            ids = sorted({d.stock_id for d in [*cache["population"], *cache["agenda"]]})
+            사실 = cjob.master_facts(client, ids, market, as_of)
+            cache["population"] = cjob.with_masters(cache["population"], 사실)
+            cache["agenda"] = cjob.with_masters(cache["agenda"], 사실)
     return as_of
 
 
