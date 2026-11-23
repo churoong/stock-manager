@@ -19,6 +19,14 @@ on:
         description: 며칠마다 한 번 (읽기를 줄인다)
         type: string
         default: "5"
+      masters:
+        description: 거장 계좌 거름(docs/company.md 12.6) — A·C·D 와 함께 열고 걸림을 판정
+        type: boolean
+        default: false
+      no_scorecard:
+        description: 뒤 성과를 읽지 않는다(수익 봉인 — 거장 거름은 켠다)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -40,6 +48,8 @@ jobs:
       MARKET: ${{ inputs.market }}
       DAYS: ${{ inputs.days }}
       EVERY: ${{ inputs.every }}
+      MASTERS: ${{ inputs.masters }}
+      NO_SCORECARD: ${{ inputs.no_scorecard }}
     steps:
       - uses: actions/checkout@v5
 
@@ -59,7 +69,10 @@ jobs:
       - name: 소급 재생
         run: |
           set -o pipefail
-          python scripts/company_replay.py --market "$MARKET" --days "$DAYS" --every "$EVERY" 2>&1 \
+          extra=()
+          if [ "$MASTERS" = "true" ]; then extra+=(--masters); fi
+          if [ "$NO_SCORECARD" = "true" ]; then extra+=(--no-scorecard); fi
+          python scripts/company_replay.py --market "$MARKET" --days "$DAYS" --every "$EVERY" "${extra[@]}" 2>&1 \
             | python scripts/ops_tee.py company-replay.txt
 
       - name: 결과를 운영 이슈로
