@@ -102,3 +102,8 @@ def test_dry_run_이면_기록을_건드리지_않는다(monkeypatch: pytest.Mon
     monkeypatch.setattr(daily, "_notify_failure", lambda *a, **k: None)
     daily.notify_timeout("KR", 15, dry_run=True)
     assert [s for s, _ in _상태(mem)] == ["running"]
+
+
+def test_관문_질의의_정리_문구는_db_상수와_같다() -> None:
+    """질의는 정적 문자열이라(동적 질의 상한, test_sql_schema) 문구를 손으로 적는다 — 어긋나면 정리 행 세기가 꺼진다"""
+    assert f"LIKE '{db.REAPED_PREFIX}%'" in jd.BATCH_RUNS_SQL

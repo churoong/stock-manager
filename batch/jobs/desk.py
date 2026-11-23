@@ -105,7 +105,8 @@ BATCH_RUNS_SQL = (
     " CASE WHEN json_valid(step_log) AND json_extract(step_log, '$.paper.account_skips') IS NULL"
     " THEN json_extract(step_log, '$.paper.accounts') END AS paper_accounts,"
     # 끝맺지 못해 정리된 행(`reap_stale_runs` — 강제 종료·한도로 죽은 실행)은 사고다(25.2253)
-    " CASE WHEN status = 'skipped' AND error_text LIKE '" + db.REAPED_PREFIX + "%' THEN 1 END AS reaped"
+    # 문구는 `db.REAPED_PREFIX` 와 같아야 한다 — 질의를 정적 문자열로 두려고 그대로 적고 시험이 묶는다(25.2254)
+    " CASE WHEN status = 'skipped' AND error_text LIKE '끝맺지 못한 기록%' THEN 1 END AS reaped"
     " FROM batch_runs WHERE job_name IN (?, ?) AND started_at >= ?"
 )
 NAMES_SQL = "SELECT id, name, rule_version FROM paper_accounts"
