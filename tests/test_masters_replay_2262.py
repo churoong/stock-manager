@@ -146,8 +146,30 @@ def test_ZL_의_늘_가결은_열지_않음이_아니라_고침_대상이다() -
     ch = m._charters(True)
     for z in ("ZL", "ZN"):
         판 = m.master_verdicts([_회의(z, "d1", list(range(5)))], ch)[z]
-        assert ("(b) 늘 가결" + m.RETUNE_MARK in 판) is (z == "ZL") and any(x.startswith("(b) 늘 가결") for x in 판)
-    assert m.RETUNE_B == {"ZL": 2.6}
+        assert (판 == ["(b) 늘 가결" + m.retune_mark("ZL", ch["ZL"])]) is (z == "ZL")
+        assert any(x.startswith("(b) 늘 가결") for x in 판)
+    assert m.RETUNE_B == {"ZL": 2.6} and "threshold 2.6 " in m.retune_mark("ZL", ch["ZL"])
+    # 고친 헌장으로 다시 돌린 두 번째 재생에서도 (b) 면 표시 없이 걸림(열지 않음) — 고침은 한 번뿐
+    고침 = m._charters(True, retune=True)
+    assert 고침["ZL"]["threshold"] == 2.6 and 고침["ZN"] is ms.CHARTERS["ZN"] and ms.CHARTERS["ZL"]["threshold"] == 2.0
+    assert m.master_verdicts([_회의("ZL", "d1", list(range(5)))], 고침)["ZL"] == ["(b) 늘 가결"]
+
+
+def test_재생은_운영처럼_가중_0_인_거장_키로는_거장_자료를_읽지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    from batch.jobs import company as job
+    from batch.jobs import daily
+
+    m = _m()
+    읽음: list[object] = []
+    d = co.Dossier(stock_id=1, ticker="T01", as_of="2026-11-20")
+    monkeypatch.setattr(daily, "load_signal_rows", lambda c, mk, day: ([object()], "2026-11-20"))
+    for 이름 in ("population_dossiers", "load_dossiers"):
+        monkeypatch.setattr(job, 이름, lambda *a: [d])
+    monkeypatch.setattr(job, "agenda_rows", lambda rows, n: rows)
+    monkeypatch.setattr(job, "master_facts", lambda *a: 읽음.append(a) or {})
+    영 = {"Z0": {**ms.CHARTERS["ZM"], "weights": {k: 0 for k in ms.CHARTERS["ZM"]["weights"]}}}
+    m.replay(object(), "KR", 1, 5, {"A": co.CHARTERS["A"], **영}, scorecard=False)
+    assert 읽음 == []
 
 
 def test_수익_봉인이면_성적표_행을_만들지_않고_찍지도_않는다(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:

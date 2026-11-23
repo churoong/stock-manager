@@ -37,7 +37,14 @@ PASS_RATE_MAX = 0.9  # (b) 가결률 ≥ 90%
 OVER_TOP_N_MAX = 0.2  # (e) ZN·ZL 가결 수 > top_n 인 회의 ≥ 20%
 #: (b) 에 걸려도 열지 않음이 아니라 threshold 를 한 번 고칠 계좌 — {계좌: 고칠 threshold} (12.6)
 RETUNE_B: dict[str, float] = {"ZL": 2.6}
-RETUNE_MARK = " → 고침 대상(threshold 2.6 으로 한 번 다시 재생)"
+
+
+def retune_mark(z: str, charter: dict[str, Any]) -> str:
+    """(b) 고침 표시 — 고칠 값에서 만든다. 이미 고친 헌장(threshold ≥ 고칠 값)이면 붙이지 않는다: 고침은 한 번뿐이라
+    두 번째 재생에서도 (b) 면 열지 않음이다 (12.6, 25.2265)"""
+    if z not in RETUNE_B or float(charter["threshold"]) >= RETUNE_B[z]:
+        return ""
+    return f" → 고침 대상(threshold {RETUNE_B[z]:g} 으로 한 번 다시 재생 — `--retune`)"
 
 
 def tally(meetings: list[tuple[str, str, list[co.Item], list[co.Item]]]) -> dict[str, Any]:
@@ -112,7 +119,7 @@ def master_verdicts(
             걸림.append("(a) 기준 통과 종목 부족")
         if x["passed"] / max(x["agenda"], 1) >= PASS_RATE_MAX:
             # ZL 만 열지 않음이 아니라 threshold 2.6 으로 한 번 고쳐 다시 돌릴 대상 (12.6 (b))
-            걸림.append(f"(b) 늘 가결{RETUNE_MARK if z in RETUNE_B else ''}")
+            걸림.append(f"(b) 늘 가결{retune_mark(z, ch)}")
         peers, 문턱 = OVERLAP_RULE[z]
         겹침 = overlap(meetings, z, peers)
         if 겹침 is not None and 겹침 >= 문턱:
@@ -189,13 +196,14 @@ def main() -> int:
     p.add_argument("--every", type=int, default=5, help="며칠마다 한 번 열까(읽기를 줄인다)")
     p.add_argument("--masters", action="store_true", help="거장 계좌(12장)를 A·C·D 와 함께 열고 12.6 거름을 찍는다")
     p.add_argument("--no-scorecard", action="store_true", help="뒤 성과를 읽지 않는다(수익 봉인, 12.6)")
+    p.add_argument("--retune", action="store_true", help="(b) 고침 한 번 — ZL threshold 를 2.6 으로 (12.6)")
     a = p.parse_args()
 
     from batch.core.client import TursoClient
 
     # 닫아야 읽기 수가 api_usage 에 남는다 (25.1465 검증 권장)
     with TursoClient() as client:
-        charters = _charters(a.masters)
+        charters = _charters(a.masters, retune=a.retune)
         회의, 본, 성적 = replay(client, a.market, a.days, a.every, charters, scorecard=not a.no_scorecard)
         끝 = [f"(신호 날짜 {len(본)}개: {min(본, default='-')} ~ {max(본, default='-')}."
              " 신호는 지금 상장 중인 종목만 읽힌다 — 그 사이 폐지된 종목은 빠진다)",
@@ -208,11 +216,12 @@ def main() -> int:
     return 0
 
 
-def _charters(masters: bool) -> dict[str, dict[str, Any]]:
-    """열 헌장 — 기본은 코드의 판 2 헌장, `--masters` 면 A·C·D 와 거장 계좌"""
+def _charters(masters: bool, *, retune: bool = False) -> dict[str, dict[str, Any]]:
+    """열 헌장 — 기본은 코드의 판 2 헌장, `--masters` 면 A·C·D 와 거장 계좌. `retune` 은 (b) 고침 값을 넣는다"""
     if not masters:
         return dict(co.CHARTERS)
-    return {**{k: co.CHARTERS[k] for k in MASTER_PEERS}, **ms.CHARTERS}
+    거장 = {k: ({**v, "threshold": RETUNE_B[k]} if retune and k in RETUNE_B else v) for k, v in ms.CHARTERS.items()}
+    return {**{k: co.CHARTERS[k] for k in MASTER_PEERS}, **거장}
 
 
 def replay(
