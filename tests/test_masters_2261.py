@@ -212,7 +212,8 @@ def test_문서_12_3_이_코드_문턱을_적는다() -> None:
 
 
 def test_버핏부_ROE_문턱_경계가_입장을_바꾼다() -> None:
-    """ROE 만 문턱 언저리로 두고 나머지 다섯은 고정 — 문턱을 옮기면 깨진다 (25.2261 교차검증 [권고])"""
+    """ROE 만 문턱 언저리로 두고 나머지 다섯은 고정 — 비교식(≥)과 ① 의 해 수 조건을 묶는다. 문턱 값 자체는 12.3 대조
+    시험(`test_문서_12_3_이_코드_문턱을_적는다`)이 묶는다 (25.2261 교차검증 [권고])"""
     def 회사(sid: int, ni: float, 해수: int = 5) -> co.Dossier:
         return _d(sid, annual=_연간(*((2026 - 해수 + k, ni) for k in range(해수)), ocf=ni + 100),
                   raw={"profit_stability": 1, "debt_ratio": 0.3, "ep": 0.08}, beta=0.8)  # fmt: skip
@@ -254,7 +255,7 @@ def test_같은_날_정정_공시는_접수번호로_고른다() -> None:
         c.execute("INSERT INTO financial_snapshots (stock_id, as_of_date, receipt_no, fiscal_year, report_code,"
                   " consolidated, payload, source, fetched_at) VALUES (1, '2025-03-10', ?, 2024, '11011', 1, ?, 't', 't')",
                   [접수번호, json.dumps({"net_income": ni})])  # fmt: skip
-    for 접수번호, 보고, 금액 in (("20250310000200", 2024, 0), ("20250310000100", 2025, 10)):  # 어느 읽기 순서로도 원공시가 뒤
+    for 접수번호, 보고, 금액 in (("20250310000200", 2024, 0), ("20250310000100", 2025, 10)):  # rowid·고유 색인 순서 둘 다에서 원공시가 뒤
         c.execute("INSERT INTO stock_dividends (stock_id, fiscal_year, report_year, receipt_no, as_of_date,"
                   " cash_dividend_total, source, fetched_at) VALUES (1, 2024, ?, ?, '2025-03-10', ?, 't', 't')",
                   [보고, 접수번호, 금액])  # fmt: skip
@@ -343,3 +344,33 @@ def test_거장_자료_읽기가_실패하면_거장_계좌만_막는다(monkeyp
     with pytest.raises(RuntimeError, match="거장 자료 읽기 실패"):
         jp.committee_step(object(), market="KR", account="ZM", charter=ms.CHARTERS["ZM"], charters={}, signal_rows=[],
                           trade_date="2026-11-20", cache=cache, now="t", rule_version=1)  # fmt: skip
+
+
+def test_한도_초과는_삼키지_않고_배치를_멈춘다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """거장 읽기 실패를 거장 계좌만 막는 것은 고장일 때만 — 한도는 다른 자리처럼 올린다 (25.2264, 교차검증 [권고])"""
+    from batch.jobs import paper as jp
+
+    d = co.Dossier(stock_id=1, ticker="T1", as_of="2026-11-20")
+    monkeypatch.setattr(cjob, "population_dossiers", lambda *a: [d])
+    monkeypatch.setattr(cjob, "agenda_rows", lambda rows, n: rows)
+    monkeypatch.setattr(cjob, "load_dossiers", lambda *a: [d])
+
+    def 한도(*a: object) -> dict:
+        raise RuntimeError("D1_ERROR: Exceeded row read limit")
+
+    monkeypatch.setattr(cjob, "master_facts", 한도)
+    cache: dict = {}
+    with pytest.raises(RuntimeError, match="row read limit"):
+        jp._조사_준비(object(), "KR", [], {**co.CHARTERS, **ms.CHARTERS}, cache, "2026-11-20")
+    assert "masters_error" not in cache
+
+
+def test_가장_늦은_해에_별도만_있으면_별도로_고른다() -> None:
+    """`_pit_annual` 의 반대 방향 — 옛 해에 연결이 있어도 끝해가 별도뿐이면 별도로 일관되게 (backtest 규칙)"""
+    줄 = [
+        {"fiscal_year": 2023, "consolidated": 1, "as_of_date": "2024-03-10", "receipt_no": "a", "v": "연결23"},
+        {"fiscal_year": 2023, "consolidated": 0, "as_of_date": "2024-03-10", "receipt_no": "b", "v": "별도23"},
+        {"fiscal_year": 2024, "consolidated": 0, "as_of_date": "2025-03-10", "receipt_no": "c", "v": "별도24"},
+    ]
+    assert [r["v"] for r in cjob._pit_annual(줄)] == ["별도23", "별도24"]
+    assert [r["v"] for r in cjob._pit_annual(줄[2:])] == ["별도24"]

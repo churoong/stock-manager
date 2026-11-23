@@ -35,6 +35,9 @@ NO_DATA_MAX = 0.5  # (c′) 거장 부서 하나라도 안건의 50% 넘게 자�
 ZERO_DAYS_MAX = 0.8  # (a) 가결 0 인 회의 ≥ 80%
 PASS_RATE_MAX = 0.9  # (b) 가결률 ≥ 90%
 OVER_TOP_N_MAX = 0.2  # (e) ZN·ZL 가결 수 > top_n 인 회의 ≥ 20%
+#: (b) 에 걸려도 열지 않음이 아니라 threshold 를 한 번 고칠 계좌 — {계좌: 고칠 threshold} (12.6)
+RETUNE_B: dict[str, float] = {"ZL": 2.6}
+RETUNE_MARK = " → 고침 대상(threshold 2.6 으로 한 번 다시 재생)"
 
 
 def tally(meetings: list[tuple[str, str, list[co.Item], list[co.Item]]]) -> dict[str, Any]:
@@ -108,7 +111,8 @@ def master_verdicts(
         if x["zero_days"] / x["meetings"] >= ZERO_DAYS_MAX:
             걸림.append("(a) 기준 통과 종목 부족")
         if x["passed"] / max(x["agenda"], 1) >= PASS_RATE_MAX:
-            걸림.append("(b) 늘 가결")
+            # ZL 만 열지 않음이 아니라 threshold 2.6 으로 한 번 고쳐 다시 돌릴 대상 (12.6 (b))
+            걸림.append(f"(b) 늘 가결{RETUNE_MARK if z in RETUNE_B else ''}")
         peers, 문턱 = OVERLAP_RULE[z]
         겹침 = overlap(meetings, z, peers)
         if 겹침 is not None and 겹침 >= 문턱:
@@ -126,7 +130,7 @@ def master_lines(
 ) -> list[str]:
     """12.6 거름 결과 줄 — 계좌마다 판정·수치(종목 이름 없음)"""
     판 = master_verdicts(meetings, charters)
-    out = ["[거장 계좌 거름 — docs/company.md 12.6, 한 시장이라도 걸리면 열지 않는다]"]
+    out = ["[거장 계좌 거름 — docs/company.md 12.6, 한 시장이라도 걸리면 열지 않는다(ZL 의 (b) 만 고침 대상)]"]
     for z, 걸림 in 판.items():
         peers, _ = OVERLAP_RULE[z]
         겹침 = overlap(meetings, z, peers)
@@ -222,7 +226,7 @@ def replay(
     """
     from batch.core import calendar as cal
     from batch.jobs import company as job
-    from batch.jobs import daily
+    from batch.jobs import daily, paper
 
     오늘 = cal.local_today(market)
     본: set[str] = set()
@@ -230,7 +234,7 @@ def replay(
     성적: list[dict[str, Any]] = []
     charters = charters or dict(co.CHARTERS)
     크기 = max(int(ch["agenda"]) for ch in charters.values())
-    거장 = any(set(ch["weights"]) & set(co.MASTER_DEPARTMENTS) for ch in charters.values())
+    거장 = any(paper.uses_masters(ch) for ch in charters.values())  # 운영(`_조사_준비`)과 같은 식
     날 = 오늘 - timedelta(days=days)
     while 날 <= 오늘:
         rows, as_of = daily.load_signal_rows(client, market, 날.isoformat())

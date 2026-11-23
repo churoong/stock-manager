@@ -255,13 +255,14 @@ def load_dossiers(client: Any, rows: list[report_picks.SignalRow], country: str,
 
 # ── 거장 부서 자료 (docs/company.md 12.1, 25.2261) ───────────────────────────────────────────────
 
-#: 사업보고서 스냅샷 — 기준일까지 접수된 것만. 통화는 같은 사업연도 원장에서 잇는다
+#: 사업보고서(`dart.ANNUAL_REPORT_CODE` — 날글자를 SQL 에 박지 않는다, 25.143) 스냅샷 — 기준일까지 접수된 것만.
+#: 통화는 같은 사업연도 원장에서 잇는다
 #: (스냅샷 payload 에 통화가 없다, 25.919)
 MASTER_SNAP_SQL = (
     "SELECT f.stock_id, f.as_of_date, f.receipt_no, f.fiscal_year, f.consolidated, f.payload, fin.currency AS cur"
     " FROM financial_snapshots f LEFT JOIN financials fin ON fin.stock_id = f.stock_id"
     "  AND fin.fiscal_year = f.fiscal_year AND fin.report_code = f.report_code AND fin.consolidated = f.consolidated"
-    " WHERE f.report_code = '11011' AND f.as_of_date <= ? AND f.stock_id IN (SELECT value FROM json_each(?))"
+    " WHERE f.report_code = ? AND f.as_of_date <= ? AND f.stock_id IN (SELECT value FROM json_each(?))"
 )
 #: 그날 점수가 쓴 팩터 원값 — (종목, 팩터)마다 그날 가장 높은 계산 판
 MASTER_FACTOR_SQL = (
@@ -313,13 +314,14 @@ def master_facts(client: Any, ids: list[int], country: str, as_of: str) -> dict[
     from batch.jobs.backtest import _공시_순
     from batch.services import sectors
     from batch.services.scoring import MARKET_CAP_KEY
+    from batch.sources import dart
 
     if not ids:
         return {}
     묶음 = _ids(ids)
     국내ocf = country != "KR" or bool(db.get_setting(client, KR_CFO_DONE_KEY))
     스냅: dict[int, list[dict[str, Any]]] = {}
-    for r in client.execute(MASTER_SNAP_SQL, [as_of, 묶음]).dicts():
+    for r in client.execute(MASTER_SNAP_SQL, [dart.ANNUAL_REPORT_CODE, as_of, 묶음]).dicts():
         스냅.setdefault(int(r["stock_id"]), []).append(r)
     원값: dict[int, dict[str, Any]] = {}
     판: dict[tuple[int, str], int] = {}

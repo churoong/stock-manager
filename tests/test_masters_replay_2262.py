@@ -114,3 +114,74 @@ def test_수익_봉인이면_뒤_성과를_읽지_않고_거장_자료를_운영
     읽음.clear()
     m.replay(object(), "KR", 1, 5)
     assert 읽음 == [f"안건{max(int(c['agenda']) for c in co.CHARTERS.values())}", "뒤성과"]
+
+
+# ── 25.2264 교차검증 [권고] 보강 — 문턱 경계 ─────────────────────────────────────────
+
+
+def test_자료_없음은_절반까지는_걸리지_않고_넘으면_걸린다() -> None:
+    m = _m()
+    ch = m._charters(True)
+    zm_반 = [_회의("ZM", f"d{i}", [1, 2], [3], {"buffett": None if i % 2 else 1, "lynch": 1}) for i in range(4)]
+    assert not any(x.startswith("(c′)") for x in m.master_verdicts(zm_반, ch)["ZM"])  # 정확히 50%
+    zm_넘 = [*zm_반, _회의("ZM", "d9", [1, 2], [3], {"buffett": None, "lynch": 1})]
+    assert "(c′) 자료 부족: buffett" in m.master_verdicts(zm_넘, ch)["ZM"]  # 3/5 = 60%
+
+
+def test_top_n_넘침은_넘을_때만_세고_20퍼센트에서_걸리며_ZM_에는_없다() -> None:
+    m = _m()
+    ch = m._charters(True)
+
+    def 날들(aid: str, 넘는날: int, 가결: int) -> list:
+        return [_회의(aid, f"d{i}", list(range(가결 + (1 if i < 넘는날 else 0))), list(range(100, 140)))
+                for i in range(5)]  # fmt: skip
+
+    assert not any(x.startswith("(e)") for x in m.master_verdicts(날들("ZN", 0, 5), ch)["ZN"])  # 가결 = top_n
+    assert "(e) 동률 고르기" in m.master_verdicts(날들("ZN", 1, 5), ch)["ZN"]  # 1/5 = 20%
+    assert not any(x.startswith("(e)") for x in m.master_verdicts(날들("ZM", 5, 5), ch)["ZM"])  # ZM 은 (e) 밖
+
+
+def test_ZL_의_늘_가결은_열지_않음이_아니라_고침_대상이다() -> None:
+    m = _m()
+    ch = m._charters(True)
+    for z in ("ZL", "ZN"):
+        판 = m.master_verdicts([_회의(z, "d1", list(range(5)))], ch)[z]
+        assert ("(b) 늘 가결" + m.RETUNE_MARK in 판) is (z == "ZL") and any(x.startswith("(b) 늘 가결") for x in 판)
+    assert m.RETUNE_B == {"ZL": 2.6}
+
+
+def test_수익_봉인이면_성적표_행을_만들지_않고_찍지도_않는다(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    import sys
+
+    from batch.core import client as cl
+    from batch.jobs import company as job
+    from batch.jobs import daily
+
+    m = _m()
+    d = co.Dossier(stock_id=1, ticker="T01", as_of="2026-11-20")
+    monkeypatch.setattr(daily, "load_signal_rows", lambda c, mk, day: ([object()], "2026-11-20"))
+    for 이름 in ("population_dossiers", "load_dossiers"):
+        monkeypatch.setattr(job, 이름, lambda *a: [d])
+    monkeypatch.setattr(job, "agenda_rows", lambda rows, n: rows)
+    monkeypatch.setattr(job, "master_facts", lambda *a: {})
+    monkeypatch.setattr(job, "forward_excess", lambda *a: {1: 0.1})
+    monkeypatch.setattr(co, "meet", lambda ds, ch, pop: ([_item(1, True)], [_item(1, True)]))
+    monkeypatch.setattr(co, "records_from", lambda *a: [{"행": 1}])
+    assert m.replay(object(), "KR", 1, 5, m._charters(True), scorecard=False)[2] == []
+    assert m.replay(object(), "KR", 1, 5, m._charters(True))[2] != []  # 켜면 만든다
+
+    class 가짜:
+        def __enter__(self) -> object:
+            return self
+
+        def __exit__(self, *a: object) -> None:
+            return None
+
+    monkeypatch.setattr(cl, "TursoClient", 가짜)
+    monkeypatch.setattr(co, "scorecard", lambda rows: {})
+    monkeypatch.setattr(sys, "argv", ["x", "--masters", "--no-scorecard", "--days", "1"])
+    m.main()
+    assert "부서 성적표" not in capsys.readouterr().out
+    monkeypatch.setattr(sys, "argv", ["x", "--days", "1"])
+    m.main()
+    assert "부서 성적표" in capsys.readouterr().out

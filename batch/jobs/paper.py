@@ -2012,6 +2012,8 @@ def _조사_준비(
                 사실 = cjob.master_facts(client, sorted({d.stock_id for d in [*모집단, *안건]}), market, as_of)
                 모집단, 안건 = cjob.with_masters(모집단, 사실), cjob.with_masters(안건, 사실)
             except Exception as e:  # noqa: BLE001 — 거장 헌장 계좌만 막고 기록한다
+                if db.quota_reason(e):  # 한도 초과는 다른 자리처럼 배치를 멈춘다 (25.2264)
+                    raise
                 cache["masters_error"] = f"{type(e).__name__}: {e}"
                 log.warning("거장 자료 읽기 실패 — 거장 헌장 계좌는 오늘 회의하지 않는다: %s", cache["masters_error"])
         cache["population"], cache["agenda"] = 모집단, 안건

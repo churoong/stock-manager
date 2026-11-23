@@ -42,7 +42,8 @@ def 파이썬이_고르는_질의() -> set[str]:
     # (`inp.consolidated`, `load_growth` 가 `FINANCIAL_BASIS` 로 고른 것)과 같은 행만 `sg.newer_quarter` 가 쓴다
     # 거장 부서 자료(`company.MASTER_SNAP_SQL`, 25.2261·25.2263)는 기준일까지의 사업보고서 스냅샷을 다 읽고
     # `company._pit_annual` 이 `backtest.pit_basis_rows` 와 같은 규칙(가장 늦은 사업연도에 연결이 있으면 연결)으로 고른다.
-    # 규칙은 `test_masters_2261.test_거장_자료는_기준일까지_접수된_것만_읽는다`(별도 행을 고르지 않는다)가 묶는다
+    # 규칙은 `test_masters_2261.test_거장_자료는_기준일까지_접수된_것만_읽는다`(연결이 있으면 별도를 고르지 않는다)와
+    # `test_가장_늦은_해에_별도만_있으면_별도로_고른다`(반대 방향)가 묶는다
     return {re.sub(r"\s+", " ", verdicts.QUARTERS_SQL), re.sub(r"\s+", " ", metrics.EVENT_FIN_SQL),
             re.sub(r"\s+", " ", kr_cashflow.TODO_SQL),
             re.sub(r"\s+", " ", signals_job.NEWER_QUARTER_SQL), re.sub(r"\s+", " ", company.MASTER_SNAP_SQL)}  # fmt: skip
