@@ -203,3 +203,34 @@ def test_안건이_커져도_앞_회사는_제_안건_크기만_본다(monkeypat
 
     assert 회의(pop) == 회의(pop[:20])
     assert co.meet(pop, co.CHARTERS["A"], pop)[1] != co.meet(pop[:20], co.CHARTERS["A"], pop)[1]  # 자르지 않으면 다르다
+
+    # 지주사(H)도 투표 회사 회의를 다시 열 때 그 회사 안건 크기만 본다(25.2269, 25.2268 교차검증 [권고])
+    from datetime import date
+
+    class 빈:
+        rows: list = []
+
+        def dicts(self) -> list:
+            return []
+
+    class 빈클라:
+        def execute(self, *a: object) -> 빈:
+            return 빈()
+
+    def 지주(cache_agenda: list[co.Dossier]) -> tuple:
+        cache = {"agenda": cache_agenda, "population": pop}
+        out = job.holding_step(
+            빈클라(), market="KR", account="H", config={"voters": {"A": co.charter_hash(co.CHARTERS["A"])}},
+            charters={"A": co.CHARTERS["A"]}, signal_rows=행, trade_date="2026-10-14", cache=cache, now="t",
+            rule_version=3, today=date(2026, 10, 14), top_n=5)  # fmt: skip
+        return out[3]["recommended"], out[2]  # 추천 수 · 결정 원장 문장(표 포함)
+
+    assert 지주(pop) == 지주(pop[:20]) and 지주(pop)[1]  # 문장이 비지 않는다 — 비교가 공짜가 아니다
+
+
+def test_위원회_실패_글은_이름이_위원회로_끝나면_겹치지_않는다() -> None:
+    assert pp.committee_failed("거장위원회") == "거장위원회 회의를 열지 못함"
+    assert pp.committee_failed("가치") == "가치 투자위원회를 열지 못함"
+    c = desk.checks(halted=False, paper={"accounts": {"ZM": {"committee": {"error": "헌장 검사 실패"}}}}, broker={},
+                    recon_bad=[], warnings=0, h_orders=0)  # fmt: skip
+    assert any(x["text"].startswith("가상 거장위원회 회의를 열지 못함 — 오늘 사지 않았습니다") for x in c)

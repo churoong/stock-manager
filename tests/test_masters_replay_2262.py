@@ -150,11 +150,9 @@ def test_ZL_의_늘_가결은_열지_않음이_아니라_고침_대상이다() -
         assert any(x.startswith("(b) 늘 가결") for x in 판)
     assert m.RETUNE_B == {"ZL": 2.6} and "threshold 2.6 " in m.retune_mark("ZL", ch["ZL"])
     # 표시는 고칠 값에서 만든다 — 값을 바꾸면 표시도 바뀐다(날글자 2.6 이면 깨진다, 25.2268)
-    고친값 = {**m.RETUNE_B, "ZL": 2.7}
-    m.RETUNE_B.clear()
-    m.RETUNE_B.update(고친값)
-    assert "threshold 2.7 " in m.retune_mark("ZL", ch["ZL"])
-    m.RETUNE_B["ZL"] = 2.6
+    with pytest.MonkeyPatch.context() as mp:  # 실패해도 원복(25.2269)
+        mp.setitem(m.RETUNE_B, "ZL", 2.7)
+        assert "threshold 2.7 " in m.retune_mark("ZL", ch["ZL"])
     # 고친 헌장으로 다시 돌린 두 번째 재생에서도 (b) 면 표시 없이 걸림(열지 않음) — 고침은 한 번뿐
     고침 = m._charters(True, retune=True)
     assert 고침["ZL"]["threshold"] == 2.6 and 고침["ZN"] is ms.CHARTERS["ZN"] and ms.CHARTERS["ZL"]["threshold"] == 2.0

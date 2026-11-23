@@ -1264,9 +1264,10 @@ def checks(
         if not isinstance(a, dict):
             continue
         nm = _이름(aid)
-        for 칸, 이름 in (("committee", "투자위원회를 열지 못함"), ("holding", "고르지 못함")):
+        for 칸, 이름 in (("committee", None), ("holding", "고르지 못함")):
             if isinstance(a.get(칸), dict) and a[칸].get("error"):
-                글 = f"가상 {nm} {이름} — 오늘 사지 않았습니다: {str(a[칸]['error'])[:100]}"
+                머리 = pp.committee_failed(nm) if 이름 is None else f"{nm} {이름}"
+                글 = f"가상 {머리} — 오늘 사지 않았습니다: {str(a[칸]['error'])[:100]}"
                 out.append({"level": "high", "text": 글})
         if a.get("charter_errors"):
             out.append({"level": "high", "text": f"가상 {nm} 헌장 오류: {'; '.join(a['charter_errors'])[:120]}"})

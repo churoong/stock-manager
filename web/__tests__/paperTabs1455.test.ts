@@ -108,3 +108,21 @@ describe("보유 손익 표시·그래프 색 (25.1604)", () => {
     expect(SPARE_COLORS.filter((x) => 색.includes(x))).toEqual([]);
   });
 });
+
+describe("거장 계좌 선 색 (25.2269)", () => {
+  // 상대 휘도 대비 — 밝은 바탕(흰색)과 다크 바탕(slate-950 #020617) 모두에서 3 이상
+  const 휘도 = (hex: string) => {
+    const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const 대비 = (a: string, b: string) => {
+    const [x, y] = [휘도(a), 휘도(b)].sort((p, q) => q - p);
+    return (x + 0.05) / (y + 0.05);
+  };
+  it("ZM·ZL 선은 밝은·다크 바탕 둘 다에서 보인다", () => {
+    for (const id of ["ZM", "ZL"]) {
+      expect(대비(ACCOUNT_COLOR[id], "#020617"), id).toBeGreaterThanOrEqual(3);
+      expect(대비(ACCOUNT_COLOR[id], "#ffffff"), id).toBeGreaterThanOrEqual(2);
+    }
+  });
+});

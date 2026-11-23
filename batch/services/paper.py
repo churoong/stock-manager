@@ -60,6 +60,12 @@ def account_name(aid: str) -> str:
     return ACCOUNT_NAMES.get(str(aid), str(aid))
 
 
+def committee_failed(name: str) -> str:
+    """'위원회를 열지 못함' 글 — 화면 이름이 이미 '위원회' 로 끝나면(거장위원회 ZM) 겹치지 않게
+    (25.2269, 25.2268 교차검증 [권고]). 리포트 ⚠️ 줄(`jobs/paper`)과 상황실 경보(`desk`)가 같이 쓴다"""
+    return f"{name} 회의를 열지 못함" if name.endswith("위원회") else f"{name} 투자위원회를 열지 못함"
+
+
 def step_error_orders(rec: dict[str, Any]) -> str:
     """계좌 단계 예외가 난 계좌 기록(`run_step` 의 accounts.<계좌>)에서 주문을 어디까지 적었나 — 리포트 ⚠️ 줄·상황실
     공통 글(25.1924). `orders` 가 수면 적은 뒤, 글("이미 냄" — 같은 날 다시 돈 실행)이면 앞 실행이 냄, 적기 전 수

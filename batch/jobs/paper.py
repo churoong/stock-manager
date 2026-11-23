@@ -2811,7 +2811,7 @@ def run_step(
                 if 뒤:
                     메모줄.append(f"   가장 높은 표 {뒤}")
             else:
-                메모줄.append(f"⚠️ 가상 {계이름} 투자위원회를 열지 못함 — {위.get('error')}")
+                메모줄.append(f"⚠️ 가상 {pp.committee_failed(계이름)} — {위.get('error')}")
         if isinstance(a기록.get("holding"), dict):
             지 = a기록["holding"]
             가중글 = " · ".join(f"{pp.account_name(c)} {w:g}" for c, w in sorted((지.get("weights") or {}).items()))
