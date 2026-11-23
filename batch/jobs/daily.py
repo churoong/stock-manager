@@ -3674,7 +3674,8 @@ def timeout_text(minutes: int, market: str | None = None) -> str:
 
 #: 시간 초과 알림 단계의 Turso 요청 상한(초, 재시도 없음) — 알림 앞 마지막 성공 읽기·알림 뒤 기록 닫기 (25.2255).
 #: 국내 잡 20분 가운데 배치 15분 + 30초를 쓰고 남은 약 3분 안에서, Turso 가 느린 날(곧 죽은 그날) 60초 × 재시도 셋이
-#: 알림·뒷단계(시세 사본 맞추기)를 밀어내지 않게. 요청은 셋(읽기·닫기 SELECT·UPDATE) 남짓이라 최악 약 30초.
+#: 알림·뒷단계(시세 사본 맞추기)를 밀어내지 않게. 요청은 셋(읽기·닫기 SELECT·UPDATE) 남짓이고, requests 제한은 연결·
+#: 읽기(바이트 사이)에 따로 걸려 요청 하나가 8초를 넘을 수 있다 — 텔레그램까지 최악 1분 남짓 `[확인필요]`(25.2256).
 #: 넘기면 건너뛴다 — 읽기는 "읽지 못했습니다" 로, 닫기는 6시간 뒤 정리(그 행도 사고로 센다)로
 TIMEOUT_DB_REQUEST_S = 8.0
 
@@ -3692,6 +3693,7 @@ def notify_timeout(market: str, minutes: int, dry_run: bool) -> None:
     글 = timeout_text(minutes, market)
     # 알림 앞의 마지막 성공 읽기도 짧게 — `_notify_failure` 는 텔레그램 전에 DB 를 읽는다(25.2255, 25.2254 교차검증
     # [필수]: 닫기만 뒤로 옮겨선 그 읽기의 재시도가 남은 잡 시간을 먹어 알림을 잃을 수 있었다). 닫기도 같은 상한
+    # 운영 클라이언트(Turso·D1, 사본 감싸개는 넘겨 줌)는 모두 갖는다 — 시험이 묶는다(25.2256: D1 에 없어 조용히 빠졌다)
     if client is not None and hasattr(client, "set_quick"):
         client.set_quick(TIMEOUT_DB_REQUEST_S)
     _notify_failure(client, market, job_name(market), 글, dry_run)  # type: ignore[arg-type]

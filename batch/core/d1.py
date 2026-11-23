@@ -114,10 +114,16 @@ class D1Client:
         self.writes = WriteCounter()
         self.reads = ReadCounter()
         self._recording = False
+        self._quick_timeout: float | None = None  # `set_quick` 이 켠다(25.2256)
 
     # ------------------------------------------------------------------
     # 공개 API (TursoClient 와 같은 이름·같은 뜻)
     # ------------------------------------------------------------------
+
+    def set_quick(self, timeout: float) -> None:
+        """요청마다 `timeout` 초, 재시도 없이 — `TursoClient.set_quick` 과 같은 뜻(25.2256, 25.2255 교차검증 [권고]:
+        D1 백엔드면 시간 초과 알림 단계가 조용히 60초 × 재시도로 돌아갔다)"""
+        self._quick_timeout = timeout
 
     def __enter__(self) -> D1Client:
         return self
@@ -192,9 +198,12 @@ class D1Client:
 
     def _post(self, payload: dict) -> dict:
         last: Exception | None = None
-        for attempt in range(len(RETRY_DELAYS) + 1):
+        빠름 = self._quick_timeout is not None
+        기다림 = () if 빠름 else RETRY_DELAYS
+        for attempt in range(len(기다림) + 1):
             try:
-                response = self._session.post(self._endpoint, json=payload, timeout=TIMEOUT)
+                response = self._session.post(self._endpoint, json=payload,
+                                              timeout=self._quick_timeout if 빠름 else TIMEOUT)  # fmt: skip
             except requests.RequestException as exc:  # 연결·타임아웃만 다시 보낸다
                 last = exc
             else:
@@ -208,10 +217,10 @@ class D1Client:
                 else:
                     # 401·403·400 은 다시 보내도 같다. 설정을 고쳐야 한다
                     raise TursoError(f"D1 HTTP {response.status_code}: {response.text[:300]}")
-            if attempt < len(RETRY_DELAYS):
+            if attempt < len(기다림):
                 import time
 
-                time.sleep(RETRY_DELAYS[attempt])
+                time.sleep(기다림[attempt])
         raise TursoError(f"D1 통신 실패: {last}")
 
     def _flush(self, written: int, read: int) -> None:

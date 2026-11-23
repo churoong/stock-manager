@@ -153,3 +153,32 @@ def test_dry_run_이면_기록을_건드리지_않는다(monkeypatch: pytest.Mon
 def test_관문_질의의_정리_문구는_db_상수와_같다() -> None:
     """질의는 정적 문자열이라(동적 질의 상한, test_sql_schema) 문구를 손으로 적는다 — 어긋나면 정리 행 세기가 꺼진다"""
     assert f"LIKE '{db.REAPED_PREFIX}%'" in jd.BATCH_RUNS_SQL
+
+
+def test_D1_도_짧은_상한이면_한_번만_그_제한으로_보낸다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """D1 에 `set_quick` 이 없어 알림 단계가 조용히 60초 × 재시도로 돌았다 (25.2256, 25.2255 교차검증 [권고])"""
+    import requests
+
+    from batch.core import d1, turso
+
+    c = d1.D1Client("a", "d", "t")
+    보냄: list[float] = []
+
+    def post(url: str, json: object, timeout: float) -> None:
+        보냄.append(timeout)
+        raise requests.ConnectionError("Read timed out")
+
+    monkeypatch.setattr(c._session, "post", post)
+    monkeypatch.setattr("time.sleep", lambda s: 보냄.append(-s))
+    c.set_quick(8.0)
+    with pytest.raises(turso.TursoError):
+        c._post({})
+    assert 보냄 == [8.0]
+
+
+def test_운영_클라이언트는_모두_짧은_상한을_갖는다() -> None:
+    """알림 단계는 `hasattr` 로 거른다(시험용 가짜 클라이언트) — 운영 백엔드에 빠지면 조용히 옛 길로 돌았다(25.2256)"""
+    from batch.core import d1, price_replica, turso
+
+    assert callable(turso.TursoClient.set_quick) and callable(d1.D1Client.set_quick)
+    assert hasattr(price_replica.ReplicaClient, "__getattr__")  # 감싸개는 원격 클라이언트로 넘겨 준다
