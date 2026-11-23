@@ -67,6 +67,8 @@ OPEN_ORDERS_SQL = (
 BAR_SQL = "SELECT date, open, close, volume, change_pct FROM prices WHERE stock_id = ? AND date = ?"
 #: 그 종목의 더 뒤 날 시세가 있나 — 그날 행만 빠진 것(수집 일부 실패)과 정지를 가른다(25.1713)
 LATER_BAR_SQL = "SELECT 1 FROM prices WHERE stock_id = ? AND date > ? LIMIT 1"
+#: 그 종목의 그날 행이 있나 — 끊긴 행이 앞 장부터 이어지는지 가른다(25.2258)
+BAR_EXISTS_SQL = "SELECT 1 FROM prices WHERE stock_id = ? AND date = ? LIMIT 1"
 #: 그날 행이 **아예 없는** 종목(시장엔 그날 시세가 있음)을 정지로 보기 전에 기다리는 거래일 수(25.1713, 체결 판정 감사
 #: [필수]) — 미국 조각 수집(`yfinance_src.fetch_daily_bars`)은 일부 조각만 받아도 성공이고, 국내도 코스닥만 실패해도
 #: 배치가 나아가 그 종목 행만 빠질 수 있다. 다음 배치의 다시 받기·빈 날 메우기(`_heal_yahoo_days`)가 대개 하루 안에
@@ -905,9 +907,13 @@ def fill_orders(
             for _ in range(MISSING_BAR_WAIT_SESSIONS):
                 기한 = cal.next_session(market, 기한)
             뒤행 = bool(client.execute(LATER_BAR_SQL, [o.stock_id, 날]).rows)
-            # 기다림은 **첫 판정에만**(미룬 적 없는 주문) — 미룰 때마다 새 장에 다시 걸려 끊긴 종목(상장폐지·행 없는
-            # 정지)의 청산이 20거래일이 아니라 약 60거래일 뒤에 났다(25.2257, 11-23 결함 회차 [권고])
-            처음 = o.deferrals == 0
+            # 기다림은 **새로 빠진 행에만** — 미룬 적 없는 주문이거나, 앞 장에는 그 종목 행이 있었을 때.
+            # 미룰 때마다 새 장에 다시 걸려 끊긴 종목(상장폐지·행 없는 정지)의 청산이 20거래일이 아니라
+            # 약 60거래일 뒤에 났다(25.2257, 11-23 결함 회차 [권고]). '한 번 미뤘으면 끔' 은 하한가·거래량 0 정지·
+            # 시장 전체 못 받음·환율 없음으로 미룬 매도의 메움 기다림까지 꺼 체결이 한 장 밀렸다(25.2258,
+            # 25.2257 교차검증 [권고]) — 끊김이 앞 장부터 이어질 때만 끈다
+            앞장 = cal.previous_session(market, date.fromisoformat(날))
+            처음 = o.deferrals == 0 or bool(client.execute(BAR_EXISTS_SQL, [o.stock_id, 앞장.isoformat()]).rows)
             if trade_date < 기한.isoformat() and not 뒤행 and 처음:
                 기록["waiting_bar"] = 기록.get("waiting_bar", 0) + 1
                 continue

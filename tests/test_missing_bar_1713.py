@@ -135,9 +135,11 @@ def test_종가_0_행은_정지() -> None:
     assert not pp.halted(pp.Bar("2026-10-15", None, 100.0, None))
 
 
-def test_끊긴_종목_청산까지_장수는_약_20거래일(client: Client, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
+@pytest.mark.parametrize("종류", ["stock", "etf"])
+def test_끊긴_종목_청산까지_장수는_22번째_실행(client: Client, monkeypatch: pytest.MonkeyPatch, 종류: str) -> None:  # noqa: F811
     """25.2257 (11-23 결함 회차 [권고]) — 행이 끊긴 종목(상장폐지·행 없는 정지)의 매도가 미룰 때마다 2거래일 기다림에
-    다시 걸려 청산이 약 60번째 실행에서 났다. 기다림은 첫 판정에만 — 첫 기다림 2장 + 미룸 20번 ≈ 22번째 실행"""
+    다시 걸려 청산이 약 60번째 실행에서 났다. 첫 기다림 2장 + 미룸 19번 + 20번째 정지 판정에서 청산 = 22번째 실행.
+    국내 ETF 분기도 같다(25.2258 — ETF 분기만 되돌리는 변이를 잡게)"""
     c = client
     _3번_주문(c, monkeypatch)
     _시세(c, "2026-10-15", 10_000, 10_000)
@@ -146,6 +148,7 @@ def test_끊긴_종목_청산까지_장수는_약_20거래일(client: Client, mo
     _시세(c, "2026-10-16", 10_000, 10_000)
     _시세3(c, "2026-10-16", 9_100, 9_000)  # −9% 손절 → 10-19 매도, 3번 행은 그 뒤로 없다
     _하루(c, monkeypatch, "2026-10-16", signals=False)
+    c.conn.execute("UPDATE stocks SET asset_type = ? WHERE id = 3", [종류])  # 매도가 선 뒤(test_etf_missing_bar_2216 과 같은 길)
     날 = date(2026, 10, 19)
     번 = 0
     while 번 < 40:
@@ -155,4 +158,31 @@ def test_끊긴_종목_청산까지_장수는_약_20거래일(client: Client, mo
         if c.q("SELECT COUNT(*) FROM paper_fills WHERE stock_id = 3 AND side = 'sell'")[0][0]:
             break
         날 = cal.next_session("KR", 날)
-    assert 20 <= 번 <= 24, f"{번}번째 실행에서야 청산(또는 40번 안에 없음)"
+    assert 번 == 22, f"{번}번째 실행에서야 청산(또는 40번 안에 없음)"
+    assert c.q("SELECT DISTINCT price FROM paper_fills WHERE stock_id = 3 AND side = 'sell'") == [(9_000,)]  # 마지막 종가
+
+
+def test_정지로_미룬_매도도_새로_빠진_행은_기다린다(client: Client, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
+    """25.2258 (25.2257 교차검증 [권고]) — 10-19 거래량 0 정지로 미룬 매도(미룸 1)가 10-20 에 그 종목 행만 빠지고 10-21
+    아침에 메워졌다. 앞 장(10-19)엔 행이 있었으니 새로 빠진 행 — 기다렸다가 메워진 10-20 시가로 찬다(한 번 미뤘다고
+    기다림을 끄면 10-21 시가로 한 장 밀렸다)"""
+    c = client
+    _3번_주문(c, monkeypatch)
+    _시세(c, "2026-10-15", 10_000, 10_000)
+    _시세3(c, "2026-10-15", 10_100, 9_900)
+    _하루(c, monkeypatch, "2026-10-15", signals=False)
+    _시세(c, "2026-10-16", 10_000, 10_000)
+    _시세3(c, "2026-10-16", 9_100, 9_000)  # −9% 손절 → 10-19 매도
+    _하루(c, monkeypatch, "2026-10-16", signals=False)
+    _시세(c, "2026-10-19", 10_000, 10_000)
+    _시세3(c, "2026-10-19", 9_000, 9_000, volume=0)  # 거래 정지 → 미룸
+    _하루(c, monkeypatch, "2026-10-19", signals=False)
+    _시세(c, "2026-10-20", 10_000, 10_000)  # 3번 행만 빠짐
+    _하루(c, monkeypatch, "2026-10-20", signals=False)
+    assert c.q("SELECT COUNT(*) FROM paper_fills WHERE stock_id = 3 AND side = 'sell'")[0][0] == 0
+    _시세3(c, "2026-10-20", 8_800, 8_700)  # 메워짐
+    _시세(c, "2026-10-21", 10_000, 10_000)
+    _시세3(c, "2026-10-21", 8_000, 8_000)
+    _하루(c, monkeypatch, "2026-10-21", signals=False)
+    assert c.q("SELECT DISTINCT fill_date, price FROM paper_fills WHERE stock_id = 3 AND side = 'sell'") == [
+        ("2026-10-20", 8_800)]
