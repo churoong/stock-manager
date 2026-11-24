@@ -203,7 +203,12 @@ def orders_through_gate(
         if 남은 <= 0:
             break
         든 = {주문[c.key]["stock_id"] for c in 통과}
-        더 = [r for r in candidates if r.stock_id not in 넘김 and r.stock_id not in 든]
+        # 앞 회차에서 자료 문제로 넘긴 종목(시세 없음·묵음·1주 미만·경계)도 다시 보지 않는다 — 회차마다 다시 읽고 넘김
+        # 상한을
+        # 다시 써 빈 자리를 못 채웠다(25.2322, 25.2321 교차검증 [참고]). "현금 부족 — 멈춤" 종목은 다음 회차에 다시 본다
+        자료문제 = {k for k, v in (기록.get("not_bought") or {}).items()
+                    if k != -1 and not str(v).startswith("현금 부족")}  # fmt: skip
+        더 = [r for r in candidates if r.stock_id not in 넘김 | 자료문제 and r.stock_id not in 든]
         예약 = open_buys + [pp.Order(id=-1 - c.key, account_id=account_id, stock_id=주문[c.key]["stock_id"], side="buy",
                                      order_type="market", limit_price=None, quantity=주문[c.key]["quantity"],
                                      currency=주문[c.key]["currency"], fill_session=fill_session,
@@ -217,11 +222,19 @@ def orders_through_gate(
         시작 = len(주문)
         주문 += 새
         통과, 막힘 = gate(주문)
+        if 회 > 0:
+            기록["gate_rounds"] = 회 + 1  # 새 줄을 실제로 다시 잰 회차만 센다(25.2322)
         새막힘 = [(c, 까닭) for c, 까닭 in 막힘 if c.key >= 시작]
         넘김 |= {주문[c.key]["stock_id"] for c, _ in 새막힘}
         if not 새막힘 or not all(code in CAP_CODES for _c, 까닭 in 새막힘 for code, _t in 까닭):
             break
-        기록["gate_rounds"] = 회 + 2
     기록["orders"] = len(통과)
     기록["picks"] = [주문[c.key]["stock_id"] for c in 통과]
+    # 앞 회차에 "현금 부족" 으로 적혔다가 다음 회차에 산 종목은 못 산 것에서 뺀다 — 같은 종목이 picks 와 not_bought 에
+    # 함께
+    # 적혀 기록이 스스로 어긋났다(25.2322, 25.2321 교차검증 [권고])
+    if 기록.get("not_bought"):
+        기록["not_bought"] = {k: v for k, v in 기록["not_bought"].items() if k not in set(기록["picks"])}
+        if not 기록["not_bought"]:
+            del 기록["not_bought"]
     return 주문, 통과, 막힘, 기록
