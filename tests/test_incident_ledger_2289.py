@@ -321,13 +321,14 @@ def test_읽지도_쓰지도_않는다_그리고_문서() -> None:
                "건너뜀·도는 중·확인 실행은 사고를 열지도 닫지도 않는다", "아직 열림", "한국 시각", "끝맺지 못한 기록",
                "영향", "문장 머리", "25.2295", "이틀(`SPAN_SHOW_DAYS`)부터", "같은 코드로 복구", "코드가 바뀐 뒤 복구",
                "그 고침 덕인지는 모른다", "실패·중단 N번", "25.2298", "미국 동부 날짜", "실패·중단한 날 N일", "달력 폭이 아니다",
-               "문서만 바꾼 커밋", "25.2300", "**무응답**", "**검산 틀린 날**", "앞 다섯(`OTHER_TOP_N`)"):  # fmt: skip
+               "문서만 바꾼 커밋", "25.2300", "**무응답**", "**검산 틀린 날**", "앞 다섯(`OTHER_TOP_N`)", "25.2307",
+               "**계좌가 제 일을 못 한 날**"):  # fmt: skip
         assert 조각 in 문서, 조각
 
 
 def test_실행_밖의_무응답과_검산_틀린_날() -> None:
     """25.2300 — 아예 안 돈 실행(무응답)과 장부 검산이 틀린 날은 실행 줄에 없다. 건수와 이름만 싣는다"""
-    assert il.other_lines([], []) == ["무응답·검산 틀린 날: 없음"]
+    assert il.other_lines([], []) == ["무응답·검산·계좌 건너뜀: 없음"]
     줄 = il.other_lines([("daily_kr", "KR", "2026-11-18"), ("daily_us", "US", "2026-11-17"), ("daily_kr", "KR", "2026-11-18")],
                        [("H", "2026-11-18"), ("B", "2026-11-18"), ("H", "2026-11-19")])  # fmt: skip
     # 겹친 값은 한 번 · 날짜 차례
@@ -391,4 +392,49 @@ def test_요약_실행이_무응답과_검산을_읽어_싣는다(monkeypatch) -
     찍힘.clear()
     assert ws.run(dry_run=True) == 0
     글 = "\n".join(찍힘)
-    assert "운영 사고(실패 묶음 → 복구)" in 글 and "무응답·검산 줄을 만들지 못했습니다 (RuntimeError)" in 글
+    assert "운영 사고(실패 묶음 → 복구)" in 글 and "무응답·검산·계좌 줄을 만들지 못했습니다 (RuntimeError)" in 글
+
+
+def test_계좌가_제_일을_못_한_날(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """25.2307 — 넷째 조각. 주간 요약이 이미 읽는 실행 기록의 `paper.account_skips`·`account_errors`·`error` 에서
+    끌어낸다(새 읽기 없음). 관문 무사고 칸과 같은 재료, 날 단위"""
+    import json
+    from datetime import timedelta
+
+    from batch.core import db
+    from tests.test_portfolio_job import MemClient
+
+    def _p(job: str, st: str, when: str, faults: tuple[str, ...], market: str = "KR") -> ws.Run:
+        return ws.Run(job, market, st, f"2026-11-{when}:00+00:00", None, (), None, None, None, faults)
+
+    날들 = il.account_days([_p("daily_kr", "partial", "17T23:30", ("H",)), _p("daily_kr", "partial", "18T00:30", ("H", "ZM")),
+                           _p("daily_us", "partial", "18T15:30", ("단계",), "US"),  # 한국 11-19 00:30 이지만 미국 동부 11-18
+                           _p("daily_kr", "dryrun", "19T23:30", ("B",)),  # 확인 실행은 뺀다
+                           _p("daily_kr", "success", "20T23:30", ())])  # fmt: skip
+    assert sorted(날들) == [("H", "2026-11-18"), ("H", "2026-11-18"), ("ZM", "2026-11-18"), ("단계", "2026-11-18")]
+    줄 = il.other_lines([], [], 날들)
+    assert 줄 == ["계좌가 제 일을 못 한 날: 1일 · 계좌 H, ZM, 단계 · 11-18"]
+    # 셋이 함께면 무응답 → 검산 → 계좌 차례
+    셋 = il.other_lines([("daily_kr", "KR", "2026-11-18")], [("H", "2026-11-17")], 날들)
+    assert [x.split(":")[0] for x in 셋] == ["무응답(기대 시각까지 성공 없음)", "검산 틀린 날", "계좌가 제 일을 못 한 날"]
+    # 이음매 — load_runs 가 step_log 에서 읽는다(빈 dict·깨진 꼴·paper 없음은 빈 것)
+    mem = MemClient()
+    db.apply_migrations(mem)  # type: ignore[arg-type]
+    now = datetime.now(UTC)
+    for i, 로그 in enumerate([{"paper": {"account_skips": {"H": "buy: 환율 없음"}, "account_errors": {"ZM": "KeyError"}}},
+                             {"paper": {"account_skips": {}, "account_errors": {}}}, {"paper": {"error": "죽음"}},
+                             {"paper": {"account_skips": ["H"]}}, {"paper": "글"}, {}]):  # fmt: skip
+        t = (now - timedelta(hours=10 - i)).isoformat(timespec="seconds")
+        mem.conn.execute("INSERT INTO batch_runs (job_name, market, trade_date, status, started_at, step_log)"
+                         " VALUES ('daily_kr', 'KR', ?, 'partial', ?, ?)", [t[:10], t, json.dumps(로그)])  # fmt: skip
+    assert [r.paper_faults for r in ws.load_runs(mem, (now - timedelta(days=1)).isoformat())] == [  # type: ignore[arg-type]
+        ("H", "ZM"), (), ("단계",), (), (), ()]
+    # 요약 실행에 실린다
+    mem.close = lambda: None  # type: ignore[method-assign]
+    monkeypatch.setattr(ws, "TursoClient", lambda: mem)
+    monkeypatch.setattr(ws, "load_losses", lambda c, now, through, 끝: (0, 0, []))
+    찍힘: list[str] = []
+    monkeypatch.setattr("builtins.print", lambda *a, **k: 찍힘.append(" ".join(str(x) for x in a)))
+    assert ws.run(dry_run=True) == 0
+    글 = "\n".join(찍힘)
+    assert "계좌가 제 일을 못 한 날: " in 글 and "계좌 H, ZM, 단계" in 글

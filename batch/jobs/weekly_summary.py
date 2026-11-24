@@ -104,6 +104,10 @@ class Run:
     sha: str | None = None
     #: 배치 코드 지문(`step_log.fingerprint.code`, 25.2302) — 문서만 바꾼 커밋에는 안 바뀐다. 있으면 `sha` 보다 먼저
     code: str | None = None
+    #: 그 실행에서 제 일을 못 한 가상모의투자 계좌(`step_log.paper.account_skips`·`account_errors` 의 열쇠, 25.2307 —
+    #: 운영 사고 대장 넷째 조각). 단계 전체가 예외로 끝났으면 "단계". 관문 무사고 칸(`desk.paper_step_failed`)과
+    #: 같은 재료다
+    paper_faults: tuple[str, ...] = ()
 
 
 #: **예정된 건너뜀** — 고장이 아니다 (docs/infra.md 25.1372, 주간 요약 감사 재현). 미국 일일 배치는 서머타임을 덮으려고
@@ -133,6 +137,7 @@ def load_runs(client: TursoClient, since: str) -> list[Run]:
         까닭: str | None = None
         코드: str | None = None
         배치코드: str | None = None
+        계좌못함: tuple[str, ...] = ()
         try:
             로그 = json.loads(r["step_log"]) if r["step_log"] else {}
             if isinstance(로그, dict) and isinstance(로그.get("warnings"), list):
@@ -144,10 +149,17 @@ def load_runs(client: TursoClient, since: str) -> list[Run]:
                 코드 = 지문["sha"]
             if isinstance(지문, dict) and isinstance(지문.get("code"), str) and 지문["code"]:
                 배치코드 = 지문["code"]
+            모의 = 로그.get("paper") if isinstance(로그, dict) else None
+            if isinstance(모의, dict):
+                못함 = {str(k) for 칸 in ("account_skips", "account_errors")
+                       if isinstance(모의.get(칸), dict) for k in 모의[칸]}  # fmt: skip
+                if 모의.get("error") is not None:
+                    못함.add("단계")
+                계좌못함 = tuple(sorted(못함))
         except (TypeError, ValueError):
             pass
         out.append(Run(str(r["job_name"]), r["market"], str(r["status"]), str(r["started_at"]), r["error_text"], 경고,
-                       까닭, 코드, 배치코드))  # fmt: skip
+                       까닭, 코드, 배치코드, 계좌못함))  # fmt: skip
     return out
 
 
@@ -694,9 +706,9 @@ def run(dry_run: bool = False, force: bool = False) -> int:
         try:
             무응답 = [(str(r[0]), str(r[1]), str(r[2])) for r in client.execute(MISSING_ALERTS_SQL, [since]).rows]
             검산 = [(str(r[0]), str(r[1])) for r in client.execute(RECON_BAD_SQL, [since[:10]]).rows]
-            사고 = [*사고, *incident_ledger.other_lines(무응답, 검산)]
+            사고 = [*사고, *incident_ledger.other_lines(무응답, 검산, incident_ledger.account_days(runs))]
         except Exception as exc:  # noqa: BLE001
-            사고 = [*사고, f"무응답·검산 줄을 만들지 못했습니다 ({type(exc).__name__})"]
+            사고 = [*사고, f"무응답·검산·계좌 줄을 만들지 못했습니다 ({type(exc).__name__})"]
         text = compose(runs=runs, last_success=last, now=now, reads_used=used, writes_used=쓰기, rot_lines=rot_lines,
                        postmortem_lines=사후, paper_lines=모의, incident_lines=사고)  # fmt: skip
         print(text)

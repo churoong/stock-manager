@@ -180,22 +180,36 @@ def lines(found: list[dict[str, Any]]) -> list[str]:
 OTHER_TOP_N = 5
 
 
-def other_lines(missing: list[tuple[str, str, str]], recon_bad: list[tuple[str, str]]) -> list[str]:
-    """`missing` = [(작업, 시장, 현지 날짜)](`health_alerts` 의 missing), `recon_bad` = [(계좌, 날짜)](`recon_ok = 0`).
+def account_days(runs: list[Any]) -> list[tuple[str, str]]:
+    """실행 줄 → [(계좌, 날짜)] — 가상모의투자 계좌가 제 일을 못 한 날(25.2307, 넷째 조각).
 
-    둘 다 비면 한 줄("없음"). 같은 값이 겹쳐 들어와도 한 번으로 센다"""
+    날짜는 걸친 날 수와 같은 잣대(`_날` — 그 작업 시장의 날짜). 확인 실행(`dryrun`)은 뺀다. 줄에 `paper_faults` 가
+    없으면 빈 것"""
+    return [(a, _날(str(r.started_at), str(r.market or ""))) for r in runs
+            if r.status != "dryrun" for a in getattr(r, "paper_faults", ()) or ()]  # fmt: skip
+
+
+def other_lines(
+    missing: list[tuple[str, str, str]], recon_bad: list[tuple[str, str]],
+    account_bad: list[tuple[str, str]] | None = None,
+) -> list[str]:
+    """`missing` = [(작업, 시장, 현지 날짜)](`health_alerts` 의 missing), `recon_bad` = [(계좌, 날짜)](`recon_ok = 0`),
+    `account_bad` = [(계좌, 날짜)](`account_days` — 계좌 건너뜀·위원회·지주사 실패·계좌 예외, 25.2307).
+
+    모두 비면 한 줄("없음"). 같은 값이 겹쳐 들어와도 한 번으로 센다. 검산·계좌는 **날** 단위(같은 날 두 계좌는 하루)"""
     무 = sorted(set(missing), key=lambda x: (x[2], x[0], x[1]))
-    검 = sorted(set(recon_bad), key=lambda x: (x[1], x[0]))
-    if not 무 and not 검:
-        return ["무응답·검산 틀린 날: 없음"]
+    if not 무 and not recon_bad and not account_bad:
+        return ["무응답·검산·계좌 건너뜀: 없음"]
     줄: list[str] = []
     if 무:
         보임 = " · ".join(f"{j}({m}) {d[5:]}" for j, m, d in 무[:OTHER_TOP_N])
         꼬리 = f" … 그 밖 {len(무) - OTHER_TOP_N}건" if len(무) > OTHER_TOP_N else ""
         줄.append(f"무응답(기대 시각까지 성공 없음): {len(무)}건 — {보임}{꼬리}")
-    if 검:
-        날 = sorted({d for _a, d in 검})
-        계좌 = ", ".join(sorted({a for a, _d in 검}))
+    for 머리, 짝 in (("검산 틀린 날", recon_bad), ("계좌가 제 일을 못 한 날", account_bad or [])):
+        if not 짝:
+            continue
+        날 = sorted({d for _a, d in 짝})
+        계좌 = ", ".join(sorted({a for a, _d in 짝}))
         꼬리 = f" … 그 밖 {len(날) - OTHER_TOP_N}일" if len(날) > OTHER_TOP_N else ""
-        줄.append(f"검산 틀린 날: {len(날)}일 · 계좌 {계좌} · {', '.join(d[5:] for d in 날[:OTHER_TOP_N])}{꼬리}")
+        줄.append(f"{머리}: {len(날)}일 · 계좌 {계좌} · {', '.join(d[5:] for d in 날[:OTHER_TOP_N])}{꼬리}")
     return 줄
