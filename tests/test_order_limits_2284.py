@@ -118,6 +118,19 @@ def test_같은_종목_같은_날_회차의_합으로도_센다() -> None:
     # 계좌를 가르지 않는다(시장에 주는 충격은 합) — 첫째·도전자가 같은 종목을 같은 날 사면 더한다
     둘 = [_o(1, quantity=600), _o(2, quantity=600, broker="kis_vts2")]
     assert ol.summarize(둘, bars)["KR"]["adv_breach_stock_day"] == 1
+    # 25.2286 — 키의 **날**: 이틀에 각 0.6%(합 1.2%)는 0, 이틀 모두 넘으면 2
+    이틀 = [_o(1, quantity=600), _o(2, quantity=600, trade_date="2026-11-21")]
+    assert ol.summarize(이틀, {1: _봉(22, 끝=21)})["KR"]["adv_breach_stock_day"] == 0
+    넘는이틀 = [_o(k, quantity=600, trade_date=d) for k, d in enumerate(("2026-11-20", "2026-11-20", "2026-11-21", "2026-11-21"))]
+    assert ol.summarize(넘는이틀, {1: _봉(22, 끝=21)})["KR"]["adv_breach_stock_day"] == 2
+    # 합에는 매수만 — 같은 날 매수 0.6% + 매도 0.6% 는 0
+    assert ol.summarize([_o(1, quantity=600), _o(2, quantity=600, side="sell")], bars)["KR"]["adv_breach_stock_day"] == 0
+    # 경계 — 합이 딱 1%(500만 + 500만 ÷ 10억)는 걸리지 않는다
+    assert ol.summarize([_o(1, quantity=500), _o(2, quantity=500)], bars)["KR"]["adv_breach_stock_day"] == 0
+    assert ol.summarize([_o(1, quantity=500), _o(2, quantity=501)], bars)["KR"]["adv_breach_stock_day"] == 1
+    # 새로 센 수가 사람에게 가는 길 — 출력 줄
+    글 = "\n".join(ol.lines(ol.summarize(orders, bars), "a", "b"))
+    assert "걸렸을 0건 · 같은 종목·같은 날 매수 합으로는 1곳(종목·날 — 줄로 넘은 날도 든다)" in 글
 
 
 def test_하루_매수_합은_계좌마다_낸_것의_최대다() -> None:
@@ -126,6 +139,12 @@ def test_하루_매수_합은_계좌마다_낸_것의_최대다() -> None:
     s = ol.summarize(orders, {1: _봉(20)})["KR"]
     assert s["max_daily_buy"] == 500_000.0  # 첫째 30 + 20 주 — 도전자 40 주를 더한 900,000 이 아니다
     assert s["max_notional"] == 400_000.0
+    글 = "\n".join(ol.lines({"KR": s}, "a", "b"))
+    assert "하루 매수 합 최대(계좌별) 500,000원" in 글
+    # 계좌 칸이 없는 주문 행은 조용히 합치지 않고 깨진다(25.2286 — 질의가 칸을 안 읽으면 바로 드러나게)
+    없음 = {k: v for k, v in _o(1).items() if k != "broker"}
+    with pytest.raises(KeyError):
+        ol.summarize([없음], {1: _봉(20)})
 
 
 def test_95_분위는_최근접_순위다() -> None:
@@ -168,6 +187,10 @@ def test_읽기는_창_안_주문과_그_종목의_봉만이고_쓰지_않는다
                        " trade_date, reason, status) VALUES ('kis_vts', 'KR', ?, 'buy', 'limit', ?, 10, ?, '베낌', ?)",
                        [(1, 14_000.0, "2026-11-20", "filled"), (1, 10_000.0, "2026-10-26", "filled"),
                         (2, 10_000.0, "2026-10-27", "filled"), (2, 12_900.0, "2026-11-20", "rejected")])  # fmt: skip
+    # 도전자 계좌의 같은 날 매수 — 질의가 계좌 칸을 읽어야 하루 합이 갈린다(25.2286)
+    c.conn.execute("INSERT INTO paper_broker_orders (broker, market, stock_id, side, order_type, limit_price, quantity,"
+                   " trade_date, reason, status) VALUES ('kis_vts2', 'KR', 1, 'buy', 'limit', 9900, 100, '2026-11-20',"
+                   " '베낌', 'filled')")  # fmt: skip
     for sid in (1, 2, 3):
         # 마지막 봉(11-19)만 종가가 다르다 — 앞 종가가 가장 늦은 봉에서 오는지(읽는 차례)
         c.conn.executemany("INSERT INTO prices VALUES (?, ?, ?, 100000, 1000000000)",
@@ -176,7 +199,10 @@ def test_읽기는_창_안_주문과_그_종목의_봉만이고_쓰지_않는다
     줄 = jo.run(c, "2026-11-24")
     assert "2026-10-27~2026-11-24" in 줄[0]  # 오늘 − 28일부터 — 10-26 주문은 밖, 10-27 은 안
     # 거부된 주문도 센다(상태와 무관). 앞 종가 9,900 × 1.3 = 12,870 — 12,900 도 가격 깃(10,000 기준이면 안 걸린다)
-    assert "KR: 주문 3건(매수 3·매도 0)" in 줄[1] and "걸렸을 2건" in 줄[2]
+    assert "KR: 주문 4건(매수 4·매도 0)" in 줄[1] and "걸렸을 2건" in 줄[2]
+    # 계좌별 하루 합: 도전자 990,000 이 최대 — 첫째(140,000 + 129,000)를 더한 1,259,000 이 아니다
+    assert "최대 990,000원" in 줄[4] and "하루 매수 합 최대(계좌별) 990,000원" in 줄[4]
+    assert "broker" in jo.ORDERS_SQL
     (s1, p1), (s2, p2) = c.본
     assert s1 == jo.ORDERS_SQL and p1 == ["2026-10-27"]
     assert s2 == jo.PRICES_SQL and p2 == ["[1, 2]", "2026-09-12", "2026-11-24"]  # 창 앞 45일, 주문 없는 종목 3 은 안 읽는다
@@ -207,5 +233,6 @@ def test_문서가_깃과_읽는_법을_적는다() -> None:
                f"앞 {ol.ADV_DAYS} 거래일(`ADV_DAYS`) 평균 거래대금의 1%(`ADV_SHARE_MAX`", f"{ol.ADV_MIN_DAYS}일(`ADV_MIN_DAYS`)",
                "매도는 막지 않는다", "사용자 결정", "주문 경로에 닿지 않는다", "상태와 무관하게",
                "가격 깃은 매수·매도 모두 센다", f"(1 ± {markets.KR_DAILY_LIMIT:.0%})", f"그 앞 {ol.PRICE_LOOKBACK_DAYS}일까지",
-               f"{ol.STALE_BAR_DAYS}일(`STALE_BAR_DAYS`)", "같은 종목·같은 날", "계좌마다"):  # fmt: skip
+               f"{ol.STALE_BAR_DAYS}일(`STALE_BAR_DAYS`)", "같은 종목·같은 날", "계좌마다",
+               "가격 깃·거래대금 깃(줄·종목-하루 모두) 0", "거부된 주문도 든다", "종목·날 단위"):  # fmt: skip
         assert 조각 in 글, 조각

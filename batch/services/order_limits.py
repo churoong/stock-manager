@@ -8,8 +8,10 @@ docs/roadmap.md 1장 #10, docs/infra.md 25.2284. 지금 사전 위험 점검(`ri
 세는 것(거래대금 깃·크기는 매수만 "걸림" 으로 — 위험을 줄이는 매도는 막지 않는다, 참고 수만. 가격 깃은 양쪽 모두):
 - 가격 깃(국내 지정가): 지정가가 앞 거래일 종가 × (1 ± 가격제한폭 `markets.KR_DAILY_LIMIT`) 밖 — 거래소가 받지 않는 값
 - 거래대금 깃: 주문 금액 > 앞 `ADV_DAYS` 거래일 평균 거래대금 × `ADV_SHARE_MAX`(깔때기 수용량 문턱과 같은 1%)
-- 주문 크기 분포(그 시장 통화): 주문당 최대·95 분위, 하루 매수 합 최대 — **주문당·하루 총액 절대 상한의 숫자는 사용자
-  결정**이라 여기서 정하지 않는다. 분포는 그 결정의 재료이고 금액이라 비공개 운영 이슈로만 나간다(`scripts/ops_tee`)
+  — 줄마다와 함께 **같은 종목·같은 날 매수 합**으로도 센다(쪼개진 회차). 앞 봉이 `STALE_BAR_DAYS` 보다 묵었으면 모름
+- 주문 크기 분포(그 시장 통화): 주문당 최대·95 분위, 하루 매수 합 최대(**계좌마다** 낸 것의 최대 — 거부된 주문도
+  든다) — **주문당·하루 총액 절대 상한의 숫자는 사용자 결정**이라 여기서 정하지 않는다. 분포는 그 결정의 재료이고
+  금액이라 비공개 운영 이슈로만 나간다(`scripts/ops_tee`)
 """
 
 from __future__ import annotations
@@ -105,7 +107,8 @@ def summarize(orders: list[dict[str, Any]], bars: dict[int, list[dict[str, Any]]
         s["adv_unknown"] += c["adv_breach"] is None
         if c["notional"] is not None:
             금액들[m].append(c["notional"])
-            하루합[(str(o.get("broker") or ""), m, day)] += c["notional"]
+            # 칸이 없으면 크게 깨진다(KeyError) — 조용히 한 칸으로 합치면 두 계좌의 합이 되살아난다(25.2286)
+            하루합[(str(o["broker"]), m, day)] += c["notional"]
             칸 = 종목날[(m, int(o["stock_id"]), day)]
             칸[0], 칸[1] = (칸[0] or 0.0) + c["notional"], 평균
     for m, s in out.items():
@@ -142,7 +145,7 @@ def lines(summary: dict[str, dict[str, Any]], since: str, today: str) -> list[st
             )
         줄.append(
             f"    거래대금 깃(매수 금액 > {ADV_DAYS}일 평균 거래대금의 {ADV_SHARE_MAX:.0%}): 걸렸을 {s['adv_breach']}건"
-            f" · 같은 종목·같은 날 매수 합으로는 {s['adv_breach_stock_day']}건"
+            f" · 같은 종목·같은 날 매수 합으로는 {s['adv_breach_stock_day']}곳(종목·날 — 줄로 넘은 날도 든다)"
             f" · 모름 {s['adv_unknown']}건 · 참고 — 같은 잣대를 넘은 매도 {s['sell_adv_over']}건(매도는 막지 않는다)"
         )
         줄.append(
