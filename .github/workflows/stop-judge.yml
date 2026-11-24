@@ -1,0 +1,56 @@
+name: 손절 매도 집행 판정 (읽기 전용)
+
+# 사전 등록 둘(docs/factors.md 12.53 — 원장 #45 stop_exec_pair · #46 stop_cluster_defer)의 수를 센다 (docs/infra.md 25.2271).
+# 문이 차기 전에는 수만 내고, 문을 처음 넘긴 실행에서 한 번 값·판정을 낸다. 쓰지 않는다. 수동 실행만 — 매월 첫 발굴 회차 때 한 번.
+# 출력은 운영 출력 규칙대로 공개 로그 대신 비공개 운영 저장소 이슈로 보낸다(scripts/ops_tee.py).
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write # 결과를 이슈 코멘트로 내보낸다 (docs/infra.md 25.17)
+
+jobs:
+  judge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+      TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+      DB_BACKEND: ${{ vars.DB_BACKEND }}
+      D1_ACCOUNT_ID: ${{ secrets.D1_ACCOUNT_ID }}
+      D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+      D1_API_TOKEN: ${{ secrets.D1_API_TOKEN }}
+      OFFLINE_MODE: "0"
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: DB 백엔드 고정 (docs/infra.md 25.472·25.480)
+        run: python -m batch.core.client --pin >> "$GITHUB_ENV"
+
+      - name: 수 세기·판정
+        run: |
+          set -o pipefail
+          python scripts/stop_judge.py 2>&1 | python scripts/ops_tee.py stop-judge.txt
+
+      - name: 결과를 운영 이슈로
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPS_REPO: ${{ secrets.OPS_REPO }}
+          OPS_TOKEN: ${{ secrets.OPS_TOKEN }}
+        run: |
+          python scripts/publish_output.py \
+            --title "운영 출력 (클라우드 세션용)" \
+            --file stop-judge.txt \
+            --note "손절 매도 집행 판정"
