@@ -781,6 +781,8 @@ class Test밸류_분모:
 
 #: 아직 그물 밖인 모듈과 **왜 아직인지**. 하나씩 줄여 간다
 아직_안_보는_모듈 = {
+    "order_limits": "그림자 계측의 창·표본 하한은 docs/paper.md 15.12 의 목록 줄에 적혀 있다 — 값과 문서의 대조는"
+    " `tests/test_order_limits_2284.test_문서가_깃과_읽는_법을_적는다` 가 묶는다(25.2284)",
     "funnel_oc": "문턱을 갖지 않는다 — 판정 함수·문턱은 `luck`·`scoreboard`·`desk`·`paper` 의 것을 그대로 부르고, 제 상수는 합성"
     " 자료의 격자(`TABLE_*`)뿐이다. 격자와 docs/funnel.md 3.2 의 대조는 `tests/test_funnel_oc_2276` 가 묶는다(25.2276)",
     "stop_exec": "손절 집행 판정의 등록 상수(문·기한·α·계좌 집합)는 docs/factors.md 12.53 의 문장 꼴이 제각각이다 — 값과 문서의"
