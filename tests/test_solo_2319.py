@@ -666,7 +666,9 @@ def test_못_산_날_경고_술어() -> None:
     assert solo.warning({"buy": dict(z4), "risk_blocked": 2, "risk_blocked_by": {"frozen": 2}}) is None
     assert solo.warning({"buy": {**z4, "orders": 1, "not_bought": {3: "x"}}}) is None  # 하나라도 샀다
     assert solo.warning({"buy": {"skipped": "그 달 첫 거래일 장이 아님"}}) is None  # 자리 없음 — 정상
-    assert solo.warning({"buy": {**z4, "skipped": "환율 없음"}}) is None  # 매수 단계 이상 끝남은 desk._buy_fault 몫
+    # 매수 단계 이상 끝남은 desk._buy_fault 몫 — 문이 없으면 경고가 나는 꼴로(25.2326, 25.2325 교차검증 [권고])
+    assert solo.warning({"buy": {**z4, "skipped": "환율 없음", "not_bought": {3: "x"}}}) is None
+    assert solo.warning({"buy": {**z3, "ranked": 0, "skipped": "환율 없음"}}) is None
     assert solo.warning({"buy": dict(z4)}) is None  # 살 후보가 없었다 — 정상
     assert solo.warning({"buy": {**z4, "ranked": 0}}) is None  # Z4 순위 0 은 정상일 수 있다
     # Z3 순위 0 은 자료 장애 — 그달 매수를 잃는다
@@ -762,3 +764,20 @@ def test_매수가_관문에만_막힌_날도_리포트와_상황실에_같은_�
     assert "⚠️ 가상 오닐 사지 못함 — 위험 점검에 막힘 1건" in 줄
     assert {"level": "normal", "text": "가상 오닐 사지 못함 — 위험 점검에 막힘 1건"} in desk.checks(
         halted=False, paper=기록, broker=None, recon_bad=[], warnings=0)  # fmt: skip
+
+
+def test_보유_매도만_막히고_살_후보가_없는_날은_사지_못함이_뜨지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.2326 (25.2325 교차검증 [권고]) — 엔진으로: Z4 가 3 을 든 채 매도가 멈춤 스위치에 막히고, 살 후보는 없음"""
+    c = _새(monkeypatch, ("Z4",), ("2026-10-14",))
+    _국면(monkeypatch, "bull")
+    _하루(c, monkeypatch, "2026-10-14")  # 3 을 산다
+    _시세(c, 3, "2026-10-15", 10_000, 9_000)  # −10% → 매도 판정
+    _시세(c, 1, "2026-10-15", 10_000, 10_000)
+    # 멈춤 스위치 — 매도가 관문에 막힌다(살 후보는 3 뿐인데 이미 들었다)
+    c.conn.execute("INSERT INTO settings (key, value, updated_at) VALUES ('paper_halt', '{\"on\": true}', 't')")
+    줄, 기록 = _하루(c, monkeypatch, "2026-10-15")
+    a = 기록["accounts"]["Z4"]
+    assert a["risk_blocked"] >= 1 and "blocked" not in (a.get("buy") or {})
+    assert not any("사지 못함" in x for x in 줄)
+    assert not any("사지 못함" in x["text"] for x in desk.checks(halted=False, paper=기록, broker=None, recon_bad=[],
+                                                                   warnings=0))  # fmt: skip
