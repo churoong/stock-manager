@@ -122,6 +122,18 @@ def test_그림자는_같은_조건에서_스위치를_끈_실행이_낸_것과_
         mp.undo()
 
 
+def test_두_계획_호출은_멈춤만_다르고_같은_인자를_받는다() -> None:
+    """25.2304 (25.2301 교차검증 [권고]) — 직접 대조 시험의 판은 상한·오늘 정리·장중판이 없어, 그림자 호출에만
+    `sent_today`·`cleaned_today`·`guard_held` 를 바꿔도 통과했다. 두 호출이 `halted` 만 다르고 위치 인자와 `**인자`
+    한 벌을 그대로 받는지 소스로 묶는다"""
+    import inspect
+
+    글 = inspect.getsource(job.run)
+    진짜 = "bm.plan(주문들, 코드, 정리기준, 증권, 산적, halted=멈춤, **인자)"
+    그림자 = "bm.plan(주문들, 코드, 정리기준, 증권, 산적, halted=False, **인자)"
+    assert 글.count(진짜) == 1 and 글.count(그림자) == 1 and 글.count("bm.plan(") == 2
+
+
 def test_증권사에만_남은_몫은_정리로_센다(c: Client) -> None:  # noqa: F811
     # 내부 보유 없이 증권사에만 2주 — 산 적이 있는 종목이어야 정리 대상이다(`BOUGHT_SQL`)
     c.conn.execute("INSERT INTO paper_broker_orders (broker, paper_order_id, account_id, market, stock_id, code, side,"

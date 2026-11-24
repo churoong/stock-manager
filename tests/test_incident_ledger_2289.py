@@ -357,7 +357,10 @@ def test_요약_실행이_무응답과_검산을_읽어_싣는다(monkeypatch) -
     안 = (now - timedelta(days=2)).isoformat(timespec="seconds")
     밖 = (now - timedelta(days=20)).isoformat(timespec="seconds")
     # 달력 알림(job 'calendar')은 무응답이 아니다 — 갈래를 안 거르면 따로 한 건이 된다
+    # 웹 진단 행(job web_reads — kind 는 경로 문자열)·곧 바닥남(calendar-low)도 섞여 쌓인다(25.2304). 시각은 웹이 쓰는 'Z' 꼴도
     for 작업, 종류, 언제, 날 in (("daily_kr", "missing", 안, 안[:10]), ("calendar", "calendar", 안, 안[:10]),
+                              ("calendar", "calendar-low", 안, 안[:10]), ("web_reads", "/api/desk", 안, 안[:10]),
+                              ("daily_us", "missing", 안[:19] + "Z", 안[:10]),
                               ("daily_kr", "missing", 밖, 밖[:10])):  # fmt: skip
         mem.conn.execute("INSERT INTO health_alerts (job, market, local_date, kind, message, data, created_at)"
                          " VALUES (?, 'KR', ?, ?, 'm', '{}', ?)", [작업, 날, 종류, 언제])  # fmt: skip
@@ -371,7 +374,7 @@ def test_요약_실행이_무응답과_검산을_읽어_싣는다(monkeypatch) -
     monkeypatch.setattr("builtins.print", lambda *a, **k: 찍힘.append(" ".join(str(x) for x in a)))
     assert ws.run(dry_run=True) == 0
     글 = "\n".join(찍힘)
-    assert f"무응답(기대 시각까지 성공 없음): 1건 — daily_kr(KR) {안[5:10]}" in 글
+    assert f"무응답(기대 시각까지 성공 없음): 2건 — daily_kr(KR) {안[5:10]} · daily_us(KR) {안[5:10]}" in 글
     assert f"검산 틀린 날: 1일 · 계좌 H · {안[5:10]}" in 글
     # 읽기가 깨져도 대장 줄은 남는다
     진짜 = mem.execute

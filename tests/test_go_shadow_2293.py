@@ -112,8 +112,13 @@ def test_같은_날_다시_돈_실행은_앞_실행의_응답_없음을_매도�
         c = 새판()
         첫 = jb.run(c, "KR", _at("08:40"), session=_Sess(fail={"005930": kv.NoResponse("응답 없음")}), sleep=lambda _x: None)
         assert 첫["sent"] == {"no_response": 2} and "sending_today" not in 첫  # 첫 실행 앞에는 오늘 줄이 없다
+        # 앞 실행이 남긴 정리 줄(내부 주문 없음)도 체결을 모르는 주문이다 — 함께 센다(25.2304)
+        c.conn.execute("INSERT INTO paper_broker_orders (broker, paper_order_id, account_id, market, stock_id, code, side,"
+                       " order_type, quantity, trade_date, reason, status, source, created_at) VALUES ('kis_vts', NULL,"
+                       " 'B', 'KR', 3, '000660', 'sell', 'market', 1, '2026-10-16', ?, 'sending', 't', 't')",
+                       [jb.bm.REASON_CLEANUP])  # fmt: skip
         둘 = jb.run(c, "KR", _at("08:45"), session=_Sess(), sleep=lambda _x: None)
-        assert 둘["sending_today"] == 2
+        assert 둘["sending_today"] == 3
         assert 둘["go_shadow"]["verdict"] == "sell_only" and "sending_today" in 둘["go_shadow"]["reasons"]
     finally:
         mp.undo()

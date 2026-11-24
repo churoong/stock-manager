@@ -114,8 +114,9 @@ class Run:
 _예정된_건너뜀 = ("휴장일", "아직 이릅니다")
 
 
-#: 운영 사고 대장의 실행 밖 두 갈래(25.2300) — 주 1회, 7일 창. `health_alerts` 는 created_at 색인, `paper_daily` 는
-#: (account_id, as_of) 기본키라 as_of 범위가 계좌마다 짧은 훑기다(계좌 열몇 × 7행)
+#: 운영 사고 대장의 실행 밖 두 갈래(25.2300) — 주 1회, 7일 창. `health_alerts` 는 created_at 색인을 탄다.
+#: `paper_daily` 는 계좌 조건이 없어 **통째 훑기**다(25.2304 정정 — 처음엔 "기본키로 짧은 훑기" 라 적었다).
+#: 주 1회이고 운용 요약이 날마다 같은 표를 통째로 읽어 비용은 작지만, 읽는 행은 계좌 × 운영 일수로 는다
 MISSING_ALERTS_SQL = "SELECT job, market, local_date FROM health_alerts WHERE kind = 'missing' AND created_at >= ?"
 RECON_BAD_SQL = "SELECT account_id, as_of FROM paper_daily WHERE recon_ok = 0 AND as_of >= ?"
 
