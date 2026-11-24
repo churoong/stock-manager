@@ -1009,10 +1009,12 @@ def run(
     if 대기:
         기록["pending_fill_buys"] = len(대기)
     정리기준 = {sid: 내부.get(sid, 0) + 대기.get(sid, 0) for sid in set(내부) | set(대기)}
-    손절선 = _오늘_손절선(client, 오늘, 베낌) if slot == MAIN and not 미국 else None
-    인자: dict[str, Any] = dict(already=이미, cleaned_today=정리함, bought_today=오늘산, frozen=frozen,
-                              currency="USD" if 미국 else "KRW", closes=종가, guard_held=장중판, stop_floor=손절선,
-                              sent_today=int(낸수[0][0] or 0) if 낸수 else 0)  # fmt: skip
+    # 계획 인자는 한 벌 — 진짜 계획과 멈춤 그림자(25.2297)가 같은 것을 받는다
+    인자: dict[str, Any] = dict(
+        already=이미, cleaned_today=정리함, bought_today=오늘산, frozen=frozen, currency="USD" if 미국 else "KRW",
+        closes=종가, sent_today=int(낸수[0][0] or 0) if 낸수 else 0, guard_held=장중판,
+        stop_floor=_오늘_손절선(client, 오늘, 베낌) if slot == MAIN and not 미국 else None,
+    )
     낼것, 안냄 = bm.plan(주문들, 코드, 정리기준, 증권, 산적, halted=멈춤, **인자)
     if 멈춤:
         # 그림자(25.2297, roadmap #3) — 스위치는 하나뿐이라 켜면 손절·정리까지 멈춘다. "매수만 멈춤" 이었다면 냈을
