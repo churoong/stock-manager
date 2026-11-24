@@ -35,7 +35,7 @@ from batch.core.client import TursoClient
 from batch.core.entry import guard
 from batch.notify import telegram
 from batch.services import adjust as adj
-from batch.services import column_rot, postmortem
+from batch.services import column_rot, incident_ledger, postmortem
 
 log = logging.getLogger("weekly_summary")
 
@@ -412,6 +412,7 @@ def compose(
     postmortem_lines: list[str] | None = None,
     writes_used: int | None | object = _안줌,
     paper_lines: list[str] | None = None,
+    incident_lines: list[str] | None = None,
 ) -> str:
     """메시지 본문. 순수 함수 — 테스트가 그대로 돌린다.
 
@@ -472,6 +473,10 @@ def compose(
             언제 = "돈 기록 없음" if 지난 is None else f"마지막 실행 {지난}일 전"
             lines.append(f"  {job}: {언제} (기대 {EXPECTED_DAYS[job]}일 안)")
         lines += _외(len(묵은))
+
+    # 운영 사고 대장 — 실패 묶음과 복구 시간 (docs/health.md 7.3, 25.2289). 상태 수 뒤, 데이터 점검 앞
+    if incident_lines:
+        lines += ["", *incident_lines]
 
     if rot_lines:
         lines += ["", *rot_lines]
@@ -663,7 +668,8 @@ def run(dry_run: bool = False, force: bool = False) -> int:
         except Exception as exc:  # noqa: BLE001 — 곁다리 절이다
             모의 = [*모의, f"실행 품질 절을 만들지 못했습니다 ({type(exc).__name__})"]
         text = compose(runs=runs, last_success=last, now=now, reads_used=used, writes_used=쓰기, rot_lines=rot_lines,
-                       postmortem_lines=사후, paper_lines=모의)  # fmt: skip
+                       postmortem_lines=사후, paper_lines=모의,
+                       incident_lines=incident_ledger.lines(incident_ledger.incidents(runs)))  # fmt: skip
         print(text)
         sent = 0
         뒤경고: list[str] = []
