@@ -70,8 +70,7 @@ export async function GET(request: Request) {
       WATCHES,
       markets,
     );
-    // 아예 안 깨워진 일일 배치는 그날 첫 [무응답] 을 만들 때 한 번 깨운다(25.2310, docs/health.md 5장 예외) — 결과는 알림 글에
-    const due = await kickMissingDaily(판정);
+    const due = 판정;
 
     if (due.length > 0) {
       const stamp = now.toISOString();
@@ -82,6 +81,10 @@ export async function GET(request: Request) {
         })),
       );
     }
+
+    // 아예 안 깨워진 일일 배치는 그날 [무응답] 을 **저장한 뒤** 한 번 깨운다(25.2310·25.2311, docs/health.md 5장 예외) — 결과는 그 행의
+    // 글 끝에 적혀 아래 발송에 실린다. 저장이 깨졌으면 위에서 던져 여기 오지 않는다
+    const 깨움 = due.length > 0 ? await kickMissingDaily(due) : [];
 
     // 저장된 것 중 못 보낸 것을 보낸다. 방금 넣은 것과 지난번에 발송이 실패한 것이 함께 나온다
     const 묵은잡음 = HEALTH_CLAIM_PREFIX + new Date(now.getTime() - HEALTH_CLAIM_STALE_MS).toISOString();
@@ -116,7 +119,7 @@ export async function GET(request: Request) {
       }
     }
 
-    const detail = { due: due.length, sent, pending: pending.length, errors };
+    const detail = { due: due.length, sent, pending: pending.length, errors, ...(깨움.length ? { kick: 깨움 } : {}) };
     await recordHeartbeat("health", "ALL", now, errors.length ? "error" : "checked", detail);
     return NextResponse.json({ checked_at: now.toISOString(), ...detail });
   } catch (error) {

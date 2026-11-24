@@ -254,12 +254,15 @@ def test_미국_앞_코드는_동부_날짜로_가른다() -> None:
     from tests.test_paper_job_1445 import Client
 
     c = Client()
-    for 끝, 코드 in (("2026-01-14T13:40:00+00:00", "old"), ("2026-01-15T05:30:00+00:00", "today")):
+    # 둘째 줄은 두 자정 **사이** — 동부 01-14 22:00(앞날)이지만 한국으로는 01-15 12:00(같은 날)이다(25.2311 — 처음 판은 두 줄이
+    # 두 자정 모두에서 같은 쪽이라 한국 자정으로 바꿔도 통과했다)
+    for 끝, 코드 in (("2026-01-14T13:40:00+00:00", "old"), ("2026-01-15T03:00:00+00:00", "evening"),
+                     ("2026-01-15T05:30:00+00:00", "today")):
         c.conn.execute("INSERT INTO batch_runs (job_name, market, trade_date, status, started_at, finished_at, step_log)"
                        " VALUES ('daily_us', 'US', '2026-01-14', 'partial', ?, ?, ?)",
                        [끝, 끝, json.dumps(_지문("s1", 코드))])  # fmt: skip
-    # 동부 01-15 00:30 에 시작한 줄은 같은 날이다(한국 날짜로 갈랐다면 01-15 14:30 이라 앞날로 봤을 것)
-    assert jb.prev_code(c, "US", jb.market_midnight_utc(date(2026, 1, 15), "US")) == "old"
+    # 동부 자정(05:00Z) 전 줄 가운데 늦은 것 = "evening". 한국 자정(01-14 15:00Z)으로 갈랐다면 "old" 였다
+    assert jb.prev_code(c, "US", jb.market_midnight_utc(date(2026, 1, 15), "US")) == "evening"
 
 
 def test_작업_이름은_일일_배치와_같다() -> None:
