@@ -247,6 +247,8 @@ describe("아예 안 깨워진 일일 배치 깨우기", () => {
     ]);
     expect(부름).toEqual(["daily-kr"]);
     expect(행("daily_kr")!.message).toBe("[무응답] daily_kr"); // 이미 보낸 글은 고치지 않는다
+    // 결과는 heartbeat 쪽에만 — 그 행은 'claim' 에 남는다(25.2316)
+    expect(JSON.parse(행("daily_kr")!.data).kick).toBe("claim");
     // 한 번뿐이다 — 다음 호출은 `data.kick` 이 차 있어 잡지 못한다
     expect(await kickMissingDaily([알림("daily_kr")], f)).toEqual([]);
     expect(부름).toEqual(["daily-kr"]);
@@ -266,7 +268,7 @@ describe("아예 안 깨워진 일일 배치 깨우기", () => {
     const 깨짐 = await kickMissingDaily([알림("daily_kr")], async () => {
       throw new Error("부르면 안 된다");
     });
-    expect(깨짐[0].kick).toBe("failed:SQLITE_BUSY");
+    expect(깨짐[0].kick).toBe("failed:잡기 SQLITE_BUSY"); // 잡기 자체가 깨진 것은 글로 갈라 둔다(25.2316)
     expect(깨짐[0].noted).toBe(false); // 결과 쓰기도 실패했다 — 늘 참으로 두면 깨진다(25.2314)
   });
 

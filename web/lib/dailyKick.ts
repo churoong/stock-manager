@@ -15,6 +15,8 @@
  * - 일일 배치 둘만(감성 채점은 아니다 — 그날 판단을 망치지 않는다)
  *
  * 깨운 결과는 그 알림 행의 글 끝과 `data.kick`(`kicked`·`ran:<상태>`·`failed:…`)에 남는다 — 발송 전에 고쳐 적는다.
+ * 결과를 못 적은 행(발송 중이거나 이미 보낸 행 — `noted: false`)은 `data.kick` 이 'claim' 에 남고 결과는 무응답 경로
+ * heartbeat 의 `detail.kick[]` 에만 있다(25.2316)
  * **던지지 않는다** — DB·GitHub 실패도 `failed:` 글로(알림 발송을 막지 않게).
  */
 import { execute } from "@/lib/db";
@@ -118,23 +120,18 @@ export async function kickMissingDaily(
         : null;
     if (!job || from === null) continue;
     const 열쇠 = [d.job, d.market, d.localDate];
+    // 잡기 자체가 깨진 것(일시 DB 오류)은 글을 갈라 둔다 — "잡기 실패" 와 "깨우기·읽기 실패" 를 읽어서 가를 수 있게(25.2316).
+    // 잡기가 깨져도 결과 쓰기가 `data.kick` 을 채워 그날은 다시 깨우지 않는다(보수 — 한 번을 넘지 않는 쪽)
     let 결과: DailyKick;
     try {
       const 잡음 = await execute(KICK_CLAIM_SQL, 열쇠);
       if (잡음.affectedRows === 0) continue; // 다른 호출이 이미 잡았거나(그 호출이 깨운다) 저장되지 않았다
-      const 있음 = await execute(ANY_RUN_SINCE_SQL, [d.job, from]);
-      if (있음.rows.length) {
-        결과 = `ran:${String(있음.rows[0][0])}`;
-      } else {
-        const r = await dispatch(job);
-        결과 = r.dispatched
-          ? "kicked"
-          : `failed:${(r.reason ?? "").slice(0, 80)}`;
-      }
+      결과 = await 깨우기(d.job, from, job, dispatch);
     } catch (e: unknown) {
-      결과 = `failed:${e instanceof Error ? e.message.slice(0, 80) : "?"}`;
+      결과 = `failed:잡기 ${e instanceof Error ? e.message.slice(0, 72) : "?"}`;
     }
-    // 결과를 그 행에 적는다 — 겹친 호출이 그 사이 그 행을 발송용으로 잡았으면(sent_at) 0행이고 [무응답] 글에 결과 줄이 빠진다.
+    // 결과를 그 행에 적는다 — 겹친 호출이 그 사이 그 행을 발송용으로 잡았거나, 잡기 전에 이미 보낸 행이면(25.2315) 0행이고
+    // [무응답] 글에 결과 줄이 빠진다(그 행의 `data.kick` 은 'claim' 에 남는다).
     // 그때는 `noted: false` 로 heartbeat detail 에 남는다(25.2312, 25.2311 교차검증 [권고] — 예전엔 조용히 넘어갔다)
     // 결과 쓰기가 실패해도(쓰기 한도·일시 오류) 던지지 않는다 — 삼키는 것이 아니라 `noted: false` 로 heartbeat 에 남는다
     let 적음 = 0;
@@ -152,6 +149,25 @@ export async function kickMissingDaily(
     });
   }
   return out;
+}
+
+/** 잡은 뒤 — 이 세션의 시도가 있으면 `ran:<상태>`, 없으면 깨운다. **던지지 않는다**(읽기·깨우기 실패는 `failed:` 글) */
+async function 깨우기(
+  jobName: string,
+  from: string,
+  job: DispatchJob,
+  dispatch: (
+    job: DispatchJob,
+  ) => Promise<{ dispatched: boolean; reason?: string }>,
+): Promise<DailyKick> {
+  try {
+    const 있음 = await execute(ANY_RUN_SINCE_SQL, [jobName, from]);
+    if (있음.rows.length) return `ran:${String(있음.rows[0][0])}`;
+    const r = await dispatch(job);
+    return r.dispatched ? "kicked" : `failed:${(r.reason ?? "").slice(0, 80)}`;
+  } catch (e: unknown) {
+    return `failed:${e instanceof Error ? e.message.slice(0, 80) : "?"}`;
+  }
 }
 
 /** 알림 글 끝에 붙는 한 줄 */
