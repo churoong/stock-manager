@@ -307,5 +307,71 @@ def test_읽지도_쓰지도_않는다_그리고_문서() -> None:
                "건너뜀·도는 중·확인 실행은 사고를 열지도 닫지도 않는다", "아직 열림", "한국 시각", "끝맺지 못한 기록",
                "영향", "문장 머리", "25.2295", "이틀(`SPAN_SHOW_DAYS`)부터", "같은 코드로 복구", "코드가 바뀐 뒤 복구",
                "그 고침 덕인지는 모른다", "실패·중단 N번", "25.2298", "미국 동부 날짜", "실패·중단한 날 N일", "달력 폭이 아니다",
-               "문서만 바꾼 커밋"):  # fmt: skip
+               "문서만 바꾼 커밋", "25.2300", "**무응답**", "**검산 틀린 날**", "앞 다섯(`OTHER_TOP_N`)"):  # fmt: skip
         assert 조각 in 문서, 조각
+
+
+def test_실행_밖의_무응답과_검산_틀린_날() -> None:
+    """25.2300 — 아예 안 돈 실행(무응답)과 장부 검산이 틀린 날은 실행 줄에 없다. 건수와 이름만 싣는다"""
+    assert il.other_lines([], []) == ["무응답·검산 틀린 날: 없음"]
+    줄 = il.other_lines([("daily_kr", "KR", "2026-11-18"), ("daily_us", "US", "2026-11-17"), ("daily_kr", "KR", "2026-11-18")],
+                       [("H", "2026-11-18"), ("B", "2026-11-18"), ("H", "2026-11-19")])  # fmt: skip
+    # 겹친 값은 한 번 · 날짜 차례
+    assert 줄[0] == "무응답(기대 시각까지 성공 없음): 2건 — daily_us(US) 11-17 · daily_kr(KR) 11-18"
+    # 검산은 **날** 수 — 같은 날 두 계좌는 하루(관문 무사고 칸과 같은 날 단위)
+    assert 줄[1] == "검산 틀린 날: 2일 · 계좌 B, H · 11-18, 11-19"
+    assert il.other_lines([], [("H", "2026-11-18")]) == ["검산 틀린 날: 1일 · 계좌 H · 11-18"]
+    많음 = il.other_lines([("j", "KR", f"2026-11-{d:02d}") for d in range(10, 17)], [])
+    assert 많음[0].endswith("j(KR) 11-14 … 그 밖 2건") and 많음[0].startswith("무응답(기대 시각까지 성공 없음): 7건")
+    # 경계: 다섯이면 꼬리가 없고 여섯이면 "그 밖 1건"
+    assert "그 밖" not in il.other_lines([("j", "KR", f"2026-11-{d:02d}") for d in range(10, 15)], [])[0]
+    assert il.other_lines([("j", "KR", f"2026-11-{d:02d}") for d in range(10, 16)], [])[0].endswith("… 그 밖 1건")
+    assert il.other_lines([], [("H", f"2026-11-{d:02d}") for d in range(10, 16)])[0].endswith("… 그 밖 1일")
+    assert il.OTHER_TOP_N == 5
+    많은날 = il.other_lines([], [("H", f"2026-11-{d:02d}") for d in range(10, 17)])
+    assert 많은날[0] == "검산 틀린 날: 7일 · 계좌 H · 11-10, 11-11, 11-12, 11-13, 11-14 … 그 밖 2일"
+
+
+def test_요약_실행이_무응답과_검산을_읽어_싣는다(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """이음매(25.2300) — 실제 스키마에서 `run(dry_run=True)` 가 두 표를 7일 창으로 읽는다. 창 밖·다른 갈래는 빠진다"""
+    from datetime import timedelta
+
+    from batch.core import db
+    from tests.test_portfolio_job import MemClient
+
+    mem = MemClient()
+    db.apply_migrations(mem)  # type: ignore[arg-type]
+    mem.close = lambda: None  # type: ignore[method-assign]
+    now = datetime.now(UTC)
+    안 = (now - timedelta(days=2)).isoformat(timespec="seconds")
+    밖 = (now - timedelta(days=20)).isoformat(timespec="seconds")
+    # 달력 알림(job 'calendar')은 무응답이 아니다 — 갈래를 안 거르면 따로 한 건이 된다
+    for 작업, 종류, 언제, 날 in (("daily_kr", "missing", 안, 안[:10]), ("calendar", "calendar", 안, 안[:10]),
+                              ("daily_kr", "missing", 밖, 밖[:10])):  # fmt: skip
+        mem.conn.execute("INSERT INTO health_alerts (job, market, local_date, kind, message, data, created_at)"
+                         " VALUES (?, 'KR', ?, ?, 'm', '{}', ?)", [작업, 날, 종류, 언제])  # fmt: skip
+    for 계좌, 날, ok in (("H", 안[:10], 0), ("B", 안[:10], 1), ("H", 밖[:10], 0)):
+        mem.conn.execute("INSERT INTO paper_daily (account_id, as_of, invested_krw, cash_krw, holdings_krw, equity_krw,"
+                         " pnl_krw, twr_index, positions_json, recon_ok, updated_at) VALUES (?, ?, 1, 1, 0, 1, 0, 1.0, '[]', ?, 't')",
+                         [계좌, 날, ok])  # fmt: skip
+    monkeypatch.setattr(ws, "TursoClient", lambda: mem)
+    monkeypatch.setattr(ws, "load_losses", lambda c, now, through, 끝: (0, 0, []))
+    찍힘: list[str] = []
+    monkeypatch.setattr("builtins.print", lambda *a, **k: 찍힘.append(" ".join(str(x) for x in a)))
+    assert ws.run(dry_run=True) == 0
+    글 = "\n".join(찍힘)
+    assert f"무응답(기대 시각까지 성공 없음): 1건 — daily_kr(KR) {안[5:10]}" in 글
+    assert f"검산 틀린 날: 1일 · 계좌 H · {안[5:10]}" in 글
+    # 읽기가 깨져도 대장 줄은 남는다
+    진짜 = mem.execute
+
+    def 깨짐(sql, params=None):  # type: ignore[no-untyped-def]
+        if sql == ws.RECON_BAD_SQL:
+            raise RuntimeError("x")
+        return 진짜(sql, params)
+
+    monkeypatch.setattr(mem, "execute", 깨짐)
+    찍힘.clear()
+    assert ws.run(dry_run=True) == 0
+    글 = "\n".join(찍힘)
+    assert "운영 사고(실패 묶음 → 복구)" in 글 and "무응답·검산 줄을 만들지 못했습니다 (RuntimeError)" in 글

@@ -112,6 +112,12 @@ class Run:
 _예정된_건너뜀 = ("휴장일", "아직 이릅니다")
 
 
+#: 운영 사고 대장의 실행 밖 두 갈래(25.2300) — 주 1회, 7일 창. `health_alerts` 는 created_at 색인, `paper_daily` 는
+#: (account_id, as_of) 기본키라 as_of 범위가 계좌마다 짧은 훑기다(계좌 열몇 × 7행)
+MISSING_ALERTS_SQL = "SELECT job, market, local_date FROM health_alerts WHERE kind = 'missing' AND created_at >= ?"
+RECON_BAD_SQL = "SELECT account_id, as_of FROM paper_daily WHERE recon_ok = 0 AND as_of >= ?"
+
+
 def load_runs(client: TursoClient, since: str) -> list[Run]:
     rows = client.execute(
         "SELECT job_name, market, status, started_at, error_text, step_log FROM batch_runs"
@@ -678,6 +684,13 @@ def run(dry_run: bool = False, force: bool = False) -> int:
             사고 = incident_ledger.lines(incident_ledger.incidents(runs))
         except Exception as exc:  # noqa: BLE001
             사고 = [f"운영 사고 절을 만들지 못했습니다 ({type(exc).__name__})"]
+        # 실행 기록 밖의 두 갈래(25.2300) — 따로 가둔다: 이 읽기가 깨져도 위 대장 줄은 남는다
+        try:
+            무응답 = [(str(r[0]), str(r[1]), str(r[2])) for r in client.execute(MISSING_ALERTS_SQL, [since]).rows]
+            검산 = [(str(r[0]), str(r[1])) for r in client.execute(RECON_BAD_SQL, [since[:10]]).rows]
+            사고 = [*사고, *incident_ledger.other_lines(무응답, 검산)]
+        except Exception as exc:  # noqa: BLE001
+            사고 = [*사고, f"무응답·검산 줄을 만들지 못했습니다 ({type(exc).__name__})"]
         text = compose(runs=runs, last_success=last, now=now, reads_used=used, writes_used=쓰기, rot_lines=rot_lines,
                        postmortem_lines=사후, paper_lines=모의, incident_lines=사고)  # fmt: skip
         print(text)
