@@ -28,7 +28,8 @@ def test_지문은_커밋과_실행_번호와_파이썬과_의존성을_담는�
     monkeypatch.setenv("GITHUB_RUN_ID", "777")
     monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "2")
     f = db.run_fingerprint()
-    assert set(f) == {"sha", "run", "py", "deps"}
+    assert set(f) == {"sha", "run", "py", "deps", "code"}
+    assert len(f["code"]) == 10 and int(f["code"], 16) >= 0
     assert f["sha"] == "0123456789ab" and f["run"] == "777.2"
     import platform
 
@@ -205,3 +206,44 @@ def test_빈_step_log_으로_닫는_성공도_지문만_남는다() -> None:
     db.finish_batch_run(c, 하나, status="success")  # type: ignore[arg-type]
     db.finish_batch_run(c, 둘, status="skipped", step_log={})  # type: ignore[arg-type]
     assert _로그(c, 하나) == _로그(c, 둘) == {db.RUN_FINGERPRINT_KEY: db.run_fingerprint()}
+
+
+def test_배치_코드_지문은_파이썬_코드가_바뀔_때만_바뀐다(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """25.2302 — `sha` 는 저장소 머리라 문서만 바꾼 커밋에도 바뀐다. `code` 는 `batch/` 의 *.py 경로·내용만 본다"""
+    뿌리 = tmp_path / "batch"
+    (뿌리 / "core").mkdir(parents=True)
+    가짜 = 뿌리 / "core" / "db.py"
+    가짜.write_text("x = 1\n")
+    (뿌리 / "a.py").write_text("def f():\n    return 1\n")
+    monkeypatch.setattr(db, "__file__", str(가짜))
+
+    def 냄() -> str:
+        monkeypatch.setattr(db, "_지문", [None])
+        return db.run_fingerprint()["code"]
+
+    처음 = 냄()
+    (tmp_path / "README.md").write_text("문서")  # batch 밖의 문서 — 그대로
+    (뿌리 / "notes.txt").write_text("파이썬이 아님")  # .py 가 아님 — 그대로
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_x.py").write_text("assert 1")  # batch 밖의 파이썬(시험·스크립트) — 그대로
+    assert 냄() == 처음
+    (뿌리 / "a.py").write_text("def f():\n    return 2\n")  # 내용
+    둘 = 냄()
+    assert 둘 != 처음
+    (뿌리 / "a.py").rename(뿌리 / "b.py")  # 같은 내용이어도 경로가 바뀌면
+    assert 냄() != 둘
+    # 실제 저장소에서도 값이 난다
+    monkeypatch.undo()
+    monkeypatch.setattr(db, "_지문", [None])
+    assert len(db.run_fingerprint()["code"]) == 10
+
+
+def test_배치_코드를_못_훑어도_지문은_나간다(monkeypatch: pytest.MonkeyPatch) -> None:
+    from pathlib import Path as P
+
+    def 깨짐(self, pattern):  # type: ignore[no-untyped-def]
+        raise PermissionError("못 읽음")
+
+    monkeypatch.setattr(P, "rglob", 깨짐)
+    f = db.run_fingerprint()
+    assert f["code"] is None and f["code_error"] == "PermissionError" and f["deps"] and "error" not in f

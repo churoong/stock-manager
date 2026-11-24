@@ -614,6 +614,9 @@ def run_fingerprint() -> dict[str, Any]:
       달라지면 깔린 판이 움직인 것이다(간접 의존성, 그리고 고정하지 않은 pip 자신 — 25.2279). 워크플로마다 더 까는
       것이 달라 워크플로끼리는 값이 다르다. 판 목록은 싣지 않는다(실행마다 수 KB). 훑다 실패하면 None 이고
       `error` 칸에 예외 이름
+    - `code`: 배치 코드(`batch/` 아래 `*.py` 의 경로·내용)의 sha1 앞 10자(25.2302) — `sha` 는 저장소 머리라 문서만 바꾼
+      커밋에도 바뀐다(하루 여러 번 푸시하는 저장소라 "코드가 바뀌었나" 를 가르지 못했다, 25.2295 교차검증 [참고]).
+      이 값은 **돌린 파이썬 코드**가 바뀔 때만 바뀐다. 훑다 실패하면 None 이고 `code_error` 칸에 예외 이름
     """
     if _지문[0] is None:
         import hashlib
@@ -635,6 +638,15 @@ def run_fingerprint() -> dict[str, Any]:
             지문["deps"] = hashlib.sha1("\n".join(판들).encode()).hexdigest()[:10]
         except Exception as exc:  # noqa: BLE001 — 기록용 칸이 본 작업을 죽이지 않게
             지문["error"] = type(exc).__name__
+        지문["code"] = None
+        try:
+            뿌리 = Path(__file__).resolve().parents[1]  # batch/
+            h = hashlib.sha1()
+            for 파일 in sorted(뿌리.rglob("*.py")):
+                h.update(파일.relative_to(뿌리).as_posix().encode() + b"\0" + 파일.read_bytes() + b"\0")
+            지문["code"] = h.hexdigest()[:10]
+        except Exception as exc:  # noqa: BLE001 — 기록용 칸이 본 작업을 죽이지 않게(위와 같다)
+            지문["code_error"] = type(exc).__name__
         _지문[0] = 지문
     return dict(_지문[0])
 

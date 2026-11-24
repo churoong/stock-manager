@@ -210,6 +210,15 @@ def test_같은_코드로_복구됐는지를_가른다() -> None:
     assert [x["same_code"] for x in 둘] == [True, True]
     # 부분 성공으로 닫히면서 코드가 같은 경우
     assert il.incidents([_s("a", "failed", "17T01:00", "abc"), _s("a", "partial", "17T03:00", "abc")])[0]["same_code"] is True
+    # 배치 코드 지문(`code`, 25.2302)이 둘 다 있으면 그것으로 — 문서만 바꾼 커밋(sha 다름·code 같음)은 "같은 코드"
+    def _k(st: str, when: str, sha: str | None, code: str | None) -> ws.Run:
+        return ws.Run("a", "KR", st, f"2026-11-{when}:00+00:00", None, (), None, sha, code)
+
+    assert il.incidents([_k("failed", "17T01:00", "abc", "c1"), _k("success", "17T03:00", "def", "c1")])[0]["same_code"] is True
+    assert il.incidents([_k("failed", "17T01:00", "abc", "c1"), _k("success", "17T03:00", "abc", "c2")])[0]["same_code"] is False
+    # 한쪽만 code 가 있으면(지문이 생기기 전 줄) 커밋으로 견준다 — 갈래를 섞지 않는다
+    assert il.incidents([_k("failed", "17T01:00", "abc", None), _k("success", "17T03:00", "abc", "c2")])[0]["same_code"] is True
+    assert il.incidents([_k("failed", "17T01:00", None, "c1"), _k("success", "17T03:00", "abc", None)])[0]["same_code"] is None
     # `sha` 속성이 없는 줄(다른 호출자)도 깨지지 않는다
     from types import SimpleNamespace as NS
 
@@ -235,7 +244,8 @@ def test_실행_기록에서_코드를_읽는다() -> None:
 
     mem = MemClient()
     db.apply_migrations(mem)  # type: ignore[arg-type]
-    for i, 로그 in enumerate([{db.RUN_FINGERPRINT_KEY: {"sha": "abc123"}}, {db.RUN_FINGERPRINT_KEY: {"sha": None}},
+    for i, 로그 in enumerate([{db.RUN_FINGERPRINT_KEY: {"sha": "abc123", "code": "c0ffee"}},
+                             {db.RUN_FINGERPRINT_KEY: {"sha": None, "code": 7}},
                              {db.RUN_FINGERPRINT_KEY: "글"}, {"warnings": []}, None, {db.RUN_FINGERPRINT_KEY: {"sha": 7}},
                              {db.RUN_FINGERPRINT_KEY: {"sha": ""}}, [1], "글"]):  # fmt: skip
         mem.conn.execute(
@@ -243,6 +253,7 @@ def test_실행_기록에서_코드를_읽는다() -> None:
             [f"j{i}", "KR", "2026-11-17", "failed", f"2026-11-17T0{i}:00:00+00:00", json.dumps(로그) if 로그 is not None else None],
         )
     assert [r.sha for r in ws.load_runs(mem, "2026-11-01")] == ["abc123", None, None, None, None, None, None, None, None]  # type: ignore[arg-type]
+    assert [r.code for r in ws.load_runs(mem, "2026-11-01")][:2] == ["c0ffee", None]  # type: ignore[arg-type]
     # 실제로 닫는 길이 그 칸을 채운다 — 지문의 이름이 바뀌면 여기서 깨진다
     assert "sha" in db.run_fingerprint() and db.RUN_FINGERPRINT_KEY == "fingerprint"
 

@@ -14,10 +14,11 @@ docs/roadmap.md 1장 #9 뒤 절반의 첫 조각. 실전 전환 근거의 하나
 - **걸친 날 수**(25.2295, 영향의 첫 조각) = 그 묶음의 실패·중단 줄이 선 **날짜**의 수(한국 날짜 — 시장이 미국인 줄은
   미국 동부 날짜, 25.2298). 하루 한 번 도는 작업이면 "그 작업이 제 일을 못 한 날 수" 에 가깝다(거래일 달력은 읽지 않는다
   — 어림. 달력 폭이 아니다: 금·월 이틀 실패는 2일이다)
-- **같은 코드로 복구됐나**(25.2295) = 첫 실패의 코드(`sha` — `step_log.fingerprint`, 25.2277)와 닫은 실행의 코드를
-  견준다. 같으면 코드 고침 없이 나은 것이고(바깥 까닭이 지나갔거나 깔린 판·설정·시크릿·자료가 바뀜), 다르면 그 사이에
-  코드가 바뀌었다(고침이 들어갔을 수 있다 — **그 고침 덕인지는 모른다**. 문서만 바꾼 커밋에도 선다). 어느 한쪽이라도
-  모르면(지문 이전 줄·로컬 실행·정리된 줄) 적지 않는다
+- **같은 코드로 복구됐나**(25.2295) = 첫 실패의 코드와 닫은 실행의 코드를 견준다 — 둘 다 배치 코드 지문(`code`,
+  25.2302 — 문서만 바꾼 커밋에는 안 바뀐다)이 있으면 그것으로, 아니면 커밋(`sha`, 25.2277)으로. 같으면 코드 고침 없이
+  나은 것이고(바깥 까닭이 지나갔거나 깔린 판·설정·시크릿·자료가 바뀜), 다르면 그 사이에 코드가 바뀌었다(고침이 들어갔을
+  수 있다 — **그 고침 덕인지는 모른다**. 커밋으로 견줄 때는 문서만 바꾼 커밋에도 선다). 어느 한쪽이라도 모르면(지문 이전
+  줄·로컬 실행·정리된 줄) 적지 않는다
 """
 
 from __future__ import annotations
@@ -53,6 +54,11 @@ def _갈래(error_text: Any) -> str:
     return (글.split(":")[0].strip() or "까닭 없음")[:CAUSE_MAX]
 
 
+def _코드(r: Any) -> tuple[str | None, str | None]:
+    """(배치 코드 지문, 커밋) — 줄에 그 속성이 없거나 비면 None"""
+    return (getattr(r, "code", None) or None, getattr(r, "sha", None) or None)
+
+
 def incidents(runs: list[Any]) -> list[dict[str, Any]]:
     """실행 줄(시작 시각 오름차순이 아니어도 된다 — 여기서 세운다) → 사고 목록.
 
@@ -73,15 +79,21 @@ def incidents(runs: list[Any]) -> list[dict[str, Any]]:
                            "failures": 0, "minutes": None, "cause": _갈래(r.error_text), "days": 0,
                            "same_code": None}  # fmt: skip
                 out.append(열린[키])
-                날들[키], 첫코드[키] = set(), getattr(r, "sha", None)
+                날들[키], 첫코드[키] = set(), _코드(r)
             열린[키]["failures"] += 1
             날들[키].add(_날(str(r.started_at), 키[1]))
             열린[키]["days"] = len(날들[키])
         elif r.status in CLOSE_STATUS and 키 in 열린:
             건 = 열린.pop(키)
             건["closed"] = str(r.started_at)
-            앞, 뒤 = 첫코드.pop(키, None), getattr(r, "sha", None)
-            건["same_code"] = (앞 == 뒤) if 앞 and 뒤 else None
+            앞, 뒤 = 첫코드.pop(키, None), _코드(r)
+            # 같은 갈래끼리만 견준다 — 배치 코드 지문(`code`)이 둘 다 있으면 그것으로, 아니면 커밋(`sha`)으로(25.2302)
+            if 앞 and 뒤 and 앞[0] and 뒤[0]:
+                건["same_code"] = 앞[0] == 뒤[0]
+            elif 앞 and 뒤 and 앞[1] and 뒤[1]:
+                건["same_code"] = 앞[1] == 뒤[1]
+            else:
+                건["same_code"] = None
             시작, 끝 = _때(건["opened"]), _때(건["closed"])
             if 시작 is not None and 끝 is not None:
                 try:

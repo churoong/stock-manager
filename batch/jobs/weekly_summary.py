@@ -102,6 +102,8 @@ class Run:
     decision: str | None = None
     #: 그 실행의 코드(`step_log.fingerprint.sha`, 25.2277) — 사고 대장이 "같은 코드로 복구됐나" 를 가른다 (25.2295)
     sha: str | None = None
+    #: 배치 코드 지문(`step_log.fingerprint.code`, 25.2302) — 문서만 바꾼 커밋에는 안 바뀐다. 있으면 `sha` 보다 먼저
+    code: str | None = None
 
 
 #: **예정된 건너뜀** — 고장이 아니다 (docs/infra.md 25.1372, 주간 요약 감사 재현). 미국 일일 배치는 서머타임을 덮으려고
@@ -129,6 +131,7 @@ def load_runs(client: TursoClient, since: str) -> list[Run]:
         경고: tuple[str, ...] = ()
         까닭: str | None = None
         코드: str | None = None
+        배치코드: str | None = None
         try:
             로그 = json.loads(r["step_log"]) if r["step_log"] else {}
             if isinstance(로그, dict) and isinstance(로그.get("warnings"), list):
@@ -138,10 +141,12 @@ def load_runs(client: TursoClient, since: str) -> list[Run]:
             지문 = 로그.get(db.RUN_FINGERPRINT_KEY) if isinstance(로그, dict) else None
             if isinstance(지문, dict) and isinstance(지문.get("sha"), str) and 지문["sha"]:
                 코드 = 지문["sha"]
+            if isinstance(지문, dict) and isinstance(지문.get("code"), str) and 지문["code"]:
+                배치코드 = 지문["code"]
         except (TypeError, ValueError):
             pass
         out.append(Run(str(r["job_name"]), r["market"], str(r["status"]), str(r["started_at"]), r["error_text"], 경고,
-                       까닭, 코드))  # fmt: skip
+                       까닭, 코드, 배치코드))  # fmt: skip
     return out
 
 
