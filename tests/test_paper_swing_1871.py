@@ -489,3 +489,15 @@ def test_아는_종목_고르기는_계좌들이_쓰는_값과_같다() -> None:
     값들 = {str(r[0]) for r in mem.conn.execute("SELECT DISTINCT selection FROM paper_accounts").fetchall()}
     assert {"signal", "random", "short", "etf_tactical"} <= 값들  # 읽기가 비면 아래가 공짜로 통과한다
     assert 값들 <= pp.SELECTIONS, 값들 - pp.SELECTIONS
+
+
+def test_화면이_아는_종목_고르기는_엔진과_같다() -> None:
+    """web/lib/paper.ts `PAPER_SELECTIONS` 가 엔진 `SELECTIONS` 와 같다(25.2318) — 엔진에만 새 값을 더하면 화면이 그 계좌를
+    "모르는 고르기 — 배치가 건너뜀" 으로 적고, 화면에만 더하면 건너뛰는 계좌를 산다고 적는다"""
+    import re
+    from pathlib import Path
+
+    글 = (Path(__file__).resolve().parents[1] / "web" / "lib" / "paper.ts").read_text(encoding="utf-8")
+    찾음 = re.search(r"PAPER_SELECTIONS[^=]*= new Set\(\[([^\]]*)\]\)", 글)
+    assert 찾음, "PAPER_SELECTIONS 선언을 못 찾음"
+    assert set(re.findall(r'"([a-z_]+)"', 찾음.group(1))) == set(pp.SELECTIONS)

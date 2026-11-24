@@ -97,6 +97,8 @@ const SELL_RULE_TEXT: Record<string, string> = {
 export function hasCommittee(a: { charter_json?: string | null; selection?: string | null }): boolean {
   return Boolean(a.charter_json) && a.selection !== "weighted";
 }
+/** 배치가 아는 종목 고르기 값 — batch/services/paper.py `SELECTIONS` 와 같아야 한다(25.2318, tests/test_paper_swing_1871.py 가 견준다) */
+export const PAPER_SELECTIONS: ReadonlySet<string> = new Set(["signal", "random", "weighted", "short", "etf_tactical"]);
 export function ruleText(a: AccountRule): string {
   let 헌장: { name?: string; agenda?: number; top_n?: number } | null = null;
   try {
@@ -104,7 +106,12 @@ export function ruleText(a: AccountRule): string {
   } catch {
     헌장 = null;
   }
-  const 고르기 = a.selection === "weighted"
+  // 배치가 모르는 고르기 값의 계좌는 그 계좌만 건너뛴다(batch/services/paper.py `SELECTIONS`, 25.2317) — 여기서 "점수 상위" 로
+  // 떨어뜨리면 사지도 않는 계좌를 산다고 적는다(25.2318). 값이 없으면 배치 기본(signal)과 같다
+  const 모름 = a.selection != null && !PAPER_SELECTIONS.has(a.selection);
+  const 고르기 = 모름
+    ? `모르는 고르기(${a.selection}) — 배치가 건너뜀`
+    : a.selection === "weighted"
     ? `지주사 — 회사 추천을 성적 가중치로 합친 점수, 두 곳 이상 추천한 종목 상위 ${a.top_n ?? 5}`
     : 헌장
     ? `${위원회이름(헌장.name)} 가결(안건 ${헌장.agenda ?? "?"}개 중 최대 ${헌장.top_n ?? a.top_n ?? 5}종목)`

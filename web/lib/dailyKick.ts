@@ -15,8 +15,8 @@
  * - 일일 배치 둘만(감성 채점은 아니다 — 그날 판단을 망치지 않는다)
  *
  * 깨운 결과는 그 알림 행의 글 끝과 `data.kick`(`kicked`·`ran:<상태>`·`failed:…`)에 남는다 — 발송 전에 고쳐 적는다.
- * 결과를 못 적은 행(발송 중이거나 이미 보낸 행 — `noted: false`)은 `data.kick` 이 'claim' 에 남고 결과는 무응답 경로
- * heartbeat 의 `detail.kick[]` 에만 있다(25.2316)
+ * 결과를 못 적은 행(`noted: false`)의 결과는 무응답 경로 heartbeat 의 `detail.kick[]` 에만 있다(25.2316) — 발송 중이거나
+ * 이미 보낸 행이면 `data.kick` 이 'claim' 에 남고, 잡기·결과 쓰기가 둘 다 깨진 행이면 비어 있다(25.2318)
  * **던지지 않는다** — DB·GitHub 실패도 `failed:` 글로(알림 발송을 막지 않게).
  */
 import { execute } from "@/lib/db";
@@ -121,7 +121,9 @@ export async function kickMissingDaily(
     if (!job || from === null) continue;
     const 열쇠 = [d.job, d.market, d.localDate];
     // 잡기 자체가 깨진 것(일시 DB 오류)은 글을 갈라 둔다 — "잡기 실패" 와 "깨우기·읽기 실패" 를 읽어서 가를 수 있게(25.2316).
-    // 잡기가 깨져도 결과 쓰기가 `data.kick` 을 채워 그날은 다시 깨우지 않는다(보수 — 한 번을 넘지 않는 쪽)
+    // 잡기가 깨지면 **그날 깨움은 잃는다**(드묾) — 다음 매시 호출은 같은 날 알림을 다시 만들지 않아(`dueAlerts` 가 같은 날 행을 뺀다)
+    // 이 행이 다시 넘어오지 않는다. 결과 쓰기를 건너뛰어도 되살릴 길이 없으니 적어서 [무응답] 글에 까닭을 남긴다(25.2318 — 25.2316
+    // 주석의 "결과 쓰기가 다시 깨우지 않게 막는다" 는 틀렸다: 막는 것은 `dueAlerts` 다)
     let 결과: DailyKick;
     try {
       const 잡음 = await execute(KICK_CLAIM_SQL, 열쇠);
@@ -131,7 +133,7 @@ export async function kickMissingDaily(
       결과 = `failed:잡기 ${e instanceof Error ? e.message.slice(0, 72) : "?"}`;
     }
     // 결과를 그 행에 적는다 — 겹친 호출이 그 사이 그 행을 발송용으로 잡았거나, 잡기 전에 이미 보낸 행이면(25.2315) 0행이고
-    // [무응답] 글에 결과 줄이 빠진다(그 행의 `data.kick` 은 'claim' 에 남는다).
+    // [무응답] 글에 결과 줄이 빠진다(잡기가 된 행이면 `data.kick` 은 'claim' 에 남는다 — 잡기가 깨진 행은 비어 있다, 25.2318).
     // 그때는 `noted: false` 로 heartbeat detail 에 남는다(25.2312, 25.2311 교차검증 [권고] — 예전엔 조용히 넘어갔다)
     // 결과 쓰기가 실패해도(쓰기 한도·일시 오류) 던지지 않는다 — 삼키는 것이 아니라 `noted: false` 로 heartbeat 에 남는다
     let 적음 = 0;

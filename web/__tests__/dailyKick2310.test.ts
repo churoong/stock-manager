@@ -272,6 +272,27 @@ describe("아예 안 깨워진 일일 배치 깨우기", () => {
     expect(깨짐[0].noted).toBe(false); // 결과 쓰기도 실패했다 — 늘 참으로 두면 깨진다(25.2314)
   });
 
+  it("잡은 뒤 실행 기록 읽기가 깨지면 '잡기' 가 아니라 읽기 실패 글이고 깨우지 않는다 — 25.2318", async () => {
+    const { 행 } = db([], [알림("daily_kr")]);
+    const 진짜 = execute.getMockImplementation()!;
+    execute.mockImplementation(async (sql: string, args?: unknown[]) => {
+      if (sql === ANY_RUN_SINCE_SQL) throw new Error("SQLITE_BUSY");
+      return 진짜(sql, args);
+    });
+    const { 부름, f } = 부르개();
+    const 결과 = await kickMissingDaily([알림("daily_kr")], f);
+    expect(결과).toEqual([
+      {
+        job: "daily_kr",
+        market: "KR",
+        kick: "failed:SQLITE_BUSY",
+        noted: true,
+      },
+    ]);
+    expect(부름).toEqual([]); // 모르면 깨우지 않는다 — 돌았는지 모르는 채 다시 돌리지 않는다
+    expect(JSON.parse(행("daily_kr")!.data).kick).toBe("failed:SQLITE_BUSY");
+  });
+
   it("개장 시각을 모르면 깨우지 않는다 · 그 시장 자정", async () => {
     db([], [알림("daily_kr", "missing", {})]);
     expect(
