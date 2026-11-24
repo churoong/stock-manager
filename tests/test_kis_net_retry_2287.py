@@ -129,6 +129,8 @@ def test_다시_받은_수가_실행_기록에_실린다() -> None:
     assert jb._호출(세션) == {"calls": 7, "net_retries": 2}
     세션.net_retries = 0
     assert jb._호출(세션) == {"calls": 7}
+    세션.net_retries, 세션.rate_retries = 2, 3  # 초당 한도 다시 받기도 같은 꼴로(25.2291 — 장중 감시와 같은 칸)
+    assert jb._호출(세션) == ig._호출(세션) == {"calls": 7, "rate_retries": 3, "net_retries": 2}
     글 = inspect.getsource(jb.run)
     assert 글.count("return 기록 | _호출(sess)") == 4 and '{"calls": sess.calls}' not in 글
     assert 글.count("return 기록") == 4  # 기록을 돌려주는 반환은 모두 꼬리를 단다
@@ -153,14 +155,30 @@ def test_모름으로_닫을_때_보낼_때_적은_글을_버리지_않는다() 
             bm.Outcome(3, "unknown", None, 0, None, bm.MISSING), bm.Outcome(4, "filled", "0009", 3, 100.0, None),
             bm.Outcome(5, "unknown", None, 0, None, bm.MISSING_US), bm.Outcome(6, "rejected", None, 0, None, "거부 수량")]  # fmt: skip
     for o in 결과:
-        assert len(jb.recon_params(o, "t")) == jb.RECON_SQL.count("?") == 10
+        assert len(jb.recon_params(o, "t")) == jb.RECON_SQL.count("?") == 12
         c.execute(jb.RECON_SQL, jb.recon_params(o, "t"))
     행 = {r[0]: r[1:] for r in c.execute("SELECT id, status, message, broker_order_no, filled_qty FROM paper_broker_orders")}
     assert 행[1] == ("unknown", f"{bm.MISSING} · 보낼 때: {보낼때}", None, 0)
     assert 행[2] == ("unknown", bm.MISSING, None, 0) and 행[3] == ("unknown", bm.MISSING, None, 0)  # 앞 글이 없으면 새 글만
     assert 행[4] == ("filled", 보낼때, "0009", 3)  # 새 글이 없으면(체결과 맞음) 예전대로 그대로 둔다
-    assert 행[5][1] == f"{bm.MISSING_US} · 보낼 때: {'가' * 120}"  # 120자에서 자른다
+    assert 행[5][1] == f"{bm.MISSING_US}{jb.RECON_KEPT}{'가' * jb.RECON_KEEP_CHARS}" and jb.RECON_KEEP_CHARS == 240
     assert 행[6] == ("rejected", "거부 수량", None, 0)  # 모름이 아니면 예전대로 새 글로 바꾼다
+    assert f"'{jb.RECON_KEPT}'" in jb.RECON_SQL and f"substr(message, 1, {jb.RECON_KEEP_CHARS})" in jb.RECON_SQL
+    # **두 번 적용돼도 같다**(25.2291) — DB 호출은 시간 초과·5xx 에서 같은 묶음을 다시 보낸다
+    for o in 결과:
+        c.execute(jb.RECON_SQL, jb.recon_params(o, "t"))
+    둘째 = {r[0]: r[1:] for r in c.execute("SELECT id, status, message, broker_order_no, filled_qty FROM paper_broker_orders")}
+    assert 둘째 == 행 and 둘째[1][1].count(jb.RECON_KEPT) == 1
+    # 운영 꼴 — 장중 손절 줄(머리 + 가장 긴 모름 문장)도 칸 이름까지 남는다(120자였을 때는 잘렸다)
+    try:
+        kv.parse_order({"rt_cd": "1", "msg_cd": "", "msg1": "모의투자 주문이 불가한 시간입니다 다시 확인하시기 바랍니다 " * 3,
+                        "output": {}, "error_code": "x", "ctx_area_fk100": "", "ctx_area_nk100": ""})  # fmt: skip
+    except kv.NoResponse as exc:
+        장중 = f"장중 현재가 123,400 ≤ 손절선 125,000 · {str(exc)[:200]}"
+    c.execute("INSERT INTO paper_broker_orders (id, status, message) VALUES (7, 'sending', ?)", [장중])
+    c.execute(jb.RECON_SQL, jb.recon_params(bm.Outcome(7, "unknown", None, 0, None, bm.MISSING), "t"))
+    글 = c.execute("SELECT message FROM paper_broker_orders WHERE id = 7").fetchone()[0]
+    assert 글 == f"{bm.MISSING}{jb.RECON_KEPT}{장중}" and "칸(" in 글 and "rt_cd '1'" in 글
 
 
 def test_모름_문장의_길이를_묶는다() -> None:

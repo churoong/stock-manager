@@ -202,18 +202,28 @@ REALIZED_SNAPSHOT_SQL = (
 #: 맞추기 결과를 줄에 적는다. 글(`message`)은 새 글이 없으면 그대로, **모름(`unknown`)으로 닫을 때 보낼 때 적은 글이
 #: 있으면 버리지 않고 뒤에 잇는다**(25.2290 — 25.2288 이 모름 문장에 실은 "받은 것" 이 다음 아침 "체결 조회에 없음"
 #: 으로 덮여 하루 만에 사라졌다. 실제로 접수 안 된 쪽일수록 진단 글이 필요하다). 앞머리는 새 글 그대로라 머리로
-#: 가르는 읽기는 그대로다. 인자: [상태, 주문번호, 체결 수량, 평균가, 글, 상태, 글, 글, 받은 때, 번호] — `recon_params`
+#: 가르는 읽기는 그대로다. 인자는 `recon_params` 가 만든다:
+#: [상태, 주문번호, 체결 수량, 평균가, 글, 상태, 글, 글, 상태, 글, 받은 때, 번호].
+#: **두 번 적용돼도 같다**(25.2291 — 처음 꼴은 같은 문장이 다시 가면 "… · 보낼 때: … · 보낼 때: …" 로 겹쳤다. DB
+#: 호출은 시간 초과·5xx 에서 같은 묶음을 다시 보낸다): 이미 이은 글(`RECON_KEPT` 가 든 글)과 새 글과 같은 글(앞 글
+#: 없이 닫힌 줄의 둘째 적용)은 그대로 둔다. 잇는 길이는 보낼 때 글의 상한(예외 글 200자 + 장중 줄 머리)을 덮는
+#: `RECON_KEEP_CHARS` — 120자였을 때는 지키려던 칸 이름이 잘렸다
+RECON_KEPT = " · 보낼 때: "
+RECON_KEEP_CHARS = 240
 RECON_SQL = (
     "UPDATE paper_broker_orders SET status = ?, broker_order_no = COALESCE(?, broker_order_no), filled_qty = ?,"
     " avg_price = ?, message = CASE WHEN ? IS NULL THEN message"
-    " WHEN ? = 'unknown' AND COALESCE(message, '') <> '' THEN ? || ' · 보낼 때: ' || substr(message, 1, 120)"
+    " WHEN ? = 'unknown' AND COALESCE(message, '') <> '' AND message <> ? AND instr(message, ' · 보낼 때: ') = 0"
+    " THEN ? || ' · 보낼 때: ' || substr(message, 1, 240)"
+    " WHEN ? = 'unknown' AND instr(COALESCE(message, ''), ' · 보낼 때: ') > 0 THEN message"
     " ELSE ? END, fetched_at = ? WHERE id = ?"
 )
 
 
 def recon_params(o: Any, 지금: str) -> list[Any]:
     """`RECON_SQL` 의 인자 — 글과 상태가 문장 안에서 되풀이된다"""
-    return [o.status, o.order_no, o.filled, o.avg_price, o.message, o.status, o.message, o.message, 지금, o.row_id]
+    return [o.status, o.order_no, o.filled, o.avg_price, o.message, o.status, o.message, o.message, o.status,
+            o.message, 지금, o.row_id]  # fmt: skip
 
 
 DAILY_SQL = (
@@ -715,7 +725,9 @@ def _호출(sess: Any) -> dict[str, int]:
     것을 쓴다**(25.2290 — 처음엔 마지막 반환에만 붙여, 주문을 안 낸 날(접수 전 막힘·장 없음·잔고 잘림)의 다시 받은
     수가 빠졌다. 그 길들도 맞추기·잔고 조회는 이미 다 한 뒤다)"""
     끊김 = int(getattr(sess, "net_retries", 0) or 0)
-    return {"calls": sess.calls} | ({"net_retries": 끊김} if 끊김 else {})
+    한도 = int(getattr(sess, "rate_retries", 0) or 0)  # 초당 한도로 다시 받은 수도(25.2291 — 장중 감시와 같은 칸)
+    return ({"calls": sess.calls} | ({"rate_retries": 한도} if 한도 else {})
+            | ({"net_retries": 끊김} if 끊김 else {}))  # fmt: skip
 
 
 def run(
