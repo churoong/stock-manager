@@ -124,7 +124,7 @@ export function championEmptiedBy(gateError: string | null | undefined): boolean
  * 상수를 바꾸면 화면 글만 낡지 않게
  */
 export const DESK_RULES = {
-  RISK_NEAR_STOP_PP: 2, CHAMPION_BLOCK: 20, CHAMPION_MIN_BLOCKS: 3, CHAMPION_WIN_SHARE: 0.67,
+  RISK_NEAR_STOP_PP: 2, RISK_INDEX_SHOCK_PCT: 5, CHAMPION_BLOCK: 20, CHAMPION_MIN_BLOCKS: 3, CHAMPION_WIN_SHARE: 0.67,
   GATE_SEL_MIN_BLOCKS: 6, CHAMPION_EVIDENCE_MIN_BLOCKS: 4, CHAMPION_ALPHA: 0.05,
   GATE_POCOCK_ALPHA: 0.0221,
 } as const;
@@ -141,6 +141,13 @@ export interface RiskRow {
   open_risk_pct?: number | null;
   /** 평균단가·종가·비중이 없어 열린 위험에서 뺀 보유 수(있을 때만) */
   open_risk_skipped?: number;
+  /** 지수 충격 — 각 시장 지수가 `DESK_RULES.RISK_INDEX_SHOCK_PCT`% 빠지는 날의 예상 손익(평가 총액 대비 %, 잃으면 음수).
+   *  ETF 전술 계좌·보유 글이 깨진 날·하나도 못 잰 계좌는 null, 베타를 못 읽은 날·이 칸이 없던 날은 undefined (25.2281) */
+  index_shock_pct?: number | null;
+  /** 베타를 몰라 1 로 본 보유 수(있을 때만) */
+  index_shock_assumed?: number;
+  /** 비중이 없어 지수 충격에서 뺀 보유 수(있을 때만) */
+  index_shock_skipped?: number;
 }
 /** 실전 준비 목록 한 항목 (docs/paper.md 14장, 25.1513) — 상태는 배치 코드의 표, 근거는 기록에서 */
 export interface ReadinessItem { key: string; label: string; status: "done" | "partial" | "rehearsal" | "todo" | "user"; note: string; evidence: string | null }
@@ -437,6 +444,19 @@ export function adjustCheckText(c: FillAdjustCheck | null | undefined, mirror: s
   if (!c) return null;
   const 섞임 = c.pre_link ? ` · 연결 전 보유 ${c.pre_link}종목이 섞여 실측이 흔들림(판정에서 뺌)` : "";
   return `${c.from ?? "?"}~${c.to ?? "?"} KIS 실측 손익 차이 ${ppText(c.actual_pp)} (${accountName(mirror)} 평가 대비) · 칸으로 설명한 몫 ${ppText(c.explained_pp)} ±${c.band_pp.toFixed(2)} · 안 잰 회전 ${c.unmeasured_pct.toFixed(0)}%${섞임}`;
+}
+
+/**
+ * 위험판 "지수 충격" 칸 (25.2281) — 예상 손익이라 부호를 그대로 보인다("−3.4%", 인버스·음의 베타면 "+0.5%"). 값이 없으면
+ * "-". 베타를 몰라 1 로 본 보유·비중이 없어 뺀 보유가 있으면 그 수를 덧붙인다 — 가정을 숨기지 않는다
+ */
+export function indexShockText(r: Pick<RiskRow, "index_shock_pct" | "index_shock_assumed" | "index_shock_skipped">): string {
+  const 덧 = [r.index_shock_assumed ? `${r.index_shock_assumed}종목 베타 1 가정` : "", r.index_shock_skipped ? `${r.index_shock_skipped}종목 못 잼` : ""].filter(Boolean).join(" · ");
+  const 꼬리 = 덧 ? ` (${덧})` : "";
+  const v = r.index_shock_pct;
+  if (v == null || !Number.isFinite(v)) return `-${꼬리}`;
+  const 값 = v === 0 ? "0.0%" : `${v < 0 ? "−" : "+"}${Math.abs(v).toFixed(1)}%`;
+  return `${값}${꼬리}`;
 }
 
 /**

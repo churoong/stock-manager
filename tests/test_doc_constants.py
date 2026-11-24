@@ -1086,6 +1086,8 @@ class Test이웃_모듈들:
         검사(DESK, f"최근 {dk.GATE_INCIDENT_DAYS}일(`GATE_INCIDENT_DAYS`)", "관문 무사고 창 (25.1508)")
         검사(DESK, f"{dk.GATE_KEPT_PCT:g}%(`GATE_KEPT_PCT`) 이상, 표본 {dk.GATE_KEPT_MIN_N}(`GATE_KEPT_MIN_N`)", "관문 KIS 실현율 (25.1508)")
         검사(DESK, f"손절선까지 {dk.RISK_NEAR_STOP_PP:g}%p(`RISK_NEAR_STOP_PP`)", "위험판 손절 가까움 (25.1508)")
+        검사(DESK, f"지수가 {dk.RISK_INDEX_SHOCK_PCT:g}%(`RISK_INDEX_SHOCK_PCT`) 빠지는 날", "위험판 지수 충격 (25.2281)")
+        검사(DESK, f"베타 {dk.RISK_BETA_UNKNOWN:g}(`RISK_BETA_UNKNOWN`)", "위험판 베타 모름 가정 (25.2281)")
         검사(DESK, f"{dk.KIS_RECENT_DAYS}일(`KIS_RECENT_DAYS`)보다 오래되면", "관문 KIS 줄 최근 (25.1511)")
         검사(PAPER, f"최근 {dk.READY_WINDOW_DAYS}일(`READY_WINDOW_DAYS`)", "준비 목록 배치 늦음 창 (25.1513)")
         검사(PAPER, f"{dk.READY_LATE_SEC}초(`READY_LATE_SEC`)", "준비 목록 늦음 문턱 (25.1513)")

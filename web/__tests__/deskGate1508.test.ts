@@ -83,6 +83,7 @@ describe("화면 글의 문턱은 배치 상수와 같다 (25.1511)", () => {
     const py = readFileSync(join(process.cwd(), "..", "batch", "services", "desk.py"), "utf8");
     const 값 = (name: string) => Number(new RegExp(`^${name} = ([0-9.]+)`, "m").exec(py)?.[1]);
     expect(값("RISK_NEAR_STOP_PP")).toBe(DESK_RULES.RISK_NEAR_STOP_PP);
+    expect(값("RISK_INDEX_SHOCK_PCT")).toBe(DESK_RULES.RISK_INDEX_SHOCK_PCT); // 25.2281
     expect(값("CHAMPION_BLOCK")).toBe(DESK_RULES.CHAMPION_BLOCK);
     expect(값("CHAMPION_MIN_BLOCKS")).toBe(DESK_RULES.CHAMPION_MIN_BLOCKS);
     expect(값("CHAMPION_WIN_SHARE")).toBe(DESK_RULES.CHAMPION_WIN_SHARE);

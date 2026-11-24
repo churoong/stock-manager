@@ -79,6 +79,15 @@ LATEST_SQL = (
 STOCK_NAMES_SQL = (
     "SELECT id, COALESCE(name_ko, name_en, ticker) AS name FROM stocks WHERE id IN (SELECT value FROM json_each(?))"
 )
+#: 보유 종목의 베타 — 위험판 "지수 충격" 칸(25.2281). 종목마다 최근 `BETA_MAX_AGE_DAYS` 안의 가장 늦은 1Y 행 하나
+#: (색인 `idx_metrics_stock (stock_id, as_of_date DESC, window)` — 바닥 날짜가 없으면 베타가 없는 종목은 제 기록을
+#: 끝까지 훑는다). 성과 지표는 주 1회(metrics.yml 월요일) 갱신이라 창을 넉넉히 둔다
+BETA_SQL = (
+    "SELECT j.value AS stock_id, (SELECT pm.beta FROM performance_metrics pm WHERE pm.stock_id = j.value"
+    " AND pm.window = '1Y' AND pm.beta IS NOT NULL AND pm.as_of_date >= ?"
+    " ORDER BY pm.as_of_date DESC, pm.calc_version DESC LIMIT 1) AS beta FROM json_each(?) j"
+)
+BETA_MAX_AGE_DAYS = 45
 #: 실전 준비 목록 — 최근 창의 일일 배치 늦음(색인 job_name, started_at). 분모는 **지연을 잰 실행만**
 #: (`COUNT(delay_seconds)`) — 손 실행·예약 없는 실행·정리된 실행은 지연이 비어 "N회 중" 을 부풀렸다(25.1516, 검토 6)
 BATCH_DELAY_SQL = (
@@ -567,6 +576,22 @@ def _멈춘평가(client: Any, h: str, since: str) -> dict[str, list[tuple[str, 
         return None
 
 
+def _betas(client: Any, ids: list[int], now: datetime) -> dict[int, float] | None:
+    """보유 종목 → 1Y 베타(25.2281). 곁다리 — 못 읽으면 None(위험판의 지수 충격 칸만 빠지고 나머지는 그대로).
+    한도 오류는 다시 올린다. 베타 행이 없는 종목은 결과에 없다(부르는 쪽이 가정값과 수를 싣는다)"""
+    if not ids:
+        return {}
+    try:
+        바닥 = (now - timedelta(days=BETA_MAX_AGE_DAYS)).date().isoformat()
+        행 = client.execute(BETA_SQL, [바닥, json.dumps(ids)]).dicts()
+        return {int(r["stock_id"]): float(r["beta"]) for r in 행 if r.get("beta") is not None}
+    except Exception as exc:  # noqa: BLE001
+        if db.quota_reason(exc):
+            raise
+        logging.getLogger("desk").warning("위험판 베타를 읽지 못했다 — 지수 충격 칸을 뺀다: %s", 예외글(exc))
+        return None
+
+
 def 예외글(exc: BaseException) -> str:
     """곁다리 실패의 까닭 글 — "예외이름: 본문(120자)". `gate_error` 의 예외 꼴은 모두 이것이다(25.1997)"""
     return f"{type(exc).__name__}: {str(exc)[:120]}"
@@ -650,7 +675,8 @@ def _관문판(
             사전: dict[str, Any] = desk.prereg_status(계열, 판들, 증거, 그림자 or {})
         except Exception as exc:  # noqa: BLE001
             사전 = {"error": 예외글(exc)}
-        판 = {"gate": 관문, "risk": desk.risk_board(latest, 계열, 손절), "prereg_status": 사전,
+        위험 = desk.risk_board(latest, 계열, 손절, _betas(client, ids, now))
+        판 = {"gate": 관문, "risk": 위험, "prereg_status": 사전,
              "champion": desk.champion(계열, h, 증거, 판시작),
              "readiness": desk.readiness(runs=늦음[0] if 늦음 else None, kis=kis요약), "gate_error": None,
              "gate_carry": None}  # fmt: skip

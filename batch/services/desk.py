@@ -346,6 +346,14 @@ GATE_RATIO_MIN_N = 20
 KIS_RECENT_DAYS = 7
 #: 위험판 — 손절선까지 이만큼(%p) 안이면 "손절 가까움"
 RISK_NEAR_STOP_PP = 2.0
+#: ETF 전술 계좌(가상 X 국내 ETF·가상 Y 미국 ETF, docs/paper.md 17장) — 손절선이 없고 인버스를 든다
+ETF_TACTICAL_IDS = ("X", "Y")
+#: 위험판 "지수 충격" 의 크기(%) — 각 시장 지수가 같은 날 이만큼 빠질 때의 예상 손실을 낸다(25.2281, docs/roadmap.md
+#: 1장 #4). 문턱이 아니라 **표시용 잣대**다. 5% 는 국내·미국 대표 지수로 드문 하루 낙폭의 크기
+#: `[확인필요: 실측 빈도 — 운영 지수 자료로 한 해 몇 번인지]`
+RISK_INDEX_SHOCK_PCT = 5.0
+#: 베타를 모르는 보유에 쓰는 값 — 시장만큼 움직인다고 본다(빼면 위험이 작게 보인다). 가정한 종목 수를 함께 싣는다
+RISK_BETA_UNKNOWN = 1.0
 #: 열린 위험을 내지 않는 계좌 — 매도 원칙에 "손절" 이 없다(D 장기보유 `time`: 기간초과 하나만, `pp.SELL_RULES`).
 #: 선에서 팔지 않으므로 "모두 선에 닿아 팔리면 잃는 몫" 이 한계가 못 된다(25.2279, 25.2278 교차검증 [권고]).
 #: 손절 가까움은 예전대로 같은 선으로 보인다(위험을 보는 자리 — docs/desk.md 6장)
@@ -1054,7 +1062,7 @@ def _손절_해당없음(account: str, n_positions: int) -> tuple[str, bool] | N
             # 정지가 길면 마지막 종가 청산(25.2024, 25.2023 교차검증 [권고])
             return f"하루 넘긴 단타 보유 {n_positions}종목 — 매도 대기(단타잔여·하한가·정지로 미룬 짝 매도)", True
         return "해당 없음 — 당일 단타(하루 끝 보유 0주)", False
-    if account in ("X", "Y"):
+    if account in ETF_TACTICAL_IDS:
         # ETF 전술(paper.md 17장) — 손절선이 없다. 국면이 바뀐 날 전량 갈아탄다(25.2166)
         return "해당 없음 — ETF 전술은 손절 없이 지수 국면이 바뀐 날 갈아탐", False
     if account in pp.MASTER_IDS:
@@ -1067,8 +1075,40 @@ def _손절_해당없음(account: str, n_positions: int) -> tuple[str, bool] | N
     return None
 
 
+def index_shock(account: str, positions: list[dict[str, Any]], holdings: float,
+                betas: dict[int, float]) -> dict[str, Any]:  # fmt: skip
+    """위험판 "지수 충격" 칸 — 각 시장 지수가 `RISK_INDEX_SHOCK_PCT`% 빠지는 날의 예상 손익(평가 총액 대비 %, 잃으면
+    음수) = Σ 비중(%) × 베타 × (−충격 ÷ 100). 베타는 종목마다 제 나라 지수 대비(`performance_metrics.beta` — 국내 KOSPI·
+    미국 S&P 500, docs/metrics.md 6절)라 "두 시장이 같은 날 같은 만큼 빠진다" 는 가정이 든다. 선형 어림이다 — 급락
+    날의 베타는 평소보다 크기 쉽다(아래쪽 한계 아님, 가늠자). 베타를 모르는 보유는 `RISK_BETA_UNKNOWN` 으로 보고 그
+    수를 `index_shock_assumed` 에, 비중이 없어 못 잰 보유 수는 `index_shock_skipped` 에(있을 때만).
+    ETF 전술 계좌(X·Y)는 값 없음 — 인버스를 드는 계좌라 지수 방향이 곧 전략이고 ETF 의 베타 행을 보장하지 않는다
+    `[확인필요: ETF 베타]`. 보유 평가는 있는데 종목이 비었으면(보유 글 깨짐) 값 없음, 보유가 없으면 0"""
+    if account in ETF_TACTICAL_IDS or (not positions and holdings > 0):
+        return {"index_shock_pct": None}
+    합, 센, 가정, 못잼 = 0.0, 0, 0, 0
+    for q in positions:
+        비중 = q.get("weight_pct")
+        if 비중 is None:
+            못잼 += 1
+            continue
+        sid = q.get("stock_id")
+        b = betas.get(int(sid)) if sid is not None else None
+        if b is None:
+            b, 가정 = RISK_BETA_UNKNOWN, 가정 + 1
+        합 += float(비중) * float(b) * (-RISK_INDEX_SHOCK_PCT / 100)
+        센 += 1
+    out: dict[str, Any] = {"index_shock_pct": None if positions and not 센 else 합}
+    if 가정:
+        out["index_shock_assumed"] = 가정
+    if 못잼:
+        out["index_shock_skipped"] = 못잼
+    return out
+
+
 def risk_board(
     latest: dict[str, dict[str, Any]], series: dict[str, list[tuple[str, float]]], stops: dict[str, float],
+    betas: dict[int, float] | None = None,
 ) -> list[dict[str, Any]]:
     """위험판 — 계좌마다 노출·집중·손절 가까움·낙폭.
 
@@ -1079,7 +1119,9 @@ def risk_board(
     기간이 없거나 모르는 값이면 장기로 본다(매도 플래그와 같이). 유상증자 권리락 계수는 반영하지 않는다
     (드묾 `[확인필요]`).
     `open_risk_pct` = 열린 위험(25.2278, docs/desk.md 6장) — 손절 가까움과 같은 선·같은 값으로 낸다. 못 잰 보유 수는
-    `open_risk_skipped`(있을 때만)
+    `open_risk_skipped`(있을 때만).
+    `betas`(종목 → 베타)를 주면 `index_shock_pct` 칸을 더한다(`index_shock`, 25.2281) — 안 주면(베타를 못 읽은 날)
+    칸 자체가 없다
     """
     out = []
     for a in sorted(latest):
@@ -1123,6 +1165,7 @@ def risk_board(
                                       or (not 종목 and 보유 > 0) else 열린),
                     **({"open_risk_skipped": 못잼} if 못잼 and 주석 is None and a not in OPEN_RISK_NO_STOP_IDS
                        else {}),
+                    **(index_shock(a, 종목, 보유, betas) if betas is not None else {}),
                     **({"near_stop_note": 주석[0]} if 주석 else {}),
                     **({"near_stop_warn": True} if 주석 and 주석[1] else {}),
                     "dd_pct": (v[-1][1] / 고점 - 1) * 100 if v and 고점 else None})  # fmt: skip
