@@ -14,7 +14,9 @@ docs/roadmap.md 1장 #10, docs/infra.md 25.2284. 지금 사전 위험 점검(`ri
 
 from __future__ import annotations
 
+import math
 from collections import defaultdict
+from datetime import date
 from typing import Any
 
 from batch.core import markets
@@ -29,13 +31,17 @@ ADV_MIN_DAYS = 10
 ADV_SHARE_MAX = scoreboard.STAGE01_MAX_CAPACITY
 #: 시세를 읽을 때 창 앞으로 더 읽는 달력일 — 거래일 `ADV_DAYS` 를 덮는 여유(연휴 포함)
 PRICE_LOOKBACK_DAYS = 45
+#: 앞 봉이 주문일에서 이 달력일보다 멀면 "앞 거래일 종가" 가 아니다(시세 구멍·수집 실패) — 모름으로 둔다(25.2285).
+#: 긴 연휴(국내 추석·설 약 열흘)를 덮는 값
+STALE_BAR_DAYS = 14
 
 
 def _앞_시세(bars: list[dict[str, Any]], day: str) -> tuple[float | None, float | None]:
-    """그 종목의 일봉(날짜 오름차순) → (앞 거래일 종가, 앞 `ADV_DAYS` 거래일 평균 거래대금). 못 내면 None.
+    """그 종목의 일봉(차례 무관 — 여기서 날짜로 세운다) → (앞 거래일 종가, 앞 `ADV_DAYS` 거래일 평균 거래대금).
+    못 내면 None — 앞 봉이 `STALE_BAR_DAYS` 보다 묵었으면 그것도 모름(묵은 종가로 확정 판정을 내지 않는다).
     거래대금 칸이 빈 행(미국 — 거래량만 온다)은 종가 × 거래량으로 채운다"""
-    앞 = [b for b in bars if str(b["date"]) < day and b.get("close")]
-    if not 앞:
+    앞 = sorted((b for b in bars if str(b["date"]) < day and b.get("close")), key=lambda b: str(b["date"]))
+    if not 앞 or (date.fromisoformat(day) - date.fromisoformat(str(앞[-1]["date"])[:10])).days > STALE_BAR_DAYS:
         return None, None
     값들 = []
     for b in 앞[-ADV_DAYS:]:
@@ -65,19 +71,23 @@ def _분위(xs: list[float], q: float) -> float | None:
     if not xs:
         return None
     s = sorted(xs)
-    return s[min(len(s) - 1, int(q * len(s)))]
+    return s[max(0, math.ceil(q * len(s)) - 1)]  # 최근접 순위 — 20건의 95 분위는 19번째(최댓값이 아니다)
 
 
 def summarize(orders: list[dict[str, Any]], bars: dict[int, list[dict[str, Any]]]) -> dict[str, dict[str, Any]]:
-    """시장마다 {orders, buys, sells, band_breach, band_unknown, adv_breach, adv_unknown, sell_adv_over,
-    max_notional, p95_notional, max_daily_buy, days}. 거래대금 깃·크기는 매수만, 가격 깃은 양쪽 모두 센다"""
+    """시장마다 {orders, buys, sells, band_breach, band_unknown, adv_breach, adv_breach_stock_day, adv_unknown,
+    sell_adv_over, max_notional, p95_notional, max_daily_buy(계좌별 최대), days}.
+    거래대금 깃·크기는 매수만, 가격 깃은 양쪽 모두 센다"""
     out: dict[str, dict[str, Any]] = {}
-    하루합: dict[tuple[str, str], float] = defaultdict(float)
+    하루합: dict[tuple[str, str, str], float] = defaultdict(float)  # (증권사 칸 = 계좌, 시장, 날)
+    # (시장, 종목, 날) → [매수 합, 평균 거래대금]
+    종목날: dict[tuple[str, int, str], list[float | None]] = defaultdict(lambda: [0.0, None])
     금액들: dict[str, list[float]] = defaultdict(list)
     for o in orders:
         m = str(o.get("market"))
         s = out.setdefault(m, {"orders": 0, "buys": 0, "sells": 0, "band_breach": 0, "band_unknown": 0, "adv_breach": 0,
-                               "adv_unknown": 0, "sell_adv_over": 0, "days": set()})  # fmt: skip
+                               "adv_unknown": 0, "sell_adv_over": 0, "adv_breach_stock_day": 0,
+                               "days": set()})  # fmt: skip
         day = str(o["trade_date"])[:10]
         앞종가, 평균 = _앞_시세(bars.get(int(o["stock_id"]), []), day)
         c = classify(o, 앞종가, 평균)
@@ -95,12 +105,19 @@ def summarize(orders: list[dict[str, Any]], bars: dict[int, list[dict[str, Any]]
         s["adv_unknown"] += c["adv_breach"] is None
         if c["notional"] is not None:
             금액들[m].append(c["notional"])
-            하루합[(m, day)] += c["notional"]
+            하루합[(str(o.get("broker") or ""), m, day)] += c["notional"]
+            칸 = 종목날[(m, int(o["stock_id"]), day)]
+            칸[0], 칸[1] = (칸[0] or 0.0) + c["notional"], 평균
     for m, s in out.items():
         s["days"] = len(s["days"])
         s["max_notional"] = max(금액들[m], default=None)
         s["p95_notional"] = _분위(금액들[m], 0.95)
-        s["max_daily_buy"] = max((v for (mm, _d), v in 하루합.items() if mm == m), default=None)
+        # 하루 매수 합은 **계좌(증권사 칸)마다** 낸 것의 최대 — 첫째·도전자 계좌를 더하면 상한의 재료가 부풀려진다
+        s["max_daily_buy"] = max((v for (_b, mm, _d), v in 하루합.items() if mm == m), default=None)
+        # 같은 종목·같은 날의 매수 회차를 더한 몫 — 줄마다는 1% 밑이어도 합이 넘으면 센다(계좌를 가르지 않는다:
+        # 시장에 주는 충격은 합이다)
+        s["adv_breach_stock_day"] = sum(1 for (mm, _s, _d), (합, 평) in 종목날.items()
+                                        if mm == m and 평 and 합 is not None and 합 / 평 > ADV_SHARE_MAX)  # fmt: skip
     return out
 
 
@@ -125,10 +142,12 @@ def lines(summary: dict[str, dict[str, Any]], since: str, today: str) -> list[st
             )
         줄.append(
             f"    거래대금 깃(매수 금액 > {ADV_DAYS}일 평균 거래대금의 {ADV_SHARE_MAX:.0%}): 걸렸을 {s['adv_breach']}건"
+            f" · 같은 종목·같은 날 매수 합으로는 {s['adv_breach_stock_day']}건"
             f" · 모름 {s['adv_unknown']}건 · 참고 — 같은 잣대를 넘은 매도 {s['sell_adv_over']}건(매도는 막지 않는다)"
         )
         줄.append(
             f"    매수 주문 크기: 최대 {_돈(s['max_notional'], m)} · 95분위 {_돈(s['p95_notional'], m)}"
-            f" · 하루 매수 합 최대 {_돈(s['max_daily_buy'], m)} — 주문당·하루 총액 상한은 사용자 결정(한도 미정)"
+            f" · 하루 매수 합 최대(계좌별) {_돈(s['max_daily_buy'], m)}"
+            " — 주문당·하루 총액 상한은 사용자 결정(한도 미정)"
         )
     return 줄

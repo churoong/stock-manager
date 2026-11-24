@@ -8,9 +8,11 @@ from typing import Any
 
 from batch.services import order_limits as ol
 
-#: 창 안의 KIS모의투자 주문 — 상태와 무관하게(거부된 것도 "보내려던 주문" 이다)
+#: 창 안의 KIS모의투자 주문 — 상태와 무관하게(거부된 것도 "보내려던 주문" 이다). `broker` 는 계좌 가름(첫째·도전자,
+#: 시장별 칸)이다 — 하루 매수 합을 계좌마다 낸다(25.2285). 증권사 조건이 없어 색인 (broker, trade_date) 을 못 타고
+#: **표 전체를 읽는다** — 표가 작고 수동·달 한 번이라 둔다 `[확인필요: 첫 실행 rows_read]`
 ORDERS_SQL = (
-    "SELECT id, market, stock_id, side, order_type, limit_price, quantity, trade_date, reason, status"
+    "SELECT id, broker, market, stock_id, side, order_type, limit_price, quantity, trade_date, reason, status"
     " FROM paper_broker_orders WHERE trade_date >= ? ORDER BY trade_date, id"
 )
 #: 그 종목들의 일봉 — 창 앞으로 `PRICE_LOOKBACK_DAYS` 더(앞 종가·평균 거래대금). 유일 색인 (stock_id, date)

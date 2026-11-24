@@ -20,7 +20,7 @@ from batch.services import scoreboard
 
 
 def _o(i: int, **kw) -> dict:
-    return {"id": i, "market": "KR", "stock_id": 1, "side": "buy", "order_type": "limit", "limit_price": 10_000.0,
+    return {"id": i, "broker": "kis_vts", "market": "KR", "stock_id": 1, "side": "buy", "order_type": "limit", "limit_price": 10_000.0,
             "quantity": 10, "trade_date": "2026-11-20", "reason": "베낌", "status": "filled", **kw}  # fmt: skip
 
 
@@ -32,7 +32,7 @@ def _봉(n: int = 20, close: float = 10_000.0, value: float | None = 1_000_000_0
 
 def test_상수는_정의처에서_온다() -> None:
     assert ol.ADV_SHARE_MAX == scoreboard.STAGE01_MAX_CAPACITY == 0.01
-    assert (ol.WINDOW_DAYS, ol.ADV_DAYS, ol.ADV_MIN_DAYS, ol.PRICE_LOOKBACK_DAYS) == (28, 20, 10, 45)
+    assert (ol.WINDOW_DAYS, ol.ADV_DAYS, ol.ADV_MIN_DAYS, ol.PRICE_LOOKBACK_DAYS, ol.STALE_BAR_DAYS) == (28, 20, 10, 45, 14)
     assert markets.KR_DAILY_LIMIT == 0.30
 
 
@@ -47,6 +47,15 @@ def test_앞_시세는_그날_앞_봉만_본다() -> None:
     # 평균은 마지막 20 거래일만
     긴 = _봉(5, value=9e15, 끝=5) + _봉(20, 끝=25)
     assert ol._앞_시세(긴, "2026-11-26")[1] == 1_000_000_000.0
+    # 봉의 차례에 기대지 않는다(25.2285) — 뒤집어 줘도 앞 종가는 가장 늦은 봉, 평균은 마지막 20일
+    섞음 = [{**b, "close": 10_000.0 + k} for k, b in enumerate(긴)]
+    assert ol._앞_시세(섞음[::-1], "2026-11-26") == (10_024.0, 1_000_000_000.0)
+    # 묵은 봉은 "앞 거래일 종가" 가 아니다 — 시세 구멍이면 모름(확정 판정을 내지 않는다)
+    assert ol._앞_시세(_봉(20), f"2026-12-{19 + ol.STALE_BAR_DAYS - 30:02d}") == (10_000.0, 1_000_000_000.0)  # 딱 14일
+    assert ol._앞_시세(_봉(20), f"2026-12-{20 + ol.STALE_BAR_DAYS - 30:02d}") == (None, None)
+    # 거래대금 0·종가 없는 봉은 평균·앞 종가에 쓰지 않는다
+    assert ol._앞_시세(_봉(10) + [{"date": "2026-11-19x", "close": None, "value": 5.0, "volume": 1}], "2026-11-20")[0] == 10_000.0
+    assert ol._앞_시세(_봉(9, 끝=18) + _봉(1, value=0, volume=0), "2026-11-20")[1] is None  # 0 을 빼면 9일 — 하한 미달
 
 
 def test_가격_깃은_국내_지정가만_앞_종가_30퍼센트_밖() -> None:
@@ -81,18 +90,48 @@ def test_요약은_매수만_걸림으로_세고_매도는_참고다() -> None:
         _o(5, stock_id=3),  # 시세 없음 — 모름
         _o(6, trade_date="2026-11-21", quantity=50),
         _o(7, market="US", stock_id=9, limit_price=20.0, quantity=5),
+        _o(8, side="sell", limit_price=6_000.0, quantity=1),  # 가격제한폭 밖 지정가 **매도** — 가격 깃은 양쪽 모두
+        _o(9, side="sell", order_type="market", limit_price=None, quantity=1),  # 국내 시장가 — 가격 깃 대상이 아니다
+        _o(10, stock_id=3, order_type="market", limit_price=None, status="rejected"),  # 거부된 것도 보내려던 주문
     ]
     s = ol.summarize(orders, bars)
     kr = s["KR"]
-    assert (kr["orders"], kr["buys"], kr["sells"], kr["days"]) == (6, 5, 1, 2)
-    assert (kr["band_breach"], kr["band_unknown"]) == (1, 1)
-    assert (kr["adv_breach"], kr["adv_unknown"], kr["sell_adv_over"]) == (1, 1, 1)
+    assert (kr["orders"], kr["buys"], kr["sells"], kr["days"]) == (9, 6, 3, 2)
+    assert (kr["band_breach"], kr["band_unknown"]) == (2, 1)  # 시장가 둘은 "앞 종가 모름" 으로 세지 않는다
+    assert (kr["adv_breach"], kr["adv_unknown"], kr["sell_adv_over"]) == (1, 2, 1)
+    assert kr["adv_breach_stock_day"] == 1
     # 금액: 100,000 · 140,000 · 100,000 · (모름 5번도 지정가라 금액은 난다) 100,000 · 500,000
     assert kr["max_notional"] == 500_000.0 and kr["p95_notional"] == 500_000.0
     assert kr["max_daily_buy"] == 500_000.0  # 11-21 하루 500,000 > 11-20 합 440,000
     us = s["US"]
     assert (us["orders"], us["band_breach"], us["band_unknown"], us["adv_unknown"]) == (1, 0, 0, 1)
     assert us["max_notional"] == 100.0
+
+
+def test_같은_종목_같은_날_회차의_합으로도_센다() -> None:
+    """25.2285 (25.2284 교차검증 [권고]) — 분할 매수 회차가 줄마다 1% 밑이면 합이 넘어도 0건이었다. 주문이 통째로
+    커지는 사고에서는 회차가 같이 커진다"""
+    bars = {1: _봉(20)}  # 평균 거래대금 10억 → 1% = 1,000만 원
+    orders = [_o(k, limit_price=9_800.0, quantity=500) for k in (1, 2, 3)]  # 각 490만(0.49%), 합 1,470만(1.47%)
+    s = ol.summarize(orders + [_o(4, trade_date="2026-11-21", quantity=500)], bars)["KR"]
+    assert s["adv_breach"] == 0 and s["adv_breach_stock_day"] == 1  # 11-20 하루만 — 11-21 은 한 줄(0.5%)
+    # 계좌를 가르지 않는다(시장에 주는 충격은 합) — 첫째·도전자가 같은 종목을 같은 날 사면 더한다
+    둘 = [_o(1, quantity=600), _o(2, quantity=600, broker="kis_vts2")]
+    assert ol.summarize(둘, bars)["KR"]["adv_breach_stock_day"] == 1
+
+
+def test_하루_매수_합은_계좌마다_낸_것의_최대다() -> None:
+    """25.2285 — 첫째·도전자 두 계좌의 매수를 더하면 "하루 총액 상한" 의 재료가 부풀려진다(덜 막는 쪽으로 틀린다)"""
+    orders = [_o(1, quantity=30), _o(2, quantity=20), _o(3, quantity=40, broker="kis_vts2")]
+    s = ol.summarize(orders, {1: _봉(20)})["KR"]
+    assert s["max_daily_buy"] == 500_000.0  # 첫째 30 + 20 주 — 도전자 40 주를 더한 900,000 이 아니다
+    assert s["max_notional"] == 400_000.0
+
+
+def test_95_분위는_최근접_순위다() -> None:
+    assert ol._분위([float(k) for k in range(1, 21)], 0.95) == 19.0  # 20건이면 19번째 — 최댓값이 아니다
+    assert ol._분위([float(k) for k in range(1, 101)], 0.95) == 95.0
+    assert ol._분위([7.0], 0.95) == 7.0 and ol._분위([], 0.95) is None
 
 
 def test_줄은_건수와_금액을_적고_한도는_정하지_않는다() -> None:
@@ -108,7 +147,7 @@ def test_줄은_건수와_금액을_적고_한도는_정하지_않는다() -> No
 class _C:
     def __init__(self) -> None:
         self.conn = sqlite3.connect(":memory:")
-        self.conn.execute("CREATE TABLE paper_broker_orders (id INTEGER PRIMARY KEY, market TEXT, stock_id INTEGER, side TEXT,"
+        self.conn.execute("CREATE TABLE paper_broker_orders (id INTEGER PRIMARY KEY, broker TEXT, market TEXT, stock_id INTEGER, side TEXT,"
                           " order_type TEXT, limit_price REAL, quantity INTEGER, trade_date TEXT, reason TEXT, status TEXT)")  # fmt: skip
         self.conn.execute("CREATE TABLE prices (stock_id INTEGER, date TEXT, close REAL, volume INTEGER, value INTEGER)")
         self.본: list[tuple[str, list]] = []
@@ -125,15 +164,19 @@ class _C:
 
 def test_읽기는_창_안_주문과_그_종목의_봉만이고_쓰지_않는다() -> None:
     c = _C()
-    c.conn.executemany("INSERT INTO paper_broker_orders (market, stock_id, side, order_type, limit_price, quantity, trade_date,"
-                       " reason, status) VALUES ('KR', ?, 'buy', 'limit', ?, 10, ?, '베낌', 'filled')",
-                       [(1, 14_000.0, "2026-11-20"), (1, 10_000.0, "2026-10-26"), (2, 10_000.0, "2026-10-27")])  # fmt: skip
+    c.conn.executemany("INSERT INTO paper_broker_orders (broker, market, stock_id, side, order_type, limit_price, quantity,"
+                       " trade_date, reason, status) VALUES ('kis_vts', 'KR', ?, 'buy', 'limit', ?, 10, ?, '베낌', ?)",
+                       [(1, 14_000.0, "2026-11-20", "filled"), (1, 10_000.0, "2026-10-26", "filled"),
+                        (2, 10_000.0, "2026-10-27", "filled"), (2, 12_900.0, "2026-11-20", "rejected")])  # fmt: skip
     for sid in (1, 2, 3):
-        c.conn.executemany("INSERT INTO prices VALUES (?, ?, 10000, 100000, 1000000000)",
-                           [(sid, b["date"]) for b in _봉(20)] + [(sid, "2026-09-11"), (sid, "2026-09-12")])  # fmt: skip
+        # 마지막 봉(11-19)만 종가가 다르다 — 앞 종가가 가장 늦은 봉에서 오는지(읽는 차례)
+        c.conn.executemany("INSERT INTO prices VALUES (?, ?, ?, 100000, 1000000000)",
+                           [(sid, b["date"], 10_000 if b["date"] < "2026-11-19" else 9_900) for b in _봉(20)]
+                           + [(sid, "2026-09-11", 10_000), (sid, "2026-09-12", 10_000)])  # fmt: skip
     줄 = jo.run(c, "2026-11-24")
-    assert "2026-10-27~2026-11-24" in 줄[0]  # 창 28일 — 10-26 주문은 밖, 10-27 은 안
-    assert "KR: 주문 2건(매수 2·매도 0)" in 줄[1] and "걸렸을 1건" in 줄[2]
+    assert "2026-10-27~2026-11-24" in 줄[0]  # 오늘 − 28일부터 — 10-26 주문은 밖, 10-27 은 안
+    # 거부된 주문도 센다(상태와 무관). 앞 종가 9,900 × 1.3 = 12,870 — 12,900 도 가격 깃(10,000 기준이면 안 걸린다)
+    assert "KR: 주문 3건(매수 3·매도 0)" in 줄[1] and "걸렸을 2건" in 줄[2]
     (s1, p1), (s2, p2) = c.본
     assert s1 == jo.ORDERS_SQL and p1 == ["2026-10-27"]
     assert s2 == jo.PRICES_SQL and p2 == ["[1, 2]", "2026-09-12", "2026-11-24"]  # 창 앞 45일, 주문 없는 종목 3 은 안 읽는다
@@ -162,5 +205,7 @@ def test_문서가_깃과_읽는_법을_적는다() -> None:
     글 = (뿌리 / "docs" / "paper.md").read_text()
     for 조각 in ("### 15.12 절대 한도·가격 깃 — 그림자 계측", "25.2284", f"최근 {ol.WINDOW_DAYS}일(`WINDOW_DAYS`)",
                f"앞 {ol.ADV_DAYS} 거래일(`ADV_DAYS`) 평균 거래대금의 1%(`ADV_SHARE_MAX`", f"{ol.ADV_MIN_DAYS}일(`ADV_MIN_DAYS`)",
-               "매도는 막지 않는다", "사용자 결정", "주문 경로에 닿지 않는다"):  # fmt: skip
+               "매도는 막지 않는다", "사용자 결정", "주문 경로에 닿지 않는다", "상태와 무관하게",
+               "가격 깃은 매수·매도 모두 센다", f"(1 ± {markets.KR_DAILY_LIMIT:.0%})", f"그 앞 {ol.PRICE_LOOKBACK_DAYS}일까지",
+               f"{ol.STALE_BAR_DAYS}일(`STALE_BAR_DAYS`)", "같은 종목·같은 날", "계좌마다"):  # fmt: skip
         assert 조각 in 글, 조각

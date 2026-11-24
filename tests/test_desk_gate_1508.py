@@ -195,6 +195,14 @@ def test_write_베타_읽기가_깨지면_칸만_빠지고_까닭이_요약에_�
     assert s["gate"] is not None
 
 
+def test_관문판이_통째로_깨진_실행은_앞_실행의_베타_까닭을_지운다() -> None:
+    """25.2285 (25.2284 교차검증 [참고]) — 요약은 같은 날 앞 실행의 것에 덮어 합친다. 실패 갈래가 `risk_beta_error`
+    칸을 싣지 않으면 앞 실행(국내)의 까닭이 뒤 실행(미국)의 요약에 낡은 채 남는다"""
+    판, 글 = job._관문판(object(), datetime(2026, 10, 16, tzinfo=UTC), {}, "B", set(), [], since="", version=None)
+    assert 글 and 판["gate_error"] == 글 and 판["risk"] == []
+    assert "risk_beta_error" in 판 and 판["risk_beta_error"] is None
+
+
 def test_write_puts_gate_risk_champion(monkeypatch: pytest.MonkeyPatch) -> None:
     c = Client(accounts=None)
     monkeypatch.setattr(job.bmj, "MIRROR_ACCOUNT", "B")
