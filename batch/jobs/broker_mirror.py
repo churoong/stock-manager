@@ -92,7 +92,9 @@ OPEN_ORDERS_SQL = (
     "SELECT id, stock_id, side, order_type, limit_price, quantity FROM paper_orders"
     " WHERE account_id = ? AND market = ? AND status = 'open' AND fill_session = ? ORDER BY id"
 )
-SENT_SQL = "SELECT paper_order_id, stock_id, reason FROM paper_broker_orders WHERE broker = ? AND trade_date = ?"
+SENT_SQL = (
+    "SELECT paper_order_id, stock_id, reason, status FROM paper_broker_orders WHERE broker = ? AND trade_date = ?"
+)
 PENDING_SQL = (
     "SELECT id, code, side, quantity, trade_date, broker_order_no, limit_price FROM paper_broker_orders"
     " WHERE broker = ? AND status IN ('sending', 'accepted') AND trade_date < ?"
@@ -982,6 +984,10 @@ def run(
     주문들 = client.execute(OPEN_ORDERS_SQL, [베낌, market, 오늘.isoformat()]).dicts()
     보냄 = client.execute(SENT_SQL, [증권사, 오늘.isoformat()]).dicts()
     이미 = {int(r["paper_order_id"]) for r in 보냄 if r["paper_order_id"] is not None}
+    # 오늘 앞 실행이 응답을 못 받은 줄(25.2299, 25.2293 교차검증 [권고]) — 같은 날 다시 돈 실행은 이 줄을 맞추지 않는다
+    # (맞추기는 어제까지의 줄만). 주문 허가 판정의 "체결을 모르는 채 다음 주문" 갈래로. 새 읽기 없음 — 이미 읽는 줄의 열
+    if 앞모름 := sum(1 for r in 보냄 if r.get("status") == "sending"):
+        기록["sending_today"] = 앞모름
     정리함 = 오늘_정리함(보냄)
     # 오늘 정리한 종목은 **같은 티커의 모든 행**으로 — 같은 날 다시 돌 때 이긴 행이 바뀌면(오늘 새 행을 처음 삼) 앞
     # 실행이 옛 행으로 낸 정리를 못 보고 새 행으로 한 번 더 정리했다(25.1616, 25.1615 교차검증 [필수] 1)

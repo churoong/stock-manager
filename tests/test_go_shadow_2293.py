@@ -55,7 +55,7 @@ def test_0_과_거짓과_빈_글은_걸리지_않는다() -> None:
 
 def test_갈래는_상수가_정의처다() -> None:
     assert list(bm.GO_NO_GO) == ["halted", "balance_truncated", "send"]
-    assert list(bm.GO_SELL_ONLY) == ["reconcile_unknown", "reconcile_truncated", "diff", "unknown_codes"]
+    assert list(bm.GO_SELL_ONLY) == ["reconcile_unknown", "reconcile_truncated", "diff", "unknown_codes", "sending_today"]
     assert not set(bm.GO_NO_GO) & set(bm.GO_SELL_ONLY)
 
 
@@ -85,6 +85,44 @@ def test_낼_매수_건수를_따로_싣는다() -> None:
     """25.2298 (25.2293 교차검증 [권고]) — `planned.mirror` 는 매도·매수를 함께 세어 `sell_only` 인 날 "새 매수를 냈나"
     를 가를 수 없었다. 흐름 시험(`test_kis_vts_1475`·`test_halt_shadow_2297`)이 값을 본다"""
     assert 'planned_buys"] = sum(x.side == "buy" for x in 낼것)' in inspect.getsource(jb)
+
+
+def test_같은_날_다시_돈_실행은_앞_실행의_응답_없음을_매도만으로_센다() -> None:
+    """25.2299 (25.2293 교차검증 [권고]) — 앞 실행이 응답 없음으로 남긴 오늘 `sending` 줄은 맞추기 대상(어제까지)이
+    아니라 다시 돈 실행의 판정이 `go` 였다. 흐름: 첫 실행이 응답을 못 받고, 같은 날 다시 돈 실행이 그 수를 센다"""
+    from batch.sources import kis_vts as kv
+    from tests.test_kis_vts_1475 import _at, _Sess, 키
+    from tests.test_paper_job_1445 import Client
+
+    mp = pytest.MonkeyPatch()
+    try:
+        for k, v in 키.items():
+            mp.setenv(k, v)
+        mp.setattr(jb, "MIRROR_ACCOUNT", "B")
+
+        def 새판() -> Client:
+            c = Client()
+            for oid, 회차, price, q in ((101, 1, 9_800, 3), (103, 2, 9_600, 2)):
+                c.conn.execute(
+                    "INSERT INTO paper_orders (id, account_id, market, stock_id, side, order_type, limit_price, quantity,"
+                    " currency, decided_on, fill_session, reason, rule_version, tranche, created_at)"
+                    " VALUES (?, 'B', 'KR', 1, 'buy', 'limit', ?, ?, 'KRW', '2026-10-15', '2026-10-16', 'r', 1, ?, 't')",
+                    [oid, price, q, 회차],
+                )  # fmt: skip
+            return c
+
+        # 앞 실행이 접수를 받았으면(accepted) 다시 돈 실행은 세지 않는다 — 응답 없음만이다
+        c = 새판()
+        jb.run(c, "KR", _at("08:40"), session=_Sess(), sleep=lambda _x: None)
+        assert "sending_today" not in jb.run(c, "KR", _at("08:45"), session=_Sess(), sleep=lambda _x: None)
+        c = 새판()
+        첫 = jb.run(c, "KR", _at("08:40"), session=_Sess(fail={"005930": kv.NoResponse("응답 없음")}), sleep=lambda _x: None)
+        assert 첫["sent"] == {"no_response": 2} and "sending_today" not in 첫  # 첫 실행 앞에는 오늘 줄이 없다
+        둘 = jb.run(c, "KR", _at("08:45"), session=_Sess(), sleep=lambda _x: None)
+        assert 둘["sending_today"] == 2
+        assert 둘["go_shadow"]["verdict"] == "sell_only" and "sending_today" in 둘["go_shadow"]["reasons"]
+    finally:
+        mp.undo()
 
 
 def test_기록만_한다_주문을_막거나_바꾸지_않는다() -> None:
