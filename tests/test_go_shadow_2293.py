@@ -71,6 +71,22 @@ def test_단계_기록의_꼬리에_실리고_깨져도_단계는_끝난다(monk
     assert jb._끝({"diff": 1}, 세션) == {"diff": 1, "go_shadow": {"error": "ValueError"}, "calls": 3}
 
 
+def test_갈래_열쇠마다_단계가_실제로_그_칸을_쓴다() -> None:
+    """25.2298 (25.2293 교차검증 [권고]) — 시험이 손으로 만든 기록만 봐서, 단계가 쓰는 칸 이름이 바뀌면(예:
+    `reconcile_truncated` → `recon_truncated`) 그 갈래가 조용히 죽어 "한 번도 안 선 갈래" 로 읽혔다. 열쇠마다
+    `run` 이 그 이름으로 기록에 쓰는지 소스로 묶는다(`reconcile_unknown` 은 `reconciled` 의 `unknown` 에서 읽는다)"""
+    글 = inspect.getsource(jb)
+    for k in (*bm.GO_NO_GO, *bm.GO_SELL_ONLY):
+        칸 = "reconciled" if k == "reconcile_unknown" else k
+        assert f'기록["{칸}"] = ' in 글, k
+
+
+def test_낼_매수_건수를_따로_싣는다() -> None:
+    """25.2298 (25.2293 교차검증 [권고]) — `planned.mirror` 는 매도·매수를 함께 세어 `sell_only` 인 날 "새 매수를 냈나"
+    를 가를 수 없었다. 흐름 시험(`test_kis_vts_1475`·`test_halt_shadow_2297`)이 값을 본다"""
+    assert 'planned_buys"] = sum(x.side == "buy" for x in 낼것)' in inspect.getsource(jb)
+
+
 def test_기록만_한다_주문을_막거나_바꾸지_않는다() -> None:
     """판정을 읽는 코드가 없다 — 켜는 일은 따로(그림자 기록이 쌓인 뒤, 사용자 결정)"""
     글 = inspect.getsource(jb.run)
@@ -84,5 +100,6 @@ def test_기록만_한다_주문을_막거나_바꾸지_않는다() -> None:
 def test_문서가_갈래와_읽는_법을_적는다() -> None:
     글 = (뿌리 / "docs" / "paper.md").read_text()
     for 조각 in ("### 15.13 주문 허가 판정", "25.2293", "`go_shadow`", "주문을 막지 않는다", "`sell_only`", "`no_go`",
-               *(f"`{k}`" for k in (*bm.GO_NO_GO, *bm.GO_SELL_ONLY)), "새 코드 첫날", "오탐"):  # fmt: skip
+               *(f"`{k}`" for k in (*bm.GO_NO_GO, *bm.GO_SELL_ONLY)), "새 코드 첫날", "오탐", "25.2298", "`planned_buys`",
+               "같은 날 다시 돈 실행", "`broker2`", "칸이 없는 실행", "미국"):  # fmt: skip
         assert 조각 in 글, 조각

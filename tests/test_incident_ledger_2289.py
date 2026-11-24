@@ -153,18 +153,39 @@ def test_걸친_날_수는_한국_날짜로_센다() -> None:
     둘 = il.incidents([_r("x", "failed", "17T14:00"), _r("x", "failed", "17T15:30"), _r("x", "success", "17T16:00")])
     assert 둘[0]["days"] == 2
     사흘 = il.incidents([_r("daily_kr", "failed", "17T23:27"), _r("daily_kr", "failed", "18T23:27"),
-                       _r("daily_kr", "skipped", "19T10:00"),  # 건너뜀은 날 수에 들지 않는다
+                       # 건너뜀은 날 수에 들지 않는다 — 실패가 없는 한국 날짜(11-20 01:00)에 둔다(25.2298: 처음엔
+                       # 실패가 선 날에 둬 세어도 3 이었다)
+                       _r("daily_kr", "skipped", "19T16:00"),
                        _r("daily_kr", "failed", "20T23:27")])  # fmt: skip
     assert 사흘[0]["days"] == 3 and 사흘[0]["closed"] is None
+    # 정리된 줄(끝맺지 못한 기록)은 날 수에 든다 — 사고를 여는 줄이다(25.2298)
+    from batch.core import db
+
+    죽음 = f"{db.REAPED_PREFIX}. 정리"
+    정리 = il.incidents([_r("z", "skipped", "17T01:00", err=죽음), _r("z", "skipped", "18T01:00", err=죽음)])
+    assert 정리[0]["days"] == 2 and 정리[0]["failures"] == 2
+    # 미국 작업은 미국 동부 날짜로 센다(25.2298) — 13:27·15:05 UTC 는 한국 22:27·이튿날 00:05 지만 한 미국 거래일
+    미국 = il.incidents([_r("daily_us", "failed", "17T13:27", "US"), _r("daily_us", "failed", "17T15:05", "US"),
+                       _r("daily_us", "success", "18T13:27", "US")])  # fmt: skip
+    assert 미국[0]["days"] == 1
+    # 같은 시각이 국내(또는 시장 없는) 작업이면 한국 날짜 둘
+    assert il.incidents([_r("q", "failed", "17T13:27", None), _r("q", "failed", "17T15:05", None)])[0]["days"] == 2
+    # 미국 동부 자정(05:00 UTC, 겨울)을 사이에 두면 미국도 이틀
+    assert il.incidents([_r("daily_us", "failed", "17T04:30", "US"),
+                         _r("daily_us", "failed", "17T05:30", "US")])[0]["days"] == 2  # fmt: skip
     # 닫힌 뒤 새 사고는 날 수를 처음부터 센다(앞 사고의 날이 남지 않는다)
     다시 = il.incidents([_r("y", "failed", "16T01:00"), _r("y", "success", "16T02:00"),
                        _r("y", "failed", "18T01:00"), _r("y", "failed", "19T01:00")])  # fmt: skip
     assert [x["days"] for x in 다시] == [1, 2]
     # 줄: 이틀부터 적는다(`SPAN_SHOW_DAYS`) — 하루 안의 사고에는 붙지 않는다
     assert il.SPAN_SHOW_DAYS == 2
-    assert "실패·중단 2번 · 복구" in il.lines(하루)[1] and "걸침" not in il.lines(하루)[1]
-    assert "실패·중단 2번 · 2일에 걸침 · 복구" in il.lines(둘)[1]
-    assert "실패·중단 3번 · 3일에 걸침 · 아직 복구 안 됨" in il.lines(사흘)[1]
+    assert "실패·중단 2번 · 복구" in il.lines(하루)[1] and "한 날" not in il.lines(하루)[1]
+    # 달력 폭이 아니라 **날의 수**다(25.2298 — "N일에 걸침" 은 금·월 이틀 실패에서 "복구 4.0일" 과 맞서 읽혔다)
+    assert "실패·중단 2번 · 실패·중단한 날 2일 · 복구" in il.lines(둘)[1]
+    assert "실패·중단 3번 · 실패·중단한 날 3일 · 아직 복구 안 됨" in il.lines(사흘)[1]
+    assert "걸침" not in "".join(il.lines(사흘))
+    # 날 수 칸이 None 인 사고를 줘도 줄은 깨지지 않는다
+    assert "한 날" not in il.lines([{**사흘[0], "days": None}])[1]
     # 시간대 없는 값은 원문 날짜 그대로
     assert il._날("2026-11-17T23:27:00") == "2026-11-17" and il._날("2026-11-17T23:27:00+00:00") == "2026-11-18"
 
@@ -183,8 +204,12 @@ def test_같은_코드로_복구됐는지를_가른다() -> None:
     assert 열림[0]["same_code"] is None
     # 닫힌 뒤 새 사고는 제 첫 실패의 코드로 다시 견준다(앞 사고의 코드가 남지 않는다)
     둘 = il.incidents([_s("a", "failed", "17T01:00", "abc"), _s("a", "success", "17T02:00", "abc"),
-                     _s("a", "failed", "18T01:00", "def"), _s("a", "success", "18T02:00", "ghi")])  # fmt: skip
-    assert [x["same_code"] for x in 둘] == [True, False]
+                     _s("a", "failed", "18T01:00", "def"), _s("a", "success", "18T02:00", "def")])  # fmt: skip
+    # 둘째 사고는 def → def 라 참이다 — 앞 사고의 abc 를 물려받으면 거짓이 된다(25.2298: 처음엔 def → ghi 라
+    # 물려받아도 거짓이어서 못 잡았다)
+    assert [x["same_code"] for x in 둘] == [True, True]
+    # 부분 성공으로 닫히면서 코드가 같은 경우
+    assert il.incidents([_s("a", "failed", "17T01:00", "abc"), _s("a", "partial", "17T03:00", "abc")])[0]["same_code"] is True
     # `sha` 속성이 없는 줄(다른 호출자)도 깨지지 않는다
     from types import SimpleNamespace as NS
 
@@ -212,12 +237,12 @@ def test_실행_기록에서_코드를_읽는다() -> None:
     db.apply_migrations(mem)  # type: ignore[arg-type]
     for i, 로그 in enumerate([{db.RUN_FINGERPRINT_KEY: {"sha": "abc123"}}, {db.RUN_FINGERPRINT_KEY: {"sha": None}},
                              {db.RUN_FINGERPRINT_KEY: "글"}, {"warnings": []}, None, {db.RUN_FINGERPRINT_KEY: {"sha": 7}},
-                             {db.RUN_FINGERPRINT_KEY: {"sha": ""}}]):  # fmt: skip
+                             {db.RUN_FINGERPRINT_KEY: {"sha": ""}}, [1], "글"]):  # fmt: skip
         mem.conn.execute(
             "INSERT INTO batch_runs (job_name, market, trade_date, status, started_at, step_log) VALUES (?,?,?,?,?,?)",
             [f"j{i}", "KR", "2026-11-17", "failed", f"2026-11-17T0{i}:00:00+00:00", json.dumps(로그) if 로그 is not None else None],
         )
-    assert [r.sha for r in ws.load_runs(mem, "2026-11-01")] == ["abc123", None, None, None, None, None, None]  # type: ignore[arg-type]
+    assert [r.sha for r in ws.load_runs(mem, "2026-11-01")] == ["abc123", None, None, None, None, None, None, None, None]  # type: ignore[arg-type]
     # 실제로 닫는 길이 그 칸을 채운다 — 지문의 이름이 바뀌면 여기서 깨진다
     assert "sha" in db.run_fingerprint() and db.RUN_FINGERPRINT_KEY == "fingerprint"
 
@@ -281,5 +306,6 @@ def test_읽지도_쓰지도_않는다_그리고_문서() -> None:
     for 조각 in ("### 7.3 운영 사고 대장", "25.2289", f"{il.CAUSE_MAX}자 `CAUSE_MAX`", f"긴 것부터 {il.TOP_N}건(`TOP_N`)", "새 표를 만들지 않는다",
                "건너뜀·도는 중·확인 실행은 사고를 열지도 닫지도 않는다", "아직 열림", "한국 시각", "끝맺지 못한 기록",
                "영향", "문장 머리", "25.2295", "이틀(`SPAN_SHOW_DAYS`)부터", "같은 코드로 복구", "코드가 바뀐 뒤 복구",
-               "그 고침 덕인지는 모른다", "실패·중단 N번"):  # fmt: skip
+               "그 고침 덕인지는 모른다", "실패·중단 N번", "25.2298", "미국 동부 날짜", "실패·중단한 날 N일", "달력 폭이 아니다",
+               "문서만 바꾼 커밋"):  # fmt: skip
         assert 조각 in 문서, 조각

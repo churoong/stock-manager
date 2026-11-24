@@ -1071,6 +1071,9 @@ def run(
     기록["sent"] = dict(상태)
     기록["planned"] = {"cleanup": sum(x.reason == bm.REASON_CLEANUP for x in 낼것),
                      "mirror": sum(x.reason == bm.REASON_MIRROR for x in 낼것)}  # fmt: skip
+    # 낼 것 가운데 **매수** 건수(25.2298, 25.2293 교차검증 [권고]) — `planned.mirror` 는 매도·매수를 함께 세어,
+    # 주문 허가 판정이 "매도만" 인 날 새 매수를 냈는지를 이 기록만으로 가를 수 없었다(docs/paper.md 15.13). 건수뿐이다
+    기록["planned_buys"] = sum(x.side == "buy" for x in 낼것)
     if 안냄:
         기록["not_sent"] = dict(Counter(까닭 for _o, _s, 까닭 in 안냄))
     기록["halted"] = 멈춤

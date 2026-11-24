@@ -33,10 +33,21 @@ describe("거래내역 비고", () => {
     expect(칸).toMatch(
       /whitespace-normal break-words[^>]*>\{o\.message\}<\/p>/,
     );
-    // 칸 전체에 truncate 를 걸지 않는다(펼친 글까지 잘린다) — 접힌 머리에만
-    expect(화면).not.toContain(
-      'className="max-w-[16rem] truncate text-slate-500"',
+    // 칸 전체에 truncate 를 걸지 않는다(펼친 글까지 잘린다) — 접힌 머리에만. 클래스 차례에 기대지 않게 칸을 여는
+    // 태그의 className 을 뽑아 낱말로 본다(25.2298 — 처음엔 한 글자열만 막아 차례만 바꾸면 통과했다)
+    const 여는칸 = 화면.match(
+      /<td className="([^"]*)">\s*\{remarkLong\(o\.message\)/,
     );
+    expect(여는칸).not.toBeNull();
+    expect(여는칸![1].split(/\s+/)).not.toContain("truncate");
     expect(칸).toMatch(/<summary className="[^"]*truncate/);
+    // 데스크톱은 마우스 올리기로도 본다 — title 은 남긴다
+    expect(칸).toMatch(/<summary[^>]*title=\{o\.message \?\? ""\}/);
+    // 펼친 문단은 자르지 않는다
+    const 문단 = 칸.match(/<p className="([^"]*)">\{o\.message\}<\/p>/);
+    expect(문단).not.toBeNull();
+    expect(문단![1].split(/\s+/)).not.toContain("truncate");
+    // 짧은 글은 예전대로 그 글을 그린다
+    expect(칸).toContain('(o.message ?? "")');
   });
 });

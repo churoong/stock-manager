@@ -335,6 +335,7 @@ def test_job_sends_once_and_records(c: Client) -> None:
     기록 = job.run(c, "KR", _at("08:40"), session=s, sleep=lambda _x: None, clock=lambda: _at("08:40"))
     assert s.orders == [("sell", "000660", 2, None), ("buy", "005930", 3, 9_800.0), ("buy", "005930", 2, 9_600.0)]
     assert 기록["sent"] == {"accepted": 3} and 기록["diff"] == 0 and 기록["planned"] == {"cleanup": 0, "mirror": 3}
+    assert 기록["planned_buys"] == 2  # 25.2298 — 베낌 3 가운데 매수 둘
     줄 = c.q("SELECT paper_order_id, status, broker_order_no, reason, source FROM paper_broker_orders ORDER BY id")
     assert 줄 == [(102, "accepted", "N1", "베낌", "kis_vts"), (101, "accepted", "N2", "베낌", "kis_vts"),
                  (103, "accepted", "N3", "베낌", "kis_vts")]  # fmt: skip
