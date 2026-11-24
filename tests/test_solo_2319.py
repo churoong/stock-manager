@@ -779,5 +779,27 @@ def test_보유_매도만_막히고_살_후보가_없는_날은_사지_못함이
     a = 기록["accounts"]["Z4"]
     assert a["risk_blocked"] >= 1 and "blocked" not in (a.get("buy") or {})
     assert not any("사지 못함" in x for x in 줄)
-    assert not any("사지 못함" in x["text"] for x in desk.checks(halted=False, paper=기록, broker=None, recon_bad=[],
+    assert not any("사지 못함" in x["text"] for x in desk.checks(halted=True, paper=기록, broker=None, recon_bad=[],
                                                                    warnings=0))  # fmt: skip
+
+
+def test_멈춤_스위치로_매수가_막힌_날도_사지_못함이_뜬다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.2327 — paper.md 18장의 결정("정말 못 산 날 — 보수 쪽이라 그대로")을 시험으로 고정한다"""
+    c = _새(monkeypatch, ("Z4",), ("2026-10-14",))
+    _국면(monkeypatch, "bull")
+    c.conn.execute("INSERT INTO settings (key, value, updated_at) VALUES ('paper_halt', '{\"on\": true}', 't')")
+    줄, 기록 = _하루(c, monkeypatch, "2026-10-14")
+    assert 기록["accounts"]["Z4"]["buy"]["blocked"] == 1
+    assert "⚠️ 가상 오닐 사지 못함 — 위험 점검에 막힘 1건" in 줄
+    할일 = desk.checks(halted=True, paper=기록, broker=None, recon_bad=[], warnings=0)
+    assert {"level": "normal", "text": "가상 오닐 사지 못함 — 위험 점검에 막힘 1건"} in 할일
+    assert any("멈춤 스위치" in x["text"] for x in 할일)
+
+
+def test_장부_현금이_음수면_신호_갈래와_같은_까닭으로_건너뛴다(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cal, "local_today", lambda _m=None: date(2026, 11, 2))
+    주문, 기록 = paper_solo.size_orders(
+        _시세판(1_000.0, "2026-10-30"), solo.CANSLIM, [solo.Ranked(1, 99, {"rs": 99})], 1, market="KR",
+        valuation=_가치(1e6, -10.0), open_buys=[], fx_rate=None, as_of="2026-10-30", n_ranked=1, is_frozen=lambda _s: False,
+    )  # fmt: skip
+    assert 주문 == [] and 기록 == {"skipped": "장부 현금이 음수"} and 기록["skipped"] in pp.BUY_FAULT_SKIPS

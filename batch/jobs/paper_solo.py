@@ -123,6 +123,11 @@ def size_orders(
     예약 = pp.reserved_krw(open_buys, {"USD": fx_rate})
     if 예약 is None:
         return [], {"skipped": "미체결 달러 주문의 환율 모름"}
+    if valuation.cash_krw < 0:
+        # 신호 갈래(`jobs/paper.buy_orders`)와 같은 까닭 글 — 운용 점검이 사고(높음)로 센다(`pp.BUY_FAULT_SKIPS`,
+        # 25.2226).
+        # 예전 단독 갈래엔 없어 음수 현금 날 관문의 현금 막힘으로 '사지 못함'(보통)만 떴다(25.2327)
+        return [], {"skipped": "장부 현금이 음수"}
     현금 = valuation.cash_krw - 예약
     비중 = 1 / solo.Z3_SLICES if selection == solo.MAGIC else solo.Z4_WEIGHT_PCT / 100
     오늘 = cal.local_today(market)
