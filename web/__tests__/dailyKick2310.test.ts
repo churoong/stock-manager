@@ -211,18 +211,8 @@ describe("아예 안 깨워진 일일 배치 깨우기", () => {
     expect(둘.부름).toEqual(["daily-kr"]);
   });
 
-  it("이미 발송된 행은 잡지 않고, 그 사이 발송용으로 잡힌 행은 결과를 못 적은 것으로 남긴다 — 25.2312", async () => {
+  it("깨우는 동안 겹친 호출이 그 행을 발송용으로 잡으면 결과를 못 적은 것으로 남긴다 — 25.2312", async () => {
     const { 행 } = db([], [알림("daily_kr")]);
-    // ① 이미 보낸 행 — 잡지 않는다(깨우지도 글을 고치지도 않는다)
-    execute.mockImplementationOnce(async () => ({
-      columns: [],
-      rows: [],
-      affectedRows: 0,
-    })); // 잡기 0행 흉내
-    const { 부름, f } = 부르개();
-    expect(await kickMissingDaily([알림("daily_kr")], f)).toEqual([]);
-    expect(부름).toEqual([]);
-    // ② 깨우는 동안 겹친 호출이 그 행을 발송용으로 잡았다 — 결과 줄은 못 붙고 noted:false
     const 결과 = await kickMissingDaily([알림("daily_kr")], async () => {
       await execute(
         "UPDATE health_alerts SET sent_at = 'claim:x' WHERE job = 'daily_kr'",
@@ -233,6 +223,17 @@ describe("아예 안 깨워진 일일 배치 깨우기", () => {
       { job: "daily_kr", market: "KR", kick: "kicked", noted: false },
     ]);
     expect(행("daily_kr")!.message).toBe("[무응답] daily_kr");
+  });
+
+  it("저장과 잡기 사이에 겹친 호출이 발송용으로 잡은 행도 깨운다 — 깨움을 잃지 않는다(25.2314)", async () => {
+    db([], [알림("daily_kr")]);
+    await execute(
+      "UPDATE health_alerts SET sent_at = 'claim:2026-11-23T00:20:00Z' WHERE job = 'daily_kr'",
+    );
+    const { 부름, f } = 부르개();
+    const 결과 = await kickMissingDaily([알림("daily_kr")], f);
+    expect(부름).toEqual(["daily-kr"]);
+    expect(결과[0]).toMatchObject({ kick: "kicked", noted: false }); // 결과 줄은 못 붙는다(발송 중)
   });
 
   it("발송된 행은 실제 SQL 로도 잡히지 않는다", async () => {
@@ -261,6 +262,7 @@ describe("아예 안 깨워진 일일 배치 깨우기", () => {
       throw new Error("부르면 안 된다");
     });
     expect(깨짐[0].kick).toBe("failed:SQLITE_BUSY");
+    expect(깨짐[0].noted).toBe(false); // 결과 쓰기도 실패했다 — 늘 참으로 두면 깨진다(25.2314)
   });
 
   it("개장 시각을 모르면 깨우지 않는다 · 그 시장 자정", async () => {

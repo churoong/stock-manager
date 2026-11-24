@@ -53,8 +53,11 @@ LIMIT 1`;
  * 알림을 **먼저 저장한 뒤** 그 행을 잡는다(25.2311, 25.2310 교차검증 [권고]) — 깨움이 저장보다 앞서면 저장이 깨진 날(쓰기 한도·일시
  * 오류) 다음 매시 호출이 같은 [무응답] 을 다시 만들고 또 깨웠다. 겹친 두 호출도 이 조건부 UPDATE 로 하나만 잡는다
  */
+/** 잡기는 **발송이 끝난**(실제 시각이 찍힌) 행만 막는다 — 발송 중(`sent_at = 'claim:…'`)인 행은 잡는다(25.2314, 25.2312 교차검증
+ * [권고]: 25.2312 가 `sent_at IS NULL` 로 막자, 저장과 잡기 사이에 겹친 호출이 그 행을 발송용으로 잡으면 깨움 자체를 잃었다 —
+ * 고치기 전(깨우고 결과 줄만 빠짐)보다 나빴다. 결과 줄이 빠지는 것은 `noted: false` 로 남는다) */
 export const KICK_CLAIM_SQL = `UPDATE health_alerts SET data = json_set(data, '$.kick', 'claim')
-WHERE job = ? AND market = ? AND local_date = ? AND kind = 'missing' AND json_extract(data, '$.kick') IS NULL AND sent_at IS NULL`;
+WHERE job = ? AND market = ? AND local_date = ? AND kind = 'missing' AND json_extract(data, '$.kick') IS NULL AND (sent_at IS NULL OR sent_at LIKE 'claim:%')`;
 export const KICK_RESULT_SQL = `UPDATE health_alerts SET message = message || ?, data = json_set(data, '$.kick', ?)
 WHERE job = ? AND market = ? AND local_date = ? AND kind = 'missing' AND sent_at IS NULL`;
 /** 개장 시각에서 거슬러 그 시장 자정까지(국내 09:00·미국 09:30 개장). 늦게 여는 날(수능일 10:00)은 자정이 그만큼 늦게 잡힌다 —
