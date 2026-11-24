@@ -67,6 +67,18 @@ GO_SELL_ONLY = {
 }
 
 
+def halt_shadow(intents: list[Intent]) -> dict[str, int]:
+    """멈춤 스위치가 켜진 날의 그림자(25.2297, docs/paper.md 15.14) — 멈춤이 없었다면 냈을 주문을 갈래로 센다.
+
+    `sells` = 베낀 매도(H 의 손절·익절·정리 매도), `cleanups` = 증권사에만 남은 몫의 정리 매도, `buys` = 베낀 매수.
+    "매수만 멈춤" 모드였다면 `sells + cleanups` 는 나갔고 `buys` 만 막혔다 — 지금 스위치는 셋 다 막는다"""
+    return {
+        "sells": sum(1 for x in intents if x.side == "sell" and x.reason != REASON_CLEANUP),
+        "cleanups": sum(1 for x in intents if x.reason == REASON_CLEANUP),
+        "buys": sum(1 for x in intents if x.side == "buy"),
+    }
+
+
 def go_shadow(record: dict[str, Any]) -> dict[str, Any]:
     """KIS 단계 기록 → {verdict: "go"·"sell_only"·"no_go", reasons: [갈래 열쇠]}. 순수 계산.
 

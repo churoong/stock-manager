@@ -1003,11 +1003,19 @@ def run(
     if 대기:
         기록["pending_fill_buys"] = len(대기)
     정리기준 = {sid: 내부.get(sid, 0) + 대기.get(sid, 0) for sid in set(내부) | set(대기)}
-    낼것, 안냄 = bm.plan(주문들, 코드, 정리기준, 증권, 산적, already=이미, cleaned_today=정리함, halted=멈춤,
-                       bought_today=오늘산, frozen=frozen, currency="USD" if 미국 else "KRW",
-                       closes=종가, sent_today=int(낸수[0][0] or 0) if 낸수 else 0,
-                       guard_held=장중판,
-                       stop_floor=_오늘_손절선(client, 오늘, 베낌) if slot == MAIN and not 미국 else None)  # fmt: skip
+    손절선 = _오늘_손절선(client, 오늘, 베낌) if slot == MAIN and not 미국 else None
+    인자: dict[str, Any] = dict(already=이미, cleaned_today=정리함, bought_today=오늘산, frozen=frozen,
+                              currency="USD" if 미국 else "KRW", closes=종가, guard_held=장중판, stop_floor=손절선,
+                              sent_today=int(낸수[0][0] or 0) if 낸수 else 0)  # fmt: skip
+    낼것, 안냄 = bm.plan(주문들, 코드, 정리기준, 증권, 산적, halted=멈춤, **인자)
+    if 멈춤:
+        # 그림자(25.2297, roadmap #3) — 스위치는 하나뿐이라 켜면 손절·정리까지 멈춘다. "매수만 멈춤" 이었다면 냈을
+        # 매도·정리 수를 센다(같은 계획 함수를 멈춤 없이 한 번 더 — 순수 계산, 주문은 내지 않는다). 곁다리로 가둔다:
+        # 멈춘 날은 계획의 나머지 길을 타지 않으므로 이 셈이 던져도 실행은 그대로다
+        try:
+            기록["halt_shadow"] = bm.halt_shadow(bm.plan(주문들, 코드, 정리기준, 증권, 산적, halted=False, **인자)[0])
+        except Exception as exc:  # noqa: BLE001
+            기록["halt_shadow"] = {"error": type(exc).__name__}
     # 미국에서 티커는 있는데 KIS 거래소 코드가 없어 뺀 종목은 "종목 코드 없음" 이 아니다 — 까닭을 바로 적는다
     # (25.1608, 25.1607 교차검증 [권고] 2. 내지 않는 처리 자체는 25.1485 그대로)
     if 미국:
