@@ -236,15 +236,20 @@ describe("아예 안 깨워진 일일 배치 깨우기", () => {
     expect(결과[0]).toMatchObject({ kick: "kicked", noted: false }); // 결과 줄은 못 붙는다(발송 중)
   });
 
-  it("발송된 행은 실제 SQL 로도 잡히지 않는다", async () => {
+  it("발송이 끝난 행도 깨운다 — 결과 줄은 못 붙고 noted:false(25.2315)", async () => {
     const { 행 } = db([], [알림("daily_kr")]);
     await execute(
       "UPDATE health_alerts SET sent_at = '2026-11-23T00:20:00Z' WHERE job = 'daily_kr'",
     );
     const { 부름, f } = 부르개();
+    expect(await kickMissingDaily([알림("daily_kr")], f)).toEqual([
+      { job: "daily_kr", market: "KR", kick: "kicked", noted: false },
+    ]);
+    expect(부름).toEqual(["daily-kr"]);
+    expect(행("daily_kr")!.message).toBe("[무응답] daily_kr"); // 이미 보낸 글은 고치지 않는다
+    // 한 번뿐이다 — 다음 호출은 `data.kick` 이 차 있어 잡지 못한다
     expect(await kickMissingDaily([알림("daily_kr")], f)).toEqual([]);
-    expect(부름).toEqual([]);
-    expect(행("daily_kr")!.message).toBe("[무응답] daily_kr");
+    expect(부름).toEqual(["daily-kr"]);
   });
 
   it("깨우기 실패·DB 실패는 던지지 않고 글로", async () => {
