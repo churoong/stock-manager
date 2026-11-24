@@ -783,6 +783,8 @@ class Test밸류_분모:
 아직_안_보는_모듈 = {
     "incident_ledger": "문턱이 없다 — 상수는 상태 이름 묶음과 표시 개수(`TOP_N`·`CAUSE_MAX`)뿐이고 docs/health.md 7.3 의 목록"
     " 줄에 적혀 있다. 값과 문서의 대조는 `tests/test_incident_ledger_2289` 가 묶는다(25.2289)",
+    "loss_ladder": "규칙·문턱이 아니다 — 창(`WINDOWS`)과 관찰용 격자(`GRID`)는 docs/desk.md 6장의 목록 줄에 적혀 있고 값과 문서의"
+    " 대조는 `tests/test_loss_ladder_2296` 이 묶는다(25.2296)",
     "order_limits": "그림자 계측의 창·표본 하한은 docs/paper.md 15.12 의 목록 줄에 적혀 있다 — 값과 문서의 대조는"
     " `tests/test_order_limits_2284.test_문서가_깃과_읽는_법을_적는다` 가 묶는다(25.2284)",
     "funnel_oc": "문턱을 갖지 않는다 — 판정 함수·문턱은 `luck`·`scoreboard`·`desk`·`paper` 의 것을 그대로 부르고, 제 상수는 합성"

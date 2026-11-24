@@ -21,7 +21,7 @@ from typing import Any
 from batch.core import calendar as cal
 from batch.core import db
 from batch.jobs import broker_mirror as bmj
-from batch.services import desk
+from batch.services import desk, loss_ladder
 from batch.services import paper as pp
 
 #: 관문 R 대비 옆 원가·묵은 평가 비중(25.1709) — H·R1·R2 의 지금 판 구간 줄만(보유 칸을 읽는다)
@@ -682,15 +682,21 @@ def _관문판(
             사전 = {"error": 예외글(exc)}
         베타, 베타오류 = _betas(client, ids, now)
         위험 = desk.risk_board(latest, 계열, 손절, 베타)
+        # 계좌 손실 사다리 그림자(25.2296, roadmap #3) — KIS 가 베끼는 계좌 하나만. 이미 읽은 지수 계열로 낸다(읽기 0).
+        # 곁다리 — 깨져도 관문·위험판은 남는다. 주문·판정에 닿지 않는다
+        try:
+            사다리: dict[str, Any] = {"account": h, **loss_ladder.ladder(계열.get(h) or [])}
+        except Exception as exc:  # noqa: BLE001
+            사다리 = {"account": h, "error": 예외글(exc)}
         판 = {"gate": 관문, "risk": 위험, "prereg_status": 사전,
              "champion": desk.champion(계열, h, 증거, 판시작),
              "readiness": desk.readiness(runs=늦음[0] if 늦음 else None, kis=kis요약), "gate_error": None,
-             "gate_carry": None, "risk_beta_error": 베타오류}  # fmt: skip
+             "gate_carry": None, "risk_beta_error": 베타오류, "loss_ladder": 사다리}  # fmt: skip
         return 판, None
     except Exception as exc:  # noqa: BLE001 — 곁다리 안의 곁다리
         글 = 예외글(exc)
         return {"gate": None, "risk": [], "champion": [], "readiness": [], "prereg_status": {}, "gate_error": 글,
-                "gate_carry": 앞관문, "risk_beta_error": None}, 글  # fmt: skip
+                "gate_carry": 앞관문, "risk_beta_error": None, "loss_ladder": None}, 글  # fmt: skip
 
 
 def _this_version_evidence(row: dict[str, Any]) -> dict[str, Any]:
