@@ -610,23 +610,47 @@ def run_fingerprint() -> dict[str, Any]:
     - `sha`: 커밋(Actions 의 `GITHUB_SHA` 앞 12자 — 로컬 실행은 None. git 을 부르지 않는다)
     - `run`: Actions 실행 번호·재시도("번호.재시도" — 공개 저장소의 실행 주소 끝자리라 개인정보가 아니다), 로컬은 None
     - `py`: 파이썬 판
-    - `deps`: 깔린 배포판 전부의 "이름==판" 을 정렬해 낸 지문(sha1 앞 10자) — 직접 의존성은 requirements.txt 가
-      고정하므로 같은 커밋에서 이 값이 달라지면 **간접 의존성이 움직인 것**이다. 판 목록은 싣지 않는다(실행마다 수 KB)
+    - `deps`: 깔린 배포판 전부의 "이름==판" 을 정렬해 낸 지문(sha1 앞 10자) — **같은 커밋·같은 워크플로**에서 이 값이
+      달라지면 깔린 판이 움직인 것이다(간접 의존성, 그리고 고정하지 않은 pip 자신 — 25.2279). 워크플로마다 더 까는
+      것이 달라 워크플로끼리는 값이 다르다. 판 목록은 싣지 않는다(실행마다 수 KB). 훑다 실패하면 None 이고
+      `error` 칸에 예외 이름
     """
     if _지문[0] is None:
         import hashlib
         import platform
         from importlib import metadata
 
-        판들 = sorted({f"{(d.metadata['Name'] or '').lower()}=={d.version}" for d in metadata.distributions()})
         실행, 재시도 = os.environ.get("GITHUB_RUN_ID"), os.environ.get("GITHUB_RUN_ATTEMPT")
-        _지문[0] = {
+        지문: dict[str, Any] = {
             "sha": (os.environ.get("GITHUB_SHA") or "")[:12] or None,
             "run": f"{실행}.{재시도 or 1}" if 실행 else None,
             "py": platform.python_version(),
-            "deps": hashlib.sha1("\n".join(판들).encode()).hexdigest()[:10],
+            "deps": None,
         }
+        # **곁다리가 닫기를 막지 않는다** (25.2279, 25.2277 교차검증 [권고] 셋) — 지문은 닫는 UPDATE 앞에서 불린다.
+        # 배포판 훑기가 던지면(깨진 METADATA 의 UnicodeDecodeError, 이름 없는 배포판 — 파이썬이 오르면 KeyError)
+        # 모든 작업의 닫기가 막히고 실행 기록이 running 으로 남는다. 실패는 칸에 적고 그 지문을 그대로 다시 쓴다
+        try:
+            판들 = sorted({f"{(d.metadata['Name'] or '').lower()}=={d.version}" for d in metadata.distributions()})
+            지문["deps"] = hashlib.sha1("\n".join(판들).encode()).hexdigest()[:10]
+        except Exception as exc:  # noqa: BLE001 — 기록용 칸이 본 작업을 죽이지 않게
+            지문["error"] = type(exc).__name__
+        _지문[0] = 지문
     return dict(_지문[0])
+
+
+#: 실행 기록을 닫는 문장 둘 — 인자 자리 [끝난 때, 상태, step_log 칸, 오류 글, 번호] 가 같다(25.2277·25.2279).
+#: 고정 글로 둔다(스키마 대조 그물 `tests/test_sql_schema` 가 본다 — 이어 붙여 만들면 "못 보는 질의" 가 된다)
+CLOSE_RUN_SQL = (
+    "UPDATE batch_runs SET finished_at = ?, status = ?, step_log = COALESCE(?, step_log), error_text = ? WHERE id = ?"
+)
+#: step_log 없이(또는 빈 것으로) 닫는 **내** 실행 — 있던 것에 지문 칸만 더한다. JSON 이 아닌 옛 글은 그대로.
+#: `'$.fingerprint'` 는 `RUN_FINGERPRINT_KEY` 와 같아야 한다(시험이 대조)
+CLOSE_RUN_FINGERPRINT_SQL = (
+    "UPDATE batch_runs SET finished_at = ?, status = ?, step_log = CASE WHEN step_log IS NOT NULL"
+    " AND NOT json_valid(step_log) THEN step_log"
+    " ELSE json_set(COALESCE(step_log, '{}'), '$.fingerprint', json(?)) END, error_text = ? WHERE id = ?"
+)
 
 
 def finish_batch_run(
@@ -653,19 +677,12 @@ def finish_batch_run(
         # 내 지문을 적으면 "그 실행이 어느 코드였나" 가 거짓이 된다
         step_log = {**step_log, ROWS_READ_KEY: ReadCounter.process_total - 시작}
         step_log[RUN_FINGERPRINT_KEY] = run_fingerprint()
-    # step_log 없이 닫는 **내** 실행(실패 정리)에도 지문을 남긴다(25.2277) — 사고 난 실행이야말로 "어느 코드였나" 가
-    # 필요하다. 있던 step_log(진행 상태)은 그대로 두고 칸 하나만 더한다. 같은 문장·같은 인자 자리로 한다(쓰기 한 번
-    # 그대로, 닫기가 둘로 갈라지지 않게). JSON 이 아닌 옛 글은 건드리지 않는다
+    # step_log 없이(빈 dict 포함) 닫는 **내** 실행에도 지문을 남긴다(25.2277) — 실패 정리뿐 아니라 그렇게 닫는
+    # 성공·건너뜀도(예전 NULL 대신 지문만 든 칸). 사고 난 실행이야말로 "어느 코드였나" 가 필요하다. 있던
+    # step_log(진행 상태)은 그대로 두고 칸 하나만 더한다. 같은 인자 자리의 한 문장(쓰기 한 번 그대로)
     지문만 = not step_log and 시작 is not None
     client.execute(
-        "UPDATE batch_runs SET finished_at = ?, status = ?, step_log = "
-        + (
-            "CASE WHEN step_log IS NOT NULL AND NOT json_valid(step_log) THEN step_log"
-            f" ELSE json_set(COALESCE(step_log, '{{}}'), '$.{RUN_FINGERPRINT_KEY}', json(?)) END"
-            if 지문만
-            else "COALESCE(?, step_log)"
-        )
-        + ", error_text = ? WHERE id = ?",
+        CLOSE_RUN_FINGERPRINT_SQL if 지문만 else CLOSE_RUN_SQL,
         [
             now_iso(),
             status,

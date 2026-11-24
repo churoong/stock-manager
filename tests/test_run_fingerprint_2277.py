@@ -150,3 +150,58 @@ def test_닫는_문장의_인자_자리는_성공과_실패가_같다() -> None:
     assert sql.startswith("UPDATE batch_runs SET finished_at = ?, status = ?, step_log = ") and sql.count("?") == 5
     assert params[1] == "failed" and params[3] == "왜" and params[4] == 번호
     assert json.loads(params[2]) == db.run_fingerprint()
+
+
+def test_지문을_못_내도_닫기는_간다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.2279 (25.2277 교차검증 [권고]) — 배포판 훑기가 던지면(깨진 METADATA) 닫는 UPDATE 앞에서 막혀 모든 작업의
+    실행 기록이 running 으로 남았다. 곁다리는 실패를 칸에 적고 닫기는 그대로 간다"""
+    from importlib import metadata
+
+    부른수 = []
+
+    def 깨짐():
+        부른수.append(1)
+        raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "깨진 METADATA")
+
+    monkeypatch.setattr(metadata, "distributions", 깨짐)
+    f = db.run_fingerprint()
+    assert f["deps"] is None and f["error"] == "UnicodeDecodeError" and f["py"]
+    c = _sqlite_client()
+    성공 = db.start_batch_run(c, job_name="paper", market="KR", trade_date="2026-11-24")  # type: ignore[arg-type]
+    실패 = db.start_batch_run(c, job_name="paper", market="US", trade_date="2026-11-24")  # type: ignore[arg-type]
+    db.finish_batch_run(c, 성공, status="success", step_log={"orders": 1})  # type: ignore[arg-type]
+    db.finish_batch_run(c, 실패, status="failed", error_text="죽음")  # type: ignore[arg-type]
+    상태 = dict(c.execute("SELECT id, status FROM batch_runs WHERE id IN (?, ?)", [성공, 실패]).rows)
+    assert 상태 == {성공: "success", 실패: "failed"}
+    assert _로그(c, 성공)[db.RUN_FINGERPRINT_KEY]["error"] == "UnicodeDecodeError"
+    assert _로그(c, 실패) == {db.RUN_FINGERPRINT_KEY: f}
+    assert len(부른수) == 1  # 실패한 지문도 한 번만 낸다(닫을 때마다 다시 던지지 않는다)
+
+
+def test_이름_없는_배포판은_지문을_막지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    from importlib import metadata
+
+    class _빈:
+        metadata = {"Name": None}
+        version = "1"
+
+    monkeypatch.setattr(metadata, "distributions", lambda: [_빈()])
+    f = db.run_fingerprint()
+    assert f["deps"] and "error" not in f
+
+
+def test_닫는_문장_둘은_고정_글이고_열쇠가_같다() -> None:
+    assert f"'$.{db.RUN_FINGERPRINT_KEY}'" in db.CLOSE_RUN_FINGERPRINT_SQL
+    for sql in (db.CLOSE_RUN_SQL, db.CLOSE_RUN_FINGERPRINT_SQL):
+        assert sql.startswith("UPDATE batch_runs SET finished_at = ?, status = ?, step_log = ") and sql.count("?") == 5
+        assert sql.endswith(", error_text = ? WHERE id = ?")
+
+
+def test_빈_step_log_으로_닫는_성공도_지문만_남는다() -> None:
+    """실패 정리만이 아니다 — step_log 없이·빈 dict 로 닫는 내 실행 전부(예전엔 NULL)"""
+    c = _sqlite_client()
+    하나 = db.start_batch_run(c, job_name="x", market=None, trade_date=None)  # type: ignore[arg-type]
+    둘 = db.start_batch_run(c, job_name="x", market=None, trade_date=None)  # type: ignore[arg-type]
+    db.finish_batch_run(c, 하나, status="success")  # type: ignore[arg-type]
+    db.finish_batch_run(c, 둘, status="skipped", step_log={})  # type: ignore[arg-type]
+    assert _로그(c, 하나) == _로그(c, 둘) == {db.RUN_FINGERPRINT_KEY: db.run_fingerprint()}

@@ -69,6 +69,16 @@ def test_전략끼리_함께_움직이면_문턱이_낮아져_통과가_는다()
     assert oc.dsr_pass_rate(0.0, 60, 18, rho=0.8, sims=300, seed=4)["pass_rate"] < 0.05
 
 
+def test_실력_0_줄의_통과를_따로_센다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.2279 (25.2276 교차검증 [권고]) — '실력 0 이 하나라도 통과' 열이 0 으로 죽어도 잡는 시험이 없었다"""
+    r = oc.dsr_pass_rate(0.0, 60, 18, rho=0.5, sims=2000, seed=1)
+    assert r["any_null_pass_rate"] == pytest.approx(0.034, abs=0.0005)  # 문서 표의 3.4%
+    monkeypatch.setattr(oc.scoreboard, "STAGE01_MIN_DSR", 0.0)
+    assert oc.dsr_pass_rate(0.0, 60, 18, sims=10, seed=1)["any_null_pass_rate"] == 1.0
+    # 실력 0 줄이 없으면(전략 하나) 거짓 통과도 없다
+    assert oc.dsr_pass_rate(0.0, 60, 18, cohort=1, sims=10, seed=1)["any_null_pass_rate"] == 0.0
+
+
 def test_24개월_미만은_판정_안_함이라_통과가_아니다() -> None:
     assert oc.dsr_pass_rate(9.0, luck.MIN_MONTHS - 1, 18, sims=10, seed=1)["pass_rate"] == 0.0
 
@@ -163,8 +173,9 @@ def test_문서의_표_값이_함수가_내는_값이다() -> None:
     assert "| 50(실력 0) | 6·10 | " + " | ".join(f"{x * 100:.1f}%" for x in r) + " |" in 절
     r = oc.gate_pass_rate(56.0, 10.0, sims=4000, seed=1)["cumulative_pass"]
     assert "| 56 | 10 | " + " | ".join(f"{x * 100:.1f}%" for x in r) + " |" in 절
-    칸 = [f"{oc.min_effect(6, a, sims=4000, seed=1):.2f}" for a in oc.TABLE_ALPHA]
-    assert "| 6 | " + " | ".join(칸) + " |" in 절
+    for n in oc.TABLE_BLOCKS:  # (다) 표는 네 줄 전부(25.2279 — 처음엔 6 줄만 묶어 두 칸이 반올림으로 어긋나 있었다)
+        칸 = [f"{oc.min_effect(n, a, sims=4000, seed=1):.2f}" for a in oc.TABLE_ALPHA]
+        assert f"| {n} | " + " | ".join(칸) + " |" in 절, n
     d = oc.dsr_pass_rate(2.0, 60, 18, sims=2000, seed=1)
     assert f"| 2.0 | {d['pass_rate'] * 100:.1f}% |" in 절 and d["any_null_pass_rate"] <= 0.001
 

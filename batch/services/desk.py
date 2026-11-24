@@ -346,6 +346,10 @@ GATE_RATIO_MIN_N = 20
 KIS_RECENT_DAYS = 7
 #: 위험판 — 손절선까지 이만큼(%p) 안이면 "손절 가까움"
 RISK_NEAR_STOP_PP = 2.0
+#: 열린 위험을 내지 않는 계좌 — 매도 원칙에 "손절" 이 없다(D 장기보유 `time`: 기간초과 하나만, `pp.SELL_RULES`).
+#: 선에서 팔지 않으므로 "모두 선에 닿아 팔리면 잃는 몫" 이 한계가 못 된다(25.2279, 25.2278 교차검증 [권고]).
+#: 손절 가까움은 예전대로 같은 선으로 보인다(위험을 보는 자리 — docs/desk.md 6장)
+OPEN_RISK_NO_STOP_IDS = ("D",)
 #: 챔피언 교체 후보 — 겹치지 않는 블록 길이(평가 횟수), 최소 블록 수, 이긴 블록 비율
 CHAMPION_BLOCK = 20
 CHAMPION_MIN_BLOCKS = 3
@@ -1111,9 +1115,12 @@ def risk_board(
         out.append({"id": a, "exposure_pct": 보유 / 자산 * 100 if 자산 > 0 else None, "positions": len(종목),
                     "top_weight_pct": float(큰.get("weight_pct") or 0) if 큰 else None,
                     "top_name": (큰.get("name") or 큰.get("ticker")) if 큰 else None, "near_stop": 가까움,
-                    # 손절선으로 재지 않는 계좌(스윙·단타·ETF 전술)와 하나도 못 잰 계좌는 None. 보유가 없으면 0
-                    "open_risk_pct": None if 주석 or (종목 and not 센) else 열린,
-                    **({"open_risk_skipped": 못잼} if 못잼 and 주석 is None else {}),
+                    # 손절선으로 재지 않는 계좌(스윙·단타·ETF 전술), 손절로 팔지 않는 계좌(D), 하나도 못 잰 계좌는 None.
+                    # 보유가 없으면 0 — 다만 보유 평가가 있는데 종목이 비었으면(보유 글이 깨짐) 모름(25.2279)
+                    "open_risk_pct": (None if 주석 or a in OPEN_RISK_NO_STOP_IDS or (종목 and not 센)
+                                      or (not 종목 and 보유 > 0) else 열린),
+                    **({"open_risk_skipped": 못잼} if 못잼 and 주석 is None and a not in OPEN_RISK_NO_STOP_IDS
+                       else {}),
                     **({"near_stop_note": 주석[0]} if 주석 else {}),
                     **({"near_stop_warn": True} if 주석 and 주석[1] else {}),
                     "dd_pct": (v[-1][1] / 고점 - 1) * 100 if v and 고점 else None})  # fmt: skip
