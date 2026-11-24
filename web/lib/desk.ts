@@ -185,6 +185,8 @@ export interface DeskSummary {
   fill_adjust?: FillAdjust | null; fill_adjust_error?: string | null;
   leaderboard: DeskLeaderboard; rule_history?: Record<string, RuleSpan[]>; mirror_account: string; updated_at: string;
   gate?: Gate | null; risk?: RiskRow[]; champion?: ChampionRow[]; gate_error?: string | null; readiness?: ReadinessItem[];
+  /** 위험판의 베타를 못 읽은 까닭 — 있으면 지수 충격 칸이 빠진 날이다 (25.2283) */
+  risk_beta_error?: string | null;
   last_market: DeskMarketKey;
   kis_account: DeskKisAccount; markets: Partial<Record<DeskMarketKey, DeskMarket>>;
 }
@@ -201,6 +203,8 @@ export interface DeskView {
   champion: ChampionRow[];
   /** 관문·위험판·챔피언 계산이 실패한 실행이면 그 까닭 (25.1511) */
   gate_error: string | null;
+  /** 위험판의 베타를 못 읽은 까닭 — 지수 충격 칸이 전 계좌 "-" 인 날의 이유 (25.2283). 25.2283 전 요약에는 없다 */
+  risk_beta_error: string | null;
   /** 25.1513 전 요약에는 없다 */
   readiness: ReadinessItem[];
   /** 25.1514 전 요약에는 없다 */
@@ -212,7 +216,7 @@ export interface DeskView {
 }
 
 export const EMPTY_DESK: DeskView = {
-  as_of: null, updated_at: null, leaderboard: null, rule_history: {}, gate: null, risk: [], champion: [], gate_error: null, readiness: [], fill_adjust: null, fill_adjust_error: null, mirror_account: null, kis_account: null, markets: {},
+  as_of: null, updated_at: null, leaderboard: null, rule_history: {}, gate: null, risk: [], champion: [], gate_error: null, risk_beta_error: null, readiness: [], fill_adjust: null, fill_adjust_error: null, mirror_account: null, kis_account: null, markets: {},
 };
 
 /** 최근 줄들(날짜 역순)에서 보일 것을 고른다. 깨진 JSON 줄은 없는 셈 친다 */
@@ -241,6 +245,7 @@ export function pickDesk(rows: Array<{ as_of: string; summary_json: string | nul
     risk: Array.isArray(첫.s.risk) ? 첫.s.risk : [],
     champion: Array.isArray(첫.s.champion) ? 첫.s.champion : [],
     gate_error: 첫.s.gate_error ?? null,
+    risk_beta_error: 첫.s.risk_beta_error ?? null,
     readiness: Array.isArray(첫.s.readiness) ? 첫.s.readiness : [],
     fill_adjust: 첫.s.fill_adjust && typeof 첫.s.fill_adjust === "object" && 첫.s.fill_adjust.rows ? 첫.s.fill_adjust : null,
     fill_adjust_error: 첫.s.fill_adjust_error ?? null,

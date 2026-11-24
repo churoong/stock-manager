@@ -577,22 +577,24 @@ def _멈춘평가(client: Any, h: str, since: str) -> dict[str, list[tuple[str, 
         return None
 
 
-def _betas(client: Any, ids: list[int], now: datetime) -> dict[int, float] | None:
-    """보유 종목 → 1Y 베타(25.2281). 곁다리 — 못 읽으면 None(위험판의 지수 충격 칸만 빠지고 나머지는 그대로).
+def _betas(client: Any, ids: list[int], now: datetime) -> tuple[dict[int, float] | None, str | None]:
+    """보유 종목 → (1Y 베타, 못 읽은 까닭)(25.2281). 곁다리 — 못 읽으면 (None, 까닭): 위험판의 지수 충격 칸만 빠지고
+    나머지는 그대로, 까닭은 운용 요약 `risk_beta_error` 에 남는다(25.2283 — 예전엔 로그 한 줄뿐이라 화면의 전 계좌
+    "-" 가 왜인지 DB 로 읽을 수 없었다).
     한도 오류는 삼키지 않고 올린다 — 다만 부르는 자리가 `_관문판` 의 try 안이라 거기서 받아 관문판을 비우고
     `gate_error` 에 남는다(그 안의 다른 읽기와 같은 꼴, 25.2282 — 한도가 찬 날은 뒤 읽기도 깨진다).
     베타 행이 없는 종목은 결과에 없다(부르는 쪽이 가정값과 수를 싣는다)"""
     if not ids:
-        return {}
+        return {}, None
     try:
         바닥 = (now - timedelta(days=BETA_MAX_AGE_DAYS)).date().isoformat()
         행 = client.execute(BETA_SQL, [바닥, json.dumps(ids)]).dicts()
-        return {int(r["stock_id"]): float(r["beta"]) for r in 행 if r.get("beta") is not None}
+        return {int(r["stock_id"]): float(r["beta"]) for r in 행 if r.get("beta") is not None}, None
     except Exception as exc:  # noqa: BLE001
         if db.quota_reason(exc):
             raise
         logging.getLogger("desk").warning("위험판 베타를 읽지 못했다 — 지수 충격 칸을 뺀다: %s", 예외글(exc))
-        return None
+        return None, 예외글(exc)
 
 
 def 예외글(exc: BaseException) -> str:
@@ -678,16 +680,17 @@ def _관문판(
             사전: dict[str, Any] = desk.prereg_status(계열, 판들, 증거, 그림자 or {})
         except Exception as exc:  # noqa: BLE001
             사전 = {"error": 예외글(exc)}
-        위험 = desk.risk_board(latest, 계열, 손절, _betas(client, ids, now))
+        베타, 베타오류 = _betas(client, ids, now)
+        위험 = desk.risk_board(latest, 계열, 손절, 베타)
         판 = {"gate": 관문, "risk": 위험, "prereg_status": 사전,
              "champion": desk.champion(계열, h, 증거, 판시작),
              "readiness": desk.readiness(runs=늦음[0] if 늦음 else None, kis=kis요약), "gate_error": None,
-             "gate_carry": None}  # fmt: skip
+             "gate_carry": None, "risk_beta_error": 베타오류}  # fmt: skip
         return 판, None
     except Exception as exc:  # noqa: BLE001 — 곁다리 안의 곁다리
         글 = 예외글(exc)
         return {"gate": None, "risk": [], "champion": [], "readiness": [], "prereg_status": {}, "gate_error": 글,
-                "gate_carry": 앞관문}, 글  # fmt: skip
+                "gate_carry": 앞관문, "risk_beta_error": None}, 글  # fmt: skip
 
 
 def _this_version_evidence(row: dict[str, Any]) -> dict[str, Any]:

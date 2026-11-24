@@ -48,6 +48,7 @@ def test_베타를_모르면_1_로_보고_수를_알린다() -> None:
 def test_비중이_없는_보유는_빼고_수를_알린다() -> None:
     r = _판("H", [_q(1, 40.0), _q(2, None)], {1: 1.0, 2: 1.0})
     assert r["index_shock_pct"] == pytest.approx(-2.0) and r["index_shock_skipped"] == 1
+    assert "index_shock_assumed" not in r  # 못 잰 보유를 "베타 가정" 으로도 세지 않는다(25.2283)
     하나도 = _판("H", [_q(2, None)], {2: 1.0})
     assert 하나도["index_shock_pct"] is None and 하나도["index_shock_skipped"] == 1
 
@@ -110,13 +111,14 @@ def test_베타는_창_안의_가장_늦은_1Y_행_하나다() -> None:
         (2, "2026-11-17", "1Y", None, 1), (2, "2026-11-10", "1Y", 0.7, 1),  # 최근 행이 비면 그 앞 행
         (3, "2026-09-01", "1Y", 2.0, 1),  # 창(45일) 밖 — 묵은 베타는 쓰지 않는다
         (4, "2026-11-17", "3Y", 0.9, 1),  # 1Y 행 없음
+        (6, "2026-10-10", "1Y", 0.3, 1), (6, "2026-10-09", "1Y", 7.0, 1),  # 바닥 날짜와 같은 날은 든다(>=), 하루 앞은 밖
     ])  # fmt: skip
     now = datetime(2026, 11, 24, 3, 0, tzinfo=UTC)
-    assert jd._betas(c, [1, 2, 3, 4, 5], now) == {1: 1.4, 2: 0.7}
+    assert jd._betas(c, [1, 2, 3, 4, 5, 6], now) == ({1: 1.4, 2: 0.7, 6: 0.3}, None)
     sql, params = c.본[-1]
-    assert sql == jd.BETA_SQL and params == ["2026-10-10", json.dumps([1, 2, 3, 4, 5])] and jd.BETA_MAX_AGE_DAYS == 45
+    assert sql == jd.BETA_SQL and params == ["2026-10-10", json.dumps([1, 2, 3, 4, 5, 6])] and jd.BETA_MAX_AGE_DAYS == 45
     # 보유가 없으면 읽지 않는다
-    assert jd._betas(c, [], now) == {} and len(c.본) == 1
+    assert jd._betas(c, [], now) == ({}, None) and len(c.본) == 1
 
 
 def test_베타_읽기가_깨져도_위험판은_나오고_한도_오류는_올린다() -> None:
@@ -128,7 +130,9 @@ def test_베타_읽기가_깨져도_위험판은_나오고_한도_오류는_올�
             raise RuntimeError(self.글)
 
     now = datetime(2026, 11, 24, tzinfo=UTC)
-    assert jd._betas(_깨짐("no such table: performance_metrics"), [1], now) is None
+    # 못 읽은 까닭을 함께 돌려준다 — 운용 요약 `risk_beta_error` 로 간다(25.2283)
+    assert jd._betas(_깨짐("no such table: performance_metrics"), [1], now) == (
+        None, "RuntimeError: no such table: performance_metrics")  # fmt: skip
     한도글 = "D1 HTTP 400: exceeded D1's free tier daily row read limit"
     from batch.core import db
 
@@ -141,7 +145,9 @@ def test_운용_요약의_위험판이_베타를_받는다() -> None:
     """이음매 — `_관문판` 은 다른 시험이 통째로 바꿔 끼워 돌린다. 베타를 넘기는 줄이 빠지면 칸이 말없이 사라진다"""
     import inspect
 
-    assert "desk.risk_board(latest, 계열, 손절, _betas(client, ids, now))" in inspect.getsource(jd._관문판)
+    글 = inspect.getsource(jd._관문판)
+    assert "베타, 베타오류 = _betas(client, ids, now)" in 글 and "desk.risk_board(latest, 계열, 손절, 베타)" in 글
+    assert '"risk_beta_error": 베타오류' in 글
 
 
 def test_문서가_식과_가정을_적는다() -> None:
@@ -149,5 +155,6 @@ def test_문서가_식과_가정을_적는다() -> None:
     for 조각 in ("**지수 충격**(`index_shock_pct`, 25.2281", "Σ 비중(%) × 베타 × (−충격 ÷ 100)",
                f"지수가 {desk.RISK_INDEX_SHOCK_PCT:g}%(`RISK_INDEX_SHOCK_PCT`) 빠지는 날",
                f"베타 {desk.RISK_BETA_UNKNOWN:g}(`RISK_BETA_UNKNOWN`)", "`index_shock_assumed`", "선형 어림",
+               "1Y 값(`performance_metrics.beta`", "`risk_beta_error`", "관문판 전체가 비고 `gate_error` 에 남는다",
                f"최근 {jd.BETA_MAX_AGE_DAYS}일(`BETA_MAX_AGE_DAYS`)", "주문·사이징을 바꾸지 않는다"):  # fmt: skip
         assert 조각 in 글, 조각

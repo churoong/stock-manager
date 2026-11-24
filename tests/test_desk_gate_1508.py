@@ -169,6 +169,32 @@ def test_champion_blocks_by_hand() -> None:
     assert r2["blocks"] == 3 and r2["wins"] < 3  # 마지막 블록(최근 20 평가)이 진 것으로 든다
 
 
+def test_write_베타_읽기가_깨지면_칸만_빠지고_까닭이_요약에_남는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.2283 (25.2282 교차검증 [권고]) — 예전엔 로그 한 줄뿐이라 전 계좌 "-" 의 까닭을 DB·화면으로 읽을 수 없었다.
+    위험판의 나머지·관문은 그대로다"""
+    c = Client(accounts=None)
+    monkeypatch.setattr(job.bmj, "MIRROR_ACCOUNT", "B")
+    c.conn.execute("INSERT INTO paper_daily (account_id, as_of, invested_krw, cash_krw, holdings_krw, equity_krw, pnl_krw,"
+                   " twr_index, positions_json, recon_ok, updated_at) VALUES ('B', '2026-10-16', 1000, 400, 600, 1000, 0,"
+                   " 1.0, ?, 1, 't')", [json.dumps([{"stock_id": 1, "horizon": "short", "avg_price": 100.0, "close": 94.0,
+                                                     "weight_pct": 60.0}])])  # fmt: skip
+    진짜 = c.execute
+
+    def 실행(sql, params=None):
+        if sql == job.BETA_SQL:
+            raise RuntimeError("no such function: json_each")
+        return 진짜(sql, params)
+
+    monkeypatch.setattr(c, "execute", 실행)
+    job.write(c, "KR", datetime(2026, 10, 16, 23, 40, tzinfo=UTC), trade_date="2026-10-16", session_date="2026-10-19",
+              step_log={}, warnings=[])  # fmt: skip
+    s = json.loads(c.q("SELECT summary_json FROM paper_desk")[0][0])
+    assert s["risk_beta_error"] == "RuntimeError: no such function: json_each" and s["gate_error"] is None
+    b = {r["id"]: r for r in s["risk"]}["B"]
+    assert "index_shock_pct" not in b and b["exposure_pct"] == pytest.approx(60.0) and b["open_risk_pct"] is not None
+    assert s["gate"] is not None
+
+
 def test_write_puts_gate_risk_champion(monkeypatch: pytest.MonkeyPatch) -> None:
     c = Client(accounts=None)
     monkeypatch.setattr(job.bmj, "MIRROR_ACCOUNT", "B")
@@ -198,6 +224,7 @@ def test_write_puts_gate_risk_champion(monkeypatch: pytest.MonkeyPatch) -> None:
     b = {r["id"]: r for r in s["risk"]}["B"]
     assert b["exposure_pct"] == pytest.approx(60.0) and b["near_stop"][0]["name"] == "종목1"
     assert b["index_shock_pct"] == pytest.approx(60.0 * 1.2 * -0.05) and "index_shock_assumed" not in b
+    assert s["risk_beta_error"] is None
     assert b["open_risk_pct"] == pytest.approx(60.0 * (1 - 93 / 94))
     assert isinstance(s["champion"], list)
 

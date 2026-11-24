@@ -357,6 +357,9 @@ export default function DeskView() {
             팔지 않는 계좌는 -). 지수 −{DESK_RULES.RISK_INDEX_SHOCK_PCT}% = 각 시장 지수가 그만큼 빠지는 날의 예상 손익(Σ 비중 × 1년 베타의 선형 어림 — 급락 날은 더 클 수 있다 ·
             베타를 모르면 1 로 보고 수를 적는다 · ETF 전술 계좌는 내지 않는다).
           </p>
+          {desk.risk_beta_error ? (
+            <p className="mt-1 break-words text-xs text-amber-700 dark:text-amber-400">지수 충격 칸을 내지 못함(베타 읽기 실패) — {desk.risk_beta_error}</p>
+          ) : null}
         </section>
       ) : null}
 
