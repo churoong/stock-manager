@@ -92,13 +92,16 @@ const SELL_RULE_TEXT: Record<string, string> = {
   day_close: "산 그날 종가에 판다(매도 플래그 무시 · 하한가 종가면 다음 장 시가)",
   // ETF 전술 X·Y (docs/paper.md 17장, infra 25.2166)
   etf_switch: "지수 국면이 바뀐 날 정리(매도 플래그 무시) — 판 돈으로 다음 실행에 새 국면 ETF",
+  // 거장 단독 Z3·Z4 (docs/company.md 12.5, docs/paper.md 18장, infra 25.2319)
+  hold_1y: "첫 체결 365일 뒤 첫 결정일에 다음 장 시가(손절·목표 없음, 매도 플래그 무시)",
+  canslim_exit: "종가가 첫 체결가 대비 −8% 이하·+25% 이상이면 다음 장 시가(기한 없음, 매도 플래그 무시)",
 };
 /** 투자위원회 헌장이 있는 계좌인가 — 지주사(H, selection weighted)의 charter_json 은 투표 회사 지문이라 위원회가 아니다 (25.1482) */
 export function hasCommittee(a: { charter_json?: string | null; selection?: string | null }): boolean {
   return Boolean(a.charter_json) && a.selection !== "weighted";
 }
 /** 배치가 아는 종목 고르기 값 — batch/services/paper.py `SELECTIONS` 와 같아야 한다(25.2318, tests/test_paper_swing_1871.py 가 견준다) */
-export const PAPER_SELECTIONS: ReadonlySet<string> = new Set(["signal", "random", "weighted", "short", "etf_tactical"]);
+export const PAPER_SELECTIONS: ReadonlySet<string> = new Set(["signal", "random", "weighted", "short", "etf_tactical", "magic_formula", "canslim"]);
 export function ruleText(a: AccountRule): string {
   let 헌장: { name?: string; agenda?: number; top_n?: number } | null = null;
   try {
@@ -121,7 +124,11 @@ export function ruleText(a: AccountRule): string {
         ? `단기 신호만 점수 상위 ${a.top_n ?? 5}종목(든 종목은 더 사지 않음)`
         : a.selection === "etf_tactical"
           ? "ETF 전술 — 지수 200일선·20거래일 수익으로 상승이면 지수 ETF 98%, 하락이면 인버스 50%, 엇갈리면 현금"
-          : `점수 상위 ${a.top_n ?? 5}종목`;
+          : a.selection === "magic_formula"
+            ? "그린블랫 마법공식 — 매월 첫 거래일 유니버스 EY·ROC 순위 상위에서 안 든 1종목, 평가 총액 1/24, 시장당 12종목"
+            : a.selection === "canslim"
+              ? "오닐 CAN SLIM — 실적 A·주가 N·L 모두 찬성, 시장 강세일 때만 12-1 모멘텀 순, 종목 10%, 시장당 5종목"
+              : `점수 상위 ${a.top_n ?? 5}종목`;
   const 진입 = a.entry_rule === "open" ? "다음 장 시가에 한 번에" : "3회 분할 지정가";
   return `매수: ${고르기} · ${진입} — 매도: ${SELL_RULE_TEXT[a.sell_rule] ?? a.sell_rule}`;
 }

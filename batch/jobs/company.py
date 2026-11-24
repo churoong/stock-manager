@@ -308,8 +308,14 @@ def _pit_annual(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [고름[k] for k in sorted(고름)]
 
 
-def master_facts(client: Any, ids: list[int], country: str, as_of: str) -> dict[int, dict[str, Any]]:
-    """거장 부서 자료 — {종목: Dossier.masters} (docs/company.md 12.1). 기준일 `as_of` 까지 알 수 있던 값만"""
+def master_facts(
+    client: Any, ids: list[int], country: str, as_of: str, *, light: bool = False,
+) -> dict[int, dict[str, Any]]:
+    """거장 부서 자료 — {종목: Dossier.masters} (docs/company.md 12.1). 기준일 `as_of` 까지 알 수 있던 값만.
+
+    `light` — 배당·베타를 읽지 않는다(`div` 빈 dict · `beta` None). 그린블랫·오닐 부서만 쓰는 단독 계좌 Z3·Z4 가
+    유니버스 전체를 읽을 때(`jobs/paper_solo`, 25.2319) — 베타는 기준일까지의 모든 행을 읽어 유니버스 단위로는 무겁다.
+    버핏(베타)·그레이엄(배당) 부서에 이 자료를 넣으면 '판정 불가' 가 된다 — 위원회 길은 늘 전부 읽는다"""
     from batch.core import db
     from batch.jobs.backtest import _공시_순
     from batch.services import sectors
@@ -336,13 +342,13 @@ def master_facts(client: Any, ids: list[int], country: str, as_of: str) -> dict[
             v = {}
         원값.setdefault(k[0], {})[k[1]] = v if isinstance(v, dict) else {}
     배당: dict[int, dict[int, tuple[tuple[str, str], bool]]] = {}
-    for r in client.execute(MASTER_DIV_SQL, [as_of, 묶음]).dicts():
+    for r in [] if light else client.execute(MASTER_DIV_SQL, [as_of, 묶음]).dicts():
         표 = 배당.setdefault(int(r["stock_id"]), {})
         fy, 순 = int(r["fiscal_year"]), _공시_순(r)  # 같은 사업연도는 가장 늦은 접수(같은 날이면 접수번호)
         if fy not in 표 or 순 >= 표[fy][0]:
             표[fy] = (순, float(r["cash_dividend_total"]) > 0)
     베타: dict[int, tuple[int, str, float]] = {}
-    for r in client.execute(MASTER_BETA_SQL, [as_of, 묶음]).dicts():
+    for r in [] if light else client.execute(MASTER_BETA_SQL, [as_of, 묶음]).dicts():
         sid, 순 = int(r["stock_id"]), (1 if r["window"] == "3Y" else 0)
         후보 = (순, str(r["as_of_date"]), float(r["beta"]))
         if sid not in 베타 or 후보[:2] > 베타[sid][:2]:

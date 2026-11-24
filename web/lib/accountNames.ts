@@ -19,6 +19,8 @@ export const ACCOUNT_NAMES: Readonly<Record<string, string>> = {
   Y: "미국ETF",
   ZL: "린치",
   ZM: "거장위원회",
+  Z3: "그린블랫",
+  Z4: "오닐",
 };
 
 /** 계좌 화면 이름 — 모르는 계좌는 식별자 그대로 */

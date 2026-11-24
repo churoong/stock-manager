@@ -458,12 +458,12 @@ def test_swing_exit_순수_함수는_권리락을_진입_뒤_날마다만_되돌
 
 
 def test_모르는_종목_고르기의_계좌는_그_계좌만_건너뛴다(monkeypatch: pytest.MonkeyPatch) -> None:
-    """25.2317 (docs/company.md 12.5) — Z3·Z4 의 새 고르기(`magic_formula`·`canslim`) 행이 엔진보다 먼저 들어와도 조용히
-    신호 종목 고르기로 사지 않는다. 다른 계좌는 그대로 돈다"""
+    """25.2317 (docs/company.md 12.5) — 새 고르기 값의 행이 엔진보다 먼저 들어와도 조용히 신호 종목 고르기로 사지 않는다.
+    다른 계좌는 그대로 돈다. 25.2319 에서 엔진이 `magic_formula`·`canslim` 을 갖춰 아직 없는 값(`made_up_v9`)으로 바꿨다"""
     c = _계좌(("B",), s=False)
     c.conn.execute(
         "INSERT INTO paper_accounts (id, name, sell_rule, rule_version, created_at, entry_rule, top_n, selection)"
-        " VALUES ('Z3', '가상 그린블랫 계좌', 'core', 1, '2026-10-14T00:00:00+00:00', 'open', 12, 'magic_formula')"
+        " VALUES ('Z3', '가상 그린블랫 계좌', 'core', 1, '2026-10-14T00:00:00+00:00', 'open', 12, 'made_up_v9')"
     )
     다음 = cal.next_session("KR", date(2026, 10, 14))
     monkeypatch.setattr(cal, "local_today", lambda _m=None: 다음)
@@ -472,11 +472,11 @@ def test_모르는_종목_고르기의_계좌는_그_계좌만_건너뛴다(monk
     줄, 기록 = job.run_step(c, market="KR", trade_date="2026-10-14", late=False, signal_rows=[_신호()], settings=설정,
                           price_series={}, series_unknown={}, allocate=True,
                           now=datetime.fromisoformat(f"{다음}T00:30:00+00:00"))  # fmt: skip
-    assert 기록["accounts"]["Z3"] == {"error": "모르는 종목 고르기 magic_formula"}
-    assert 기록["account_skips"] == {"Z3": "모르는 종목 고르기 magic_formula"}
+    assert 기록["accounts"]["Z3"] == {"error": "모르는 종목 고르기 made_up_v9"}
+    assert 기록["account_skips"] == {"Z3": "모르는 종목 고르기 made_up_v9"}
     assert 기록["accounts"]["B"]["orders"] >= 1
     assert c.conn.execute("SELECT COUNT(*) FROM paper_orders WHERE account_id = 'Z3'").fetchone()[0] == 0
-    assert "⚠️ 가상 Z3 모르는 종목 고르기(magic_formula) — 오늘 이 계좌는 평가·매매하지 않았습니다" in 줄
+    assert "⚠️ 가상 그린블랫 모르는 종목 고르기(made_up_v9) — 오늘 이 계좌는 평가·매매하지 않았습니다" in 줄
 
 
 def test_아는_종목_고르기는_계좌들이_쓰는_값과_같다() -> None:
@@ -487,7 +487,7 @@ def test_아는_종목_고르기는_계좌들이_쓰는_값과_같다() -> None:
     mem = MemClient()
     db.apply_migrations(mem)  # type: ignore[arg-type]
     값들 = {str(r[0]) for r in mem.conn.execute("SELECT DISTINCT selection FROM paper_accounts").fetchall()}
-    assert {"signal", "random", "short", "etf_tactical"} <= 값들  # 읽기가 비면 아래가 공짜로 통과한다
+    assert {"signal", "random", "short", "etf_tactical", "magic_formula", "canslim"} <= 값들  # 읽기가 비면 공짜 통과
     assert 값들 <= pp.SELECTIONS, 값들 - pp.SELECTIONS
 
 

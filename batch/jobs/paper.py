@@ -28,11 +28,11 @@ from typing import Any
 from batch.core import calendar as cal
 from batch.core import db
 from batch.core import settings_range as sr
-from batch.jobs import paper_etf
+from batch.jobs import paper_etf, paper_solo
 from batch.notify import formatter
 from batch.services import backtest as bt
 from batch.services import company as co
-from batch.services import desk, report_picks
+from batch.services import desk, report_picks, solo
 from batch.services import etf_tactical as et_svc
 from batch.services import fx as fx_svc
 from batch.services import holding as hold
@@ -1326,6 +1326,17 @@ def sell_decisions(
                     기준가 = 행["market_value"] / 행["quantity"] if 행["market_value"] else None
                     notes[int(행["stock_id"])] = {"ref": (기준가, 행["price_date"]), "hold": [], "flags": [팖]}
             continue
+        if sell_rule in (solo.HOLD_1Y, solo.CANSLIM_EXIT):
+            # 거장 단독 Z3·Z4(docs/company.md 12.5, paper.md 18장, 25.2319) — 매도 플래그·보강을 보지 않고 사전 등록한
+            # 규칙
+            # 하나로 판다(스윙과 같은 까닭: 보강을 타면 보유마다 질의가 늘고, 보강이 비면 매도가 조용히 막힌다)
+            팖 = _단독넘음(client, 행, today, sell_rule)
+            if 팖 is not None:
+                out[int(행["stock_id"])] = ([팖["reason_code"]], [팖])
+                if notes is not None:
+                    기준가 = 행["market_value"] / 행["quantity"] if 행["market_value"] else None
+                    notes[int(행["stock_id"])] = {"ref": (기준가, 행["price_date"]), "hold": [], "flags": [팖]}
+            continue
         # A·B 가 같은 로트를 들고 있으면 한 번만 보강한다 — 읽기를 두 번 쓰지 않는다
         열쇠 = json.dumps({k: v for k, v in 행.items() if k != "quantity"}, sort_keys=True, default=str)
         if 열쇠 not in enrich_cache:
@@ -1425,6 +1436,56 @@ def _스윙넘음(client: Any, 행: dict[str, Any], today: date) -> dict[str, An
                                     "prices·kr_corp_events", 날), "passed": None})  # fmt: skip
     return {"reason_code": pp.SWING_CODES[까닭], "level": "red", "rationale": f"{글} ({날}, {sh.SWING_CLOSE.name})",
             "criteria": 근거}
+
+
+def _단독넘음(client: Any, 행: dict[str, Any], today: date, sell_rule: str) -> dict[str, Any] | None:
+    """Z3 `hold_1y`·Z4 `canslim_exit` 보유 하나의 판정 — 넘었으면 결정 원장·주문 근거에 남길 플래그 한 줄, 아니면 None.
+
+    첫 로트(첫 체결일·첫 체결가 — 슬리피지 전)로 잰다. `canslim_exit` 은 **그날(마지막) 종가** 하나로 — 기한이 없어
+    진입부터 모든 종가를 읽지 않는다(배치가 빠진 날의 넘음은 다음 결정일 종가로 다시 잰다, paper.md 18.3). 국내 유상증자
+    권리락은 스윙처럼 그 종가 날까지 지난 계수로 되돌려 견준다(25.1999 — 원시 종가면 권리락 하락이 거짓 손절이 된다)"""
+    from batch.jobs import monitor_targets as mt
+    from batch.services import shadow as sh
+
+    로트 = sorted(행.get("lots") or [])
+    if not 로트 or not 로트[0][2] or float(로트[0][2]) <= 0:
+        return None
+    진입일, _q, 진입가 = 로트[0]
+    진입일 = str(진입일)[:10]
+    통화 = str(행.get("currency") or ("USD" if 행.get("country") == "US" else "KRW"))
+
+    def _값(v: float) -> str:
+        return f"{v:,.0f}원" if 통화 == "KRW" else f"{v:,.2f} {통화}"
+
+    진입행 = {**sf._criterion("첫 체결", f"{_값(float(진입가))} ({진입일})", "첫 매수 체결가·체결일(슬리피지 전)",
+                             "가상모의투자 체결", 진입일), "passed": None}  # fmt: skip
+    if sell_rule == solo.HOLD_1Y:
+        if not solo.hold_1y_due(진입일, today):
+            return None
+        날수 = (today - date.fromisoformat(진입일)).days
+        return {"reason_code": solo.HOLD_CODE, "level": "red",
+                "rationale": f"첫 체결 뒤 {날수}일 — 1년({solo.HOLD_DAYS}일) 보유를 채움 (magic_formula_v1 hold_1y)",
+                "criteria": [진입행, sf._criterion("보유 날수", f"{날수}일 (결정일 {today.isoformat()})",
+                                                   f"≥ {solo.HOLD_DAYS}일 — 다음 장 시가에 판다", "가상모의투자 체결",
+                                                   today.isoformat())]}  # fmt: skip
+    if not 행.get("market_value") or not 행.get("quantity") or not 행.get("price_date"):
+        return None
+    종가 = float(행["market_value"]) / float(행["quantity"])
+    날 = str(행["price_date"])[:10]
+    계수들 = [] if 행.get("country") == "US" else mt.rights_factors_since(client, int(행["stock_id"]), 진입일)
+    계수 = sh.rights_back(진입일, 날, 계수들)
+    되돌린 = 종가 / 계수
+    까닭 = solo.canslim_exit(float(진입가), 되돌린)
+    if 까닭 is None:
+        return None
+    수익 = round((되돌린 / float(진입가) - 1) * 100, 4)
+    선 = f"손절 {solo.CANSLIM_STOP * 100:g}% · 익절 +{solo.CANSLIM_TARGET * 100:g}% (첫 체결가 대비 종가, 기한 없음)"
+    되돌림글 = f" (권리락 되돌림 ×{round(계수, 6):g})" if 계수 != 1 else ""
+    글 = (f"종가가 첫 체결가 대비 {수익:+g}%{되돌림글} — "
+         + (f"오닐 손절선 {solo.CANSLIM_STOP * 100:g}% 이하" if 까닭 == "stop"
+            else f"오닐 익절선 +{solo.CANSLIM_TARGET * 100:g}% 이상"))  # fmt: skip
+    return {"reason_code": solo.CANSLIM_CODES[까닭], "level": "red", "rationale": f"{글} ({날}, canslim_v1)",
+            "criteria": [진입행, sf._criterion("판정 종가", f"{_값(종가)}{되돌림글}", 선, "prices", 날)]}  # fmt: skip
 
 
 def _주수(q: float) -> str:
@@ -2314,6 +2375,7 @@ def run_step(
     줄: list[str] = []
     계좌기록: dict[str, Any] = {}
     유니버스: list[int] | None = None  # 무작위 대조의 모집단 — 하루 실행에 한 번만 읽어 R1·R2 가 같이 쓴다
+    단독캐시: dict[str, Any] = {}  # 거장 단독 Z3·Z4 의 유니버스 거장 자료 — 실행 하나에 시장·기준일마다 한 번(25.2319)
     # 투자사 헌장 (docs/company.md, 25.1466) — 헌장이 맞는 계좌만 위원회를 연다.
     # 틀리면 그 계좌는 판 1 그대로(기록에 까닭)
     헌장들: dict[str, dict[str, Any]] = {}
@@ -2399,6 +2461,7 @@ def run_step(
         진입 = str(acct.get("entry_rule") or "tranche")
         종목수 = int(acct.get("top_n") or report_picks.TOP_STOCKS)
         무작위 = str(acct.get("selection") or "signal") == "random"
+        단독 = 고르기 in solo.RULE_NAMES  # 거장 단독 Z3·Z4(25.2319) — 유니버스에서 고른다
         a기록: dict[str, Any] = {"fills": sum(1 for f in 새체결 if f.account_id == aid)}
         # 처음부터 같은 dict 를 걸어 둔다 — 계좌 단계 예외가 어디서 나도 그때까지 채운 칸(주문 수 등)이 남게(25.1924)
         계좌기록[aid] = a기록
@@ -2611,6 +2674,56 @@ def run_step(
                     # 국면은 사라는데 못 산 날 — 결정 원장에도(25.2168). 기준 종가는 비워 성과 분해에 들지 않는다
                     문장.append(_결정판(aid, market, trade_date, int(목표), "skip", f"ETF 전술: {b기록['skipped']}",
                                     {"etf": paper_etf.criteria(전술계획["regime"])}, None, None, 지금))  # fmt: skip
+            elif 단독:
+                # 거장 단독 Z3·Z4(docs/company.md 12.5, paper.md 18장, 25.2319) — 신호 종목이 아니라 그날 유니버스에서
+                # 고르고
+                # 크기는 평가 총액 × 고정 비중이다(`build_portfolio` 를 타지 않는다). 재무·팩터 기준일은 신호 기준일 —
+                # `allocate` 가 거짓인 날(신호가 묵었거나 못 읽음)은 팩터도 묵어 사지 않는다. 보유 상한은 이 시장 보유 +
+                # 열린 매수로 세고, 그날 파는 종목은 뺀다(같은 장 시가에 나간다)
+                if not (allocate and signal_rows):
+                    a기록["buy"] = {"skipped": "배분하지 않는 날(신호 없음·묵음·추천 못 읽음)"}
+                else:
+                    단독기준일 = max((r.as_of_date for r in signal_rows if r.as_of_date), default=trade_date)
+                    if 유니버스 is None:
+                        유니버스 = [int(r[0]) for r in client.execute(UNIVERSE_SQL, [market, market]).rows]
+                    열린매수 = [o for o in 열린 if o.account_id == aid and o.side == "buy"]
+                    든 = {sid for sid in 보유 if sid not in 파는} | {o.stock_id for o in 열린매수}
+                    든 = {sid for sid in 든 if _stock(client, sid, stock_cache).get("country") == market}
+                    고름, b기록 = paper_solo.plan(
+                        client, 고르기, market=market, as_of=단독기준일, fill_session=다음장, universe_ids=유니버스,
+                        held=든, excluded=set(최근판) | 이미팖, cache=단독캐시,
+                    )  # fmt: skip
+                    주문, 크기기록 = paper_solo.size_orders(
+                        client, 고르기, 고름, market=market, valuation=v, open_buys=열린매수,
+                        fx_rate=fx[0] if fx else None, as_of=단독기준일, n_ranked=int(b기록.get("ranked") or 0),
+                    )  # fmt: skip
+                    b기록.update(크기기록)
+                    후보 = [rg.Candidate(o["stock_id"], "buy", o["cost_krw"], o["ref_date"], i, o["cash_krw"])
+                            for i, o in enumerate(주문)]  # fmt: skip
+                    # 위 거둠으로 `열린` 이 줄었을 수 있다 — 관문의 열린 칸을 다시 잰다(ETF 갈래와 같다)
+                    문맥 = dc_replace(문맥, **_관문_열린칸(client, aid, v, 열린, fx, stock_cache))
+                    통과, 막힘 = rg.gate(후보, 문맥)
+                    막힌수 += len(막힘)
+                    막힌모두 += 막힘
+                    기준 = 다시잰기준(기준)
+                    for c in 통과:
+                        o = 주문[c.key]
+                        문장.append((INSERT_ORDER_SQL, [
+                            aid, market, o["stock_id"], "buy", "market", None, o["quantity"], o["currency"], trade_date,
+                            다음장, 기준, 0, o["reason"], o["horizon"], None, None,
+                            json.dumps({**o["rationale"], "costs": 비용표}, ensure_ascii=False, default=str), 판, 지금,
+                            o["ref_price"],
+                        ]))  # fmt: skip
+                        문장.append(_결정판(aid, market, trade_date, o["stock_id"], "buy", o["reason"],
+                                        {"solo": o["rationale"]["criteria"], "weight": o["rationale"]["weight"]},
+                                        o["ref_price"], o["ref_date"], 지금))  # fmt: skip
+                    for c, 까닭 in 막힘:
+                        o = 주문[c.key]
+                        문장.append(_결정판(aid, market, trade_date, o["stock_id"], "blocked",
+                                        "위험 점검: " + "; ".join(t for _c, t in 까닭),
+                                        {"solo": o["rationale"]["criteria"]}, o["ref_price"], o["ref_date"],
+                                        지금))  # fmt: skip
+                    a기록["buy"] = b기록
             elif allocate and settings is not None and signal_rows:
                 # 손절이 선 보유에 더 사지 않는다 — **계좌 규칙 전의** 판정에서 (검증 [필수] 4: 규칙으로 거른 뒤의
                 # 매도에서 뽑으면 손절을 따르지 않는 D 는 늘 비어, 떨어진 보유를 목표 비중까지 날마다 더 샀다 —

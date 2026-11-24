@@ -28,7 +28,7 @@ def _행() -> dict[str, dict]:
     c = Client(accounts=None)
     return {str(r["id"]): r for r in c.execute(
         "SELECT id, name, sell_rule, rule_version, created_at, entry_rule, top_n, selection, charter_json, charter_since"
-        " FROM paper_accounts WHERE id LIKE 'Z%'").dicts()}  # fmt: skip
+        " FROM paper_accounts WHERE id LIKE 'Z%' AND charter_json IS NOT NULL").dicts()}  # fmt: skip — Z3·Z4 는 헌장 없음(0097)
 
 
 def test_마이그레이션_헌장은_코드_헌장_그대로다() -> None:
@@ -58,7 +58,7 @@ def test_등록부() -> None:
     assert desk._손절_해당없음("S", 0) is not None  # 스윙은 그대로
     # 웹 사본
     웹 = (Path(__file__).resolve().parent.parent / "web" / "lib" / "kisChallenger.ts").read_text(encoding="utf-8")
-    assert re.search(r'SEPARATE_IDS: readonly string\[\] = \["S", "T", "X", "Y", "ZL", "ZM"\]', 웹)
+    assert re.search(r'SEPARATE_IDS: readonly string\[\] = \["S", "T", "X", "Y", "Z3", "Z4", "ZL", "ZM"\]', 웹)
 
 
 def _a_to_y(c: Client) -> tuple[list, list, list]:

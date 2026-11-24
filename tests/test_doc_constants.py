@@ -791,6 +791,8 @@ class Test밸류_분모:
     " 자료의 격자(`TABLE_*`)뿐이다. 격자와 docs/funnel.md 3.2 의 대조는 `tests/test_funnel_oc_2276` 가 묶는다(25.2276)",
     "stop_exec": "손절 집행 판정의 등록 상수(문·기한·α·계좌 집합)는 docs/factors.md 12.53 의 문장 꼴이 제각각이다 — 값과 문서의"
     " 대조는 `tests/test_stop_exec_2271.test_등록_상수가_사전_등록_문장과_같다` 가 묶는다(25.2271)",
+    "solo": "거장 단독 Z3·Z4 의 사전 등록 값(1/24·12·365·5·10%·−8%·+25%)은 docs/company.md 12.5 의 문장 안에 있다 — 값과 문서의"
+    " 대조는 `tests/test_solo_2319.test_사전_등록_값` 이 묶는다(25.2319)",
     "masters": "거장 부서 문턱은 docs/company.md 12.3 표 칸에 적혀 문장 모양이 제각각이다 — 값과 문서의 대조는"
     " `tests/test_masters_2261.test_문서_12_3_이_코드_문턱을_적는다` 가 묶는다(25.2261)",
     "backtest": "거래비용·리밸런스 수는 docs/backtest.md 가 표로 적고 있는데 문장 모양이"

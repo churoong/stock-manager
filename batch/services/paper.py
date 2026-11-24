@@ -40,12 +40,19 @@ SELL_RULES: dict[str, frozenset[str] | None] = {
     # X·Y ETF 전술 (docs/paper.md 17장, 2026-11-06 사용자 지시): 매도 플래그를 보지 않고 국면이 바뀐 날 `jobs/paper_etf`
     # 가 낸 전량 매도(`국면전환`) 하나로 판다
     "etf_switch": frozenset({"국면전환"}),
+    # Z3 그린블랫 `hold_1y`·Z4 오닐 `canslim_exit` (docs/company.md 12.5, paper.md 18장, 25.2319): 매도 플래그를 보지
+    # 않고
+    # `jobs/paper._단독넘음` 이 사전 등록한 규칙 하나로 낸 까닭 코드로 판다. 이름은 `services/solo` 와 같아야
+    # 한다(시험이 대조)
+    "hold_1y": frozenset({"보유1년"}),
+    "canslim_exit": frozenset({"오닐손절", "오닐익절"}),
 }
 #: 계좌가 쓰는 종목 고르기 방식(`paper_accounts.selection`) — 엔진이 아는 값 (docs/company.md 12.5, 25.2317).
 #: 여기 없는 값의 계좌는 그 계좌만 건너뛴다(`jobs/paper` 계좌 루프 — 모르는 매도 규칙과 같은 막이). 거장 단독 계좌
 #: Z3·Z4 의 새 값(`magic_formula`·`canslim`)은 엔진이 그 고르기를 갖춘 커밋에서 더한다 — 행이 코드보다 먼저 들어와도
-#: 엉뚱하게 `signal` 로 사지 않게. 예전엔 모르는 값이 조용히 신호 종목 고르기(`signal`)로 떨어졌다
-SELECTIONS = frozenset({"signal", "random", "weighted", "short", "etf_tactical"})
+#: 엉뚱하게 `signal` 로 사지 않게. 예전엔 모르는 값이 조용히 신호 종목 고르기(`signal`)로 떨어졌다.
+#: 25.2319 — 엔진이 Z3·Z4 고르기(`jobs/paper_solo`)를 갖춰 `magic_formula`·`canslim` 을 더했다
+SELECTIONS = frozenset({"signal", "random", "weighted", "short", "etf_tactical", "magic_formula", "canslim"})
 #: 추세 익절(G)의 매도 사유 코드 — 매도 플래그(`sell_flags.evaluate`)가 아니라 모의 엔진이 낸다
 TRAIL_CODE = "추적손절"
 #: 계좌 **화면 이름** — 사람에게 보이는 곳(리포트·텔레그램·웹)은 알파벳 대신 계좌 특성 이름을 쓴다(2026-10-28 사용자
@@ -57,6 +64,8 @@ ACCOUNT_NAMES: dict[str, str] = {
     "R1": "무작위1", "R2": "무작위2", "S": "스윙", "T": "단타", "X": "국내ETF", "Y": "미국ETF",
     # 거장 계좌(docs/company.md 12장, 0096) — 이름에 투자가 이름을 넣는다(2026-11-23 사용자 지시)
     "ZL": "린치", "ZM": "거장위원회",
+    # 거장 단독 규칙 계좌(docs/company.md 12.5, 0097, 25.2319)
+    "Z3": "그린블랫", "Z4": "오닐",
 }
 
 
@@ -91,9 +100,13 @@ def step_error_orders(rec: dict[str, Any]) -> str:
 #: 성과 채우기는 따로 한 바퀴(기존 계좌의 하루 상한을 나눠 쓰지 않게). 정의처는 여기 하나(`desk.SEPARATE_IDS`)
 #: X·Y ETF 전술(paper.md 17장) — 종목 계좌와 잣대가 다르다. ZL·ZM 거장 계좌(docs/company.md 12.7) — 코호트
 #: "거장 2026-11" 로 따로 판정, 순위표 공통 구간·챔피언·KIS 베끼기·H 투표 밖
-SEPARATE_IDS = ("S", "T", "X", "Y", "ZL", "ZM")
+SEPARATE_IDS = ("S", "T", "X", "Y", "Z3", "Z4", "ZL", "ZM")
 #: 거장 계좌 — 따로 재지만 스윙·ETF 와 달리 매도 규칙(core)의 손절선을 그대로 쓴다(`desk._손절_해당없음` 이 가른다)
 MASTER_IDS: tuple[str, ...] = ("ZL", "ZM")
+#: 거장 단독 규칙 계좌 Z3·Z4(docs/company.md 12.5, 25.2319) — 신호가 아니라 유니버스에서 고르고(`jobs/paper_solo`) 제
+#: 매도
+#: 규칙(`hold_1y`·`canslim_exit`)으로 판다. 코호트 "거장 2026-11" 로 ZM·ZL 과 함께 판정(12.7)
+SOLO_IDS: tuple[str, ...] = ("Z3", "Z4")
 #: 같은 날 사고파는 계좌 — 당일 단타 T (docs/paper.md 16.3.2, 25.1881). 한 날 안의 체결·판정 순서에서 이 계좌의 매도만
 #: 그날 매수 **뒤**로 간다(`side_rank`). 행은 0092(2026-10-29 개설) — 이 정렬이 행보다 먼저 main 에 들어갔다
 SAME_DAY_IDS: tuple[str, ...] = ("T",)
