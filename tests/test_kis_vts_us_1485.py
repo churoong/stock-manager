@@ -212,8 +212,9 @@ def test_us_job_sends_reservations_and_keeps_kr_apart(c: Client) -> None:
     c.conn.execute("UPDATE stocks SET market = 'NASDAQ' WHERE id = 5")
     job.run(c, "US", _kst("21:27", "2026-10-19"), session=_UsSess(), clock=lambda: _kst("21:27", "2026-10-19"))
     job.run(c, "US", _kst("21:27", "2026-10-20"), session=_UsSess(), clock=lambda: _kst("21:27", "2026-10-20"))
+    # 보낼 때 적은 글(예약번호)은 버리지 않고 뒤에 잇는다(25.2290) — 앞머리는 맞추기 글 그대로
     assert c.q("SELECT status, message FROM paper_broker_orders WHERE paper_order_id = 202") == [
-        ("unknown", bm.MISSING_US)]
+        ("unknown", f"{bm.MISSING_US} · 보낼 때: 예약번호 R1")]
     assert c.q("SELECT paper_order_id, status, broker_order_no, filled_qty, avg_price FROM paper_broker_orders"
                " WHERE trade_date = '2026-10-16' ORDER BY id") == [(201, "filled", "5501", 3, 199.9),
                                                                    (203, "unfilled", "5502", 0, None)]  # fmt: skip
