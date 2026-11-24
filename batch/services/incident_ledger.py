@@ -55,8 +55,13 @@ def _갈래(error_text: Any) -> str:
 
 
 def _코드(r: Any) -> tuple[str | None, str | None]:
-    """(배치 코드 지문, 커밋) — 줄에 그 속성이 없거나 비면 None"""
-    return (getattr(r, "code", None) or None, getattr(r, "sha", None) or None)
+    """(배치 코드 지문, 커밋) — 줄에 그 속성이 없거나 비면 None.
+
+    커밋이 없는 줄(**로컬 실행**)은 배치 코드 지문이 있어도 둘 다 None 이다(25.2305, 25.2302 교차검증 [권고]) — 로컬은
+    작업 트리를 해시하므로 커밋하지 않은 낙서 파일 하나에도 "코드가 바뀐 뒤 복구" 가 섰다. 기록이 말한 "로컬 실행은 적지
+    않는다" 를 지킨다"""
+    sha = getattr(r, "sha", None) or None
+    return (getattr(r, "code", None) or None, sha) if sha else (None, None)
 
 
 def incidents(runs: list[Any]) -> list[dict[str, Any]]:

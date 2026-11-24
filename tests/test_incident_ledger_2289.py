@@ -219,6 +219,9 @@ def test_같은_코드로_복구됐는지를_가른다() -> None:
     # 한쪽만 code 가 있으면(지문이 생기기 전 줄) 커밋으로 견준다 — 갈래를 섞지 않는다
     assert il.incidents([_k("failed", "17T01:00", "abc", None), _k("success", "17T03:00", "abc", "c2")])[0]["same_code"] is True
     assert il.incidents([_k("failed", "17T01:00", None, "c1"), _k("success", "17T03:00", "abc", None)])[0]["same_code"] is None
+    # 로컬 실행(커밋 없음)은 코드 지문이 있어도 견주지 않는다(25.2305) — 작업 트리의 낙서 파일 하나에도 달라진다
+    assert il.incidents([_k("failed", "17T01:00", None, "c1"), _k("success", "17T03:00", "abc", "c1")])[0]["same_code"] is None
+    assert il.incidents([_k("failed", "17T01:00", "abc", "c1"), _k("success", "17T03:00", None, "c2")])[0]["same_code"] is None
     # `sha` 속성이 없는 줄(다른 호출자)도 깨지지 않는다
     from types import SimpleNamespace as NS
 

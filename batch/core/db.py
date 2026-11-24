@@ -605,7 +605,7 @@ _지문: list[dict[str, Any] | None] = [None]
 
 
 def run_fingerprint() -> dict[str, Any]:
-    """이 프로세스의 실행 지문 {sha, run, py, deps} — 한 번 내고 다시 쓴다. 네트워크·DB·하위 프로세스를 쓰지 않는다.
+    """이 프로세스의 실행 지문 {sha, run, py, deps, code} — 한 번 내고 다시 쓴다. 네트워크·DB·하위 프로세스를 안 쓴다.
 
     - `sha`: 커밋(Actions 의 `GITHUB_SHA` 앞 12자 — 로컬 실행은 None. git 을 부르지 않는다)
     - `run`: Actions 실행 번호·재시도("번호.재시도" — 공개 저장소의 실행 주소 끝자리라 개인정보가 아니다), 로컬은 None
@@ -616,7 +616,8 @@ def run_fingerprint() -> dict[str, Any]:
       `error` 칸에 예외 이름
     - `code`: 배치 코드(`batch/` 아래 `*.py` 의 경로·내용)의 sha1 앞 10자(25.2302) — `sha` 는 저장소 머리라 문서만 바꾼
       커밋에도 바뀐다(하루 여러 번 푸시하는 저장소라 "코드가 바뀌었나" 를 가르지 못했다, 25.2295 교차검증 [참고]).
-      이 값은 **돌린 파이썬 코드**가 바뀔 때만 바뀐다. 훑다 실패하면 None 이고 `code_error` 칸에 예외 이름
+      이 값은 **배치 파이썬 코드**가 바뀔 때만 바뀐다 — 마이그레이션 SQL·`scripts/`·워크플로 변경은 안 잡힌다(25.2305).
+      훑다 실패하면 None 이고 `code_error` 칸에 예외 이름
     """
     if _지문[0] is None:
         import hashlib

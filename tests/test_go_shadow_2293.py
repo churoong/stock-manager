@@ -117,8 +117,13 @@ def test_같은_날_다시_돈_실행은_앞_실행의_응답_없음을_매도�
                        " order_type, quantity, trade_date, reason, status, source, created_at) VALUES ('kis_vts', NULL,"
                        " 'B', 'KR', 3, '000660', 'sell', 'market', 1, '2026-10-16', ?, 'sending', 't', 't')",
                        [jb.bm.REASON_CLEANUP])  # fmt: skip
+        # 장중 손절 줄도(25.2305)
+        c.conn.execute("INSERT INTO paper_broker_orders (broker, paper_order_id, account_id, market, stock_id, code, side,"
+                       " order_type, quantity, trade_date, reason, status, source, created_at) VALUES ('kis_vts', NULL,"
+                       " 'B', 'KR', 3, '000660', 'sell', 'market', 1, '2026-10-16', ?, 'sending', 't', 't')",
+                       [jb.bm.GUARD_REASON_LIST[0]])  # fmt: skip
         둘 = jb.run(c, "KR", _at("08:45"), session=_Sess(), sleep=lambda _x: None)
-        assert 둘["sending_today"] == 3
+        assert 둘["sending_today"] == 4
         assert 둘["go_shadow"]["verdict"] == "sell_only" and "sending_today" in 둘["go_shadow"]["reasons"]
     finally:
         mp.undo()

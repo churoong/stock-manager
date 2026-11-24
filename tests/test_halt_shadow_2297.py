@@ -132,6 +132,9 @@ def test_두_계획_호출은_멈춤만_다르고_같은_인자를_받는다() -
     진짜 = "bm.plan(주문들, 코드, 정리기준, 증권, 산적, halted=멈춤, **인자)"
     그림자 = "bm.plan(주문들, 코드, 정리기준, 증권, 산적, halted=False, **인자)"
     assert 글.count(진짜) == 1 and 글.count(그림자) == 1 and 글.count("bm.plan(") == 2
+    # 묶음을 만든 뒤 고치지 않는다 — 두 호출 사이에서 `인자["sent_today"] = 0` 같은 줄이 끼면 그림자만 다른 인자를
+    # 받는데도 호출 글은 같다(25.2305, 25.2304 교차검증 [권고])
+    assert 글.count("인자: dict") == 1 and "인자[" not in 글 and "인자." not in 글 and "인자 =" not in 글
 
 
 def test_증권사에만_남은_몫은_정리로_센다(c: Client) -> None:  # noqa: F811
