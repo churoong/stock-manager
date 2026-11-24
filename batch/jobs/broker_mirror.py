@@ -207,14 +207,17 @@ REALIZED_SNAPSHOT_SQL = (
 #: **두 번 적용돼도 같다**(25.2291 — 처음 꼴은 같은 문장이 다시 가면 "… · 보낼 때: … · 보낼 때: …" 로 겹쳤다. DB
 #: 호출은 시간 초과·5xx 에서 같은 묶음을 다시 보낸다): 이미 이은 글(`RECON_KEPT` 가 든 글)과 새 글과 같은 글(앞 글
 #: 없이 닫힌 줄의 둘째 적용)은 그대로 둔다. 잇는 길이는 보낼 때 글의 상한(예외 글 200자 + 장중 줄 머리)을 덮는
-#: `RECON_KEEP_CHARS` — 120자였을 때는 지키려던 칸 이름이 잘렸다
+#: `RECON_KEEP_CHARS` — 120자였을 때는 지키려던 칸 이름이 잘렸고, 240자는 가장 긴 장중 머리(익절선(고점 대비)·7자리
+#: 가격 — `intraday_guard.note` 39자 + " · " + 예외 글 200자 = 242자)에서 2자 모자랐다(25.2292). 표지 글과 길이는
+#: 문장 안에 글자로 적는다(스키마 대조 그물이 고정 글만 본다) — 상수와 같은지는 시험이 센다. 표지가 든 줄은 다시
+#: 맞추지 않는다는 전제다(모름으로 닫힌 줄은 맞추기 대상 sending·accepted 에 다시 들지 않는다)
 RECON_KEPT = " · 보낼 때: "
-RECON_KEEP_CHARS = 240
+RECON_KEEP_CHARS = 260
 RECON_SQL = (
     "UPDATE paper_broker_orders SET status = ?, broker_order_no = COALESCE(?, broker_order_no), filled_qty = ?,"
     " avg_price = ?, message = CASE WHEN ? IS NULL THEN message"
     " WHEN ? = 'unknown' AND COALESCE(message, '') <> '' AND message <> ? AND instr(message, ' · 보낼 때: ') = 0"
-    " THEN ? || ' · 보낼 때: ' || substr(message, 1, 240)"
+    " THEN ? || ' · 보낼 때: ' || substr(message, 1, 260)"
     " WHEN ? = 'unknown' AND instr(COALESCE(message, ''), ' · 보낼 때: ') > 0 THEN message"
     " ELSE ? END, fetched_at = ? WHERE id = ?"
 )

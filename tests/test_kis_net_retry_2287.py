@@ -138,7 +138,8 @@ def test_다시_받은_수가_실행_기록에_실린다() -> None:
 
 def test_모름으로_닫을_때_보낼_때_적은_글을_버리지_않는다() -> None:
     """25.2290 (25.2288 교차검증 [권고]) — 모름 문장에 실은 "받은 것" 이 다음 아침 맞추기의 "체결 조회에 없음" 으로
-    덮여 하루 만에 사라졌다. 앞머리는 새 글 그대로(머리로 가르는 읽기는 그대로), 뒤에 보낼 때 글 120자"""
+    덮여 하루 만에 사라졌다. 앞머리는 새 글 그대로(머리로 가르는 읽기는 그대로), 뒤에 보낼 때 글
+    `RECON_KEEP_CHARS` 자. 두 번 적용해도 같다(25.2291)"""
     import sqlite3
 
     from batch.jobs import broker_mirror as jb
@@ -161,9 +162,12 @@ def test_모름으로_닫을_때_보낼_때_적은_글을_버리지_않는다() 
     assert 행[1] == ("unknown", f"{bm.MISSING} · 보낼 때: {보낼때}", None, 0)
     assert 행[2] == ("unknown", bm.MISSING, None, 0) and 행[3] == ("unknown", bm.MISSING, None, 0)  # 앞 글이 없으면 새 글만
     assert 행[4] == ("filled", 보낼때, "0009", 3)  # 새 글이 없으면(체결과 맞음) 예전대로 그대로 둔다
-    assert 행[5][1] == f"{bm.MISSING_US}{jb.RECON_KEPT}{'가' * jb.RECON_KEEP_CHARS}" and jb.RECON_KEEP_CHARS == 240
+    assert 행[5][1] == f"{bm.MISSING_US}{jb.RECON_KEPT}{'가' * jb.RECON_KEEP_CHARS}" and jb.RECON_KEEP_CHARS == 260
     assert 행[6] == ("rejected", "거부 수량", None, 0)  # 모름이 아니면 예전대로 새 글로 바꾼다
-    assert f"'{jb.RECON_KEPT}'" in jb.RECON_SQL and f"substr(message, 1, {jb.RECON_KEEP_CHARS})" in jb.RECON_SQL
+    # 표지 글은 문장 안에 글자로 세 번, 길이는 한 번 — 상수와 같아야 한다(25.2292)
+    assert jb.RECON_SQL.count(f"'{jb.RECON_KEPT}'") == 3
+    assert jb.RECON_SQL.count(f"substr(message, 1, {jb.RECON_KEEP_CHARS})") == 1 and "substr(" in jb.RECON_SQL
+    assert jb.RECON_SQL.count("substr(") == 1
     # **두 번 적용돼도 같다**(25.2291) — DB 호출은 시간 초과·5xx 에서 같은 묶음을 다시 보낸다
     for o in 결과:
         c.execute(jb.RECON_SQL, jb.recon_params(o, "t"))
@@ -179,6 +183,19 @@ def test_모름으로_닫을_때_보낼_때_적은_글을_버리지_않는다() 
     c.execute(jb.RECON_SQL, jb.recon_params(bm.Outcome(7, "unknown", None, 0, None, bm.MISSING), "t"))
     글 = c.execute("SELECT message FROM paper_broker_orders WHERE id = 7").fetchone()[0]
     assert 글 == f"{bm.MISSING}{jb.RECON_KEPT}{장중}" and "칸(" in 글 and "rt_cd '1'" in 글
+    # 상한 꼴(25.2292) — 가장 긴 장중 머리(익절선(고점 대비)·7자리 가격) + 예외 글 200자가 잘리지 않는다
+    from batch.jobs import intraday_guard as ig
+
+    가장긴 = max((ig.note(ig.Hit(1, "000001", 1, 1_234_500.0, 1_300_000.0, k, "x")) for k in ig.KIND_TEXT), key=len)
+    assert len(가장긴) == 39 and "익절선(고점 대비)" in 가장긴
+    상한 = f"{가장긴} · {'가' * 190}끝칸(abcdef)"
+    assert len(상한) == 39 + 3 + 200 <= jb.RECON_KEEP_CHARS
+    c.execute("INSERT INTO paper_broker_orders (id, status, message) VALUES (8, 'sending', ?)", [상한])
+    c.execute(jb.RECON_SQL, jb.recon_params(bm.Outcome(8, "unknown", None, 0, None, bm.MISSING), "t"))
+    assert c.execute("SELECT message FROM paper_broker_orders WHERE id = 8").fetchone()[0].endswith("끝칸(abcdef)")
+    # 표지가 든 글이어도 모름이 **아닌** 상태로 닫으면 새 글로 바꾼다(지금은 닿지 않는 길 — 규칙만 묶는다)
+    c.execute(jb.RECON_SQL, jb.recon_params(bm.Outcome(8, "rejected", None, 0, None, "거부 수량"), "t"))
+    assert c.execute("SELECT status, message FROM paper_broker_orders WHERE id = 8").fetchone() == ("rejected", "거부 수량")
 
 
 def test_모름_문장의_길이를_묶는다() -> None:
