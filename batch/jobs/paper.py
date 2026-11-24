@@ -2385,6 +2385,15 @@ def run_step(
             계좌기록[aid] = {"error": f"모르는 매도 규칙 {규칙}"}
             줄.append(f"⚠️ 가상 {계이름} 모르는 매도 규칙({규칙}) — 오늘 이 계좌는 평가·매매하지 않았습니다")
             return
+        고르기 = str(acct.get("selection") or "signal")
+        if 고르기 not in pp.SELECTIONS:
+            # 계좌 행이 엔진보다 먼저 들어온 날(25.2317, docs/company.md 12.5 — Z3·Z4 의 `magic_formula`·
+            # `canslim`) — 예전엔 모르는 값이 조용히 신호 종목 고르기로 떨어져 사전 등록과 다른 규칙으로 샀다.
+            # 그 계좌 하나만 건너뛴다
+            log.error("가상 %s 모르는 종목 고르기 %s — 그 계좌를 건너뜀", aid, 고르기)
+            계좌기록[aid] = {"error": f"모르는 종목 고르기 {고르기}"}
+            줄.append(f"⚠️ 가상 {계이름} 모르는 종목 고르기({고르기}) — 오늘 이 계좌는 평가·매매하지 않았습니다")
+            return
         기준 = 다시잰기준(기준)
         _결정판 = partial(_결정, rule_version=판)
         진입 = str(acct.get("entry_rule") or "tranche")

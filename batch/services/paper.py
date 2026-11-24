@@ -41,6 +41,11 @@ SELL_RULES: dict[str, frozenset[str] | None] = {
     # 가 낸 전량 매도(`국면전환`) 하나로 판다
     "etf_switch": frozenset({"국면전환"}),
 }
+#: 계좌가 쓰는 종목 고르기 방식(`paper_accounts.selection`) — 엔진이 아는 값 (docs/company.md 12.5, 25.2317).
+#: 여기 없는 값의 계좌는 그 계좌만 건너뛴다(`jobs/paper` 계좌 루프 — 모르는 매도 규칙과 같은 막이). 거장 단독 계좌
+#: Z3·Z4 의 새 값(`magic_formula`·`canslim`)은 엔진이 그 고르기를 갖춘 커밋에서 더한다 — 행이 코드보다 먼저 들어와도
+#: 엉뚱하게 `signal` 로 사지 않게. 예전엔 모르는 값이 조용히 신호 종목 고르기(`signal`)로 떨어졌다
+SELECTIONS = frozenset({"signal", "random", "weighted", "short", "etf_tactical"})
 #: 추세 익절(G)의 매도 사유 코드 — 매도 플래그(`sell_flags.evaluate`)가 아니라 모의 엔진이 낸다
 TRAIL_CODE = "추적손절"
 #: 계좌 **화면 이름** — 사람에게 보이는 곳(리포트·텔레그램·웹)은 알파벳 대신 계좌 특성 이름을 쓴다(2026-10-28 사용자
