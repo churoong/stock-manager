@@ -9,6 +9,7 @@ import { tokenMatches } from "@/lib/intraday";
 import { sendTelegram } from "@/lib/telegram";
 import { recordHeartbeat } from "@/lib/heartbeat";
 import { watchTursoReturn } from "@/lib/tursoWatch";
+import { kickMissingDaily } from "@/lib/dailyKick";
 
 /**
  * 무응답 감시 (docs/health.md, Step 17). cron-job.org 가 1시간마다 부른다.
@@ -61,7 +62,7 @@ export async function GET(request: Request) {
 
     // D1 임시 운영 중에는 미국을 돌리지 않는다(docs/infra.md 25.14). 미국 배치가 없다고 매일 알리면 거짓 알림이다
     const markets: Market[] = (await currentBackend()) === "d1" ? ["KR"] : ["KR", "US"];
-    const due = dueAlerts(
+    const 판정 = dueAlerts(
       now,
       rowsToObjects<Session>(sessionsRs),
       rowsToObjects<LastSuccess>(lastRs),
@@ -69,6 +70,8 @@ export async function GET(request: Request) {
       WATCHES,
       markets,
     );
+    // 아예 안 깨워진 일일 배치는 그날 첫 [무응답] 을 만들 때 한 번 깨운다(25.2310, docs/health.md 5장 예외) — 결과는 알림 글에
+    const due = await kickMissingDaily(판정);
 
     if (due.length > 0) {
       const stamp = now.toISOString();
