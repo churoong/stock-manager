@@ -162,21 +162,24 @@ def test_새_코드_첫날은_매도만으로_센다(monkeypatch: pytest.MonkeyP
 
     c = _코드판(monkeypatch, {"sha": "s2", "code": "new"},
                # 먼저 끝난 성공 줄은 지금과 같은 코드지만 늦게 끝난 부분 성공 줄이 앞 실행이다(두 상태 가운데 늦은 것)
-               [("success", "2026-10-14T23:40:00+00:00", _지문("s0", "new")),
-                ("partial", "2026-10-15T23:40:00+00:00", _지문("s1", "old")),
-                ("failed", "2026-10-15T23:50:00+00:00", _지문("s9", "new"))])  # 실패는 앞 실행이 아니다 # fmt: skip
+               [("success", "2026-10-13T23:40:00+00:00", _지문("s0", "new")),
+                ("partial", "2026-10-14T23:40:00+00:00", _지문("s1", "old")),
+                ("failed", "2026-10-14T23:50:00+00:00", _지문("s9", "new")),  # 실패는 앞 실행이 아니다
+                # **같은 날**(한국 10-16 08:30) 앞서 끝난 실행은 앞 실행이 아니다(25.2308) — 08:27 이 접수 전에 막혀 partial
+                # 로 끝나고 이 실행(예비)이 실제로 사는 날, 그 줄을 앞으로 잡으면 칸이 빠졌다
+                ("partial", "2026-10-15T23:30:00+00:00", _지문("s2", "new"))])  # fmt: skip
     s = _Sess()
     기록 = jb.run(c, "KR", _at("08:40"), session=s, sleep=lambda _x: None)
     assert 기록["new_code"] is True and "new_code" in 기록["go_shadow"]["reasons"] and len(s.orders) == 1
 
 
 @pytest.mark.parametrize(("지금", "앞줄"), [
-    ({"sha": "s2", "code": "old"}, [("partial", "2026-10-15T23:40:00+00:00", {"fingerprint": {"sha": "s1", "code": "old"}})]),
+    ({"sha": "s2", "code": "old"}, [("partial", "2026-10-14T23:40:00+00:00", {"fingerprint": {"sha": "s1", "code": "old"}})]),
     ({"sha": "s2", "code": "new"}, []),  # 앞 실행이 없다(첫 주) — 모름
-    ({"sha": "s2", "code": "new"}, [("success", "2026-10-15T23:40:00+00:00", {"fingerprint": {"sha": "s1"}})]),  # 25.2302 전
+    ({"sha": "s2", "code": "new"}, [("success", "2026-10-14T23:40:00+00:00", {"fingerprint": {"sha": "s1"}})]),  # 25.2302 전
     # 앞 실행이 로컬(커밋 없음)이면 견줄 수 없다 — 그 줄은 뺀다
-    ({"sha": "s2", "code": "new"}, [("success", "2026-10-15T23:40:00+00:00", {"fingerprint": {"sha": None, "code": "x"}})]),
-    ({"sha": None, "code": "new"}, [("success", "2026-10-15T23:40:00+00:00", {"fingerprint": {"sha": "s1", "code": "old"}})]),
+    ({"sha": "s2", "code": "new"}, [("success", "2026-10-14T23:40:00+00:00", {"fingerprint": {"sha": None, "code": "x"}})]),
+    ({"sha": None, "code": "new"}, [("success", "2026-10-14T23:40:00+00:00", {"fingerprint": {"sha": "s1", "code": "old"}})]),
 ])  # fmt: skip
 def test_새_코드가_아니거나_모르면_칸이_없다(monkeypatch: pytest.MonkeyPatch, 지금: dict, 앞줄: list) -> None:
     from tests.test_kis_vts_1475 import _at, _Sess
@@ -201,6 +204,21 @@ def test_앞_코드를_못_읽어도_주문_단계는_간다(monkeypatch: pytest
     s = _Sess()
     기록 = jb.run(c, "KR", _at("08:40"), session=s, sleep=lambda _x: None)
     assert "new_code" not in 기록 and len(s.orders) == 1 and 기록["sent"] == {"accepted": 1}
+    # 모름으로 남긴다(25.2308) — 칸이 없으면 분포에서 "새 코드 아님" 과 구별되지 않았다
+    assert 기록["new_code_error"] == "RuntimeError"
+
+
+def test_깨진_step_log_한_줄이_앞_코드_읽기를_깨지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.2308 — `json_valid` 없이 `json_extract` 가 JSON 아닌 줄을 만나면 질의 전체가 깨졌다(25.1633 의 같은 교훈)"""
+    from tests.test_kis_vts_1475 import _at, _Sess
+
+    c = _코드판(monkeypatch, {"sha": "s2", "code": "new"},
+               [("partial", "2026-10-13T23:40:00+00:00", _지문("s1", "old"))])  # fmt: skip
+    c.conn.execute("INSERT INTO batch_runs (job_name, market, trade_date, status, started_at, finished_at, step_log)"
+                   " VALUES ('daily_kr', 'KR', '2026-10-14', 'success', '2026-10-14T23:40:00+00:00',"
+                   " '2026-10-14T23:40:00+00:00', '깨진 글')")  # fmt: skip
+    기록 = jb.run(c, "KR", _at("08:40"), session=_Sess(), sleep=lambda _x: None)
+    assert 기록["new_code"] is True and "new_code_error" not in 기록
 
 
 def test_로컬_실행은_앞_코드를_읽지도_않는다(monkeypatch: pytest.MonkeyPatch) -> None:

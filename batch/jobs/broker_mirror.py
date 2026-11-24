@@ -727,20 +727,26 @@ def _account_perf(client: Any, sess: Any, 증권사: str, 오늘: str, 합: dict
 
 #: 새 코드 첫날(25.2306, docs/paper.md 15.13) — 같은 시장 일일 배치의 앞 성공·부분 성공 실행이 남긴 배치 코드 지문
 #: (`step_log.fingerprint.code`, 25.2302). 상태마다 한 줄씩(색인 `idx_batch_runs_last_success` = (job_name, status,
-#: finished_at DESC) 를 타 두 행만 읽는다 — `IN` 으로 묶으면 정렬에 그 작업의 성공 줄을 다 읽는다). 로컬 실행
+#: finished_at DESC) 를 탄다 — `IN` 으로 묶으면 정렬에 그 작업의 성공 줄을 다 읽는다). 로컬 실행
 #: (커밋 없음) 줄은 작업 트리를 해시해 견줄 수 없어 뺀다(25.2305 와 같은 잣대). 작업 이름은 `daily.job_name` 과 같아야
 #: 한다(시험이 대조)
 DAILY_JOB = {"KR": "daily_kr", "US": "daily_us"}
+#: **오늘(그 시장 날짜) 전에 시작한** 실행만 앞 실행이다(25.2308, 25.2306 교차검증 [권고]) — 같은 날 앞 실행(08:27 이
+#: 접수 전에 막혀 partial 로 끝나고 09:35 예비가 실제로 사는 날 등)을 앞 실행으로 잡으면, 정작 새 코드로 매수를 낸
+#: 실행에서 칸이 빠졌다. 깨진 step_log 한 줄이 질의 전체를 깨지 않게 `json_valid` 를 먼저 본다(25.1633 의 같은 교훈).
+#: 지문 있는 줄이 나올 때까지 색인을 따라 훑는다 — 지문 이전 줄이 쌓인 동안은 그 작업의 성공 줄 수만큼 읽는다
 PREV_CODE_SQL = (
     "SELECT json_extract(step_log, '$.fingerprint.code'), finished_at FROM batch_runs WHERE job_name = ? AND status = ?"
-    " AND finished_at IS NOT NULL AND json_extract(step_log, '$.fingerprint.sha') IS NOT NULL"
-    " ORDER BY finished_at DESC LIMIT 1"
+    " AND finished_at IS NOT NULL AND started_at < ? AND json_valid(step_log)"
+    " AND json_extract(step_log, '$.fingerprint.sha') IS NOT NULL ORDER BY finished_at DESC LIMIT 1"
 )
 
 
-def prev_code(client: Any, market: str) -> str | None:
-    """앞 성공·부분 성공 일일 배치의 배치 코드 지문 — 둘 가운데 늦게 끝난 것. 그 줄에 지문이 없으면(25.2302 전) None"""
-    줄 = [r for 상태 in ("success", "partial") for r in client.execute(PREV_CODE_SQL, [DAILY_JOB[market], 상태]).rows]
+def prev_code(client: Any, market: str, before: str) -> str | None:
+    """`before`(오늘 그 시장 자정의 UTC 시각) 전에 시작한 성공·부분 성공 일일 배치의 배치 코드 지문 — 둘 가운데 늦게
+    끝난 것. 그 줄에 지문이 없으면(25.2302 전) None"""
+    줄 = [r for 상태 in ("success", "partial")
+         for r in client.execute(PREV_CODE_SQL, [DAILY_JOB[market], 상태, before]).rows]  # fmt: skip
     if not 줄:
         return None
     값 = max(줄, key=lambda r: str(r[1] or ""))[0]
@@ -819,12 +825,12 @@ def run(
     # 새 코드 첫날(25.2306) — 주문 허가 판정(15.13)의 매도만 갈래 재료. Actions 실행(커밋 있음)에서만 읽는다: 로컬
     # 실행은 작업 트리를 해시해 견줄 수 없고, 읽기를 안 하니 시험의 가짜 클라이언트에도 닿지 않는다. 앞 값이 없으면 모름
     if (지문 := db.run_fingerprint()).get("sha") and 지문.get("code"):
+        자정 = datetime.combine(오늘, datetime.min.time(), tzinfo=cal.market_tz(market)).astimezone(UTC).isoformat()
         try:
-            앞코드 = prev_code(client, market)
+            앞코드 = prev_code(client, market, 자정)
         except Exception as exc:  # noqa: BLE001 — 그림자 재료라 못 읽어도 주문 단계는 간다
-            import logging
-
-            logging.getLogger("broker_mirror").warning("앞 실행 코드 지문을 읽지 못했다: %s", exc)
+            # 모름으로 남긴다(25.2308) — 칸이 없으면 분포에서 "새 코드 아님"(go 쪽)과 구별되지 않았다
+            기록["new_code_error"] = type(exc).__name__
         else:
             if 앞코드 and 앞코드 != 지문["code"]:
                 기록["new_code"] = True

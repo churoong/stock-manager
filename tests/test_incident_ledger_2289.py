@@ -322,7 +322,7 @@ def test_읽지도_쓰지도_않는다_그리고_문서() -> None:
                "영향", "문장 머리", "25.2295", "이틀(`SPAN_SHOW_DAYS`)부터", "같은 코드로 복구", "코드가 바뀐 뒤 복구",
                "그 고침 덕인지는 모른다", "실패·중단 N번", "25.2298", "미국 동부 날짜", "실패·중단한 날 N일", "달력 폭이 아니다",
                "문서만 바꾼 커밋", "25.2300", "**무응답**", "**검산 틀린 날**", "앞 다섯(`OTHER_TOP_N`)", "25.2307",
-               "**계좌가 제 일을 못 한 날**"):  # fmt: skip
+               "**계좌가 제 일을 못 한 날**", "25.2308", "단계 건너뜀", "같은 날 다시 돈 실행이 끝까지 돌아도 센다"):  # fmt: skip
         assert 조각 in 문서, 조각
 
 
@@ -392,7 +392,9 @@ def test_요약_실행이_무응답과_검산을_읽어_싣는다(monkeypatch) -
     찍힘.clear()
     assert ws.run(dry_run=True) == 0
     글 = "\n".join(찍힘)
-    assert "운영 사고(실패 묶음 → 복구)" in 글 and "무응답·검산·계좌 줄을 만들지 못했습니다 (RuntimeError)" in 글
+    # 읽기마다 따로 가둔다(25.2308) — 검산 읽기가 깨져도 무응답 줄은 남는다
+    assert "운영 사고(실패 묶음 → 복구)" in 글 and "검산 줄을 만들지 못했습니다 (RuntimeError)" in 글
+    assert "무응답(기대 시각까지 성공 없음): 2건" in 글 and "검산 틀린 날" not in 글
 
 
 def test_계좌가_제_일을_못_한_날(monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -438,3 +440,29 @@ def test_계좌가_제_일을_못_한_날(monkeypatch) -> None:  # type: ignore[
     assert ws.run(dry_run=True) == 0
     글 = "\n".join(찍힘)
     assert "계좌가 제 일을 못 한 날: " in 글 and "계좌 H, ZM, 단계" in 글
+
+
+def test_계좌_줄의_단계_갈래와_읽기가_깨진_날() -> None:
+    """25.2308 — ① 단계를 통째로 건너뛴 날(잠금 등, 입금 없음 밖)도 센다(관문 `desk.paper_step_failed` 와 같은 잣대)
+    ② 베끼는 계좌 하나의 예외는 `error` 도 싣지만 "단계" 로 적지 않는다 ③ 읽기가 깨진 날에도 계좌 줄은 남는다"""
+    import json
+
+    from batch.core import db
+    from batch.services import desk
+    from tests.test_portfolio_job import MemClient
+
+    assert ws._단계_쉼_정상 == desk.PAPER_SKIP_OK  # 관문과 같은 정상 쉼
+    mem = MemClient()
+    db.apply_migrations(mem)  # type: ignore[arg-type]
+    now = datetime.now(UTC)
+    from datetime import timedelta
+
+    for i, 로그 in enumerate([{"paper": {"skipped": "다른 시장의 가상모의투자 단계가 도는 중(잠금)"}},
+                             {"paper": {"skipped": "입금 없음"}},
+                             {"paper": {"error": "가상 H 계좌 단계 실패: KeyError", "account_errors": {"H": "KeyError"}}},
+                             {"paper": {"error": "죽음", "account_errors": {}}}]):  # fmt: skip
+        t = (now - timedelta(hours=10 - i)).isoformat(timespec="seconds")
+        mem.conn.execute("INSERT INTO batch_runs (job_name, market, trade_date, status, started_at, step_log)"
+                         " VALUES ('daily_kr', 'KR', ?, 'partial', ?, ?)", [t[:10], t, json.dumps(로그)])  # fmt: skip
+    assert [r.paper_faults for r in ws.load_runs(mem, (now - timedelta(days=1)).isoformat())] == [  # type: ignore[arg-type]
+        ("단계 건너뜀",), (), ("H",), ("단계",)]

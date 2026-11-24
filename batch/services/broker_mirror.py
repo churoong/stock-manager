@@ -87,8 +87,8 @@ def go_shadow(record: dict[str, Any]) -> dict[str, Any]:
     - `no_go` 갈래(`GO_NO_GO`)는 **지금도 주문을 내지 않는** 경우다(판정이 현재 동작과 같다 — 대조용)
     - `sell_only` 갈래(`GO_SELL_ONLY`)가 새 그림자다: 체결을 모르거나 잔고가 어긋난 채 **새 매수**를 내는 날. 위험을
       줄이는 매도·정리는 막지 않는다는 뜻이라 "매도만"
-    - 둘 다 걸리면 `no_go`. 아직 보지 않는 것: 시세 기준일·커버리지·읽기 예산·"새 코드 첫날"(실행 지문) — 이 기록에
-      없다
+    - 둘 다 걸리면 `no_go`. 새 코드 첫날(`new_code`)은 KIS 단계(`jobs/broker_mirror.run`)가 앞 거래일 실행의 지문을
+      읽어 싣는다(25.2306·25.2308). 아직 보지 않는 것: 시세 기준일·커버리지·읽기 예산 — 이 기록에 없다
     """
     맞춤 = record.get("reconciled")
     값 = {k: record.get(k) for k in (*GO_NO_GO, *GO_SELL_ONLY)}

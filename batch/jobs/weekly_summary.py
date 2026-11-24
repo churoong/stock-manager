@@ -125,6 +125,11 @@ MISSING_ALERTS_SQL = "SELECT job, market, local_date FROM health_alerts WHERE ki
 RECON_BAD_SQL = "SELECT account_id, as_of FROM paper_daily WHERE recon_ok = 0 AND as_of >= ?"
 
 
+#: 가상모의투자 단계의 정상 쉼 — 관문(`desk.PAPER_SKIP_OK`)과 같아야 한다(시험이 대조). 여기서 desk 를 들이면 무거워
+#: 글자 그대로 둔다
+_단계_쉼_정상 = ("입금 없음",)
+
+
 def load_runs(client: TursoClient, since: str) -> list[Run]:
     rows = client.execute(
         "SELECT job_name, market, status, started_at, error_text, step_log FROM batch_runs"
@@ -153,8 +158,14 @@ def load_runs(client: TursoClient, since: str) -> list[Run]:
             if isinstance(모의, dict):
                 못함 = {str(k) for 칸 in ("account_skips", "account_errors")
                        if isinstance(모의.get(칸), dict) for k in 모의[칸]}  # fmt: skip
-                if 모의.get("error") is not None:
+                # 단계 전체 예외 — 베끼는 계좌 하나의 예외도 `error` 를 함께 싣는다(paper.py). 그때는 계좌 이름만
+                # (25.2308 — "계좌 H, 단계" 로 단계 전체가 깨진 것처럼 읽혔다)
+                if 모의.get("error") is not None and not 못함 & set(모의.get("account_errors") or {}):
                     못함.add("단계")
+                # 단계를 통째로 건너뛴 날(다른 시장 잠금 등 — 입금 없음 밖, 관문 `desk.paper_step_failed` 와 같은
+                # 잣대, 25.2308 — 처음엔 빠져 관문과 주간 요약이 다른 말을 했다)
+                if isinstance(모의.get("skipped"), str) and 모의["skipped"] not in _단계_쉼_정상:
+                    못함.add("단계 건너뜀")
                 계좌못함 = tuple(sorted(못함))
         except (TypeError, ValueError):
             pass
@@ -702,11 +713,21 @@ def run(dry_run: bool = False, force: bool = False) -> int:
             사고 = incident_ledger.lines(incident_ledger.incidents(runs))
         except Exception as exc:  # noqa: BLE001
             사고 = [f"운영 사고 절을 만들지 못했습니다 ({type(exc).__name__})"]
-        # 실행 기록 밖의 두 갈래(25.2300) — 따로 가둔다: 이 읽기가 깨져도 위 대장 줄은 남는다
+        # 실행 기록 밖의 두 갈래(25.2300)와 계좌 줄(25.2307) — 읽기마다 따로 가둔다(25.2308): 읽기 하나가 깨져도 위 대장
+        # 줄과 나머지 갈래는 남는다. 계좌 줄은 새 읽기가 없어 읽기가 깨진 날에도 남는다
+        깨짐: list[str] = []
+        무응답: list[tuple[str, str, str]] = []
+        검산: list[tuple[str, str]] = []
         try:
             무응답 = [(str(r[0]), str(r[1]), str(r[2])) for r in client.execute(MISSING_ALERTS_SQL, [since]).rows]
+        except Exception as exc:  # noqa: BLE001
+            깨짐.append(f"무응답 줄을 만들지 못했습니다 ({type(exc).__name__})")
+        try:
             검산 = [(str(r[0]), str(r[1])) for r in client.execute(RECON_BAD_SQL, [since[:10]]).rows]
-            사고 = [*사고, *incident_ledger.other_lines(무응답, 검산, incident_ledger.account_days(runs))]
+        except Exception as exc:  # noqa: BLE001
+            깨짐.append(f"검산 줄을 만들지 못했습니다 ({type(exc).__name__})")
+        try:
+            사고 = [*사고, *incident_ledger.other_lines(무응답, 검산, incident_ledger.account_days(runs)), *깨짐]
         except Exception as exc:  # noqa: BLE001
             사고 = [*사고, f"무응답·검산·계좌 줄을 만들지 못했습니다 ({type(exc).__name__})"]
         text = compose(runs=runs, last_success=last, now=now, reads_used=used, writes_used=쓰기, rot_lines=rot_lines,
