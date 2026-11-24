@@ -651,12 +651,27 @@ def test_다시_잴_때_자료_문제로_넘긴_종목은_다시_읽지_않는�
 
 
 def test_못_산_날_경고_술어() -> None:
-    assert solo.warning({"buy": {"slots": 1, "orders": 0, "not_bought": {3: "시세 없음 — 다음 순위로", 4: "묵은 종가"}}}) == (
+    z4 = {"rule": "canslim_v1", "slots": 1, "orders": 0, "ranked": 5}
+    z3 = {"rule": "magic_formula_v1", "slots": 1, "orders": 0, "ranked": 800, "universe": 900}
+    assert solo.warning({"buy": {**z4, "not_bought": {3: "시세 없음 — 다음 순위로", 4: "묵은 종가"}}}) == (
         "normal", "사지 못함 — 시세 없음 — 다음 순위로 외 1종목")  # fmt: skip
-    assert solo.warning({"buy": {"slots": 2, "orders": 0}, "risk_blocked": 3}) == ("normal", "사지 못함 — 위험 점검에 막힘 3건")
-    assert solo.warning({"buy": {"slots": 1, "orders": 1, "not_bought": {3: "x"}}}) is None  # 하나라도 샀다
+    assert solo.warning({"buy": {**z4, "slots": 2, "blocked": 3}}) == ("normal", "사지 못함 — 위험 점검에 막힘 3건")
+    # 자료 문제와 매수 막힘이 함께면 둘 다 — 자리를 비운 막힘을 숨기지 않는다(25.2325)
+    assert solo.warning({"buy": {**z4, "not_bought": {3: "시세 없음"}, "blocked": 1}}) == (
+        "normal", "사지 못함 — 시세 없음 · 위험 점검에 막힘 1건")  # fmt: skip
+    # 넘김 상한 표지(−1, JSON 이면 '-1')는 종목으로 세지 않는다
+    assert solo.warning({"buy": {**z4, "not_bought": {3: "시세 없음", "-1": "넘긴 후보 10개 — 그만 봄"}}}) == (
+        "normal", "사지 못함 — 시세 없음")  # fmt: skip
+    # 매도만 막힌 날은 거짓 경고를 내지 않는다 — 계좌의 risk_blocked 는 막힌 매도도 센다(25.2325 [필수])
+    assert solo.warning({"buy": dict(z4), "risk_blocked": 2, "risk_blocked_by": {"frozen": 2}}) is None
+    assert solo.warning({"buy": {**z4, "orders": 1, "not_bought": {3: "x"}}}) is None  # 하나라도 샀다
     assert solo.warning({"buy": {"skipped": "그 달 첫 거래일 장이 아님"}}) is None  # 자리 없음 — 정상
-    assert solo.warning({"buy": {"slots": 3, "orders": 0}}) is None  # 살 후보가 없었다 — 정상
+    assert solo.warning({"buy": {**z4, "skipped": "환율 없음"}}) is None  # 매수 단계 이상 끝남은 desk._buy_fault 몫
+    assert solo.warning({"buy": dict(z4)}) is None  # 살 후보가 없었다 — 정상
+    assert solo.warning({"buy": {**z4, "ranked": 0}}) is None  # Z4 순위 0 은 정상일 수 있다
+    # Z3 순위 0 은 자료 장애 — 그달 매수를 잃는다
+    assert solo.warning({"buy": {**z3, "ranked": 0, "universe": 0}}) == ("normal", "사지 못함 — 순위 낼 자료 없음(유니버스 0종목)")
+    assert solo.warning({"buy": {"slots": 1, "orders": 0, "not_bought": {3: "x"}}}) is None  # 단독 계좌가 아님
     assert solo.warning({}) is None
 
 
@@ -731,3 +746,19 @@ def test_관문에_막힌_종목은_못_산_것에_현금_부족으로_남지_�
         fill_session="2026-11-02",
     )  # fmt: skip
     assert 3 not in 기록.get("not_bought", {})
+    assert 기록["blocked"] == 2  # 매수 쪽 막힌 종목 수(2·3) — 경고가 읽는 칸(25.2325)
+
+
+def test_매수가_관문에만_막힌_날도_리포트와_상황실에_같은_글로(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.2325 — 매수 쪽 막힘 수(`buy.blocked`)로 띄운다. 종목 상한을 5% 로 내리면 10% 매수가 stock_cap 으로 막힌다"""
+    from tests.test_paper_job_1445 import 설정 as 공통설정
+
+    monkeypatch.setitem(공통설정, "max_weight_per_stock", 5.0)
+    c = _새(monkeypatch, ("Z4",), ("2026-10-14",))
+    _국면(monkeypatch, "bull")
+    줄, 기록 = _하루(c, monkeypatch, "2026-10-14")
+    a = 기록["accounts"]["Z4"]
+    assert a["buy"]["blocked"] == 1 and a["buy"]["orders"] == 0
+    assert "⚠️ 가상 오닐 사지 못함 — 위험 점검에 막힘 1건" in 줄
+    assert {"level": "normal", "text": "가상 오닐 사지 못함 — 위험 점검에 막힘 1건"} in desk.checks(
+        halted=False, paper=기록, broker=None, recon_bad=[], warnings=0)  # fmt: skip

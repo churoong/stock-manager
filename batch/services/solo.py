@@ -137,15 +137,27 @@ def warning(rec: dict[str, Any]) -> tuple[str, str] | None:
     못 산 날**.
 
     리포트의 ⚠️ 줄(`jobs/paper`)과 운용 요약 '확인할 일'(`desk.checks`)이 같은 술어를 쓴다(25.2170 의 ETF 와 같은 꼴,
-    25.2323).
-    후보가 모두 자료 문제·현금 부족으로 넘겨졌거나 위험 점검에 막힌 날만 — 자리가 없거나(보유 상한·달 첫 장 아님·국면)
-    살 후보가 아예 없는 날(이미 다 든 날)은 정상이라 None. Z3 은 한 달에 한 번이라 그달 매수를 통째로 잃는 날이다"""
+    25.2323). 거르는 문도 하나 — 매수 기록의 `rule`(단독 판 이름)이 있는 계좌만(25.2325 — 예전엔 리포트는 고르기 값,
+    상황실은 계좌 id 로 걸렀다).
+    - 뜨는 날: 자리가 있고(`slots`) 하나도 안 샀는데, 후보가 자료 문제·현금 부족으로 넘겨졌거나(`not_bought`) **매수**가
+      위험 점검에 막혔거나(`blocked` — 계좌의 `risk_blocked` 는 막힌 **매도**도 세어 쓰지 않는다, 25.2325 교차검증
+      [필수]), Z3 이 순위를 하나도 못 낸 날(유니버스 자료 장애 — 마법공식은 유니버스 전체에 순위를 매겨 0 이면 이상이다.
+      Z4 는 두 부서가 모두 찬성한 종목만 순위에 들어 0 이 정상일 수 있다)
+    - 정상(None): 자리 없음(보유 상한·달 첫 장 아님·국면) · 살 후보가 아예 없음(이미 다 듦) · 매수 단계가 이상으로 일찍
+      끝남(`skipped` — 환율 없음 등은 `desk._buy_fault` 가 따로 띄우고 관문 무사고에도 센다, 겹치지 않게)"""
     b = rec.get("buy") or {}
-    if not isinstance(b, dict) or not b.get("slots") or b.get("orders"):
+    if not isinstance(b, dict) or b.get("rule") not in RULE_NAMES.values() or not b.get("slots") or b.get("orders"):
         return None
-    못삼 = {k: v for k, v in (b.get("not_bought") or {}).items()}
-    막힘 = int(rec.get("risk_blocked") or 0)
+    if b.get("skipped"):
+        return None
+    # 넘김 상한 표지(열쇠 −1, JSON 으로 되읽으면 '-1')는 종목이 아니다
+    못삼 = [v for k, v in (b.get("not_bought") or {}).items() if str(k) != "-1"]
+    막힘 = int(b.get("blocked") or 0)
+    if b.get("rule") == RULE_NAMES[MAGIC] and not b.get("ranked"):
+        return "normal", f"사지 못함 — 순위 낼 자료 없음(유니버스 {int(b.get('universe') or 0)}종목)"
     if not 못삼 and not 막힘:
         return None
-    까닭 = next(iter(못삼.values()), None) if 못삼 else f"위험 점검에 막힘 {막힘}건"
-    return "normal", f"사지 못함 — {까닭}" + (f" 외 {len(못삼) - 1}종목" if len(못삼) > 1 else "")
+    글 = [f"{못삼[0]}" + (f" 외 {len(못삼) - 1}종목" if len(못삼) > 1 else "")] if 못삼 else []
+    if 막힘:
+        글.append(f"위험 점검에 막힘 {막힘}건")
+    return "normal", "사지 못함 — " + " · ".join(글)

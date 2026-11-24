@@ -81,7 +81,8 @@ def plan(
     자료 = universe_dossiers(client, market, universe_ids, as_of, cache)
     순위 = solo.magic_ranks(자료) if selection == solo.MAGIC else solo.canslim_ranks(자료)
     후보 = solo.candidates(순위, held, excluded)
-    return 후보, 자리, {"universe": len(자료), "ranked": len(순위), "held": len(held), "slots": 자리}
+    return 후보, 자리, {"rule": solo.RULE_NAMES[selection], "universe": len(자료), "ranked": len(순위),
+                       "held": len(held), "slots": 자리}  # fmt: skip
 
 
 def _근거(selection: str, r: solo.Ranked, as_of: str, n_ranked: int) -> list[dict[str, Any]]:
@@ -230,6 +231,10 @@ def orders_through_gate(
             break
     기록["orders"] = len(통과)
     기록["picks"] = [주문[c.key]["stock_id"] for c in 통과]
+    # 매수 쪽 막힌 종목 수 — 계좌의 `risk_blocked` 는 막힌 매도도 세어 경고가 그것을 쓰면 매도가 막힌 날 "사지 못함" 이
+    # 거짓으로 떴다(25.2325, 25.2323 교차검증 [필수])
+    if 막힘:
+        기록["blocked"] = len({주문[c.key]["stock_id"] for c, _ in 막힘})
     # 앞 회차에 "현금 부족" 으로 적혔다가 다음 회차에 주문 줄이 된 종목은 못 산 것에서 뺀다 — 산 종목이 picks 와
     # not_bought 에 함께 적혔고(25.2322), 관문에 막힌 종목은 원장 blocked(위험 점검)와 까닭이 엇갈렸다(25.2324 — 막힌
     # 까닭은 원장에 있다)

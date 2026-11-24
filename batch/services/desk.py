@@ -1374,7 +1374,7 @@ def checks(
         if (경고 := _etf_warning(a)) is not None:
             # ETF 전술 X·Y 의 멈춤·못 산 날 — 리포트 끝 ⚠️ 줄과 같은 술어(25.2170, 25.2168 교차검증 [권고])
             out.append({"level": 경고[0], "text": f"가상 {nm} {경고[1]}"})
-        if aid in pp.SOLO_IDS and (경고 := _solo_warning(a)) is not None:
+        if (경고 := _solo_warning(a)) is not None:
             # 거장 단독 Z3·Z4 가 자리가 있는데 하나도 못 산 날 — 리포트 끝 ⚠️ 줄과 같은 술어(25.2323)
             out.append({"level": 경고[0], "text": f"가상 {nm} {경고[1]}"})
         if a.get("substitute_overlap_hit"):
