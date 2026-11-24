@@ -11,6 +11,11 @@ docs/roadmap.md 1장 #9 뒤 절반의 첫 조각. 실전 전환 근거의 하나
 - **원인 갈래** = 첫 실패의 `error_text` 머리(첫 `:` 앞, 40자). 예외 이름을 적는 작업은 이름이, 대부분의 작업은
   `str(exc)` 를 적으므로 **문장 머리**가 온다(25.2290 정정 — 처음엔 "예외 이름, 본문 없음" 이라 적었다)
 - 창 끝까지 닫히지 않은 사고는 "열림" 으로 따로 센다(복구 시간 없음)
+- **걸친 날 수**(25.2295, 영향의 첫 조각) = 그 묶음의 실패·중단 줄이 선 **한국 날짜**의 수. 하루 한 번 도는 작업이면
+  "그 작업이 제 일을 못 한 날 수" 에 가깝다(거래일 달력은 읽지 않는다 — 어림)
+- **같은 코드로 복구됐나**(25.2295) = 첫 실패의 코드(`sha` — `step_log.fingerprint`, 25.2277)와 닫은 실행의 코드를
+  견준다. 같으면 바깥 까닭(망·공급자·한도)이 지나간 것이고, 다르면 그 사이에 코드가 바뀌었다(고침이 들어갔을 수 있다 —
+  **그 고침 덕인지는 모른다**). 어느 한쪽이라도 모르면(지문 이전 줄·로컬 실행·정리된 줄) 적지 않는다
 """
 
 from __future__ import annotations
@@ -30,6 +35,8 @@ CLOSE_STATUS = ("success", "partial")
 CAUSE_MAX = 40
 #: 요약에 따로 적는 사고 수(긴 것부터)
 TOP_N = 3
+#: 걸친 날 수를 줄에 적기 시작하는 값 — 하루 안의 사고(대부분)는 적지 않는다
+SPAN_SHOW_DAYS = 2
 
 
 def _때(s: str) -> datetime | None:
@@ -48,21 +55,31 @@ def incidents(runs: list[Any]) -> list[dict[str, Any]]:
     """실행 줄(시작 시각 오름차순이 아니어도 된다 — 여기서 세운다) → 사고 목록.
 
     줄은 `job_name`·`market`·`status`·`started_at`·`error_text` 속성을 가진 것(`jobs/weekly_summary.Run`).
-    돌려주는 것: [{job, market, opened, closed(없으면 None), failures, minutes(없으면 None), cause}] — 연 시각 차례"""
+    줄에 `sha` 속성이 있으면(없어도 된다) 코드 견줌에 쓴다.
+    돌려주는 것: [{job, market, opened, closed(없으면 None), failures, minutes(없으면 None), cause, days,
+    same_code(True·False·모르면 None)}] — 연 시각 차례"""
     열린: dict[tuple[str, str], dict[str, Any]] = {}
     out: list[dict[str, Any]] = []
+    날들: dict[tuple[str, str], set[str]] = {}
+    첫코드: dict[tuple[str, str], Any] = {}
     for r in sorted(runs, key=lambda x: str(x.started_at)):
         키 = (str(r.job_name), str(r.market or ""))
         죽음 = r.status == "skipped" and str(r.error_text or "").startswith(db.REAPED_PREFIX)
         if r.status in OPEN_STATUS or 죽음:
             if 키 not in 열린:
                 열린[키] = {"job": 키[0], "market": 키[1] or None, "opened": str(r.started_at), "closed": None,
-                           "failures": 0, "minutes": None, "cause": _갈래(r.error_text)}  # fmt: skip
+                           "failures": 0, "minutes": None, "cause": _갈래(r.error_text), "days": 0,
+                           "same_code": None}  # fmt: skip
                 out.append(열린[키])
+                날들[키], 첫코드[키] = set(), getattr(r, "sha", None)
             열린[키]["failures"] += 1
+            날들[키].add(_날(str(r.started_at)))
+            열린[키]["days"] = len(날들[키])
         elif r.status in CLOSE_STATUS and 키 in 열린:
             건 = 열린.pop(키)
             건["closed"] = str(r.started_at)
+            앞, 뒤 = 첫코드.pop(키, None), getattr(r, "sha", None)
+            건["same_code"] = (앞 == 뒤) if 앞 and 뒤 else None
             시작, 끝 = _때(건["opened"]), _때(건["closed"])
             if 시작 is not None and 끝 is not None:
                 try:
@@ -83,6 +100,14 @@ def _언제(s: str) -> str:
     if t is None or t.tzinfo is None:
         return str(s)[:16]
     return t.astimezone(SHOW_TZ).strftime("%m-%d %H:%M")
+
+
+def _날(s: str) -> str:
+    """시작 시각 → 한국 날짜("YYYY-MM-DD"). 못 읽거나 시간대가 없으면 원문 앞 10자"""
+    t = _때(s)
+    if t is None or t.tzinfo is None:
+        return str(s)[:10]
+    return t.astimezone(SHOW_TZ).strftime("%Y-%m-%d")
 
 
 def _분(m: int) -> str:
@@ -106,7 +131,11 @@ def lines(found: list[dict[str, Any]]) -> list[str]:
     for x in 적을것:
         어디 = x["job"] + (f"({x['market']})" if x["market"] else "")
         언제 = "아직 복구 안 됨" if x["closed"] is None else f"복구 {_분(x['minutes'])}"
-        줄.append(f"  {어디}: {_언제(x['opened'])} 부터 실패 {x['failures']}번 · {언제} · {x['cause']}")
+        # "실패·중단"(25.2295) — 정리된 줄(강제 종료·한도로 끝맺지 못함)도 세므로 "실패" 만으로는 틀린 말이었다
+        걸침 = f" · {x['days']}일에 걸침" if x.get("days", 0) >= SPAN_SHOW_DAYS else ""
+        코드 = {True: " · 같은 코드로 복구", False: " · 코드가 바뀐 뒤 복구"}.get(x.get("same_code"), "")
+        앞 = f"  {어디}: {_언제(x['opened'])} 부터 실패·중단 {x['failures']}번{걸침}"
+        줄.append(f"{앞} · {언제}{코드} · {x['cause']}")
     # 머리 수 − 실제로 적은 줄 수(25.2290) — 닫혔지만 복구 시간을 못 잰 사고는 목록에 없어도 여기서 센다
     if len(found) > len(적을것):
         줄.append(f"  … 그 밖 {len(found) - len(적을것)}건")

@@ -100,6 +100,8 @@ class Run:
     warnings: tuple[str, ...]
     #: 건너뛴 까닭(`step_log.decision`) — 예정된 건너뜀을 가른다 (25.1372)
     decision: str | None = None
+    #: 그 실행의 코드(`step_log.fingerprint.sha`, 25.2277) — 사고 대장이 "같은 코드로 복구됐나" 를 가른다 (25.2295)
+    sha: str | None = None
 
 
 #: **예정된 건너뜀** — 고장이 아니다 (docs/infra.md 25.1372, 주간 요약 감사 재현). 미국 일일 배치는 서머타임을 덮으려고
@@ -120,16 +122,20 @@ def load_runs(client: TursoClient, since: str) -> list[Run]:
     for r in rows:
         경고: tuple[str, ...] = ()
         까닭: str | None = None
+        코드: str | None = None
         try:
             로그 = json.loads(r["step_log"]) if r["step_log"] else {}
             if isinstance(로그, dict) and isinstance(로그.get("warnings"), list):
                 경고 = tuple(str(w) for w in 로그["warnings"])
             if isinstance(로그, dict) and isinstance(로그.get("decision"), str):
                 까닭 = 로그["decision"]
+            지문 = 로그.get(db.RUN_FINGERPRINT_KEY) if isinstance(로그, dict) else None
+            if isinstance(지문, dict) and isinstance(지문.get("sha"), str) and 지문["sha"]:
+                코드 = 지문["sha"]
         except (TypeError, ValueError):
             pass
         out.append(Run(str(r["job_name"]), r["market"], str(r["status"]), str(r["started_at"]), r["error_text"], 경고,
-                       까닭))  # fmt: skip
+                       까닭, 코드))  # fmt: skip
     return out
 
 
