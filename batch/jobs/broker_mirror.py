@@ -733,6 +733,17 @@ def _호출(sess: Any) -> dict[str, int]:
             | ({"net_retries": 끊김} if 끊김 else {}))  # fmt: skip
 
 
+def _끝(기록: dict[str, Any], sess: Any) -> dict[str, Any]:
+    """KIS 단계가 돌려주는 기록의 마지막 조립 — 주문 허가 판정의 그림자(`bm.go_shadow`, 25.2293)와 호출 수 꼬리.
+    **모든 반환이 이것을 쓴다.** 그림자 판정은 기록만 한다(주문은 이미 냈거나 안 낸 뒤다) — 계산이 깨져도 단계는
+    그대로 끝난다(까닭만 남긴다)"""
+    try:
+        그림자: dict[str, Any] = bm.go_shadow(기록)
+    except Exception as exc:  # noqa: BLE001 — 곁다리 기록이 단계를 죽이지 않게
+        그림자 = {"error": type(exc).__name__}
+    return 기록 | {"go_shadow": 그림자} | _호출(sess)
+
+
 def run(
     client: Any, market: str, now: datetime, *, session: Any = None, sleep: Any = time.sleep, clock: Any = None,
     frozen: set[int] | None = None, slot: Slot = MAIN, hold_send: str | None = None,
@@ -955,14 +966,14 @@ def run(
     if getattr(sess, "balance_truncated", False):
         기록["balance_truncated"] = True
         기록["send"] = "증권사 잔고 조회가 쪽 상한에 닿아 잘림 — 오늘 주문 안 냄"
-        return 기록 | _호출(sess)
+        return _끝(기록, sess)
     if hold_send:
         기록["send"] = hold_send
-        return 기록 | _호출(sess)
+        return _끝(기록, sess)
     막힘 = send_block(market, now)
     if 막힘:
         기록["send"] = 막힘
-        return 기록 | _호출(sess)
+        return _끝(기록, sess)
     if not 미국 and 현지 < (접수 := kr_order_window(오늘)[0]):
         # 그날 접수 시작까지(`send_block` 과 같은 창, 25.2240 — 10:00 개장일은 09:30)
         sleep((접수 - 현지).total_seconds() + 5)
@@ -1055,7 +1066,7 @@ def run(
     if 안냄:
         기록["not_sent"] = dict(Counter(까닭 for _o, _s, 까닭 in 안냄))
     기록["halted"] = 멈춤
-    return 기록 | _호출(sess)
+    return _끝(기록, sess)
 
 
 class _건너뜀(Exception):  # noqa: N818 — 흐름 표시

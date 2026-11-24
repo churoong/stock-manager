@@ -50,6 +50,40 @@ PARTIAL_CLEANUP = "증권사 주문가능 수량 모자람 — 일부만 정리"
 US_MARKETABLE_PCT = 10.0
 
 
+#: **주문 허가 판정의 그림자** (docs/paper.md 15.13, docs/roadmap.md 1장 #2, 25.2293). 실전에서 가장 비싼 사고는
+#: 체결을 모르는 채 다음 주문을 내는 것이다 — 발주 직전에 "지금 내도 되는가" 를 한 장으로 판정할 것인데, 켜기 전에
+#: **지금까지의 실행에 댔다면 어떻게 나왔을지**를 먼저 쌓는다(오탐률). 이 판정은 기록만 한다 — 주문을 막지 않는다.
+#: 갈래마다 KIS 단계 기록의 어느 칸을 보는지(칸이 있고 참이면 걸린다)
+GO_NO_GO = {
+    "halted": "멈춤 스위치",
+    "balance_truncated": "증권사 잔고 조회가 잘림",
+    "send": "보내기 막힘(장 없음·접수 창 밖·보류)",
+}
+GO_SELL_ONLY = {
+    "reconcile_unknown": "지난 주문 가운데 체결을 모르는 것(맞추기 뒤 unknown)",
+    "reconcile_truncated": "체결 조회가 잘려 맞추기를 다 못 함",
+    "diff": "증권사 잔고와 내부 장부가 어긋남",
+    "unknown_codes": "증권사 잔고에 우리가 모르는 종목",
+}
+
+
+def go_shadow(record: dict[str, Any]) -> dict[str, Any]:
+    """KIS 단계 기록 → {verdict: "go"·"sell_only"·"no_go", reasons: [갈래 열쇠]}. 순수 계산.
+
+    - `no_go` 갈래(`GO_NO_GO`)는 **지금도 주문을 내지 않는** 경우다(판정이 현재 동작과 같다 — 대조용)
+    - `sell_only` 갈래(`GO_SELL_ONLY`)가 새 그림자다: 체결을 모르거나 잔고가 어긋난 채 **새 매수**를 내는 날. 위험을
+      줄이는 매도·정리는 막지 않는다는 뜻이라 "매도만"
+    - 둘 다 걸리면 `no_go`. 아직 보지 않는 것: 시세 기준일·커버리지·읽기 예산·"새 코드 첫날"(실행 지문) — 이 기록에
+      없다
+    """
+    맞춤 = record.get("reconciled")
+    값 = {k: record.get(k) for k in (*GO_NO_GO, *GO_SELL_ONLY)}
+    값["reconcile_unknown"] = 맞춤.get("unknown") if isinstance(맞춤, dict) else None
+    막음 = [k for k in GO_NO_GO if 값.get(k)]
+    매도만 = [k for k in GO_SELL_ONLY if 값.get(k)]
+    return {"verdict": "no_go" if 막음 else "sell_only" if 매도만 else "go", "reasons": 막음 + 매도만}
+
+
 @dataclass(frozen=True)
 class Intent:
     paper_order_id: int | None  # 정리는 None

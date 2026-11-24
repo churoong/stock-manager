@@ -132,8 +132,11 @@ def test_다시_받은_수가_실행_기록에_실린다() -> None:
     세션.net_retries, 세션.rate_retries = 2, 3  # 초당 한도 다시 받기도 같은 꼴로(25.2291 — 장중 감시와 같은 칸)
     assert jb._호출(세션) == ig._호출(세션) == {"calls": 7, "rate_retries": 3, "net_retries": 2}
     글 = inspect.getsource(jb.run)
-    assert 글.count("return 기록 | _호출(sess)") == 4 and '{"calls": sess.calls}' not in 글
-    assert 글.count("return 기록") == 4  # 기록을 돌려주는 반환은 모두 꼬리를 단다
+    # 반환 넷이 모두 `_끝`(그림자 판정 + 호출 수 꼬리, 25.2293)을 거친다
+    assert 글.count("return _끝(기록, sess)") == 4 and '{"calls": sess.calls}' not in 글
+    # 그 밖의 반환은 모두 "꺼짐"(`{"off": …}` — KIS 를 부르기 전)뿐이다
+    assert 글.count("return ") == 4 + 글.count('return {"off": ')
+    assert jb._끝({"a": 1}, 세션)["calls"] == 7 and "go_shadow" in jb._끝({"a": 1}, 세션)
 
 
 def test_모름으로_닫을_때_보낼_때_적은_글을_버리지_않는다() -> None:
