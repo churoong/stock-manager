@@ -203,9 +203,9 @@ def orders_through_gate(
         if 남은 <= 0:
             break
         든 = {주문[c.key]["stock_id"] for c in 통과}
-        # 앞 회차에서 자료 문제로 넘긴 종목(시세 없음·묵음·1주 미만·경계)도 다시 보지 않는다 — 회차마다 다시 읽고 넘김
-        # 상한을
-        # 다시 써 빈 자리를 못 채웠다(25.2322, 25.2321 교차검증 [참고]). "현금 부족 — 멈춤" 종목은 다음 회차에 다시 본다
+        # 앞 회차에서 자료 문제로 넘긴 종목(시세 없음·묵음·1주 미만·경계)도 다시 보지 않는다 — 회차마다 다시 읽고
+        # 넘김 상한을 다시 써 빈 자리를 못 채웠다(25.2322, 25.2321 교차검증 [참고]). "현금 부족 — 멈춤" 종목은 다음
+        # 회차에 다시 본다
         자료문제 = {k for k, v in (기록.get("not_bought") or {}).items()
                     if k != -1 and not str(v).startswith("현금 부족")}  # fmt: skip
         더 = [r for r in candidates if r.stock_id not in 넘김 | 자료문제 and r.stock_id not in 든]
@@ -230,11 +230,12 @@ def orders_through_gate(
             break
     기록["orders"] = len(통과)
     기록["picks"] = [주문[c.key]["stock_id"] for c in 통과]
-    # 앞 회차에 "현금 부족" 으로 적혔다가 다음 회차에 산 종목은 못 산 것에서 뺀다 — 같은 종목이 picks 와 not_bought 에
-    # 함께
-    # 적혀 기록이 스스로 어긋났다(25.2322, 25.2321 교차검증 [권고])
+    # 앞 회차에 "현금 부족" 으로 적혔다가 다음 회차에 주문 줄이 된 종목은 못 산 것에서 뺀다 — 산 종목이 picks 와
+    # not_bought 에 함께 적혔고(25.2322), 관문에 막힌 종목은 원장 blocked(위험 점검)와 까닭이 엇갈렸다(25.2324 — 막힌
+    # 까닭은 원장에 있다)
     if 기록.get("not_bought"):
-        기록["not_bought"] = {k: v for k, v in 기록["not_bought"].items() if k not in set(기록["picks"])}
+        줄종목 = {o["stock_id"] for o in 주문}
+        기록["not_bought"] = {k: v for k, v in 기록["not_bought"].items() if k not in 줄종목}
         if not 기록["not_bought"]:
             del 기록["not_bought"]
     return 주문, 통과, 막힘, 기록

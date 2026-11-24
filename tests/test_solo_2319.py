@@ -668,3 +668,66 @@ def test_못_산_날은_리포트와_상황실에_같은_글로(monkeypatch: pyt
     assert "⚠️ 가상 오닐 사지 못함 — 기업행위 경계(분할·병합 의심) — 다음 순위로" in 줄
     할일 = desk.checks(halted=False, paper=기록, broker=None, recon_bad=[], warnings=0)
     assert {"level": "normal", "text": "가상 오닐 사지 못함 — 기업행위 경계(분할·병합 의심) — 다음 순위로"} in 할일
+
+
+def test_gate_rounds_는_새_줄을_실제로_다시_잰_회차만_센다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.2324 (25.2322 교차검증 [권고]) — 2회차에 새 줄이 없으면 칸이 없고, 관문을 다섯 번 다 쓰면 5"""
+    from batch.services import risk_gate as rg
+
+    monkeypatch.setattr(cal, "local_today", lambda _m=None: date(2026, 11, 2))
+
+    def _판(시세있음: set[int]) -> Any:
+        class _P:
+            def execute(self, _sql: str, args: list) -> Any:
+                class _R:
+                    rows = [(1_000.0, "2026-10-30")] if args[0] in 시세있음 else []
+
+                return _R()
+
+        return _P()
+
+    def _관문막음(막을: set[int]) -> Any:
+        def _g(줄들: list[dict]) -> tuple[list, list]:
+            cs = [rg.Candidate(o["stock_id"], "buy", o["cost_krw"], o["ref_date"], i, o["cash_krw"])
+                  for i, o in enumerate(줄들)]  # fmt: skip
+            return ([c for c in cs if c.stock_id not in 막을],
+                    [(c, [("sector_cap", "업종")]) for c in cs if c.stock_id in 막을])  # fmt: skip
+
+        return _g
+
+    후보 = [solo.Ranked(i, 100 - i, {"rs": 1}) for i in range(1, 21)]
+    인자 = dict(market="KR", valuation=_가치(1e8, 1e8), open_buys=[], fx_rate=None, as_of="2026-10-30", n_ranked=20,
+              is_frozen=lambda _s: False, account_id="Z4", fill_session="2026-11-02")  # fmt: skip
+    # 1·2 만 시세 — 1 이 막히고 2회차엔 새 줄이 없다
+    _주, _통, _막, 기록 = paper_solo.orders_through_gate(_판({1, 2}), solo.CANSLIM, 후보, 2, gate=_관문막음({1}), **인자)
+    assert "gate_rounds" not in 기록 and 기록["picks"] == [2]
+    # 모두 시세 있고 앞 다섯 회차의 첫 줄이 늘 막힘 — 관문 다섯 번(다시 재기 넷)
+    _주, _통, _막, 기록 = paper_solo.orders_through_gate(
+        _판(set(range(1, 21))), solo.CANSLIM, 후보, 1, gate=_관문막음({1, 2, 3, 4, 5}), **인자)
+    assert 기록["gate_rounds"] == paper_solo.MAX_GATE_ROUNDS and 기록["orders"] == 0
+
+
+def test_관문에_막힌_종목은_못_산_것에_현금_부족으로_남지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    from batch.services import risk_gate as rg
+
+    monkeypatch.setattr(cal, "local_today", lambda _m=None: date(2026, 11, 2))
+    후보 = [solo.Ranked(i, 100 - i, {"rs": 1}) for i in range(1, 6)]
+
+    class _판:
+        def execute(self, *_a: Any) -> Any:
+            class _R:
+                rows = [(1_000.0, "2026-10-30")]
+
+            return _R()
+
+    def _관문(줄들: list[dict]) -> tuple[list, list]:  # 2·3 은 업종 상한
+        cs = [rg.Candidate(o["stock_id"], "buy", o["cost_krw"], o["ref_date"], i, o["cash_krw"]) for i, o in enumerate(줄들)]
+        return [c for c in cs if c.stock_id not in (2, 3)], [(c, [("sector_cap", "업종")]) for c in cs if c.stock_id in (2, 3)]
+
+    # 쓸 현금 20만 — 1회차: 1 100주·2 80주(3 은 현금 부족) → 2 막힘. 2회차: 3 이 주문 줄이 되었다가 막힘
+    _주, _통, _막, 기록 = paper_solo.orders_through_gate(
+        _판(), solo.CANSLIM, 후보, 3, market="KR", valuation=_가치(1e6, 200_000), open_buys=[], fx_rate=None,
+        as_of="2026-10-30", n_ranked=5, is_frozen=lambda _s: False, gate=_관문, account_id="Z4",
+        fill_session="2026-11-02",
+    )  # fmt: skip
+    assert 3 not in 기록.get("not_bought", {})
