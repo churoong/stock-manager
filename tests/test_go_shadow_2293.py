@@ -6,6 +6,7 @@ docs/roadmap.md 1장 #2 의 첫 조각. KIS모의투자 단계 기록에서 끌�
 from __future__ import annotations
 
 import inspect
+import json
 from pathlib import Path
 
 import pytest
@@ -55,7 +56,8 @@ def test_0_과_거짓과_빈_글은_걸리지_않는다() -> None:
 
 def test_갈래는_상수가_정의처다() -> None:
     assert list(bm.GO_NO_GO) == ["halted", "balance_truncated", "send"]
-    assert list(bm.GO_SELL_ONLY) == ["reconcile_unknown", "reconcile_truncated", "diff", "unknown_codes", "sending_today"]
+    assert list(bm.GO_SELL_ONLY) == ["reconcile_unknown", "reconcile_truncated", "diff", "unknown_codes", "sending_today",
+                                     "new_code"]
     assert not set(bm.GO_NO_GO) & set(bm.GO_SELL_ONLY)
 
 
@@ -127,6 +129,94 @@ def test_같은_날_다시_돈_실행은_앞_실행의_응답_없음을_매도�
         assert 둘["go_shadow"]["verdict"] == "sell_only" and "sending_today" in 둘["go_shadow"]["reasons"]
     finally:
         mp.undo()
+
+
+def _코드판(monkeypatch: pytest.MonkeyPatch, 지금: dict, 앞줄: list[tuple[str, str, dict]]):  # type: ignore[no-untyped-def]
+    """KIS 흐름 판 + 앞 일일 배치 실행 줄 [(상태, 끝난 시각, step_log)] + 이 실행의 지문"""
+    from tests.test_kis_vts_1475 import 키
+    from tests.test_paper_job_1445 import Client
+
+    for k, v in 키.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.setattr(jb, "MIRROR_ACCOUNT", "B")
+    monkeypatch.setattr(jb.db, "run_fingerprint", lambda: dict(지금))
+    c = Client()
+    c.conn.execute(
+        "INSERT INTO paper_orders (id, account_id, market, stock_id, side, order_type, limit_price, quantity, currency,"
+        " decided_on, fill_session, reason, rule_version, tranche, created_at)"
+        " VALUES (101, 'B', 'KR', 1, 'buy', 'limit', 9800, 3, 'KRW', '2026-10-15', '2026-10-16', 'r', 1, 1, 't')"
+    )  # fmt: skip
+    for 상태, 끝, 로그 in 앞줄:
+        c.conn.execute("INSERT INTO batch_runs (job_name, market, trade_date, status, started_at, finished_at, step_log)"
+                       " VALUES ('daily_kr', 'KR', '2026-10-15', ?, ?, ?, ?)", [상태, 끝, 끝, json.dumps(로그)])  # fmt: skip
+    return c
+
+
+def _지문(sha: str | None, code: str | None) -> dict:
+    return {jb.db.RUN_FINGERPRINT_KEY: {"sha": sha, "code": code}}
+
+
+def test_새_코드_첫날은_매도만으로_센다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.2306 — 배치 코드 지문이 앞 성공·부분 성공 일일 배치와 다르면 `new_code`. 주문은 그대로 나간다"""
+    from tests.test_kis_vts_1475 import _at, _Sess
+
+    c = _코드판(monkeypatch, {"sha": "s2", "code": "new"},
+               # 먼저 끝난 성공 줄은 지금과 같은 코드지만 늦게 끝난 부분 성공 줄이 앞 실행이다(두 상태 가운데 늦은 것)
+               [("success", "2026-10-14T23:40:00+00:00", _지문("s0", "new")),
+                ("partial", "2026-10-15T23:40:00+00:00", _지문("s1", "old")),
+                ("failed", "2026-10-15T23:50:00+00:00", _지문("s9", "new"))])  # 실패는 앞 실행이 아니다 # fmt: skip
+    s = _Sess()
+    기록 = jb.run(c, "KR", _at("08:40"), session=s, sleep=lambda _x: None)
+    assert 기록["new_code"] is True and "new_code" in 기록["go_shadow"]["reasons"] and len(s.orders) == 1
+
+
+@pytest.mark.parametrize(("지금", "앞줄"), [
+    ({"sha": "s2", "code": "old"}, [("partial", "2026-10-15T23:40:00+00:00", {"fingerprint": {"sha": "s1", "code": "old"}})]),
+    ({"sha": "s2", "code": "new"}, []),  # 앞 실행이 없다(첫 주) — 모름
+    ({"sha": "s2", "code": "new"}, [("success", "2026-10-15T23:40:00+00:00", {"fingerprint": {"sha": "s1"}})]),  # 25.2302 전
+    # 앞 실행이 로컬(커밋 없음)이면 견줄 수 없다 — 그 줄은 뺀다
+    ({"sha": "s2", "code": "new"}, [("success", "2026-10-15T23:40:00+00:00", {"fingerprint": {"sha": None, "code": "x"}})]),
+    ({"sha": None, "code": "new"}, [("success", "2026-10-15T23:40:00+00:00", {"fingerprint": {"sha": "s1", "code": "old"}})]),
+])  # fmt: skip
+def test_새_코드가_아니거나_모르면_칸이_없다(monkeypatch: pytest.MonkeyPatch, 지금: dict, 앞줄: list) -> None:
+    from tests.test_kis_vts_1475 import _at, _Sess
+
+    c = _코드판(monkeypatch, 지금, 앞줄)
+    기록 = jb.run(c, "KR", _at("08:40"), session=_Sess(), sleep=lambda _x: None)
+    assert "new_code" not in 기록 and "new_code" not in 기록["go_shadow"]["reasons"]
+
+
+def test_앞_코드를_못_읽어도_주문_단계는_간다(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tests.test_kis_vts_1475 import _at, _Sess
+
+    c = _코드판(monkeypatch, {"sha": "s2", "code": "new"}, [])
+    진짜 = c.execute
+
+    def 실행(sql, params=None):  # type: ignore[no-untyped-def]
+        if sql == jb.PREV_CODE_SQL:
+            raise RuntimeError("no such function: json_extract")
+        return 진짜(sql, params)
+
+    monkeypatch.setattr(c, "execute", 실행)
+    s = _Sess()
+    기록 = jb.run(c, "KR", _at("08:40"), session=s, sleep=lambda _x: None)
+    assert "new_code" not in 기록 and len(s.orders) == 1 and 기록["sent"] == {"accepted": 1}
+
+
+def test_로컬_실행은_앞_코드를_읽지도_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tests.test_kis_vts_1475 import _at, _Sess
+
+    c = _코드판(monkeypatch, {"sha": None, "code": "new"}, [])
+    진짜 = c.execute
+    monkeypatch.setattr(c, "execute", lambda sql, params=None: pytest.fail("읽으면 안 된다") if sql == jb.PREV_CODE_SQL
+                        else 진짜(sql, params))  # fmt: skip
+    jb.run(c, "KR", _at("08:40"), session=_Sess(), sleep=lambda _x: None)
+
+
+def test_작업_이름은_일일_배치와_같다() -> None:
+    from batch.jobs import daily
+
+    assert {m: daily.job_name(m) for m in ("KR", "US")} == jb.DAILY_JOB
 
 
 def test_기록만_한다_주문을_막거나_바꾸지_않는다() -> None:

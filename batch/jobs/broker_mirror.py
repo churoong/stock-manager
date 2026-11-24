@@ -725,6 +725,28 @@ def _account_perf(client: Any, sess: Any, 증권사: str, 오늘: str, 합: dict
     return 원화계좌, p | 견줌
 
 
+#: 새 코드 첫날(25.2306, docs/paper.md 15.13) — 같은 시장 일일 배치의 앞 성공·부분 성공 실행이 남긴 배치 코드 지문
+#: (`step_log.fingerprint.code`, 25.2302). 상태마다 한 줄씩(색인 `idx_batch_runs_last_success` = (job_name, status,
+#: finished_at DESC) 를 타 두 행만 읽는다 — `IN` 으로 묶으면 정렬에 그 작업의 성공 줄을 다 읽는다). 로컬 실행
+#: (커밋 없음) 줄은 작업 트리를 해시해 견줄 수 없어 뺀다(25.2305 와 같은 잣대). 작업 이름은 `daily.job_name` 과 같아야
+#: 한다(시험이 대조)
+DAILY_JOB = {"KR": "daily_kr", "US": "daily_us"}
+PREV_CODE_SQL = (
+    "SELECT json_extract(step_log, '$.fingerprint.code'), finished_at FROM batch_runs WHERE job_name = ? AND status = ?"
+    " AND finished_at IS NOT NULL AND json_extract(step_log, '$.fingerprint.sha') IS NOT NULL"
+    " ORDER BY finished_at DESC LIMIT 1"
+)
+
+
+def prev_code(client: Any, market: str) -> str | None:
+    """앞 성공·부분 성공 일일 배치의 배치 코드 지문 — 둘 가운데 늦게 끝난 것. 그 줄에 지문이 없으면(25.2302 전) None"""
+    줄 = [r for 상태 in ("success", "partial") for r in client.execute(PREV_CODE_SQL, [DAILY_JOB[market], 상태]).rows]
+    if not 줄:
+        return None
+    값 = max(줄, key=lambda r: str(r[1] or ""))[0]
+    return 값 if isinstance(값, str) and 값 else None
+
+
 def _호출(sess: Any) -> dict[str, int]:
     """KIS 단계 기록의 꼬리 — 호출 수와(있으면) 조회를 연결 오류·시간 초과로 다시 받은 수(25.2288). **모든 반환이 이
     것을 쓴다**(25.2290 — 처음엔 마지막 반환에만 붙여, 주문을 안 낸 날(접수 전 막힘·장 없음·잔고 잘림)의 다시 받은
@@ -794,6 +816,18 @@ def run(
     오늘 = 현지.date()
     sess = session or kv.Session(client, now, keys=slot.keys)
     기록: dict[str, Any] = {}
+    # 새 코드 첫날(25.2306) — 주문 허가 판정(15.13)의 매도만 갈래 재료. Actions 실행(커밋 있음)에서만 읽는다: 로컬
+    # 실행은 작업 트리를 해시해 견줄 수 없고, 읽기를 안 하니 시험의 가짜 클라이언트에도 닿지 않는다. 앞 값이 없으면 모름
+    if (지문 := db.run_fingerprint()).get("sha") and 지문.get("code"):
+        try:
+            앞코드 = prev_code(client, market)
+        except Exception as exc:  # noqa: BLE001 — 그림자 재료라 못 읽어도 주문 단계는 간다
+            import logging
+
+            logging.getLogger("broker_mirror").warning("앞 실행 코드 지문을 읽지 못했다: %s", exc)
+        else:
+            if 앞코드 and 앞코드 != 지문["code"]:
+                기록["new_code"] = True
 
     # 1. 맞추기 — 어제까지 낸 하루짜리 주문은 끝났다. 체결 조회는 3개월 안만 되므로 그보다 오래된 줄은 모름으로 닫는다
     한계 = (오늘 - timedelta(days=kv.CCLD_MAX_DAYS)).isoformat()
