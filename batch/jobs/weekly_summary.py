@@ -164,7 +164,7 @@ def load_runs(client: TursoClient, since: str) -> list[Run]:
                     못함.add("단계")
                 # 단계를 통째로 건너뛴 날(다른 시장 잠금 등 — 입금 없음 밖, 관문 `desk.paper_step_failed` 와 같은
                 # 잣대, 25.2308 — 처음엔 빠져 관문과 주간 요약이 다른 말을 했다)
-                if isinstance(모의.get("skipped"), str) and 모의["skipped"] not in _단계_쉼_정상:
+                if isinstance(모의.get("skipped"), str) and 모의["skipped"] and 모의["skipped"] not in _단계_쉼_정상:
                     못함.add("단계 건너뜀")
                 계좌못함 = tuple(sorted(못함))
         except (TypeError, ValueError):
@@ -727,7 +727,8 @@ def run(dry_run: bool = False, force: bool = False) -> int:
         except Exception as exc:  # noqa: BLE001
             깨짐.append(f"검산 줄을 만들지 못했습니다 ({type(exc).__name__})")
         try:
-            사고 = [*사고, *incident_ledger.other_lines(무응답, 검산, incident_ledger.account_days(runs)), *깨짐]
+            사고 = [*사고, *incident_ledger.other_lines(무응답, 검산, incident_ledger.account_days(runs),
+                                                       unknown=bool(깨짐)), *깨짐]
         except Exception as exc:  # noqa: BLE001
             사고 = [*사고, f"무응답·검산·계좌 줄을 만들지 못했습니다 ({type(exc).__name__})"]
         text = compose(runs=runs, last_success=last, now=now, reads_used=used, writes_used=쓰기, rot_lines=rot_lines,

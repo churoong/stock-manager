@@ -322,7 +322,8 @@ def test_읽지도_쓰지도_않는다_그리고_문서() -> None:
                "영향", "문장 머리", "25.2295", "이틀(`SPAN_SHOW_DAYS`)부터", "같은 코드로 복구", "코드가 바뀐 뒤 복구",
                "그 고침 덕인지는 모른다", "실패·중단 N번", "25.2298", "미국 동부 날짜", "실패·중단한 날 N일", "달력 폭이 아니다",
                "문서만 바꾼 커밋", "25.2300", "**무응답**", "**검산 틀린 날**", "앞 다섯(`OTHER_TOP_N`)", "25.2307",
-               "**계좌가 제 일을 못 한 날**", "25.2308", "단계 건너뜀", "같은 날 다시 돈 실행이 끝까지 돌아도 센다"):  # fmt: skip
+               "**계좌가 제 일을 못 한 날**", "25.2308", "단계 건너뜀", "같은 날 다시 돈 실행이 끝까지 돌아도 센다",
+               "읽기가 하나라도 깨지면 \"없음\" 줄을 내지 않는다"):  # fmt: skip
         assert 조각 in 문서, 조각
 
 
@@ -460,9 +461,59 @@ def test_계좌_줄의_단계_갈래와_읽기가_깨진_날() -> None:
     for i, 로그 in enumerate([{"paper": {"skipped": "다른 시장의 가상모의투자 단계가 도는 중(잠금)"}},
                              {"paper": {"skipped": "입금 없음"}},
                              {"paper": {"error": "가상 H 계좌 단계 실패: KeyError", "account_errors": {"H": "KeyError"}}},
-                             {"paper": {"error": "죽음", "account_errors": {}}}]):  # fmt: skip
+                             {"paper": {"error": "죽음", "account_errors": {}}},
+                             {"paper": {"skipped": ""}}]):  # 빈 글은 쉼이 아니다(관문 `bool(건너뜀)` 과 같다, 25.2309) # fmt: skip
         t = (now - timedelta(hours=10 - i)).isoformat(timespec="seconds")
         mem.conn.execute("INSERT INTO batch_runs (job_name, market, trade_date, status, started_at, step_log)"
                          " VALUES ('daily_kr', 'KR', ?, 'partial', ?, ?)", [t[:10], t, json.dumps(로그)])  # fmt: skip
     assert [r.paper_faults for r in ws.load_runs(mem, (now - timedelta(days=1)).isoformat())] == [  # type: ignore[arg-type]
-        ("단계 건너뜀",), (), ("H",), ("단계",)]
+        ("단계 건너뜀",), (), ("H",), ("단계",), ()]
+
+
+def test_읽기가_깨지면_없음이라_말하지_않고_계좌_줄은_남는다(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """25.2309 (25.2308 교차검증 [권고], 회귀) — 읽기를 따로 가둔 뒤 실패한 읽기를 빈 목록으로 넘겨, 다른 갈래가 비면
+    "무응답·검산·계좌 건너뜀: 없음" 과 "… 줄을 만들지 못했습니다" 가 함께 찍혔다. 그리고 "읽기가 깨진 날에도 계좌 줄은
+    남는다"(25.2308) 를 실제로 깨 본다"""
+    import json
+    from datetime import timedelta
+
+    from batch.core import db
+    from tests.test_portfolio_job import MemClient
+
+    assert il.other_lines([], [], [], unknown=True) == []
+    assert il.other_lines([], [], []) == ["무응답·검산·계좌 건너뜀: 없음"]
+
+    def 판(깨질: set[str], 계좌사고: bool):  # type: ignore[no-untyped-def]
+        mem = MemClient()
+        db.apply_migrations(mem)  # type: ignore[arg-type]
+        mem.close = lambda: None  # type: ignore[method-assign]
+        if 계좌사고:
+            t = (datetime.now(UTC) - timedelta(hours=5)).isoformat(timespec="seconds")
+            mem.conn.execute("INSERT INTO batch_runs (job_name, market, trade_date, status, started_at, step_log)"
+                             " VALUES ('daily_kr', 'KR', ?, 'partial', ?, ?)",
+                             [t[:10], t, json.dumps({"paper": {"account_skips": {"H": "buy: 환율 없음"}}})])  # fmt: skip
+        진짜 = mem.execute
+
+        def 실행(sql, params=None):  # type: ignore[no-untyped-def]
+            if sql in 깨질:
+                raise RuntimeError("x")
+            return 진짜(sql, params)
+
+        mem.execute = 실행  # type: ignore[method-assign]
+        monkeypatch.setattr(ws, "TursoClient", lambda: mem)
+        monkeypatch.setattr(ws, "load_losses", lambda c, now, through, 끝: (0, 0, []))
+        찍힘: list[str] = []
+        monkeypatch.setattr("builtins.print", lambda *a, **k: 찍힘.append(" ".join(str(x) for x in a)))
+        assert ws.run(dry_run=True) == 0
+        return "\n".join(찍힘)
+
+    둘다 = 판({ws.MISSING_ALERTS_SQL, ws.RECON_BAD_SQL}, False)
+    assert "무응답·검산·계좌 건너뜀: 없음" not in 둘다
+    assert "무응답 줄을 만들지 못했습니다 (RuntimeError)" in 둘다 and "검산 줄을 만들지 못했습니다 (RuntimeError)" in 둘다
+    검산만 = 판({ws.RECON_BAD_SQL}, False)  # 무응답 0건이어도 "없음" 이라 말하지 않는다
+    assert "무응답·검산·계좌 건너뜀: 없음" not in 검산만 and "검산 줄을 만들지 못했습니다" in 검산만
+    # 무응답 읽기가 깨져도 계좌 줄은 남는다(새 읽기가 없다)
+    계좌 = 판({ws.MISSING_ALERTS_SQL}, True)
+    assert "계좌가 제 일을 못 한 날: 1일 · 계좌 H" in 계좌 and "무응답 줄을 만들지 못했습니다" in 계좌
+    # 읽기가 멀쩡하고 아무 일 없으면 여전히 "없음"
+    assert "무응답·검산·계좌 건너뜀: 없음" in 판(set(), False)

@@ -735,11 +735,20 @@ DAILY_JOB = {"KR": "daily_kr", "US": "daily_us"}
 #: 접수 전에 막혀 partial 로 끝나고 09:35 예비가 실제로 사는 날 등)을 앞 실행으로 잡으면, 정작 새 코드로 매수를 낸
 #: 실행에서 칸이 빠졌다. 깨진 step_log 한 줄이 질의 전체를 깨지 않게 `json_valid` 를 먼저 본다(25.1633 의 같은 교훈).
 #: 지문 있는 줄이 나올 때까지 색인을 따라 훑는다 — 지문 이전 줄이 쌓인 동안은 그 작업의 성공 줄 수만큼 읽는다
+#: `json_valid` 는 `CASE WHEN … THEN json_extract … END` 로 감싼다(25.2309 — `AND` 항의 평가 차례는 SQLite 가 약속하지
+#: 않는다. 실행 계획이 바뀌면 깨진 줄에서 다시 'malformed JSON' 이 날 수 있었다. jobs/desk.py 의 관문 질의와 같은 꼴)
 PREV_CODE_SQL = (
-    "SELECT json_extract(step_log, '$.fingerprint.code'), finished_at FROM batch_runs WHERE job_name = ? AND status = ?"
-    " AND finished_at IS NOT NULL AND started_at < ? AND json_valid(step_log)"
-    " AND json_extract(step_log, '$.fingerprint.sha') IS NOT NULL ORDER BY finished_at DESC LIMIT 1"
+    "SELECT CASE WHEN json_valid(step_log) THEN json_extract(step_log, '$.fingerprint.code') END, finished_at"
+    " FROM batch_runs WHERE job_name = ? AND status = ? AND finished_at IS NOT NULL AND started_at < ?"
+    " AND (CASE WHEN json_valid(step_log) THEN json_extract(step_log, '$.fingerprint.sha') END) IS NOT NULL"
+    " ORDER BY finished_at DESC LIMIT 1"
 )
+
+
+def market_midnight_utc(day: date, market: str) -> str:
+    """그 시장 날짜 `day` 의 자정을 UTC isoformat 으로 — `batch_runs.started_at`(UTC isoformat)과 글자로 견준다.
+    미국은 동부 시각이라 서머타임이 들어간다(25.2309 — 시험이 겨울·여름 경계를 본다)"""
+    return datetime.combine(day, datetime.min.time(), tzinfo=cal.market_tz(market)).astimezone(UTC).isoformat()
 
 
 def prev_code(client: Any, market: str, before: str) -> str | None:
@@ -825,7 +834,7 @@ def run(
     # 새 코드 첫날(25.2306) — 주문 허가 판정(15.13)의 매도만 갈래 재료. Actions 실행(커밋 있음)에서만 읽는다: 로컬
     # 실행은 작업 트리를 해시해 견줄 수 없고, 읽기를 안 하니 시험의 가짜 클라이언트에도 닿지 않는다. 앞 값이 없으면 모름
     if (지문 := db.run_fingerprint()).get("sha") and 지문.get("code"):
-        자정 = datetime.combine(오늘, datetime.min.time(), tzinfo=cal.market_tz(market)).astimezone(UTC).isoformat()
+        자정 = market_midnight_utc(오늘, market)
         try:
             앞코드 = prev_code(client, market, 자정)
         except Exception as exc:  # noqa: BLE001 — 그림자 재료라 못 읽어도 주문 단계는 간다

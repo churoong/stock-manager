@@ -176,6 +176,8 @@ def test_새_코드_첫날은_매도만으로_센다(monkeypatch: pytest.MonkeyP
 @pytest.mark.parametrize(("지금", "앞줄"), [
     ({"sha": "s2", "code": "old"}, [("partial", "2026-10-14T23:40:00+00:00", {"fingerprint": {"sha": "s1", "code": "old"}})]),
     ({"sha": "s2", "code": "new"}, []),  # 앞 실행이 없다(첫 주) — 모름
+    # 같은 날(한국 10-16 08:30) 줄만 있다 — 앞 거래일 실행이 없으니 모름(25.2309)
+    ({"sha": "s2", "code": "new"}, [("partial", "2026-10-15T23:30:00+00:00", {"fingerprint": {"sha": "s1", "code": "old"}})]),
     ({"sha": "s2", "code": "new"}, [("success", "2026-10-14T23:40:00+00:00", {"fingerprint": {"sha": "s1"}})]),  # 25.2302 전
     # 앞 실행이 로컬(커밋 없음)이면 견줄 수 없다 — 그 줄은 뺀다
     ({"sha": "s2", "code": "new"}, [("success", "2026-10-14T23:40:00+00:00", {"fingerprint": {"sha": None, "code": "x"}})]),
@@ -229,6 +231,35 @@ def test_로컬_실행은_앞_코드를_읽지도_않는다(monkeypatch: pytest.
     monkeypatch.setattr(c, "execute", lambda sql, params=None: pytest.fail("읽으면 안 된다") if sql == jb.PREV_CODE_SQL
                         else 진짜(sql, params))  # fmt: skip
     jb.run(c, "KR", _at("08:40"), session=_Sess(), sleep=lambda _x: None)
+
+
+@pytest.mark.parametrize(("날", "시장", "자정"), [
+    ("2026-10-16", "KR", "2026-10-15T15:00:00+00:00"),
+    ("2026-01-15", "US", "2026-01-15T05:00:00+00:00"),  # 겨울(EST, UTC−5)
+    ("2026-07-15", "US", "2026-07-15T04:00:00+00:00"),  # 여름(EDT, UTC−4)
+    ("2026-03-09", "US", "2026-03-09T04:00:00+00:00"),  # 서머타임 시작(3-08) 다음 날
+])  # fmt: skip
+def test_그_시장_자정을_UTC_로(날: str, 시장: str, 자정: str) -> None:
+    """25.2309 — 미국은 동부 자정이라 서머타임이 들어간다. run 이 이 함수로 앞 거래일 경계를 잡는다"""
+    from datetime import date
+
+    assert jb.market_midnight_utc(date.fromisoformat(날), 시장) == 자정
+    assert "자정 = market_midnight_utc(오늘, market)" in inspect.getsource(jb.run)
+
+
+def test_미국_앞_코드는_동부_날짜로_가른다() -> None:
+    """미국 예비 실행(14:27 UTC)과 전날 실행 — 동부 자정 전 줄만 앞 실행이다"""
+    from datetime import date
+
+    from tests.test_paper_job_1445 import Client
+
+    c = Client()
+    for 끝, 코드 in (("2026-01-14T13:40:00+00:00", "old"), ("2026-01-15T05:30:00+00:00", "today")):
+        c.conn.execute("INSERT INTO batch_runs (job_name, market, trade_date, status, started_at, finished_at, step_log)"
+                       " VALUES ('daily_us', 'US', '2026-01-14', 'partial', ?, ?, ?)",
+                       [끝, 끝, json.dumps(_지문("s1", 코드))])  # fmt: skip
+    # 동부 01-15 00:30 에 시작한 줄은 같은 날이다(한국 날짜로 갈랐다면 01-15 14:30 이라 앞날로 봤을 것)
+    assert jb.prev_code(c, "US", jb.market_midnight_utc(date(2026, 1, 15), "US")) == "old"
 
 
 def test_작업_이름은_일일_배치와_같다() -> None:

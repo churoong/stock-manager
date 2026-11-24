@@ -191,15 +191,17 @@ def account_days(runs: list[Any]) -> list[tuple[str, str]]:
 
 def other_lines(
     missing: list[tuple[str, str, str]], recon_bad: list[tuple[str, str]],
-    account_bad: list[tuple[str, str]] | None = None,
+    account_bad: list[tuple[str, str]] | None = None, *, unknown: bool = False,
 ) -> list[str]:
     """`missing` = [(작업, 시장, 현지 날짜)](`health_alerts` 의 missing), `recon_bad` = [(계좌, 날짜)](`recon_ok = 0`),
     `account_bad` = [(계좌, 날짜)](`account_days` — 계좌 건너뜀·위원회·지주사 실패·계좌 예외, 25.2307).
 
-    모두 비면 한 줄("없음"). 같은 값이 겹쳐 들어와도 한 번으로 센다. 검산·계좌는 **날** 단위(같은 날 두 계좌는 하루)"""
+    모두 비면 한 줄("없음") — 다만 `unknown`(읽기 하나라도 깨짐)이면 그 줄을 내지 않는다(25.2309, 25.2308 교차검증
+    [권고] — "없음" 과 "만들지 못했습니다" 가 함께 찍혀 모르는 것을 없다고 말했다). 같은 값이 겹쳐 들어와도 한 번으로
+    센다. 검산·계좌는 **날** 단위(같은 날 두 계좌는 하루)"""
     무 = sorted(set(missing), key=lambda x: (x[2], x[0], x[1]))
     if not 무 and not recon_bad and not account_bad:
-        return ["무응답·검산·계좌 건너뜀: 없음"]
+        return [] if unknown else ["무응답·검산·계좌 건너뜀: 없음"]
     줄: list[str] = []
     if 무:
         보임 = " · ".join(f"{j}({m}) {d[5:]}" for j, m, d in 무[:OTHER_TOP_N])
