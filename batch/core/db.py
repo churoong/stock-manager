@@ -597,6 +597,37 @@ def prices_touched_summary() -> dict[str, Any] | None:
 #: 실행별 읽기량을 적는 step_log 열쇠. 하위 작업을 품은 실행(일일 배치)은 하위 몫까지 들어 있다
 ROWS_READ_KEY = "db_rows_read"
 
+#: **실행 지문**을 적는 step_log 열쇠 (docs/infra.md 25.2277, docs/roadmap.md 1장 #9). "그날 주문·판정이 어느 코드와
+#: 어느 환경으로 나갔나" 는 소급해 만들 수 없는 기록이다 — Actions 실행 기록은 90일 뒤 사라지고 [확인필요: 보존 기간],
+#: 고정하지 않은 간접 의존성(시간대 자료 등)은 같은 커밋에서도 바뀐다
+RUN_FINGERPRINT_KEY = "fingerprint"
+_지문: list[dict[str, Any] | None] = [None]
+
+
+def run_fingerprint() -> dict[str, Any]:
+    """이 프로세스의 실행 지문 {sha, run, py, deps} — 한 번 내고 다시 쓴다. 네트워크·DB·하위 프로세스를 쓰지 않는다.
+
+    - `sha`: 커밋(Actions 의 `GITHUB_SHA` 앞 12자 — 로컬 실행은 None. git 을 부르지 않는다)
+    - `run`: Actions 실행 번호·재시도("번호.재시도" — 공개 저장소의 실행 주소 끝자리라 개인정보가 아니다), 로컬은 None
+    - `py`: 파이썬 판
+    - `deps`: 깔린 배포판 전부의 "이름==판" 을 정렬해 낸 지문(sha1 앞 10자) — 직접 의존성은 requirements.txt 가
+      고정하므로 같은 커밋에서 이 값이 달라지면 **간접 의존성이 움직인 것**이다. 판 목록은 싣지 않는다(실행마다 수 KB)
+    """
+    if _지문[0] is None:
+        import hashlib
+        import platform
+        from importlib import metadata
+
+        판들 = sorted({f"{(d.metadata['Name'] or '').lower()}=={d.version}" for d in metadata.distributions()})
+        실행, 재시도 = os.environ.get("GITHUB_RUN_ID"), os.environ.get("GITHUB_RUN_ATTEMPT")
+        _지문[0] = {
+            "sha": (os.environ.get("GITHUB_SHA") or "")[:12] or None,
+            "run": f"{실행}.{재시도 or 1}" if 실행 else None,
+            "py": platform.python_version(),
+            "deps": hashlib.sha1("\n".join(판들).encode()).hexdigest()[:10],
+        }
+    return dict(_지문[0])
+
 
 def finish_batch_run(
     client: TursoClient,
@@ -618,14 +649,27 @@ def finish_batch_run(
     # step_log 을 줄 때만 더한다. 안 주는 닫기(실패 정리 `_닫기`·`fail_open_runs`)는 있던 것을 **그대로** 둔다(25.668) —
     # 성공한 실행은 거의 모두 step_log 을 주므로 순위를 매기기엔 충분하다
     if step_log and 시작 is not None:
+        # 실행 지문도 같은 쓰기에 싣는다(25.2277 — 쓰기 한 번 그대로). 이 프로세스가 연 실행에만: 남의 기록을 정리할 때
+        # 내 지문을 적으면 "그 실행이 어느 코드였나" 가 거짓이 된다
         step_log = {**step_log, ROWS_READ_KEY: ReadCounter.process_total - 시작}
+        step_log[RUN_FINGERPRINT_KEY] = run_fingerprint()
+    # step_log 없이 닫는 **내** 실행(실패 정리)에도 지문을 남긴다(25.2277) — 사고 난 실행이야말로 "어느 코드였나" 가
+    # 필요하다. 있던 step_log(진행 상태)은 그대로 두고 칸 하나만 더한다. 같은 문장·같은 인자 자리로 한다(쓰기 한 번
+    # 그대로, 닫기가 둘로 갈라지지 않게). JSON 이 아닌 옛 글은 건드리지 않는다
+    지문만 = not step_log and 시작 is not None
     client.execute(
-        "UPDATE batch_runs SET finished_at = ?, status = ?, step_log = COALESCE(?, step_log), error_text = ?"
-        " WHERE id = ?",
+        "UPDATE batch_runs SET finished_at = ?, status = ?, step_log = "
+        + (
+            "CASE WHEN step_log IS NOT NULL AND NOT json_valid(step_log) THEN step_log"
+            f" ELSE json_set(COALESCE(step_log, '{{}}'), '$.{RUN_FINGERPRINT_KEY}', json(?)) END"
+            if 지문만
+            else "COALESCE(?, step_log)"
+        )
+        + ", error_text = ? WHERE id = ?",
         [
             now_iso(),
             status,
-            json.dumps(step_log, ensure_ascii=False) if step_log else None,
+            json.dumps(run_fingerprint()) if 지문만 else json.dumps(step_log, ensure_ascii=False) if step_log else None,
             error_text,
             run_id,
         ],
