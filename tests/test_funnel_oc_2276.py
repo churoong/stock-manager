@@ -176,6 +176,10 @@ def test_문서의_표_값이_함수가_내는_값이다() -> None:
     for n in oc.TABLE_BLOCKS:  # (다) 표는 네 줄 전부(25.2279 — 처음엔 6 줄만 묶어 두 칸이 반올림으로 어긋나 있었다)
         칸 = [f"{oc.min_effect(n, a, sims=4000, seed=1):.2f}" for a in oc.TABLE_ALPHA]
         assert f"| {n} | " + " | ".join(칸) + " |" in 절, n
+    # 한계 문단의 "한 묶음 늦추면" 숫자(25.2280 — 처음엔 시험 밖이었다): 묶음 5·8·12
+    늦 = oc.gate_pass_rate(53.0, 6.0, looks=(105, 168, 233), sims=4000, seed=1)
+    assert 늦["blocks"] == [5, 8, 12]
+    assert "한 묶음 늦추면 53·6 의 누적이 " + " · ".join(f"{x * 100:.1f}" for x in 늦["cumulative_pass"]) + "%" in 절
     d = oc.dsr_pass_rate(2.0, 60, 18, sims=2000, seed=1)
     assert f"| 2.0 | {d['pass_rate'] * 100:.1f}% |" in 절 and d["any_null_pass_rate"] <= 0.001
 

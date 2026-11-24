@@ -85,6 +85,30 @@ def test_손절로_팔지_않는_계좌_D_는_값이_없다() -> None:
     assert _판("D", [])["open_risk_pct"] is None
 
 
+def test_손절_없는_매도_원칙의_계좌는_모두_목록에_있다() -> None:
+    """25.2280 (25.2279 교차검증 [권고]) — 목록을 계좌 ID 로 박아 두었다. 코드가 아는 계좌 → 매도 원칙(위원회 헌장·
+    거장 헌장·핵심/탐색 변형)에서 '손절' 을 따르지 않는 원칙의 계좌 가운데 손절 가까움 글로 가르지 않는 것이 곧 이
+    목록이어야 한다 — D 의 원칙이 바뀌거나 새 계좌가 기간초과만으로 팔면 여기서 깨진다"""
+    from batch.services import company as co
+    from batch.services import core_strategy as cs
+    from batch.services import masters
+    from batch.services import paper as pp
+
+    원칙: dict[str, set[str]] = {}
+    for 계좌, 헌장 in {**co.CHARTERS, **masters.CHARTERS}.items():
+        원칙.setdefault(계좌, set()).add(헌장["sell_rule"])
+    for v in {**cs.VARIANTS, **cs.EXPLORE_VARIANTS}.values():
+        원칙.setdefault(v.account, set()).add(v.sell_rule)
+    assert {"A", "C", "D", "E", "H", "G", "B", "R1", "R2", "ZL", "ZM"} <= set(원칙)
+    def 없음(r: str) -> bool:
+        return pp.SELL_RULES[r] is not None and "손절" not in pp.SELL_RULES[r]
+
+    # 한 곳이라도(any)·모든 곳에서(all) — 둘이 같아야 한다(헌장과 변형이 같은 원칙을 말한다)
+    for 고름 in (any, all):
+        손절없음 = {a for a, rs in 원칙.items() if 고름(없음(r) for r in rs) and desk._손절_해당없음(a, 1) is None}
+        assert 손절없음 == set(desk.OPEN_RISK_NO_STOP_IDS), 고름.__name__
+
+
 def test_보유_평가가_있는데_종목이_비면_0_이_아니라_모름이다() -> None:
     """보유 글(positions_json)이 깨져 빈 목록으로 읽힌 날 — "위험 0" 으로 보이지 않게"""
     r = desk.risk_board({"A": {"equity": 1_000_000, "holdings": 500_000, "positions": []}}, {}, 손절)[0]

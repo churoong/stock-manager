@@ -135,8 +135,9 @@ export interface RiskRow {
   near_stop_note?: string;
   /** 그 글이 경고인가 — 단타에 하룻밤 넘긴 보유가 남은 날(25.2023) */
   near_stop_warn?: boolean;
-  /** 열린 위험 — 보유가 모두 손절선까지 내려 팔리면 평가 총액에서 잃는 몫(%, 양수). 손절선으로 재지 않는 계좌·하나도
-   *  못 잰 계좌는 null, 이 칸이 없던 날의 요약은 undefined (25.2278) */
+  /** 열린 위험 — 보유가 모두 손절선까지 내려 팔리면 평가 총액에서 잃는 몫(%, 양수). null 인 경우: 손절선으로 재지 않는
+   *  계좌(스윙·단타·ETF 전술), 손절로 팔지 않는 계좌(D 장기보유), 하나도 못 잰 계좌, 보유 평가는 있는데 종목 목록이 빈 날
+   *  (보유 글 깨짐). 이 칸이 없던 날의 요약은 undefined (25.2278·25.2279) */
   open_risk_pct?: number | null;
   /** 평균단가·종가·비중이 없어 열린 위험에서 뺀 보유 수(있을 때만) */
   open_risk_skipped?: number;
@@ -440,7 +441,8 @@ export function adjustCheckText(c: FillAdjustCheck | null | undefined, mirror: s
 
 /**
  * 위험판 "열린 위험" 칸 (25.2278) — 잃는 몫이라 마이너스로 보인다("−4.2%"). 값이 없으면 "-"(손절선으로 재지 않는 계좌·
- * 이 칸이 없던 날). 못 잰 보유가 있으면 그 수를 덧붙인다 — 숫자가 작게 보이는 까닭을 숨기지 않는다
+ * 손절로 팔지 않는 D·보유 글이 깨진 날·이 칸이 없던 날 — 25.2279). 못 잰 보유가 있으면 그 수를 덧붙인다 — 숫자가 작게
+ * 보이는 까닭을 숨기지 않는다
  */
 export function openRiskText(r: Pick<RiskRow, "open_risk_pct" | "open_risk_skipped">): string {
   const 못잼 = r.open_risk_skipped ? ` (${r.open_risk_skipped}종목 못 잼)` : "";

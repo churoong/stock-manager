@@ -315,7 +315,7 @@ export default function DeskView() {
                   <th className="py-1">계좌</th>
                   <th className="text-right">노출</th>
                   <th className="text-right">낙폭</th>
-                  <th className="text-right" title="보유가 모두 손절선까지 내려 팔리면 평가 총액에서 잃는 몫 — 갭으로 선을 건너뛴 체결은 담지 않는다(아래쪽 한계)">
+                  <th className="text-right" title="보유가 모두 손절선까지 내려 팔리면 평가 총액에서 잃는 몫 — 갭으로 선을 건너뛴 체결은 담지 않는다(아래쪽 한계). 손절선으로 재지 않는 계좌(스윙·단타·ETF 전술)와 손절로 팔지 않는 장기보유 계좌는 -">
                     열린 위험
                   </th>
                   <th className="pl-2">가장 큰 종목</th>
