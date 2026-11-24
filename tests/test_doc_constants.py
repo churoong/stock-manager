@@ -781,6 +781,8 @@ class Test밸류_분모:
 
 #: 아직 그물 밖인 모듈과 **왜 아직인지**. 하나씩 줄여 간다
 아직_안_보는_모듈 = {
+    "funnel_oc": "문턱을 갖지 않는다 — 판정 함수·문턱은 `luck`·`scoreboard`·`desk`·`paper` 의 것을 그대로 부르고, 제 상수는 합성"
+    " 자료의 격자(`TABLE_*`)뿐이다. 격자와 docs/funnel.md 3.2 의 대조는 `tests/test_funnel_oc_2276` 가 묶는다(25.2276)",
     "stop_exec": "손절 집행 판정의 등록 상수(문·기한·α·계좌 집합)는 docs/factors.md 12.53 의 문장 꼴이 제각각이다 — 값과 문서의"
     " 대조는 `tests/test_stop_exec_2271.test_등록_상수가_사전_등록_문장과_같다` 가 묶는다(25.2271)",
     "masters": "거장 부서 문턱은 docs/company.md 12.3 표 칸에 적혀 문장 모양이 제각각이다 — 값과 문서의 대조는"
