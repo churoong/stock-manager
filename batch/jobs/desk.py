@@ -80,8 +80,9 @@ STOCK_NAMES_SQL = (
     "SELECT id, COALESCE(name_ko, name_en, ticker) AS name FROM stocks WHERE id IN (SELECT value FROM json_each(?))"
 )
 #: 보유 종목의 베타 — 위험판 "지수 충격" 칸(25.2281). 종목마다 최근 `BETA_MAX_AGE_DAYS` 안의 가장 늦은 1Y 행 하나
-#: (색인 `idx_metrics_stock (stock_id, as_of_date DESC, window)` — 바닥 날짜가 없으면 베타가 없는 종목은 제 기록을
-#: 끝까지 훑는다). 성과 지표는 주 1회(metrics.yml 월요일) 갱신이라 창을 넉넉히 둔다
+#: (UNIQUE 자동 색인 `(stock_id, as_of_date, window, calc_version)` 으로 종목·날짜 범위를 찾는다 — `idx_metrics_stock`
+#: 은 0040 이 지웠다, 25.2282. 바닥 날짜가 없으면 베타가 없는 종목은 제 기록을 끝까지 훑는다. 창 안의 행은 모두 읽고
+#: 계산 판 차례만 따로 정렬한다). 성과 지표는 주 1회(metrics.yml 월요일) 갱신이라 창을 넉넉히 둔다
 BETA_SQL = (
     "SELECT j.value AS stock_id, (SELECT pm.beta FROM performance_metrics pm WHERE pm.stock_id = j.value"
     " AND pm.window = '1Y' AND pm.beta IS NOT NULL AND pm.as_of_date >= ?"
@@ -578,7 +579,9 @@ def _멈춘평가(client: Any, h: str, since: str) -> dict[str, list[tuple[str, 
 
 def _betas(client: Any, ids: list[int], now: datetime) -> dict[int, float] | None:
     """보유 종목 → 1Y 베타(25.2281). 곁다리 — 못 읽으면 None(위험판의 지수 충격 칸만 빠지고 나머지는 그대로).
-    한도 오류는 다시 올린다. 베타 행이 없는 종목은 결과에 없다(부르는 쪽이 가정값과 수를 싣는다)"""
+    한도 오류는 삼키지 않고 올린다 — 다만 부르는 자리가 `_관문판` 의 try 안이라 거기서 받아 관문판을 비우고
+    `gate_error` 에 남는다(그 안의 다른 읽기와 같은 꼴, 25.2282 — 한도가 찬 날은 뒤 읽기도 깨진다).
+    베타 행이 없는 종목은 결과에 없다(부르는 쪽이 가정값과 수를 싣는다)"""
     if not ids:
         return {}
     try:

@@ -186,6 +186,10 @@ def test_write_puts_gate_risk_champion(monkeypatch: pytest.MonkeyPatch) -> None:
                            " VALUES (?, ?, ?, ?, 'success')", [작업, m, d, f"{d}T23:30:00"])  # fmt: skip
     c.conn.execute("INSERT INTO batch_runs (job_name, market, trade_date, started_at, status)"
                    " VALUES ('daily_kr', 'KR', '2026-10-08', '2026-10-09T00:00:00', 'failed')")  # fmt: skip
+    # 지수 충격의 베타(25.2282 — 마이그레이션 스키마 그대로의 읽기 경로): 창 안 1Y 행, 3Y 는 쓰지 않는다
+    for 창이름, 베타 in (("1Y", 1.2), ("3Y", 9.0)):
+        c.conn.execute("INSERT INTO performance_metrics (stock_id, as_of_date, window, beta, data_points, calc_version,"
+                       " created_at) VALUES (1, '2026-10-12', ?, ?, 250, 1, 't')", [창이름, 베타])  # fmt: skip
     job.write(c, "KR", 지금, trade_date="2026-10-16", session_date="2026-10-19", step_log={}, warnings=[])  # fmt: skip
     s = json.loads(c.q("SELECT summary_json FROM paper_desk")[0][0])
     칸 = {i["key"]: i for i in s["gate"]["items"]}
@@ -193,6 +197,8 @@ def test_write_puts_gate_risk_champion(monkeypatch: pytest.MonkeyPatch) -> None:
     assert not s["gate"]["passed"]
     b = {r["id"]: r for r in s["risk"]}["B"]
     assert b["exposure_pct"] == pytest.approx(60.0) and b["near_stop"][0]["name"] == "종목1"
+    assert b["index_shock_pct"] == pytest.approx(60.0 * 1.2 * -0.05) and "index_shock_assumed" not in b
+    assert b["open_risk_pct"] == pytest.approx(60.0 * (1 - 93 / 94))
     assert isinstance(s["champion"], list)
 
 

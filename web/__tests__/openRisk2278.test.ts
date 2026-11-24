@@ -9,6 +9,8 @@ describe("openRiskText", () => {
   });
   it("0 은 마이너스 없이", () => {
     expect(openRiskText({ open_risk_pct: 0 })).toBe("0.0%");
+    expect(openRiskText({ open_risk_pct: 0.04 })).toBe("0.0%"); // 25.2282
+    expect(openRiskText({ open_risk_pct: 0.05 })).toBe("−0.1%");
   });
   it("값이 없으면 - (손절선으로 재지 않는 계좌 · 이 칸이 없던 날의 요약)", () => {
     expect(openRiskText({ open_risk_pct: null })).toBe("-");

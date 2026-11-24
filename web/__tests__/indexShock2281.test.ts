@@ -7,6 +7,9 @@ describe("indexShockText", () => {
     expect(indexShockText({ index_shock_pct: -3.449 })).toBe("−3.4%");
     expect(indexShockText({ index_shock_pct: 0.5 })).toBe("+0.5%");
     expect(indexShockText({ index_shock_pct: 0 })).toBe("0.0%");
+    expect(indexShockText({ index_shock_pct: -0.04 })).toBe("0.0%"); // 반올림해 0.0 이면 부호 없이 (25.2282)
+    expect(indexShockText({ index_shock_pct: 0.049 })).toBe("0.0%");
+    expect(indexShockText({ index_shock_pct: -0.05 })).toBe("−0.1%");
   });
   it("값이 없으면 - (ETF 전술 · 베타를 못 읽은 날 · 이 칸이 없던 날)", () => {
     expect(indexShockText({ index_shock_pct: null })).toBe("-");

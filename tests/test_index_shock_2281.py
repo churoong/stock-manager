@@ -60,7 +60,10 @@ def test_보유가_없으면_0_이고_보유_글이_깨진_날은_모름이다()
 @pytest.mark.parametrize("계좌", ["X", "Y"])
 def test_ETF_전술_계좌는_값이_없다(계좌: str) -> None:
     """인버스를 드는 계좌 — 베타 1 가정이면 부호가 뒤집힌다"""
-    assert desk.ETF_TACTICAL_IDS == ("X", "Y")
+    from batch.services import etf_tactical
+
+    # 목록의 원천은 ETF 전술 계좌 정의 — 계좌가 늘면 여기서 깨진다(25.2282, 25.2281 교차검증 [권고])
+    assert set(desk.ETF_TACTICAL_IDS) == set(etf_tactical.ACCOUNTS) and desk.ETF_TACTICAL_IDS == ("X", "Y")
     for 종목 in ([_q(1, 90.0)], []):
         r = _판(계좌, 종목, {1: 1.0})
         assert r["index_shock_pct"] is None and "index_shock_assumed" not in r
@@ -81,7 +84,8 @@ def test_베타를_못_읽은_날은_칸이_없고_나머지는_그대로다() -
 
 
 class _C:
-    """`BETA_SQL` 을 실제 SQLite 로 돌린다 — 스키마의 색인·열 이름 그대로"""
+    """`BETA_SQL` 을 실제 SQLite 로 돌린다 — 열 이름만 맞춘 손 표(색인 없음). 마이그레이션 스키마 그대로의 경로는
+    `test_desk_gate_1508.test_write_puts_gate_risk_champion` 이 묶는다(25.2282)"""
 
     def __init__(self) -> None:
         self.conn = sqlite3.connect(":memory:")

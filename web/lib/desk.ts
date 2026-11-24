@@ -455,7 +455,8 @@ export function indexShockText(r: Pick<RiskRow, "index_shock_pct" | "index_shock
   const 꼬리 = 덧 ? ` (${덧})` : "";
   const v = r.index_shock_pct;
   if (v == null || !Number.isFinite(v)) return `-${꼬리}`;
-  const 값 = v === 0 ? "0.0%" : `${v < 0 ? "−" : "+"}${Math.abs(v).toFixed(1)}%`;
+  // 반올림해 0.0 이면 부호를 뗀다("−0.0%" 가 아니라 "0.0%", 25.2282)
+  const 값 = Math.abs(v) < 0.05 ? "0.0%" : `${v < 0 ? "−" : "+"}${Math.abs(v).toFixed(1)}%`;
   return `${값}${꼬리}`;
 }
 
@@ -467,7 +468,7 @@ export function indexShockText(r: Pick<RiskRow, "index_shock_pct" | "index_shock
 export function openRiskText(r: Pick<RiskRow, "open_risk_pct" | "open_risk_skipped">): string {
   const 못잼 = r.open_risk_skipped ? ` (${r.open_risk_skipped}종목 못 잼)` : "";
   if (r.open_risk_pct == null || !Number.isFinite(r.open_risk_pct)) return 못잼 ? `-${못잼}` : "-";
-  const 값 = r.open_risk_pct === 0 ? "0.0%" : `−${r.open_risk_pct.toFixed(1)}%`;
+  const 값 = Math.abs(r.open_risk_pct) < 0.05 ? "0.0%" : `−${r.open_risk_pct.toFixed(1)}%`;
   return `${값}${못잼}`;
 }
 
