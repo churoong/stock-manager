@@ -22,7 +22,11 @@ READ_BACK_DAYS = 10
 EVENTS_SQL = (
     "SELECT d.account_id, d.market, d.stock_id, d.decided_on, d.reason, d.ref_close, d.ref_date, d.ret_5d, d.ret_60d,"
     " d.bench_5d, d.outcome_note, o.order_type, o.status, o.deferrals, o.fill_basis, o.close_note,"
-    " f.fill_date, f.price, f.day_close, f.horizon, s.ticker"
+    " f.fill_date, f.price, f.day_close, s.ticker,"
+    # 보유 기간 — 매도 체결의 horizon 은 늘 비어 있다(매도 주문이 싣지 않는다).
+    # 결정일 앞 마지막 매수 체결에서 읽는다(25.2274)
+    " (SELECT b.horizon FROM paper_fills b WHERE b.account_id = d.account_id AND b.stock_id = d.stock_id"
+    "   AND b.side = 'buy' AND b.fill_date <= d.decided_on ORDER BY b.fill_date DESC, b.id DESC LIMIT 1) AS horizon"
     " FROM paper_decisions d JOIN stocks s ON s.id = d.stock_id"
     " LEFT JOIN paper_orders o ON o.account_id = d.account_id AND o.market = d.market AND o.decided_on = d.decided_on"
     "  AND o.stock_id = d.stock_id AND o.side = 'sell'"
@@ -93,6 +97,9 @@ def facts(events: list[dict[str, Any]]) -> dict[str, Any]:
 
     def 손절폭(e: dict[str, Any]) -> float:
         return float(기본.get(str(e.get("horizon") or "mid"), 기본["mid"])["stop_pct"])
+
+    # 보유 기간을 못 읽은 사건은 중기(mid)로 셈한다 — 그 수를 함께 낸다
+    out["horizon_unknown"] = sum(e.get("horizon") not in 기본 for e in 표본)
 
     for 이름, 군집인가 in (("cluster", True), ("single", False)):
         행 = [e for e in 표본 if e.get("ret_60d") is not None

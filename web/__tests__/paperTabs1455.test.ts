@@ -126,6 +126,19 @@ describe("거장 계좌 선 색 (25.2269)", () => {
     }
   });
 
+  it("어느 두 선도 눈으로 가를 만큼 색이 떨어져 있다 (25.2274)", () => {
+    // CIE76 색차 — 16진 값만 다른 근접 색(무작위1·2 가 6, 단타·안정이 9 였다)을 잡는다
+    const lab = (hex: string) => {
+      const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+      const f = (t: number) => (t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116);
+      const [x, y, z] = [(0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047, 0.2126 * r + 0.7152 * g + 0.0722 * b, (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883].map(f);
+      return [116 * y - 16, 500 * (x - y), 200 * (y - z)];
+    };
+    const 색차 = (a: string, b: string) => Math.hypot(...lab(a).map((v, i) => v - lab(b)[i]));
+    const 선 = Object.entries({ ...ACCOUNT_COLOR, ...INDEX_COLOR });
+    for (const [i, [a, ca]] of 선.entries()) for (const [b, cb] of 선.slice(i + 1)) expect(색차(ca, cb), `${a}·${b}`).toBeGreaterThanOrEqual(15);
+  });
+
   it("모든 계좌 선과 지수 선이 서로 다른 색이고 두 바탕에서 보인다 (25.2272)", () => {
     const 선 = { ...ACCOUNT_COLOR, ...INDEX_COLOR };
     expect(new Set(Object.values(선)).size).toBe(Object.keys(선).length);

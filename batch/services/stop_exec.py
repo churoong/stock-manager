@@ -26,7 +26,8 @@ ACCOUNTS: tuple[str, ...] = ("A", "B", "C", "E", "G", "H", "R1", "R2", "ZL", "ZM
 #: 한쪽 α — 등록 상수(가족 구성이 바뀌어도 고치지 않는다)
 ALPHA = 0.0125
 STOP = "손절"
-#: 값이 난 실행의 날짜 — {"stop_exec_pair": "YYYY-MM-DD", "stop_cluster_defer": …}. 적힌 판정은 다시 값을 내지 않는다
+#: 값이 났거나 기한으로 닫힌(판정 불가) 실행의 날짜 — {"stop_exec_pair": "YYYY-MM-DD", "stop_cluster_defer": …}.
+#: 적힌 판정은 다시 값을 내지 않는다. 적는 커밋은 `tests/test_stop_exec_2271` 의 `JUDGED == {}` 단언도 함께 고친다
 JUDGED: dict[str, str] = {}
 
 #: stop_exec_pair 문 — 갭 하락 사건·그런 체결일·그런 묶음. 기한까지 못 넘기면 판정 불가
@@ -141,7 +142,9 @@ def _하한(값: dict[int, float]) -> dict[str, Any]:
 def judge_pair(events: list[dict[str, Any]], today: str, judged: dict[str, str] | None = None) -> dict[str, Any]:
     """`stop_exec_pair` — 수(늘) + 문을 처음 넘긴 실행에서만 값·판정. 국내만 판정, 미국은 수만"""
     judged = JUDGED if judged is None else judged
-    국내 = [e for e in events if e.get("market") == "KR" and e.get("account_id") in ACCOUNTS]
+    # 기한 뒤 체결은 세지 않는다 — "기한까지 문 미달이면 판정 불가" 가 기한 뒤 사건으로 뒤집히지 않게(25.2274)
+    국내 = [e for e in events if e.get("market") == "KR" and e.get("account_id") in ACCOUNTS
+            and str(e.get("fill_date") or "")[:10] <= PAIR_DEADLINE]  # fmt: skip
     갈래: dict[str, int] = {}
     사건행: list[Pair] = []
     for e in 국내:
@@ -228,6 +231,8 @@ def classify_cluster(e: dict[str, Any]) -> tuple[str, dict[str, Any] | None]:
 def judge_cluster(events: list[dict[str, Any]], today: str, judged: dict[str, str] | None = None) -> dict[str, Any]:
     """`stop_cluster_defer` — 수(늘) + 볼 시점의 한 번에서만 값·판정. 닫힌 묶음만 센다"""
     judged = JUDGED if judged is None else judged
+    # 기한 뒤 결정일은 세지 않는다 — 기한 뒤 첫 실행의 "판정 불가" 가 그 뒤 사건으로 뒤집히지 않게(25.2274)
+    events = [e for e in events if str(e["decided_on"])[:10] <= CLUSTER_DEADLINE]
     군집수 = cluster_days(events)
     국내 = [e for e in events if e.get("market") == "KR" and e.get("account_id") in ACCOUNTS
             and e.get("reason") == STOP and str(e["decided_on"])[:10] >= SAMPLE_FROM]  # fmt: skip
@@ -284,8 +289,8 @@ def judge_cluster(events: list[dict[str, Any]], today: str, judged: dict[str, st
         판정 = "pass"
     elif c["upper"] is not None and c["upper"] < 0:
         판정 = "close"  # 군집일에도 즉시 매도
-    elif 양[0] and 양[1] and not 양[2] and not 거부["vetoed"]:
-        판정 = "market_rebound"  # 시장 반등 몫 — 지수 국면 노출 질문으로
+    elif 양[0] and 양[1] and ex["lower"] is not None and not 양[2] and not 거부["vetoed"]:
+        판정 = "market_rebound"  # 시장 반등 몫 — 지수 국면 노출 질문으로. ③ 을 못 낸 날(지수 없음·묶음 부족)은 접음
     else:
         판정 = "fold"
     return {**out, "status": "judge", "verdict": 판정, "diff": x, "cluster": c, "excess": ex, "veto": 거부}
@@ -323,6 +328,8 @@ def lines(result: dict[str, Any]) -> list[str]:
     머리 = f"[{result['name']}] 상태 {result['status']} · 문 {'참' if result['gate'] else '안 참'}"
     수 = " · ".join(f"{k} {v}" for k, v in c.items() if k != "by")
     out = [머리, f"  수: {수}", "  갈래: " + ", ".join(f"{k} {v}" for k, v in c["by"].items())]
+    if result["status"] == "expired":
+        return [*out, "  판정 불가(기한) — 이 날짜를 stop_exec.JUDGED 에 적어 커밋한다(닫음 — 다시 세지 않는다)"]
     if result["status"] != "judge":
         return out
     return [*out, "  판정(한 번 — 이 날짜를 stop_exec.JUDGED 에 적어 커밋): " + result["verdict"],
