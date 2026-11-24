@@ -135,6 +135,11 @@ export interface RiskRow {
   near_stop_note?: string;
   /** 그 글이 경고인가 — 단타에 하룻밤 넘긴 보유가 남은 날(25.2023) */
   near_stop_warn?: boolean;
+  /** 열린 위험 — 보유가 모두 손절선까지 내려 팔리면 평가 총액에서 잃는 몫(%, 양수). 손절선으로 재지 않는 계좌·하나도
+   *  못 잰 계좌는 null, 이 칸이 없던 날의 요약은 undefined (25.2278) */
+  open_risk_pct?: number | null;
+  /** 평균단가·종가·비중이 없어 열린 위험에서 뺀 보유 수(있을 때만) */
+  open_risk_skipped?: number;
 }
 /** 실전 준비 목록 한 항목 (docs/paper.md 14장, 25.1513) — 상태는 배치 코드의 표, 근거는 기록에서 */
 export interface ReadinessItem { key: string; label: string; status: "done" | "partial" | "rehearsal" | "todo" | "user"; note: string; evidence: string | null }
@@ -431,6 +436,17 @@ export function adjustCheckText(c: FillAdjustCheck | null | undefined, mirror: s
   if (!c) return null;
   const 섞임 = c.pre_link ? ` · 연결 전 보유 ${c.pre_link}종목이 섞여 실측이 흔들림(판정에서 뺌)` : "";
   return `${c.from ?? "?"}~${c.to ?? "?"} KIS 실측 손익 차이 ${ppText(c.actual_pp)} (${accountName(mirror)} 평가 대비) · 칸으로 설명한 몫 ${ppText(c.explained_pp)} ±${c.band_pp.toFixed(2)} · 안 잰 회전 ${c.unmeasured_pct.toFixed(0)}%${섞임}`;
+}
+
+/**
+ * 위험판 "열린 위험" 칸 (25.2278) — 잃는 몫이라 마이너스로 보인다("−4.2%"). 값이 없으면 "-"(손절선으로 재지 않는 계좌·
+ * 이 칸이 없던 날). 못 잰 보유가 있으면 그 수를 덧붙인다 — 숫자가 작게 보이는 까닭을 숨기지 않는다
+ */
+export function openRiskText(r: Pick<RiskRow, "open_risk_pct" | "open_risk_skipped">): string {
+  const 못잼 = r.open_risk_skipped ? ` (${r.open_risk_skipped}종목 못 잼)` : "";
+  if (r.open_risk_pct == null || !Number.isFinite(r.open_risk_pct)) return 못잼 ? `-${못잼}` : "-";
+  const 값 = r.open_risk_pct === 0 ? "0.0%" : `−${r.open_risk_pct.toFixed(1)}%`;
+  return `${값}${못잼}`;
 }
 
 /**

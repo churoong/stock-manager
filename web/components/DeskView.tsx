@@ -13,6 +13,7 @@ import {
   kisOffText,
   kisStatusText,
   nearStopText,
+  openRiskText,
   notSentText,
   orderLine,
   pctText,
@@ -308,12 +309,15 @@ export default function DeskView() {
         <section className={CARD}>
           <h2 className="font-semibold">위험판</h2>
           <div className="overflow-x-auto">
-            <table className="mt-2 w-full min-w-[560px] text-sm">
+            <table className="mt-2 w-full min-w-[640px] text-sm">
               <thead>
                 <tr className="text-left text-xs text-slate-500">
                   <th className="py-1">계좌</th>
                   <th className="text-right">노출</th>
                   <th className="text-right">낙폭</th>
+                  <th className="text-right" title="보유가 모두 손절선까지 내려 팔리면 평가 총액에서 잃는 몫 — 갭으로 선을 건너뛴 체결은 담지 않는다(아래쪽 한계)">
+                    열린 위험
+                  </th>
                   <th className="pl-2">가장 큰 종목</th>
                   <th className="pl-2">손절 가까움</th>
                 </tr>
@@ -324,6 +328,7 @@ export default function DeskView() {
                     <td className="py-1 font-semibold">{accountName(r.id)}</td>
                     <td className="text-right">{r.exposure_pct == null ? "-" : `${r.exposure_pct.toFixed(0)}%`}</td>
                     <td className={`text-right ${tone(r.dd_pct)}`}>{pctText(r.dd_pct)}</td>
+                    <td className="whitespace-nowrap text-right text-xs">{openRiskText(r)}</td>
                     <td className="pl-2 text-xs">
                       {r.top_name ? `${r.top_name} ${r.top_weight_pct?.toFixed(1)}%` : "-"} <span className="text-slate-400">({r.positions}종목)</span>
                     </td>

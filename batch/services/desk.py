@@ -1071,7 +1071,9 @@ def risk_board(
     손절 가까움의 수익률은 **매도 플래그와 같은 잣대** — 종목 통화로 종가 ÷ 평균단가(수수료 포함 원가) − 1.
     원화 평가손익률은 환율이 섞여 미국 종목이 달러로는 손절선 1%p 앞인데 "없음" 으로 보였다(25.1511 검토 2).
     기간이 없거나 모르는 값이면 장기로 본다(매도 플래그와 같이). 유상증자 권리락 계수는 반영하지 않는다
-    (드묾 `[확인필요]`)
+    (드묾 `[확인필요]`).
+    `open_risk_pct` = 열린 위험(25.2278, docs/desk.md 6장) — 손절 가까움과 같은 선·같은 값으로 낸다. 못 잰 보유 수는
+    `open_risk_skipped`(있을 때만)
     """
     out = []
     for a in sorted(latest):
@@ -1084,20 +1086,34 @@ def risk_board(
         # 원가 기준)으로 재면 스윙 손절선(−3%) 앞 보유가 "없음" 이고 이미 판 보유만 다른 선으로 떴다(25.2022 결함 루프 —
         # 주간 요약은 25.1873 이 같은 처리)
         주석 = _손절_해당없음(a, len(종목))
+        # 열린 위험(25.2278) — 보유가 **모두 제 손절선까지 내려 팔리면** 평가 총액에서 잃는 몫(%): Σ 비중 × max(0, 1 −
+        # 손절가 ÷ 종가), 손절가 = 평균단가 × (1 + 손절 %). 이미 선 밑인 보유는 0(더 내릴 몫이 아니라 팔릴 차례다).
+        # 갭으로 선을 건너뛴 체결(docs/factors.md 12.53)은 담지 않는다 — **아래쪽 한계**다
+        열린, 센, 못잼 = 0.0, 0, 0
         for q in 종목 if 주석 is None else []:
             기간 = str(q.get("horizon") or "")
             선 = stops.get(기간 if 기간 in stops else "long")
             avg, close = q.get("avg_price"), q.get("close")
             if 선 is None or not avg or close is None or float(avg) <= 0:
+                못잼 += 1
                 continue
             u = (float(close) / float(avg) - 1) * 100
             if u <= 선 + RISK_NEAR_STOP_PP:
                 가까움.append({"name": q.get("name") or q.get("ticker"), "unrealized_pct": u, "stop_pct": 선})
+            비중 = q.get("weight_pct")
+            if 비중 is None or float(close) <= 0:
+                못잼 += 1
+                continue
+            열린 += float(비중) * max(0.0, 1 - float(avg) * (1 + 선 / 100) / float(close))
+            센 += 1
         v = sorted(series.get(a) or [])
         고점 = max((t for _d, t in v), default=None)
         out.append({"id": a, "exposure_pct": 보유 / 자산 * 100 if 자산 > 0 else None, "positions": len(종목),
                     "top_weight_pct": float(큰.get("weight_pct") or 0) if 큰 else None,
                     "top_name": (큰.get("name") or 큰.get("ticker")) if 큰 else None, "near_stop": 가까움,
+                    # 손절선으로 재지 않는 계좌(스윙·단타·ETF 전술)와 하나도 못 잰 계좌는 None. 보유가 없으면 0
+                    "open_risk_pct": None if 주석 or (종목 and not 센) else 열린,
+                    **({"open_risk_skipped": 못잼} if 못잼 and 주석 is None else {}),
                     **({"near_stop_note": 주석[0]} if 주석 else {}),
                     **({"near_stop_warn": True} if 주석 and 주석[1] else {}),
                     "dd_pct": (v[-1][1] / 고점 - 1) * 100 if v and 고점 else None})  # fmt: skip
