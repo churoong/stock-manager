@@ -1020,7 +1020,9 @@ def run(
     if 안냄:
         기록["not_sent"] = dict(Counter(까닭 for _o, _s, 까닭 in 안냄))
     기록["halted"] = 멈춤
-    return 기록 | {"calls": sess.calls}
+    # 조회를 다시 받아 넘긴 수(25.2288) — 있을 때만. 건수뿐이다
+    끊김 = int(getattr(sess, "net_retries", 0) or 0)
+    return 기록 | {"calls": sess.calls} | ({"net_retries": 끊김} if 끊김 else {})
 
 
 class _건너뜀(Exception):  # noqa: N818 — 흐름 표시

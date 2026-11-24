@@ -487,7 +487,9 @@ def _호출(sess: Any) -> dict[str, int]:
     """회차의 KIS 호출 수와(있으면) 초당 한도로 다시 한 수 — 같은 모의 앱키를 쓰는 다른 호출과 겹치는 일이 얼마나 잦은지
     잰다(25.1800, 25.1799 교차검증 [참고]: 10-26 10:05 회차는 호출 1건에 원장 한도를 받았다)"""
     다시 = int(getattr(sess, "rate_retries", 0) or 0)
-    return {"calls": sess.calls} | ({"rate_retries": 다시} if 다시 else {})
+    # 조회를 연결 오류·시간 초과로 다시 받은 수(25.2287 — 다시 받아 넘긴 날이 기록에 남아야 잦기를 잰다, 25.2288)
+    끊김 = int(getattr(sess, "net_retries", 0) or 0)
+    return {"calls": sess.calls} | ({"rate_retries": 다시} if 다시 else {}) | ({"net_retries": 끊김} if 끊김 else {})
 
 
 def alerted_ids(client: Any, key: str, today: date) -> set[int]:

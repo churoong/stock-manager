@@ -78,6 +78,55 @@ def test_조회는_JSON_아닌_응답도_다시_받는다(monkeypatch: pytest.Mo
     assert s.balance()[0] and 부름[0] == 2 and 쉼 == [1.0]
 
 
+def test_다시_받기는_끊긴_요청을_그대로_다시_보낸다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.2288 — 둘째 쪽에서 끊겼을 때 첫 쪽으로 돌아가거나 이어 받기 표지 없이 나가면 안 된다"""
+    쪽1 = {**잔고, "ctx_area_fk100": "f", "ctx_area_nk100": "n"}
+    쪽2 = {"rt_cd": "0", "output1": [{"pdno": "000660", "hldg_qty": "2", "ord_psbl_qty": "2", "pchs_avg_pric": "500"}],
+          "output2": [{}]}  # fmt: skip
+    s, http, 쉼 = _쉼을_적는_세션(monkeypatch, [(쪽1, "M"), (쪽2, "")])
+    진짜, 본 = http.get, []
+
+    def 둘째에서_한_번_끊김(url: str, **kw: Any) -> Any:
+        본.append((kw["params"].get("CTX_AREA_NK100"), kw["headers"]["tr_cont"]))
+        if len(본) == 2:
+            raise requests.ReadTimeout("timed out")
+        return 진짜(url, **kw)
+
+    http.get = 둘째에서_한_번_끊김  # type: ignore[method-assign]
+    보유, _합 = s.balance()
+    assert [h.code for h in 보유] == ["005930", "000660"]
+    assert 본 == [("", ""), ("n", "N"), ("n", "N")] and 쉼 == [1.0]
+
+
+def test_코드_없는_모름_문장에_받은_것이_남는다() -> None:
+    """25.2288 — 주문 줄의 message 로 가는 유일한 흔적. 값이 아니라 칸 이름만, msg1 은 앞 60자"""
+    with pytest.raises(kv.NoResponse) as e:
+        kv.parse_order({"rt_cd": "1", "msg_cd": "", "msg1": "모의투자 장시작전 입니다" + "가" * 80, "output": {"ODNO": "9"}})
+    글 = str(e.value)
+    assert "rt_cd '1'" in 글 and "모의투자 장시작전 입니다" in 글 and "칸(msg1,msg_cd,output,rt_cd)" in 글
+    assert "가" * 61 not in 글 and "ODNO" not in 글 and "'9'" not in 글
+    with pytest.raises(kv.NoResponse, match=r"rt_cd None · Gateway Timeout · 칸\(error,status\)"):
+        kv.parse_us_reservation({"error": "Gateway Timeout", "status": 504})
+    with pytest.raises(kv.NoResponse) as e:
+        kv.parse_order(None)
+    assert str(e.value) == "모의 주문 응답에 KIS 오류 코드가 없습니다"
+
+
+def test_다시_받은_수가_실행_기록에_실린다() -> None:
+    """25.2288 — 다시 받아 넘긴 날이 기록에 남아야 잦기를 잰다(rate_retries 와 같은 꼴: 있을 때만)"""
+    from batch.jobs import intraday_guard as ig
+
+    세션 = type("S", (), {"calls": 7, "rate_retries": 0, "net_retries": 2})()
+    assert ig._호출(세션) == {"calls": 7, "net_retries": 2}
+    세션.net_retries, 세션.rate_retries = 0, 1
+    assert ig._호출(세션) == {"calls": 7, "rate_retries": 1}
+    import inspect
+
+    from batch.jobs import broker_mirror as jb
+
+    assert '({"net_retries": 끊김} if 끊김 else {})' in inspect.getsource(jb.run)
+
+
 @pytest.mark.parametrize("꼴", ["끊김", "JSON 아님"])
 def test_주문은_다시_보내지_않는다(monkeypatch: pytest.MonkeyPatch, 꼴: str) -> None:
     """접수됐는지 모르는 주문을 다시 보내면 두 번 나간다 — 한 번만 보내고 모름으로 둔다"""
