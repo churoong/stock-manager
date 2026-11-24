@@ -137,7 +137,8 @@ def test_network_errors_hide_url_and_mean_unknown(monkeypatch: pytest.MonkeyPatc
     http.get = 끊김  # type: ignore[method-assign]
     with pytest.raises(kv.NoResponse) as e:
         s.balance()
-    assert "12345678" not in str(e.value) and e.value.__cause__ is None and e.value.__suppress_context__
+    # 원래 예외(주소가 실린다)를 원인으로도 문맥으로도 잇지 않는다 — except 밖에서 올린다(25.2287)
+    assert "12345678" not in str(e.value) and e.value.__cause__ is None and e.value.__context__ is None
     # JSON 이 아닌 응답(게이트웨이 502 등)·주문번호 없는 성공도 '모름' — 거부로 닫지 않는다 (검증 [권장] 3)
     s, http = _세션(monkeypatch, [])
     http.post = lambda url, **kw: type("R", (), {"status_code": 502, "json": lambda _s: (_ for _ in ()).throw(ValueError()),

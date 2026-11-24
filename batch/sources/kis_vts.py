@@ -92,6 +92,11 @@ RATE_LIMIT_CODE = "EGW00201"
 LEDGER_RATE_LIMIT_CODE = "EGW00215"
 RATE_LIMIT_CODES = (RATE_LIMIT_CODE, LEDGER_RATE_LIMIT_CODE)
 RATE_WAITS = (1.5, 61.0)
+#: **조회(GET)** 의 연결 오류·시간 초과·JSON 아닌 응답을 다시 받기 전 쉬는 초 — 두 번까지(25.2287, 결함 루프).
+#: 조회는 몇 번 받아도 같은 답이라 다시 받아도 된다. 아침 베끼기는 하루 한 번이라 조회 한 번의 시간 초과로 그날
+#: KIS모의투자 주문이 통째로 빠졌다(예비 실행도 이어 돌지 않는다). **주문(POST)은 다시 보내지 않는다** — 접수됐는지
+#: 모르는 주문을 다시 보내면 두 번 나간다
+GET_NET_WAITS = (1.0, 3.0)
 #: 연속 조회(다음 쪽) 최대 — 잔고는 모의에서 한 번에 20건(inquire_balance.py L118 주석)
 MAX_PAGES = 10
 #: 체결 조회 쪽 최대 — 모의는 한 쪽에 15건쯤이라(검증 보고) 며칠 밀린 맞추기도 담게 넉넉히
@@ -176,8 +181,19 @@ class Accepted:
     order_time: str | None  # ORD_TMD (HHMMSS)
 
 
+def _order_ok(payload: object, what: str) -> dict[str, Any]:
+    """**주문** 응답 — KIS 오류 코드가 있을 때만 거부(`KisFailed`). 코드 없는 실패(게이트웨이 오류 JSON·`rt_cd` 칸
+    없음·빈 `msg_cd`)는 접수됐는지 모른다 → `NoResponse`(모름). docs/paper.md 15.2 가 적은 그대로다 — 예전엔 `_ok` 가
+    코드 유무와 무관하게 거부로 올려, 실제로 접수된 주문이 `rejected` 로 닫히면 다음 날 맞추기(sending·accepted 만
+    본다)에서 영영 빠졌다(25.2287, 결함 루프). 조회 응답은 `_ok` 그대로"""
+    코드 = str(payload.get("msg_cd") or "").strip() if isinstance(payload, dict) else ""
+    if not isinstance(payload, dict) or (str(payload.get("rt_cd")) != "0" and not 코드):
+        raise NoResponse(f"{what} 응답에 KIS 오류 코드가 없습니다")
+    return _ok(payload, what)
+
+
 def parse_order(payload: object) -> Accepted:
-    body = _ok(payload, "모의 주문")
+    body = _order_ok(payload, "모의 주문")
     out = body.get("output") or {}
     no = str(out.get("ODNO") or "").strip()
     if not no:
@@ -260,7 +276,7 @@ def parse_us_reservation(payload: object) -> Accepted:
     무엇이 오는지 보게 한다. 정규 주문번호는 개장 때 생겨 체결 조회와는 날·종목·방향·수량·단가로 맞추므로 이 번호는
     기록일 뿐이다
     """
-    body = _ok(payload, "모의 미국 예약주문")
+    body = _order_ok(payload, "모의 미국 예약주문")
     out = body.get("output") or {}
     if isinstance(out, list):
         out = out[0] if out and isinstance(out[0], dict) else {}
@@ -377,6 +393,7 @@ class Session:
         self.sleep = sleep
         self.calls = 0
         self.rate_retries = 0
+        self.net_retries = 0
         #: 마지막 잔고 조회가 쪽 상한(`MAX_PAGES`)에 닿아 잘렸나(25.1712) — 체결 조회는 "다 받음" 을 돌려주는데 잔고는
         #: 말없이 잘라 정리·베낀 매도·실현손익 기준점이 빠진 보유를 0 으로 읽었다
         self.balance_truncated = False
@@ -398,7 +415,7 @@ class Session:
         self._last = time.monotonic()
 
     def _call(self, method: str, path: str, tr: str, *, params: dict | None = None, body: dict | None = None,
-              tr_cont: str = "", _retry: int = 0) -> tuple[object, str]:  # fmt: skip
+              tr_cont: str = "", _retry: int = 0, _net: int = 0) -> tuple[object, str]:  # fmt: skip
         self._wait()
         url = _check_url(BASE + path, tr)
         headers = self.head | {"tr_id": tr, "tr_cont": tr_cont}
@@ -412,18 +429,33 @@ class Session:
                 r = self.http.get(url, params=params, headers=headers, timeout=TIMEOUT, allow_redirects=False)
         except requests.RequestException as exc:
             # 예외 문장에 요청 주소(조회는 `?CANO=…` 계좌번호)가 실린다 — 이름만 남기고 원래 예외를 잇지 않는다
-            # (traceback 에도 안 남게, 25.1475 검증 [권장] 2)
-            raise NoResponse(f"모의 응답 없음 ({type(exc).__name__})") from None
-        try:
-            payload = r.json()
-        except ValueError:
-            payload = None
-        if not isinstance(payload, dict):
-            raise NoResponse(f"모의 HTTP {r.status_code} — JSON 아님")
+            # (traceback 에도 안 남게, 25.1475 검증 [권장] 2). 다시 받기·올리기는 이 except 밖에서 한다(25.2287 —
+            # 안에서 다시 부르면 그 예외가 문맥으로 따라붙는다)
+            실패: str | None = f"모의 응답 없음 ({type(exc).__name__})"
+            r = None
+        else:
+            실패 = None
+        payload: object = None
+        if r is not None:
+            try:
+                payload = r.json()
+            except ValueError:
+                payload = None
+            if not isinstance(payload, dict):
+                실패 = f"모의 HTTP {r.status_code} — JSON 아님"
+        if 실패 is not None:
+            if method == "GET" and _net < len(GET_NET_WAITS):
+                self.sleep(GET_NET_WAITS[_net])
+                self.net_retries += 1
+                return self._call(method, path, tr, params=params, body=body, tr_cont=tr_cont, _retry=_retry,
+                                  _net=_net + 1)  # fmt: skip
+            raise NoResponse(실패)
+        assert isinstance(payload, dict)
         if method == "GET" and str(payload.get("msg_cd") or "") in RATE_LIMIT_CODES and _retry < len(RATE_WAITS):
             self.sleep(RATE_WAITS[_retry])
             self.rate_retries += 1
-            return self._call(method, path, tr, params=params, body=body, tr_cont=tr_cont, _retry=_retry + 1)
+            return self._call(method, path, tr, params=params, body=body, tr_cont=tr_cont, _retry=_retry + 1,
+                              _net=_net)  # fmt: skip
         return payload, str(getattr(r, "headers", {}).get("tr_cont", "") or "")
 
     def order(self, side: str, code: str, quantity: int, price: float | None) -> Accepted:
