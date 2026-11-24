@@ -645,3 +645,26 @@ def test_다시_잴_때_자료_문제로_넘긴_종목은_다시_읽지_않는�
         fill_session="2026-11-02",
     )  # fmt: skip
     assert 기록["picks"] == [3, 4] and 읽음.count(2) == 1  # 2(시세 없음)는 1회차에만 읽었다
+
+
+# ── 25.2323 — 자리가 있는데 하나도 못 산 날의 경고 ────────────────────────────────────────────
+
+
+def test_못_산_날_경고_술어() -> None:
+    assert solo.warning({"buy": {"slots": 1, "orders": 0, "not_bought": {3: "시세 없음 — 다음 순위로", 4: "묵은 종가"}}}) == (
+        "normal", "사지 못함 — 시세 없음 — 다음 순위로 외 1종목")  # fmt: skip
+    assert solo.warning({"buy": {"slots": 2, "orders": 0}, "risk_blocked": 3}) == ("normal", "사지 못함 — 위험 점검에 막힘 3건")
+    assert solo.warning({"buy": {"slots": 1, "orders": 1, "not_bought": {3: "x"}}}) is None  # 하나라도 샀다
+    assert solo.warning({"buy": {"skipped": "그 달 첫 거래일 장이 아님"}}) is None  # 자리 없음 — 정상
+    assert solo.warning({"buy": {"slots": 3, "orders": 0}}) is None  # 살 후보가 없었다 — 정상
+    assert solo.warning({}) is None
+
+
+def test_못_산_날은_리포트와_상황실에_같은_글로(monkeypatch: pytest.MonkeyPatch) -> None:
+    c = _새(monkeypatch, ("Z4",), ("2026-10-14",))
+    _국면(monkeypatch, "bull")
+    monkeypatch.setattr(job, "frozen_ids", lambda _c, ids, _m: set(ids) & {3})  # 유일한 후보 3 이 경계
+    줄, 기록 = _하루(c, monkeypatch, "2026-10-14")
+    assert "⚠️ 가상 오닐 사지 못함 — 기업행위 경계(분할·병합 의심) — 다음 순위로" in 줄
+    할일 = desk.checks(halted=False, paper=기록, broker=None, recon_bad=[], warnings=0)
+    assert {"level": "normal", "text": "가상 오닐 사지 못함 — 기업행위 경계(분할·병합 의심) — 다음 순위로"} in 할일

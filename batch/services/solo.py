@@ -130,3 +130,22 @@ def canslim_exit(entry_price: float, close: float) -> str | None:
     if r >= CANSLIM_TARGET - 1e-12:
         return "target"
     return None
+
+
+def warning(rec: dict[str, Any]) -> tuple[str, str] | None:
+    """Z3·Z4 계좌 실행 기록(`step_log.paper.accounts.Z3|Z4`) → (수준, 글) 또는 None — **살 자리가 있었는데 하나도
+    못 산 날**.
+
+    리포트의 ⚠️ 줄(`jobs/paper`)과 운용 요약 '확인할 일'(`desk.checks`)이 같은 술어를 쓴다(25.2170 의 ETF 와 같은 꼴,
+    25.2323).
+    후보가 모두 자료 문제·현금 부족으로 넘겨졌거나 위험 점검에 막힌 날만 — 자리가 없거나(보유 상한·달 첫 장 아님·국면)
+    살 후보가 아예 없는 날(이미 다 든 날)은 정상이라 None. Z3 은 한 달에 한 번이라 그달 매수를 통째로 잃는 날이다"""
+    b = rec.get("buy") or {}
+    if not isinstance(b, dict) or not b.get("slots") or b.get("orders"):
+        return None
+    못삼 = {k: v for k, v in (b.get("not_bought") or {}).items()}
+    막힘 = int(rec.get("risk_blocked") or 0)
+    if not 못삼 and not 막힘:
+        return None
+    까닭 = next(iter(못삼.values()), None) if 못삼 else f"위험 점검에 막힘 {막힘}건"
+    return "normal", f"사지 못함 — {까닭}" + (f" 외 {len(못삼) - 1}종목" if len(못삼) > 1 else "")

@@ -2972,6 +2972,9 @@ def run_step(
         if (경고 := et_warning(a기록)) is not None:
             # ETF 전술의 멈춤·못 산 날 — 상황실 '확인할 일' 과 같은 술어(25.2170)
             줄.append(f"⚠️ 가상 {계이름} {경고[1]}")
+        if 단독 and (경고 := solo.warning(a기록)) is not None:
+            # 거장 단독 Z3·Z4 가 자리가 있는데 하나도 못 산 날 — 상황실과 같은 술어(25.2323)
+            줄.append(f"⚠️ 가상 {계이름} {경고[1]}")
     for acct in accounts:
         try:
             _계좌_단계(acct)

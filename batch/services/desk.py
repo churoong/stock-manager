@@ -19,6 +19,7 @@ from batch.services.etf_tactical import warning as _etf_warning
 from batch.services.paper import SEPARATE_IDS as _SEPARATE_IDS
 from batch.services.paper import account_name as _account_name
 from batch.services.paper import step_error_orders as _step_error_orders
+from batch.services.solo import warning as _solo_warning
 
 #: 계좌 종류 — 화면 글. 모르는 계좌는 이름만 (docs/paper.md 1장, docs/company.md)
 KIND = {"A": "회사", "C": "회사", "D": "회사", "E": "회사", "B": "기준(점수 상위)", "G": "추세 익절",
@@ -1372,6 +1373,9 @@ def checks(
             매수끝남.setdefault(까닭, []).append(nm)
         if (경고 := _etf_warning(a)) is not None:
             # ETF 전술 X·Y 의 멈춤·못 산 날 — 리포트 끝 ⚠️ 줄과 같은 술어(25.2170, 25.2168 교차검증 [권고])
+            out.append({"level": 경고[0], "text": f"가상 {nm} {경고[1]}"})
+        if aid in pp.SOLO_IDS and (경고 := _solo_warning(a)) is not None:
+            # 거장 단독 Z3·Z4 가 자리가 있는데 하나도 못 산 날 — 리포트 끝 ⚠️ 줄과 같은 술어(25.2323)
             out.append({"level": 경고[0], "text": f"가상 {nm} {경고[1]}"})
         if a.get("substitute_overlap_hit"):
             # 무작위 대조의 옛 자리 신호가 다시 나와 뽑기가 운영·문서 규칙과 갈렸을 수 있는 날(25.1929 찾은 것,
