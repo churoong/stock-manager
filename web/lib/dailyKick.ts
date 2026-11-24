@@ -54,7 +54,7 @@ LIMIT 1`;
  * 오류) 다음 매시 호출이 같은 [무응답] 을 다시 만들고 또 깨웠다. 겹친 두 호출도 이 조건부 UPDATE 로 하나만 잡는다
  */
 export const KICK_CLAIM_SQL = `UPDATE health_alerts SET data = json_set(data, '$.kick', 'claim')
-WHERE job = ? AND market = ? AND local_date = ? AND kind = 'missing' AND json_extract(data, '$.kick') IS NULL`;
+WHERE job = ? AND market = ? AND local_date = ? AND kind = 'missing' AND json_extract(data, '$.kick') IS NULL AND sent_at IS NULL`;
 export const KICK_RESULT_SQL = `UPDATE health_alerts SET message = message || ?, data = json_set(data, '$.kick', ?)
 WHERE job = ? AND market = ? AND local_date = ? AND kind = 'missing' AND sent_at IS NULL`;
 /** 개장 시각에서 거슬러 그 시장 자정까지(국내 09:00·미국 09:30 개장). 늦게 여는 날(수능일 10:00)은 자정이 그만큼 늦게 잡힌다 —
@@ -95,8 +95,15 @@ export async function kickMissingDaily(
     job: DispatchJob,
   ) => Promise<{ dispatched: boolean; reason?: string }> = (job) =>
     dispatchJob(job, 상한fetch(DAILY_KICK_TIMEOUT_MS)),
-): Promise<Array<{ job: string; market: string; kick: DailyKick }>> {
-  const out: Array<{ job: string; market: string; kick: DailyKick }> = [];
+): Promise<
+  Array<{ job: string; market: string; kick: DailyKick; noted: boolean }>
+> {
+  const out: Array<{
+    job: string;
+    market: string;
+    kick: DailyKick;
+    noted: boolean;
+  }> = [];
   for (const d of due) {
     const job = DAILY_KICK_JOBS[d.job];
     const 열림 = d.data.session_open_utc;
@@ -122,10 +129,22 @@ export async function kickMissingDaily(
     } catch (e: unknown) {
       결과 = `failed:${e instanceof Error ? e.message.slice(0, 80) : "?"}`;
     }
-    await execute(KICK_RESULT_SQL, [kickNote(결과), 결과, ...열쇠]).catch(
-      () => undefined,
-    );
-    out.push({ job: d.job, market: d.market, kick: 결과 });
+    // 결과를 그 행에 적는다 — 겹친 호출이 그 사이 그 행을 발송용으로 잡았으면(sent_at) 0행이고 [무응답] 글에 결과 줄이 빠진다.
+    // 그때는 `noted: false` 로 heartbeat detail 에 남는다(25.2312, 25.2311 교차검증 [권고] — 예전엔 조용히 넘어갔다)
+    // 결과 쓰기가 실패해도(쓰기 한도·일시 오류) 던지지 않는다 — 삼키는 것이 아니라 `noted: false` 로 heartbeat 에 남는다
+    let 적음 = 0;
+    try {
+      적음 = (await execute(KICK_RESULT_SQL, [kickNote(결과), 결과, ...열쇠]))
+        .affectedRows;
+    } catch {
+      적음 = 0;
+    }
+    out.push({
+      job: d.job,
+      market: d.market,
+      kick: 결과,
+      noted: 적음 > 0,
+    });
   }
   return out;
 }

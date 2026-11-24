@@ -123,7 +123,9 @@ describe("아예 안 깨워진 일일 배치 깨우기", () => {
     const { 부름, f } = 부르개();
     const 결과 = await kickMissingDaily(알림들, f);
     expect(부름).toEqual(["daily-kr"]);
-    expect(결과).toEqual([{ job: "daily_kr", market: "KR", kick: "kicked" }]);
+    expect(결과).toEqual([
+      { job: "daily_kr", market: "KR", kick: "kicked", noted: true },
+    ]);
     const r = 행("daily_kr")!;
     expect(r.message).toBe("[무응답] daily_kr" + kickNote("kicked"));
     expect(JSON.parse(r.data)).toMatchObject({
@@ -182,6 +184,8 @@ describe("아예 안 깨워진 일일 배치 깨우기", () => {
       ],
       ["daily_kr", "2026-11-22T23:27:05+00:00", "failed", null],
       ["daily_kr", "2026-11-22T23:27:05+00:00", "running", {}],
+      // 건너뜀이면서 기록이 깨진 줄 — `json_valid` 막음이 없으면 질의가 'malformed JSON' 으로 깨진다(25.2312)
+      ["daily_kr", "2026-11-22T23:27:06+00:00", "skipped", null],
     ];
     for (const 한줄 of 경우) {
       const { 행 } = db([한줄], [알림("daily_kr")]);
@@ -205,6 +209,41 @@ describe("아예 안 깨워진 일일 배치 깨우기", () => {
     await kickMissingDaily([알림("daily_kr")], 둘.f);
     await kickMissingDaily([알림("daily_kr")], 둘.f); // 겹친 호출 — 이미 잡혔다
     expect(둘.부름).toEqual(["daily-kr"]);
+  });
+
+  it("이미 발송된 행은 잡지 않고, 그 사이 발송용으로 잡힌 행은 결과를 못 적은 것으로 남긴다 — 25.2312", async () => {
+    const { 행 } = db([], [알림("daily_kr")]);
+    // ① 이미 보낸 행 — 잡지 않는다(깨우지도 글을 고치지도 않는다)
+    execute.mockImplementationOnce(async () => ({
+      columns: [],
+      rows: [],
+      affectedRows: 0,
+    })); // 잡기 0행 흉내
+    const { 부름, f } = 부르개();
+    expect(await kickMissingDaily([알림("daily_kr")], f)).toEqual([]);
+    expect(부름).toEqual([]);
+    // ② 깨우는 동안 겹친 호출이 그 행을 발송용으로 잡았다 — 결과 줄은 못 붙고 noted:false
+    const 결과 = await kickMissingDaily([알림("daily_kr")], async () => {
+      await execute(
+        "UPDATE health_alerts SET sent_at = 'claim:x' WHERE job = 'daily_kr'",
+      );
+      return { dispatched: true };
+    });
+    expect(결과).toEqual([
+      { job: "daily_kr", market: "KR", kick: "kicked", noted: false },
+    ]);
+    expect(행("daily_kr")!.message).toBe("[무응답] daily_kr");
+  });
+
+  it("발송된 행은 실제 SQL 로도 잡히지 않는다", async () => {
+    const { 행 } = db([], [알림("daily_kr")]);
+    await execute(
+      "UPDATE health_alerts SET sent_at = '2026-11-23T00:20:00Z' WHERE job = 'daily_kr'",
+    );
+    const { 부름, f } = 부르개();
+    expect(await kickMissingDaily([알림("daily_kr")], f)).toEqual([]);
+    expect(부름).toEqual([]);
+    expect(행("daily_kr")!.message).toBe("[무응답] daily_kr");
   });
 
   it("깨우기 실패·DB 실패는 던지지 않고 글로", async () => {
