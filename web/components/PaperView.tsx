@@ -113,12 +113,15 @@ function tone(v: number | null | undefined): string {
 /** 계좌 선 색 — 계좌 id 로 고정, 무작위 대조(R)는 회색 계열로 눌러 둔다. 차례로 돌려 쓰면 계좌가 아홉이라 R1 이 A 색,
  *  G·H 가 R 의 회색을 가져갔다(25.1604, 웹 화면 감사 [권고] 5) */
 export const ACCOUNT_COLOR: Record<string, string> = {
-  A: "#dc2626", B: "#7c3aed", C: "#ea580c", D: "#16a34a", E: "#2563eb", G: "#ca8a04", H: "#db2777", R1: "#9ca3af", R2: "#cbd5e1",
-  S: "#0d9488", T: "#4f46e5", // 스윙·단타(25.1892) — 예비 색 차례에 맡기면 계좌가 늘 때 색이 바뀐다
-  X: "#0891b2", Y: "#9f1239", // ETF 전술 국내·미국(25.2168)
+  A: "#dc2626", B: "#7c3aed", C: "#ea580c", D: "#16a34a", E: "#2563eb", G: "#ca8a04", H: "#db2777", R1: "#9ca3af", R2: "#a8b3c2",
+  S: "#0d9488", T: "#6366f1", // 스윙·단타(25.1892) — 예비 색 차례에 맡기면 계좌가 늘 때 색이 바뀐다
+  X: "#0891b2", Y: "#f43f5e", // ETF 전술 국내·미국(25.2168)
+  // 25.2272: 다크 카드 바탕(slate-900)에서 대비 3 에 못 미치던 단타(2.8)·미국ETF(2.2), 밝은 바탕에서 1.5 이던 무작위2 를 바꿈
   ZL: "#b45309", ZM: "#e879f9", // 거장 계좌 린치·거장위원회(25.2267~2269) — 값이 겹치지 않게(15선이라 색상 계열은 가까울 수 있다).
   // ZM 은 밝은·다크 바탕 둘 다에서 보이는 중간 명도(거의 검정 #111827 은 다크 바탕 #020617 에 묻혔다, 25.2269)
 };
+/** 지수 비교선 색 — 계좌 고정 색과 값이 겹치지 않게(S&P500 이 국내ETF 계좌와 같은 #0891b2 였다, 25.2272) */
+export const INDEX_COLOR = { KOSPI: "#64748b", SP500: "#38bdf8" } as const;
 // 예비 색 — 고정 색과 색상이 떨어진 것(라임·자홍·갈색). S·T 가 예전 앞 두 색을 가져가 겹치지 않게 바꿈(25.1892·25.1894)
 export const SPARE_COLORS = ["#65a30d", "#a21caf", "#78350f"];
 
@@ -133,8 +136,8 @@ function chartSeries(history: HistoryRow[], ids: string[]): Series[] {
     });
   return [
     ...ids.map((aid, i) => ({ label: accountName(aid), color: ACCOUNT_COLOR[aid] ?? SPARE_COLORS[i % SPARE_COLORS.length], points: ratio(by(aid), (h) => h.equity_krw) })),
-    { label: "KOSPI", color: "#64748b", points: ratio(첫, (h) => h.kospi_krw) },
-    { label: "S&P500", color: "#0891b2", points: ratio(첫, (h) => h.sp500_krw) },
+    { label: "KOSPI", color: INDEX_COLOR.KOSPI, points: ratio(첫, (h) => h.kospi_krw) },
+    { label: "S&P500", color: INDEX_COLOR.SP500, points: ratio(첫, (h) => h.sp500_krw) },
   ];
 }
 

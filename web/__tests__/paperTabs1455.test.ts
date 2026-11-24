@@ -2,7 +2,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { ACCOUNT_COLOR, AccountTabs, SPARE_COLORS, type Data, type SubTab } from "@/components/PaperView";
+import { ACCOUNT_COLOR, AccountTabs, INDEX_COLOR, SPARE_COLORS, type Data, type SubTab } from "@/components/PaperView";
 import { ACCOUNT_NAMES } from "@/lib/accountNames";
 import { accountView } from "@/lib/paper";
 
@@ -123,6 +123,17 @@ describe("거장 계좌 선 색 (25.2269)", () => {
     for (const id of ["ZM", "ZL"]) {
       expect(대비(ACCOUNT_COLOR[id], "#020617"), id).toBeGreaterThanOrEqual(3);
       expect(대비(ACCOUNT_COLOR[id], "#ffffff"), id).toBeGreaterThanOrEqual(2);
+    }
+  });
+
+  it("모든 계좌 선과 지수 선이 서로 다른 색이고 두 바탕에서 보인다 (25.2272)", () => {
+    const 선 = { ...ACCOUNT_COLOR, ...INDEX_COLOR };
+    expect(new Set(Object.values(선)).size).toBe(Object.keys(선).length);
+    // 그래프가 놓인 카드 바탕: 밝은 모드 흰색, 다크 모드 slate-900(#0f172a) — 페이지 바탕 slate-950 도 함께
+    for (const [id, 색] of Object.entries(선)) {
+      expect(대비(색, "#0f172a"), id).toBeGreaterThanOrEqual(3);
+      expect(대비(색, "#020617"), id).toBeGreaterThanOrEqual(3);
+      expect(대비(색, "#ffffff"), id).toBeGreaterThanOrEqual(2);
     }
   });
 });
