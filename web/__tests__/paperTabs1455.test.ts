@@ -135,12 +135,15 @@ describe("거장 계좌 선 색 (25.2269)", () => {
       return [116 * y - 16, 500 * (x - y), 200 * (y - z)];
     };
     const 색차 = (a: string, b: string) => Math.hypot(...lab(a).map((v, i) => v - lab(b)[i]));
-    const 선 = Object.entries({ ...ACCOUNT_COLOR, ...INDEX_COLOR });
+    // 예비 색(이름 사본에 없는 계좌가 생길 때 쓰는 색)도 같은 잣대로(25.2275)
+    const 예비 = Object.fromEntries(SPARE_COLORS.map((c, i) => [`예비${i + 1}`, c]));
+    const 선 = Object.entries({ ...ACCOUNT_COLOR, ...INDEX_COLOR, ...예비 });
     for (const [i, [a, ca]] of 선.entries()) for (const [b, cb] of 선.slice(i + 1)) expect(색차(ca, cb), `${a}·${b}`).toBeGreaterThanOrEqual(15);
   });
 
   it("모든 계좌 선과 지수 선이 서로 다른 색이고 두 바탕에서 보인다 (25.2272)", () => {
-    const 선 = { ...ACCOUNT_COLOR, ...INDEX_COLOR };
+    const 선: Record<string, string> = { ...ACCOUNT_COLOR, ...INDEX_COLOR };
+    SPARE_COLORS.forEach((c, i) => (선[`예비${i + 1}`] = c));
     expect(new Set(Object.values(선)).size).toBe(Object.keys(선).length);
     // 그래프가 놓인 카드 바탕: 밝은 모드 흰색, 다크 모드 slate-900(#0f172a) — 페이지 바탕 slate-950 도 함께
     for (const [id, 색] of Object.entries(선)) {

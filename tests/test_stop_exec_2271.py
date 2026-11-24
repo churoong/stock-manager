@@ -231,20 +231,31 @@ def test_읽기_질의가_실제_스키마에서_돌고_달력_일정_칸을_붙
     _장부(mem, "A", 2, d, n, reason="손절,기간초과")
     _장부(mem, "S", 1, d, n, reason="스윙손절")  # 계좌 집합 밖
     _장부(mem, "C", 2, d, n, 체결=False)
-    # B 의 종목 1 은 결정일 앞에 단기(short)로 산 보유 — 보유 기간은 마지막 매수 체결에서 읽는다(25.2274)
-    cur = c.execute("INSERT INTO paper_orders (account_id, market, stock_id, side, order_type, quantity, currency, decided_on,"
-                    " fill_session, tranche, reason, rule_version, status, created_at) VALUES ('B', 'KR', 1, 'buy', 'market',"
-                    " 10, 'KRW', '2026-11-25', '2026-11-26', 1, '2부 배분', 1, 'filled', 't')")  # fmt: skip
-    c.execute("INSERT INTO paper_fills (order_id, account_id, stock_id, side, fill_date, price, quantity, currency, fx_rate,"
-              " fee, tax, slippage, cash_krw, horizon, created_at) VALUES (?, 'B', 1, 'buy', '2026-11-26', 100, 10, 'KRW',"
-              " 1, 0, 0, 0, -1000, 'short', 't')", [cur.lastrowid])  # fmt: skip
+    # B 의 종목 1: 앞선 보유(장기로 사서 11-17 에 다 팖) → 11-26 단기로 다시 엶 → 11-30 중기 신호로 더 삼 → (결정 뒤) 12-03 재매수.
+    # 운영 손절이 재는 보유 기간은 **지금 보유를 연 첫 매수**(short) — `pp.positions` 와 같은 뜻(25.2275)
+    for 쪽, 날, 기간 in (("buy", "2026-11-10", "long"), ("sell", "2026-11-17", None), ("buy", "2026-11-26", "short"),
+                       ("buy", "2026-11-30", "mid"), ("buy", "2026-12-03", "long")):  # fmt: skip
+        cur = c.execute("INSERT INTO paper_orders (account_id, market, stock_id, side, order_type, quantity, currency,"
+                        " decided_on, fill_session, tranche, reason, rule_version, status, created_at) VALUES ('B', 'KR', 1,"
+                        " ?, 'market', 10, 'KRW', ?, ?, 9, 'x', 1, 'filled', 't')", [쪽, f"p{날}", 날])  # fmt: skip
+        c.execute("INSERT INTO paper_fills (order_id, account_id, stock_id, side, fill_date, price, quantity, currency,"
+                  " fx_rate, fee, tax, slippage, cash_krw, horizon, created_at) VALUES (?, 'B', 1, ?, ?, 100, 10, 'KRW',"
+                  " 1, 0, 0, 0, 0, ?, 't')", [cur.lastrowid, 쪽, 날, 기간])  # fmt: skip
     for sid in (1, 2):
         for day, o, cl in ((n, 95, 97), ("2026-12-03", 96, 98)):
             c.execute("INSERT INTO prices (stock_id, date, open, high, low, close, volume, change_pct, currency, source,"
                       " fetched_at) VALUES (?, ?, ?, ?, ?, ?, 1, -3.0, 'KRW', 't', 't')", [sid, day, o, cl, o, cl])  # fmt: skip
     # 종목 2 는 12-03 이 배당 기준일 → 배당락일 12-02 = 체결일 (D+1~D+5 창 안이기도 하다)
+    # C 의 종목 2 는 결정일 **뒤**에만 매수 체결이 있다 — 보유 기간은 모름(결정일 뒤 체결을 읽지 않는다)
+    cur = c.execute("INSERT INTO paper_orders (account_id, market, stock_id, side, order_type, quantity, currency, decided_on,"
+                    " fill_session, tranche, reason, rule_version, status, created_at) VALUES ('C', 'KR', 2, 'buy', 'market',"
+                    " 10, 'KRW', '2026-12-02', '2026-12-03', 9, 'x', 1, 'filled', 't')")  # fmt: skip
+    c.execute("INSERT INTO paper_fills (order_id, account_id, stock_id, side, fill_date, price, quantity, currency, fx_rate,"
+              " fee, tax, slippage, cash_krw, horizon, created_at) VALUES (?, 'C', 2, 'buy', '2026-12-03', 100, 10, 'KRW',"
+              " 1, 0, 0, 0, 0, 'short', 't')", [cur.lastrowid])  # fmt: skip
+    # 종목 1 은 일정 행이 있지만 락일(12-18)이 체결일도 D+1~D+5 창도 아니다 — 거짓 경우
     c.execute("INSERT INTO kr_corp_events (code, kind, record_date, source, fetched_at)"
-              " VALUES ('000002', 'dividend', '2026-12-03', 't', 't')")  # fmt: skip
+              " VALUES ('000002', 'dividend', '2026-12-03', 't', 't'), ('000001', 'dividend', '2026-12-21', 't', 't')")  # fmt: skip
     events = job.load(mem)
     assert sorted((e["account_id"], e["stock_id"]) for e in events) == [("A", 2), ("B", 1), ("C", 2)]
     b = next(e for e in events if e["account_id"] == "B")
@@ -260,8 +271,12 @@ def test_읽기_질의가_실제_스키마에서_돌고_달력_일정_칸을_붙
     r = sx.judge_cluster(events, "2026-12-10")
     assert r["counts"]["cluster_days"] == 1 and r["counts"]["by"] == {"event": 1, "unfilled": 1}
     assert job.facts(events)["max_accounts_per_day"] == 2
-    # 보유 기간을 못 읽은 사건(C — 매수 체결 없음)은 중기로 셈하고 그 수를 낸다
+    # 보유 기간을 못 읽은 사건(C — 매수 체결 없음)은 운영처럼 장기(−25%)로 셈하고 그 수를 낸다
     assert job.facts(events)["horizon_unknown"] == 1
+    모름 = job.facts([{**b, "horizon": None, "ret_60d": -20.0}])  # −20% 는 장기 손절폭 위 — 중기(−15%)로 재면 1 이 된다
+    assert 모름["single"]["second_stop_share"] == 0.0 and 모름["horizon_unknown"] == 1
+    # 판정과 같은 표본 — 기한 뒤 결정일은 사실 칸에도 세지 않는다
+    assert job.facts([{**b, "decided_on": "2028-12-05", "ret_60d": -20.0}])["single"]["n"] == 0
     짧음 = job.facts([{**b, "ret_60d": -10.0}])  # 단기 손절폭 −7% 아래 — 중기(−15%)로 재면 0 이 된다
     assert 짧음["single"]["second_stop_share"] == 1.0
     assert job.kospi_on(mem, [n]) is None  # 지수 행이 없으면 모름
@@ -316,3 +331,35 @@ def test_시장_반등_몫도_거부권에_걸리면_접는다() -> None:
     # 지수 초과를 못 낸 날(지수 없음)은 '시장 반등 몫' 이 아니라 접음
     없음 = [{**e, "bench_5d": None} for e in _군집_표본(12, 8.0, 2.0)]
     assert sx.judge_cluster(없음, "2028-06-01")["verdict"] == "fold"
+
+
+# ── 25.2275 (25.2274 교차검증 [권고]) ────────────────────────────────────────────
+
+
+def test_묶음_하한이_양이어도_뒤_반이_양이_아니면_접는다() -> None:
+    앞 = [_e(묶음_첫날 + 28 * k, stock_id=s) for k in range(15) for s in (1, 2, 3, 4)]
+    뒤 = [_e(묶음_첫날 + 28 * 15 + i, stock_id=s, day_close=94.9, bar_close=94.9, bar_change_pct=-5.1)
+          for i in range(15) for s in (1, 2, 3, 4)]  # fmt: skip
+    r = sx.judge_pair([*앞, *뒤], "2028-04-01")
+    assert r["status"] == "judge" and r["bound"]["lower"] > 0 and r["second_half"] < 0 < r["first_half"]
+    assert r["verdict"] == "fold"
+
+
+def test_기한_뒤에는_언제_돌려도_같은_답이다() -> None:
+    """닫힘을 기한 다음 날 기준으로 굳힌다 — 기한 앞 사건의 묶음이 뒤늦게 닫혀 '판정 불가' 가 '판정' 으로 뒤집히지 않게"""
+    기한 = date.fromisoformat(sx.CLUSTER_DEADLINE)
+    # 기한 직전 묶음(기한 + 14일 안에 안 닫힌다)에 여섯째 두 무리 묶음을 둔다 — 그 앞 다섯은 닫혀 있다
+    끝묶음_첫날 = (기한.toordinal() // pp.EVIDENCE_BLOCK_DAYS) * pp.EVIDENCE_BLOCK_DAYS
+    표본 = []
+    for k in range(6):
+        d0 = date.fromordinal(끝묶음_첫날 - 28 * k)
+        i = (d0 - D0).days
+        표본 += [_e(i, stock_id=1, ret_5d=8.0), _e(i, stock_id=2, ret_5d=8.0), _e(i + 1, stock_id=3, ret_5d=2.0)]
+    바로 = sx.judge_cluster(표본, (기한 + timedelta(days=1)).isoformat())
+    늦게 = sx.judge_cluster(표본, (기한 + timedelta(days=60)).isoformat())
+    assert 바로["status"] == 늦게["status"] == "expired" and 바로["counts"]["both_blocks"] == 늦게["counts"]["both_blocks"] == 5
+
+
+def test_미체결은_결정일로_기한을_잰다() -> None:
+    r = sx.judge_pair([_e(decided_on="2028-06-01", ref_date="2028-06-01", fill_date=None)], "2028-07-01")
+    assert r["counts"]["by"] == {}

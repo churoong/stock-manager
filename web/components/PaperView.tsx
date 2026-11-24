@@ -124,8 +124,8 @@ export const ACCOUNT_COLOR: Record<string, string> = {
 };
 /** 지수 비교선 색 — 계좌 고정 색과 값이 겹치지 않게(S&P500 이 국내ETF 계좌와 같은 #0891b2 였다, 25.2272) */
 export const INDEX_COLOR = { KOSPI: "#64748b", SP500: "#38bdf8" } as const;
-// 예비 색 — 고정 색과 색상이 떨어진 것(라임·자홍·갈색). S·T 가 예전 앞 두 색을 가져가 겹치지 않게 바꿈(25.1892·25.1894)
-export const SPARE_COLORS = ["#65a30d", "#a21caf", "#78350f"];
+// 예비 색 — 고정 색과 색차가 벌어지고 두 바탕에서 보이는 것(연보라·분홍·하늘, 25.2275 — 예전 라임·자홍·갈색은 다크 바탕 대비 3 에 못 미쳤다)
+export const SPARE_COLORS = ["#a78bfa", "#f472b6", "#60a5fa"];
 
 /** 같은 돈 흐름이라 평가 ÷ 입금으로 견준다 — 모든 계좌·KOSPI·S&P500 이 같은 날 같은 금액을 받았다 (docs/paper.md 4장) */
 function chartSeries(history: HistoryRow[], ids: string[]): Series[] {

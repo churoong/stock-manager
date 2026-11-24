@@ -23,10 +23,14 @@ EVENTS_SQL = (
     "SELECT d.account_id, d.market, d.stock_id, d.decided_on, d.reason, d.ref_close, d.ref_date, d.ret_5d, d.ret_60d,"
     " d.bench_5d, d.outcome_note, o.order_type, o.status, o.deferrals, o.fill_basis, o.close_note,"
     " f.fill_date, f.price, f.day_close, s.ticker,"
-    # 보유 기간 — 매도 체결의 horizon 은 늘 비어 있다(매도 주문이 싣지 않는다).
-    # 결정일 앞 마지막 매수 체결에서 읽는다(25.2274)
+    # 보유 기간 — 매도 체결의 horizon 은 늘 비어 있다(매도 주문이 싣지 않는다). 운영 손절 판정이 쓰는 것은 **그 보유를
+    # 연 첫 매수 체결**의 기간이다(`pp.positions` — 추가 매수는 덮지 않는다). 이 계좌 집합의 매도는 전량이라 보유의
+    # 경계는 결정일 앞 마지막 매도 체결이다 — 그 뒤 첫 매수 체결에서 읽는다(25.2275, 25.2274 교차검증 [권고])
     " (SELECT b.horizon FROM paper_fills b WHERE b.account_id = d.account_id AND b.stock_id = d.stock_id"
-    "   AND b.side = 'buy' AND b.fill_date <= d.decided_on ORDER BY b.fill_date DESC, b.id DESC LIMIT 1) AS horizon"
+    "   AND b.side = 'buy' AND b.fill_date <= d.decided_on"
+    "   AND b.fill_date > COALESCE((SELECT MAX(x.fill_date) FROM paper_fills x WHERE x.account_id = d.account_id"
+    "     AND x.stock_id = d.stock_id AND x.side = 'sell' AND x.fill_date <= d.decided_on), '')"
+    "   ORDER BY b.fill_date, b.id LIMIT 1) AS horizon"
     " FROM paper_decisions d JOIN stocks s ON s.id = d.stock_id"
     " LEFT JOIN paper_orders o ON o.account_id = d.account_id AND o.market = d.market AND o.decided_on = d.decided_on"
     "  AND o.stock_id = d.stock_id AND o.side = 'sell'"
@@ -88,7 +92,10 @@ def load(client: Any) -> list[dict[str, Any]]:
 
 def facts(events: list[dict[str, Any]]) -> dict[str, Any]:
     """`stop_cluster_defer` 꼬리 (나) — 사실로만: 군집·홑날 따로 ret_60d 가 그 보유 기간 손절폭 이하인 비율·최저값,
-    날마다 사건이 선 계좌 수의 최댓값. 판정에 쓰지 않는다. 손절폭은 기본값(`signals.DEFAULT_TARGETS`)"""
+    날마다 사건이 선 계좌 수의 최댓값. 판정에 쓰지 않는다. 손절폭은 기본값(`signals.rules_for` — 설정 이력은
+    안 따라간다).
+    판정과 같은 표본 — 기한 뒤 결정일은 세지 않는다"""
+    events = [e for e in events if str(e["decided_on"])[:10] <= sx.CLUSTER_DEADLINE]
     군집 = sx.cluster_days(events)
     out: dict[str, Any] = {}
     표본 = [e for e in events if e.get("market") == "KR" and e.get("reason") == sx.STOP
@@ -96,9 +103,9 @@ def facts(events: list[dict[str, Any]]) -> dict[str, Any]:
     기본 = sg.DEFAULT_TARGETS
 
     def 손절폭(e: dict[str, Any]) -> float:
-        return float(기본.get(str(e.get("horizon") or "mid"), 기본["mid"])["stop_pct"])
+        return float(sg.rules_for(e.get("horizon"))["stop_pct"])
 
-    # 보유 기간을 못 읽은 사건은 중기(mid)로 셈한다 — 그 수를 함께 낸다
+    # 보유 기간을 못 읽은 사건은 운영처럼 장기(long)로 셈한다(`signals.rules_for`) — 그 수를 함께 낸다
     out["horizon_unknown"] = sum(e.get("horizon") not in 기본 for e in 표본)
 
     for 이름, 군집인가 in (("cluster", True), ("single", False)):

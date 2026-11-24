@@ -144,7 +144,7 @@ def judge_pair(events: list[dict[str, Any]], today: str, judged: dict[str, str] 
     judged = JUDGED if judged is None else judged
     # 기한 뒤 체결은 세지 않는다 — "기한까지 문 미달이면 판정 불가" 가 기한 뒤 사건으로 뒤집히지 않게(25.2274)
     국내 = [e for e in events if e.get("market") == "KR" and e.get("account_id") in ACCOUNTS
-            and str(e.get("fill_date") or "")[:10] <= PAIR_DEADLINE]  # fmt: skip
+            and str(e.get("fill_date") or e["decided_on"])[:10] <= PAIR_DEADLINE]  # fmt: skip  # 미체결은 결정일로
     갈래: dict[str, int] = {}
     사건행: list[Pair] = []
     for e in 국내:
@@ -242,7 +242,9 @@ def judge_cluster(events: list[dict[str, Any]], today: str, judged: dict[str, st
         k, v = classify_cluster(e)
         갈래[k] = 갈래.get(k, 0) + 1
         분류.append((e, k, v))
-    오늘 = date.fromisoformat(today[:10])
+    # 기한 뒤에는 닫힘을 기한 다음 날 기준으로 굳힌다 — "기한 뒤 첫 실행" 을 언제 돌려도 같은 답(판정 불가가 묶음이
+    # 뒤늦게 닫혀 판정으로 뒤집히지 않게, 25.2275)
+    오늘 = min(date.fromisoformat(today[:10]), date.fromisoformat(CLUSTER_DEADLINE) + timedelta(days=1))
     덜참 = {_묶음(str(e["decided_on"])) for e, k, _v in 분류 if k == "wait"}
 
     def 닫힘(b: int) -> bool:
@@ -329,7 +331,7 @@ def lines(result: dict[str, Any]) -> list[str]:
     수 = " · ".join(f"{k} {v}" for k, v in c.items() if k != "by")
     out = [머리, f"  수: {수}", "  갈래: " + ", ".join(f"{k} {v}" for k, v in c["by"].items())]
     if result["status"] == "expired":
-        return [*out, "  판정 불가(기한) — 이 날짜를 stop_exec.JUDGED 에 적어 커밋한다(닫음 — 다시 세지 않는다)"]
+        return [*out, "  판정 불가(기한) — 이 날짜를 stop_exec.JUDGED 에 적어 커밋한다(닫음 — 다시 판정하지 않는다)"]
     if result["status"] != "judge":
         return out
     return [*out, "  판정(한 번 — 이 날짜를 stop_exec.JUDGED 에 적어 커밋): " + result["verdict"],
