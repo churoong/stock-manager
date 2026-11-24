@@ -47,6 +47,51 @@ def test_작업과_시장마다_따로이고_차례에_기대지_않는다() -> 
     assert [x["closed"] is None for x in 뒤집힘] == [False, False, True, True]
 
 
+def test_같은_작업_이름이어도_시장이_다르면_따로다() -> None:
+    """25.2290 — 처음 시험은 작업 이름이 시장마다 달라 이름만으로 갈렸다. 운영에는 같은 이름에 시장만 다른 작업이
+    많다(verdicts·etf·analyze_extra …) — 미국 성공이 국내 사고를 닫으면 복구가 거짓으로 빨라진다"""
+    runs = [_r("verdicts", "failed", "17T23:30", "KR", "E: 1"), _r("verdicts", "success", "18T13:30", "US"),
+            _r("verdicts", "failed", "18T14:00", "US", "E: 2")]  # fmt: skip
+    found = il.incidents(runs)
+    assert [(x["market"], x["closed"], x["failures"]) for x in found] == [("KR", None, 1), ("US", None, 1)]
+
+
+def test_죽은_실행을_정리한_줄은_사고를_연다() -> None:
+    """25.2290 — 강제 종료·한도로 끝맺지 못해 정리된 줄(`skipped` + 정리 머리)은 관문의 무사고 칸이 사고로 센다
+    (25.2253). 대장도 같은 잣대 — 예정된 건너뜀·한도 건너뜀은 여전히 열지 않는다"""
+    from batch.core import db
+
+    죽음 = f"{db.REAPED_PREFIX}. 6시간 뒤 정리했다"
+    runs = [_r("daily_kr", "skipped", "17T23:30", err=죽음), _r("daily_kr", "skipped", "18T00:00", err="휴장일"),
+            _r("daily_kr", "success", "18T23:30")]  # fmt: skip
+    found = il.incidents(runs)
+    assert len(found) == 1 and found[0]["failures"] == 1 and found[0]["minutes"] == 1440
+    assert found[0]["cause"].startswith(db.REAPED_PREFIX)
+    assert il.incidents([_r("daily_kr", "skipped", "17T23:30", err="한도"), _r("daily_kr", "skipped", "18T23:30")]) == []
+
+
+def test_복구_시간을_못_잰_사고도_그_밖_수에_든다() -> None:
+    runs = []
+    for k, job in enumerate(("a", "b", "c", "d", "e")):
+        if k < 3:  # 시간대가 섞여 복구 시간을 못 잰다 — 목록에는 없지만 수에는 든다
+            runs += [ws.Run(job, None, "failed", "2026-11-17T23:30:00", "E: 1", ()),
+                     ws.Run(job, None, "success", "2026-11-18T00:30:00+00:00", None, ())]  # fmt: skip
+        else:
+            runs += [_r(job, "failed", "17T23:30", None, "E: 1"), _r(job, "success", "18T00:30", None)]
+    줄 = il.lines(il.incidents(runs))
+    assert 줄[0].startswith("운영 사고(실패 묶음 → 복구): 5건") and len(줄) == 4 and 줄[-1] == "  … 그 밖 3건"
+    하나 = il.lines(il.incidents(runs[:2]))
+    assert 하나 == ["운영 사고(실패 묶음 → 복구): 1건", "  … 그 밖 1건"]
+
+
+def test_원인_머리의_운영_꼴() -> None:
+    """대부분의 작업은 `str(exc)` 를 적는다 — 예외 이름이 아니라 문장 머리가 온다(25.2290 — 문서를 사실대로)"""
+    assert il._갈래("모의 잔고 조회 실패 EGW00123 기간이 만료된 token 입니다") == "모의 잔고 조회 실패 EGW00123 기간이 만료된 token 입니다"[:40]
+    assert il._갈래("발송 실패: 텔레그램 400") == "발송 실패"
+    assert il._언제("2026-11-17T23:27:41+00:00") == "11-18 08:27" and il._언제("2026-11-17T23:27:41") == "2026-11-17T23:27"
+    assert il._언제("모르는 때 — 아주 긴 글자열") == "모르는 때 — 아주 긴 글자열"[:16]
+
+
 def test_도는_중과_확인_실행은_열지도_닫지도_않는다() -> None:
     runs = [_r("daily_kr", "running", "17T23:00"), _r("daily_kr", "dryrun", "17T23:10"),
             _r("daily_kr", "failed", "17T23:30", err="E: 1"), _r("daily_kr", "dryrun", "17T23:40"),
@@ -85,9 +130,10 @@ def test_요약_줄() -> None:
     줄 = il.lines(found)
     # 닫힌 넷: 20·65·180·2880분 → 중앙값(아래쪽) 65분, 가장 긴 것 2일
     assert 줄[0] == "운영 사고(실패 묶음 → 복구): 5건 · 복구 중앙값 65분 · 가장 긴 것 2.0일 · 아직 열림 1건"
-    assert 줄[1] == "  signals: 2026-11-20T01:00 부터 실패 1번 · 아직 복구 안 됨 · Open"  # 열린 것이 맨 앞
-    assert 줄[2] == "  daily_us(US): 2026-11-17T13:30 부터 실패 1번 · 복구 2.0일 · KisFailed"
-    assert 줄[3] == "  metrics: 2026-11-16T01:00 부터 실패 1번 · 복구 3.0시간 · M"
+    # 시각은 한국 시각(25.2290) — UTC 01:00 = KST 10:00
+    assert 줄[1] == "  signals: 11-20 10:00 부터 실패 1번 · 아직 복구 안 됨 · Open"  # 열린 것이 맨 앞
+    assert 줄[2] == "  daily_us(US): 11-17 22:30 부터 실패 1번 · 복구 2.0일 · KisFailed"
+    assert 줄[3] == "  metrics: 11-16 10:00 부터 실패 1번 · 복구 3.0시간 · M"
     assert 줄[4] == "  … 그 밖 2건" and len(줄) == 5 and il.TOP_N == 3
     assert il._분(119) == "119분" and il._분(120) == "2.0시간" and il._분(2879) == "48.0시간" and il._분(2880) == "2.0일"
 
@@ -98,11 +144,14 @@ def test_주간_요약에_실린다() -> None:
     글 = ws.compose(runs=runs, last_success={}, now=now, reads_used=None,
                    incident_lines=il.lines(il.incidents(runs)))  # fmt: skip
     assert "운영 사고(실패 묶음 → 복구): 1건 · 복구 중앙값 65분 · 가장 긴 것 65분" in 글
-    assert "daily_kr(KR): 2026-11-17T23:30 부터 실패 1번 · 복구 65분 · TursoError" in 글
+    # 국내 일일 배치 08:30 KST = 전날 23:30 UTC — 한국 날짜로 실린다(예전엔 하루 앞 밤 시각으로 읽혔다)
+    assert "daily_kr(KR): 11-18 08:30 부터 실패 1번 · 복구 65분 · TursoError" in 글
     # 안 주면 절이 없다(예전 요약 그대로)
     assert "운영 사고" not in ws.compose(runs=runs, last_success={}, now=now, reads_used=None)
     # 이음매 — 요약 실행이 대장을 만들어 넘긴다
-    assert "incident_lines=incident_ledger.lines(incident_ledger.incidents(runs))" in inspect.getsource(ws.run)
+    글 = inspect.getsource(ws.run)
+    assert "사고 = incident_ledger.lines(incident_ledger.incidents(runs))" in 글 and "incident_lines=사고" in 글
+    assert "운영 사고 절을 만들지 못했습니다" in 글  # 이 절이 깨져도 요약은 나간다(다른 곁다리 절과 같은 꼴)
 
 
 def test_읽지도_쓰지도_않는다_그리고_문서() -> None:
@@ -111,5 +160,6 @@ def test_읽지도_쓰지도_않는다_그리고_문서() -> None:
         assert 금지 not in 글, 금지
     문서 = (뿌리 / "docs" / "health.md").read_text()
     for 조각 in ("### 7.3 운영 사고 대장", "25.2289", f"{il.CAUSE_MAX}자 `CAUSE_MAX`", f"긴 것부터 {il.TOP_N}건(`TOP_N`)", "새 표를 만들지 않는다",
-               "건너뜀·도는 중·확인 실행은 사고를 열지도 닫지도 않는다", "아직 열림"):  # fmt: skip
+               "건너뜀·도는 중·확인 실행은 사고를 열지도 닫지도 않는다", "아직 열림", "한국 시각", "끝맺지 못한 기록",
+               "영향", "문장 머리"):  # fmt: skip
         assert 조각 in 문서, 조각

@@ -124,7 +124,63 @@ def test_다시_받은_수가_실행_기록에_실린다() -> None:
 
     from batch.jobs import broker_mirror as jb
 
-    assert '({"net_retries": 끊김} if 끊김 else {})' in inspect.getsource(jb.run)
+    # 아침 베끼기 — 꼬리를 한 곳에서 만들고 **모든 반환**이 그것을 쓴다(25.2290: 처음엔 마지막 반환에만 붙였다)
+    세션.net_retries, 세션.rate_retries = 2, 0
+    assert jb._호출(세션) == {"calls": 7, "net_retries": 2}
+    세션.net_retries = 0
+    assert jb._호출(세션) == {"calls": 7}
+    글 = inspect.getsource(jb.run)
+    assert 글.count("return 기록 | _호출(sess)") == 4 and '{"calls": sess.calls}' not in 글
+    assert 글.count("return 기록") == 4  # 기록을 돌려주는 반환은 모두 꼬리를 단다
+
+
+def test_모름으로_닫을_때_보낼_때_적은_글을_버리지_않는다() -> None:
+    """25.2290 (25.2288 교차검증 [권고]) — 모름 문장에 실은 "받은 것" 이 다음 아침 맞추기의 "체결 조회에 없음" 으로
+    덮여 하루 만에 사라졌다. 앞머리는 새 글 그대로(머리로 가르는 읽기는 그대로), 뒤에 보낼 때 글 120자"""
+    import sqlite3
+
+    from batch.jobs import broker_mirror as jb
+    from batch.services import broker_mirror as bm
+
+    c = sqlite3.connect(":memory:")
+    c.execute("CREATE TABLE paper_broker_orders (id INTEGER PRIMARY KEY, status TEXT, broker_order_no TEXT, filled_qty INTEGER,"
+              " avg_price REAL, message TEXT, fetched_at TEXT)")  # fmt: skip
+    보낼때 = "모의 주문 응답에 KIS 오류 코드가 없습니다 — rt_cd '1' · 모의투자 장시작전 입니다 · 칸(msg1,rt_cd)"
+    c.executemany("INSERT INTO paper_broker_orders (id, status, broker_order_no, message) VALUES (?, 'sending', ?, ?)",
+                  [(1, None, 보낼때), (2, None, None), (3, None, ""), (4, "0001", 보낼때), (5, None, "가" * 300),
+                   (6, None, 보낼때)])  # fmt: skip
+    결과 = [bm.Outcome(1, "unknown", None, 0, None, bm.MISSING), bm.Outcome(2, "unknown", None, 0, None, bm.MISSING),
+            bm.Outcome(3, "unknown", None, 0, None, bm.MISSING), bm.Outcome(4, "filled", "0009", 3, 100.0, None),
+            bm.Outcome(5, "unknown", None, 0, None, bm.MISSING_US), bm.Outcome(6, "rejected", None, 0, None, "거부 수량")]  # fmt: skip
+    for o in 결과:
+        assert len(jb.recon_params(o, "t")) == jb.RECON_SQL.count("?") == 10
+        c.execute(jb.RECON_SQL, jb.recon_params(o, "t"))
+    행 = {r[0]: r[1:] for r in c.execute("SELECT id, status, message, broker_order_no, filled_qty FROM paper_broker_orders")}
+    assert 행[1] == ("unknown", f"{bm.MISSING} · 보낼 때: {보낼때}", None, 0)
+    assert 행[2] == ("unknown", bm.MISSING, None, 0) and 행[3] == ("unknown", bm.MISSING, None, 0)  # 앞 글이 없으면 새 글만
+    assert 행[4] == ("filled", 보낼때, "0009", 3)  # 새 글이 없으면(체결과 맞음) 예전대로 그대로 둔다
+    assert 행[5][1] == f"{bm.MISSING_US} · 보낼 때: {'가' * 120}"  # 120자에서 자른다
+    assert 행[6] == ("rejected", "거부 수량", None, 0)  # 모름이 아니면 예전대로 새 글로 바꾼다
+
+
+def test_모름_문장의_길이를_묶는다() -> None:
+    """25.2290 — 칸 이름은 여덟까지·이름마다 24자, rt_cd 는 앞 20자, 문구는 글일 때만(dict 면 안쪽 값이 따라온다)"""
+    본문 = {f"k{n:02d}": 1 for n in range(12)} | {"rt_cd": "9" * 80, "msg_cd": "", "이름이_아주_긴_칸_" * 5: 1}
+    with pytest.raises(kv.NoResponse) as e:
+        kv.parse_order(본문)
+    글 = str(e.value)
+    assert "k08" not in 글 and "k07" in 글 and "9" * 21 not in 글  # 정렬한 앞 여덟(k00~k07)까지
+    짧은본문 = {"rt_cd": "1", "msg_cd": "", "이름이_아주_긴_칸_" * 5: 1}
+    with pytest.raises(kv.NoResponse) as e2:
+        kv.parse_order(짧은본문)
+    assert ("이름이_아주_긴_칸_" * 5)[:24] in str(e2.value) and ("이름이_아주_긴_칸_" * 5)[:25] not in str(e2.value)
+    with pytest.raises(kv.NoResponse) as e:
+        kv.parse_order({"error": {"account": "12345678"}, "error_description": "token expired " + "x" * 80})
+    assert "12345678" not in str(e.value) and "token expired" in str(e.value) and "x" * 47 not in str(e.value)
+    # 문구 후보가 글이 아니면(dict) 싣지 않는다 — 안쪽 값이 문장에 따라오지 않게
+    with pytest.raises(kv.NoResponse) as e:
+        kv.parse_order({"error": {"account": "12345678"}})
+    assert "12345678" not in str(e.value) and str(e.value).endswith("칸(error)")
 
 
 @pytest.mark.parametrize("꼴", ["끊김", "JSON 아님"])

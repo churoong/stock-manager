@@ -188,14 +188,18 @@ def _order_ok(payload: object, what: str) -> dict[str, Any]:
     본다)에서 영영 빠졌다(25.2287, 결함 루프). 조회 응답은 `_ok` 그대로"""
     코드 = str(payload.get("msg_cd") or "").strip() if isinstance(payload, dict) else ""
     if not isinstance(payload, dict) or (str(payload.get("rt_cd")) != "0" and not 코드):
-        # 받은 것을 문장에 남긴다(25.2288, 25.2287 교차검증 [권고]) — 이 문장이 주문 줄의 `message`(웹 거래내역)·장중
-        # 알림으로 가는 유일한 흔적이다. 예전 `_ok` 는 msg1 을 실었는데 고정 글로 바꾸며 진단 길이 끊겼다.
-        # rt_cd·msg1 앞 60자·최상위 칸 **이름**(값은 싣지 않는다)만 — 응답 본문에 계좌번호는 없다
+        # 받은 것을 문장에 남긴다(25.2288, 25.2287 교차검증 [권고]) — 이 문장이 주문 줄의 `message`(웹 거래내역)로
+        # 가는 유일한 흔적이다(장중 알림·리포트에는 실리지 않는다 — 25.2290 정정). 예전 `_ok` 는 msg1 을 실었는데
+        # 고정 글로 바꾸며 진단 길이 끊겼다. rt_cd(앞 20자)·문구 앞 60자·최상위 칸 **이름** 여덟(이름마다 24자)만 —
+        # 값은 싣지 않는다(문구 후보도 글일 때만: `error` 가 dict 면 안쪽 값이 따라온다).
+        # 응답 본문에 계좌번호는 없다
         덧 = ""
         if isinstance(payload, dict):
-            글 = str(payload.get("msg1") or payload.get("error") or "").strip()[:60]
-            칸 = ",".join(sorted(str(k) for k in payload)[:8])
-            덧 = f" — rt_cd {payload.get('rt_cd')!r}" + (f" · {글}" if 글 else "") + (f" · 칸({칸})" if 칸 else "")
+            후보 = (payload.get(k) for k in ("msg1", "error_description", "error"))
+            글 = next((v.strip()[:60] for v in 후보 if isinstance(v, str) and v.strip()), "")
+            칸 = ",".join(sorted(str(k)[:24] for k in payload)[:8])
+            덧 = f" — rt_cd {repr(payload.get('rt_cd'))[:20]}" + (f" · {글}" if 글 else "")
+            덧 += f" · 칸({칸})" if 칸 else ""
         raise NoResponse(f"{what} 응답에 KIS 오류 코드가 없습니다{덧}")
     return _ok(payload, what)
 

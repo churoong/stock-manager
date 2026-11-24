@@ -667,9 +667,13 @@ def run(dry_run: bool = False, force: bool = False) -> int:
             실행 = 실행_때
         except Exception as exc:  # noqa: BLE001 — 곁다리 절이다
             모의 = [*모의, f"실행 품질 절을 만들지 못했습니다 ({type(exc).__name__})"]
+        # 운영 사고 대장(25.2289) — 다른 곁다리 절처럼 가둔다(25.2290): 이 절이 깨져도 요약은 나간다
+        try:
+            사고 = incident_ledger.lines(incident_ledger.incidents(runs))
+        except Exception as exc:  # noqa: BLE001
+            사고 = [f"운영 사고 절을 만들지 못했습니다 ({type(exc).__name__})"]
         text = compose(runs=runs, last_success=last, now=now, reads_used=used, writes_used=쓰기, rot_lines=rot_lines,
-                       postmortem_lines=사후, paper_lines=모의,
-                       incident_lines=incident_ledger.lines(incident_ledger.incidents(runs)))  # fmt: skip
+                       postmortem_lines=사후, paper_lines=모의, incident_lines=사고)  # fmt: skip
         print(text)
         sent = 0
         뒤경고: list[str] = []

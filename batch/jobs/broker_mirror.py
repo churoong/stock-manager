@@ -199,10 +199,23 @@ REALIZED_SNAPSHOT_SQL = (
     " ORDER BY as_of"
 )
 
+#: 맞추기 결과를 줄에 적는다. 글(`message`)은 새 글이 없으면 그대로, **모름(`unknown`)으로 닫을 때 보낼 때 적은 글이
+#: 있으면 버리지 않고 뒤에 잇는다**(25.2290 — 25.2288 이 모름 문장에 실은 "받은 것" 이 다음 아침 "체결 조회에 없음"
+#: 으로 덮여 하루 만에 사라졌다. 실제로 접수 안 된 쪽일수록 진단 글이 필요하다). 앞머리는 새 글 그대로라 머리로
+#: 가르는 읽기는 그대로다. 인자: [상태, 주문번호, 체결 수량, 평균가, 글, 상태, 글, 글, 받은 때, 번호] — `recon_params`
 RECON_SQL = (
     "UPDATE paper_broker_orders SET status = ?, broker_order_no = COALESCE(?, broker_order_no), filled_qty = ?,"
-    " avg_price = ?, message = COALESCE(?, message), fetched_at = ? WHERE id = ?"
+    " avg_price = ?, message = CASE WHEN ? IS NULL THEN message"
+    " WHEN ? = 'unknown' AND COALESCE(message, '') <> '' THEN ? || ' · 보낼 때: ' || substr(message, 1, 120)"
+    " ELSE ? END, fetched_at = ? WHERE id = ?"
 )
+
+
+def recon_params(o: Any, 지금: str) -> list[Any]:
+    """`RECON_SQL` 의 인자 — 글과 상태가 문장 안에서 되풀이된다"""
+    return [o.status, o.order_no, o.filled, o.avg_price, o.message, o.status, o.message, o.message, 지금, o.row_id]
+
+
 DAILY_SQL = (
     "INSERT INTO paper_broker_daily (broker, as_of, account_id, cash_krw, total_krw, holdings_json, diff_json, source,"
     " fetched_at, summary_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (broker, as_of) DO UPDATE SET"
@@ -697,6 +710,14 @@ def _account_perf(client: Any, sess: Any, 증권사: str, 오늘: str, 합: dict
     return 원화계좌, p | 견줌
 
 
+def _호출(sess: Any) -> dict[str, int]:
+    """KIS 단계 기록의 꼬리 — 호출 수와(있으면) 조회를 연결 오류·시간 초과로 다시 받은 수(25.2288). **모든 반환이 이
+    것을 쓴다**(25.2290 — 처음엔 마지막 반환에만 붙여, 주문을 안 낸 날(접수 전 막힘·장 없음·잔고 잘림)의 다시 받은
+    수가 빠졌다. 그 길들도 맞추기·잔고 조회는 이미 다 한 뒤다)"""
+    끊김 = int(getattr(sess, "net_retries", 0) or 0)
+    return {"calls": sess.calls} | ({"net_retries": 끊김} if 끊김 else {})
+
+
 def run(
     client: Any, market: str, now: datetime, *, session: Any = None, sleep: Any = time.sleep, clock: Any = None,
     frozen: set[int] | None = None, slot: Slot = MAIN, hold_send: str | None = None,
@@ -757,8 +778,7 @@ def run(
         닫힘 = client.execute(CLAIMED_SQL, [증권사, min(str(r["trade_date"]) for r in 남은), 오늘.isoformat()]).rows
         결과 = bm.reconcile(남은, 체결, complete=다받음, missing=bm.MISSING_US if 미국 else bm.MISSING,
                             claimed=[(d, n) for d, n in 닫힘])  # fmt: skip
-        client.batch([(RECON_SQL, [o.status, o.order_no, o.filled, o.avg_price, o.message, 지금, o.row_id])
-                      for o in 결과])  # fmt: skip
+        client.batch([(RECON_SQL, recon_params(o, 지금)) for o in 결과])
         기록["reconciled"] = dict(Counter(o.status for o in 결과))
         if not 다받음:
             기록["reconcile_truncated"] = True
@@ -920,14 +940,14 @@ def run(
     if getattr(sess, "balance_truncated", False):
         기록["balance_truncated"] = True
         기록["send"] = "증권사 잔고 조회가 쪽 상한에 닿아 잘림 — 오늘 주문 안 냄"
-        return 기록 | {"calls": sess.calls}
+        return 기록 | _호출(sess)
     if hold_send:
         기록["send"] = hold_send
-        return 기록 | {"calls": sess.calls}
+        return 기록 | _호출(sess)
     막힘 = send_block(market, now)
     if 막힘:
         기록["send"] = 막힘
-        return 기록 | {"calls": sess.calls}
+        return 기록 | _호출(sess)
     if not 미국 and 현지 < (접수 := kr_order_window(오늘)[0]):
         # 그날 접수 시작까지(`send_block` 과 같은 창, 25.2240 — 10:00 개장일은 09:30)
         sleep((접수 - 현지).total_seconds() + 5)
@@ -1020,9 +1040,7 @@ def run(
     if 안냄:
         기록["not_sent"] = dict(Counter(까닭 for _o, _s, 까닭 in 안냄))
     기록["halted"] = 멈춤
-    # 조회를 다시 받아 넘긴 수(25.2288) — 있을 때만. 건수뿐이다
-    끊김 = int(getattr(sess, "net_retries", 0) or 0)
-    return 기록 | {"calls": sess.calls} | ({"net_retries": 끊김} if 끊김 else {})
+    return 기록 | _호출(sess)
 
 
 class _건너뜀(Exception):  # noqa: N818 — 흐름 표시
