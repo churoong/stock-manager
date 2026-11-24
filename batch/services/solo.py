@@ -99,17 +99,19 @@ def picks(ranked: list[Ranked], held: set[int], excluded: set[int], max_hold: in
     """순위에서 새로 살 종목 — 이미 든 것·뺄 것(`excluded` — 매도가 열린·다시 사기 쉼)은 건너뛴다.
 
     자리 = `max_hold − 보유 수`(0 아래면 0), `per_day` 가 있으면 그것과 작은 쪽(Z3 은 한 달에 1)"""
-    자리 = max(0, max_hold - len(held))
-    if per_day is not None:
-        자리 = min(자리, per_day)
-    out: list[Ranked] = []
-    for r in ranked:
-        if len(out) >= 자리:
-            break
-        if r.stock_id in held or r.stock_id in excluded:
-            continue
-        out.append(r)
-    return out
+    return candidates(ranked, held, excluded)[:slots(len(held), max_hold, per_day)]
+
+
+def candidates(ranked: list[Ranked], held: set[int], excluded: set[int]) -> list[Ranked]:
+    """순위에서 살 수 있는 후보 전부(순위 순) — 든 것·뺄 것을 건너뛴다. 몇 개를 살지는 `slots`, 자료 문제(멈춤·시세·
+    1주 못 삼)로 다음 순위로 넘기는 것은 부르는 쪽(`jobs/paper_solo.size_orders`)이 한다(25.2320)"""
+    return [r for r in ranked if r.stock_id not in held and r.stock_id not in excluded]
+
+
+def slots(n_held: int, max_hold: int, per_day: int | None) -> int:
+    """새로 살 자리 = `max_hold − 보유 수`(0 아래면 0), `per_day` 가 있으면 그것과 작은 쪽(Z3 은 한 달에 1)"""
+    자리 = max(0, max_hold - n_held)
+    return 자리 if per_day is None else min(자리, per_day)
 
 
 def hold_1y_due(first_fill: str, today: date) -> bool:

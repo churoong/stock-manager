@@ -10,12 +10,14 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from datetime import date
 from typing import Any
 
 from batch.core import calendar as cal
 from batch.services import company as co
 from batch.services import paper as pp
+from batch.services import risk_gate as rg
 from batch.services import solo
 from batch.services.sell_flags import _criterion
 
@@ -41,35 +43,37 @@ def universe_dossiers(client: Any, market: str, ids: list[int], as_of: str, cach
 def plan(
     client: Any, selection: str, *, market: str, as_of: str, fill_session: str, universe_ids: list[int],
     held: set[int], excluded: set[int], cache: dict[str, Any],
-) -> tuple[list[solo.Ranked], dict[str, Any]]:
-    """그날 새로 살 종목(순위 순)과 기록. `held` = 이 시장 보유 + 열린 매수(그날 파는 것은 뺀다 — 같은 장에 나간다),
-    `excluded` = 매도가 열린·다시 사기 쉼 종목. 쉬는 날은 ([], {"skipped": 까닭})"""
+) -> tuple[list[solo.Ranked], int, dict[str, Any]]:
+    """그날 살 후보(순위 순 — 든 것·뺄 것 뺀 전부), 새로 살 자리 수, 기록. `held` = 이 시장 보유 + 열린 매수(그날 파는
+    것은 뺀다 — 같은 장에 나간다), `excluded` = 매도가 열린·다시 사기 쉼 종목. 쉬는 날은 ([], 0, {"skipped": 까닭}).
+
+    자리보다 후보를 넉넉히 돌려준다 — 고른 종목이 기업행위 경계·묵은 시세·1주 못 삼이면 다음 순위로 넘긴다(25.2320,
+    25.2319 교차검증 [필수] 1·[권고] — 사전 등록 "상위에서 아직 안 든 1종목" 은 살 수 있는 다음 순위로 읽는다)"""
     if selection == solo.MAGIC:
         첫장 = date.fromisoformat(fill_session)
         if not solo.is_month_first_session(첫장, cal.previous_session(market, 첫장)):
-            return [], {"skipped": "그 달 첫 거래일 장이 아님", "fill_session": fill_session}
-        if len(held) >= solo.Z3_MAX_HOLD:
-            return [], {"skipped": f"보유 {len(held)} — 상한 {solo.Z3_MAX_HOLD}", "held": len(held)}
-        자료 = universe_dossiers(client, market, universe_ids, as_of, cache)
-        순위 = solo.magic_ranks(자료)
-        고름 = solo.picks(순위, held, excluded, solo.Z3_MAX_HOLD, 1)
+            return [], 0, {"skipped": "그 달 첫 거래일 장이 아님", "fill_session": fill_session}
+        상한, 하루 = solo.Z3_MAX_HOLD, 1
     elif selection == solo.CANSLIM:
+        상한, 하루 = solo.Z4_MAX_HOLD, None
+    else:  # 부르는 쪽이 단독 고르기만 넘긴다
+        raise ValueError(f"단독 고르기가 아님: {selection}")
+    자리 = solo.slots(len(held), 상한, 하루)
+    if 자리 == 0:
+        return [], 0, {"skipped": f"보유 {len(held)} — 상한 {상한}", "held": len(held)}
+    if selection == solo.CANSLIM:
         from batch.services import trend
 
-        if len(held) >= solo.Z4_MAX_HOLD:
-            return [], {"skipped": f"보유 {len(held)} — 상한 {solo.Z4_MAX_HOLD}", "held": len(held)}
         지수 = solo.M_INDEX[market]
         국면 = trend.regimes_for_country(client, market, as_of).get(지수)
         상태 = getattr(국면, "state", None)
         if not solo.canslim_market_ok(상태):
-            return [], {"skipped": f"시장 국면 {trend.STATE_LABEL.get(str(상태), '모름')}({지수}) — 강세일 때만",
-                        "regime": 상태, "regime_note": getattr(국면, "note", None)}  # fmt: skip
-        자료 = universe_dossiers(client, market, universe_ids, as_of, cache)
-        순위 = solo.canslim_ranks(자료)
-        고름 = solo.picks(순위, held, excluded, solo.Z4_MAX_HOLD, None)
-    else:  # 부르는 쪽이 단독 고르기만 넘긴다
-        raise ValueError(f"단독 고르기가 아님: {selection}")
-    return 고름, {"universe": len(자료), "ranked": len(순위), "held": len(held), "picks": [r.stock_id for r in 고름]}
+            return [], 0, {"skipped": f"시장 국면 {trend.STATE_LABEL.get(str(상태), '모름')}({지수}) — 강세일 때만",
+                           "regime": 상태, "regime_note": getattr(국면, "note", None)}  # fmt: skip
+    자료 = universe_dossiers(client, market, universe_ids, as_of, cache)
+    순위 = solo.magic_ranks(자료) if selection == solo.MAGIC else solo.canslim_ranks(자료)
+    후보 = solo.candidates(순위, held, excluded)
+    return 후보, 자리, {"universe": len(자료), "ranked": len(순위), "held": len(held), "slots": 자리}
 
 
 def _근거(selection: str, r: solo.Ranked, as_of: str, n_ranked: int) -> list[dict[str, Any]]:
@@ -86,13 +90,22 @@ def _근거(selection: str, r: solo.Ranked, as_of: str, n_ranked: int) -> list[d
 
 
 def size_orders(
-    client: Any, selection: str, picks: list[solo.Ranked], *, market: str, valuation: pp.Valuation,
-    open_buys: list[pp.Order], fx_rate: float | None, as_of: str, n_ranked: int,
+    client: Any, selection: str, candidates: list[solo.Ranked], slots: int, *, market: str,
+    valuation: pp.Valuation, open_buys: list[pp.Order], fx_rate: float | None, as_of: str, n_ranked: int,
+    is_frozen: Callable[[int], bool],
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """고른 종목마다 다음 장 시가 시장가 한 줄 — 수량 = ⌊min(평가 총액 × 비중 ÷ 기준가, 남은 쓸 현금 ÷ 여유 기준가)⌋.
+    """후보를 순위대로 보며 자리(`slots`)만큼 다음 장 시가 시장가 한 줄씩.
 
-    비중은 Z3 1/24 · Z4 10%. 기준가 = 오늘(그 시장)까지 마지막 종가. 1주도 못 사는 종목은 건너뛰고 까닭을 남긴다"""
-    if not picks:
+    - 수량 = ⌊min(평가 총액 × 비중 ÷ 기준가, 남은 쓸 현금 ÷ 예약 단가)⌋ — 비중 Z3 1/24 · Z4 10%, 기준가 = 오늘(그
+      시장)까지 마지막 종가. **예약 단가는 `pp.reserved_krw` 와 같은 잣대**(기준가 × (1 + 시가 틈 여유 10%) × 수수료
+      여유, 달러는 환율 × 환율 여유) — 여유 없이 나누면 같은 계좌 다른 시장의 열린 매수와 겹쳐 체결 때 "현금 부족" 으로
+      취소됐다(25.2320, 25.2319 교차검증 [필수] 2 — 25.1458 "Candidate.cash_krw = 예약과 같은 값"). 크기 상한(평가 총액
+      × 비중)은 기준가로 (`size_buys` 시가 일괄과 같은 짝)
+    - 다음 순위로 넘기는 것: 기업행위 경계(`is_frozen` — 관문의 `frozen` 은 관심 집합만 봐 유니버스에서 새로 고른 종목을
+      못 막는다, 25.2320 [필수] 1), 시세 없음, 묵은 종가(관문과 같은 거래일 잣대), 평가 총액 × 비중이 1주에 못 미침.
+      **현금이 모자라 1주도 못 사면 멈춘다**(더 싼 다음 순위로 바꿔 사지 않는다 — 크기 규칙이 바뀐다)
+    - 넘긴 까닭은 `not_bought` 에"""
+    if not candidates or slots <= 0:
         return [], {}
     통화 = "KRW" if market == "KR" else "USD"
     환율 = 1.0 if 통화 == "KRW" else fx_rate
@@ -103,22 +116,36 @@ def size_orders(
         return [], {"skipped": "미체결 달러 주문의 환율 모름"}
     현금 = valuation.cash_krw - 예약
     비중 = 1 / solo.Z3_SLICES if selection == solo.MAGIC else solo.Z4_WEIGHT_PCT / 100
-    오늘 = cal.local_today(market).isoformat()
+    오늘 = cal.local_today(market)
+    묵음선 = rg.ref_floor(market, 오늘)
+    여유 = (1 + pp.FEE_BUFFER) * (1 + pp.FX_BUFFER if 통화 != "KRW" else 1.0)
     주문: list[dict[str, Any]] = []
     못삼: dict[int, str] = {}
-    for r in picks:
-        시세 = client.execute(LAST_CLOSE_SQL, [r.stock_id, 오늘]).rows
+    for r in candidates:
+        if len(주문) >= slots:
+            break
+        if is_frozen(r.stock_id):
+            못삼[r.stock_id] = "기업행위 경계(분할·병합 의심) — 다음 순위로"
+            continue
+        시세 = client.execute(LAST_CLOSE_SQL, [r.stock_id, 오늘.isoformat()]).rows
         if not 시세:
-            못삼[r.stock_id] = "시세 없음"
+            못삼[r.stock_id] = "시세 없음 — 다음 순위로"
             continue
         종가, 날 = float(시세[0][0]), str(시세[0][1])[:10]
-        주당 = 종가 * 환율
-        주당현금 = 주당 * (1 + pp.FEE_BUFFER) * (1 + pp.FX_BUFFER if 통화 != "KRW" else 1.0)
-        수량 = math.floor(min(valuation.equity_krw * 비중 / 주당, max(현금, 0.0) / 주당현금)) if 주당 > 0 else 0
-        if 수량 < 1:
-            못삼[r.stock_id] = "1주도 못 삼"
+        if rg.stale(날, 오늘, 묵음선):
+            못삼[r.stock_id] = f"묵은 종가({날}) — 다음 순위로"
             continue
-        현금 -= 수량 * 주당현금
+        주당 = 종가 * 환율  # 원
+        크기 = math.floor(valuation.equity_krw * 비중 / 주당) if 주당 > 0 else 0
+        if 크기 < 1:
+            못삼[r.stock_id] = "비중으로 1주에 못 미침 — 다음 순위로"
+            continue
+        예약단가 = 주당 * (1 + pp.OPEN_BUY_BUFFER) * 여유  # `reserved_krw` 와 같은 식
+        수량 = min(크기, math.floor(max(현금, 0.0) / 예약단가))
+        if 수량 < 1:
+            못삼[r.stock_id] = "현금 부족 — 멈춤"
+            break
+        현금 -= 수량 * 예약단가
         근거 = _근거(selection, r, as_of, n_ranked)
         규칙 = solo.RULE_NAMES[selection]
         주문.append({
@@ -129,6 +156,9 @@ def size_orders(
             # 25.2168)
             "rationale": {"rule": 규칙, "rank_pct": round(r.pct, 4), "detail": r.detail, "weight": 비중,
                           "criteria": 근거, "signal": {"criteria": 근거}},
-            "ref_price": 종가, "cost_krw": 수량 * 주당현금, "ref_date": 날, "cash_krw": 수량 * 주당현금,
+            # 관문 종목·업종 상한은 기준가 × 수수료 여유(산 값), 현금 검사는 예약과 같은 값
+            "ref_price": 종가, "cost_krw": 수량 * 주당 * (1 + pp.FEE_BUFFER), "ref_date": 날,
+            "cash_krw": 수량 * 예약단가,
         })  # fmt: skip
-    return 주문, {"orders": len(주문), **({"not_bought": 못삼} if 못삼 else {})}
+    return 주문, {"orders": len(주문), "picks": [o["stock_id"] for o in 주문],
+                  **({"not_bought": 못삼} if 못삼 else {})}  # fmt: skip

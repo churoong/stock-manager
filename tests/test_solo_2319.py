@@ -108,7 +108,7 @@ def test_마이그레이션_행은_엔진_값과_같다() -> None:
     assert not {"Z3", "Z4"} & set(pp.MASTER_IDS)  # core 손절선을 재지 않는다
     assert {("Z3", 1), ("Z4", 1)} <= set(desk.PREREG)
     assert (pp.account_name("Z3"), pp.account_name("Z4")) == ("그린블랫", "오닐")
-    assert "1년" in desk._손절_해당없음("Z3", 2)[0] and "−8%" in desk._손절_해당없음("Z4", 2)[0]
+    assert "365일 뒤" in desk._손절_해당없음("Z3", 2)[0] and "−8% 손절·+25% 익절" in desk._손절_해당없음("Z4", 2)[0]
 
 
 # ── 엔진 한 바퀴 ─────────────────────────────────────────────────────────────────────────────
@@ -280,3 +280,196 @@ def test_유니버스_읽기는_배당_베타를_읽지_않는다() -> None:
     assert cjob.MASTER_DIV_SQL not in 가벼움.sql and cjob.MASTER_BETA_SQL not in 가벼움.sql
     assert cjob.MASTER_SNAP_SQL in 가벼움.sql and cjob.MASTER_FACTOR_SQL in 가벼움.sql
     assert {cjob.MASTER_DIV_SQL, cjob.MASTER_BETA_SQL} <= set(전부.sql)
+
+
+# ── 25.2320 (25.2319 교차검증 [필수] 2·[권고]) ────────────────────────────────────────────────
+
+
+def test_기업행위_경계_종목은_건너뛰고_다음_순위를_산다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """[필수] 1 — 관문의 `frozen` 은 관심 집합(보유·열린 주문·신호)만 봐 유니버스에서 새로 고른 종목을 못 막았다. 그래서
+    원장에 buy 를 남기고 다음 날 주문만 '멈춤' 으로 닫히길 되풀이했다(25.1480 과 같은 꼴). 후보마다 보고 다음 순위로"""
+    c = _새(monkeypatch, ("Z4",), ("2026-10-14",))
+    _국면(monkeypatch, "bull")
+    # 1 도 오닐 두 부서 찬성이 되게 — 이익이 늘고 12-1 이 3 다음
+    자료 = [_d(1, oi=40, mom=0.8), _d(3, oi=90, mom=0.9), *[_d(10 + i, oi=10, mom=0.01 * i, ni=(9, 8, 7, 6))
+                                                       for i in range(8)]]  # fmt: skip
+    monkeypatch.setattr(paper_solo, "universe_dossiers", lambda *_a, **_k: 자료)
+    본: list[set[int]] = []
+    monkeypatch.setattr(job, "frozen_ids", lambda _c, ids, _m: (본.append(set(ids)), {3} & set(ids))[1])
+    _줄, 기록 = _하루(c, monkeypatch, "2026-10-14")
+    assert [o[0] for o in _주문(c, "Z4")] == [1]  # 3 은 경계 — 다음 순위 1
+    assert {3} in 본  # 후보마다 물었다(관심 집합에는 3 이 없다)
+    assert 기록["accounts"]["Z4"]["buy"]["not_bought"] == {3: "기업행위 경계(분할·병합 의심) — 다음 순위로"}
+    assert c.q("SELECT stock_id, kind FROM paper_decisions WHERE account_id = 'Z4'") == [(1, "buy")]
+
+
+def _가치(equity: float, cash: float) -> pp.Valuation:
+    return pp.Valuation(invested_krw=equity, cash_krw=cash, holdings_krw=equity - cash, equity_krw=equity, pnl_krw=0.0,
+                        pnl_pct=None)
+
+
+class _시세판:
+    def __init__(self, close: float, day: str) -> None:
+        self.close, self.day = close, day
+
+    def execute(self, _sql: str, _args: list) -> Any:
+        class _R:
+            rows = [(self.close, self.day)]
+
+        return _R()
+
+
+def test_현금은_예약과_같은_잣대로_쓴다_두_시장이_겹쳐도_체결_점검을_넘는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """[필수] 2 — 쓸 현금을 기준가 × 수수료 여유로만 세면, 같은 계좌의 다른 열린 매수 예약(기준가 × 1.10 × 1.01)과 겹쳐
+    체결 때 '현금 부족' 으로 취소됐다. 크기는 평가 총액 × 비중(기준가), 현금은 예약 단가로"""
+    오늘 = date(2026, 11, 2)
+    monkeypatch.setattr(cal, "local_today", lambda _m=None: 오늘)
+    후보 = [solo.Ranked(i, 100 - i, {"rs": 100 - i}) for i in range(1, 9)]
+    # 국내 다섯 종목(1,000원) — 평가 총액 1억 × 10% = 1만 주씩, 현금은 예약 단가 1,111원으로 센다
+    주문, _ = paper_solo.size_orders(
+        _시세판(1_000.0, "2026-10-30"), solo.CANSLIM, 후보, 5, market="KR", valuation=_가치(1e8, 1e8), open_buys=[],
+        fx_rate=1_400.0, as_of="2026-10-30", n_ranked=8, is_frozen=lambda _s: False,
+    )  # fmt: skip
+    assert [o["quantity"] for o in 주문] == [10_000] * 5
+    열린 = [pp.Order(id=i, account_id="Z4", stock_id=o["stock_id"], side="buy", order_type="market", limit_price=None,
+                     quantity=o["quantity"], currency="KRW", fill_session="2026-11-02", ref_price=o["ref_price"])
+            for i, o in enumerate(주문, start=1)]  # fmt: skip
+    for o, 열 in zip(주문, 열린, strict=True):
+        assert abs(o["cash_krw"] - pp.reserved_krw([열], {"USD": 1_400.0})) < 1  # 예약과 같은 값(25.1458)
+    # 같은 날 미국 — 국내 예약을 뺀 현금 안에서만
+    미국, _ = paper_solo.size_orders(
+        _시세판(10.0, "2026-10-30"), solo.CANSLIM, 후보, 5, market="US", valuation=_가치(1e8, 1e8), open_buys=열린,
+        fx_rate=1_400.0, as_of="2026-10-30", n_ranked=8, is_frozen=lambda _s: False,
+    )  # fmt: skip
+    남은 = 1e8 - pp.reserved_krw(열린, {"USD": 1_400.0})
+    assert sum(o["cash_krw"] for o in 미국) <= 남은 + 1
+    # 다른 예약을 다 빼도 국내 첫 주문의 체결 점검(기준가 그대로 시가)이 음수로 가지 않는다
+    미국열린 = [pp.Order(id=100 + i, account_id="Z4", stock_id=o["stock_id"], side="buy", order_type="market",
+                       limit_price=None, quantity=o["quantity"], currency="USD", fill_session="2026-11-02",
+                       ref_price=o["ref_price"]) for i, o in enumerate(미국)]  # fmt: skip
+    다른 = pp.reserved_krw(열린[1:] + 미국열린, {"USD": 1_400.0})
+    assert 1e8 - 1_000 * 10_000 * (1 + pp.FEE_BUFFER) - 다른 >= 0
+    # 현금이 모자라 1주도 못 사면 멈춘다 — 더 싼 다음 순위로 바꿔 사지 않는다
+    멈춤, 기록 = paper_solo.size_orders(
+        _시세판(1_000.0, "2026-10-30"), solo.CANSLIM, 후보, 5, market="KR", valuation=_가치(1e8, 500.0), open_buys=[],
+        fx_rate=1_400.0, as_of="2026-10-30", n_ranked=8, is_frozen=lambda _s: False,
+    )  # fmt: skip
+    assert 멈춤 == [] and 기록["not_bought"] == {1: "현금 부족 — 멈춤"}
+
+
+def test_비중으로_1주에_못_미치거나_묵은_종가면_다음_순위로(monkeypatch: pytest.MonkeyPatch) -> None:
+    오늘 = date(2026, 11, 2)
+    monkeypatch.setattr(cal, "local_today", lambda _m=None: 오늘)
+    후보 = [solo.Ranked(i, 100 - i, {"ey": 0.1, "roc": 0.2}) for i in (1, 2, 3)]
+
+    class _판:
+        def execute(self, _sql: str, args: list) -> Any:
+            class _R:
+                rows = {1: [(5_000_000.0, "2026-10-30")], 2: [(1_000.0, "2026-09-01")],
+                        3: [(1_000.0, "2026-10-30")]}[args[0]]  # fmt: skip
+
+            return _R()
+
+    # Z3 — 100만 ÷ 24 = 41,666원: 1 은 500만 원짜리(1주에 못 미침), 2 는 묵은 종가, 3 을 41주
+    주문, 기록 = paper_solo.size_orders(
+        _판(), solo.MAGIC, 후보, 1, market="KR", valuation=_가치(1e6, 1e6), open_buys=[], fx_rate=None,
+        as_of="2026-10-30", n_ranked=3, is_frozen=lambda _s: False,
+    )  # fmt: skip
+    assert [(o["stock_id"], o["quantity"]) for o in 주문] == [(3, 41)]
+    assert 기록["not_bought"] == {1: "비중으로 1주에 못 미침 — 다음 순위로", 2: "묵은 종가(2026-09-01) — 다음 순위로"}
+
+
+def test_Z3_는_1년_된_보유를_달_첫_장에_팔고_같은_장에_새로_산다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """[권고] — hold_1y 가 엔진까지 이어지는지(갈래를 빼면 Z3 은 영원히 팔지 않는다). 보유 날수를 31일로 줄여 한 달 안에
+    돌린다 — 10-01 체결 + 31 = 11-01. 결정일 10-30 엔 팔지 않고, 결정일 11-02(달 첫 장 아침)엔 팔고 같은 장에 새로 산다"""
+    c = _새(monkeypatch, ("Z3",), ("2026-09-30", "2026-10-01", "2026-10-29", "2026-10-30"))
+    # 9월에 열고 입금한 계좌로(개설일 막이·현금)
+    c.conn.execute("UPDATE paper_accounts SET created_at = '2026-09-01T00:00:00+00:00' WHERE id = 'Z3'")
+    c.conn.execute("UPDATE paper_cash_flows SET flow_date = '2026-09-01', created_at = '2026-09-01T00:00:00+00:00'")
+    monkeypatch.setattr(solo, "HOLD_DAYS", 31)
+    _하루(c, monkeypatch, "2026-09-30")  # 다음 장 10-01 — 10월 첫 거래일: 3 을 산다
+    _하루(c, monkeypatch, "2026-10-01")  # 10-01 시가 체결
+    assert c.q("SELECT stock_id, fill_date FROM paper_fills WHERE account_id = 'Z3'") == [(3, "2026-10-01")]
+    _하루(c, monkeypatch, "2026-10-29")  # 결정일 10-30 — 아직(10-30 < 11-01)
+    assert [o for o in _주문(c, "Z3") if o[1] == "sell"] == []
+    _하루(c, monkeypatch, "2026-10-30")  # 결정일 11-02 ≥ 11-01 — 팔고, 같은 장(11 월 첫 장)에 새로 산다
+    assert [o[:2] + o[4:] for o in _주문(c, "Z3") if o[1] == "sell"] == [(3, "sell", "2026-11-02", "open", "보유1년")]
+    assert [o[0] for o in _주문(c, "Z3") if o[1] == "buy"] == [3, 1]  # 3 은 그날 파는 종목이라 빼고 다음 순위 1
+
+
+def test_국내_권리락은_되돌려_견준다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """[권고] — 원시 종가는 −8% 아래지만 권리락 계수(0.9)로 되돌리면 위 — 팔지 않는다(25.1999 와 같은 꼴)"""
+    from batch.jobs import monitor_targets as mt
+
+    monkeypatch.setattr(mt, "rights_factors_since", lambda *_a, **_k: [("2026-10-20", 0.9)])
+    행 = {"stock_id": 1, "country": "KR", "currency": "KRW", "lots": [("2026-10-15", 10.0, 10_000.0)],
+         "market_value": 10 * 9_000.0, "quantity": 10.0, "price_date": "2026-10-21"}  # fmt: skip
+    assert job._단독넘음(object(), 행, date(2026, 10, 22), solo.CANSLIM_EXIT) is None  # 9,000 ÷ 0.9 = 10,000
+    팖 = job._단독넘음(object(), {**행, "market_value": 10 * 8_200.0}, date(2026, 10, 22), solo.CANSLIM_EXIT)
+    assert 팖["reason_code"] == "오닐손절" and "권리락 되돌림 ×0.9" in 팖["criteria"][1]["display"]
+
+
+def test_국면_지수_열쇠는_추세_모듈과_같다() -> None:
+    for 시장, 열쇠 in solo.M_INDEX.items():
+        assert 열쇠 in trend.COUNTRY_INDEXES[시장], 시장
+
+
+def test_보유_상한은_시장마다_센다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """[권고] — 다른 시장 보유는 이 시장 상한에 들지 않는다(미국 2 를 들고도 국내 단계의 held 는 빈 집합)"""
+    c = _새(monkeypatch, ("Z4",), ("2026-10-14",))
+    _국면(monkeypatch, "bull")
+    c.conn.execute("INSERT INTO paper_orders (id, account_id, market, stock_id, side, order_type, limit_price, quantity,"
+                   " currency, decided_on, fill_session, fill_basis, tranche, reason, status, rule_version, created_at,"
+                   " ref_price) VALUES (901, 'Z4', 'US', 2, 'buy', 'market', NULL, 1, 'USD', '2026-10-13',"
+                   " '2026-10-16', 'open', 0, 'canslim_v1', 'open', 1, '2026-10-13T00:00:00+00:00', 10)")  # fmt: skip
+    본: list[set[int]] = []
+    원래 = paper_solo.plan
+    monkeypatch.setattr(paper_solo, "plan", lambda *a, **k: (본.append(set(k["held"])), 원래(*a, **k))[1])
+    _하루(c, monkeypatch, "2026-10-14")
+    assert 본 and 본[0] == set()
+
+
+def test_다시_사기_쉼_안에는_같은_종목을_다시_사지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """[권고] — 판 뒤 5거래일 안이면 다시 1순위여도 사지 않는다(엔진 연결)"""
+    c = _새(monkeypatch, ("Z4",), ("2026-10-14",))
+    _국면(monkeypatch, "bull")
+    본: list[set[int]] = []
+    원래 = paper_solo.plan
+    monkeypatch.setattr(paper_solo, "plan", lambda *a, **k: (본.append(set(k["excluded"])), 원래(*a, **k))[1])
+    _하루(c, monkeypatch, "2026-10-14")
+    _시세(c, 3, "2026-10-15", 10_000, 9_000)  # 체결 뒤 −10% → 판다
+    _시세(c, 1, "2026-10-15", 10_000, 10_000)
+    _하루(c, monkeypatch, "2026-10-15")
+    _시세(c, 3, "2026-10-16", 9_000, 9_000)
+    _시세(c, 1, "2026-10-16", 10_000, 10_000)
+    _하루(c, monkeypatch, "2026-10-16")  # 10-19 에 팔림(열린 매도) — 쉼·열린 매도로 3 을 빼야 한다
+    _시세(c, 3, "2026-10-19", 9_000, 9_000)
+    _시세(c, 1, "2026-10-19", 10_000, 10_000)
+    _하루(c, monkeypatch, "2026-10-19")  # 10-19 체결 — 판 뒤 쉼 안
+    assert 3 in 본[-1]
+    assert [o[0] for o in _주문(c, "Z4") if o[1] == "buy"] == [3]
+
+
+def test_월간_복기의_규칙_점검은_단독_계좌_규칙으로_적는다() -> None:
+    """[권고] — core 잣대로 세면 Z3 의 손절 없는 보유를 '손절선 아래로 들고 간 날' 로, Z4 를 평균단가 −25% 로 적었다"""
+    행 = [{"as_of": "2026-11-16", "invested_krw": 1_000, "equity_krw": 1_000, "twr_index": 1.0,
+           "positions_json": '[{"stock_id": 10, "value_krw": 120, "horizon": "long", "cost": 200, "market_value": 120}]'}]
+    줄 = pp.summary_lines({"Z3": 행, "Z4": 행}, {}, "2026-11-12", "2026-11-01", {}, {},
+                          {"max_stock_pct": 10.0, "stop_pct": {"long": -25.0}}, {"Z3": "hold_1y", "Z4": "canslim_exit"})
+    z3 = next(x for x in 줄 if x.startswith("  그린블랫 규칙 점검"))
+    z4 = next(x for x in 줄 if x.startswith("  오닐 규칙 점검"))
+    assert "손절선 아래로 들고 간 날" not in z3 and "손절·목표 없이 첫 체결 365일 뒤" in z3
+    assert "손절선 아래로 들고 간 날" not in z4 and "−8% 이하·+25% 이상" in z4
+    assert "설계상(종목 10% 로 산다)" in z4  # 12% — 종목 상한 넘음은 설계상
+
+
+def test_웹_규칙_글은_규칙_값과_같다() -> None:
+    """웹 `ruleText`·`SELL_RULE_TEXT` 는 값을 손으로 적는다 — 규칙 정의처(`services/solo`)와 어긋나면 깨진다(25.1874, 25.2320)"""
+    from pathlib import Path
+
+    글 = (Path(__file__).resolve().parent.parent / "web" / "lib" / "paper.ts").read_text(encoding="utf-8")
+    아래 = f"{solo.CANSLIM_STOP * 100:g}".replace("-", "−")
+    for 조각 in (f"평가 총액 1/{solo.Z3_SLICES}", f"시장당 {solo.Z3_MAX_HOLD}종목", f"첫 체결 {solo.HOLD_DAYS}일 뒤",
+                 f"종목 {solo.Z4_WEIGHT_PCT:g}%", f"시장당 {solo.Z4_MAX_HOLD}종목",
+                 f"{아래}% 이하·+{solo.CANSLIM_TARGET * 100:g}% 이상"):  # fmt: skip
+        assert 조각 in 글, 조각

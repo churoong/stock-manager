@@ -1127,6 +1127,20 @@ def summary_lines(
             out.append(f"  {nm} 규칙 점검: 해당 없음(ETF 전술 — 종목·섹터 상한 100%, 손절 대신 지수 국면이 바뀐 날"
                        " 갈아탐, paper.md 17.1)")
             continue
+        elif (sell_rules or {}).get(aid) in ("hold_1y", "canslim_exit"):
+            # 거장 단독 Z3·Z4(paper.md 18장, 25.2320 — 25.2319 교차검증 [권고]): Z3 은 손절이 없고 Z4 의 선은 평균단가
+            # 대비 기간 손절(−25% 등)이 아니라 첫 체결가 대비 종가 −8%·+25% — core 잣대로 세면 틀린 수가 났다. 값은 규칙
+            # 정의처에서(25.1874). Z4 는 설계상 종목 10% 로 사 조금만 올라도 종목 상한을 넘는다 — 덧말로 가른다
+            from batch.services import solo
+
+            if (sell_rules or {}).get(aid) == solo.HOLD_1Y:
+                손절글 = f"손절선 점검 해당 없음(그린블랫 — 손절·목표 없이 첫 체결 {solo.HOLD_DAYS}일 뒤 매도)"
+            else:
+                아래 = f"{solo.CANSLIM_STOP * 100:g}".replace("-", "−")
+                위 = f"+{solo.CANSLIM_TARGET * 100:g}"
+                손절글 = f"손절선 점검 해당 없음(오닐 — 첫 체결가 대비 종가 {아래}% 이하·{위}% 이상이면 다음 장 시가)"
+                if 종목넘음:
+                    손절글 = f"종목 상한 넘음은 설계상(종목 {solo.Z4_WEIGHT_PCT:g}% 로 산다) · " + 손절글
         else:
             손절글 = f"손절선 아래로 들고 간 날 {len(손절넘김)}{덧}"
         out.append(f"  {nm} 규칙 점검: 종목 상한 넘은 날 {len(종목넘음)} · 섹터 상한 넘은 날 {len(섹터넘음)}"

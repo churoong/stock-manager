@@ -2689,13 +2689,16 @@ def run_step(
                     열린매수 = [o for o in 열린 if o.account_id == aid and o.side == "buy"]
                     든 = {sid for sid in 보유 if sid not in 파는} | {o.stock_id for o in 열린매수}
                     든 = {sid for sid in 든 if _stock(client, sid, stock_cache).get("country") == market}
-                    고름, b기록 = paper_solo.plan(
+                    후보들, 자리, b기록 = paper_solo.plan(
                         client, 고르기, market=market, as_of=단독기준일, fill_session=다음장, universe_ids=유니버스,
                         held=든, excluded=set(최근판) | 이미팖, cache=단독캐시,
                     )  # fmt: skip
+                    # 기업행위 경계는 후보마다 — 관문의 `frozen`(관심 집합만)은 유니버스에서 새로 고른 종목을 못 막는다
+                    # (25.2320, R 의 대체 고르기와 같은 꼴). 경계면 다음 순위로
                     주문, 크기기록 = paper_solo.size_orders(
-                        client, 고르기, 고름, market=market, valuation=v, open_buys=열린매수,
+                        client, 고르기, 후보들, 자리, market=market, valuation=v, open_buys=열린매수,
                         fx_rate=fx[0] if fx else None, as_of=단독기준일, n_ranked=int(b기록.get("ranked") or 0),
+                        is_frozen=lambda sid: sid in 멈춘 or sid in frozen_ids(client, {sid}, {sid: market}),
                     )  # fmt: skip
                     b기록.update(크기기록)
                     후보 = [rg.Candidate(o["stock_id"], "buy", o["cost_krw"], o["ref_date"], i, o["cash_krw"])
