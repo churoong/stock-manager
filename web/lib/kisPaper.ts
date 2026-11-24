@@ -94,6 +94,16 @@ const STATUS_TEXT: Record<string, string> = {
   rejected: "거부",
   unknown: "모름",
 };
+/** 거래내역 비고를 접어 보일 글자 수 — 이보다 길면 눌러 펼친다(25.2294). 칸 너비 16rem 에 대략 한 줄 */
+export const REMARK_FOLD = 24;
+/**
+ * 비고가 길어 접어야 하는가 (25.2294) — 예전엔 16rem 에서 잘리고 전체 글은 title(마우스 올리기)뿐이라 폰에서는
+ * "응답 모름" 줄의 진단 글(받은 것·보낼 때 글, 25.2288·25.2290)을 볼 수 없었다
+ */
+export function remarkLong(message: string | null | undefined): boolean {
+  return (message ?? "").length > REMARK_FOLD;
+}
+
 export function statusText(s: string): string {
   return STATUS_TEXT[s] ?? s;
 }

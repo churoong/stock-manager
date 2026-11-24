@@ -5,7 +5,7 @@ import EquityChart, { type Series } from "@/components/EquityChart";
 import { KisRealized } from "@/components/PaperRealized";
 import { bodyOf, readJson } from "@/lib/http";
 import Pager from "@/components/Pager";
-import { amountText, perfLines, priceText, sentTimeText, statusText, usCashText, wholeBreakdownText, type KisMarket, type KisMarketView, type KisOrder, type KisWhole } from "@/lib/kisPaper";
+import { amountText, perfLines, priceText, remarkLong, sentTimeText, statusText, usCashText, wholeBreakdownText, type KisMarket, type KisMarketView, type KisOrder, type KisWhole } from "@/lib/kisPaper";
 import { orderTimeText, type LiveView } from "@/lib/kisVts";
 import { userTimeOf } from "@/lib/market";
 import { pageOf } from "@/lib/paging";
@@ -151,8 +151,17 @@ function KisTrades({ orders, cur }: { orders: KisOrder[]; cur: "KRW" | "USD" }) 
                 <td>{statusText(o.status)}</td>
                 <td className="text-right">{o.filled_qty ?? "-"}</td>
                 <td className="text-right">{amountText(o.avg_price, cur)}</td>
-                <td className="max-w-[16rem] truncate text-slate-500" title={o.message ?? ""}>
-                  {o.message ?? ""}
+                <td className="max-w-[16rem] text-slate-500">
+                  {remarkLong(o.message) ? (
+                    <details>
+                      <summary className="cursor-pointer truncate" title={o.message ?? ""}>
+                        {o.message}
+                      </summary>
+                      <p className="whitespace-normal break-words pt-1">{o.message}</p>
+                    </details>
+                  ) : (
+                    (o.message ?? "")
+                  )}
                 </td>
               </tr>
             ))}
