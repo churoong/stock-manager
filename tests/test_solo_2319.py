@@ -473,3 +473,114 @@ def test_웹_규칙_글은_규칙_값과_같다() -> None:
                  f"종목 {solo.Z4_WEIGHT_PCT:g}%", f"시장당 {solo.Z4_MAX_HOLD}종목",
                  f"{아래}% 이하·+{solo.CANSLIM_TARGET * 100:g}% 이상"):  # fmt: skip
         assert 조각 in 글, 조각
+
+
+# ── 25.2321 (25.2320 교차검증 [필수] 1·[권고]) ────────────────────────────────────────────────
+
+
+def test_새로_사는_종목에도_업종_상한이_걸리고_막힌_자리는_다음_순위로(monkeypatch: pytest.MonkeyPatch) -> None:
+    """[필수] — 관문의 업종 칸에 후보 종목이 없으면 업종 30% 상한이 꺼졌다. 상한에 막힌 자리는 다음 순위(다른 업종)로"""
+    c = _새(monkeypatch, ("Z4",), ("2026-10-14",))
+    _국면(monkeypatch, "bull")
+    for sid, 업종 in ((4, "전자"), (5, "전자"), (6, "전자"), (7, "화학"), (8, "전자")):
+        c.conn.execute("INSERT INTO stocks (id, ticker, market, country, name_ko, sector, currency, status, source,"
+                       " fetched_at, asset_type) VALUES (?, ?, 'M', 'KR', ?, ?, 'KRW', 'active', 't', 't', 'stock')",
+                       [sid, f"00{sid}", f"종목{sid}", 업종])  # fmt: skip
+        _시세(c, sid, "2026-10-14", 10_000, 10_000)
+    # 12-1 순: 3 > 4 > 5 > 6 > 8 > 7 — 위 다섯이 모두 '전자'(1·3 도 전자), 7 만 '화학'
+    좋음 = [_d(3, mom=0.99), _d(4, mom=0.98), _d(5, mom=0.97), _d(6, mom=0.96), _d(8, mom=0.95), _d(7, mom=0.94)]
+    나쁨 = [_d(1, mom=0.1, ni=(10, 9, 8, 7)), *[_d(20 + i, mom=0.01 * i, ni=(9, 8, 7, 6)) for i in range(30)]]
+    monkeypatch.setattr(paper_solo, "universe_dossiers", lambda *_a, **_k: 좋음 + 나쁨)
+    _줄, 기록 = _하루(c, monkeypatch, "2026-10-14")
+    # 전자 셋(30.3% — 상한 30% + 여유 1.5%p 안)까지, 넷째 전자부터 막히고 남은 두 자리 가운데 하나를 화학 7 로
+    assert sorted(o[0] for o in _주문(c, "Z4")) == [3, 4, 5, 7]
+    막힘 = c.q("SELECT stock_id, reason FROM paper_decisions WHERE account_id = 'Z4' AND kind = 'blocked' ORDER BY 1")
+    assert [m[0] for m in 막힘] == [6, 8] and all("전자" in m[1] for m in 막힘)
+    assert 기록["accounts"]["Z4"]["buy"]["gate_rounds"] == 2
+
+
+def test_상한_밖의_막힘은_다음_순위로_넘기지_않는다() -> None:
+    """멈춤 스위치·하루 손실·현금 같은 막힘은 다음 순위로 넘겨도 같이 막힌다 — 한 번에 멈춘다"""
+    후보 = [solo.Ranked(i, 100 - i, {"rs": 1}) for i in range(1, 6)]
+    불림: list[int] = []
+
+    def _관문(줄들: list[dict]) -> tuple[list, list]:
+        불림.append(len(줄들))
+        from batch.services import risk_gate as rg
+
+        cs = [rg.Candidate(o["stock_id"], "buy", o["cost_krw"], o["ref_date"], i, o["cash_krw"]) for i, o in enumerate(줄들)]
+        return [], [(c, [("halted", "멈춤 스위치")]) for c in cs]
+
+    import batch.jobs.paper_solo as ps
+
+    class _판:
+        def execute(self, *_a: Any) -> Any:
+            class _R:
+                rows = [(1_000.0, "2026-10-30")]
+
+            return _R()
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(cal, "local_today", lambda _m=None: date(2026, 11, 2))
+        주문, 통과, 막힘, _기록 = ps.orders_through_gate(
+            _판(), solo.CANSLIM, 후보, 2, market="KR", valuation=_가치(1e8, 1e8), open_buys=[], fx_rate=None,
+            as_of="2026-10-30", n_ranked=5, is_frozen=lambda _s: False, gate=_관문, account_id="Z4",
+            fill_session="2026-11-02",
+        )  # fmt: skip
+    assert 불림 == [2] and 통과 == [] and len(막힘) == 2
+
+
+def test_시세_없음도_다음_순위로_미국은_권리락을_읽지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cal, "local_today", lambda _m=None: date(2026, 11, 2))
+    후보 = [solo.Ranked(i, 100 - i, {"rs": 1}) for i in (1, 2)]
+
+    class _판:
+        def execute(self, _sql: str, args: list) -> Any:
+            class _R:
+                rows = {1: [], 2: [(1_000.0, "2026-10-30")]}[args[0]]
+
+            return _R()
+
+    주문, 기록 = paper_solo.size_orders(
+        _판(), solo.CANSLIM, 후보, 1, market="KR", valuation=_가치(1e6, 1e6), open_buys=[], fx_rate=None,
+        as_of="2026-10-30", n_ranked=2, is_frozen=lambda _s: False,
+    )  # fmt: skip
+    assert [o["stock_id"] for o in 주문] == [2] and 기록["not_bought"] == {1: "시세 없음 — 다음 순위로"}
+    from batch.jobs import monitor_targets as mt
+
+    monkeypatch.setattr(mt, "rights_factors_since", lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("읽음")))
+    행 = {"stock_id": 2, "country": "US", "currency": "USD", "lots": [("2026-10-15", 1.0, 100.0)],
+         "market_value": 91.0, "quantity": 1.0, "price_date": "2026-10-21"}  # fmt: skip
+    assert job._단독넘음(object(), 행, date(2026, 10, 22), solo.CANSLIM_EXIT)["reason_code"] == "오닐손절"
+
+
+def test_단독_매도_규칙_이름은_정의처와_같다() -> None:
+    assert pp.SOLO_SELL_RULES == (solo.HOLD_1Y, solo.CANSLIM_EXIT)
+
+
+def test_다시_잴_때_앞_회차에_통과한_줄의_예약을_뺀다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """두 번째 회차의 쓸 현금은 첫 회차 통과 줄을 열린 매수로 쳐 뺀다 — 빼지 않으면 같은 현금을 두 번 쓴다"""
+    from batch.services import risk_gate as rg
+
+    monkeypatch.setattr(cal, "local_today", lambda _m=None: date(2026, 11, 2))
+    후보 = [solo.Ranked(i, 100 - i, {"rs": 1}) for i in range(1, 6)]
+
+    class _판:
+        def execute(self, *_a: Any) -> Any:
+            class _R:
+                rows = [(1_000.0, "2026-10-30")]
+
+            return _R()
+
+    def _관문(줄들: list[dict]) -> tuple[list, list]:  # 2 만 업종 상한
+        cs = [rg.Candidate(o["stock_id"], "buy", o["cost_krw"], o["ref_date"], i, o["cash_krw"]) for i, o in enumerate(줄들)]
+        return [c for c in cs if c.stock_id != 2], [(c, [("sector_cap", "업종")]) for c in cs if c.stock_id == 2]
+
+    # 평가 총액 100만 × 10% = 100주(예약 1주 1,111원) · 쓸 현금 20만
+    주문, 통과, _막힘, _기록 = paper_solo.orders_through_gate(
+        _판(), solo.CANSLIM, 후보, 3, market="KR", valuation=_가치(1e6, 200_000), open_buys=[], fx_rate=None,
+        as_of="2026-10-30", n_ranked=5, is_frozen=lambda _s: False, gate=_관문, account_id="Z4",
+        fill_session="2026-11-02",
+    )  # fmt: skip
+    # 1회: 1 100주(11.11만) · 2 80주 → 2 막힘. 2회: 남은 현금 20만 − 11.11만 = 8.89만 → 3 80주, 4 는 현금 부족
+    assert [(주문[c.key]["stock_id"], 주문[c.key]["quantity"]) for c in 통과] == [(1, 100), (3, 80)]

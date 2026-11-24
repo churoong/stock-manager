@@ -2693,19 +2693,28 @@ def run_step(
                         client, 고르기, market=market, as_of=단독기준일, fill_session=다음장, universe_ids=유니버스,
                         held=든, excluded=set(최근판) | 이미팖, cache=단독캐시,
                     )  # fmt: skip
+                    # 위 거둠으로 `열린` 이 줄었을 수 있다 — 관문의 열린 칸을 다시 잰다(ETF 갈래와 같다). 후보 종목의
+                    # 업종도
+                    # 채운다 — 보유·열린 매수만 채우면 새 종목은 업종이 비어 업종 30% 상한이 꺼졌다(25.2321, 25.2320
+                    # 교차검증 [필수] — 신호 갈래 25.1453 과 같은 꼴)
+                    새칸 = _관문_열린칸(client, aid, v, 열린, fx, stock_cache)
+
+                    def _단독관문(줄들: list[dict[str, Any]]) -> tuple[list[Any], list[Any]]:
+                        칸 = {**새칸, "sector_of": {**새칸["sector_of"], **{
+                            o["stock_id"]: _stock(client, o["stock_id"], stock_cache).get("sector") for o in 줄들}}}
+                        줄 = [rg.Candidate(o["stock_id"], "buy", o["cost_krw"], o["ref_date"], i, o["cash_krw"])
+                             for i, o in enumerate(줄들)]  # fmt: skip
+                        return rg.gate(줄, dc_replace(문맥, **칸))
+
                     # 기업행위 경계는 후보마다 — 관문의 `frozen`(관심 집합만)은 유니버스에서 새로 고른 종목을 못 막는다
-                    # (25.2320, R 의 대체 고르기와 같은 꼴). 경계면 다음 순위로
-                    주문, 크기기록 = paper_solo.size_orders(
+                    # (25.2320, R 의 대체 고르기와 같은 꼴). 경계·자료 문제·종목·업종 상한이면 다음 순위로(25.2321)
+                    주문, 통과, 막힘, 크기기록 = paper_solo.orders_through_gate(
                         client, 고르기, 후보들, 자리, market=market, valuation=v, open_buys=열린매수,
                         fx_rate=fx[0] if fx else None, as_of=단독기준일, n_ranked=int(b기록.get("ranked") or 0),
                         is_frozen=lambda sid: sid in 멈춘 or sid in frozen_ids(client, {sid}, {sid: market}),
+                        gate=_단독관문, account_id=aid, fill_session=다음장,
                     )  # fmt: skip
                     b기록.update(크기기록)
-                    후보 = [rg.Candidate(o["stock_id"], "buy", o["cost_krw"], o["ref_date"], i, o["cash_krw"])
-                            for i, o in enumerate(주문)]  # fmt: skip
-                    # 위 거둠으로 `열린` 이 줄었을 수 있다 — 관문의 열린 칸을 다시 잰다(ETF 갈래와 같다)
-                    문맥 = dc_replace(문맥, **_관문_열린칸(client, aid, v, 열린, fx, stock_cache))
-                    통과, 막힘 = rg.gate(후보, 문맥)
                     막힌수 += len(막힘)
                     막힌모두 += 막힘
                     기준 = 다시잰기준(기준)

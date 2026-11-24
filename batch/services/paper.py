@@ -107,6 +107,9 @@ MASTER_IDS: tuple[str, ...] = ("ZL", "ZM")
 #: 매도
 #: 규칙(`hold_1y`·`canslim_exit`)으로 판다. 코호트 "거장 2026-11" 로 ZM·ZL 과 함께 판정(12.7)
 SOLO_IDS: tuple[str, ...] = ("Z3", "Z4")
+#: 그 두 계좌의 매도 규칙 이름 — 정의처는 `services/solo`(HOLD_1Y·CANSLIM_EXIT — 시험이 대조). 여기서 solo 를 부르면
+#: 순환 import 라 이름만 둔다
+SOLO_SELL_RULES: tuple[str, ...] = ("hold_1y", "canslim_exit")
 #: 같은 날 사고파는 계좌 — 당일 단타 T (docs/paper.md 16.3.2, 25.1881). 한 날 안의 체결·판정 순서에서 이 계좌의 매도만
 #: 그날 매수 **뒤**로 간다(`side_rank`). 행은 0092(2026-10-29 개설) — 이 정렬이 행보다 먼저 main 에 들어갔다
 SAME_DAY_IDS: tuple[str, ...] = ("T",)
@@ -1127,7 +1130,7 @@ def summary_lines(
             out.append(f"  {nm} 규칙 점검: 해당 없음(ETF 전술 — 종목·섹터 상한 100%, 손절 대신 지수 국면이 바뀐 날"
                        " 갈아탐, paper.md 17.1)")
             continue
-        elif (sell_rules or {}).get(aid) in ("hold_1y", "canslim_exit"):
+        elif (sell_rules or {}).get(aid) in SOLO_SELL_RULES:
             # 거장 단독 Z3·Z4(paper.md 18장, 25.2320 — 25.2319 교차검증 [권고]): Z3 은 손절이 없고 Z4 의 선은 평균단가
             # 대비 기간 손절(−25% 등)이 아니라 첫 체결가 대비 종가 −8%·+25% — core 잣대로 세면 틀린 수가 났다. 값은 규칙
             # 정의처에서(25.1874). Z4 는 설계상 종목 10% 로 사 조금만 올라도 종목 상한을 넘는다 — 덧말로 가른다

@@ -21,6 +21,14 @@ from batch.services import risk_gate as rg
 from batch.services import solo
 from batch.services.sell_flags import _criterion
 
+#: 한 자리에 넘길 수 있는 후보 수 — 넘으면 그만 본다(25.2321). 상위 10 이 모두 자료 문제면 그날 자료가 통째로 이상한
+#: 것이다
+SKIP_PER_SLOT = 10
+#: 위험 점검의 종목·업종 상한에 막힌 후보는 다음 순위로 넘긴다(25.2321) — 그 밖의 막힘(멈춤 스위치·하루 손실·현금·주문
+#: 수)은
+#: 다음 순위로 넘겨도 같이 막혀 멈춘다. 다시 재는 횟수 상한
+CAP_CODES = frozenset({"stock_cap", "sector_cap"})
+MAX_GATE_ROUNDS = 5
 #: 기준가 — 그날까지 마지막 종가(`jobs/paper.LAST_CLOSE_SQL` 와 같은 글, 순환 import 를 피하려고 여기 둔다 — 시험이
 #: 대조)
 LAST_CLOSE_SQL = (
@@ -121,12 +129,16 @@ def size_orders(
     여유 = (1 + pp.FEE_BUFFER) * (1 + pp.FX_BUFFER if 통화 != "KRW" else 1.0)
     주문: list[dict[str, Any]] = []
     못삼: dict[int, str] = {}
+    넘김상한 = slots * SKIP_PER_SLOT
     for r in candidates:
         if len(주문) >= slots:
             break
-        if is_frozen(r.stock_id):
-            못삼[r.stock_id] = "기업행위 경계(분할·병합 의심) — 다음 순위로"
-            continue
+        if len(못삼) >= 넘김상한:
+            # 상위 후보가 줄줄이 자료 문제인 날(시세가 통째로 묵음·경계 읽기 장애) 유니버스 끝까지 읽지 않게(25.2321
+            # [참고])
+            못삼[-1] = f"넘긴 후보 {넘김상한}개 — 그만 봄"
+            break
+        # 싼 검사(시세·묵음·크기) 먼저, 경계(종목마다 DB 읽기)는 뒤에(25.2321 [참고])
         시세 = client.execute(LAST_CLOSE_SQL, [r.stock_id, 오늘.isoformat()]).rows
         if not 시세:
             못삼[r.stock_id] = "시세 없음 — 다음 순위로"
@@ -139,6 +151,9 @@ def size_orders(
         크기 = math.floor(valuation.equity_krw * 비중 / 주당) if 주당 > 0 else 0
         if 크기 < 1:
             못삼[r.stock_id] = "비중으로 1주에 못 미침 — 다음 순위로"
+            continue
+        if is_frozen(r.stock_id):
+            못삼[r.stock_id] = "기업행위 경계(분할·병합 의심) — 다음 순위로"
             continue
         예약단가 = 주당 * (1 + pp.OPEN_BUY_BUFFER) * 여유  # `reserved_krw` 와 같은 식
         수량 = min(크기, math.floor(max(현금, 0.0) / 예약단가))
@@ -156,9 +171,57 @@ def size_orders(
             # 25.2168)
             "rationale": {"rule": 규칙, "rank_pct": round(r.pct, 4), "detail": r.detail, "weight": 비중,
                           "criteria": 근거, "signal": {"criteria": 근거}},
-            # 관문 종목·업종 상한은 기준가 × 수수료 여유(산 값), 현금 검사는 예약과 같은 값
-            "ref_price": 종가, "cost_krw": 수량 * 주당 * (1 + pp.FEE_BUFFER), "ref_date": 날,
+            # 관문 종목·업종 상한은 기준가 × 수수료·환율 여유(`size_buys` 와 같은 짝, 25.2321), 현금 검사는 예약과 같은
+            # 값
+            "ref_price": 종가, "cost_krw": 수량 * 주당 * 여유, "ref_date": 날,
             "cash_krw": 수량 * 예약단가,
         })  # fmt: skip
     return 주문, {"orders": len(주문), "picks": [o["stock_id"] for o in 주문],
                   **({"not_bought": 못삼} if 못삼 else {})}  # fmt: skip
+
+
+def orders_through_gate(
+    client: Any, selection: str, candidates: list[solo.Ranked], slots: int, *, market: str,
+    valuation: pp.Valuation, open_buys: list[pp.Order], fx_rate: float | None, as_of: str, n_ranked: int,
+    is_frozen: Callable[[int], bool], gate: Callable[[list[dict[str, Any]]], tuple[list[Any], list[Any]]],
+    account_id: str, fill_session: str,
+) -> tuple[list[dict[str, Any]], list[Any], list[Any], dict[str, Any]]:
+    """`size_orders` → 위험 점검(`gate` — 주문 줄 전체를 받아 (통과 Candidate, [(막힌 Candidate, 까닭)]))을 되풀이한다.
+
+    새로 낸 줄이 **종목·업종 상한으로만** 막히면 그 종목을 빼고 남은 자리를 다음 순위로 다시 잰다(최대
+    `MAX_GATE_ROUNDS`). 사전 등록 "상위에서 아직 안 든 1종목" 을 살 수 있는 다음 순위로 읽은 것과 같은 꼴(25.2321,
+    25.2320 교차검증 [권고] — 예전엔 상한에 막힌 자리가 그날 비고 다음 날 같은 상위 후보가 또 막혀, 한 업종에 몰린 동안
+    Z4 가 상한까지 영영 못 찼다). 다음 회차의 현금은 앞 회차에 통과한 줄을 열린 매수로 쳐 뺀다(예약과 같은 잣대).
+    돌려주는 것: (모든 주문 줄, 통과, 막힘, 기록) — Candidate 의 `key` 는 주문 줄의 자리"""
+    주문: list[dict[str, Any]] = []
+    통과: list[Any] = []
+    막힘: list[Any] = []
+    기록: dict[str, Any] = {}
+    넘김: set[int] = set()
+    for 회 in range(MAX_GATE_ROUNDS):
+        남은 = slots - len(통과)
+        if 남은 <= 0:
+            break
+        든 = {주문[c.key]["stock_id"] for c in 통과}
+        더 = [r for r in candidates if r.stock_id not in 넘김 and r.stock_id not in 든]
+        예약 = open_buys + [pp.Order(id=-1 - c.key, account_id=account_id, stock_id=주문[c.key]["stock_id"], side="buy",
+                                     order_type="market", limit_price=None, quantity=주문[c.key]["quantity"],
+                                     currency=주문[c.key]["currency"], fill_session=fill_session,
+                                     ref_price=주문[c.key]["ref_price"]) for c in 통과]  # fmt: skip
+        새, 기 = size_orders(client, selection, 더, 남은, market=market, valuation=valuation, open_buys=예약,
+                            fx_rate=fx_rate, as_of=as_of, n_ranked=n_ranked, is_frozen=is_frozen)  # fmt: skip
+        for k, v in 기.items():
+            기록[k] = {**기록.get(k, {}), **v} if isinstance(v, dict) else v
+        if not 새:
+            break
+        시작 = len(주문)
+        주문 += 새
+        통과, 막힘 = gate(주문)
+        새막힘 = [(c, 까닭) for c, 까닭 in 막힘 if c.key >= 시작]
+        넘김 |= {주문[c.key]["stock_id"] for c, _ in 새막힘}
+        if not 새막힘 or not all(code in CAP_CODES for _c, 까닭 in 새막힘 for code, _t in 까닭):
+            break
+        기록["gate_rounds"] = 회 + 2
+    기록["orders"] = len(통과)
+    기록["picks"] = [주문[c.key]["stock_id"] for c in 통과]
+    return 주문, 통과, 막힘, 기록
