@@ -80,6 +80,8 @@ def test_buy_orders_의_글자_까닭은_모두_상수에_있다() -> None:
 
 #: 정상 반환이 `skipped` 에 싣는 후보별 건너뜀 목록의 꼴(이상 까닭이 아니다) — 이 글자 그대로만 상수가 아니어도 된다
 SKIPPED_LIST_FORMS = frozenset({"빠짐[:10]"})
+#: 끝의 정상 반환이 dict 에 펼치는 꼴(`paper_solo.size_orders` 의 못 산 후보 칸) — 이 글자 그대로만 펼침을 허용한다
+SPREAD_FORMS = frozenset({"{'not_bought': 못삼} if 못삼 else {}"})
 
 
 def _skipped_글들(함수: object) -> set[str]:
@@ -91,10 +93,6 @@ def _skipped_글들(함수: object) -> set[str]:
 
     나무 = ast.parse(textwrap.dedent(inspect.getsource(함수)))  # type: ignore[arg-type]
     글들: set[str] = set()
-    # **이른 반환**만 — 주문 줄이 빈 목록(`return [], {...}`)인 return. 끝의 정상 return 은 후보별 건너뜀 목록을 `skipped` 에
-    # 싣는다(`buy_orders` 의 `빠짐[:10]`) — 이상 까닭이 아니다
-    이른 = [n for n in ast.walk(나무) if isinstance(n, ast.Return) and isinstance(n.value, ast.Tuple)
-            and n.value.elts and isinstance(n.value.elts[0], ast.List) and not n.value.elts[0].elts]  # fmt: skip
     # 꼴을 강제한다(25.2333, 25.2332 교차검증 [권고]) — 이른 반환의 둘째 칸이 dict 글자가 아니면(`return [], 기록`·
     # `dict(skipped=…)`) 대조가 까닭을 볼 수 없어 실패시킨다. 빈 목록을 호출로 만든 꼴(`list()`)도 쓰지 않는다.
     # 첫 칸을 변수에 담은 꼴은 아래 글 모으기가 덮는다(25.2335·25.2336)
@@ -102,20 +100,28 @@ def _skipped_글들(함수: object) -> set[str]:
         if isinstance(n, ast.Return) and isinstance(n.value, ast.Tuple) and n.value.elts:
             첫 = n.value.elts[0]
             assert not (isinstance(첫, ast.Call) and ast.unparse(첫.func) == "list"), ast.unparse(n)
-    # 글 모으기는 **모든** 튜플 반환에서(25.2335, 25.2334 교차검증 [권고]) — 첫 칸을 변수에 담은 이른 반환은 `이른` 거름에
-    # 안 걸려 대조에서 조용히 빠졌다. 그리고 꼴을 강제한다(25.2336, 25.2335 교차검증 [권고] — 25.2335 는 글자 상수만 모아
-    # `{"skipped": 까닭}`(이름)·`"새" + 까닭`·`"… %s" % x`·`return 빈, 기록`(dict 변수)이 모두 통과했다):
-    # 모든 튜플 반환의 둘째 칸은 dict 글자, `skipped` 값은 글자 상수 — 예외는 정상 반환의 후보별 목록 꼴
-    # `SKIPPED_LIST_FORMS` 뿐(고정된 글자 그대로)
-    for 반환 in (n for n in ast.walk(나무) if isinstance(n, ast.Return) and isinstance(n.value, ast.Tuple)):
-        assert len(반환.value.elts) == 2 and isinstance(반환.value.elts[1], ast.Dict), ast.unparse(반환)  # type: ignore[union-attr]
-        for d in (n for n in ast.walk(반환.value) if isinstance(n, ast.Dict)):  # type: ignore[arg-type]
+    # **허용하는 꼴 하나**(25.2337, 25.2336 교차검증 [권고]) — 25.2332→2333→2335→2336 이 거를 꼴을 하나씩 더했는데 매번
+    # 거름 밖 꼴(튜플을 변수에 담은 반환·`{**기록}` 펼침·이름 열쇠·도우미 호출 반환·첫 칸 변수 + 목록 꼴)이 다시 나왔다.
+    # 이제 거꾸로 묶는다: 함수 안의 **모든** return 은 `(…, {글자 열쇠: …})` 두 칸 튜플이고, 그 dict(안쪽 포함)의 열쇠는 모두
+    # 글자 상수, `skipped` 값은 글자 상수. 예외는 함수 본문의 **마지막 문장**인 정상 반환의 후보별 목록 꼴
+    # `SKIPPED_LIST_FORMS`·펼침 꼴 `SPREAD_FORMS` 뿐(글자 그대로)
+    본문 = 나무.body[0].body  # type: ignore[attr-defined]
+    끝반환 = 본문[-1] if isinstance(본문[-1], ast.Return) else None
+    for 반환 in (n for n in ast.walk(나무) if isinstance(n, ast.Return)):
+        꼴 = 반환.value
+        assert isinstance(꼴, ast.Tuple) and len(꼴.elts) == 2 and isinstance(꼴.elts[1], ast.Dict), ast.unparse(반환)
+        for d in (n for n in ast.walk(꼴) if isinstance(n, ast.Dict)):
             for k, v in zip(d.keys, d.values, strict=True):
-                if isinstance(k, ast.Constant) and k.value == "skipped":
-                    if isinstance(v, ast.Constant) and isinstance(v.value, str):
-                        글들.add(v.value)
-                    else:
-                        assert 반환 not in 이른 and ast.unparse(v) in SKIPPED_LIST_FORMS, ast.unparse(v)
+                if k is None:  # `**` 펼침 — 끝반환의 고정된 꼴만(`SPREAD_FORMS`)
+                    assert 반환 is 끝반환 and ast.unparse(v) in SPREAD_FORMS, ast.unparse(d)
+                    continue
+                assert isinstance(k, ast.Constant) and isinstance(k.value, str), ast.unparse(d)
+                if k.value != "skipped":
+                    continue
+                if isinstance(v, ast.Constant) and isinstance(v.value, str):
+                    글들.add(v.value)
+                else:
+                    assert 반환 is 끝반환 and ast.unparse(v) in SKIPPED_LIST_FORMS, ast.unparse(v)
     return 글들
 
 
