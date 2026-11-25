@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import inspect
+from pathlib import Path
 
 import pytest
 
@@ -147,6 +148,33 @@ NORMAL_SKIP_FORMS = frozenset({
 })
 
 
+def _첨자_자리_됨(첨자: object, 부모: dict) -> bool:
+    """`x["skipped"]` 첨자가 놓여도 되는 자리 — 읽기(Load), 또는 대입문의 **곧은** 과녁(25.2340, 25.2339 교차검증 [권고]:
+    튜플 풀기 `x["skipped"], _ = "새", 0`·`for x["skipped"] in …` 과녁은 자리 검사도 값 모으기도 빠져나갔다). 지우기(Del)·
+    튜플·for·with 과녁은 실패"""
+    import ast
+
+    assert isinstance(첨자, ast.Subscript)
+    if isinstance(첨자.ctx, ast.Load):
+        return True
+    위 = 부모.get(첨자)
+    if isinstance(위, ast.Assign):
+        return any(t is 첨자 for t in 위.targets)
+    return isinstance(위, ast.AugAssign | ast.AnnAssign) and 위.target is 첨자
+
+
+def test_batch_에_skipped_이름_상수가_없다() -> None:
+    """이름 열쇠(`{pp.SKIP_KEY: "새"}`)는 두 모듈의 글자 `"skipped"` 만 보는 허용 목록 밖이다(25.2340, 25.2339 교차검증
+    [참고]) — 값이 `"skipped"` 인 대입이 batch 어디에도 없게 묶는다"""
+    import ast
+
+    뿌리 = Path(__file__).resolve().parent.parent / "batch"
+    for 파일 in 뿌리.rglob("*.py"):
+        for n in ast.walk(ast.parse(파일.read_text(encoding="utf-8"))):
+            if isinstance(n, ast.Assign | ast.AnnAssign) and isinstance(n.value, ast.Constant):
+                assert n.value.value != "skipped", f"{파일}:{n.lineno}"
+
+
 def test_모듈_전체의_skipped_글은_이상이나_정상_한쪽에_든다() -> None:
     """25.2338 (25.2337 교차검증 [권고]) — 두 함수의 return 만 보아, 부르는 쪽(`run` 의 `a기록["buy"] = {"skipped": …}`
     직접 대입·`paper_solo.plan`)에 새 이상 까닭을 넣고 `BUY_FAULT_SKIPS` 에 안 넣으면 `desk._buy_fault` 가 정상 쉼으로
@@ -170,7 +198,7 @@ def test_모듈_전체의_skipped_글은_이상이나_정상_한쪽에_든다() 
                 continue
             위 = 부모.get(c)
             허용 = ((isinstance(위, ast.Dict) and any(k is c for k in 위.keys))
-                  or (isinstance(위, ast.Subscript) and 위.slice is c)
+                  or (isinstance(위, ast.Subscript) and 위.slice is c and _첨자_자리_됨(위, 부모))
                   or (isinstance(위, ast.Call) and isinstance(위.func, ast.Attribute) and 위.func.attr == "get"
                       and 위.args[:1] == [c]))  # fmt: skip
             assert 허용, (모듈.__name__, c.lineno, ast.unparse(위) if 위 is not None else None)
