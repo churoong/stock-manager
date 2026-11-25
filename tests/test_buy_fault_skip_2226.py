@@ -129,7 +129,9 @@ def test_같은_날_다시_돌아_샀어도_사고로_남는다() -> None:
     assert desk.batch_incident_days(줄들, {"daily_kr": ["2026-10-10"]}) == 1
 
 
-#: `skipped` 열쇠에 실리는 글 가운데 **이상이 아닌 것**(정상 쉼·단계 수준) — 모듈 전체 대조의 반대쪽(25.2338). 새 글을 쓰면
+#: `skipped` 열쇠에 실리는 글 가운데 **매수 이상이 아닌 것**(정상 쉼·단계 수준 — 단계 수준 판정은 `desk.paper_step_failed`
+#: 몫이라 "사고 아님" 이라는 뜻이 아니다) — 모듈 전체 대조의 반대쪽(25.2338). `jobs/paper_etf` 는 대조 밖이다 — ETF 기록은
+#: `desk._buy_fault` 가 `etf` 칸으로 빼고 `_etf_warning` 이 따로 띄운다. 새 글을 쓰면
 #: `pp.BUY_FAULT_SKIPS`(이상 — 운용 점검이 띄움) 또는 여기(정상 — 사유와 함께) 가운데 한 곳에 넣어야 시험이 지나간다
 NORMAL_SKIPS: dict[str, str] = {
     "배분하지 않는 날(신호 없음·묵음·추천 못 읽음)": "배분 계좌가 쉬는 날 — 신호 없음은 리포트가 따로 말한다(jobs/paper run)",
@@ -155,8 +157,23 @@ def test_모듈_전체의_skipped_글은_이상이나_정상_한쪽에_든다() 
     from batch.jobs import paper_solo
 
     본것: set[str] = set()
+    assert not set(NORMAL_SKIPS) & set(pp.BUY_FAULT_SKIPS)  # 한쪽에만(25.2339)
     for 모듈 in (job, paper_solo):
         나무 = ast.parse(inspect.getsource(모듈))
+        # `"skipped"` 글자가 놓일 수 있는 자리를 **허용 목록**으로(25.2339, 25.2338 교차검증 [권고] — 25.2338 은 쓰는 꼴 셋만
+        # 모아 `.setdefault("skipped", …)`·`dict([("skipped", …)])`·`SKIP_KEY = "skipped"; {SKIP_KEY: …}` 가 빠졌다):
+        # dict 열쇠 · 첨자(`x["skipped"]` 읽기·쓰기) · `.get("skipped")` 첫 인자. 그 밖 자리면 실패 — 아래 세 꼴이 모으는
+        # 쓰는 자리 전부가 된다
+        부모 = {c: n for n in ast.walk(나무) for c in ast.iter_child_nodes(n)}
+        for c in ast.walk(나무):
+            if not (isinstance(c, ast.Constant) and c.value == "skipped"):
+                continue
+            위 = 부모.get(c)
+            허용 = ((isinstance(위, ast.Dict) and any(k is c for k in 위.keys))
+                  or (isinstance(위, ast.Subscript) and 위.slice is c)
+                  or (isinstance(위, ast.Call) and isinstance(위.func, ast.Attribute) and 위.func.attr == "get"
+                      and 위.args[:1] == [c]))  # fmt: skip
+            assert 허용, (모듈.__name__, c.lineno, ast.unparse(위) if 위 is not None else None)
         for n in ast.walk(나무):
             값들: list[ast.expr] = []
             if isinstance(n, ast.Dict):
@@ -176,7 +193,10 @@ def test_모듈_전체의_skipped_글은_이상이나_정상_한쪽에_든다() 
                     assert v.value in pp.BUY_FAULT_SKIPS or v.value in NORMAL_SKIPS, (모듈.__name__, v.value)
                     본것.add(v.value)
                 else:
-                    assert ast.unparse(v) in NORMAL_SKIP_FORMS, (모듈.__name__, ast.unparse(v))
-                    본것.add(ast.unparse(v))
+                    # 꼴은 다시 파싱한 나무로 견준다(25.2339 — unparse 글자는 따옴표 꼴이 파이썬 판마다 다를 수 있다)
+                    꼴 = next((f for f in NORMAL_SKIP_FORMS if ast.dump(ast.parse(f, mode="eval").body) == ast.dump(v)),
+                             None)  # fmt: skip
+                    assert 꼴 is not None, (모듈.__name__, ast.unparse(v))
+                    본것.add(꼴)
     # 목록이 낡지 않게 — 정상 목록의 글·꼴이 모두 실제로 쓰인다
     assert set(NORMAL_SKIPS) | NORMAL_SKIP_FORMS <= 본것, (set(NORMAL_SKIPS) | NORMAL_SKIP_FORMS) - 본것
