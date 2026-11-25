@@ -595,7 +595,11 @@ def _개장전_잔고(rows: list[dict[str, Any]], market: str, avgs: dict[str, d
         try:
             시각 = datetime.fromisoformat(str(r["fetched_at"]))
             시각 = 시각 if 시각.tzinfo else 시각.replace(tzinfo=UTC)
-            개장 = cal.session_open_utc(market, date.fromisoformat(날))
+            # 국내는 수능일 한 시간 늦춤을 아는 `kr_open_utc`(25.2348 — 11-24 결함 루프 건너뛴 ⓒ: 달력 그대로면 수능일
+            # 09:00~10:00 KST 의 개장 전 잔고 줄이 "개장 뒤" 로 빠져 그날 기준점을 잃었다. 주문 창 `kr_order_window` 와
+            # 같은 잣대)
+            개장 = (kr_open_utc(date.fromisoformat(날)) if market == "KR"
+                   else cal.session_open_utc(market, date.fromisoformat(날)))  # fmt: skip
             보유 = json.loads(r["holdings_json"] or "[]")
         except (TypeError, ValueError):
             continue
