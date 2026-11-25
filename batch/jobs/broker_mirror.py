@@ -318,14 +318,14 @@ def mark_nonjudgment_defers(client: Any, rows: list[dict[str, Any]], market: str
 
 
 def kr_open_utc(day: date) -> datetime | None:
-    """국내 그 거래일 정규장 시작(UTC) — 수능일 늦춤 포함(25.1774). 정의처는 `monitor_targets.open_utc`(25.2355)"""
+    """국내 그 거래일 정규장 시작(UTC) — 수능일 늦춤 포함(25.1774). 정의처는 `core/calendar.market_open_utc`(25.2356)"""
     from batch.jobs import monitor_targets as mt
 
     return mt.open_utc("KR", day)
 
 
 def kr_close_utc(day: date) -> datetime | None:
-    """국내 그 거래일 정규장 마감(UTC) — 수능일 16:30(25.2240). 정의처는 `monitor_targets.close_utc`(25.2355)"""
+    """국내 그 거래일 정규장 마감(UTC) — 수능일 16:30(25.2240). 정의처는 `core/calendar.market_close_utc`(25.2356)"""
     from batch.jobs import monitor_targets as mt
 
     return mt.close_utc("KR", day)

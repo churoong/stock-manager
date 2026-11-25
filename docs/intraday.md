@@ -127,7 +127,7 @@ cron-job.org  → GET /api/cron/intraday?market=KR|US  (헤더 x-cron-secret)
 | 미국 뉴스 | `…/api/cron/news` | **매 60분**, 하루 종일 (2026-10-02 까지 매 1분, infra 25.880) | 매일 |
 | 국내 뉴스 | `…/api/cron/news-kr` | **매 60분**, 하루 종일 | 매일 |
 
-> **수능일은 장이 10:00~16:30 이다** (docs/infra.md 25.350). 달력(`market_sessions`)은 `monitor_targets.KR_CSAT_DAYS` 로 고쳐 적지만, 크론이 15:55 에 끝나면 마지막 한 시간은 불리지 않는다. 그날만 16:55 까지 늘릴지는 사용자 결정(docs/handoff.md).
+> **수능일은 장이 10:00~16:30 이다** (docs/infra.md 25.350). 달력(`market_sessions`)은 `core/calendar.KR_CSAT_DAYS`(25.2356 정의처) 로 고쳐 적지만, 크론이 15:55 에 끝나면 마지막 한 시간은 불리지 않는다. 그날만 16:55 까지 늘릴지는 사용자 결정(docs/handoff.md).
 
 > **장중 말고 셋이 더 있다** (2026-09-23, docs/infra.md 25.141). 이 표에 장중 두 줄만
 > 있었는데, 사용자가 등록할 것은 다섯이다. 주기의 근거는 `docs/sentiment.md`

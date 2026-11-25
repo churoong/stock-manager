@@ -280,7 +280,6 @@ class RunDecision:
     late_minutes: int | None = None
 
 
-
 #: **수능일 국내 장은 한 시간 늦게 열고 늦게 닫는다**(10:00~16:30 KST) (docs/infra.md 25.350).
 #: exchange_calendars 4.13.2 는 이날을 평일처럼 09:00~15:30 으로 준다 — 2026-09-27 이 세션에서 직접 돌려 확인했다
 #: (새해 첫 거래일 10:00 개장은 맞게 준다). 그대로 두면 장중 경로가 15:55 뒤를 장 밖으로 보고
@@ -297,7 +296,8 @@ def market_open_utc(market: str, day: date) -> datetime | None:
     (`decide`), KIS 주문 창·잔고 기준점, 가상모의투자 "이미 열렸나/닫혔나", 장중 감시 창, 지수 확정 거래일이 이것을
     쓴다"""
     열림 = session_open_utc(market, day)
-    if market == "KR" and 열림 is not None and day.isoformat() in KR_CSAT_DAYS and 열림.astimezone(UTC).hour == 0:
+    if (market.upper() == "KR" and 열림 is not None and day.isoformat() in KR_CSAT_DAYS
+            and 열림.astimezone(UTC).hour == 0):  # fmt: skip
         열림 += CSAT_SHIFT
     return 열림
 
@@ -306,10 +306,11 @@ def market_close_utc(market: str, day: date) -> datetime | None:
     """그 거래일 정규장 마감(UTC) — 국내 수능일은 개장처럼 한 시간 늦춘다(16:30, 25.350). 달력이 모르면 None"""
     닫힘 = session_close_utc(market, day)
     열림 = session_open_utc(market, day)
-    if (market == "KR" and 닫힘 is not None and 열림 is not None and day.isoformat() in KR_CSAT_DAYS
+    if (market.upper() == "KR" and 닫힘 is not None and 열림 is not None and day.isoformat() in KR_CSAT_DAYS
             and 열림.astimezone(UTC).hour == 0):  # fmt: skip
         닫힘 += CSAT_SHIFT
     return 닫힘
+
 
 def decide(
     market: str, now: datetime | None = None, force: bool = False
@@ -433,7 +434,7 @@ def next_scheduled_hint(market: str, now: datetime | None = None) -> str:
         # 문구의 시각은 상수에서(25.2112 — 상수와 글이 어긋나지 않게)
         if market.upper() == "KR":
             return (f"다음 거래일 08:27 KST — 오늘 마지막 예비 실행({시:02d}:{분:02d} KST) 시각이 지났습니다"
-                    " (늦게 도착한 예비가 장 마감(15:30 KST) 전까지 더 돌 수는 있으나 약속하지 않습니다)")  # fmt: skip
+                    " (늦게 도착한 예비가 장 마감 전까지 더 돌 수는 있으나 약속하지 않습니다)")  # fmt: skip
         return (f"다음 거래일 미국 정규장 시작 1시간 전 — 오늘 마지막 예약({시:02d}:{분:02d} UTC) 시각이 지났습니다"
                 " (늦게 도착한 예비가 장 마감 전까지 더 돌 수는 있으나 약속하지 않습니다)")  # fmt: skip
     # **같은 날 예비 실행을 말한다** (docs/infra.md 25.913, 감사). 실패 알림 끝의 "다음 예정 매 거래일 08:27" 은

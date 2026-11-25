@@ -59,13 +59,13 @@ QUIET_SKIPPED = "quiet-skipped"  # 웹 장중 경로의 같은 이름과 같다
 def session_window(d: date) -> tuple[time, time]:
     """그 거래일 시간외 단일가의 (시작, 끝) KST. **수능일은 한 시간 늦춘다**(25.2134, 11-04 결함 회차 [권고]).
 
-    수능일은 정규장이 10:00~16:30 으로 한 시간 늦고(`monitor_targets.KR_CSAT_DAYS`, 25.350) 장 뒤 시간외도 따라 늦어
+    수능일은 정규장이 10:00~16:30 으로 한 시간 늦고(`core/calendar.KR_CSAT_DAYS`, 25.350) 장 뒤 시간외도 따라 늦어
     약 17:00~19:00 이다 `[확인필요: 거래소 공지 시각]`. 예전엔 16:00~18:00 고정이라 18:17 예약 실행이 진행 중인 중간
     시세를 그날 알림으로 적고, 하루 한 번 자리(alerts UNIQUE)를 차지해 19:00 마감 값은 다시 알리지 못했다"""
-    from batch.jobs import monitor_targets as mt  # 늦은 가져오기 — 서비스가 작업 모듈을 위에서 읽지 않게
+    from batch.core import calendar as cal  # 정의처(25.2357) — 늦은 가져오기는 그대로(달력 라이브러리 읽기를 미룬다)
 
-    if d.isoformat() in mt.KR_CSAT_DAYS:
-        밀림 = datetime.combine(d, OPEN_KST) + mt.CSAT_SHIFT, datetime.combine(d, CLOSE_KST) + mt.CSAT_SHIFT
+    if d.isoformat() in cal.KR_CSAT_DAYS:
+        밀림 = datetime.combine(d, OPEN_KST) + cal.CSAT_SHIFT, datetime.combine(d, CLOSE_KST) + cal.CSAT_SHIFT
         return 밀림[0].time(), 밀림[1].time()
     return OPEN_KST, CLOSE_KST
 
