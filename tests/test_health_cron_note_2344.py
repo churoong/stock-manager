@@ -96,8 +96,11 @@ def test_문턱이_웹_판정과_같다() -> None:
     글 = (뿌리 / "web/lib/health.ts").read_text(encoding="utf-8")
     m = re.search(r'job: "health", market: "ALL", label: "무응답 감시", everyMinutes: (\d+)', 글)
     # 노랑 경계의 배수도 웹에서 읽는다(25.2346, 25.2345 교차검증 [참고] — 배수가 바뀌면 "노랑 경계와 같은 값" 이 몰래 틀어졌다)
-    배수 = re.search(r"const 문턱 = Math\.max\(기대\.everyMinutes \* (\d+), 15\);", 글)
-    assert m and 배수 and "if (지난분 <= 문턱) return { tone: \"ok\"" in 글
+    # 경계 꼴은 cronVerdict 몸통 안에서만 찾는다(같은 줄이 다른 판정 함수에도 있다 — 25.2346 교차검증 [참고])
+    몸통 = 글[글.index("export function cronVerdict("):]
+    몸통 = 몸통[: 몸통.index("\nexport function", 1)]
+    배수 = re.search(r"const 문턱 = Math\.max\(기대\.everyMinutes \* (\d+), 15\);", 몸통)
+    assert m and 배수 and "if (지난분 <= 문턱) return { tone: \"ok\"" in 몸통
     assert int(배수.group(1)) * int(m.group(1)) == daily.HEALTH_CRON_STALE_MINUTES
 
 
