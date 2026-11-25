@@ -166,10 +166,14 @@ def go_shadow_lines(verdicts: list[tuple[str, str, str, tuple[str, ...], bool, i
             매도만 = [v for v in 내 if v[2] == "sell_only"]
             샀을 = [v[5] for v in 매도만 if isinstance(v[5], int) and v[5] > 0]
             수모름 = sum(1 for v in 매도만 if not isinstance(v[5], int))
-            # 매수 수를 아는 칸이 하나도 없으면 "0건" 이 "막을 것 없음" 으로 읽힌다 — "모름" 으로(25.2372)
-            건 = f"{sum(샀을)}건" if 수모름 < len(매도만) else "모름"
-            글 = f"    켰다면 막았을 매수: {건} (매도만 {len(매도만)}칸 가운데 매수를 내려 한 칸 {len(샀을)})"
-            out.append(글 + (f" · 매수 수 모름 {수모름}칸" if 수모름 else ""))
+            # 매수 수를 아는 칸이 하나도 없으면 "0건" 이 "막을 것 없음" 으로 읽힌다 — "모름" 으로(25.2372).
+            # 일부만 알면 아는 칸의 합은 **아래 경계**다 — "N건 이상"(25.2373)
+            if 수모름 == len(매도만):
+                out.append(f"    켰다면 막았을 매수: 모름 (매도만 {len(매도만)}칸 모두 매수 수 모름)")
+            else:
+                건 = f"{sum(샀을)}건" + (" 이상" if 수모름 else "")
+                글 = f"    켰다면 막았을 매수: {건} (매도만 {len(매도만)}칸 가운데 매수를 내려 한 칸 {len(샀을)})"
+                out.append(글 + (f" · 매수 수 모름 {수모름}칸" if 수모름 else ""))
         for 판정, 이름 in (("sell_only", "매도만"), ("no_go", "막힘")):
             셈: dict[str, int] = {}
             for v in 내:
