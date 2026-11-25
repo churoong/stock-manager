@@ -1043,12 +1043,19 @@ def run(
     # (클라이언트가 5만 행마다 더한다 — 이 실행의 덜 더한 몫은 빠진다, Turso 대시보드 값과 같다는 보장도 없다
     # `[확인필요]`). Turso 일 때만(카운터가 Turso 한도다).
     # 한 행 읽기(기본 키). 못 읽으면 모름 칸만 — 주문 단계는 그대로 간다
-    if client_backend.resolved_backend() == client_backend.TURSO:
-        쓴비율 = bm.read_budget_used_pct(db.remaining_read_budget_or_none(client), db.TURSO_MONTHLY_READ_LIMIT)
-        if 쓴비율 is None:
-            기록["read_budget_unknown"] = True
-        elif 쓴비율 >= bm.READ_BUDGET_PCT:
-            기록["read_budget"] = 쓴비율
+    # 통째로 가둔다(25.2335, 25.2334 교차검증 [권고]) — `remaining_read_budget_or_none` 은 execute 예외만 None 으로 막고
+    # 그 밖(값 변환·백엔드 판정)이 던지면 보내기 전에 단계가 끝나 그날 주문·정리가 나가지 않았다. 문턱은 반올림 전 값과
+    # 견준다(79.96% 가 80.0 으로 올라 서지 않게)
+    try:
+        if client_backend.resolved_backend() == client_backend.TURSO:
+            쓴비율 = bm.read_budget_used_pct(db.remaining_read_budget_or_none(client), db.TURSO_MONTHLY_READ_LIMIT)
+            if 쓴비율 is None:
+                기록["read_budget_unknown"] = True
+            elif 쓴비율 >= bm.READ_BUDGET_PCT:
+                기록["read_budget"] = round(쓴비율, 1)
+    except Exception as exc:  # noqa: BLE001 — 그림자 재료라 못 재도 주문 단계는 간다
+        기록["read_budget_unknown"] = True
+        기록["read_budget_error"] = type(exc).__name__
     정리함 = 오늘_정리함(보냄)
     # 오늘 정리한 종목은 **같은 티커의 모든 행**으로 — 같은 날 다시 돌 때 이긴 행이 바뀌면(오늘 새 행을 처음 삼) 앞
     # 실행이 옛 행으로 낸 정리를 못 보고 새 행으로 한 번 더 정리했다(25.1616, 25.1615 교차검증 [필수] 1)

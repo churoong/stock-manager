@@ -92,18 +92,26 @@ def _skipped_글들(함수: object) -> set[str]:
     이른 = [n for n in ast.walk(나무) if isinstance(n, ast.Return) and isinstance(n.value, ast.Tuple)
             and n.value.elts and isinstance(n.value.elts[0], ast.List) and not n.value.elts[0].elts]  # fmt: skip
     # 꼴을 강제한다(25.2333, 25.2332 교차검증 [권고]) — 이른 반환의 둘째 칸이 dict 글자가 아니면(`return [], 기록`·
-    # `dict(skipped=…)`) 대조가 까닭을 볼 수 없어 실패시킨다. 빈 목록을 호출로 만든 꼴(`list()`)·변수에 담은 꼴도 쓰지 않는다
+    # `dict(skipped=…)`) 대조가 까닭을 볼 수 없어 실패시킨다. 빈 목록을 호출로 만든 꼴(`list()`)도 쓰지 않는다. 변수에 담은 꼴은 아래 글 모으기가 덮는다(25.2335)
     for n in ast.walk(나무):
         if isinstance(n, ast.Return) and isinstance(n.value, ast.Tuple) and n.value.elts:
             첫 = n.value.elts[0]
             assert not (isinstance(첫, ast.Call) and ast.unparse(첫.func) == "list"), ast.unparse(n)
     for 반환 in 이른:
         assert len(반환.value.elts) == 2 and isinstance(반환.value.elts[1], ast.Dict), ast.unparse(반환)  # type: ignore[union-attr]
+    # 글 모으기는 **모든** 튜플 반환에서(25.2335, 25.2334 교차검증 [권고]) — 첫 칸을 변수에 담은 이른 반환
+    # (`빈: list = []; return 빈, {"skipped": "새 까닭"}`)은 `이른` 거름에 안 걸려 대조에서 조용히 빠졌다. 끝의 정상 반환은
+    # 첫 칸이 변수(`out`·`주문`)라 첫 칸 꼴로는 막을 수 없다 — 대신 `skipped` 값이 **글자 상수면** 어느 반환이든 까닭으로
+    # 센다. 정상 반환의 후보별 목록(`빠짐[:10]`)은 상수가 아니라 걸러진다. f-string 은 어느 반환에서든 실패(상수와 못 견줌)
+    for 반환 in (n for n in ast.walk(나무) if isinstance(n, ast.Return) and isinstance(n.value, ast.Tuple)):
         for d in (n for n in ast.walk(반환.value) if isinstance(n, ast.Dict)):  # type: ignore[arg-type]
             for k, v in zip(d.keys, d.values, strict=True):
                 if isinstance(k, ast.Constant) and k.value == "skipped":
-                    assert isinstance(v, ast.Constant) and isinstance(v.value, str), ast.unparse(v)
-                    글들.add(v.value)
+                    assert not isinstance(v, ast.JoinedStr), ast.unparse(v)
+                    if 반환 in 이른:
+                        assert isinstance(v, ast.Constant) and isinstance(v.value, str), ast.unparse(v)
+                    if isinstance(v, ast.Constant) and isinstance(v.value, str):
+                        글들.add(v.value)
     return 글들
 
 

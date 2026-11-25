@@ -69,15 +69,17 @@ GO_SELL_ONLY = {
     "read_budget": "DB 월 읽기 누계가 경고선(`READ_BUDGET_PCT`) 이상 — 보낸 뒤 결과를 못 적고 끊길 수 있음(25.2334)",
 }
 #: 읽기 예산 갈래의 문턱(%) — 사용량 카운터의 경고선(`api_usage.warn_at_pct` 기본 80, CLAUDE.md "80% 도달 시 경고")과
-#: 같은 값. 맞춘 값이 아니다. 10월 한 달 누계가 약 72%였다(25.1178) — 무거운 달의 월말에는 설 수 있다
+#: 같은 값. 맞춘 값이 아니다. 10월은 12일째 누계가 이미 약 72%였다(25.1176) — 무거운 달에는 중순부터 설 수 있다(25.2335
+#: 정정 — 25.2334 는 이 값을 한 달 누계로 잘못 읽었다)
 READ_BUDGET_PCT = 80.0
 
 
 def read_budget_used_pct(remaining: int | None, limit: int) -> float | None:
-    """남은 월 읽기 → 쓴 비율(%, 소수 한 자리). 모르면 None. 순수 계산"""
+    """남은 월 읽기 → 쓴 비율(%). 모르면 None. 순수 계산. 반올림하지 않는다 — 문턱은 날 값과 견주고 실을 때만
+    반올림한다(25.2335 — 79.96% 가 80.0 으로 올라 갈래가 섰다)"""
     if remaining is None or limit <= 0:
         return None
-    return round(100 * (1 - remaining / limit), 1)
+    return 100 * (1 - remaining / limit)
 
 
 def halt_shadow(intents: list[Intent]) -> dict[str, int]:
@@ -101,6 +103,8 @@ def go_shadow(record: dict[str, Any]) -> dict[str, Any]:
     - 둘 다 걸리면 `no_go`. 새 코드 첫날(`new_code`)은 KIS 단계(`jobs/broker_mirror.run`)가 앞 거래일 실행의 지문을
       읽어 싣는다(25.2306·25.2308). 읽기 예산(`read_budget`)도 그렇다(25.2334). 아직 보지 않는 것: 커버리지 — 이
       기록에 없다. 시세 기준일은 넣지 않는다(H 의 위험 점검이 이미 막는다, docs/paper.md 15.13)
+    - 갈래가 아닌 모름 칸(`new_code_error`·`read_budget_unknown`)은 판정이 `go` 로 남는다 — 분포를 세는 쪽은 그 칸이
+      있는 실행을 `go` 와 따로 센다(25.2335)
     """
     맞춤 = record.get("reconciled")
     값 = {k: record.get(k) for k in (*GO_NO_GO, *GO_SELL_ONLY)}
