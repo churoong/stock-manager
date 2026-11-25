@@ -48,6 +48,25 @@ def test_문턱_안이면_말하지_않는다() -> None:
     assert daily.health_cron_note(_분전(30, "error"), 지금) is None  # type: ignore[arg-type]
 
 
+def test_오래_멈췄으면_마지막이_실패여도_말한다() -> None:
+    """25.2345 (25.2344 교차검증 [권고]) — 실패 줄을 일찍 빼는 바꿈이 들어와도 시험이 다 통과했다"""
+    assert "불리지 않았습니다" in str(daily.health_cron_note(_분전(daily.HEALTH_CRON_STALE_MINUTES + 1, "error"), 지금))  # type: ignore[arg-type]
+
+
+def test_시간대_없는_시각은_UTC_로_본다() -> None:
+    """25.2345 — 시간대 처리를 지워도 통과했다(그 갈래가 깨지면 비교에서 TypeError)"""
+    판 = _판([{"called_at": (지금 - timedelta(minutes=200)).replace(tzinfo=None).isoformat(), "outcome": "checked"}])
+    assert "3시간 20분째" in str(daily.health_cron_note(판, 지금))  # type: ignore[arg-type]
+    판 = _판([{"called_at": (지금 - timedelta(minutes=10)).replace(tzinfo=None).isoformat(), "outcome": "checked"}])
+    assert daily.health_cron_note(판, 지금) is None  # type: ignore[arg-type]
+
+
+def test_읽은_뒤_무엇이_깨져도_한_줄로_말한다() -> None:
+    """25.2345 (25.2344 교차검증 [권고]) — execute 만 감싸 KeyError·TypeError 가 시세 단계 바깥 except 로 빠져 그날
+    배치가 failed·리포트 잃음이 될 수 있었다"""
+    assert "실패" in str(daily.health_cron_note(_판([{"outcome": "checked"}]), 지금))  # type: ignore[arg-type]  # called_at 없음
+
+
 def test_문턱을_넘으면_시간과_함께_말한다() -> None:
     글 = daily.health_cron_note(_분전(daily.HEALTH_CRON_STALE_MINUTES + 1), 지금)  # type: ignore[arg-type]
     assert 글 is not None and "3시간 1분째" in 글 and "cron-job.org" in 글

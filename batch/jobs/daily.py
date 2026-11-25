@@ -1210,26 +1210,35 @@ def _주의_출력(warnings: list[str], 최대: int = 20, 길이: int = 240) -> 
 
 
 #: 무응답 감시(cron-job.org → 웹 `cron/health`, 60분마다)가 이만큼(분) 넘게 안 불렸으면 리포트에 말한다 — 웹 /status 의
-#: `cronVerdict` 문턱(주기의 세 배, 25.141)과 같은 잣대(25.2344, docs/roadmap.md 1장 #5 "감시의 감시")
+#: `cronVerdict` 의 **노랑(warn) 경계**(주기의 세 배, 25.141 — 빨강은 여섯 배)와 같은 값(25.2344, roadmap #5 "감시의
+#: 감시"). 하루 한 번 보는 줄이라 빨강까지 기다리지 않는다(25.2345 — 60분 주기에서 180분을 넘기려면 두 번 넘게 거른다)
 HEALTH_CRON_STALE_MINUTES = 180
 
 
 def health_cron_note(client: TursoClient, now: datetime) -> str | None:
     """**감시의 감시**(25.2344, roadmap #5) — 무응답 감시가 멈추면 배치가 안 돈 날 알림이 오지 않는데, 그것을 알리는
     곳이 /status 화면(사람이 열어야 보임)뿐이었다. 일일 배치는 Actions 에서 돌아 cron-job.org·Vercel 과 길이 따로다 —
-    그 심장박동 한 줄을 읽어 오래 멈췄으면 리포트 경고 한 줄. 마지막 호출이 실패(`error`)인 것은 감시가 **돌고는** 있어
-    /status 가 따로 빨갛게 띄우므로 여기서는 보지 않는다(멈춤만). 한 행 읽기(기본 키)"""
+    그 심장박동 한 줄을 읽어 오래 멈췄으면 리포트 경고 한 줄. **멈춤만** 본다 — 최근에 불렸는데 마지막 호출이
+    실패(`error`)인 것은 감시가 돌고는 있어 /status 가 따로 띄운다. 오래 멈춘 줄은 마지막이 실패였어도 말한다.
+    한 행 읽기(기본 키). 무엇이 깨져도 한 줄로 말하고 배치를 죽이지 않는다 — DB 한도만 올린다(25.2345)"""
     try:
-        rows = client.execute(
-            "SELECT called_at, outcome FROM cron_heartbeats WHERE job = 'health' AND market = 'ALL'"
-        ).dicts()
+        return _감시_판정(client, now)
     except Exception as exc:  # noqa: BLE001 — 말해 주는 일이 배치를 죽이지 않게. 한도는 올린다
         if db.quota_reason(exc):
             raise
-        return _실패문("무응답 감시 호출 기록 읽기", exc)
+        return _실패문("무응답 감시 호출 기록 보기", exc)
+
+
+#: 멈춤의 원인 안내 — cron-job.org 작업만이 아니라 웹 쪽 DB 한도(심장박동을 남기지 않고 건너뜀)도 같은 꼴이다(25.2345)
+_감시_원인 = "(cron-job.org 작업·웹 DB 한도 확인)"
+
+
+def _감시_판정(client: TursoClient, now: datetime) -> str | None:
+    rows = client.execute(
+        "SELECT called_at, outcome FROM cron_heartbeats WHERE job = 'health' AND market = 'ALL'"
+    ).dicts()
     if not rows or str(rows[0].get("outcome")) == "never":
-        return ("⚠️ 무응답 감시가 한 번도 불리지 않았습니다 — 배치가 안 돈 날 알림이 오지 않습니다"
-                "(cron-job.org 작업 확인)")
+        return f"⚠️ 무응답 감시가 한 번도 불리지 않았습니다 — 배치가 안 돈 날 알림이 오지 않습니다{_감시_원인}"
     try:
         마지막 = datetime.fromisoformat(str(rows[0]["called_at"]).replace("Z", "+00:00"))
     except ValueError:
@@ -1238,7 +1247,7 @@ def health_cron_note(client: TursoClient, now: datetime) -> str | None:
     if 지난분 <= HEALTH_CRON_STALE_MINUTES:
         return None
     return (f"⚠️ 무응답 감시가 {지난분 // 60}시간 {지난분 % 60}분째 불리지 않았습니다 — 배치가 안 돈 날 알림이 오지"
-            " 않습니다(cron-job.org 작업 확인)")  # fmt: skip
+            f" 않습니다{_감시_원인}")  # fmt: skip
 
 
 def _실패문(이름: str, exc: BaseException) -> str:
