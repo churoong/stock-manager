@@ -93,13 +93,7 @@ def _skipped_글들(함수: object) -> set[str]:
 
     나무 = ast.parse(textwrap.dedent(inspect.getsource(함수)))  # type: ignore[arg-type]
     글들: set[str] = set()
-    # 꼴을 강제한다(25.2333, 25.2332 교차검증 [권고]) — 이른 반환의 둘째 칸이 dict 글자가 아니면(`return [], 기록`·
-    # `dict(skipped=…)`) 대조가 까닭을 볼 수 없어 실패시킨다. 빈 목록을 호출로 만든 꼴(`list()`)도 쓰지 않는다.
-    # 첫 칸을 변수에 담은 꼴은 아래 글 모으기가 덮는다(25.2335·25.2336)
-    for n in ast.walk(나무):
-        if isinstance(n, ast.Return) and isinstance(n.value, ast.Tuple) and n.value.elts:
-            첫 = n.value.elts[0]
-            assert not (isinstance(첫, ast.Call) and ast.unparse(첫.func) == "list"), ast.unparse(n)
+    # 예전의 이른 반환 거름·`list()` 검사(25.2333)는 아래 허용 꼴이 대신한다(25.2338 에서 지움)
     # **허용하는 꼴 하나**(25.2337, 25.2336 교차검증 [권고]) — 25.2332→2333→2335→2336 이 거를 꼴을 하나씩 더했는데 매번
     # 거름 밖 꼴(튜플을 변수에 담은 반환·`{**기록}` 펼침·이름 열쇠·도우미 호출 반환·첫 칸 변수 + 목록 꼴)이 다시 나왔다.
     # 이제 거꾸로 묶는다: 함수 안의 **모든** return 은 `(…, {글자 열쇠: …})` 두 칸 튜플이고, 그 dict(안쪽 포함)의 열쇠는 모두
@@ -133,3 +127,56 @@ def test_같은_날_다시_돌아_샀어도_사고로_남는다() -> None:
     for r in 줄들:
         r["trade_date"] = "2026-10-10"
     assert desk.batch_incident_days(줄들, {"daily_kr": ["2026-10-10"]}) == 1
+
+
+#: `skipped` 열쇠에 실리는 글 가운데 **이상이 아닌 것**(정상 쉼·단계 수준) — 모듈 전체 대조의 반대쪽(25.2338). 새 글을 쓰면
+#: `pp.BUY_FAULT_SKIPS`(이상 — 운용 점검이 띄움) 또는 여기(정상 — 사유와 함께) 가운데 한 곳에 넣어야 시험이 지나간다
+NORMAL_SKIPS: dict[str, str] = {
+    "배분하지 않는 날(신호 없음·묵음·추천 못 읽음)": "배분 계좌가 쉬는 날 — 신호 없음은 리포트가 따로 말한다(jobs/paper run)",
+    "그 달 첫 거래일 장이 아님": "Z3 은 한 달에 한 번만 산다(paper.md 18장)",
+    "입금 없음": "단계 수준 — 장부가 빈 날(계좌 buy 기록이 아니다)",
+    "다른 시장의 가상모의투자 단계가 도는 중(잠금)": "단계 수준 — 잠금 건너뜀은 경고 줄과 `(잠금)` 끝말로 따로 띄운다(25.2145)",
+}
+#: 글자 상수가 아닌 `skipped` 값 — 고정된 글자 그대로만(정상 쉼의 f-string · 후보별 목록)
+NORMAL_SKIP_FORMS = frozenset({
+    "빠짐[:10]",
+    "f'보유 {len(held)} — 상한 {상한}'",
+    "f'시장 국면 {trend.STATE_LABEL.get(str(상태), '모름')}({지수}) — 강세일 때만'",
+})
+
+
+def test_모듈_전체의_skipped_글은_이상이나_정상_한쪽에_든다() -> None:
+    """25.2338 (25.2337 교차검증 [권고]) — 두 함수의 return 만 보아, 부르는 쪽(`run` 의 `a기록["buy"] = {"skipped": …}`
+    직접 대입·`paper_solo.plan`)에 새 이상 까닭을 넣고 `BUY_FAULT_SKIPS` 에 안 넣으면 `desk._buy_fault` 가 정상 쉼으로
+    치는데 아무 시험도 깨지지 않았다. 두 모듈 전체에서 `skipped` 를 쓰는 자리(dict 글자·`x["skipped"] =` 대입·
+    `skipped=` 키워드)를 모두 모아 한쪽에 들었는지 견준다"""
+    import ast
+
+    from batch.jobs import paper_solo
+
+    본것: set[str] = set()
+    for 모듈 in (job, paper_solo):
+        나무 = ast.parse(inspect.getsource(모듈))
+        for n in ast.walk(나무):
+            값들: list[ast.expr] = []
+            if isinstance(n, ast.Dict):
+                for k, v in zip(n.keys, n.values, strict=True):
+                    if isinstance(k, ast.Constant) and k.value == "skipped":
+                        값들.append(v)
+            elif isinstance(n, ast.Assign | ast.AugAssign | ast.AnnAssign):
+                과녁 = n.targets if isinstance(n, ast.Assign) else [n.target]
+                for t in 과녁:
+                    if isinstance(t, ast.Subscript) and isinstance(t.slice, ast.Constant) and t.slice.value == "skipped":
+                        assert n.value is not None
+                        값들.append(n.value)
+            elif isinstance(n, ast.Call):
+                값들 += [kw.value for kw in n.keywords if kw.arg == "skipped"]
+            for v in 값들:
+                if isinstance(v, ast.Constant) and isinstance(v.value, str):
+                    assert v.value in pp.BUY_FAULT_SKIPS or v.value in NORMAL_SKIPS, (모듈.__name__, v.value)
+                    본것.add(v.value)
+                else:
+                    assert ast.unparse(v) in NORMAL_SKIP_FORMS, (모듈.__name__, ast.unparse(v))
+                    본것.add(ast.unparse(v))
+    # 목록이 낡지 않게 — 정상 목록의 글·꼴이 모두 실제로 쓰인다
+    assert set(NORMAL_SKIPS) | NORMAL_SKIP_FORMS <= 본것, (set(NORMAL_SKIPS) | NORMAL_SKIP_FORMS) - 본것
