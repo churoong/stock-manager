@@ -145,7 +145,7 @@ def go_shadow_lines(verdicts: list[tuple[str, str, str, tuple[str, ...], bool]])
     if not verdicts:
         return []
     자리 = {s: sum(1 for v in verdicts if v[0] == s) for s in ("broker", "broker2")}
-    out = [f"주문 허가 그림자(KIS 단계, 켜지 않음, 실행 단위): 판정 {len(verdicts)}번"
+    out = [f"주문 허가 그림자(KIS 단계, 켜지 않음, 실행 단위): 실행 {len(verdicts)}번"
            f" (베끼는 계좌 {자리['broker']} · 도전자 {자리['broker2']})"]  # fmt: skip
     시장들 = sorted({v[1] for v in verdicts}, key=lambda m: (m != "KR", m))
     for 시장 in 시장들:
