@@ -10,15 +10,15 @@ import re
 from pathlib import Path
 
 뿌리 = Path(__file__).resolve().parent.parent
-# 문자열 리터럴·줄 주석을 걷어 낸 뒤 문장(;)마다 본다(25.2362 — 리터럴 안 `;`·따옴표 친 표 이름·upsert 를 놓쳤다)
-_리터럴 = re.compile(r"'(?:[^']|'')*'")
-_주석 = re.compile(r"--[^\n]*")
+# 문자열 리터럴·줄 주석·블록 주석을 **왼쪽부터 한 번에** 걷은 뒤 문장(;)마다 본다(25.2362·2363 — 따로 걷으면 주석 속
+# 홑따옴표가 뒤 SQL 을 리터럴로 삼켰다)
+_걷을것 = re.compile(r"'(?:[^']|'')*'|--[^\n]*|/\*.*?\*/", re.DOTALL)
 _표 = re.compile(r"""\bpaper_accounts\b|"paper_accounts"|`paper_accounts`|\[paper_accounts\]""", re.IGNORECASE)
-_바꿈 = re.compile(r"\bUPDATE\b|\bON\s+CONFLICT\b", re.IGNORECASE)
-_갈아끼움 = re.compile(r"\bREPLACE\s+INTO\b|\bINSERT\s+OR\s+REPLACE\b", re.IGNORECASE)  # 행을 통째로 다시 씀
+_바꿈 = re.compile(r"\bUPDATE\b", re.IGNORECASE)  # upsert 의 `DO UPDATE SET` 도 여기서 잡힌다
+# 행을 통째로 다시 씀 — 열 목록에 없는 판·헌장도 기본값으로 돌아가므로 열과 상관없이 판 변경(25.2363)
+_갈아끼움 = re.compile(r"\bREPLACE\s+INTO\b|\bINSERT\s+OR\s+REPLACE\b", re.IGNORECASE)
 # 판을 바꾸는 칸 — 판 번호, 그리고 판단을 만드는 헌장 값(헌장만 바꾸는 판 변경도 창을 따른다, docs/paper.md 2.5.1)
-_판_칸 = re.compile(r"\b(rule_version|charter_json)\s*=", re.IGNORECASE)
-_판_열 = re.compile(r"\b(rule_version|charter_json)\b", re.IGNORECASE)
+_판_칸 = re.compile(r"""["`\[]?\b(rule_version|charter_json)\b["`\]]?\s*=""", re.IGNORECASE)  # 따옴표 친 열(25.2363)
 창_줄 = re.compile(r"^--\s*판 올림 창:\s*(\d{4})-(\d{2})\s*$", re.MULTILINE)
 예외_줄 = re.compile(r"^--\s*판 올림 (예외|사전 등록):(.*)$", re.MULTILINE)
 창_달 = (1, 7)
@@ -28,10 +28,9 @@ _판_열 = re.compile(r"\b(rule_version|charter_json)\b", re.IGNORECASE)
 
 
 def 판_변경(글: str) -> bool:
-    본문 = _주석.sub("", _리터럴.sub("''", 글))
+    본문 = _걷을것.sub(lambda m: "''" if m.group(0).startswith("'") else " ", 글)
     return any(
-        _표.search(문) and ((_바꿈.search(문) and _판_칸.search(문)) or (_갈아끼움.search(문) and _판_열.search(문)))
-        for 문 in 본문.split(";")
+        _표.search(문) and ((_바꿈.search(문) and _판_칸.search(문)) or _갈아끼움.search(문)) for 문 in 본문.split(";")
     )
 
 
@@ -97,12 +96,21 @@ def test_판정_자체() -> None:
     assert 판정("UPDATE paper_accounts SET charter_json = json_set(charter_json, '$.top_n', 7) WHERE id='A';") not in (None, "ok")
     assert 판정("INSERT OR REPLACE INTO paper_accounts (id, rule_version) VALUES ('A', 5);") not in (None, "ok")
     assert 판정("INSERT OR IGNORE INTO paper_accounts (id, rule_version) VALUES ('Z9', 1);") is None  # 새 계좌(0096 꼴)
+    # 25.2363 — 걷기 하나하나를 잡는 꼴(각 걷기를 빼면 깨진다)
+    assert 판정("UPDATE paper_accounts SET name = 'a;b', rule_version = 5 WHERE id='A';") not in (None, "ok")  # 리터럴 걷기
+    assert 판정("UPDATE x -- paper_accounts\nSET rule_version = 1;") is None  # 줄 주석 걷기
+    assert 판정("UPDATE x /* paper_accounts */ SET rule_version = 1;") is None  # 블록 주석 걷기
+    assert 판정("-- H's charter bump\nUPDATE paper_accounts SET rule_version = 5 WHERE id = 'H';") not in (None, "ok")
+    assert 판정("/* don't */ UPDATE paper_accounts SET rule_version = 5 WHERE id = 'H';") not in (None, "ok")
+    assert 판정('UPDATE paper_accounts SET "rule_version" = 5;') not in (None, "ok")  # 따옴표 친 열
+    assert 판정("INSERT OR REPLACE INTO paper_accounts (id, name) VALUES ('A', 'x');") not in (None, "ok")
     # 머리(30줄) 밖의 표시는 세지 않는다
     assert 판정("\n" * 40 + "-- 판 올림 창: 2027-01\n" + 올림) != "ok"
 
 
 def test_문서() -> None:
     글 = (뿌리 / "docs/paper.md").read_text()
-    for 조각 in ("2.5.1 판 올림 창", "25.2361", "`-- 판 올림 창: YYYY-MM`", "`-- 판 올림 예외: <까닭>`", "test_rule_bump_window_2361"):
+    for 조각 in ("2.5.1 판 올림 창", "25.2361", "`-- 판 올림 창: YYYY-MM`", "`-- 판 올림 예외: <까닭>`", "test_rule_bump_window_2361",
+                 "`-- 판 올림 사전 등록: <절>`", "2027-01 부터", "크기와 상관없이 바로"):
         assert 조각 in 글, 조각
     assert "판 올림 대기열" in (뿌리 / "docs/handoff.md").read_text()
