@@ -126,7 +126,9 @@ def size_orders(
     if valuation.cash_krw < 0:
         # 신호 갈래(`jobs/paper.buy_orders`)와 같은 까닭 글 — 운용 점검이 사고(높음)로 센다(`pp.BUY_FAULT_SKIPS`,
         # 25.2226).
-        # 예전 단독 갈래엔 없어 음수 현금 날 관문의 현금 막힘으로 '사지 못함'(보통)만 떴다(25.2327)
+        # 예전 단독 갈래엔 없어 음수 현금 날 아래 수량이 0 이 되어 '현금 부족 — 멈춤'(not_bought)으로 '사지
+        # 못함'(보통)만
+        # 떴다(25.2327, 25.2328 바로잡음 — 관문까지 가지 않았다). 자리·후보가 없는 날은 여기 닿지 않는다(장부 검산 몫)
         return [], {"skipped": "장부 현금이 음수"}
     현금 = valuation.cash_krw - 예약
     비중 = 1 / solo.Z3_SLICES if selection == solo.MAGIC else solo.Z4_WEIGHT_PCT / 100

@@ -803,3 +803,21 @@ def test_장부_현금이_음수면_신호_갈래와_같은_까닭으로_건너�
         valuation=_가치(1e6, -10.0), open_buys=[], fx_rate=None, as_of="2026-10-30", n_ranked=1, is_frozen=lambda _s: False,
     )  # fmt: skip
     assert 주문 == [] and 기록 == {"skipped": "장부 현금이 음수"} and 기록["skipped"] in pp.BUY_FAULT_SKIPS
+
+
+def test_장부_현금이_음수인_날_엔진은_상황실_높음으로_띄우고_사지_못함은_겹치지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.2328 (25.2327 교차검증 [권고]) — size_orders 의 skipped 가 계좌 기록 buy.skipped 로 이어져 desk._buy_fault(높음)·
+    account_skips(관문 무사고 사고)에 들고, 리포트·상황실의 '사지 못함' 은 뜨지 않는다"""
+    c = _새(monkeypatch, ("Z4",), ("2026-10-14",))
+    _국면(monkeypatch, "bull")
+    # 장부 현금을 음수로 — 평가 결과만 바꾼다(입금 장부는 입금·취소만 받는다)
+    원래 = job.mark
+    monkeypatch.setattr(job, "mark", lambda *a, **k: (lambda v, 검: (dataclasses.replace(v, cash_krw=-10.0), 검))(
+        *원래(*a, **k)))  # fmt: skip
+    줄, 기록 = _하루(c, monkeypatch, "2026-10-14")
+    b = 기록["accounts"]["Z4"]["buy"]
+    assert b["skipped"] == "장부 현금이 음수"
+    assert "Z4" in desk.account_skips(기록["accounts"])
+    할일 = desk.checks(halted=False, paper=기록, broker=None, recon_bad=[], warnings=0)
+    assert any(x["level"] == "high" and "장부 현금이 음수" in x["text"] for x in 할일)
+    assert not any("사지 못함" in x for x in 줄) and not any("사지 못함" in x["text"] for x in 할일)
