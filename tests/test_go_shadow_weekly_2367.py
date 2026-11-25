@@ -21,21 +21,28 @@ def test_짧은_이름은_갈래와_같은_집합() -> None:
 def test_분포_줄() -> None:
     assert bm.go_shadow_lines([]) == []
     v = [
-        ("broker", "go", (), False),
-        ("broker", "go", (), True),  # 모름 칸 — 그대로와 따로
-        ("broker", "sell_only", ("diff", "new_code"), False),
-        ("broker2", "sell_only", ("diff",), False),
-        ("broker", "no_go", ("halted", "diff"), False),
+        ("broker", "KR", "go", (), False),
+        ("broker", "KR", "go", (), True),  # 모름 칸 — 그대로와 따로
+        ("broker", "KR", "sell_only", ("new_code",), True),  # 매도만의 모름 칸은 "모름 칸 있음" 에 세지 않는다(25.2368)
+        ("broker", "KR", "sell_only", ("diff",), False),
+        ("broker2", "KR", "sell_only", ("diff",), False),
+        ("broker", "KR", "no_go", ("halted", "diff"), False),
+        ("broker", "US", "sell_only", ("read_budget",), False),
+        ("broker", "US", "error", (), False),  # 그림자 계산이 깨진 실행(25.2368)
     ]
     줄 = bm.go_shadow_lines(v)
-    assert 줄[0] == "주문 허가 그림자(KIS 단계, 켜지 않음): 판정 5번 (베끼는 계좌 4 · 도전자 1)"
-    assert 줄[1] == "  그대로 1 · 매도만이었을 2 · 막힘 1 · 모름 칸 있음 1"
-    assert 줄[2] == "  매도만 갈래: 잔고 어긋남 2 · 새 코드 첫날 1"  # 많은 것부터
-    assert 줄[3] == "  막힘 갈래: 멈춤 1 · 잔고 어긋남 1"
-    assert len(줄) == 4
-    # 모름 칸이 없으면 그 조각은 싣지 않는다
-    assert bm.go_shadow_lines([("broker", "go", (), False)]) == [
-        "주문 허가 그림자(KIS 단계, 켜지 않음): 판정 1번 (베끼는 계좌 1 · 도전자 0)", "  그대로 1 · 매도만이었을 0 · 막힘 0"]
+    assert 줄 == [
+        "주문 허가 그림자(KIS 단계, 켜지 않음, 실행 단위): 판정 8번 (베끼는 계좌 7 · 도전자 1)",
+        "  KR: 그대로 1 · 매도만이었을 3 · 막힘 1 · 모름 칸 있음 1",
+        "    매도만 갈래: 잔고 어긋남 2 · 새 코드 첫날 1",  # 많은 것부터 — 넣은 차례(새 코드 먼저)와 다르게
+        "    막힘 갈래: 멈춤 1 · 잔고 어긋남 1",
+        "  US: 그대로 0 · 매도만이었을 1 · 막힘 0 · 판정 못 함 1",
+        "    매도만 갈래: 읽기 예산 1",
+    ]
+    # 모름 칸·판정 못 함이 없으면 그 조각은 싣지 않는다
+    assert bm.go_shadow_lines([("broker", "US", "go", (), False)]) == [
+        "주문 허가 그림자(KIS 단계, 켜지 않음, 실행 단위): 판정 1번 (베끼는 계좌 1 · 도전자 0)",
+        "  US: 그대로 1 · 매도만이었을 0 · 막힘 0"]
 
 
 def _넣기(mem, i: int, 로그: object, 앞시간: int = 1) -> None:  # type: ignore[no-untyped-def]
@@ -57,16 +64,19 @@ def test_실행_기록에서_읽는다() -> None:
          "broker2": {"go_shadow": {"verdict": "go", "reasons": []}, "new_code_error": "ValueError"}},
         {"broker": {"error": "x"}},  # 단계 예외 — 판정 없음
         {"broker": {"go_shadow": "글"}}, {"broker": "글"}, None, [1], {"broker": {"go_shadow": {"verdict": 3}}},
+        {"broker": {"go_shadow": {"error": "KeyError"}}},
         {"broker": {"go_shadow": {"verdict": "go", "reasons": None}}},
     ]  # fmt: skip
     for i, 로그 in enumerate(로그들):
         _넣기(mem, i, 로그)
     runs = ws.load_runs(mem, "2026-01-01")  # type: ignore[arg-type]
     모두 = [v for r in runs for v in r.go]
-    assert ("broker", "sell_only", ("diff",), True) in 모두
-    assert ("broker2", "go", (), True) in 모두
-    assert ("broker", "go", (), False) in 모두
-    assert len(모두) == 3
+    assert ("broker", "KR", "sell_only", ("diff",), True) in 모두
+    assert ("broker2", "KR", "go", (), True) in 모두
+    assert ("broker", "KR", "go", (), False) in 모두
+    # 계산이 깨진 그림자·모르는 판정 글은 "판정 못 함"(25.2368) — 빠지지 않는다
+    assert 모두.count(("broker", "KR", "error", (), False)) == 2
+    assert len(모두) == 5
 
 
 def test_요약_실행이_분포를_싣는다(monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -85,8 +95,8 @@ def test_요약_실행이_분포를_싣는다(monkeypatch) -> None:  # type: ign
     monkeypatch.setattr("builtins.print", lambda *a, **k: 찍힘.append(" ".join(str(x) for x in a)))
     assert ws.run(dry_run=True) == 0
     글 = "\n".join(찍힘)
-    assert "주문 허가 그림자(KIS 단계, 켜지 않음): 판정 2번 (베끼는 계좌 2 · 도전자 0)" in 글
-    assert "  매도만 갈래: 새 코드 첫날 1" in 글
+    assert "주문 허가 그림자(KIS 단계, 켜지 않음, 실행 단위): 판정 2번 (베끼는 계좌 2 · 도전자 0)" in 글
+    assert "  KR: 그대로 1 · 매도만이었을 1 · 막힘 0" in 글 and "    매도만 갈래: 새 코드 첫날 1" in 글
     monkeypatch.setattr(ws._bm, "go_shadow_lines", lambda v: 1 / 0)
     찍힘.clear()
     assert ws.run(dry_run=True) == 0

@@ -126,32 +126,46 @@ GO_SHORT = {
 GO_UNKNOWN_KEYS = ("new_code_error", "read_budget_unknown")
 
 
-def go_shadow_lines(verdicts: list[tuple[str, str, tuple[str, ...], bool]]) -> list[str]:
-    """주문 허가 그림자의 7일 분포 — 주간 요약 줄(docs/paper.md 15.13, roadmap #2 "문턱·켜기는 분포를 본 뒤", 25.2367).
+#: 그림자 계산이 깨졌거나(`_끝` 이 `{"error": …}` 를 실음) 판정 글이 셋 밖인 실행 — 조용히 빠지면 "판정 0" 이
+#: "KIS 단계가 안 돈 주" 와 구별되지 않는다(25.2368)
+GO_ERROR = "error"
+_판정들 = ("go", "sell_only", "no_go")
 
-    `verdicts` 는 실행마다 (자리 `broker`·`broker2`, 판정, 갈래 열쇠들, 모름 칸 있음). 순수 계산. 판정이 하나도 없으면
-    빈 목록(키를 넣기 전·KIS 단계가 안 돈 주). 판정은 그림자라 주문을 막지 않았다 — 이 줄은 "켰다면" 의 크기다
+
+def go_shadow_lines(verdicts: list[tuple[str, str, str, tuple[str, ...], bool]]) -> list[str]:
+    """주문 허가 그림자의 7일 분포 — 주간 요약 줄(docs/paper.md 15.13, roadmap #2 "문턱·켜기는 분포를 본 뒤",
+    25.2367·2368).
+
+    `verdicts` 는 실행마다 (자리 `broker`·`broker2`, 시장 `KR`·`US`, 판정, 갈래 열쇠들, 모름 칸 있음). 순수 계산.
+    **시장별로** 센다 — 갈래가 시장마다 다르게 서고 문턱도 시장별 판단이다(25.2368). **실행 단위**다(같은 날 다시 돈
+    실행도 따로 — 날 단위로 합치지 않는다). 판정 `error`(그림자 계산이 깨짐·모르는 판정 글)는 "판정 못 함" 으로 따로.
+    판정이 하나도 없으면 빈 목록(키를 넣기 전·KIS 단계가 안 돈 주). 판정은 그림자라 주문을 막지 않았다 — "켰다면" 의
+    크기다. "막힘" 에는 지금도 주문을 내지 않는 정상 막힘(접수 창 밖·보류 — `send`)이 든다
     """
     if not verdicts:
         return []
     자리 = {s: sum(1 for v in verdicts if v[0] == s) for s in ("broker", "broker2")}
-    판 = {k: sum(1 for v in verdicts if v[1] == k) for k in ("go", "sell_only", "no_go")}
-    모름 = sum(1 for v in verdicts if v[1] == "go" and v[3])
-    그대로 = 판["go"] - 모름
-    머리 = (f"주문 허가 그림자(KIS 단계, 켜지 않음): 판정 {len(verdicts)}번"
-            f" (베끼는 계좌 {자리['broker']} · 도전자 {자리['broker2']})")  # fmt: skip
-    몸 = f"  그대로 {그대로} · 매도만이었을 {판['sell_only']} · 막힘 {판['no_go']}"
-    몸 += f" · 모름 칸 있음 {모름}" if 모름 else ""
-    out = [머리, 몸]
-    for 판정, 이름 in (("sell_only", "매도만"), ("no_go", "막힘")):
-        셈: dict[str, int] = {}
-        for v in verdicts:
-            if v[1] == 판정:
-                for k in v[2]:
-                    셈[k] = 셈.get(k, 0) + 1
-        if 셈:
-            차례 = sorted(셈.items(), key=lambda x: -x[1])
-            out.append(f"  {이름} 갈래: " + " · ".join(f"{GO_SHORT.get(k, k)} {n}" for k, n in 차례))
+    out = [f"주문 허가 그림자(KIS 단계, 켜지 않음, 실행 단위): 판정 {len(verdicts)}번"
+           f" (베끼는 계좌 {자리['broker']} · 도전자 {자리['broker2']})"]  # fmt: skip
+    시장들 = sorted({v[1] for v in verdicts}, key=lambda m: (m != "KR", m))
+    for 시장 in 시장들:
+        내 = [v for v in verdicts if v[1] == 시장]
+        판 = {k: sum(1 for v in 내 if v[2] == k) for k in _판정들}
+        모름 = sum(1 for v in 내 if v[2] == "go" and v[4])  # go 만 — 매도만·막힘은 이미 "그대로" 밖이다
+        못함 = sum(1 for v in 내 if v[2] not in _판정들)
+        몸 = f"  {시장}: 그대로 {판['go'] - 모름} · 매도만이었을 {판['sell_only']} · 막힘 {판['no_go']}"
+        몸 += f" · 모름 칸 있음 {모름}" if 모름 else ""
+        몸 += f" · 판정 못 함 {못함}" if 못함 else ""
+        out.append(몸)
+        for 판정, 이름 in (("sell_only", "매도만"), ("no_go", "막힘")):
+            셈: dict[str, int] = {}
+            for v in 내:
+                if v[2] == 판정:
+                    for k in v[3]:
+                        셈[k] = 셈.get(k, 0) + 1
+            if 셈:
+                차례 = sorted(셈.items(), key=lambda x: -x[1])
+                out.append(f"    {이름} 갈래: " + " · ".join(f"{GO_SHORT.get(k, k)} {n}" for k, n in 차례))
     return out
 
 
