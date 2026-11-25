@@ -69,10 +69,14 @@ def test_같은_까닭은_한_줄로_모은다() -> None:
 
 
 def test_buy_orders_의_글자_까닭은_모두_상수에_있다() -> None:
-    """반대 방향 — 새 이른 반환 글이 생기고 상수에 안 넣으면 조용히 정상 쉼이 된다(25.2227)"""
-    src = inspect.getsource(job.buy_orders)
-    글들 = set(re.findall(r'return \[\], \{"skipped": "([^"]+)"\}', src))
-    assert 글들 == set(pp.BUY_FAULT_SKIPS)
+    """반대 방향 — 새 이른 반환 글이 생기고 상수에 안 넣으면 조용히 정상 쉼이 된다(25.2227). 거장 단독
+    `paper_solo.size_orders` 도(25.2331, 25.2330 교차검증 [권고] — 단독은 `solo.warning` 이 skipped 면 None 이라 상수에 없는
+    새 이른 반환은 어디에도 줄이 뜨지 않는다)"""
+    from batch.jobs import paper_solo
+
+    for 함수 in (job.buy_orders, paper_solo.size_orders):
+        글들 = set(re.findall(r'return \[\], \{"skipped": "([^"]+)"\}', inspect.getsource(함수)))
+        assert 글들 == set(pp.BUY_FAULT_SKIPS), 함수.__name__
 
 
 def test_같은_날_다시_돌아_샀어도_사고로_남는다() -> None:
