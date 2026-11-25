@@ -104,8 +104,8 @@ def go_shadow(record: dict[str, Any]) -> dict[str, Any]:
       읽어 싣는다(25.2306·25.2308). 읽기 예산(`read_budget`)도 그렇다(25.2334). 커버리지는 갈래가 아니라 일일 배치의
       관측 칸(`step_log.price_coverage`, 미국만 — 25.2342)이다. 시세 기준일은 넣지 않는다(H 의 위험 점검이 이미
       막는다, docs/paper.md 15.13)
-    - 갈래가 아닌 모름 칸(`new_code_error`·`read_budget_unknown`)은 판정이 `go` 로 남는다 — 분포를 세는 쪽(아직
-      없다)은 그 칸이 있는 실행을 `go` 와 따로 센다(25.2335)
+    - 갈래가 아닌 모름 칸(`new_code_error`·`read_budget_unknown`)은 판정이 `go` 로 남는다 — 분포를 세는 쪽
+      (`go_shadow_lines`, 주간 요약 — 25.2367)은 그 칸이 있는 실행을 `go` 와 따로 센다(25.2335)
     """
     맞춤 = record.get("reconciled")
     값 = {k: record.get(k) for k in (*GO_NO_GO, *GO_SELL_ONLY)}
@@ -113,6 +113,46 @@ def go_shadow(record: dict[str, Any]) -> dict[str, Any]:
     막음 = [k for k in GO_NO_GO if 값.get(k)]
     매도만 = [k for k in GO_SELL_ONLY if 값.get(k)]
     return {"verdict": "no_go" if 막음 else "sell_only" if 매도만 else "go", "reasons": 막음 + 매도만}
+
+
+#: 주간 요약 분포 줄의 짧은 이름 — 갈래 열쇠와 같은 집합이어야 한다(시험이 대조, 25.2367)
+GO_SHORT = {
+    "halted": "멈춤", "balance_truncated": "잔고 조회 잘림", "send": "보내기 막힘",
+    "reconcile_unknown": "체결 모름", "reconcile_truncated": "체결 조회 잘림", "diff": "잔고 어긋남",
+    "unknown_codes": "모르는 종목", "sending_today": "응답 없는 주문", "new_code": "새 코드 첫날",
+    "read_budget": "읽기 예산",
+}  # fmt: skip
+#: 갈래가 아닌 모름 칸 — 있는 실행은 `go` 와 따로 센다(25.2335 독스트링이 "분포를 세는 쪽" 에 맡긴 것)
+GO_UNKNOWN_KEYS = ("new_code_error", "read_budget_unknown")
+
+
+def go_shadow_lines(verdicts: list[tuple[str, str, tuple[str, ...], bool]]) -> list[str]:
+    """주문 허가 그림자의 7일 분포 — 주간 요약 줄(docs/paper.md 15.13, roadmap #2 "문턱·켜기는 분포를 본 뒤", 25.2367).
+
+    `verdicts` 는 실행마다 (자리 `broker`·`broker2`, 판정, 갈래 열쇠들, 모름 칸 있음). 순수 계산. 판정이 하나도 없으면
+    빈 목록(키를 넣기 전·KIS 단계가 안 돈 주). 판정은 그림자라 주문을 막지 않았다 — 이 줄은 "켰다면" 의 크기다
+    """
+    if not verdicts:
+        return []
+    자리 = {s: sum(1 for v in verdicts if v[0] == s) for s in ("broker", "broker2")}
+    판 = {k: sum(1 for v in verdicts if v[1] == k) for k in ("go", "sell_only", "no_go")}
+    모름 = sum(1 for v in verdicts if v[1] == "go" and v[3])
+    그대로 = 판["go"] - 모름
+    머리 = (f"주문 허가 그림자(KIS 단계, 켜지 않음): 판정 {len(verdicts)}번"
+            f" (베끼는 계좌 {자리['broker']} · 도전자 {자리['broker2']})")  # fmt: skip
+    몸 = f"  그대로 {그대로} · 매도만이었을 {판['sell_only']} · 막힘 {판['no_go']}"
+    몸 += f" · 모름 칸 있음 {모름}" if 모름 else ""
+    out = [머리, 몸]
+    for 판정, 이름 in (("sell_only", "매도만"), ("no_go", "막힘")):
+        셈: dict[str, int] = {}
+        for v in verdicts:
+            if v[1] == 판정:
+                for k in v[2]:
+                    셈[k] = 셈.get(k, 0) + 1
+        if 셈:
+            차례 = sorted(셈.items(), key=lambda x: -x[1])
+            out.append(f"  {이름} 갈래: " + " · ".join(f"{GO_SHORT.get(k, k)} {n}" for k, n in 차례))
+    return out
 
 
 @dataclass(frozen=True)

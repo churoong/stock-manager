@@ -35,6 +35,7 @@ from batch.core.client import TursoClient
 from batch.core.entry import guard
 from batch.notify import telegram
 from batch.services import adjust as adj
+from batch.services import broker_mirror as _bm
 from batch.services import column_rot, incident_ledger, postmortem
 
 log = logging.getLogger("weekly_summary")
@@ -108,6 +109,9 @@ class Run:
     #: 운영 사고 대장 넷째 조각). 단계 전체가 예외로 끝났으면 "단계". 관문 무사고 칸(`desk.paper_step_failed`)과
     #: 같은 재료다
     paper_faults: tuple[str, ...] = ()
+    #: KIS 단계의 주문 허가 그림자(`step_log.broker`·`broker2` 의 `go_shadow`, 25.2293) —
+    #: (자리, 판정, 갈래, 모름 칸 있음). 주간 분포 줄(`bm.go_shadow_lines`, 25.2367)의 재료
+    go: tuple[tuple[str, str, tuple[str, ...], bool], ...] = ()
 
 
 #: **예정된 건너뜀** — 고장이 아니다 (docs/infra.md 25.1372, 주간 요약 감사 재현). 미국 일일 배치는 서머타임을 덮으려고
@@ -143,6 +147,7 @@ def load_runs(client: TursoClient, since: str) -> list[Run]:
         코드: str | None = None
         배치코드: str | None = None
         계좌못함: tuple[str, ...] = ()
+        허가: list[tuple[str, str, tuple[str, ...], bool]] = []
         try:
             로그 = json.loads(r["step_log"]) if r["step_log"] else {}
             if isinstance(로그, dict) and isinstance(로그.get("warnings"), list):
@@ -167,10 +172,16 @@ def load_runs(client: TursoClient, since: str) -> list[Run]:
                 if isinstance(모의.get("skipped"), str) and 모의["skipped"] and 모의["skipped"] not in _단계_쉼_정상:
                     못함.add("단계 건너뜀")
                 계좌못함 = tuple(sorted(못함))
-        except (TypeError, ValueError):
+            for 자리 in ("broker", "broker2"):
+                칸 = 로그.get(자리) if isinstance(로그, dict) else None
+                그림자 = 칸.get("go_shadow") if isinstance(칸, dict) else None
+                if isinstance(그림자, dict) and isinstance(그림자.get("verdict"), str):
+                    갈래 = tuple(str(k) for k in 그림자.get("reasons") or [] if isinstance(k, str))
+                    허가.append((자리, 그림자["verdict"], 갈래, any(칸.get(k) for k in _bm.GO_UNKNOWN_KEYS)))
+        except (TypeError, ValueError, AttributeError):
             pass
         out.append(Run(str(r["job_name"]), r["market"], str(r["status"]), str(r["started_at"]), r["error_text"], 경고,
-                       까닭, 코드, 배치코드, 계좌못함))  # fmt: skip
+                       까닭, 코드, 배치코드, 계좌못함, tuple(허가)))  # fmt: skip
     return out
 
 
@@ -731,6 +742,12 @@ def run(dry_run: bool = False, force: bool = False) -> int:
                                                        unknown=bool(깨짐)), *깨짐]
         except Exception as exc:  # noqa: BLE001
             사고 = [*사고, f"무응답·검산·계좌 줄을 만들지 못했습니다 ({type(exc).__name__})"]
+        # 주문 허가 그림자 분포(25.2367) — 새 읽기 없음(실행 기록에서). 깨져도 요약은 나간다
+        try:
+            허가줄 = _bm.go_shadow_lines([v for r in runs for v in r.go])
+            사고 = [*사고, *([""] if 사고 and 허가줄 else []), *허가줄]
+        except Exception as exc:  # noqa: BLE001
+            사고 = [*사고, f"주문 허가 그림자 줄을 만들지 못했습니다 ({type(exc).__name__})"]
         text = compose(runs=runs, last_success=last, now=now, reads_used=used, writes_used=쓰기, rot_lines=rot_lines,
                        postmortem_lines=사후, paper_lines=모의, incident_lines=사고)  # fmt: skip
         print(text)
