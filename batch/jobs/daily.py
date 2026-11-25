@@ -1823,10 +1823,14 @@ def collect_us_prices(
     # **그날 시세 커버리지**(25.2342, docs/paper.md 15.13 — 주문 허가 판정의 관측 칸). 야후는 조각으로 받아 일부만
     # 빠질 수 있고(국내는 거래소 한 번에 전종목이라 그 꼴의 실패가 없다), 빠진 종목은 신호가 묵은 값으로 남아 상위-N
     # 같은 횡단면 순위가 줄어든 모집단으로 매겨진다 — 종목별 묵음 거름(`risk_gate.stale`)은 그 왜곡을 못 본다. 반환 꼴은
-    # 그대로 두고(부르는 곳 19곳) 받을 dict 를 넘긴 쪽에만 채운다. 대상에는 ETF·시세가 한 번도 없던 종목이 섞여 평소에도
-    # 100% 가 아니다
+    # 그대로 두고(운영 호출은 `run` 하나, 시험의 가짜·직접 호출이 여럿) 받을 dict 를 넘긴 쪽에만 채운다. 대상에는 ETF·
+    # 시세가 한 번도 없던 종목이 섞여 평소에도 100% 가 아니다. **서로 다른 종목 수**로 센다(25.2343 — 같은 종목의 겹친
+    # 그날 줄이 비율을 부풀리지 않게). 받은 수 기준이라 저장을 미룬 종목(수정주가 대기열 실패, `_store_us_bars` 보류)도
+    # 든다 — 드문 길이라 관측 칸에선 둔다
     if coverage is not None:
-        coverage.update({"day": 그날, "targets": len(targets)})
+        그날종목 = {b.ticker for b in result.data
+                  if b.date == trade_date and b.close is not None and b.ticker in targets}  # fmt: skip
+        coverage.update({"day": len(그날종목), "targets": len(targets)})
     suspicion = cal.suspect_calendar(is_open=True, rows_collected=그날)
     if suspicion:
         warnings.append(suspicion)

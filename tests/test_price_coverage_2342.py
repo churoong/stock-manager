@@ -28,6 +28,8 @@ def test_그날_행이_있는_대상만_센다(monkeypatch: pytest.MonkeyPatch) 
         DailyBar(ticker="AAPL", date="2026-09-14", close=210.0, volume=1),
         DailyBar(ticker="AAPL", date="2026-09-15", close=220.0, volume=1),  # 그날 — 셈
         DailyBar(ticker="MSFT", date="2026-09-14", close=400.0, volume=1),  # 앞날만 — 안 셈
+        DailyBar(ticker="MSFT", date="2026-09-15", close=None, volume=1),  # type: ignore[arg-type]  # 종가 없음 — 안 셈
+        DailyBar(ticker="AAPL", date="2026-09-15", close=220.0, volume=1),  # 같은 종목 겹친 줄 — 한 번만(25.2343)
         DailyBar(ticker="ZZZZ", date="2026-09-15", close=1.0, volume=1),  # 대상 밖 — 안 셈
     ])  # fmt: skip
     client = FakeClient(symbols={"AAPL": 1, "MSFT": 2})
@@ -77,3 +79,29 @@ def test_시장_갈림길이_미국에_넘긴다(monkeypatch: pytest.MonkeyPatch
     판: dict[str, int] = {}
     daily.collect_prices(FakeClient(symbols={"AAPL": 1}), "US", "2026-09-15", coverage=판)
     assert 판.get("day") == 1
+
+
+@pytest.mark.parametrize(("채움", "기대"), [
+    ({"day": 0, "targets": 9}, {"day": 0, "targets": 9}),  # 그날 시세가 통째로 빠진 날 — 이 칸이 가장 필요한 날
+    (None, None),  # 국내처럼 채우지 않으면 칸이 없다
+])  # fmt: skip
+def test_일일_배치가_실행_기록에_싣는다(monkeypatch: pytest.MonkeyPatch, 채움: dict | None, 기대: dict | None) -> None:
+    """25.2343 (25.2342 교차검증 [권고]) — 소스 글자 대조만으로는 대입 뒤 지우는 줄(`step_log.pop`)이 들어와도 통과했다.
+    실제 `daily.run` 으로 돌려 `finish_batch_run` 에 넘어간 기록을 본다"""
+    from batch.jobs import daily
+    from tests.test_report_store_fail_1180 import _준비
+
+    _준비(monkeypatch, 0)
+    닫음: list = []
+    monkeypatch.setattr(daily.db, "finish_batch_run", lambda c, rid, **k: 닫음.append(k))
+
+    def 수집(c, mk, d, *, coverage=None):  # type: ignore[no-untyped-def]  # noqa: ANN001
+        if 채움 is not None and coverage is not None:
+            coverage.update(채움)
+        return ([{"name": "x", "close": 1, "change_pct": 0, "volume": 1, "currency": "KRW", "source": "krx",
+                  "trade_date": d}], [], "1종목")  # fmt: skip
+
+    monkeypatch.setattr(daily, "collect_prices", 수집)
+    daily.run("KR")
+    로그 = 닫음[-1]["step_log"]
+    assert 로그.get("price_coverage") == 기대
