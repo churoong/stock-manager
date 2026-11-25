@@ -1,6 +1,6 @@
 """판 올림 창 (docs/paper.md 2.5.1, docs/infra.md 25.2361~2364).
 
-판을 바꾸는 마이그레이션(판 번호·헌장 값)은 머리에 `-- 판 올림 창: YYYY-MM`(1월·7월, 2027-01 부터)·`-- 판 올림 예외: <까닭>`·
+판을 바꾸는 마이그레이션(판 번호·헌장 값·규칙 열·행값 대입, 계좌 행을 통째로 다시 쓰는 REPLACE·DELETE·표 다시 짓기)은 머리에 `-- 판 올림 창: YYYY-MM`(1월·7월, 2027-01 부터)·`-- 판 올림 예외: <까닭>`·
 `-- 판 올림 사전 등록: <절>` 가운데 하나를 단다. 0097 까지(0077·0088·0095)는 이 규칙 전이라 표시가 없다 — 목록을 고정해 0098 부터 본다.
 """
 
@@ -17,7 +17,14 @@ _표 = re.compile(r"""\bpaper_accounts\b|"paper_accounts"|`paper_accounts`|\[pap
 _바꿈 = re.compile(r"\bUPDATE\b", re.IGNORECASE)  # upsert 의 `DO UPDATE SET` 도 여기서 잡힌다
 # 행을 통째로 다시 씀 — 열 목록에 없는 판·헌장도 기본값으로 돌아가므로 열과 상관없이 판 변경(25.2363).
 # 지우고 다시 넣기(DELETE 뒤 INSERT)도 같은 효과라 계좌 행을 지우는 문장도 판 변경으로 본다(25.2364)
-_갈아끼움 = re.compile(r"\bREPLACE\s+INTO\b|\bINSERT\s+OR\s+REPLACE\b|\bDELETE\s+FROM\b", re.IGNORECASE)
+# 표 다시 짓기(DROP 뒤 새 표를 RENAME — 0073 이 쓴 꼴)도 같다(25.2365). DELETE·DROP·RENAME 은 **대상 표가 paper_accounts** 일 때만
+# (다른 표를 지우며 하위 질의로 읽기만 하는 문장은 아님, 25.2365)
+_표이름 = r"""["`\[]?(?:main\.)?paper_accounts\b["`\]]?"""
+_갈아끼움 = re.compile(
+    r"\bREPLACE\s+INTO\b|\bINSERT\s+OR\s+REPLACE\b|\bDELETE\s+FROM\s+" + _표이름 + r"|\bDROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?"
+    + _표이름 + r"|\bALTER\s+TABLE\s+\S+\s+RENAME\s+TO\s+" + _표이름,
+    re.IGNORECASE,
+)
 # 판을 바꾸는 칸 — 판 번호, 그리고 판단을 만드는 헌장 값(헌장만 바꾸는 판 변경도 창을 따른다, docs/paper.md 2.5.1)
 # 판단을 정하는 열 — 판 번호·헌장, 그리고 규칙 열(매도 규칙·진입·상위 N·선정, 0070·0075 — 판을 올리지 않고 이것만 바꾸면
 # 더 나쁜 위반이라 같이 본다, 25.2364). 따옴표 친 열(25.2363)과 행값 대입 `SET (a, b) = (…)`(25.2364)도
@@ -120,6 +127,14 @@ def test_판정_자체() -> None:
     assert 판정("DELETE FROM paper_accounts WHERE id='H'; INSERT INTO paper_accounts (id, rule_version) VALUES ('H', 5);") not in (None, "ok")
     for 열 in ("sell_rule = 'trend'", "entry_rule = 'x'", "top_n = 7", "selection = 'y'"):
         assert 판정(f"UPDATE paper_accounts SET {열} WHERE id='A';") not in (None, "ok"), 열
+    # 25.2365 — REPLACE INTO, 표 다시 짓기, 대상 표로 좁힌 DELETE
+    assert 판정("REPLACE INTO paper_accounts (id, name) VALUES ('A', 'x');") not in (None, "ok")
+    assert 판정("DROP TABLE paper_accounts;") not in (None, "ok")
+    assert 판정("CREATE TABLE paper_accounts_new (id TEXT);"
+              " INSERT INTO paper_accounts_new SELECT id FROM paper_accounts;"
+              " DROP TABLE IF EXISTS paper_accounts; ALTER TABLE paper_accounts_new RENAME TO paper_accounts;") not in (None, "ok")
+    assert 판정("DELETE FROM paper_orders WHERE account_id NOT IN (SELECT id FROM paper_accounts);") is None
+    assert 판정("ALTER TABLE paper_accounts RENAME TO paper_accounts_old;") is None  # 옮기기만(다시 짓기 앞 단계)은 아님
     # 머리 30줄 경계 — 30번째 줄의 표시는 세고 31번째는 세지 않는다
     assert 판정("\n" * 29 + "-- 판 올림 창: 2027-01\n" + 올림) == "ok"
     assert 판정("\n" * 30 + "-- 판 올림 창: 2027-01\n" + 올림) != "ok"
@@ -130,6 +145,7 @@ def test_판정_자체() -> None:
 def test_문서() -> None:
     글 = (뿌리 / "docs/paper.md").read_text()
     for 조각 in ("2.5.1 판 올림 창", "25.2361", "`-- 판 올림 창: YYYY-MM`", "`-- 판 올림 예외: <까닭>`", "test_rule_bump_window_2361",
-                 "`-- 판 올림 사전 등록: <절>`", "2027-01 부터", "크기와 상관없이 바로"):
+                 "`-- 판 올림 사전 등록: <절>`", "2027-01 부터", "크기와 상관없이 바로", "`DELETE FROM` 은 열과 상관없이",
+                 "25.1600 [권고] 1", "**켜는 문턱**은 원가 위"):
         assert 조각 in 글, 조각
     assert "판 올림 대기열" in (뿌리 / "docs/handoff.md").read_text()
