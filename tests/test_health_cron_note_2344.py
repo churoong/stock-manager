@@ -95,7 +95,10 @@ def test_문턱이_웹_판정과_같다() -> None:
     """/status 의 `cronVerdict` 는 주기의 세 배 — 무응답 감시 주기(`CRON_EXPECTED` health)가 바뀌면 여기도 바꾼다"""
     글 = (뿌리 / "web/lib/health.ts").read_text(encoding="utf-8")
     m = re.search(r'job: "health", market: "ALL", label: "무응답 감시", everyMinutes: (\d+)', 글)
-    assert m and 3 * int(m.group(1)) == daily.HEALTH_CRON_STALE_MINUTES
+    # 노랑 경계의 배수도 웹에서 읽는다(25.2346, 25.2345 교차검증 [참고] — 배수가 바뀌면 "노랑 경계와 같은 값" 이 몰래 틀어졌다)
+    배수 = re.search(r"const 문턱 = Math\.max\(기대\.everyMinutes \* (\d+), 15\);", 글)
+    assert m and 배수 and "if (지난분 <= 문턱) return { tone: \"ok\"" in 글
+    assert int(배수.group(1)) * int(m.group(1)) == daily.HEALTH_CRON_STALE_MINUTES
 
 
 def test_일일_배치가_리포트_경고로_싣는다(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -104,6 +107,10 @@ def test_일일_배치가_리포트_경고로_싣는다(monkeypatch: pytest.Monk
     _준비(monkeypatch, 0)
     닫음: list = []
     monkeypatch.setattr(daily.db, "finish_batch_run", lambda c, rid, **k: 닫음.append(k))
-    monkeypatch.setattr(daily, "health_cron_note", lambda c, now: "⚠️ 무응답 감시 멈춤(시험)")
+    받은: list = []
+    monkeypatch.setattr(daily, "health_cron_note", lambda c, now: (받은.append(now), "⚠️ 무응답 감시 멈춤(시험)")[1])
     daily.run("KR")
     assert "⚠️ 무응답 감시 멈춤(시험)" in 닫음[-1]["step_log"]["warnings"]
+    # 넘기는 시각은 시간대가 있다(25.2346, 25.2345 교차검증 [권고] — 판정 전체를 가둔 뒤로는 시간대 없는 `now` 가 죽지 않고
+    # 날마다 "…보기 실패" 거짓 경고가 되어 진짜 멈춤을 가렸다)
+    assert 받은 and 받은[-1].tzinfo is not None
