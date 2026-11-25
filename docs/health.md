@@ -20,6 +20,7 @@
 |---|---|---|
 | 배치가 **실패** | 배치 자신 (`daily._notify_failure`) | 오류 내용과 마지막 성공 |
 | 배치가 **안 돎** | **무응답 감시** (이 문서) | 기대 시각까지 성공 기록이 없음 |
+| 무응답 감시가 **안 돎** | **일일 배치**(Actions — cron-job.org·Vercel 과 길이 따로, 25.2344) | 감시 심장박동(`cron_heartbeats` health)이 `HEALTH_CRON_STALE_MINUTES`(180분 — /status `cronVerdict` 와 같은 주기의 세 배) 넘게 멈춤 → 리포트 ⚠️ 한 줄 |
 
 ---
 

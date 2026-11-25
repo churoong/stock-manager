@@ -1209,6 +1209,38 @@ def _주의_출력(warnings: list[str], 최대: int = 20, 길이: int = 240) -> 
     return 줄
 
 
+#: 무응답 감시(cron-job.org → 웹 `cron/health`, 60분마다)가 이만큼(분) 넘게 안 불렸으면 리포트에 말한다 — 웹 /status 의
+#: `cronVerdict` 문턱(주기의 세 배, 25.141)과 같은 잣대(25.2344, docs/roadmap.md 1장 #5 "감시의 감시")
+HEALTH_CRON_STALE_MINUTES = 180
+
+
+def health_cron_note(client: TursoClient, now: datetime) -> str | None:
+    """**감시의 감시**(25.2344, roadmap #5) — 무응답 감시가 멈추면 배치가 안 돈 날 알림이 오지 않는데, 그것을 알리는
+    곳이 /status 화면(사람이 열어야 보임)뿐이었다. 일일 배치는 Actions 에서 돌아 cron-job.org·Vercel 과 길이 따로다 —
+    그 심장박동 한 줄을 읽어 오래 멈췄으면 리포트 경고 한 줄. 마지막 호출이 실패(`error`)인 것은 감시가 **돌고는** 있어
+    /status 가 따로 빨갛게 띄우므로 여기서는 보지 않는다(멈춤만). 한 행 읽기(기본 키)"""
+    try:
+        rows = client.execute(
+            "SELECT called_at, outcome FROM cron_heartbeats WHERE job = 'health' AND market = 'ALL'"
+        ).dicts()
+    except Exception as exc:  # noqa: BLE001 — 말해 주는 일이 배치를 죽이지 않게. 한도는 올린다
+        if db.quota_reason(exc):
+            raise
+        return _실패문("무응답 감시 호출 기록 읽기", exc)
+    if not rows or str(rows[0].get("outcome")) == "never":
+        return ("⚠️ 무응답 감시가 한 번도 불리지 않았습니다 — 배치가 안 돈 날 알림이 오지 않습니다"
+                "(cron-job.org 작업 확인)")
+    try:
+        마지막 = datetime.fromisoformat(str(rows[0]["called_at"]).replace("Z", "+00:00"))
+    except ValueError:
+        return f"⚠️ 무응답 감시 호출 시각을 읽지 못했습니다({str(rows[0]['called_at'])[:40]})"
+    지난분 = int((now - (마지막 if 마지막.tzinfo else 마지막.replace(tzinfo=UTC))).total_seconds() // 60)
+    if 지난분 <= HEALTH_CRON_STALE_MINUTES:
+        return None
+    return (f"⚠️ 무응답 감시가 {지난분 // 60}시간 {지난분 % 60}분째 불리지 않았습니다 — 배치가 안 돈 날 알림이 오지"
+            " 않습니다(cron-job.org 작업 확인)")  # fmt: skip
+
+
 def _실패문(이름: str, exc: BaseException) -> str:
     """하위 작업이 예외로 끝난 것을 리포트 한 줄로. **한도는 "실패" 가 아니라 "건너뜀"** 이다 (docs/infra.md 25.666,
     교차검증) — 기록은 `skipped` 로 닫는데(25.664) 리포트는 "…실패: D1_ERROR …" 라 적어 둘이 어긋났다."""
@@ -2303,6 +2335,9 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
             용량경고 = db.db_size_note(client)
             if 용량경고:
                 warnings.append(용량경고)
+            # 감시의 감시(25.2344) — 무응답 감시가 멈췄으면 리포트가 말한다(그것이 멈춘 것을 알릴 다른 통로가 없다)
+            if 감시말 := health_cron_note(client, datetime.now(UTC)):
+                warnings.append(감시말)
             # 장 시작 전 창을 놓친 늦은 실행이면 맨 앞에 말한다 (2026-10-01 사용자 결정, 25.845)
             # 이어 도는 실행은 리포트를 만들지 않는다 — 리포트는 먼저 제때 갔다(25.2146, 25.2144 교차검증 [권고])
             if decision.late_minutes is not None and not 발송끝남:
