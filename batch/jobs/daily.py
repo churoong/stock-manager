@@ -1725,16 +1725,16 @@ def load_signal_rows(
 
 
 def collect_prices(
-    client: TursoClient, market: str, trade_date: str
+    client: TursoClient, market: str, trade_date: str, *, coverage: dict[str, int] | None = None
 ) -> tuple[list[dict[str, Any]], list[str], str]:
-    """시장별 수집 경로로 넘긴다. 두 시장은 원천도 응답 모양도 다르다."""
+    """시장별 수집 경로로 넘긴다. 두 시장은 원천도 응답 모양도 다르다. `coverage` 는 미국만 채운다(25.2342)."""
     if market.upper() == "KR":
         return collect_kr_prices(client, trade_date)
-    return collect_us_prices(client, trade_date)
+    return collect_us_prices(client, trade_date, coverage=coverage)
 
 
 def collect_us_prices(
-    client: TursoClient, trade_date: str
+    client: TursoClient, trade_date: str, *, coverage: dict[str, int] | None = None
 ) -> tuple[list[dict[str, Any]], list[str], str]:
     """미국 전종목 시세를 야후에서 받아 저장한다.
 
@@ -1820,6 +1820,13 @@ def collect_us_prices(
     # 야후 미게시) 이 검사가 영영 울리지 않았다. 국내는 그날 행만 받아 처음부터 맞다. 경고만 한다 — 뒤 단계(신호)가
     # 종가 없는 종목을 이미 건너뛴다
     그날 = sum(1 for b in result.data if b.date == trade_date and b.close is not None and b.ticker in targets)
+    # **그날 시세 커버리지**(25.2342, docs/paper.md 15.13 — 주문 허가 판정의 관측 칸). 야후는 조각으로 받아 일부만
+    # 빠질 수 있고(국내는 거래소 한 번에 전종목이라 그 꼴의 실패가 없다), 빠진 종목은 신호가 묵은 값으로 남아 상위-N
+    # 같은 횡단면 순위가 줄어든 모집단으로 매겨진다 — 종목별 묵음 거름(`risk_gate.stale`)은 그 왜곡을 못 본다. 반환 꼴은
+    # 그대로 두고(부르는 곳 19곳) 받을 dict 를 넘긴 쪽에만 채운다. 대상에는 ETF·시세가 한 번도 없던 종목이 섞여 평소에도
+    # 100% 가 아니다
+    if coverage is not None:
+        coverage.update({"day": 그날, "targets": len(targets)})
     suspicion = cal.suspect_calendar(is_open=True, rows_collected=그날)
     if suspicion:
         warnings.append(suspicion)
@@ -2272,7 +2279,10 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
             etf_이음경고.append(f"추천 ETF 잇기 실패: {exc}")
         try:
             try:
-                rows, warnings, summary = collect_prices(client, market, decision.trade_date)
+                커버리지: dict[str, int] = {}
+                rows, warnings, summary = collect_prices(client, market, decision.trade_date, coverage=커버리지)
+                if 커버리지:
+                    step_log["price_coverage"] = 커버리지
                 warnings = etf_이음경고 + warnings
             except KrxNotYet as 이름:
                 # 실패 알림을 보내지 않고 **건너뜀** 으로 닫는다 — 성공이 아니므로 다음 실행(08:27·예비)이 다시 돈다
