@@ -213,8 +213,10 @@ REALIZED_ROWS_SQL = (
 )
 REALIZED_SET_SQL = "UPDATE paper_broker_orders SET realized_krw = ?, realized_fx_krw = ? WHERE id = ?"
 #: 기록 밖에서 찼을 수 있는 매수 — 체결 0 인 채 응답 없음·접수·모름(25.2351). 실현손익의 수량·원가엔 넣지 않고 "그 뒤
-#: 바퀴는 수량이 확인되지 않았다" 표시에만 쓴다(`bm.realized(maybe_buys=)`). 미국 모름은 빼다 — 보통 개장 때 안 나간
-#: 예약이다(`BOUGHT_SQL`·`NET_SQL` 과 같은 잣대, 25.1714 — 25.2352)
+#: 바퀴는 수량이 확인되지 않았다"·"원가가 섞였을 수 있다" 표시에만 쓴다(`bm.realized(maybe_buys=)`). 미국 모름은 뺀다
+#: — 보통 개장 때 안 나간 예약이다(`BOUGHT_SQL`·`NET_SQL` 과 같은 잣대, 25.1714 — 25.2352). 실현손익 쪽은 빼는 비용이
+#: (드물게 실제로 찼을 때) 앞 바퀴 값이 남는 것이라 비대칭이지만 같은 잣대를 골랐다
+#: `[확인필요: 미국 모름이 실제로 찬 비율]`
 REALIZED_MAYBE_BUYS_SQL = (
     "SELECT trade_date, stock_id, code FROM paper_broker_orders WHERE broker = ? AND side = 'buy'"
     " AND (status IN ('sending', 'accepted') OR (status = 'unknown' AND market = 'KR')) AND COALESCE(filled_qty, 0) = 0"
