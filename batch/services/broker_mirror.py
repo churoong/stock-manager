@@ -126,7 +126,7 @@ GO_SHORT = {
 GO_UNKNOWN_KEYS = ("new_code_error", "read_budget_unknown")
 
 
-#: 그림자 계산이 깨졌거나(`_끝` 이 `{"error": …}` 를 실음) 판정 글이 셋 밖인 실행 — 조용히 빠지면 "판정 0" 이
+#: 그림자 계산이 깨졌거나(`_끝` 이 `{"error": …}` 를 실음) 판정 글이 셋 밖인 실행 — 조용히 빠지면 줄이 비어
 #: "KIS 단계가 안 돈 주" 와 구별되지 않는다(25.2368)
 GO_ERROR = "error"
 _판정들 = ("go", "sell_only", "no_go")
@@ -145,7 +145,8 @@ def go_shadow_lines(verdicts: list[tuple[str, str, str, tuple[str, ...], bool]])
     if not verdicts:
         return []
     자리 = {s: sum(1 for v in verdicts if v[0] == s) for s in ("broker", "broker2")}
-    out = [f"주문 허가 그림자(KIS 단계, 켜지 않음, 실행 단위): 실행 {len(verdicts)}번"
+    # 머리 수는 **판정 칸**(실행 × 자리) — 한 실행에 베끼는 계좌·도전자가 함께 돌면 둘로 센다(25.2370)
+    out = [f"주문 허가 그림자(KIS 단계, 켜지 않음, 실행 단위): 판정 칸 {len(verdicts)}개"
            f" (베끼는 계좌 {자리['broker']} · 도전자 {자리['broker2']})"]  # fmt: skip
     시장들 = sorted({v[1] for v in verdicts}, key=lambda m: (m != "KR", m))
     for 시장 in 시장들:

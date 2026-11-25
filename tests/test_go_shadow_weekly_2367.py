@@ -32,19 +32,22 @@ def test_분포_줄() -> None:
     ]
     줄 = bm.go_shadow_lines(v)
     assert 줄 == [
-        "주문 허가 그림자(KIS 단계, 켜지 않음, 실행 단위): 실행 8번 (베끼는 계좌 7 · 도전자 1)",
+        "주문 허가 그림자(KIS 단계, 켜지 않음, 실행 단위): 판정 칸 8개 (베끼는 계좌 7 · 도전자 1)",
         "  KR: 그대로 1 · 매도만이었을 3 · 막힘 1 · 모름 칸 있음 1",
         "    매도만 갈래: 잔고 어긋남 2 · 새 코드 첫날 1",  # 많은 것부터 — 넣은 차례(새 코드 먼저)와 다르게
         "    막힘 갈래: 멈춤 1 · 잔고 어긋남 1",
         "  US: 그대로 0 · 매도만이었을 1 · 막힘 0 · 판정 못 함 1",
         "    매도만 갈래: 읽기 예산 1",
     ]
+    # 한 실행에 두 자리면 판정 칸 둘(25.2370 — "실행 2번" 으로 실행 수가 부풀어 읽혔다)
+    assert bm.go_shadow_lines([("broker", "KR", "go", (), False), ("broker2", "KR", "go", (), False)])[0].endswith(
+        "판정 칸 2개 (베끼는 계좌 1 · 도전자 1)")
     # 국내 먼저 — 시장 없는 줄("?")은 글자 순으로 앞이지만 뒤로
     assert [x.split(":")[0].strip() for x in bm.go_shadow_lines([("broker", "?", "go", (), False),
                                                                 ("broker", "KR", "go", (), False)])[1:]] == ["KR", "?"]
     # 모름 칸·판정 못 함이 없으면 그 조각은 싣지 않는다
     assert bm.go_shadow_lines([("broker", "US", "go", (), False)]) == [
-        "주문 허가 그림자(KIS 단계, 켜지 않음, 실행 단위): 실행 1번 (베끼는 계좌 1 · 도전자 0)",
+        "주문 허가 그림자(KIS 단계, 켜지 않음, 실행 단위): 판정 칸 1개 (베끼는 계좌 1 · 도전자 0)",
         "  US: 그대로 1 · 매도만이었을 0 · 막힘 0"]
 
 
@@ -77,7 +80,7 @@ def test_실행_기록에서_읽는다() -> None:
     _넣기(mem, 21, {"broker": {"go_shadow": {"verdict": "go", "reasons": []}}}, 시장=None)
     runs = ws.load_runs(mem, "2026-01-01")  # type: ignore[arg-type]
     모두 = [v for r in runs for v in r.go]
-    assert ("broker", "US", "sell_only", ("diff",), False) in 모두 and ("broker", "?", "go", (), False) in 모두
+    assert 모두.count(("broker", "US", "sell_only", ("diff",), False)) == 1 and 모두.count(("broker", "?", "go", (), False)) == 1
     모두 = [v for v in 모두 if v[1] == "KR"]
     assert ("broker", "KR", "sell_only", ("diff",), True) in 모두
     assert ("broker2", "KR", "go", (), True) in 모두
@@ -103,7 +106,7 @@ def test_요약_실행이_분포를_싣는다(monkeypatch) -> None:  # type: ign
     monkeypatch.setattr("builtins.print", lambda *a, **k: 찍힘.append(" ".join(str(x) for x in a)))
     assert ws.run(dry_run=True) == 0
     글 = "\n".join(찍힘)
-    assert "주문 허가 그림자(KIS 단계, 켜지 않음, 실행 단위): 실행 2번 (베끼는 계좌 2 · 도전자 0)" in 글
+    assert "주문 허가 그림자(KIS 단계, 켜지 않음, 실행 단위): 판정 칸 2개 (베끼는 계좌 2 · 도전자 0)" in 글
     assert "  KR: 그대로 1 · 매도만이었을 1 · 막힘 0" in 글 and "    매도만 갈래: 새 코드 첫날 1" in 글
     monkeypatch.setattr(ws._bm, "go_shadow_lines", lambda v: 1 / 0)
     찍힘.clear()
