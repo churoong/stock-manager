@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import inspect
-import re
 
 import pytest
 
@@ -75,8 +74,30 @@ def test_buy_orders_의_글자_까닭은_모두_상수에_있다() -> None:
     from batch.jobs import paper_solo
 
     for 함수 in (job.buy_orders, paper_solo.size_orders):
-        글들 = set(re.findall(r'return \[\], \{"skipped": "([^"]+)"\}', inspect.getsource(함수)))
+        글들 = _skipped_글들(함수)
         assert 글들 == set(pp.BUY_FAULT_SKIPS), 함수.__name__
+
+
+def _skipped_글들(함수: object) -> set[str]:
+    """함수의 return 값 안에 있는 `"skipped"` 열쇠 dict 의 값 — AST 로(25.2332, 25.2331 교차검증 [권고]: 정규식은 한 줄짜리
+    `return [], {"skipped": "글"}` 꼴만 잡아, 열쇠를 더 붙이거나 f-string·여러 줄로 쓴 새 까닭은 조용히 빠졌다). 값이 글자
+    상수가 아니면(f-string·이름) 실패 — 상수와 견줄 수 없는 까닭은 `desk._buy_fault` 가 못 띄운다"""
+    import ast
+    import textwrap
+
+    나무 = ast.parse(textwrap.dedent(inspect.getsource(함수)))  # type: ignore[arg-type]
+    글들: set[str] = set()
+    # **이른 반환**만 — 주문 줄이 빈 목록(`return [], {...}`)인 return. 끝의 정상 return 은 후보별 건너뜀 목록을 `skipped` 에
+    # 싣는다(`buy_orders` 의 `빠짐[:10]`) — 이상 까닭이 아니다
+    이른 = [n for n in ast.walk(나무) if isinstance(n, ast.Return) and isinstance(n.value, ast.Tuple)
+            and n.value.elts and isinstance(n.value.elts[0], ast.List) and not n.value.elts[0].elts]  # fmt: skip
+    for 반환 in 이른:
+        for d in (n for n in ast.walk(반환.value) if isinstance(n, ast.Dict)):  # type: ignore[arg-type]
+            for k, v in zip(d.keys, d.values, strict=True):
+                if isinstance(k, ast.Constant) and k.value == "skipped":
+                    assert isinstance(v, ast.Constant) and isinstance(v.value, str), ast.unparse(v)
+                    글들.add(v.value)
+    return 글들
 
 
 def test_같은_날_다시_돌아_샀어도_사고로_남는다() -> None:
