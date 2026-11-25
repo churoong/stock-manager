@@ -165,14 +165,17 @@ def _첨자_자리_됨(첨자: object, 부모: dict) -> bool:
 
 def test_batch_에_skipped_이름_상수가_없다() -> None:
     """이름 열쇠(`{pp.SKIP_KEY: "새"}`)는 두 모듈의 글자 `"skipped"` 만 보는 허용 목록 밖이다(25.2340, 25.2339 교차검증
-    [참고]) — 값이 `"skipped"` 인 대입이 batch 어디에도 없게 묶는다"""
+    [참고]) — 값이 **글자 상수 하나**인 대입(`X = "skipped"`·`X: str = "skipped"`)이 batch 어디에도 없게 묶는다. 튜플 값·
+    walrus·기본 인자·이어 붙인 글자·`str(...)` 꼴은 보지 않는다(알고 둔 한계, 25.2341)"""
     import ast
 
     뿌리 = Path(__file__).resolve().parent.parent / "batch"
     for 파일 in 뿌리.rglob("*.py"):
         for n in ast.walk(ast.parse(파일.read_text(encoding="utf-8"))):
             if isinstance(n, ast.Assign | ast.AnnAssign) and isinstance(n.value, ast.Constant):
-                assert n.value.value != "skipped", f"{파일}:{n.lineno}"
+                assert n.value.value != "skipped", (
+                    f"{파일}:{n.lineno} — 매수 기록 `skipped` 열쇠를 이름으로 돌아가지 못하게 막는 시험(25.2340). batch_runs 상태"
+                    " 같은 다른 뜻이면 이름을 다르게 짓지 말고 글자 그대로 쓴다")
 
 
 def test_모듈_전체의_skipped_글은_이상이나_정상_한쪽에_든다() -> None:
