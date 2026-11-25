@@ -110,8 +110,9 @@ class Run:
     #: 같은 재료다
     paper_faults: tuple[str, ...] = ()
     #: KIS 단계의 주문 허가 그림자(`step_log.broker`·`broker2` 의 `go_shadow`, 25.2293) —
-    #: (자리, 시장, 판정, 갈래, 모름 칸 있음). 주간 분포 줄(`bm.go_shadow_lines`, 25.2367·2368)의 재료
-    go: tuple[tuple[str, str, str, tuple[str, ...], bool], ...] = ()
+    #: (자리, 시장, 판정, 갈래, 모름 칸 있음, 내려 한 매수 `planned_buys`). 주간 분포 줄(`bm.go_shadow_lines`,
+    #: 25.2367·2368·2371)의 재료
+    go: tuple[tuple[str, str, str, tuple[str, ...], bool, int | None], ...] = ()
 
 
 #: **예정된 건너뜀** — 고장이 아니다 (docs/infra.md 25.1372, 주간 요약 감사 재현). 미국 일일 배치는 서머타임을 덮으려고
@@ -147,7 +148,7 @@ def load_runs(client: TursoClient, since: str) -> list[Run]:
         코드: str | None = None
         배치코드: str | None = None
         계좌못함: tuple[str, ...] = ()
-        허가: list[tuple[str, str, str, tuple[str, ...], bool]] = []
+        허가: list[tuple[str, str, str, tuple[str, ...], bool, int | None]] = []
         try:
             로그 = json.loads(r["step_log"]) if r["step_log"] else {}
             if isinstance(로그, dict) and isinstance(로그.get("warnings"), list):
@@ -181,7 +182,10 @@ def load_runs(client: TursoClient, since: str) -> list[Run]:
                 # 계산이 깨진 그림자(`{"error": …}`)·모르는 판정 글은 "판정 못 함" 으로 센다(25.2368 — 조용히 빠졌다)
                 판정 = 판정 if 판정 in ("go", "sell_only", "no_go") else _bm.GO_ERROR
                 갈래 = tuple(str(k) for k in 그림자.get("reasons") or [] if isinstance(k, str))
-                허가.append((자리, str(r["market"] or "?"), 판정, 갈래, any(칸.get(k) for k in _bm.GO_UNKNOWN_KEYS)))
+                산 = 칸.get("planned_buys")
+                산 = 산 if isinstance(산, int) and not isinstance(산, bool) else None  # 25.2298 앞 기록·꼴 틀림은 모름
+                모름칸 = any(칸.get(k) for k in _bm.GO_UNKNOWN_KEYS)
+                허가.append((자리, str(r["market"] or "?"), 판정, 갈래, 모름칸, 산))
         except (TypeError, ValueError, AttributeError):
             pass
         out.append(Run(str(r["job_name"]), r["market"], str(r["status"]), str(r["started_at"]), r["error_text"], 경고,

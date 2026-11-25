@@ -132,11 +132,12 @@ GO_ERROR = "error"
 _판정들 = ("go", "sell_only", "no_go")
 
 
-def go_shadow_lines(verdicts: list[tuple[str, str, str, tuple[str, ...], bool]]) -> list[str]:
+def go_shadow_lines(verdicts: list[tuple[str, str, str, tuple[str, ...], bool, int | None]]) -> list[str]:
     """주문 허가 그림자의 7일 분포 — 주간 요약 줄(docs/paper.md 15.13, roadmap #2 "문턱·켜기는 분포를 본 뒤",
     25.2367·2368).
 
-    `verdicts` 는 실행마다 (자리 `broker`·`broker2`, 시장 `KR`·`US`, 판정, 갈래 열쇠들, 모름 칸 있음). 순수 계산.
+    `verdicts` 는 실행마다 (자리 `broker`·`broker2`, 시장 `KR`·`US`, 판정, 갈래 열쇠들, 모름 칸 있음, 내려 한 매수 건수
+    `planned_buys` — 없으면 None). 순수 계산.
     **시장별로** 센다 — 갈래가 시장마다 다르게 서고 문턱도 시장별 판단이다(25.2368). **실행 단위**다(같은 날 다시 돈
     실행도 따로 — 날 단위로 합치지 않는다). 판정 `error`(그림자 계산이 깨짐·모르는 판정 글)는 "판정 못 함" 으로 따로.
     판정이 하나도 없으면 빈 목록(키를 넣기 전·KIS 단계가 안 돈 주). 판정은 그림자라 주문을 막지 않았다 — "켰다면" 의
@@ -146,7 +147,7 @@ def go_shadow_lines(verdicts: list[tuple[str, str, str, tuple[str, ...], bool]])
         return []
     자리 = {s: sum(1 for v in verdicts if v[0] == s) for s in ("broker", "broker2")}
     # 머리 수는 **판정 칸**(실행 × 자리) — 한 실행에 베끼는 계좌·도전자가 함께 돌면 둘로 센다(25.2370)
-    out = [f"주문 허가 그림자(KIS 단계, 켜지 않음, 실행 단위): 판정 칸 {len(verdicts)}개"
+    out = [f"주문 허가 그림자(KIS 단계, 켜지 않음, 날로 합치지 않음): 판정 칸 {len(verdicts)}개"
            f" (베끼는 계좌 {자리['broker']} · 도전자 {자리['broker2']})"]  # fmt: skip
     시장들 = sorted({v[1] for v in verdicts}, key=lambda m: (m != "KR", m))
     for 시장 in 시장들:
@@ -158,6 +159,15 @@ def go_shadow_lines(verdicts: list[tuple[str, str, str, tuple[str, ...], bool]])
         몸 += f" · 모름 칸 있음 {모름}" if 모름 else ""
         몸 += f" · 판정 못 함 {못함}" if 못함 else ""
         out.append(몸)
+        # **켰다면 막았을 매수**(25.2371) — 매도만 판정 칸 가운데 그 실행이 실제로 매수를 내려 했는지
+        # (`planned_buys`, 25.2298). 매수를 내려 하지 않은 날의 매도만은 켜도 아무것도 막지 않는다 —
+        # 오탐의 비용은 이 수로 읽는다
+        if 판["sell_only"]:
+            매도만 = [v for v in 내 if v[2] == "sell_only"]
+            샀을 = [v[5] for v in 매도만 if isinstance(v[5], int) and v[5] > 0]
+            수모름 = sum(1 for v in 매도만 if not isinstance(v[5], int))
+            글 = f"    켰다면 막았을 매수: {sum(샀을)}건 (매도만 {len(매도만)}칸 가운데 매수를 내려 한 칸 {len(샀을)})"
+            out.append(글 + (f" · 매수 수 모름 {수모름}칸" if 수모름 else ""))
         for 판정, 이름 in (("sell_only", "매도만"), ("no_go", "막힘")):
             셈: dict[str, int] = {}
             for v in 내:
