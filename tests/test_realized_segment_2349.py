@@ -92,4 +92,39 @@ def test_일일_배치가_기록_밖_매수를_읽어_넘긴다() -> None:
     job.update_realized(c, "kis_vts", "KR")
     바뀜 = {x[1][2]: x[1][:2] for x in c.batches[0]}
     assert 바뀜[3] == [None, None]  # 기록 밖 매수가 있어 앞 바퀴도 모름
-    assert "status IN ('sending', 'accepted', 'unknown')" in job.REALIZED_MAYBE_BUYS_SQL
+    for 조각 in ("side = 'buy'", "status IN ('sending', 'accepted')", "(status = 'unknown' AND market = 'KR')",
+                 "COALESCE(filled_qty, 0) = 0"):  # fmt: skip
+        assert 조각 in job.REALIZED_MAYBE_BUYS_SQL, 조각
+
+
+
+def test_기준점도_행도_없는_날의_기록_밖_매수도_센다() -> None:
+    """25.2352 (25.2351 교차검증 [권고]) — 앞 시험의 기록 밖 매수가 기준점 날이라, 날짜 고리에 그 날을 넣는 줄을 되돌려도
+    지나갔다. 10-14 확인 기준점 뒤 행·기준점 없는 10-15 에 기록 밖 매수 → 10-16 다 팖 → 다시 삼 → 10-20 KIS 8 > 기록 3"""
+    행 = [_o(1, "2026-10-13", "buy", 10, 100.0), _o(3, "2026-10-16", "sell", 10, 120.0),
+         _o(4, "2026-10-19", "buy", 3, 110.0), _o(5, "2026-10-20", "sell", 3, 125.0)]  # fmt: skip
+    스냅 = [("2026-10-14", {"C1": 10}), ("2026-10-20", {"C1": 8})]
+    밖 = [{"trade_date": "2026-10-15", "stock_id": 1, "code": "C1"}]
+    assert bm.realized(행, lambda d: None, {}, 스냅, maybe_buys=밖)[3] == (None, None)
+    assert bm.realized(행, lambda d: None, {}, 스냅)[3] == (200.0, 0.0)
+
+
+def test_다_판_뒤의_기록_밖_매수는_앞_바퀴를_열어_두지_않는다() -> None:
+    """25.2352 (25.2351 교차검증 [권고]) — 앞 바퀴 원가를 흐릴 수 있는 것은 기록 보유가 0 이 되기 전의 기록 밖 매수뿐.
+    다 판 뒤(10-17) 의 것까지 막으면 맞는 +200 이 소급해 모름이 됐다. 새 바퀴는 그대로 모름(KIS 8 > 기록 3)"""
+    행 = [_o(1, "2026-10-14", "buy", 10, 100.0), _o(3, "2026-10-16", "sell", 10, 120.0),
+         _o(4, "2026-10-19", "buy", 3, 110.0), _o(5, "2026-10-20", "sell", 3, 125.0)]  # fmt: skip
+    스냅 = [("2026-10-15", {"C1": 10}), ("2026-10-20", {"C1": 8})]
+    r = bm.realized(행, lambda d: None, {}, 스냅, maybe_buys=[{"trade_date": "2026-10-17", "stock_id": 1, "code": "C1"}])
+    assert r[3] == (200.0, 0.0) and r[5] == (None, None)
+
+
+def test_기록_밖_매수와_밖_매도가_겹쳐_KIS_가_적으면_모름() -> None:
+    """25.2352 (25.2351 교차검증 [권고], 탐침 P3) — 10-15 KIS 10 = 기록 10 확인, 같은 날 기록 밖 매수 5주 @200(참)과 기록
+    밖 매도 7주(참), 10-16 KIS 8 < 기록 10, 10-17 8주 @150 매도. 기록 원가를 비율로 줄이면 +400(참값 약 +133)"""
+    행 = [_o(1, "2026-10-14", "buy", 10, 100.0), _o(2, "2026-10-17", "sell", 8, 150.0)]
+    r = bm.realized(행, lambda d: None, {}, [("2026-10-15", {"C1": 10}), ("2026-10-16", {"C1": 8})],
+                    maybe_buys=[{"trade_date": "2026-10-15", "stock_id": 1, "code": "C1"}])  # fmt: skip
+    assert r[2] == (None, None)
+    # 기록 밖 매수가 없으면 예전처럼 비율로 줄여 맞는 값(기록 밖 매도뿐)
+    assert bm.realized(행, lambda d: None, {}, [("2026-10-15", {"C1": 10}), ("2026-10-16", {"C1": 8})])[2] == (400.0, 0.0)

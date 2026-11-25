@@ -213,10 +213,11 @@ REALIZED_ROWS_SQL = (
 )
 REALIZED_SET_SQL = "UPDATE paper_broker_orders SET realized_krw = ?, realized_fx_krw = ? WHERE id = ?"
 #: 기록 밖에서 찼을 수 있는 매수 — 체결 0 인 채 응답 없음·접수·모름(25.2351). 실현손익의 수량·원가엔 넣지 않고 "그 뒤
-#: 바퀴는 수량이 확인되지 않았다" 표시에만 쓴다(`bm.realized(maybe_buys=)`)
+#: 바퀴는 수량이 확인되지 않았다" 표시에만 쓴다(`bm.realized(maybe_buys=)`). 미국 모름은 빼다 — 보통 개장 때 안 나간
+#: 예약이다(`BOUGHT_SQL`·`NET_SQL` 과 같은 잣대, 25.1714 — 25.2352)
 REALIZED_MAYBE_BUYS_SQL = (
     "SELECT trade_date, stock_id, code FROM paper_broker_orders WHERE broker = ? AND side = 'buy'"
-    " AND status IN ('sending', 'accepted', 'unknown') AND COALESCE(filled_qty, 0) = 0"
+    " AND (status IN ('sending', 'accepted') OR (status = 'unknown' AND market = 'KR')) AND COALESCE(filled_qty, 0) = 0"
 )
 #: 미국 체결의 원화 환산 — 가상모의투자와 같은 환율 표(그날 이하 마지막). 7일 넘게 묵었으면 모름.
 #: 체결 첫날 7일 앞부터 마지막 날까지 한 번에 읽는다(25.1698 — 예전엔 체결 거래일마다 한 번, 3년이면 750번)
