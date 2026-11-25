@@ -58,6 +58,7 @@ def _판(monkeypatch: pytest.MonkeyPatch, 쓴: int | None):  # type: ignore[no-u
 
 @pytest.mark.parametrize(("쓴", "기대"), [
     (int(db.TURSO_MONTHLY_READ_LIMIT * 0.85), 85.0),
+    (int(db.TURSO_MONTHLY_READ_LIMIT * 0.85123), 85.1),  # 실을 때 소수 한 자리(25.2336)
     (int(db.TURSO_MONTHLY_READ_LIMIT * 0.80), 80.0),  # 경고선과 같으면 선다(사용량 상태 `warn` 과 같은 잣대)
     (int(db.TURSO_MONTHLY_READ_LIMIT * 0.79), None),
     (int(db.TURSO_MONTHLY_READ_LIMIT * 0.7996), None),  # 반올림하면 80.0 이지만 서지 않는다(25.2335)

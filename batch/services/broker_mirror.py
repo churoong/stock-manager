@@ -103,8 +103,8 @@ def go_shadow(record: dict[str, Any]) -> dict[str, Any]:
     - 둘 다 걸리면 `no_go`. 새 코드 첫날(`new_code`)은 KIS 단계(`jobs/broker_mirror.run`)가 앞 거래일 실행의 지문을
       읽어 싣는다(25.2306·25.2308). 읽기 예산(`read_budget`)도 그렇다(25.2334). 아직 보지 않는 것: 커버리지 — 이
       기록에 없다. 시세 기준일은 넣지 않는다(H 의 위험 점검이 이미 막는다, docs/paper.md 15.13)
-    - 갈래가 아닌 모름 칸(`new_code_error`·`read_budget_unknown`)은 판정이 `go` 로 남는다 — 분포를 세는 쪽은 그 칸이
-      있는 실행을 `go` 와 따로 센다(25.2335)
+    - 갈래가 아닌 모름 칸(`new_code_error`·`read_budget_unknown`)은 판정이 `go` 로 남는다 — 분포를 세는 쪽(아직 없다)은
+      그 칸이 있는 실행을 `go` 와 따로 센다(25.2335)
     """
     맞춤 = record.get("reconciled")
     값 = {k: record.get(k) for k in (*GO_NO_GO, *GO_SELL_ONLY)}
