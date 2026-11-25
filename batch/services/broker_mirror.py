@@ -134,7 +134,7 @@ _판정들 = ("go", "sell_only", "no_go")
 
 def go_shadow_lines(verdicts: list[tuple[str, str, str, tuple[str, ...], bool, int | None]]) -> list[str]:
     """주문 허가 그림자의 7일 분포 — 주간 요약 줄(docs/paper.md 15.13, roadmap #2 "문턱·켜기는 분포를 본 뒤",
-    25.2367·2368).
+    25.2367·2368·2371).
 
     `verdicts` 는 실행마다 (자리 `broker`·`broker2`, 시장 `KR`·`US`, 판정, 갈래 열쇠들, 모름 칸 있음, 내려 한 매수 건수
     `planned_buys` — 없으면 None). 순수 계산.
@@ -166,7 +166,9 @@ def go_shadow_lines(verdicts: list[tuple[str, str, str, tuple[str, ...], bool, i
             매도만 = [v for v in 내 if v[2] == "sell_only"]
             샀을 = [v[5] for v in 매도만 if isinstance(v[5], int) and v[5] > 0]
             수모름 = sum(1 for v in 매도만 if not isinstance(v[5], int))
-            글 = f"    켰다면 막았을 매수: {sum(샀을)}건 (매도만 {len(매도만)}칸 가운데 매수를 내려 한 칸 {len(샀을)})"
+            # 매수 수를 아는 칸이 하나도 없으면 "0건" 이 "막을 것 없음" 으로 읽힌다 — "모름" 으로(25.2372)
+            건 = f"{sum(샀을)}건" if 수모름 < len(매도만) else "모름"
+            글 = f"    켰다면 막았을 매수: {건} (매도만 {len(매도만)}칸 가운데 매수를 내려 한 칸 {len(샀을)})"
             out.append(글 + (f" · 매수 수 모름 {수모름}칸" if 수모름 else ""))
         for 판정, 이름 in (("sell_only", "매도만"), ("no_go", "막힘")):
             셈: dict[str, int] = {}
