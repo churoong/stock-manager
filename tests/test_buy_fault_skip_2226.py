@@ -91,7 +91,14 @@ def _skipped_글들(함수: object) -> set[str]:
     # 싣는다(`buy_orders` 의 `빠짐[:10]`) — 이상 까닭이 아니다
     이른 = [n for n in ast.walk(나무) if isinstance(n, ast.Return) and isinstance(n.value, ast.Tuple)
             and n.value.elts and isinstance(n.value.elts[0], ast.List) and not n.value.elts[0].elts]  # fmt: skip
+    # 꼴을 강제한다(25.2333, 25.2332 교차검증 [권고]) — 이른 반환의 둘째 칸이 dict 글자가 아니면(`return [], 기록`·
+    # `dict(skipped=…)`) 대조가 까닭을 볼 수 없어 실패시킨다. 빈 목록을 호출로 만든 꼴(`list()`)·변수에 담은 꼴도 쓰지 않는다
+    for n in ast.walk(나무):
+        if isinstance(n, ast.Return) and isinstance(n.value, ast.Tuple) and n.value.elts:
+            첫 = n.value.elts[0]
+            assert not (isinstance(첫, ast.Call) and ast.unparse(첫.func) == "list"), ast.unparse(n)
     for 반환 in 이른:
+        assert len(반환.value.elts) == 2 and isinstance(반환.value.elts[1], ast.Dict), ast.unparse(반환)  # type: ignore[union-attr]
         for d in (n for n in ast.walk(반환.value) if isinstance(n, ast.Dict)):  # type: ignore[arg-type]
             for k, v in zip(d.keys, d.values, strict=True):
                 if isinstance(k, ast.Constant) and k.value == "skipped":
