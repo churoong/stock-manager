@@ -44,7 +44,7 @@ def _준비(monkeypatch: pytest.MonkeyPatch, 실패수: int) -> tuple[list, list
     m(daily.db, "measure_db_size", lambda c: None)
     m(daily.db, "db_size_note", lambda c: None)
     m(etf_link, "link", lambda c, mk: {})
-    m(daily, "collect_prices", lambda c, mk, d: ([{"name": "x", "close": 1, "change_pct": 0, "volume": 1,
+    m(daily, "collect_prices", lambda c, mk, d, **_k: ([{"name": "x", "close": 1, "change_pct": 0, "volume": 1,
                                                     "currency": "KRW", "source": "krx", "trade_date": d}], [], "1종목"))  # fmt: skip
     m(daily, "refresh_recommendations", lambda mk, d: [])
     m(daily, "refresh_portfolio", lambda mk=None: [])
