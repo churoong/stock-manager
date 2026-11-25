@@ -316,11 +316,11 @@ def test_달력이_이미_수능_늦춤을_알면_두_번_늦추지_않는다(mo
 
 def test_올해_수능일이_9월부터는_목록에_있다() -> None:
     """수능일은 달력이 모른다 — 목록에 없으면 그해 KIS 주문이 08:38 에 나가 "장시작전" 으로 모두 거부된다(2026-11-19,
-    25.2240). 9월이면 그해 수능일이 공고돼 있으니 `monitor_targets.KR_CSAT_DAYS` 에 더할 것 (25.2249)"""
+    25.2240). 9월이면 그해 수능일이 공고돼 있으니 `core/calendar.KR_CSAT_DAYS` 에 더할 것 (25.2249 — 정의처는 25.2356 부터 core/calendar)"""
     from datetime import date as _d
 
     from batch.jobs import monitor_targets as mt
 
     오늘 = _d.today()
     if 오늘.month >= 9:
-        assert any(d.startswith(f"{오늘.year}-") for d in mt.KR_CSAT_DAYS), f"{오늘.year} 수능일을 KR_CSAT_DAYS 에 더하세요"
+        assert any(d.startswith(f"{오늘.year}-") for d in mt.KR_CSAT_DAYS), f"{오늘.year} 수능일을 batch/core/calendar.py KR_CSAT_DAYS 에 더하세요"

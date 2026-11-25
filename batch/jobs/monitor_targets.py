@@ -32,35 +32,19 @@ JOB_NAME = "monitor_targets"
 SESSION_DAYS = 14
 
 
-#: **수능일 국내 장은 한 시간 늦게 열고 늦게 닫는다**(10:00~16:30 KST) (docs/infra.md 25.350).
-#: exchange_calendars 4.13.2 는 이날을 평일처럼 09:00~15:30 으로 준다 — 2026-09-27 이 세션에서 직접 돌려 확인했다
-#: (새해 첫 거래일 10:00 개장은 맞게 준다). 그대로 두면 장중 경로가 15:55 뒤를 장 밖으로 보고
-#: **마지막 한 시간의 손절·목표 터치를 영영 놓친다.** 해마다 거래소 공지로 한 줄씩 더한다(CLAUDE.md "연 1회 대조").
-#: 2025-11-13 은 2026학년도 수능(지난 일, 대조용).
-#: 2026-11-19 는 2027학년도 수능 `[확인필요: 교육부 확정 공고·거래소 공지]`.
-KR_CSAT_DAYS = frozenset({"2025-11-13", "2026-11-19"})
-CSAT_SHIFT = timedelta(hours=1)
+#: 수능일 늦춤의 정의처는 `core/calendar`(25.2356 — `decide` 도 같은 잣대를 쓰게 옮겼다). 이름은 여기서 다시 내보낸다
+KR_CSAT_DAYS = cal.KR_CSAT_DAYS
+CSAT_SHIFT = cal.CSAT_SHIFT
 
 
 def open_utc(market: str, day: date) -> datetime | None:
-    """그 거래일 정규장 시작(UTC) — 국내 수능일은 달력이 모르는 한 시간 늦춤을 더한다(달력이 이미 늦춘 해 — 개장
-    01:00 UTC — 면 더하지 않는다). 달력이 모르면 None. **개장·마감 판정의 단일 정의처**(25.2355 — KIS 주문 창·잔고
-    기준점(`broker_mirror.kr_open_utc`)·가상모의투자 "이미 열렸나"(`daily._장_열림`·`paper` 다시잰기준)가 갈려 수능일
-    09:00~10:00 KST 실행이 가상 주문을 시가 대신 종가로 채웠다)"""
-    열림 = cal.session_open_utc(market, day)
-    if market == "KR" and 열림 is not None and day.isoformat() in KR_CSAT_DAYS and 열림.astimezone(UTC).hour == 0:
-        열림 += CSAT_SHIFT
-    return 열림
+    """그 거래일 정규장 시작(UTC, 국내 수능일 늦춤 포함) — `cal.market_open_utc` 와 같다(25.2355·2356)"""
+    return cal.market_open_utc(market, day)
 
 
 def close_utc(market: str, day: date) -> datetime | None:
-    """그 거래일 정규장 마감(UTC) — 국내 수능일은 개장처럼 한 시간 늦춘다(16:30, 25.350). 달력이 모르면 None"""
-    닫힘 = cal.session_close_utc(market, day)
-    열림 = cal.session_open_utc(market, day)
-    if (market == "KR" and 닫힘 is not None and 열림 is not None and day.isoformat() in KR_CSAT_DAYS
-            and 열림.astimezone(UTC).hour == 0):  # fmt: skip
-        닫힘 += CSAT_SHIFT
-    return 닫힘
+    """그 거래일 정규장 마감(UTC, 국내 수능일 16:30) — `cal.market_close_utc` 와 같다(25.2355·2356)"""
+    return cal.market_close_utc(market, day)
 
 
 def session_rows(market: str, start, days: int = SESSION_DAYS) -> list[tuple[str, str, str, str]]:
