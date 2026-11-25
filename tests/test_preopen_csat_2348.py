@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from batch.core import calendar as cal
 from batch.jobs import broker_mirror as job
-from batch.jobs import monitor_targets as mt
 
 
 def _줄(날: str, 시각: str) -> dict:
@@ -11,7 +11,7 @@ def _줄(날: str, 시각: str) -> dict:
 
 
 def test_수능일_09시대_줄은_개장_전이다() -> None:
-    assert "2026-11-19" in mt.KR_CSAT_DAYS
+    assert "2026-11-19" in cal.KR_CSAT_DAYS
     # 09:35 KST = 00:35 UTC — 달력은 09:00 개장으로 보지만 그날은 10:00 개장이다
     assert job._개장전_잔고([_줄("2026-11-19", "2026-11-19T00:35:00+00:00")], "KR") == [("2026-11-19", {"005930": 3})]
     # 10:00 KST(01:00 UTC) 뒤는 개장 뒤

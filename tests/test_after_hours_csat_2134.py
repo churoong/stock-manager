@@ -7,7 +7,7 @@ from datetime import UTC, date, datetime, time
 
 import pytest
 
-from batch.jobs import monitor_targets as mt
+from batch.core import calendar as cal
 from batch.services import after_hours as ah
 
 
@@ -28,6 +28,6 @@ def test_수능일_시간외_창(utc: datetime, 기대: str | None) -> None:
 
 
 def test_창은_수능일_목록과_밀림을_따른다() -> None:
-    for d in mt.KR_CSAT_DAYS:
+    for d in cal.KR_CSAT_DAYS:
         assert ah.session_window(date.fromisoformat(d)) == (time(17, 0), time(19, 0))
     assert ah.session_window(date(2026, 11, 18)) == (ah.OPEN_KST, ah.CLOSE_KST)
