@@ -1041,6 +1041,7 @@ class Test이웃_모듈들:
         검사(PAPER, f"하루 증권사 모의 주문 상한 {bm.MAX_ORDERS_PER_DAY}건", "증권사 모의 하루 주문 상한 (25.1475)")
         검사(PAPER, f"지난 {bm.COMPARE_DAYS}일(`COMPARE_DAYS`)", "KIS모의투자 비교 창 (25.1478)")
         검사(PAPER, f"마지막 종가에서 {bm.US_MARKETABLE_PCT:g}%(`US_MARKETABLE_PCT`)", "미국 시장가 대신 지정가 폭 (25.1485)")
+        검사(PAPER, f"한도의 {bm.READ_BUDGET_PCT:g}%(`READ_BUDGET_PCT`", "주문 허가 판정 읽기 예산 문턱 (25.2334)")
         검사(PAPER, f"차 {bm.PRICE_TOL:g}달러 미만, `PRICE_TOL`", "미국 맞추기 단가 허용 차 (25.1490)")
         검사(PAPER, f"{bm.DIVERGE_MIN_N}건(`DIVERGE_MIN_N`) 이상", "괴리 알림 표본 (25.1504)")
         검사(PAPER, f"지정가의 {bm.BAR_RATIO_FLOOR:g}배(`BAR_RATIO_FLOOR`", "어긋난 까닭 분할 의심 (25.1737)")

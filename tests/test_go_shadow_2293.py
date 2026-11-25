@@ -57,7 +57,7 @@ def test_0_과_거짓과_빈_글은_걸리지_않는다() -> None:
 def test_갈래는_상수가_정의처다() -> None:
     assert list(bm.GO_NO_GO) == ["halted", "balance_truncated", "send"]
     assert list(bm.GO_SELL_ONLY) == ["reconcile_unknown", "reconcile_truncated", "diff", "unknown_codes", "sending_today",
-                                     "new_code"]
+                                     "new_code", "read_budget"]  # read_budget 25.2334
     assert not set(bm.GO_NO_GO) & set(bm.GO_SELL_ONLY)
 
 

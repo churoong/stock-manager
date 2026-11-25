@@ -27,6 +27,7 @@ from typing import Any
 import requests
 
 from batch.core import calendar as cal
+from batch.core import client as client_backend
 from batch.core import db
 from batch.services import broker_mirror as bm
 from batch.services import fx as fx_svc
@@ -1037,6 +1038,17 @@ def run(
     # (맞추기는 어제까지의 줄만). 주문 허가 판정의 "체결을 모르는 채 다음 주문" 갈래로. 새 읽기 없음 — 이미 읽는 줄의 열
     if 앞모름 := sum(1 for r in 보냄 if r.get("status") == "sending"):
         기록["sending_today"] = 앞모름
+    # 읽기 예산(25.2334) — 주문 허가 판정(15.13)의 매도만 갈래 재료. 월 읽기 한도에 닿으면 보낸 뒤 결과를 적는 읽기·
+    # 쓰기가 막혀 응답 받은 주문이 `sending` 으로 남는다(체결을 모르는 채 다음 날). 카운터는 우리가 센 누계다
+    # (클라이언트가 5만 행마다 더한다 — 이 실행의 덜 더한 몫은 빠진다, Turso 대시보드 값과 같다는 보장도 없다
+    # `[확인필요]`). Turso 일 때만(카운터가 Turso 한도다).
+    # 한 행 읽기(기본 키). 못 읽으면 모름 칸만 — 주문 단계는 그대로 간다
+    if client_backend.resolved_backend() == client_backend.TURSO:
+        쓴비율 = bm.read_budget_used_pct(db.remaining_read_budget_or_none(client), db.TURSO_MONTHLY_READ_LIMIT)
+        if 쓴비율 is None:
+            기록["read_budget_unknown"] = True
+        elif 쓴비율 >= bm.READ_BUDGET_PCT:
+            기록["read_budget"] = 쓴비율
     정리함 = 오늘_정리함(보냄)
     # 오늘 정리한 종목은 **같은 티커의 모든 행**으로 — 같은 날 다시 돌 때 이긴 행이 바뀌면(오늘 새 행을 처음 삼) 앞
     # 실행이 옛 행으로 낸 정리를 못 보고 새 행으로 한 번 더 정리했다(25.1616, 25.1615 교차검증 [필수] 1)
