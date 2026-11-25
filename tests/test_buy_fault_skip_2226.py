@@ -47,9 +47,15 @@ def test_확인할_일에_줄이_서고_장부_현금_음수는_높음() -> None
 
 
 def test_까닭_글이_buy_orders_와_같다() -> None:
-    src = inspect.getsource(job.buy_orders)
-    for 까닭 in pp.BUY_FAULT_SKIPS:
-        assert f'{{"skipped": "{까닭}"}}' in src, 까닭
+    """거장 단독 Z3·Z4 의 `paper_solo.size_orders` 도 같은 글이어야 한다(25.2330, 25.2329 교차검증 [참고] — 글자가
+    어긋나면 미국 실행의 환율 없음 날이 `desk._buy_fault` 에 걸리지 않고, `solo.warning` 은 skipped 면 None 이라
+    아무 줄도 뜨지 않는다)"""
+    from batch.jobs import paper_solo
+
+    for 함수 in (job.buy_orders, paper_solo.size_orders):
+        src = inspect.getsource(함수)
+        for 까닭 in pp.BUY_FAULT_SKIPS:
+            assert f'{{"skipped": "{까닭}"}}' in src, (함수.__name__, 까닭)
 
 
 def test_같은_까닭은_한_줄로_모은다() -> None:
