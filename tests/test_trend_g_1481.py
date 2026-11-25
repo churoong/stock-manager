@@ -20,6 +20,10 @@ def test_trend_exit_only_after_target_and_above_cost() -> None:
     # 권리락 계수는 원가·고점 모두에 — 권리락 전 고점이 거짓 하락을 만들지 않게
     assert pp.trend_exit(100, 120, 100, 10, -7, rights_scale=0.8) is False  # 고점 96(원가 80 대비 +20%) → 89.3 위
     assert pp.trend_exit(100, None, 100, 10, -7) is False
+    # 켜는 문턱이 원가 위일 뿐 — 목표에 닿은 뒤 갭 하락이면 그날 종가가 원가 아래여도 켜진다(25.2365 규칙서·독스트링, 25.2366)
+    assert pp.trend_exit(100, 110, 90, 10, -7) is True
+    # 다른 날 더 싸게 산 몫이 섞이면 첫 매수 뒤 고점을 지금 평균 원가로 견줘 목표 도달이 소급된다(25.1600 [권고] 1)
+    assert pp.trend_exit(92.5, 105, 85, 10, -7) is True
 
 
 def test_trend_rule_does_not_sell_at_target_but_trails() -> None:

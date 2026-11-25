@@ -19,10 +19,11 @@ _바꿈 = re.compile(r"\bUPDATE\b", re.IGNORECASE)  # upsert 의 `DO UPDATE SET`
 # 지우고 다시 넣기(DELETE 뒤 INSERT)도 같은 효과라 계좌 행을 지우는 문장도 판 변경으로 본다(25.2364)
 # 표 다시 짓기(DROP 뒤 새 표를 RENAME — 0073 이 쓴 꼴)도 같다(25.2365). DELETE·DROP·RENAME 은 **대상 표가 paper_accounts** 일 때만
 # (다른 표를 지우며 하위 질의로 읽기만 하는 문장은 아님, 25.2365)
-_표이름 = r"""["`\[]?(?:main\.)?paper_accounts\b["`\]]?"""
+_표이름 = r"""(?:["`\[]?main["`\]]?\.)?["`\[]?paper_accounts\b["`\]]?"""
 _갈아끼움 = re.compile(
     r"\bREPLACE\s+INTO\b|\bINSERT\s+OR\s+REPLACE\b|\bDELETE\s+FROM\s+" + _표이름 + r"|\bDROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?"
-    + _표이름 + r"|\bALTER\s+TABLE\s+\S+\s+RENAME\s+TO\s+" + _표이름,
+    + _표이름 + r"|\bALTER\s+TABLE\s+\S+\s+RENAME\s+TO\s+" + _표이름
+    + r"|\bCREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?" + _표이름,  # 옛 표를 먼저 옮기고 새로 짓는 순서(25.2366)
     re.IGNORECASE,
 )
 # 판을 바꾸는 칸 — 판 번호, 그리고 판단을 만드는 헌장 값(헌장만 바꾸는 판 변경도 창을 따른다, docs/paper.md 2.5.1)
@@ -36,7 +37,7 @@ _판_칸 = re.compile(
 예외_줄 = re.compile(r"^--\s*판 올림 (예외|사전 등록):(.*)$", re.MULTILINE)
 창_달 = (1, 7)
 첫_창 = (2027, 1)
-규칙_전 = {"0077", "0088", "0095"}  # 0097 까지 판을 바꾼 마이그레이션 — 표시 없음
+규칙_전 = {"0070", "0077", "0088", "0095"}  # 0097 까지 판을 바꾼 마이그레이션 — 표시 없음(0070 은 표를 처음 지음, 25.2366 CREATE 갈래)
 규칙_전_끝 = 97
 
 
@@ -134,6 +135,13 @@ def test_판정_자체() -> None:
               " INSERT INTO paper_accounts_new SELECT id FROM paper_accounts;"
               " DROP TABLE IF EXISTS paper_accounts; ALTER TABLE paper_accounts_new RENAME TO paper_accounts;") not in (None, "ok")
     assert 판정("DELETE FROM paper_orders WHERE account_id NOT IN (SELECT id FROM paper_accounts);") is None
+    # 25.2366 — 다시 짓기 두 갈래를 따로(한 사례에 같이 있으면 서로를 가렸다), 옛 표를 먼저 옮기는 순서(새 표 CREATE)
+    assert 판정("ALTER TABLE paper_accounts_new RENAME TO paper_accounts;") not in (None, "ok")
+    assert 판정("DROP TABLE IF EXISTS paper_accounts;") not in (None, "ok")
+    assert 판정("ALTER TABLE paper_accounts RENAME TO paper_accounts_old;"
+              " CREATE TABLE paper_accounts (id TEXT, rule_version INT DEFAULT 1);"
+              " INSERT INTO paper_accounts (id) SELECT id FROM paper_accounts_old; DROP TABLE paper_accounts_old;") not in (None, "ok")
+    assert 판정('DELETE FROM main."paper_accounts" WHERE id = \'H\';') not in (None, "ok")  # 따옴표 친 표 + main.
     assert 판정("ALTER TABLE paper_accounts RENAME TO paper_accounts_old;") is None  # 옮기기만(다시 짓기 앞 단계)은 아님
     # 머리 30줄 경계 — 30번째 줄의 표시는 세고 31번째는 세지 않는다
     assert 판정("\n" * 29 + "-- 판 올림 창: 2027-01\n" + 올림) == "ok"
