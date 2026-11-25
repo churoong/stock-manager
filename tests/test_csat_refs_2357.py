@@ -29,7 +29,7 @@ def test_옛_정의처를_가리키는_글이_없다() -> None:
         대상 = [뿌리 / 길] if 길.endswith(".md") else sorted((뿌리 / 길).rglob("*.py"))
         for 파일 in 대상:
             # 취소선(~~…~~) 구간만 고친 옛 기록으로 빼고 나머지는 다 본다(25.2359 — 줄째 빼면 handoff 의 긴 살아 있는
-            # 문단이 통째로 빠졌다)
+            # 문단이 통째로 빠졌다). DOTALL 을 쓰지 않는다 — 줄을 넘는 짝은 빼지 않아 더 보는 쪽으로 남는다
             글 = re.sub(r"~~.*?~~", "", 파일.read_text())
             for 옛 in ("monitor_targets.KR_CSAT_DAYS", "monitor_targets.open_utc", "monitor_targets.close_utc"):
                 assert 옛 not in 글, f"{파일.relative_to(뿌리)}: {옛} → core/calendar"
@@ -48,3 +48,7 @@ def test_실패_알림_끝줄은_마감_시각을_박지_않는다() -> None:
     앞 = cal.next_scheduled_hint("KR", datetime(2026, 11, 18, 23, 40, tzinfo=UTC))  # 08:40 KST — 예비 앞
     assert "약속하지 않습니다" in 뒤 and "09:35 KST 예비" in 앞
     assert "15:30" not in 뒤 and "15:30" not in 앞
+    # 수능일 마감 "16:30" 을 박아도 날짜를 보지 않으니 평일 내내 틀린다 — 평일 같은 시각에도 없어야 한다(25.2360).
+    # 날짜를 보고 그날 마감을 적는 올바른 구현은 두 단언을 다 통과한다
+    for 평일 in (datetime(2026, 11, 18, 1, 0, tzinfo=UTC), datetime(2026, 11, 17, 23, 40, tzinfo=UTC)):
+        assert "16:30" not in cal.next_scheduled_hint("KR", 평일)
