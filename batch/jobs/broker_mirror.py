@@ -139,6 +139,26 @@ HELD_BEFORE_SQL = (
     " JOIN stocks s ON s.id = f.stock_id WHERE f.account_id = ? AND s.country = ? AND f.fill_date < ?"
     " GROUP BY f.stock_id"
 )
+#: 연결날부터의 가상 체결(날짜·id 순) — 연결 전 보유가 연결 뒤 한 번이라도 0 이 됐는지 본다(25.2349)
+FILLS_SINCE_SQL = (
+    "SELECT f.stock_id, f.side, f.quantity FROM paper_fills f JOIN stocks s ON s.id = f.stock_id"
+    " WHERE f.account_id = ? AND s.country = ? AND f.fill_date >= ? ORDER BY f.fill_date, f.id"
+)
+
+
+def emptied_after_link(start: dict[int, int], fills: list[dict[str, Any]]) -> set[int]:
+    """연결 전 보유(`start` = 연결날 전 수량) 가운데 연결 뒤 체결로 한 번이라도 0 이하가 된 종목 — 그 뒤 다시 산 몫은
+    "연결 뒤 산 가상 보유" 라 잔고 대보기에 넣는다(25.2349). 순수 계산"""
+    수량 = dict(start)
+    out: set[int] = set()
+    for f in fills:
+        sid = int(f["stock_id"])
+        if sid not in 수량:
+            continue
+        수량[sid] += int(f["quantity"]) if f["side"] == "buy" else -int(f["quantity"])
+        if 수량[sid] <= 0:
+            out.add(sid)
+    return out
 #: 종목마다 마지막으로 산 계좌(정리 줄의 계좌, 25.1517) — id 순이라 뒤 줄이 이긴다
 BOUGHT_BY_SQL = (
     "SELECT stock_id, account_id FROM paper_broker_orders WHERE broker = ? AND side = 'buy' AND status <> 'rejected'"
@@ -923,8 +943,15 @@ def run(
     # 연결 뒤 산 가상 보유는 상한·코드 없음으로 보내지 못한 것까지 늘 대 본다(같은 반박 [참고] 4)
     연결일 = client.execute(LINK_DATE_SQL, [증권사, 베낌]).rows
     연결날 = str(연결일[0][0]) if 연결일 and 연결일[0][0] else None
-    연결때 = ({int(r["stock_id"]) for r in client.execute(HELD_BEFORE_SQL, [베낌, market, 연결날]).dicts()
-             if int(r["q"] or 0) > 0} if 연결날 else set(내부))  # fmt: skip
+    # 연결 뒤 다 팔고 다시 산 종목은 연결 전 보유가 아니다(25.2349 — 11-24 결함 루프 건너뛴 ⓐ: 연결 때 종목 집합으로
+    # 굳어 다시 산 몫의 KIS 거부·못 보냄이 어긋남에서 숨었다 — 25.1564 의 "연결 뒤 산 가상 보유는 늘 대 본다" 가 깨졌다)
+    if 연결날:
+        시작 = {int(r["stock_id"]): int(r["q"] or 0)
+              for r in client.execute(HELD_BEFORE_SQL, [베낌, market, 연결날]).dicts() if int(r["q"] or 0) > 0}
+        연결때 = set(시작) - (emptied_after_link(시작, client.execute(FILLS_SINCE_SQL, [베낌, market, 연결날]).dicts())
+                         if 시작 else set())  # fmt: skip
+    else:
+        연결때 = set(내부)
     연결전 = sorted(sid for sid in 내부 if sid in 연결때 and sid not in 증권)
     장중판 = guard_held(client, 증권사, 베낌) if not 미국 else set()
     # 잔고 대보기에서는 **KIS 가 0 주일 때만** 뺀다 — 일부만 찬 장중 매도·같은 날 다시 찬 회차로 남은 몫은
