@@ -62,6 +62,8 @@ class _Client:
             return _Rs([x for x in self.fx if args[0] <= x[0] <= args[1]])
         if sql == job.REALIZED_SNAPSHOT_SQL:
             return _Rs([list(x) for x in self.snapshots], ["as_of", "fetched_at", "holdings_json"])
+        if sql == job.REALIZED_MAYBE_BUYS_SQL:  # 기록 밖에서 찼을 수 있는 매수(25.2351) — 이 가짜엔 없다
+            return _Rs([], ["trade_date", "stock_id", "code"])
         raise AssertionError(sql)
 
     def batch(self, statements: list) -> None:

@@ -68,4 +68,4 @@ def test_실현손익_갱신이_평균단가를_넘긴다() -> None:
     import inspect
 
     src = inspect.getsource(job.update_realized)
-    assert "_개장전_잔고(" in src and "스냅평균)" in src and "bm.realized(" in src and "스냅, 스냅평균)" in src
+    assert "_개장전_잔고(" in src and "스냅평균)" in src and "bm.realized(" in src and "스냅, 스냅평균, maybe_buys=미상)" in src

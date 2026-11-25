@@ -967,6 +967,7 @@ def realized(
     rows: list[dict[str, Any]], fx_on: Any, balance: dict[str, int] | None = None,
     snapshots: list[tuple[str, dict[str, int]]] | None = None,
     snapshot_avgs: dict[str, dict[str, float]] | None = None,
+    maybe_buys: list[dict[str, Any]] | None = None,
 ) -> dict[int, tuple[float | None, float | None]]:
     """KIS모의투자 매도마다 실현손익(원)과 그 가운데 환차 몫 — **우리 주문 기록**(체결 수량·평균 체결가)의 평균 원가
     (docs/paper.md 15.7.1, 25.1694, 2026-10-22 사용자 지시 "모의투자에 실현손익이나 기간실현손익").
@@ -990,7 +991,9 @@ def realized(
     - **오염**(25.1701, 25.1698 교차검증 [권고] 1·2): 개장 전 잔고가 기록보다 많거나 기록보다 많이 판 매도가 나오면
       그 티커의 지금(또는 마지막) 보유 구간 매도를 모름으로 하고, 그 뒤 매도도 모름 — **개장 전 잔고가 0** 인 날 기록을
       0 으로 맞추고(원가 새로 시작) 오염을 푼다. 0 을 확인한 구간은 닫는다(뒤의 어긋남이 그 구간을 건드리지 않음).
-      구간은 **KIS 0 기준점에서만** 닫는다 — 기록 보유가 0 이 된 것만으로는 닫지 않는다(25.2349).
+      구간이 닫히는 길은 둘 — ① KIS 0 기준점 ② 기록 보유가 0 이 되었고 마지막 매수 뒤 (끝이 아닌) 기준점을 거쳤으며 그
+      뒤 기록 밖에서 찼을 수 있는 매수(`maybe_buys`)가 없다(25.2350·2351). 기록 보유가 0 이 된 것만으로는 닫지
+      않는다(25.2349).
       `balance` 는 이 실행의 잔고로 같은 잣대(기록보다 많으면 마지막 구간 모름)
     - 원가를 모르는 매수(환율 없는 미국)가 든 동안의 매도도 모름 — 다 판 뒤 새로 살 때까지
     """
@@ -998,6 +1001,9 @@ def realized(
     구간: dict[str, list[int]] = {}  # 코드마다 지금(또는 마지막) 보유 구간의 매도 id
     오염: set[str] = set()
     산뒤: set[str] = set()  # 직전 기준점 뒤 매수가 있었던 티커
+    # 직전 기준점 뒤 **기록 밖에서 찼을 수 있는** 매수(체결 0 인 채 응답 없음·접수·모름 — `maybe_buys`)가 있었던 티커.
+    # 닫는 길 ② 만 본다(25.2351) — `산뒤` 에 섞으면 KIS < 기록 가지까지 오염으로 넓어진다
+    밖산뒤: set[str] = set()
     out: dict[int, tuple[float | None, float | None]] = {}
 
     def 열쇠(r: dict[str, Any]) -> str:
@@ -1019,7 +1025,11 @@ def realized(
         # ② 는 "`산뒤` 에 없음" 이면 선다 — 마지막 매수 뒤 (끝이 아닌) 기준점을 거쳤다는 뜻이다. 그 기준점에서
         # KIS > 기록이거나 매수가 섞인 KIS < 기록이었으면 오염이라 그 구간 매도는 이미 모름이고(`팔기` 도 오염이면
         # 모름), 남는 것은 KIS == 기록이거나 매도만 있어 KIS 로 줄여 맞춘 경우다
-        if q <= 0 and k not in 산뒤:
+        # 기준점 뒤 기록 밖에서 찼을 수 있는 매수가 있었으면 그 수량은 확인되지 않았다 — 닫지 않는다(25.2351,
+        # 25.2350 교차검증 [필수] 1: `산뒤` 는 체결 수량이 있는 기록 매수만 세어, 모름으로 닫혔지만 실제로 찬 매수 뒤의
+        # 매도가 섞인 평균 원가로 나간 바퀴를 닫았다 — +200, 참값 +100 이 남았다). 손 매수는 여전히 못 본다
+        # (알고 둔 한계)
+        if q <= 0 and k not in 산뒤 and k not in 밖산뒤:
             구간[k] = []
         산뒤.add(k)
         환율 = fx_on(str(r["trade_date"])) if r.get("market") == "US" else 1.0
@@ -1096,6 +1106,7 @@ def realized(
                     보유[k] = (kis, 현 * kis / q0, 원 * kis / q0, 모름)
         if not 끝:
             산뒤.clear()
+            밖산뒤.clear()
 
     찬 = [r for r in rows if int(r.get("filled_qty") or 0) > 0]
     기록코드 = sorted({열쇠(r) for r in 찬})
@@ -1103,9 +1114,13 @@ def realized(
     for r in 찬:
         날들.setdefault(str(r["trade_date"])[:10], []).append(r)
     스냅 = {str(d)[:10]: v for d, v in (snapshots or [])}
-    for 날 in sorted(set(날들) | set(스냅)):
+    미상: dict[str, set[str]] = {}
+    for r in maybe_buys or []:
+        미상.setdefault(str(r["trade_date"])[:10], set()).add(열쇠(r))
+    for 날 in sorted(set(날들) | set(스냅) | set(미상)):
         if 날 in 스냅:
             잔고와(스냅[날], False, (snapshot_avgs or {}).get(날))
+        밖산뒤.update(미상.get(날, set()))  # 개장 전 기준점 뒤(그날 장)에 찼을 수 있다
         # 같은 날 순서: 아침 베낀 매도 먼저(장 전 주문), 그 뒤 매수와 **장중 손절**은 **값 높은 것부터** — 매수는
         # **지정가**, 손절은 체결가(25.1810·25.1812·25.1813, 결함 루프 10-27). 장중 손절은 개장 5분 뒤부터 아침
         # 손절선 아래에서 시장가로 나간다. 지정가가 손절 체결가 이상인 회차는 그보다 먼저 찬다 — 값이 내려오며

@@ -212,6 +212,12 @@ REALIZED_ROWS_SQL = (
     " FROM paper_broker_orders WHERE broker = ? AND filled_qty > 0"
 )
 REALIZED_SET_SQL = "UPDATE paper_broker_orders SET realized_krw = ?, realized_fx_krw = ? WHERE id = ?"
+#: 기록 밖에서 찼을 수 있는 매수 — 체결 0 인 채 응답 없음·접수·모름(25.2351). 실현손익의 수량·원가엔 넣지 않고 "그 뒤
+#: 바퀴는 수량이 확인되지 않았다" 표시에만 쓴다(`bm.realized(maybe_buys=)`)
+REALIZED_MAYBE_BUYS_SQL = (
+    "SELECT trade_date, stock_id, code FROM paper_broker_orders WHERE broker = ? AND side = 'buy'"
+    " AND status IN ('sending', 'accepted', 'unknown') AND COALESCE(filled_qty, 0) = 0"
+)
 #: 미국 체결의 원화 환산 — 가상모의투자와 같은 환율 표(그날 이하 마지막). 7일 넘게 묵었으면 모름.
 #: 체결 첫날 7일 앞부터 마지막 날까지 한 번에 읽는다(25.1698 — 예전엔 체결 거래일마다 한 번, 3년이면 750번)
 REALIZED_FX_SQL = "SELECT date, rate FROM fx_rates WHERE pair = 'USDKRW' AND date >= ? AND date <= ? ORDER BY date"
@@ -674,7 +680,8 @@ def update_realized(client: Any, 증권사: str, market: str, balance: dict[str,
     첫날 = min(str(r["trade_date"])[:10] for r in rows)
     스냅평균: dict[str, dict[str, float]] = {}
     스냅 = _개장전_잔고(client.execute(REALIZED_SNAPSHOT_SQL, [증권사, 첫날]).dicts(), market, 스냅평균)
-    값 = bm.realized([{**r, "market": market} for r in rows], 환율, balance, 스냅, 스냅평균)
+    미상 = client.execute(REALIZED_MAYBE_BUYS_SQL, [증권사]).dicts()
+    값 = bm.realized([{**r, "market": market} for r in rows], 환율, balance, 스냅, 스냅평균, maybe_buys=미상)
     지금값 = {int(r["id"]): (r["realized_krw"], r["realized_fx_krw"]) for r in rows}
     문장 = [(REALIZED_SET_SQL, [v[0], v[1], i]) for i, v in 값.items() if 지금값.get(i) != v]
     if 문장:
