@@ -318,27 +318,17 @@ def mark_nonjudgment_defers(client: Any, rows: list[dict[str, Any]], market: str
 
 
 def kr_open_utc(day: date) -> datetime | None:
-    """국내 그 거래일 정규장 시작(UTC) — 수능일은 달력이 모르는 한 시간 늦춤을 더한다(`intraday_guard.window` 와 같은
-    잣대, 25.1774). 달력이 모르면 None"""
+    """국내 그 거래일 정규장 시작(UTC) — 수능일 늦춤 포함(25.1774). 정의처는 `monitor_targets.open_utc`(25.2355)"""
     from batch.jobs import monitor_targets as mt
 
-    열림 = cal.session_open_utc("KR", day)
-    if 열림 is not None and day.isoformat() in mt.KR_CSAT_DAYS and 열림.astimezone(UTC).hour == 0:
-        열림 += mt.CSAT_SHIFT
-    return 열림
+    return mt.open_utc("KR", day)
 
 
 def kr_close_utc(day: date) -> datetime | None:
-    """국내 그 거래일 정규장 마감(UTC) — 수능일은 개장처럼 한 시간 늦춘다(16:30, `after_hours` 25.350 과 같은 잣대).
-    달력이 이미 늦춘 해(개장이 01:00 UTC)면 더하지 않는다. 달력이 모르면 None (25.2240)"""
+    """국내 그 거래일 정규장 마감(UTC) — 수능일 16:30(25.2240). 정의처는 `monitor_targets.close_utc`(25.2355)"""
     from batch.jobs import monitor_targets as mt
 
-    닫힘 = cal.session_close_utc("KR", day)
-    열림 = cal.session_open_utc("KR", day)
-    if (닫힘 is not None and 열림 is not None and day.isoformat() in mt.KR_CSAT_DAYS
-            and 열림.astimezone(UTC).hour == 0):  # fmt: skip
-        닫힘 += mt.CSAT_SHIFT
-    return 닫힘
+    return mt.close_utc("KR", day)
 
 
 def kr_order_window(day: date) -> tuple[datetime, datetime]:

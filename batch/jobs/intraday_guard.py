@@ -265,11 +265,9 @@ def window(market: str, day: date) -> tuple[datetime, datetime] | None:
     """그날 장중 감시 창(UTC) — 개장 + 5분 ~ 마감 − 15분. 수능일은 한 시간 늦춘다. 달력이 모르면 None"""
     from batch.jobs import monitor_targets as mt
 
-    열림, 닫힘 = cal.session_open_utc(market, day), cal.session_close_utc(market, day)
+    열림, 닫힘 = mt.open_utc(market, day), mt.close_utc(market, day)  # 수능일 늦춤은 정의처 하나(25.2355)
     if 열림 is None or 닫힘 is None:
         return None
-    if market == "KR" and day.isoformat() in mt.KR_CSAT_DAYS and 열림.astimezone(UTC).hour == 0:
-        열림, 닫힘 = 열림 + mt.CSAT_SHIFT, 닫힘 + mt.CSAT_SHIFT
     return 열림 + OPEN_MARGIN, 닫힘 - CLOSE_MARGIN
 
 

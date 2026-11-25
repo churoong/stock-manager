@@ -48,7 +48,10 @@ def settled_days(now: datetime | None = None) -> dict[str, str]:
     out: dict[str, str] = {}
     for country in set(INDEX_COUNTRY.values()):
         오늘 = 지금.astimezone(cal.market_tz(country)).date()
-        마감 = cal.session_close_utc(country, 오늘)
+        from batch.jobs import monitor_targets as mt
+
+        # 국내 수능일은 16:30 마감(25.2355 — 달력 그대로면 15:30~16:30 실행이 장중 값을 그날 확정 종가로 받았다)
+        마감 = mt.close_utc(country, 오늘)
         if 마감 is not None and 지금 >= 마감 + SETTLE_MARGIN:
             out[country] = 오늘.isoformat()
         else:

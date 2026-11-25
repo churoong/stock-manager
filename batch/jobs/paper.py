@@ -2354,7 +2354,9 @@ def run_step(
         바뀐다. 시각을 넘긴 실행(`now` — 시험·재현)은 그 시각을 믿는다. 단계 도중 **마감**을 넘기는 것(아주 늦은 실행이
         몇 분 사이 마감을 지남)은 다시 재지 않는다 — 계좌마다 체결 장이 갈리게 되어서 알고 둔다"""
         if now is None and 지금기준 == "open" and not after_close:
-            열림 = cal.session_open_utc(market, date.fromisoformat(다음장))
+            from batch.jobs import monitor_targets as mt
+
+            열림 = mt.open_utc(market, date.fromisoformat(다음장))  # 수능일 늦춤 포함(25.2355)
             if 열림 is not None and datetime.now(UTC) >= 열림:
                 return "close"
         return 지금기준

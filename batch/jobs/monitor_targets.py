@@ -42,6 +42,27 @@ KR_CSAT_DAYS = frozenset({"2025-11-13", "2026-11-19"})
 CSAT_SHIFT = timedelta(hours=1)
 
 
+def open_utc(market: str, day: date) -> datetime | None:
+    """그 거래일 정규장 시작(UTC) — 국내 수능일은 달력이 모르는 한 시간 늦춤을 더한다(달력이 이미 늦춘 해 — 개장
+    01:00 UTC — 면 더하지 않는다). 달력이 모르면 None. **개장·마감 판정의 단일 정의처**(25.2355 — KIS 주문 창·잔고
+    기준점(`broker_mirror.kr_open_utc`)·가상모의투자 "이미 열렸나"(`daily._장_열림`·`paper` 다시잰기준)가 갈려 수능일
+    09:00~10:00 KST 실행이 가상 주문을 시가 대신 종가로 채웠다)"""
+    열림 = cal.session_open_utc(market, day)
+    if market == "KR" and 열림 is not None and day.isoformat() in KR_CSAT_DAYS and 열림.astimezone(UTC).hour == 0:
+        열림 += CSAT_SHIFT
+    return 열림
+
+
+def close_utc(market: str, day: date) -> datetime | None:
+    """그 거래일 정규장 마감(UTC) — 국내 수능일은 개장처럼 한 시간 늦춘다(16:30, 25.350). 달력이 모르면 None"""
+    닫힘 = cal.session_close_utc(market, day)
+    열림 = cal.session_open_utc(market, day)
+    if (market == "KR" and 닫힘 is not None and 열림 is not None and day.isoformat() in KR_CSAT_DAYS
+            and 열림.astimezone(UTC).hour == 0):  # fmt: skip
+        닫힘 += CSAT_SHIFT
+    return 닫힘
+
+
 def session_rows(market: str, start, days: int = SESSION_DAYS) -> list[tuple[str, str, str, str]]:
     """(현지 날짜, 개장 UTC, 폐장 UTC, 출처). 휴장일은 빠진다."""
     import pandas as pd

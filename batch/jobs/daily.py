@@ -3006,7 +3006,11 @@ def _장_열림(market: str, session_date: str) -> bool:
     예약)이 시세·점수 단계를 지나 가상모의투자 단계에 닿을 때는 이미 개장 뒤인데 주문이 그날 **시가**로 찼다 — 주문보다
     앞선 값으로 차는 25.1447 [필수] 3 과 같은 꼴(25.1678 교차검증 [권고])."""
     try:
-        열림 = cal.session_open_utc(market, date.fromisoformat(session_date))
+        from batch.jobs import monitor_targets as mt
+
+        # 국내 수능일 늦춤 포함(25.2355 — 달력 그대로면 수능일 09:00~10:00 KST 에 닿은 실행이 "이미 열림" 으로 봐
+        # 가상 주문을 그날 시가 대신 종가로 채웠다)
+        열림 = mt.open_utc(market, date.fromisoformat(session_date))
     except Exception:  # noqa: BLE001 — 모르면 시작 때 판정 그대로
         return False
     return 열림 is not None and datetime.now(UTC) >= 열림
@@ -3015,7 +3019,9 @@ def _장_열림(market: str, session_date: str) -> bool:
 def _장_끝남(market: str, session_date: str) -> bool:
     """오늘 장이 이미 끝났나 — 모의 계좌 주문을 다음 장으로 미룰 때 쓴다 (25.1447). 모르면 False."""
     try:
-        끝 = cal.session_close_utc(market, date.fromisoformat(session_date))
+        from batch.jobs import monitor_targets as mt
+
+        끝 = mt.close_utc(market, date.fromisoformat(session_date))  # 수능일 16:30 (25.2355)
     except Exception:  # noqa: BLE001 — 모르면 예전처럼(다음 거래일 = 오늘 장)
         return False
     return 끝 is not None and datetime.now(UTC) >= 끝
