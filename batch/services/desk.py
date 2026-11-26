@@ -1417,6 +1417,37 @@ def checks(
     return sorted(out, key=lambda x: x["level"] != "high")
 
 
+#: 이어 돈 실행이 앞 실행에서 이어받은 확인할 일의 머리(25.2376)
+CARRIED_HEAD = "앞 실행 — "
+
+
+def carry_same_day(prev: dict[str, Any] | None, section: dict[str, Any], resumed: bool) -> dict[str, Any]:
+    """같은 거래일 이어 돈 실행의 시장 칸 — 앞 실행 칸의 계좌 기록을 잃지 않게(25.2376, 결함 루프 11-26).
+
+    이어 돌기(발송 뒤 이어 돌기 25.2144·늦게 여는 날 이어 내기 25.2240·같은 날 손 재실행)는 가상 단계를 다시 도는데,
+    그날 결정이 이미 있는 계좌는 `orders: "이미 냄"` 만 남기고 위원회·지주사·매수·계좌 실패 칸이 비어, 칸을 통째로
+    바꾸면 첫 실행의 높음 확인할 일과 지주사 기록(`holding`)이 사라졌다. `resumed`(이번 기록에 "이미 냄" 계좌가
+    있음)이고 앞 칸이 같은 거래일이면: 지주사 기록이 비었으면 앞 것을, 확인할 일은 이번 줄 + 이번에 없는 앞 줄
+    ("앞 실행 — " 머리). 순수 계산
+    """
+    if not resumed or not isinstance(prev, dict) or prev.get("trade_date") != section.get("trade_date"):
+        return section
+    out = dict(section)
+    if out.get("holding") is None and prev.get("holding") is not None:
+        out["holding"] = prev["holding"]
+    지금글 = {str(c.get("text")).removeprefix(CARRIED_HEAD) for c in out.get("checks") or []}
+    이어 = []
+    for c in prev.get("checks") or []:
+        if not isinstance(c, dict) or c.get("kind") in ("warnings", "global"):  # 경고 줄 수·멈춤은 이번 실행 것이 맞다
+            continue
+        글 = str(c.get("text") or "").removeprefix(CARRIED_HEAD)
+        if 글 and 글 not in 지금글:
+            지금글.add(글)
+            이어.append({**c, "text": CARRIED_HEAD + 글})
+    out["checks"] = sorted([*(out.get("checks") or []), *이어], key=lambda x: x.get("level") != "high")
+    return out
+
+
 def merge(prev: dict[str, Any] | None, market: str, section: dict[str, Any], common: dict[str, Any]) -> dict[str, Any]:
     """그날 요약에 이 시장 칸을 합친다 — 다른 시장 칸은 남기고, 순위·KIS·확인할 일(`common`)은 이번 것으로 덮는다.
 

@@ -429,6 +429,10 @@ def write(
         # 그날 줄을 처음 연다 — 직전 줄의 시장 칸만 이어받는다(순위·KIS 는 이번 것)
         전 = client.execute(DESK_PREV_SQL, [as_of]).rows
         그날 = {"markets": ((_json(전[0][0]) if 전 else None) or {}).get("markets") or {}}
+    # 같은 거래일 이어 돈 실행이면 앞 칸의 계좌 기록을 잇는다(25.2376 — "이미 냄" 계좌는 계좌 칸이 비어 덮으면 사라졌다)
+    이어돔 = any(isinstance(v, dict) and v.get("orders") == "이미 냄"
+               for v in ((step_log.get("paper") or {}).get("accounts") or {}).values())  # fmt: skip
+    시장칸 = desk.carry_same_day(((그날.get("markets") or {}).get(market)), 시장칸, 이어돔)
     합 = desk.merge(그날, market, 시장칸, 공통)
     client.execute(DESK_UPSERT_SQL, [as_of, json.dumps(합, ensure_ascii=False), 지금])
     out = {"as_of": as_of, "accounts": len(순위["rows"]), "checks": len(시장칸["checks"])}
