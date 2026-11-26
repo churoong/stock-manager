@@ -76,6 +76,25 @@ describe("확인할 일 합치기", () => {
     expect(c.map((x) => x.text)).toEqual(["멈춤 스위치", "KIS 단계 실패", "경고 줄"]);
     expect(c.map((x) => x.market)).toEqual(["KR", "US", "KR"]);
   });
+
+  it("시장마다 따로 난 같은 글은 둘 다 싣는다 — 멈춤 스위치만 한 번 (25.2375)", () => {
+    const 거부 = { level: "normal" as const, text: "KIS모의투자 거부 1건 — 거래내역의 까닭을 봅니다" };
+    const 실패 = { level: "high" as const, text: "KIS모의투자 단계 실패: KisFailed: 토큰 발급 실패" };
+    const 멈춤 = { level: "high" as const, text: "멈춤 스위치가 켜져 있어 가상·KIS모의투자 모두 새 주문을 내지 않습니다", kind: "global" as const };
+    const c = allChecks({
+      KR: { ...market({ checks: [거부, 실패, 멈춤] }), as_of: "d" },
+      US: { ...market({ checks: [거부, 실패, 멈춤] }), as_of: "d" },
+    });
+    expect(c.filter((x) => x.text === 실패.text).map((x) => x.market)).toEqual(["KR", "US"]);
+    expect(c.filter((x) => x.text === 거부.text).map((x) => x.market)).toEqual(["KR", "US"]);
+    expect(c.filter((x) => x.text === 멈춤.text)).toHaveLength(1);
+    // 표지가 없는 옛 요약의 멈춤 줄도 한 번
+    const 옛 = allChecks({
+      KR: { ...market({ checks: [{ level: "high", text: 멈춤.text }] }), as_of: "d" },
+      US: { ...market({ checks: [{ level: "high", text: 멈춤.text }] }), as_of: "d" },
+    });
+    expect(옛).toHaveLength(1);
+  });
 });
 
 describe("글", () => {

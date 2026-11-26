@@ -1292,7 +1292,10 @@ def checks(
     """
     out: list[dict[str, str]] = []
     if halted:
-        out.append({"level": "high", "text": "멈춤 스위치가 켜져 있어 가상·KIS모의투자 모두 새 주문을 내지 않습니다"})
+        # 두 시장이 함께 보는 사실 — 화면이 두 시장 칸에서 한 번만 싣는다(`kind: global`, 25.2375). 다른 줄은 시장마다
+        # 따로 난 일이라 글이 같아도 합치지 않는다
+        out.append({"level": "high", "text": "멈춤 스위치가 켜져 있어 가상·KIS모의투자 모두 새 주문을 내지 않습니다",
+                    "kind": "global"})  # fmt: skip
     p = paper or {}
     if p.get("error"):
         # KIS 가 베끼는 계좌의 계좌 단계 실패면 그 계좌 줄을 아래에서 겹쳐 내지 않는다 — 대신 주문을 어디까지 적었나를

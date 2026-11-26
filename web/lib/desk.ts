@@ -59,7 +59,7 @@ export interface RuleSpan {
   /** 판 사전 등록(25.1520) — null = 등록 없이 연 판, 없음 = 그 전 요약 */
   prereg?: { hypothesis: string; metric: string; retro?: boolean } | null;
 }
-export interface DeskCheck { level: "high" | "normal"; text: string }
+export interface DeskCheck { level: "high" | "normal"; text: string; kind?: "global" }
 export interface DeskFill { side: string; name: string; ticker: string; quantity: number; price: number; currency: string; fill_date?: string }
 export interface DeskOrder {
   side: string; name: string; ticker: string; quantity: number; order_type: string; limit_price: number | null;
@@ -264,8 +264,13 @@ export function kstDate(iso: string | null | undefined): string | null {
   return Number.isNaN(t.getTime()) ? null : t.toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" });
 }
 
+/** 두 시장이 함께 보는 사실(멈춤 스위치) — `kind: global` 을 싣기 전(25.2375 앞) 요약은 글 머리로 가른다 */
+const GLOBAL_CHECK_HEAD = "멈춤 스위치";
+
 /**
- * 확인할 일 — 시장 칸마다 따로 적힌 것을 합친다. 높음이 먼저, 같은 글은 한 번(멈춤 스위치처럼 두 시장에 다 나오는 것).
+ * 확인할 일 — 시장 칸마다 따로 적힌 것을 합친다. 높음이 먼저. **두 시장이 함께 보는 사실(멈춤 스위치)만 한 번** —
+ * 그 밖의 줄은 시장마다 따로 난 일이라 글이 같아도 둘 다 싣는다(25.2375, 결함 루프 11-26: "KIS모의투자 거부 1건"·같은
+ * 토큰 오류 글이 두 시장에 나면 미국 줄이 사라지고 "국내" 로만 보였다).
  * 그 칸이 요약 날짜보다 앞서 돈 실행이면(이어받은 칸 — 미국 휴장·밤 미국 배치 전) `ran` 에 그 실행일 (25.1503)
  */
 export function allChecks(markets: DeskView["markets"], asOf?: string | null): Array<DeskCheck & { market: DeskMarketKey; ran: string | null }> {
@@ -275,8 +280,9 @@ export function allChecks(markets: DeskView["markets"], asOf?: string | null): A
     const 칸 = markets[m];
     const 날 = kstDate(칸?.run_at);
     for (const c of 칸?.checks ?? []) {
-      if (본.has(c.text)) continue;
-      본.add(c.text);
+      const 열쇠 = c.kind === "global" || c.text.startsWith(GLOBAL_CHECK_HEAD) ? c.text : `${m}|${c.text}`;
+      if (본.has(열쇠)) continue;
+      본.add(열쇠);
       out.push({ ...c, market: m, ran: 날 && asOf && 날 !== asOf ? 날 : null });
     }
   }
