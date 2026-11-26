@@ -801,7 +801,7 @@ def active_flags_for_report(
     rows = client.execute(
         "SELECT f.stock_id, f.level, f.reason_code, f.rationale_text, f.rationale_data, f.first_seen_date,"
         " f.created_at,"
-        " f.as_of_date, COALESCE(s.name_ko, s.name_en, s.ticker) AS name"
+        " f.as_of_date, COALESCE(s.name_ko, s.name_en, s.ticker) AS name, s.ticker"
         " FROM sell_flags f JOIN stocks s ON s.id = f.stock_id"
         " WHERE s.country = ? AND f.is_active = 1 AND f.dismissed_at IS NULL"
         "   AND f.as_of_date = (SELECT MAX(as_of_date) FROM sell_flags)",
@@ -811,6 +811,8 @@ def active_flags_for_report(
     return [
         {
             "stock_id": r["stock_id"], "level": r["level"], "reason_code": r["reason_code"], "name": r["name"],
+            # 티커 — 첫 화면 "오늘 볼 것" 이 같은 짧은 이름의 다른 종목(GOOGL·GOOG)을 가르는 데 쓴다(25.2374)
+            "ticker": r.get("ticker"),
             # **이 나라 리포트가 아직 보여 주지 않은 것이 NEW** (docs/infra.md 25.495·25.501, 텔레그램 감사).
             # 예전에는 처음 걸린 날 == 오늘 이었다 — 국내 종목 플래그가 저녁 미국 배치에서 처음 걸리면 다음 날
             # 국내 리포트에서 한 번도 보여 준 적 없는데 NEW 가 빠졌다. 25.495 는 날짜로 견줘 **아침 발송 뒤 같은 날**

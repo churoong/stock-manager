@@ -215,15 +215,32 @@ def todo_line(flags: list[dict[str, Any]], currency: str = "KRW", today: str | N
     2026-10-23 사용자 "오늘 아침에 온 리포트보면 여전히 내용이 가독성이 떨어지는데" — 실물로 찍어 보니 손절 플래그가
     150번째 줄에 있었다. 플래그 절은 그대로 두고(근거 문장) 첫 화면에는 무엇을 볼지만. 플래그가 없으면 None(줄 없음)
     """
-    묶음: dict[str, list[str]] = {}
-    새로 = set()
+    # **종목으로 센다**(25.2374, 결함 루프 11-26) — 예전엔 짧은 이름으로 걸러, 같은 회사의 다른 주식 종류(GOOGL·GOOG
+    # → "Alphabet")를 하나로 세어 손절·새로 걸림 수를 적게 적었다. 같은 종목의 같은 색 플래그 둘(25.1738 — 황 기간초과와
+    # 재무악화)은 여전히 하나. 짧은 이름이 서로 다른 종목과 겹치면 그 이름들에만 티커를 붙인다
+    def 열쇠(f: dict[str, Any]) -> Any:
+        return f.get("stock_id") if f.get("stock_id") is not None else ("이름", f.get("name"))
+
+    짧은: dict[Any, str] = {}
     for f in flags:
-        이름 = short_name(f.get("name"), None, currency)
+        짧은.setdefault(열쇠(f), short_name(f.get("name"), None, currency))
+    겹침 = {n for n in 짧은.values() if sum(1 for m in 짧은.values() if m == n) > 1}
+    보일: dict[Any, str] = {}
+    for f in flags:
+        k = 열쇠(f)
+        if k not in 보일:
+            보일[k] = short_name(f.get("name"), f.get("ticker"), currency) if 짧은[k] in 겹침 else 짧은[k]
+    묶음: dict[str, list[str]] = {}
+    본: dict[str, set[Any]] = {}
+    새로: set[Any] = set()
+    for f in flags:
+        k = 열쇠(f)
         칸 = 묶음.setdefault(str(f.get("level")), [])
-        if 이름 not in 칸:
-            칸.append(이름)
+        if k not in 본.setdefault(str(f.get("level")), set()):
+            본[str(f.get("level"))].add(k)
+            칸.append(보일[k])
         if f.get("new"):
-            새로.add(이름)
+            새로.add(k)
     조각 = []
     for level in ("red", "green", "yellow"):
         xs = 묶음.get(level) or []
