@@ -1355,10 +1355,13 @@ def checks(
                     "text": f"KIS 계좌 성과 계산 실패({b['perf_error']}) — 주문은 그대로 나갔습니다"})
     if b.get("diff"):
         out.append({"level": "normal", "text": f"KIS 잔고와 가상 장부가 어긋난 종목 {b['diff']}개"})
-    # KIS 기록에서 난 줄 표지 — 같은 날 이어 돈 실행이 그 실행의 KIS 기록으로 다시 말하므로 앞 실행 것을 잇지 않는다
-    # (25.2380, 25.2376 교차검증 [권고]: "베낄 주문 N건이 남았습니다" 가 다 낸 뒤에도 "앞 실행 —" 으로 남았다)
+    # KIS 기록에서 난 줄 표지(25.2380·2381) — 둘로 가른다.
+    # `kis`(상태): 실행마다 다시 재는 것(시크릿 빔·보내기 보류·안 낸 주문·잔고 어긋남) — 같은 날 이어 돈 실행이 KIS 를
+    # 돌면 그 실행 것이 맞아 앞 것을 잇지 않는다("베낄 주문 N건이 남았습니다" 가 다 낸 뒤에도 남았다, 25.2380).
+    # `kis_event`(사건): 그 실행에서만 난 것(단계 실패·괴리·거부·응답 모름·조회에 없는 주문·곁다리 실패) — 다음 실행이
+    # 다시 말하지 않으므로(괴리는 보낸 열쇠를 빼고, 거부·모름은 그 실행의 보냄 칸에서만) 계속 잇는다(25.2381)
     for c in out[kis처음:]:
-        c["kind"] = "kis"
+        c["kind"] = "kis" if str(c["text"]).startswith(KIS_STATE_HEADS) else "kis_event"
     if recon_bad:
         틀림 = ", ".join(_이름(a) for a in sorted(recon_bad))
         out.append({"level": "high", "text": f"장부 검산 어긋남: 계좌 {틀림}"})
@@ -1422,6 +1425,10 @@ def checks(
     return sorted(out, key=lambda x: x["level"] != "high")
 
 
+#: KIS 상태 줄(실행마다 다시 재는 것)의 글 머리 — `kind: kis` 와 표지 전 옛 줄을 가른다(25.2381)
+KIS_STATE_HEADS = (
+    "KIS모의투자 시크릿", "KIS모의투자에 보내지 않음", "KIS모의투자에 안 낸 주문", "KIS 잔고와 가상 장부가",
+)  # fmt: skip
 #: 이어 돈 실행이 앞 실행에서 이어받은 확인할 일의 머리(25.2376)
 CARRIED_HEAD = "앞 실행 — "
 
@@ -1449,7 +1456,8 @@ def carry_same_day(prev: dict[str, Any] | None, section: dict[str, Any], resumed
         if not isinstance(c, dict) or c.get("kind") in ("warnings", "global"):  # 경고 줄 수·멈춤은 이번 실행 것이 맞다
             continue
         글 = str(c.get("text") or "").removeprefix(CARRIED_HEAD)
-        if 글.startswith("멈춤 스위치") or (이번_KIS and c.get("kind") == "kis"):  # 표지 전(25.2375 앞) 멈춤 줄도
+        # 표지 전(25.2375·2380 앞) 옛 줄은 글 머리로 — 멈춤, KIS 상태 줄
+        if 글.startswith("멈춤 스위치") or (이번_KIS and (c.get("kind") == "kis" or 글.startswith(KIS_STATE_HEADS))):
             continue
         if 글 and 글 not in 지금글:
             지금글.add(글)

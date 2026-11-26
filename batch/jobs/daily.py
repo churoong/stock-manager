@@ -2944,7 +2944,9 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
                     # 붙인 시세 손댐(`prices_touched` — 시세 사본이 고친 범위를 따라가는 유일한 기록)·지문·읽은 행 수를
                     # 통째로 갈아 끼웠다
                     with contextlib.suppress(Exception):
-                        칸 = ("broker", "broker2", "desk", "report_head")
+                        # 경고 목록도 — KIS 단계가 첫 닫기 **뒤에** 붙인 줄(단계 실패·시크릿 빔·도전자 보류 — 보류 줄은
+                        # 이 기록에만 남는다)이 빠졌다(25.2381). json_patch 는 배열을 통째로 바꿔 늘어난 목록이 들어간다
+                        칸 = ("broker", "broker2", "desk", "report_head", "warnings")
                         db.merge_run_step_log(client, run_id, {k: step_log.get(k) for k in 칸})
 
         _kis와_요약()

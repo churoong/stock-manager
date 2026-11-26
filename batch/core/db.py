@@ -674,7 +674,8 @@ CLOSE_RUN_FINGERPRINT_SQL = (
 
 def merge_run_step_log(client: Any, run_id: int, part: dict[str, Any]) -> None:
     """이미 닫힌 실행 기록의 step_log 에 칸만 더한다(25.2379) — 있던 칸(`prices_touched`·지문·읽은 행 수)은 그대로.
-    값이 None 인 칸은 싣지 않는다(json_patch 는 null 을 "지움" 으로 읽는다)"""
+    값이 None 인 칸은 싣지 않는다 — json_patch(RFC 7396)는 null 을 "지움" 으로 읽어 **안쪽 null 칸도 빠진다**(읽는 쪽은
+    `.get()` 이라 없음과 같다, 25.2381). 배열은 통째로 바뀐다"""
     part = {k: v for k, v in part.items() if v is not None}
     if not part:
         return

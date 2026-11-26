@@ -30,7 +30,9 @@ def _kis_desk(monkeypatch: pytest.MonkeyPatch, 가상기록: dict | None = None)
     monkeypatch.setattr(broker_mirror, "challenger_account", lambda c: "C")
     monkeypatch.setattr(daily, "_notify_failure", lambda *a, **k: True)
     monkeypatch.setattr(daily.db, "finish_batch_run", lambda c, rid, **k: 부름["finish"].append(k.get("status")))
-    monkeypatch.setattr(daily.db, "merge_run_step_log", lambda c, rid, part: 부름["finish"].append("덧씀"))
+    부름["part"] = []
+    monkeypatch.setattr(daily.db, "merge_run_step_log",
+                        lambda c, rid, part: 부름["finish"].append("덧씀") or 부름["part"].append(part))  # fmt: skip
     return 부름
 
 
@@ -48,6 +50,10 @@ def test_발송_실패여도_KIS_와_운용요약이_돈다(monkeypatch: pytest.
     assert 부름["paper"] == ["2026-10-08"] and len(부름["kis"]) == 2 and 부름["desk"] == [1]
     # 실패로 닫고(알림 먼저) KIS·요약 뒤 그 결과 칸만 덧쓴다(25.2377·2379 — 다시 닫지 않는다)
     assert 부름["finish"] == ["failed", "덧씀"]
+    # 덧쓰는 칸 — KIS·요약 결과와 그 뒤 늘어난 경고 목록(25.2381 — 내용을 보지 않는 람다로는 칸이 빠져도 몰랐다)
+    칸 = 부름["part"][0]
+    assert 칸["broker"] == {"sent": {}} and 칸["broker2"] == {"sent": {}} and 칸["desk"] == {}
+    assert isinstance(칸["warnings"], list)
 
 
 def test_발송_실패면_알림이_KIS_보다_먼저(monkeypatch: pytest.MonkeyPatch) -> None:

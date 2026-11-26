@@ -93,7 +93,7 @@ def test_alert_wiring() -> None:
     assert daily._kis_알림문({"error": "x"}) == "KIS모의투자 단계 실패: x"
     확인 = desk.checks(halted=False, paper=None, broker={"diverge": "벌어짐", "diverge_error": "ValueError"}, recon_bad=[],
                      warnings=0)  # fmt: skip
-    assert 확인[0] == {"level": "high", "text": "벌어짐", "kind": "kis"}  # KIS 줄 표지(25.2380)
+    assert 확인[0] == {"level": "high", "text": "벌어짐", "kind": "kis_event"}  # 사건 줄 표지(25.2381)
     assert "KIS 괴리 판정 실패(ValueError)" in 확인[1]["text"]
     # KIS 알림에는 "리포트는 웹에" 줄을 붙이지 않는다(검토 7)
     글 = formatter.failure_alert(market="KR", job_name="daily_kr", error_text="벌어짐", last_success=None,

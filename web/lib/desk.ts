@@ -59,7 +59,7 @@ export interface RuleSpan {
   /** 판 사전 등록(25.1520) — null = 등록 없이 연 판, 없음 = 그 전 요약 */
   prereg?: { hypothesis: string; metric: string; retro?: boolean } | null;
 }
-export interface DeskCheck { level: "high" | "normal"; text: string; kind?: "global" | "kis" | "warnings" }
+export interface DeskCheck { level: "high" | "normal"; text: string; kind?: "global" | "kis" | "kis_event" | "warnings" }
 export interface DeskFill { side: string; name: string; ticker: string; quantity: number; price: number; currency: string; fill_date?: string }
 export interface DeskOrder {
   side: string; name: string; ticker: string; quantity: number; order_type: string; limit_price: number | null;
