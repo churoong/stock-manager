@@ -116,7 +116,13 @@ BATCH_RUNS_SQL = (
     " THEN json_extract(step_log, '$.paper.accounts') END AS paper_accounts,"
     # 끝맺지 못해 정리된 행(`reap_stale_runs` — 강제 종료·한도로 죽은 실행)은 사고다(25.2253)
     # 문구는 `db.REAPED_PREFIX` 와 같아야 한다 — 질의를 정적 문자열로 두려고 그대로 적고 시험이 묶는다(25.2254)
-    " CASE WHEN status = 'skipped' AND error_text LIKE '끝맺지 못한 기록%' THEN 1 END AS reaped"
+    " CASE WHEN status = 'skipped' AND error_text LIKE '끝맺지 못한 기록%' THEN 1 END AS reaped,"
+    # 그 실행에서 장부 검산이 어긋난 계좌가 있었나(25.2378) — `paper_daily.recon_ok` 는 (계좌, 한국 날짜) 한 행을
+    # 같은 날 뒤 실행이 덮어, 아침에 어긋나 알린 날이 저녁 실행 뒤 관문 무사고에서 사라질 수 있었다. 실행 기록은
+    # 덮이지 않는다
+    " CASE WHEN json_valid(step_log) AND json_type(step_log, '$.paper.accounts') = 'object' THEN"
+    " EXISTS (SELECT 1 FROM json_each(step_log, '$.paper.accounts') AS a"
+    " WHERE json_extract(a.value, '$.recon_ok') = 0) END AS recon_bad, started_at"
     " FROM batch_runs WHERE job_name IN (?, ?) AND started_at >= ?"
 )
 NAMES_SQL = "SELECT id, name, rule_version FROM paper_accounts"
@@ -220,6 +226,15 @@ def _기초(client: Any) -> tuple[dict[str, list[tuple[str, float]]], set[str], 
     """평가 계열·검산 어긋난 날·계좌·순위 — 운용 요약과 아침 운용 보고가 같이 쓴다"""
     계열, 검산틀린날, 계좌들, 순위, _평가, _손익, _그림자, _현금 = _기초_평가(client)
     return 계열, 검산틀린날, 계좌들, 순위
+
+
+def _한국날(iso: Any) -> str | None:
+    """UTC 시각 글 → 한국 날짜(YYYY-MM-DD). 꼴이 틀리면 None"""
+    try:
+        t = datetime.fromisoformat(str(iso))
+    except (TypeError, ValueError):
+        return None
+    return (t if t.tzinfo else t.replace(tzinfo=UTC)).astimezone(cal.market_tz("KR")).date().isoformat()
 
 
 def _기초_평가(
@@ -654,6 +669,9 @@ def _관문판(
         앞당김 = (date.fromisoformat(창) - timedelta(days=12)).isoformat()
         실행들 = client.execute(BATCH_RUNS_SQL, [job_name("KR"), job_name("US"), 앞당김]).dicts()
         실패 = desk.batch_incident_days(실행들, 기대)
+        # 검산 어긋난 날 = 평가 행이 말하는 날 ∪ 실행 기록이 말하는 날(그 실행의 한국 날짜) — 덮인 평가 행이 놓친 날을
+        # 되살린다(25.2378, 엄격해지기만 한다)
+        검산틀린날 = set(검산틀린날) | {d for r in 실행들 if r.get("recon_bad") and (d := _한국날(r.get("started_at")))}
         마지막 = client.execute(LATEST_SQL).dicts()
         # 결정 단위 선정 증거 — 가상 단계가 성과 분해와 함께 마지막 평가 행에 적은 것(25.1518, 읽기 0)
         # 대신 읽은 성과 분해가 **지금 판** 것일 때만(25.1696, 25.1690 교차검증 [권고]) — 판을 올린 날부터 성과 분해가
