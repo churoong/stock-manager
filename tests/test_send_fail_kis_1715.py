@@ -45,7 +45,50 @@ def test_발송_실패여도_KIS_와_운용요약이_돈다(monkeypatch: pytest.
     monkeypatch.setattr(daily.telegram, "send", 실패)
     assert daily.run("KR") == 1
     assert 부름["paper"] == ["2026-10-08"] and len(부름["kis"]) == 2 and 부름["desk"] == [1]
-    assert 부름["finish"] == ["failed"]
+    # 실패로 닫고(알림 먼저) KIS·요약 뒤 그 결과를 실패 기록에 한 번 더 적는다(25.2377)
+    assert 부름["finish"] == ["failed", "failed"]
+
+
+def test_발송_실패면_알림이_KIS_보다_먼저(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.2377 (결함 루프 11-26) — KIS 가 접수 시작을 기다리다 시간 제한에 걸려도 실패 알림·기록은 이미 나갔다"""
+    _준비(monkeypatch, 0)
+    부름 = _kis_desk(monkeypatch)
+    차례: list[str] = []
+    monkeypatch.setattr(daily, "_notify_failure", lambda *a, **k: 차례.append("알림") or True)
+    monkeypatch.setattr(daily.db, "finish_batch_run", lambda c, rid, **k: 차례.append("기록"))
+
+    def kis(*_a, **k):  # noqa: ANN002, ANN003, ANN202
+        차례.append("KIS")
+        부름["kis"].append(k.get("slot"))
+        return {"sent": {}}
+
+    def 실패(text, *a, **k):  # noqa: ANN001, ANN002, ANN003, ANN202
+        from batch.notify import telegram
+
+        raise telegram.TelegramError("400 chat not found")
+
+    monkeypatch.setattr(broker_mirror, "run", kis)
+    monkeypatch.setattr(daily.telegram, "send", 실패)
+    assert daily.run("KR") == 1
+    assert 차례[:2] == ["기록", "알림"] and "KIS" in 차례 and 차례.index("KIS") > 1 and 차례[-1] == "기록"
+
+
+def test_KIS_가_깨져도_발송_실패는_알린다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.2377 — 뒤의 KIS·요약이 던져도 실패 알림은 이미 나갔고, 실행은 실패(1)로 끝난다"""
+    _준비(monkeypatch, 0)
+    부름 = _kis_desk(monkeypatch)
+    알림: list[str] = []
+    monkeypatch.setattr(daily, "_notify_failure", lambda *a, **k: 알림.append(str(a[3])) or True)
+    monkeypatch.setattr(desk, "write", lambda *a, **k: 1 / 0)
+
+    def 실패(text, *a, **k):  # noqa: ANN001, ANN002, ANN003, ANN202
+        from batch.notify import telegram
+
+        raise telegram.TelegramError("400 chat not found")
+
+    monkeypatch.setattr(daily.telegram, "send", 실패)
+    assert daily.run("KR") == 1
+    assert any(x.startswith("발송 실패") for x in 알림) and 부름["finish"][0] == "failed"
 
 
 def test_발송_직전_DB_오류여도_KIS_와_운용요약이_돈다(monkeypatch: pytest.MonkeyPatch) -> None:

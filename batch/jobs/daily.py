@@ -2927,8 +2927,22 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
             _notify_failure(client, market, name, f"리포트 발송 여부 모름(다시 보내지 않음): {exc}{덧말}",
                             dry_run=dry_run, title="리포트 발송 여부 모름")
         except Exception as exc:
-            _kis와_요약()
-            return _send_failed(client, run_id, step_log, market, name, exc, dry_run)
+            # 실패 기록·알림을 **먼저**(25.2377, 결함 루프 11-26 — 바깥 except 는 25.1717 에서 고쳤는데 이 경로가
+            # 남았다). KIS 가 접수 시작(08:30)을 기다리다 단계 시간 제한에 걸리면 "발송 실패" 알림과 실패 기록이
+            # 끝내 나가지 않고 "보냈는지 알 수 없음" 시간 초과 알림만 갔다. KIS·요약은 그 뒤에 돌고, 그 결과
+            # (broker·desk)를 실행 기록에 한 번 더 적는다(실패로 닫은 채)
+            try:
+                return _send_failed(client, run_id, step_log, market, name, exc, dry_run)
+            finally:
+                이미 = 베낌["done"]
+                try:
+                    _kis와_요약()
+                except Exception:  # noqa: BLE001 — 실패는 이미 알렸다
+                    log.exception("발송 실패한 실행의 KIS모의투자·운용 요약 단계 실패")
+                if not 이미 and 베낌["done"]:
+                    with contextlib.suppress(Exception):
+                        db.finish_batch_run(client, run_id, status="failed", step_log={**step_log, "sent": False},
+                                            error_text=f"발송 실패: {exc}")  # fmt: skip
 
         _kis와_요약()
         try:
