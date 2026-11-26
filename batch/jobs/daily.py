@@ -2940,9 +2940,12 @@ def run(market: str, *, force: bool = False, dry_run: bool = False) -> int:
                 except Exception:  # noqa: BLE001 — 실패는 이미 알렸다
                     log.exception("발송 실패한 실행의 KIS모의투자·운용 요약 단계 실패")
                 if not 이미 and 베낌["done"]:
+                    # 칸만 **덧쓴다**(25.2379, 25.2377 교차검증 [필수]) — `finish_batch_run` 을 다시 부르면 첫 닫기가
+                    # 붙인 시세 손댐(`prices_touched` — 시세 사본이 고친 범위를 따라가는 유일한 기록)·지문·읽은 행 수를
+                    # 통째로 갈아 끼웠다
                     with contextlib.suppress(Exception):
-                        db.finish_batch_run(client, run_id, status="failed", step_log={**step_log, "sent": False},
-                                            error_text=f"발송 실패: {exc}")  # fmt: skip
+                        칸 = ("broker", "broker2", "desk", "report_head")
+                        db.merge_run_step_log(client, run_id, {k: step_log.get(k) for k in 칸})
 
         _kis와_요약()
         try:

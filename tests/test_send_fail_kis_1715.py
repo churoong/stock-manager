@@ -30,6 +30,7 @@ def _kis_desk(monkeypatch: pytest.MonkeyPatch, 가상기록: dict | None = None)
     monkeypatch.setattr(broker_mirror, "challenger_account", lambda c: "C")
     monkeypatch.setattr(daily, "_notify_failure", lambda *a, **k: True)
     monkeypatch.setattr(daily.db, "finish_batch_run", lambda c, rid, **k: 부름["finish"].append(k.get("status")))
+    monkeypatch.setattr(daily.db, "merge_run_step_log", lambda c, rid, part: 부름["finish"].append("덧씀"))
     return 부름
 
 
@@ -45,8 +46,8 @@ def test_발송_실패여도_KIS_와_운용요약이_돈다(monkeypatch: pytest.
     monkeypatch.setattr(daily.telegram, "send", 실패)
     assert daily.run("KR") == 1
     assert 부름["paper"] == ["2026-10-08"] and len(부름["kis"]) == 2 and 부름["desk"] == [1]
-    # 실패로 닫고(알림 먼저) KIS·요약 뒤 그 결과를 실패 기록에 한 번 더 적는다(25.2377)
-    assert 부름["finish"] == ["failed", "failed"]
+    # 실패로 닫고(알림 먼저) KIS·요약 뒤 그 결과 칸만 덧쓴다(25.2377·2379 — 다시 닫지 않는다)
+    assert 부름["finish"] == ["failed", "덧씀"]
 
 
 def test_발송_실패면_알림이_KIS_보다_먼저(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -56,6 +57,7 @@ def test_발송_실패면_알림이_KIS_보다_먼저(monkeypatch: pytest.Monkey
     차례: list[str] = []
     monkeypatch.setattr(daily, "_notify_failure", lambda *a, **k: 차례.append("알림") or True)
     monkeypatch.setattr(daily.db, "finish_batch_run", lambda c, rid, **k: 차례.append("기록"))
+    monkeypatch.setattr(daily.db, "merge_run_step_log", lambda c, rid, part: 차례.append("덧씀"))
 
     def kis(*_a, **k):  # noqa: ANN002, ANN003, ANN202
         차례.append("KIS")
@@ -70,7 +72,7 @@ def test_발송_실패면_알림이_KIS_보다_먼저(monkeypatch: pytest.Monkey
     monkeypatch.setattr(broker_mirror, "run", kis)
     monkeypatch.setattr(daily.telegram, "send", 실패)
     assert daily.run("KR") == 1
-    assert 차례[:2] == ["기록", "알림"] and "KIS" in 차례 and 차례.index("KIS") > 1 and 차례[-1] == "기록"
+    assert 차례[:2] == ["기록", "알림"] and "KIS" in 차례 and 차례.index("KIS") > 1 and 차례[-1] == "덧씀"
 
 
 def test_KIS_가_깨져도_발송_실패는_알린다(monkeypatch: pytest.MonkeyPatch) -> None:

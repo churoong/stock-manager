@@ -654,6 +654,12 @@ def run_fingerprint() -> dict[str, Any]:
 
 #: 실행 기록을 닫는 문장 둘 — 인자 자리 [끝난 때, 상태, step_log 칸, 오류 글, 번호] 가 같다(25.2277·25.2279).
 #: 고정 글로 둔다(스키마 대조 그물 `tests/test_sql_schema` 가 본다 — 이어 붙여 만들면 "못 보는 질의" 가 된다)
+#: 닫힌 실행 기록에 칸만 **덧쓴다**(25.2379) — `CLOSE_RUN_SQL` 은 step_log 을 통째로 바꿔, 두 번 닫으면 첫 닫기가 붙인
+#: 시세 손댐(`prices_touched`)·지문·읽은 행 수가 지워졌다. JSON 이 아닌 옛 글은 그대로
+MERGE_RUN_STEP_LOG_SQL = (
+    "UPDATE batch_runs SET step_log = CASE WHEN step_log IS NULL THEN ? WHEN json_valid(step_log)"
+    " THEN json_patch(step_log, ?) ELSE step_log END WHERE id = ?"
+)
 CLOSE_RUN_SQL = (
     "UPDATE batch_runs SET finished_at = ?, status = ?, step_log = COALESCE(?, step_log), error_text = ? WHERE id = ?"
 )
@@ -664,6 +670,16 @@ CLOSE_RUN_FINGERPRINT_SQL = (
     " AND NOT json_valid(step_log) THEN step_log"
     " ELSE json_set(COALESCE(step_log, '{}'), '$.fingerprint', json(?)) END, error_text = ? WHERE id = ?"
 )
+
+
+def merge_run_step_log(client: Any, run_id: int, part: dict[str, Any]) -> None:
+    """이미 닫힌 실행 기록의 step_log 에 칸만 더한다(25.2379) — 있던 칸(`prices_touched`·지문·읽은 행 수)은 그대로.
+    값이 None 인 칸은 싣지 않는다(json_patch 는 null 을 "지움" 으로 읽는다)"""
+    part = {k: v for k, v in part.items() if v is not None}
+    if not part:
+        return
+    글 = json.dumps(part, ensure_ascii=False)
+    client.execute(MERGE_RUN_STEP_LOG_SQL, [글, 글, run_id])
 
 
 def finish_batch_run(
