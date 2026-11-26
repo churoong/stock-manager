@@ -92,13 +92,20 @@ def test_앞_실행의_KIS_사건_줄은_잇는다() -> None:
     앞칸 = {"trade_date": "d", "holding": None, "checks": desk.checks(
         halted=False, paper={}, recon_bad=[], warnings=0, h_orders=2,
         broker={"diverge": "괴리 글", "sent": {"rejected": 1, "no_response": 2}, "error": "KisFailed: x",
-                "send": "접수 시작 전 — 보내지 않음", "diff": 3})}  # fmt: skip
+                "reconciled": {"unknown": 1}, "send": "접수 시작 전 — 보내지 않음", "diff": 3, "missing": ["KIS_VTS_APP_KEY"],
+                "not_sent": {"코드 없음": 1}, "diverge_error": "ValueError", "defer_mark_error": "KeyError",
+                "late_mark_error": "KeyError", "cells_error": "ValueError", "perf_error": "KeyError"})}  # fmt: skip
     보냄 = {"trade_date": "d", "holding": None, "kis_step": {"sent": {}, "planned": {"cleanup": 0, "mirror": 0}},
             "checks": []}  # fmt: skip
     남음 = [c["text"].removeprefix(desk.CARRIED_HEAD) for c in desk.carry_same_day(앞칸, 보냄, resumed=True)["checks"]]
     assert "괴리 글" in 남음 and any("거부 1건" in t for t in 남음) and any("응답 모름 2건" in t for t in 남음)
-    assert any(t.startswith("KIS모의투자 단계 실패") for t in 남음)
-    assert not any(t.startswith(desk.KIS_STATE_HEADS) for t in 남음)  # 보내기 보류·잔고 어긋남은 이번 것
+    assert any(t.startswith("KIS모의투자 단계 실패") for t in 남음) and any("체결 조회에 없는 주문 1건" in t for t in 남음)
+    # 상태 줄 — 실행마다 다시 잰다(곁다리 계산 실패 포함, 25.2382). 상수 튜플이 아니라 글자 그대로(25.2381 시험은
+    # 자기 참조라 튜플에서 머리를 빼도 통과했다)
+    for 글 in ("보내지 않음", "잔고와 가상 장부가", "안 낸 주문", "시크릿", "괴리 판정 실패", "비교 표본 표시 실패",
+              "체결 칸 계산 실패", "성과 계산 실패"):  # fmt: skip
+        assert not any(글 in t for t in 남음), 글
+    assert len(남음) == 5  # 사건 줄 다섯 — 단계 실패·괴리·거부·응답 모름·조회에 없는 주문
 
 
 def test_표지_전_KIS_상태_줄도_거른다() -> None:
@@ -108,3 +115,13 @@ def test_표지_전_KIS_상태_줄도_거른다() -> None:
     보냄 = {"trade_date": "d", "holding": None, "kis_step": {"sent": {}}, "checks": []}
     assert [c["text"] for c in desk.carry_same_day(앞칸, 보냄, True)["checks"]] == [
         desk.CARRIED_HEAD + "KIS모의투자 거부 1건 — 거래내역의 까닭을 봅니다"]
+
+
+def test_KIS_줄은_모두_만들_때_표지() -> None:
+    """25.2382 — 글 머리 대조는 문구가 바뀌면 조용히 갈렸다. KIS 기록에서 난 줄은 하나도 빠짐없이 표지가 있다"""
+    줄 = desk.checks(halted=False, paper={}, recon_bad=[], warnings=0, h_orders=2, broker={
+        "diverge": "괴리 글", "sent": {"rejected": 1, "no_response": 2}, "error": "x", "reconciled": {"unknown": 1},
+        "send": "접수 시작 전 — 보내지 않음", "diff": 3, "missing": ["K"], "not_sent": {"코드 없음": 1},
+        "diverge_error": "e", "defer_mark_error": "e", "late_mark_error": "e", "cells_error": "e", "perf_error": "e"})
+    assert len(줄) == 14 and all(c.get("kind") in ("kis", "kis_event") for c in 줄)
+    assert sum(c["kind"] == "kis_event" for c in 줄) == 5

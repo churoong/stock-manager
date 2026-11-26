@@ -56,6 +56,27 @@ def test_발송_실패여도_KIS_와_운용요약이_돈다(monkeypatch: pytest.
     assert isinstance(칸["warnings"], list)
 
 
+def test_발송_실패_뒤_KIS_가_붙인_경고가_덧쓰기에_든다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """25.2382 (25.2381 교차검증 [권고]) — 첫 닫기 **뒤에** KIS 단계가 warnings 에 붙인 줄이 덧쓰는 칸에 실제로 있는지.
+    목록이 있는지만 보면 KIS 전 사본을 넘겨도 통과했다"""
+    _준비(monkeypatch, 0)
+    부름 = _kis_desk(monkeypatch)
+
+    def kis(*_a, **k):  # noqa: ANN002, ANN003, ANN202
+        raise RuntimeError("토큰 발급 실패")
+
+    def 실패(text, *a, **k):  # noqa: ANN001, ANN002, ANN003, ANN202
+        from batch.notify import telegram
+
+        raise telegram.TelegramError("400 chat not found")
+
+    monkeypatch.setattr(broker_mirror, "run", kis)
+    monkeypatch.setattr(daily.telegram, "send", 실패)
+    assert daily.run("KR") == 1
+    경고 = 부름["part"][0]["warnings"]
+    assert any("KIS모의투자" in w and "토큰 발급 실패" in w for w in 경고)
+
+
 def test_발송_실패면_알림이_KIS_보다_먼저(monkeypatch: pytest.MonkeyPatch) -> None:
     """25.2377 (결함 루프 11-26) — KIS 가 접수 시작을 기다리다 시간 제한에 걸려도 실패 알림·기록은 이미 나갔다"""
     _준비(monkeypatch, 0)

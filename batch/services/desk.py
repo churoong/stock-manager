@@ -1308,15 +1308,21 @@ def checks(
                     "text": f"가상모의투자 단계 실패: {str(p['error'])[:120]}" + (f" — {적은곳}" if 적은곳 else "")
                     + " — 그날 KIS 베끼기도 하지 않았습니다"})
     b = broker or {}
-    kis처음 = len(out)  # 여기부터 KIS 기록에서 난 줄 — 아래에서 `kind: kis` 표지(25.2380)
+    # KIS 기록에서 난 줄은 만들 때 바로 표지한다(25.2380·2381·2382 — 글 머리 대조는 문구가 바뀌면 조용히 갈렸다).
+    # `kis`(상태): broker_mirror.run 이 **실행마다 다시 재는 것** — 시크릿 빔·보내기 보류·안 낸 주문·잔고 어긋남, 그리고
+    # 곁다리 계산 실패(괴리 판정·비교 표본 표시·체결 칸·성과 — 매번 다시 돌고 그날 행을 덮는다). 같은 날 이어 돈 실행이
+    # KIS 를 돌면 그 실행 것이 맞아 앞 것을 잇지 않는다.
+    # `kis_event`(사건): 그 실행에서만 난 것 — 단계 실패·괴리 본문(보낸 열쇠는 다시 알리지 않음)·거부·응답 모름·조회에
+    # 없는 주문(그 실행의 보냄·맞춤 칸에서만). 다음 실행이 다시 말하지 않으므로 계속 잇는다
+    상태, 사건 = "kis", "kis_event"
     if b.get("missing"):
-        out.append({"level": "high",
+        out.append({"kind": 상태, "level": "high",
                     "text": f"KIS모의투자 시크릿 {', '.join(b['missing'])} 이(가) 비어 주문을 내지 않았습니다"})
     if b.get("error"):
-        out.append({"level": "high", "text": f"KIS모의투자 단계 실패: {str(b['error'])[:120]}"})
+        out.append({"kind": 사건, "level": "high", "text": f"KIS모의투자 단계 실패: {str(b['error'])[:120]}"})
     # 안 보낸 날 (25.1503, 검토 1) — 접수 시작 전·장 끝난 뒤·예약 마감 뒤에 돈 실행은 그날 KIS 에 아무것도 내지 않는다
     if b.get("send") and b["send"] not in SEND_OK:
-        out.append({"level": "high" if h_orders else "normal",
+        out.append({"kind": 상태, "level": "high" if h_orders else "normal",
                     "text": f"KIS모의투자에 보내지 않음: {b['send']}" + (f" — 베낄 주문 {h_orders}건이 남았습니다"
                                                                     if h_orders else "")})  # fmt: skip
     if b.get("diverge"):
@@ -1324,44 +1330,43 @@ def checks(
         # 켜진 날 매도 가격 칸을 말 중간에서 잘랐다(25.1641 교차검증 [권고], 25.1649).
         # 꼴이 깨진 긴 값만 막고 자른 표시를 붙인다
         글 = str(b["diverge"])
-        out.append({"level": "high", "text": 글 if len(글) <= DIVERGE_TEXT_MAX else 글[: DIVERGE_TEXT_MAX - 1] + "…"})
+        out.append({"kind": 사건,
+                    "level": "high", "text": 글 if len(글) <= DIVERGE_TEXT_MAX else 글[: DIVERGE_TEXT_MAX - 1] + "…"})
     if b.get("diverge_error"):
-        out.append({"level": "normal", "text": f"KIS 괴리 판정 실패({b['diverge_error']}) — 주문은 그대로 나갔습니다"})
+        out.append({"kind": 상태,
+                    "level": "normal", "text": f"KIS 괴리 판정 실패({b['diverge_error']}) — 주문은 그대로 나갔습니다"})
     # 비교 표본을 가르는 곁다리 실패(25.1815, 25.1812 교차검증 [권고]) — 실행 기록에만 있어, 그날 괴리 알림이 시세·환율
     # 구멍으로 미룬 매도 탓인지·체결 칸이 왜 안 바뀌었는지 알 길이 없었다
     if b.get("defer_mark_error"):
-        out.append({"level": "normal", "text": f"KIS 비교 표본 표시 실패({b['defer_mark_error']}) — 오늘 일치율·괴리에 "
+        out.append({"kind": 상태,
+                    "level": "normal", "text": f"KIS 비교 표본 표시 실패({b['defer_mark_error']}) — 오늘 일치율·괴리에 "
                                                "시세·환율이 없어 미룬 매도가 섞였을 수 있습니다"})
     if b.get("late_mark_error"):  # 개장 뒤 보낸 시장가 표시 실패(25.2221)
-        out.append({"level": "normal", "text": f"KIS 비교 표본 표시 실패({b['late_mark_error']}) — 오늘 일치율·괴리에 "
+        out.append({"kind": 상태,
+                    "level": "normal", "text": f"KIS 비교 표본 표시 실패({b['late_mark_error']}) — 오늘 일치율·괴리에 "
                                                "개장 뒤 보낸 시장가가 섞였을 수 있습니다"})
     if b.get("cells_error"):
-        out.append({"level": "normal",
+        out.append({"kind": 상태, "level": "normal",
                     "text": f"KIS 체결 칸 계산 실패({b['cells_error']}) — 오늘 체결 칸이 비거나 갱신되지 않았습니다"})
     if b.get("not_sent"):
         까닭 = ", ".join(f"{k} {v}건" for k, v in sorted(b["not_sent"].items()))
-        out.append({"level": "normal", "text": f"KIS모의투자에 안 낸 주문: {까닭}"})
+        out.append({"kind": 상태, "level": "normal", "text": f"KIS모의투자에 안 낸 주문: {까닭}"})
     보냄 = b.get("sent") or {}
     if 보냄.get("rejected"):
-        out.append({"level": "normal", "text": f"KIS모의투자 거부 {보냄['rejected']}건 — 거래내역의 까닭을 봅니다"})
+        out.append({"kind": 사건, "level": "normal",
+                    "text": f"KIS모의투자 거부 {보냄['rejected']}건 — 거래내역의 까닭을 봅니다"})
     if 보냄.get("no_response"):
-        out.append({"level": "normal",
+        out.append({"kind": 사건, "level": "normal",
                     "text": f"KIS모의투자 응답 모름 {보냄['no_response']}건 — 다음 배치가 체결 조회로 맞춥니다"})
     맞춤 = b.get("reconciled") or {}
     if 맞춤.get("unknown"):
-        out.append({"level": "normal", "text": f"KIS모의투자 체결 조회에 없는 주문 {맞춤['unknown']}건(모름으로 닫음)"})
+        out.append({"kind": 사건, "level": "normal",
+                    "text": f"KIS모의투자 체결 조회에 없는 주문 {맞춤['unknown']}건(모름으로 닫음)"})
     if b.get("perf_error"):
-        out.append({"level": "normal",
+        out.append({"kind": 상태, "level": "normal",
                     "text": f"KIS 계좌 성과 계산 실패({b['perf_error']}) — 주문은 그대로 나갔습니다"})
     if b.get("diff"):
-        out.append({"level": "normal", "text": f"KIS 잔고와 가상 장부가 어긋난 종목 {b['diff']}개"})
-    # KIS 기록에서 난 줄 표지(25.2380·2381) — 둘로 가른다.
-    # `kis`(상태): 실행마다 다시 재는 것(시크릿 빔·보내기 보류·안 낸 주문·잔고 어긋남) — 같은 날 이어 돈 실행이 KIS 를
-    # 돌면 그 실행 것이 맞아 앞 것을 잇지 않는다("베낄 주문 N건이 남았습니다" 가 다 낸 뒤에도 남았다, 25.2380).
-    # `kis_event`(사건): 그 실행에서만 난 것(단계 실패·괴리·거부·응답 모름·조회에 없는 주문·곁다리 실패) — 다음 실행이
-    # 다시 말하지 않으므로(괴리는 보낸 열쇠를 빼고, 거부·모름은 그 실행의 보냄 칸에서만) 계속 잇는다(25.2381)
-    for c in out[kis처음:]:
-        c["kind"] = "kis" if str(c["text"]).startswith(KIS_STATE_HEADS) else "kis_event"
+        out.append({"kind": 상태, "level": "normal", "text": f"KIS 잔고와 가상 장부가 어긋난 종목 {b['diff']}개"})
     if recon_bad:
         틀림 = ", ".join(_이름(a) for a in sorted(recon_bad))
         out.append({"level": "high", "text": f"장부 검산 어긋남: 계좌 {틀림}"})
@@ -1425,9 +1430,10 @@ def checks(
     return sorted(out, key=lambda x: x["level"] != "high")
 
 
-#: KIS 상태 줄(실행마다 다시 재는 것)의 글 머리 — `kind: kis` 와 표지 전 옛 줄을 가른다(25.2381)
+#: 표지 전(25.2380 앞) 옛 줄의 KIS 상태 줄 글 머리 — 배포 전에 쓴 칸만 이것으로 가른다(새 줄은 만들 때 표지, 25.2382)
 KIS_STATE_HEADS = (
     "KIS모의투자 시크릿", "KIS모의투자에 보내지 않음", "KIS모의투자에 안 낸 주문", "KIS 잔고와 가상 장부가",
+    "KIS 괴리 판정 실패", "KIS 비교 표본 표시 실패", "KIS 체결 칸 계산 실패", "KIS 계좌 성과 계산 실패",
 )  # fmt: skip
 #: 이어 돈 실행이 앞 실행에서 이어받은 확인할 일의 머리(25.2376)
 CARRIED_HEAD = "앞 실행 — "
@@ -1457,7 +1463,8 @@ def carry_same_day(prev: dict[str, Any] | None, section: dict[str, Any], resumed
             continue
         글 = str(c.get("text") or "").removeprefix(CARRIED_HEAD)
         # 표지 전(25.2375·2380 앞) 옛 줄은 글 머리로 — 멈춤, KIS 상태 줄
-        if 글.startswith("멈춤 스위치") or (이번_KIS and (c.get("kind") == "kis" or 글.startswith(KIS_STATE_HEADS))):
+        옛상태 = "kind" not in c and 글.startswith(KIS_STATE_HEADS)
+        if 글.startswith("멈춤 스위치") or (이번_KIS and (c.get("kind") == "kis" or 옛상태)):
             continue
         if 글 and 글 not in 지금글:
             지금글.add(글)
