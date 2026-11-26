@@ -65,3 +65,22 @@ def test_write_가_두번째_실행에서_잇는다(monkeypatch: pytest.MonkeyPa
     kr = s["markets"]["KR"]
     assert kr["holding"] == {"weights": {"A": 1.1}}
     assert {desk.CARRIED_HEAD + t for t in 첫줄 if not t.startswith("멈춤")} <= {x["text"] for x in kr["checks"]}
+
+
+def test_이번_실행이_KIS_를_돌았으면_앞_KIS_줄은_잇지_않는다() -> None:
+    """25.2380 (25.2376 교차검증 [권고]) — 늦게 여는 날 08:27 첫 실행의 "접수 시작 전 — 베낄 주문 3건이 남았습니다" 가
+    09:35 이어 돈 실행이 다 낸 뒤에도 "앞 실행 —" 높음으로 남았다"""
+    앞칸 = {"trade_date": "d", "holding": None, "checks": desk.checks(
+        halted=False, paper={}, broker={"send": "접수 시작 전 — 보내지 않음"}, recon_bad=[], warnings=0, h_orders=3)}
+    assert 앞칸["checks"] and all(c.get("kind") == "kis" for c in 앞칸["checks"])
+    보냄 = {"trade_date": "d", "holding": None, "kis_step": {"sent": {"accepted": 3}}, "checks": []}
+    assert desk.carry_same_day(앞칸, 보냄, resumed=True)["checks"] == []
+    # 이번 실행이 KIS 를 안 돌았으면(기록 없음) 앞 KIS 줄은 그날 있었던 일 — 잇는다
+    안돎 = {"trade_date": "d", "holding": None, "kis_step": {}, "checks": []}
+    assert [c["text"].startswith(desk.CARRIED_HEAD) for c in desk.carry_same_day(앞칸, 안돎, resumed=True)["checks"]] == [True]
+
+
+def test_표지_전_멈춤_줄도_잇지_않는다() -> None:
+    """25.2375 앞에 쓴 칸의 멈춤 줄은 `kind: global` 이 없다 — 배포 당일 "앞 실행 — 멈춤…" 으로 남지 않게"""
+    앞칸 = {"trade_date": "d", "checks": [{"level": "high", "text": "멈춤 스위치가 켜져 있어 가상·KIS모의투자 모두 새 주문을 내지 않습니다"}]}
+    assert desk.carry_same_day(앞칸, {"trade_date": "d", "holding": None, "checks": []}, True)["checks"] == []

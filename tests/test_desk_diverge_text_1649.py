@@ -16,7 +16,7 @@ def test_네_칸이_다_켜진_글도_끝까지() -> None:
     글 = _네_칸_글()
     assert len(글) > 300  # 예전 상한을 넘는 정상 글
     c = desk.checks(halted=False, paper=None, broker={"diverge": 글}, recon_bad=[], warnings=0)
-    assert c == [{"level": "high", "text": 글}] and 글.endswith("가상이 체결가를 낙관")
+    assert c == [{"level": "high", "text": 글, "kind": "kis"}] and 글.endswith("가상이 체결가를 낙관")  # 표지 25.2380
 
 
 def test_꼴이_깨진_긴_값만_자르고_표시() -> None:

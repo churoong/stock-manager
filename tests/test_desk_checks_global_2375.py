@@ -14,4 +14,5 @@ def test_멈춤만_global() -> None:
                      recon_bad=[], warnings=0)  # fmt: skip
     전역 = [c for c in 줄 if c.get("kind") == "global"]
     assert len(전역) == 1 and 전역[0]["text"].startswith("멈춤 스위치")
-    assert all("kind" not in c for c in 줄 if not c["text"].startswith("멈춤 스위치"))
+    # 나머지는 KIS 기록에서 난 줄(25.2380 `kind: kis`) — 전역이 아니다
+    assert all(c.get("kind") == "kis" for c in 줄 if not c["text"].startswith("멈춤 스위치"))

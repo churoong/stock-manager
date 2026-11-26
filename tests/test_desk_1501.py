@@ -53,7 +53,7 @@ def test_checks_order_and_text() -> None:
     # 쉬는 날은 안 보낸 것이 정상, 베낄 주문이 없으면 보통
     assert desk.checks(halted=False, paper=None, broker={"send": "오늘은 장이 없다"}, recon_bad=[], warnings=0) == []
     낮음 = desk.checks(halted=False, paper=None, broker={"send": "접수 시작 전 — 보내지 않음"}, recon_bad=[], warnings=0)
-    assert 낮음 == [{"level": "normal", "text": "KIS모의투자에 보내지 않음: 접수 시작 전 — 보내지 않음"}]
+    assert 낮음 == [{"level": "normal", "text": "KIS모의투자에 보내지 않음: 접수 시작 전 — 보내지 않음", "kind": "kis"}]
     assert desk.checks(halted=False, paper=None, broker=None, recon_bad=[], warnings=0) == []
 
 

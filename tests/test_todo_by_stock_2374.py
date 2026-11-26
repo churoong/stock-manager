@@ -48,3 +48,23 @@ def test_종목_번호가_없으면_이름으로() -> None:
 def test_리포트_행이_티커를_싣는다() -> None:
     src = inspect.getsource(jsf.active_flags_for_report)
     assert "s.ticker" in src and '"ticker": r.get("ticker")' in src
+
+
+def test_실제_질의에서_첫_줄까지() -> None:
+    """25.2380 (25.2374 교차검증 [권고]) — 글 대조가 아니라 `active_flags_for_report` 가 실제로 티커를 돌려주고 첫 줄까지
+    이어지는지"""
+    from batch.core import db
+    from tests.test_portfolio_job import MemClient
+
+    mem = MemClient()
+    db.apply_migrations(mem)  # type: ignore[arg-type]
+    for sid, tk, 이름 in ((901, "GOOGL", "Alphabet Inc. Class A Common Stock"), (902, "GOOG", "Alphabet Inc. Class C Capital Stock")):
+        mem.conn.execute("INSERT INTO stocks (id, ticker, market, country, name_en, currency, status, source, fetched_at)"
+                         " VALUES (?, ?, 'NASDAQ', 'US', ?, 'USD', 'active', 't', 't')", [sid, tk, 이름])  # fmt: skip
+        mem.conn.execute("INSERT INTO sell_flags (stock_id, as_of_date, level, reason_code, rationale_text, rationale_data,"
+                         " is_active, first_seen_date, created_at) VALUES (?, '2026-11-27', 'red', '손절', 'x', '{}', 1,"
+                         " '2026-11-27', '2026-11-27T00:00:00+00:00')", [sid])  # fmt: skip
+    행 = jsf.active_flags_for_report(mem, "US", "2026-11-27")  # type: ignore[arg-type]
+    assert sorted(r["ticker"] for r in 행) == ["GOOG", "GOOGL"]
+    줄 = formatter.todo_line(행, "USD", "2026-11-27")
+    assert 줄 is not None and "🔴손절 2(" in 줄 and "Alphabet(GOOGL)" in 줄 and "Alphabet(GOOG)" in 줄

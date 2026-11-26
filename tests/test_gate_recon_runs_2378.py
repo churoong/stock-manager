@@ -62,3 +62,19 @@ def test_관문이_덮인_날도_센다(monkeypatch) -> None:  # type: ignore[no
     잡힌.clear()
     jd._관문판(mem, 지금, {}, "H", {jd._한국날(지금.isoformat()) or ""}, {}, since="", version=1)  # type: ignore[arg-type]
     assert 잡힌.get("recon") == 1  # 같은 날이 두 쪽에 다 있으면 하루
+
+
+def test_창_밖_실행은_세지_않는다(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """25.2380 (25.2378 교차검증 [권고]) — 실행 기록은 창보다 12일 앞부터 읽는다. 창 밖 날짜가 세어지지 않는 것은 뒤의
+    `d >= 창` 거름 하나에 걸려 있어 묶는다"""
+    from datetime import UTC, datetime, timedelta
+
+    잡힌: dict[str, int] = {}
+    monkeypatch.setattr(jd.desk, "gate", lambda *a, **k: 잡힌.update(recon=k["recon_bad_days"]) or {"ok": True})
+    mem = MemClient()
+    db.apply_migrations(mem)  # type: ignore[arg-type]
+    지금 = datetime.now(UTC)
+    밖 = 지금 - timedelta(days=jd.desk.GATE_INCIDENT_DAYS + 5)  # 앞당김(12일) 안, 창 밖
+    _행(mem, 밖.replace(microsecond=0).isoformat(), {"A": {"recon_ok": False}})
+    jd._관문판(mem, 지금, {}, "H", set(), {}, since="", version=1)  # type: ignore[arg-type]
+    assert 잡힌.get("recon") == 0

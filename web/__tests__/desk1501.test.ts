@@ -67,7 +67,7 @@ describe("요약 고르기", () => {
 });
 
 describe("확인할 일 합치기", () => {
-  it("높음이 먼저, 두 시장에 같은 글은 한 번", () => {
+  it("높음이 먼저, 멈춤 스위치(표지 없는 옛 꼴 포함)는 두 시장에서 한 번", () => {
     const halt = { level: "high" as const, text: "멈춤 스위치" };
     const c = allChecks({
       KR: { ...market({ checks: [{ level: "normal", text: "경고 줄" }, halt] }), as_of: "d" },
