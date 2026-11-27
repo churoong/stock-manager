@@ -29,8 +29,7 @@ import {
   compareReal,
   freshFx,
   kstToday,
-  parseJsonList,
-  recordErrorText,
+  accountRecord,
   reservedByAccount,
   withLegacy,
   type DailyRow,
@@ -67,9 +66,8 @@ export async function GET() {
     const 마지막 = rowsToObjects<DailyRow & { positions_json: string; unknown_json: string | null; attribution_json: string | null }>(latest);
     // 보유 이름 — 마지막 평가의 보유 목록에 든 종목만
     // 깨진 한 줄이 화면 전체를 500 으로 만들지 않게 — 그 계좌만 "보유 기록을 읽지 못함"(25.2384)
-    const 보유읽기 = Object.fromEntries(마지막.map((d) => [d.account_id, parseJsonList(d.positions_json)]));
-    const 모름읽기 = Object.fromEntries(마지막.map((d) => [d.account_id, parseJsonList(d.unknown_json)]));
-    const 보유들 = Object.fromEntries(Object.entries(보유읽기).map(([k, v]) => [k, v.list]));
+    const 기록들 = Object.fromEntries(마지막.map((d) => [d.account_id, accountRecord(d.positions_json, d.unknown_json)]));
+    const 보유들 = Object.fromEntries(Object.entries(기록들).map(([k, v]) => [k, v.positions]));
     const ids = [...new Set(Object.values(보유들).flat().map((p) => Number(p.stock_id)))];
     const 이름 = ids.length
       ? Object.fromEntries(
@@ -97,9 +95,9 @@ export async function GET() {
       ...a,
       view: accountView(a.id, 입금, 현금[a.id] ?? 입금, 예약[a.id] === undefined ? 0 : 예약[a.id], 마지막.find((d) => d.account_id === a.id)),
       positions: (보유들[a.id] ?? []).map((p) => ({ ...p, ...(이름[Number(p.stock_id)] ?? {}) })),
-      unknown: 모름읽기[a.id]?.list ?? [],
-      positions_broken: Boolean(보유읽기[a.id]?.broken),
-      record_error: recordErrorText(Boolean(보유읽기[a.id]?.broken), Boolean(모름읽기[a.id]?.broken)),
+      unknown: 기록들[a.id]?.unknown ?? [],
+      positions_broken: 기록들[a.id]?.positions_broken ?? false,
+      record_error: 기록들[a.id]?.record_error ?? null,
       attribution: 성과분해(a.id),
     }));
     // 실제 투자와 같은 기간 비교 (25.1448) — 실제 표는 읽기만. 못 읽으면 비교만 빠진다

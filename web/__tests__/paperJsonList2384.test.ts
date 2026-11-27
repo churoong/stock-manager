@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { parseJsonList, recordErrorText } from "@/lib/paper";
+import { accountRecord, parseJsonList, recordErrorText } from "@/lib/paper";
 
 describe("parseJsonList", () => {
   it("목록은 그대로, 빈 값은 빈 목록(깨짐 아님)", () => {
@@ -17,14 +17,12 @@ describe("parseJsonList", () => {
   });
   it("라우트가 날 JSON.parse 대신 이것을 쓴다 — 보유·모름 둘 다", () => {
     const src = readFileSync(join(process.cwd(), "app", "api", "paper", "route.ts"), "utf8");
-    expect(src).toContain("parseJsonList(d.positions_json)");
-    expect(src).toContain("parseJsonList(d.unknown_json)");
+    expect(src).toContain("accountRecord(d.positions_json, d.unknown_json)");
     // 한 줄 전체를 본다 — `[^)]*` 는 첫 `)` 에서 멈춰 옛 꼴(`…find((d) => …)?.unknown_json`)을 못 잡았다(25.2385)
     expect(src).not.toMatch(/JSON\.parse\([^;\n]*positions_json/);
     expect(src).not.toMatch(/JSON\.parse\([^;\n]*unknown_json/);
-    expect(src).toContain("unknown: 모름읽기[a.id]?.list");
-    expect(src).toContain("record_error: recordErrorText(");
-    expect(src).toContain("positions_broken: Boolean(보유읽기[a.id]?.broken)");
+    expect(src).toContain("positions_broken: 기록들[a.id]?.positions_broken");
+    expect(src).toContain("record_error: 기록들[a.id]?.record_error");
   });
   it("객체가 아닌 원소는 걸러 내고 깨짐 (25.2385)", () => {
     expect(parseJsonList('[{"stock_id":1}, null, 3]')).toEqual({ list: [{ stock_id: 1 }], broken: true });
@@ -39,10 +37,35 @@ describe("parseJsonList", () => {
   it("화면 — 보유 탭이 깨짐이면 '보유 없음' 대신 그 문구, 탭 수는 '?', 요약에도 빨간 줄 (25.2385)", () => {
     const v = readFileSync(join(process.cwd(), "components", "PaperView.tsx"), "utf8");
     const 보유 = v.slice(v.indexOf("function HoldingsPane"));
-    const 깨짐 = 보유.indexOf("if (a.positions_broken) return");
+    const 깨짐 = 보유.indexOf("if (a.positions_broken && !a.positions.length) return");
     expect(깨짐).toBeGreaterThanOrEqual(0); // 못 찾음(-1)도 "앞" 으로 통과하지 않게
     expect(깨짐).toBeLessThan(보유.indexOf("보유 종목이 없습니다"));
     expect(v).toContain('a.positions_broken ? "?" : a.positions.length');
     expect(v).toContain("{a.record_error ? <p");
+  });
+});
+
+
+describe("accountRecord — 계좌 한 줄을 동작으로 (25.2386)", () => {
+  it("보유만 깨짐 · 모름만 깨짐 · 둘 다 · 멀쩡", () => {
+    const 보유깨짐 = accountRecord("x", '[{"stock_id":2}]');
+    expect(보유깨짐.positions_broken).toBe(true);
+    expect(보유깨짐.record_error).toContain("보유가 없는 것이 아닙니다");
+    expect(보유깨짐.unknown).toEqual([{ stock_id: 2 }]);
+    const 모름깨짐 = accountRecord('[{"stock_id":1}]', "x");
+    expect(모름깨짐.positions_broken).toBe(false); // 인자를 뒤바꾸면 여기서 깨진다
+    expect(모름깨짐.record_error).toContain("원가로 평가한 보유 목록");
+    expect(모름깨짐.positions).toEqual([{ stock_id: 1 }]);
+    expect(accountRecord("x", "x").record_error).toContain("보유 기록·원가 평가 목록");
+    expect(accountRecord('[{"stock_id":1}]', null)).toEqual({
+      positions: [{ stock_id: 1 }], unknown: [], positions_broken: false, record_error: null,
+    });
+  });
+  it("부분 깨짐은 읽은 줄을 남기고 깨짐 표시 — 화면은 빨간 줄 + 표", () => {
+    const r = accountRecord('[{"stock_id":1}, null]', null);
+    expect(r.positions).toEqual([{ stock_id: 1 }]);
+    expect(r.positions_broken).toBe(true);
+    const v = readFileSync(join(process.cwd(), "components", "PaperView.tsx"), "utf8");
+    expect(v).toContain("{a.positions_broken ? <p className=\"mb-1 text-xs text-rose-600\">{a.record_error} — 읽은 줄만 보입니다</p> : null}");
   });
 });

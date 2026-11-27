@@ -77,6 +77,26 @@ export function recordErrorText(positionsBroken: boolean, unknownBroken: boolean
   return null;
 }
 
+/**
+ * 계좌 한 줄의 보유·모름 칸 — 평가 행 JSON 두 칸에서(25.2386, 25.2385 교차검증 [권고]: 라우트 글자 대조로는 인자를 뒤바꾸거나
+ * 깨짐 표시를 꺼도 시험이 통과했다 — 동작으로 단언하게 순수 함수로 뺀다)
+ */
+export function accountRecord(positionsJson: string | null | undefined, unknownJson: string | null | undefined): {
+  positions: Array<Record<string, unknown>>;
+  unknown: Array<Record<string, unknown>>;
+  positions_broken: boolean;
+  record_error: string | null;
+} {
+  const 보유 = parseJsonList(positionsJson);
+  const 모름 = parseJsonList(unknownJson);
+  return {
+    positions: 보유.list,
+    unknown: 모름.list,
+    positions_broken: 보유.broken,
+    record_error: recordErrorText(보유.broken, 모름.broken),
+  };
+}
+
 export function isMissingColumn(e: unknown): boolean {
   return /no such column/i.test(e instanceof Error ? e.message : String(e));
 }

@@ -659,10 +659,12 @@ function SummaryPane({ a }: { a: Account }) {
 }
 
 function HoldingsPane({ a }: { a: Account }) {
-  if (a.positions_broken) return <p className="text-sm text-rose-600">{a.record_error}</p>;
+  // 깨졌어도 읽은 만큼은 보인다 — 빨간 줄을 위에 단다(25.2386, 부분 깨짐에 멀쩡한 줄까지 숨겼다)
+  if (a.positions_broken && !a.positions.length) return <p className="text-sm text-rose-600">{a.record_error}</p>;
   if (!a.positions.length) return <p className="text-sm text-slate-500">보유 종목이 없습니다{a.view.asOf ? ` (${a.view.asOf} 평가)` : ""}.</p>;
   return (
     <div className="overflow-x-auto">
+      {a.positions_broken ? <p className="mb-1 text-xs text-rose-600">{a.record_error} — 읽은 줄만 보입니다</p> : null}
       <table className="w-full min-w-[640px] text-xs">
         <thead className="text-slate-500">
           <tr>
