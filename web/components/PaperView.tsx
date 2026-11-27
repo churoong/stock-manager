@@ -51,6 +51,8 @@ interface Account {
   view: AccountView;
   positions: Position[];
   unknown: Array<{ stock_id: number; why: string }>;
+  /** 평가 행의 보유·모름 JSON 이 깨져 빈 목록으로 읽음(25.2384) — 조용히 0 으로 보이지 않게 */
+  record_error?: string | null;
   attribution: Attribution | null;
 }
 /** 보유 한 줄 — 배치가 낸 값 그대로 (25.1455). 웹은 계산하지 않는다 */
@@ -648,6 +650,7 @@ function SummaryPane({ a }: { a: Account }) {
       {v.notes.map((n) => (
         <p key={n} className={`mt-2 text-xs ${n.startsWith("⚠️") ? "text-red-600 dark:text-red-400" : "text-slate-500"}`}>{n}</p>
       ))}
+      {a.record_error ? <p className="mt-1 text-xs text-rose-600">{a.record_error}</p> : null}
       {a.unknown.length ? <p className="mt-1 text-xs text-amber-600">원가로 평가한 보유 {a.unknown.length}개 (종가·환율 없음 또는 기업행위 멈춤)</p> : null}
     </div>
   );

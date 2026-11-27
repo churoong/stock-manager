@@ -29,6 +29,7 @@ import {
   compareReal,
   freshFx,
   kstToday,
+  parseJsonList,
   reservedByAccount,
   withLegacy,
   type DailyRow,
@@ -64,9 +65,10 @@ export async function GET() {
     const 예약 = reservedByAccount(rowsToObjects<OpenBuy>(buys), 환율);
     const 마지막 = rowsToObjects<DailyRow & { positions_json: string; unknown_json: string | null; attribution_json: string | null }>(latest);
     // 보유 이름 — 마지막 평가의 보유 목록에 든 종목만
-    const 보유들 = Object.fromEntries(
-      마지막.map((d) => [d.account_id, JSON.parse(d.positions_json || "[]") as Array<Record<string, unknown>>]),
-    );
+    // 깨진 한 줄이 화면 전체를 500 으로 만들지 않게 — 그 계좌만 "보유 기록을 읽지 못함"(25.2384)
+    const 보유읽기 = Object.fromEntries(마지막.map((d) => [d.account_id, parseJsonList(d.positions_json)]));
+    const 모름읽기 = Object.fromEntries(마지막.map((d) => [d.account_id, parseJsonList(d.unknown_json)]));
+    const 보유들 = Object.fromEntries(Object.entries(보유읽기).map(([k, v]) => [k, v.list]));
     const ids = [...new Set(Object.values(보유들).flat().map((p) => Number(p.stock_id)))];
     const 이름 = ids.length
       ? Object.fromEntries(
@@ -94,7 +96,8 @@ export async function GET() {
       ...a,
       view: accountView(a.id, 입금, 현금[a.id] ?? 입금, 예약[a.id] === undefined ? 0 : 예약[a.id], 마지막.find((d) => d.account_id === a.id)),
       positions: (보유들[a.id] ?? []).map((p) => ({ ...p, ...(이름[Number(p.stock_id)] ?? {}) })),
-      unknown: JSON.parse(마지막.find((d) => d.account_id === a.id)?.unknown_json || "[]"),
+      unknown: 모름읽기[a.id]?.list ?? [],
+      record_error: 보유읽기[a.id]?.broken || 모름읽기[a.id]?.broken ? "보유 기록을 읽지 못했습니다(평가 행의 JSON 이 깨짐)" : null,
       attribution: 성과분해(a.id),
     }));
     // 실제 투자와 같은 기간 비교 (25.1448) — 실제 표는 읽기만. 못 읽으면 비교만 빠진다

@@ -51,6 +51,21 @@ export const PAPER_OPEN_ORDERS_LEGACY = `SELECT o.id, o.account_id, o.market, s.
   o.side, o.limit_price, o.quantity, o.currency, o.fill_session, o.tranche, o.reason
 FROM paper_orders o JOIN stocks s ON s.id = o.stock_id WHERE o.status = 'open' ORDER BY o.id`;
 
+/**
+ * 평가 행의 JSON 목록 칸(보유·모름)을 읽는다 — 깨진 한 줄이 가상모의투자 화면 전체를 500 으로 만들지 않게(25.2384,
+ * 결함 루프 11-27 [참고]). 성과 분해(attribution_json)는 이미 이렇게 읽는다. 목록이 아니거나 깨졌으면 빈 목록 + 깨짐 표시 —
+ * 화면이 "보유 기록을 읽지 못함" 을 보여 조용히 0 으로 보이지 않게 한다
+ */
+export function parseJsonList(text: string | null | undefined): { list: Array<Record<string, unknown>>; broken: boolean } {
+  if (!text) return { list: [], broken: false };
+  try {
+    const v: unknown = JSON.parse(text);
+    return Array.isArray(v) ? { list: v as Array<Record<string, unknown>>, broken: false } : { list: [], broken: true };
+  } catch {
+    return { list: [], broken: true };
+  }
+}
+
 export function isMissingColumn(e: unknown): boolean {
   return /no such column/i.test(e instanceof Error ? e.message : String(e));
 }
