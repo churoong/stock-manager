@@ -30,6 +30,7 @@ import {
   freshFx,
   kstToday,
   parseJsonList,
+  recordErrorText,
   reservedByAccount,
   withLegacy,
   type DailyRow,
@@ -97,7 +98,8 @@ export async function GET() {
       view: accountView(a.id, 입금, 현금[a.id] ?? 입금, 예약[a.id] === undefined ? 0 : 예약[a.id], 마지막.find((d) => d.account_id === a.id)),
       positions: (보유들[a.id] ?? []).map((p) => ({ ...p, ...(이름[Number(p.stock_id)] ?? {}) })),
       unknown: 모름읽기[a.id]?.list ?? [],
-      record_error: 보유읽기[a.id]?.broken || 모름읽기[a.id]?.broken ? "보유 기록을 읽지 못했습니다(평가 행의 JSON 이 깨짐)" : null,
+      positions_broken: Boolean(보유읽기[a.id]?.broken),
+      record_error: recordErrorText(Boolean(보유읽기[a.id]?.broken), Boolean(모름읽기[a.id]?.broken)),
       attribution: 성과분해(a.id),
     }));
     // 실제 투자와 같은 기간 비교 (25.1448) — 실제 표는 읽기만. 못 읽으면 비교만 빠진다

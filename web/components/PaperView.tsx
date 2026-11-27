@@ -53,6 +53,8 @@ interface Account {
   unknown: Array<{ stock_id: number; why: string }>;
   /** 평가 행의 보유·모름 JSON 이 깨져 빈 목록으로 읽음(25.2384) — 조용히 0 으로 보이지 않게 */
   record_error?: string | null;
+  /** 보유 JSON 이 깨져 빈 목록 — 보유 탭이 "보유 없음" 으로 읽히지 않게(25.2385) */
+  positions_broken?: boolean;
   attribution: Attribution | null;
 }
 /** 보유 한 줄 — 배치가 낸 값 그대로 (25.1455). 웹은 계산하지 않는다 */
@@ -601,7 +603,7 @@ export function AccountTabs({ data, acct, setAcct, sub, setSub, desk }: {
             className={`shrink-0 px-3 py-2 ${sub === k ? "border-b-2 border-slate-900 font-medium dark:border-slate-100" : "text-slate-500"}`}
           >
             {label}
-            {k === "holdings" ? ` ${a.positions.length}` : k === "trades" ? ` ${체결.length >= FILLS_PER_ACCOUNT ? `${FILLS_PER_ACCOUNT}+` : 체결.length}` : k === "orders" ? ` ${주문.length}` : ""}
+            {k === "holdings" ? ` ${a.positions_broken ? "?" : a.positions.length}` : k === "trades" ? ` ${체결.length >= FILLS_PER_ACCOUNT ? `${FILLS_PER_ACCOUNT}+` : 체결.length}` : k === "orders" ? ` ${주문.length}` : ""}
           </button>
         ))}
       </div>
@@ -657,6 +659,7 @@ function SummaryPane({ a }: { a: Account }) {
 }
 
 function HoldingsPane({ a }: { a: Account }) {
+  if (a.positions_broken) return <p className="text-sm text-rose-600">{a.record_error}</p>;
   if (!a.positions.length) return <p className="text-sm text-slate-500">보유 종목이 없습니다{a.view.asOf ? ` (${a.view.asOf} 평가)` : ""}.</p>;
   return (
     <div className="overflow-x-auto">

@@ -60,10 +60,21 @@ export function parseJsonList(text: string | null | undefined): { list: Array<Re
   if (!text) return { list: [], broken: false };
   try {
     const v: unknown = JSON.parse(text);
-    return Array.isArray(v) ? { list: v as Array<Record<string, unknown>>, broken: false } : { list: [], broken: true };
+    if (!Array.isArray(v)) return { list: [], broken: true };
+    // 객체가 아닌 원소(null·숫자)는 걸러 내고 깨짐으로 — 라우트의 `p.stock_id` 가 던져 다시 화면 전체 500 이 되지 않게(25.2385)
+    const 객체 = v.filter((x): x is Record<string, unknown> => typeof x === "object" && x !== null && !Array.isArray(x));
+    return { list: 객체, broken: 객체.length !== v.length };
   } catch {
     return { list: [], broken: true };
   }
+}
+
+/** 평가 행 JSON 이 깨진 계좌의 화면 문구 — 보유·모름을 따로(25.2385). 둘 다 멀쩡하면 null */
+export function recordErrorText(positionsBroken: boolean, unknownBroken: boolean): string | null {
+  if (positionsBroken && unknownBroken) return "보유 기록·원가 평가 목록을 읽지 못했습니다(평가 행의 JSON 이 깨짐)";
+  if (positionsBroken) return "보유 기록을 읽지 못했습니다(평가 행의 JSON 이 깨짐) — 보유가 없는 것이 아닙니다";
+  if (unknownBroken) return "원가로 평가한 보유 목록을 읽지 못했습니다(평가 행의 JSON 이 깨짐)";
+  return null;
 }
 
 export function isMissingColumn(e: unknown): boolean {
