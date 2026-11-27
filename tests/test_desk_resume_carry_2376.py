@@ -125,3 +125,14 @@ def test_KIS_줄은_모두_만들_때_표지() -> None:
         "diverge_error": "e", "defer_mark_error": "e", "late_mark_error": "e", "cells_error": "e", "perf_error": "e"})
     assert len(줄) == 14 and all(c.get("kind") in ("kis", "kis_event") for c in 줄)
     assert sum(c["kind"] == "kis_event" for c in 줄) == 5
+
+
+def test_표지_전_곁다리_실패_줄도_거른다() -> None:
+    """25.2383 (25.2382 교차검증 [권고]) — `KIS_STATE_HEADS` 에 더한 곁다리 실패 머리 넷이 표지 없는 옛 줄을 거른다"""
+    옛 = ["KIS 괴리 판정 실패(ValueError) — 주문은 그대로 나갔습니다",
+          "KIS 비교 표본 표시 실패(KeyError) — 오늘 일치율·괴리에 시세·환율이 없어 미룬 매도가 섞였을 수 있습니다",
+          "KIS 체결 칸 계산 실패(ValueError) — 오늘 체결 칸이 비거나 갱신되지 않았습니다",
+          "KIS 계좌 성과 계산 실패(KeyError) — 주문은 그대로 나갔습니다"]  # fmt: skip
+    앞칸 = {"trade_date": "d", "checks": [{"level": "normal", "text": t} for t in 옛]}
+    보냄 = {"trade_date": "d", "holding": None, "kis_step": {"sent": {}}, "checks": []}
+    assert desk.carry_same_day(앞칸, 보냄, True)["checks"] == []
