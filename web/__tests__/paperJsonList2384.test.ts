@@ -22,8 +22,11 @@ describe("parseJsonList", () => {
     expect(src).not.toMatch(/JSON\.parse\([^;\n]*positions_json/);
     expect(src).not.toMatch(/JSON\.parse\([^;\n]*unknown_json/);
     // 세 칸은 한 번에 펼친다 — 하나씩 옮겨 담는 줄이 남아 있으면 안 된다(25.2387)
-    expect(src).toContain("...recordFields(기록들[a.id]),");
-    expect(src).not.toMatch(/\b(unknown|positions_broken|record_error):/);
+    expect(src).toContain("...recordFields(기록들[a.id], 이름),");
+    // 계좌 줄을 만드는 블록 안에서 네 칸을 따로 옮겨 담지 않는다(25.2388 — 보유 칸이 빠져 있었다). 따옴표·공백 꼴도
+    const 블록 = src.slice(src.indexOf(">(accounts).map((a) => ({"), src.indexOf("}));", src.indexOf(">(accounts).map((a) => ({")));
+    expect(블록.length).toBeGreaterThan(0);
+    expect(블록).not.toMatch(/\b["']?(positions|unknown|positions_broken|record_error)["']?\s*:/);
     expect(src).toContain("[k, v.positions]");
   });
   it("객체가 아닌 원소는 걸러 내고 깨짐 (25.2385)", () => {
@@ -34,7 +37,11 @@ describe("parseJsonList", () => {
     expect(recordErrorText(false, false)).toBeNull();
     expect(recordErrorText(true, false)).toContain("보유가 없는 것이 아닙니다");
     expect(recordErrorText(false, true)).toContain("원가로 평가한 보유 목록");
-    expect(recordErrorText(true, true)).toContain("원가 평가 목록도 읽지 못했습니다");
+    // 전체 문구로 — 꼬리만 보면 앞의 "보유가 없는 것이 아닙니다" 가 빠져도 몰랐다(25.2388)
+    expect(recordErrorText(true, true)).toBe(
+      "보유 기록을 읽지 못했습니다(평가 행의 JSON 이 깨짐) — 보유가 없는 것이 아닙니다 · 원가 평가 목록도 읽지 못했습니다");
+    expect(recordErrorText(true, true, 2)).toBe(
+      "보유 기록 일부를 읽지 못했습니다(평가 행의 JSON 이 깨짐) — 읽은 2줄만 보입니다 · 원가 평가 목록도 읽지 못했습니다");
     expect(recordErrorText(true, false, 2)).toBe("보유 기록 일부를 읽지 못했습니다(평가 행의 JSON 이 깨짐) — 읽은 2줄만 보입니다");
   });
   it("화면 — 보유 탭이 깨짐이면 '보유 없음' 대신 그 문구, 탭 수는 '?', 요약에도 빨간 줄 (25.2385)", () => {
@@ -68,7 +75,7 @@ describe("accountRecord — 계좌 한 줄을 동작으로 (25.2386)", () => {
     const r = accountRecord('[{"stock_id":1}, null]', null);
     expect(r.positions).toEqual([{ stock_id: 1 }]);
     expect(r.positions_broken).toBe(true);
-    expect(r.record_error).toContain("일부를 읽지 못했습니다") // 표가 보이는데 "읽지 못했습니다" 로 어긋나지 않게(25.2387)
+    expect(r.record_error).toBe("보유 기록 일부를 읽지 못했습니다(평가 행의 JSON 이 깨짐) — 읽은 1줄만 보입니다"); // 25.2387
     const v = readFileSync(join(process.cwd(), "components", "PaperView.tsx"), "utf8");
     expect(v).toContain("{a.positions_broken ? <p className=\"mb-1 text-xs text-rose-600\">{a.record_error}</p> : null}");
   });
@@ -78,9 +85,14 @@ describe("accountRecord — 계좌 한 줄을 동작으로 (25.2386)", () => {
 describe("recordFields — 라우트가 펼치는 세 칸 (25.2387)", () => {
   it("평가 행이 있으면 그 값, 없으면 멀쩡한 빈 값", () => {
     expect(recordFields(accountRecord("x", '[{"stock_id":2}]'))).toEqual({
-      unknown: [{ stock_id: 2 }], positions_broken: true,
+      positions: [], unknown: [{ stock_id: 2 }], positions_broken: true,
       record_error: "보유 기록을 읽지 못했습니다(평가 행의 JSON 이 깨짐) — 보유가 없는 것이 아닙니다",
     });
-    expect(recordFields(undefined)).toEqual({ unknown: [], positions_broken: false, record_error: null });
+    expect(recordFields(undefined)).toEqual({ positions: [], unknown: [], positions_broken: false, record_error: null });
+  });
+  it("보유 칸은 기록의 보유(모름 아님)에 이름을 붙인다 (25.2388)", () => {
+    const r = recordFields(accountRecord('[{"stock_id":1,"quantity":3}]', '[{"stock_id":9}]'), { 1: { ticker: "005930", name: "삼성전자" } });
+    expect(r.positions).toEqual([{ stock_id: 1, quantity: 3, ticker: "005930", name: "삼성전자" }]);
+    expect(r.unknown).toEqual([{ stock_id: 9 }]);
   });
 });

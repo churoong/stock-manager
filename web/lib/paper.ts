@@ -103,12 +103,23 @@ export function accountRecord(positionsJson: string | null | undefined, unknownJ
 
 /** 라우트가 계좌 줄에 펼치는 세 칸 — 평가 행이 없는 계좌(새 계좌)는 멀쩡한 빈 값(25.2387 — 라우트가 칸을 하나씩 옮겨
  * 담으면 글자 대조로는 끄거나 비워도 시험이 몰랐다. 한 번에 펼치고 이 함수를 동작으로 단언한다) */
-export function recordFields(r: ReturnType<typeof accountRecord> | undefined): {
+export function recordFields(
+  r: ReturnType<typeof accountRecord> | undefined,
+  names: Record<number, Record<string, unknown>> = {},
+): {
+  positions: Array<Record<string, unknown>>;
   unknown: Array<Record<string, unknown>>;
   positions_broken: boolean;
   record_error: string | null;
 } {
-  return { unknown: r?.unknown ?? [], positions_broken: r?.positions_broken ?? false, record_error: r?.record_error ?? null };
+  // 보유 칸도 여기서 — 라우트에 따로 옮겨 담는 줄이 남으면 비우거나 모름 목록으로 바꿔도 시험이 몰랐다(25.2388).
+  // 보유 이름(종목 코드·이름)은 종목 번호로 붙인다
+  return {
+    positions: (r?.positions ?? []).map((p) => ({ ...p, ...(names[Number(p.stock_id)] ?? {}) })),
+    unknown: r?.unknown ?? [],
+    positions_broken: r?.positions_broken ?? false,
+    record_error: r?.record_error ?? null,
+  };
 }
 
 export function isMissingColumn(e: unknown): boolean {
