@@ -30,6 +30,7 @@ import {
   freshFx,
   kstToday,
   accountRecord,
+  recordFields,
   reservedByAccount,
   withLegacy,
   type DailyRow,
@@ -95,9 +96,7 @@ export async function GET() {
       ...a,
       view: accountView(a.id, 입금, 현금[a.id] ?? 입금, 예약[a.id] === undefined ? 0 : 예약[a.id], 마지막.find((d) => d.account_id === a.id)),
       positions: (보유들[a.id] ?? []).map((p) => ({ ...p, ...(이름[Number(p.stock_id)] ?? {}) })),
-      unknown: 기록들[a.id]?.unknown ?? [],
-      positions_broken: 기록들[a.id]?.positions_broken ?? false,
-      record_error: 기록들[a.id]?.record_error ?? null,
+      ...recordFields(기록들[a.id]),
       attribution: 성과분해(a.id),
     }));
     // 실제 투자와 같은 기간 비교 (25.1448) — 실제 표는 읽기만. 못 읽으면 비교만 빠진다

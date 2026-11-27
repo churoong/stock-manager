@@ -603,7 +603,7 @@ export function AccountTabs({ data, acct, setAcct, sub, setSub, desk }: {
             className={`shrink-0 px-3 py-2 ${sub === k ? "border-b-2 border-slate-900 font-medium dark:border-slate-100" : "text-slate-500"}`}
           >
             {label}
-            {k === "holdings" ? ` ${a.positions_broken ? "?" : a.positions.length}` : k === "trades" ? ` ${체결.length >= FILLS_PER_ACCOUNT ? `${FILLS_PER_ACCOUNT}+` : 체결.length}` : k === "orders" ? ` ${주문.length}` : ""}
+            {k === "holdings" ? ` ${a.positions_broken ? `${a.positions.length || ""}?` : a.positions.length}` : k === "trades" ? ` ${체결.length >= FILLS_PER_ACCOUNT ? `${FILLS_PER_ACCOUNT}+` : 체결.length}` : k === "orders" ? ` ${주문.length}` : ""}
           </button>
         ))}
       </div>
@@ -664,7 +664,7 @@ function HoldingsPane({ a }: { a: Account }) {
   if (!a.positions.length) return <p className="text-sm text-slate-500">보유 종목이 없습니다{a.view.asOf ? ` (${a.view.asOf} 평가)` : ""}.</p>;
   return (
     <div className="overflow-x-auto">
-      {a.positions_broken ? <p className="mb-1 text-xs text-rose-600">{a.record_error} — 읽은 줄만 보입니다</p> : null}
+      {a.positions_broken ? <p className="mb-1 text-xs text-rose-600">{a.record_error}</p> : null}
       <table className="w-full min-w-[640px] text-xs">
         <thead className="text-slate-500">
           <tr>

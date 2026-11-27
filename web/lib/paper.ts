@@ -69,10 +69,14 @@ export function parseJsonList(text: string | null | undefined): { list: Array<Re
   }
 }
 
-/** 평가 행 JSON 이 깨진 계좌의 화면 문구 — 보유·모름을 따로(25.2385). 둘 다 멀쩡하면 null */
-export function recordErrorText(positionsBroken: boolean, unknownBroken: boolean): string | null {
-  if (positionsBroken && unknownBroken) return "보유 기록·원가 평가 목록을 읽지 못했습니다(평가 행의 JSON 이 깨짐)";
-  if (positionsBroken) return "보유 기록을 읽지 못했습니다(평가 행의 JSON 이 깨짐) — 보유가 없는 것이 아닙니다";
+/** 평가 행 JSON 이 깨진 계좌의 화면 문구 — 보유·모름을 따로(25.2385). 둘 다 멀쩡하면 null.
+ * 보유 일부만 읽었으면(`positionsRead` > 0) "일부" 문구 — 표가 보이는데 "읽지 못했습니다" 로 어긋나지 않게(25.2387) */
+export function recordErrorText(positionsBroken: boolean, unknownBroken: boolean, positionsRead = 0): string | null {
+  const 보유글 = positionsRead > 0
+    ? `보유 기록 일부를 읽지 못했습니다(평가 행의 JSON 이 깨짐) — 읽은 ${positionsRead}줄만 보입니다`
+    : "보유 기록을 읽지 못했습니다(평가 행의 JSON 이 깨짐) — 보유가 없는 것이 아닙니다";
+  if (positionsBroken && unknownBroken) return `${보유글} · 원가 평가 목록도 읽지 못했습니다`;
+  if (positionsBroken) return 보유글;
   if (unknownBroken) return "원가로 평가한 보유 목록을 읽지 못했습니다(평가 행의 JSON 이 깨짐)";
   return null;
 }
@@ -93,8 +97,18 @@ export function accountRecord(positionsJson: string | null | undefined, unknownJ
     positions: 보유.list,
     unknown: 모름.list,
     positions_broken: 보유.broken,
-    record_error: recordErrorText(보유.broken, 모름.broken),
+    record_error: recordErrorText(보유.broken, 모름.broken, 보유.list.length),
   };
+}
+
+/** 라우트가 계좌 줄에 펼치는 세 칸 — 평가 행이 없는 계좌(새 계좌)는 멀쩡한 빈 값(25.2387 — 라우트가 칸을 하나씩 옮겨
+ * 담으면 글자 대조로는 끄거나 비워도 시험이 몰랐다. 한 번에 펼치고 이 함수를 동작으로 단언한다) */
+export function recordFields(r: ReturnType<typeof accountRecord> | undefined): {
+  unknown: Array<Record<string, unknown>>;
+  positions_broken: boolean;
+  record_error: string | null;
+} {
+  return { unknown: r?.unknown ?? [], positions_broken: r?.positions_broken ?? false, record_error: r?.record_error ?? null };
 }
 
 export function isMissingColumn(e: unknown): boolean {
